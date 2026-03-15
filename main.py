@@ -1,22 +1,3 @@
-# ─── CRITICAL: PyTorch / torchaudio patches MUST be first ─────────────────────
-# These must run before ANY module imports torch or torchaudio (e.g. Coqui TTS)
-import torch as _torch
-_orig_load = _torch.load
-def _safe_load(*a, **kw):
-    kw.setdefault("weights_only", False)
-    return _orig_load(*a, **kw)
-_torch.load = _safe_load
-
-try:
-    import torchaudio as _ta
-    from torchaudio._backend import utils as _ta_utils
-    from torchaudio._backend.soundfile import SoundfileBackend as _SfB
-    _ta_utils.get_available_backends.cache_clear()
-    _ta_utils.get_available_backends = lambda: {"soundfile": _SfB}
-except Exception:
-    pass
-# ──────────────────────────────────────────────────────────────────────────────
-
 import os
 import asyncio
 import socketio  # type: ignore

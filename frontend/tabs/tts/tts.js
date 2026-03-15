@@ -1,44 +1,42 @@
-import { appendLog, pickPath, setupDragAndDrop, setupInputDrop, getAgentBaseUrl, resolveDropPath } from '../../js/shared/utils.js';
-
-let _ttsMode = 'standard';      // 'standard' | 'clone' | 'library'
-let _ttsRefAudioPath = '';
-let _selectedProfileId = null;
-let _xttsReady = false;
+import { appendLog, pickPath, setupInputDrop, getAgentBaseUrl, resolveDropPath } from '../../js/shared/utils.js';
 
 let _allEdgeVoices = [];
+let _ttsRefAudioPath = '';
+let _selectedProfileId = null;
 
 // ─── Init ────────────────────────────────────────────────
 export async function initTtsTab() {
-    setTtsMode('standard');
-    setupTtsDropzone();
     setupInputDrop('tts_output_dir', 'folder');
-    await checkXttsStatus();
-    await loadVoiceLibrary();
+    setupInputDrop('tts_clone_output_dir', 'folder');
+    setupTtsDropzone();
     await loadTtsVoices();
+    await checkF5Status();
+    await loadVoiceLibrary();
+    await loadDictionary();
+
+    const textInput = document.getElementById('tts_text_input');
+    if (textInput) {
+        textInput.addEventListener('input', () => {
+            const countEl = document.getElementById('tts_char_count');
+            if (countEl) countEl.textContent = textInput.value.length;
+        });
+    }
 }
 
-// ─── Mode Switching ───────────────────────────────────────
-window.setTtsMode = function(mode) {
-    _ttsMode = mode;
-    ['standard', 'xtts'].forEach(m => {
-        const panel = document.getElementById(`tts_panel_${m}`);
-        const btn   = document.getElementById(`tts_mode_btn_${m}`);
-        if (!panel || !btn) return;
-        panel.classList.toggle('hidden', m !== mode);
-        btn.classList.toggle('active-mode', m === mode);
-        btn.classList.toggle('text-white', m === mode);
-        btn.classList.toggle('text-gray-400', m !== mode);
-    });
+// ─── Sub-Tab Switching ───────────────────────────────────
+window.switchTtsSubTab = function(tabId, event) {
+    document.querySelectorAll('.tts-subtab').forEach(el => el.classList.add('hidden'));
+    document.getElementById('tts_sub_' + tabId)?.classList.remove('hidden');
 
-    // Show XTTS banner only for clone / library
-    const banner = document.getElementById('xtts_status_banner');
-    if (banner) banner.classList.toggle('hidden', mode === 'standard');
-
-    const profileInfo = document.getElementById('tts_selected_profile_info');
-    if (profileInfo) profileInfo.classList.toggle('hidden', mode === 'standard');
+    const nav = event.currentTarget.parentElement;
+    nav.querySelectorAll('.tab-btn').forEach(el => el.classList.remove('active'));
+    event.currentTarget.classList.add('active');
 };
 
-// ─── Advanced Voice Filtering ──────────────────────────────────
+// ═══════════════════════════════════════════════════════════
+// SUB-TAB 1: Standard TTS (Edge-TTS)
+// ═══════════════════════════════════════════════════════════
+
 const LANG_NAMES = {
     'af': '南非語 Afrikaans', 'am': '阿姆哈拉語 Amharic', 'ar': '阿拉伯語 Arabic', 'az': '亞塞拜然語 Azerbaijani',
     'bg': '保加利亞語 Bulgarian', 'bn': '孟加拉語 Bangla', 'bs': '波士尼亞語 Bosnian',
@@ -68,27 +66,22 @@ const LANG_NAMES = {
 };
 
 const REGION_NAMES = {
-    // A-C
     'AE': '阿聯 UAE', 'AF': '阿富汗 AF', 'AL': '阿爾巴尼亞 AL', 'AM': '亞美尼亞 AM', 'AR': '阿根廷 AR', 'AT': '奧地利 AT', 'AU': '澳洲 AU', 'AZ': '亞塞拜然 AZ',
     'BA': '波士尼亞 BA', 'BD': '孟加拉 BD', 'BE': '比利時 BE', 'BG': '保加利亞 BG', 'BH': '巴林 BH', 'BO': '玻利維亞 BO', 'BR': '巴西 BR',
     'CA': '加拿大 CA', 'CH': '瑞士 CH', 'CL': '智利 CL', 'CN': '中國 CN', 'CO': '哥倫比亞 CO', 'CR': '哥斯大黎加 CR', 'CU': '古巴 CU', 'CZ': '捷克 CZ',
-    // D-G
     'DE': '德國 DE', 'DK': '丹麥 DK', 'DO': '多明尼加 DO', 'DZ': '阿爾及利亞 DZ',
     'EC': '厄瓜多 EC', 'EE': '愛沙尼亞 EE', 'EG': '埃及 EG', 'ES': '西班牙 ES', 'ET': '衣索比亞 ET',
     'FI': '芬蘭 FI', 'FR': '法國 FR',
     'GB': '英國 GB', 'GE': '喬治亞 GE', 'GQ': '赤道幾內亞 GQ', 'GR': '希臘 GR', 'GT': '瓜地馬拉 GT',
-    // H-L
     'HK': '香港 HK', 'HN': '宏都拉斯 HN', 'HR': '克羅埃西亞 HR', 'HU': '匈牙利 HU',
     'ID': '印尼 ID', 'IE': '愛爾蘭 IE', 'IL': '以色列 IL', 'IN': '印度 IN', 'IQ': '伊拉克 IQ', 'IR': '伊朗 IR', 'IS': '冰島 IS', 'IT': '義大利 IT',
     'JO': '約旦 JO', 'JP': '日本 JP',
     'KE': '肯亞 KE', 'KH': '柬埔寨 KH', 'KR': '韓國 KR', 'KW': '科威特 KW', 'KZ': '哈薩克 KZ',
     'LA': '寮國 LA', 'LK': '斯里蘭卡 LK', 'LT': '立陶宛 LT', 'LV': '拉脫維亞 LV', 'LY': '利比亞 LY',
-    // M-P
     'MA': '摩洛哥 MA', 'MK': '馬其頓 MK', 'MM': '緬甸 MM', 'MN': '蒙古 MN', 'MT': '馬爾他 MT', 'MX': '墨西哥 MX', 'MY': '馬來西亞 MY',
     'NE': '尼泊爾 NE', 'NG': '奈及利亞 NG', 'NI': '尼加拉瓜 NI', 'NL': '荷蘭 NL', 'NO': '挪威 NO', 'NZ': '紐西蘭 NZ',
     'OM': '阿曼 OM',
     'PA': '巴拿馬 PA', 'PE': '秘魯 PE', 'PH': '菲律賓 PH', 'PK': '巴基斯坦 PK', 'PL': '波蘭 PL', 'PR': '波多黎各 PR', 'PS': '巴勒斯坦 PS', 'PT': '葡萄牙 PT', 'PY': '巴拉圭 PY',
-    // Q-Z
     'QA': '卡達 QA',
     'RO': '羅馬尼亞 RO', 'RS': '塞爾維亞 RS', 'RU': '俄羅斯 RU',
     'SA': '沙烏地 SA', 'SE': '瑞典 SE', 'SG': '新加坡 SG', 'SI': '斯洛維尼亞 SI', 'SK': '斯洛伐克 SK', 'SO': '索馬利亞 SO', 'SV': '薩爾瓦多 SV', 'SY': '敘利亞 SY',
@@ -104,32 +97,25 @@ async function loadTtsVoices() {
         const res = await fetch(getAgentBaseUrl() + '/api/v1/tts/voices');
         const data = await res.json();
         _allEdgeVoices = data.voices || [];
-        
+
         const langs = new Set();
-        _allEdgeVoices.forEach(v => {
-            const lang = v.Locale.split('-')[0];
-            langs.add(lang);
-        });
-        
+        _allEdgeVoices.forEach(v => langs.add(v.Locale.split('-')[0]));
+
         const langSelect = document.getElementById('tts_filter_lang');
         if (langSelect) {
             langSelect.innerHTML = '<option value="all">全部語系 (All)</option>';
             const priority = ['zh', 'en', 'ja', 'ko'];
             Array.from(langs).sort((a, b) => {
-                const idxA = priority.indexOf(a);
-                const idxB = priority.indexOf(b);
+                const idxA = priority.indexOf(a), idxB = priority.indexOf(b);
                 if (idxA !== -1 && idxB !== -1) return idxA - idxB;
                 if (idxA !== -1) return -1;
                 if (idxB !== -1) return 1;
                 return a.localeCompare(b);
             }).forEach(lang => {
-                const label = LANG_NAMES[lang] || lang.toUpperCase();
-                const code = lang.toUpperCase();
-                langSelect.innerHTML += `<option value="${lang}">${label} ${code}</option>`;
+                langSelect.innerHTML += `<option value="${lang}">${LANG_NAMES[lang] || lang.toUpperCase()} ${lang.toUpperCase()}</option>`;
             });
             if (langs.has('zh')) langSelect.value = 'zh';
         }
-        
         window.updateTtsFilterRegions();
         window.updateTtsVoices();
     } catch (e) {
@@ -143,58 +129,30 @@ window.updateTtsFilterRegions = function() {
     const lang = document.getElementById('tts_filter_lang')?.value || 'all';
     const regionSelect = document.getElementById('tts_filter_region');
     if (!regionSelect) return;
-    
     regionSelect.innerHTML = '<option value="all">全部區域</option>';
     if (lang === 'all') return;
-    
     const regions = new Set();
-    _allEdgeVoices.forEach(v => {
-        const parts = v.Locale.split('-');
-        if (parts[0] === lang && parts.length > 1) {
-            regions.add(parts[1]);
-        }
-    });
-    
-    Array.from(regions).sort().forEach(r => {
-        const label = REGION_NAMES[r] || r;
-        regionSelect.innerHTML += `<option value="${r}">${label}</option>`;
-    });
+    _allEdgeVoices.forEach(v => { const p = v.Locale.split('-'); if (p[0] === lang && p.length > 1) regions.add(p[1]); });
+    Array.from(regions).sort().forEach(r => { regionSelect.innerHTML += `<option value="${r}">${REGION_NAMES[r] || r}</option>`; });
 };
 
 window.updateTtsVoices = function() {
     const lang = document.getElementById('tts_filter_lang')?.value || 'all';
     const region = document.getElementById('tts_filter_region')?.value || 'all';
     const gender = document.getElementById('tts_filter_gender')?.value || 'all';
-    
     const voiceSelect = document.getElementById('tts_voice');
     if (!voiceSelect) return;
-    
     let filtered = _allEdgeVoices;
     if (lang !== 'all') filtered = filtered.filter(v => v.Locale.startsWith(lang + '-'));
     if (region !== 'all') filtered = filtered.filter(v => v.Locale.endsWith('-' + region));
     if (gender !== 'all') filtered = filtered.filter(v => v.Gender === gender);
-    
     voiceSelect.innerHTML = '';
-    
-    if (filtered.length === 0) {
-        voiceSelect.innerHTML = '<option value="">(無符合條件的聲音)</option>';
-        return;
-    }
-    
+    if (filtered.length === 0) { voiceSelect.innerHTML = '<option value="">(無符合條件的聲音)</option>'; return; }
     filtered.forEach(v => {
-        // Clean up FriendlyName: strip Microsoft prefix and language/country suffix
-        const rawName = v.FriendlyName || v.ShortName;
-        const shortVoiceName = rawName
-            .replace(/^Microsoft\s+/, '')
-            .replace(/\s+Online\s+\(Natural\).*$/, '')
-            .trim();
-        const regionCode = v.Locale.split('-')[1] || '';
-        const regionLabel = REGION_NAMES[regionCode] || regionCode;
-        const genderCh = v.Gender === 'Female' ? '女聲' : '男聲';
-        voiceSelect.innerHTML += `<option value="${v.ShortName}">${regionLabel} - ${shortVoiceName} (${genderCh})</option>`;
+        const shortName = (v.FriendlyName || v.ShortName).replace(/^Microsoft\s+/, '').replace(/\s+Online\s+\(Natural\).*$/, '').trim();
+        const rc = v.Locale.split('-')[1] || '';
+        voiceSelect.innerHTML += `<option value="${v.ShortName}">${REGION_NAMES[rc] || rc} - ${shortName} (${v.Gender === 'Female' ? '女聲' : '男聲'})</option>`;
     });
-    
-    // Auto-select Taiwan voice if available
     const twVoice = filtered.find(v => v.Locale === 'zh-TW');
     if (twVoice) voiceSelect.value = twVoice.ShortName;
 };
@@ -202,10 +160,8 @@ window.updateTtsVoices = function() {
 window.previewTtsVoice = function() {
     const voice = document.getElementById('tts_voice')?.value;
     if (!voice) return;
-    
     const btn = document.getElementById('btn_tts_preview');
     if (btn) { btn.disabled = true; btn.textContent = '載入中'; }
-    
     const audio = new Audio(getAgentBaseUrl() + `/api/v1/tts/preview?voice=${voice}&text=${encodeURIComponent("您好，這是語音試聽。")}`);
     audio.play().then(() => {
         if (btn) btn.textContent = '播放中';
@@ -216,168 +172,99 @@ window.previewTtsVoice = function() {
     });
 };
 
-// ─── Duration Estimation ──────────────────────────────────
 window.calculateTtsDuration = async function() {
     const textInput = document.getElementById('tts_text_input');
     const btn = document.getElementById('tts_calc_btn');
     const durSpan = document.getElementById('tts_est_duration');
     const rateSpan = document.getElementById('tts_est_rate');
-    
     const text = textInput ? textInput.value.trim() : '';
-    if (!text) {
-        alert('請先輸入你要合成的文字！');
-        return;
-    }
-
+    if (!text) { alert('請先輸入你要合成的文字！'); return; }
     const voice = document.getElementById('tts_voice')?.value || 'zh-TW-HsiaoChenNeural';
     const rateUrl = document.getElementById('tts_rate')?.value || '0';
     const pitchUrl = document.getElementById('tts_pitch')?.value || '0';
-    
     const rateStr = (rateUrl >= 0 ? '+' : '') + rateUrl + '%';
     const pitchStr = (pitchUrl >= 0 ? '+' : '') + pitchUrl + 'Hz';
-
-    if (btn) {
-        btn.disabled = true;
-        btn.innerHTML = `<svg class="animate-spin -ml-1 mr-2 h-3.5 w-3.5 text-white" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg> 計算中...`;
-    }
-
+    if (btn) { btn.disabled = true; btn.innerHTML = `<svg class="animate-spin -ml-1 mr-2 h-3.5 w-3.5 text-white" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg> 計算中...`; }
     try {
-        const payload = { text, voice, rate: rateStr, pitch: pitchStr };
-        const res = await fetch(getAgentBaseUrl() + '/api/v1/tts/estimate', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(payload)
-        });
-        
+        const res = await fetch(getAgentBaseUrl() + '/api/v1/tts/estimate', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ text, voice, rate: rateStr, pitch: pitchStr }) });
         if (!res.ok) throw new Error(await res.text());
         const data = await res.json();
-        
-        // Format MM:SS.f
         const totalSecs = data.duration_seconds || 0;
-        const mins = Math.floor(totalSecs / 60);
-        const secs = Math.floor(totalSecs % 60);
-        const ms = Math.floor((totalSecs - Math.floor(totalSecs)) * 10); // get 1 decimal
-        const formattedDur = `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}.${ms}`;
-        
-        if (durSpan) durSpan.textContent = formattedDur;
+        const mins = Math.floor(totalSecs / 60), secs = Math.floor(totalSecs % 60), ms = Math.floor((totalSecs - Math.floor(totalSecs)) * 10);
+        if (durSpan) durSpan.textContent = `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}.${ms}`;
         if (rateSpan) rateSpan.textContent = `${data.chars_per_second} 字/秒`;
-        
-    } catch (e) {
-        console.error("Estimation failed:", e);
-        if (durSpan) durSpan.textContent = "Error";
-    } finally {
-        if (btn) {
-            btn.disabled = false;
-            btn.innerHTML = `<svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg> 計算音檔時長`;
-        }
-    }
+    } catch (e) { console.error("Estimation failed:", e); if (durSpan) durSpan.textContent = "Error"; }
+    finally { if (btn) { btn.disabled = false; btn.innerHTML = `<svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg> 計算音檔時長`; } }
 };
 
-// ─── XTTS Model Status ────────────────────────────────────
-async function checkXttsStatus() {
+window.pickTtsOutputDir = function() { pickPath('tts_output_dir', 'folder'); };
+
+// ─── Standard TTS Submit ─────────────────────────────────
+window.submitTtsJob = async function() {
+    const text = document.getElementById('tts_text_input')?.value?.trim();
+    const outputDir = document.getElementById('tts_output_dir')?.value?.trim();
+    const outputName = document.getElementById('tts_output_name')?.value?.trim() || 'tts_output';
+    if (!text) { alert('請輸入要合成的文字'); return; }
+    if (!outputDir) { alert('請選擇輸出目錄'); return; }
+
+    const payload = {
+        text, output_dir: outputDir, output_name: outputName,
+        voice: document.getElementById('tts_voice')?.value || 'zh-TW-HsiaoChenNeural',
+        rate: parseInt(document.getElementById('tts_rate')?.value || '0'),
+        pitch: parseInt(document.getElementById('tts_pitch')?.value || '0')
+    };
+
+    await _runWithProgress('tts', getAgentBaseUrl() + '/api/v1/tts_jobs', payload, 'btn_start_tts');
+};
+
+// ═══════════════════════════════════════════════════════════
+// SUB-TAB 2: Voice Clone (F5-TTS)
+// ═══════════════════════════════════════════════════════════
+
+async function checkF5Status() {
     try {
-        const res = await fetch(getAgentBaseUrl() + '/api/v1/tts/xtts_status');
+        const res = await fetch(getAgentBaseUrl() + '/api/v1/tts/f5_status');
         const data = await res.json();
-        const statusText = document.getElementById('xtts_status_text');
-        const dlBtn = document.getElementById('btn_download_xtts');
-        _xttsReady = data.ready === true;
-        if (_xttsReady) {
-            if (statusText) statusText.textContent = 'XTTS v2 模型已就緒';
-            if (dlBtn) dlBtn.classList.add('hidden');
+        const el = document.getElementById('f5_status_text');
+        if (data.available) {
+            if (el) el.innerHTML = '<span class="text-green-400">F5-TTS 已就緒</span>';
         } else {
-            if (statusText) statusText.textContent = 'XTTS v2 模型未下載（約 2GB，僅克隆模式需要）';
-            if (dlBtn) dlBtn.classList.remove('hidden');
+            if (el) el.innerHTML = '<span class="text-red-400">F5-TTS 未安裝 — 請執行 pip install f5-tts</span>';
         }
-    } catch {
-        const statusText = document.getElementById('xtts_status_text');
-        if (statusText) statusText.textContent = '無法取得 XTTS 狀態（後端可能尚未啟動）';
-    }
+    } catch { const el = document.getElementById('f5_status_text'); if (el) el.textContent = '無法取得 F5-TTS 狀態'; }
 }
 
-window.downloadXttsModel = async function() {
-    const btn = document.getElementById('btn_download_xtts');
-    if (btn) { btn.disabled = true; btn.textContent = '下載中...'; }
-    const statusText = document.getElementById('xtts_status_text');
-    if (statusText) statusText.textContent = '下載中，請稍候（可能需要數分鐘）...';
-    try {
-        await fetch(getAgentBaseUrl() + '/api/v1/tts/xtts_download', { method: 'POST' });
-        if (statusText) statusText.textContent = '下載完成！XTTS v2 已就緒';
-        if (btn) { btn.classList.add('hidden'); }
-        _xttsReady = true;
-    } catch {
-        if (statusText) statusText.textContent = '下載失敗，請確認網路並重試';
-        if (btn) { btn.disabled = false; btn.textContent = '下載模型 (~2GB)'; }
-    }
-};
-
-// ─── Reference Audio (Clone Mode) ────────────────────────
+// ─── Reference Audio ─────────────────────────────────────
 async function setupTtsDropzone() {
     const zone = document.getElementById('tts_clone_dropzone');
     if (!zone) return;
     zone.addEventListener('dragover', e => { e.preventDefault(); zone.classList.add('border-blue-500'); });
     zone.addEventListener('dragleave', () => zone.classList.remove('border-blue-500'));
     zone.addEventListener('drop', async e => {
-        e.preventDefault();
-        zone.classList.remove('border-blue-500');
+        e.preventDefault(); zone.classList.remove('border-blue-500');
         const files = e.dataTransfer.files;
-        if (files.length > 0) {
-            const path = await resolveDropPath(e, files[0]);
-            if (path) setTtsRefAudioPath(path);
-        }
+        if (files.length > 0) { const path = await resolveDropPath(e, files[0]); if (path) setTtsRefAudioPath(path); }
     });
 }
-
-// Native file picker for reference audio
-window.pickTtsReferenceNative = async function() {
-    // We use pickPath from utils.js which triggers the native dialog
-    await pickPath('tts_ref_audio_path_display', 'file');
-    const path = document.getElementById('tts_ref_audio_path_display')?.value;
-    if (path) {
-        setTtsRefAudioPath(path);
-    }
-};
-
-window.pickTtsReference = function() {
-    // Keep this as fallback or for drag-drop logic
-    let inputEl = document.getElementById('_tts_ref_input');
-    if (!inputEl) {
-        inputEl = document.createElement('input');
-        inputEl.type = 'file';
-        inputEl.id = '_tts_ref_input';
-        inputEl.accept = '.wav,.mp3,.m4a,.aac,.ogg,.flac';
-        inputEl.style.display = 'none';
-        document.body.appendChild(inputEl);
-        inputEl.addEventListener('change', async () => {
-            const file = inputEl.files?.[0];
-            if (file) {
-                const path = await resolveDropPath(null, file);
-                setTtsRefAudioPath(path);
-            }
-        });
-    }
-    inputEl.click();
-};
 
 function setTtsRefAudioPath(path) {
     _ttsRefAudioPath = path;
     const name = path.split(/[\\/]/).pop();
-    
-    // Sync Display Input
     const displayEl = document.getElementById('tts_ref_audio_path_display');
     if (displayEl) displayEl.value = path;
-
     const info = document.getElementById('tts_ref_info');
     const nameEl = document.getElementById('tts_ref_name');
     if (info) info.classList.remove('hidden');
-    if (nameEl) {
-        nameEl.textContent = ` ${name}`;
-        nameEl.title = path;
-    }
-    
-    // UI logic: selecting a local reference clears the library selection
+    if (nameEl) { nameEl.textContent = ` ${name}`; nameEl.title = path; }
     _selectedProfileId = null;
     document.getElementById('tts_selected_profile_info')?.classList.add('hidden');
 }
+
+window.pickTtsReferenceNative = async function() {
+    await pickPath('tts_ref_audio_path_display', 'file');
+    const path = document.getElementById('tts_ref_audio_path_display')?.value;
+    if (path) setTtsRefAudioPath(path);
+};
 
 window.clearTtsRef = function() {
     _ttsRefAudioPath = '';
@@ -386,17 +273,14 @@ window.clearTtsRef = function() {
     document.getElementById('tts_ref_info')?.classList.add('hidden');
 };
 
-// ─── Voice Library ────────────────────────────────────────
+// ─── Voice Library ───────────────────────────────────────
 async function loadVoiceLibrary() {
     const list = document.getElementById('tts_library_list');
     if (!list) return;
     try {
         const res = await fetch(getAgentBaseUrl() + '/api/v1/voice_profiles');
         const profiles = await res.json();
-        if (!profiles.length) {
-            list.innerHTML = '<p class="text-gray-500 text-sm text-center py-4">NAS 聲音庫是空的，先用「聲音克隆」模式建立第一個角色。</p>';
-            return;
-        }
+        if (!profiles.length) { list.innerHTML = '<p class="text-gray-500 text-sm text-center py-4">NAS 聲音庫是空的。</p>'; return; }
         list.innerHTML = profiles.map(p => `
           <div class="flex items-center justify-between bg-[#1e1e1e] border border-[#3a3a3a] rounded-lg px-3 py-2 text-sm">
             <div>
@@ -405,14 +289,12 @@ async function loadVoiceLibrary() {
               ${p.cached_locally ? '<span class="ml-2 text-xs text-green-400">已快取</span>' : ''}
             </div>
             <div class="flex gap-2">
-              ${!p.cached_locally ? `<button onclick="cacheProfile('${p.id}')" class="bg-[#1f538d] hover:bg-[#2a6cbf] text-white text-xs py-1 px-2 rounded transition-colors">快取至本機</button>` : ''}
+              ${!p.cached_locally ? `<button onclick="cacheProfile('${p.id}')" class="bg-[#1f538d] hover:bg-[#2a6cbf] text-white text-xs py-1 px-2 rounded transition-colors">快取</button>` : ''}
               <button onclick="selectProfile('${p.id}','${p.name}')" class="bg-[#333] hover:bg-[#444] text-white text-xs py-1 px-2 rounded transition-colors">選用</button>
               <button onclick="deleteProfile('${p.id}')" class="text-red-400 hover:text-red-300 text-xs px-1">刪除</button>
             </div>
           </div>`).join('');
-    } catch {
-        list.innerHTML = '<p class="text-red-400 text-sm text-center py-4">無法連線至 NAS 聲音庫</p>';
-    }
+    } catch { list.innerHTML = '<p class="text-red-400 text-sm text-center py-4">無法連線至 NAS 聲音庫</p>'; }
 }
 
 window.selectProfile = function(id, name) {
@@ -421,24 +303,18 @@ window.selectProfile = function(id, name) {
     const nameEl = document.getElementById('tts_selected_profile_name');
     if (info) info.classList.remove('hidden');
     if (nameEl) nameEl.textContent = name;
-    
-    // UI logic: selecting a library profile clears the local reference file
-    clearTtsRef();
+    window.clearTtsRef();
 };
 
 window.cacheProfile = async function(id) {
-    try {
-        await fetch(getAgentBaseUrl() + `/api/v1/voice_profiles/${id}/cache`, { method: 'POST' });
-        await loadVoiceLibrary();
-    } catch(e) { alert('快取失敗: ' + e.message); }
+    try { await fetch(getAgentBaseUrl() + `/api/v1/voice_profiles/${id}/cache`, { method: 'POST' }); await loadVoiceLibrary(); }
+    catch(e) { alert('快取失敗: ' + e.message); }
 };
 
 window.deleteProfile = async function(id) {
     if (!confirm('確定要刪除這個聲音角色嗎？')) return;
-    try {
-        await fetch(getAgentBaseUrl() + `/api/v1/voice_profiles/${id}`, { method: 'DELETE' });
-        await loadVoiceLibrary();
-    } catch(e) { alert('刪除失敗: ' + e.message); }
+    try { await fetch(getAgentBaseUrl() + `/api/v1/voice_profiles/${id}`, { method: 'DELETE' }); await loadVoiceLibrary(); }
+    catch(e) { alert('刪除失敗: ' + e.message); }
 };
 
 window.saveTtsToLibrary = async function() {
@@ -448,119 +324,158 @@ window.saveTtsToLibrary = async function() {
     const desc = prompt('描述（可留空）：') || '';
     try {
         const res = await fetch(getAgentBaseUrl() + '/api/v1/voice_profiles', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ name, description: desc, reference_audio: _ttsRefAudioPath, language: 'zh' })
         });
         const data = await res.json();
-        if (data.id) {
-            alert(`已存入 NAS 聲音庫：${name}`);
-            await loadVoiceLibrary();
-        }
+        if (data.id) { alert(`已存入 NAS 聲音庫：${name}`); await loadVoiceLibrary(); }
     } catch(e) { alert('儲存失敗: ' + e.message); }
 };
 
-window.addVoiceToLibrary = function() {
-    pickTtsReference();
-};
+window.addVoiceToLibrary = function() { window.pickTtsReferenceNative(); };
 
-// ─── Output Dir ───────────────────────────────────────────
-window.pickTtsOutputDir = function() {
-    pickPath('tts_output_dir', 'folder');
-};
-
-// ─── Submit Job ───────────────────────────────────────────
-window.submitTtsJob = async function() {
-    const text = document.getElementById('tts_text_input')?.value?.trim();
-    const outputDir = document.getElementById('tts_output_dir')?.value?.trim();
-    const outputName = document.getElementById('tts_output_name')?.value?.trim() || 'tts_output';
-    
-    // progress elements
-    const progArea = document.getElementById('tts_progress_area');
-    const progLabel = document.getElementById('tts_prog_label');
-    const progBar = document.getElementById('tts_prog_bar');
-    const progPct = document.getElementById('tts_prog_pct');
-
+// ─── Clone Submit ────────────────────────────────────────
+window.submitCloneJob = async function() {
+    const text = document.getElementById('tts_clone_text_input')?.value?.trim();
+    const outputDir = document.getElementById('tts_clone_output_dir')?.value?.trim();
+    const outputName = document.getElementById('tts_clone_output_name')?.value?.trim() || 'clone_output';
     if (!text) { alert('請輸入要合成的文字'); return; }
     if (!outputDir) { alert('請選擇輸出目錄'); return; }
+    if (!_ttsRefAudioPath && !_selectedProfileId) { alert('請先選擇參考音訊或 NAS 聲音角色'); return; }
 
-    let endpoint = getAgentBaseUrl() + '/api/v1/tts_jobs';
-    let payload = { text, output_dir: outputDir, output_name: outputName };
-
-    if (_ttsMode === 'standard') {
-        payload.voice = document.getElementById('tts_voice')?.value;
-        payload.rate  = parseInt(document.getElementById('tts_rate')?.value || '0');
-        payload.pitch = parseInt(document.getElementById('tts_pitch')?.value || '0');
-    } else if (_ttsMode === 'xtts') {
-        if (!_xttsReady) { alert('XTTS v2 模型尚未下載，請先下載模型'); return; }
-        
-        if (_ttsRefAudioPath) {
-            endpoint = getAgentBaseUrl() + '/api/v1/tts_jobs/clone';
-            payload.reference_audio = _ttsRefAudioPath;
-        } else if (_selectedProfileId) {
-            endpoint = getAgentBaseUrl() + '/api/v1/tts_jobs/profile';
-            payload.profile_id = _selectedProfileId;
-        } else {
-            alert('請先在左側拖曳參考音訊，或在右側選取 NAS 庫存聲音');
-            return;
-        }
+    let refAudio = _ttsRefAudioPath;
+    if (!refAudio && _selectedProfileId) {
+        // Use profile's cached reference audio — backend /tts_jobs/profile would handle this,
+        // but for F5-TTS we need the actual file path. We'll pass the profile_id and let backend resolve.
+        // For now, alert user to use a direct reference audio or cache the profile first.
+        alert('請先將選取的 NAS 角色「快取至本機」，然後使用臨時克隆區選取本機快取的音檔。');
+        return;
     }
 
-    // Start UI Progress Simulation
-    if (progArea) progArea.classList.remove('hidden');
-    if (progLabel) progLabel.textContent = '正在產生語音...';
-    if (progBar) {
-        progBar.style.width = '2%';
-        progBar.style.background = 'linear-gradient(90deg, #3b82f6, #60a5fa)';
-    }
-    if (progPct) progPct.textContent = '2%';
+    const payload = { text, reference_audio: refAudio, output_dir: outputDir, output_name: outputName };
+    await _runWithProgress('tts_clone', getAgentBaseUrl() + '/api/v1/tts_jobs/clone', payload, 'btn_start_clone');
+};
 
-    let currentPct = 2;
-    const progressInterval = setInterval(() => {
-        // Asymptotic curve growing to 95%
-        if (currentPct < 95) {
-            currentPct += (99 - currentPct) * 0.05;
-            const displayPct = Math.round(currentPct);
-            if (progBar) progBar.style.width = displayPct + '%';
-            if (progPct) progPct.textContent = displayPct + '%';
-        }
-    }, 500);
+// ═══════════════════════════════════════════════════════════
+// SUB-TAB 3: Dictionary Editor
+// ═══════════════════════════════════════════════════════════
 
-    const btn = document.getElementById('btn_start_tts');
-    if (btn) { btn.disabled = true; btn.classList.add('opacity-50', 'cursor-not-allowed'); }
+let _dictData = { vocab_mapping: {}, pronunciation_hacks: {} };
 
+window.loadDictionary = async function() {
     try {
-        const res = await fetch(endpoint, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+        const res = await fetch(getAgentBaseUrl() + '/api/v1/tts/dictionary');
+        _dictData = await res.json();
+        _renderDictList('vocab', _dictData.vocab_mapping || {});
+        _renderDictList('pron', _dictData.pronunciation_hacks || {});
+        _showDictStatus('已載入字典', 'text-green-400 bg-[#1a2a1a] border border-[#3a6a3a]');
+    } catch (e) {
+        _showDictStatus('載入失敗: ' + e.message, 'text-red-400 bg-[#2a1a1a] border border-[#6a3a3a]');
+    }
+};
+
+window.saveDictionary = async function() {
+    // Collect from DOM
+    const vocab = _collectDictRows('vocab');
+    const pron = _collectDictRows('pron');
+    const payload = { vocab_mapping: vocab, pronunciation_hacks: pron };
+    try {
+        const res = await fetch(getAgentBaseUrl() + '/api/v1/tts/dictionary', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(payload)
         });
         const data = await res.json();
-        
-        clearInterval(progressInterval);
-        
+        if (data.status === 'ok') {
+            _dictData = payload;
+            _showDictStatus('字典已儲存！', 'text-green-400 bg-[#1a2a1a] border border-[#3a6a3a]');
+        } else { throw new Error(data.detail || '未知錯誤'); }
+    } catch (e) { _showDictStatus('儲存失敗: ' + e.message, 'text-red-400 bg-[#2a1a1a] border border-[#6a3a3a]'); }
+};
+
+window.addDictRow = function(type) {
+    const list = document.getElementById(type === 'vocab' ? 'dict_vocab_list' : 'dict_pron_list');
+    if (!list) return;
+    list.insertAdjacentHTML('beforeend', _dictRowHtml(type, '', ''));
+};
+
+window.removeDictRow = function(btn) { btn.closest('.dict-row').remove(); };
+
+function _renderDictList(type, mapping) {
+    const list = document.getElementById(type === 'vocab' ? 'dict_vocab_list' : 'dict_pron_list');
+    if (!list) return;
+    list.innerHTML = '';
+    for (const [key, val] of Object.entries(mapping)) {
+        list.insertAdjacentHTML('beforeend', _dictRowHtml(type, key, val));
+    }
+}
+
+function _dictRowHtml(type, key, val) {
+    const label1 = type === 'vocab' ? '原詞' : '原詞';
+    const label2 = type === 'vocab' ? '替換為' : '讀音';
+    return `<div class="dict-row flex items-center gap-2">
+      <input type="text" value="${_escHtml(key)}" placeholder="${label1}" class="dict-key flex-1 bg-[#1e1e1e] border border-[#444] rounded px-2 py-1 text-sm text-white focus:border-blue-500 focus:outline-none">
+      <span class="text-gray-500 text-xs">→</span>
+      <input type="text" value="${_escHtml(val)}" placeholder="${label2}" class="dict-val flex-1 bg-[#1e1e1e] border border-[#444] rounded px-2 py-1 text-sm text-white focus:border-blue-500 focus:outline-none">
+      <button onclick="removeDictRow(this)" class="text-red-400 hover:text-red-300 text-xs px-1 font-bold">✕</button>
+    </div>`;
+}
+
+function _collectDictRows(type) {
+    const list = document.getElementById(type === 'vocab' ? 'dict_vocab_list' : 'dict_pron_list');
+    const result = {};
+    if (!list) return result;
+    list.querySelectorAll('.dict-row').forEach(row => {
+        const key = row.querySelector('.dict-key')?.value?.trim();
+        const val = row.querySelector('.dict-val')?.value?.trim();
+        if (key && val) result[key] = val;
+    });
+    return result;
+}
+
+function _escHtml(s) { return s.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;'); }
+
+function _showDictStatus(msg, cls) {
+    const el = document.getElementById('dict_save_status');
+    if (!el) return;
+    el.className = 'mt-2 text-center text-sm py-2 rounded ' + cls;
+    el.textContent = msg;
+    el.classList.remove('hidden');
+    setTimeout(() => el.classList.add('hidden'), 3000);
+}
+
+// ═══════════════════════════════════════════════════════════
+// Shared Progress Helper
+// ═══════════════════════════════════════════════════════════
+
+async function _runWithProgress(prefix, endpoint, payload, btnId) {
+    const progArea = document.getElementById(prefix + '_progress_area');
+    const progLabel = document.getElementById(prefix + '_prog_label');
+    const progBar = document.getElementById(prefix + '_prog_bar');
+    const progPct = document.getElementById(prefix + '_prog_pct');
+    const btn = document.getElementById(btnId);
+
+    if (progArea) progArea.classList.remove('hidden');
+    if (progLabel) progLabel.textContent = '正在產生語音...';
+    if (progBar) { progBar.style.width = '2%'; progBar.style.background = prefix === 'tts_clone' ? 'linear-gradient(90deg, #8b5cf6, #a78bfa)' : 'linear-gradient(90deg, #3b82f6, #60a5fa)'; }
+    if (progPct) progPct.textContent = '2%';
+
+    let currentPct = 2;
+    const iv = setInterval(() => { if (currentPct < 95) { currentPct += (99 - currentPct) * 0.05; const d = Math.round(currentPct); if (progBar) progBar.style.width = d + '%'; if (progPct) progPct.textContent = d + '%'; } }, 500);
+    if (btn) { btn.disabled = true; btn.classList.add('opacity-50', 'cursor-not-allowed'); }
+
+    try {
+        const res = await fetch(endpoint, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+        const data = await res.json();
+        clearInterval(iv);
         if (res.ok) {
-            if (progBar) {
-                progBar.style.width = '100%';
-                progBar.style.background = 'linear-gradient(90deg, #059669, #10b981)'; // Green success
-            }
+            if (progBar) { progBar.style.width = '100%'; progBar.style.background = 'linear-gradient(90deg, #059669, #10b981)'; }
             if (progPct) progPct.textContent = '100%';
-            if (progLabel) {
-                const outName = data.output ? data.output.split(/[\\/]/).pop() : outputName;
-                progLabel.innerHTML = `完成！儲存至: <span class="text-green-400 font-mono">${outName}</span>`;
-            }
-        } else {
-            throw new Error(data.detail || '未知的後端錯誤');
-        }
+            if (progLabel) { const outName = data.output ? data.output.split(/[\\/]/).pop() : ''; progLabel.innerHTML = `完成！儲存至: <span class="text-green-400 font-mono">${outName}</span>`; }
+        } else { throw new Error(data.detail || '未知的後端錯誤'); }
     } catch(e) {
-        clearInterval(progressInterval);
-        if (progBar) {
-            progBar.style.width = '100%';
-            progBar.style.background = 'linear-gradient(90deg, #ef4444, #f87171)'; // Red error
-        }
+        clearInterval(iv);
+        if (progBar) { progBar.style.width = '100%'; progBar.style.background = 'linear-gradient(90deg, #ef4444, #f87171)'; }
         if (progPct) progPct.textContent = 'Err';
         if (progLabel) progLabel.textContent = `失敗：${e.message}`;
-    } finally {
-        if (btn) { btn.disabled = false; btn.classList.remove('opacity-50', 'cursor-not-allowed'); }
-    }
-};
+    } finally { if (btn) { btn.disabled = false; btn.classList.remove('opacity-50', 'cursor-not-allowed'); } }
+}

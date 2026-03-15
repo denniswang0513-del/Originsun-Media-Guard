@@ -2,30 +2,12 @@
 TTS Engine — Originsun Media Guard Pro
 Supports:
   1. Edge-TTS  (standard, free, Taiwan accent)
-  2. XTTS v2   (Coqui, voice cloning, local)
+  2. F5-TTS   (voice cloning, local) — planned
+  3. GPT-SoVITS (voice cloning, local) — planned
 """
 import os
 import asyncio
 
-# ─── PyTorch 2.6+ compatibility patch ────────────────────────────────────────
-# Coqui TTS checkpoints contain custom classes that fail with weights_only=True
-import torch
-_original_torch_load = torch.load
-def _patched_torch_load(*args, **kwargs):
-    kwargs.setdefault("weights_only", False)
-    return _original_torch_load(*args, **kwargs)
-torch.load = _patched_torch_load
-
-# ─── torchaudio: force soundfile backend (torchcodec broken on Windows) ───────
-try:
-    import torchaudio
-    from torchaudio._backend import utils as _ta_utils
-    from torchaudio._backend.soundfile import SoundfileBackend as _SfBackend
-    # Clear the cached backend list and replace it so soundfile is the ONLY option
-    _ta_utils.get_available_backends.cache_clear()
-    _ta_utils.get_available_backends = lambda: {"soundfile": _SfBackend}
-except Exception:
-    pass
 
 # ─── Edge TTS ────────────────────────────────────────────────────────────────
 async def run_edge_tts(text: str, voice: str, rate: int, pitch: int, output_path: str) -> str:
@@ -33,7 +15,7 @@ async def run_edge_tts(text: str, voice: str, rate: int, pitch: int, output_path
     import tempfile
     import subprocess
     import sys
-    
+
     # Write text to a temporary UTF-8 file (handles special characters gracefully)
     with tempfile.NamedTemporaryFile("w", encoding="utf-8", delete=False) as tf:
         tf.write(text)
@@ -58,11 +40,11 @@ async def run_edge_tts(text: str, voice: str, rate: int, pitch: int, output_path
         import os
         env = os.environ.copy()
         result = subprocess.run(cmd, capture_output=True, text=True, env=env)
-        
+
         # Cleanup temp file
         if os.path.exists(text_file_path):
             os.remove(text_file_path)
-            
+
         if result.returncode != 0:
             raise RuntimeError(f"edge-tts failed: {result.stderr}")
 
@@ -70,71 +52,55 @@ async def run_edge_tts(text: str, voice: str, rate: int, pitch: int, output_path
     return output_path
 
 
+# ─── F5-TTS (Voice Cloning) ──────────────────────────────────────────────────
+F5_MODEL_DIR = os.path.join(os.path.dirname(__file__), "models", "f5_tts")
 
-# ─── XTTS v2 (Voice Cloning) ─────────────────────────────────────────────────
-XTTS_MODEL_PATH = os.path.join(os.path.dirname(__file__), "models", "xtts_v2")
+_f5_instance = None
 
-def xtts_is_ready() -> bool:
-    """Check if XTTS v2 model files are downloaded."""
-    # Coqui TTS downloads into "tts/tts_models--multilingual--multi-dataset--xtts_v2" if we set XDG_DATA_HOME
-    config_path = os.path.join(XTTS_MODEL_PATH, "tts", "tts_models--multilingual--multi-dataset--xtts_v2", "config.json")
-    return os.path.exists(config_path)
+def _get_f5_tts():
+    """Lazy-load F5-TTS model (cached after first call)."""
+    global _f5_instance
+    if _f5_instance is None:
+        from f5_tts.api import F5TTS  # type: ignore
+        os.makedirs(F5_MODEL_DIR, exist_ok=True)
+        _f5_instance = F5TTS(model_type="F5-TTS", ckpt_file="", vocab_file="")
+    return _f5_instance
 
-def download_xtts_model():
-    """Trigger XTTS v2 model download (blocking)."""
+
+def f5_tts_is_available() -> bool:
+    """Check if F5-TTS package is installed."""
     try:
-        os.environ["XTTS_MODEL_PATH"] = XTTS_MODEL_PATH  # for subprocess/async instances
-        os.makedirs(XTTS_MODEL_PATH, exist_ok=True)
-        # Point Coqui TTS to our local directory and bypass TOS prompt
-        os.environ["XDG_DATA_HOME"] = XTTS_MODEL_PATH
-        os.environ["TTS_HOME"] = XTTS_MODEL_PATH
-        os.environ["COQUI_TOS_AGREED"] = "1"
-        from TTS.api import TTS  # type: ignore
-        # Instantiating the TTS class will automatically download the model if it doesn't exist
-        tts = TTS("tts_models/multilingual/multi-dataset/xtts_v2", progress_bar=True)
-        print("[TTS] XTTS v2 model downloaded successfully.")
+        import f5_tts  # type: ignore  # noqa: F401
+        return True
     except ImportError:
-        raise RuntimeError("Coqui TTS 未安裝，請執行: pip install TTS")
+        return False
 
-async def run_voice_clone(text: str, reference_audio: str, output_path: str, language: str = "zh") -> str:
-    """Clone voice from reference audio and synthesize text."""
-    if not xtts_is_ready():
-        raise RuntimeError("XTTS v2 模型尚未下載，請先下載模型")
-    try:
-        from TTS.api import TTS  # type: ignore
-    except ImportError:
-        raise RuntimeError("Coqui TTS 未安裝，請執行: pip install TTS")
 
-    # Run in executor to avoid blocking event loop
+async def run_f5_tts_clone(text: str, reference_audio: str, output_path: str) -> str:
+    """Clone voice from reference audio using F5-TTS and synthesize text."""
     loop = asyncio.get_event_loop()
-    await loop.run_in_executor(None, _clone_sync, text, reference_audio, output_path, language)
+    await loop.run_in_executor(None, _f5_clone_sync, text, reference_audio, output_path)
     return output_path
 
-def _clone_sync(text, reference_audio, output_path, language):
+
+def _f5_clone_sync(text: str, reference_audio: str, output_path: str):
     import shutil
     import tempfile
 
-    # Ensure TTS loads from the correct local path and bypass TOS
-    os.environ["XDG_DATA_HOME"] = XTTS_MODEL_PATH
-    os.environ["TTS_HOME"] = XTTS_MODEL_PATH
-    os.environ["COQUI_TOS_AGREED"] = "1"
-
-    # Workaround: soundfile/libsndfile cannot open non-ASCII paths on Windows.
-    # Copy reference audio to a temp file with an ASCII-safe name.
+    # Workaround: copy reference to ASCII-safe temp path (same as old XTTS fix)
     tmp_ref = None
     try:
         ext = os.path.splitext(reference_audio)[1] or ".wav"
-        tmp_fd, tmp_ref = tempfile.mkstemp(suffix=ext, prefix="tts_ref_")
+        tmp_fd, tmp_ref = tempfile.mkstemp(suffix=ext, prefix="f5_ref_")
         os.close(tmp_fd)
         shutil.copy2(reference_audio, tmp_ref)
 
-        from TTS.api import TTS  # type: ignore
-        tts = TTS("tts_models/multilingual/multi-dataset/xtts_v2")
-        tts.tts_to_file(
-            text=text,
-            speaker_wav=tmp_ref,
-            language=language,
-            file_path=output_path
+        tts = _get_f5_tts()
+        tts.infer(
+            ref_file=tmp_ref,
+            ref_text="",       # empty = auto ASR
+            gen_text=text,
+            file_wave=output_path,
         )
     finally:
         if tmp_ref and os.path.exists(tmp_ref):
