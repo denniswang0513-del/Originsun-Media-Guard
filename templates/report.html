@@ -1,0 +1,418 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Originsun Media Guard — 備份報表 / {{ manifest.project_name }}</title>
+    <style>
+        /* ─── Global ─── */
+        *,
+        *::before,
+        *::after {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        body {
+            font-family: 'Segoe UI', Arial, sans-serif;
+            background: #f5f5f5;
+            color: #222;
+            font-size: 13px;
+        }
+
+        /* ─── Layout Wrapper ─── */
+        .page-wrapper {
+            max-width: 1600px;
+            margin: 24px auto;
+            padding: 0 16px;
+        }
+
+        /* ─── Header ─── */
+        .report-header {
+            background: #fff;
+            border: 1px solid #ddd;
+            border-radius: 8px;
+            padding: 24px 28px;
+            margin-bottom: 16px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 16px;
+        }
+
+        .report-header h1 {
+            font-size: 22px;
+            font-weight: 700;
+            color: #111;
+        }
+
+        .report-header h1 span {
+            color: #D48A04;
+        }
+
+        .report-header .meta {
+            font-size: 12px;
+            color: #888;
+            margin-top: 4px;
+        }
+
+        .btn-print {
+            background: #D48A04;
+            color: #fff;
+            border: none;
+            border-radius: 6px;
+            padding: 8px 18px;
+            font-size: 13px;
+            font-weight: 600;
+            cursor: pointer;
+            white-space: nowrap;
+            transition: background 0.2s;
+        }
+
+        .btn-print:hover {
+            background: #b87300;
+        }
+
+        /* ─── Summary Cards ─── */
+        .summary-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+            gap: 12px;
+            margin-bottom: 16px;
+        }
+
+        .summary-card {
+            background: #fff;
+            border: 1px solid #ddd;
+            border-radius: 8px;
+            padding: 16px;
+            text-align: center;
+        }
+
+        .summary-card .value {
+            font-size: 22px;
+            font-weight: 700;
+            color: #D48A04;
+        }
+
+        .summary-card .label {
+            font-size: 11px;
+            color: #888;
+            margin-top: 4px;
+        }
+
+        /* ─── File Table ─── */
+        .files-table-wrapper {
+            background: #fff;
+            border: 1px solid #ddd;
+            border-radius: 8px;
+            overflow: hidden;
+            margin-bottom: 20px;
+        }
+
+        .files-table-wrapper h2 {
+            font-size: 14px;
+            font-weight: 600;
+            padding: 14px 20px;
+            border-bottom: 1px solid #eee;
+            color: #333;
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+
+        thead tr {
+            background: #f8f8f8;
+        }
+
+        thead th {
+            text-align: left;
+            padding: 10px 12px;
+            font-size: 11px;
+            font-weight: 600;
+            color: #555;
+            border-bottom: 2px solid #e0e0e0;
+            white-space: nowrap;
+        }
+
+        tbody tr {
+            border-bottom: 1px solid #eee;
+        }
+
+        tbody tr:last-child {
+            border-bottom: none;
+        }
+
+        tbody tr:nth-child(even) {
+            background: #fafafa;
+        }
+
+        tbody td {
+            padding: 10px 12px;
+            vertical-align: middle;
+        }
+
+        /* ─── Film Strip Row ─── */
+        .filmstrip-row td {
+            padding-top: 0 !important;
+            border-bottom: none;
+        }
+
+        .filmstrip-row img {
+            width: 100%;
+            height: auto;
+            border-radius: 4px;
+            display: block;
+        }
+
+        /* Keep filmstrip row same bg as its sibling info row */
+        tr:nth-child(4n+1)+.filmstrip-row,
+        tr:nth-child(4n+3)+.filmstrip-row {
+            background: #fafafa;
+        }
+
+        /* ─── File Info ─── */
+        .file-name {
+            font-weight: 600;
+            color: #111;
+            max-width: 600px;
+            word-break: break-all;
+        }
+
+        .file-path {
+            font-size: 10px;
+            color: #aaa;
+            max-width: 600px;
+            word-break: break-all;
+        }
+
+        .hash-code {
+            font-family: 'Consolas', monospace;
+            font-size: 11px;
+            color: #333;
+            letter-spacing: 0.5px;
+        }
+
+        .badge {
+            display: inline-block;
+            padding: 2px 7px;
+            border-radius: 999px;
+            font-size: 10px;
+            font-weight: 600;
+            background: #eef4ff;
+            color: #2a65c4;
+            border: 1px solid #cde;
+            white-space: nowrap;
+        }
+
+        /* ─── Footer ─── */
+        .report-footer {
+            text-align: center;
+            font-size: 11px;
+            color: #bbb;
+            margin-top: 8px;
+            padding-bottom: 30px;
+        }
+
+        /* ─── Print Styles ─── */
+        @media print {
+            @page {
+                size: A4 landscape;
+                margin: 12mm;
+            }
+
+            body {
+                background: #fff;
+                font-size: 11px;
+            }
+
+            .page-wrapper {
+                max-width: 100%;
+                margin: 0;
+                padding: 0;
+            }
+
+            /* Hide interactive elements */
+            .btn-print {
+                display: none !important;
+            }
+
+            /* Film strip scales to fit page */
+            .film-strip-cell {
+                overflow: visible;
+                max-width: none;
+            }
+
+            .film-strip-cell img {
+                width: 100%;
+                height: auto;
+            }
+
+            /* Prevent table rows from being split across pages */
+            tbody tr {
+                page-break-inside: avoid;
+                break-inside: avoid;
+            }
+
+            table {
+                page-break-inside: auto;
+            }
+
+            /* Cards and header on same page */
+            .report-header,
+            .summary-grid {
+                page-break-after: avoid;
+                break-after: avoid;
+            }
+        }
+    </style>
+</head>
+
+<body>
+
+    <div class="page-wrapper">
+
+        <!-- Header -->
+        <header class="report-header">
+            <div>
+                <h1>📦 <span>{{ manifest.project_name }}</span> 檔案報表</h1>
+                <div class="meta">
+                    報表產生：{{ generated_at }}
+                </div>
+            </div>
+            <button class="btn-print" onclick="window.print()">📥 下載為 PDF</button>
+        </header>
+
+        <!-- Summary Cards -->
+        <div class="summary-grid">
+            <div class="summary-card">
+                <div class="value">{{ manifest.total_files }}</div>
+                <div class="label">總媒體檔案數</div>
+            </div>
+            <div class="summary-card">
+                <div class="value">{{ total_size_str }}</div>
+                <div class="label">總處理容量</div>
+            </div>
+            <div class="summary-card">
+                <div class="value" style="font-size:14px; word-break:break-all;">
+                    {{ manifest.local_root or '—' }}
+                </div>
+                <div class="label">Local Root</div>
+            </div>
+            <div class="summary-card">
+                <div class="value" style="font-size:14px; word-break:break-all;">
+                    {{ manifest.nas_root or '—' }}
+                </div>
+                <div class="label">NAS Root</div>
+            </div>
+        </div>
+
+        <!-- File Details Table -->
+        <div class="files-table-wrapper">
+            <h2>📋 檔案詳細資訊</h2>
+            <table>
+                <thead>
+                    <tr>
+                        <th style="width: 40px;">#</th>
+                        <th>檔名 / 路徑</th>
+                        <th>大小</th>
+                        <th>解析度</th>
+                        <th>時長</th>
+                        <th>格率</th>
+                        <th>編碼格式</th>
+                        <th>XXH64 校驗</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for rec in manifest.files %}
+                    <!-- Row 1: 檔案資訊 -->
+                    <tr>
+                        <td style="color:#bbb; font-size:11px; vertical-align:top; padding-top:12px;">{{ loop.index }}
+                        </td>
+
+                        <!-- 檔案資訊 -->
+                        <td>
+                            <div class="file-name" title="{{ rec.filename }}">{{ rec.filename }}</div>
+                            <div class="file-path" title="{{ rec.src_path }}">{{ rec.src_path }}</div>
+                        </td>
+
+                        <!-- 大小 -->
+                        <td style="white-space:nowrap;">{{ rec.size_bytes | fmt_size }}</td>
+
+                        <!-- 解析度 -->
+                        <td style="white-space:nowrap;">
+                            {% if rec.resolution %}
+                            <span style="font-size:11px; color:#444;">{{ rec.resolution }}</span>
+                            {% else %}
+                            <span style="color:#ccc;">—</span>
+                            {% endif %}
+                        </td>
+
+                        <!-- 時長 -->
+                        <td style="white-space:nowrap; font-variant-numeric:tabular-nums;">
+                            {{ rec.duration | fmt_clip_dur }}
+                        </td>
+
+                        <!-- 幀率 -->
+                        <td style="white-space:nowrap;">
+                            {% if rec.fps %}
+                            <span class="badge">{{ rec.fps }}</span>
+                            {% else %}
+                            <span style="color:#ccc;">—</span>
+                            {% endif %}
+                        </td>
+
+                        <!-- 編碼格式 -->
+                        <td>
+                            {% if rec.codec %}
+                            <span class="badge" style="background:#f0faf0; color:#2a8a2a; border-color:#b0d8b0;">
+                                {{ rec.codec | upper }}
+                            </span>
+                            {% else %}
+                            <span style="color:#ccc;">—</span>
+                            {% endif %}
+                        </td>
+
+                        <!-- XXH64 校驗 -->
+                        <td>
+                            {% if rec.xxh64 %}
+                            <span class="hash-code">{{ rec.xxh64[:8] }}…{{ rec.xxh64[-4:] }}</span>
+                            <div style="font-size:9px;color:#bbb;" title="{{ rec.xxh64 }}">{{ rec.xxh64 }}</div>
+                            {% else %}
+                            <span style="color:#ccc;">未校驗</span>
+                            {% endif %}
+                        </td>
+                    </tr>
+                    <!-- Row 2: 膠卷 (如果有) -->
+                    {% if rec.film_strip_b64 %}
+                    <tr class="filmstrip-row">
+                        <td colspan="8" class="film-strip-cell"
+                            style="padding: 4px 12px 10px; border-bottom: 2px solid #e8e8e8;">
+                            <img src="data:image/jpeg;base64,{{ rec.film_strip_b64 }}"
+                                alt="film strip for {{ rec.filename }}">
+                        </td>
+                    </tr>
+                    {% endif %}
+                    {% else %}
+                    <tr>
+                        <td colspan="8" style="text-align:center; color:#bbb; padding:30px;">尚無檔案資料</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+
+        <!-- Footer -->
+        <div class="report-footer">
+            此報表由源日影像 OriginsunStudio製作，僅供內部核查使用。
+        </div>
+
+    </div>
+
+</body>
+
+</html>

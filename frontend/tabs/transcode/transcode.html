@@ -1,0 +1,57 @@
+<h2 class="text-lg font-semibold mb-4 text-[#e0e0e0] border-b border-[#3a3a3a] pb-2">轉 Proxy (高級整理模式)</h2>
+<div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+    <!-- Left: Source + Destination -->
+    <div class="space-y-4">
+        <div>
+            <label class="block text-sm font-medium text-gray-400 mb-1">專案名稱 (Project Name - 用於建立主根目錄)</label>
+            <div class="flex gap-2">
+                <input type="text" id="tc_proj_name"
+                    class="flex-1 bg-[#1e1e1e] border border-[#444] rounded px-3 py-2 text-sm focus:outline-none focus:border-blue-500"
+                    value="20260228_Standalone">
+                <button onclick="setTodayNameTc()"
+                    class="bg-[#333] hover:bg-[#444] text-gray-300 border border-[#555] rounded px-3 text-xs transition whitespace-nowrap"
+                    title="設定為今日日期">設為今日</button>
+            </div>
+        </div>
+        <div>
+            <div class="flex justify-between items-center mb-1">
+                <label class="block text-sm font-medium text-gray-400">來源清單 (每個來源對應一個卡匣名稱)</label>
+                <button onclick="addSourceRowTc()"
+                    class="text-xs bg-[#333] hover:bg-[#444] px-2 py-1 rounded text-white border border-[#555]">+
+                    新增來源</button>
+            </div>
+            <div id="tc_source_list"
+                class="space-y-2 bg-[#1e1e1e] border border-[#444] rounded p-2 min-h-[120px] max-h-[160px] overflow-y-auto transition-colors duration-200">
+                <!-- JS Generated -->
+            </div>
+        </div>
+        <div>
+            <label class="block text-sm font-medium text-gray-400 mb-1">目標輸出資料夾</label>
+            <div class="flex gap-2">
+                <input type="text" id="tc_dest"
+                    class="flex-1 bg-[#1e1e1e] border border-[#444] rounded px-3 py-2 text-sm focus:outline-none focus:border-blue-500"
+                    value="C:/A_TEST_PROXY">
+                <button onclick="pickPath('tc_dest', 'folder')"
+                    class="bg-[#333] hover:bg-[#444] px-3 rounded border border-[#555] text-gray-300">📁</button>
+            </div>
+        </div>
+    </div>
+    <!-- Right: Description + Host selector -->
+    <div class="space-y-3">
+        <p class="text-sm text-gray-400 leading-relaxed">
+            獨立標籤頁專為產生 ProRes Proxy 設計。<br><br>
+            系統將會根據您填寫的「專案名稱」與「卡匣/來源名稱」，自動建立分層目錄歸檔。
+        </p>
+        <div id="tc_host_panel" class="hidden p-3 bg-[#1a2a3a] border border-[#2e4a6e] rounded-lg">
+            <div class="text-xs text-blue-300 font-semibold mb-2">🖥️ 轉檔由哪些主機處理（多選，自動分配）：</div>
+            <div id="tc_host_checkboxes" class="flex flex-wrap gap-x-4 gap-y-1"></div>
+        </div>
+    </div>
+</div>
+<hr class="my-5 border-[#3a3a3a]">
+<div class="flex justify-end">
+    <button onclick="submitTranscode()"
+        class="bg-[#d48a04] hover:bg-[#f09a06] text-white font-bold py-2 px-8 rounded shadow text-sm transition-colors">
+        啟動轉檔
+    </button>
+</div>

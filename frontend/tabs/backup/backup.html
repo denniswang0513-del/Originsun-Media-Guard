@@ -1,0 +1,118 @@
+<h2 class="text-lg font-semibold mb-4 text-[#e0e0e0] border-b border-[#3a3a3a] pb-2">備份並轉檔</h2>
+
+<div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+    <!-- Left: Paths -->
+    <div class="space-y-3">
+        <div>
+            <label class="block text-sm font-medium text-gray-400 mb-1">新增目的地資料夾 (New Destination Folder)</label>
+            <div class="flex gap-2">
+                <input type="text" id="proj_name"
+                    class="flex-1 bg-[#1e1e1e] border border-[#444] rounded px-3 py-2 text-sm focus:outline-none focus:border-blue-500"
+                    value="20260228">
+                <button onclick="setTodayName()"
+                    class="bg-[#333] hover:bg-[#444] text-gray-300 border border-[#555] rounded px-3 text-xs transition whitespace-nowrap"
+                    title="設定為今日日期">設為今日</button>
+            </div>
+        </div>
+        <div>
+            <label class="block text-sm font-medium text-gray-400 mb-1">專案素材區 (Local Root)</label>
+            <div class="flex gap-2">
+                <input type="text" id="local_root"
+                    class="flex-1 bg-[#1e1e1e] border border-[#444] rounded px-3 py-2 text-sm"
+                    value="C:/A_TEST_DEST">
+                <button onclick="pickPath('local_root', 'folder')"
+                    class="bg-[#333] hover:bg-[#444] px-3 rounded border border-[#555] text-gray-300">📁</button>
+            </div>
+        </div>
+        <div>
+            <label class="block text-sm font-medium text-gray-400 mb-1">異地備份區 (NAS Root)</label>
+            <div class="flex gap-2">
+                <input type="text" id="nas_root"
+                    class="flex-1 bg-[#1e1e1e] border border-[#444] rounded px-3 py-2 text-sm"
+                    value="C:/A_TEST_NAS">
+                <button onclick="pickPath('nas_root', 'folder')"
+                    class="bg-[#333] hover:bg-[#444] px-3 rounded border border-[#555] text-gray-300">📁</button>
+            </div>
+        </div>
+        <div>
+            <label class="block text-sm font-medium text-gray-400 mb-1">Proxy轉檔區 (Proxy Root)</label>
+            <div class="flex gap-2">
+                <input type="text" id="proxy_root"
+                    class="flex-1 bg-[#1e1e1e] border border-[#444] rounded px-3 py-2 text-sm"
+                    value="C:/A_TEST_PROXY">
+                <button onclick="pickPath('proxy_root', 'folder')"
+                    class="bg-[#333] hover:bg-[#444] px-3 rounded border border-[#555] text-gray-300">📁</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Right: Sources and Options -->
+    <div class="space-y-4">
+        <div>
+            <div class="flex justify-between items-center mb-1">
+                <label class="block text-sm font-medium text-gray-400">檔案來源 (Source Directories)</label>
+                <button onclick="addSourceRow()"
+                    class="text-xs bg-[#333] hover:bg-[#444] px-2 py-1 rounded text-white border border-[#555]">+ 新增來源</button>
+            </div>
+            <div id="source_list"
+                class="space-y-2 bg-[#1e1e1e] border border-[#444] rounded p-2 min-h-[120px] max-h-[160px] overflow-y-auto transition-colors duration-200">
+                <!-- JS Generated Rows will go here -->
+            </div>
+        </div>
+
+        <div class="pt-2">
+            <label class="block text-sm font-medium text-gray-400 mb-2">執行項目</label>
+            <div class="flex flex-wrap gap-4 text-sm">
+                <label class="flex items-center gap-2 cursor-pointer">
+                    <input type="checkbox" id="chk_hash"
+                        class="form-checkbox text-blue-500 rounded bg-[#1e1e1e] border-[#444]">
+                    <span>XXH64 完整性校驗</span>
+                </label>
+                <label class="flex items-center gap-2 cursor-pointer">
+                    <input type="checkbox" id="chk_transcode" checked onchange="renderHostSelector()"
+                        class="form-checkbox text-blue-500 rounded bg-[#1e1e1e] border-[#444]">
+                    <span>Proxy轉檔 (ProRes LT_720P_proxy)</span>
+                </label>
+                <label class="flex items-center gap-2 cursor-pointer">
+                    <input type="checkbox" id="chk_concat" checked onchange="renderHostSelector()"
+                        class="form-checkbox text-blue-500 rounded bg-[#1e1e1e] border-[#444]">
+                    <span>自動時間碼串帶</span>
+                </label>
+                <label class="flex items-center gap-2 cursor-pointer">
+                    <input type="checkbox" id="chk_report" checked
+                        class="form-checkbox text-blue-400 rounded bg-[#1e1e1e] border-[#444]">
+                    <span class="text-white">檔案視覺報表</span>
+                </label>
+
+                <!-- Remote Host Selector Panel -->
+                <div id="host_selector_panel"
+                    class="hidden mt-3 p-3 bg-[#1a2a3a] border border-[#2e4a6e] rounded-lg">
+                    <div class="text-xs text-blue-300 font-semibold mb-2">🖥️ 轉檔/串帶 交由哪些主機處理：</div>
+                    <div id="host_selector_checkboxes" class="flex flex-wrap gap-x-4 gap-y-1"></div>
+                </div>
+
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="mt-6 border-t border-[#3a3a3a] pt-4">
+    <div class="flex flex-col h-full bg-[#1e1e1e] border border-[#2e4a6e] rounded-lg p-3">
+        <div class="flex justify-between items-center mb-2">
+            <h3 class="text-sm font-semibold text-blue-300">📜 最新備份報表 (NAS 全域索引)</h3>
+            <button onclick="loadReportHistory()" class="text-xs bg-[#333] hover:bg-[#444] text-white py-1 px-3 rounded border border-[#555] transition-colors">
+                🔄 重新載入
+            </button>
+        </div>
+        <div id="main_history_list" class="bg-[#151515] border border-[#3a3a3a] rounded-lg flex-1 min-h-[120px] max-h-[160px] overflow-y-auto shadow-inner">
+            <div class="px-4 py-8 text-center text-xs text-gray-500 flex items-center justify-center h-full">NAS 尚無歷史報表紀錄</div>
+        </div>
+    </div>
+
+    <div class="flex justify-end gap-3 mt-4">
+        <button onclick="submitJob()"
+            class="bg-[#1f538d] hover:bg-[#2a6cbf] text-white font-bold py-2 px-8 rounded shadow text-sm transition-colors">
+            開始備份
+        </button>
+    </div>
+</div>

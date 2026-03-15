@@ -1,0 +1,11 @@
+fastapi
+uvicorn
+python-socketio
+xxhash
+customtkinter
+requests
+psutil
+Jinja2
+google-api-python-client
+google-auth-httplib2
+google-auth-oauthlib

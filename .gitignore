@@ -1,0 +1,67 @@
+# Google API Credentials (NEVER commit these)
+credentials/token.json
+credentials/credentials.json
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+.venv/
+*.egg-info/
+
+# Logs
+*.log
+*.txt.bak
+server_test_log.txt
+
+# Build artifacts
+Originsun_Agent.zip
+dist/
+build/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+
+# Config (runtime only, not committed)
+settings.json
+
+# OS
+.DS_Store
+Thumbs.db
+
+# AI Models (20GB+, downloaded on demand)
+models/
+
+# Voice cache (runtime generated)
+voice/
+
+# Test resources & output (video files, logs, reports)
+Test/
+test_zone/
+Desktop/
+
+# Test artifacts in root
+out_*.mp4
+_test_*.mp4
+frame_*.jpg
+test_*.mp4
+test_*.vtt
+test_*.srt
+
+# Test artifacts in frontend
+frontend/test_*.mp3
+
+# Test concat output
+tests/test_concat/*.mov
+tests/test_concat/*.mp4
+tests/test_concat/*.txt
+
+# Python embed runtime (very large, downloaded on install)
+python_embed/
+
+# FFmpeg binaries (bundled separately)
+ffmpeg.exe
+ffprobe.exe
+get-pip.py

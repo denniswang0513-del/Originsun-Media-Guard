@@ -1,0 +1,208 @@
+/* ─── Originsun Media Guard Pro ─── */
+/* Extracted from index.html <style> blocks */
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+        }
+
+        .log-box {
+            font-family: 'Consolas', 'Courier New', monospace;
+            white-space: pre-wrap;
+        }
+
+        /* ─── Settings Modal ─────────────────────────────────────────── */
+        .originsun-modal-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(0, 0, 0, 0.75);
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            z-index: 9999;
+        }
+
+        .originsun-modal-content {
+            background-color: #2b2b2b;
+            width: 550px;
+            border-radius: 8px;
+            box-shadow: 0 10px 25px rgba(0, 0, 0, 0.5);
+            border: 1px solid #444;
+            overflow: hidden;
+            color: #e5e7eb;
+            font-family: inherit;
+        }
+
+        .modal-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 16px 20px;
+            background-color: #1f1f1f;
+            border-bottom: 1px solid #333;
+        }
+
+        .modal-header h3 {
+            margin: 0;
+            font-size: 16px;
+            color: #fff;
+        }
+
+        .close-btn {
+            font-size: 24px;
+            cursor: pointer;
+            color: #888;
+        }
+
+        .close-btn:hover {
+            color: #fff;
+        }
+
+        .modal-tabs {
+            display: flex;
+            background-color: #1f1f1f;
+            border-bottom: 1px solid #444;
+        }
+
+        .tab-btn {
+            flex: 1;
+            padding: 12px 0;
+            background: none;
+            border: none;
+            color: #aaa;
+            cursor: pointer;
+            font-size: 14px;
+            border-bottom: 2px solid transparent;
+        }
+
+        .tab-btn:hover {
+            color: #fff;
+            background-color: #252525;
+        }
+
+        .tab-btn.active {
+            color: #fff;
+            border-bottom: 2px solid #8b5cf6;
+        }
+
+        .tab-content {
+            padding: 20px;
+        }
+
+        .form-group {
+            margin-bottom: 16px;
+        }
+
+        .form-group label {
+            display: block;
+            margin-bottom: 6px;
+            font-size: 13px;
+            color: #aaa;
+        }
+
+        .form-group input,
+        .form-group textarea {
+            width: 100%;
+            box-sizing: border-box;
+            background-color: #1a1a1a;
+            border: 1px solid #444;
+            color: #fff;
+            padding: 10px;
+            border-radius: 4px;
+            font-family: inherit;
+        }
+
+        .form-group input:focus,
+        .form-group textarea:focus {
+            outline: none;
+            border-color: #8b5cf6;
+        }
+
+        .template-hint {
+            font-size: 12px;
+            color: #fbbf24;
+            margin-bottom: 12px;
+        }
+
+        .modal-footer {
+            padding: 16px 20px;
+            border-top: 1px solid #333;
+            display: flex;
+            justify-content: flex-end;
+            gap: 12px;
+        }
+
+        .btn-cancel {
+            background-color: transparent;
+            color: #aaa;
+            border: 1px solid #555;
+            padding: 8px 16px;
+            border-radius: 4px;
+            cursor: pointer;
+        }
+
+        .btn-cancel:hover {
+            background-color: #333;
+            color: #fff;
+        }
+
+        .btn-save {
+            background-color: #6d28d9;
+            color: #fff;
+            border: none;
+            padding: 8px 20px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-weight: bold;
+        }
+
+        .btn-save:hover {
+            background-color: #5b21b6;
+        }
+
+/* ─── Settings Modal: Channel Toggle Pills ─── */
+
+                    .ch-toggles {
+                        display: inline-flex;
+                        gap: 5px;
+                        margin-left: 8px;
+                        vertical-align: middle;
+                    }
+
+                    .ch-toggle {
+                        display: inline-block;
+                        padding: 2px 9px;
+                        border-radius: 99px;
+                        font-size: 11px;
+                        font-weight: 600;
+                        cursor: pointer;
+                        border: 1.5px solid;
+                        transition: background .15s, color .15s;
+                        user-select: none;
+                    }
+
+                    .ch-toggle.gchat.on {
+                        background: #7C3AED;
+                        border-color: #7C3AED;
+                        color: #fff;
+                    }
+
+                    .ch-toggle.gchat.off {
+                        background: transparent;
+                        border-color: #4B5563;
+                        color: #6B7280;
+                    }
+
+                    .ch-toggle.line.on {
+                        background: #06C755;
+                        border-color: #06C755;
+                        color: #fff;
+                    }
+
+                    .ch-toggle.line.off {
+                        background: transparent;
+                        border-color: #4B5563;
+                        color: #6B7280;
+                    }

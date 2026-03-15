@@ -1,0 +1,20 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(wc -l /d/Antigravity/OriginsunTranscode/frontend/tabs/*/*.js)",
+      "Bash(wc -l /d/Antigravity/OriginsunTranscode/core/*.py /d/Antigravity/OriginsunTranscode/*.py)",
+      "Bash(find D:/Antigravity/OriginsunTranscode/frontend/tabs -name *.html -o -name *.js)",
+      "Bash(ls -la /d/Antigravity/OriginsunTranscode/*.py /d/Antigravity/OriginsunTranscode/*.json)",
+      "Bash(for tab:*)",
+      "Bash(do echo:*)",
+      "Read(//d/Antigravity/OriginsunTranscode/frontend/tabs/**)",
+      "Bash(done)",
+      "Bash(python -c \"from routers import *\")",
+      "Bash(python -c \"from main import app; print\\(''''✓ main.py imports successfully''''\\)\")",
+      "Bash(python -c \"from main import app; print\\(''''main.py imports OK''''\\)\")",
+      "Bash(ls -la D:/Antigravity/OriginsunTranscode/*.py D:/Antigravity/OriginsunTranscode/*.mp3 D:/Antigravity/OriginsunTranscode/*.wav D:/Antigravity/OriginsunTranscode/*.txt D:/Antigravity/OriginsunTranscode/*.log)",
+      "Bash(ls -la \"D:/Antigravity/OriginsunTranscode/\"test*.mp3 \"D:/Antigravity/OriginsunTranscode/\"20260311*.txt)",
+      "Bash(ls \"D:/Antigravity/OriginsunTranscode/\"*.mp3 \"D:/Antigravity/OriginsunTranscode/\"*.wav \"D:/Antigravity/OriginsunTranscode/\"test_*.py \"D:/Antigravity/OriginsunTranscode/\"cmd_*.txt \"D:/Antigravity/OriginsunTranscode/\"stderr.log)"
+    ]
+  }
+}

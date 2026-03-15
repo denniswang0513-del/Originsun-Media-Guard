@@ -1,0 +1,90 @@
+<h2 class="text-lg font-semibold mb-4 text-[#e0e0e0] border-b border-[#3a3a3a] pb-2">NAS 專案檔案報表</h2>
+<div class="grid grid-cols-1 md:grid-cols-2 gap-6 mb-5">
+    <!-- Left: Source & Output -->
+    <div class="space-y-4">
+        <div>
+            <label class="block text-sm font-medium text-gray-400 mb-1">來源資料夾 (Scan Source)</label>
+            <div class="flex gap-2">
+                <input type="text" id="rpt_source"
+                    class="flex-1 bg-[#1e1e1e] border border-[#444] rounded px-3 py-2 text-sm focus:outline-none focus:border-purple-500"
+                    placeholder="選擇包含影片的資料夾...">
+                <button onclick="pickPath('rpt_source', 'folder')"
+                    class="bg-[#333] hover:bg-[#444] px-3 rounded border border-[#555] text-gray-300">📁</button>
+            </div>
+        </div>
+        <div>
+            <label class="block text-sm font-medium text-gray-400 mb-1">報表輸出資料夾 (Output Directory)</label>
+            <div class="flex gap-2">
+                <input type="text" id="rpt_output"
+                    class="flex-1 bg-[#1e1e1e] border border-[#444] rounded px-3 py-2 text-sm focus:outline-none focus:border-purple-500"
+                    value="\\192.168.1.132\Container\AI_Workspace\Originsun_Web\FileReport"
+                    placeholder="HTML 報表儲存位置...">
+                <button onclick="pickPath('rpt_output', 'folder')"
+                    class="bg-[#333] hover:bg-[#444] px-3 rounded border border-[#555] text-gray-300">📁</button>
+            </div>
+        </div>
+        <div>
+            <label class="block text-sm font-medium text-gray-400 mb-1">報表名稱 (Report Name)</label>
+            <input type="text" id="rpt_report_name"
+                class="w-full bg-[#1e1e1e] border border-[#444] rounded px-3 py-2 text-sm focus:outline-none focus:border-purple-500"
+                placeholder="例：20260303_Report">
+        </div>
+        <div>
+            <label class="block text-sm font-medium text-gray-400 mb-1">異地備份資訊 (NAS Root 可選填)</label>
+            <div class="flex gap-2">
+                <input type="text" id="rpt_nas_root"
+                    class="flex-1 bg-[#1e1e1e] border border-[#444] rounded px-3 py-2 text-sm focus:outline-none focus:border-purple-500"
+                    placeholder="NAS 目的地的根路徑（僅供顯示於報表）">
+                <button onclick="pickPath('rpt_nas_root', 'folder')"
+                    class="bg-[#333] hover:bg-[#444] px-3 rounded border border-[#555] text-gray-300">📁</button>
+            </div>
+        </div>
+
+        <!-- Report Content Options -->
+        <div>
+            <label class="block text-sm font-medium text-gray-400 mb-1">報表內容</label>
+            <div class="bg-[#1e1e1e] border border-[#3a3a3a] rounded p-3">
+                <div class="space-y-2 text-sm">
+                    <label class="flex items-center gap-2 cursor-pointer">
+                        <input type="checkbox" id="rpt_filmstrip" checked
+                            class="form-checkbox text-purple-500 rounded bg-[#1e1e1e] border-[#444]">
+                        <span>🎬 包含膠卷縮圖 (15 幀)</span>
+                    </label>
+                    <label class="flex items-center gap-2 cursor-pointer">
+                        <input type="checkbox" id="rpt_techspec" checked
+                            class="form-checkbox text-blue-500 rounded bg-[#1e1e1e] border-[#444]">
+                        <span>📹 包含技術規格 (時間 / FPS / 解析度 / 編碼)</span>
+                    </label>
+                    <label class="flex items-center gap-2 cursor-pointer">
+                        <input type="checkbox" id="rpt_hash"
+                            class="form-checkbox text-purple-500 rounded bg-[#1e1e1e] border-[#444]">
+                        <span>🔐 對每個檔案計算 XXH64 校驗碼 (較慢)</span>
+                    </label>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Right: Report History + Submit -->
+    <div class="space-y-4 flex flex-col h-full">
+        <div class="flex-1 flex flex-col">
+            <div class="flex justify-between items-center mb-2">
+                <h3 class="text-sm font-semibold text-gray-300">📜 報表歷史紀錄 (NAS 全域索引)</h3>
+                <button onclick="loadReportHistory()" class="text-xs bg-[#333] hover:bg-[#444] text-white py-1 px-3 rounded border border-[#555] transition-colors">
+                    🔄 重新載入
+                </button>
+            </div>
+            <div id="rpt_history_list" class="bg-[#1e1e1e] border border-[#3a3a3a] rounded-lg flex-1 min-h-[150px] max-h-[220px] overflow-y-auto shadow-inner">
+                <div class="px-4 py-8 text-center text-xs text-gray-500 flex items-center justify-center h-full">NAS 尚無歷史報表紀錄</div>
+            </div>
+        </div>
+
+        <!-- Submit Button -->
+        <div class="flex justify-end pt-2 mt-auto">
+            <button onclick="submitReportJob()"
+                class="bg-[#5b21b6] hover:bg-[#7c3aed] text-white font-bold py-2 px-8 rounded shadow text-sm transition-colors">
+                生成報表
+            </button>
+        </div>
+    </div>
+</div>

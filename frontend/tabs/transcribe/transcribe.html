@@ -1,0 +1,126 @@
+<h2 class="text-lg font-semibold mb-4 text-[#e0e0e0] border-b border-[#3a3a3a] pb-2">🎙️ AI 逐字稿產生器</h2>
+
+<div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+    <!-- Left: Dropzone + Output path -->
+    <div class="space-y-4">
+        <!-- Dropzone -->
+        <div>
+            <div class="flex justify-between items-center mb-1">
+                <label class="block text-sm font-medium text-gray-400">影音檔案來源 (依檔序排列)</label>
+                <div class="flex gap-2">
+                    <button onclick="if(window.pickMultiFiles) window.pickMultiFiles()" class="text-xs bg-indigo-900 border-indigo-700 hover:bg-indigo-700 px-2 py-1 rounded text-white border transition-colors shadow-sm text-[11px]">📁 選擇檔案</button>
+                    <button onclick="addStandaloneSource('transcribe_file_list')"
+                        class="text-xs bg-[#333] hover:bg-[#444] px-2 py-1 rounded text-white border border-[#555]">+ 新增欄位</button>
+                </div>
+            </div>
+            <div id="transcribe_file_list"
+                class="space-y-2 bg-[#1e1e1e] border border-[#444] rounded p-2 min-h-[120px] max-h-[160px] overflow-y-auto">
+                <!-- JS Generated -->
+            </div>
+        </div>
+
+        <!-- Output path -->
+        <div>
+            <label class="block text-sm font-medium text-gray-400 mb-1">輸出目標資料夾 (Output Directory)</label>
+            <div class="flex gap-2">
+                <input type="text" id="transcribe_dest"
+                    class="flex-1 bg-[#1e1e1e] border border-[#444] rounded px-3 py-2 text-sm focus:outline-none focus:border-emerald-500"
+                    value="" placeholder="指定輸出路徑...">
+                <button onclick="pickPath('transcribe_dest', 'folder')"
+                    class="bg-[#333] hover:bg-[#444] px-3 rounded border border-[#555] text-gray-300">📁</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Right: Settings -->
+    <div class="space-y-4">
+        <!-- Model selector -->
+        <div>
+            <div class="flex justify-between items-center mb-1">
+                <label class="block text-sm font-medium text-gray-400">辨識模型 (Recognition Model)</label>
+                <span id="model_status_badge" class="px-2 py-0.5 rounded text-xs bg-[#333] text-gray-400">檢查中...</span>
+            </div>
+            <div class="flex gap-2 items-center">
+                <select id="transcribe_model" onchange="if(window.updateModelStatus) window.updateModelStatus()"
+                    class="flex-1 bg-[#1e1e1e] text-sm border border-[#444] rounded px-3 py-2 focus:outline-none focus:border-emerald-500">
+                    <option value="turbo" selected>⚡ Turbo (推薦 — 速度與精準的平衡)</option>
+                    <option value="large-v3">🎯 Large-v3 (極致精準 — 較慢)</option>
+                    <option value="medium">🚀 Medium (快速 — 精準度略低)</option>
+                </select>
+                <button id="btn_download_model" onclick="if(window.downloadSelectedModel) window.downloadSelectedModel()" class="hidden bg-blue-600 hover:bg-blue-500 text-white px-3 py-2 rounded text-sm whitespace-nowrap shadow-sm transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed">
+                    ⬇️ 下載模型
+                </button>
+            </div>
+        </div>
+
+        <!-- Output format -->
+        <div>
+            <label class="block text-sm font-medium text-gray-400 mb-2">輸出格式 (Output Format)</label>
+            <div class="flex flex-col gap-2">
+                <label class="flex items-center gap-2 cursor-pointer text-sm">
+                    <input type="checkbox" id="transcribe_srt" checked
+                        class="form-checkbox text-emerald-500 rounded bg-[#1e1e1e] border-[#444]">
+                    <span class="text-gray-300">📝 .srt (含時間碼字幕檔)</span>
+                </label>
+                <label class="flex items-center gap-2 cursor-pointer text-sm">
+                    <input type="checkbox" id="transcribe_txt" checked
+                        class="form-checkbox text-emerald-500 rounded bg-[#1e1e1e] border-[#444]">
+                    <span class="text-gray-300">📄 .txt (純文字逐字稿)</span>
+                </label>
+            </div>
+        </div>
+
+        <!-- Proxy option -->
+        <div>
+            <label class="block text-sm font-medium text-gray-400 mb-2">附加功能</label>
+                <label class="flex items-center gap-2 cursor-pointer text-sm">
+                    <input type="checkbox" id="transcribe_proxy"
+                        class="form-checkbox text-emerald-500 rounded bg-[#1e1e1e] border-[#444]">
+                    <span class="text-gray-300">🎞️ 同時產生參考用影像串帶 (720p Proxy)</span>
+                </label>
+                <label class="flex items-center gap-2 cursor-pointer text-sm">
+                    <input type="checkbox" id="transcribe_wav"
+                        class="form-checkbox text-emerald-500 rounded bg-[#1e1e1e] border-[#444]">
+                    <span class="text-gray-300">🎵 同時保留提取的實體音訊檔 (.wav)</span>
+                </label>
+        </div>
+
+        <!-- Output Mode Toggle -->
+        <div>
+            <label class="block text-sm font-medium text-gray-400 mb-2">逐字稿輸出模式</label>
+            <div class="flex rounded-lg overflow-hidden border border-[#444]" id="transcribe_mode_toggle">
+                <button type="button" data-mode="merged"
+                    class="flex-1 px-3 py-1.5 text-xs font-semibold bg-emerald-800 text-emerald-100 border-r border-[#444] transition-colors"
+                    onclick="setTranscribeMode('merged')">🔗 合併輸出</button>
+                <button type="button" data-mode="individual"
+                    class="flex-1 px-3 py-1.5 text-xs font-semibold bg-[#1e1e1e] text-gray-400 transition-colors"
+                    onclick="setTranscribeMode('individual')">📄 獨立輸出</button>
+            </div>
+            <p id="transcribe_mode_hint" class="text-[10px] text-gray-600 mt-1">所有來源合併為一份逐字稿</p>
+        </div>
+
+        <!-- Info -->
+        <div class="bg-[#1e1e1e] border border-[#333] rounded p-3 text-xs text-gray-500">
+            💡 系統會將所有輸入檔案的音訊提取並拼接為一個完整的 WAV 總音檔，再進行統一辨識。辨識完成後，總音檔連同字幕會一併保存至輸出資料夾。
+        </div>
+    </div>
+</div>
+
+<!-- Transcribe progress bar -->
+<div id="transcribe_progress_area" class="hidden mt-5 p-4 bg-[#1e1e1e] border border-[#333] rounded-lg">
+    <div class="flex justify-between text-xs text-gray-400 mb-1">
+        <span id="transcribe_prog_label">準備中...</span>
+        <span id="transcribe_prog_pct">0%</span>
+    </div>
+    <div class="w-full bg-[#2a2a2a] rounded-full h-3 border border-[#444] overflow-hidden">
+        <div id="transcribe_prog_bar" class="h-3 rounded-full transition-all duration-300" style="width: 0%; background: linear-gradient(90deg, #059669, #10b981);"></div>
+    </div>
+</div>
+
+<hr class="my-5 border-[#3a3a3a]">
+<div class="flex justify-end">
+    <button onclick="submitTranscribeJob()"
+        class="bg-emerald-700 hover:bg-emerald-600 text-white font-bold py-2.5 px-10 rounded shadow-lg text-sm transition-all duration-200 hover:scale-105 active:scale-95">
+        🎙️ 開始生成逐字稿
+    </button>
+</div>
