@@ -101,10 +101,13 @@ def main():
         files_to_sync = [
             "main.py",
             "config.py",
+            "core_engine.py",
             "report_generator.py",
             "notifier.py",
             "drive_sync.py",
             "transcriber.py",
+            "tts_engine.py",
+            "taiwan_dict.json",
             "download_model.py",
             "version.json",
             "logo.ico",
@@ -114,8 +117,8 @@ def main():
             "bootstrap.py",
             "Originsun_Agent.zip"
         ]
-        
-        folders_to_sync = ["frontend", "templates", "windows_helper", "core", "routers"]
+
+        folders_to_sync = ["frontend", "templates", "windows_helper", "core", "routers", "utils"]
         
         for f in files_to_sync:
             if os.path.exists(f):
