@@ -136,16 +136,33 @@ def _transcribe_ref_audio(audio_path: str) -> str:
     F5-TTS's built-in ASR uses transformers pipeline which imports torchcodec,
     and torchcodec crashes on Windows (missing FFmpeg shared DLLs).
     We use faster-whisper (already installed for Whisper tab) instead.
+
+    IMPORTANT: ref_text must be proportional to the actual speech content.
+    A too-short ref_text (e.g. "...") causes F5-TTS tensor size mismatch errors
+    because it miscalculates the output duration ratio.
     """
     try:
         from faster_whisper import WhisperModel  # type: ignore
         model = WhisperModel("tiny", device="cpu", compute_type="int8")
         segments, _ = model.transcribe(audio_path, language="zh")
         text = " ".join(seg.text.strip() for seg in segments)
-        return text if text.strip() else "..."
+        if text.strip():
+            return text
+    except Exception as e:
+        print(f"[TTS] faster-whisper transcription failed: {e}")
+
+    # Fallback: estimate ~4 chars/sec of audio to generate proportional placeholder.
+    # This prevents tensor mismatch from ref_text being too short.
+    try:
+        import soundfile as sf
+        data, sr = sf.read(audio_path)
+        duration = len(data) / sr
+        # F5-TTS clips to 12s max, estimate ~4 Chinese chars per second
+        effective_dur = min(duration, 12.0)
+        char_count = max(int(effective_dur * 4), 10)
+        return "。" * char_count
     except Exception:
-        # Fallback: return placeholder (F5-TTS still works, just slightly lower quality)
-        return "..."
+        return "。" * 40  # ~10 seconds worth of placeholder
 
 
 def _f5_clone_sync(text: str, reference_audio: str, output_path: str):
