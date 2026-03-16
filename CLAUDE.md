@@ -15,7 +15,8 @@
 2. 備份同時可選擇性觸發**轉檔**（Proxy）、**串接**（Reel）、**視覺報表**
 3. 剪輯師用**比對驗證**確認素材完整性
 4. **語音辨識（Whisper）** 可將影片音軌轉為逐字稿（SRT/TXT）
-5. **TTS** 功能（🚧 開發中）可用 Edge-TTS 合成語音，或用 XTTS v2 克隆聲音
+5. **TTS** 功能（🚧 開發中）可用 Edge-TTS 合成語音，或用 F5-TTS 進行零樣本聲音克隆
+6. **台灣正音引擎** 可將大陸用語自動轉為台灣用語 + 發音校正（熱更新 JSON 字典）
 
 系統分為**主控端（伺服器）**和**代理端（同事電腦）**：
 - 主控端：`main.py` 啟動的 FastAPI 服務，提供 Web UI + API
@@ -30,7 +31,7 @@
 d:\Antigravity\OriginsunTranscode\.venv\Scripts\python.exe main.py
 
 # 開發模式（有熱重載，推薦）
-# 注意：hot reload 只能用於 FastAPI 路由，不包含 PyTorch monkey-patch 的副作用
+# 注意：hot reload 只能用於 FastAPI 路由，不包含 tts_engine.py 頂部的 patch 副作用
 d:\Antigravity\OriginsunTranscode\.venv\Scripts\uvicorn.exe main:io_app --host 0.0.0.0 --port 8000 --reload
 
 # 背景無視窗啟動（正式部署方式）
@@ -48,7 +49,6 @@ OriginsunTranscode/
 │
 │  ── 【進入點與核心邏輯】
 ├── main.py                  # FastAPI 應用程式進入點
-│                            #   - 最頂部有 PyTorch + torchaudio 的 monkey-patch（見第 5 節）
 │                            #   - 建立 FastAPI app 並掛載 NoCacheMiddleware + CORS
 │                            #   - 建立 socketio.ASGIApp(sio, app) → io_app
 │                            #   - 掛載所有 router（api_backup, api_verify, api_proxy...）
@@ -74,13 +74,25 @@ OriginsunTranscode/
 │                            #   - 支援 individual_mode（每個影片單獨一個檔）或合併模式
 │                            #   - 支援 generate_proxy（順帶轉 Proxy 檔）
 │
-├── tts_engine.py            # TTS 引擎（🚧 開發中，支援 Edge-TTS + Coqui XTTS v2）
-│                            #   - 頂部有 torch + torchaudio monkey-patch（與 main.py 相同）
+├── tts_engine.py            # TTS 引擎（🚧 開發中，支援 Edge-TTS + F5-TTS）
+│                            #   - 頂部有 torchcodec/torchaudio Windows 修補（見第 5 節）
 │                            #   - run_edge_tts()：async，透過 subprocess 呼叫 edge-tts CLI
-│                            #   - run_voice_clone()：async，載入 XTTS v2 模型進行聲音克隆
-│                            #   - xtts_is_ready()：檢查模型目錄是否存在
-│                            #   - download_xtts_model()：觸發模型下載（blocking，應在 executor 中呼叫）
-│                            #   - XTTS_MODEL_PATH = ./models/xtts_v2
+│                            #   - run_f5_tts_clone()：async，使用 F5-TTS 進行零樣本聲音克隆
+│                            #   - f5_tts_is_available()：檢查 f5-tts 套件是否已安裝
+│                            #   - _get_f5_tts()：lazy-load F5-TTS 模型（全局快取 _f5_instance）
+│                            #   - _transcribe_ref_audio()：用 faster-whisper 轉錄參考音訊
+│                            #   - F5_MODEL_DIR = ./models/f5_tts
+│
+├── taiwan_dict.json         # 台灣正音字典（熱更新，不需重啟）
+│                            #   - vocab_mapping：大陸→台灣用語（14 筆，如 視頻→影片）
+│                            #   - pronunciation_hacks：發音校正（10 筆，如 垃圾→勒色）
+│
+├── utils/
+│   ├── __init__.py
+│   └── taiwan_normalizer.py # 台灣正音引擎
+│                            #   - normalize_for_taiwan_tts(text)：依序套用 vocab + pronunciation
+│                            #   - _load_dict()：每次呼叫時讀取 taiwan_dict.json（支援熱更新）
+│                            #   - 最長優先替換（避免子字串衝突）
 │
 ├── notifier.py              # 任務完成通知器
 │                            #   - send_google_chat()：發送到 Google Chat Incoming Webhook
@@ -198,13 +210,16 @@ OriginsunTranscode/
 │       ├── concat/          # 影片串接頁籤
 │       ├── report/          # 視覺報表頁籤
 │       ├── transcribe/      # Whisper 語音辨識頁籤
-│       └── tts/             # TTS 頁籤（🚧 開發中）
+│       └── tts/             # TTS 頁籤（🚧 開發中，含 3 個子頁）
+│                            #   子頁 1：📢 標準 TTS（Edge-TTS）
+│                            #   子頁 2：🎙️ 聲音克隆（F5-TTS）
+│                            #   子頁 3：📖 正音字典編輯器
 │
 │  ── 【模型與資料目錄】
 ├── models/
-│   └── xtts_v2/             # XTTS v2 本機模型（約 2GB，需手動下載）
-│                            #   子路徑：tts/tts_models--multilingual--multi-dataset--xtts_v2/
-│                            #   xtts_is_ready() 只檢查這個路徑下的 config.json 是否存在
+│   └── f5_tts/              # F5-TTS 模型快取目錄
+│                            #   模型自動從 HuggingFace 下載至 ~/.cache/huggingface/
+│                            #   F5TTS_v1_Base (~1.2GB, model_1250000.safetensors)
 │
 ├── voice/                   # 本機聲音角色快取（執行時自動建立）
 ├── credentials/             # Google API OAuth 憑證（.gitignore，不可提交）
@@ -304,52 +319,56 @@ _on_conflict(data):
 
 ## 5. 重大技術注意事項（務必閱讀）
 
-### 5.1 PyTorch 2.6+ monkey-patch（`main.py` 第 1-18 行）
+### 5.1 torchcodec + torchaudio Windows 修補（`tts_engine.py` 頂部）
 
+**⚠️ 歷史變遷**：v1.5.0 之前使用 Coqui XTTS v2，需要在 `main.py` 頂部做 PyTorch `weights_only` patch 和 torchaudio backend patch。升級為 F5-TTS 後，已從 `main.py` 移除這些 patch，改在 `tts_engine.py` 頂部處理新的相容性問題。
+
+**問題 1 — torchcodec 崩潰**：torchcodec 在 Windows 上呼叫 `os.add_dll_directory('.')` 時觸發 `[WinError 87]`。
+
+**修復**：
 ```python
-import torch as _torch
-_orig_load = _torch.load
-def _safe_load(*a, **kw):
-    kw.setdefault("weights_only", False)
-    return _orig_load(*a, **kw)
-_torch.load = _safe_load
+_orig_add_dll_directory = os.add_dll_directory
+def _safe_add_dll_directory(path):
+    try:
+        return _orig_add_dll_directory(path)
+    except OSError:
+        # Return a no-op context manager
+        ...
+os.add_dll_directory = _safe_add_dll_directory
 ```
 
-**原因**：PyTorch 2.6 把 `weights_only` 預設值改為 `True`，導致 Coqui TTS 的 checkpoint（包含自訂 Python 類別）無法載入。必須在任何模組 `import torch` 之前執行這個 patch。
+**問題 2 — torchaudio 2.10+ 移除 backend 系統**：torchaudio 2.10 直接使用 torchcodec 作為唯一後端，舊的 `_backend.utils` 路徑不存在。
 
-**千萬不要移動**：這段必須是 `main.py` 的最頂部，因為之後的 `from routers import api_tts` 會間接觸發 `tts_engine.py` 的 import，進而 import PyTorch。
-
-`tts_engine.py` 也有相同的 patch，是為了讓 `tts_engine.py` 能被單獨 import（例如測試時）。
-
-### 5.2 torchaudio 後端強制 soundfile（`main.py` 第 10-17 行）
-
+**修復**：直接 patch `torchaudio.load` 改用 soundfile：
 ```python
-import torchaudio as _ta
-from torchaudio._backend import utils as _ta_utils
-from torchaudio._backend.soundfile import SoundfileBackend as _SfB
-_ta_utils.get_available_backends.cache_clear()
-_ta_utils.get_available_backends = lambda: {"soundfile": _SfB}
+import soundfile as _sf
+def _patched_ta_load(uri, ...):
+    data, sr = _sf.read(str(uri), dtype="float32", ...)
+    return torch.from_numpy(data).unsqueeze(0), sr
+torchaudio.load = _patched_ta_load
 ```
 
-**原因**：Windows 上 torchaudio 的 torchcodec 後端（新版預設）在 XTTS v2 環境下會崩潰。強制覆蓋成只用 soundfile 後端即可正常。
+**問題 3 — F5-TTS 內建 ASR 觸發 torchcodec**：F5-TTS 的 `preprocess_ref_audio_text()` 使用 transformers pipeline 自動轉錄參考音訊，pipeline 內部 `import torchcodec` 又觸發同樣的崩潰。
 
-**注意**：這個 patch 使用了 torchaudio 的私有 API（`_backend.utils`），如果 torchaudio 版本升級，路徑可能改變，需要確認。
+**修復**：`_transcribe_ref_audio()` 函式使用 faster-whisper（已安裝用於 Whisper 頁籤）自行轉錄，再將結果傳入 `ref_text` 參數。
 
-### 5.3 Windows 非 ASCII 路徑問題
+**千萬不要移動**：這些 patch 必須在 `tts_engine.py` 的最頂部（docstring 之後立即執行），因為 `main.py` import `api_tts` 時會間接觸發 `tts_engine.py` 的 import。
 
-**問題**：libsndfile（XTTS v2 底層用來讀音訊的 C 函式庫）無法開啟路徑含中文/非 ASCII 字元的檔案。
+### 5.2 Windows 非 ASCII 路徑問題
 
-**解法**（`tts_engine.py` 的 `_clone_sync()` 函式）：
+**問題**：F5-TTS 底層無法開啟路徑含中文/非 ASCII 字元的檔案。
+
+**解法**（`tts_engine.py` 的 `_f5_clone_sync()` 函式）：
 ```python
 ext = os.path.splitext(reference_audio)[1]
-tmp_fd, tmp_ref = tempfile.mkstemp(suffix=ext, prefix="tts_ref_")
+tmp_fd, tmp_ref = tempfile.mkstemp(suffix=ext, prefix="f5_ref_")
 os.close(tmp_fd)
 shutil.copy2(reference_audio, tmp_ref)  # 複製到 ASCII 路徑
 # ... 用 tmp_ref 做 TTS ...
 os.remove(tmp_ref)  # finally block 中清理
 ```
 
-### 5.4 Edge-TTS 透過子程序呼叫
+### 5.3 Edge-TTS 透過子程序呼叫
 
 Edge-TTS 的 Python API 在 Windows 上直接 `await communicate.stream()` 時，中文文字若包含全形字元有時會產生亂碼。改用 subprocess + temp file 的方式：
 
@@ -361,7 +380,7 @@ env = os.environ.copy()  # 必須繼承環境（空環境下 asyncio 在 Windows
 result = subprocess.run(cmd, capture_output=True, text=True, env=env)
 ```
 
-### 5.5 `_emit_sync` — 從工作執行緒 emit Socket.IO
+### 5.4 `_emit_sync` — 從工作執行緒 emit Socket.IO
 
 FastAPI 的 BackgroundTasks 和 `asyncio.to_thread()` 執行的函式在工作執行緒中運行，無法直接 `await sio.emit()`。正確方式：
 
@@ -509,12 +528,19 @@ def _emit_sync(event: str, data: dict) -> None:
 | GET | `/api/v1/tts/preview` | 串流預覽指定聲音 |
 | POST | `/api/v1/tts/estimate` | 估算 TTS 時長與字元速率 |
 
-#### 聲音克隆（XTTS v2）
+#### 聲音克隆（F5-TTS）
 
 | 方法 | 路徑 | 說明 |
 |------|------|------|
-| POST | `/api/v1/tts_jobs/clone` | 從參考音訊克隆聲音合成 |
-| POST | `/api/v1/tts_jobs/profile` | 使用已儲存的聲音角色合成 |
+| POST | `/api/v1/tts_jobs/clone` | 從參考音訊克隆聲音合成（F5-TTS 零樣本） |
+| GET | `/api/v1/tts/f5_status` | 檢查 F5-TTS 套件是否已安裝 |
+
+#### 台灣正音字典
+
+| 方法 | 路徑 | 說明 |
+|------|------|------|
+| GET | `/api/v1/tts/dictionary` | 讀取 taiwan_dict.json（熱更新） |
+| POST | `/api/v1/tts/dictionary` | 更新 taiwan_dict.json（不需重啟） |
 
 #### 聲音角色管理
 
@@ -525,12 +551,6 @@ def _emit_sync(event: str, data: dict) -> None:
 | DELETE | `/api/v1/voice_profiles/{id}` | 刪除聲音角色 |
 | POST | `/api/v1/voice_profiles/{id}/cache` | 將 NAS 角色快取到本機 |
 
-#### XTTS 模型管理
-
-| 方法 | 路徑 | 說明 |
-|------|------|------|
-| GET | `/api/v1/tts/xtts_status` | 檢查 XTTS v2 模型是否已下載 |
-| POST | `/api/v1/tts/xtts_download` | 觸發 XTTS v2 模型下載 |
 
 ### 7.9 Pydantic Schema 完整清單 (`core/schemas.py`)
 
@@ -636,10 +656,12 @@ class CompareSourceRequest(BaseModel):
 2. 檢查 Port 8000 是否被佔用。
 3. 如果是在遠端 IP 存取，確保同事電腦也有安裝並運行 Agent（瀏覽器會嘗試 fetch `localhost:8000`）。
 
-### Q2: 語音克隆 (XTTS) 突然無法運作
-1. 確認 `models/xtts_v2` 目錄下是否有內容。
-2. 檢查是否有顯存 (VRAM) 溢出。
-3. 檢查環境變數 `COQUI_TOS_AGREED` 是否設為 `1`。
+### Q2: 語音克隆 (F5-TTS) 無法運作
+1. 確認 `pip install f5-tts` 是否已執行。
+2. 檢查 `GET /api/v1/tts/f5_status` 回傳 `{"available":true}`。
+3. 首次執行會自動從 HuggingFace 下載模型 (~1.2GB)，需等待。
+4. CPU 推論速度很慢（約 19 分鐘/句），建議使用 CUDA GPU。
+5. 若出現 `[WinError 87]`，確認 `tts_engine.py` 頂部的 torchcodec patch 存在。
 
 ### Q3: 影片轉檔失敗 (FFmpeg Error)
 1. 檢查 `ffmpeg.exe` 是否存在於專案根目錄。
@@ -669,6 +691,10 @@ class CompareSourceRequest(BaseModel):
 
 ## 10. 未來規劃 (Roadmap)
 
+- [x] **TTS 引擎升級**：XTTS v2 (Coqui) → F5-TTS（零樣本聲音克隆）
+- [x] **台灣正音引擎**：JSON 字典驅動的文字預處理（vocab_mapping + pronunciation_hacks）
+- [x] **TTS 前端三子頁**：標準 TTS / 聲音克隆 / 正音字典編輯器
+- [x] **正音字典 API**：GET/POST `/api/v1/tts/dictionary`，支援熱更新
 - [ ] **TTS 整合完善**：接入任務佇列、Socket.IO 即時進度、完成通知、SRT 批次合成
 - [ ] **多節點分派最佳化**：目前的 `compute_hosts` 僅能手動指定，未來希望實作基於負載的主動分派
 - [ ] **行動端適配**：目前 UI 針對大螢幕優化，行動端排版仍需加強
