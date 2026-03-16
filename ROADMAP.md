@@ -10,7 +10,7 @@
 - ✅ 模組化後端：`main.py` + `core/` + `routers/`
 - ✅ 模組化前端：`frontend/tabs/` 各分頁獨立
 - ✅ OTA 熱更新 + 遠端多機派工
-- ✅ 🔊 語音合成 Tab（🚧 開發中）— Edge-TTS + XTTS v2 聲音克隆 + NAS 聲音庫
+- ✅ 🔊 語音合成 Tab（🚧 開發中）— Edge-TTS + F5-TTS 聲音克隆 + NAS 聲音庫 + 台灣正音引擎
 
 ---
 
@@ -21,9 +21,11 @@
 ### 已建置
 
 - `tts_engine.py` — Edge-TTS 標準 TTS（台灣口音，免費）
-- `tts_engine.py` — Coqui XTTS v2 聲音克隆（3~6 秒參考音訊即可克隆）
-- `routers/api_tts.py` — 12 個 API 端點（標準 TTS / 聲音克隆 / 聲音庫 CRUD / 模型管理）
-- `frontend/tabs/tts/` — 雙模式切換 UI（標準 TTS / XTTS 聲音克隆，含 NAS 聲音庫）
+- `tts_engine.py` — F5-TTS 聲音克隆（Flow Matching 零樣本克隆）
+- `routers/api_tts.py` — 9 個 API 端點（標準 TTS / F5-TTS 克隆 / 聲音庫 CRUD / 正音字典）
+- `frontend/tabs/tts/` — 三子頁 UI（📢 標準 TTS / 🎙️ 聲音克隆 / 📖 正音字典）
+- `utils/taiwan_normalizer.py` — 台灣正音引擎（vocab_mapping + pronunciation_hacks）
+- `taiwan_dict.json` — 正音字典（14 筆用語 + 10 筆發音校正）
 - NAS 聲音庫：`\\192.168.1.132\...\voice` 為主資料庫，本機為快取
 
 ### 尚需完成
@@ -197,7 +199,7 @@ tools:
 現在 (v1.5.0)
     │
     ▼ Phase H: 語音合成 (🚧 開發中)
-    │   → Edge-TTS + XTTS v2 聲音克隆 + NAS 聲音庫
+    │   → Edge-TTS + F5-TTS 聲音克隆 + 台灣正音引擎 + NAS 聲音庫
     │
     ▼ Phase A: Auth
     │   → 任何人想用都要登入
