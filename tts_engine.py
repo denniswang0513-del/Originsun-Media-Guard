@@ -125,10 +125,18 @@ def f5_tts_is_available() -> bool:
         return False
 
 
-async def run_f5_tts_clone(text: str, reference_audio: str, output_path: str) -> str:
-    """Clone voice from reference audio using F5-TTS and synthesize text."""
+async def run_f5_tts_clone(text: str, reference_audio: str, output_path: str,
+                           progress_cb=None) -> str:
+    """Clone voice from reference audio using F5-TTS and synthesize text.
+
+    Args:
+        progress_cb: Optional callback(dict) for progress updates.
+            dict keys: phase (str), pct (int 0-100), msg (str)
+    """
     loop = asyncio.get_event_loop()
-    await loop.run_in_executor(None, _f5_clone_sync, text, reference_audio, output_path)
+    await loop.run_in_executor(
+        None, _f5_clone_sync, text, reference_audio, output_path, progress_cb
+    )
     return output_path
 
 
@@ -145,7 +153,9 @@ def _transcribe_ref_audio(audio_path: str) -> str:
     """
     try:
         from faster_whisper import WhisperModel  # type: ignore
-        model = WhisperModel("tiny", device="cpu", compute_type="int8")
+        _dev = "cuda" if _torch.cuda.is_available() else "cpu"
+        _ctype = "float16" if _dev == "cuda" else "int8"
+        model = WhisperModel("tiny", device=_dev, compute_type=_ctype)
         segments, _ = model.transcribe(audio_path, language="zh")
         text = " ".join(seg.text.strip() for seg in segments)
         if text.strip():
@@ -167,11 +177,19 @@ def _transcribe_ref_audio(audio_path: str) -> str:
         return "。" * 40  # ~10 seconds worth of placeholder
 
 
-def _f5_clone_sync(text: str, reference_audio: str, output_path: str):
+def _f5_clone_sync(text: str, reference_audio: str, output_path: str,
+                   progress_cb=None):
     import shutil
     import tempfile
     import sys
     import io
+
+    def _report(phase: str, pct: int = 0, msg: str = ""):
+        if progress_cb:
+            try:
+                progress_cb({"phase": phase, "pct": pct, "msg": msg})
+            except Exception:
+                pass
 
     # Force UTF-8 stdout/stderr to prevent cp950 encoding crashes on Windows
     # F5-TTS internally prints Chinese text (ref_text, gen_text) during inference
@@ -182,6 +200,8 @@ def _f5_clone_sync(text: str, reference_audio: str, output_path: str):
     except Exception:
         pass  # If wrapping fails, proceed with original streams
 
+    _report("preparing", 5, "正在準備參考音訊...")
+
     # Workaround: copy reference to ASCII-safe temp path (same as old XTTS fix)
     tmp_ref = None
     try:
@@ -191,15 +211,26 @@ def _f5_clone_sync(text: str, reference_audio: str, output_path: str):
         shutil.copy2(reference_audio, tmp_ref)
 
         # Transcribe reference audio ourselves (avoids torchcodec crash)
+        _report("transcribing", 15, "正在轉錄參考音訊...")
         ref_text = _transcribe_ref_audio(tmp_ref)
 
+        # Load model (first time is slow: ~30-60s)
+        if _f5_instance is None:
+            _report("loading_model", 30, "正在載入 F5-TTS 模型（首次約需 30 秒）...")
+
         tts = _get_f5_tts()
+
+        device_name = "GPU" if _torch.cuda.is_available() else "CPU"
+        _report("inferring", 50, f"正在用 {device_name} 合成語音，請稍候...")
+
         tts.infer(
             ref_file=tmp_ref,
             ref_text=ref_text,
             gen_text=text,
             file_wave=output_path,
         )
+
+        _report("done", 100, "合成完成！")
     finally:
         if tmp_ref and os.path.exists(tmp_ref):
             os.remove(tmp_ref)

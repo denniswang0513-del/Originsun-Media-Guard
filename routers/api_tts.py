@@ -19,7 +19,7 @@ import uuid
 import json
 import shutil
 import subprocess
-from fastapi import APIRouter, HTTPException  # pyre-ignore[21]
+from fastapi import APIRouter, HTTPException, BackgroundTasks  # pyre-ignore[21]
 from fastapi.responses import StreamingResponse  # pyre-ignore[21]
 from pydantic import BaseModel  # pyre-ignore[21]
 import edge_tts  # pyre-ignore[21]
@@ -202,20 +202,37 @@ async def estimate_tts_duration(req: TtsEstimateRequest):
 
 # ─── Voice Clone (F5-TTS) ─────────────────────────────────
 @router.post("/tts_jobs/clone")
-async def tts_clone(req: VoiceCloneRequest):
+async def tts_clone(req: VoiceCloneRequest, background_tasks: BackgroundTasks):
     if not f5_tts_is_available():
         raise HTTPException(status_code=428, detail="F5-TTS 未安裝，請執行: pip install f5-tts")
 
     from utils.taiwan_normalizer import normalize_for_taiwan_tts  # pyre-ignore[21]
-    normalized_text = normalize_for_taiwan_tts(req.text)
+    from core.logger import _emit_sync  # pyre-ignore[21]
 
+    normalized_text = normalize_for_taiwan_tts(req.text)
     os.makedirs(req.output_dir, exist_ok=True)
     output_path = os.path.join(req.output_dir, req.output_name + ".wav")
-    try:
-        await run_f5_tts_clone(normalized_text, req.reference_audio, output_path)
-        return {"status": "done", "output": output_path}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+
+    def _on_progress(data: dict):
+        _emit_sync("tts_clone_progress", data)
+
+    async def _run_clone():
+        try:
+            await run_f5_tts_clone(
+                normalized_text, req.reference_audio, output_path,
+                progress_cb=_on_progress
+            )
+            _emit_sync("tts_clone_progress", {
+                "phase": "done", "pct": 100,
+                "msg": "合成完成！", "output": output_path
+            })
+        except Exception as e:
+            _emit_sync("tts_clone_progress", {
+                "phase": "error", "pct": 0, "msg": str(e)
+            })
+
+    background_tasks.add_task(_run_clone)
+    return {"status": "queued", "output": output_path}
 
 @router.get("/tts/f5_status")
 def f5_status():

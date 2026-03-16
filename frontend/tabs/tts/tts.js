@@ -334,7 +334,7 @@ window.saveTtsToLibrary = async function() {
 
 window.addVoiceToLibrary = function() { window.pickTtsReferenceNative(); };
 
-// ─── Clone Submit ────────────────────────────────────────
+// ─── Clone Submit (Socket.IO real-time progress) ─────────
 window.submitCloneJob = async function() {
     const text = document.getElementById('tts_clone_text_input')?.value?.trim();
     const outputDir = document.getElementById('tts_clone_output_dir')?.value?.trim();
@@ -345,15 +345,86 @@ window.submitCloneJob = async function() {
 
     let refAudio = _ttsRefAudioPath;
     if (!refAudio && _selectedProfileId) {
-        // Use profile's cached reference audio — backend /tts_jobs/profile would handle this,
-        // but for F5-TTS we need the actual file path. We'll pass the profile_id and let backend resolve.
-        // For now, alert user to use a direct reference audio or cache the profile first.
         alert('請先將選取的 NAS 角色「快取至本機」，然後使用臨時克隆區選取本機快取的音檔。');
         return;
     }
 
-    const payload = { text, reference_audio: refAudio, output_dir: outputDir, output_name: outputName };
-    await _runWithProgress('tts_clone', getAgentBaseUrl() + '/api/v1/tts_jobs/clone', payload, 'btn_start_clone');
+    const btn = document.getElementById('btn_start_clone');
+    const progArea = document.getElementById('tts_clone_progress_area');
+    const progLabel = document.getElementById('tts_clone_prog_label');
+    const progBar = document.getElementById('tts_clone_prog_bar');
+    const progPct = document.getElementById('tts_clone_prog_pct');
+
+    // Show progress area + disable button
+    if (progArea) progArea.classList.remove('hidden');
+    if (progLabel) progLabel.textContent = '準備中...';
+    if (progBar) { progBar.style.width = '2%'; progBar.style.background = 'linear-gradient(90deg, #8b5cf6, #a78bfa)'; progBar.classList.add('animate-pulse'); }
+    if (progPct) progPct.textContent = '2%';
+    if (btn) { btn.disabled = true; btn.classList.add('opacity-50', 'cursor-not-allowed'); }
+
+    // Listen for Socket.IO progress events from backend
+    const socket = window._socket || io();
+    const _phaseLabels = {
+        preparing: '🔧 正在準備參考音訊...',
+        transcribing: '🎤 正在轉錄參考音訊...',
+        loading_model: '📦 正在載入 F5-TTS 模型（首次約需 30 秒）...',
+        inferring: '🧠 正在合成語音，請耐心等候...',
+        done: '✅ 合成完成！',
+        error: '❌ 合成失敗'
+    };
+
+    function _onCloneProgress(data) {
+        const pct = data.pct || 0;
+        const label = _phaseLabels[data.phase] || data.msg || '處理中...';
+        if (progBar) progBar.style.width = pct + '%';
+        if (progPct) progPct.textContent = pct + '%';
+        if (progLabel) progLabel.textContent = label;
+
+        if (data.phase === 'inferring') {
+            // Pulsing animation during inference (the long wait)
+            if (progBar) progBar.classList.add('animate-pulse');
+        }
+
+        if (data.phase === 'done') {
+            socket.off('tts_clone_progress', _onCloneProgress);
+            if (progBar) { progBar.style.width = '100%'; progBar.style.background = 'linear-gradient(90deg, #059669, #10b981)'; progBar.classList.remove('animate-pulse'); }
+            if (progPct) progPct.textContent = '100%';
+            const outName = data.output ? data.output.split(/[\\/]/).pop() : '';
+            if (progLabel) progLabel.innerHTML = `✅ 完成！儲存至: <span class="text-green-400 font-mono">${outName}</span>`;
+            if (btn) { btn.disabled = false; btn.classList.remove('opacity-50', 'cursor-not-allowed'); }
+        } else if (data.phase === 'error') {
+            socket.off('tts_clone_progress', _onCloneProgress);
+            if (progBar) { progBar.style.width = '100%'; progBar.style.background = 'linear-gradient(90deg, #ef4444, #f87171)'; progBar.classList.remove('animate-pulse'); }
+            if (progPct) progPct.textContent = 'Err';
+            if (progLabel) progLabel.textContent = `❌ 失敗：${data.msg || '未知錯誤'}`;
+            if (btn) { btn.disabled = false; btn.classList.remove('opacity-50', 'cursor-not-allowed'); }
+        }
+    }
+
+    socket.on('tts_clone_progress', _onCloneProgress);
+
+    // POST (returns immediately with "queued" status)
+    try {
+        const payload = { text, reference_audio: refAudio, output_dir: outputDir, output_name: outputName };
+        const res = await fetch(getAgentBaseUrl() + '/api/v1/tts_jobs/clone', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload)
+        });
+        if (!res.ok) {
+            const errData = await res.json().catch(() => ({}));
+            socket.off('tts_clone_progress', _onCloneProgress);
+            if (progBar) { progBar.style.width = '100%'; progBar.style.background = 'linear-gradient(90deg, #ef4444, #f87171)'; progBar.classList.remove('animate-pulse'); }
+            if (progPct) progPct.textContent = 'Err';
+            if (progLabel) progLabel.textContent = `❌ 失敗：${errData.detail || res.statusText}`;
+            if (btn) { btn.disabled = false; btn.classList.remove('opacity-50', 'cursor-not-allowed'); }
+        }
+    } catch(e) {
+        socket.off('tts_clone_progress', _onCloneProgress);
+        if (progBar) { progBar.style.width = '100%'; progBar.style.background = 'linear-gradient(90deg, #ef4444, #f87171)'; progBar.classList.remove('animate-pulse'); }
+        if (progPct) progPct.textContent = 'Err';
+        if (progLabel) progLabel.textContent = `❌ 網路錯誤：${e.message}`;
+        if (btn) { btn.disabled = false; btn.classList.remove('opacity-50', 'cursor-not-allowed'); }
+    }
 };
 
 // ═══════════════════════════════════════════════════════════

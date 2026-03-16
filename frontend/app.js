@@ -165,6 +165,7 @@ window.onerror = function(msg, url, lineNo, columnNo, error) {
                 autoConnect: true,
                 reconnection: true
             });
+            window._socket = socket;  // Expose for TTS tab and other modules
 
             socket.on('connect', () => {
                 appendLog('已連線至伺服器 WebSocket', 'system');
