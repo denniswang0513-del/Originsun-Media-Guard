@@ -170,6 +170,17 @@ def _transcribe_ref_audio(audio_path: str) -> str:
 def _f5_clone_sync(text: str, reference_audio: str, output_path: str):
     import shutil
     import tempfile
+    import sys
+    import io
+
+    # Force UTF-8 stdout/stderr to prevent cp950 encoding crashes on Windows
+    # F5-TTS internally prints Chinese text (ref_text, gen_text) during inference
+    old_stdout, old_stderr = sys.stdout, sys.stderr
+    try:
+        sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="replace", line_buffering=True)
+        sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding="utf-8", errors="replace", line_buffering=True)
+    except Exception:
+        pass  # If wrapping fails, proceed with original streams
 
     # Workaround: copy reference to ASCII-safe temp path (same as old XTTS fix)
     tmp_ref = None
@@ -192,3 +203,8 @@ def _f5_clone_sync(text: str, reference_audio: str, output_path: str):
     finally:
         if tmp_ref and os.path.exists(tmp_ref):
             os.remove(tmp_ref)
+        # Restore original stdout/stderr
+        try:
+            sys.stdout, sys.stderr = old_stdout, old_stderr
+        except Exception:
+            pass
