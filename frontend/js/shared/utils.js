@@ -135,15 +135,21 @@ export function addStandaloneSource(listId, defaultPath = '') {
     if (!container) return;
     const row = document.createElement('div');
     row.className = 'flex gap-2 items-center';
+    const inputId = 'standalone_src_' + Date.now() + '_' + Math.random().toString(36).slice(2, 6);
     row.innerHTML = `
-        <input type="text" class="flex-1 bg-[#2a2a2a] border border-[#555] rounded px-2 py-1 text-sm focus:border-blue-500" value="${defaultPath}" placeholder="檔案絕對路徑...">
+        <input type="text" id="${inputId}" class="flex-1 bg-[#2a2a2a] border border-[#555] rounded px-2 py-1 text-sm focus:border-blue-500" value="${defaultPath}" placeholder="檔案絕對路徑...">
+        <button type="button" class="btn-pick-file text-gray-400 hover:text-white bg-[#333] hover:bg-[#444] border border-[#555] px-2 py-1 rounded text-sm" title="選擇檔案">📁</button>
         <button type="button" class="btn-remove-row text-red-400 hover:text-red-300 font-bold px-2 rounded">X</button>
     `;
     container.appendChild(row);
 
+    row.querySelector('.btn-pick-file').addEventListener('click', function() {
+        pickPath(inputId, 'file');
+    });
     row.querySelector('.btn-remove-row').addEventListener('click', function() {
         row.remove();
     });
+    return inputId;
 }
 window.addStandaloneSource = addStandaloneSource;
 

@@ -18,7 +18,7 @@ export async function fetchModelStatus() {
 
 export async function pickMultiFiles() {
     try {
-        const res = await fetch(getAgentBaseUrl() + '/api/v1/utils/pick?type=file');
+        const res = await fetch(getAgentBaseUrl() + '/api/v1/utils/pick_file');
         const data = await res.json();
         if (data.path) {
             let paths = Array.isArray(data.path) ? data.path : [data.path];
@@ -195,8 +195,35 @@ export function initTranscribeTab() {
     setupInputDrop('transcribe_dest');
 }
 
+export async function pickTranscribeFolder() {
+    try {
+        const res = await fetch(getAgentBaseUrl() + '/api/v1/utils/pick_folder');
+        const data = await res.json();
+        if (data.path) {
+            // List video files from the selected folder
+            const listRes = await fetch(getAgentBaseUrl() + '/api/v1/list_dir', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ path: data.path })
+            });
+            const listData = await listRes.json();
+            if (listData.files && listData.files.length > 0) {
+                listData.files.forEach(f => {
+                    addStandaloneSource('transcribe_file_list', f);
+                });
+                appendLog(`📂 已載入 ${listData.files.length} 個影音檔案`, 'system');
+            } else {
+                appendLog('⚠️ 資料夾中沒有找到影音檔案', 'info');
+            }
+        }
+    } catch (err) {
+        console.error("無法開啟資料夾選取視窗", err);
+    }
+}
+
 window.fetchModelStatus = fetchModelStatus;
 window.pickMultiFiles = pickMultiFiles;
+window.pickTranscribeFolder = pickTranscribeFolder;
 window.updateModelStatus = updateModelStatus;
 window.downloadSelectedModel = downloadSelectedModel;
 window.setTranscribeMode = setTranscribeMode;

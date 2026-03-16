@@ -6,12 +6,17 @@ import shutil
 TARGET_ZIP = "Originsun_Agent.zip"
 FILES_TO_PACK = [
     "main.py",
+    "server.py",
     "config.py",
+    "core_engine.py",
+    "tts_engine.py",
     "report_generator.py",
     "notifier.py",
     "drive_sync.py",
     "transcriber.py",
     "download_model.py",
+    "taiwan_dict.json",
+    "version.json",
     "update_agent.bat",
     "start_hidden.vbs",
     "logo.ico",
@@ -25,6 +30,7 @@ DIRS_TO_PACK = [
     "python_embed",
     "core",
     "routers",
+    "utils",
 ]
 
 def create_agent_zip():

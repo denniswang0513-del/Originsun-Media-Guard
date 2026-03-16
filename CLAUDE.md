@@ -1,6 +1,6 @@
 # Originsun Media Guard Pro — Claude Code 完整交接文件
 
-> **版本**: v1.5.0（2026-03-16）
+> **版本**: v1.6.0（2026-03-16）
 > **目標讀者**: 接手開發的 AI 協作者（Claude Code）
 > **開發環境**: Windows 11、Python 3.11、Vanilla JS (ES Modules)
 > **啟動方式**: `d:\Antigravity\OriginsunTranscode\.venv\Scripts\python.exe main.py`
@@ -15,7 +15,7 @@
 2. 備份同時可選擇性觸發**轉檔**（Proxy）、**串接**（Reel）、**視覺報表**
 3. 剪輯師用**比對驗證**確認素材完整性
 4. **語音辨識（Whisper）** 可將影片音軌轉為逐字稿（SRT/TXT）
-5. **TTS** 功能（🚧 開發中）可用 Edge-TTS 合成語音，或用 F5-TTS 進行零樣本聲音克隆
+5. **TTS** 功能可用 Edge-TTS 生成語音，或用 F5-TTS 進行零樣本聲音複製
 6. **台灣正音引擎** 可將大陸用語自動轉為台灣用語 + 發音校正（熱更新 JSON 字典）
 
 系統分為**主控端（伺服器）**和**代理端（同事電腦）**：
@@ -74,13 +74,16 @@ OriginsunTranscode/
 │                            #   - 支援 individual_mode（每個影片單獨一個檔）或合併模式
 │                            #   - 支援 generate_proxy（順帶轉 Proxy 檔）
 │
-├── tts_engine.py            # TTS 引擎（🚧 開發中，支援 Edge-TTS + F5-TTS）
+├── tts_engine.py            # TTS 引擎（支援 Edge-TTS + F5-TTS）
 │                            #   - 頂部有 torchcodec/torchaudio Windows 修補（見第 5 節）
 │                            #   - run_edge_tts()：async，透過 subprocess 呼叫 edge-tts CLI
-│                            #   - run_f5_tts_clone()：async，使用 F5-TTS 進行零樣本聲音克隆
+│                            #   - run_f5_tts_clone()：async，使用 F5-TTS 進行零樣本聲音複製
 │                            #   - f5_tts_is_available()：檢查 f5-tts 套件是否已安裝
 │                            #   - _get_f5_tts()：lazy-load F5-TTS 模型（全局快取 _f5_instance）
 │                            #   - _transcribe_ref_audio()：用 faster-whisper 轉錄參考音訊
+│                            #   - _prepare_gen_text()：生成文字前處理（數字轉中文、句邊界注入、句末標點）
+│                            #   - _pad_text_for_inference()：偵測短尾塊並補齊虛擬文字避免截斷
+│                            #   - _convert_numbers_in_text()：阿拉伯數字→中文讀法（百分比、年份、序數等）
 │                            #   - F5_MODEL_DIR = ./models/f5_tts
 │
 ├── taiwan_dict.json         # 台灣正音字典（熱更新，不需重啟）
@@ -173,7 +176,7 @@ OriginsunTranscode/
 │   ├── api_report.py        # 報表端點（見 7.5）
 │   ├── api_transcribe.py    # 語音辨識端點（見 7.6）
 │   ├── api_system.py        # 系統工具端點（見 7.7）
-│   └── api_tts.py           # TTS 端點（🚧 開發中，見 7.8）
+│   └── api_tts.py           # TTS 端點（見 7.8）
 │
 │  ── 【frontend/ — 靜態前端（SPA）】
 ├── frontend/
@@ -210,9 +213,9 @@ OriginsunTranscode/
 │       ├── concat/          # 影片串接頁籤
 │       ├── report/          # 視覺報表頁籤
 │       ├── transcribe/      # Whisper 語音辨識頁籤
-│       └── tts/             # TTS 頁籤（🚧 開發中，含 3 個子頁）
+│       └── tts/             # TTS 頁籤（含 3 個子頁）
 │                            #   子頁 1：📢 標準 TTS（Edge-TTS）
-│                            #   子頁 2：🎙️ 聲音克隆（F5-TTS）
+│                            #   子頁 2：🎙️ 聲音複製（F5-TTS）
 │                            #   子頁 3：📖 正音字典編輯器
 │
 │  ── 【模型與資料目錄】
@@ -253,7 +256,7 @@ OriginsunTranscode/
 │   ├── POST /api/v1/jobs/verify       → VerifyRequest    → task_queue
 │   ├── POST /api/v1/jobs/transcribe   → TranscribeRequest → task_queue
 │   ├── POST /api/v1/report_jobs       → 直接 asyncio.create_task()（不走 queue）
-│   └── POST /api/v1/tts_jobs          → 直接執行（🚧 尚未接入 queue）
+│   └── POST /api/v1/tts_jobs          → 直接執行（尚未接入 queue）
 │
 └── Socket.IO (python-socketio AsyncServer)
     ├── 瀏覽器 → 伺服器
@@ -515,7 +518,7 @@ def _emit_sync(event: str, data: dict) -> None:
 | GET | `/download_agent` | 下載 Originsun_Agent.zip |
 | GET | `/download_installer` | 下載安裝精靈 .bat |
 
-### 7.8 TTS 語音合成（🚧 開發中，`routers/api_tts.py`）
+### 7.8 TTS 語音生成（`routers/api_tts.py`）
 
 **現況**：後端 API 和前端 UI 均已完成，但尚未接入任務佇列、Socket.IO 即時進度、完成通知。
 
@@ -528,7 +531,7 @@ def _emit_sync(event: str, data: dict) -> None:
 | GET | `/api/v1/tts/preview` | 串流預覽指定聲音 |
 | POST | `/api/v1/tts/estimate` | 估算 TTS 時長與字元速率 |
 
-#### 聲音克隆（F5-TTS）
+#### 聲音複製（F5-TTS）
 
 | 方法 | 路徑 | 說明 |
 |------|------|------|
@@ -691,9 +694,9 @@ class CompareSourceRequest(BaseModel):
 
 ## 10. 未來規劃 (Roadmap)
 
-- [x] **TTS 引擎升級**：XTTS v2 (Coqui) → F5-TTS（零樣本聲音克隆）
+- [x] **TTS 引擎升級**：XTTS v2 (Coqui) → F5-TTS（零樣本聲音複製）
 - [x] **台灣正音引擎**：JSON 字典驅動的文字預處理（vocab_mapping + pronunciation_hacks）
-- [x] **TTS 前端三子頁**：標準 TTS / 聲音克隆 / 正音字典編輯器
+- [x] **TTS 前端三子頁**：標準 TTS / 聲音複製 / 正音字典編輯器
 - [x] **正音字典 API**：GET/POST `/api/v1/tts/dictionary`，支援熱更新
 - [ ] **TTS 整合完善**：接入任務佇列、Socket.IO 即時進度、完成通知、SRT 批次合成
 - [ ] **多節點分派最佳化**：目前的 `compute_hosts` 僅能手動指定，未來希望實作基於負載的主動分派

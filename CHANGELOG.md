@@ -4,6 +4,57 @@
 
 ---
 
+## [1.6.0] - 2026-03-16
+
+### TTS 功能完善與正式上線
+
+**新增**
+
+- `tts_engine.py` — 智能文字前處理管線 `_prepare_gen_text()`
+  - `_convert_numbers_in_text()`：阿拉伯數字轉中文讀法（百分比、年份、序數、長數字逐位讀）
+  - `_num_to_zh()`：非負整數轉中文數字（支援萬/億位）
+  - 句邊界注入：CJK 標點後自動加空格，幫助 F5-TTS 正確分塊
+  - 句末標點保證：無標點時自動補句號
+- `tts_engine.py` — 智能文字補齊 `_pad_text_for_inference()`
+  - 偵測 F5-TTS 分塊後最後一塊是否過短（< 15 bytes）
+  - 若過短則補充「…」虛擬文字，推論後自動修剪對應音訊
+  - 解決聲音複製末端截斷問題
+- `frontend/tabs/transcribe/` — 新增「📂 選擇資料夾」按鈕
+  - 自動列出資料夾內所有影音檔案並加入來源清單
+
+**修改**
+
+- UI 用語統一：「克隆」→「複製」、「合成」→「生成」（前端 + 後端全面替換）
+- 移除所有「🚧 開發中」標記：
+  - `frontend/index.html` — TTS 頁籤按鈕的 amber 徽章與特殊配色
+  - `frontend/tabs/tts/tts.html` — 頂部橘色警告橫幅
+  - `frontend/app.js` — `switchTab()` 中 TTS 頁籤的 amber 特殊樣式邏輯
+- `CLAUDE.md` — 同步更新版本號、目錄結構、用語（v1.5.0 → v1.6.0）
+
+**技術備註**
+
+- F5-TTS 的 `chunk_text()` 會將文字分塊，最後一塊若 < 10 bytes 會觸發 `local_speed=0.3` 覆寫，導致時長計算錯誤與音訊截斷。`_pad_text_for_inference()` 透過補齊虛擬文字避開此邊界條件。
+- 阿拉伯數字對 F5-TTS 屬 OOD（訓練集外分佈），直接輸入會被跳過或亂讀。`_convert_numbers_in_text()` 在推論前將所有數字轉為中文讀法。
+- 推論後修剪使用 byte 比例估算虛擬文字對應的音訊長度，`prepared_bytes` 在補齊前記錄，確保只修剪真正的虛擬文字音訊。
+
+**影響範圍**
+
+| 檔案 | 動作 |
+|------|------|
+| `tts_engine.py` | 修改（+300 行前處理邏輯） |
+| `routers/api_tts.py` | 修改（用語：合成→生成） |
+| `frontend/index.html` | 修改（移除開發中標記） |
+| `frontend/app.js` | 修改（移除 TTS amber 特殊樣式） |
+| `frontend/tabs/tts/tts.html` | 修改（移除警告橫幅、用語統一） |
+| `frontend/tabs/tts/tts.js` | 修改（用語：克隆→複製、合成→生成） |
+| `frontend/tabs/transcribe/transcribe.html` | 修改（新增資料夾按鈕） |
+| `frontend/tabs/transcribe/transcribe.js` | 修改（新增 pickTranscribeFolder） |
+| `version.json` | 修改（v1.6.0） |
+| `CLAUDE.md` | 修改（版本號 + 內容同步） |
+| `ROADMAP.md` | 修改（更新 Phase H 狀態） |
+
+---
+
 ## 2026-03-16
 
 ### TTS 系統升級：XTTS v2 → F5-TTS + 台灣正音引擎

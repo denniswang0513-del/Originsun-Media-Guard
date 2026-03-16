@@ -11,6 +11,40 @@ export async function initTtsTab() {
     setupTtsDropzone();
     await loadTtsVoices();
     await checkF5Status();
+
+    // Listen for F5 model download progress
+    const socket = window._socket || (window.io && window.io());
+    if (socket) {
+        socket.on('f5_model_download', (data) => {
+            const el = document.getElementById('f5_status_text');
+            const btn = document.getElementById('btn_f5_download');
+            if (data.phase === 'done') {
+                if (el) el.innerHTML = '<span class="text-green-400">模型下載完成！</span>';
+                if (btn) btn.classList.add('hidden');
+                checkF5Status();
+            } else if (data.phase === 'error') {
+                if (el) el.innerHTML = `<span class="text-red-400">${data.msg}</span>`;
+                if (btn) { btn.disabled = false; btn.textContent = '⬇️ 下載模型'; btn.classList.remove('hidden'); }
+            } else {
+                if (el) el.innerHTML = `<span class="text-yellow-400">${data.msg || '下載中...'}</span>`;
+            }
+        });
+        socket.on('f5_pip_install', (data) => {
+            const el = document.getElementById('f5_status_text');
+            const btn = document.getElementById('btn_f5_install');
+            if (data.phase === 'done') {
+                if (el) el.innerHTML = `<span class="text-green-400">${data.msg}</span>`;
+                if (btn) btn.classList.add('hidden');
+                checkF5Status();
+            } else if (data.phase === 'error') {
+                if (el) el.innerHTML = `<span class="text-red-400">${data.msg}</span>`;
+                if (btn) { btn.disabled = false; btn.textContent = '📦 安裝套件'; }
+            } else {
+                if (el) el.innerHTML = `<span class="text-yellow-400">${data.msg || '安裝中...'}</span>`;
+            }
+        });
+    }
+
     await loadVoiceLibrary();
     await loadDictionary();
 
@@ -178,7 +212,7 @@ window.calculateTtsDuration = async function() {
     const durSpan = document.getElementById('tts_est_duration');
     const rateSpan = document.getElementById('tts_est_rate');
     const text = textInput ? textInput.value.trim() : '';
-    if (!text) { alert('請先輸入你要合成的文字！'); return; }
+    if (!text) { alert('請先輸入你要生成的文字！'); return; }
     const voice = document.getElementById('tts_voice')?.value || 'zh-TW-HsiaoChenNeural';
     const rateUrl = document.getElementById('tts_rate')?.value || '0';
     const pitchUrl = document.getElementById('tts_pitch')?.value || '0';
@@ -204,7 +238,7 @@ window.submitTtsJob = async function() {
     const text = document.getElementById('tts_text_input')?.value?.trim();
     const outputDir = document.getElementById('tts_output_dir')?.value?.trim();
     const outputName = document.getElementById('tts_output_name')?.value?.trim() || 'tts_output';
-    if (!text) { alert('請輸入要合成的文字'); return; }
+    if (!text) { alert('請輸入要生成的文字'); return; }
     if (!outputDir) { alert('請選擇輸出目錄'); return; }
 
     const payload = {
@@ -226,13 +260,108 @@ async function checkF5Status() {
         const res = await fetch(getAgentBaseUrl() + '/api/v1/tts/f5_status');
         const data = await res.json();
         const el = document.getElementById('f5_status_text');
-        if (data.available) {
-            if (el) el.innerHTML = '<span class="text-green-400">F5-TTS 已就緒</span>';
+        const banner = document.getElementById('f5_status_banner');
+        const pkgOk = data.available;
+        const modelLocal = data.model_ready;
+        const modelCached = data.model_cached;
+
+        // Ensure action buttons exist
+        let btn = document.getElementById('btn_f5_download');
+        if (!btn && banner) {
+            btn = document.createElement('button');
+            btn.id = 'btn_f5_download';
+            btn.className = 'hidden bg-orange-600 hover:bg-orange-500 text-white text-xs px-3 py-1 rounded';
+            btn.onclick = () => window.downloadF5Model();
+            banner.appendChild(btn);
+        }
+        let installBtn = document.getElementById('btn_f5_install');
+        if (!installBtn && banner) {
+            installBtn = document.createElement('button');
+            installBtn.id = 'btn_f5_install';
+            installBtn.className = 'hidden bg-blue-600 hover:bg-blue-500 text-white text-xs px-3 py-1 rounded ml-2';
+            installBtn.textContent = '📦 安裝套件';
+            installBtn.onclick = () => window.installF5Package();
+            banner.appendChild(installBtn);
+        }
+
+        // Determine banner state
+        if (modelLocal && pkgOk) {
+            // Fully ready — subtle inline text, no background
+            if (el) el.innerHTML = '<span class="text-gray-600">● F5-TTS 已就緒</span>';
+            if (btn) btn.classList.add('hidden');
+            if (installBtn) installBtn.classList.add('hidden');
+            if (banner) {
+                banner.className = 'flex items-center justify-between text-xs mb-3 px-1';
+            }
         } else {
-            if (el) el.innerHTML = '<span class="text-red-400">F5-TTS 未安裝 — 請執行 pip install f5-tts</span>';
+            // Something missing — show prominent banner with action buttons
+            const msgs = [];
+            if (!pkgOk) msgs.push('套件未安裝');
+            if (!modelLocal && modelCached) msgs.push('模型存在於快取，需複製到 models 資料夾');
+            else if (!modelLocal) msgs.push('模型尚未下載（約 1.2 GB）');
+
+            if (el) el.innerHTML = `<span class="text-orange-400">${msgs.join(' ｜ ')}</span>`;
+
+            // Show install button if package missing
+            if (!pkgOk) {
+                if (installBtn) installBtn.classList.remove('hidden');
+            } else {
+                if (installBtn) installBtn.classList.add('hidden');
+            }
+
+            // Show download/copy button if model not in local
+            if (!modelLocal) {
+                if (btn) {
+                    btn.classList.remove('hidden');
+                    btn.textContent = modelCached ? '📂 複製到 models' : '⬇️ 下載模型';
+                }
+            } else {
+                if (btn) btn.classList.add('hidden');
+            }
+            if (banner) {
+                banner.className = 'bg-[#1a2a3a] border border-orange-600 rounded-lg px-4 py-3 flex items-center justify-between text-sm mb-3';
+            }
         }
     } catch { const el = document.getElementById('f5_status_text'); if (el) el.textContent = '無法取得 F5-TTS 狀態'; }
 }
+
+async function downloadF5Model() {
+    const btn = document.getElementById('btn_f5_download');
+    const el = document.getElementById('f5_status_text');
+    if (btn) { btn.disabled = true; btn.textContent = '下載中...'; }
+    if (el) el.innerHTML = '<span class="text-yellow-400">正在下載 F5-TTS 模型，請稍候...</span>';
+    try {
+        const res = await fetch(getAgentBaseUrl() + '/api/v1/tts/f5_download', { method: 'POST' });
+        if (!res.ok) {
+            const err = await res.json();
+            if (el) el.innerHTML = `<span class="text-red-400">下載失敗: ${err.detail || '未知錯誤'}</span>`;
+            if (btn) { btn.disabled = false; btn.textContent = '⬇️ 下載模型'; }
+        }
+    } catch (e) {
+        if (el) el.innerHTML = `<span class="text-red-400">下載請求失敗: ${e.message}</span>`;
+        if (btn) { btn.disabled = false; btn.textContent = '⬇️ 下載模型'; }
+    }
+}
+window.downloadF5Model = downloadF5Model;
+
+async function installF5Package() {
+    const btn = document.getElementById('btn_f5_install');
+    const el = document.getElementById('f5_status_text');
+    if (btn) { btn.disabled = true; btn.textContent = '安裝中...'; }
+    if (el) el.innerHTML = '<span class="text-yellow-400">正在安裝 f5-tts 套件，這可能需要幾分鐘...</span>';
+    try {
+        const res = await fetch(getAgentBaseUrl() + '/api/v1/tts/f5_install', { method: 'POST' });
+        if (!res.ok) {
+            const err = await res.json();
+            if (el) el.innerHTML = `<span class="text-red-400">安裝失敗: ${err.detail || '未知錯誤'}</span>`;
+            if (btn) { btn.disabled = false; btn.textContent = '📦 安裝套件'; }
+        }
+    } catch (e) {
+        if (el) el.innerHTML = `<span class="text-red-400">安裝請求失敗: ${e.message}</span>`;
+        if (btn) { btn.disabled = false; btn.textContent = '📦 安裝套件'; }
+    }
+}
+window.installF5Package = installF5Package;
 
 // ─── Reference Audio ─────────────────────────────────────
 async function setupTtsDropzone() {
@@ -339,13 +468,13 @@ window.submitCloneJob = async function() {
     const text = document.getElementById('tts_clone_text_input')?.value?.trim();
     const outputDir = document.getElementById('tts_clone_output_dir')?.value?.trim();
     const outputName = document.getElementById('tts_clone_output_name')?.value?.trim() || 'clone_output';
-    if (!text) { alert('請輸入要合成的文字'); return; }
+    if (!text) { alert('請輸入要生成的文字'); return; }
     if (!outputDir) { alert('請選擇輸出目錄'); return; }
     if (!_ttsRefAudioPath && !_selectedProfileId) { alert('請先選擇參考音訊或 NAS 聲音角色'); return; }
 
     let refAudio = _ttsRefAudioPath;
     if (!refAudio && _selectedProfileId) {
-        alert('請先將選取的 NAS 角色「快取至本機」，然後使用臨時克隆區選取本機快取的音檔。');
+        alert('請先將選取的 NAS 角色「快取至本機」，然後使用臨時複製區選取本機快取的音檔。');
         return;
     }
 
@@ -368,9 +497,10 @@ window.submitCloneJob = async function() {
         preparing: '🔧 正在準備參考音訊...',
         transcribing: '🎤 正在轉錄參考音訊...',
         loading_model: '📦 正在載入 F5-TTS 模型（首次約需 30 秒）...',
-        inferring: '🧠 正在合成語音，請耐心等候...',
-        done: '✅ 合成完成！',
-        error: '❌ 合成失敗'
+        inferring: '🧠 正在生成語音，請耐心等候...',
+        pitch_shift: '🎵 正在調整音高...',
+        done: '✅ 生成完成！',
+        error: '❌ 生成失敗'
     };
 
     function _onCloneProgress(data) {
@@ -405,7 +535,12 @@ window.submitCloneJob = async function() {
 
     // POST (returns immediately with "queued" status)
     try {
-        const payload = { text, reference_audio: refAudio, output_dir: outputDir, output_name: outputName };
+        // Convert rate% (-50~+50) to F5-TTS speed multiplier (0.5~1.5)
+        const rateVal = parseInt(document.getElementById('tts_clone_speed')?.value || '0', 10);
+        const speed = 1.0 + rateVal / 100.0;
+        const pitch = parseInt(document.getElementById('tts_clone_pitch')?.value || '0', 10);
+        const refText = document.getElementById('tts_clone_ref_text')?.value?.trim() || null;
+        const payload = { text, reference_audio: refAudio, output_dir: outputDir, output_name: outputName, speed, pitch, ref_text: refText };
         const res = await fetch(getAgentBaseUrl() + '/api/v1/tts_jobs/clone', {
             method: 'POST', headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(payload)

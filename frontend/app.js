@@ -28,11 +28,12 @@ window.onerror = function(msg, url, lineNo, columnNo, error) {
             try {
                 // Load Backup Tab
                 const tabMain = document.getElementById('tab_main');
-                const backupRes = await fetch('./tabs/backup/backup.html');
+                const _cb = `?t=${Date.now()}`;
+                const backupRes = await fetch(`./tabs/backup/backup.html${_cb}`);
                 if (backupRes.ok) {
                     tabMain.innerHTML = await backupRes.text();
                     // dynamically import module to avoid breaking global app.js scope
-                    const backupModule = await import('./tabs/backup/backup.js');
+                    const backupModule = await import(`./tabs/backup/backup.js${_cb}`);
                     backupModule.initBackupTab();
                 } else {
                     console.error("Failed to load Backup tab HTML:", backupRes.statusText);
@@ -40,10 +41,10 @@ window.onerror = function(msg, url, lineNo, columnNo, error) {
 
                 // Load Verify Tab
                 const tabVerify = document.getElementById('tab_verify');
-                const verifyRes = await fetch('./tabs/verify/verify.html');
+                const verifyRes = await fetch(`./tabs/verify/verify.html${_cb}`);
                 if (verifyRes.ok) {
                     tabVerify.innerHTML = await verifyRes.text();
-                    const verifyModule = await import('./tabs/verify/verify.js');
+                    const verifyModule = await import(`./tabs/verify/verify.js${_cb}`);
                     verifyModule.initVerifyTab();
                 } else {
                     console.error("Failed to load Verify tab HTML:", verifyRes.statusText);
@@ -51,10 +52,10 @@ window.onerror = function(msg, url, lineNo, columnNo, error) {
 
                 // Load Transcode Tab
                 const tabTranscode = document.getElementById('tab_transcode');
-                const transcodeRes = await fetch('./tabs/transcode/transcode.html');
+                const transcodeRes = await fetch(`./tabs/transcode/transcode.html${_cb}`);
                 if (transcodeRes.ok) {
                     tabTranscode.innerHTML = await transcodeRes.text();
-                    const tcModule = await import('./tabs/transcode/transcode.js');
+                    const tcModule = await import(`./tabs/transcode/transcode.js${_cb}`);
                     tcModule.initTranscodeTab();
                 } else {
                     console.error("Failed to load Transcode tab HTML:", transcodeRes.statusText);
@@ -62,10 +63,10 @@ window.onerror = function(msg, url, lineNo, columnNo, error) {
 
                 // Load Concat Tab
                 const tabConcat = document.getElementById('tab_concat');
-                const concatRes = await fetch('./tabs/concat/concat.html');
+                const concatRes = await fetch(`./tabs/concat/concat.html${_cb}`);
                 if (concatRes.ok) {
                     tabConcat.innerHTML = await concatRes.text();
-                    const ccModule = await import('./tabs/concat/concat.js');
+                    const ccModule = await import(`./tabs/concat/concat.js${_cb}`);
                     ccModule.initConcatTab();
                 } else {
                     console.error("Failed to load Concat tab HTML:", concatRes.statusText);
@@ -73,10 +74,10 @@ window.onerror = function(msg, url, lineNo, columnNo, error) {
 
                 // Load Report Tab
                 const tabReport = document.getElementById('tab_report');
-                const reportRes = await fetch('./tabs/report/report.html');
+                const reportRes = await fetch(`./tabs/report/report.html${_cb}`);
                 if (reportRes.ok) {
                     tabReport.innerHTML = await reportRes.text();
-                    const reportModule = await import('./tabs/report/report.js');
+                    const reportModule = await import(`./tabs/report/report.js${_cb}`);
                     reportModule.initReportTab();
                 } else {
                     console.error("Failed to load Report tab HTML:", reportRes.statusText);
@@ -84,10 +85,10 @@ window.onerror = function(msg, url, lineNo, columnNo, error) {
 
                 // Load Transcribe Tab
                 const tabTranscribe = document.getElementById('tab_transcribe');
-                const transcribeRes = await fetch('./tabs/transcribe/transcribe.html');
+                const transcribeRes = await fetch(`./tabs/transcribe/transcribe.html${_cb}`);
                 if (transcribeRes.ok) {
                     tabTranscribe.innerHTML = await transcribeRes.text();
-                    const tsModule = await import('./tabs/transcribe/transcribe.js');
+                    const tsModule = await import(`./tabs/transcribe/transcribe.js${_cb}`);
                     tsModule.initTranscribeTab();
                 } else {
                     console.error("Failed to load Transcribe tab HTML:", transcribeRes.statusText);
@@ -916,12 +917,7 @@ window.onerror = function(msg, url, lineNo, columnNo, error) {
                 const el = document.getElementById(btn);
                 if (el) {
                     el.classList.remove('bg-[#2a2a2a]', 'text-blue-400', 'text-amber-300', 'border', 'border-b-0', 'border-[#3a3a3a]');
-                    if (btn === 'btn_tab_tts') {
-                        el.classList.add('bg-[#1e1e1e]', 'text-amber-400', 'border-transparent');
-                        el.classList.remove('text-white');
-                    } else {
-                        el.classList.add('bg-[#1e1e1e]', 'text-white', 'border-transparent');
-                    }
+                    el.classList.add('bg-[#1e1e1e]', 'text-white', 'border-transparent');
                 }
             });
 
@@ -929,12 +925,7 @@ window.onerror = function(msg, url, lineNo, columnNo, error) {
             const activeBtn = document.getElementById('btn_' + tabId);
             if (activeBtn) {
                 activeBtn.classList.remove('bg-[#1e1e1e]', 'text-white', 'text-amber-400', 'border-transparent');
-                activeBtn.classList.add('bg-[#2a2a2a]', 'border', 'border-b-0', 'border-[#3a3a3a]');
-                if (tabId === 'tab_tts') {
-                    activeBtn.classList.add('text-amber-300');
-                } else {
-                    activeBtn.classList.add('text-blue-400');
-                }
+                activeBtn.classList.add('bg-[#2a2a2a]', 'border', 'border-b-0', 'border-[#3a3a3a]', 'text-blue-400');
             }
 
             // Auto-fill output directory when entering report tab

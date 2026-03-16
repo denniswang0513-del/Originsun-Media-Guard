@@ -1,14 +1,9 @@
 <div class="flex flex-col gap-4">
 
-  <!-- Header Notice -->
-  <div class="bg-amber-900 border border-amber-600 rounded-lg px-4 py-2 flex items-center gap-2 text-amber-200 text-sm">
-    🚧 <strong>語音合成功能開發中</strong> — 部分功能可能尚未完整，請謹慎使用。
-  </div>
-
   <!-- Sub-Tab Navigation -->
   <div class="modal-tabs" style="border-radius: 8px 8px 0 0;">
     <button class="tab-btn active" onclick="switchTtsSubTab('standard', event)">📢 標準 TTS</button>
-    <button class="tab-btn" onclick="switchTtsSubTab('clone', event)">🎙️ 聲音克隆</button>
+    <button class="tab-btn" onclick="switchTtsSubTab('clone', event)">🎙️ 聲音複製</button>
     <button class="tab-btn" onclick="switchTtsSubTab('dict', event)">📖 正音字典</button>
   </div>
 
@@ -79,7 +74,7 @@
 
     <!-- Text Input -->
     <div>
-      <label class="block text-xs text-gray-400 mb-1">合成文字 <span class="text-gray-600">（或拖曳 .txt 檔）</span></label>
+      <label class="block text-xs text-gray-400 mb-1">生成文字 <span class="text-gray-600">（或拖曳 .txt 檔）</span></label>
       <textarea id="tts_text_input" rows="6" placeholder="在此輸入要轉換為語音的文字..."
         class="w-full bg-[#1e1e1e] border border-[#555] rounded px-3 py-2 text-sm focus:border-blue-500 resize-y font-sans"></textarea>
       <div class="flex items-center justify-between mt-1 text-xs text-gray-500 bg-[#1a1a1a] rounded px-3 py-1.5 border-t border-[#333]">
@@ -127,7 +122,7 @@
     <div class="flex justify-end mt-2">
       <button id="btn_start_tts" onclick="submitTtsJob()"
         class="bg-blue-700 hover:bg-blue-600 text-white font-bold py-2 px-6 rounded shadow transition-colors">
-        開始合成
+        開始生成
       </button>
     </div>
   </div>
@@ -138,8 +133,12 @@
   <div id="tts_sub_clone" class="tts-subtab hidden">
 
     <!-- F5-TTS status -->
-    <div id="f5_status_banner" class="bg-[#1a2a3a] border border-[#2e4a6e] rounded-lg px-4 py-3 flex items-center justify-between text-sm mb-3">
-      <span id="f5_status_text" class="text-gray-300">正在檢查 F5-TTS 狀態...</span>
+    <div id="f5_status_banner" class="flex items-center justify-between text-xs mb-3 px-1">
+      <span id="f5_status_text" class="text-gray-600">正在檢查 F5-TTS 狀態...</span>
+      <div class="flex gap-2">
+        <button id="btn_f5_download" class="hidden bg-orange-600 hover:bg-orange-500 text-white text-xs px-3 py-1 rounded" onclick="window.downloadF5Model()">⬇️ 下載模型</button>
+        <button id="btn_f5_install" class="hidden bg-blue-600 hover:bg-blue-500 text-white text-xs px-3 py-1 rounded" onclick="window.installF5Package()">📦 安裝套件</button>
+      </div>
     </div>
 
     <div class="grid grid-cols-2 gap-4 mb-4">
@@ -147,7 +146,7 @@
       <!-- LEFT: NAS Library -->
       <div class="flex flex-col bg-[#1a1a1a] border border-[#333] rounded-lg p-3">
         <h3 class="text-xs font-bold text-gray-400 uppercase tracking-wider mb-2 border-b border-[#333] pb-1">聲音庫 (NAS)</h3>
-        <p class="text-[10px] text-gray-500 mb-2 leading-relaxed">選擇已建立的角色進行合成。</p>
+        <p class="text-[10px] text-gray-500 mb-2 leading-relaxed">選擇已建立的角色進行生成。</p>
         <div id="tts_library_list" class="flex-grow overflow-auto h-40 space-y-1 mb-2 pr-1 custom-scrollbar">
           <p class="text-gray-500 text-xs text-center py-4">正在從 NAS 載入聲音庫...</p>
         </div>
@@ -158,8 +157,8 @@
 
       <!-- RIGHT: Reference Audio -->
       <div class="flex flex-col bg-[#1a1a1a] border border-[#333] rounded-lg p-3">
-        <h3 class="text-xs font-bold text-gray-400 uppercase tracking-wider mb-2 border-b border-[#333] pb-1">臨時克隆區</h3>
-        <p class="text-[10px] text-gray-500 mb-2 leading-relaxed">拖曳短音檔（3~15 秒），進行單次臨時合成。</p>
+        <h3 class="text-xs font-bold text-gray-400 uppercase tracking-wider mb-2 border-b border-[#333] pb-1">臨時複製區</h3>
+        <p class="text-[10px] text-gray-500 mb-2 leading-relaxed">拖曳短音檔（3~15 秒），進行單次臨時生成。</p>
         <div class="bg-[#1e1e1e] border-2 border-dashed border-[#444] rounded-lg p-4 text-center mb-2 flex-grow" id="tts_clone_dropzone">
           <p class="text-gray-400 text-sm mb-2">拖曳參考音訊至此</p>
           <div class="flex gap-1 mb-1">
@@ -178,6 +177,13 @@
             轉存至左側聲音庫 (NAS)
           </button>
         </div>
+        <!-- Reference Audio Text -->
+        <div class="mt-2">
+          <label class="block text-[10px] text-gray-500 mb-1">參考音訊文字 <span class="text-gray-600">（選填，留空則自動轉錄）</span></label>
+          <input type="text" id="tts_clone_ref_text" placeholder="輸入參考音訊中實際說的話（可大幅提升語速精準度）"
+            class="w-full bg-[#1e1e1e] border border-[#444] rounded px-2 py-1.5 text-xs text-white focus:border-purple-500 focus:outline-none">
+          <p class="text-[10px] text-gray-600 mt-1">手動輸入，可跳過自動轉錄並獲得最精準的語速匹配</p>
+        </div>
       </div>
 
     </div>
@@ -185,6 +191,24 @@
     <!-- Selected profile indicator -->
     <div id="tts_selected_profile_info" class="hidden bg-[#1a1a2a] border border-[#3a3a6a] rounded px-3 py-2 text-sm text-blue-300">
       當前選用：<strong id="tts_selected_profile_name">—</strong>
+    </div>
+
+    <!-- Speed & Pitch -->
+    <div class="px-3 py-3 bg-[#1a1a1a] border border-[#333] rounded-lg space-y-3">
+      <div class="flex items-center gap-3">
+        <label class="text-[10px] text-gray-500 uppercase tracking-wider shrink-0 w-20">語速 Speed</label>
+        <input type="range" id="tts_clone_speed" min="-50" max="50" value="0" step="5"
+          oninput="document.getElementById('tts_clone_speed_label').textContent = (this.value >= 0 ? '+' : '') + this.value + '%'"
+          class="flex-1 accent-purple-500 h-1.5">
+        <span id="tts_clone_speed_label" class="text-xs text-purple-300 font-mono w-10 text-right">+0%</span>
+      </div>
+      <div class="flex items-center gap-3">
+        <label class="text-[10px] text-gray-500 uppercase tracking-wider shrink-0 w-20">音高 Pitch</label>
+        <input type="range" id="tts_clone_pitch" min="-10" max="10" value="0" step="1"
+          oninput="document.getElementById('tts_clone_pitch_label').textContent = (this.value >= 0 ? '+' : '') + this.value + 'Hz'"
+          class="flex-1 accent-purple-500 h-1.5">
+        <span id="tts_clone_pitch_label" class="text-xs text-purple-300 font-mono w-10 text-right">+0Hz</span>
+      </div>
     </div>
 
     <!-- Taiwan normalizer toggle -->
@@ -196,8 +220,8 @@
 
     <!-- Text Input -->
     <div>
-      <label class="block text-xs text-gray-400 mb-1">合成文字</label>
-      <textarea id="tts_clone_text_input" rows="6" placeholder="在此輸入要用克隆聲音合成的文字..."
+      <label class="block text-xs text-gray-400 mb-1">生成文字</label>
+      <textarea id="tts_clone_text_input" rows="6" placeholder="在此輸入要用複製聲音生成的文字..."
         class="w-full bg-[#1e1e1e] border border-[#555] rounded px-3 py-2 text-sm focus:border-blue-500 resize-y font-sans"></textarea>
     </div>
 
@@ -231,7 +255,7 @@
     <div class="flex justify-end mt-2">
       <button id="btn_start_clone" onclick="submitCloneJob()"
         class="bg-purple-700 hover:bg-purple-600 text-white font-bold py-2 px-6 rounded shadow transition-colors">
-        開始克隆合成
+        開始複製生成
       </button>
     </div>
   </div>

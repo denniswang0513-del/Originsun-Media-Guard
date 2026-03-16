@@ -67,6 +67,18 @@ async def download_installer():
         return FileResponse(file_path, filename="Install_Originsun_Agent.bat")
     return {"error": "找不到自動安裝腳本。"}
 
+@app.get("/")
+async def serve_index():
+    """Serve index.html with aggressive no-cache headers."""
+    index_path = os.path.join("frontend", "index.html")
+    if os.path.exists(index_path):
+        resp = FileResponse(index_path, media_type="text/html")
+        resp.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
+        resp.headers["Pragma"] = "no-cache"
+        resp.headers["Expires"] = "0"
+        return resp
+    return FileResponse("frontend/index.html")
+
 if os.path.exists("frontend"):
     app.mount("/", StaticFiles(directory="frontend", html=True), name="frontend")
 else:

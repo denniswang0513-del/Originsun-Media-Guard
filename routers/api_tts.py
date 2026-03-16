@@ -26,7 +26,7 @@ import edge_tts  # pyre-ignore[21]
 from typing import Optional
 
 from config import load_settings  # pyre-ignore[21]
-from tts_engine import run_edge_tts, run_f5_tts_clone, f5_tts_is_available  # pyre-ignore[21]
+from tts_engine import run_edge_tts, run_f5_tts_clone, f5_tts_is_available, f5_model_is_ready, f5_model_status, download_f5_model  # pyre-ignore[21]
 
 router = APIRouter(prefix="/api/v1", tags=["TTS"])
 
@@ -80,6 +80,9 @@ class VoiceCloneRequest(BaseModel):
     reference_audio: str
     output_dir: str
     output_name: str = "clone_output"
+    speed: float = 1.0   # 0.5 ~ 1.5, default normal speed
+    pitch: int = 0       # -10 ~ +10 semitones, default no shift
+    ref_text: Optional[str] = None  # Manual transcription of reference audio (skips Whisper)
 
 class TtsEstimateRequest(BaseModel):
     text: str
@@ -220,11 +223,12 @@ async def tts_clone(req: VoiceCloneRequest, background_tasks: BackgroundTasks):
         try:
             await run_f5_tts_clone(
                 normalized_text, req.reference_audio, output_path,
-                progress_cb=_on_progress
+                progress_cb=_on_progress, speed=req.speed, pitch=req.pitch,
+                ref_text=req.ref_text
             )
             _emit_sync("tts_clone_progress", {
                 "phase": "done", "pct": 100,
-                "msg": "合成完成！", "output": output_path
+                "msg": "生成完成！", "output": output_path
             })
         except Exception as e:
             _emit_sync("tts_clone_progress", {
@@ -236,7 +240,57 @@ async def tts_clone(req: VoiceCloneRequest, background_tasks: BackgroundTasks):
 
 @router.get("/tts/f5_status")
 def f5_status():
-    return {"available": f5_tts_is_available()}
+    status = f5_model_status()
+    return {
+        "available": f5_tts_is_available(),
+        "model_ready": status["local"],
+        "model_cached": status["cached"],
+    }
+
+@router.post("/tts/f5_download")
+async def f5_download_model_endpoint(background_tasks: BackgroundTasks):
+    from core.logger import _emit_sync  # pyre-ignore[21]
+
+    def _on_progress(data: dict):
+        _emit_sync("f5_model_download", data)
+
+    def _run_download():
+        try:
+            download_f5_model(progress_cb=_on_progress)
+            _emit_sync("f5_model_download", {
+                "phase": "done", "pct": 100, "msg": "F5-TTS 模型下載完成！"
+            })
+        except Exception as e:
+            _emit_sync("f5_model_download", {
+                "phase": "error", "pct": 0, "msg": f"下載失敗: {e}"
+            })
+
+    background_tasks.add_task(_run_download)
+    return {"status": "downloading"}
+
+@router.post("/tts/f5_install")
+async def f5_install_package(background_tasks: BackgroundTasks):
+    """pip install f5-tts in background."""
+    import sys, subprocess
+    from core.logger import _emit_sync  # pyre-ignore[21]
+
+    def _run_install():
+        try:
+            _emit_sync("f5_pip_install", {"phase": "installing", "pct": 50, "msg": "正在安裝 f5-tts 套件..."})
+            result = subprocess.run(
+                [sys.executable, "-m", "pip", "install", "f5-tts"],
+                capture_output=True, text=True, timeout=600,
+            )
+            if result.returncode == 0:
+                _emit_sync("f5_pip_install", {"phase": "done", "pct": 100, "msg": "f5-tts 套件安裝完成！請重啟伺服器。"})
+            else:
+                err = result.stderr.strip().split('\n')[-1] if result.stderr else "未知錯誤"
+                _emit_sync("f5_pip_install", {"phase": "error", "pct": 0, "msg": f"安裝失敗: {err}"})
+        except Exception as e:
+            _emit_sync("f5_pip_install", {"phase": "error", "pct": 0, "msg": f"安裝失敗: {e}"})
+
+    background_tasks.add_task(_run_install)
+    return {"status": "installing"}
 
 # ─── Taiwan Dictionary API (Hot Reload) ──────────────────
 DICT_PATH = os.path.join(os.path.dirname(os.path.dirname(__file__)), "taiwan_dict.json")

@@ -11,7 +11,7 @@ ElseIf fso.FileExists(chromePath2) Then
 ElseIf fso.FileExists(chromePath3) Then
     chromePath = chromePath3
 End If
-serverUrl = "http://192.168.1.11:8000"
+serverUrl = "http://localhost:8000"
 icoPath = "D:\Antigravity\OriginsunTranscode\logo.ico"
 sLinkFile = WshShell.SpecialFolders("Desktop") & "\Originsun Media Guard Web.lnk"
 Set oLink = WshShell.CreateShortcut(sLinkFile)

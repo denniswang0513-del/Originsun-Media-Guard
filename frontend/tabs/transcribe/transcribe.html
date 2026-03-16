@@ -9,6 +9,7 @@
                 <label class="block text-sm font-medium text-gray-400">影音檔案來源 (依檔序排列)</label>
                 <div class="flex gap-2">
                     <button onclick="if(window.pickMultiFiles) window.pickMultiFiles()" class="text-xs bg-indigo-900 border-indigo-700 hover:bg-indigo-700 px-2 py-1 rounded text-white border transition-colors shadow-sm text-[11px]">📁 選擇檔案</button>
+                    <button onclick="if(window.pickTranscribeFolder) window.pickTranscribeFolder()" class="text-xs bg-amber-900 border-amber-700 hover:bg-amber-700 px-2 py-1 rounded text-white border transition-colors shadow-sm text-[11px]">📂 選擇資料夾</button>
                     <button onclick="addStandaloneSource('transcribe_file_list')"
                         class="text-xs bg-[#333] hover:bg-[#444] px-2 py-1 rounded text-white border border-[#555]">+ 新增欄位</button>
                 </div>
