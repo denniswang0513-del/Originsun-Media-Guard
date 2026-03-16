@@ -86,6 +86,8 @@ async def run_edge_tts(text: str, voice: str, rate: int, pitch: int, output_path
     def _run_subprocess():
         import os
         env = os.environ.copy()
+        # Remove PYTHONHASHSEED if invalid (uvicorn may set non-numeric values)
+        env.pop("PYTHONHASHSEED", None)
         result = subprocess.run(cmd, capture_output=True, text=True, env=env)
 
         # Cleanup temp file

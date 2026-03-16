@@ -163,6 +163,8 @@ async def estimate_tts_duration(req: TtsEstimateRequest):
         cmd.extend(["--write-subtitles", vtt_path])
 
         env = os.environ.copy()
+        # Remove PYTHONHASHSEED if invalid (uvicorn may set non-numeric values)
+        env.pop("PYTHONHASHSEED", None)
         result = subprocess.run(cmd, capture_output=True, text=True, env=env)
         if result.returncode != 0:
             if os.path.exists(vtt_path): os.remove(vtt_path)
