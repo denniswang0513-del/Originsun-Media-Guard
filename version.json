@@ -1,5 +1,5 @@
 {
-  "version": "1.6.0",
-  "build_date": "2026-03-16",
-  "notes": "TTS 功能完善：F5-TTS 智能文字前處理（數字轉中文、句邊界注入、短塊補齊）、UI 用語統一（克隆→複製、合成→生成）、逐字稿資料夾選取、移除開發中標記正式上線。"
+  "version": "1.7.0",
+  "build_date": "2026-03-18",
+  "notes": "feat: remote path validation, projects tab, queue management, test suite (75 tests)"
 }

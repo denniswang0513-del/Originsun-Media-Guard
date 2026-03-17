@@ -3,9 +3,14 @@ chcp 65001 >nul
 title Originsun SaaS Agent Launcher
 color 0B
 
-:: ==== Auto-Hide Mechanism ====
-if "%~1"=="hidden" goto :run_agent
-echo CreateObject("Wscript.Shell").Run """%~f0"" hidden", 0, False > "%TEMP%\hide_agent.vbs"
+:: ==== Self-relaunch from TEMP to survive NAS overwrite ====
+if "%~1"=="tempcopy" goto :run_agent
+:: Copy self to TEMP then relaunch hidden (so NAS xcopy won't break running script)
+set "TEMP_BAT=%TEMP%\originsun_agent_launcher.bat"
+copy /y "%~f0" "%TEMP_BAT%" >nul
+set "ORIG_DIR=%~dp0"
+if "%ORIG_DIR:~-1%"=="\" set "ORIG_DIR=%ORIG_DIR:~0,-1%"
+> "%TEMP%\hide_agent.vbs" echo CreateObject("Wscript.Shell").Run """%TEMP_BAT%"" tempcopy ""%ORIG_DIR%""", 0, False
 wscript "%TEMP%\hide_agent.vbs"
 del "%TEMP%\hide_agent.vbs"
 exit /b
@@ -13,35 +18,130 @@ exit /b
 :run_agent
 :: =============================
 
+:: Use passed dir (from TEMP relaunch) or fallback to own dir
+if not "%~2"=="" (
+    set "INSTALL_DIR=%~2"
+) else (
+    set "INSTALL_DIR=%~dp0"
+)
+if "%INSTALL_DIR:~-1%"=="\" set "INSTALL_DIR=%INSTALL_DIR:~0,-1%"
+
+:: ---- Guard: must run from local disk, not NAS ----
+echo %INSTALL_DIR% | findstr /i "^\\\\" >nul 2>&1
+if %errorlevel%==0 (
+    echo.
+    echo [ERROR] 請勿直接從 NAS 執行此程式！
+    echo         請先用桌面上的「安裝 Originsun Agent」捷徑完成安裝，
+    echo         安裝完成後從桌面捷徑啟動。
+    echo.
+    pause
+    exit /b 1
+)
+
 echo ===================================================
 echo   Originsun Media Guard Pro - Local Agent
 echo ===================================================
 echo.
 
-set "INSTALL_DIR=%~dp0"
-if "%INSTALL_DIR:~-1%"=="\" set "INSTALL_DIR=%INSTALL_DIR:~0,-1%"
-
 set "NAS_LATEST=\\192.168.1.132\Container\AI_Workspace\agents\Originsun Media Guard Pro"
-set "EMBED_PY=%INSTALL_DIR%\python_embed\python.exe"
+set "STATUS_FILE=%INSTALL_DIR%\update_status.json"
 
-echo [System] Checking for updates, please wait...
-ping 127.0.0.1 -n 4 > nul
+:: ---- Detect best Python executable ----
+set "EMBED_PY="
+if exist "%INSTALL_DIR%\python_embed\python.exe" (
+    set "EMBED_PY=%INSTALL_DIR%\python_embed\python.exe"
+    goto :found_py
+)
+if exist "%INSTALL_DIR%\.venv\Scripts\python.exe" (
+    set "EMBED_PY=%INSTALL_DIR%\.venv\Scripts\python.exe"
+    goto :found_py
+)
+where python >nul 2>&1
+if %errorlevel%==0 (
+    for /f "tokens=*" %%P in ('where python') do (
+        set "EMBED_PY=%%P"
+        goto :found_py
+    )
+)
+echo [Error] 找不到 Python！請執行安裝精靈。
+pause
+exit /b 1
 
-if exist "%NAS_LATEST%" (
-    echo [System] NAS connected. Syncing latest version...
-    xcopy "%NAS_LATEST%\*" "%INSTALL_DIR%\" /Y /D /E /C /I >nul
-    echo [System] Sync complete.
-    echo [System] Installing/updating Python packages...
-    "%EMBED_PY%" -m pip install -r "%INSTALL_DIR%\0225_requirements.txt" --quiet --no-warn-script-location >nul 2>&1
-    echo [System] Package check complete.
-) else (
-    echo [System] NAS unavailable. Starting with current version.
+:found_py
+echo [System] Using Python: %EMBED_PY%
+set "REQ_FILE=%INSTALL_DIR%\0225_requirements.txt"
+set "REQ_BACKUP=%TEMP%\originsun_req_backup.txt"
+set "NEED_PIP=1"
+
+echo [System] Checking for updates...
+
+:: ---- Backup requirements before sync ----
+if exist "%REQ_FILE%" copy /y "%REQ_FILE%" "%REQ_BACKUP%" >nul
+
+if not exist "%NAS_LATEST%" goto :no_nas
+
+:: ---- Step 1: Sync from NAS ----
+echo {"step":1,"pct":5,"msg":"正在從 NAS 同步最新版本..."} > "%STATUS_FILE%"
+echo [System] NAS connected. Syncing latest version...
+
+:: Exclude Originsun_Agent.zip (~1GB) — only needed for fresh installs, not OTA updates
+echo Originsun_Agent.zip> "%TEMP%\xcopy_exclude.txt"
+xcopy "%NAS_LATEST%\*" "%INSTALL_DIR%\" /Y /D /E /C /I /EXCLUDE:%TEMP%\xcopy_exclude.txt >nul
+del "%TEMP%\xcopy_exclude.txt" >nul 2>&1
+
+echo {"step":1,"pct":28,"msg":"NAS 同步完成，正在檢查套件..."} > "%STATUS_FILE%"
+echo [System] Sync complete.
+
+:: ---- Start update monitor on port 8001 ----
+if exist "%INSTALL_DIR%\update_monitor.py" (
+    start /b "" "%EMBED_PY%" "%INSTALL_DIR%\update_monitor.py"
+    ping 127.0.0.1 -n 2 > nul
 )
 
+:: ---- Check if requirements changed (use && to avoid delayed expansion issue) ----
+if exist "%REQ_BACKUP%" (
+    fc /b "%REQ_FILE%" "%REQ_BACKUP%" >nul 2>&1 && set "NEED_PIP=0"
+    del "%REQ_BACKUP%" >nul 2>&1
+)
+goto :check_pip
+
+:no_nas
+echo {"step":3,"pct":85,"msg":"NAS 不可用，使用目前版本啟動伺服器..."} > "%STATUS_FILE%"
+echo [System] NAS unavailable. Starting with current version.
+set "NEED_PIP=0"
+
+:check_pip
+:: ---- Step 2: Install packages (only if requirements changed) ----
+if "%NEED_PIP%"=="0" (
+    echo {"step":2,"pct":82,"msg":"套件無需更新，跳過安裝。"} > "%STATUS_FILE%"
+    echo [System] Requirements unchanged, skipping pip install.
+    goto :start_server
+)
+
+echo {"step":2,"pct":30,"msg":"正在安裝/更新 Python 套件（首次可能需要 10-20 分鐘）..."} > "%STATUS_FILE%"
+echo [System] Requirements changed. Installing/updating Python packages...
+echo [System] First-time install may take 10-20 minutes.
+echo ---------------------------------------------------
+"%EMBED_PY%" -m pip install -r "%INSTALL_DIR%\0225_requirements.txt" --no-warn-script-location
+echo ---------------------------------------------------
+echo {"step":2,"pct":82,"msg":"套件安裝完成！"} > "%STATUS_FILE%"
+echo [System] Package install complete.
+
+:start_server
+:: ---- Step 3: Start server ----
+echo {"step":3,"pct":85,"msg":"正在重新啟動伺服器..."} > "%STATUS_FILE%"
 echo.
 echo [System] Starting Originsun Local Agent...
 echo [Hint] Do not close this window. Minimize it and use the web interface.
 echo ---------------------------------------------------
+
+:: ---- Kill processes bound to port 8000 (without killing ourselves or update_monitor) ----
+echo [System] Freeing port 8000...
+for /f "tokens=5" %%P in ('netstat -aon ^| findstr ":8000.*LISTENING" 2^>nul') do (
+    echo [System] Killing PID %%P on port 8000...
+    taskkill /F /PID %%P >nul 2>&1
+)
+ping 127.0.0.1 -n 3 >nul
 
 netsh advfirewall firewall show rule name="Originsun Agent Port 8000" >nul 2>&1
 if %errorlevel% neq 0 (
@@ -49,6 +149,16 @@ if %errorlevel% neq 0 (
     powershell -ExecutionPolicy Bypass -Command "Start-Process cmd -ArgumentList '/c netsh advfirewall firewall add rule name=\"Originsun Agent Port 8000\" dir=in action=allow protocol=TCP localport=8000' -Verb RunAs -WindowStyle Hidden"
 )
 
-"%EMBED_PY%" -m uvicorn main:io_app --host 0.0.0.0 --port 8000
+:: ---- Change to install directory before starting uvicorn ----
+cd /d "%INSTALL_DIR%"
+if %errorlevel% neq 0 (
+    echo [Error] Cannot cd to %INSTALL_DIR%
+    pause
+    exit /b 1
+)
 
-pause
+:: ---- Start uvicorn (log to file since window is hidden) ----
+echo [System] Launching uvicorn on port 8000...
+set "PYTHONPATH=%INSTALL_DIR%"
+echo [%date% %time%] Starting uvicorn... >> "%INSTALL_DIR%\agent_server.log"
+"%EMBED_PY%" -m uvicorn main:io_app --host 0.0.0.0 --port 8000 >> "%INSTALL_DIR%\agent_server.log" 2>&1

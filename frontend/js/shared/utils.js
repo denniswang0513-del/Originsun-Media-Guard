@@ -180,6 +180,26 @@ export function setupInputDrop(inputId) {
     });
 }
 
+export async function validateRemotePaths(hostIp, paths) {
+    const url = 'http://' + hostIp + '/api/v1/validate_paths';
+    const res = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ paths })
+    });
+    const data = await res.json();
+    const errors = [];
+    for (const [path, info] of Object.entries(data.results)) {
+        if (!info.drive_exists) {
+            errors.push(`磁碟機 ${info.drive} 不存在`);
+        } else if (!info.path_exists) {
+            errors.push(`路徑不存在: ${path}`);
+        }
+    }
+    return errors.length ? { ok: false, errors } : { ok: true };
+}
+window.validateRemotePaths = validateRemotePaths;
+
 export function setupDragAndDrop(containerId, addRowFunc) {
     const container = document.getElementById(containerId);
     if (!container) return;

@@ -7,16 +7,50 @@ from fastapi import APIRouter, BackgroundTasks, Request  # type: ignore
 from fastapi.responses import JSONResponse, FileResponse  # type: ignore
 
 import core.state as state  # type: ignore
-from core.engine_inst import engine  # type: ignore
 from core.socket_mgr import sio  # type: ignore
 from config import load_settings, save_settings  # type: ignore
-from core.schemas import ListDirRequest, DownloadModelRequest, OpenFileRequest  # type: ignore
+from core.schemas import ListDirRequest, DownloadModelRequest, OpenFileRequest, ValidatePathsRequest  # type: ignore
 
 router = APIRouter()
 
 @router.get("/api/v1/health")
 async def health_check():
-    return {"status": "ok", "service": "OriginsunTranscode", "busy": state.worker_busy, "host": socket.gethostname()}
+    jobs = state.get_all_jobs()
+    running = [j for j in jobs.values() if j.status == state.JobStatus.RUNNING]
+    busy = len(running) > 0
+
+    cpu_pct = 0.0
+    mem_pct = 0.0
+    try:
+        import psutil  # type: ignore
+        cpu_pct = psutil.cpu_percent(interval=None)
+        mem_pct = psutil.virtual_memory().percent
+    except Exception:
+        pass
+
+    ver = ""
+    try:
+        import json as _j
+        with open("version.json", "r", encoding="utf-8") as f:
+            ver = _j.load(f).get("version", "")
+    except Exception:
+        pass
+
+    current_tasks = [
+        {"job_id": j.job_id, "project_name": j.project_name, "task_type": j.task_type}
+        for j in running
+    ]
+
+    return {
+        "status": "ok",
+        "hostname": socket.gethostname(),
+        "cpu_percent": cpu_pct,
+        "memory_percent": mem_pct,
+        "worker_busy": busy,
+        "active_job_count": len(running),
+        "current_tasks": current_tasks,
+        "version": ver,
+    }
 
 @router.get("/api/settings/load")
 async def load_settings_api():
@@ -104,42 +138,171 @@ async def download_model_endpoint(req: DownloadModelRequest, background_tasks: B
     return {"status": "started", "model_size": req.model_size}
 
 @router.post("/api/v1/control/pause")
-async def pause_job():
-    engine.request_pause()
-    state._report_pause_event.clear()
+async def pause_job(job_id: str = ""):
+    if job_id:
+        job = state.get_job(job_id)
+        if not job:
+            return JSONResponse(status_code=404, content={"error": "Job not found"})
+        if job.engine:
+            job.engine.request_pause()
+        if job.report_pause_event:
+            job.report_pause_event.clear()
+        job.status = state.JobStatus.PAUSED
+        return {"status": "paused", "job_id": job_id}
+    # No job_id: pause ALL running jobs (backward compat)
+    for j in state.get_all_jobs().values():
+        if j.status == state.JobStatus.RUNNING:
+            if j.engine:
+                j.engine.request_pause()
+            if j.report_pause_event:
+                j.report_pause_event.clear()
+            j.status = state.JobStatus.PAUSED
     return {"status": "paused"}
 
 @router.post("/api/v1/control/resume")
-async def resume_job():
-    engine.request_resume()
-    state._report_pause_event.set()
+async def resume_job(job_id: str = ""):
+    if job_id:
+        job = state.get_job(job_id)
+        if not job:
+            return JSONResponse(status_code=404, content={"error": "Job not found"})
+        if job.engine:
+            job.engine.request_resume()
+        if job.report_pause_event:
+            job.report_pause_event.set()
+        job.status = state.JobStatus.RUNNING
+        return {"status": "resumed", "job_id": job_id}
+    # No job_id: resume ALL paused jobs (backward compat)
+    for j in state.get_all_jobs().values():
+        if j.status == state.JobStatus.PAUSED:
+            if j.engine:
+                j.engine.request_resume()
+            if j.report_pause_event:
+                j.report_pause_event.set()
+            j.status = state.JobStatus.RUNNING
     return {"status": "resumed"}
 
 @router.post("/api/v1/control/stop")
-async def stop_job():
-    engine.request_stop()
-    if state._current_report_task and not state._current_report_task.done():
-        state._current_report_task.cancel()
+async def stop_job(job_id: str = ""):
+    if job_id:
+        job = state.get_job(job_id)
+        if not job:
+            return JSONResponse(status_code=404, content={"error": "Job not found"})
+        if job.engine:
+            job.engine.request_stop()
+        if job.asyncio_task and not job.asyncio_task.done():
+            job.asyncio_task.cancel()
+        job.status = state.JobStatus.CANCELLED
+        return {"status": "stopped", "job_id": job_id}
+    # No job_id: stop ALL running/paused jobs (backward compat)
+    for j in state.get_all_jobs().values():
+        if j.status in (state.JobStatus.RUNNING, state.JobStatus.PAUSED):
+            if j.engine:
+                j.engine.request_stop()
+            if j.asyncio_task and not j.asyncio_task.done():
+                j.asyncio_task.cancel()
+            j.status = state.JobStatus.CANCELLED
     return {"status": "stopped"}
 
 @router.post("/api/v1/control/update")
 async def update_agent():
-    import subprocess
+    import subprocess, json, sys
     try:
         base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-        subprocess.Popen(["wscript.exe", os.path.join(base_dir, "start_hidden.vbs")], shell=False)
+        bat_path = os.path.join(base_dir, "update_agent.bat")
+        monitor_path = os.path.join(base_dir, "update_monitor.py")
+        status_file = os.path.join(base_dir, "update_status.json")
+
+        # Write initial status so monitor has something to serve immediately
+        with open(status_file, 'w', encoding='utf-8') as f:
+            json.dump({"step": 0, "pct": 2, "msg": "正在啟動更新程序..."}, f, ensure_ascii=False)
+
+        # Start monitor on port 8001 — DETACHED so it survives os._exit
+        subprocess.Popen(
+            [sys.executable, monitor_path],
+            creationflags=subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP,
+            close_fds=True
+        )
+
+        # Copy bat to TEMP so NAS xcopy won't break it mid-execution
+        import shutil, tempfile
+        temp_bat = os.path.join(tempfile.gettempdir(), "originsun_agent_launcher.bat")
+        shutil.copy2(bat_path, temp_bat)
+
+        # Start update bat from TEMP — hidden window
+        si = subprocess.STARTUPINFO()
+        si.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+        si.wShowWindow = 0  # SW_HIDE
+        subprocess.Popen(
+            ["cmd", "/c", temp_bat, "tempcopy", base_dir],
+            startupinfo=si,
+            creationflags=subprocess.CREATE_NEW_CONSOLE,
+            shell=False
+        )
         asyncio.get_running_loop().call_later(1.0, os._exit, 0)
         return {"status": "updating"}
-    except Exception as e: return {"status": "error", "message": str(e)}
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
 
 @router.get("/api/v1/status")
 async def get_status(log_offset: int = 0):
-    logs = list(state._status_log_buffer)[log_offset:]  # type: ignore
+    jobs = state.get_all_jobs()
+    active_statuses = (
+        state.JobStatus.QUEUED, state.JobStatus.WAITING,
+        state.JobStatus.RUNNING, state.JobStatus.PAUSED,
+    )
+    active_jobs = {}
+    for jid, j in jobs.items():
+        if j.status in active_statuses:
+            active_jobs[jid] = {
+                "job_id": j.job_id,
+                "project_name": j.project_name,
+                "task_type": j.task_type,
+                "status": j.status.value,
+                "progress": j.progress,
+                "created_at": j.created_at,
+                "started_at": j.started_at,
+            }
+
+    busy = any(j.status == state.JobStatus.RUNNING for j in jobs.values())
+    paused = any(j.status == state.JobStatus.PAUSED for j in jobs.values())
+    queue_len = sum(1 for j in jobs.values() if j.status in (state.JobStatus.QUEUED, state.JobStatus.WAITING))
+
+    logs = list(state._global_log_buffer)[log_offset:]
     return {
-        "status": "online", "busy": state.worker_busy, "queue_length": state.task_queue.qsize(),
-        "paused": engine._pause_event.is_set(), "logs": logs, "new_log_offset": log_offset + len(logs),
-        "progress": state._current_progress
+        "status": "online",
+        "busy": busy,
+        "queue_length": queue_len,
+        "paused": paused,
+        "logs": logs,
+        "new_log_offset": log_offset + len(logs),
+        "progress": None,  # deprecated; use active_jobs[id].progress
+        "active_jobs": active_jobs,
     }
+
+@router.get("/api/v1/jobs/{job_id}")
+async def get_job_detail(job_id: str):
+    job = state.get_job(job_id)
+    if not job:
+        return JSONResponse(status_code=404, content={"error": "Job not found"})
+    return {
+        "job_id": job.job_id,
+        "project_name": job.project_name,
+        "task_type": job.task_type,
+        "status": job.status.value,
+        "progress": job.progress,
+        "created_at": job.created_at,
+        "started_at": job.started_at,
+        "finished_at": job.finished_at,
+        "error_detail": job.error_detail,
+    }
+
+@router.get("/api/v1/jobs/{job_id}/logs")
+async def get_job_logs(job_id: str, offset: int = 0):
+    job = state.get_job(job_id)
+    if not job:
+        return JSONResponse(status_code=404, content={"error": "Job not found"})
+    logs = job.log_buffer[offset:]
+    return {"logs": logs, "new_offset": offset + len(logs)}
 
 @router.get("/api/v1/version")
 async def get_version():
@@ -276,6 +439,21 @@ MsgBox "桌面捷徑已成功建立！請查看桌面上的「Originsun Media Gu
         return {"status": "error", "message": f"腳本執行失敗 (cscript 錯誤): {str(e)}"}
     except Exception as e:
         return {"status": "error", "message": f"建立失敗: {str(e)}"}
+
+@router.post("/api/v1/validate_paths")
+async def validate_paths(req: ValidatePathsRequest):
+    """檢查每個路徑的磁碟機是否存在、路徑本身是否存在（供遠端主機派發前驗證）"""
+    results = {}
+    for p in req.paths:
+        drive = os.path.splitdrive(p)[0]  # e.g. "S:"
+        drive_exists = os.path.exists(drive + os.sep) if drive else True
+        path_exists = os.path.exists(p)
+        results[p] = {
+            "drive": drive,
+            "drive_exists": drive_exists,
+            "path_exists": path_exists,
+        }
+    return {"status": "ok", "results": results}
 
 @router.get("/api/v1/utils/resolve_drop")
 async def api_resolve_drop(name: str):

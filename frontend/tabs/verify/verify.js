@@ -63,7 +63,7 @@ export async function submitVerify() {
         const result = await res.json();
         const retryBtn = document.getElementById('btn_retry');
         if (retryBtn) retryBtn.style.display = 'none';
-        appendLog(`比對請求已送出，模式：${vfMode === 'quick' ? '快速' : 'XXH64 進階'}，排序號: ${result.position}`, 'system');
+        appendLog(`比對請求已送出，模式：${vfMode === 'quick' ? '快速' : 'XXH64 進階'}，任務 ID: ${result.job_id || '?'}`, 'system');
     } catch (e) { 
         appendLog('發送失敗: ' + e, 'error'); 
     }

@@ -1,14 +1,16 @@
-from fastapi import APIRouter, BackgroundTasks  # type: ignore
-from core.schemas import TranscribeRequest
-import core.state as state  # type: ignore
-from core.worker import _background_worker  # type: ignore
+import os
+from fastapi import APIRouter  # type: ignore
+from fastapi.responses import JSONResponse  # type: ignore
+from core.schemas import TranscribeRequest  # type: ignore
+from core.worker import enqueue_job  # type: ignore
 
 router = APIRouter()
 
 @router.post("/api/v1/jobs/transcribe")
-async def create_transcribe_job(req: TranscribeRequest, bg_tasks: BackgroundTasks):
-    state.task_queue.put(req)
-    if not state.worker_busy:
-        state.worker_busy = True
-        bg_tasks.add_task(_background_worker)
-    return {"status": "queued", "position": state.task_queue.qsize()}
+async def create_transcribe_job(req: TranscribeRequest):
+    project_name = req.project_name or os.path.basename(req.dest_dir) or "unnamed"
+    try:
+        job_id = enqueue_job(req, project_name, "transcribe")
+        return {"status": "queued", "job_id": job_id}
+    except ValueError as e:
+        return JSONResponse(status_code=409, content={"status": "duplicate", "detail": str(e)})

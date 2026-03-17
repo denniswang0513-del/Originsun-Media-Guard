@@ -10,50 +10,95 @@ NOTE: torchaudio backend patch below is REQUIRED before any torch import.
       See CLAUDE.md §5.2 for details.
 """
 
-# ─── torchcodec + torchaudio patch (Windows) ─────────────────────────────────
-# torchcodec crashes on Windows: os.add_dll_directory('.') → [WinError 87]
-# torchaudio 2.10+ uses torchcodec by default for load().
-# Fix both by: (1) patching os.add_dll_directory to skip invalid paths,
-#              (2) patching torchaudio.load to use soundfile instead.
-# See CLAUDE.md §5.2 for background.
-import os as _os
-_orig_add_dll_directory = _os.add_dll_directory
-
-def _safe_add_dll_directory(path):
-    """Skip invalid DLL directories (e.g. '.') that crash on Windows."""
-    try:
-        return _orig_add_dll_directory(path)
-    except OSError:
-        import contextlib
-        @contextlib.contextmanager
-        def _noop_cm():
-            yield None
-        return _noop_cm()
-
-_os.add_dll_directory = _safe_add_dll_directory
-
-import torchaudio as _ta
-import soundfile as _sf
-import torch as _torch
-
-_orig_ta_load = _ta.load
-
-def _patched_ta_load(uri, frame_offset=0, num_frames=-1, normalize=True,
-                     channels_first=True, format=None, buffer_size=4096, backend=None):
-    data, sr = _sf.read(str(uri), dtype="float32",
-                        start=frame_offset,
-                        stop=frame_offset + num_frames if num_frames > 0 else None)
-    t = _torch.from_numpy(data)
-    if t.ndim == 1:
-        t = t.unsqueeze(0)
-    elif channels_first:
-        t = t.T
-    return t, sr
-
-_ta.load = _patched_ta_load
-
+# ─── Lazy-loaded torch/torchaudio/soundfile ──────────────────────────────────
+# These imports are DEFERRED to first use (not module load time) because
+# importing torch takes 15-30+ seconds and would block uvicorn startup.
+# The torchcodec/torchaudio patches are applied once on first import.
+# See CLAUDE.md §5.1-5.2 for background.
 import os
 import asyncio
+
+_torch = None      # lazy: set by _ensure_tts_imports()
+_ta = None         # lazy: torchaudio
+_sf = None         # lazy: soundfile
+_TTS_PACKAGES_AVAILABLE = None  # None = not yet checked
+_TTS_MISSING_REASON = ""
+_tts_imports_done = False
+
+
+def _ensure_tts_imports():
+    """Lazy-import torch, torchaudio, soundfile and apply Windows patches.
+
+    Called once on first use of any F5-TTS function.
+    This keeps uvicorn startup fast (~2s instead of ~20s).
+    """
+    global _torch, _ta, _sf, _TTS_PACKAGES_AVAILABLE, _TTS_MISSING_REASON, _tts_imports_done
+    if _tts_imports_done:
+        return _TTS_PACKAGES_AVAILABLE
+    _tts_imports_done = True
+
+    try:
+        # Patch os.add_dll_directory BEFORE importing torch/torchaudio
+        # torchcodec crashes on Windows: os.add_dll_directory('.') → [WinError 87]
+        _orig_add_dll_directory = os.add_dll_directory
+
+        def _safe_add_dll_directory(path):
+            try:
+                return _orig_add_dll_directory(path)
+            except OSError:
+                import contextlib
+                @contextlib.contextmanager
+                def _noop_cm():
+                    yield None
+                return _noop_cm()
+
+        os.add_dll_directory = _safe_add_dll_directory
+
+        import torchaudio
+        import soundfile
+        import torch
+
+        _ta = torchaudio
+        _sf = soundfile
+        _torch = torch
+
+        # Patch torchaudio.load to use soundfile (avoids torchcodec backend crash)
+        def _patched_ta_load(uri, frame_offset=0, num_frames=-1, normalize=True,
+                             channels_first=True, format=None, buffer_size=4096, backend=None):
+            data, sr = soundfile.read(str(uri), dtype="float32",
+                                      start=frame_offset,
+                                      stop=frame_offset + num_frames if num_frames > 0 else None)
+            t = torch.from_numpy(data)
+            if t.ndim == 1:
+                t = t.unsqueeze(0)
+            elif channels_first:
+                t = t.T
+            return t, sr
+
+        torchaudio.load = _patched_ta_load
+
+        _TTS_PACKAGES_AVAILABLE = True
+        return True
+
+    except ImportError as e:
+        _TTS_PACKAGES_AVAILABLE = False
+        _TTS_MISSING_REASON = f"缺少 TTS 套件: {e}. 請安裝 torch, torchaudio, soundfile 後重啟。"
+        print(f"[WARNING] {_TTS_MISSING_REASON}")
+        return False
+
+
+def tts_packages_available() -> bool:
+    """Check if core TTS packages (torch, torchaudio, soundfile) are installed."""
+    if _TTS_PACKAGES_AVAILABLE is None:
+        _ensure_tts_imports()
+    return _TTS_PACKAGES_AVAILABLE
+
+
+def tts_missing_reason() -> str:
+    """Return human-readable reason why TTS packages are unavailable."""
+    if _TTS_PACKAGES_AVAILABLE is None:
+        _ensure_tts_imports()
+    return _TTS_MISSING_REASON
 
 
 # ─── Edge TTS ────────────────────────────────────────────────────────────────
@@ -184,6 +229,7 @@ def download_f5_model(progress_cb=None) -> str:
 
 def _get_f5_tts():
     """Lazy-load F5-TTS model (cached after first call)."""
+    _ensure_tts_imports()
     global _f5_instance
     if _f5_instance is None:
         from f5_tts.api import F5TTS  # type: ignore
@@ -277,6 +323,7 @@ def _transcribe_ref_audio(audio_path: str) -> str:
     A too-short ref_text (e.g. "...") causes F5-TTS tensor size mismatch errors
     because it miscalculates the output duration ratio.
     """
+    _ensure_tts_imports()
     audio_dur = _get_audio_duration(audio_path)
     effective_dur = min(audio_dur, 12.0) if audio_dur > 0 else 10.0
 
@@ -475,6 +522,7 @@ def _pad_text_for_inference(text: str, ref_text_len: int, ref_audio_dur: float, 
 def _f5_clone_sync(text: str, reference_audio: str, output_path: str,
                    progress_cb=None, speed: float = 1.0, pitch: int = 0,
                    ref_text: str = None):
+    _ensure_tts_imports()
     import shutil
     import tempfile
     import sys

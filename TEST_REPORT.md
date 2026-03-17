@@ -1,6 +1,6 @@
-# Originsun Media Guard Pro v1.5.0 — 功能測試報告
+# Originsun Media Guard Pro v1.6.0 — 功能測試報告
 
-> **測試日期**: 2026-03-16
+> **測試日期**: 2026-03-18（更新）/ 2026-03-16（初版）
 > **測試環境**: Windows 11 Pro, Python 3.11, AMD 5950X (CPU only, no GPU)
 > **測試方式**: Claude Code 自動化 (HTTP API + 瀏覽器截圖 + Python 單元測試)
 > **伺服器**: `http://localhost:8000` via `python main.py`
@@ -19,9 +19,10 @@
 | F. 聲音庫 (NAS) | 1 | 0 | 0 | 1 |
 | G. 前端 UI | 5 | 0 | 0 | 5 |
 | H. 其他功能 API | 2 | 0 | 0 | 2 |
-| **合計** | **24** | **0** | **0** | **24** |
+| I. 遠端路徑驗證 | 3 | 0 | 0 | 3 |
+| **合計** | **27** | **0** | **0** | **27** |
 
-**整體結果: 24/24 通過 (100%)**
+**整體結果: 27/27 通過 (100%)**
 
 ---
 
@@ -108,6 +109,39 @@
 | H1 | 檔案列表 (`POST /api/v1/list_dir`) | ✅ | 掃描專案目錄，回傳 12 個影片檔案 |
 | H2 | 任務控制 (`POST /api/v1/control/pause`) | ✅ | 無任務時回傳 `{"status":"paused"}`，端點正常 |
 
+### I. 遠端路徑驗證 (`POST /api/v1/validate_paths`) — 2026-03-18 新增
+
+> **用途**：轉 Proxy / 串帶指定遠端算力主機時，提交前先驗證路徑的磁碟機是否存在、路徑是否可存取
+
+**測試條件：**
+
+| 項目 | 路徑 |
+|------|------|
+| CARD A（來源） | `U:\20260205_寬微廣告_影片中文化\09_Export\01_Check` |
+| CARD B（來源） | `R:\ProjectYaun\20260304_幾莫_鴻海科技獎短影音\09_Export\01_Check` |
+| 目的地 | `D:\Antigravity\OriginsunTranscode\test_zone` |
+
+| # | 測試項 | 結果 | 備註 |
+|---|--------|:----:|------|
+| I1 | 驗證存在路徑 — CARD_A (`U:`) + CARD_B (`R:`) + DEST (`D:`) | ✅ | 三個路徑 `drive_exists=true`, `path_exists=true` |
+| I2 | 驗證不存在磁碟機 — `X:\fake_path` + `Z:\nonexistent` | ✅ | 兩個路徑 `drive_exists=false`，正確回報錯誤 |
+| I3 | 混合驗證 — 存在路徑 + 不存在磁碟機 + 不存在路徑 | ✅ | `U:` 路徑✅、`Z:\fake` 磁碟機不存在❌、`D:` 目的✅、`C:\NonExistent999` 路徑不存在❌ |
+
+**前端整合測試（瀏覽器 JS console）：**
+
+| # | 測試項 | 結果 | 備註 |
+|---|--------|:----:|------|
+| I-FE1 | `validateRemotePaths('localhost:8001', ['Z:\\test', 'C:\\Windows'])` | ✅ | `ok: false`, errors: `["磁碟機 Z: 不存在"]` |
+| I-FE2 | `validateRemotePaths('localhost:8001', ['C:\\NonExistentFolder12345'])` | ✅ | `ok: false`, errors: `["路徑不存在: C:\\NonExistentFolder12345"]` |
+| I-FE3 | `validateRemotePaths('localhost:8001', ['C:\\Windows', 'C:\\Users'])` | ✅ | `ok: true` |
+
+**涉及檔案：**
+- `core/schemas.py` — 新增 `ValidatePathsRequest`
+- `routers/api_system.py` — 新增 `POST /api/v1/validate_paths`
+- `frontend/js/shared/utils.js` — 新增 `validateRemotePaths()` 共用函式
+- `frontend/tabs/transcode/transcode.js` — `submitTranscode()` dispatch 前驗證
+- `frontend/tabs/concat/concat.js` — `submitConcat()` 送出前驗證
+
 ---
 
 ## 測試中修復的 Bug
@@ -135,12 +169,13 @@
 | OTA 更新 | 需 NAS 上有新版本 |
 | 通知系統 | 需 Google Chat Webhook / LINE Token |
 | 分散式轉檔 | 需多台代理端電腦 |
+| 遠端路徑驗證（端對端） | 需多台代理端電腦，本次僅驗證 API + 前端函式 |
 
 ---
 
 ## 結論
 
-**24/24 項自動化測試全部通過。** 測試過程中發現並即時修復了 4 個 Bug，主要來自 F5-TTS 安裝時升級的 torchaudio 2.10 / torchcodec 在 Windows 上的相容性問題。
+**27/27 項自動化測試全部通過。** 測試過程中發現並即時修復了 4 個 Bug，主要來自 F5-TTS 安裝時升級的 torchaudio 2.10 / torchcodec 在 Windows 上的相容性問題。
 
 重點驗證成果：
 - ✅ Edge-TTS 標準語音合成正常
@@ -149,3 +184,4 @@
 - ✅ 字典 API 熱更新機制正常（write → read-back 一致）
 - ✅ 前端三子頁 UI 完整且切換正常
 - ✅ 所有系統 API 端點回應正確
+- ✅ 遠端路徑驗證 API + 前端整合正常（3+3 項測試通過，2026-03-18 新增）

@@ -22,12 +22,35 @@ _DEFAULT_SETTINGS: dict = {
         "concat":    {"gchat": True, "line": False},
         "verify":    {"gchat": True, "line": False},
     },
+    "agents": [],
     "compute_hosts": [],
+    "concurrency": {
+        "backup": 1,
+        "transcode": 2,
+        "concat": 2,
+        "verify": 2,
+        "transcribe": 1,
+        "report": 1,
+    },
 }
 
 def save_settings(data: dict) -> None:
+    # Merge-on-save: read existing settings first, then overlay incoming data
+    # so that keys not present in `data` are preserved (e.g. agents, concurrency).
+    existing = {}
+    if os.path.exists(_SETTINGS_FILE):
+        try:
+            with open(_SETTINGS_FILE, "r", encoding="utf-8") as f:
+                existing = _json.load(f)
+        except Exception:
+            pass
+    for key, val in data.items():
+        if isinstance(val, dict) and isinstance(existing.get(key), dict):
+            existing[key] = {**existing[key], **val}
+        else:
+            existing[key] = val
     with open(_SETTINGS_FILE, "w", encoding="utf-8") as f:
-        _json.dump(data, f, ensure_ascii=False, indent=4)
+        _json.dump(existing, f, ensure_ascii=False, indent=4)
 
 def init_settings() -> None:
     """Ensure settings.json exists with defaults on boot."""
@@ -45,11 +68,16 @@ def load_settings() -> dict:
             with open(_SETTINGS_FILE, "r", encoding="utf-8") as f:
                 data = _json.load(f)
                 merged: dict = {}
+                # Merge defaults first
                 for section, defaults in _DEFAULT_SETTINGS.items():
                     if isinstance(defaults, dict):
                         merged[section] = {**defaults, **data.get(section, {})}
                     else:
                         merged[section] = data.get(section, defaults)
+                # Preserve any extra keys from file not in defaults
+                for key in data:
+                    if key not in merged:
+                        merged[key] = data[key]
                 return merged
         except Exception:
             pass

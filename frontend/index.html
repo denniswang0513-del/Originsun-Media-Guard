@@ -13,6 +13,7 @@
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.7.2/socket.io.js"></script>
     <link rel="stylesheet" href="style.css?v=1.5.0">
+    <link rel="stylesheet" href="./tabs/projects/projects.css">
 </head>
 
 <body class="bg-[#1e1e1e] text-gray-200 h-screen flex flex-col">
@@ -92,6 +93,9 @@
 
         <!-- Tabs Nav -->
         <nav class="flex border-b border-[#3e3e3e] mb-2">
+            <button onclick="switchTab('tab-projects')" id="btn_tab-projects"
+                class="px-5 py-3 text-sm font-semibold rounded-t-lg bg-[#1e1e1e] text-white hover:text-gray-200 hover:bg-[#252525] border border-transparent mr-1 transition-colors">📋
+                專案總覽</button>
             <button onclick="switchTab('tab_main')" id="btn_tab_main"
                 class="px-5 py-3 text-sm font-semibold rounded-t-lg bg-[#2a2a2a] text-blue-400 border border-b-0 border-[#3a3a3a] mr-1 transition-colors">📦
                 備份並轉檔</button>
@@ -115,6 +119,11 @@
                 🔊 語音生成
             </button>
         </nav>
+
+        <!-- Tab 0: Projects Overview -->
+        <section id="tab-projects"
+            class="tab-content hidden bg-[#2a2a2a] p-5 rounded-b-lg rounded-tr-lg border border-[#3a3a3a] shadow-sm transform transition-all duration-300">
+        </section>
 
         <!-- Tab 1: Backup & Transcode -->
         <section id="tab_main"
@@ -305,16 +314,38 @@
     <!-- UI Overlay for Background Update -->
     <div id="updatingModal"
         class="hidden fixed inset-0 bg-black/90 z-[110] flex items-center justify-center backdrop-blur-md">
-        <div class="bg-[#1e1e1e] border-t-4 border-blue-500 rounded-lg shadow-2xl p-8 max-w-md w-full text-center">
-            <div class="mb-6 flex justify-center">
-                <div class="w-16 h-16 border-4 border-blue-500/30 border-t-blue-500 rounded-full animate-spin"></div>
+        <div class="bg-[#1e1e1e] border-t-4 border-blue-500 rounded-lg shadow-2xl p-8 max-w-lg w-full">
+            <!-- Header with spinner -->
+            <div class="flex items-center gap-4 mb-6">
+                <div class="w-12 h-12 border-4 border-blue-500/30 border-t-blue-500 rounded-full animate-spin shrink-0"></div>
+                <div>
+                    <h2 class="text-xl font-bold text-white">正在升級系統</h2>
+                    <p class="text-gray-400 text-sm">請勿關閉視窗，完成後將自動重整</p>
+                </div>
             </div>
-            <h2 class="text-2xl font-bold text-white mb-2 tracking-wider">正在升級加速器...</h2>
-            <p class="text-gray-400 text-sm mb-4">
-                系統正在套用 NAS 上的最新版本，<br>請勿關閉視窗，更新完成後將自動重整。
-            </p>
-            <div class="text-xs text-blue-400 font-mono animate-pulse">
-                [Downloading & Restarting...]
+            <!-- Progress bar -->
+            <div class="w-full bg-[#2a2a2a] rounded-full h-2 mb-5 overflow-hidden">
+                <div id="update_pct_bar" class="bg-blue-500 h-2 rounded-full transition-all duration-500" style="width:2%"></div>
+            </div>
+            <!-- Steps list -->
+            <div class="space-y-2 mb-5">
+                <div id="upd_step_1" class="flex items-center gap-3 text-sm text-gray-400">
+                    <span id="upd_icon_1" class="text-base w-5 text-center">⏳</span>
+                    <span>從 NAS 同步最新版本</span>
+                </div>
+                <div id="upd_step_2" class="flex items-center gap-3 text-sm text-gray-400">
+                    <span id="upd_icon_2" class="text-base w-5 text-center">⏳</span>
+                    <span>安裝 / 更新 Python 套件</span>
+                    <span class="text-xs text-gray-600">（首次可能需要 10-20 分鐘）</span>
+                </div>
+                <div id="upd_step_3" class="flex items-center gap-3 text-sm text-gray-400">
+                    <span id="upd_icon_3" class="text-base w-5 text-center">⏳</span>
+                    <span>重新啟動伺服器</span>
+                </div>
+            </div>
+            <!-- Current message -->
+            <div id="upd_msg" class="text-xs text-blue-400 font-mono bg-[#0a0a0a] rounded px-3 py-2 animate-pulse">
+                正在準備更新...
             </div>
         </div>
     </div>

@@ -15,13 +15,9 @@ import core.state as state  # type: ignore
 
 from routers import (  # type: ignore
     api_backup, api_verify, api_proxy, api_concat,
-    api_report, api_transcribe, api_system
+    api_report, api_transcribe, api_system, api_tts,
+    api_job_history, api_queue
 )
-try:
-    from routers import api_tts  # type: ignore
-except ImportError:
-    api_tts = None
-    print("[WARNING] TTS module not available (missing torch/torchaudio/soundfile). TTS endpoints disabled.")
 
 app = FastAPI(title="Originsun Media Guard Web API")
 
@@ -52,12 +48,14 @@ app.include_router(api_concat.router)
 app.include_router(api_report.router)
 app.include_router(api_transcribe.router)
 app.include_router(api_system.router)
-if api_tts:
-    app.include_router(api_tts.router)
+app.include_router(api_tts.router)
+app.include_router(api_job_history.router)
+app.include_router(api_queue.router)
 
 @app.on_event("startup")
 async def _on_startup():
     state.set_main_loop(asyncio.get_running_loop())
+    state.init_concurrency()
 
 @app.get("/download_agent")
 async def download_agent():

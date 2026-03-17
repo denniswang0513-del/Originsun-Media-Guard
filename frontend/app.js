@@ -19,6 +19,23 @@ window.onerror = function(msg, url, lineNo, columnNo, error) {
     return false;
 };
 
+// ─── Fallback for appendLog function ─── //
+// If utils.js hasn't loaded yet or appendLog is not available globally, define a fallback
+if (typeof appendLog === 'undefined') {
+    window.appendLog = function(msg, type = 'info') {
+        const terminal = document.getElementById('terminal_verbose');
+        if (terminal) {
+            const line = document.createElement('div');
+            line.className = type === 'system' ? 'text-yellow-300 font-bold' :
+                            type === 'error' ? 'text-red-400' :
+                            type === 'verbose' ? 'text-gray-500 text-xs' : 'text-gray-400';
+            line.textContent = '[' + new Date().toLocaleTimeString() + '] ' + msg;
+            terminal.appendChild(line);
+            terminal.scrollTop = terminal.scrollHeight;
+        }
+    };
+}
+
 // ─── Main Application ─── //
         let currentSocketUrl = window.location.origin;
         let socket = null;
@@ -29,6 +46,19 @@ window.onerror = function(msg, url, lineNo, columnNo, error) {
                 // Load Backup Tab
                 const tabMain = document.getElementById('tab_main');
                 const _cb = `?t=${Date.now()}`;
+
+                // Load Projects Overview Tab (first, before backup)
+                try {
+                    const tabProjects = document.getElementById('tab-projects');
+                    const projRes = await fetch(`./tabs/projects/projects.html${_cb}`);
+                    if (projRes.ok) {
+                        tabProjects.innerHTML = await projRes.text();
+                        const projModule = await import(`./tabs/projects/projects.js${_cb}`);
+                        projModule.initTab();
+                    }
+                } catch (projErr) {
+                    console.warn('[Projects Tab] 載入失敗:', projErr);
+                }
                 const backupRes = await fetch(`./tabs/backup/backup.html${_cb}`);
                 if (backupRes.ok) {
                     tabMain.innerHTML = await backupRes.text();
@@ -167,6 +197,7 @@ window.onerror = function(msg, url, lineNo, columnNo, error) {
                 reconnection: true
             });
             window._socket = socket;  // Expose for TTS tab and other modules
+            window.socket = socket;
 
             socket.on('connect', () => {
                 appendLog('已連線至伺服器 WebSocket', 'system');
@@ -355,8 +386,18 @@ window.onerror = function(msg, url, lineNo, columnNo, error) {
                     btn.dataset.driveUrl = data.drive_url || '';
                     btn.style.display = 'inline-flex';
                 }
-                // Auto-open
-                if (data.local_path) openReportFile(data.local_path, data.drive_url || '');
+                // Auto-open: only if THIS tab initiated the report (job_id match).
+                // Prevents duplicate windows even if Socket.IO broadcasts to all tabs.
+                if (data.job_id && window._myReportJobIds?.has(data.job_id)) {
+                    window._myReportJobIds.delete(data.job_id);
+                    if (data.public_url) {
+                        window.open(data.public_url, '_blank');
+                    } else if (data.drive_url) {
+                        window.open(data.drive_url, '_blank');
+                    } else if (data.local_path) {
+                        openReportFile(data.local_path, '');
+                    }
+                }
             });
 
             // Transcribe progress updates
@@ -441,6 +482,7 @@ window.onerror = function(msg, url, lineNo, columnNo, error) {
         let initialPollComplete = false;
         let isUpdating = false;
         let hasServerDiedDuringUpdate = false;
+        let _updatePollTimer = null;
 
         async function pollLocalAgent() {
             try {
@@ -583,11 +625,51 @@ window.onerror = function(msg, url, lineNo, columnNo, error) {
             }
         }
 
+        function updateUpdateModal(d) {
+            const pctBar = document.getElementById('update_pct_bar');
+            const msgEl  = document.getElementById('upd_msg');
+            if (pctBar) pctBar.style.width = (d.pct || 2) + '%';
+            if (msgEl)  msgEl.textContent = d.msg || '';
+            const step = d.step || 0;
+            for (let i = 1; i <= 3; i++) {
+                const icon = document.getElementById(`upd_icon_${i}`);
+                const row  = document.getElementById(`upd_step_${i}`);
+                if (!icon || !row) continue;
+                if (i < step) {
+                    icon.textContent = '✅';
+                    row.className = row.className.replace(/text-gray-400|text-blue-300/g, '') + ' text-green-400';
+                } else if (i === step) {
+                    icon.textContent = '🔄';
+                    row.className = row.className.replace(/text-gray-400|text-green-400/g, '') + ' text-blue-300';
+                } else {
+                    icon.textContent = '⏳';
+                    row.className = row.className.replace(/text-blue-300|text-green-400/g, '') + ' text-gray-400';
+                }
+            }
+        }
+
+        function startUpdateProgressPolling() {
+            if (_updatePollTimer) return;
+            _updatePollTimer = setInterval(async () => {
+                if (!isUpdating) {
+                    clearInterval(_updatePollTimer);
+                    _updatePollTimer = null;
+                    return;
+                }
+                try {
+                    const r = await fetch('http://localhost:8001/status',
+                        { signal: AbortSignal.timeout(2000) });
+                    if (r.ok) updateUpdateModal(await r.json());
+                } catch (e) { /* monitor 尚未就緒，忽略 */ }
+            }, 1000);
+        }
+
         async function updateAgent() {
             if (!confirm('即將套用 NAS 上的最新版本並重新啟動本機代理。這將會中斷正在本機執行的任務。\n確認要執行嗎？')) return;
 
             isUpdating = true;
             hasServerDiedDuringUpdate = false;
+            startUpdateProgressPolling();
             checkForceInstallModal(); // 立刻覆蓋藍色大遮罩
 
             try {
@@ -653,7 +735,7 @@ window.onerror = function(msg, url, lineNo, columnNo, error) {
                 hosts.forEach((h, i) => {
                     const lbl = document.createElement('label');
                     lbl.className = 'flex items-center gap-1 text-xs text-gray-300 cursor-pointer';
-                    lbl.innerHTML = '<input type="checkbox" id="host_chk_' + i + '" class="form-checkbox rounded bg-[#1e1e1e] border-[#444]"> 🖥️ ' + h.name + ' <span class="text-gray-500">(' + h.ip + ')</span>';
+                    lbl.innerHTML = '<input type="checkbox" id="host_chk_' + i + '" data-ip="' + h.ip + '" data-name="' + h.name + '" class="form-checkbox rounded bg-[#1e1e1e] border-[#444]"> 🖥️ ' + h.name + ' <span class="text-gray-500">(' + h.ip + ')</span>';
                     cbxDiv.appendChild(lbl);
                 });
                 cbxDiv.dataset.built = '1';
@@ -725,6 +807,8 @@ window.onerror = function(msg, url, lineNo, columnNo, error) {
             const pathEl = document.getElementById('conflict_path');
             const reasonEl = document.getElementById('conflict_reason');
             const actionsEl = document.getElementById('conflict_actions');
+            const conflictJobId = data.job_id || '';  // Capture job_id for routing
+            window._currentConflictJobId = conflictJobId;  // Store for setGlobalConflict
 
             pathEl.textContent = `檔案: ${data.rel_path} (${data.target === 'nas' ? 'NAS端' : '本機端'})`;
             reasonEl.textContent = data.reason;
@@ -738,7 +822,7 @@ window.onerror = function(msg, url, lineNo, columnNo, error) {
                 btn.textContent = text;
                 btn.onclick = () => {
                     modal.classList.add('hidden');
-                    if (socket) socket.emit('resolve_conflict', { action: action });
+                    if (socket) socket.emit('resolve_conflict', { action: action, job_id: conflictJobId });
                 };
                 return btn;
             };
@@ -769,7 +853,7 @@ window.onerror = function(msg, url, lineNo, columnNo, error) {
 
         // 全部覆蓋 / 全部略過：通知 server 設定全域模式並關閉 modal
         function setGlobalConflict(action) {
-            socket.emit('set_global_conflict', { action });
+            socket.emit('set_global_conflict', { action, job_id: window._currentConflictJobId || '' });
             document.getElementById('conflict_modal').classList.add('hidden');
             const label = action === 'overwrite' ? '全部覆蓋' : '全部略過';
             appendLog(`[!] 已設定「${label}」模式，後續衝突將自動套用。`, 'system');
@@ -912,7 +996,7 @@ window.onerror = function(msg, url, lineNo, columnNo, error) {
             document.getElementById(tabId).classList.remove('hidden');
 
             // 重置按鈕樣式
-            const btnCols = ['btn_tab_main', 'btn_tab_verify', 'btn_tab_transcode', 'btn_tab_concat', 'btn_tab_report', 'btn_tab_transcribe', 'btn_tab_tts'];
+            const btnCols = ['btn_tab-projects', 'btn_tab_main', 'btn_tab_verify', 'btn_tab_transcode', 'btn_tab_concat', 'btn_tab_report', 'btn_tab_transcribe', 'btn_tab_tts'];
             btnCols.forEach(btn => {
                 const el = document.getElementById(btn);
                 if (el) {
@@ -927,6 +1011,9 @@ window.onerror = function(msg, url, lineNo, columnNo, error) {
                 activeBtn.classList.remove('bg-[#1e1e1e]', 'text-white', 'text-amber-400', 'border-transparent');
                 activeBtn.classList.add('bg-[#2a2a2a]', 'border', 'border-b-0', 'border-[#3a3a3a]', 'text-blue-400');
             }
+
+            // Notify projects tab of visibility change
+            document.dispatchEvent(new CustomEvent('tab-changed', { detail: { tab: tabId } }));
 
             // Auto-fill output directory when entering report tab
             if (tabId === 'tab_report') {
@@ -1006,9 +1093,20 @@ window.onerror = function(msg, url, lineNo, columnNo, error) {
                                 });
                             }
 
-                            if (d.progress) {
-                                let pct = d.progress.total_pct || 0;
-                                let txt = d.progress.current_file || '處理中...';
+                            // Try active_jobs first (new multi-job backend), fallback to legacy d.progress
+                            let hostProg = null;
+                            if (d.active_jobs) {
+                                const ajobs = Object.values(d.active_jobs);
+                                if (ajobs.length > 0) {
+                                    // Pick the first running job's progress
+                                    const running = ajobs.find(j => j.status === 'running') || ajobs[0];
+                                    hostProg = running.progress;
+                                }
+                            }
+                            if (!hostProg && d.progress) hostProg = d.progress;
+                            if (hostProg) {
+                                let pct = hostProg.total_pct || 0;
+                                let txt = hostProg.current_file || '處理中...';
                                 updateHostProgress(ip, Math.floor(pct), `[${Math.floor(pct)}%] ${txt}`, '#3b82f6');
                             }
 
@@ -1234,7 +1332,7 @@ window.onerror = function(msg, url, lineNo, columnNo, error) {
                             body: JSON.stringify({ sources: files, dest_dir: dest })
                         });
                         const res = await r.json();
-                        if (typeof appendLog === 'function') appendLog('✅ ' + h.name + ' [' + (cardName || 'all') + '] 接收，排序: ' + (res.position || '?'), 'system');
+                        if (typeof appendLog === 'function') appendLog('✅ ' + h.name + ' [' + (cardName || 'all') + '] 接收，任務 ID: ' + (res.job_id || '?'), 'system');
                         hostOk = true;
                     } catch (err) {
                         if (typeof appendLog === 'function') appendLog('❌ 無法連線到 ' + h.name + ': ' + err.message, 'error');
@@ -1301,16 +1399,16 @@ window.onerror = function(msg, url, lineNo, columnNo, error) {
                                                 sources: [concatSrcDir],
                                                 dest_dir: concatDestDir,
                                                 custom_name: flags.project_name + '_' + cardName + '_reel',
-                                                resolution: '720P',
-                                                codec: 'H.264 (NVENC)',
-                                                burn_timecode: true,
-                                                burn_filename: false
+                                                resolution: flags.concat_resolution || '720P',
+                                                codec: flags.concat_codec || 'H.264 (NVENC)',
+                                                burn_timecode: flags.concat_burn_tc ?? true,
+                                                burn_filename: flags.concat_burn_fn ?? false
                                             };
                                             const r3 = await fetch(concatUrl, {
                                                 method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(concatPayload)
                                             });
                                             const j3 = await r3.json();
-                                            if (typeof appendLog === 'function') appendLog('📌 串帶 [' + cardName + '] 排隊中: ' + (j3.position || '?'), 'system');
+                                            if (typeof appendLog === 'function') appendLog('📌 串帶 [' + cardName + '] 排隊中，任務 ID: ' + (j3.job_id || '?'), 'system');
                                         }
                                     }
 
@@ -1318,15 +1416,25 @@ window.onerror = function(msg, url, lineNo, columnNo, error) {
                                     if (flags.do_report) {
                                         const localDir = flags.local_root + '/' + flags.project_name;
                                         const reportPayload = {
-                                            source_dir: localDir, output_dir: flags.local_root, nas_root: flags.nas_root || '',
-                                            report_name: flags.project_name, do_filmstrip: true, do_techspec: true,
-                                            do_hash: false, do_gdrive: false, do_gchat: false, do_line: false,
-                                            exclude_dirs: flags.proxy_root ? [flags.proxy_root + '/' + flags.project_name] : []
+                                            source_dir: localDir,
+                                            output_dir: flags.report_output || flags.local_root,
+                                            nas_root: flags.nas_root || '',
+                                            report_name: flags.report_name || flags.project_name,
+                                            do_filmstrip: flags.report_filmstrip ?? true,
+                                            do_techspec: flags.report_techspec ?? true,
+                                            do_hash: flags.report_hash ?? false,
+                                            do_gdrive: false, do_gchat: false, do_line: false,
+                                            exclude_dirs: flags.proxy_root ? [flags.proxy_root + '/' + flags.project_name] : [],
+                                            client_sid: window.socket?.id || ''
                                         };
                                         const r4 = await fetch(getComputeBaseUrl() + '/api/v1/report_jobs', {
                                             method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(reportPayload)
                                         });
                                         const j4 = await r4.json();
+                                        if (j4.job_id) {
+                                            window._myReportJobIds = window._myReportJobIds || new Set();
+                                            window._myReportJobIds.add(j4.job_id);
+                                        }
                                         if (typeof appendLog === 'function') appendLog('📊 報表任務已提交: ' + j4.status, 'system');
                                     }
                                     window._postMergeFlags = null;
@@ -1452,7 +1560,7 @@ window.onerror = function(msg, url, lineNo, columnNo, error) {
                                             method: 'POST', headers: { 'Content-Type': 'application/json' },
                                             body: JSON.stringify({ sources: srcFiles, dest_dir: destDir })
                                         }).then(res => res.json()).then(j => {
-                                            if (typeof appendLog === 'function') appendLog(`📌 主機 ${dist.host.name} [${cardName}] 補轉排隊: ${j.position || '?'}`, 'system');
+                                            if (typeof appendLog === 'function') appendLog(`📌 主機 ${dist.host.name} [${cardName}] 補轉排隊，任務 ID: ${j.job_id || '?'}`, 'system');
                                         }).catch(err => {
                                             if (typeof appendLog === 'function') appendLog(`⚠️ 主機 ${dist.host.name} [${cardName}] 補轉派發失敗: ${err.message}`, 'error');
                                         });

@@ -37,6 +37,7 @@ export async function submitReportJob() {
         do_gdrive: document.getElementById('rpt_gdrive')?.checked ?? false,
         do_gchat: false,
         do_line: false,
+        client_sid: window.socket?.id || '',
     };
 
     rptLog('正在送出報表工作請求...', 'system');
@@ -48,6 +49,11 @@ export async function submitReportJob() {
         });
         const result = await res.json();
         if (result.status === 'queued') {
+            // Track job_id so only THIS tab auto-opens the report window
+            if (result.job_id) {
+                window._myReportJobIds = window._myReportJobIds || new Set();
+                window._myReportJobIds.add(result.job_id);
+            }
             rptLog(`工作已排隊—— Socket.IO 將持續回報進度`, 'ok');
         } else {
             rptLog(`錯誤： ${JSON.stringify(result)}`, 'error');

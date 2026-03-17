@@ -1,6 +1,6 @@
 # Originsun Media Guard Pro — Claude Code 完整交接文件
 
-> **版本**: v1.6.0（2026-03-16）
+> **版本**: v1.7.0（2026-03-18）
 > **目標讀者**: 接手開發的 AI 協作者（Claude Code）
 > **開發環境**: Windows 11、Python 3.11、Vanilla JS (ES Modules)
 > **啟動方式**: `d:\Antigravity\OriginsunTranscode\.venv\Scripts\python.exe main.py`
@@ -166,7 +166,7 @@ OriginsunTranscode/
 │                            #   - 最終產出放在 {output_dir}/Originsun_Reports/ 下
 │                            #   - 更新 reports_index.json（本機 + NAS 各一份）
 │
-│  ── 【routers/ — FastAPI 路由模組（8 個）】
+│  ── 【routers/ — FastAPI 路由模組（10 個）】
 ├── routers/
 │   ├── __init__.py
 │   ├── api_backup.py        # 備份端點（見 7.1）
@@ -176,7 +176,9 @@ OriginsunTranscode/
 │   ├── api_report.py        # 報表端點（見 7.5）
 │   ├── api_transcribe.py    # 語音辨識端點（見 7.6）
 │   ├── api_system.py        # 系統工具端點（見 7.7）
-│   └── api_tts.py           # TTS 端點（見 7.8）
+│   ├── api_tts.py           # TTS 端點（見 7.8）
+│   ├── api_queue.py         # 佇列管理端點（見 7.9）
+│   └── api_job_history.py   # 任務歷史端點
 │
 │  ── 【frontend/ — 靜態前端（SPA）】
 ├── frontend/
@@ -213,10 +215,12 @@ OriginsunTranscode/
 │       ├── concat/          # 影片串接頁籤
 │       ├── report/          # 視覺報表頁籤
 │       ├── transcribe/      # Whisper 語音辨識頁籤
-│       └── tts/             # TTS 頁籤（含 3 個子頁）
-│                            #   子頁 1：📢 標準 TTS（Edge-TTS）
-│                            #   子頁 2：🎙️ 聲音複製（F5-TTS）
-│                            #   子頁 3：📖 正音字典編輯器
+│       ├── tts/             # TTS 頁籤（含 3 個子頁）
+│       │                    #   子頁 1：📢 標準 TTS（Edge-TTS）
+│       │                    #   子頁 2：🎙️ 聲音複製（F5-TTS）
+│       │                    #   子頁 3：📖 正音字典編輯器
+│       └── projects/        # 專案總覽頁籤
+│                            #   機器狀態、佇列管理、Agent 管理
 │
 │  ── 【模型與資料目錄】
 ├── models/
@@ -237,7 +241,34 @@ OriginsunTranscode/
 ├── start_hidden.vbs         # 無黑色視窗地啟動 python main.py
 ├── update_agent.bat         # OTA 更新腳本（從 NAS 複製新程式碼，重啟服務）
 ├── Install_Originsun_Agent.bat  # 新同事安裝精靈（從伺服器下載 Agent.zip，解壓到桌面）
-└── Maintainer_Guide.md      # 維護人員操作手冊
+├── Maintainer_Guide.md      # 維護人員操作手冊
+│
+│  ── 【測試套件】
+├── pytest.ini               # pytest 設定（asyncio_mode=auto, testpaths=tests）
+├── tests/
+│   ├── conftest.py          # 共用 fixtures（tmp_settings, mock_engine, async_client, real_server）
+│   ├── test_smoke.py        # Smoke tests（5 個：health, version, settings, frontend, socketio）
+│   ├── unit/                # 單元測試（20 個）
+│   │   ├── test_taiwan_normalizer.py  # 台灣正音引擎（8 個測試）
+│   │   ├── test_config.py             # 設定讀寫（6 個測試）
+│   │   └── test_core_engine.py        # 核心引擎（6 個測試）
+│   ├── integration/         # 整合測試（30 個）
+│   │   ├── test_api_system.py         # 系統 API（7 個測試）
+│   │   ├── test_api_queue.py          # 佇列管理 API（8 個測試）
+│   │   ├── test_api_validate_paths.py # 遠端路徑驗證 API（8 個測試）
+│   │   ├── test_task_queue.py         # 任務佇列（3 個測試）
+│   │   └── test_conflict_resolution.py # 衝突解決（4 個測試）
+│   └── e2e/                 # 端對端測試（20 個）
+│       ├── conftest.py      # Playwright fixtures
+│       ├── test_ui_basic.py           # 基本 UI（5 個測試）
+│       ├── test_task_flow.py          # 任務流程（3 個測試）
+│       ├── test_projects_tab.py       # 專案總覽 UI（8 個測試）
+│       └── test_validate_remote_paths.py  # 遠端路徑驗證前端（4 個測試）
+│
+│  ── 【測試與開發文件】
+├── TEST_INSTRUCTIONS.md     # 測試套件建置指令（17 個指令）
+├── TEST_REPORT.md           # 功能測試報告
+└── FINISHING.md             # 收尾流程範本
 ```
 
 ---
@@ -514,6 +545,7 @@ def _emit_sync(event: str, data: dict) -> None:
 | GET | `/api/v1/utils/pick_file` | 彈出系統檔案選擇器 |
 | POST | `/api/v1/utils/create_shortcut` | 建立桌面捷徑 |
 | GET | `/api/v1/utils/resolve_drop` | 拖放路徑反向解析 |
+| POST | `/api/v1/validate_paths` | 驗證路徑磁碟機與目錄是否存在（遠端派發前驗證） |
 | POST | `/api/admin/restart` | 重啟 Agent 服務 |
 | GET | `/download_agent` | 下載 Originsun_Agent.zip |
 | GET | `/download_installer` | 下載安裝精靈 .bat |
@@ -555,7 +587,16 @@ def _emit_sync(event: str, data: dict) -> None:
 | POST | `/api/v1/voice_profiles/{id}/cache` | 將 NAS 角色快取到本機 |
 
 
-### 7.9 Pydantic Schema 完整清單 (`core/schemas.py`)
+### 7.9 佇列管理 (`routers/api_queue.py`)
+
+| 方法 | 路徑 | 說明 |
+|------|------|------|
+| GET | `/api/v1/queue` | 取得所有排隊中和執行中的任務 |
+| POST | `/api/v1/queue/reorder` | 重新排序佇列 |
+| POST | `/api/v1/queue/{job_id}/urgent` | 將任務設為緊急（排到最前） |
+| DELETE | `/api/v1/queue/{job_id}/urgent` | 取消任務的緊急狀態 |
+
+### 7.10 Pydantic Schema 完整清單 (`core/schemas.py`)
 
 ```python
 class BackupRequest(BaseModel):
@@ -648,6 +689,9 @@ class CompareSourceRequest(BaseModel):
     video_exts: List[str] = [".mov", ".mp4", ".mkv", ".mxf", ".avi", ".mts", ".m2ts", ".r3d", ".braw"]
     proxy_exts: List[str] = [".mov", ".mp4"]
     flat_proxy: bool = False
+
+class ValidatePathsRequest(BaseModel):
+    paths: List[str]
 ```
 
 ---

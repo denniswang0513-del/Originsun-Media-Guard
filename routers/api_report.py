@@ -1,17 +1,19 @@
-from fastapi import APIRouter
-from core.schemas import ReportJobRequest
-import core.state as state
+from fastapi import APIRouter  # type: ignore
+from fastapi.responses import JSONResponse  # type: ignore
+from core.schemas import ReportJobRequest  # type: ignore
+from core.worker import enqueue_job  # type: ignore
 import os
-import asyncio
-from core.report_job import _run_report_job
 
 router = APIRouter()
 
 @router.post("/api/v1/report_jobs")
 async def start_report_job(req: ReportJobRequest):
-    state._report_pause_event.set()
-    state._current_report_task = asyncio.create_task(_run_report_job(req))
-    return {"status": "queued"}
+    project_name = req.report_name or "report"
+    try:
+        job_id = enqueue_job(req, project_name, "report")
+        return {"status": "queued", "job_id": job_id}
+    except ValueError as e:
+        return JSONResponse(status_code=409, content={"status": "duplicate", "detail": str(e)})
 
 @router.get("/api/v1/reports/history")
 async def get_reports_history(output_dir: str = ""):

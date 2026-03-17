@@ -18,10 +18,13 @@ FILES_TO_PACK = [
     "taiwan_dict.json",
     "version.json",
     "update_agent.bat",
+    "update_monitor.py",
     "start_hidden.vbs",
     "logo.ico",
     "ffprobe.exe",
     "ffmpeg.exe",
+    "0225_requirements.txt",
+    "Install_Originsun_Agent.bat",
 ]
 DIRS_TO_PACK = [
     "frontend",

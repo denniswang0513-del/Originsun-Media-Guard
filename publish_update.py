@@ -113,6 +113,8 @@ def main():
             "logo.ico",
             "Install_Originsun_Agent.bat",
             "update_agent.bat",
+            "update_monitor.py",
+            "start_hidden.vbs",
             "0225_requirements.txt",
             "bootstrap.py",
             "Originsun_Agent.zip"

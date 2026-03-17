@@ -1,4 +1,4 @@
-import { getComputeBaseUrl, appendLog, pickPath, setupDragAndDrop, setupInputDrop } from '../../js/shared/utils.js';
+import { getComputeBaseUrl, appendLog, pickPath, setupDragAndDrop, setupInputDrop, validateRemotePaths } from '../../js/shared/utils.js';
 
 let tcSourceIndex = 0;
 
@@ -82,7 +82,25 @@ export async function submitTranscode() {
         return;
     }
 
-    window._isStandaloneTranscode = true; 
+    // 驗證遠端主機路徑
+    const remoteHosts = tcHosts.filter(h => h.ip !== 'local' && h.ip !== window.location.host);
+    if (remoteHosts.length > 0) {
+        const pathsToCheck = [destDir, ...cards.map(c => c[2])];
+        for (const h of remoteHosts) {
+            try {
+                const result = await validateRemotePaths(h.ip, pathsToCheck);
+                if (!result.ok) {
+                    alert(`⚠️ 遠端主機 [${h.name}] 路徑檢查失敗：\n\n${result.errors.join('\n')}\n\n請確認該主機是否已映射對應磁碟機。`);
+                    return;
+                }
+            } catch (e) {
+                alert(`⚠️ 無法連線至遠端主機 [${h.name}] (${h.ip}) 進行路徑驗證：${e.message}`);
+                return;
+            }
+        }
+    }
+
+    window._isStandaloneTranscode = true;
 
     window._standaloneState = {
         sources: cards.map(c => ({ cardName: c[0], path: c[2] })).filter(c => c.path),

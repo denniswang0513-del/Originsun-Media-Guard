@@ -283,8 +283,17 @@
                 <div class="meta">
                     報表產生：{{ generated_at }}
                 </div>
+                {% if public_url %}
+                <div class="meta" style="margin-top:4px;">
+                    🌐 公開網址：<a href="{{ public_url }}" target="_blank" style="color:#3b82f6; text-decoration:underline;">{{ public_url }}</a>
+                </div>
+                {% endif %}
             </div>
-            <button class="btn-print" onclick="window.print()">📥 下載為 PDF</button>
+            {% if pdf_url %}
+            <a class="btn-print" href="{{ pdf_url }}" download style="text-decoration:none; color:inherit;">📥 下載 PDF</a>
+            {% else %}
+            <button class="btn-print" onclick="window.print()">🖨 列印</button>
+            {% endif %}
         </header>
 
         <!-- Summary Cards -->

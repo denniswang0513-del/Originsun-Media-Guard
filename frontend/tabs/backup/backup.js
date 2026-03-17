@@ -131,6 +131,17 @@ export async function submitJob() {
                 const firstRemote = _selH.find(h => h.ip !== 'local');
                 return firstRemote ? firstRemote.name : '本機';
             })(),
+            // 串帶進階設定
+            concat_resolution: document.getElementById('bk_cc_res')?.value || '720P',
+            concat_codec: document.getElementById('bk_cc_codec')?.value || 'H.264 (NVENC)',
+            concat_burn_tc: document.getElementById('bk_cc_burn_tc')?.checked ?? true,
+            concat_burn_fn: document.getElementById('bk_cc_burn_fn')?.checked ?? false,
+            // 報表進階設定
+            report_name: document.getElementById('bk_rpt_name')?.value.trim() || '',
+            report_output: document.getElementById('bk_rpt_output')?.value.trim() || '',
+            report_filmstrip: document.getElementById('bk_rpt_filmstrip')?.checked ?? true,
+            report_techspec: document.getElementById('bk_rpt_techspec')?.checked ?? true,
+            report_hash: document.getElementById('bk_rpt_hash')?.checked ?? false,
         };
         payload.do_transcode = false;
         payload.do_concat = false;
@@ -150,10 +161,22 @@ export async function submitJob() {
         const result = await res.json();
         const btnRetry = document.getElementById('btn_retry');
         if (btnRetry) btnRetry.style.display = 'none';
-        appendLog(`請求已送出，伺服器排序狀態: ${result.status}, 排序號: ${result.position}`, 'system');
+        appendLog(`請求已送出，伺服器排序狀態: ${result.status}, 任務 ID: ${result.job_id || '?'}`, 'system');
     } catch (err) {
         appendLog(`請求發送失敗: ${err.message}`, 'error');
     }
+}
+
+function toggleConcatOptions() {
+    const panel = document.getElementById('concat_options_panel');
+    const checked = document.getElementById('chk_concat')?.checked;
+    if (panel) panel.classList.toggle('hidden', !checked);
+}
+
+function toggleReportOptions() {
+    const panel = document.getElementById('report_options_panel');
+    const checked = document.getElementById('chk_report')?.checked;
+    if (panel) panel.classList.toggle('hidden', !checked);
 }
 
 // Ensure functions are added to window object so inline event handlers in index.html still work during refactor,
@@ -167,6 +190,11 @@ export function initBackupTab() {
     setupInputDrop('local_root');
     setupInputDrop('nas_root');
     setupInputDrop('proxy_root');
+    setupInputDrop('bk_rpt_output');
+
+    // Sync initial visibility of concat/report options panels
+    toggleConcatOptions();
+    toggleReportOptions();
 }
 
 
@@ -174,3 +202,5 @@ export function initBackupTab() {
 window.addSourceRow = addSourceRow;
 window.setTodayName = setTodayName;
 window.submitJob = submitJob;
+window.toggleConcatOptions = toggleConcatOptions;
+window.toggleReportOptions = toggleReportOptions;

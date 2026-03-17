@@ -3,6 +3,7 @@ from typing import List, Tuple
 
 class BackupRequest(BaseModel):
     task_type: str = "backup"
+    job_id: str = ""
     project_name: str
     local_root: str
     nas_root: str
@@ -15,11 +16,15 @@ class BackupRequest(BaseModel):
 
 class TranscodeRequest(BaseModel):
     task_type: str = "transcode"
+    job_id: str = ""
+    project_name: str = ""
     sources: List[str]
     dest_dir: str
 
 class ConcatRequest(BaseModel):
     task_type: str = "concat"
+    job_id: str = ""
+    project_name: str = ""
     sources: List[str]
     dest_dir: str
     custom_name: str = ""
@@ -30,11 +35,14 @@ class ConcatRequest(BaseModel):
 
 class VerifyRequest(BaseModel):
     task_type: str = "verify"
+    job_id: str = ""
+    project_name: str = ""
     pairs: List[Tuple[str, str]]
     mode: str = "quick"
 
 class ReportJobRequest(BaseModel):
     task_type: str = "report"
+    job_id: str = ""
     source_dir: str
     output_dir: str
     nas_root: str = ""
@@ -46,9 +54,12 @@ class ReportJobRequest(BaseModel):
     do_gchat: bool = False
     do_line: bool = False
     exclude_dirs: list = []
+    client_sid: str = ""       # Socket.IO client sid（報表完成時只通知該客戶端）
 
 class TranscribeRequest(BaseModel):
     task_type: str = "transcribe"
+    job_id: str = ""
+    project_name: str = ""
     sources: List[str]
     dest_dir: str
     model_size: str = "turbo"
@@ -91,3 +102,9 @@ class CompareSourceRequest(BaseModel):
 
 class OpenFileRequest(BaseModel):
     path: str
+
+class ValidatePathsRequest(BaseModel):
+    paths: List[str]
+
+class ReorderRequest(BaseModel):
+    ordered_job_ids: List[str]

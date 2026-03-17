@@ -1,4 +1,4 @@
-import { appendLog, getComputeBaseUrl, addStandaloneSource, setupDragAndDrop, setupInputDrop } from '../../js/shared/utils.js';
+import { appendLog, getComputeBaseUrl, addStandaloneSource, setupDragAndDrop, setupInputDrop, validateRemotePaths } from '../../js/shared/utils.js';
 
 export async function submitConcat() {
     const rows = document.getElementById('cc_source_list').children;
@@ -24,6 +24,19 @@ export async function submitConcat() {
     };
 
     if (!isLocal) {
+        // 驗證遠端主機路徑
+        const pathsToCheck = [payload.dest_dir, ...sources];
+        try {
+            const result = await validateRemotePaths(selectedOpt.value, pathsToCheck);
+            if (!result.ok) {
+                alert(`⚠️ 遠端主機 [${ccHostName}] 路徑檢查失敗：\n\n${result.errors.join('\n')}\n\n請確認該主機是否已映射對應磁碟機。`);
+                return;
+            }
+        } catch (e) {
+            alert(`⚠️ 無法連線至遠端主機 [${ccHostName}] 進行路徑驗證：${e.message}`);
+            return;
+        }
+
         window._remoteJobType = 'concat';
         window._activeRemoteHosts = {};
         if(window.initRemoteHostProgress) window.initRemoteHostProgress([ccHostObj]);
@@ -38,7 +51,7 @@ export async function submitConcat() {
         const retryBtn = document.getElementById('btn_retry');
         if(retryBtn) retryBtn.style.display = 'none';
         
-        appendLog(`串帶請求已送出至 [${ccHostName}]，排序號: ${result.position}`, 'system');
+        appendLog(`串帶請求已送出至 [${ccHostName}]，任務 ID: ${result.job_id || '?'}`, 'system');
         
         if (!isLocal) {
             if(window.updateHostProgress) window.updateHostProgress(ccIp, 20, '已排程，串帶中...', '#228b22');

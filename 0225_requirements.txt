@@ -1,0 +1,35 @@
+# ─── Originsun Media Guard Pro — Python Dependencies ───
+
+# ── Core Server ──
+fastapi
+uvicorn
+python-socketio
+python-multipart
+aiofiles
+pydantic
+
+# ── Utilities ──
+customtkinter
+xxhash
+requests
+Jinja2
+Pillow
+psutil
+
+# ── Google API ──
+google-api-python-client
+google-auth-oauthlib
+google-auth-httplib2
+
+# ── TTS ──
+edge-tts
+soundfile
+torch
+torchaudio
+f5-tts
+
+# ── Whisper (語音辨識) ──
+faster-whisper
+
+# ── Report ──
+playwright

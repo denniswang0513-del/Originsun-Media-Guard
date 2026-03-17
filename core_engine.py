@@ -236,8 +236,14 @@ class MediaGuardEngine:
         nas_dir = os.path.join(nas_root, project_name) if nas_root else ""
         
         all_items: List[Tuple[str, str, str]] = []
+        # 收集需要在目的地建立的空資料夾（來源有但沒有任何檔案的目錄）
+        empty_dirs: List[Tuple[str, str]] = []   # (card, rel_dir)
         for card, src_root in sources:
-            for dirpath, _, filenames in os.walk(src_root):
+            for dirpath, dirnames, filenames in os.walk(src_root):
+                if not filenames and not dirnames:
+                    # 真正的空資料夾（無檔案、無子目錄）
+                    rel_dir = os.path.relpath(dirpath, src_root).lstrip("\\/")
+                    empty_dirs.append((card, rel_dir))
                 for fname in filenames:
                     src_abs = os.path.join(dirpath, fname)
                     rel = os.path.relpath(src_abs, src_root).lstrip("\\/")
@@ -256,7 +262,19 @@ class MediaGuardEngine:
         t_last_chunk = [time.time()]  # mutable so inner func can update it
         
         self.log(f"[Engine] 準備備份 {total_files} 個檔案，總計 {total_bytes / (1024**3):.2f} GB")
-        
+
+        # ── 預先建立空資料夾（攝影機卡片常見的 metadata 目錄） ──
+        if empty_dirs:
+            self.log(f"[Engine] 同步 {len(empty_dirs)} 個空資料夾結構...")
+            for card, rel_dir in empty_dirs:
+                l_dir = os.path.join(local_dir, card, rel_dir)
+                os.makedirs(l_dir, exist_ok=True)
+                if nas_dir:
+                    n_dir = os.path.join(nas_dir, card, rel_dir)
+                    try:
+                        os.makedirs(n_dir, exist_ok=True)
+                    except OSError as e:
+                        self.err(f"建立 NAS 空資料夾失敗: {rel_dir} - {e}")
 
         # ── 檢查重複的交互機制 ──
         def check_duplicate(engine: "MediaGuardEngine", src: str, dest: str, target_type: str, f_size: int, rel_path: str) -> Tuple[str, str]:
@@ -653,6 +671,9 @@ class MediaGuardEngine:
         on_progress: Optional[Callable[[Dict[str, Any]], None]] = None
     ):
         """獨立 Proxy 轉檔邏輯"""
+        if os.environ.get("MOCK_FFMPEG") == "1":
+            self._logger("MOCK: transcode skipped")
+            return
         self._stop_event.clear()
         self._pause_event.clear()
 
@@ -966,70 +987,102 @@ class MediaGuardEngine:
             # 使用 -filter_script:v 將長篇幅的影片濾鏡載入，保持與 -vf 相同的單一輸入流映射邏輯
             vf_arg = ["-filter_script:v", filter_script_path]
 
-        cmd = [
-            "ffmpeg", "-y", "-nostdin",
-            "-f", "concat", "-safe", "0",
-            "-i", concat_list,
-            "-map", "0:v", "-map", "0:a?"
-        ] + vf_arg + vcodec_args + acodec_args + [
-            "-progress", "pipe:1",
-            "-nostats",
-            reel_out
-        ]
+        used_nvenc = "NVENC" in codec
+        fallback_attempted = False
 
-        # 加入 CREATE_NO_WINDOW 避免在背景打擾到使用者
-        creation_flags = 0
-        if hasattr(subprocess, 'CREATE_NO_WINDOW'):
-            creation_flags = getattr(subprocess, 'CREATE_NO_WINDOW')
-            
-        err_log_file = os.path.join(tempfile.gettempdir(), f"Originsun_concat_err_{uuid.uuid4().hex[:8]}.log")
-        f_err = open(err_log_file, "w", encoding="utf-8")
-        proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=f_err, encoding="utf-8", errors="replace", creationflags=creation_flags)
-        
-        t_start = time.time()
-        for cline in (proc.stdout or []):
-            if self._check_pause_stop():
-                proc.terminate()
-                break
-                
-            cline = cline.strip()
-            if cline.startswith("out_time_ms="):
+        # ── 可能執行兩次：第一次 NVENC，失敗則 fallback x264 ──
+        while True:
+            cmd = [
+                "ffmpeg", "-y", "-nostdin",
+                "-f", "concat", "-safe", "0",
+                "-i", concat_list,
+                "-map", "0:v", "-map", "0:a?"
+            ] + vf_arg + vcodec_args + acodec_args + [
+                "-progress", "pipe:1",
+                "-nostats",
+                reel_out
+            ]
+
+            # 加入 CREATE_NO_WINDOW 避免在背景打擾到使用者
+            creation_flags = 0
+            if hasattr(subprocess, 'CREATE_NO_WINDOW'):
+                creation_flags = getattr(subprocess, 'CREATE_NO_WINDOW')
+
+            err_log_file = os.path.join(tempfile.gettempdir(), f"Originsun_concat_err_{uuid.uuid4().hex[:8]}.log")
+            f_err = open(err_log_file, "w", encoding="utf-8")
+            proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=f_err, encoding="utf-8", errors="replace", creationflags=creation_flags)
+
+            t_start = time.time()
+            for cline in (proc.stdout or []):
+                if self._check_pause_stop():
+                    proc.terminate()
+                    break
+
+                cline = cline.strip()
+                if cline.startswith("out_time_ms="):
+                    try:
+                        cms = int(cline.split("=")[1])
+                        if concat_duration > 0:
+                            cfrac = min(1.0, (cms / 1_000_000) / float(concat_duration))
+                            elapsed = time.time() - t_start
+                            speed_mbps = float(os.path.getsize(reel_out) / (1024*1024)) / elapsed if elapsed > 0 and os.path.exists(reel_out) else 0.0
+
+                            if on_progress is not None:
+                                on_progress({  # type: ignore
+                                    "phase": "concat",
+                                    "status": "processing",
+                                    "current_file": os.path.basename(reel_out),
+                                    "file_pct": cfrac * 100,
+                                    "total_pct": cfrac * 100,
+                                    "speed_mbps": speed_mbps,
+                                    "done_files": 1,
+                                    "total_files": 1
+                                })
+                    except Exception:
+                        pass
+
+            try:
+                proc.wait(timeout=3)
+            except subprocess.TimeoutExpired:
+                proc.kill()
+                proc.wait()
+
+            try:
+                f_err.close()
+            except:
+                pass
+
+            # ── NVENC 失敗 → 自動降級為 x264 軟體編碼 ──
+            if proc.returncode != 0 and used_nvenc and not fallback_attempted:
+                err_txt = ""
                 try:
-                    cms = int(cline.split("=")[1])
-                    if concat_duration > 0:
-                        cfrac = min(1.0, (cms / 1_000_000) / float(concat_duration))
-                        elapsed = time.time() - t_start
-                        speed_mbps = float(os.path.getsize(reel_out) / (1024*1024)) / elapsed if elapsed > 0 and os.path.exists(reel_out) else 0.0
-
-                        if on_progress is not None:
-                            on_progress({  # type: ignore
-                                "phase": "concat",
-                                "status": "processing",
-                                "current_file": os.path.basename(reel_out),
-                                "file_pct": cfrac * 100,
-                                "total_pct": cfrac * 100,
-                                "speed_mbps": speed_mbps,
-                                "done_files": 1,
-                                "total_files": 1
-                            })
-                except Exception:
+                    with open(err_log_file, "r", encoding="utf-8") as fe:
+                        err_txt = fe.read()
+                except:
                     pass
+                try:
+                    os.remove(err_log_file)
+                except:
+                    pass
+                # 清理失敗的輸出檔
+                if os.path.exists(reel_out):
+                    try: os.remove(reel_out)
+                    except: pass
 
-        try:
-            proc.wait(timeout=3)
-        except subprocess.TimeoutExpired:
-            proc.kill()
-            proc.wait()
+                self.log("[!] NVENC 硬體編碼失敗，自動切換為 x264 軟體編碼重試...")
+                vcodec_args = ["-c:v", "libx264", "-pix_fmt", "yuv420p", "-preset", "fast", "-crf", "23"]
+                acodec_args = ["-c:a", "aac", "-b:a", "192k"]
+                used_nvenc = False
+                fallback_attempted = True
+                continue  # 重新執行 while 迴圈
+
+            break  # 正常結束或非 NVENC 失敗，跳出迴圈
 
         try:
             os.remove(concat_list)
             if os.path.exists(cmd_file_path):
                 os.remove(cmd_file_path)
         except Exception:
-            pass
-        try:
-            f_err.close()
-        except:
             pass
 
         if self._stop_event.is_set():
@@ -1048,10 +1101,11 @@ class MediaGuardEngine:
                 err_txt = "..." + err_txt[-500:]  # type: ignore
             self.err(f"[!] 串帶失敗: \n{err_txt}")
         else:
-            self.log("[Engine] 串帶壓印任務完成！")
+            suffix = "（已自動降級為 x264 軟體編碼）" if fallback_attempted else ""
+            self.log(f"[Engine] 串帶壓印任務完成！{suffix}")
             if on_progress is not None:
                 on_progress({"phase": "concat", "status": "completed", "total_pct": 100})  # type: ignore
-                
+
         try:
             if os.path.exists(err_log_file):
                 os.remove(err_log_file)
@@ -1089,13 +1143,16 @@ class MediaGuardEngine:
             
             # 掃描來源檔案
             all_files: List[str] = []
+            verify_empty_dirs: List[str] = []   # 來源中的空資料夾（相對路徑）
             if ";" in src_input or os.path.isfile(src_input):
                 for fpath in src_input.split(";"):
                     fpath = fpath.strip()
                     if fpath and os.path.isfile(fpath):
                         all_files.append(fpath)
             elif os.path.isdir(src_input):
-                for root, _, files in os.walk(src_input):
+                for root, dirnames, files in os.walk(src_input):
+                    if not files and not dirnames:
+                        verify_empty_dirs.append(os.path.relpath(root, src_input))
                     for f in files:
                         all_files.append(os.path.join(root, f))
             
@@ -1115,6 +1172,18 @@ class MediaGuardEngine:
                 
             self.log(f"→ 掃描到 {total} 個檔案。開始{'快速（大小）' if mode == 'quick' else '進階（XXH64）'}比對...")
             err_count: int = 0
+
+            # ── 檢查空資料夾是否存在於目標 ──
+            if verify_empty_dirs and os.path.isdir(dst_input):
+                for rel_dir in verify_empty_dirs:
+                    dst_dir = os.path.join(dst_input, rel_dir)
+                    if not os.path.exists(dst_dir):
+                        self.err(f"目標缺少空資料夾: {rel_dir}/")
+                        err_count += 1
+                        os.makedirs(dst_dir, exist_ok=True)
+                        self.log(f"[補齊] 已建立空資料夾: {rel_dir}/")
+                    else:
+                        self.log(f"[OK] 空資料夾存在: {rel_dir}/")
             
             for i, src_abs in enumerate(all_files):
                 if self._check_pause_stop():

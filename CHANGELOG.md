@@ -4,6 +4,43 @@
 
 ---
 
+## [1.7.0] - 2026-03-18
+
+### 新增
+- `routers/api_system.py` — 新增 `POST /api/v1/validate_paths` 遠端路徑驗證 API
+- `core/schemas.py` — 新增 `ValidatePathsRequest` Pydantic 模型
+- `frontend/js/shared/utils.js` — 新增 `validateRemotePaths()` 共用前端函式
+- `frontend/tabs/transcode/transcode.js` — 轉 Proxy dispatch 前驗證遠端主機路徑
+- `frontend/tabs/concat/concat.js` — 串帶送出前驗證遠端主機路徑
+- `routers/api_queue.py` — 佇列管理 API（列表、重排、緊急標記）
+- `routers/api_job_history.py` — 任務歷史 API
+- `frontend/tabs/projects/` — 專案總覽頁籤（機器狀態、佇列管理、Agent 管理）
+- `core/state.py` — 任務狀態管理、併發控制、Job 生命週期
+- `core/worker.py` — 重構：併發任務執行、多類型分派
+- `tests/` — 完整測試套件（75 個測試：20 unit + 30 integration + 5 smoke + 20 e2e）
+- `pytest.ini` — pytest 設定
+- `TEST_INSTRUCTIONS.md` — 測試套件建置指令（17 個指令）
+- `.github/workflows/test.yml` — CI 設定（GitHub Actions）
+
+### 修改
+- `core_engine.py` — 新增 MOCK_FFMPEG gate，支援測試模式
+- `config.py` — 新增 agents、concurrency 預設設定
+- `frontend/app.js` — 整合專案總覽頁籤、佇列管理 UI
+- `frontend/index.html` — 新增專案總覽頁籤按鈕
+- `main.py` — 掛載 api_queue、api_job_history 路由
+- `CLAUDE.md` — 同步更新版本號、目錄結構、API 表格（v1.6.0 → v1.7.0）
+- `TEST_REPORT.md` — 新增遠端路徑驗證測試結果（27/27 → 含新增 6 項）
+- `FINISHING.md` — 修正 CHANGELOG 格式範例未包在程式碼區塊的問題
+
+### 技術備註
+- 遠端路徑驗證使用 `os.path.splitdrive()` + `os.path.exists()` 檢查磁碟機與路徑
+- 前端 `validateRemotePaths()` 透過跨域 fetch 呼叫遠端 Agent API
+- 備份功能不需驗證（一定在本機執行），僅轉 Proxy 和串帶需要
+- 測試套件使用 pytest + pytest-asyncio + httpx（ASGI transport）+ Playwright（E2E）
+- E2E 測試在 port 18000 啟動獨立 uvicorn 實例，設定 MOCK_FFMPEG=1
+
+---
+
 ## [1.6.0] - 2026-03-16
 
 ### TTS 功能完善與正式上線
