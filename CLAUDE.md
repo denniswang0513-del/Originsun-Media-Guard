@@ -1,6 +1,6 @@
 # Originsun Media Guard Pro — Claude Code 完整交接文件
 
-> **版本**: v1.7.0（2026-03-18）
+> **版本**: v1.7.1（2026-03-18）
 > **目標讀者**: 接手開發的 AI 協作者（Claude Code）
 > **開發環境**: Windows 11、Python 3.11、Vanilla JS (ES Modules)
 > **啟動方式**: `d:\Antigravity\OriginsunTranscode\.venv\Scripts\python.exe main.py`
@@ -610,6 +610,17 @@ class BackupRequest(BaseModel):
     do_transcode: bool = True
     do_concat: bool = True
     do_report: bool = False
+    # Concat settings
+    concat_resolution: str = "720P"
+    concat_codec: str = "H.264 (NVENC)"
+    concat_burn_tc: bool = True
+    concat_burn_fn: bool = False
+    # Report settings
+    report_name: str = ""
+    report_output: str = ""
+    report_filmstrip: bool = True
+    report_techspec: bool = True
+    report_hash: bool = False
 
 class TranscodeRequest(BaseModel):
     task_type: str = "transcode"

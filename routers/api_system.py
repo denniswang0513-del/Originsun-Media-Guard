@@ -343,7 +343,7 @@ async def open_local_folder(req: OpenFileRequest):
             import subprocess
             subprocess.Popen(f'explorer /select,"{req.path}"')
             return {"status": "ok", "opened": folder_path}
-        return {"status": "error"}
+        return {"status": "error", "message": f"資料夾不存在: {folder_path}"}
     except Exception as e: return {"status": "error", "message": str(e)}
 
 @router.get("/api/v1/utils/pick_folder")

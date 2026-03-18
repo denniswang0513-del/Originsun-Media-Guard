@@ -196,7 +196,7 @@ async def _run_report_job(req: ReportJobRequest, job_id: str = ""):
                 with open(nas_index_path, "w", encoding="utf-8") as _nf:
                     _json.dump(nas_history, _nf, ensure_ascii=False, indent=2)
         except Exception as _ie:
-            await _emit_log(job_id, "info", f"索引更新失敗: {_ie}")
+            await _emit_log(job_id, "error", f"⚠️ NAS 索引更新失敗（報表記錄可能不會出現在歷史清單中）: {_ie}")
 
         # Optional Google Drive upload
         drive_url = ""
