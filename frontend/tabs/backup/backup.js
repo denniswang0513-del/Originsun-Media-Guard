@@ -102,6 +102,17 @@ export async function submitJob() {
         do_transcode: document.getElementById('chk_transcode').checked,
         do_concat: document.getElementById('chk_concat').checked,
         do_report: doReport,
+        // Concat settings
+        concat_resolution: document.getElementById('bk_cc_res')?.value || '720P',
+        concat_codec: document.getElementById('bk_cc_codec')?.value || 'H.264 (NVENC)',
+        concat_burn_tc: document.getElementById('bk_cc_burn_tc')?.checked ?? true,
+        concat_burn_fn: document.getElementById('bk_cc_burn_fn')?.checked ?? false,
+        // Report settings
+        report_name: document.getElementById('bk_rpt_name')?.value.trim() || '',
+        report_output: document.getElementById('bk_rpt_output')?.value.trim() || '',
+        report_filmstrip: document.getElementById('bk_rpt_filmstrip')?.checked ?? true,
+        report_techspec: document.getElementById('bk_rpt_techspec')?.checked ?? true,
+        report_hash: document.getElementById('bk_rpt_hash')?.checked ?? false,
     };
 
     const _selH = getSelectedHosts();
@@ -159,6 +170,11 @@ export async function submitJob() {
             body: JSON.stringify(payload)
         });
         const result = await res.json();
+        if (!res.ok) {
+            appendLog(`任務提交失敗: ${result.detail || result.message || JSON.stringify(result)}`, 'error');
+            alert(result.detail || '任務提交失敗');
+            return;
+        }
         const btnRetry = document.getElementById('btn_retry');
         if (btnRetry) btnRetry.style.display = 'none';
         appendLog(`請求已送出，伺服器排序狀態: ${result.status}, 任務 ID: ${result.job_id || '?'}`, 'system');

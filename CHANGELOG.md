@@ -4,6 +4,23 @@
 
 ---
 
+## [1.7.1] - 2026-03-18
+
+### 修復
+- `core_engine.py` — 修正 `self._logger` → `self.log` 屬性錯誤，導致轉檔任務失敗
+- `core/worker.py` — 串帶設定（解析度/編碼/燒入時間碼）從 UI 讀取，不再硬編碼 720P/H.264
+- `core/worker.py` — 報表設定（名稱/輸出資料夾/膠卷/技術規格/校驗碼）從 UI 讀取，不再硬編碼
+- `core/worker.py` — transcode/concat/report 各階段獨立 try-catch 隔離，一步失敗不阻斷後續
+- `core/worker.py` — 來源目錄不存在時 emit 警告 log 而非靜默跳過
+- `frontend/tabs/report/report.js` — `copyPublicUrl` 新增 `execCommand('copy')` fallback，解決 HTTP 環境下 clipboard API 被瀏覽器攔截的問題
+- `frontend/tabs/backup/backup.js` — 任務提交失敗時顯示 alert 錯誤提示
+
+### 變更
+- `core/schemas.py` — `BackupRequest` 新增串帶/報表設定欄位（向下相容）
+- `frontend/tabs/report/report.js` — 移除「開啟資料夾」「HTML」「PDF」按鈕，僅保留「複製公開網址」
+
+---
+
 ## [1.7.0] - 2026-03-18
 
 ### 新增

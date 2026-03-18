@@ -1,5 +1,5 @@
 {
-  "version": "1.7.0",
+  "version": "1.7.1",
   "build_date": "2026-03-18",
-  "notes": "feat: remote path validation, projects tab, queue management, test suite (75 tests)"
+  "notes": "fix: concat/report settings passthrough, clipboard fallback for HTTP, isolated chained task error handling"
 }

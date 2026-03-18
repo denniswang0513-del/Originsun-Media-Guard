@@ -13,6 +13,17 @@ class BackupRequest(BaseModel):
     do_transcode: bool = True
     do_concat: bool = True
     do_report: bool = False
+    # Concat settings
+    concat_resolution: str = "720P"
+    concat_codec: str = "H.264 (NVENC)"
+    concat_burn_tc: bool = True
+    concat_burn_fn: bool = False
+    # Report settings
+    report_name: str = ""
+    report_output: str = ""
+    report_filmstrip: bool = True
+    report_techspec: bool = True
+    report_hash: bool = False
 
 class TranscodeRequest(BaseModel):
     task_type: str = "transcode"

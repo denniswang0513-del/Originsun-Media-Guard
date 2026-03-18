@@ -672,7 +672,7 @@ class MediaGuardEngine:
     ):
         """獨立 Proxy 轉檔邏輯"""
         if os.environ.get("MOCK_FFMPEG") == "1":
-            self._logger("MOCK: transcode skipped")
+            self.log("MOCK: transcode skipped")
             return
         self._stop_event.clear()
         self._pause_event.clear()

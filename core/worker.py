@@ -229,75 +229,106 @@ async def _run_backup(job, engine, task: BackupRequest, _on_progress, _on_confli
         do_report=getattr(task, 'do_report', False)
     )
 
-    # Chained transcode
+    # Chained transcode (isolated — failure won't block concat/report)
     if getattr(task, "do_transcode", False):
-        for card_name, _ in task.cards:
-            if engine._pause_event.is_set() and engine._stop_event.is_set():
-                break
-            src_dir = os.path.join(task.local_root, task.project_name, card_name)
-            dest_dir = os.path.join(task.proxy_root, task.project_name, card_name)
-            if os.path.exists(src_dir):
-                await asyncio.to_thread(
-                    engine.run_transcode_job,
-                    sources=[src_dir], dest_dir=dest_dir, on_progress=_on_progress
-                )
+        try:
+            for card_name, _ in task.cards:
+                if engine._stop_event.is_set():
+                    break
+                src_dir = os.path.join(task.local_root, task.project_name, card_name)
+                dest_dir = os.path.join(task.proxy_root, task.project_name, card_name)
+                if os.path.exists(src_dir):
+                    await asyncio.to_thread(
+                        engine.run_transcode_job,
+                        sources=[src_dir], dest_dir=dest_dir, on_progress=_on_progress
+                    )
+                else:
+                    _emit_sync_for_job(job.job_id, 'log', {
+                        'type': 'error',
+                        'msg': f'[transcode] 來源目錄不存在，已跳過: {src_dir}'
+                    })
+        except Exception as ex:
+            _emit_sync_for_job(job.job_id, 'log', {
+                'type': 'error',
+                'msg': f'[transcode] 轉檔階段發生錯誤（不影響後續串帶/報表）: {ex}'
+            })
 
-    # Chained concat
+    # Chained concat (isolated — failure won't block report)
     if getattr(task, "do_concat", False):
-        for card_name, _ in task.cards:
-            if engine._pause_event.is_set() and engine._stop_event.is_set():
-                break
-            use_proxy = getattr(task, "do_transcode", False)
-            src_dir = os.path.join(
-                task.proxy_root if use_proxy else task.local_root,
-                task.project_name, card_name
-            )
-            dest_dir = os.path.join(task.proxy_root, task.project_name, card_name)
-            if os.path.exists(src_dir):
-                await asyncio.to_thread(
-                    engine.run_concat_job,
-                    sources=[src_dir], dest_dir=dest_dir,
-                    custom_name=f"{task.project_name}_{card_name}_reel",
-                    resolution="720P", codec="H.264 (NVENC)",
-                    burn_timecode=True, burn_filename=False,
-                    on_progress=_on_progress
+        try:
+            cc_resolution = getattr(task, 'concat_resolution', '720P')
+            cc_codec = getattr(task, 'concat_codec', 'H.264 (NVENC)')
+            cc_burn_tc = getattr(task, 'concat_burn_tc', True)
+            cc_burn_fn = getattr(task, 'concat_burn_fn', False)
+            for card_name, _ in task.cards:
+                if engine._stop_event.is_set():
+                    break
+                use_proxy = getattr(task, "do_transcode", False)
+                src_dir = os.path.join(
+                    task.proxy_root if use_proxy else task.local_root,
+                    task.project_name, card_name
                 )
+                dest_dir = os.path.join(task.proxy_root, task.project_name, card_name)
+                if os.path.exists(src_dir):
+                    await asyncio.to_thread(
+                        engine.run_concat_job,
+                        sources=[src_dir], dest_dir=dest_dir,
+                        custom_name=f"{task.project_name}_{card_name}_reel",
+                        resolution=cc_resolution, codec=cc_codec,
+                        burn_timecode=cc_burn_tc, burn_filename=cc_burn_fn,
+                        on_progress=_on_progress
+                    )
+                else:
+                    _emit_sync_for_job(job.job_id, 'log', {
+                        'type': 'error',
+                        'msg': f'[concat] 來源目錄不存在，已跳過: {src_dir}'
+                    })
+        except Exception as ex:
+            _emit_sync_for_job(job.job_id, 'log', {
+                'type': 'error',
+                'msg': f'[concat] 串帶階段發生錯誤（不影響後續報表）: {ex}'
+            })
 
-    # Post-task report
+    # Post-task report (isolated)
     if isinstance(task, BackupRequest) and getattr(task, 'do_report', False):
         try:
             local_dir = os.path.join(task.local_root, task.project_name)
+            rpt_output = getattr(task, 'report_output', '') or task.local_root
+            rpt_name = getattr(task, 'report_name', '') or task.project_name
+            rpt_filmstrip = getattr(task, 'report_filmstrip', True)
+            rpt_techspec = getattr(task, 'report_techspec', True)
+            rpt_hash = getattr(task, 'report_hash', False)
+
             await sio.emit('progress', {
                 'phase': 'report', 'status': 'processing',
-                'current_file': '📊 備份完成，正在啟動視覺報表掃描...',
+                'current_file': 'backup done, starting report scan...',
                 'total_pct': 0, 'job_id': job.job_id
             })
 
             from core.report_job import _run_report_job  # type: ignore
             report_req = ReportJobRequest(**{
                 "source_dir": local_dir,
-                "output_dir": task.local_root,
+                "output_dir": rpt_output,
                 "nas_root": task.nas_root,
-                "report_name": task.project_name,
-                "do_filmstrip": True, "do_techspec": True,
-                "do_hash": task.do_hash,
+                "report_name": rpt_name,
+                "do_filmstrip": rpt_filmstrip, "do_techspec": rpt_techspec,
+                "do_hash": rpt_hash,
                 "do_gdrive": False, "do_gchat": False, "do_line": False,
                 "exclude_dirs": [os.path.join(task.proxy_root, task.project_name)] if task.proxy_root else [],
             })
-            # Report runs as a separate asyncio task (parallel, not blocking this job)
             report_job_id = uuid.uuid4().hex[:8]
             report_req.job_id = report_job_id
             asyncio.create_task(_run_report_job(report_req, report_job_id))
 
             await sio.emit('progress', {
                 'phase': 'report', 'status': 'processing',
-                'current_file': '📊 視覺報表掃描中（請查看「視覺報表」頁籤追蹤進度）',
+                'current_file': 'report scanning (check report tab for progress)',
                 'total_pct': 50, 'job_id': job.job_id
             })
         except Exception as ex:
             _emit_sync_for_job(job.job_id, 'log', {
                 'type': 'error',
-                'msg': f'報表啟動失敗: {ex}'
+                'msg': f'[report] report failed: {ex}'
             })
 
     elif isinstance(task, BackupRequest) and not getattr(task, 'do_report', False):
