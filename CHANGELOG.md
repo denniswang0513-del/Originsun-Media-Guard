@@ -4,6 +4,27 @@
 
 ---
 
+## [1.8.0] - 2026-03-18
+
+### 新增
+- `routers/api_system.py` — 新增 `GET /download_update` 端點，即時打包輕量 OTA 更新 ZIP（~200KB，僅程式碼）
+- `config.py` — 新增 `master_server` 預設值（`http://192.168.1.11:8000`），供 Agent 識別主控端位址
+
+### 修改
+- `routers/api_system.py` — `GET /api/v1/nas_version` 改為透過 HTTP 從主控端取得版號（取代 NAS SMB 讀取）
+- `routers/api_system.py` — `POST /api/v1/control/update` 傳遞 `master_server` URL 給更新腳本
+- `update_agent.bat` — OTA 更新從 NAS xcopy 改為 HTTP 下載 + 解壓（PowerShell `Invoke-WebRequest`）
+- `frontend/index.html` — 更新進度步驟文字：「從 NAS 同步」→「從伺服器下載」
+- `frontend/app.js` — 更新 tooltip 與確認對話框文字
+
+### 技術備註
+- OTA 更新完全不依賴 NAS SMB，Agent 直接從主控端 `http://192.168.1.11:8000/download_update` 下載
+- 更新 ZIP 排除 `python_embed/`、`ffmpeg.exe`、`ffprobe.exe`、`windows_helper/`，僅包含程式碼與前端
+- 套件需求變動時（`0225_requirements.txt`），更新腳本會自動執行 `pip install`
+- 主控端的 `master_server` 設定留空即可（不會從自己更新自己）
+
+---
+
 ## [1.7.2] - 2026-03-18
 
 ### 修改

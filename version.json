@@ -1,5 +1,5 @@
 {
-  "version": "1.7.2",
+  "version": "1.8.0",
   "build_date": "2026-03-18",
-  "notes": "refactor: remove hardcoded NAS Container paths, use settings.json configuration"
+  "notes": "feat: HTTP-based OTA updates, no NAS dependency"
 }

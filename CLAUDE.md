@@ -1,6 +1,6 @@
 # Originsun Media Guard Pro — Claude Code 完整交接文件
 
-> **版本**: v1.7.2（2026-03-18）
+> **版本**: v1.8.0（2026-03-18）
 > **目標讀者**: 接手開發的 AI 協作者（Claude Code）
 > **開發環境**: Windows 11、Python 3.11、Vanilla JS (ES Modules)
 > **啟動方式**: `d:\Antigravity\OriginsunTranscode\.venv\Scripts\python.exe main.py`
@@ -108,6 +108,7 @@ OriginsunTranscode/
 │                            #   - init_settings()：啟動時確保 settings.json 存在（自動建立預設值）
 │                            #   - load_settings()：讀取並 merge 預設值（深度 merge）
 │                            #   - save_settings()：將 dict 寫回 settings.json
+│                            #   - 預設值含 master_server（主控端 URL，用於 HTTP OTA 更新）
 │
 ├── report_generator.py      # HTML 報表產生器
 │                            #   - save_report()：把 ReportManifest 渲染成 HTML（Jinja2 模板）
@@ -236,10 +237,10 @@ OriginsunTranscode/
 ├── ffprobe.exe              # 隨附 FFprobe，用來讀取影片 metadata
 │
 │  ── 【部署與發布腳本】
-├── publish_update.py        # 互動式版本發布腳本（問版本號 → 打包 → 推送 NAS）
+├── publish_update.py        # 互動式版本發布腳本（問版本號 → 打包）
 ├── build_agent_zip.py       # 非互動式打包腳本（publish_update.py 會呼叫它）
 ├── start_hidden.vbs         # 無黑色視窗地啟動 python main.py
-├── update_agent.bat         # OTA 更新腳本（從 NAS 複製新程式碼，重啟服務）
+├── update_agent.bat         # OTA 更新腳本（從主控端 HTTP 下載更新 ZIP，重啟服務）
 ├── Install_Originsun_Agent.bat  # 新同事安裝精靈（從伺服器下載 Agent.zip，解壓到桌面）
 ├── Maintainer_Guide.md      # 維護人員操作手冊
 │
@@ -528,7 +529,7 @@ def _emit_sync(event: str, data: dict) -> None:
 | GET | `/api/v1/health` | 健康檢查（回傳服務狀態與主機資訊） |
 | GET | `/api/v1/status` | 取得佇列狀態、進度、log 緩衝 |
 | GET | `/api/v1/version` | 取得本機版本號 |
-| GET | `/api/v1/nas_version` | 取得 NAS 版本號 |
+| GET | `/api/v1/nas_version` | 從主控端 HTTP 取得最新版號（用於 OTA 版本比對） |
 | GET | `/api/settings/load` | 讀取 settings.json |
 | POST | `/api/settings/save` | 寫入 settings.json |
 | GET | `/api/v1/settings` | 取得設定（相容格式） |
@@ -547,7 +548,8 @@ def _emit_sync(event: str, data: dict) -> None:
 | GET | `/api/v1/utils/resolve_drop` | 拖放路徑反向解析 |
 | POST | `/api/v1/validate_paths` | 驗證路徑磁碟機與目錄是否存在（遠端派發前驗證） |
 | POST | `/api/admin/restart` | 重啟 Agent 服務 |
-| GET | `/download_agent` | 下載 Originsun_Agent.zip |
+| GET | `/download_agent` | 下載 Originsun_Agent.zip（完整安裝包 ~1GB） |
+| GET | `/download_update` | 下載輕量 OTA 更新 ZIP（僅程式碼 ~200KB） |
 | GET | `/download_installer` | 下載安裝精靈 .bat |
 
 ### 7.8 TTS 語音生成（`routers/api_tts.py`）
@@ -753,6 +755,7 @@ class ValidatePathsRequest(BaseModel):
 - [x] **台灣正音引擎**：JSON 字典驅動的文字預處理（vocab_mapping + pronunciation_hacks）
 - [x] **TTS 前端三子頁**：標準 TTS / 聲音複製 / 正音字典編輯器
 - [x] **正音字典 API**：GET/POST `/api/v1/tts/dictionary`，支援熱更新
+- [x] **純 HTTP OTA 更新**：移除 NAS SMB 依賴，Agent 從主控端 HTTP 下載輕量更新 ZIP（~200KB）
 - [ ] **TTS 整合完善**：接入任務佇列、Socket.IO 即時進度、完成通知、SRT 批次合成
 - [ ] **多節點分派最佳化**：目前的 `compute_hosts` 僅能手動指定，未來希望實作基於負載的主動分派
 - [ ] **行動端適配**：目前 UI 針對大螢幕優化，行動端排版仍需加強

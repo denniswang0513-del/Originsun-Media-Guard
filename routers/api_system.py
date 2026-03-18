@@ -223,17 +223,20 @@ async def update_agent():
             close_fds=True
         )
 
-        # Copy bat to TEMP so NAS xcopy won't break it mid-execution
+        # Copy bat to TEMP so extraction won't break it mid-execution
         import shutil, tempfile
         temp_bat = os.path.join(tempfile.gettempdir(), "originsun_agent_launcher.bat")
         shutil.copy2(bat_path, temp_bat)
+
+        # Read master server URL from settings
+        master = load_settings().get("master_server", "http://192.168.1.11:8000")
 
         # Start update bat from TEMP — hidden window
         si = subprocess.STARTUPINFO()
         si.dwFlags |= subprocess.STARTF_USESHOWWINDOW
         si.wShowWindow = 0  # SW_HIDE
         subprocess.Popen(
-            ["cmd", "/c", temp_bat, "tempcopy", base_dir],
+            ["cmd", "/c", temp_bat, "tempcopy", base_dir, master],
             startupinfo=si,
             creationflags=subprocess.CREATE_NEW_CONSOLE,
             shell=False
@@ -317,17 +320,20 @@ async def get_version():
 
 @router.get("/api/v1/nas_version")
 async def get_nas_version():
-    import json
-    from config import load_settings
-    ota_dir = load_settings().get("nas_paths", {}).get("ota_dir", "")
-    if not ota_dir:
-        return {"version": "unknown", "error": "nas_paths.ota_dir not configured"}
-    v_file = os.path.join(ota_dir, "version.json")
+    """Fetch the latest version from the master server over HTTP."""
+    import json, urllib.request
+    master = load_settings().get("master_server", "")
+    if not master:
+        return {"version": "unknown", "error": "master_server not configured"}
     try:
-        if os.path.exists(v_file):
-            with open(v_file, "r", encoding="utf-8") as f: return json.load(f)
-        return {"version": "unknown", "error": "NAS version.json not found"}
-    except Exception as e: return {"version": "unknown", "error": str(e)}
+        url = f"{master.rstrip('/')}/api/v1/version"
+        def _fetch():
+            req = urllib.request.Request(url, headers={"User-Agent": "OriginsunAgent/1.0"})
+            with urllib.request.urlopen(req, timeout=5) as r:
+                return json.loads(r.read().decode())
+        return await asyncio.to_thread(_fetch)
+    except Exception as e:
+        return {"version": "unknown", "error": str(e)}
 
 @router.post("/api/v1/utils/open_file")
 async def open_local_file(req: OpenFileRequest):
@@ -581,6 +587,52 @@ async def download_agent():
     if os.path.exists(file_path):
         return FileResponse(file_path, filename="Originsun_Agent.zip")
     return {"error": "系統尚未打包 Originsun_Agent.zip，請聯絡管理員放置此檔案於伺服器根目錄。"}
+
+@router.get("/download_update")
+async def download_update(background_tasks: BackgroundTasks):
+    """Serve a lightweight code-only ZIP for OTA updates (~10-30MB).
+    Excludes python_embed, ffmpeg, ffprobe, Originsun_Agent.zip, etc."""
+    import zipfile, tempfile
+    base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+    files_to_include = [
+        "main.py", "config.py", "core_engine.py", "report_generator.py",
+        "notifier.py", "drive_sync.py", "transcriber.py", "tts_engine.py",
+        "taiwan_dict.json", "download_model.py", "version.json", "logo.ico",
+        "update_agent.bat", "update_monitor.py", "start_hidden.vbs",
+        "0225_requirements.txt", "bootstrap.py", "server.py",
+    ]
+    dirs_to_include = ["frontend", "templates", "core", "routers", "utils"]
+
+    tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".zip", prefix="originsun_update_")
+    try:
+        with zipfile.ZipFile(tmp, 'w', zipfile.ZIP_DEFLATED) as zf:
+            for f in files_to_include:
+                full = os.path.join(base_dir, f)
+                if os.path.exists(full):
+                    zf.write(full, f)
+            for d in dirs_to_include:
+                dpath = os.path.join(base_dir, d)
+                if not os.path.isdir(dpath):
+                    continue
+                for root, _, fnames in os.walk(dpath):
+                    if "__pycache__" in root:
+                        continue
+                    for fn in fnames:
+                        fp = os.path.join(root, fn)
+                        arcname = os.path.relpath(fp, base_dir)
+                        zf.write(fp, arcname)
+        tmp.close()
+        background_tasks.add_task(os.unlink, tmp.name)
+        return FileResponse(tmp.name, filename="Originsun_Update.zip",
+                            media_type="application/zip")
+    except Exception as e:
+        tmp.close()
+        try:
+            os.unlink(tmp.name)
+        except OSError:
+            pass
+        return JSONResponse(status_code=500, content={"error": str(e)})
 
 @router.get("/download_installer")
 async def download_installer():

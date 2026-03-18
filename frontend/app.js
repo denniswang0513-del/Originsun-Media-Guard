@@ -614,7 +614,7 @@ if (typeof appendLog === 'undefined') {
                 if (isNewerSemver(latestVersion, currentVersion)) {
                     btnBadge.className = "cursor-pointer text-sm font-bold text-white bg-red-600 hover:bg-red-500 px-2 py-0.5 rounded shadow animate-pulse flex items-center gap-1";
                     btnBadge.innerHTML = `🚀 <span class="underline">發現新版本 (v${latestVersion})</span>`;
-                    btnBadge.title = `點擊以從 NAS 安裝最新版 (目前: v${currentVersion})`;
+                    btnBadge.title = `點擊以從伺服器安裝最新版 (目前: v${currentVersion})`;
                 } else {
                     btnBadge.className = "cursor-pointer text-sm font-normal text-blue-400 hover:text-blue-300 px-2 py-0.5 rounded transition-colors";
                     btnBadge.innerHTML = `v${currentVersion || '?'}`;
@@ -665,7 +665,7 @@ if (typeof appendLog === 'undefined') {
         }
 
         async function updateAgent() {
-            if (!confirm('即將套用 NAS 上的最新版本並重新啟動本機代理。這將會中斷正在本機執行的任務。\n確認要執行嗎？')) return;
+            if (!confirm('即將從伺服器下載最新版本並重新啟動本機代理。這將會中斷正在本機執行的任務。\n確認要執行嗎？')) return;
 
             isUpdating = true;
             hasServerDiedDuringUpdate = false;

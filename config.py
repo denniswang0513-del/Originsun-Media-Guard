@@ -27,6 +27,7 @@ _DEFAULT_SETTINGS: dict = {
         "web_report_dir": "",
         "voice_dir": "",
     },
+    "master_server": "http://192.168.1.11:8000",
     "agents": [],
     "compute_hosts": [],
     "concurrency": {

@@ -3,9 +3,9 @@ chcp 65001 >nul
 title Originsun SaaS Agent Launcher
 color 0B
 
-:: ==== Self-relaunch from TEMP to survive NAS overwrite ====
+:: ==== Self-relaunch from TEMP to survive file overwrite ====
 if "%~1"=="tempcopy" goto :run_agent
-:: Copy self to TEMP then relaunch hidden (so NAS xcopy won't break running script)
+:: Copy self to TEMP then relaunch hidden (so ZIP extraction won't break running script)
 set "TEMP_BAT=%TEMP%\originsun_agent_launcher.bat"
 copy /y "%~f0" "%TEMP_BAT%" >nul
 set "ORIG_DIR=%~dp0"
@@ -26,6 +26,13 @@ if not "%~2"=="" (
 )
 if "%INSTALL_DIR:~-1%"=="\" set "INSTALL_DIR=%INSTALL_DIR:~0,-1%"
 
+:: Master server URL (passed as 3rd arg from api_system.py, or default)
+if not "%~3"=="" (
+    set "MASTER_URL=%~3"
+) else (
+    set "MASTER_URL=http://192.168.1.11:8000"
+)
+
 :: ---- Guard: must run from local disk, not NAS ----
 echo %INSTALL_DIR% | findstr /i "^\\\\" >nul 2>&1
 if %errorlevel%==0 (
@@ -43,9 +50,8 @@ echo   Originsun Media Guard Pro - Local Agent
 echo ===================================================
 echo.
 
-rem NAS_LATEST is read from settings.json at runtime by the server; left empty here
-set "NAS_LATEST="
 set "STATUS_FILE=%INSTALL_DIR%\update_status.json"
+set "UPDATE_ZIP=%TEMP%\originsun_update.zip"
 
 :: ---- Detect best Python executable ----
 set "EMBED_PY="
@@ -74,24 +80,14 @@ set "REQ_FILE=%INSTALL_DIR%\0225_requirements.txt"
 set "REQ_BACKUP=%TEMP%\originsun_req_backup.txt"
 set "NEED_PIP=1"
 
-echo [System] Checking for updates...
+echo [System] Checking for updates from %MASTER_URL% ...
 
-:: ---- Backup requirements before sync ----
+:: ---- Backup requirements before update ----
 if exist "%REQ_FILE%" copy /y "%REQ_FILE%" "%REQ_BACKUP%" >nul
 
-if not exist "%NAS_LATEST%" goto :no_nas
-
-:: ---- Step 1: Sync from NAS ----
-echo {"step":1,"pct":5,"msg":"正在從 NAS 同步最新版本..."} > "%STATUS_FILE%"
-echo [System] NAS connected. Syncing latest version...
-
-:: Exclude Originsun_Agent.zip (~1GB) — only needed for fresh installs, not OTA updates
-echo Originsun_Agent.zip> "%TEMP%\xcopy_exclude.txt"
-xcopy "%NAS_LATEST%\*" "%INSTALL_DIR%\" /Y /D /E /C /I /EXCLUDE:%TEMP%\xcopy_exclude.txt >nul
-del "%TEMP%\xcopy_exclude.txt" >nul 2>&1
-
-echo {"step":1,"pct":28,"msg":"NAS 同步完成，正在檢查套件..."} > "%STATUS_FILE%"
-echo [System] Sync complete.
+:: ---- Step 1: Download update from master server via HTTP ----
+echo {"step":1,"pct":5,"msg":"正在從伺服器下載最新版本..."} > "%STATUS_FILE%"
+echo [System] Downloading update from %MASTER_URL%/download_update ...
 
 :: ---- Start update monitor on port 8001 ----
 if exist "%INSTALL_DIR%\update_monitor.py" (
@@ -99,17 +95,27 @@ if exist "%INSTALL_DIR%\update_monitor.py" (
     ping 127.0.0.1 -n 2 > nul
 )
 
+powershell -ExecutionPolicy Bypass -Command "try { [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12; Invoke-WebRequest -Uri '%MASTER_URL%/download_update' -OutFile '%UPDATE_ZIP%' -TimeoutSec 300 -UseBasicParsing } catch { exit 1 }"
+if %errorlevel% neq 0 (
+    echo {"step":1,"pct":5,"msg":"下載失敗，使用目前版本啟動伺服器..."} > "%STATUS_FILE%"
+    echo [System] Download failed. Starting with current version.
+    set "NEED_PIP=0"
+    goto :check_pip
+)
+
+echo {"step":1,"pct":20,"msg":"正在解壓更新檔案..."} > "%STATUS_FILE%"
+echo [System] Extracting update...
+powershell -ExecutionPolicy Bypass -Command "Expand-Archive -Path '%UPDATE_ZIP%' -DestinationPath '%INSTALL_DIR%' -Force"
+del /f /q "%UPDATE_ZIP%" >nul 2>&1
+
+echo {"step":1,"pct":28,"msg":"更新完成，正在檢查套件..."} > "%STATUS_FILE%"
+echo [System] Update extracted.
+
 :: ---- Check if requirements changed (use && to avoid delayed expansion issue) ----
 if exist "%REQ_BACKUP%" (
     fc /b "%REQ_FILE%" "%REQ_BACKUP%" >nul 2>&1 && set "NEED_PIP=0"
     del "%REQ_BACKUP%" >nul 2>&1
 )
-goto :check_pip
-
-:no_nas
-echo {"step":3,"pct":85,"msg":"NAS 不可用，使用目前版本啟動伺服器..."} > "%STATUS_FILE%"
-echo [System] NAS unavailable. Starting with current version.
-set "NEED_PIP=0"
 
 :check_pip
 :: ---- Step 2: Install packages (only if requirements changed) ----
