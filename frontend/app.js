@@ -595,6 +595,7 @@ if (typeof appendLog === 'undefined') {
                 const nasData = await nasRes.json();
                 const currentVersion = localData.version;
                 const latestVersion = nasData.version;
+                _localAgentVersion = currentVersion; // 記住本機版本供 updateAgent 使用
 
                 const isNewerSemver = (latest, current) => {
                     if (!latest || latest === 'unknown' || !current) return false;
@@ -664,7 +665,21 @@ if (typeof appendLog === 'undefined') {
             }, 1000);
         }
 
+        // 記住本機版本，供 updateAgent 判斷是否需要首次遷移
+        let _localAgentVersion = null;
+
         async function updateAgent() {
+            // 若本機 Agent 版本 < 1.8.0，舊版 OTA 機制 (NAS xcopy) 不可用，
+            // 改為下載一鍵升級腳本讓使用者手動執行
+            const needsMigration = _localAgentVersion && _isOlderThan(_localAgentVersion, '1.8.0');
+
+            if (needsMigration) {
+                if (!confirm('本機代理版本過舊（v' + _localAgentVersion + '），需要執行一次升級腳本。\n\n按確定後將下載升級工具，請雙擊執行即可自動完成升級。')) return;
+                window.open('/download_updater', '_blank');
+                appendLog('已下載 Originsun_Updater.bat，請在本機雙擊執行即可自動升級。', 'system');
+                return;
+            }
+
             if (!confirm('即將從伺服器下載最新版本並重新啟動本機代理。這將會中斷正在本機執行的任務。\n確認要執行嗎？')) return;
 
             isUpdating = true;
@@ -680,6 +695,16 @@ if (typeof appendLog === 'undefined') {
                 // 忽略錯誤，絕對不把 isUpdating 設為 false，讓畫面維持藍色等待直到 polling 醒來
                 console.warn('Update trigger network drop:', err);
             }
+        }
+
+        function _isOlderThan(ver, minVer) {
+            const a = ver.split('.').map(Number);
+            const b = minVer.split('.').map(Number);
+            for (let i = 0; i < Math.max(a.length, b.length); i++) {
+                if ((a[i] || 0) < (b[i] || 0)) return true;
+                if ((a[i] || 0) > (b[i] || 0)) return false;
+            }
+            return false;
         }
 
         async function createShortcut() {

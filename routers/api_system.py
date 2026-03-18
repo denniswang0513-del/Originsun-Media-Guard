@@ -634,6 +634,79 @@ async def download_update(background_tasks: BackgroundTasks):
             pass
         return JSONResponse(status_code=500, content={"error": str(e)})
 
+@router.get("/download_updater")
+async def download_updater(request: Request):
+    """Generate a one-click updater bat for first-time migration to HTTP OTA."""
+    from fastapi.responses import Response
+    # Use the request's host so the bat always points back to this server
+    server_url = f"http://{request.headers.get('host', '192.168.1.11:8000')}"
+    bat_content = f"""@echo off
+chcp 65001 >nul
+title Originsun Agent - 一鍵升級
+color 0B
+echo ===================================================
+echo   Originsun Media Guard Pro - 一鍵升級工具
+echo ===================================================
+echo.
+
+set "INSTALL_DIR="
+if exist "C:\\OriginsunAgent\\main.py" set "INSTALL_DIR=C:\\OriginsunAgent"
+if exist "%~dp0main.py" set "INSTALL_DIR=%~dp0"
+if "%INSTALL_DIR%"=="" (
+    echo [Error] 找不到安裝目錄！
+    echo         請將此檔案放到 Agent 安裝目錄中再執行。
+    pause
+    exit /b 1
+)
+if "%INSTALL_DIR:~-1%"=="\\" set "INSTALL_DIR=%INSTALL_DIR:~0,-1%"
+
+echo [System] 安裝目錄: %INSTALL_DIR%
+echo [System] 伺服器: {server_url}
+echo.
+
+:: Kill running agent
+echo [System] 正在停止舊版 Agent...
+for /f "tokens=5" %%P in ('netstat -aon ^| findstr ":8000.*LISTENING" 2^>nul') do (
+    taskkill /F /PID %%P >nul 2>&1
+)
+ping 127.0.0.1 -n 2 >nul
+
+:: Download update
+set "UPDATE_ZIP=%TEMP%\\originsun_update.zip"
+echo [System] 正在從伺服器下載最新版本...
+powershell -ExecutionPolicy Bypass -Command "try {{ [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12; Invoke-WebRequest -Uri '{server_url}/download_update' -OutFile '%UPDATE_ZIP%' -TimeoutSec 300 -UseBasicParsing }} catch {{ Write-Host $_.Exception.Message; exit 1 }}"
+if %errorlevel% neq 0 (
+    echo [Error] 下載失敗！請確認伺服器是否在線。
+    pause
+    exit /b 1
+)
+
+:: Extract
+echo [System] 正在解壓更新檔案...
+powershell -ExecutionPolicy Bypass -Command "Expand-Archive -Path '%UPDATE_ZIP%' -DestinationPath '%INSTALL_DIR%' -Force"
+del /f /q "%UPDATE_ZIP%" >nul 2>&1
+
+echo.
+echo [OK] 升級完成！正在重新啟動 Agent...
+echo.
+
+:: Restart agent
+cd /d "%INSTALL_DIR%"
+if exist "%INSTALL_DIR%\\start_hidden.vbs" (
+    wscript "%INSTALL_DIR%\\start_hidden.vbs"
+) else (
+    start "" "%INSTALL_DIR%\\update_agent.bat"
+)
+
+echo [OK] Agent 已啟動，請重新整理網頁。
+ping 127.0.0.1 -n 3 >nul
+"""
+    return Response(
+        content=bat_content,
+        media_type="application/octet-stream",
+        headers={"Content-Disposition": "attachment; filename=Originsun_Updater.bat"}
+    )
+
 @router.get("/download_installer")
 async def download_installer():
     file_path = "Install_Originsun_Agent.bat"
