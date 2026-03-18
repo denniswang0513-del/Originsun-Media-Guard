@@ -22,6 +22,11 @@ _DEFAULT_SETTINGS: dict = {
         "concat":    {"gchat": True, "line": False},
         "verify":    {"gchat": True, "line": False},
     },
+    "nas_paths": {
+        "ota_dir": "",
+        "web_report_dir": "",
+        "voice_dir": "",
+    },
     "agents": [],
     "compute_hosts": [],
     "concurrency": {

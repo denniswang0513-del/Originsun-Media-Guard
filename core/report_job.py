@@ -150,18 +150,22 @@ async def _run_report_job(req: ReportJobRequest, job_id: str = ""):
         # Phase 5: Publish Public URL
         await _emit_rpt(job_id, "render", 60, "🌐 發佈至公開 Web 伺服器...")
         public_url = ""
-        nas_web_dir = r"\\192.168.1.132\Container\AI_Workspace\Originsun_Web\FileReport"
-        try:
-            os.makedirs(nas_web_dir, exist_ok=True)
-            nas_html = os.path.join(nas_web_dir, os.path.basename(local_html))
-            shutil.copy2(local_html, nas_html)
-            if local_pdf:
-                nas_pdf = os.path.join(nas_web_dir, os.path.basename(local_pdf))
-                shutil.copy2(local_pdf, nas_pdf)
-            public_url = f"{_web_base}/{os.path.basename(local_html)}"
-            await _emit_log(job_id, "system", f"🌐 專案已發佈至 Web Server: {public_url}")
-        except Exception as _we:
-            await _emit_log(job_id, "info", f"Web Server 發佈與備份失敗: {_we}")
+        from config import load_settings as _load_settings
+        nas_web_dir = _load_settings().get("nas_paths", {}).get("web_report_dir", "")
+        if nas_web_dir:
+            try:
+                os.makedirs(nas_web_dir, exist_ok=True)
+                nas_html = os.path.join(nas_web_dir, os.path.basename(local_html))
+                shutil.copy2(local_html, nas_html)
+                if local_pdf:
+                    nas_pdf = os.path.join(nas_web_dir, os.path.basename(local_pdf))
+                    shutil.copy2(local_pdf, nas_pdf)
+                public_url = f"{_web_base}/{os.path.basename(local_html)}"
+                await _emit_log(job_id, "system", f"🌐 專案已發佈至 Web Server: {public_url}")
+            except Exception as _we:
+                await _emit_log(job_id, "info", f"Web Server 發佈失敗: {_we}")
+        else:
+            await _emit_log(job_id, "info", "⚠️ 未設定 nas_paths.web_report_dir，跳過 Web 發佈")
 
         # Update reports_index.json
         index_path = os.path.join(reports_dir, "reports_index.json")
@@ -177,7 +181,7 @@ async def _run_report_job(req: ReportJobRequest, job_id: str = ""):
             "file_count": total,
             "total_size_str": _fmt_size_py(manifest.total_bytes),
         }
-        nas_index_path = os.path.join(nas_web_dir, "reports_index.json")
+        nas_index_path = os.path.join(nas_web_dir, "reports_index.json") if nas_web_dir else ""
         try:
             history: dict = {"reports": []}
             if os.path.exists(index_path):
@@ -187,7 +191,7 @@ async def _run_report_job(req: ReportJobRequest, job_id: str = ""):
             with open(index_path, "w", encoding="utf-8") as _f:
                 _json.dump(history, _f, ensure_ascii=False, indent=2)
 
-            if index_path != nas_index_path:
+            if nas_index_path and index_path != nas_index_path:
                 nas_history: dict = {"reports": []}
                 if os.path.exists(nas_index_path):
                     with open(nas_index_path, "r", encoding="utf-8") as _nf:

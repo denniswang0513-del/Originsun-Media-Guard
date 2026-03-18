@@ -33,10 +33,11 @@ router = APIRouter(prefix="/api/v1", tags=["TTS"])
 # ─── Helpers ──────────────────────────────────────────────
 def _get_nas_library_path() -> str:
     settings = load_settings()
-    return settings.get(
-        "voice_library_nas_path",
-        r"\\192.168.1.132\Container\AI_Workspace\agents\Originsun Media Guard Pro\voice"
-    )
+    # Check legacy key first, then new nas_paths.voice_dir
+    legacy = settings.get("voice_library_nas_path", "")
+    if legacy:
+        return legacy
+    return settings.get("nas_paths", {}).get("voice_dir", "")
 
 def _get_cache_path() -> str:
     settings = load_settings()

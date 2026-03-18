@@ -56,23 +56,6 @@ app.include_router(api_queue.router)
 async def _on_startup():
     state.set_main_loop(asyncio.get_running_loop())
     state.init_concurrency()
-    # Auto-mount NAS Container share if not accessible
-    _nas_container = r"\\192.168.1.132\Container"
-    if not os.path.exists(_nas_container):
-        import subprocess as _sp
-        try:
-            _result = _sp.run(
-                ["net", "use", _nas_container],
-                capture_output=True, text=True, timeout=10
-            )
-            if _result.returncode == 0:
-                print("[STARTUP] NAS Container ok")
-            else:
-                print(f"[STARTUP] NAS Container unavailable: {_result.returncode}")
-        except Exception as _e:
-            print(f"[STARTUP] NAS Container mount failed: {_e}")
-    else:
-        print("[STARTUP] NAS Container ok")
 
 @app.get("/download_agent")
 async def download_agent():

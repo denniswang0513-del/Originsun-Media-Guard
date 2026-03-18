@@ -318,7 +318,11 @@ async def get_version():
 @router.get("/api/v1/nas_version")
 async def get_nas_version():
     import json
-    v_file = r"\\192.168.1.132\Container\AI_Workspace\agents\Originsun Media Guard Pro\version.json"
+    from config import load_settings
+    ota_dir = load_settings().get("nas_paths", {}).get("ota_dir", "")
+    if not ota_dir:
+        return {"version": "unknown", "error": "nas_paths.ota_dir not configured"}
+    v_file = os.path.join(ota_dir, "version.json")
     try:
         if os.path.exists(v_file):
             with open(v_file, "r", encoding="utf-8") as f: return json.load(f)

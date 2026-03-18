@@ -106,7 +106,7 @@ async def test_validate_empty_paths(async_client):
 @pytest.mark.asyncio
 async def test_validate_unc_path(async_client):
     """UNC 路徑 — drive 為 \\\\server\\share 格式"""
-    unc = "\\\\192.168.1.132\\Container"
+    unc = "\\\\192.168.1.132\\Originsun"
     r = await async_client.post(
         "/api/v1/validate_paths",
         json={"paths": [unc]},

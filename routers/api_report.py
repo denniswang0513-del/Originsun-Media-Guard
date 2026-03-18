@@ -2,9 +2,16 @@ from fastapi import APIRouter  # type: ignore
 from fastapi.responses import JSONResponse  # type: ignore
 from core.schemas import ReportJobRequest  # type: ignore
 from core.worker import enqueue_job  # type: ignore
+from config import load_settings
 import os
 
 router = APIRouter()
+
+def _get_report_index_path() -> str:
+    web_dir = load_settings().get("nas_paths", {}).get("web_report_dir", "")
+    if not web_dir:
+        return ""
+    return os.path.join(web_dir, "reports_index.json")
 
 @router.post("/api/v1/report_jobs")
 async def start_report_job(req: ReportJobRequest):
@@ -17,8 +24,8 @@ async def start_report_job(req: ReportJobRequest):
 
 @router.get("/api/v1/reports/history")
 async def get_reports_history(output_dir: str = ""):
-    index_path = r"\\192.168.1.132\Container\AI_Workspace\Originsun_Web\FileReport\reports_index.json"
-    if not os.path.exists(index_path):
+    index_path = _get_report_index_path()
+    if not index_path or not os.path.exists(index_path):
         return {"reports": []}
     try:
         import json as _j
@@ -30,9 +37,9 @@ async def get_reports_history(output_dir: str = ""):
 @router.delete("/api/v1/reports/{report_id}")
 async def delete_report_entry(report_id: str, output_dir: str = ""):
     import json as _j
-    index_path = r"\\192.168.1.132\Container\AI_Workspace\Originsun_Web\FileReport\reports_index.json"
-    if not os.path.exists(index_path):
-        return {"status": "error", "message": "NAS index not found"}
+    index_path = _get_report_index_path()
+    if not index_path or not os.path.exists(index_path):
+        return {"status": "error", "message": "nas_paths.web_report_dir not configured or index not found"}
     try:
         with open(index_path, "r", encoding="utf-8") as f:
             data = _j.load(f)

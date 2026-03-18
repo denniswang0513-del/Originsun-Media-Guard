@@ -1,5 +1,5 @@
 {
-  "version": "1.7.1",
+  "version": "1.7.2",
   "build_date": "2026-03-18",
-  "notes": "fix: concat/report settings passthrough, clipboard fallback, isolated error handling"
+  "notes": "refactor: remove hardcoded NAS Container paths, use settings.json configuration"
 }

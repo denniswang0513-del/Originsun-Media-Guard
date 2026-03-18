@@ -7,7 +7,13 @@ import shutil
 
 VERSION_FILE = "version.json"
 BUILD_SCRIPT = "build_agent_zip.py"
-NAS_OTA_PATH = r"\\192.168.1.132\Container\AI_Workspace\agents\Originsun Media Guard Pro"
+
+def _get_nas_ota_path():
+    try:
+        from config import load_settings
+        return load_settings().get("nas_paths", {}).get("ota_dir", "")
+    except Exception:
+        return ""
 
 def main():
     print("="*60)
@@ -22,10 +28,10 @@ def main():
     # 1. 讀取目前版本
     with open(VERSION_FILE, "r", encoding="utf-8") as f:
         v_data = json.load(f)
-    
+
     current_version = v_data.get("version", "未知")
     print(f"[*] 目前系統版本: {current_version}")
-    
+
     # 2. 詢問新版本資訊
     import argparse
     parser = argparse.ArgumentParser()
@@ -42,7 +48,7 @@ def main():
             new_version = raw_nv.encode(sys.stdin.encoding, 'replace').decode('utf-8', 'ignore') if raw_nv else current_version
         except Exception:
             new_version = current_version
-            
+
     if args.notes:
         notes = args.notes
     else:
@@ -54,7 +60,7 @@ def main():
 
     if not new_version:
         new_version = current_version
-        
+
     if not notes:
         notes = v_data.get("notes", "微幅更新")
 
@@ -65,7 +71,7 @@ def main():
 
     with open(VERSION_FILE, "w", encoding="utf-8") as f:
         json.dump(v_data, f, indent=2, ensure_ascii=False)
-    
+
     print(f"\n[OK] 已更新 {VERSION_FILE} (v{new_version})")
 
     # 4. 呼叫自動打包腳本
@@ -73,13 +79,19 @@ def main():
     if not os.path.exists(BUILD_SCRIPT):
         print(f"錯誤: 找不到打包腳本 {BUILD_SCRIPT}")
         return
-    
+
     result = subprocess.run([sys.executable, BUILD_SCRIPT], shell=False)
     if result.returncode != 0:
         print("\n[ERROR] 打包過程發生錯誤，發布終止。")
         return
-        
+
     # 5. [可選] 同步至 NAS OTA 目錄
+    NAS_OTA_PATH = _get_nas_ota_path()
+    if not NAS_OTA_PATH:
+        print("\n[SKIP] settings.json 中未設定 nas_paths.ota_dir，跳過 NAS 同步。")
+        print("[*] 如需 OTA 更新，請在系統設定中填入 NAS OTA 路徑。")
+        return
+
     print(f"\n[*] 準備發布 OTA 更新至 NAS: {NAS_OTA_PATH}")
     if args.sync.lower() == "y":
         ans = "y"
@@ -87,7 +99,7 @@ def main():
         ans = "n"
     else:
         ans = input("是否要立即同步檔案至 NAS? (y/n) [y]: ").strip().lower()
-        
+
     if ans == "" or ans == "y":
         if not os.path.exists(NAS_OTA_PATH):
             try:
@@ -121,12 +133,12 @@ def main():
         ]
 
         folders_to_sync = ["frontend", "templates", "windows_helper", "core", "routers", "utils"]
-        
+
         for f in files_to_sync:
             if os.path.exists(f):
                 shutil.copy2(f, os.path.join(NAS_OTA_PATH, f))
                 print(f"  [OK] 同步檔案: {f}")
-                
+
         for folder in folders_to_sync:
             if os.path.exists(folder):
                 dest_dir = os.path.join(NAS_OTA_PATH, folder)
@@ -134,7 +146,7 @@ def main():
                     shutil.rmtree(dest_dir)
                 shutil.copytree(folder, dest_dir)
                 print(f"  [OK] 同步資料夾: {folder}\\")
-                
+
         print("\n[OK] 發布成功！NAS 端已擁有最新版。")
         print("[*] 同事將會在他們的網頁上看到「發現新版本」的按鈕。")
     else:

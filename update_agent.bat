@@ -43,7 +43,8 @@ echo   Originsun Media Guard Pro - Local Agent
 echo ===================================================
 echo.
 
-set "NAS_LATEST=\\192.168.1.132\Container\AI_Workspace\agents\Originsun Media Guard Pro"
+rem NAS_LATEST is read from settings.json at runtime by the server; left empty here
+set "NAS_LATEST="
 set "STATUS_FILE=%INSTALL_DIR%\update_status.json"
 
 :: ---- Detect best Python executable ----

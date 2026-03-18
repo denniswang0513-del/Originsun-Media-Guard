@@ -10,7 +10,8 @@ echo.
 
 set "INSTALL_DIR=C:\OriginsunAgent"
 set "SERVER_URL=http://192.168.1.11:8000"
-set "NAS_ZIP=\\192.168.1.132\Container\AI_Workspace\agents\Originsun Media Guard Pro\Originsun_Agent.zip"
+rem NAS_ZIP left empty — install always downloads from server HTTP endpoint
+set "NAS_ZIP="
 set "ZIP_FILE=%TEMP%\Originsun_Agent.zip"
 
 echo [Info] Install target : %INSTALL_DIR%

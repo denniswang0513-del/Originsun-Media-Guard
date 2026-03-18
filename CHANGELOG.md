@@ -4,6 +4,27 @@
 
 ---
 
+## [1.7.2] - 2026-03-18
+
+### 修改
+- `main.py` — 移除啟動時自動掛載 `\\192.168.1.132\Container` 的程式碼，節省約 10 秒啟動時間
+- `routers/api_system.py` — NAS 版本檢查改從 `settings.json` 的 `nas_paths.ota_dir` 讀取路徑
+- `routers/api_report.py` — 報表歷史索引路徑改從 `settings.json` 的 `nas_paths.web_report_dir` 讀取
+- `routers/api_tts.py` — 聲音庫路徑改從 `settings.json` 的 `nas_paths.voice_dir` 讀取（含 legacy fallback）
+- `core/report_job.py` — NAS Web 發佈路徑改從 `settings.json` 讀取，未設定時優雅跳過
+- `publish_update.py` — OTA 發布路徑改從 `settings.json` 讀取，未設定時跳過 NAS 同步
+- `Install_Originsun_Agent.bat` — 移除 NAS ZIP 路徑，一律使用 HTTP 下載
+- `update_agent.bat` — 移除 NAS 路徑硬編碼
+- `config.py` — `nas_paths` 預設設定新增 `ota_dir`、`web_report_dir`、`voice_dir` 三個欄位
+- `tests/integration/test_api_validate_paths.py` — UNC 範例路徑更新
+
+### 技術備註
+- 所有原本硬編碼的 `\\192.168.1.132\Container\AI_Workspace\...` 路徑統一改由 `settings.json` 的 `nas_paths` 區塊管理
+- 未設定 NAS 路徑時，相關功能（OTA、報表歷史、聲音庫）會優雅跳過而非報錯
+- `server.py` 為遺留檔案，不在此次清理範圍
+
+---
+
 ## [1.7.1] - 2026-03-18
 
 ### 修復
