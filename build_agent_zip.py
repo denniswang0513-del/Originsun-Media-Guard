@@ -18,6 +18,7 @@ FILES_TO_PACK = [
     "taiwan_dict.json",
     "version.json",
     "update_agent.bat",
+    "bootstrap.py",
     "update_monitor.py",
     "start_hidden.vbs",
     "logo.ico",

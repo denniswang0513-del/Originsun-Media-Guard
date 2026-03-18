@@ -263,9 +263,8 @@ async def _run_backup(job, engine, task: BackupRequest, _on_progress, _on_confli
             for card_name, _ in task.cards:
                 if engine._stop_event.is_set():
                     break
-                use_proxy = getattr(task, "do_transcode", False)
                 src_dir = os.path.join(
-                    task.proxy_root if use_proxy else task.local_root,
+                    task.local_root,
                     task.project_name, card_name
                 )
                 dest_dir = os.path.join(task.proxy_root, task.project_name, card_name)

@@ -1,5 +1,5 @@
 {
-  "version": "1.8.0",
+  "version": "1.8.1",
   "build_date": "2026-03-18",
-  "notes": "feat: HTTP-based OTA updates, no NAS dependency"
+  "notes": "feat: auto-download updater + migration overlay for legacy agents"
 }

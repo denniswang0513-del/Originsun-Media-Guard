@@ -1,6 +1,6 @@
 # Originsun Media Guard Pro — Claude Code 完整交接文件
 
-> **版本**: v1.8.0（2026-03-18）
+> **版本**: v1.8.1（2026-03-18）
 > **目標讀者**: 接手開發的 AI 協作者（Claude Code）
 > **開發環境**: Windows 11、Python 3.11、Vanilla JS (ES Modules)
 > **啟動方式**: `d:\Antigravity\OriginsunTranscode\.venv\Scripts\python.exe main.py`
@@ -114,7 +114,12 @@ OriginsunTranscode/
 │                            #   - save_report()：把 ReportManifest 渲染成 HTML（Jinja2 模板）
 │                            #   - generate_pdf_from_html()：用 playwright/weasyprint 轉 PDF
 │
-├── version.json             # {"version": "1.5.0", "build_date": "...", "notes": "..."}
+├── bootstrap.py             # 雙模式腳本
+│                            #   - `python bootstrap.py`：初始安裝（venv、pip、ffmpeg）
+│                            #   - `python bootstrap.py --update [URL]`：OTA 更新（下載 ZIP → 解壓 → 重啟）
+│                            #   - 僅使用 stdlib（urllib、zipfile、subprocess），無外部依賴
+│
+├── version.json             # {"version": "1.8.1", "build_date": "...", "notes": "..."}
 │                            #   前端定期輪詢此檔來比對 NAS 版本號 → OTA 更新觸發點
 │
 ├── settings.json            # 執行時設定（不進 git，由 config.py 自動初始化）
@@ -550,7 +555,9 @@ def _emit_sync(event: str, data: dict) -> None:
 | POST | `/api/admin/restart` | 重啟 Agent 服務 |
 | GET | `/download_agent` | 下載 Originsun_Agent.zip（完整安裝包 ~1GB） |
 | GET | `/download_update` | 下載輕量 OTA 更新 ZIP（僅程式碼 ~200KB） |
+| GET | `/download_updater` | 下載獨立遷移用 bat（v1.7→v1.8 首次升級） |
 | GET | `/download_installer` | 下載安裝精靈 .bat |
+| GET | `/bootstrap.ps1` | 動態 PowerShell 腳本（一行指令完成升級） |
 
 ### 7.8 TTS 語音生成（`routers/api_tts.py`）
 

@@ -24,7 +24,7 @@ _DEFAULT_SETTINGS: dict = {
     },
     "nas_paths": {
         "ota_dir": "",
-        "web_report_dir": "",
+        "web_report_dir": r"\\192.168.1.132\Container\AI_Workspace\Originsun_Web\FileReport",
         "voice_dir": "",
     },
     "master_server": "http://192.168.1.11:8000",

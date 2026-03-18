@@ -4,6 +4,28 @@
 
 ---
 
+## [1.8.1] - 2026-03-18
+
+### 新增
+- `bootstrap.py` — 改寫為雙模式腳本（初始安裝 + `--update` OTA 更新），僅使用 stdlib
+- `routers/api_system.py` — 新增 `GET /bootstrap.ps1` 動態 PowerShell 端點，一行指令完成升級
+- `routers/api_system.py` — 新增 `GET /download_updater` 獨立遷移 bat 下載端點
+- `frontend/app.js` — 新增 migration overlay UI（`_showMigrationOverlay`），引導 v1.7.0 使用者升級
+- `frontend/app.js` — 新增 `_pollForMigrationDone()`，自動偵測升級完成並重新載入頁面
+
+### 修改
+- `config.py` — `web_report_dir` 預設值改為 `\\192.168.1.132\Container\AI_Workspace\Originsun_Web\FileReport`，新安裝自動帶入
+- `core/worker.py` — 串帶來源一律使用原始素材（`local_root`），不再依據是否勾選轉檔切換路徑
+- `build_agent_zip.py` — 打包清單加入 `bootstrap.py`
+- `frontend/app.js` — `updateAgent()` 對舊版 Agent 自動下載升級工具 + 顯示引導 overlay
+
+### 技術備註
+- v1.7.0 → v1.8.x 首次升級因瀏覽器安全限制無法全自動，需使用者執行一次下載的 bat 檔
+- 升級完成後，`_pollForMigrationDone()` 偵測到新版本會自動移除 overlay 並重新載入
+- 後續所有更新（v1.8.x+）皆為真正一鍵更新
+
+---
+
 ## [1.8.0] - 2026-03-18
 
 ### 新增
