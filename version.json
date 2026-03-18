@@ -1,5 +1,5 @@
 {
-  "version": "1.8.2",
-  "build_date": "2026-03-18",
-  "notes": "fix: rebuild agent install package + migration overlay polish"
+  "version": "1.8.3",
+  "build_date": "2026-03-19",
+  "notes": "feat: backend periodic version check + Socket.IO push update notification / fix: OTA version check bugs"
 }

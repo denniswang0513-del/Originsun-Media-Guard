@@ -4,6 +4,26 @@
 
 ---
 
+## [1.8.3] - 2026-03-19
+
+### 新增
+- `main.py` — 新增 `_periodic_version_check()` 背景任務，每 10 分鐘向主控端檢查版號，有更新時透過 Socket.IO `update_available` 事件主動推播給所有連線前端
+- `main.py` — 新增 `_read_local_version()` 和 `_is_newer()` 輔助函式（語意版本比較，支援 v 前綴）
+- `frontend/app.js` — 新增 `socket.on('update_available')` 監聽，後端推播時立即顯示紅色更新徽章
+
+### 修改
+- `frontend/app.js` — 修正 `checkAgentVersion()` 中 `nasVersionUrl` 死三元運算（兩邊路徑相同），改為正確區分本機/遠端路徑
+- `frontend/app.js` — 新增 `latestVersion === 'unknown'` 時的 fallback 邏輯，防止版本檢查靜默失敗
+- `frontend/app.js` — 新增 `stripV()` 處理版本號 v 前綴，避免 `parseInt('v1')` 產生 NaN
+- `routers/api_system.py` — `/api/v1/nas_version` 當 `master_server` 未設定時，改為回傳本機版號（主控端自身不再回傳 unknown）
+- `version.json` — 移除版本號中的 `v` 前綴（`v1.8.2` → `1.8.2`），統一格式
+
+### 技術備註
+- v1.7.0 的舊前端無 `update_available` 監聽，仍需透過主控端網頁（192.168.1.11:8000）查看更新通知，或手動更新一次
+- 後端推播不取代前端輪詢，兩者互補：前端每次載入仍會執行 `checkAgentVersion()`，後端則在瀏覽器開啟期間持續推播
+
+---
+
 ## [1.8.2] - 2026-03-18
 
 ### 修改

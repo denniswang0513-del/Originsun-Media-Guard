@@ -324,7 +324,8 @@ async def get_nas_version():
     import json, urllib.request
     master = load_settings().get("master_server", "")
     if not master:
-        return {"version": "unknown", "error": "master_server not configured"}
+        # 未設定 master_server = 本機就是主控端，直接回傳自己的版號
+        return await get_version()
     try:
         url = f"{master.rstrip('/')}/api/v1/version"
         def _fetch():

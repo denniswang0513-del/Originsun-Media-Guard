@@ -56,6 +56,70 @@ app.include_router(api_queue.router)
 async def _on_startup():
     state.set_main_loop(asyncio.get_running_loop())
     state.init_concurrency()
+    asyncio.create_task(_periodic_version_check())
+
+
+def _read_local_version() -> str:
+    """讀取本機 version.json 中的版號。"""
+    import json as _json
+    v_file = os.path.join(os.path.dirname(os.path.abspath(__file__)), "version.json")
+    try:
+        with open(v_file, "r", encoding="utf-8") as f:
+            return _json.load(f).get("version", "0.0.0")
+    except Exception:
+        return "0.0.0"
+
+
+def _is_newer(remote: str, local: str) -> bool:
+    """比較版號，remote > local 回傳 True。自動移除 v 前綴。"""
+    def _strip(v):
+        return v.lstrip("v") if v else ""
+    r, l = _strip(remote), _strip(local)
+    if not r or r == "unknown" or not l:
+        return False
+    if r == l:
+        return False
+    try:
+        rp = list(map(int, r.split(".")))
+        lp = list(map(int, l.split(".")))
+        for i in range(max(len(rp), len(lp))):
+            rv = rp[i] if i < len(rp) else 0
+            lv = lp[i] if i < len(lp) else 0
+            if rv > lv:
+                return True
+            if rv < lv:
+                return False
+    except (ValueError, IndexError):
+        pass
+    return False
+
+
+async def _periodic_version_check():
+    """每 10 分鐘檢查主控端版號，有更新時透過 Socket.IO 推播給前端。"""
+    import json as _json
+    import urllib.request
+    await asyncio.sleep(15)  # 讓服務先穩定
+    while True:
+        try:
+            from config import load_settings
+            master = load_settings().get("master_server", "")
+            if master:
+                local_ver = _read_local_version()
+                url = f"{master.rstrip('/')}/api/v1/version"
+                def _fetch():
+                    req = urllib.request.Request(url, headers={"User-Agent": "OriginsunAgent/1.0"})
+                    with urllib.request.urlopen(req, timeout=5) as r:
+                        return _json.loads(r.read().decode())
+                remote = await asyncio.to_thread(_fetch)
+                remote_ver = remote.get("version", "")
+                if _is_newer(remote_ver, local_ver):
+                    await sio.emit("update_available", {
+                        "latest_version": remote_ver,
+                        "current_version": local_ver
+                    })
+        except Exception:
+            pass
+        await asyncio.sleep(600)  # 10 分鐘
 
 @app.get("/download_agent")
 async def download_agent():

@@ -1,6 +1,6 @@
 # Originsun Media Guard Pro — Claude Code 完整交接文件
 
-> **版本**: v1.8.2（2026-03-18）
+> **版本**: v1.8.3（2026-03-19）
 > **目標讀者**: 接手開發的 AI 協作者（Claude Code）
 > **開發環境**: Windows 11、Python 3.11、Vanilla JS (ES Modules)
 > **啟動方式**: `d:\Antigravity\OriginsunTranscode\.venv\Scripts\python.exe main.py`
@@ -53,6 +53,10 @@ OriginsunTranscode/
 │                            #   - 建立 socketio.ASGIApp(sio, app) → io_app
 │                            #   - 掛載所有 router（api_backup, api_verify, api_proxy...）
 │                            #   - 最後將 frontend/ 目錄 mount 為靜態檔案（html=True）
+│                            #   - _periodic_version_check()：背景每 10 分鐘檢查主控端版號
+│                            #     有更新時透過 Socket.IO 推播 'update_available' 給前端
+│                            #   - _read_local_version()：讀取本機 version.json 版號
+│                            #   - _is_newer(remote, local)：語意版本比較（支援 v 前綴）
 │
 ├── server.py                # ⚠️ 遺留的舊版單一大檔案伺服器（v1.4 以前）
 │                            #   保留作為歷史參考，不再使用，不可刪除（build_agent_zip.py 會打包它）
@@ -311,7 +315,8 @@ OriginsunTranscode/
         ├── model_download_done       → Whisper 模型下載完成
         ├── model_download_error      → Whisper 模型下載失敗
         ├── report_progress           → 報表生成進度 {phase, pct, msg, type}
-        └── report_job_done           → 報表完成 {report_name, local_path, pdf_path, public_url, drive_url}
+        ├── report_job_done           → 報表完成 {report_name, local_path, pdf_path, public_url, drive_url}
+        └── update_available          → 後端偵測到新版本 {latest_version, current_version}
 ```
 
 ### 4.2 任務佇列機制（重要）
