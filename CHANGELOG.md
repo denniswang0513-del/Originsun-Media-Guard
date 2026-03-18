@@ -4,6 +4,19 @@
 
 ---
 
+## [1.8.2] - 2026-03-18
+
+### 修改
+- `version.json` — 版本號更新至 v1.8.2
+- `build_agent_zip.py` — 重新打包 `Originsun_Agent.zip`，確保新安裝取得最新版本
+
+### 技術備註
+- `Install_Originsun_Agent.bat` 下載的 ZIP 由 `/download_agent` 端點提供，需手動執行 `build_agent_zip.py` 重新打包才能更新 ZIP 內容
+- 串帶來源路徑確認正確：備份觸發串帶時一律使用 `local_root`（原始素材），不受轉檔勾選影響
+- 報表歷史路徑預設值（`nas_paths.web_report_dir`）已在 v1.7.2 設定正確，若顯示空白請確認 NAS 上 `reports_index.json` 是否存在
+
+---
+
 ## [1.8.1] - 2026-03-18
 
 ### 新增

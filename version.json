@@ -1,5 +1,5 @@
 {
-  "version": "1.8.1",
+  "version": "1.8.2",
   "build_date": "2026-03-18",
-  "notes": "feat: auto-download updater + migration overlay for legacy agents"
+  "notes": "fix: rebuild agent install package + migration overlay polish"
 }
