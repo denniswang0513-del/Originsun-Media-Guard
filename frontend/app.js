@@ -670,13 +670,29 @@ if (typeof appendLog === 'undefined') {
 
         async function updateAgent() {
             // 若本機 Agent 版本 < 1.8.0，舊版 OTA 機制 (NAS xcopy) 不可用，
-            // 改為下載一鍵升級腳本讓使用者手動執行
+            // 自動下載升級工具 + 顯示操作指引遮罩
             const needsMigration = _localAgentVersion && _isOlderThan(_localAgentVersion, '1.8.0');
 
             if (needsMigration) {
-                if (!confirm('本機代理版本過舊（v' + _localAgentVersion + '），需要執行一次升級腳本。\n\n按確定後將下載升級工具，請雙擊執行即可自動完成升級。')) return;
-                window.open('/download_updater', '_blank');
-                appendLog('已下載 Originsun_Updater.bat，請在本機雙擊執行即可自動升級。', 'system');
+                // 1) 自動下載 Originsun_Updater.bat
+                const a = document.createElement('a');
+                a.href = '/download_updater';
+                a.download = 'Originsun_Updater.bat';
+                document.body.appendChild(a);
+                a.click();
+                document.body.removeChild(a);
+
+                // 2) 顯示首次遷移指引遮罩
+                _showMigrationOverlay();
+
+                // 3) 同時複製 PowerShell 指令到剪貼簿（備用）
+                const serverHost = window.location.host || '192.168.1.11:8000';
+                const psCmd = `powershell -ExecutionPolicy Bypass -c "irm http://${serverHost}/bootstrap.ps1 | iex"`;
+                try { await navigator.clipboard.writeText(psCmd); } catch(e) {}
+
+                // 4) 開始輪詢：偵測版本升級完成後自動重整
+                _pollForMigrationDone();
+                appendLog('已下載升級工具，請在 Chrome 下載列執行它。', 'system');
                 return;
             }
 
@@ -695,6 +711,72 @@ if (typeof appendLog === 'undefined') {
                 // 忽略錯誤，絕對不把 isUpdating 設為 false，讓畫面維持藍色等待直到 polling 醒來
                 console.warn('Update trigger network drop:', err);
             }
+        }
+
+        function _showMigrationOverlay() {
+            // 如果遮罩已存在就不重複建立
+            if (document.getElementById('migrationOverlay')) return;
+            const overlay = document.createElement('div');
+            overlay.id = 'migrationOverlay';
+            overlay.className = 'fixed inset-0 bg-black/90 z-[120] flex items-center justify-center backdrop-blur-md';
+            overlay.innerHTML = `
+                <div class="bg-[#1e1e1e] border-t-4 border-orange-500 rounded-lg shadow-2xl p-8 max-w-lg w-full">
+                    <div class="flex items-center gap-4 mb-6">
+                        <div class="text-5xl">🚀</div>
+                        <div>
+                            <h2 class="text-xl font-bold text-white">首次升級（僅需一次）</h2>
+                            <p class="text-gray-400 text-sm">升級完成後，未來更新只需點一下即可</p>
+                        </div>
+                    </div>
+                    <div class="bg-[#2a2a2a] rounded-lg p-5 mb-5 space-y-4">
+                        <div class="flex items-start gap-3">
+                            <span class="text-2xl">①</span>
+                            <div>
+                                <p class="text-white font-semibold">在 Chrome 下載列找到並執行升級工具</p>
+                                <p class="text-gray-400 text-xs mt-1">若出現「已封鎖」，請點 ⋮ →「仍然保留」</p>
+                            </div>
+                        </div>
+                        <div class="flex items-start gap-3">
+                            <span class="text-2xl">②</span>
+                            <div>
+                                <p class="text-white font-semibold">等待自動完成（約 30 秒）</p>
+                                <p class="text-gray-400 text-xs mt-1">完成後此頁面會自動重新整理</p>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="bg-blue-900/30 border border-blue-600 rounded p-3 mb-5 text-xs text-blue-300">
+                        💡 <strong>備用方法：</strong>升級指令已複製到剪貼簿，也可按
+                        <kbd class="bg-[#333] px-1 rounded">Win+R</kbd> →
+                        <kbd class="bg-[#333] px-1 rounded">Ctrl+V</kbd> →
+                        <kbd class="bg-[#333] px-1 rounded">Enter</kbd> 執行
+                    </div>
+                    <div class="flex items-center justify-between">
+                        <div class="flex items-center gap-2 text-gray-500 text-xs">
+                            <div class="w-4 h-4 rounded-full border-2 border-t-transparent border-orange-500 animate-spin"></div>
+                            等待升級完成中...
+                        </div>
+                        <button onclick="document.getElementById('migrationOverlay').remove()"
+                                class="text-gray-500 hover:text-gray-300 text-xs underline">關閉</button>
+                    </div>
+                </div>`;
+            document.body.appendChild(overlay);
+        }
+
+        function _pollForMigrationDone() {
+            const timer = setInterval(async () => {
+                try {
+                    const r = await fetch('http://localhost:8000/api/v1/version', { signal: AbortSignal.timeout(2000) });
+                    if (!r.ok) return;
+                    const data = await r.json();
+                    if (data.version && !_isOlderThan(data.version, '1.8.0')) {
+                        clearInterval(timer);
+                        const overlay = document.getElementById('migrationOverlay');
+                        if (overlay) overlay.remove();
+                        appendLog('升級完成！正在重新載入頁面...', 'system');
+                        setTimeout(() => window.location.reload(), 1500);
+                    }
+                } catch (e) { /* agent 尚未重啟，繼續等 */ }
+            }, 3000);
         }
 
         function _isOlderThan(ver, minVer) {

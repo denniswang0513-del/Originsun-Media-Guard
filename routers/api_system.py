@@ -707,6 +707,77 @@ ping 127.0.0.1 -n 3 >nul
         headers={"Content-Disposition": "attachment; filename=Originsun_Updater.bat"}
     )
 
+@router.get("/bootstrap.ps1")
+async def bootstrap_ps1(request: Request):
+    """Serve a PowerShell bootstrap script for one-command agent migration."""
+    from fastapi.responses import Response
+    server_url = f"http://{request.headers.get('host', '192.168.1.11:8000')}"
+    ps_content = f"""# Originsun Agent - One-Command Upgrade
+# Usage: powershell -c "irm {server_url}/bootstrap.ps1 | iex"
+[Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+$ErrorActionPreference = 'Stop'
+
+Write-Host ''
+Write-Host '==================================================='
+Write-Host '  Originsun Media Guard Pro - One-Command Upgrade'
+Write-Host '==================================================='
+Write-Host ''
+
+# 1. Find install directory
+$installDir = $null
+$candidates = @(
+    'C:\\OriginsunAgent',
+    "$env:USERPROFILE\\Desktop\\OriginsunAgent",
+    "$env:LOCALAPPDATA\\OriginsunAgent"
+)
+foreach ($d in $candidates) {{
+    if (Test-Path "$d\\main.py") {{ $installDir = $d; break }}
+}}
+if (-not $installDir) {{
+    Write-Host '[ERROR] Cannot find OriginsunAgent install directory!' -ForegroundColor Red
+    Write-Host '        Please run this from the Agent directory or install first.'
+    pause; exit 1
+}}
+Write-Host "[System] Install dir: $installDir"
+Write-Host "[System] Server: {server_url}"
+Write-Host ''
+
+# 2. Kill old agent on port 8000
+Write-Host '[System] Stopping old Agent...'
+try {{
+    Get-NetTCPConnection -LocalPort 8000 -ErrorAction SilentlyContinue |
+        ForEach-Object {{ Stop-Process -Id $_.OwningProcess -Force -ErrorAction SilentlyContinue }}
+}} catch {{}}
+Start-Sleep -Seconds 2
+
+# 3. Download update ZIP
+$zipPath = "$env:TEMP\\originsun_update.zip"
+Write-Host '[System] Downloading latest version...'
+[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+Invoke-WebRequest -Uri '{server_url}/download_update' -OutFile $zipPath -UseBasicParsing -TimeoutSec 300
+
+# 4. Extract (overwrite all)
+Write-Host '[System] Extracting update...'
+Expand-Archive -Path $zipPath -DestinationPath $installDir -Force
+Remove-Item $zipPath -Force -ErrorAction SilentlyContinue
+
+# 5. Restart agent
+Write-Host ''
+Write-Host '[OK] Upgrade complete! Restarting Agent...' -ForegroundColor Green
+$vbs = Join-Path $installDir 'start_hidden.vbs'
+if (Test-Path $vbs) {{
+    Start-Process wscript -ArgumentList "`"$vbs`""
+}} else {{
+    Start-Process (Join-Path $installDir 'update_agent.bat')
+}}
+Write-Host '[OK] Agent started. Please refresh the web page.' -ForegroundColor Green
+Start-Sleep -Seconds 3
+"""
+    return Response(
+        content=ps_content,
+        media_type="text/plain; charset=utf-8",
+    )
+
 @router.get("/download_installer")
 async def download_installer():
     file_path = "Install_Originsun_Agent.bat"
