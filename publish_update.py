@@ -3,22 +3,15 @@ import sys
 import json
 import subprocess
 from datetime import datetime
-import shutil
 
 VERSION_FILE = "version.json"
 BUILD_SCRIPT = "build_agent_zip.py"
 
-def _get_nas_ota_path():
-    try:
-        from config import load_settings
-        return load_settings().get("nas_paths", {}).get("ota_dir", "")
-    except Exception:
-        return ""
 
 def main():
-    print("="*60)
+    print("=" * 60)
     print("[*] Originsun SaaS - Auto Publisher")
-    print("="*60)
+    print("=" * 60)
     print("")
 
     if not os.path.exists(VERSION_FILE):
@@ -37,7 +30,6 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--version", type=str, default="")
     parser.add_argument("--notes", type=str, default="")
-    parser.add_argument("--sync", type=str, default="")
     args, _ = parser.parse_known_args()
 
     if args.version:
@@ -85,72 +77,9 @@ def main():
         print("\n[ERROR] 打包過程發生錯誤，發布終止。")
         return
 
-    # 5. [可選] 同步至 NAS OTA 目錄
-    NAS_OTA_PATH = _get_nas_ota_path()
-    if not NAS_OTA_PATH:
-        print("\n[SKIP] settings.json 中未設定 nas_paths.ota_dir，跳過 NAS 同步。")
-        print("[*] 如需 OTA 更新，請在系統設定中填入 NAS OTA 路徑。")
-        return
+    print("\n[OK] 發布完成！Agent ZIP 已建置。")
+    print("[*] 同事的 Agent 會透過 HTTP 偵測到新版本並顯示更新通知。")
 
-    print(f"\n[*] 準備發布 OTA 更新至 NAS: {NAS_OTA_PATH}")
-    if args.sync.lower() == "y":
-        ans = "y"
-    elif args.sync.lower() == "n":
-        ans = "n"
-    else:
-        ans = input("是否要立即同步檔案至 NAS? (y/n) [y]: ").strip().lower()
-
-    if ans == "" or ans == "y":
-        if not os.path.exists(NAS_OTA_PATH):
-            try:
-                os.makedirs(NAS_OTA_PATH, exist_ok=True)
-            except Exception as e:
-                print(f"無法存取或建立 NAS 路徑: {e}")
-                print("請手動將檔案複製到 NAS。")
-                return
-
-        print("正在同步核心檔案至 NAS...")
-        files_to_sync = [
-            "main.py",
-            "config.py",
-            "core_engine.py",
-            "report_generator.py",
-            "notifier.py",
-            "drive_sync.py",
-            "transcriber.py",
-            "tts_engine.py",
-            "taiwan_dict.json",
-            "download_model.py",
-            "version.json",
-            "logo.ico",
-            "Install_Originsun_Agent.bat",
-            "update_agent.bat",
-            "update_monitor.py",
-            "start_hidden.vbs",
-            "0225_requirements.txt",
-            "bootstrap.py",
-            "Originsun_Agent.zip"
-        ]
-
-        folders_to_sync = ["frontend", "templates", "windows_helper", "core", "routers", "utils"]
-
-        for f in files_to_sync:
-            if os.path.exists(f):
-                shutil.copy2(f, os.path.join(NAS_OTA_PATH, f))
-                print(f"  [OK] 同步檔案: {f}")
-
-        for folder in folders_to_sync:
-            if os.path.exists(folder):
-                dest_dir = os.path.join(NAS_OTA_PATH, folder)
-                if os.path.exists(dest_dir):
-                    shutil.rmtree(dest_dir)
-                shutil.copytree(folder, dest_dir)
-                print(f"  [OK] 同步資料夾: {folder}\\")
-
-        print("\n[OK] 發布成功！NAS 端已擁有最新版。")
-        print("[*] 同事將會在他們的網頁上看到「發現新版本」的按鈕。")
-    else:
-        print("\n跳過 NAS 同步，僅完成在地打包。")
 
 if __name__ == "__main__":
     main()
