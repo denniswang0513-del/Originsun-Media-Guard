@@ -118,3 +118,29 @@ async def test_serial_execution(async_client, mock_engine):
     assert mock_engine.run_backup_job.call_count >= 2, (
         f"Expected 2+ calls, got {mock_engine.run_backup_job.call_count}"
     )
+
+
+# ── 4. 同專案排隊而非拒絕 ──────────────────────────────────────
+async def test_same_project_queues_not_rejects(async_client, mock_engine):
+    """同專案提交兩個 backup → 第二個應排隊（200 + warning），不應被拒絕（409）。"""
+    def slow_backup(*args, **kwargs):
+        time.sleep(2.0)
+
+    mock_engine.run_backup_job.side_effect = slow_backup
+    state.CONCURRENCY_LIMITS["backup"] = 1
+
+    r1 = await async_client.post("/api/v1/jobs", json=MINIMAL_BACKUP)
+    assert r1.status_code == 200
+
+    await asyncio.sleep(0.3)
+
+    r2 = await async_client.post("/api/v1/jobs", json=MINIMAL_BACKUP)
+    assert r2.status_code == 200
+    data2 = r2.json()
+    assert data2["status"] == "queued"
+    assert "warning" in data2, "Second job should return a duplicate warning"
+
+    await asyncio.sleep(5.0)
+    assert mock_engine.run_backup_job.call_count >= 2, (
+        f"Expected 2+ calls, got {mock_engine.run_backup_job.call_count}"
+    )

@@ -49,7 +49,22 @@ export function getTcSelectedHosts() {
     return result;
 }
 
+let _tcSubmitting = false;
+
 export async function submitTranscode() {
+    if (_tcSubmitting) return;
+    _tcSubmitting = true;
+
+    const submitBtn = document.querySelector('#tab_transcode button[onclick="submitTranscode()"]');
+    if (submitBtn) {
+        submitBtn.disabled = true;
+        submitBtn.classList.add('opacity-70', 'cursor-not-allowed');
+        submitBtn._origText = submitBtn.textContent;
+        submitBtn.textContent = '提交中...';
+    }
+
+    try {
+
     const tcHostsRaw = getTcSelectedHosts();
     if (!tcHostsRaw || tcHostsRaw.length === 0) {
         alert('請至少選擇一台主機');
@@ -123,6 +138,15 @@ export async function submitTranscode() {
         await window.dispatchRemoteTranscode(ctx);
     } else {
         appendLog('❌ window.dispatchRemoteTranscode not found!', 'error');
+    }
+
+    } finally {
+        _tcSubmitting = false;
+        if (submitBtn) {
+            submitBtn.disabled = false;
+            submitBtn.classList.remove('opacity-70', 'cursor-not-allowed');
+            submitBtn.textContent = submitBtn._origText || '開始轉檔';
+        }
     }
 }
 

@@ -1,6 +1,21 @@
 import { appendLog, getComputeBaseUrl, addStandaloneSource, setupDragAndDrop, setupInputDrop, validateRemotePaths } from '../../js/shared/utils.js';
 
+let _ccSubmitting = false;
+
 export async function submitConcat() {
+    if (_ccSubmitting) return;
+    _ccSubmitting = true;
+
+    const submitBtn = document.querySelector('#tab_concat button[onclick="submitConcat()"]');
+    if (submitBtn) {
+        submitBtn.disabled = true;
+        submitBtn.classList.add('opacity-70', 'cursor-not-allowed');
+        submitBtn._origText = submitBtn.textContent;
+        submitBtn.textContent = '提交中...';
+    }
+
+    try {
+
     const rows = document.getElementById('cc_source_list').children;
     const sources = Array.from(rows).map(row => row.querySelector('input').value.trim()).filter(v => v);
     if (!sources.length) { alert('需要提供來源！'); return; }
@@ -52,6 +67,7 @@ export async function submitConcat() {
         if(retryBtn) retryBtn.style.display = 'none';
         
         appendLog(`串帶請求已送出至 [${ccHostName}]，任務 ID: ${result.job_id || '?'}`, 'system');
+        if (result.warning) appendLog(`⚠️ ${result.warning}`, 'system');
         
         if (!isLocal) {
             if(window.updateHostProgress) window.updateHostProgress(ccIp, 20, '已排程，串帶中...', '#228b22');
@@ -61,8 +77,17 @@ export async function submitConcat() {
             };
             if(window.startHeartbeatMonitor) window.startHeartbeatMonitor();
         }
-    } catch (e) { 
-        appendLog('發送失敗: ' + e.message, 'error'); 
+    } catch (e) {
+        appendLog('發送失敗: ' + e.message, 'error');
+    }
+
+    } finally {
+        _ccSubmitting = false;
+        if (submitBtn) {
+            submitBtn.disabled = false;
+            submitBtn.classList.remove('opacity-70', 'cursor-not-allowed');
+            submitBtn.textContent = submitBtn._origText || '開始串帶';
+        }
     }
 }
 

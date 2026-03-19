@@ -13,11 +13,11 @@ router = APIRouter()
 @router.post("/api/v1/jobs/transcode")
 async def create_transcode_job(req: TranscodeRequest):
     project_name = req.project_name or os.path.basename(req.dest_dir) or "unnamed"
-    try:
-        job_id = enqueue_job(req, project_name, "transcode")
-        return {"status": "queued", "job_id": job_id}
-    except ValueError as e:
-        return JSONResponse(status_code=409, content={"status": "duplicate", "detail": str(e)})
+    job_id, warning = enqueue_job(req, project_name, "transcode")
+    resp = {"status": "queued", "job_id": job_id}
+    if warning:
+        resp["warning"] = warning
+    return resp
 
 @router.post("/api/v1/merge_host_outputs")
 async def merge_host_outputs(req: MergeHostOutputsRequest):

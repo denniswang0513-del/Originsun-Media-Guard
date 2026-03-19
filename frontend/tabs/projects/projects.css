@@ -156,7 +156,7 @@
 #pj-active-container {
     display: flex;
     flex-direction: column;
-    gap: 8px;
+    gap: 3px;
     margin-bottom: 24px;
     min-height: 60px;
 }
@@ -186,40 +186,34 @@
     to { transform: rotate(360deg); }
 }
 
-/* ── Task Card ── */
+/* ── Task Card (single-row compact layout) ── */
 .pj-card {
     display: flex;
+    flex-direction: column;
     background: #1e1e1e;
     border: 1px solid #333;
-    border-radius: 6px;
+    border-radius: 4px;
     overflow: hidden;
     transition: border-color 0.25s ease, opacity 0.25s ease;
 }
 
-.pj-card-color-bar {
-    width: 3px;
-    flex-shrink: 0;
-    border-radius: 6px 0 0 6px;
-}
-
-.pj-card-body {
-    flex: 1;
-    padding: 10px 14px;
-    min-width: 0;
-}
-
-/* Card header row */
-.pj-card-header {
+.pj-card-row {
     display: flex;
     align-items: center;
     gap: 8px;
-    margin-bottom: 8px;
+    padding: 5px 10px;
+    min-height: 30px;
 }
 
 .pj-project-name {
     font-weight: 700;
-    font-size: 14px;
+    font-size: 13px;
     color: #e0e0e0;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 180px;
+    flex-shrink: 0;
 }
 
 .pj-type-badge {
@@ -230,6 +224,7 @@
     font-weight: 600;
     text-transform: uppercase;
     letter-spacing: 0.3px;
+    flex-shrink: 0;
 }
 
 .pj-status-badge {
@@ -275,22 +270,28 @@
     to { transform: rotate(360deg); }
 }
 
-/* Progress */
+/* Progress (inline within row) */
 .pj-progress-wrap {
-    margin-bottom: 6px;
+    flex: 1;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    min-width: 0;
+    margin-bottom: 0;
 }
 
 .pj-progress-bar {
-    width: 100%;
-    height: 6px;
+    flex: 1;
+    height: 4px;
     background: #2a2a2a;
-    border-radius: 3px;
+    border-radius: 2px;
     overflow: hidden;
+    min-width: 60px;
 }
 
 .pj-progress-fill {
     height: 100%;
-    border-radius: 3px;
+    border-radius: 2px;
     transition: width 0.3s ease;
     width: 0%;
 }
@@ -308,12 +309,40 @@
 }
 
 .pj-progress-info {
-    font-size: 11px;
+    font-size: 10px;
     color: #666;
-    margin-top: 3px;
+    margin-top: 0;
+    white-space: nowrap;
+    flex-shrink: 0;
 }
 
-/* Current file */
+/* Log toggle (inline arrow icon) */
+.pj-log-toggle {
+    font-size: 11px;
+    color: #556;
+    cursor: pointer;
+    user-select: none;
+    flex-shrink: 0;
+    width: 14px;
+    text-align: center;
+    transition: color 0.2s ease;
+}
+
+.pj-log-toggle:hover {
+    color: #88a;
+}
+
+/* Card detail (expandable area below row) */
+.pj-card-detail {
+    padding: 0 10px 6px 28px;
+    display: none;
+}
+
+.pj-card-detail.pj-detail-open {
+    display: block;
+}
+
+/* Current file (inside detail) */
 .pj-current-file {
     font-size: 11px;
     color: #666;
@@ -323,21 +352,7 @@
     margin-bottom: 4px;
 }
 
-/* Log toggle */
-.pj-log-toggle {
-    font-size: 11px;
-    color: #556;
-    cursor: pointer;
-    user-select: none;
-    padding: 2px 0;
-    transition: color 0.2s ease;
-}
-
-.pj-log-toggle:hover {
-    color: #88a;
-}
-
-/* Log area */
+/* Log area (inside detail) */
 .pj-log-area {
     max-height: 120px;
     overflow-y: auto;
@@ -348,11 +363,6 @@
     margin-top: 4px;
     font-size: 11px;
     line-height: 1.5;
-    display: none;
-}
-
-.pj-log-area.pj-log-open {
-    display: block;
 }
 
 .pj-log-line-info { color: #888; }
@@ -360,11 +370,12 @@
 .pj-log-line-error { color: #ef4444; }
 .pj-log-line-verbose { color: #555; font-size: 10px; }
 
-/* Card actions */
+/* Card actions (inline within row) */
 .pj-card-actions {
     display: flex;
-    gap: 6px;
-    margin-top: 8px;
+    gap: 4px;
+    margin-top: 0;
+    flex-shrink: 0;
 }
 
 .pj-btn {
@@ -399,12 +410,10 @@
 .pj-card.pj-card-done {
     border-left: 3px solid #22c55e;
 }
-.pj-card.pj-card-done > .pj-card-color-bar { display: none; }
 
 .pj-card.pj-card-error {
     border-left: 3px solid #ef4444;
 }
-.pj-card.pj-card-error > .pj-card-color-bar { display: none; }
 
 /* Card animations */
 .pj-card.pj-entering {
@@ -495,6 +504,34 @@
     padding: 20px 0;
     font-size: 13px;
 }
+
+/* ── History Pagination ── */
+.pj-pagination {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 0 2px;
+}
+.pj-page-arrow {
+    cursor: pointer;
+    color: #555;
+    font-size: 14px;
+    padding: 0 4px;
+    user-select: none;
+}
+.pj-page-arrow:hover { color: #aaa; }
+.pj-page-arrow.disabled { opacity: 0.3; pointer-events: none; }
+.pj-page-dot {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: #444;
+    cursor: pointer;
+    transition: background 0.2s;
+}
+.pj-page-dot:hover { background: #888; }
+.pj-page-dot.active { background: #3b82f6; width: 8px; height: 8px; }
 
 /* ── Queue Panel ── */
 #pj-queue-container {

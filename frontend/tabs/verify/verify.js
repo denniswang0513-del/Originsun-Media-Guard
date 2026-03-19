@@ -33,7 +33,22 @@ export function addVerifySourceRow(defaultPath1 = '', defaultPath2 = '') {
     return `vf_src_${vfIndex}`;
 }
 
+let _vfSubmitting = false;
+
 export async function submitVerify() {
+    if (_vfSubmitting) return;
+    _vfSubmitting = true;
+
+    const submitBtn = document.querySelector('#tab_verify button[onclick="submitVerify()"]');
+    if (submitBtn) {
+        submitBtn.disabled = true;
+        submitBtn.classList.add('opacity-70', 'cursor-not-allowed');
+        submitBtn._origText = submitBtn.textContent;
+        submitBtn.textContent = '提交中...';
+    }
+
+    try {
+
     const rows = document.getElementById('vf_source_list').children;
     const pairs = [];
     for (let row of rows) {
@@ -64,8 +79,18 @@ export async function submitVerify() {
         const retryBtn = document.getElementById('btn_retry');
         if (retryBtn) retryBtn.style.display = 'none';
         appendLog(`比對請求已送出，模式：${vfMode === 'quick' ? '快速' : 'XXH64 進階'}，任務 ID: ${result.job_id || '?'}`, 'system');
-    } catch (e) { 
-        appendLog('發送失敗: ' + e, 'error'); 
+        if (result.warning) appendLog(`⚠️ ${result.warning}`, 'system');
+    } catch (e) {
+        appendLog('發送失敗: ' + e, 'error');
+    }
+
+    } finally {
+        _vfSubmitting = false;
+        if (submitBtn) {
+            submitBtn.disabled = false;
+            submitBtn.classList.remove('opacity-70', 'cursor-not-allowed');
+            submitBtn.textContent = submitBtn._origText || '開始比對';
+        }
     }
 }
 

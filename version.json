@@ -1,5 +1,5 @@
 {
-  "version": "1.8.3",
+  "version": "1.8.4",
   "build_date": "2026-03-19",
-  "notes": "feat: backend periodic version check + Socket.IO push update notification / fix: OTA version check bugs"
+  "notes": "feat: compact single-row task cards + history dot pagination / fix: task queue duplicate warning display"
 }

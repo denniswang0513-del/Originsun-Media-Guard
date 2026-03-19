@@ -18,17 +18,17 @@ from core_engine import ReportManifest  # type: ignore
 
 # ── Public API ───────────────────────────────────────────────
 
-def enqueue_job(request: Any, project_name: str, task_type: str) -> str:
+def enqueue_job(request: Any, project_name: str, task_type: str) -> tuple:
     """
     Register a new job and trigger the dispatcher.
-    Returns job_id.
-    Raises ValueError if duplicate (same project_name + task_type already active).
+    Returns (job_id, warning_or_none).
+    If a duplicate (same project_name + task_type) is already active,
+    the job is still accepted but a warning string is returned.
     """
+    warning = None
     dup = state.find_duplicate(project_name, task_type)
     if dup:
-        raise ValueError(
-            f"專案 '{project_name}' 已有進行中的 {task_type} 任務 (job_id={dup.job_id})"
-        )
+        warning = f"專案 '{project_name}' 已有進行中的 {task_type} 任務 (job_id={dup.job_id})，新任務已加入排隊"
 
     job_id = getattr(request, 'job_id', '') or uuid.uuid4().hex[:8]
     request.job_id = job_id
@@ -64,7 +64,7 @@ def enqueue_job(request: Any, project_name: str, task_type: str) -> str:
         }))
         asyncio.ensure_future(_try_dispatch(task_type))
 
-    return job_id
+    return job_id, warning
 
 
 # ── Priority Dispatcher ─────────────────────────────────────

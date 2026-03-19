@@ -24,6 +24,11 @@ let _queueItems = [];       // current queue data from API
 let _isDragging = false;    // true during drag — defers socket updates
 let _pendingQueueUpdate = null; // buffered socket update during drag
 
+// History pagination state
+const HISTORY_PAGE_SIZE = 5;
+let _historyAllJobs = [];
+let _historyPage = 0;
+
 // Machine polling state
 let _agents = [];           // from settings.json
 let _agentStatus = {};      // id → { online, slow, data, timerId }
@@ -188,27 +193,81 @@ async function _loadHistory() {
         const res = await fetch('/api/v1/job_history?date=' + encodeURIComponent(date) + '&limit=100');
         if (!res.ok) { loading.textContent = '載入失敗'; return; }
         const data = await res.json();
-        container.textContent = '';
 
-        if (!data.jobs || data.jobs.length === 0) {
-            const empty = document.createElement('div');
-            empty.className = 'pj-history-empty';
-            empty.textContent = date + ' 尚無完成的任務';
-            container.appendChild(empty);
-        } else {
-            for (const entry of data.jobs) {
-                _renderHistoryItem(container, entry);
-            }
-        }
+        _historyAllJobs = data.jobs || [];
+        _historyPage = 0;
+        _renderHistoryPage();
 
         // Update today done count
         if (date === _todayStr()) {
-            _todayDoneCount = (data.jobs || []).length;
+            _todayDoneCount = _historyAllJobs.length;
             _updateBadges();
         }
     } catch (_) {
         loading.textContent = '載入失敗';
     }
+}
+
+function _renderHistoryPage() {
+    const container = document.getElementById('pj-history-container');
+    if (!container) return;
+    container.textContent = '';
+
+    if (_historyAllJobs.length === 0) {
+        const dateInput = document.getElementById('pj-history-date');
+        const date = dateInput ? dateInput.value : _todayStr();
+        const empty = document.createElement('div');
+        empty.className = 'pj-history-empty';
+        empty.textContent = date + ' 尚無完成的任務';
+        container.appendChild(empty);
+        return;
+    }
+
+    const totalPages = Math.ceil(_historyAllJobs.length / HISTORY_PAGE_SIZE);
+    if (_historyPage >= totalPages) _historyPage = totalPages - 1;
+    const start = _historyPage * HISTORY_PAGE_SIZE;
+    const end = Math.min(start + HISTORY_PAGE_SIZE, _historyAllJobs.length);
+
+    for (let i = start; i < end; i++) {
+        _renderHistoryItem(container, _historyAllJobs[i]);
+    }
+
+    if (totalPages > 1) {
+        _renderPagination(container, totalPages);
+    }
+}
+
+function _renderPagination(container, totalPages) {
+    const wrap = document.createElement('div');
+    wrap.className = 'pj-pagination';
+
+    // Left arrow
+    const left = document.createElement('span');
+    left.className = 'pj-page-arrow' + (_historyPage === 0 ? ' disabled' : '');
+    left.textContent = '\u2039';
+    left.addEventListener('click', () => {
+        if (_historyPage > 0) { _historyPage--; _renderHistoryPage(); }
+    });
+    wrap.appendChild(left);
+
+    // Dots
+    for (let i = 0; i < totalPages; i++) {
+        const dot = document.createElement('span');
+        dot.className = 'pj-page-dot' + (i === _historyPage ? ' active' : '');
+        dot.addEventListener('click', () => { _historyPage = i; _renderHistoryPage(); });
+        wrap.appendChild(dot);
+    }
+
+    // Right arrow
+    const right = document.createElement('span');
+    right.className = 'pj-page-arrow' + (_historyPage === totalPages - 1 ? ' disabled' : '');
+    right.textContent = '\u203a';
+    right.addEventListener('click', () => {
+        if (_historyPage < totalPages - 1) { _historyPage++; _renderHistoryPage(); }
+    });
+    wrap.appendChild(right);
+
+    container.appendChild(wrap);
 }
 
 async function clearHistory() {
@@ -267,40 +326,32 @@ function _createCard(job) {
     card.className = 'pj-card pj-entering';
     card.id = 'pj-card-' + jobId;
 
-    // Color bar
-    const bar = document.createElement('div');
-    bar.className = 'pj-card-color-bar';
-    bar.style.backgroundColor = color;
-    card.appendChild(bar);
+    // ── Single row ──
+    const row = document.createElement('div');
+    row.className = 'pj-card-row';
+    row.style.borderLeft = '3px solid ' + color;
 
-    // Body
-    const body = document.createElement('div');
-    body.className = 'pj-card-body';
-
-    // Header row
-    const header = document.createElement('div');
-    header.className = 'pj-card-header';
-
-    const projName = document.createElement('span');
-    projName.className = 'pj-project-name';
-    projName.appendChild(_text(job.project_name || '--'));
-    header.appendChild(projName);
-
+    // Type badge (leftmost)
     const typeBadge = document.createElement('span');
     typeBadge.className = 'pj-type-badge';
     typeBadge.style.backgroundColor = color;
     typeBadge.appendChild(_text(TYPE_LABELS[taskType] || taskType));
-    header.appendChild(typeBadge);
+    row.appendChild(typeBadge);
 
-    const statusBadge = document.createElement('span');
-    statusBadge.className = 'pj-status-badge';
-    statusBadge.id = 'pj-status-' + jobId;
-    statusBadge.appendChild(_text(STATUS_LABELS[job.status] || job.status));
-    header.appendChild(statusBadge);
+    // Toggle arrow
+    const logToggle = document.createElement('span');
+    logToggle.className = 'pj-log-toggle';
+    logToggle.textContent = '▸';
+    logToggle.addEventListener('click', () => toggleLog(jobId));
+    row.appendChild(logToggle);
 
-    body.appendChild(header);
+    // Project name
+    const projName = document.createElement('span');
+    projName.className = 'pj-project-name';
+    projName.appendChild(_text(job.project_name || '--'));
+    row.appendChild(projName);
 
-    // Progress
+    // Progress (inline)
     const progressWrap = document.createElement('div');
     progressWrap.className = 'pj-progress-wrap';
 
@@ -319,28 +370,16 @@ function _createCard(job) {
     progressInfo.id = 'pj-info-' + jobId;
     progressWrap.appendChild(progressInfo);
 
-    body.appendChild(progressWrap);
+    row.appendChild(progressWrap);
 
-    // Current file
-    const curFile = document.createElement('div');
-    curFile.className = 'pj-current-file';
-    curFile.id = 'pj-file-' + jobId;
-    body.appendChild(curFile);
+    // Status badge
+    const statusBadge = document.createElement('span');
+    statusBadge.className = 'pj-status-badge';
+    statusBadge.id = 'pj-status-' + jobId;
+    statusBadge.appendChild(_text(STATUS_LABELS[job.status] || job.status));
+    row.appendChild(statusBadge);
 
-    // Log toggle
-    const logToggle = document.createElement('div');
-    logToggle.className = 'pj-log-toggle';
-    logToggle.textContent = '查看詳細 ▾';
-    logToggle.addEventListener('click', () => toggleLog(jobId));
-    body.appendChild(logToggle);
-
-    // Log area
-    const logArea = document.createElement('div');
-    logArea.className = 'pj-log-area';
-    logArea.id = 'pj-log-' + jobId;
-    body.appendChild(logArea);
-
-    // Actions
+    // Actions (inline)
     const actions = document.createElement('div');
     actions.className = 'pj-card-actions';
     actions.id = 'pj-actions-' + jobId;
@@ -364,9 +403,26 @@ function _createCard(job) {
     actions.appendChild(btnPause);
     actions.appendChild(btnStop);
     actions.appendChild(btnClose);
-    body.appendChild(actions);
+    row.appendChild(actions);
 
-    card.appendChild(body);
+    card.appendChild(row);
+
+    // ── Expandable detail area ──
+    const detail = document.createElement('div');
+    detail.className = 'pj-card-detail';
+    detail.id = 'pj-detail-' + jobId;
+
+    const curFile = document.createElement('div');
+    curFile.className = 'pj-current-file';
+    curFile.id = 'pj-file-' + jobId;
+    detail.appendChild(curFile);
+
+    const logArea = document.createElement('div');
+    logArea.className = 'pj-log-area';
+    logArea.id = 'pj-log-' + jobId;
+    detail.appendChild(logArea);
+
+    card.appendChild(detail);
 
     // Set initial indeterminate state for queued/waiting
     const status = job.status || 'queued';
@@ -559,19 +615,20 @@ function _appendCardLog(jobId, msg, type) {
 function toggleLog(jobId) {
     const info = _cards[jobId];
     if (!info) return;
+    const detail = document.getElementById('pj-detail-' + jobId);
     const logArea = document.getElementById('pj-log-' + jobId);
     const card = info.el;
     const toggle = card.querySelector('.pj-log-toggle');
-    if (!logArea || !toggle) return;
+    if (!detail || !toggle) return;
 
     info.logExpanded = !info.logExpanded;
     if (info.logExpanded) {
-        logArea.classList.add('pj-log-open');
-        toggle.textContent = '收起詳細 ▴';
-        logArea.scrollTop = logArea.scrollHeight;
+        detail.classList.add('pj-detail-open');
+        toggle.textContent = '▾';
+        if (logArea) logArea.scrollTop = logArea.scrollHeight;
     } else {
-        logArea.classList.remove('pj-log-open');
-        toggle.textContent = '查看詳細 ▾';
+        detail.classList.remove('pj-detail-open');
+        toggle.textContent = '▸';
     }
 }
 
@@ -648,16 +705,12 @@ function _onTaskStatus(data) {
             body: JSON.stringify(entry),
         }).catch(() => {});
 
-        // If viewing today, prepend to history list
+        // If viewing today, prepend to paginated history
         const dateInput = document.getElementById('pj-history-date');
         if (dateInput && dateInput.value === _todayStr()) {
-            const container = document.getElementById('pj-history-container');
-            if (container) {
-                // Remove empty-state placeholder
-                const empty = container.querySelector('.pj-history-empty');
-                if (empty) empty.remove();
-                _renderHistoryItem(container, entry, true);
-            }
+            _historyAllJobs.unshift(entry);
+            _historyPage = 0;
+            _renderHistoryPage();
         }
     }
 }
@@ -1301,17 +1354,17 @@ function _renderHistoryItem(container, entry, prepend) {
     }
     row.appendChild(time);
 
-    // Project name
-    const proj = document.createElement('span');
-    proj.className = 'pj-history-project';
-    proj.appendChild(_text(entry.project_name || '--'));
-    row.appendChild(proj);
-
     // Task type
     const type = document.createElement('span');
     type.className = 'pj-history-type';
     type.appendChild(_text(TYPE_LABELS[entry.task_type] || entry.task_type || ''));
     row.appendChild(type);
+
+    // Project name
+    const proj = document.createElement('span');
+    proj.className = 'pj-history-project';
+    proj.appendChild(_text(entry.project_name || '--'));
+    row.appendChild(proj);
 
     // Duration
     const dur = document.createElement('span');

@@ -64,7 +64,21 @@ function getSelectedHosts() {
 }
 
 
+let _submitting = false;
+
 export async function submitJob() {
+    if (_submitting) return;
+    _submitting = true;
+
+    const submitBtn = document.querySelector('#tab_backup button[onclick="submitJob()"]');
+    if (submitBtn) {
+        submitBtn.disabled = true;
+        submitBtn.classList.add('opacity-70', 'cursor-not-allowed');
+        submitBtn._origText = submitBtn.textContent;
+        submitBtn.textContent = '提交中...';
+    }
+
+    try {
     // Reset global progress
     resetProgress();
     window._isStandaloneTranscode = false;
@@ -178,8 +192,20 @@ export async function submitJob() {
         const btnRetry = document.getElementById('btn_retry');
         if (btnRetry) btnRetry.style.display = 'none';
         appendLog(`請求已送出，伺服器排序狀態: ${result.status}, 任務 ID: ${result.job_id || '?'}`, 'system');
+        if (result.warning) {
+            appendLog(`⚠️ ${result.warning}`, 'system');
+        }
     } catch (err) {
         appendLog(`請求發送失敗: ${err.message}`, 'error');
+    }
+
+    } finally {
+        _submitting = false;
+        if (submitBtn) {
+            submitBtn.disabled = false;
+            submitBtn.classList.remove('opacity-70', 'cursor-not-allowed');
+            submitBtn.textContent = submitBtn._origText || '開始備份';
+        }
     }
 }
 

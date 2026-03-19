@@ -165,8 +165,10 @@ export async function submitTranscribeJob() {
             body: JSON.stringify(payload)
         });
         
+        const result = await res.json();
         if (res.ok) {
             appendLog('✅ 已成功將逐字稿任務送入佇列。', 'system');
+            if (result.warning) appendLog(`⚠️ ${result.warning}`, 'system');
             // Show progress area
             const progArea = document.getElementById('transcribe_progress_area');
             if (progArea) progArea.classList.remove('hidden');
@@ -175,8 +177,7 @@ export async function submitTranscribeJob() {
             document.getElementById('transcribe_prog_pct').textContent = '0%';
             document.getElementById('transcribe_prog_bar').style.width = '0%';
         } else {
-            const text = await res.text();
-            alert(`提交失敗: ${text}`);
+            alert(`提交失敗: ${result.detail || JSON.stringify(result)}`);
             btn.innerHTML = originalText;
             btn.disabled = false;
             btn.classList.remove('opacity-70', 'cursor-not-allowed');

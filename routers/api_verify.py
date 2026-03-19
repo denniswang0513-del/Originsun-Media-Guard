@@ -11,8 +11,8 @@ async def create_verify_job(req: VerifyRequest):
     project_name = req.project_name or (
         os.path.basename(req.pairs[0][0]) if req.pairs else "unnamed"
     )
-    try:
-        job_id = enqueue_job(req, project_name, "verify")
-        return {"status": "queued", "job_id": job_id}
-    except ValueError as e:
-        return JSONResponse(status_code=409, content={"status": "duplicate", "detail": str(e)})
+    job_id, warning = enqueue_job(req, project_name, "verify")
+    resp = {"status": "queued", "job_id": job_id}
+    if warning:
+        resp["warning"] = warning
+    return resp

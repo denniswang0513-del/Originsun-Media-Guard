@@ -4,6 +4,26 @@
 
 ---
 
+## [1.8.4] - 2026-03-19
+
+### 新增
+- `frontend/tabs/projects/projects.js` — 任務卡片改為單行緊湊佈局（`.pj-card-row`），點擊 ▸ 展開詳細 log
+- `frontend/tabs/projects/projects.js` — 歷史紀錄區新增點狀分頁器（每頁 5 筆，`‹ ● ○ ○ ›` 導航）
+- `tests/integration/test_task_queue.py` — 新增 `test_same_project_queues_not_rejects` 測試（同專案重複提交應排隊而非拒絕）
+
+### 修改
+- `frontend/tabs/projects/projects.css` — 重寫 `.pj-card` 系列樣式為單行 flex 佈局，新增 `.pj-pagination` 分頁樣式
+- `frontend/tabs/projects/projects.js` — 類別按鈕（type badge）移至卡片最左側；歷史紀錄中類別移至時間右側、專案名左側
+- `frontend/tabs/verify/verify.js` — 補齊 try/finally 提交鎖定 + 新增 warning 顯示
+- `frontend/tabs/transcribe/transcribe.js` — 新增 warning 顯示 + 修正 response body 重複讀取 bug
+- `frontend/tabs/concat/concat.js` — 新增 warning 顯示
+
+### 技術備註
+- 任務卡片從 ~120px 壓縮至 ~30px 單行，容納更多排隊項目
+- 歷史分頁為純前端分頁（仍一次 fetch 100 筆），後端 API 不變
+
+---
+
 ## [1.8.3] - 2026-03-19
 
 ### 新增
