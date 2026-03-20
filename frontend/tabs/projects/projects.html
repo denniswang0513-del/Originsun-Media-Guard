@@ -88,9 +88,27 @@
     <div id="pj-active-container"></div>
 
     <!-- 完成 Section -->
-    <div class="pj-section-header" style="margin-top: 16px;">
+    <div class="pj-section-header pj-history-toolbar" style="margin-top: 16px;">
         <span>完成</span>
-        <div class="pj-section-header-right">
+        <div class="pj-history-toolbar-right">
+            <input type="text" id="pj-history-search" class="pj-filter-input" placeholder="搜尋專案名…">
+            <select id="pj-history-type-filter" class="pj-filter-select">
+                <option value="">全部類型</option>
+                <option value="backup">備份</option>
+                <option value="transcode">轉檔</option>
+                <option value="concat">串接</option>
+                <option value="verify">驗證</option>
+                <option value="report">報表</option>
+                <option value="transcribe">逐字稿</option>
+                <option value="tts">語音生成</option>
+                <option value="clone">聲音複製</option>
+            </select>
+            <select id="pj-history-status-filter" class="pj-filter-select">
+                <option value="">全部狀態</option>
+                <option value="done">完成</option>
+                <option value="error">失敗</option>
+                <option value="cancelled">取消</option>
+            </select>
             <input type="date" id="pj-history-date" class="pj-history-date">
             <button class="pj-btn-clear" onclick="window.projectsTab.clearHistory()">清除</button>
         </div>

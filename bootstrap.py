@@ -29,6 +29,83 @@ def _read_master_server(base_dir):
 # Mode 1: OTA Update (--update)
 # ---------------------------------------------------------------------------
 
+def _kill_port(port):
+    """Kill any process listening on the given port. Returns list of killed PIDs."""
+    killed = []
+    try:
+        out = subprocess.check_output("netstat -aon", text=True, stderr=subprocess.DEVNULL)
+        for line in out.splitlines():
+            if f":{port}" in line and "LISTENING" in line:
+                pid = int(line.split()[-1])
+                if pid == os.getpid():
+                    continue
+                try:
+                    os.kill(pid, signal.SIGTERM)
+                except OSError:
+                    subprocess.run(["taskkill", "/F", "/PID", str(pid)],
+                                   capture_output=True)
+                killed.append(pid)
+                print(f"  Killed PID {pid}")
+    except Exception as e:
+        print(f"  Warning: {e}")
+    return killed
+
+
+def _restart_agent(base_dir):
+    """Start the agent using start_hidden.vbs or update_agent.bat."""
+    vbs = os.path.join(base_dir, "start_hidden.vbs")
+    if os.path.exists(vbs):
+        subprocess.Popen(["wscript.exe", vbs])
+    else:
+        bat = os.path.join(base_dir, "update_agent.bat")
+        subprocess.Popen(bat, shell=True, creationflags=0x00000008)
+
+
+def _rollback(base_dir, backup_dir, reason=""):
+    """Restore backed-up files and show a Windows alert dialog."""
+    if not os.path.isdir(backup_dir):
+        print("[Rollback] No backup found, cannot rollback.")
+        return
+    print("[Rollback] Restoring previous version...")
+    restored = 0
+    for root, _dirs, files in os.walk(backup_dir):
+        for fname in files:
+            bak_path = os.path.join(root, fname)
+            rel = os.path.relpath(bak_path, backup_dir)
+            dst = os.path.join(base_dir, rel)
+            try:
+                os.makedirs(os.path.dirname(dst), exist_ok=True)
+                shutil.copy2(bak_path, dst)
+                restored += 1
+            except Exception as e:
+                print(f"  Warning: failed to restore {rel}: {e}")
+    print(f"  Restored {restored} file(s).")
+    try:
+        shutil.rmtree(backup_dir)
+    except OSError:
+        pass
+    _show_rollback_alert(reason)
+
+
+def _show_rollback_alert(reason):
+    """Pop up a native Windows message box explaining the rollback."""
+    safe_reason = reason.replace('"', "'")
+    msg = (
+        "OTA 更新失敗，已自動回滾至舊版本。" '" & vbCrLf & vbCrLf & "'
+        f"原因：{safe_reason}" '" & vbCrLf & vbCrLf & "'
+        "舊版本已重新啟動，可正常使用。" '" & vbCrLf & "'
+        "請通知管理員檢查更新檔案。"
+    )
+    try:
+        vbs_path = os.path.join(tempfile.gettempdir(), "originsun_rollback_alert.vbs")
+        with open(vbs_path, "w", encoding="utf-8") as f:
+            # vbExclamation = 48
+            f.write(f'MsgBox "{msg}", 48, "Originsun 更新回滾通知"\n')
+        subprocess.Popen(["wscript.exe", vbs_path])
+    except Exception:
+        pass  # alert is best-effort
+
+
 def run_update(server_url=""):
     base_dir = _find_install_dir()
 
@@ -46,21 +123,7 @@ def run_update(server_url=""):
 
     # 1) Kill existing agent on port 8000
     print("[System] Stopping old Agent on port 8000...")
-    try:
-        out = subprocess.check_output("netstat -aon", text=True, stderr=subprocess.DEVNULL)
-        for line in out.splitlines():
-            if ":8000" in line and "LISTENING" in line:
-                parts = line.split()
-                pid = int(parts[-1])
-                if pid != os.getpid():
-                    try:
-                        os.kill(pid, signal.SIGTERM)
-                    except OSError:
-                        subprocess.run(["taskkill", "/F", "/PID", str(pid)],
-                                       capture_output=True)
-                    print(f"  Killed PID {pid}")
-    except Exception as e:
-        print(f"  Warning: {e}")
+    _kill_port(8000)
     time.sleep(2)
 
     # 2) Download update ZIP
@@ -88,13 +151,32 @@ def run_update(server_url=""):
         print(f"\n[ERROR] Download failed: {e}")
         sys.exit(1)
 
-    # 3) Extract (overwrite)
-    print("[System] Extracting update...")
+    # 3) Backup + 4) Extract in one ZIP open
+    backup_dir = os.path.join(base_dir, "_backup")
+    print("[System] Backing up current version...")
     try:
+        shutil.rmtree(backup_dir, ignore_errors=True)
+        os.makedirs(backup_dir)
         with zipfile.ZipFile(zip_path, "r") as zf:
+            for name in zf.namelist():
+                if name.endswith("/"):
+                    continue  # skip directories
+                src = os.path.join(base_dir, name)
+                if os.path.isfile(src):
+                    dst = os.path.join(backup_dir, name)
+                    os.makedirs(os.path.dirname(dst), exist_ok=True)
+                    shutil.copy2(src, dst)
+            print(f"  Backup saved to {backup_dir}")
+            # Extract inside the same ZipFile context
+            print("[System] Extracting update...")
             zf.extractall(base_dir)
+    except zipfile.BadZipFile as e:
+        print(f"[ERROR] Bad ZIP file: {e}")
+        _rollback(base_dir, backup_dir, "更新檔案損毀")
+        sys.exit(1)
     except Exception as e:
-        print(f"[ERROR] Extraction failed: {e}")
+        print(f"[ERROR] Backup/extraction failed: {e}")
+        _rollback(base_dir, backup_dir, f"解壓縮失敗：{e}")
         sys.exit(1)
     finally:
         try:
@@ -102,16 +184,38 @@ def run_update(server_url=""):
         except OSError:
             pass
 
-    # 4) Restart agent
+    # 5) Restart agent
     print("\n[OK] Upgrade complete! Restarting Agent...")
-    vbs = os.path.join(base_dir, "start_hidden.vbs")
-    if os.path.exists(vbs):
-        subprocess.Popen(["wscript.exe", vbs])
+    _restart_agent(base_dir)
+
+    # 6) Health check — rollback if new version fails to start
+    print("[System] Verifying new version starts correctly...")
+    healthy = False
+    health_req = urllib.request.Request(
+        "http://localhost:8000/api/v1/health",
+        headers={"User-Agent": "OriginsunBootstrap/1.0"},
+    )
+    for i in range(15):
+        try:
+            urllib.request.urlopen(health_req, timeout=2)
+            healthy = True
+            break
+        except Exception:
+            print(f"\r  Waiting for health check... ({i + 1}/15)", end="", flush=True)
+            time.sleep(1)
+    print()
+
+    if healthy:
+        print("[OK] New version is running. Update successful!")
+        shutil.rmtree(backup_dir, ignore_errors=True)
     else:
-        bat = os.path.join(base_dir, "update_agent.bat")
-        subprocess.Popen(bat, shell=True, creationflags=0x00000008)
-    print("[OK] Agent started. Please refresh the web page.")
-    time.sleep(2)
+        print("[ERROR] New version failed to start!")
+        _kill_port(8000)
+        time.sleep(1)
+        _rollback(base_dir, backup_dir, "新版啟動後無回應（Health Check 15 秒逾時）")
+        _restart_agent(base_dir)
+        print("[OK] Rolled back to previous version and restarted.")
+        sys.exit(1)
 
 
 # ---------------------------------------------------------------------------

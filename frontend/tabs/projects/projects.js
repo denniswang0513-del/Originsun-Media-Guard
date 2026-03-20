@@ -35,6 +35,7 @@ let _loadQueueTimer = null; // debounce timer for _loadQueue
 const HISTORY_PAGE_SIZE = 5;
 let _historyAllJobs = [];
 let _historyPage = 0;
+let _historyFilterTimer = null; // debounce for search input
 
 // Machine polling state
 let _agents = [];           // from settings.json
@@ -218,7 +219,14 @@ async function _loadHistory() {
     container.appendChild(loading);
 
     try {
-        const res = await fetch('/api/v1/job_history?date=' + encodeURIComponent(date) + '&limit=100');
+        let url = '/api/v1/job_history?date=' + encodeURIComponent(date) + '&limit=200';
+        const searchVal = (document.getElementById('pj-history-search')?.value || '').trim();
+        const typeVal = document.getElementById('pj-history-type-filter')?.value || '';
+        const statusVal = document.getElementById('pj-history-status-filter')?.value || '';
+        if (searchVal) url += '&q=' + encodeURIComponent(searchVal);
+        if (typeVal) url += '&task_type=' + encodeURIComponent(typeVal);
+        if (statusVal) url += '&status=' + encodeURIComponent(statusVal);
+        const res = await fetch(url);
         if (!res.ok) { loading.textContent = '載入失敗'; return; }
         const data = await res.json();
 
@@ -335,6 +343,25 @@ function _initHistoryDate() {
     input.value = today;
     input.max = today;
     input.addEventListener('change', () => _loadHistory());
+
+    // Filter controls
+    const searchInput = document.getElementById('pj-history-search');
+    const typeFilter = document.getElementById('pj-history-type-filter');
+    const statusFilter = document.getElementById('pj-history-status-filter');
+    if (searchInput) {
+        searchInput.addEventListener('input', () => {
+            clearTimeout(_historyFilterTimer);
+            _historyFilterTimer = setTimeout(() => _loadHistory(), 300);
+        });
+    }
+    if (typeFilter) typeFilter.addEventListener('change', () => {
+        clearTimeout(_historyFilterTimer);
+        _historyFilterTimer = setTimeout(() => _loadHistory(), 150);
+    });
+    if (statusFilter) statusFilter.addEventListener('change', () => {
+        clearTimeout(_historyFilterTimer);
+        _historyFilterTimer = setTimeout(() => _loadHistory(), 150);
+    });
 }
 
 // ══════════════════════════════════════════
@@ -1449,6 +1476,15 @@ function _renderHistoryItem(container, entry, prepend) {
     dur.textContent = secs != null ? _fmtDuration(secs) : '--';
     row.appendChild(dur);
 
+    // Log button (only if log_file exists)
+    if (entry.log_file) {
+        const logBtn = document.createElement('button');
+        logBtn.className = 'pj-log-btn';
+        logBtn.textContent = 'Log';
+        logBtn.addEventListener('click', () => _showLogModal(entry));
+        row.appendChild(logBtn);
+    }
+
     if (prepend) {
         container.insertBefore(row, container.firstChild);
     } else {
@@ -1469,6 +1505,56 @@ function _renderHistoryItem(container, entry, prepend) {
     }
 }
 
+
+// ══════════════════════════════════════════
+//  Log Viewer Modal
+// ══════════════════════════════════════════
+
+async function _showLogModal(entry) {
+    // Remove existing modal if any
+    document.querySelector('.pj-log-overlay')?.remove();
+
+    // Create overlay
+    const overlay = document.createElement('div');
+    overlay.className = 'pj-log-overlay';
+    overlay.addEventListener('click', (e) => { if (e.target === overlay) overlay.remove(); });
+    const _onEsc = (e) => { if (e.key === 'Escape') { overlay.remove(); document.removeEventListener('keydown', _onEsc); } };
+    document.addEventListener('keydown', _onEsc);
+
+    const modal = document.createElement('div');
+    modal.className = 'pj-log-modal';
+
+    // Header
+    const header = document.createElement('div');
+    header.className = 'pj-log-modal-header';
+    const title = document.createElement('span');
+    title.appendChild(_text((TYPE_LABELS[entry.task_type] || entry.task_type) + ' — ' + (entry.project_name || entry.job_id)));
+    header.appendChild(title);
+    const closeBtn = document.createElement('button');
+    closeBtn.className = 'pj-log-modal-close';
+    closeBtn.textContent = '\u2715';
+    closeBtn.addEventListener('click', () => overlay.remove());
+    header.appendChild(closeBtn);
+    modal.appendChild(header);
+
+    // Body
+    const body = document.createElement('div');
+    body.className = 'pj-log-modal-body';
+    body.textContent = '載入中…';
+    modal.appendChild(body);
+
+    overlay.appendChild(modal);
+    document.body.appendChild(overlay);
+
+    // Fetch log
+    try {
+        const res = await fetch('/api/v1/job_history/' + encodeURIComponent(entry.job_id) + '/log');
+        const data = await res.json();
+        body.textContent = data.log || data.error || '（空白）';
+    } catch (_) {
+        body.textContent = '載入失敗';
+    }
+}
 
 // ══════════════════════════════════════════
 //  Scheduled Tasks

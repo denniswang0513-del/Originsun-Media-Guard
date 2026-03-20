@@ -54,12 +54,22 @@ def _match_date(entry: dict, date_str: str) -> bool:
 @router.get("/api/v1/job_history")
 async def get_job_history(
     date: Optional[str] = None,
+    task_type: Optional[str] = None,
+    status: Optional[str] = None,
+    q: Optional[str] = None,
     limit: int = 100,
     offset: int = 0,
 ):
     history = _load_history()
     if date:
         history = [e for e in history if _match_date(e, date)]
+    if task_type:
+        history = [e for e in history if e.get("task_type") == task_type]
+    if status:
+        history = [e for e in history if e.get("status") == status]
+    if q:
+        q_lower = q.lower()
+        history = [e for e in history if q_lower in (e.get("project_name") or "").lower()]
     subset = history[offset:offset + limit]
     return {
         "jobs": subset,
@@ -72,6 +82,38 @@ async def post_job_history(entry: dict = Body(...)):
     """Add a history entry from the frontend. Deduplicates by job_id."""
     append_history(entry)
     return {"status": "ok"}
+
+
+_LOG_MAX_BYTES = 512 * 1024  # 512 KB cap to avoid sending huge logs
+
+
+@router.get("/api/v1/job_history/{job_id}/log")
+async def get_job_log(job_id: str):
+    """Return the log file content for a completed job."""
+    history = _load_history()
+    entry = next((e for e in history if e.get("job_id") == job_id), None)
+    if not entry:
+        return {"log": "", "error": "找不到此任務"}
+    log_file = entry.get("log_file", "")
+    if not log_file:
+        return {"log": "", "error": "此任務沒有 Log 檔案"}
+    # Validate: only allow paths written by our own worker (log_file comes from job_history.json)
+    # Basic sanity: must end with _Log_ pattern and .txt extension
+    resolved = os.path.realpath(log_file)
+    if not resolved.endswith(".txt") or "_Log_" not in os.path.basename(resolved):
+        return {"log": "", "error": "Log 路徑格式不符"}
+    try:
+        size = os.path.getsize(resolved)
+        with open(resolved, "r", encoding="utf-8-sig") as f:
+            if size > _LOG_MAX_BYTES:
+                f.seek(max(0, size - _LOG_MAX_BYTES))
+                f.readline()  # skip partial line
+                content = f"…（僅顯示最後 {_LOG_MAX_BYTES // 1024} KB）\n" + f.read()
+            else:
+                content = f.read()
+        return {"log": content}
+    except Exception as exc:
+        return {"log": "", "error": str(exc)}
 
 
 @router.delete("/api/v1/job_history")

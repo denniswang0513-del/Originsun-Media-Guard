@@ -1,6 +1,6 @@
 # Originsun Media Guard Pro — Claude Code 完整交接文件
 
-> **版本**: v1.9.1（2026-03-20）
+> **版本**: v1.9.3（2026-03-20）
 > **目標讀者**: 接手開發的 AI 協作者（Claude Code）
 > **開發環境**: Windows 11、Python 3.11、Vanilla JS (ES Modules)
 > **啟動方式**: `d:\Antigravity\OriginsunTranscode\.venv\Scripts\python.exe main.py`
@@ -780,7 +780,10 @@ class ValidatePathsRequest(BaseModel):
 - [x] **台灣正音引擎**：JSON 字典驅動的文字預處理（vocab_mapping + pronunciation_hacks）
 - [x] **TTS 前端三子頁**：標準 TTS / 聲音複製 / 正音字典編輯器
 - [x] **正音字典 API**：GET/POST `/api/v1/tts/dictionary`，支援熱更新
-- [x] **純 HTTP OTA 更新**：移除 NAS SMB 依賴，Agent 從主控端 HTTP 下載輕量更新 ZIP（~200KB）
+- [x] **純 HTTP OTA 更新**：移除 NAS SMB 依賴，Agent 從主控端 HTTP 下載輕量更新 ZIP（~200KB）+ 更新防卡死
 - [ ] **TTS 整合完善**：接入任務佇列、Socket.IO 即時進度、完成通知、SRT 批次合成
 - [x] **運算主機合併至機器狀態**：NAS 共享 agents.json，各 TAB host checkbox 即時同步
+- [x] **機器狀態即時監控**：綠燈脈衝 / 紅燈離線 / 橘燈慢 + CPU 顯示 + 版本號
+- [x] **開機自動啟動**：Windows Startup 捷徑 + `start_hidden.vbs`
+- [x] **書籤 + 排程系統**：儲存常用設定、cron 定時排程、排程中 badge
 - [ ] **行動端適配**：目前 UI 針對大螢幕優化，行動端排版仍需加強

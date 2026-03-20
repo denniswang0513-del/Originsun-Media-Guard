@@ -27,6 +27,7 @@ _DEFAULT_SETTINGS: dict = {
         "web_report_dir": r"\\192.168.1.132\Container\AI_Workspace\Originsun_Web\FileReport",
         "voice_dir": "",
         "agents_dir": r"\\192.168.1.132\Container\AI_Workspace\Originsun_Web\Agents",
+        "logs_dir": r"\\192.168.1.132\Container\AI_Workspace\Originsun_Web\Logs",
     },
     "master_server": "http://192.168.1.11:8000",
     "agents": [],

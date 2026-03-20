@@ -499,7 +499,21 @@ async def _run_report(job, task: ReportJobRequest):
 # ── Helper Functions ─────────────────────────────────────────
 
 def _resolve_log_dir(job: state.JobState) -> str:
-    """Determine the directory for this job's log file."""
+    """Determine the directory for this job's log file.
+
+    Priority: NAS logs_dir (shared, persistent) → local fallback.
+    """
+    # Try NAS shared logs directory first
+    try:
+        from config import load_settings
+        settings = load_settings()
+        nas_logs = settings.get("nas_paths", {}).get("logs_dir", "")
+        if nas_logs and os.path.isdir(nas_logs):
+            return nas_logs
+    except Exception:
+        pass
+
+    # Fallback to local directories
     task = job.request
     if isinstance(task, BackupRequest):
         return os.path.join(task.local_root, task.project_name)
@@ -526,6 +540,7 @@ def _persist_job_history(job: state.JobState):
             "started_at": job.started_at,
             "finished_at": job.finished_at,
             "error_detail": job.error_detail,
+            "log_file": job.log_file_path or "",
         })
     except Exception as e:
         print(f"Failed to persist job history: {e}")
