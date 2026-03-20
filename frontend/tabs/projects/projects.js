@@ -789,14 +789,17 @@ async function _loadAgents() {
 }
 
 async function _loadAgentsNoPolling() {
+    console.log('[Agents] _loadAgentsNoPolling start');
     try {
         const res = await fetch('/api/v1/agents');
+        console.log('[Agents] fetch agents response:', res.status);
         if (!res.ok) return;
         const data = await res.json();
         _agents = data.agents || [];
+        console.log('[Agents] agents loaded:', _agents.length);
     } catch (_) { /* silent */ }
     _renderMachines();
-    _syncComputeHosts();
+    try { _syncComputeHosts(); } catch (_) { /* host checkboxes may not be ready yet */ }
 }
 
 function _renderMachines() {
@@ -955,26 +958,35 @@ async function _pollAgent(agent) {
     const st = _agentStatus[agent.id];
     if (!st) return; // agent was removed
 
+    // Use server-side proxy to poll agent health (avoids browser CORS / Private Network issues)
+    const healthUrl = '/api/v1/agents/' + encodeURIComponent(agent.id) + '/health';
+
     const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 4000);
+    const timeout = setTimeout(() => controller.abort(), 6000);
     const startTime = Date.now();
 
     try {
-        const res = await fetch(agent.url + '/api/v1/health', { signal: controller.signal });
+        const res = await fetch(healthUrl, { signal: controller.signal });
         clearTimeout(timeout);
         const elapsed = Date.now() - startTime;
 
         if (res.ok) {
             const data = await res.json();
-            st.online = true;
-            st.slow = elapsed > 3000;
-            st.data = data;
+            if (data.status === 'offline') {
+                st.online = false;
+                st.slow = false;
+                st.data = {};
+            } else {
+                st.online = true;
+                st.slow = elapsed > 3000;
+                st.data = data;
+            }
         } else {
             st.online = false;
             st.slow = false;
             st.data = {};
         }
-    } catch (_) {
+    } catch (err) {
         clearTimeout(timeout);
         st.online = false;
         st.slow = false;

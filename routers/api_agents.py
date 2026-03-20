@@ -1,13 +1,16 @@
 """
 api_agents.py — NAS 共享機器管理 API
 Endpoints:
-  GET    /api/v1/agents        — 列出所有機器（從 NAS agents.json 讀取）
-  POST   /api/v1/agents        — 新增機器
-  DELETE /api/v1/agents/{id}   — 移除機器
+  GET    /api/v1/agents              — 列出所有機器（從 NAS agents.json 讀取）
+  POST   /api/v1/agents              — 新增機器
+  DELETE /api/v1/agents/{id}         — 移除機器
+  GET    /api/v1/agents/{id}/health  — Proxy 取得遠端機器健康狀態（避開瀏覽器 CORS）
 """
 import os
 import json
 import re
+import urllib.request
+import urllib.error
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 from config import load_settings
@@ -94,6 +97,25 @@ def add_agent(req: NewAgentRequest):
     agents.append(new_agent)
     _save_agents(nas_dir, agents)
     return {"status": "ok", "agent": new_agent}
+
+
+@router.get("/agents/{agent_id}/health")
+def proxy_agent_health(agent_id: str):
+    """Proxy health check for a remote agent — avoids browser CORS/Private Network issues."""
+    nas_dir = _get_nas_agents_dir()
+    agents = _load_agents(nas_dir)
+    agent = next((a for a in agents if a.get("id") == agent_id), None)
+    if not agent:
+        raise HTTPException(status_code=404, detail=f"找不到 ID 為 {agent_id} 的機器")
+
+    url = agent.get("url", "").rstrip("/") + "/api/v1/health"
+    try:
+        req = urllib.request.Request(url, method="GET")
+        with urllib.request.urlopen(req, timeout=4) as resp:
+            data = json.loads(resp.read().decode("utf-8"))
+            return data
+    except Exception:
+        return {"status": "offline"}
 
 
 @router.delete("/agents/{agent_id}")

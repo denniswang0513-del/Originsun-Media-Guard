@@ -1,5 +1,5 @@
 {
-  "version": "1.9.2",
+  "version": "1.9.3",
   "build_date": "2026-03-20",
-  "notes": "fix: OTA update overlay stuck, machine status green dot, update_monitor port conflict"
+  "notes": "fix: machine status green dot polling + CORS Private Network Access + proxy health endpoint"
 }

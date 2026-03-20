@@ -23,14 +23,32 @@ app = FastAPI(title="Originsun Media Guard Web API")
 
 class NoCacheMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request, call_next):
+        # Chrome Private Network Access (CORS-RFC1918) — required for
+        # cross-origin fetches between LAN machines (e.g. agent health polling).
+        # Must handle BEFORE CORSMiddleware sees the request, because Starlette's
+        # CORSMiddleware rejects unknown preflight headers with 400.
+        if (request.method == "OPTIONS"
+                and request.headers.get("access-control-request-private-network")):
+            from starlette.responses import Response as _Resp
+            origin = request.headers.get("origin", "*")
+            return _Resp(status_code=204, headers={
+                "Access-Control-Allow-Origin": origin,
+                "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, OPTIONS",
+                "Access-Control-Allow-Headers": request.headers.get(
+                    "access-control-request-headers", "*"),
+                "Access-Control-Allow-Credentials": "true",
+                "Access-Control-Allow-Private-Network": "true",
+                "Access-Control-Max-Age": "600",
+            })
+
         response = await call_next(request)
         if request.method == "GET":
             response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
             response.headers["Pragma"] = "no-cache"
             response.headers["Expires"] = "0"
+        response.headers["Access-Control-Allow-Private-Network"] = "true"
         return response
 
-app.add_middleware(NoCacheMiddleware)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -38,6 +56,10 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+# NoCacheMiddleware must be added AFTER CORSMiddleware so it wraps the
+# outside — this lets it inject Access-Control-Allow-Private-Network on
+# CORS preflight responses that CORSMiddleware already handled.
+app.add_middleware(NoCacheMiddleware)
 
 io_app = socketio.ASGIApp(sio, app)
 
