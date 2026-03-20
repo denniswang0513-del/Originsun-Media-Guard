@@ -4,6 +4,35 @@
 
 ---
 
+## [1.9.1] - 2026-03-20
+
+### 新增
+- `routers/api_agents.py` — NAS 共享機器管理 API（GET/POST/DELETE `/api/v1/agents`），所有電腦讀寫同一份 `agents.json`
+- `routers/api_bookmarks.py` — 書籤 CRUD API，儲存常用任務設定（不含路徑）
+- `routers/api_schedules.py` — 排程管理 API，支援 cron 重複排程與單次排程
+- `core/scheduler.py` — 任務排程器，每 60 秒掃描 `scheduled_jobs.json`，到期自動送入佇列
+- `frontend/tabs/projects/projects.html` — 系統參數新增「機器列表 NAS 路徑」欄位
+- `frontend/js/shared/utils.js` — 新增 `renderHostCheckboxes()` / `collectSelectedHosts()` 共用函式
+- 各 TAB（備份/轉檔/串接/驗證/轉錄/報表/TTS）新增「處理主機」checkbox 選擇面板
+
+### 修改
+- `config.py` — 新增 `nas_paths.agents_dir` 預設值、`_migrate_compute_hosts()` 自動遷移舊資料
+- `core/scheduler.py` — `croniter` import 改為 graceful（缺套件時不崩潰，排程功能降級）
+- `0225_requirements.txt` — 加入 `croniter` 依賴
+- `update_agent.bat` — 新增版本比較邏輯（本機 >= 遠端時跳過更新，防止版本倒退）
+- `frontend/app.js` — 移除運算主機 UI，預載改用 `/api/v1/agents` API
+- `frontend/index.html` — 移除設定 Modal 的「🖥️ 運算主機」tab
+- `frontend/tabs/projects/projects.js` — 改用 NAS agents API、`_syncComputeHosts()` 即時同步各 TAB host checkbox、任務區塊分為進行中/完成/等待三區、共用分頁元件 `_renderPaginationWidget()`、debounce 佇列刷新
+- `notifier.py` — 移除 `_fmt_size_py` 死碼別名
+- `Maintainer_Guide.md` — 更新 requirements 套件管理說明
+
+### 技術備註
+- 運算主機與機器狀態合併為一套系統，NAS 上 `agents.json` 為唯一資料來源
+- OTA 版本守護：`update_agent.bat` 比較語意版號，避免舊版主控端覆蓋新版 Agent
+- `croniter` graceful import 確保無排程套件時伺服器仍可啟動
+
+---
+
 ## [1.8.4] - 2026-03-19
 
 ### 新增

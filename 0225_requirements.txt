@@ -15,6 +15,7 @@ requests
 Jinja2
 Pillow
 psutil
+croniter
 
 # ── Google API ──
 google-api-python-client

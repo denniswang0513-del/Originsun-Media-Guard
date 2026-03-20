@@ -1,6 +1,6 @@
 # Originsun Media Guard Pro — Claude Code 完整交接文件
 
-> **版本**: v1.8.4（2026-03-19）
+> **版本**: v1.9.1（2026-03-20）
 > **目標讀者**: 接手開發的 AI 協作者（Claude Code）
 > **開發環境**: Windows 11、Python 3.11、Vanilla JS (ES Modules)
 > **啟動方式**: `d:\Antigravity\OriginsunTranscode\.venv\Scripts\python.exe main.py`
@@ -167,14 +167,16 @@ OriginsunTranscode/
 │   │                        #   - 任務完成後 emit 'task_status' {'status': 'done'/'error'}
 │   │                        #   - BackupRequest 完成後若 do_report=True，啟動 _run_report_job()
 │   │
-│   └── report_job.py        # 視覺報表非同步任務（約 240 行）
-│                            #   - _run_report_job(req: ReportJobRequest)：完整報表流程
-│                            #   - Phase 1 Scan → Phase 2 Meta/Hash → Phase 3 Film Strip
-│                            #   - → Phase 4 Render HTML + PDF → Phase 5 Publish to NAS Web Server
-│                            #   - 每個 phase 透過 'report_progress' Socket 事件回報進度
-│                            #   - 可暫停：每次迭代前呼叫 _check_pause()
-│                            #   - 最終產出放在 {output_dir}/Originsun_Reports/ 下
-│                            #   - 更新 reports_index.json（本機 + NAS 各一份）
+│   ├── report_job.py        # 視覺報表非同步任務（約 240 行）
+│   │                        #   - _run_report_job(req: ReportJobRequest)：完整報表流程
+│   │                        #   - Phase 1 Scan → Phase 2 Meta/Hash → Phase 3 Film Strip
+│   │                        #   - → Phase 4 Render HTML + PDF → Phase 5 Publish to NAS Web Server
+│   │                        #   - 每個 phase 透過 'report_progress' Socket 事件回報進度
+│   │                        #   - 可暫停：每次迭代前呼叫 _check_pause()
+│   │                        #   - 最終產出放在 {output_dir}/Originsun_Reports/ 下
+│   │                        #   - 更新 reports_index.json（本機 + NAS 各一份）
+│   │
+│   └── scheduler.py         # 任務排程器（croniter cron + run_at 單次排程，每 60 秒掃描）
 │
 │  ── 【routers/ — FastAPI 路由模組（10 個）】
 ├── routers/
@@ -188,7 +190,10 @@ OriginsunTranscode/
 │   ├── api_system.py        # 系統工具端點（見 7.7）
 │   ├── api_tts.py           # TTS 端點（見 7.8）
 │   ├── api_queue.py         # 佇列管理端點（見 7.9）
-│   └── api_job_history.py   # 任務歷史端點
+│   ├── api_job_history.py   # 任務歷史端點
+│   ├── api_agents.py        # NAS 共享機器管理 API (GET/POST/DELETE /api/v1/agents)（見 7.11）
+│   ├── api_bookmarks.py     # 書籤 CRUD API
+│   └── api_schedules.py     # 排程管理 API
 │
 │  ── 【frontend/ — 靜態前端（SPA）】
 ├── frontend/
@@ -610,7 +615,15 @@ def _emit_sync(event: str, data: dict) -> None:
 | POST | `/api/v1/queue/{job_id}/urgent` | 將任務設為緊急（排到最前） |
 | DELETE | `/api/v1/queue/{job_id}/urgent` | 取消任務的緊急狀態 |
 
-### 7.10 Pydantic Schema 完整清單 (`core/schemas.py`)
+### 7.11 機器管理 (`routers/api_agents.py`)
+
+| 方法 | 路徑 | 說明 |
+|------|------|------|
+| GET | `/api/v1/agents` | 列出所有機器（從 NAS agents.json 讀取） |
+| POST | `/api/v1/agents` | 新增機器 |
+| DELETE | `/api/v1/agents/{id}` | 移除機器 |
+
+### 7.12 Pydantic Schema 完整清單 (`core/schemas.py`)
 
 ```python
 class BackupRequest(BaseModel):
@@ -769,5 +782,5 @@ class ValidatePathsRequest(BaseModel):
 - [x] **正音字典 API**：GET/POST `/api/v1/tts/dictionary`，支援熱更新
 - [x] **純 HTTP OTA 更新**：移除 NAS SMB 依賴，Agent 從主控端 HTTP 下載輕量更新 ZIP（~200KB）
 - [ ] **TTS 整合完善**：接入任務佇列、Socket.IO 即時進度、完成通知、SRT 批次合成
-- [ ] **多節點分派最佳化**：目前的 `compute_hosts` 僅能手動指定，未來希望實作基於負載的主動分派
+- [x] **運算主機合併至機器狀態**：NAS 共享 agents.json，各 TAB host checkbox 即時同步
 - [ ] **行動端適配**：目前 UI 針對大螢幕優化，行動端排版仍需加強

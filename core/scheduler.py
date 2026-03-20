@@ -12,7 +12,10 @@ import threading
 from datetime import datetime
 from typing import List, Optional
 
-from croniter import croniter  # type: ignore
+try:
+    from croniter import croniter  # type: ignore
+except ImportError:
+    croniter = None  # graceful degradation — cron schedules won't fire
 
 from core.schemas import (  # type: ignore
     BackupRequest, TranscodeRequest, ConcatRequest,
@@ -75,6 +78,8 @@ def save_schedules(schedules: List[dict]) -> None:
 
 def is_valid_cron(expr: str) -> bool:
     """檢查 cron 表達式是否合法。"""
+    if croniter is None:
+        return False
     try:
         croniter(expr)
         return True
@@ -84,6 +89,8 @@ def is_valid_cron(expr: str) -> bool:
 
 def compute_next_run(cron_expr: str, after: Optional[datetime] = None) -> str:
     """計算下次執行時間（ISO 字串）。"""
+    if croniter is None:
+        return ""
     base = after or datetime.now()
     ci = croniter(cron_expr, base)
     return ci.get_next(datetime).isoformat(timespec="seconds")
