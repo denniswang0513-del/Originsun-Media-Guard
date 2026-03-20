@@ -1,6 +1,6 @@
 # Originsun Media Guard Pro — Claude Code 完整交接文件
 
-> **版本**: v1.9.3（2026-03-20）
+> **版本**: v1.9.4（2026-03-20）
 > **目標讀者**: 接手開發的 AI 協作者（Claude Code）
 > **開發環境**: Windows 11、Python 3.11、Vanilla JS (ES Modules)
 > **啟動方式**: `d:\Antigravity\OriginsunTranscode\.venv\Scripts\python.exe main.py`
@@ -120,7 +120,11 @@ OriginsunTranscode/
 │
 ├── bootstrap.py             # 雙模式腳本
 │                            #   - `python bootstrap.py`：初始安裝（venv、pip、ffmpeg）
-│                            #   - `python bootstrap.py --update [URL]`：OTA 更新（下載 ZIP → 解壓 → 重啟）
+│                            #   - `python bootstrap.py --update [URL]`：OTA 更新（下載 ZIP → 備份 → 解壓 → 重啟）
+│                            #   - 備份+雙層回滾：解壓失敗自動還原 + 啟動失敗 health check 15 秒回滾
+│                            #   - 回滾時彈出 Windows MsgBox 通知使用者
+│                            #   - _kill_port(port)：統一的 port 占用清除
+│                            #   - _restart_agent(base_dir)：統一的重啟邏輯
 │                            #   - 僅使用 stdlib（urllib、zipfile、subprocess），無外部依賴
 │
 ├── version.json             # {"version": "1.8.1", "build_date": "...", "notes": "..."}
@@ -190,7 +194,7 @@ OriginsunTranscode/
 │   ├── api_system.py        # 系統工具端點（見 7.7）
 │   ├── api_tts.py           # TTS 端點（見 7.8）
 │   ├── api_queue.py         # 佇列管理端點（見 7.9）
-│   ├── api_job_history.py   # 任務歷史端點
+│   ├── api_job_history.py   # 任務歷史端點（篩選 + log 查看）
 │   ├── api_agents.py        # NAS 共享機器管理 API (GET/POST/DELETE /api/v1/agents)（見 7.11）
 │   ├── api_bookmarks.py     # 書籤 CRUD API
 │   └── api_schedules.py     # 排程管理 API
@@ -622,6 +626,15 @@ def _emit_sync(event: str, data: dict) -> None:
 | GET | `/api/v1/agents` | 列出所有機器（從 NAS agents.json 讀取） |
 | POST | `/api/v1/agents` | 新增機器 |
 | DELETE | `/api/v1/agents/{id}` | 移除機器 |
+
+### 7.13 任務歷史 (`routers/api_job_history.py`)
+
+| 方法 | 路徑 | 說明 |
+|------|------|------|
+| GET | `/api/v1/job_history` | 查詢歷史（支援 date/task_type/status/q 篩選） |
+| POST | `/api/v1/job_history` | 新增歷史紀錄（前端呼叫，自動去重） |
+| GET | `/api/v1/job_history/{job_id}/log` | 取得任務 Log 內容（512KB 上限） |
+| DELETE | `/api/v1/job_history` | 清除歷史（可指定日期） |
 
 ### 7.12 Pydantic Schema 完整清單 (`core/schemas.py`)
 

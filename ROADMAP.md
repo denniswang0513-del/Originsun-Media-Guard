@@ -72,6 +72,7 @@
 
 ### 要建置的東西
 
+- [x] **OTA 回滾機制**：備份+雙層回滾（解壓失敗 + 啟動失敗 health check）+ Windows MsgBox 通知
 - [ ] **遠端一鍵更新**：主控端可直接觸發任一 Agent 的 OTA 更新（POST 到遠端 `/api/v1/control/update`）
 - [ ] **更新進度監控**：主控端輪詢遠端 Agent 的更新狀態（`update_monitor.py` port 8001）
 - [ ] **批次更新**：一鍵更新所有過舊版本的 Agent

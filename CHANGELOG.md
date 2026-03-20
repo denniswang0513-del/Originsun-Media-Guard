@@ -4,6 +4,29 @@
 
 ---
 
+## [1.9.4] - 2026-03-20
+
+### 新增
+- `GET /api/v1/job_history` 新增 `task_type`、`status`、`q` 篩選參數
+- `GET /api/v1/job_history/{job_id}/log` — 任務 Log 查看端點（512KB 上限 + 路徑驗證）
+- `config.py` — 新增 `nas_paths.logs_dir` 預設值，Log 檔案優先存放 NAS
+- `frontend/tabs/projects/` — 歷史搜尋工具列（關鍵字/類型/狀態/日期篩選）+ Log Modal
+- `bootstrap.py` — OTA 更新備份+雙層回滾機制（解壓失敗 + 啟動失敗 health check 15 秒）
+- `bootstrap.py` — 回滾時彈出 Windows 原生 MsgBox 通知使用者
+
+### 修改
+- `bootstrap.py` — 提取 `_kill_port()`、`_restart_agent()` 消除重複邏輯，合併 ZIP 開啟
+- `core/worker.py` — `_resolve_log_dir()` 優先使用 NAS logs_dir，`_persist_job_history()` 新增 `log_file` 欄位
+- `frontend/tabs/projects/projects.html` — 「完成」標題與篩選控制項合併為單行工具列
+- `frontend/tabs/projects/projects.css` — 新增工具列、篩選輸入框、Log Modal 樣式、日曆圖示暗色適配
+
+### 技術備註
+- OTA 回滾流程：下載 → 備份即將覆蓋的檔案到 `_backup/` → 解壓（失敗回滾）→ 重啟 → health check 15 秒（失敗回滾+重啟舊版）
+- VBS MsgBox 使用 `vbCrLf` 換行 + 引號跳脫，避免注入問題
+- Log 路徑驗證使用檔名 pattern（`_Log_*.txt`）而非目錄白名單，以支援 UNC 路徑
+
+---
+
 ## [1.9.1] - 2026-03-20
 
 ### 新增
