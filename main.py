@@ -16,7 +16,7 @@ import core.state as state  # type: ignore
 from routers import (  # type: ignore
     api_backup, api_verify, api_proxy, api_concat,
     api_report, api_transcribe, api_system, api_tts,
-    api_job_history, api_queue
+    api_job_history, api_queue, api_schedules, api_agents
 )
 
 app = FastAPI(title="Originsun Media Guard Web API")
@@ -51,12 +51,16 @@ app.include_router(api_system.router)
 app.include_router(api_tts.router)
 app.include_router(api_job_history.router)
 app.include_router(api_queue.router)
+app.include_router(api_schedules.router)
+app.include_router(api_agents.router)
 
 @app.on_event("startup")
 async def _on_startup():
     state.set_main_loop(asyncio.get_running_loop())
     state.init_concurrency()
     asyncio.create_task(_periodic_version_check())
+    from core.scheduler import run_scheduler  # type: ignore
+    asyncio.create_task(run_scheduler())
 
 
 def _read_local_version() -> str:

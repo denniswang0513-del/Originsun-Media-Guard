@@ -41,13 +41,7 @@ except ImportError:
         _PLAYWRIGHT_AVAILABLE = False
 
 
-def _fmt_size(size_bytes: int) -> str:
-    """Return a human-readable file size string."""
-    for unit in ("B", "KB", "MB", "GB", "TB"):
-        if size_bytes < 1024:
-            return f"{size_bytes:.1f} {unit}"
-        size_bytes //= 1024  # type: ignore
-    return f"{size_bytes} TB"
+from utils.formatting import fmt_size as _fmt_size
 
 
 def _fmt_clip_duration(seconds: float) -> str:

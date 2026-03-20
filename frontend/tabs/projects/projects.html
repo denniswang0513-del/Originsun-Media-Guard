@@ -6,6 +6,7 @@
             <h2>專案總覽</h2>
             <span class="pj-badge pj-badge-running">執行中 <span id="pj-count-running">0</span></span>
             <span class="pj-badge pj-badge-queued">排隊中 <span id="pj-count-queued">0</span></span>
+            <span class="pj-badge pj-badge-scheduled">排程中 <span id="pj-count-scheduled">0</span></span>
             <span class="pj-badge pj-badge-done">今日完成 <span id="pj-count-done">0</span></span>
         </div>
         <div class="pj-header-right">
@@ -15,6 +16,15 @@
 
     <!-- Settings Panel (collapsed by default) -->
     <div id="pj-settings-panel" class="pj-settings-panel" style="display:none;">
+        <!-- NAS 機器共享路徑 -->
+        <div class="pj-settings-item pj-settings-wide">
+            <label>機器列表 NAS 路徑</label>
+            <div class="pj-settings-nas-row">
+                <input type="text" id="pj-nas-agents-dir" class="pj-settings-nas-input"
+                    placeholder="\\\\192.168.1.x\\Share\\Agents">
+                <button class="pj-btn pj-btn-pause" onclick="window.projectsTab.saveAgentsDir()">儲存</button>
+            </div>
+        </div>
         <div class="pj-settings-item">
             <label>備份並行上限</label>
             <select id="pj-limit-backup" onchange="window.projectsTab.saveLimits('backup', this.value)">
@@ -67,27 +77,33 @@
     </div>
     <div id="pj-machines-container"></div>
 
-    <!-- Active Tasks Section -->
-    <div class="pj-section-header" style="margin-top: 16px;">進行中 / 排隊中</div>
+    <!-- Scheduled Tasks Section -->
+    <div class="pj-section-header" style="margin-top: 16px;">
+        <span>排程任務</span>
+    </div>
+    <div id="pj-schedules-container"></div>
+
+    <!-- 進行中 Section -->
+    <div class="pj-section-header" style="margin-top: 16px;">進行中</div>
     <div id="pj-active-container"></div>
 
-    <!-- Queue Panel -->
+    <!-- 完成 Section -->
     <div class="pj-section-header" style="margin-top: 16px;">
-        <span>排隊等待</span>
-        <div class="pj-section-header-right">
-            <button class="pj-btn-settings" onclick="window.projectsTab.refreshQueue()">重新整理</button>
-        </div>
-    </div>
-    <div id="pj-queue-container"></div>
-
-    <!-- History Section -->
-    <div class="pj-section-header" style="margin-top: 24px;">
-        <span>歷史紀錄</span>
+        <span>完成</span>
         <div class="pj-section-header-right">
             <input type="date" id="pj-history-date" class="pj-history-date">
             <button class="pj-btn-clear" onclick="window.projectsTab.clearHistory()">清除</button>
         </div>
     </div>
     <div id="pj-history-container"></div>
+
+    <!-- 等待 Section -->
+    <div class="pj-section-header" style="margin-top: 16px;">
+        <span>等待</span>
+        <div class="pj-section-header-right">
+            <button class="pj-btn-settings" onclick="window.projectsTab.refreshQueue()">重新整理</button>
+        </div>
+    </div>
+    <div id="pj-queue-container"></div>
 
 </div>

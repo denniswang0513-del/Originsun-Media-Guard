@@ -15,6 +15,7 @@ Usage:
 import os
 import json
 from typing import Optional
+from utils.formatting import fmt_size
 
 _SETTINGS_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "settings.json")
 
@@ -28,18 +29,12 @@ def _load_settings() -> dict:
             pass
     return {}
 
-def _fmt_size_py(size: float) -> str:
-    for u in ("B", "KB", "MB", "GB", "TB"):
-        if size < 1024:
-            return f"{size:.1f} {u}"
-        size /= 1024.0
-    return f"{size:.1f} TB"
 
 def _build_message(template: str, project_name: str, drive_url: Optional[str], file_count: int, total_size: float) -> str:
     msg = template
     msg = msg.replace("{project_name}", project_name)
     msg = msg.replace("{file_count}", str(file_count))
-    msg = msg.replace("{total_size}", _fmt_size_py(total_size))
+    msg = msg.replace("{total_size}", fmt_size(total_size))
     msg = msg.replace("{report_url}", drive_url if drive_url else "無報表連結")
     return msg
 
@@ -187,7 +182,7 @@ def notify_tab(template_key: str, **variables) -> None:
     for k, v in variables.items():
         if isinstance(v, float):
             if k in ("total_size", "size", "total_bytes"):
-                v_str = _fmt_size_py(v)
+                v_str = fmt_size(v)
             else:
                 v_str = f"{v:.2f}"
         else:

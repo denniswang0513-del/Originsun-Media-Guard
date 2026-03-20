@@ -106,27 +106,18 @@ export function setTranscribeMode(mode) {
     }
 }
 
-export async function submitTranscribeJob() {
+export function collectTranscribePayload() {
     const rows = document.getElementById('transcribe_file_list').children;
     const sources = Array.from(rows).map(row => row.querySelector('input')?.value.trim()).filter(v => v);
-    
+
     if (!sources.length) {
         alert('請先加入影音檔案來源！');
-        return;
+        return { valid: false };
     }
     const destDir = document.getElementById('transcribe_dest')?.value.trim();
     if (!destDir) {
         alert('請指定輸出目標資料夾！');
-        return;
-    }
-
-    // Show progress area
-    const progArea = document.getElementById('transcribe_progress_area');
-    if (progArea) {
-        progArea.classList.remove('hidden');
-        document.getElementById('transcribe_prog_label').textContent = '佇列中等待執行...';
-        document.getElementById('transcribe_prog_pct').textContent = '0%';
-        document.getElementById('transcribe_prog_bar').style.width = '0%';
+        return { valid: false };
     }
 
     const modelSize = document.getElementById('transcribe_model')?.value || 'turbo';
@@ -137,7 +128,7 @@ export async function submitTranscribeJob() {
 
     if (!outputSrt && !outputTxt) {
         alert('請至少勾選一種輸出格式 (.srt 或 .txt)！');
-        return;
+        return { valid: false };
     }
 
     const payload = {
@@ -151,6 +142,24 @@ export async function submitTranscribeJob() {
         generate_proxy: generateProxy,
         individual_mode: window.transcribeMode === 'individual'
     };
+
+    return { valid: true, payload, name: '逐字稿' };
+}
+window.collectTranscribePayload = collectTranscribePayload;
+
+export async function submitTranscribeJob() {
+    const collected = collectTranscribePayload();
+    if (!collected.valid) return;
+    const payload = collected.payload;
+
+    // Show progress area
+    const progArea = document.getElementById('transcribe_progress_area');
+    if (progArea) {
+        progArea.classList.remove('hidden');
+        document.getElementById('transcribe_prog_label').textContent = '佇列中等待執行...';
+        document.getElementById('transcribe_prog_pct').textContent = '0%';
+        document.getElementById('transcribe_prog_bar').style.width = '0%';
+    }
 
     const btn = document.querySelector('#tab_transcribe button[onclick="submitTranscribeJob()"]');
     const originalText = btn.innerHTML;

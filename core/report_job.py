@@ -12,12 +12,7 @@ from core.schemas import ReportJobRequest  # type: ignore
 from core_engine import MediaGuardEngine, ReportManifest, FileRecord, SUPPORTED_EXTS  # type: ignore
 from report_generator import save_report, generate_pdf_from_html  # type: ignore
 from config import load_settings
-
-def _fmt_size_py(size: int) -> str:
-    for u in ("B","KB","MB","GB","TB"):
-        if size < 1024: return f"{size:.1f} {u}"
-        size //= 1024  # type: ignore
-    return f"{size} TB"
+from utils.formatting import fmt_size
 
 async def _emit_rpt(job_id: str, phase: str, pct: float, msg: str, typ: str = "info"):
     job = state.get_job(job_id)
@@ -179,7 +174,7 @@ async def _run_report_job(req: ReportJobRequest, job_id: str = ""):
             "drive_url": "",
             "created_at": _dt.now().strftime("%Y-%m-%d %H:%M"),
             "file_count": total,
-            "total_size_str": _fmt_size_py(manifest.total_bytes),
+            "total_size_str": fmt_size(manifest.total_bytes),
         }
         nas_index_path = os.path.join(nas_web_dir, "reports_index.json") if nas_web_dir else ""
         try:

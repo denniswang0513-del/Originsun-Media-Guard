@@ -37,17 +37,35 @@ export function setTodayNameTc() {
 }
 
 export function getTcSelectedHosts() {
-    const hosts = window._computeHosts || [];
-    const result = [];
-    const localChk = document.getElementById('tc_host_chk_local');
-    if (localChk && localChk.checked) result.push({ name: '本機', ip: 'local' });
-    hosts.forEach((h, i) => {
-        const chk = document.getElementById('tc_host_chk_' + i);
-        if (chk && chk.checked) result.push(h);
-    });
+    const result = window.collectSelectedHosts('tc_host_checkboxes');
     if (!result.length) result.push({ name: '本機', ip: 'local' });
     return result;
 }
+
+export function collectTranscodePayload() {
+    const rows = document.getElementById('tc_source_list').children;
+    const sources = [];
+    for (let row of rows) {
+        const inputs = row.querySelectorAll('input');
+        const srcPath = inputs[1]?.value.trim();
+        if (srcPath) sources.push(srcPath);
+    }
+    if (sources.length === 0) {
+        alert('請至少提供一個來源。');
+        return { valid: false };
+    }
+    const destDir = document.getElementById('tc_dest')?.value.trim();
+    if (!destDir) {
+        alert('請設定目標輸出資料夾！');
+        return { valid: false };
+    }
+    const payload = {
+        sources: sources,
+        dest_dir: destDir,
+    };
+    return { valid: true, payload, name: '轉檔' };
+}
+window.collectTranscodePayload = collectTranscodePayload;
 
 let _tcSubmitting = false;
 

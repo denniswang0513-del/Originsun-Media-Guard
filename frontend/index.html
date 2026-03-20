@@ -275,6 +275,36 @@
             </div>
         </section>
 
+    <!-- Schedule Modal -->
+    <div id="schedule-modal-overlay" class="schedule-modal-overlay" style="display:none;">
+        <div class="schedule-modal">
+            <h3 class="schedule-modal-title">設定排程時間</h3>
+            <div class="schedule-modal-field">
+                <label>排程名稱</label>
+                <input type="text" id="schedule-modal-name" placeholder="如：備份寬微廣告">
+            </div>
+            <div class="schedule-modal-row">
+                <div class="schedule-modal-field">
+                    <label>日期</label>
+                    <input type="date" id="schedule-modal-date">
+                </div>
+                <div class="schedule-modal-field">
+                    <label>開始時間</label>
+                    <div class="schedule-modal-time-row">
+                        <select id="schedule-modal-hour" class="schedule-modal-select"></select>
+                        <span class="schedule-modal-time-sep">:</span>
+                        <select id="schedule-modal-min" class="schedule-modal-select"></select>
+                    </div>
+                </div>
+            </div>
+            <div class="schedule-modal-footer">
+                <button class="schedule-modal-btn schedule-modal-cancel" onclick="window.cancelScheduleModal()">取消</button>
+                <button class="schedule-modal-btn schedule-modal-confirm" onclick="window.confirmScheduleModal()">建立排程</button>
+            </div>
+        </div>
+    </div>
+
+
     </main>
 
     <div id="forceInstallModal"
@@ -396,7 +426,6 @@
             <div class="modal-tabs">
                 <button class="tab-btn active" onclick="switchSettingsTab('api_keys', event)">🔑 通訊金鑰</button>
                 <button class="tab-btn" onclick="switchSettingsTab('templates', event)">📝 訊息樣板</button>
-                <button class="tab-btn" onclick="switchSettingsTab('compute_hosts', event)">🖥️ 運算主機</button>
             </div>
             <div id="tab_api_keys" class="tab-content">
                 <div class="form-group">
@@ -460,16 +489,6 @@
                     <textarea id="tpl_transcribe_success" rows="2">🎙️ 【逐字稿完成】{project_name} 已生成！
 📂 輸出至：{dest_dir} | 共 {file_count} 個檔案</textarea>
                 </div>
-            </div>
-
-            <!-- 🖥️ 運算主機管理 -->
-            <div id="tab_compute_hosts" class="tab-content" style="display: none;">
-                <p style="color:#9CA3AF;font-size:13px;margin-bottom:12px;">新增公司內網中可以用來執行轉檔/串帶的電腦，瀏覽器會透過這些 IP 送出任務。</p>
-                <div id="compute_host_list" style="display:flex;flex-direction:column;gap:8px;margin-bottom:12px;">
-                </div>
-                <button onclick="addComputeHostRow()"
-                    style="background:#1f538d;color:#fff;border:none;padding:6px 16px;border-radius:6px;cursor:pointer;font-size:13px;">+
-                    新增主機</button>
             </div>
 
             <div class="modal-footer">

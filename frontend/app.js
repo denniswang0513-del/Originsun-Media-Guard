@@ -29,7 +29,7 @@ if (typeof appendLog === 'undefined') {
             line.className = type === 'system' ? 'text-yellow-300 font-bold' :
                             type === 'error' ? 'text-red-400' :
                             type === 'verbose' ? 'text-gray-500 text-xs' : 'text-gray-400';
-            line.textContent = '[' + new Date().toLocaleTimeString() + '] ' + msg;
+            line.textContent = '[' + new Date().toLocaleTimeString('en-US', { hour12: false }) + '] ' + msg;
             terminal.appendChild(line);
             terminal.scrollTop = terminal.scrollHeight;
         }
@@ -173,12 +173,15 @@ if (typeof appendLog === 'undefined') {
                 updateComputeModeStyle();
             }
 
-            // Pre-load settings so host selector shows immediately
-            fetch('/api/settings/load')
+            // Pre-load agents from NAS so host selector shows immediately
+            fetch('/api/v1/agents')
                 .then(res => res.ok ? res.json() : null)
                 .then(data => {
                     if (data) {
-                        window._computeHosts = data.compute_hosts || [];
+                        window._computeHosts = (data.agents || []).map(a => ({
+                            name: a.name,
+                            ip: (a.url || '').replace(/^https?:\/\//, '')
+                        }));
                         if (typeof renderHostSelector === 'function') renderHostSelector();
                         if (typeof renderStandaloneHostPanels === 'function') renderStandaloneHostPanels();
                     }
@@ -857,40 +860,18 @@ if (typeof appendLog === 'undefined') {
 
         function renderHostSelector() {
             const panel = document.getElementById('host_selector_panel');
-            const cbxDiv = document.getElementById('host_selector_checkboxes');
-            if (!panel || !cbxDiv) return;
+            if (!panel) return;
             const hosts = window._computeHosts || [];
             const chkTc = document.getElementById('chk_transcode');
             const chkCc = document.getElementById('chk_concat');
             const shouldShow = (chkTc && chkTc.checked) || (chkCc && chkCc.checked);
             if (!hosts.length || !shouldShow) { panel.classList.add('hidden'); return; }
-            // 只在第一次（或主機列表改變時）重建 checkboxes，避免勾選狀態被清空
-            if (!cbxDiv.dataset.built) {
-                cbxDiv.innerHTML = '';
-                const local = document.createElement('label');
-                local.className = 'flex items-center gap-1 text-xs text-gray-300 cursor-pointer';
-                local.innerHTML = '<input type="checkbox" id="host_chk_local" checked class="form-checkbox rounded bg-[#1e1e1e] border-[#444]"> 💻 本機';
-                cbxDiv.appendChild(local);
-                hosts.forEach((h, i) => {
-                    const lbl = document.createElement('label');
-                    lbl.className = 'flex items-center gap-1 text-xs text-gray-300 cursor-pointer';
-                    lbl.innerHTML = '<input type="checkbox" id="host_chk_' + i + '" data-ip="' + h.ip + '" data-name="' + h.name + '" class="form-checkbox rounded bg-[#1e1e1e] border-[#444]"> 🖥️ ' + h.name + ' <span class="text-gray-500">(' + h.ip + ')</span>';
-                    cbxDiv.appendChild(lbl);
-                });
-                cbxDiv.dataset.built = '1';
-            }
+            window.renderHostCheckboxes('host_selector_checkboxes', { idPrefix: 'host_chk' });
             panel.classList.remove('hidden');
         }
 
         function getSelectedHosts() {
-            const hosts = window._computeHosts || [];
-            const result = [];
-            const localChk = document.getElementById('host_chk_local');
-            if (localChk && localChk.checked) result.push({ name: '本機', ip: 'local' });
-            hosts.forEach((h, i) => {
-                const chk = document.getElementById('host_chk_' + i);
-                if (chk && chk.checked) result.push(h);
-            });
+            const result = window.collectSelectedHosts('host_selector_checkboxes');
             if (!result.length) result.push({ name: '本機', ip: 'local' });
             return result;
         }
@@ -898,45 +879,24 @@ if (typeof appendLog === 'undefined') {
 
 
 
-        // 將主機列表同步到兩個獨立 TAB 的主機選擇 UI
+        // 將主機列表同步到各獨立 TAB 的主機選擇 UI
+        const _HOST_PANELS = [
+            { checkboxes: 'tc_host_checkboxes',         panel: 'tc_host_panel',         prefix: 'tc_host_chk' },
+            { checkboxes: 'cc_host_checkboxes',         panel: 'cc_host_panel',         prefix: 'cc_host_chk' },
+            { checkboxes: 'vf_host_checkboxes',         panel: 'vf_host_panel',         prefix: 'vf_host_chk' },
+            { checkboxes: 'tr_host_checkboxes',         panel: 'tr_host_panel',         prefix: 'tr_host_chk' },
+            { checkboxes: 'rpt_host_checkboxes',        panel: 'rpt_host_panel',        prefix: 'rpt_host_chk' },
+            { checkboxes: 'tts_host_checkboxes',        panel: 'tts_host_panel',        prefix: 'tts_host_chk' },
+            { checkboxes: 'tts_clone_host_checkboxes',  panel: 'tts_clone_host_panel',  prefix: 'tts_clone_host_chk' },
+        ];
         function renderStandaloneHostPanels() {
             const hosts = window._computeHosts || [];
             if (!hosts.length) return;
-
-            // 轉 Proxy TAB: checkbox 群組
-            const tcDiv = document.getElementById('tc_host_checkboxes');
-            const tcPanel = document.getElementById('tc_host_panel');
-            
-            if (tcDiv && !tcDiv.dataset.built) {
-                tcDiv.innerHTML = '';
-                const localLbl = document.createElement('label');
-                localLbl.className = 'flex items-center gap-1 text-xs text-gray-300 cursor-pointer';
-                localLbl.innerHTML = '<input type="checkbox" id="tc_host_chk_local" checked class="form-checkbox rounded bg-[#1e1e1e] border-[#444]"> 💻 本機';
-                tcDiv.appendChild(localLbl);
-                hosts.forEach((h, i) => {
-                    const lbl = document.createElement('label');
-                    lbl.className = 'flex items-center gap-1 text-xs text-gray-300 cursor-pointer';
-                    lbl.innerHTML = '<input type="checkbox" id="tc_host_chk_' + i + '" class="form-checkbox rounded bg-[#1e1e1e] border-[#444]"> 🖥️ ' + h.name + ' <span class="text-gray-500">(' + h.ip + ')</span>';
-                    tcDiv.appendChild(lbl);
-                });
-                tcDiv.dataset.built = '1';
+            for (const { checkboxes, panel, prefix } of _HOST_PANELS) {
+                window.renderHostCheckboxes(checkboxes, { idPrefix: prefix });
+                const el = document.getElementById(panel);
+                if (el) el.classList.remove('hidden');
             }
-            if (tcPanel) tcPanel.classList.remove('hidden');
-
-            // 製作串帶 TAB: 下拉選單
-            const ccSel = document.getElementById('cc_host_select');
-            const ccPanel = document.getElementById('cc_host_panel');
-            if (ccSel && !ccSel.dataset.built) {
-                ccSel.innerHTML = '<option value="local">💻 本機</option>';
-                hosts.forEach(h => {
-                    const opt = document.createElement('option');
-                    opt.value = h.ip;
-                    opt.textContent = '🖥️ ' + h.name + ' (' + h.ip + ')';
-                    ccSel.appendChild(opt);
-                });
-                ccSel.dataset.built = '1';
-            }
-            if (ccPanel) ccPanel.classList.remove('hidden');
         }
 
 
@@ -1811,80 +1771,6 @@ if (typeof appendLog === 'undefined') {
             document.getElementById('install-modal').classList.remove('hidden');
         }
 
-        // ─── Compute Host List helpers ────────────────────────────────────
-        async function testHostConnection(btn) {
-            const row = btn.closest('div');
-            const inputs = row.querySelectorAll('input');
-            const ip = inputs[1]?.value.trim();
-            if (!ip) return;
-
-            const originalBg = btn.style.background;
-            btn.textContent = '測試中...';
-            btn.style.background = '#d48a04';
-
-            try {
-                const ctrl = new AbortController();
-                const timeoutId = setTimeout(() => ctrl.abort(), 3000);
-                const res = await fetch(`http://${ip}/api/v1/health`, { signal: ctrl.signal });
-                clearTimeout(timeoutId);
-
-                if (res.ok) {
-                    btn.innerHTML = '✅ OK';
-                    btn.style.background = '#228b22';
-                } else {
-                    btn.innerHTML = '❌ Fail';
-                    btn.style.background = '#8b0000';
-                }
-            } catch (err) {
-                btn.innerHTML = '❌ Fail';
-                btn.style.background = '#8b0000';
-            }
-
-            setTimeout(() => {
-                btn.textContent = '測試連線';
-                btn.style.background = originalBg;
-            }, 3000);
-        }
-
-        function addComputeHostRow(name = '', ip = '') {
-            const container = document.getElementById('compute_host_list');
-            if (!container) return;
-            const row = document.createElement('div');
-            row.style.cssText = 'display:flex;gap:8px;align-items:center;';
-            row.innerHTML = `
-                <input type="text" placeholder="主機名稱（如：轉檔主機A）" value="${name}"
-                    style="flex:1;background:#1e1e1e;border:1px solid #444;border-radius:6px;padding:6px 10px;color:#e0e0e0;font-size:13px;">
-                <input type="text" placeholder="IP:Port（如：192.168.1.50:8000）" value="${ip}"
-                    style="flex:1.5;background:#1e1e1e;border:1px solid #444;border-radius:6px;padding:6px 10px;color:#e0e0e0;font-size:13px;">
-                <button onclick="testHostConnection(this)"
-                    style="background:#3b82f6;color:#fff;border:none;padding:5px 10px;border-radius:6px;cursor:pointer;font-size:12px;min-width:65px;white-space:nowrap;">測試連線</button>
-                <button onclick="this.closest('div').remove()"
-                    style="background:#8b0000;color:#fff;border:none;padding:5px 10px;border-radius:6px;cursor:pointer;font-size:13px;">−</button>`;
-            container.appendChild(row);
-        }
-
-        function loadComputeHostRows(hosts) {
-            const container = document.getElementById('compute_host_list');
-            if (!container) return;
-            container.innerHTML = '';
-            (hosts || []).forEach(h => addComputeHostRow(h.name || '', h.ip || ''));
-            // 更新全域快取供下拉選單使用
-            window._computeHosts = hosts || [];
-        }
-
-        function getComputeHostRows() {
-            const rows = document.querySelectorAll('#compute_host_list > div');
-            const result = [];
-            rows.forEach(row => {
-                const inputs = row.querySelectorAll('input');
-                const name = inputs[0]?.value.trim();
-                const ip = inputs[1]?.value.trim();
-                if (name || ip) result.push({ name, ip });
-            });
-            window._computeHosts = result;
-            return result;
-        }
-
         // ─── Settings Modal ───────────────────────────────────────────
         // Global tab-switch function (called from inline onclick on tab buttons)
         function switchSettingsTab(tabId, event) {
@@ -1917,8 +1803,6 @@ if (typeof appendLog === 'undefined') {
                         document.getElementById('tpl_concat_success').value = t.concat_success || '';
                         document.getElementById('tpl_verify_success').value = t.verify_success || '';
                         document.getElementById('tpl_transcribe_success').value = t.transcribe_success || '';
-                        // ── Load compute hosts ────────────────────────────────────────
-                        loadComputeHostRows(data.compute_hosts || []);
                         // ── Load channel toggles ──────────────────────────────────────
                         const ch = data.notification_channels || {};
                         const tabs = ['backup', 'report', 'transcode', 'concat', 'verify', 'transcribe'];
@@ -1964,8 +1848,6 @@ if (typeof appendLog === 'undefined') {
                             }
                         ])
                     ),
-                    // ── Compute hosts ─────────────────────────────────
-                    compute_hosts: getComputeHostRows(),
                 };
                 try {
                     const response = await fetch('/api/settings/save', {
@@ -2001,6 +1883,106 @@ if (typeof appendLog === 'undefined') {
                 t.classList.toggle('off');
             });
         });
+
+
+// ── Shared collect-function map (used by schedule modal) ──
+        const _collectMap = {
+            'backup': 'collectBackupPayload',
+            'transcode': 'collectTranscodePayload',
+            'concat': 'collectConcatPayload',
+            'verify': 'collectVerifyPayload',
+            'transcribe': 'collectTranscribePayload',
+            'tts': 'collectTtsPayload',
+            'clone': 'collectClonePayload',
+            'report': 'collectReportPayload',
+        };
+
+// ── Schedule Modal ──────────────────────────────
+        let _scheduleModalData = null;
+
+        function _initScheduleSelects() {
+            const hourSel = document.getElementById('schedule-modal-hour');
+            const minSel = document.getElementById('schedule-modal-min');
+            if (!hourSel || hourSel.options.length) return;
+            for (let h = 0; h < 24; h++) {
+                const o = document.createElement('option');
+                o.value = o.textContent = String(h).padStart(2, '0');
+                hourSel.appendChild(o);
+            }
+            for (const m of ['00', '15', '30', '45']) {
+                const o = document.createElement('option');
+                o.value = o.textContent = m;
+                minSel.appendChild(o);
+            }
+        }
+
+        function scheduleJob(taskType) {
+            const fnName = _collectMap[taskType];
+            if (!fnName || typeof window[fnName] !== 'function') {
+                alert('此任務類型暫不支援排程');
+                return;
+            }
+            const result = window[fnName]();
+            if (!result || !result.valid) return;
+
+            _scheduleModalData = { taskType, payload: result.payload, name: result.name || '' };
+
+            // Pre-fill modal
+            _initScheduleSelects();
+            const overlay = document.getElementById('schedule-modal-overlay');
+            document.getElementById('schedule-modal-name').value = result.name || '';
+            // Default date = tomorrow
+            const tomorrow = new Date();
+            tomorrow.setDate(tomorrow.getDate() + 1);
+            document.getElementById('schedule-modal-date').value = tomorrow.toISOString().slice(0, 10);
+            document.getElementById('schedule-modal-hour').value = '02';
+            document.getElementById('schedule-modal-min').value = '00';
+            overlay.style.display = 'flex';
+        }
+
+        function cancelScheduleModal() {
+            document.getElementById('schedule-modal-overlay').style.display = 'none';
+            _scheduleModalData = null;
+        }
+
+        async function confirmScheduleModal() {
+            if (!_scheduleModalData) return;
+            const name = document.getElementById('schedule-modal-name').value.trim();
+            const date = document.getElementById('schedule-modal-date').value;
+            const hh = document.getElementById('schedule-modal-hour').value;
+            const mm = document.getElementById('schedule-modal-min').value;
+            if (!name) { alert('請輸入排程名稱'); return; }
+            if (!date) { alert('請選擇日期'); return; }
+
+            const runAt = date + 'T' + hh + ':' + mm + ':00';
+            const body = {
+                name,
+                run_at: runAt,
+                task_type: _scheduleModalData.taskType,
+                request: _scheduleModalData.payload,
+            };
+
+            try {
+                const r = await fetch('/api/v1/schedules', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(body),
+                });
+                if (!r.ok) {
+                    const err = await r.json().catch(() => ({}));
+                    alert('排程建立失敗: ' + (err.detail || r.statusText));
+                    return;
+                }
+                alert('排程已建立');
+                cancelScheduleModal();
+            } catch (e) {
+                alert('排程建立失敗: ' + e.message);
+            }
+        }
+
+        window.scheduleJob = scheduleJob;
+        window.cancelScheduleModal = cancelScheduleModal;
+        window.confirmScheduleModal = confirmScheduleModal;
 
 
 // ─── Initialize on Page Load ─── //

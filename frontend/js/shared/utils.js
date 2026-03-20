@@ -124,7 +124,69 @@ export function resetProgress() {
     if (window._heartbeatTimer) clearInterval(window._heartbeatTimer);
 }
 
+// ── 共用主機選擇模組 ──
+
+/**
+ * 將 compute_hosts 渲染為 checkbox 到指定容器。
+ * @param {string} containerId - 容器 DOM id
+ * @param {object} [opts] - 選項
+ * @param {boolean} [opts.includeLocal=true] - 是否包含「本機」選項
+ * @param {boolean} [opts.localChecked=true] - 「本機」預設勾選
+ * @param {string}  [opts.idPrefix] - checkbox id 前綴（避免多個選擇器 id 衝突），預設為 containerId
+ */
+export function renderHostCheckboxes(containerId, opts = {}) {
+    const container = document.getElementById(containerId);
+    if (!container) return;
+    const hosts = window._computeHosts || [];
+    if (!hosts.length) {
+        container.closest('.pj-sch-sub-panel, [id$="_host_panel"], [id$="host_selector_panel"]')
+            ?.style.setProperty('display', 'none');
+        return;
+    }
+    if (container.dataset.built) return; // 避免重複渲染清除勾選
+
+    const prefix = opts.idPrefix || containerId;
+    const includeLocal = opts.includeLocal !== false;
+    const localChecked = opts.localChecked !== false;
+    container.innerHTML = '';
+
+    if (includeLocal) {
+        const lbl = document.createElement('label');
+        lbl.className = 'flex items-center gap-1 text-xs text-gray-300 cursor-pointer';
+        lbl.innerHTML = `<input type="checkbox" id="${prefix}_local" data-ip="local" data-name="本機" ${localChecked ? 'checked' : ''} class="form-checkbox rounded bg-[#1e1e1e] border-[#444]"> 本機`;
+        container.appendChild(lbl);
+    }
+    hosts.forEach((h, i) => {
+        const lbl = document.createElement('label');
+        lbl.className = 'flex items-center gap-1 text-xs text-gray-300 cursor-pointer';
+        lbl.innerHTML = `<input type="checkbox" id="${prefix}_${i}" data-ip="${h.ip}" data-name="${h.name}" class="form-checkbox rounded bg-[#1e1e1e] border-[#444]"> ${h.name} <span class="text-gray-500">(${h.ip})</span>`;
+        container.appendChild(lbl);
+    });
+    container.dataset.built = '1';
+}
+
+/**
+ * 收集容器內勾選的主機。
+ * @param {string} containerId - 容器 DOM id
+ * @returns {Array<{name: string, ip: string}>}
+ */
+export function collectSelectedHosts(containerId) {
+    const container = document.getElementById(containerId);
+    if (!container) return [];
+    const result = [];
+    container.querySelectorAll('input[type="checkbox"]:checked').forEach(chk => {
+        const ip = chk.dataset.ip;
+        const name = chk.dataset.name;
+        if (ip && name) result.push({ name, ip });
+    });
+    return result;
+}
+
+window.renderHostCheckboxes = renderHostCheckboxes;
+window.collectSelectedHosts = collectSelectedHosts;
+
 // Make accessible to global scope if needed during transition
+window.resolveDropPath = resolveDropPath;
 window.appendLog = appendLog;
 window.pickPath = pickPath;
 window.getComputeBaseUrl = getComputeBaseUrl;

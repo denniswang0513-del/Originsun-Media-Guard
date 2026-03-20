@@ -87,7 +87,7 @@
                 <!-- Remote Host Selector Panel -->
                 <div id="host_selector_panel"
                     class="hidden mt-3 p-3 bg-[#1a2a3a] border border-[#2e4a6e] rounded-lg">
-                    <div class="text-xs text-blue-300 font-semibold mb-2">🖥️ 轉檔/串帶 交由哪些主機處理：</div>
+                    <div class="text-xs text-blue-300 font-semibold mb-2">處理主機</div>
                     <div id="host_selector_checkboxes" class="flex flex-wrap gap-x-4 gap-y-1"></div>
                 </div>
 
@@ -178,6 +178,10 @@
     </div>
 
     <div class="flex justify-end gap-3 mt-4">
+        <button onclick="scheduleJob('backup')"
+            class="bg-[#333] hover:bg-[#444] text-gray-300 font-bold py-2 px-6 rounded shadow text-sm transition-colors border border-[#555]">
+            排程
+        </button>
         <button onclick="submitJob()"
             class="bg-[#1f538d] hover:bg-[#2a6cbf] text-white font-bold py-2 px-8 rounded shadow text-sm transition-colors">
             開始備份

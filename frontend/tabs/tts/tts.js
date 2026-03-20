@@ -233,13 +233,13 @@ window.calculateTtsDuration = async function() {
 
 window.pickTtsOutputDir = function() { pickPath('tts_output_dir', 'folder'); };
 
-// ─── Standard TTS Submit ─────────────────────────────────
-window.submitTtsJob = async function() {
+// ─── Standard TTS Collect + Submit ───────────────────────
+window.collectTtsPayload = function() {
     const text = document.getElementById('tts_text_input')?.value?.trim();
     const outputDir = document.getElementById('tts_output_dir')?.value?.trim();
     const outputName = document.getElementById('tts_output_name')?.value?.trim() || 'tts_output';
-    if (!text) { alert('請輸入要生成的文字'); return; }
-    if (!outputDir) { alert('請選擇輸出目錄'); return; }
+    if (!text) { alert('請輸入要生成的文字'); return { valid: false }; }
+    if (!outputDir) { alert('請選擇輸出目錄'); return { valid: false }; }
 
     const payload = {
         text, output_dir: outputDir, output_name: outputName,
@@ -248,7 +248,13 @@ window.submitTtsJob = async function() {
         pitch: parseInt(document.getElementById('tts_pitch')?.value || '0')
     };
 
-    await _runWithProgress('tts', getAgentBaseUrl() + '/api/v1/tts_jobs', payload, 'btn_start_tts');
+    return { valid: true, payload, name: 'TTS 語音生成' };
+};
+
+window.submitTtsJob = async function() {
+    const collected = window.collectTtsPayload();
+    if (!collected.valid) return;
+    await _runWithProgress('tts', getAgentBaseUrl() + '/api/v1/tts_jobs', collected.payload, 'btn_start_tts');
 };
 
 // ═══════════════════════════════════════════════════════════
@@ -463,20 +469,38 @@ window.saveTtsToLibrary = async function() {
 
 window.addVoiceToLibrary = function() { window.pickTtsReferenceNative(); };
 
-// ─── Clone Submit (Socket.IO real-time progress) ─────────
-window.submitCloneJob = async function() {
+// ─── Clone Collect + Submit (Socket.IO real-time progress) ─────────
+window.collectClonePayload = function() {
     const text = document.getElementById('tts_clone_text_input')?.value?.trim();
     const outputDir = document.getElementById('tts_clone_output_dir')?.value?.trim();
     const outputName = document.getElementById('tts_clone_output_name')?.value?.trim() || 'clone_output';
-    if (!text) { alert('請輸入要生成的文字'); return; }
-    if (!outputDir) { alert('請選擇輸出目錄'); return; }
-    if (!_ttsRefAudioPath && !_selectedProfileId) { alert('請先選擇參考音訊或 NAS 聲音角色'); return; }
+    if (!text) { alert('請輸入要生成的文字'); return { valid: false }; }
+    if (!outputDir) { alert('請選擇輸出目錄'); return { valid: false }; }
+    if (!_ttsRefAudioPath && !_selectedProfileId) { alert('請先選擇參考音訊或 NAS 聲音角色'); return { valid: false }; }
 
     let refAudio = _ttsRefAudioPath;
     if (!refAudio && _selectedProfileId) {
         alert('請先將選取的 NAS 角色「快取至本機」，然後使用臨時複製區選取本機快取的音檔。');
-        return;
+        return { valid: false };
     }
+
+    const rateVal = parseInt(document.getElementById('tts_clone_speed')?.value || '0', 10);
+    const speed = 1.0 + rateVal / 100.0;
+    const pitch = parseInt(document.getElementById('tts_clone_pitch')?.value || '0', 10);
+    const refText = document.getElementById('tts_clone_ref_text')?.value?.trim() || null;
+    const payload = { text, reference_audio: refAudio, output_dir: outputDir, output_name: outputName, speed, pitch, ref_text: refText };
+
+    return { valid: true, payload, name: '聲音複製' };
+};
+
+window.submitCloneJob = async function() {
+    const collected = window.collectClonePayload();
+    if (!collected.valid) return;
+
+    const text = collected.payload.text;
+    const outputDir = collected.payload.output_dir;
+    const outputName = collected.payload.output_name;
+    let refAudio = collected.payload.reference_audio;
 
     const btn = document.getElementById('btn_start_clone');
     const progArea = document.getElementById('tts_clone_progress_area');
@@ -535,12 +559,7 @@ window.submitCloneJob = async function() {
 
     // POST (returns immediately with "queued" status)
     try {
-        // Convert rate% (-50~+50) to F5-TTS speed multiplier (0.5~1.5)
-        const rateVal = parseInt(document.getElementById('tts_clone_speed')?.value || '0', 10);
-        const speed = 1.0 + rateVal / 100.0;
-        const pitch = parseInt(document.getElementById('tts_clone_pitch')?.value || '0', 10);
-        const refText = document.getElementById('tts_clone_ref_text')?.value?.trim() || null;
-        const payload = { text, reference_audio: refAudio, output_dir: outputDir, output_name: outputName, speed, pitch, ref_text: refText };
+        const payload = collected.payload;
         const res = await fetch(getAgentBaseUrl() + '/api/v1/tts_jobs/clone', {
             method: 'POST', headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(payload)

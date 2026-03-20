@@ -60,6 +60,11 @@
     border-color: #d48a0444;
 }
 
+.pj-badge-scheduled {
+    color: #a855f7;
+    border-color: #a855f744;
+}
+
 .pj-badge-done {
     color: #22c55e;
     border-color: #22c55e44;
@@ -99,6 +104,26 @@
     grid-template-columns: repeat(4, 1fr);
     gap: 12px;
     animation: pj-slide-down 0.2s ease;
+}
+
+.pj-settings-wide {
+    grid-column: 1 / -1;
+}
+
+.pj-settings-nas-row {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+}
+
+.pj-settings-nas-input {
+    flex: 1;
+    background: #1e1e1e;
+    color: #d4d4d4;
+    border: 1px solid #444;
+    border-radius: 4px;
+    padding: 4px 8px;
+    font-size: 13px;
 }
 
 .pj-settings-item {
@@ -775,9 +800,16 @@
     transition: width 0.5s ease, background-color 0.5s ease;
 }
 
+.pj-machine-cpu-label {
+    font-size: 9px;
+    color: #888;
+    letter-spacing: 0.5px;
+    flex-shrink: 0;
+}
+
 .pj-machine-cpu-text {
     font-size: 10px;
-    color: #666;
+    color: #aaa;
     width: 30px;
     text-align: right;
     flex-shrink: 0;
@@ -840,6 +872,258 @@
 
 .pj-agent-input.pj-agent-port {
     width: 60px;
+}
+
+/* ── Scheduled Tasks ── */
+#pj-schedules-container {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    margin-bottom: 16px;
+    min-height: 40px;
+}
+
+.pj-schedule-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 7px 10px;
+    background: #1e1e1e;
+    border: 1px solid #333;
+    border-radius: 4px;
+    font-size: 12px;
+    transition: border-color 0.2s ease;
+}
+
+.pj-schedule-row:hover {
+    border-color: #555;
+}
+
+.pj-schedule-row.pj-schedule-disabled {
+    opacity: 0.45;
+}
+
+.pj-schedule-name {
+    font-weight: 700;
+    color: #e0e0e0;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    max-width: 200px;
+}
+
+.pj-schedule-cron {
+    font-size: 11px;
+    color: #888;
+    flex-shrink: 0;
+}
+
+.pj-schedule-next {
+    font-size: 11px;
+    color: #666;
+    flex-shrink: 0;
+}
+
+.pj-schedule-actions {
+    display: flex;
+    gap: 4px;
+    margin-left: auto;
+    flex-shrink: 0;
+    align-items: center;
+}
+
+.pj-schedule-toggle {
+    position: relative;
+    width: 32px;
+    height: 16px;
+    background: #444;
+    border-radius: 8px;
+    cursor: pointer;
+    transition: background 0.3s ease;
+    border: none;
+    padding: 0;
+}
+
+.pj-schedule-toggle.pj-toggle-on {
+    background: #22c55e;
+}
+
+.pj-schedule-toggle::after {
+    content: '';
+    position: absolute;
+    top: 2px;
+    left: 2px;
+    width: 12px;
+    height: 12px;
+    background: #fff;
+    border-radius: 50%;
+    transition: transform 0.2s ease;
+}
+
+.pj-schedule-toggle.pj-toggle-on::after {
+    transform: translateX(16px);
+}
+
+.pj-schedule-delete {
+    font-size: 11px;
+    color: #555;
+    cursor: pointer;
+    background: none;
+    border: none;
+    font-family: inherit;
+    padding: 2px 4px;
+    line-height: 1;
+    transition: color 0.2s ease;
+}
+
+.pj-schedule-delete:hover {
+    color: #ef4444;
+}
+
+.pj-schedules-empty {
+    text-align: center;
+    color: #555;
+    padding: 16px 0;
+    font-size: 12px;
+}
+
+.pj-schedule-row .pj-schedule-time {
+    font-size: 11px;
+    color: #888;
+    flex-shrink: 0;
+}
+
+/* ── Schedule detail panel ── */
+.pj-schedule-wrapper {
+    margin-bottom: 2px;
+}
+
+.pj-schedule-arrow {
+    font-size: 8px;
+    color: #555;
+    flex-shrink: 0;
+    width: 10px;
+    text-align: center;
+    transition: color 0.2s ease;
+}
+
+.pj-schedule-row:hover .pj-schedule-arrow {
+    color: #999;
+}
+
+.pj-schedule-row-expanded {
+    border-bottom-left-radius: 0;
+    border-bottom-right-radius: 0;
+    border-bottom-color: transparent;
+}
+
+.pj-schedule-detail {
+    background: #161616;
+    border: 1px solid #333;
+    border-top: none;
+    border-radius: 0 0 4px 4px;
+    padding: 8px 12px 8px 30px;
+    animation: pj-slide-down 0.15s ease;
+}
+
+.pj-schedule-detail-line {
+    display: flex;
+    gap: 8px;
+    padding: 2px 0;
+    font-size: 11px;
+    line-height: 1.5;
+}
+
+.pj-schedule-detail-label {
+    color: #666;
+    flex-shrink: 0;
+    min-width: 70px;
+}
+
+.pj-schedule-detail-value {
+    color: #aaa;
+    word-break: break-all;
+}
+
+/* ── Inline schedule time editor ── */
+.pj-schedule-time-editable {
+    cursor: pointer;
+    border-bottom: 1px dashed transparent;
+    transition: border-color 0.2s ease, color 0.2s ease;
+}
+
+.pj-schedule-time-editable:hover {
+    border-bottom-color: #555;
+    color: #ccc;
+}
+
+.pj-schedule-time-editing {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    cursor: default;
+    border-bottom: none !important;
+}
+
+.pj-sch-edit-date,
+.pj-sch-edit-time {
+    background: #1e1e1e;
+    color: #d4d4d4;
+    border: 1px solid #444;
+    border-radius: 3px;
+    padding: 2px 5px;
+    font-size: 11px;
+    font-family: inherit;
+    outline: none;
+    color-scheme: dark;
+}
+
+.pj-sch-edit-date { width: 120px; }
+
+.pj-sch-edit-select {
+    background: #1e1e1e;
+    color: #d4d4d4;
+    border: 1px solid #444;
+    border-radius: 3px;
+    padding: 2px 4px;
+    font-size: 11px;
+    font-family: inherit;
+    outline: none;
+    color-scheme: dark;
+    cursor: pointer;
+}
+
+.pj-sch-edit-date:focus,
+.pj-sch-edit-select:focus {
+    border-color: #3b82f6;
+}
+
+.pj-sch-edit-ok,
+.pj-sch-edit-cancel {
+    background: none;
+    border: none;
+    cursor: pointer;
+    font-size: 13px;
+    padding: 2px 4px;
+    line-height: 1;
+    transition: color 0.2s ease;
+}
+
+.pj-sch-edit-ok {
+    color: #22c55e;
+}
+
+.pj-sch-edit-ok:hover {
+    color: #4ade80;
+}
+
+.pj-sch-edit-cancel {
+    color: #666;
+}
+
+.pj-sch-edit-cancel:hover {
+    color: #ef4444;
 }
 
 /* Scrollbar styling for log area */

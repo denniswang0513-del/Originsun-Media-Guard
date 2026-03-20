@@ -33,6 +33,28 @@ export function addVerifySourceRow(defaultPath1 = '', defaultPath2 = '') {
     return `vf_src_${vfIndex}`;
 }
 
+export function collectVerifyPayload() {
+    const rows = document.getElementById('vf_source_list').children;
+    const pairs = [];
+    for (let row of rows) {
+        const inputs = row.querySelectorAll('input');
+        if (inputs[0].value.trim() && inputs[1].value.trim()) {
+            pairs.push([inputs[0].value.trim(), inputs[1].value.trim()]);
+        }
+    }
+    if (pairs.length === 0) {
+        alert('至少需要一組完整的比對路徑！');
+        return { valid: false };
+    }
+    const vfMode = document.querySelector('input[name="vf_mode"]:checked').value;
+    const payload = {
+        pairs: pairs,
+        mode: vfMode
+    };
+    return { valid: true, payload, name: '檔案比對' };
+}
+window.collectVerifyPayload = collectVerifyPayload;
+
 let _vfSubmitting = false;
 
 export async function submitVerify() {
@@ -49,24 +71,10 @@ export async function submitVerify() {
 
     try {
 
-    const rows = document.getElementById('vf_source_list').children;
-    const pairs = [];
-    for (let row of rows) {
-        const inputs = row.querySelectorAll('input');
-        if (inputs[0].value.trim() && inputs[1].value.trim()) {
-            pairs.push([inputs[0].value.trim(), inputs[1].value.trim()]);
-        }
-    }
-    if (pairs.length === 0) {
-        alert('至少需要一組完整的比對路徑！');
-        return;
-    }
-
-    const vfMode = document.querySelector('input[name="vf_mode"]:checked').value;
-    const payload = {
-        pairs: pairs,
-        mode: vfMode
-    };
+    const collected = collectVerifyPayload();
+    if (!collected.valid) return;
+    const payload = collected.payload;
+    const vfMode = payload.mode;
 
     try {
         window._lastJob = { url: 'http://localhost:8000/api/v1/jobs/verify', payload };

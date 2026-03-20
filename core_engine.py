@@ -11,6 +11,8 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Callable, Any, Dict, List, Tuple, Optional
 
+from utils.formatting import fmt_size
+
 # ─────────────────────────────────────────────────────────
 # Report Data Structures
 # ─────────────────────────────────────────────────────────
@@ -216,6 +218,84 @@ class MediaGuardEngine:
                 })
         return _prog
 
+    def _check_disk_space(self, path: str, required_bytes: int, buffer_pct: float = 0.05) -> Tuple[bool, int]:
+        """檢查目的地磁碟可用空間是否足夠。回傳 (足夠, 可用位元組)。"""
+        try:
+            check_path = path
+            while not os.path.exists(check_path):
+                parent = os.path.dirname(check_path)
+                if parent == check_path:
+                    self.log("[Engine] 磁碟空間預檢：無法定位磁碟根目錄，跳過檢查")
+                    return True, -1
+                check_path = parent
+            free = shutil.disk_usage(check_path).free
+            needed = int(required_bytes * (1 + buffer_pct))
+            return free >= needed, free
+        except Exception as exc:
+            self.log(f"[Engine] 磁碟空間預檢失敗（{exc}），跳過檢查")
+            return True, -1
+
+    # ── Checkpoint helpers for resume-from-interruption ──
+
+    _CHECKPOINT_FILE = ".originsun_checkpoint.json"
+
+    @staticmethod
+    def _load_checkpoint(local_dir: str) -> Dict[str, Any]:
+        """讀取中斷點檔案，回傳 completed dict。找不到或損壞時回傳空 dict。"""
+        cp_path = os.path.join(local_dir, MediaGuardEngine._CHECKPOINT_FILE)
+        if not os.path.exists(cp_path):
+            return {}
+        try:
+            with open(cp_path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            return data.get("completed", {})
+        except Exception:
+            return {}
+
+    @staticmethod
+    def _save_checkpoint(local_dir: str, project_name: str, completed: Dict[str, Any]) -> None:
+        """將 completed dict 寫入中斷點檔案（原子寫入）。"""
+        cp_path = os.path.join(local_dir, MediaGuardEngine._CHECKPOINT_FILE)
+        tmp_path = cp_path + ".tmp"
+        data = {
+            "project_name": project_name,
+            "updated_at": datetime.now().isoformat(timespec="seconds"),
+            "completed": completed,
+        }
+        try:
+            with open(tmp_path, "w", encoding="utf-8") as f:
+                json.dump(data, f, ensure_ascii=False)
+            os.replace(tmp_path, cp_path)
+        except Exception:
+            # 寫入失敗不影響備份本身
+            if os.path.exists(tmp_path):
+                try:
+                    os.remove(tmp_path)
+                except OSError:
+                    pass
+
+    @staticmethod
+    def _remove_checkpoint(local_dir: str) -> None:
+        """備份完整完成後刪除中斷點檔案。"""
+        cp_path = os.path.join(local_dir, MediaGuardEngine._CHECKPOINT_FILE)
+        try:
+            if os.path.exists(cp_path):
+                os.remove(cp_path)
+        except OSError:
+            pass
+
+    @staticmethod
+    def _is_checkpoint_done(completed: Dict[str, Any], key: str, phase: str, dest_path: str, src_size: int) -> bool:
+        """檢查某檔案在指定階段是否已由 checkpoint 標記完成且目的地檔案仍完好。"""
+        entry = completed.get(key)
+        if not entry or not entry.get(phase):
+            return False
+        # 雙重驗證：checkpoint 記錄存在 + 目的地檔案大小一致
+        try:
+            return os.stat(dest_path).st_size == src_size
+        except OSError:
+            return False
+
     def run_backup_job(
         self,
         sources: List[Tuple[str, str]], # (CardName, RootPath)
@@ -261,7 +341,24 @@ class MediaGuardEngine:
         speed_samples = _deque(maxlen=5)
         t_last_chunk = [time.time()]  # mutable so inner func can update it
         
-        self.log(f"[Engine] 準備備份 {total_files} 個檔案，總計 {total_bytes / (1024**3):.2f} GB")
+        self.log(f"[Engine] 準備備份 {total_files} 個檔案，總計 {fmt_size(total_bytes)}")
+
+        # ── 磁碟空間預檢 ──
+        for label, target in [("本機", local_dir), ("NAS", nas_dir)]:
+            if not target:
+                continue
+            ok, free = self._check_disk_space(target, total_bytes)
+            if not ok:
+                self.err(f"⚠ {label}空間不足：需要 {fmt_size(total_bytes)}，"
+                         f"可用 {fmt_size(free)}（含 5% 安全餘量）")
+                return
+
+        # ── 中斷點續傳：載入 checkpoint ──
+        cp_completed = self._load_checkpoint(local_dir)
+        if cp_completed:
+            resumed = sum(1 for v in cp_completed.values()
+                          if v.get("local") and (not nas_dir or v.get("nas")))
+            self.log(f"[Engine] 偵測到中斷點，{resumed}/{total_files} 個檔案可跳過")
 
         # ── 預先建立空資料夾（攝影機卡片常見的 metadata 目錄） ──
         if empty_dirs:
@@ -355,58 +452,81 @@ class MediaGuardEngine:
             if self._check_pause_stop():
                 self.log("[Engine] 任務已依指示中斷。")
                 break
-                
+
+            cp_key = f"{card}/{rel}"
             l_dest = os.path.join(local_dir, card, rel)
-            
+
             try:
                 file_size = os.path.getsize(src_abs)
             except OSError:
                 continue
 
+            # 中斷點跳過：本機階段已完成
+            if self._is_checkpoint_done(cp_completed, cp_key, "local", l_dest, file_size):
+                self.log(f"[==] 中斷點跳過（本機）: {cp_key}")
+                done_state_l[1] += 1
+                done_state_l[0] += file_size
+                continue
+
             action_l, l_dest = check_duplicate(self, src_abs, l_dest, "local", file_size, rel)
             skip_copy_l = action_l == "skip"
-            
-            if src_abs.lower().endswith(SUPPORTED_EXTS) and not skip_copy_l:
+
+            if skip_copy_l:
+                # 重複檢查確認檔案已存在且相同 → 補寫 checkpoint 加速下次續傳
+                entry = cp_completed.setdefault(cp_key, {"size": file_size})
+                entry["local"] = True
+                done_state_l[1] += 1
+                done_state_l[0] += file_size
+                continue
+
+            if src_abs.lower().endswith(SUPPORTED_EXTS):
                 while not self.is_file_stable(src_abs):
                     if self._check_pause_stop(): break
                     time.sleep(2)
             
             try:
-                if not skip_copy_l:
-                    prog_cb = self._create_progress_callback(
-                        "backup_local", total_bytes, total_files, card, rel,
-                        t_last_chunk, speed_samples, done_state_l, on_progress
-                    )
-                    if not self.copy_file_chunked(src_abs, l_dest, prog_cb):
-                        break
+                prog_cb = self._create_progress_callback(
+                    "backup_local", total_bytes, total_files, card, rel,
+                    t_last_chunk, speed_samples, done_state_l, on_progress
+                )
+                if not self.copy_file_chunked(src_abs, l_dest, prog_cb):
+                    break
             except Exception as e:
                 self.err(f"寫入本機失敗: {rel} - {e}")
-                
-            import shutil
+
             try:
-                if not skip_copy_l: shutil.copystat(src_abs, l_dest)
+                shutil.copystat(src_abs, l_dest)
             except OSError:
                 pass
-                    
-            if not skip_copy_l:
-                if do_hash:
-                    h_src = self.get_xxh64(src_abs)
-                    h_loc = self.get_xxh64(l_dest)
-                    if h_src == h_loc:
-                        self.log(f"[OK] 本機寫入成功 {card}/{rel} ({_short_hash(h_src)}...)")
-                    else:
-                        self.err(f"[XXH64 FAIL] 本機寫入失敗 {card}/{rel}")
+
+            if do_hash:
+                h_src = self.get_xxh64(src_abs)
+                h_loc = self.get_xxh64(l_dest)
+                if h_src == h_loc:
+                    self.log(f"[OK] 本機寫入成功 {card}/{rel} ({_short_hash(h_src)}...)")
                 else:
-                    self.log(f"[OK] 本機寫入成功 {card}/{rel}")
-                
-                done_state_l[1] += 1
-                done_state_l[0] += file_size
-                
+                    self.err(f"[XXH64 FAIL] 本機寫入失敗 {card}/{rel}")
+            else:
+                self.log(f"[OK] 本機寫入成功 {card}/{rel}")
+
+            # 記錄 checkpoint（每 50 個檔案寫一次，避免過多 I/O）
+            entry = cp_completed.setdefault(cp_key, {"size": file_size})
+            entry["local"] = True
+
+            done_state_l[1] += 1
+            done_state_l[0] += file_size
+
+            if done_state_l[1] % 50 == 0:
+                self._save_checkpoint(local_dir, project_name, cp_completed)
+
+        # 階段一結束：flush checkpoint 記錄
+        if cp_completed:
+            self._save_checkpoint(local_dir, project_name, cp_completed)
+
         # ==========================================
         # 階段二：備份至 NAS (NAS)
         # ==========================================
         if nas_dir and not self._stop_event.is_set():
-            assert isinstance(self, type(self))
             self.log(f"[Engine] 開始階段二：備份至 NAS...")
             done_bytes_n = 0
             done_files_n = 0
@@ -418,52 +538,87 @@ class MediaGuardEngine:
                 if engine._check_pause_stop():
                     engine.log("[Engine] 任務已依指示中斷。")
                     break
-                    
+
+                cp_key = f"{card}/{rel}"
                 n_dest = os.path.join(nas_dir, card, rel)
-                
+
                 try:
                     file_size = os.path.getsize(src_abs)
                 except OSError:
                     continue
-                    
+
+                # 中斷點跳過：NAS 階段已完成
+                if self._is_checkpoint_done(cp_completed, cp_key, "nas", n_dest, file_size):
+                    self.log(f"[==] 中斷點跳過（NAS）: {cp_key}")
+                    done_state_n[1] += 1
+                    done_state_n[0] += file_size
+                    continue
+
                 action_n, n_dest = check_duplicate(self, src_abs, n_dest, "nas", file_size, rel)
                 skip_copy_n = action_n == "skip"
-                
-                if src_abs.lower().endswith(SUPPORTED_EXTS) and not skip_copy_n:
+
+                if skip_copy_n:
+                    # 重複檢查確認檔案已存在且相同 → 補寫 checkpoint 加速下次續傳
+                    entry = cp_completed.setdefault(cp_key, {"size": file_size})
+                    entry["nas"] = True
+                    done_state_n[1] += 1
+                    done_state_n[0] += file_size
+                    continue
+
+                if src_abs.lower().endswith(SUPPORTED_EXTS):
                     while not engine.is_file_stable(src_abs):
                         if engine._check_pause_stop(): break
                         time.sleep(2)
-                
+
                 try:
-                    if not skip_copy_n:
-                        prog_cb_n = self._create_progress_callback(
-                            "backup_nas", total_bytes, total_files, card, rel,
-                            t_last_chunk, speed_samples_n, done_state_n, on_progress
-                        )
-                        if not engine.copy_file_chunked(str(src_abs), n_dest, prog_cb_n):
-                            break
+                    prog_cb_n = self._create_progress_callback(
+                        "backup_nas", total_bytes, total_files, card, rel,
+                        t_last_chunk, speed_samples_n, done_state_n, on_progress
+                    )
+                    if not engine.copy_file_chunked(str(src_abs), n_dest, prog_cb_n):
+                        break
                 except Exception as e:
                     engine.err(f"寫入 NAS 失敗: {rel} - {e}")
-                    
-                import shutil
+
                 try:
-                    if not skip_copy_n: shutil.copystat(str(src_abs), n_dest)
+                    shutil.copystat(str(src_abs), n_dest)
                 except OSError:
                     pass
-                        
-                if not skip_copy_n:
-                    if do_hash:
-                        h_src = engine.get_xxh64(src_abs)
-                        h_nas = engine.get_xxh64(n_dest)
-                        if h_src == h_nas:
-                            engine.log(f"[OK] NAS 寫入成功 {card}/{rel} ({_short_hash(h_src)}...)")
-                        else:
-                            engine.err(f"[XXH64 FAIL] NAS 寫入失敗 {card}/{rel}")
+
+                if do_hash:
+                    h_src = engine.get_xxh64(src_abs)
+                    h_nas = engine.get_xxh64(n_dest)
+                    if h_src == h_nas:
+                        engine.log(f"[OK] NAS 寫入成功 {card}/{rel} ({_short_hash(h_src)}...)")
                     else:
-                        engine.log(f"[OK] NAS 寫入成功 {card}/{rel}")
-                    
+                        engine.err(f"[XXH64 FAIL] NAS 寫入失敗 {card}/{rel}")
+                else:
+                    engine.log(f"[OK] NAS 寫入成功 {card}/{rel}")
+
+                # 記錄 checkpoint（每 50 個檔案寫一次）
+                entry = cp_completed.setdefault(cp_key, {"size": file_size})
+                entry["nas"] = True
+
                 done_state_n[1] += 1
                 done_state_n[0] += file_size
+
+                if done_state_n[1] % 50 == 0:
+                    self._save_checkpoint(local_dir, project_name, cp_completed)
+
+            # 階段二結束：flush checkpoint 記錄
+            if cp_completed:
+                self._save_checkpoint(local_dir, project_name, cp_completed)
+
+        # ── 備份後補齊空資料夾（防止中途被刪除） ──
+        if not self._stop_event.is_set() and empty_dirs:
+            for card, rel_dir in empty_dirs:
+                l_dir = os.path.join(local_dir, card, rel_dir)
+                os.makedirs(l_dir, exist_ok=True)
+                if nas_dir:
+                    try:
+                        os.makedirs(os.path.join(nas_dir, card, rel_dir), exist_ok=True)
+                    except OSError:
+                        pass
 
         # ── 備份後快速二次掃描 (檔名與大小) ──
         if not self._stop_event.is_set():
@@ -527,7 +682,6 @@ class MediaGuardEngine:
                         except Exception as e:
                             self.err(f"二次掃描補齊 NAS 失敗: {rel} ({e})")
                     try:
-                        import shutil
                         shutil.copystat(str(src_abs), l_dest)
                         if n_dest: shutil.copystat(str(src_abs), n_dest)
                     except Exception:
@@ -539,6 +693,8 @@ class MediaGuardEngine:
                 else:
                     self.log(f"[!] 二次掃描完成，共補齊了 {mismatch_count} 個檔案。")
                 self.log("[Engine] 備份任務全部完成。")
+                # 備份完整完成，移除中斷點檔案
+                self._remove_checkpoint(local_dir)
                 if on_progress is not None:
                     on_progress({"phase": "backup", "status": "completed", "total_pct": 100})  # type: ignore
                 

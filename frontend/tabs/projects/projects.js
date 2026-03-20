@@ -5,10 +5,12 @@
 const TYPE_COLORS = {
     backup: '#3b82f6', transcode: '#d48a04', concat: '#228b22',
     verify: '#06b6d4', transcribe: '#a855f7', report: '#7c3aed',
+    tts: '#ec4899', clone: '#f59e0b',
 };
 const TYPE_LABELS = {
     backup: '備份', transcode: '轉檔', concat: '串接',
     verify: '驗證', transcribe: '轉錄', report: '報表',
+    tts: '語音生成', clone: '聲音複製',
 };
 const STATUS_LABELS = {
     queued: '排隊中', waiting: '等待坑位', running: '執行中',
@@ -23,6 +25,11 @@ let _todayDoneCount = 0;
 let _queueItems = [];       // current queue data from API
 let _isDragging = false;    // true during drag — defers socket updates
 let _pendingQueueUpdate = null; // buffered socket update during drag
+
+// Queue pagination state
+const QUEUE_PAGE_SIZE = 5;
+let _queuePage = 0;
+let _loadQueueTimer = null; // debounce timer for _loadQueue
 
 // History pagination state
 const HISTORY_PAGE_SIZE = 5;
@@ -75,6 +82,7 @@ export function initTab() {
     _loadActiveJobs();
     _loadQueue();
     _loadHistory();
+    _loadSchedules();
     _bindSocket();
     _loadAgents();
 
@@ -92,6 +100,7 @@ export function initTab() {
         stopJob,
         toggleSettings,
         saveLimits,
+        saveAgentsDir,
         clearHistory,
         refreshQueue,
         jumpToFront,
@@ -104,6 +113,8 @@ export function initTab() {
         pausePolling,
         reloadAgents: _loadAgents,
         reloadAgentsNoPolling: _loadAgentsNoPolling,
+        toggleSchedule,
+        deleteSchedule,
     };
 }
 
@@ -133,6 +144,9 @@ async function _loadActiveJobs() {
         const data = await res.json();
         const jobs = data.active_jobs || {};
         for (const [jobId, job] of Object.entries(jobs)) {
+            const status = job.status || 'queued';
+            // Only show running/paused in "進行中"; queued items show in "等待"
+            if (status === 'queued' || status === 'waiting') continue;
             if (!_cards[jobId]) {
                 _insertCard(job, false);
             }
@@ -156,6 +170,10 @@ async function _loadSettings() {
             const sel = document.getElementById('pj-limit-' + key);
             if (sel && c[key] != null) sel.value = String(c[key]);
         }
+        // 載入 NAS agents_dir 路徑
+        const agentsDir = (settings.nas_paths || {}).agents_dir || '';
+        const dirInput = document.getElementById('pj-nas-agents-dir');
+        if (dirInput) dirInput.value = agentsDir;
     } catch (_) { /* silent */ }
 }
 
@@ -163,16 +181,26 @@ async function saveLimits(key, val) {
     const numVal = parseInt(val, 10);
     if (!numVal || numVal < 1) return;
     try {
-        const r = await fetch('/api/settings/load');
-        if (!r.ok) return;
-        const settings = await r.json();
-        if (!settings.concurrency) settings.concurrency = {};
-        settings.concurrency[key] = numVal;
         await fetch('/api/settings/save', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(settings),
+            body: JSON.stringify({ concurrency: { [key]: numVal } }),
         });
+    } catch (_) { /* silent */ }
+}
+
+async function saveAgentsDir() {
+    const input = document.getElementById('pj-nas-agents-dir');
+    if (!input) return;
+    const dir = input.value.trim();
+    try {
+        await fetch('/api/settings/save', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ nas_paths: { agents_dir: dir } }),
+        });
+        // 重新載入機器列表
+        await _loadAgents();
     } catch (_) { /* silent */ }
 }
 
@@ -233,38 +261,33 @@ function _renderHistoryPage() {
     }
 
     if (totalPages > 1) {
-        _renderPagination(container, totalPages);
+        _renderPaginationWidget(container, totalPages, _historyPage, (p) => {
+            _historyPage = p; _renderHistoryPage();
+        });
     }
 }
 
-function _renderPagination(container, totalPages) {
+function _renderPaginationWidget(container, totalPages, currentPage, onPageChange) {
     const wrap = document.createElement('div');
     wrap.className = 'pj-pagination';
 
-    // Left arrow
     const left = document.createElement('span');
-    left.className = 'pj-page-arrow' + (_historyPage === 0 ? ' disabled' : '');
+    left.className = 'pj-page-arrow' + (currentPage === 0 ? ' disabled' : '');
     left.textContent = '\u2039';
-    left.addEventListener('click', () => {
-        if (_historyPage > 0) { _historyPage--; _renderHistoryPage(); }
-    });
+    left.addEventListener('click', () => { if (currentPage > 0) onPageChange(currentPage - 1); });
     wrap.appendChild(left);
 
-    // Dots
     for (let i = 0; i < totalPages; i++) {
         const dot = document.createElement('span');
-        dot.className = 'pj-page-dot' + (i === _historyPage ? ' active' : '');
-        dot.addEventListener('click', () => { _historyPage = i; _renderHistoryPage(); });
+        dot.className = 'pj-page-dot' + (i === currentPage ? ' active' : '');
+        dot.addEventListener('click', () => onPageChange(i));
         wrap.appendChild(dot);
     }
 
-    // Right arrow
     const right = document.createElement('span');
-    right.className = 'pj-page-arrow' + (_historyPage === totalPages - 1 ? ' disabled' : '');
+    right.className = 'pj-page-arrow' + (currentPage === totalPages - 1 ? ' disabled' : '');
     right.textContent = '\u203a';
-    right.addEventListener('click', () => {
-        if (_historyPage < totalPages - 1) { _historyPage++; _renderHistoryPage(); }
-    });
+    right.addEventListener('click', () => { if (currentPage < totalPages - 1) onPageChange(currentPage + 1); });
     wrap.appendChild(right);
 
     container.appendChild(wrap);
@@ -636,18 +659,23 @@ function toggleLog(jobId) {
 //  Badge Counts
 // ══════════════════════════════════════════
 function _updateBadges() {
-    let running = 0, queued = 0;
+    let running = 0;
     for (const info of Object.values(_cards)) {
         if (info.status === 'running' || info.status === 'paused') running++;
-        else if (info.status === 'queued' || info.status === 'waiting') queued++;
     }
+    // Count queued from queue data (excludes running items)
+    const queued = _queueItems.filter(i => i.status !== 'running').length;
+    // Count enabled schedules
+    const scheduled = _schedules.filter(s => s.enabled).length;
 
     const elRunning = document.getElementById('pj-count-running');
     const elQueued = document.getElementById('pj-count-queued');
+    const elScheduled = document.getElementById('pj-count-scheduled');
     const elDone = document.getElementById('pj-count-done');
 
     if (elRunning) elRunning.textContent = String(running);
     if (elQueued) elQueued.textContent = String(queued);
+    if (elScheduled) elScheduled.textContent = String(scheduled);
     if (elDone) elDone.textContent = String(_todayDoneCount);
 }
 
@@ -656,14 +684,9 @@ function _updateBadges() {
 // ══════════════════════════════════════════
 function _onJobQueued(data) {
     if (!data || !data.job_id) return;
-    if (_cards[data.job_id]) return; // already exists
-    _insertCard({
-        job_id: data.job_id,
-        project_name: data.project_name || '',
-        task_type: data.task_type || 'backup',
-        status: 'queued',
-    }, true);
-    _updateBadges();
+    // Queued items show in "等待" section — refresh queue panel
+    // (debounced: _loadQueue calls _updateBadges after fetch completes)
+    _loadQueueDebounced();
 }
 
 function _onTaskStatus(data) {
@@ -671,24 +694,31 @@ function _onTaskStatus(data) {
     const jobId = data.job_id;
     const status = data.status;
 
-    // Create card if we don't have it (e.g., page opened after job was queued)
-    if (!_cards[jobId] && status !== 'done' && status !== 'error' && status !== 'cancelled') {
+    // Create card only for running/paused (queued items stay in "等待")
+    if (!_cards[jobId] && (status === 'running' || status === 'paused')) {
         _insertCard({
             job_id: jobId,
             project_name: data.project_name || '',
             task_type: data.task_type || 'backup',
             status: status,
         }, true);
+        // Refresh queue to remove this item from "等待"
+        _loadQueueDebounced();
     }
 
     if (_cards[jobId]) {
         _updateCardStatus(jobId, status);
     }
 
-    // On done/error, write to history and update history list if viewing today
+    // On done/error, write to history, auto-close card, refresh queue
     if (status === 'done' || status === 'error' || status === 'cancelled') {
         _todayDoneCount++;
         _updateBadges();
+
+        // Auto-close card after 3 seconds
+        if (_cards[jobId]) {
+            setTimeout(() => closeCard(jobId), 3000);
+        }
 
         // Post to backend history (deduplication handled server-side)
         const entry = {
@@ -712,6 +742,9 @@ function _onTaskStatus(data) {
             _historyPage = 0;
             _renderHistoryPage();
         }
+
+        // Refresh queue
+        _loadQueueDebounced();
     }
 }
 
@@ -737,6 +770,16 @@ function _onLog(data) {
 //  Machine Status Polling
 // ══════════════════════════════════════════
 
+function _syncComputeHosts() {
+    window._computeHosts = _agents.map(a => ({
+        name: a.name,
+        ip: (a.url || '').replace(/^https?:\/\//, '')
+    }));
+    if (typeof window.renderStandaloneHostPanels === 'function') {
+        window.renderStandaloneHostPanels();
+    }
+}
+
 async function _loadAgents() {
     await _loadAgentsNoPolling();
     // Start polling for each agent
@@ -747,12 +790,13 @@ async function _loadAgents() {
 
 async function _loadAgentsNoPolling() {
     try {
-        const res = await fetch('/api/settings/load');
+        const res = await fetch('/api/v1/agents');
         if (!res.ok) return;
-        const settings = await res.json();
-        _agents = settings.agents || [];
+        const data = await res.json();
+        _agents = data.agents || [];
     } catch (_) { /* silent */ }
     _renderMachines();
+    _syncComputeHosts();
 }
 
 function _renderMachines() {
@@ -853,6 +897,11 @@ function _createMachineCard(agent) {
     if (!isOnline && status.online !== undefined) {
         // no CPU bar when offline
     } else {
+        const cpuLabel = document.createElement('span');
+        cpuLabel.className = 'pj-machine-cpu-label';
+        cpuLabel.textContent = 'CPU';
+        cpuDiv.appendChild(cpuLabel);
+
         const barWrap = document.createElement('div');
         barWrap.className = 'pj-machine-cpu-bar';
 
@@ -983,33 +1032,27 @@ async function addAgent() {
         return;
     }
 
-    const id = agentName.toLowerCase().replace(/[^a-z0-9]/g, '-');
     const url = 'http://' + agentIp + ':' + agentPort;
 
     try {
-        const res = await fetch('/api/settings/load');
-        if (!res.ok) return;
-        const settings = await res.json();
-        if (!settings.agents) settings.agents = [];
-
-        // Check for duplicate
-        if (settings.agents.some(a => a.id === id)) {
-            alert('已存在相同名稱的機器');
-            return;
-        }
-
-        settings.agents.push({ id, name: agentName, url });
-        await fetch('/api/settings/save', {
+        const res = await fetch('/api/v1/agents', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(settings),
+            body: JSON.stringify({ name: agentName, url }),
         });
+        if (!res.ok) {
+            const err = await res.json().catch(() => ({}));
+            alert(err.detail || '新增失敗');
+            return;
+        }
+        const data = await res.json();
+        const newAgent = data.agent;
 
-        _agents = settings.agents;
+        _agents.push(newAgent);
         _renderMachines();
+        _syncComputeHosts();
 
         // Start polling for the new agent
-        const newAgent = _agents.find(a => a.id === id);
         if (newAgent) _startPolling(newAgent);
 
         // Clear form and hide
@@ -1028,19 +1071,19 @@ async function removeAgent(agentId) {
     _stopPolling(agentId);
 
     try {
-        const res = await fetch('/api/settings/load');
-        if (!res.ok) return;
-        const settings = await res.json();
-        settings.agents = (settings.agents || []).filter(a => a.id !== agentId);
-        await fetch('/api/settings/save', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(settings),
+        const res = await fetch('/api/v1/agents/' + encodeURIComponent(agentId), {
+            method: 'DELETE',
         });
-        _agents = settings.agents;
+        if (!res.ok) {
+            const err = await res.json().catch(() => ({}));
+            alert(err.detail || '移除失敗');
+            return;
+        }
+        _agents = _agents.filter(a => a.id !== agentId);
     } catch (_) { /* silent */ }
 
     _renderMachines();
+    _syncComputeHosts();
 }
 
 // ══════════════════════════════════════════
@@ -1052,8 +1095,16 @@ async function _loadQueue() {
         const res = await fetch('/api/v1/queue');
         if (!res.ok) return;
         _queueItems = await res.json();
+        _queuePage = 0;
         _renderQueue();
+        _updateBadges();
     } catch (_) { /* silent */ }
+}
+
+// Debounced version — coalesces rapid socket events into a single fetch
+function _loadQueueDebounced() {
+    if (_loadQueueTimer) clearTimeout(_loadQueueTimer);
+    _loadQueueTimer = setTimeout(() => { _loadQueueTimer = null; _loadQueue(); }, 200);
 }
 
 function refreshQueue() { _loadQueue(); }
@@ -1063,19 +1114,31 @@ function _renderQueue() {
     if (!container) return;
     container.textContent = '';
 
-    if (_queueItems.length === 0) {
+    // Filter out running items (they show in "進行中")
+    const waitingItems = _queueItems.filter(i => i.status !== 'running');
+
+    if (waitingItems.length === 0) {
         const empty = document.createElement('div');
         empty.className = 'pj-queue-empty';
-        empty.textContent = '目前沒有排隊中的任務';
+        empty.textContent = '目前沒有等待中的任務';
         container.appendChild(empty);
         return;
     }
 
-    let idx = 0;
-    for (const item of _queueItems) {
-        idx++;
-        const row = _createQueueRow(item, idx);
+    const totalPages = Math.ceil(waitingItems.length / QUEUE_PAGE_SIZE);
+    if (_queuePage >= totalPages) _queuePage = totalPages - 1;
+    const start = _queuePage * QUEUE_PAGE_SIZE;
+    const end = Math.min(start + QUEUE_PAGE_SIZE, waitingItems.length);
+
+    for (let i = start; i < end; i++) {
+        const row = _createQueueRow(waitingItems[i], i + 1);
         container.appendChild(row);
+    }
+
+    if (totalPages > 1) {
+        _renderPaginationWidget(container, totalPages, _queuePage, (p) => {
+            _queuePage = p; _renderQueue();
+        });
     }
 }
 
@@ -1324,6 +1387,7 @@ function _onQueueUpdated(data) {
         return;
     }
     _queueItems = (data && data.queue) || [];
+    _queuePage = 0;
     _renderQueue();
     _updateBadges();
 }
@@ -1390,5 +1454,433 @@ function _renderHistoryItem(container, entry, prepend) {
         } else {
             container.appendChild(errRow);
         }
+    }
+}
+
+
+// ══════════════════════════════════════════
+//  Scheduled Tasks
+// ══════════════════════════════════════════
+
+let _schedules = [];
+
+async function _loadSchedules() {
+    try {
+        const res = await fetch('/api/v1/schedules');
+        if (res.ok) {
+            _schedules = await res.json();
+        } else {
+            _schedules = [];
+        }
+    } catch {
+        _schedules = [];
+    }
+    _renderSchedules();
+}
+
+function _renderSchedules() {
+    const container = document.getElementById('pj-schedules-container');
+    if (!container) return;
+    container.textContent = '';
+
+    if (_schedules.length === 0) {
+        const empty = document.createElement('div');
+        empty.className = 'pj-schedules-empty';
+        empty.textContent = '尚未設定任何排程';
+        container.appendChild(empty);
+        _updateBadges();
+        return;
+    }
+
+    for (const sch of _schedules) {
+        container.appendChild(_createScheduleRow(sch));
+    }
+    _updateBadges();
+}
+
+function _createScheduleRow(sch) {
+    const wrapper = document.createElement('div');
+    wrapper.className = 'pj-schedule-wrapper';
+
+    const row = document.createElement('div');
+    row.className = 'pj-schedule-row';
+    if (!sch.enabled) row.classList.add('pj-schedule-disabled');
+
+    // Expand indicator
+    const arrow = document.createElement('span');
+    arrow.className = 'pj-schedule-arrow';
+    arrow.textContent = '▶';
+    row.appendChild(arrow);
+
+    // Task type badge
+    const typeBadge = document.createElement('span');
+    typeBadge.className = 'pj-queue-type';
+    const color = TYPE_COLORS[sch.task_type] || '#666';
+    typeBadge.style.backgroundColor = color;
+    typeBadge.appendChild(_text(TYPE_LABELS[sch.task_type] || sch.task_type));
+    row.appendChild(typeBadge);
+
+    // Name
+    const name = document.createElement('span');
+    name.className = 'pj-schedule-name';
+    name.appendChild(_text(sch.name));
+    row.appendChild(name);
+
+    // Schedule time display (clickable to edit)
+    const timeEl = document.createElement('span');
+    timeEl.className = 'pj-schedule-time pj-schedule-time-editable';
+    timeEl.title = '點擊修改時間';
+    if (sch.run_at) {
+        const d = new Date(sch.run_at);
+        timeEl.appendChild(_text(_fmtShortDateTime(d)));
+    } else if (sch.cron) {
+        timeEl.appendChild(_text(_cronToHuman(sch.cron)));
+    }
+    timeEl.addEventListener('click', (e) => {
+        e.stopPropagation();
+        _editScheduleTime(sch, timeEl);
+    });
+    row.appendChild(timeEl);
+
+    // Status info
+    const statusEl = document.createElement('span');
+    statusEl.className = 'pj-schedule-next';
+    if (!sch.enabled && sch.last_run) {
+        const d = new Date(sch.last_run);
+        statusEl.appendChild(_text('已執行: ' + _fmtShortDateTime(d)));
+    } else if (sch.next_run && sch.enabled) {
+        const nd = new Date(sch.next_run);
+        if (nd > new Date()) {
+            statusEl.appendChild(_text('等待中'));
+        }
+    }
+    row.appendChild(statusEl);
+
+    // Actions
+    const actions = document.createElement('div');
+    actions.className = 'pj-schedule-actions';
+
+    // Toggle switch
+    const toggle = document.createElement('button');
+    toggle.className = 'pj-schedule-toggle';
+    if (sch.enabled) toggle.classList.add('pj-toggle-on');
+    toggle.title = sch.enabled ? '停用' : '啟用';
+    toggle.addEventListener('click', (e) => { e.stopPropagation(); toggleSchedule(sch.schedule_id, !sch.enabled); });
+    actions.appendChild(toggle);
+
+    // Delete button
+    const del = document.createElement('button');
+    del.className = 'pj-schedule-delete';
+    del.textContent = '\u2715'; // ✕
+    del.title = '刪除排程';
+    del.addEventListener('click', (e) => { e.stopPropagation(); deleteSchedule(sch.schedule_id); });
+    actions.appendChild(del);
+
+    row.appendChild(actions);
+
+    // Detail panel (hidden by default)
+    const detail = document.createElement('div');
+    detail.className = 'pj-schedule-detail';
+    detail.style.display = 'none';
+    detail.appendChild(_buildScheduleDetail(sch));
+
+    // Toggle detail on row click
+    row.addEventListener('click', () => {
+        const isOpen = detail.style.display !== 'none';
+        detail.style.display = isOpen ? 'none' : '';
+        arrow.textContent = isOpen ? '▶' : '▼';
+        row.classList.toggle('pj-schedule-row-expanded', !isOpen);
+    });
+    row.style.cursor = 'pointer';
+
+    wrapper.appendChild(row);
+    wrapper.appendChild(detail);
+    return wrapper;
+}
+
+function _buildScheduleDetail(sch) {
+    const container = document.createElement('div');
+    const r = sch.request || {};
+
+    // Render fields as key-value pairs
+    const fields = _getDetailFields(sch.task_type, r);
+    for (const [label, value] of fields) {
+        const line = document.createElement('div');
+        line.className = 'pj-schedule-detail-line';
+
+        const labelEl = document.createElement('span');
+        labelEl.className = 'pj-schedule-detail-label';
+        labelEl.appendChild(_text(label));
+        line.appendChild(labelEl);
+
+        const valEl = document.createElement('span');
+        valEl.className = 'pj-schedule-detail-value';
+        valEl.appendChild(_text(value));
+        line.appendChild(valEl);
+
+        container.appendChild(line);
+    }
+
+    if (fields.length === 0) {
+        const empty = document.createElement('span');
+        empty.className = 'pj-schedule-detail-value';
+        empty.appendChild(_text('無設定資料'));
+        container.appendChild(empty);
+    }
+
+    return container;
+}
+
+function _getDetailFields(taskType, r) {
+    const fields = [];
+    const _bool = (v) => v ? '✓' : '✕';
+
+    switch (taskType) {
+        case 'backup':
+            if (r.project_name) fields.push(['專案名稱', r.project_name]);
+            if (r.local_root) fields.push(['本機路徑', r.local_root]);
+            if (r.nas_root) fields.push(['NAS 路徑', r.nas_root]);
+            if (r.proxy_root) fields.push(['Proxy 路徑', r.proxy_root]);
+            if (r.cards && r.cards.length) {
+                fields.push(['記憶卡', r.cards.map(c => (c[0] || '') + ' → ' + (c[1] || '')).join('、')]);
+            }
+            fields.push(['Hash 校驗', _bool(r.do_hash)]);
+            fields.push(['轉檔', _bool(r.do_transcode)]);
+            fields.push(['串接', _bool(r.do_concat)]);
+            fields.push(['報表', _bool(r.do_report)]);
+            if (r.do_concat) {
+                fields.push(['串接解析度', r.concat_resolution || '720P']);
+                fields.push(['串接編碼', r.concat_codec || 'H.264']);
+            }
+            break;
+        case 'transcode':
+            if (r.sources && r.sources.length) fields.push(['來源', r.sources.join('、')]);
+            if (r.dest_dir) fields.push(['輸出目錄', r.dest_dir]);
+            break;
+        case 'concat':
+            if (r.sources && r.sources.length) fields.push(['來源', r.sources.join('、')]);
+            if (r.dest_dir) fields.push(['輸出目錄', r.dest_dir]);
+            fields.push(['解析度', r.resolution || '1080P']);
+            fields.push(['編碼', r.codec || 'ProRes']);
+            fields.push(['時間碼', _bool(r.burn_timecode)]);
+            fields.push(['檔名', _bool(r.burn_filename)]);
+            if (r.custom_name) fields.push(['自訂檔名', r.custom_name]);
+            break;
+        case 'verify':
+            if (r.pairs && r.pairs.length) {
+                fields.push(['比對組', r.pairs.map(p => (p[0] || '') + ' ↔ ' + (p[1] || '')).join('、')]);
+            }
+            fields.push(['模式', r.mode || 'quick']);
+            break;
+        case 'transcribe':
+            if (r.sources && r.sources.length) fields.push(['來源', r.sources.join('、')]);
+            if (r.dest_dir) fields.push(['輸出目錄', r.dest_dir]);
+            fields.push(['模型', r.model_size || 'turbo']);
+            fields.push(['SRT', _bool(r.output_srt)]);
+            fields.push(['TXT', _bool(r.output_txt)]);
+            fields.push(['WAV', _bool(r.output_wav)]);
+            fields.push(['Proxy', _bool(r.generate_proxy)]);
+            break;
+        case 'report':
+            if (r.source_dir) fields.push(['來源目錄', r.source_dir]);
+            if (r.output_dir) fields.push(['輸出目錄', r.output_dir]);
+            fields.push(['縮圖條', _bool(r.do_filmstrip)]);
+            fields.push(['技術規格', _bool(r.do_techspec)]);
+            fields.push(['Hash', _bool(r.do_hash)]);
+            break;
+        case 'tts':
+            if (r.voice) fields.push(['聲音', r.voice]);
+            if (r.text) fields.push(['文字', r.text.length > 50 ? r.text.substring(0, 50) + '...' : r.text]);
+            if (r.output_dir) fields.push(['輸出目錄', r.output_dir]);
+            if (r.output_name) fields.push(['輸出檔名', r.output_name]);
+            break;
+        case 'clone':
+            if (r.reference_audio) fields.push(['參考音訊', r.reference_audio]);
+            if (r.text) fields.push(['文字', r.text.length > 50 ? r.text.substring(0, 50) + '...' : r.text]);
+            if (r.output_dir) fields.push(['輸出目錄', r.output_dir]);
+            if (r.output_name) fields.push(['輸出檔名', r.output_name]);
+            break;
+        default:
+            // Generic fallback: show all keys
+            for (const [k, v] of Object.entries(r)) {
+                if (k === 'task_type' || k === 'job_id') continue;
+                fields.push([k, typeof v === 'object' ? JSON.stringify(v) : String(v)]);
+            }
+    }
+
+    // Show compute_hosts if present
+    if (r.compute_hosts && r.compute_hosts.length) {
+        fields.push(['處理主機', r.compute_hosts.map(h => h.name || h.ip || h).join('、')]);
+    }
+
+    return fields;
+}
+
+function _fmtShortDateTime(d) {
+    const mm = String(d.getMonth() + 1).padStart(2, '0');
+    const dd = String(d.getDate()).padStart(2, '0');
+    const hh = String(d.getHours()).padStart(2, '0');
+    const mi = String(d.getMinutes()).padStart(2, '0');
+    return mm + '/' + dd + ' ' + hh + ':' + mi;
+}
+
+function _cronToHuman(cron) {
+    if (!cron) return cron;
+    const parts = cron.trim().split(/\s+/);
+    if (parts.length < 5) return cron;
+    const [min, hour, dom, mon, dow] = parts;
+
+    const time = hour.padStart(2, '0') + ':' + min.padStart(2, '0');
+
+    // Daily
+    if (dom === '*' && mon === '*' && dow === '*') {
+        return '每天 ' + time;
+    }
+    // Weekdays
+    if (dom === '*' && mon === '*' && dow === '1-5') {
+        return '週一至週五 ' + time;
+    }
+    // Specific weekday
+    const dayNames = { '0': '日', '1': '一', '2': '二', '3': '三', '4': '四', '5': '五', '6': '六', '7': '日' };
+    if (dom === '*' && mon === '*' && dayNames[dow]) {
+        return '每週' + dayNames[dow] + ' ' + time;
+    }
+    // Specific day of month
+    if (mon === '*' && dow === '*' && /^\d+$/.test(dom)) {
+        return '每月 ' + dom + ' 日 ' + time;
+    }
+    // Fallback — show raw cron with prefix so users know it's technical
+    return 'Cron: ' + cron;
+}
+
+function _editScheduleTime(sch, timeEl) {
+    // Already editing?
+    if (timeEl.querySelector('select')) return;
+
+    const origHtml = timeEl.innerHTML;
+    timeEl.textContent = '';
+    timeEl.classList.add('pj-schedule-time-editing');
+
+    // Date input
+    const dateIn = document.createElement('input');
+    dateIn.type = 'date';
+    dateIn.className = 'pj-sch-edit-date';
+    if (sch.run_at) {
+        dateIn.value = sch.run_at.slice(0, 10);
+    } else {
+        dateIn.value = _todayStr();
+    }
+
+    // Hour select (24h)
+    const hourSel = document.createElement('select');
+    hourSel.className = 'pj-sch-edit-select';
+    for (let h = 0; h < 24; h++) {
+        const o = document.createElement('option');
+        o.value = o.textContent = String(h).padStart(2, '0');
+        hourSel.appendChild(o);
+    }
+    const sep = document.createElement('span');
+    sep.textContent = ':';
+    sep.style.color = '#888';
+
+    // Minute select
+    const minSel = document.createElement('select');
+    minSel.className = 'pj-sch-edit-select';
+    for (const m of ['00', '15', '30', '45']) {
+        const o = document.createElement('option');
+        o.value = o.textContent = m;
+        minSel.appendChild(o);
+    }
+
+    if (sch.run_at) {
+        hourSel.value = sch.run_at.slice(11, 13);
+        minSel.value = sch.run_at.slice(14, 16);
+        // If minute not in 15-min options, add it
+        if (!minSel.value) {
+            const extra = document.createElement('option');
+            extra.value = extra.textContent = sch.run_at.slice(14, 16);
+            minSel.insertBefore(extra, minSel.firstChild);
+            minSel.value = extra.value;
+        }
+    } else {
+        hourSel.value = '02';
+        minSel.value = '00';
+    }
+
+    // Confirm button
+    const okBtn = document.createElement('button');
+    okBtn.className = 'pj-sch-edit-ok';
+    okBtn.textContent = '✓';
+    okBtn.title = '確認';
+    okBtn.addEventListener('click', async (e) => {
+        e.stopPropagation();
+        const newRunAt = dateIn.value + 'T' + hourSel.value + ':' + minSel.value + ':00';
+        const dt = new Date(newRunAt);
+        if (dt <= new Date()) {
+            alert('排程時間必須在未來');
+            return;
+        }
+        try {
+            const res = await fetch('/api/v1/schedules/' + sch.schedule_id, {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ run_at: newRunAt }),
+            });
+            if (!res.ok) {
+                const err = await res.json().catch(() => ({}));
+                alert('更新失敗: ' + (err.detail || res.statusText));
+                return;
+            }
+            await _loadSchedules();
+        } catch (ex) {
+            alert('更新失敗: ' + ex.message);
+        }
+    });
+
+    // Cancel button
+    const cancelBtn = document.createElement('button');
+    cancelBtn.className = 'pj-sch-edit-cancel';
+    cancelBtn.textContent = '✕';
+    cancelBtn.title = '取消';
+    cancelBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        timeEl.classList.remove('pj-schedule-time-editing');
+        timeEl.innerHTML = origHtml;
+    });
+
+    timeEl.appendChild(dateIn);
+    timeEl.appendChild(hourSel);
+    timeEl.appendChild(sep);
+    timeEl.appendChild(minSel);
+    timeEl.appendChild(okBtn);
+    timeEl.appendChild(cancelBtn);
+
+    dateIn.focus();
+}
+
+async function toggleSchedule(scheduleId, enabled) {
+    try {
+        const res = await fetch('/api/v1/schedules/' + scheduleId, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ enabled }),
+        });
+        if (res.ok) {
+            await _loadSchedules();
+        }
+    } catch {
+        // silent
+    }
+}
+
+async function deleteSchedule(scheduleId) {
+    if (!confirm('確定要刪除此排程？')) return;
+    try {
+        const res = await fetch('/api/v1/schedules/' + scheduleId, { method: 'DELETE' });
+        if (res.ok) {
+            await _loadSchedules();
+        }
+    } catch {
+        // silent
     }
 }

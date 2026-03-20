@@ -1,5 +1,5 @@
 from pydantic import BaseModel  # type: ignore
-from typing import List, Tuple
+from typing import List, Optional, Tuple
 
 class BackupRequest(BaseModel):
     task_type: str = "backup"
@@ -24,6 +24,7 @@ class BackupRequest(BaseModel):
     report_filmstrip: bool = True
     report_techspec: bool = True
     report_hash: bool = False
+    compute_hosts: list = []
 
 class TranscodeRequest(BaseModel):
     task_type: str = "transcode"
@@ -31,6 +32,7 @@ class TranscodeRequest(BaseModel):
     project_name: str = ""
     sources: List[str]
     dest_dir: str
+    compute_hosts: list = []
 
 class ConcatRequest(BaseModel):
     task_type: str = "concat"
@@ -43,6 +45,7 @@ class ConcatRequest(BaseModel):
     codec: str = "ProRes"
     burn_timecode: bool = True
     burn_filename: bool = False
+    compute_hosts: list = []
 
 class VerifyRequest(BaseModel):
     task_type: str = "verify"
@@ -50,6 +53,7 @@ class VerifyRequest(BaseModel):
     project_name: str = ""
     pairs: List[Tuple[str, str]]
     mode: str = "quick"
+    compute_hosts: list = []
 
 class ReportJobRequest(BaseModel):
     task_type: str = "report"
@@ -79,6 +83,7 @@ class TranscribeRequest(BaseModel):
     output_wav: bool = False
     generate_proxy: bool = False
     individual_mode: bool = False
+    compute_hosts: list = []
 
 class DownloadModelRequest(BaseModel):
     model_size: str
@@ -119,3 +124,21 @@ class ValidatePathsRequest(BaseModel):
 
 class ReorderRequest(BaseModel):
     ordered_job_ids: List[str]
+
+
+class ScheduleCreateRequest(BaseModel):
+    name: str
+    cron: Optional[str] = None                   # "0 2 * * *" (重複排程用)
+    run_at: Optional[str] = None                 # ISO datetime (單次排程用)
+    task_type: str = "backup"                    # backup/transcode/concat/verify/transcribe/tts/clone
+    request: dict                                # 對應任務類型的完整設定 dict
+    enabled: bool = True
+
+
+class ScheduleUpdateRequest(BaseModel):
+    name: Optional[str] = None
+    cron: Optional[str] = None
+    run_at: Optional[str] = None
+    task_type: Optional[str] = None
+    enabled: Optional[bool] = None
+    request: Optional[dict] = None

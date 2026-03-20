@@ -170,6 +170,32 @@ export function initReportTab() {
 }
 
 // Make accessible to global scope
+function collectReportPayload() {
+    const src = document.getElementById('rpt_source')?.value.trim();
+    const outDir = document.getElementById('rpt_output')?.value.trim();
+    if (!src) { alert('請選擇來源資料夾！'); return { valid: false }; }
+    if (!outDir) { alert('請選擇報表輸出目錄！'); return { valid: false }; }
+    const today = new Date();
+    const defaultName = today.getFullYear().toString() +
+        String(today.getMonth() + 1).padStart(2, '0') +
+        String(today.getDate()).padStart(2, '0') + '_Report';
+    const reportName = document.getElementById('rpt_report_name')?.value.trim() || defaultName;
+    return {
+        valid: true,
+        name: reportName,
+        payload: {
+            source_dir: src,
+            output_dir: outDir,
+            nas_root: document.getElementById('rpt_nas_root')?.value.trim() || '',
+            report_name: reportName,
+            do_filmstrip: document.getElementById('rpt_filmstrip')?.checked ?? true,
+            do_techspec: document.getElementById('rpt_techspec')?.checked ?? true,
+            do_hash: document.getElementById('rpt_hash')?.checked ?? false,
+        },
+    };
+}
+
+window.collectReportPayload = collectReportPayload;
 window.submitReportJob = submitReportJob;
 window.loadReportHistory = loadReportHistory;
 window.deleteReport = deleteReport;

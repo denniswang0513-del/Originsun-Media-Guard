@@ -230,7 +230,40 @@ async def _run_backup(job, engine, task: BackupRequest, _on_progress, _on_confli
     )
 
     # Chained transcode (isolated — failure won't block concat/report)
-    if getattr(task, "do_transcode", False):
+    compute_hosts = getattr(task, "compute_hosts", []) or []
+    has_remote_hosts = any(h.get("ip") != "local" for h in compute_hosts) if compute_hosts else False
+
+    if getattr(task, "do_transcode", False) and has_remote_hosts:
+        # 分散式轉檔：派發到遠端主機
+        try:
+            from core.scheduler import dispatch_distributed_transcode  # type: ignore
+            source_dirs = [
+                os.path.join(task.local_root, task.project_name, card_name)
+                for card_name, _ in task.cards
+                if os.path.exists(os.path.join(task.local_root, task.project_name, card_name))
+            ]
+            _emit_sync_for_job(job.job_id, 'log', {
+                'type': 'system',
+                'msg': f'[transcode] 啟動分散式轉檔，派發至 {len(compute_hosts)} 台主機...'
+            })
+            n = await asyncio.to_thread(
+                dispatch_distributed_transcode,
+                source_dirs=source_dirs,
+                dest_dir=os.path.join(task.proxy_root, task.project_name),
+                compute_hosts=compute_hosts,
+                project_name=task.project_name,
+            )
+            _emit_sync_for_job(job.job_id, 'log', {
+                'type': 'system',
+                'msg': f'[transcode] 分散式轉檔已派發 {n} 台主機'
+            })
+        except Exception as ex:
+            _emit_sync_for_job(job.job_id, 'log', {
+                'type': 'error',
+                'msg': f'[transcode] 分散式轉檔派發失敗: {ex}'
+            })
+    elif getattr(task, "do_transcode", False):
+        # 本機轉檔
         try:
             for card_name, _ in task.cards:
                 if engine._stop_event.is_set():

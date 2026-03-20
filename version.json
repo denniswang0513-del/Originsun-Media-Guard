@@ -1,5 +1,5 @@
 {
-  "version": "1.8.4",
-  "build_date": "2026-03-19",
-  "notes": "feat: compact single-row task cards + history dot pagination / fix: task queue duplicate warning display"
+  "version": "1.9.0",
+  "build_date": "2026-03-20",
+  "notes": "feat: merge compute_hosts into agents (NAS shared), bookmarks, schedules, host checkboxes per tab, OTA version guard"
 }

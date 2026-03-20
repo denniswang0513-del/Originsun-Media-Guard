@@ -26,6 +26,7 @@ _DEFAULT_SETTINGS: dict = {
         "ota_dir": "",
         "web_report_dir": r"\\192.168.1.132\Container\AI_Workspace\Originsun_Web\FileReport",
         "voice_dir": "",
+        "agents_dir": r"\\192.168.1.132\Container\AI_Workspace\Originsun_Web\Agents",
     },
     "master_server": "http://192.168.1.11:8000",
     "agents": [],
@@ -68,11 +69,37 @@ def init_settings() -> None:
 
 init_settings()
 
+def _migrate_compute_hosts(data: dict) -> None:
+    """將舊 compute_hosts 轉換為 agents 格式（一次性遷移）。"""
+    import re as _re
+    old = data.get("compute_hosts")
+    if not old:
+        return
+    agents = data.setdefault("agents", [])
+    existing_urls = {a.get("url", "").rstrip("/") for a in agents}
+    for h in old:
+        ip = h.get("ip", "")
+        url = f"http://{ip}".rstrip("/")
+        if url in existing_urls:
+            continue
+        name = h.get("name", ip)
+        slug = _re.sub(r"[^a-z0-9]+", "_", name.lower()).strip("_") or "host"
+        agents.append({"id": slug, "name": name, "url": url})
+        existing_urls.add(url)
+    # 遷移完成，移除舊 key
+    data.pop("compute_hosts", None)
+
+
 def load_settings() -> dict:
     if os.path.exists(_SETTINGS_FILE):
         try:
             with open(_SETTINGS_FILE, "r", encoding="utf-8") as f:
                 data = _json.load(f)
+                # 一次性遷移 compute_hosts → agents
+                if data.get("compute_hosts"):
+                    _migrate_compute_hosts(data)
+                    with open(_SETTINGS_FILE, "w", encoding="utf-8") as fw:
+                        _json.dump(data, fw, ensure_ascii=False, indent=4)
                 merged: dict = {}
                 # Merge defaults first
                 for section, defaults in _DEFAULT_SETTINGS.items():

@@ -82,12 +82,50 @@ set "NEED_PIP=1"
 
 echo [System] Checking for updates from %MASTER_URL% ...
 
+:: ---- Version comparison: skip update if local >= remote ----
+set "SKIP_UPDATE=0"
+set "LOCAL_VER="
+set "REMOTE_VER="
+
+:: Read local version
+if exist "%INSTALL_DIR%\version.json" (
+    for /f "tokens=2 delims=:, " %%V in ('type "%INSTALL_DIR%\version.json" ^| findstr "version"') do (
+        set "LOCAL_VER=%%~V"
+    )
+)
+
+:: Fetch remote version (5 second timeout)
+for /f "delims=" %%R in ('powershell -ExecutionPolicy Bypass -Command "try { [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12; $r = Invoke-RestMethod -Uri '%MASTER_URL%/api/v1/version' -TimeoutSec 5 -UseBasicParsing; $r.version } catch { Write-Output 'error' }" 2^>nul') do (
+    set "REMOTE_VER=%%R"
+)
+
+if "%REMOTE_VER%"=="error" (
+    echo [System] Cannot reach master server. Starting with current version.
+    set "SKIP_UPDATE=1"
+)
+if "%REMOTE_VER%"=="" set "SKIP_UPDATE=1"
+
+:: Compare versions (only update if remote is strictly newer)
+if "%SKIP_UPDATE%"=="0" if not "%LOCAL_VER%"=="" if not "%REMOTE_VER%"=="" (
+    echo [System] Local: v%LOCAL_VER%  Remote: v%REMOTE_VER%
+    powershell -ExecutionPolicy Bypass -Command "$l='%LOCAL_VER%'.Split('.'); $r='%REMOTE_VER%'.Split('.'); for($i=0;$i -lt 3;$i++){$li=[int]$l[$i];$ri=[int]$r[$i]; if($ri -gt $li){exit 0}; if($ri -lt $li){exit 2}}; exit 2"
+    if %errorlevel%==2 (
+        echo [System] Local version is up-to-date. Skipping update.
+        set "SKIP_UPDATE=1"
+    )
+)
+
+if "%SKIP_UPDATE%"=="1" (
+    set "NEED_PIP=0"
+    goto :check_pip
+)
+
 :: ---- Backup requirements before update ----
 if exist "%REQ_FILE%" copy /y "%REQ_FILE%" "%REQ_BACKUP%" >nul
 
 :: ---- Step 1: Download update from master server via HTTP ----
-echo {"step":1,"pct":5,"msg":"正在從伺服器下載最新版本..."} > "%STATUS_FILE%"
-echo [System] Downloading update from %MASTER_URL%/download_update ...
+echo {"step":1,"pct":5,"msg":"正在從伺服器下載最新版本 v%REMOTE_VER%..."} > "%STATUS_FILE%"
+echo [System] Downloading update v%REMOTE_VER% from %MASTER_URL%/download_update ...
 
 :: ---- Start update monitor on port 8001 ----
 if exist "%INSTALL_DIR%\update_monitor.py" (

@@ -1,4 +1,4 @@
-import { getComputeBaseUrl, appendLog, resetProgress, resolveDropPath, pickPath, setupInputDrop, setupDragAndDrop } from '../../js/shared/utils.js';
+import { getComputeBaseUrl, appendLog, resetProgress, resolveDropPath, pickPath, setupInputDrop, setupDragAndDrop, renderHostCheckboxes, collectSelectedHosts } from '../../js/shared/utils.js';
 
 let sourceIndex = 0;
 
@@ -37,32 +37,56 @@ export function setTodayName() {
 }
 
 function getSelectedHosts() {
-    // This function originally lived in app.js and relied on window._computeHosts.
-    // For now, we will query the DOM to find selected hosts if we are in Backup tab.
-    const result = [];
-    const localChk = document.getElementById('host_chk_local');
-    if (localChk && localChk.checked) result.push({ name: '本機', ip: 'local' });
-    
-    // In a real refactor, window._computeHosts should be managed by a central store,
-    // but we can query checkboxes directly if they are rendered.
-    const cbxDiv = document.getElementById('host_selector_checkboxes');
-    if (cbxDiv) {
-        const checkboxes = cbxDiv.querySelectorAll('input[type="checkbox"]');
-        checkboxes.forEach((chk, i) => {
-            if (chk.id !== 'host_chk_local' && chk.checked) {
-                // Temporary hack based on the text content. We will need a better way to store host IPs.
-                // Assuming we stored ip in dataset when rendering. (Requires updating renderHostSelector)
-                const ip = chk.dataset.ip;
-                const name = chk.dataset.name;
-                if(ip && name) result.push({name, ip});
-            }
-        });
-    }
-
+    const result = collectSelectedHosts('host_selector_checkboxes');
     if (!result.length) result.push({ name: '本機', ip: 'local' });
     return result;
 }
 
+
+export function collectBackupPayload() {
+    const srcRows = document.getElementById('source_list').children;
+    const cards = [];
+    for (let row of srcRows) {
+        const inputs = row.querySelectorAll('input');
+        if (inputs[0].value.trim() && inputs[1].value.trim()) {
+            cards.push([inputs[0].value.trim(), inputs[1].value.trim()]);
+        }
+    }
+    if (cards.length === 0) {
+        alert('至少需要一個有效的來源路徑！');
+        return { valid: false };
+    }
+
+    const chkReport = document.getElementById('chk_report');
+    const doReport = chkReport ? chkReport.checked : false;
+    const projectName = document.getElementById('proj_name').value.trim();
+
+    const payload = {
+        project_name: projectName,
+        local_root: document.getElementById('local_root').value.trim(),
+        nas_root: document.getElementById('nas_root').value.trim(),
+        proxy_root: document.getElementById('proxy_root').value.trim(),
+        cards: cards,
+        do_hash: document.getElementById('chk_hash').checked,
+        do_transcode: document.getElementById('chk_transcode').checked,
+        do_concat: document.getElementById('chk_concat').checked,
+        do_report: doReport,
+        // Concat settings
+        concat_resolution: document.getElementById('bk_cc_res')?.value || '720P',
+        concat_codec: document.getElementById('bk_cc_codec')?.value || 'H.264 (NVENC)',
+        concat_burn_tc: document.getElementById('bk_cc_burn_tc')?.checked ?? true,
+        concat_burn_fn: document.getElementById('bk_cc_burn_fn')?.checked ?? false,
+        // Report settings
+        report_name: document.getElementById('bk_rpt_name')?.value.trim() || '',
+        report_output: document.getElementById('bk_rpt_output')?.value.trim() || '',
+        report_filmstrip: document.getElementById('bk_rpt_filmstrip')?.checked ?? true,
+        report_techspec: document.getElementById('bk_rpt_techspec')?.checked ?? true,
+        report_hash: document.getElementById('bk_rpt_hash')?.checked ?? false,
+    };
+
+    return { valid: true, payload, name: projectName };
+}
+window.collectBackupPayload = collectBackupPayload;
 
 let _submitting = false;
 
@@ -84,50 +108,17 @@ export async function submitJob() {
     window._isStandaloneTranscode = false;
     window._remoteDispatchExpectedRetryCount = 0;
 
-    const srcRows = document.getElementById('source_list').children;
-    const cards = [];
-    for (let row of srcRows) {
-        const inputs = row.querySelectorAll('input');
-        if (inputs[0].value.trim() && inputs[1].value.trim()) {
-            cards.push([inputs[0].value.trim(), inputs[1].value.trim()]);
-        }
-    }
-    if (cards.length === 0) {
-        alert('至少需要一個有效的來源路徑！');
-        return;
-    }
+    const collected = collectBackupPayload();
+    if (!collected.valid) return;
+    const payload = collected.payload;
 
-    const chkReport = document.getElementById('chk_report');
-    const doReport = chkReport ? chkReport.checked : false;
+    const doReport = payload.do_report;
 
     // Show / hide report progress segment based on selection
     const segReport = document.getElementById('seg_report');
     const legendReport = document.getElementById('legend_report');
     if (segReport) segReport.classList.toggle('hidden', !doReport);
     if (legendReport) legendReport.classList.toggle('hidden', !doReport);
-
-    const payload = {
-        project_name: document.getElementById('proj_name').value.trim(),
-        local_root: document.getElementById('local_root').value.trim(),
-        nas_root: document.getElementById('nas_root').value.trim(),
-        proxy_root: document.getElementById('proxy_root').value.trim(),
-        cards: cards,
-        do_hash: document.getElementById('chk_hash').checked,
-        do_transcode: document.getElementById('chk_transcode').checked,
-        do_concat: document.getElementById('chk_concat').checked,
-        do_report: doReport,
-        // Concat settings
-        concat_resolution: document.getElementById('bk_cc_res')?.value || '720P',
-        concat_codec: document.getElementById('bk_cc_codec')?.value || 'H.264 (NVENC)',
-        concat_burn_tc: document.getElementById('bk_cc_burn_tc')?.checked ?? true,
-        concat_burn_fn: document.getElementById('bk_cc_burn_fn')?.checked ?? false,
-        // Report settings
-        report_name: document.getElementById('bk_rpt_name')?.value.trim() || '',
-        report_output: document.getElementById('bk_rpt_output')?.value.trim() || '',
-        report_filmstrip: document.getElementById('bk_rpt_filmstrip')?.checked ?? true,
-        report_techspec: document.getElementById('bk_rpt_techspec')?.checked ?? true,
-        report_hash: document.getElementById('bk_rpt_hash')?.checked ?? false,
-    };
 
     const _selH = getSelectedHosts();
     const _hasRemote = _selH.some(h => h.ip !== 'local');
