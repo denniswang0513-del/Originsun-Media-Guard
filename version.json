@@ -1,5 +1,5 @@
 {
-  "version": "1.9.1",
+  "version": "1.9.2",
   "build_date": "2026-03-20",
-  "notes": "fix: add croniter to requirements, graceful import fallback for scheduler"
+  "notes": "fix: OTA update overlay stuck, machine status green dot, update_monitor port conflict"
 }

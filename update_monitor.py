@@ -32,10 +32,29 @@ class StatusHandler(BaseHTTPRequestHandler):
         pass  # suppress access logs
 
 
+def _kill_old_monitor():
+    """殺掉佔用 port 8001 的舊 monitor 進程。"""
+    import subprocess
+    try:
+        result = subprocess.run(
+            ['netstat', '-ano'], capture_output=True, text=True, timeout=5
+        )
+        for line in result.stdout.splitlines():
+            if ':8001' in line and 'LISTENING' in line:
+                parts = line.split()
+                pid = parts[-1]
+                if pid.isdigit() and int(pid) != os.getpid():
+                    subprocess.run(['taskkill', '/F', '/PID', pid],
+                                   capture_output=True, timeout=5)
+    except Exception:
+        pass
+
+
 if __name__ == '__main__':
+    _kill_old_monitor()
     try:
         httpd = HTTPServer(('0.0.0.0', 8001), StatusHandler)
         threading.Timer(1800, httpd.shutdown).start()  # 30 分鐘後自動關閉
         httpd.serve_forever()
     except OSError:
-        pass  # port 已被佔用 → 靜默退出
+        pass  # port 仍被佔用 → 靜默退出（前端 fallback 會處理）

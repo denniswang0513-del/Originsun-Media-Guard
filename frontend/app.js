@@ -500,6 +500,8 @@ if (typeof appendLog === 'undefined') {
         let isUpdating = false;
         let hasServerDiedDuringUpdate = false;
         let _updatePollTimer = null;
+        let _updateStartTime = 0;    // timestamp when update started
+        let _updateLastProgress = 0; // timestamp of last progress update
 
         async function pollLocalAgent() {
             try {
@@ -686,18 +688,51 @@ if (typeof appendLog === 'undefined') {
 
         function startUpdateProgressPolling() {
             if (_updatePollTimer) return;
+            _updateStartTime = Date.now();
+            _updateLastProgress = Date.now();
             _updatePollTimer = setInterval(async () => {
                 if (!isUpdating) {
                     clearInterval(_updatePollTimer);
                     _updatePollTimer = null;
                     return;
                 }
+
+                // 1) 嘗試從 update_monitor (port 8001) 取得進度
                 try {
                     const r = await fetch('http://localhost:8001/status',
                         { signal: AbortSignal.timeout(2000) });
-                    if (r.ok) updateUpdateModal(await r.json());
-                } catch (e) { /* monitor 尚未就緒，忽略 */ }
-            }, 1000);
+                    if (r.ok) {
+                        _updateLastProgress = Date.now();
+                        updateUpdateModal(await r.json());
+                    }
+                } catch (e) { /* monitor 尚未就緒或 port 衝突 */ }
+
+                // 2) Fallback：若超過 30 秒沒收到進度，直接偵測主服務是否已恢復
+                const elapsed = Date.now() - _updateStartTime;
+                const stale = Date.now() - _updateLastProgress;
+                if (stale > 30000 && elapsed > 15000) {
+                    try {
+                        const health = await fetch('http://localhost:8000/api/v1/health',
+                            { signal: AbortSignal.timeout(2000) });
+                        if (health.ok) {
+                            // 伺服器已恢復！自動完成更新
+                            isUpdating = false;
+                            clearInterval(_updatePollTimer);
+                            _updatePollTimer = null;
+                            window.location.reload();
+                            return;
+                        }
+                    } catch (e) { /* 伺服器尚未恢復 */ }
+                }
+
+                // 3) 最大超時 5 分鐘：強制 reload
+                if (elapsed > 300000) {
+                    isUpdating = false;
+                    clearInterval(_updatePollTimer);
+                    _updatePollTimer = null;
+                    window.location.reload();
+                }
+            }, 2000);
         }
 
         // 記住本機版本，供 updateAgent 判斷是否需要首次遷移

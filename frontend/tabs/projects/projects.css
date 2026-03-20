@@ -713,15 +713,16 @@
 }
 
 .pj-machine-dot {
-    width: 8px;
-    height: 8px;
+    width: 10px;
+    height: 10px;
     border-radius: 50%;
     flex-shrink: 0;
+    background: #666;
 }
 
-.pj-machine-dot.pj-dot-online { background: #22c55e; }
-.pj-machine-dot.pj-dot-offline { background: #ef4444; }
-.pj-machine-dot.pj-dot-slow { background: #d48a04; }
+.pj-machine-dot.pj-dot-online { background: #22c55e; box-shadow: 0 0 6px #22c55e; }
+.pj-machine-dot.pj-dot-offline { background: #ef4444; box-shadow: 0 0 6px #ef4444; }
+.pj-machine-dot.pj-dot-slow { background: #d48a04; box-shadow: 0 0 6px #d48a04; }
 .pj-machine-dot.pj-dot-unknown { background: #666; }
 
 .pj-machine-name {
