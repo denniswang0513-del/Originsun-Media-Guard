@@ -292,7 +292,8 @@ async def _run_backup(job, engine, task: BackupRequest, _on_progress, _on_confli
     elif getattr(task, "do_transcode", False):
         # 本機轉檔
         try:
-            for card_name, _ in task.cards:
+            _tc_card_total = len(task.cards)
+            for _tc_card_idx, (card_name, _) in enumerate(task.cards):
                 if engine._stop_event.is_set():
                     break
                 src_dir = os.path.join(task.local_root, task.project_name, card_name)
@@ -300,7 +301,8 @@ async def _run_backup(job, engine, task: BackupRequest, _on_progress, _on_confli
                 if os.path.exists(src_dir):
                     await asyncio.to_thread(
                         engine.run_transcode_job,
-                        sources=[src_dir], dest_dir=dest_dir, on_progress=_on_progress
+                        sources=[src_dir], dest_dir=dest_dir,
+                        on_progress=_make_card_progress(_tc_card_idx, _tc_card_total, _on_progress)
                     )
                 else:
                     _emit_sync_for_job(job.job_id, 'log', {
@@ -320,7 +322,8 @@ async def _run_backup(job, engine, task: BackupRequest, _on_progress, _on_confli
             cc_codec = getattr(task, 'concat_codec', 'H.264 (NVENC)')
             cc_burn_tc = getattr(task, 'concat_burn_tc', True)
             cc_burn_fn = getattr(task, 'concat_burn_fn', False)
-            for card_name, _ in task.cards:
+            _cc_total = len(task.cards)
+            for _cc_idx, (card_name, _) in enumerate(task.cards):
                 if engine._stop_event.is_set():
                     break
                 src_dir = os.path.join(
@@ -335,7 +338,7 @@ async def _run_backup(job, engine, task: BackupRequest, _on_progress, _on_confli
                         custom_name=f"{task.project_name}_{card_name}_reel",
                         resolution=cc_resolution, codec=cc_codec,
                         burn_timecode=cc_burn_tc, burn_filename=cc_burn_fn,
-                        on_progress=_on_progress
+                        on_progress=_make_card_progress(_cc_idx, _cc_total, _on_progress, track_files=True)
                     )
                 else:
                     _emit_sync_for_job(job.job_id, 'log', {
@@ -530,6 +533,20 @@ async def _run_report(job, task: ReportJobRequest):
     job.report_pause_event = asyncio.Event()
     job.report_pause_event.set()  # start unpaused
     await _run_report_job(task, job.job_id)
+
+
+# ── Progress Scaling ─────────────────────────────────────────
+
+def _make_card_progress(idx, total, on_progress, *, track_files=False):
+    """Factory: scale per-card progress (0-100%) into cross-card aggregate."""
+    def _cb(data):
+        pct = data.get('total_pct', 0)
+        scaled = {**data, 'total_pct': (idx / total + pct / 100 / total) * 100}
+        if track_files:
+            scaled['done_files'] = idx + (1 if pct >= 100 else 0)
+            scaled['total_files'] = total
+        on_progress(scaled)
+    return _cb
 
 
 # ── Helper Functions ─────────────────────────────────────────

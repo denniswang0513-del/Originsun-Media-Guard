@@ -18,6 +18,13 @@ def _write_log_to_file(log_file_path: str, msg: str):
         print(f"Failed to write log to file: {e}")
 
 
+def _emit_sync(event: str, data: dict) -> None:
+    """Thread-safe emit without job_id (broadcast to all clients)."""
+    loop = state.get_main_loop()
+    if loop:
+        asyncio.run_coroutine_threadsafe(sio.emit(event, data), loop)
+
+
 def _emit_sync_for_job(job_id: str, event: str, data: dict) -> None:
     """Thread-safe emit that tags events with job_id and updates per-job + global buffers."""
     # Inject job_id into emitted data

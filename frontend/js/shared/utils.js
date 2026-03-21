@@ -105,15 +105,32 @@ export async function pickPath(inputId, type = 'folder') {
 
 export function resetProgress() {
     // ── Backup TAB (four-segment) ──
+    // 根據勾選狀態決定哪些段要顯示
+    const _chkTrans = document.getElementById('chk_transcode')?.checked ?? false;
+    const _chkConcat = document.getElementById('chk_concat')?.checked ?? false;
+    const _chkReport = !!window._backupReportPending;
+
     ['bk-seg-backup', 'bk-seg-trans', 'bk-seg-concat', 'bk-seg-report'].forEach(id => {
         const el = document.getElementById(id);
-        if (el) { el.style.width = '0%'; if (id === 'bk-seg-report') el.classList.add('hidden'); }
+        if (!el) return;
+        el.style.width = '0%';
+        // 根據勾選狀態顯示/隱藏
+        if (id === 'bk-seg-trans') el.classList.toggle('hidden', !_chkTrans);
+        else if (id === 'bk-seg-concat') el.classList.toggle('hidden', !_chkConcat);
+        else if (id === 'bk-seg-report') el.classList.toggle('hidden', !_chkReport);
     });
     ['bk-lbl-backup', 'bk-lbl-trans', 'bk-lbl-concat', 'bk-lbl-report'].forEach(id => {
         const el = document.getElementById(id);
         if (el) el.textContent = '0%';
     });
-    document.getElementById('bk-legend-report')?.classList.add('hidden');
+    // 圖例也根據勾選狀態
+    const legendContainer = document.querySelector('#bk-progress .flex.gap-4');
+    if (legendContainer) {
+        const legends = legendContainer.children;
+        if (legends[1]) legends[1].classList.toggle('hidden', !_chkTrans);
+        if (legends[2]) legends[2].classList.toggle('hidden', !_chkConcat);
+    }
+    document.getElementById('bk-legend-report')?.classList.toggle('hidden', !_chkReport);
     const bkLabel = document.getElementById('bk-prog-label');
     if (bkLabel) bkLabel.textContent = '進度：尚未開始';
     const bkEta = document.getElementById('bk-prog-eta');
@@ -153,9 +170,12 @@ export function resetProgress() {
     // ── Remote host progress ──
     ['bk', 'tc', 'ct'].forEach(p => document.getElementById(p + '-remote-hosts-progress')?.classList.add('hidden'));
     if (window._heartbeatTimer) clearInterval(window._heartbeatTimer);
+    window._remoteDispatching = false;
 
-    // Reset active job tab
-    window._activeJobTab = null;
+    // 不清除 _activeJobTab — 備份流程中子任務的 running 事件需要保留
+    window._backupFinalShown = false;
+    window._backupPipeline = null;
+    window._backupReportPending = false;
 }
 
 // ── 共用主機選擇模組 ──
@@ -216,8 +236,51 @@ export function collectSelectedHosts(containerId) {
     return result;
 }
 
+// 單選版本（radio）— 用於只在一台主機執行的 TAB
+export function renderHostRadios(containerId, opts = {}) {
+    const container = document.getElementById(containerId);
+    if (!container) return;
+    const hosts = window._computeHosts || [];
+    if (!hosts.length) {
+        container.closest('.pj-sch-sub-panel, [id$="_host_panel"], [id$="host_selector_panel"]')
+            ?.style.setProperty('display', 'none');
+        return;
+    }
+    if (container.dataset.built) return;
+
+    const prefix = opts.idPrefix || containerId;
+    const groupName = prefix + '_radio';
+    const includeLocal = opts.includeLocal !== false;
+    const localChecked = opts.localChecked !== false;
+    container.innerHTML = '';
+
+    if (includeLocal) {
+        const lbl = document.createElement('label');
+        lbl.className = 'flex items-center gap-1 text-xs text-gray-300 cursor-pointer';
+        lbl.innerHTML = `<input type="radio" name="${groupName}" id="${prefix}_local" data-ip="local" data-name="本機" ${localChecked ? 'checked' : ''} class="form-radio bg-[#1e1e1e] border-[#444]"> 本機`;
+        container.appendChild(lbl);
+    }
+    hosts.forEach((h, i) => {
+        const lbl = document.createElement('label');
+        lbl.className = 'flex items-center gap-1 text-xs text-gray-300 cursor-pointer';
+        lbl.innerHTML = `<input type="radio" name="${groupName}" id="${prefix}_${i}" data-ip="${h.ip}" data-name="${h.name}" ${!localChecked && i === 0 ? 'checked' : ''} class="form-radio bg-[#1e1e1e] border-[#444]"> ${h.name} <span class="text-gray-500">(${h.ip})</span>`;
+        container.appendChild(lbl);
+    });
+    container.dataset.built = '1';
+}
+
+export function collectSelectedHost(containerId) {
+    const container = document.getElementById(containerId);
+    if (!container) return { name: '本機', ip: 'local' };
+    const checked = container.querySelector('input[type="radio"]:checked');
+    if (checked) return { name: checked.dataset.name, ip: checked.dataset.ip };
+    return { name: '本機', ip: 'local' };
+}
+
 window.renderHostCheckboxes = renderHostCheckboxes;
 window.collectSelectedHosts = collectSelectedHosts;
+window.renderHostRadios = renderHostRadios;
+window.collectSelectedHost = collectSelectedHost;
 
 // Make accessible to global scope if needed during transition
 window.resolveDropPath = resolveDropPath;

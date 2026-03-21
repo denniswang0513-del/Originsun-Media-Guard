@@ -102,11 +102,17 @@ def tts_missing_reason() -> str:
 
 
 # ─── Edge TTS ────────────────────────────────────────────────────────────────
-async def run_edge_tts(text: str, voice: str, rate: int, pitch: int, output_path: str) -> str:
+async def run_edge_tts(
+    text: str, voice: str, rate: int, pitch: int, output_path: str,
+    progress_cb=None,
+) -> str:
     """Generate speech using Microsoft Edge TTS via CLI."""
     import tempfile
     import subprocess
     import sys
+
+    if progress_cb:
+        progress_cb({"phase": "preparing", "pct": 10, "msg": "準備合成文字..."})
 
     # Write text to a temporary UTF-8 file (handles special characters gracefully)
     with tempfile.NamedTemporaryFile("w", encoding="utf-8", delete=False) as tf:
@@ -126,6 +132,9 @@ async def run_edge_tts(text: str, voice: str, rate: int, pitch: int, output_path
         cmd.extend(["--rate", rate_str])
     if pitch != 0:
         cmd.extend(["--pitch", pitch_str])
+
+    if progress_cb:
+        progress_cb({"phase": "synthesizing", "pct": 50, "msg": "Edge-TTS 合成中..."})
 
     loop = asyncio.get_event_loop()
     def _run_subprocess():

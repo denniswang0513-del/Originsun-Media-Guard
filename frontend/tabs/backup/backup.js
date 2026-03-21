@@ -115,11 +115,38 @@ export async function submitJob() {
 
     const doReport = payload.do_report;
 
-    // Show / hide report progress segment based on selection
+    // 根據勾選項目顯示/隱藏對應的進度段和圖例
+    const doTranscode = payload.do_transcode;
+    const doConcat = payload.do_concat;
+    const segTrans = document.getElementById('bk-seg-trans');
+    const segConcat = document.getElementById('bk-seg-concat');
     const segReport = document.getElementById('bk-seg-report');
+    const legendTrans = segTrans?.closest('.flex')?.querySelectorAll('span')?.[0]?.parentElement;
+    const legendConcat = segConcat?.closest('.flex')?.querySelectorAll('span')?.[0]?.parentElement;
     const legendReport = document.getElementById('bk-legend-report');
+    // 用更直接的方式找圖例
+    const legendContainer = document.querySelector('#bk-progress .flex.gap-4');
+    if (legendContainer) {
+        const legends = legendContainer.children;
+        // [0]=備份, [1]=轉檔, [2]=串帶, [3]=報表
+        if (legends[1]) legends[1].classList.toggle('hidden', !doTranscode);
+        if (legends[2]) legends[2].classList.toggle('hidden', !doConcat);
+    }
+    if (segTrans) segTrans.classList.toggle('hidden', !doTranscode);
+    if (segConcat) segConcat.classList.toggle('hidden', !doConcat);
     if (segReport) segReport.classList.toggle('hidden', !doReport);
     if (legendReport) legendReport.classList.toggle('hidden', !doReport);
+    // 標記報表待完成（防止 task_status:done 過早顯示完成摘要）
+    window._backupReportPending = doReport;
+    // 記錄勾選項目 + 待完成集合（不分順序，全部完成才顯示摘要）
+    const pending = new Set();
+    if (doConcat) pending.add('concat');
+    if (doReport) pending.add('report');
+    window._backupPipeline = {
+        phases: ['備份', ...(doTranscode ? ['轉檔'] : []), ...(doConcat ? ['串帶'] : []), ...(doReport ? ['報表'] : [])],
+        pending,  // 尚未完成的非同步階段
+        startTime: Date.now(),
+    };
 
     const _selH = getSelectedHosts();
     const _hasRemote = _selH.some(h => h.ip !== 'local');

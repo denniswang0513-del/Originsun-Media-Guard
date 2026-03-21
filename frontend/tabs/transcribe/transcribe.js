@@ -148,6 +148,7 @@ export function collectTranscribePayload() {
 window.collectTranscribePayload = collectTranscribePayload;
 
 export async function submitTranscribeJob() {
+    window._activeJobTab = 'transcribe';
     const collected = collectTranscribePayload();
     if (!collected.valid) return;
     const payload = collected.payload;
@@ -167,17 +168,34 @@ export async function submitTranscribeJob() {
     btn.disabled = true;
     btn.classList.add('opacity-70', 'cursor-not-allowed');
 
+    // 讀取處理主機
+    const trHostObj = window.collectSelectedHost ? window.collectSelectedHost('tr_host_checkboxes') : { name: '本機', ip: 'local' };
+    const isLocal = trHostObj.ip === 'local';
+    const trHostUrl = isLocal ? getAgentBaseUrl() : 'http://' + trHostObj.ip;
+
+    if (!isLocal && window.initRemoteHostProgress) {
+        window._remoteJobType = 'transcribe';
+        window._activeRemoteHosts = {};
+        if (window.showRemoteMainProgress) window.showRemoteMainProgress('遠端轉錄中...');
+        window.initRemoteHostProgress([trHostObj]);
+    }
+
     try {
-        const res = await fetch(getAgentBaseUrl() + '/api/v1/jobs/transcribe', {
+        const res = await fetch(trHostUrl + '/api/v1/jobs/transcribe', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(payload)
         });
-        
+
         const result = await res.json();
         if (res.ok) {
-            appendLog('✅ 已成功將逐字稿任務送入佇列。', 'system');
+            appendLog(`✅ 已成功將逐字稿任務送至 [${trHostObj.name}] 佇列。`, 'system');
             if (result.warning) appendLog(`⚠️ ${result.warning}`, 'system');
+            if (!isLocal) {
+                if (window.updateHostProgress) window.updateHostProgress(trHostObj.ip, 20, '已排程，轉錄中...', '#059669');
+                window._activeRemoteHosts[trHostObj.ip] = { host: trHostObj, lastSeen: Date.now(), startTime: Date.now(), logOffset: 0 };
+                if (window.startHeartbeatMonitor) window.startHeartbeatMonitor();
+            }
             // Show progress area
             const progArea = document.getElementById('transcribe_progress_area');
             if (progArea) progArea.classList.remove('hidden');

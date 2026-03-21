@@ -252,9 +252,89 @@ window.collectTtsPayload = function() {
 };
 
 window.submitTtsJob = async function() {
+    window._activeJobTab = 'tts';
     const collected = window.collectTtsPayload();
     if (!collected.valid) return;
-    await _runWithProgress('tts', getAgentBaseUrl() + '/api/v1/tts_jobs', collected.payload, 'btn_start_tts');
+
+    const btn = document.getElementById('btn_start_tts');
+    const progArea = document.getElementById('tts_progress_area');
+    const progLabel = document.getElementById('tts_prog_label');
+    const progBar = document.getElementById('tts_prog_bar');
+    const progPct = document.getElementById('tts_prog_pct');
+
+    // Reset & show
+    if (progArea) progArea.classList.remove('hidden');
+    if (progBar) { progBar.style.width = '2%'; progBar.style.background = 'linear-gradient(90deg, #3b82f6, #60a5fa)'; }
+    if (progPct) progPct.textContent = '2%';
+    if (progLabel) progLabel.textContent = '準備中...';
+    if (btn) { btn.disabled = true; btn.classList.add('opacity-50', 'cursor-not-allowed'); }
+
+    const PHASE_LABELS = {
+        preparing: '🔧 準備合成文字...',
+        synthesizing: '🔊 Edge-TTS 合成中...',
+        done: '✅ TTS 完成',
+        error: '❌ 生成失敗',
+    };
+
+    // 讀取處理主機
+    const ttsHostObj = window.collectSelectedHost ? window.collectSelectedHost('tts_host_checkboxes') : { name: '本機', ip: 'local' };
+    const isLocal = ttsHostObj.ip === 'local';
+    const ttsHostUrl = isLocal ? getAgentBaseUrl() : 'http://' + ttsHostObj.ip;
+
+    // 遠端主機：比照 verify/concat/transcribe，用 initRemoteHostProgress + heartbeat
+    if (!isLocal && window.initRemoteHostProgress) {
+        window._remoteJobType = 'tts';
+        window._activeRemoteHosts = {};
+        if (window.showRemoteMainProgress) window.showRemoteMainProgress('遠端 TTS 合成中...');
+        window.initRemoteHostProgress([ttsHostObj]);
+    }
+
+    const socket = window._ttsSocket || window.socket;
+    function _onEdgeProgress(data) {
+        const pct = data.pct || 0;
+        if (progBar) progBar.style.width = pct + '%';
+        if (progPct) progPct.textContent = pct + '%';
+        if (progLabel) progLabel.textContent = PHASE_LABELS[data.phase] || data.msg || '';
+
+        if (data.phase === 'done') {
+            if (progBar) progBar.style.background = 'linear-gradient(90deg, #22c55e, #4ade80)';
+            const outName = data.output ? data.output.split(/[\\/]/).pop() : '';
+            const elapsed = data.elapsed_sec ? ` / 耗時 ${Math.round(data.elapsed_sec)}s` : '';
+            if (progLabel) progLabel.innerHTML = `✅ TTS 完成 — <span class="text-green-400 font-mono">${outName}</span>${elapsed}`;
+            socket.off('tts_edge_progress', _onEdgeProgress);
+            if (btn) { btn.disabled = false; btn.classList.remove('opacity-50', 'cursor-not-allowed'); }
+        } else if (data.phase === 'error') {
+            if (progBar) progBar.style.background = 'linear-gradient(90deg, #ef4444, #f87171)';
+            if (progLabel) progLabel.textContent = `❌ 失敗：${data.msg}`;
+            socket.off('tts_edge_progress', _onEdgeProgress);
+            if (btn) { btn.disabled = false; btn.classList.remove('opacity-50', 'cursor-not-allowed'); }
+        }
+    }
+    socket.on('tts_edge_progress', _onEdgeProgress);
+
+    try {
+        if (progLabel) progLabel.textContent = isLocal ? '準備中...' : `送出至 [${ttsHostObj.name}] 處理中...`;
+        const res = await fetch(ttsHostUrl + '/api/v1/tts_jobs', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(collected.payload),
+        });
+        if (!res.ok) {
+            const data = await res.json();
+            throw new Error(data.detail || '後端錯誤');
+        }
+        // 遠端：啟動 heartbeat 監控（比照 verify/concat/transcribe）
+        if (!isLocal) {
+            if (window.updateHostProgress) window.updateHostProgress(ttsHostObj.ip, 20, '已送出，合成中...', '#6366f1');
+            window._activeRemoteHosts[ttsHostObj.ip] = { host: ttsHostObj, lastSeen: Date.now(), startTime: Date.now(), logOffset: 0 };
+            if (window.startHeartbeatMonitor) window.startHeartbeatMonitor();
+        }
+    } catch (e) {
+        socket.off('tts_edge_progress', _onEdgeProgress);
+        if (progBar) { progBar.style.width = '100%'; progBar.style.background = 'linear-gradient(90deg, #ef4444, #f87171)'; }
+        if (progPct) progPct.textContent = 'Err';
+        if (progLabel) progLabel.textContent = `❌ 失敗：${e.message}`;
+        if (btn) { btn.disabled = false; btn.classList.remove('opacity-50', 'cursor-not-allowed'); }
+    }
 };
 
 // ═══════════════════════════════════════════════════════════
@@ -494,6 +574,7 @@ window.collectClonePayload = function() {
 };
 
 window.submitCloneJob = async function() {
+    window._activeJobTab = 'tts';
     const collected = window.collectClonePayload();
     if (!collected.valid) return;
 
@@ -515,8 +596,13 @@ window.submitCloneJob = async function() {
     if (progPct) progPct.textContent = '2%';
     if (btn) { btn.disabled = true; btn.classList.add('opacity-50', 'cursor-not-allowed'); }
 
+    // 讀取處理主機（聲音複製）
+    const cloneHostObj = window.collectSelectedHost ? window.collectSelectedHost('tts_clone_host_checkboxes') : { name: '本機', ip: 'local' };
+    const cloneIsLocal = cloneHostObj.ip === 'local';
+    const cloneHostUrl = cloneIsLocal ? getAgentBaseUrl() : 'http://' + cloneHostObj.ip;
+
     // Listen for Socket.IO progress events from backend
-    const socket = window._socket || io();
+    const socket = window.socket;
     const _phaseLabels = {
         preparing: '🔧 正在準備參考音訊...',
         transcribing: '🎤 正在轉錄參考音訊...',
@@ -541,10 +627,11 @@ window.submitCloneJob = async function() {
 
         if (data.phase === 'done') {
             socket.off('tts_clone_progress', _onCloneProgress);
-            if (progBar) { progBar.style.width = '100%'; progBar.style.background = 'linear-gradient(90deg, #059669, #10b981)'; progBar.classList.remove('animate-pulse'); }
+            if (progBar) { progBar.style.width = '100%'; progBar.style.background = 'linear-gradient(90deg, #22c55e, #4ade80)'; progBar.classList.remove('animate-pulse'); }
             if (progPct) progPct.textContent = '100%';
             const outName = data.output ? data.output.split(/[\\/]/).pop() : '';
-            if (progLabel) progLabel.innerHTML = `✅ 完成！儲存至: <span class="text-green-400 font-mono">${outName}</span>`;
+            const elapsed = data.elapsed_sec ? ` / 耗時 ${Math.round(data.elapsed_sec)}s` : '';
+            if (progLabel) progLabel.innerHTML = `✅ 聲音複製完成 — <span class="text-green-400 font-mono">${outName}</span>${elapsed}`;
             if (btn) { btn.disabled = false; btn.classList.remove('opacity-50', 'cursor-not-allowed'); }
         } else if (data.phase === 'error') {
             socket.off('tts_clone_progress', _onCloneProgress);
@@ -555,12 +642,22 @@ window.submitCloneJob = async function() {
         }
     }
 
-    socket.on('tts_clone_progress', _onCloneProgress);
+    // 遠端主機：比照其他 TAB
+    if (!cloneIsLocal && window.initRemoteHostProgress) {
+        window._remoteJobType = 'tts_clone';
+        window._activeRemoteHosts = {};
+        if (window.showRemoteMainProgress) window.showRemoteMainProgress('遠端聲音複製中...');
+        window.initRemoteHostProgress([cloneHostObj]);
+    }
 
-    // POST (returns immediately with "queued" status)
+    if (cloneIsLocal) {
+        socket.on('tts_clone_progress', _onCloneProgress);
+    }
+
     try {
+        if (progLabel) progLabel.textContent = cloneIsLocal ? '準備中...' : `送出至 [${cloneHostObj.name}] 處理中...`;
         const payload = collected.payload;
-        const res = await fetch(getAgentBaseUrl() + '/api/v1/tts_jobs/clone', {
+        const res = await fetch(cloneHostUrl + '/api/v1/tts_jobs/clone', {
             method: 'POST', headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(payload)
         });
@@ -571,6 +668,11 @@ window.submitCloneJob = async function() {
             if (progPct) progPct.textContent = 'Err';
             if (progLabel) progLabel.textContent = `❌ 失敗：${errData.detail || res.statusText}`;
             if (btn) { btn.disabled = false; btn.classList.remove('opacity-50', 'cursor-not-allowed'); }
+        } else if (!cloneIsLocal) {
+            // 遠端：啟動 heartbeat
+            if (window.updateHostProgress) window.updateHostProgress(cloneHostObj.ip, 20, '已送出，F5-TTS 推理中...', '#6366f1');
+            window._activeRemoteHosts[cloneHostObj.ip] = { host: cloneHostObj, lastSeen: Date.now(), startTime: Date.now(), logOffset: 0 };
+            if (window.startHeartbeatMonitor) window.startHeartbeatMonitor();
         }
     } catch(e) {
         socket.off('tts_clone_progress', _onCloneProgress);
@@ -668,39 +770,3 @@ function _showDictStatus(msg, cls) {
     setTimeout(() => el.classList.add('hidden'), 3000);
 }
 
-// ═══════════════════════════════════════════════════════════
-// Shared Progress Helper
-// ═══════════════════════════════════════════════════════════
-
-async function _runWithProgress(prefix, endpoint, payload, btnId) {
-    const progArea = document.getElementById(prefix + '_progress_area');
-    const progLabel = document.getElementById(prefix + '_prog_label');
-    const progBar = document.getElementById(prefix + '_prog_bar');
-    const progPct = document.getElementById(prefix + '_prog_pct');
-    const btn = document.getElementById(btnId);
-
-    if (progArea) progArea.classList.remove('hidden');
-    if (progLabel) progLabel.textContent = '正在產生語音...';
-    if (progBar) { progBar.style.width = '2%'; progBar.style.background = prefix === 'tts_clone' ? 'linear-gradient(90deg, #8b5cf6, #a78bfa)' : 'linear-gradient(90deg, #3b82f6, #60a5fa)'; }
-    if (progPct) progPct.textContent = '2%';
-
-    let currentPct = 2;
-    const iv = setInterval(() => { if (currentPct < 95) { currentPct += (99 - currentPct) * 0.05; const d = Math.round(currentPct); if (progBar) progBar.style.width = d + '%'; if (progPct) progPct.textContent = d + '%'; } }, 500);
-    if (btn) { btn.disabled = true; btn.classList.add('opacity-50', 'cursor-not-allowed'); }
-
-    try {
-        const res = await fetch(endpoint, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
-        const data = await res.json();
-        clearInterval(iv);
-        if (res.ok) {
-            if (progBar) { progBar.style.width = '100%'; progBar.style.background = 'linear-gradient(90deg, #059669, #10b981)'; }
-            if (progPct) progPct.textContent = '100%';
-            if (progLabel) { const outName = data.output ? data.output.split(/[\\/]/).pop() : ''; progLabel.innerHTML = `完成！儲存至: <span class="text-green-400 font-mono">${outName}</span>`; }
-        } else { throw new Error(data.detail || '未知的後端錯誤'); }
-    } catch(e) {
-        clearInterval(iv);
-        if (progBar) { progBar.style.width = '100%'; progBar.style.background = 'linear-gradient(90deg, #ef4444, #f87171)'; }
-        if (progPct) progPct.textContent = 'Err';
-        if (progLabel) progLabel.textContent = `失敗：${e.message}`;
-    } finally { if (btn) { btn.disabled = false; btn.classList.remove('opacity-50', 'cursor-not-allowed'); } }
-}

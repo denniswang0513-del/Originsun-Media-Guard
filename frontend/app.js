@@ -255,6 +255,11 @@ if (typeof appendLog === 'undefined') {
                 const retryBtn = document.getElementById('btn_retry');
 
                 if (data.status === 'running') {
+                    // 多機模式：派發中/heartbeat 執行中，不清空進度
+                    if (window._remoteDispatching || window._heartbeatTimer ||
+                        (window._activeRemoteHosts && Object.keys(window._activeRemoteHosts).length > 0)) {
+                        return;
+                    }
                     // 新任務開始時才清除上一次的完成狀態
                     if (typeof resetProgress === 'function') resetProgress();
                 }
@@ -266,12 +271,41 @@ if (typeof appendLog === 'undefined') {
                         return;
                     }
 
+                    // 分散式轉檔：備份 done 後立即派發，不顯示完成摘要
+                    if (window._remoteDispatch) {
+                        if (typeof appendLog === 'function') appendLog('系統：備份完成，開始派發分散式轉檔...', 'system');
+                        dispatchRemoteTranscode(window._remoteDispatch);
+                        window._remoteDispatch = null;
+                        return;
+                    }
+
+                    // 多卡串帶：追蹤完成數
+                    const mc = window._concatMultiCard;
+                    if (mc && mc.total > 1 && data.summary?.task_type === 'concat') {
+                        mc.done++;
+                        if (mc.done < mc.total) {
+                            if (typeof appendLog === 'function') appendLog(`🎞️ 串帶 ${mc.done}/${mc.total} 張卡完成`, 'system');
+                            return;
+                        }
+                        if (typeof appendLog === 'function') appendLog(`✅ 串帶全部完成（${mc.total} 張卡）`, 'system');
+                        window._concatMultiCard = null;
+                    }
+
+                    // Pipeline 追蹤：標記 concat 完成
+                    const pl = window._backupPipeline;
+                    if (pl && pl.pending && data.summary?.task_type === 'concat') {
+                        pl.pending.delete('concat');
+                    }
+
+                    // 若 pipeline 還有待完成項目（concat 或 report），不顯示最終摘要
+                    if (pl && pl.pending && pl.pending.size > 0) {
+                        return;
+                    }
+
                     if (typeof appendLog === 'function') appendLog('系統：所有排定任務執行完畢！', 'system');
-                    // 顯示完成摘要（不再清空進度條）
                     showCompletionSummary(data.summary, window._activeJobTab);
                     if (retryBtn) retryBtn.style.display = 'none';
                     playDing();
-                    if (window._remoteDispatch) { dispatchRemoteTranscode(window._remoteDispatch); window._remoteDispatch = null; }
 
                 } else if (data.status === 'error') {
                     if (typeof appendLog === 'function') appendLog('系統提示：任務執行發生錯誤：' + data.detail, 'error');
@@ -339,7 +373,7 @@ if (typeof appendLog === 'undefined') {
                 }
             });
 
-            // Standalone report tab: progress updates
+            // Report progress updates (report tab + backup tab chained report)
             socket.on('report_progress', (data) => {
                 const phase = data.phase || '';
                 const pct = parseFloat(data.pct) || 0;
@@ -349,11 +383,9 @@ if (typeof appendLog === 'undefined') {
                 // __done__ = job ended
                 if (phase === '__done__') return;
 
-                // Show report progress bar
+                // Update report tab progress bar (rp-*)
                 const rpContainer = document.getElementById('rp-progress');
                 if (rpContainer) rpContainer.classList.remove('hidden');
-
-                // Update label
                 const lblEl = document.getElementById('rp-prog-label');
                 if (lblEl) lblEl.textContent = msg;
 
@@ -376,6 +408,36 @@ if (typeof appendLog === 'undefined') {
                     if (lblEl2) lblEl2.textContent = i < phaseIdx ? '100%' : i === phaseIdx ? pctStr : '0%';
                 });
 
+                // 同時更新備份 TAB 的報表進度段（bk-seg-report）
+                if (window._activeJobTab === 'backup' && !window._backupFinalShown) {
+                    // 計算整體報表進度：4 個 report phase 各佔 25%
+                    const phaseWeight = { scan: 0, meta: 1, strip: 2, render: 3 };
+                    const pw = phaseWeight[phase] ?? 0;
+                    const overallPct = (pw * 25) + (pct / 100) * 25; // 0-100
+                    // 動態段寬
+                    const _doT = document.getElementById('chk_transcode')?.checked ?? false;
+                    const _doC = document.getElementById('chk_concat')?.checked ?? false;
+                    const _sc = 1 + (_doT ? 1 : 0) + (_doC ? 1 : 0) + 1; // +1 for report itself
+                    const _sw = 100 / _sc;
+                    const bkSegReport = document.getElementById('bk-seg-report');
+                    const bkLblReport = document.getElementById('bk-lbl-report');
+                    const bkLegendReport = document.getElementById('bk-legend-report');
+                    const bkProgLabel = document.getElementById('bk-prog-label');
+                    const bkProgEta = document.getElementById('bk-prog-eta');
+                    if (bkSegReport) { bkSegReport.classList.remove('hidden'); bkSegReport.style.width = `${(overallPct / 100) * _sw}%`; }
+                    if (bkLblReport) bkLblReport.textContent = `${Math.round(overallPct)}%`;
+                    if (bkLegendReport) bkLegendReport.classList.remove('hidden');
+                    if (bkProgLabel) bkProgLabel.textContent = `📊 ${msg}`;
+                    if (bkProgEta) bkProgEta.textContent = '';
+                    // 確保前面的段顯示 100%
+                    const prevSegs = ['bk-seg-backup'];
+                    const prevLbls = ['bk-lbl-backup'];
+                    if (_doT) { prevSegs.push('bk-seg-trans'); prevLbls.push('bk-lbl-trans'); }
+                    if (_doC) { prevSegs.push('bk-seg-concat'); prevLbls.push('bk-lbl-concat'); }
+                    prevSegs.forEach(id => { const el = document.getElementById(id); if (el) el.style.width = `${_sw}%`; });
+                    prevLbls.forEach(id => { const el = document.getElementById(id); if (el) el.textContent = '100%'; });
+                }
+
                 rptLog(msg, data.type || 'info');
             });
 
@@ -383,8 +445,27 @@ if (typeof appendLog === 'undefined') {
             socket.on('report_job_done', (data) => {
                 appendLog(`✅ 報表完成：${data.report_name || ''}`, 'system');
 
-                // 顯示報表完成摘要（不清空進度條）
+                window._backupReportPending = false;
+
+                // Pipeline 追蹤：標記 report 完成
+                const pl = window._backupPipeline;
+                if (pl && pl.pending) {
+                    pl.pending.delete('report');
+                }
+
+                // 報表 TAB 完成摘要
                 showCompletionSummary({ task_type: 'report', elapsed_sec: 0 }, 'report');
+
+                // 備份 TAB：僅在所有 pipeline 階段都完成時才顯示最終摘要
+                if (window._activeJobTab === 'backup') {
+                    if (pl && pl.pending && pl.pending.size > 0) {
+                        // 還有其他階段（如 concat）未完成，等它完成
+                        return;
+                    }
+                    appendLog('系統：所有排定任務執行完畢！', 'system');
+                    showCompletionSummary({ task_type: 'backup', elapsed_sec: 0 }, 'backup');
+                    playDing();
+                }
                 const retryBtn = document.getElementById('btn_retry');
                 if (retryBtn) retryBtn.style.display = 'none';
                 
@@ -911,8 +992,12 @@ if (typeof appendLog === 'undefined') {
 
 
         // 將主機列表同步到各獨立 TAB 的主機選擇 UI
-        const _HOST_PANELS = [
-            { checkboxes: 'tc_host_checkboxes',         panel: 'tc_host_panel',         prefix: 'tc_host_chk' },
+        // 多選（checkbox）：轉 Proxy TAB（支援分散式多機轉檔）
+        const _MULTI_HOST_PANELS = [
+            { checkboxes: 'tc_host_checkboxes', panel: 'tc_host_panel', prefix: 'tc_host_chk' },
+        ];
+        // 單選（radio）：其餘 TAB（只在一台主機執行）
+        const _SINGLE_HOST_PANELS = [
             { checkboxes: 'cc_host_checkboxes',         panel: 'cc_host_panel',         prefix: 'cc_host_chk' },
             { checkboxes: 'vf_host_checkboxes',         panel: 'vf_host_panel',         prefix: 'vf_host_chk' },
             { checkboxes: 'tr_host_checkboxes',         panel: 'tr_host_panel',         prefix: 'tr_host_chk' },
@@ -923,8 +1008,13 @@ if (typeof appendLog === 'undefined') {
         function renderStandaloneHostPanels() {
             const hosts = window._computeHosts || [];
             if (!hosts.length) return;
-            for (const { checkboxes, panel, prefix } of _HOST_PANELS) {
+            for (const { checkboxes, panel, prefix } of _MULTI_HOST_PANELS) {
                 window.renderHostCheckboxes(checkboxes, { idPrefix: prefix });
+                const el = document.getElementById(panel);
+                if (el) el.classList.remove('hidden');
+            }
+            for (const { checkboxes, panel, prefix } of _SINGLE_HOST_PANELS) {
+                window.renderHostRadios(checkboxes, { idPrefix: prefix });
                 const el = document.getElementById(panel);
                 if (el) el.classList.remove('hidden');
             }
@@ -1047,6 +1137,9 @@ if (typeof appendLog === 'undefined') {
         // Show final status after task completes (instead of resetting)
         function showCompletionSummary(summary, tab) {
             if (!summary) return;
+            // 備份 TAB 的最終摘要已顯示，不允許再覆蓋
+            const _isBackup = tab === 'backup' || (tab == null && window._activeJobTab === 'backup');
+            if (_isBackup && window._backupFinalShown) return;
             const type = summary.task_type || tab || '';
             const files = summary.total_files || 0;
             const bytes = summary.total_bytes || 0;
@@ -1056,7 +1149,17 @@ if (typeof appendLog === 'undefined') {
 
             let label = '✅ 完成';
             const parts = [];
-            if (type === 'backup') { label = '✅ 備份完成'; }
+
+            // 備份 TAB：顯示所有已完成的勾選項目
+            const pipeline = window._backupPipeline;
+            if ((type === 'backup' || tab === 'backup') && pipeline && !pipeline._shown) {
+                label = '✅ 全部完成';
+                parts.push(pipeline.phases.map(p => `${p} ✓`).join('　'));
+                const totalElapsed = (Date.now() - pipeline.startTime) / 1000;
+                if (totalElapsed > 0) parts.push(`總耗時 ${_formatElapsed(totalElapsed)}`);
+                pipeline._shown = true;
+                window._backupFinalShown = true; // 防止後續 progress 事件覆蓋
+            } else if (type === 'backup') { label = '✅ 備份完成'; }
             else if (type === 'transcode') { label = '✅ 轉檔完成'; }
             else if (type === 'concat') { label = '✅ 串帶完成'; }
             else if (type === 'verify') {
@@ -1067,9 +1170,9 @@ if (typeof appendLog === 'undefined') {
             else if (type === 'transcribe') { label = '✅ 轉錄完成'; }
             else if (type === 'report') { label = '✅ 報表完成'; }
 
-            if (type !== 'verify' && files > 0) parts.push(`${files} 檔`);
-            if (bytes > 0) parts.push(_formatBytes(bytes));
-            if (elapsed > 0) parts.push(`耗時 ${_formatElapsed(elapsed)}`);
+            if (!pipeline && type !== 'verify' && files > 0) parts.push(`${files} 檔`);
+            if (!pipeline && bytes > 0) parts.push(_formatBytes(bytes));
+            if (!pipeline && elapsed > 0) parts.push(`耗時 ${_formatElapsed(elapsed)}`);
 
             const text = parts.length > 0 ? `${label} — ${parts.join(' / ')}` : label;
 
@@ -1091,13 +1194,24 @@ if (typeof appendLog === 'undefined') {
             }
 
             if (activeTab === 'backup') {
+                // 若報表尚在執行中，不顯示完成摘要
+                if (window._backupReportPending) return;
                 const progLabel = document.getElementById('bk-prog-label');
                 const progEta = document.getElementById('bk-prog-eta');
                 if (progLabel) progLabel.textContent = text;
                 if (progEta) progEta.textContent = '';
-                _fillSegmentsGreen(
-                    ['bk-seg-backup', 'bk-seg-trans', 'bk-seg-concat'],
-                    ['bk-lbl-backup', 'bk-lbl-trans', 'bk-lbl-concat'], '33.33%');
+                // 動態段寬
+                const _doT = document.getElementById('chk_transcode')?.checked ?? false;
+                const _doC = document.getElementById('chk_concat')?.checked ?? false;
+                const _doR = !document.getElementById('bk-seg-report')?.classList.contains('hidden');
+                const _n = 1 + (_doT ? 1 : 0) + (_doC ? 1 : 0) + (_doR ? 1 : 0);
+                const _w = (100 / _n).toFixed(2) + '%';
+                const segIds = ['bk-seg-backup'];
+                const lblIds = ['bk-lbl-backup'];
+                if (_doT) { segIds.push('bk-seg-trans'); lblIds.push('bk-lbl-trans'); }
+                if (_doC) { segIds.push('bk-seg-concat'); lblIds.push('bk-lbl-concat'); }
+                if (_doR) { segIds.push('bk-seg-report'); lblIds.push('bk-lbl-report'); }
+                _fillSegmentsGreen(segIds, lblIds, _w);
             } else if (activeTab === 'report') {
                 const rpLabel = document.getElementById('rp-prog-label');
                 if (rpLabel) rpLabel.textContent = text;
@@ -1155,9 +1269,17 @@ if (typeof appendLog === 'undefined') {
                 return;
             }
 
-            // ── Backup TAB: four-segment progress bar ──
+            // ── Backup TAB: dynamic multi-segment progress bar ──
             const segBackup = document.getElementById('bk-seg-backup');
             if (!segBackup) return; // tab not loaded yet
+
+            // 完成摘要已顯示，不再接受進度更新
+            if (window._backupFinalShown) return;
+
+            // 多機模式下，忽略本機的 transcode/concat progress（由 heartbeat 聚合）
+            if (window._remoteDispatching && (phase === 'transcode' || phase === 'concat')) {
+                return;
+            }
 
             const container = document.getElementById('bk-progress');
             if (container) container.classList.remove('hidden');
@@ -1169,64 +1291,73 @@ if (typeof appendLog === 'undefined') {
             const progLabel = document.getElementById('bk-prog-label');
             const progEta = document.getElementById('bk-prog-eta');
 
+            // 動態計算每段寬度：根據勾選的執行項目
+            const _doTrans = document.getElementById('chk_transcode')?.checked ?? false;
+            const _doConcat = document.getElementById('chk_concat')?.checked ?? false;
+            const _doReport = !!window._backupReportPending || !document.getElementById('bk-seg-report')?.classList.contains('hidden');
+            const _segCount = 1 + (_doTrans ? 1 : 0) + (_doConcat ? 1 : 0) + (_doReport ? 1 : 0);
+            const _sw = 100 / _segCount; // 每段寬度百分比
+
             if (phase === 'backup_local' || phase === 'backup_nas') {
                 let combinedPct = 0;
                 let barWidth = 0;
                 if (phase === 'backup_local') {
                     combinedPct = totalPct / 2;
-                    barWidth = (totalPct / 100) * (33.33 / 2);
+                    barWidth = (totalPct / 100) * (_sw / 2);
                 } else {
                     combinedPct = 50 + (totalPct / 2);
-                    barWidth = (33.33 / 2) + ((totalPct / 100) * (33.33 / 2));
+                    barWidth = (_sw / 2) + ((totalPct / 100) * (_sw / 2));
                 }
                 segBackup.style.width = `${barWidth}%`;
                 segBackup.style.backgroundColor = phase === 'backup_local' ? '#1f538d' : '#143c68';
                 lblBackup.textContent = `${combinedPct.toFixed(0)}%`;
-                segTrans.style.width = '0%'; lblTrans.textContent = '0%';
-                segConcat.style.width = '0%'; lblConcat.textContent = '0%';
+                if (segTrans) { segTrans.style.width = '0%'; lblTrans.textContent = '0%'; }
+                if (segConcat) { segConcat.style.width = '0%'; lblConcat.textContent = '0%'; }
             } else if (phase === 'rescan') {
-                segBackup.style.width = '33.33%';
+                segBackup.style.width = `${_sw}%`;
                 segBackup.style.backgroundColor = '#0d6e6e';
-                segTrans.style.width = '0%'; segTrans.style.backgroundColor = '#d48a04';
-                segConcat.style.width = '0%'; segConcat.style.backgroundColor = '#228b22';
+                if (segTrans) { segTrans.style.width = '0%'; segTrans.style.backgroundColor = '#d48a04'; }
+                if (segConcat) { segConcat.style.width = '0%'; segConcat.style.backgroundColor = '#228b22'; }
                 const isRecopying = fname.startsWith('[補齊]');
                 lblBackup.textContent = isRecopying ? `補${totalPct.toFixed(0)}%` : `掃${totalPct.toFixed(0)}%`;
-                lblTrans.textContent = '0%';
-                lblConcat.textContent = '0%';
+                if (lblTrans) lblTrans.textContent = '0%';
+                if (lblConcat) lblConcat.textContent = '0%';
             } else if (phase === 'transcode') {
-                segBackup.style.width = '33.33%'; segBackup.style.backgroundColor = '#1f538d';
-                segTrans.style.width = `${(totalPct / 100) * 33.33}%`; segTrans.style.backgroundColor = '#d48a04';
+                segBackup.style.width = `${_sw}%`; segBackup.style.backgroundColor = '#1f538d';
+                if (segTrans) { segTrans.style.width = `${(totalPct / 100) * _sw}%`; segTrans.style.backgroundColor = '#d48a04'; }
                 lblBackup.textContent = '100%';
-                lblTrans.textContent = `${totalPct.toFixed(0)}%`;
-                segConcat.style.width = '0%'; lblConcat.textContent = '0%';
+                if (lblTrans) lblTrans.textContent = `${totalPct.toFixed(0)}%`;
+                if (segConcat) { segConcat.style.width = '0%'; } if (lblConcat) lblConcat.textContent = '0%';
             } else if (phase === 'concat') {
-                segBackup.style.width = '33.33%'; segBackup.style.backgroundColor = '#1f538d';
-                segTrans.style.width = '33.33%'; segTrans.style.backgroundColor = '#d48a04';
-                segConcat.style.width = `${(totalPct / 100) * 33.33}%`; segConcat.style.backgroundColor = '#228b22';
+                // 多卡串帶聚合：每張卡佔 1/total
+                let aggConcatPct = totalPct;
+                const mc = window._concatMultiCard;
+                if (mc && mc.total > 1) {
+                    aggConcatPct = (mc.done / mc.total + totalPct / 100 / mc.total) * 100;
+                }
+                segBackup.style.width = `${_sw}%`; segBackup.style.backgroundColor = '#1f538d';
+                if (segTrans) { segTrans.style.width = `${_sw}%`; segTrans.style.backgroundColor = '#d48a04'; }
+                if (segConcat) { segConcat.style.width = `${(aggConcatPct / 100) * _sw}%`; segConcat.style.backgroundColor = '#228b22'; }
                 lblBackup.textContent = '100%';
-                lblTrans.textContent = '100%';
-                lblConcat.textContent = `${totalPct.toFixed(0)}%`;
+                if (lblTrans) lblTrans.textContent = '100%';
+                if (lblConcat) lblConcat.textContent = `${aggConcatPct.toFixed(0)}%`;
             } else if (phase === 'report') {
-                segBackup.style.width = '25%'; segBackup.style.backgroundColor = '#1f538d';
-                segTrans.style.width = '25%'; segTrans.style.backgroundColor = '#d48a04';
-                segConcat.style.width = '25%'; segConcat.style.backgroundColor = '#228b22';
+                segBackup.style.width = `${_sw}%`; segBackup.style.backgroundColor = '#1f538d';
+                if (segTrans) { segTrans.style.width = `${_sw}%`; segTrans.style.backgroundColor = '#d48a04'; }
+                if (segConcat) { segConcat.style.width = `${_sw}%`; segConcat.style.backgroundColor = '#228b22'; }
                 const segReportEl = document.getElementById('bk-seg-report');
                 const lblReportEl = document.getElementById('bk-lbl-report');
                 const legendReport = document.getElementById('bk-legend-report');
-                if (segReportEl) { segReportEl.classList.remove('hidden'); segReportEl.style.width = `${(totalPct / 100) * 25}%`; }
+                if (segReportEl) { segReportEl.classList.remove('hidden'); segReportEl.style.width = `${(totalPct / 100) * _sw}%`; }
                 if (lblReportEl) lblReportEl.textContent = `${totalPct.toFixed(0)}%`;
                 if (legendReport) legendReport.classList.remove('hidden');
-                lblBackup.textContent = '100%'; lblTrans.textContent = '100%'; lblConcat.textContent = '100%';
+                lblBackup.textContent = '100%';
+                if (lblTrans) lblTrans.textContent = '100%';
+                if (lblConcat) lblConcat.textContent = '100%';
             } else if (phase === 'verify') {
                 const teal = '#0d6e6e';
-                const third = totalPct / 3;
-                const remain = totalPct - third * 2;
-                segBackup.style.width = `${Math.min(third, 33.33)}%`; segBackup.style.backgroundColor = teal;
-                segTrans.style.width = `${Math.min(third, 33.33)}%`; segTrans.style.backgroundColor = teal;
-                segConcat.style.width = `${Math.min(remain, 33.34)}%`; segConcat.style.backgroundColor = teal;
-                lblBackup.textContent = totalPct >= 33 ? '33%' : `${totalPct.toFixed(0)}%`;
-                lblTrans.textContent = totalPct >= 66 ? '66%' : totalPct >= 33 ? `${totalPct.toFixed(0)}%` : '0%';
-                lblConcat.textContent = totalPct >= 99 ? '100%' : totalPct >= 66 ? `${totalPct.toFixed(0)}%` : '0%';
+                segBackup.style.width = `${Math.min(totalPct, 100)}%`; segBackup.style.backgroundColor = teal;
+                lblBackup.textContent = `${totalPct.toFixed(0)}%`;
             }
 
             // Labels
@@ -1282,10 +1413,17 @@ if (typeof appendLog === 'undefined') {
         window._heartbeatTimer = null;
         window._remoteJobType = null;
 
+        // 任務類型中文對照（全域常量，避免重複定義）
+        const JOB_LABELS = {
+            transcode: '轉檔', verify: '比對', concat: '串帶',
+            report: '報表', transcribe: '轉錄', tts: 'TTS 合成', tts_clone: '聲音複製',
+        };
+
         function initRemoteHostProgress(hosts) {
             const tab = window._activeJobTab || 'backup';
-            if (!['backup', 'transcode', 'concat'].includes(tab)) return; // no remote panel for this tab
-            const prefix = tab === 'transcode' ? 'tc' : tab === 'concat' ? 'ct' : 'bk';
+            const prefixMap = { backup: 'bk', transcode: 'tc', concat: 'ct', verify: 'vf', report: 'rp', transcribe: 'tr', tts: 'tts' };
+            const prefix = prefixMap[tab];
+            if (!prefix) return;
             const panel = document.getElementById(prefix + '-remote-hosts-progress');
             const rows = document.getElementById(prefix + '-remote-host-rows');
             if (!panel || !rows) return;
@@ -1341,27 +1479,49 @@ if (typeof appendLog === 'undefined') {
                                 });
                             }
 
-                            // Try active_jobs first (new multi-job backend), fallback to legacy d.progress
-                            let hostProg = null;
+                            // 聚合此主機的所有 job 進度（多卡場景）
+                            let hostPct = 0;
+                            let hostTxt = '處理中...';
+                            let totalJobs = info.expectedJobs || 1;
+                            let doneJobs = 0;
+
                             if (d.active_jobs) {
                                 const ajobs = Object.values(d.active_jobs);
                                 if (ajobs.length > 0) {
-                                    // Pick the first running job's progress
-                                    const running = ajobs.find(j => j.status === 'running') || ajobs[0];
-                                    hostProg = running.progress;
+                                    totalJobs = Math.max(totalJobs, ajobs.length);
+                                    let sumPct = 0;
+                                    for (const j of ajobs) {
+                                        const jp = j.progress?.total_pct || 0;
+                                        if (j.status === 'done' || j.status === 'completed') {
+                                            sumPct += 100;
+                                            doneJobs++;
+                                        } else {
+                                            sumPct += jp;
+                                            if (j.status === 'running' && j.progress?.current_file) {
+                                                hostTxt = j.progress.current_file;
+                                            }
+                                        }
+                                    }
+                                    hostPct = sumPct / totalJobs;
                                 }
                             }
-                            if (!hostProg && d.progress) hostProg = d.progress;
-                            if (hostProg) {
-                                let pct = hostProg.total_pct || 0;
-                                let txt = hostProg.current_file || '處理中...';
-                                updateHostProgress(ip, Math.floor(pct), `[${Math.floor(pct)}%] ${txt}`, '#3b82f6');
+                            // Fallback to legacy single-progress
+                            if (hostPct === 0 && d.progress) {
+                                hostPct = d.progress.total_pct || 0;
+                                hostTxt = d.progress.current_file || '處理中...';
+                            }
+
+                            info.pct = hostPct;
+                            if (hostPct > 0) {
+                                updateHostProgress(ip, Math.floor(hostPct), `[${Math.floor(hostPct)}%] ${hostTxt}`, '#3b82f6');
                             }
 
                             // If worker is idle, queue empty, and at least 15s have passed since submission
                             if (!d.busy && d.queue_length === 0 && (now - info.startTime > 15000)) {
                                 info.done = true;
-                                updateHostProgress(ip, 100, '✅ 轉檔完成', '#228b22');
+                                info.pct = 100;
+                                const _jl = JOB_LABELS[window._remoteJobType] || '任務';
+                                updateHostProgress(ip, 100, `✅ ${_jl}完成`, '#228b22');
                             }
                         }
                     } catch (_) { }
@@ -1372,21 +1532,81 @@ if (typeof appendLog === 'undefined') {
                     }
                 }
 
+                // 更新主進度條（多機加總進度 — 用各主機實際進度的平均值）
+                const _allHosts = Object.values(window._activeRemoteHosts || {});
+                if (_allHosts.length > 0) {
+                    const _doneCount = _allHosts.filter(h => h.done).length;
+                    const _sumPct = _allHosts.reduce((s, h) => s + (h.pct || 0), 0);
+                    const _aggPct = Math.round(_sumPct / _allHosts.length);
+                    const _tab = window._activeJobTab || 'backup';
+
+                    if (_tab === 'backup') {
+                        // 備份 TAB：更新轉檔段的進度（聚合所有主機）
+                        const _doTrans = document.getElementById('chk_transcode')?.checked ?? false;
+                        const _doConcat = document.getElementById('chk_concat')?.checked ?? false;
+                        const _doReport = !!window._backupReportPending || !document.getElementById('bk-seg-report')?.classList.contains('hidden');
+                        const _sc = 1 + (_doTrans ? 1 : 0) + (_doConcat ? 1 : 0) + (_doReport ? 1 : 0);
+                        const _segW = 100 / _sc;
+                        const bkSegBackup = document.getElementById('bk-seg-backup');
+                        const bkSegTrans = document.getElementById('bk-seg-trans');
+                        const bkLblTrans = document.getElementById('bk-lbl-trans');
+                        const bkProgLabel = document.getElementById('bk-prog-label');
+                        if (bkSegBackup) { bkSegBackup.style.width = `${_segW}%`; bkSegBackup.style.backgroundColor = '#1f538d'; }
+                        if (bkSegTrans) { bkSegTrans.style.width = `${(_aggPct / 100) * _segW}%`; bkSegTrans.style.backgroundColor = '#d48a04'; }
+                        if (bkLblTrans) bkLblTrans.textContent = `${_aggPct}%`;
+                        document.getElementById('bk-lbl-backup').textContent = '100%';
+                        if (bkProgLabel) bkProgLabel.textContent = `遠端轉檔　${_doneCount}/${_allHosts.length} 台完成 (${_aggPct}%)`;
+                    } else {
+                        // 其他 TAB：單一進度條
+                        const _pfxMap = { transcode: 'tc', concat: 'ct', verify: 'vf', report: 'rp', transcribe: 'tr', tts: 'tts' };
+                        const _pfx = _pfxMap[_tab];
+                        if (_pfx) {
+                            const _bar = document.getElementById(_pfx + '-prog-bar');
+                            const _lbl = document.getElementById(_pfx + '-prog-label');
+                            if (_bar) _bar.style.width = Math.max(5, _aggPct) + '%';
+                            const _jl2 = JOB_LABELS[window._remoteJobType] || '任務';
+                            if (_lbl) _lbl.textContent = `遠端${_jl2}　${_doneCount}/${_allHosts.length} 台完成 (${_aggPct}%)`;
+                        }
+                    }
+                }
+
                 // Check if all hosts have completed their chunks
-                const hosts = Object.values(window._activeRemoteHosts || {});
+                const hosts = _allHosts;
                 if (hosts.length > 0 && hosts.every(h => h.done)) {
                     stopHeartbeatMonitor();
 
                     // Small buffer to allow the UI to reflect 100% state before fetching
                     setTimeout(() => {
-                        if (window._remoteJobType === 'concat') {
-                            if (typeof appendLog === 'function') appendLog('✅ 所有遠端串帶任務已完成。', 'system');
-                            return;
+                        const _rjt = window._remoteJobType || 'transcode';
+                        // 只有 transcode（多機備份流程）才需要合併
+                        if (_rjt === 'transcode') {
+                            const ms = document.getElementById('merge_status_text');
+                            if (ms) ms.textContent = '所有遠端主機任務結束，自動觸發整合程序…';
+                            if (typeof appendLog === 'function') appendLog('系統提示：所有遠端任務已完成，自動觸發合併與驗證程序...', 'system');
+                            mergeHostOutputs();
+                        } else {
+                            // 其他 TAB（verify/concat/report/transcribe/tts）：直接顯示完成
+                            const _jl = JOB_LABELS[_rjt] || '任務';
+                            if (typeof appendLog === 'function') appendLog(`✅ 遠端${_jl}任務已完成。`, 'system');
+                            // 更新主進度條為完成狀態（嘗試 dash 和 underscore 兩種命名）
+                            const _tab = window._activeJobTab || 'backup';
+                            const _pfxMap = { backup: 'bk', transcode: 'tc', concat: 'ct', verify: 'vf', report: 'rp', transcribe: 'tr', tts: 'tts' };
+                            const _pfx = _pfxMap[_tab];
+                            if (_pfx) {
+                                const _bar = document.getElementById(_pfx + '-prog-bar') || document.getElementById(_pfx + '_prog_bar');
+                                const _lbl = document.getElementById(_pfx + '-prog-label') || document.getElementById(_pfx + '_prog_label');
+                                const _eta = document.getElementById(_pfx + '-prog-eta') || document.getElementById(_pfx + '_prog_eta');
+                                const _pct = document.getElementById(_pfx + '-prog-pct') || document.getElementById(_pfx + '_prog_pct');
+                                const _area = document.getElementById(_pfx + '-progress') || document.getElementById(_pfx + '_progress_area');
+                                if (_area) _area.classList.remove('hidden');
+                                if (_bar) { _bar.style.width = '100%'; _bar.style.background = 'linear-gradient(90deg, #22c55e, #4ade80)'; }
+                                if (_lbl) _lbl.textContent = `✅ 遠端${_jl}完成`;
+                                if (_eta) _eta.textContent = '';
+                                if (_pct) _pct.textContent = '100%';
+                            }
+                            stopHeartbeatMonitor();
+                            playDing();
                         }
-                        const ms = document.getElementById('merge_status_text');
-                        if (ms) ms.textContent = '所有遠端主機任務結束，自動觸發整合程序…';
-                        if (typeof appendLog === 'function') appendLog('系統提示：所有遠端任務已完成，自動觸發合併與驗證程序...', 'system');
-                        mergeHostOutputs();
                     }, 2000);
                 }
             }, 5000);
@@ -1394,12 +1614,37 @@ if (typeof appendLog === 'undefined') {
 
         function stopHeartbeatMonitor() {
             if (window._heartbeatTimer) { clearInterval(window._heartbeatTimer); window._heartbeatTimer = null; }
+            window._remoteDispatching = false;
         }
+
+        // 顯示對應 TAB 的主進度條（多機模式，不經過 progress Socket 事件）
+        function showRemoteMainProgress(label) {
+            const tab = window._activeJobTab || 'backup';
+            const pfxMap = { backup: 'bk', transcode: 'tc', concat: 'ct', verify: 'vf', report: 'rp', transcribe: 'tr', tts: 'tts' };
+            const pfx = pfxMap[tab];
+            if (!pfx) return;
+            const container = document.getElementById(pfx + '-progress');
+            const bar = document.getElementById(pfx + '-prog-bar');
+            const lbl = document.getElementById(pfx + '-prog-label');
+            if (container) container.classList.remove('hidden');
+            if (bar) { bar.style.width = '5%'; bar.style.backgroundColor = '#3b82f6'; }
+            if (lbl) lbl.textContent = label || '遠端執行中...';
+        }
+
+        // Export remote host functions to window for tab JS access
+        window.initRemoteHostProgress = initRemoteHostProgress;
+        window.updateHostProgress = updateHostProgress;
+        window.startHeartbeatMonitor = startHeartbeatMonitor;
+        window.stopHeartbeatMonitor = stopHeartbeatMonitor;
+        window.showRemoteMainProgress = showRemoteMainProgress;
+        window.dispatchRemoteTranscode = dispatchRemoteTranscode;
 
         async function dispatchRemoteTranscode(ctx) {
             window._remoteJobType = 'transcode';
-            if (!ctx || !ctx.hosts || !ctx.hosts.length) return;
+            window._remoteDispatching = true; // 防止 task_status:running 觸發 resetProgress
+            if (!ctx || !ctx.hosts || !ctx.hosts.length) { window._remoteDispatching = false; return; }
             if (typeof appendLog === 'function') appendLog('🖥️ 分派轉檔任務給遠端主機...', 'system');
+            showRemoteMainProgress('分散式轉檔：派發中...');
             initRemoteHostProgress(ctx.hosts);
 
             // Pre-flight ping
@@ -1588,7 +1833,7 @@ if (typeof appendLog === 'undefined') {
                 }
                 if (hostOk) {
                     updateHostProgress(h.ip, 20, '轉檔中...', '#d48a04');
-                    window._activeRemoteHosts[h.ip] = { host: h, files: allCardFiles.map(cf => cf.file), lastSeen: Date.now(), startTime: Date.now() };
+                    window._activeRemoteHosts[h.ip] = { host: h, files: allCardFiles.map(cf => cf.file), lastSeen: Date.now(), startTime: Date.now(), expectedJobs: cardNames.length, pct: 0 };
                 } else {
                     updateHostProgress(h.ip, 0, '連線失敗', '#8b0000');
                 }
@@ -1635,7 +1880,8 @@ if (typeof appendLog === 'undefined') {
                                         const concatUrl = (flags.concat_host_url || getComputeBaseUrl()) + '/api/v1/jobs/concat';
                                         const concatHostName = flags.concat_host_name || '本機';
                                         if (typeof appendLog === 'function') appendLog('🏗️ 串帶將由 [' + concatHostName + '] 執行', 'system');
-                                        // Use index-based loop to safely handle cards that may not be clean [key, value] tuples
+                                        // 追蹤多卡串帶進度
+                                        window._concatMultiCard = { total: flags.cards.length, done: 0, jobIds: [] };
                                         for (let ci = 0; ci < flags.cards.length; ci++) {
                                             const cardEntry = flags.cards[ci];
                                             // Cards can be [cardName, srcPath] or [cardName, srcPath, absSrcPath]

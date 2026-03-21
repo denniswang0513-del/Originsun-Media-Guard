@@ -46,14 +46,15 @@ export async function submitConcat() {
     if (!collected.valid) return;
     const payload = collected.payload;
 
-    const ccSelectedHosts = window.collectSelectedHosts('cc_host_checkboxes');
-    const ccHostObj = ccSelectedHosts.length ? ccSelectedHosts[0] : { name: '本機', ip: 'local' };
+    const ccHostObj = window.collectSelectedHost ? window.collectSelectedHost('cc_host_checkboxes') : { name: '本機', ip: 'local' };
     const isLocal = ccHostObj.ip === 'local';
-    const ccHostUrl = isLocal ? 'http://localhost:8000' : 'http://' + ccHostObj.ip;
+    const ccHostUrl = isLocal ? getComputeBaseUrl() : 'http://' + ccHostObj.ip;
+    const ccHostName = ccHostObj.name || ccHostObj.ip;
+    const ccIp = isLocal ? 'local' : ccHostObj.ip;
 
     if (!isLocal) {
         // 驗證遠端主機路徑
-        const pathsToCheck = [payload.dest_dir, ...sources];
+        const pathsToCheck = [payload.dest_dir, ...payload.sources];
         try {
             const result = await validateRemotePaths(ccHostObj.ip, pathsToCheck);
             if (!result.ok) {
@@ -67,7 +68,8 @@ export async function submitConcat() {
 
         window._remoteJobType = 'concat';
         window._activeRemoteHosts = {};
-        if(window.initRemoteHostProgress) window.initRemoteHostProgress([ccHostObj]);
+        if (window.showRemoteMainProgress) window.showRemoteMainProgress('遠端串帶中...');
+        if (window.initRemoteHostProgress) window.initRemoteHostProgress([ccHostObj]);
     }
     try {
         window._lastJob = { url: ccHostUrl + '/api/v1/jobs/concat', payload };
@@ -85,7 +87,7 @@ export async function submitConcat() {
         if (!isLocal) {
             if(window.updateHostProgress) window.updateHostProgress(ccIp, 20, '已排程，串帶中...', '#228b22');
             window._activeRemoteHosts[ccIp] = {
-                host: ccHostObj, files: sources,
+                host: ccHostObj, files: payload.sources,
                 lastSeen: Date.now(), startTime: Date.now(), logOffset: 0
             };
             if(window.startHeartbeatMonitor) window.startHeartbeatMonitor();

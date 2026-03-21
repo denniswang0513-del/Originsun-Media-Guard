@@ -36,21 +36,37 @@ export async function submitReportJob() {
         client_sid: window.socket?.id || '',
     };
 
+    // 讀取處理主機
+    const rptHostObj = window.collectSelectedHost ? window.collectSelectedHost('rpt_host_checkboxes') : { name: '本機', ip: 'local' };
+    const isLocal = rptHostObj.ip === 'local';
+    const rptHostUrl = isLocal ? getComputeBaseUrl() : 'http://' + rptHostObj.ip;
+
+    if (!isLocal && window.initRemoteHostProgress) {
+        window._remoteJobType = 'report';
+        window._activeRemoteHosts = {};
+        if (window.showRemoteMainProgress) window.showRemoteMainProgress('遠端報表生成中...');
+        window.initRemoteHostProgress([rptHostObj]);
+    }
+
     rptLog('正在送出報表工作請求...', 'system');
     try {
-        const res = await fetch(getComputeBaseUrl() + '/api/v1/report_jobs', {
+        const res = await fetch(rptHostUrl + '/api/v1/report_jobs', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(payload)
         });
         const result = await res.json();
         if (result.status === 'queued') {
-            // Track job_id so only THIS tab auto-opens the report window
             if (result.job_id) {
                 window._myReportJobIds = window._myReportJobIds || new Set();
                 window._myReportJobIds.add(result.job_id);
             }
-            rptLog(`工作已排隊—— Socket.IO 將持續回報進度`, 'ok');
+            rptLog(`工作已排隊至 [${rptHostObj.name}]—— Socket.IO 將持續回報進度`, 'ok');
+            if (!isLocal) {
+                if (window.updateHostProgress) window.updateHostProgress(rptHostObj.ip, 20, '已排程，報表生成中...', '#7c3aed');
+                window._activeRemoteHosts[rptHostObj.ip] = { host: rptHostObj, lastSeen: Date.now(), startTime: Date.now(), logOffset: 0 };
+                if (window.startHeartbeatMonitor) window.startHeartbeatMonitor();
+            }
         } else {
             rptLog(`錯誤： ${JSON.stringify(result)}`, 'error');
         }

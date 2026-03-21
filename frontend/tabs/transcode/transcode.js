@@ -143,20 +143,38 @@ export async function submitTranscode() {
     };
     window._standaloneRetryCount = 0;  
 
-    const ctx = {
-        job_type: 'transcode',
-        use_absolute_paths: true,
-        project_name: projectName,
-        cards: cards,
-        hosts: tcHosts,
-        proxy_root: destDir, 
-        settings: null 
-    };
-
-    if (window.dispatchRemoteTranscode) {
-        await window.dispatchRemoteTranscode(ctx);
+    // 只有本機時，直接走本機 API（不走分散式派發 + heartbeat）
+    const hasRemote = tcHosts.some(h => h.ip !== 'local' && h.ip !== window.location.host);
+    if (!hasRemote) {
+        // 本機直接提交
+        const collected = collectTranscodePayload();
+        if (!collected.valid) return;
+        try {
+            const r = await fetch(getComputeBaseUrl() + '/api/v1/jobs/transcode', {
+                method: 'POST', headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(collected.payload)
+            });
+            const j = await r.json();
+            appendLog('📌 本機轉檔任務已提交，ID: ' + (j.job_id || '?'), 'system');
+        } catch (e) {
+            appendLog('❌ 提交失敗: ' + e.message, 'error');
+        }
     } else {
-        appendLog('❌ window.dispatchRemoteTranscode not found!', 'error');
+        // 多機分散式派發
+        const ctx = {
+            job_type: 'transcode',
+            use_absolute_paths: true,
+            project_name: projectName,
+            cards: cards,
+            hosts: tcHosts,
+            proxy_root: destDir,
+            settings: null
+        };
+        if (window.dispatchRemoteTranscode) {
+            await window.dispatchRemoteTranscode(ctx);
+        } else {
+            appendLog('❌ window.dispatchRemoteTranscode not found!', 'error');
+        }
     }
 
     } finally {

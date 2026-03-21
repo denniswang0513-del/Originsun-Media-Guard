@@ -1,5 +1,5 @@
 {
   "version": "1.9.4",
-  "build_date": "2026-03-20",
-  "notes": "歷史搜尋 + Log 查看器 + OTA 回滾機制"
+  "build_date": "2026-03-21",
+  "notes": "進度條優化 + OTA 回滾機制"
 }

@@ -77,8 +77,20 @@ export async function submitVerify() {
     const payload = collected.payload;
     const vfMode = payload.mode;
 
+    // 讀取處理主機
+    const vfHostObj = window.collectSelectedHost ? window.collectSelectedHost('vf_host_checkboxes') : { name: '本機', ip: 'local' };
+    const isLocal = vfHostObj.ip === 'local';
+    const vfHostUrl = isLocal ? getComputeBaseUrl() : 'http://' + vfHostObj.ip;
+
+    if (!isLocal && window.initRemoteHostProgress) {
+        window._remoteJobType = 'verify';
+        window._activeRemoteHosts = {};
+        if (window.showRemoteMainProgress) window.showRemoteMainProgress('遠端比對中...');
+        window.initRemoteHostProgress([vfHostObj]);
+    }
+
     try {
-        window._lastJob = { url: 'http://localhost:8000/api/v1/jobs/verify', payload };
+        window._lastJob = { url: vfHostUrl + '/api/v1/jobs/verify', payload };
         const res = await fetch(window._lastJob.url, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -87,8 +99,13 @@ export async function submitVerify() {
         const result = await res.json();
         const retryBtn = document.getElementById('btn_retry');
         if (retryBtn) retryBtn.style.display = 'none';
-        appendLog(`比對請求已送出，模式：${vfMode === 'quick' ? '快速' : 'XXH64 進階'}，任務 ID: ${result.job_id || '?'}`, 'system');
+        appendLog(`比對請求已送出至 [${vfHostObj.name}]，模式：${vfMode === 'quick' ? '快速' : 'XXH64 進階'}，任務 ID: ${result.job_id || '?'}`, 'system');
         if (result.warning) appendLog(`⚠️ ${result.warning}`, 'system');
+        if (!isLocal) {
+            if (window.updateHostProgress) window.updateHostProgress(vfHostObj.ip, 20, '已排程，比對中...', '#0d9488');
+            window._activeRemoteHosts[vfHostObj.ip] = { host: vfHostObj, lastSeen: Date.now(), startTime: Date.now(), logOffset: 0 };
+            if (window.startHeartbeatMonitor) window.startHeartbeatMonitor();
+        }
     } catch (e) {
         appendLog('發送失敗: ' + e, 'error');
     }

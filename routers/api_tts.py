@@ -15,6 +15,7 @@ Endpoints:
   POST /api/v1/voice_profiles/{id}/cache — cache NAS profile locally
 """
 import os
+import time
 import uuid
 import json
 import shutil
@@ -93,18 +94,37 @@ class TtsEstimateRequest(BaseModel):
 
 # ─── Standard TTS (with Taiwan normalizer) ────────────────
 @router.post("/tts_jobs")
-async def tts_standard(req: TtsRequest):
-    # Apply Taiwan normalizer before synthesis
+async def tts_standard(req: TtsRequest, background_tasks: BackgroundTasks):
     from utils.taiwan_normalizer import normalize_for_taiwan_tts  # pyre-ignore[21]
-    normalized_text = normalize_for_taiwan_tts(req.text)
+    from core.logger import _emit_sync  # pyre-ignore[21]
 
+    normalized_text = normalize_for_taiwan_tts(req.text)
     os.makedirs(req.output_dir, exist_ok=True)
     output_path = os.path.join(req.output_dir, req.output_name + ".mp3")
-    try:
-        await run_edge_tts(normalized_text, req.voice, req.rate, req.pitch, output_path)
-        return {"status": "done", "output": output_path}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+
+    def _on_progress(data: dict):
+        _emit_sync("tts_edge_progress", data)
+
+    async def _run_edge():
+        _t0 = time.time()
+        try:
+            await run_edge_tts(
+                normalized_text, req.voice, req.rate, req.pitch, output_path,
+                progress_cb=_on_progress,
+            )
+            _elapsed = time.time() - _t0
+            _emit_sync("tts_edge_progress", {
+                "phase": "done", "pct": 100,
+                "msg": "生成完成！", "output": output_path,
+                "elapsed_sec": _elapsed,
+            })
+        except Exception as e:
+            _emit_sync("tts_edge_progress", {
+                "phase": "error", "pct": 0, "msg": str(e),
+            })
+
+    background_tasks.add_task(_run_edge)
+    return {"status": "queued", "output": output_path}
 
 _cached_voices = None
 
@@ -221,15 +241,18 @@ async def tts_clone(req: VoiceCloneRequest, background_tasks: BackgroundTasks):
         _emit_sync("tts_clone_progress", data)
 
     async def _run_clone():
+        _t0 = time.time()
         try:
             await run_f5_tts_clone(
                 normalized_text, req.reference_audio, output_path,
                 progress_cb=_on_progress, speed=req.speed, pitch=req.pitch,
                 ref_text=req.ref_text
             )
+            _elapsed = time.time() - _t0
             _emit_sync("tts_clone_progress", {
                 "phase": "done", "pct": 100,
-                "msg": "生成完成！", "output": output_path
+                "msg": "生成完成！", "output": output_path,
+                "elapsed_sec": _elapsed,
             })
         except Exception as e:
             _emit_sync("tts_clone_progress", {
