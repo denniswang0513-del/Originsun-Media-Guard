@@ -1,5 +1,5 @@
 {
-  "version": "1.9.4",
-  "build_date": "2026-03-21",
-  "notes": "進度條優化 + OTA 回滾機制"
+  "version": "1.9.5",
+  "build_date": "2026-03-22",
+  "notes": "進度條優化 + 多機遠端支援 + OTA 回滾 + TTS 修復"
 }
