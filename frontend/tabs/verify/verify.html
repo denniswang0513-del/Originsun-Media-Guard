@@ -53,3 +53,15 @@
         開始比對
     </button>
 </div>
+
+<!-- Progress Bar -->
+<div id="vf-progress" class="mt-4 mb-2 hidden">
+    <div class="flex justify-between text-xs text-gray-400 mb-1">
+        <span id="vf-prog-label">進度：尚未開始</span>
+        <span id="vf-prog-eta"></span>
+    </div>
+    <div class="relative w-full bg-[#1e1e1e] rounded-full h-4 border border-[#444] overflow-hidden">
+        <div id="vf-prog-bar" class="h-4 transition-all duration-300" style="width: 0%; background-color: #0d9488;"></div>
+    </div>
+    <div class="text-xs text-gray-500 mt-1"><span id="vf-prog-detail"></span></div>
+</div>

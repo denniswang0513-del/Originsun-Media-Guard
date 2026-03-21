@@ -187,4 +187,30 @@
             開始備份
         </button>
     </div>
+
+    <!-- Progress Bar (四段式：備份/轉檔/串接/報表) -->
+    <div id="bk-progress" class="mt-4 mb-2 hidden">
+        <div class="flex justify-between text-xs text-gray-400 mb-1">
+            <span id="bk-prog-label">進度：尚未開始</span>
+            <span id="bk-prog-eta"></span>
+        </div>
+        <div class="relative w-full bg-[#1e1e1e] rounded-full h-4 border border-[#444] overflow-hidden flex">
+            <div id="bk-seg-backup" class="h-4 transition-all duration-300 shrink-0" style="width: 0%; background-color: #1f538d;"></div>
+            <div id="bk-seg-trans" class="h-4 transition-all duration-300 shrink-0" style="width: 0%; background-color: #d48a04;"></div>
+            <div id="bk-seg-concat" class="h-4 transition-all duration-300 shrink-0" style="width: 0%; background-color: #228b22;"></div>
+            <div id="bk-seg-report" class="h-4 transition-all duration-300 shrink-0 hidden" style="width: 0%; background-color: #7c3aed;"></div>
+        </div>
+        <div class="flex gap-4 mt-1 text-xs text-gray-500 flex-wrap">
+            <span class="flex items-center gap-1"><span class="inline-block w-2 h-2 rounded-full" style="background:#1f538d"></span>[備份] <span id="bk-lbl-backup">0%</span></span>
+            <span class="flex items-center gap-1"><span class="inline-block w-2 h-2 rounded-full" style="background:#d48a04"></span>[轉檔] <span id="bk-lbl-trans">0%</span></span>
+            <span class="flex items-center gap-1"><span class="inline-block w-2 h-2 rounded-full" style="background:#228b22"></span>[串帶] <span id="bk-lbl-concat">0%</span></span>
+            <span id="bk-legend-report" class="flex items-center gap-1 hidden"><span class="inline-block w-2 h-2 rounded-full" style="background:#7c3aed"></span>[報表] <span id="bk-lbl-report">0%</span></span>
+        </div>
+    </div>
+
+    <!-- 遠端主機轉檔進度 -->
+    <div id="bk-remote-hosts-progress" class="hidden mb-2 p-3 bg-[#1a1a2e] border border-[#2e3a6e] rounded-lg">
+        <div class="text-xs text-blue-400 font-semibold mb-2">🖥️ 遠端主機轉檔進度</div>
+        <div id="bk-remote-host-rows" class="flex flex-col gap-2"></div>
+    </div>
 </div>

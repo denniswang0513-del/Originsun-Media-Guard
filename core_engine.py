@@ -214,7 +214,9 @@ class MediaGuardEngine:
                     "speed_mbps": avg_speed / (1024 * 1024),
                     "eta_sec": eta_sec,
                     "done_files": done_state[1],
-                    "total_files": total_files
+                    "total_files": total_files,
+                    "done_bytes": curr_total_done,
+                    "total_bytes": total_bytes,
                 })
         return _prog
 
@@ -850,6 +852,10 @@ class MediaGuardEngine:
             self.log("[Engine] 未找到任何支援的影片檔可轉檔。")
             return
 
+        # 計算來源總容量
+        _tc_total_bytes = sum(os.path.getsize(f) for f in files if os.path.exists(f))
+        _tc_done_bytes = 0
+
         self.log(f"[Engine] 共找到 {total} 個影片，開始 Proxy 轉檔...")
         err_count: int = 0
 
@@ -874,6 +880,7 @@ class MediaGuardEngine:
             base_name = os.path.splitext(os.path.basename(src_file))[0]
             proxy_out = os.path.join(out_dir, f"{base_name}_proxy.mov")
 
+            _src_sz = os.path.getsize(src_file) if os.path.exists(src_file) else 0
             self.log(f"[{i+1}/{total}] 正在轉檔: {os.path.basename(src_file)}")
             duration = self._get_video_duration(src_file)
 
@@ -916,7 +923,9 @@ class MediaGuardEngine:
                                     "file_pct": frac * 100,
                                     "total_pct": curr_pct,
                                     "done_files": i,
-                                    "total_files": total
+                                    "total_files": total,
+                                    "done_bytes": _tc_done_bytes + int(frac * _src_sz),
+                                    "total_bytes": _tc_total_bytes,
                                 })
                     except Exception:
                         pass
@@ -935,6 +944,9 @@ class MediaGuardEngine:
                     except:
                         pass
                 break
+
+            # 累加已完成容量
+            _tc_done_bytes += _src_sz
 
             if proc.returncode != 0:
                 self.err(f"[!] 轉檔失敗: {os.path.basename(src_file)}")
@@ -987,6 +999,8 @@ class MediaGuardEngine:
         # 皆百分之百共用同一套絕對排序基準，從物理上根絕時間軸張冠李戴的漂移現象。
         files = sorted(files)
 
+        _ct_total_bytes = sum(os.path.getsize(f) for f in files if os.path.exists(f))
+        _ct_sources_count = len(files)
         self.log(f"[Engine] 共找到 {len(files)} 個影片碎片，準備串聯...")
 
         import tempfile
@@ -1181,7 +1195,8 @@ class MediaGuardEngine:
                         if concat_duration > 0:
                             cfrac = min(1.0, (cms / 1_000_000) / float(concat_duration))
                             elapsed = time.time() - t_start
-                            speed_mbps = float(os.path.getsize(reel_out) / (1024*1024)) / elapsed if elapsed > 0 and os.path.exists(reel_out) else 0.0
+                            _out_sz = os.path.getsize(reel_out) if os.path.exists(reel_out) else 0
+                            speed_mbps = float(_out_sz / (1024*1024)) / elapsed if elapsed > 0 else 0.0
 
                             if on_progress is not None:
                                 on_progress({  # type: ignore
@@ -1192,7 +1207,10 @@ class MediaGuardEngine:
                                     "total_pct": cfrac * 100,
                                     "speed_mbps": speed_mbps,
                                     "done_files": 1,
-                                    "total_files": 1
+                                    "total_files": 1,
+                                    "done_bytes": _out_sz,
+                                    "total_bytes": _ct_total_bytes,
+                                    "sources_count": _ct_sources_count,
                                 })
                     except Exception:
                         pass
@@ -1289,6 +1307,10 @@ class MediaGuardEngine:
 
         self.log(f"[Engine] 開始獨立校驗，共 {len(pairs)} 組比對任務")
         total_err_count: int = 0
+        _vf_total_bytes: int = 0
+        _vf_done_bytes: int = 0
+        _vf_total_files: int = 0
+        _vf_done_files: int = 0
 
         for s_idx, (src_input, dst_input) in enumerate(pairs):
             if self._check_pause_stop():
@@ -1325,7 +1347,12 @@ class MediaGuardEngine:
             if total == 0:
                 self.log("[!] 此組來源內沒有任何檔案，跳過。")
                 continue
-                
+
+            # 累加總計（跨 pair）
+            _pair_bytes = sum(os.path.getsize(f) for f in all_files if os.path.exists(f))
+            _vf_total_bytes += _pair_bytes
+            _vf_total_files += total
+
             self.log(f"→ 掃描到 {total} 個檔案。開始{'快速（大小）' if mode == 'quick' else '進階（XXH64）'}比對...")
             err_count: int = 0
 
@@ -1364,9 +1391,10 @@ class MediaGuardEngine:
                     err_count = err_count + 1
                     continue
                 
+                _file_sz = os.path.getsize(src_abs) if os.path.exists(src_abs) else 0
                 # ─ 快速比對：只比較檔案大小
                 if mode == "quick":
-                    src_sz = os.path.getsize(src_abs)
+                    src_sz = _file_sz
                     dst_sz = os.path.getsize(dst_abs)
                     if src_sz == dst_sz:
                         self.log(f"[OK] {rel_path}  ({src_sz:,} bytes)")
@@ -1382,8 +1410,9 @@ class MediaGuardEngine:
                     else:
                         self.err(f"Hash 不符: {rel_path}\n      來源: {h_src}\n      目標: {h_dst}")
                         err_count = err_count + 1
-
-                pct = ((i + 1) / total) * 100
+                _vf_done_bytes += _file_sz
+                _vf_done_files += 1
+                pct = (_vf_done_files / _vf_total_files) * 100 if _vf_total_files else ((i + 1) / total) * 100
                 if on_progress is not None:
                     try:
                         on_progress({  # type: ignore
@@ -1392,12 +1421,14 @@ class MediaGuardEngine:
                             "current_file": rel_path,
                             "file_pct": pct,
                             "total_pct": pct,
-                            "done_files": i + 1,
-                            "total_files": total
+                            "done_files": _vf_done_files,
+                            "total_files": _vf_total_files,
+                            "done_bytes": _vf_done_bytes,
+                            "total_bytes": _vf_total_bytes,
                         })
                     except Exception:
                         pass
-            
+
             total_err_count += err_count  # type: ignore
 
         if not self._stop_event.is_set():
@@ -1407,7 +1438,13 @@ class MediaGuardEngine:
                 self.err(f"\n[Engine] 獨立校驗完成：共發現 {total_err_count} 個不符錯誤！")
             
             if on_progress is not None:
-                on_progress({"phase": "verify", "status": "completed", "total_pct": 100})  # type: ignore
+                on_progress({  # type: ignore
+                    "phase": "verify", "status": "completed", "total_pct": 100,
+                    "done_files": _vf_total_files, "total_files": _vf_total_files,
+                    "done_bytes": _vf_total_bytes, "total_bytes": _vf_total_bytes,
+                    "matched": _vf_total_files - total_err_count,
+                    "mismatched": total_err_count,
+                })
                 
         first_dst = pairs[0][1] if pairs else ""
         if first_dst:

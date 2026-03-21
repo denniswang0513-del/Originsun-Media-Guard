@@ -86,3 +86,21 @@
         開始串帶
     </button>
 </div>
+
+<!-- 遠端主機進度 -->
+<div id="ct-remote-hosts-progress" class="hidden mt-4 mb-2 p-3 bg-[#1a1a2e] border border-[#2e3a6e] rounded-lg">
+    <div class="text-xs text-blue-400 font-semibold mb-2">🖥️ 遠端主機串接進度</div>
+    <div id="ct-remote-host-rows" class="flex flex-col gap-2"></div>
+</div>
+
+<!-- Progress Bar -->
+<div id="ct-progress" class="mt-4 mb-2 hidden">
+    <div class="flex justify-between text-xs text-gray-400 mb-1">
+        <span id="ct-prog-label">進度：尚未開始</span>
+        <span id="ct-prog-eta"></span>
+    </div>
+    <div class="relative w-full bg-[#1e1e1e] rounded-full h-4 border border-[#444] overflow-hidden">
+        <div id="ct-prog-bar" class="h-4 transition-all duration-300" style="width: 0%; background-color: #228b22;"></div>
+    </div>
+    <div class="text-xs text-gray-500 mt-1"><span id="ct-prog-detail"></span></div>
+</div>

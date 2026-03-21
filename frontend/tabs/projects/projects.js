@@ -1517,8 +1517,9 @@ async function _showLogModal(entry) {
     // Create overlay
     const overlay = document.createElement('div');
     overlay.className = 'pj-log-overlay';
-    overlay.addEventListener('click', (e) => { if (e.target === overlay) overlay.remove(); });
-    const _onEsc = (e) => { if (e.key === 'Escape') { overlay.remove(); document.removeEventListener('keydown', _onEsc); } };
+    const _closeModal = () => { overlay.remove(); document.removeEventListener('keydown', _onEsc); };
+    overlay.addEventListener('click', (e) => { if (e.target === overlay) _closeModal(); });
+    const _onEsc = (e) => { if (e.key === 'Escape') _closeModal(); };
     document.addEventListener('keydown', _onEsc);
 
     const modal = document.createElement('div');
@@ -1533,7 +1534,7 @@ async function _showLogModal(entry) {
     const closeBtn = document.createElement('button');
     closeBtn.className = 'pj-log-modal-close';
     closeBtn.textContent = '\u2715';
-    closeBtn.addEventListener('click', () => overlay.remove());
+    closeBtn.addEventListener('click', () => _closeModal());
     header.appendChild(closeBtn);
     modal.appendChild(header);
 
@@ -1549,6 +1550,7 @@ async function _showLogModal(entry) {
     // Fetch log
     try {
         const res = await fetch('/api/v1/job_history/' + encodeURIComponent(entry.job_id) + '/log');
+        if (!res.ok) { body.textContent = '載入失敗（HTTP ' + res.status + '）'; return; }
         const data = await res.json();
         body.textContent = data.log || data.error || '（空白）';
     } catch (_) {

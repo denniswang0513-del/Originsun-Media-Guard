@@ -254,18 +254,21 @@ if (typeof appendLog === 'undefined') {
             socket.on('task_status', (data) => {
                 const retryBtn = document.getElementById('btn_retry');
 
+                if (data.status === 'running') {
+                    // 新任務開始時才清除上一次的完成狀態
+                    if (typeof resetProgress === 'function') resetProgress();
+                }
 
                 if (data.status === 'done') {
-                    // If we are actively polling remote hosts in distributed mode, do NOT let a single local host's 
+                    // If we are actively polling remote hosts in distributed mode, do NOT let a single local host's
                     // task completion broadcast prematurely reset the global UI and kill the heartbeat monitor.
                     if (window._activeRemoteHosts && Object.keys(window._activeRemoteHosts).length > 0 && window._heartbeatTimer) {
                         return;
                     }
 
                     if (typeof appendLog === 'function') appendLog('系統：所有排定任務執行完畢！', 'system');
-                    if (typeof resetProgress === 'function') resetProgress();
-                    const pLabel = document.getElementById('prog_label');
-                    if (pLabel) pLabel.textContent = '執行完畢！';
+                    // 顯示完成摘要（不再清空進度條）
+                    showCompletionSummary(data.summary, window._activeJobTab);
                     if (retryBtn) retryBtn.style.display = 'none';
                     playDing();
                     if (window._remoteDispatch) { dispatchRemoteTranscode(window._remoteDispatch); window._remoteDispatch = null; }
@@ -323,12 +326,13 @@ if (typeof appendLog === 'undefined') {
                     btn.classList.remove('opacity-70', 'cursor-not-allowed');
                 }
                 const label = document.getElementById('transcribe_prog_label');
-                if (label) label.textContent = '✅ 完成！';
+                if (label) label.textContent = '✅ 轉錄完成';
                 const pctLabel = document.getElementById('transcribe_prog_pct');
                 if (pctLabel) pctLabel.textContent = '100%';
                 const bar = document.getElementById('transcribe_prog_bar');
                 if (bar) {
                     bar.style.width = '100%';
+                    bar.style.background = 'linear-gradient(90deg, #22c55e, #4ade80)';
                 }
                 if (typeof appendLog === 'function') {
                     appendLog('✅ 逐字稿生成完畢！目的地：' + data.dest_dir, 'system');
@@ -342,25 +346,24 @@ if (typeof appendLog === 'undefined') {
                 const msg = data.msg || '';
                 const pctStr = `${pct.toFixed(0)}%`;
 
-                // __done__ = job ended (cancelled or failed) — switch back to backup mode
-                if (phase === '__done__') {
-                    document.getElementById('progress_report_mode')?.classList.add('hidden');
-                    document.getElementById('progress_backup_mode')?.classList.remove('hidden');
-                    return;
-                }
+                // __done__ = job ended
+                if (phase === '__done__') return;
+
+                // Show report progress bar
+                const rpContainer = document.getElementById('rp-progress');
+                if (rpContainer) rpContainer.classList.remove('hidden');
 
                 // Update label
-                const lblEl = document.getElementById('rpt_prog_label');
+                const lblEl = document.getElementById('rp-prog-label');
                 if (lblEl) lblEl.textContent = msg;
 
-                const quarter = 25; // 4 phases = 25% each
+                const quarter = 25;
                 const segs = {
-                    scan: ['rpt_seg_scan', 'rpt_lbl_scan'],
-                    meta: ['rpt_seg_meta', 'rpt_lbl_meta'],
-                    strip: ['rpt_seg_strip', 'rpt_lbl_strip'],
-                    render: ['rpt_seg_render', 'rpt_lbl_render'],
+                    scan: ['rp-seg-scan', 'rp-lbl-scan'],
+                    meta: ['rp-seg-meta', 'rp-lbl-meta'],
+                    strip: ['rp-seg-strip', 'rp-lbl-strip'],
+                    render: ['rp-seg-render', 'rp-lbl-render'],
                 };
-                // Fill all previous phases to 100%, current to pct
                 const order = ['scan', 'meta', 'strip', 'render'];
                 const phaseIdx = order.indexOf(phase);
                 order.forEach((p, i) => {
@@ -379,15 +382,9 @@ if (typeof appendLog === 'undefined') {
             // Report job finished
             socket.on('report_job_done', (data) => {
                 appendLog(`✅ 報表完成：${data.report_name || ''}`, 'system');
-                // Switch back to backup mode progress bar
-                document.getElementById('progress_report_mode')?.classList.add('hidden');
-                document.getElementById('progress_backup_mode')?.classList.remove('hidden');
 
-                // 執行和 task_status: done 相同的任務結束清理動作
-                if (typeof appendLog === 'function') appendLog('系統：所有排定任務執行完畢！', 'system');
-                if (typeof resetProgress === 'function') resetProgress();
-                const pLabel = document.getElementById('prog_label');
-                if (pLabel) pLabel.textContent = '執行完畢！';
+                // 顯示報表完成摘要（不清空進度條）
+                showCompletionSummary({ task_type: 'report', elapsed_sec: 0 }, 'report');
                 const retryBtn = document.getElementById('btn_retry');
                 if (retryBtn) retryBtn.style.display = 'none';
                 
@@ -466,9 +463,8 @@ if (typeof appendLog === 'undefined') {
 
         const terminal = document.getElementById('terminal');
         const terminalVerbose = document.getElementById('terminal_verbose');
-        const progLabel = document.getElementById('prog_label');
-        const progEta = document.getElementById('prog_eta');
         const statusBadge = document.getElementById('status-badge');
+        window._activeJobTab = null; // 'backup' | 'verify' | 'transcode' | 'concat' | 'report'
 
         function playDing() {
             try {
@@ -994,6 +990,148 @@ if (typeof appendLog === 'undefined') {
         }
 
         // ================= Progress Bar Update =================
+        // Helper: format bytes to human-readable
+        function _formatBytes(b) {
+            if (b == null || b <= 0) return '';
+            if (b >= 1e12) return (b / 1e12).toFixed(1) + ' TB';
+            if (b >= 1e9) return (b / 1e9).toFixed(1) + ' GB';
+            if (b >= 1e6) return (b / 1e6).toFixed(1) + ' MB';
+            return (b / 1e3).toFixed(0) + ' KB';
+        }
+
+        // Helper: format elapsed seconds to HH:MM:SS
+        function _formatElapsed(sec) {
+            if (!sec || sec <= 0) return '00:00';
+            const s = Math.round(sec);
+            const hh = Math.floor(s / 3600);
+            const mm = String(Math.floor((s % 3600) / 60)).padStart(2, '0');
+            const ss = String(s % 60).padStart(2, '0');
+            return hh > 0 ? `${hh}:${mm}:${ss}` : `${mm}:${ss}`;
+        }
+
+        // Helper: format speed + ETA string (with completion time point)
+        function _formatEta(data) {
+            const parts = [];
+            if (data.speed_mbps != null) parts.push(`${data.speed_mbps.toFixed(1)} MB/s`);
+            if (data.eta_sec != null && data.eta_sec > 0) {
+                const s = Math.round(data.eta_sec);
+                parts.push(`剩餘 ${_formatElapsed(s)}`);
+                const finish = new Date(Date.now() + s * 1000);
+                parts.push(`預計 ${String(finish.getHours()).padStart(2,'0')}:${String(finish.getMinutes()).padStart(2,'0')} 完成`);
+            }
+            return parts.join('　');
+        }
+
+        // Helper: format phase label text (with GB display)
+        function _phaseLabel(phase, totalPct, data) {
+            const PHASE_TEXT = {
+                backup_local: "第一階段：寫入本機", backup_nas: "第二階段：寫入 NAS",
+                rescan: "二次掃描/補齊", transcode: "Proxy轉檔", concat: "串帶作業",
+                report: "📊 報表生成與同步", verify: "Hash 比對",
+            };
+            const phaseText = PHASE_TEXT[phase] || "進度";
+            const done = data.done_files ?? 0;
+            const total = data.total_files ?? 0;
+            const fname = data.current_file || '';
+
+            let sizeStr = '';
+            if (data.total_bytes > 0) {
+                sizeStr = `　${_formatBytes(data.done_bytes || 0)} / ${_formatBytes(data.total_bytes)}`;
+            }
+
+            if (fname) return `${phaseText}　${done}/${total} 檔${sizeStr} (${totalPct.toFixed(1)}%)　${fname}`;
+            return `${phaseText}　${done}/${total} 檔${sizeStr} (${totalPct.toFixed(1)}%)`;
+        }
+
+        // ── Completion Summary ──
+        // Show final status after task completes (instead of resetting)
+        function showCompletionSummary(summary, tab) {
+            if (!summary) return;
+            const type = summary.task_type || tab || '';
+            const files = summary.total_files || 0;
+            const bytes = summary.total_bytes || 0;
+            const elapsed = summary.elapsed_sec || 0;
+            const matched = summary.verify_matched || 0;
+            const mismatched = summary.verify_mismatched || 0;
+
+            let label = '✅ 完成';
+            const parts = [];
+            if (type === 'backup') { label = '✅ 備份完成'; }
+            else if (type === 'transcode') { label = '✅ 轉檔完成'; }
+            else if (type === 'concat') { label = '✅ 串帶完成'; }
+            else if (type === 'verify') {
+                label = mismatched > 0 ? '⚠️ 驗證完成' : '✅ 驗證完成';
+                if (mismatched > 0) parts.push(`${matched}/${matched + mismatched} 檔一致，${mismatched} 檔不符`);
+                else if (files > 0) parts.push(`${files}/${files} 檔一致`);
+            }
+            else if (type === 'transcribe') { label = '✅ 轉錄完成'; }
+            else if (type === 'report') { label = '✅ 報表完成'; }
+
+            if (type !== 'verify' && files > 0) parts.push(`${files} 檔`);
+            if (bytes > 0) parts.push(_formatBytes(bytes));
+            if (elapsed > 0) parts.push(`耗時 ${_formatElapsed(elapsed)}`);
+
+            const text = parts.length > 0 ? `${label} — ${parts.join(' / ')}` : label;
+
+            // Update the active tab's progress bar
+            const activeTab = tab || window._activeJobTab || 'backup';
+            const prefixMap = { backup: 'bk', verify: 'vf', transcode: 'tc', concat: 'ct', report: 'rp' };
+            const prefix = prefixMap[activeTab];
+
+            // Helper: fill multi-segment bars to 100% green
+            function _fillSegmentsGreen(segIds, lblIds, widthPct) {
+                segIds.forEach(id => {
+                    const el = document.getElementById(id);
+                    if (el) { el.style.width = widthPct; el.style.backgroundColor = '#22c55e'; }
+                });
+                lblIds.forEach(id => {
+                    const el = document.getElementById(id);
+                    if (el) el.textContent = '100%';
+                });
+            }
+
+            if (activeTab === 'backup') {
+                const progLabel = document.getElementById('bk-prog-label');
+                const progEta = document.getElementById('bk-prog-eta');
+                if (progLabel) progLabel.textContent = text;
+                if (progEta) progEta.textContent = '';
+                _fillSegmentsGreen(
+                    ['bk-seg-backup', 'bk-seg-trans', 'bk-seg-concat'],
+                    ['bk-lbl-backup', 'bk-lbl-trans', 'bk-lbl-concat'], '33.33%');
+            } else if (activeTab === 'report') {
+                const rpLabel = document.getElementById('rp-prog-label');
+                if (rpLabel) rpLabel.textContent = text;
+                const rpEta = document.getElementById('rp-prog-eta');
+                if (rpEta) rpEta.textContent = '';
+                _fillSegmentsGreen(
+                    ['rp-seg-scan', 'rp-seg-meta', 'rp-seg-strip', 'rp-seg-render'],
+                    ['rp-lbl-scan', 'rp-lbl-meta', 'rp-lbl-strip', 'rp-lbl-render'], '25%');
+            } else if (prefix) {
+                const bar = document.getElementById(prefix + '-prog-bar');
+                const lbl = document.getElementById(prefix + '-prog-label');
+                const eta = document.getElementById(prefix + '-prog-eta');
+                const detail = document.getElementById(prefix + '-prog-detail');
+                if (bar) { bar.style.width = '100%'; bar.style.backgroundColor = mismatched > 0 ? '#f59e0b' : '#22c55e'; }
+                if (lbl) lbl.textContent = text;
+                if (eta) eta.textContent = '';
+                if (detail) detail.textContent = '';
+            }
+        }
+
+        // Helper: update a simple single-bar progress (verify/transcode/concat standalone)
+        function _updateSimpleProgress(prefix, totalPct, data) {
+            const container = document.getElementById(prefix + '-progress');
+            const bar = document.getElementById(prefix + '-prog-bar');
+            const label = document.getElementById(prefix + '-prog-label');
+            const eta = document.getElementById(prefix + '-prog-eta');
+            const detail = document.getElementById(prefix + '-prog-detail');
+            if (container) container.classList.remove('hidden');
+            if (bar) bar.style.width = `${totalPct}%`;
+            if (label) label.textContent = _phaseLabel(data.phase, totalPct, data);
+            if (eta) eta.textContent = _formatEta(data);
+            if (detail) detail.textContent = data.current_file ? `${data.done_files ?? 0}/${data.total_files ?? 0} ${data.current_file}` : '';
+        }
+
         function updateProgress(data) {
             const phase = data.phase || 'backup';
             const filePct = data.file_pct ?? 0;
@@ -1001,46 +1139,54 @@ if (typeof appendLog === 'undefined') {
             const done = data.done_files ?? 0;
             const total = data.total_files ?? 0;
             const fname = data.current_file || '';
+            const tab = window._activeJobTab || 'backup';
 
+            // ── Standalone TAB progress bars ──
+            if (tab === 'verify' && phase === 'verify') {
+                _updateSimpleProgress('vf', totalPct, data);
+                return;
+            }
+            if (tab === 'transcode' && phase === 'transcode') {
+                _updateSimpleProgress('tc', totalPct, data);
+                return;
+            }
+            if (tab === 'concat' && phase === 'concat') {
+                _updateSimpleProgress('ct', totalPct, data);
+                return;
+            }
 
+            // ── Backup TAB: four-segment progress bar ──
+            const segBackup = document.getElementById('bk-seg-backup');
+            if (!segBackup) return; // tab not loaded yet
 
-            // Segmented bar: each segment occupies a portion of the total 100% width
-            // Key idea: segment widths are ABSOLUTE percentages of the bar container,
-            // so we use totalPct to allocate across 3 phases (assuming equal weight unless we get phase_pct)
-            const segBackup = document.getElementById('seg_backup');
-            const lblBackup = document.getElementById('lbl_backup');
-            const segTrans = document.getElementById('seg_trans');
-            const lblTrans = document.getElementById('lbl_trans');
-            const segConcat = document.getElementById('seg_concat');
-            const lblConcat = document.getElementById('lbl_concat');
+            const container = document.getElementById('bk-progress');
+            if (container) container.classList.remove('hidden');
+            const lblBackup = document.getElementById('bk-lbl-backup');
+            const segTrans = document.getElementById('bk-seg-trans');
+            const lblTrans = document.getElementById('bk-lbl-trans');
+            const segConcat = document.getElementById('bk-seg-concat');
+            const lblConcat = document.getElementById('bk-lbl-concat');
+            const progLabel = document.getElementById('bk-prog-label');
+            const progEta = document.getElementById('bk-prog-eta');
 
-            // Use totalPct to drive the active segment; completed phases are filled to their max allocation
-            // Phase weights: backup=1/3, transcode=1/3, concat=1/3 (equal)
-            // Phase weights: backup=1/3, transcode=1/3, concat=1/3 (equal)
-            // But now backup is split into local and NAS. So we share the first 33.33%.
-            // Since we don't know file sizes up front, we'll just map both backup phases to fill the 0-33.33% space visually based on their own totalPct.
             if (phase === 'backup_local' || phase === 'backup_nas') {
-                // 將備份階段的 33.33% 再切半：Local 佔前半 (0~16.66%)，NAS 佔後半 (16.66~33.33%)
-                let combinedPct = 0; // 0 ~ 100 針對整個 Backup 階段的完成度
-                let barWidth = 0;    // 0 ~ 33.33 針對整條總進度條的寬度
+                let combinedPct = 0;
+                let barWidth = 0;
                 if (phase === 'backup_local') {
-                    combinedPct = totalPct / 2; // local 跑完最多 50%
+                    combinedPct = totalPct / 2;
                     barWidth = (totalPct / 100) * (33.33 / 2);
                 } else {
-                    combinedPct = 50 + (totalPct / 2); // NAS 從 50% 開始加
+                    combinedPct = 50 + (totalPct / 2);
                     barWidth = (33.33 / 2) + ((totalPct / 100) * (33.33 / 2));
                 }
-
                 segBackup.style.width = `${barWidth}%`;
-                segBackup.style.backgroundColor = phase === 'backup_local' ? '#1f538d' : '#143c68'; // Slightly darker blue for NAS
+                segBackup.style.backgroundColor = phase === 'backup_local' ? '#1f538d' : '#143c68';
                 lblBackup.textContent = `${combinedPct.toFixed(0)}%`;
                 segTrans.style.width = '0%'; lblTrans.textContent = '0%';
                 segConcat.style.width = '0%'; lblConcat.textContent = '0%';
             } else if (phase === 'rescan') {
-                // Rescan is part of backup — keep everything in the backup (blue) segment
-                // Use a teal tint to distinguish scanning from normal copy
                 segBackup.style.width = '33.33%';
-                segBackup.style.backgroundColor = '#0d6e6e'; // teal = 二次掃描中
+                segBackup.style.backgroundColor = '#0d6e6e';
                 segTrans.style.width = '0%'; segTrans.style.backgroundColor = '#d48a04';
                 segConcat.style.width = '0%'; segConcat.style.backgroundColor = '#228b22';
                 const isRecopying = fname.startsWith('[補齊]');
@@ -1061,20 +1207,18 @@ if (typeof appendLog === 'undefined') {
                 lblTrans.textContent = '100%';
                 lblConcat.textContent = `${totalPct.toFixed(0)}%`;
             } else if (phase === 'report') {
-                // Report generation phase: 3 baseline segments full, report segment fills up
                 segBackup.style.width = '25%'; segBackup.style.backgroundColor = '#1f538d';
                 segTrans.style.width = '25%'; segTrans.style.backgroundColor = '#d48a04';
                 segConcat.style.width = '25%'; segConcat.style.backgroundColor = '#228b22';
-                const segReportEl = document.getElementById('seg_report');
-                const lblReportEl = document.getElementById('lbl_report');
-                if (segReportEl) { segReportEl.classList.remove('hidden'); segReportEl.style.width = `${(totalPct / 100) * 25}%`; segReportEl.style.backgroundColor = '#7c3aed'; }
+                const segReportEl = document.getElementById('bk-seg-report');
+                const lblReportEl = document.getElementById('bk-lbl-report');
+                const legendReport = document.getElementById('bk-legend-report');
+                if (segReportEl) { segReportEl.classList.remove('hidden'); segReportEl.style.width = `${(totalPct / 100) * 25}%`; }
                 if (lblReportEl) lblReportEl.textContent = `${totalPct.toFixed(0)}%`;
+                if (legendReport) legendReport.classList.remove('hidden');
                 lblBackup.textContent = '100%'; lblTrans.textContent = '100%'; lblConcat.textContent = '100%';
             } else if (phase === 'verify') {
-                // 比對模式：獨立全寬進度條（teal），不受三段分割影響
-                const fullW = `${totalPct}%`;
                 const teal = '#0d6e6e';
-                // 以三段共享填充整條進度條
                 const third = totalPct / 3;
                 const remain = totalPct - third * 2;
                 segBackup.style.width = `${Math.min(third, 33.33)}%`; segBackup.style.backgroundColor = teal;
@@ -1085,42 +1229,9 @@ if (typeof appendLog === 'undefined') {
                 lblConcat.textContent = totalPct >= 99 ? '100%' : totalPct >= 66 ? `${totalPct.toFixed(0)}%` : '0%';
             }
 
-
-            // Main label — mirroring desktop format: 進度：XX.XX%  X/Y〃filename (XX%)
-            let phaseText = "進度";
-            if (phase === 'backup_local') phaseText = "第一階段：寫入本機";
-            else if (phase === 'backup_nas') phaseText = "第二階段：寫入 NAS";
-            else if (phase === 'rescan') phaseText = "二次掃描/補齊";
-            else if (phase === 'transcode') phaseText = "Proxy轉檔";
-            else if (phase === 'concat') phaseText = "串帶作業";
-            else if (phase === 'report') phaseText = "📊 報表生成與同步";
-            else if (phase === 'verify') phaseText = "獨立比對";
-
-            if (fname) {
-                progLabel.textContent = `${phaseText}：${totalPct.toFixed(2)}%  ${done}/${total}〃${fname} (${filePct.toFixed(1)}%)`;
-            } else {
-                progLabel.textContent = `${phaseText}：${done} / ${total} 個項目  (${totalPct.toFixed(2)}%)`;
-            }
-
-            // Right label: show speed + ETA together (like the desktop app)
-            const speedStr = data.speed_mbps != null ? `${data.speed_mbps.toFixed(1)} MB/s` : null;
-            let etaStr = null;
-            if (data.eta_sec != null && data.eta_sec > 0) {
-                const s = Math.round(data.eta_sec);
-                const hh = String(Math.floor(s / 3600)).padStart(2, '0');
-                const mm = String(Math.floor((s % 3600) / 60)).padStart(2, '0');
-                const ss = String(s % 60).padStart(2, '0');
-                etaStr = `預計剩餘：${hh}:${mm}:${ss}`;
-            }
-            if (speedStr && etaStr) {
-                progEta.textContent = `${speedStr}　${etaStr}`;
-            } else if (etaStr) {
-                progEta.textContent = etaStr;
-            } else if (speedStr) {
-                progEta.textContent = `速度: ${speedStr}`;
-            } else {
-                progEta.textContent = '';
-            }
+            // Labels
+            if (progLabel) progLabel.textContent = _phaseLabel(phase, totalPct, data);
+            if (progEta) progEta.textContent = _formatEta(data);
         }
 
 
@@ -1172,8 +1283,11 @@ if (typeof appendLog === 'undefined') {
         window._remoteJobType = null;
 
         function initRemoteHostProgress(hosts) {
-            const panel = document.getElementById('remote_hosts_progress');
-            const rows = document.getElementById('remote_host_rows');
+            const tab = window._activeJobTab || 'backup';
+            if (!['backup', 'transcode', 'concat'].includes(tab)) return; // no remote panel for this tab
+            const prefix = tab === 'transcode' ? 'tc' : tab === 'concat' ? 'ct' : 'bk';
+            const panel = document.getElementById(prefix + '-remote-hosts-progress');
+            const rows = document.getElementById(prefix + '-remote-host-rows');
             if (!panel || !rows) return;
             rows.innerHTML = '';
             hosts.forEach(h => {

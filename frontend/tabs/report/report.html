@@ -90,5 +90,25 @@
                 生成報表
             </button>
         </div>
+
+        <!-- Progress Bar (四段式：掃描/Meta/膠卷/報表輸出) -->
+        <div id="rp-progress" class="mt-4 mb-2 hidden">
+            <div class="flex justify-between text-xs text-gray-400 mb-1">
+                <span id="rp-prog-label">備用中...</span>
+                <span id="rp-prog-eta"></span>
+            </div>
+            <div class="relative w-full bg-[#1e1e1e] rounded-full h-4 border border-[#444] overflow-hidden flex">
+                <div id="rp-seg-scan" class="h-4 transition-all duration-300 shrink-0" style="width:0%; background:#1f538d"></div>
+                <div id="rp-seg-meta" class="h-4 transition-all duration-300 shrink-0" style="width:0%; background:#d48a04"></div>
+                <div id="rp-seg-strip" class="h-4 transition-all duration-300 shrink-0" style="width:0%; background:#228b22"></div>
+                <div id="rp-seg-render" class="h-4 transition-all duration-300 shrink-0" style="width:0%; background:#7c3aed"></div>
+            </div>
+            <div class="flex gap-4 mt-1 text-xs text-gray-500 flex-wrap">
+                <span class="flex items-center gap-1"><span class="inline-block w-2 h-2 rounded-full" style="background:#1f538d"></span>[掃描] <span id="rp-lbl-scan">0%</span></span>
+                <span class="flex items-center gap-1"><span class="inline-block w-2 h-2 rounded-full" style="background:#d48a04"></span>[Meta/Hash] <span id="rp-lbl-meta">0%</span></span>
+                <span class="flex items-center gap-1"><span class="inline-block w-2 h-2 rounded-full" style="background:#228b22"></span>[膠卷生成] <span id="rp-lbl-strip">0%</span></span>
+                <span class="flex items-center gap-1"><span class="inline-block w-2 h-2 rounded-full" style="background:#7c3aed"></span>[報表輸出] <span id="rp-lbl-render">0%</span></span>
+            </div>
+        </div>
     </div>
 </div>

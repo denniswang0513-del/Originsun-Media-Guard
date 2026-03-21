@@ -57,7 +57,7 @@ async def get_job_history(
     task_type: Optional[str] = None,
     status: Optional[str] = None,
     q: Optional[str] = None,
-    limit: int = 100,
+    limit: int = 200,
     offset: int = 0,
 ):
     history = _load_history()
@@ -104,13 +104,14 @@ async def get_job_log(job_id: str):
         return {"log": "", "error": "Log 路徑格式不符"}
     try:
         size = os.path.getsize(resolved)
-        with open(resolved, "r", encoding="utf-8-sig") as f:
+        with open(resolved, "rb") as f:
             if size > _LOG_MAX_BYTES:
                 f.seek(max(0, size - _LOG_MAX_BYTES))
-                f.readline()  # skip partial line
-                content = f"…（僅顯示最後 {_LOG_MAX_BYTES // 1024} KB）\n" + f.read()
+                f.readline()  # skip partial line at boundary
+                raw = f.read()
+                content = f"…（僅顯示最後 {_LOG_MAX_BYTES // 1024} KB）\n" + raw.decode("utf-8-sig", errors="replace")
             else:
-                content = f.read()
+                content = f.read().decode("utf-8-sig", errors="replace")
         return {"log": content}
     except Exception as exc:
         return {"log": "", "error": str(exc)}

@@ -40,6 +40,16 @@ class JobState:
     # Per-job 報表暫停
     report_pause_event: Optional[asyncio.Event] = None
 
+    # 累計統計（由 _on_progress 更新，done 時附帶 summary）
+    total_files: int = 0
+    total_bytes: int = 0
+    done_files: int = 0
+    done_bytes: int = 0
+
+    # 驗證結果
+    verify_matched: int = 0
+    verify_mismatched: int = 0
+
     # 時間戳
     created_at: str = ""
     started_at: Optional[str] = None

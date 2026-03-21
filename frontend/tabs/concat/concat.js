@@ -30,6 +30,7 @@ let _ccSubmitting = false;
 export async function submitConcat() {
     if (_ccSubmitting) return;
     _ccSubmitting = true;
+    window._activeJobTab = 'concat';
 
     const submitBtn = document.querySelector('#tab_concat button[onclick="submitConcat()"]');
     if (submitBtn) {

@@ -9,6 +9,8 @@ from core.engine_inst import create_engine  # type: ignore
 import core.state as state  # type: ignore
 from core.logger import _emit_sync_for_job, _write_log_to_file  # type: ignore
 
+import re
+
 from core.schemas import (  # type: ignore
     BackupRequest, TranscodeRequest, ConcatRequest,
     VerifyRequest, TranscribeRequest, ReportJobRequest
@@ -145,6 +147,13 @@ async def _execute_job(job: state.JobState):
     def _on_progress(data: dict):
         data_with_id = {**data, "job_id": job_id}
         job.progress = data_with_id
+        # 累積統計供完成摘要使用
+        for key in ('total_files', 'total_bytes', 'done_files', 'done_bytes'):
+            if key in data:
+                setattr(job, key, data[key])
+        for src, dst in (('matched', 'verify_matched'), ('mismatched', 'verify_mismatched')):
+            if src in data:
+                setattr(job, dst, data[src])
         _emit_sync_for_job(job_id, 'progress', data)
 
     def _on_conflict(data: dict) -> str:
@@ -179,7 +188,25 @@ async def _execute_job(job: state.JobState):
         # Mark done
         job.status = state.JobStatus.DONE
         job.finished_at = _dt.now().isoformat()
-        await sio.emit('task_status', {'status': 'done', 'job_id': job_id})
+        # 計算耗時
+        _elapsed = 0
+        if job.started_at:
+            try:
+                _elapsed = (_dt.fromisoformat(job.finished_at) - _dt.fromisoformat(job.started_at)).total_seconds()
+            except Exception:
+                pass
+        await sio.emit('task_status', {
+            'status': 'done', 'job_id': job_id,
+            'summary': {
+                'task_type': task_type,
+                'total_files': job.total_files,
+                'total_bytes': job.total_bytes,
+                'done_bytes': job.done_bytes,
+                'elapsed_sec': _elapsed,
+                'verify_matched': job.verify_matched,
+                'verify_mismatched': job.verify_mismatched,
+            }
+        })
 
     except asyncio.CancelledError:
         job.status = state.JobStatus.CANCELLED
@@ -430,11 +457,20 @@ async def _run_transcribe(job, engine, task: TranscribeRequest):
 
     _loop = asyncio.get_running_loop()
 
+    _tr_total = len(task.sources)
+
     def _on_prog(pct, msg):
         if engine._stop_event and engine._stop_event.is_set():
             raise Exception("使用者強制中止任務")
+        # 從 msg 解析 [idx/total] 格式
+        _m = re.match(r'\[(\d+)/(\d+)\]', msg)
+        _done = int(_m.group(1)) if _m else 0
+        _tot = int(_m.group(2)) if _m else _tr_total
         asyncio.run_coroutine_threadsafe(
-            sio.emit('transcribe_progress', {'pct': pct, 'msg': msg, 'job_id': job_id}),
+            sio.emit('transcribe_progress', {
+                'pct': pct, 'msg': msg, 'job_id': job_id,
+                'done_files': _done, 'total_files': _tot,
+            }),
             _loop
         )
 

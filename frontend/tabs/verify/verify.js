@@ -60,6 +60,7 @@ let _vfSubmitting = false;
 export async function submitVerify() {
     if (_vfSubmitting) return;
     _vfSubmitting = true;
+    window._activeJobTab = 'verify';
 
     const submitBtn = document.querySelector('#tab_verify button[onclick="submitVerify()"]');
     if (submitBtn) {

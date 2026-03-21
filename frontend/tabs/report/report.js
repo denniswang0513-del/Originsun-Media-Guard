@@ -1,4 +1,4 @@
-import { appendLog, getComputeBaseUrl, setupInputDrop } from '../../js/shared/utils.js';
+import { appendLog, getComputeBaseUrl, setupInputDrop, resetProgress } from '../../js/shared/utils.js';
 
 function rptLog(msg, type = 'info') {
     // Route all report logs into the shared '當前進度追蹤' log panels
@@ -6,19 +6,15 @@ function rptLog(msg, type = 'info') {
 }
 
 export async function submitReportJob() {
+    window._activeJobTab = 'report';
     const src = document.getElementById('rpt_source')?.value.trim();
     const outDir = document.getElementById('rpt_output')?.value.trim();
     if (!src) { alert('請選擇辨源資料夾！'); return; }
     if (!outDir) { alert('請選擇報表輸出目錄！'); return; }
 
-    // Switch progress area to report mode and scroll to tracker
-    document.getElementById('progress_backup_mode')?.classList.add('hidden');
-    document.getElementById('progress_report_mode')?.classList.remove('hidden');
-    // Reset report progress bars
-    ['rpt_seg_scan', 'rpt_seg_meta', 'rpt_seg_strip', 'rpt_seg_render'].forEach(id => { const el = document.getElementById(id); if (el) el.style.width = '0%'; });
-    ['rpt_lbl_scan', 'rpt_lbl_meta', 'rpt_lbl_strip', 'rpt_lbl_render'].forEach(id => { const el = document.getElementById(id); if (el) el.textContent = '0%'; });
-    // Scroll to 當前進度追蹤 section
-    document.getElementById('terminal')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    // Reset all progress bars then show report bar
+    resetProgress();
+    document.getElementById('rp-progress')?.classList.remove('hidden');
 
     const today = new Date();
     const defaultName = today.getFullYear().toString() +

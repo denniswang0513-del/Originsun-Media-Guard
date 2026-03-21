@@ -72,6 +72,7 @@ let _tcSubmitting = false;
 export async function submitTranscode() {
     if (_tcSubmitting) return;
     _tcSubmitting = true;
+    window._activeJobTab = 'transcode';
 
     const submitBtn = document.querySelector('#tab_transcode button[onclick="submitTranscode()"]');
     if (submitBtn) {
@@ -204,15 +205,12 @@ export async function verifyStandaloneProxies() {
         if (missingSources.length === 0) {
             appendLog('✅ 所有預期的 Proxy 檔案皆已正常產出！', 'system');
 
-            const segTrans = document.getElementById('seg_trans');
-            const lblTrans = document.getElementById('lbl_trans');
-            if (segTrans) { segTrans.style.width = '100%'; segTrans.style.backgroundColor = '#228b22'; }
-            if (lblTrans) lblTrans.textContent = '✅ 完成';
-
-            const progLabel = document.getElementById('prog_label');
-            const progEta   = document.getElementById('prog_eta');
-            if (progLabel) progLabel.textContent = '🎉 轉 Proxy 完成 ✅';
-            if (progEta) progEta.textContent = '';
+            const tcBar = document.getElementById('tc-prog-bar');
+            const tcLabel = document.getElementById('tc-prog-label');
+            if (tcBar) { tcBar.style.width = '100%'; tcBar.style.backgroundColor = '#228b22'; }
+            if (tcLabel) tcLabel.textContent = '🎉 轉 Proxy 完成 ✅';
+            const tcEta = document.getElementById('tc-prog-eta');
+            if (tcEta) tcEta.textContent = '';
 
             for (const [ip] of Object.entries(window._activeRemoteHosts || {})) {
                 if(window.updateHostProgress) window.updateHostProgress(ip, 100, '✅ 驗證完成', '#228b22');

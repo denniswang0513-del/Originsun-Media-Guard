@@ -104,24 +104,58 @@ export async function pickPath(inputId, type = 'folder') {
 }
 
 export function resetProgress() {
-    ['seg_backup', 'seg_trans', 'seg_concat', 'seg_report'].forEach(id => {
+    // ── Backup TAB (four-segment) ──
+    ['bk-seg-backup', 'bk-seg-trans', 'bk-seg-concat', 'bk-seg-report'].forEach(id => {
         const el = document.getElementById(id);
-        if (el) el.style.width = '0%';
+        if (el) { el.style.width = '0%'; if (id === 'bk-seg-report') el.classList.add('hidden'); }
     });
-    ['lbl_backup', 'lbl_trans', 'lbl_concat', 'lbl_report'].forEach(id => {
+    ['bk-lbl-backup', 'bk-lbl-trans', 'bk-lbl-concat', 'bk-lbl-report'].forEach(id => {
         const el = document.getElementById(id);
         if (el) el.textContent = '0%';
     });
-    const progLabel = document.getElementById('prog_label');
-    const progEta = document.getElementById('prog_eta');
-    if (progLabel) progLabel.textContent = '等待開始...';
-    if (progEta) progEta.textContent = '';
-    
+    document.getElementById('bk-legend-report')?.classList.add('hidden');
+    const bkLabel = document.getElementById('bk-prog-label');
+    if (bkLabel) bkLabel.textContent = '進度：尚未開始';
+    const bkEta = document.getElementById('bk-prog-eta');
+    if (bkEta) bkEta.textContent = '';
+    document.getElementById('bk-progress')?.classList.add('hidden');
+
+    // ── Standalone TABs (single bar) ──
+    ['vf', 'tc', 'ct'].forEach(prefix => {
+        const bar = document.getElementById(prefix + '-prog-bar');
+        if (bar) bar.style.width = '0%';
+        const lbl = document.getElementById(prefix + '-prog-label');
+        if (lbl) lbl.textContent = '進度：尚未開始';
+        const eta = document.getElementById(prefix + '-prog-eta');
+        if (eta) eta.textContent = '';
+        const detail = document.getElementById(prefix + '-prog-detail');
+        if (detail) detail.textContent = '';
+        document.getElementById(prefix + '-progress')?.classList.add('hidden');
+    });
+
+    // ── Report TAB (four-segment) ──
+    ['rp-seg-scan', 'rp-seg-meta', 'rp-seg-strip', 'rp-seg-render'].forEach(id => {
+        const el = document.getElementById(id);
+        if (el) el.style.width = '0%';
+    });
+    ['rp-lbl-scan', 'rp-lbl-meta', 'rp-lbl-strip', 'rp-lbl-render'].forEach(id => {
+        const el = document.getElementById(id);
+        if (el) el.textContent = '0%';
+    });
+    const rpLabel = document.getElementById('rp-prog-label');
+    if (rpLabel) rpLabel.textContent = '備用中...';
+    document.getElementById('rp-progress')?.classList.add('hidden');
+
+    // ── Shared controls ──
     const btnReport = document.getElementById('btn_open_report');
     if (btnReport) btnReport.style.display = 'none';
-    
-    document.getElementById('remote_hosts_progress')?.classList.add('hidden');
+
+    // ── Remote host progress ──
+    ['bk', 'tc', 'ct'].forEach(p => document.getElementById(p + '-remote-hosts-progress')?.classList.add('hidden'));
     if (window._heartbeatTimer) clearInterval(window._heartbeatTimer);
+
+    // Reset active job tab
+    window._activeJobTab = null;
 }
 
 // ── 共用主機選擇模組 ──

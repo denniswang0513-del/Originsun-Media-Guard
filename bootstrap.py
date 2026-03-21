@@ -39,11 +39,8 @@ def _kill_port(port):
                 pid = int(line.split()[-1])
                 if pid == os.getpid():
                     continue
-                try:
-                    os.kill(pid, signal.SIGTERM)
-                except OSError:
-                    subprocess.run(["taskkill", "/F", "/PID", str(pid)],
-                                   capture_output=True)
+                subprocess.run(["taskkill", "/F", "/PID", str(pid)],
+                               capture_output=True)
                 killed.append(pid)
                 print(f"  Killed PID {pid}")
     except Exception as e:
@@ -158,15 +155,22 @@ def run_update(server_url=""):
         shutil.rmtree(backup_dir, ignore_errors=True)
         os.makedirs(backup_dir)
         with zipfile.ZipFile(zip_path, "r") as zf:
+            backed_up = 0
+            failed = 0
             for name in zf.namelist():
                 if name.endswith("/"):
                     continue  # skip directories
                 src = os.path.join(base_dir, name)
                 if os.path.isfile(src):
                     dst = os.path.join(backup_dir, name)
-                    os.makedirs(os.path.dirname(dst), exist_ok=True)
-                    shutil.copy2(src, dst)
-            print(f"  Backup saved to {backup_dir}")
+                    try:
+                        os.makedirs(os.path.dirname(dst), exist_ok=True)
+                        shutil.copy2(src, dst)
+                        backed_up += 1
+                    except Exception as e:
+                        print(f"  Warning: failed to backup {name}: {e}")
+                        failed += 1
+            print(f"  Backup: {backed_up} file(s) saved, {failed} failed.")
             # Extract inside the same ZipFile context
             print("[System] Extracting update...")
             zf.extractall(base_dir)

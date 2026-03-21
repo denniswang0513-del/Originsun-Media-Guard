@@ -93,6 +93,7 @@ let _submitting = false;
 export async function submitJob() {
     if (_submitting) return;
     _submitting = true;
+    window._activeJobTab = 'backup';
 
     const submitBtn = document.querySelector('#tab_backup button[onclick="submitJob()"]');
     if (submitBtn) {
@@ -115,8 +116,8 @@ export async function submitJob() {
     const doReport = payload.do_report;
 
     // Show / hide report progress segment based on selection
-    const segReport = document.getElementById('seg_report');
-    const legendReport = document.getElementById('legend_report');
+    const segReport = document.getElementById('bk-seg-report');
+    const legendReport = document.getElementById('bk-legend-report');
     if (segReport) segReport.classList.toggle('hidden', !doReport);
     if (legendReport) legendReport.classList.toggle('hidden', !doReport);
 

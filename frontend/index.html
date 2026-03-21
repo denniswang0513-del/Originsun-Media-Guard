@@ -170,7 +170,7 @@
         <!-- Progress Tracking -->
         <section class="bg-[#2a2a2a] p-5 rounded-lg border border-[#3a3a3a] shadow-sm">
             <div class="flex justify-between items-center mb-4">
-                <h2 class="text-lg font-semibold text-[#e0e0e0]">當前進度追蹤</h2>
+                <h2 class="text-lg font-semibold text-[#e0e0e0]">執行控制與日誌</h2>
                 <div class="flex gap-2">
                     <!-- 📄 開啟報表按鈕 (任務完成後顯示) -->
                     <button id="btn_open_report" onclick="openReport()" style="display:none;"
@@ -190,73 +190,6 @@
                         class="bg-[#8b0000] hover:bg-[#cc2200] text-white text-xs py-1 px-3 rounded transition-colors">強制中止</button>
                 </div>
             </div>
-
-            <!-- Progress: auto-switches between backup mode and report mode -->
-            <!-- Backup / Transcode mode -->
-            <div id="progress_backup_mode" class="mb-4">
-                <div class="flex justify-between text-xs text-gray-400 mb-1">
-                    <span id="prog_label">進度：尚未開始</span>
-                    <span id="prog_eta"></span>
-                </div>
-                <div class="relative w-full bg-[#1e1e1e] rounded-full h-4 border border-[#444] overflow-hidden flex">
-                    <div id="seg_backup" class="h-4 transition-all duration-300 shrink-0"
-                        style="width: 0%; background-color: #1f538d;"></div>
-                    <div id="seg_trans" class="h-4 transition-all duration-300 shrink-0"
-                        style="width: 0%; background-color: #d48a04;"></div>
-                    <div id="seg_concat" class="h-4 transition-all duration-300 shrink-0"
-                        style="width: 0%; background-color: #228b22;"></div>
-                    <div id="seg_report" class="h-4 transition-all duration-300 shrink-0 hidden"
-                        style="width: 0%; background-color: #7c3aed;"></div>
-                </div>
-                <div class="flex gap-4 mt-1 text-xs text-gray-500 flex-wrap">
-                    <span class="flex items-center gap-1"><span class="inline-block w-2 h-2 rounded-full"
-                            style="background:#1f538d"></span>[備份] <span id="lbl_backup">0%</span></span>
-                    <span class="flex items-center gap-1"><span class="inline-block w-2 h-2 rounded-full"
-                            style="background:#d48a04"></span>[轉檔] <span id="lbl_trans">0%</span></span>
-                    <span class="flex items-center gap-1"><span class="inline-block w-2 h-2 rounded-full"
-                            style="background:#228b22"></span>[串帶] <span id="lbl_concat">0%</span></span>
-                    <span id="legend_report" class="flex items-center gap-1 hidden"><span
-                            class="inline-block w-2 h-2 rounded-full" style="background:#7c3aed"></span>[報表生成] <span
-                            id="lbl_report">0%</span></span>
-                </div>
-            </div>
-
-            <!-- Report mode: 4-segment progress bar (hidden until report job starts) -->
-            <div id="progress_report_mode" class="mb-4 hidden">
-                <div class="flex justify-between text-xs text-gray-400 mb-1">
-                    <span id="rpt_prog_label">備用中...</span>
-                    <span id="rpt_prog_eta"></span>
-                </div>
-                <div class="relative w-full bg-[#1e1e1e] rounded-full h-4 border border-[#444] overflow-hidden flex">
-                    <div id="rpt_seg_scan" class="h-4 transition-all duration-300" style="width:0%; background:#1f538d">
-                    </div>
-                    <div id="rpt_seg_meta" class="h-4 transition-all duration-300" style="width:0%; background:#d48a04">
-                    </div>
-                    <div id="rpt_seg_strip" class="h-4 transition-all duration-300"
-                        style="width:0%; background:#228b22"></div>
-                    <div id="rpt_seg_render" class="h-4 transition-all duration-300"
-                        style="width:0%; background:#7c3aed"></div>
-                </div>
-                <div class="flex gap-4 mt-1 text-xs text-gray-500 flex-wrap">
-                    <span class="flex items-center gap-1"><span class="inline-block w-2 h-2 rounded-full"
-                            style="background:#1f538d"></span>[掃描] <span id="rpt_lbl_scan">0%</span></span>
-                    <span class="flex items-center gap-1"><span class="inline-block w-2 h-2 rounded-full"
-                            style="background:#d48a04"></span>[Meta/Hash] <span id="rpt_lbl_meta">0%</span></span>
-                    <span class="flex items-center gap-1"><span class="inline-block w-2 h-2 rounded-full"
-                            style="background:#228b22"></span>[膠卷生成] <span id="rpt_lbl_strip">0%</span></span>
-                    <span class="flex items-center gap-1"><span class="inline-block w-2 h-2 rounded-full"
-                            style="background:#7c3aed"></span>[報表輸出] <span id="rpt_lbl_render">0%</span></span>
-                </div>
-            </div>
-
-
-            <!-- 遠端主機轉檔進度 -->
-            <div id="remote_hosts_progress" class="hidden mb-4 p-3 bg-[#1a1a2e] border border-[#2e3a6e] rounded-lg">
-                <div class="text-xs text-blue-400 font-semibold mb-2">🖥️ 遠端主機轉檔進度</div>
-                <div id="remote_host_rows" class="flex flex-col gap-2"></div>
-            </div>
-
-            <!-- 整合結果面板已依使用者要求移除 -->
 
             <!-- Terminal Logs -->
             <div class="mt-4 grid grid-cols-2 gap-4">
