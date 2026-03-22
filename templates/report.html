@@ -292,12 +292,15 @@
                 padding: 0 0 4px 0 !important;
                 border-bottom: none !important;
             }
+            .filmstrip-row td {
+                overflow-x: auto !important;
+                -webkit-overflow-scrolling: touch;
+            }
             .filmstrip-row img {
                 border-radius: 0;
-                width: 100%;
-                min-height: 72px;
-                object-fit: cover;
-                object-position: center;
+                width: auto;
+                height: 80px;
+                max-width: none;
             }
 
             /* 詳細資訊行（預設隱藏，toggle 開啟） */
