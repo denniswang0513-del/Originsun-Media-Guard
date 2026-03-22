@@ -218,6 +218,117 @@
             padding-bottom: 30px;
         }
 
+        /* ─── Mobile RWD: 純圖流 ─── */
+        /* ─── Mobile: 詳細資訊 toggle 按鈕 ─── */
+        .mobile-detail-toggle {
+            display: none; /* Desktop 隱藏 */
+        }
+        .mobile-detail-row {
+            display: none; /* Desktop 不需要，已有表格欄位 */
+        }
+
+        @media (max-width: 768px) {
+            .page-wrapper { margin: 4px auto; padding: 0; }
+
+            /* Header 垂直堆疊 */
+            .report-header { flex-direction: column; align-items: flex-start; padding: 14px 16px; }
+            .report-header h1 { font-size: 17px; }
+
+            /* Summary 2x2 */
+            .summary-grid { grid-template-columns: 1fr 1fr; gap: 6px; margin-bottom: 10px; }
+            .summary-card { padding: 10px; }
+            .summary-card .value { font-size: 16px; }
+
+            /* 詳細資訊 toggle 按鈕 */
+            .mobile-detail-toggle {
+                display: inline-block;
+                background: #eee;
+                border: 1px solid #ddd;
+                border-radius: 6px;
+                padding: 6px 14px;
+                font-size: 12px;
+                color: #555;
+                cursor: pointer;
+                margin: 8px 12px;
+            }
+            .mobile-detail-toggle:active { background: #ddd; }
+            .mobile-detail-toggle.active { background: #D48A04; color: #fff; border-color: #D48A04; }
+
+            /* 隱藏表頭 */
+            .files-table-wrapper h2 { font-size: 13px; padding: 10px 12px; display: inline; }
+            thead { display: none; }
+
+            /* 資訊行：只顯示檔名+大小 */
+            tbody tr:not(.filmstrip-row):not(.mobile-detail-row) {
+                display: flex;
+                flex-wrap: wrap;
+                align-items: baseline;
+                padding: 8px 6px 2px;
+                border-bottom: none;
+                gap: 0 8px;
+            }
+            tbody tr:not(.filmstrip-row):not(.mobile-detail-row) td { display: none; padding: 0; }
+            /* #序號 */
+            tbody tr:not(.filmstrip-row):not(.mobile-detail-row) td:nth-child(1) {
+                display: inline; font-size: 10px; color: #bbb;
+            }
+            /* 檔名 */
+            tbody tr:not(.filmstrip-row):not(.mobile-detail-row) td:nth-child(2) {
+                display: inline; flex: 1; min-width: 0;
+            }
+            tbody tr:not(.filmstrip-row):not(.mobile-detail-row) td:nth-child(2) .file-name {
+                font-size: 13px; font-weight: 600; max-width: none; display: inline;
+            }
+            tbody tr:not(.filmstrip-row):not(.mobile-detail-row) td:nth-child(2) .file-path { display: none; }
+            /* 大小 */
+            tbody tr:not(.filmstrip-row):not(.mobile-detail-row) td:nth-child(3) {
+                display: inline; font-size: 11px; color: #888;
+            }
+
+            /* 膠卷圖：全寬無間距，圖更大 */
+            .filmstrip-row { display: block; }
+            .filmstrip-row td {
+                display: block !important;
+                padding: 0 0 4px 0 !important;
+                border-bottom: none !important;
+            }
+            .filmstrip-row img {
+                border-radius: 0;
+                width: 100%;
+                min-height: 72px;
+                object-fit: cover;
+                object-position: center;
+            }
+
+            /* 詳細資訊行（預設隱藏，toggle 開啟） */
+            .mobile-detail-row {
+                display: none;
+                padding: 0 8px 8px;
+                border-bottom: 2px solid #e8e8e8;
+            }
+            .mobile-detail-row.show { display: block; }
+            .mobile-detail-row td {
+                display: block !important;
+                padding: 0 !important;
+            }
+            .mobile-detail-grid {
+                display: grid;
+                grid-template-columns: 1fr 1fr;
+                gap: 2px 12px;
+                font-size: 11px;
+                color: #666;
+                padding: 4px 8px 6px;
+                background: #fafafa;
+                border-radius: 4px;
+            }
+            .mobile-detail-grid .mdg-label { color: #999; font-size: 10px; }
+            .mobile-detail-grid .mdg-value { color: #333; }
+
+            .report-footer { font-size: 10px; padding-bottom: 16px; }
+
+            .report-footer { font-size: 10px; padding-bottom: 16px; }
+        }
+
         /* ─── Print Styles ─── */
         @media print {
             @page {
@@ -323,6 +434,9 @@
         <!-- File Details Table -->
         <div class="files-table-wrapper">
             <h2>📋 檔案詳細資訊</h2>
+            <button class="mobile-detail-toggle" onclick="this.classList.toggle('active'); document.querySelectorAll('.mobile-detail-row').forEach(r => r.classList.toggle('show'));">
+                📊 顯示技術規格
+            </button>
             <table>
                 <thead>
                     <tr>
@@ -406,6 +520,25 @@
                         </td>
                     </tr>
                     {% endif %}
+                    <!-- Mobile: 詳細資訊（toggle 控制） -->
+                    <tr class="mobile-detail-row">
+                        <td colspan="8">
+                            <div class="mobile-detail-grid">
+                                <span class="mdg-label">解析度</span>
+                                <span class="mdg-value">{{ rec.resolution or '—' }}</span>
+                                <span class="mdg-label">時長</span>
+                                <span class="mdg-value">{{ rec.duration | fmt_clip_dur }}</span>
+                                <span class="mdg-label">幀率</span>
+                                <span class="mdg-value">{{ rec.fps or '—' }}</span>
+                                <span class="mdg-label">編碼</span>
+                                <span class="mdg-value">{{ (rec.codec or '—') | upper }}</span>
+                                {% if rec.xxh64 %}
+                                <span class="mdg-label">XXH64</span>
+                                <span class="mdg-value" style="font-family:monospace; font-size:10px;">{{ rec.xxh64[:12] }}…</span>
+                                {% endif %}
+                            </div>
+                        </td>
+                    </tr>
                     {% else %}
                     <tr>
                         <td colspan="8" style="text-align:center; color:#bbb; padding:30px;">尚無檔案資料</td>
