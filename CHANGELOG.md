@@ -4,6 +4,29 @@
 
 ---
 
+## [1.9.6] - 2026-03-22
+
+### 新增
+- 所有 TAB 統一動作列：`[暫停] [中止]` + `[排程] [開始/開始新佇列]`，按任務狀態動態切換
+- 處理主機狀態燈（綠=連線/紅=離線），IP 顯示去掉 port
+- 日誌左欄改為「任務摘要」（只顯示 system + error），右欄「全部日誌」含遠端主機 log
+- 遠端 log 自動分類（含 `[Engine]`/`完成`/`開始` → system，含 `失敗`/`錯誤` → error）
+- `apiControl('stop')` 全面清理狀態（pipeline/heartbeat/remote hosts 一次清除）
+- 報表完成時自動重新載入報表歷史列表
+
+### 修正
+- 備份完成摘要顯示「串帶完成」而非「全部完成」— 根因：`resetProgress()` 意外清除 `_backupPipeline`
+- `resetProgress()` 不再清除 `_backupPipeline` 和 `_backupReportPending`（備份子任務 running 事件需要保留）
+- 備份報表段在多機模式下不顯示 — 修正 `_chkReport` 同時檢查 checkbox 和 `_backupReportPending`
+- TTS 遠端主機完成後主進度條未更新
+
+### 優化
+- `updateActionBarState()` DOM 查詢快取（延遲初始化，避免每次呼叫重新查詢）
+- 遠端 log 分類 regex 預編譯（避免 heartbeat 每次迭代重新編譯）
+- 各 TAB 加分隔線統一視覺結構
+
+---
+
 ## [1.9.4] - 2026-03-20
 
 ### 新增

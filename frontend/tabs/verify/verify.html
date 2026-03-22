@@ -43,15 +43,18 @@
         </div>
     </div>
 </div>
-<div class="mt-6 flex justify-end gap-3 pt-4 border-t border-[#3a3a3a]">
-    <button onclick="scheduleJob('verify')"
-        class="bg-[#333] hover:bg-[#444] text-gray-300 font-bold py-2 px-6 rounded shadow text-sm transition-colors border border-[#555]">
-        排程
-    </button>
-    <button onclick="submitVerify()"
-        class="bg-[#555555] hover:bg-[#666666] text-white font-bold py-2 px-8 rounded shadow text-sm transition-colors">
-        開始比對
-    </button>
+<div class="mt-6 border-t border-[#3a3a3a] pt-4">
+<div class="flex justify-between items-center" id="vf-action-bar">
+    <div class="flex gap-2 tab-control-btns hidden">
+        <button onclick="apiControl('pause')" class="bg-[#7a5500] hover:bg-[#b07a00] text-white text-xs font-bold py-2 px-4 rounded shadow transition-colors">暫停</button>
+        <button onclick="apiControl('resume')" class="bg-[#3a5a3a] hover:bg-[#4a7a4a] text-white text-xs font-bold py-2 px-4 rounded shadow transition-colors">繼續</button>
+        <button onclick="apiControl('stop')" class="bg-[#8b0000] hover:bg-[#cc2200] text-white text-xs font-bold py-2 px-4 rounded shadow transition-colors">強制中止</button>
+    </div>
+    <div class="flex gap-3 ml-auto">
+        <button onclick="scheduleJob('verify')" class="bg-[#333] hover:bg-[#444] text-gray-300 font-bold py-2 px-6 rounded shadow text-sm transition-colors border border-[#555]">排程</button>
+        <button class="tab-start-btn bg-[#555555] hover:bg-[#666666] text-white font-bold py-2 px-8 rounded shadow text-sm transition-colors"
+            onclick="submitVerify()" data-idle-text="開始" data-busy-text="開始新佇列">開始</button>
+    </div>
 </div>
 
 <!-- Progress Bar -->
@@ -68,4 +71,5 @@
 <div id="vf-remote-hosts-progress" class="hidden mt-2 mb-2 p-3 bg-[#1a1a2e] border border-[#2e3a6e] rounded-lg">
     <div class="text-xs text-blue-300 mb-2 font-semibold">🖥️ 遠端主機進度</div>
     <div id="vf-remote-host-rows" class="flex flex-col gap-2"></div>
+</div>
 </div>

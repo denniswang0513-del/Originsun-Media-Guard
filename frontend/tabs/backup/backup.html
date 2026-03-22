@@ -177,15 +177,26 @@
         </div>
     </div>
 
-    <div class="flex justify-end gap-3 mt-4">
-        <button onclick="scheduleJob('backup')"
-            class="bg-[#333] hover:bg-[#444] text-gray-300 font-bold py-2 px-6 rounded shadow text-sm transition-colors border border-[#555]">
-            排程
-        </button>
-        <button onclick="submitJob()"
-            class="bg-[#1f538d] hover:bg-[#2a6cbf] text-white font-bold py-2 px-8 rounded shadow text-sm transition-colors">
-            開始備份
-        </button>
+    <div class="mt-6 border-t border-[#3a3a3a] pt-4">
+    <div class="flex justify-between items-center" id="bk-action-bar">
+        <div class="flex gap-2 tab-control-btns hidden">
+            <button onclick="apiControl('pause')"
+                class="bg-[#7a5500] hover:bg-[#b07a00] text-white text-xs font-bold py-2 px-4 rounded shadow transition-colors">暫停</button>
+            <button onclick="apiControl('resume')"
+                class="bg-[#3a5a3a] hover:bg-[#4a7a4a] text-white text-xs font-bold py-2 px-4 rounded shadow transition-colors">繼續</button>
+            <button onclick="apiControl('stop')"
+                class="bg-[#8b0000] hover:bg-[#cc2200] text-white text-xs font-bold py-2 px-4 rounded shadow transition-colors">強制中止</button>
+        </div>
+        <div class="flex gap-3 ml-auto">
+            <button onclick="scheduleJob('backup')"
+                class="bg-[#333] hover:bg-[#444] text-gray-300 font-bold py-2 px-6 rounded shadow text-sm transition-colors border border-[#555]">
+                排程
+            </button>
+            <button class="tab-start-btn bg-[#1f538d] hover:bg-[#2a6cbf] text-white font-bold py-2 px-8 rounded shadow text-sm transition-colors"
+                onclick="submitJob()" data-idle-text="開始" data-busy-text="開始新佇列">
+                開始
+            </button>
+        </div>
     </div>
 
     <!-- Progress Bar (四段式：備份/轉檔/串接/報表) -->

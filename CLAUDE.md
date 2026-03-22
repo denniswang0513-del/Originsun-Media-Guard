@@ -1,6 +1,6 @@
 # Originsun Media Guard Pro — Claude Code 完整交接文件
 
-> **版本**: v1.9.4（2026-03-20）
+> **版本**: v1.9.6（2026-03-22）
 > **目標讀者**: 接手開發的 AI 協作者（Claude Code）
 > **開發環境**: Windows 11、Python 3.11、Vanilla JS (ES Modules)
 > **啟動方式**: `d:\Antigravity\OriginsunTranscode\.venv\Scripts\python.exe main.py`

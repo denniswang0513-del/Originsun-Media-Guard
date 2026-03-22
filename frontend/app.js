@@ -255,6 +255,7 @@ if (typeof appendLog === 'undefined') {
                 const retryBtn = document.getElementById('btn_retry');
 
                 if (data.status === 'running') {
+                    updateActionBarState('running');
                     // 多機模式：派發中/heartbeat 執行中，不清空進度
                     if (window._remoteDispatching || window._heartbeatTimer ||
                         (window._activeRemoteHosts && Object.keys(window._activeRemoteHosts).length > 0)) {
@@ -304,10 +305,12 @@ if (typeof appendLog === 'undefined') {
 
                     if (typeof appendLog === 'function') appendLog('系統：所有排定任務執行完畢！', 'system');
                     showCompletionSummary(data.summary, window._activeJobTab);
+                    updateActionBarState('idle');
                     if (retryBtn) retryBtn.style.display = 'none';
                     playDing();
 
                 } else if (data.status === 'error') {
+                    updateActionBarState('idle');
                     if (typeof appendLog === 'function') appendLog('系統提示：任務執行發生錯誤：' + data.detail, 'error');
                     // 顯示重試按鈕（如果有記錄上次任務）
                     if (retryBtn && window._lastJob) retryBtn.style.display = 'inline-block';
@@ -464,8 +467,10 @@ if (typeof appendLog === 'undefined') {
                     }
                     appendLog('系統：所有排定任務執行完畢！', 'system');
                     showCompletionSummary({ task_type: 'backup', elapsed_sec: 0 }, 'backup');
+                    updateActionBarState('idle');
                     playDing();
                 }
+                updateActionBarState('idle');
                 const retryBtn = document.getElementById('btn_retry');
                 if (retryBtn) retryBtn.style.display = 'none';
                 
@@ -1454,6 +1459,10 @@ if (typeof appendLog === 'undefined') {
             if (lbl) lbl.textContent = txt || (pct + '%');
         }
 
+        // 預編譯遠端 log 分類 regex（避免 heartbeat 每次迭代重新編譯）
+        const _RE_SYSTEM_LOG = /\[Engine\]|系統|✅|完成|開始/;
+        const _RE_ERROR_LOG = /\[!\]|❌|失敗|錯誤|error|FAIL/i;
+
         function startHeartbeatMonitor() {
             if (window._heartbeatTimer) clearInterval(window._heartbeatTimer);
             window._heartbeatTimer = setInterval(async () => {
@@ -1474,7 +1483,11 @@ if (typeof appendLog === 'undefined') {
                             if (d.logs && d.logs.length > 0) {
                                 d.logs.forEach(msg => {
                                     if (typeof appendLog === 'function') {
-                                        appendLog(`[${info.host.name}] ${msg.replace(/^\[.*?\]\s*/, '')}`, 'info');
+                                        const cleanMsg = msg.replace(/^\[.*?\]\s*/, '');
+                                        let _lt = 'info';
+                                        if (_RE_SYSTEM_LOG.test(cleanMsg)) _lt = 'system';
+                                        if (_RE_ERROR_LOG.test(cleanMsg)) _lt = 'error';
+                                        appendLog(`[${info.host.name}] ${cleanMsg}`, _lt);
                                     }
                                 });
                             }
@@ -1605,6 +1618,11 @@ if (typeof appendLog === 'undefined') {
                                 if (_pct) _pct.textContent = '100%';
                             }
                             stopHeartbeatMonitor();
+                            // 報表完成時刷新歷史列表
+                            if (_rjt === 'report' && typeof loadReportHistory === 'function') {
+                                loadReportHistory();
+                            }
+                            updateActionBarState('idle');
                             playDing();
                         }
                     }, 2000);
@@ -2123,31 +2141,59 @@ if (typeof appendLog === 'undefined') {
 
 
 
+        // ── 統一按鈕列狀態切換（DOM refs 延遲快取）──
+        let _cachedControlBtns = null;
+        let _cachedStartBtns = null;
+        function updateActionBarState(state) {
+            if (!_cachedControlBtns) _cachedControlBtns = Array.from(document.querySelectorAll('.tab-control-btns'));
+            if (!_cachedStartBtns) _cachedStartBtns = Array.from(document.querySelectorAll('.tab-start-btn'));
+            _cachedControlBtns.forEach(el => {
+                el.classList.toggle('hidden', state === 'idle');
+            });
+            _cachedStartBtns.forEach(btn => {
+                const idle = btn.dataset.idleText || '開始';
+                const busy = btn.dataset.busyText || '開始新佇列';
+                btn.textContent = state === 'idle' ? idle : busy;
+            });
+        }
+        window.updateActionBarState = updateActionBarState;
+
         async function apiControl(cmd) {
-            if (cmd === 'stop') {
-                window._remoteDispatch = null;
-                window._postMergeFlags = null;
-            }
+            const cmdLabel = cmd === 'pause' ? '暫停' : cmd === 'resume' ? '繼續' : '強制中止';
 
             // 1. 發送給本機
             try {
-                const res = await fetch(getComputeBaseUrl() + `/api/v1/control/${cmd}`, { method: 'POST' });
-                const r = await res.json();
-                appendLog(`[本機] 發送控制指令 [${cmd === 'pause' ? '暫停' : cmd === 'resume' ? '繼續' : '強制中止'}] 成功`, 'system');
+                await fetch(getComputeBaseUrl() + `/api/v1/control/${cmd}`, { method: 'POST' });
+                appendLog(`[本機] ${cmdLabel} 成功`, 'system');
             } catch (err) {
-                appendLog(`[本機] 發送控制指令失敗: ${err.message}`, 'error');
+                appendLog(`[本機] ${cmdLabel} 失敗: ${err.message}`, 'error');
             }
 
             // 2. 發送給所有活躍中的遠端主機
             const activeHosts = Object.keys(window._activeRemoteHosts || {});
             for (const ip of activeHosts) {
                 try {
-                    const hostUrl = 'http://' + ip;
-                    await fetch(hostUrl + `/api/v1/control/${cmd}`, { method: 'POST' });
-                    appendLog(`[${ip}] 發送控制指令 [${cmd}] 成功`, 'system');
+                    await fetch('http://' + ip + `/api/v1/control/${cmd}`, { method: 'POST' });
+                    appendLog(`[${ip}] ${cmdLabel} 成功`, 'system');
                 } catch (e) {
-                    appendLog(`[${ip}] 發送控制指令失敗: ${e.message}`, 'error');
+                    appendLog(`[${ip}] ${cmdLabel} 失敗: ${e.message}`, 'error');
                 }
+            }
+
+            // 3. 強制中止：清理所有狀態
+            if (cmd === 'stop') {
+                window._remoteDispatch = null;
+                window._postMergeFlags = null;
+                window._backupPipeline = null;
+                window._backupReportPending = false;
+                window._backupFinalShown = false;
+                window._concatMultiCard = null;
+                window._activeRemoteHosts = {};
+                if (window._heartbeatTimer) { clearInterval(window._heartbeatTimer); window._heartbeatTimer = null; }
+                window._remoteDispatching = false;
+                updateActionBarState('idle');
+                if (typeof resetProgress === 'function') resetProgress();
+                appendLog('系統：已全部中止（本機 + 所有遠端主機）', 'system');
             }
         }
 

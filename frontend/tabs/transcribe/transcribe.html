@@ -112,8 +112,22 @@
     </div>
 </div>
 
+<div class="mt-6 border-t border-[#3a3a3a] pt-4">
+<div class="flex justify-between items-center" id="tr-action-bar">
+    <div class="flex gap-2 tab-control-btns hidden">
+        <button onclick="apiControl('pause')" class="bg-[#7a5500] hover:bg-[#b07a00] text-white text-xs font-bold py-2 px-4 rounded shadow transition-colors">暫停</button>
+        <button onclick="apiControl('resume')" class="bg-[#3a5a3a] hover:bg-[#4a7a4a] text-white text-xs font-bold py-2 px-4 rounded shadow transition-colors">繼續</button>
+        <button onclick="apiControl('stop')" class="bg-[#8b0000] hover:bg-[#cc2200] text-white text-xs font-bold py-2 px-4 rounded shadow transition-colors">強制中止</button>
+    </div>
+    <div class="flex gap-3 ml-auto">
+        <button onclick="scheduleJob('transcribe')" class="bg-[#333] hover:bg-[#444] text-gray-300 font-bold py-2 px-6 rounded shadow text-sm transition-colors border border-[#555]">排程</button>
+        <button class="tab-start-btn bg-emerald-700 hover:bg-emerald-600 text-white font-bold py-2 px-8 rounded shadow text-sm transition-colors"
+            onclick="submitTranscribeJob()" data-idle-text="開始" data-busy-text="開始新佇列">開始</button>
+    </div>
+</div>
+
 <!-- Transcribe progress bar -->
-<div id="transcribe_progress_area" class="hidden mt-5 p-4 bg-[#1e1e1e] border border-[#333] rounded-lg">
+<div id="transcribe_progress_area" class="hidden mt-4 p-4 bg-[#1e1e1e] border border-[#333] rounded-lg">
     <div class="flex justify-between text-xs text-gray-400 mb-1">
         <span id="transcribe_prog_label">準備中...</span>
         <span id="transcribe_prog_pct">0%</span>
@@ -122,19 +136,9 @@
         <div id="transcribe_prog_bar" class="h-3 rounded-full transition-all duration-300" style="width: 0%; background: linear-gradient(90deg, #059669, #10b981);"></div>
     </div>
 </div>
+
 <div id="tr-remote-hosts-progress" class="hidden mt-2 mb-2 p-3 bg-[#1a1a2e] border border-[#2e3a6e] rounded-lg">
     <div class="text-xs text-blue-300 mb-2 font-semibold">🖥️ 遠端主機進度</div>
     <div id="tr-remote-host-rows" class="flex flex-col gap-2"></div>
 </div>
-
-<hr class="my-5 border-[#3a3a3a]">
-<div class="flex justify-end gap-3">
-    <button onclick="scheduleJob('transcribe')"
-        class="bg-[#333] hover:bg-[#444] text-gray-300 font-bold py-2 px-6 rounded shadow text-sm transition-colors border border-[#555]">
-        排程
-    </button>
-    <button onclick="submitTranscribeJob()"
-        class="bg-emerald-700 hover:bg-emerald-600 text-white font-bold py-2.5 px-10 rounded shadow-lg text-sm transition-all duration-200 hover:scale-105 active:scale-95">
-        🎙️ 開始生成逐字稿
-    </button>
 </div>

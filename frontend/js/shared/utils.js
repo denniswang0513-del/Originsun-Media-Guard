@@ -63,12 +63,12 @@ export function appendLog(msg, type = 'info') {
         terminalVerbose.scrollTop = 0;
     }
 
-    if (terminal && (type === 'error' || type === 'system' || type === 'info')) {
+    // 左欄「任務摘要」：只顯示關鍵訊息（system + error）
+    if (terminal && (type === 'error' || type === 'system')) {
         const divLeft = document.createElement('div');
         divLeft.textContent = formattedText;
         if (type === 'error') divLeft.className = 'text-red-400 mt-1 mb-1';
-        else if (type === 'system') divLeft.className = 'text-yellow-400 font-bold mt-1 mb-1';
-        else divLeft.className = 'text-gray-300 mb-0.5';
+        else divLeft.className = 'text-yellow-400 font-bold mt-1 mb-1';
         terminal.prepend(divLeft);
         terminal.scrollTop = 0;
     }
@@ -108,7 +108,7 @@ export function resetProgress() {
     // 根據勾選狀態決定哪些段要顯示
     const _chkTrans = document.getElementById('chk_transcode')?.checked ?? false;
     const _chkConcat = document.getElementById('chk_concat')?.checked ?? false;
-    const _chkReport = !!window._backupReportPending;
+    const _chkReport = (document.getElementById('chk_report')?.checked ?? false) || !!window._backupReportPending;
 
     ['bk-seg-backup', 'bk-seg-trans', 'bk-seg-concat', 'bk-seg-report'].forEach(id => {
         const el = document.getElementById(id);
@@ -172,10 +172,10 @@ export function resetProgress() {
     if (window._heartbeatTimer) clearInterval(window._heartbeatTimer);
     window._remoteDispatching = false;
 
-    // 不清除 _activeJobTab — 備份流程中子任務的 running 事件需要保留
+    // 不清除 _activeJobTab / _backupPipeline / _backupReportPending
+    // — 備份流程中子任務（轉檔/串帶/報表）的 running 事件會觸發 resetProgress，
+    //   但 pipeline 和 reportPending 在整個流程完成前都需要保留
     window._backupFinalShown = false;
-    window._backupPipeline = null;
-    window._backupReportPending = false;
 }
 
 // ── 共用主機選擇模組 ──
@@ -188,6 +188,49 @@ export function resetProgress() {
  * @param {boolean} [opts.localChecked=true] - 「本機」預設勾選
  * @param {string}  [opts.idPrefix] - checkbox id 前綴（避免多個選擇器 id 衝突），預設為 containerId
  */
+// 格式化 IP：去掉 port（:8000）
+function _displayIp(ip) {
+    if (!ip || ip === 'local') return '';
+    return ip.replace(/:\d+$/, '');
+}
+
+// 狀態燈 HTML
+function _dotHtml(ip) {
+    const dotId = 'host-dot-' + (ip || 'local').replace(/[.:]/g, '_');
+    return `<span id="${dotId}" class="host-status-dot" style="width:8px;height:8px;border-radius:50%;display:inline-block;background:#555;flex-shrink:0;"></span>`;
+}
+
+// 偵測所有遠端主機連線狀態，更新狀態燈
+let _hostHealthTimer = null;
+async function _checkHostHealth() {
+    const hosts = window._computeHosts || [];
+    // 本機固定綠燈
+    document.querySelectorAll('[id="host-dot-local"]').forEach(el => {
+        el.style.background = '#22c55e';
+        el.style.boxShadow = '0 0 4px #22c55e';
+    });
+    for (const h of hosts) {
+        const dotId = 'host-dot-' + (h.ip || '').replace(/[.:]/g, '_');
+        const dots = document.querySelectorAll(`[id="${dotId}"]`);
+        try {
+            const r = await fetch('http://' + h.ip + '/api/v1/health', { signal: AbortSignal.timeout(3000) });
+            if (r.ok) {
+                dots.forEach(el => { el.style.background = '#22c55e'; el.style.boxShadow = '0 0 4px #22c55e'; });
+            } else {
+                dots.forEach(el => { el.style.background = '#ef4444'; el.style.boxShadow = 'none'; });
+            }
+        } catch {
+            dots.forEach(el => { el.style.background = '#ef4444'; el.style.boxShadow = 'none'; });
+        }
+    }
+}
+
+function _startHostHealthPolling() {
+    if (_hostHealthTimer) return;
+    _checkHostHealth(); // 立即偵測一次
+    _hostHealthTimer = setInterval(_checkHostHealth, 30000); // 每 30 秒
+}
+
 export function renderHostCheckboxes(containerId, opts = {}) {
     const container = document.getElementById(containerId);
     if (!container) return;
@@ -207,16 +250,17 @@ export function renderHostCheckboxes(containerId, opts = {}) {
     if (includeLocal) {
         const lbl = document.createElement('label');
         lbl.className = 'flex items-center gap-1 text-xs text-gray-300 cursor-pointer';
-        lbl.innerHTML = `<input type="checkbox" id="${prefix}_local" data-ip="local" data-name="本機" ${localChecked ? 'checked' : ''} class="form-checkbox rounded bg-[#1e1e1e] border-[#444]"> 本機`;
+        lbl.innerHTML = `<input type="checkbox" id="${prefix}_local" data-ip="local" data-name="本機" ${localChecked ? 'checked' : ''} class="form-checkbox rounded bg-[#1e1e1e] border-[#444]"> ${_dotHtml('local')} 本機`;
         container.appendChild(lbl);
     }
     hosts.forEach((h, i) => {
         const lbl = document.createElement('label');
         lbl.className = 'flex items-center gap-1 text-xs text-gray-300 cursor-pointer';
-        lbl.innerHTML = `<input type="checkbox" id="${prefix}_${i}" data-ip="${h.ip}" data-name="${h.name}" class="form-checkbox rounded bg-[#1e1e1e] border-[#444]"> ${h.name} <span class="text-gray-500">(${h.ip})</span>`;
+        lbl.innerHTML = `<input type="checkbox" id="${prefix}_${i}" data-ip="${h.ip}" data-name="${h.name}" class="form-checkbox rounded bg-[#1e1e1e] border-[#444]"> ${_dotHtml(h.ip)} ${h.name} <span class="text-gray-500">(${_displayIp(h.ip)})</span>`;
         container.appendChild(lbl);
     });
     container.dataset.built = '1';
+    _startHostHealthPolling();
 }
 
 /**
@@ -257,16 +301,17 @@ export function renderHostRadios(containerId, opts = {}) {
     if (includeLocal) {
         const lbl = document.createElement('label');
         lbl.className = 'flex items-center gap-1 text-xs text-gray-300 cursor-pointer';
-        lbl.innerHTML = `<input type="radio" name="${groupName}" id="${prefix}_local" data-ip="local" data-name="本機" ${localChecked ? 'checked' : ''} class="form-radio bg-[#1e1e1e] border-[#444]"> 本機`;
+        lbl.innerHTML = `<input type="radio" name="${groupName}" id="${prefix}_local" data-ip="local" data-name="本機" ${localChecked ? 'checked' : ''} class="form-radio bg-[#1e1e1e] border-[#444]"> ${_dotHtml('local')} 本機`;
         container.appendChild(lbl);
     }
     hosts.forEach((h, i) => {
         const lbl = document.createElement('label');
         lbl.className = 'flex items-center gap-1 text-xs text-gray-300 cursor-pointer';
-        lbl.innerHTML = `<input type="radio" name="${groupName}" id="${prefix}_${i}" data-ip="${h.ip}" data-name="${h.name}" ${!localChecked && i === 0 ? 'checked' : ''} class="form-radio bg-[#1e1e1e] border-[#444]"> ${h.name} <span class="text-gray-500">(${h.ip})</span>`;
+        lbl.innerHTML = `<input type="radio" name="${groupName}" id="${prefix}_${i}" data-ip="${h.ip}" data-name="${h.name}" ${!localChecked && i === 0 ? 'checked' : ''} class="form-radio bg-[#1e1e1e] border-[#444]"> ${_dotHtml(h.ip)} ${h.name} <span class="text-gray-500">(${_displayIp(h.ip)})</span>`;
         container.appendChild(lbl);
     });
     container.dataset.built = '1';
+    _startHostHealthPolling();
 }
 
 export function collectSelectedHost(containerId) {

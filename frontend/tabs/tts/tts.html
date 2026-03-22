@@ -115,8 +115,20 @@
       <div id="tts_host_checkboxes" class="flex flex-wrap gap-x-4 gap-y-1"></div>
     </div>
 
-    <!-- Progress & Submit -->
-    <div id="tts_progress_area" class="hidden mt-2 p-4 bg-[#1e1e1e] border border-[#333] rounded-lg">
+    <div class="mt-6 border-t border-[#3a3a3a] pt-4">
+    <div class="flex justify-between items-center" id="tts-action-bar">
+      <div class="flex gap-2 tab-control-btns hidden">
+        <button onclick="apiControl('pause')" class="bg-[#7a5500] hover:bg-[#b07a00] text-white text-xs font-bold py-2 px-4 rounded shadow transition-colors">暫停</button>
+        <button onclick="apiControl('resume')" class="bg-[#3a5a3a] hover:bg-[#4a7a4a] text-white text-xs font-bold py-2 px-4 rounded shadow transition-colors">繼續</button>
+        <button onclick="apiControl('stop')" class="bg-[#8b0000] hover:bg-[#cc2200] text-white text-xs font-bold py-2 px-4 rounded shadow transition-colors">強制中止</button>
+      </div>
+      <div class="flex gap-3 ml-auto">
+        <button onclick="scheduleJob('tts')" class="bg-[#333] hover:bg-[#444] text-gray-300 font-bold py-2 px-6 rounded shadow text-sm transition-colors border border-[#555]">排程</button>
+        <button id="btn_start_tts" class="tab-start-btn bg-blue-700 hover:bg-blue-600 text-white font-bold py-2 px-6 rounded shadow transition-colors"
+          onclick="submitTtsJob()" data-idle-text="開始" data-busy-text="開始新佇列">開始</button>
+      </div>
+    </div>
+    <div id="tts_progress_area" class="hidden mt-4 p-4 bg-[#1e1e1e] border border-[#333] rounded-lg">
       <div class="flex justify-between text-xs text-gray-400 mb-1">
         <span id="tts_prog_label">準備中...</span>
         <span id="tts_prog_pct">0%</span>
@@ -129,15 +141,6 @@
       <div class="text-xs text-blue-300 mb-2 font-semibold">🖥️ 遠端主機進度</div>
       <div id="tts-remote-host-rows" class="flex flex-col gap-2"></div>
     </div>
-    <div class="flex justify-end gap-3 mt-2">
-      <button onclick="scheduleJob('tts')"
-        class="bg-[#333] hover:bg-[#444] text-gray-300 font-bold py-2 px-6 rounded shadow text-sm transition-colors border border-[#555]">
-        排程
-      </button>
-      <button id="btn_start_tts" onclick="submitTtsJob()"
-        class="bg-blue-700 hover:bg-blue-600 text-white font-bold py-2 px-6 rounded shadow transition-colors">
-        開始生成
-      </button>
     </div>
   </div>
 
@@ -262,8 +265,20 @@
       <div id="tts_clone_host_checkboxes" class="flex flex-wrap gap-x-4 gap-y-1"></div>
     </div>
 
-    <!-- Progress & Submit -->
-    <div id="tts_clone_progress_area" class="hidden mt-2 p-4 bg-[#1e1e1e] border border-[#333] rounded-lg">
+    <div class="mt-6 border-t border-[#3a3a3a] pt-4">
+    <div class="flex justify-between items-center" id="tts-clone-action-bar">
+      <div class="flex gap-2 tab-control-btns hidden">
+        <button onclick="apiControl('pause')" class="bg-[#7a5500] hover:bg-[#b07a00] text-white text-xs font-bold py-2 px-4 rounded shadow transition-colors">暫停</button>
+        <button onclick="apiControl('resume')" class="bg-[#3a5a3a] hover:bg-[#4a7a4a] text-white text-xs font-bold py-2 px-4 rounded shadow transition-colors">繼續</button>
+        <button onclick="apiControl('stop')" class="bg-[#8b0000] hover:bg-[#cc2200] text-white text-xs font-bold py-2 px-4 rounded shadow transition-colors">強制中止</button>
+      </div>
+      <div class="flex gap-3 ml-auto">
+        <button onclick="scheduleJob('clone')" class="bg-[#333] hover:bg-[#444] text-gray-300 font-bold py-2 px-6 rounded shadow text-sm transition-colors border border-[#555]">排程</button>
+        <button id="btn_start_clone" class="tab-start-btn bg-purple-700 hover:bg-purple-600 text-white font-bold py-2 px-6 rounded shadow transition-colors"
+          onclick="submitCloneJob()" data-idle-text="開始" data-busy-text="開始新佇列">開始</button>
+      </div>
+    </div>
+    <div id="tts_clone_progress_area" class="hidden mt-4 p-4 bg-[#1e1e1e] border border-[#333] rounded-lg">
       <div class="flex justify-between text-xs text-gray-400 mb-1">
         <span id="tts_clone_prog_label">準備中...</span>
         <span id="tts_clone_prog_pct">0%</span>
@@ -272,15 +287,6 @@
         <div id="tts_clone_prog_bar" class="h-3 rounded-full transition-all duration-300" style="width: 0%; background: linear-gradient(90deg, #8b5cf6, #a78bfa);"></div>
       </div>
     </div>
-    <div class="flex justify-end gap-3 mt-2">
-      <button onclick="scheduleJob('clone')"
-        class="bg-[#333] hover:bg-[#444] text-gray-300 font-bold py-2 px-6 rounded shadow text-sm transition-colors border border-[#555]">
-        排程
-      </button>
-      <button id="btn_start_clone" onclick="submitCloneJob()"
-        class="bg-purple-700 hover:bg-purple-600 text-white font-bold py-2 px-6 rounded shadow transition-colors">
-        開始複製生成
-      </button>
     </div>
   </div>
 
