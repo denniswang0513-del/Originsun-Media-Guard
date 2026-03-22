@@ -292,15 +292,17 @@
                 padding: 0 0 4px 0 !important;
                 border-bottom: none !important;
             }
-            .filmstrip-row td {
-                overflow-x: auto !important;
+            .filmstrip-scroll {
+                overflow-x: auto;
                 -webkit-overflow-scrolling: touch;
+                max-width: 100vw;
             }
-            .filmstrip-row img {
+            .filmstrip-scroll img {
                 border-radius: 0;
                 width: auto;
                 height: 80px;
                 max-width: none;
+                display: block;
             }
 
             /* 詳細資訊行（預設隱藏，toggle 開啟） */
@@ -518,8 +520,10 @@
                     <tr class="filmstrip-row">
                         <td colspan="8" class="film-strip-cell"
                             style="padding: 4px 12px 10px; border-bottom: 2px solid #e8e8e8;">
-                            <img src="data:image/jpeg;base64,{{ rec.film_strip_b64 }}"
-                                alt="film strip for {{ rec.filename }}">
+                            <div class="filmstrip-scroll">
+                                <img src="data:image/jpeg;base64,{{ rec.film_strip_b64 }}"
+                                    alt="film strip for {{ rec.filename }}">
+                            </div>
                         </td>
                     </tr>
                     {% endif %}
