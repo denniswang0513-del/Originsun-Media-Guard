@@ -750,7 +750,7 @@ class MediaGuardEngine:
             return {"fps": 0.0, "resolution": "", "codec": "", "duration": 0.0}
 
     @staticmethod
-    def generate_film_strip(filepath: str, frames: int = 15, thumb_width: int = 240, quality: int = 85) -> str:
+    def generate_film_strip(filepath: str, frames: int = 10, thumb_width: int = 240, quality: int = 85) -> str:
         """Extract `frames` equally-spaced thumbnails, stitch them horizontally, and return as Base64 JPG string."""
         try:
             from PIL import Image  # type: ignore
