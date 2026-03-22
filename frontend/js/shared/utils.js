@@ -200,15 +200,51 @@ function _dotHtml(ip) {
     return `<span id="${dotId}" class="host-status-dot" style="width:8px;height:8px;border-radius:50%;display:inline-block;background:#555;flex-shrink:0;"></span>`;
 }
 
-// 偵測所有遠端主機連線狀態，更新狀態燈
+// 偵測本機 IP（從 window.location 或 /api/v1/health）
+let _localIp = null;
+async function _detectLocalIp() {
+    if (_localIp) return _localIp;
+    const hostname = window.location.hostname;
+    if (hostname && hostname !== 'localhost' && hostname !== '127.0.0.1') {
+        _localIp = hostname;
+        return _localIp;
+    }
+    try {
+        const r = await fetch('/api/v1/health', { signal: AbortSignal.timeout(3000) });
+        const d = await r.json();
+        // 從 agents 中找匹配 hostname 的
+        const hosts = window._computeHosts || [];
+        for (const h of hosts) {
+            try {
+                const hr = await fetch('http://' + h.ip + '/api/v1/health', { signal: AbortSignal.timeout(2000) });
+                const hd = await hr.json();
+                if (hd.hostname === d.hostname) { _localIp = h.ip; return _localIp; }
+            } catch {}
+        }
+    } catch {}
+    _localIp = 'localhost';
+    return _localIp;
+}
+
+// 判斷 agent IP 是否為本機
+function _isLocalHost(agentIp) {
+    if (!agentIp || agentIp === 'local') return true;
+    const ip = agentIp.replace(/:\d+$/, '');
+    const local = (_localIp || '').replace(/:\d+$/, '');
+    const hostname = window.location.hostname;
+    return ip === local
+        || ip === hostname
+        || (hostname === 'localhost' && ip === '127.0.0.1')
+        || (hostname === '127.0.0.1' && ip === 'localhost');
+}
+
+// 頁面載入時立即偵測本機 IP
+_detectLocalIp();
+
+// 偵測所有主機連線狀態，更新狀態燈
 let _hostHealthTimer = null;
 async function _checkHostHealth() {
     const hosts = window._computeHosts || [];
-    // 本機固定綠燈
-    document.querySelectorAll('[id="host-dot-local"]').forEach(el => {
-        el.style.background = '#22c55e';
-        el.style.boxShadow = '0 0 4px #22c55e';
-    });
     for (const h of hosts) {
         const dotId = 'host-dot-' + (h.ip || '').replace(/[.:]/g, '_');
         const dots = document.querySelectorAll(`[id="${dotId}"]`);
@@ -227,7 +263,7 @@ async function _checkHostHealth() {
 
 function _startHostHealthPolling() {
     if (_hostHealthTimer) return;
-    _checkHostHealth(); // 立即偵測一次
+    _detectLocalIp().then(() => _checkHostHealth()); // 先偵測本機 IP 再檢查健康
     _hostHealthTimer = setInterval(_checkHostHealth, 30000); // 每 30 秒
 }
 
@@ -243,20 +279,14 @@ export function renderHostCheckboxes(containerId, opts = {}) {
     if (container.dataset.built) return; // 避免重複渲染清除勾選
 
     const prefix = opts.idPrefix || containerId;
-    const includeLocal = opts.includeLocal !== false;
-    const localChecked = opts.localChecked !== false;
     container.innerHTML = '';
 
-    if (includeLocal) {
-        const lbl = document.createElement('label');
-        lbl.className = 'flex items-center gap-1 text-xs text-gray-300 cursor-pointer';
-        lbl.innerHTML = `<input type="checkbox" id="${prefix}_local" data-ip="local" data-name="本機" ${localChecked ? 'checked' : ''} class="form-checkbox rounded bg-[#1e1e1e] border-[#444]"> ${_dotHtml('local')} 本機`;
-        container.appendChild(lbl);
-    }
     hosts.forEach((h, i) => {
+        const isLocal = _isLocalHost(h.ip);
         const lbl = document.createElement('label');
         lbl.className = 'flex items-center gap-1 text-xs text-gray-300 cursor-pointer';
-        lbl.innerHTML = `<input type="checkbox" id="${prefix}_${i}" data-ip="${h.ip}" data-name="${h.name}" class="form-checkbox rounded bg-[#1e1e1e] border-[#444]"> ${_dotHtml(h.ip)} ${h.name} <span class="text-gray-500">(${_displayIp(h.ip)})</span>`;
+        const localTag = isLocal ? '<span class="text-green-400 text-[10px]">(本機)</span>' : '';
+        lbl.innerHTML = `<input type="checkbox" id="${prefix}_${i}" data-ip="${h.ip}" data-name="${h.name}" ${isLocal ? 'checked' : ''} class="form-checkbox rounded bg-[#1e1e1e] border-[#444]"> ${_dotHtml(h.ip)} ${h.name} <span class="text-gray-500">(${_displayIp(h.ip)})</span>${localTag}`;
         container.appendChild(lbl);
     });
     container.dataset.built = '1';
@@ -275,7 +305,11 @@ export function collectSelectedHosts(containerId) {
     container.querySelectorAll('input[type="checkbox"]:checked').forEach(chk => {
         const ip = chk.dataset.ip;
         const name = chk.dataset.name;
-        if (ip && name) result.push({ name, ip });
+        if (ip && name) {
+            // 本機 agent 用 'local' 標記（和原本邏輯相容）
+            const isLocal = _isLocalHost(ip);
+            result.push({ name, ip: isLocal ? 'local' : ip });
+        }
     });
     return result;
 }
@@ -294,22 +328,24 @@ export function renderHostRadios(containerId, opts = {}) {
 
     const prefix = opts.idPrefix || containerId;
     const groupName = prefix + '_radio';
-    const includeLocal = opts.includeLocal !== false;
-    const localChecked = opts.localChecked !== false;
     container.innerHTML = '';
+    let hasChecked = false;
 
-    if (includeLocal) {
-        const lbl = document.createElement('label');
-        lbl.className = 'flex items-center gap-1 text-xs text-gray-300 cursor-pointer';
-        lbl.innerHTML = `<input type="radio" name="${groupName}" id="${prefix}_local" data-ip="local" data-name="本機" ${localChecked ? 'checked' : ''} class="form-radio bg-[#1e1e1e] border-[#444]"> ${_dotHtml('local')} 本機`;
-        container.appendChild(lbl);
-    }
     hosts.forEach((h, i) => {
+        const isLocal = _isLocalHost(h.ip);
+        const shouldCheck = isLocal && !hasChecked;
+        if (shouldCheck) hasChecked = true;
         const lbl = document.createElement('label');
         lbl.className = 'flex items-center gap-1 text-xs text-gray-300 cursor-pointer';
-        lbl.innerHTML = `<input type="radio" name="${groupName}" id="${prefix}_${i}" data-ip="${h.ip}" data-name="${h.name}" ${!localChecked && i === 0 ? 'checked' : ''} class="form-radio bg-[#1e1e1e] border-[#444]"> ${_dotHtml(h.ip)} ${h.name} <span class="text-gray-500">(${_displayIp(h.ip)})</span>`;
+        const localTag = isLocal ? '<span class="text-green-400 text-[10px]">(本機)</span>' : '';
+        lbl.innerHTML = `<input type="radio" name="${groupName}" id="${prefix}_${i}" data-ip="${h.ip}" data-name="${h.name}" ${shouldCheck ? 'checked' : ''} class="form-radio bg-[#1e1e1e] border-[#444]"> ${_dotHtml(h.ip)} ${h.name} <span class="text-gray-500">(${_displayIp(h.ip)})</span>${localTag}`;
         container.appendChild(lbl);
     });
+    // 如果沒有匹配的本機，預設勾第一個
+    if (!hasChecked) {
+        const first = container.querySelector('input[type="radio"]');
+        if (first) first.checked = true;
+    }
     container.dataset.built = '1';
     _startHostHealthPolling();
 }
@@ -318,7 +354,13 @@ export function collectSelectedHost(containerId) {
     const container = document.getElementById(containerId);
     if (!container) return { name: '本機', ip: 'local' };
     const checked = container.querySelector('input[type="radio"]:checked');
-    if (checked) return { name: checked.dataset.name, ip: checked.dataset.ip };
+    if (checked) {
+        const ip = checked.dataset.ip;
+        const name = checked.dataset.name;
+        // 本機 agent 回傳 ip='local' 供後續判斷
+        const isLocal = _isLocalHost(ip);
+        return { name, ip: isLocal ? 'local' : ip };
+    }
     return { name: '本機', ip: 'local' };
 }
 
