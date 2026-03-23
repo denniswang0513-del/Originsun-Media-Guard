@@ -199,31 +199,36 @@ async def trigger_agent_update(agent_id: str):
 
 
 @router.get("/agents/{agent_id}/update_status")
-async def get_agent_update_status(agent_id: str):
-    """Proxy: poll remote Agent's update_monitor (port 8001) for update progress."""
+async def get_agent_update_status(agent_id: str, since: float = 0):
+    """Proxy: poll remote Agent's update_monitor (port 8001) for update progress.
+
+    Args:
+        since: timestamp (epoch) when update was triggered. Health check is skipped
+               for the first 15 seconds to avoid false positives from the old server.
+    """
+    import time
     agent = await _find_agent(agent_id)
-    # update_monitor runs on port 8001
     base_url = agent.get("url", "").rstrip("/")
-    # Replace :8000 with :8001 for update_monitor
     monitor_url = base_url.replace(":8000", ":8001") + "/status"
     health_url = base_url + "/api/v1/health"
+    elapsed = time.time() - since if since > 0 else 999
 
     def _poll():
-        # 先檢查主服務是否已恢復（最可靠的完成信號）
-        try:
-            req = urllib.request.Request(health_url, method="GET")
-            with urllib.request.urlopen(req, timeout=2) as resp:
-                data = json.loads(resp.read().decode("utf-8"))
-                return {"phase": "done", "pct": 100, "source": "health",
-                        "version": data.get("version", "")}
-        except Exception:
-            pass
-        # 主服務還沒回來，查 update_monitor 取得進度
+        # 前 15 秒不查 health（舊 server 還沒關閉，會誤判為完成）
+        if elapsed > 15:
+            try:
+                req = urllib.request.Request(health_url, method="GET")
+                with urllib.request.urlopen(req, timeout=2) as resp:
+                    data = json.loads(resp.read().decode("utf-8"))
+                    return {"phase": "done", "pct": 100, "source": "health",
+                            "version": data.get("version", "")}
+            except Exception:
+                pass
+        # 查 update_monitor 取得進度
         try:
             req = urllib.request.Request(monitor_url, method="GET")
             with urllib.request.urlopen(req, timeout=3) as resp:
                 data = json.loads(resp.read().decode("utf-8"))
-                # 統一欄位名：monitor 用 step/msg，前端期望 phase
                 if "step" in data and "phase" not in data:
                     phases = {1: "downloading", 2: "installing", 3: "restarting"}
                     data["phase"] = phases.get(data["step"], "updating")
@@ -231,6 +236,7 @@ async def get_agent_update_status(agent_id: str):
                 return data
         except Exception:
             pass
+        # 15 秒後 health 也沒回來 → 還在更新中
         return {"phase": "updating", "pct": 50, "source": "none",
                     "detail": "主服務和監控都無回應，更新進行中..."}
 

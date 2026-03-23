@@ -76,7 +76,7 @@ async function _triggerAgentUpdate(agentId) {
     }
 
     // Start polling update progress
-    _updatingAgents[agentId] = { phase: 'downloading', pct: 0 };
+    _updatingAgents[agentId] = { phase: 'downloading', pct: 0, since: Date.now() / 1000 };
     _updateMachineCard(agentId);
     _pollUpdateStatus(agentId);
 }
@@ -90,7 +90,8 @@ async function _pollUpdateStatus(agentId, _retries = 0) {
         return;
     }
     try {
-        const r = await fetch('/api/v1/agents/' + encodeURIComponent(agentId) + '/update_status');
+        const since = _updatingAgents[agentId]?.since || 0;
+        const r = await fetch('/api/v1/agents/' + encodeURIComponent(agentId) + '/update_status?since=' + since);
         const d = await r.json();
         const u = _updatingAgents[agentId];
         if (!u) return;

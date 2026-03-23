@@ -796,7 +796,8 @@ Start-Sleep -Seconds 3
 
 @router.get("/download_installer")
 async def download_installer():
-    file_path = "Install_or_Update.bat"
+    base = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    file_path = os.path.join(base, "Install_or_Update.bat")
     if os.path.exists(file_path):
         return FileResponse(file_path, filename="Install_or_Update.bat")
     return {"error": "Install_or_Update.bat not found."}
