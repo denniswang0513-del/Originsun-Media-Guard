@@ -47,12 +47,7 @@ def _save_json(bookmarks: list) -> None:
                 pass
 
 
-def _get_machine_id() -> str:
-    try:
-        from config import load_settings
-        return load_settings().get("machine_id", "") or __import__("socket").gethostname()
-    except Exception:
-        return "unknown"
+from db.json_fallback import get_machine_id as _get_machine_id  # noqa: E402
 
 
 def _validate_request(task_type: str, request: dict) -> None:
