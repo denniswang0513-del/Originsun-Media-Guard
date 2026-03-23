@@ -607,7 +607,18 @@ async def download_update(background_tasks: BackgroundTasks):
         "update_agent.bat", "update_monitor.py", "start_hidden.vbs",
         "0225_requirements.txt", "bootstrap.py", "server.py",
     ]
+    # 自動偵測含 .py 的資料夾（排除大型/非必要目錄）
+    _exclude = {'.venv', 'venv', 'node_modules', '.git', '.claude', 'tests',
+                'models', 'voice', 'credentials', '__pycache__', 'e2e',
+                'python_embed', 'windows_helper'}
     dirs_to_include = ["frontend", "templates", "core", "routers", "utils"]
+    for entry in os.listdir(base_dir):
+        if entry.startswith('.') or entry.startswith('_') or entry in _exclude:
+            continue
+        full = os.path.join(base_dir, entry)
+        if os.path.isdir(full) and entry not in dirs_to_include:
+            if any(f.endswith('.py') for f in os.listdir(full)):
+                dirs_to_include.append(entry)
 
     tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".zip", prefix="originsun_update_")
     try:

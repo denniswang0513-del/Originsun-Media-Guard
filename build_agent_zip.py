@@ -37,6 +37,28 @@ DIRS_TO_PACK = [
     "utils",
 ]
 
+# 自動偵測：掃描所有 Python 檔案的 import，找出遺漏的本地資料夾
+_EXCLUDE_DIRS = {'.venv', 'venv', 'node_modules', '.git', '.claude', 'tests',
+                 'models', 'voice', 'credentials', '__pycache__', 'e2e'}
+
+def _auto_discover_dirs():
+    """掃描專案根目錄，自動加入含 __init__.py 的 Python package。"""
+    discovered = set(DIRS_TO_PACK)
+    base = os.path.dirname(os.path.abspath(__file__))
+    for entry in os.listdir(base):
+        if entry.startswith('.') or entry.startswith('_'):
+            continue
+        if entry in _EXCLUDE_DIRS:
+            continue
+        full = os.path.join(base, entry)
+        if os.path.isdir(full) and entry not in discovered:
+            # 含 __init__.py 或含 .py 檔案的資料夾 = 應該打包
+            has_py = any(f.endswith('.py') for f in os.listdir(full))
+            if has_py:
+                discovered.add(entry)
+                print(f"  [自動偵測] 新增資料夾: {entry}/")
+    return list(discovered)
+
 def create_agent_zip():
     print(f"==================================================")
     print(f"  即將建立本機代理加速器安裝包: {TARGET_ZIP}")
@@ -58,8 +80,9 @@ def create_agent_zip():
             else:
                 print(f"  ! 警告: 找不到檔案 {file}，將被忽略。")
 
-        # 2. 寫入資料夾 (包含底下所有內容)
-        for d in DIRS_TO_PACK:
+        # 2. 寫入資料夾 (包含底下所有內容，含自動偵測的新資料夾)
+        all_dirs = _auto_discover_dirs()
+        for d in sorted(all_dirs):
             if os.path.exists(d):
                 for root, dirs, files in os.walk(d):
                     for file in files:

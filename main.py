@@ -17,11 +17,19 @@ from starlette.middleware.base import BaseHTTPMiddleware # type: ignore
 from core.socket_mgr import sio  # type: ignore
 import core.state as state  # type: ignore
 
-from routers import (  # type: ignore
-    api_backup, api_verify, api_proxy, api_concat,
-    api_report, api_transcribe, api_system, api_tts,
-    api_job_history, api_queue, api_schedules, api_agents
-)
+# ── Router 容錯載入（缺模組時跳過該 router，不 crash）──
+_ROUTER_MODULES = [
+    'api_backup', 'api_verify', 'api_proxy', 'api_concat',
+    'api_report', 'api_transcribe', 'api_system', 'api_tts',
+    'api_job_history', 'api_queue', 'api_schedules', 'api_agents',
+]
+_routers = {}
+for _mod_name in _ROUTER_MODULES:
+    try:
+        _mod = __import__(f'routers.{_mod_name}', fromlist=['router'])
+        _routers[_mod_name] = _mod
+    except Exception as _e:
+        print(f'[WARN] Router {_mod_name} 載入失敗，已跳過: {_e}')
 
 app = FastAPI(title="Originsun Media Guard Web API")
 
@@ -67,18 +75,9 @@ app.add_middleware(NoCacheMiddleware)
 
 io_app = socketio.ASGIApp(sio, app)
 
-app.include_router(api_backup.router)
-app.include_router(api_verify.router)
-app.include_router(api_proxy.router)
-app.include_router(api_concat.router)
-app.include_router(api_report.router)
-app.include_router(api_transcribe.router)
-app.include_router(api_system.router)
-app.include_router(api_tts.router)
-app.include_router(api_job_history.router)
-app.include_router(api_queue.router)
-app.include_router(api_schedules.router)
-app.include_router(api_agents.router)
+for _mod_name, _mod in _routers.items():
+    if hasattr(_mod, 'router'):
+        app.include_router(_mod.router)
 
 @app.on_event("startup")
 async def _on_startup():
