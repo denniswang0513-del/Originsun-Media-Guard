@@ -77,7 +77,7 @@
 
 ## Phase K：遠端 Agent 管理
 
-**優先等級**：🟠 高 — 多機環境的維護效率
+**狀態**：✅ 全部完成
 
 ### 要建置的東西
 
@@ -93,11 +93,11 @@
   - `start_hidden.vbs` 啟動前 kill 舊進程（防止版本殘留）
   - `Install_or_Update.bat` 一鍵安裝/更新（自動找 Agent 目錄 + pip + bootstrap）
   - health proxy 改用 `asyncio.to_thread`（防阻塞 event loop）
-- [ ] **遠端一鍵更新**：主控端可直接觸發任一 Agent 的 OTA 更新（POST 到遠端 `/api/v1/control/update`）
-- [ ] **更新進度監控**：主控端輪詢遠端 Agent 的更新狀態（`update_monitor.py` port 8001）
-- [ ] **批次更新**：一鍵更新所有過舊版本的 Agent
+- [x] **遠端一鍵更新（v1.9.10）**：主控端 POST proxy → 遠端 `/api/v1/control/update`，機器卡片 [更新] 按鈕
+- [x] **更新進度監控（v1.9.10）**：輪詢 `update_monitor` port 8001 + health fallback（前 15 秒跳過 health 避免誤判）
+- [x] **批次更新（v1.9.10）**：[全部更新 N 台過舊] 按鈕，滾動逐台更新（一台完成再下一台）
 - [x] **版本狀態顯示**：機器卡片顯示版本號（health proxy 回傳 version 欄位）
-- [ ] **「有新版」標記**：比對遠端版本，過舊時顯示更新按鈕
+- [x] **「有新版」標記（v1.9.10）**：`_isNewer` 語意版本比對，過舊顯示橘色 ⬆ + [更新] 按鈕
 
 ### 做完後你看到的改變
 
@@ -330,7 +330,7 @@ tools:
 ## 完整時序
 
 ```
-現在 (v1.9.9)
+現在 (v1.9.10)
     │
     ▼ Phase H: 語音生成 (✅ 全部完成)
     │   → Edge-TTS + F5-TTS + 台灣正音引擎 + 佇列整合 + GPU 推理
@@ -341,8 +341,8 @@ tools:
     ▼ Phase B: PostgreSQL 集中資料庫 (✅ 全部完成)
     │   → QNAP Docker + 5 張表 + DB 優先 JSON fallback + 自動重連
     │
-    ▼ Phase K: 遠端 Agent 管理 (🟡 部分完成)
-    │   → ✅ 版本顯示 + OTA 回滾 → 待做：一鍵遠端更新 → 批次更新
+    ▼ Phase K: 遠端 Agent 管理 (✅ 全部完成)
+    │   → 版本顯示 + OTA 6 層防護 + 一鍵遠端更新 + 進度監控 + 批次更新
     │
     ▼ Phase L: 行動端適配 (🟡 部分完成)
     │   → ✅ 報表手機版 RWD → 待做：主 UI RWD → 觸控優化
