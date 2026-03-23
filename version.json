@@ -1,5 +1,5 @@
 {
-  "version": "1.9.7",
-  "build_date": "2026-03-22",
-  "notes": "報表 UI 優化 — 膠卷圖 10 格 + 手機版 RWD + 下載按鈕樣式"
+  "version": "1.9.8",
+  "build_date": "2026-03-23",
+  "notes": "TTS queue + GPU fix + force-stop cleanup"
 }
