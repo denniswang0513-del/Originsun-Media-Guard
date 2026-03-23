@@ -170,6 +170,81 @@ async def proxy_agent_health(agent_id: str):
     return await asyncio.to_thread(_fetch_health)
 
 
+@router.post("/agents/{agent_id}/update")
+async def trigger_agent_update(agent_id: str):
+    """Proxy: trigger OTA update on a remote Agent."""
+    agent = None
+    try:
+        from db.json_fallback import get_agents_fallback
+        agents = get_agents_fallback()
+        agent = next((a for a in agents if a.get("id") == agent_id), None)
+    except Exception:
+        pass
+
+    if not agent:
+        raise HTTPException(status_code=404, detail=f"找不到 ID 為 {agent_id} 的機器")
+
+    url = agent.get("url", "").rstrip("/") + "/api/v1/control/update"
+
+    def _trigger():
+        try:
+            req = urllib.request.Request(url, method="POST",
+                                         data=b'{}',
+                                         headers={"Content-Type": "application/json"})
+            with urllib.request.urlopen(req, timeout=10) as resp:
+                return json.loads(resp.read().decode("utf-8"))
+        except Exception as e:
+            return {"status": "error", "detail": str(e)}
+
+    import asyncio
+    return await asyncio.to_thread(_trigger)
+
+
+@router.get("/agents/{agent_id}/update_status")
+async def get_agent_update_status(agent_id: str):
+    """Proxy: poll remote Agent's update_monitor (port 8001) for update progress."""
+    agent = None
+    try:
+        from db.json_fallback import get_agents_fallback
+        agents = get_agents_fallback()
+        agent = next((a for a in agents if a.get("id") == agent_id), None)
+    except Exception:
+        pass
+
+    if not agent:
+        raise HTTPException(status_code=404, detail=f"找不到 ID 為 {agent_id} 的機器")
+
+    # update_monitor runs on port 8001
+    base_url = agent.get("url", "").rstrip("/")
+    # Replace :8000 with :8001 for update_monitor
+    monitor_url = base_url.replace(":8000", ":8001") + "/status"
+    health_url = base_url + "/api/v1/health"
+
+    def _poll():
+        # Try update_monitor first (port 8001)
+        try:
+            req = urllib.request.Request(monitor_url, method="GET")
+            with urllib.request.urlopen(req, timeout=3) as resp:
+                data = json.loads(resp.read().decode("utf-8"))
+                data["source"] = "monitor"
+                return data
+        except Exception:
+            pass
+        # Fallback: check if main server is back (update finished)
+        try:
+            req = urllib.request.Request(health_url, method="GET")
+            with urllib.request.urlopen(req, timeout=3) as resp:
+                data = json.loads(resp.read().decode("utf-8"))
+                return {"phase": "done", "pct": 100, "source": "health",
+                        "version": data.get("version", "")}
+        except Exception:
+            return {"phase": "updating", "pct": 50, "source": "none",
+                    "detail": "主服務和監控都無回應，更新進行中..."}
+
+    import asyncio
+    return await asyncio.to_thread(_poll)
+
+
 @router.delete("/agents/{agent_id}")
 async def remove_agent(agent_id: str):
     if state.db_online:

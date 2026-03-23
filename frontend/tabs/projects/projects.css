@@ -920,6 +920,78 @@
     color: #666;
 }
 
+/* Version badge */
+.pj-version-badge {
+    font-size: 9px;
+    color: #888;
+    margin-left: auto;
+    padding: 1px 5px;
+    border-radius: 3px;
+    background: #2a2a2a;
+}
+.pj-version-outdated {
+    color: #f59e0b;
+    background: #3b2a0a;
+}
+.pj-version-updating {
+    color: #60a5fa;
+    background: #1e2a3a;
+    animation: pulse 1.5s infinite;
+}
+@keyframes pulse { 50% { opacity: 0.6; } }
+
+/* Inline update button */
+.pj-btn-inline-update {
+    font-size: 9px;
+    padding: 1px 6px;
+    margin-left: 4px;
+    border: 1px solid #f59e0b;
+    border-radius: 3px;
+    background: transparent;
+    color: #f59e0b;
+    cursor: pointer;
+}
+.pj-btn-inline-update:hover {
+    background: #f59e0b;
+    color: #000;
+}
+
+/* Batch update button */
+.pj-btn-update {
+    font-size: 11px;
+    padding: 3px 10px;
+    border: 1px solid #f59e0b;
+    border-radius: 4px;
+    background: transparent;
+    color: #f59e0b;
+    cursor: pointer;
+    margin-right: 6px;
+}
+.pj-btn-update:hover {
+    background: #f59e0b;
+    color: #000;
+}
+.pj-btn-update:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+/* Update progress bar inside machine card */
+.pj-machine-update-bar {
+    width: 100%;
+    height: 3px;
+    background: #2a2a2a;
+    border-radius: 2px;
+    margin: 4px 0 2px;
+    overflow: hidden;
+}
+.pj-machine-update-fill {
+    height: 100%;
+    background: linear-gradient(90deg, #3b82f6, #60a5fa);
+    border-radius: 2px;
+    transition: width 0.5s;
+}
+
 .pj-machines-empty {
     text-align: center;
     color: #555;

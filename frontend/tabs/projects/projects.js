@@ -20,6 +20,8 @@ const STATUS_LABELS = {
 // ── Module State ──
 const _cards = {};          // job_id → { el, status, taskType, logExpanded }
 let _todayDoneCount = 0;
+let _masterVersion = '';    // 主控端版本號（用於比對遠端是否過舊）
+const _updatingAgents = {}; // agent_id → { timer, phase }
 
 // Queue state
 let _queueItems = [];       // current queue data from API
@@ -36,6 +38,124 @@ const HISTORY_PAGE_SIZE = 5;
 let _historyAllJobs = [];
 let _historyPage = 0;
 let _historyFilterTimer = null; // debounce for search input
+
+// ── Version comparison ──
+function _isNewer(remote, local) {
+    if (!remote || !local) return false;
+    const a = remote.replace(/^v/, '').split('.').map(Number);
+    const b = local.replace(/^v/, '').split('.').map(Number);
+    for (let i = 0; i < Math.max(a.length, b.length); i++) {
+        if ((a[i] || 0) > (b[i] || 0)) return true;
+        if ((a[i] || 0) < (b[i] || 0)) return false;
+    }
+    return false;
+}
+
+async function _fetchMasterVersion() {
+    try {
+        const r = await fetch('/api/v1/version');
+        const d = await r.json();
+        _masterVersion = d.version || '';
+    } catch (_) {}
+}
+
+// ── Remote Agent Update ──
+async function _triggerAgentUpdate(agentId) {
+    if (_updatingAgents[agentId]) return;
+    _updatingAgents[agentId] = { phase: 'triggering' };
+    _updateMachineCard(agentId);
+
+    try {
+        const r = await fetch('/api/v1/agents/' + encodeURIComponent(agentId) + '/update', { method: 'POST' });
+        if (!r.ok) throw new Error('HTTP ' + r.status);
+    } catch (e) {
+        delete _updatingAgents[agentId];
+        _updateMachineCard(agentId);
+        if (typeof appendLog === 'function') appendLog(`❌ 更新 ${agentId} 失敗：${e.message}`, 'error');
+        return;
+    }
+
+    // Start polling update progress
+    _updatingAgents[agentId] = { phase: 'downloading', pct: 0 };
+    _updateMachineCard(agentId);
+    _pollUpdateStatus(agentId);
+}
+
+async function _pollUpdateStatus(agentId) {
+    if (!_updatingAgents[agentId]) return;
+    try {
+        const r = await fetch('/api/v1/agents/' + encodeURIComponent(agentId) + '/update_status');
+        const d = await r.json();
+        const u = _updatingAgents[agentId];
+        if (!u) return;
+        u.phase = d.phase || 'updating';
+        u.pct = d.pct || 0;
+        u.detail = d.detail || '';
+
+        if (d.phase === 'done') {
+            // Update complete — refresh agent status
+            delete _updatingAgents[agentId];
+            const st = _agentStatus[agentId];
+            if (st && d.version) {
+                st.data = st.data || {};
+                st.data.version = d.version;
+            }
+            _updateMachineCard(agentId);
+            _updateBatchButton();
+            if (typeof appendLog === 'function') appendLog(`✅ ${agentId} 更新完成（${d.version || ''})`, 'system');
+            // If batch update is running, trigger next
+            if (window._batchUpdateQueue && window._batchUpdateQueue.length > 0) {
+                const next = window._batchUpdateQueue.shift();
+                _triggerAgentUpdate(next);
+            } else if (window._batchUpdateQueue) {
+                window._batchUpdateQueue = null;
+                const btn = document.getElementById('pj-batch-update-btn');
+                if (btn) { btn.textContent = '✅ 全部已是最新版'; btn.disabled = true; }
+            }
+            return;
+        }
+    } catch (_) {}
+
+    _updateMachineCard(agentId);
+    // Poll again in 2 seconds
+    setTimeout(() => _pollUpdateStatus(agentId), 2000);
+}
+
+function _updateBatchButton() {
+    const btn = document.getElementById('pj-batch-update-btn');
+    if (!btn) return;
+    const outdated = _agents.filter(a => {
+        const st = _agentStatus[a.id] || {};
+        const v = st.data?.version;
+        return v && _isNewer(_masterVersion, v) && !_updatingAgents[a.id];
+    });
+    if (outdated.length > 0) {
+        btn.style.display = '';
+        btn.textContent = `全部更新 ${outdated.length} 台過舊`;
+        btn.disabled = false;
+    } else if (Object.keys(_updatingAgents).length > 0) {
+        btn.style.display = '';
+        btn.disabled = true;
+    } else {
+        btn.style.display = 'none';
+    }
+}
+
+async function _batchUpdate() {
+    const outdated = _agents.filter(a => {
+        const st = _agentStatus[a.id] || {};
+        const v = st.data?.version;
+        return v && _isNewer(_masterVersion, v) && !_updatingAgents[a.id];
+    });
+    if (outdated.length === 0) return;
+
+    const btn = document.getElementById('pj-batch-update-btn');
+    if (btn) { btn.textContent = `更新中 0/${outdated.length}...`; btn.disabled = true; }
+
+    // Rolling update: one at a time
+    window._batchUpdateQueue = outdated.slice(1).map(a => a.id);
+    _triggerAgentUpdate(outdated[0].id);
+}
 
 // Machine polling state
 let _agents = [];           // from settings.json
@@ -86,6 +206,7 @@ export function initTab() {
     _loadSchedules();
     _bindSocket();
     _loadAgents();
+    _fetchMasterVersion();
 
     // Listen for tab visibility changes
     document.addEventListener('tab-changed', (e) => {
@@ -116,6 +237,8 @@ export function initTab() {
         reloadAgentsNoPolling: _loadAgentsNoPolling,
         toggleSchedule,
         deleteSchedule,
+        batchUpdate: _batchUpdate,
+        triggerUpdate: _triggerAgentUpdate,
     };
 }
 
@@ -880,6 +1003,36 @@ function _createMachineCard(agent) {
     name.appendChild(_text(agent.name || agent.id));
     header.appendChild(name);
 
+    // Version badge + update indicator
+    const agentVersion = data.version || '';
+    const updating = _updatingAgents[agent.id];
+    if (updating) {
+        // Show update progress
+        const updBadge = document.createElement('span');
+        updBadge.className = 'pj-version-badge pj-version-updating';
+        const PHASE_TEXT = { downloading: '下載中', installing: '安裝套件', extracting: '解壓中',
+            restarting: '重啟中', triggering: '觸發中', updating: '更新中' };
+        updBadge.textContent = `⏳ ${PHASE_TEXT[updating.phase] || updating.phase} ${updating.pct || 0}%`;
+        header.appendChild(updBadge);
+    } else if (agentVersion) {
+        const vBadge = document.createElement('span');
+        vBadge.className = 'pj-version-badge';
+        vBadge.textContent = 'v' + agentVersion;
+        if (_masterVersion && _isNewer(_masterVersion, agentVersion)) {
+            vBadge.classList.add('pj-version-outdated');
+            vBadge.textContent += ' ⬆';
+            // Update button
+            const updBtn = document.createElement('button');
+            updBtn.className = 'pj-btn-inline-update';
+            updBtn.textContent = '更新';
+            updBtn.addEventListener('click', (e) => { e.stopPropagation(); _triggerAgentUpdate(agent.id); });
+            header.appendChild(vBadge);
+            header.appendChild(updBtn);
+        } else {
+            header.appendChild(vBadge);
+        }
+    }
+
     card.appendChild(header);
 
     // Remove button
@@ -889,11 +1042,27 @@ function _createMachineCard(agent) {
     removeBtn.addEventListener('click', () => removeAgent(agent.id));
     card.appendChild(removeBtn);
 
+    // Update progress bar (shown during update)
+    if (updating && updating.pct > 0) {
+        const updDiv = document.createElement('div');
+        updDiv.className = 'pj-machine-update-bar';
+        const updFill = document.createElement('div');
+        updFill.className = 'pj-machine-update-fill';
+        updFill.style.width = updating.pct + '%';
+        updDiv.appendChild(updFill);
+        card.appendChild(updDiv);
+    }
+
     // Task info
     const taskDiv = document.createElement('div');
     taskDiv.className = 'pj-machine-task';
 
-    if (!isOnline && status.online !== undefined) {
+    if (updating) {
+        const updText = document.createElement('span');
+        updText.style.color = '#f59e0b';
+        updText.textContent = updating.detail || '更新進行中...';
+        taskDiv.appendChild(updText);
+    } else if (!isOnline && status.online !== undefined) {
         const offText = document.createElement('span');
         offText.className = 'pj-machine-offline-text';
         offText.textContent = '無法連線';
@@ -1021,6 +1190,7 @@ async function _pollAgent(agent) {
     }
 
     _updateMachineCard(agent.id);
+    _updateBatchButton();
 
     // Schedule next poll (5s after completion)
     if (_agentStatus[agent.id]) {
