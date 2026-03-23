@@ -82,7 +82,7 @@
 ### 要建置的東西
 
 - [x] **OTA 回滾機制**：備份+雙層回滾（解壓失敗 + 啟動失敗 health check）+ Windows MsgBox 通知
-- [x] **OTA 無痛更新（v1.9.8）**：
+- [x] **OTA 無痛更新（v1.9.8~v1.9.9）**：
   - `publish_update.py` 自動生成 `update_manifest.json`（掃描 import → 比對 requirements → 列出新套件）
   - `bootstrap.py` 解壓後自動 `pip install` 新套件
   - `bootstrap.py` 更新前 `worker_busy` 檢查（有任務在跑 → 拒絕更新）
@@ -90,6 +90,9 @@
   - `bootstrap.py` 全 12 router import 測試（失敗 → 回滾 + 彈窗）
   - `main.py` router 容錯載入（缺模組跳過該 router，不 crash）
   - `build_agent_zip.py` + `/download_update` 自動掃描含 .py 的資料夾（不再漏包）
+  - `start_hidden.vbs` 啟動前 kill 舊進程（防止版本殘留）
+  - `Install_or_Update.bat` 一鍵安裝/更新（自動找 Agent 目錄 + pip + bootstrap）
+  - health proxy 改用 `asyncio.to_thread`（防阻塞 event loop）
 - [ ] **遠端一鍵更新**：主控端可直接觸發任一 Agent 的 OTA 更新（POST 到遠端 `/api/v1/control/update`）
 - [ ] **更新進度監控**：主控端輪詢遠端 Agent 的更新狀態（`update_monitor.py` port 8001）
 - [ ] **批次更新**：一鍵更新所有過舊版本的 Agent
@@ -327,7 +330,7 @@ tools:
 ## 完整時序
 
 ```
-現在 (v1.9.8)
+現在 (v1.9.9)
     │
     ▼ Phase H: 語音生成 (✅ 全部完成)
     │   → Edge-TTS + F5-TTS + 台灣正音引擎 + 佇列整合 + GPU 推理
@@ -369,4 +372,4 @@ tools:
         → 集中 Log + 營運儀表板
 ```
 
-**下一步**：Phase A（Auth + 角色權限）→ Phase J（專案管理模組）。
+**下一步**：Phase A（Auth + 角色權限）→ Phase J（專案管理 / 影片前置作業系統）。
