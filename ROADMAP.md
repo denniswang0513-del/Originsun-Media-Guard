@@ -4,13 +4,13 @@
 
 ---
 
-## 現況 (v1.9.7) 基準線
+## 現況 (v1.9.8) 基準線
 
 - ✅ 6 個完整工作流程（備份、比對、轉 Proxy、串帶、報表、AI 逐字稿）
 - ✅ 模組化後端：`main.py` + `core/` + `routers/`
 - ✅ 模組化前端：`frontend/tabs/` 各分頁獨立
 - ✅ OTA 純 HTTP 熱更新 + 版本守護 + 更新防卡死 + 雙層回滾機制（解壓失敗+啟動失敗）
-- ✅ 語音生成 Tab — Edge-TTS + F5-TTS 聲音複製 + NAS 聲音庫 + 台灣正音引擎
+- ✅ 語音生成 Tab — Edge-TTS + F5-TTS 聲音複製 + NAS 聲音庫 + 台灣正音引擎 + 佇列整合 + GPU 推理
 - ✅ 專案總覽 — 單行緊湊任務卡片 + 歷史搜尋篩選 + Log 查看器 + 佇列管理 + 排程
 - ✅ 處理主機 UI — 本機自動偵測整合 + 狀態燈（綠/紅）+ IP 去 port + 多選/單選分離
 - ✅ 機器狀態即時監控 — 綠燈脈衝（在線）/ 紅燈（離線）/ 橘燈（慢）+ CPU 顯示
@@ -37,11 +37,17 @@
 - `utils/taiwan_normalizer.py` — 台灣正音引擎（vocab_mapping + pronunciation_hacks）
 - NAS 聲音庫：統一管理，全辦公室共享
 
-### 尚需完成（併入 Phase H-remaining，視需求插入）
+### v1.9.8 完成
 
-- [ ] 接入任務佇列（目前 TTS 繞過 task_queue，未排隊）
-- [ ] Socket.IO 即時進度事件（目前前端用模擬進度條）
-- [ ] 完成通知整合（`notifier.py`）
+- [x] 接入任務佇列（TtsRequest + TtsCloneRequest schema，enqueue_job async）
+- [x] Socket.IO 即時進度事件（progress + task_status，和其他 TAB 統一）
+- [x] 完成通知整合（`notifier.py` — `tts_success` template）
+- [x] GPU 推理修正（update_agent.bat .venv 優先於 python_embed）
+- [x] F5-TTS device 自動重建（CPU→CUDA 檢測不一致時重新載入）
+- [x] 獨立 concurrency slot（`CONCURRENCY_LIMITS['tts'] = 1`）
+
+### 尚需完成
+
 - [ ] SRT 批次合成功能
 
 ---
