@@ -59,9 +59,9 @@
         }
 
         .btn-print {
-            background: #D48A04;
-            color: #fff;
-            border: none;
+            background: #fff;
+            color: #333;
+            border: 1px solid #ccc;
             border-radius: 6px;
             padding: 8px 18px;
             font-size: 13px;
@@ -72,7 +72,7 @@
         }
 
         .btn-print:hover {
-            background: #b87300;
+            background: #f0f0f0;
         }
 
         /* ─── Summary Cards ─── */
@@ -406,9 +406,9 @@
                 {% endif %}
             </div>
             {% if pdf_url %}
-            <a class="btn-print" href="{{ pdf_url }}" download style="text-decoration:none; color:inherit;">📥 下載 PDF</a>
+            <a class="btn-print" href="{{ pdf_url }}" download style="text-decoration:none;">下載 PDF</a>
             {% else %}
-            <button class="btn-print" onclick="window.print()">🖨 列印</button>
+            <button class="btn-print" onclick="window.print()">列印</button>
             {% endif %}
         </header>
 
