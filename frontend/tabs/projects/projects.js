@@ -81,8 +81,14 @@ async function _triggerAgentUpdate(agentId) {
     _pollUpdateStatus(agentId);
 }
 
-async function _pollUpdateStatus(agentId) {
+async function _pollUpdateStatus(agentId, _retries = 0) {
     if (!_updatingAgents[agentId]) return;
+    if (_retries > 90) { // 90 × 2s = 3 分鐘 timeout
+        delete _updatingAgents[agentId];
+        _updateMachineCard(agentId);
+        if (typeof appendLog === 'function') appendLog(`⚠️ ${agentId} 更新超時（3 分鐘未完成）`, 'error');
+        return;
+    }
     try {
         const r = await fetch('/api/v1/agents/' + encodeURIComponent(agentId) + '/update_status');
         const d = await r.json();
@@ -118,7 +124,7 @@ async function _pollUpdateStatus(agentId) {
 
     _updateMachineCard(agentId);
     // Poll again in 2 seconds
-    setTimeout(() => _pollUpdateStatus(agentId), 2000);
+    setTimeout(() => _pollUpdateStatus(agentId, _retries + 1), 2000);
 }
 
 function _updateBatchButton() {
