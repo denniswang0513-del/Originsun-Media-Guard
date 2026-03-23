@@ -209,24 +209,29 @@ async def get_agent_update_status(agent_id: str):
     health_url = base_url + "/api/v1/health"
 
     def _poll():
-        # Try update_monitor first (port 8001)
-        try:
-            req = urllib.request.Request(monitor_url, method="GET")
-            with urllib.request.urlopen(req, timeout=3) as resp:
-                data = json.loads(resp.read().decode("utf-8"))
-                data["source"] = "monitor"
-                return data
-        except Exception:
-            pass
-        # Fallback: check if main server is back (update finished)
+        # 先檢查主服務是否已恢復（最可靠的完成信號）
         try:
             req = urllib.request.Request(health_url, method="GET")
-            with urllib.request.urlopen(req, timeout=3) as resp:
+            with urllib.request.urlopen(req, timeout=2) as resp:
                 data = json.loads(resp.read().decode("utf-8"))
                 return {"phase": "done", "pct": 100, "source": "health",
                         "version": data.get("version", "")}
         except Exception:
-            return {"phase": "updating", "pct": 50, "source": "none",
+            pass
+        # 主服務還沒回來，查 update_monitor 取得進度
+        try:
+            req = urllib.request.Request(monitor_url, method="GET")
+            with urllib.request.urlopen(req, timeout=3) as resp:
+                data = json.loads(resp.read().decode("utf-8"))
+                # 統一欄位名：monitor 用 step/msg，前端期望 phase
+                if "step" in data and "phase" not in data:
+                    phases = {1: "downloading", 2: "installing", 3: "restarting"}
+                    data["phase"] = phases.get(data["step"], "updating")
+                data["source"] = "monitor"
+                return data
+        except Exception:
+            pass
+        return {"phase": "updating", "pct": 50, "source": "none",
                     "detail": "主服務和監控都無回應，更新進行中..."}
 
     return await asyncio.to_thread(_poll)
