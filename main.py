@@ -101,7 +101,10 @@ async def _on_startup():
 
 async def _periodic_db_health():
     """每 60 秒檢查 DB 連線，斷線時自動重連。"""
-    from db.session import db_available, init_db
+    try:
+        from db.session import db_available, init_db
+    except ImportError:
+        return  # 代理端沒有 db 模組，直接退出
     while True:
         await asyncio.sleep(60)
         try:
