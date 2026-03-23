@@ -149,8 +149,9 @@ def run_update(server_url=""):
     _kill_port(8000)
     time.sleep(2)
 
-    # 2) Download update ZIP
+    # 2) Download update ZIP (寫入 .tmp → 完整後 rename，防下載中斷產生半成品)
     zip_path = os.path.join(tempfile.gettempdir(), "originsun_update.zip")
+    tmp_path = zip_path + ".tmp"
     url = f"{server_url}/download_update"
     print(f"[System] Downloading from {url} ...")
     try:
@@ -158,7 +159,7 @@ def run_update(server_url=""):
         with urllib.request.urlopen(req, timeout=300) as resp:
             total = int(resp.headers.get("Content-Length", 0))
             downloaded = 0
-            with open(zip_path, "wb") as f:
+            with open(tmp_path, "wb") as f:
                 while True:
                     chunk = resp.read(256 * 1024)
                     if not chunk:
@@ -170,7 +171,16 @@ def run_update(server_url=""):
                         print(f"\r  {downloaded // 1024:,} KB / {total // 1024:,} KB ({pct}%)",
                               end="", flush=True)
             print()
+        # 下載完整才 rename（防中斷產生半成品 ZIP）
+        if os.path.exists(zip_path):
+            os.unlink(zip_path)
+        os.rename(tmp_path, zip_path)
     except Exception as e:
+        # 清理不完整的 .tmp
+        try:
+            os.unlink(tmp_path)
+        except OSError:
+            pass
         print(f"\n[ERROR] Download failed: {e}")
         sys.exit(1)
 
@@ -252,12 +262,22 @@ def run_update(server_url=""):
         except Exception as e:
             print(f"  [WARN] Manifest processing failed (non-fatal): {e}")
 
-    # 6) Startup test — verify new code can at least import
+    # 6) Startup test — verify ALL routers can import
     print("[System] Testing new code imports...")
     python_exe = _find_python(base_dir)
     if python_exe:
+        test_code = (
+            "import importlib, sys; "
+            "mods = ['routers.api_backup','routers.api_verify','routers.api_proxy',"
+            "'routers.api_concat','routers.api_report','routers.api_transcribe',"
+            "'routers.api_system','routers.api_tts','routers.api_job_history',"
+            "'routers.api_queue','routers.api_schedules','routers.api_agents']; "
+            "failed = []; "
+            "[failed.append(m) if not importlib.import_module(m) is None and False else None for m in mods]; "
+            "print(f'{len(mods)} routers OK')"
+        )
         test_result = subprocess.run(
-            [python_exe, "-c", "from routers import api_system; print('OK')"],
+            [python_exe, "-c", test_code],
             capture_output=True, text=True, timeout=30, cwd=base_dir,
         )
         if test_result.returncode != 0:
@@ -265,7 +285,7 @@ def run_update(server_url=""):
             _rollback(base_dir, backup_dir, f"新版程式碼 import 失敗")
             _restart_agent(base_dir)
             sys.exit(1)
-        print("  [OK] Import test passed.")
+        print(f"  [OK] {test_result.stdout.strip()}")
 
     # 7) Restart agent
     print("\n[OK] Upgrade complete! Restarting Agent...")
