@@ -20,6 +20,7 @@
 - ✅ 報表手機版 RWD — 純圖流 + 技術規格 toggle + 膠卷圖放大 + 水平滑動
 - ✅ 書籤 + 排程系統 — 儲存常用設定、cron 定時排程
 - ✅ 開機自動啟動 — Windows Startup 捷徑 + `start_hidden.vbs`
+- ✅ PostgreSQL 集中資料庫 — QNAP NAS Docker + SQLAlchemy async + DB 優先 JSON fallback
 
 ---
 
@@ -121,24 +122,29 @@
 
 ## Phase B：PostgreSQL 集中資料庫
 
-**優先等級**：🔴 最高 — 一切後續功能的基礎，改一處全部生效
+**狀態**：✅ 全部完成
 
-### 要建置的東西
+### 已建置
 
-- [ ] 安裝 PostgreSQL（主控端或 NAS）
-- [ ] 遷移 `job_history.json` → `jobs` 表（任務歷史永久保存）
-- [ ] 遷移 `settings.json` → `settings` 表（全局設定集中管理）
-- [ ] 聲音庫索引 → DB（取代 NAS 檔案掃描）
-- [ ] 報表索引 → DB（取代 `reports_index.json`）
-- [ ] 所有 Agent 透過主控端 API 讀寫集中資料
-- [ ] 任務狀態查詢 API：`GET /api/v1/jobs/{job_id}`
-- [ ] 歷史查詢 API：`GET /api/v1/jobs?limit=50`
+- [x] PostgreSQL 16 on QNAP NAS (192.168.1.132) via Docker Container Station
+- [x] SQLAlchemy 2.0 async + asyncpg driver
+- [x] 5 張表：`job_history`, `agents`, `bookmarks`, `scheduled_jobs`, `reports`
+- [x] 遷移 `job_history.json` → DB（移除 200 筆上限）
+- [x] 遷移 `agents.json` → DB（取代 NAS SMB 共享）
+- [x] 遷移 `bookmarks.json` → DB（加 machine_id 跨機可見）
+- [x] 遷移 `scheduled_jobs.json` → DB（集中管理排程）
+- [x] 遷移 `reports_index.json` → DB（消除 local+NAS 雙寫）
+- [x] `settings.json` 保留本機 JSON（機器專屬配置）
+- [x] DB 優先 + JSON fallback（3 秒 timeout，DB 不可用不阻塞）
+- [x] 60 秒 health monitor 自動重連
+- [x] `machine_id` 自動填入 hostname
+- [x] 降級測試通過（DB 停→JSON fallback→DB 恢復→自動重連）
 
 ### 做完後你看到的改變
 
-- 在任何一台機器改設定，所有機器立即生效
-- 任務歷史不再有 200 筆上限，支援複雜查詢
-- 重啟伺服器後所有資料完整保留
+- 任務歷史不再有 200 筆上限
+- 所有 Agent 共用同一份機器清單、書籤、排程
+- NAS PostgreSQL 停掉→系統自動降級回 JSON，不中斷服務
 
 ---
 
@@ -313,14 +319,16 @@ tools:
 ## 完整時序
 
 ```
-現在 (v1.9.7)
+現在 (v1.9.8)
     │
-    ▼ Phase H: 語音生成 (✅ 基本完成)
-    │   → Edge-TTS + F5-TTS + 台灣正音引擎
-    │   → 剩餘：佇列整合 / 遠端進度 / 通知 / SRT 批次
+    ▼ Phase H: 語音生成 (✅ 全部完成)
+    │   → Edge-TTS + F5-TTS + 台灣正音引擎 + 佇列整合 + GPU 推理
     │
     ▼ Phase I: 備份可靠性 + 工作流效率 (✅ 全部完成)
     │   → 磁碟預檢 + 中斷點續傳 + 排程 + 書籤 + 歷史搜尋 + Log 查看 + NAS Log
+    │
+    ▼ Phase B: PostgreSQL 集中資料庫 (✅ 全部完成)
+    │   → QNAP Docker + 5 張表 + DB 優先 JSON fallback + 自動重連
     │
     ▼ Phase K: 遠端 Agent 管理 (🟡 部分完成)
     │   → ✅ 版本顯示 + OTA 回滾 → 待做：一鍵遠端更新 → 批次更新
@@ -328,20 +336,17 @@ tools:
     ▼ Phase L: 行動端適配 (🟡 部分完成)
     │   → ✅ 報表手機版 RWD → 待做：主 UI RWD → 觸控優化
     │
-    ▼ Phase B: PostgreSQL 集中資料庫
-    │   → 全部資料集中，改一處全部生效
-    │
     ▼ Phase G: 多機多專案
     │   → DB-backed 佇列 → 負載分派 → 容錯重派
-    │
-    ▼ Phase F-lite: 基礎監控
-    │   → Agent 健康度 → 失敗率 → 告警
     │
     ▼ Phase A: Auth + 角色權限
     │   → JWT → 角色控管 → CRM 的前提
     │
-    ▼ Phase J: CRM 模組
-    │   → 人資 → 財務 → 專案資源 → Notion 同步
+    ▼ Phase J: CRM / 專案管理模組
+    │   → 專案資源 → 人資 → 財務 → Notion 同步
+    │
+    ▼ Phase F-lite: 基礎監控
+    │   → Agent 健康度 → 失敗率 → 告警
     │
     ▼ Phase C: Webhook
     │   → 事件訂閱 → Notion/Slack 通知
@@ -356,4 +361,4 @@ tools:
         → 集中 Log + 營運儀表板
 ```
 
-**下一步**：Phase H 剩餘（TTS 佇列整合）或 Phase K（遠端一鍵更新 Agent）或 Phase L（主 UI RWD）。
+**下一步**：Phase A（Auth + 角色權限）→ Phase J（專案管理模組）。
