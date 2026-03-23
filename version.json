@@ -1,5 +1,5 @@
 {
-  "version": "1.9.9",
-  "build_date": "2026-03-23",
-  "notes": "OTA painless update + ROADMAP"
+  "version": "1.9.10",
+  "build_date": "2026-03-24",
+  "notes": "Phase K complete: remote agent management + batch update"
 }
