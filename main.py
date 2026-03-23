@@ -84,9 +84,36 @@ app.include_router(api_agents.router)
 async def _on_startup():
     state.set_main_loop(asyncio.get_running_loop())
     state.init_concurrency()
+    # ── PostgreSQL 連線 ──
+    try:
+        from db.session import init_db
+        ok = await init_db()
+        state.db_online = ok
+        print(f"[DB] PostgreSQL {'連線成功' if ok else '不可用，使用 JSON fallback'}")
+    except Exception as e:
+        state.db_online = False
+        print(f"[DB] 初始化失敗: {e}")
     asyncio.create_task(_periodic_version_check())
+    asyncio.create_task(_periodic_db_health())
     from core.scheduler import run_scheduler  # type: ignore
     asyncio.create_task(run_scheduler())
+
+
+async def _periodic_db_health():
+    """每 60 秒檢查 DB 連線，斷線時自動重連。"""
+    from db.session import db_available, init_db
+    while True:
+        await asyncio.sleep(60)
+        try:
+            was_online = state.db_online
+            state.db_online = await db_available()
+            if not was_online and state.db_online:
+                print("[DB] PostgreSQL 連線恢復")
+            elif was_online and not state.db_online:
+                print("[DB] PostgreSQL 連線中斷，切換至 JSON fallback")
+                state.db_online = await init_db()
+        except Exception:
+            state.db_online = False
 
 
 def _read_local_version() -> str:

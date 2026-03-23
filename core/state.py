@@ -131,6 +131,7 @@ _global_log_buffer: list = []
 
 # ── Event Loop Reference (unchanged) ────────────────────────
 _main_loop = None
+db_online: bool = False
 
 def get_main_loop():
     global _main_loop

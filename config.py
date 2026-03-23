@@ -30,6 +30,8 @@ _DEFAULT_SETTINGS: dict = {
         "logs_dir": r"\\192.168.1.132\Container\AI_Workspace\Originsun_Web\Logs",
     },
     "master_server": "http://192.168.1.11:8000",
+    "database_url": "postgresql+asyncpg://originsun:originsun2026@192.168.1.132:5432/mediaguard",
+    "machine_id": "",  # 自動填入 hostname（init_settings 時）
     "agents": [],
     "compute_hosts": [],
     "concurrency": {
@@ -67,6 +69,15 @@ def init_settings() -> None:
             save_settings(_DEFAULT_SETTINGS)
         except Exception as e:
             print(f"Failed to auto-create settings.json: {e}")
+    # 自動填入 machine_id（首次啟動時）
+    try:
+        import socket as _socket
+        data = load_settings()
+        if not data.get("machine_id"):
+            data["machine_id"] = _socket.gethostname()
+            save_settings(data)
+    except Exception:
+        pass
 
 init_settings()
 

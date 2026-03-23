@@ -162,8 +162,7 @@ async def _run_report_job(req: ReportJobRequest, job_id: str = ""):
         else:
             await _emit_log(job_id, "info", "⚠️ 未設定 nas_paths.web_report_dir，跳過 Web 發佈")
 
-        # Update reports_index.json
-        index_path = os.path.join(reports_dir, "reports_index.json")
+        # Update reports index — DB first, JSON as fallback / dual-write
         report_id = str(uuid.uuid4()).replace("-", "")[0:8]  # type: ignore[misc]
         entry = {
             "id": report_id,
@@ -176,6 +175,28 @@ async def _run_report_job(req: ReportJobRequest, job_id: str = ""):
             "file_count": total,
             "total_size_str": fmt_size(manifest.total_bytes),
         }
+
+        # DB write (if available)
+        if state.db_online:
+            try:
+                from db.session import get_session_factory
+                factory = get_session_factory()
+                if factory:
+                    from db.repos import reports_repo
+                    _machine_id = ""
+                    try:
+                        _machine_id = load_settings().get("machine_id", "") or __import__("socket").gethostname()
+                    except Exception:
+                        pass
+                    db_entry = dict(entry, machine_id=_machine_id)
+                    async with factory() as _db_session:
+                        await reports_repo.add(_db_session, db_entry)
+                        await _db_session.commit()
+            except Exception as _dbe:
+                await _emit_log(job_id, "info", f"DB 報表索引寫入失敗（將使用 JSON fallback）: {_dbe}")
+
+        # JSON dual-write (local + NAS) — always write for backwards compat
+        index_path = os.path.join(reports_dir, "reports_index.json")
         nas_index_path = os.path.join(nas_web_dir, "reports_index.json") if nas_web_dir else ""
         try:
             history: dict = {"reports": []}
@@ -207,6 +228,20 @@ async def _run_report_job(req: ReportJobRequest, job_id: str = ""):
                 drive_url = await asyncio.to_thread(upload_to_drive, local_html, _settings.get("gdrive_folder_id") or None)
                 entry["drive_url"] = drive_url
 
+                # Update drive_url in DB
+                if state.db_online:
+                    try:
+                        from db.session import get_session_factory
+                        _fac = get_session_factory()
+                        if _fac:
+                            from db.repos import reports_repo
+                            async with _fac() as _ds:
+                                await reports_repo.update_drive_url(_ds, report_id, drive_url)
+                                await _ds.commit()
+                    except Exception:
+                        pass
+
+                # Update drive_url in JSON indexes
                 def _update_drive_url_in_index(path: str):
                     if os.path.exists(path):
                         with open(path, "r", encoding="utf-8") as _f:

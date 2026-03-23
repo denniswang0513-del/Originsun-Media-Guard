@@ -21,6 +21,7 @@ from core.schemas import (  # type: ignore
     BackupRequest, TranscodeRequest, ConcatRequest,
     VerifyRequest, TranscribeRequest, ReportJobRequest,
 )
+import core.state as state  # type: ignore
 
 _log = logging.getLogger(__name__)
 
@@ -258,50 +259,110 @@ def dispatch_distributed_transcode(
 
 # ── 排程檢查與派發 ────────────────────────────────────────────
 
+def _get_machine_id() -> str:
+    try:
+        from config import load_settings
+        return load_settings().get("machine_id", "") or __import__("socket").gethostname()
+    except Exception:
+        return "unknown"
+
+
 def _check_and_dispatch() -> int:
     """
     掃描所有排程，到期的送入 enqueue_job() 或透過 HTTP 派發 TTS。
     回傳本次觸發的排程數量。
+    DB 優先，JSON fallback。
     """
     from core.worker import enqueue_job  # type: ignore
 
-    # Phase 1: 在鎖內收集到期排程並更新狀態
-    due_tasks = []  # list of (schedule_id, task_type, req_data)
-    with _file_lock:
-        schedules = load_schedules()
-        now = datetime.now()
-        changed = False
+    due_tasks = []  # list of (schedule_id, task_type, req_data, name)
+    used_db = False
 
-        for sch in schedules:
-            if not sch.get("enabled", True):
-                continue
-            next_run = sch.get("next_run")
-            if not next_run:
-                continue
-            try:
-                next_dt = datetime.fromisoformat(next_run)
-            except (ValueError, TypeError):
-                continue
-            if now >= next_dt:
-                task_type = sch.get("task_type", "backup")
-                req_data = sch.get("request", {})
-                due_tasks.append((sch.get("schedule_id"), task_type, req_data,
-                                  sch.get("name", "scheduled")))
+    # ─── Phase 1: 收集到期排程並更新狀態 ───────────────────
+    if state.db_online:
+        try:
+            import asyncio
+            from db.session import get_session_factory
+            factory = get_session_factory()
+            if factory:
+                from db.repos import schedules_repo
 
-                # 更新時間（無論成功與否，避免無限重試）
-                sch["last_run"] = now.isoformat(timespec="seconds")
-                cron = sch.get("cron")
-                if cron:
-                    sch["next_run"] = compute_next_run(cron, now)
-                else:
-                    sch["enabled"] = False
-                    sch["next_run"] = None
-                changed = True
+                async def _db_check():
+                    nonlocal due_tasks, used_db
+                    now = datetime.now()
+                    machine_id = _get_machine_id()
+                    async with factory() as session:
+                        due = await schedules_repo.get_due(session, machine_id, now)
+                        for sch in due:
+                            sid = sch.get("schedule_id")
+                            task_type = sch.get("task_type", "backup")
+                            req_data = sch.get("request", {})
+                            due_tasks.append((sid, task_type, req_data,
+                                              sch.get("name", "scheduled")))
+                            # 更新時間
+                            cron = sch.get("cron")
+                            if cron:
+                                next_run_str = compute_next_run(cron, now)
+                                next_run_dt = datetime.fromisoformat(next_run_str) if next_run_str else None
+                                await schedules_repo.mark_fired(
+                                    session, sid, last_run=now,
+                                    next_run=next_run_dt, enabled=True,
+                                )
+                            else:
+                                await schedules_repo.mark_fired(
+                                    session, sid, last_run=now,
+                                    next_run=None, enabled=False,
+                                )
+                        await session.commit()
+                    used_db = True
 
-        if changed:
-            save_schedules(schedules)
+                # Run async code from sync context
+                loop = state.get_main_loop()
+                if loop and loop.is_running():
+                    future = asyncio.run_coroutine_threadsafe(_db_check(), loop)
+                    future.result(timeout=10)
+        except Exception as e:
+            _log.debug("排程 DB 檢查失敗，回退到 JSON: %s", e)
+            due_tasks = []
+            used_db = False
 
-    # Phase 2: 在鎖外派發任務（避免 HTTP 呼叫阻塞鎖）
+    # JSON fallback
+    if not used_db:
+        with _file_lock:
+            schedules = load_schedules()
+            now = datetime.now()
+            changed = False
+
+            for sch in schedules:
+                if not sch.get("enabled", True):
+                    continue
+                next_run = sch.get("next_run")
+                if not next_run:
+                    continue
+                try:
+                    next_dt = datetime.fromisoformat(next_run)
+                except (ValueError, TypeError):
+                    continue
+                if now >= next_dt:
+                    task_type = sch.get("task_type", "backup")
+                    req_data = sch.get("request", {})
+                    due_tasks.append((sch.get("schedule_id"), task_type, req_data,
+                                      sch.get("name", "scheduled")))
+
+                    # 更新時間（無論成功與否，避免無限重試）
+                    sch["last_run"] = now.isoformat(timespec="seconds")
+                    cron = sch.get("cron")
+                    if cron:
+                        sch["next_run"] = compute_next_run(cron, now)
+                    else:
+                        sch["enabled"] = False
+                        sch["next_run"] = None
+                    changed = True
+
+            if changed:
+                save_schedules(schedules)
+
+    # ─── Phase 2: 在鎖外派發任務（避免 HTTP 呼叫阻塞鎖） ──
     dispatched = 0
     for schedule_id, task_type, req_data, name in due_tasks:
         if task_type in ("tts", "clone"):
