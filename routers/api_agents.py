@@ -157,12 +157,17 @@ async def proxy_agent_health(agent_id: str):
         raise HTTPException(status_code=404, detail=f"找不到 ID 為 {agent_id} 的機器")
 
     url = agent.get("url", "").rstrip("/") + "/api/v1/health"
-    try:
-        req = urllib.request.Request(url, method="GET")
-        with urllib.request.urlopen(req, timeout=4) as resp:
-            return json.loads(resp.read().decode("utf-8"))
-    except Exception:
-        return {"status": "offline"}
+
+    def _fetch_health():
+        try:
+            r = urllib.request.Request(url, method="GET")
+            with urllib.request.urlopen(r, timeout=4) as resp:
+                return json.loads(resp.read().decode("utf-8"))
+        except Exception:
+            return {"status": "offline"}
+
+    import asyncio
+    return await asyncio.to_thread(_fetch_health)
 
 
 @router.delete("/agents/{agent_id}")
