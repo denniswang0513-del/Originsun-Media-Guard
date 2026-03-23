@@ -47,7 +47,12 @@ def _save_json(bookmarks: list) -> None:
                 pass
 
 
-from db.json_fallback import get_machine_id as _get_machine_id  # noqa: E402
+try:
+    from db.json_fallback import get_machine_id as _get_machine_id  # noqa: E402
+except ImportError:
+    import socket as _socket
+    def _get_machine_id() -> str:
+        return _socket.gethostname()
 
 
 def _validate_request(task_type: str, request: dict) -> None:

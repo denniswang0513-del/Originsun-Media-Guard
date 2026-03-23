@@ -22,7 +22,12 @@ import core.state as state
 router = APIRouter(prefix="/api/v1", tags=["schedules"])
 
 
-from db.json_fallback import get_machine_id as _get_machine_id  # noqa: E402
+try:
+    from db.json_fallback import get_machine_id as _get_machine_id  # noqa: E402
+except ImportError:
+    import socket as _socket
+    def _get_machine_id() -> str:
+        return _socket.gethostname()
 
 
 @router.get("/schedules")
