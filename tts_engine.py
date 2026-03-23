@@ -240,6 +240,11 @@ def _get_f5_tts():
     """Lazy-load F5-TTS model (cached after first call)."""
     _ensure_tts_imports()
     global _f5_instance
+    _desired = "cuda" if _torch and _torch.cuda.is_available() else "cpu"
+    # 如果快取存在但 device 不對（例如之前載入在 CPU，但現在 CUDA 可用），強制重建
+    if _f5_instance is not None and getattr(_f5_instance, 'device', 'cpu') != _desired:
+        print(f"[F5-TTS] 模型在 {getattr(_f5_instance, 'device', '?')} 上，需要 {_desired}，重新載入...")
+        _f5_instance = None
     if _f5_instance is None:
         from f5_tts.api import F5TTS  # type: ignore
         os.makedirs(F5_MODEL_DIR, exist_ok=True)
@@ -248,6 +253,7 @@ def _get_f5_tts():
             model="F5TTS_v1_Base",
             ckpt_file=local_ckpt or "",
             vocab_file="",
+            device=_desired,
         )
     return _f5_instance
 
@@ -593,7 +599,7 @@ def _f5_clone_sync(text: str, reference_audio: str, output_path: str,
 
         tts = _get_f5_tts()
 
-        device_name = "GPU" if _torch.cuda.is_available() else "CPU"
+        device_name = "GPU" if getattr(tts, 'device', 'cpu') != 'cpu' else "CPU"
         _report("inferring", 50, f"正在用 {device_name} 生成語音，請稍候...")
 
         # Pre-process generation text: ensure sentence boundaries & avoid

@@ -281,6 +281,7 @@ window.submitTtsJob = async function() {
     const isLocal = ttsHostObj.ip === 'local';
     const ttsHostUrl = isLocal ? getAgentBaseUrl() : 'http://' + ttsHostObj.ip;
 
+    // TTS 現在走 task queue，進度透過 Socket.IO 'progress' 事件（和其他 TAB 一樣）
     // 遠端主機：比照 verify/concat/transcribe，用 initRemoteHostProgress + heartbeat
     if (!isLocal && window.initRemoteHostProgress) {
         window._remoteJobType = 'tts';
@@ -289,28 +290,32 @@ window.submitTtsJob = async function() {
         window.initRemoteHostProgress([ttsHostObj]);
     }
 
+    // 本機：監聽 progress 事件更新 TTS 進度條
     const socket = window._ttsSocket || window.socket;
-    function _onEdgeProgress(data) {
-        const pct = data.pct || 0;
+    let _ttsJobId = null;
+    function _onProgress(data) {
+        if (data.phase !== 'tts') return;
+        const pct = data.total_pct || 0;
+        if (progArea) progArea.classList.remove('hidden');
         if (progBar) progBar.style.width = pct + '%';
-        if (progPct) progPct.textContent = pct + '%';
-        if (progLabel) progLabel.textContent = PHASE_LABELS[data.phase] || data.msg || '';
-
-        if (data.phase === 'done') {
-            if (progBar) progBar.style.background = 'linear-gradient(90deg, #22c55e, #4ade80)';
-            const outName = data.output ? data.output.split(/[\\/]/).pop() : '';
-            const elapsed = data.elapsed_sec ? ` / 耗時 ${Math.round(data.elapsed_sec)}s` : '';
-            if (progLabel) progLabel.innerHTML = `✅ TTS 完成 — <span class="text-green-400 font-mono">${outName}</span>${elapsed}`;
-            socket.off('tts_edge_progress', _onEdgeProgress);
-            if (btn) { btn.disabled = false; btn.classList.remove('opacity-50', 'cursor-not-allowed'); }
-        } else if (data.phase === 'error') {
-            if (progBar) progBar.style.background = 'linear-gradient(90deg, #ef4444, #f87171)';
-            if (progLabel) progLabel.textContent = `❌ 失敗：${data.msg}`;
-            socket.off('tts_edge_progress', _onEdgeProgress);
-            if (btn) { btn.disabled = false; btn.classList.remove('opacity-50', 'cursor-not-allowed'); }
-        }
+        if (progPct) progPct.textContent = Math.round(pct) + '%';
+        if (progLabel) progLabel.textContent = data.current_file || 'TTS 合成中...';
     }
-    socket.on('tts_edge_progress', _onEdgeProgress);
+    function _onTaskDone(data) {
+        if (data.summary?.task_type !== 'tts') return;
+        socket.off('progress', _onProgress);
+        socket.off('task_status', _onTaskDone);
+        if (progArea) progArea.classList.remove('hidden');
+        if (progBar) { progBar.style.width = '100%'; progBar.style.background = 'linear-gradient(90deg, #22c55e, #4ade80)'; }
+        if (progPct) progPct.textContent = '100%';
+        const elapsed = data.summary?.elapsed_sec ? ` / 耗時 ${Math.round(data.summary.elapsed_sec)}s` : '';
+        if (progLabel) progLabel.textContent = `✅ TTS 完成${elapsed}`;
+        if (btn) { btn.disabled = false; btn.classList.remove('opacity-50', 'cursor-not-allowed'); }
+    }
+    if (isLocal) {
+        socket.on('progress', _onProgress);
+        socket.on('task_status', _onTaskDone);
+    }
 
     try {
         if (progLabel) progLabel.textContent = isLocal ? '準備中...' : `送出至 [${ttsHostObj.name}] 處理中...`;
@@ -322,6 +327,9 @@ window.submitTtsJob = async function() {
             const data = await res.json();
             throw new Error(data.detail || '後端錯誤');
         }
+        const resData = await res.json();
+        _ttsJobId = resData.job_id || null;
+
         // 遠端：啟動 heartbeat 監控（比照 verify/concat/transcribe）
         if (!isLocal) {
             if (window.updateHostProgress) window.updateHostProgress(ttsHostObj.ip, 20, '已送出，合成中...', '#6366f1');
@@ -329,7 +337,8 @@ window.submitTtsJob = async function() {
             if (window.startHeartbeatMonitor) window.startHeartbeatMonitor();
         }
     } catch (e) {
-        socket.off('tts_edge_progress', _onEdgeProgress);
+        socket.off('progress', _onProgress);
+        socket.off('task_status', _onTaskDone);
         if (progBar) { progBar.style.width = '100%'; progBar.style.background = 'linear-gradient(90deg, #ef4444, #f87171)'; }
         if (progPct) progPct.textContent = 'Err';
         if (progLabel) progLabel.textContent = `❌ 失敗：${e.message}`;
@@ -601,45 +610,38 @@ window.submitCloneJob = async function() {
     const cloneIsLocal = cloneHostObj.ip === 'local';
     const cloneHostUrl = cloneIsLocal ? getAgentBaseUrl() : 'http://' + cloneHostObj.ip;
 
-    // Listen for Socket.IO progress events from backend
+    // Voice Clone 現在走 task queue，進度透過 'progress' + 'task_status' 事件（和其他 TAB 一樣）
     const socket = window.socket;
-    const _phaseLabels = {
-        preparing: '🔧 正在準備參考音訊...',
-        transcribing: '🎤 正在轉錄參考音訊...',
-        loading_model: '📦 正在載入 F5-TTS 模型（首次約需 30 秒）...',
-        inferring: '🧠 正在生成語音，請耐心等候...',
-        pitch_shift: '🎵 正在調整音高...',
-        done: '✅ 生成完成！',
-        error: '❌ 生成失敗'
-    };
+    let _cloneJobId = null;
 
     function _onCloneProgress(data) {
-        const pct = data.pct || 0;
-        const label = _phaseLabels[data.phase] || data.msg || '處理中...';
-        if (progBar) progBar.style.width = pct + '%';
-        if (progPct) progPct.textContent = pct + '%';
-        if (progLabel) progLabel.textContent = label;
-
-        if (data.phase === 'inferring') {
-            // Pulsing animation during inference (the long wait)
-            if (progBar) progBar.classList.add('animate-pulse');
-        }
-
-        if (data.phase === 'done') {
-            socket.off('tts_clone_progress', _onCloneProgress);
-            if (progBar) { progBar.style.width = '100%'; progBar.style.background = 'linear-gradient(90deg, #22c55e, #4ade80)'; progBar.classList.remove('animate-pulse'); }
-            if (progPct) progPct.textContent = '100%';
-            const outName = data.output ? data.output.split(/[\\/]/).pop() : '';
-            const elapsed = data.elapsed_sec ? ` / 耗時 ${Math.round(data.elapsed_sec)}s` : '';
-            if (progLabel) progLabel.innerHTML = `✅ 聲音複製完成 — <span class="text-green-400 font-mono">${outName}</span>${elapsed}`;
-            if (btn) { btn.disabled = false; btn.classList.remove('opacity-50', 'cursor-not-allowed'); }
-        } else if (data.phase === 'error') {
-            socket.off('tts_clone_progress', _onCloneProgress);
+        if (data.phase !== 'tts') return;
+        const pct = data.total_pct || 0;
+        if (progArea) progArea.classList.remove('hidden');
+        if (progBar) { progBar.style.width = pct + '%'; if (pct < 100) progBar.classList.add('animate-pulse'); }
+        if (progPct) progPct.textContent = Math.round(pct) + '%';
+        if (progLabel) progLabel.textContent = data.current_file || 'F5-TTS 推理中...';
+    }
+    function _onCloneDone(data) {
+        if (data.status === 'error' && data.summary?.task_type === 'tts') {
+            socket.off('progress', _onCloneProgress);
+            socket.off('task_status', _onCloneDone);
+            if (progArea) progArea.classList.remove('hidden');
             if (progBar) { progBar.style.width = '100%'; progBar.style.background = 'linear-gradient(90deg, #ef4444, #f87171)'; progBar.classList.remove('animate-pulse'); }
             if (progPct) progPct.textContent = 'Err';
-            if (progLabel) progLabel.textContent = `❌ 失敗：${data.msg || '未知錯誤'}`;
+            if (progLabel) progLabel.textContent = `❌ ${data.detail || '任務失敗'}`;
             if (btn) { btn.disabled = false; btn.classList.remove('opacity-50', 'cursor-not-allowed'); }
+            return;
         }
+        if (data.summary?.task_type !== 'tts') return;
+        socket.off('progress', _onCloneProgress);
+        socket.off('task_status', _onCloneDone);
+        if (progArea) progArea.classList.remove('hidden');
+        if (progBar) { progBar.style.width = '100%'; progBar.style.background = 'linear-gradient(90deg, #22c55e, #4ade80)'; progBar.classList.remove('animate-pulse'); }
+        if (progPct) progPct.textContent = '100%';
+        const elapsed = data.summary?.elapsed_sec ? ` / 耗時 ${Math.round(data.summary.elapsed_sec)}s` : '';
+        if (progLabel) progLabel.textContent = `✅ 聲音複製完成${elapsed}`;
+        if (btn) { btn.disabled = false; btn.classList.remove('opacity-50', 'cursor-not-allowed'); }
     }
 
     // 遠端主機：比照其他 TAB
@@ -651,7 +653,8 @@ window.submitCloneJob = async function() {
     }
 
     if (cloneIsLocal) {
-        socket.on('tts_clone_progress', _onCloneProgress);
+        socket.on('progress', _onCloneProgress);
+        socket.on('task_status', _onCloneDone);
     }
 
     try {
@@ -663,19 +666,24 @@ window.submitCloneJob = async function() {
         });
         if (!res.ok) {
             const errData = await res.json().catch(() => ({}));
-            socket.off('tts_clone_progress', _onCloneProgress);
+            socket.off('progress', _onCloneProgress);
+            socket.off('task_status', _onCloneDone);
             if (progBar) { progBar.style.width = '100%'; progBar.style.background = 'linear-gradient(90deg, #ef4444, #f87171)'; progBar.classList.remove('animate-pulse'); }
             if (progPct) progPct.textContent = 'Err';
             if (progLabel) progLabel.textContent = `❌ 失敗：${errData.detail || res.statusText}`;
             if (btn) { btn.disabled = false; btn.classList.remove('opacity-50', 'cursor-not-allowed'); }
-        } else if (!cloneIsLocal) {
-            // 遠端：啟動 heartbeat
-            if (window.updateHostProgress) window.updateHostProgress(cloneHostObj.ip, 20, '已送出，F5-TTS 推理中...', '#6366f1');
-            window._activeRemoteHosts[cloneHostObj.ip] = { host: cloneHostObj, lastSeen: Date.now(), startTime: Date.now(), logOffset: 0 };
-            if (window.startHeartbeatMonitor) window.startHeartbeatMonitor();
+        } else {
+            const resData = await res.json();
+            _cloneJobId = resData.job_id || null;
+            if (!cloneIsLocal) {
+                if (window.updateHostProgress) window.updateHostProgress(cloneHostObj.ip, 20, '已送出，F5-TTS 推理中...', '#6366f1');
+                window._activeRemoteHosts[cloneHostObj.ip] = { host: cloneHostObj, lastSeen: Date.now(), startTime: Date.now(), logOffset: 0 };
+                if (window.startHeartbeatMonitor) window.startHeartbeatMonitor();
+            }
         }
     } catch(e) {
-        socket.off('tts_clone_progress', _onCloneProgress);
+        socket.off('progress', _onCloneProgress);
+        socket.off('task_status', _onCloneDone);
         if (progBar) { progBar.style.width = '100%'; progBar.style.background = 'linear-gradient(90deg, #ef4444, #f87171)'; progBar.classList.remove('animate-pulse'); }
         if (progPct) progPct.textContent = 'Err';
         if (progLabel) progLabel.textContent = `❌ 網路錯誤：${e.message}`;

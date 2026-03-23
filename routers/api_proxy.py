@@ -13,7 +13,7 @@ router = APIRouter()
 @router.post("/api/v1/jobs/transcode")
 async def create_transcode_job(req: TranscodeRequest):
     project_name = req.project_name or os.path.basename(req.dest_dir) or "unnamed"
-    job_id, warning = enqueue_job(req, project_name, "transcode")
+    job_id, warning = await enqueue_job(req, project_name, "transcode")
     resp = {"status": "queued", "job_id": job_id}
     if warning:
         resp["warning"] = warning

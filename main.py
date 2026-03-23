@@ -1,4 +1,8 @@
 import os
+# 確保 VBS/BAT 啟動時 CUDA 環境正確（TEMP relaunch 可能丟失 GPU 存取）
+os.environ.setdefault('CUDA_DEVICE_ORDER', 'PCI_BUS_ID')
+os.environ.setdefault('CUDA_VISIBLE_DEVICES', '0')
+
 import asyncio
 import socketio  # type: ignore
 import uvicorn  # type: ignore

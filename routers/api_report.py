@@ -17,7 +17,7 @@ def _get_report_index_path() -> str:
 async def start_report_job(req: ReportJobRequest):
     project_name = req.report_name or "report"
     try:
-        job_id = enqueue_job(req, project_name, "report")
+        job_id = await enqueue_job(req, project_name, "report")
         return {"status": "queued", "job_id": job_id}
     except ValueError as e:
         return JSONResponse(status_code=409, content={"status": "duplicate", "detail": str(e)})

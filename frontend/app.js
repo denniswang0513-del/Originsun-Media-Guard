@@ -312,8 +312,12 @@ if (typeof appendLog === 'undefined') {
                 } else if (data.status === 'error') {
                     updateActionBarState('idle');
                     if (typeof appendLog === 'function') appendLog('系統提示：任務執行發生錯誤：' + data.detail, 'error');
-                    // 顯示重試按鈕（如果有記錄上次任務）
                     if (retryBtn && window._lastJob) retryBtn.style.display = 'inline-block';
+
+                } else if (data.status === 'cancelled') {
+                    updateActionBarState('idle');
+                    if (typeof resetProgress === 'function') resetProgress();
+                    if (typeof appendLog === 'function') appendLog('❌ 任務已被中止', 'error');
                 }
             });
 
@@ -2142,15 +2146,11 @@ if (typeof appendLog === 'undefined') {
 
 
         // ── 統一按鈕列狀態切換（DOM refs 延遲快取）──
-        let _cachedControlBtns = null;
-        let _cachedStartBtns = null;
         function updateActionBarState(state) {
-            if (!_cachedControlBtns) _cachedControlBtns = Array.from(document.querySelectorAll('.tab-control-btns'));
-            if (!_cachedStartBtns) _cachedStartBtns = Array.from(document.querySelectorAll('.tab-start-btn'));
-            _cachedControlBtns.forEach(el => {
+            document.querySelectorAll('.tab-control-btns').forEach(el => {
                 el.classList.toggle('hidden', state === 'idle');
             });
-            _cachedStartBtns.forEach(btn => {
+            document.querySelectorAll('.tab-start-btn').forEach(btn => {
                 const idle = btn.dataset.idleText || '開始';
                 const busy = btn.dataset.busyText || '開始新佇列';
                 btn.textContent = state === 'idle' ? idle : busy;
@@ -2193,7 +2193,7 @@ if (typeof appendLog === 'undefined') {
                 window._remoteDispatching = false;
                 updateActionBarState('idle');
                 if (typeof resetProgress === 'function') resetProgress();
-                appendLog('系統：已全部中止（本機 + 所有遠端主機）', 'system');
+                appendLog('❌ 已全部強制中止（本機 + 所有遠端主機）', 'error');
             }
         }
 

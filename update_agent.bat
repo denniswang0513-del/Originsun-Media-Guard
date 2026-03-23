@@ -55,12 +55,12 @@ set "UPDATE_ZIP=%TEMP%\originsun_update.zip"
 
 :: ---- Detect best Python executable ----
 set "EMBED_PY="
-if exist "%INSTALL_DIR%\python_embed\python.exe" (
-    set "EMBED_PY=%INSTALL_DIR%\python_embed\python.exe"
-    goto :found_py
-)
 if exist "%INSTALL_DIR%\.venv\Scripts\python.exe" (
     set "EMBED_PY=%INSTALL_DIR%\.venv\Scripts\python.exe"
+    goto :found_py
+)
+if exist "%INSTALL_DIR%\python_embed\python.exe" (
+    set "EMBED_PY=%INSTALL_DIR%\python_embed\python.exe"
     goto :found_py
 )
 where python >nul 2>&1
@@ -202,6 +202,8 @@ if %errorlevel% neq 0 (
     exit /b 1
 )
 
+:: ---- Restore full environment from registry (VBS TEMP-relaunch may strip vars) ----
+for /f "delims=" %%P in ('powershell -NoProfile -Command "[Environment]::GetEnvironmentVariable('Path','Machine') + ';' + [Environment]::GetEnvironmentVariable('Path','User')"') do set "PATH=%%P"
 :: ---- Start uvicorn (log to file since window is hidden) ----
 echo [System] Launching uvicorn on port 8000...
 set "PYTHONPATH=%INSTALL_DIR%"

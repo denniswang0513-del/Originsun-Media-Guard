@@ -6,7 +6,7 @@ router = APIRouter()
 
 @router.post("/api/v1/jobs")
 async def create_backup_job(req: BackupRequest):
-    job_id, warning = enqueue_job(req, req.project_name, "backup")
+    job_id, warning = await enqueue_job(req, req.project_name, "backup")
     resp = {"status": "queued", "job_id": job_id}
     if warning:
         resp["warning"] = warning

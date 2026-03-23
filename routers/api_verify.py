@@ -11,7 +11,7 @@ async def create_verify_job(req: VerifyRequest):
     project_name = req.project_name or (
         os.path.basename(req.pairs[0][0]) if req.pairs else "unnamed"
     )
-    job_id, warning = enqueue_job(req, project_name, "verify")
+    job_id, warning = await enqueue_job(req, project_name, "verify")
     resp = {"status": "queued", "job_id": job_id}
     if warning:
         resp["warning"] = warning

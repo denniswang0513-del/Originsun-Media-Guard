@@ -9,7 +9,7 @@ router = APIRouter()
 @router.post("/api/v1/jobs/concat")
 async def create_concat_job(req: ConcatRequest):
     project_name = req.project_name or os.path.basename(req.dest_dir) or "unnamed"
-    job_id, warning = enqueue_job(req, project_name, "concat")
+    job_id, warning = await enqueue_job(req, project_name, "concat")
     resp = {"status": "queued", "job_id": job_id}
     if warning:
         resp["warning"] = warning

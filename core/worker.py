@@ -13,14 +13,15 @@ import re
 
 from core.schemas import (  # type: ignore
     BackupRequest, TranscodeRequest, ConcatRequest,
-    VerifyRequest, TranscribeRequest, ReportJobRequest
+    VerifyRequest, TranscribeRequest, ReportJobRequest,
+    TtsRequest, TtsCloneRequest,
 )
 from core_engine import ReportManifest  # type: ignore
 
 
 # ── Public API ───────────────────────────────────────────────
 
-def enqueue_job(request: Any, project_name: str, task_type: str) -> tuple:
+async def enqueue_job(request: Any, project_name: str, task_type: str) -> tuple:
     """
     Register a new job and trigger the dispatcher.
     Returns (job_id, warning_or_none).
@@ -51,20 +52,12 @@ def enqueue_job(request: Any, project_name: str, task_type: str) -> tuple:
         'msg': f'任務已加入佇列: {project_name} ({task_type})'
     })
 
-    # Emit queued status so frontend shows it
-    loop = state.get_main_loop()
-    if loop and loop.is_running():
-        asyncio.run_coroutine_threadsafe(sio.emit('task_status', {
-            'status': 'queued', 'job_id': job_id,
-            'project_name': project_name, 'task_type': task_type
-        }), loop)
-        asyncio.run_coroutine_threadsafe(_try_dispatch(task_type), loop)
-    else:
-        asyncio.ensure_future(sio.emit('task_status', {
-            'status': 'queued', 'job_id': job_id,
-            'project_name': project_name, 'task_type': task_type
-        }))
-        asyncio.ensure_future(_try_dispatch(task_type))
+    # emit queued 狀態 + 觸發 dispatch（fire-and-forget，不阻塞 HTTP response）
+    await sio.emit('task_status', {
+        'status': 'queued', 'job_id': job_id,
+        'project_name': project_name, 'task_type': task_type
+    })
+    asyncio.ensure_future(_try_dispatch(task_type))
 
     return job_id, warning
 
@@ -184,6 +177,12 @@ async def _execute_job(job: state.JobState):
 
         elif isinstance(task, ReportJobRequest):
             await _run_report(job, task)
+
+        elif isinstance(task, TtsCloneRequest):
+            await _run_tts_clone(job, task)
+
+        elif isinstance(task, TtsRequest):
+            await _run_tts(job, task)
 
         # Mark done
         job.status = state.JobStatus.DONE
@@ -525,6 +524,89 @@ async def _run_verify(job, engine, task: VerifyRequest, _on_progress):
         )
     except Exception:
         pass
+
+
+def _tts_normalize(text: str, use_taiwan: bool) -> str:
+    """Apply Taiwan normalizer if enabled."""
+    if use_taiwan:
+        try:
+            from utils.taiwan_normalizer import normalize_for_taiwan_tts
+            return normalize_for_taiwan_tts(text)
+        except Exception:
+            pass
+    return text
+
+
+def _tts_progress_cb(job_id: str):
+    """Create a TTS progress callback for the given job."""
+    from core.logger import _emit_sync_for_job  # type: ignore
+    def _cb(data: dict):
+        _emit_sync_for_job(job_id, 'progress', {
+            'phase': 'tts',
+            'total_pct': data.get('pct', 0),
+            'current_file': data.get('msg', ''),
+            'done_files': 1 if data.get('pct', 0) >= 100 else 0,
+            'total_files': 1,
+        })
+    return _cb
+
+
+def _tts_finalize(job, output_path: str):
+    """Set job stats after TTS completion."""
+    job.total_files = 1
+    job.done_files = 1
+    try:
+        job.total_bytes = os.path.getsize(output_path)
+    except Exception:
+        pass
+
+
+async def _run_tts(job, task: TtsRequest):
+    """Run TTS job within the slot worker."""
+    from tts_engine import run_edge_tts  # type: ignore
+    from core.logger import _emit_sync_for_job  # type: ignore
+
+    text = _tts_normalize(task.text, task.use_taiwan)
+    os.makedirs(task.output_dir, exist_ok=True)
+    output_path = os.path.join(task.output_dir, task.output_name + ".mp3")
+
+    await run_edge_tts(
+        text, task.voice,
+        int(task.rate) if task.rate else 0,
+        int(task.pitch) if task.pitch else 0,
+        output_path, progress_cb=_tts_progress_cb(job.job_id),
+    )
+
+    _emit_sync_for_job(job.job_id, 'log', {'type': 'system', 'msg': f'TTS 完成：{output_path}'})
+    _tts_finalize(job, output_path)
+
+    try:
+        from notifier import notify_tab  # type: ignore
+        await asyncio.to_thread(
+            notify_tab, "tts_success",
+            project_name=task.output_name, dest_dir=task.output_dir
+        )
+    except Exception:
+        pass
+
+
+async def _run_tts_clone(job, task: TtsCloneRequest):
+    """Run F5-TTS voice clone job within the slot worker."""
+    from tts_engine import _f5_clone_sync, _ensure_tts_imports  # type: ignore
+    from core.logger import _emit_sync_for_job  # type: ignore
+    _ensure_tts_imports()
+
+    text = _tts_normalize(task.text, task.use_taiwan)
+    os.makedirs(task.output_dir, exist_ok=True)
+    output_path = os.path.join(task.output_dir, task.output_name + ".wav")
+
+    await asyncio.to_thread(
+        _f5_clone_sync, text, task.reference_audio, output_path,
+        _tts_progress_cb(job.job_id), task.speed, task.pitch, task.ref_text,
+    )
+
+    _emit_sync_for_job(job.job_id, 'log', {'type': 'system', 'msg': f'聲音複製完成：{output_path}'})
+    _tts_finalize(job, output_path)
 
 
 async def _run_report(job, task: ReportJobRequest):

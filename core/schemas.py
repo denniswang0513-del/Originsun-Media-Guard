@@ -85,6 +85,36 @@ class TranscribeRequest(BaseModel):
     individual_mode: bool = False
     compute_hosts: list = []
 
+class TtsRequest(BaseModel):
+    task_type: str = "tts"
+    job_id: str = ""
+    project_name: str = ""
+    text: str
+    voice: str = "zh-TW-HsiaoChenNeural"
+    rate: int = 0
+    pitch: int = 0
+    output_dir: str
+    output_name: str = "tts_output"
+    use_taiwan: bool = True
+    compute_hosts: list = []
+
+
+class TtsCloneRequest(BaseModel):
+    task_type: str = "tts"
+    job_id: str = ""
+    project_name: str = ""
+    text: str
+    reference_audio: str
+    output_dir: str
+    output_name: str = "clone_output"
+    speed: float = 1.0
+    pitch: int = 0
+    ref_text: Optional[str] = None
+    use_taiwan: bool = True
+    mode: str = "clone"  # "clone" to distinguish from standard tts
+    compute_hosts: list = []
+
+
 class DownloadModelRequest(BaseModel):
     model_size: str
 

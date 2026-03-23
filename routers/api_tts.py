@@ -94,37 +94,22 @@ class TtsEstimateRequest(BaseModel):
 
 # ─── Standard TTS (with Taiwan normalizer) ────────────────
 @router.post("/tts_jobs")
-async def tts_standard(req: TtsRequest, background_tasks: BackgroundTasks):
-    from utils.taiwan_normalizer import normalize_for_taiwan_tts  # pyre-ignore[21]
-    from core.logger import _emit_sync  # pyre-ignore[21]
+async def tts_standard(req: TtsRequest):
+    from core.worker import enqueue_job  # type: ignore
+    from core.schemas import TtsRequest as TtsJobRequest  # type: ignore
 
-    normalized_text = normalize_for_taiwan_tts(req.text)
-    os.makedirs(req.output_dir, exist_ok=True)
+    job_req = TtsJobRequest(
+        text=req.text,
+        voice=req.voice,
+        rate=req.rate if isinstance(req.rate, int) else 0,
+        pitch=req.pitch if isinstance(req.pitch, int) else 0,
+        output_dir=req.output_dir,
+        output_name=req.output_name,
+        use_taiwan=True,
+    )
     output_path = os.path.join(req.output_dir, req.output_name + ".mp3")
-
-    def _on_progress(data: dict):
-        _emit_sync("tts_edge_progress", data)
-
-    async def _run_edge():
-        _t0 = time.time()
-        try:
-            await run_edge_tts(
-                normalized_text, req.voice, req.rate, req.pitch, output_path,
-                progress_cb=_on_progress,
-            )
-            _elapsed = time.time() - _t0
-            _emit_sync("tts_edge_progress", {
-                "phase": "done", "pct": 100,
-                "msg": "生成完成！", "output": output_path,
-                "elapsed_sec": _elapsed,
-            })
-        except Exception as e:
-            _emit_sync("tts_edge_progress", {
-                "phase": "error", "pct": 0, "msg": str(e),
-            })
-
-    background_tasks.add_task(_run_edge)
-    return {"status": "queued", "output": output_path}
+    job_id, warning = await enqueue_job(job_req, req.output_name, "tts")
+    return {"status": "queued", "output": output_path, "job_id": job_id}
 
 _cached_voices = None
 
@@ -226,49 +211,43 @@ async def estimate_tts_duration(req: TtsEstimateRequest):
 
 # ─── Voice Clone (F5-TTS) ─────────────────────────────────
 @router.post("/tts_jobs/clone")
-async def tts_clone(req: VoiceCloneRequest, background_tasks: BackgroundTasks):
+async def tts_clone(req: VoiceCloneRequest):
     if not f5_tts_is_available():
         raise HTTPException(status_code=428, detail="F5-TTS 未安裝，請執行: pip install f5-tts")
 
-    from utils.taiwan_normalizer import normalize_for_taiwan_tts  # pyre-ignore[21]
-    from core.logger import _emit_sync  # pyre-ignore[21]
+    from core.worker import enqueue_job  # type: ignore
+    from core.schemas import TtsCloneRequest  # type: ignore
 
-    normalized_text = normalize_for_taiwan_tts(req.text)
-    os.makedirs(req.output_dir, exist_ok=True)
+    job_req = TtsCloneRequest(
+        text=req.text,
+        reference_audio=req.reference_audio,
+        output_dir=req.output_dir,
+        output_name=req.output_name,
+        speed=req.speed,
+        pitch=req.pitch,
+        ref_text=req.ref_text,
+        use_taiwan=True,
+        mode="clone",
+    )
     output_path = os.path.join(req.output_dir, req.output_name + ".wav")
-
-    def _on_progress(data: dict):
-        _emit_sync("tts_clone_progress", data)
-
-    async def _run_clone():
-        _t0 = time.time()
-        try:
-            await run_f5_tts_clone(
-                normalized_text, req.reference_audio, output_path,
-                progress_cb=_on_progress, speed=req.speed, pitch=req.pitch,
-                ref_text=req.ref_text
-            )
-            _elapsed = time.time() - _t0
-            _emit_sync("tts_clone_progress", {
-                "phase": "done", "pct": 100,
-                "msg": "生成完成！", "output": output_path,
-                "elapsed_sec": _elapsed,
-            })
-        except Exception as e:
-            _emit_sync("tts_clone_progress", {
-                "phase": "error", "pct": 0, "msg": str(e)
-            })
-
-    background_tasks.add_task(_run_clone)
-    return {"status": "queued", "output": output_path}
+    job_id, warning = await enqueue_job(job_req, req.output_name, "tts")
+    return {"status": "queued", "output": output_path, "job_id": job_id}
 
 @router.get("/tts/f5_status")
 def f5_status():
     status = f5_model_status()
+    device = "unknown"
+    try:
+        from tts_engine import _f5_instance
+        if _f5_instance is not None:
+            device = getattr(_f5_instance, 'device', 'unknown')
+    except Exception:
+        pass
     return {
         "available": f5_tts_is_available(),
         "model_ready": status["local"],
         "model_cached": status["cached"],
+        "device": device,
     }
 
 @router.post("/tts/f5_download")

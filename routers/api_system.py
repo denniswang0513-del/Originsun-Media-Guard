@@ -193,14 +193,18 @@ async def stop_job(job_id: str = ""):
             job.asyncio_task.cancel()
         job.status = state.JobStatus.CANCELLED
         return {"status": "stopped", "job_id": job_id}
-    # No job_id: stop ALL running/paused jobs (backward compat)
-    for j in state.get_all_jobs().values():
+    # No job_id: stop ALL jobs (running + paused + queued)
+    for j in list(state.get_all_jobs().values()):
         if j.status in (state.JobStatus.RUNNING, state.JobStatus.PAUSED):
             if j.engine:
                 j.engine.request_stop()
             if j.asyncio_task and not j.asyncio_task.done():
                 j.asyncio_task.cancel()
+        if j.status in (state.JobStatus.RUNNING, state.JobStatus.PAUSED,
+                         state.JobStatus.QUEUED, state.JobStatus.WAITING):
             j.status = state.JobStatus.CANCELLED
+    # 重置所有活躍 slot 計數，防止 slot 被永久佔用
+    state._active_counts.clear()
     return {"status": "stopped"}
 
 @router.post("/api/v1/control/update")

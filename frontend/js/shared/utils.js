@@ -163,12 +163,46 @@ export function resetProgress() {
     if (rpLabel) rpLabel.textContent = '備用中...';
     document.getElementById('rp-progress')?.classList.add('hidden');
 
+    // ── Transcribe TAB ──
+    const trBar = document.getElementById('transcribe_prog_bar');
+    if (trBar) { trBar.style.width = '0%'; trBar.style.background = ''; }
+    const trLabel = document.getElementById('transcribe_prog_label');
+    if (trLabel) trLabel.textContent = '';
+    const trPct = document.getElementById('transcribe_prog_pct');
+    if (trPct) trPct.textContent = '0%';
+
+    // ── TTS TABs ──
+    ['tts_progress_area', 'tts_clone_progress_area'].forEach(id => {
+        const el = document.getElementById(id);
+        if (el) el.classList.add('hidden');
+    });
+    ['tts_prog_bar', 'tts_clone_prog_bar'].forEach(id => {
+        const el = document.getElementById(id);
+        if (el) { el.style.width = '0%'; el.style.background = ''; el.classList.remove('animate-pulse'); }
+    });
+    ['tts_prog_label', 'tts_clone_prog_label'].forEach(id => {
+        const el = document.getElementById(id);
+        if (el) el.textContent = '';
+    });
+    ['tts_prog_pct', 'tts_clone_prog_pct'].forEach(id => {
+        const el = document.getElementById(id);
+        if (el) el.textContent = '0%';
+    });
+
+    // ── Re-enable all disabled submit buttons ──
+    document.querySelectorAll('button.opacity-50.cursor-not-allowed').forEach(btn => {
+        btn.disabled = false;
+        btn.classList.remove('opacity-50', 'cursor-not-allowed');
+    });
+
     // ── Shared controls ──
     const btnReport = document.getElementById('btn_open_report');
     if (btnReport) btnReport.style.display = 'none';
 
     // ── Remote host progress ──
     ['bk', 'tc', 'ct'].forEach(p => document.getElementById(p + '-remote-hosts-progress')?.classList.add('hidden'));
+    // 也隱藏所有「遠端主機進度」面板（各 TAB 共用 class）
+    document.querySelectorAll('[id$="-remote-hosts-progress"]').forEach(el => el.classList.add('hidden'));
     if (window._heartbeatTimer) clearInterval(window._heartbeatTimer);
     window._remoteDispatching = false;
 
