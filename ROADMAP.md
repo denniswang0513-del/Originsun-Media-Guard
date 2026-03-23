@@ -46,9 +46,7 @@
 - [x] F5-TTS device 自動重建（CPU→CUDA 檢測不一致時重新載入）
 - [x] 獨立 concurrency slot（`CONCURRENCY_LIMITS['tts'] = 1`）
 
-### 尚需完成
-
-- [ ] SRT 批次合成功能
+### 狀態：✅ 全部完成
 
 ---
 
