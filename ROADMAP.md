@@ -4,12 +4,12 @@
 
 ---
 
-## 現況 (v1.9.8) 基準線
+## 現況 (v1.9.9) 基準線
 
 - ✅ 6 個完整工作流程（備份、比對、轉 Proxy、串帶、報表、AI 逐字稿）
 - ✅ 模組化後端：`main.py` + `core/` + `routers/`
 - ✅ 模組化前端：`frontend/tabs/` 各分頁獨立
-- ✅ OTA 純 HTTP 熱更新 + 版本守護 + 更新防卡死 + 雙層回滾機制（解壓失敗+啟動失敗）
+- ✅ OTA 無痛更新（6 層防護：busy 檢查 → 下載防中斷 → 備份回滾 → 自動 pip install → 全 router import 測試 → health check）
 - ✅ 語音生成 Tab — Edge-TTS + F5-TTS 聲音複製 + NAS 聲音庫 + 台灣正音引擎 + 佇列整合 + GPU 推理
 - ✅ 專案總覽 — 單行緊湊任務卡片 + 歷史搜尋篩選 + Log 查看器 + 佇列管理 + 排程
 - ✅ 處理主機 UI — 本機自動偵測整合 + 狀態燈（綠/紅）+ IP 去 port + 多選/單選分離
@@ -82,6 +82,14 @@
 ### 要建置的東西
 
 - [x] **OTA 回滾機制**：備份+雙層回滾（解壓失敗 + 啟動失敗 health check）+ Windows MsgBox 通知
+- [x] **OTA 無痛更新（v1.9.8）**：
+  - `publish_update.py` 自動生成 `update_manifest.json`（掃描 import → 比對 requirements → 列出新套件）
+  - `bootstrap.py` 解壓後自動 `pip install` 新套件
+  - `bootstrap.py` 更新前 `worker_busy` 檢查（有任務在跑 → 拒絕更新）
+  - `bootstrap.py` 下載寫 `.tmp` → 完整後 rename（防下載中斷）
+  - `bootstrap.py` 全 12 router import 測試（失敗 → 回滾 + 彈窗）
+  - `main.py` router 容錯載入（缺模組跳過該 router，不 crash）
+  - `build_agent_zip.py` + `/download_update` 自動掃描含 .py 的資料夾（不再漏包）
 - [ ] **遠端一鍵更新**：主控端可直接觸發任一 Agent 的 OTA 更新（POST 到遠端 `/api/v1/control/update`）
 - [ ] **更新進度監控**：主控端輪詢遠端 Agent 的更新狀態（`update_monitor.py` port 8001）
 - [ ] **批次更新**：一鍵更新所有過舊版本的 Agent
