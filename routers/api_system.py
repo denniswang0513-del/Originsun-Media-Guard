@@ -796,7 +796,7 @@ Start-Sleep -Seconds 3
 
 @router.get("/download_installer")
 async def download_installer():
-    file_path = "Install_Originsun_Agent.bat"
+    file_path = "Install_or_Update.bat"
     if os.path.exists(file_path):
-        return FileResponse(file_path, filename="Install_Originsun_Agent.bat")
-    return {"error": "找不到自動安裝腳本，請確認伺服器根目錄下有 Install_Originsun_Agent.bat。"}
+        return FileResponse(file_path, filename="Install_or_Update.bat")
+    return {"error": "Install_or_Update.bat not found."}
