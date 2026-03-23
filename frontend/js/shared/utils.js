@@ -3,7 +3,7 @@
 
 export function getComputeBaseUrl() {
     const mode = document.getElementById('compute_mode')?.value;
-    return (mode === 'local' && window.localAgentActive) ? 'http://localhost:8000' : '';
+    return (mode === 'local' && window.localAgentActive) ? 'http://127.0.0.1:8000' : '';
 }
 
 export function getAgentBaseUrl() {

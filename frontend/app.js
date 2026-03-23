@@ -592,7 +592,7 @@ if (typeof appendLog === 'undefined') {
         async function pollLocalAgent() {
             try {
                 const isLocal = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
-                const targetUrl = isLocal ? '/api/v1/status' : 'http://localhost:8000/api/v1/status';
+                const targetUrl = isLocal ? '/api/v1/status' : 'http://127.0.0.1:8000/api/v1/status';
 
                 const controller = new AbortController();
                 const timeoutId = setTimeout(() => controller.abort(), 1000);
@@ -603,7 +603,7 @@ if (typeof appendLog === 'undefined') {
                 if (response.ok) {
                     localAgentActive = true;
                     updateAgentBadge(true);
-                    const newUrl = isLocal ? window.location.origin : 'http://localhost:8000';
+                    const newUrl = isLocal ? window.location.origin : 'http://127.0.0.1:8000';
                     if (currentSocketUrl !== newUrl) {
                         currentSocketUrl = newUrl;
                         setupSocket(currentSocketUrl);
@@ -678,7 +678,7 @@ if (typeof appendLog === 'undefined') {
             try {
                 // 1. 取得本機 Agent 正在運行的版本（不論在 localhost 或遠端都固定問 localhost）
                 const isLocal = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
-                const localVersionUrl = isLocal ? '/api/v1/version' : 'http://localhost:8000/api/v1/version';
+                const localVersionUrl = isLocal ? '/api/v1/version' : 'http://127.0.0.1:8000/api/v1/version';
                 // 瀏覽主控端時，主控端本身就是版本來源，直接用 /api/v1/version
                 const nasVersionUrl = isLocal ? '/api/v1/nas_version' : '/api/v1/version';
 
@@ -785,7 +785,7 @@ if (typeof appendLog === 'undefined') {
 
                 // 1) 嘗試從 update_monitor (port 8001) 取得進度
                 try {
-                    const r = await fetch('http://localhost:8001/status',
+                    const r = await fetch('http://127.0.0.1:8001/status',
                         { signal: AbortSignal.timeout(2000) });
                     if (r.ok) {
                         _updateLastProgress = Date.now();
@@ -798,7 +798,7 @@ if (typeof appendLog === 'undefined') {
                 const stale = Date.now() - _updateLastProgress;
                 if (stale > 30000 && elapsed > 15000) {
                     try {
-                        const health = await fetch('http://localhost:8000/api/v1/health',
+                        const health = await fetch('http://127.0.0.1:8000/api/v1/health',
                             { signal: AbortSignal.timeout(2000) });
                         if (health.ok) {
                             // 伺服器已恢復！自動完成更新
@@ -861,7 +861,7 @@ if (typeof appendLog === 'undefined') {
 
             try {
                 // 不使用 await 等待 json，因為伺服器會在這瞬間自我了斷 (os._exit)，必然引發 Network Error
-                fetch('http://localhost:8000/api/v1/control/update', { method: 'POST' }).catch(e => console.log('Expected disconnect:', e));
+                fetch('http://127.0.0.1:8000/api/v1/control/update', { method: 'POST' }).catch(e => console.log('Expected disconnect:', e));
                 appendLog('更新指令已送出，稍後連線指示燈將會變為紅色，數秒後將自動重新載入網頁。', 'system');
             } catch (err) {
                 // 忽略錯誤，絕對不把 isUpdating 設為 false，讓畫面維持藍色等待直到 polling 醒來
@@ -921,7 +921,7 @@ if (typeof appendLog === 'undefined') {
         function _pollForMigrationDone() {
             const timer = setInterval(async () => {
                 try {
-                    const r = await fetch('http://localhost:8000/api/v1/version', { signal: AbortSignal.timeout(2000) });
+                    const r = await fetch('http://127.0.0.1:8000/api/v1/version', { signal: AbortSignal.timeout(2000) });
                     if (!r.ok) return;
                     const data = await r.json();
                     if (data.version && !_isOlderThan(data.version, '1.8.0')) {
@@ -951,7 +951,7 @@ if (typeof appendLog === 'undefined') {
                 return;
             }
             try {
-                const res = await fetch('http://localhost:8000/api/v1/utils/create_shortcut', { method: 'POST' });
+                const res = await fetch('http://127.0.0.1:8000/api/v1/utils/create_shortcut', { method: 'POST' });
                 const data = await res.json();
                 if (data.status === 'success') {
                     alert(data.message);
@@ -973,7 +973,7 @@ if (typeof appendLog === 'undefined') {
         // ===== SaaS 路由輔助函數 =====
         function getAgentBaseUrl() {
             // 本機代理伺服器，負責 UI 操作如選取資料夾與拖曳。如果沒開，回退給網頁原始伺服器。
-            return localAgentActive ? 'http://localhost:8000' : '';
+            return localAgentActive ? 'http://127.0.0.1:8000' : '';
         }
 
         // ===== Multi-host: render host selector checkboxes =====
