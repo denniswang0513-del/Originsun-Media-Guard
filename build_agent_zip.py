@@ -26,6 +26,7 @@ FILES_TO_PACK = [
     "ffmpeg.exe",
     "0225_requirements.txt",
     "Install_Originsun_Agent.bat",
+    "update_manifest.json",
 ]
 DIRS_TO_PACK = [
     "frontend",

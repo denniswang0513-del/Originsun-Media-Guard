@@ -103,6 +103,17 @@ def _show_rollback_alert(reason):
         pass  # alert is best-effort
 
 
+def _find_python(base_dir):
+    """Find the best Python executable for this installation."""
+    for p in [
+        os.path.join(base_dir, ".venv", "Scripts", "python.exe"),
+        os.path.join(base_dir, "python_embed", "python.exe"),
+    ]:
+        if os.path.exists(p):
+            return p
+    return None
+
+
 def run_update(server_url=""):
     base_dir = _find_install_dir()
 
@@ -117,6 +128,21 @@ def run_update(server_url=""):
     print("=" * 52)
     print(f"\n  Install dir : {base_dir}")
     print(f"  Server      : {server_url}\n")
+
+    # 0) Pre-check: reject update if worker is busy
+    try:
+        req = urllib.request.Request(
+            "http://localhost:8000/api/v1/status",
+            headers={"User-Agent": "OriginsunBootstrap/1.0"},
+        )
+        resp_data = json.loads(urllib.request.urlopen(req, timeout=3).read())
+        busy = resp_data.get("worker_busy") or resp_data.get("active_job_count", 0) > 0
+        if busy:
+            print("[BLOCKED] 有任務正在執行中，請等待完成後再更新。")
+            _show_rollback_alert("有任務正在執行中，無法更新。請等待任務完成後再試。")
+            sys.exit(1)
+    except Exception:
+        pass  # server might already be stopped, proceed anyway
 
     # 1) Kill existing agent on port 8000
     print("[System] Stopping old Agent on port 8000...")
@@ -188,11 +214,64 @@ def run_update(server_url=""):
         except OSError:
             pass
 
-    # 5) Restart agent
+    # 5) Install new pip dependencies from update_manifest.json
+    manifest_path = os.path.join(base_dir, "update_manifest.json")
+    if os.path.exists(manifest_path):
+        try:
+            with open(manifest_path, "r", encoding="utf-8") as mf:
+                manifest = json.load(mf)
+            new_pkgs = manifest.get("pip_install", [])
+            if new_pkgs:
+                print(f"[System] Installing {len(new_pkgs)} new package(s): {', '.join(new_pkgs)}")
+                # 找 pip
+                pip_exe = None
+                for p in [
+                    os.path.join(base_dir, ".venv", "Scripts", "pip.exe"),
+                    os.path.join(base_dir, "python_embed", "Scripts", "pip.exe"),
+                ]:
+                    if os.path.exists(p):
+                        pip_exe = p
+                        break
+                if not pip_exe:
+                    # fallback: python -m pip
+                    python_exe = _find_python(base_dir)
+                    if python_exe:
+                        pip_exe = [python_exe, "-m", "pip"]
+                if pip_exe:
+                    cmd = pip_exe if isinstance(pip_exe, list) else [pip_exe]
+                    cmd += ["install", "--quiet"] + new_pkgs
+                    result = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
+                    if result.returncode == 0:
+                        print(f"  [OK] Packages installed successfully.")
+                    else:
+                        print(f"  [WARN] pip install failed (non-fatal): {result.stderr[:200]}")
+                else:
+                    print("  [WARN] pip not found, skipping package installation.")
+            else:
+                print("[System] No new packages required.")
+        except Exception as e:
+            print(f"  [WARN] Manifest processing failed (non-fatal): {e}")
+
+    # 6) Startup test — verify new code can at least import
+    print("[System] Testing new code imports...")
+    python_exe = _find_python(base_dir)
+    if python_exe:
+        test_result = subprocess.run(
+            [python_exe, "-c", "from routers import api_system; print('OK')"],
+            capture_output=True, text=True, timeout=30, cwd=base_dir,
+        )
+        if test_result.returncode != 0:
+            print(f"  [ERROR] Import test failed: {test_result.stderr[:300]}")
+            _rollback(base_dir, backup_dir, f"新版程式碼 import 失敗")
+            _restart_agent(base_dir)
+            sys.exit(1)
+        print("  [OK] Import test passed.")
+
+    # 7) Restart agent
     print("\n[OK] Upgrade complete! Restarting Agent...")
     _restart_agent(base_dir)
 
-    # 6) Health check — rollback if new version fails to start
+    # 8) Health check — rollback if new version fails to start
     print("[System] Verifying new version starts correctly...")
     healthy = False
     health_req = urllib.request.Request(

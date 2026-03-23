@@ -1,0 +1,10 @@
+{
+  "version": "1.9.8",
+  "pip_install": [
+    "asyncpg",
+    "huggingface-hub",
+    "pydub",
+    "sqlalchemy[asyncio]"
+  ],
+  "note": "Agent 更新時自動 pip install 這些套件"
+}
