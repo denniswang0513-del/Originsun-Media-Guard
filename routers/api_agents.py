@@ -20,18 +20,33 @@ import core.state as state
 router = APIRouter(prefix="/api/v1", tags=["Agents"])
 
 
-def _find_agent(agent_id: str) -> dict:
-    """Find agent by ID from DB or JSON fallback. Raises 404 if not found."""
-    agent = None
-    try:
-        from db.json_fallback import get_agents_fallback
-        agents = get_agents_fallback()
-        agent = next((a for a in agents if a.get("id") == agent_id), None)
-    except Exception:
-        pass
+def _find_agent_sync(agent_id: str) -> dict:
+    """Find agent by ID from NAS JSON or local JSON. Raises 404 if not found."""
+    nas_dir = _get_nas_agents_dir()
+    agents = _load_agents_json(nas_dir)
+    agent = next((a for a in agents if a.get("id") == agent_id), None)
     if not agent:
         raise HTTPException(status_code=404, detail=f"找不到 ID 為 {agent_id} 的機器")
     return agent
+
+
+async def _find_agent(agent_id: str) -> dict:
+    """Find agent by ID from DB (preferred) or JSON fallback. Raises 404 if not found."""
+    # Try DB first
+    if state.db_online:
+        try:
+            from db.session import get_session_factory
+            factory = get_session_factory()
+            if factory:
+                from db.repos import agents_repo
+                async with factory() as session:
+                    agent = await agents_repo.get(session, agent_id)
+                    if agent:
+                        return agent
+        except Exception:
+            pass
+    # Fallback to JSON
+    return _find_agent_sync(agent_id)
 
 
 # ─── JSON Fallback Helpers (保留原有邏輯) ─────────────────
@@ -150,7 +165,7 @@ async def add_agent(req: NewAgentRequest):
 @router.get("/agents/{agent_id}/health")
 async def proxy_agent_health(agent_id: str):
     """Proxy health check — avoids browser CORS/Private Network issues."""
-    agent = _find_agent(agent_id)
+    agent = await _find_agent(agent_id)
     url = agent.get("url", "").rstrip("/") + "/api/v1/health"
 
     def _fetch_health():
@@ -167,7 +182,7 @@ async def proxy_agent_health(agent_id: str):
 @router.post("/agents/{agent_id}/update")
 async def trigger_agent_update(agent_id: str):
     """Proxy: trigger OTA update on a remote Agent."""
-    agent = _find_agent(agent_id)
+    agent = await _find_agent(agent_id)
     url = agent.get("url", "").rstrip("/") + "/api/v1/control/update"
 
     def _trigger():
@@ -186,7 +201,7 @@ async def trigger_agent_update(agent_id: str):
 @router.get("/agents/{agent_id}/update_status")
 async def get_agent_update_status(agent_id: str):
     """Proxy: poll remote Agent's update_monitor (port 8001) for update progress."""
-    agent = _find_agent(agent_id)
+    agent = await _find_agent(agent_id)
     # update_monitor runs on port 8001
     base_url = agent.get("url", "").rstrip("/")
     # Replace :8000 with :8001 for update_monitor
