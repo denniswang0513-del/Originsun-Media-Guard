@@ -39,7 +39,12 @@ def _match_date(entry: dict, date_str: str) -> bool:
     return ts[:10] == date_str
 
 
-from db.json_fallback import get_machine_id as _get_machine_id  # noqa: E402
+try:
+    from db.json_fallback import get_machine_id as _get_machine_id  # noqa: E402
+except ImportError:
+    import socket as _socket
+    def _get_machine_id() -> str:
+        return _socket.gethostname()
 
 
 # ─── Public API (called from worker.py) ──────────────────
