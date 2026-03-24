@@ -7,35 +7,41 @@ echo ============================================================
 echo.
 
 set "SERVER=http://192.168.1.11:8000"
-set "FOUND="
 
-for /d %%d in ("%USERPROFILE%\Desktop\Originsun*") do @if exist "%%~d\main.py" set "FOUND=%%~d"
-for /d %%d in ("%USERPROFILE%\Downloads\Originsun*") do @if exist "%%~d\main.py" set "FOUND=%%~d"
-for /d %%d in ("C:\Originsun*") do @if exist "%%~d\main.py" set "FOUND=%%~d"
-for /d %%d in ("D:\Originsun*") do @if exist "%%~d\main.py" set "FOUND=%%~d"
-for /d %%d in ("C:\Users\%USERNAME%\Originsun*") do @if exist "%%~d\main.py" set "FOUND=%%~d"
-if exist "%USERPROFILE%\Desktop\Originsun_Agent\main.py" set "FOUND=%USERPROFILE%\Desktop\Originsun_Agent"
+REM Kill old process on port 8000
+echo [0/3] Stopping old Agent...
+for /f "tokens=5" %%p in ('netstat -aon ^| findstr ":8000 " ^| findstr "LISTENING" 2^>nul') do (
+    taskkill /PID %%p /F >nul 2>nul
+)
+timeout /t 2 /nobreak >nul
+
+REM Search for existing Agent
+set "FOUND="
+for /d %%d in ("%USERPROFILE%\Desktop\Originsun*" "%USERPROFILE%\Downloads\Originsun*" "C:\Originsun*" "D:\Originsun*" "C:\Users\%USERNAME%\Originsun*") do @if exist "%%~d\main.py" set "FOUND=%%~d"
 
 if not defined FOUND goto :fresh_install
 
 echo [OK] Found Agent: %FOUND%
 echo.
-cd /d "%FOUND%"
 
+REM Force download latest update (bypass old bootstrap)
+echo [1/3] Downloading latest update...
+cd /d "%FOUND%"
+powershell -Command "Invoke-WebRequest -Uri '%SERVER%/download_update' -OutFile '%TEMP%\originsun_update.zip'" 2>nul
+if not exist "%TEMP%\originsun_update.zip" (
+    echo [WARN] Update download failed, trying full install...
+    goto :fresh_install
+)
+
+echo [2/3] Extracting update...
+powershell -Command "Expand-Archive -Path '%TEMP%\originsun_update.zip' -DestinationPath '%FOUND%' -Force"
+del "%TEMP%\originsun_update.zip" 2>nul
+
+echo [2.5/3] Installing packages...
 if exist .venv\Scripts\pip.exe (
-    echo [1/3] Installing packages...
     .venv\Scripts\pip.exe install sqlalchemy[asyncio] asyncpg --quiet 2>nul
-    echo [2/3] Updating...
-    .venv\Scripts\python.exe bootstrap.py --update %SERVER%
 ) else if exist python_embed\python.exe (
-    echo [1/3] Installing packages...
     python_embed\python.exe -m pip install sqlalchemy[asyncio] asyncpg --quiet 2>nul
-    echo [2/3] Updating...
-    python_embed\python.exe bootstrap.py --update %SERVER%
-) else (
-    echo [ERROR] Python not found!
-    pause
-    exit /b 1
 )
 
 echo [3/3] Starting...
@@ -47,7 +53,7 @@ pause
 exit /b 0
 
 :fresh_install
-echo [INFO] No existing Agent found. Fresh install...
+echo [INFO] No existing Agent found. Fresh install to Desktop...
 echo.
 echo Downloading full package from server (~1GB, please wait)...
 cd /d "%USERPROFILE%\Desktop"
