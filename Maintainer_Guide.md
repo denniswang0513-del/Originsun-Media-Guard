@@ -47,7 +47,11 @@ python publish_update.py
 ## ⚠️ 3. 常見維護問題與解法
 
 - **我要加新的 Python 依賴套件怎麼辦？**
-  如果你 `pip install` 了新的套件，不用擔心，打包腳本會自動把整個 `.venv`（虛擬環境）包裝進 `Originsun_Agent.zip` 裡面，新同事下載會直接拿到新套件；舊同事因為是走 OTA 差量更新，目前腳本沒有每次更新 `.venv`，如果你的更新非常重大，建議請同事「**重新下載精靈重新安裝**」一次。
+  1. 先在本機安裝測試：`pip install 套件名`
+  2. 將套件名加入 `0225_requirements.txt`（這是 Agent 端的依賴清單）
+  3. 正常執行 `python publish_update.py` 發布新版
+
+  OTA 更新時，`update_agent.bat` 會自動比對新舊 `0225_requirements.txt`，若有變動會自動執行 `pip install -r 0225_requirements.txt` 安裝新套件。同事不需要手動操作，也不需要重新安裝。
   
 - **我不小心把版本號寫錯了怎麼辦？**
   你可以在專案目錄下找到 `version.json` 這個檔案，用純文字編輯器直接手動改回你要的數字，然後再跑一次 `publish_update.py` 發布覆蓋 NAS 的檔案即可。

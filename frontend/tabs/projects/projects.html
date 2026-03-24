@@ -1,0 +1,128 @@
+<div class="pj-container">
+
+    <!-- Header Bar -->
+    <div class="pj-header">
+        <div class="pj-header-left">
+            <h2>專案總覽</h2>
+            <span class="pj-badge pj-badge-running">執行中 <span id="pj-count-running">0</span></span>
+            <span class="pj-badge pj-badge-queued">排隊中 <span id="pj-count-queued">0</span></span>
+            <span class="pj-badge pj-badge-scheduled">排程中 <span id="pj-count-scheduled">0</span></span>
+            <span class="pj-badge pj-badge-done">今日完成 <span id="pj-count-done">0</span></span>
+        </div>
+        <div class="pj-header-right">
+            <button class="pj-btn-settings" onclick="window.projectsTab.toggleSettings()">⚙ 系統參數</button>
+        </div>
+    </div>
+
+    <!-- Settings Panel (collapsed by default) -->
+    <div id="pj-settings-panel" class="pj-settings-panel" style="display:none;">
+        <!-- NAS 機器共享路徑 -->
+        <div class="pj-settings-item pj-settings-wide">
+            <label>機器列表 NAS 路徑</label>
+            <div class="pj-settings-nas-row">
+                <input type="text" id="pj-nas-agents-dir" class="pj-settings-nas-input"
+                    placeholder="\\\\192.168.1.x\\Share\\Agents">
+                <button class="pj-btn pj-btn-pause" onclick="window.projectsTab.saveAgentsDir()">儲存</button>
+            </div>
+        </div>
+        <div class="pj-settings-item">
+            <label>備份並行上限</label>
+            <select id="pj-limit-backup" onchange="window.projectsTab.saveLimits('backup', this.value)">
+                <option value="1">1</option>
+                <option value="2">2</option>
+            </select>
+        </div>
+        <div class="pj-settings-item">
+            <label>轉檔並行上限</label>
+            <select id="pj-limit-transcode" onchange="window.projectsTab.saveLimits('transcode', this.value)">
+                <option value="1">1</option>
+                <option value="2">2</option>
+                <option value="3">3</option>
+                <option value="4">4</option>
+            </select>
+        </div>
+        <div class="pj-settings-item">
+            <label>轉錄並行上限</label>
+            <select id="pj-limit-transcribe" onchange="window.projectsTab.saveLimits('transcribe', this.value)">
+                <option value="1">1</option>
+                <option value="2">2</option>
+                <option value="3">3</option>
+                <option value="4">4</option>
+            </select>
+        </div>
+        <div class="pj-settings-item">
+            <label>串接並行上限</label>
+            <select id="pj-limit-concat" onchange="window.projectsTab.saveLimits('concat', this.value)">
+                <option value="1">1</option>
+                <option value="2">2</option>
+                <option value="3">3</option>
+                <option value="4">4</option>
+            </select>
+        </div>
+    </div>
+
+    <!-- Machine Status Section -->
+    <div class="pj-section-header">
+        <span>機器狀態</span>
+        <div class="pj-section-header-right">
+            <button id="pj-batch-update-btn" class="pj-btn-update admin-only" style="display:none;" onclick="window.projectsTab.batchUpdate()"></button>
+            <button class="pj-btn-settings admin-only" style="display:none;" onclick="window.projectsTab.toggleAddAgent()">+ 新增機器</button>
+        </div>
+    </div>
+    <div id="pj-add-agent-form" class="pj-add-agent-form" style="display:none;">
+        <input type="text" id="pj-agent-name" class="pj-agent-input" placeholder="名稱（如 PC-A）">
+        <input type="text" id="pj-agent-ip" class="pj-agent-input" placeholder="192.168.1.x">
+        <input type="number" id="pj-agent-port" class="pj-agent-input pj-agent-port" placeholder="8000" value="8000">
+        <button class="pj-btn pj-btn-pause" onclick="window.projectsTab.addAgent()">新增</button>
+        <button class="pj-btn pj-btn-close" onclick="window.projectsTab.toggleAddAgent()">取消</button>
+    </div>
+    <div id="pj-machines-container"></div>
+
+    <!-- Scheduled Tasks Section -->
+    <div class="pj-section-header" style="margin-top: 16px;">
+        <span>排程任務</span>
+    </div>
+    <div id="pj-schedules-container"></div>
+
+    <!-- 進行中 Section -->
+    <div class="pj-section-header" style="margin-top: 16px;">進行中</div>
+    <div id="pj-active-container"></div>
+
+    <!-- 完成 Section -->
+    <div class="pj-section-header pj-history-toolbar" style="margin-top: 16px;">
+        <span>完成</span>
+        <div class="pj-history-toolbar-right">
+            <input type="text" id="pj-history-search" class="pj-filter-input" placeholder="搜尋專案名…">
+            <select id="pj-history-type-filter" class="pj-filter-select">
+                <option value="">全部類型</option>
+                <option value="backup">備份</option>
+                <option value="transcode">轉檔</option>
+                <option value="concat">串接</option>
+                <option value="verify">驗證</option>
+                <option value="report">報表</option>
+                <option value="transcribe">逐字稿</option>
+                <option value="tts">語音生成</option>
+                <option value="clone">聲音複製</option>
+            </select>
+            <select id="pj-history-status-filter" class="pj-filter-select">
+                <option value="">全部狀態</option>
+                <option value="done">完成</option>
+                <option value="error">失敗</option>
+                <option value="cancelled">取消</option>
+            </select>
+            <input type="date" id="pj-history-date" class="pj-history-date">
+            <button class="pj-btn-clear admin-only" style="display:none;" onclick="window.projectsTab.clearHistory()">清除</button>
+        </div>
+    </div>
+    <div id="pj-history-container"></div>
+
+    <!-- 等待 Section -->
+    <div class="pj-section-header" style="margin-top: 16px;">
+        <span>等待</span>
+        <div class="pj-section-header-right">
+            <button class="pj-btn-settings" onclick="window.projectsTab.refreshQueue()">重新整理</button>
+        </div>
+    </div>
+    <div id="pj-queue-container"></div>
+
+</div>

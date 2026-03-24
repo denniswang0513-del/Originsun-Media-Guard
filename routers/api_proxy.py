@@ -1,21 +1,23 @@
-from fastapi import APIRouter, BackgroundTasks  # type: ignore
+from fastapi import APIRouter  # type: ignore
+from fastapi.responses import JSONResponse  # type: ignore
 import os
 import shutil
 from core.schemas import (  # type: ignore
     TranscodeRequest, MergeHostOutputsRequest, VerifyProxiesRequest,
     VerifyStandaloneProxiesRequest, CompareSourceRequest, MergeOutputRequest
 )
-import core.state as state  # type: ignore
-from core.worker import _background_worker  # type: ignore
+from core.worker import enqueue_job  # type: ignore
 
 router = APIRouter()
 
 @router.post("/api/v1/jobs/transcode")
-async def create_transcode_job(req: TranscodeRequest, bg_tasks: BackgroundTasks):
-    state.task_queue.put(req)
-    if not state.worker_busy:
-        bg_tasks.add_task(_background_worker)
-    return {"status": "queued", "position": state.task_queue.qsize()}
+async def create_transcode_job(req: TranscodeRequest):
+    project_name = req.project_name or os.path.basename(req.dest_dir) or "unnamed"
+    job_id, warning = await enqueue_job(req, project_name, "transcode")
+    resp = {"status": "queued", "job_id": job_id}
+    if warning:
+        resp["warning"] = warning
+    return resp
 
 @router.post("/api/v1/merge_host_outputs")
 async def merge_host_outputs(req: MergeHostOutputsRequest):

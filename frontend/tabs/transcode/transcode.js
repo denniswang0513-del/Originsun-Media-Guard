@@ -1,4 +1,4 @@
-import { getComputeBaseUrl, appendLog, pickPath, setupDragAndDrop, setupInputDrop } from '../../js/shared/utils.js';
+import { getComputeBaseUrl, appendLog, pickPath, setupDragAndDrop, setupInputDrop, validateRemotePaths } from '../../js/shared/utils.js';
 
 let tcSourceIndex = 0;
 
@@ -37,19 +37,53 @@ export function setTodayNameTc() {
 }
 
 export function getTcSelectedHosts() {
-    const hosts = window._computeHosts || [];
-    const result = [];
-    const localChk = document.getElementById('tc_host_chk_local');
-    if (localChk && localChk.checked) result.push({ name: '本機', ip: 'local' });
-    hosts.forEach((h, i) => {
-        const chk = document.getElementById('tc_host_chk_' + i);
-        if (chk && chk.checked) result.push(h);
-    });
+    const result = window.collectSelectedHosts('tc_host_checkboxes');
     if (!result.length) result.push({ name: '本機', ip: 'local' });
     return result;
 }
 
+export function collectTranscodePayload() {
+    const rows = document.getElementById('tc_source_list').children;
+    const sources = [];
+    for (let row of rows) {
+        const inputs = row.querySelectorAll('input');
+        const srcPath = inputs[1]?.value.trim();
+        if (srcPath) sources.push(srcPath);
+    }
+    if (sources.length === 0) {
+        alert('請至少提供一個來源。');
+        return { valid: false };
+    }
+    const destDir = document.getElementById('tc_dest')?.value.trim();
+    if (!destDir) {
+        alert('請設定目標輸出資料夾！');
+        return { valid: false };
+    }
+    const payload = {
+        sources: sources,
+        dest_dir: destDir,
+    };
+    return { valid: true, payload, name: '轉檔' };
+}
+window.collectTranscodePayload = collectTranscodePayload;
+
+let _tcSubmitting = false;
+
 export async function submitTranscode() {
+    if (_tcSubmitting) return;
+    _tcSubmitting = true;
+    window._activeJobTab = 'transcode';
+
+    const submitBtn = document.querySelector('#tab_transcode button[onclick="submitTranscode()"]');
+    if (submitBtn) {
+        submitBtn.disabled = true;
+        submitBtn.classList.add('opacity-70', 'cursor-not-allowed');
+        submitBtn._origText = submitBtn.textContent;
+        submitBtn.textContent = '提交中...';
+    }
+
+    try {
+
     const tcHostsRaw = getTcSelectedHosts();
     if (!tcHostsRaw || tcHostsRaw.length === 0) {
         alert('請至少選擇一台主機');
@@ -82,7 +116,25 @@ export async function submitTranscode() {
         return;
     }
 
-    window._isStandaloneTranscode = true; 
+    // 驗證遠端主機路徑
+    const remoteHosts = tcHosts.filter(h => h.ip !== 'local' && h.ip !== window.location.host);
+    if (remoteHosts.length > 0) {
+        const pathsToCheck = [destDir, ...cards.map(c => c[2])];
+        for (const h of remoteHosts) {
+            try {
+                const result = await validateRemotePaths(h.ip, pathsToCheck);
+                if (!result.ok) {
+                    alert(`⚠️ 遠端主機 [${h.name}] 路徑檢查失敗：\n\n${result.errors.join('\n')}\n\n請確認該主機是否已映射對應磁碟機。`);
+                    return;
+                }
+            } catch (e) {
+                alert(`⚠️ 無法連線至遠端主機 [${h.name}] (${h.ip}) 進行路徑驗證：${e.message}`);
+                return;
+            }
+        }
+    }
+
+    window._isStandaloneTranscode = true;
 
     window._standaloneState = {
         sources: cards.map(c => ({ cardName: c[0], path: c[2] })).filter(c => c.path),
@@ -91,20 +143,47 @@ export async function submitTranscode() {
     };
     window._standaloneRetryCount = 0;  
 
-    const ctx = {
-        job_type: 'transcode',
-        use_absolute_paths: true,
-        project_name: projectName,
-        cards: cards,
-        hosts: tcHosts,
-        proxy_root: destDir, 
-        settings: null 
-    };
-
-    if (window.dispatchRemoteTranscode) {
-        await window.dispatchRemoteTranscode(ctx);
+    // 只有本機時，直接走本機 API（不走分散式派發 + heartbeat）
+    const hasRemote = tcHosts.some(h => h.ip !== 'local' && h.ip !== window.location.host);
+    if (!hasRemote) {
+        // 本機直接提交
+        const collected = collectTranscodePayload();
+        if (!collected.valid) return;
+        try {
+            const r = await fetch(getComputeBaseUrl() + '/api/v1/jobs/transcode', {
+                method: 'POST', headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(collected.payload)
+            });
+            const j = await r.json();
+            appendLog('📌 本機轉檔任務已提交，ID: ' + (j.job_id || '?'), 'system');
+        } catch (e) {
+            appendLog('❌ 提交失敗: ' + e.message, 'error');
+        }
     } else {
-        appendLog('❌ window.dispatchRemoteTranscode not found!', 'error');
+        // 多機分散式派發
+        const ctx = {
+            job_type: 'transcode',
+            use_absolute_paths: true,
+            project_name: projectName,
+            cards: cards,
+            hosts: tcHosts,
+            proxy_root: destDir,
+            settings: null
+        };
+        if (window.dispatchRemoteTranscode) {
+            await window.dispatchRemoteTranscode(ctx);
+        } else {
+            appendLog('❌ window.dispatchRemoteTranscode not found!', 'error');
+        }
+    }
+
+    } finally {
+        _tcSubmitting = false;
+        if (submitBtn) {
+            submitBtn.disabled = false;
+            submitBtn.classList.remove('opacity-70', 'cursor-not-allowed');
+            submitBtn.textContent = submitBtn._origText || '開始轉檔';
+        }
     }
 }
 
@@ -144,15 +223,12 @@ export async function verifyStandaloneProxies() {
         if (missingSources.length === 0) {
             appendLog('✅ 所有預期的 Proxy 檔案皆已正常產出！', 'system');
 
-            const segTrans = document.getElementById('seg_trans');
-            const lblTrans = document.getElementById('lbl_trans');
-            if (segTrans) { segTrans.style.width = '100%'; segTrans.style.backgroundColor = '#228b22'; }
-            if (lblTrans) lblTrans.textContent = '✅ 完成';
-
-            const progLabel = document.getElementById('prog_label');
-            const progEta   = document.getElementById('prog_eta');
-            if (progLabel) progLabel.textContent = '🎉 轉 Proxy 完成 ✅';
-            if (progEta) progEta.textContent = '';
+            const tcBar = document.getElementById('tc-prog-bar');
+            const tcLabel = document.getElementById('tc-prog-label');
+            if (tcBar) { tcBar.style.width = '100%'; tcBar.style.backgroundColor = '#228b22'; }
+            if (tcLabel) tcLabel.textContent = '🎉 轉 Proxy 完成 ✅';
+            const tcEta = document.getElementById('tc-prog-eta');
+            if (tcEta) tcEta.textContent = '';
 
             for (const [ip] of Object.entries(window._activeRemoteHosts || {})) {
                 if(window.updateHostProgress) window.updateHostProgress(ip, 100, '✅ 驗證完成', '#228b22');

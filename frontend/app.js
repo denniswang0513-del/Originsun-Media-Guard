@@ -1,6 +1,217 @@
 // ─── Originsun Media Guard Pro ─── //
 // Extracted from index.html <script> blocks
 
+// ─── Auth State ─── //
+window._isAdmin = false;
+window._authToken = localStorage.getItem('auth_token') || '';
+window._authUser = null;
+
+// Check saved token on load
+(async function _initAuth() {
+    if (!window._authToken) { _applyAuthState(false); return; }
+    try {
+        const r = await fetch('/api/v1/auth/me', { headers: { 'Authorization': 'Bearer ' + window._authToken } });
+        if (r.ok) {
+            const d = await r.json();
+            window._authUser = d;
+            _applyAuthState(d.role === 'admin');
+            _applyVisibleTabs();
+        } else {
+            localStorage.removeItem('auth_token');
+            window._authToken = '';
+            _applyAuthState(false);
+        }
+    } catch (_) { _applyAuthState(false); }
+})();
+
+function _applyAuthState(isAdmin) {
+    window._isAdmin = isAdmin;
+    document.querySelectorAll('.admin-only').forEach(el => {
+        el.style.display = isAdmin ? '' : 'none';
+    });
+    const btn = document.getElementById('btn-auth');
+    if (btn) {
+        if (isAdmin && window._authUser) {
+            btn.textContent = '👤';
+            btn.style.color = '#22c55e';
+            btn.style.borderColor = '#22c55e';
+            btn.title = window._authUser.username + ' (登出)';
+        } else {
+            btn.textContent = '👤';
+            btn.style.color = '#888';
+            btn.style.borderColor = '#555';
+            btn.title = '登入';
+        }
+    }
+}
+
+window._authToggle = function() {
+    let dd = document.getElementById('auth-dropdown');
+    if (dd) { dd.remove(); return; }
+    dd = document.createElement('div');
+    dd.id = 'auth-dropdown';
+    dd.style.cssText = 'position:fixed;top:50px;right:10px;background:#2d2d2d;border:1px solid #555;border-radius:8px;padding:8px 0;z-index:100;min-width:180px;box-shadow:0 4px 12px rgba(0,0,0,0.5);';
+
+    const _item = (icon, text, onclick) => `<div onclick="${onclick}" style="padding:6px 14px;cursor:pointer;font-size:12px;color:#ddd;display:flex;align-items:center;gap:6px;" onmouseover="this.style.background='#3a3a3a'" onmouseout="this.style.background=''">${icon} ${text}</div>`;
+    const _sep = '<div style="border-top:1px solid #444;margin:4px 0;"></div>';
+
+    let html = '';
+
+    if (window._authUser) {
+        // 已登入
+        html += `<div style="padding:6px 14px 8px;color:#aaa;font-size:11px;">👤 ${window._authUser.username} (${window._authUser.role})</div>`;
+        html += _sep;
+
+        // 頁籤設定
+        const TAB_NAMES = {backup:'備份並轉檔',verify:'檔案比對',transcode:'轉 Proxy',concat:'製作串帶',report:'檔案視覺報表',transcribe:'AI 逐字稿',tts:'語音生成'};
+        const tabs = window._authUser?.visible_tabs;
+        html += `<div style="padding:4px 14px;font-size:11px;color:#888;">📋 顯示頁籤</div>`;
+        Object.entries(TAB_NAMES).forEach(([k, v]) => {
+            const checked = !tabs || tabs.includes(k);
+            html += `<label style="display:flex;align-items:center;gap:6px;padding:2px 14px;cursor:pointer;font-size:12px;color:#ddd;">
+                <input type="checkbox" ${checked?'checked':''} data-tab="${k}" onchange="window._toggleTab(this)"> ${v}</label>`;
+        });
+        html += _sep;
+
+        // 工具
+        html += _item('✨', '建立桌面捷徑', "createShortcut();document.getElementById('auth-dropdown')?.remove()");
+        html += _item('📥', '下載安裝檔', "showInstallModal();document.getElementById('auth-dropdown')?.remove()");
+
+        if (window._isAdmin) {
+            html += _sep;
+            html += _item('⚙️', '系統設定', "document.getElementById('btnOpenSettings')?.click();document.getElementById('auth-dropdown')?.remove()");
+        }
+
+        html += _sep;
+        html += `<div style="padding:6px 14px;">
+            <button onclick="window._authLogout()" style="background:transparent;border:1px solid #ef4444;color:#ef4444;border-radius:4px;padding:4px 0;cursor:pointer;font-size:12px;width:100%;">登出</button></div>`;
+    } else {
+        // 未登入
+        html += _item('✨', '建立桌面捷徑', "createShortcut();document.getElementById('auth-dropdown')?.remove()");
+        html += _item('📥', '下載安裝檔', "showInstallModal();document.getElementById('auth-dropdown')?.remove()");
+        html += _sep;
+        html += `<div style="padding:6px 14px;">
+            <button onclick="document.getElementById('auth-dropdown')?.remove();window._showLoginModal()" style="background:#3b82f6;color:#fff;border:none;border-radius:4px;padding:4px 0;cursor:pointer;font-size:12px;width:100%;">🔑 登入</button></div>`;
+    }
+
+    dd.innerHTML = html;
+    document.body.appendChild(dd);
+    setTimeout(() => document.addEventListener('click', function _close(e) {
+        if (!dd.contains(e.target) && e.target.id !== 'btn-auth') { dd.remove(); document.removeEventListener('click', _close); }
+    }), 100);
+};
+
+window._showLoginModal = function() {
+    // Show login modal
+    let modal = document.getElementById('auth-login-modal');
+    if (modal) { modal.classList.remove('hidden'); return; }
+    modal = document.createElement('div');
+    modal.id = 'auth-login-modal';
+    modal.className = 'fixed inset-0 bg-black bg-opacity-70 z-50 flex items-center justify-center';
+    modal.innerHTML = `
+        <div class="bg-[#2d2d2d] border border-[#444] rounded-xl shadow-2xl p-6 w-80">
+            <h3 class="text-lg font-bold text-white mb-4">登入</h3>
+            <input id="auth-username" type="text" placeholder="帳號" class="w-full mb-3 px-3 py-2 bg-[#1e1e1e] border border-[#555] rounded text-white text-sm" autofocus>
+            <input id="auth-password" type="password" placeholder="密碼" class="w-full mb-3 px-3 py-2 bg-[#1e1e1e] border border-[#555] rounded text-white text-sm">
+            <div id="auth-error" class="text-red-400 text-xs mb-2 hidden"></div>
+            <div class="flex justify-end gap-2">
+                <button onclick="document.getElementById('auth-login-modal').classList.add('hidden')"
+                    class="px-4 py-1.5 text-sm text-gray-400 hover:text-white">取消</button>
+                <button onclick="window._doLogin()"
+                    class="px-4 py-1.5 text-sm bg-blue-600 hover:bg-blue-500 text-white rounded">登入</button>
+            </div>
+        </div>`;
+    document.body.appendChild(modal);
+    modal.addEventListener('click', (e) => { if (e.target === modal) modal.classList.add('hidden'); });
+    document.getElementById('auth-password').addEventListener('keydown', (e) => { if (e.key === 'Enter') window._doLogin(); });
+    document.getElementById('auth-username').focus();
+};
+
+window._doLogin = async function() {
+    const u = document.getElementById('auth-username')?.value.trim();
+    const p = document.getElementById('auth-password')?.value;
+    const errEl = document.getElementById('auth-error');
+    if (!u || !p) { if (errEl) { errEl.textContent = '請輸入帳號和密碼'; errEl.classList.remove('hidden'); } return; }
+    try {
+        const r = await fetch('/api/v1/auth/login', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ username: u, password: p }),
+        });
+        const d = await r.json();
+        if (!r.ok) { if (errEl) { errEl.textContent = d.detail || '登入失敗'; errEl.classList.remove('hidden'); } return; }
+        window._authToken = d.token;
+        window._authUser = d;
+        localStorage.setItem('auth_token', d.token);
+        _applyAuthState(d.role === 'admin');
+        _applyVisibleTabs();
+        document.getElementById('auth-login-modal')?.classList.add('hidden');
+        if (d.first_login) {
+            alert('首次登入，請到系統設定修改密碼。');
+        }
+    } catch (e) {
+        if (errEl) { errEl.textContent = '連線失敗'; errEl.classList.remove('hidden'); }
+    }
+};
+
+window._authLogout = function() {
+    localStorage.removeItem('auth_token');
+    window._authToken = '';
+    window._authUser = null;
+    _applyAuthState(false);
+    document.getElementById('auth-dropdown')?.remove();
+    // Restore all tabs
+    document.querySelectorAll('.tab-content').forEach(el => el.style.removeProperty('display'));
+    document.querySelectorAll('nav button').forEach(el => el.style.removeProperty('display'));
+};
+
+window._toggleTab = async function(checkbox) {
+    const tab = checkbox.dataset.tab;
+    const allCheckboxes = document.querySelectorAll('#auth-dropdown input[data-tab]');
+    const selected = [];
+    allCheckboxes.forEach(cb => { if (cb.checked) selected.push(cb.dataset.tab); });
+    // Save to server
+    try {
+        await fetch('/api/v1/auth/me', {
+            method: 'PUT', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ visible_tabs: selected.length === 7 ? null : selected }),
+        });
+        if (window._authUser) window._authUser.visible_tabs = selected.length === 7 ? null : selected;
+        _applyVisibleTabs();
+    } catch (_) {}
+};
+
+function _applyVisibleTabs() {
+    const tabs = window._authUser?.visible_tabs;
+    if (!tabs) return; // null = show all
+    const TAB_MAP = {backup:'tab_backup',verify:'tab_verify',transcode:'tab_transcode',concat:'tab_concat',report:'tab_report',transcribe:'tab_transcribe',tts:'tab_tts'};
+    const NAV_MAP = {backup:'備份',verify:'比對',transcode:'Proxy',concat:'串帶',report:'報表',transcribe:'逐字',tts:'語音'};
+    Object.entries(TAB_MAP).forEach(([key, id]) => {
+        const el = document.getElementById(id);
+        if (el) el.style.display = tabs.includes(key) ? '' : 'none';
+    });
+    // Hide nav buttons for hidden tabs
+    document.querySelectorAll('nav button').forEach(btn => {
+        const text = btn.textContent;
+        Object.entries(NAV_MAP).forEach(([key, label]) => {
+            if (text.includes(label)) btn.style.display = tabs.includes(key) ? '' : 'none';
+        });
+    });
+}
+
+// Patch fetch to auto-add auth header for sensitive endpoints
+const _origFetch = window.fetch;
+window.fetch = function(url, opts = {}) {
+    if (window._authToken && typeof url === 'string' &&
+        (url.includes('/settings/') || url.includes('/control/update') ||
+         url.includes('/admin/') || url.includes('/auth/') ||
+         url.includes('/job_history') && opts.method === 'DELETE' ||
+         url.includes('/reports/') && opts.method === 'DELETE' ||
+         url.includes('/agents') && (opts.method === 'POST' || opts.method === 'DELETE'))) {
+        opts.headers = { ...opts.headers, 'Authorization': 'Bearer ' + window._authToken };
+    }
+    return _origFetch.call(window, url, opts);
+};
+
 // ─── Global Error Handler ─── //
 window.onerror = function(msg, url, lineNo, columnNo, error) {
     var errDiv = document.createElement('div');
@@ -19,6 +230,23 @@ window.onerror = function(msg, url, lineNo, columnNo, error) {
     return false;
 };
 
+// ─── Fallback for appendLog function ─── //
+// If utils.js hasn't loaded yet or appendLog is not available globally, define a fallback
+if (typeof appendLog === 'undefined') {
+    window.appendLog = function(msg, type = 'info') {
+        const terminal = document.getElementById('terminal_verbose');
+        if (terminal) {
+            const line = document.createElement('div');
+            line.className = type === 'system' ? 'text-yellow-300 font-bold' :
+                            type === 'error' ? 'text-red-400' :
+                            type === 'verbose' ? 'text-gray-500 text-xs' : 'text-gray-400';
+            line.textContent = '[' + new Date().toLocaleTimeString('en-US', { hour12: false }) + '] ' + msg;
+            terminal.appendChild(line);
+            terminal.scrollTop = terminal.scrollHeight;
+        }
+    };
+}
+
 // ─── Main Application ─── //
         let currentSocketUrl = window.location.origin;
         let socket = null;
@@ -28,11 +256,25 @@ window.onerror = function(msg, url, lineNo, columnNo, error) {
             try {
                 // Load Backup Tab
                 const tabMain = document.getElementById('tab_main');
-                const backupRes = await fetch('./tabs/backup/backup.html');
+                const _cb = `?t=${Date.now()}`;
+
+                // Load Projects Overview Tab (first, before backup)
+                try {
+                    const tabProjects = document.getElementById('tab-projects');
+                    const projRes = await fetch(`./tabs/projects/projects.html${_cb}`);
+                    if (projRes.ok) {
+                        tabProjects.innerHTML = await projRes.text();
+                        const projModule = await import(`./tabs/projects/projects.js${_cb}`);
+                        projModule.initTab();
+                    }
+                } catch (projErr) {
+                    console.warn('[Projects Tab] 載入失敗:', projErr);
+                }
+                const backupRes = await fetch(`./tabs/backup/backup.html${_cb}`);
                 if (backupRes.ok) {
                     tabMain.innerHTML = await backupRes.text();
                     // dynamically import module to avoid breaking global app.js scope
-                    const backupModule = await import('./tabs/backup/backup.js');
+                    const backupModule = await import(`./tabs/backup/backup.js${_cb}`);
                     backupModule.initBackupTab();
                 } else {
                     console.error("Failed to load Backup tab HTML:", backupRes.statusText);
@@ -40,10 +282,10 @@ window.onerror = function(msg, url, lineNo, columnNo, error) {
 
                 // Load Verify Tab
                 const tabVerify = document.getElementById('tab_verify');
-                const verifyRes = await fetch('./tabs/verify/verify.html');
+                const verifyRes = await fetch(`./tabs/verify/verify.html${_cb}`);
                 if (verifyRes.ok) {
                     tabVerify.innerHTML = await verifyRes.text();
-                    const verifyModule = await import('./tabs/verify/verify.js');
+                    const verifyModule = await import(`./tabs/verify/verify.js${_cb}`);
                     verifyModule.initVerifyTab();
                 } else {
                     console.error("Failed to load Verify tab HTML:", verifyRes.statusText);
@@ -51,10 +293,10 @@ window.onerror = function(msg, url, lineNo, columnNo, error) {
 
                 // Load Transcode Tab
                 const tabTranscode = document.getElementById('tab_transcode');
-                const transcodeRes = await fetch('./tabs/transcode/transcode.html');
+                const transcodeRes = await fetch(`./tabs/transcode/transcode.html${_cb}`);
                 if (transcodeRes.ok) {
                     tabTranscode.innerHTML = await transcodeRes.text();
-                    const tcModule = await import('./tabs/transcode/transcode.js');
+                    const tcModule = await import(`./tabs/transcode/transcode.js${_cb}`);
                     tcModule.initTranscodeTab();
                 } else {
                     console.error("Failed to load Transcode tab HTML:", transcodeRes.statusText);
@@ -62,10 +304,10 @@ window.onerror = function(msg, url, lineNo, columnNo, error) {
 
                 // Load Concat Tab
                 const tabConcat = document.getElementById('tab_concat');
-                const concatRes = await fetch('./tabs/concat/concat.html');
+                const concatRes = await fetch(`./tabs/concat/concat.html${_cb}`);
                 if (concatRes.ok) {
                     tabConcat.innerHTML = await concatRes.text();
-                    const ccModule = await import('./tabs/concat/concat.js');
+                    const ccModule = await import(`./tabs/concat/concat.js${_cb}`);
                     ccModule.initConcatTab();
                 } else {
                     console.error("Failed to load Concat tab HTML:", concatRes.statusText);
@@ -73,10 +315,10 @@ window.onerror = function(msg, url, lineNo, columnNo, error) {
 
                 // Load Report Tab
                 const tabReport = document.getElementById('tab_report');
-                const reportRes = await fetch('./tabs/report/report.html');
+                const reportRes = await fetch(`./tabs/report/report.html${_cb}`);
                 if (reportRes.ok) {
                     tabReport.innerHTML = await reportRes.text();
-                    const reportModule = await import('./tabs/report/report.js');
+                    const reportModule = await import(`./tabs/report/report.js${_cb}`);
                     reportModule.initReportTab();
                 } else {
                     console.error("Failed to load Report tab HTML:", reportRes.statusText);
@@ -84,10 +326,10 @@ window.onerror = function(msg, url, lineNo, columnNo, error) {
 
                 // Load Transcribe Tab
                 const tabTranscribe = document.getElementById('tab_transcribe');
-                const transcribeRes = await fetch('./tabs/transcribe/transcribe.html');
+                const transcribeRes = await fetch(`./tabs/transcribe/transcribe.html${_cb}`);
                 if (transcribeRes.ok) {
                     tabTranscribe.innerHTML = await transcribeRes.text();
-                    const tsModule = await import('./tabs/transcribe/transcribe.js');
+                    const tsModule = await import(`./tabs/transcribe/transcribe.js${_cb}`);
                     tsModule.initTranscribeTab();
                 } else {
                     console.error("Failed to load Transcribe tab HTML:", transcribeRes.statusText);
@@ -142,12 +384,15 @@ window.onerror = function(msg, url, lineNo, columnNo, error) {
                 updateComputeModeStyle();
             }
 
-            // Pre-load settings so host selector shows immediately
-            fetch('/api/settings/load')
+            // Pre-load agents from NAS so host selector shows immediately
+            fetch('/api/v1/agents')
                 .then(res => res.ok ? res.json() : null)
                 .then(data => {
                     if (data) {
-                        window._computeHosts = data.compute_hosts || [];
+                        window._computeHosts = (data.agents || []).map(a => ({
+                            name: a.name,
+                            ip: (a.url || '').replace(/^https?:\/\//, '')
+                        }));
                         if (typeof renderHostSelector === 'function') renderHostSelector();
                         if (typeof renderStandaloneHostPanels === 'function') renderStandaloneHostPanels();
                     }
@@ -165,9 +410,25 @@ window.onerror = function(msg, url, lineNo, columnNo, error) {
                 autoConnect: true,
                 reconnection: true
             });
+            window._socket = socket;  // Expose for TTS tab and other modules
+            window.socket = socket;
 
             socket.on('connect', () => {
                 appendLog('已連線至伺服器 WebSocket', 'system');
+            });
+
+            // 後端定期檢查主控端版號，有新版時推播
+            socket.on('update_available', (data) => {
+                const btnBadge = document.getElementById('header_version_badge');
+                if (!btnBadge) return;
+                const stripV = (v) => v && v.startsWith('v') ? v.slice(1) : v;
+                const latest = stripV(data.latest_version);
+                const current = stripV(data.current_version);
+                _localAgentVersion = data.current_version;
+                btnBadge.style.display = 'inline-block';
+                btnBadge.className = "cursor-pointer text-sm font-bold text-white bg-red-600 hover:bg-red-500 px-2 py-0.5 rounded shadow animate-pulse flex items-center gap-1";
+                btnBadge.innerHTML = `🚀 <span class="underline">發現新版本 (v${latest})</span>`;
+                btnBadge.title = `點擊以從伺服器安裝最新版 (目前: v${current})`;
             });
 
             socket.on('log', (data) => {
@@ -204,26 +465,70 @@ window.onerror = function(msg, url, lineNo, columnNo, error) {
             socket.on('task_status', (data) => {
                 const retryBtn = document.getElementById('btn_retry');
 
+                if (data.status === 'running') {
+                    updateActionBarState('running');
+                    // 多機模式：派發中/heartbeat 執行中，不清空進度
+                    if (window._remoteDispatching || window._heartbeatTimer ||
+                        (window._activeRemoteHosts && Object.keys(window._activeRemoteHosts).length > 0)) {
+                        return;
+                    }
+                    // 新任務開始時才清除上一次的完成狀態
+                    if (typeof resetProgress === 'function') resetProgress();
+                }
 
                 if (data.status === 'done') {
-                    // If we are actively polling remote hosts in distributed mode, do NOT let a single local host's 
+                    // If we are actively polling remote hosts in distributed mode, do NOT let a single local host's
                     // task completion broadcast prematurely reset the global UI and kill the heartbeat monitor.
                     if (window._activeRemoteHosts && Object.keys(window._activeRemoteHosts).length > 0 && window._heartbeatTimer) {
                         return;
                     }
 
+                    // 分散式轉檔：備份 done 後立即派發，不顯示完成摘要
+                    if (window._remoteDispatch) {
+                        if (typeof appendLog === 'function') appendLog('系統：備份完成，開始派發分散式轉檔...', 'system');
+                        dispatchRemoteTranscode(window._remoteDispatch);
+                        window._remoteDispatch = null;
+                        return;
+                    }
+
+                    // 多卡串帶：追蹤完成數
+                    const mc = window._concatMultiCard;
+                    if (mc && mc.total > 1 && data.summary?.task_type === 'concat') {
+                        mc.done++;
+                        if (mc.done < mc.total) {
+                            if (typeof appendLog === 'function') appendLog(`🎞️ 串帶 ${mc.done}/${mc.total} 張卡完成`, 'system');
+                            return;
+                        }
+                        if (typeof appendLog === 'function') appendLog(`✅ 串帶全部完成（${mc.total} 張卡）`, 'system');
+                        window._concatMultiCard = null;
+                    }
+
+                    // Pipeline 追蹤：標記 concat 完成
+                    const pl = window._backupPipeline;
+                    if (pl && pl.pending && data.summary?.task_type === 'concat') {
+                        pl.pending.delete('concat');
+                    }
+
+                    // 若 pipeline 還有待完成項目（concat 或 report），不顯示最終摘要
+                    if (pl && pl.pending && pl.pending.size > 0) {
+                        return;
+                    }
+
                     if (typeof appendLog === 'function') appendLog('系統：所有排定任務執行完畢！', 'system');
-                    if (typeof resetProgress === 'function') resetProgress();
-                    const pLabel = document.getElementById('prog_label');
-                    if (pLabel) pLabel.textContent = '執行完畢！';
+                    showCompletionSummary(data.summary, window._activeJobTab);
+                    updateActionBarState('idle');
                     if (retryBtn) retryBtn.style.display = 'none';
                     playDing();
-                    if (window._remoteDispatch) { dispatchRemoteTranscode(window._remoteDispatch); window._remoteDispatch = null; }
 
                 } else if (data.status === 'error') {
+                    updateActionBarState('idle');
                     if (typeof appendLog === 'function') appendLog('系統提示：任務執行發生錯誤：' + data.detail, 'error');
-                    // 顯示重試按鈕（如果有記錄上次任務）
                     if (retryBtn && window._lastJob) retryBtn.style.display = 'inline-block';
+
+                } else if (data.status === 'cancelled') {
+                    updateActionBarState('idle');
+                    if (typeof resetProgress === 'function') resetProgress();
+                    if (typeof appendLog === 'function') appendLog('❌ 任務已被中止', 'error');
                 }
             });
 
@@ -273,44 +578,42 @@ window.onerror = function(msg, url, lineNo, columnNo, error) {
                     btn.classList.remove('opacity-70', 'cursor-not-allowed');
                 }
                 const label = document.getElementById('transcribe_prog_label');
-                if (label) label.textContent = '✅ 完成！';
+                if (label) label.textContent = '✅ 轉錄完成';
                 const pctLabel = document.getElementById('transcribe_prog_pct');
                 if (pctLabel) pctLabel.textContent = '100%';
                 const bar = document.getElementById('transcribe_prog_bar');
                 if (bar) {
                     bar.style.width = '100%';
+                    bar.style.background = 'linear-gradient(90deg, #22c55e, #4ade80)';
                 }
                 if (typeof appendLog === 'function') {
                     appendLog('✅ 逐字稿生成完畢！目的地：' + data.dest_dir, 'system');
                 }
             });
 
-            // Standalone report tab: progress updates
+            // Report progress updates (report tab + backup tab chained report)
             socket.on('report_progress', (data) => {
                 const phase = data.phase || '';
                 const pct = parseFloat(data.pct) || 0;
                 const msg = data.msg || '';
                 const pctStr = `${pct.toFixed(0)}%`;
 
-                // __done__ = job ended (cancelled or failed) — switch back to backup mode
-                if (phase === '__done__') {
-                    document.getElementById('progress_report_mode')?.classList.add('hidden');
-                    document.getElementById('progress_backup_mode')?.classList.remove('hidden');
-                    return;
-                }
+                // __done__ = job ended
+                if (phase === '__done__') return;
 
-                // Update label
-                const lblEl = document.getElementById('rpt_prog_label');
+                // Update report tab progress bar (rp-*)
+                const rpContainer = document.getElementById('rp-progress');
+                if (rpContainer) rpContainer.classList.remove('hidden');
+                const lblEl = document.getElementById('rp-prog-label');
                 if (lblEl) lblEl.textContent = msg;
 
-                const quarter = 25; // 4 phases = 25% each
+                const quarter = 25;
                 const segs = {
-                    scan: ['rpt_seg_scan', 'rpt_lbl_scan'],
-                    meta: ['rpt_seg_meta', 'rpt_lbl_meta'],
-                    strip: ['rpt_seg_strip', 'rpt_lbl_strip'],
-                    render: ['rpt_seg_render', 'rpt_lbl_render'],
+                    scan: ['rp-seg-scan', 'rp-lbl-scan'],
+                    meta: ['rp-seg-meta', 'rp-lbl-meta'],
+                    strip: ['rp-seg-strip', 'rp-lbl-strip'],
+                    render: ['rp-seg-render', 'rp-lbl-render'],
                 };
-                // Fill all previous phases to 100%, current to pct
                 const order = ['scan', 'meta', 'strip', 'render'];
                 const phaseIdx = order.indexOf(phase);
                 order.forEach((p, i) => {
@@ -323,21 +626,66 @@ window.onerror = function(msg, url, lineNo, columnNo, error) {
                     if (lblEl2) lblEl2.textContent = i < phaseIdx ? '100%' : i === phaseIdx ? pctStr : '0%';
                 });
 
+                // 同時更新備份 TAB 的報表進度段（bk-seg-report）
+                if (window._activeJobTab === 'backup' && !window._backupFinalShown) {
+                    // 計算整體報表進度：4 個 report phase 各佔 25%
+                    const phaseWeight = { scan: 0, meta: 1, strip: 2, render: 3 };
+                    const pw = phaseWeight[phase] ?? 0;
+                    const overallPct = (pw * 25) + (pct / 100) * 25; // 0-100
+                    // 動態段寬
+                    const _doT = document.getElementById('chk_transcode')?.checked ?? false;
+                    const _doC = document.getElementById('chk_concat')?.checked ?? false;
+                    const _sc = 1 + (_doT ? 1 : 0) + (_doC ? 1 : 0) + 1; // +1 for report itself
+                    const _sw = 100 / _sc;
+                    const bkSegReport = document.getElementById('bk-seg-report');
+                    const bkLblReport = document.getElementById('bk-lbl-report');
+                    const bkLegendReport = document.getElementById('bk-legend-report');
+                    const bkProgLabel = document.getElementById('bk-prog-label');
+                    const bkProgEta = document.getElementById('bk-prog-eta');
+                    if (bkSegReport) { bkSegReport.classList.remove('hidden'); bkSegReport.style.width = `${(overallPct / 100) * _sw}%`; }
+                    if (bkLblReport) bkLblReport.textContent = `${Math.round(overallPct)}%`;
+                    if (bkLegendReport) bkLegendReport.classList.remove('hidden');
+                    if (bkProgLabel) bkProgLabel.textContent = `📊 ${msg}`;
+                    if (bkProgEta) bkProgEta.textContent = '';
+                    // 確保前面的段顯示 100%
+                    const prevSegs = ['bk-seg-backup'];
+                    const prevLbls = ['bk-lbl-backup'];
+                    if (_doT) { prevSegs.push('bk-seg-trans'); prevLbls.push('bk-lbl-trans'); }
+                    if (_doC) { prevSegs.push('bk-seg-concat'); prevLbls.push('bk-lbl-concat'); }
+                    prevSegs.forEach(id => { const el = document.getElementById(id); if (el) el.style.width = `${_sw}%`; });
+                    prevLbls.forEach(id => { const el = document.getElementById(id); if (el) el.textContent = '100%'; });
+                }
+
                 rptLog(msg, data.type || 'info');
             });
 
             // Report job finished
             socket.on('report_job_done', (data) => {
                 appendLog(`✅ 報表完成：${data.report_name || ''}`, 'system');
-                // Switch back to backup mode progress bar
-                document.getElementById('progress_report_mode')?.classList.add('hidden');
-                document.getElementById('progress_backup_mode')?.classList.remove('hidden');
 
-                // 執行和 task_status: done 相同的任務結束清理動作
-                if (typeof appendLog === 'function') appendLog('系統：所有排定任務執行完畢！', 'system');
-                if (typeof resetProgress === 'function') resetProgress();
-                const pLabel = document.getElementById('prog_label');
-                if (pLabel) pLabel.textContent = '執行完畢！';
+                window._backupReportPending = false;
+
+                // Pipeline 追蹤：標記 report 完成
+                const pl = window._backupPipeline;
+                if (pl && pl.pending) {
+                    pl.pending.delete('report');
+                }
+
+                // 報表 TAB 完成摘要
+                showCompletionSummary({ task_type: 'report', elapsed_sec: 0 }, 'report');
+
+                // 備份 TAB：僅在所有 pipeline 階段都完成時才顯示最終摘要
+                if (window._activeJobTab === 'backup') {
+                    if (pl && pl.pending && pl.pending.size > 0) {
+                        // 還有其他階段（如 concat）未完成，等它完成
+                        return;
+                    }
+                    appendLog('系統：所有排定任務執行完畢！', 'system');
+                    showCompletionSummary({ task_type: 'backup', elapsed_sec: 0 }, 'backup');
+                    updateActionBarState('idle');
+                    playDing();
+                }
+                updateActionBarState('idle');
                 const retryBtn = document.getElementById('btn_retry');
                 if (retryBtn) retryBtn.style.display = 'none';
                 
@@ -353,8 +701,18 @@ window.onerror = function(msg, url, lineNo, columnNo, error) {
                     btn.dataset.driveUrl = data.drive_url || '';
                     btn.style.display = 'inline-flex';
                 }
-                // Auto-open
-                if (data.local_path) openReportFile(data.local_path, data.drive_url || '');
+                // Auto-open: only if THIS tab initiated the report (job_id match).
+                // Prevents duplicate windows even if Socket.IO broadcasts to all tabs.
+                if (data.job_id && window._myReportJobIds?.has(data.job_id)) {
+                    window._myReportJobIds.delete(data.job_id);
+                    if (data.public_url) {
+                        window.open(data.public_url, '_blank');
+                    } else if (data.drive_url) {
+                        window.open(data.drive_url, '_blank');
+                    } else if (data.local_path) {
+                        openReportFile(data.local_path, '');
+                    }
+                }
             });
 
             // Transcribe progress updates
@@ -406,9 +764,8 @@ window.onerror = function(msg, url, lineNo, columnNo, error) {
 
         const terminal = document.getElementById('terminal');
         const terminalVerbose = document.getElementById('terminal_verbose');
-        const progLabel = document.getElementById('prog_label');
-        const progEta = document.getElementById('prog_eta');
         const statusBadge = document.getElementById('status-badge');
+        window._activeJobTab = null; // 'backup' | 'verify' | 'transcode' | 'concat' | 'report'
 
         function playDing() {
             try {
@@ -439,11 +796,14 @@ window.onerror = function(msg, url, lineNo, columnNo, error) {
         let initialPollComplete = false;
         let isUpdating = false;
         let hasServerDiedDuringUpdate = false;
+        let _updatePollTimer = null;
+        let _updateStartTime = 0;    // timestamp when update started
+        let _updateLastProgress = 0; // timestamp of last progress update
 
         async function pollLocalAgent() {
             try {
                 const isLocal = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
-                const targetUrl = isLocal ? '/api/v1/status' : 'http://localhost:8000/api/v1/status';
+                const targetUrl = isLocal ? '/api/v1/status' : 'http://127.0.0.1:8000/api/v1/status';
 
                 const controller = new AbortController();
                 const timeoutId = setTimeout(() => controller.abort(), 1000);
@@ -454,7 +814,7 @@ window.onerror = function(msg, url, lineNo, columnNo, error) {
                 if (response.ok) {
                     localAgentActive = true;
                     updateAgentBadge(true);
-                    const newUrl = isLocal ? window.location.origin : 'http://localhost:8000';
+                    const newUrl = isLocal ? window.location.origin : 'http://127.0.0.1:8000';
                     if (currentSocketUrl !== newUrl) {
                         currentSocketUrl = newUrl;
                         setupSocket(currentSocketUrl);
@@ -529,8 +889,9 @@ window.onerror = function(msg, url, lineNo, columnNo, error) {
             try {
                 // 1. 取得本機 Agent 正在運行的版本（不論在 localhost 或遠端都固定問 localhost）
                 const isLocal = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
-                const localVersionUrl = isLocal ? '/api/v1/version' : 'http://localhost:8000/api/v1/version';
-                const nasVersionUrl = isLocal ? '/api/v1/nas_version' : '/api/v1/nas_version';
+                const localVersionUrl = isLocal ? '/api/v1/version' : 'http://127.0.0.1:8000/api/v1/version';
+                // 瀏覽主控端時，主控端本身就是版本來源，直接用 /api/v1/version
+                const nasVersionUrl = isLocal ? '/api/v1/nas_version' : '/api/v1/version';
 
                 const [localRes, nasRes] = await Promise.all([
                     fetch(localVersionUrl).catch(() => null),
@@ -550,30 +911,48 @@ window.onerror = function(msg, url, lineNo, columnNo, error) {
                 const localData = await localRes.json();
                 const nasData = await nasRes.json();
                 const currentVersion = localData.version;
-                const latestVersion = nasData.version;
+                let latestVersion = nasData.version;
+                _localAgentVersion = currentVersion; // 記住本機版本供 updateAgent 使用
 
+                // Fallback: 若 nas_version 回傳 unknown，嘗試從當前頁面 origin 取得
+                if (latestVersion === 'unknown') {
+                    try {
+                        const fbRes = await fetch('/api/v1/version').catch(() => null);
+                        if (fbRes?.ok) {
+                            const fb = await fbRes.json();
+                            if (fb.version && fb.version !== 'unknown') latestVersion = fb.version;
+                        }
+                    } catch(e) {}
+                }
+
+                // 移除 v 前綴後再比較版號
+                const stripV = (v) => v && v.startsWith('v') ? v.slice(1) : v;
                 const isNewerSemver = (latest, current) => {
                     if (!latest || latest === 'unknown' || !current) return false;
-                    if (latest === current) return false;
-                    const lParts = latest.split('.').map(Number);
-                    const cParts = current.split('.').map(Number);
+                    const l = stripV(latest), c = stripV(current);
+                    if (l === c) return false;
+                    const lParts = l.split('.').map(Number);
+                    const cParts = c.split('.').map(Number);
                     for (let i = 0; i < Math.max(lParts.length, cParts.length); i++) {
-                        const l = lParts[i] || 0;
-                        const c = cParts[i] || 0;
-                        if (l > c) return true;
-                        if (l < c) return false;
+                        const lp = lParts[i] || 0;
+                        const cp = cParts[i] || 0;
+                        if (lp > cp) return true;
+                        if (lp < cp) return false;
                     }
                     return false;
                 };
 
-                // 3. 比較版號，嚴謹確認 NAS 版本是否真的大於本機版本
+                // 3. 比較版號，嚴謹確認最新版本是否真的大於本機版本
                 if (isNewerSemver(latestVersion, currentVersion)) {
+                    const displayLatest = stripV(latestVersion);
+                    const displayCurrent = stripV(currentVersion);
                     btnBadge.className = "cursor-pointer text-sm font-bold text-white bg-red-600 hover:bg-red-500 px-2 py-0.5 rounded shadow animate-pulse flex items-center gap-1";
-                    btnBadge.innerHTML = `🚀 <span class="underline">發現新版本 (v${latestVersion})</span>`;
-                    btnBadge.title = `點擊以從 NAS 安裝最新版 (目前: v${currentVersion})`;
+                    btnBadge.innerHTML = `🚀 <span class="underline">發現新版本 (v${displayLatest})</span>`;
+                    btnBadge.title = `點擊以從伺服器安裝最新版 (目前: v${displayCurrent})`;
                 } else {
+                    const displayCurrent = stripV(currentVersion);
                     btnBadge.className = "cursor-pointer text-sm font-normal text-blue-400 hover:text-blue-300 px-2 py-0.5 rounded transition-colors";
-                    btnBadge.innerHTML = `v${currentVersion || '?'}`;
+                    btnBadge.innerHTML = `v${displayCurrent || '?'}`;
                     btnBadge.title = "已是最新版 (點擊可強制重新套用更新)";
                 }
             } catch (err) {
@@ -581,21 +960,200 @@ window.onerror = function(msg, url, lineNo, columnNo, error) {
             }
         }
 
+        function updateUpdateModal(d) {
+            const pctBar = document.getElementById('update_pct_bar');
+            const msgEl  = document.getElementById('upd_msg');
+            if (pctBar) pctBar.style.width = (d.pct || 2) + '%';
+            if (msgEl)  msgEl.textContent = d.msg || '';
+            const step = d.step || 0;
+            for (let i = 1; i <= 3; i++) {
+                const icon = document.getElementById(`upd_icon_${i}`);
+                const row  = document.getElementById(`upd_step_${i}`);
+                if (!icon || !row) continue;
+                if (i < step) {
+                    icon.textContent = '✅';
+                    row.className = row.className.replace(/text-gray-400|text-blue-300/g, '') + ' text-green-400';
+                } else if (i === step) {
+                    icon.textContent = '🔄';
+                    row.className = row.className.replace(/text-gray-400|text-green-400/g, '') + ' text-blue-300';
+                } else {
+                    icon.textContent = '⏳';
+                    row.className = row.className.replace(/text-blue-300|text-green-400/g, '') + ' text-gray-400';
+                }
+            }
+        }
+
+        function startUpdateProgressPolling() {
+            if (_updatePollTimer) return;
+            _updateStartTime = Date.now();
+            _updateLastProgress = Date.now();
+            _updatePollTimer = setInterval(async () => {
+                if (!isUpdating) {
+                    clearInterval(_updatePollTimer);
+                    _updatePollTimer = null;
+                    return;
+                }
+
+                // 1) 嘗試從 update_monitor (port 8001) 取得進度
+                try {
+                    const r = await fetch('http://127.0.0.1:8001/status',
+                        { signal: AbortSignal.timeout(2000) });
+                    if (r.ok) {
+                        _updateLastProgress = Date.now();
+                        updateUpdateModal(await r.json());
+                    }
+                } catch (e) { /* monitor 尚未就緒或 port 衝突 */ }
+
+                // 2) Fallback：若超過 30 秒沒收到進度，直接偵測主服務是否已恢復
+                const elapsed = Date.now() - _updateStartTime;
+                const stale = Date.now() - _updateLastProgress;
+                if (stale > 30000 && elapsed > 15000) {
+                    try {
+                        const health = await fetch('http://127.0.0.1:8000/api/v1/health',
+                            { signal: AbortSignal.timeout(2000) });
+                        if (health.ok) {
+                            // 伺服器已恢復！自動完成更新
+                            isUpdating = false;
+                            clearInterval(_updatePollTimer);
+                            _updatePollTimer = null;
+                            window.location.reload();
+                            return;
+                        }
+                    } catch (e) { /* 伺服器尚未恢復 */ }
+                }
+
+                // 3) 最大超時 5 分鐘：強制 reload
+                if (elapsed > 300000) {
+                    isUpdating = false;
+                    clearInterval(_updatePollTimer);
+                    _updatePollTimer = null;
+                    window.location.reload();
+                }
+            }, 2000);
+        }
+
+        // 記住本機版本，供 updateAgent 判斷是否需要首次遷移
+        let _localAgentVersion = null;
+
         async function updateAgent() {
-            if (!confirm('即將套用 NAS 上的最新版本並重新啟動本機代理。這將會中斷正在本機執行的任務。\n確認要執行嗎？')) return;
+            // 若本機 Agent 版本 < 1.8.0，舊版 OTA 機制 (NAS xcopy) 不可用，
+            // 自動下載升級工具 + 顯示操作指引遮罩
+            const needsMigration = _localAgentVersion && _isOlderThan(_localAgentVersion, '1.8.0');
+
+            if (needsMigration) {
+                // 1) 自動下載 Originsun_Updater.bat
+                const a = document.createElement('a');
+                a.href = '/download_updater';
+                a.download = 'Originsun_Updater.bat';
+                document.body.appendChild(a);
+                a.click();
+                document.body.removeChild(a);
+
+                // 2) 顯示首次遷移指引遮罩
+                _showMigrationOverlay();
+
+                // 3) 同時複製 PowerShell 指令到剪貼簿（備用）
+                const serverHost = window.location.host || '192.168.1.11:8000';
+                const psCmd = `powershell -ExecutionPolicy Bypass -c "irm http://${serverHost}/bootstrap.ps1 | iex"`;
+                try { await navigator.clipboard.writeText(psCmd); } catch(e) {}
+
+                // 4) 開始輪詢：偵測版本升級完成後自動重整
+                _pollForMigrationDone();
+                appendLog('已下載升級工具，請在 Chrome 下載列執行它。', 'system');
+                return;
+            }
+
+            if (!confirm('即將從伺服器下載最新版本並重新啟動本機代理。這將會中斷正在本機執行的任務。\n確認要執行嗎？')) return;
 
             isUpdating = true;
             hasServerDiedDuringUpdate = false;
+            startUpdateProgressPolling();
             checkForceInstallModal(); // 立刻覆蓋藍色大遮罩
 
             try {
                 // 不使用 await 等待 json，因為伺服器會在這瞬間自我了斷 (os._exit)，必然引發 Network Error
-                fetch('http://localhost:8000/api/v1/control/update', { method: 'POST' }).catch(e => console.log('Expected disconnect:', e));
+                fetch('http://127.0.0.1:8000/api/v1/control/update', { method: 'POST' }).catch(e => console.log('Expected disconnect:', e));
                 appendLog('更新指令已送出，稍後連線指示燈將會變為紅色，數秒後將自動重新載入網頁。', 'system');
             } catch (err) {
                 // 忽略錯誤，絕對不把 isUpdating 設為 false，讓畫面維持藍色等待直到 polling 醒來
                 console.warn('Update trigger network drop:', err);
             }
+        }
+
+        function _showMigrationOverlay() {
+            // 如果遮罩已存在就不重複建立
+            if (document.getElementById('migrationOverlay')) return;
+            const overlay = document.createElement('div');
+            overlay.id = 'migrationOverlay';
+            overlay.className = 'fixed inset-0 bg-black/90 z-[120] flex items-center justify-center backdrop-blur-md';
+            overlay.innerHTML = `
+                <div class="bg-[#1e1e1e] border-t-4 border-orange-500 rounded-lg shadow-2xl p-8 max-w-lg w-full">
+                    <div class="flex items-center gap-4 mb-6">
+                        <div class="text-5xl">🚀</div>
+                        <div>
+                            <h2 class="text-xl font-bold text-white">首次升級（僅需一次）</h2>
+                            <p class="text-gray-400 text-sm">升級完成後，未來更新只需點一下即可</p>
+                        </div>
+                    </div>
+                    <div class="bg-[#2a2a2a] rounded-lg p-5 mb-5 space-y-4">
+                        <div class="flex items-start gap-3">
+                            <span class="text-2xl">①</span>
+                            <div>
+                                <p class="text-white font-semibold">在 Chrome 下載列找到並執行升級工具</p>
+                                <p class="text-gray-400 text-xs mt-1">若出現「已封鎖」，請點 ⋮ →「仍然保留」</p>
+                            </div>
+                        </div>
+                        <div class="flex items-start gap-3">
+                            <span class="text-2xl">②</span>
+                            <div>
+                                <p class="text-white font-semibold">等待自動完成（約 30 秒）</p>
+                                <p class="text-gray-400 text-xs mt-1">完成後此頁面會自動重新整理</p>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="bg-blue-900/30 border border-blue-600 rounded p-3 mb-5 text-xs text-blue-300">
+                        💡 <strong>備用方法：</strong>升級指令已複製到剪貼簿，也可按
+                        <kbd class="bg-[#333] px-1 rounded">Win+R</kbd> →
+                        <kbd class="bg-[#333] px-1 rounded">Ctrl+V</kbd> →
+                        <kbd class="bg-[#333] px-1 rounded">Enter</kbd> 執行
+                    </div>
+                    <div class="flex items-center justify-between">
+                        <div class="flex items-center gap-2 text-gray-500 text-xs">
+                            <div class="w-4 h-4 rounded-full border-2 border-t-transparent border-orange-500 animate-spin"></div>
+                            等待升級完成中...
+                        </div>
+                        <button onclick="document.getElementById('migrationOverlay').remove()"
+                                class="text-gray-500 hover:text-gray-300 text-xs underline">關閉</button>
+                    </div>
+                </div>`;
+            document.body.appendChild(overlay);
+        }
+
+        function _pollForMigrationDone() {
+            const timer = setInterval(async () => {
+                try {
+                    const r = await fetch('http://127.0.0.1:8000/api/v1/version', { signal: AbortSignal.timeout(2000) });
+                    if (!r.ok) return;
+                    const data = await r.json();
+                    if (data.version && !_isOlderThan(data.version, '1.8.0')) {
+                        clearInterval(timer);
+                        const overlay = document.getElementById('migrationOverlay');
+                        if (overlay) overlay.remove();
+                        appendLog('升級完成！正在重新載入頁面...', 'system');
+                        setTimeout(() => window.location.reload(), 1500);
+                    }
+                } catch (e) { /* agent 尚未重啟，繼續等 */ }
+            }, 3000);
+        }
+
+        function _isOlderThan(ver, minVer) {
+            const a = ver.split('.').map(Number);
+            const b = minVer.split('.').map(Number);
+            for (let i = 0; i < Math.max(a.length, b.length); i++) {
+                if ((a[i] || 0) < (b[i] || 0)) return true;
+                if ((a[i] || 0) > (b[i] || 0)) return false;
+            }
+            return false;
         }
 
         async function createShortcut() {
@@ -604,7 +1162,7 @@ window.onerror = function(msg, url, lineNo, columnNo, error) {
                 return;
             }
             try {
-                const res = await fetch('http://localhost:8000/api/v1/utils/create_shortcut', { method: 'POST' });
+                const res = await fetch('http://127.0.0.1:8000/api/v1/utils/create_shortcut', { method: 'POST' });
                 const data = await res.json();
                 if (data.status === 'success') {
                     alert(data.message);
@@ -626,7 +1184,7 @@ window.onerror = function(msg, url, lineNo, columnNo, error) {
         // ===== SaaS 路由輔助函數 =====
         function getAgentBaseUrl() {
             // 本機代理伺服器，負責 UI 操作如選取資料夾與拖曳。如果沒開，回退給網頁原始伺服器。
-            return localAgentActive ? 'http://localhost:8000' : '';
+            return localAgentActive ? 'http://127.0.0.1:8000' : '';
         }
 
         // ===== Multi-host: render host selector checkboxes =====
@@ -634,40 +1192,18 @@ window.onerror = function(msg, url, lineNo, columnNo, error) {
 
         function renderHostSelector() {
             const panel = document.getElementById('host_selector_panel');
-            const cbxDiv = document.getElementById('host_selector_checkboxes');
-            if (!panel || !cbxDiv) return;
+            if (!panel) return;
             const hosts = window._computeHosts || [];
             const chkTc = document.getElementById('chk_transcode');
             const chkCc = document.getElementById('chk_concat');
             const shouldShow = (chkTc && chkTc.checked) || (chkCc && chkCc.checked);
             if (!hosts.length || !shouldShow) { panel.classList.add('hidden'); return; }
-            // 只在第一次（或主機列表改變時）重建 checkboxes，避免勾選狀態被清空
-            if (!cbxDiv.dataset.built) {
-                cbxDiv.innerHTML = '';
-                const local = document.createElement('label');
-                local.className = 'flex items-center gap-1 text-xs text-gray-300 cursor-pointer';
-                local.innerHTML = '<input type="checkbox" id="host_chk_local" checked class="form-checkbox rounded bg-[#1e1e1e] border-[#444]"> 💻 本機';
-                cbxDiv.appendChild(local);
-                hosts.forEach((h, i) => {
-                    const lbl = document.createElement('label');
-                    lbl.className = 'flex items-center gap-1 text-xs text-gray-300 cursor-pointer';
-                    lbl.innerHTML = '<input type="checkbox" id="host_chk_' + i + '" class="form-checkbox rounded bg-[#1e1e1e] border-[#444]"> 🖥️ ' + h.name + ' <span class="text-gray-500">(' + h.ip + ')</span>';
-                    cbxDiv.appendChild(lbl);
-                });
-                cbxDiv.dataset.built = '1';
-            }
+            window.renderHostCheckboxes('host_selector_checkboxes', { idPrefix: 'host_chk' });
             panel.classList.remove('hidden');
         }
 
         function getSelectedHosts() {
-            const hosts = window._computeHosts || [];
-            const result = [];
-            const localChk = document.getElementById('host_chk_local');
-            if (localChk && localChk.checked) result.push({ name: '本機', ip: 'local' });
-            hosts.forEach((h, i) => {
-                const chk = document.getElementById('host_chk_' + i);
-                if (chk && chk.checked) result.push(h);
-            });
+            const result = window.collectSelectedHosts('host_selector_checkboxes');
             if (!result.length) result.push({ name: '本機', ip: 'local' });
             return result;
         }
@@ -675,45 +1211,33 @@ window.onerror = function(msg, url, lineNo, columnNo, error) {
 
 
 
-        // 將主機列表同步到兩個獨立 TAB 的主機選擇 UI
+        // 將主機列表同步到各獨立 TAB 的主機選擇 UI
+        // 多選（checkbox）：轉 Proxy TAB（支援分散式多機轉檔）
+        const _MULTI_HOST_PANELS = [
+            { checkboxes: 'tc_host_checkboxes', panel: 'tc_host_panel', prefix: 'tc_host_chk' },
+        ];
+        // 單選（radio）：其餘 TAB（只在一台主機執行）
+        const _SINGLE_HOST_PANELS = [
+            { checkboxes: 'cc_host_checkboxes',         panel: 'cc_host_panel',         prefix: 'cc_host_chk' },
+            { checkboxes: 'vf_host_checkboxes',         panel: 'vf_host_panel',         prefix: 'vf_host_chk' },
+            { checkboxes: 'tr_host_checkboxes',         panel: 'tr_host_panel',         prefix: 'tr_host_chk' },
+            { checkboxes: 'rpt_host_checkboxes',        panel: 'rpt_host_panel',        prefix: 'rpt_host_chk' },
+            { checkboxes: 'tts_host_checkboxes',        panel: 'tts_host_panel',        prefix: 'tts_host_chk' },
+            { checkboxes: 'tts_clone_host_checkboxes',  panel: 'tts_clone_host_panel',  prefix: 'tts_clone_host_chk' },
+        ];
         function renderStandaloneHostPanels() {
             const hosts = window._computeHosts || [];
             if (!hosts.length) return;
-
-            // 轉 Proxy TAB: checkbox 群組
-            const tcDiv = document.getElementById('tc_host_checkboxes');
-            const tcPanel = document.getElementById('tc_host_panel');
-            
-            if (tcDiv && !tcDiv.dataset.built) {
-                tcDiv.innerHTML = '';
-                const localLbl = document.createElement('label');
-                localLbl.className = 'flex items-center gap-1 text-xs text-gray-300 cursor-pointer';
-                localLbl.innerHTML = '<input type="checkbox" id="tc_host_chk_local" checked class="form-checkbox rounded bg-[#1e1e1e] border-[#444]"> 💻 本機';
-                tcDiv.appendChild(localLbl);
-                hosts.forEach((h, i) => {
-                    const lbl = document.createElement('label');
-                    lbl.className = 'flex items-center gap-1 text-xs text-gray-300 cursor-pointer';
-                    lbl.innerHTML = '<input type="checkbox" id="tc_host_chk_' + i + '" class="form-checkbox rounded bg-[#1e1e1e] border-[#444]"> 🖥️ ' + h.name + ' <span class="text-gray-500">(' + h.ip + ')</span>';
-                    tcDiv.appendChild(lbl);
-                });
-                tcDiv.dataset.built = '1';
+            for (const { checkboxes, panel, prefix } of _MULTI_HOST_PANELS) {
+                window.renderHostCheckboxes(checkboxes, { idPrefix: prefix });
+                const el = document.getElementById(panel);
+                if (el) el.classList.remove('hidden');
             }
-            if (tcPanel) tcPanel.classList.remove('hidden');
-
-            // 製作串帶 TAB: 下拉選單
-            const ccSel = document.getElementById('cc_host_select');
-            const ccPanel = document.getElementById('cc_host_panel');
-            if (ccSel && !ccSel.dataset.built) {
-                ccSel.innerHTML = '<option value="local">💻 本機</option>';
-                hosts.forEach(h => {
-                    const opt = document.createElement('option');
-                    opt.value = h.ip;
-                    opt.textContent = '🖥️ ' + h.name + ' (' + h.ip + ')';
-                    ccSel.appendChild(opt);
-                });
-                ccSel.dataset.built = '1';
+            for (const { checkboxes, panel, prefix } of _SINGLE_HOST_PANELS) {
+                window.renderHostRadios(checkboxes, { idPrefix: prefix });
+                const el = document.getElementById(panel);
+                if (el) el.classList.remove('hidden');
             }
-            if (ccPanel) ccPanel.classList.remove('hidden');
         }
 
 
@@ -723,6 +1247,8 @@ window.onerror = function(msg, url, lineNo, columnNo, error) {
             const pathEl = document.getElementById('conflict_path');
             const reasonEl = document.getElementById('conflict_reason');
             const actionsEl = document.getElementById('conflict_actions');
+            const conflictJobId = data.job_id || '';  // Capture job_id for routing
+            window._currentConflictJobId = conflictJobId;  // Store for setGlobalConflict
 
             pathEl.textContent = `檔案: ${data.rel_path} (${data.target === 'nas' ? 'NAS端' : '本機端'})`;
             reasonEl.textContent = data.reason;
@@ -736,7 +1262,7 @@ window.onerror = function(msg, url, lineNo, columnNo, error) {
                 btn.textContent = text;
                 btn.onclick = () => {
                     modal.classList.add('hidden');
-                    if (socket) socket.emit('resolve_conflict', { action: action });
+                    if (socket) socket.emit('resolve_conflict', { action: action, job_id: conflictJobId });
                 };
                 return btn;
             };
@@ -767,13 +1293,179 @@ window.onerror = function(msg, url, lineNo, columnNo, error) {
 
         // 全部覆蓋 / 全部略過：通知 server 設定全域模式並關閉 modal
         function setGlobalConflict(action) {
-            socket.emit('set_global_conflict', { action });
+            socket.emit('set_global_conflict', { action, job_id: window._currentConflictJobId || '' });
             document.getElementById('conflict_modal').classList.add('hidden');
             const label = action === 'overwrite' ? '全部覆蓋' : '全部略過';
             appendLog(`[!] 已設定「${label}」模式，後續衝突將自動套用。`, 'system');
         }
 
         // ================= Progress Bar Update =================
+        // Helper: format bytes to human-readable
+        function _formatBytes(b) {
+            if (b == null || b <= 0) return '';
+            if (b >= 1e12) return (b / 1e12).toFixed(1) + ' TB';
+            if (b >= 1e9) return (b / 1e9).toFixed(1) + ' GB';
+            if (b >= 1e6) return (b / 1e6).toFixed(1) + ' MB';
+            return (b / 1e3).toFixed(0) + ' KB';
+        }
+
+        // Helper: format elapsed seconds to HH:MM:SS
+        function _formatElapsed(sec) {
+            if (!sec || sec <= 0) return '00:00';
+            const s = Math.round(sec);
+            const hh = Math.floor(s / 3600);
+            const mm = String(Math.floor((s % 3600) / 60)).padStart(2, '0');
+            const ss = String(s % 60).padStart(2, '0');
+            return hh > 0 ? `${hh}:${mm}:${ss}` : `${mm}:${ss}`;
+        }
+
+        // Helper: format speed + ETA string (with completion time point)
+        function _formatEta(data) {
+            const parts = [];
+            if (data.speed_mbps != null) parts.push(`${data.speed_mbps.toFixed(1)} MB/s`);
+            if (data.eta_sec != null && data.eta_sec > 0) {
+                const s = Math.round(data.eta_sec);
+                parts.push(`剩餘 ${_formatElapsed(s)}`);
+                const finish = new Date(Date.now() + s * 1000);
+                parts.push(`預計 ${String(finish.getHours()).padStart(2,'0')}:${String(finish.getMinutes()).padStart(2,'0')} 完成`);
+            }
+            return parts.join('　');
+        }
+
+        // Helper: format phase label text (with GB display)
+        function _phaseLabel(phase, totalPct, data) {
+            const PHASE_TEXT = {
+                backup_local: "第一階段：寫入本機", backup_nas: "第二階段：寫入 NAS",
+                rescan: "二次掃描/補齊", transcode: "Proxy轉檔", concat: "串帶作業",
+                report: "📊 報表生成與同步", verify: "Hash 比對",
+            };
+            const phaseText = PHASE_TEXT[phase] || "進度";
+            const done = data.done_files ?? 0;
+            const total = data.total_files ?? 0;
+            const fname = data.current_file || '';
+
+            let sizeStr = '';
+            if (data.total_bytes > 0) {
+                sizeStr = `　${_formatBytes(data.done_bytes || 0)} / ${_formatBytes(data.total_bytes)}`;
+            }
+
+            if (fname) return `${phaseText}　${done}/${total} 檔${sizeStr} (${totalPct.toFixed(1)}%)　${fname}`;
+            return `${phaseText}　${done}/${total} 檔${sizeStr} (${totalPct.toFixed(1)}%)`;
+        }
+
+        // ── Completion Summary ──
+        // Show final status after task completes (instead of resetting)
+        function showCompletionSummary(summary, tab) {
+            if (!summary) return;
+            // 備份 TAB 的最終摘要已顯示，不允許再覆蓋
+            const _isBackup = tab === 'backup' || (tab == null && window._activeJobTab === 'backup');
+            if (_isBackup && window._backupFinalShown) return;
+            const type = summary.task_type || tab || '';
+            const files = summary.total_files || 0;
+            const bytes = summary.total_bytes || 0;
+            const elapsed = summary.elapsed_sec || 0;
+            const matched = summary.verify_matched || 0;
+            const mismatched = summary.verify_mismatched || 0;
+
+            let label = '✅ 完成';
+            const parts = [];
+
+            // 備份 TAB：顯示所有已完成的勾選項目
+            const pipeline = window._backupPipeline;
+            if ((type === 'backup' || tab === 'backup') && pipeline && !pipeline._shown) {
+                label = '✅ 全部完成';
+                parts.push(pipeline.phases.map(p => `${p} ✓`).join('　'));
+                const totalElapsed = (Date.now() - pipeline.startTime) / 1000;
+                if (totalElapsed > 0) parts.push(`總耗時 ${_formatElapsed(totalElapsed)}`);
+                pipeline._shown = true;
+                window._backupFinalShown = true; // 防止後續 progress 事件覆蓋
+            } else if (type === 'backup') { label = '✅ 備份完成'; }
+            else if (type === 'transcode') { label = '✅ 轉檔完成'; }
+            else if (type === 'concat') { label = '✅ 串帶完成'; }
+            else if (type === 'verify') {
+                label = mismatched > 0 ? '⚠️ 驗證完成' : '✅ 驗證完成';
+                if (mismatched > 0) parts.push(`${matched}/${matched + mismatched} 檔一致，${mismatched} 檔不符`);
+                else if (files > 0) parts.push(`${files}/${files} 檔一致`);
+            }
+            else if (type === 'transcribe') { label = '✅ 轉錄完成'; }
+            else if (type === 'report') { label = '✅ 報表完成'; }
+
+            if (!pipeline && type !== 'verify' && files > 0) parts.push(`${files} 檔`);
+            if (!pipeline && bytes > 0) parts.push(_formatBytes(bytes));
+            if (!pipeline && elapsed > 0) parts.push(`耗時 ${_formatElapsed(elapsed)}`);
+
+            const text = parts.length > 0 ? `${label} — ${parts.join(' / ')}` : label;
+
+            // Update the active tab's progress bar
+            const activeTab = tab || window._activeJobTab || 'backup';
+            const prefixMap = { backup: 'bk', verify: 'vf', transcode: 'tc', concat: 'ct', report: 'rp' };
+            const prefix = prefixMap[activeTab];
+
+            // Helper: fill multi-segment bars to 100% green
+            function _fillSegmentsGreen(segIds, lblIds, widthPct) {
+                segIds.forEach(id => {
+                    const el = document.getElementById(id);
+                    if (el) { el.style.width = widthPct; el.style.backgroundColor = '#22c55e'; }
+                });
+                lblIds.forEach(id => {
+                    const el = document.getElementById(id);
+                    if (el) el.textContent = '100%';
+                });
+            }
+
+            if (activeTab === 'backup') {
+                // 若報表尚在執行中，不顯示完成摘要
+                if (window._backupReportPending) return;
+                const progLabel = document.getElementById('bk-prog-label');
+                const progEta = document.getElementById('bk-prog-eta');
+                if (progLabel) progLabel.textContent = text;
+                if (progEta) progEta.textContent = '';
+                // 動態段寬
+                const _doT = document.getElementById('chk_transcode')?.checked ?? false;
+                const _doC = document.getElementById('chk_concat')?.checked ?? false;
+                const _doR = !document.getElementById('bk-seg-report')?.classList.contains('hidden');
+                const _n = 1 + (_doT ? 1 : 0) + (_doC ? 1 : 0) + (_doR ? 1 : 0);
+                const _w = (100 / _n).toFixed(2) + '%';
+                const segIds = ['bk-seg-backup'];
+                const lblIds = ['bk-lbl-backup'];
+                if (_doT) { segIds.push('bk-seg-trans'); lblIds.push('bk-lbl-trans'); }
+                if (_doC) { segIds.push('bk-seg-concat'); lblIds.push('bk-lbl-concat'); }
+                if (_doR) { segIds.push('bk-seg-report'); lblIds.push('bk-lbl-report'); }
+                _fillSegmentsGreen(segIds, lblIds, _w);
+            } else if (activeTab === 'report') {
+                const rpLabel = document.getElementById('rp-prog-label');
+                if (rpLabel) rpLabel.textContent = text;
+                const rpEta = document.getElementById('rp-prog-eta');
+                if (rpEta) rpEta.textContent = '';
+                _fillSegmentsGreen(
+                    ['rp-seg-scan', 'rp-seg-meta', 'rp-seg-strip', 'rp-seg-render'],
+                    ['rp-lbl-scan', 'rp-lbl-meta', 'rp-lbl-strip', 'rp-lbl-render'], '25%');
+            } else if (prefix) {
+                const bar = document.getElementById(prefix + '-prog-bar');
+                const lbl = document.getElementById(prefix + '-prog-label');
+                const eta = document.getElementById(prefix + '-prog-eta');
+                const detail = document.getElementById(prefix + '-prog-detail');
+                if (bar) { bar.style.width = '100%'; bar.style.backgroundColor = mismatched > 0 ? '#f59e0b' : '#22c55e'; }
+                if (lbl) lbl.textContent = text;
+                if (eta) eta.textContent = '';
+                if (detail) detail.textContent = '';
+            }
+        }
+
+        // Helper: update a simple single-bar progress (verify/transcode/concat standalone)
+        function _updateSimpleProgress(prefix, totalPct, data) {
+            const container = document.getElementById(prefix + '-progress');
+            const bar = document.getElementById(prefix + '-prog-bar');
+            const label = document.getElementById(prefix + '-prog-label');
+            const eta = document.getElementById(prefix + '-prog-eta');
+            const detail = document.getElementById(prefix + '-prog-detail');
+            if (container) container.classList.remove('hidden');
+            if (bar) bar.style.width = `${totalPct}%`;
+            if (label) label.textContent = _phaseLabel(data.phase, totalPct, data);
+            if (eta) eta.textContent = _formatEta(data);
+            if (detail) detail.textContent = data.current_file ? `${data.done_files ?? 0}/${data.total_files ?? 0} ${data.current_file}` : '';
+        }
+
         function updateProgress(data) {
             const phase = data.phase || 'backup';
             const filePct = data.file_pct ?? 0;
@@ -781,126 +1473,116 @@ window.onerror = function(msg, url, lineNo, columnNo, error) {
             const done = data.done_files ?? 0;
             const total = data.total_files ?? 0;
             const fname = data.current_file || '';
+            const tab = window._activeJobTab || 'backup';
 
+            // ── Standalone TAB progress bars ──
+            if (tab === 'verify' && phase === 'verify') {
+                _updateSimpleProgress('vf', totalPct, data);
+                return;
+            }
+            if (tab === 'transcode' && phase === 'transcode') {
+                _updateSimpleProgress('tc', totalPct, data);
+                return;
+            }
+            if (tab === 'concat' && phase === 'concat') {
+                _updateSimpleProgress('ct', totalPct, data);
+                return;
+            }
 
+            // ── Backup TAB: dynamic multi-segment progress bar ──
+            const segBackup = document.getElementById('bk-seg-backup');
+            if (!segBackup) return; // tab not loaded yet
 
-            // Segmented bar: each segment occupies a portion of the total 100% width
-            // Key idea: segment widths are ABSOLUTE percentages of the bar container,
-            // so we use totalPct to allocate across 3 phases (assuming equal weight unless we get phase_pct)
-            const segBackup = document.getElementById('seg_backup');
-            const lblBackup = document.getElementById('lbl_backup');
-            const segTrans = document.getElementById('seg_trans');
-            const lblTrans = document.getElementById('lbl_trans');
-            const segConcat = document.getElementById('seg_concat');
-            const lblConcat = document.getElementById('lbl_concat');
+            // 完成摘要已顯示，不再接受進度更新
+            if (window._backupFinalShown) return;
 
-            // Use totalPct to drive the active segment; completed phases are filled to their max allocation
-            // Phase weights: backup=1/3, transcode=1/3, concat=1/3 (equal)
-            // Phase weights: backup=1/3, transcode=1/3, concat=1/3 (equal)
-            // But now backup is split into local and NAS. So we share the first 33.33%.
-            // Since we don't know file sizes up front, we'll just map both backup phases to fill the 0-33.33% space visually based on their own totalPct.
+            // 多機模式下，忽略本機的 transcode/concat progress（由 heartbeat 聚合）
+            if (window._remoteDispatching && (phase === 'transcode' || phase === 'concat')) {
+                return;
+            }
+
+            const container = document.getElementById('bk-progress');
+            if (container) container.classList.remove('hidden');
+            const lblBackup = document.getElementById('bk-lbl-backup');
+            const segTrans = document.getElementById('bk-seg-trans');
+            const lblTrans = document.getElementById('bk-lbl-trans');
+            const segConcat = document.getElementById('bk-seg-concat');
+            const lblConcat = document.getElementById('bk-lbl-concat');
+            const progLabel = document.getElementById('bk-prog-label');
+            const progEta = document.getElementById('bk-prog-eta');
+
+            // 動態計算每段寬度：根據勾選的執行項目
+            const _doTrans = document.getElementById('chk_transcode')?.checked ?? false;
+            const _doConcat = document.getElementById('chk_concat')?.checked ?? false;
+            const _doReport = !!window._backupReportPending || !document.getElementById('bk-seg-report')?.classList.contains('hidden');
+            const _segCount = 1 + (_doTrans ? 1 : 0) + (_doConcat ? 1 : 0) + (_doReport ? 1 : 0);
+            const _sw = 100 / _segCount; // 每段寬度百分比
+
             if (phase === 'backup_local' || phase === 'backup_nas') {
-                // 將備份階段的 33.33% 再切半：Local 佔前半 (0~16.66%)，NAS 佔後半 (16.66~33.33%)
-                let combinedPct = 0; // 0 ~ 100 針對整個 Backup 階段的完成度
-                let barWidth = 0;    // 0 ~ 33.33 針對整條總進度條的寬度
+                let combinedPct = 0;
+                let barWidth = 0;
                 if (phase === 'backup_local') {
-                    combinedPct = totalPct / 2; // local 跑完最多 50%
-                    barWidth = (totalPct / 100) * (33.33 / 2);
+                    combinedPct = totalPct / 2;
+                    barWidth = (totalPct / 100) * (_sw / 2);
                 } else {
-                    combinedPct = 50 + (totalPct / 2); // NAS 從 50% 開始加
-                    barWidth = (33.33 / 2) + ((totalPct / 100) * (33.33 / 2));
+                    combinedPct = 50 + (totalPct / 2);
+                    barWidth = (_sw / 2) + ((totalPct / 100) * (_sw / 2));
                 }
-
                 segBackup.style.width = `${barWidth}%`;
-                segBackup.style.backgroundColor = phase === 'backup_local' ? '#1f538d' : '#143c68'; // Slightly darker blue for NAS
+                segBackup.style.backgroundColor = phase === 'backup_local' ? '#1f538d' : '#143c68';
                 lblBackup.textContent = `${combinedPct.toFixed(0)}%`;
-                segTrans.style.width = '0%'; lblTrans.textContent = '0%';
-                segConcat.style.width = '0%'; lblConcat.textContent = '0%';
+                if (segTrans) { segTrans.style.width = '0%'; lblTrans.textContent = '0%'; }
+                if (segConcat) { segConcat.style.width = '0%'; lblConcat.textContent = '0%'; }
             } else if (phase === 'rescan') {
-                // Rescan is part of backup — keep everything in the backup (blue) segment
-                // Use a teal tint to distinguish scanning from normal copy
-                segBackup.style.width = '33.33%';
-                segBackup.style.backgroundColor = '#0d6e6e'; // teal = 二次掃描中
-                segTrans.style.width = '0%'; segTrans.style.backgroundColor = '#d48a04';
-                segConcat.style.width = '0%'; segConcat.style.backgroundColor = '#228b22';
+                segBackup.style.width = `${_sw}%`;
+                segBackup.style.backgroundColor = '#0d6e6e';
+                if (segTrans) { segTrans.style.width = '0%'; segTrans.style.backgroundColor = '#d48a04'; }
+                if (segConcat) { segConcat.style.width = '0%'; segConcat.style.backgroundColor = '#228b22'; }
                 const isRecopying = fname.startsWith('[補齊]');
                 lblBackup.textContent = isRecopying ? `補${totalPct.toFixed(0)}%` : `掃${totalPct.toFixed(0)}%`;
-                lblTrans.textContent = '0%';
-                lblConcat.textContent = '0%';
+                if (lblTrans) lblTrans.textContent = '0%';
+                if (lblConcat) lblConcat.textContent = '0%';
             } else if (phase === 'transcode') {
-                segBackup.style.width = '33.33%'; segBackup.style.backgroundColor = '#1f538d';
-                segTrans.style.width = `${(totalPct / 100) * 33.33}%`; segTrans.style.backgroundColor = '#d48a04';
+                segBackup.style.width = `${_sw}%`; segBackup.style.backgroundColor = '#1f538d';
+                if (segTrans) { segTrans.style.width = `${(totalPct / 100) * _sw}%`; segTrans.style.backgroundColor = '#d48a04'; }
                 lblBackup.textContent = '100%';
-                lblTrans.textContent = `${totalPct.toFixed(0)}%`;
-                segConcat.style.width = '0%'; lblConcat.textContent = '0%';
+                if (lblTrans) lblTrans.textContent = `${totalPct.toFixed(0)}%`;
+                if (segConcat) { segConcat.style.width = '0%'; } if (lblConcat) lblConcat.textContent = '0%';
             } else if (phase === 'concat') {
-                segBackup.style.width = '33.33%'; segBackup.style.backgroundColor = '#1f538d';
-                segTrans.style.width = '33.33%'; segTrans.style.backgroundColor = '#d48a04';
-                segConcat.style.width = `${(totalPct / 100) * 33.33}%`; segConcat.style.backgroundColor = '#228b22';
+                // 多卡串帶聚合：每張卡佔 1/total
+                let aggConcatPct = totalPct;
+                const mc = window._concatMultiCard;
+                if (mc && mc.total > 1) {
+                    aggConcatPct = (mc.done / mc.total + totalPct / 100 / mc.total) * 100;
+                }
+                segBackup.style.width = `${_sw}%`; segBackup.style.backgroundColor = '#1f538d';
+                if (segTrans) { segTrans.style.width = `${_sw}%`; segTrans.style.backgroundColor = '#d48a04'; }
+                if (segConcat) { segConcat.style.width = `${(aggConcatPct / 100) * _sw}%`; segConcat.style.backgroundColor = '#228b22'; }
                 lblBackup.textContent = '100%';
-                lblTrans.textContent = '100%';
-                lblConcat.textContent = `${totalPct.toFixed(0)}%`;
+                if (lblTrans) lblTrans.textContent = '100%';
+                if (lblConcat) lblConcat.textContent = `${aggConcatPct.toFixed(0)}%`;
             } else if (phase === 'report') {
-                // Report generation phase: 3 baseline segments full, report segment fills up
-                segBackup.style.width = '25%'; segBackup.style.backgroundColor = '#1f538d';
-                segTrans.style.width = '25%'; segTrans.style.backgroundColor = '#d48a04';
-                segConcat.style.width = '25%'; segConcat.style.backgroundColor = '#228b22';
-                const segReportEl = document.getElementById('seg_report');
-                const lblReportEl = document.getElementById('lbl_report');
-                if (segReportEl) { segReportEl.classList.remove('hidden'); segReportEl.style.width = `${(totalPct / 100) * 25}%`; segReportEl.style.backgroundColor = '#7c3aed'; }
+                segBackup.style.width = `${_sw}%`; segBackup.style.backgroundColor = '#1f538d';
+                if (segTrans) { segTrans.style.width = `${_sw}%`; segTrans.style.backgroundColor = '#d48a04'; }
+                if (segConcat) { segConcat.style.width = `${_sw}%`; segConcat.style.backgroundColor = '#228b22'; }
+                const segReportEl = document.getElementById('bk-seg-report');
+                const lblReportEl = document.getElementById('bk-lbl-report');
+                const legendReport = document.getElementById('bk-legend-report');
+                if (segReportEl) { segReportEl.classList.remove('hidden'); segReportEl.style.width = `${(totalPct / 100) * _sw}%`; }
                 if (lblReportEl) lblReportEl.textContent = `${totalPct.toFixed(0)}%`;
-                lblBackup.textContent = '100%'; lblTrans.textContent = '100%'; lblConcat.textContent = '100%';
+                if (legendReport) legendReport.classList.remove('hidden');
+                lblBackup.textContent = '100%';
+                if (lblTrans) lblTrans.textContent = '100%';
+                if (lblConcat) lblConcat.textContent = '100%';
             } else if (phase === 'verify') {
-                // 比對模式：獨立全寬進度條（teal），不受三段分割影響
-                const fullW = `${totalPct}%`;
                 const teal = '#0d6e6e';
-                // 以三段共享填充整條進度條
-                const third = totalPct / 3;
-                const remain = totalPct - third * 2;
-                segBackup.style.width = `${Math.min(third, 33.33)}%`; segBackup.style.backgroundColor = teal;
-                segTrans.style.width = `${Math.min(third, 33.33)}%`; segTrans.style.backgroundColor = teal;
-                segConcat.style.width = `${Math.min(remain, 33.34)}%`; segConcat.style.backgroundColor = teal;
-                lblBackup.textContent = totalPct >= 33 ? '33%' : `${totalPct.toFixed(0)}%`;
-                lblTrans.textContent = totalPct >= 66 ? '66%' : totalPct >= 33 ? `${totalPct.toFixed(0)}%` : '0%';
-                lblConcat.textContent = totalPct >= 99 ? '100%' : totalPct >= 66 ? `${totalPct.toFixed(0)}%` : '0%';
+                segBackup.style.width = `${Math.min(totalPct, 100)}%`; segBackup.style.backgroundColor = teal;
+                lblBackup.textContent = `${totalPct.toFixed(0)}%`;
             }
 
-
-            // Main label — mirroring desktop format: 進度：XX.XX%  X/Y〃filename (XX%)
-            let phaseText = "進度";
-            if (phase === 'backup_local') phaseText = "第一階段：寫入本機";
-            else if (phase === 'backup_nas') phaseText = "第二階段：寫入 NAS";
-            else if (phase === 'rescan') phaseText = "二次掃描/補齊";
-            else if (phase === 'transcode') phaseText = "Proxy轉檔";
-            else if (phase === 'concat') phaseText = "串帶作業";
-            else if (phase === 'report') phaseText = "📊 報表生成與同步";
-            else if (phase === 'verify') phaseText = "獨立比對";
-
-            if (fname) {
-                progLabel.textContent = `${phaseText}：${totalPct.toFixed(2)}%  ${done}/${total}〃${fname} (${filePct.toFixed(1)}%)`;
-            } else {
-                progLabel.textContent = `${phaseText}：${done} / ${total} 個項目  (${totalPct.toFixed(2)}%)`;
-            }
-
-            // Right label: show speed + ETA together (like the desktop app)
-            const speedStr = data.speed_mbps != null ? `${data.speed_mbps.toFixed(1)} MB/s` : null;
-            let etaStr = null;
-            if (data.eta_sec != null && data.eta_sec > 0) {
-                const s = Math.round(data.eta_sec);
-                const hh = String(Math.floor(s / 3600)).padStart(2, '0');
-                const mm = String(Math.floor((s % 3600) / 60)).padStart(2, '0');
-                const ss = String(s % 60).padStart(2, '0');
-                etaStr = `預計剩餘：${hh}:${mm}:${ss}`;
-            }
-            if (speedStr && etaStr) {
-                progEta.textContent = `${speedStr}　${etaStr}`;
-            } else if (etaStr) {
-                progEta.textContent = etaStr;
-            } else if (speedStr) {
-                progEta.textContent = `速度: ${speedStr}`;
-            } else {
-                progEta.textContent = '';
-            }
+            // Labels
+            if (progLabel) progLabel.textContent = _phaseLabel(phase, totalPct, data);
+            if (progEta) progEta.textContent = _formatEta(data);
         }
 
 
@@ -910,17 +1592,12 @@ window.onerror = function(msg, url, lineNo, columnNo, error) {
             document.getElementById(tabId).classList.remove('hidden');
 
             // 重置按鈕樣式
-            const btnCols = ['btn_tab_main', 'btn_tab_verify', 'btn_tab_transcode', 'btn_tab_concat', 'btn_tab_report', 'btn_tab_transcribe', 'btn_tab_tts'];
+            const btnCols = ['btn_tab-projects', 'btn_tab_main', 'btn_tab_verify', 'btn_tab_transcode', 'btn_tab_concat', 'btn_tab_report', 'btn_tab_transcribe', 'btn_tab_tts'];
             btnCols.forEach(btn => {
                 const el = document.getElementById(btn);
                 if (el) {
                     el.classList.remove('bg-[#2a2a2a]', 'text-blue-400', 'text-amber-300', 'border', 'border-b-0', 'border-[#3a3a3a]');
-                    if (btn === 'btn_tab_tts') {
-                        el.classList.add('bg-[#1e1e1e]', 'text-amber-400', 'border-transparent');
-                        el.classList.remove('text-white');
-                    } else {
-                        el.classList.add('bg-[#1e1e1e]', 'text-white', 'border-transparent');
-                    }
+                    el.classList.add('bg-[#1e1e1e]', 'text-white', 'border-transparent');
                 }
             });
 
@@ -928,13 +1605,11 @@ window.onerror = function(msg, url, lineNo, columnNo, error) {
             const activeBtn = document.getElementById('btn_' + tabId);
             if (activeBtn) {
                 activeBtn.classList.remove('bg-[#1e1e1e]', 'text-white', 'text-amber-400', 'border-transparent');
-                activeBtn.classList.add('bg-[#2a2a2a]', 'border', 'border-b-0', 'border-[#3a3a3a]');
-                if (tabId === 'tab_tts') {
-                    activeBtn.classList.add('text-amber-300');
-                } else {
-                    activeBtn.classList.add('text-blue-400');
-                }
+                activeBtn.classList.add('bg-[#2a2a2a]', 'border', 'border-b-0', 'border-[#3a3a3a]', 'text-blue-400');
             }
+
+            // Notify projects tab of visibility change
+            document.dispatchEvent(new CustomEvent('tab-changed', { detail: { tab: tabId } }));
 
             // Auto-fill output directory when entering report tab
             if (tabId === 'tab_report') {
@@ -958,9 +1633,19 @@ window.onerror = function(msg, url, lineNo, columnNo, error) {
         window._heartbeatTimer = null;
         window._remoteJobType = null;
 
+        // 任務類型中文對照（全域常量，避免重複定義）
+        const JOB_LABELS = {
+            transcode: '轉檔', verify: '比對', concat: '串帶',
+            report: '報表', transcribe: '轉錄', tts: 'TTS 合成', tts_clone: '聲音複製',
+        };
+
         function initRemoteHostProgress(hosts) {
-            const panel = document.getElementById('remote_hosts_progress');
-            const rows = document.getElementById('remote_host_rows');
+            const tab = window._activeJobTab || 'backup';
+            const prefixMap = { backup: 'bk', transcode: 'tc', concat: 'ct', verify: 'vf', report: 'rp', transcribe: 'tr', tts: 'tts' };
+            const prefix = prefixMap[tab];
+            if (!prefix) return;
+            const panel = document.getElementById(prefix + '-remote-hosts-progress');
+            const rows = document.getElementById(prefix + '-remote-host-rows');
             if (!panel || !rows) return;
             rows.innerHTML = '';
             hosts.forEach(h => {
@@ -989,6 +1674,10 @@ window.onerror = function(msg, url, lineNo, columnNo, error) {
             if (lbl) lbl.textContent = txt || (pct + '%');
         }
 
+        // 預編譯遠端 log 分類 regex（避免 heartbeat 每次迭代重新編譯）
+        const _RE_SYSTEM_LOG = /\[Engine\]|系統|✅|完成|開始/;
+        const _RE_ERROR_LOG = /\[!\]|❌|失敗|錯誤|error|FAIL/i;
+
         function startHeartbeatMonitor() {
             if (window._heartbeatTimer) clearInterval(window._heartbeatTimer);
             window._heartbeatTimer = setInterval(async () => {
@@ -1009,21 +1698,58 @@ window.onerror = function(msg, url, lineNo, columnNo, error) {
                             if (d.logs && d.logs.length > 0) {
                                 d.logs.forEach(msg => {
                                     if (typeof appendLog === 'function') {
-                                        appendLog(`[${info.host.name}] ${msg.replace(/^\[.*?\]\s*/, '')}`, 'info');
+                                        const cleanMsg = msg.replace(/^\[.*?\]\s*/, '');
+                                        let _lt = 'info';
+                                        if (_RE_SYSTEM_LOG.test(cleanMsg)) _lt = 'system';
+                                        if (_RE_ERROR_LOG.test(cleanMsg)) _lt = 'error';
+                                        appendLog(`[${info.host.name}] ${cleanMsg}`, _lt);
                                     }
                                 });
                             }
 
-                            if (d.progress) {
-                                let pct = d.progress.total_pct || 0;
-                                let txt = d.progress.current_file || '處理中...';
-                                updateHostProgress(ip, Math.floor(pct), `[${Math.floor(pct)}%] ${txt}`, '#3b82f6');
+                            // 聚合此主機的所有 job 進度（多卡場景）
+                            let hostPct = 0;
+                            let hostTxt = '處理中...';
+                            let totalJobs = info.expectedJobs || 1;
+                            let doneJobs = 0;
+
+                            if (d.active_jobs) {
+                                const ajobs = Object.values(d.active_jobs);
+                                if (ajobs.length > 0) {
+                                    totalJobs = Math.max(totalJobs, ajobs.length);
+                                    let sumPct = 0;
+                                    for (const j of ajobs) {
+                                        const jp = j.progress?.total_pct || 0;
+                                        if (j.status === 'done' || j.status === 'completed') {
+                                            sumPct += 100;
+                                            doneJobs++;
+                                        } else {
+                                            sumPct += jp;
+                                            if (j.status === 'running' && j.progress?.current_file) {
+                                                hostTxt = j.progress.current_file;
+                                            }
+                                        }
+                                    }
+                                    hostPct = sumPct / totalJobs;
+                                }
+                            }
+                            // Fallback to legacy single-progress
+                            if (hostPct === 0 && d.progress) {
+                                hostPct = d.progress.total_pct || 0;
+                                hostTxt = d.progress.current_file || '處理中...';
+                            }
+
+                            info.pct = hostPct;
+                            if (hostPct > 0) {
+                                updateHostProgress(ip, Math.floor(hostPct), `[${Math.floor(hostPct)}%] ${hostTxt}`, '#3b82f6');
                             }
 
                             // If worker is idle, queue empty, and at least 15s have passed since submission
                             if (!d.busy && d.queue_length === 0 && (now - info.startTime > 15000)) {
                                 info.done = true;
-                                updateHostProgress(ip, 100, '✅ 轉檔完成', '#228b22');
+                                info.pct = 100;
+                                const _jl = JOB_LABELS[window._remoteJobType] || '任務';
+                                updateHostProgress(ip, 100, `✅ ${_jl}完成`, '#228b22');
                             }
                         }
                     } catch (_) { }
@@ -1034,21 +1760,86 @@ window.onerror = function(msg, url, lineNo, columnNo, error) {
                     }
                 }
 
+                // 更新主進度條（多機加總進度 — 用各主機實際進度的平均值）
+                const _allHosts = Object.values(window._activeRemoteHosts || {});
+                if (_allHosts.length > 0) {
+                    const _doneCount = _allHosts.filter(h => h.done).length;
+                    const _sumPct = _allHosts.reduce((s, h) => s + (h.pct || 0), 0);
+                    const _aggPct = Math.round(_sumPct / _allHosts.length);
+                    const _tab = window._activeJobTab || 'backup';
+
+                    if (_tab === 'backup') {
+                        // 備份 TAB：更新轉檔段的進度（聚合所有主機）
+                        const _doTrans = document.getElementById('chk_transcode')?.checked ?? false;
+                        const _doConcat = document.getElementById('chk_concat')?.checked ?? false;
+                        const _doReport = !!window._backupReportPending || !document.getElementById('bk-seg-report')?.classList.contains('hidden');
+                        const _sc = 1 + (_doTrans ? 1 : 0) + (_doConcat ? 1 : 0) + (_doReport ? 1 : 0);
+                        const _segW = 100 / _sc;
+                        const bkSegBackup = document.getElementById('bk-seg-backup');
+                        const bkSegTrans = document.getElementById('bk-seg-trans');
+                        const bkLblTrans = document.getElementById('bk-lbl-trans');
+                        const bkProgLabel = document.getElementById('bk-prog-label');
+                        if (bkSegBackup) { bkSegBackup.style.width = `${_segW}%`; bkSegBackup.style.backgroundColor = '#1f538d'; }
+                        if (bkSegTrans) { bkSegTrans.style.width = `${(_aggPct / 100) * _segW}%`; bkSegTrans.style.backgroundColor = '#d48a04'; }
+                        if (bkLblTrans) bkLblTrans.textContent = `${_aggPct}%`;
+                        document.getElementById('bk-lbl-backup').textContent = '100%';
+                        if (bkProgLabel) bkProgLabel.textContent = `遠端轉檔　${_doneCount}/${_allHosts.length} 台完成 (${_aggPct}%)`;
+                    } else {
+                        // 其他 TAB：單一進度條
+                        const _pfxMap = { transcode: 'tc', concat: 'ct', verify: 'vf', report: 'rp', transcribe: 'tr', tts: 'tts' };
+                        const _pfx = _pfxMap[_tab];
+                        if (_pfx) {
+                            const _bar = document.getElementById(_pfx + '-prog-bar');
+                            const _lbl = document.getElementById(_pfx + '-prog-label');
+                            if (_bar) _bar.style.width = Math.max(5, _aggPct) + '%';
+                            const _jl2 = JOB_LABELS[window._remoteJobType] || '任務';
+                            if (_lbl) _lbl.textContent = `遠端${_jl2}　${_doneCount}/${_allHosts.length} 台完成 (${_aggPct}%)`;
+                        }
+                    }
+                }
+
                 // Check if all hosts have completed their chunks
-                const hosts = Object.values(window._activeRemoteHosts || {});
+                const hosts = _allHosts;
                 if (hosts.length > 0 && hosts.every(h => h.done)) {
                     stopHeartbeatMonitor();
 
                     // Small buffer to allow the UI to reflect 100% state before fetching
                     setTimeout(() => {
-                        if (window._remoteJobType === 'concat') {
-                            if (typeof appendLog === 'function') appendLog('✅ 所有遠端串帶任務已完成。', 'system');
-                            return;
+                        const _rjt = window._remoteJobType || 'transcode';
+                        // 只有 transcode（多機備份流程）才需要合併
+                        if (_rjt === 'transcode') {
+                            const ms = document.getElementById('merge_status_text');
+                            if (ms) ms.textContent = '所有遠端主機任務結束，自動觸發整合程序…';
+                            if (typeof appendLog === 'function') appendLog('系統提示：所有遠端任務已完成，自動觸發合併與驗證程序...', 'system');
+                            mergeHostOutputs();
+                        } else {
+                            // 其他 TAB（verify/concat/report/transcribe/tts）：直接顯示完成
+                            const _jl = JOB_LABELS[_rjt] || '任務';
+                            if (typeof appendLog === 'function') appendLog(`✅ 遠端${_jl}任務已完成。`, 'system');
+                            // 更新主進度條為完成狀態（嘗試 dash 和 underscore 兩種命名）
+                            const _tab = window._activeJobTab || 'backup';
+                            const _pfxMap = { backup: 'bk', transcode: 'tc', concat: 'ct', verify: 'vf', report: 'rp', transcribe: 'tr', tts: 'tts' };
+                            const _pfx = _pfxMap[_tab];
+                            if (_pfx) {
+                                const _bar = document.getElementById(_pfx + '-prog-bar') || document.getElementById(_pfx + '_prog_bar');
+                                const _lbl = document.getElementById(_pfx + '-prog-label') || document.getElementById(_pfx + '_prog_label');
+                                const _eta = document.getElementById(_pfx + '-prog-eta') || document.getElementById(_pfx + '_prog_eta');
+                                const _pct = document.getElementById(_pfx + '-prog-pct') || document.getElementById(_pfx + '_prog_pct');
+                                const _area = document.getElementById(_pfx + '-progress') || document.getElementById(_pfx + '_progress_area');
+                                if (_area) _area.classList.remove('hidden');
+                                if (_bar) { _bar.style.width = '100%'; _bar.style.background = 'linear-gradient(90deg, #22c55e, #4ade80)'; }
+                                if (_lbl) _lbl.textContent = `✅ 遠端${_jl}完成`;
+                                if (_eta) _eta.textContent = '';
+                                if (_pct) _pct.textContent = '100%';
+                            }
+                            stopHeartbeatMonitor();
+                            // 報表完成時刷新歷史列表
+                            if (_rjt === 'report' && typeof loadReportHistory === 'function') {
+                                loadReportHistory();
+                            }
+                            updateActionBarState('idle');
+                            playDing();
                         }
-                        const ms = document.getElementById('merge_status_text');
-                        if (ms) ms.textContent = '所有遠端主機任務結束，自動觸發整合程序…';
-                        if (typeof appendLog === 'function') appendLog('系統提示：所有遠端任務已完成，自動觸發合併與驗證程序...', 'system');
-                        mergeHostOutputs();
                     }, 2000);
                 }
             }, 5000);
@@ -1056,12 +1847,37 @@ window.onerror = function(msg, url, lineNo, columnNo, error) {
 
         function stopHeartbeatMonitor() {
             if (window._heartbeatTimer) { clearInterval(window._heartbeatTimer); window._heartbeatTimer = null; }
+            window._remoteDispatching = false;
         }
+
+        // 顯示對應 TAB 的主進度條（多機模式，不經過 progress Socket 事件）
+        function showRemoteMainProgress(label) {
+            const tab = window._activeJobTab || 'backup';
+            const pfxMap = { backup: 'bk', transcode: 'tc', concat: 'ct', verify: 'vf', report: 'rp', transcribe: 'tr', tts: 'tts' };
+            const pfx = pfxMap[tab];
+            if (!pfx) return;
+            const container = document.getElementById(pfx + '-progress');
+            const bar = document.getElementById(pfx + '-prog-bar');
+            const lbl = document.getElementById(pfx + '-prog-label');
+            if (container) container.classList.remove('hidden');
+            if (bar) { bar.style.width = '5%'; bar.style.backgroundColor = '#3b82f6'; }
+            if (lbl) lbl.textContent = label || '遠端執行中...';
+        }
+
+        // Export remote host functions to window for tab JS access
+        window.initRemoteHostProgress = initRemoteHostProgress;
+        window.updateHostProgress = updateHostProgress;
+        window.startHeartbeatMonitor = startHeartbeatMonitor;
+        window.stopHeartbeatMonitor = stopHeartbeatMonitor;
+        window.showRemoteMainProgress = showRemoteMainProgress;
+        window.dispatchRemoteTranscode = dispatchRemoteTranscode;
 
         async function dispatchRemoteTranscode(ctx) {
             window._remoteJobType = 'transcode';
-            if (!ctx || !ctx.hosts || !ctx.hosts.length) return;
+            window._remoteDispatching = true; // 防止 task_status:running 觸發 resetProgress
+            if (!ctx || !ctx.hosts || !ctx.hosts.length) { window._remoteDispatching = false; return; }
             if (typeof appendLog === 'function') appendLog('🖥️ 分派轉檔任務給遠端主機...', 'system');
+            showRemoteMainProgress('分散式轉檔：派發中...');
             initRemoteHostProgress(ctx.hosts);
 
             // Pre-flight ping
@@ -1242,7 +2058,7 @@ window.onerror = function(msg, url, lineNo, columnNo, error) {
                             body: JSON.stringify({ sources: files, dest_dir: dest })
                         });
                         const res = await r.json();
-                        if (typeof appendLog === 'function') appendLog('✅ ' + h.name + ' [' + (cardName || 'all') + '] 接收，排序: ' + (res.position || '?'), 'system');
+                        if (typeof appendLog === 'function') appendLog('✅ ' + h.name + ' [' + (cardName || 'all') + '] 接收，任務 ID: ' + (res.job_id || '?'), 'system');
                         hostOk = true;
                     } catch (err) {
                         if (typeof appendLog === 'function') appendLog('❌ 無法連線到 ' + h.name + ': ' + err.message, 'error');
@@ -1250,7 +2066,7 @@ window.onerror = function(msg, url, lineNo, columnNo, error) {
                 }
                 if (hostOk) {
                     updateHostProgress(h.ip, 20, '轉檔中...', '#d48a04');
-                    window._activeRemoteHosts[h.ip] = { host: h, files: allCardFiles.map(cf => cf.file), lastSeen: Date.now(), startTime: Date.now() };
+                    window._activeRemoteHosts[h.ip] = { host: h, files: allCardFiles.map(cf => cf.file), lastSeen: Date.now(), startTime: Date.now(), expectedJobs: cardNames.length, pct: 0 };
                 } else {
                     updateHostProgress(h.ip, 0, '連線失敗', '#8b0000');
                 }
@@ -1297,7 +2113,8 @@ window.onerror = function(msg, url, lineNo, columnNo, error) {
                                         const concatUrl = (flags.concat_host_url || getComputeBaseUrl()) + '/api/v1/jobs/concat';
                                         const concatHostName = flags.concat_host_name || '本機';
                                         if (typeof appendLog === 'function') appendLog('🏗️ 串帶將由 [' + concatHostName + '] 執行', 'system');
-                                        // Use index-based loop to safely handle cards that may not be clean [key, value] tuples
+                                        // 追蹤多卡串帶進度
+                                        window._concatMultiCard = { total: flags.cards.length, done: 0, jobIds: [] };
                                         for (let ci = 0; ci < flags.cards.length; ci++) {
                                             const cardEntry = flags.cards[ci];
                                             // Cards can be [cardName, srcPath] or [cardName, srcPath, absSrcPath]
@@ -1309,16 +2126,16 @@ window.onerror = function(msg, url, lineNo, columnNo, error) {
                                                 sources: [concatSrcDir],
                                                 dest_dir: concatDestDir,
                                                 custom_name: flags.project_name + '_' + cardName + '_reel',
-                                                resolution: '720P',
-                                                codec: 'H.264 (NVENC)',
-                                                burn_timecode: true,
-                                                burn_filename: false
+                                                resolution: flags.concat_resolution || '720P',
+                                                codec: flags.concat_codec || 'H.264 (NVENC)',
+                                                burn_timecode: flags.concat_burn_tc ?? true,
+                                                burn_filename: flags.concat_burn_fn ?? false
                                             };
                                             const r3 = await fetch(concatUrl, {
                                                 method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(concatPayload)
                                             });
                                             const j3 = await r3.json();
-                                            if (typeof appendLog === 'function') appendLog('📌 串帶 [' + cardName + '] 排隊中: ' + (j3.position || '?'), 'system');
+                                            if (typeof appendLog === 'function') appendLog('📌 串帶 [' + cardName + '] 排隊中，任務 ID: ' + (j3.job_id || '?'), 'system');
                                         }
                                     }
 
@@ -1326,15 +2143,25 @@ window.onerror = function(msg, url, lineNo, columnNo, error) {
                                     if (flags.do_report) {
                                         const localDir = flags.local_root + '/' + flags.project_name;
                                         const reportPayload = {
-                                            source_dir: localDir, output_dir: flags.local_root, nas_root: flags.nas_root || '',
-                                            report_name: flags.project_name, do_filmstrip: true, do_techspec: true,
-                                            do_hash: false, do_gdrive: false, do_gchat: false, do_line: false,
-                                            exclude_dirs: flags.proxy_root ? [flags.proxy_root + '/' + flags.project_name] : []
+                                            source_dir: localDir,
+                                            output_dir: flags.report_output || flags.local_root,
+                                            nas_root: flags.nas_root || '',
+                                            report_name: flags.report_name || flags.project_name,
+                                            do_filmstrip: flags.report_filmstrip ?? true,
+                                            do_techspec: flags.report_techspec ?? true,
+                                            do_hash: flags.report_hash ?? false,
+                                            do_gdrive: false, do_gchat: false, do_line: false,
+                                            exclude_dirs: flags.proxy_root ? [flags.proxy_root + '/' + flags.project_name] : [],
+                                            client_sid: window.socket?.id || ''
                                         };
                                         const r4 = await fetch(getComputeBaseUrl() + '/api/v1/report_jobs', {
                                             method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(reportPayload)
                                         });
                                         const j4 = await r4.json();
+                                        if (j4.job_id) {
+                                            window._myReportJobIds = window._myReportJobIds || new Set();
+                                            window._myReportJobIds.add(j4.job_id);
+                                        }
                                         if (typeof appendLog === 'function') appendLog('📊 報表任務已提交: ' + j4.status, 'system');
                                     }
                                     window._postMergeFlags = null;
@@ -1460,7 +2287,7 @@ window.onerror = function(msg, url, lineNo, columnNo, error) {
                                             method: 'POST', headers: { 'Content-Type': 'application/json' },
                                             body: JSON.stringify({ sources: srcFiles, dest_dir: destDir })
                                         }).then(res => res.json()).then(j => {
-                                            if (typeof appendLog === 'function') appendLog(`📌 主機 ${dist.host.name} [${cardName}] 補轉排隊: ${j.position || '?'}`, 'system');
+                                            if (typeof appendLog === 'function') appendLog(`📌 主機 ${dist.host.name} [${cardName}] 補轉排隊，任務 ID: ${j.job_id || '?'}`, 'system');
                                         }).catch(err => {
                                             if (typeof appendLog === 'function') appendLog(`⚠️ 主機 ${dist.host.name} [${cardName}] 補轉派發失敗: ${err.message}`, 'error');
                                         });
@@ -1529,31 +2356,55 @@ window.onerror = function(msg, url, lineNo, columnNo, error) {
 
 
 
+        // ── 統一按鈕列狀態切換（DOM refs 延遲快取）──
+        function updateActionBarState(state) {
+            document.querySelectorAll('.tab-control-btns').forEach(el => {
+                el.classList.toggle('hidden', state === 'idle');
+            });
+            document.querySelectorAll('.tab-start-btn').forEach(btn => {
+                const idle = btn.dataset.idleText || '開始';
+                const busy = btn.dataset.busyText || '開始新佇列';
+                btn.textContent = state === 'idle' ? idle : busy;
+            });
+        }
+        window.updateActionBarState = updateActionBarState;
+
         async function apiControl(cmd) {
-            if (cmd === 'stop') {
-                window._remoteDispatch = null;
-                window._postMergeFlags = null;
-            }
+            const cmdLabel = cmd === 'pause' ? '暫停' : cmd === 'resume' ? '繼續' : '強制中止';
 
             // 1. 發送給本機
             try {
-                const res = await fetch(getComputeBaseUrl() + `/api/v1/control/${cmd}`, { method: 'POST' });
-                const r = await res.json();
-                appendLog(`[本機] 發送控制指令 [${cmd === 'pause' ? '暫停' : cmd === 'resume' ? '繼續' : '強制中止'}] 成功`, 'system');
+                await fetch(getComputeBaseUrl() + `/api/v1/control/${cmd}`, { method: 'POST' });
+                appendLog(`[本機] ${cmdLabel} 成功`, 'system');
             } catch (err) {
-                appendLog(`[本機] 發送控制指令失敗: ${err.message}`, 'error');
+                appendLog(`[本機] ${cmdLabel} 失敗: ${err.message}`, 'error');
             }
 
             // 2. 發送給所有活躍中的遠端主機
             const activeHosts = Object.keys(window._activeRemoteHosts || {});
             for (const ip of activeHosts) {
                 try {
-                    const hostUrl = 'http://' + ip;
-                    await fetch(hostUrl + `/api/v1/control/${cmd}`, { method: 'POST' });
-                    appendLog(`[${ip}] 發送控制指令 [${cmd}] 成功`, 'system');
+                    await fetch('http://' + ip + `/api/v1/control/${cmd}`, { method: 'POST' });
+                    appendLog(`[${ip}] ${cmdLabel} 成功`, 'system');
                 } catch (e) {
-                    appendLog(`[${ip}] 發送控制指令失敗: ${e.message}`, 'error');
+                    appendLog(`[${ip}] ${cmdLabel} 失敗: ${e.message}`, 'error');
                 }
+            }
+
+            // 3. 強制中止：清理所有狀態
+            if (cmd === 'stop') {
+                window._remoteDispatch = null;
+                window._postMergeFlags = null;
+                window._backupPipeline = null;
+                window._backupReportPending = false;
+                window._backupFinalShown = false;
+                window._concatMultiCard = null;
+                window._activeRemoteHosts = {};
+                if (window._heartbeatTimer) { clearInterval(window._heartbeatTimer); window._heartbeatTimer = null; }
+                window._remoteDispatching = false;
+                updateActionBarState('idle');
+                if (typeof resetProgress === 'function') resetProgress();
+                appendLog('❌ 已全部強制中止（本機 + 所有遠端主機）', 'error');
             }
         }
 
@@ -1572,80 +2423,6 @@ window.onerror = function(msg, url, lineNo, columnNo, error) {
             document.getElementById('install-modal').classList.remove('hidden');
         }
 
-        // ─── Compute Host List helpers ────────────────────────────────────
-        async function testHostConnection(btn) {
-            const row = btn.closest('div');
-            const inputs = row.querySelectorAll('input');
-            const ip = inputs[1]?.value.trim();
-            if (!ip) return;
-
-            const originalBg = btn.style.background;
-            btn.textContent = '測試中...';
-            btn.style.background = '#d48a04';
-
-            try {
-                const ctrl = new AbortController();
-                const timeoutId = setTimeout(() => ctrl.abort(), 3000);
-                const res = await fetch(`http://${ip}/api/v1/health`, { signal: ctrl.signal });
-                clearTimeout(timeoutId);
-
-                if (res.ok) {
-                    btn.innerHTML = '✅ OK';
-                    btn.style.background = '#228b22';
-                } else {
-                    btn.innerHTML = '❌ Fail';
-                    btn.style.background = '#8b0000';
-                }
-            } catch (err) {
-                btn.innerHTML = '❌ Fail';
-                btn.style.background = '#8b0000';
-            }
-
-            setTimeout(() => {
-                btn.textContent = '測試連線';
-                btn.style.background = originalBg;
-            }, 3000);
-        }
-
-        function addComputeHostRow(name = '', ip = '') {
-            const container = document.getElementById('compute_host_list');
-            if (!container) return;
-            const row = document.createElement('div');
-            row.style.cssText = 'display:flex;gap:8px;align-items:center;';
-            row.innerHTML = `
-                <input type="text" placeholder="主機名稱（如：轉檔主機A）" value="${name}"
-                    style="flex:1;background:#1e1e1e;border:1px solid #444;border-radius:6px;padding:6px 10px;color:#e0e0e0;font-size:13px;">
-                <input type="text" placeholder="IP:Port（如：192.168.1.50:8000）" value="${ip}"
-                    style="flex:1.5;background:#1e1e1e;border:1px solid #444;border-radius:6px;padding:6px 10px;color:#e0e0e0;font-size:13px;">
-                <button onclick="testHostConnection(this)"
-                    style="background:#3b82f6;color:#fff;border:none;padding:5px 10px;border-radius:6px;cursor:pointer;font-size:12px;min-width:65px;white-space:nowrap;">測試連線</button>
-                <button onclick="this.closest('div').remove()"
-                    style="background:#8b0000;color:#fff;border:none;padding:5px 10px;border-radius:6px;cursor:pointer;font-size:13px;">−</button>`;
-            container.appendChild(row);
-        }
-
-        function loadComputeHostRows(hosts) {
-            const container = document.getElementById('compute_host_list');
-            if (!container) return;
-            container.innerHTML = '';
-            (hosts || []).forEach(h => addComputeHostRow(h.name || '', h.ip || ''));
-            // 更新全域快取供下拉選單使用
-            window._computeHosts = hosts || [];
-        }
-
-        function getComputeHostRows() {
-            const rows = document.querySelectorAll('#compute_host_list > div');
-            const result = [];
-            rows.forEach(row => {
-                const inputs = row.querySelectorAll('input');
-                const name = inputs[0]?.value.trim();
-                const ip = inputs[1]?.value.trim();
-                if (name || ip) result.push({ name, ip });
-            });
-            window._computeHosts = result;
-            return result;
-        }
-
         // ─── Settings Modal ───────────────────────────────────────────
         // Global tab-switch function (called from inline onclick on tab buttons)
         function switchSettingsTab(tabId, event) {
@@ -1653,7 +2430,77 @@ window.onerror = function(msg, url, lineNo, columnNo, error) {
             document.querySelectorAll('#settingsModal .tab-btn').forEach(el => el.classList.remove('active'));
             document.getElementById('tab_' + tabId).style.display = 'block';
             (event || window.event).currentTarget.classList.add('active');
+            if (tabId === 'user_mgmt') _loadUserList();
         }
+
+        // ── User Management ──
+        async function _loadUserList() {
+            const container = document.getElementById('user-mgmt-list');
+            if (!container) return;
+            try {
+                const r = await fetch('/api/v1/auth/users');
+                if (!r.ok) { container.innerHTML = '<span style="color:#f87171">載入失敗（需要管理員權限）</span>'; return; }
+                const users = await r.json();
+                container.innerHTML = users.map(u => `
+                    <div style="display:flex; align-items:center; gap:8px; padding:8px 0; border-bottom:1px solid #333;">
+                        <span style="color:#fff; min-width:80px;">👤 ${u.username}</span>
+                        <span style="color:#888; min-width:60px;">${u.role}</span>
+                        <span style="color:#555; flex:1; font-size:11px;">${u.visible_tabs ? u.visible_tabs.join(', ') : '全部頁籤'}</span>
+                        ${u.username !== 'admin' ? `
+                            <button onclick="window._changeUserRole('${u.username}','${u.role}')" style="background:transparent; border:1px solid #555; color:#aaa; border-radius:3px; padding:2px 8px; cursor:pointer; font-size:11px;">改角色</button>
+                            <button onclick="window._changeUserPwd('${u.username}')" style="background:transparent; border:1px solid #555; color:#aaa; border-radius:3px; padding:2px 8px; cursor:pointer; font-size:11px;">改密碼</button>
+                            <button onclick="window._deleteUser('${u.username}')" style="background:transparent; border:1px solid #ef4444; color:#ef4444; border-radius:3px; padding:2px 8px; cursor:pointer; font-size:11px;">刪除</button>
+                        ` : '<span style="color:#22c55e; font-size:11px;">系統管理員</span>'}
+                    </div>
+                `).join('');
+            } catch (_) {
+                container.innerHTML = '<span style="color:#f87171">載入失敗</span>';
+            }
+        }
+
+        window._addUserPrompt = async function() {
+            const username = prompt('新使用者帳號：');
+            if (!username) return;
+            const password = prompt('密碼：');
+            if (!password) return;
+            const role = prompt('角色（admin / editor / viewer）：', 'editor');
+            if (!role) return;
+            try {
+                const r = await fetch('/api/v1/auth/users', {
+                    method: 'POST', headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ username, password, role }),
+                });
+                const d = await r.json();
+                if (!r.ok) { alert(d.detail || '新增失敗'); return; }
+                _loadUserList();
+            } catch (_) { alert('連線失敗'); }
+        };
+
+        window._changeUserRole = async function(username, currentRole) {
+            const role = prompt(`修改 ${username} 的角色（目前：${currentRole}）：`, currentRole);
+            if (!role || role === currentRole) return;
+            const r = await fetch('/api/v1/auth/users/' + username, {
+                method: 'PUT', headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ role }),
+            });
+            if (r.ok) _loadUserList(); else alert('修改失敗');
+        };
+
+        window._changeUserPwd = async function(username) {
+            const password = prompt(`設定 ${username} 的新密碼：`);
+            if (!password) return;
+            const r = await fetch('/api/v1/auth/users/' + username, {
+                method: 'PUT', headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ password }),
+            });
+            if (r.ok) alert('密碼已更新'); else alert('修改失敗');
+        };
+
+        window._deleteUser = async function(username) {
+            if (!confirm(`確定要刪除使用者 "${username}"？`)) return;
+            const r = await fetch('/api/v1/auth/users/' + username, { method: 'DELETE' });
+            if (r.ok) _loadUserList(); else alert('刪除失敗');
+        };
 
         // Wrapped in DOMContentLoaded so modal HTML (placed after this script)
         // is fully parsed before we try to bind event listeners.
@@ -1678,8 +2525,6 @@ window.onerror = function(msg, url, lineNo, columnNo, error) {
                         document.getElementById('tpl_concat_success').value = t.concat_success || '';
                         document.getElementById('tpl_verify_success').value = t.verify_success || '';
                         document.getElementById('tpl_transcribe_success').value = t.transcribe_success || '';
-                        // ── Load compute hosts ────────────────────────────────────────
-                        loadComputeHostRows(data.compute_hosts || []);
                         // ── Load channel toggles ──────────────────────────────────────
                         const ch = data.notification_channels || {};
                         const tabs = ['backup', 'report', 'transcode', 'concat', 'verify', 'transcribe'];
@@ -1725,8 +2570,6 @@ window.onerror = function(msg, url, lineNo, columnNo, error) {
                             }
                         ])
                     ),
-                    // ── Compute hosts ─────────────────────────────────
-                    compute_hosts: getComputeHostRows(),
                 };
                 try {
                     const response = await fetch('/api/settings/save', {
@@ -1762,6 +2605,106 @@ window.onerror = function(msg, url, lineNo, columnNo, error) {
                 t.classList.toggle('off');
             });
         });
+
+
+// ── Shared collect-function map (used by schedule modal) ──
+        const _collectMap = {
+            'backup': 'collectBackupPayload',
+            'transcode': 'collectTranscodePayload',
+            'concat': 'collectConcatPayload',
+            'verify': 'collectVerifyPayload',
+            'transcribe': 'collectTranscribePayload',
+            'tts': 'collectTtsPayload',
+            'clone': 'collectClonePayload',
+            'report': 'collectReportPayload',
+        };
+
+// ── Schedule Modal ──────────────────────────────
+        let _scheduleModalData = null;
+
+        function _initScheduleSelects() {
+            const hourSel = document.getElementById('schedule-modal-hour');
+            const minSel = document.getElementById('schedule-modal-min');
+            if (!hourSel || hourSel.options.length) return;
+            for (let h = 0; h < 24; h++) {
+                const o = document.createElement('option');
+                o.value = o.textContent = String(h).padStart(2, '0');
+                hourSel.appendChild(o);
+            }
+            for (const m of ['00', '15', '30', '45']) {
+                const o = document.createElement('option');
+                o.value = o.textContent = m;
+                minSel.appendChild(o);
+            }
+        }
+
+        function scheduleJob(taskType) {
+            const fnName = _collectMap[taskType];
+            if (!fnName || typeof window[fnName] !== 'function') {
+                alert('此任務類型暫不支援排程');
+                return;
+            }
+            const result = window[fnName]();
+            if (!result || !result.valid) return;
+
+            _scheduleModalData = { taskType, payload: result.payload, name: result.name || '' };
+
+            // Pre-fill modal
+            _initScheduleSelects();
+            const overlay = document.getElementById('schedule-modal-overlay');
+            document.getElementById('schedule-modal-name').value = result.name || '';
+            // Default date = tomorrow
+            const tomorrow = new Date();
+            tomorrow.setDate(tomorrow.getDate() + 1);
+            document.getElementById('schedule-modal-date').value = tomorrow.toISOString().slice(0, 10);
+            document.getElementById('schedule-modal-hour').value = '02';
+            document.getElementById('schedule-modal-min').value = '00';
+            overlay.style.display = 'flex';
+        }
+
+        function cancelScheduleModal() {
+            document.getElementById('schedule-modal-overlay').style.display = 'none';
+            _scheduleModalData = null;
+        }
+
+        async function confirmScheduleModal() {
+            if (!_scheduleModalData) return;
+            const name = document.getElementById('schedule-modal-name').value.trim();
+            const date = document.getElementById('schedule-modal-date').value;
+            const hh = document.getElementById('schedule-modal-hour').value;
+            const mm = document.getElementById('schedule-modal-min').value;
+            if (!name) { alert('請輸入排程名稱'); return; }
+            if (!date) { alert('請選擇日期'); return; }
+
+            const runAt = date + 'T' + hh + ':' + mm + ':00';
+            const body = {
+                name,
+                run_at: runAt,
+                task_type: _scheduleModalData.taskType,
+                request: _scheduleModalData.payload,
+            };
+
+            try {
+                const r = await fetch('/api/v1/schedules', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(body),
+                });
+                if (!r.ok) {
+                    const err = await r.json().catch(() => ({}));
+                    alert('排程建立失敗: ' + (err.detail || r.statusText));
+                    return;
+                }
+                alert('排程已建立');
+                cancelScheduleModal();
+            } catch (e) {
+                alert('排程建立失敗: ' + e.message);
+            }
+        }
+
+        window.scheduleJob = scheduleJob;
+        window.cancelScheduleModal = cancelScheduleModal;
+        window.confirmScheduleModal = confirmScheduleModal;
 
 
 // ─── Initialize on Page Load ─── //

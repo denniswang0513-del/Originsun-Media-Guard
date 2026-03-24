@@ -1,0 +1,1318 @@
+/* ── Projects Overview Tab ── */
+/* All classes prefixed with pj- to avoid collisions */
+
+.pj-container {
+    font-family: 'JetBrains Mono', 'Consolas', 'Courier New', monospace;
+    color: #d4d4d4;
+}
+
+/* ── Header Bar ── */
+.pj-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 16px;
+}
+
+.pj-header-left {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+}
+
+.pj-header-left h2 {
+    font-size: 18px;
+    font-weight: 700;
+    color: #e0e0e0;
+    margin: 0;
+}
+
+/* ── Badges ── */
+.pj-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 12px;
+    padding: 3px 10px;
+    border-radius: 12px;
+    background: #2a2a2a;
+    border: 1px solid #3a3a3a;
+    color: #aaa;
+}
+
+.pj-badge-running {
+    color: #3b82f6;
+    border-color: #2563eb44;
+}
+
+.pj-badge-running::before {
+    content: '';
+    display: inline-block;
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    background: #3b82f6;
+    animation: pj-breathe 2s ease-in-out infinite;
+}
+
+.pj-badge-queued {
+    color: #d48a04;
+    border-color: #d48a0444;
+}
+
+.pj-badge-scheduled {
+    color: #a855f7;
+    border-color: #a855f744;
+}
+
+.pj-badge-done {
+    color: #22c55e;
+    border-color: #22c55e44;
+}
+
+@keyframes pj-breathe {
+    0%, 100% { opacity: 0.4; transform: scale(0.85); }
+    50% { opacity: 1; transform: scale(1.15); }
+}
+
+/* ── Settings Button ── */
+.pj-btn-settings {
+    background: #374151;
+    color: #d4d4d4;
+    border: 1px solid #4b5563;
+    padding: 5px 14px;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 12px;
+    font-family: inherit;
+    transition: background 0.2s ease, border-color 0.2s ease;
+}
+
+.pj-btn-settings:hover {
+    background: #4b5563;
+    border-color: #6b7280;
+}
+
+/* ── Settings Panel ── */
+.pj-settings-panel {
+    background: #1a1a1a;
+    border: 1px solid #333;
+    border-radius: 6px;
+    padding: 14px 16px;
+    margin-bottom: 16px;
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 12px;
+    animation: pj-slide-down 0.2s ease;
+}
+
+.pj-settings-wide {
+    grid-column: 1 / -1;
+}
+
+.pj-settings-nas-row {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+}
+
+.pj-settings-nas-input {
+    flex: 1;
+    background: #1e1e1e;
+    color: #d4d4d4;
+    border: 1px solid #444;
+    border-radius: 4px;
+    padding: 4px 8px;
+    font-size: 13px;
+}
+
+.pj-settings-item {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.pj-settings-item label {
+    font-size: 11px;
+    color: #888;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+.pj-settings-item select {
+    background: #1e1e1e;
+    color: #d4d4d4;
+    border: 1px solid #444;
+    border-radius: 4px;
+    padding: 4px 8px;
+    font-size: 13px;
+    font-family: inherit;
+    cursor: pointer;
+    outline: none;
+    transition: border-color 0.2s ease;
+}
+
+.pj-settings-item select:focus {
+    border-color: #3b82f6;
+}
+
+/* ── Section Headers ── */
+.pj-section-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    font-size: 13px;
+    font-weight: 600;
+    color: #888;
+    text-transform: uppercase;
+    letter-spacing: 0.8px;
+    margin-bottom: 10px;
+    padding-bottom: 6px;
+    border-bottom: 1px solid #2a2a2a;
+}
+
+.pj-section-header-right {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+/* ── Active Container ── */
+#pj-active-container {
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+    margin-bottom: 24px;
+    min-height: 60px;
+}
+
+/* ── Empty State ── */
+.pj-empty-state {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    padding: 32px 0;
+    color: #555;
+    font-size: 13px;
+    gap: 10px;
+}
+
+.pj-empty-spinner {
+    width: 28px;
+    height: 28px;
+    border: 2px solid #333;
+    border-top-color: #555;
+    border-radius: 50%;
+    animation: pj-spin-slow 3s linear infinite;
+}
+
+@keyframes pj-spin-slow {
+    to { transform: rotate(360deg); }
+}
+
+/* ── Task Card (single-row compact layout) ── */
+.pj-card {
+    display: flex;
+    flex-direction: column;
+    background: #1e1e1e;
+    border: 1px solid #333;
+    border-radius: 4px;
+    overflow: hidden;
+    transition: border-color 0.25s ease, opacity 0.25s ease;
+}
+
+.pj-card-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 5px 10px;
+    min-height: 30px;
+}
+
+.pj-project-name {
+    font-weight: 700;
+    font-size: 13px;
+    color: #e0e0e0;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 180px;
+    flex-shrink: 0;
+}
+
+.pj-type-badge {
+    font-size: 10px;
+    padding: 1px 7px;
+    border-radius: 3px;
+    color: #fff;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.3px;
+    flex-shrink: 0;
+}
+
+.pj-status-badge {
+    font-size: 11px;
+    padding: 1px 8px;
+    border-radius: 3px;
+    margin-left: auto;
+    color: #d4d4d4;
+    background: #333;
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+}
+
+.pj-status-badge.pj-status-running::before {
+    content: '';
+    display: inline-block;
+    width: 10px;
+    height: 10px;
+    border: 2px solid transparent;
+    border-top-color: currentColor;
+    border-radius: 50%;
+    animation: pj-spin 0.8s linear infinite;
+}
+
+.pj-status-badge.pj-status-done {
+    background: #16532d;
+    color: #4ade80;
+}
+
+.pj-status-badge.pj-status-error {
+    background: #531616;
+    color: #f87171;
+}
+
+.pj-status-badge.pj-status-queued,
+.pj-status-badge.pj-status-waiting {
+    background: #3d2e00;
+    color: #fbbf24;
+}
+
+@keyframes pj-spin {
+    to { transform: rotate(360deg); }
+}
+
+/* Progress (inline within row) */
+.pj-progress-wrap {
+    flex: 1;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    min-width: 0;
+    margin-bottom: 0;
+}
+
+.pj-progress-bar {
+    flex: 1;
+    height: 4px;
+    background: #2a2a2a;
+    border-radius: 2px;
+    overflow: hidden;
+    min-width: 60px;
+}
+
+.pj-progress-fill {
+    height: 100%;
+    border-radius: 2px;
+    transition: width 0.3s ease;
+    width: 0%;
+}
+
+.pj-progress-fill.pj-indeterminate {
+    width: 100% !important;
+    background: linear-gradient(90deg, transparent 0%, #555 50%, transparent 100%);
+    background-size: 200% 100%;
+    animation: pj-slide 1.5s ease-in-out infinite;
+}
+
+@keyframes pj-slide {
+    0% { background-position: 200% 0; }
+    100% { background-position: -200% 0; }
+}
+
+.pj-progress-info {
+    font-size: 10px;
+    color: #666;
+    margin-top: 0;
+    white-space: nowrap;
+    flex-shrink: 0;
+}
+
+/* Log toggle (inline arrow icon) */
+.pj-log-toggle {
+    font-size: 11px;
+    color: #556;
+    cursor: pointer;
+    user-select: none;
+    flex-shrink: 0;
+    width: 14px;
+    text-align: center;
+    transition: color 0.2s ease;
+}
+
+.pj-log-toggle:hover {
+    color: #88a;
+}
+
+/* Card detail (expandable area below row) */
+.pj-card-detail {
+    padding: 0 10px 6px 28px;
+    display: none;
+}
+
+.pj-card-detail.pj-detail-open {
+    display: block;
+}
+
+/* Current file (inside detail) */
+.pj-current-file {
+    font-size: 11px;
+    color: #666;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    margin-bottom: 4px;
+}
+
+/* Log area (inside detail) */
+.pj-log-area {
+    max-height: 120px;
+    overflow-y: auto;
+    background: #111;
+    border: 1px solid #222;
+    border-radius: 4px;
+    padding: 6px 8px;
+    margin-top: 4px;
+    font-size: 11px;
+    line-height: 1.5;
+}
+
+.pj-log-line-info { color: #888; }
+.pj-log-line-system { color: #d48a04; font-weight: 700; }
+.pj-log-line-error { color: #ef4444; }
+.pj-log-line-verbose { color: #555; font-size: 10px; }
+
+/* Card actions (inline within row) */
+.pj-card-actions {
+    display: flex;
+    gap: 4px;
+    margin-top: 0;
+    flex-shrink: 0;
+}
+
+.pj-btn {
+    font-size: 11px;
+    padding: 3px 12px;
+    border-radius: 3px;
+    border: none;
+    cursor: pointer;
+    font-family: inherit;
+    transition: background 0.2s ease, opacity 0.2s ease;
+}
+
+.pj-btn-pause {
+    background: #7a5500;
+    color: #fff;
+}
+.pj-btn-pause:hover { background: #b07a00; }
+
+.pj-btn-stop {
+    background: #8b0000;
+    color: #fff;
+}
+.pj-btn-stop:hover { background: #cc2200; }
+
+.pj-btn-close {
+    background: #374151;
+    color: #d4d4d4;
+}
+.pj-btn-close:hover { background: #4b5563; }
+
+/* Card state overrides */
+.pj-card.pj-card-done {
+    border-left: 3px solid #22c55e;
+}
+
+.pj-card.pj-card-error {
+    border-left: 3px solid #ef4444;
+}
+
+/* Card animations */
+.pj-card.pj-entering {
+    animation: pj-slide-in 0.3s ease forwards;
+}
+
+.pj-card.pj-leaving {
+    animation: pj-fade-out 0.25s ease forwards;
+}
+
+@keyframes pj-slide-in {
+    from { opacity: 0; transform: translateY(-12px); }
+    to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes pj-fade-out {
+    from { opacity: 1; transform: scale(1); }
+    to { opacity: 0; transform: scale(0.97); }
+}
+
+@keyframes pj-slide-down {
+    from { opacity: 0; max-height: 0; padding-top: 0; padding-bottom: 0; }
+    to { opacity: 1; max-height: 200px; }
+}
+
+/* ── History Toolbar (title + filters + date in one row) ── */
+.pj-history-toolbar {
+    flex-wrap: wrap;
+}
+.pj-history-toolbar-right {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    flex-wrap: wrap;
+}
+.pj-filter-input, .pj-filter-select {
+    background: #1e1e1e;
+    color: #d4d4d4;
+    border: 1px solid #444;
+    border-radius: 4px;
+    padding: 3px 8px;
+    font-size: 12px;
+    font-family: inherit;
+    outline: none;
+}
+.pj-filter-input { width: 140px; }
+.pj-filter-select { min-width: 80px; }
+.pj-filter-input:focus, .pj-filter-select:focus { border-color: #3b82f6; }
+
+/* ── History Log Modal ── */
+.pj-log-btn {
+    background: none;
+    border: 1px solid #444;
+    color: #888;
+    border-radius: 3px;
+    padding: 1px 6px;
+    font-size: 10px;
+    cursor: pointer;
+    flex-shrink: 0;
+    margin-left: 4px;
+}
+.pj-log-btn:hover { border-color: #3b82f6; color: #3b82f6; }
+
+.pj-log-overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(0,0,0,0.7);
+    z-index: 9000;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+.pj-log-modal {
+    background: #1a1a1a;
+    border: 1px solid #444;
+    border-radius: 8px;
+    width: 80%;
+    max-width: 800px;
+    max-height: 80vh;
+    display: flex;
+    flex-direction: column;
+}
+.pj-log-modal-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 10px 16px;
+    border-bottom: 1px solid #333;
+    font-size: 13px;
+    font-weight: 600;
+}
+.pj-log-modal-close {
+    background: none;
+    border: none;
+    color: #888;
+    font-size: 18px;
+    cursor: pointer;
+}
+.pj-log-modal-close:hover { color: #fff; }
+.pj-log-modal-body {
+    padding: 12px 16px;
+    overflow-y: auto;
+    font-size: 11px;
+    font-family: 'Consolas', 'Courier New', monospace;
+    color: #ccc;
+    white-space: pre-wrap;
+    word-break: break-all;
+    line-height: 1.5;
+}
+
+/* ── History ── */
+.pj-history-date {
+    background: #1e1e1e;
+    color: #d4d4d4;
+    border: 1px solid #444;
+    border-radius: 4px;
+    padding: 3px 8px;
+    font-size: 12px;
+    font-family: inherit;
+    outline: none;
+}
+.pj-history-date::-webkit-calendar-picker-indicator {
+    filter: invert(0.6);
+    cursor: pointer;
+}
+
+.pj-history-date:focus {
+    border-color: #3b82f6;
+}
+
+.pj-btn-clear {
+    background: #8b0000;
+    color: #fff;
+    border: none;
+    border-radius: 3px;
+    padding: 3px 10px;
+    font-size: 11px;
+    cursor: pointer;
+    font-family: inherit;
+    transition: background 0.2s ease;
+}
+.pj-btn-clear:hover { background: #cc2200; }
+
+#pj-history-container {
+    min-height: 40px;
+}
+
+.pj-history-row {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 5px 8px;
+    font-size: 12px;
+    border-bottom: 1px solid #1e1e1e;
+    transition: background 0.15s ease;
+}
+
+.pj-history-row:hover {
+    background: #1a1a1a;
+}
+
+.pj-history-icon { font-size: 13px; flex-shrink: 0; }
+.pj-history-time { color: #666; flex-shrink: 0; width: 42px; }
+.pj-history-project { color: #d4d4d4; font-weight: 600; min-width: 0; }
+.pj-history-type { color: #888; font-size: 11px; flex-shrink: 0; }
+.pj-history-duration { color: #666; margin-left: auto; flex-shrink: 0; }
+
+.pj-history-error {
+    font-size: 11px;
+    color: #ef4444;
+    padding: 0 8px 4px 34px;
+}
+
+.pj-history-empty {
+    text-align: center;
+    color: #555;
+    padding: 20px 0;
+    font-size: 13px;
+}
+
+/* ── History Pagination ── */
+.pj-pagination {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 0 2px;
+}
+.pj-page-arrow {
+    cursor: pointer;
+    color: #555;
+    font-size: 14px;
+    padding: 0 4px;
+    user-select: none;
+}
+.pj-page-arrow:hover { color: #aaa; }
+.pj-page-arrow.disabled { opacity: 0.3; pointer-events: none; }
+.pj-page-dot {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: #444;
+    cursor: pointer;
+    transition: background 0.2s;
+}
+.pj-page-dot:hover { background: #888; }
+.pj-page-dot.active { background: #3b82f6; width: 8px; height: 8px; }
+
+/* ── Queue Panel ── */
+#pj-queue-container {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    margin-bottom: 24px;
+    min-height: 40px;
+}
+
+.pj-queue-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 7px 10px;
+    background: #1e1e1e;
+    border: 1px solid #333;
+    border-radius: 4px;
+    font-size: 12px;
+    transition: border-color 0.2s ease, opacity 0.2s ease, background 0.2s ease;
+}
+
+.pj-queue-row:hover {
+    border-color: #555;
+}
+
+.pj-queue-row[draggable="true"] {
+    cursor: grab;
+}
+
+.pj-queue-handle {
+    color: #555;
+    font-size: 14px;
+    cursor: grab;
+    user-select: none;
+    width: 18px;
+    flex-shrink: 0;
+    text-align: center;
+}
+
+.pj-queue-number {
+    color: #666;
+    font-size: 11px;
+    width: 20px;
+    text-align: right;
+    flex-shrink: 0;
+    font-variant-numeric: tabular-nums;
+}
+
+.pj-queue-project {
+    font-weight: 700;
+    color: #e0e0e0;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    flex: 1;
+}
+
+.pj-queue-type {
+    font-size: 10px;
+    padding: 1px 7px;
+    border-radius: 3px;
+    color: #fff;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.3px;
+    flex-shrink: 0;
+}
+
+.pj-queue-urgent-tag {
+    font-size: 10px;
+    color: #ef4444;
+    font-weight: 700;
+    flex-shrink: 0;
+}
+
+.pj-queue-actions {
+    display: flex;
+    gap: 4px;
+    margin-left: auto;
+    flex-shrink: 0;
+}
+
+.pj-queue-actions .pj-btn {
+    font-size: 10px;
+    padding: 2px 8px;
+}
+
+/* Drag states */
+.pj-queue-row.pj-dragging {
+    opacity: 0.4;
+}
+
+.pj-queue-row.pj-drag-over {
+    border-top: 2px solid #3b82f6;
+}
+
+/* Urgent state */
+.pj-queue-row.pj-urgent {
+    border-left: 3px solid #ef4444;
+    background: #1a1111;
+}
+
+/* Locked (running) — not draggable */
+.pj-queue-row.pj-locked {
+    opacity: 0.6;
+    cursor: default;
+}
+
+.pj-queue-row.pj-locked .pj-queue-handle {
+    visibility: hidden;
+}
+
+.pj-queue-empty {
+    text-align: center;
+    color: #555;
+    padding: 16px 0;
+    font-size: 12px;
+}
+
+/* ── Machine Status ── */
+#pj-machines-container {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+    margin-bottom: 16px;
+    min-height: 40px;
+}
+
+.pj-machine-card {
+    width: 200px;
+    background: #1a1a1a;
+    border: 1px solid #2a2a2a;
+    border-radius: 6px;
+    padding: 10px 12px;
+    position: relative;
+    transition: opacity 0.3s ease, border-color 0.2s ease;
+}
+
+.pj-machine-card:hover {
+    border-color: #3a3a3a;
+}
+
+.pj-machine-card.pj-machine-offline {
+    opacity: 0.5;
+}
+
+.pj-machine-header {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin-bottom: 8px;
+}
+
+.pj-machine-dot {
+    width: 12px;
+    height: 12px;
+    border-radius: 50%;
+    flex-shrink: 0;
+    background: #666;
+}
+
+.pj-machine-dot.pj-dot-online {
+    background: #22c55e;
+    box-shadow: 0 0 8px 2px #22c55e;
+    animation: pj-dot-pulse 2s ease-in-out infinite;
+}
+.pj-machine-dot.pj-dot-offline { background: #ef4444; box-shadow: 0 0 8px 2px #ef4444; }
+.pj-machine-dot.pj-dot-slow { background: #d48a04; box-shadow: 0 0 8px 2px #d48a04; }
+.pj-machine-dot.pj-dot-unknown { background: #666; }
+
+@keyframes pj-dot-pulse {
+    0%, 100% { box-shadow: 0 0 8px 2px #22c55e; }
+    50% { box-shadow: 0 0 14px 4px #22c55e; }
+}
+
+.pj-machine-name {
+    font-weight: 700;
+    font-size: 13px;
+    color: #e0e0e0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    flex: 1;
+}
+
+.pj-machine-remove {
+    position: absolute;
+    top: 4px;
+    right: 6px;
+    font-size: 11px;
+    color: #555;
+    cursor: pointer;
+    background: none;
+    border: none;
+    font-family: inherit;
+    padding: 2px 4px;
+    line-height: 1;
+    transition: color 0.2s ease;
+}
+
+.pj-machine-remove:hover {
+    color: #ef4444;
+}
+
+.pj-machine-task {
+    font-size: 11px;
+    color: #888;
+    margin-bottom: 8px;
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    min-height: 16px;
+}
+
+.pj-machine-task-type {
+    font-size: 9px;
+    padding: 0 5px;
+    border-radius: 2px;
+    color: #fff;
+    font-weight: 600;
+    text-transform: uppercase;
+    flex-shrink: 0;
+}
+
+.pj-machine-task-name {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    color: #ccc;
+}
+
+.pj-machine-cpu {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.pj-machine-cpu-bar {
+    flex: 1;
+    height: 3px;
+    background: #2a2a2a;
+    border-radius: 2px;
+    overflow: hidden;
+}
+
+.pj-machine-cpu-fill {
+    height: 100%;
+    border-radius: 2px;
+    transition: width 0.5s ease, background-color 0.5s ease;
+}
+
+.pj-machine-cpu-label {
+    font-size: 9px;
+    color: #888;
+    letter-spacing: 0.5px;
+    flex-shrink: 0;
+}
+
+.pj-machine-cpu-text {
+    font-size: 10px;
+    color: #aaa;
+    width: 30px;
+    text-align: right;
+    flex-shrink: 0;
+    font-variant-numeric: tabular-nums;
+}
+
+.pj-machine-offline-text {
+    font-size: 10px;
+    color: #666;
+}
+
+/* Version row */
+.pj-machine-version-row {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    margin: 4px 0 2px;
+    min-height: 18px;
+}
+
+/* Version badge */
+.pj-version-badge {
+    font-size: 9px;
+    color: #888;
+    padding: 1px 5px;
+    border-radius: 3px;
+    background: #2a2a2a;
+}
+.pj-version-outdated {
+    color: #f59e0b;
+    background: #3b2a0a;
+}
+.pj-version-updating {
+    color: #60a5fa;
+    background: #1e2a3a;
+    animation: pulse 1.5s infinite;
+}
+@keyframes pulse { 50% { opacity: 0.6; } }
+
+/* Inline update button */
+.pj-btn-inline-update {
+    font-size: 9px;
+    padding: 1px 6px;
+    margin-left: 4px;
+    border: 1px solid #f59e0b;
+    border-radius: 3px;
+    background: transparent;
+    color: #f59e0b;
+    cursor: pointer;
+}
+.pj-btn-inline-update:hover {
+    background: #f59e0b;
+    color: #000;
+}
+
+/* Batch update button */
+.pj-btn-update {
+    font-size: 11px;
+    padding: 3px 10px;
+    border: 1px solid #f59e0b;
+    border-radius: 4px;
+    background: transparent;
+    color: #f59e0b;
+    cursor: pointer;
+    margin-right: 6px;
+}
+.pj-btn-update:hover {
+    background: #f59e0b;
+    color: #000;
+}
+.pj-btn-update:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+/* Update progress bar inside machine card */
+.pj-machine-update-bar {
+    width: 100%;
+    height: 3px;
+    background: #2a2a2a;
+    border-radius: 2px;
+    margin: 4px 0 2px;
+    overflow: hidden;
+}
+.pj-machine-update-fill {
+    height: 100%;
+    background: linear-gradient(90deg, #3b82f6, #60a5fa);
+    border-radius: 2px;
+    transition: width 0.5s;
+}
+
+.pj-machines-empty {
+    text-align: center;
+    color: #555;
+    padding: 16px 0;
+    font-size: 12px;
+    width: 100%;
+}
+
+.pj-machines-empty button {
+    background: none;
+    border: none;
+    color: #3b82f6;
+    cursor: pointer;
+    font-size: 12px;
+    font-family: inherit;
+    text-decoration: underline;
+    margin-left: 4px;
+}
+
+/* Add Agent Form */
+.pj-add-agent-form {
+    background: #161616;
+    border: 1px solid #2a2a2a;
+    border-radius: 6px;
+    padding: 10px 12px;
+    margin-bottom: 10px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    animation: pj-slide-down 0.2s ease;
+}
+
+.pj-agent-input {
+    background: #1e1e1e;
+    color: #d4d4d4;
+    border: 1px solid #444;
+    border-radius: 4px;
+    padding: 4px 8px;
+    font-size: 12px;
+    font-family: inherit;
+    outline: none;
+    transition: border-color 0.2s ease;
+    width: 120px;
+}
+
+.pj-agent-input:focus {
+    border-color: #3b82f6;
+}
+
+.pj-agent-input.pj-agent-port {
+    width: 60px;
+}
+
+/* ── Scheduled Tasks ── */
+#pj-schedules-container {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    margin-bottom: 16px;
+    min-height: 40px;
+}
+
+.pj-schedule-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 7px 10px;
+    background: #1e1e1e;
+    border: 1px solid #333;
+    border-radius: 4px;
+    font-size: 12px;
+    transition: border-color 0.2s ease;
+}
+
+.pj-schedule-row:hover {
+    border-color: #555;
+}
+
+.pj-schedule-row.pj-schedule-disabled {
+    opacity: 0.45;
+}
+
+.pj-schedule-name {
+    font-weight: 700;
+    color: #e0e0e0;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    max-width: 200px;
+}
+
+.pj-schedule-cron {
+    font-size: 11px;
+    color: #888;
+    flex-shrink: 0;
+}
+
+.pj-schedule-next {
+    font-size: 11px;
+    color: #666;
+    flex-shrink: 0;
+}
+
+.pj-schedule-actions {
+    display: flex;
+    gap: 4px;
+    margin-left: auto;
+    flex-shrink: 0;
+    align-items: center;
+}
+
+.pj-schedule-toggle {
+    position: relative;
+    width: 32px;
+    height: 16px;
+    background: #444;
+    border-radius: 8px;
+    cursor: pointer;
+    transition: background 0.3s ease;
+    border: none;
+    padding: 0;
+}
+
+.pj-schedule-toggle.pj-toggle-on {
+    background: #22c55e;
+}
+
+.pj-schedule-toggle::after {
+    content: '';
+    position: absolute;
+    top: 2px;
+    left: 2px;
+    width: 12px;
+    height: 12px;
+    background: #fff;
+    border-radius: 50%;
+    transition: transform 0.2s ease;
+}
+
+.pj-schedule-toggle.pj-toggle-on::after {
+    transform: translateX(16px);
+}
+
+.pj-schedule-delete {
+    font-size: 11px;
+    color: #555;
+    cursor: pointer;
+    background: none;
+    border: none;
+    font-family: inherit;
+    padding: 2px 4px;
+    line-height: 1;
+    transition: color 0.2s ease;
+}
+
+.pj-schedule-delete:hover {
+    color: #ef4444;
+}
+
+.pj-schedules-empty {
+    text-align: center;
+    color: #555;
+    padding: 16px 0;
+    font-size: 12px;
+}
+
+.pj-schedule-row .pj-schedule-time {
+    font-size: 11px;
+    color: #888;
+    flex-shrink: 0;
+}
+
+/* ── Schedule detail panel ── */
+.pj-schedule-wrapper {
+    margin-bottom: 2px;
+}
+
+.pj-schedule-arrow {
+    font-size: 8px;
+    color: #555;
+    flex-shrink: 0;
+    width: 10px;
+    text-align: center;
+    transition: color 0.2s ease;
+}
+
+.pj-schedule-row:hover .pj-schedule-arrow {
+    color: #999;
+}
+
+.pj-schedule-row-expanded {
+    border-bottom-left-radius: 0;
+    border-bottom-right-radius: 0;
+    border-bottom-color: transparent;
+}
+
+.pj-schedule-detail {
+    background: #161616;
+    border: 1px solid #333;
+    border-top: none;
+    border-radius: 0 0 4px 4px;
+    padding: 8px 12px 8px 30px;
+    animation: pj-slide-down 0.15s ease;
+}
+
+.pj-schedule-detail-line {
+    display: flex;
+    gap: 8px;
+    padding: 2px 0;
+    font-size: 11px;
+    line-height: 1.5;
+}
+
+.pj-schedule-detail-label {
+    color: #666;
+    flex-shrink: 0;
+    min-width: 70px;
+}
+
+.pj-schedule-detail-value {
+    color: #aaa;
+    word-break: break-all;
+}
+
+/* ── Inline schedule time editor ── */
+.pj-schedule-time-editable {
+    cursor: pointer;
+    border-bottom: 1px dashed transparent;
+    transition: border-color 0.2s ease, color 0.2s ease;
+}
+
+.pj-schedule-time-editable:hover {
+    border-bottom-color: #555;
+    color: #ccc;
+}
+
+.pj-schedule-time-editing {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    cursor: default;
+    border-bottom: none !important;
+}
+
+.pj-sch-edit-date,
+.pj-sch-edit-time {
+    background: #1e1e1e;
+    color: #d4d4d4;
+    border: 1px solid #444;
+    border-radius: 3px;
+    padding: 2px 5px;
+    font-size: 11px;
+    font-family: inherit;
+    outline: none;
+    color-scheme: dark;
+}
+
+.pj-sch-edit-date { width: 120px; }
+
+.pj-sch-edit-select {
+    background: #1e1e1e;
+    color: #d4d4d4;
+    border: 1px solid #444;
+    border-radius: 3px;
+    padding: 2px 4px;
+    font-size: 11px;
+    font-family: inherit;
+    outline: none;
+    color-scheme: dark;
+    cursor: pointer;
+}
+
+.pj-sch-edit-date:focus,
+.pj-sch-edit-select:focus {
+    border-color: #3b82f6;
+}
+
+.pj-sch-edit-ok,
+.pj-sch-edit-cancel {
+    background: none;
+    border: none;
+    cursor: pointer;
+    font-size: 13px;
+    padding: 2px 4px;
+    line-height: 1;
+    transition: color 0.2s ease;
+}
+
+.pj-sch-edit-ok {
+    color: #22c55e;
+}
+
+.pj-sch-edit-ok:hover {
+    color: #4ade80;
+}
+
+.pj-sch-edit-cancel {
+    color: #666;
+}
+
+.pj-sch-edit-cancel:hover {
+    color: #ef4444;
+}
+
+/* Scrollbar styling for log area */
+.pj-log-area::-webkit-scrollbar {
+    width: 4px;
+}
+.pj-log-area::-webkit-scrollbar-track {
+    background: transparent;
+}
+.pj-log-area::-webkit-scrollbar-thumb {
+    background: #333;
+    border-radius: 2px;
+}

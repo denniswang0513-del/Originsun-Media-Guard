@@ -1,8 +1,9 @@
 from pydantic import BaseModel  # type: ignore
-from typing import List, Tuple
+from typing import List, Optional, Tuple
 
 class BackupRequest(BaseModel):
     task_type: str = "backup"
+    job_id: str = ""
     project_name: str
     local_root: str
     nas_root: str
@@ -12,14 +13,31 @@ class BackupRequest(BaseModel):
     do_transcode: bool = True
     do_concat: bool = True
     do_report: bool = False
+    # Concat settings
+    concat_resolution: str = "720P"
+    concat_codec: str = "H.264 (NVENC)"
+    concat_burn_tc: bool = True
+    concat_burn_fn: bool = False
+    # Report settings
+    report_name: str = ""
+    report_output: str = ""
+    report_filmstrip: bool = True
+    report_techspec: bool = True
+    report_hash: bool = False
+    compute_hosts: list = []
 
 class TranscodeRequest(BaseModel):
     task_type: str = "transcode"
+    job_id: str = ""
+    project_name: str = ""
     sources: List[str]
     dest_dir: str
+    compute_hosts: list = []
 
 class ConcatRequest(BaseModel):
     task_type: str = "concat"
+    job_id: str = ""
+    project_name: str = ""
     sources: List[str]
     dest_dir: str
     custom_name: str = ""
@@ -27,14 +45,19 @@ class ConcatRequest(BaseModel):
     codec: str = "ProRes"
     burn_timecode: bool = True
     burn_filename: bool = False
+    compute_hosts: list = []
 
 class VerifyRequest(BaseModel):
     task_type: str = "verify"
+    job_id: str = ""
+    project_name: str = ""
     pairs: List[Tuple[str, str]]
     mode: str = "quick"
+    compute_hosts: list = []
 
 class ReportJobRequest(BaseModel):
     task_type: str = "report"
+    job_id: str = ""
     source_dir: str
     output_dir: str
     nas_root: str = ""
@@ -46,9 +69,12 @@ class ReportJobRequest(BaseModel):
     do_gchat: bool = False
     do_line: bool = False
     exclude_dirs: list = []
+    client_sid: str = ""       # Socket.IO client sid（報表完成時只通知該客戶端）
 
 class TranscribeRequest(BaseModel):
     task_type: str = "transcribe"
+    job_id: str = ""
+    project_name: str = ""
     sources: List[str]
     dest_dir: str
     model_size: str = "turbo"
@@ -57,6 +83,37 @@ class TranscribeRequest(BaseModel):
     output_wav: bool = False
     generate_proxy: bool = False
     individual_mode: bool = False
+    compute_hosts: list = []
+
+class TtsRequest(BaseModel):
+    task_type: str = "tts"
+    job_id: str = ""
+    project_name: str = ""
+    text: str
+    voice: str = "zh-TW-HsiaoChenNeural"
+    rate: int = 0
+    pitch: int = 0
+    output_dir: str
+    output_name: str = "tts_output"
+    use_taiwan: bool = True
+    compute_hosts: list = []
+
+
+class TtsCloneRequest(BaseModel):
+    task_type: str = "tts"
+    job_id: str = ""
+    project_name: str = ""
+    text: str
+    reference_audio: str
+    output_dir: str
+    output_name: str = "clone_output"
+    speed: float = 1.0
+    pitch: int = 0
+    ref_text: Optional[str] = None
+    use_taiwan: bool = True
+    mode: str = "clone"  # "clone" to distinguish from standard tts
+    compute_hosts: list = []
+
 
 class DownloadModelRequest(BaseModel):
     model_size: str
@@ -91,3 +148,27 @@ class CompareSourceRequest(BaseModel):
 
 class OpenFileRequest(BaseModel):
     path: str
+
+class ValidatePathsRequest(BaseModel):
+    paths: List[str]
+
+class ReorderRequest(BaseModel):
+    ordered_job_ids: List[str]
+
+
+class ScheduleCreateRequest(BaseModel):
+    name: str
+    cron: Optional[str] = None                   # "0 2 * * *" (重複排程用)
+    run_at: Optional[str] = None                 # ISO datetime (單次排程用)
+    task_type: str = "backup"                    # backup/transcode/concat/verify/transcribe/tts/clone
+    request: dict                                # 對應任務類型的完整設定 dict
+    enabled: bool = True
+
+
+class ScheduleUpdateRequest(BaseModel):
+    name: Optional[str] = None
+    cron: Optional[str] = None
+    run_at: Optional[str] = None
+    task_type: Optional[str] = None
+    enabled: Optional[bool] = None
+    request: Optional[dict] = None

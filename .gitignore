@@ -26,6 +26,10 @@ build/
 
 # Config (runtime only, not committed)
 settings.json
+bookmarks.json
+scheduled_jobs.json
+job_history.json
+update_status.json
 
 # OS
 .DS_Store

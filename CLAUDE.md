@@ -1,6 +1,6 @@
 # Originsun Media Guard Pro — Claude Code 完整交接文件
 
-> **版本**: v1.5.0（2026-03-16）
+> **版本**: v1.9.6（2026-03-22）
 > **目標讀者**: 接手開發的 AI 協作者（Claude Code）
 > **開發環境**: Windows 11、Python 3.11、Vanilla JS (ES Modules)
 > **啟動方式**: `d:\Antigravity\OriginsunTranscode\.venv\Scripts\python.exe main.py`
@@ -15,7 +15,8 @@
 2. 備份同時可選擇性觸發**轉檔**（Proxy）、**串接**（Reel）、**視覺報表**
 3. 剪輯師用**比對驗證**確認素材完整性
 4. **語音辨識（Whisper）** 可將影片音軌轉為逐字稿（SRT/TXT）
-5. **TTS** 功能（🚧 開發中）可用 Edge-TTS 合成語音，或用 XTTS v2 克隆聲音
+5. **TTS** 功能可用 Edge-TTS 生成語音，或用 F5-TTS 進行零樣本聲音複製
+6. **台灣正音引擎** 可將大陸用語自動轉為台灣用語 + 發音校正（熱更新 JSON 字典）
 
 系統分為**主控端（伺服器）**和**代理端（同事電腦）**：
 - 主控端：`main.py` 啟動的 FastAPI 服務，提供 Web UI + API
@@ -30,7 +31,7 @@
 d:\Antigravity\OriginsunTranscode\.venv\Scripts\python.exe main.py
 
 # 開發模式（有熱重載，推薦）
-# 注意：hot reload 只能用於 FastAPI 路由，不包含 PyTorch monkey-patch 的副作用
+# 注意：hot reload 只能用於 FastAPI 路由，不包含 tts_engine.py 頂部的 patch 副作用
 d:\Antigravity\OriginsunTranscode\.venv\Scripts\uvicorn.exe main:io_app --host 0.0.0.0 --port 8000 --reload
 
 # 背景無視窗啟動（正式部署方式）
@@ -48,11 +49,14 @@ OriginsunTranscode/
 │
 │  ── 【進入點與核心邏輯】
 ├── main.py                  # FastAPI 應用程式進入點
-│                            #   - 最頂部有 PyTorch + torchaudio 的 monkey-patch（見第 5 節）
 │                            #   - 建立 FastAPI app 並掛載 NoCacheMiddleware + CORS
 │                            #   - 建立 socketio.ASGIApp(sio, app) → io_app
 │                            #   - 掛載所有 router（api_backup, api_verify, api_proxy...）
 │                            #   - 最後將 frontend/ 目錄 mount 為靜態檔案（html=True）
+│                            #   - _periodic_version_check()：背景每 10 分鐘檢查主控端版號
+│                            #     有更新時透過 Socket.IO 推播 'update_available' 給前端
+│                            #   - _read_local_version()：讀取本機 version.json 版號
+│                            #   - _is_newer(remote, local)：語意版本比較（支援 v 前綴）
 │
 ├── server.py                # ⚠️ 遺留的舊版單一大檔案伺服器（v1.4 以前）
 │                            #   保留作為歷史參考，不再使用，不可刪除（build_agent_zip.py 會打包它）
@@ -74,13 +78,28 @@ OriginsunTranscode/
 │                            #   - 支援 individual_mode（每個影片單獨一個檔）或合併模式
 │                            #   - 支援 generate_proxy（順帶轉 Proxy 檔）
 │
-├── tts_engine.py            # TTS 引擎（🚧 開發中，支援 Edge-TTS + Coqui XTTS v2）
-│                            #   - 頂部有 torch + torchaudio monkey-patch（與 main.py 相同）
+├── tts_engine.py            # TTS 引擎（支援 Edge-TTS + F5-TTS）
+│                            #   - 頂部有 torchcodec/torchaudio Windows 修補（見第 5 節）
 │                            #   - run_edge_tts()：async，透過 subprocess 呼叫 edge-tts CLI
-│                            #   - run_voice_clone()：async，載入 XTTS v2 模型進行聲音克隆
-│                            #   - xtts_is_ready()：檢查模型目錄是否存在
-│                            #   - download_xtts_model()：觸發模型下載（blocking，應在 executor 中呼叫）
-│                            #   - XTTS_MODEL_PATH = ./models/xtts_v2
+│                            #   - run_f5_tts_clone()：async，使用 F5-TTS 進行零樣本聲音複製
+│                            #   - f5_tts_is_available()：檢查 f5-tts 套件是否已安裝
+│                            #   - _get_f5_tts()：lazy-load F5-TTS 模型（全局快取 _f5_instance）
+│                            #   - _transcribe_ref_audio()：用 faster-whisper 轉錄參考音訊
+│                            #   - _prepare_gen_text()：生成文字前處理（數字轉中文、句邊界注入、句末標點）
+│                            #   - _pad_text_for_inference()：偵測短尾塊並補齊虛擬文字避免截斷
+│                            #   - _convert_numbers_in_text()：阿拉伯數字→中文讀法（百分比、年份、序數等）
+│                            #   - F5_MODEL_DIR = ./models/f5_tts
+│
+├── taiwan_dict.json         # 台灣正音字典（熱更新，不需重啟）
+│                            #   - vocab_mapping：大陸→台灣用語（14 筆，如 視頻→影片）
+│                            #   - pronunciation_hacks：發音校正（10 筆，如 垃圾→勒色）
+│
+├── utils/
+│   ├── __init__.py
+│   └── taiwan_normalizer.py # 台灣正音引擎
+│                            #   - normalize_for_taiwan_tts(text)：依序套用 vocab + pronunciation
+│                            #   - _load_dict()：每次呼叫時讀取 taiwan_dict.json（支援熱更新）
+│                            #   - 最長優先替換（避免子字串衝突）
 │
 ├── notifier.py              # 任務完成通知器
 │                            #   - send_google_chat()：發送到 Google Chat Incoming Webhook
@@ -93,12 +112,22 @@ OriginsunTranscode/
 │                            #   - init_settings()：啟動時確保 settings.json 存在（自動建立預設值）
 │                            #   - load_settings()：讀取並 merge 預設值（深度 merge）
 │                            #   - save_settings()：將 dict 寫回 settings.json
+│                            #   - 預設值含 master_server（主控端 URL，用於 HTTP OTA 更新）
 │
 ├── report_generator.py      # HTML 報表產生器
 │                            #   - save_report()：把 ReportManifest 渲染成 HTML（Jinja2 模板）
 │                            #   - generate_pdf_from_html()：用 playwright/weasyprint 轉 PDF
 │
-├── version.json             # {"version": "1.5.0", "build_date": "...", "notes": "..."}
+├── bootstrap.py             # 雙模式腳本
+│                            #   - `python bootstrap.py`：初始安裝（venv、pip、ffmpeg）
+│                            #   - `python bootstrap.py --update [URL]`：OTA 更新（下載 ZIP → 備份 → 解壓 → 重啟）
+│                            #   - 備份+雙層回滾：解壓失敗自動還原 + 啟動失敗 health check 15 秒回滾
+│                            #   - 回滾時彈出 Windows MsgBox 通知使用者
+│                            #   - _kill_port(port)：統一的 port 占用清除
+│                            #   - _restart_agent(base_dir)：統一的重啟邏輯
+│                            #   - 僅使用 stdlib（urllib、zipfile、subprocess），無外部依賴
+│
+├── version.json             # {"version": "1.8.1", "build_date": "...", "notes": "..."}
 │                            #   前端定期輪詢此檔來比對 NAS 版本號 → OTA 更新觸發點
 │
 ├── settings.json            # 執行時設定（不進 git，由 config.py 自動初始化）
@@ -142,16 +171,18 @@ OriginsunTranscode/
 │   │                        #   - 任務完成後 emit 'task_status' {'status': 'done'/'error'}
 │   │                        #   - BackupRequest 完成後若 do_report=True，啟動 _run_report_job()
 │   │
-│   └── report_job.py        # 視覺報表非同步任務（約 240 行）
-│                            #   - _run_report_job(req: ReportJobRequest)：完整報表流程
-│                            #   - Phase 1 Scan → Phase 2 Meta/Hash → Phase 3 Film Strip
-│                            #   - → Phase 4 Render HTML + PDF → Phase 5 Publish to NAS Web Server
-│                            #   - 每個 phase 透過 'report_progress' Socket 事件回報進度
-│                            #   - 可暫停：每次迭代前呼叫 _check_pause()
-│                            #   - 最終產出放在 {output_dir}/Originsun_Reports/ 下
-│                            #   - 更新 reports_index.json（本機 + NAS 各一份）
+│   ├── report_job.py        # 視覺報表非同步任務（約 240 行）
+│   │                        #   - _run_report_job(req: ReportJobRequest)：完整報表流程
+│   │                        #   - Phase 1 Scan → Phase 2 Meta/Hash → Phase 3 Film Strip
+│   │                        #   - → Phase 4 Render HTML + PDF → Phase 5 Publish to NAS Web Server
+│   │                        #   - 每個 phase 透過 'report_progress' Socket 事件回報進度
+│   │                        #   - 可暫停：每次迭代前呼叫 _check_pause()
+│   │                        #   - 最終產出放在 {output_dir}/Originsun_Reports/ 下
+│   │                        #   - 更新 reports_index.json（本機 + NAS 各一份）
+│   │
+│   └── scheduler.py         # 任務排程器（croniter cron + run_at 單次排程，每 60 秒掃描）
 │
-│  ── 【routers/ — FastAPI 路由模組（8 個）】
+│  ── 【routers/ — FastAPI 路由模組（10 個）】
 ├── routers/
 │   ├── __init__.py
 │   ├── api_backup.py        # 備份端點（見 7.1）
@@ -161,7 +192,12 @@ OriginsunTranscode/
 │   ├── api_report.py        # 報表端點（見 7.5）
 │   ├── api_transcribe.py    # 語音辨識端點（見 7.6）
 │   ├── api_system.py        # 系統工具端點（見 7.7）
-│   └── api_tts.py           # TTS 端點（🚧 開發中，見 7.8）
+│   ├── api_tts.py           # TTS 端點（見 7.8）
+│   ├── api_queue.py         # 佇列管理端點（見 7.9）
+│   ├── api_job_history.py   # 任務歷史端點（篩選 + log 查看）
+│   ├── api_agents.py        # NAS 共享機器管理 API (GET/POST/DELETE /api/v1/agents)（見 7.11）
+│   ├── api_bookmarks.py     # 書籤 CRUD API
+│   └── api_schedules.py     # 排程管理 API
 │
 │  ── 【frontend/ — 靜態前端（SPA）】
 ├── frontend/
@@ -198,13 +234,18 @@ OriginsunTranscode/
 │       ├── concat/          # 影片串接頁籤
 │       ├── report/          # 視覺報表頁籤
 │       ├── transcribe/      # Whisper 語音辨識頁籤
-│       └── tts/             # TTS 頁籤（🚧 開發中）
+│       ├── tts/             # TTS 頁籤（含 3 個子頁）
+│       │                    #   子頁 1：📢 標準 TTS（Edge-TTS）
+│       │                    #   子頁 2：🎙️ 聲音複製（F5-TTS）
+│       │                    #   子頁 3：📖 正音字典編輯器
+│       └── projects/        # 專案總覽頁籤
+│                            #   機器狀態、佇列管理、Agent 管理
 │
 │  ── 【模型與資料目錄】
 ├── models/
-│   └── xtts_v2/             # XTTS v2 本機模型（約 2GB，需手動下載）
-│                            #   子路徑：tts/tts_models--multilingual--multi-dataset--xtts_v2/
-│                            #   xtts_is_ready() 只檢查這個路徑下的 config.json 是否存在
+│   └── f5_tts/              # F5-TTS 模型快取目錄
+│                            #   模型自動從 HuggingFace 下載至 ~/.cache/huggingface/
+│                            #   F5TTS_v1_Base (~1.2GB, model_1250000.safetensors)
 │
 ├── voice/                   # 本機聲音角色快取（執行時自動建立）
 ├── credentials/             # Google API OAuth 憑證（.gitignore，不可提交）
@@ -214,12 +255,39 @@ OriginsunTranscode/
 ├── ffprobe.exe              # 隨附 FFprobe，用來讀取影片 metadata
 │
 │  ── 【部署與發布腳本】
-├── publish_update.py        # 互動式版本發布腳本（問版本號 → 打包 → 推送 NAS）
+├── publish_update.py        # 互動式版本發布腳本（問版本號 → 打包）
 ├── build_agent_zip.py       # 非互動式打包腳本（publish_update.py 會呼叫它）
 ├── start_hidden.vbs         # 無黑色視窗地啟動 python main.py
-├── update_agent.bat         # OTA 更新腳本（從 NAS 複製新程式碼，重啟服務）
+├── update_agent.bat         # OTA 更新腳本（從主控端 HTTP 下載更新 ZIP，重啟服務）
 ├── Install_Originsun_Agent.bat  # 新同事安裝精靈（從伺服器下載 Agent.zip，解壓到桌面）
-└── Maintainer_Guide.md      # 維護人員操作手冊
+├── Maintainer_Guide.md      # 維護人員操作手冊
+│
+│  ── 【測試套件】
+├── pytest.ini               # pytest 設定（asyncio_mode=auto, testpaths=tests）
+├── tests/
+│   ├── conftest.py          # 共用 fixtures（tmp_settings, mock_engine, async_client, real_server）
+│   ├── test_smoke.py        # Smoke tests（5 個：health, version, settings, frontend, socketio）
+│   ├── unit/                # 單元測試（20 個）
+│   │   ├── test_taiwan_normalizer.py  # 台灣正音引擎（8 個測試）
+│   │   ├── test_config.py             # 設定讀寫（6 個測試）
+│   │   └── test_core_engine.py        # 核心引擎（6 個測試）
+│   ├── integration/         # 整合測試（30 個）
+│   │   ├── test_api_system.py         # 系統 API（7 個測試）
+│   │   ├── test_api_queue.py          # 佇列管理 API（8 個測試）
+│   │   ├── test_api_validate_paths.py # 遠端路徑驗證 API（8 個測試）
+│   │   ├── test_task_queue.py         # 任務佇列（3 個測試）
+│   │   └── test_conflict_resolution.py # 衝突解決（4 個測試）
+│   └── e2e/                 # 端對端測試（20 個）
+│       ├── conftest.py      # Playwright fixtures
+│       ├── test_ui_basic.py           # 基本 UI（5 個測試）
+│       ├── test_task_flow.py          # 任務流程（3 個測試）
+│       ├── test_projects_tab.py       # 專案總覽 UI（8 個測試）
+│       └── test_validate_remote_paths.py  # 遠端路徑驗證前端（4 個測試）
+│
+│  ── 【測試與開發文件】
+├── TEST_INSTRUCTIONS.md     # 測試套件建置指令（17 個指令）
+├── TEST_REPORT.md           # 功能測試報告
+└── FINISHING.md             # 收尾流程範本
 ```
 
 ---
@@ -238,7 +306,7 @@ OriginsunTranscode/
 │   ├── POST /api/v1/jobs/verify       → VerifyRequest    → task_queue
 │   ├── POST /api/v1/jobs/transcribe   → TranscribeRequest → task_queue
 │   ├── POST /api/v1/report_jobs       → 直接 asyncio.create_task()（不走 queue）
-│   └── POST /api/v1/tts_jobs          → 直接執行（🚧 尚未接入 queue）
+│   └── POST /api/v1/tts_jobs          → 直接執行（尚未接入 queue）
 │
 └── Socket.IO (python-socketio AsyncServer)
     ├── 瀏覽器 → 伺服器
@@ -256,7 +324,8 @@ OriginsunTranscode/
         ├── model_download_done       → Whisper 模型下載完成
         ├── model_download_error      → Whisper 模型下載失敗
         ├── report_progress           → 報表生成進度 {phase, pct, msg, type}
-        └── report_job_done           → 報表完成 {report_name, local_path, pdf_path, public_url, drive_url}
+        ├── report_job_done           → 報表完成 {report_name, local_path, pdf_path, public_url, drive_url}
+        └── update_available          → 後端偵測到新版本 {latest_version, current_version}
 ```
 
 ### 4.2 任務佇列機制（重要）
@@ -304,52 +373,56 @@ _on_conflict(data):
 
 ## 5. 重大技術注意事項（務必閱讀）
 
-### 5.1 PyTorch 2.6+ monkey-patch（`main.py` 第 1-18 行）
+### 5.1 torchcodec + torchaudio Windows 修補（`tts_engine.py` 頂部）
 
+**⚠️ 歷史變遷**：v1.5.0 之前使用 Coqui XTTS v2，需要在 `main.py` 頂部做 PyTorch `weights_only` patch 和 torchaudio backend patch。升級為 F5-TTS 後，已從 `main.py` 移除這些 patch，改在 `tts_engine.py` 頂部處理新的相容性問題。
+
+**問題 1 — torchcodec 崩潰**：torchcodec 在 Windows 上呼叫 `os.add_dll_directory('.')` 時觸發 `[WinError 87]`。
+
+**修復**：
 ```python
-import torch as _torch
-_orig_load = _torch.load
-def _safe_load(*a, **kw):
-    kw.setdefault("weights_only", False)
-    return _orig_load(*a, **kw)
-_torch.load = _safe_load
+_orig_add_dll_directory = os.add_dll_directory
+def _safe_add_dll_directory(path):
+    try:
+        return _orig_add_dll_directory(path)
+    except OSError:
+        # Return a no-op context manager
+        ...
+os.add_dll_directory = _safe_add_dll_directory
 ```
 
-**原因**：PyTorch 2.6 把 `weights_only` 預設值改為 `True`，導致 Coqui TTS 的 checkpoint（包含自訂 Python 類別）無法載入。必須在任何模組 `import torch` 之前執行這個 patch。
+**問題 2 — torchaudio 2.10+ 移除 backend 系統**：torchaudio 2.10 直接使用 torchcodec 作為唯一後端，舊的 `_backend.utils` 路徑不存在。
 
-**千萬不要移動**：這段必須是 `main.py` 的最頂部，因為之後的 `from routers import api_tts` 會間接觸發 `tts_engine.py` 的 import，進而 import PyTorch。
-
-`tts_engine.py` 也有相同的 patch，是為了讓 `tts_engine.py` 能被單獨 import（例如測試時）。
-
-### 5.2 torchaudio 後端強制 soundfile（`main.py` 第 10-17 行）
-
+**修復**：直接 patch `torchaudio.load` 改用 soundfile：
 ```python
-import torchaudio as _ta
-from torchaudio._backend import utils as _ta_utils
-from torchaudio._backend.soundfile import SoundfileBackend as _SfB
-_ta_utils.get_available_backends.cache_clear()
-_ta_utils.get_available_backends = lambda: {"soundfile": _SfB}
+import soundfile as _sf
+def _patched_ta_load(uri, ...):
+    data, sr = _sf.read(str(uri), dtype="float32", ...)
+    return torch.from_numpy(data).unsqueeze(0), sr
+torchaudio.load = _patched_ta_load
 ```
 
-**原因**：Windows 上 torchaudio 的 torchcodec 後端（新版預設）在 XTTS v2 環境下會崩潰。強制覆蓋成只用 soundfile 後端即可正常。
+**問題 3 — F5-TTS 內建 ASR 觸發 torchcodec**：F5-TTS 的 `preprocess_ref_audio_text()` 使用 transformers pipeline 自動轉錄參考音訊，pipeline 內部 `import torchcodec` 又觸發同樣的崩潰。
 
-**注意**：這個 patch 使用了 torchaudio 的私有 API（`_backend.utils`），如果 torchaudio 版本升級，路徑可能改變，需要確認。
+**修復**：`_transcribe_ref_audio()` 函式使用 faster-whisper（已安裝用於 Whisper 頁籤）自行轉錄，再將結果傳入 `ref_text` 參數。
 
-### 5.3 Windows 非 ASCII 路徑問題
+**千萬不要移動**：這些 patch 必須在 `tts_engine.py` 的最頂部（docstring 之後立即執行），因為 `main.py` import `api_tts` 時會間接觸發 `tts_engine.py` 的 import。
 
-**問題**：libsndfile（XTTS v2 底層用來讀音訊的 C 函式庫）無法開啟路徑含中文/非 ASCII 字元的檔案。
+### 5.2 Windows 非 ASCII 路徑問題
 
-**解法**（`tts_engine.py` 的 `_clone_sync()` 函式）：
+**問題**：F5-TTS 底層無法開啟路徑含中文/非 ASCII 字元的檔案。
+
+**解法**（`tts_engine.py` 的 `_f5_clone_sync()` 函式）：
 ```python
 ext = os.path.splitext(reference_audio)[1]
-tmp_fd, tmp_ref = tempfile.mkstemp(suffix=ext, prefix="tts_ref_")
+tmp_fd, tmp_ref = tempfile.mkstemp(suffix=ext, prefix="f5_ref_")
 os.close(tmp_fd)
 shutil.copy2(reference_audio, tmp_ref)  # 複製到 ASCII 路徑
 # ... 用 tmp_ref 做 TTS ...
 os.remove(tmp_ref)  # finally block 中清理
 ```
 
-### 5.4 Edge-TTS 透過子程序呼叫
+### 5.3 Edge-TTS 透過子程序呼叫
 
 Edge-TTS 的 Python API 在 Windows 上直接 `await communicate.stream()` 時，中文文字若包含全形字元有時會產生亂碼。改用 subprocess + temp file 的方式：
 
@@ -361,7 +434,7 @@ env = os.environ.copy()  # 必須繼承環境（空環境下 asyncio 在 Windows
 result = subprocess.run(cmd, capture_output=True, text=True, env=env)
 ```
 
-### 5.5 `_emit_sync` — 從工作執行緒 emit Socket.IO
+### 5.4 `_emit_sync` — 從工作執行緒 emit Socket.IO
 
 FastAPI 的 BackgroundTasks 和 `asyncio.to_thread()` 執行的函式在工作執行緒中運行，無法直接 `await sio.emit()`。正確方式：
 
@@ -475,7 +548,7 @@ def _emit_sync(event: str, data: dict) -> None:
 | GET | `/api/v1/health` | 健康檢查（回傳服務狀態與主機資訊） |
 | GET | `/api/v1/status` | 取得佇列狀態、進度、log 緩衝 |
 | GET | `/api/v1/version` | 取得本機版本號 |
-| GET | `/api/v1/nas_version` | 取得 NAS 版本號 |
+| GET | `/api/v1/nas_version` | 從主控端 HTTP 取得最新版號（用於 OTA 版本比對） |
 | GET | `/api/settings/load` | 讀取 settings.json |
 | POST | `/api/settings/save` | 寫入 settings.json |
 | GET | `/api/v1/settings` | 取得設定（相容格式） |
@@ -492,11 +565,15 @@ def _emit_sync(event: str, data: dict) -> None:
 | GET | `/api/v1/utils/pick_file` | 彈出系統檔案選擇器 |
 | POST | `/api/v1/utils/create_shortcut` | 建立桌面捷徑 |
 | GET | `/api/v1/utils/resolve_drop` | 拖放路徑反向解析 |
+| POST | `/api/v1/validate_paths` | 驗證路徑磁碟機與目錄是否存在（遠端派發前驗證） |
 | POST | `/api/admin/restart` | 重啟 Agent 服務 |
-| GET | `/download_agent` | 下載 Originsun_Agent.zip |
+| GET | `/download_agent` | 下載 Originsun_Agent.zip（完整安裝包 ~1GB） |
+| GET | `/download_update` | 下載輕量 OTA 更新 ZIP（僅程式碼 ~200KB） |
+| GET | `/download_updater` | 下載獨立遷移用 bat（v1.7→v1.8 首次升級） |
 | GET | `/download_installer` | 下載安裝精靈 .bat |
+| GET | `/bootstrap.ps1` | 動態 PowerShell 腳本（一行指令完成升級） |
 
-### 7.8 TTS 語音合成（🚧 開發中，`routers/api_tts.py`）
+### 7.8 TTS 語音生成（`routers/api_tts.py`）
 
 **現況**：後端 API 和前端 UI 均已完成，但尚未接入任務佇列、Socket.IO 即時進度、完成通知。
 
@@ -509,12 +586,19 @@ def _emit_sync(event: str, data: dict) -> None:
 | GET | `/api/v1/tts/preview` | 串流預覽指定聲音 |
 | POST | `/api/v1/tts/estimate` | 估算 TTS 時長與字元速率 |
 
-#### 聲音克隆（XTTS v2）
+#### 聲音複製（F5-TTS）
 
 | 方法 | 路徑 | 說明 |
 |------|------|------|
-| POST | `/api/v1/tts_jobs/clone` | 從參考音訊克隆聲音合成 |
-| POST | `/api/v1/tts_jobs/profile` | 使用已儲存的聲音角色合成 |
+| POST | `/api/v1/tts_jobs/clone` | 從參考音訊克隆聲音合成（F5-TTS 零樣本） |
+| GET | `/api/v1/tts/f5_status` | 檢查 F5-TTS 套件是否已安裝 |
+
+#### 台灣正音字典
+
+| 方法 | 路徑 | 說明 |
+|------|------|------|
+| GET | `/api/v1/tts/dictionary` | 讀取 taiwan_dict.json（熱更新） |
+| POST | `/api/v1/tts/dictionary` | 更新 taiwan_dict.json（不需重啟） |
 
 #### 聲音角色管理
 
@@ -525,14 +609,34 @@ def _emit_sync(event: str, data: dict) -> None:
 | DELETE | `/api/v1/voice_profiles/{id}` | 刪除聲音角色 |
 | POST | `/api/v1/voice_profiles/{id}/cache` | 將 NAS 角色快取到本機 |
 
-#### XTTS 模型管理
+
+### 7.9 佇列管理 (`routers/api_queue.py`)
 
 | 方法 | 路徑 | 說明 |
 |------|------|------|
-| GET | `/api/v1/tts/xtts_status` | 檢查 XTTS v2 模型是否已下載 |
-| POST | `/api/v1/tts/xtts_download` | 觸發 XTTS v2 模型下載 |
+| GET | `/api/v1/queue` | 取得所有排隊中和執行中的任務 |
+| POST | `/api/v1/queue/reorder` | 重新排序佇列 |
+| POST | `/api/v1/queue/{job_id}/urgent` | 將任務設為緊急（排到最前） |
+| DELETE | `/api/v1/queue/{job_id}/urgent` | 取消任務的緊急狀態 |
 
-### 7.9 Pydantic Schema 完整清單 (`core/schemas.py`)
+### 7.11 機器管理 (`routers/api_agents.py`)
+
+| 方法 | 路徑 | 說明 |
+|------|------|------|
+| GET | `/api/v1/agents` | 列出所有機器（從 NAS agents.json 讀取） |
+| POST | `/api/v1/agents` | 新增機器 |
+| DELETE | `/api/v1/agents/{id}` | 移除機器 |
+
+### 7.13 任務歷史 (`routers/api_job_history.py`)
+
+| 方法 | 路徑 | 說明 |
+|------|------|------|
+| GET | `/api/v1/job_history` | 查詢歷史（支援 date/task_type/status/q 篩選） |
+| POST | `/api/v1/job_history` | 新增歷史紀錄（前端呼叫，自動去重） |
+| GET | `/api/v1/job_history/{job_id}/log` | 取得任務 Log 內容（512KB 上限） |
+| DELETE | `/api/v1/job_history` | 清除歷史（可指定日期） |
+
+### 7.12 Pydantic Schema 完整清單 (`core/schemas.py`)
 
 ```python
 class BackupRequest(BaseModel):
@@ -546,6 +650,17 @@ class BackupRequest(BaseModel):
     do_transcode: bool = True
     do_concat: bool = True
     do_report: bool = False
+    # Concat settings
+    concat_resolution: str = "720P"
+    concat_codec: str = "H.264 (NVENC)"
+    concat_burn_tc: bool = True
+    concat_burn_fn: bool = False
+    # Report settings
+    report_name: str = ""
+    report_output: str = ""
+    report_filmstrip: bool = True
+    report_techspec: bool = True
+    report_hash: bool = False
 
 class TranscodeRequest(BaseModel):
     task_type: str = "transcode"
@@ -625,6 +740,9 @@ class CompareSourceRequest(BaseModel):
     video_exts: List[str] = [".mov", ".mp4", ".mkv", ".mxf", ".avi", ".mts", ".m2ts", ".r3d", ".braw"]
     proxy_exts: List[str] = [".mov", ".mp4"]
     flat_proxy: bool = False
+
+class ValidatePathsRequest(BaseModel):
+    paths: List[str]
 ```
 
 ---
@@ -636,10 +754,12 @@ class CompareSourceRequest(BaseModel):
 2. 檢查 Port 8000 是否被佔用。
 3. 如果是在遠端 IP 存取，確保同事電腦也有安裝並運行 Agent（瀏覽器會嘗試 fetch `localhost:8000`）。
 
-### Q2: 語音克隆 (XTTS) 突然無法運作
-1. 確認 `models/xtts_v2` 目錄下是否有內容。
-2. 檢查是否有顯存 (VRAM) 溢出。
-3. 檢查環境變數 `COQUI_TOS_AGREED` 是否設為 `1`。
+### Q2: 語音克隆 (F5-TTS) 無法運作
+1. 確認 `pip install f5-tts` 是否已執行。
+2. 檢查 `GET /api/v1/tts/f5_status` 回傳 `{"available":true}`。
+3. 首次執行會自動從 HuggingFace 下載模型 (~1.2GB)，需等待。
+4. CPU 推論速度很慢（約 19 分鐘/句），建議使用 CUDA GPU。
+5. 若出現 `[WinError 87]`，確認 `tts_engine.py` 頂部的 torchcodec patch 存在。
 
 ### Q3: 影片轉檔失敗 (FFmpeg Error)
 1. 檢查 `ffmpeg.exe` 是否存在於專案根目錄。
@@ -669,6 +789,14 @@ class CompareSourceRequest(BaseModel):
 
 ## 10. 未來規劃 (Roadmap)
 
+- [x] **TTS 引擎升級**：XTTS v2 (Coqui) → F5-TTS（零樣本聲音複製）
+- [x] **台灣正音引擎**：JSON 字典驅動的文字預處理（vocab_mapping + pronunciation_hacks）
+- [x] **TTS 前端三子頁**：標準 TTS / 聲音複製 / 正音字典編輯器
+- [x] **正音字典 API**：GET/POST `/api/v1/tts/dictionary`，支援熱更新
+- [x] **純 HTTP OTA 更新**：移除 NAS SMB 依賴，Agent 從主控端 HTTP 下載輕量更新 ZIP（~200KB）+ 更新防卡死
 - [ ] **TTS 整合完善**：接入任務佇列、Socket.IO 即時進度、完成通知、SRT 批次合成
-- [ ] **多節點分派最佳化**：目前的 `compute_hosts` 僅能手動指定，未來希望實作基於負載的主動分派
+- [x] **運算主機合併至機器狀態**：NAS 共享 agents.json，各 TAB host checkbox 即時同步
+- [x] **機器狀態即時監控**：綠燈脈衝 / 紅燈離線 / 橘燈慢 + CPU 顯示 + 版本號
+- [x] **開機自動啟動**：Windows Startup 捷徑 + `start_hidden.vbs`
+- [x] **書籤 + 排程系統**：儲存常用設定、cron 定時排程、排程中 badge
 - [ ] **行動端適配**：目前 UI 針對大螢幕優化，行動端排版仍需加強

@@ -1,0 +1,77 @@
+name: Tests
+
+on:
+  push:
+    branches: [main, dev]
+  pull_request:
+    branches: [main, dev]
+
+jobs:
+  unit-and-integration:
+    runs-on: ubuntu-latest
+    env:
+      MOCK_FFMPEG: "1"
+      MOCK_NAS: "1"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install deps
+        run: |
+          pip install pytest pytest-asyncio pytest-mock httpx pytest-cov playwright
+          playwright install chromium
+      - name: Unit tests
+        run: pytest tests/unit -v --tb=short
+      - name: Integration tests
+        run: pytest tests/integration -v --tb=short
+
+  smoke:
+    runs-on: ubuntu-latest
+    needs: unit-and-integration
+    env:
+      MOCK_FFMPEG: "1"
+      MOCK_NAS: "1"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install deps
+        run: pip install pytest httpx uvicorn fastapi python-socketio
+      - name: Start server
+        run: |
+          uvicorn main:io_app --host 0.0.0.0 --port 18000 &
+          sleep 8
+      - name: Smoke tests
+        run: pytest -m smoke -v --tb=short
+
+  e2e:
+    runs-on: ubuntu-latest
+    needs: smoke
+    if: github.event_name == 'pull_request'
+    env:
+      MOCK_FFMPEG: "1"
+      MOCK_NAS: "1"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install deps
+        run: |
+          pip install pytest playwright httpx
+          playwright install chromium --with-deps
+      - name: Start server
+        run: |
+          uvicorn main:io_app --host 0.0.0.0 --port 18000 &
+          sleep 8
+      - name: E2E tests
+        run: pytest -m e2e -v --tb=short
+      - name: Upload screenshots on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-screenshots
+          path: tests/e2e/screenshots/
+          retention-days: 7

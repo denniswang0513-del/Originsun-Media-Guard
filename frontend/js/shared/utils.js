@@ -3,7 +3,7 @@
 
 export function getComputeBaseUrl() {
     const mode = document.getElementById('compute_mode')?.value;
-    return (mode === 'local' && window.localAgentActive) ? 'http://localhost:8000' : '';
+    return (mode === 'local' && window.localAgentActive) ? 'http://127.0.0.1:8000' : '';
 }
 
 export function getAgentBaseUrl() {
@@ -63,12 +63,12 @@ export function appendLog(msg, type = 'info') {
         terminalVerbose.scrollTop = 0;
     }
 
-    if (terminal && (type === 'error' || type === 'system' || type === 'info')) {
+    // 左欄「任務摘要」：只顯示關鍵訊息（system + error）
+    if (terminal && (type === 'error' || type === 'system')) {
         const divLeft = document.createElement('div');
         divLeft.textContent = formattedText;
         if (type === 'error') divLeft.className = 'text-red-400 mt-1 mb-1';
-        else if (type === 'system') divLeft.className = 'text-yellow-400 font-bold mt-1 mb-1';
-        else divLeft.className = 'text-gray-300 mb-0.5';
+        else divLeft.className = 'text-yellow-400 font-bold mt-1 mb-1';
         terminal.prepend(divLeft);
         terminal.scrollTop = 0;
     }
@@ -104,27 +104,307 @@ export async function pickPath(inputId, type = 'folder') {
 }
 
 export function resetProgress() {
-    ['seg_backup', 'seg_trans', 'seg_concat', 'seg_report'].forEach(id => {
+    // ── Backup TAB (four-segment) ──
+    // 根據勾選狀態決定哪些段要顯示
+    const _chkTrans = document.getElementById('chk_transcode')?.checked ?? false;
+    const _chkConcat = document.getElementById('chk_concat')?.checked ?? false;
+    const _chkReport = (document.getElementById('chk_report')?.checked ?? false) || !!window._backupReportPending;
+
+    ['bk-seg-backup', 'bk-seg-trans', 'bk-seg-concat', 'bk-seg-report'].forEach(id => {
         const el = document.getElementById(id);
-        if (el) el.style.width = '0%';
+        if (!el) return;
+        el.style.width = '0%';
+        // 根據勾選狀態顯示/隱藏
+        if (id === 'bk-seg-trans') el.classList.toggle('hidden', !_chkTrans);
+        else if (id === 'bk-seg-concat') el.classList.toggle('hidden', !_chkConcat);
+        else if (id === 'bk-seg-report') el.classList.toggle('hidden', !_chkReport);
     });
-    ['lbl_backup', 'lbl_trans', 'lbl_concat', 'lbl_report'].forEach(id => {
+    ['bk-lbl-backup', 'bk-lbl-trans', 'bk-lbl-concat', 'bk-lbl-report'].forEach(id => {
         const el = document.getElementById(id);
         if (el) el.textContent = '0%';
     });
-    const progLabel = document.getElementById('prog_label');
-    const progEta = document.getElementById('prog_eta');
-    if (progLabel) progLabel.textContent = '等待開始...';
-    if (progEta) progEta.textContent = '';
-    
+    // 圖例也根據勾選狀態
+    const legendContainer = document.querySelector('#bk-progress .flex.gap-4');
+    if (legendContainer) {
+        const legends = legendContainer.children;
+        if (legends[1]) legends[1].classList.toggle('hidden', !_chkTrans);
+        if (legends[2]) legends[2].classList.toggle('hidden', !_chkConcat);
+    }
+    document.getElementById('bk-legend-report')?.classList.toggle('hidden', !_chkReport);
+    const bkLabel = document.getElementById('bk-prog-label');
+    if (bkLabel) bkLabel.textContent = '進度：尚未開始';
+    const bkEta = document.getElementById('bk-prog-eta');
+    if (bkEta) bkEta.textContent = '';
+    document.getElementById('bk-progress')?.classList.add('hidden');
+
+    // ── Standalone TABs (single bar) ──
+    ['vf', 'tc', 'ct'].forEach(prefix => {
+        const bar = document.getElementById(prefix + '-prog-bar');
+        if (bar) bar.style.width = '0%';
+        const lbl = document.getElementById(prefix + '-prog-label');
+        if (lbl) lbl.textContent = '進度：尚未開始';
+        const eta = document.getElementById(prefix + '-prog-eta');
+        if (eta) eta.textContent = '';
+        const detail = document.getElementById(prefix + '-prog-detail');
+        if (detail) detail.textContent = '';
+        document.getElementById(prefix + '-progress')?.classList.add('hidden');
+    });
+
+    // ── Report TAB (four-segment) ──
+    ['rp-seg-scan', 'rp-seg-meta', 'rp-seg-strip', 'rp-seg-render'].forEach(id => {
+        const el = document.getElementById(id);
+        if (el) el.style.width = '0%';
+    });
+    ['rp-lbl-scan', 'rp-lbl-meta', 'rp-lbl-strip', 'rp-lbl-render'].forEach(id => {
+        const el = document.getElementById(id);
+        if (el) el.textContent = '0%';
+    });
+    const rpLabel = document.getElementById('rp-prog-label');
+    if (rpLabel) rpLabel.textContent = '備用中...';
+    document.getElementById('rp-progress')?.classList.add('hidden');
+
+    // ── Transcribe TAB ──
+    const trBar = document.getElementById('transcribe_prog_bar');
+    if (trBar) { trBar.style.width = '0%'; trBar.style.background = ''; }
+    const trLabel = document.getElementById('transcribe_prog_label');
+    if (trLabel) trLabel.textContent = '';
+    const trPct = document.getElementById('transcribe_prog_pct');
+    if (trPct) trPct.textContent = '0%';
+
+    // ── TTS TABs ──
+    ['tts_progress_area', 'tts_clone_progress_area'].forEach(id => {
+        const el = document.getElementById(id);
+        if (el) el.classList.add('hidden');
+    });
+    ['tts_prog_bar', 'tts_clone_prog_bar'].forEach(id => {
+        const el = document.getElementById(id);
+        if (el) { el.style.width = '0%'; el.style.background = ''; el.classList.remove('animate-pulse'); }
+    });
+    ['tts_prog_label', 'tts_clone_prog_label'].forEach(id => {
+        const el = document.getElementById(id);
+        if (el) el.textContent = '';
+    });
+    ['tts_prog_pct', 'tts_clone_prog_pct'].forEach(id => {
+        const el = document.getElementById(id);
+        if (el) el.textContent = '0%';
+    });
+
+    // ── Re-enable all disabled submit buttons ──
+    document.querySelectorAll('button.opacity-50.cursor-not-allowed').forEach(btn => {
+        btn.disabled = false;
+        btn.classList.remove('opacity-50', 'cursor-not-allowed');
+    });
+
+    // ── Shared controls ──
     const btnReport = document.getElementById('btn_open_report');
     if (btnReport) btnReport.style.display = 'none';
-    
-    document.getElementById('remote_hosts_progress')?.classList.add('hidden');
+
+    // ── Remote host progress ──
+    ['bk', 'tc', 'ct'].forEach(p => document.getElementById(p + '-remote-hosts-progress')?.classList.add('hidden'));
+    // 也隱藏所有「遠端主機進度」面板（各 TAB 共用 class）
+    document.querySelectorAll('[id$="-remote-hosts-progress"]').forEach(el => el.classList.add('hidden'));
     if (window._heartbeatTimer) clearInterval(window._heartbeatTimer);
+    window._remoteDispatching = false;
+
+    // 不清除 _activeJobTab / _backupPipeline / _backupReportPending
+    // — 備份流程中子任務（轉檔/串帶/報表）的 running 事件會觸發 resetProgress，
+    //   但 pipeline 和 reportPending 在整個流程完成前都需要保留
+    window._backupFinalShown = false;
 }
 
+// ── 共用主機選擇模組 ──
+
+/**
+ * 將 compute_hosts 渲染為 checkbox 到指定容器。
+ * @param {string} containerId - 容器 DOM id
+ * @param {object} [opts] - 選項
+ * @param {boolean} [opts.includeLocal=true] - 是否包含「本機」選項
+ * @param {boolean} [opts.localChecked=true] - 「本機」預設勾選
+ * @param {string}  [opts.idPrefix] - checkbox id 前綴（避免多個選擇器 id 衝突），預設為 containerId
+ */
+// 格式化 IP：去掉 port（:8000）
+function _displayIp(ip) {
+    if (!ip || ip === 'local') return '';
+    return ip.replace(/:\d+$/, '');
+}
+
+// 狀態燈 HTML
+function _dotHtml(ip) {
+    const dotId = 'host-dot-' + (ip || 'local').replace(/[.:]/g, '_');
+    return `<span id="${dotId}" class="host-status-dot" style="width:8px;height:8px;border-radius:50%;display:inline-block;background:#555;flex-shrink:0;"></span>`;
+}
+
+// 偵測本機 IP（從 window.location 或 /api/v1/health）
+let _localIp = null;
+async function _detectLocalIp() {
+    if (_localIp) return _localIp;
+    const hostname = window.location.hostname;
+    if (hostname && hostname !== 'localhost' && hostname !== '127.0.0.1') {
+        _localIp = hostname;
+        return _localIp;
+    }
+    try {
+        const r = await fetch('/api/v1/health', { signal: AbortSignal.timeout(3000) });
+        const d = await r.json();
+        // 從 agents 中找匹配 hostname 的
+        const hosts = window._computeHosts || [];
+        for (const h of hosts) {
+            try {
+                const hr = await fetch('http://' + h.ip + '/api/v1/health', { signal: AbortSignal.timeout(2000) });
+                const hd = await hr.json();
+                if (hd.hostname === d.hostname) { _localIp = h.ip; return _localIp; }
+            } catch {}
+        }
+    } catch {}
+    _localIp = 'localhost';
+    return _localIp;
+}
+
+// 判斷 agent IP 是否為本機
+function _isLocalHost(agentIp) {
+    if (!agentIp || agentIp === 'local') return true;
+    const ip = agentIp.replace(/:\d+$/, '');
+    const local = (_localIp || '').replace(/:\d+$/, '');
+    const hostname = window.location.hostname;
+    return ip === local
+        || ip === hostname
+        || (hostname === 'localhost' && ip === '127.0.0.1')
+        || (hostname === '127.0.0.1' && ip === 'localhost');
+}
+
+// 頁面載入時立即偵測本機 IP
+_detectLocalIp();
+
+// 偵測所有主機連線狀態，更新狀態燈
+let _hostHealthTimer = null;
+async function _checkHostHealth() {
+    const hosts = window._computeHosts || [];
+    for (const h of hosts) {
+        const dotId = 'host-dot-' + (h.ip || '').replace(/[.:]/g, '_');
+        const dots = document.querySelectorAll(`[id="${dotId}"]`);
+        try {
+            const r = await fetch('http://' + h.ip + '/api/v1/health', { signal: AbortSignal.timeout(3000) });
+            if (r.ok) {
+                dots.forEach(el => { el.style.background = '#22c55e'; el.style.boxShadow = '0 0 4px #22c55e'; });
+            } else {
+                dots.forEach(el => { el.style.background = '#ef4444'; el.style.boxShadow = 'none'; });
+            }
+        } catch {
+            dots.forEach(el => { el.style.background = '#ef4444'; el.style.boxShadow = 'none'; });
+        }
+    }
+}
+
+function _startHostHealthPolling() {
+    if (_hostHealthTimer) return;
+    _detectLocalIp().then(() => _checkHostHealth()); // 先偵測本機 IP 再檢查健康
+    _hostHealthTimer = setInterval(_checkHostHealth, 30000); // 每 30 秒
+}
+
+export function renderHostCheckboxes(containerId, opts = {}) {
+    const container = document.getElementById(containerId);
+    if (!container) return;
+    const hosts = window._computeHosts || [];
+    if (!hosts.length) {
+        container.closest('.pj-sch-sub-panel, [id$="_host_panel"], [id$="host_selector_panel"]')
+            ?.style.setProperty('display', 'none');
+        return;
+    }
+    if (container.dataset.built) return; // 避免重複渲染清除勾選
+
+    const prefix = opts.idPrefix || containerId;
+    container.innerHTML = '';
+
+    hosts.forEach((h, i) => {
+        const isLocal = _isLocalHost(h.ip);
+        const lbl = document.createElement('label');
+        lbl.className = 'flex items-center gap-1 text-xs text-gray-300 cursor-pointer';
+        const localTag = isLocal ? '<span class="text-green-400 text-[10px]">(本機)</span>' : '';
+        lbl.innerHTML = `<input type="checkbox" id="${prefix}_${i}" data-ip="${h.ip}" data-name="${h.name}" ${isLocal ? 'checked' : ''} class="form-checkbox rounded bg-[#1e1e1e] border-[#444]"> ${_dotHtml(h.ip)} ${h.name} <span class="text-gray-500">(${_displayIp(h.ip)})</span>${localTag}`;
+        container.appendChild(lbl);
+    });
+    container.dataset.built = '1';
+    _startHostHealthPolling();
+}
+
+/**
+ * 收集容器內勾選的主機。
+ * @param {string} containerId - 容器 DOM id
+ * @returns {Array<{name: string, ip: string}>}
+ */
+export function collectSelectedHosts(containerId) {
+    const container = document.getElementById(containerId);
+    if (!container) return [];
+    const result = [];
+    container.querySelectorAll('input[type="checkbox"]:checked').forEach(chk => {
+        const ip = chk.dataset.ip;
+        const name = chk.dataset.name;
+        if (ip && name) {
+            // 本機 agent 用 'local' 標記（和原本邏輯相容）
+            const isLocal = _isLocalHost(ip);
+            result.push({ name, ip: isLocal ? 'local' : ip });
+        }
+    });
+    return result;
+}
+
+// 單選版本（radio）— 用於只在一台主機執行的 TAB
+export function renderHostRadios(containerId, opts = {}) {
+    const container = document.getElementById(containerId);
+    if (!container) return;
+    const hosts = window._computeHosts || [];
+    if (!hosts.length) {
+        container.closest('.pj-sch-sub-panel, [id$="_host_panel"], [id$="host_selector_panel"]')
+            ?.style.setProperty('display', 'none');
+        return;
+    }
+    if (container.dataset.built) return;
+
+    const prefix = opts.idPrefix || containerId;
+    const groupName = prefix + '_radio';
+    container.innerHTML = '';
+    let hasChecked = false;
+
+    hosts.forEach((h, i) => {
+        const isLocal = _isLocalHost(h.ip);
+        const shouldCheck = isLocal && !hasChecked;
+        if (shouldCheck) hasChecked = true;
+        const lbl = document.createElement('label');
+        lbl.className = 'flex items-center gap-1 text-xs text-gray-300 cursor-pointer';
+        const localTag = isLocal ? '<span class="text-green-400 text-[10px]">(本機)</span>' : '';
+        lbl.innerHTML = `<input type="radio" name="${groupName}" id="${prefix}_${i}" data-ip="${h.ip}" data-name="${h.name}" ${shouldCheck ? 'checked' : ''} class="form-radio bg-[#1e1e1e] border-[#444]"> ${_dotHtml(h.ip)} ${h.name} <span class="text-gray-500">(${_displayIp(h.ip)})</span>${localTag}`;
+        container.appendChild(lbl);
+    });
+    // 如果沒有匹配的本機，預設勾第一個
+    if (!hasChecked) {
+        const first = container.querySelector('input[type="radio"]');
+        if (first) first.checked = true;
+    }
+    container.dataset.built = '1';
+    _startHostHealthPolling();
+}
+
+export function collectSelectedHost(containerId) {
+    const container = document.getElementById(containerId);
+    if (!container) return { name: '本機', ip: 'local' };
+    const checked = container.querySelector('input[type="radio"]:checked');
+    if (checked) {
+        const ip = checked.dataset.ip;
+        const name = checked.dataset.name;
+        // 本機 agent 回傳 ip='local' 供後續判斷
+        const isLocal = _isLocalHost(ip);
+        return { name, ip: isLocal ? 'local' : ip };
+    }
+    return { name: '本機', ip: 'local' };
+}
+
+window.renderHostCheckboxes = renderHostCheckboxes;
+window.collectSelectedHosts = collectSelectedHosts;
+window.renderHostRadios = renderHostRadios;
+window.collectSelectedHost = collectSelectedHost;
+
 // Make accessible to global scope if needed during transition
+window.resolveDropPath = resolveDropPath;
 window.appendLog = appendLog;
 window.pickPath = pickPath;
 window.getComputeBaseUrl = getComputeBaseUrl;
@@ -135,15 +415,21 @@ export function addStandaloneSource(listId, defaultPath = '') {
     if (!container) return;
     const row = document.createElement('div');
     row.className = 'flex gap-2 items-center';
+    const inputId = 'standalone_src_' + Date.now() + '_' + Math.random().toString(36).slice(2, 6);
     row.innerHTML = `
-        <input type="text" class="flex-1 bg-[#2a2a2a] border border-[#555] rounded px-2 py-1 text-sm focus:border-blue-500" value="${defaultPath}" placeholder="檔案絕對路徑...">
+        <input type="text" id="${inputId}" class="flex-1 bg-[#2a2a2a] border border-[#555] rounded px-2 py-1 text-sm focus:border-blue-500" value="${defaultPath}" placeholder="檔案絕對路徑...">
+        <button type="button" class="btn-pick-file text-gray-400 hover:text-white bg-[#333] hover:bg-[#444] border border-[#555] px-2 py-1 rounded text-sm" title="選擇檔案">📁</button>
         <button type="button" class="btn-remove-row text-red-400 hover:text-red-300 font-bold px-2 rounded">X</button>
     `;
     container.appendChild(row);
 
+    row.querySelector('.btn-pick-file').addEventListener('click', function() {
+        pickPath(inputId, 'file');
+    });
     row.querySelector('.btn-remove-row').addEventListener('click', function() {
         row.remove();
     });
+    return inputId;
 }
 window.addStandaloneSource = addStandaloneSource;
 
@@ -173,6 +459,26 @@ export function setupInputDrop(inputId) {
         if (path) el.value = path;
     });
 }
+
+export async function validateRemotePaths(hostIp, paths) {
+    const url = 'http://' + hostIp + '/api/v1/validate_paths';
+    const res = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ paths })
+    });
+    const data = await res.json();
+    const errors = [];
+    for (const [path, info] of Object.entries(data.results)) {
+        if (!info.drive_exists) {
+            errors.push(`磁碟機 ${info.drive} 不存在`);
+        } else if (!info.path_exists) {
+            errors.push(`路徑不存在: ${path}`);
+        }
+    }
+    return errors.length ? { ok: false, errors } : { ok: true };
+}
+window.validateRemotePaths = validateRemotePaths;
 
 export function setupDragAndDrop(containerId, addRowFunc) {
     const container = document.getElementById(containerId);

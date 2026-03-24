@@ -1,40 +1,22 @@
 <div class="flex flex-col gap-4">
 
-  <!-- Header Notice -->
-  <div class="bg-amber-900 border border-amber-600 rounded-lg px-4 py-2 flex items-center gap-2 text-amber-200 text-sm">
-    🚧 <strong>語音合成功能開發中</strong> — 部分功能可能尚未完整，請謹慎使用。
+  <!-- Sub-Tab Navigation -->
+  <div class="modal-tabs" style="border-radius: 8px 8px 0 0;">
+    <button class="tab-btn active" onclick="switchTtsSubTab('standard', event)">📢 標準 TTS</button>
+    <button class="tab-btn" onclick="switchTtsSubTab('clone', event)">🎙️ 聲音複製</button>
+    <button class="tab-btn" onclick="switchTtsSubTab('dict', event)">📖 正音字典</button>
   </div>
 
-  <!-- Mode Tabs -->
-  <div class="flex gap-2 border-b border-[#444]">
-    <button id="tts_mode_btn_standard" onclick="setTtsMode('standard')"
-      class="tts-mode-btn active-mode px-4 py-2 text-sm font-semibold text-white border-b-2 border-blue-500 transition-colors">
-      標準 TTS
-    </button>
-    <button id="tts_mode_btn_xtts" onclick="setTtsMode('xtts')"
-      class="tts-mode-btn px-4 py-2 text-sm font-semibold text-gray-400 hover:text-white border-b-2 border-transparent transition-colors">
-      聲音克隆 (開發中)
-    </button>
-  </div>
-
-  <!-- XTTS Model Status Banner (shown only for Clone/Library modes) -->
-  <div id="xtts_status_banner" class="hidden bg-[#1a2a3a] border border-[#2e4a6e] rounded-lg px-4 py-3 flex items-center justify-between text-sm">
-    <span id="xtts_status_text" class="text-gray-300">正在檢查 XTTS v2 模型狀態...</span>
-    <button id="btn_download_xtts" onclick="downloadXttsModel()"
-      class="hidden bg-blue-700 hover:bg-blue-600 text-white text-xs font-bold py-1 px-3 rounded transition-colors">
-      下載模型 (~2GB)
-    </button>
-  </div>
-
-  <!-- === STANDARD TTS MODE === -->
-  <div id="tts_panel_standard">
-    <!-- Row 1: Filters -->
+  <!-- ════════════════════════════════════════════════════════ -->
+  <!-- SUB-TAB 1: Standard TTS (Edge-TTS)                     -->
+  <!-- ════════════════════════════════════════════════════════ -->
+  <div id="tts_sub_standard" class="tts-subtab">
+    <!-- Filters -->
     <div class="grid grid-cols-3 gap-3 mb-2 px-3 py-2 bg-[#1a1a1a] border border-[#333] rounded-lg">
       <div>
         <label class="block text-[10px] text-gray-500 mb-1 uppercase tracking-wider">語系 Language</label>
         <select id="tts_filter_lang" onchange="updateTtsFilterRegions(); updateTtsVoices();"
           class="w-full bg-[#252525] border border-[#3a3a3a] rounded px-2 py-1.5 text-sm text-white focus:border-blue-500 focus:outline-none">
-          <!-- JS populated -->
         </select>
       </div>
       <div>
@@ -55,9 +37,8 @@
       </div>
     </div>
 
-    <!-- Row 2: Voice selector + preview + sliders -->
+    <!-- Voice selector + preview + sliders -->
     <div class="px-3 py-3 bg-[#1a1a1a] border border-[#333] rounded-lg space-y-3">
-      <!-- Voice -->
       <div class="flex items-center gap-2">
         <label class="text-[10px] text-gray-500 uppercase tracking-wider shrink-0 w-20">聲音 Voice</label>
         <select id="tts_voice"
@@ -68,8 +49,6 @@
           class="shrink-0 bg-blue-800 hover:bg-blue-700 text-white px-3 py-1.5 rounded text-sm border border-blue-700 transition-colors"
           title="試聽此聲音">試聽</button>
       </div>
-
-      <!-- Speed -->
       <div class="flex items-center gap-3">
         <label class="text-[10px] text-gray-500 uppercase tracking-wider shrink-0 w-20">語速 Speed</label>
         <input type="range" id="tts_rate" min="-50" max="50" value="0" step="5"
@@ -77,8 +56,6 @@
           class="flex-1 accent-blue-500 h-1.5">
         <span id="tts_rate_label" class="text-xs text-blue-300 font-mono w-10 text-right">+0%</span>
       </div>
-
-      <!-- Pitch -->
       <div class="flex items-center gap-3">
         <label class="text-[10px] text-gray-500 uppercase tracking-wider shrink-0 w-20">音高 Pitch</label>
         <input type="range" id="tts_pitch" min="-10" max="10" value="0" step="1"
@@ -87,17 +64,106 @@
         <span id="tts_pitch_label" class="text-xs text-blue-300 font-mono w-10 text-right">+0Hz</span>
       </div>
     </div>
+
+    <!-- Taiwan normalizer toggle -->
+    <div class="flex items-center gap-3 px-3 py-2 bg-[#1a2a1a] border border-[#3a6a3a] rounded-lg">
+      <input type="checkbox" id="tts_taiwan_normalize" checked class="accent-green-500 w-4 h-4">
+      <label for="tts_taiwan_normalize" class="text-sm text-green-300 cursor-pointer">啟用台灣正音引擎</label>
+      <span class="text-[10px] text-gray-500">（自動將大陸用語轉為台灣用語 + 發音校正）</span>
+    </div>
+
+    <!-- Text Input -->
+    <div>
+      <label class="block text-xs text-gray-400 mb-1">生成文字 <span class="text-gray-600">（或拖曳 .txt 檔）</span></label>
+      <textarea id="tts_text_input" rows="6" placeholder="在此輸入要轉換為語音的文字..."
+        class="w-full bg-[#1e1e1e] border border-[#555] rounded px-3 py-2 text-sm focus:border-blue-500 resize-y font-sans"></textarea>
+      <div class="flex items-center justify-between mt-1 text-xs text-gray-500 bg-[#1a1a1a] rounded px-3 py-1.5 border-t border-[#333]">
+        <div class="flex items-center space-x-4">
+          <span>字數: <span id="tts_char_count" class="font-mono text-gray-300">0</span></span>
+          <span class="text-gray-600">|</span>
+          <span>時長: <strong id="tts_est_duration" class="font-mono text-blue-300">--:--.-</strong></span>
+          <span class="text-gray-600">|</span>
+          <span>速律: <span id="tts_est_rate" class="font-mono text-purple-300">-.- 字/秒</span></span>
+        </div>
+        <button onclick="calculateTtsDuration()" id="tts_calc_btn" class="bg-[#2d3748] hover:bg-[#4a5568] text-gray-300 py-1 px-3 rounded border border-[#4a5568] transition-colors flex items-center gap-1.5 focus:outline-none">
+          <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
+          計算音檔時長
+        </button>
+      </div>
+    </div>
+
+    <!-- Output Settings -->
+    <div class="grid grid-cols-2 gap-4">
+      <div>
+        <label class="block text-xs text-gray-400 mb-1">輸出目錄</label>
+        <div class="flex gap-1">
+          <input type="text" id="tts_output_dir" placeholder="輸出資料夾目錄"
+            class="flex-1 bg-[#1e1e1e] border border-[#555] rounded px-2 py-1.5 text-sm focus:border-blue-500">
+          <button onclick="pickTtsOutputDir()" class="bg-[#333] hover:bg-[#444] px-3 font-bold rounded border border-[#555] text-gray-300 transition-colors">📂</button>
+        </div>
+      </div>
+      <div>
+        <label class="block text-xs text-gray-400 mb-1">輸出檔名</label>
+        <input type="text" id="tts_output_name" placeholder="output（不含副檔名）"
+          class="w-full bg-[#1e1e1e] border border-[#555] rounded px-2 py-1.5 text-sm focus:border-blue-500">
+      </div>
+    </div>
+
+    <!-- Host Selector -->
+    <div id="tts_host_panel" class="hidden mt-2 p-3 bg-[#1a2a3a] border border-[#2e4a6e] rounded-lg">
+      <div class="text-xs text-blue-300 font-semibold mb-2">處理主機</div>
+      <div id="tts_host_checkboxes" class="flex flex-wrap gap-x-4 gap-y-1"></div>
+    </div>
+
+    <div class="mt-6 border-t border-[#3a3a3a] pt-4">
+    <div class="flex justify-between items-center" id="tts-action-bar">
+      <div class="flex gap-2 tab-control-btns hidden">
+        <button onclick="apiControl('pause')" class="bg-[#7a5500] hover:bg-[#b07a00] text-white text-xs font-bold py-2 px-4 rounded shadow transition-colors">暫停</button>
+        <button onclick="apiControl('resume')" class="bg-[#3a5a3a] hover:bg-[#4a7a4a] text-white text-xs font-bold py-2 px-4 rounded shadow transition-colors">繼續</button>
+        <button onclick="apiControl('stop')" class="bg-[#8b0000] hover:bg-[#cc2200] text-white text-xs font-bold py-2 px-4 rounded shadow transition-colors">強制中止</button>
+      </div>
+      <div class="flex gap-3 ml-auto">
+        <button onclick="scheduleJob('tts')" class="bg-[#333] hover:bg-[#444] text-gray-300 font-bold py-2 px-6 rounded shadow text-sm transition-colors border border-[#555]">排程</button>
+        <button id="btn_start_tts" class="tab-start-btn bg-blue-700 hover:bg-blue-600 text-white font-bold py-2 px-6 rounded shadow transition-colors"
+          onclick="submitTtsJob()" data-idle-text="開始" data-busy-text="開始新佇列">開始</button>
+      </div>
+    </div>
+    <div id="tts_progress_area" class="hidden mt-4 p-4 bg-[#1e1e1e] border border-[#333] rounded-lg">
+      <div class="flex justify-between text-xs text-gray-400 mb-1">
+        <span id="tts_prog_label">準備中...</span>
+        <span id="tts_prog_pct">0%</span>
+      </div>
+      <div class="w-full bg-[#2a2a2a] rounded-full h-3 border border-[#444] overflow-hidden">
+        <div id="tts_prog_bar" class="h-3 rounded-full transition-all duration-300" style="width: 0%; background: linear-gradient(90deg, #3b82f6, #60a5fa);"></div>
+      </div>
+    </div>
+    <div id="tts-remote-hosts-progress" class="hidden mt-2 mb-2 p-3 bg-[#1a1a2e] border border-[#2e3a6e] rounded-lg">
+      <div class="text-xs text-blue-300 mb-2 font-semibold">🖥️ 遠端主機進度</div>
+      <div id="tts-remote-host-rows" class="flex flex-col gap-2"></div>
+    </div>
+    </div>
   </div>
 
+  <!-- ════════════════════════════════════════════════════════ -->
+  <!-- SUB-TAB 2: Voice Clone (F5-TTS)                        -->
+  <!-- ════════════════════════════════════════════════════════ -->
+  <div id="tts_sub_clone" class="tts-subtab hidden">
 
-  <!-- === XTTS CLONE & LIBRARY MODE === -->
-  <div id="tts_panel_xtts" class="hidden">
+    <!-- F5-TTS status -->
+    <div id="f5_status_banner" class="flex items-center justify-between text-xs mb-3 px-1">
+      <span id="f5_status_text" class="text-gray-600">正在檢查 F5-TTS 狀態...</span>
+      <div class="flex gap-2">
+        <button id="btn_f5_download" class="hidden bg-orange-600 hover:bg-orange-500 text-white text-xs px-3 py-1 rounded" onclick="window.downloadF5Model()">⬇️ 下載模型</button>
+        <button id="btn_f5_install" class="hidden bg-blue-600 hover:bg-blue-500 text-white text-xs px-3 py-1 rounded" onclick="window.installF5Package()">📦 安裝套件</button>
+      </div>
+    </div>
+
     <div class="grid grid-cols-2 gap-4 mb-4">
-      
-      <!-- LEFT: NAS Library List -->
+
+      <!-- LEFT: NAS Library -->
       <div class="flex flex-col bg-[#1a1a1a] border border-[#333] rounded-lg p-3">
         <h3 class="text-xs font-bold text-gray-400 uppercase tracking-wider mb-2 border-b border-[#333] pb-1">聲音庫 (NAS)</h3>
-        <p class="text-[10px] text-gray-500 mb-2 leading-relaxed">選擇已建立的角色進行合成。建立新角色請點擊下方按鈕，直接儲存至 NAS。</p>
+        <p class="text-[10px] text-gray-500 mb-2 leading-relaxed">選擇已建立的角色進行生成。</p>
         <div id="tts_library_list" class="flex-grow overflow-auto h-40 space-y-1 mb-2 pr-1 custom-scrollbar">
           <p class="text-gray-500 text-xs text-center py-4">正在從 NAS 載入聲音庫...</p>
         </div>
@@ -106,101 +172,169 @@
         </button>
       </div>
 
-      <!-- RIGHT: Voice Clone / Temporary Dropzone -->
+      <!-- RIGHT: Reference Audio -->
       <div class="flex flex-col bg-[#1a1a1a] border border-[#333] rounded-lg p-3">
-        <h3 class="text-xs font-bold text-gray-400 uppercase tracking-wider mb-2 border-b border-[#333] pb-1">臨時克隆區</h3>
-        <p class="text-[10px] text-gray-500 mb-2 leading-relaxed">不想存入資料庫？請將短音檔拖曳至此，進行單次臨時合成。</p>
+        <h3 class="text-xs font-bold text-gray-400 uppercase tracking-wider mb-2 border-b border-[#333] pb-1">臨時複製區</h3>
+        <p class="text-[10px] text-gray-500 mb-2 leading-relaxed">拖曳短音檔（3~15 秒），進行單次臨時生成。</p>
         <div class="bg-[#1e1e1e] border-2 border-dashed border-[#444] rounded-lg p-4 text-center mb-2 flex-grow" id="tts_clone_dropzone">
-          <p class="text-gray-400 text-sm mb-2">拖曳參考音訊至此，或使用原生選取</p>
+          <p class="text-gray-400 text-sm mb-2">拖曳參考音訊至此</p>
           <div class="flex gap-1 mb-1">
             <input type="text" id="tts_ref_audio_path_display" readonly placeholder="尚未選擇參考音訊..."
               class="flex-1 bg-[#151515] border border-[#333] rounded px-2 py-1 text-[11px] text-gray-400 focus:outline-none">
             <button onclick="pickTtsReferenceNative()" class="bg-[#333] hover:bg-[#444] text-white text-xs py-1 px-3 rounded border border-[#555] transition-colors">📂 選取</button>
           </div>
-          <p class="text-[10px] text-gray-500 mt-1">支援 .wav/.mp3（3~6 秒清晰語音）</p>
+          <p class="text-[10px] text-gray-500 mt-1">支援 .wav/.mp3（3~15 秒清晰語音）</p>
         </div>
         <div id="tts_ref_info" class="hidden bg-[#1a2a1a] border border-[#3a6a3a] rounded px-2 py-1.5 flex flex-col gap-2 text-sm">
           <div class="flex justify-between items-center border-b border-[#2a4a2a] pb-1">
-            <span id="tts_ref_name" class="text-green-300 text-xs font-mono truncate w-[80%]" title="">ref.wav</span>
+            <span id="tts_ref_name" class="text-green-300 text-xs font-mono truncate w-[80%]">ref.wav</span>
             <button onclick="clearTtsRef()" class="text-red-400 hover:text-red-300 text-xs px-1">✕ 清除</button>
           </div>
           <button onclick="saveTtsToLibrary()" class="bg-[#1f538d] hover:bg-[#2a6cbf] text-white text-xs py-1.5 rounded transition-colors w-full">
             轉存至左側聲音庫 (NAS)
           </button>
         </div>
+        <!-- Reference Audio Text -->
+        <div class="mt-2">
+          <label class="block text-[10px] text-gray-500 mb-1">參考音訊文字 <span class="text-gray-600">（選填，留空則自動轉錄）</span></label>
+          <input type="text" id="tts_clone_ref_text" placeholder="輸入參考音訊中實際說的話（可大幅提升語速精準度）"
+            class="w-full bg-[#1e1e1e] border border-[#444] rounded px-2 py-1.5 text-xs text-white focus:border-purple-500 focus:outline-none">
+          <p class="text-[10px] text-gray-600 mt-1">手動輸入，可跳過自動轉錄並獲得最精準的語速匹配</p>
+        </div>
       </div>
-      
+
     </div>
-  </div>
 
-  <!-- Current selected voice indicator (Clone/Library) -->
-  <div id="tts_selected_profile_info" class="hidden bg-[#1a1a2a] border border-[#3a3a6a] rounded px-3 py-2 text-sm text-blue-300">
-    當前選用：<strong id="tts_selected_profile_name">—</strong>
-  </div>
+    <!-- Selected profile indicator -->
+    <div id="tts_selected_profile_info" class="hidden bg-[#1a1a2a] border border-[#3a3a6a] rounded px-3 py-2 text-sm text-blue-300">
+      當前選用：<strong id="tts_selected_profile_name">—</strong>
+    </div>
 
-  <!-- Text Input -->
-  <div>
-    <label class="block text-xs text-gray-400 mb-1">合成文字 <span class="text-gray-600">（或拖曳 .txt 檔）</span></label>
-    <textarea id="tts_text_input" rows="6" placeholder="在此輸入要轉換為語音的文字..."
-      class="w-full bg-[#1e1e1e] border border-[#555] rounded px-3 py-2 text-sm focus:border-blue-500 resize-y font-sans"></textarea>
-    
-    <!-- Stats Bar -->
-    <div class="flex items-center justify-between mt-1 text-xs text-gray-500 bg-[#1a1a1a] rounded px-3 py-1.5 border-t border-[#333]">
-      <div class="flex items-center space-x-4">
-        <span>字數: <span id="tts_char_count" class="font-mono text-gray-300">0</span></span>
-        <span class="text-gray-600">|</span>
-        <span>時長: <strong id="tts_est_duration" class="font-mono text-blue-300">--:--.-</strong></span>
-        <span class="text-gray-600">|</span>
-        <span>速律: <span id="tts_est_rate" class="font-mono text-purple-300">-.- 字/秒</span></span>
+    <!-- Speed & Pitch -->
+    <div class="px-3 py-3 bg-[#1a1a1a] border border-[#333] rounded-lg space-y-3">
+      <div class="flex items-center gap-3">
+        <label class="text-[10px] text-gray-500 uppercase tracking-wider shrink-0 w-20">語速 Speed</label>
+        <input type="range" id="tts_clone_speed" min="-50" max="50" value="0" step="5"
+          oninput="document.getElementById('tts_clone_speed_label').textContent = (this.value >= 0 ? '+' : '') + this.value + '%'"
+          class="flex-1 accent-purple-500 h-1.5">
+        <span id="tts_clone_speed_label" class="text-xs text-purple-300 font-mono w-10 text-right">+0%</span>
       </div>
-      <button onclick="calculateTtsDuration()" id="tts_calc_btn" class="bg-[#2d3748] hover:bg-[#4a5568] text-gray-300 py-1 px-3 rounded border border-[#4a5568] transition-colors flex items-center gap-1.5 focus:outline-none">
-        <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
-        計算音檔時長
-      </button>
+      <div class="flex items-center gap-3">
+        <label class="text-[10px] text-gray-500 uppercase tracking-wider shrink-0 w-20">音高 Pitch</label>
+        <input type="range" id="tts_clone_pitch" min="-10" max="10" value="0" step="1"
+          oninput="document.getElementById('tts_clone_pitch_label').textContent = (this.value >= 0 ? '+' : '') + this.value + 'Hz'"
+          class="flex-1 accent-purple-500 h-1.5">
+        <span id="tts_clone_pitch_label" class="text-xs text-purple-300 font-mono w-10 text-right">+0Hz</span>
+      </div>
     </div>
-  </div>
 
-  <!-- Output Settings -->
-  <div class="grid grid-cols-2 gap-4">
+    <!-- Taiwan normalizer toggle -->
+    <div class="flex items-center gap-3 px-3 py-2 bg-[#1a2a1a] border border-[#3a6a3a] rounded-lg">
+      <input type="checkbox" id="tts_clone_taiwan_normalize" checked class="accent-green-500 w-4 h-4">
+      <label for="tts_clone_taiwan_normalize" class="text-sm text-green-300 cursor-pointer">啟用台灣正音引擎</label>
+      <span class="text-[10px] text-gray-500">（自動將大陸用語轉為台灣用語 + 發音校正）</span>
+    </div>
+
+    <!-- Text Input -->
     <div>
-      <label class="block text-xs text-gray-400 mb-1">輸出目錄</label>
-      <div class="flex gap-1">
-        <input type="text" id="tts_output_dir" placeholder="輸出資料夾目錄"
-          class="flex-1 bg-[#1e1e1e] border border-[#555] rounded px-2 py-1.5 text-sm focus:border-blue-500">
-        <button onclick="pickTtsOutputDir()" class="bg-[#333] hover:bg-[#444] px-3 font-bold rounded border border-[#555] text-gray-300 transition-colors">📂</button>
+      <label class="block text-xs text-gray-400 mb-1">生成文字</label>
+      <textarea id="tts_clone_text_input" rows="6" placeholder="在此輸入要用複製聲音生成的文字..."
+        class="w-full bg-[#1e1e1e] border border-[#555] rounded px-3 py-2 text-sm focus:border-blue-500 resize-y font-sans"></textarea>
+    </div>
+
+    <!-- Output -->
+    <div class="grid grid-cols-2 gap-4">
+      <div>
+        <label class="block text-xs text-gray-400 mb-1">輸出目錄</label>
+        <div class="flex gap-1">
+          <input type="text" id="tts_clone_output_dir" placeholder="輸出資料夾目錄"
+            class="flex-1 bg-[#1e1e1e] border border-[#555] rounded px-2 py-1.5 text-sm focus:border-blue-500">
+          <button onclick="pickPath('tts_clone_output_dir', 'folder')" class="bg-[#333] hover:bg-[#444] px-3 font-bold rounded border border-[#555] text-gray-300 transition-colors">📂</button>
+        </div>
+      </div>
+      <div>
+        <label class="block text-xs text-gray-400 mb-1">輸出檔名</label>
+        <input type="text" id="tts_clone_output_name" placeholder="clone_output（不含副檔名）"
+          class="w-full bg-[#1e1e1e] border border-[#555] rounded px-2 py-1.5 text-sm focus:border-blue-500">
       </div>
     </div>
-    <div>
-      <label class="block text-xs text-gray-400 mb-1">輸出檔名</label>
-      <input type="text" id="tts_output_name" placeholder="output（不含副檔名）"
-        class="w-full bg-[#1e1e1e] border border-[#555] rounded px-2 py-1.5 text-sm focus:border-blue-500">
-    </div>
-  </div>
 
-  <!-- TTS progress bar -->
-  <div id="tts_progress_area" class="hidden mt-2 p-4 bg-[#1e1e1e] border border-[#333] rounded-lg">
+    <!-- Host Selector -->
+    <div id="tts_clone_host_panel" class="hidden mt-2 p-3 bg-[#1a2a3a] border border-[#2e4a6e] rounded-lg">
+      <div class="text-xs text-blue-300 font-semibold mb-2">處理主機</div>
+      <div id="tts_clone_host_checkboxes" class="flex flex-wrap gap-x-4 gap-y-1"></div>
+    </div>
+
+    <div class="mt-6 border-t border-[#3a3a3a] pt-4">
+    <div class="flex justify-between items-center" id="tts-clone-action-bar">
+      <div class="flex gap-2 tab-control-btns hidden">
+        <button onclick="apiControl('pause')" class="bg-[#7a5500] hover:bg-[#b07a00] text-white text-xs font-bold py-2 px-4 rounded shadow transition-colors">暫停</button>
+        <button onclick="apiControl('resume')" class="bg-[#3a5a3a] hover:bg-[#4a7a4a] text-white text-xs font-bold py-2 px-4 rounded shadow transition-colors">繼續</button>
+        <button onclick="apiControl('stop')" class="bg-[#8b0000] hover:bg-[#cc2200] text-white text-xs font-bold py-2 px-4 rounded shadow transition-colors">強制中止</button>
+      </div>
+      <div class="flex gap-3 ml-auto">
+        <button onclick="scheduleJob('clone')" class="bg-[#333] hover:bg-[#444] text-gray-300 font-bold py-2 px-6 rounded shadow text-sm transition-colors border border-[#555]">排程</button>
+        <button id="btn_start_clone" class="tab-start-btn bg-purple-700 hover:bg-purple-600 text-white font-bold py-2 px-6 rounded shadow transition-colors"
+          onclick="submitCloneJob()" data-idle-text="開始" data-busy-text="開始新佇列">開始</button>
+      </div>
+    </div>
+    <div id="tts_clone_progress_area" class="hidden mt-4 p-4 bg-[#1e1e1e] border border-[#333] rounded-lg">
       <div class="flex justify-between text-xs text-gray-400 mb-1">
-          <span id="tts_prog_label">準備中...</span>
-          <span id="tts_prog_pct">0%</span>
+        <span id="tts_clone_prog_label">準備中...</span>
+        <span id="tts_clone_prog_pct">0%</span>
       </div>
       <div class="w-full bg-[#2a2a2a] rounded-full h-3 border border-[#444] overflow-hidden">
-          <div id="tts_prog_bar" class="h-3 rounded-full transition-all duration-300" style="width: 0%; background: linear-gradient(90deg, #3b82f6, #60a5fa);"></div>
+        <div id="tts_clone_prog_bar" class="h-3 rounded-full transition-all duration-300" style="width: 0%; background: linear-gradient(90deg, #8b5cf6, #a78bfa);"></div>
       </div>
+    </div>
+    </div>
   </div>
 
-  <!-- Submit Button -->
-  <div class="flex justify-end mt-2">
-    <button id="btn_start_tts" onclick="submitTtsJob()"
-      class="bg-blue-700 hover:bg-blue-600 text-white font-bold py-2 px-6 rounded shadow transition-colors">
-      開始合成
-    </button>
+  <!-- ════════════════════════════════════════════════════════ -->
+  <!-- SUB-TAB 3: Taiwan Dictionary Editor                     -->
+  <!-- ════════════════════════════════════════════════════════ -->
+  <div id="tts_sub_dict" class="tts-subtab hidden">
+
+    <!-- Toolbar -->
+    <div class="flex items-center justify-between mb-3">
+      <h3 class="text-sm text-gray-300 font-semibold">台灣正音字典編輯器</h3>
+      <div class="flex gap-2">
+        <button onclick="loadDictionary()" class="bg-[#333] hover:bg-[#444] text-gray-300 text-xs py-1.5 px-3 rounded border border-[#555] transition-colors">
+          重新載入
+        </button>
+        <button onclick="saveDictionary()" class="bg-green-800 hover:bg-green-700 text-white text-xs py-1.5 px-3 rounded border border-green-700 transition-colors font-bold">
+          儲存字典
+        </button>
+      </div>
+    </div>
+
+    <!-- Vocab Mapping -->
+    <div class="bg-[#1a1a1a] border border-[#333] rounded-lg p-3 mb-4">
+      <h4 class="text-xs font-bold text-blue-400 uppercase tracking-wider mb-2 border-b border-[#333] pb-1">用語轉換 (vocab_mapping)</h4>
+      <p class="text-[10px] text-gray-500 mb-2">將大陸用語自動替換為台灣用語，例如「視頻」→「影片」</p>
+      <div id="dict_vocab_list" class="space-y-1 mb-2 max-h-60 overflow-auto custom-scrollbar">
+        <!-- JS populated -->
+      </div>
+      <button onclick="addDictRow('vocab')" class="bg-[#2a2a2a] hover:bg-[#333] border border-[#555] text-gray-300 text-[11px] py-1.5 px-2 rounded transition-colors w-full">
+        + 新增用語轉換
+      </button>
+    </div>
+
+    <!-- Pronunciation Hacks -->
+    <div class="bg-[#1a1a1a] border border-[#333] rounded-lg p-3">
+      <h4 class="text-xs font-bold text-purple-400 uppercase tracking-wider mb-2 border-b border-[#333] pb-1">發音校正 (pronunciation_hacks)</h4>
+      <p class="text-[10px] text-gray-500 mb-2">強制替換讀音，例如「垃圾」→「勒色」（TTS 引擎會照替換後的字唸）</p>
+      <div id="dict_pron_list" class="space-y-1 mb-2 max-h-60 overflow-auto custom-scrollbar">
+        <!-- JS populated -->
+      </div>
+      <button onclick="addDictRow('pron')" class="bg-[#2a2a2a] hover:bg-[#333] border border-[#555] text-gray-300 text-[11px] py-1.5 px-2 rounded transition-colors w-full">
+        + 新增發音校正
+      </button>
+    </div>
+
+    <!-- Save status -->
+    <div id="dict_save_status" class="hidden mt-2 text-center text-sm py-2 rounded"></div>
+
   </div>
 
 </div>
-
-<style>
-.tts-mode-btn.active-mode {
-  color: white;
-  border-bottom-color: #3b82f6;
-}
-</style>

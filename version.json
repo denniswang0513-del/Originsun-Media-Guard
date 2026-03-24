@@ -1,5 +1,5 @@
 {
-  "version": "1.5.0",
-  "build_date": "2026-03-13",
-  "notes": "重大架構升級：前後端全面模組化重構 (嚴格分頁隔離)。後端拆分為 main.py + core/ + routers/，前端拆分為 frontend/tabs/ 各分頁獨立模組，並新增自動化整合測試。"
+  "version": "1.9.11",
+  "build_date": "2026-03-24",
+  "notes": "Phase A: Auth + user management + tab customization"
 }
