@@ -65,8 +65,8 @@
     <div class="pj-section-header">
         <span>機器狀態</span>
         <div class="pj-section-header-right">
-            <button id="pj-batch-update-btn" class="pj-btn-update" style="display:none;" onclick="window.projectsTab.batchUpdate()"></button>
-            <button class="pj-btn-settings" onclick="window.projectsTab.toggleAddAgent()">+ 新增機器</button>
+            <button id="pj-batch-update-btn" class="pj-btn-update admin-only" style="display:none;" onclick="window.projectsTab.batchUpdate()"></button>
+            <button class="pj-btn-settings admin-only" style="display:none;" onclick="window.projectsTab.toggleAddAgent()">+ 新增機器</button>
         </div>
     </div>
     <div id="pj-add-agent-form" class="pj-add-agent-form" style="display:none;">
@@ -111,7 +111,7 @@
                 <option value="cancelled">取消</option>
             </select>
             <input type="date" id="pj-history-date" class="pj-history-date">
-            <button class="pj-btn-clear" onclick="window.projectsTab.clearHistory()">清除</button>
+            <button class="pj-btn-clear admin-only" style="display:none;" onclick="window.projectsTab.clearHistory()">清除</button>
         </div>
     </div>
     <div id="pj-history-container"></div>

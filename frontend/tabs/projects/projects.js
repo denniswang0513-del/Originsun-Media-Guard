@@ -1028,13 +1028,15 @@ function _createMachineCard(agent) {
         if (_masterVersion && _isNewer(_masterVersion, agentVersion)) {
             vBadge.classList.add('pj-version-outdated');
             vBadge.textContent += ' ⬆';
-            // Update button
-            const updBtn = document.createElement('button');
-            updBtn.className = 'pj-btn-inline-update';
-            updBtn.textContent = '更新';
-            updBtn.addEventListener('click', (e) => { e.stopPropagation(); _triggerAgentUpdate(agent.id); });
             header.appendChild(vBadge);
-            header.appendChild(updBtn);
+            // Update button (admin only)
+            if (window._isAdmin) {
+                const updBtn = document.createElement('button');
+                updBtn.className = 'pj-btn-inline-update';
+                updBtn.textContent = '更新';
+                updBtn.addEventListener('click', (e) => { e.stopPropagation(); _triggerAgentUpdate(agent.id); });
+                header.appendChild(updBtn);
+            }
         } else {
             header.appendChild(vBadge);
         }
@@ -1042,12 +1044,14 @@ function _createMachineCard(agent) {
 
     card.appendChild(header);
 
-    // Remove button
-    const removeBtn = document.createElement('button');
-    removeBtn.className = 'pj-machine-remove';
-    removeBtn.textContent = '\u2715'; // ✕
-    removeBtn.addEventListener('click', () => removeAgent(agent.id));
-    card.appendChild(removeBtn);
+    // Remove button (admin only)
+    if (window._isAdmin) {
+        const removeBtn = document.createElement('button');
+        removeBtn.className = 'pj-machine-remove';
+        removeBtn.textContent = '\u2715'; // ✕
+        removeBtn.addEventListener('click', () => removeAgent(agent.id));
+        card.appendChild(removeBtn);
+    }
 
     // Update progress bar (shown during update)
     if (updating && updating.pct > 0) {

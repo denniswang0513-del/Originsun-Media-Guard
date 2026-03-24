@@ -1,6 +1,189 @@
 // ─── Originsun Media Guard Pro ─── //
 // Extracted from index.html <script> blocks
 
+// ─── Auth State ─── //
+window._isAdmin = false;
+window._authToken = localStorage.getItem('auth_token') || '';
+window._authUser = null;
+
+// Check saved token on load
+(async function _initAuth() {
+    if (!window._authToken) { _applyAuthState(false); return; }
+    try {
+        const r = await fetch('/api/v1/auth/me', { headers: { 'Authorization': 'Bearer ' + window._authToken } });
+        if (r.ok) {
+            const d = await r.json();
+            window._authUser = d;
+            _applyAuthState(d.role === 'admin');
+            _applyVisibleTabs();
+        } else {
+            localStorage.removeItem('auth_token');
+            window._authToken = '';
+            _applyAuthState(false);
+        }
+    } catch (_) { _applyAuthState(false); }
+})();
+
+function _applyAuthState(isAdmin) {
+    window._isAdmin = isAdmin;
+    document.querySelectorAll('.admin-only').forEach(el => {
+        el.style.display = isAdmin ? '' : 'none';
+    });
+    const btn = document.getElementById('btn-auth');
+    if (btn) {
+        if (isAdmin && window._authUser) {
+            btn.textContent = '👤';
+            btn.style.color = '#22c55e';
+            btn.style.borderColor = '#22c55e';
+            btn.title = window._authUser.username + ' (登出)';
+        } else {
+            btn.textContent = '👤';
+            btn.style.color = '#888';
+            btn.style.borderColor = '#555';
+            btn.title = '登入';
+        }
+    }
+}
+
+window._authToggle = function() {
+    if (window._isAdmin || window._authUser) {
+        // Show dropdown
+        let dd = document.getElementById('auth-dropdown');
+        if (dd) { dd.remove(); return; }
+        dd = document.createElement('div');
+        dd.id = 'auth-dropdown';
+        dd.style.cssText = 'position:fixed;top:50px;right:10px;background:#2d2d2d;border:1px solid #555;border-radius:8px;padding:8px 0;z-index:100;min-width:160px;box-shadow:0 4px 12px rgba(0,0,0,0.5);';
+
+        const TAB_NAMES = {backup:'備份並轉檔',verify:'檔案比對',transcode:'轉 Proxy',concat:'製作串帶',report:'檔案視覺報表',transcribe:'AI 逐字稿',tts:'語音生成'};
+        const tabs = window._authUser?.visible_tabs;
+        const ALL_TABS = Object.keys(TAB_NAMES);
+
+        let html = `<div style="padding:4px 12px 8px;color:#aaa;font-size:11px;border-bottom:1px solid #444;">👤 ${window._authUser?.username || ''} (${window._authUser?.role || ''})</div>`;
+        html += `<div style="padding:8px 12px;font-size:12px;color:#ccc;">📋 顯示頁籤</div>`;
+        ALL_TABS.forEach(t => {
+            const checked = !tabs || tabs.includes(t);
+            html += `<label style="display:flex;align-items:center;gap:6px;padding:2px 12px;cursor:pointer;font-size:12px;color:#ddd;">
+                <input type="checkbox" ${checked?'checked':''} data-tab="${t}" onchange="window._toggleTab(this)"> ${TAB_NAMES[t]}</label>`;
+        });
+        html += `<div style="border-top:1px solid #444;margin-top:8px;padding:8px 12px;">
+            <button onclick="window._authLogout()" style="background:transparent;border:1px solid #ef4444;color:#ef4444;border-radius:4px;padding:3px 12px;cursor:pointer;font-size:12px;width:100%;">登出</button></div>`;
+        dd.innerHTML = html;
+        document.body.appendChild(dd);
+        setTimeout(() => document.addEventListener('click', function _close(e) {
+            if (!dd.contains(e.target) && e.target.id !== 'btn-auth') { dd.remove(); document.removeEventListener('click', _close); }
+        }), 100);
+        return;
+    }
+    // Show login modal
+    let modal = document.getElementById('auth-login-modal');
+    if (modal) { modal.classList.remove('hidden'); return; }
+    modal = document.createElement('div');
+    modal.id = 'auth-login-modal';
+    modal.className = 'fixed inset-0 bg-black bg-opacity-70 z-50 flex items-center justify-center';
+    modal.innerHTML = `
+        <div class="bg-[#2d2d2d] border border-[#444] rounded-xl shadow-2xl p-6 w-80">
+            <h3 class="text-lg font-bold text-white mb-4">登入</h3>
+            <input id="auth-username" type="text" placeholder="帳號" class="w-full mb-3 px-3 py-2 bg-[#1e1e1e] border border-[#555] rounded text-white text-sm" autofocus>
+            <input id="auth-password" type="password" placeholder="密碼" class="w-full mb-3 px-3 py-2 bg-[#1e1e1e] border border-[#555] rounded text-white text-sm">
+            <div id="auth-error" class="text-red-400 text-xs mb-2 hidden"></div>
+            <div class="flex justify-end gap-2">
+                <button onclick="document.getElementById('auth-login-modal').classList.add('hidden')"
+                    class="px-4 py-1.5 text-sm text-gray-400 hover:text-white">取消</button>
+                <button onclick="window._doLogin()"
+                    class="px-4 py-1.5 text-sm bg-blue-600 hover:bg-blue-500 text-white rounded">登入</button>
+            </div>
+        </div>`;
+    document.body.appendChild(modal);
+    modal.addEventListener('click', (e) => { if (e.target === modal) modal.classList.add('hidden'); });
+    document.getElementById('auth-password').addEventListener('keydown', (e) => { if (e.key === 'Enter') window._doLogin(); });
+    document.getElementById('auth-username').focus();
+};
+
+window._doLogin = async function() {
+    const u = document.getElementById('auth-username')?.value.trim();
+    const p = document.getElementById('auth-password')?.value;
+    const errEl = document.getElementById('auth-error');
+    if (!u || !p) { if (errEl) { errEl.textContent = '請輸入帳號和密碼'; errEl.classList.remove('hidden'); } return; }
+    try {
+        const r = await fetch('/api/v1/auth/login', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ username: u, password: p }),
+        });
+        const d = await r.json();
+        if (!r.ok) { if (errEl) { errEl.textContent = d.detail || '登入失敗'; errEl.classList.remove('hidden'); } return; }
+        window._authToken = d.token;
+        window._authUser = d;
+        localStorage.setItem('auth_token', d.token);
+        _applyAuthState(d.role === 'admin');
+        _applyVisibleTabs();
+        document.getElementById('auth-login-modal')?.classList.add('hidden');
+        if (d.first_login) {
+            alert('首次登入，請到系統設定修改密碼。');
+        }
+    } catch (e) {
+        if (errEl) { errEl.textContent = '連線失敗'; errEl.classList.remove('hidden'); }
+    }
+};
+
+window._authLogout = function() {
+    localStorage.removeItem('auth_token');
+    window._authToken = '';
+    window._authUser = null;
+    _applyAuthState(false);
+    document.getElementById('auth-dropdown')?.remove();
+    // Restore all tabs
+    document.querySelectorAll('.tab-content').forEach(el => el.style.removeProperty('display'));
+    document.querySelectorAll('nav button').forEach(el => el.style.removeProperty('display'));
+};
+
+window._toggleTab = async function(checkbox) {
+    const tab = checkbox.dataset.tab;
+    const allCheckboxes = document.querySelectorAll('#auth-dropdown input[data-tab]');
+    const selected = [];
+    allCheckboxes.forEach(cb => { if (cb.checked) selected.push(cb.dataset.tab); });
+    // Save to server
+    try {
+        await fetch('/api/v1/auth/me', {
+            method: 'PUT', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ visible_tabs: selected.length === 7 ? null : selected }),
+        });
+        if (window._authUser) window._authUser.visible_tabs = selected.length === 7 ? null : selected;
+        _applyVisibleTabs();
+    } catch (_) {}
+};
+
+function _applyVisibleTabs() {
+    const tabs = window._authUser?.visible_tabs;
+    if (!tabs) return; // null = show all
+    const TAB_MAP = {backup:'tab_backup',verify:'tab_verify',transcode:'tab_transcode',concat:'tab_concat',report:'tab_report',transcribe:'tab_transcribe',tts:'tab_tts'};
+    const NAV_MAP = {backup:'備份',verify:'比對',transcode:'Proxy',concat:'串帶',report:'報表',transcribe:'逐字',tts:'語音'};
+    Object.entries(TAB_MAP).forEach(([key, id]) => {
+        const el = document.getElementById(id);
+        if (el) el.style.display = tabs.includes(key) ? '' : 'none';
+    });
+    // Hide nav buttons for hidden tabs
+    document.querySelectorAll('nav button').forEach(btn => {
+        const text = btn.textContent;
+        Object.entries(NAV_MAP).forEach(([key, label]) => {
+            if (text.includes(label)) btn.style.display = tabs.includes(key) ? '' : 'none';
+        });
+    });
+}
+
+// Patch fetch to auto-add auth header for sensitive endpoints
+const _origFetch = window.fetch;
+window.fetch = function(url, opts = {}) {
+    if (window._authToken && typeof url === 'string' &&
+        (url.includes('/settings/') || url.includes('/control/update') ||
+         url.includes('/admin/') || url.includes('/auth/') ||
+         url.includes('/job_history') && opts.method === 'DELETE' ||
+         url.includes('/reports/') && opts.method === 'DELETE' ||
+         url.includes('/agents') && (opts.method === 'POST' || opts.method === 'DELETE'))) {
+        opts.headers = { ...opts.headers, 'Authorization': 'Bearer ' + window._authToken };
+    }
+    return _origFetch.call(window, url, opts);
+};
+
 // ─── Global Error Handler ─── //
 window.onerror = function(msg, url, lineNo, columnNo, error) {
     var errDiv = document.createElement('div');
@@ -2219,7 +2402,77 @@ if (typeof appendLog === 'undefined') {
             document.querySelectorAll('#settingsModal .tab-btn').forEach(el => el.classList.remove('active'));
             document.getElementById('tab_' + tabId).style.display = 'block';
             (event || window.event).currentTarget.classList.add('active');
+            if (tabId === 'user_mgmt') _loadUserList();
         }
+
+        // ── User Management ──
+        async function _loadUserList() {
+            const container = document.getElementById('user-mgmt-list');
+            if (!container) return;
+            try {
+                const r = await fetch('/api/v1/auth/users');
+                if (!r.ok) { container.innerHTML = '<span style="color:#f87171">載入失敗（需要管理員權限）</span>'; return; }
+                const users = await r.json();
+                container.innerHTML = users.map(u => `
+                    <div style="display:flex; align-items:center; gap:8px; padding:8px 0; border-bottom:1px solid #333;">
+                        <span style="color:#fff; min-width:80px;">👤 ${u.username}</span>
+                        <span style="color:#888; min-width:60px;">${u.role}</span>
+                        <span style="color:#555; flex:1; font-size:11px;">${u.visible_tabs ? u.visible_tabs.join(', ') : '全部頁籤'}</span>
+                        ${u.username !== 'admin' ? `
+                            <button onclick="window._changeUserRole('${u.username}','${u.role}')" style="background:transparent; border:1px solid #555; color:#aaa; border-radius:3px; padding:2px 8px; cursor:pointer; font-size:11px;">改角色</button>
+                            <button onclick="window._changeUserPwd('${u.username}')" style="background:transparent; border:1px solid #555; color:#aaa; border-radius:3px; padding:2px 8px; cursor:pointer; font-size:11px;">改密碼</button>
+                            <button onclick="window._deleteUser('${u.username}')" style="background:transparent; border:1px solid #ef4444; color:#ef4444; border-radius:3px; padding:2px 8px; cursor:pointer; font-size:11px;">刪除</button>
+                        ` : '<span style="color:#22c55e; font-size:11px;">系統管理員</span>'}
+                    </div>
+                `).join('');
+            } catch (_) {
+                container.innerHTML = '<span style="color:#f87171">載入失敗</span>';
+            }
+        }
+
+        window._addUserPrompt = async function() {
+            const username = prompt('新使用者帳號：');
+            if (!username) return;
+            const password = prompt('密碼：');
+            if (!password) return;
+            const role = prompt('角色（admin / editor / viewer）：', 'editor');
+            if (!role) return;
+            try {
+                const r = await fetch('/api/v1/auth/users', {
+                    method: 'POST', headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ username, password, role }),
+                });
+                const d = await r.json();
+                if (!r.ok) { alert(d.detail || '新增失敗'); return; }
+                _loadUserList();
+            } catch (_) { alert('連線失敗'); }
+        };
+
+        window._changeUserRole = async function(username, currentRole) {
+            const role = prompt(`修改 ${username} 的角色（目前：${currentRole}）：`, currentRole);
+            if (!role || role === currentRole) return;
+            const r = await fetch('/api/v1/auth/users/' + username, {
+                method: 'PUT', headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ role }),
+            });
+            if (r.ok) _loadUserList(); else alert('修改失敗');
+        };
+
+        window._changeUserPwd = async function(username) {
+            const password = prompt(`設定 ${username} 的新密碼：`);
+            if (!password) return;
+            const r = await fetch('/api/v1/auth/users/' + username, {
+                method: 'PUT', headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ password }),
+            });
+            if (r.ok) alert('密碼已更新'); else alert('修改失敗');
+        };
+
+        window._deleteUser = async function(username) {
+            if (!confirm(`確定要刪除使用者 "${username}"？`)) return;
+            const r = await fetch('/api/v1/auth/users/' + username, { method: 'DELETE' });
+            if (r.ok) _loadUserList(); else alert('刪除失敗');
+        };
 
         // Wrapped in DOMContentLoaded so modal HTML (placed after this script)
         // is fully parsed before we try to bind event listeners.

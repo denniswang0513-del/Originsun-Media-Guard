@@ -43,10 +43,13 @@
                 class="bg-[#1f538d] hover:bg-[#2a6cbf] text-white text-xs font-bold py-1 px-3 rounded shadow transition-colors flex items-center gap-1">
                 <span>📥 下載安裝檔</span>
             </button>
-            <button id="btnOpenSettings" class="btn-header-action"
-                style="background-color: #374151; color: white; border: 1px solid #4B5563; padding: 4px 12px; border-radius: 4px; cursor: pointer; margin-left: 8px; font-size: 12px;">
+            <button id="btnOpenSettings" class="btn-header-action admin-only"
+                style="background-color: #374151; color: white; border: 1px solid #4B5563; padding: 4px 12px; border-radius: 4px; cursor: pointer; margin-left: 8px; font-size: 12px; display: none;">
                 ⚙️ 系統設定
             </button>
+            <button id="btn-auth" onclick="window._authToggle()"
+                style="background: transparent; border: 1px solid #555; border-radius: 50%; width: 30px; height: 30px; cursor: pointer; font-size: 14px; margin-left: 4px; color: #888;"
+                title="登入">👤</button>
 
             <!-- 安裝說明 Modal -->
             <div id="install-modal"
@@ -348,6 +351,7 @@
             <div class="modal-tabs">
                 <button class="tab-btn active" onclick="switchSettingsTab('api_keys', event)">🔑 通訊金鑰</button>
                 <button class="tab-btn" onclick="switchSettingsTab('templates', event)">📝 訊息樣板</button>
+                <button class="tab-btn admin-only" style="display:none;" onclick="switchSettingsTab('user_mgmt', event)">👥 使用者管理</button>
             </div>
             <div id="tab_api_keys" class="tab-content">
                 <div class="form-group">
@@ -411,6 +415,14 @@
                     <textarea id="tpl_transcribe_success" rows="2">🎙️ 【逐字稿完成】{project_name} 已生成！
 📂 輸出至：{dest_dir} | 共 {file_count} 個檔案</textarea>
                 </div>
+            </div>
+
+            <div id="tab_user_mgmt" class="tab-content" style="display: none;">
+                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
+                    <span style="color:#aaa; font-size:13px;">管理系統使用者帳號與角色</span>
+                    <button onclick="window._addUserPrompt()" style="background:#3b82f6; color:#fff; border:none; border-radius:4px; padding:4px 12px; cursor:pointer; font-size:12px;">+ 新增使用者</button>
+                </div>
+                <div id="user-mgmt-list" style="font-size:12px;"></div>
             </div>
 
             <div class="modal-footer">

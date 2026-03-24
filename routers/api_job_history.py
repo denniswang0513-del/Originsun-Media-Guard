@@ -4,7 +4,7 @@ api_job_history.py — 任務歷史 API（DB 優先，JSON fallback）
 import os
 import json
 import threading
-from fastapi import APIRouter, Body  # type: ignore
+from fastapi import APIRouter, Body, Request  # type: ignore
 from typing import Optional
 import core.state as state
 
@@ -181,7 +181,12 @@ async def get_job_log(job_id: str):
 
 
 @router.delete("/api/v1/job_history")
-async def clear_job_history(date: Optional[str] = None):
+async def clear_job_history(request: Request, date: Optional[str] = None):
+    try:
+        from core.auth import check_admin
+        check_admin(request)
+    except ImportError:
+        pass
     if state.db_online:
         try:
             from db.session import get_session_factory

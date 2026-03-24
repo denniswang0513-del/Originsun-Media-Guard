@@ -13,6 +13,16 @@ from core.schemas import ListDirRequest, DownloadModelRequest, OpenFileRequest, 
 
 router = APIRouter()
 
+
+def _check_admin(request: Request):
+    """Check admin permission. No-op if auth module not available."""
+    try:
+        from core.auth import check_admin
+        check_admin(request)
+    except ImportError:
+        pass  # auth module not available, skip check
+
+
 @router.get("/api/v1/health")
 async def health_check():
     jobs = state.get_all_jobs()
@@ -58,6 +68,7 @@ async def load_settings_api():
 
 @router.post("/api/settings/save")
 async def save_settings_api(req: Request):
+    _check_admin(req)
     try:
         new_settings = await req.json()
         save_settings(new_settings)
@@ -208,7 +219,8 @@ async def stop_job(job_id: str = ""):
     return {"status": "stopped"}
 
 @router.post("/api/v1/control/update")
-async def update_agent():
+async def update_agent(request: Request):
+    _check_admin(request)
     import subprocess, json, sys
     try:
         base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -567,7 +579,8 @@ async def api_resolve_drop(name: str):
     return {"path": path}
 
 @router.post("/api/admin/restart")
-async def admin_restart():
+async def admin_restart(request: Request):
+    _check_admin(request)
     import subprocess
     base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     vbs = os.path.join(base_dir, "start_hidden.vbs")

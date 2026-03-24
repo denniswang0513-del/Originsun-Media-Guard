@@ -12,12 +12,21 @@ import re
 import asyncio
 import urllib.request
 import urllib.error
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
 from config import load_settings
 import core.state as state
 
 router = APIRouter(prefix="/api/v1", tags=["Agents"])
+
+
+def _check_admin_agents(request):
+    """Check admin permission. No-op if auth module not available."""
+    try:
+        from core.auth import check_admin
+        check_admin(request)
+    except ImportError:
+        pass
 
 
 def _find_agent_sync(agent_id: str) -> dict:
@@ -112,7 +121,8 @@ async def list_agents():
 
 
 @router.post("/agents")
-async def add_agent(req: NewAgentRequest):
+async def add_agent(req: NewAgentRequest, request: Request):
+    _check_admin_agents(request)
     url_clean = req.url.rstrip("/")
 
     if state.db_online:
@@ -180,8 +190,9 @@ async def proxy_agent_health(agent_id: str):
 
 
 @router.post("/agents/{agent_id}/update")
-async def trigger_agent_update(agent_id: str):
+async def trigger_agent_update(agent_id: str, request: Request):
     """Proxy: trigger OTA update on a remote Agent."""
+    _check_admin_agents(request)
     agent = await _find_agent(agent_id)
     url = agent.get("url", "").rstrip("/") + "/api/v1/control/update"
 
@@ -244,7 +255,8 @@ async def get_agent_update_status(agent_id: str, since: float = 0):
 
 
 @router.delete("/agents/{agent_id}")
-async def remove_agent(agent_id: str):
+async def remove_agent(agent_id: str, request: Request):
+    _check_admin_agents(request)
     if state.db_online:
         try:
             from db.session import get_session_factory

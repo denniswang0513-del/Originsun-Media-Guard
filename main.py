@@ -19,6 +19,7 @@ import core.state as state  # type: ignore
 
 # ── Router 容錯載入（缺模組時跳過該 router，不 crash）──
 _ROUTER_MODULES = [
+    'api_auth',
     'api_backup', 'api_verify', 'api_proxy', 'api_concat',
     'api_report', 'api_transcribe', 'api_system', 'api_tts',
     'api_job_history', 'api_queue', 'api_schedules', 'api_agents',
