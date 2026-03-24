@@ -6,8 +6,8 @@ window._isAdmin = false;
 window._authToken = localStorage.getItem('auth_token') || '';
 window._authUser = null;
 
-// Check saved token on load
-(async function _initAuth() {
+// Check saved token on load（存 Promise 供 loadTabs 等待）
+window._authReady = (async function _initAuth() {
     if (!window._authToken) { _applyAuthState(false); return; }
     try {
         const r = await fetch('/api/v1/auth/me', { headers: { 'Authorization': 'Bearer ' + window._authToken } });
@@ -15,7 +15,7 @@ window._authUser = null;
             const d = await r.json();
             window._authUser = d;
             _applyAuthState(d.role === 'admin');
-            _applyVisibleTabs();
+            // _applyVisibleTabs 延後到 loadTabs 完成後執行
         } else {
             localStorage.removeItem('auth_token');
             window._authToken = '';
@@ -62,15 +62,18 @@ window._authToggle = function() {
         html += `<div style="padding:6px 14px 8px;color:#aaa;font-size:11px;">👤 ${window._authUser.username} (${window._authUser.role})</div>`;
         html += _sep;
 
-        // 頁籤設定
+        // 頁籤設定（含儲存按鈕）
         const TAB_NAMES = {backup:'備份並轉檔',verify:'檔案比對',transcode:'轉 Proxy',concat:'製作串帶',report:'檔案視覺報表',transcribe:'AI 逐字稿',tts:'語音生成'};
         const tabs = window._authUser?.visible_tabs;
-        html += `<div style="padding:4px 14px;font-size:11px;color:#888;">📋 顯示頁籤</div>`;
+        html += `<div style="padding:6px 14px 4px;font-size:11px;color:#888;font-weight:bold;">📋 頁籤顯示設定</div>`;
+        html += `<div style="padding:0 14px 4px;">`;
         Object.entries(TAB_NAMES).forEach(([k, v]) => {
             const checked = !tabs || tabs.includes(k);
-            html += `<label style="display:flex;align-items:center;gap:6px;padding:2px 14px;cursor:pointer;font-size:12px;color:#ddd;">
-                <input type="checkbox" ${checked?'checked':''} data-tab="${k}" onchange="window._toggleTab(this)"> ${v}</label>`;
+            html += `<label style="display:flex;align-items:center;gap:6px;padding:3px 0;cursor:pointer;font-size:12px;color:#ddd;">
+                <input type="checkbox" ${checked?'checked':''} data-tab-pref="${k}" onchange="window._previewTabPref(this);window._updateTabPrefCache()" style="accent-color:#3b82f6;"> ${v}</label>`;
         });
+        html += `<button onclick="event.stopPropagation();window._saveTabPrefs()" style="background:#3b82f6;color:#fff;border:none;border-radius:4px;padding:4px 0;cursor:pointer;font-size:11px;width:100%;margin-top:6px;">儲存設定</button>`;
+        html += `</div>`;
         html += _sep;
 
         // 工具
@@ -79,6 +82,7 @@ window._authToggle = function() {
 
         if (window._isAdmin) {
             html += _sep;
+            html += _item('👥', '使用者管理', "window._openUserMgmt();document.getElementById('auth-dropdown')?.remove()");
             html += _item('⚙️', '系統設定', "document.getElementById('btnOpenSettings')?.click();document.getElementById('auth-dropdown')?.remove()");
         }
 
@@ -164,36 +168,69 @@ window._authLogout = function() {
     document.querySelectorAll('nav button').forEach(el => el.style.removeProperty('display'));
 };
 
-window._toggleTab = async function(checkbox) {
-    const tab = checkbox.dataset.tab;
-    const allCheckboxes = document.querySelectorAll('#auth-dropdown input[data-tab]');
-    const selected = [];
-    allCheckboxes.forEach(cb => { if (cb.checked) selected.push(cb.dataset.tab); });
-    // Save to server
+// 即時預覽：checkbox 切換時立即顯示/隱藏 TAB
+window._previewTabPref = function(cb) {
+    const key = cb.dataset.tabPref;
+    const TAB_MAP = {backup:'tab_main',verify:'tab_verify',transcode:'tab_transcode',concat:'tab_concat',report:'tab_report',transcribe:'tab_transcribe',tts:'tab_tts'};
+    const NAV_MAP = {backup:'備份',verify:'比對',transcode:'Proxy',concat:'串帶',report:'報表',transcribe:'逐字',tts:'語音'};
+    const tabEl = document.getElementById(TAB_MAP[key]);
+    if (tabEl) tabEl.style.display = cb.checked ? '' : 'none';
+    document.querySelectorAll('nav button').forEach(btn => {
+        if (btn.textContent.includes(NAV_MAP[key])) btn.style.display = cb.checked ? '' : 'none';
+    });
+};
+
+// 快取 checkbox 狀態（避免 dropdown 被 click-outside 移除後抓不到）
+window._tabPrefCache = null;
+window._updateTabPrefCache = function() {
+    const cbs = document.querySelectorAll('#auth-dropdown input[data-tab-pref]');
+    if (cbs.length > 0) {
+        window._tabPrefCache = [];
+        cbs.forEach(cb => { if (cb.checked) window._tabPrefCache.push(cb.dataset.tabPref); });
+    }
+};
+
+window._saveTabPrefs = async function() {
+    // 先嘗試從 DOM 讀（dropdown 還在的話），否則用快取
+    const allCheckboxes = document.querySelectorAll('#auth-dropdown input[data-tab-pref]');
+    let selected;
+    if (allCheckboxes.length > 0) {
+        selected = [];
+        allCheckboxes.forEach(cb => { if (cb.checked) selected.push(cb.dataset.tabPref); });
+    } else {
+        selected = window._tabPrefCache || [];
+    }
+    const saveBtn = document.querySelector('#auth-dropdown button[onclick*="saveTabPrefs"]');
     try {
-        await fetch('/api/v1/auth/me', {
-            method: 'PUT', headers: { 'Content-Type': 'application/json' },
+        const res = await fetch('/api/v1/auth/me', {
+            method: 'PUT', headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + (localStorage.getItem('auth_token') || '') },
             body: JSON.stringify({ visible_tabs: selected.length === 7 ? null : selected }),
         });
-        if (window._authUser) window._authUser.visible_tabs = selected.length === 7 ? null : selected;
-        _applyVisibleTabs();
-    } catch (_) {}
+        if (res.ok) {
+            if (window._authUser) window._authUser.visible_tabs = selected.length === 7 ? null : selected;
+            _applyVisibleTabs();
+            if (saveBtn) { saveBtn.textContent = '✅ 已儲存'; saveBtn.style.background = '#22c55e'; setTimeout(() => { saveBtn.textContent = '儲存設定'; saveBtn.style.background = '#3b82f6'; }, 1500); }
+        } else {
+            if (saveBtn) { saveBtn.textContent = '❌ 儲存失敗'; saveBtn.style.background = '#ef4444'; setTimeout(() => { saveBtn.textContent = '儲存設定'; saveBtn.style.background = '#3b82f6'; }, 1500); }
+        }
+    } catch (_) {
+        if (saveBtn) { saveBtn.textContent = '❌ 儲存失敗'; saveBtn.style.background = '#ef4444'; setTimeout(() => { saveBtn.textContent = '儲存設定'; saveBtn.style.background = '#3b82f6'; }, 1500); }
+    }
 };
 
 function _applyVisibleTabs() {
     const tabs = window._authUser?.visible_tabs;
-    if (!tabs) return; // null = show all
-    const TAB_MAP = {backup:'tab_backup',verify:'tab_verify',transcode:'tab_transcode',concat:'tab_concat',report:'tab_report',transcribe:'tab_transcribe',tts:'tab_tts'};
+    const TAB_MAP = {backup:'tab_main',verify:'tab_verify',transcode:'tab_transcode',concat:'tab_concat',report:'tab_report',transcribe:'tab_transcribe',tts:'tab_tts'};
     const NAV_MAP = {backup:'備份',verify:'比對',transcode:'Proxy',concat:'串帶',report:'報表',transcribe:'逐字',tts:'語音'};
+    // null = show all; array = only show listed
     Object.entries(TAB_MAP).forEach(([key, id]) => {
         const el = document.getElementById(id);
-        if (el) el.style.display = tabs.includes(key) ? '' : 'none';
+        if (el) el.style.display = (!tabs || tabs.includes(key)) ? '' : 'none';
     });
-    // Hide nav buttons for hidden tabs
     document.querySelectorAll('nav button').forEach(btn => {
         const text = btn.textContent;
         Object.entries(NAV_MAP).forEach(([key, label]) => {
-            if (text.includes(label)) btn.style.display = tabs.includes(key) ? '' : 'none';
+            if (text.includes(label)) btn.style.display = (!tabs || tabs.includes(key)) ? '' : 'none';
         });
     });
 }
@@ -353,7 +390,11 @@ if (typeof appendLog === 'undefined') {
         }
 
         // Initialize tabs immediately
-        loadTabs().then(() => {
+        loadTabs().then(async () => {
+            // 等 auth 完成 + 頁籤載入完成 → 才套用偏好
+            await window._authReady;
+            _applyVisibleTabs();
+
             // Initialization after dynamic tabs load
             const today = new Date();
             const yyyy = today.getFullYear();
@@ -870,17 +911,14 @@ if (typeof appendLog === 'undefined') {
         }
 
         function updateAgentBadge(isActive) {
-            if (!statusBadge) return;
+            const dot = document.getElementById('status-dot');
             const btnShortcut = document.getElementById('btn_create_shortcut');
             if (isActive) {
-                statusBadge.textContent = "🟢 本機已連線";
-                statusBadge.className = "px-3 py-1 rounded-full text-xs font-semibold bg-green-900 text-green-100 border border-green-700";
-                // 每次節點上線時，偷偷檢查版本
+                if (dot) { dot.style.background = '#22c55e'; dot.style.boxShadow = '0 0 6px #22c55e'; dot.title = '本機已連線'; }
                 checkAgentVersion();
                 if (btnShortcut) btnShortcut.style.display = 'flex';
             } else {
-                statusBadge.textContent = "🔴 僅支援伺服器運算";
-                statusBadge.className = "px-3 py-1 rounded-full text-xs font-semibold bg-red-900 text-red-100 border border-red-700";
+                if (dot) { dot.style.background = '#ef4444'; dot.style.boxShadow = 'none'; dot.title = '本機離線'; }
                 if (btnShortcut) btnShortcut.style.display = 'none';
             }
         }
@@ -2433,26 +2471,67 @@ if (typeof appendLog === 'undefined') {
             if (tabId === 'user_mgmt') _loadUserList();
         }
 
-        // ── User Management ──
+        // ── User Management (standalone modal) ──
+        const TAB_NAMES = {backup:'備份並轉檔',verify:'檔案比對',transcode:'轉 Proxy',concat:'製作串帶',report:'檔案視覺報表',transcribe:'AI 逐字稿',tts:'語音生成'};
+
+        window._openUserMgmt = async function() {
+            // Remove existing
+            document.getElementById('user-mgmt-modal')?.remove();
+            const overlay = document.createElement('div');
+            overlay.id = 'user-mgmt-modal';
+            overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.7);z-index:200;display:flex;align-items:center;justify-content:center;';
+            overlay.addEventListener('click', e => { if (e.target === overlay) overlay.remove(); });
+            document.addEventListener('keydown', function _esc(e) { if (e.key === 'Escape') { overlay.remove(); document.removeEventListener('keydown', _esc); } });
+
+            const modal = document.createElement('div');
+            modal.style.cssText = 'background:#1e1e1e;border:1px solid #444;border-radius:12px;padding:24px;width:90%;max-width:720px;max-height:80vh;overflow-y:auto;color:#ddd;';
+            modal.innerHTML = `
+                <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">
+                    <h2 style="margin:0;font-size:16px;color:#fff;">👥 使用者管理</h2>
+                    <div style="display:flex;gap:8px;align-items:center;">
+                        <button id="umgmt-add-btn" style="background:#3b82f6;color:#fff;border:none;border-radius:6px;padding:6px 14px;cursor:pointer;font-size:12px;">+ 新增使用者</button>
+                        <span onclick="document.getElementById('user-mgmt-modal')?.remove()" style="cursor:pointer;font-size:20px;color:#888;line-height:1;">✕</span>
+                    </div>
+                </div>
+                <div id="umgmt-list" style="font-size:12px;">載入中...</div>
+            `;
+            overlay.appendChild(modal);
+            document.body.appendChild(overlay);
+
+            document.getElementById('umgmt-add-btn').onclick = () => window._addUserPrompt();
+            await _loadUserList();
+        };
+
         async function _loadUserList() {
-            const container = document.getElementById('user-mgmt-list');
+            const container = document.getElementById('umgmt-list');
             if (!container) return;
             try {
-                const r = await fetch('/api/v1/auth/users');
+                const r = await fetch('/api/v1/auth/users', { headers: { 'Authorization': 'Bearer ' + (localStorage.getItem('auth_token') || '') } });
                 if (!r.ok) { container.innerHTML = '<span style="color:#f87171">載入失敗（需要管理員權限）</span>'; return; }
                 const users = await r.json();
-                container.innerHTML = users.map(u => `
-                    <div style="display:flex; align-items:center; gap:8px; padding:8px 0; border-bottom:1px solid #333;">
-                        <span style="color:#fff; min-width:80px;">👤 ${u.username}</span>
-                        <span style="color:#888; min-width:60px;">${u.role}</span>
-                        <span style="color:#555; flex:1; font-size:11px;">${u.visible_tabs ? u.visible_tabs.join(', ') : '全部頁籤'}</span>
-                        ${u.username !== 'admin' ? `
-                            <button onclick="window._changeUserRole('${u.username}','${u.role}')" style="background:transparent; border:1px solid #555; color:#aaa; border-radius:3px; padding:2px 8px; cursor:pointer; font-size:11px;">改角色</button>
-                            <button onclick="window._changeUserPwd('${u.username}')" style="background:transparent; border:1px solid #555; color:#aaa; border-radius:3px; padding:2px 8px; cursor:pointer; font-size:11px;">改密碼</button>
-                            <button onclick="window._deleteUser('${u.username}')" style="background:transparent; border:1px solid #ef4444; color:#ef4444; border-radius:3px; padding:2px 8px; cursor:pointer; font-size:11px;">刪除</button>
-                        ` : '<span style="color:#22c55e; font-size:11px;">系統管理員</span>'}
-                    </div>
-                `).join('');
+                container.innerHTML = users.map(u => {
+                    const tabs = u.visible_tabs || Object.keys(TAB_NAMES);
+                    const tabCheckboxes = Object.entries(TAB_NAMES).map(([k,v]) =>
+                        `<label style="display:inline-flex;align-items:center;gap:3px;font-size:11px;color:#aaa;cursor:pointer;margin-right:6px;">
+                            <input type="checkbox" ${tabs.includes(k)?'checked':''} data-user="${u.username}" data-tab="${k}" style="accent-color:#3b82f6;"> ${v}
+                        </label>`
+                    ).join('');
+                    return `
+                    <div style="padding:12px;margin-bottom:8px;background:#252525;border:1px solid #333;border-radius:8px;">
+                        <div style="display:flex;align-items:center;gap:10px;margin-bottom:8px;flex-wrap:wrap;">
+                            <span style="color:#fff;font-weight:bold;font-size:13px;min-width:70px;">👤 ${u.username}</span>
+                            <select data-role-user="${u.username}" style="background:#1a1a1a;color:#ddd;border:1px solid #444;border-radius:4px;padding:3px 8px;font-size:11px;">
+                                <option value="admin" ${u.role==='admin'?'selected':''}>admin</option>
+                                <option value="editor" ${u.role==='editor'?'selected':''}>editor</option>
+                                <option value="viewer" ${u.role==='viewer'?'selected':''}>viewer</option>
+                            </select>
+                            <button onclick="window._changeUserPwd('${u.username}')" style="background:transparent;border:1px solid #555;color:#aaa;border-radius:4px;padding:3px 10px;cursor:pointer;font-size:11px;">🔑 改密碼</button>
+                            <button onclick="window._saveUserSettings('${u.username}')" style="background:#3b82f6;color:#fff;border:none;border-radius:4px;padding:3px 12px;cursor:pointer;font-size:11px;">💾 儲存</button>
+                            ${u.username !== 'admin' ? `<button onclick="window._deleteUser('${u.username}')" style="background:transparent;border:1px solid #ef4444;color:#ef4444;border-radius:4px;padding:3px 10px;cursor:pointer;font-size:11px;">刪除</button>` : ''}
+                        </div>
+                        <div style="padding-left:4px;display:flex;flex-wrap:wrap;gap:2px;">${tabCheckboxes}</div>
+                    </div>`;
+                }).join('');
             } catch (_) {
                 container.innerHTML = '<span style="color:#f87171">載入失敗</span>';
             }
@@ -2473,6 +2552,31 @@ if (typeof appendLog === 'undefined') {
                 const d = await r.json();
                 if (!r.ok) { alert(d.detail || '新增失敗'); return; }
                 _loadUserList();
+            } catch (_) { alert('連線失敗'); }
+        };
+
+        window._saveUserSettings = async function(username) {
+            const roleSelect = document.querySelector(`select[data-role-user="${username}"]`);
+            const tabCheckboxes = document.querySelectorAll(`input[data-user="${username}"][data-tab]`);
+            const role = roleSelect ? roleSelect.value : 'editor';
+            const selectedTabs = [];
+            tabCheckboxes.forEach(cb => { if (cb.checked) selectedTabs.push(cb.dataset.tab); });
+            const visible_tabs = selectedTabs.length === 7 ? null : selectedTabs;
+            try {
+                const r = await fetch('/api/v1/auth/users/' + username, {
+                    method: 'PUT', headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ role, visible_tabs }),
+                });
+                if (r.ok) {
+                    // Find the save button for this user and flash green
+                    const btns = document.querySelectorAll('#umgmt-list button, #user-mgmt-list button');
+                    btns.forEach(b => {
+                        if (b.textContent.includes('儲存') && b.onclick?.toString().includes(username)) {
+                            b.textContent = '✅ 已儲存'; b.style.background = '#22c55e';
+                            setTimeout(() => { b.textContent = '💾 儲存'; b.style.background = '#3b82f6'; }, 1500);
+                        }
+                    });
+                } else { alert('儲存失敗'); }
             } catch (_) { alert('連線失敗'); }
         };
 

@@ -198,7 +198,7 @@ async def get_me(request: Request):
 
 
 @router.put("/me")
-async def update_me(req: UpdateMeRequest, request: Request):
+async def update_me(request: Request):
     """Update own password or visible tabs."""
     payload = _extract_token(request)
     if not payload:
@@ -209,11 +209,12 @@ async def update_me(req: UpdateMeRequest, request: Request):
     if not user:
         raise HTTPException(status_code=404, detail="使用者不存在")
 
-    if req.password:
-        user['password_hash'] = hash_password(req.password)
+    body = await request.json()
+    if body.get('password'):
+        user['password_hash'] = hash_password(body['password'])
         user['first_login'] = False
-    if req.visible_tabs is not None:
-        user['visible_tabs'] = req.visible_tabs
+    if 'visible_tabs' in body:  # 區分 null（全部顯示）和未傳
+        user['visible_tabs'] = body['visible_tabs']
 
     sync_user_to_json(user)
     await _save_user_to_db(user)
