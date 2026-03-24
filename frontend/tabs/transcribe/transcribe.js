@@ -18,7 +18,7 @@ export async function fetchModelStatus() {
 
 export async function pickMultiFiles() {
     try {
-        const res = await fetch(getAgentBaseUrl() + '/api/v1/utils/pick?type=file');
+        const res = await fetch(getAgentBaseUrl() + '/api/v1/utils/pick_file');
         const data = await res.json();
         if (data.path) {
             let paths = Array.isArray(data.path) ? data.path : [data.path];
@@ -106,27 +106,18 @@ export function setTranscribeMode(mode) {
     }
 }
 
-export async function submitTranscribeJob() {
+export function collectTranscribePayload() {
     const rows = document.getElementById('transcribe_file_list').children;
     const sources = Array.from(rows).map(row => row.querySelector('input')?.value.trim()).filter(v => v);
-    
+
     if (!sources.length) {
         alert('請先加入影音檔案來源！');
-        return;
+        return { valid: false };
     }
     const destDir = document.getElementById('transcribe_dest')?.value.trim();
     if (!destDir) {
         alert('請指定輸出目標資料夾！');
-        return;
-    }
-
-    // Show progress area
-    const progArea = document.getElementById('transcribe_progress_area');
-    if (progArea) {
-        progArea.classList.remove('hidden');
-        document.getElementById('transcribe_prog_label').textContent = '佇列中等待執行...';
-        document.getElementById('transcribe_prog_pct').textContent = '0%';
-        document.getElementById('transcribe_prog_bar').style.width = '0%';
+        return { valid: false };
     }
 
     const modelSize = document.getElementById('transcribe_model')?.value || 'turbo';
@@ -137,7 +128,7 @@ export async function submitTranscribeJob() {
 
     if (!outputSrt && !outputTxt) {
         alert('請至少勾選一種輸出格式 (.srt 或 .txt)！');
-        return;
+        return { valid: false };
     }
 
     const payload = {
@@ -152,21 +143,59 @@ export async function submitTranscribeJob() {
         individual_mode: window.transcribeMode === 'individual'
     };
 
+    return { valid: true, payload, name: '逐字稿' };
+}
+window.collectTranscribePayload = collectTranscribePayload;
+
+export async function submitTranscribeJob() {
+    window._activeJobTab = 'transcribe';
+    const collected = collectTranscribePayload();
+    if (!collected.valid) return;
+    const payload = collected.payload;
+
+    // Show progress area
+    const progArea = document.getElementById('transcribe_progress_area');
+    if (progArea) {
+        progArea.classList.remove('hidden');
+        document.getElementById('transcribe_prog_label').textContent = '佇列中等待執行...';
+        document.getElementById('transcribe_prog_pct').textContent = '0%';
+        document.getElementById('transcribe_prog_bar').style.width = '0%';
+    }
+
     const btn = document.querySelector('#tab_transcribe button[onclick="submitTranscribeJob()"]');
     const originalText = btn.innerHTML;
     btn.innerHTML = '🕒 送出中...';
     btn.disabled = true;
     btn.classList.add('opacity-70', 'cursor-not-allowed');
 
+    // 讀取處理主機
+    const trHostObj = window.collectSelectedHost ? window.collectSelectedHost('tr_host_checkboxes') : { name: '本機', ip: 'local' };
+    const isLocal = trHostObj.ip === 'local';
+    const trHostUrl = isLocal ? getAgentBaseUrl() : 'http://' + trHostObj.ip;
+
+    if (!isLocal && window.initRemoteHostProgress) {
+        window._remoteJobType = 'transcribe';
+        window._activeRemoteHosts = {};
+        if (window.showRemoteMainProgress) window.showRemoteMainProgress('遠端轉錄中...');
+        window.initRemoteHostProgress([trHostObj]);
+    }
+
     try {
-        const res = await fetch(getAgentBaseUrl() + '/api/v1/jobs/transcribe', {
+        const res = await fetch(trHostUrl + '/api/v1/jobs/transcribe', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(payload)
         });
-        
+
+        const result = await res.json();
         if (res.ok) {
-            appendLog('✅ 已成功將逐字稿任務送入佇列。', 'system');
+            appendLog(`✅ 已成功將逐字稿任務送至 [${trHostObj.name}] 佇列。`, 'system');
+            if (result.warning) appendLog(`⚠️ ${result.warning}`, 'system');
+            if (!isLocal) {
+                if (window.updateHostProgress) window.updateHostProgress(trHostObj.ip, 20, '已排程，轉錄中...', '#059669');
+                window._activeRemoteHosts[trHostObj.ip] = { host: trHostObj, lastSeen: Date.now(), startTime: Date.now(), logOffset: 0 };
+                if (window.startHeartbeatMonitor) window.startHeartbeatMonitor();
+            }
             // Show progress area
             const progArea = document.getElementById('transcribe_progress_area');
             if (progArea) progArea.classList.remove('hidden');
@@ -175,8 +204,7 @@ export async function submitTranscribeJob() {
             document.getElementById('transcribe_prog_pct').textContent = '0%';
             document.getElementById('transcribe_prog_bar').style.width = '0%';
         } else {
-            const text = await res.text();
-            alert(`提交失敗: ${text}`);
+            alert(`提交失敗: ${result.detail || JSON.stringify(result)}`);
             btn.innerHTML = originalText;
             btn.disabled = false;
             btn.classList.remove('opacity-70', 'cursor-not-allowed');
@@ -195,8 +223,35 @@ export function initTranscribeTab() {
     setupInputDrop('transcribe_dest');
 }
 
+export async function pickTranscribeFolder() {
+    try {
+        const res = await fetch(getAgentBaseUrl() + '/api/v1/utils/pick_folder');
+        const data = await res.json();
+        if (data.path) {
+            // List video files from the selected folder
+            const listRes = await fetch(getAgentBaseUrl() + '/api/v1/list_dir', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ path: data.path })
+            });
+            const listData = await listRes.json();
+            if (listData.files && listData.files.length > 0) {
+                listData.files.forEach(f => {
+                    addStandaloneSource('transcribe_file_list', f);
+                });
+                appendLog(`📂 已載入 ${listData.files.length} 個影音檔案`, 'system');
+            } else {
+                appendLog('⚠️ 資料夾中沒有找到影音檔案', 'info');
+            }
+        }
+    } catch (err) {
+        console.error("無法開啟資料夾選取視窗", err);
+    }
+}
+
 window.fetchModelStatus = fetchModelStatus;
 window.pickMultiFiles = pickMultiFiles;
+window.pickTranscribeFolder = pickTranscribeFolder;
 window.updateModelStatus = updateModelStatus;
 window.downloadSelectedModel = downloadSelectedModel;
 window.setTranscribeMode = setTranscribeMode;

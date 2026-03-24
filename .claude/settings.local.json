@@ -14,7 +14,27 @@
       "Bash(python -c \"from main import app; print\\(''''main.py imports OK''''\\)\")",
       "Bash(ls -la D:/Antigravity/OriginsunTranscode/*.py D:/Antigravity/OriginsunTranscode/*.mp3 D:/Antigravity/OriginsunTranscode/*.wav D:/Antigravity/OriginsunTranscode/*.txt D:/Antigravity/OriginsunTranscode/*.log)",
       "Bash(ls -la \"D:/Antigravity/OriginsunTranscode/\"test*.mp3 \"D:/Antigravity/OriginsunTranscode/\"20260311*.txt)",
-      "Bash(ls \"D:/Antigravity/OriginsunTranscode/\"*.mp3 \"D:/Antigravity/OriginsunTranscode/\"*.wav \"D:/Antigravity/OriginsunTranscode/\"test_*.py \"D:/Antigravity/OriginsunTranscode/\"cmd_*.txt \"D:/Antigravity/OriginsunTranscode/\"stderr.log)"
+      "Bash(ls \"D:/Antigravity/OriginsunTranscode/\"*.mp3 \"D:/Antigravity/OriginsunTranscode/\"*.wav \"D:/Antigravity/OriginsunTranscode/\"test_*.py \"D:/Antigravity/OriginsunTranscode/\"cmd_*.txt \"D:/Antigravity/OriginsunTranscode/\"stderr.log)",
+      "Bash(grep -E \"\\\\.py$|^d\")",
+      "Bash(.venvScriptspython.exe -c \"import numpy; print\\(''numpy available:'', numpy.__version__\\)\")",
+      "Bash(./.venv/Scripts/python.exe -c \"import numpy; print\\(''numpy available:'', numpy.__version__\\)\")",
+      "mcp__Claude_Preview__preview_start",
+      "Bash(rm -rf \"//192.168.1.132/Container/AI_Workspace/agents/Originsun Media Guard Pro/voice/test_voice\")",
+      "Bash(\"//192.168.1.132/Container/AI_Workspace/agents/Originsun Media Guard Pro/voice/profiles.json\")",
+      "Bash(find /d/Antigravity/OriginsunTranscode/frontend -name *.js -type f)",
+      "Bash(ls -la \"D:\\\\Antigravity\\\\OriginsunTranscode\\\\models\\\\f5_tts\"\" 2>/dev/null || echo \"Directory does not exist \")",
+      "Bash(D:/Antigravity/OriginsunTranscode/.venv/Scripts/python.exe -c \"import f5_tts; print\\(''f5-tts installed OK''\\)\")",
+      "Bash(find D:AntigravityOriginsunTranscode.venvLibsite-packagesf5_tts -name *.py -type f)",
+      "Bash(python -c \"import f5_tts; print\\(f5_tts.__file__\\)\")",
+      "Bash(cp \"D:/Antigravity/OriginsunTranscode/tts_engine.py\" \"C:/OriginsunAgent/tts_engine.py\")",
+      "Bash(cp \"D:/Antigravity/OriginsunTranscode/routers/api_tts.py\" \"C:/OriginsunAgent/routers/api_tts.py\")",
+      "Bash(cp \"D:/Antigravity/OriginsunTranscode/frontend/tabs/tts/tts.html\" \"C:/OriginsunAgent/frontend/tabs/tts/tts.html\")",
+      "Bash(cp \"D:/Antigravity/OriginsunTranscode/frontend/tabs/tts/tts.js\" \"C:/OriginsunAgent/frontend/tabs/tts/tts.js\")",
+      "Bash(cp \"D:/Antigravity/OriginsunTranscode/frontend/tabs/transcribe/transcribe.html\" \"C:/OriginsunAgent/frontend/tabs/transcribe/transcribe.html\")",
+      "Bash(cp \"D:/Antigravity/OriginsunTranscode/frontend/tabs/transcribe/transcribe.js\" \"C:/OriginsunAgent/frontend/tabs/transcribe/transcribe.js\")",
+      "Bash(.venv/Scripts/python.exe -c \":*)",
+      "Bash(copy \"D:\\\\Antigravity\\\\OriginsunTranscode\\\\frontend\\\\index.html\" \"C:\\\\OriginsunAgent\\\\frontend\\\\index.html\")",
+      "Bash(copy \"D:\\\\Antigravity\\\\OriginsunTranscode\\\\frontend\\\\tabs\\\\tts\\\\tts.html\" \"C:\\\\OriginsunAgent\\\\frontend\\\\tabs\\\\tts\\\\tts.html\")"
     ]
   }
 }

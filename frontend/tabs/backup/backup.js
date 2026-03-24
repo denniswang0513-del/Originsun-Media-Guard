@@ -1,4 +1,4 @@
-import { getComputeBaseUrl, appendLog, resetProgress, resolveDropPath, pickPath, setupInputDrop, setupDragAndDrop } from '../../js/shared/utils.js';
+import { getComputeBaseUrl, appendLog, resetProgress, resolveDropPath, pickPath, setupInputDrop, setupDragAndDrop, renderHostCheckboxes, collectSelectedHosts } from '../../js/shared/utils.js';
 
 let sourceIndex = 0;
 
@@ -37,39 +37,13 @@ export function setTodayName() {
 }
 
 function getSelectedHosts() {
-    // This function originally lived in app.js and relied on window._computeHosts.
-    // For now, we will query the DOM to find selected hosts if we are in Backup tab.
-    const result = [];
-    const localChk = document.getElementById('host_chk_local');
-    if (localChk && localChk.checked) result.push({ name: '本機', ip: 'local' });
-    
-    // In a real refactor, window._computeHosts should be managed by a central store,
-    // but we can query checkboxes directly if they are rendered.
-    const cbxDiv = document.getElementById('host_selector_checkboxes');
-    if (cbxDiv) {
-        const checkboxes = cbxDiv.querySelectorAll('input[type="checkbox"]');
-        checkboxes.forEach((chk, i) => {
-            if (chk.id !== 'host_chk_local' && chk.checked) {
-                // Temporary hack based on the text content. We will need a better way to store host IPs.
-                // Assuming we stored ip in dataset when rendering. (Requires updating renderHostSelector)
-                const ip = chk.dataset.ip;
-                const name = chk.dataset.name;
-                if(ip && name) result.push({name, ip});
-            }
-        });
-    }
-
+    const result = collectSelectedHosts('host_selector_checkboxes');
     if (!result.length) result.push({ name: '本機', ip: 'local' });
     return result;
 }
 
 
-export async function submitJob() {
-    // Reset global progress
-    resetProgress();
-    window._isStandaloneTranscode = false;
-    window._remoteDispatchExpectedRetryCount = 0;
-
+export function collectBackupPayload() {
     const srcRows = document.getElementById('source_list').children;
     const cards = [];
     for (let row of srcRows) {
@@ -80,20 +54,15 @@ export async function submitJob() {
     }
     if (cards.length === 0) {
         alert('至少需要一個有效的來源路徑！');
-        return;
+        return { valid: false };
     }
 
     const chkReport = document.getElementById('chk_report');
     const doReport = chkReport ? chkReport.checked : false;
-
-    // Show / hide report progress segment based on selection
-    const segReport = document.getElementById('seg_report');
-    const legendReport = document.getElementById('legend_report');
-    if (segReport) segReport.classList.toggle('hidden', !doReport);
-    if (legendReport) legendReport.classList.toggle('hidden', !doReport);
+    const projectName = document.getElementById('proj_name').value.trim();
 
     const payload = {
-        project_name: document.getElementById('proj_name').value.trim(),
+        project_name: projectName,
         local_root: document.getElementById('local_root').value.trim(),
         nas_root: document.getElementById('nas_root').value.trim(),
         proxy_root: document.getElementById('proxy_root').value.trim(),
@@ -102,6 +71,81 @@ export async function submitJob() {
         do_transcode: document.getElementById('chk_transcode').checked,
         do_concat: document.getElementById('chk_concat').checked,
         do_report: doReport,
+        // Concat settings
+        concat_resolution: document.getElementById('bk_cc_res')?.value || '720P',
+        concat_codec: document.getElementById('bk_cc_codec')?.value || 'H.264 (NVENC)',
+        concat_burn_tc: document.getElementById('bk_cc_burn_tc')?.checked ?? true,
+        concat_burn_fn: document.getElementById('bk_cc_burn_fn')?.checked ?? false,
+        // Report settings
+        report_name: document.getElementById('bk_rpt_name')?.value.trim() || '',
+        report_output: document.getElementById('bk_rpt_output')?.value.trim() || '',
+        report_filmstrip: document.getElementById('bk_rpt_filmstrip')?.checked ?? true,
+        report_techspec: document.getElementById('bk_rpt_techspec')?.checked ?? true,
+        report_hash: document.getElementById('bk_rpt_hash')?.checked ?? false,
+    };
+
+    return { valid: true, payload, name: projectName };
+}
+window.collectBackupPayload = collectBackupPayload;
+
+let _submitting = false;
+
+export async function submitJob() {
+    if (_submitting) return;
+    _submitting = true;
+    window._activeJobTab = 'backup';
+
+    const submitBtn = document.querySelector('#tab_backup button[onclick="submitJob()"]');
+    if (submitBtn) {
+        submitBtn.disabled = true;
+        submitBtn.classList.add('opacity-70', 'cursor-not-allowed');
+        submitBtn._origText = submitBtn.textContent;
+        submitBtn.textContent = '提交中...';
+    }
+
+    try {
+    // Reset global progress
+    resetProgress();
+    window._isStandaloneTranscode = false;
+    window._remoteDispatchExpectedRetryCount = 0;
+
+    const collected = collectBackupPayload();
+    if (!collected.valid) return;
+    const payload = collected.payload;
+
+    const doReport = payload.do_report;
+
+    // 根據勾選項目顯示/隱藏對應的進度段和圖例
+    const doTranscode = payload.do_transcode;
+    const doConcat = payload.do_concat;
+    const segTrans = document.getElementById('bk-seg-trans');
+    const segConcat = document.getElementById('bk-seg-concat');
+    const segReport = document.getElementById('bk-seg-report');
+    const legendTrans = segTrans?.closest('.flex')?.querySelectorAll('span')?.[0]?.parentElement;
+    const legendConcat = segConcat?.closest('.flex')?.querySelectorAll('span')?.[0]?.parentElement;
+    const legendReport = document.getElementById('bk-legend-report');
+    // 用更直接的方式找圖例
+    const legendContainer = document.querySelector('#bk-progress .flex.gap-4');
+    if (legendContainer) {
+        const legends = legendContainer.children;
+        // [0]=備份, [1]=轉檔, [2]=串帶, [3]=報表
+        if (legends[1]) legends[1].classList.toggle('hidden', !doTranscode);
+        if (legends[2]) legends[2].classList.toggle('hidden', !doConcat);
+    }
+    if (segTrans) segTrans.classList.toggle('hidden', !doTranscode);
+    if (segConcat) segConcat.classList.toggle('hidden', !doConcat);
+    if (segReport) segReport.classList.toggle('hidden', !doReport);
+    if (legendReport) legendReport.classList.toggle('hidden', !doReport);
+    // 標記報表待完成（防止 task_status:done 過早顯示完成摘要）
+    window._backupReportPending = doReport;
+    // 記錄勾選項目 + 待完成集合（不分順序，全部完成才顯示摘要）
+    const pending = new Set();
+    if (doConcat) pending.add('concat');
+    if (doReport) pending.add('report');
+    window._backupPipeline = {
+        phases: ['備份', ...(doTranscode ? ['轉檔'] : []), ...(doConcat ? ['串帶'] : []), ...(doReport ? ['報表'] : [])],
+        pending,  // 尚未完成的非同步階段
+        startTime: Date.now(),
     };
 
     const _selH = getSelectedHosts();
@@ -131,6 +175,17 @@ export async function submitJob() {
                 const firstRemote = _selH.find(h => h.ip !== 'local');
                 return firstRemote ? firstRemote.name : '本機';
             })(),
+            // 串帶進階設定
+            concat_resolution: document.getElementById('bk_cc_res')?.value || '720P',
+            concat_codec: document.getElementById('bk_cc_codec')?.value || 'H.264 (NVENC)',
+            concat_burn_tc: document.getElementById('bk_cc_burn_tc')?.checked ?? true,
+            concat_burn_fn: document.getElementById('bk_cc_burn_fn')?.checked ?? false,
+            // 報表進階設定
+            report_name: document.getElementById('bk_rpt_name')?.value.trim() || '',
+            report_output: document.getElementById('bk_rpt_output')?.value.trim() || '',
+            report_filmstrip: document.getElementById('bk_rpt_filmstrip')?.checked ?? true,
+            report_techspec: document.getElementById('bk_rpt_techspec')?.checked ?? true,
+            report_hash: document.getElementById('bk_rpt_hash')?.checked ?? false,
         };
         payload.do_transcode = false;
         payload.do_concat = false;
@@ -148,12 +203,41 @@ export async function submitJob() {
             body: JSON.stringify(payload)
         });
         const result = await res.json();
+        if (!res.ok) {
+            appendLog(`任務提交失敗: ${result.detail || result.message || JSON.stringify(result)}`, 'error');
+            alert(result.detail || '任務提交失敗');
+            return;
+        }
         const btnRetry = document.getElementById('btn_retry');
         if (btnRetry) btnRetry.style.display = 'none';
-        appendLog(`請求已送出，伺服器排序狀態: ${result.status}, 排序號: ${result.position}`, 'system');
+        appendLog(`請求已送出，伺服器排序狀態: ${result.status}, 任務 ID: ${result.job_id || '?'}`, 'system');
+        if (result.warning) {
+            appendLog(`⚠️ ${result.warning}`, 'system');
+        }
     } catch (err) {
         appendLog(`請求發送失敗: ${err.message}`, 'error');
     }
+
+    } finally {
+        _submitting = false;
+        if (submitBtn) {
+            submitBtn.disabled = false;
+            submitBtn.classList.remove('opacity-70', 'cursor-not-allowed');
+            submitBtn.textContent = submitBtn._origText || '開始備份';
+        }
+    }
+}
+
+function toggleConcatOptions() {
+    const panel = document.getElementById('concat_options_panel');
+    const checked = document.getElementById('chk_concat')?.checked;
+    if (panel) panel.classList.toggle('hidden', !checked);
+}
+
+function toggleReportOptions() {
+    const panel = document.getElementById('report_options_panel');
+    const checked = document.getElementById('chk_report')?.checked;
+    if (panel) panel.classList.toggle('hidden', !checked);
 }
 
 // Ensure functions are added to window object so inline event handlers in index.html still work during refactor,
@@ -167,6 +251,11 @@ export function initBackupTab() {
     setupInputDrop('local_root');
     setupInputDrop('nas_root');
     setupInputDrop('proxy_root');
+    setupInputDrop('bk_rpt_output');
+
+    // Sync initial visibility of concat/report options panels
+    toggleConcatOptions();
+    toggleReportOptions();
 }
 
 
@@ -174,3 +263,5 @@ export function initBackupTab() {
 window.addSourceRow = addSourceRow;
 window.setTodayName = setTodayName;
 window.submitJob = submitJob;
+window.toggleConcatOptions = toggleConcatOptions;
+window.toggleReportOptions = toggleReportOptions;

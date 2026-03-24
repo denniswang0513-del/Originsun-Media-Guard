@@ -41,13 +41,7 @@ except ImportError:
         _PLAYWRIGHT_AVAILABLE = False
 
 
-def _fmt_size(size_bytes: int) -> str:
-    """Return a human-readable file size string."""
-    for unit in ("B", "KB", "MB", "GB", "TB"):
-        if size_bytes < 1024:
-            return f"{size_bytes:.1f} {unit}"
-        size_bytes //= 1024  # type: ignore
-    return f"{size_bytes} TB"
+from utils.formatting import fmt_size as _fmt_size
 
 
 def _fmt_clip_duration(seconds: float) -> str:
@@ -75,7 +69,7 @@ def _fmt_duration(start: datetime, end: Optional[datetime]) -> str:
     return f"{s}s"
 
 
-def generate_report(manifest) -> str:  # type: ignore
+def generate_report(manifest, public_url: str = "", pdf_url: str = "") -> str:  # type: ignore
     """
     Render a ReportManifest into a self-contained HTML string.
 
@@ -83,6 +77,10 @@ def generate_report(manifest) -> str:  # type: ignore
     ----------
     manifest : ReportManifest
         The fully populated manifest object from core_engine.
+    public_url : str, optional
+        Public URL for the HTML report (displayed as clickable link).
+    pdf_url : str, optional
+        Public URL for the PDF report (used for download button).
 
     Returns
     -------
@@ -112,32 +110,48 @@ def generate_report(manifest) -> str:  # type: ignore
         "generated_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
         "elapsed": _fmt_duration(manifest.start_time, manifest.end_time),
         "total_size_str": _fmt_size(manifest.total_bytes),
+        "public_url": public_url,
+        "pdf_url": pdf_url,
     }
 
     return template.render(**context)
 
 
-def save_report(manifest, output_dir: str, custom_name: str = "") -> str:  # type: ignore
+def save_report(manifest, output_dir: str, custom_name: str = "",
+                public_url: str = "", pdf_url: str = "",
+                exact_filename: str = "") -> str:  # type: ignore
     """
-    Generate and save the HTML report to `output_dir/Originsun_Reports/`.
+    Generate and save the HTML report to *output_dir* (caller provides final path).
 
     Parameters
     ----------
+    output_dir : str
+        The directory where the HTML file will be saved.
+        Caller is responsible for including ``Originsun_Reports`` if desired.
     custom_name : str, optional
-        If provided, the file is saved as `{custom_name}.html`.
-        Otherwise defaults to `Report_{project}_{timestamp}.html`.
+        If provided, the file is saved as ``{custom_name}_{timestamp}.html``.
+        Otherwise defaults to ``Report_{project}_{timestamp}.html``.
+    public_url : str, optional
+        Public URL for the HTML report (displayed as clickable link).
+    pdf_url : str, optional
+        Public URL for the PDF report (used for download button).
+    exact_filename : str, optional
+        If provided, use this exact filename (bypasses custom_name logic).
+        Useful when caller needs to guarantee the filename matches a pre-computed URL.
 
     Returns
     -------
     str
         Absolute path of the saved HTML file.
     """
-    html_content = generate_report(manifest)
+    html_content = generate_report(manifest, public_url=public_url, pdf_url=pdf_url)
 
-    report_dir = os.path.join(output_dir, "Originsun_Reports")
-    os.makedirs(report_dir, exist_ok=True)
+    # Use output_dir directly — caller is responsible for the full path
+    os.makedirs(output_dir, exist_ok=True)
 
-    if custom_name:
+    if exact_filename:
+        filename = exact_filename
+    elif custom_name:
         # Sanitise to avoid path-traversal characters
         safe_name = "".join(c for c in custom_name if c.isalnum() or c in " _-").strip()
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -146,7 +160,7 @@ def save_report(manifest, output_dir: str, custom_name: str = "") -> str:  # typ
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         filename = f"Report_{manifest.project_name}_{timestamp}.html"
 
-    out_path = os.path.join(report_dir, filename)
+    out_path = os.path.join(output_dir, filename)
 
     with open(out_path, "w", encoding="utf-8") as f:
         f.write(html_content)
@@ -174,4 +188,6 @@ async def generate_pdf_from_html(local_html_path: str, output_pdf_path: str) -> 
         return True
     except Exception as e:
         print(f"[error] PDF Generation Failed: {e}")
+        import traceback
+        traceback.print_exc()
         return False

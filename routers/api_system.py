@@ -7,16 +7,60 @@ from fastapi import APIRouter, BackgroundTasks, Request  # type: ignore
 from fastapi.responses import JSONResponse, FileResponse  # type: ignore
 
 import core.state as state  # type: ignore
-from core.engine_inst import engine  # type: ignore
 from core.socket_mgr import sio  # type: ignore
 from config import load_settings, save_settings  # type: ignore
-from core.schemas import ListDirRequest, DownloadModelRequest, OpenFileRequest  # type: ignore
+from core.schemas import ListDirRequest, DownloadModelRequest, OpenFileRequest, ValidatePathsRequest  # type: ignore
 
 router = APIRouter()
 
+
+def _check_admin(request: Request):
+    """Check admin permission. No-op if auth module not available."""
+    try:
+        from core.auth import check_admin
+        check_admin(request)
+    except ImportError:
+        pass  # auth module not available, skip check
+
+
 @router.get("/api/v1/health")
 async def health_check():
-    return {"status": "ok", "service": "OriginsunTranscode", "busy": state.worker_busy, "host": socket.gethostname()}
+    jobs = state.get_all_jobs()
+    running = [j for j in jobs.values() if j.status == state.JobStatus.RUNNING]
+    busy = len(running) > 0
+
+    cpu_pct = 0.0
+    mem_pct = 0.0
+    try:
+        import psutil  # type: ignore
+        cpu_pct = psutil.cpu_percent(interval=None)
+        mem_pct = psutil.virtual_memory().percent
+    except Exception:
+        pass
+
+    ver = ""
+    try:
+        import json as _j
+        with open("version.json", "r", encoding="utf-8") as f:
+            ver = _j.load(f).get("version", "")
+    except Exception:
+        pass
+
+    current_tasks = [
+        {"job_id": j.job_id, "project_name": j.project_name, "task_type": j.task_type}
+        for j in running
+    ]
+
+    return {
+        "status": "ok",
+        "hostname": socket.gethostname(),
+        "cpu_percent": cpu_pct,
+        "memory_percent": mem_pct,
+        "worker_busy": busy,
+        "active_job_count": len(running),
+        "current_tasks": current_tasks,
+        "version": ver,
+    }
 
 @router.get("/api/settings/load")
 async def load_settings_api():
@@ -24,6 +68,7 @@ async def load_settings_api():
 
 @router.post("/api/settings/save")
 async def save_settings_api(req: Request):
+    _check_admin(req)
     try:
         new_settings = await req.json()
         save_settings(new_settings)
@@ -104,42 +149,179 @@ async def download_model_endpoint(req: DownloadModelRequest, background_tasks: B
     return {"status": "started", "model_size": req.model_size}
 
 @router.post("/api/v1/control/pause")
-async def pause_job():
-    engine.request_pause()
-    state._report_pause_event.clear()
+async def pause_job(job_id: str = ""):
+    if job_id:
+        job = state.get_job(job_id)
+        if not job:
+            return JSONResponse(status_code=404, content={"error": "Job not found"})
+        if job.engine:
+            job.engine.request_pause()
+        if job.report_pause_event:
+            job.report_pause_event.clear()
+        job.status = state.JobStatus.PAUSED
+        return {"status": "paused", "job_id": job_id}
+    # No job_id: pause ALL running jobs (backward compat)
+    for j in state.get_all_jobs().values():
+        if j.status == state.JobStatus.RUNNING:
+            if j.engine:
+                j.engine.request_pause()
+            if j.report_pause_event:
+                j.report_pause_event.clear()
+            j.status = state.JobStatus.PAUSED
     return {"status": "paused"}
 
 @router.post("/api/v1/control/resume")
-async def resume_job():
-    engine.request_resume()
-    state._report_pause_event.set()
+async def resume_job(job_id: str = ""):
+    if job_id:
+        job = state.get_job(job_id)
+        if not job:
+            return JSONResponse(status_code=404, content={"error": "Job not found"})
+        if job.engine:
+            job.engine.request_resume()
+        if job.report_pause_event:
+            job.report_pause_event.set()
+        job.status = state.JobStatus.RUNNING
+        return {"status": "resumed", "job_id": job_id}
+    # No job_id: resume ALL paused jobs (backward compat)
+    for j in state.get_all_jobs().values():
+        if j.status == state.JobStatus.PAUSED:
+            if j.engine:
+                j.engine.request_resume()
+            if j.report_pause_event:
+                j.report_pause_event.set()
+            j.status = state.JobStatus.RUNNING
     return {"status": "resumed"}
 
 @router.post("/api/v1/control/stop")
-async def stop_job():
-    engine.request_stop()
-    if state._current_report_task and not state._current_report_task.done():
-        state._current_report_task.cancel()
+async def stop_job(job_id: str = ""):
+    if job_id:
+        job = state.get_job(job_id)
+        if not job:
+            return JSONResponse(status_code=404, content={"error": "Job not found"})
+        if job.engine:
+            job.engine.request_stop()
+        if job.asyncio_task and not job.asyncio_task.done():
+            job.asyncio_task.cancel()
+        job.status = state.JobStatus.CANCELLED
+        return {"status": "stopped", "job_id": job_id}
+    # No job_id: stop ALL jobs (running + paused + queued)
+    for j in list(state.get_all_jobs().values()):
+        if j.status in (state.JobStatus.RUNNING, state.JobStatus.PAUSED):
+            if j.engine:
+                j.engine.request_stop()
+            if j.asyncio_task and not j.asyncio_task.done():
+                j.asyncio_task.cancel()
+        if j.status in (state.JobStatus.RUNNING, state.JobStatus.PAUSED,
+                         state.JobStatus.QUEUED, state.JobStatus.WAITING):
+            j.status = state.JobStatus.CANCELLED
+    # 重置所有活躍 slot 計數，防止 slot 被永久佔用
+    state._active_counts.clear()
     return {"status": "stopped"}
 
 @router.post("/api/v1/control/update")
-async def update_agent():
-    import subprocess
+async def update_agent(request: Request):
+    _check_admin(request)
+    import subprocess, json, sys
     try:
         base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-        subprocess.Popen(["wscript.exe", os.path.join(base_dir, "start_hidden.vbs")], shell=False)
+        bat_path = os.path.join(base_dir, "update_agent.bat")
+        monitor_path = os.path.join(base_dir, "update_monitor.py")
+        status_file = os.path.join(base_dir, "update_status.json")
+
+        # Write initial status so monitor has something to serve immediately
+        with open(status_file, 'w', encoding='utf-8') as f:
+            json.dump({"step": 0, "pct": 2, "msg": "正在啟動更新程序..."}, f, ensure_ascii=False)
+
+        # Start monitor on port 8001 — DETACHED so it survives os._exit
+        subprocess.Popen(
+            [sys.executable, monitor_path],
+            creationflags=subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP,
+            close_fds=True
+        )
+
+        # Copy bat to TEMP so extraction won't break it mid-execution
+        import shutil, tempfile
+        temp_bat = os.path.join(tempfile.gettempdir(), "originsun_agent_launcher.bat")
+        shutil.copy2(bat_path, temp_bat)
+
+        # Read master server URL from settings
+        master = load_settings().get("master_server", "http://192.168.1.11:8000")
+
+        # Start update bat from TEMP — hidden window
+        si = subprocess.STARTUPINFO()
+        si.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+        si.wShowWindow = 0  # SW_HIDE
+        subprocess.Popen(
+            ["cmd", "/c", temp_bat, "tempcopy", base_dir, master],
+            startupinfo=si,
+            creationflags=subprocess.CREATE_NEW_CONSOLE,
+            shell=False
+        )
         asyncio.get_running_loop().call_later(1.0, os._exit, 0)
         return {"status": "updating"}
-    except Exception as e: return {"status": "error", "message": str(e)}
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
 
 @router.get("/api/v1/status")
 async def get_status(log_offset: int = 0):
-    logs = list(state._status_log_buffer)[log_offset:]  # type: ignore
+    jobs = state.get_all_jobs()
+    active_statuses = (
+        state.JobStatus.QUEUED, state.JobStatus.WAITING,
+        state.JobStatus.RUNNING, state.JobStatus.PAUSED,
+    )
+    active_jobs = {}
+    for jid, j in jobs.items():
+        if j.status in active_statuses:
+            active_jobs[jid] = {
+                "job_id": j.job_id,
+                "project_name": j.project_name,
+                "task_type": j.task_type,
+                "status": j.status.value,
+                "progress": j.progress,
+                "created_at": j.created_at,
+                "started_at": j.started_at,
+            }
+
+    busy = any(j.status == state.JobStatus.RUNNING for j in jobs.values())
+    paused = any(j.status == state.JobStatus.PAUSED for j in jobs.values())
+    queue_len = sum(1 for j in jobs.values() if j.status in (state.JobStatus.QUEUED, state.JobStatus.WAITING))
+
+    logs = list(state._global_log_buffer)[log_offset:]
     return {
-        "status": "online", "busy": state.worker_busy, "queue_length": state.task_queue.qsize(),
-        "paused": engine._pause_event.is_set(), "logs": logs, "new_log_offset": log_offset + len(logs),
-        "progress": state._current_progress
+        "status": "online",
+        "busy": busy,
+        "queue_length": queue_len,
+        "paused": paused,
+        "logs": logs,
+        "new_log_offset": log_offset + len(logs),
+        "progress": None,  # deprecated; use active_jobs[id].progress
+        "active_jobs": active_jobs,
     }
+
+@router.get("/api/v1/jobs/{job_id}")
+async def get_job_detail(job_id: str):
+    job = state.get_job(job_id)
+    if not job:
+        return JSONResponse(status_code=404, content={"error": "Job not found"})
+    return {
+        "job_id": job.job_id,
+        "project_name": job.project_name,
+        "task_type": job.task_type,
+        "status": job.status.value,
+        "progress": job.progress,
+        "created_at": job.created_at,
+        "started_at": job.started_at,
+        "finished_at": job.finished_at,
+        "error_detail": job.error_detail,
+    }
+
+@router.get("/api/v1/jobs/{job_id}/logs")
+async def get_job_logs(job_id: str, offset: int = 0):
+    job = state.get_job(job_id)
+    if not job:
+        return JSONResponse(status_code=404, content={"error": "Job not found"})
+    logs = job.log_buffer[offset:]
+    return {"logs": logs, "new_offset": offset + len(logs)}
 
 @router.get("/api/v1/version")
 async def get_version():
@@ -154,13 +336,21 @@ async def get_version():
 
 @router.get("/api/v1/nas_version")
 async def get_nas_version():
-    import json
-    v_file = r"\\192.168.1.132\Container\AI_Workspace\agents\Originsun Media Guard Pro\version.json"
+    """Fetch the latest version from the master server over HTTP."""
+    import json, urllib.request
+    master = load_settings().get("master_server", "")
+    if not master:
+        # 未設定 master_server = 本機就是主控端，直接回傳自己的版號
+        return await get_version()
     try:
-        if os.path.exists(v_file):
-            with open(v_file, "r", encoding="utf-8") as f: return json.load(f)
-        return {"version": "unknown", "error": "NAS version.json not found"}
-    except Exception as e: return {"version": "unknown", "error": str(e)}
+        url = f"{master.rstrip('/')}/api/v1/version"
+        def _fetch():
+            req = urllib.request.Request(url, headers={"User-Agent": "OriginsunAgent/1.0"})
+            with urllib.request.urlopen(req, timeout=5) as r:
+                return json.loads(r.read().decode())
+        return await asyncio.to_thread(_fetch)
+    except Exception as e:
+        return {"version": "unknown", "error": str(e)}
 
 @router.post("/api/v1/utils/open_file")
 async def open_local_file(req: OpenFileRequest):
@@ -180,7 +370,7 @@ async def open_local_folder(req: OpenFileRequest):
             import subprocess
             subprocess.Popen(f'explorer /select,"{req.path}"')
             return {"status": "ok", "opened": folder_path}
-        return {"status": "error"}
+        return {"status": "error", "message": f"資料夾不存在: {folder_path}"}
     except Exception as e: return {"status": "error", "message": str(e)}
 
 @router.get("/api/v1/utils/pick_folder")
@@ -276,6 +466,21 @@ MsgBox "桌面捷徑已成功建立！請查看桌面上的「Originsun Media Gu
         return {"status": "error", "message": f"腳本執行失敗 (cscript 錯誤): {str(e)}"}
     except Exception as e:
         return {"status": "error", "message": f"建立失敗: {str(e)}"}
+
+@router.post("/api/v1/validate_paths")
+async def validate_paths(req: ValidatePathsRequest):
+    """檢查每個路徑的磁碟機是否存在、路徑本身是否存在（供遠端主機派發前驗證）"""
+    results = {}
+    for p in req.paths:
+        drive = os.path.splitdrive(p)[0]  # e.g. "S:"
+        drive_exists = os.path.exists(drive + os.sep) if drive else True
+        path_exists = os.path.exists(p)
+        results[p] = {
+            "drive": drive,
+            "drive_exists": drive_exists,
+            "path_exists": path_exists,
+        }
+    return {"status": "ok", "results": results}
 
 @router.get("/api/v1/utils/resolve_drop")
 async def api_resolve_drop(name: str):
@@ -374,7 +579,8 @@ async def api_resolve_drop(name: str):
     return {"path": path}
 
 @router.post("/api/admin/restart")
-async def admin_restart():
+async def admin_restart(request: Request):
+    _check_admin(request)
     import subprocess
     base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     vbs = os.path.join(base_dir, "start_hidden.vbs")
@@ -400,9 +606,211 @@ async def download_agent():
         return FileResponse(file_path, filename="Originsun_Agent.zip")
     return {"error": "系統尚未打包 Originsun_Agent.zip，請聯絡管理員放置此檔案於伺服器根目錄。"}
 
+@router.get("/download_update")
+async def download_update(background_tasks: BackgroundTasks):
+    """Serve a lightweight code-only ZIP for OTA updates (~10-30MB).
+    Excludes python_embed, ffmpeg, ffprobe, Originsun_Agent.zip, etc."""
+    import zipfile, tempfile
+    base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+    files_to_include = [
+        "main.py", "config.py", "core_engine.py", "report_generator.py",
+        "notifier.py", "drive_sync.py", "transcriber.py", "tts_engine.py",
+        "taiwan_dict.json", "download_model.py", "version.json", "logo.ico",
+        "update_agent.bat", "update_monitor.py", "start_hidden.vbs",
+        "0225_requirements.txt", "bootstrap.py", "server.py",
+    ]
+    # 自動偵測含 .py 的資料夾（排除大型/非必要目錄）
+    _exclude = {'.venv', 'venv', 'node_modules', '.git', '.claude', 'tests',
+                'models', 'voice', 'credentials', '__pycache__', 'e2e',
+                'python_embed', 'windows_helper'}
+    dirs_to_include = ["frontend", "templates", "core", "routers", "utils"]
+    for entry in os.listdir(base_dir):
+        if entry.startswith('.') or entry.startswith('_') or entry in _exclude:
+            continue
+        full = os.path.join(base_dir, entry)
+        if os.path.isdir(full) and entry not in dirs_to_include:
+            if any(f.endswith('.py') for f in os.listdir(full)):
+                dirs_to_include.append(entry)
+
+    tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".zip", prefix="originsun_update_")
+    try:
+        with zipfile.ZipFile(tmp, 'w', zipfile.ZIP_DEFLATED) as zf:
+            for f in files_to_include:
+                full = os.path.join(base_dir, f)
+                if os.path.exists(full):
+                    zf.write(full, f)
+            for d in dirs_to_include:
+                dpath = os.path.join(base_dir, d)
+                if not os.path.isdir(dpath):
+                    continue
+                for root, _, fnames in os.walk(dpath):
+                    if "__pycache__" in root:
+                        continue
+                    for fn in fnames:
+                        fp = os.path.join(root, fn)
+                        arcname = os.path.relpath(fp, base_dir)
+                        zf.write(fp, arcname)
+        tmp.close()
+        background_tasks.add_task(os.unlink, tmp.name)
+        return FileResponse(tmp.name, filename="Originsun_Update.zip",
+                            media_type="application/zip")
+    except Exception as e:
+        tmp.close()
+        try:
+            os.unlink(tmp.name)
+        except OSError:
+            pass
+        return JSONResponse(status_code=500, content={"error": str(e)})
+
+@router.get("/download_updater")
+async def download_updater(request: Request):
+    """Generate a one-click updater bat for first-time migration to HTTP OTA."""
+    from fastapi.responses import Response
+    # Use the request's host so the bat always points back to this server
+    server_url = f"http://{request.headers.get('host', '192.168.1.11:8000')}"
+    bat_content = f"""@echo off
+chcp 65001 >nul
+title Originsun Agent - 一鍵升級
+color 0B
+echo ===================================================
+echo   Originsun Media Guard Pro - 一鍵升級工具
+echo ===================================================
+echo.
+
+set "INSTALL_DIR="
+if exist "C:\\OriginsunAgent\\main.py" set "INSTALL_DIR=C:\\OriginsunAgent"
+if exist "%~dp0main.py" set "INSTALL_DIR=%~dp0"
+if "%INSTALL_DIR%"=="" (
+    echo [Error] 找不到安裝目錄！
+    echo         請將此檔案放到 Agent 安裝目錄中再執行。
+    pause
+    exit /b 1
+)
+if "%INSTALL_DIR:~-1%"=="\\" set "INSTALL_DIR=%INSTALL_DIR:~0,-1%"
+
+echo [System] 安裝目錄: %INSTALL_DIR%
+echo [System] 伺服器: {server_url}
+echo.
+
+:: Kill running agent
+echo [System] 正在停止舊版 Agent...
+for /f "tokens=5" %%P in ('netstat -aon ^| findstr ":8000.*LISTENING" 2^>nul') do (
+    taskkill /F /PID %%P >nul 2>&1
+)
+ping 127.0.0.1 -n 2 >nul
+
+:: Download update
+set "UPDATE_ZIP=%TEMP%\\originsun_update.zip"
+echo [System] 正在從伺服器下載最新版本...
+powershell -ExecutionPolicy Bypass -Command "try {{ [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12; Invoke-WebRequest -Uri '{server_url}/download_update' -OutFile '%UPDATE_ZIP%' -TimeoutSec 300 -UseBasicParsing }} catch {{ Write-Host $_.Exception.Message; exit 1 }}"
+if %errorlevel% neq 0 (
+    echo [Error] 下載失敗！請確認伺服器是否在線。
+    pause
+    exit /b 1
+)
+
+:: Extract
+echo [System] 正在解壓更新檔案...
+powershell -ExecutionPolicy Bypass -Command "Expand-Archive -Path '%UPDATE_ZIP%' -DestinationPath '%INSTALL_DIR%' -Force"
+del /f /q "%UPDATE_ZIP%" >nul 2>&1
+
+echo.
+echo [OK] 升級完成！正在重新啟動 Agent...
+echo.
+
+:: Restart agent
+cd /d "%INSTALL_DIR%"
+if exist "%INSTALL_DIR%\\start_hidden.vbs" (
+    wscript "%INSTALL_DIR%\\start_hidden.vbs"
+) else (
+    start "" "%INSTALL_DIR%\\update_agent.bat"
+)
+
+echo [OK] Agent 已啟動，請重新整理網頁。
+ping 127.0.0.1 -n 3 >nul
+"""
+    return Response(
+        content=bat_content,
+        media_type="application/octet-stream",
+        headers={"Content-Disposition": "attachment; filename=Originsun_Updater.bat"}
+    )
+
+@router.get("/bootstrap.ps1")
+async def bootstrap_ps1(request: Request):
+    """Serve a PowerShell bootstrap script for one-command agent migration."""
+    from fastapi.responses import Response
+    server_url = f"http://{request.headers.get('host', '192.168.1.11:8000')}"
+    ps_content = f"""# Originsun Agent - One-Command Upgrade
+# Usage: powershell -c "irm {server_url}/bootstrap.ps1 | iex"
+[Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+$ErrorActionPreference = 'Stop'
+
+Write-Host ''
+Write-Host '==================================================='
+Write-Host '  Originsun Media Guard Pro - One-Command Upgrade'
+Write-Host '==================================================='
+Write-Host ''
+
+# 1. Find install directory
+$installDir = $null
+$candidates = @(
+    'C:\\OriginsunAgent',
+    "$env:USERPROFILE\\Desktop\\OriginsunAgent",
+    "$env:LOCALAPPDATA\\OriginsunAgent"
+)
+foreach ($d in $candidates) {{
+    if (Test-Path "$d\\main.py") {{ $installDir = $d; break }}
+}}
+if (-not $installDir) {{
+    Write-Host '[ERROR] Cannot find OriginsunAgent install directory!' -ForegroundColor Red
+    Write-Host '        Please run this from the Agent directory or install first.'
+    pause; exit 1
+}}
+Write-Host "[System] Install dir: $installDir"
+Write-Host "[System] Server: {server_url}"
+Write-Host ''
+
+# 2. Kill old agent on port 8000
+Write-Host '[System] Stopping old Agent...'
+try {{
+    Get-NetTCPConnection -LocalPort 8000 -ErrorAction SilentlyContinue |
+        ForEach-Object {{ Stop-Process -Id $_.OwningProcess -Force -ErrorAction SilentlyContinue }}
+}} catch {{}}
+Start-Sleep -Seconds 2
+
+# 3. Download update ZIP
+$zipPath = "$env:TEMP\\originsun_update.zip"
+Write-Host '[System] Downloading latest version...'
+[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+Invoke-WebRequest -Uri '{server_url}/download_update' -OutFile $zipPath -UseBasicParsing -TimeoutSec 300
+
+# 4. Extract (overwrite all)
+Write-Host '[System] Extracting update...'
+Expand-Archive -Path $zipPath -DestinationPath $installDir -Force
+Remove-Item $zipPath -Force -ErrorAction SilentlyContinue
+
+# 5. Restart agent
+Write-Host ''
+Write-Host '[OK] Upgrade complete! Restarting Agent...' -ForegroundColor Green
+$vbs = Join-Path $installDir 'start_hidden.vbs'
+if (Test-Path $vbs) {{
+    Start-Process wscript -ArgumentList "`"$vbs`""
+}} else {{
+    Start-Process (Join-Path $installDir 'update_agent.bat')
+}}
+Write-Host '[OK] Agent started. Please refresh the web page.' -ForegroundColor Green
+Start-Sleep -Seconds 3
+"""
+    return Response(
+        content=ps_content,
+        media_type="text/plain; charset=utf-8",
+    )
+
 @router.get("/download_installer")
 async def download_installer():
-    file_path = "Install_Originsun_Agent.bat"
+    base = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    file_path = os.path.join(base, "Install_or_Update.bat")
     if os.path.exists(file_path):
-        return FileResponse(file_path, filename="Install_Originsun_Agent.bat")
-    return {"error": "找不到自動安裝腳本，請確認伺服器根目錄下有 Install_Originsun_Agent.bat。"}
+        return FileResponse(file_path, filename="Install_or_Update.bat")
+    return {"error": "Install_or_Update.bat not found."}

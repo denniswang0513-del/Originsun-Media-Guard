@@ -1,7 +1,8 @@
 from core_engine import MediaGuardEngine  # type: ignore
-from core.logger import _engine_log_cb, _emit_sync
+from core.logger import make_job_logger  # type: ignore
 
-engine = MediaGuardEngine(
-    logger_cb=_engine_log_cb,
-    error_cb=lambda msg: _emit_sync('log', {'type': 'error', 'msg': msg})
-)
+
+def create_engine(job_id: str) -> MediaGuardEngine:
+    """Factory: create a fresh engine with per-job log/error callbacks."""
+    log_cb, err_cb = make_job_logger(job_id)
+    return MediaGuardEngine(logger_cb=log_cb, error_cb=err_cb)

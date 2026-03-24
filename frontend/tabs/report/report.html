@@ -48,7 +48,7 @@
                     <label class="flex items-center gap-2 cursor-pointer">
                         <input type="checkbox" id="rpt_filmstrip" checked
                             class="form-checkbox text-purple-500 rounded bg-[#1e1e1e] border-[#444]">
-                        <span>🎬 包含膠卷縮圖 (15 幀)</span>
+                        <span>🎬 包含膠卷縮圖</span>
                     </label>
                     <label class="flex items-center gap-2 cursor-pointer">
                         <input type="checkbox" id="rpt_techspec" checked
@@ -78,13 +78,51 @@
                 <div class="px-4 py-8 text-center text-xs text-gray-500 flex items-center justify-center h-full">NAS 尚無歷史報表紀錄</div>
             </div>
         </div>
-
-        <!-- Submit Button -->
-        <div class="flex justify-end pt-2 mt-auto">
-            <button onclick="submitReportJob()"
-                class="bg-[#5b21b6] hover:bg-[#7c3aed] text-white font-bold py-2 px-8 rounded shadow text-sm transition-colors">
-                生成報表
-            </button>
+        <div id="rpt_host_panel" class="hidden p-3 bg-[#1a2a3a] border border-[#2e4a6e] rounded-lg">
+            <div class="text-xs text-blue-300 font-semibold mb-2">處理主機</div>
+            <div id="rpt_host_checkboxes" class="flex flex-wrap gap-x-4 gap-y-1"></div>
         </div>
+
     </div>
+</div>
+
+<div class="mt-6 border-t border-[#3a3a3a] pt-4">
+<!-- Action Bar -->
+<div class="flex justify-between items-center" id="rp-action-bar">
+    <div class="flex gap-2 tab-control-btns hidden">
+        <button onclick="apiControl('pause')" class="bg-[#7a5500] hover:bg-[#b07a00] text-white text-xs font-bold py-2 px-4 rounded shadow transition-colors">暫停</button>
+        <button onclick="apiControl('resume')" class="bg-[#3a5a3a] hover:bg-[#4a7a4a] text-white text-xs font-bold py-2 px-4 rounded shadow transition-colors">繼續</button>
+        <button onclick="apiControl('stop')" class="bg-[#8b0000] hover:bg-[#cc2200] text-white text-xs font-bold py-2 px-4 rounded shadow transition-colors">強制中止</button>
+    </div>
+    <div class="flex gap-3 ml-auto">
+        <button onclick="scheduleJob('report')" class="bg-[#333] hover:bg-[#444] text-gray-300 font-bold py-2 px-6 rounded shadow text-sm transition-colors border border-[#555]">排程</button>
+        <button class="tab-start-btn bg-[#5b21b6] hover:bg-[#7c3aed] text-white font-bold py-2 px-8 rounded shadow text-sm transition-colors"
+            onclick="submitReportJob()" data-idle-text="開始" data-busy-text="開始新佇列">開始</button>
+    </div>
+</div>
+
+<!-- Progress Bar (四段式：掃描/Meta/膠卷/報表輸出) -->
+<div id="rp-progress" class="mt-4 mb-2 hidden">
+    <div class="flex justify-between text-xs text-gray-400 mb-1">
+        <span id="rp-prog-label">備用中...</span>
+        <span id="rp-prog-eta"></span>
+    </div>
+    <div class="relative w-full bg-[#1e1e1e] rounded-full h-4 border border-[#444] overflow-hidden flex">
+        <div id="rp-seg-scan" class="h-4 transition-all duration-300 shrink-0" style="width:0%; background:#1f538d"></div>
+        <div id="rp-seg-meta" class="h-4 transition-all duration-300 shrink-0" style="width:0%; background:#d48a04"></div>
+        <div id="rp-seg-strip" class="h-4 transition-all duration-300 shrink-0" style="width:0%; background:#228b22"></div>
+        <div id="rp-seg-render" class="h-4 transition-all duration-300 shrink-0" style="width:0%; background:#7c3aed"></div>
+    </div>
+    <div class="flex gap-4 mt-1 text-xs text-gray-500 flex-wrap">
+        <span class="flex items-center gap-1"><span class="inline-block w-2 h-2 rounded-full" style="background:#1f538d"></span>[掃描] <span id="rp-lbl-scan">0%</span></span>
+        <span class="flex items-center gap-1"><span class="inline-block w-2 h-2 rounded-full" style="background:#d48a04"></span>[Meta/Hash] <span id="rp-lbl-meta">0%</span></span>
+        <span class="flex items-center gap-1"><span class="inline-block w-2 h-2 rounded-full" style="background:#228b22"></span>[膠卷生成] <span id="rp-lbl-strip">0%</span></span>
+        <span class="flex items-center gap-1"><span class="inline-block w-2 h-2 rounded-full" style="background:#7c3aed"></span>[報表輸出] <span id="rp-lbl-render">0%</span></span>
+    </div>
+</div>
+
+<div id="rp-remote-hosts-progress" class="hidden mt-2 mb-2 p-3 bg-[#1a1a2e] border border-[#2e3a6e] rounded-lg">
+    <div class="text-xs text-blue-300 mb-2 font-semibold">🖥️ 遠端主機進度</div>
+    <div id="rp-remote-host-rows" class="flex flex-col gap-2"></div>
+</div>
 </div>

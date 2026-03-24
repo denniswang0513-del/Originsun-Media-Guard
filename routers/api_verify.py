@@ -1,14 +1,18 @@
-from fastapi import APIRouter, BackgroundTasks  # type: ignore
-from core.schemas import VerifyRequest
-import core.state as state  # type: ignore
-from core.worker import _background_worker  # type: ignore
+import os
+from fastapi import APIRouter  # type: ignore
+from fastapi.responses import JSONResponse  # type: ignore
+from core.schemas import VerifyRequest  # type: ignore
+from core.worker import enqueue_job  # type: ignore
 
 router = APIRouter()
 
 @router.post("/api/v1/jobs/verify")
-async def create_verify_job(req: VerifyRequest, bg_tasks: BackgroundTasks):
-    state.task_queue.put(req)
-    if not state.worker_busy:
-        state.worker_busy = True
-        bg_tasks.add_task(_background_worker)
-    return {"status": "queued", "position": state.task_queue.qsize()}
+async def create_verify_job(req: VerifyRequest):
+    project_name = req.project_name or (
+        os.path.basename(req.pairs[0][0]) if req.pairs else "unnamed"
+    )
+    job_id, warning = await enqueue_job(req, project_name, "verify")
+    resp = {"status": "queued", "job_id": job_id}
+    if warning:
+        resp["warning"] = warning
+    return resp

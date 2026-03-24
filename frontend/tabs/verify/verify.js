@@ -33,7 +33,7 @@ export function addVerifySourceRow(defaultPath1 = '', defaultPath2 = '') {
     return `vf_src_${vfIndex}`;
 }
 
-export async function submitVerify() {
+export function collectVerifyPayload() {
     const rows = document.getElementById('vf_source_list').children;
     const pairs = [];
     for (let row of rows) {
@@ -44,17 +44,53 @@ export async function submitVerify() {
     }
     if (pairs.length === 0) {
         alert('至少需要一組完整的比對路徑！');
-        return;
+        return { valid: false };
     }
-
     const vfMode = document.querySelector('input[name="vf_mode"]:checked').value;
     const payload = {
         pairs: pairs,
         mode: vfMode
     };
+    return { valid: true, payload, name: '檔案比對' };
+}
+window.collectVerifyPayload = collectVerifyPayload;
+
+let _vfSubmitting = false;
+
+export async function submitVerify() {
+    if (_vfSubmitting) return;
+    _vfSubmitting = true;
+    window._activeJobTab = 'verify';
+
+    const submitBtn = document.querySelector('#tab_verify button[onclick="submitVerify()"]');
+    if (submitBtn) {
+        submitBtn.disabled = true;
+        submitBtn.classList.add('opacity-70', 'cursor-not-allowed');
+        submitBtn._origText = submitBtn.textContent;
+        submitBtn.textContent = '提交中...';
+    }
 
     try {
-        window._lastJob = { url: 'http://localhost:8000/api/v1/jobs/verify', payload };
+
+    const collected = collectVerifyPayload();
+    if (!collected.valid) return;
+    const payload = collected.payload;
+    const vfMode = payload.mode;
+
+    // 讀取處理主機
+    const vfHostObj = window.collectSelectedHost ? window.collectSelectedHost('vf_host_checkboxes') : { name: '本機', ip: 'local' };
+    const isLocal = vfHostObj.ip === 'local';
+    const vfHostUrl = isLocal ? getComputeBaseUrl() : 'http://' + vfHostObj.ip;
+
+    if (!isLocal && window.initRemoteHostProgress) {
+        window._remoteJobType = 'verify';
+        window._activeRemoteHosts = {};
+        if (window.showRemoteMainProgress) window.showRemoteMainProgress('遠端比對中...');
+        window.initRemoteHostProgress([vfHostObj]);
+    }
+
+    try {
+        window._lastJob = { url: vfHostUrl + '/api/v1/jobs/verify', payload };
         const res = await fetch(window._lastJob.url, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -63,9 +99,24 @@ export async function submitVerify() {
         const result = await res.json();
         const retryBtn = document.getElementById('btn_retry');
         if (retryBtn) retryBtn.style.display = 'none';
-        appendLog(`比對請求已送出，模式：${vfMode === 'quick' ? '快速' : 'XXH64 進階'}，排序號: ${result.position}`, 'system');
-    } catch (e) { 
-        appendLog('發送失敗: ' + e, 'error'); 
+        appendLog(`比對請求已送出至 [${vfHostObj.name}]，模式：${vfMode === 'quick' ? '快速' : 'XXH64 進階'}，任務 ID: ${result.job_id || '?'}`, 'system');
+        if (result.warning) appendLog(`⚠️ ${result.warning}`, 'system');
+        if (!isLocal) {
+            if (window.updateHostProgress) window.updateHostProgress(vfHostObj.ip, 20, '已排程，比對中...', '#0d9488');
+            window._activeRemoteHosts[vfHostObj.ip] = { host: vfHostObj, lastSeen: Date.now(), startTime: Date.now(), logOffset: 0 };
+            if (window.startHeartbeatMonitor) window.startHeartbeatMonitor();
+        }
+    } catch (e) {
+        appendLog('發送失敗: ' + e, 'error');
+    }
+
+    } finally {
+        _vfSubmitting = false;
+        if (submitBtn) {
+            submitBtn.disabled = false;
+            submitBtn.classList.remove('opacity-70', 'cursor-not-allowed');
+            submitBtn.textContent = submitBtn._origText || '開始比對';
+        }
     }
 }
 
