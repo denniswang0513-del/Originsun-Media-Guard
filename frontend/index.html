@@ -35,18 +35,9 @@
             <select id="compute_mode" style="display:none;">
                 <option value="local" selected>本機</option>
             </select>
-            <button onclick="createShortcut()" id="btn_create_shortcut" style="display: none;"
-                class="bg-[#2a6cbf] hover:bg-[#3b82f6] text-white text-xs font-bold py-1 px-3 rounded shadow transition-colors items-center gap-1">
-                <span>✨ 建立桌面捷徑</span>
-            </button>
-            <button onclick="showInstallModal()"
-                class="bg-[#1f538d] hover:bg-[#2a6cbf] text-white text-xs font-bold py-1 px-3 rounded shadow transition-colors flex items-center gap-1">
-                <span>📥 下載安裝檔</span>
-            </button>
-            <button id="btnOpenSettings" class="btn-header-action admin-only"
-                style="background-color: #374151; color: white; border: 1px solid #4B5563; padding: 4px 12px; border-radius: 4px; cursor: pointer; margin-left: 8px; font-size: 12px; display: none;">
-                ⚙️ 系統設定
-            </button>
+            <!-- 三個按鈕隱藏，改由 👤 選單觸發 -->
+            <button onclick="createShortcut()" id="btn_create_shortcut" style="display: none;"></button>
+            <button id="btnOpenSettings" class="admin-only" style="display: none;"></button>
             <button id="btn-auth" onclick="window._authToggle()"
                 style="background: transparent; border: 1px solid #555; border-radius: 50%; width: 30px; height: 30px; cursor: pointer; font-size: 14px; margin-left: 4px; color: #888;"
                 title="登入">👤</button>

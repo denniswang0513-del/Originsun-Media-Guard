@@ -777,7 +777,7 @@
 }
 
 .pj-machine-card {
-    width: 180px;
+    width: 200px;
     background: #1a1a1a;
     border: 1px solid #2a2a2a;
     border-radius: 6px;
@@ -920,11 +920,19 @@
     color: #666;
 }
 
+/* Version row */
+.pj-machine-version-row {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    margin: 4px 0 2px;
+    min-height: 18px;
+}
+
 /* Version badge */
 .pj-version-badge {
     font-size: 9px;
     color: #888;
-    margin-left: auto;
     padding: 1px 5px;
     border-radius: 3px;
     background: #2a2a2a;

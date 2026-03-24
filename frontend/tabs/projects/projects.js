@@ -1010,17 +1010,20 @@ function _createMachineCard(agent) {
     name.appendChild(_text(agent.name || agent.id));
     header.appendChild(name);
 
-    // Version badge + update indicator
+    card.appendChild(header);
+
+    // Version row (separate line)
     const agentVersion = data.version || '';
     const updating = _updatingAgents[agent.id];
+    const versionRow = document.createElement('div');
+    versionRow.className = 'pj-machine-version-row';
     if (updating) {
-        // Show update progress
         const updBadge = document.createElement('span');
         updBadge.className = 'pj-version-badge pj-version-updating';
         const PHASE_TEXT = { downloading: '下載中', installing: '安裝套件', extracting: '解壓中',
             restarting: '重啟中', triggering: '觸發中', updating: '更新中' };
         updBadge.textContent = `⏳ ${PHASE_TEXT[updating.phase] || updating.phase} ${updating.pct || 0}%`;
-        header.appendChild(updBadge);
+        versionRow.appendChild(updBadge);
     } else if (agentVersion) {
         const vBadge = document.createElement('span');
         vBadge.className = 'pj-version-badge';
@@ -1028,21 +1031,19 @@ function _createMachineCard(agent) {
         if (_masterVersion && _isNewer(_masterVersion, agentVersion)) {
             vBadge.classList.add('pj-version-outdated');
             vBadge.textContent += ' ⬆';
-            header.appendChild(vBadge);
-            // Update button (admin only)
+            versionRow.appendChild(vBadge);
             if (window._isAdmin) {
                 const updBtn = document.createElement('button');
                 updBtn.className = 'pj-btn-inline-update';
                 updBtn.textContent = '更新';
                 updBtn.addEventListener('click', (e) => { e.stopPropagation(); _triggerAgentUpdate(agent.id); });
-                header.appendChild(updBtn);
+                versionRow.appendChild(updBtn);
             }
         } else {
-            header.appendChild(vBadge);
+            versionRow.appendChild(vBadge);
         }
     }
-
-    card.appendChild(header);
+    card.appendChild(versionRow);
 
     // Remove button (admin only)
     if (window._isAdmin) {

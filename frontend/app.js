@@ -46,34 +46,62 @@ function _applyAuthState(isAdmin) {
 }
 
 window._authToggle = function() {
-    if (window._isAdmin || window._authUser) {
-        // Show dropdown
-        let dd = document.getElementById('auth-dropdown');
-        if (dd) { dd.remove(); return; }
-        dd = document.createElement('div');
-        dd.id = 'auth-dropdown';
-        dd.style.cssText = 'position:fixed;top:50px;right:10px;background:#2d2d2d;border:1px solid #555;border-radius:8px;padding:8px 0;z-index:100;min-width:160px;box-shadow:0 4px 12px rgba(0,0,0,0.5);';
+    let dd = document.getElementById('auth-dropdown');
+    if (dd) { dd.remove(); return; }
+    dd = document.createElement('div');
+    dd.id = 'auth-dropdown';
+    dd.style.cssText = 'position:fixed;top:50px;right:10px;background:#2d2d2d;border:1px solid #555;border-radius:8px;padding:8px 0;z-index:100;min-width:180px;box-shadow:0 4px 12px rgba(0,0,0,0.5);';
 
+    const _item = (icon, text, onclick) => `<div onclick="${onclick}" style="padding:6px 14px;cursor:pointer;font-size:12px;color:#ddd;display:flex;align-items:center;gap:6px;" onmouseover="this.style.background='#3a3a3a'" onmouseout="this.style.background=''">${icon} ${text}</div>`;
+    const _sep = '<div style="border-top:1px solid #444;margin:4px 0;"></div>';
+
+    let html = '';
+
+    if (window._authUser) {
+        // 已登入
+        html += `<div style="padding:6px 14px 8px;color:#aaa;font-size:11px;">👤 ${window._authUser.username} (${window._authUser.role})</div>`;
+        html += _sep;
+
+        // 頁籤設定
         const TAB_NAMES = {backup:'備份並轉檔',verify:'檔案比對',transcode:'轉 Proxy',concat:'製作串帶',report:'檔案視覺報表',transcribe:'AI 逐字稿',tts:'語音生成'};
         const tabs = window._authUser?.visible_tabs;
-        const ALL_TABS = Object.keys(TAB_NAMES);
-
-        let html = `<div style="padding:4px 12px 8px;color:#aaa;font-size:11px;border-bottom:1px solid #444;">👤 ${window._authUser?.username || ''} (${window._authUser?.role || ''})</div>`;
-        html += `<div style="padding:8px 12px;font-size:12px;color:#ccc;">📋 顯示頁籤</div>`;
-        ALL_TABS.forEach(t => {
-            const checked = !tabs || tabs.includes(t);
-            html += `<label style="display:flex;align-items:center;gap:6px;padding:2px 12px;cursor:pointer;font-size:12px;color:#ddd;">
-                <input type="checkbox" ${checked?'checked':''} data-tab="${t}" onchange="window._toggleTab(this)"> ${TAB_NAMES[t]}</label>`;
+        html += `<div style="padding:4px 14px;font-size:11px;color:#888;">📋 顯示頁籤</div>`;
+        Object.entries(TAB_NAMES).forEach(([k, v]) => {
+            const checked = !tabs || tabs.includes(k);
+            html += `<label style="display:flex;align-items:center;gap:6px;padding:2px 14px;cursor:pointer;font-size:12px;color:#ddd;">
+                <input type="checkbox" ${checked?'checked':''} data-tab="${k}" onchange="window._toggleTab(this)"> ${v}</label>`;
         });
-        html += `<div style="border-top:1px solid #444;margin-top:8px;padding:8px 12px;">
-            <button onclick="window._authLogout()" style="background:transparent;border:1px solid #ef4444;color:#ef4444;border-radius:4px;padding:3px 12px;cursor:pointer;font-size:12px;width:100%;">登出</button></div>`;
-        dd.innerHTML = html;
-        document.body.appendChild(dd);
-        setTimeout(() => document.addEventListener('click', function _close(e) {
-            if (!dd.contains(e.target) && e.target.id !== 'btn-auth') { dd.remove(); document.removeEventListener('click', _close); }
-        }), 100);
-        return;
+        html += _sep;
+
+        // 工具
+        html += _item('✨', '建立桌面捷徑', "createShortcut();document.getElementById('auth-dropdown')?.remove()");
+        html += _item('📥', '下載安裝檔', "showInstallModal();document.getElementById('auth-dropdown')?.remove()");
+
+        if (window._isAdmin) {
+            html += _sep;
+            html += _item('⚙️', '系統設定', "document.getElementById('btnOpenSettings')?.click();document.getElementById('auth-dropdown')?.remove()");
+        }
+
+        html += _sep;
+        html += `<div style="padding:6px 14px;">
+            <button onclick="window._authLogout()" style="background:transparent;border:1px solid #ef4444;color:#ef4444;border-radius:4px;padding:4px 0;cursor:pointer;font-size:12px;width:100%;">登出</button></div>`;
+    } else {
+        // 未登入
+        html += _item('✨', '建立桌面捷徑', "createShortcut();document.getElementById('auth-dropdown')?.remove()");
+        html += _item('📥', '下載安裝檔', "showInstallModal();document.getElementById('auth-dropdown')?.remove()");
+        html += _sep;
+        html += `<div style="padding:6px 14px;">
+            <button onclick="document.getElementById('auth-dropdown')?.remove();window._showLoginModal()" style="background:#3b82f6;color:#fff;border:none;border-radius:4px;padding:4px 0;cursor:pointer;font-size:12px;width:100%;">🔑 登入</button></div>`;
     }
+
+    dd.innerHTML = html;
+    document.body.appendChild(dd);
+    setTimeout(() => document.addEventListener('click', function _close(e) {
+        if (!dd.contains(e.target) && e.target.id !== 'btn-auth') { dd.remove(); document.removeEventListener('click', _close); }
+    }), 100);
+};
+
+window._showLoginModal = function() {
     // Show login modal
     let modal = document.getElementById('auth-login-modal');
     if (modal) { modal.classList.remove('hidden'); return; }
