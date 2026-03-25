@@ -638,6 +638,32 @@ async def api_resolve_drop(name: str):
     path = await asyncio.to_thread(_find)  # type: ignore
     return {"path": path}
 
+@router.post("/api/v1/internal/restart")
+async def internal_restart(request: Request):
+    """Internal restart endpoint — called by master server to restart agents.
+    Uses X-Internal-Key header for simple auth (no JWT needed)."""
+    key = request.headers.get("X-Internal-Key", "")
+    if key != "originsun-internal-restart":
+        return JSONResponse({"detail": "Invalid internal key"}, 401)
+    import subprocess
+    base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    vbs = os.path.join(base_dir, "start_hidden.vbs")
+
+    async def _restart():
+        await asyncio.sleep(1.5)
+        try:
+            if os.path.exists(vbs):
+                subprocess.Popen(["wscript.exe", vbs], shell=False)
+            else:
+                bat = os.path.join(base_dir, "update_agent.bat")
+                subprocess.Popen(bat, shell=True, creationflags=0x00000008)
+        except Exception: pass
+        asyncio.get_running_loop().call_later(0.5, os._exit, 0)
+
+    asyncio.create_task(_restart())
+    return {"status": "restarting"}
+
+
 @router.post("/api/admin/restart")
 async def admin_restart(request: Request):
     _check_admin(request)

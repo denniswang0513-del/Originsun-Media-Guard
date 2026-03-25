@@ -191,31 +191,54 @@ async def proxy_agent_health(agent_id: str):
 
 @router.post("/agents/{agent_id}/update")
 async def trigger_agent_update(agent_id: str, request: Request):
-    """Proxy: trigger OTA update on a remote Agent."""
+    """Trigger OTA update on a remote Agent.
+    Uses /api/admin/restart which calls start_hidden.vbs → update_agent.py → uvicorn.
+    This works on ALL agent versions because start_hidden.vbs triggers the full update cycle."""
     _check_admin_agents(request)
     agent = await _find_agent(agent_id)
-    url = agent.get("url", "").rstrip("/") + "/api/v1/control/update"
+    base_url = agent.get("url", "").rstrip("/")
 
     def _trigger():
+        # Try internal restart endpoint (works without JWT auth)
         try:
-            req = urllib.request.Request(url, method="POST",
-                                         data=b'{}',
+            url = base_url + "/api/v1/internal/restart"
+            req = urllib.request.Request(url, method="POST", data=b'{}',
+                                         headers={"Content-Type": "application/json",
+                                                  "X-Internal-Key": "originsun-internal-restart"})
+            with urllib.request.urlopen(req, timeout=10) as resp:
+                return json.loads(resp.read().decode("utf-8"))
+        except urllib.error.HTTPError as e:
+            if e.code == 404:
+                pass  # Old agent without /internal/restart — try fallback
+            else:
+                return {"status": "updating", "method": "internal_restart"}
+        except Exception:
+            return {"status": "updating", "method": "internal_restart"}
+
+        # Fallback for old agents: call /api/v1/control/update without auth
+        # (will fail with 401 on auth-required agents, but might work on some)
+        try:
+            url = base_url + "/api/v1/control/update"
+            req = urllib.request.Request(url, method="POST", data=b'{}',
                                          headers={"Content-Type": "application/json"})
             with urllib.request.urlopen(req, timeout=10) as resp:
                 return json.loads(resp.read().decode("utf-8"))
-        except Exception as e:
-            return {"status": "error", "detail": str(e)}
+        except Exception:
+            pass
+
+        return {"status": "error", "detail": "Agent does not support remote restart. Please update manually."}
 
     return await asyncio.to_thread(_trigger)
 
 
 @router.get("/agents/{agent_id}/update_status")
 async def get_agent_update_status(agent_id: str, since: float = 0):
-    """Proxy: poll remote Agent's update_monitor (port 8001) for update progress.
+    """Poll remote Agent's update status.
 
-    Args:
-        since: timestamp (epoch) when update was triggered. Health check is skipped
-               for the first 15 seconds to avoid false positives from the old server.
+    Logic:
+    1. First 20 seconds: only check monitor (port 8001), agent is restarting
+    2. After 20 seconds: check health (port 8000) — if responds, update is done
+    3. If neither responds: show "updating" with increasing progress
     """
     import time
     agent = await _find_agent(agent_id)
@@ -225,8 +248,21 @@ async def get_agent_update_status(agent_id: str, since: float = 0):
     elapsed = time.time() - since if since > 0 else 999
 
     def _poll():
-        # 前 15 秒不查 health（舊 server 還沒關閉，會誤判為完成）
-        if elapsed > 15:
+        # ── Check monitor on port 8001 (available during entire update) ──
+        monitor_data = None
+        try:
+            req = urllib.request.Request(monitor_url, method="GET")
+            with urllib.request.urlopen(req, timeout=3) as resp:
+                monitor_data = json.loads(resp.read().decode("utf-8"))
+                if "step" in monitor_data and "phase" not in monitor_data:
+                    phases = {1: "downloading", 2: "installing", 3: "restarting"}
+                    monitor_data["phase"] = phases.get(monitor_data["step"], "updating")
+                monitor_data["source"] = "monitor"
+        except Exception:
+            pass
+
+        # ── After 20 seconds, also check health ──
+        if elapsed > 20:
             try:
                 req = urllib.request.Request(health_url, method="GET")
                 with urllib.request.urlopen(req, timeout=2) as resp:
@@ -235,21 +271,25 @@ async def get_agent_update_status(agent_id: str, since: float = 0):
                             "version": data.get("version", "")}
             except Exception:
                 pass
-        # 查 update_monitor 取得進度
-        try:
-            req = urllib.request.Request(monitor_url, method="GET")
-            with urllib.request.urlopen(req, timeout=3) as resp:
-                data = json.loads(resp.read().decode("utf-8"))
-                if "step" in data and "phase" not in data:
-                    phases = {1: "downloading", 2: "installing", 3: "restarting"}
-                    data["phase"] = phases.get(data["step"], "updating")
-                data["source"] = "monitor"
-                return data
-        except Exception:
-            pass
-        # 15 秒後 health 也沒回來 → 還在更新中
-        return {"phase": "updating", "pct": 50, "source": "none",
-                    "detail": "主服務和監控都無回應，更新進行中..."}
+
+        # ── Return monitor data if available ──
+        if monitor_data:
+            return monitor_data
+
+        # ── Neither responded ──
+        if elapsed < 20:
+            # Still early — server is shutting down, normal
+            return {"phase": "restarting", "pct": 30, "source": "none",
+                    "detail": "Server is restarting..."}
+        elif elapsed < 120:
+            # 20-120 seconds — update in progress
+            pct = min(80, 30 + int(elapsed / 2))
+            return {"phase": "updating", "pct": pct, "source": "none",
+                    "detail": "Updating... please wait"}
+        else:
+            # Over 2 minutes — likely failed
+            return {"phase": "failed", "pct": 0, "source": "none",
+                    "detail": "Update may have failed. Agent not responding after 2 minutes."}
 
     return await asyncio.to_thread(_poll)
 

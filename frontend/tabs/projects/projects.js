@@ -121,6 +121,18 @@ async function _pollUpdateStatus(agentId, _retries = 0) {
             }
             return;
         }
+        if (d.phase === 'failed') {
+            // Update failed — stop polling, show error
+            delete _updatingAgents[agentId];
+            _updateMachineCard(agentId);
+            if (typeof appendLog === 'function') appendLog(`❌ ${agentId} 更新失敗：${d.detail || 'Agent 無回應'}。請手動執行 Install_or_Update.bat`, 'error');
+            // Continue batch if running
+            if (window._batchUpdateQueue && window._batchUpdateQueue.length > 0) {
+                const next = window._batchUpdateQueue.shift();
+                _triggerAgentUpdate(next);
+            }
+            return;
+        }
     } catch (_) {}
 
     _updateMachineCard(agentId);
