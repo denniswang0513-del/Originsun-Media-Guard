@@ -474,13 +474,28 @@ async def delete_user(username: str, request: Request):
 
 @router.get("/google/config")
 async def google_config():
-    """Return Google OAuth config for frontend (public, no auth required)."""
+    """Return Google OAuth config for frontend (public, no auth required).
+    If local settings have no google_oauth, try fetching from master server."""
     settings = load_settings()
     g = settings.get("google_oauth", {})
-    return {
-        "enabled": g.get("enabled", False),
-        "client_id": g.get("client_id", ""),
-    }
+
+    # If local config has it, return directly
+    if g.get("enabled") and g.get("client_id"):
+        return {"enabled": True, "client_id": g["client_id"]}
+
+    # Otherwise try master server (agent machines don't have google_oauth in settings)
+    master = settings.get("master_server", "")
+    if master:
+        try:
+            import urllib.request, json as _json
+            url = f"{master.rstrip('/')}/api/v1/auth/google/config"
+            req = urllib.request.Request(url, headers={"User-Agent": "OriginsunAgent/2.0"})
+            with urllib.request.urlopen(req, timeout=3) as r:
+                return _json.loads(r.read().decode())
+        except Exception:
+            pass
+
+    return {"enabled": g.get("enabled", False), "client_id": g.get("client_id", "")}
 
 
 async def _find_user_by_google_id(google_id: str) -> Optional[dict]:
@@ -521,10 +536,37 @@ def _generate_unique_username(email: str, display_name: str, existing_users: lis
 
 @router.post("/google/login")
 async def google_login(req: GoogleLoginRequest):
-    """Authenticate via Google OAuth. Auto-creates user on first login."""
-    if verify_google_id_token is None:
-        raise HTTPException(status_code=501, detail="google-auth library not installed on this machine")
+    """Authenticate via Google OAuth. Auto-creates user on first login.
+    If google-auth is not installed (agent machine), proxy to master server."""
     settings = load_settings()
+
+    # Agent machines: proxy Google login to master server
+    if verify_google_id_token is None:
+        master = settings.get("master_server", "")
+        if master:
+            try:
+                import urllib.request, json as _json
+                url = f"{master.rstrip('/')}/api/v1/auth/google/login"
+                data = _json.dumps({"credential": req.credential}).encode()
+                _req = urllib.request.Request(url, data=data, headers={
+                    "Content-Type": "application/json",
+                    "User-Agent": "OriginsunAgent/2.0",
+                })
+                with urllib.request.urlopen(_req, timeout=10) as r:
+                    result = _json.loads(r.read().decode())
+                    # Sync the user locally so agent knows about them
+                    if result.get("username"):
+                        _persist_user({
+                            "username": result["username"],
+                            "role_name": result.get("role_name", DEFAULT_ROLE),
+                            "google_id": result.get("google_id", ""),
+                            "email": result.get("email", ""),
+                            "avatar_url": result.get("avatar_url", ""),
+                        })
+                    return result
+            except Exception as e:
+                raise HTTPException(status_code=502, detail=f"Master server Google login failed: {e}")
+        raise HTTPException(status_code=501, detail="google-auth not installed and no master_server configured")
     g = settings.get("google_oauth", {})
     if not g.get("enabled"):
         raise HTTPException(status_code=400, detail="Google OAuth is not enabled")
