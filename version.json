@@ -1,5 +1,5 @@
 {
-  "version": "1.10.1",
+  "version": "1.10.2",
   "build_date": "2026-03-25",
-  "notes": "OTA fixes: status file path + pip progress + VBS background"
+  "notes": "Google OAuth proxy for agents + publish UI"
 }
