@@ -1,5 +1,5 @@
 {
-  "version": "Google OAuth login + RBAC refactor + UI modals",
+  "version": "1.10.0",
   "pip_install": [
     "asyncpg",
     "huggingface-hub",
