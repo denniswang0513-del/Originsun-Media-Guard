@@ -1,11 +1,10 @@
 {
-  "version": "1.10.0",
+  "version": "1.10.1",
   "pip_install": [
     "asyncpg",
     "huggingface-hub",
     "pydub",
-    "sqlalchemy[asyncio]",
-    "tts"
+    "sqlalchemy[asyncio]"
   ],
   "note": "Agent 更新時自動 pip install 這些套件"
 }
