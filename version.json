@@ -1,5 +1,5 @@
 {
-  "version": "1.10.4",
+  "version": "1.10.5",
   "build_date": "2026-03-25",
-  "notes": "Fix update button: pure Python detached restart"
+  "notes": "Remote update: internal/restart endpoint + improved polling"
 }
