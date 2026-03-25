@@ -5,6 +5,7 @@ color 0B
 
 :: ==== Self-relaunch from TEMP to survive file overwrite ====
 if "%~1"=="tempcopy" goto :run_agent
+if "%~1"=="hidden" goto :run_agent
 :: Copy self to TEMP then relaunch hidden (so ZIP extraction won't break running script)
 set "TEMP_BAT=%TEMP%\originsun_agent_launcher.bat"
 copy /y "%~f0" "%TEMP_BAT%" >nul
