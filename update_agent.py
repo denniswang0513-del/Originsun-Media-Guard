@@ -19,7 +19,7 @@ import re
 # ── Paths ──
 INSTALL_DIR = os.path.dirname(os.path.abspath(__file__))
 ROLLBACK_DIR = os.path.join(INSTALL_DIR, "_rollback")
-STATUS_FILE = os.path.join(INSTALL_DIR, "_update_status.json")
+STATUS_FILE = os.path.join(INSTALL_DIR, "update_status.json")
 VERSION_FILE = os.path.join(INSTALL_DIR, "version.json")
 REQUIREMENTS = os.path.join(INSTALL_DIR, "requirements_agent.txt")
 PREFLIGHT_SCRIPT = os.path.join(INSTALL_DIR, "preflight.py")
