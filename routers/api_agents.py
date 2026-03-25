@@ -103,6 +103,40 @@ class NewAgentRequest(BaseModel):
 
 @router.get("/agents")
 async def list_agents():
+    """List agents. NAS agents.json is the single source of truth.
+    DB agents are merged in (for any that were added via web UI but not yet in NAS)."""
+    nas_dir = _get_nas_agents_dir()
+    nas_agents = _load_agents_json(nas_dir)
+
+    # If NAS has agents, use NAS as primary source
+    if nas_agents:
+        # Also check DB for any agents not in NAS (added via web UI)
+        db_agents = []
+        if state.db_online:
+            try:
+                from db.session import get_session_factory
+                factory = get_session_factory()
+                if factory:
+                    from db.repos import agents_repo
+                    async with factory() as session:
+                        db_agents = await agents_repo.list_all(session)
+            except Exception:
+                pass
+
+        # Merge: NAS is primary, add DB-only agents
+        nas_ids = {a["id"] for a in nas_agents}
+        merged = list(nas_agents)
+        for dba in db_agents:
+            if dba["id"] not in nas_ids:
+                merged.append(dba)
+
+        # Sync merged list back to NAS so new agents persist
+        if len(merged) > len(nas_agents):
+            _save_agents_json(nas_dir, merged)
+
+        return {"agents": merged, "nas_configured": True, "source": "nas+db"}
+
+    # No NAS config — fall back to DB only
     if state.db_online:
         try:
             from db.session import get_session_factory
@@ -111,13 +145,11 @@ async def list_agents():
                 from db.repos import agents_repo
                 async with factory() as session:
                     agents = await agents_repo.list_all(session)
-                    return {"agents": agents, "nas_configured": True, "source": "db"}
+                    return {"agents": agents, "nas_configured": False, "source": "db"}
         except Exception:
             pass
-    # Fallback to JSON
-    nas_dir = _get_nas_agents_dir()
-    agents = _load_agents_json(nas_dir)
-    return {"agents": agents, "nas_configured": bool(nas_dir), "source": "json"}
+
+    return {"agents": [], "nas_configured": False, "source": "none"}
 
 
 @router.post("/agents")
