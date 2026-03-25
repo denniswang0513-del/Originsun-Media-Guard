@@ -1,5 +1,5 @@
 {
-  "version": "1.9.11",
-  "build_date": "2026-03-24",
-  "notes": "Phase A: Auth + user management + tab customization"
+  "version": "1.10.0",
+  "build_date": "2026-03-25",
+  "notes": "Google OAuth login + RBAC refactor + UI modals"
 }

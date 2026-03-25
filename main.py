@@ -19,7 +19,7 @@ import core.state as state  # type: ignore
 
 # ── Router 容錯載入（缺模組時跳過該 router，不 crash）──
 _ROUTER_MODULES = [
-    'api_auth',
+    'api_auth', 'api_roles',
     'api_backup', 'api_verify', 'api_proxy', 'api_concat',
     'api_report', 'api_transcribe', 'api_system', 'api_tts',
     'api_job_history', 'api_queue', 'api_schedules', 'api_agents',
@@ -93,6 +93,26 @@ async def _on_startup():
     except Exception as e:
         state.db_online = False
         print(f"[DB] 初始化失敗: {e}")
+    # ── DB Migration: Google OAuth columns ──
+    if state.db_online:
+        try:
+            from db.session import get_session_factory
+            factory = get_session_factory()
+            if factory:
+                from sqlalchemy import text
+                async with factory() as session:
+                    for col, coltype in [
+                        ("google_id", "VARCHAR(255)"),
+                        ("email", "VARCHAR(255)"),
+                        ("avatar_url", "VARCHAR(512)"),
+                    ]:
+                        try:
+                            await session.execute(text(f"ALTER TABLE users ADD COLUMN IF NOT EXISTS {col} {coltype}"))
+                            await session.commit()
+                        except Exception:
+                            await session.rollback()
+        except Exception:
+            pass
     asyncio.create_task(_periodic_version_check())
     asyncio.create_task(_periodic_db_health())
     from core.scheduler import run_scheduler  # type: ignore

@@ -97,12 +97,27 @@ class Report(Base):
     )
 
 
+class Role(Base):
+    __tablename__ = "roles"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    name = Column(String(32), unique=True, nullable=False)
+    access_level = Column(Integer, nullable=False, default=1)
+    modules = Column(JSONB, nullable=False, default=list)
+    description = Column(String(255), nullable=True)
+
+
 class User(Base):
     __tablename__ = "users"
 
     username = Column(String(64), primary_key=True)
-    password_hash = Column(String(255), nullable=False)
-    role = Column(String(16), nullable=False, default="editor")
-    visible_tabs = Column(JSONB)
+    password_hash = Column(String(255), nullable=True)                  # nullable: Google-only 使用者無密碼
+    role = Column(String(16), nullable=False, default="editor")         # 舊欄位，過渡期保留
+    visible_tabs = Column(JSONB)                                        # 舊欄位，過渡期保留
+    role_id = Column(Integer, nullable=True)                            # 新 RBAC FK（過渡期 nullable）
     first_login = Column(Boolean, default=False)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
+    # ── Google OAuth 欄位 ──
+    google_id = Column(String(255), unique=True, nullable=True, index=True)
+    email = Column(String(255), nullable=True)
+    avatar_url = Column(String(512), nullable=True)

@@ -1,0 +1,83 @@
+[
+  {
+    "username": "admin",
+    "password_hash": "9204c9923e79b746bbc80707078b3419$d7d9056dcf1cbe5c7f93bc58bd0aa274eec40d15e96de8d76afdbfb0dca986a4",
+    "role": "admin",
+    "role_id": 1,
+    "role_name": "admin",
+    "access_level": 3,
+    "modules": [
+      "backup",
+      "verify",
+      "transcode",
+      "concat",
+      "report",
+      "transcribe",
+      "tts",
+      "projects"
+    ],
+    "visible_tabs": null,
+    "first_login": true
+  },
+  {
+    "username": "denniswang0513",
+    "password_hash": "",
+    "role": "editor",
+    "role_id": 3,
+    "role_name": "editor",
+    "access_level": 1,
+    "modules": [
+      "transcode",
+      "concat",
+      "verify",
+      "transcribe"
+    ],
+    "visible_tabs": null,
+    "first_login": true,
+    "google_id": "112850993049190723437",
+    "email": "denniswang0513@gmail.com",
+    "avatar_url": "https://lh3.googleusercontent.com/a/ACg8ocJnPN0iyV5uNAEnOw734Og7tpoziaFuIWv2UPLIbe7AQp5bBg=s96-c"
+  },
+  {
+    "username": "denniswang0513_2",
+    "password_hash": "",
+    "role": "editor",
+    "role_id": 3,
+    "role_name": "editor",
+    "access_level": 1,
+    "modules": [
+      "backup",
+      "verify",
+      "transcode",
+      "concat",
+      "report",
+      "projects"
+    ],
+    "visible_tabs": null,
+    "first_login": true,
+    "google_id": "112850993049190723437",
+    "email": "denniswang0513@gmail.com",
+    "avatar_url": "https://lh3.googleusercontent.com/a/ACg8ocJnPN0iyV5uNAEnOw734Og7tpoziaFuIWv2UPLIbe7AQp5bBg=s96-c"
+  },
+  {
+    "username": "denniswang0513_3",
+    "password_hash": "",
+    "role": "editor",
+    "role_id": 3,
+    "role_name": "editor",
+    "access_level": 1,
+    "modules": [
+      "backup",
+      "verify",
+      "transcode",
+      "concat",
+      "report",
+      "projects"
+    ],
+    "visible_tabs": null,
+    "first_login": true,
+    "google_id": "112850993049190723437",
+    "email": "denniswang0513@gmail.com",
+    "avatar_url": "https://lh3.googleusercontent.com/a/ACg8ocJnPN0iyV5uNAEnOw734Og7tpoziaFuIWv2UPLIbe7AQp5bBg=s96-c"
+  }
+]
