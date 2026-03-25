@@ -220,15 +220,15 @@ async def stop_job(job_id: str = ""):
 
 @router.post("/api/v1/control/update")
 async def update_agent(request: Request):
-    """Trigger OTA update: run update_agent.py, then restart uvicorn.
-    Uses Python directly (not BAT) to avoid legacy BAT issues."""
+    """Trigger OTA update: download new code, then restart uvicorn.
+    Entire flow runs in a detached Python process that survives os._exit."""
     _check_admin(request)
     import subprocess, json, sys
     try:
         base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-        updater_py = os.path.join(base_dir, "update_agent.py")
         monitor_path = os.path.join(base_dir, "update_monitor.py")
         status_file = os.path.join(base_dir, "update_status.json")
+        py = sys.executable
 
         # Write initial status
         with open(status_file, 'w', encoding='utf-8') as f:
@@ -236,64 +236,87 @@ async def update_agent(request: Request):
 
         # Start monitor on port 8001 (DETACHED, survives os._exit)
         subprocess.Popen(
-            [sys.executable, monitor_path],
+            [py, monitor_path],
             creationflags=subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP,
             close_fds=True
         )
 
         master = load_settings().get("master_server", "http://192.168.1.11:8000")
 
-        if os.path.exists(updater_py):
-            # New path: Python updater (download → pip → preflight → rollback)
-            # Then restart via start_hidden.vbs
-            vbs_path = os.path.join(base_dir, "start_hidden.vbs")
-            # Build a one-shot script that: 1) runs updater 2) restarts server
-            import tempfile as _tf
-            restart_script = os.path.join(_tf.gettempdir(), "originsun_restart.py")
-            with open(restart_script, 'w', encoding='utf-8') as f:
-                f.write(f'''import subprocess, sys, os, time
-os.chdir(r"{base_dir}")
-# Phase 1: Run OTA updater
-subprocess.run([r"{sys.executable}", r"{updater_py}", r"{master}"], timeout=600)
-# Phase 2: Kill old server on port 8000
-import socket
-for _ in range(3):
+        # Build a self-contained restart script in TEMP
+        # This script: 1) waits for old server to die 2) runs updater 3) starts new server
+        import tempfile as _tf
+        restart_script = os.path.join(_tf.gettempdir(), "originsun_restart.py")
+        with open(restart_script, 'w', encoding='utf-8') as f:
+            f.write(f'''#!/usr/bin/env python3
+"""One-shot OTA restart script. Runs detached from the main server process."""
+import subprocess, sys, os, time, json
+
+BASE = r"{base_dir}"
+PY = r"{py}"
+MASTER = r"{master}"
+STATUS = os.path.join(BASE, "update_status.json")
+
+def write_status(step, pct, msg):
     try:
-        result = subprocess.run(["netstat", "-ano"], capture_output=True, text=True, timeout=5)
-        for line in result.stdout.splitlines():
+        with open(STATUS, "w", encoding="utf-8") as f:
+            json.dump({{"step": step, "pct": pct, "msg": msg}}, f, ensure_ascii=False)
+    except: pass
+
+def kill_port_8000():
+    """Kill all processes listening on port 8000."""
+    try:
+        r = subprocess.run(["netstat", "-ano"], capture_output=True, text=True, timeout=5)
+        for line in r.stdout.splitlines():
             if ":8000" in line and "LISTENING" in line:
                 pid = line.split()[-1]
-                if pid.isdigit():
+                if pid.isdigit() and int(pid) != os.getpid():
                     subprocess.run(["taskkill", "/F", "/PID", pid], capture_output=True, timeout=5)
     except: pass
-    time.sleep(1)
-# Phase 3: Restart server
-vbs = r"{vbs_path}"
-if os.path.exists(vbs):
-    subprocess.Popen(["wscript", vbs], creationflags=0x00000008)
-else:
-    subprocess.Popen([r"{sys.executable}", "-m", "uvicorn", "main:io_app", "--host", "0.0.0.0", "--port", "8000"],
-                     creationflags=0x00000008 | 0x00000200)
-''')
-            subprocess.Popen(
-                [sys.executable, restart_script],
-                creationflags=subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP,
-                close_fds=True,
-            )
-        else:
-            # Fallback: old BAT path (for agents that don't have update_agent.py yet)
-            bat_path = os.path.join(base_dir, "update_agent.bat")
-            import shutil, tempfile
-            temp_bat = os.path.join(tempfile.gettempdir(), "originsun_agent_launcher.bat")
-            shutil.copy2(bat_path, temp_bat)
-            si = subprocess.STARTUPINFO()
-            si.dwFlags |= subprocess.STARTF_USESHOWWINDOW
-            si.wShowWindow = 0
-            subprocess.Popen(
-                ["cmd", "/c", temp_bat, "tempcopy", base_dir, master],
-                startupinfo=si, creationflags=subprocess.CREATE_NEW_CONSOLE, shell=False
-            )
 
+os.chdir(BASE)
+
+# Wait for old server to release port
+write_status(1, 5, "Waiting for old server to stop...")
+time.sleep(3)
+kill_port_8000()
+time.sleep(2)
+
+# Phase 1: Run OTA updater (if exists)
+updater = os.path.join(BASE, "update_agent.py")
+if os.path.exists(updater):
+    write_status(1, 10, "Running OTA updater...")
+    try:
+        subprocess.run([PY, updater, MASTER], timeout=600, cwd=BASE)
+    except Exception as e:
+        write_status(1, 10, f"Updater error: {{e}}")
+
+# Phase 2: Ensure port 8000 is free
+write_status(2, 80, "Preparing to start server...")
+kill_port_8000()
+time.sleep(1)
+
+# Phase 3: Start uvicorn directly (DETACHED, no VBS, no BAT)
+write_status(3, 90, "Starting server...")
+env = os.environ.copy()
+env["PYTHONPATH"] = BASE
+subprocess.Popen(
+    [PY, "-m", "uvicorn", "main:io_app", "--host", "0.0.0.0", "--port", "8000"],
+    cwd=BASE,
+    env=env,
+    creationflags=0x00000008 | 0x00000200,  # DETACHED + CREATE_NEW_PROCESS_GROUP
+)
+
+write_status(3, 100, "Server started. Waiting for connection...")
+''')
+        # Launch restart script as DETACHED process
+        subprocess.Popen(
+            [py, restart_script],
+            creationflags=subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP,
+            close_fds=True,
+        )
+
+        # Kill ourselves after 1 second (gives time for HTTP response)
         asyncio.get_running_loop().call_later(1.0, os._exit, 0)
         return {"status": "updating"}
     except Exception as e:
