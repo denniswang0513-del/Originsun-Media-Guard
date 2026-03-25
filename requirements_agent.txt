@@ -1,0 +1,25 @@
+# ─── Originsun Media Guard Pro — Agent Dependencies (Minimal) ───
+# This file is used by update_agent.py on agent machines.
+# Do NOT add server-only packages (torch, TTS, whisper, sqlalchemy).
+
+# ── Core Server ──
+fastapi
+uvicorn[standard]
+python-socketio
+python-multipart
+aiofiles
+pydantic
+
+# ── Utilities ──
+xxhash
+requests
+psutil
+Jinja2
+Pillow
+croniter
+
+# ── Google Auth (for login) ──
+google-auth
+google-auth-oauthlib
+google-auth-httplib2
+google-api-python-client

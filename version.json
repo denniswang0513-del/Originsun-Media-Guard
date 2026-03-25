@@ -1,5 +1,5 @@
 {
-  "version": "1.10.0",
+  "version": "1.10.1",
   "build_date": "2026-03-25",
-  "notes": "Google OAuth login + RBAC refactor + UI modals + agent import fix"
+  "notes": "OTA v2: rollback + preflight + agent requirements split"
 }
