@@ -1,4 +1,5 @@
 """Database connection management — async SQLAlchemy + asyncpg."""
+from __future__ import annotations
 
 import asyncio
 from typing import Optional, AsyncGenerator
@@ -184,6 +185,6 @@ async def db_available() -> bool:
         return False
 
 
-def get_session_factory() -> Optional[async_sessionmaker[AsyncSession]]:
+def get_session_factory():
     """Get the session factory (for non-FastAPI contexts like scheduler)."""
     return _session_factory
