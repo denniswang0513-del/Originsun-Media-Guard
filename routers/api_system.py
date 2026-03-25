@@ -220,43 +220,80 @@ async def stop_job(job_id: str = ""):
 
 @router.post("/api/v1/control/update")
 async def update_agent(request: Request):
+    """Trigger OTA update: run update_agent.py, then restart uvicorn.
+    Uses Python directly (not BAT) to avoid legacy BAT issues."""
     _check_admin(request)
     import subprocess, json, sys
     try:
         base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-        bat_path = os.path.join(base_dir, "update_agent.bat")
+        updater_py = os.path.join(base_dir, "update_agent.py")
         monitor_path = os.path.join(base_dir, "update_monitor.py")
         status_file = os.path.join(base_dir, "update_status.json")
 
-        # Write initial status so monitor has something to serve immediately
+        # Write initial status
         with open(status_file, 'w', encoding='utf-8') as f:
-            json.dump({"step": 0, "pct": 2, "msg": "正在啟動更新程序..."}, f, ensure_ascii=False)
+            json.dump({"step": 0, "pct": 2, "msg": "Starting update..."}, f, ensure_ascii=False)
 
-        # Start monitor on port 8001 — DETACHED so it survives os._exit
+        # Start monitor on port 8001 (DETACHED, survives os._exit)
         subprocess.Popen(
             [sys.executable, monitor_path],
             creationflags=subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP,
             close_fds=True
         )
 
-        # Copy bat to TEMP so extraction won't break it mid-execution
-        import shutil, tempfile
-        temp_bat = os.path.join(tempfile.gettempdir(), "originsun_agent_launcher.bat")
-        shutil.copy2(bat_path, temp_bat)
-
-        # Read master server URL from settings
         master = load_settings().get("master_server", "http://192.168.1.11:8000")
 
-        # Start update bat from TEMP — hidden window
-        si = subprocess.STARTUPINFO()
-        si.dwFlags |= subprocess.STARTF_USESHOWWINDOW
-        si.wShowWindow = 0  # SW_HIDE
-        subprocess.Popen(
-            ["cmd", "/c", temp_bat, "tempcopy", base_dir, master],
-            startupinfo=si,
-            creationflags=subprocess.CREATE_NEW_CONSOLE,
-            shell=False
-        )
+        if os.path.exists(updater_py):
+            # New path: Python updater (download → pip → preflight → rollback)
+            # Then restart via start_hidden.vbs
+            vbs_path = os.path.join(base_dir, "start_hidden.vbs")
+            # Build a one-shot script that: 1) runs updater 2) restarts server
+            import tempfile as _tf
+            restart_script = os.path.join(_tf.gettempdir(), "originsun_restart.py")
+            with open(restart_script, 'w', encoding='utf-8') as f:
+                f.write(f'''import subprocess, sys, os, time
+os.chdir(r"{base_dir}")
+# Phase 1: Run OTA updater
+subprocess.run([r"{sys.executable}", r"{updater_py}", r"{master}"], timeout=600)
+# Phase 2: Kill old server on port 8000
+import socket
+for _ in range(3):
+    try:
+        result = subprocess.run(["netstat", "-ano"], capture_output=True, text=True, timeout=5)
+        for line in result.stdout.splitlines():
+            if ":8000" in line and "LISTENING" in line:
+                pid = line.split()[-1]
+                if pid.isdigit():
+                    subprocess.run(["taskkill", "/F", "/PID", pid], capture_output=True, timeout=5)
+    except: pass
+    time.sleep(1)
+# Phase 3: Restart server
+vbs = r"{vbs_path}"
+if os.path.exists(vbs):
+    subprocess.Popen(["wscript", vbs], creationflags=0x00000008)
+else:
+    subprocess.Popen([r"{sys.executable}", "-m", "uvicorn", "main:io_app", "--host", "0.0.0.0", "--port", "8000"],
+                     creationflags=0x00000008 | 0x00000200)
+''')
+            subprocess.Popen(
+                [sys.executable, restart_script],
+                creationflags=subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP,
+                close_fds=True,
+            )
+        else:
+            # Fallback: old BAT path (for agents that don't have update_agent.py yet)
+            bat_path = os.path.join(base_dir, "update_agent.bat")
+            import shutil, tempfile
+            temp_bat = os.path.join(tempfile.gettempdir(), "originsun_agent_launcher.bat")
+            shutil.copy2(bat_path, temp_bat)
+            si = subprocess.STARTUPINFO()
+            si.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+            si.wShowWindow = 0
+            subprocess.Popen(
+                ["cmd", "/c", temp_bat, "tempcopy", base_dir, master],
+                startupinfo=si, creationflags=subprocess.CREATE_NEW_CONSOLE, shell=False
+            )
+
         asyncio.get_running_loop().call_later(1.0, os._exit, 0)
         return {"status": "updating"}
     except Exception as e:
