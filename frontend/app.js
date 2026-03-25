@@ -3,6 +3,8 @@
 
 // ─── Auth State ─── //
 window._isAdmin = false;
+window._accessLevel = 0;     // RBAC: 0=readonly, 1=operator, 2=manager, 3=superadmin
+window._modules = [];         // RBAC: visible module keys from role
 window._authToken = localStorage.getItem('auth_token') || '';
 window._authUser = null;
 
@@ -14,8 +16,10 @@ window._authReady = (async function _initAuth() {
         if (r.ok) {
             const d = await r.json();
             window._authUser = d;
-            _applyAuthState(d.role === 'admin');
-            // _applyVisibleTabs 延後到 loadTabs 完成後執行
+            window._accessLevel = d.access_level || 0;
+            window._modules = d.modules || [];
+            _applyAuthState(window._accessLevel >= 3);
+            // _applyModuleTabs 延後到 loadTabs 完成後執行
         } else {
             localStorage.removeItem('auth_token');
             window._authToken = '';
@@ -27,15 +31,31 @@ window._authReady = (async function _initAuth() {
 function _applyAuthState(isAdmin) {
     window._isAdmin = isAdmin;
     document.querySelectorAll('.admin-only').forEach(el => {
-        el.style.display = isAdmin ? '' : 'none';
+        el.style.display = window._accessLevel >= 3 ? '' : 'none';
+    });
+    document.querySelectorAll('.manager-only').forEach(el => {
+        el.style.display = window._accessLevel >= 2 ? '' : 'none';
     });
     const btn = document.getElementById('btn-auth');
     if (btn) {
-        if (isAdmin && window._authUser) {
+        const avatarUrl = window._authUser?.avatar_url;
+        if (window._authUser && avatarUrl) {
+            // Google avatar
+            btn.innerHTML = `<img src="${avatarUrl}" style="width:28px;height:28px;border-radius:50%;object-fit:cover;">`;
+            btn.style.padding = '0';
+            btn.style.overflow = 'hidden';
+            btn.style.borderColor = window._accessLevel > 0 ? '#22c55e' : '#60a5fa';
+            btn.title = window._authUser.username + ' (' + (window._authUser.role_name || '') + ')';
+        } else if (window._authUser && window._accessLevel > 0) {
             btn.textContent = '👤';
             btn.style.color = '#22c55e';
             btn.style.borderColor = '#22c55e';
-            btn.title = window._authUser.username + ' (登出)';
+            btn.title = window._authUser.username + ' (' + (window._authUser.role_name || '') + ')';
+        } else if (window._authUser) {
+            btn.textContent = '👤';
+            btn.style.color = '#60a5fa';
+            btn.style.borderColor = '#60a5fa';
+            btn.title = window._authUser.username + ' (' + (window._authUser.role_name || '') + ')';
         } else {
             btn.textContent = '👤';
             btn.style.color = '#888';
@@ -58,31 +78,19 @@ window._authToggle = function() {
     let html = '';
 
     if (window._authUser) {
-        // 已登入
-        html += `<div style="padding:6px 14px 8px;color:#aaa;font-size:11px;">👤 ${window._authUser.username} (${window._authUser.role})</div>`;
-        html += _sep;
-
-        // 頁籤設定（含儲存按鈕）
-        const TAB_NAMES = {backup:'備份並轉檔',verify:'檔案比對',transcode:'轉 Proxy',concat:'製作串帶',report:'檔案視覺報表',transcribe:'AI 逐字稿',tts:'語音生成'};
-        const tabs = window._authUser?.visible_tabs;
-        html += `<div style="padding:6px 14px 4px;font-size:11px;color:#888;font-weight:bold;">📋 頁籤顯示設定</div>`;
-        html += `<div style="padding:0 14px 4px;">`;
-        Object.entries(TAB_NAMES).forEach(([k, v]) => {
-            const checked = !tabs || tabs.includes(k);
-            html += `<label style="display:flex;align-items:center;gap:6px;padding:3px 0;cursor:pointer;font-size:12px;color:#ddd;">
-                <input type="checkbox" ${checked?'checked':''} data-tab-pref="${k}" onchange="window._previewTabPref(this);window._updateTabPrefCache()" style="accent-color:#3b82f6;"> ${v}</label>`;
-        });
-        html += `<button onclick="event.stopPropagation();window._saveTabPrefs()" style="background:#3b82f6;color:#fff;border:none;border-radius:4px;padding:4px 0;cursor:pointer;font-size:11px;width:100%;margin-top:6px;">儲存設定</button>`;
-        html += `</div>`;
+        // 已登入 — 顯示角色名稱
+        const roleName = window._authUser.role_name || window._authUser.role || '';
+        html += `<div style="padding:6px 14px 8px;color:#aaa;font-size:11px;">👤 ${window._authUser.username} <span style="color:#60a5fa;">(${roleName})</span></div>`;
         html += _sep;
 
         // 工具
         html += _item('✨', '建立桌面捷徑', "createShortcut();document.getElementById('auth-dropdown')?.remove()");
         html += _item('📥', '下載安裝檔', "showInstallModal();document.getElementById('auth-dropdown')?.remove()");
 
-        if (window._isAdmin) {
+        if (window._accessLevel >= 3) {
             html += _sep;
             html += _item('👥', '使用者管理', "window._openUserMgmt();document.getElementById('auth-dropdown')?.remove()");
+            html += _item('🔰', '角色管理', "window._openRoleMgmt();document.getElementById('auth-dropdown')?.remove()");
             html += _item('⚙️', '系統設定', "document.getElementById('btnOpenSettings')?.click();document.getElementById('auth-dropdown')?.remove()");
         }
 
@@ -124,11 +132,21 @@ window._showLoginModal = function() {
                 <button onclick="window._doLogin()"
                     class="px-4 py-1.5 text-sm bg-blue-600 hover:bg-blue-500 text-white rounded">登入</button>
             </div>
+            <div id="google-login-divider" class="flex items-center gap-3 my-4" style="display:none;">
+                <hr class="flex-1 border-[#444]"><span class="text-xs text-gray-500">or</span><hr class="flex-1 border-[#444]">
+            </div>
+            <div id="g_id_signin_container" style="display:none;justify-content:center;"></div>
         </div>`;
     document.body.appendChild(modal);
     modal.addEventListener('click', (e) => { if (e.target === modal) modal.classList.add('hidden'); });
-    document.getElementById('auth-password').addEventListener('keydown', (e) => { if (e.key === 'Enter') window._doLogin(); });
+    // Use named handler to avoid stacking on repeated open
+    const pwdEl = document.getElementById('auth-password');
+    if (pwdEl && !pwdEl._loginHandler) {
+        pwdEl._loginHandler = (e) => { if (e.key === 'Enter') window._doLogin(); };
+        pwdEl.addEventListener('keydown', pwdEl._loginHandler);
+    }
     document.getElementById('auth-username').focus();
+    _initGoogleLogin();
 };
 
 window._doLogin = async function() {
@@ -143,15 +161,7 @@ window._doLogin = async function() {
         });
         const d = await r.json();
         if (!r.ok) { if (errEl) { errEl.textContent = d.detail || '登入失敗'; errEl.classList.remove('hidden'); } return; }
-        window._authToken = d.token;
-        window._authUser = d;
-        localStorage.setItem('auth_token', d.token);
-        _applyAuthState(d.role === 'admin');
-        _applyVisibleTabs();
-        document.getElementById('auth-login-modal')?.classList.add('hidden');
-        if (d.first_login) {
-            alert('首次登入，請到系統設定修改密碼。');
-        }
+        _onLoginSuccess(d);
     } catch (e) {
         if (errEl) { errEl.textContent = '連線失敗'; errEl.classList.remove('hidden'); }
     }
@@ -161,86 +171,125 @@ window._authLogout = function() {
     localStorage.removeItem('auth_token');
     window._authToken = '';
     window._authUser = null;
+    window._accessLevel = 0;
+    window._modules = [];
     _applyAuthState(false);
     document.getElementById('auth-dropdown')?.remove();
-    // Restore all tabs
+    // Restore all tabs (未登入 = 全部顯示)
     document.querySelectorAll('.tab-content').forEach(el => el.style.removeProperty('display'));
     document.querySelectorAll('nav button').forEach(el => el.style.removeProperty('display'));
 };
 
-// 即時預覽：checkbox 切換時立即顯示/隱藏 TAB
-window._previewTabPref = function(cb) {
-    const key = cb.dataset.tabPref;
-    const TAB_MAP = {backup:'tab_main',verify:'tab_verify',transcode:'tab_transcode',concat:'tab_concat',report:'tab_report',transcribe:'tab_transcribe',tts:'tab_tts'};
-    const NAV_MAP = {backup:'備份',verify:'比對',transcode:'Proxy',concat:'串帶',report:'報表',transcribe:'逐字',tts:'語音'};
-    const tabEl = document.getElementById(TAB_MAP[key]);
-    if (tabEl) tabEl.style.display = cb.checked ? '' : 'none';
-    document.querySelectorAll('nav button').forEach(btn => {
-        if (btn.textContent.includes(NAV_MAP[key])) btn.style.display = cb.checked ? '' : 'none';
-    });
-};
-
-// 快取 checkbox 狀態（避免 dropdown 被 click-outside 移除後抓不到）
-window._tabPrefCache = null;
-window._updateTabPrefCache = function() {
-    const cbs = document.querySelectorAll('#auth-dropdown input[data-tab-pref]');
-    if (cbs.length > 0) {
-        window._tabPrefCache = [];
-        cbs.forEach(cb => { if (cb.checked) window._tabPrefCache.push(cb.dataset.tabPref); });
+// ─── Shared Login Success Handler ─── //
+function _onLoginSuccess(d) {
+    window._authToken = d.token;
+    window._authUser = d;
+    window._accessLevel = d.access_level || 0;
+    window._modules = d.modules || [];
+    localStorage.setItem('auth_token', d.token);
+    _applyAuthState(window._accessLevel >= 3);
+    _applyModuleTabs();
+    document.getElementById('auth-login-modal')?.classList.add('hidden');
+    if (d.first_login) {
+        alert('首次登入，請到系統設定修改密碼。');
     }
-};
+}
 
-window._saveTabPrefs = async function() {
-    // 先嘗試從 DOM 讀（dropdown 還在的話），否則用快取
-    const allCheckboxes = document.querySelectorAll('#auth-dropdown input[data-tab-pref]');
-    let selected;
-    if (allCheckboxes.length > 0) {
-        selected = [];
-        allCheckboxes.forEach(cb => { if (cb.checked) selected.push(cb.dataset.tabPref); });
-    } else {
-        selected = window._tabPrefCache || [];
-    }
-    const saveBtn = document.querySelector('#auth-dropdown button[onclick*="saveTabPrefs"]');
+// ─── Google OAuth Integration ─── //
+let _googleOAuthInited = false;
+
+async function _initGoogleLogin() {
+    if (_googleOAuthInited) return;
     try {
-        const res = await fetch('/api/v1/auth/me', {
-            method: 'PUT', headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + (localStorage.getItem('auth_token') || '') },
-            body: JSON.stringify({ visible_tabs: selected.length === 7 ? null : selected }),
-        });
-        if (res.ok) {
-            if (window._authUser) window._authUser.visible_tabs = selected.length === 7 ? null : selected;
-            _applyVisibleTabs();
-            if (saveBtn) { saveBtn.textContent = '✅ 已儲存'; saveBtn.style.background = '#22c55e'; setTimeout(() => { saveBtn.textContent = '儲存設定'; saveBtn.style.background = '#3b82f6'; }, 1500); }
-        } else {
-            if (saveBtn) { saveBtn.textContent = '❌ 儲存失敗'; saveBtn.style.background = '#ef4444'; setTimeout(() => { saveBtn.textContent = '儲存設定'; saveBtn.style.background = '#3b82f6'; }, 1500); }
-        }
-    } catch (_) {
-        if (saveBtn) { saveBtn.textContent = '❌ 儲存失敗'; saveBtn.style.background = '#ef4444'; setTimeout(() => { saveBtn.textContent = '儲存設定'; saveBtn.style.background = '#3b82f6'; }, 1500); }
-    }
-};
+        const res = await fetch('/api/v1/auth/google/config');
+        if (!res.ok) return;
+        const cfg = await res.json();
+        if (!cfg.enabled || !cfg.client_id) return;
 
-function _applyVisibleTabs() {
-    const tabs = window._authUser?.visible_tabs;
-    const TAB_MAP = {backup:'tab_main',verify:'tab_verify',transcode:'tab_transcode',concat:'tab_concat',report:'tab_report',transcribe:'tab_transcribe',tts:'tab_tts'};
-    const NAV_MAP = {backup:'備份',verify:'比對',transcode:'Proxy',concat:'串帶',report:'報表',transcribe:'逐字',tts:'語音'};
-    // null = show all; array = only show listed
+        // Wait for GIS library
+        if (typeof google === 'undefined' || !google.accounts) {
+            await new Promise(resolve => {
+                let tries = 0;
+                const iv = setInterval(() => {
+                    tries++;
+                    if ((typeof google !== 'undefined' && google.accounts) || tries > 40) {
+                        clearInterval(iv);
+                        resolve();
+                    }
+                }, 150);
+            });
+        }
+        if (typeof google === 'undefined' || !google.accounts) return;
+
+        google.accounts.id.initialize({
+            client_id: cfg.client_id,
+            callback: _handleGoogleCredential,
+            auto_select: false,
+            cancel_on_tap_outside: true,
+        });
+
+        const container = document.getElementById('g_id_signin_container');
+        if (container) {
+            google.accounts.id.renderButton(container, {
+                theme: 'filled_black', size: 'large', width: 268,
+                text: 'signin_with', shape: 'rectangular', logo_alignment: 'left',
+            });
+            container.style.display = 'flex';
+        }
+        const divider = document.getElementById('google-login-divider');
+        if (divider) divider.style.display = 'flex';
+
+        _googleOAuthInited = true;
+    } catch (e) {
+        console.warn('[Google OAuth] Init failed:', e);
+    }
+}
+
+async function _handleGoogleCredential(response) {
+    const errEl = document.getElementById('auth-error');
+    try {
+        const res = await fetch('/api/v1/auth/google/login', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ credential: response.credential }),
+        });
+        const d = await res.json();
+        if (!res.ok) {
+            if (errEl) { errEl.textContent = d.detail || 'Google 登入失敗'; errEl.classList.remove('hidden'); }
+            return;
+        }
+        _onLoginSuccess(d);
+    } catch (e) {
+        if (errEl) { errEl.textContent = '連線失敗'; errEl.classList.remove('hidden'); }
+    }
+}
+
+// ─── RBAC Module-based Tab Visibility ─── //
+function _applyModuleTabs() {
+    const modules = window._modules;
+    const TAB_MAP = {backup:'tab_main',verify:'tab_verify',transcode:'tab_transcode',concat:'tab_concat',report:'tab_report',transcribe:'tab_transcribe',tts:'tab_tts',projects:'tab-projects'};
+    const NAV_MAP = {backup:'備份',verify:'比對',transcode:'Proxy',concat:'串帶',report:'報表',transcribe:'逐字',tts:'語音',projects:'專案'};
+    // 未登入（modules 為空）= 顯示全部；登入後 = 只顯示 modules 中的頁籤
+    const showAll = !window._authUser || !modules || modules.length === 0;
     Object.entries(TAB_MAP).forEach(([key, id]) => {
         const el = document.getElementById(id);
-        if (el) el.style.display = (!tabs || tabs.includes(key)) ? '' : 'none';
+        if (el) el.style.display = (showAll || modules.includes(key)) ? '' : 'none';
     });
     document.querySelectorAll('nav button').forEach(btn => {
         const text = btn.textContent;
         Object.entries(NAV_MAP).forEach(([key, label]) => {
-            if (text.includes(label)) btn.style.display = (!tabs || tabs.includes(key)) ? '' : 'none';
+            if (text.includes(label)) btn.style.display = (showAll || modules.includes(key)) ? '' : 'none';
         });
     });
 }
+// Legacy alias
+function _applyVisibleTabs() { _applyModuleTabs(); }
 
 // Patch fetch to auto-add auth header for sensitive endpoints
 const _origFetch = window.fetch;
 window.fetch = function(url, opts = {}) {
     if (window._authToken && typeof url === 'string' &&
         (url.includes('/settings/') || url.includes('/control/update') ||
-         url.includes('/admin/') || url.includes('/auth/') ||
+         url.includes('/admin/') || url.includes('/auth/') || url.includes('/roles') ||
          url.includes('/job_history') && opts.method === 'DELETE' ||
          url.includes('/reports/') && opts.method === 'DELETE' ||
          url.includes('/agents') && (opts.method === 'POST' || opts.method === 'DELETE'))) {
@@ -2475,25 +2524,30 @@ if (typeof appendLog === 'undefined') {
         const TAB_NAMES = {backup:'備份並轉檔',verify:'檔案比對',transcode:'轉 Proxy',concat:'製作串帶',report:'檔案視覺報表',transcribe:'AI 逐字稿',tts:'語音生成'};
 
         window._openUserMgmt = async function() {
-            // Remove existing
+            _ensureModalStyles();
             document.getElementById('user-mgmt-modal')?.remove();
             const overlay = document.createElement('div');
             overlay.id = 'user-mgmt-modal';
-            overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.7);z-index:200;display:flex;align-items:center;justify-content:center;';
+            overlay.className = '_fm-overlay';
             overlay.addEventListener('click', e => { if (e.target === overlay) overlay.remove(); });
             document.addEventListener('keydown', function _esc(e) { if (e.key === 'Escape') { overlay.remove(); document.removeEventListener('keydown', _esc); } });
 
             const modal = document.createElement('div');
-            modal.style.cssText = 'background:#1e1e1e;border:1px solid #444;border-radius:12px;padding:24px;width:90%;max-width:720px;max-height:80vh;overflow-y:auto;color:#ddd;';
+            modal.className = '_fm-modal';
+            modal.style.width = '720px'; modal.style.maxWidth = '90%';
             modal.innerHTML = `
-                <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">
-                    <h2 style="margin:0;font-size:16px;color:#fff;">👥 使用者管理</h2>
-                    <div style="display:flex;gap:8px;align-items:center;">
-                        <button id="umgmt-add-btn" style="background:#3b82f6;color:#fff;border:none;border-radius:6px;padding:6px 14px;cursor:pointer;font-size:12px;">+ 新增使用者</button>
-                        <span onclick="document.getElementById('user-mgmt-modal')?.remove()" style="cursor:pointer;font-size:20px;color:#888;line-height:1;">✕</span>
+                <div class="_fm-header">
+                    <h3>使用者管理</h3>
+                    <div style="display:flex;gap:10px;align-items:center;">
+                        <button id="umgmt-add-btn" class="_fm-btn-submit" style="padding:5px 16px;font-size:12px;">+ 新增使用者</button>
+                        <span class="_fm-close" onclick="document.getElementById('user-mgmt-modal')?.remove()">✕</span>
                     </div>
                 </div>
-                <div id="umgmt-list" style="font-size:12px;">載入中...</div>
+                <div class="_fm-body" style="padding:16px 24px;">
+                    <div id="umgmt-list" style="font-size:12px;">
+                        <div style="text-align:center;color:#666;padding:20px;">載入中...</div>
+                    </div>
+                </div>
             `;
             overlay.appendChild(modal);
             document.body.appendChild(overlay);
@@ -2502,74 +2556,291 @@ if (typeof appendLog === 'undefined') {
             await _loadUserList();
         };
 
+        // ─── RBAC: cached roles list for user mgmt ─── //
+        let _cachedRoles = [];
+        async function _fetchRoles() {
+            try {
+                const r = await fetch('/api/v1/roles');
+                if (r.ok) _cachedRoles = await r.json();
+            } catch (_) {}
+            return _cachedRoles;
+        }
+
         async function _loadUserList() {
             const container = document.getElementById('umgmt-list');
             if (!container) return;
             try {
-                const r = await fetch('/api/v1/auth/users', { headers: { 'Authorization': 'Bearer ' + (localStorage.getItem('auth_token') || '') } });
-                if (!r.ok) { container.innerHTML = '<span style="color:#f87171">載入失敗（需要管理員權限）</span>'; return; }
+                const [rolesResult, r] = await Promise.all([
+                    _fetchRoles(),
+                    fetch('/api/v1/auth/users', { headers: { 'Authorization': 'Bearer ' + (localStorage.getItem('auth_token') || '') } }),
+                ]);
+                const roles = _cachedRoles;
+                if (!r.ok) { container.innerHTML = '<div style="text-align:center;color:#f87171;padding:20px;">載入失敗（需要管理員權限）</div>'; return; }
                 const users = await r.json();
-                container.innerHTML = users.map(u => {
-                    const tabs = u.visible_tabs || Object.keys(TAB_NAMES);
-                    const tabCheckboxes = Object.entries(TAB_NAMES).map(([k,v]) =>
-                        `<label style="display:inline-flex;align-items:center;gap:3px;font-size:11px;color:#aaa;cursor:pointer;margin-right:6px;">
-                            <input type="checkbox" ${tabs.includes(k)?'checked':''} data-user="${u.username}" data-tab="${k}" style="accent-color:#3b82f6;"> ${v}
-                        </label>`
-                    ).join('');
+                const roleOptions = roles.map(rl =>
+                    `<option value="${rl.name}">${rl.name} (Lv${rl.access_level})</option>`
+                ).join('');
+
+                // Table header
+                let html = `<div style="display:grid;grid-template-columns:140px 150px 1fr auto;gap:0;font-size:11px;color:#666;padding:0 16px 8px;font-weight:600;letter-spacing:0.5px;text-transform:uppercase;">
+                    <span>帳號</span><span>角色</span><span>可用模組</span><span>操作</span>
+                </div>`;
+                html += users.map(u => {
+                    const userRole = u.role_name || u.role || 'editor';
+                    const modules = u.modules || [];
+                    const moduleTags = _renderModuleTags(modules);
+                    const am = u.auth_method || 'password';
+                    const authBadge = am === 'google'
+                        ? '<span style="display:inline-block;background:#4285f422;color:#8ab4f8;font-size:9px;padding:1px 5px;border-radius:3px;margin-left:4px;vertical-align:middle;">G</span>'
+                        : am === 'both'
+                        ? '<span style="display:inline-block;background:#4285f422;color:#8ab4f8;font-size:9px;padding:1px 5px;border-radius:3px;margin-left:4px;vertical-align:middle;">G+</span>'
+                        : '';
+                    const avatarImg = u.avatar_url
+                        ? `<img src="${u.avatar_url}" style="width:20px;height:20px;border-radius:50%;object-fit:cover;vertical-align:middle;margin-right:4px;">`
+                        : '';
+                    const emailLine = u.email
+                        ? `<div style="font-size:10px;color:#666;margin-top:1px;">${u.email}</div>`
+                        : '';
                     return `
-                    <div style="padding:12px;margin-bottom:8px;background:#252525;border:1px solid #333;border-radius:8px;">
-                        <div style="display:flex;align-items:center;gap:10px;margin-bottom:8px;flex-wrap:wrap;">
-                            <span style="color:#fff;font-weight:bold;font-size:13px;min-width:70px;">👤 ${u.username}</span>
-                            <select data-role-user="${u.username}" style="background:#1a1a1a;color:#ddd;border:1px solid #444;border-radius:4px;padding:3px 8px;font-size:11px;">
-                                <option value="admin" ${u.role==='admin'?'selected':''}>admin</option>
-                                <option value="editor" ${u.role==='editor'?'selected':''}>editor</option>
-                                <option value="viewer" ${u.role==='viewer'?'selected':''}>viewer</option>
-                            </select>
-                            <button onclick="window._changeUserPwd('${u.username}')" style="background:transparent;border:1px solid #555;color:#aaa;border-radius:4px;padding:3px 10px;cursor:pointer;font-size:11px;">🔑 改密碼</button>
-                            <button onclick="window._saveUserSettings('${u.username}')" style="background:#3b82f6;color:#fff;border:none;border-radius:4px;padding:3px 12px;cursor:pointer;font-size:11px;">💾 儲存</button>
-                            ${u.username !== 'admin' ? `<button onclick="window._deleteUser('${u.username}')" style="background:transparent;border:1px solid #ef4444;color:#ef4444;border-radius:4px;padding:3px 10px;cursor:pointer;font-size:11px;">刪除</button>` : ''}
+                    <div style="display:grid;grid-template-columns:140px 150px 1fr auto;gap:12px;align-items:center;padding:12px 16px;margin-bottom:1px;background:#1e1e1e;border:1px solid #2e2e2e;border-radius:8px;transition:border-color .15s;" onmouseenter="this.style.borderColor='#444'" onmouseleave="this.style.borderColor='#2e2e2e'">
+                        <div>
+                            <div>${avatarImg}<span style="color:#f0f0f0;font-weight:600;font-size:13px;">${u.username}</span>${u.username === 'admin' ? '<span style="display:inline-block;background:#7c3aed22;color:#a78bfa;font-size:9px;padding:1px 5px;border-radius:3px;margin-left:4px;vertical-align:middle;">SUPER</span>' : ''}${authBadge}</div>
+                            ${emailLine}
                         </div>
-                        <div style="padding-left:4px;display:flex;flex-wrap:wrap;gap:2px;">${tabCheckboxes}</div>
+                        <div>
+                            <select data-role-user="${u.username}" class="_fm-select" style="padding:4px 8px;font-size:11px;border-radius:5px;" onchange="window._onUserRoleChange(this)">
+                                ${roleOptions.replace(`value="${userRole}"`, `value="${userRole}" selected`)}
+                            </select>
+                        </div>
+                        <div data-modules-user="${u.username}" style="display:flex;flex-wrap:wrap;gap:4px;line-height:1.6;">${moduleTags}</div>
+                        <div style="display:flex;gap:6px;align-items:center;">
+                            <button onclick="window._changeUserPwd('${u.username}')" class="_fm-btn-cancel" style="padding:3px 10px;font-size:11px;">改密碼</button>
+                            <button onclick="window._saveUserSettings('${u.username}')" class="_fm-btn-submit" style="padding:3px 12px;font-size:11px;font-weight:500;">儲存</button>
+                            ${u.username !== 'admin' ? `<button onclick="window._deleteUser('${u.username}')" style="background:transparent;border:1px solid rgba(239,68,68,0.3);color:#f87171;border-radius:6px;padding:3px 10px;cursor:pointer;font-size:11px;transition:all .15s;" onmouseenter="this.style.borderColor='#ef4444';this.style.background='rgba(239,68,68,0.08)'" onmouseleave="this.style.borderColor='rgba(239,68,68,0.3)';this.style.background='transparent'">刪除</button>` : ''}
+                        </div>
                     </div>`;
                 }).join('');
+                container.innerHTML = html;
             } catch (_) {
-                container.innerHTML = '<span style="color:#f87171">載入失敗</span>';
+                container.innerHTML = '<div style="text-align:center;color:#f87171;padding:20px;">載入失敗</div>';
             }
         }
 
-        window._addUserPrompt = async function() {
-            const username = prompt('新使用者帳號：');
-            if (!username) return;
-            const password = prompt('密碼：');
-            if (!password) return;
-            const role = prompt('角色（admin / editor / viewer）：', 'editor');
-            if (!role) return;
-            try {
-                const r = await fetch('/api/v1/auth/users', {
-                    method: 'POST', headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ username, password, role }),
+        // ─── Modal Shared Styles (injected once) ─── //
+        function _ensureModalStyles() {
+            if (document.getElementById('_formModalStyles')) return;
+            const style = document.createElement('style');
+            style.id = '_formModalStyles';
+            style.textContent = `
+                @keyframes _fmFadeIn { from { opacity:0 } to { opacity:1 } }
+                @keyframes _fmSlideUp { from { opacity:0; transform:translateY(12px) scale(0.98) } to { opacity:1; transform:translateY(0) scale(1) } }
+                ._fm-overlay { position:fixed;inset:0;background:rgba(0,0,0,0.72);z-index:10000;display:flex;align-items:center;justify-content:center;animation:_fmFadeIn .18s ease-out }
+                ._fm-modal { background:#252525;border:1px solid #3a3a3a;border-radius:10px;box-shadow:0 20px 50px rgba(0,0,0,0.55);width:460px;max-height:85vh;overflow-y:auto;animation:_fmSlideUp .22s ease-out;color:#e5e7eb }
+                ._fm-header { padding:18px 24px;border-bottom:1px solid #333;display:flex;justify-content:space-between;align-items:center }
+                ._fm-header h3 { margin:0;font-size:15px;font-weight:600;color:#f0f0f0;letter-spacing:0.3px }
+                ._fm-close { cursor:pointer;width:28px;height:28px;display:flex;align-items:center;justify-content:center;border-radius:6px;color:#666;font-size:18px;transition:all .15s }
+                ._fm-close:hover { background:#333;color:#ccc }
+                ._fm-body { padding:20px 24px }
+                ._fm-section { margin-bottom:4px }
+                ._fm-section-label { font-size:11px;font-weight:600;color:#666;text-transform:uppercase;letter-spacing:1px;margin-bottom:12px }
+                ._fm-divider { height:1px;background:#333;margin:16px 0 }
+                ._fm-field { margin-bottom:14px }
+                ._fm-field:last-child { margin-bottom:0 }
+                ._fm-label { display:block;font-size:12px;font-weight:500;color:#999;margin-bottom:6px }
+                ._fm-label .req { color:#ef4444;margin-left:2px }
+                ._fm-input, ._fm-select { width:100%;box-sizing:border-box;background:#1a1a1a;border:1px solid #3a3a3a;color:#fff;padding:9px 12px;border-radius:6px;font-size:13px;transition:border-color .15s,box-shadow .15s;outline:none }
+                ._fm-input:focus, ._fm-select:focus { border-color:#7c3aed;box-shadow:0 0 0 2px rgba(124,58,237,0.15) }
+                ._fm-input::placeholder { color:#555 }
+                ._fm-checkgrid { display:grid;grid-template-columns:repeat(4,1fr);gap:6px;padding:4px 0 }
+                ._fm-chk { display:flex;align-items:center;gap:6px;font-size:12px;color:#bbb;cursor:pointer;padding:5px 8px;border-radius:5px;transition:background .12s;user-select:none }
+                ._fm-chk:hover { background:#2a2a2a }
+                ._fm-chk input { accent-color:#7c3aed;width:14px;height:14px;cursor:pointer }
+                ._fm-hint { font-size:11px;color:#666;margin-top:4px }
+                ._fm-error { display:none;color:#f87171;font-size:12px;margin-top:12px;padding:8px 12px;background:rgba(239,68,68,0.08);border:1px solid rgba(239,68,68,0.2);border-radius:6px }
+                ._fm-footer { padding:14px 24px;border-top:1px solid #333;display:flex;justify-content:flex-end;gap:10px }
+                ._fm-btn-cancel { background:transparent;border:1px solid #444;color:#999;padding:7px 18px;border-radius:6px;font-size:13px;cursor:pointer;transition:all .15s }
+                ._fm-btn-cancel:hover { background:#2a2a2a;color:#ddd;border-color:#555 }
+                ._fm-btn-submit { background:#6d28d9;border:none;color:#fff;padding:7px 22px;border-radius:6px;font-size:13px;font-weight:600;cursor:pointer;transition:all .15s }
+                ._fm-btn-submit:hover { background:#5b21b6 }
+                ._fm-btn-submit:disabled { opacity:0.5;cursor:not-allowed }
+            `;
+            document.head.appendChild(style);
+        }
+
+        // ─── Styled Form Modal Builder ─── //
+        function _createFormModal({ id, title, fields, onSubmit, submitLabel = '建立' }) {
+            document.getElementById(id)?.remove();
+            _ensureModalStyles();
+
+            const overlay = document.createElement('div');
+            overlay.id = id;
+            overlay.className = '_fm-overlay';
+
+            // Build sections / fields HTML
+            let bodyHtml = '';
+            let inSection = false;
+            for (const f of fields) {
+                // Section divider support
+                if (f.type === 'divider') {
+                    if (inSection) bodyHtml += `</div>`;
+                    bodyHtml += `<div class="_fm-divider"></div>`;
+                    inSection = false;
+                    continue;
+                }
+                if (f.type === 'section') {
+                    if (inSection) bodyHtml += `</div>`;
+                    bodyHtml += `<div class="_fm-section"><div class="_fm-section-label">${f.label}</div>`;
+                    inSection = true;
+                    continue;
+                }
+
+                bodyHtml += `<div class="_fm-field">`;
+                if (f.label && f.type !== 'checkboxes') {
+                    bodyHtml += `<label class="_fm-label">${f.label}${f.required ? '<span class="req">*</span>' : ''}</label>`;
+                }
+                if (f.type === 'select') {
+                    const opts = (f.options || []).map(o =>
+                        `<option value="${o.value}" ${o.value === f.defaultValue ? 'selected' : ''}>${o.label}</option>`
+                    ).join('');
+                    bodyHtml += `<select data-field="${f.key}" class="_fm-select">${opts}</select>`;
+                } else if (f.type === 'checkboxes') {
+                    if (f.label) bodyHtml += `<label class="_fm-label">${f.label}</label>`;
+                    bodyHtml += `<div class="_fm-checkgrid">`;
+                    for (const o of (f.options || [])) {
+                        bodyHtml += `<label class="_fm-chk">
+                            <input type="checkbox" data-field="${f.key}" value="${o.value}" ${o.checked ? 'checked' : ''}> ${o.label}
+                        </label>`;
+                    }
+                    bodyHtml += `</div>`;
+                } else {
+                    bodyHtml += `<input data-field="${f.key}" type="${f.type || 'text'}" placeholder="${f.placeholder || ''}" ${f.autofocus ? 'autofocus' : ''} class="_fm-input">`;
+                }
+                if (f.hint) bodyHtml += `<div class="_fm-hint">${f.hint}</div>`;
+                bodyHtml += `</div>`;
+            }
+            if (inSection) bodyHtml += `</div>`;
+
+            const modal = document.createElement('div');
+            modal.className = '_fm-modal';
+            modal.innerHTML = `
+                <div class="_fm-header">
+                    <h3>${title}</h3>
+                    <span class="_fm-close">✕</span>
+                </div>
+                <div class="_fm-body">${bodyHtml}
+                    <div class="_fm-error" data-error></div>
+                </div>
+                <div class="_fm-footer">
+                    <button class="_fm-btn-cancel" data-action="cancel">取消</button>
+                    <button class="_fm-btn-submit" data-action="submit">${submitLabel}</button>
+                </div>
+            `;
+            overlay.appendChild(modal);
+            document.body.appendChild(overlay);
+
+            const close = () => { overlay.style.animation = 'none'; overlay.remove(); };
+            const errEl = modal.querySelector('[data-error]');
+            const setError = (msg) => { if (msg) { errEl.textContent = msg; errEl.style.display = ''; } else { errEl.style.display = 'none'; } };
+            const getValues = () => {
+                const vals = {};
+                for (const f of fields) {
+                    if (f.type === 'divider' || f.type === 'section') continue;
+                    if (f.type === 'checkboxes') {
+                        vals[f.key] = [...modal.querySelectorAll(`input[data-field="${f.key}"]:checked`)].map(cb => cb.value);
+                    } else {
+                        const el = modal.querySelector(`[data-field="${f.key}"]`);
+                        vals[f.key] = el ? el.value.trim() : '';
+                    }
+                }
+                return vals;
+            };
+
+            overlay.addEventListener('click', e => { if (e.target === overlay) close(); });
+            modal.querySelector('._fm-close').onclick = close;
+            modal.querySelector('[data-action="cancel"]').onclick = close;
+            modal.querySelector('[data-action="submit"]').onclick = async () => {
+                setError('');
+                const btn = modal.querySelector('[data-action="submit"]');
+                btn.disabled = true; btn.textContent = '處理中...';
+                try {
+                    await onSubmit(getValues(), setError, close);
+                } finally {
+                    btn.disabled = false; btn.textContent = submitLabel;
+                }
+            };
+            document.addEventListener('keydown', function _esc(e) {
+                if (e.key === 'Escape') { close(); document.removeEventListener('keydown', _esc); }
+            });
+            modal.querySelectorAll('input._fm-input').forEach(inp => {
+                inp.addEventListener('keydown', e => {
+                    if (e.key === 'Enter') modal.querySelector('[data-action="submit"]').click();
                 });
-                const d = await r.json();
-                if (!r.ok) { alert(d.detail || '新增失敗'); return; }
-                _loadUserList();
-            } catch (_) { alert('連線失敗'); }
+            });
+            const firstInput = modal.querySelector('input[autofocus], input._fm-input');
+            if (firstInput) setTimeout(() => firstInput.focus(), 80);
+
+            return { overlay, getValues, close, setError };
+        }
+
+        // ─── Add User (styled modal) ─── //
+        window._addUserPrompt = async function() {
+            const roles = _cachedRoles.length ? _cachedRoles : await _fetchRoles();
+            const roleOptions = roles.map(r => ({
+                value: r.name,
+                label: `${r.name} (Lv${r.access_level})`,
+            }));
+            _createFormModal({
+                id: 'add-user-modal',
+                title: '新增使用者',
+                submitLabel: '建立使用者',
+                fields: [
+                    { type: 'section', label: '帳號資訊' },
+                    { key: 'username', label: '帳號', type: 'text', required: true, autofocus: true, placeholder: '輸入英文帳號名稱' },
+                    { key: 'password', label: '密碼', type: 'password', required: true, placeholder: '設定密碼' },
+                    { key: 'password2', label: '確認密碼', type: 'password', required: true, placeholder: '再次輸入密碼' },
+                    { type: 'divider' },
+                    { type: 'section', label: '權限指派' },
+                    { key: 'role_name', label: '角色', type: 'select', options: roleOptions, defaultValue: 'editor' },
+                ],
+                onSubmit: async (vals, setError, close) => {
+                    if (!vals.username) { setError('請輸入帳號'); return; }
+                    if (!vals.password) { setError('請輸入密碼'); return; }
+                    if (vals.password !== vals.password2) { setError('兩次密碼不一致'); return; }
+                    if (vals.password.length < 3) { setError('密碼至少需要 3 個字元'); return; }
+                    try {
+                        const r = await fetch('/api/v1/auth/users', {
+                            method: 'POST', headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ username: vals.username, password: vals.password, role_name: vals.role_name }),
+                        });
+                        const d = await r.json();
+                        if (!r.ok) { setError(d.detail || '新增失敗'); return; }
+                        close();
+                        _loadUserList();
+                    } catch (_) { setError('連線失敗，請稍後再試'); }
+                },
+            });
+        };
+
+        window._onUserRoleChange = function(selectEl) {
+            const username = selectEl.getAttribute('data-role-user');
+            const roleName = selectEl.value;
+            const role = _cachedRoles.find(r => r.name === roleName);
+            const modulesDiv = document.querySelector(`[data-modules-user="${username}"]`);
+            if (!modulesDiv || !role) return;
+            const modules = role.modules || [];
+            modulesDiv.innerHTML = _renderModuleTags(modules);
         };
 
         window._saveUserSettings = async function(username) {
             const roleSelect = document.querySelector(`select[data-role-user="${username}"]`);
-            const tabCheckboxes = document.querySelectorAll(`input[data-user="${username}"][data-tab]`);
-            const role = roleSelect ? roleSelect.value : 'editor';
-            const selectedTabs = [];
-            tabCheckboxes.forEach(cb => { if (cb.checked) selectedTabs.push(cb.dataset.tab); });
-            const visible_tabs = selectedTabs.length === 7 ? null : selectedTabs;
+            const role_name = roleSelect ? roleSelect.value : 'editor';
             try {
                 const r = await fetch('/api/v1/auth/users/' + username, {
                     method: 'PUT', headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ role, visible_tabs }),
+                    body: JSON.stringify({ role_name }),
                 });
                 if (r.ok) {
-                    // Find the save button for this user and flash green
-                    const btns = document.querySelectorAll('#umgmt-list button, #user-mgmt-list button');
+                    const btns = document.querySelectorAll('#umgmt-list button');
                     btns.forEach(b => {
                         if (b.textContent.includes('儲存') && b.onclick?.toString().includes(username)) {
                             b.textContent = '✅ 已儲存'; b.style.background = '#22c55e';
@@ -2578,16 +2849,6 @@ if (typeof appendLog === 'undefined') {
                     });
                 } else { alert('儲存失敗'); }
             } catch (_) { alert('連線失敗'); }
-        };
-
-        window._changeUserRole = async function(username, currentRole) {
-            const role = prompt(`修改 ${username} 的角色（目前：${currentRole}）：`, currentRole);
-            if (!role || role === currentRole) return;
-            const r = await fetch('/api/v1/auth/users/' + username, {
-                method: 'PUT', headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ role }),
-            });
-            if (r.ok) _loadUserList(); else alert('修改失敗');
         };
 
         window._changeUserPwd = async function(username) {
@@ -2604,6 +2865,170 @@ if (typeof appendLog === 'undefined') {
             if (!confirm(`確定要刪除使用者 "${username}"？`)) return;
             const r = await fetch('/api/v1/auth/users/' + username, { method: 'DELETE' });
             if (r.ok) _loadUserList(); else alert('刪除失敗');
+        };
+
+        // ─── Role Management Modal (RBAC) ─── //
+        const ALL_MODULES = ['backup','verify','transcode','concat','report','transcribe','tts','projects'];
+        const MODULE_LABELS = {backup:'備份',verify:'比對',transcode:'轉檔',concat:'串帶',report:'報表',transcribe:'逐字稿',tts:'語音',projects:'專案'};
+
+        function _renderModuleTags(modules) {
+            return (modules && modules.length)
+                ? modules.map(m => `<span style="display:inline-block;background:#2a2a2a;border:1px solid #3a3a3a;border-radius:4px;padding:1px 7px;font-size:10px;color:#999;">${MODULE_LABELS[m]||m}</span>`).join(' ')
+                : '<span style="color:#555;font-size:11px;">未設定</span>';
+        }
+
+        window._openRoleMgmt = async function() {
+            _ensureModalStyles();
+            document.getElementById('role-mgmt-modal')?.remove();
+            const overlay = document.createElement('div');
+            overlay.id = 'role-mgmt-modal';
+            overlay.className = '_fm-overlay';
+            overlay.addEventListener('click', e => { if (e.target === overlay) overlay.remove(); });
+            document.addEventListener('keydown', function _esc(e) { if (e.key === 'Escape') { overlay.remove(); document.removeEventListener('keydown', _esc); } });
+
+            const modal = document.createElement('div');
+            modal.className = '_fm-modal';
+            modal.style.width = '820px'; modal.style.maxWidth = '90%';
+            modal.innerHTML = `
+                <div class="_fm-header">
+                    <h3>角色管理 (RBAC)</h3>
+                    <div style="display:flex;gap:10px;align-items:center;">
+                        <button id="rmgmt-add-btn" class="_fm-btn-submit" style="padding:5px 16px;font-size:12px;">+ 新增角色</button>
+                        <span class="_fm-close" onclick="document.getElementById('role-mgmt-modal')?.remove()">✕</span>
+                    </div>
+                </div>
+                <div class="_fm-body" style="padding:16px 24px;">
+                    <div id="rmgmt-list" style="font-size:12px;">
+                        <div style="text-align:center;color:#666;padding:20px;">載入中...</div>
+                    </div>
+                </div>
+            `;
+            overlay.appendChild(modal);
+            document.body.appendChild(overlay);
+
+            document.getElementById('rmgmt-add-btn').onclick = () => _addRolePrompt();
+            await _loadRoleList();
+        };
+
+        async function _loadRoleList() {
+            const container = document.getElementById('rmgmt-list');
+            if (!container) return;
+            try {
+                const roles = await _fetchRoles();
+                container.innerHTML = roles.map(r => {
+                    const moduleCheckboxes = ALL_MODULES.map(m =>
+                        `<label class="_fm-chk" style="min-width:auto;padding:3px 6px;">
+                            <input type="checkbox" ${(r.modules||[]).includes(m)?'checked':''} data-role-id="${r.id}" data-module="${m}"> ${MODULE_LABELS[m]||m}
+                        </label>`
+                    ).join('');
+                    const isAdmin = r.name === 'admin';
+                    const lvColors = ['#666','#3b82f6','#d48a04','#a855f7'];
+                    const lvColor = lvColors[r.access_level] || '#666';
+                    return `
+                    <div style="padding:14px 16px;margin-bottom:6px;background:#1e1e1e;border:1px solid #2e2e2e;border-radius:8px;transition:border-color .15s;" onmouseenter="this.style.borderColor='#444'" onmouseleave="this.style.borderColor='#2e2e2e'">
+                        <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px;flex-wrap:wrap;">
+                            <input data-role-name="${r.id}" value="${r.name}" class="_fm-input" style="width:110px;padding:5px 10px;font-size:12px;font-weight:600;" ${isAdmin?'readonly style="width:110px;padding:5px 10px;font-size:12px;font-weight:600;opacity:0.6;cursor:not-allowed;"':''}>
+                            <span style="display:inline-block;background:${lvColor}22;color:${lvColor};font-size:10px;font-weight:600;padding:2px 8px;border-radius:4px;letter-spacing:0.3px;">Lv${r.access_level}</span>
+                            <select data-role-level="${r.id}" class="_fm-select" style="padding:4px 8px;font-size:11px;width:auto;">
+                                <option value="0" ${r.access_level===0?'selected':''}>Lv0 唯讀</option>
+                                <option value="1" ${r.access_level===1?'selected':''}>Lv1 操作</option>
+                                <option value="2" ${r.access_level===2?'selected':''}>Lv2 管理</option>
+                                <option value="3" ${r.access_level===3?'selected':''}>Lv3 超級管理</option>
+                            </select>
+                            <input data-role-desc="${r.id}" value="${r.description||''}" placeholder="描述..." class="_fm-input" style="flex:1;min-width:80px;padding:5px 10px;font-size:11px;color:#888;">
+                            <div style="display:flex;gap:6px;margin-left:auto;">
+                                <button onclick="window._saveRole(${r.id})" class="_fm-btn-submit" style="padding:3px 14px;font-size:11px;font-weight:500;">儲存</button>
+                                ${!isAdmin ? `<button onclick="window._deleteRole(${r.id},'${r.name}')" style="background:transparent;border:1px solid rgba(239,68,68,0.3);color:#f87171;border-radius:6px;padding:3px 10px;cursor:pointer;font-size:11px;transition:all .15s;" onmouseenter="this.style.borderColor='#ef4444';this.style.background='rgba(239,68,68,0.08)'" onmouseleave="this.style.borderColor='rgba(239,68,68,0.3)';this.style.background='transparent'">刪除</button>` : ''}
+                            </div>
+                        </div>
+                        <div style="display:flex;flex-wrap:wrap;gap:2px;">${moduleCheckboxes}</div>
+                    </div>`;
+                }).join('');
+            } catch (_) {
+                container.innerHTML = '<div style="text-align:center;color:#f87171;padding:20px;">載入失敗</div>';
+            }
+        }
+
+        async function _addRolePrompt() {
+            const moduleOptions = ALL_MODULES.map(m => ({
+                value: m, label: MODULE_LABELS[m] || m, checked: false,
+            }));
+            _createFormModal({
+                id: 'add-role-modal',
+                title: '新增角色',
+                submitLabel: '建立角色',
+                fields: [
+                    { type: 'section', label: '基本資訊' },
+                    { key: 'name', label: '角色名稱', type: 'text', required: true, autofocus: true, placeholder: '英文名稱，例如 intern' },
+                    { key: 'access_level', label: '權限等級', type: 'select', options: [
+                        { value: '0', label: 'Lv0 唯讀' },
+                        { value: '1', label: 'Lv1 操作' },
+                        { value: '2', label: 'Lv2 管理' },
+                        { value: '3', label: 'Lv3 超級管理' },
+                    ], defaultValue: '1' },
+                    { key: 'description', label: '描述', type: 'text', placeholder: '角色用途說明（選填）' },
+                    { type: 'divider' },
+                    { type: 'section', label: '功能權限' },
+                    { key: 'modules', label: '可用模組', type: 'checkboxes', options: moduleOptions },
+                ],
+                onSubmit: async (vals, setError, close) => {
+                    if (!vals.name) { setError('請輸入角色名稱'); return; }
+                    if (!/^[a-zA-Z_][a-zA-Z0-9_]*$/.test(vals.name)) { setError('角色名稱只能包含英文字母、數字和底線'); return; }
+                    try {
+                        const r = await fetch('/api/v1/roles', {
+                            method: 'POST', headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({
+                                name: vals.name,
+                                access_level: parseInt(vals.access_level),
+                                modules: vals.modules || [],
+                                description: vals.description || '',
+                            }),
+                        });
+                        const d = await r.json();
+                        if (!r.ok) { setError(d.detail || '新增失敗'); return; }
+                        close();
+                        _loadRoleList();
+                    } catch (_) { setError('連線失敗，請稍後再試'); }
+                },
+            });
+        }
+
+        window._saveRole = async function(roleId) {
+            const nameEl = document.querySelector(`input[data-role-name="${roleId}"]`);
+            const levelEl = document.querySelector(`select[data-role-level="${roleId}"]`);
+            const descEl = document.querySelector(`input[data-role-desc="${roleId}"]`);
+            const moduleCbs = document.querySelectorAll(`input[data-role-id="${roleId}"][data-module]`);
+            const modules = [];
+            moduleCbs.forEach(cb => { if (cb.checked) modules.push(cb.dataset.module); });
+            try {
+                const r = await fetch('/api/v1/roles/' + roleId, {
+                    method: 'PUT', headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        name: nameEl?.value || '',
+                        access_level: parseInt(levelEl?.value || '1'),
+                        modules,
+                        description: descEl?.value || '',
+                    }),
+                });
+                if (r.ok) {
+                    const btn = document.querySelector(`button[onclick*="_saveRole(${roleId})"]`);
+                    if (btn) { btn.textContent = '✅ 已儲存'; btn.style.background = '#22c55e'; setTimeout(() => { btn.textContent = '💾 儲存'; btn.style.background = '#3b82f6'; }, 1500); }
+                } else {
+                    const d = await r.json();
+                    alert(d.detail || '儲存失敗');
+                }
+            } catch (_) { alert('連線失敗'); }
+        };
+
+        window._deleteRole = async function(roleId, roleName) {
+            if (!confirm(`確定要刪除角色 "${roleName}"？`)) return;
+            try {
+                const r = await fetch('/api/v1/roles/' + roleId, { method: 'DELETE' });
+                if (r.ok) { _loadRoleList(); } else {
+                    const d = await r.json();
+                    alert(d.detail || '刪除失敗');
+                }
+            } catch (_) { alert('連線失敗'); }
         };
 
         // Wrapped in DOMContentLoaded so modal HTML (placed after this script)

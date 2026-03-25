@@ -4,6 +4,35 @@
 
 ---
 
+## [1.10.0] - 2026-03-25
+
+### 新增
+- Google OAuth 登入（GIS Credential 模式）— 不需 client_secret，前端一鍵登入
+- `core/google_auth.py` — Google ID Token 驗證模組（RS256 簽名 + audience 校驗）
+- 自動建立使用者：Google 首次登入自動以 email 前綴建帳號（預設 editor 角色）
+- 帳號連結：既有密碼帳號若 email 匹配，自動綁定 Google ID
+- `_createFormModal(opts)` — 通用表單 Modal 建構函式（text/password/select/checkboxes）
+- 新增使用者 Modal — 帳號 + 密碼 + 確認密碼 + 角色下拉（取代 prompt()）
+- 新增角色 Modal — 名稱 + 權限等級 + 描述 + 模組 checkbox（取代 prompt()）
+- 角色切換即時更新模組 tags（`_onUserRoleChange`）
+- Google 頭像顯示在右上角 auth dropdown
+- 使用者管理面板顯示 email、登入方式 badge（密碼/Google/兩者）
+
+### 修改
+- `db/models.py` — User 加 google_id（unique+indexed）、email、avatar_url；password_hash 改 nullable
+- `routers/api_auth.py` — 大幅重構：提取 `_find_user_by()`、`_user_orm_to_dict()`、`_compute_auth_method()`、`_persist_user()`、`_get_user_role_name()`
+- `config.py` — 加 `google_oauth` 預設設定區塊（enabled/client_id/default_role/allowed_domains）
+- `main.py` — startup 加 `ALTER TABLE users ADD COLUMN IF NOT EXISTS` migration
+- `frontend/index.html` — 加 GIS script tag
+- `frontend/app.js` — 登入 modal 加 Google 按鈕 + `_onLoginSuccess()` 統一登入成功邏輯 + `_renderModuleTags()` 消除模板重複
+
+### 技術備註
+- Google OAuth 使用 GIS Credential 模式（非 redirect flow），不需 HTTPS、不需 client_secret
+- DB migration 使用 `IF NOT EXISTS` 避免每次啟動丟 exception
+- `/simplify` 三輪審查修復：7 處 `_persist_user` 統一、3 處 `auth_method` bug fix、module-level HTTP transport 重用
+
+---
+
 ## [1.9.6] - 2026-03-22
 
 ### 新增

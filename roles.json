@@ -1,0 +1,32 @@
+[
+  {
+    "id": 1,
+    "name": "admin",
+    "access_level": 3,
+    "modules": [
+      "backup",
+      "verify",
+      "transcode",
+      "concat",
+      "report",
+      "transcribe",
+      "tts",
+      "projects"
+    ],
+    "description": "系統管理員"
+  },
+  {
+    "id": 3,
+    "name": "editor",
+    "access_level": 1,
+    "modules": [
+      "backup",
+      "verify",
+      "transcode",
+      "concat",
+      "report",
+      "projects"
+    ],
+    "description": "剪輯師"
+  }
+]

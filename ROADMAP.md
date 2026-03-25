@@ -212,10 +212,13 @@
 
 ### 要建置的東西
 
-- [ ] JWT Token 登入端點（`POST /auth/login`）
-- [ ] 角色權限（admin / manager / user）
-- [ ] FastAPI Middleware：全域攔截，依角色控管 API 存取
-- [ ] 前端：登入頁 + 權限控管（不同角色看到不同頁籤）
+- [x] JWT Token 登入端點（`POST /auth/login`）
+- [x] 角色權限（admin / producer / editor / cameraman / assistant / viewer）+ RBAC 模組級守衛
+- [x] FastAPI Middleware：全域攔截，依角色控管 API 存取
+- [x] 前端：登入頁 + 權限控管（不同角色看到不同頁籤）
+- [x] Google OAuth 登入（GIS Credential 模式，自動建立/連結帳號）
+- [x] 使用者管理 UI（美化 Modal + 角色切換即時更新 + Google 頭像）
+- [x] 角色管理 UI（新增角色 Modal + 權限等級 + 模組 checkbox）
 - [ ] API Key 管理機制（供 OpenClaw 等外部系統使用）
 
 ### 做完後你看到的改變

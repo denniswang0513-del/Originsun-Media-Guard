@@ -42,6 +42,12 @@ _DEFAULT_SETTINGS: dict = {
         "transcribe": 1,
         "report": 1,
     },
+    "google_oauth": {
+        "enabled": False,
+        "client_id": "",
+        "default_role": "editor",
+        "allowed_domains": [],      # 空 = 允許所有，例 ["originsun.com"]
+    },
 }
 
 def save_settings(data: dict) -> None:

@@ -1,6 +1,6 @@
 # Originsun Media Guard Pro — Claude Code 完整交接文件
 
-> **版本**: v1.9.6（2026-03-22）
+> **版本**: v1.10.0（2026-03-25）
 > **目標讀者**: 接手開發的 AI 協作者（Claude Code）
 > **開發環境**: Windows 11、Python 3.11、Vanilla JS (ES Modules)
 > **啟動方式**: `d:\Antigravity\OriginsunTranscode\.venv\Scripts\python.exe main.py`
@@ -182,9 +182,10 @@ OriginsunTranscode/
 │   │
 │   └── scheduler.py         # 任務排程器（croniter cron + run_at 單次排程，每 60 秒掃描）
 │
-│  ── 【routers/ — FastAPI 路由模組（10 個）】
+│  ── 【routers/ — FastAPI 路由模組（12 個）】
 ├── routers/
 │   ├── __init__.py
+│   ├── api_auth.py          # 認證端點（登入/登出/Google OAuth/使用者 CRUD/角色 RBAC，見 7.14）
 │   ├── api_backup.py        # 備份端點（見 7.1）
 │   ├── api_verify.py        # 驗證端點（見 7.2）
 │   ├── api_proxy.py         # Proxy 轉檔 + 分散式計算端點（見 7.3）
@@ -198,6 +199,14 @@ OriginsunTranscode/
 │   ├── api_agents.py        # NAS 共享機器管理 API (GET/POST/DELETE /api/v1/agents)（見 7.11）
 │   ├── api_bookmarks.py     # 書籤 CRUD API
 │   └── api_schedules.py     # 排程管理 API
+│
+│  ── 【認證與權限】
+├── core/
+│   ├── auth.py              # JWT 認證 + RBAC 權限守衛（check_admin, get_current_user, find_role_by_name）
+│   └── google_auth.py       # Google ID Token 驗證（GIS credential 模式，不需 client_secret）
+├── db/
+│   ├── models.py            # SQLAlchemy ORM（User + Role 表，User 含 google_id/email/avatar_url）
+│   └── session.py           # DB 連線 + init_db() + 預設角色/使用者 seed
 │
 │  ── 【frontend/ — 靜態前端（SPA）】
 ├── frontend/
@@ -448,6 +457,20 @@ def _emit_sync(event: str, data: dict) -> None:
 
 `state._main_loop` 由 `@app.on_event("startup")` 設定。如果在 worker 中 emit 事件前端收不到，檢查 `state._main_loop` 是否為 None。
 
+### 5.6 RBAC + Google OAuth 認證系統
+
+- **雙寫架構**：使用者資料同時存 `users.json`（JSON 檔）和 SQLite DB（`db/models.py`）。
+  每次修改必須呼叫 `_persist_user(user_data)` 統一寫入，不可分開呼叫 `sync_user_to_json` + `_save_user_to_db`。
+- **Google OAuth 使用 GIS Credential 模式**：不需 client_secret，不需 redirect URI。
+  前端載入 `accounts.google.com/gsi/client`，Google 返回 ID Token JWT，後端用 `google-auth` 庫驗證。
+- **DB Migration**：`main.py` startup 用 `ALTER TABLE users ADD COLUMN IF NOT EXISTS` 加欄位，
+  不另建 migration 檔案。新增欄位時加在同一個迴圈裡。
+- **`_find_user_by(column, value)`**：統一的使用者查找函式，支援 DB 和 JSON fallback。
+  不要再新增 `_find_user_by_xxx` 單獨函式。
+- **前端登入成功統一用 `_onLoginSuccess(d)`**，不要在密碼和 Google 兩條路徑各寫一次。
+- **`_createFormModal(opts)`**：`app.js` 中的通用表單 Modal 建構函式，
+  支援 text/password/select/checkboxes，新增表單彈窗時直接複用。
+
 ---
 
 ## 6. 前端架構詳解 (SPA & WebSockets)
@@ -636,6 +659,23 @@ def _emit_sync(event: str, data: dict) -> None:
 | GET | `/api/v1/job_history/{job_id}/log` | 取得任務 Log 內容（512KB 上限） |
 | DELETE | `/api/v1/job_history` | 清除歷史（可指定日期） |
 
+### 7.14 認證與授權 (`routers/api_auth.py`)
+
+| 方法 | 路徑 | 說明 |
+|------|------|------|
+| POST | `/api/v1/auth/login` | 密碼登入（返回 JWT） |
+| GET | `/api/v1/auth/me` | 取得當前登入使用者資訊 |
+| GET | `/api/v1/auth/users` | 列出所有使用者（需 admin） |
+| POST | `/api/v1/auth/users` | 新增使用者（需 admin） |
+| PUT | `/api/v1/auth/users/{username}` | 修改使用者角色/密碼（需 admin） |
+| DELETE | `/api/v1/auth/users/{username}` | 刪除使用者（需 admin） |
+| GET | `/api/v1/auth/google/config` | 取得 Google OAuth 設定（公開） |
+| POST | `/api/v1/auth/google/login` | Google ID Token 登入 |
+| GET | `/api/v1/roles` | 列出所有角色 |
+| POST | `/api/v1/roles` | 新增角色（需 admin） |
+| PUT | `/api/v1/roles/{id}` | 修改角色權限/模組（需 admin） |
+| DELETE | `/api/v1/roles/{id}` | 刪除角色（需 admin） |
+
 ### 7.12 Pydantic Schema 完整清單 (`core/schemas.py`)
 
 ```python
@@ -794,6 +834,9 @@ class ValidatePathsRequest(BaseModel):
 - [x] **TTS 前端三子頁**：標準 TTS / 聲音複製 / 正音字典編輯器
 - [x] **正音字典 API**：GET/POST `/api/v1/tts/dictionary`，支援熱更新
 - [x] **純 HTTP OTA 更新**：移除 NAS SMB 依賴，Agent 從主控端 HTTP 下載輕量更新 ZIP（~200KB）+ 更新防卡死
+- [x] **RBAC 權限系統**：角色管理（admin/producer/editor/cameraman/assistant/viewer）+ 模組級權限守衛
+- [x] **Google OAuth 登入**：GIS Credential 模式，自動建立使用者，支援帳號連結
+- [x] **使用者/角色管理 UI**：美化 Modal（取代 prompt()）、角色切換即時更新模組、Google 頭像顯示
 - [ ] **TTS 整合完善**：接入任務佇列、Socket.IO 即時進度、完成通知、SRT 批次合成
 - [x] **運算主機合併至機器狀態**：NAS 共享 agents.json，各 TAB host checkbox 即時同步
 - [x] **機器狀態即時監控**：綠燈脈衝 / 紅燈離線 / 橘燈慢 + CPU 顯示 + 版本號

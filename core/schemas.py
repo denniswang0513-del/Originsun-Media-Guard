@@ -1,6 +1,23 @@
 from pydantic import BaseModel  # type: ignore
 from typing import List, Optional, Tuple
 
+
+# ── Role Schemas (RBAC) ──
+
+class CreateRoleRequest(BaseModel):
+    name: str
+    access_level: int = 1
+    modules: List[str] = []
+    description: str = ""
+
+
+class UpdateRoleRequest(BaseModel):
+    name: Optional[str] = None
+    access_level: Optional[int] = None
+    modules: Optional[List[str]] = None
+    description: Optional[str] = None
+
+
 class BackupRequest(BaseModel):
     task_type: str = "backup"
     job_id: str = ""
