@@ -3,16 +3,25 @@
 import asyncio
 from typing import Optional, AsyncGenerator
 
-from sqlalchemy.ext.asyncio import (
-    create_async_engine,
-    async_sessionmaker,
-    AsyncSession,
-    AsyncEngine,
-)
-from sqlalchemy import text
+try:
+    from sqlalchemy.ext.asyncio import (
+        create_async_engine,
+        async_sessionmaker,
+        AsyncSession,
+        AsyncEngine,
+    )
+    from sqlalchemy import text
+    _HAS_SQLALCHEMY = True
+except ImportError:
+    _HAS_SQLALCHEMY = False
+    create_async_engine = None
+    async_sessionmaker = None
+    AsyncSession = None
+    AsyncEngine = None
+    text = None
 
-_engine: Optional[AsyncEngine] = None
-_session_factory: Optional[async_sessionmaker[AsyncSession]] = None
+_engine = None
+_session_factory = None
 
 
 def get_database_url() -> str:
@@ -33,6 +42,8 @@ async def init_db() -> bool:
 
     Returns True if DB is reachable, False otherwise.
     """
+    if not _HAS_SQLALCHEMY:
+        return False
     global _engine, _session_factory
     try:
         url = get_database_url()

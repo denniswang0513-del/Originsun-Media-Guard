@@ -20,7 +20,11 @@ from core.auth import (
     load_roles_json, LEGACY_ROLE_LEVELS,
     get_all_roles, find_role_by_name,
 )
-from core.google_auth import verify_google_id_token, GoogleTokenError
+try:
+    from core.google_auth import verify_google_id_token, GoogleTokenError
+except ImportError:
+    verify_google_id_token = None  # google-auth not installed on this machine
+    class GoogleTokenError(Exception): pass
 from config import load_settings
 import core.state as state
 import re
@@ -518,6 +522,8 @@ def _generate_unique_username(email: str, display_name: str, existing_users: lis
 @router.post("/google/login")
 async def google_login(req: GoogleLoginRequest):
     """Authenticate via Google OAuth. Auto-creates user on first login."""
+    if verify_google_id_token is None:
+        raise HTTPException(status_code=501, detail="google-auth library not installed on this machine")
     settings = load_settings()
     g = settings.get("google_oauth", {})
     if not g.get("enabled"):
