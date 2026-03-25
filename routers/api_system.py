@@ -613,20 +613,29 @@ async def download_update(background_tasks: BackgroundTasks):
     import zipfile, tempfile
     base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
-    files_to_include = [
-        "main.py", "config.py", "core_engine.py", "report_generator.py",
-        "notifier.py", "drive_sync.py", "transcriber.py", "tts_engine.py",
-        "taiwan_dict.json", "download_model.py", "version.json", "logo.ico",
-        "update_agent.bat", "update_monitor.py", "start_hidden.vbs",
-        "0225_requirements.txt", "bootstrap.py", "server.py",
-    ]
-    # 自動偵測含 .py 的資料夾（排除大型/非必要目錄）
-    _exclude = {'.venv', 'venv', 'node_modules', '.git', '.claude', 'tests',
-                'models', 'voice', 'credentials', '__pycache__', 'e2e',
-                'python_embed', 'windows_helper'}
-    dirs_to_include = ["frontend", "templates", "core", "routers", "utils"]
+    # Use ota_manifest as single source of truth
+    try:
+        from ota_manifest import AGENT_FILES, AGENT_DIRS, EXCLUDE_DIRS
+        files_to_include = list(AGENT_FILES)
+        dirs_to_include = list(AGENT_DIRS)
+    except ImportError:
+        # Fallback if ota_manifest not available
+        files_to_include = [
+            "main.py", "config.py", "core_engine.py", "report_generator.py",
+            "notifier.py", "drive_sync.py", "transcriber.py", "tts_engine.py",
+            "taiwan_dict.json", "download_model.py", "version.json", "logo.ico",
+            "update_agent.bat", "update_agent.py", "update_monitor.py",
+            "preflight.py", "ota_manifest.py", "start_hidden.vbs",
+            "requirements_agent.txt", "bootstrap.py", "server.py",
+        ]
+        EXCLUDE_DIRS = {'.venv', 'venv', 'node_modules', '.git', '.claude', 'tests',
+                        'models', 'voice', 'credentials', '__pycache__', 'e2e',
+                        'python_embed', '_rollback'}
+        dirs_to_include = ["frontend", "templates", "core", "routers", "utils", "db"]
+
+    # Auto-discover additional Python packages
     for entry in os.listdir(base_dir):
-        if entry.startswith('.') or entry.startswith('_') or entry in _exclude:
+        if entry.startswith('.') or entry.startswith('_') or entry in EXCLUDE_DIRS:
             continue
         full = os.path.join(base_dir, entry)
         if os.path.isdir(full) and entry not in dirs_to_include:
