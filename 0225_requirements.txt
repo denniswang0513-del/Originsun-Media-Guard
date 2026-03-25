@@ -21,6 +21,11 @@ croniter
 google-api-python-client
 google-auth-oauthlib
 google-auth-httplib2
+google-auth
+
+# ── Database (optional — JSON fallback if not installed) ──
+sqlalchemy[asyncio]
+asyncpg
 
 # ── TTS ──
 edge-tts

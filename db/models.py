@@ -1,8 +1,19 @@
 """SQLAlchemy ORM models for Originsun Media Guard Pro."""
 
-from sqlalchemy import Column, String, Text, Boolean, Integer, DateTime, func, Index
-from sqlalchemy.dialects.postgresql import JSONB
-from sqlalchemy.orm import DeclarativeBase
+try:
+    from sqlalchemy import Column, String, Text, Boolean, Integer, DateTime, func, Index
+    from sqlalchemy.dialects.postgresql import JSONB
+    from sqlalchemy.orm import DeclarativeBase
+    _HAS_SQLALCHEMY = True
+except ImportError:
+    _HAS_SQLALCHEMY = False
+    # Provide stubs so module can be imported without crashing
+    class _Stub:
+        def __call__(self, *a, **kw): return self
+        def __getattr__(self, _): return self
+    Column = String = Text = Boolean = Integer = DateTime = func = Index = _Stub()
+    JSONB = _Stub()
+    class DeclarativeBase: pass
 
 
 class Base(DeclarativeBase):
