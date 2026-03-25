@@ -1,10 +1,11 @@
 {
-  "version": "1.9.9",
+  "version": "Google OAuth login + RBAC refactor + UI modals",
   "pip_install": [
     "asyncpg",
     "huggingface-hub",
     "pydub",
-    "sqlalchemy[asyncio]"
+    "sqlalchemy[asyncio]",
+    "tts"
   ],
   "note": "Agent 更新時自動 pip install 這些套件"
 }
