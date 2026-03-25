@@ -606,6 +606,44 @@ async def download_agent():
         return FileResponse(file_path, filename="Originsun_Agent.zip")
     return {"error": "系統尚未打包 Originsun_Agent.zip，請聯絡管理員放置此檔案於伺服器根目錄。"}
 
+@router.post("/api/v1/publish")
+async def publish_version(request: Request):
+    """Trigger version publish from the web UI. Requires admin."""
+    _check_admin(request)
+    import subprocess, re
+    body = await request.json()
+    version = body.get("version", "").strip()
+    notes = body.get("notes", "").strip()
+
+    if not version:
+        return JSONResponse({"status": "error", "message": "Version is required"}, 400)
+    if not re.match(r"^\d+\.\d+\.\d+$", version):
+        return JSONResponse({"status": "error", "message": f"Invalid version format: {version} (need X.Y.Z)"}, 400)
+    if not notes:
+        notes = "Update"
+
+    base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    publish_script = os.path.join(base_dir, "publish_update.py")
+    if not os.path.exists(publish_script):
+        return JSONResponse({"status": "error", "message": "publish_update.py not found"}, 500)
+
+    try:
+        result = await asyncio.to_thread(
+            subprocess.run,
+            [sys.executable, publish_script, "--version", version, "--notes", notes],
+            capture_output=True, text=True, timeout=600, cwd=base_dir,
+        )
+        log_output = (result.stdout or "") + (result.stderr or "")
+        if result.returncode == 0:
+            return {"status": "ok", "message": f"v{version} published", "log": log_output}
+        else:
+            return JSONResponse({"status": "error", "message": f"Publish failed (exit {result.returncode})", "log": log_output}, 500)
+    except subprocess.TimeoutExpired:
+        return JSONResponse({"status": "error", "message": "Publish timed out (600s)"}, 500)
+    except Exception as e:
+        return JSONResponse({"status": "error", "message": str(e)}, 500)
+
+
 @router.get("/download_update")
 async def download_update(background_tasks: BackgroundTasks):
     """Serve a lightweight code-only ZIP for OTA updates (~10-30MB).
