@@ -92,6 +92,17 @@ def _make_id(name: str) -> str:
     return slug or "agent"
 
 
+async def _sync_db_to_nas(session, repo):
+    """Best-effort: dump DB agents to NAS JSON as backup."""
+    try:
+        all_agents = await repo.list_all(session)
+        nas_dir = _get_nas_agents_dir()
+        if nas_dir:
+            _save_agents_json(nas_dir, all_agents)
+    except Exception:
+        pass  # Non-critical — NAS JSON is just a backup
+
+
 # ─── Schemas ──────────────────────────────────────────────
 
 class NewAgentRequest(BaseModel):
@@ -103,40 +114,7 @@ class NewAgentRequest(BaseModel):
 
 @router.get("/agents")
 async def list_agents():
-    """List agents. NAS agents.json is the single source of truth.
-    DB agents are merged in (for any that were added via web UI but not yet in NAS)."""
-    nas_dir = _get_nas_agents_dir()
-    nas_agents = _load_agents_json(nas_dir)
-
-    # If NAS has agents, use NAS as primary source
-    if nas_agents:
-        # Also check DB for any agents not in NAS (added via web UI)
-        db_agents = []
-        if state.db_online:
-            try:
-                from db.session import get_session_factory
-                factory = get_session_factory()
-                if factory:
-                    from db.repos import agents_repo
-                    async with factory() as session:
-                        db_agents = await agents_repo.list_all(session)
-            except Exception:
-                pass
-
-        # Merge: NAS is primary, add DB-only agents
-        nas_ids = {a["id"] for a in nas_agents}
-        merged = list(nas_agents)
-        for dba in db_agents:
-            if dba["id"] not in nas_ids:
-                merged.append(dba)
-
-        # Sync merged list back to NAS so new agents persist
-        if len(merged) > len(nas_agents):
-            _save_agents_json(nas_dir, merged)
-
-        return {"agents": merged, "nas_configured": True, "source": "nas+db"}
-
-    # No NAS config — fall back to DB only
+    """DB is the single source of truth. JSON fallback when DB offline."""
     if state.db_online:
         try:
             from db.session import get_session_factory
@@ -144,12 +122,23 @@ async def list_agents():
             if factory:
                 from db.repos import agents_repo
                 async with factory() as session:
-                    agents = await agents_repo.list_all(session)
-                    return {"agents": agents, "nas_configured": False, "source": "db"}
+                    db_agents = await agents_repo.list_all(session)
+                    # Auto-migrate: if DB empty but NAS JSON has data, import once
+                    if not db_agents:
+                        nas_dir = _get_nas_agents_dir()
+                        nas_agents = _load_agents_json(nas_dir)
+                        if nas_agents:
+                            for a in nas_agents:
+                                await agents_repo.add(session, a["id"], a["name"], a["url"])
+                            await session.commit()
+                            db_agents = await agents_repo.list_all(session)
+                    return {"agents": db_agents, "nas_configured": True, "source": "db"}
         except Exception:
             pass
-
-    return {"agents": [], "nas_configured": False, "source": "none"}
+    # Fallback to JSON when DB offline
+    nas_dir = _get_nas_agents_dir()
+    agents = _load_agents_json(nas_dir)
+    return {"agents": agents, "nas_configured": bool(nas_dir), "source": "json"}
 
 
 @router.post("/agents")
@@ -178,6 +167,8 @@ async def add_agent(req: NewAgentRequest, request: Request):
                     await agents_repo.add(session, agent_id, req.name, url_clean)
                     await session.commit()
                     new_agent = {"id": agent_id, "name": req.name, "url": url_clean}
+                    # Sync to NAS JSON as backup
+                    await _sync_db_to_nas(session, agents_repo)
                     return {"status": "ok", "agent": new_agent}
         except HTTPException:
             raise
@@ -231,97 +222,97 @@ async def trigger_agent_update(agent_id: str, request: Request):
     base_url = agent.get("url", "").rstrip("/")
 
     def _trigger():
-        # Try internal restart endpoint (works without JWT auth)
-        try:
-            url = base_url + "/api/v1/internal/restart"
-            req = urllib.request.Request(url, method="POST", data=b'{}',
-                                         headers={"Content-Type": "application/json",
-                                                  "X-Internal-Key": "originsun-internal-restart"})
-            with urllib.request.urlopen(req, timeout=10) as resp:
-                return json.loads(resp.read().decode("utf-8"))
-        except urllib.error.HTTPError as e:
-            if e.code == 404:
-                pass  # Old agent without /internal/restart — try fallback
-            else:
-                return {"status": "updating", "method": "internal_restart"}
-        except Exception:
-            return {"status": "updating", "method": "internal_restart"}
+        # Try internal/restart first (no JWT, simpler — both endpoints now run update_agent.py)
+        for endpoint, headers in [
+            ("/api/v1/internal/restart", {"Content-Type": "application/json",
+                                           "X-Internal-Key": "originsun-internal-restart"}),
+        ]:
+            try:
+                url = base_url + endpoint
+                req = urllib.request.Request(url, method="POST", data=b'{}', headers=headers)
+                with urllib.request.urlopen(req, timeout=10) as resp:
+                    return json.loads(resp.read().decode("utf-8"))
+            except urllib.error.HTTPError as e:
+                if e.code in (404, 405):
+                    continue  # Endpoint not available, try next
+                return {"status": "updating"}
+            except urllib.error.URLError:
+                return {"status": "restarting"}
+            except Exception:
+                continue
 
-        # Fallback for old agents: call /api/v1/control/update without auth
-        # (will fail with 401 on auth-required agents, but might work on some)
+        # Fallback: control/update with JWT (for agents that have auth but no internal/restart)
         try:
+            login_url = base_url + "/api/v1/auth/login"
+            login_data = json.dumps({"username": "admin", "password": "admin"}).encode()
+            login_req = urllib.request.Request(login_url, method="POST", data=login_data,
+                                               headers={"Content-Type": "application/json"})
+            with urllib.request.urlopen(login_req, timeout=5) as resp:
+                token = json.loads(resp.read().decode("utf-8")).get("token", "")
+
             url = base_url + "/api/v1/control/update"
             req = urllib.request.Request(url, method="POST", data=b'{}',
-                                         headers={"Content-Type": "application/json"})
+                                         headers={"Content-Type": "application/json",
+                                                  "Authorization": f"Bearer {token}"})
             with urllib.request.urlopen(req, timeout=10) as resp:
                 return json.loads(resp.read().decode("utf-8"))
         except Exception:
             pass
 
-        return {"status": "error", "detail": "Agent does not support remote restart. Please update manually."}
+        return {"status": "error", "detail": "Agent does not support remote update."}
 
     return await asyncio.to_thread(_trigger)
 
 
 @router.get("/agents/{agent_id}/update_status")
 async def get_agent_update_status(agent_id: str, since: float = 0):
-    """Poll remote Agent's update status.
+    """Poll remote Agent's update status (simplified — no port 8001 monitor).
 
     Logic:
-    1. First 20 seconds: only check monitor (port 8001), agent is restarting
-    2. After 20 seconds: check health (port 8000) — if responds, update is done
-    3. If neither responds: show "updating" with increasing progress
+    1. First 10 seconds: agent is restarting, don't bother connecting
+    2. After 10 seconds: try health check on port 8000
+       - Responds → read /api/v1/update_status for result → done or failed
+       - No response → estimate progress based on elapsed time
+    3. Over 3 minutes: declare failed
     """
     import time
     agent = await _find_agent(agent_id)
     base_url = agent.get("url", "").rstrip("/")
-    monitor_url = base_url.replace(":8000", ":8001") + "/status"
-    health_url = base_url + "/api/v1/health"
     elapsed = time.time() - since if since > 0 else 999
 
     def _poll():
-        # ── Check monitor on port 8001 (available during entire update) ──
-        monitor_data = None
+        # First 10 seconds: agent is shutting down + restarting, don't connect
+        if elapsed < 10:
+            return {"phase": "restarting", "pct": 20, "detail": "正在重啟..."}
+
+        # Try health check
+        health = None
         try:
-            req = urllib.request.Request(monitor_url, method="GET")
+            req = urllib.request.Request(base_url + "/api/v1/health", method="GET")
             with urllib.request.urlopen(req, timeout=3) as resp:
-                monitor_data = json.loads(resp.read().decode("utf-8"))
-                if "step" in monitor_data and "phase" not in monitor_data:
-                    phases = {1: "downloading", 2: "installing", 3: "restarting"}
-                    monitor_data["phase"] = phases.get(monitor_data["step"], "updating")
-                monitor_data["source"] = "monitor"
+                health = json.loads(resp.read().decode("utf-8"))
         except Exception:
             pass
 
-        # ── After 20 seconds, also check health ──
-        if elapsed > 20:
-            try:
-                req = urllib.request.Request(health_url, method="GET")
-                with urllib.request.urlopen(req, timeout=2) as resp:
-                    data = json.loads(resp.read().decode("utf-8"))
-                    return {"phase": "done", "pct": 100, "source": "health",
-                            "version": data.get("version", "")}
-            except Exception:
-                pass
+        if not health or health.get("status") == "offline":
+            # Agent still down — estimate progress
+            if elapsed < 180:
+                pct = min(80, 20 + int(elapsed / 3))
+                return {"phase": "updating", "pct": pct, "detail": "更新中，請稍候..."}
+            return {"phase": "failed", "pct": 0, "detail": "Agent 超過 3 分鐘未回應"}
 
-        # ── Return monitor data if available ──
-        if monitor_data:
-            return monitor_data
+        # Agent is back online — read update_status.json for the real result
+        version = health.get("version", "")
+        detail = ""
+        try:
+            req2 = urllib.request.Request(base_url + "/api/v1/update_status", method="GET")
+            with urllib.request.urlopen(req2, timeout=3) as resp2:
+                status = json.loads(resp2.read().decode("utf-8"))
+                detail = status.get("msg", "")
+        except Exception:
+            pass
 
-        # ── Neither responded ──
-        if elapsed < 20:
-            # Still early — server is shutting down, normal
-            return {"phase": "restarting", "pct": 30, "source": "none",
-                    "detail": "Server is restarting..."}
-        elif elapsed < 120:
-            # 20-120 seconds — update in progress
-            pct = min(80, 30 + int(elapsed / 2))
-            return {"phase": "updating", "pct": pct, "source": "none",
-                    "detail": "Updating... please wait"}
-        else:
-            # Over 2 minutes — likely failed
-            return {"phase": "failed", "pct": 0, "source": "none",
-                    "detail": "Update may have failed. Agent not responding after 2 minutes."}
+        return {"phase": "done", "pct": 100, "version": version, "detail": detail}
 
     return await asyncio.to_thread(_poll)
 
@@ -340,6 +331,8 @@ async def remove_agent(agent_id: str, request: Request):
                     await session.commit()
                     if not removed:
                         raise HTTPException(status_code=404, detail=f"找不到 ID 為 {agent_id} 的機器")
+                    # Sync to NAS JSON as backup
+                    await _sync_db_to_nas(session, agents_repo)
                     return {"status": "ok"}
         except HTTPException:
             raise

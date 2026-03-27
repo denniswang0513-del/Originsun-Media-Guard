@@ -27,7 +27,7 @@ echo.
 REM Force download latest update (bypass old bootstrap)
 echo [1/3] Downloading latest update...
 cd /d "%FOUND%"
-powershell -Command "Invoke-WebRequest -Uri '%SERVER%/download_update' -OutFile '%TEMP%\originsun_update.zip'" 2>nul
+powershell -Command "(New-Object Net.WebClient).DownloadFile('%SERVER%/download_update','%TEMP%\originsun_update.zip')" 2>nul
 if not exist "%TEMP%\originsun_update.zip" (
     echo [WARN] Update download failed, trying full install...
     goto :fresh_install
@@ -57,7 +57,7 @@ echo [INFO] No existing Agent found. Fresh install to Desktop...
 echo.
 echo Downloading full package from server (~1GB, please wait)...
 cd /d "%USERPROFILE%\Desktop"
-powershell -Command "Invoke-WebRequest -Uri '%SERVER%/download_agent' -OutFile 'Originsun_Agent.zip'"
+powershell -Command "(New-Object Net.WebClient).DownloadFile('%SERVER%/download_agent','Originsun_Agent.zip')"
 if not exist Originsun_Agent.zip (
     echo [ERROR] Download failed! Check if server %SERVER% is online.
     pause

@@ -192,6 +192,13 @@ def rollback(reason: str):
 def run_update(master_url: str) -> int:
     """Execute the 7-phase update. Returns 0=success, 1=failed+rolled back."""
 
+    # Clear stale status from previous runs
+    try:
+        if os.path.exists(STATUS_FILE):
+            os.remove(STATUS_FILE)
+    except Exception:
+        pass
+
     # ── Phase 1: CHECK ──
     log("Phase 1: Checking master server...")
     write_status(1, 5, "正在連線到主控端...")
@@ -273,6 +280,24 @@ def run_update(master_url: str) -> int:
     else:
         log("Phase 5: No requirements_agent.txt found, skipping pip.")
 
+    # ── Phase 5b: MANIFEST SAFETY NET ──
+    manifest_file = os.path.join(INSTALL_DIR, "update_manifest.json")
+    if os.path.isfile(manifest_file):
+        try:
+            with open(manifest_file, "r", encoding="utf-8") as f:
+                manifest = json.load(f)
+            extra_pkgs = manifest.get("pip_install", [])
+            if extra_pkgs:
+                log(f"Phase 5b: Installing {len(extra_pkgs)} manifest packages: {', '.join(extra_pkgs)}")
+                write_status(5, 70, f"正在安裝額外套件 ({len(extra_pkgs)})...")
+                subprocess.run(
+                    [PYTHON, "-m", "pip", "install", "-q", "--no-warn-script-location"] + extra_pkgs,
+                    capture_output=True, text=True, timeout=300,
+                )
+                log("Manifest packages installed.")
+        except Exception as e:
+            log(f"Manifest install warning (non-fatal): {e}")
+
     # ── Phase 6: PREFLIGHT ──
     log("Phase 6: Running preflight check...")
     write_status(6, 80, "正在驗證更新...")
@@ -281,6 +306,7 @@ def run_update(master_url: str) -> int:
             result = subprocess.run(
                 [PYTHON, PREFLIGHT_SCRIPT],
                 capture_output=True, text=True, timeout=30,
+                cwd=INSTALL_DIR,
             )
             if result.returncode != 0:
                 log(f"Preflight FAILED:\n{result.stdout}")

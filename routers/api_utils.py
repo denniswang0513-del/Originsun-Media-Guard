@@ -1,0 +1,322 @@
+"""Utility endpoints: file open, folder pick, shortcut creation, path resolution.
+
+Split from api_system.py — all endpoint paths remain unchanged.
+"""
+import os
+import re
+import subprocess
+import asyncio
+from fastapi import APIRouter  # type: ignore
+from core.schemas import OpenFileRequest, ValidatePathsRequest  # type: ignore
+
+router = APIRouter()
+
+
+@router.post("/api/v1/utils/open_file")
+async def open_local_file(req: OpenFileRequest):
+    try:
+        import webbrowser as _wb
+        safe_path = req.path.replace("\\", "/")
+        if not safe_path.startswith("file://"): safe_path = f"file:///{safe_path}"
+        _wb.open(safe_path)
+        return {"status": "ok", "opened": safe_path}
+    except Exception as e: return {"status": "error", "message": str(e)}
+
+@router.post("/api/v1/utils/open_folder")
+async def open_local_folder(req: OpenFileRequest):
+    try:
+        folder_path = os.path.dirname(req.path)
+        if os.path.exists(folder_path):
+            import subprocess
+            subprocess.Popen(f'explorer /select,"{req.path}"')
+            return {"status": "ok", "opened": folder_path}
+        return {"status": "error", "message": f"資料夾不存在: {folder_path}"}
+    except Exception as e: return {"status": "error", "message": str(e)}
+
+@router.get("/api/v1/utils/pick_folder")
+async def api_pick_folder(title: str = "選擇資料夾"):
+    def _pick():
+        import tkinter as tk
+        from tkinter import filedialog
+        root = tk.Tk()
+        root.attributes("-topmost", True)
+        root.withdraw()
+        path = filedialog.askdirectory(title=title)
+        root.destroy()
+        return path
+    selected = await asyncio.to_thread(_pick)  # type: ignore
+    return {"path": selected}
+
+@router.get("/api/v1/utils/pick_file")
+async def api_pick_file(title: str = "選擇檔案"):
+    def _pick():
+        import tkinter as tk
+        from tkinter import filedialog
+        root = tk.Tk()
+        root.attributes("-topmost", True)
+        root.withdraw()
+        path = filedialog.askopenfilename(title=title)
+        root.destroy()
+        return path
+    selected = await asyncio.to_thread(_pick)  # type: ignore
+    return {"path": selected}
+
+@router.post("/api/v1/utils/create_shortcut")
+async def create_desktop_shortcut():
+    import subprocess
+    import locale
+    import socket
+    try:
+        vbs_path = os.path.join(os.getcwd(), "Create_Shortcut.vbs")
+
+        try:
+            s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            s.connect(("8.8.8.8", 80))
+            my_ip = s.getsockname()[0]
+            s.close()
+        except:
+            my_ip = "127.0.0.1"
+
+        ico_path = os.path.join(os.getcwd(), "logo.ico")
+
+        vbs_code = f"""
+Set WshShell = CreateObject("WScript.Shell")
+Set fso = CreateObject("Scripting.FileSystemObject")
+chromePath1 = WshShell.ExpandEnvironmentStrings("%ProgramFiles%") & "\\Google\\Chrome\\Application\\chrome.exe"
+chromePath2 = WshShell.ExpandEnvironmentStrings("%ProgramFiles(x86)%") & "\\Google\\Chrome\\Application\\chrome.exe"
+chromePath3 = WshShell.ExpandEnvironmentStrings("%LocalAppData%") & "\\Google\\Chrome\\Application\\chrome.exe"
+chromePath = ""
+If fso.FileExists(chromePath1) Then
+    chromePath = chromePath1
+ElseIf fso.FileExists(chromePath2) Then
+    chromePath = chromePath2
+ElseIf fso.FileExists(chromePath3) Then
+    chromePath = chromePath3
+End If
+serverUrl = "http://localhost:8000"
+icoPath = "{ico_path}"
+sLinkFile = WshShell.SpecialFolders("Desktop") & "\\Originsun Media Guard Web.lnk"
+Set oLink = WshShell.CreateShortcut(sLinkFile)
+If chromePath <> "" Then
+    oLink.TargetPath = chromePath
+    oLink.Arguments = "--app=" & serverUrl & " --start-fullscreen"
+    If fso.FileExists(icoPath) Then
+        oLink.IconLocation = icoPath
+    Else
+        oLink.IconLocation = chromePath & ", 0"
+    End If
+Else
+    oLink.TargetPath = serverUrl
+    If fso.FileExists(icoPath) Then
+        oLink.IconLocation = icoPath
+    End If
+End If
+oLink.Description = "Originsun Media Guard Pro Web Edition"
+oLink.WindowStyle = 1
+oLink.Save
+MsgBox "桌面捷徑已成功建立！請查看桌面上的「Originsun Media Guard Web」。", vbInformation, "安裝成功"
+"""
+        sys_enc = locale.getpreferredencoding()
+        with open(vbs_path, "w", encoding=sys_enc, errors="replace") as f:
+            f.write(vbs_code.strip())
+
+        subprocess.run(["cscript.exe", "//nologo", vbs_path], check=True, creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0x08000000))
+        return {"status": "success", "message": "桌面捷徑已成功建立！\n請查看桌面上的「Originsun Media Guard Web」。"}
+    except subprocess.CalledProcessError as e:
+        return {"status": "error", "message": f"腳本執行失敗 (cscript 錯誤): {str(e)}"}
+    except Exception as e:
+        return {"status": "error", "message": f"建立失敗: {str(e)}"}
+
+@router.post("/api/v1/validate_paths")
+async def validate_paths(req: ValidatePathsRequest):
+    """檢查每個路徑的磁碟機是否存在、路徑本身是否存在（供遠端主機派發前驗證）"""
+    results = {}
+    for p in req.paths:
+        drive = os.path.splitdrive(p)[0]  # e.g. "S:"
+        drive_exists = os.path.exists(drive + os.sep) if drive else True
+        path_exists = os.path.exists(p)
+        results[p] = {
+            "drive": drive,
+            "drive_exists": drive_exists,
+            "path_exists": path_exists,
+        }
+    return {"status": "ok", "results": results}
+
+@router.get("/api/v1/utils/resolve_drop")
+async def api_resolve_drop(name: str):
+    def _find():
+        import re
+        import subprocess
+
+        clean_name = name.strip()
+
+        match = re.search(r'\(([a-zA-Z]):\)', clean_name)
+        if match: return f"{match.group(1).upper()}:\\"
+        match = re.search(r'^([a-zA-Z]):$', clean_name)
+        if match: return f"{match.group(1).upper()}:\\"
+        match = re.search(r'^([a-zA-Z])_drive$', clean_name, re.IGNORECASE)
+        if match: return f"{match.group(1).upper()}:\\"
+
+        drives = [f"{chr(d)}:\\" for d in range(65, 91) if os.path.exists(f"{chr(d)}:\\")]
+
+        for drive in drives:
+            try:
+                out = subprocess.check_output(f'vol {drive[0]}:', text=True, shell=True, stderr=subprocess.DEVNULL)
+                if clean_name.lower() in out.lower(): return drive
+            except Exception: pass
+
+        try:
+            ps_script = """
+            [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+            $app = New-Object -ComObject Shell.Application
+            foreach ($win in $app.Windows()) {
+                try {
+                    $sel = $win.Document.SelectedItems()
+                    if ($sel -ne $null) {
+                        foreach ($item in $sel) { Write-Output $item.Path }
+                    }
+                    $folderPath = $win.Document.Folder.Self.Path
+                    if ($folderPath -ne $null -and $folderPath -ne "") {
+                        Write-Output "FOLDER:$folderPath"
+                    }
+                } catch {}
+            }
+            """
+            paths = subprocess.check_output(["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", ps_script], encoding="utf-8", errors="replace", stderr=subprocess.DEVNULL).splitlines()
+            lower_name = clean_name.lower()
+
+            selected_items = []
+            open_folders = []
+            for p in paths:
+                p = p.strip()
+                if not p: continue
+                if p.startswith("FOLDER:"): open_folders.append(p.removeprefix("FOLDER:"))
+                else: selected_items.append(p)
+
+            exact_matches = [p for p in selected_items if os.path.basename(p).lower() == lower_name]
+            if exact_matches: return max(exact_matches, key=len)
+
+            folder_candidates = []
+            for folder in open_folders:
+                candidate = os.path.join(folder, clean_name)
+                if os.path.exists(candidate): folder_candidates.append(candidate)
+            if folder_candidates: return max(folder_candidates, key=len)
+        except Exception: pass
+
+        user_profile = os.environ.get('USERPROFILE', '')
+        known_system_dirs = ["Desktop", "Downloads", "Documents", "Videos", "Pictures", "Music"]
+        if user_profile:
+            for sysdir in known_system_dirs:
+                if clean_name.lower() == sysdir.lower():
+                    full = os.path.join(user_profile, sysdir)
+                    if os.path.exists(full): return full
+                    onedrive = os.environ.get('OneDriveConsumer', os.environ.get('OneDrive', ''))
+                    if onedrive:
+                        od_path = os.path.join(onedrive, sysdir)
+                        if os.path.exists(od_path): return od_path
+
+        if user_profile:
+            for subdir in known_system_dirs:
+                candidate = os.path.join(user_profile, subdir, clean_name)
+                if os.path.exists(candidate): return candidate
+
+        if len(clean_name) >= 2:
+            for drive in drives:
+                candidate = os.path.join(drive, clean_name)
+                if os.path.exists(candidate): return candidate
+
+            for drive in drives:
+                try:
+                    for sub in os.scandir(drive):
+                        if sub.is_dir():
+                            candidate = os.path.join(sub.path, clean_name)
+                            if os.path.exists(candidate): return candidate
+                except Exception: continue
+
+        return ""
+
+    path = await asyncio.to_thread(_find)  # type: ignore
+    return {"path": path}
+
+
+# ── NAS Browser (for external access) ──────────────────────────────────
+VIDEO_EXTS = {".mov", ".mp4", ".mkv", ".mxf", ".avi", ".mts", ".m2ts", ".r3d", ".braw"}
+
+@router.get("/api/v1/browse")
+async def browse_directory(path: str = "", show_files: bool = False):
+    """List subdirectories (and optionally video files) under a given path.
+    Restricted to browse_roots whitelist in settings.json."""
+    from config import load_settings  # type: ignore
+    settings = load_settings()
+    roots = settings.get("browse_roots", [])
+
+    # Auto-detect roots from common drive letters if not configured
+    if not roots:
+        for letter in ["S", "R", "T", "Z", "D", "E"]:
+            drive = f"{letter}:/"
+            if os.path.isdir(drive):
+                roots.append(drive)
+        # Also add NAS UNC paths from settings
+        for k, v in settings.get("nas_paths", {}).items():
+            if v and v.startswith("\\\\"):
+                root = "\\\\".join(v.split("\\")[:4]) + "\\"  # e.g. \\192.168.1.132\Container
+                if root not in roots:
+                    roots.append(root)
+
+    # Normalize for comparison
+    def _norm(p):
+        return p.replace("\\", "/").rstrip("/").lower()
+
+    # If no path specified, return available roots
+    if not path:
+        available = []
+        for r in roots:
+            r_clean = r.replace("\\", "/").rstrip("/")
+            try:
+                if os.path.isdir(r):
+                    available.append({"name": r_clean, "path": r_clean, "type": "root"})
+            except Exception:
+                pass
+        return {"status": "ok", "path": "", "entries": available, "roots": [r.replace("\\", "/").rstrip("/") for r in roots]}
+
+    # Security: path must start with one of the allowed roots
+    norm_path = _norm(path)
+    allowed = any(norm_path.startswith(_norm(r)) for r in roots)
+    if not allowed:
+        return {"status": "error", "message": f"Access denied: {path}"}
+
+    if not os.path.isdir(path):
+        return {"status": "error", "message": f"Directory not found: {path}"}
+
+    entries = []
+    try:
+        with os.scandir(path) as it:
+            for entry in sorted(it, key=lambda e: (not e.is_dir(), e.name.lower())):
+                if entry.name.startswith(".") or entry.name.startswith("@"):
+                    continue  # Skip hidden/system dirs (NAS @Recycle etc.)
+                if entry.is_dir():
+                    entries.append({
+                        "name": entry.name,
+                        "path": entry.path.replace("\\", "/"),
+                        "type": "dir"
+                    })
+                elif show_files and os.path.splitext(entry.name)[1].lower() in VIDEO_EXTS:
+                    try:
+                        size = entry.stat().st_size
+                    except Exception:
+                        size = 0
+                    entries.append({
+                        "name": entry.name,
+                        "path": entry.path.replace("\\", "/"),
+                        "type": "file",
+                        "size": size
+                    })
+    except PermissionError:
+        return {"status": "error", "message": f"Permission denied: {path}"}
+
+    return {
+        "status": "ok",
+        "path": path.replace("\\", "/"),
+        "entries": entries,
+        "parent": os.path.dirname(path).replace("\\", "/") if path else ""
+    }

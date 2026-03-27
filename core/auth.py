@@ -1,13 +1,17 @@
 """
-Auth utilities — JWT token + password hashing + role decorator.
+Auth utilities — JWT token + password hashing + role decorator + API Key.
 Uses stdlib only (no bcrypt dependency).
 """
+import asyncio
 import hashlib
 import hmac
 import json
 import os
 import time
 import secrets
+import threading
+from collections import defaultdict
+from datetime import datetime, timezone
 from functools import wraps
 from typing import Optional
 
@@ -104,10 +108,24 @@ LEGACY_ROLE_LEVELS = {'admin': 3, 'editor': 1, 'viewer': 0}
 # ── Role Decorator ──
 
 def _extract_token(request: Request) -> Optional[dict]:
-    """Extract and verify token from Authorization header."""
+    """Extract and verify auth from Authorization header OR X-API-Key header.
+
+    Priority: JWT Bearer token → API Key.
+    API Key authentication builds a payload identical to JWT so all
+    downstream checks (check_admin, require_role, etc.) work unchanged.
+    """
+    # 1. Try JWT Bearer token first
     auth = request.headers.get('Authorization', '')
     if auth.startswith('Bearer '):
-        return verify_token(auth[7:])
+        payload = verify_token(auth[7:])
+        if payload is not None:
+            return payload
+
+    # 2. Try X-API-Key header
+    api_key = request.headers.get('X-API-Key', '').strip()
+    if api_key:
+        return _verify_api_key(api_key, request)
+
     return None
 
 
@@ -206,7 +224,7 @@ def _remove_from_json(path: str, key: str, value):
 # ── Users JSON (public API, delegates to generic helpers) ──
 
 def load_users_json() -> list:
-    return _load_json(_USERS_JSON)
+    return _load_json_cached(_USERS_JSON)
 
 def save_users_json(users: list):
     _save_json(_USERS_JSON, users)
@@ -221,7 +239,7 @@ def remove_user_from_json(username: str):
 # ── Roles JSON (public API, delegates to generic helpers) ──
 
 def load_roles_json() -> list:
-    return _load_json(_ROLES_JSON)
+    return _load_json_cached(_ROLES_JSON)
 
 def save_roles_json(roles: list):
     _save_json(_ROLES_JSON, roles)
@@ -272,3 +290,225 @@ async def find_role_by_id(role_id: int):
     """Find a single role by id. Returns dict or None."""
     roles = await get_all_roles()
     return next((r for r in roles if r['id'] == role_id), None)
+
+
+# ── API Key Authentication ──
+
+_API_KEYS_JSON = os.path.join(_BASE_DIR, 'api_keys.json')
+
+# Rate limiter: track failed API key attempts per IP
+_fail_counts: dict[str, list[float]] = defaultdict(list)  # ip → [timestamps]
+_fail_lock = threading.Lock()
+_RATE_LIMIT_MAX = 10       # max failures in window
+_RATE_LIMIT_WINDOW = 300   # 5 minutes
+
+
+def _check_rate_limit(ip: str) -> bool:
+    """Return True if IP is rate-limited (too many failed API key attempts)."""
+    now = time.time()
+    with _fail_lock:
+        attempts = _fail_counts[ip]
+        # Prune old entries
+        _fail_counts[ip] = [t for t in attempts if now - t < _RATE_LIMIT_WINDOW]
+        if not _fail_counts[ip]:
+            del _fail_counts[ip]
+            return False
+        return len(_fail_counts[ip]) >= _RATE_LIMIT_MAX
+
+
+def _record_fail(ip: str):
+    """Record a failed API key attempt."""
+    with _fail_lock:
+        _fail_counts[ip].append(time.time())
+
+
+def hash_api_key(key: str) -> str:
+    """SHA-256 hash of an API key string."""
+    return hashlib.sha256(key.encode()).hexdigest()
+
+
+def generate_api_key() -> str:
+    """Generate a new API key: osk_ + 32 hex chars (128-bit entropy)."""
+    return 'osk_' + secrets.token_hex(16)
+
+
+# ── Cached JSON reads for hot-path (API Key auth) ──
+_json_cache: dict[str, tuple[float, list]] = {}  # path → (mtime, data)
+
+
+def _load_json_cached(path: str) -> list:
+    """Read JSON with mtime-based cache — avoids disk I/O on every request."""
+    try:
+        mt = os.path.getmtime(path)
+    except OSError:
+        return []
+    cached = _json_cache.get(path)
+    if cached and cached[0] == mt:
+        return cached[1]
+    data = _load_json(path)
+    _json_cache[path] = (mt, data)
+    return data
+
+
+def load_api_keys_json() -> list:
+    return _load_json_cached(_API_KEYS_JSON)
+
+
+def save_api_keys_json(keys: list):
+    _save_json(_API_KEYS_JSON, keys)
+
+
+def sync_api_key_to_json(key_data: dict):
+    _sync_to_json(_API_KEYS_JSON, key_data, 'id')
+
+
+def remove_api_key_from_json(key_id: int):
+    _remove_from_json(_API_KEYS_JSON, 'id', key_id)
+
+
+def remove_api_keys_by_username_json(username: str):
+    """Remove all API keys for a given username from JSON."""
+    items = _load_json(_API_KEYS_JSON)
+    _save_json(_API_KEYS_JSON, [k for k in items if k.get('username') != username])
+
+
+def _verify_api_key(raw_key: str, request: Request) -> Optional[dict]:
+    """Verify an API key and return a JWT-compatible payload, or None.
+
+    Checks: rate limit → hash lookup (DB then JSON) → is_active → expires_at → user exists.
+    On success, schedules a background update of last_used_at.
+    """
+
+    # Rate limit check
+    client_ip = request.client.host if request.client else '0.0.0.0'
+    if _check_rate_limit(client_ip):
+        raise HTTPException(status_code=429, detail="請求過於頻繁，請稍後再試")
+
+    key_hash = hash_api_key(raw_key)
+    key_record = _find_api_key_by_hash(key_hash)
+
+    if not key_record:
+        _record_fail(client_ip)
+        return None
+
+    # Check active
+    if not key_record.get('is_active', True):
+        _record_fail(client_ip)
+        return None
+
+    # Check expiry
+    expires = key_record.get('expires_at')
+    if expires:
+        if isinstance(expires, str):
+            try:
+                exp_dt = datetime.fromisoformat(expires)
+            except Exception:
+                exp_dt = None
+        else:
+            exp_dt = expires
+        if exp_dt and exp_dt.replace(tzinfo=timezone.utc if exp_dt.tzinfo is None else exp_dt.tzinfo) < datetime.now(timezone.utc):
+            _record_fail(client_ip)
+            return None
+
+    # Look up user to build payload
+    username = key_record.get('username', '')
+    user_payload = _build_user_payload_for_api_key(username)
+    if user_payload is None:
+        _record_fail(client_ip)
+        return None
+
+    # Background update last_used_at (fire and forget)
+    try:
+        loop = asyncio.get_running_loop()
+        loop.create_task(_update_last_used(key_record['id']))
+    except Exception:
+        pass
+
+    return user_payload
+
+
+def _find_api_key_by_hash(key_hash: str) -> Optional[dict]:
+    """Find an API key record by its SHA-256 hash. Uses JSON (sync-safe).
+
+    Note: DB api_keys table is write-only for auth lookups because
+    _extract_token runs in a sync context and can't await DB queries.
+    """
+    keys = load_api_keys_json()
+    return next((k for k in keys if k.get('key_hash') == key_hash), None)
+
+
+def _build_user_payload_for_api_key(username: str) -> Optional[dict]:
+    """Build a JWT-compatible payload dict for the given username.
+
+    Returns None if user not found. Looks up user's role to populate
+    access_level, modules, role_name — identical to JWT token payload.
+    """
+    # Find user in JSON (sync-safe, no await needed)
+    users = load_users_json()
+    user = next((u for u in users if u.get('username') == username), None)
+    if not user:
+        return None
+
+    # Build payload matching JWT format
+    role_name = user.get('role_name') or user.get('role', 'editor')
+    access_level = user.get('access_level', 1)
+    modules = user.get('modules', [])
+
+    # If user has role_id, try to get role details from JSON
+    role_id = user.get('role_id')
+    if role_id:
+        roles = load_roles_json()
+        role = next((r for r in roles if r.get('id') == role_id), None)
+        if role:
+            role_name = role.get('name', role_name)
+            access_level = role.get('access_level', access_level)
+            modules = role.get('modules', modules)
+
+    return {
+        'sub': username,
+        'role_name': role_name,
+        'access_level': access_level,
+        'modules': modules,
+        'auth_method': 'api_key',
+    }
+
+
+_last_used_written: dict[int, float] = {}  # key_id → last write timestamp
+_LAST_USED_DEBOUNCE = 60  # only write once per 60 seconds per key
+
+
+async def _update_last_used(key_id: int):
+    """Background task: update last_used_at (debounced to avoid disk write storm)."""
+    now = time.time()
+    if now - _last_used_written.get(key_id, 0) < _LAST_USED_DEBOUNCE:
+        return
+    _last_used_written[key_id] = now
+
+    now_iso = datetime.now(timezone.utc).isoformat(timespec='seconds')
+
+    # Update JSON
+    keys = _load_json(_API_KEYS_JSON)  # bypass cache — we're writing
+    for k in keys:
+        if k.get('id') == key_id:
+            k['last_used_at'] = now_iso
+            break
+    save_api_keys_json(keys)
+
+    # Update DB
+    import core.state as state
+    if state.db_online:
+        try:
+            from db.session import get_session_factory
+            factory = get_session_factory()
+            if factory:
+                from sqlalchemy import update, text
+                from db.models import ApiKey
+                async with factory() as session:
+                    await session.execute(
+                        update(ApiKey).where(ApiKey.id == key_id).values(
+                            last_used_at=datetime.now(timezone.utc)
+                        )
+                    )
+                    await session.commit()
+        except Exception:
+            pass

@@ -226,40 +226,6 @@
 
     </main>
 
-    <div id="forceInstallModal"
-        class="hidden fixed inset-0 bg-black/80 z-[100] flex items-center justify-center backdrop-blur-sm">
-        <div class="bg-[#2d2d2d] rounded-lg border border-red-500 shadow-2xl p-8 max-w-lg w-full text-center">
-            <div class="text-5xl mb-4">🚨</div>
-            <h2 class="text-2xl font-bold text-white mb-2">未偵測到本機代理加速器</h2>
-            <p class="text-gray-300 text-sm mb-6 leading-relaxed">
-                為確保拖曳資料夾、視窗選取等在地化功能能夠順暢運作，<br>
-                您必須在您的電腦上安裝並運行「Originsun 本機節點」。
-            </p>
-            <div class="bg-[#1e1e1e] border border-gray-600 rounded p-4 mb-4 text-left">
-                <h3 class="text-white font-bold mb-2">三秒無腦安裝步驟：</h3>
-                <ol class="list-decimal list-inside text-gray-300 text-sm space-y-2">
-                    <li>點擊下方按鈕下載自動安裝腳本。</li>
-                    <li>雙擊執行下載的 <code class="bg-[#333] px-1 rounded text-blue-300">Install_Originsun_Agent.bat</code>。
-                    </li>
-                    <li>安裝完成後，此畫面將會自動解除鎖定！</li>
-                </ol>
-            </div>
-            <div class="bg-yellow-900/40 border border-yellow-600 rounded p-3 mb-5 text-left text-xs text-yellow-300">
-                ⚠️ <strong>Chrome 使用者注意：</strong>下載後若出現「已封鎖」提示，請點擊下載欄右側
-                <strong>「⋮」→「仍然保留」</strong>，即可繼續安裝。
-            </div>
-            <a id="modal-download-btn" href="/download_installer"
-                class="inline-flex items-center justify-center gap-2 bg-[#1f538d] hover:bg-[#2a6cbf] text-white font-bold py-3 px-8 rounded-lg shadow-lg transition-transform transform hover:scale-105 active:scale-95">
-                <span class="text-xl">📥</span>
-                <span>立即下載自動安裝精靈</span>
-            </a>
-            <div class="mt-6 flex justify-center items-center gap-2 text-gray-500 text-xs font-semibold">
-                <div class="w-4 h-4 rounded-full border-2 border-t-transparent border-blue-500 animate-spin"></div>
-                正持續偵測本機端節點連線...
-            </div>
-        </div>
-    </div>
-
     <!-- UI Overlay for Background Update -->
     <div id="updatingModal"
         class="hidden fixed inset-0 bg-black/90 z-[110] flex items-center justify-center backdrop-blur-md">
@@ -333,7 +299,7 @@
         </div>
     </div>
 
-    <script src="app.js?v=1.9.11"></script>
+    <script type="module" src="app.js?v=1.10.20"></script>
 
     <!-- ⚙️ Settings Modal -->
     <div id="settingsModal" class="originsun-modal-overlay" style="display: none;">
@@ -421,10 +387,7 @@
 
             <div class="modal-footer">
                 <button class="btn-cancel" id="btnCancelSettings">取消</button>
-                <button id="btnRestartAgent"
-                    style="background:transparent;border:1px solid #6B7280;color:#9CA3AF;padding:6px 14px;border-radius:6px;cursor:pointer;font-size:13px;">🔄
-                    重新啟動 Agent</button>
-                <button class="btn-save" id="btnSaveSettings">💾 儲存設定</button>
+                <button class="btn-save" id="btnSaveSettings">儲存設定</button>
             </div>
         </div>
     </div>

@@ -1,320 +1,18 @@
 // ─── Originsun Media Guard Pro ─── //
-// Extracted from index.html <script> blocks
+// Entry point — imports all extracted modules, then defines core app logic.
 
-// ─── Auth State ─── //
-window._isAdmin = false;
-window._accessLevel = 0;     // RBAC: 0=readonly, 1=operator, 2=manager, 3=superadmin
-window._modules = [];         // RBAC: visible module keys from role
-window._authToken = localStorage.getItem('auth_token') || '';
-window._authUser = null;
-
-// Check saved token on load（存 Promise 供 loadTabs 等待）
-window._authReady = (async function _initAuth() {
-    if (!window._authToken) { _applyAuthState(false); return; }
-    try {
-        const r = await fetch('/api/v1/auth/me', { headers: { 'Authorization': 'Bearer ' + window._authToken } });
-        if (r.ok) {
-            const d = await r.json();
-            window._authUser = d;
-            window._accessLevel = d.access_level || 0;
-            window._modules = d.modules || [];
-            _applyAuthState(window._accessLevel >= 3);
-            // _applyModuleTabs 延後到 loadTabs 完成後執行
-        } else {
-            localStorage.removeItem('auth_token');
-            window._authToken = '';
-            _applyAuthState(false);
-        }
-    } catch (_) { _applyAuthState(false); }
-})();
-
-function _applyAuthState(isAdmin) {
-    window._isAdmin = isAdmin;
-    document.querySelectorAll('.admin-only').forEach(el => {
-        el.style.display = window._accessLevel >= 3 ? '' : 'none';
-    });
-    document.querySelectorAll('.manager-only').forEach(el => {
-        el.style.display = window._accessLevel >= 2 ? '' : 'none';
-    });
-    const btn = document.getElementById('btn-auth');
-    if (btn) {
-        const avatarUrl = window._authUser?.avatar_url;
-        if (window._authUser && avatarUrl) {
-            // Google avatar
-            btn.innerHTML = `<img src="${avatarUrl}" style="width:28px;height:28px;border-radius:50%;object-fit:cover;">`;
-            btn.style.padding = '0';
-            btn.style.overflow = 'hidden';
-            btn.style.borderColor = window._accessLevel > 0 ? '#22c55e' : '#60a5fa';
-            btn.title = window._authUser.username + ' (' + (window._authUser.role_name || '') + ')';
-        } else if (window._authUser && window._accessLevel > 0) {
-            btn.textContent = '👤';
-            btn.style.color = '#22c55e';
-            btn.style.borderColor = '#22c55e';
-            btn.title = window._authUser.username + ' (' + (window._authUser.role_name || '') + ')';
-        } else if (window._authUser) {
-            btn.textContent = '👤';
-            btn.style.color = '#60a5fa';
-            btn.style.borderColor = '#60a5fa';
-            btn.title = window._authUser.username + ' (' + (window._authUser.role_name || '') + ')';
-        } else {
-            btn.textContent = '👤';
-            btn.style.color = '#888';
-            btn.style.borderColor = '#555';
-            btn.title = '登入';
-        }
-    }
-}
-
-window._authToggle = function() {
-    let dd = document.getElementById('auth-dropdown');
-    if (dd) { dd.remove(); return; }
-    dd = document.createElement('div');
-    dd.id = 'auth-dropdown';
-    dd.style.cssText = 'position:fixed;top:50px;right:10px;background:#2d2d2d;border:1px solid #555;border-radius:8px;padding:8px 0;z-index:100;min-width:180px;box-shadow:0 4px 12px rgba(0,0,0,0.5);';
-
-    const _item = (icon, text, onclick) => `<div onclick="${onclick}" style="padding:6px 14px;cursor:pointer;font-size:12px;color:#ddd;display:flex;align-items:center;gap:6px;" onmouseover="this.style.background='#3a3a3a'" onmouseout="this.style.background=''">${icon} ${text}</div>`;
-    const _sep = '<div style="border-top:1px solid #444;margin:4px 0;"></div>';
-
-    let html = '';
-
-    if (window._authUser) {
-        // 已登入 — 顯示角色名稱
-        const roleName = window._authUser.role_name || window._authUser.role || '';
-        html += `<div style="padding:6px 14px 8px;color:#aaa;font-size:11px;">👤 ${window._authUser.username} <span style="color:#60a5fa;">(${roleName})</span></div>`;
-        html += _sep;
-
-        // 工具
-        html += _item('✨', '建立桌面捷徑', "createShortcut();document.getElementById('auth-dropdown')?.remove()");
-        html += _item('📥', '下載安裝檔', "showInstallModal();document.getElementById('auth-dropdown')?.remove()");
-
-        if (window._accessLevel >= 3) {
-            html += _sep;
-            html += _item('👥', '使用者管理', "window._openUserMgmt();document.getElementById('auth-dropdown')?.remove()");
-            html += _item('🔰', '角色管理', "window._openRoleMgmt();document.getElementById('auth-dropdown')?.remove()");
-            html += _item('⚙️', '系統設定', "document.getElementById('btnOpenSettings')?.click();document.getElementById('auth-dropdown')?.remove()");
-        }
-
-        html += _sep;
-        html += `<div style="padding:6px 14px;">
-            <button onclick="window._authLogout()" style="background:transparent;border:1px solid #ef4444;color:#ef4444;border-radius:4px;padding:4px 0;cursor:pointer;font-size:12px;width:100%;">登出</button></div>`;
-    } else {
-        // 未登入
-        html += _item('✨', '建立桌面捷徑', "createShortcut();document.getElementById('auth-dropdown')?.remove()");
-        html += _item('📥', '下載安裝檔', "showInstallModal();document.getElementById('auth-dropdown')?.remove()");
-        html += _sep;
-        html += `<div style="padding:6px 14px;">
-            <button onclick="document.getElementById('auth-dropdown')?.remove();window._showLoginModal()" style="background:#3b82f6;color:#fff;border:none;border-radius:4px;padding:4px 0;cursor:pointer;font-size:12px;width:100%;">🔑 登入</button></div>`;
-    }
-
-    dd.innerHTML = html;
-    document.body.appendChild(dd);
-    setTimeout(() => document.addEventListener('click', function _close(e) {
-        if (!dd.contains(e.target) && e.target.id !== 'btn-auth') { dd.remove(); document.removeEventListener('click', _close); }
-    }), 100);
-};
-
-window._showLoginModal = function() {
-    // Show login modal
-    let modal = document.getElementById('auth-login-modal');
-    if (modal) { modal.classList.remove('hidden'); return; }
-    modal = document.createElement('div');
-    modal.id = 'auth-login-modal';
-    modal.className = 'fixed inset-0 bg-black bg-opacity-70 z-50 flex items-center justify-center';
-    modal.innerHTML = `
-        <div class="bg-[#2d2d2d] border border-[#444] rounded-xl shadow-2xl p-6 w-80">
-            <h3 class="text-lg font-bold text-white mb-4">登入</h3>
-            <input id="auth-username" type="text" placeholder="帳號" class="w-full mb-3 px-3 py-2 bg-[#1e1e1e] border border-[#555] rounded text-white text-sm" autofocus>
-            <input id="auth-password" type="password" placeholder="密碼" class="w-full mb-3 px-3 py-2 bg-[#1e1e1e] border border-[#555] rounded text-white text-sm">
-            <div id="auth-error" class="text-red-400 text-xs mb-2 hidden"></div>
-            <div class="flex justify-end gap-2">
-                <button onclick="document.getElementById('auth-login-modal').classList.add('hidden')"
-                    class="px-4 py-1.5 text-sm text-gray-400 hover:text-white">取消</button>
-                <button onclick="window._doLogin()"
-                    class="px-4 py-1.5 text-sm bg-blue-600 hover:bg-blue-500 text-white rounded">登入</button>
-            </div>
-            <div id="google-login-divider" class="flex items-center gap-3 my-4" style="display:none;">
-                <hr class="flex-1 border-[#444]"><span class="text-xs text-gray-500">or</span><hr class="flex-1 border-[#444]">
-            </div>
-            <div id="g_id_signin_container" style="display:none;justify-content:center;"></div>
-        </div>`;
-    document.body.appendChild(modal);
-    modal.addEventListener('click', (e) => { if (e.target === modal) modal.classList.add('hidden'); });
-    // Use named handler to avoid stacking on repeated open
-    const pwdEl = document.getElementById('auth-password');
-    if (pwdEl && !pwdEl._loginHandler) {
-        pwdEl._loginHandler = (e) => { if (e.key === 'Enter') window._doLogin(); };
-        pwdEl.addEventListener('keydown', pwdEl._loginHandler);
-    }
-    document.getElementById('auth-username').focus();
-    _initGoogleLogin();
-};
-
-window._doLogin = async function() {
-    const u = document.getElementById('auth-username')?.value.trim();
-    const p = document.getElementById('auth-password')?.value;
-    const errEl = document.getElementById('auth-error');
-    if (!u || !p) { if (errEl) { errEl.textContent = '請輸入帳號和密碼'; errEl.classList.remove('hidden'); } return; }
-    try {
-        const r = await fetch('/api/v1/auth/login', {
-            method: 'POST', headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ username: u, password: p }),
-        });
-        const d = await r.json();
-        if (!r.ok) { if (errEl) { errEl.textContent = d.detail || '登入失敗'; errEl.classList.remove('hidden'); } return; }
-        _onLoginSuccess(d);
-    } catch (e) {
-        if (errEl) { errEl.textContent = '連線失敗'; errEl.classList.remove('hidden'); }
-    }
-};
-
-window._authLogout = function() {
-    localStorage.removeItem('auth_token');
-    window._authToken = '';
-    window._authUser = null;
-    window._accessLevel = 0;
-    window._modules = [];
-    _applyAuthState(false);
-    document.getElementById('auth-dropdown')?.remove();
-    // Restore all tabs (未登入 = 全部顯示)
-    document.querySelectorAll('.tab-content').forEach(el => el.style.removeProperty('display'));
-    document.querySelectorAll('nav button').forEach(el => el.style.removeProperty('display'));
-};
-
-// ─── Shared Login Success Handler ─── //
-function _onLoginSuccess(d) {
-    window._authToken = d.token;
-    window._authUser = d;
-    window._accessLevel = d.access_level || 0;
-    window._modules = d.modules || [];
-    localStorage.setItem('auth_token', d.token);
-    _applyAuthState(window._accessLevel >= 3);
-    _applyModuleTabs();
-    document.getElementById('auth-login-modal')?.classList.add('hidden');
-    if (d.first_login) {
-        alert('首次登入，請到系統設定修改密碼。');
-    }
-}
-
-// ─── Google OAuth Integration ─── //
-let _googleOAuthInited = false;
-
-async function _initGoogleLogin() {
-    if (_googleOAuthInited) return;
-    try {
-        const res = await fetch('/api/v1/auth/google/config');
-        if (!res.ok) return;
-        const cfg = await res.json();
-        if (!cfg.enabled || !cfg.client_id) return;
-
-        // Wait for GIS library
-        if (typeof google === 'undefined' || !google.accounts) {
-            await new Promise(resolve => {
-                let tries = 0;
-                const iv = setInterval(() => {
-                    tries++;
-                    if ((typeof google !== 'undefined' && google.accounts) || tries > 40) {
-                        clearInterval(iv);
-                        resolve();
-                    }
-                }, 150);
-            });
-        }
-        if (typeof google === 'undefined' || !google.accounts) return;
-
-        google.accounts.id.initialize({
-            client_id: cfg.client_id,
-            callback: _handleGoogleCredential,
-            auto_select: false,
-            cancel_on_tap_outside: true,
-        });
-
-        const container = document.getElementById('g_id_signin_container');
-        if (container) {
-            google.accounts.id.renderButton(container, {
-                theme: 'filled_black', size: 'large', width: 268,
-                text: 'signin_with', shape: 'rectangular', logo_alignment: 'left',
-            });
-            container.style.display = 'flex';
-        }
-        const divider = document.getElementById('google-login-divider');
-        if (divider) divider.style.display = 'flex';
-
-        _googleOAuthInited = true;
-    } catch (e) {
-        console.warn('[Google OAuth] Init failed:', e);
-    }
-}
-
-async function _handleGoogleCredential(response) {
-    const errEl = document.getElementById('auth-error');
-    try {
-        const res = await fetch('/api/v1/auth/google/login', {
-            method: 'POST', headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ credential: response.credential }),
-        });
-        const d = await res.json();
-        if (!res.ok) {
-            if (errEl) { errEl.textContent = d.detail || 'Google 登入失敗'; errEl.classList.remove('hidden'); }
-            return;
-        }
-        _onLoginSuccess(d);
-    } catch (e) {
-        if (errEl) { errEl.textContent = '連線失敗'; errEl.classList.remove('hidden'); }
-    }
-}
-
-// ─── RBAC Module-based Tab Visibility ─── //
-function _applyModuleTabs() {
-    const modules = window._modules;
-    const TAB_MAP = {backup:'tab_main',verify:'tab_verify',transcode:'tab_transcode',concat:'tab_concat',report:'tab_report',transcribe:'tab_transcribe',tts:'tab_tts',projects:'tab-projects'};
-    const NAV_MAP = {backup:'備份',verify:'比對',transcode:'Proxy',concat:'串帶',report:'報表',transcribe:'逐字',tts:'語音',projects:'專案'};
-    // 未登入（modules 為空）= 顯示全部；登入後 = 只顯示 modules 中的頁籤
-    const showAll = !window._authUser || !modules || modules.length === 0;
-    Object.entries(TAB_MAP).forEach(([key, id]) => {
-        const el = document.getElementById(id);
-        if (el) el.style.display = (showAll || modules.includes(key)) ? '' : 'none';
-    });
-    document.querySelectorAll('nav button').forEach(btn => {
-        const text = btn.textContent;
-        Object.entries(NAV_MAP).forEach(([key, label]) => {
-            if (text.includes(label)) btn.style.display = (showAll || modules.includes(key)) ? '' : 'none';
-        });
-    });
-}
-// Legacy alias
-function _applyVisibleTabs() { _applyModuleTabs(); }
-
-// Patch fetch to auto-add auth header for sensitive endpoints
-const _origFetch = window.fetch;
-window.fetch = function(url, opts = {}) {
-    if (window._authToken && typeof url === 'string' &&
-        (url.includes('/settings/') || url.includes('/control/update') ||
-         url.includes('/admin/') || url.includes('/auth/') || url.includes('/roles') ||
-         url.includes('/job_history') && opts.method === 'DELETE' ||
-         url.includes('/reports/') && opts.method === 'DELETE' ||
-         url.includes('/agents') && (opts.method === 'POST' || opts.method === 'DELETE'))) {
-        opts.headers = { ...opts.headers, 'Authorization': 'Bearer ' + window._authToken };
-    }
-    return _origFetch.call(window, url, opts);
-};
-
-// ─── Global Error Handler ─── //
-window.onerror = function(msg, url, lineNo, columnNo, error) {
-    var errDiv = document.createElement('div');
-    errDiv.style.position = 'fixed';
-    errDiv.style.top = '0';
-    errDiv.style.left = '0';
-    errDiv.style.width = '100%';
-    errDiv.style.background = 'red';
-    errDiv.style.color = 'white';
-    errDiv.style.zIndex = '999999';
-    errDiv.style.padding = '20px';
-    errDiv.style.fontSize = '24px';
-    errDiv.style.fontWeight = 'bold';
-    errDiv.innerHTML = 'FRONTEND ERROR:<br>' + msg + '<br>Line: ' + lineNo + '<br>Col: ' + columnNo;
-    document.body.appendChild(errDiv);
-    return false;
-};
+// ── Module Imports (side-effect: each module registers its window.* globals) ──
+import './js/shared/modal-styles.js';
+import './js/auth/auth-state.js';
+import './js/auth/login-modal.js';
+import './js/auth/google-oauth.js';
+import './js/admin/user-mgmt.js';
+import './js/admin/role-mgmt.js';
+import './js/admin/api-keys.js';
+import './js/update/version-check.js';
+import './js/update/update-modal.js';
+import './js/settings/settings-modal.js';
+import './js/shared/nas-browser.js';
 
 // ─── Fallback for appendLog function ─── //
 // If utils.js hasn't loaded yet or appendLog is not available globally, define a fallback
@@ -334,7 +32,7 @@ if (typeof appendLog === 'undefined') {
 }
 
 // ─── Main Application ─── //
-        let currentSocketUrl = window.location.origin;
+        window.currentSocketUrl = window.location.origin;
         let socket = null;
 
         // Dynamically load tabs
@@ -442,14 +140,14 @@ if (typeof appendLog === 'undefined') {
         loadTabs().then(async () => {
             // 等 auth 完成 + 頁籤載入完成 → 才套用偏好
             await window._authReady;
-            _applyVisibleTabs();
+            if (typeof window._applyVisibleTabs === 'function') window._applyVisibleTabs();
 
             // Initialization after dynamic tabs load
             const today = new Date();
             const yyyy = today.getFullYear();
             const mm = String(today.getMonth() + 1).padStart(2, '0');
             const dd = String(today.getDate()).padStart(2, '0');
-            
+
             // Backup Tab project name
             const projNameEl = document.getElementById('proj_name');
             if (projNameEl) projNameEl.value = `${yyyy}${mm}${dd}`;
@@ -514,7 +212,7 @@ if (typeof appendLog === 'undefined') {
                 const stripV = (v) => v && v.startsWith('v') ? v.slice(1) : v;
                 const latest = stripV(data.latest_version);
                 const current = stripV(data.current_version);
-                _localAgentVersion = data.current_version;
+                window._localAgentVersion = data.current_version;
                 btnBadge.style.display = 'inline-block';
                 btnBadge.className = "cursor-pointer text-sm font-bold text-white bg-red-600 hover:bg-red-500 px-2 py-0.5 rounded shadow animate-pulse flex items-center gap-1";
                 btnBadge.innerHTML = `🚀 <span class="underline">發現新版本 (v${latest})</span>`;
@@ -524,6 +222,14 @@ if (typeof appendLog === 'undefined') {
             socket.on('log', (data) => {
                 if (typeof appendLog === 'function') {
                     appendLog(data.msg, data.type);
+                }
+                // 收集錯誤訊息到 _taskErrors（標記當前階段）
+                if (data.type === 'error' && data.msg) {
+                    if (!window._taskErrors) window._taskErrors = [];
+                    const now = new Date();
+                    const ts = String(now.getHours()).padStart(2,'0') + ':' + String(now.getMinutes()).padStart(2,'0') + ':' + String(now.getSeconds()).padStart(2,'0');
+                    const phase = window._activeJobTab || 'system';
+                    window._taskErrors.push({ ts, phase, msg: data.msg });
                 }
             });
 
@@ -535,7 +241,14 @@ if (typeof appendLog === 'undefined') {
 
             socket.on('transcribe_error', (data) => {
                 const retryBtn = document.getElementById('btn_retry');
-                
+
+                // 收集錯誤
+                if (!window._taskErrors) window._taskErrors = [];
+                const now = new Date();
+                const ts = String(now.getHours()).padStart(2,'0') + ':' + String(now.getMinutes()).padStart(2,'0') + ':' + String(now.getSeconds()).padStart(2,'0');
+                window._taskErrors.push({ ts, phase: 'transcribe', msg: data.msg || 'Whisper error' });
+                _showErrorPanelIfNeeded();
+
                 // --- Unlock Transcribe Button if locked ---
                 const tBtn = document.querySelector('#tab_transcribe button[onclick="submitTranscribeJob()"]');
                 if (tBtn && tBtn.disabled) {
@@ -544,7 +257,7 @@ if (typeof appendLog === 'undefined') {
                     tBtn.classList.remove('opacity-70', 'cursor-not-allowed');
                 }
                 const tLbl = document.getElementById('transcribe_prog_label');
-                if (tLbl) tLbl.textContent = '❌ 任務中止或失敗: ' + (data.msg || '');
+                if (tLbl) tLbl.textContent = '[X] 任務中止或失敗: ' + (data.msg || '');
                 const tBar = document.getElementById('transcribe_prog_bar');
                 if (tBar) {
                     tBar.style.width = '0%';
@@ -562,7 +275,9 @@ if (typeof appendLog === 'undefined') {
                         (window._activeRemoteHosts && Object.keys(window._activeRemoteHosts).length > 0)) {
                         return;
                     }
-                    // 新任務開始時才清除上一次的完成狀態
+                    // 新任務開始時清除上一次的錯誤 + 完成狀態
+                    window._taskErrors = [];
+                    _hideErrorPanel();
                     if (typeof resetProgress === 'function') resetProgress();
                 }
 
@@ -571,6 +286,29 @@ if (typeof appendLog === 'undefined') {
                     // task completion broadcast prematurely reset the global UI and kill the heartbeat monitor.
                     if (window._activeRemoteHosts && Object.keys(window._activeRemoteHosts).length > 0 && window._heartbeatTimer) {
                         return;
+                    }
+
+                    // 本機補轉完成追蹤：遞減 pending 計數，到 0 時重新驗證
+                    if (window._retryLocalPending && window._retryLocalPending > 0 && data.summary?.task_type === 'transcode') {
+                        window._retryLocalPending--;
+                        if (typeof appendLog === 'function') appendLog(`[OK] 本機補轉完成，剩餘 ${window._retryLocalPending} 個`, 'system');
+                        if (window._retryLocalPending <= 0) {
+                            window._retryLocalPending = 0;
+                            if (typeof appendLog === 'function') appendLog('[>] 本機補轉全部完成，重新驗證...', 'system');
+                            const _rlFlags = window._retryLocalFlags;
+                            const _rlProxyRoot = window._retryProxyRoot;
+                            const _rlProjName = window._retryProjName;
+                            window._retryLocalFlags = null;
+                            window._retryProxyRoot = null;
+                            window._retryProjName = null;
+                            // 延遲 3 秒等 NAS 落盤，再驗證
+                            setTimeout(() => {
+                                if (window.verifyAndRetryMissingProxies) {
+                                    window.verifyAndRetryMissingProxies(_rlProxyRoot, _rlProjName, _rlFlags);
+                                }
+                            }, 3000);
+                        }
+                        return; // 不要觸發一般的完成摘要
                     }
 
                     // 分散式轉檔：備份 done 後立即派發，不顯示完成摘要
@@ -593,15 +331,25 @@ if (typeof appendLog === 'undefined') {
                         window._concatMultiCard = null;
                     }
 
-                    // Pipeline 追蹤：標記 concat 完成
+                    // Pipeline 追蹤：標記階段完成
                     const pl = window._backupPipeline;
-                    if (pl && pl.pending && data.summary?.task_type === 'concat') {
-                        pl.pending.delete('concat');
+                    if (pl && pl.pending) {
+                        const tt = data.summary?.task_type;
+                        if (tt === 'concat') pl.pending.delete('concat');
+                        // 備份 task_status:done 表示後端 chained 的 concat 也已完成（若有的話）
+                        // 只有分散式模式的 concat 才需要等前端觸發
+                        if (tt === 'backup' && !window._remoteDispatch) {
+                            pl.pending.delete('concat');
+                        }
                     }
 
-                    // 若 pipeline 還有待完成項目（concat 或 report），不顯示最終摘要
+                    // 若 pipeline 還有待完成項目（report 等），不顯示最終摘要
                     if (pl && pl.pending && pl.pending.size > 0) {
-                        return;
+                        // 但如果報表已完成（_backupReportPending=false），也清除
+                        if (pl.pending.has('report') && !window._backupReportPending) {
+                            pl.pending.delete('report');
+                        }
+                        if (pl.pending.size > 0) return;
                     }
 
                     if (typeof appendLog === 'function') appendLog('系統：所有排定任務執行完畢！', 'system');
@@ -614,6 +362,8 @@ if (typeof appendLog === 'undefined') {
                     updateActionBarState('idle');
                     if (typeof appendLog === 'function') appendLog('系統提示：任務執行發生錯誤：' + data.detail, 'error');
                     if (retryBtn && window._lastJob) retryBtn.style.display = 'inline-block';
+                    // 顯示錯誤面板
+                    _showErrorPanelIfNeeded();
 
                 } else if (data.status === 'cancelled') {
                     updateActionBarState('idle');
@@ -688,8 +438,24 @@ if (typeof appendLog === 'undefined') {
                 const msg = data.msg || '';
                 const pctStr = `${pct.toFixed(0)}%`;
 
-                // __done__ = job ended
-                if (phase === '__done__') return;
+                // __done__ = job ended (includes error cases where report_job_done is never emitted)
+                if (phase === '__done__') {
+                    // 確保 _backupReportPending 被清除，否則完成摘要永遠不會顯示
+                    if (window._backupReportPending) {
+                        window._backupReportPending = false;
+                        const pl = window._backupPipeline;
+                        if (pl && pl.pending) pl.pending.delete('report');
+                        // 如果備份 TAB 且所有階段都完成，顯示最終摘要
+                        if (window._activeJobTab === 'backup') {
+                            if (!pl || !pl.pending || pl.pending.size === 0) {
+                                showCompletionSummary({ task_type: 'backup', elapsed_sec: 0 }, 'backup');
+                                updateActionBarState('idle');
+                                playDing();
+                            }
+                        }
+                    }
+                    return;
+                }
 
                 // Update report tab progress bar (rp-*)
                 const rpContainer = document.getElementById('rp-progress');
@@ -778,10 +544,10 @@ if (typeof appendLog === 'undefined') {
                 updateActionBarState('idle');
                 const retryBtn = document.getElementById('btn_retry');
                 if (retryBtn) retryBtn.style.display = 'none';
-                
+
                 // Refresh the history dashboard on both tabs
                 loadReportHistory();
-                
+
                 playDing();
 
                 // Show "開啟本次報表" button
@@ -827,11 +593,11 @@ if (typeof appendLog === 'undefined') {
             // Transcribe job finished
             socket.on('transcribe_done', (data) => {
                 appendLog(`✅ 逐字稿生成完成！輸出目錄：${data.dest_dir || ''}`, 'system');
-                
+
                 const lblEl = document.getElementById('transcribe_prog_label');
                 const pctEl = document.getElementById('transcribe_prog_pct');
                 const barEl = document.getElementById('transcribe_prog_bar');
-                
+
                 if (lblEl) lblEl.textContent = '完成！';
                 if (pctEl) pctEl.textContent = '100%';
                 if (barEl) barEl.style.width = '100%';
@@ -841,7 +607,7 @@ if (typeof appendLog === 'undefined') {
 
                 // Open output folder directly
                 if (data.dest_dir) {
-                    fetch(currentSocketUrl + '/api/v1/utils/open_folder', {
+                    fetch(window.currentSocketUrl + '/api/v1/utils/open_folder', {
                         method: 'POST',
                         headers: {'Content-Type': 'application/json'},
                         body: JSON.stringify({path: data.dest_dir})
@@ -849,8 +615,9 @@ if (typeof appendLog === 'undefined') {
                 }
             });
         }
+        window.setupSocket = setupSocket;
 
-        setupSocket(currentSocketUrl);
+        setupSocket(window.currentSocketUrl);
 
         const terminal = document.getElementById('terminal');
         const terminalVerbose = document.getElementById('terminal_verbose');
@@ -881,370 +648,21 @@ if (typeof appendLog === 'undefined') {
             }
         }
 
-        // --- Local Agent Polling ---
-        let localAgentActive = false;
-        let initialPollComplete = false;
-        let isUpdating = false;
-        let hasServerDiedDuringUpdate = false;
-        let _updatePollTimer = null;
-        let _updateStartTime = 0;    // timestamp when update started
-        let _updateLastProgress = 0; // timestamp of last progress update
+        // Start polling immediately and then every 3 seconds
+        if (typeof window.pollLocalAgent === 'function') window.pollLocalAgent();
+        setInterval(() => { if (typeof window.pollLocalAgent === 'function') window.pollLocalAgent(); }, 3000);
+        // ---------------------------
 
-        async function pollLocalAgent() {
-            try {
-                const isLocal = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
-                const targetUrl = isLocal ? '/api/v1/status' : 'http://127.0.0.1:8000/api/v1/status';
+        // Variables related to sources and setup were moved to backup.js
 
-                const controller = new AbortController();
-                const timeoutId = setTimeout(() => controller.abort(), 1000);
-
-                const response = await fetch(targetUrl, { signal: controller.signal });
-                clearTimeout(timeoutId);
-
-                if (response.ok) {
-                    localAgentActive = true;
-                    updateAgentBadge(true);
-                    const newUrl = isLocal ? window.location.origin : 'http://127.0.0.1:8000';
-                    if (currentSocketUrl !== newUrl) {
-                        currentSocketUrl = newUrl;
-                        setupSocket(currentSocketUrl);
-                    }
-                } else {
-                    localAgentActive = false;
-                    if (isUpdating) hasServerDiedDuringUpdate = true;
-                    updateAgentBadge(false);
-                    if (currentSocketUrl !== window.location.origin) {
-                        currentSocketUrl = window.location.origin;
-                        setupSocket(currentSocketUrl);
-                    }
-                }
-            } catch (err) {
-                localAgentActive = false;
-                if (isUpdating) hasServerDiedDuringUpdate = true;
-                updateAgentBadge(false);
-                if (currentSocketUrl !== window.location.origin) {
-                    currentSocketUrl = window.location.origin;
-                    setupSocket(currentSocketUrl);
-                }
-            } finally {
-                initialPollComplete = true;
-                checkForceInstallModal();
-            }
-        }
-
-        function checkForceInstallModal() {
-            const isLocal = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
-            const modal = document.getElementById('forceInstallModal');
-            const updatingModal = document.getElementById('updatingModal');
-            if (!modal) return;
-
-            // 處理更新中的遮罩顯示
-            if (isUpdating) {
-                modal.classList.add('hidden');
-                if (updatingModal) updatingModal.classList.remove('hidden');
-            } else {
-                if (updatingModal) updatingModal.classList.add('hidden');
-            }
-
-            if (isLocal || localAgentActive) {
-                modal.classList.add('hidden');
-                // 如果代理剛更新回來，且本機真的斷線過又恢復連線，才觸發網頁重整以套用新版 JS
-                if (isUpdating && localAgentActive && hasServerDiedDuringUpdate) {
-                    isUpdating = false;
-                    setTimeout(() => window.location.reload(), 1500);
-                }
-            } else if (initialPollComplete && !isUpdating) {
-                // 只有在非更新狀態，且啟動檢查已完成，又失去連線時，才顯示安裝視窗
-                modal.classList.remove('hidden');
-            }
-        }
-
-        function updateAgentBadge(isActive) {
-            const dot = document.getElementById('status-dot');
-            const btnShortcut = document.getElementById('btn_create_shortcut');
-            if (isActive) {
-                if (dot) { dot.style.background = '#22c55e'; dot.style.boxShadow = '0 0 6px #22c55e'; dot.title = '本機已連線'; }
-                checkAgentVersion();
-                if (btnShortcut) btnShortcut.style.display = 'flex';
-            } else {
-                if (dot) { dot.style.background = '#ef4444'; dot.style.boxShadow = 'none'; dot.title = '本機離線'; }
-                if (btnShortcut) btnShortcut.style.display = 'none';
-            }
-        }
-
-        async function checkAgentVersion() {
-            try {
-                // 1. 取得本機 Agent 正在運行的版本（不論在 localhost 或遠端都固定問 localhost）
-                const isLocal = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
-                const localVersionUrl = isLocal ? '/api/v1/version' : 'http://127.0.0.1:8000/api/v1/version';
-                // 瀏覽主控端時，主控端本身就是版本來源，直接用 /api/v1/version
-                const nasVersionUrl = isLocal ? '/api/v1/nas_version' : '/api/v1/version';
-
-                const [localRes, nasRes] = await Promise.all([
-                    fetch(localVersionUrl).catch(() => null),
-                    fetch(nasVersionUrl).catch(() => null)
-                ]);
-
-                const btnBadge = document.getElementById('header_version_badge');
-                if (!btnBadge) return;
-
-                btnBadge.style.display = 'inline-block';
-
-                if (!localRes || !localRes.ok || !nasRes || !nasRes.ok) {
-                    console.warn("版號檢查失敗: 無法連線");
-                    return;
-                }
-
-                const localData = await localRes.json();
-                const nasData = await nasRes.json();
-                const currentVersion = localData.version;
-                let latestVersion = nasData.version;
-                _localAgentVersion = currentVersion; // 記住本機版本供 updateAgent 使用
-
-                // Fallback: 若 nas_version 回傳 unknown，嘗試從當前頁面 origin 取得
-                if (latestVersion === 'unknown') {
-                    try {
-                        const fbRes = await fetch('/api/v1/version').catch(() => null);
-                        if (fbRes?.ok) {
-                            const fb = await fbRes.json();
-                            if (fb.version && fb.version !== 'unknown') latestVersion = fb.version;
-                        }
-                    } catch(e) {}
-                }
-
-                // 移除 v 前綴後再比較版號
-                const stripV = (v) => v && v.startsWith('v') ? v.slice(1) : v;
-                const isNewerSemver = (latest, current) => {
-                    if (!latest || latest === 'unknown' || !current) return false;
-                    const l = stripV(latest), c = stripV(current);
-                    if (l === c) return false;
-                    const lParts = l.split('.').map(Number);
-                    const cParts = c.split('.').map(Number);
-                    for (let i = 0; i < Math.max(lParts.length, cParts.length); i++) {
-                        const lp = lParts[i] || 0;
-                        const cp = cParts[i] || 0;
-                        if (lp > cp) return true;
-                        if (lp < cp) return false;
-                    }
-                    return false;
-                };
-
-                // 3. 比較版號，嚴謹確認最新版本是否真的大於本機版本
-                if (isNewerSemver(latestVersion, currentVersion)) {
-                    const displayLatest = stripV(latestVersion);
-                    const displayCurrent = stripV(currentVersion);
-                    btnBadge.className = "cursor-pointer text-sm font-bold text-white bg-red-600 hover:bg-red-500 px-2 py-0.5 rounded shadow animate-pulse flex items-center gap-1";
-                    btnBadge.innerHTML = `🚀 <span class="underline">發現新版本 (v${displayLatest})</span>`;
-                    btnBadge.title = `點擊以從伺服器安裝最新版 (目前: v${displayCurrent})`;
-                } else {
-                    const displayCurrent = stripV(currentVersion);
-                    btnBadge.className = "cursor-pointer text-sm font-normal text-blue-400 hover:text-blue-300 px-2 py-0.5 rounded transition-colors";
-                    btnBadge.innerHTML = `v${displayCurrent || '?'}`;
-                    btnBadge.title = "已是最新版 (點擊可強制重新套用更新)";
-                }
-            } catch (err) {
-                console.warn("版號檢查失敗", err);
-            }
-        }
-
-        function updateUpdateModal(d) {
-            const pctBar = document.getElementById('update_pct_bar');
-            const msgEl  = document.getElementById('upd_msg');
-            if (pctBar) pctBar.style.width = (d.pct || 2) + '%';
-            if (msgEl)  msgEl.textContent = d.msg || '';
-            const step = d.step || 0;
-            for (let i = 1; i <= 3; i++) {
-                const icon = document.getElementById(`upd_icon_${i}`);
-                const row  = document.getElementById(`upd_step_${i}`);
-                if (!icon || !row) continue;
-                if (i < step) {
-                    icon.textContent = '✅';
-                    row.className = row.className.replace(/text-gray-400|text-blue-300/g, '') + ' text-green-400';
-                } else if (i === step) {
-                    icon.textContent = '🔄';
-                    row.className = row.className.replace(/text-gray-400|text-green-400/g, '') + ' text-blue-300';
-                } else {
-                    icon.textContent = '⏳';
-                    row.className = row.className.replace(/text-blue-300|text-green-400/g, '') + ' text-gray-400';
-                }
-            }
-        }
-
-        function startUpdateProgressPolling() {
-            if (_updatePollTimer) return;
-            _updateStartTime = Date.now();
-            _updateLastProgress = Date.now();
-            _updatePollTimer = setInterval(async () => {
-                if (!isUpdating) {
-                    clearInterval(_updatePollTimer);
-                    _updatePollTimer = null;
-                    return;
-                }
-
-                // 1) 嘗試從 update_monitor (port 8001) 取得進度
-                try {
-                    const r = await fetch('http://127.0.0.1:8001/status',
-                        { signal: AbortSignal.timeout(2000) });
-                    if (r.ok) {
-                        _updateLastProgress = Date.now();
-                        updateUpdateModal(await r.json());
-                    }
-                } catch (e) { /* monitor 尚未就緒或 port 衝突 */ }
-
-                // 2) Fallback：若超過 30 秒沒收到進度，直接偵測主服務是否已恢復
-                const elapsed = Date.now() - _updateStartTime;
-                const stale = Date.now() - _updateLastProgress;
-                if (stale > 30000 && elapsed > 15000) {
-                    try {
-                        const health = await fetch('http://127.0.0.1:8000/api/v1/health',
-                            { signal: AbortSignal.timeout(2000) });
-                        if (health.ok) {
-                            // 伺服器已恢復！自動完成更新
-                            isUpdating = false;
-                            clearInterval(_updatePollTimer);
-                            _updatePollTimer = null;
-                            window.location.reload();
-                            return;
-                        }
-                    } catch (e) { /* 伺服器尚未恢復 */ }
-                }
-
-                // 3) 最大超時 5 分鐘：強制 reload
-                if (elapsed > 300000) {
-                    isUpdating = false;
-                    clearInterval(_updatePollTimer);
-                    _updatePollTimer = null;
-                    window.location.reload();
-                }
-            }, 2000);
-        }
-
-        // 記住本機版本，供 updateAgent 判斷是否需要首次遷移
-        let _localAgentVersion = null;
-
-        async function updateAgent() {
-            // 若本機 Agent 版本 < 1.8.0，舊版 OTA 機制 (NAS xcopy) 不可用，
-            // 自動下載升級工具 + 顯示操作指引遮罩
-            const needsMigration = _localAgentVersion && _isOlderThan(_localAgentVersion, '1.8.0');
-
-            if (needsMigration) {
-                // 1) 自動下載 Originsun_Updater.bat
-                const a = document.createElement('a');
-                a.href = '/download_updater';
-                a.download = 'Originsun_Updater.bat';
-                document.body.appendChild(a);
-                a.click();
-                document.body.removeChild(a);
-
-                // 2) 顯示首次遷移指引遮罩
-                _showMigrationOverlay();
-
-                // 3) 同時複製 PowerShell 指令到剪貼簿（備用）
-                const serverHost = window.location.host || '192.168.1.11:8000';
-                const psCmd = `powershell -ExecutionPolicy Bypass -c "irm http://${serverHost}/bootstrap.ps1 | iex"`;
-                try { await navigator.clipboard.writeText(psCmd); } catch(e) {}
-
-                // 4) 開始輪詢：偵測版本升級完成後自動重整
-                _pollForMigrationDone();
-                appendLog('已下載升級工具，請在 Chrome 下載列執行它。', 'system');
-                return;
-            }
-
-            if (!confirm('即將從伺服器下載最新版本並重新啟動本機代理。這將會中斷正在本機執行的任務。\n確認要執行嗎？')) return;
-
-            isUpdating = true;
-            hasServerDiedDuringUpdate = false;
-            startUpdateProgressPolling();
-            checkForceInstallModal(); // 立刻覆蓋藍色大遮罩
-
-            try {
-                // 不使用 await 等待 json，因為伺服器會在這瞬間自我了斷 (os._exit)，必然引發 Network Error
-                fetch('http://127.0.0.1:8000/api/v1/control/update', { method: 'POST' }).catch(e => console.log('Expected disconnect:', e));
-                appendLog('更新指令已送出，稍後連線指示燈將會變為紅色，數秒後將自動重新載入網頁。', 'system');
-            } catch (err) {
-                // 忽略錯誤，絕對不把 isUpdating 設為 false，讓畫面維持藍色等待直到 polling 醒來
-                console.warn('Update trigger network drop:', err);
-            }
-        }
-
-        function _showMigrationOverlay() {
-            // 如果遮罩已存在就不重複建立
-            if (document.getElementById('migrationOverlay')) return;
-            const overlay = document.createElement('div');
-            overlay.id = 'migrationOverlay';
-            overlay.className = 'fixed inset-0 bg-black/90 z-[120] flex items-center justify-center backdrop-blur-md';
-            overlay.innerHTML = `
-                <div class="bg-[#1e1e1e] border-t-4 border-orange-500 rounded-lg shadow-2xl p-8 max-w-lg w-full">
-                    <div class="flex items-center gap-4 mb-6">
-                        <div class="text-5xl">🚀</div>
-                        <div>
-                            <h2 class="text-xl font-bold text-white">首次升級（僅需一次）</h2>
-                            <p class="text-gray-400 text-sm">升級完成後，未來更新只需點一下即可</p>
-                        </div>
-                    </div>
-                    <div class="bg-[#2a2a2a] rounded-lg p-5 mb-5 space-y-4">
-                        <div class="flex items-start gap-3">
-                            <span class="text-2xl">①</span>
-                            <div>
-                                <p class="text-white font-semibold">在 Chrome 下載列找到並執行升級工具</p>
-                                <p class="text-gray-400 text-xs mt-1">若出現「已封鎖」，請點 ⋮ →「仍然保留」</p>
-                            </div>
-                        </div>
-                        <div class="flex items-start gap-3">
-                            <span class="text-2xl">②</span>
-                            <div>
-                                <p class="text-white font-semibold">等待自動完成（約 30 秒）</p>
-                                <p class="text-gray-400 text-xs mt-1">完成後此頁面會自動重新整理</p>
-                            </div>
-                        </div>
-                    </div>
-                    <div class="bg-blue-900/30 border border-blue-600 rounded p-3 mb-5 text-xs text-blue-300">
-                        💡 <strong>備用方法：</strong>升級指令已複製到剪貼簿，也可按
-                        <kbd class="bg-[#333] px-1 rounded">Win+R</kbd> →
-                        <kbd class="bg-[#333] px-1 rounded">Ctrl+V</kbd> →
-                        <kbd class="bg-[#333] px-1 rounded">Enter</kbd> 執行
-                    </div>
-                    <div class="flex items-center justify-between">
-                        <div class="flex items-center gap-2 text-gray-500 text-xs">
-                            <div class="w-4 h-4 rounded-full border-2 border-t-transparent border-orange-500 animate-spin"></div>
-                            等待升級完成中...
-                        </div>
-                        <button onclick="document.getElementById('migrationOverlay').remove()"
-                                class="text-gray-500 hover:text-gray-300 text-xs underline">關閉</button>
-                    </div>
-                </div>`;
-            document.body.appendChild(overlay);
-        }
-
-        function _pollForMigrationDone() {
-            const timer = setInterval(async () => {
-                try {
-                    const r = await fetch('http://127.0.0.1:8000/api/v1/version', { signal: AbortSignal.timeout(2000) });
-                    if (!r.ok) return;
-                    const data = await r.json();
-                    if (data.version && !_isOlderThan(data.version, '1.8.0')) {
-                        clearInterval(timer);
-                        const overlay = document.getElementById('migrationOverlay');
-                        if (overlay) overlay.remove();
-                        appendLog('升級完成！正在重新載入頁面...', 'system');
-                        setTimeout(() => window.location.reload(), 1500);
-                    }
-                } catch (e) { /* agent 尚未重啟，繼續等 */ }
-            }, 3000);
-        }
-
-        function _isOlderThan(ver, minVer) {
-            const a = ver.split('.').map(Number);
-            const b = minVer.split('.').map(Number);
-            for (let i = 0; i < Math.max(a.length, b.length); i++) {
-                if ((a[i] || 0) < (b[i] || 0)) return true;
-                if ((a[i] || 0) > (b[i] || 0)) return false;
-            }
-            return false;
+        // ===== SaaS 路由輔助函數 =====
+        function getAgentBaseUrl() {
+            // 本機代理伺服器，負責 UI 操作如選取資料夾與拖曳。如果沒開，回退給網頁原始伺服器。
+            return window._localAgentActive ? 'http://127.0.0.1:8000' : '';
         }
 
         async function createShortcut() {
-            if (!localAgentActive) {
+            if (!window._localAgentActive) {
                 alert("此功能需要在「本機已連線」狀態下才能執行！");
                 return;
             }
@@ -1259,19 +677,6 @@ if (typeof appendLog === 'undefined') {
             } catch (err) {
                 alert("建立失敗，無法連線至本機代理程式。");
             }
-        }
-
-        // Start polling immediately and then every 3 seconds
-        pollLocalAgent();
-        setInterval(pollLocalAgent, 3000);
-        // ---------------------------
-
-        // Variables related to sources and setup were moved to backup.js
-
-        // ===== SaaS 路由輔助函數 =====
-        function getAgentBaseUrl() {
-            // 本機代理伺服器，負責 UI 操作如選取資料夾與拖曳。如果沒開，回退給網頁原始伺服器。
-            return localAgentActive ? 'http://127.0.0.1:8000' : '';
         }
 
         // ===== Multi-host: render host selector checkboxes =====
@@ -1537,7 +942,93 @@ if (typeof appendLog === 'undefined') {
                 if (eta) eta.textContent = '';
                 if (detail) detail.textContent = '';
             }
+
+            // 任務完成後顯示錯誤面板（如果有錯誤）
+            _showErrorPanelIfNeeded();
         }
+
+        // ── 錯誤摘要面板（通用，所有 TAB 共用）──
+        function _getErrorPanelParent() {
+            const tab = window._activeJobTab || 'backup';
+            // 每個 TAB 的進度條區域 ID
+            const parentMap = {
+                backup: 'bk-progress',
+                verify: 'vf-progress',
+                transcode: 'tc-progress',
+                concat: 'ct-progress',
+                report: 'rp-progress',
+                transcribe: 'transcribe_progress_area',
+                tts: 'tts_progress_area',
+            };
+            const parentId = parentMap[tab];
+            return parentId ? document.getElementById(parentId) : null;
+        }
+
+        function _ensureErrorPanel(parent) {
+            if (!parent) return null;
+            let panel = parent.querySelector('.task-error-panel');
+            if (panel) return panel;
+            // 動態建立錯誤面板
+            panel = document.createElement('div');
+            panel.className = 'task-error-panel hidden mt-2 mb-2 rounded-lg border border-red-800/60 bg-red-950/40 overflow-hidden';
+            panel.innerHTML = `
+                <div class="flex items-center justify-between px-3 py-2 cursor-pointer select-none" onclick="window._toggleErrorPanel(this)">
+                    <span class="text-red-400 text-xs font-semibold"><span class="err-icon">&#9660;</span> <span class="err-count">0</span> -- 請檢查檔案狀態</span>
+                    <button class="text-xs text-red-400/70 hover:text-red-300 underline" onclick="event.stopPropagation();document.getElementById('terminal')?.scrollIntoView({behavior:'smooth'})">查看完整 Log</button>
+                </div>
+                <div class="err-list px-3 pb-2"></div>
+            `;
+            parent.after(panel);
+            return panel;
+        }
+
+        function _showErrorPanelIfNeeded() {
+            const errors = window._taskErrors || [];
+            const parent = _getErrorPanelParent();
+            if (!parent) return;
+            const panel = _ensureErrorPanel(parent);
+            if (!panel) return;
+
+            if (errors.length === 0) {
+                panel.classList.add('hidden');
+                return;
+            }
+
+            // 確保進度區域可見（快速失敗的任務可能沒觸發進度條顯示）
+            parent.classList.remove('hidden');
+
+            const countEl = panel.querySelector('.err-count');
+            const list = panel.querySelector('.err-list');
+            if (countEl) countEl.textContent = errors.length + ' 個錯誤';
+            if (list) list.innerHTML = errors.map(e =>
+                `<div class="flex gap-2 text-xs py-1 border-t border-red-900/30">` +
+                `<span class="text-red-600/70 shrink-0 font-mono">${e.ts}</span>` +
+                (e.phase ? `<span class="text-red-500/60 shrink-0">[${e.phase}]</span>` : '') +
+                `<span class="text-red-300/90 break-all">${e.msg.replace(/</g, '&lt;')}</span>` +
+                `</div>`
+            ).join('');
+
+            panel.classList.remove('hidden');
+            if (list) list.style.display = '';
+            const icon = panel.querySelector('.err-icon');
+            if (icon) icon.innerHTML = '&#9660;';
+        }
+
+        function _hideErrorPanel() {
+            // 隱藏所有 TAB 的錯誤面板
+            document.querySelectorAll('.task-error-panel').forEach(p => p.classList.add('hidden'));
+        }
+
+        window._toggleErrorPanel = function(header) {
+            const panel = header?.closest('.task-error-panel');
+            if (!panel) return;
+            const list = panel.querySelector('.err-list');
+            const icon = panel.querySelector('.err-icon');
+            if (!list) return;
+            const hidden = list.style.display === 'none';
+            list.style.display = hidden ? '' : 'none';
+            if (icon) icon.innerHTML = hidden ? '&#9660;' : '&#9654;';
+        };
 
         // Helper: update a simple single-bar progress (verify/transcode/concat standalone)
         function _updateSimpleProgress(prefix, totalPct, data) {
@@ -1831,8 +1322,10 @@ if (typeof appendLog === 'undefined') {
                                 updateHostProgress(ip, Math.floor(hostPct), `[${Math.floor(hostPct)}%] ${hostTxt}`, '#3b82f6');
                             }
 
-                            // If worker is idle, queue empty, and at least 15s have passed since submission
-                            if (!d.busy && d.queue_length === 0 && (now - info.startTime > 15000)) {
+                            // If worker is idle, queue empty, and enough time has passed since submission
+                            // (shorter wait for retries since files are smaller)
+                            const _minWait = window._remoteDispatchExpectedRetryCount > 0 ? 8000 : 15000;
+                            if (!d.busy && d.queue_length === 0 && (now - info.startTime > _minWait)) {
                                 info.done = true;
                                 info.pct = 100;
                                 const _jl = JOB_LABELS[window._remoteJobType] || '任務';
@@ -1962,6 +1455,11 @@ if (typeof appendLog === 'undefined') {
         async function dispatchRemoteTranscode(ctx) {
             window._remoteJobType = 'transcode';
             window._remoteDispatching = true; // 防止 task_status:running 觸發 resetProgress
+            // 重置補轉相關狀態
+            window._remoteDispatchExpectedRetryCount = 0;
+            window._retryFailedHosts = [];
+            window._retryLocalPending = 0;
+            window._retryLocalFlags = null;
             if (!ctx || !ctx.hosts || !ctx.hosts.length) { window._remoteDispatching = false; return; }
             if (typeof appendLog === 'function') appendLog('🖥️ 分派轉檔任務給遠端主機...', 'system');
             showRemoteMainProgress('分散式轉檔：派發中...');
@@ -2073,13 +1571,10 @@ if (typeof appendLog === 'undefined') {
             }
 
             // 建立預期產出清單 (For Verification)
-            // 檔名規則: basename + "_proxy.mov"，子目錄結構應予保留
             const expectedFiles = {};
             for (const entry of cardEntries) {
                 expectedFiles[entry.cardName] = {};
-                // If the standalone tab passes a specific 'cardDir' directly to map structural depths, use it as basePath.
-                // Otherwise, fallback to 'projDir' mapping from the root backup.
-                const basePath = entry.cardDir || projDir; 
+                const basePath = entry.cardDir || projDir;
                 for (const fileAbs of entry.files) {
                     let relPath = fileAbs;
                     const normFileAbs = fileAbs.replace(/\\/g, '/');
@@ -2090,20 +1585,17 @@ if (typeof appendLog === 'undefined') {
                     let parentDir = '';
                     const parts = relPath.replace(/\\/g, '/').split('/');
                     if (parts.length > 1) {
-                        // The main backup structure only preserves one level of internal directories, standardly.
                         parentDir = parts[parts.length - 2] + '/';
                     }
                     const basename = parts[parts.length - 1].replace(/\.[^/.]+$/, "");
                     const expectedProxyPath = parentDir + basename + "_proxy.mov";
-                    // Store the mapping: expectedProxyPath -> original absolute source path
                     expectedFiles[entry.cardName][expectedProxyPath] = fileAbs;
                 }
             }
             window._remoteDispatchExpected = expectedFiles;
 
             // ── 分派：將每張卡的檔案按輪轉 round-robin 分配給各遠端主機 ──────────
-            // 先把所有卡的 [cardName, file] 攤平，再 round-robin 給主機
-            const allCardFiles = []; // [{ cardName, file }]
+            const allCardFiles = [];
             for (const { cardName, files } of cardEntries) {
                 for (const file of files) allCardFiles.push({ cardName, file });
             }
@@ -2111,8 +1603,7 @@ if (typeof appendLog === 'undefined') {
             const n = reachable.length;
             if (typeof appendLog === 'function') appendLog('📋 共 ' + totalFiles + ' 個檔案（' + cardEntries.length + ' 張卡），分配給 ' + n + ' 台主機', 'system');
 
-            // 每台主機建立 { cardName -> [files] } 的 map
-            const hostCardMaps = reachable.map(() => ({})); // [{cardName: [files]}, ...]
+            const hostCardMaps = reachable.map(() => ({}));
             allCardFiles.forEach(({ cardName, file }, idx) => {
                 const hostIdx = idx % n;
                 if (!hostCardMaps[hostIdx][cardName]) hostCardMaps[hostIdx][cardName] = [];
@@ -2129,11 +1620,9 @@ if (typeof appendLog === 'undefined') {
                 const totalForHost = cardNames.reduce((s, c) => s + cardMap[c].length, 0);
                 updateHostProgress(h.ip, 10, '送出中... (' + totalForHost + ' 個)', '#1f538d');
 
-                // 每張卡對此主機各送一個 transcode job，dest_dir 包含卡名
                 let hostOk = false;
                 for (const cardName of cardNames) {
                     const files = cardMap[cardName];
-                    // dest_dir: proxy_root/project_name/HostDispatch_主機名/卡名
                     const cardSuffix = cardName ? '/' + cardName : '';
                     const dest = ctx.proxy_root
                         ? ctx.proxy_root + '/' + ctx.project_name + '/HostDispatch_' + h.name.replace(/\s+/g, '_') + cardSuffix
@@ -2200,14 +1689,13 @@ if (typeof appendLog === 'undefined') {
                                         const concatUrl = (flags.concat_host_url || getComputeBaseUrl()) + '/api/v1/jobs/concat';
                                         const concatHostName = flags.concat_host_name || '本機';
                                         if (typeof appendLog === 'function') appendLog('🏗️ 串帶將由 [' + concatHostName + '] 執行', 'system');
-                                        // 追蹤多卡串帶進度
                                         window._concatMultiCard = { total: flags.cards.length, done: 0, jobIds: [] };
                                         for (let ci = 0; ci < flags.cards.length; ci++) {
                                             const cardEntry = flags.cards[ci];
-                                            // Cards can be [cardName, srcPath] or [cardName, srcPath, absSrcPath]
                                             const cardName = Array.isArray(cardEntry) ? cardEntry[0] : cardEntry;
                                             if (!cardName) continue;
-                                            const concatSrcDir = flags.proxy_root + '/' + flags.project_name + '/' + cardName;
+                                            // 串帶來源：用原始影片（local_root），與本機備份流程一致
+                                            const concatSrcDir = flags.local_root + '/' + flags.project_name + '/' + cardName;
                                             const concatDestDir = flags.proxy_root + '/' + flags.project_name + '/' + cardName;
                                             const concatPayload = {
                                                 sources: [concatSrcDir],
@@ -2265,7 +1753,6 @@ if (typeof appendLog === 'undefined') {
                         const cards = (flags && Array.isArray(flags.cards)) ? flags.cards : [];
                         const localRoot = flags ? flags.local_root : '';
 
-                        // 若無卡匣資訊，直接跳過驗證執行後續作業
                         if (!localRoot || !proxyRoot || !projName || cards.length === 0) {
                             if (window.executePostMergeJobs) window.executePostMergeJobs(flags);
                             return;
@@ -2276,23 +1763,17 @@ if (typeof appendLog === 'undefined') {
                         if (ms) ms.textContent = '驗證檔案中…';
 
                         try {
-                            // ── 逐卡呼叫後端 compare_source（與轉 Proxy TAB 邏輯完全相同）
-                            const allMissing = []; // [{ cardName, sourceFile }]
-
-                            // All cards share the same proxy output dir (flat, no card subfolder)
+                            const allMissing = [];
                             const sharedProxyDir = proxyRoot.replace(/\\/g, '/') + '/' + projName;
 
                             for (let ci = 0; ci < cards.length; ci++) {
                                 const cardEntry = cards[ci];
                                 const cardName = Array.isArray(cardEntry) ? cardEntry[0] : cardEntry;
-                                // cards[1] = original source path (e.g. Y:\原始素材\card_A)
                                 const cardSrcPath = Array.isArray(cardEntry) && cardEntry[1] ? cardEntry[1] : null;
                                 if (!cardName) continue;
 
-                                // ── 智慧來源路徑：優先用「原始素材路徑」，找不到自動降級到「備份副本路徑」──
                                 const backupCopyDir = (localRoot.replace(/\\/g, '/') + '/' + projName + '/' + cardName);
                                 let sourceDir = cardSrcPath || backupCopyDir;
-                                // 【優化】精準指定到個別卡匣的專屬資料夾，防止跨卡同名檔案互相干擾
                                 const proxyDir  = sharedProxyDir + '/' + cardName;
 
                                 if (typeof appendLog === 'function') appendLog(`🔍 [${cardName}] 比對來源: ${sourceDir} → ${proxyDir}`, 'system');
@@ -2304,7 +1785,6 @@ if (typeof appendLog === 'undefined') {
                                     });
                                     let d = await r.json();
 
-                                    // ── 若原始路徑不可達（已拔卡/離線），自動降級用備份副本 ──
                                     if (d.status === 'error' && cardSrcPath && sourceDir === cardSrcPath) {
                                         if (typeof appendLog === 'function') appendLog(`⚠️ [${cardName}] 原始路徑不可達，改用備份副本: ${backupCopyDir}`, 'system');
                                         sourceDir = backupCopyDir;
@@ -2334,59 +1814,123 @@ if (typeof appendLog === 'undefined') {
                                 return;
                             }
 
-                            // ── 有缺漏：啟動補轉重試機制
                             window._remoteDispatchExpectedRetryCount = (window._remoteDispatchExpectedRetryCount || 0) + 1;
-                            if (typeof appendLog === 'function') appendLog(`⚠️ 發現 ${allMissing.length} 個缺失的 Proxy 檔案，啟動補轉 (第 ${window._remoteDispatchExpectedRetryCount} 次)...`, 'error');
+                            if (typeof appendLog === 'function') appendLog(`[!] 發現 ${allMissing.length} 個缺失的 Proxy 檔案，啟動補轉 (第 ${window._remoteDispatchExpectedRetryCount} 次)...`, 'error');
 
-                            if (window._remoteDispatchExpectedRetryCount > 2) {
-                                if (typeof appendLog === 'function') appendLog('❌ 補件重試已達上限 (2次)，放棄重試，強行啟動後續作業。', 'error');
+                            if (window._remoteDispatchExpectedRetryCount > 3) {
+                                if (typeof appendLog === 'function') appendLog('[X] 補件重試已達上限 (3次)，放棄重試，啟動後續作業。', 'error');
                                 if (window.executePostMergeJobs) window.executePostMergeJobs(flags);
                                 return;
                             }
 
-                            // ── 派發補轉：round-robin 分配給存活的遠端主機
-                            const activeHostsObj = window._activeRemoteHosts || {};
-                            const activeHostNames = Object.keys(activeHostsObj);
-                            if (activeHostNames.length === 0) {
-                                if (typeof appendLog === 'function') appendLog('❌ 無存活的遠端主機可補轉，強行啟動後續作業。', 'error');
-                                if (window.executePostMergeJobs) window.executePostMergeJobs(flags);
-                                return;
-                            }
+                            // ── 補轉策略：第1次換遠端主機 → 第2次本機轉 → 第3次本機再試 ──
+                            const retryCount = window._remoteDispatchExpectedRetryCount;
+                            const useLocal = retryCount >= 2; // 第2次起用本機
 
-                            const reachable = activeHostNames.map(ip => ({
-                                ip,
-                                name: (activeHostsObj[ip].host && activeHostsObj[ip].host.name) || ip
-                            }));
-                            const distributions = reachable.map(h => ({ host: h, byCard: {} }));
-                            allMissing.forEach(({ cardName, sourceFile }, i) => {
-                                const dist = distributions[i % distributions.length];
-                                if (!dist.byCard[cardName]) dist.byCard[cardName] = [];
-                                dist.byCard[cardName].push(sourceFile);
-                            });
+                            if (useLocal) {
+                                // 本機補轉：直接送到 localhost，100% 路徑可達
+                                if (typeof appendLog === 'function') appendLog(`[>] 第 ${retryCount} 次補轉：使用本機轉檔（保證路徑可達）`, 'system');
+                                const localUrl = window.currentSocketUrl || window.location.origin;
+                                let localStarted = 0;
+                                const byCard = {};
+                                allMissing.forEach(({ cardName, sourceFile }) => {
+                                    if (!byCard[cardName]) byCard[cardName] = [];
+                                    byCard[cardName].push(sourceFile);
+                                });
 
-                            let requestsStarted = 0;
-                            for (const dist of distributions) {
-                                for (const [cardName, srcFiles] of Object.entries(dist.byCard)) {
-                                    const remoteUrl = `http://${dist.host.ip}/api/v1/jobs/transcode`;
+                                for (const [cardName, srcFiles] of Object.entries(byCard)) {
                                     const destDir = proxyRoot + '/' + projName + '/' + cardName;
                                     try {
-                                        fetch(remoteUrl, {
+                                        const r = await fetch(localUrl + '/api/v1/jobs/transcode', {
                                             method: 'POST', headers: { 'Content-Type': 'application/json' },
                                             body: JSON.stringify({ sources: srcFiles, dest_dir: destDir })
-                                        }).then(res => res.json()).then(j => {
-                                            if (typeof appendLog === 'function') appendLog(`📌 主機 ${dist.host.name} [${cardName}] 補轉排隊，任務 ID: ${j.job_id || '?'}`, 'system');
-                                        }).catch(err => {
-                                            if (typeof appendLog === 'function') appendLog(`⚠️ 主機 ${dist.host.name} [${cardName}] 補轉派發失敗: ${err.message}`, 'error');
                                         });
-                                        requestsStarted++;
-                                    } catch(e) {}
+                                        const j = await r.json();
+                                        if (typeof appendLog === 'function') appendLog(`[OK] 本機補轉 [${cardName}] ${srcFiles.length} 個檔案排隊，任務 ID: ${j.job_id || '?'}`, 'system');
+                                        localStarted++;
+                                    } catch (err) {
+                                        if (typeof appendLog === 'function') appendLog(`[X] 本機補轉 [${cardName}] 失敗: ${err.message}`, 'error');
+                                    }
                                 }
-                            }
 
-                            if (requestsStarted > 0 && typeof window.startHeartbeatMonitor === 'function') {
-                                window.startHeartbeatMonitor();
+                                if (localStarted > 0) {
+                                    // 本機轉檔：用 Socket.IO task_status 事件偵測完成，再跑驗證
+                                    if (typeof appendLog === 'function') appendLog(`[>] 本機補轉中，等待 ${localStarted} 個任務完成...`, 'system');
+                                    window._retryLocalPending = localStarted;
+                                    window._retryLocalFlags = flags;
+                                    window._retryProxyRoot = proxyRoot;
+                                    window._retryProjName = projName;
+                                    // task_status:done 事件處理器會遞減 _retryLocalPending
+                                    // 到 0 時自動觸發 verifyAndRetryMissingProxies
+                                } else {
+                                    if (window.executePostMergeJobs) window.executePostMergeJobs(flags);
+                                }
                             } else {
-                                if (window.executePostMergeJobs) window.executePostMergeJobs(flags);
+                                // 第1次補轉：換不同的遠端主機
+                                const activeHostsObj = window._activeRemoteHosts || {};
+                                const activeHostNames = Object.keys(activeHostsObj);
+                                // 找出哪些主機上次失敗了 — 排除它們
+                                const failedHosts = new Set(window._retryFailedHosts || []);
+                                const candidateIps = activeHostNames.filter(ip => !failedHosts.has(ip));
+
+                                if (candidateIps.length === 0) {
+                                    // 所有遠端主機都失敗過 → 直接走本機
+                                    if (typeof appendLog === 'function') appendLog('[>] 所有遠端主機都曾失敗，改用本機補轉', 'system');
+                                    window._remoteDispatchExpectedRetryCount = 2; // 跳到本機流程
+                                    window.verifyAndRetryMissingProxies(proxyRoot, projName, flags);
+                                    return;
+                                }
+
+                                const reachable = candidateIps.map(ip => ({
+                                    ip,
+                                    name: (activeHostsObj[ip].host && activeHostsObj[ip].host.name) || ip
+                                }));
+                                if (typeof appendLog === 'function') appendLog(`[>] 第1次補轉：使用 ${reachable.length} 台備選遠端主機`, 'system');
+
+                                // 記住這次用的主機（如果又失敗就列入黑名單）
+                                window._retryFailedHosts = [...failedHosts, ...reachable.map(h => h.ip)];
+
+                                const distributions = reachable.map(h => ({ host: h, byCard: {} }));
+                                allMissing.forEach(({ cardName, sourceFile }, i) => {
+                                    const dist = distributions[i % distributions.length];
+                                    if (!dist.byCard[cardName]) dist.byCard[cardName] = [];
+                                    dist.byCard[cardName].push(sourceFile);
+                                });
+
+                                let requestsStarted = 0;
+                                window._activeRemoteHosts = {}; // 重置，只追蹤補轉主機
+                                for (const dist of distributions) {
+                                    for (const [cardName, srcFiles] of Object.entries(dist.byCard)) {
+                                        const destDir = proxyRoot + '/' + projName + '/HostDispatch_Retry_' + dist.host.name.replace(/\s+/g, '_') + '/' + cardName;
+                                        try {
+                                            const r = await fetch('http://' + dist.host.ip + '/api/v1/jobs/transcode', {
+                                                method: 'POST', headers: { 'Content-Type': 'application/json' },
+                                                body: JSON.stringify({ sources: srcFiles, dest_dir: destDir })
+                                            });
+                                            const j = await r.json();
+                                            if (typeof appendLog === 'function') appendLog(`[OK] ${dist.host.name} [${cardName}] 補轉排隊，任務 ID: ${j.job_id || '?'}`, 'system');
+                                            requestsStarted++;
+                                            window._activeRemoteHosts[dist.host.ip] = {
+                                                host: dist.host, done: false, pct: 0,
+                                                lastSeen: Date.now(), startTime: Date.now(),
+                                                expectedJobs: Object.keys(dist.byCard).length
+                                            };
+                                        } catch (err) {
+                                            if (typeof appendLog === 'function') appendLog(`[X] ${dist.host.name} [${cardName}] 補轉失敗: ${err.message}`, 'error');
+                                        }
+                                    }
+                                }
+
+                                if (requestsStarted > 0) {
+                                    // 存 flags 供 merge 後的驗證使用
+                                    window._postMergeFlags = flags;
+                                    startHeartbeatMonitor();
+                                } else {
+                                    // 遠端全部失敗 → 直接走本機
+                                    if (typeof appendLog === 'function') appendLog('[>] 遠端補轉全部失敗，改用本機', 'system');
+                                    window._remoteDispatchExpectedRetryCount = 2;
+                                    window.verifyAndRetryMissingProxies(proxyRoot, projName, flags);
+                                }
                             }
 
                         } catch (e) {
@@ -2416,7 +1960,7 @@ if (typeof appendLog === 'undefined') {
         // 輪詢遠端主機進度，直到任務完成
         async function pollRemoteHostProgress(hostUrl, hostName) {
             let offset = 0;
-            const maxPolls = 300; // 最多輪詢 10 分鐘
+            const maxPolls = 300;
             appendLog(`[${hostName}] 開始監控遠端進度...`, 'system');
             for (let i = 0; i < maxPolls; i++) {
                 await new Promise(r => setTimeout(r, 2000));
@@ -2424,10 +1968,8 @@ if (typeof appendLog === 'undefined') {
                     const res = await fetch(hostUrl + '/api/v1/status?log_offset=' + offset, { signal: AbortSignal.timeout(5000) });
                     if (!res.ok) { appendLog(`[${hostName}] 狀態查詢失敗 (${res.status})`, 'error'); break; }
                     const data = await res.json();
-                    // 顯示新日誌
                     (data.logs || []).forEach(line => appendLog(`[${hostName}] ${line}`, 'system'));
                     offset = data.new_log_offset || offset;
-                    // 結束條件：不 busy 且 queue 空
                     if (!data.busy && data.queue_length === 0) {
                         appendLog(`[${hostName}] ✅ 任務完成`, 'system');
                         return;
@@ -2505,636 +2047,6 @@ if (typeof appendLog === 'undefined') {
                 selectEl.className = "bg-[#333] text-sm border border-[#555] rounded px-2 py-1 focus:outline-none focus:border-blue-500";
             }
         }
-
-        function showInstallModal() {
-            document.getElementById('install-modal').classList.remove('hidden');
-        }
-
-        // ─── Settings Modal ───────────────────────────────────────────
-        // Global tab-switch function (called from inline onclick on tab buttons)
-        function switchSettingsTab(tabId, event) {
-            document.querySelectorAll('#settingsModal .tab-content').forEach(el => el.style.display = 'none');
-            document.querySelectorAll('#settingsModal .tab-btn').forEach(el => el.classList.remove('active'));
-            document.getElementById('tab_' + tabId).style.display = 'block';
-            (event || window.event).currentTarget.classList.add('active');
-            if (tabId === 'user_mgmt') _loadUserList();
-        }
-
-        // ── User Management (standalone modal) ──
-        const TAB_NAMES = {backup:'備份並轉檔',verify:'檔案比對',transcode:'轉 Proxy',concat:'製作串帶',report:'檔案視覺報表',transcribe:'AI 逐字稿',tts:'語音生成'};
-
-        window._openUserMgmt = async function() {
-            _ensureModalStyles();
-            document.getElementById('user-mgmt-modal')?.remove();
-            const overlay = document.createElement('div');
-            overlay.id = 'user-mgmt-modal';
-            overlay.className = '_fm-overlay';
-            overlay.addEventListener('click', e => { if (e.target === overlay) overlay.remove(); });
-            document.addEventListener('keydown', function _esc(e) { if (e.key === 'Escape') { overlay.remove(); document.removeEventListener('keydown', _esc); } });
-
-            const modal = document.createElement('div');
-            modal.className = '_fm-modal';
-            modal.style.width = '720px'; modal.style.maxWidth = '90%';
-            modal.innerHTML = `
-                <div class="_fm-header">
-                    <h3>使用者管理</h3>
-                    <div style="display:flex;gap:10px;align-items:center;">
-                        <button id="umgmt-add-btn" class="_fm-btn-submit" style="padding:5px 16px;font-size:12px;">+ 新增使用者</button>
-                        <span class="_fm-close" onclick="document.getElementById('user-mgmt-modal')?.remove()">✕</span>
-                    </div>
-                </div>
-                <div class="_fm-body" style="padding:16px 24px;">
-                    <div id="umgmt-list" style="font-size:12px;">
-                        <div style="text-align:center;color:#666;padding:20px;">載入中...</div>
-                    </div>
-                </div>
-            `;
-            overlay.appendChild(modal);
-            document.body.appendChild(overlay);
-
-            document.getElementById('umgmt-add-btn').onclick = () => window._addUserPrompt();
-            await _loadUserList();
-        };
-
-        // ─── RBAC: cached roles list for user mgmt ─── //
-        let _cachedRoles = [];
-        async function _fetchRoles() {
-            try {
-                const r = await fetch('/api/v1/roles');
-                if (r.ok) _cachedRoles = await r.json();
-            } catch (_) {}
-            return _cachedRoles;
-        }
-
-        async function _loadUserList() {
-            const container = document.getElementById('umgmt-list');
-            if (!container) return;
-            try {
-                const [rolesResult, r] = await Promise.all([
-                    _fetchRoles(),
-                    fetch('/api/v1/auth/users', { headers: { 'Authorization': 'Bearer ' + (localStorage.getItem('auth_token') || '') } }),
-                ]);
-                const roles = _cachedRoles;
-                if (!r.ok) { container.innerHTML = '<div style="text-align:center;color:#f87171;padding:20px;">載入失敗（需要管理員權限）</div>'; return; }
-                const users = await r.json();
-                const roleOptions = roles.map(rl =>
-                    `<option value="${rl.name}">${rl.name} (Lv${rl.access_level})</option>`
-                ).join('');
-
-                // Table header
-                let html = `<div style="display:grid;grid-template-columns:140px 150px 1fr auto;gap:0;font-size:11px;color:#666;padding:0 16px 8px;font-weight:600;letter-spacing:0.5px;text-transform:uppercase;">
-                    <span>帳號</span><span>角色</span><span>可用模組</span><span>操作</span>
-                </div>`;
-                html += users.map(u => {
-                    const userRole = u.role_name || u.role || 'editor';
-                    const modules = u.modules || [];
-                    const moduleTags = _renderModuleTags(modules);
-                    const am = u.auth_method || 'password';
-                    const authBadge = am === 'google'
-                        ? '<span style="display:inline-block;background:#4285f422;color:#8ab4f8;font-size:9px;padding:1px 5px;border-radius:3px;margin-left:4px;vertical-align:middle;">G</span>'
-                        : am === 'both'
-                        ? '<span style="display:inline-block;background:#4285f422;color:#8ab4f8;font-size:9px;padding:1px 5px;border-radius:3px;margin-left:4px;vertical-align:middle;">G+</span>'
-                        : '';
-                    const avatarImg = u.avatar_url
-                        ? `<img src="${u.avatar_url}" style="width:20px;height:20px;border-radius:50%;object-fit:cover;vertical-align:middle;margin-right:4px;">`
-                        : '';
-                    const emailLine = u.email
-                        ? `<div style="font-size:10px;color:#666;margin-top:1px;">${u.email}</div>`
-                        : '';
-                    return `
-                    <div style="display:grid;grid-template-columns:140px 150px 1fr auto;gap:12px;align-items:center;padding:12px 16px;margin-bottom:1px;background:#1e1e1e;border:1px solid #2e2e2e;border-radius:8px;transition:border-color .15s;" onmouseenter="this.style.borderColor='#444'" onmouseleave="this.style.borderColor='#2e2e2e'">
-                        <div>
-                            <div>${avatarImg}<span style="color:#f0f0f0;font-weight:600;font-size:13px;">${u.username}</span>${u.username === 'admin' ? '<span style="display:inline-block;background:#7c3aed22;color:#a78bfa;font-size:9px;padding:1px 5px;border-radius:3px;margin-left:4px;vertical-align:middle;">SUPER</span>' : ''}${authBadge}</div>
-                            ${emailLine}
-                        </div>
-                        <div>
-                            <select data-role-user="${u.username}" class="_fm-select" style="padding:4px 8px;font-size:11px;border-radius:5px;" onchange="window._onUserRoleChange(this)">
-                                ${roleOptions.replace(`value="${userRole}"`, `value="${userRole}" selected`)}
-                            </select>
-                        </div>
-                        <div data-modules-user="${u.username}" style="display:flex;flex-wrap:wrap;gap:4px;line-height:1.6;">${moduleTags}</div>
-                        <div style="display:flex;gap:6px;align-items:center;">
-                            <button onclick="window._changeUserPwd('${u.username}')" class="_fm-btn-cancel" style="padding:3px 10px;font-size:11px;">改密碼</button>
-                            <button onclick="window._saveUserSettings('${u.username}')" class="_fm-btn-submit" style="padding:3px 12px;font-size:11px;font-weight:500;">儲存</button>
-                            ${u.username !== 'admin' ? `<button onclick="window._deleteUser('${u.username}')" style="background:transparent;border:1px solid rgba(239,68,68,0.3);color:#f87171;border-radius:6px;padding:3px 10px;cursor:pointer;font-size:11px;transition:all .15s;" onmouseenter="this.style.borderColor='#ef4444';this.style.background='rgba(239,68,68,0.08)'" onmouseleave="this.style.borderColor='rgba(239,68,68,0.3)';this.style.background='transparent'">刪除</button>` : ''}
-                        </div>
-                    </div>`;
-                }).join('');
-                container.innerHTML = html;
-            } catch (_) {
-                container.innerHTML = '<div style="text-align:center;color:#f87171;padding:20px;">載入失敗</div>';
-            }
-        }
-
-        // ─── Modal Shared Styles (injected once) ─── //
-        function _ensureModalStyles() {
-            if (document.getElementById('_formModalStyles')) return;
-            const style = document.createElement('style');
-            style.id = '_formModalStyles';
-            style.textContent = `
-                @keyframes _fmFadeIn { from { opacity:0 } to { opacity:1 } }
-                @keyframes _fmSlideUp { from { opacity:0; transform:translateY(12px) scale(0.98) } to { opacity:1; transform:translateY(0) scale(1) } }
-                ._fm-overlay { position:fixed;inset:0;background:rgba(0,0,0,0.72);z-index:10000;display:flex;align-items:center;justify-content:center;animation:_fmFadeIn .18s ease-out }
-                ._fm-modal { background:#252525;border:1px solid #3a3a3a;border-radius:10px;box-shadow:0 20px 50px rgba(0,0,0,0.55);width:460px;max-height:85vh;overflow-y:auto;animation:_fmSlideUp .22s ease-out;color:#e5e7eb }
-                ._fm-header { padding:18px 24px;border-bottom:1px solid #333;display:flex;justify-content:space-between;align-items:center }
-                ._fm-header h3 { margin:0;font-size:15px;font-weight:600;color:#f0f0f0;letter-spacing:0.3px }
-                ._fm-close { cursor:pointer;width:28px;height:28px;display:flex;align-items:center;justify-content:center;border-radius:6px;color:#666;font-size:18px;transition:all .15s }
-                ._fm-close:hover { background:#333;color:#ccc }
-                ._fm-body { padding:20px 24px }
-                ._fm-section { margin-bottom:4px }
-                ._fm-section-label { font-size:11px;font-weight:600;color:#666;text-transform:uppercase;letter-spacing:1px;margin-bottom:12px }
-                ._fm-divider { height:1px;background:#333;margin:16px 0 }
-                ._fm-field { margin-bottom:14px }
-                ._fm-field:last-child { margin-bottom:0 }
-                ._fm-label { display:block;font-size:12px;font-weight:500;color:#999;margin-bottom:6px }
-                ._fm-label .req { color:#ef4444;margin-left:2px }
-                ._fm-input, ._fm-select { width:100%;box-sizing:border-box;background:#1a1a1a;border:1px solid #3a3a3a;color:#fff;padding:9px 12px;border-radius:6px;font-size:13px;transition:border-color .15s,box-shadow .15s;outline:none }
-                ._fm-input:focus, ._fm-select:focus { border-color:#7c3aed;box-shadow:0 0 0 2px rgba(124,58,237,0.15) }
-                ._fm-input::placeholder { color:#555 }
-                ._fm-checkgrid { display:grid;grid-template-columns:repeat(4,1fr);gap:6px;padding:4px 0 }
-                ._fm-chk { display:flex;align-items:center;gap:6px;font-size:12px;color:#bbb;cursor:pointer;padding:5px 8px;border-radius:5px;transition:background .12s;user-select:none }
-                ._fm-chk:hover { background:#2a2a2a }
-                ._fm-chk input { accent-color:#7c3aed;width:14px;height:14px;cursor:pointer }
-                ._fm-hint { font-size:11px;color:#666;margin-top:4px }
-                ._fm-error { display:none;color:#f87171;font-size:12px;margin-top:12px;padding:8px 12px;background:rgba(239,68,68,0.08);border:1px solid rgba(239,68,68,0.2);border-radius:6px }
-                ._fm-footer { padding:14px 24px;border-top:1px solid #333;display:flex;justify-content:flex-end;gap:10px }
-                ._fm-btn-cancel { background:transparent;border:1px solid #444;color:#999;padding:7px 18px;border-radius:6px;font-size:13px;cursor:pointer;transition:all .15s }
-                ._fm-btn-cancel:hover { background:#2a2a2a;color:#ddd;border-color:#555 }
-                ._fm-btn-submit { background:#6d28d9;border:none;color:#fff;padding:7px 22px;border-radius:6px;font-size:13px;font-weight:600;cursor:pointer;transition:all .15s }
-                ._fm-btn-submit:hover { background:#5b21b6 }
-                ._fm-btn-submit:disabled { opacity:0.5;cursor:not-allowed }
-            `;
-            document.head.appendChild(style);
-        }
-
-        // ─── Styled Form Modal Builder ─── //
-        function _createFormModal({ id, title, fields, onSubmit, submitLabel = '建立' }) {
-            document.getElementById(id)?.remove();
-            _ensureModalStyles();
-
-            const overlay = document.createElement('div');
-            overlay.id = id;
-            overlay.className = '_fm-overlay';
-
-            // Build sections / fields HTML
-            let bodyHtml = '';
-            let inSection = false;
-            for (const f of fields) {
-                // Section divider support
-                if (f.type === 'divider') {
-                    if (inSection) bodyHtml += `</div>`;
-                    bodyHtml += `<div class="_fm-divider"></div>`;
-                    inSection = false;
-                    continue;
-                }
-                if (f.type === 'section') {
-                    if (inSection) bodyHtml += `</div>`;
-                    bodyHtml += `<div class="_fm-section"><div class="_fm-section-label">${f.label}</div>`;
-                    inSection = true;
-                    continue;
-                }
-
-                bodyHtml += `<div class="_fm-field">`;
-                if (f.label && f.type !== 'checkboxes') {
-                    bodyHtml += `<label class="_fm-label">${f.label}${f.required ? '<span class="req">*</span>' : ''}</label>`;
-                }
-                if (f.type === 'select') {
-                    const opts = (f.options || []).map(o =>
-                        `<option value="${o.value}" ${o.value === f.defaultValue ? 'selected' : ''}>${o.label}</option>`
-                    ).join('');
-                    bodyHtml += `<select data-field="${f.key}" class="_fm-select">${opts}</select>`;
-                } else if (f.type === 'checkboxes') {
-                    if (f.label) bodyHtml += `<label class="_fm-label">${f.label}</label>`;
-                    bodyHtml += `<div class="_fm-checkgrid">`;
-                    for (const o of (f.options || [])) {
-                        bodyHtml += `<label class="_fm-chk">
-                            <input type="checkbox" data-field="${f.key}" value="${o.value}" ${o.checked ? 'checked' : ''}> ${o.label}
-                        </label>`;
-                    }
-                    bodyHtml += `</div>`;
-                } else {
-                    bodyHtml += `<input data-field="${f.key}" type="${f.type || 'text'}" placeholder="${f.placeholder || ''}" ${f.autofocus ? 'autofocus' : ''} class="_fm-input">`;
-                }
-                if (f.hint) bodyHtml += `<div class="_fm-hint">${f.hint}</div>`;
-                bodyHtml += `</div>`;
-            }
-            if (inSection) bodyHtml += `</div>`;
-
-            const modal = document.createElement('div');
-            modal.className = '_fm-modal';
-            modal.innerHTML = `
-                <div class="_fm-header">
-                    <h3>${title}</h3>
-                    <span class="_fm-close">✕</span>
-                </div>
-                <div class="_fm-body">${bodyHtml}
-                    <div class="_fm-error" data-error></div>
-                </div>
-                <div class="_fm-footer">
-                    <button class="_fm-btn-cancel" data-action="cancel">取消</button>
-                    <button class="_fm-btn-submit" data-action="submit">${submitLabel}</button>
-                </div>
-            `;
-            overlay.appendChild(modal);
-            document.body.appendChild(overlay);
-
-            const close = () => { overlay.style.animation = 'none'; overlay.remove(); };
-            const errEl = modal.querySelector('[data-error]');
-            const setError = (msg) => { if (msg) { errEl.textContent = msg; errEl.style.display = ''; } else { errEl.style.display = 'none'; } };
-            const getValues = () => {
-                const vals = {};
-                for (const f of fields) {
-                    if (f.type === 'divider' || f.type === 'section') continue;
-                    if (f.type === 'checkboxes') {
-                        vals[f.key] = [...modal.querySelectorAll(`input[data-field="${f.key}"]:checked`)].map(cb => cb.value);
-                    } else {
-                        const el = modal.querySelector(`[data-field="${f.key}"]`);
-                        vals[f.key] = el ? el.value.trim() : '';
-                    }
-                }
-                return vals;
-            };
-
-            overlay.addEventListener('click', e => { if (e.target === overlay) close(); });
-            modal.querySelector('._fm-close').onclick = close;
-            modal.querySelector('[data-action="cancel"]').onclick = close;
-            modal.querySelector('[data-action="submit"]').onclick = async () => {
-                setError('');
-                const btn = modal.querySelector('[data-action="submit"]');
-                btn.disabled = true; btn.textContent = '處理中...';
-                try {
-                    await onSubmit(getValues(), setError, close);
-                } finally {
-                    btn.disabled = false; btn.textContent = submitLabel;
-                }
-            };
-            document.addEventListener('keydown', function _esc(e) {
-                if (e.key === 'Escape') { close(); document.removeEventListener('keydown', _esc); }
-            });
-            modal.querySelectorAll('input._fm-input').forEach(inp => {
-                inp.addEventListener('keydown', e => {
-                    if (e.key === 'Enter') modal.querySelector('[data-action="submit"]').click();
-                });
-            });
-            const firstInput = modal.querySelector('input[autofocus], input._fm-input');
-            if (firstInput) setTimeout(() => firstInput.focus(), 80);
-
-            return { overlay, getValues, close, setError };
-        }
-
-        // ─── Add User (styled modal) ─── //
-        window._addUserPrompt = async function() {
-            const roles = _cachedRoles.length ? _cachedRoles : await _fetchRoles();
-            const roleOptions = roles.map(r => ({
-                value: r.name,
-                label: `${r.name} (Lv${r.access_level})`,
-            }));
-            _createFormModal({
-                id: 'add-user-modal',
-                title: '新增使用者',
-                submitLabel: '建立使用者',
-                fields: [
-                    { type: 'section', label: '帳號資訊' },
-                    { key: 'username', label: '帳號', type: 'text', required: true, autofocus: true, placeholder: '輸入英文帳號名稱' },
-                    { key: 'password', label: '密碼', type: 'password', required: true, placeholder: '設定密碼' },
-                    { key: 'password2', label: '確認密碼', type: 'password', required: true, placeholder: '再次輸入密碼' },
-                    { type: 'divider' },
-                    { type: 'section', label: '權限指派' },
-                    { key: 'role_name', label: '角色', type: 'select', options: roleOptions, defaultValue: 'editor' },
-                ],
-                onSubmit: async (vals, setError, close) => {
-                    if (!vals.username) { setError('請輸入帳號'); return; }
-                    if (!vals.password) { setError('請輸入密碼'); return; }
-                    if (vals.password !== vals.password2) { setError('兩次密碼不一致'); return; }
-                    if (vals.password.length < 3) { setError('密碼至少需要 3 個字元'); return; }
-                    try {
-                        const r = await fetch('/api/v1/auth/users', {
-                            method: 'POST', headers: { 'Content-Type': 'application/json' },
-                            body: JSON.stringify({ username: vals.username, password: vals.password, role_name: vals.role_name }),
-                        });
-                        const d = await r.json();
-                        if (!r.ok) { setError(d.detail || '新增失敗'); return; }
-                        close();
-                        _loadUserList();
-                    } catch (_) { setError('連線失敗，請稍後再試'); }
-                },
-            });
-        };
-
-        window._onUserRoleChange = function(selectEl) {
-            const username = selectEl.getAttribute('data-role-user');
-            const roleName = selectEl.value;
-            const role = _cachedRoles.find(r => r.name === roleName);
-            const modulesDiv = document.querySelector(`[data-modules-user="${username}"]`);
-            if (!modulesDiv || !role) return;
-            const modules = role.modules || [];
-            modulesDiv.innerHTML = _renderModuleTags(modules);
-        };
-
-        window._saveUserSettings = async function(username) {
-            const roleSelect = document.querySelector(`select[data-role-user="${username}"]`);
-            const role_name = roleSelect ? roleSelect.value : 'editor';
-            try {
-                const r = await fetch('/api/v1/auth/users/' + username, {
-                    method: 'PUT', headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ role_name }),
-                });
-                if (r.ok) {
-                    const btns = document.querySelectorAll('#umgmt-list button');
-                    btns.forEach(b => {
-                        if (b.textContent.includes('儲存') && b.onclick?.toString().includes(username)) {
-                            b.textContent = '✅ 已儲存'; b.style.background = '#22c55e';
-                            setTimeout(() => { b.textContent = '💾 儲存'; b.style.background = '#3b82f6'; }, 1500);
-                        }
-                    });
-                } else { alert('儲存失敗'); }
-            } catch (_) { alert('連線失敗'); }
-        };
-
-        window._changeUserPwd = async function(username) {
-            const password = prompt(`設定 ${username} 的新密碼：`);
-            if (!password) return;
-            const r = await fetch('/api/v1/auth/users/' + username, {
-                method: 'PUT', headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ password }),
-            });
-            if (r.ok) alert('密碼已更新'); else alert('修改失敗');
-        };
-
-        window._deleteUser = async function(username) {
-            if (!confirm(`確定要刪除使用者 "${username}"？`)) return;
-            const r = await fetch('/api/v1/auth/users/' + username, { method: 'DELETE' });
-            if (r.ok) _loadUserList(); else alert('刪除失敗');
-        };
-
-        // ─── Role Management Modal (RBAC) ─── //
-        const ALL_MODULES = ['backup','verify','transcode','concat','report','transcribe','tts','projects'];
-        const MODULE_LABELS = {backup:'備份',verify:'比對',transcode:'轉檔',concat:'串帶',report:'報表',transcribe:'逐字稿',tts:'語音',projects:'專案'};
-
-        function _renderModuleTags(modules) {
-            return (modules && modules.length)
-                ? modules.map(m => `<span style="display:inline-block;background:#2a2a2a;border:1px solid #3a3a3a;border-radius:4px;padding:1px 7px;font-size:10px;color:#999;">${MODULE_LABELS[m]||m}</span>`).join(' ')
-                : '<span style="color:#555;font-size:11px;">未設定</span>';
-        }
-
-        window._openRoleMgmt = async function() {
-            _ensureModalStyles();
-            document.getElementById('role-mgmt-modal')?.remove();
-            const overlay = document.createElement('div');
-            overlay.id = 'role-mgmt-modal';
-            overlay.className = '_fm-overlay';
-            overlay.addEventListener('click', e => { if (e.target === overlay) overlay.remove(); });
-            document.addEventListener('keydown', function _esc(e) { if (e.key === 'Escape') { overlay.remove(); document.removeEventListener('keydown', _esc); } });
-
-            const modal = document.createElement('div');
-            modal.className = '_fm-modal';
-            modal.style.width = '820px'; modal.style.maxWidth = '90%';
-            modal.innerHTML = `
-                <div class="_fm-header">
-                    <h3>角色管理 (RBAC)</h3>
-                    <div style="display:flex;gap:10px;align-items:center;">
-                        <button id="rmgmt-add-btn" class="_fm-btn-submit" style="padding:5px 16px;font-size:12px;">+ 新增角色</button>
-                        <span class="_fm-close" onclick="document.getElementById('role-mgmt-modal')?.remove()">✕</span>
-                    </div>
-                </div>
-                <div class="_fm-body" style="padding:16px 24px;">
-                    <div id="rmgmt-list" style="font-size:12px;">
-                        <div style="text-align:center;color:#666;padding:20px;">載入中...</div>
-                    </div>
-                </div>
-            `;
-            overlay.appendChild(modal);
-            document.body.appendChild(overlay);
-
-            document.getElementById('rmgmt-add-btn').onclick = () => _addRolePrompt();
-            await _loadRoleList();
-        };
-
-        async function _loadRoleList() {
-            const container = document.getElementById('rmgmt-list');
-            if (!container) return;
-            try {
-                const roles = await _fetchRoles();
-                container.innerHTML = roles.map(r => {
-                    const moduleCheckboxes = ALL_MODULES.map(m =>
-                        `<label class="_fm-chk" style="min-width:auto;padding:3px 6px;">
-                            <input type="checkbox" ${(r.modules||[]).includes(m)?'checked':''} data-role-id="${r.id}" data-module="${m}"> ${MODULE_LABELS[m]||m}
-                        </label>`
-                    ).join('');
-                    const isAdmin = r.name === 'admin';
-                    const lvColors = ['#666','#3b82f6','#d48a04','#a855f7'];
-                    const lvColor = lvColors[r.access_level] || '#666';
-                    return `
-                    <div style="padding:14px 16px;margin-bottom:6px;background:#1e1e1e;border:1px solid #2e2e2e;border-radius:8px;transition:border-color .15s;" onmouseenter="this.style.borderColor='#444'" onmouseleave="this.style.borderColor='#2e2e2e'">
-                        <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px;flex-wrap:wrap;">
-                            <input data-role-name="${r.id}" value="${r.name}" class="_fm-input" style="width:110px;padding:5px 10px;font-size:12px;font-weight:600;" ${isAdmin?'readonly style="width:110px;padding:5px 10px;font-size:12px;font-weight:600;opacity:0.6;cursor:not-allowed;"':''}>
-                            <span style="display:inline-block;background:${lvColor}22;color:${lvColor};font-size:10px;font-weight:600;padding:2px 8px;border-radius:4px;letter-spacing:0.3px;">Lv${r.access_level}</span>
-                            <select data-role-level="${r.id}" class="_fm-select" style="padding:4px 8px;font-size:11px;width:auto;">
-                                <option value="0" ${r.access_level===0?'selected':''}>Lv0 唯讀</option>
-                                <option value="1" ${r.access_level===1?'selected':''}>Lv1 操作</option>
-                                <option value="2" ${r.access_level===2?'selected':''}>Lv2 管理</option>
-                                <option value="3" ${r.access_level===3?'selected':''}>Lv3 超級管理</option>
-                            </select>
-                            <input data-role-desc="${r.id}" value="${r.description||''}" placeholder="描述..." class="_fm-input" style="flex:1;min-width:80px;padding:5px 10px;font-size:11px;color:#888;">
-                            <div style="display:flex;gap:6px;margin-left:auto;">
-                                <button onclick="window._saveRole(${r.id})" class="_fm-btn-submit" style="padding:3px 14px;font-size:11px;font-weight:500;">儲存</button>
-                                ${!isAdmin ? `<button onclick="window._deleteRole(${r.id},'${r.name}')" style="background:transparent;border:1px solid rgba(239,68,68,0.3);color:#f87171;border-radius:6px;padding:3px 10px;cursor:pointer;font-size:11px;transition:all .15s;" onmouseenter="this.style.borderColor='#ef4444';this.style.background='rgba(239,68,68,0.08)'" onmouseleave="this.style.borderColor='rgba(239,68,68,0.3)';this.style.background='transparent'">刪除</button>` : ''}
-                            </div>
-                        </div>
-                        <div style="display:flex;flex-wrap:wrap;gap:2px;">${moduleCheckboxes}</div>
-                    </div>`;
-                }).join('');
-            } catch (_) {
-                container.innerHTML = '<div style="text-align:center;color:#f87171;padding:20px;">載入失敗</div>';
-            }
-        }
-
-        async function _addRolePrompt() {
-            const moduleOptions = ALL_MODULES.map(m => ({
-                value: m, label: MODULE_LABELS[m] || m, checked: false,
-            }));
-            _createFormModal({
-                id: 'add-role-modal',
-                title: '新增角色',
-                submitLabel: '建立角色',
-                fields: [
-                    { type: 'section', label: '基本資訊' },
-                    { key: 'name', label: '角色名稱', type: 'text', required: true, autofocus: true, placeholder: '英文名稱，例如 intern' },
-                    { key: 'access_level', label: '權限等級', type: 'select', options: [
-                        { value: '0', label: 'Lv0 唯讀' },
-                        { value: '1', label: 'Lv1 操作' },
-                        { value: '2', label: 'Lv2 管理' },
-                        { value: '3', label: 'Lv3 超級管理' },
-                    ], defaultValue: '1' },
-                    { key: 'description', label: '描述', type: 'text', placeholder: '角色用途說明（選填）' },
-                    { type: 'divider' },
-                    { type: 'section', label: '功能權限' },
-                    { key: 'modules', label: '可用模組', type: 'checkboxes', options: moduleOptions },
-                ],
-                onSubmit: async (vals, setError, close) => {
-                    if (!vals.name) { setError('請輸入角色名稱'); return; }
-                    if (!/^[a-zA-Z_][a-zA-Z0-9_]*$/.test(vals.name)) { setError('角色名稱只能包含英文字母、數字和底線'); return; }
-                    try {
-                        const r = await fetch('/api/v1/roles', {
-                            method: 'POST', headers: { 'Content-Type': 'application/json' },
-                            body: JSON.stringify({
-                                name: vals.name,
-                                access_level: parseInt(vals.access_level),
-                                modules: vals.modules || [],
-                                description: vals.description || '',
-                            }),
-                        });
-                        const d = await r.json();
-                        if (!r.ok) { setError(d.detail || '新增失敗'); return; }
-                        close();
-                        _loadRoleList();
-                    } catch (_) { setError('連線失敗，請稍後再試'); }
-                },
-            });
-        }
-
-        window._saveRole = async function(roleId) {
-            const nameEl = document.querySelector(`input[data-role-name="${roleId}"]`);
-            const levelEl = document.querySelector(`select[data-role-level="${roleId}"]`);
-            const descEl = document.querySelector(`input[data-role-desc="${roleId}"]`);
-            const moduleCbs = document.querySelectorAll(`input[data-role-id="${roleId}"][data-module]`);
-            const modules = [];
-            moduleCbs.forEach(cb => { if (cb.checked) modules.push(cb.dataset.module); });
-            try {
-                const r = await fetch('/api/v1/roles/' + roleId, {
-                    method: 'PUT', headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                        name: nameEl?.value || '',
-                        access_level: parseInt(levelEl?.value || '1'),
-                        modules,
-                        description: descEl?.value || '',
-                    }),
-                });
-                if (r.ok) {
-                    const btn = document.querySelector(`button[onclick*="_saveRole(${roleId})"]`);
-                    if (btn) { btn.textContent = '✅ 已儲存'; btn.style.background = '#22c55e'; setTimeout(() => { btn.textContent = '💾 儲存'; btn.style.background = '#3b82f6'; }, 1500); }
-                } else {
-                    const d = await r.json();
-                    alert(d.detail || '儲存失敗');
-                }
-            } catch (_) { alert('連線失敗'); }
-        };
-
-        window._deleteRole = async function(roleId, roleName) {
-            if (!confirm(`確定要刪除角色 "${roleName}"？`)) return;
-            try {
-                const r = await fetch('/api/v1/roles/' + roleId, { method: 'DELETE' });
-                if (r.ok) { _loadRoleList(); } else {
-                    const d = await r.json();
-                    alert(d.detail || '刪除失敗');
-                }
-            } catch (_) { alert('連線失敗'); }
-        };
-
-        // Wrapped in DOMContentLoaded so modal HTML (placed after this script)
-        // is fully parsed before we try to bind event listeners.
-        document.addEventListener('DOMContentLoaded', () => {
-            const modal = document.getElementById('settingsModal');
-
-            // ── Load settings when modal opens ───────────────────────
-            document.getElementById('btnOpenSettings').addEventListener('click', async () => {
-                modal.style.display = 'flex';
-                try {
-                    const res = await fetch('/api/settings/load');
-                    if (res.ok) {
-                        const data = await res.json();
-                        const n = data.notifications || {};
-                        const t = data.message_templates || {};
-                        document.getElementById('line_token').value = n.line_notify_token || '';
-                        document.getElementById('gchat_webhook').value = n.google_chat_webhook || '';
-                        document.getElementById('custom_webhook').value = n.custom_webhook_url || '';
-                        document.getElementById('tpl_backup_success').value = t.backup_success || '';
-                        document.getElementById('tpl_report_success').value = t.report_success || '';
-                        document.getElementById('tpl_transcode_success').value = t.transcode_success || '';
-                        document.getElementById('tpl_concat_success').value = t.concat_success || '';
-                        document.getElementById('tpl_verify_success').value = t.verify_success || '';
-                        document.getElementById('tpl_transcribe_success').value = t.transcribe_success || '';
-                        // ── Load channel toggles ──────────────────────────────────────
-                        const ch = data.notification_channels || {};
-                        const tabs = ['backup', 'report', 'transcode', 'concat', 'verify', 'transcribe'];
-                        tabs.forEach(tab => {
-                            const cfg = ch[tab] || { gchat: true, line: false };
-                            document.querySelectorAll(`.ch-toggle[data-tab="${tab}"]`).forEach(el => {
-                                const channel = el.dataset.ch;
-                                const isOn = cfg[channel] !== undefined ? cfg[channel] : (channel === 'gchat');
-                                el.classList.toggle('on', isOn);
-                                el.classList.toggle('off', !isOn);
-                            });
-                        });
-                    }
-                } catch (e) { /* silent fail */ }
-            });
-
-            document.getElementById('btnCloseSettings').onclick = () => modal.style.display = 'none';
-            document.getElementById('btnCancelSettings').onclick = () => modal.style.display = 'none';
-
-            // ── Save settings ────────────────────────────────────────
-            document.getElementById('btnSaveSettings').addEventListener('click', async () => {
-                const settingsData = {
-                    notifications: {
-                        line_notify_token: document.getElementById('line_token').value,
-                        google_chat_webhook: document.getElementById('gchat_webhook').value,
-                        custom_webhook_url: document.getElementById('custom_webhook').value,
-                    },
-                    message_templates: {
-                        backup_success: document.getElementById('tpl_backup_success').value,
-                        report_success: document.getElementById('tpl_report_success').value,
-                        transcode_success: document.getElementById('tpl_transcode_success').value,
-                        concat_success: document.getElementById('tpl_concat_success').value,
-                        verify_success: document.getElementById('tpl_verify_success').value,
-                        transcribe_success: document.getElementById('tpl_transcribe_success').value,
-                    },
-                    // ── Channel toggles ──────────────────────────────
-                    notification_channels: Object.fromEntries(
-                        ['backup', 'report', 'transcode', 'concat', 'verify', 'transcribe'].map(tab => [
-                            tab,
-                            {
-                                gchat: document.querySelector(`.ch-toggle.gchat[data-tab="${tab}"]`)?.classList.contains('on') ?? true,
-                                line: document.querySelector(`.ch-toggle.line[data-tab="${tab}"]`)?.classList.contains('on') ?? false,
-                            }
-                        ])
-                    ),
-                };
-                try {
-                    const response = await fetch('/api/settings/save', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify(settingsData)
-                    });
-                    if (response.ok) {
-                        alert('✅ 設定已成功儲存！');
-                        modal.style.display = 'none';
-                    } else {
-                        alert('❌ 儲存失敗，請檢查伺服器連線。');
-                    }
-                } catch (error) {
-                    console.error('儲存設定發生錯誤:', error);
-                    alert('❌ 儲存發生例外錯誤！');
-                }
-            });
-            // ── Restart Agent ──────────────────────────────────────
-            document.getElementById('btnRestartAgent').addEventListener('click', async () => {
-                if (!confirm('確定要重新啟動本機 Agent？\n伺服器將短暫離線約 10 秒，並自動同步 NAS 最新版本。')) return;
-                try {
-                    await fetch('/api/admin/restart', { method: 'POST' });
-                } catch (_) { /* server going down is expected */ }
-                alert('⏳ Agent 正在重新啟動中，請等待約 15 秒後重新整理頁面。');
-                modal.style.display = 'none';
-            });
-            // ── Channel toggle pills ────────────────────────────────
-            document.getElementById('settingsModal').addEventListener('click', e => {
-                const t = e.target.closest('.ch-toggle');
-                if (!t) return;
-                t.classList.toggle('on');
-                t.classList.toggle('off');
-            });
-        });
-
 
 // ── Shared collect-function map (used by schedule modal) ──
         const _collectMap = {
@@ -3236,13 +2148,31 @@ if (typeof appendLog === 'undefined') {
         window.confirmScheduleModal = confirmScheduleModal;
 
 
+// ─── Expose remaining globals for HTML onclick and tab JS ─── //
+        window.switchTab = switchTab;
+        window.setGlobalConflict = setGlobalConflict;
+        window.showConflictModal = showConflictModal;
+        window.updateProgress = updateProgress;
+        window.showCompletionSummary = showCompletionSummary;
+        window.playDing = playDing;
+        window.createShortcut = createShortcut;
+        window.getAgentBaseUrl = getAgentBaseUrl;
+        window.getSelectedHosts = getSelectedHosts;
+        window.renderHostSelector = renderHostSelector;
+        window.renderStandaloneHostPanels = renderStandaloneHostPanels;
+        window.apiControl = apiControl;
+        window.updateComputeModeStyle = updateComputeModeStyle;
+        window.mergeHostOutputs = mergeHostOutputs;
+        window.pollRemoteHostProgress = pollRemoteHostProgress;
+        window.getComputeBaseUrl = typeof getComputeBaseUrl !== 'undefined' ? getComputeBaseUrl : getAgentBaseUrl;
+
 // ─── Initialize on Page Load ─── //
         document.addEventListener('DOMContentLoaded', () => {
             // Load the NAS report history into the main Backup Tab dashboard right away
             if (typeof loadReportHistory === 'function') {
                 loadReportHistory();
             }
-            
+
             // Check model status immediately
             if (typeof fetchModelStatus === 'function') {
                 fetchModelStatus();

@@ -4,12 +4,12 @@
 
 ---
 
-## 現況 (v1.9.9) 基準線
+## 現況 (v1.10.22) 基準線
 
 - ✅ 6 個完整工作流程（備份、比對、轉 Proxy、串帶、報表、AI 逐字稿）
-- ✅ 模組化後端：`main.py` + `core/` + `routers/`
+- ✅ 模組化後端：`main.py` + `core/` + `routers/`（router 容錯載入，缺模組跳過不 crash）
 - ✅ 模組化前端：`frontend/tabs/` 各分頁獨立
-- ✅ OTA 無痛更新（6 層防護：busy 檢查 → 下載防中斷 → 備份回滾 → 自動 pip install → 全 router import 測試 → health check）
+- ✅ OTA 安全更新（4 層套件防線 + 7 階段更新流程 + publish.html 發布工具）
 - ✅ 語音生成 Tab — Edge-TTS + F5-TTS 聲音複製 + NAS 聲音庫 + 台灣正音引擎 + 佇列整合 + GPU 推理
 - ✅ 專案總覽 — 單行緊湊任務卡片 + 歷史搜尋篩選 + Log 查看器 + 佇列管理 + 排程
 - ✅ 處理主機 UI — 本機自動偵測整合 + 狀態燈（綠/紅）+ IP 去 port + 多選/單選分離
@@ -21,6 +21,18 @@
 - ✅ 書籤 + 排程系統 — 儲存常用設定、cron 定時排程
 - ✅ 開機自動啟動 — Windows Startup 捷徑 + `start_hidden.vbs`
 - ✅ PostgreSQL 集中資料庫 — QNAP NAS Docker + SQLAlchemy async + DB 優先 JSON fallback
+- ✅ Auth + RBAC — JWT 登入 + Google OAuth + 六角色權限 + 模組級守衛
+- ✅ 版本發布工具 — `publish.html` Web UI + 並發鎖 + 發布歷史 + 一鍵回滾
+- ✅ CORS Private Network Access — 跨 LAN 機器的 preflight 支援
+- ✅ 版本 badge 本機更新 — 點擊版號即觸發 OTA（移除 JWT 限制 + 步驟動畫 Modal）
+- ✅ OTA 簡化 — 移除 port 8001 monitor，改用 `update_status.json` + health 輪詢
+- ✅ Phase 0 程式碼重構 — app.js 拆 10 模組 + projects.js 拆 3 + api_system.py 拆 3 router
+- ✅ 分散式補轉 3 層 fallback — 失敗換遠端主機 → 本機轉 → 再試一次（保證不漏檔）
+- ✅ 進度條錯誤面板 — 任務報錯時自動展開錯誤摘要，可查看完整 Log
+- ✅ PDF 報表分頁優化 — header/summary 壓縮 + 每檔 tbody 綁定 break-inside:avoid + 膠卷手機版滑動修復
+- ✅ Cloudflare 外網存取支援 — 移除 forceInstallModal + 外網自動偵測 + 狀態燈修正
+- ✅ NAS 瀏覽器 — 外網使用者用 Web Modal 取代 Windows 對話框，自動偵測磁碟根目錄 + 白名單安全限制
+- ✅ API 目錄瀏覽端點 — `GET /api/v1/browse` 支援 `browse_roots` 白名單 + 自動偵測磁碟
 
 ---
 
@@ -75,36 +87,171 @@
 
 ---
 
-## Phase K：遠端 Agent 管理
+## Phase K：遠端 Agent 管理 + OTA 更新
 
 **狀態**：✅ 全部完成
 
-### 要建置的東西
+### 已建置
 
-- [x] **OTA 回滾機制**：備份+雙層回滾（解壓失敗 + 啟動失敗 health check）+ Windows MsgBox 通知
-- [x] **OTA 無痛更新（v1.9.8~v1.9.9）**：
-  - `publish_update.py` 自動生成 `update_manifest.json`（掃描 import → 比對 requirements → 列出新套件）
-  - `bootstrap.py` 解壓後自動 `pip install` 新套件
-  - `bootstrap.py` 更新前 `worker_busy` 檢查（有任務在跑 → 拒絕更新）
-  - `bootstrap.py` 下載寫 `.tmp` → 完整後 rename（防下載中斷）
-  - `bootstrap.py` 全 12 router import 測試（失敗 → 回滾 + 彈窗）
-  - `main.py` router 容錯載入（缺模組跳過該 router，不 crash）
-  - `build_agent_zip.py` + `/download_update` 自動掃描含 .py 的資料夾（不再漏包）
-  - `start_hidden.vbs` 啟動前 kill 舊進程（防止版本殘留）
-  - `Install_or_Update.bat` 一鍵安裝/更新（自動找 Agent 目錄 + pip + bootstrap）
-  - health proxy 改用 `asyncio.to_thread`（防阻塞 event loop）
-- [x] **遠端一鍵更新（v1.9.10）**：主控端 POST proxy → 遠端 `/api/v1/control/update`，機器卡片 [更新] 按鈕
-- [x] **更新進度監控（v1.9.10）**：輪詢 `update_monitor` port 8001 + health fallback（前 15 秒跳過 health 避免誤判）
-- [x] **批次更新（v1.9.10）**：[全部更新 N 台過舊] 按鈕，滾動逐台更新（一台完成再下一台）
-- [x] **版本狀態顯示**：機器卡片顯示版本號（health proxy 回傳 version 欄位）
-- [x] **「有新版」標記（v1.9.10）**：`_isNewer` 語意版本比對，過舊顯示橘色 ⬆ + [更新] 按鈕
+#### OTA 7 階段更新流程（`update_agent.py`）
+- [x] Phase 1 CHECK → Phase 2 COMPARE → Phase 3 BACKUP → Phase 4 DOWNLOAD+EXTRACT → Phase 5 PIP → Phase 5b MANIFEST SAFETY NET → Phase 6 PREFLIGHT → Phase 7 CLEANUP
+- [x] 任何階段失敗 → 自動回滾到 `_rollback/` 備份
+
+#### 4 層套件完整性防線
+- [x] **Publish 自動更新 requirements**：`publish_update.py` 掃描所有 import → 自動 append 到 `requirements_agent.txt`
+- [x] **Server-side Preflight 卡控**：打包前在 server 跑 `preflight.py`，失敗則不發布
+- [x] **Manifest Safety Net**：`update_agent.py` Phase 5b 讀 `update_manifest.json` 補裝遺漏套件
+- [x] **動態 Preflight**：`preflight.py` 掃描所有 .py 的 import 逐一驗證，不靠硬編碼清單
+
+#### 版本發布工具（`publish.html`）
+- [x] NAS 上的 Web UI，Admin 登入後可一鍵發布新版
+- [x] 並發鎖（`asyncio.Lock`，同一時間只能有一個 publish）
+- [x] 發布歷史紀錄（`publish_history.json`，最近 50 筆）
+- [x] 一鍵回滾（`POST /api/v1/publish/rollback`，還原上一版 version.json + ZIP）
+- [x] Agent 狀態總覽（publish 前顯示所有機器版本 + busy 狀態）
+- [x] 版本降級保護（前端 + 後端雙重驗證）
+
+#### 共享常數模組（`ota_manifest.py`）
+- [x] `STDLIB`、`LOCAL_MODULES`、`EXCLUDE_DIRS`、`IMPORT_TO_PIP`、`scan_imports()` 統一定義
+- [x] `publish_update.py`、`preflight.py` 共用，消除重複
+
+#### 遠端管理
+- [x] 遠端一鍵更新：主控端 proxy → Agent `/api/v1/internal/restart`
+- [x] 更新進度監控：輪詢 `update_status.json` + health fallback（移除 port 8001 monitor 依賴）
+- [x] 批次更新：[全部更新 N 台過舊] 按鈕
+- [x] 版本狀態顯示 + 「有新版」橘色標記
+- [x] `Install_or_Update.bat`：自動找 Agent 目錄 + `pip install -r requirements_agent.txt` + 無硬編碼套件
+- [x] 版本 badge 本機更新：`control/update` 無需 JWT（localhost 限定）+ 前端步驟動畫 Modal
+- [x] OTA 簡化：移除 `update_monitor.py` port 8001 依賴，改用 detached BAT + `update_status.json`
 
 ### 做完後你看到的改變
 
-- 在專案總覽頁面看到每台機器的版本號
-- 版本過舊的機器會顯示更新按鈕
-- 點一下就能遠端更新，不需要到同事電腦前操作
-- 可以一次更新所有機器
+- `publish.html` 一鍵發布，壞版本出不了門（preflight 卡控）
+- 套件不會再掉（4 層防線自動偵測 + 自動安裝）
+- 遠端一鍵更新，不需到同事電腦前操作
+- 發布失敗可一鍵回滾
+
+---
+
+## Phase 0：程式碼重構（進入 CRM 前必做）
+
+**狀態**：✅ 全部完成
+**基準數據**：全專案 32,044 行 / 115 個檔案 → 重構後最大活躍檔案從 3499 行降到 1951 行
+
+### 問題分析
+
+| 檔案 | 行數 | 問題 |
+|------|------|------|
+| `frontend/app.js` | 3499 | Auth + 登入 + OAuth + 使用者管理 + 角色管理 + API Key + OTA + 版本 + 進度條 + 設定 + dropdown 全混在一起 |
+| `frontend/tabs/projects/projects.js` | 2180 | 專案總覽 + Agent 卡片 + 遠端更新 + 批次更新 + 歷史篩選 |
+| `routers/api_system.py` | 1028 | 健康 + 狀態 + 設定 + OTA + publish + 下載 + 工具端點 |
+| `frontend/tabs/projects/projects.css` | 1318 | 專案總覽全部樣式 |
+
+### 優先級 1：拆分 `app.js`（3499 行 → 10 個模組）
+
+```
+frontend/js/
+├── auth/
+│   ├── auth-state.js      ← 狀態 + 登入/登出 + dropdown (~250行)
+│   ├── google-oauth.js    ← GIS 整合 (~80行)
+│   └── login-modal.js     ← 登入 Modal (~100行)
+├── admin/
+│   ├── user-mgmt.js       ← 使用者管理 Tab Modal (~400行)
+│   ├── role-mgmt.js       ← 角色管理 Modal (~200行)
+│   └── api-keys.js        ← API Key UI (~250行)
+├── update/
+│   ├── version-check.js   ← 版本偵測 + badge (~200行)
+│   └── update-modal.js    ← 本機更新 Modal (~120行)
+├── settings/
+│   └── settings-modal.js  ← 通知設定 Modal (~150行)
+└── shared/
+    ├── utils.js           ← 現有（不動）
+    └── modal-styles.js    ← _ensureModalStyles + _createFormModal (~120行)
+
+frontend/app.js            ← 進入點：import + Socket.IO + 初始化 (~300行)
+```
+
+### 優先級 2：拆分 `projects.js`（2180 行 → 3 個模組）
+
+```
+frontend/tabs/projects/
+├── projects.js        ← 進入點 + 任務卡片 + 歷史 (~800行)
+├── agent-cards.js     ← 機器卡片渲染 + 狀態監控 (~600行)
+└── agent-update.js    ← 遠端更新 + 批次更新 (~500行)
+```
+
+### 優先級 3：拆分 `api_system.py`（1028 行 → 3 個模組）
+
+```
+routers/
+├── api_system.py      ← 健康/狀態/設定/控制 (~400行)
+├── api_ota.py         ← OTA + publish + rollback + download (~400行)
+└── api_utils.py       ← open_file/pick_folder/shortcuts (~200行)
+```
+
+### 不動的部分
+
+| 檔案 | 行數 | 理由 |
+|------|------|------|
+| `core_engine.py` | 1452 | 核心引擎，邏輯內聚，拆了反而難維護 |
+| `tts_engine.py` | 676 | TTS 引擎，單一職責 |
+| `core/worker.py` | 681 | 任務消費器，內聚 |
+| `core/auth.py` | 491 | Auth 核心，剛好 |
+| `server.py` | 1727 | 遺留（build 依賴，不可刪） |
+| `Anent_MediaGuard_Pro.py` | 2559 | 遺留舊版單檔，不動 |
+| 其餘 56 個 <500 行檔案 | — | 已經健康 |
+
+### 可清理的遺留檔案
+
+| 檔案 | 行數 | 說明 |
+|------|------|------|
+| `update_monitor.py` | 60 | 已棄用（port 8001 monitor 已移除） |
+| `patch_ui.py` | 298 | 一次性 patch 腳本 |
+| `Toolbox_Preview.py` | 68 | 工具預覽腳本 |
+| `debug_compare.py` | 35 | 除錯用 |
+| `remove_all_emojis.py` | 31 | 一次性工具 |
+| `backup_source.py` | 24 | 一次性工具 |
+
+### 實際完成結果
+
+| 指標 | 重構前 | 重構後 |
+|------|--------|--------|
+| `app.js` | 3499 行 | **1951 行** + 10 個模組 (72-250行/個) |
+| `projects.js` | 2180 行 | **1687 行** + agent-cards (418行) + agent-update (140行) |
+| `api_system.py` | 1031 行 | **332 行** + api_ota (523行) + api_utils (239行) |
+| 修改 API Key UI 需讀取 | app.js 3499 行 | `api-keys.js` 194 行 |
+| 修改 OTA 邏輯需讀取 | api_system.py 1031 行 | `api_ota.py` 523 行 |
+| 新增 CRM 模組 | 塞進 app.js | 獨立 `tabs/crm/` + `routers/api_crm.py` |
+
+### 新增的模組檔案
+
+```
+frontend/js/
+├── shared/modal-styles.js   (160行) — Modal 樣式 + 表單建立器
+├── auth/auth-state.js       (174行) — Auth 狀態 + 登出 + RBAC
+├── auth/login-modal.js       (88行) — 登入 Modal + fetch 攔截
+├── auth/google-oauth.js      (72行) — Google OAuth
+├── admin/user-mgmt.js       (250行) — 使用者管理 Tab Modal
+├── admin/role-mgmt.js       (157行) — 角色管理
+├── admin/api-keys.js        (194行) — API Key CRUD
+├── update/version-check.js  (173行) — 版本偵測 + badge
+├── update/update-modal.js   (212行) — 更新 Modal + migration
+└── settings/settings-modal.js(114行) — 通知設定
+
+frontend/tabs/projects/
+├── agent-cards.js           (418行) — Agent 機器卡片 + 狀態輪詢
+└── agent-update.js          (140行) — 遠端更新 + 批次更新
+
+routers/
+├── api_ota.py               (523行) — OTA + publish + download
+└── api_utils.py             (239行) — 檔案工具端點
+```
+
+### 做完後你看到的改變
+
+- AI 每次修改只需讀 1-2 個 200-500 行的檔案，不再讀 3000 行找 20 行
+- 重複工具函式已消除（`_isNewer`, `_text` 統一 export/import）
+- CRM 模組有自己的目錄，不會跟現有功能打架
 
 ---
 
@@ -139,9 +286,9 @@
 
 - [x] PostgreSQL 16 on QNAP NAS (192.168.1.132) via Docker Container Station
 - [x] SQLAlchemy 2.0 async + asyncpg driver
-- [x] 5 張表：`job_history`, `agents`, `bookmarks`, `scheduled_jobs`, `reports`
+- [x] 7 張表：`job_history`, `agents`, `bookmarks`, `scheduled_jobs`, `reports`, `users`, `roles`
 - [x] 遷移 `job_history.json` → DB（移除 200 筆上限）
-- [x] 遷移 `agents.json` → DB（取代 NAS SMB 共享）
+- [x] 遷移 `agents.json` → DB（`routers/api_agents.py` DB-first + NAS JSON fallback，啟動時自動 NAS→DB 遷移）
 - [x] 遷移 `bookmarks.json` → DB（加 machine_id 跨機可見）
 - [x] 遷移 `scheduled_jobs.json` → DB（集中管理排程）
 - [x] 遷移 `reports_index.json` → DB（消除 local+NAS 雙寫）
@@ -150,11 +297,12 @@
 - [x] 60 秒 health monitor 自動重連
 - [x] `machine_id` 自動填入 hostname
 - [x] 降級測試通過（DB 停→JSON fallback→DB 恢復→自動重連）
+- [x] 啟動時自動 seed 預設角色 + 遷移舊使用者到 RBAC role_id
 
 ### 做完後你看到的改變
 
 - 任務歷史不再有 200 筆上限
-- 所有 Agent 共用同一份機器清單、書籤、排程
+- 所有 Agent 共用同一份機器清單、書籤、排程、使用者帳號
 - NAS PostgreSQL 停掉→系統自動降級回 JSON，不中斷服務
 
 ---
@@ -192,12 +340,18 @@
 ## Phase F-lite：基礎監控
 
 **優先等級**：🟠 高 — 多機環境需要可觀測性
+**狀態**：🟡 部分完成
 
-### 要建置的東西
+### 已完成
 
-- [ ] Agent 健康度面板（在線/離線/負載）
+- [x] Agent 健康度面板（`publish.html` Connected Agents card：在線/離線/busy + 版本號）
+- [x] 主 UI 機器狀態即時監控（綠燈脈衝/紅燈/橘燈 + CPU 顯示）
+
+### 尚需完成
+
 - [ ] 任務失敗率統計（成功率、平均處理時間）
 - [ ] 告警通知整合（已有 `notifier.py`，擴充至 Agent 異常告警）
+- [ ] 獨立監控儀表板頁面（整合到主 UI）
 
 ### 做完後你看到的改變
 
@@ -208,24 +362,40 @@
 
 ## Phase A：Auth + 角色權限
 
-**優先等級**：🟠 高 — CRM 模組的前提（敏感資料保護）
+**狀態**：✅ 全部完成
 
-### 要建置的東西
+### 已建置
 
-- [x] JWT Token 登入端點（`POST /auth/login`）
-- [x] 角色權限（admin / producer / editor / cameraman / assistant / viewer）+ RBAC 模組級守衛
-- [x] FastAPI Middleware：全域攔截，依角色控管 API 存取
+- [x] JWT Token 登入端點（`POST /api/v1/auth/login`）
+- [x] 六角色 RBAC（admin / producer / editor / cameraman / assistant / viewer）+ 模組級守衛
+- [x] FastAPI Middleware：`_check_admin()` 容錯包裝（auth 模組不存在時不 crash）
 - [x] 前端：登入頁 + 權限控管（不同角色看到不同頁籤）
-- [x] Google OAuth 登入（GIS Credential 模式，自動建立/連結帳號）
-- [x] 使用者管理 UI（美化 Modal + 角色切換即時更新 + Google 頭像）
+- [x] Google OAuth 登入（GIS Credential 模式，自動建立/連結帳號，`core/google_auth.py`）
+- [x] 使用者管理 UI（美化 Modal + 角色切換即時更新模組 tags + Google 頭像）
 - [x] 角色管理 UI（新增角色 Modal + 權限等級 + 模組 checkbox）
-- [ ] API Key 管理機制（供 OpenClaw 等外部系統使用）
+- [x] DB 使用者表擴充（`google_id`, `email`, `avatar_url` 欄位，啟動時自動 migrate）
+
+- [x] API Key 管理機制 — `X-API-Key` header + SHA-256 hash + rate limit + JSON fallback
+  - `core/auth.py`：`_extract_token()` 支援 JWT + API Key 雙通道
+  - `routers/api_api_keys.py`：CRUD 端點（建立/列出/改名/停用/啟用/刪除）
+  - `db/models.py`：`ApiKey` ORM model
+  - 前端：Tab 分頁式使用者管理 Modal（使用者 / API Keys 分頁切換）
+  - 安全：rate limit（10 次/5 分鐘）、刪除使用者連帶撤銷 keys
+- [x] Google OAuth 重複建立帳號 bug 修復
+  - `_find_user_by()` DB 查無結果時改為 fallback 到 JSON（不再直接 return None）
+  - DB `password_hash` 改為 nullable（Google-only 使用者無密碼）
+- [x] UI 優化：Tab 分頁式使用者管理 Modal（使用者 / API Keys 切換）
+- [x] 「系統設定」→「通知設定」改名 + 移至下拉選單（無需登入即可存取）
+- [x] 「重新啟動 Agent」從設定 Modal 移至下拉選單（與通知設定同層級，無需登入）
 
 ### 做完後你看到的改變
 
-- 沒登入的人打開網頁 → 跳到登入頁面
-- 人資/財務頁籤只有 admin/manager 看得到
-- OpenClaw 或外部系統呼叫 API 時需帶 API Key
+- ✅ 沒登入的人打開網頁 → 跳到登入頁面
+- ✅ 不同角色看到不同頁籤（模組級控管）
+- ✅ 可用 Google 帳號一鍵登入
+- ✅ OpenClaw 或外部系統呼叫 API 時帶 `X-API-Key: osk_xxx` 即可認證
+- ✅ 使用者管理 Tab 分頁：使用者列表 / API Keys 分開顯示，更整潔
+- ✅ 通知設定和重新啟動 Agent 不需登入就能用（下拉選單）
 
 ---
 
@@ -333,31 +503,36 @@ tools:
 ## 完整時序
 
 ```
-現在 (v1.9.10)
+已完成
     │
-    ▼ Phase H: 語音生成 (✅ 全部完成)
+    ▼ Phase H: 語音生成 (✅)
     │   → Edge-TTS + F5-TTS + 台灣正音引擎 + 佇列整合 + GPU 推理
     │
-    ▼ Phase I: 備份可靠性 + 工作流效率 (✅ 全部完成)
+    ▼ Phase I: 備份可靠性 + 工作流效率 (✅)
     │   → 磁碟預檢 + 中斷點續傳 + 排程 + 書籤 + 歷史搜尋 + Log 查看 + NAS Log
     │
-    ▼ Phase B: PostgreSQL 集中資料庫 (✅ 全部完成)
-    │   → QNAP Docker + 5 張表 + DB 優先 JSON fallback + 自動重連
+    ▼ Phase B: PostgreSQL 集中資料庫 (✅)
+    │   → QNAP Docker + 7 張表 + DB 優先 JSON fallback + 自動重連 + RBAC seed
     │
-    ▼ Phase K: 遠端 Agent 管理 (✅ 全部完成)
-    │   → 版本顯示 + OTA 6 層防護 + 一鍵遠端更新 + 進度監控 + 批次更新
+    ▼ Phase K: 遠端 Agent 管理 + OTA (✅)
+    │   → 7 階段 OTA + 4 層套件防線 + publish.html + 遠端更新 + 回滾
+    │
+    ▼ Phase A: Auth + 角色權限 (✅)
+    │   → JWT + Google OAuth + 六角色 RBAC + 使用者/角色管理 UI + API Key 管理
+    │
+現在 (v1.10.20) ← 你在這裡
+    │
+    ▼ Phase 0: 程式碼重構 (✅)
+    │   → app.js 3499→1951+10模組 / projects.js 2180→1687+2模組 / api_system.py 1031→332+2router
+    │
+    ▼ Phase J: CRM / 專案管理模組 (⬜ 下一步)
+    │   → 專案資源 → 人資 → 財務 → Notion 同步
     │
     ▼ Phase L: 行動端適配 (🟡 部分完成)
     │   → ✅ 報表手機版 RWD → 待做：主 UI RWD → 觸控優化
     │
     ▼ Phase G: 多機多專案
     │   → DB-backed 佇列 → 負載分派 → 容錯重派
-    │
-    ▼ Phase A: Auth + 角色權限
-    │   → JWT → 角色控管 → CRM 的前提
-    │
-    ▼ Phase J: CRM / 專案管理模組
-    │   → 專案資源 → 人資 → 財務 → Notion 同步
     │
     ▼ Phase F-lite: 基礎監控
     │   → Agent 健康度 → 失敗率 → 告警
@@ -375,4 +550,20 @@ tools:
         → 集中 Log + 營運儀表板
 ```
 
-**下一步**：Phase A（Auth + 角色權限）→ Phase J（專案管理 / 影片前置作業系統）。
+**下一步**：Phase J（CRM 模組）。
+
+---
+
+## 版本歷程摘要
+
+| 版本 | 日期 | 重點 |
+|------|------|------|
+| v1.10.22 | 2026-03-27 | 分散式補轉 3 層 fallback + 進度條錯誤面板 + PDF 分頁優化 + 膠卷手機版滑動修復 |
+| v1.10.22 | 2026-03-27 | Cloudflare 外網支援 + NAS 瀏覽器 + 分散式補轉 3 層 fallback + 進度條錯誤面板 + PDF 分頁優化 |
+| v1.10.21 | 2026-03-26 | Phase 0 完成：app.js 拆 10 模組 + projects.js 拆 3 + api_system.py 拆 3 router |
+| v1.10.20 | 2026-03-26 | Phase A 完成：API Key CRUD + Tab 分頁式使用者管理 UI + Google OAuth 重複帳號 bug 修復 |
+| v1.10.19 | 2026-03-26 | `control/update` 移除 JWT 限制，版本 badge 更新終於能用 |
+| v1.10.18 | 2026-03-26 | 本機更新 Modal 步驟動畫，移除 port 8001 monitor 依賴 |
+| v1.10.17 | 2026-03-26 | OTA 簡化：detached BAT + `update_status.json` 端點 |
+| v1.10.16 | 2026-03-26 | Agent DB 同步 + `trigger_agent_update` 修正 |
+| v1.10.12 | 2026-03-26 | OTA 強化：動態 preflight + 自動 requirements + publish 安全 |

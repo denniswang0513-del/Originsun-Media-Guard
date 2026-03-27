@@ -140,7 +140,11 @@ async def _get_all_users() -> list:
 
 
 async def _find_user_by(column_name: str, value) -> Optional[dict]:
-    """Generic: find a single user by any column (DB first, JSON fallback)."""
+    """Generic: find a single user by any column (DB first, then JSON fallback).
+
+    IMPORTANT: If DB query succeeds but returns no rows, we still check JSON
+    because Google OAuth users may exist only in JSON (not yet synced to DB).
+    """
     if value is None:
         return None
     if state.db_online:
@@ -153,18 +157,20 @@ async def _find_user_by(column_name: str, value) -> Optional[dict]:
                 async with factory() as session:
                     col = getattr(User, column_name, None)
                     if col is None:
-                        return None
-                    stmt = select(User, Role).select_from(
-                        outerjoin(User, Role, User.role_id == Role.id)
-                    ).where(col == value)
-                    row = (await session.execute(stmt)).first()
-                    if not row:
-                        return None
-                    u, r = row
-                    return _enrich_user(_user_orm_to_dict(u), r)
+                        # Column doesn't exist on the ORM model — skip DB, try JSON
+                        pass
+                    else:
+                        stmt = select(User, Role).select_from(
+                            outerjoin(User, Role, User.role_id == Role.id)
+                        ).where(col == value)
+                        row = (await session.execute(stmt)).first()
+                        if row:
+                            u, r = row
+                            return _enrich_user(_user_orm_to_dict(u), r)
+                        # DB returned no rows — fall through to JSON
         except Exception:
             pass
-    # JSON fallback
+    # JSON fallback (always checked if DB didn't find the user)
     users = load_users_json()
     roles = load_roles_json()
     role_map = {r['id']: r for r in roles}
@@ -184,7 +190,8 @@ async def _find_user(username: str) -> Optional[dict]:
 
 async def _persist_user(user_data: dict):
     """Save user to both JSON and DB (single call site for all mutations)."""
-    await _persist_user(user_data)
+    sync_user_to_json(_build_json_mirror(user_data))
+    await _save_user_to_db(user_data)
 
 
 async def _save_user_to_db(user_data: dict):
@@ -467,6 +474,14 @@ async def delete_user(username: str, request: Request):
 
     remove_user_from_json(username)
     await _delete_user_from_db(username)
+
+    # Cascade: delete all API keys belonging to this user
+    try:
+        from routers.api_api_keys import _delete_keys_by_username
+        await _delete_keys_by_username(username)
+    except Exception:
+        pass
+
     return {'status': 'ok'}
 
 

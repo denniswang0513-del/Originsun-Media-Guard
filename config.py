@@ -42,6 +42,7 @@ _DEFAULT_SETTINGS: dict = {
         "transcribe": 1,
         "report": 1,
     },
+    "browse_roots": [],  # NAS 瀏覽器允許的根目錄，例 ["S:/", "R:/", "T:/"]
     "google_oauth": {
         "enabled": False,
         "client_id": "",

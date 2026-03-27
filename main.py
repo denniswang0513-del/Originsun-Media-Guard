@@ -21,8 +21,9 @@ import core.state as state  # type: ignore
 _ROUTER_MODULES = [
     'api_auth', 'api_roles',
     'api_backup', 'api_verify', 'api_proxy', 'api_concat',
-    'api_report', 'api_transcribe', 'api_system', 'api_tts',
+    'api_report', 'api_transcribe', 'api_system', 'api_ota', 'api_utils', 'api_tts',
     'api_job_history', 'api_queue', 'api_schedules', 'api_agents',
+    'api_api_keys',
 ]
 _routers = {}
 for _mod_name in _ROUTER_MODULES:
@@ -111,6 +112,38 @@ async def _on_startup():
                             await session.commit()
                         except Exception:
                             await session.rollback()
+                    # Google-only users have no password — allow NULL
+                    try:
+                        await session.execute(text("ALTER TABLE users ALTER COLUMN password_hash DROP NOT NULL"))
+                        await session.commit()
+                    except Exception:
+                        await session.rollback()
+        except Exception:
+            pass
+    # ── DB Migration: api_keys table ──
+    if state.db_online:
+        try:
+            from db.session import get_session_factory
+            factory2 = get_session_factory()
+            if factory2:
+                from sqlalchemy import text as _text
+                async with factory2() as session:
+                    await session.execute(_text("""
+                        CREATE TABLE IF NOT EXISTS api_keys (
+                            id SERIAL PRIMARY KEY,
+                            key_hash VARCHAR(64) NOT NULL UNIQUE,
+                            key_prefix VARCHAR(12) NOT NULL,
+                            name VARCHAR(64) NOT NULL,
+                            username VARCHAR(64) NOT NULL,
+                            created_at TIMESTAMPTZ DEFAULT NOW(),
+                            expires_at TIMESTAMPTZ,
+                            last_used_at TIMESTAMPTZ,
+                            is_active BOOLEAN NOT NULL DEFAULT TRUE
+                        )
+                    """))
+                    await session.execute(_text("CREATE INDEX IF NOT EXISTS idx_ak_username ON api_keys(username)"))
+                    await session.execute(_text("CREATE INDEX IF NOT EXISTS idx_ak_active ON api_keys(is_active)"))
+                    await session.commit()
         except Exception:
             pass
     asyncio.create_task(_periodic_version_check())

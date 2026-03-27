@@ -183,7 +183,86 @@ async def generate_pdf_from_html(local_html_path: str, output_pdf_path: str) -> 
             page = await browser.new_page()
             # Wait for all resources (e.g. Base64 images) to fully load
             await page.goto(file_url, wait_until="networkidle")
-            await page.pdf(path=output_pdf_path, print_background=True, format="A4")
+            # Chromium PDF treats <table> as monolithic — convert to divs for proper pagination
+            await page.evaluate("""() => {
+                const wrapper = document.querySelector('.files-table-wrapper');
+                if (!wrapper) return;
+                const table = wrapper.querySelector('table');
+                if (!table) return;
+                wrapper.style.overflow = 'visible';
+                wrapper.style.border = 'none';
+
+                const thead = table.querySelector('thead tr');
+                const rows = Array.from(table.querySelectorAll('tbody tr'));
+                const widths = ['3%','35%','8%','10%','8%','8%','10%','18%'];
+                const container = document.createElement('div');
+
+                function makeFlex(cells, tag) {
+                    const row = document.createElement('div');
+                    const isHeader = tag === 'th';
+                    row.style.cssText = 'display:flex; align-items:center; padding:6px 0;' +
+                        (isHeader ? ' background:#f8f8f8; border-bottom:2px solid #e0e0e0; font-size:11px; font-weight:600; color:#555;' : ' border-bottom:1px solid #eee;');
+                    cells.forEach((cell, i) => {
+                        const d = document.createElement('div');
+                        d.style.cssText = 'padding:0 12px; width:' + (widths[i]||'10%') + '; flex-shrink:0; overflow:hidden;';
+                        d.innerHTML = cell.innerHTML;
+                        row.appendChild(d);
+                    });
+                    return row;
+                }
+
+                // Group: header + first data row in one unbreakable div
+                const firstGroup = document.createElement('div');
+                firstGroup.style.cssText = 'break-inside:avoid; page-break-inside:avoid;';
+                if (thead) firstGroup.appendChild(makeFlex(thead.querySelectorAll('th'), 'th'));
+
+                // Find first non-mobile data row
+                let firstDataIdx = 0;
+                for (let i = 0; i < rows.length; i++) {
+                    if (!rows[i].classList.contains('mobile-detail-row') && !rows[i].classList.contains('filmstrip-row')) {
+                        firstGroup.appendChild(makeFlex(rows[i].querySelectorAll('td'), 'td'));
+                        // Also grab its filmstrip if next row is filmstrip
+                        if (rows[i+1] && rows[i+1].classList.contains('filmstrip-row')) {
+                            const fs = document.createElement('div');
+                            fs.style.cssText = 'padding:0 12px 4px;';
+                            fs.innerHTML = rows[i+1].querySelector('td')?.innerHTML || '';
+                            firstGroup.appendChild(fs);
+                            firstDataIdx = i + 2;
+                        } else {
+                            firstDataIdx = i + 1;
+                        }
+                        break;
+                    }
+                }
+                container.appendChild(firstGroup);
+
+                // Remaining rows
+                for (let i = firstDataIdx; i < rows.length; i++) {
+                    const tr = rows[i];
+                    if (tr.classList.contains('mobile-detail-row')) continue;
+                    if (tr.classList.contains('filmstrip-row')) {
+                        const fs = document.createElement('div');
+                        fs.style.cssText = 'padding:0 12px 4px;';
+                        fs.innerHTML = tr.querySelector('td')?.innerHTML || '';
+                        container.appendChild(fs);
+                    } else {
+                        const row = makeFlex(tr.querySelectorAll('td'), 'td');
+                        row.style.cssText += ' break-inside:avoid; page-break-inside:avoid;';
+                        container.appendChild(row);
+                    }
+                }
+
+                table.replaceWith(container);
+                const toggle = wrapper.querySelector('.mobile-detail-toggle');
+                if (toggle) toggle.style.display = 'none';
+            }""")
+            await page.pdf(
+                path=output_pdf_path,
+                print_background=True,
+                format="A4",
+                landscape=True,
+                margin={"top": "10mm", "bottom": "10mm", "left": "10mm", "right": "10mm"}
+            )
             await browser.close()
         return True
     except Exception as e:

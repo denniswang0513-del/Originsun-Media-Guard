@@ -9,9 +9,15 @@ import argparse
 import json
 import os
 import re
+import shutil
 import subprocess
 import sys
 from datetime import datetime
+
+from ota_manifest import (
+    EXCLUDE_DIRS, STDLIB, LOCAL_MODULES, IMPORT_TO_PIP,
+    SERVER_ONLY_PKGS, IMPLICIT_DEPS, scan_imports,
+)
 
 VERSION_FILE = "version.json"
 MANIFEST_FILE = "update_manifest.json"
@@ -54,100 +60,86 @@ def atomic_json_write(path: str, data: dict):
 # Manifest Generator
 # ────────────────────────────────────────
 
-def generate_manifest(version: str):
-    """Scan imports, compare with requirements, write update_manifest.json."""
-    base = os.path.dirname(os.path.abspath(__file__))
 
-    # Read known packages from requirements files
-    known_pkgs = set()
+def read_requirements(base_dir: str) -> set:
+    """Read known pip package names from requirements files."""
+    known = set()
     for req_name in ["0225_requirements.txt", "requirements_agent.txt"]:
-        req_file = os.path.join(base, req_name)
+        req_file = os.path.join(base_dir, req_name)
         if os.path.exists(req_file):
             for line in open(req_file, encoding="utf-8"):
                 line = line.strip()
                 if line and not line.startswith("#"):
-                    known_pkgs.add(re.split(r"[>=<\[]", line)[0].strip().lower())
+                    known.add(re.split(r"[>=<\[]", line)[0].strip().lower())
+    return known
 
-    # Scan all .py imports
-    imported = set()
-    exclude = {".venv", "venv", "node_modules", ".git", "tests", "__pycache__",
-               "python_embed", "_rollback", ".claude"}
-    for root, dirs, files in os.walk(base):
-        dirs[:] = [d for d in dirs if d not in exclude]
-        for f in files:
-            if not f.endswith(".py"):
-                continue
-            try:
-                content = open(os.path.join(root, f), encoding="utf-8", errors="ignore").read()
-                for m in re.findall(r"^\s*(?:from|import)\s+([\w.]+)", content, re.MULTILINE):
-                    imported.add(m.split(".")[0].lower())
-            except Exception:
-                pass
 
-    # Stdlib + local modules
-    stdlib = {
-        "os", "sys", "json", "time", "re", "io", "math", "random", "uuid", "datetime",
-        "pathlib", "collections", "functools", "itertools", "typing", "enum", "dataclasses",
-        "abc", "subprocess", "shutil", "tempfile", "zipfile", "hashlib", "socket", "signal",
-        "threading", "asyncio", "concurrent", "http", "urllib", "email", "html", "xml",
-        "logging", "warnings", "traceback", "inspect", "importlib", "pkgutil", "copy",
-        "struct", "base64", "hmac", "secrets", "contextlib", "textwrap", "string",
-        "argparse", "configparser", "csv", "sqlite3", "platform", "ctypes", "glob",
-        "fnmatch", "stat", "mimetypes", "webbrowser", "multiprocessing", "filecmp", "gc",
-        "locale", "queue", "tkinter", "codecs", "operator", "fractions", "decimal",
-        "heapq", "bisect", "array", "weakref", "types", "numbers", "cmath", "pprint",
-        "dis", "token", "tokenize", "site", "pip", "distutils", "unittest", "doctest",
-        "venv", "ensurepip",
-    }
-    import_to_pip = {
-        "pil": "Pillow", "cv2": "opencv-python", "sklearn": "scikit-learn",
-        "socketio": "python-socketio", "google": "google-api-python-client",
-        "googleapiclient": "google-api-python-client",
-        "google_auth_oauthlib": "google-auth-oauthlib",
-        "sqlalchemy": "sqlalchemy[asyncio]",
-        "starlette": "",  # bundled with fastapi
-        "pydub": "pydub", "huggingface_hub": "huggingface-hub",
-        "edge_tts": "edge-tts", "f5_tts": "f5-tts",
-        "faster_whisper": "faster-whisper",
-        "tkinterdnd2": "",  # optional
-    }
-    local_modules = {
-        "core", "routers", "utils", "db", "frontend", "templates", "windows_helper",
-        "core_engine", "tts_engine", "transcriber", "notifier", "config",
-        "report_generator", "drive_sync", "download_model", "bootstrap",
-        "server", "main", "update_monitor", "build_agent_zip", "publish_update",
-        "update_agent", "preflight", "ota_manifest",
-    }
-
+def resolve_new_deps(imported: set, known_pkgs: set) -> list:
+    """Resolve import names to pip packages, return list of NEW deps not in requirements."""
     new_deps = []
-    for pkg in imported - stdlib - local_modules:
-        if pkg in import_to_pip:
-            pip_name = import_to_pip[pkg]
+    for pkg in imported - STDLIB - LOCAL_MODULES:
+        if pkg in IMPORT_TO_PIP:
+            pip_name = IMPORT_TO_PIP[pkg]
             if not pip_name:
                 continue
-            if pip_name.lower() not in known_pkgs:
+            if pip_name.lower() not in known_pkgs and pip_name.split("[")[0].lower() not in known_pkgs:
                 new_deps.append(pip_name)
         elif pkg not in known_pkgs:
             new_deps.append(pkg)
 
-    # Implicit deps
-    implicit_deps = {"sqlalchemy[asyncio]": ["asyncpg"]}
+    # Add implicit deps
     for pkg in list(new_deps):
-        for trigger, extras in implicit_deps.items():
+        for trigger, extras in IMPLICIT_DEPS.items():
             if pkg == trigger:
                 new_deps.extend(e for e in extras if e not in new_deps)
 
+    # Filter out server-only packages
+    new_deps = [d for d in new_deps if d.lower() not in SERVER_ONLY_PKGS]
+
+    return sorted(set(new_deps))
+
+
+def generate_manifest(version: str) -> list:
+    """Scan imports, auto-update requirements_agent.txt, write manifest. Returns new deps."""
+    base = os.path.dirname(os.path.abspath(__file__))
+    imported = scan_imports(base)
+    known_pkgs = read_requirements(base)
+    new_deps = resolve_new_deps(imported, known_pkgs)
+
+    # ── Auto-append new deps to requirements_agent.txt ──
+    if new_deps:
+        req_path = os.path.join(base, "requirements_agent.txt")
+        existing_lower = set()
+        if os.path.exists(req_path):
+            for line in open(req_path, encoding="utf-8"):
+                pkg = re.split(r"[>=<\[]", line.strip())[0].strip().lower()
+                if pkg:
+                    existing_lower.add(pkg)
+
+        actually_new = [d for d in new_deps if d.split("[")[0].lower() not in existing_lower]
+        if actually_new:
+            with open(req_path, "a", encoding="utf-8") as f:
+                f.write("\n# ── Auto-detected by publish ──\n")
+                for dep in actually_new:
+                    f.write(f"{dep}\n")
+                    print(f"  [AUTO] requirements_agent.txt += {dep}")
+            # All new deps were just written — manifest should show none remaining
+            new_deps = []
+
+    # Write manifest (for update_agent.py safety net)
     manifest = {
         "version": version,
-        "pip_install": sorted(new_deps),
-        "note": "Agent 更新時自動 pip install 這些套件",
+        "pip_install": new_deps,
+        "note": "Agent OTA safety net — update_agent.py also installs these",
     }
     atomic_json_write(os.path.join(base, MANIFEST_FILE), manifest)
 
     if new_deps:
-        print(f"\n[*] {MANIFEST_FILE}: 偵測到 {len(new_deps)} 個新套件: {', '.join(sorted(new_deps))}")
+        print(f"\n[*] {MANIFEST_FILE}: {len(new_deps)} extra packages: {', '.join(new_deps)}")
     else:
-        print(f"\n[*] {MANIFEST_FILE}: 無新增套件")
+        print(f"\n[*] {MANIFEST_FILE}: all dependencies covered by requirements_agent.txt")
+
+    return new_deps
 
 
 # ────────────────────────────────────────
@@ -206,6 +198,18 @@ def main():
             raw = input("[?] 更新日誌: ").strip()
             notes = raw if raw else v_data.get("notes", "微幅更新")
 
+    # ── Backup current version for rollback ──
+    rollback_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "_publish_rollback")
+    os.makedirs(rollback_dir, exist_ok=True)
+    try:
+        shutil.copy2(VERSION_FILE, os.path.join(rollback_dir, "version.json"))
+        zip_path = "Originsun_Agent.zip"
+        if os.path.exists(zip_path):
+            shutil.copy2(zip_path, os.path.join(rollback_dir, "Originsun_Agent.zip"))
+        print(f"[OK] Rollback backup saved to {rollback_dir}")
+    except Exception as e:
+        print(f"[WARN] Rollback backup failed: {e}")
+
     # Write version.json (atomic)
     v_data["version"] = new_version
     v_data["build_date"] = datetime.now().strftime("%Y-%m-%d")
@@ -213,8 +217,28 @@ def main():
     atomic_json_write(VERSION_FILE, v_data)
     print(f"\n[OK] 已更新 {VERSION_FILE} (v{new_version})")
 
-    # Generate manifest
+    # Generate manifest + auto-update requirements
     generate_manifest(new_version)
+
+    # ── Server-side preflight: catch broken imports BEFORE packaging ──
+    print("\n[*] 執行發布前健康檢查 (preflight)...")
+    preflight_script = os.path.join(os.path.dirname(os.path.abspath(__file__)), "preflight.py")
+    if os.path.exists(preflight_script):
+        pf_result = subprocess.run(
+            [sys.executable, preflight_script],
+            capture_output=True, text=True, timeout=30,
+        )
+        if pf_result.returncode != 0:
+            print(f"\n[ERROR] Preflight 失敗！不允許發布壞版本：")
+            print(pf_result.stdout)
+            # Rollback version.json
+            v_data["version"] = current_version
+            atomic_json_write(VERSION_FILE, v_data)
+            print(f"[*] 已回滾 {VERSION_FILE} 至 v{current_version}")
+            return 1
+        print("[OK] Preflight 通過")
+    else:
+        print("[WARN] preflight.py 不存在，跳過健康檢查")
 
     # Build ZIP
     print("\n[*] 開始編譯並打包 ZIP...")

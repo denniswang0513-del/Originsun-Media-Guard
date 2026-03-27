@@ -132,3 +132,23 @@ class User(Base):
     google_id = Column(String(255), unique=True, nullable=True, index=True)
     email = Column(String(255), nullable=True)
     avatar_url = Column(String(512), nullable=True)
+
+
+class ApiKey(Base):
+    """API Key for programmatic access (OpenClaw, scripts, CI/CD)."""
+    __tablename__ = "api_keys"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    key_hash = Column(String(64), unique=True, nullable=False, index=True)  # SHA-256 hex
+    key_prefix = Column(String(12), nullable=False)        # "osk_a1b2" 前幾字元，列表辨識用
+    name = Column(String(64), nullable=False)              # 使用者命名（如 "OpenClaw"）
+    username = Column(String(64), nullable=False)          # 所屬使用者
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    expires_at = Column(DateTime(timezone=True), nullable=True)  # null = 永不過期
+    last_used_at = Column(DateTime(timezone=True), nullable=True)
+    is_active = Column(Boolean, default=True, nullable=False)
+
+    __table_args__ = (
+        Index("idx_ak_username", "username"),
+        Index("idx_ak_active", "is_active"),
+    )

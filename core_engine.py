@@ -849,7 +849,7 @@ class MediaGuardEngine:
 
         total = len(files)
         if total == 0:
-            self.log("[Engine] 未找到任何支援的影片檔可轉檔。")
+            self.err("[Engine] 未找到任何支援的影片檔可轉檔。")
             return
 
         # 計算來源總容量
@@ -991,7 +991,7 @@ class MediaGuardEngine:
                             files.append(os.path.join(root, fname))
 
         if not files:
-            self.log("[Engine] 未找到任何支援的影片檔可串帶。")
+            self.err("[Engine] 未找到任何支援的影片檔可串帶。")
             return
 
         # [v1.0.179] 強制全局預先排序 (Global Array Serialization)

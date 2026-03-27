@@ -75,11 +75,27 @@ export function appendLog(msg, type = 'info') {
 }
 
 export async function pickPath(inputId, type = 'folder') {
+    const el = document.getElementById(inputId);
+    if (!el) return;
+
+    // External access → use NAS browser modal instead of Windows picker
+    if (window._isExternalAccess && typeof window.openNasBrowser === 'function') {
+        const path = await window.openNasBrowser({
+            title: type === 'folder' ? '選擇目錄' : '選擇檔案',
+            initialPath: el.value || '',
+            mode: type,
+            showFiles: type === 'file'
+        });
+        if (path) {
+            el.value = path;
+            _autoFillCardName(el, inputId, path);
+        }
+        return;
+    }
+
+    // LAN access → original Windows picker
     try {
         const endpoint = getAgentBaseUrl() + (type === 'folder' ? '/api/v1/utils/pick_folder' : '/api/v1/utils/pick_file');
-        const el = document.getElementById(inputId);
-        if (!el) return;
-        
         el.classList.add('animate-pulse', 'bg-blue-900', 'text-white');
         const res = await fetch(endpoint);
         const data = await res.json();
@@ -87,19 +103,23 @@ export async function pickPath(inputId, type = 'folder') {
 
         if (data.path) {
             el.value = data.path;
-            if (inputId.startsWith('src_path_')) {
-                const row = el.closest('.flex');
-                const nameInput = row.querySelectorAll('input')[0];
-                if (!nameInput.value.trim() || nameInput.value.startsWith('Card_')) {
-                    const parts = data.path.replace(/\\/g, '/').split('/');
-                    nameInput.value = parts[parts.length - 1] || nameInput.value;
-                }
-            }
+            _autoFillCardName(el, inputId, data.path);
         }
     } catch (e) {
         console.error("Picker failed:", e);
-        const el = document.getElementById(inputId);
-        if(el) el.classList.remove('animate-pulse', 'bg-blue-900', 'text-white');
+        el.classList.remove('animate-pulse', 'bg-blue-900', 'text-white');
+    }
+}
+
+function _autoFillCardName(el, inputId, path) {
+    if (inputId.startsWith('src_path_')) {
+        const row = el.closest('.flex');
+        if (!row) return;
+        const nameInput = row.querySelectorAll('input')[0];
+        if (nameInput && (!nameInput.value.trim() || nameInput.value.startsWith('Card_'))) {
+            const parts = path.replace(/\\/g, '/').split('/');
+            nameInput.value = parts[parts.length - 1] || nameInput.value;
+        }
     }
 }
 
