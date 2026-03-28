@@ -102,6 +102,7 @@
 .crm-col-status  { flex: 1; }
 .crm-col-am      { flex: 1.2; }
 .crm-col-contact { flex: 1; text-align: right; }
+.crm-col-actions { width: 120px; flex-shrink: 0; }
 
 #crm-list-body {
   flex: 1;
@@ -124,6 +125,8 @@
 .crm-row-status { flex: 1; }
 .crm-row-am { flex: 1.2; display: flex; align-items: center; gap: 6px; color: #9ca3af; font-size: 12px; }
 .crm-row-contact { flex: 1; text-align: right; color: #6b7280; font-size: 12px; }
+.crm-row-actions { width: 120px; flex-shrink: 0; display: flex; gap: 4px; justify-content: flex-end; opacity: 0; transition: opacity 0.15s; }
+.crm-row:hover .crm-row-actions { opacity: 1; }
 
 .crm-avatar {
   width: 22px; height: 22px; border-radius: 50%;
@@ -203,6 +206,7 @@
   display: flex;
   gap: 2px;
   flex-shrink: 0;
+  margin-left: auto;
 }
 
 .crm-tab {
@@ -223,7 +227,7 @@
   display: flex;
   align-items: center;
   gap: 6px;
-  margin-left: auto;
+  margin-left: 8px;
   flex-shrink: 0;
 }
 
@@ -399,4 +403,45 @@
   background: #3b1f1f;
   border-color: #7f1d1d;
   color: #fca5a5;
+}
+
+/* ── Project badge colors ── */
+.crm-proj-badge-洽談中 { background: #3b2f1f; color: #fbbf24; }
+.crm-proj-badge-進行中 { background: #1e3a5f; color: #93c5fd; }
+.crm-proj-badge-已結案 { background: #374151; color: #9ca3af; }
+
+/* ── Project list columns ── */
+.crm-col-client { flex: 1.2; }
+.crm-col-date   { flex: 1; text-align: right; }
+.crm-row-client { flex: 1.2; color: #9ca3af; font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.crm-row-date   { flex: 1; text-align: right; color: #6b7280; font-size: 12px; }
+
+/* ── PM checkbox list ── */
+.crm-checkbox-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-height: 160px;
+  overflow-y: auto;
+  padding: 6px;
+  background: #1e1e1e;
+  border: 1px solid #3a3a3a;
+  border-radius: 6px;
+}
+.crm-checkbox-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 4px;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 12px;
+  color: #d1d5db;
+}
+.crm-checkbox-item:hover { background: #333; }
+.crm-checkbox-item input[type="checkbox"] {
+  accent-color: #3b82f6;
+  width: 14px;
+  height: 14px;
+  flex-shrink: 0;
 }

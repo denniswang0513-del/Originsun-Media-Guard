@@ -79,8 +79,8 @@ async def init_db() -> bool:
 # ── RBAC seed & migration ──
 
 _DEFAULT_ROLES = [
-    {"name": "admin",     "access_level": 3, "modules": ["backup","verify","transcode","concat","report","transcribe","tts","projects","crm"], "description": "系統管理員"},
-    {"name": "producer",  "access_level": 2, "modules": ["backup","verify","report","transcode","concat","transcribe","projects","crm"],       "description": "製片"},
+    {"name": "admin",     "access_level": 3, "modules": ["backup","verify","transcode","concat","report","transcribe","tts","projects","crm_clients","crm_projects"], "description": "系統管理員"},
+    {"name": "producer",  "access_level": 2, "modules": ["backup","verify","report","transcode","concat","transcribe","projects","crm_clients","crm_projects"],       "description": "製片"},
     {"name": "editor",    "access_level": 1, "modules": ["transcode","concat","verify","transcribe"],                                    "description": "剪輯師"},
     {"name": "cameraman", "access_level": 1, "modules": ["backup","verify","report"],                                                    "description": "攝影師"},
     {"name": "assistant", "access_level": 1, "modules": ["backup","verify"],                                                             "description": "助理"},

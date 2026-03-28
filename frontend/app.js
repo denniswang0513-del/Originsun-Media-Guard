@@ -132,17 +132,30 @@ if (typeof appendLog === 'undefined') {
                     console.warn('[TTS Tab] 載入失敗（開發中）:', ttsErr);
                 }
 
-                // Load CRM Tab
+                // Load CRM Clients Tab
                 try {
-                    const tabCrm = document.getElementById('tab_crm');
-                    const crmRes = await fetch(`./tabs/crm/crm.html${_cb}`);
-                    if (crmRes.ok) {
-                        tabCrm.innerHTML = await crmRes.text();
+                    const tabClients = document.getElementById('tab_crm_clients');
+                    const clientsRes = await fetch(`./tabs/crm/crm.html${_cb}`);
+                    if (clientsRes.ok) {
+                        tabClients.innerHTML = await clientsRes.text();
                         const crmModule = await import(`./tabs/crm/crm.js${_cb}`);
                         crmModule.initCrmTab();
                     }
-                } catch (crmErr) {
-                    console.warn('[CRM Tab] 載入失敗:', crmErr);
+                } catch (e) {
+                    console.warn('[CRM Clients Tab] 載入失敗:', e);
+                }
+
+                // Load CRM Projects Tab
+                try {
+                    const tabProjects = document.getElementById('tab_crm_projects');
+                    const projRes = await fetch(`./tabs/crm/crm-projects.html${_cb}`);
+                    if (projRes.ok) {
+                        tabProjects.innerHTML = await projRes.text();
+                        const projModule = await import(`./tabs/crm/crm-projects.js${_cb}`);
+                        projModule.initCrmProjectsTab();
+                    }
+                } catch (e) {
+                    console.warn('[CRM Projects Tab] 載入失敗:', e);
                 }
             } catch (err) {
                 console.error("Error loading tabs:", err);
@@ -1183,7 +1196,7 @@ if (typeof appendLog === 'undefined') {
             document.getElementById(tabId).classList.remove('hidden');
 
             // 重置按鈕樣式
-            const btnCols = ['btn_tab-projects', 'btn_tab_main', 'btn_tab_verify', 'btn_tab_transcode', 'btn_tab_concat', 'btn_tab_report', 'btn_tab_transcribe', 'btn_tab_tts'];
+            const btnCols = ['btn_tab-projects', 'btn_tab_main', 'btn_tab_verify', 'btn_tab_transcode', 'btn_tab_concat', 'btn_tab_report', 'btn_tab_transcribe', 'btn_tab_tts', 'btn_tab_crm_clients', 'btn_tab_crm_projects'];
             btnCols.forEach(btn => {
                 const el = document.getElementById(btn);
                 if (el) {

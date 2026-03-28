@@ -3,7 +3,7 @@
  * 功能：列表視圖 + 詳情面板 + 新增/編輯 Modal + CSV 匯入
  */
 
-const API = '/api/v1/crm';
+import { crmFetch as _fetch, esc as _esc, renderAvatar, populateUserSelect, setupResizeHandle } from './crm-utils.js';
 
 // ── State ────────────────────────────────────────────────────
 
@@ -16,22 +16,10 @@ let _csvFile = null;
 
 // ── API ──────────────────────────────────────────────────────
 
-async function _fetch(path, opts = {}) {
-    const token = localStorage.getItem('auth_token');
-    const headers = { 'Content-Type': 'application/json', ...(opts.headers || {}) };
-    if (token) headers['Authorization'] = `Bearer ${token}`;
-    const res = await fetch(API + path, { ...opts, headers });
-    if (!res.ok) {
-        const err = await res.json().catch(() => ({ detail: res.statusText }));
-        throw new Error(err.detail || '請求失敗');
-    }
-    return res.json();
-}
-
 async function _fetchMultipart(path, formData) {
     const token = localStorage.getItem('auth_token');
     const headers = token ? { 'Authorization': `Bearer ${token}` } : {};
-    const res = await fetch(API + path, { method: 'POST', headers, body: formData });
+    const res = await fetch('/api/v1/crm' + path, { method: 'POST', headers, body: formData });
     if (!res.ok) {
         const err = await res.json().catch(() => ({ detail: res.statusText }));
         throw new Error(err.detail || '匯入失敗');
@@ -77,17 +65,7 @@ function _badge(status) {
 }
 
 function _avatar(username, size = 22) {
-    const user = _users.find(u => u.username === username);
-    const initials = _esc((username || '?').substring(0, 1).toUpperCase());
-    if (user?.avatar_url) {
-        return `<div class="crm-avatar" style="width:${size}px;height:${size}px;">
-            <img src="${_esc(user.avatar_url)}" alt="${_esc(username)}">
-        </div>`;
-    }
-    const colors = ['#3b82f6','#8b5cf6','#ec4899','#f59e0b','#10b981'];
-    const code = (username || '').charCodeAt(0);
-    const color = colors[Number.isFinite(code) ? code % colors.length : 0];
-    return `<div class="crm-avatar" style="width:${size}px;height:${size}px;background:${color};">${initials}</div>`;
+    return renderAvatar(username, _users, size);
 }
 
 function renderList() {
@@ -107,16 +85,20 @@ function renderList() {
                 ${c.am_username ? _avatar(c.am_username) + _esc(c.am_username) : '<span class="crm-muted">—</span>'}
             </div>
             <div class="crm-row-contact">${c.updated_at ? c.updated_at.substring(0,10) : '—'}</div>
+            <div class="crm-row-actions" onclick="event.stopPropagation()">
+                <button class="crm-btn crm-btn-secondary crm-btn-sm" onclick="window._crmEditClient('${c.id}')">編輯</button>
+                <button class="crm-btn crm-btn-danger crm-btn-sm" onclick="window._crmDeleteClient('${c.id}')">刪除</button>
+            </div>
         </div>
     `).join('');
 }
 
 function renderDetail(client) {
-    const prop = (icon, label, value, empty = '空') => {
+    const prop = (label, value, empty = '空') => {
         const isEmpty = !value;
         return `
         <div class="crm-detail-prop">
-            <div class="crm-prop-label">${icon} ${label}</div>
+            <div class="crm-prop-label">${label}</div>
             <div class="crm-prop-value${isEmpty ? ' empty' : ''}">${isEmpty ? empty : _esc(value)}</div>
         </div>`;
     };
@@ -130,37 +112,33 @@ function renderDetail(client) {
 
     // Tab 1: 客戶資訊
     document.getElementById('crm-detail-info').innerHTML = `
-        ${prop('≡', '抬頭', client.full_name)}
-        ${prop('≡', '統一編號', client.tax_id)}
-        ${prop('≡', '匯款資訊', client.payment_info)}
-        ${prop('≡', '匯款備註', client.payment_note)}
+        ${prop('抬頭', client.full_name)}
+        ${prop('統一編號', client.tax_id)}
+        ${prop('匯款資訊', client.payment_info)}
+        ${prop('匯款備註', client.payment_note)}
     `;
 
     // Tab 2: 客戶關係
     document.getElementById('crm-detail-rel').innerHTML = `
         <div class="crm-detail-prop">
-            <div class="crm-prop-label">✦ 狀態</div>
+            <div class="crm-prop-label">狀態</div>
             <div class="crm-prop-value">${_badge(client.status)}</div>
         </div>
         <div class="crm-detail-prop">
-            <div class="crm-prop-label">👤 AM</div>
+            <div class="crm-prop-label">AM</div>
             <div class="crm-prop-value">${amHtml}</div>
         </div>
-        ${prop('≡', '來源管道', client.source_channel)}
-        ${prop('≡', '聯絡人', client.contact_person ? `${client.contact_person}${client.contact_method ? ' / ' + client.contact_method : ''}` : '')}
-        ${prop('≡', '合作契機', client.cooperation_note)}
-        ${prop('≡', '備註', client.notes)}
-        ${prop('📅', '修改日期', client.updated_at ? client.updated_at.substring(0,10) : '')}
+        ${prop('來源管道', client.source_channel)}
+        ${prop('聯絡人', client.contact_person ? `${client.contact_person}${client.contact_method ? ' / ' + client.contact_method : ''}` : '')}
+        ${prop('合作契機', client.cooperation_note)}
+        ${prop('備註', client.notes)}
+        ${prop('修改日期', client.updated_at ? client.updated_at.substring(0,10) : '')}
     `;
 }
 
 /** Shared helper: populate a <select> with user options */
 function _populateSelect(elementId, placeholder) {
-    const sel = document.getElementById(elementId);
-    if (!sel) return;
-    const current = sel.value;
-    sel.innerHTML = `<option value="">${placeholder}</option>` +
-        _users.map(u => `<option value="${_esc(u.username)}"${u.username === current ? ' selected' : ''}>${_esc(u.username)}</option>`).join('');
+    populateUserSelect(elementId, _users, placeholder);
 }
 
 function _showListError(msg) {
@@ -184,8 +162,6 @@ function selectClient(id) {
     const client = _clients.find(c => c.id === id);
     if (!client) return;
     renderDetail(client);
-    document.getElementById('crm-btn-edit').onclick = () => openModal(client);
-    document.getElementById('crm-btn-delete').onclick = () => deleteClient(client);
 }
 
 function closeDetail() {
@@ -332,10 +308,6 @@ async function doImport() {
 
 // ── Utility ──────────────────────────────────────────────────
 
-function _esc(str) {
-    return String(str || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
-}
-
 // ── Init ─────────────────────────────────────────────────────
 
 export function initCrmTab() {
@@ -347,6 +319,14 @@ export function initCrmTab() {
     }
 
     window._crmSelectClient = selectClient;
+    window._crmEditClient = (id) => {
+        const client = _clients.find(c => c.id === id);
+        if (client) openModal(client);
+    };
+    window._crmDeleteClient = (id) => {
+        const client = _clients.find(c => c.id === id);
+        if (client) deleteClient(client);
+    };
 
     let _searchTimer;
     document.getElementById('crm-search').addEventListener('input', e => {
@@ -400,34 +380,7 @@ export function initCrmTab() {
         if (el) el.addEventListener('click', e => { if (e.target === el) el.style.display = 'none'; });
     }
 
-    // Drag-to-resize detail panel
-    const resizeHandle = document.getElementById('crm-resize-handle');
-    const detailPanel = document.getElementById('crm-detail-panel');
-    if (resizeHandle && detailPanel) {
-        let startX, startW;
-        resizeHandle.addEventListener('mousedown', e => {
-            e.preventDefault();
-            startX = e.clientX;
-            startW = detailPanel.offsetWidth;
-            resizeHandle.classList.add('dragging');
-            document.body.style.cursor = 'col-resize';
-            document.body.style.userSelect = 'none';
-
-            const onMove = ev => {
-                const w = startW - (ev.clientX - startX);
-                detailPanel.style.width = Math.max(320, Math.min(800, w)) + 'px';
-            };
-            const onUp = () => {
-                resizeHandle.classList.remove('dragging');
-                document.body.style.cursor = '';
-                document.body.style.userSelect = '';
-                document.removeEventListener('mousemove', onMove);
-                document.removeEventListener('mouseup', onUp);
-            };
-            document.addEventListener('mousemove', onMove);
-            document.addEventListener('mouseup', onUp);
-        });
-    }
+    setupResizeHandle('crm-resize-handle', 'crm-detail-panel');
 
     Promise.all([loadUsers(), loadClients()]);
 }

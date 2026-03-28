@@ -160,6 +160,29 @@ class Client(Base):
     )
 
 
+class CrmProject(Base):
+    """CRM 專案資料。"""
+    __tablename__ = "crm_projects"
+
+    id = Column(String(32), primary_key=True)
+    name = Column(String(255), nullable=False)
+    client_id = Column(String(32), nullable=False)              # soft FK → clients.id
+    status = Column(String(32), nullable=False, default="洽談中")  # 洽談中/進行中/已結案
+    am_username = Column(String(64), nullable=True)
+    pm_usernames = Column(JSONB, nullable=True)                  # ["user1","user2"]
+    shoot_date = Column(DateTime(timezone=True), nullable=True)
+    folder_path = Column(Text, nullable=True)
+    description = Column(Text, nullable=True)
+    notes = Column(Text, nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    __table_args__ = (
+        Index("idx_crmproj_client", "client_id"),
+        Index("idx_crmproj_status", "status"),
+    )
+
+
 class ApiKey(Base):
     """API Key for programmatic access (OpenClaw, scripts, CI/CD)."""
     __tablename__ = "api_keys"

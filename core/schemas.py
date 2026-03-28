@@ -206,3 +206,15 @@ class ClientPayload(BaseModel):
     payment_info: str = ""
     payment_note: str = ""
     notes: str = ""
+
+
+class CrmProjectPayload(BaseModel):
+    name: str
+    client_id: str
+    status: str = "洽談中"
+    am_username: Optional[str] = None
+    pm_usernames: List[str] = []
+    shoot_date: Optional[str] = None
+    folder_path: str = ""
+    description: str = ""
+    notes: str = ""

@@ -9,19 +9,25 @@ Endpoints:
   POST   /api/v1/crm/clients/import_csv   — CSV 匯入（Notion / Google Sheets 格式）
   GET    /api/v1/crm/users               — 取得可選 AM/PM 使用者列表
 """
+import asyncio
 import csv
 import io
+import os
+import shutil
 import uuid
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
+from typing import Optional
 
 from fastapi import APIRouter, HTTPException, Request, UploadFile, File, Query
+
+from config import load_settings as _load_settings
 
 import core.state as state
 
 try:
     from sqlalchemy import select, or_
     from sqlalchemy.exc import IntegrityError
-    from db.models import Client, User
+    from db.models import Client, User, CrmProject
     _HAS_DB = True
 except ImportError:
     _HAS_DB = False
@@ -56,6 +62,16 @@ def _now() -> datetime:
     return datetime.now(timezone.utc)
 
 
+def _parse_shoot_date(date_str: Optional[str]) -> Optional[datetime]:
+    if not date_str:
+        return None
+    try:
+        d = date.fromisoformat(date_str)
+        return datetime(d.year, d.month, d.day, tzinfo=timezone.utc)
+    except ValueError:
+        return None
+
+
 def _to_dict(c) -> dict:
     return {
         "id": c.id,
@@ -76,7 +92,7 @@ def _to_dict(c) -> dict:
     }
 
 
-from core.schemas import ClientPayload
+from core.schemas import ClientPayload, CrmProjectPayload
 
 
 # ── Endpoints ────────────────────────────────────────────────
@@ -270,3 +286,186 @@ async def list_crm_users():
         {"username": r[0], "avatar_url": r[1] or "", "email": r[2] or ""}
         for r in rows
     ]}
+
+
+# ── Project Helpers ─────────────────────────────────────────
+
+def _to_project_dict(p, client_short_name: str = "") -> dict:
+    return {
+        "id": p.id,
+        "name": p.name,
+        "client_id": p.client_id,
+        "client_short_name": client_short_name,
+        "status": p.status or "洽談中",
+        "am_username": p.am_username or "",
+        "pm_usernames": p.pm_usernames or [],
+        "shoot_date": p.shoot_date.isoformat() if p.shoot_date else None,
+        "folder_path": p.folder_path or "",
+        "description": p.description or "",
+        "notes": p.notes or "",
+        "created_at": p.created_at.isoformat() if p.created_at else None,
+        "updated_at": p.updated_at.isoformat() if p.updated_at else None,
+    }
+
+
+# ── Project Endpoints ───────────────────────────────────────
+
+@router.get("/projects")
+async def list_projects(
+    q: str = Query(""),
+    status: str = Query(""),
+    client_id: str = Query(""),
+    am: str = Query(""),
+):
+    _require_db()
+    factory = await _get_factory()
+
+    async with factory() as session:
+        query = (
+            select(CrmProject, Client.short_name.label("client_short_name"))
+            .outerjoin(Client, Client.id == CrmProject.client_id)
+            .order_by(CrmProject.updated_at.desc())
+        )
+        if status:
+            query = query.where(CrmProject.status == status)
+        if client_id:
+            query = query.where(CrmProject.client_id == client_id)
+        if am:
+            query = query.where(CrmProject.am_username == am)
+        if q:
+            ql = f"%{q}%"
+            query = query.where(or_(
+                CrmProject.name.ilike(ql),
+                CrmProject.description.ilike(ql),
+            ))
+        rows = (await session.execute(query)).all()
+
+    return {
+        "projects": [_to_project_dict(row[0], row[1] or "") for row in rows],
+        "total": len(rows),
+    }
+
+
+@router.post("/projects")
+async def create_project(req: CrmProjectPayload, request: Request):
+    _check_auth(request)
+    _require_db()
+    factory = await _get_factory()
+
+    now = _now()
+    shoot_dt = _parse_shoot_date(req.shoot_date)
+
+    data = req.model_dump(exclude={"shoot_date"})
+    project = CrmProject(id=uuid.uuid4().hex, shoot_date=shoot_dt,
+                         created_at=now, updated_at=now, **data)
+
+    async with factory() as session:
+        # Verify client exists
+        client = await session.get(Client, req.client_id)
+        if not client:
+            raise HTTPException(status_code=404, detail="找不到指定的客戶")
+        client_name = client.short_name
+
+        session.add(project)
+        await session.commit()
+        await session.refresh(project)
+
+    # Folder template copy (best-effort)
+    warning = ""
+    if req.folder_path:
+        try:
+            settings = _load_settings()
+            template = settings.get("project_folder_template", "")
+            if template and os.path.isdir(template) and not os.path.exists(req.folder_path):
+                await asyncio.to_thread(shutil.copytree, template, req.folder_path)
+        except Exception as e:
+            warning = f"資料夾範本複製失敗: {e}"
+
+    result = {"status": "ok", "project": _to_project_dict(project, client_name)}
+    if warning:
+        result["warning"] = warning
+    return result
+
+
+@router.get("/projects/{project_id}")
+async def get_project(project_id: str):
+    _require_db()
+    factory = await _get_factory()
+
+    async with factory() as session:
+        project = await session.get(CrmProject, project_id)
+        if not project:
+            raise HTTPException(status_code=404, detail="找不到此專案")
+        client = await session.get(Client, project.client_id)
+        client_name = client.short_name if client else ""
+
+    return _to_project_dict(project, client_name)
+
+
+@router.put("/projects/{project_id}")
+async def update_project(project_id: str, req: CrmProjectPayload, request: Request):
+    _check_auth(request)
+    _require_db()
+    factory = await _get_factory()
+
+    shoot_dt = _parse_shoot_date(req.shoot_date)
+
+    async with factory() as session:
+        project = await session.get(CrmProject, project_id)
+        if not project:
+            raise HTTPException(status_code=404, detail="找不到此專案")
+
+        # Verify client exists
+        client = await session.get(Client, req.client_id)
+        if not client:
+            raise HTTPException(status_code=404, detail="找不到指定的客戶")
+
+        for k, v in req.model_dump(exclude={"shoot_date"}).items():
+            setattr(project, k, v)
+        project.shoot_date = shoot_dt
+        project.updated_at = _now()
+        await session.commit()
+        await session.refresh(project)
+        client_name = client.short_name
+
+    return {"status": "ok", "project": _to_project_dict(project, client_name)}
+
+
+@router.delete("/projects/{project_id}")
+async def delete_project(project_id: str, request: Request):
+    _check_auth(request)
+    _require_db()
+    factory = await _get_factory()
+
+    async with factory() as session:
+        project = await session.get(CrmProject, project_id)
+        if not project:
+            raise HTTPException(status_code=404, detail="找不到此專案")
+        await session.delete(project)
+        await session.commit()
+    return {"status": "ok"}
+
+
+@router.patch("/projects/{project_id}/status")
+async def update_project_status(project_id: str, request: Request):
+    _check_auth(request)
+    _require_db()
+    factory = await _get_factory()
+
+    body = await request.json()
+    new_status = body.get("status", "")
+    if new_status not in ("洽談中", "進行中", "已結案"):
+        raise HTTPException(status_code=400, detail="無效的狀態值")
+
+    async with factory() as session:
+        project = await session.get(CrmProject, project_id)
+        if not project:
+            raise HTTPException(status_code=404, detail="找不到此專案")
+        project.status = new_status
+        project.updated_at = _now()
+        await session.commit()
+        await session.refresh(project)
+        client = await session.get(Client, project.client_id)
+        client_name = client.short_name if client else ""
+
+    return {"status": "ok", "project": _to_project_dict(project, client_name)}
