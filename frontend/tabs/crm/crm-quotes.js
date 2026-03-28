@@ -129,6 +129,7 @@ function renderDetail(q) {
         ${prop('最終報價', q.final_price !== null ? '$' + _fmtNum(q.final_price) : '')}
         ${prop('付款階段', (q.payment_stages || []).map(s => s.label + ' ' + s.pct + '%').join(' / '))}
         ${prop('備註', q.terms)}
+        ${q.status === '已簽核' ? `<div style="padding:12px 0;"><button class="crm-btn crm-btn-primary crm-btn-sm" onclick="window._quoteActivateProject('${q.project_id}')">啟動專案 (切為進行中)</button></div>` : ''}
     `;
 
     // Items tab
@@ -184,7 +185,7 @@ function closeDetail() {
 let _itemRows = [];
 
 function addItemRow(data = null) {
-    const d = data || { group_name: '', description: '', unit: '式', quantity: 1, unit_price: 0, note: '' };
+    const d = data || { group_name: '', description: '', unit: '式', quantity: 1, unit_price: 0, internal_cost: 0, note: '' };
     _itemRows.push(d);
     _renderItemRows();
 }
@@ -205,6 +206,7 @@ function _renderItemRows() {
             <input type="text" class="crm-input qi-unit" value="${_esc(it.unit)}" placeholder="單位" style="width:50px;">
             <input type="number" class="crm-input qi-qty" value="${it.quantity}" min="1" style="width:55px;text-align:right;">
             <input type="number" class="crm-input qi-price" value="${it.unit_price}" min="0" style="width:90px;text-align:right;">
+            <input type="number" class="crm-input qi-cost" value="${it.internal_cost || 0}" min="0" style="width:80px;text-align:right;" placeholder="成本">
             <span class="qi-amount">$${_fmtNum(it.quantity * it.unit_price)}</span>
             <button type="button" class="crm-btn crm-btn-danger crm-btn-sm qi-remove" onclick="window._quoteRemoveItem(${i})">&#x2715;</button>
         </div>
@@ -218,23 +220,30 @@ function _renderItemRows() {
         row.querySelector('.qi-unit').addEventListener('input', e => { _itemRows[idx].unit = e.target.value; });
         row.querySelector('.qi-qty').addEventListener('input', e => { _itemRows[idx].quantity = parseInt(e.target.value) || 0; _recalcTotals(); });
         row.querySelector('.qi-price').addEventListener('input', e => { _itemRows[idx].unit_price = parseInt(e.target.value) || 0; _recalcTotals(); });
+        row.querySelector('.qi-cost').addEventListener('input', e => { _itemRows[idx].internal_cost = parseInt(e.target.value) || 0; _recalcTotals(); });
     });
 }
 
 function _recalcTotals() {
     const subtotal = _itemRows.reduce((s, it) => s + (it.quantity * it.unit_price), 0);
+    const costTotal = _itemRows.reduce((s, it) => s + ((it.internal_cost || 0) * (it.quantity || 1)), 0);
     const discount = parseInt(document.getElementById('quote-f-discount')?.value) || 0;
     const taxRate = parseInt(document.getElementById('quote-f-tax_rate')?.value) || 0;
     const taxable = Math.max(subtotal - discount, 0);
     const taxAmount = Math.floor(taxable * taxRate / 100);
     const total = taxable + taxAmount;
+    const profitRate = subtotal > 0 ? Math.round((subtotal - costTotal) / subtotal * 100) : 0;
 
     document.getElementById('quote-calc-subtotal').textContent = '$' + _fmtNum(subtotal);
     document.getElementById('quote-calc-tax-pct').textContent = taxRate;
     document.getElementById('quote-calc-tax').textContent = '$' + _fmtNum(taxAmount);
     document.getElementById('quote-calc-total').textContent = '$' + _fmtNum(total);
 
-    // Update per-row amounts
+    const costEl = document.getElementById('quote-calc-cost');
+    if (costEl) costEl.textContent = '$' + _fmtNum(costTotal);
+    const profitEl = document.getElementById('quote-calc-profit');
+    if (profitEl) profitEl.textContent = profitRate + '%';
+
     document.querySelectorAll('.quote-item-edit-row').forEach(row => {
         const idx = parseInt(row.dataset.idx);
         const it = _itemRows[idx];
@@ -248,7 +257,51 @@ function _populateProjectSelect(selectedId) {
     const sel = document.getElementById('quote-f-project_id');
     if (!sel) return;
     sel.innerHTML = `<option value="">— 選擇專案 —</option>` +
-        _projects.map(p => `<option value="${p.id}"${p.id === selectedId ? ' selected' : ''}>${_esc(p.name)} (${_esc(p.client_short_name)})</option>`).join('');
+        _projects.map(p => `<option value="${p.id}"${p.id === selectedId ? ' selected' : ''}>${_esc(p.name)} (${_esc(p.client_short_name)})</option>`).join('') +
+        `<option value="__new__">+ 新增專案</option>`;
+}
+
+function _showInlineProjectForm() {
+    const area = document.getElementById('quote-inline-project');
+    if (!area) return;
+    area.style.display = 'block';
+    area.innerHTML = `
+        <div class="crm-form-grid" style="margin-top:8px;padding:10px;background:#1e1e1e;border-radius:6px;border:1px solid #3a3a3a;">
+            <div class="crm-field">
+                <label>專案名稱 <span class="crm-required">*</span></label>
+                <input id="quote-np-name" type="text" class="crm-input" placeholder="例：形象影片">
+            </div>
+            <div class="crm-field">
+                <label>客戶 <span class="crm-required">*</span></label>
+                <select id="quote-np-client" class="crm-input">
+                    <option value="">— 選擇客戶 —</option>
+                    ${_clients.map(c => `<option value="${c.id}">${_esc(c.short_name)}</option>`).join('')}
+                </select>
+            </div>
+            <div class="crm-field" style="display:flex;align-items:flex-end;gap:6px;">
+                <button type="button" id="quote-np-save" class="crm-btn crm-btn-primary crm-btn-sm">建立</button>
+                <button type="button" id="quote-np-cancel" class="crm-btn crm-btn-secondary crm-btn-sm">取消</button>
+            </div>
+        </div>`;
+    document.getElementById('quote-np-save').addEventListener('click', _createInlineProject);
+    document.getElementById('quote-np-cancel').addEventListener('click', () => {
+        area.style.display = 'none';
+        document.getElementById('quote-f-project_id').value = '';
+    });
+}
+
+async function _createInlineProject() {
+    const name = document.getElementById('quote-np-name').value.trim();
+    const clientId = document.getElementById('quote-np-client').value;
+    if (!name || !clientId) { alert('請填寫專案名稱和選擇客戶'); return; }
+    try {
+        const r = await _fetch('/projects', { method: 'POST', body: JSON.stringify({ name, client_id: clientId, status: '洽談中' }) });
+        _projects.push(r.project);
+        _populateProjectSelect(r.project.id);
+        document.getElementById('quote-inline-project').style.display = 'none';
+    } catch (e) {
+        alert('建立專案失敗：' + e.message);
+    }
 }
 
 function _populateTemplateSelect() {
@@ -306,7 +359,7 @@ async function openModal(quotation = null, projectId = null) {
 
 async function saveQuotation() {
     const projectId = _editingProjectId || document.getElementById('quote-f-project_id').value;
-    if (!projectId) { _showModalError('請選擇專案'); return; }
+    if (!projectId || projectId === '__new__') { _showModalError('請選擇專案'); return; }
     if (_itemRows.length === 0 || !_itemRows.some(it => it.description)) { _showModalError('請至少新增一個項目'); return; }
 
     const payload = {
@@ -321,7 +374,7 @@ async function saveQuotation() {
         items: _itemRows.filter(it => it.description).map(it => ({
             group_name: it.group_name || '', description: it.description,
             unit: it.unit || '式', quantity: it.quantity || 1,
-            unit_price: it.unit_price || 0, note: it.note || '',
+            unit_price: it.unit_price || 0, internal_cost: it.internal_cost || 0, note: it.note || '',
         })),
     };
 
@@ -336,6 +389,8 @@ async function saveQuotation() {
         }
         document.getElementById('quote-modal').style.display = 'none';
         await Promise.all([loadQuotations(), loadStats()]);
+        // Refresh project detail quotation sub-tab if open
+        if (window._projRefreshQuotes) window._projRefreshQuotes(projectId);
     } catch (e) {
         _showModalError(e.message);
     } finally {
@@ -443,6 +498,18 @@ export function initCrmQuotesTab() {
         if (q) deleteQuotation(q);
     };
     window._quoteRemoveItem = removeItemRow;
+    window._openQuoteModalForProject = (projectId) => openModal(null, projectId);
+    window._quoteActivateProject = async (projectId) => {
+        if (!confirm('確定將此專案狀態切為「進行中」？')) return;
+        try {
+            await _fetch(`/projects/${projectId}/status`, {
+                method: 'PATCH', body: JSON.stringify({ status: '進行中' })
+            });
+            alert('專案已切為進行中');
+        } catch (e) {
+            alert('操作失敗：' + e.message);
+        }
+    };
     window._quoteDeleteTemplate = _deleteTemplate;
 
     // Search + filters
@@ -472,6 +539,15 @@ export function initCrmQuotesTab() {
     // Template apply
     document.getElementById('quote-f-template').addEventListener('change', e => {
         if (e.target.value) _applyTemplate(e.target.value);
+    });
+
+    // Project select: handle "+ 新增專案"
+    document.getElementById('quote-f-project_id').addEventListener('change', e => {
+        if (e.target.value === '__new__') {
+            _showInlineProjectForm();
+        } else {
+            document.getElementById('quote-inline-project').style.display = 'none';
+        }
     });
 
     // Recalc on discount/tax change

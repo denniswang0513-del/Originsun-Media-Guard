@@ -3,8 +3,8 @@
 .crm-root {
   display: flex;
   flex-direction: column;
-  height: 100%;
-  min-height: 600px;
+  height: calc(100vh - 160px);
+  min-height: 400px;
   font-size: 14px;
 }
 
@@ -498,3 +498,16 @@
 
 /* ── Template list ── */
 .quote-template-row { padding: 10px 0; border-bottom: 1px solid #2e2e2e; }
+
+/* ── Staff badge colors ── */
+.crm-staff-badge-在職 { background: #14532d; color: #86efac; }
+.crm-staff-badge-離職 { background: #374151; color: #9ca3af; }
+.crm-staff-badge-兼職 { background: #3b2f1f; color: #fbbf24; }
+
+/* ── Staff list columns ── */
+.crm-col-role  { flex: 1; }
+.crm-col-rate  { flex: 0.7; text-align: right; }
+.crm-col-phone { flex: 1; }
+.crm-row-role  { flex: 1; color: #9ca3af; font-size: 12px; }
+.crm-row-rate  { flex: 0.7; text-align: right; color: #e0e0e0; font-size: 13px; font-weight: 600; }
+.crm-row-phone { flex: 1; color: #6b7280; font-size: 12px; }

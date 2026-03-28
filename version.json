@@ -1,5 +1,5 @@
 {
-  "version": "1.10.23",
-  "build_date": "2026-03-27",
-  "notes": "UNC auto-convert for distributed transcode + NAS browser + error panel + PDF pagination fix"
+  "version": "1.10.24",
+  "build_date": "2026-03-28",
+  "notes": "CRM quotation mgmt + project split"
 }

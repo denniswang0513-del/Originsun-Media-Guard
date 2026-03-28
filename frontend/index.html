@@ -128,6 +128,10 @@
                 class="px-5 py-3 text-sm font-semibold rounded-t-lg bg-[#1e1e1e] text-white hover:text-purple-200 hover:bg-[#252525] border border-transparent ml-1 transition-colors">
                 💰 報價管理
             </button>
+            <button onclick="switchTab('tab_crm_staff')" id="btn_tab_crm_staff"
+                class="px-5 py-3 text-sm font-semibold rounded-t-lg bg-[#1e1e1e] text-white hover:text-purple-200 hover:bg-[#252525] border border-transparent ml-1 transition-colors">
+                👥 人力資源
+            </button>
         </nav>
 
         <!-- Tab 0: Projects Overview -->
@@ -192,8 +196,13 @@
             class="tab-content hidden bg-[#2a2a2a] rounded-b-lg rounded-tr-lg border border-[#3a3a3a] shadow-sm" style="padding:0;overflow:hidden;">
         </section>
 
+        <!-- Tab 11: 人力資源 -->
+        <section id="tab_crm_staff"
+            class="tab-content hidden bg-[#2a2a2a] rounded-b-lg rounded-tr-lg border border-[#3a3a3a] shadow-sm" style="padding:0;overflow:hidden;">
+        </section>
+
         <!-- Progress Tracking -->
-        <section class="bg-[#2a2a2a] p-5 rounded-lg border border-[#3a3a3a] shadow-sm">
+        <section class="media-task-section bg-[#2a2a2a] p-5 rounded-lg border border-[#3a3a3a] shadow-sm">
             <div class="flex justify-between items-center mb-4">
                 <h2 class="text-lg font-semibold text-[#e0e0e0]">執行控制與日誌</h2>
                 <div class="flex gap-2">

@@ -1,0 +1,179 @@
+<div class="crm-root">
+<!-- Toolbar -->
+<div class="crm-toolbar">
+  <input id="staff-search" type="search" placeholder="搜尋姓名、職能..." class="crm-search-input">
+  <select id="staff-filter-role" class="crm-select">
+    <option value="">全部職能</option>
+    <option value="攝影師">攝影師</option>
+    <option value="剪輯師">剪輯師</option>
+    <option value="導演">導演</option>
+    <option value="製片">製片</option>
+    <option value="燈光">燈光</option>
+    <option value="收音">收音</option>
+    <option value="空拍">空拍</option>
+    <option value="動畫">動畫</option>
+  </select>
+  <select id="staff-filter-status" class="crm-select">
+    <option value="">全部狀態</option>
+    <option value="在職">在職</option>
+    <option value="離職">離職</option>
+    <option value="兼職">兼職</option>
+  </select>
+  <div class="crm-toolbar-right">
+    <button id="staff-btn-import" class="crm-btn crm-btn-secondary">匯入 CSV</button>
+    <button id="staff-btn-add" class="crm-btn crm-btn-primary">+ 新增人員</button>
+  </div>
+</div>
+
+<!-- Body -->
+<div class="crm-body">
+  <div class="crm-list-panel">
+    <div class="crm-list-header">
+      <span class="crm-col-name">姓名</span>
+      <span class="crm-col-role">職能</span>
+      <span class="crm-col-rate">日費</span>
+      <span class="crm-col-status">狀態</span>
+      <span class="crm-col-phone">電話</span>
+      <span class="crm-col-actions"></span>
+    </div>
+    <div id="staff-list-body">
+      <div class="crm-empty">載入中...</div>
+    </div>
+  </div>
+
+  <div class="crm-resize-handle" id="staff-resize-handle" style="display:none;"></div>
+  <div class="crm-detail-panel" id="staff-detail-panel" style="display:none;">
+    <div class="crm-detail-bar">
+      <div id="staff-detail-title" class="crm-detail-bar-title"></div>
+      <div class="crm-detail-bar-tabs" id="staff-detail-tabs">
+        <button class="crm-tab active" data-tab="info">人員資訊</button>
+        <button class="crm-tab" data-tab="projects">專案紀錄</button>
+      </div>
+      <div class="crm-detail-bar-actions">
+        <button id="staff-detail-close" class="crm-detail-close" title="關閉">&#x2715;</button>
+      </div>
+    </div>
+    <div class="crm-detail-content">
+      <div id="staff-detail-info"></div>
+      <div id="staff-detail-projects" class="hidden"></div>
+    </div>
+  </div>
+</div>
+</div>
+
+<!-- Add / Edit Staff Modal -->
+<div id="staff-modal" class="crm-modal-overlay" style="display:none;">
+  <div class="crm-modal">
+    <div class="crm-modal-header">
+      <h3 id="staff-modal-title">新增人員</h3>
+      <button onclick="document.getElementById('staff-modal').style.display='none'" class="crm-detail-close">&#x2715;</button>
+    </div>
+    <div class="crm-modal-body">
+      <div class="crm-form-section">基本資料</div>
+      <div class="crm-form-grid">
+        <div class="crm-field">
+          <label>姓名 <span class="crm-required">*</span></label>
+          <input id="staff-f-name" type="text" class="crm-input">
+        </div>
+        <div class="crm-field">
+          <label>職能</label>
+          <select id="staff-f-role" class="crm-input">
+            <option value="">—</option>
+            <option value="攝影師">攝影師</option>
+            <option value="剪輯師">剪輯師</option>
+            <option value="導演">導演</option>
+            <option value="製片">製片</option>
+            <option value="燈光">燈光</option>
+            <option value="收音">收音</option>
+            <option value="空拍">空拍</option>
+            <option value="動畫">動畫</option>
+          </select>
+        </div>
+        <div class="crm-field">
+          <label>日費</label>
+          <input id="staff-f-daily_rate" type="number" class="crm-input" min="0">
+        </div>
+        <div class="crm-field">
+          <label>時薪</label>
+          <input id="staff-f-hourly_rate" type="number" class="crm-input" min="0">
+        </div>
+        <div class="crm-field">
+          <label>電話</label>
+          <input id="staff-f-phone" type="text" class="crm-input">
+        </div>
+        <div class="crm-field">
+          <label>Email</label>
+          <input id="staff-f-email" type="email" class="crm-input">
+        </div>
+        <div class="crm-field">
+          <label>狀態</label>
+          <select id="staff-f-status" class="crm-input">
+            <option value="在職">在職</option>
+            <option value="離職">離職</option>
+            <option value="兼職">兼職</option>
+          </select>
+        </div>
+        <div class="crm-field">
+          <label>作品集</label>
+          <input id="staff-f-portfolio_url" type="url" class="crm-input" placeholder="https://...">
+        </div>
+      </div>
+
+      <div class="crm-form-section">付款資訊（勞報用）</div>
+      <div class="crm-form-grid">
+        <div class="crm-field">
+          <label>身分證字號</label>
+          <input id="staff-f-id_number" type="text" class="crm-input" maxlength="10">
+        </div>
+        <div class="crm-field crm-field-full">
+          <label>住址</label>
+          <input id="staff-f-address" type="text" class="crm-input" placeholder="戶籍地址（勞報單用）">
+        </div>
+        <div class="crm-field">
+          <label>銀行</label>
+          <input id="staff-f-bank_name" type="text" class="crm-input" placeholder="例：台北富邦(012)">
+        </div>
+        <div class="crm-field">
+          <label>帳號</label>
+          <input id="staff-f-bank_account" type="text" class="crm-input">
+        </div>
+        <div class="crm-field crm-field-full">
+          <label>備註</label>
+          <textarea id="staff-f-notes" class="crm-input crm-textarea" rows="2"></textarea>
+        </div>
+      </div>
+      <div id="staff-modal-error" class="crm-error" style="display:none;"></div>
+    </div>
+    <div class="crm-modal-footer">
+      <button onclick="document.getElementById('staff-modal').style.display='none'" class="crm-btn crm-btn-secondary">取消</button>
+      <button id="staff-btn-save" class="crm-btn crm-btn-primary">儲存</button>
+    </div>
+  </div>
+</div>
+
+<!-- CSV Import Modal -->
+<div id="staff-import-modal" class="crm-modal-overlay" style="display:none;">
+  <div class="crm-modal" style="max-width:480px;">
+    <div class="crm-modal-header">
+      <h3>匯入人員 CSV</h3>
+      <button onclick="document.getElementById('staff-import-modal').style.display='none'" class="crm-detail-close">&#x2715;</button>
+    </div>
+    <div class="crm-modal-body">
+      <p class="crm-import-hint">CSV 需包含「姓名」欄位。<br>姓名已存在則更新，否則新增。</p>
+      <div class="crm-drop-zone" id="staff-drop-zone">
+        <div class="crm-drop-icon">📂</div>
+        <div>拖曳 CSV 至此，或</div>
+        <label class="crm-btn crm-btn-secondary" style="cursor:pointer;margin-top:8px;">
+          選擇檔案
+          <input id="staff-csv-file" type="file" accept=".csv" style="display:none;">
+        </label>
+        <div id="staff-drop-filename" style="margin-top:8px;color:#9ca3af;font-size:12px;"></div>
+      </div>
+      <div id="staff-import-result" style="display:none;" class="crm-import-result"></div>
+    </div>
+    <div class="crm-modal-footer">
+      <button onclick="document.getElementById('staff-import-modal').style.display='none'" class="crm-btn crm-btn-secondary">關閉</button>
+      <button id="staff-btn-do-import" class="crm-btn crm-btn-primary" disabled>開始匯入</button>
+    </div>
+  </div>
+</div>

@@ -1,3 +1,4 @@
+<div class="crm-root">
 <!-- Stats Cards -->
 <div class="crm-toolbar" style="gap:12px;padding:14px 16px;">
   <div class="quote-stat-card">
@@ -67,6 +68,7 @@
     </div>
   </div>
 </div>
+</div>
 
 <!-- Add / Edit Quotation Modal -->
 <div id="quote-modal" class="crm-modal-overlay" style="display:none;">
@@ -78,11 +80,12 @@
     <div class="crm-modal-body">
       <div class="crm-form-section">報價資訊</div>
       <div class="crm-form-grid">
-        <div class="crm-field">
+        <div class="crm-field crm-field-full">
           <label>專案 <span class="crm-required">*</span></label>
           <select id="quote-f-project_id" class="crm-input">
             <option value="">— 選擇專案 —</option>
           </select>
+          <div id="quote-inline-project" style="display:none;"></div>
         </div>
         <div class="crm-field">
           <label>狀態</label>
@@ -125,6 +128,8 @@
         <div class="quote-total-row"><span>稅額 (<span id="quote-calc-tax-pct">5</span>%)</span><span id="quote-calc-tax">$0</span></div>
         <div class="quote-total-row total"><span>含稅總計</span><span id="quote-calc-total">$0</span></div>
         <div class="quote-total-row"><span>最終報價（手動）</span><input id="quote-f-final_price" type="number" class="crm-input" placeholder="留空=同含稅總計" style="width:150px;text-align:right;"></div>
+        <div class="quote-total-row" style="margin-top:8px;border-top:1px solid #3a3a3a;padding-top:8px;"><span>內部成本合計</span><span id="quote-calc-cost" style="color:#fbbf24;">$0</span></div>
+        <div class="quote-total-row"><span>利潤率</span><span id="quote-calc-profit" style="color:#86efac;">0%</span></div>
       </div>
 
       <div class="crm-form-section">付款與備註</div>

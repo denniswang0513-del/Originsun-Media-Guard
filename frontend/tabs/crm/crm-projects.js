@@ -137,7 +137,40 @@ function renderDetail(project) {
             <div class="crm-prop-label">PM</div>
             <div class="crm-prop-value">${pmHtml}</div>
         </div>
+        <div style="margin-top:12px;border-top:1px solid #2e2e2e;padding-top:12px;">
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
+                <span style="font-size:12px;font-weight:700;color:#6b7280;">派工人員</span>
+                <button class="crm-btn crm-btn-primary crm-btn-sm" onclick="window._projAddStaff()">+ 新增派工</button>
+            </div>
+            <div id="proj-staff-list">載入中...</div>
+        </div>
     `;
+    _loadProjectStaff(project.id);
+}
+
+async function _loadProjectStaff(projectId) {
+    const container = document.getElementById('proj-staff-list');
+    if (!container) return;
+    try {
+        const data = await _fetch('/projects/' + projectId + '/staff');
+        const staff = data.staff || [];
+        if (staff.length === 0) {
+            container.innerHTML = '<div class="crm-empty" style="padding:8px 0;">尚無派工</div>';
+            return;
+        }
+        const totalCost = staff.reduce((s, r) => s + r.cost, 0);
+        container.innerHTML = staff.map(r => `
+            <div class="quote-item-row" style="padding:6px 0;">
+                <span class="quote-item-desc">${_esc(r.staff_name)} <span class="crm-muted">${_esc(r.staff_role)}</span></span>
+                <span class="quote-item-qty">${r.days}天</span>
+                <span class="quote-item-price">$${(r.rate || 0).toLocaleString('zh-TW')}</span>
+                <span class="quote-item-amount">$${r.cost.toLocaleString('zh-TW')}</span>
+                <button class="crm-btn crm-btn-danger crm-btn-sm" style="padding:2px 6px;" onclick="window._projRemoveStaff('${r.id}','${projectId}')">&#x2715;</button>
+            </div>
+        `).join('') + `<div style="text-align:right;font-weight:700;padding:8px 0;color:#e0e0e0;">內部成本合計: $${totalCost.toLocaleString('zh-TW')}</div>`;
+    } catch (_) {
+        container.innerHTML = '<div class="crm-empty">載入失敗</div>';
+    }
 }
 
 // ── Helpers ──────────────────────────────────────────────────
@@ -208,20 +241,23 @@ async function _loadProjectQuotations(projectId) {
     try {
         const data = await _fetch(`/projects/${projectId}/quotations`);
         const quotes = data.quotations || [];
-        if (quotes.length === 0) {
-            container.innerHTML = '<div class="crm-empty">尚無報價</div>';
-            return;
+        let html = '';
+        if (quotes.length > 0) {
+            html = quotes.map(q => {
+                const price = q.final_price !== null && q.final_price !== undefined ? q.final_price : q.total;
+                const statusCls = ['草稿','已寄送','已簽核','已拒絕'].includes(q.status) ? `crm-badge crm-quote-badge-${q.status}` : 'crm-badge';
+                return `<div class="quote-item-row" style="padding:8px 0;">
+                    <span class="quote-item-desc">v${q.version}</span>
+                    <span><span class="${statusCls}">${_esc(q.status)}</span></span>
+                    <span class="quote-item-amount">$${(price || 0).toLocaleString('zh-TW')}</span>
+                    <span class="crm-muted">${q.quote_date ? q.quote_date.substring(0, 10) : ''}</span>
+                </div>`;
+            }).join('');
+        } else {
+            html = '<div class="crm-empty" style="padding:16px 0;">尚無報價</div>';
         }
-        container.innerHTML = quotes.map(q => {
-            const price = q.final_price !== null && q.final_price !== undefined ? q.final_price : q.total;
-            const statusCls = ['草稿','已寄送','已簽核','已拒絕'].includes(q.status) ? `crm-badge crm-quote-badge-${q.status}` : 'crm-badge';
-            return `<div class="quote-item-row" style="padding:8px 0;">
-                <span class="quote-item-desc">v${q.version}</span>
-                <span><span class="${statusCls}">${_esc(q.status)}</span></span>
-                <span class="quote-item-amount">$${(price || 0).toLocaleString('zh-TW')}</span>
-                <span class="crm-muted">${q.quote_date ? q.quote_date.substring(0, 10) : ''}</span>
-            </div>`;
-        }).join('');
+        html += `<div style="padding:8px 0;"><button class="crm-btn crm-btn-primary crm-btn-sm" onclick="window._projAddQuote()">+ 新增報價</button></div>`;
+        container.innerHTML = html;
     } catch (_) {
         container.innerHTML = '<div class="crm-empty">載入失敗</div>';
     }
@@ -391,6 +427,56 @@ export function initCrmProjectsTab() {
     window._projDelete = (id) => {
         const p = _projects.find(x => x.id === id);
         if (p) deleteProject(p);
+    };
+    window._projRefreshQuotes = (projectId) => {
+        if (_selectedId === projectId) _loadProjectQuotations(projectId);
+    };
+    window._projAddStaff = async () => {
+        if (!_selectedId) return;
+        let staffList = [];
+        try { staffList = (await _fetch('/staff?status=在職')).staff || []; } catch(_) {}
+        if (staffList.length === 0) { alert('請先在人力資源 Tab 新增人員'); return; }
+        const container = document.getElementById('proj-staff-list');
+        if (!container) return;
+        // Show inline form at top
+        const formId = 'proj-staff-add-form';
+        if (document.getElementById(formId)) return; // already showing
+        const formHtml = `<div id="${formId}" style="padding:8px;background:#1e1e1e;border-radius:6px;border:1px solid #3a3a3a;margin-bottom:8px;display:flex;gap:6px;align-items:center;flex-wrap:wrap;">
+            <select id="proj-staff-sel" class="crm-input" style="flex:1;min-width:120px;">
+                <option value="">— 選擇人員 —</option>
+                ${staffList.map(s => `<option value="${s.id}" data-role="${_esc(s.role)}">${_esc(s.name)} (${_esc(s.role)} $${s.daily_rate}/天)</option>`).join('')}
+            </select>
+            <input id="proj-staff-days" type="number" class="crm-input" value="1" min="1" style="width:60px;text-align:right;" placeholder="天數">
+            <button class="crm-btn crm-btn-primary crm-btn-sm" onclick="window._projConfirmStaff()">確定</button>
+            <button class="crm-btn crm-btn-secondary crm-btn-sm" onclick="document.getElementById('${formId}').remove()">取消</button>
+        </div>`;
+        container.insertAdjacentHTML('afterbegin', formHtml);
+    };
+    window._projConfirmStaff = async () => {
+        const sel = document.getElementById('proj-staff-sel');
+        const staffId = sel?.value;
+        if (!staffId) { alert('請選擇人員'); return; }
+        const role = sel.selectedOptions[0]?.dataset.role || '';
+        const days = parseInt(document.getElementById('proj-staff-days')?.value) || 1;
+        try {
+            await _fetch('/projects/' + _selectedId + '/staff', {
+                method: 'POST', body: JSON.stringify({ staff_id: staffId, role_in_project: role, days })
+            });
+            _loadProjectStaff(_selectedId);
+        } catch (e) { alert('新增失敗：' + e.message); }
+    };
+    window._projRemoveStaff = async (psId, projectId) => {
+        if (!confirm('確定移除此派工？')) return;
+        try {
+            await _fetch('/project-staff/' + psId, { method: 'DELETE' });
+            _loadProjectStaff(projectId);
+        } catch (e) { alert(e.message); }
+    };
+    window._projAddQuote = () => {
+        if (!_selectedId) return;
+        if (window._openQuoteModalForProject) {
+            window._openQuoteModalForProject(_selectedId);
+        }
     };
 
     // Search + filters

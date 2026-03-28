@@ -226,6 +226,7 @@ class QuotationItemPayload(BaseModel):
     unit: str = "式"
     quantity: int = 1
     unit_price: int = 0
+    internal_cost: int = 0
     note: str = ""
 
 
@@ -248,3 +249,27 @@ class QuotationTemplatePayload(BaseModel):
     terms: str = ""
     payment_stages: List[dict] = []
     items: List[QuotationItemPayload] = []
+
+
+class StaffPayload(BaseModel):
+    name: str
+    role: str = ""
+    daily_rate: int = 0
+    hourly_rate: int = 0
+    phone: str = ""
+    email: str = ""
+    id_number: str = ""
+    address: str = ""
+    bank_name: str = ""
+    bank_account: str = ""
+    portfolio_url: str = ""
+    status: str = "在職"
+    notes: str = ""
+
+
+class ProjectStaffPayload(BaseModel):
+    staff_id: str
+    role_in_project: str = ""
+    days: int = 1
+    rate_override: Optional[int] = None
+    notes: str = ""

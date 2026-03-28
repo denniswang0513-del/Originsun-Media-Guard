@@ -224,6 +224,7 @@ class CrmQuotationItem(Base):
     unit_price = Column(Integer, nullable=False, default=0)     # 單價（元）
     amount = Column(Integer, nullable=False, default=0)         # 小計 = quantity × unit_price
     note = Column(String(512), nullable=True)                   # 備註（如出班價說明）
+    internal_cost = Column(Integer, nullable=False, default=0)  # 內部成本（元）
 
 
 class CrmQuotationTemplate(Base):
@@ -239,6 +240,47 @@ class CrmQuotationTemplate(Base):
     items = Column(JSONB, nullable=True)                        # [{group_name, description, unit, quantity, unit_price}]
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now())
+
+
+class CrmStaff(Base):
+    """CRM 人員資料庫。"""
+    __tablename__ = "crm_staff"
+
+    id = Column(String(32), primary_key=True)
+    name = Column(String(64), nullable=False)
+    role = Column(String(64), nullable=False, default="")       # 職能（攝影師/剪輯師/導演...）
+    daily_rate = Column(Integer, nullable=False, default=0)     # 日費
+    hourly_rate = Column(Integer, nullable=False, default=0)    # 時薪
+    phone = Column(String(32), nullable=True)
+    email = Column(String(128), nullable=True)
+    id_number = Column(String(16), nullable=True)               # 身分證字號
+    address = Column(String(255), nullable=True)                # 住址（勞報用）
+    bank_name = Column(String(64), nullable=True)
+    bank_account = Column(String(32), nullable=True)
+    portfolio_url = Column(String(512), nullable=True)          # 作品集連結
+    status = Column(String(32), nullable=False, default="在職")  # 在職/離職/兼職
+    notes = Column(Text, nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    __table_args__ = (
+        Index("idx_staff_role", "role"),
+        Index("idx_staff_status", "status"),
+    )
+
+
+class CrmProjectStaff(Base):
+    """專案派工。"""
+    __tablename__ = "crm_project_staff"
+
+    id = Column(String(32), primary_key=True)
+    project_id = Column(String(32), nullable=False, index=True)
+    staff_id = Column(String(32), nullable=False, index=True)
+    role_in_project = Column(String(64), nullable=True)         # 在此專案的職務
+    days = Column(Integer, nullable=False, default=1)
+    rate_override = Column(Integer, nullable=True)              # 覆寫日費（null=用人員預設）
+    cost = Column(Integer, nullable=False, default=0)           # 費用 = days × rate
+    notes = Column(Text, nullable=True)
 
 
 class ApiKey(Base):

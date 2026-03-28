@@ -38,16 +38,23 @@ def create_agent_zip():
     print(f"  即將建立本機代理加速器安裝包: {TARGET_ZIP}")
     print("=" * 50)
 
+    write_path = TARGET_ZIP
     if os.path.exists(TARGET_ZIP):
-        os.remove(TARGET_ZIP)
-        print(f"[清除] 找到並刪除舊版 {TARGET_ZIP}")
+        try:
+            os.remove(TARGET_ZIP)
+            print(f"[清除] 找到並刪除舊版 {TARGET_ZIP}")
+        except PermissionError:
+            write_path = TARGET_ZIP + ".new"
+            if os.path.exists(write_path):
+                os.remove(write_path)
+            print(f"[注意] {TARGET_ZIP} 被鎖定，先寫入 {write_path}")
 
     print(f"\n[打包中] 開始寫入壓縮檔，請稍候 (根據 .venv 大小可能需要幾十秒)...")
 
     all_files = list(AGENT_FILES) + list(INSTALL_EXTRA_FILES)
     all_dirs = _auto_discover_dirs(set(AGENT_DIRS) | set(INSTALL_EXTRA_DIRS))
 
-    with zipfile.ZipFile(TARGET_ZIP, "w", zipfile.ZIP_DEFLATED) as zipf:
+    with zipfile.ZipFile(write_path, "w", zipfile.ZIP_DEFLATED) as zipf:
         # Individual files
         for fname in all_files:
             if os.path.exists(fname):
@@ -68,10 +75,22 @@ def create_agent_zip():
             else:
                 print(f"  ! 警告: 找不到目錄 {d}，跳過")
 
-    zip_size_mb = os.path.getsize(TARGET_ZIP) / (1024 * 1024)
+    # If wrote to temp file, replace original
+    if write_path != TARGET_ZIP:
+        try:
+            os.remove(TARGET_ZIP)
+        except PermissionError:
+            pass
+        try:
+            os.rename(write_path, TARGET_ZIP)
+        except PermissionError:
+            print(f"  [注意] 無法覆蓋 {TARGET_ZIP}，新版位於 {write_path}")
+
+    final = write_path if os.path.exists(write_path) else TARGET_ZIP
+    zip_size_mb = os.path.getsize(final) / (1024 * 1024)
     print(f"\n{'=' * 50}")
     print(f"  [OK] 打包完成！")
-    print(f"  檔案名稱: {TARGET_ZIP}")
+    print(f"  檔案名稱: {final}")
     print(f"  檔案大小: {zip_size_mb:.2f} MB")
     print(f"{'=' * 50}")
 

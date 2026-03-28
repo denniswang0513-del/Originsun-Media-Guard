@@ -27,7 +27,8 @@ import core.state as state
 try:
     from sqlalchemy import select, or_, delete
     from sqlalchemy.exc import IntegrityError
-    from db.models import Client, User, CrmProject, CrmQuotation, CrmQuotationItem, CrmQuotationTemplate
+    from db.models import (Client, User, CrmProject, CrmQuotation, CrmQuotationItem,
+                           CrmQuotationTemplate, CrmStaff, CrmProjectStaff)
     _HAS_DB = True
 except ImportError:
     _HAS_DB = False
@@ -93,7 +94,8 @@ def _to_dict(c) -> dict:
 
 
 from core.schemas import (ClientPayload, CrmProjectPayload,
-                         QuotationPayload, QuotationItemPayload, QuotationTemplatePayload)
+                         QuotationPayload, QuotationItemPayload, QuotationTemplatePayload,
+                         StaffPayload, ProjectStaffPayload)
 
 
 # ── Endpoints ────────────────────────────────────────────────
@@ -603,7 +605,7 @@ def _item_to_dict(it) -> dict:
         "sort_order": it.sort_order, "description": it.description,
         "unit": it.unit, "quantity": it.quantity,
         "unit_price": it.unit_price, "amount": it.amount,
-        "note": it.note or "",
+        "internal_cost": it.internal_cost, "note": it.note or "",
     }
 
 
@@ -630,7 +632,7 @@ async def _save_items(session, quotation_id: str, items: list):
             group_name=d.get("group_name", ""), description=d["description"],
             unit=d.get("unit", "式"), quantity=d["quantity"],
             unit_price=d["unit_price"], amount=d["amount"],
-            note=d.get("note", ""),
+            internal_cost=d.get("internal_cost", 0), note=d.get("note", ""),
         ))
     return items_data
 
@@ -882,3 +884,277 @@ async def delete_template(template_id: str, request: Request):
         await session.delete(t)
         await session.commit()
     return {"status": "ok"}
+
+
+# ── Staff Helpers ───────────────────────────────────────────
+
+def _to_staff_dict(s) -> dict:
+    return {
+        "id": s.id, "name": s.name, "role": s.role or "",
+        "daily_rate": s.daily_rate, "hourly_rate": s.hourly_rate,
+        "phone": s.phone or "", "email": s.email or "",
+        "id_number": s.id_number or "", "address": s.address or "",
+        "bank_name": s.bank_name or "",
+        "bank_account": s.bank_account or "", "portfolio_url": s.portfolio_url or "",
+        "status": s.status or "在職", "notes": s.notes or "",
+        "created_at": s.created_at.isoformat() if s.created_at else None,
+        "updated_at": s.updated_at.isoformat() if s.updated_at else None,
+    }
+
+
+# ── Staff Endpoints ─────────────────────────────────────────
+
+@router.get("/staff")
+async def list_staff(q: str = Query(""), role: str = Query(""), status: str = Query("")):
+    _require_db()
+    factory = await _get_factory()
+    async with factory() as session:
+        query = select(CrmStaff).order_by(CrmStaff.name)
+        if role:
+            query = query.where(CrmStaff.role == role)
+        if status:
+            query = query.where(CrmStaff.status == status)
+        if q:
+            ql = f"%{q}%"
+            query = query.where(or_(CrmStaff.name.ilike(ql), CrmStaff.role.ilike(ql)))
+        rows = (await session.execute(query)).scalars().all()
+    return {"staff": [_to_staff_dict(s) for s in rows], "total": len(rows)}
+
+
+@router.post("/staff")
+async def create_staff(req: StaffPayload, request: Request):
+    _check_auth(request)
+    _require_db()
+    factory = await _get_factory()
+    now = _now()
+    s = CrmStaff(id=uuid.uuid4().hex, created_at=now, updated_at=now, **req.model_dump())
+    async with factory() as session:
+        session.add(s)
+        await session.commit()
+        await session.refresh(s)
+    return {"status": "ok", "staff": _to_staff_dict(s)}
+
+
+@router.get("/staff/{staff_id}")
+async def get_staff(staff_id: str):
+    _require_db()
+    factory = await _get_factory()
+    async with factory() as session:
+        s = await session.get(CrmStaff, staff_id)
+        if not s:
+            raise HTTPException(status_code=404, detail="找不到此人員")
+    return _to_staff_dict(s)
+
+
+@router.put("/staff/{staff_id}")
+async def update_staff(staff_id: str, req: StaffPayload, request: Request):
+    _check_auth(request)
+    _require_db()
+    factory = await _get_factory()
+    async with factory() as session:
+        s = await session.get(CrmStaff, staff_id)
+        if not s:
+            raise HTTPException(status_code=404, detail="找不到此人員")
+        for k, v in req.model_dump().items():
+            setattr(s, k, v)
+        s.updated_at = _now()
+        await session.commit()
+        await session.refresh(s)
+    return {"status": "ok", "staff": _to_staff_dict(s)}
+
+
+@router.delete("/staff/{staff_id}")
+async def delete_staff(staff_id: str, request: Request):
+    _check_auth(request)
+    _require_db()
+    factory = await _get_factory()
+    async with factory() as session:
+        s = await session.get(CrmStaff, staff_id)
+        if not s:
+            raise HTTPException(status_code=404, detail="找不到此人員")
+        await session.delete(s)
+        await session.commit()
+    return {"status": "ok"}
+
+
+@router.get("/staff/{staff_id}/projects")
+async def get_staff_projects(staff_id: str):
+    """查詢人員的專案執行紀錄。"""
+    _require_db()
+    factory = await _get_factory()
+    async with factory() as session:
+        rows = (await session.execute(
+            select(CrmProjectStaff, CrmProject.name.label("project_name"),
+                   Client.short_name.label("client_name"))
+            .outerjoin(CrmProject, CrmProject.id == CrmProjectStaff.project_id)
+            .outerjoin(Client, Client.id == CrmProject.client_id)
+            .where(CrmProjectStaff.staff_id == staff_id)
+        )).all()
+    return {"projects": [{
+        "id": r[0].id, "project_id": r[0].project_id,
+        "project_name": r[1] or "", "client_name": r[2] or "",
+        "role_in_project": r[0].role_in_project or "",
+        "days": r[0].days, "cost": r[0].cost,
+        "notes": r[0].notes or "",
+    } for r in rows]}
+
+
+# ── Staff CSV Import ────────────────────────────────────────
+
+_STAFF_COL_MAP = {
+    "name":          ["姓名", "收款人", "name"],
+    "role":          ["職能", "角色", "role"],
+    "daily_rate":    ["日費", "daily_rate"],
+    "hourly_rate":   ["時薪", "hourly_rate"],
+    "phone":         ["電話", "phone"],
+    "email":         ["email", "信箱"],
+    "id_number":     ["身分證", "身份證字號", "身分證字號", "id_number"],
+    "address":       ["住址", "地址", "address"],
+    "bank_name":     ["銀行", "bank_name"],
+    "bank_account":  ["帳號", "bank_account"],
+    "portfolio_url": ["作品集", "portfolio_url"],
+    "status":        ["狀態", "status"],
+    "notes":         ["備註", "notes"],
+}
+
+
+def _map_staff_row(header_map: dict, row: dict) -> dict:
+    data = {}
+    for field, aliases in _STAFF_COL_MAP.items():
+        for alias in aliases:
+            orig = header_map.get(alias.lower())
+            if orig and row.get(orig, "").strip():
+                val = row[orig].strip()
+                data[field] = int(val) if field in ("daily_rate", "hourly_rate") and val.isdigit() else val
+                break
+    return data
+
+
+@router.post("/staff/import_csv")
+async def import_staff_csv(request: Request, file: UploadFile = File(...)):
+    _check_auth(request)
+    _require_db()
+    content = await file.read()
+    try:
+        text = content.decode("utf-8-sig")
+    except UnicodeDecodeError:
+        text = content.decode("big5", errors="replace")
+
+    reader = csv.DictReader(io.StringIO(text))
+    headers = list(reader.fieldnames or [])
+    header_map = {h.lower(): h for h in headers}
+    imported = updated = skipped = 0
+    factory = await _get_factory()
+
+    async with factory() as session:
+        existing_map = {s.name: s for s in (await session.execute(select(CrmStaff))).scalars().all()}
+        for row in reader:
+            data = _map_staff_row(header_map, row)
+            if not data.get("name"):
+                skipped += 1
+                continue
+            now = _now()
+            existing = existing_map.get(data["name"])
+            if existing:
+                for k, v in data.items():
+                    if k != "name" and v:
+                        setattr(existing, k, v)
+                existing.updated_at = now
+                updated += 1
+            else:
+                s = CrmStaff(id=uuid.uuid4().hex, created_at=now, updated_at=now, **data)
+                session.add(s)
+                existing_map[data["name"]] = s
+                imported += 1
+        await session.commit()
+    return {"status": "ok", "imported": imported, "updated": updated, "skipped": skipped}
+
+
+# ── Project Staff (派工) Endpoints ──────────────────────────
+
+@router.get("/projects/{project_id}/staff")
+async def list_project_staff(project_id: str):
+    _require_db()
+    factory = await _get_factory()
+    async with factory() as session:
+        rows = (await session.execute(
+            select(CrmProjectStaff, CrmStaff.name.label("staff_name"), CrmStaff.role.label("staff_role"),
+                   CrmStaff.daily_rate.label("default_rate"))
+            .outerjoin(CrmStaff, CrmStaff.id == CrmProjectStaff.staff_id)
+            .where(CrmProjectStaff.project_id == project_id)
+        )).all()
+    return {"staff": [{
+        "id": r[0].id, "project_id": r[0].project_id, "staff_id": r[0].staff_id,
+        "staff_name": r[1] or "", "staff_role": r[2] or "",
+        "role_in_project": r[0].role_in_project or "", "days": r[0].days,
+        "rate": r[0].rate_override if r[0].rate_override is not None else (r[3] or 0),
+        "cost": r[0].cost, "notes": r[0].notes or "",
+    } for r in rows]}
+
+
+@router.post("/projects/{project_id}/staff")
+async def add_project_staff(project_id: str, req: ProjectStaffPayload, request: Request):
+    _check_auth(request)
+    _require_db()
+    factory = await _get_factory()
+    async with factory() as session:
+        staff = await session.get(CrmStaff, req.staff_id)
+        if not staff:
+            raise HTTPException(status_code=404, detail="找不到此人員")
+        rate = req.rate_override if req.rate_override is not None else staff.daily_rate
+        cost = req.days * rate
+        ps = CrmProjectStaff(
+            id=uuid.uuid4().hex, project_id=project_id, staff_id=req.staff_id,
+            role_in_project=req.role_in_project, days=req.days,
+            rate_override=req.rate_override, cost=cost, notes=req.notes,
+        )
+        session.add(ps)
+        await session.commit()
+    return {"status": "ok", "cost": cost}
+
+
+@router.put("/project-staff/{ps_id}")
+async def update_project_staff(ps_id: str, req: ProjectStaffPayload, request: Request):
+    _check_auth(request)
+    _require_db()
+    factory = await _get_factory()
+    async with factory() as session:
+        ps = await session.get(CrmProjectStaff, ps_id)
+        if not ps:
+            raise HTTPException(status_code=404, detail="找不到此派工紀錄")
+        staff = await session.get(CrmStaff, req.staff_id)
+        rate = req.rate_override if req.rate_override is not None else (staff.daily_rate if staff else 0)
+        ps.staff_id = req.staff_id
+        ps.role_in_project = req.role_in_project
+        ps.days = req.days
+        ps.rate_override = req.rate_override
+        ps.cost = req.days * rate
+        ps.notes = req.notes
+        await session.commit()
+    return {"status": "ok", "cost": ps.cost}
+
+
+@router.delete("/project-staff/{ps_id}")
+async def delete_project_staff(ps_id: str, request: Request):
+    _check_auth(request)
+    _require_db()
+    factory = await _get_factory()
+    async with factory() as session:
+        ps = await session.get(CrmProjectStaff, ps_id)
+        if not ps:
+            raise HTTPException(status_code=404, detail="找不到此派工紀錄")
+        await session.delete(ps)
+        await session.commit()
+    return {"status": "ok"}
+
+
+@router.get("/projects/{project_id}/cost-summary")
+async def project_cost_summary(project_id: str):
+    _require_db()
+    factory = await _get_factory()
+    async with factory() as session:
+        rows = (await session.execute(
+            select(CrmProjectStaff).where(CrmProjectStaff.project_id == project_id)
+        )).scalars().all()
+    total_cost = sum(r.cost for r in rows)
+    return {"total_cost": total_cost, "staff_count": len(rows)}

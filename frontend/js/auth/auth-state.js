@@ -154,8 +154,8 @@ export function _onLoginSuccess(d) {
 // ─── RBAC Module-based Tab Visibility ─── //
 export function _applyModuleTabs() {
     const modules = window._modules;
-    const TAB_MAP = {backup:'tab_main',verify:'tab_verify',transcode:'tab_transcode',concat:'tab_concat',report:'tab_report',transcribe:'tab_transcribe',tts:'tab_tts',projects:'tab-projects',crm_clients:'tab_crm_clients',crm_projects:'tab_crm_projects',crm_quotes:'tab_crm_quotes'};
-    const NAV_MAP = {backup:'備份',verify:'比對',transcode:'Proxy',concat:'串帶',report:'報表',transcribe:'逐字',tts:'語音',projects:'專案',crm_clients:'客戶',crm_projects:'專案管理',crm_quotes:'報價'};
+    const TAB_MAP = {backup:'tab_main',verify:'tab_verify',transcode:'tab_transcode',concat:'tab_concat',report:'tab_report',transcribe:'tab_transcribe',tts:'tab_tts',projects:'tab-projects',crm_clients:'tab_crm_clients',crm_projects:'tab_crm_projects',crm_quotes:'tab_crm_quotes',crm_staff:'tab_crm_staff'};
+    const NAV_MAP = {backup:'備份',verify:'比對',transcode:'Proxy',concat:'串帶',report:'報表',transcribe:'逐字',tts:'語音',projects:'專案',crm_clients:'客戶',crm_projects:'專案管理',crm_quotes:'報價',crm_staff:'人力'};
     // 未登入（modules 為空）= 顯示全部；登入後 = 只顯示 modules 中的頁籤
     const showAll = !window._authUser || !modules || modules.length === 0;
     Object.entries(TAB_MAP).forEach(([key, id]) => {
