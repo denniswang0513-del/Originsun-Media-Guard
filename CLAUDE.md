@@ -198,14 +198,15 @@ OriginsunTranscode/
 │   ├── api_job_history.py   # 任務歷史端點（篩選 + log 查看）
 │   ├── api_agents.py        # NAS 共享機器管理 API (GET/POST/DELETE /api/v1/agents)（見 7.11）
 │   ├── api_bookmarks.py     # 書籤 CRUD API
-│   └── api_schedules.py     # 排程管理 API
+│   ├── api_schedules.py     # 排程管理 API
+│   └── api_crm.py           # CRM 客戶管理 API（見 7.15）— 客戶 CRUD + CSV 匯入 + AM 使用者列表
 │
 │  ── 【認證與權限】
 ├── core/
 │   ├── auth.py              # JWT 認證 + RBAC 權限守衛（check_admin, get_current_user, find_role_by_name）
 │   └── google_auth.py       # Google ID Token 驗證（GIS credential 模式，不需 client_secret）
 ├── db/
-│   ├── models.py            # SQLAlchemy ORM（User + Role 表，User 含 google_id/email/avatar_url）
+│   ├── models.py            # SQLAlchemy ORM（User + Role + Client 表，User 含 google_id/email/avatar_url）
 │   └── session.py           # DB 連線 + init_db() + 預設角色/使用者 seed
 │
 │  ── 【frontend/ — 靜態前端（SPA）】
@@ -247,6 +248,8 @@ OriginsunTranscode/
 │       │                    #   子頁 1：📢 標準 TTS（Edge-TTS）
 │       │                    #   子頁 2：🎙️ 聲音複製（F5-TTS）
 │       │                    #   子頁 3：📖 正音字典編輯器
+│       ├── crm/             # CRM 客戶管理頁籤
+│       │                    #   兩欄佈局（列表+詳情）+ 新增/編輯 Modal + CSV 匯入 Modal
 │       └── projects/        # 專案總覽頁籤
 │                            #   機器狀態、佇列管理、Agent 管理
 │
@@ -633,6 +636,18 @@ def _emit_sync(event: str, data: dict) -> None:
 | POST | `/api/v1/voice_profiles/{id}/cache` | 將 NAS 角色快取到本機 |
 
 
+### 7.15 CRM 客戶管理 (`routers/api_crm.py`)
+
+| 方法 | 路徑 | 說明 |
+|------|------|------|
+| GET | `/api/v1/crm/clients` | 列表（搜尋 q + 篩選 status/am） |
+| POST | `/api/v1/crm/clients` | 新增客戶 |
+| GET | `/api/v1/crm/clients/{id}` | 取得客戶詳情 |
+| PUT | `/api/v1/crm/clients/{id}` | 更新客戶 |
+| DELETE | `/api/v1/crm/clients/{id}` | 刪除客戶 |
+| POST | `/api/v1/crm/clients/import_csv` | CSV 匯入（Notion / Google Sheets 格式） |
+| GET | `/api/v1/crm/users` | 取得可選 AM/PM 使用者列表 |
+
 ### 7.9 佇列管理 (`routers/api_queue.py`)
 
 | 方法 | 路徑 | 說明 |
@@ -842,4 +857,6 @@ class ValidatePathsRequest(BaseModel):
 - [x] **機器狀態即時監控**：綠燈脈衝 / 紅燈離線 / 橘燈慢 + CPU 顯示 + 版本號
 - [x] **開機自動啟動**：Windows Startup 捷徑 + `start_hidden.vbs`
 - [x] **書籤 + 排程系統**：儲存常用設定、cron 定時排程、排程中 badge
+- [x] **CRM 客戶管理 Tab**：`routers/api_crm.py` 7 端點 + `frontend/tabs/crm/` + CSV 匯入（Notion/Google Sheets 格式）
+- [ ] **專案管理 Tab**：專案 CRUD + 客戶關聯 + AM/PM 指派 + 資料夾範本複製 + 備份 Tab 整合
 - [ ] **行動端適配**：目前 UI 針對大螢幕優化，行動端排版仍需加強

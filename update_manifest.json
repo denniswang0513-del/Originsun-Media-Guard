@@ -1,11 +1,5 @@
 {
-  "version": "1.10.5",
-  "pip_install": [
-    "__future__",
-    "asyncpg",
-    "huggingface-hub",
-    "pydub",
-    "sqlalchemy[asyncio]"
-  ],
-  "note": "Agent 更新時自動 pip install 這些套件"
+  "version": "1.10.23",
+  "pip_install": [],
+  "note": "Agent OTA safety net — update_agent.py also installs these"
 }

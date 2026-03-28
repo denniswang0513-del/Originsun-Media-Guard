@@ -131,6 +131,19 @@ if (typeof appendLog === 'undefined') {
                 } catch (ttsErr) {
                     console.warn('[TTS Tab] 載入失敗（開發中）:', ttsErr);
                 }
+
+                // Load CRM Tab
+                try {
+                    const tabCrm = document.getElementById('tab_crm');
+                    const crmRes = await fetch(`./tabs/crm/crm.html${_cb}`);
+                    if (crmRes.ok) {
+                        tabCrm.innerHTML = await crmRes.text();
+                        const crmModule = await import(`./tabs/crm/crm.js${_cb}`);
+                        crmModule.initCrmTab();
+                    }
+                } catch (crmErr) {
+                    console.warn('[CRM Tab] 載入失敗:', crmErr);
+                }
             } catch (err) {
                 console.error("Error loading tabs:", err);
             }
@@ -1493,6 +1506,34 @@ if (typeof appendLog === 'undefined') {
             }
             ctx = Object.assign({}, ctx, { hosts: reachable });
 
+            // ── 取得磁碟代號 → UNC 映射表，讓遠端主機不受磁碟掛載差異影響 ──
+            // 存放在 window 上，讓補轉邏輯也能共用同一份（避免閉包過期問題）
+            window._driveMap = {};
+            try {
+                const dmRes = await fetch('/api/v1/utils/drive_map');
+                const dmData = await dmRes.json();
+                if (dmData.status === 'ok' && dmData.mappings) {
+                    window._driveMap = dmData.mappings;
+                    const count = Object.keys(dmData.mappings).length;
+                    if (count > 0 && typeof appendLog === 'function') {
+                        appendLog('[UNC] 已載入 ' + count + ' 個磁碟映射，遠端路徑將自動轉換', 'system');
+                    }
+                }
+            } catch (_) { /* UNC conversion is best-effort */ }
+
+            function _toUnc(filePath) {
+                const map = window._driveMap;
+                if (!filePath || !map) return filePath;
+                const drive = filePath.substring(0, 2).toUpperCase(); // "T:"
+                const unc = map[drive];
+                if (unc) {
+                    return unc.replace(/\\/g, '/') + filePath.substring(2).replace(/\\/g, '/');
+                }
+                return filePath;
+            }
+            // 暴露給補轉邏輯使用
+            window._toUnc = _toUnc;
+
             // ── 掃描來源：按卡分別掃描，保留卡名 ──────────────────────────────
             // cards: [[cardName, srcPath], ...] 或 scanDir fallback
             const cardEntries = []; // [{ cardName, files: [] }]
@@ -1622,11 +1663,11 @@ if (typeof appendLog === 'undefined') {
 
                 let hostOk = false;
                 for (const cardName of cardNames) {
-                    const files = cardMap[cardName];
+                    const files = cardMap[cardName].map(_toUnc);
                     const cardSuffix = cardName ? '/' + cardName : '';
-                    const dest = ctx.proxy_root
+                    const dest = _toUnc(ctx.proxy_root
                         ? ctx.proxy_root + '/' + ctx.project_name + '/HostDispatch_' + h.name.replace(/\s+/g, '_') + cardSuffix
-                        : '';
+                        : '');
                     try {
                         if (typeof appendLog === 'function') appendLog('→ 送出 [' + (cardName || '(all)') + '] ' + files.length + ' 個給 ' + h.name, 'system');
                         const r = await fetch('http://' + h.ip + '/api/v1/jobs/transcode', {
@@ -1899,13 +1940,15 @@ if (typeof appendLog === 'undefined') {
 
                                 let requestsStarted = 0;
                                 window._activeRemoteHosts = {}; // 重置，只追蹤補轉主機
+                                const _unc = window._toUnc || (x => x);
                                 for (const dist of distributions) {
                                     for (const [cardName, srcFiles] of Object.entries(dist.byCard)) {
-                                        const destDir = proxyRoot + '/' + projName + '/HostDispatch_Retry_' + dist.host.name.replace(/\s+/g, '_') + '/' + cardName;
+                                        const destDir = _unc(proxyRoot + '/' + projName + '/HostDispatch_Retry_' + dist.host.name.replace(/\s+/g, '_') + '/' + cardName);
+                                        const uncFiles = srcFiles.map(_unc);
                                         try {
                                             const r = await fetch('http://' + dist.host.ip + '/api/v1/jobs/transcode', {
                                                 method: 'POST', headers: { 'Content-Type': 'application/json' },
-                                                body: JSON.stringify({ sources: srcFiles, dest_dir: destDir })
+                                                body: JSON.stringify({ sources: uncFiles, dest_dir: destDir })
                                             });
                                             const j = await r.json();
                                             if (typeof appendLog === 'function') appendLog(`[OK] ${dist.host.name} [${cardName}] 補轉排隊，任務 ID: ${j.job_id || '?'}`, 'system');

@@ -6,6 +6,8 @@ import os
 import re
 import subprocess
 import asyncio
+import locale
+import time
 from fastapi import APIRouter  # type: ignore
 from core.schemas import OpenFileRequest, ValidatePathsRequest  # type: ignore
 
@@ -252,7 +254,7 @@ async def browse_directory(path: str = "", show_files: bool = False):
 
     # Auto-detect roots from common drive letters if not configured
     if not roots:
-        for letter in ["S", "R", "T", "Z", "D", "E"]:
+        for letter in ["S", "R", "T", "Z", "D"]:
             drive = f"{letter}:/"
             if os.path.isdir(drive):
                 roots.append(drive)
@@ -320,3 +322,61 @@ async def browse_directory(path: str = "", show_files: bool = False):
         "entries": entries,
         "parent": os.path.dirname(path).replace("\\", "/") if path else ""
     }
+
+
+# ── Drive letter → UNC mapping (for distributed transcode) ─────────────
+_drive_map_cache: dict = {}
+_drive_map_ts: float = 0.0
+_drive_map_lock = asyncio.Lock()
+
+
+@router.get("/api/v1/utils/drive_map")
+async def get_drive_map():
+    """Return mapping of drive letters to UNC paths.
+    Used by frontend to convert paths before sending to remote agents."""
+    global _drive_map_cache, _drive_map_ts
+    now = time.time()
+    # Cache for 60 seconds
+    if _drive_map_cache and now - _drive_map_ts < 60:
+        return {"status": "ok", "mappings": _drive_map_cache}
+
+    async with _drive_map_lock:
+        # Re-check after acquiring lock (another request may have refreshed)
+        if _drive_map_cache and time.time() - _drive_map_ts < 60:
+            return {"status": "ok", "mappings": _drive_map_cache}
+
+        result = await asyncio.to_thread(_scan_drive_mappings)
+        _drive_map_cache = result
+        _drive_map_ts = time.time()
+        return {"status": "ok", "mappings": result}
+
+
+def _scan_drive_mappings() -> dict:
+    """Scan network drive letter → UNC path mappings via `net use`."""
+    sys_enc = locale.getpreferredencoding() or 'utf-8'
+    mappings: dict[str, str] = {}
+    try:
+        r = subprocess.run(
+            ['net', 'use'], capture_output=True, text=True,
+            encoding=sys_enc, errors='replace', timeout=5,
+        )
+        drives = re.findall(r'OK\s+([A-Z]:)', r.stdout)
+        # Query each drive individually for accurate share name (handles spaces)
+        for drv in drives:
+            try:
+                r2 = subprocess.run(
+                    ['net', 'use', drv], capture_output=True, text=True,
+                    encoding=sys_enc, errors='replace', timeout=3,
+                )
+                for line in r2.stdout.split('\n'):
+                    idx = line.find('\\\\')
+                    if idx >= 0:
+                        unc = line[idx:].rstrip()
+                        if unc:
+                            mappings[drv.upper()] = unc
+                        break
+            except Exception:
+                pass
+    except Exception:
+        pass
+    return mappings

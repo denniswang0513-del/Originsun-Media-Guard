@@ -14,6 +14,8 @@ import pytest
 import pytest_asyncio
 import httpx
 
+from core.auth import create_token
+
 # Ensure project root is importable
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
@@ -118,6 +120,18 @@ async def async_client(mock_engine, tmp_settings):
     transport = httpx.ASGITransport(app=io_app)
     async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
         yield client
+
+
+@pytest.fixture
+def admin_token(tmp_settings):
+    """Create a valid admin JWT token for authenticated test requests."""
+    return create_token({"sub": "admin", "role": "admin", "access_level": 3})
+
+
+@pytest.fixture
+def admin_headers(admin_token):
+    """HTTP headers with admin Bearer token."""
+    return {"Authorization": f"Bearer {admin_token}"}
 
 
 # ── 5. real_server ───────────────────────────────────────────

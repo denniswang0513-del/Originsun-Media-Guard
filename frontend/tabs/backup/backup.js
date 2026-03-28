@@ -163,18 +163,9 @@ export async function submitJob() {
             cards: payload.cards,
             do_hash: false,
             do_transcode: false,
-            concat_host_url: (() => {
-                const localHost = _selH.find(h => h.ip === 'local');
-                if (localHost) return getComputeBaseUrl();
-                const firstRemote = _selH.find(h => h.ip !== 'local');
-                return firstRemote ? 'http://' + firstRemote.ip : getComputeBaseUrl();
-            })(),
-            concat_host_name: (() => {
-                const localHost = _selH.find(h => h.ip === 'local');
-                if (localHost) return localHost.name || '本機';
-                const firstRemote = _selH.find(h => h.ip !== 'local');
-                return firstRemote ? firstRemote.name : '本機';
-            })(),
+            // 串帶永遠在主控端執行（只有主控端保證能存取 local_root 原始影片）
+            concat_host_url: '',
+            concat_host_name: '本機 (主控端)',
             // 串帶進階設定
             concat_resolution: document.getElementById('bk_cc_res')?.value || '720P',
             concat_codec: document.getElementById('bk_cc_codec')?.value || 'H.264 (NVENC)',

@@ -215,7 +215,7 @@ async def test_health_structure(async_client):
 
 
 # ── 8. Agents settings roundtrip ─────────────────────────────
-async def test_agents_settings_roundtrip(async_client):
+async def test_agents_settings_roundtrip(async_client, admin_headers):
     """Load settings → add agent → save → load → agent persists."""
     # Load current settings
     r = await async_client.get("/api/settings/load")
@@ -228,8 +228,8 @@ async def test_agents_settings_roundtrip(async_client):
     agents.append(new_agent)
     settings["agents"] = agents
 
-    # Save
-    r2 = await async_client.post("/api/settings/save", json=settings)
+    # Save (requires admin auth)
+    r2 = await async_client.post("/api/settings/save", json=settings, headers=admin_headers)
     assert r2.status_code == 200
 
     # Reload and verify
@@ -247,4 +247,4 @@ async def test_agents_settings_roundtrip(async_client):
 
     # Clean up: remove test agent
     settings["agents"] = [a for a in saved_agents if a.get("id") != "test_agent_1"]
-    await async_client.post("/api/settings/save", json=settings)
+    await async_client.post("/api/settings/save", json=settings, headers=admin_headers)

@@ -189,3 +189,20 @@ class ScheduleUpdateRequest(BaseModel):
     task_type: Optional[str] = None
     enabled: Optional[bool] = None
     request: Optional[dict] = None
+
+
+# ── CRM Schemas ──
+
+class ClientPayload(BaseModel):
+    short_name: str
+    full_name: str = ""
+    tax_id: str = ""
+    am_username: Optional[str] = None
+    source_channel: str = ""
+    contact_person: str = ""
+    contact_method: str = ""
+    status: str = "潛在客戶"
+    cooperation_note: str = ""
+    payment_info: str = ""
+    payment_note: str = ""
+    notes: str = ""

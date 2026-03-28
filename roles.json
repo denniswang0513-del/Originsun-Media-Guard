@@ -11,7 +11,8 @@
       "report",
       "transcribe",
       "tts",
-      "projects"
+      "projects",
+      "crm"
     ],
     "description": "系統管理員"
   },

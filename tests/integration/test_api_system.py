@@ -35,7 +35,7 @@ async def test_status_structure(async_client):
 
 
 # ── 4. settings roundtrip ──────────────────────────────────
-async def test_settings_roundtrip(async_client):
+async def test_settings_roundtrip(async_client, admin_headers):
     # Load
     r = await async_client.get("/api/settings/load")
     assert r.status_code == 200
@@ -46,6 +46,7 @@ async def test_settings_roundtrip(async_client):
     r2 = await async_client.post(
         "/api/settings/save",
         json=settings,
+        headers=admin_headers,
     )
     assert r2.status_code == 200
 

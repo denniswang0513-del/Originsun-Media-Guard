@@ -33,6 +33,7 @@
 - ✅ Cloudflare 外網存取支援 — 移除 forceInstallModal + 外網自動偵測 + 狀態燈修正
 - ✅ NAS 瀏覽器 — 外網使用者用 Web Modal 取代 Windows 對話框，自動偵測磁碟根目錄 + 白名單安全限制
 - ✅ API 目錄瀏覽端點 — `GET /api/v1/browse` 支援 `browse_roots` 白名單 + 自動偵測磁碟
+- ✅ CRM 客戶管理 Tab — `routers/api_crm.py` 7 端點 + `frontend/tabs/crm/` + CSV 匯入（Notion/Google Sheets）
 
 ---
 
@@ -399,22 +400,61 @@ routers/
 
 ---
 
-## Phase J：CRM 模組
+## Phase J：CRM + 專案管理模組
 
-**優先等級**：🟡 中 — 公司內部管理系統
+**優先等級**：🔴 高 — 整合散落在 Notion / Google Sheets 的客戶與專案資料
+**狀態**：🟡 進行中
 
-### 要建置的東西
+### J-1：客戶管理 Tab（✅ 已完成）
 
-- [ ] **人資模組**：員工資料、出勤記錄、假勤管理
+- [x] **Client DB Model**：`db/models.py` — `clients` 表（15 欄位 + idx_client_am/status 索引）
+- [x] **CRM API**：`routers/api_crm.py` — 7 個端點
+  - `GET /api/v1/crm/clients` — 列表（SQL WHERE 篩選 status/am + ilike 搜尋）
+  - `POST /api/v1/crm/clients` — 新增
+  - `GET /api/v1/crm/clients/{id}` — 詳情
+  - `PUT /api/v1/crm/clients/{id}` — 更新
+  - `DELETE /api/v1/crm/clients/{id}` — 刪除
+  - `POST /api/v1/crm/clients/import_csv` — CSV 匯入（Notion + Google Sheets 格式，utf-8-sig/big5）
+  - `GET /api/v1/crm/users` — AM/PM 使用者列表（僅 username/avatar/email）
+- [x] **Frontend**：`frontend/tabs/crm/` — crm.html + crm.js + crm.css
+  - 兩欄式佈局：左列表 + 右詳情面板
+  - 新增/編輯 Modal（15 欄位表單）
+  - CSV 匯入 Modal（拖放 + 檔案選擇）
+  - Debounced 搜尋（300ms）+ 狀態/AM 下拉篩選
+  - Avatar（圖片 + 首字母 fallback）+ 狀態 badge
+- [x] **整合**：`main.py` router 註冊 + `index.html` tab 按鈕 + `app.js` 動態載入
+
+### J-2：專案管理 Tab（⬜ 下一步）
+
+- [ ] **J-2a：Project DB + CRUD API**
+  - `crm_projects` 表：client_id FK、am_username、pm_usernames (JSONB array)、folder_path、status（洽談中/進行中/結案）、shoot_date
+  - REST API：列表（含客戶名稱 join）+ CRUD + 狀態切換
+- [ ] **J-2b：專案資料夾範本複製**
+  - 建立專案時自動複製資料夾範本到指定路徑
+  - 需要使用者提供範本資料夾路徑
+- [ ] **J-2c：Frontend Project Tab**
+  - 專案列表（按客戶分組或平鋪）+ 詳情面板
+  - 新增時選擇客戶 + 指派 AM/PM
+
+### J-3：備份 Tab 整合（⬜ 待 J-2 完成）
+
+- [ ] 備份頁籤新增「選擇現有專案」下拉選項
+- [ ] 選擇專案後自動帶入 project_name、local_root、nas_root、proxy_root
+- [ ] 保留原有手動輸入方式（兩種模式並存）
+- [ ] `job_history` 表新增 `crm_project_id` 欄位，關聯任務歷史與專案
+
+### J-4：進階 CRM 功能（⬜ 未來規劃）
+
 - [ ] **財務模組**：專案預算、報銷流程、費用追蹤
-- [ ] **專案資源管理**：素材庫總覽、排程、人力配置
+- [ ] **人資模組**：員工資料、出勤記錄、假勤管理
 - [ ] **Notion 雙向同步**：專案板、任務追蹤與 Notion 資料庫即時同步
 
 ### 做完後你看到的改變
 
-- 同事在同一個系統管理專案進度、人事、財務
-- Notion 上的專案更新自動同步到系統，反之亦然
-- 管理層可以一站式查看公司營運狀態
+- 客戶資料從 Notion + Google Sheets 集中到一個系統，支援 CSV 匯入
+- 建立專案時自動複製資料夾範本，不再手動建資料夾
+- 備份任務可直接選專案，路徑自動帶入，減少人為錯誤
+- 未來：同事在同一個系統管理專案進度、人事、財務
 
 ---
 
@@ -520,13 +560,13 @@ tools:
     ▼ Phase A: Auth + 角色權限 (✅)
     │   → JWT + Google OAuth + 六角色 RBAC + 使用者/角色管理 UI + API Key 管理
     │
-現在 (v1.10.20) ← 你在這裡
-    │
     ▼ Phase 0: 程式碼重構 (✅)
     │   → app.js 3499→1951+10模組 / projects.js 2180→1687+2模組 / api_system.py 1031→332+2router
     │
-    ▼ Phase J: CRM / 專案管理模組 (⬜ 下一步)
-    │   → 專案資源 → 人資 → 財務 → Notion 同步
+現在 (v1.10.22) ← 你在這裡
+    │
+    ▼ Phase J: CRM + 專案管理 (🟡 進行中)
+    │   → ✅ J-1 客戶管理 Tab → ⬜ J-2 專案管理 Tab → ⬜ J-3 備份整合 → ⬜ J-4 財務/人資
     │
     ▼ Phase L: 行動端適配 (🟡 部分完成)
     │   → ✅ 報表手機版 RWD → 待做：主 UI RWD → 觸控優化
@@ -550,7 +590,7 @@ tools:
         → 集中 Log + 營運儀表板
 ```
 
-**下一步**：Phase J（CRM 模組）。
+**下一步**：Phase J-2（專案管理 Tab）。
 
 ---
 

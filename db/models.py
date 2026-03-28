@@ -134,6 +134,32 @@ class User(Base):
     avatar_url = Column(String(512), nullable=True)
 
 
+class Client(Base):
+    """CRM 客戶資料。"""
+    __tablename__ = "clients"
+
+    id = Column(String(32), primary_key=True)
+    short_name = Column(String(64), nullable=False, unique=True)  # 客戶代稱
+    full_name = Column(String(255), nullable=True, default="")  # 全稱 / 抬頭
+    tax_id = Column(String(16), nullable=True, default="")      # 統一編號
+    am_username = Column(String(64), nullable=True)             # AM，FK → users
+    source_channel = Column(String(64), nullable=True, default="")   # 來源管道
+    contact_person = Column(String(128), nullable=True, default="")  # 客戶聯絡人
+    contact_method = Column(String(128), nullable=True, default="")  # 聯絡方式
+    status = Column(String(32), nullable=True, default="潛在客戶")
+    cooperation_note = Column(Text, nullable=True)              # 合作契機
+    payment_info = Column(String(255), nullable=True, default="")  # 匯款資訊（銀行/帳號）
+    payment_note = Column(Text, nullable=True)                     # 匯款備註
+    notes = Column(Text, nullable=True)                         # 備註
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    __table_args__ = (
+        Index("idx_client_am", "am_username"),
+        Index("idx_client_status", "status"),
+    )
+
+
 class ApiKey(Base):
     """API Key for programmatic access (OpenClaw, scripts, CI/CD)."""
     __tablename__ = "api_keys"

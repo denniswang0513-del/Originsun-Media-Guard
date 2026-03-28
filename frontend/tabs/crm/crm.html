@@ -1,0 +1,167 @@
+<link rel="stylesheet" href="./tabs/crm/crm.css">
+
+<div class="crm-root">
+  <!-- Toolbar -->
+  <div class="crm-toolbar">
+    <input id="crm-search" type="search" placeholder="搜尋客戶、聯絡人..." class="crm-search-input">
+    <select id="crm-filter-status" class="crm-select">
+      <option value="">全部狀態</option>
+      <option value="潛在客戶">潛在客戶</option>
+      <option value="新客戶">新客戶</option>
+      <option value="舊客戶">舊客戶</option>
+      <option value="暫停合作">暫停合作</option>
+    </select>
+    <select id="crm-filter-am" class="crm-select">
+      <option value="">全部 AM</option>
+    </select>
+    <div class="crm-toolbar-right">
+      <button id="crm-btn-import" class="crm-btn crm-btn-secondary">匯入 CSV</button>
+      <button id="crm-btn-add" class="crm-btn crm-btn-primary">+ 新增客戶</button>
+    </div>
+  </div>
+
+  <!-- Body: list + detail panel -->
+  <div class="crm-body">
+    <!-- Client list -->
+    <div class="crm-list-panel" id="crm-list-panel">
+      <div class="crm-list-header">
+        <span class="crm-col-name">客戶代稱</span>
+        <span class="crm-col-status">狀態</span>
+        <span class="crm-col-am">AM</span>
+        <span class="crm-col-contact">更新日期</span>
+      </div>
+      <div id="crm-list-body">
+        <div class="crm-empty">載入中...</div>
+      </div>
+    </div>
+
+    <!-- Resize handle + Detail panel -->
+    <div class="crm-resize-handle" id="crm-resize-handle" style="display:none;"></div>
+    <div class="crm-detail-panel" id="crm-detail-panel" style="display:none;">
+      <div class="crm-detail-bar">
+        <div id="crm-detail-title" class="crm-detail-bar-title"></div>
+        <div class="crm-detail-bar-tabs" id="crm-detail-tabs">
+          <button class="crm-tab active" data-tab="info">客戶資訊</button>
+          <button class="crm-tab" data-tab="rel">客戶關係</button>
+        </div>
+        <div class="crm-detail-bar-actions">
+          <button id="crm-btn-edit" class="crm-btn crm-btn-secondary crm-btn-sm">編輯</button>
+          <button id="crm-btn-delete" class="crm-btn crm-btn-danger crm-btn-sm">刪除</button>
+          <button id="crm-detail-close" class="crm-detail-close" title="關閉">✕</button>
+        </div>
+      </div>
+      <div id="crm-detail-content" class="crm-detail-content">
+        <div id="crm-detail-info"></div>
+        <div id="crm-detail-rel" class="hidden"></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Add / Edit Modal -->
+<div id="crm-modal" class="crm-modal-overlay" style="display:none;">
+  <div class="crm-modal">
+    <div class="crm-modal-header">
+      <h3 id="crm-modal-title">新增客戶</h3>
+      <button onclick="document.getElementById('crm-modal').style.display='none'" class="crm-detail-close">✕</button>
+    </div>
+    <div class="crm-modal-body">
+      <!-- ▸ 客戶資訊 -->
+      <div class="crm-form-section">客戶資訊</div>
+      <div class="crm-form-grid">
+        <div class="crm-field crm-field-full">
+          <label>客戶代稱 <span class="crm-required">*</span></label>
+          <input id="crm-f-short_name" type="text" class="crm-input" placeholder="例：工研院">
+        </div>
+        <div class="crm-field">
+          <label>抬頭</label>
+          <input id="crm-f-full_name" type="text" class="crm-input" placeholder="法人完整名稱">
+        </div>
+        <div class="crm-field">
+          <label>統一編號</label>
+          <input id="crm-f-tax_id" type="text" class="crm-input" maxlength="8">
+        </div>
+        <div class="crm-field">
+          <label>匯款資訊</label>
+          <input id="crm-f-payment_info" type="text" class="crm-input" placeholder="銀行 / 帳號">
+        </div>
+        <div class="crm-field">
+          <label>匯款備註</label>
+          <input id="crm-f-payment_note" type="text" class="crm-input">
+        </div>
+      </div>
+
+      <!-- ▸ 客戶關係 -->
+      <div class="crm-form-section">客戶關係</div>
+      <div class="crm-form-grid">
+        <div class="crm-field">
+          <label>狀態</label>
+          <select id="crm-f-status" class="crm-input">
+            <option value="潛在客戶">潛在客戶</option>
+            <option value="新客戶">新客戶</option>
+            <option value="舊客戶">舊客戶</option>
+            <option value="暫停合作">暫停合作</option>
+          </select>
+        </div>
+        <div class="crm-field">
+          <label>AM（業務）</label>
+          <select id="crm-f-am_username" class="crm-input">
+            <option value="">— 未指派 —</option>
+          </select>
+        </div>
+        <div class="crm-field">
+          <label>來源管道</label>
+          <input id="crm-f-source_channel" type="text" class="crm-input" placeholder="寄信洽詢 / 介紹 / 廣告">
+        </div>
+        <div class="crm-field">
+          <label>客戶聯絡人</label>
+          <input id="crm-f-contact_person" type="text" class="crm-input">
+        </div>
+        <div class="crm-field">
+          <label>聯絡方式</label>
+          <input id="crm-f-contact_method" type="text" class="crm-input" placeholder="Line / Email / 電話">
+        </div>
+        <div class="crm-field crm-field-full">
+          <label>合作契機</label>
+          <input id="crm-f-cooperation_note" type="text" class="crm-input">
+        </div>
+        <div class="crm-field crm-field-full">
+          <label>備註</label>
+          <textarea id="crm-f-notes" class="crm-input crm-textarea" rows="4" placeholder="接續動作、聯繫狀況、其他備忘..."></textarea>
+        </div>
+      </div>
+      <div id="crm-modal-error" class="crm-error" style="display:none;"></div>
+    </div>
+    <div class="crm-modal-footer">
+      <button onclick="document.getElementById('crm-modal').style.display='none'" class="crm-btn crm-btn-secondary">取消</button>
+      <button id="crm-btn-save" class="crm-btn crm-btn-primary">儲存</button>
+    </div>
+  </div>
+</div>
+
+<!-- CSV Import Modal -->
+<div id="crm-import-modal" class="crm-modal-overlay" style="display:none;">
+  <div class="crm-modal" style="max-width:480px;">
+    <div class="crm-modal-header">
+      <h3>匯入 CSV</h3>
+      <button onclick="document.getElementById('crm-import-modal').style.display='none'" class="crm-detail-close">✕</button>
+    </div>
+    <div class="crm-modal-body">
+      <p class="crm-import-hint">支援 Notion 匯出 CSV 及 Google Sheets CSV。<br>若客戶代稱已存在則更新，否則新增。</p>
+      <div class="crm-drop-zone" id="crm-drop-zone">
+        <div class="crm-drop-icon">📂</div>
+        <div>拖曳 CSV 檔案至此，或</div>
+        <label class="crm-btn crm-btn-secondary" style="cursor:pointer;margin-top:8px;">
+          選擇檔案
+          <input id="crm-csv-file" type="file" accept=".csv" style="display:none;">
+        </label>
+        <div id="crm-drop-filename" style="margin-top:8px;color:#9ca3af;font-size:12px;"></div>
+      </div>
+      <div id="crm-import-result" style="display:none;" class="crm-import-result"></div>
+    </div>
+    <div class="crm-modal-footer">
+      <button onclick="document.getElementById('crm-import-modal').style.display='none'" class="crm-btn crm-btn-secondary">關閉</button>
+      <button id="crm-btn-do-import" class="crm-btn crm-btn-primary" disabled>開始匯入</button>
+    </div>
+  </div>
+</div>

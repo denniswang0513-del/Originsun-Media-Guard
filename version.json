@@ -1,5 +1,5 @@
 {
-  "version": "1.10.5",
-  "build_date": "2026-03-25",
-  "notes": "Remote update: internal/restart endpoint + improved polling"
+  "version": "1.10.23",
+  "build_date": "2026-03-27",
+  "notes": "UNC auto-convert for distributed transcode + NAS browser + error panel + PDF pagination fix"
 }
