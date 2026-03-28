@@ -28,7 +28,7 @@ try:
     from sqlalchemy import select, or_, delete
     from sqlalchemy.exc import IntegrityError
     from db.models import (Client, User, CrmProject, CrmQuotation, CrmQuotationItem,
-                           CrmQuotationTemplate, CrmStaff, CrmProjectStaff)
+                           CrmQuotationTemplate, CrmStaff, CrmProjectStaff, CrmProjectExpense)
     _HAS_DB = True
 except ImportError:
     _HAS_DB = False
@@ -93,7 +93,7 @@ def _to_dict(c) -> dict:
     }
 
 
-from core.schemas import (ClientPayload, CrmProjectPayload,
+from core.schemas import (ClientPayload, CrmProjectPayload, ProjectExpensePayload,
                          QuotationPayload, QuotationItemPayload, QuotationTemplatePayload,
                          StaffPayload, ProjectStaffPayload)
 
@@ -295,17 +295,23 @@ async def list_crm_users():
 
 def _to_project_dict(p, client_short_name: str = "") -> dict:
     return {
-        "id": p.id,
-        "name": p.name,
-        "client_id": p.client_id,
-        "client_short_name": client_short_name,
+        "id": p.id, "name": p.name,
+        "client_id": p.client_id, "client_short_name": client_short_name,
         "status": p.status or "洽談中",
-        "am_username": p.am_username or "",
-        "pm_usernames": p.pm_usernames or [],
+        "am_username": p.am_username or "", "pm_usernames": p.pm_usernames or [],
         "shoot_date": p.shoot_date.isoformat() if p.shoot_date else None,
+        "start_date": p.start_date.isoformat() if p.start_date else None,
+        "completion_date": p.completion_date.isoformat() if p.completion_date else None,
+        "project_type": p.project_type or "",
         "folder_path": p.folder_path or "",
-        "description": p.description or "",
-        "notes": p.notes or "",
+        "description": p.description or "", "notes": p.notes or "",
+        "contract_amount": p.contract_amount,
+        "tax_rate": p.tax_rate, "profit_target_pct": p.profit_target_pct,
+        "misc_budget_pct": p.misc_budget_pct,
+        "payment_status": p.payment_status or "未到帳",
+        "amount_receivable": p.amount_receivable,
+        "amount_received": p.amount_received,
+        "transfer_fee": p.transfer_fee,
         "created_at": p.created_at.isoformat() if p.created_at else None,
         "updated_at": p.updated_at.isoformat() if p.updated_at else None,
     }
@@ -356,14 +362,14 @@ async def create_project(req: CrmProjectPayload, request: Request):
     factory = await _get_factory()
 
     now = _now()
-    shoot_dt = _parse_shoot_date(req.shoot_date)
+    date_fields = {"shoot_date", "start_date", "completion_date"}
+    dates = {f: _parse_shoot_date(getattr(req, f)) for f in date_fields}
 
-    data = req.model_dump(exclude={"shoot_date"})
-    project = CrmProject(id=uuid.uuid4().hex, shoot_date=shoot_dt,
+    data = req.model_dump(exclude=date_fields)
+    project = CrmProject(id=uuid.uuid4().hex, **dates,
                          created_at=now, updated_at=now, **data)
 
     async with factory() as session:
-        # Verify client exists
         client = await session.get(Client, req.client_id)
         if not client:
             raise HTTPException(status_code=404, detail="找不到指定的客戶")
@@ -411,21 +417,22 @@ async def update_project(project_id: str, req: CrmProjectPayload, request: Reque
     _require_db()
     factory = await _get_factory()
 
-    shoot_dt = _parse_shoot_date(req.shoot_date)
+    date_fields = {"shoot_date", "start_date", "completion_date"}
+    dates = {f: _parse_shoot_date(getattr(req, f)) for f in date_fields}
 
     async with factory() as session:
         project = await session.get(CrmProject, project_id)
         if not project:
             raise HTTPException(status_code=404, detail="找不到此專案")
 
-        # Verify client exists
         client = await session.get(Client, req.client_id)
         if not client:
             raise HTTPException(status_code=404, detail="找不到指定的客戶")
 
-        for k, v in req.model_dump(exclude={"shoot_date"}).items():
+        for k, v in req.model_dump(exclude=date_fields).items():
             setattr(project, k, v)
-        project.shoot_date = shoot_dt
+        for k, v in dates.items():
+            setattr(project, k, v)
         project.updated_at = _now()
         await session.commit()
         await session.refresh(project)
@@ -1158,3 +1165,120 @@ async def project_cost_summary(project_id: str):
         )).scalars().all()
     total_cost = sum(r.cost for r in rows)
     return {"total_cost": total_cost, "staff_count": len(rows)}
+
+
+# ── Project Expense (雜支) Endpoints ────────────────────────
+
+@router.get("/projects/{project_id}/expenses")
+async def list_project_expenses(project_id: str):
+    _require_db()
+    factory = await _get_factory()
+    async with factory() as session:
+        rows = (await session.execute(
+            select(CrmProjectExpense).where(CrmProjectExpense.project_id == project_id)
+        )).scalars().all()
+    return {"expenses": [{
+        "id": e.id, "category": e.category,
+        "estimated": e.estimated, "actual": e.actual,
+        "notes": e.notes or "",
+    } for e in rows]}
+
+
+@router.post("/projects/{project_id}/expenses")
+async def add_project_expense(project_id: str, req: ProjectExpensePayload, request: Request):
+    _check_auth(request)
+    _require_db()
+    factory = await _get_factory()
+    async with factory() as session:
+        e = CrmProjectExpense(
+            id=uuid.uuid4().hex, project_id=project_id,
+            category=req.category, estimated=req.estimated,
+            actual=req.actual, notes=req.notes,
+        )
+        session.add(e)
+        await session.commit()
+    return {"status": "ok"}
+
+
+@router.put("/project-expenses/{expense_id}")
+async def update_project_expense(expense_id: str, req: ProjectExpensePayload, request: Request):
+    _check_auth(request)
+    _require_db()
+    factory = await _get_factory()
+    async with factory() as session:
+        e = await session.get(CrmProjectExpense, expense_id)
+        if not e:
+            raise HTTPException(status_code=404, detail="找不到此雜支")
+        e.category = req.category
+        e.estimated = req.estimated
+        e.actual = req.actual
+        e.notes = req.notes
+        await session.commit()
+    return {"status": "ok"}
+
+
+@router.delete("/project-expenses/{expense_id}")
+async def delete_project_expense(expense_id: str, request: Request):
+    _check_auth(request)
+    _require_db()
+    factory = await _get_factory()
+    async with factory() as session:
+        e = await session.get(CrmProjectExpense, expense_id)
+        if not e:
+            raise HTTPException(status_code=404, detail="找不到此雜支")
+        await session.delete(e)
+        await session.commit()
+    return {"status": "ok"}
+
+
+@router.get("/projects/{project_id}/financial-summary")
+async def project_financial_summary(project_id: str):
+    """專案財務摘要：含稅/未稅/毛利/雜支/外包 預估vs實際。"""
+    _require_db()
+    factory = await _get_factory()
+    async with factory() as session:
+        project = await session.get(CrmProject, project_id)
+        if not project:
+            raise HTTPException(status_code=404, detail="找不到此專案")
+
+        from sqlalchemy import func as sa_func
+
+        exp_row = (await session.execute(
+            select(sa_func.coalesce(sa_func.sum(CrmProjectExpense.estimated), 0),
+                   sa_func.coalesce(sa_func.sum(CrmProjectExpense.actual), 0))
+            .where(CrmProjectExpense.project_id == project_id)
+        )).first()
+        expense_estimated = exp_row[0] if exp_row else 0
+        expense_actual = exp_row[1] if exp_row else 0
+
+        staff_row = (await session.execute(
+            select(sa_func.coalesce(sa_func.sum(CrmProjectStaff.cost), 0),
+                   sa_func.coalesce(sa_func.sum(sa_func.coalesce(CrmProjectStaff.actual_cost, CrmProjectStaff.cost)), 0))
+            .where(CrmProjectStaff.project_id == project_id)
+        )).first()
+        staff_estimated = staff_row[0] if staff_row else 0
+        staff_actual = staff_row[1] if staff_row else 0
+
+    contract = project.contract_amount or 0
+    tax_rate = project.tax_rate or 5
+    ex_tax = round(contract / (1 + tax_rate / 100))
+    profit_target = int(ex_tax * (project.profit_target_pct or 20) / 100)
+    misc_budget = int(ex_tax * (project.misc_budget_pct or 5) / 100)
+    outsource_budget = ex_tax - profit_target - misc_budget
+
+    total_cost = expense_actual + staff_actual
+    actual_profit = ex_tax - total_cost
+    profit_rate = round(actual_profit / ex_tax * 100) if ex_tax > 0 else 0
+
+    return {
+        "contract_amount": contract, "ex_tax": ex_tax,
+        "profit_target": profit_target, "profit_target_pct": project.profit_target_pct or 20,
+        "misc_budget": misc_budget, "outsource_budget": outsource_budget,
+        "expense_estimated": expense_estimated, "expense_actual": expense_actual,
+        "staff_estimated": staff_estimated, "staff_actual": staff_actual,
+        "total_cost": total_cost, "actual_profit": actual_profit, "profit_rate": profit_rate,
+        "payment_status": project.payment_status or "未到帳",
+        "amount_receivable": project.amount_receivable,
+        "amount_received": project.amount_received,
+        "transfer_fee": project.transfer_fee,
+    }

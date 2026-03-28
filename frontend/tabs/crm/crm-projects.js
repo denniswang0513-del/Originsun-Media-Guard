@@ -104,19 +104,28 @@ function renderDetail(project) {
 
     document.getElementById('proj-detail-title').textContent = project.name;
 
+    const _pBadge = (status) => {
+        const map = {'未到帳':'crm-badge crm-pay-未到帳','部分到帳':'crm-badge crm-pay-部分到帳','全額到帳':'crm-badge crm-pay-全額到帳'};
+        return `<span class="${map[status] || 'crm-badge'}">${_esc(status || '未到帳')}</span>`;
+    };
+
     // Tab 1: 專案資訊
     document.getElementById('proj-detail-info').innerHTML = `
         ${prop('客戶', project.client_short_name)}
-        <div class="crm-detail-prop">
-            <div class="crm-prop-label">狀態</div>
-            <div class="crm-prop-value">${_badge(project.status)}</div>
-        </div>
+        <div class="crm-detail-prop"><div class="crm-prop-label">狀態</div><div class="crm-prop-value">${_badge(project.status)}</div></div>
+        ${prop('類型', project.project_type)}
+        ${prop('起始日', project.start_date ? project.start_date.substring(0, 10) : '')}
         ${prop('拍攝日期', project.shoot_date ? project.shoot_date.substring(0, 10) : '')}
+        ${prop('結案日', project.completion_date ? project.completion_date.substring(0, 10) : '')}
         ${prop('資料夾', project.folder_path)}
         ${prop('說明', project.description)}
+        ${project.contract_amount ? `${prop('合約金額', '$' + project.contract_amount.toLocaleString('zh-TW'))}` : ''}
+        ${project.contract_amount ? `<div class="crm-detail-prop"><div class="crm-prop-label">帳務</div><div class="crm-prop-value">${_pBadge(project.payment_status)}</div></div>` : ''}
         ${prop('備註', project.notes)}
-        ${prop('修改日期', project.updated_at ? project.updated_at.substring(0, 10) : '')}
     `;
+
+    // Tab 4: 財務
+    _loadFinancialSummary(project.id);
 
     // Tab 2: 人員配置
     const amHtml = project.am_username
@@ -146,6 +155,36 @@ function renderDetail(project) {
         </div>
     `;
     _loadProjectStaff(project.id);
+}
+
+async function _loadFinancialSummary(projectId) {
+    const container = document.getElementById('proj-detail-finance');
+    if (!container) return;
+    container.innerHTML = '<div class="crm-empty" style="padding:8px;">載入中...</div>';
+    try {
+        const f = await _fetch('/projects/' + projectId + '/financial-summary');
+        const _n = (n) => (n || 0).toLocaleString('zh-TW');
+        const profitColor = f.profit_rate >= 20 ? '#86efac' : f.profit_rate >= 0 ? '#fbbf24' : '#fca5a5';
+        container.innerHTML = `
+            <div class="crm-detail-prop"><div class="crm-prop-label">合約金額（含稅）</div><div class="crm-prop-value" style="font-weight:700;">$${_n(f.contract_amount)}</div></div>
+            <div class="crm-detail-prop"><div class="crm-prop-label">未稅金額</div><div class="crm-prop-value">$${_n(f.ex_tax)}</div></div>
+            <div class="crm-detail-prop"><div class="crm-prop-label">目標毛利 (${f.profit_target_pct}%)</div><div class="crm-prop-value">$${_n(f.profit_target)}</div></div>
+            <div style="border-top:1px solid #2e2e2e;margin:8px 0;"></div>
+            <div class="crm-detail-prop"><div class="crm-prop-label">雜支預算</div><div class="crm-prop-value">$${_n(f.misc_budget)}</div></div>
+            <div class="crm-detail-prop"><div class="crm-prop-label">雜支實際</div><div class="crm-prop-value">$${_n(f.expense_actual)}</div></div>
+            <div class="crm-detail-prop"><div class="crm-prop-label">外包預算</div><div class="crm-prop-value">$${_n(f.outsource_budget)}</div></div>
+            <div class="crm-detail-prop"><div class="crm-prop-label">外包實際（派工）</div><div class="crm-prop-value">$${_n(f.staff_actual)}</div></div>
+            <div style="border-top:1px solid #2e2e2e;margin:8px 0;"></div>
+            <div class="crm-detail-prop"><div class="crm-prop-label" style="font-weight:700;">實際毛利</div><div class="crm-prop-value" style="font-weight:700;color:${profitColor};">$${_n(f.actual_profit)} (${f.profit_rate}%)</div></div>
+            <div style="border-top:1px solid #2e2e2e;margin:8px 0;"></div>
+            <div class="crm-detail-prop"><div class="crm-prop-label">帳務狀況</div><div class="crm-prop-value">${f.payment_status || '未到帳'}</div></div>
+            <div class="crm-detail-prop"><div class="crm-prop-label">應收帳款</div><div class="crm-prop-value">$${_n(f.amount_receivable)}</div></div>
+            <div class="crm-detail-prop"><div class="crm-prop-label">已收帳款</div><div class="crm-prop-value">$${_n(f.amount_received)}</div></div>
+            ${f.transfer_fee ? `<div class="crm-detail-prop"><div class="crm-prop-label">帳款匯費</div><div class="crm-prop-value">$${_n(f.transfer_fee)}</div></div>` : ''}
+        `;
+    } catch (_) {
+        container.innerHTML = '<div class="crm-empty">載入失敗</div>';
+    }
 }
 
 async function _loadProjectStaff(projectId) {
@@ -274,8 +313,10 @@ function closeDetail() {
 
 // ── Add / Edit Modal ─────────────────────────────────────────
 
-const _FIELDS = ['name', 'client_id', 'status', 'shoot_date', 'folder_path',
-    'description', 'am_username', 'notes'];
+const _FIELDS = ['name', 'client_id', 'status', 'project_type', 'start_date', 'shoot_date',
+    'completion_date', 'folder_path', 'description', 'am_username', 'notes',
+    'contract_amount', 'tax_rate', 'profit_target_pct', 'misc_budget_pct',
+    'payment_status', 'amount_receivable', 'amount_received', 'transfer_fee'];
 
 function openModal(project = null) {
     _editingId = project ? project.id : null;
@@ -288,13 +329,17 @@ function openModal(project = null) {
     _populateSelect('proj-f-am_username', '— 未指派 —');
     _populatePmCheckboxes(project ? (project.pm_usernames || []) : []);
 
+    const dateFields = ['shoot_date', 'start_date', 'completion_date'];
     for (const f of _FIELDS) {
         const el = document.getElementById(`proj-f-${f}`);
         if (!el) continue;
-        if (f === 'shoot_date' && project?.shoot_date) {
-            el.value = project.shoot_date.substring(0, 10);
+        if (dateFields.includes(f) && project?.[f]) {
+            el.value = project[f].substring(0, 10);
+        } else if (['contract_amount', 'amount_receivable', 'amount_received', 'transfer_fee'].includes(f)) {
+            el.value = project?.[f] ?? '';
         } else {
-            el.value = project ? (project[f] ?? '') : '';
+            const defaults = { tax_rate: '5', profit_target_pct: '20', misc_budget_pct: '5', payment_status: '未到帳' };
+            el.value = project ? (project[f] ?? '') : (defaults[f] ?? '');
         }
     }
 
@@ -309,12 +354,17 @@ async function saveProject() {
     if (!client_id) { _showModalError('請選擇客戶'); return; }
 
     const payload = {};
+    const intFields = ['contract_amount', 'tax_rate', 'profit_target_pct', 'misc_budget_pct',
+                       'amount_receivable', 'amount_received', 'transfer_fee'];
+    const dateFields = ['shoot_date', 'start_date', 'completion_date'];
     for (const f of _FIELDS) {
         const el = document.getElementById(`proj-f-${f}`);
-        payload[f] = el ? el.value.trim() : '';
+        let val = el ? el.value.trim() : '';
+        if (intFields.includes(f)) val = val ? parseInt(val) : null;
+        if (dateFields.includes(f)) val = val || null;
+        payload[f] = val;
     }
     payload.pm_usernames = _getSelectedPms();
-    payload.shoot_date = payload.shoot_date || null;
 
     const btn = document.getElementById('proj-btn-save');
     btn.disabled = true;
@@ -529,6 +579,7 @@ export function initCrmProjectsTab() {
             document.getElementById('proj-detail-info').classList.toggle('hidden', tab !== 'info');
             document.getElementById('proj-detail-team').classList.toggle('hidden', tab !== 'team');
             document.getElementById('proj-detail-quotes').classList.toggle('hidden', tab !== 'quotes');
+            document.getElementById('proj-detail-finance').classList.toggle('hidden', tab !== 'finance');
         });
     });
 

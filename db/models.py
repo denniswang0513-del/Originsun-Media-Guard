@@ -167,13 +167,27 @@ class CrmProject(Base):
     id = Column(String(32), primary_key=True)
     name = Column(String(255), nullable=False)
     client_id = Column(String(32), nullable=False)              # soft FK → clients.id
-    status = Column(String(32), nullable=False, default="洽談中")  # 洽談中/進行中/已結案
+    status = Column(String(32), nullable=False, default="洽談中")
     am_username = Column(String(64), nullable=True)
-    pm_usernames = Column(JSONB, nullable=True)                  # ["user1","user2"]
+    pm_usernames = Column(JSONB, nullable=True)
     shoot_date = Column(DateTime(timezone=True), nullable=True)
+    start_date = Column(DateTime(timezone=True), nullable=True)       # 起始日
+    completion_date = Column(DateTime(timezone=True), nullable=True)  # 結案日
+    project_type = Column(String(64), nullable=True, default="")      # 紀實影片/活動紀實/廣告/形象/MV
     folder_path = Column(Text, nullable=True)
     description = Column(Text, nullable=True)
     notes = Column(Text, nullable=True)
+    # 財務
+    contract_amount = Column(Integer, nullable=True)                  # 合約金額（含稅）
+    tax_rate = Column(Integer, nullable=False, default=5)             # 稅率 %
+    profit_target_pct = Column(Integer, nullable=False, default=20)   # 目標毛利率 %
+    misc_budget_pct = Column(Integer, nullable=False, default=5)      # 雜支預算比例 %
+    # 帳務
+    payment_status = Column(String(32), nullable=True, default="未到帳")  # 未到帳/部分到帳/全額到帳
+    amount_receivable = Column(Integer, nullable=True)                # 應收帳款
+    amount_received = Column(Integer, nullable=True)                  # 已收帳款
+    transfer_fee = Column(Integer, nullable=True)                     # 帳款匯費
+
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now())
 
@@ -277,9 +291,27 @@ class CrmProjectStaff(Base):
     project_id = Column(String(32), nullable=False, index=True)
     staff_id = Column(String(32), nullable=False, index=True)
     role_in_project = Column(String(64), nullable=True)         # 在此專案的職務
-    days = Column(Integer, nullable=False, default=1)
-    rate_override = Column(Integer, nullable=True)              # 覆寫日費（null=用人員預設）
-    cost = Column(Integer, nullable=False, default=0)           # 費用 = days × rate
+    phase = Column(String(32), nullable=True, default="")      # 前期製作/現場拍攝/後期製作
+    days = Column(Integer, nullable=False, default=1)           # 預估天數
+    rate_override = Column(Integer, nullable=True)              # 覆寫日費
+    cost = Column(Integer, nullable=False, default=0)           # 預估費用
+    actual_days = Column(Integer, nullable=True)                # 實際天數
+    actual_cost = Column(Integer, nullable=True)                # 實際花費
+    payment_status = Column(String(32), nullable=True)          # 未付/已付/已開勞報 ← 財務預留
+    payment_date = Column(DateTime(timezone=True), nullable=True)  # ← 財務預留
+    notes = Column(Text, nullable=True)
+
+
+class CrmProjectExpense(Base):
+    """專案雜支明細。"""
+    __tablename__ = "crm_project_expenses"
+
+    id = Column(String(32), primary_key=True)
+    project_id = Column(String(32), nullable=False, index=True)
+    category = Column(String(64), nullable=False)               # 交通/住宿/飲食/提案/其他
+    estimated = Column(Integer, nullable=False, default=0)      # 預估金額
+    actual = Column(Integer, nullable=False, default=0)         # 實際金額
+    receipt_url = Column(String(512), nullable=True)            # 收據連結 ← 財務預留
     notes = Column(Text, nullable=True)
 
 

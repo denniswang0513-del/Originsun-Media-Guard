@@ -215,8 +215,28 @@ class CrmProjectPayload(BaseModel):
     am_username: Optional[str] = None
     pm_usernames: List[str] = []
     shoot_date: Optional[str] = None
+    start_date: Optional[str] = None
+    completion_date: Optional[str] = None
+    project_type: str = ""
     folder_path: str = ""
     description: str = ""
+    notes: str = ""
+    # 財務
+    contract_amount: Optional[int] = None
+    tax_rate: int = 5
+    profit_target_pct: int = 20
+    misc_budget_pct: int = 5
+    # 帳務
+    payment_status: str = "未到帳"
+    amount_receivable: Optional[int] = None
+    amount_received: Optional[int] = None
+    transfer_fee: Optional[int] = None
+
+
+class ProjectExpensePayload(BaseModel):
+    category: str
+    estimated: int = 0
+    actual: int = 0
     notes: str = ""
 
 

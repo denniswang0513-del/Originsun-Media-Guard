@@ -499,6 +499,11 @@
 /* ── Template list ── */
 .quote-template-row { padding: 10px 0; border-bottom: 1px solid #2e2e2e; }
 
+/* ── Payment status badges ── */
+.crm-pay-未到帳   { background: #3b1f1f; color: #fca5a5; }
+.crm-pay-部分到帳 { background: #3b2f1f; color: #fbbf24; }
+.crm-pay-全額到帳 { background: #14532d; color: #86efac; }
+
 /* ── Staff badge colors ── */
 .crm-staff-badge-在職 { background: #14532d; color: #86efac; }
 .crm-staff-badge-離職 { background: #374151; color: #9ca3af; }

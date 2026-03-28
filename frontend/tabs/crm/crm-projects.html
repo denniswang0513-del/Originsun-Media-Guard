@@ -45,6 +45,7 @@
         <button class="crm-tab active" data-tab="info">專案資訊</button>
         <button class="crm-tab" data-tab="team">人員配置</button>
         <button class="crm-tab" data-tab="quotes">報價</button>
+        <button class="crm-tab" data-tab="finance">財務</button>
       </div>
       <div class="crm-detail-bar-actions">
         <button id="proj-detail-close" class="crm-detail-close" title="關閉">✕</button>
@@ -54,6 +55,7 @@
       <div id="proj-detail-info"></div>
       <div id="proj-detail-team" class="hidden"></div>
       <div id="proj-detail-quotes" class="hidden"></div>
+      <div id="proj-detail-finance" class="hidden"></div>
     </div>
   </div>
 </div>
@@ -83,13 +85,33 @@
           <label>狀態</label>
           <select id="proj-f-status" class="crm-input">
             <option value="洽談中">洽談中</option>
+            <option value="報價中">報價中</option>
             <option value="進行中">進行中</option>
             <option value="已結案">已結案</option>
           </select>
         </div>
         <div class="crm-field">
+          <label>案件類型</label>
+          <select id="proj-f-project_type" class="crm-input">
+            <option value="">—</option>
+            <option value="紀實影片">紀實影片</option>
+            <option value="活動紀實">活動紀實</option>
+            <option value="形象影片">形象影片</option>
+            <option value="廣告">廣告</option>
+            <option value="MV">MV</option>
+          </select>
+        </div>
+        <div class="crm-field">
+          <label>起始日</label>
+          <input id="proj-f-start_date" type="date" class="crm-input">
+        </div>
+        <div class="crm-field">
           <label>拍攝日期</label>
           <input id="proj-f-shoot_date" type="date" class="crm-input">
+        </div>
+        <div class="crm-field">
+          <label>結案日</label>
+          <input id="proj-f-completion_date" type="date" class="crm-input">
         </div>
         <div class="crm-field">
           <label>專案資料夾</label>
@@ -98,6 +120,50 @@
         <div class="crm-field crm-field-full">
           <label>說明</label>
           <input id="proj-f-description" type="text" class="crm-input">
+        </div>
+      </div>
+
+      <div class="crm-form-section">財務資訊</div>
+      <div class="crm-form-grid">
+        <div class="crm-field">
+          <label>合約金額（含稅）</label>
+          <input id="proj-f-contract_amount" type="number" class="crm-input" min="0">
+        </div>
+        <div class="crm-field">
+          <label>稅率 (%)</label>
+          <input id="proj-f-tax_rate" type="number" class="crm-input" value="5" min="0" max="100">
+        </div>
+        <div class="crm-field">
+          <label>目標毛利率 (%)</label>
+          <input id="proj-f-profit_target_pct" type="number" class="crm-input" value="20" min="0" max="100">
+        </div>
+        <div class="crm-field">
+          <label>雜支比例 (%)</label>
+          <input id="proj-f-misc_budget_pct" type="number" class="crm-input" value="5" min="0" max="100">
+        </div>
+      </div>
+
+      <div class="crm-form-section">帳務追蹤</div>
+      <div class="crm-form-grid">
+        <div class="crm-field">
+          <label>帳務狀況</label>
+          <select id="proj-f-payment_status" class="crm-input">
+            <option value="未到帳">未到帳</option>
+            <option value="部分到帳">部分到帳</option>
+            <option value="全額到帳">全額到帳</option>
+          </select>
+        </div>
+        <div class="crm-field">
+          <label>應收帳款</label>
+          <input id="proj-f-amount_receivable" type="number" class="crm-input" min="0">
+        </div>
+        <div class="crm-field">
+          <label>已收帳款</label>
+          <input id="proj-f-amount_received" type="number" class="crm-input" min="0">
+        </div>
+        <div class="crm-field">
+          <label>帳款匯費</label>
+          <input id="proj-f-transfer_fee" type="number" class="crm-input" min="0">
         </div>
       </div>
 
