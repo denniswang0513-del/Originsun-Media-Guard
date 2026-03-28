@@ -157,6 +157,19 @@ if (typeof appendLog === 'undefined') {
                 } catch (e) {
                     console.warn('[CRM Projects Tab] 載入失敗:', e);
                 }
+
+                // Load CRM Quotes Tab
+                try {
+                    const tabQuotes = document.getElementById('tab_crm_quotes');
+                    const quotesRes = await fetch(`./tabs/crm/crm-quotes.html${_cb}`);
+                    if (quotesRes.ok) {
+                        tabQuotes.innerHTML = await quotesRes.text();
+                        const quotesModule = await import(`./tabs/crm/crm-quotes.js${_cb}`);
+                        quotesModule.initCrmQuotesTab();
+                    }
+                } catch (e) {
+                    console.warn('[CRM Quotes Tab] 載入失敗:', e);
+                }
             } catch (err) {
                 console.error("Error loading tabs:", err);
             }
@@ -1196,7 +1209,7 @@ if (typeof appendLog === 'undefined') {
             document.getElementById(tabId).classList.remove('hidden');
 
             // 重置按鈕樣式
-            const btnCols = ['btn_tab-projects', 'btn_tab_main', 'btn_tab_verify', 'btn_tab_transcode', 'btn_tab_concat', 'btn_tab_report', 'btn_tab_transcribe', 'btn_tab_tts', 'btn_tab_crm_clients', 'btn_tab_crm_projects'];
+            const btnCols = ['btn_tab-projects', 'btn_tab_main', 'btn_tab_verify', 'btn_tab_transcode', 'btn_tab_concat', 'btn_tab_report', 'btn_tab_transcribe', 'btn_tab_tts', 'btn_tab_crm_clients', 'btn_tab_crm_projects', 'btn_tab_crm_quotes'];
             btnCols.forEach(btn => {
                 const el = document.getElementById(btn);
                 if (el) {

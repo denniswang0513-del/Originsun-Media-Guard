@@ -1,0 +1,167 @@
+<!-- Stats Cards -->
+<div class="crm-toolbar" style="gap:12px;padding:14px 16px;">
+  <div class="quote-stat-card">
+    <div class="quote-stat-label">本月報價</div>
+    <div class="quote-stat-value" id="quote-stat-month">$0</div>
+  </div>
+  <div class="quote-stat-card">
+    <div class="quote-stat-label">待簽核</div>
+    <div class="quote-stat-value" id="quote-stat-pending">0 筆</div>
+  </div>
+  <div class="quote-stat-card">
+    <div class="quote-stat-label">簽約率</div>
+    <div class="quote-stat-value" id="quote-stat-rate">0%</div>
+  </div>
+  <div class="crm-toolbar-right">
+    <button id="quote-btn-templates" class="crm-btn crm-btn-secondary">範本管理</button>
+    <button id="quote-btn-add" class="crm-btn crm-btn-primary">+ 新增報價</button>
+  </div>
+</div>
+
+<!-- Filters -->
+<div class="crm-toolbar" style="border-top:none;padding-top:0;">
+  <input id="quote-search" type="search" placeholder="搜尋專案、客戶..." class="crm-search-input">
+  <select id="quote-filter-status" class="crm-select">
+    <option value="">全部狀態</option>
+    <option value="草稿">草稿</option>
+    <option value="已寄送">已寄送</option>
+    <option value="已簽核">已簽核</option>
+    <option value="已拒絕">已拒絕</option>
+  </select>
+  <select id="quote-filter-client" class="crm-select">
+    <option value="">全部客戶</option>
+  </select>
+</div>
+
+<!-- List -->
+<div class="crm-body">
+  <div class="crm-list-panel" id="quote-list-panel">
+    <div class="crm-list-header">
+      <span class="crm-col-name">報價編號</span>
+      <span class="crm-col-client">專案 / 客戶</span>
+      <span class="crm-col-status">狀態</span>
+      <span class="crm-col-amount">金額</span>
+      <span class="crm-col-date">日期</span>
+      <span class="crm-col-actions"></span>
+    </div>
+    <div id="quote-list-body">
+      <div class="crm-empty">載入中...</div>
+    </div>
+  </div>
+
+  <div class="crm-resize-handle" id="quote-resize-handle" style="display:none;"></div>
+  <div class="crm-detail-panel" id="quote-detail-panel" style="display:none;">
+    <div class="crm-detail-bar">
+      <div id="quote-detail-title" class="crm-detail-bar-title"></div>
+      <div class="crm-detail-bar-tabs" id="quote-detail-tabs">
+        <button class="crm-tab active" data-tab="info">報價資訊</button>
+        <button class="crm-tab" data-tab="items">項目明細</button>
+      </div>
+      <div class="crm-detail-bar-actions">
+        <button id="quote-detail-close" class="crm-detail-close" title="關閉">&#x2715;</button>
+      </div>
+    </div>
+    <div class="crm-detail-content">
+      <div id="quote-detail-info"></div>
+      <div id="quote-detail-items" class="hidden"></div>
+    </div>
+  </div>
+</div>
+
+<!-- Add / Edit Quotation Modal -->
+<div id="quote-modal" class="crm-modal-overlay" style="display:none;">
+  <div class="crm-modal" style="max-width:780px;">
+    <div class="crm-modal-header">
+      <h3 id="quote-modal-title">新增報價</h3>
+      <button onclick="document.getElementById('quote-modal').style.display='none'" class="crm-detail-close">&#x2715;</button>
+    </div>
+    <div class="crm-modal-body">
+      <div class="crm-form-section">報價資訊</div>
+      <div class="crm-form-grid">
+        <div class="crm-field">
+          <label>專案 <span class="crm-required">*</span></label>
+          <select id="quote-f-project_id" class="crm-input">
+            <option value="">— 選擇專案 —</option>
+          </select>
+        </div>
+        <div class="crm-field">
+          <label>狀態</label>
+          <select id="quote-f-status" class="crm-input">
+            <option value="草稿">草稿</option>
+            <option value="已寄送">已寄送</option>
+            <option value="已簽核">已簽核</option>
+            <option value="已拒絕">已拒絕</option>
+          </select>
+        </div>
+        <div class="crm-field">
+          <label>報價日期</label>
+          <input id="quote-f-quote_date" type="date" class="crm-input">
+        </div>
+        <div class="crm-field">
+          <label>有效期限</label>
+          <input id="quote-f-valid_until" type="date" class="crm-input">
+        </div>
+        <div class="crm-field">
+          <label>套用範本</label>
+          <select id="quote-f-template" class="crm-input">
+            <option value="">— 不使用範本 —</option>
+          </select>
+        </div>
+        <div class="crm-field">
+          <label>稅率 (%)</label>
+          <input id="quote-f-tax_rate" type="number" class="crm-input" value="5" min="0" max="100">
+        </div>
+      </div>
+
+      <div class="crm-form-section" style="display:flex;justify-content:space-between;align-items:center;">
+        項目明細
+        <button type="button" id="quote-btn-add-item" class="crm-btn crm-btn-secondary crm-btn-sm">+ 新增項目</button>
+      </div>
+      <div id="quote-items-list" class="quote-items-list"></div>
+
+      <div class="quote-totals">
+        <div class="quote-total-row"><span>小計</span><span id="quote-calc-subtotal">$0</span></div>
+        <div class="quote-total-row"><span>折扣</span><input id="quote-f-discount" type="number" class="crm-input" value="0" min="0" style="width:120px;text-align:right;"></div>
+        <div class="quote-total-row"><span>稅額 (<span id="quote-calc-tax-pct">5</span>%)</span><span id="quote-calc-tax">$0</span></div>
+        <div class="quote-total-row total"><span>含稅總計</span><span id="quote-calc-total">$0</span></div>
+        <div class="quote-total-row"><span>最終報價（手動）</span><input id="quote-f-final_price" type="number" class="crm-input" placeholder="留空=同含稅總計" style="width:150px;text-align:right;"></div>
+      </div>
+
+      <div class="crm-form-section">付款與備註</div>
+      <div class="crm-form-grid">
+        <div class="crm-field crm-field-full">
+          <label>付款階段</label>
+          <input id="quote-f-payment_stages" type="text" class="crm-input" placeholder='例：腳本 20%, 拍攝完成 40%, 結案 40%'>
+        </div>
+        <div class="crm-field crm-field-full">
+          <label>備註/條款</label>
+          <textarea id="quote-f-terms" class="crm-input crm-textarea" rows="3"></textarea>
+        </div>
+      </div>
+      <div id="quote-modal-error" class="crm-error" style="display:none;"></div>
+    </div>
+    <div class="crm-modal-footer">
+      <button onclick="document.getElementById('quote-modal').style.display='none'" class="crm-btn crm-btn-secondary">取消</button>
+      <button id="quote-btn-save" class="crm-btn crm-btn-primary">儲存</button>
+    </div>
+  </div>
+</div>
+
+<!-- Template Management Modal -->
+<div id="quote-template-modal" class="crm-modal-overlay" style="display:none;">
+  <div class="crm-modal" style="max-width:600px;">
+    <div class="crm-modal-header">
+      <h3>報價範本</h3>
+      <button onclick="document.getElementById('quote-template-modal').style.display='none'" class="crm-detail-close">&#x2715;</button>
+    </div>
+    <div class="crm-modal-body">
+      <div style="display:flex;justify-content:flex-end;margin-bottom:12px;">
+        <button id="quote-tpl-btn-add" class="crm-btn crm-btn-primary crm-btn-sm">+ 新增範本</button>
+      </div>
+      <div id="quote-template-list"></div>
+    </div>
+    <div class="crm-modal-footer">
+      <button onclick="document.getElementById('quote-template-modal').style.display='none'" class="crm-btn crm-btn-secondary">關閉</button>
+    </div>
+  </div>
+</div>

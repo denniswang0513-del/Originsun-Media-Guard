@@ -43,6 +43,18 @@ export function populateUserSelect(elementId, users, placeholder) {
         users.map(u => `<option value="${esc(u.username)}"${u.username === current ? ' selected' : ''}>${esc(u.username)}</option>`).join('');
 }
 
+export function fmtNum(n) {
+    return (n || 0).toLocaleString('zh-TW');
+}
+
+export function populateClientSelect(elementId, clients, placeholder = '全部客戶') {
+    const sel = document.getElementById(elementId);
+    if (!sel) return;
+    const current = sel.value;
+    sel.innerHTML = `<option value="">${placeholder}</option>` +
+        clients.map(c => `<option value="${c.id}"${c.id === current ? ' selected' : ''}>${esc(c.short_name)}</option>`).join('');
+}
+
 export function setupResizeHandle(handleId, panelId) {
     const resizeHandle = document.getElementById(handleId);
     const detailPanel = document.getElementById(panelId);

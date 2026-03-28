@@ -3,7 +3,7 @@
  * 功能：列表 + 詳情面板 + 新增/編輯 Modal + 狀態快切
  */
 
-import { crmFetch as _fetch, esc as _esc, renderAvatar, populateUserSelect, setupResizeHandle } from './crm-utils.js';
+import { crmFetch as _fetch, esc as _esc, renderAvatar, populateUserSelect, populateClientSelect, setupResizeHandle } from './crm-utils.js';
 
 // ── State ────────────────────────────────────────────────────
 
@@ -57,7 +57,7 @@ async function loadUsers() {
 
 function _badge(status) {
     const s = status || '洽談中';
-    const known = ['洽談中', '進行中', '已結案'];
+    const known = ['洽談中', '報價中', '進行中', '已結案'];
     const cls = known.includes(s) ? `crm-badge crm-proj-badge-${s}` : 'crm-badge';
     return `<span class="${cls}">${_esc(s)}</span>`;
 }
@@ -147,11 +147,7 @@ function _populateSelect(elementId, placeholder) {
 }
 
 function _populateClientFilter() {
-    const sel = document.getElementById('proj-filter-client');
-    if (!sel) return;
-    const current = sel.value;
-    sel.innerHTML = `<option value="">全部客戶</option>` +
-        _clients.map(c => `<option value="${c.id}"${c.id === current ? ' selected' : ''}>${_esc(c.short_name)}</option>`).join('');
+    populateClientSelect('proj-filter-client', _clients);
 }
 
 function _populateClientDropdown(elementId, selectedId) {
@@ -203,6 +199,32 @@ function selectProject(id) {
     const project = _projects.find(p => p.id === id);
     if (!project) return;
     renderDetail(project);
+    _loadProjectQuotations(id);
+}
+
+async function _loadProjectQuotations(projectId) {
+    const container = document.getElementById('proj-detail-quotes');
+    if (!container) return;
+    try {
+        const data = await _fetch(`/projects/${projectId}/quotations`);
+        const quotes = data.quotations || [];
+        if (quotes.length === 0) {
+            container.innerHTML = '<div class="crm-empty">尚無報價</div>';
+            return;
+        }
+        container.innerHTML = quotes.map(q => {
+            const price = q.final_price !== null && q.final_price !== undefined ? q.final_price : q.total;
+            const statusCls = ['草稿','已寄送','已簽核','已拒絕'].includes(q.status) ? `crm-badge crm-quote-badge-${q.status}` : 'crm-badge';
+            return `<div class="quote-item-row" style="padding:8px 0;">
+                <span class="quote-item-desc">v${q.version}</span>
+                <span><span class="${statusCls}">${_esc(q.status)}</span></span>
+                <span class="quote-item-amount">$${(price || 0).toLocaleString('zh-TW')}</span>
+                <span class="crm-muted">${q.quote_date ? q.quote_date.substring(0, 10) : ''}</span>
+            </div>`;
+        }).join('');
+    } catch (_) {
+        container.innerHTML = '<div class="crm-empty">載入失敗</div>';
+    }
 }
 
 function closeDetail() {
@@ -298,12 +320,67 @@ async function deleteProject(project) {
     }
 }
 
+// ── CSV Import ───────────────────────────────────────────────
+
+let _csvFile = null;
+
+function openImportModal() {
+    _csvFile = null;
+    document.getElementById('proj-drop-filename').textContent = '';
+    const result = document.getElementById('proj-import-result');
+    result.style.display = 'none';
+    result.className = 'crm-import-result';
+    document.getElementById('proj-btn-do-import').disabled = true;
+    document.getElementById('proj-import-modal').style.display = 'flex';
+}
+
+function _setCsvFile(file) {
+    _csvFile = file;
+    document.getElementById('proj-drop-filename').textContent = file ? file.name : '';
+    document.getElementById('proj-btn-do-import').disabled = !file;
+}
+
+async function doImport() {
+    if (!_csvFile) return;
+    const btn = document.getElementById('proj-btn-do-import');
+    btn.disabled = true;
+    btn.textContent = '匯入中...';
+
+    try {
+        const token = localStorage.getItem('auth_token');
+        const headers = token ? { 'Authorization': `Bearer ${token}` } : {};
+        const form = new FormData();
+        form.append('file', _csvFile);
+        const res = await fetch('/api/v1/crm/projects/import_csv', { method: 'POST', headers, body: form });
+        if (!res.ok) {
+            const err = await res.json().catch(() => ({ detail: res.statusText }));
+            throw new Error(err.detail || '匯入失敗');
+        }
+        const data = await res.json();
+        const result = document.getElementById('proj-import-result');
+        result.className = 'crm-import-result';
+        result.innerHTML = `匯入完成<br>新增：<strong>${data.imported}</strong> 筆 ／ 更新：<strong>${data.updated}</strong> 筆 ／ 跳過：<strong>${data.skipped}</strong> 筆`;
+        result.style.display = 'block';
+        await loadProjects();
+    } catch (e) {
+        const result = document.getElementById('proj-import-result');
+        result.className = 'crm-import-result crm-import-result-error';
+        result.innerHTML = _esc(e.message);
+        result.style.display = 'block';
+    } finally {
+        btn.disabled = false;
+        btn.textContent = '開始匯入';
+    }
+}
+
 // ── Init ─────────────────────────────────────────────────────
 
 export function initCrmProjectsTab() {
-    // Move modal to body
-    const modal = document.getElementById('proj-modal');
-    if (modal) document.body.appendChild(modal);
+    // Move modals to body
+    for (const id of ['proj-modal', 'proj-import-modal']) {
+        const el = document.getElementById(id);
+        if (el) document.body.appendChild(el);
+    }
 
     // Global handlers for onclick
     window._projSelect = selectProject;
@@ -338,8 +415,24 @@ export function initCrmProjectsTab() {
 
     // Buttons
     document.getElementById('proj-btn-add').addEventListener('click', () => openModal());
+    document.getElementById('proj-btn-import').addEventListener('click', openImportModal);
     document.getElementById('proj-btn-save').addEventListener('click', saveProject);
     document.getElementById('proj-detail-close').addEventListener('click', closeDetail);
+    document.getElementById('proj-btn-do-import').addEventListener('click', doImport);
+
+    // CSV file input + drop zone
+    document.getElementById('proj-csv-file').addEventListener('change', e => {
+        _setCsvFile(e.target.files[0] || null);
+    });
+    const zone = document.getElementById('proj-drop-zone');
+    zone.addEventListener('dragover', e => { e.preventDefault(); zone.classList.add('drag-over'); });
+    zone.addEventListener('dragleave', () => zone.classList.remove('drag-over'));
+    zone.addEventListener('drop', e => {
+        e.preventDefault();
+        zone.classList.remove('drag-over');
+        const file = e.dataTransfer.files[0];
+        if (file && file.name.endsWith('.csv')) _setCsvFile(file);
+    });
 
     // Detail sub-tabs
     document.querySelectorAll('#proj-detail-tabs .crm-tab').forEach(btn => {
@@ -349,12 +442,15 @@ export function initCrmProjectsTab() {
             const tab = btn.dataset.tab;
             document.getElementById('proj-detail-info').classList.toggle('hidden', tab !== 'info');
             document.getElementById('proj-detail-team').classList.toggle('hidden', tab !== 'team');
+            document.getElementById('proj-detail-quotes').classList.toggle('hidden', tab !== 'quotes');
         });
     });
 
     // Modal overlay click to close
-    const modalEl = document.getElementById('proj-modal');
-    if (modalEl) modalEl.addEventListener('click', e => { if (e.target === modalEl) modalEl.style.display = 'none'; });
+    for (const id of ['proj-modal', 'proj-import-modal']) {
+        const el = document.getElementById(id);
+        if (el) el.addEventListener('click', e => { if (e.target === el) el.style.display = 'none'; });
+    }
 
     setupResizeHandle('proj-resize-handle', 'proj-detail-panel');
 

@@ -13,7 +13,8 @@
       "tts",
       "projects",
       "crm_clients",
-      "crm_projects"
+      "crm_projects",
+      "crm_quotes"
     ],
     "description": "系統管理員"
   },

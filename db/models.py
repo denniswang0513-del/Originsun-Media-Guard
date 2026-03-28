@@ -183,6 +183,64 @@ class CrmProject(Base):
     )
 
 
+class CrmQuotation(Base):
+    """CRM 報價單。"""
+    __tablename__ = "crm_quotations"
+
+    id = Column(String(32), primary_key=True)
+    project_id = Column(String(32), nullable=False)             # soft FK → crm_projects
+    version = Column(Integer, nullable=False, default=1)        # v1, v2, v3...
+    status = Column(String(32), nullable=False, default="草稿")  # 草稿/已寄送/已簽核/已拒絕
+    quote_date = Column(DateTime(timezone=True), nullable=True)
+    valid_until = Column(DateTime(timezone=True), nullable=True)
+    subtotal = Column(Integer, nullable=False, default=0)       # 整體規劃費（項目加總）
+    discount = Column(Integer, nullable=False, default=0)       # 專案折扣（正數）
+    tax_rate = Column(Integer, nullable=False, default=5)       # 稅率 %
+    tax_amount = Column(Integer, nullable=False, default=0)     # 稅額
+    total = Column(Integer, nullable=False, default=0)          # 含稅總計
+    final_price = Column(Integer, nullable=True)                # 最終報價（手動填，可與 total 不同）
+    payment_stages = Column(JSONB, nullable=True)               # [{"label":"腳本","pct":20},...]
+    terms = Column(Text, nullable=True)                         # 備註/條款
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    __table_args__ = (
+        Index("idx_quote_project", "project_id"),
+        Index("idx_quote_status", "status"),
+    )
+
+
+class CrmQuotationItem(Base):
+    """報價單項目明細。"""
+    __tablename__ = "crm_quotation_items"
+
+    id = Column(String(32), primary_key=True)
+    quotation_id = Column(String(32), nullable=False, index=True)  # soft FK → crm_quotations
+    group_name = Column(String(64), nullable=True, default="")  # 群組（前期作業/拍攝期/後製剪輯）
+    sort_order = Column(Integer, nullable=False, default=0)
+    description = Column(String(512), nullable=False)           # 項目描述
+    unit = Column(String(32), nullable=False, default="式")     # 單位（式/天/人/場/次/部/首）
+    quantity = Column(Integer, nullable=False, default=1)
+    unit_price = Column(Integer, nullable=False, default=0)     # 單價（元）
+    amount = Column(Integer, nullable=False, default=0)         # 小計 = quantity × unit_price
+    note = Column(String(512), nullable=True)                   # 備註（如出班價說明）
+
+
+class CrmQuotationTemplate(Base):
+    """報價範本。"""
+    __tablename__ = "crm_quotation_templates"
+
+    id = Column(String(32), primary_key=True)
+    name = Column(String(128), nullable=False, unique=True)
+    description = Column(Text, nullable=True)
+    tax_rate = Column(Integer, nullable=False, default=5)
+    terms = Column(Text, nullable=True)
+    payment_stages = Column(JSONB, nullable=True)
+    items = Column(JSONB, nullable=True)                        # [{group_name, description, unit, quantity, unit_price}]
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), server_default=func.now())
+
+
 class ApiKey(Base):
     """API Key for programmatic access (OpenClaw, scripts, CI/CD)."""
     __tablename__ = "api_keys"

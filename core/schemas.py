@@ -218,3 +218,33 @@ class CrmProjectPayload(BaseModel):
     folder_path: str = ""
     description: str = ""
     notes: str = ""
+
+
+class QuotationItemPayload(BaseModel):
+    group_name: str = ""
+    description: str
+    unit: str = "式"
+    quantity: int = 1
+    unit_price: int = 0
+    note: str = ""
+
+
+class QuotationPayload(BaseModel):
+    status: str = "草稿"
+    quote_date: Optional[str] = None
+    valid_until: Optional[str] = None
+    discount: int = 0
+    tax_rate: int = 5
+    final_price: Optional[int] = None
+    payment_stages: List[dict] = []
+    terms: str = ""
+    items: List[QuotationItemPayload] = []
+
+
+class QuotationTemplatePayload(BaseModel):
+    name: str
+    description: str = ""
+    tax_rate: int = 5
+    terms: str = ""
+    payment_stages: List[dict] = []
+    items: List[QuotationItemPayload] = []

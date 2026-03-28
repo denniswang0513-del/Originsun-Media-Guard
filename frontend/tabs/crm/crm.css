@@ -407,6 +407,7 @@
 
 /* ── Project badge colors ── */
 .crm-proj-badge-洽談中 { background: #3b2f1f; color: #fbbf24; }
+.crm-proj-badge-報價中 { background: #3b2a1f; color: #fb923c; }
 .crm-proj-badge-進行中 { background: #1e3a5f; color: #93c5fd; }
 .crm-proj-badge-已結案 { background: #374151; color: #9ca3af; }
 
@@ -445,3 +446,55 @@
   height: 14px;
   flex-shrink: 0;
 }
+
+/* ── Quotation badge colors ── */
+.crm-quote-badge-草稿   { background: #374151; color: #9ca3af; }
+.crm-quote-badge-已寄送 { background: #1e3a5f; color: #93c5fd; }
+.crm-quote-badge-已簽核 { background: #14532d; color: #86efac; }
+.crm-quote-badge-已拒絕 { background: #3b1f1f; color: #fca5a5; }
+
+/* ── Quotation list columns ── */
+.crm-col-amount { flex: 0.8; text-align: right; }
+.crm-row-amount { flex: 0.8; text-align: right; font-weight: 600; color: #e0e0e0; font-size: 13px; }
+
+/* ── Stat cards ── */
+.quote-stat-card {
+  background: #1e1e1e;
+  border: 1px solid #3a3a3a;
+  border-radius: 8px;
+  padding: 10px 18px;
+  min-width: 100px;
+}
+.quote-stat-label { font-size: 11px; color: #6b7280; margin-bottom: 2px; }
+.quote-stat-value { font-size: 18px; font-weight: 700; color: #e0e0e0; }
+
+/* ── Quotation items edit ── */
+.quote-items-list { display: flex; flex-direction: column; gap: 6px; margin-bottom: 12px; }
+.quote-item-edit-row {
+  display: flex; gap: 6px; align-items: center; font-size: 13px;
+}
+.quote-item-edit-row .crm-input { padding: 5px 6px; font-size: 12px; }
+.qi-amount { width: 90px; text-align: right; color: #9ca3af; font-size: 12px; flex-shrink: 0; }
+.qi-remove { flex-shrink: 0; }
+
+/* ── Quotation totals ── */
+.quote-totals {
+  background: #1e1e1e; border: 1px solid #3a3a3a; border-radius: 8px;
+  padding: 12px 16px; margin-bottom: 16px;
+}
+.quote-total-row {
+  display: flex; justify-content: space-between; align-items: center;
+  padding: 4px 0; font-size: 13px; color: #9ca3af;
+}
+.quote-total-row.total { font-size: 15px; font-weight: 700; color: #e0e0e0; border-top: 1px solid #3a3a3a; margin-top: 4px; padding-top: 8px; }
+
+/* ── Quotation detail items ── */
+.quote-group-title { font-size: 12px; font-weight: 700; color: #6b7280; padding: 10px 0 4px; border-bottom: 1px solid #2e2e2e; }
+.quote-item-row { display: flex; gap: 8px; padding: 6px 0; border-bottom: 1px solid #2e2e2e; font-size: 13px; }
+.quote-item-desc { flex: 2; color: #d1d5db; }
+.quote-item-qty { flex: 0.5; color: #9ca3af; text-align: center; }
+.quote-item-price { flex: 0.6; color: #9ca3af; text-align: right; }
+.quote-item-amount { flex: 0.6; color: #e0e0e0; text-align: right; font-weight: 600; }
+
+/* ── Template list ── */
+.quote-template-row { padding: 10px 0; border-bottom: 1px solid #2e2e2e; }
