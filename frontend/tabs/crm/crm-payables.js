@@ -21,6 +21,11 @@ async function loadPayables() {
         _payees = [];
     }
     renderList();
+    // If detail is open, refresh it
+    if (_selectedName) {
+        const updated = _payees.find(x => x.payee_name === _selectedName);
+        if (updated) renderDetail(updated);
+    }
 }
 
 function renderList() {
@@ -40,31 +45,43 @@ function renderList() {
             <div class="crm-row-amount">$${_fmtNum(p.total_amount)}</div>
             <div class="crm-row-client" style="font-size:11px;">${_esc(p.bank_name ? p.bank_name + ' ' + p.bank_account : '')}</div>
             <div class="crm-row-status"><span class="${statusCls}">${statusText}</span></div>
-            <div class="crm-row-actions" onclick="event.stopPropagation()">
-                ${!allPaid ? `<button class="crm-btn crm-btn-primary crm-btn-sm" onclick="window._payablePayAll('${_esc(p.payee_name)}')">全部付款</button>` : ''}
-            </div>
+            <div class="crm-row-actions" onclick="event.stopPropagation()"></div>
         </div>`;
     }).join('');
 }
 
 function renderDetail(p) {
-    document.getElementById('payable-detail-title').textContent = p.payee_name;
+    // Title bar: name + buttons on the right
+    const titleEl = document.getElementById('payable-detail-title');
+    titleEl.textContent = p.payee_name;
+
+    // Inject action buttons into the detail bar actions area
+    const actionsArea = document.getElementById('payable-bar-actions');
+    if (actionsArea) {
+        const hasUnpaid = p.items.some(it => it.payment_status !== '已付款');
+        actionsArea.innerHTML = `
+            <button class="crm-btn crm-btn-secondary crm-btn-sm" onclick="window._payableCopyInfo('${_esc(p.payee_name)}')">複製匯款資訊</button>
+            ${hasUnpaid ? `<button class="crm-btn crm-btn-primary crm-btn-sm" onclick="window._payablePayAll('${_esc(p.payee_name)}')">全部付款</button>` : ''}
+            <button class="crm-btn crm-btn-secondary crm-btn-sm" onclick="window._payableRefresh()">重新整理</button>
+            <button id="payable-detail-close" class="crm-detail-close" title="關閉" onclick="window._payableClose()">&#x2715;</button>
+        `;
+    }
 
     const bankHtml = p.bank_name
         ? `<div class="crm-detail-prop"><div class="crm-prop-label">銀行</div><div class="crm-prop-value">${_esc(p.bank_name)} ${_esc(p.bank_account)}</div></div>`
         : '';
 
+    const today = new Date().toISOString().substring(0, 10);
     const itemsHtml = p.items.map(it => {
         const isPaid = it.payment_status === '已付款';
         return `
-        <div class="payable-item" style="${isPaid ? 'opacity:0.5;' : ''}">
-            <span class="payable-item-date">${_esc(it.date)}</span>
+        <div class="payable-item" id="payable-row-${it.id}">
             <span class="payable-item-summary">${_esc(it.summary)}</span>
             <span class="payable-item-cat">${_esc(it.category)}</span>
             <span class="payable-item-amt">$${_fmtNum(it.amount)}</span>
             ${isPaid
-                ? `<span style="width:80px;text-align:center;font-size:11px;color:#86efac;">已付款</span>`
-                : `<button class="crm-btn crm-btn-danger crm-btn-sm" style="width:80px;" onclick="window._payableSinglePay('${it.id}','${_esc(p.payee_name)}')">未付款</button>`
+                ? `<span style="min-width:160px;text-align:right;font-size:11px;color:#86efac;">${it.payment_date || ''} 已付款</span>`
+                : `<button class="crm-btn crm-btn-danger crm-btn-sm" style="min-width:80px;" data-id="${it.id}" onclick="window._payableSinglePay(this,'${it.id}','${_esc(p.payee_name)}')">未付款</button>`
             }
         </div>`;
     }).join('');
@@ -77,12 +94,7 @@ function renderDetail(p) {
         <div style="border-top:1px solid #2e2e2e;margin:10px 0;"></div>
         <div style="font-size:12px;font-weight:700;color:#6b7280;margin-bottom:6px;">付款明細</div>
         ${itemsHtml}
-        <div style="display:flex;gap:8px;padding:10px 0;border-top:1px solid #2e2e2e;margin-top:8px;">
-            <button class="crm-btn crm-btn-secondary crm-btn-sm" onclick="window._payableCopyInfo('${_esc(p.payee_name)}')">複製匯款資訊</button>
-            ${p.items.some(it => it.payment_status !== '已付款') ? `<button class="crm-btn crm-btn-primary crm-btn-sm" onclick="window._payablePayAll('${_esc(p.payee_name)}')">全部付款</button>` : ''}
-        </div>
     `;
-
 }
 
 function selectPayee(name) {
@@ -104,18 +116,26 @@ function closeDetail() {
 }
 
 window._payableSelect = selectPayee;
-window._payableSinglePay = async (paymentId, payeeName) => {
+window._payableClose = closeDetail;
+window._payableRefresh = () => loadPayables();
+
+// Single pay: immediately update UI, then call API
+window._payableSinglePay = async (btn, paymentId, payeeName) => {
     if (!confirm('確定標記此筆為已付款？')) return;
+    const today = new Date().toISOString().substring(0, 10);
     try {
         await _fetch('/payments/batch-pay', {
             method: 'PATCH',
-            body: JSON.stringify({ payment_ids: [paymentId], payment_date: new Date().toISOString().substring(0, 10) })
+            body: JSON.stringify({ payment_ids: [paymentId], payment_date: today })
         });
-        await loadPayables();
-        const updated = _payees.find(x => x.payee_name === payeeName);
-        if (updated) renderDetail(updated);
+        // Immediately replace button with paid text (no reload)
+        const row = document.getElementById('payable-row-' + paymentId);
+        if (row) {
+            btn.outerHTML = `<span style="min-width:160px;text-align:right;font-size:11px;color:#86efac;">${today} 已付款</span>`;
+        }
     } catch (e) { alert(e.message); }
 };
+
 window._payableCopyInfo = (name) => {
     const p = _payees.find(x => x.payee_name === name);
     if (!p) return;
@@ -132,21 +152,26 @@ window._payableCopyInfo = (name) => {
         prompt('請手動複製:', text);
     });
 };
+
 window._payablePayAll = async (name) => {
     const p = _payees.find(x => x.payee_name === name);
     if (!p) return;
     const unpaidIds = p.items.filter(it => it.payment_status !== '已付款').map(it => it.id);
     if (!unpaidIds.length) return;
     if (!confirm(`確定將 ${name} 的 ${unpaidIds.length} 筆全部標記為已付款？`)) return;
+    const today = new Date().toISOString().substring(0, 10);
     try {
         await _fetch('/payments/batch-pay', {
             method: 'PATCH',
-            body: JSON.stringify({ payment_ids: unpaidIds, payment_date: new Date().toISOString().substring(0, 10) })
+            body: JSON.stringify({ payment_ids: unpaidIds, payment_date: today })
         });
-        await loadPayables();
-        if (_selectedName === name) {
-            const updated = _payees.find(x => x.payee_name === name);
-            if (updated) renderDetail(updated);
+        // Immediately update all buttons
+        for (const id of unpaidIds) {
+            const row = document.getElementById('payable-row-' + id);
+            if (row) {
+                const btn = row.querySelector('.crm-btn-danger');
+                if (btn) btn.outerHTML = `<span style="min-width:160px;text-align:right;font-size:11px;color:#86efac;">${today} 已付款</span>`;
+            }
         }
     } catch (e) { alert(e.message); }
 };
@@ -157,7 +182,6 @@ export function initCrmPayablesTab() {
     monthInput.value = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
     monthInput.addEventListener('change', loadPayables);
     document.getElementById('payable-filter-status').addEventListener('change', loadPayables);
-    document.getElementById('payable-detail-close').addEventListener('click', closeDetail);
     setupResizeHandle('payable-resize-handle', 'payable-detail-panel');
     loadPayables();
 }

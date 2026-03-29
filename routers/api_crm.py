@@ -1914,6 +1914,7 @@ async def payables_summary(month: str = Query(""), status: str = Query("")):
             "summary": p.summary or "",
             "category": p.category or "",
             "payment_status": p.payment_status or "",
+            "payment_date": p.payment_date.strftime("%Y/%m/%d") if p.payment_date else "",
         })
 
     payees = sorted(payee_groups.values(), key=lambda x: x["payee_name"])
