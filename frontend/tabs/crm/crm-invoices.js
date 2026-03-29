@@ -251,20 +251,31 @@ export function initCrmInvoicesTab() {
 
     setupResizeHandle('inv-resize-handle', 'inv-detail-panel');
     // View switching
-    let _paymentsLoaded = false;
-    let _paymentsLoading = false;
+    let _paymentsLoaded = false, _paymentsLoading = false;
+    let _cashbookLoaded = false, _cashbookLoading = false;
     const invView = document.getElementById('inv-invoices-view');
     const payView = document.getElementById('inv-payments-view');
+    const cashView = document.getElementById('inv-cashbook-view');
+    const allViews = [invView, payView, cashView];
+    const allBtns = ['inv-view-invoices', 'inv-view-payments', 'inv-view-cashbook'];
+    const baseUrl = location.origin;
+
+    function _switchView(showView, activeBtn) {
+        allViews.forEach(v => { if (v) v.style.display = 'none'; });
+        allBtns.forEach(b => document.getElementById(b)?.classList.remove('active'));
+        if (showView) showView.style.display = 'flex';
+        document.getElementById(activeBtn)?.classList.add('active');
+    }
+
+    document.getElementById('inv-view-invoices').addEventListener('click', () => _switchView(invView, 'inv-view-invoices'));
+
     document.getElementById('inv-view-payments').addEventListener('click', async () => {
         if (_paymentsLoading) return;
-        invView.style.display = 'none'; payView.style.display = 'flex';
-        document.getElementById('inv-view-invoices').classList.remove('active');
-        document.getElementById('inv-view-payments').classList.add('active');
+        _switchView(payView, 'inv-view-payments');
         if (!_paymentsLoaded) {
             _paymentsLoading = true;
             try {
                 const _cb = '?t=' + Date.now();
-                const baseUrl = location.origin;
                 const res = await fetch(baseUrl + '/tabs/crm/crm-payments.html' + _cb);
                 if (res.ok) {
                     payView.innerHTML = await res.text();
@@ -276,10 +287,24 @@ export function initCrmInvoicesTab() {
             finally { _paymentsLoading = false; }
         }
     });
-    document.getElementById('inv-view-invoices').addEventListener('click', () => {
-        payView.style.display = 'none'; invView.style.display = 'flex';
-        document.getElementById('inv-view-payments').classList.remove('active');
-        document.getElementById('inv-view-invoices').classList.add('active');
+
+    document.getElementById('inv-view-cashbook').addEventListener('click', async () => {
+        if (_cashbookLoading) return;
+        _switchView(cashView, 'inv-view-cashbook');
+        if (!_cashbookLoaded) {
+            _cashbookLoading = true;
+            try {
+                const _cb = '?t=' + Date.now();
+                const res = await fetch(baseUrl + '/tabs/crm/crm-cashbook.html' + _cb);
+                if (res.ok) {
+                    cashView.innerHTML = await res.text();
+                    const mod = await import(baseUrl + '/tabs/crm/crm-cashbook.js' + _cb);
+                    mod.initCrmCashbookTab();
+                    _cashbookLoaded = true;
+                }
+            } catch (e) { console.warn('[Cashbook] load failed:', e); }
+            finally { _cashbookLoading = false; }
+        }
     });
 
     Promise.all([loadInvoices(), loadProjects()]);

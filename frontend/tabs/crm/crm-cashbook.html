@@ -1,0 +1,152 @@
+<!-- Cash Entry Toolbar -->
+<div class="crm-toolbar">
+  <input id="cash-search" type="search" placeholder="搜尋摘要、收款人..." class="crm-search-input">
+  <select id="cash-filter-cat" class="crm-select">
+    <option value="">全部類別</option>
+    <option value="請款">請款</option>
+    <option value="收支">收支</option>
+    <option value="轉存">轉存</option>
+  </select>
+  <select id="cash-filter-item" class="crm-select">
+    <option value="">全部項目</option>
+    <option value="專案">專案</option>
+    <option value="設備耗材">設備耗材</option>
+    <option value="行政">行政</option>
+    <option value="轉存">轉存</option>
+  </select>
+  <div class="crm-toolbar-right">
+    <button id="cash-btn-import" class="crm-btn crm-btn-secondary">匯入 CSV</button>
+    <button id="cash-btn-add" class="crm-btn crm-btn-primary">+ 新增</button>
+  </div>
+</div>
+
+<!-- Body -->
+<div class="crm-body">
+  <div class="crm-list-panel">
+    <div class="crm-list-header">
+      <span class="crm-col-date">日期</span>
+      <span class="crm-col-name">摘要</span>
+      <span class="crm-col-amt-out">支出</span>
+      <span class="crm-col-amt-in">存入</span>
+      <span class="crm-col-client">收款人</span>
+      <span class="crm-col-status">類別</span>
+      <span class="crm-col-actions"></span>
+    </div>
+    <div id="cash-list-body"><div class="crm-empty">載入中...</div></div>
+  </div>
+
+  <div class="crm-resize-handle" id="cash-resize-handle" style="display:none;"></div>
+  <div class="crm-detail-panel" id="cash-detail-panel" style="display:none;">
+    <div class="crm-detail-bar">
+      <div id="cash-detail-title" class="crm-detail-bar-title"></div>
+      <div class="crm-detail-bar-actions">
+        <button id="cash-detail-close" class="crm-detail-close" title="關閉">&#x2715;</button>
+      </div>
+    </div>
+    <div class="crm-detail-content" id="cash-detail-content"></div>
+  </div>
+</div>
+
+<!-- Add/Edit Modal -->
+<div id="cash-modal" class="crm-modal-overlay" style="display:none;">
+  <div class="crm-modal">
+    <div class="crm-modal-header">
+      <h3 id="cash-modal-title">新增收支</h3>
+      <button onclick="document.getElementById('cash-modal').style.display='none'" class="crm-detail-close">&#x2715;</button>
+    </div>
+    <div class="crm-modal-body">
+      <div class="crm-form-grid">
+        <div class="crm-field crm-field-full">
+          <label>摘要 <span class="crm-required">*</span></label>
+          <input id="cash-f-summary" type="text" class="crm-input">
+        </div>
+        <div class="crm-field">
+          <label>日期</label>
+          <input id="cash-f-entry_date" type="date" class="crm-input">
+        </div>
+        <div class="crm-field">
+          <label>支出</label>
+          <input id="cash-f-expense" type="number" class="crm-input" min="0">
+        </div>
+        <div class="crm-field">
+          <label>請款</label>
+          <input id="cash-f-claim" type="number" class="crm-input" min="0">
+        </div>
+        <div class="crm-field">
+          <label>存入</label>
+          <input id="cash-f-deposit" type="number" class="crm-input" min="0">
+        </div>
+        <div class="crm-field">
+          <label>類別</label>
+          <select id="cash-f-category" class="crm-input">
+            <option value="">—</option>
+            <option value="請款">請款</option>
+            <option value="收支">收支</option>
+            <option value="轉存">轉存</option>
+          </select>
+        </div>
+        <div class="crm-field">
+          <label>項目</label>
+          <select id="cash-f-item" class="crm-input">
+            <option value="">—</option>
+            <option value="專案">專案</option>
+            <option value="設備耗材">設備耗材</option>
+            <option value="行政">行政</option>
+            <option value="轉存">轉存</option>
+          </select>
+        </div>
+        <div class="crm-field">
+          <label>收款人</label>
+          <input id="cash-f-payee" type="text" class="crm-input" placeholder="姓名_身分證">
+        </div>
+        <div class="crm-field">
+          <label>專案標籤</label>
+          <input id="cash-f-project_label" type="text" class="crm-input">
+        </div>
+        <div class="crm-field">
+          <label>付款狀態</label>
+          <select id="cash-f-payment_status" class="crm-input">
+            <option value="">—</option>
+            <option value="已付款">已付款</option>
+            <option value="未付款">未付款</option>
+          </select>
+        </div>
+        <div class="crm-field crm-field-full">
+          <label>附註</label>
+          <input id="cash-f-note" type="text" class="crm-input">
+        </div>
+      </div>
+      <div id="cash-modal-error" class="crm-error" style="display:none;"></div>
+    </div>
+    <div class="crm-modal-footer">
+      <button onclick="document.getElementById('cash-modal').style.display='none'" class="crm-btn crm-btn-secondary">取消</button>
+      <button id="cash-btn-save" class="crm-btn crm-btn-primary">儲存</button>
+    </div>
+  </div>
+</div>
+
+<!-- CSV Import Modal -->
+<div id="cash-import-modal" class="crm-modal-overlay" style="display:none;">
+  <div class="crm-modal" style="max-width:480px;">
+    <div class="crm-modal-header">
+      <h3>匯入收支 CSV</h3>
+      <button onclick="document.getElementById('cash-import-modal').style.display='none'" class="crm-detail-close">&#x2715;</button>
+    </div>
+    <div class="crm-modal-body">
+      <p class="crm-import-hint">支援你現有的收支明細表格式。</p>
+      <div class="crm-drop-zone" id="cash-drop-zone">
+        <div class="crm-drop-icon">📂</div>
+        <div>拖曳 CSV 至此，或</div>
+        <label class="crm-btn crm-btn-secondary" style="cursor:pointer;margin-top:8px;">
+          選擇檔案<input id="cash-csv-file" type="file" accept=".csv" style="display:none;">
+        </label>
+        <div id="cash-drop-filename" style="margin-top:8px;color:#9ca3af;font-size:12px;"></div>
+      </div>
+      <div id="cash-import-result" style="display:none;" class="crm-import-result"></div>
+    </div>
+    <div class="crm-modal-footer">
+      <button onclick="document.getElementById('cash-import-modal').style.display='none'" class="crm-btn crm-btn-secondary">關閉</button>
+      <button id="cash-btn-do-import" class="crm-btn crm-btn-primary" disabled>開始匯入</button>
+    </div>
+  </div>
+</div>

@@ -313,6 +313,26 @@ class PaymentRequestPayload(BaseModel):
     notes: str = ""
 
 
+class CashEntryPayload(BaseModel):
+    entry_date: Optional[str] = None
+    expense: Optional[int] = None
+    claim: Optional[int] = None
+    deposit: Optional[int] = None
+    summary: str
+    note: str = ""
+    category: str = ""
+    item: str = ""
+    sub_item: str = ""
+    payee: str = ""
+    status: str = ""
+    has_invoice: int = 0
+    invoice_number: str = ""
+    project_label: str = ""
+    project_id: Optional[str] = None
+    payment_date: Optional[str] = None
+    payment_status: str = ""
+
+
 class InvoicePayload(BaseModel):
     payment_type: str = "收款"
     payment_status: str = "已收款"

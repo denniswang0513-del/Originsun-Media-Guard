@@ -29,7 +29,7 @@ try:
     from sqlalchemy.exc import IntegrityError
     from db.models import (Client, User, CrmProject, CrmQuotation, CrmQuotationItem,
                            CrmQuotationTemplate, CrmStaff, CrmProjectStaff, CrmProjectExpense,
-                           CrmInvoice, CrmPaymentRequest)
+                           CrmInvoice, CrmPaymentRequest, CrmCashEntry)
     _HAS_DB = True
 except ImportError:
     _HAS_DB = False
@@ -96,7 +96,8 @@ def _to_dict(c) -> dict:
 
 from core.schemas import (ClientPayload, CrmProjectPayload, ProjectExpensePayload,
                          QuotationPayload, QuotationItemPayload, QuotationTemplatePayload,
-                         StaffPayload, ProjectStaffPayload, InvoicePayload, PaymentRequestPayload)
+                         StaffPayload, ProjectStaffPayload, InvoicePayload, PaymentRequestPayload,
+                         CashEntryPayload)
 
 
 # ── Endpoints ────────────────────────────────────────────────
@@ -1700,6 +1701,159 @@ async def import_payments_csv(request: Request, file: UploadFile = File(...)):
                 created_at=now, updated_at=now, **data,
             )
             session.add(p)
+            imported += 1
+        await session.commit()
+    return {"status": "ok", "imported": imported, "skipped": skipped}
+
+
+# ── Cash Entry (收支明細) ───────────────────────────────────
+
+def _to_cash_dict(e, project_name: str = "") -> dict:
+    return {
+        "id": e.id,
+        "entry_date": e.entry_date.isoformat() if e.entry_date else None,
+        "expense": e.expense, "claim": e.claim, "deposit": e.deposit,
+        "summary": e.summary or "", "note": e.note or "",
+        "category": e.category or "", "item": e.item or "",
+        "sub_item": e.sub_item or "", "payee": e.payee or "",
+        "status": e.status or "",
+        "has_invoice": e.has_invoice, "invoice_number": e.invoice_number or "",
+        "project_label": e.project_label or "", "project_id": e.project_id or "",
+        "project_name": project_name,
+        "payment_date": e.payment_date.isoformat() if e.payment_date else None,
+        "payment_status": e.payment_status or "",
+        "created_at": e.created_at.isoformat() if e.created_at else None,
+    }
+
+
+@router.get("/cash-entries")
+async def list_cash_entries(
+    q: str = Query(""), category: str = Query(""),
+    item: str = Query(""), project_id: str = Query(""),
+):
+    _require_db()
+    factory = await _get_factory()
+    async with factory() as session:
+        query = (
+            select(CrmCashEntry, CrmProject.name.label("pn"))
+            .outerjoin(CrmProject, CrmProject.id == CrmCashEntry.project_id)
+            .order_by(CrmCashEntry.entry_date.desc())
+        )
+        if category:
+            query = query.where(CrmCashEntry.category == category)
+        if item:
+            query = query.where(CrmCashEntry.item == item)
+        if project_id:
+            query = query.where(CrmCashEntry.project_id == project_id)
+        if q:
+            ql = f"%{q}%"
+            query = query.where(or_(CrmCashEntry.summary.ilike(ql), CrmCashEntry.payee.ilike(ql)))
+        rows = (await session.execute(query)).all()
+    return {"entries": [_to_cash_dict(r[0], r[1] or "") for r in rows], "total": len(rows)}
+
+
+@router.post("/cash-entries")
+async def create_cash_entry(req: CashEntryPayload, request: Request):
+    _check_auth(request)
+    _require_db()
+    factory = await _get_factory()
+    date_fields = {"entry_date", "payment_date"}
+    dates = {f: _parse_shoot_date(getattr(req, f)) for f in date_fields}
+    data = req.model_dump(exclude=date_fields)
+    e = CrmCashEntry(id=uuid.uuid4().hex, **dates, created_at=_now(), **data)
+    async with factory() as session:
+        session.add(e)
+        await session.commit()
+    return {"status": "ok", "entry_id": e.id}
+
+
+@router.put("/cash-entries/{entry_id}")
+async def update_cash_entry(entry_id: str, req: CashEntryPayload, request: Request):
+    _check_auth(request)
+    _require_db()
+    factory = await _get_factory()
+    date_fields = {"entry_date", "payment_date"}
+    dates = {f: _parse_shoot_date(getattr(req, f)) for f in date_fields}
+    async with factory() as session:
+        e = await session.get(CrmCashEntry, entry_id)
+        if not e:
+            raise HTTPException(status_code=404, detail="找不到此收支紀錄")
+        for k, v in req.model_dump(exclude=date_fields).items():
+            setattr(e, k, v)
+        for k, v in dates.items():
+            setattr(e, k, v)
+        await session.commit()
+    return {"status": "ok"}
+
+
+@router.delete("/cash-entries/{entry_id}")
+async def delete_cash_entry(entry_id: str, request: Request):
+    _check_auth(request)
+    _require_db()
+    factory = await _get_factory()
+    async with factory() as session:
+        e = await session.get(CrmCashEntry, entry_id)
+        if not e:
+            raise HTTPException(status_code=404, detail="找不到此收支紀錄")
+        await session.delete(e)
+        await session.commit()
+    return {"status": "ok"}
+
+
+_CASH_COL_MAP = {
+    "entry_date": ["日期"], "expense": ["支出"], "claim": ["請款"],
+    "deposit": ["存入"], "summary": ["摘要"], "note": ["附註"],
+    "category": ["類別"], "item": ["項目"], "sub_item": ["子項目"],
+    "payee": ["收款人"], "status": ["狀態"],
+    "invoice_number": ["發票號碼"], "project_label": ["專案標籤"],
+    "payment_date": ["付款日"], "payment_status": ["付款狀態"],
+}
+_CASH_INT_FIELDS = {"expense", "claim", "deposit"}
+
+
+def _map_cash_row(header_map: dict, row: dict) -> dict:
+    data = {}
+    for field, aliases in _CASH_COL_MAP.items():
+        for alias in aliases:
+            orig = header_map.get(alias.lower())
+            if orig and row.get(orig, "").strip():
+                val = row[orig].strip()
+                if field in _CASH_INT_FIELDS:
+                    clean = val.replace(",", "").replace("(", "").replace(")", "")
+                    data[field] = int(float(clean)) if clean.replace(".", "").replace("-", "").isdigit() else 0
+                else:
+                    data[field] = val
+                break
+    return data
+
+
+@router.post("/cash-entries/import_csv")
+async def import_cash_csv(request: Request, file: UploadFile = File(...)):
+    _check_auth(request)
+    _require_db()
+    content = await file.read()
+    try:
+        text = content.decode("utf-8-sig")
+    except UnicodeDecodeError:
+        text = content.decode("big5", errors="replace")
+
+    reader = csv.DictReader(io.StringIO(text))
+    headers = list(reader.fieldnames or [])
+    header_map = {h.lower(): h for h in headers}
+    imported = skipped = 0
+    factory = await _get_factory()
+
+    async with factory() as session:
+        for row in reader:
+            data = _map_cash_row(header_map, row)
+            if not data.get("summary"):
+                skipped += 1
+                continue
+            entry_date = _parse_shoot_date(data.pop("entry_date", None))
+            pay_date = _parse_shoot_date(data.pop("payment_date", None))
+            e = CrmCashEntry(id=uuid.uuid4().hex, entry_date=entry_date,
+                             payment_date=pay_date, created_at=_now(), **data)
+            session.add(e)
             imported += 1
         await session.commit()
     return {"status": "ok", "imported": imported, "skipped": skipped}

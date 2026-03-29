@@ -377,6 +377,31 @@ class CrmPaymentRequest(Base):
     )
 
 
+class CrmCashEntry(Base):
+    """帳務 — 收支明細（現金流日記帳）。"""
+    __tablename__ = "crm_cash_entries"
+
+    id = Column(String(32), primary_key=True)
+    entry_date = Column(DateTime(timezone=True), nullable=True, index=True)
+    expense = Column(Integer, nullable=True)                     # 支出
+    claim = Column(Integer, nullable=True)                       # 請款
+    deposit = Column(Integer, nullable=True)                     # 存入
+    summary = Column(String(255), nullable=False)                # 摘要
+    note = Column(Text, nullable=True)                           # 附註
+    category = Column(String(32), nullable=True)                 # 類別：請款/收支/轉存
+    item = Column(String(64), nullable=True)                     # 項目：專案/設備耗材/行政/轉存
+    sub_item = Column(String(64), nullable=True)                 # 子項目
+    payee = Column(String(128), nullable=True)                   # 收款人（姓名_身分證）
+    status = Column(String(32), nullable=True)                   # 狀態
+    has_invoice = Column(Integer, nullable=False, default=0)     # 發票 0/1
+    invoice_number = Column(String(32), nullable=True)
+    project_label = Column(String(128), nullable=True)           # 專案標籤
+    project_id = Column(String(32), nullable=True)               # 關聯專案
+    payment_date = Column(DateTime(timezone=True), nullable=True)
+    payment_status = Column(String(16), nullable=True)           # 已付款/未付款
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+
 class ApiKey(Base):
     """API Key for programmatic access (OpenClaw, scripts, CI/CD)."""
     __tablename__ = "api_keys"

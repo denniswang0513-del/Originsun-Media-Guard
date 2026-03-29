@@ -515,6 +515,12 @@
 .crm-pay-badge-付款 { background: #3b2f1f; color: #fbbf24; }
 .crm-pay-badge-作廢 { background: #374151; color: #9ca3af; text-decoration: line-through; }
 
+/* ── Cash entry columns ── */
+.crm-col-amt-out { flex: 0.7; text-align: right; }
+.crm-col-amt-in  { flex: 0.7; text-align: right; }
+.crm-row-amt-out { flex: 0.7; text-align: right; font-size: 13px; }
+.crm-row-amt-in  { flex: 0.7; text-align: right; font-size: 13px; }
+
 /* ── Staff badge colors ── */
 .crm-staff-badge-在職 { background: #14532d; color: #86efac; }
 .crm-staff-badge-離職 { background: #374151; color: #9ca3af; }
