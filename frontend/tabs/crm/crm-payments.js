@@ -91,10 +91,10 @@ function closeDetail() {
 }
 
 const _FIELDS = ['summary', 'amount', 'request_date', 'category', 'payee_name', 'payee_id',
-    'payee_type', 'needs_invoice', 'invoice_number', 'project_label', 'project_id',
+    'payee_type', 'invoice_number', 'project_label', 'project_id',
     'payment_date', 'payment_status', 'notes'];
 const _DATE_FIELDS = ['request_date', 'payment_date'];
-const _INT_FIELDS = ['amount', 'needs_invoice'];
+const _INT_FIELDS = ['amount'];
 
 const _PROJECT_CATEGORIES = ['專案外包', '專案雜支'];
 let _invoiceList = [];
@@ -259,7 +259,6 @@ export function initCrmPaymentsTab() {
                     if (!document.getElementById('pay-f-amount').value) {
                         document.getElementById('pay-f-amount').value = inv.amount_total || '';
                     }
-                    document.getElementById('pay-f-needs_invoice').value = '1';
                 }
             }
         }
