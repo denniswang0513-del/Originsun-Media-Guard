@@ -183,6 +183,19 @@ if (typeof appendLog === 'undefined') {
                 } catch (e) {
                     console.warn('[CRM Staff Tab] 載入失敗:', e);
                 }
+
+                // Load CRM Invoices Tab
+                try {
+                    const tabInv = document.getElementById('tab_crm_invoices');
+                    const invRes = await fetch(`./tabs/crm/crm-invoices.html${_cb}`);
+                    if (invRes.ok) {
+                        tabInv.innerHTML = await invRes.text();
+                        const invModule = await import(`./tabs/crm/crm-invoices.js${_cb}`);
+                        invModule.initCrmInvoicesTab();
+                    }
+                } catch (e) {
+                    console.warn('[CRM Invoices Tab] 載入失敗:', e);
+                }
             } catch (err) {
                 console.error("Error loading tabs:", err);
             }
@@ -1222,7 +1235,7 @@ if (typeof appendLog === 'undefined') {
             document.getElementById(tabId).classList.remove('hidden');
 
             // 重置按鈕樣式
-            const btnCols = ['btn_tab-projects', 'btn_tab_main', 'btn_tab_verify', 'btn_tab_transcode', 'btn_tab_concat', 'btn_tab_report', 'btn_tab_transcribe', 'btn_tab_tts', 'btn_tab_crm_clients', 'btn_tab_crm_projects', 'btn_tab_crm_quotes', 'btn_tab_crm_staff'];
+            const btnCols = ['btn_tab-projects', 'btn_tab_main', 'btn_tab_verify', 'btn_tab_transcode', 'btn_tab_concat', 'btn_tab_report', 'btn_tab_transcribe', 'btn_tab_tts', 'btn_tab_crm_clients', 'btn_tab_crm_projects', 'btn_tab_crm_quotes', 'btn_tab_crm_staff', 'btn_tab_crm_invoices'];
             btnCols.forEach(btn => {
                 const el = document.getElementById(btn);
                 if (el) {
@@ -1239,7 +1252,7 @@ if (typeof appendLog === 'undefined') {
             }
 
             // Hide progress/log sections for CRM tabs (no media tasks)
-            const crmTabs = ['tab_crm_clients', 'tab_crm_projects', 'tab_crm_quotes', 'tab_crm_staff'];
+            const crmTabs = ['tab_crm_clients', 'tab_crm_projects', 'tab_crm_quotes', 'tab_crm_staff', 'tab_crm_invoices'];
             const isCrm = crmTabs.includes(tabId);
             document.querySelectorAll('.media-task-section').forEach(el => el.style.display = isCrm ? 'none' : '');
 

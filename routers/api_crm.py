@@ -28,7 +28,8 @@ try:
     from sqlalchemy import select, or_, delete
     from sqlalchemy.exc import IntegrityError
     from db.models import (Client, User, CrmProject, CrmQuotation, CrmQuotationItem,
-                           CrmQuotationTemplate, CrmStaff, CrmProjectStaff, CrmProjectExpense)
+                           CrmQuotationTemplate, CrmStaff, CrmProjectStaff, CrmProjectExpense,
+                           CrmInvoice, CrmPaymentRequest)
     _HAS_DB = True
 except ImportError:
     _HAS_DB = False
@@ -95,7 +96,7 @@ def _to_dict(c) -> dict:
 
 from core.schemas import (ClientPayload, CrmProjectPayload, ProjectExpensePayload,
                          QuotationPayload, QuotationItemPayload, QuotationTemplatePayload,
-                         StaffPayload, ProjectStaffPayload)
+                         StaffPayload, ProjectStaffPayload, InvoicePayload, PaymentRequestPayload)
 
 
 # ── Endpoints ────────────────────────────────────────────────
@@ -1312,3 +1313,393 @@ async def project_financial_summary(project_id: str):
         "amount_received": project.amount_received,
         "transfer_fee": project.transfer_fee,
     }
+
+
+# ── Invoice Helpers ─────────────────────────────────────────
+
+def _to_invoice_dict(inv, project_name: str = "") -> dict:
+    return {
+        "id": inv.id, "payment_type": inv.payment_type or "收款",
+        "payment_status": inv.payment_status or "", "issue_status": inv.issue_status or "",
+        "invoice_number": inv.invoice_number or "", "title": inv.title or "",
+        "invoice_date": inv.invoice_date.isoformat() if inv.invoice_date else None,
+        "applicant": inv.applicant or "", "category": inv.category or "專案",
+        "invoice_kind": inv.invoice_kind or "", "amount_ex_tax": inv.amount_ex_tax,
+        "amount_total": inv.amount_total, "tax_amount": inv.tax_amount,
+        "commission": inv.commission, "company_name": inv.company_name or "",
+        "tax_id": inv.tax_id or "", "item_type": inv.item_type or "",
+        "project_id": inv.project_id or "", "project_name": project_name,
+        "notes": inv.notes or "",
+        "created_at": inv.created_at.isoformat() if inv.created_at else None,
+    }
+
+
+# ── Invoice Endpoints ───────────────────────────────────────
+
+@router.get("/invoices")
+async def list_invoices(
+    q: str = Query(""), payment_type: str = Query(""),
+    category: str = Query(""), project_id: str = Query(""),
+):
+    _require_db()
+    factory = await _get_factory()
+    async with factory() as session:
+        query = (
+            select(CrmInvoice, CrmProject.name.label("pn"))
+            .outerjoin(CrmProject, CrmProject.id == CrmInvoice.project_id)
+            .order_by(CrmInvoice.invoice_date.desc())
+        )
+        if payment_type:
+            query = query.where(CrmInvoice.payment_type == payment_type)
+        if category:
+            query = query.where(CrmInvoice.category == category)
+        if project_id:
+            query = query.where(CrmInvoice.project_id == project_id)
+        if q:
+            ql = f"%{q}%"
+            query = query.where(or_(
+                CrmInvoice.title.ilike(ql), CrmInvoice.company_name.ilike(ql),
+                CrmInvoice.invoice_number.ilike(ql),
+            ))
+        rows = (await session.execute(query)).all()
+    return {
+        "invoices": [_to_invoice_dict(r[0], r[1] or "") for r in rows],
+        "total": len(rows),
+    }
+
+
+@router.post("/invoices")
+async def create_invoice(req: InvoicePayload, request: Request):
+    _check_auth(request)
+    _require_db()
+    factory = await _get_factory()
+    now = _now()
+    inv = CrmInvoice(
+        id=uuid.uuid4().hex, invoice_date=_parse_shoot_date(req.invoice_date),
+        created_at=now, updated_at=now,
+        **req.model_dump(exclude={"invoice_date"}),
+    )
+    async with factory() as session:
+        session.add(inv)
+        await session.commit()
+        await session.refresh(inv)
+    return {"status": "ok", "invoice": _to_invoice_dict(inv)}
+
+
+@router.get("/invoices/{invoice_id}")
+async def get_invoice(invoice_id: str):
+    _require_db()
+    factory = await _get_factory()
+    async with factory() as session:
+        inv = await session.get(CrmInvoice, invoice_id)
+        if not inv:
+            raise HTTPException(status_code=404, detail="找不到此發票")
+        pn = ""
+        if inv.project_id:
+            p = await session.get(CrmProject, inv.project_id)
+            pn = p.name if p else ""
+    return _to_invoice_dict(inv, pn)
+
+
+@router.put("/invoices/{invoice_id}")
+async def update_invoice(invoice_id: str, req: InvoicePayload, request: Request):
+    _check_auth(request)
+    _require_db()
+    factory = await _get_factory()
+    async with factory() as session:
+        inv = await session.get(CrmInvoice, invoice_id)
+        if not inv:
+            raise HTTPException(status_code=404, detail="找不到此發票")
+        for k, v in req.model_dump(exclude={"invoice_date"}).items():
+            setattr(inv, k, v)
+        inv.invoice_date = _parse_shoot_date(req.invoice_date)
+        inv.updated_at = _now()
+        await session.commit()
+    return {"status": "ok"}
+
+
+@router.delete("/invoices/{invoice_id}")
+async def delete_invoice(invoice_id: str, request: Request):
+    _check_auth(request)
+    _require_db()
+    factory = await _get_factory()
+    async with factory() as session:
+        inv = await session.get(CrmInvoice, invoice_id)
+        if not inv:
+            raise HTTPException(status_code=404, detail="找不到此發票")
+        await session.delete(inv)
+        await session.commit()
+    return {"status": "ok"}
+
+
+# ── Invoice CSV Import ──────────────────────────────────────
+
+_INVOICE_COL_MAP = {
+    "payment_type":   ["款項狀態", "payment_type"],
+    "issue_status":   ["開立狀態", "issue_status"],
+    "invoice_number": ["發票編號", "invoice_number"],
+    "invoice_date":   ["填表時間", "invoice_date", "日期"],
+    "title":          ["名稱", "title", "案件名稱"],
+    "applicant":      ["申請人", "applicant"],
+    "category":       ["類別", "category"],
+    "invoice_kind":   ["發票種類", "invoice_kind"],
+    "amount_ex_tax":  ["未稅價", "amount_ex_tax"],
+    "amount_total":   ["發票金額", "amount_total"],
+    "tax_amount":     ["稅額", "tax_amount"],
+    "commission":     ["代開應區", "commission"],
+    "company_name":   ["抬頭", "company_name"],
+    "tax_id":         ["統編", "tax_id"],
+    "item_type":      ["品項", "item_type"],
+}
+
+_INVOICE_INT_FIELDS = {"amount_ex_tax", "amount_total", "tax_amount", "commission"}
+
+
+def _map_invoice_row(header_map: dict, row: dict) -> dict:
+    data = {}
+    for field, aliases in _INVOICE_COL_MAP.items():
+        for alias in aliases:
+            orig = header_map.get(alias.lower())
+            if orig and row.get(orig, "").strip():
+                val = row[orig].strip()
+                if field in _INVOICE_INT_FIELDS:
+                    val = int(float(val)) if val.replace('.', '').replace('-', '').isdigit() else 0
+                data[field] = val
+                break
+    # Derive payment_status from payment_type
+    pt = data.get("payment_type", "")
+    if "收" in pt:
+        data["payment_status"] = "已收款"
+        data["payment_type"] = "收款"
+    elif "付" in pt:
+        data["payment_status"] = "已付款"
+        data["payment_type"] = "付款"
+    elif "作廢" in pt:
+        data["payment_status"] = "作廢"
+    return data
+
+
+@router.post("/invoices/import_csv")
+async def import_invoices_csv(request: Request, file: UploadFile = File(...)):
+    _check_auth(request)
+    _require_db()
+    content = await file.read()
+    try:
+        text = content.decode("utf-8-sig")
+    except UnicodeDecodeError:
+        text = content.decode("big5", errors="replace")
+
+    reader = csv.DictReader(io.StringIO(text))
+    headers = list(reader.fieldnames or [])
+    header_map = {h.lower(): h for h in headers}
+    imported = skipped = 0
+    factory = await _get_factory()
+
+    async with factory() as session:
+        for row in reader:
+            data = _map_invoice_row(header_map, row)
+            if not data.get("title"):
+                skipped += 1
+                continue
+            now = _now()
+            inv_date = _parse_shoot_date(data.pop("invoice_date", None))
+            inv = CrmInvoice(id=uuid.uuid4().hex, invoice_date=inv_date,
+                             created_at=now, updated_at=now, **data)
+            session.add(inv)
+            imported += 1
+        await session.commit()
+    return {"status": "ok", "imported": imported, "skipped": skipped}
+
+
+# ── Payment Request Helpers ─────────────────────────────────
+
+def _to_payment_dict(p, project_name: str = "") -> dict:
+    return {
+        "id": p.id, "request_date": p.request_date.isoformat() if p.request_date else None,
+        "amount": p.amount, "summary": p.summary or "",
+        "category": p.category or "專案外包",
+        "payee_name": p.payee_name or "", "payee_id": p.payee_id or "",
+        "payee_type": p.payee_type or "",
+        "needs_invoice": p.needs_invoice, "invoice_number": p.invoice_number or "",
+        "invoice_amount": p.invoice_amount,
+        "project_id": p.project_id or "", "project_name": project_name,
+        "project_label": p.project_label or "",
+        "payment_date": p.payment_date.isoformat() if p.payment_date else None,
+        "payment_status": p.payment_status or "未付款",
+        "notes": p.notes or "",
+        "created_at": p.created_at.isoformat() if p.created_at else None,
+    }
+
+
+# ── Payment Request Endpoints ──────────────────────────────
+
+@router.get("/payments")
+async def list_payments(
+    q: str = Query(""), category: str = Query(""),
+    payment_status: str = Query(""), project_id: str = Query(""),
+):
+    _require_db()
+    factory = await _get_factory()
+    async with factory() as session:
+        query = (
+            select(CrmPaymentRequest, CrmProject.name.label("pn"))
+            .outerjoin(CrmProject, CrmProject.id == CrmPaymentRequest.project_id)
+            .order_by(CrmPaymentRequest.request_date.desc())
+        )
+        if category:
+            query = query.where(CrmPaymentRequest.category == category)
+        if payment_status:
+            query = query.where(CrmPaymentRequest.payment_status == payment_status)
+        if project_id:
+            query = query.where(CrmPaymentRequest.project_id == project_id)
+        if q:
+            ql = f"%{q}%"
+            query = query.where(or_(
+                CrmPaymentRequest.summary.ilike(ql),
+                CrmPaymentRequest.payee_name.ilike(ql),
+            ))
+        rows = (await session.execute(query)).all()
+    return {
+        "payments": [_to_payment_dict(r[0], r[1] or "") for r in rows],
+        "total": len(rows),
+    }
+
+
+@router.post("/payments")
+async def create_payment(req: PaymentRequestPayload, request: Request):
+    _check_auth(request)
+    _require_db()
+    factory = await _get_factory()
+    now = _now()
+    date_fields = {"request_date", "payment_date"}
+    dates = {f: _parse_shoot_date(getattr(req, f)) for f in date_fields}
+    data = req.model_dump(exclude=date_fields)
+    p = CrmPaymentRequest(id=uuid.uuid4().hex, **dates, created_at=now, updated_at=now, **data)
+    async with factory() as session:
+        session.add(p)
+        await session.commit()
+    return {"status": "ok", "payment": _to_payment_dict(p)}
+
+
+@router.get("/payments/{payment_id}")
+async def get_payment(payment_id: str):
+    _require_db()
+    factory = await _get_factory()
+    async with factory() as session:
+        p = await session.get(CrmPaymentRequest, payment_id)
+        if not p:
+            raise HTTPException(status_code=404, detail="找不到此請款單")
+        pn = ""
+        if p.project_id:
+            proj = await session.get(CrmProject, p.project_id)
+            pn = proj.name if proj else ""
+    return _to_payment_dict(p, pn)
+
+
+@router.put("/payments/{payment_id}")
+async def update_payment(payment_id: str, req: PaymentRequestPayload, request: Request):
+    _check_auth(request)
+    _require_db()
+    factory = await _get_factory()
+    date_fields = {"request_date", "payment_date"}
+    dates = {f: _parse_shoot_date(getattr(req, f)) for f in date_fields}
+    async with factory() as session:
+        p = await session.get(CrmPaymentRequest, payment_id)
+        if not p:
+            raise HTTPException(status_code=404, detail="找不到此請款單")
+        for k, v in req.model_dump(exclude=date_fields).items():
+            setattr(p, k, v)
+        for k, v in dates.items():
+            setattr(p, k, v)
+        p.updated_at = _now()
+        await session.commit()
+    return {"status": "ok"}
+
+
+@router.delete("/payments/{payment_id}")
+async def delete_payment(payment_id: str, request: Request):
+    _check_auth(request)
+    _require_db()
+    factory = await _get_factory()
+    async with factory() as session:
+        p = await session.get(CrmPaymentRequest, payment_id)
+        if not p:
+            raise HTTPException(status_code=404, detail="找不到此請款單")
+        await session.delete(p)
+        await session.commit()
+    return {"status": "ok"}
+
+
+# ── Payment CSV Import ──────────────────────────────────────
+
+_PAYMENT_COL_MAP = {
+    "request_date":   ["日期", "request_date"],
+    "amount":         ["請款", "金額", "amount"],
+    "summary":        ["摘要", "summary"],
+    "category":       ["項目", "類別", "category"],
+    "payee_combined": ["收款人", "payee"],
+    "payee_type":     ["狀態", "payee_type"],
+    "invoice_number": ["發票號碼", "invoice_number"],
+    "project_label":  ["專案標籤", "project_label"],
+    "payment_date":   ["付款日", "payment_date"],
+    "payment_status": ["付款狀態", "payment_status"],
+    "notes":          ["附註", "備註", "notes"],
+}
+
+
+def _map_payment_row(header_map: dict, row: dict) -> dict:
+    data = {}
+    for field, aliases in _PAYMENT_COL_MAP.items():
+        for alias in aliases:
+            orig = header_map.get(alias.lower())
+            if orig and row.get(orig, "").strip():
+                val = row[orig].strip()
+                if field == "amount":
+                    val = int(float(val.replace(",", ""))) if val.replace(",", "").replace(".", "").replace("-", "").isdigit() else 0
+                data[field] = val
+                break
+    # Parse combined payee field: "姓名_身分證" or just "姓名"
+    combined = data.pop("payee_combined", "")
+    if combined:
+        parts = combined.split("_", 1)
+        data["payee_name"] = parts[0]
+        if len(parts) > 1:
+            data["payee_id"] = parts[1]
+    return data
+
+
+@router.post("/payments/import_csv")
+async def import_payments_csv(request: Request, file: UploadFile = File(...)):
+    _check_auth(request)
+    _require_db()
+    content = await file.read()
+    try:
+        text = content.decode("utf-8-sig")
+    except UnicodeDecodeError:
+        text = content.decode("big5", errors="replace")
+
+    reader = csv.DictReader(io.StringIO(text))
+    headers = list(reader.fieldnames or [])
+    header_map = {h.lower(): h for h in headers}
+    imported = skipped = 0
+    factory = await _get_factory()
+
+    async with factory() as session:
+        for row in reader:
+            data = _map_payment_row(header_map, row)
+            if not data.get("summary") and not data.get("payee_name"):
+                skipped += 1
+                continue
+            if not data.get("summary"):
+                data["summary"] = data.get("payee_name", "")
+            now = _now()
+            req_date = _parse_shoot_date(data.pop("request_date", None))
+            pay_date = _parse_shoot_date(data.pop("payment_date", None))
+            p = CrmPaymentRequest(
+                id=uuid.uuid4().hex, request_date=req_date, payment_date=pay_date,
+                created_at=now, updated_at=now, **data,
+            )
+            session.add(p)
+            imported += 1
+        await session.commit()
+    return {"status": "ok", "imported": imported, "skipped": skipped}

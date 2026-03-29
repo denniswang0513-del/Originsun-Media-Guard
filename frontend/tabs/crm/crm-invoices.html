@@ -1,0 +1,187 @@
+<div class="crm-root">
+<!-- View switcher -->
+<div class="crm-view-switcher">
+  <button id="inv-view-invoices" class="crm-view-btn active">發票</button>
+  <button id="inv-view-payments" class="crm-view-btn">請款</button>
+</div>
+
+<!-- Invoice view -->
+<div id="inv-invoices-view">
+<!-- Toolbar -->
+<div class="crm-toolbar">
+  <input id="inv-search" type="search" placeholder="搜尋名稱、抬頭、發票號..." class="crm-search-input">
+  <select id="inv-filter-type" class="crm-select">
+    <option value="">全部款項</option>
+    <option value="收款">收款</option>
+    <option value="付款">付款</option>
+  </select>
+  <select id="inv-filter-cat" class="crm-select">
+    <option value="">全部類別</option>
+    <option value="專案">專案</option>
+    <option value="內部代開">內部代開</option>
+  </select>
+  <div class="crm-toolbar-right">
+    <button id="inv-btn-import" class="crm-btn crm-btn-secondary">匯入 CSV</button>
+    <button id="inv-btn-add" class="crm-btn crm-btn-primary">+ 新增發票</button>
+  </div>
+</div>
+
+<!-- Body -->
+<div class="crm-body">
+  <div class="crm-list-panel">
+    <div class="crm-list-header">
+      <span class="crm-col-name">名稱</span>
+      <span class="crm-col-status">款項</span>
+      <span class="crm-col-amount">金額</span>
+      <span class="crm-col-client">抬頭</span>
+      <span class="crm-col-date">日期</span>
+      <span class="crm-col-actions"></span>
+    </div>
+    <div id="inv-list-body"><div class="crm-empty">載入中...</div></div>
+  </div>
+
+  <div class="crm-resize-handle" id="inv-resize-handle" style="display:none;"></div>
+  <div class="crm-detail-panel" id="inv-detail-panel" style="display:none;">
+    <div class="crm-detail-bar">
+      <div id="inv-detail-title" class="crm-detail-bar-title"></div>
+      <div class="crm-detail-bar-actions">
+        <button id="inv-detail-close" class="crm-detail-close" title="關閉">&#x2715;</button>
+      </div>
+    </div>
+    <div class="crm-detail-content" id="inv-detail-content"></div>
+  </div>
+</div>
+</div>
+</div>
+
+<!-- Payment view (lazy-loaded) -->
+<div id="inv-payments-view" style="display:none;"></div>
+</div>
+
+<!-- Add/Edit Modal -->
+<div id="inv-modal" class="crm-modal-overlay" style="display:none;">
+  <div class="crm-modal">
+    <div class="crm-modal-header">
+      <h3 id="inv-modal-title">新增發票</h3>
+      <button onclick="document.getElementById('inv-modal').style.display='none'" class="crm-detail-close">&#x2715;</button>
+    </div>
+    <div class="crm-modal-body">
+      <div class="crm-form-grid">
+        <div class="crm-field">
+          <label>款項類型</label>
+          <select id="inv-f-payment_type" class="crm-input">
+            <option value="收款">收款</option>
+            <option value="付款">付款</option>
+          </select>
+        </div>
+        <div class="crm-field">
+          <label>開立狀態</label>
+          <select id="inv-f-issue_status" class="crm-input">
+            <option value="已開立">已開立</option>
+            <option value="作廢">作廢</option>
+          </select>
+        </div>
+        <div class="crm-field">
+          <label>發票編號</label>
+          <input id="inv-f-invoice_number" type="text" class="crm-input">
+        </div>
+        <div class="crm-field">
+          <label>日期</label>
+          <input id="inv-f-invoice_date" type="date" class="crm-input">
+        </div>
+        <div class="crm-field crm-field-full">
+          <label>名稱 <span class="crm-required">*</span></label>
+          <input id="inv-f-title" type="text" class="crm-input" placeholder="案件/項目名稱">
+        </div>
+        <div class="crm-field">
+          <label>類別</label>
+          <select id="inv-f-category" class="crm-input">
+            <option value="專案">專案</option>
+            <option value="內部代開">內部代開</option>
+          </select>
+        </div>
+        <div class="crm-field">
+          <label>發票種類</label>
+          <select id="inv-f-invoice_kind" class="crm-input">
+            <option value="電子發票">電子發票</option>
+            <option value="紙本發票">紙本發票</option>
+          </select>
+        </div>
+        <div class="crm-field">
+          <label>未稅價</label>
+          <input id="inv-f-amount_ex_tax" type="number" class="crm-input" min="0">
+        </div>
+        <div class="crm-field">
+          <label>發票金額（含稅）</label>
+          <input id="inv-f-amount_total" type="number" class="crm-input" min="0">
+        </div>
+        <div class="crm-field">
+          <label>稅額</label>
+          <input id="inv-f-tax_amount" type="number" class="crm-input" min="0">
+        </div>
+        <div class="crm-field">
+          <label>代開應區</label>
+          <input id="inv-f-commission" type="number" class="crm-input" min="0">
+        </div>
+        <div class="crm-field">
+          <label>申請人</label>
+          <input id="inv-f-applicant" type="text" class="crm-input">
+        </div>
+        <div class="crm-field">
+          <label>抬頭</label>
+          <input id="inv-f-company_name" type="text" class="crm-input">
+        </div>
+        <div class="crm-field">
+          <label>統編</label>
+          <input id="inv-f-tax_id" type="text" class="crm-input" maxlength="8">
+        </div>
+        <div class="crm-field">
+          <label>品項</label>
+          <input id="inv-f-item_type" type="text" class="crm-input" placeholder="影片製作/展場攝影...">
+        </div>
+        <div class="crm-field">
+          <label>關聯專案</label>
+          <select id="inv-f-project_id" class="crm-input">
+            <option value="">— 不關聯 —</option>
+          </select>
+        </div>
+        <div class="crm-field crm-field-full">
+          <label>備註</label>
+          <input id="inv-f-notes" type="text" class="crm-input">
+        </div>
+      </div>
+      <div id="inv-modal-error" class="crm-error" style="display:none;"></div>
+    </div>
+    <div class="crm-modal-footer">
+      <button onclick="document.getElementById('inv-modal').style.display='none'" class="crm-btn crm-btn-secondary">取消</button>
+      <button id="inv-btn-save" class="crm-btn crm-btn-primary">儲存</button>
+    </div>
+  </div>
+</div>
+
+<!-- CSV Import Modal -->
+<div id="inv-import-modal" class="crm-modal-overlay" style="display:none;">
+  <div class="crm-modal" style="max-width:480px;">
+    <div class="crm-modal-header">
+      <h3>匯入發票 CSV</h3>
+      <button onclick="document.getElementById('inv-import-modal').style.display='none'" class="crm-detail-close">&#x2715;</button>
+    </div>
+    <div class="crm-modal-body">
+      <p class="crm-import-hint">CSV 需包含「名稱」欄位。支援你現有的發票表格式。</p>
+      <div class="crm-drop-zone" id="inv-drop-zone">
+        <div class="crm-drop-icon">📂</div>
+        <div>拖曳 CSV 至此，或</div>
+        <label class="crm-btn crm-btn-secondary" style="cursor:pointer;margin-top:8px;">
+          選擇檔案
+          <input id="inv-csv-file" type="file" accept=".csv" style="display:none;">
+        </label>
+        <div id="inv-drop-filename" style="margin-top:8px;color:#9ca3af;font-size:12px;"></div>
+      </div>
+      <div id="inv-import-result" style="display:none;" class="crm-import-result"></div>
+    </div>
+    <div class="crm-modal-footer">
+      <button onclick="document.getElementById('inv-import-modal').style.display='none'" class="crm-btn crm-btn-secondary">關閉</button>
+      <button id="inv-btn-do-import" class="crm-btn crm-btn-primary" disabled>開始匯入</button>
+    </div>
+  </div>
+</div>

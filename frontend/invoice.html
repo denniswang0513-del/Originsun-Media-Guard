@@ -1,0 +1,178 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>源日影像 — 發票登記</title>
+<style>
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body { background: #1a1a1a; color: #e0e0e0; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; min-height: 100vh; }
+.container { max-width: 480px; margin: 0 auto; padding: 16px; }
+h1 { font-size: 18px; font-weight: 700; text-align: center; padding: 12px 0; color: #fff; }
+h1 span { color: #3b82f6; }
+.card { background: #2a2a2a; border: 1px solid #3a3a3a; border-radius: 12px; padding: 16px; margin-bottom: 12px; }
+label { display: block; font-size: 12px; color: #9ca3af; margin-bottom: 4px; font-weight: 600; }
+select, input[type=number], input[type=text], input[type=date] {
+  width: 100%; background: #1e1e1e; border: 1px solid #3a3a3a; border-radius: 8px;
+  color: #e0e0e0; padding: 10px 12px; font-size: 15px; margin-bottom: 12px; outline: none;
+}
+select:focus, input:focus { border-color: #3b82f6; }
+.row2 { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.btn-submit {
+  width: 100%; background: #3b82f6; color: #fff; border: none; border-radius: 10px;
+  padding: 14px; font-size: 16px; font-weight: 700; cursor: pointer;
+}
+.btn-submit:disabled { opacity: 0.5; }
+.success-msg { background: #14532d; border: 1px solid #166534; border-radius: 8px; padding: 12px; color: #86efac; text-align: center; margin-bottom: 12px; }
+.error-msg { background: #3b1f1f; border: 1px solid #7f1d1d; border-radius: 8px; padding: 12px; color: #fca5a5; text-align: center; margin-bottom: 12px; }
+.history-title { font-size: 13px; color: #6b7280; font-weight: 600; margin-bottom: 8px; }
+.history-row { display: flex; justify-content: space-between; padding: 8px 0; border-bottom: 1px solid #2e2e2e; font-size: 13px; }
+.badge-收 { color: #86efac; } .badge-付 { color: #fbbf24; } .badge-廢 { color: #9ca3af; text-decoration: line-through; }
+.login-card { text-align: center; }
+.login-card input { margin-bottom: 8px; }
+.login-card button { background: #3b82f6; color: #fff; border: none; border-radius: 8px; padding: 10px 24px; font-size: 14px; font-weight: 600; cursor: pointer; }
+</style>
+</head>
+<body>
+<div class="container">
+  <h1><span>源日影像</span> 發票登記</h1>
+
+  <div id="login-section" class="card login-card" style="display:none;">
+    <label>帳號</label><input id="login-user" type="text" placeholder="admin">
+    <label>密碼</label><input id="login-pass" type="password">
+    <button onclick="_login()">登入</button>
+    <div id="login-error" class="error-msg" style="display:none;margin-top:8px;"></div>
+  </div>
+
+  <div id="main-section" style="display:none;">
+    <div class="card">
+      <div class="row2">
+        <div><label>款項</label><select id="f-type"><option value="收款">收款</option><option value="付款">付款</option></select></div>
+        <div><label>發票種類</label><select id="f-kind"><option value="電子發票">電子發票</option><option value="紙本發票">紙本發票</option></select></div>
+      </div>
+      <label>名稱</label><input id="f-title" type="text" placeholder="案件/項目名稱">
+      <div class="row2">
+        <div><label>發票編號</label><input id="f-number" type="text"></div>
+        <div><label>日期</label><input id="f-date" type="date"></div>
+      </div>
+      <div class="row2">
+        <div><label>未稅價</label><input id="f-ex" type="number" inputmode="numeric" min="0"></div>
+        <div><label>含稅金額</label><input id="f-total" type="number" inputmode="numeric" min="0"></div>
+      </div>
+      <div class="row2">
+        <div><label>抬頭</label><input id="f-company" type="text"></div>
+        <div><label>統編</label><input id="f-taxid" type="text" maxlength="8"></div>
+      </div>
+      <label>關聯專案</label><select id="f-project"><option value="">— 不關聯 —</option></select>
+      <label>品項</label><input id="f-item" type="text" placeholder="影片製作/展場攝影...">
+      <label>備註</label><input id="f-notes" type="text">
+    </div>
+
+    <div id="msg" style="display:none;"></div>
+    <button class="btn-submit" id="btn-submit" onclick="_submit()">送出</button>
+
+    <div class="card" style="margin-top:16px;">
+      <div class="history-title">最近發票</div>
+      <div id="history-list"></div>
+    </div>
+  </div>
+</div>
+
+<script>
+const BASE = location.origin + '/api/v1/crm';
+let _token = localStorage.getItem('auth_token') || '';
+const _e = s => String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+const _n = n => (n||0).toLocaleString('zh-TW');
+
+function _headers() {
+  const h = { 'Content-Type': 'application/json' };
+  if (_token) h['Authorization'] = 'Bearer ' + _token;
+  return h;
+}
+
+async function _init() {
+  if (!_token) { document.getElementById('login-section').style.display = ''; return; }
+  document.getElementById('main-section').style.display = '';
+  document.getElementById('f-date').value = new Date().toISOString().substring(0, 10);
+  try {
+    const data = await (await fetch(BASE + '/projects', { headers: _headers() })).json();
+    const sel = document.getElementById('f-project');
+    sel.innerHTML = '<option value="">— 不關聯 —</option>' +
+      (data.projects || []).map(p => '<option value="' + p.id + '">' + _e(p.name) + '</option>').join('');
+  } catch (_) {}
+  _loadHistory();
+}
+
+async function _login() {
+  try {
+    const r = await fetch(location.origin + '/api/v1/auth/login', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username: document.getElementById('login-user').value, password: document.getElementById('login-pass').value }),
+    });
+    const d = await r.json();
+    if (d.token) { _token = d.token; localStorage.setItem('auth_token', _token); document.getElementById('login-section').style.display = 'none'; _init(); }
+    else { document.getElementById('login-error').textContent = d.detail || '登入失敗'; document.getElementById('login-error').style.display = ''; }
+  } catch (_) { document.getElementById('login-error').textContent = '連線失敗'; document.getElementById('login-error').style.display = ''; }
+}
+
+async function _submit() {
+  const title = document.getElementById('f-title').value.trim();
+  if (!title) { _showMsg('請填寫名稱', true); return; }
+  const btn = document.getElementById('btn-submit');
+  btn.disabled = true; btn.textContent = '送出中...';
+  const exTax = parseInt(document.getElementById('f-ex').value) || null;
+  const total = parseInt(document.getElementById('f-total').value) || null;
+  const taxAmt = (exTax && total) ? total - exTax : null;
+  try {
+    const r = await fetch(BASE + '/invoices', { method: 'POST', headers: _headers(), body: JSON.stringify({
+      payment_type: document.getElementById('f-type').value,
+      payment_status: document.getElementById('f-type').value === '收款' ? '已收款' : '已付款',
+      issue_status: '已開立',
+      invoice_number: document.getElementById('f-number').value,
+      invoice_date: document.getElementById('f-date').value || null,
+      title, invoice_kind: document.getElementById('f-kind').value,
+      amount_ex_tax: exTax, amount_total: total, tax_amount: taxAmt,
+      company_name: document.getElementById('f-company').value,
+      tax_id: document.getElementById('f-taxid').value,
+      project_id: document.getElementById('f-project').value || null,
+      item_type: document.getElementById('f-item').value,
+      notes: document.getElementById('f-notes').value,
+    })});
+    if (!r.ok) throw new Error((await r.json().catch(() => ({}))).detail || '建立失敗');
+    _showMsg('登記成功！', false);
+    document.getElementById('f-title').value = '';
+    document.getElementById('f-number').value = '';
+    document.getElementById('f-ex').value = '';
+    document.getElementById('f-total').value = '';
+    document.getElementById('f-company').value = '';
+    document.getElementById('f-taxid').value = '';
+    document.getElementById('f-notes').value = '';
+    _loadHistory();
+  } catch (e) { _showMsg(e.message, true); }
+  finally { btn.disabled = false; btn.textContent = '送出'; }
+}
+
+async function _loadHistory() {
+  try {
+    const data = await (await fetch(BASE + '/invoices', { headers: _headers() })).json();
+    const list = document.getElementById('history-list');
+    const invs = (data.invoices || []).slice(0, 10);
+    if (!invs.length) { list.innerHTML = '<div style="color:#6b7280;font-size:12px;">尚無紀錄</div>'; return; }
+    list.innerHTML = invs.map(inv => {
+      const cls = inv.payment_status === '作廢' ? 'badge-廢' : inv.payment_type === '收款' ? 'badge-收' : 'badge-付';
+      return '<div class="history-row"><span>' + _e(inv.title) + '</span><span class="' + cls + '">$' + _n(inv.amount_total) + '</span><span style="color:#6b7280;">' + (inv.invoice_date ? inv.invoice_date.substring(0,10) : '') + '</span></div>';
+    }).join('');
+  } catch (_) {}
+}
+
+function _showMsg(msg, isError) {
+  const el = document.getElementById('msg');
+  el.className = isError ? 'error-msg' : 'success-msg';
+  el.textContent = msg; el.style.display = '';
+  setTimeout(() => el.style.display = 'none', 3000);
+}
+
+_init();
+</script>
+</body>
+</html>

@@ -293,3 +293,42 @@ class ProjectStaffPayload(BaseModel):
     days: int = 1
     rate_override: Optional[int] = None
     notes: str = ""
+
+
+class PaymentRequestPayload(BaseModel):
+    request_date: Optional[str] = None
+    amount: int = 0
+    summary: str
+    category: str = "專案外包"
+    payee_name: str = ""
+    payee_id: str = ""
+    payee_type: str = ""
+    needs_invoice: int = 0
+    invoice_number: str = ""
+    invoice_amount: Optional[int] = None
+    project_id: Optional[str] = None
+    project_label: str = ""
+    payment_date: Optional[str] = None
+    payment_status: str = "未付款"
+    notes: str = ""
+
+
+class InvoicePayload(BaseModel):
+    payment_type: str = "收款"
+    payment_status: str = "已收款"
+    issue_status: str = "已開立"
+    invoice_number: str = ""
+    invoice_date: Optional[str] = None
+    title: str
+    applicant: str = ""
+    category: str = "專案"
+    invoice_kind: str = "電子發票"
+    amount_ex_tax: Optional[int] = None
+    amount_total: Optional[int] = None
+    tax_amount: Optional[int] = None
+    commission: Optional[int] = None
+    company_name: str = ""
+    tax_id: str = ""
+    item_type: str = ""
+    project_id: Optional[str] = None
+    notes: str = ""

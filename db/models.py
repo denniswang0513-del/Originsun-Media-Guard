@@ -315,6 +315,68 @@ class CrmProjectExpense(Base):
     notes = Column(Text, nullable=True)
 
 
+class CrmInvoice(Base):
+    """帳務 — 發票登記。"""
+    __tablename__ = "crm_invoices"
+
+    id = Column(String(32), primary_key=True)
+    payment_type = Column(String(16), nullable=False, default="收款")   # 收款/付款
+    payment_status = Column(String(16), nullable=False, default="已收款")  # 已收款/已付款/作廢
+    issue_status = Column(String(16), nullable=False, default="已開立")  # 已開立/作廢
+    invoice_number = Column(String(32), nullable=True)                  # 發票編號
+    invoice_date = Column(DateTime(timezone=True), nullable=True)       # 填表時間
+    title = Column(String(255), nullable=False)                         # 名稱（案件/項目）
+    applicant = Column(String(64), nullable=True)                       # 申請人
+    category = Column(String(32), nullable=True, default="專案")         # 專案/內部代開
+    invoice_kind = Column(String(32), nullable=True)                    # 紙本發票/電子發票
+    amount_ex_tax = Column(Integer, nullable=True)                      # 未稅價
+    amount_total = Column(Integer, nullable=True)                       # 發票金額（含稅）
+    tax_amount = Column(Integer, nullable=True)                         # 稅額
+    commission = Column(Integer, nullable=True)                         # 代開應區（代開費）
+    company_name = Column(String(255), nullable=True)                   # 抬頭
+    tax_id = Column(String(16), nullable=True)                          # 統編
+    item_type = Column(String(64), nullable=True)                       # 品項（影片製作/展場攝影...）
+    project_id = Column(String(32), nullable=True)                      # 可選關聯 → crm_projects
+    notes = Column(Text, nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    __table_args__ = (
+        Index("idx_invoice_date", "invoice_date"),
+        Index("idx_invoice_payment", "payment_type"),
+        Index("idx_invoice_project", "project_id"),
+    )
+
+
+class CrmPaymentRequest(Base):
+    """帳務 — 請款單。"""
+    __tablename__ = "crm_payment_requests"
+
+    id = Column(String(32), primary_key=True)
+    request_date = Column(DateTime(timezone=True), nullable=True)       # 日期
+    amount = Column(Integer, nullable=False, default=0)                 # 請款金額
+    summary = Column(String(255), nullable=False)                       # 摘要
+    category = Column(String(32), nullable=True, default="專案外包")      # 專案外包/零用金/轉存/發票代開
+    payee_name = Column(String(64), nullable=True)                      # 收款人姓名
+    payee_id = Column(String(16), nullable=True)                        # 收款人身分證
+    payee_type = Column(String(32), nullable=True)                      # 勞報/內部人員
+    needs_invoice = Column(Integer, nullable=False, default=0)          # 是否需代開發票 0/1
+    invoice_number = Column(String(32), nullable=True)                  # 代開發票號碼
+    invoice_amount = Column(Integer, nullable=True)                     # 代開發票金額
+    project_id = Column(String(32), nullable=True, index=True)          # 關聯專案
+    project_label = Column(String(128), nullable=True)                  # 專案標籤（手動填）
+    payment_date = Column(DateTime(timezone=True), nullable=True)       # 付款日
+    payment_status = Column(String(16), nullable=False, default="未付款") # 已付款/未付款
+    notes = Column(Text, nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    __table_args__ = (
+        Index("idx_payreq_date", "request_date"),
+        Index("idx_payreq_status", "payment_status"),
+    )
+
+
 class ApiKey(Base):
     """API Key for programmatic access (OpenClaw, scripts, CI/CD)."""
     __tablename__ = "api_keys"

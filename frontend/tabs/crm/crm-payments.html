@@ -1,0 +1,164 @@
+<!-- Payment Request Toolbar -->
+<div class="crm-toolbar">
+  <input id="pay-search" type="search" placeholder="搜尋摘要、收款人..." class="crm-search-input">
+  <select id="pay-filter-cat" class="crm-select">
+    <option value="">全部項目</option>
+    <option value="專案外包">專案外包</option>
+    <option value="零用金">零用金</option>
+    <option value="轉存">轉存</option>
+    <option value="發票代開">發票代開</option>
+  </select>
+  <select id="pay-filter-status" class="crm-select">
+    <option value="">全部狀態</option>
+    <option value="已付款">已付款</option>
+    <option value="未付款">未付款</option>
+  </select>
+  <div class="crm-toolbar-right">
+    <button id="pay-btn-import" class="crm-btn crm-btn-secondary">匯入 CSV</button>
+    <button id="pay-btn-add" class="crm-btn crm-btn-primary">+ 新增請款</button>
+  </div>
+</div>
+
+<!-- Body -->
+<div class="crm-body">
+  <div class="crm-list-panel">
+    <div class="crm-list-header">
+      <span class="crm-col-date">日期</span>
+      <span class="crm-col-name">摘要</span>
+      <span class="crm-col-amount">金額</span>
+      <span class="crm-col-client">收款人</span>
+      <span class="crm-col-status">狀態</span>
+      <span class="crm-col-actions"></span>
+    </div>
+    <div id="pay-list-body"><div class="crm-empty">載入中...</div></div>
+  </div>
+
+  <div class="crm-resize-handle" id="pay-resize-handle" style="display:none;"></div>
+  <div class="crm-detail-panel" id="pay-detail-panel" style="display:none;">
+    <div class="crm-detail-bar">
+      <div id="pay-detail-title" class="crm-detail-bar-title"></div>
+      <div class="crm-detail-bar-actions">
+        <button id="pay-detail-close" class="crm-detail-close" title="關閉">&#x2715;</button>
+      </div>
+    </div>
+    <div class="crm-detail-content" id="pay-detail-content"></div>
+  </div>
+</div>
+
+<!-- Add/Edit Modal -->
+<div id="pay-modal" class="crm-modal-overlay" style="display:none;">
+  <div class="crm-modal">
+    <div class="crm-modal-header">
+      <h3 id="pay-modal-title">新增請款</h3>
+      <button onclick="document.getElementById('pay-modal').style.display='none'" class="crm-detail-close">&#x2715;</button>
+    </div>
+    <div class="crm-modal-body">
+      <div class="crm-form-grid">
+        <div class="crm-field crm-field-full">
+          <label>摘要 <span class="crm-required">*</span></label>
+          <input id="pay-f-summary" type="text" class="crm-input" placeholder="泛亞11月空拍">
+        </div>
+        <div class="crm-field">
+          <label>金額</label>
+          <input id="pay-f-amount" type="number" class="crm-input" min="0">
+        </div>
+        <div class="crm-field">
+          <label>日期</label>
+          <input id="pay-f-request_date" type="date" class="crm-input">
+        </div>
+        <div class="crm-field">
+          <label>項目</label>
+          <select id="pay-f-category" class="crm-input">
+            <option value="專案外包">專案外包</option>
+            <option value="零用金">零用金</option>
+            <option value="轉存">轉存</option>
+            <option value="發票代開">發票代開</option>
+          </select>
+        </div>
+        <div class="crm-field">
+          <label>收款人</label>
+          <input id="pay-f-payee_name" type="text" class="crm-input">
+        </div>
+        <div class="crm-field">
+          <label>身分證</label>
+          <input id="pay-f-payee_id" type="text" class="crm-input" maxlength="10">
+        </div>
+        <div class="crm-field">
+          <label>狀態</label>
+          <select id="pay-f-payee_type" class="crm-input">
+            <option value="">—</option>
+            <option value="勞報">勞報</option>
+            <option value="內部人員">內部人員</option>
+          </select>
+        </div>
+        <div class="crm-field">
+          <label>代開發票</label>
+          <select id="pay-f-needs_invoice" class="crm-input">
+            <option value="0">否</option>
+            <option value="1">是</option>
+          </select>
+        </div>
+        <div class="crm-field">
+          <label>發票號碼</label>
+          <input id="pay-f-invoice_number" type="text" class="crm-input">
+        </div>
+        <div class="crm-field">
+          <label>專案標籤</label>
+          <input id="pay-f-project_label" type="text" class="crm-input" placeholder="2026 泛亞空拍台66專案">
+        </div>
+        <div class="crm-field">
+          <label>關聯專案</label>
+          <select id="pay-f-project_id" class="crm-input">
+            <option value="">— 不關聯 —</option>
+          </select>
+        </div>
+        <div class="crm-field">
+          <label>付款日</label>
+          <input id="pay-f-payment_date" type="date" class="crm-input">
+        </div>
+        <div class="crm-field">
+          <label>付款狀態</label>
+          <select id="pay-f-payment_status" class="crm-input">
+            <option value="未付款">未付款</option>
+            <option value="已付款">已付款</option>
+          </select>
+        </div>
+        <div class="crm-field crm-field-full">
+          <label>附註</label>
+          <input id="pay-f-notes" type="text" class="crm-input">
+        </div>
+      </div>
+      <div id="pay-modal-error" class="crm-error" style="display:none;"></div>
+    </div>
+    <div class="crm-modal-footer">
+      <button onclick="document.getElementById('pay-modal').style.display='none'" class="crm-btn crm-btn-secondary">取消</button>
+      <button id="pay-btn-save" class="crm-btn crm-btn-primary">儲存</button>
+    </div>
+  </div>
+</div>
+
+<!-- CSV Import Modal -->
+<div id="pay-import-modal" class="crm-modal-overlay" style="display:none;">
+  <div class="crm-modal" style="max-width:480px;">
+    <div class="crm-modal-header">
+      <h3>匯入請款 CSV</h3>
+      <button onclick="document.getElementById('pay-import-modal').style.display='none'" class="crm-detail-close">&#x2715;</button>
+    </div>
+    <div class="crm-modal-body">
+      <p class="crm-import-hint">支援你現有的請款表格式（日期/請款/摘要/收款人/付款狀態等）。</p>
+      <div class="crm-drop-zone" id="pay-drop-zone">
+        <div class="crm-drop-icon">📂</div>
+        <div>拖曳 CSV 至此，或</div>
+        <label class="crm-btn crm-btn-secondary" style="cursor:pointer;margin-top:8px;">
+          選擇檔案<input id="pay-csv-file" type="file" accept=".csv" style="display:none;">
+        </label>
+        <div id="pay-drop-filename" style="margin-top:8px;color:#9ca3af;font-size:12px;"></div>
+      </div>
+      <div id="pay-import-result" style="display:none;" class="crm-import-result"></div>
+    </div>
+    <div class="crm-modal-footer">
+      <button onclick="document.getElementById('pay-import-modal').style.display='none'" class="crm-btn crm-btn-secondary">關閉</button>
+      <button id="pay-btn-do-import" class="crm-btn crm-btn-primary" disabled>開始匯入</button>
+    </div>
+  </div>
+</div>

@@ -504,6 +504,17 @@
 .crm-pay-部分到帳 { background: #3b2f1f; color: #fbbf24; }
 .crm-pay-全額到帳 { background: #14532d; color: #86efac; }
 
+/* ── View Switcher ── */
+.crm-view-switcher { display: flex; gap: 2px; padding: 10px 16px 0; background: #2a2a2a; flex-shrink: 0; }
+.crm-view-btn { background: #333; border: none; color: #9ca3af; font-size: 13px; font-weight: 600; padding: 7px 20px; cursor: pointer; border-radius: 6px 6px 0 0; transition: background 0.15s, color 0.15s; }
+.crm-view-btn:hover { color: #e0e0e0; background: #3a3a3a; }
+.crm-view-btn.active { background: #1e1e1e; color: #fff; }
+
+/* ── Invoice badge colors ── */
+.crm-pay-badge-收款 { background: #14532d; color: #86efac; }
+.crm-pay-badge-付款 { background: #3b2f1f; color: #fbbf24; }
+.crm-pay-badge-作廢 { background: #374151; color: #9ca3af; text-decoration: line-through; }
+
 /* ── Staff badge colors ── */
 .crm-staff-badge-在職 { background: #14532d; color: #86efac; }
 .crm-staff-badge-離職 { background: #374151; color: #9ca3af; }
