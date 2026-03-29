@@ -58,14 +58,14 @@ function renderDetail(p) {
         const isPaid = it.payment_status === '已付款';
         return `
         <div class="payable-item" style="${isPaid ? 'opacity:0.5;' : ''}">
-            <label class="payable-check">
-                <input type="checkbox" data-id="${it.id}" class="pay-cb" ${isPaid ? 'checked disabled' : ''}>
-            </label>
             <span class="payable-item-date">${_esc(it.date)}</span>
             <span class="payable-item-summary">${_esc(it.summary)}</span>
             <span class="payable-item-cat">${_esc(it.category)}</span>
             <span class="payable-item-amt">$${_fmtNum(it.amount)}</span>
-            <span style="width:50px;text-align:center;font-size:11px;color:${isPaid ? '#86efac' : '#fca5a5'};">${isPaid ? '已付' : '未付'}</span>
+            ${isPaid
+                ? `<span style="width:80px;text-align:center;font-size:11px;color:#86efac;">已付款</span>`
+                : `<button class="crm-btn crm-btn-danger crm-btn-sm" style="width:80px;" onclick="window._payableSinglePay('${it.id}','${_esc(p.payee_name)}')">未付款</button>`
+            }
         </div>`;
     }).join('');
 
@@ -83,23 +83,6 @@ function renderDetail(p) {
         </div>
     `;
 
-    // Bind checkbox events
-    document.querySelectorAll('#payable-detail-content .pay-cb:not(:disabled)').forEach(cb => {
-        cb.addEventListener('change', async e => {
-            if (!e.target.checked) return;
-            if (!confirm('確定標記此筆為已付款？')) { e.target.checked = false; return; }
-            try {
-                await _fetch('/payments/batch-pay', {
-                    method: 'PATCH',
-                    body: JSON.stringify({ payment_ids: [e.target.dataset.id], payment_date: new Date().toISOString().substring(0, 10) })
-                });
-                await loadPayables();
-                // Re-render detail
-                const updated = _payees.find(x => x.payee_name === _selectedName);
-                if (updated) renderDetail(updated);
-            } catch (err) { alert(err.message); e.target.checked = false; }
-        });
-    });
 }
 
 function selectPayee(name) {
@@ -121,6 +104,18 @@ function closeDetail() {
 }
 
 window._payableSelect = selectPayee;
+window._payableSinglePay = async (paymentId, payeeName) => {
+    if (!confirm('確定標記此筆為已付款？')) return;
+    try {
+        await _fetch('/payments/batch-pay', {
+            method: 'PATCH',
+            body: JSON.stringify({ payment_ids: [paymentId], payment_date: new Date().toISOString().substring(0, 10) })
+        });
+        await loadPayables();
+        const updated = _payees.find(x => x.payee_name === payeeName);
+        if (updated) renderDetail(updated);
+    } catch (e) { alert(e.message); }
+};
 window._payableCopyInfo = (name) => {
     const p = _payees.find(x => x.payee_name === name);
     if (!p) return;
