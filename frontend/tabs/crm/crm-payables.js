@@ -77,6 +77,10 @@ function renderDetail(p) {
         <div style="border-top:1px solid #2e2e2e;margin:10px 0;"></div>
         <div style="font-size:12px;font-weight:700;color:#6b7280;margin-bottom:6px;">付款明細</div>
         ${itemsHtml}
+        <div style="display:flex;gap:8px;padding:10px 0;border-top:1px solid #2e2e2e;margin-top:8px;">
+            <button class="crm-btn crm-btn-secondary crm-btn-sm" onclick="window._payableCopyInfo('${_esc(p.payee_name)}')">複製匯款資訊</button>
+            ${p.items.some(it => it.payment_status !== '已付款') ? `<button class="crm-btn crm-btn-primary crm-btn-sm" onclick="window._payablePayAll('${_esc(p.payee_name)}')">全部付款</button>` : ''}
+        </div>
     `;
 
     // Bind checkbox events
@@ -117,6 +121,22 @@ function closeDetail() {
 }
 
 window._payableSelect = selectPayee;
+window._payableCopyInfo = (name) => {
+    const p = _payees.find(x => x.payee_name === name);
+    if (!p) return;
+    const unpaid = p.items.filter(it => it.payment_status !== '已付款');
+    const amount = unpaid.reduce((s, it) => s + it.amount, 0);
+    const text = [
+        '收款人: ' + p.payee_name,
+        p.payee_id ? '身分證: ' + p.payee_id : '',
+        p.bank_name ? '銀行: ' + p.bank_name : '',
+        p.bank_account ? '帳號: ' + p.bank_account : '',
+        '金額: $' + amount.toLocaleString('zh-TW'),
+    ].filter(Boolean).join('\n');
+    navigator.clipboard.writeText(text).then(() => alert('已複製匯款資訊')).catch(() => {
+        prompt('請手動複製:', text);
+    });
+};
 window._payablePayAll = async (name) => {
     const p = _payees.find(x => x.payee_name === name);
     if (!p) return;
