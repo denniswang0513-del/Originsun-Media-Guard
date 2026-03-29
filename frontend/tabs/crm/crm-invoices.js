@@ -257,7 +257,7 @@ export function initCrmInvoicesTab() {
     const payView = document.getElementById('inv-payments-view');
     document.getElementById('inv-view-payments').addEventListener('click', async () => {
         if (_paymentsLoading) return;
-        invView.style.display = 'none'; payView.style.display = '';
+        invView.style.display = 'none'; payView.style.display = 'flex';
         document.getElementById('inv-view-invoices').classList.remove('active');
         document.getElementById('inv-view-payments').classList.add('active');
         if (!_paymentsLoaded) {
@@ -276,7 +276,7 @@ export function initCrmInvoicesTab() {
         }
     });
     document.getElementById('inv-view-invoices').addEventListener('click', () => {
-        payView.style.display = 'none'; invView.style.display = '';
+        payView.style.display = 'none'; invView.style.display = 'flex';
         document.getElementById('inv-view-payments').classList.remove('active');
         document.getElementById('inv-view-invoices').classList.add('active');
     });

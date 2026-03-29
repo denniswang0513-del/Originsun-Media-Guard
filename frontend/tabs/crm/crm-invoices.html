@@ -6,7 +6,7 @@
 </div>
 
 <!-- Invoice view -->
-<div id="inv-invoices-view">
+<div id="inv-invoices-view" style="display:flex;flex-direction:column;flex:1;min-height:0;">
 <!-- Toolbar -->
 <div class="crm-toolbar">
   <input id="inv-search" type="search" placeholder="搜尋名稱、抬頭、發票號..." class="crm-search-input">
@@ -52,10 +52,9 @@
   </div>
 </div>
 </div>
-</div>
 
 <!-- Payment view (lazy-loaded) -->
-<div id="inv-payments-view" style="display:none;"></div>
+<div id="inv-payments-view" style="display:none;flex-direction:column;flex:1;min-height:0;"></div>
 </div>
 
 <!-- Add/Edit Modal -->
