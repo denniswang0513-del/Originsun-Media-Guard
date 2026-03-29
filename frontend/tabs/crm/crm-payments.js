@@ -92,7 +92,7 @@ function closeDetail() {
 
 const _FIELDS = ['summary', 'amount', 'request_date', 'category', 'payee_name', 'payee_id',
     'payee_type', 'invoice_number', 'project_label', 'project_id',
-    'payment_date', 'payment_status', 'notes'];
+    'payment_date', 'payment_status', 'planned_month', 'notes'];
 const _DATE_FIELDS = ['request_date', 'payment_date'];
 const _INT_FIELDS = ['amount'];
 
@@ -144,7 +144,13 @@ function openModal(p = null) {
         else el.value = p ? (p[f] ?? '') : '';
     }
     if (!p) document.getElementById('pay-f-request_date').value = new Date().toISOString().substring(0, 10);
+    _togglePlannedMonth(p?.payment_status || '未付款');
     document.getElementById('pay-modal').style.display = 'flex';
+}
+
+function _togglePlannedMonth(status) {
+    const field = document.getElementById('pay-planned-month-field');
+    if (field) field.style.display = status === '應付款' ? '' : 'none';
 }
 
 async function savePayment() {
@@ -239,6 +245,9 @@ export function initCrmPaymentsTab() {
         const opt = e.target.selectedOptions[0];
         document.getElementById('pay-f-payee_id').value = opt?.dataset.id || '';
     });
+
+    // Show/hide planned_month when payment_status changes
+    document.getElementById('pay-f-payment_status').addEventListener('change', e => _togglePlannedMonth(e.target.value));
 
     // Re-populate project/invoice select when category changes
     document.getElementById('pay-f-category').addEventListener('change', e => {

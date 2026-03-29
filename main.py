@@ -174,6 +174,7 @@ async def _on_startup():
                         ("crm_project_staff", "payment_status", "VARCHAR(32)"),
                         ("crm_project_staff", "payment_date", "TIMESTAMPTZ"),
                         ("crm_staff", "address", "VARCHAR(255)"),
+                        ("crm_payment_requests", "planned_month", "VARCHAR(7)"),
                     ]
                     for tbl, col, coltype in _crm_cols:
                         try:

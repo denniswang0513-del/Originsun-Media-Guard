@@ -14,8 +14,9 @@
   </select>
   <select id="pay-filter-status" class="crm-select">
     <option value="">全部狀態</option>
-    <option value="已付款">已付款</option>
     <option value="未付款">未付款</option>
+    <option value="應付款">應付款</option>
+    <option value="已付款">已付款</option>
   </select>
   <div class="crm-toolbar-right">
     <button id="pay-btn-import" class="crm-btn crm-btn-secondary">匯入 CSV</button>
@@ -130,8 +131,13 @@
           <label>付款狀態</label>
           <select id="pay-f-payment_status" class="crm-input">
             <option value="未付款">未付款</option>
+            <option value="應付款">應付款</option>
             <option value="已付款">已付款</option>
           </select>
+        </div>
+        <div class="crm-field" id="pay-planned-month-field" style="display:none;">
+          <label>預計付款月</label>
+          <input id="pay-f-planned_month" type="month" class="crm-input">
         </div>
         <div class="crm-field crm-field-full">
           <label>附註</label>

@@ -5,7 +5,7 @@ import { crmFetch as _fetch, esc as _esc, fmtNum as _fmtNum, setupResizeHandle }
 
 let _payees = [];
 let _selectedName = null;
-let _statusFilter = '未付款';
+let _statusFilter = '應付款';
 
 async function loadPayables() {
     const monthInput = document.getElementById('payable-month');

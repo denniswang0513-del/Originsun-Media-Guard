@@ -366,7 +366,8 @@ class CrmPaymentRequest(Base):
     project_id = Column(String(32), nullable=True, index=True)          # 關聯專案
     project_label = Column(String(128), nullable=True)                  # 專案標籤（手動填）
     payment_date = Column(DateTime(timezone=True), nullable=True)       # 付款日
-    payment_status = Column(String(16), nullable=False, default="未付款") # 已付款/未付款
+    payment_status = Column(String(16), nullable=False, default="未付款") # 未付款/應付款/已付款
+    planned_month = Column(String(7), nullable=True)                    # 預計付款月 "2026-04"
     notes = Column(Text, nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now())

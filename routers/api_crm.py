@@ -1527,6 +1527,7 @@ def _to_payment_dict(p, project_name: str = "") -> dict:
         "project_label": p.project_label or "",
         "payment_date": p.payment_date.isoformat() if p.payment_date else None,
         "payment_status": p.payment_status or "未付款",
+        "planned_month": p.planned_month or "",
         "notes": p.notes or "",
         "created_at": p.created_at.isoformat() if p.created_at else None,
     }
@@ -1878,12 +1879,15 @@ async def payables_summary(month: str = Query(""), status: str = Query("")):
     end = datetime(year, mon, last_day, 23, 59, 59, tzinfo=timezone.utc)
 
     async with factory() as session:
-        query = (
-            select(CrmPaymentRequest)
-            .where(CrmPaymentRequest.request_date >= start)
-            .where(CrmPaymentRequest.request_date <= end)
-            .order_by(CrmPaymentRequest.request_date)
-        )
+        # 應付帳款：用 planned_month 或 request_date 篩選
+        query = select(CrmPaymentRequest).order_by(CrmPaymentRequest.request_date)
+
+        # Filter: 應付款按 planned_month，其他按 request_date
+        query = query.where(or_(
+            CrmPaymentRequest.planned_month == month,
+            CrmPaymentRequest.request_date.between(start, end),
+        ))
+
         if status:
             query = query.where(CrmPaymentRequest.payment_status == status)
         rows = (await session.execute(query)).scalars().all()

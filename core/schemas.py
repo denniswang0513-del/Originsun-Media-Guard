@@ -310,6 +310,7 @@ class PaymentRequestPayload(BaseModel):
     project_label: str = ""
     payment_date: Optional[str] = None
     payment_status: str = "未付款"
+    planned_month: str = ""
     notes: str = ""
 
 
