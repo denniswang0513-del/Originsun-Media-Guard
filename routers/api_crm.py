@@ -1862,8 +1862,8 @@ async def import_cash_csv(request: Request, file: UploadFile = File(...)):
 # ── Accounts Payable (應付帳款) ─────────────────────────────
 
 @router.get("/payables/summary")
-async def payables_summary(month: str = Query("")):
-    """當月未付款請款彙總，按收款人分組，帶入銀行資訊。"""
+async def payables_summary(month: str = Query(""), status: str = Query("")):
+    """當月請款彙總，按收款人分組，帶入銀行資訊。status=未付款 or 已付款 or 空=全部。"""
     _require_db()
     factory = await _get_factory()
 
@@ -1878,13 +1878,15 @@ async def payables_summary(month: str = Query("")):
     end = datetime(year, mon, last_day, 23, 59, 59, tzinfo=timezone.utc)
 
     async with factory() as session:
-        rows = (await session.execute(
+        query = (
             select(CrmPaymentRequest)
-            .where(CrmPaymentRequest.payment_status == "未付款")
             .where(CrmPaymentRequest.request_date >= start)
             .where(CrmPaymentRequest.request_date <= end)
             .order_by(CrmPaymentRequest.request_date)
-        )).scalars().all()
+        )
+        if status:
+            query = query.where(CrmPaymentRequest.payment_status == status)
+        rows = (await session.execute(query)).scalars().all()
 
         staff_map = {s.name: s for s in (await session.execute(select(CrmStaff))).scalars().all()}
 
@@ -1907,6 +1909,7 @@ async def payables_summary(month: str = Query("")):
             "amount": p.amount or 0,
             "summary": p.summary or "",
             "category": p.category or "",
+            "payment_status": p.payment_status or "",
         })
 
     payees = sorted(payee_groups.values(), key=lambda x: x["payee_name"])

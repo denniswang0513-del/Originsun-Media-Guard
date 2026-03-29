@@ -1,14 +1,38 @@
 <!-- Toolbar -->
-<div class="crm-toolbar" style="gap:12px;">
-  <span style="font-size:13px;color:#9ca3af;font-weight:600;">月份</span>
+<div class="crm-toolbar">
   <input id="payable-month" type="month" class="crm-input" style="width:160px;margin:0;">
+  <select id="payable-filter-status" class="crm-select">
+    <option value="">全部狀態</option>
+    <option value="未付款" selected>未付款</option>
+    <option value="已付款">已付款</option>
+  </select>
   <div style="flex:1;"></div>
-  <div style="font-size:18px;font-weight:700;color:#e0e0e0;">
+  <div style="font-size:15px;font-weight:700;color:#e0e0e0;">
     應付總計: <span id="payable-total" style="color:#fbbf24;">$0</span>
   </div>
 </div>
 
-<!-- Payee list -->
-<div style="flex:1;overflow-y:auto;padding:0 16px 16px;">
-  <div id="payable-list"><div class="crm-empty">載入中...</div></div>
+<!-- Body: list + detail -->
+<div class="crm-body">
+  <div class="crm-list-panel">
+    <div class="crm-list-header">
+      <span class="crm-col-name">收款人</span>
+      <span class="crm-col-amount">應付金額</span>
+      <span class="crm-col-client">銀行帳號</span>
+      <span class="crm-col-status">狀態</span>
+      <span class="crm-col-actions"></span>
+    </div>
+    <div id="payable-list-body"><div class="crm-empty">載入中...</div></div>
+  </div>
+
+  <div class="crm-resize-handle" id="payable-resize-handle" style="display:none;"></div>
+  <div class="crm-detail-panel" id="payable-detail-panel" style="display:none;">
+    <div class="crm-detail-bar">
+      <div id="payable-detail-title" class="crm-detail-bar-title"></div>
+      <div class="crm-detail-bar-actions">
+        <button id="payable-detail-close" class="crm-detail-close" title="關閉">&#x2715;</button>
+      </div>
+    </div>
+    <div class="crm-detail-content" id="payable-detail-content"></div>
+  </div>
 </div>
