@@ -77,11 +77,13 @@
         </div>
         <div class="crm-field">
           <label>收款人</label>
-          <input id="pay-f-payee_name" type="text" class="crm-input">
+          <select id="pay-f-payee_name" class="crm-input">
+            <option value="">— 選擇人員 —</option>
+          </select>
         </div>
         <div class="crm-field">
-          <label>身分證</label>
-          <input id="pay-f-payee_id" type="text" class="crm-input" maxlength="10">
+          <label>身分證（自動帶入）</label>
+          <input id="pay-f-payee_id" type="text" class="crm-input" maxlength="10" readonly style="opacity:0.7;">
         </div>
         <div class="crm-field">
           <label>狀態</label>

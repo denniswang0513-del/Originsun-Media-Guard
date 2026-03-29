@@ -4,6 +4,7 @@
 import { crmFetch as _fetch, esc as _esc, fmtNum as _fmtNum, setupResizeHandle } from './crm-utils.js';
 
 let _entries = [];
+let _staffList = [];
 let _selectedId = null;
 let _editingId = null;
 let _filters = { q: '', category: '', item: '' };
@@ -85,14 +86,31 @@ const _FIELDS = ['summary', 'entry_date', 'expense', 'claim', 'deposit', 'catego
 const _INT_FIELDS = ['expense', 'claim', 'deposit'];
 const _DATE_FIELDS = ['entry_date'];
 
+async function loadStaffList() {
+    try { _staffList = (await _fetch('/staff')).staff || []; } catch(_) { _staffList = []; }
+}
+
+function _populatePayeeSelect(selectedPayee) {
+    const sel = document.getElementById('cash-f-payee');
+    if (!sel) return;
+    const name = selectedPayee ? selectedPayee.split('_')[0] : '';
+    sel.innerHTML = `<option value="">— 選擇人員 —</option>` +
+        _staffList.map(s => {
+            const val = s.name + (s.id_number ? '_' + s.id_number : '');
+            return `<option value="${_esc(val)}"${s.name === name ? ' selected' : ''}>${_esc(s.name)} (${_esc(s.role)})</option>`;
+        }).join('');
+}
+
 function openModal(e = null) {
     _editingId = e ? e.id : null;
     document.getElementById('cash-modal-title').textContent = e ? '編輯收支' : '新增收支';
     const err = document.getElementById('cash-modal-error');
     err.textContent = ''; err.style.display = 'none';
+    _populatePayeeSelect(e?.payee || '');
     for (const f of _FIELDS) {
         const el = document.getElementById('cash-f-' + f);
         if (!el) continue;
+        if (f === 'payee') continue;
         if (_DATE_FIELDS.includes(f) && e?.[f]) el.value = e[f].substring(0, 10);
         else el.value = e ? (e[f] ?? '') : '';
     }
@@ -203,5 +221,5 @@ export function initCrmCashbookTab() {
     }
 
     setupResizeHandle('cash-resize-handle', 'cash-detail-panel');
-    loadEntries();
+    Promise.all([loadEntries(), loadStaffList()]);
 }

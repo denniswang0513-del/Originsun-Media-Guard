@@ -5,6 +5,7 @@ import { crmFetch as _fetch, esc as _esc, fmtNum as _fmtNum, setupResizeHandle }
 
 let _payments = [];
 let _projects = [];
+let _staffList = [];
 let _selectedId = null;
 let _editingId = null;
 let _filters = { q: '', category: '', payment_status: '' };
@@ -22,6 +23,10 @@ async function loadPayments() {
 
 async function loadProjects() {
     try { _projects = (await _fetch('/projects')).projects || []; } catch(_) { _projects = []; }
+}
+
+async function loadStaffList() {
+    try { _staffList = (await _fetch('/staff')).staff || []; } catch(_) { _staffList = []; }
 }
 
 function _statusBadge(s) {
@@ -98,15 +103,24 @@ function _populateProjectSelect(selectedId) {
         _projects.map(p => `<option value="${p.id}"${p.id === selectedId ? ' selected' : ''}>${_esc(p.name)}</option>`).join('');
 }
 
+function _populatePayeeSelect(selectedName) {
+    const sel = document.getElementById('pay-f-payee_name');
+    if (!sel) return;
+    sel.innerHTML = `<option value="">— 選擇人員 —</option>` +
+        _staffList.map(s => `<option value="${_esc(s.name)}" data-id="${_esc(s.id_number)}"${s.name === selectedName ? ' selected' : ''}>${_esc(s.name)} (${_esc(s.role)})</option>`).join('');
+}
+
 function openModal(p = null) {
     _editingId = p ? p.id : null;
     document.getElementById('pay-modal-title').textContent = p ? '編輯請款' : '新增請款';
     const err = document.getElementById('pay-modal-error');
     err.textContent = ''; err.style.display = 'none';
     _populateProjectSelect(p?.project_id || '');
+    _populatePayeeSelect(p?.payee_name || '');
     for (const f of _FIELDS) {
         const el = document.getElementById('pay-f-' + f);
         if (!el) continue;
+        if (f === 'payee_name') continue; // handled by _populatePayeeSelect
         if (_DATE_FIELDS.includes(f) && p?.[f]) el.value = p[f].substring(0, 10);
         else el.value = p ? (p[f] ?? '') : '';
     }
@@ -200,6 +214,12 @@ export function initCrmPaymentsTab() {
     document.getElementById('pay-filter-status').addEventListener('change', e => { _filters.payment_status = e.target.value; loadPayments(); });
 
     document.getElementById('pay-btn-add').addEventListener('click', () => openModal());
+
+    // Auto-fill payee_id when payee_name changes
+    document.getElementById('pay-f-payee_name').addEventListener('change', e => {
+        const opt = e.target.selectedOptions[0];
+        document.getElementById('pay-f-payee_id').value = opt?.dataset.id || '';
+    });
     document.getElementById('pay-btn-import').addEventListener('click', openImportModal);
     document.getElementById('pay-btn-save').addEventListener('click', savePayment);
     document.getElementById('pay-detail-close').addEventListener('click', closeDetail);
@@ -218,5 +238,5 @@ export function initCrmPaymentsTab() {
     }
 
     setupResizeHandle('pay-resize-handle', 'pay-detail-panel');
-    Promise.all([loadPayments(), loadProjects()]);
+    Promise.all([loadPayments(), loadProjects(), loadStaffList()]);
 }
