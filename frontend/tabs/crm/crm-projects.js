@@ -162,16 +162,61 @@ async function _loadFinancialSummary(projectId) {
     if (!container) return;
     container.innerHTML = '<div class="crm-empty" style="padding:8px;">載入中...</div>';
     try {
-        const f = await _fetch('/projects/' + projectId + '/financial-summary');
+        const [f, expData] = await Promise.all([
+            _fetch('/projects/' + projectId + '/financial-summary'),
+            _fetch('/projects/' + projectId + '/expenses'),
+        ]);
         const _n = (n) => (n || 0).toLocaleString('zh-TW');
         const profitColor = f.profit_rate >= 20 ? '#86efac' : f.profit_rate >= 0 ? '#fbbf24' : '#fca5a5';
+        const expenses = expData.expenses || [];
+
+        // Expense detail rows
+        const expRows = expenses.map(e => `
+            <div class="expense-row">
+                <span class="expense-cat">${_esc(e.category)}</span>
+                <span class="expense-num">$${_n(e.estimated)}</span>
+                <span class="expense-num">$${_n(e.actual)}</span>
+                <span class="expense-receipt">${e.receipt_url ? `<a href="${e.receipt_url}" target="_blank" style="color:#3b82f6;">📎</a>` : '—'}</span>
+                <span class="expense-actions">
+                    <button class="crm-btn crm-btn-secondary crm-btn-sm" onclick="window._projEditExpense('${e.id}','${_esc(e.category)}',${e.estimated},${e.actual},'${_esc(e.notes)}')">編輯</button>
+                    <button class="crm-btn crm-btn-danger crm-btn-sm" onclick="window._projDeleteExpense('${e.id}')">刪</button>
+                </span>
+            </div>
+        `).join('');
+        const expTotal = expenses.reduce((s, e) => [s[0] + e.estimated, s[1] + e.actual], [0, 0]);
+
         container.innerHTML = `
             <div class="crm-detail-prop"><div class="crm-prop-label">合約金額（含稅）</div><div class="crm-prop-value" style="font-weight:700;">$${_n(f.contract_amount)}</div></div>
             <div class="crm-detail-prop"><div class="crm-prop-label">未稅金額</div><div class="crm-prop-value">$${_n(f.ex_tax)}</div></div>
             <div class="crm-detail-prop"><div class="crm-prop-label">目標毛利 (${f.profit_target_pct}%)</div><div class="crm-prop-value">$${_n(f.profit_target)}</div></div>
+
+            <div class="expense-section">
+                <div class="expense-header">
+                    <span style="font-weight:700;color:#6b7280;font-size:12px;">雜支明細</span>
+                    <span>預算 $${_n(f.misc_budget)}</span>
+                    <button class="crm-btn crm-btn-primary crm-btn-sm" onclick="window._projAddExpense()">+ 新增</button>
+                </div>
+                <div id="proj-expense-form" style="display:none;"></div>
+                ${expenses.length > 0 ? `
+                    <div class="expense-row expense-row-header">
+                        <span class="expense-cat">類別</span>
+                        <span class="expense-num">預估</span>
+                        <span class="expense-num">實際</span>
+                        <span class="expense-receipt">收據</span>
+                        <span class="expense-actions"></span>
+                    </div>
+                    ${expRows}
+                    <div class="expense-row" style="font-weight:700;border-top:1px solid #3a3a3a;">
+                        <span class="expense-cat">合計</span>
+                        <span class="expense-num">$${_n(expTotal[0])}</span>
+                        <span class="expense-num">$${_n(expTotal[1])}</span>
+                        <span class="expense-receipt"></span>
+                        <span class="expense-actions"></span>
+                    </div>
+                ` : '<div class="crm-empty" style="padding:8px 0;">尚無雜支紀錄</div>'}
+            </div>
+
             <div style="border-top:1px solid #2e2e2e;margin:8px 0;"></div>
-            <div class="crm-detail-prop"><div class="crm-prop-label">雜支預算</div><div class="crm-prop-value">$${_n(f.misc_budget)}</div></div>
-            <div class="crm-detail-prop"><div class="crm-prop-label">雜支實際</div><div class="crm-prop-value">$${_n(f.expense_actual)}</div></div>
             <div class="crm-detail-prop"><div class="crm-prop-label">外包預算</div><div class="crm-prop-value">$${_n(f.outsource_budget)}</div></div>
             <div class="crm-detail-prop"><div class="crm-prop-label">外包實際（派工）</div><div class="crm-prop-value">$${_n(f.staff_actual)}</div></div>
             <div style="border-top:1px solid #2e2e2e;margin:8px 0;"></div>
@@ -185,6 +230,25 @@ async function _loadFinancialSummary(projectId) {
     } catch (_) {
         container.innerHTML = '<div class="crm-empty">載入失敗</div>';
     }
+}
+
+function _showExpenseForm(editId = null, cat = '', est = 0, act = 0, notes = '') {
+    const form = document.getElementById('proj-expense-form');
+    if (!form) return;
+    form.style.display = 'block';
+    form.innerHTML = `
+        <div class="expense-row" style="gap:4px;flex-wrap:wrap;padding:8px;background:#1e1e1e;border-radius:6px;border:1px solid #3a3a3a;margin-bottom:6px;">
+            <select id="exp-f-cat" class="crm-input" style="width:80px;"><option value="交通">交通</option><option value="住宿">住宿</option><option value="飲食">飲食</option><option value="提案">提案</option><option value="器材">器材</option><option value="其他">其他</option></select>
+            <input id="exp-f-est" type="number" class="crm-input" placeholder="預估" style="width:80px;text-align:right;" value="${est}">
+            <input id="exp-f-act" type="number" class="crm-input" placeholder="實際" style="width:80px;text-align:right;" value="${act}">
+            <input id="exp-f-notes" type="text" class="crm-input" placeholder="備註" style="flex:1;min-width:60px;" value="${_esc(notes)}">
+            <input id="exp-f-receipt" type="file" accept="image/*,.pdf" style="display:none;">
+            <button class="crm-btn crm-btn-secondary crm-btn-sm" onclick="document.getElementById('exp-f-receipt').click()">📷</button>
+            <button class="crm-btn crm-btn-primary crm-btn-sm" onclick="window._projSaveExpense('${editId || ''}')">確定</button>
+            <button class="crm-btn crm-btn-secondary crm-btn-sm" onclick="document.getElementById('proj-expense-form').style.display='none'">取消</button>
+        </div>
+    `;
+    if (cat) document.getElementById('exp-f-cat').value = cat;
 }
 
 async function _loadProjectStaff(projectId) {
@@ -477,6 +541,44 @@ export function initCrmProjectsTab() {
     window._projDelete = (id) => {
         const p = _projects.find(x => x.id === id);
         if (p) deleteProject(p);
+    };
+    window._projAddExpense = () => _showExpenseForm();
+    window._projEditExpense = (id, cat, est, act, notes) => _showExpenseForm(id, cat, est, act, notes);
+    window._projSaveExpense = async (editId) => {
+        if (!_selectedId) return;
+        const payload = {
+            category: document.getElementById('exp-f-cat').value,
+            estimated: parseInt(document.getElementById('exp-f-est').value) || 0,
+            actual: parseInt(document.getElementById('exp-f-act').value) || 0,
+            notes: document.getElementById('exp-f-notes').value,
+        };
+        try {
+            let expenseId = editId;
+            if (editId) {
+                await _fetch('/project-expenses/' + editId, { method: 'PUT', body: JSON.stringify(payload) });
+            } else {
+                const r = await _fetch('/projects/' + _selectedId + '/expenses', { method: 'POST', body: JSON.stringify(payload) });
+                expenseId = r.expense_id;
+            }
+            // Upload receipt if file selected
+            const fileInput = document.getElementById('exp-f-receipt');
+            if (fileInput?.files?.[0] && expenseId) {
+                const form = new FormData();
+                form.append('file', fileInput.files[0]);
+                const token = localStorage.getItem('auth_token');
+                await fetch('/api/v1/crm/project-expenses/' + expenseId + '/receipt', {
+                    method: 'POST', headers: token ? { 'Authorization': 'Bearer ' + token } : {}, body: form
+                });
+            }
+            _loadFinancialSummary(_selectedId);
+        } catch (e) { alert('儲存失敗：' + e.message); }
+    };
+    window._projDeleteExpense = async (id) => {
+        if (!confirm('確定刪除此雜支？')) return;
+        try {
+            await _fetch('/project-expenses/' + id, { method: 'DELETE' });
+            _loadFinancialSummary(_selectedId);
+        } catch (e) { alert(e.message); }
     };
     window._projRefreshQuotes = (projectId) => {
         if (_selectedId === projectId) _loadProjectQuotations(projectId);

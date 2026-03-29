@@ -1180,7 +1180,7 @@ async def list_project_expenses(project_id: str):
     return {"expenses": [{
         "id": e.id, "category": e.category,
         "estimated": e.estimated, "actual": e.actual,
-        "notes": e.notes or "",
+        "receipt_url": e.receipt_url or "", "notes": e.notes or "",
     } for e in rows]}
 
 
@@ -1197,7 +1197,7 @@ async def add_project_expense(project_id: str, req: ProjectExpensePayload, reque
         )
         session.add(e)
         await session.commit()
-    return {"status": "ok"}
+    return {"status": "ok", "expense_id": e.id}
 
 
 @router.put("/project-expenses/{expense_id}")
@@ -1229,6 +1229,36 @@ async def delete_project_expense(expense_id: str, request: Request):
         await session.delete(e)
         await session.commit()
     return {"status": "ok"}
+
+
+@router.post("/project-expenses/{expense_id}/receipt")
+async def upload_expense_receipt(expense_id: str, request: Request, file: UploadFile = File(...)):
+    _check_auth(request)
+    _require_db()
+    factory = await _get_factory()
+
+    ext = os.path.splitext(file.filename or "img.jpg")[1].lower()
+    if ext not in (".jpg", ".jpeg", ".png", ".webp", ".heic", ".pdf"):
+        raise HTTPException(status_code=400, detail="不支援的檔案格式")
+
+    upload_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "uploads", "receipts")
+    os.makedirs(upload_dir, exist_ok=True)
+    filename = f"{expense_id}{ext}"
+    filepath = os.path.join(upload_dir, filename)
+
+    content = await file.read()
+    import pathlib
+    await asyncio.to_thread(pathlib.Path(filepath).write_bytes, content)
+
+    receipt_url = f"/uploads/receipts/{filename}"
+    async with factory() as session:
+        e = await session.get(CrmProjectExpense, expense_id)
+        if not e:
+            raise HTTPException(status_code=404, detail="找不到此雜支")
+        e.receipt_url = receipt_url
+        await session.commit()
+
+    return {"status": "ok", "receipt_url": receipt_url}
 
 
 @router.get("/projects/{project_id}/financial-summary")

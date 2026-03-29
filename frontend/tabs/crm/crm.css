@@ -516,3 +516,14 @@
 .crm-row-role  { flex: 1; color: #9ca3af; font-size: 12px; }
 .crm-row-rate  { flex: 0.7; text-align: right; color: #e0e0e0; font-size: 13px; font-weight: 600; }
 .crm-row-phone { flex: 1; color: #6b7280; font-size: 12px; }
+
+/* ── Expense section ── */
+.expense-section { margin: 8px 0; padding: 10px; background: #1a1a1a; border-radius: 8px; border: 1px solid #2e2e2e; }
+.expense-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px; font-size: 12px; color: #9ca3af; }
+.expense-row { display: flex; align-items: center; gap: 6px; padding: 5px 0; border-bottom: 1px solid #2e2e2e; font-size: 12px; }
+.expense-row:last-child { border-bottom: none; }
+.expense-row-header { color: #6b7280; font-weight: 600; }
+.expense-cat { flex: 1; color: #d1d5db; }
+.expense-num { width: 80px; text-align: right; color: #e0e0e0; }
+.expense-receipt { width: 30px; text-align: center; }
+.expense-actions { width: 80px; display: flex; gap: 2px; justify-content: flex-end; }

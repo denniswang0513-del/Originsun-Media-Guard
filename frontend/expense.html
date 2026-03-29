@@ -1,0 +1,244 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>源日影像 — 雜支登記</title>
+<style>
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body { background: #1a1a1a; color: #e0e0e0; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; min-height: 100vh; }
+.container { max-width: 480px; margin: 0 auto; padding: 16px; }
+h1 { font-size: 18px; font-weight: 700; text-align: center; padding: 12px 0; color: #fff; }
+h1 span { color: #3b82f6; }
+.card { background: #2a2a2a; border: 1px solid #3a3a3a; border-radius: 12px; padding: 16px; margin-bottom: 12px; }
+label { display: block; font-size: 12px; color: #9ca3af; margin-bottom: 4px; font-weight: 600; }
+select, input[type=number], input[type=text], textarea {
+  width: 100%; background: #1e1e1e; border: 1px solid #3a3a3a; border-radius: 8px;
+  color: #e0e0e0; padding: 10px 12px; font-size: 15px; margin-bottom: 12px; outline: none;
+}
+select:focus, input:focus, textarea:focus { border-color: #3b82f6; }
+textarea { resize: vertical; min-height: 50px; font-family: inherit; }
+.photo-area {
+  border: 2px dashed #3a3a3a; border-radius: 10px; padding: 20px; text-align: center;
+  color: #6b7280; font-size: 14px; cursor: pointer; margin-bottom: 12px; position: relative;
+}
+.photo-area.has-img { border-color: #3b82f6; padding: 4px; }
+.photo-area img { max-width: 100%; max-height: 200px; border-radius: 8px; }
+.photo-area .cam-icon { font-size: 32px; margin-bottom: 4px; }
+.btn-submit {
+  width: 100%; background: #3b82f6; color: #fff; border: none; border-radius: 10px;
+  padding: 14px; font-size: 16px; font-weight: 700; cursor: pointer;
+}
+.btn-submit:disabled { opacity: 0.5; }
+.btn-submit:active { background: #2563eb; }
+.success-msg { background: #14532d; border: 1px solid #166534; border-radius: 8px; padding: 12px; color: #86efac; text-align: center; margin-bottom: 12px; }
+.error-msg { background: #3b1f1f; border: 1px solid #7f1d1d; border-radius: 8px; padding: 12px; color: #fca5a5; text-align: center; margin-bottom: 12px; }
+.history-title { font-size: 13px; color: #6b7280; font-weight: 600; margin-bottom: 8px; }
+.history-row { display: flex; justify-content: space-between; align-items: center; padding: 8px 0; border-bottom: 1px solid #2e2e2e; font-size: 13px; }
+.history-row .cat { color: #9ca3af; min-width: 50px; }
+.history-row .amt { font-weight: 600; }
+.history-row .receipt { color: #3b82f6; text-decoration: none; }
+.login-card { text-align: center; }
+.login-card input { margin-bottom: 8px; }
+.login-card button { background: #3b82f6; color: #fff; border: none; border-radius: 8px; padding: 10px 24px; font-size: 14px; font-weight: 600; cursor: pointer; }
+</style>
+</head>
+<body>
+<div class="container">
+  <h1><span>源日影像</span> 雜支登記</h1>
+
+  <!-- Login -->
+  <div id="login-section" class="card login-card" style="display:none;">
+    <label>帳號</label>
+    <input id="login-user" type="text" placeholder="admin">
+    <label>密碼</label>
+    <input id="login-pass" type="password">
+    <button onclick="_login()">登入</button>
+    <div id="login-error" class="error-msg" style="display:none;margin-top:8px;"></div>
+  </div>
+
+  <!-- Main form -->
+  <div id="main-section" style="display:none;">
+    <div class="card">
+      <label>專案</label>
+      <select id="exp-project"></select>
+
+      <label>類別</label>
+      <select id="exp-category">
+        <option value="交通">交通</option>
+        <option value="住宿">住宿</option>
+        <option value="飲食">飲食</option>
+        <option value="提案">提案</option>
+        <option value="器材">器材</option>
+        <option value="其他">其他</option>
+      </select>
+
+      <label>金額</label>
+      <input id="exp-amount" type="number" inputmode="numeric" placeholder="0" min="0">
+
+      <label>備註</label>
+      <input id="exp-notes" type="text" placeholder="選填">
+
+      <label>收據</label>
+      <div class="photo-area" id="photo-area" onclick="document.getElementById('exp-file').click()">
+        <div class="cam-icon">📷</div>
+        <div>點擊拍照或選擇圖片</div>
+      </div>
+      <input id="exp-file" type="file" accept="image/*" capture="environment" style="display:none;">
+    </div>
+
+    <div id="msg" style="display:none;"></div>
+
+    <button class="btn-submit" id="btn-submit" onclick="_submit()">送出</button>
+
+    <!-- Recent history -->
+    <div class="card" style="margin-top:16px;">
+      <div class="history-title">最近紀錄</div>
+      <div id="history-list"></div>
+    </div>
+  </div>
+</div>
+
+<script>
+const BASE = location.origin + '/api/v1/crm';
+let _token = localStorage.getItem('auth_token') || '';
+let _projectId = '';
+
+function _headers() {
+  const h = { 'Content-Type': 'application/json' };
+  if (_token) h['Authorization'] = 'Bearer ' + _token;
+  return h;
+}
+
+async function _init() {
+  if (!_token) { document.getElementById('login-section').style.display = ''; return; }
+  document.getElementById('main-section').style.display = '';
+  // Load projects
+  try {
+    const r = await fetch(BASE + '/projects', { headers: _headers() });
+    const data = await r.json();
+    const sel = document.getElementById('exp-project');
+    sel.innerHTML = (data.projects || []).map(p =>
+      '<option value="' + p.id + '">' + p.name + ' (' + (p.client_short_name || '') + ')</option>'
+    ).join('');
+    if (data.projects?.length) { _projectId = data.projects[0].id; _loadHistory(); }
+    sel.addEventListener('change', e => { _projectId = e.target.value; _loadHistory(); });
+  } catch (_) {}
+
+  // Photo preview
+  document.getElementById('exp-file').addEventListener('change', e => {
+    const file = e.target.files[0];
+    const area = document.getElementById('photo-area');
+    if (file) {
+      const reader = new FileReader();
+      reader.onload = ev => { area.innerHTML = '<img src="' + ev.target.result + '">'; area.classList.add('has-img'); };
+      reader.readAsDataURL(file);
+    }
+  });
+}
+
+async function _login() {
+  const user = document.getElementById('login-user').value;
+  const pass = document.getElementById('login-pass').value;
+  try {
+    const r = await fetch(location.origin + '/api/v1/auth/login', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username: user, password: pass }),
+    });
+    const d = await r.json();
+    if (d.token) {
+      _token = d.token;
+      localStorage.setItem('auth_token', _token);
+      document.getElementById('login-section').style.display = 'none';
+      _init();
+    } else {
+      document.getElementById('login-error').textContent = d.detail || '登入失敗';
+      document.getElementById('login-error').style.display = '';
+    }
+  } catch (e) {
+    document.getElementById('login-error').textContent = '連線失敗';
+    document.getElementById('login-error').style.display = '';
+  }
+}
+
+async function _submit() {
+  const amount = parseInt(document.getElementById('exp-amount').value) || 0;
+  if (!amount) { _showMsg('請填寫金額', true); return; }
+  if (!_projectId) { _showMsg('請選擇專案', true); return; }
+
+  const btn = document.getElementById('btn-submit');
+  btn.disabled = true; btn.textContent = '送出中...';
+
+  try {
+    // Create expense
+    const r = await fetch(BASE + '/projects/' + _projectId + '/expenses', {
+      method: 'POST', headers: _headers(),
+      body: JSON.stringify({
+        category: document.getElementById('exp-category').value,
+        estimated: 0, actual: amount,
+        notes: document.getElementById('exp-notes').value,
+      }),
+    });
+    if (!r.ok) throw new Error((await r.json().catch(() => ({}))).detail || '建立失敗');
+    const created = await r.json();
+    const expenseId = created.expense_id;
+
+    // Upload receipt if file selected
+    const file = document.getElementById('exp-file').files[0];
+    if (file && expenseId) {
+      const form = new FormData();
+      form.append('file', file);
+      await fetch(BASE + '/project-expenses/' + expenseId + '/receipt', {
+        method: 'POST', headers: _token ? { 'Authorization': 'Bearer ' + _token } : {}, body: form,
+      });
+    }
+
+    _showMsg('登記成功！', false);
+    // Reset form
+    document.getElementById('exp-amount').value = '';
+    document.getElementById('exp-notes').value = '';
+    document.getElementById('exp-file').value = '';
+    const area = document.getElementById('photo-area');
+    area.innerHTML = '<div class="cam-icon">📷</div><div>點擊拍照或選擇圖片</div>';
+    area.classList.remove('has-img');
+    _loadHistory();
+  } catch (e) {
+    _showMsg(e.message, true);
+  } finally {
+    btn.disabled = false; btn.textContent = '送出';
+  }
+}
+
+async function _loadHistory() {
+  if (!_projectId) return;
+  try {
+    const r = await fetch(BASE + '/projects/' + _projectId + '/expenses', { headers: _headers() });
+    const data = await r.json();
+    const list = document.getElementById('history-list');
+    const exps = (data.expenses || []).reverse().slice(0, 10);
+    if (exps.length === 0) { list.innerHTML = '<div style="color:#6b7280;font-size:12px;">尚無紀錄</div>'; return; }
+    const _e = s => String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+    list.innerHTML = exps.map(e => {
+      const url = (e.receipt_url || '').replace(/^javascript:/i, '');
+      return '<div class="history-row">' +
+        '<span class="cat">' + _e(e.category) + '</span>' +
+        '<span class="amt">$' + (e.actual || 0).toLocaleString() + '</span>' +
+        (url ? '<a class="receipt" href="' + _e(url) + '" target="_blank">📎</a>' : '<span>—</span>') +
+        (e.notes ? '<span style="color:#6b7280;font-size:11px;">' + _e(e.notes) + '</span>' : '') +
+      '</div>';
+    }).join('');
+  } catch (_) {}
+}
+
+function _showMsg(msg, isError) {
+  const el = document.getElementById('msg');
+  el.className = isError ? 'error-msg' : 'success-msg';
+  el.textContent = msg;
+  el.style.display = '';
+  setTimeout(() => el.style.display = 'none', 3000);
+}
+
+_init();
+</script>
+</body>
+</html>

@@ -297,6 +297,8 @@ async def serve_index():
         return resp
     return FileResponse("frontend/index.html")
 
+if os.path.isdir("uploads"):
+    app.mount("/uploads", StaticFiles(directory="uploads"), name="uploads")
 if os.path.exists("frontend"):
     app.mount("/", StaticFiles(directory="frontend", html=True), name="frontend")
 else:
