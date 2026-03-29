@@ -147,6 +147,42 @@ async def _on_startup():
                     await session.commit()
         except Exception:
             pass
+    # ── DB Migration: CRM new columns ──
+    if state.db_online:
+        try:
+            from db.session import get_session_factory
+            _f = get_session_factory()
+            if _f:
+                from sqlalchemy import text as _t
+                async with _f() as _s:
+                    _crm_cols = [
+                        ("crm_projects", "start_date", "TIMESTAMPTZ"),
+                        ("crm_projects", "completion_date", "TIMESTAMPTZ"),
+                        ("crm_projects", "project_type", "VARCHAR(64) DEFAULT ''"),
+                        ("crm_projects", "contract_amount", "INTEGER"),
+                        ("crm_projects", "tax_rate", "INTEGER DEFAULT 5"),
+                        ("crm_projects", "profit_target_pct", "INTEGER DEFAULT 20"),
+                        ("crm_projects", "misc_budget_pct", "INTEGER DEFAULT 5"),
+                        ("crm_projects", "payment_status", "VARCHAR(32) DEFAULT '未到帳'"),
+                        ("crm_projects", "amount_receivable", "INTEGER"),
+                        ("crm_projects", "amount_received", "INTEGER"),
+                        ("crm_projects", "transfer_fee", "INTEGER"),
+                        ("crm_quotation_items", "internal_cost", "INTEGER DEFAULT 0"),
+                        ("crm_project_staff", "phase", "VARCHAR(32) DEFAULT ''"),
+                        ("crm_project_staff", "actual_days", "INTEGER"),
+                        ("crm_project_staff", "actual_cost", "INTEGER"),
+                        ("crm_project_staff", "payment_status", "VARCHAR(32)"),
+                        ("crm_project_staff", "payment_date", "TIMESTAMPTZ"),
+                        ("crm_staff", "address", "VARCHAR(255)"),
+                    ]
+                    for tbl, col, coltype in _crm_cols:
+                        try:
+                            await _s.execute(_t(f"ALTER TABLE {tbl} ADD COLUMN IF NOT EXISTS {col} {coltype}"))
+                            await _s.commit()
+                        except Exception:
+                            await _s.rollback()
+        except Exception:
+            pass
     asyncio.create_task(_periodic_version_check())
     asyncio.create_task(_periodic_db_health())
     from core.scheduler import run_scheduler  # type: ignore
