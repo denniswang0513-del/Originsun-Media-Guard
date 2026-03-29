@@ -192,6 +192,7 @@ export function initCrmCashbookTab() {
         if (el) document.body.appendChild(el);
     }
     window._cashSelect = selectEntry;
+    window._cashRefresh = loadEntries;
     window._cashEdit = (id) => { const e = _entries.find(x => x.id === id); if (e) openModal(e); };
     window._cashDelete = (id) => { const e = _entries.find(x => x.id === id); if (e) deleteEntry(e); };
 

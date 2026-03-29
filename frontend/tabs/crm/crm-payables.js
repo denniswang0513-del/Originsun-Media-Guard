@@ -62,7 +62,6 @@ function renderDetail(p) {
         actionsArea.innerHTML = `
             <button class="crm-btn crm-btn-secondary crm-btn-sm" onclick="window._payableCopyInfo('${_esc(p.payee_name)}')">複製匯款資訊</button>
             ${hasUnpaid ? `<button class="crm-btn crm-btn-primary crm-btn-sm" onclick="window._payablePayAll('${_esc(p.payee_name)}')">全部付款</button>` : ''}
-            <button class="crm-btn crm-btn-secondary crm-btn-sm" onclick="window._payableRefresh()">重新整理</button>
             <button id="payable-detail-close" class="crm-detail-close" title="關閉" onclick="window._payableClose()">&#x2715;</button>
         `;
     }

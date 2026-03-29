@@ -228,6 +228,7 @@ export function initCrmPaymentsTab() {
         if (el) document.body.appendChild(el);
     }
     window._paySelect = selectPayment;
+    window._payRefresh = loadPayments;
     window._payEdit = async (id) => { try { openModal(await _fetch('/payments/' + id)); } catch(_) {} };
     window._payDelete = (id) => { const p = _payments.find(x => x.id === id); if (p) deletePayment(p); };
 

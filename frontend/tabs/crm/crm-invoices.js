@@ -328,5 +328,15 @@ export function initCrmInvoicesTab() {
         }
     });
 
+    // Global refresh — reloads current active sub-view
+    document.getElementById('inv-global-refresh').addEventListener('click', () => {
+        // Refresh invoices (always loaded)
+        loadInvoices();
+        // Refresh whichever lazy-loaded sub-view is active
+        if (window._payRefresh) window._payRefresh();
+        if (window._cashRefresh) window._cashRefresh();
+        if (window._payableRefresh) window._payableRefresh();
+    });
+
     Promise.all([loadInvoices(), loadProjects()]);
 }
