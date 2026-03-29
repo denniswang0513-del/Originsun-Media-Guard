@@ -264,10 +264,11 @@ export function initCrmInvoicesTab() {
             _paymentsLoading = true;
             try {
                 const _cb = '?t=' + Date.now();
-                const res = await fetch('./tabs/crm/crm-payments.html' + _cb);
+                const baseUrl = location.origin;
+                const res = await fetch(baseUrl + '/tabs/crm/crm-payments.html' + _cb);
                 if (res.ok) {
                     payView.innerHTML = await res.text();
-                    const mod = await import('./tabs/crm/crm-payments.js' + _cb);
+                    const mod = await import(baseUrl + '/tabs/crm/crm-payments.js' + _cb);
                     mod.initCrmPaymentsTab();
                     _paymentsLoaded = true;
                 }
