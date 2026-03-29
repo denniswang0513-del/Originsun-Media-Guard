@@ -1857,3 +1857,81 @@ async def import_cash_csv(request: Request, file: UploadFile = File(...)):
             imported += 1
         await session.commit()
     return {"status": "ok", "imported": imported, "skipped": skipped}
+
+
+# ── Accounts Payable (應付帳款) ─────────────────────────────
+
+@router.get("/payables/summary")
+async def payables_summary(month: str = Query("")):
+    """當月未付款請款彙總，按收款人分組，帶入銀行資訊。"""
+    _require_db()
+    factory = await _get_factory()
+
+    if not month:
+        now = _now()
+        month = f"{now.year}-{now.month:02d}"
+    parts = month.split("-")
+    year, mon = int(parts[0]), int(parts[1])
+    from calendar import monthrange
+    start = datetime(year, mon, 1, tzinfo=timezone.utc)
+    _, last_day = monthrange(year, mon)
+    end = datetime(year, mon, last_day, 23, 59, 59, tzinfo=timezone.utc)
+
+    async with factory() as session:
+        rows = (await session.execute(
+            select(CrmPaymentRequest)
+            .where(CrmPaymentRequest.payment_status == "未付款")
+            .where(CrmPaymentRequest.request_date >= start)
+            .where(CrmPaymentRequest.request_date <= end)
+            .order_by(CrmPaymentRequest.request_date)
+        )).scalars().all()
+
+        staff_map = {s.name: s for s in (await session.execute(select(CrmStaff))).scalars().all()}
+
+    payee_groups = {}
+    for p in rows:
+        name = p.payee_name or "未指定"
+        if name not in payee_groups:
+            staff = staff_map.get(name)
+            payee_groups[name] = {
+                "payee_name": name,
+                "payee_id": p.payee_id or (staff.id_number if staff else "") or "",
+                "bank_name": (staff.bank_name if staff else "") or "",
+                "bank_account": (staff.bank_account if staff else "") or "",
+                "total_amount": 0, "items": [],
+            }
+        payee_groups[name]["total_amount"] += p.amount or 0
+        payee_groups[name]["items"].append({
+            "id": p.id,
+            "date": p.request_date.strftime("%Y/%m/%d") if p.request_date else "",
+            "amount": p.amount or 0,
+            "summary": p.summary or "",
+            "category": p.category or "",
+        })
+
+    payees = sorted(payee_groups.values(), key=lambda x: x["payee_name"])
+    return {"month": month, "payees": payees, "grand_total": sum(pg["total_amount"] for pg in payees)}
+
+
+@router.patch("/payments/batch-pay")
+async def batch_pay(request: Request):
+    _check_auth(request)
+    _require_db()
+    factory = await _get_factory()
+    body = await request.json()
+    ids = body.get("payment_ids", [])
+    pay_date = _parse_shoot_date(body.get("payment_date", "")) or _now()
+    if not ids:
+        raise HTTPException(status_code=400, detail="請提供 payment_ids")
+
+    async with factory() as session:
+        updated = 0
+        for pid in ids:
+            p = await session.get(CrmPaymentRequest, pid)
+            if p and p.payment_status != "已付款":
+                p.payment_status = "已付款"
+                p.payment_date = pay_date
+                p.updated_at = _now()
+                updated += 1
+        await session.commit()
+    return {"status": "ok", "updated": updated}

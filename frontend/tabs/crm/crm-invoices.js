@@ -253,11 +253,13 @@ export function initCrmInvoicesTab() {
     // View switching
     let _paymentsLoaded = false, _paymentsLoading = false;
     let _cashbookLoaded = false, _cashbookLoading = false;
+    let _payablesLoaded = false, _payablesLoading = false;
     const invView = document.getElementById('inv-invoices-view');
     const payView = document.getElementById('inv-payments-view');
     const cashView = document.getElementById('inv-cashbook-view');
-    const allViews = [invView, payView, cashView];
-    const allBtns = ['inv-view-invoices', 'inv-view-payments', 'inv-view-cashbook'];
+    const payablesView = document.getElementById('inv-payables-view');
+    const allViews = [invView, payView, cashView, payablesView];
+    const allBtns = ['inv-view-invoices', 'inv-view-payments', 'inv-view-cashbook', 'inv-view-payables'];
     const baseUrl = location.origin;
 
     function _switchView(showView, activeBtn) {
@@ -304,6 +306,25 @@ export function initCrmInvoicesTab() {
                 }
             } catch (e) { console.warn('[Cashbook] load failed:', e); }
             finally { _cashbookLoading = false; }
+        }
+    });
+
+    document.getElementById('inv-view-payables').addEventListener('click', async () => {
+        if (_payablesLoading) return;
+        _switchView(payablesView, 'inv-view-payables');
+        if (!_payablesLoaded) {
+            _payablesLoading = true;
+            try {
+                const _cb = '?t=' + Date.now();
+                const res = await fetch(baseUrl + '/tabs/crm/crm-payables.html' + _cb);
+                if (res.ok) {
+                    payablesView.innerHTML = await res.text();
+                    const mod = await import(baseUrl + '/tabs/crm/crm-payables.js' + _cb);
+                    mod.initCrmPayablesTab();
+                    _payablesLoaded = true;
+                }
+            } catch (e) { console.warn('[Payables] load failed:', e); }
+            finally { _payablesLoading = false; }
         }
     });
 
