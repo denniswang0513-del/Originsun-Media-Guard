@@ -96,11 +96,22 @@ const _FIELDS = ['summary', 'amount', 'request_date', 'category', 'payee_name', 
 const _DATE_FIELDS = ['request_date', 'payment_date'];
 const _INT_FIELDS = ['amount', 'needs_invoice'];
 
-function _populateProjectSelect(selectedId) {
+const _PROJECT_CATEGORIES = ['專案外包', '專案雜支', '發票代開'];
+
+function _populateProjectSelect(selectedId, category) {
     const sel = document.getElementById('pay-f-project_id');
+    const labelEl = document.getElementById('pay-f-project_id')?.closest('.crm-field');
     if (!sel) return;
-    sel.innerHTML = `<option value="">— 不關聯 —</option>` +
-        _projects.map(p => `<option value="${p.id}"${p.id === selectedId ? ' selected' : ''}>${_esc(p.name)}</option>`).join('');
+
+    if (_PROJECT_CATEGORIES.includes(category)) {
+        if (labelEl) labelEl.style.display = '';
+        sel.innerHTML = `<option value="">— 選擇專案 —</option>` +
+            _projects.map(p => `<option value="${p.id}"${p.id === selectedId ? ' selected' : ''}>${_esc(p.name)} (${_esc(p.client_short_name || '')})</option>`).join('');
+    } else {
+        if (labelEl) labelEl.style.display = '';
+        sel.innerHTML = `<option value="">— 不關聯 —</option>` +
+            _projects.map(p => `<option value="${p.id}"${p.id === selectedId ? ' selected' : ''}>${_esc(p.name)}</option>`).join('');
+    }
 }
 
 function _populatePayeeSelect(selectedName) {
@@ -115,7 +126,7 @@ function openModal(p = null) {
     document.getElementById('pay-modal-title').textContent = p ? '編輯請款' : '新增請款';
     const err = document.getElementById('pay-modal-error');
     err.textContent = ''; err.style.display = 'none';
-    _populateProjectSelect(p?.project_id || '');
+    _populateProjectSelect(p?.project_id || '', p?.category || '');
     _populatePayeeSelect(p?.payee_name || '');
     for (const f of _FIELDS) {
         const el = document.getElementById('pay-f-' + f);
@@ -219,6 +230,11 @@ export function initCrmPaymentsTab() {
     document.getElementById('pay-f-payee_name').addEventListener('change', e => {
         const opt = e.target.selectedOptions[0];
         document.getElementById('pay-f-payee_id').value = opt?.dataset.id || '';
+    });
+
+    // Re-populate project select when category changes
+    document.getElementById('pay-f-category').addEventListener('change', e => {
+        _populateProjectSelect('', e.target.value);
     });
     document.getElementById('pay-btn-import').addEventListener('click', openImportModal);
     document.getElementById('pay-btn-save').addEventListener('click', savePayment);
