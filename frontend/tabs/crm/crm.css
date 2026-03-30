@@ -520,6 +520,12 @@
 .crm-pay-badge-付款 { background: #3b2f1f; color: #fbbf24; }
 .crm-pay-badge-作廢 { background: #374151; color: #9ca3af; text-decoration: line-through; }
 
+/* ── Payment list extra columns ── */
+.crm-col-cat   { flex: 0.8; }
+.crm-col-proj  { flex: 1.2; }
+.crm-row-cat   { flex: 0.8; color: #9ca3af; font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.crm-row-proj  { flex: 1.2; color: #6b7280; font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
 /* ── Cash entry columns ── */
 .crm-col-amt-out { flex: 0.7; text-align: right; }
 .crm-col-amt-in  { flex: 0.7; text-align: right; }

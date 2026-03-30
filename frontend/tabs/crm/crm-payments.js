@@ -55,8 +55,10 @@ function renderList() {
         <div class="crm-row${p.id === _selectedId ? ' selected' : ''}" onclick="window._paySelect('${p.id}')">
             <div class="crm-row-date">${p.request_date ? p.request_date.substring(0, 10) : '—'}</div>
             <div class="crm-row-name">${_esc(p.summary)}</div>
+            <div class="crm-row-cat">${_esc(p.category || '')}${p.invoice_number ? '<br><span style="color:#6b7280;font-size:10px;">' + _esc(p.invoice_number) + '</span>' : ''}</div>
             <div class="crm-row-amount">$${_fmtNum(p.amount)}</div>
             <div class="crm-row-client">${_esc(p.payee_name)}</div>
+            <div class="crm-row-proj">${_esc(p.project_name || p.project_label || '')}</div>
             <div class="crm-row-status">${_statusBadge(p.payment_status)}</div>
             <div class="crm-row-actions" onclick="event.stopPropagation()">
                 <button class="crm-btn crm-btn-secondary crm-btn-sm" onclick="window._payEdit('${p.id}')">編輯</button>
