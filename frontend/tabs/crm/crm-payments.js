@@ -100,15 +100,21 @@ function renderDetail(p) {
         return `<div class="crm-detail-prop"><div class="crm-prop-label">${label}</div><div class="crm-prop-value${empty ? ' empty' : ''}">${empty ? '空' : _esc(String(value))}</div></div>`;
     };
     document.getElementById('pay-detail-content').innerHTML = `
-        ${prop('日期', p.request_date ? p.request_date.substring(0, 10) : '')}
+        <div style="font-size:12px;font-weight:700;color:#6b7280;padding:4px 0;">請款內容</div>
+        ${prop('摘要', p.summary)}
         ${prop('金額', '$' + _fmtNum(p.amount))}
         ${prop('項目', p.category)}
+        ${prop('日期', p.request_date ? p.request_date.substring(0, 10) : '')}
+        <div style="border-top:1px solid #2e2e2e;margin:8px 0;"></div>
+        <div style="font-size:12px;font-weight:700;color:#6b7280;padding:4px 0;">付款資訊</div>
         ${prop('收款人', p.payee_name + (p.payee_id ? ' (' + p.payee_id + ')' : ''))}
-        ${prop('狀態', p.payee_type)}
-        ${prop('代開發票', p.needs_invoice ? '是 — ' + (p.invoice_number || '待開') : '否')}
-        ${prop('專案', p.project_label || p.project_name)}
         <div class="crm-detail-prop"><div class="crm-prop-label">付款狀態</div><div class="crm-prop-value">${_statusBadge(p.payment_status)}</div></div>
         ${p.payment_date ? prop('付款日', p.payment_date.substring(0, 10)) : ''}
+        ${p.planned_month ? prop('預計付款月', p.planned_month) : ''}
+        <div style="border-top:1px solid #2e2e2e;margin:8px 0;"></div>
+        <div style="font-size:12px;font-weight:700;color:#6b7280;padding:4px 0;">補充資訊</div>
+        ${p.invoice_number ? prop('發票號碼', p.invoice_number) : ''}
+        ${p.project_name ? prop('專案', p.project_name) : ''}
         ${prop('附註', p.notes)}
     `;
     // Restore action buttons to default (edit + close)
