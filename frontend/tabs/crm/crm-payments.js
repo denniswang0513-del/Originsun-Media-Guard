@@ -146,7 +146,7 @@ function closeDetail() {
 }
 
 const _FIELDS = ['summary', 'amount', 'request_date', 'category', 'payee_name', 'payee_id',
-    'payee_type', 'invoice_number', 'project_label', 'project_id',
+    'payee_type', 'invoice_number', 'project_id',
     'payment_date', 'payment_status', 'planned_month', 'notes'];
 const _DATE_FIELDS = ['request_date', 'payment_date'];
 const _INT_FIELDS = ['amount'];
@@ -158,23 +158,57 @@ async function _loadInvoiceList() {
     try { _invoiceList = (await _fetch('/invoices?payment_type=收款')).invoices || []; } catch(_) { _invoiceList = []; }
 }
 
-function _populateProjectSelect(selectedId, category) {
-    const sel = document.getElementById('pay-f-project_id');
-    if (!sel) return;
+function _updateExtraFields(category) {
+    const invoiceField = document.getElementById('pay-invoice-field');
+    const invoiceNumField = document.getElementById('pay-invoice-number-field');
+    const projectField = document.getElementById('pay-project-field');
+    const dateField = document.getElementById('pay-date-field');
+    const payStatus = document.getElementById('pay-f-payment_status')?.value;
+
+    // Hide all first
+    if (invoiceField) invoiceField.style.display = 'none';
+    if (invoiceNumField) invoiceNumField.style.display = 'none';
+    if (projectField) projectField.style.display = 'none';
 
     if (category === '發票代開') {
-        // Show unpaid invoices instead of projects
-        const unpaid = _invoiceList.filter(inv => inv.issue_status === '已開立');
-        sel.innerHTML = `<option value="">— 選擇發票 —</option>` +
-            unpaid.map(inv => `<option value="${inv.id}" data-amt="${inv.amount_total || 0}" data-company="${_esc(inv.company_name)}"${inv.id === selectedId ? ' selected' : ''}>` +
-                `${_esc(inv.title)} $${(inv.amount_total||0).toLocaleString('zh-TW')} (${_esc(inv.company_name)})</option>`).join('');
+        // Show invoice fields + optional project
+        if (invoiceField) invoiceField.style.display = '';
+        if (invoiceNumField) invoiceNumField.style.display = '';
+        if (projectField) {
+            projectField.style.display = '';
+            const lbl = projectField.querySelector('label');
+            if (lbl) lbl.innerHTML = '專案';
+        }
+        // Populate invoice select
+        const sel = document.getElementById('pay-f-project_id');
+        if (sel) {
+            const current = sel.value;
+            sel.innerHTML = `<option value="">— 選擇發票 —</option>` +
+                _invoiceList.filter(inv => inv.issue_status === '已開立').map(inv =>
+                    `<option value="${inv.id}" data-num="${_esc(inv.invoice_number)}" data-amt="${inv.amount_total || 0}"${inv.id === current ? ' selected' : ''}>${_esc(inv.title)} $${(inv.amount_total||0).toLocaleString('zh-TW')} (${_esc(inv.company_name)})</option>`
+                ).join('');
+        }
     } else if (_PROJECT_CATEGORIES.includes(category)) {
-        sel.innerHTML = `<option value="">— 選擇專案 —</option>` +
-            _projects.map(p => `<option value="${p.id}"${p.id === selectedId ? ' selected' : ''}>${_esc(p.name)} (${_esc(p.client_short_name || '')})</option>`).join('');
-    } else {
-        sel.innerHTML = `<option value="">— 不關聯 —</option>` +
-            _projects.map(p => `<option value="${p.id}"${p.id === selectedId ? ' selected' : ''}>${_esc(p.name)}</option>`).join('');
+        // Show project field (required)
+        if (projectField) {
+            projectField.style.display = '';
+            const lbl = projectField.querySelector('label');
+            if (lbl) lbl.innerHTML = '專案 <span class="crm-required">*</span>';
+        }
+        _populateProject2Select('');
     }
+
+    // Payment date visibility
+    if (dateField) dateField.style.display = (payStatus === '已付款') ? '' : 'none';
+
+    _togglePlannedMonth(payStatus || '未付款');
+}
+
+function _populateProject2Select(selectedId) {
+    const sel = document.getElementById('pay-f-project_id2');
+    if (!sel) return;
+    sel.innerHTML = `<option value="">— 選擇專案 —</option>` +
+        _projects.map(p => `<option value="${p.id}"${p.id === selectedId ? ' selected' : ''}>${_esc(p.name)} (${_esc(p.client_short_name || '')})</option>`).join('');
 }
 
 function _populatePayeeSelect(selectedName) {
@@ -189,17 +223,17 @@ function openModal(p = null) {
     document.getElementById('pay-modal-title').textContent = p ? '編輯請款' : '新增請款';
     const err = document.getElementById('pay-modal-error');
     err.textContent = ''; err.style.display = 'none';
-    _populateProjectSelect(p?.project_id || '', p?.category || '');
     _populatePayeeSelect(p?.payee_name || '');
+    _populateProject2Select(p?.project_id || '');
     for (const f of _FIELDS) {
         const el = document.getElementById('pay-f-' + f);
         if (!el) continue;
-        if (f === 'payee_name') continue; // handled by _populatePayeeSelect
+        if (f === 'payee_name') continue;
         if (_DATE_FIELDS.includes(f) && p?.[f]) el.value = p[f].substring(0, 10);
         else el.value = p ? (p[f] ?? '') : '';
     }
     if (!p) document.getElementById('pay-f-request_date').value = new Date().toISOString().substring(0, 10);
-    _togglePlannedMonth(p?.payment_status || '未付款');
+    _updateExtraFields(p?.category || '');
     document.getElementById('pay-modal').style.display = 'flex';
 }
 
@@ -212,13 +246,28 @@ async function savePayment() {
     const summary = document.getElementById('pay-f-summary').value.trim();
     if (!summary) { _showErr('摘要為必填'); return; }
     const payload = {};
+    const cat = document.getElementById('pay-f-category')?.value || '';
     for (const f of _FIELDS) {
         const el = document.getElementById('pay-f-' + f);
         let val = el ? el.value.trim() : '';
         if (_INT_FIELDS.includes(f)) val = val ? parseInt(val) : 0;
         if (_DATE_FIELDS.includes(f)) val = val || null;
-        if (f === 'project_id') val = val || null;
+        if (f === 'project_id') {
+            // Use invoice select for 發票代開, project2 select for 專案外包/雜支
+            if (cat === '發票代開') {
+                val = document.getElementById('pay-f-project_id')?.value || null;
+            } else {
+                val = document.getElementById('pay-f-project_id2')?.value || null;
+            }
+        }
         payload[f] = val;
+    }
+    // Validation
+    if (_PROJECT_CATEGORIES.includes(cat) && !document.getElementById('pay-f-project_id2')?.value) {
+        _showErr('請選擇專案'); return;
+    }
+    if (cat === '發票代開' && !document.getElementById('pay-f-project_id')?.value) {
+        _showErr('請選擇代開發票'); return;
     }
     const btn = document.getElementById('pay-btn-save');
     btn.disabled = true; btn.textContent = '儲存中...';
@@ -304,27 +353,25 @@ export function initCrmPaymentsTab() {
     });
 
     // Show/hide planned_month when payment_status changes
-    document.getElementById('pay-f-payment_status').addEventListener('change', e => _togglePlannedMonth(e.target.value));
-
-    // Re-populate project/invoice select when category changes
-    document.getElementById('pay-f-category').addEventListener('change', e => {
-        _populateProjectSelect('', e.target.value);
-        const label = document.getElementById('pay-label-project');
-        if (label) label.textContent = e.target.value === '發票代開' ? '關聯發票' : '關聯專案';
+    // Payment status → toggle payment date + planned month
+    document.getElementById('pay-f-payment_status').addEventListener('change', e => {
+        _updateExtraFields(document.getElementById('pay-f-category')?.value || '');
     });
 
-    // When invoice is selected in 發票代開 mode, auto-fill fields
+    // Category → toggle extra fields
+    document.getElementById('pay-f-category').addEventListener('change', e => {
+        _updateExtraFields(e.target.value);
+    });
+
+    // Invoice select → auto-fill invoice number
     document.getElementById('pay-f-project_id').addEventListener('change', e => {
         const cat = document.getElementById('pay-f-category').value;
         if (cat === '發票代開') {
-            const opt = e.target.selectedOptions[0];
-            if (opt?.dataset.amt) {
-                const inv = _invoiceList.find(i => i.id === e.target.value);
-                if (inv) {
-                    document.getElementById('pay-f-invoice_number').value = inv.invoice_number || '';
-                    if (!document.getElementById('pay-f-amount').value) {
-                        document.getElementById('pay-f-amount').value = inv.amount_total || '';
-                    }
+            const inv = _invoiceList.find(i => i.id === e.target.value);
+            if (inv) {
+                document.getElementById('pay-f-invoice_number').value = inv.invoice_number || '';
+                if (!document.getElementById('pay-f-amount').value) {
+                    document.getElementById('pay-f-amount').value = inv.amount_total || '';
                 }
             }
         }

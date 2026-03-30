@@ -61,18 +61,16 @@
       <button onclick="document.getElementById('pay-modal').style.display='none'" class="crm-detail-close">&#x2715;</button>
     </div>
     <div class="crm-modal-body">
+      <!-- 請款內容 -->
+      <div class="crm-form-section">請款內容</div>
       <div class="crm-form-grid">
-        <div class="crm-field crm-field-full">
+        <div class="crm-field">
           <label>摘要 <span class="crm-required">*</span></label>
           <input id="pay-f-summary" type="text" class="crm-input" placeholder="泛亞11月空拍">
         </div>
         <div class="crm-field">
           <label>金額</label>
           <input id="pay-f-amount" type="number" class="crm-input" min="0">
-        </div>
-        <div class="crm-field">
-          <label>日期</label>
-          <input id="pay-f-request_date" type="date" class="crm-input">
         </div>
         <div class="crm-field">
           <label>項目</label>
@@ -95,6 +93,23 @@
           </select>
         </div>
         <div class="crm-field">
+          <label>請款人</label>
+          <select id="pay-f-payee_type" class="crm-input">
+            <option value="">—</option>
+            <option value="勞報">勞報</option>
+            <option value="內部人員">內部人員</option>
+          </select>
+        </div>
+        <div class="crm-field">
+          <label>日期</label>
+          <input id="pay-f-request_date" type="date" class="crm-input">
+        </div>
+      </div>
+
+      <!-- 付款資訊 -->
+      <div class="crm-form-section">付款資訊</div>
+      <div class="crm-form-grid">
+        <div class="crm-field">
           <label>收款人</label>
           <select id="pay-f-payee_name" class="crm-input">
             <option value="">— 選擇人員 —</option>
@@ -105,32 +120,6 @@
           <input id="pay-f-payee_id" type="text" class="crm-input" maxlength="10" readonly style="opacity:0.7;">
         </div>
         <div class="crm-field">
-          <label>狀態</label>
-          <select id="pay-f-payee_type" class="crm-input">
-            <option value="">—</option>
-            <option value="勞報">勞報</option>
-            <option value="內部人員">內部人員</option>
-          </select>
-        </div>
-        <div class="crm-field">
-          <label>發票號碼</label>
-          <input id="pay-f-invoice_number" type="text" class="crm-input">
-        </div>
-        <div class="crm-field">
-          <label>專案標籤</label>
-          <input id="pay-f-project_label" type="text" class="crm-input" placeholder="2026 泛亞空拍台66專案">
-        </div>
-        <div class="crm-field">
-          <label id="pay-label-project">關聯專案</label>
-          <select id="pay-f-project_id" class="crm-input">
-            <option value="">— 不關聯 —</option>
-          </select>
-        </div>
-        <div class="crm-field">
-          <label>付款日</label>
-          <input id="pay-f-payment_date" type="date" class="crm-input">
-        </div>
-        <div class="crm-field">
           <label>付款狀態</label>
           <select id="pay-f-payment_status" class="crm-input">
             <option value="未付款">未付款</option>
@@ -138,9 +127,34 @@
             <option value="已付款">已付款</option>
           </select>
         </div>
+        <div class="crm-field" id="pay-date-field">
+          <label>付款日</label>
+          <input id="pay-f-payment_date" type="date" class="crm-input">
+        </div>
         <div class="crm-field" id="pay-planned-month-field" style="display:none;">
           <label>預計付款月</label>
           <input id="pay-f-planned_month" type="month" class="crm-input">
+        </div>
+      </div>
+
+      <!-- 補充資訊 -->
+      <div class="crm-form-section">補充資訊</div>
+      <div class="crm-form-grid" id="pay-extra-fields">
+        <div class="crm-field" id="pay-invoice-field" style="display:none;">
+          <label>代開發票 <span class="crm-required">*</span></label>
+          <select id="pay-f-project_id" class="crm-input">
+            <option value="">— 選擇 —</option>
+          </select>
+        </div>
+        <div class="crm-field" id="pay-invoice-number-field" style="display:none;">
+          <label>發票號碼</label>
+          <input id="pay-f-invoice_number" type="text" class="crm-input">
+        </div>
+        <div class="crm-field" id="pay-project-field" style="display:none;">
+          <label id="pay-label-project">專案</label>
+          <select id="pay-f-project_id2" class="crm-input">
+            <option value="">— 選擇專案 —</option>
+          </select>
         </div>
         <div class="crm-field crm-field-full">
           <label>附註</label>
