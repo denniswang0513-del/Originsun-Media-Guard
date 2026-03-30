@@ -8,7 +8,7 @@ let _projects = [];
 let _staffList = [];
 let _selectedId = null;
 let _editingId = null;
-let _filters = { q: '', category: '', payment_status: '' };
+let _filters = { q: '', category: '', payment_status: '', project_id: '' };
 let _csvFile = null;
 
 async function loadPayments() {
@@ -16,6 +16,7 @@ async function loadPayments() {
     if (_filters.q)              params.set('q', _filters.q);
     if (_filters.category)       params.set('category', _filters.category);
     if (_filters.payment_status) params.set('payment_status', _filters.payment_status);
+    if (_filters.project_id)     params.set('project_id', _filters.project_id);
     try { _payments = (await _fetch('/payments?' + params)).payments || []; }
     catch (_) { _payments = []; }
     renderList();
@@ -23,6 +24,15 @@ async function loadPayments() {
 
 async function loadProjects() {
     try { _projects = (await _fetch('/projects')).projects || []; } catch(_) { _projects = []; }
+    _populateProjectFilter();
+}
+
+function _populateProjectFilter() {
+    const sel = document.getElementById('pay-filter-project');
+    if (!sel) return;
+    const current = sel.value;
+    sel.innerHTML = `<option value="">全部專案</option>` +
+        _projects.map(p => `<option value="${p.id}"${p.id === current ? ' selected' : ''}>${_esc(p.name)}</option>`).join('');
 }
 
 async function loadStaffList() {
@@ -283,6 +293,7 @@ export function initCrmPaymentsTab() {
     });
     document.getElementById('pay-filter-cat').addEventListener('change', e => { _filters.category = e.target.value; loadPayments(); });
     document.getElementById('pay-filter-status').addEventListener('change', e => { _filters.payment_status = e.target.value; loadPayments(); });
+    document.getElementById('pay-filter-project').addEventListener('change', e => { _filters.project_id = e.target.value; loadPayments(); });
 
     document.getElementById('pay-btn-add').addEventListener('click', () => openModal());
 
