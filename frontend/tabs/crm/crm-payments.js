@@ -173,6 +173,10 @@ function _startInlineEdit(p) {
         document.getElementById('ie-invoice-field').style.display = cat === '發票代開' ? '' : 'none';
         document.getElementById('ie-invnum-field').style.display = cat === '發票代開' ? '' : 'none';
 
+        // Update labels for invoice field
+        const invLabel = document.getElementById('ie-invoice-field')?.querySelector('label');
+        if (invLabel) invLabel.innerHTML = '代開發票 <span class="crm-required">*</span>';
+
         if (cat === '發票代開') {
             document.getElementById('ie-project-label').textContent = '專案';
             const invSel = document.getElementById('ie-invoice_sel');
@@ -216,9 +220,16 @@ function _startInlineEdit(p) {
     actions.querySelector('.crm-detail-close')?.addEventListener('click', closeDetail);
     document.getElementById('_ie-cancel').addEventListener('click', () => renderDetail(p));
     document.getElementById('_ie-save').addEventListener('click', async () => {
+        const cat = document.getElementById('ie-category').value;
+        // Validation
+        if (_PROJECT_CATEGORIES.includes(cat) && !document.getElementById('ie-project_id')?.value) {
+            alert('請選擇專案'); return;
+        }
+        if (cat === '發票代開' && !document.getElementById('ie-invoice_sel')?.value) {
+            alert('請選擇代開發票'); return;
+        }
         const btn = document.getElementById('_ie-save');
         btn.disabled = true; btn.textContent = '儲存中...';
-        const cat = document.getElementById('ie-category').value;
         const payload = {
             summary: document.getElementById('ie-summary').value,
             amount: parseInt(document.getElementById('ie-amount').value) || 0,
