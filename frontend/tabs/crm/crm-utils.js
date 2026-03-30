@@ -55,6 +55,95 @@ export function populateClientSelect(elementId, clients, placeholder = '全部�
         clients.map(c => `<option value="${c.id}"${c.id === current ? ' selected' : ''}>${esc(c.short_name)}</option>`).join('');
 }
 
+/**
+ * Inline edit for detail panels.
+ * @param {string} contentElId - detail content element ID
+ * @param {string} actionsElId - detail bar actions element ID
+ * @param {Array} fields - [{name, label, type, options?, value}]
+ *   type: text|number|date|month|select|textarea|readonly
+ *   options: [{value, label}] for select
+ * @param {object} data - current record data
+ * @param {function} onSave - async (payload) => void
+ * @param {function} onCancel - () => void (re-render detail)
+ */
+export function enableInlineEdit(contentElId, actionsElId, fields, data, onSave, onCancel) {
+    const content = document.getElementById(contentElId);
+    const actions = document.getElementById(actionsElId);
+    if (!content || !actions) return;
+
+    // Build editable fields
+    content.innerHTML = fields.map(f => {
+        const val = data[f.name] ?? '';
+        let input = '';
+        if (f.type === 'readonly') {
+            input = `<span class="crm-prop-value">${esc(String(val))}</span>`;
+        } else if (f.type === 'select' && f.options) {
+            input = `<select class="crm-input crm-inline-input" data-field="${f.name}">` +
+                f.options.map(o => `<option value="${esc(o.value)}"${String(val) === String(o.value) ? ' selected' : ''}>${esc(o.label)}</option>`).join('') +
+                `</select>`;
+        } else if (f.type === 'textarea') {
+            input = `<textarea class="crm-input crm-inline-input crm-textarea" data-field="${f.name}" rows="2">${esc(String(val))}</textarea>`;
+        } else if (f.type === 'date') {
+            const dateVal = val ? String(val).substring(0, 10) : '';
+            input = `<input type="date" class="crm-input crm-inline-input" data-field="${f.name}" value="${dateVal}">`;
+        } else if (f.type === 'month') {
+            input = `<input type="month" class="crm-input crm-inline-input" data-field="${f.name}" value="${esc(String(val))}">`;
+        } else if (f.type === 'number') {
+            input = `<input type="number" class="crm-input crm-inline-input" data-field="${f.name}" value="${val || ''}" min="0">`;
+        } else {
+            input = `<input type="text" class="crm-input crm-inline-input" data-field="${f.name}" value="${esc(String(val))}">`;
+        }
+        return `<div class="crm-detail-prop"><div class="crm-prop-label">${f.label}</div><div class="crm-prop-value-edit">${input}</div></div>`;
+    }).join('');
+
+    // Replace action buttons
+    const closeBtn = actions.querySelector('.crm-detail-close');
+    const closeHtml = closeBtn ? closeBtn.outerHTML : '';
+    actions.innerHTML = `
+        <button class="crm-btn crm-btn-secondary crm-btn-sm" id="_inline-cancel">取消</button>
+        <button class="crm-btn crm-btn-primary crm-btn-sm" id="_inline-save">儲存</button>
+        ${closeHtml}
+    `;
+
+    document.getElementById('_inline-cancel').addEventListener('click', onCancel);
+    document.getElementById('_inline-save').addEventListener('click', async () => {
+        const btn = document.getElementById('_inline-save');
+        btn.disabled = true; btn.textContent = '儲存中...';
+        const payload = {};
+        const intFields = fields.filter(f => f.type === 'number').map(f => f.name);
+        content.querySelectorAll('[data-field]').forEach(el => {
+            const name = el.dataset.field;
+            let val = el.value;
+            if (intFields.includes(name)) val = val ? parseInt(val) : null;
+            if (el.type === 'date' || el.type === 'month') val = val || null;
+            payload[name] = val;
+        });
+        try {
+            await onSave(payload);
+        } catch (e) {
+            alert('儲存失敗: ' + e.message);
+            btn.disabled = false; btn.textContent = '儲存';
+        }
+    });
+}
+
+/**
+ * Add edit button to detail bar actions. Call from renderDetail().
+ */
+export function addEditButton(actionsElId, onEdit) {
+    const actions = document.getElementById(actionsElId);
+    if (!actions) return;
+    // Remove old edit button if exists
+    const old = actions.querySelector('#_inline-edit-btn');
+    if (old) old.remove();
+    const btn = document.createElement('button');
+    btn.id = '_inline-edit-btn';
+    btn.className = 'crm-btn crm-btn-secondary crm-btn-sm';
+    btn.textContent = '編輯';
+    btn.addEventListener('click', onEdit);
+    actions.insertBefore(btn, actions.firstChild);
+}
+
 export function setupResizeHandle(handleId, panelId) {
     const resizeHandle = document.getElementById(handleId);
     const detailPanel = document.getElementById(panelId);

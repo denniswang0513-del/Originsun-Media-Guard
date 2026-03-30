@@ -3,7 +3,7 @@
  * 功能：列表視圖 + 詳情面板 + 新增/編輯 Modal + CSV 匯入
  */
 
-import { crmFetch as _fetch, esc as _esc, renderAvatar, populateUserSelect, setupResizeHandle } from './crm-utils.js';
+import { crmFetch as _fetch, esc as _esc, renderAvatar, populateUserSelect, setupResizeHandle, enableInlineEdit, addEditButton } from './crm-utils.js';
 
 // ── State ────────────────────────────────────────────────────
 
@@ -93,6 +93,24 @@ function renderList() {
     `).join('');
 }
 
+const _CLIENT_EDIT_FIELDS = [
+    {name:'short_name', label:'客戶代稱', type:'text'},
+    {name:'full_name', label:'抬頭', type:'text'},
+    {name:'tax_id', label:'統一編號', type:'text'},
+    {name:'status', label:'狀態', type:'select', options:[
+        {value:'潛在客戶',label:'潛在客戶'},{value:'新客戶',label:'新客戶'},
+        {value:'舊客戶',label:'舊客戶'},{value:'暫停合作',label:'暫停合作'},
+    ]},
+    {name:'am_username', label:'AM', type:'text'},
+    {name:'source_channel', label:'來源管道', type:'text'},
+    {name:'contact_person', label:'聯絡人', type:'text'},
+    {name:'contact_method', label:'聯絡方式', type:'text'},
+    {name:'cooperation_note', label:'合作契機', type:'text'},
+    {name:'payment_info', label:'匯款資訊', type:'text'},
+    {name:'payment_note', label:'匯款備註', type:'text'},
+    {name:'notes', label:'備註', type:'textarea'},
+];
+
 function renderDetail(client) {
     const prop = (label, value, empty = '空') => {
         const isEmpty = !value;
@@ -134,6 +152,23 @@ function renderDetail(client) {
         ${prop('備註', client.notes)}
         ${prop('修改日期', client.updated_at ? client.updated_at.substring(0,10) : '')}
     `;
+
+    const actions = document.getElementById('crm-bar-actions');
+    if (actions) {
+        actions.innerHTML = `<button class="crm-detail-close" title="關閉">✕</button>`;
+        actions.querySelector('.crm-detail-close').addEventListener('click', closeDetail);
+    }
+    addEditButton('crm-bar-actions', () => {
+        enableInlineEdit('crm-detail-info', 'crm-bar-actions', _CLIENT_EDIT_FIELDS, client,
+            async (payload) => {
+                await _fetch('/clients/' + client.id, { method: 'PUT', body: JSON.stringify(payload) });
+                const updated = await _fetch('/clients/' + client.id);
+                renderDetail(updated);
+                await loadClients();
+            },
+            () => renderDetail(client)
+        );
+    });
 }
 
 /** Shared helper: populate a <select> with user options */

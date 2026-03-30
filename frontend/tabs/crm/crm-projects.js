@@ -3,7 +3,7 @@
  * 功能：列表 + 詳情面板 + 新增/編輯 Modal + 狀態快切
  */
 
-import { crmFetch as _fetch, esc as _esc, renderAvatar, populateUserSelect, populateClientSelect, setupResizeHandle } from './crm-utils.js';
+import { crmFetch as _fetch, esc as _esc, renderAvatar, populateUserSelect, populateClientSelect, setupResizeHandle, enableInlineEdit, addEditButton } from './crm-utils.js';
 
 // ── State ────────────────────────────────────────────────────
 
@@ -92,6 +92,34 @@ function renderList() {
     `).join('');
 }
 
+const _PROJ_EDIT_FIELDS = [
+    {name:'name', label:'專案名稱', type:'text'},
+    {name:'project_type', label:'類型', type:'select', options:[
+        {value:'',label:'—'},{value:'紀實影片',label:'紀實影片'},{value:'活動紀實',label:'活動紀實'},
+        {value:'形象影片',label:'形象影片'},{value:'廣告',label:'廣告'},{value:'MV',label:'MV'},
+    ]},
+    {name:'status', label:'狀態', type:'select', options:[
+        {value:'洽談中',label:'洽談中'},{value:'報價中',label:'報價中'},
+        {value:'進行中',label:'進行中'},{value:'已結案',label:'已結案'},
+    ]},
+    {name:'start_date', label:'起始日', type:'date'},
+    {name:'shoot_date', label:'拍攝日期', type:'date'},
+    {name:'completion_date', label:'結案日', type:'date'},
+    {name:'folder_path', label:'資料夾', type:'text'},
+    {name:'description', label:'說明', type:'text'},
+    {name:'contract_amount', label:'合約金額（含稅）', type:'number'},
+    {name:'tax_rate', label:'稅率(%)', type:'number'},
+    {name:'profit_target_pct', label:'目標毛利率(%)', type:'number'},
+    {name:'misc_budget_pct', label:'雜支比例(%)', type:'number'},
+    {name:'payment_status', label:'帳務狀況', type:'select', options:[
+        {value:'未到帳',label:'未到帳'},{value:'部分到帳',label:'部分到帳'},{value:'全額到帳',label:'全額到帳'},
+    ]},
+    {name:'amount_receivable', label:'應收帳款', type:'number'},
+    {name:'amount_received', label:'已收帳款', type:'number'},
+    {name:'transfer_fee', label:'帳款匯費', type:'number'},
+    {name:'notes', label:'備註', type:'textarea'},
+];
+
 function renderDetail(project) {
     const prop = (label, value, empty = '空') => {
         const isEmpty = !value;
@@ -155,6 +183,24 @@ function renderDetail(project) {
         </div>
     `;
     _loadProjectStaff(project.id);
+
+    const actions = document.getElementById('proj-bar-actions');
+    if (actions) {
+        actions.innerHTML = `<button class="crm-detail-close" title="關閉">✕</button>`;
+        actions.querySelector('.crm-detail-close').addEventListener('click', closeDetail);
+    }
+    addEditButton('proj-bar-actions', () => {
+        enableInlineEdit('proj-detail-info', 'proj-bar-actions', _PROJ_EDIT_FIELDS, project,
+            async (payload) => {
+                payload.client_id = project.client_id;
+                await _fetch('/projects/' + project.id, { method: 'PUT', body: JSON.stringify(payload) });
+                const updated = await _fetch('/projects/' + project.id);
+                renderDetail(updated);
+                await loadProjects();
+            },
+            () => renderDetail(project)
+        );
+    });
 }
 
 async function _loadFinancialSummary(projectId) {

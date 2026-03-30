@@ -2,7 +2,7 @@
  * crm-quotes.js — 報價管理 Tab
  */
 
-import { crmFetch as _fetch, esc as _esc, populateClientSelect, fmtNum as _fmtNum, setupResizeHandle } from './crm-utils.js';
+import { crmFetch as _fetch, esc as _esc, populateClientSelect, fmtNum as _fmtNum, setupResizeHandle, enableInlineEdit, addEditButton } from './crm-utils.js';
 
 // ── State ────────────────────────────────────────────────────
 
@@ -104,6 +104,19 @@ function renderList() {
     }).join('');
 }
 
+const _QUOTE_EDIT_FIELDS = [
+    {name:'status', label:'狀態', type:'select', options:[
+        {value:'草稿',label:'草稿'},{value:'已寄送',label:'已寄送'},
+        {value:'已簽核',label:'已簽核'},{value:'已拒絕',label:'已拒絕'},
+    ]},
+    {name:'quote_date', label:'報價日期', type:'date'},
+    {name:'valid_until', label:'有效期限', type:'date'},
+    {name:'discount', label:'折扣', type:'number'},
+    {name:'tax_rate', label:'稅率(%)', type:'number'},
+    {name:'final_price', label:'最終報價', type:'number'},
+    {name:'terms', label:'備註/條款', type:'textarea'},
+];
+
 function renderDetail(q) {
     document.getElementById('quote-detail-title').textContent = `Q-${q.project_name || ''}-v${q.version}`;
 
@@ -153,6 +166,29 @@ function renderDetail(q) {
         `).join('');
     }
     document.getElementById('quote-detail-items').innerHTML = itemsHtml || '<div class="crm-empty">尚無項目</div>';
+
+    const actions = document.getElementById('quote-bar-actions');
+    if (actions) {
+        actions.innerHTML = `<button class="crm-detail-close" title="關閉">&#x2715;</button>`;
+        actions.querySelector('.crm-detail-close').addEventListener('click', closeDetail);
+    }
+    addEditButton('quote-bar-actions', () => {
+        enableInlineEdit('quote-detail-info', 'quote-bar-actions', _QUOTE_EDIT_FIELDS, q,
+            async (payload) => {
+                // Keep existing items when editing info fields
+                payload.items = (q.items || []).map(it => ({
+                    group_name: it.group_name || '', description: it.description,
+                    unit: it.unit || '式', quantity: it.quantity || 1,
+                    unit_price: it.unit_price || 0, internal_cost: it.internal_cost || 0,
+                }));
+                await _fetch('/quotations/' + q.id, { method: 'PUT', body: JSON.stringify(payload) });
+                const updated = await _fetch('/quotations/' + q.id);
+                renderDetail(updated);
+                await loadQuotations();
+            },
+            () => renderDetail(q)
+        );
+    });
 }
 
 // ── Detail Panel ─────────────────────────────────────────────

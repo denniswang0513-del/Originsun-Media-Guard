@@ -1,7 +1,7 @@
 /**
  * crm-cashbook.js — 收支明細子視圖
  */
-import { crmFetch as _fetch, esc as _esc, fmtNum as _fmtNum, setupResizeHandle } from './crm-utils.js';
+import { crmFetch as _fetch, esc as _esc, fmtNum as _fmtNum, setupResizeHandle, enableInlineEdit, addEditButton } from './crm-utils.js';
 
 let _entries = [];
 let _staffList = [];
@@ -43,6 +43,20 @@ function renderList() {
     `).join('');
 }
 
+const _CASH_EDIT_FIELDS = [
+    {name:'summary', label:'摘要', type:'text'},
+    {name:'entry_date', label:'日期', type:'date'},
+    {name:'expense', label:'支出', type:'number'},
+    {name:'claim', label:'請款', type:'number'},
+    {name:'deposit', label:'存入', type:'number'},
+    {name:'category', label:'類別', type:'select', options:[{value:'',label:'—'},{value:'請款',label:'請款'},{value:'收支',label:'收支'},{value:'轉存',label:'轉存'}]},
+    {name:'item', label:'項目', type:'select', options:[{value:'',label:'—'},{value:'專案',label:'專案'},{value:'設備耗材',label:'設備耗材'},{value:'行政',label:'行政'},{value:'轉存',label:'轉存'}]},
+    {name:'payee', label:'收款人', type:'text'},
+    {name:'project_label', label:'專案標籤', type:'text'},
+    {name:'payment_status', label:'付款狀態', type:'select', options:[{value:'',label:'—'},{value:'已付款',label:'已付款'},{value:'未付款',label:'未付款'}]},
+    {name:'note', label:'附註', type:'text'},
+];
+
 function renderDetail(e) {
     document.getElementById('cash-detail-title').textContent = e.summary;
     const prop = (label, value) => {
@@ -64,6 +78,23 @@ function renderDetail(e) {
         ${e.payment_status ? prop('付款狀態', e.payment_status) : ''}
         ${e.note ? prop('附註', e.note) : ''}
     `;
+    const actions = document.getElementById('cash-bar-actions');
+    if (actions) {
+        actions.innerHTML = `<button class="crm-detail-close" title="關閉">&#x2715;</button>`;
+        actions.querySelector('.crm-detail-close').addEventListener('click', closeDetail);
+    }
+    addEditButton('cash-bar-actions', () => {
+        enableInlineEdit('cash-detail-content', 'cash-bar-actions', _CASH_EDIT_FIELDS, e,
+            async (payload) => {
+                await _fetch('/cash-entries/' + e.id, { method: 'PUT', body: JSON.stringify(payload) });
+                await loadEntries();
+                const updated = _entries.find(x => x.id === e.id);
+                if (updated) renderDetail(updated);
+                else renderDetail(e);
+            },
+            () => renderDetail(e)
+        );
+    });
 }
 
 async function selectEntry(id) {

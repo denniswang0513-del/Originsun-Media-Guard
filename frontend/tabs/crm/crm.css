@@ -504,6 +504,11 @@
 .crm-pay-部分到帳 { background: #3b2f1f; color: #fbbf24; }
 .crm-pay-全額到帳 { background: #14532d; color: #86efac; }
 
+/* ── Inline edit ── */
+.crm-inline-input { padding: 4px 8px; font-size: 13px; margin: 0; }
+.crm-prop-value-edit { flex: 1; }
+.crm-prop-value-edit .crm-input { width: 100%; }
+
 /* ── View Switcher ── */
 .crm-view-switcher { display: flex; gap: 2px; padding: 10px 16px 0; background: #2a2a2a; flex-shrink: 0; }
 .crm-view-btn { background: #333; border: none; color: #9ca3af; font-size: 13px; font-weight: 600; padding: 7px 20px; cursor: pointer; border-radius: 6px 6px 0 0; transition: background 0.15s, color 0.15s; }

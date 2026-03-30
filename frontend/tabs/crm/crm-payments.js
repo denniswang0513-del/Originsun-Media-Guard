@@ -1,7 +1,7 @@
 /**
  * crm-payments.js — 請款管理子視圖
  */
-import { crmFetch as _fetch, esc as _esc, fmtNum as _fmtNum, setupResizeHandle } from './crm-utils.js';
+import { crmFetch as _fetch, esc as _esc, fmtNum as _fmtNum, setupResizeHandle, enableInlineEdit, addEditButton } from './crm-utils.js';
 
 let _payments = [];
 let _projects = [];
@@ -56,7 +56,35 @@ function renderList() {
     `).join('');
 }
 
+let _currentDetail = null;
+
+const _PAY_EDIT_FIELDS = [
+    {name:'summary', label:'摘要', type:'text'},
+    {name:'amount', label:'金額', type:'number'},
+    {name:'request_date', label:'日期', type:'date'},
+    {name:'category', label:'項目', type:'select', options:[
+        {value:'',label:'—'},{value:'行政',label:'行政'},{value:'專案外包',label:'專案外包'},
+        {value:'專案雜支',label:'專案雜支'},{value:'設備耗材',label:'設備耗材'},
+        {value:'發票代開',label:'發票代開'},{value:'零用金',label:'零用金'},
+        {value:'薪資',label:'薪資'},{value:'轉存',label:'轉存'},{value:'其他',label:'其他'},
+    ]},
+    {name:'payee_name', label:'收款人', type:'text'},
+    {name:'payee_id', label:'身分證', type:'text'},
+    {name:'payee_type', label:'狀態', type:'select', options:[
+        {value:'',label:'—'},{value:'勞報',label:'勞報'},{value:'內部人員',label:'內部人員'},
+    ]},
+    {name:'invoice_number', label:'發票號碼', type:'text'},
+    {name:'project_label', label:'專案標籤', type:'text'},
+    {name:'payment_status', label:'付款狀態', type:'select', options:[
+        {value:'未付款',label:'未付款'},{value:'應付款',label:'應付款'},{value:'已付款',label:'已付款'},
+    ]},
+    {name:'planned_month', label:'預計付款月', type:'month'},
+    {name:'payment_date', label:'付款日', type:'date'},
+    {name:'notes', label:'附註', type:'text'},
+];
+
 function renderDetail(p) {
+    _currentDetail = p;
     document.getElementById('pay-detail-title').textContent = p.summary;
     const prop = (label, value) => {
         const empty = !value;
@@ -71,9 +99,26 @@ function renderDetail(p) {
         ${prop('代開發票', p.needs_invoice ? '是 — ' + (p.invoice_number || '待開') : '否')}
         ${prop('專案', p.project_label || p.project_name)}
         <div class="crm-detail-prop"><div class="crm-prop-label">付款狀態</div><div class="crm-prop-value">${_statusBadge(p.payment_status)}</div></div>
-        ${prop('付款日', p.payment_date ? p.payment_date.substring(0, 10) : '')}
+        ${p.payment_date ? prop('付款日', p.payment_date.substring(0, 10)) : ''}
         ${prop('附註', p.notes)}
     `;
+    // Restore action buttons to default (edit + close)
+    const actions = document.getElementById('pay-bar-actions');
+    if (actions) {
+        actions.innerHTML = `<button id="payable-detail-close" class="crm-detail-close" title="關閉">&#x2715;</button>`;
+        actions.querySelector('.crm-detail-close').addEventListener('click', closeDetail);
+    }
+    addEditButton('pay-bar-actions', () => {
+        enableInlineEdit('pay-detail-content', 'pay-bar-actions', _PAY_EDIT_FIELDS, p,
+            async (payload) => {
+                await _fetch('/payments/' + p.id, { method: 'PUT', body: JSON.stringify(payload) });
+                const updated = await _fetch('/payments/' + p.id);
+                renderDetail(updated);
+                await loadPayments();
+            },
+            () => renderDetail(p)
+        );
+    });
 }
 
 async function selectPayment(id) {

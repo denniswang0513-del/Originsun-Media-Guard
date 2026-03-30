@@ -2,7 +2,7 @@
  * crm-staff.js — 人力資源 Tab
  */
 
-import { crmFetch as _fetch, esc as _esc, fmtNum as _fmtNum, setupResizeHandle } from './crm-utils.js';
+import { crmFetch as _fetch, esc as _esc, fmtNum as _fmtNum, setupResizeHandle, enableInlineEdit, addEditButton } from './crm-utils.js';
 
 let _staff = [];
 let _selectedId = null;
@@ -56,6 +56,22 @@ function renderList() {
     `).join('');
 }
 
+const _STAFF_EDIT_FIELDS = [
+    {name:'name', label:'姓名', type:'text'},
+    {name:'role', label:'職能', type:'select', options:[{value:'',label:'—'},{value:'攝影師',label:'攝影師'},{value:'剪輯師',label:'剪輯師'},{value:'導演',label:'導演'},{value:'製片',label:'製片'},{value:'燈光',label:'燈光'},{value:'收音',label:'收音'},{value:'空拍',label:'空拍'},{value:'動畫',label:'動畫'}]},
+    {name:'status', label:'狀態', type:'select', options:[{value:'在職',label:'在職'},{value:'離職',label:'離職'},{value:'兼職',label:'兼職'}]},
+    {name:'daily_rate', label:'日費', type:'number'},
+    {name:'hourly_rate', label:'時薪', type:'number'},
+    {name:'phone', label:'電話', type:'text'},
+    {name:'email', label:'Email', type:'text'},
+    {name:'id_number', label:'身分證', type:'text'},
+    {name:'address', label:'住址', type:'text'},
+    {name:'bank_name', label:'銀行', type:'text'},
+    {name:'bank_account', label:'帳號', type:'text'},
+    {name:'portfolio_url', label:'作品集', type:'text'},
+    {name:'notes', label:'備註', type:'text'},
+];
+
 function renderDetail(s) {
     document.getElementById('staff-detail-title').textContent = s.name;
     const prop = (label, value, empty = '空') => {
@@ -79,6 +95,23 @@ function renderDetail(s) {
         ${s.portfolio_url ? `<div class="crm-detail-prop"><div class="crm-prop-label">作品集</div><div class="crm-prop-value"><a href="${_esc(s.portfolio_url)}" target="_blank" style="color:#3b82f6;">${_esc(s.portfolio_url)}</a></div></div>` : ''}
         ${prop('備註', s.notes)}
     `;
+
+    const actions = document.getElementById('staff-bar-actions');
+    if (actions) {
+        actions.innerHTML = `<button class="crm-detail-close" title="關閉">&#x2715;</button>`;
+        actions.querySelector('.crm-detail-close').addEventListener('click', closeDetail);
+    }
+    addEditButton('staff-bar-actions', () => {
+        enableInlineEdit('staff-detail-info', 'staff-bar-actions', _STAFF_EDIT_FIELDS, s,
+            async (payload) => {
+                await _fetch('/staff/' + s.id, { method: 'PUT', body: JSON.stringify(payload) });
+                const updated = await _fetch('/staff/' + s.id);
+                renderDetail(updated);
+                await loadStaff();
+            },
+            () => renderDetail(s)
+        );
+    });
 
     _loadStaffProjects(s.id);
 }

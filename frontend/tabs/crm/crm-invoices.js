@@ -1,7 +1,7 @@
 /**
  * crm-invoices.js — 帳務管理 Tab
  */
-import { crmFetch as _fetch, esc as _esc, fmtNum as _fmtNum, setupResizeHandle } from './crm-utils.js';
+import { crmFetch as _fetch, esc as _esc, fmtNum as _fmtNum, setupResizeHandle, enableInlineEdit, addEditButton } from './crm-utils.js';
 
 let _invoices = [];
 let _projects = [];
@@ -58,6 +58,25 @@ function renderList() {
     `).join('');
 }
 
+const _INV_EDIT_FIELDS = [
+    {name:'payment_type', label:'款項', type:'select', options:[{value:'收款',label:'收款'},{value:'付款',label:'付款'}]},
+    {name:'issue_status', label:'開立狀態', type:'select', options:[{value:'已開立',label:'已開立'},{value:'作廢',label:'作廢'}]},
+    {name:'invoice_number', label:'發票編號', type:'text'},
+    {name:'invoice_date', label:'日期', type:'date'},
+    {name:'category', label:'類別', type:'select', options:[{value:'專案',label:'專案'},{value:'內部代開',label:'內部代開'}]},
+    {name:'invoice_kind', label:'發票種類', type:'select', options:[{value:'電子發票',label:'電子發票'},{value:'紙本發票',label:'紙本發票'}]},
+    {name:'amount_ex_tax', label:'未稅價', type:'number'},
+    {name:'amount_total', label:'發票金額', type:'number'},
+    {name:'tax_amount', label:'稅額', type:'number'},
+    {name:'commission', label:'代開應區', type:'number'},
+    {name:'applicant', label:'申請人', type:'text'},
+    {name:'company_name', label:'抬頭', type:'text'},
+    {name:'tax_id', label:'統編', type:'text'},
+    {name:'item_type', label:'品項', type:'text'},
+    {name:'title', label:'名稱', type:'text'},
+    {name:'notes', label:'備註', type:'text'},
+];
+
 function renderDetail(inv) {
     document.getElementById('inv-detail-title').textContent = inv.title;
     const prop = (label, value) => {
@@ -82,6 +101,24 @@ function renderDetail(inv) {
         ${inv.project_name ? prop('關聯專案', inv.project_name) : ''}
         ${prop('備註', inv.notes)}
     `;
+    const actions = document.getElementById('inv-bar-actions');
+    if (actions) {
+        actions.innerHTML = `<button class="crm-detail-close" title="關閉">&#x2715;</button>`;
+        actions.querySelector('.crm-detail-close').addEventListener('click', closeDetail);
+    }
+    addEditButton('inv-bar-actions', () => {
+        enableInlineEdit('inv-detail-content', 'inv-bar-actions', _INV_EDIT_FIELDS, inv,
+            async (payload) => {
+                payload.payment_status = payload.payment_type === '收款' ? '已收款' : '已付款';
+                if (payload.issue_status === '作廢') payload.payment_status = '作廢';
+                await _fetch('/invoices/' + inv.id, { method: 'PUT', body: JSON.stringify(payload) });
+                const updated = await _fetch('/invoices/' + inv.id);
+                renderDetail(updated);
+                await loadInvoices();
+            },
+            () => renderDetail(inv)
+        );
+    });
 }
 
 // ── Detail ───────────────────────────────────────────────────
