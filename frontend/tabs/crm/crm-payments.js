@@ -61,7 +61,7 @@ function renderList() {
             <div class="crm-row-inv">${p.category === '發票代開' && p.invoice_number ? _esc((() => { const inv = _invoiceList.find(i => i.invoice_number === p.invoice_number); return inv ? inv.title : p.invoice_number; })()) : ''}</div>
             <div class="crm-row-proj">${_esc(p.project_name || p.project_label || '')}</div>
             <div class="crm-row-status">${_statusBadge(p.payment_status)}</div>
-            <div class="crm-row-actions" onclick="event.stopPropagation()">
+            <div class="crm-row-actions" style="flex:0 0 50px;" onclick="event.stopPropagation()">
                 <button class="crm-btn crm-btn-danger crm-btn-sm" onclick="window._payDelete('${p.id}')">刪</button>
             </div>
         </div>

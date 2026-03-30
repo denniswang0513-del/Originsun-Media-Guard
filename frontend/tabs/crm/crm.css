@@ -520,13 +520,17 @@
 .crm-pay-badge-付款 { background: #3b2f1f; color: #fbbf24; }
 .crm-pay-badge-作廢 { background: #374151; color: #9ca3af; text-decoration: line-through; }
 
-/* ── Payment list extra columns ── */
-.crm-col-cat   { flex: 0.6; }
-.crm-col-inv   { flex: 0.8; }
-.crm-col-proj  { flex: 1.2; }
-.crm-row-cat   { flex: 0.6; color: #9ca3af; font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.crm-row-inv   { flex: 0.8; color: #6b7280; font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.crm-row-proj  { flex: 1.2; color: #6b7280; font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+/* ── Payment list (all centered, uniform width) ── */
+.pay-header-center span { flex: 1; text-align: center; }
+#pay-list-body .crm-row > div { flex: 1; text-align: center; font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+#pay-list-body .crm-row-actions { flex: 0 0 50px; }
+#pay-list-body .crm-row-name { font-weight: 600; color: #e0e0e0; }
+#pay-list-body .crm-row-amount { font-weight: 600; color: #e0e0e0; font-size: 13px; }
+#pay-list-body .crm-row-date { color: #6b7280; }
+#pay-list-body .crm-row-client { color: #9ca3af; }
+#pay-list-body .crm-row-cat { color: #9ca3af; }
+#pay-list-body .crm-row-inv { color: #6b7280; }
+#pay-list-body .crm-row-proj { color: #6b7280; }
 
 /* ── Cash entry columns ── */
 .crm-col-amt-out { flex: 0.7; text-align: right; }
