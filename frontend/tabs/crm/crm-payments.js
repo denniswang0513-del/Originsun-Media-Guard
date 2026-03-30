@@ -55,8 +55,8 @@ function renderList() {
         <div class="crm-row${p.id === _selectedId ? ' selected' : ''}" onclick="window._paySelect('${p.id}')">
             <div class="crm-row-date">${p.request_date ? p.request_date.substring(0, 10) : '—'}</div>
             <div class="crm-row-name">${_esc(p.summary)}</div>
-            <div class="crm-row-cat">${_esc(p.category || '')}</div>
             <div class="crm-row-amount">$${_fmtNum(p.amount)}</div>
+            <div class="crm-row-cat">${_esc(p.category || '')}</div>
             <div class="crm-row-client">${_esc(p.payee_name)}</div>
             <div class="crm-row-inv">${p.category === '發票代開' && p.invoice_number ? _esc((() => { const inv = _invoiceList.find(i => i.invoice_number === p.invoice_number); return inv ? inv.title : p.invoice_number; })()) : ''}</div>
             <div class="crm-row-proj">${_esc(p.project_name || p.project_label || '')}</div>
