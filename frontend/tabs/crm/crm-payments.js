@@ -113,6 +113,10 @@ function renderDetail(p) {
         ${p.planned_month ? prop('預計付款月', p.planned_month) : ''}
         <div style="border-top:1px solid #2e2e2e;margin:8px 0;"></div>
         <div style="font-size:12px;font-weight:700;color:#6b7280;padding:4px 0;">補充資訊</div>
+        ${p.category === '發票代開' && p.invoice_number ? (() => {
+            const inv = _invoiceList.find(i => i.invoice_number === p.invoice_number);
+            return prop('代開發票', inv ? inv.title + ' $' + (inv.amount_total||0).toLocaleString('zh-TW') : p.invoice_number);
+        })() : ''}
         ${p.invoice_number ? prop('發票號碼', p.invoice_number) : ''}
         ${p.project_name ? prop('專案', p.project_name) : ''}
         ${prop('附註', p.notes)}
@@ -263,6 +267,7 @@ async function selectPayment(id) {
     _selectedId = id; renderList();
     document.getElementById('pay-detail-panel').style.display = 'flex';
     document.getElementById('pay-resize-handle').style.display = '';
+    if (_invoiceList.length === 0) await _loadInvoiceList();
     try { renderDetail(await _fetch('/payments/' + id)); } catch(_) {}
 }
 
