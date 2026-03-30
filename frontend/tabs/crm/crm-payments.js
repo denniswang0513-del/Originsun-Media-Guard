@@ -69,27 +69,26 @@ function renderList() {
 let _currentDetail = null;
 
 const _PAY_EDIT_FIELDS = [
+    // 請款內容
     {name:'summary', label:'摘要', type:'text'},
     {name:'amount', label:'金額', type:'number'},
-    {name:'request_date', label:'日期', type:'date'},
     {name:'category', label:'項目', type:'select', options:[
         {value:'',label:'—'},{value:'行政',label:'行政'},{value:'專案外包',label:'專案外包'},
         {value:'專案雜支',label:'專案雜支'},{value:'設備耗材',label:'設備耗材'},
         {value:'發票代開',label:'發票代開'},{value:'零用金',label:'零用金'},
         {value:'薪資',label:'薪資'},{value:'轉存',label:'轉存'},{value:'其他',label:'其他'},
     ]},
+    {name:'request_date', label:'日期', type:'date'},
+    // 付款資訊
     {name:'payee_name', label:'收款人', type:'text'},
     {name:'payee_id', label:'身分證', type:'text'},
-    {name:'payee_type', label:'狀態', type:'select', options:[
-        {value:'',label:'—'},{value:'勞報',label:'勞報'},{value:'內部人員',label:'內部人員'},
-    ]},
-    {name:'invoice_number', label:'發票號碼', type:'text'},
-    {name:'project_label', label:'專案標籤', type:'text'},
     {name:'payment_status', label:'付款狀態', type:'select', options:[
         {value:'未付款',label:'未付款'},{value:'應付款',label:'應付款'},{value:'已付款',label:'已付款'},
     ]},
-    {name:'planned_month', label:'預計付款月', type:'month'},
     {name:'payment_date', label:'付款日', type:'date'},
+    {name:'planned_month', label:'預計付款月', type:'month'},
+    // 補充資訊
+    {name:'invoice_number', label:'發票號碼', type:'text'},
     {name:'notes', label:'附註', type:'text'},
 ];
 
