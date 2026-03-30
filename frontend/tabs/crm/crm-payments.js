@@ -123,7 +123,10 @@ function renderDetail(p) {
         actions.innerHTML = `<button id="payable-detail-close" class="crm-detail-close" title="關閉">&#x2715;</button>`;
         actions.querySelector('.crm-detail-close').addEventListener('click', closeDetail);
     }
-    addEditButton('pay-bar-actions', () => _startInlineEdit(p));
+    addEditButton('pay-bar-actions', async () => {
+        if (_invoiceList.length === 0) await _loadInvoiceList();
+        _startInlineEdit(p);
+    });
 }
 
 function _startInlineEdit(p) {
@@ -177,23 +180,23 @@ function _startInlineEdit(p) {
         const invLabel = document.getElementById('ie-invoice-field')?.querySelector('label');
         if (invLabel) invLabel.innerHTML = '代開發票 <span class="crm-required">*</span>';
 
+        // Populate project dropdown directly from _projects
+        const iep = document.getElementById('ie-project_id');
+        if (iep) {
+            iep.innerHTML = `<option value="">— 選擇專案 —</option>` +
+                _projects.map(pr => `<option value="${pr.id}"${pr.id === (p.project_id||'') ? ' selected' : ''}>${_esc(pr.name)} (${_esc(pr.client_short_name || '')})</option>`).join('');
+        }
+
         if (cat === '發票代開') {
             document.getElementById('ie-project-label').textContent = '專案';
             const invSel = document.getElementById('ie-invoice_sel');
-            invSel.innerHTML = `<option value="">— 選擇發票 —</option>` +
-                _invoiceList.filter(inv => inv.issue_status === '已開立').map(inv =>
-                    `<option value="${inv.id}">${_esc(inv.title)} $${(inv.amount_total||0).toLocaleString('zh-TW')}</option>`).join('');
-            _populateProject2Select(p.project_id || '');
-            // Copy options to ie-project_id
-            const p2 = document.getElementById('pay-f-project_id2');
-            const iep = document.getElementById('ie-project_id');
-            if (p2 && iep) iep.innerHTML = p2.innerHTML;
+            if (invSel) {
+                invSel.innerHTML = `<option value="">— 選擇發票 —</option>` +
+                    _invoiceList.filter(inv => inv.issue_status === '已開立').map(inv =>
+                        `<option value="${inv.id}">${_esc(inv.title)} $${(inv.amount_total||0).toLocaleString('zh-TW')} (${_esc(inv.company_name || '')})</option>`).join('');
+            }
         } else if (_PROJECT_CATEGORIES.includes(cat)) {
             document.getElementById('ie-project-label').innerHTML = '專案 <span class="crm-required">*</span>';
-            _populateProject2Select(p.project_id || '');
-            const p2 = document.getElementById('pay-f-project_id2');
-            const iep = document.getElementById('ie-project_id');
-            if (p2 && iep) iep.innerHTML = p2.innerHTML;
         }
     }
     _ieUpdateExtra();
