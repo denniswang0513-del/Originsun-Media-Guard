@@ -195,9 +195,12 @@ function _startInlineEdit(p) {
             document.getElementById('ie-project-label').textContent = '專案';
             const invSel = document.getElementById('ie-invoice_sel');
             if (invSel) {
+                const matchNum = p.invoice_number || '';
                 invSel.innerHTML = `<option value="">— 選擇發票 —</option>` +
-                    _invoiceList.filter(inv => inv.issue_status === '已開立').map(inv =>
-                        `<option value="${inv.id}">${_esc(inv.title)} $${(inv.amount_total||0).toLocaleString('zh-TW')} (${_esc(inv.company_name || '')})</option>`).join('');
+                    _invoiceList.filter(inv => inv.issue_status === '已開立').map(inv => {
+                        const sel = (inv.invoice_number === matchNum || inv.id === p.project_id) ? ' selected' : '';
+                        return `<option value="${inv.id}"${sel}>${_esc(inv.title)} $${(inv.amount_total||0).toLocaleString('zh-TW')} (${_esc(inv.company_name || '')})</option>`;
+                    }).join('');
             }
         } else if (_PROJECT_CATEGORIES.includes(cat)) {
             document.getElementById('ie-project-label').innerHTML = '專案 <span class="crm-required">*</span>';
