@@ -123,16 +123,125 @@ function renderDetail(p) {
         actions.innerHTML = `<button id="payable-detail-close" class="crm-detail-close" title="關閉">&#x2715;</button>`;
         actions.querySelector('.crm-detail-close').addEventListener('click', closeDetail);
     }
-    addEditButton('pay-bar-actions', () => {
-        enableInlineEdit('pay-detail-content', 'pay-bar-actions', _PAY_EDIT_FIELDS, p,
-            async (payload) => {
-                await _fetch('/payments/' + p.id, { method: 'PUT', body: JSON.stringify(payload) });
-                const updated = await _fetch('/payments/' + p.id);
-                renderDetail(updated);
-                await loadPayments();
-            },
-            () => renderDetail(p)
-        );
+    addEditButton('pay-bar-actions', () => _startInlineEdit(p));
+}
+
+function _startInlineEdit(p) {
+    const content = document.getElementById('pay-detail-content');
+    const actions = document.getElementById('pay-bar-actions');
+    if (!content || !actions) return;
+
+    const catOptions = ['','行政','其他','建構','專案外包','專案雜支','設備耗材','設備維護','軟體網路服務','發票代開','業務推廣','零用金','獎金','薪資','轉存']
+        .map(v => `<option value="${v}"${v === (p.category||'') ? ' selected' : ''}>${v || '—'}</option>`).join('');
+    const payeeOptions = `<option value="">— 選擇人員 —</option>` +
+        _staffList.map(s => `<option value="${_esc(s.name)}" data-id="${_esc(s.id_number)}"${s.name === p.payee_name ? ' selected' : ''}>${_esc(s.name)} (${_esc(s.role)})</option>`).join('');
+    const statusOptions = ['未付款','應付款','已付款']
+        .map(v => `<option value="${v}"${v === (p.payment_status||'未付款') ? ' selected' : ''}>${v}</option>`).join('');
+
+    content.innerHTML = `
+        <div class="crm-form-section">請款內容</div>
+        <div class="crm-form-grid">
+            <div class="crm-field"><label>摘要</label><input id="ie-summary" type="text" class="crm-input" value="${_esc(p.summary)}"></div>
+            <div class="crm-field"><label>金額</label><input id="ie-amount" type="number" class="crm-input" value="${p.amount || ''}"></div>
+            <div class="crm-field"><label>項目</label><select id="ie-category" class="crm-input">${catOptions}</select></div>
+            <div class="crm-field"><label>日期</label><input id="ie-request_date" type="date" class="crm-input" value="${p.request_date ? p.request_date.substring(0,10) : ''}"></div>
+        </div>
+        <div class="crm-form-section">付款資訊</div>
+        <div class="crm-form-grid">
+            <div class="crm-field"><label>收款人</label><select id="ie-payee_name" class="crm-input">${payeeOptions}</select></div>
+            <div class="crm-field"><label>身分證</label><input id="ie-payee_id" type="text" class="crm-input" value="${_esc(p.payee_id)}" readonly style="opacity:0.7;"></div>
+            <div class="crm-field"><label>付款狀態</label><select id="ie-payment_status" class="crm-input">${statusOptions}</select></div>
+            <div class="crm-field" id="ie-date-field"><label>付款日</label><input id="ie-payment_date" type="date" class="crm-input" value="${p.payment_date ? p.payment_date.substring(0,10) : ''}"></div>
+            <div class="crm-field" id="ie-planned-field" style="display:none;"><label>預計付款月</label><input id="ie-planned_month" type="month" class="crm-input" value="${_esc(p.planned_month || '')}"></div>
+        </div>
+        <div class="crm-form-section">補充資訊</div>
+        <div class="crm-form-grid" id="ie-extra">
+            <div class="crm-field" id="ie-project-field" style="display:none;"><label id="ie-project-label">專案</label><select id="ie-project_id" class="crm-input"></select></div>
+            <div class="crm-field" id="ie-invoice-field" style="display:none;"><label>代開發票</label><select id="ie-invoice_sel" class="crm-input"></select></div>
+            <div class="crm-field" id="ie-invnum-field" style="display:none;"><label>發票號碼</label><input id="ie-invoice_number" type="text" class="crm-input" value="${_esc(p.invoice_number || '')}"></div>
+            <div class="crm-field crm-field-full"><label>附註</label><input id="ie-notes" type="text" class="crm-input" value="${_esc(p.notes || '')}"></div>
+        </div>
+    `;
+
+    // Dynamic fields based on category
+    function _ieUpdateExtra() {
+        const cat = document.getElementById('ie-category').value;
+        const status = document.getElementById('ie-payment_status').value;
+        document.getElementById('ie-date-field').style.display = status === '已付款' ? '' : 'none';
+        document.getElementById('ie-planned-field').style.display = status === '應付款' ? '' : 'none';
+        document.getElementById('ie-project-field').style.display = _PROJECT_CATEGORIES.includes(cat) || cat === '發票代開' ? '' : 'none';
+        document.getElementById('ie-invoice-field').style.display = cat === '發票代開' ? '' : 'none';
+        document.getElementById('ie-invnum-field').style.display = cat === '發票代開' ? '' : 'none';
+
+        if (cat === '發票代開') {
+            document.getElementById('ie-project-label').textContent = '專案';
+            const invSel = document.getElementById('ie-invoice_sel');
+            invSel.innerHTML = `<option value="">— 選擇發票 —</option>` +
+                _invoiceList.filter(inv => inv.issue_status === '已開立').map(inv =>
+                    `<option value="${inv.id}">${_esc(inv.title)} $${(inv.amount_total||0).toLocaleString('zh-TW')}</option>`).join('');
+            _populateProject2Select(p.project_id || '');
+            // Copy options to ie-project_id
+            const p2 = document.getElementById('pay-f-project_id2');
+            const iep = document.getElementById('ie-project_id');
+            if (p2 && iep) iep.innerHTML = p2.innerHTML;
+        } else if (_PROJECT_CATEGORIES.includes(cat)) {
+            document.getElementById('ie-project-label').innerHTML = '專案 <span class="crm-required">*</span>';
+            _populateProject2Select(p.project_id || '');
+            const p2 = document.getElementById('pay-f-project_id2');
+            const iep = document.getElementById('ie-project_id');
+            if (p2 && iep) iep.innerHTML = p2.innerHTML;
+        }
+    }
+    _ieUpdateExtra();
+
+    document.getElementById('ie-category').addEventListener('change', _ieUpdateExtra);
+    document.getElementById('ie-payment_status').addEventListener('change', _ieUpdateExtra);
+    document.getElementById('ie-payee_name').addEventListener('change', e => {
+        const opt = e.target.selectedOptions[0];
+        document.getElementById('ie-payee_id').value = opt?.dataset.id || '';
+    });
+    document.getElementById('ie-invoice_sel')?.addEventListener('change', e => {
+        const inv = _invoiceList.find(i => i.id === e.target.value);
+        if (inv) document.getElementById('ie-invoice_number').value = inv.invoice_number || '';
+    });
+
+    // Action buttons
+    const closeBtn = actions.querySelector('.crm-detail-close');
+    const closeHtml = closeBtn ? closeBtn.outerHTML : '';
+    actions.innerHTML = `
+        <button class="crm-btn crm-btn-secondary crm-btn-sm" id="_ie-cancel">取消</button>
+        <button class="crm-btn crm-btn-primary crm-btn-sm" id="_ie-save">儲存</button>
+        ${closeHtml}
+    `;
+    actions.querySelector('.crm-detail-close')?.addEventListener('click', closeDetail);
+    document.getElementById('_ie-cancel').addEventListener('click', () => renderDetail(p));
+    document.getElementById('_ie-save').addEventListener('click', async () => {
+        const btn = document.getElementById('_ie-save');
+        btn.disabled = true; btn.textContent = '儲存中...';
+        const cat = document.getElementById('ie-category').value;
+        const payload = {
+            summary: document.getElementById('ie-summary').value,
+            amount: parseInt(document.getElementById('ie-amount').value) || 0,
+            category: cat,
+            request_date: document.getElementById('ie-request_date').value || null,
+            payee_name: document.getElementById('ie-payee_name').value,
+            payee_id: document.getElementById('ie-payee_id').value,
+            payment_status: document.getElementById('ie-payment_status').value,
+            payment_date: document.getElementById('ie-payment_date').value || null,
+            planned_month: document.getElementById('ie-planned_month').value || '',
+            invoice_number: document.getElementById('ie-invoice_number')?.value || '',
+            project_id: document.getElementById('ie-project_id')?.value || null,
+            notes: document.getElementById('ie-notes').value,
+        };
+        try {
+            await _fetch('/payments/' + p.id, { method: 'PUT', body: JSON.stringify(payload) });
+            const updated = await _fetch('/payments/' + p.id);
+            renderDetail(updated);
+            await loadPayments();
+        } catch (e) {
+            alert('儲存失敗: ' + e.message);
+            btn.disabled = false; btn.textContent = '儲存';
+        }
     });
 }
 
