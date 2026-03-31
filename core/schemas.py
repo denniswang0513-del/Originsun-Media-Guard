@@ -343,7 +343,7 @@ class CashEntryPayload(BaseModel):
 
 class InvoicePayload(BaseModel):
     payment_type: str = "收款"
-    payment_status: str = "已收款"
+    payment_status: str = "未收款"
     issue_status: str = "已開立"
     invoice_number: str = ""
     invoice_date: Optional[str] = None

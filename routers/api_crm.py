@@ -1977,3 +1977,79 @@ async def batch_pay(request: Request):
                 updated += 1
         await session.commit()
     return {"status": "ok", "updated": updated}
+
+
+@router.get("/receivables/summary")
+async def receivables_summary(status: str = Query("")):
+    """應收帳款彙總：已開立發票按客戶（company_name）分組。status=未收款/已收款/空=全部。"""
+    _require_db()
+    factory = await _get_factory()
+
+    async with factory() as session:
+        query = (
+            select(CrmInvoice, CrmProject.name.label("pn"))
+            .outerjoin(CrmProject, CrmProject.id == CrmInvoice.project_id)
+            .where(CrmInvoice.issue_status == "已開立")
+            .order_by(CrmInvoice.invoice_date.desc())
+        )
+        if status:
+            query = query.where(CrmInvoice.payment_status == status)
+        else:
+            query = query.where(CrmInvoice.payment_status != "已收款")
+        rows = (await session.execute(query)).all()
+
+        client_map = {c.short_name: c for c in (await session.execute(select(Client))).scalars().all()}
+
+    client_groups: dict = {}
+    for inv, proj_name in rows:
+        name = inv.company_name or "未指定"
+        if name not in client_groups:
+            client = client_map.get(name)
+            client_groups[name] = {
+                "company_name": name,
+                "tax_id": inv.tax_id or (client.tax_id if client else "") or "",
+                "payment_info": (client.payment_info if client else "") or "",
+                "payment_note": (client.payment_note if client else "") or "",
+                "total_amount": 0, "items": [],
+            }
+        client_groups[name]["total_amount"] += inv.amount_total or 0
+        days = 0
+        if inv.invoice_date:
+            days = (_now() - inv.invoice_date).days
+        client_groups[name]["items"].append({
+            "id": inv.id,
+            "title": inv.title or "",
+            "invoice_number": inv.invoice_number or "",
+            "invoice_date": inv.invoice_date.strftime("%Y/%m/%d") if inv.invoice_date else "",
+            "amount_total": inv.amount_total or 0,
+            "payment_status": inv.payment_status or "",
+            "project_name": proj_name or "",
+            "days_since_issued": days,
+            "category": inv.category or "",
+        })
+
+    clients = sorted(client_groups.values(), key=lambda x: x["company_name"])
+    return {"clients": clients, "grand_total": sum(c["total_amount"] for c in clients)}
+
+
+@router.patch("/invoices/batch-receive")
+async def batch_receive(request: Request):
+    """批次標記發票為已收款。"""
+    _check_auth(request)
+    _require_db()
+    factory = await _get_factory()
+    body = await request.json()
+    ids = body.get("invoice_ids", [])
+    if not ids:
+        raise HTTPException(status_code=400, detail="請提供 invoice_ids")
+
+    async with factory() as session:
+        updated = 0
+        for iid in ids:
+            inv = await session.get(CrmInvoice, iid)
+            if inv and inv.payment_status != "已收款":
+                inv.payment_status = "已收款"
+                inv.updated_at = _now()
+                updated += 1
+        await session.commit()
+    return {"status": "ok", "updated": updated}

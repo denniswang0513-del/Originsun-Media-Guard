@@ -8,6 +8,7 @@ let _projects = [];
 let _clients = [];
 let _selectedId = null;
 let _editingId = null;
+let _editingPaymentStatus = null;
 let _filters = { q: '', issue_status: '', category: '' };
 let _csvFile = null;
 
@@ -263,7 +264,8 @@ function renderDetail(inv) {
                     payload.issue_status = payload.invoice_number?.trim() ? '已開立' : '開立中';
                 }
                 payload.payment_type = '收款';
-                payload.payment_status = payload.issue_status === '作廢' ? '作廢' : '已收款';
+                if (payload.issue_status === '作廢') payload.payment_status = '作廢';
+                else payload.payment_status = inv.payment_status || '未收款';
                 // auto-calc from 未稅價
                 const ex = parseInt(payload.amount_ex_tax) || 0;
                 payload.amount_total = ex ? Math.round(ex * 1.05) : null;
@@ -383,6 +385,7 @@ function _onInvoiceNumberInput() {
 
 function openModal(inv = null) {
     _editingId = inv ? inv.id : null;
+    _editingPaymentStatus = inv?.payment_status || null;
     document.getElementById('inv-modal-title').textContent = inv ? '編輯發票' : '新增發票';
     const err = document.getElementById('inv-modal-error');
     err.textContent = ''; err.style.display = 'none';
@@ -454,7 +457,9 @@ async function saveInvoice() {
     payload.tax_amount = total - exTax;
     // payment_type / payment_status (auto-derive)
     payload.payment_type = '收款';
-    payload.payment_status = payload.issue_status === '作廢' ? '作廢' : '已收款';
+    if (payload.issue_status === '作廢') payload.payment_status = '作廢';
+    else if (_editingId && _editingPaymentStatus) payload.payment_status = _editingPaymentStatus;
+    else payload.payment_status = '未收款';
 
     const btn = document.getElementById('inv-btn-save');
     btn.disabled = true; btn.textContent = '儲存中...';
@@ -686,12 +691,14 @@ export async function initCrmInvoicesTab() {
     let _paymentsLoaded = false, _paymentsLoading = false;
     let _cashbookLoaded = false, _cashbookLoading = false;
     let _payablesLoaded = false, _payablesLoading = false;
+    let _receivablesLoaded = false, _receivablesLoading = false;
     const invView = document.getElementById('inv-invoices-view');
     const payView = document.getElementById('inv-payments-view');
     const cashView = document.getElementById('inv-cashbook-view');
     const payablesView = document.getElementById('inv-payables-view');
-    const allViews = [invView, payView, cashView, payablesView];
-    const allBtns = ['inv-view-invoices', 'inv-view-payments', 'inv-view-cashbook', 'inv-view-payables'];
+    const receivablesView = document.getElementById('inv-receivables-view');
+    const allViews = [invView, payView, cashView, payablesView, receivablesView];
+    const allBtns = ['inv-view-invoices', 'inv-view-payments', 'inv-view-cashbook', 'inv-view-payables', 'inv-view-receivables'];
     const baseUrl = location.origin;
 
     function _switchView(showView, activeBtn) {
@@ -760,14 +767,32 @@ export async function initCrmInvoicesTab() {
         }
     });
 
+    document.getElementById('inv-view-receivables').addEventListener('click', async () => {
+        if (_receivablesLoading) return;
+        _switchView(receivablesView, 'inv-view-receivables');
+        if (!_receivablesLoaded) {
+            _receivablesLoading = true;
+            try {
+                const _cb = '?t=' + Date.now();
+                const res = await fetch(baseUrl + '/tabs/crm/crm-receivables.html' + _cb);
+                if (res.ok) {
+                    receivablesView.innerHTML = await res.text();
+                    const mod = await import(baseUrl + '/tabs/crm/crm-receivables.js' + _cb);
+                    mod.initCrmReceivablesTab();
+                    _receivablesLoaded = true;
+                }
+            } catch (e) { console.warn('[Receivables] load failed:', e); }
+            finally { _receivablesLoading = false; }
+        }
+    });
+
     // Global refresh — reloads current active sub-view
     document.getElementById('inv-global-refresh').addEventListener('click', () => {
-        // Refresh invoices (always loaded)
         loadInvoices();
-        // Refresh whichever lazy-loaded sub-view is active
         if (window._payRefresh) window._payRefresh();
         if (window._cashRefresh) window._cashRefresh();
         if (window._payableRefresh) window._payableRefresh();
+        if (window._recvRefresh) window._recvRefresh();
     });
 
     await Promise.all([loadInvoices(), loadProjects(), loadClients()]);

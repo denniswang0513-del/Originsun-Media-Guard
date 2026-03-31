@@ -321,7 +321,7 @@ class CrmInvoice(Base):
 
     id = Column(String(32), primary_key=True)
     payment_type = Column(String(16), nullable=False, default="收款")   # 收款/付款
-    payment_status = Column(String(16), nullable=False, default="已收款")  # 已收款/已付款/作廢
+    payment_status = Column(String(16), nullable=False, default="未收款")  # 未收款/已收款/作廢
     issue_status = Column(String(16), nullable=False, default="已開立")  # 已開立/作廢
     invoice_number = Column(String(32), nullable=True)                  # 發票編號
     invoice_date = Column(DateTime(timezone=True), nullable=True)       # 填表時間

@@ -1,0 +1,36 @@
+<!-- Toolbar -->
+<div class="crm-toolbar">
+  <select id="recv-filter-status" class="crm-select">
+    <option value="" selected>未收款</option>
+    <option value="已收款">已收款</option>
+    <option value="all">全部</option>
+  </select>
+  <div style="flex:1;"></div>
+  <div style="font-size:15px;font-weight:700;color:#e0e0e0;">
+    應收總計: <span id="recv-total" style="color:#86efac;">$0</span>
+  </div>
+</div>
+
+<!-- Body: list + detail -->
+<div class="crm-body">
+  <div class="crm-list-panel">
+    <div class="crm-list-header acct-header">
+      <span>客戶</span>
+      <span>應收金額</span>
+      <span>發票數</span>
+      <span>最久天數</span>
+    </div>
+    <div id="recv-list-body"><div class="crm-empty">載入中...</div></div>
+  </div>
+
+  <div class="crm-resize-handle" id="recv-resize-handle" style="display:none;"></div>
+  <div class="crm-detail-panel" id="recv-detail-panel" style="display:none;">
+    <div class="crm-detail-bar">
+      <div id="recv-detail-title" class="crm-detail-bar-title"></div>
+      <div class="crm-detail-bar-actions" id="recv-bar-actions">
+        <button id="recv-detail-close" class="crm-detail-close" title="關閉" onclick="window._recvClose()">&#x2715;</button>
+      </div>
+    </div>
+    <div class="crm-detail-content" id="recv-detail-content"></div>
+  </div>
+</div>
