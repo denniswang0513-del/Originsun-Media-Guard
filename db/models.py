@@ -337,6 +337,9 @@ class CrmInvoice(Base):
     tax_id = Column(String(16), nullable=True)                          # 統編
     item_type = Column(String(64), nullable=True)                       # 品項（影片製作/展場攝影...）
     project_id = Column(String(32), nullable=True)                      # 可選關聯 → crm_projects
+    recipient = Column(String(128), nullable=True)                       # 紙本發票收件人
+    recipient_phone = Column(String(32), nullable=True)                  # 紙本發票收件電話
+    recipient_address = Column(String(255), nullable=True)               # 紙本發票收件地址
     notes = Column(Text, nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now())
@@ -401,6 +404,7 @@ class CrmCashEntry(Base):
     payment_date = Column(DateTime(timezone=True), nullable=True)
     payment_status = Column(String(16), nullable=True)           # 已付款/未付款
     created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), server_default=func.now())
 
 
 class ApiKey(Base):

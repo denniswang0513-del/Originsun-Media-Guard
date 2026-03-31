@@ -175,6 +175,10 @@ async def _on_startup():
                         ("crm_project_staff", "payment_date", "TIMESTAMPTZ"),
                         ("crm_staff", "address", "VARCHAR(255)"),
                         ("crm_payment_requests", "planned_month", "VARCHAR(7)"),
+                        ("crm_invoices", "recipient", "VARCHAR(128)"),
+                        ("crm_invoices", "recipient_phone", "VARCHAR(32)"),
+                        ("crm_invoices", "recipient_address", "VARCHAR(255)"),
+                        ("crm_cash_entries", "updated_at", "TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP"),
                     ]
                     for tbl, col, coltype in _crm_cols:
                         try:

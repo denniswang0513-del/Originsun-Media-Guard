@@ -290,8 +290,13 @@ class StaffPayload(BaseModel):
 class ProjectStaffPayload(BaseModel):
     staff_id: str
     role_in_project: str = ""
+    phase: str = ""
     days: int = 1
     rate_override: Optional[int] = None
+    actual_days: Optional[int] = None
+    actual_cost: Optional[int] = None
+    payment_status: Optional[str] = None
+    payment_date: Optional[str] = None
     notes: str = ""
 
 
@@ -352,4 +357,7 @@ class InvoicePayload(BaseModel):
     tax_id: str = ""
     item_type: str = ""
     project_id: Optional[str] = None
+    recipient: str = ""
+    recipient_phone: str = ""
+    recipient_address: str = ""
     notes: str = ""

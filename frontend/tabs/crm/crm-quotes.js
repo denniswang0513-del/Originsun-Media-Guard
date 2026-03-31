@@ -2,7 +2,7 @@
  * crm-quotes.js — 報價管理 Tab
  */
 
-import { crmFetch as _fetch, esc as _esc, populateClientSelect, fmtNum as _fmtNum, setupResizeHandle, enableInlineEdit, addEditButton } from './crm-utils.js';
+import { crmFetch as _fetch, esc as _esc, populateClientSelect, fmtNum as _fmtNum, setupResizeHandle, enableInlineEdit, addEditButton, kebabMenuHtml } from './crm-utils.js';
 
 // ── State ────────────────────────────────────────────────────
 
@@ -96,10 +96,7 @@ function renderList() {
             <div class="crm-row-status">${_qBadge(q.status)}</div>
             <div class="crm-row-amount">$${_fmtNum(price)}</div>
             <div class="crm-row-date">${q.quote_date ? q.quote_date.substring(0, 10) : '—'}</div>
-            <div class="crm-row-actions" onclick="event.stopPropagation()">
-                <button class="crm-btn crm-btn-secondary crm-btn-sm" onclick="window._quoteEdit('${q.id}')">編輯</button>
-                <button class="crm-btn crm-btn-danger crm-btn-sm" onclick="window._quoteDelete('${q.id}')">刪除</button>
-            </div>
+            ${kebabMenuHtml(q.id, { onEdit: '_quoteEdit', onDuplicate: '_quoteDup', onDelete: '_quoteDelete' })}
         </div>`;
     }).join('');
 }
@@ -533,6 +530,14 @@ export function initCrmQuotesTab() {
         const q = _quotations.find(x => x.id === id);
         if (q) deleteQuotation(q);
     };
+    window._quoteDup = async (id) => {
+        try {
+            const q = await _fetch('/quotations/' + id);
+            openModal(q, q.project_id);
+            _editingId = null;
+            document.getElementById('quote-modal-title').textContent = '複製報價';
+        } catch (_) {}
+    };
     window._quoteRemoveItem = removeItemRow;
     window._openQuoteModalForProject = (projectId) => openModal(null, projectId);
     window._quoteActivateProject = async (projectId) => {
@@ -609,5 +614,5 @@ export function initCrmQuotesTab() {
 
     setupResizeHandle('quote-resize-handle', 'quote-detail-panel');
 
-    Promise.all([loadQuotations(), loadStats(), loadProjects(), loadClients(), loadUsers(), loadTemplates()]);
+    await Promise.all([loadQuotations(), loadStats(), loadProjects(), loadClients(), loadUsers(), loadTemplates()]);
 }

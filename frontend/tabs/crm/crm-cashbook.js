@@ -1,7 +1,7 @@
 /**
  * crm-cashbook.js — 收支明細子視圖
  */
-import { crmFetch as _fetch, esc as _esc, fmtNum as _fmtNum, setupResizeHandle, enableInlineEdit, addEditButton } from './crm-utils.js';
+import { crmFetch as _fetch, esc as _esc, fmtNum as _fmtNum, setupResizeHandle, enableInlineEdit, addEditButton, kebabMenuHtml } from './crm-utils.js';
 
 let _entries = [];
 let _staffList = [];
@@ -35,10 +35,7 @@ function renderList() {
             <div class="crm-row-amt-in" style="color:#86efac;">${e.deposit ? '$' + _fmtNum(e.deposit) : ''}</div>
             <div class="crm-row-client">${_esc(e.payee ? e.payee.split('_')[0] : '')}</div>
             <div class="crm-row-status"><span class="crm-badge">${_esc(e.category || e.item)}</span></div>
-            <div class="crm-row-actions" onclick="event.stopPropagation()">
-                <button class="crm-btn crm-btn-secondary crm-btn-sm" onclick="window._cashEdit('${e.id}')">編輯</button>
-                <button class="crm-btn crm-btn-danger crm-btn-sm" onclick="window._cashDelete('${e.id}')">刪</button>
-            </div>
+            ${kebabMenuHtml(e.id, { onEdit: '_cashEdit', onDuplicate: '_cashDup', onDelete: '_cashDelete' })}
         </div>
     `).join('');
 }
@@ -226,6 +223,10 @@ export function initCrmCashbookTab() {
     window._cashRefresh = loadEntries;
     window._cashEdit = (id) => { const e = _entries.find(x => x.id === id); if (e) openModal(e); };
     window._cashDelete = (id) => { const e = _entries.find(x => x.id === id); if (e) deleteEntry(e); };
+    window._cashDup = (id) => {
+        const e = _entries.find(x => x.id === id);
+        if (e) { openModal(e); _editingId = null; document.getElementById('cash-modal-title').textContent = '複製收支'; }
+    };
 
     let _t;
     document.getElementById('cash-search').addEventListener('input', e => {
@@ -253,5 +254,5 @@ export function initCrmCashbookTab() {
     }
 
     setupResizeHandle('cash-resize-handle', 'cash-detail-panel');
-    Promise.all([loadEntries(), loadStaffList()]);
+    await Promise.all([loadEntries(), loadStaffList()]);
 }

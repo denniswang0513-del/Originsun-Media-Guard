@@ -3,7 +3,7 @@
  * 功能：列表 + 詳情面板 + 新增/編輯 Modal + 狀態快切
  */
 
-import { crmFetch as _fetch, esc as _esc, renderAvatar, populateUserSelect, populateClientSelect, setupResizeHandle, enableInlineEdit, addEditButton } from './crm-utils.js';
+import { crmFetch as _fetch, esc as _esc, renderAvatar, populateUserSelect, populateClientSelect, setupResizeHandle, enableInlineEdit, addEditButton, kebabMenuHtml } from './crm-utils.js';
 
 // ── State ────────────────────────────────────────────────────
 
@@ -84,10 +84,7 @@ function renderList() {
                 ${p.am_username ? _avatar(p.am_username) + _esc(p.am_username) : '<span class="crm-muted">—</span>'}
             </div>
             <div class="crm-row-date">${p.shoot_date ? p.shoot_date.substring(0, 10) : '—'}</div>
-            <div class="crm-row-actions" onclick="event.stopPropagation()">
-                <button class="crm-btn crm-btn-secondary crm-btn-sm" onclick="window._projEdit('${p.id}')">編輯</button>
-                <button class="crm-btn crm-btn-danger crm-btn-sm" onclick="window._projDelete('${p.id}')">刪除</button>
-            </div>
+            ${kebabMenuHtml(p.id, { onEdit: '_projEdit', onDuplicate: '_projDup', onDelete: '_projDelete' })}
         </div>
     `).join('');
 }
@@ -588,6 +585,10 @@ export function initCrmProjectsTab() {
         const p = _projects.find(x => x.id === id);
         if (p) deleteProject(p);
     };
+    window._projDup = (id) => {
+        const p = _projects.find(x => x.id === id);
+        if (p) { openModal(p); _editingId = null; document.getElementById('proj-modal-title').textContent = '複製專案'; }
+    };
     window._projAddExpense = () => _showExpenseForm();
     window._projEditExpense = (id, cat, est, act, notes) => _showExpenseForm(id, cat, est, act, notes);
     window._projSaveExpense = async (editId) => {
@@ -739,5 +740,5 @@ export function initCrmProjectsTab() {
 
     setupResizeHandle('proj-resize-handle', 'proj-detail-panel');
 
-    Promise.all([loadClients(), loadUsers(), loadProjects()]);
+    await Promise.all([loadClients(), loadUsers(), loadProjects()]);
 }

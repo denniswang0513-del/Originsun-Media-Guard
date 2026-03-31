@@ -714,7 +714,7 @@ async def list_project_quotations(project_id: str):
             select(CrmQuotation).where(CrmQuotation.project_id == project_id)
             .order_by(CrmQuotation.version.desc())
         )).scalars().all()
-    return {"quotations": [_to_quotation_dict(q) for q in rows]}
+    return {"quotations": [_to_quotation_dict(q) for q in rows], "total": len(rows)}
 
 
 @router.post("/projects/{project_id}/quotations")
@@ -1199,7 +1199,7 @@ async def add_project_expense(project_id: str, req: ProjectExpensePayload, reque
         )
         session.add(e)
         await session.commit()
-    return {"status": "ok", "expense_id": e.id}
+    return {"status": "ok", "expense_id": e.id, "expense": {"id": e.id}}
 
 
 @router.put("/project-expenses/{expense_id}")
@@ -1330,6 +1330,9 @@ def _to_invoice_dict(inv, project_name: str = "") -> dict:
         "commission": inv.commission, "company_name": inv.company_name or "",
         "tax_id": inv.tax_id or "", "item_type": inv.item_type or "",
         "project_id": inv.project_id or "", "project_name": project_name,
+        "recipient": getattr(inv, 'recipient', '') or "",
+        "recipient_phone": getattr(inv, 'recipient_phone', '') or "",
+        "recipient_address": getattr(inv, 'recipient_address', '') or "",
         "notes": inv.notes or "",
         "created_at": inv.created_at.isoformat() if inv.created_at else None,
     }
@@ -1341,6 +1344,7 @@ def _to_invoice_dict(inv, project_name: str = "") -> dict:
 async def list_invoices(
     q: str = Query(""), payment_type: str = Query(""),
     category: str = Query(""), project_id: str = Query(""),
+    issue_status: str = Query(""),
 ):
     _require_db()
     factory = await _get_factory()
@@ -1352,6 +1356,8 @@ async def list_invoices(
         )
         if payment_type:
             query = query.where(CrmInvoice.payment_type == payment_type)
+        if issue_status:
+            query = query.where(CrmInvoice.issue_status == issue_status)
         if category:
             query = query.where(CrmInvoice.category == category)
         if project_id:
@@ -1765,7 +1771,7 @@ async def create_cash_entry(req: CashEntryPayload, request: Request):
     async with factory() as session:
         session.add(e)
         await session.commit()
-    return {"status": "ok", "entry_id": e.id}
+    return {"status": "ok", "entry_id": e.id, "entry": {"id": e.id}}
 
 
 @router.put("/cash-entries/{entry_id}")
@@ -1783,6 +1789,7 @@ async def update_cash_entry(entry_id: str, req: CashEntryPayload, request: Reque
             setattr(e, k, v)
         for k, v in dates.items():
             setattr(e, k, v)
+        e.updated_at = _now()
         await session.commit()
     return {"status": "ok"}
 
@@ -1872,9 +1879,15 @@ async def payables_summary(month: str = Query(""), status: str = Query("")):
         now = _now()
         month = f"{now.year}-{now.month:02d}"
     parts = month.split("-")
-    year, mon = int(parts[0]), int(parts[1])
+    try:
+        year, mon = int(parts[0]), int(parts[1])
+    except (IndexError, ValueError):
+        raise HTTPException(status_code=400, detail="month 格式無效，請使用 YYYY-MM")
     from calendar import monthrange
-    start = datetime(year, mon, 1, tzinfo=timezone.utc)
+    try:
+        start = datetime(year, mon, 1, tzinfo=timezone.utc)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="month 格式無效，請使用 YYYY-MM")
     _, last_day = monthrange(year, mon)
     end = datetime(year, mon, last_day, 23, 59, 59, tzinfo=timezone.utc)
 

@@ -3,7 +3,7 @@
  * 功能：列表視圖 + 詳情面板 + 新增/編輯 Modal + CSV 匯入
  */
 
-import { crmFetch as _fetch, esc as _esc, renderAvatar, populateUserSelect, setupResizeHandle, enableInlineEdit, addEditButton } from './crm-utils.js';
+import { crmFetch as _fetch, esc as _esc, renderAvatar, populateUserSelect, setupResizeHandle, enableInlineEdit, addEditButton, kebabMenuHtml } from './crm-utils.js';
 
 // ── State ────────────────────────────────────────────────────
 
@@ -85,10 +85,7 @@ function renderList() {
                 ${c.am_username ? _avatar(c.am_username) + _esc(c.am_username) : '<span class="crm-muted">—</span>'}
             </div>
             <div class="crm-row-contact">${c.updated_at ? c.updated_at.substring(0,10) : '—'}</div>
-            <div class="crm-row-actions" onclick="event.stopPropagation()">
-                <button class="crm-btn crm-btn-secondary crm-btn-sm" onclick="window._crmEditClient('${c.id}')">編輯</button>
-                <button class="crm-btn crm-btn-danger crm-btn-sm" onclick="window._crmDeleteClient('${c.id}')">刪除</button>
-            </div>
+            ${kebabMenuHtml(c.id, { onEdit: '_crmEditClient', onDuplicate: '_crmDupClient', onDelete: '_crmDeleteClient' })}
         </div>
     `).join('');
 }
@@ -362,6 +359,10 @@ export function initCrmTab() {
         const client = _clients.find(c => c.id === id);
         if (client) deleteClient(client);
     };
+    window._crmDupClient = (id) => {
+        const client = _clients.find(c => c.id === id);
+        if (client) { openModal(client); _editingId = null; document.getElementById('crm-modal-title').textContent = '複製客戶'; }
+    };
 
     let _searchTimer;
     document.getElementById('crm-search').addEventListener('input', e => {
@@ -417,5 +418,5 @@ export function initCrmTab() {
 
     setupResizeHandle('crm-resize-handle', 'crm-detail-panel');
 
-    Promise.all([loadUsers(), loadClients()]);
+    await Promise.all([loadUsers(), loadClients()]);
 }

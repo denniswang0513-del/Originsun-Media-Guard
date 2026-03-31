@@ -1,7 +1,7 @@
 /**
  * crm-payments.js — 請款管理子視圖
  */
-import { crmFetch as _fetch, esc as _esc, fmtNum as _fmtNum, setupResizeHandle, enableInlineEdit, addEditButton } from './crm-utils.js';
+import { crmFetch as _fetch, esc as _esc, fmtNum as _fmtNum, setupResizeHandle, enableInlineEdit, addEditButton, kebabMenuHtml } from './crm-utils.js';
 
 let _payments = [];
 let _projects = [];
@@ -61,7 +61,7 @@ function renderList() {
             <span>${p.category === '發票代開' && p.invoice_number ? _esc((() => { const inv = _invoiceList.find(i => i.invoice_number === p.invoice_number); return inv ? inv.title : p.invoice_number; })()) : ''}</span>
             <span>${_esc(p.project_name || p.project_label || '')}</span>
             <span>${_statusBadge(p.payment_status)}</span>
-            <span class="pay-cell-del" onclick="event.stopPropagation()"><button class="crm-btn crm-btn-danger crm-btn-sm" onclick="window._payDelete('${p.id}')">刪</button></span>
+            ${kebabMenuHtml(p.id, { onEdit: '_payEdit', onDuplicate: '_payDup', onDelete: '_payDelete' })}
         </div>
     `).join('');
 }
@@ -487,6 +487,13 @@ export function initCrmPaymentsTab() {
     window._payRefresh = loadPayments;
     window._payEdit = async (id) => { try { openModal(await _fetch('/payments/' + id)); } catch(_) {} };
     window._payDelete = (id) => { const p = _payments.find(x => x.id === id); if (p) deletePayment(p); };
+    window._payDup = async (id) => {
+        try {
+            const p = await _fetch('/payments/' + id);
+            openModal(p); _editingId = null;
+            document.getElementById('pay-modal-title').textContent = '複製請款';
+        } catch (_) {}
+    };
 
     let _t;
     document.getElementById('pay-search').addEventListener('input', e => {
@@ -546,5 +553,5 @@ export function initCrmPaymentsTab() {
     }
 
     setupResizeHandle('pay-resize-handle', 'pay-detail-panel');
-    Promise.all([loadPayments(), loadProjects(), loadStaffList(), _loadInvoiceList()]);
+    await Promise.all([loadPayments(), loadProjects(), loadStaffList(), _loadInvoiceList()]);
 }
