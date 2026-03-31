@@ -1,6 +1,6 @@
 # Originsun Media Guard Pro — Claude Code 完整交接文件
 
-> **版本**: v1.10.0（2026-03-25）
+> **版本**: v1.10.63（2026-03-30）
 > **目標讀者**: 接手開發的 AI 協作者（Claude Code）
 > **開發環境**: Windows 11、Python 3.11、Vanilla JS (ES Modules)
 > **啟動方式**: `d:\Antigravity\OriginsunTranscode\.venv\Scripts\python.exe main.py`
@@ -248,8 +248,10 @@ OriginsunTranscode/
 │       │                    #   子頁 1：📢 標準 TTS（Edge-TTS）
 │       │                    #   子頁 2：🎙️ 聲音複製（F5-TTS）
 │       │                    #   子頁 3：📖 正音字典編輯器
-│       ├── crm/             # CRM 客戶管理頁籤
-│       │                    #   兩欄佈局（列表+詳情）+ 新增/編輯 Modal + CSV 匯入 Modal
+│       ├── crm/             # CRM 模組（11 個前端檔案）
+│       │                    #   crm.html/js（客戶）、crm-projects（專案）、crm-quotes（報價）
+│       │                    #   crm-staff（人力）、crm-invoices（發票）、crm-payments（請款）
+│       │                    #   crm-cashbook（收支）、crm-payables（應付）、crm-utils.js（共用）
 │       └── projects/        # 專案總覽頁籤
 │                            #   機器狀態、佇列管理、Agent 管理
 │
@@ -636,17 +638,36 @@ def _emit_sync(event: str, data: dict) -> None:
 | POST | `/api/v1/voice_profiles/{id}/cache` | 將 NAS 角色快取到本機 |
 
 
-### 7.15 CRM 客戶管理 (`routers/api_crm.py`)
+### 7.15 CRM 模組（`routers/api_crm.py` — 62 端點）
 
-| 方法 | 路徑 | 說明 |
-|------|------|------|
-| GET | `/api/v1/crm/clients` | 列表（搜尋 q + 篩選 status/am） |
-| POST | `/api/v1/crm/clients` | 新增客戶 |
-| GET | `/api/v1/crm/clients/{id}` | 取得客戶詳情 |
-| PUT | `/api/v1/crm/clients/{id}` | 更新客戶 |
-| DELETE | `/api/v1/crm/clients/{id}` | 刪除客戶 |
-| POST | `/api/v1/crm/clients/import_csv` | CSV 匯入（Notion / Google Sheets 格式） |
-| GET | `/api/v1/crm/users` | 取得可選 AM/PM 使用者列表 |
+CRM 系統包含 6 個獨立 Tab + 帳務管理的 4 個子視圖：
+
+| Tab | 前端檔案 | 端點數 | DB 表 |
+|-----|---------|--------|-------|
+| 🤝 客戶管理 | `crm/crm.html` + `crm.js` | 7 | `clients` |
+| 📁 專案管理 | `crm/crm-projects.html` + `.js` | 14 | `crm_projects`, `crm_project_staff`, `crm_project_expenses` |
+| 💰 報價管理 | `crm/crm-quotes.html` + `.js` | 13 | `crm_quotations`, `crm_quotation_items`, `crm_quotation_templates` |
+| 👥 人力資源 | `crm/crm-staff.html` + `.js` | 11 | `crm_staff` |
+| 🧾 帳務—發票 | `crm/crm-invoices.html` + `.js` | 6 | `crm_invoices` |
+| 🧾 帳務—請款 | `crm/crm-payments.html` + `.js` | 7 | `crm_payment_requests` |
+| 🧾 帳務—收支明細 | `crm/crm-cashbook.html` + `.js` | 5 | `crm_cash_entries` |
+| 🧾 帳務—應付帳款 | `crm/crm-payables.html` + `.js` | 2 | (視圖，無獨立表) |
+
+**共用模組**：`crm/crm-utils.js`（crmFetch, esc, fmtNum, renderAvatar, populateUserSelect, populateClientSelect, setupResizeHandle, enableInlineEdit, addEditButton）
+
+**手機版 RWD**：`/expense.html`（雜支登記）、`/invoice.html`（發票登記）
+
+**RBAC 模組**：`crm_clients`, `crm_projects`, `crm_quotes`, `crm_staff`, `crm_invoices`
+
+**新增 CRM 功能 checklist**：
+1. DB Model → `db/models.py`（新欄位需在 `main.py` startup 加 `ALTER TABLE ADD COLUMN IF NOT EXISTS`）
+2. Schema → `core/schemas.py`
+3. API → `routers/api_crm.py`
+4. 前端 → `frontend/tabs/crm/` 對應 `.html` + `.js`
+5. 帳務子視圖用 lazy-load，import 路徑必須用 `location.origin` 絕對路徑
+6. RBAC 4 處：`roles.json`, `db/session.py`, `user-mgmt.js`, `auth-state.js`
+7. HTML div 平衡檢查
+8. 發布前確認 `version.json` 版號（用戶可能從瀏覽器端發布過）
 
 ### 7.9 佇列管理 (`routers/api_queue.py`)
 
@@ -857,6 +878,14 @@ class ValidatePathsRequest(BaseModel):
 - [x] **機器狀態即時監控**：綠燈脈衝 / 紅燈離線 / 橘燈慢 + CPU 顯示 + 版本號
 - [x] **開機自動啟動**：Windows Startup 捷徑 + `start_hidden.vbs`
 - [x] **書籤 + 排程系統**：儲存常用設定、cron 定時排程、排程中 badge
-- [x] **CRM 客戶管理 Tab**：`routers/api_crm.py` 7 端點 + `frontend/tabs/crm/` + CSV 匯入（Notion/Google Sheets 格式）
-- [ ] **專案管理 Tab**：專案 CRUD + 客戶關聯 + AM/PM 指派 + 資料夾範本複製 + 備份 Tab 整合
+- [x] **CRM 客戶管理 Tab**：CRUD + CSV 匯入
+- [x] **CRM 專案管理 Tab**：CRUD + 財務系統（合約/帳務/雜支/財務摘要）+ CSV 匯入
+- [x] **CRM 報價管理 Tab**：報價 CRUD + 項目明細 + 範本 + 統計儀表板 + 內部成本 + 利潤率
+- [x] **CRM 人力資源 Tab**：人員庫 + 專案派工 + CSV 匯入 + 收款人聯動
+- [x] **CRM 帳務管理 Tab**：發票/請款/收支明細/應付帳款 四子視圖 + CSV 匯入
+- [x] **CRM 雙向整合**：專案↔報價↔人力↔帳務 互通
+- [x] **CRM 手機版 RWD**：`/expense.html`（雜支）+ `/invoice.html`（發票）
+- [x] **CRM 全模組 Inline 編輯**：詳情面板直接編輯，不需 Modal
+- [ ] **報價 PDF 輸出**：Jinja2 模板 + playwright 轉 PDF
+- [ ] **J-3 備份 Tab 整合**：選專案自動帶入路徑
 - [ ] **行動端適配**：目前 UI 針對大螢幕優化，行動端排版仍需加強

@@ -400,61 +400,61 @@ routers/
 
 ---
 
-## Phase J：CRM + 專案管理模組
+## Phase J：CRM + 專案管理 + 帳務系統
 
-**優先等級**：🔴 高 — 整合散落在 Notion / Google Sheets 的客戶與專案資料
-**狀態**：🟡 進行中
+**優先等級**：🔴 高 — 整合散落在 Notion / Google Sheets 的客戶、專案、財務資料
+**狀態**：✅ 核心功能完成（62 API / 11 DB 表 / 6 Tab + 4 子視圖）
 
-### J-1：客戶管理 Tab（✅ 已完成）
+### J-1：客戶管理 Tab ✅
+- [x] Client CRUD + CSV 匯入 + AM 篩選
 
-- [x] **Client DB Model**：`db/models.py` — `clients` 表（15 欄位 + idx_client_am/status 索引）
-- [x] **CRM API**：`routers/api_crm.py` — 7 個端點
-  - `GET /api/v1/crm/clients` — 列表（SQL WHERE 篩選 status/am + ilike 搜尋）
-  - `POST /api/v1/crm/clients` — 新增
-  - `GET /api/v1/crm/clients/{id}` — 詳情
-  - `PUT /api/v1/crm/clients/{id}` — 更新
-  - `DELETE /api/v1/crm/clients/{id}` — 刪除
-  - `POST /api/v1/crm/clients/import_csv` — CSV 匯入（Notion + Google Sheets 格式，utf-8-sig/big5）
-  - `GET /api/v1/crm/users` — AM/PM 使用者列表（僅 username/avatar/email）
-- [x] **Frontend**：`frontend/tabs/crm/` — crm.html + crm.js + crm.css
-  - 兩欄式佈局：左列表 + 右詳情面板
-  - 新增/編輯 Modal（15 欄位表單）
-  - CSV 匯入 Modal（拖放 + 檔案選擇）
-  - Debounced 搜尋（300ms）+ 狀態/AM 下拉篩選
-  - Avatar（圖片 + 首字母 fallback）+ 狀態 badge
-- [x] **整合**：`main.py` router 註冊 + `index.html` tab 按鈕 + `app.js` 動態載入
+### J-2：專案管理 Tab ✅
+- [x] Project CRUD + CSV 匯入 + 狀態（洽談中/報價中/進行中/已結案）
+- [x] 財務系統：合約金額/帳務追蹤/雜支明細/財務摘要（SQL 聚合）
+- [x] 專案派工：從人員庫選人 + 天數 × 日費 = 內部成本
 
-### J-2：專案管理 Tab（⬜ 下一步）
+### J-2+：報價管理 Tab ✅
+- [x] 報價 CRUD + 項目明細（群組分類） + 折扣 + 稅率 + 最終報價
+- [x] 報價範本（CRUD + 一鍵套用）
+- [x] 統計儀表板（本月總額/待簽核/簽約率）
+- [x] 內部成本欄 + 利潤率計算
+- [x] 專案→報價雙向整合 + 報價簽核啟動專案
 
-- [ ] **J-2a：Project DB + CRUD API**
-  - `crm_projects` 表：client_id FK、am_username、pm_usernames (JSONB array)、folder_path、status（洽談中/進行中/結案）、shoot_date
-  - REST API：列表（含客戶名稱 join）+ CRUD + 狀態切換
-- [ ] **J-2b：專案資料夾範本複製**
-  - 建立專案時自動複製資料夾範本到指定路徑
-  - 需要使用者提供範本資料夾路徑
-- [ ] **J-2c：Frontend Project Tab**
-  - 專案列表（按客戶分組或平鋪）+ 詳情面板
-  - 新增時選擇客戶 + 指派 AM/PM
+### J-2++：人力資源 Tab ✅
+- [x] 人員庫 CRUD + CSV 匯入（姓名/職能/日費/銀行/身分證/住址/作品集）
+- [x] 專案派工 + 人員專案紀錄
+- [x] 收款人↔人員庫聯動（請款/收支自動帶入身分證）
 
-### J-3：備份 Tab 整合（⬜ 待 J-2 完成）
+### J-2+++：帳務管理 Tab ✅
+- [x] **發票**：CRUD + CSV 匯入（對應 Google Sheets 格式）
+- [x] **請款**：三區塊 Modal（請款內容/付款資訊/補充資訊）+ 動態必填驗證
+  - 專案外包/雜支 → 專案必填
+  - 發票代開 → 代開發票必填 + 發票號碼自動帶入
+  - 付款狀態：未付款/應付款（預計付款月）/已付款
+- [x] **收支明細**：現金流日記帳 + CSV 匯入
+- [x] **應付帳款**：按收款人分組 + 銀行帳號帶入 + 單筆/批次付款 + 複製匯款資訊
+- [x] **手機版 RWD**：`/expense.html`（雜支登記 + 拍照收據）+ `/invoice.html`（發票登記）
+- [x] **全模組 Inline 編輯**：詳情面板直接編輯（`crm-utils.js` 共用 + 請款專用三區塊版）
+- [x] **雜支明細**：專案財務 sub-tab 內嵌 + 收據上傳 + inline 新增/編輯/刪除
+
+### J-3：備份 Tab 整合（⬜ 下一步）
 
 - [ ] 備份頁籤新增「選擇現有專案」下拉選項
 - [ ] 選擇專案後自動帶入 project_name、local_root、nas_root、proxy_root
-- [ ] 保留原有手動輸入方式（兩種模式並存）
-- [ ] `job_history` 表新增 `crm_project_id` 欄位，關聯任務歷史與專案
 
-### J-4：進階 CRM 功能（⬜ 未來規劃）
+### J-4：進階功能（⬜ 未來）
 
-- [ ] **財務模組**：專案預算、報銷流程、費用追蹤
-- [ ] **人資模組**：員工資料、出勤記錄、假勤管理
-- [ ] **Notion 雙向同步**：專案板、任務追蹤與 Notion 資料庫即時同步
+- [ ] **報價 PDF 輸出**：Jinja2 模板 + playwright 轉 PDF
+- [ ] **排班日曆**：人力資源視覺化排程
+- [ ] **Notion 雙向同步**
 
 ### 做完後你看到的改變
 
-- 客戶資料從 Notion + Google Sheets 集中到一個系統，支援 CSV 匯入
-- 建立專案時自動複製資料夾範本，不再手動建資料夾
-- 備份任務可直接選專案，路徑自動帶入，減少人為錯誤
-- 未來：同事在同一個系統管理專案進度、人事、財務
+- 客戶/專案/報價/人員/發票/請款/收支 全部從 Google Sheets 集中到一個系統
+- 報價自動計算利潤率，一鍵套用範本
+- 請款→應付帳款自動彙整，複製匯款資訊直接貼到網銀
+- 手機可在拍攝現場即時登記雜支 + 拍收據
+- 所有詳情面板支援 inline 編輯，不需開 Modal
 
 ---
 
@@ -563,10 +563,12 @@ tools:
     ▼ Phase 0: 程式碼重構 (✅)
     │   → app.js 3499→1951+10模組 / projects.js 2180→1687+2模組 / api_system.py 1031→332+2router
     │
-現在 (v1.10.22) ← 你在這裡
+    ▼ Phase J: CRM + 專案管理 + 帳務 (✅ 核心完成)
+    │   → 62 API / 11 DB 表 / 6 Tab + 4 子視圖 + 手機版 RWD + Inline 編輯
     │
-    ▼ Phase J: CRM + 專案管理 (🟡 進行中)
-    │   → ✅ J-1 客戶管理 Tab → ⬜ J-2 專案管理 Tab → ⬜ J-3 備份整合 → ⬜ J-4 財務/人資
+現在 (v1.10.63) ← 你在這裡
+    │
+    ▼ Phase J-3: 備份 Tab 整合 (⬜)
     │
     ▼ Phase L: 行動端適配 (🟡 部分完成)
     │   → ✅ 報表手機版 RWD → 待做：主 UI RWD → 觸控優化
@@ -598,6 +600,14 @@ tools:
 
 | 版本 | 日期 | 重點 |
 |------|------|------|
+| v1.10.63 | 2026-03-30 | CRM 請款列表置中對齊 + 發票欄 + 欄寬優化 |
+| v1.10.52 | 2026-03-30 | CRM 全模組 Inline 編輯 + 請款三區塊版面 |
+| v1.10.41 | 2026-03-30 | 帳務管理：應付帳款 + 批次付款 + 複製匯款資訊 + 重新整理按鈕 |
+| v1.10.35 | 2026-03-30 | 帳務管理：請款項目完整選單 + 發票代開聯動 + 應付款狀態 |
+| v1.10.31 | 2026-03-29 | 帳務管理：收支明細 + 請款 + 發票 + 手機版 RWD |
+| v1.10.28 | 2026-03-29 | CRM 人力資源 + 報價內部成本 + 專案派工 + 雙向整合 |
+| v1.10.26 | 2026-03-29 | CRM 報價管理 + 項目明細 + 範本 + 統計 + DB migration |
+| v1.10.24 | 2026-03-28 | CRM 客戶/專案獨立 Tab + 共用工具模組 + 專案財務系統 |
 | v1.10.22 | 2026-03-27 | 分散式補轉 3 層 fallback + 進度條錯誤面板 + PDF 分頁優化 + 膠卷手機版滑動修復 |
 | v1.10.22 | 2026-03-27 | Cloudflare 外網支援 + NAS 瀏覽器 + 分散式補轉 3 層 fallback + 進度條錯誤面板 + PDF 分頁優化 |
 | v1.10.21 | 2026-03-26 | Phase 0 完成：app.js 拆 10 模組 + projects.js 拆 3 + api_system.py 拆 3 router |
