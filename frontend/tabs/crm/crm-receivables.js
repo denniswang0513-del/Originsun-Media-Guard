@@ -111,10 +111,7 @@ window._recvSingleReceive = async (btn, invoiceId, companyName) => {
             method: 'PATCH',
             body: JSON.stringify({ invoice_ids: [invoiceId] })
         });
-        const row = document.getElementById('recv-row-' + invoiceId);
-        if (row) {
-            btn.outerHTML = '<span style="min-width:80px;text-align:right;font-size:11px;color:#86efac;">已收款</span>';
-        }
+        await loadReceivables();
     } catch (e) { alert(e.message); }
 };
 
@@ -146,13 +143,7 @@ window._recvReceiveAll = async (name) => {
             method: 'PATCH',
             body: JSON.stringify({ invoice_ids: unpaidIds })
         });
-        for (const id of unpaidIds) {
-            const row = document.getElementById('recv-row-' + id);
-            if (row) {
-                const btn = row.querySelector('.crm-btn-primary');
-                if (btn) btn.outerHTML = '<span style="min-width:80px;text-align:right;font-size:11px;color:#86efac;">已收款</span>';
-            }
-        }
+        await loadReceivables();
     } catch (e) { alert(e.message); }
 };
 

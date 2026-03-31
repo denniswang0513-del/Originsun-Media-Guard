@@ -770,20 +770,22 @@ export async function initCrmInvoicesTab() {
     document.getElementById('inv-view-receivables').addEventListener('click', async () => {
         if (_receivablesLoading) return;
         _switchView(receivablesView, 'inv-view-receivables');
-        if (!_receivablesLoaded) {
-            _receivablesLoading = true;
-            try {
-                const _cb = '?t=' + Date.now();
-                const res = await fetch(baseUrl + '/tabs/crm/crm-receivables.html' + _cb);
-                if (res.ok) {
-                    receivablesView.innerHTML = await res.text();
-                    const mod = await import(baseUrl + '/tabs/crm/crm-receivables.js' + _cb);
-                    mod.initCrmReceivablesTab();
-                    _receivablesLoaded = true;
-                }
-            } catch (e) { console.warn('[Receivables] load failed:', e); }
-            finally { _receivablesLoading = false; }
+        if (_receivablesLoaded) {
+            if (window._recvRefresh) window._recvRefresh();
+            return;
         }
+        _receivablesLoading = true;
+        try {
+            const _cb = '?t=' + Date.now();
+            const res = await fetch(baseUrl + '/tabs/crm/crm-receivables.html' + _cb);
+            if (res.ok) {
+                receivablesView.innerHTML = await res.text();
+                const mod = await import(baseUrl + '/tabs/crm/crm-receivables.js' + _cb);
+                mod.initCrmReceivablesTab();
+                _receivablesLoaded = true;
+            }
+        } catch (e) { console.warn('[Receivables] load failed:', e); }
+        finally { _receivablesLoading = false; }
     });
 
     // Global refresh — reloads current active sub-view
