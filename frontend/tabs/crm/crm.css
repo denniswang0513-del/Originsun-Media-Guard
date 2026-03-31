@@ -96,6 +96,7 @@
   text-transform: uppercase;
   letter-spacing: 0.05em;
   flex-shrink: 0;
+  gap: 4px;
 }
 
 .crm-col-name    { flex: 2; }
@@ -227,7 +228,7 @@
   display: flex;
   align-items: center;
   gap: 6px;
-  margin-left: 8px;
+  margin-left: auto;
   flex-shrink: 0;
 }
 
@@ -275,6 +276,17 @@
   word-break: break-word;
 }
 .crm-prop-value.empty { color: #4b5563; font-style: italic; }
+
+.crm-detail-section {
+  font-size: 11px;
+  font-weight: 700;
+  color: #6b7280;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  padding: 14px 0 6px;
+  border-bottom: 1px solid #3a3a3a;
+  margin-top: 4px;
+}
 
 .crm-am-row { display: flex; align-items: center; gap: 8px; }
 .crm-muted { color: #4b5563; }
@@ -361,6 +373,7 @@
   font-family: inherit;
 }
 .crm-input:focus { border-color: #3b82f6; }
+.crm-input-auto { background: #2a2a2a; color: #9ca3af; }
 
 .crm-textarea { resize: vertical; min-height: 60px; }
 
@@ -520,17 +533,28 @@
 .crm-pay-badge-付款 { background: #3b2f1f; color: #fbbf24; }
 .crm-pay-badge-作廢 { background: #374151; color: #9ca3af; text-decoration: line-through; }
 
-/* ── Payment list (all centered, uniform width) ── */
-.pay-header-center span { flex: 1; text-align: center; }
-#pay-list-body .crm-row > div { flex: 1; text-align: center; font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-#pay-list-body .crm-row-actions { flex: 0 0 50px; }
-#pay-list-body .crm-row-name { font-weight: 600; color: #e0e0e0; }
-#pay-list-body .crm-row-amount { font-weight: 600; color: #e0e0e0; font-size: 13px; }
-#pay-list-body .crm-row-date { color: #6b7280; }
-#pay-list-body .crm-row-client { color: #9ca3af; }
-#pay-list-body .crm-row-cat { color: #9ca3af; }
-#pay-list-body .crm-row-inv { color: #6b7280; }
-#pay-list-body .crm-row-proj { color: #6b7280; }
+/* ── Accounting tabs: centered, uniform columns ── */
+.acct-header span { flex: 1; text-align: center; }
+
+#inv-list-body .crm-row > div,
+#pay-list-body .crm-row > div,
+#pay-list-body .crm-row > span,
+#cash-list-body .crm-row > div,
+#payable-list-body .crm-row > div {
+  flex: 1; text-align: center; font-size: 12px;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.pay-cell-del { flex: 0 0 50px !important; display: flex; justify-content: center; }
+
+#pay-list-body .crm-row-name,
+#cash-list-body .crm-row-name,
+#inv-list-body .crm-row-name { font-weight: 600; color: #e0e0e0; }
+
+#pay-list-body .crm-row-amount,
+#cash-list-body .crm-row-amt-out,
+#cash-list-body .crm-row-amt-in,
+#inv-list-body .crm-row-amount,
+#payable-list-body .crm-row-amount { font-weight: 600; font-size: 13px; }
 
 /* ── Cash entry columns ── */
 .crm-col-amt-out { flex: 0.7; text-align: right; }
@@ -557,6 +581,105 @@
 .payable-item-cat { width: 60px; color: #9ca3af; }
 .payable-item-amt { width: 80px; text-align: right; font-weight: 600; color: #e0e0e0; }
 .payable-actions { padding: 8px 0 4px; text-align: right; }
+
+/* ── Invoice modal: section titles ── */
+.inv-section-title {
+  font-size: 13px;
+  font-weight: 700;
+  color: #9ca3af;
+  padding: 18px 0 8px;
+  margin-bottom: 12px;
+  border-bottom: 1px solid #3a3a3a;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+/* ── Invoice modal: label with right-aligned button ── */
+.inv-label-row {
+  display: flex;
+  align-items: center;
+  width: 100%;
+}
+.inv-label-row .inv-icon-btn { margin-left: auto; }
+
+/* ── Invoice modal: icon button (calculator, settings) ── */
+.inv-icon-btn {
+  background: none;
+  border: 1px solid #3a3a3a;
+  border-radius: 4px;
+  padding: 1px 5px;
+  font-size: 13px;
+  cursor: pointer;
+  line-height: 1;
+  transition: background 0.15s;
+}
+.inv-icon-btn:hover { background: #3a3a3a; }
+
+/* ── Invoice modal: radio group ── */
+.inv-radio-group {
+  display: flex;
+  gap: 20px;
+  padding: 4px 0;
+}
+.inv-radio-label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  color: #d1d5db;
+  cursor: pointer;
+}
+.inv-radio-label input[type="radio"] {
+  accent-color: #3b82f6;
+  width: 16px;
+  height: 16px;
+  margin: 0;
+}
+
+/* ── Invoice modal: popup (calculator / commission settings) ── */
+.inv-popup {
+  position: fixed;
+  z-index: 1100;
+  background: #2d2d2d;
+  border: 1px solid #555;
+  border-radius: 10px;
+  width: 340px;
+  box-shadow: 0 12px 40px rgba(0,0,0,0.6);
+  top: 50%; left: 50%;
+  transform: translate(-50%, -50%);
+}
+.inv-popup-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 16px;
+  border-bottom: 1px solid #3a3a3a;
+  font-size: 14px;
+  font-weight: 700;
+  color: #fff;
+}
+.inv-popup-body { padding: 14px 16px; }
+
+/* ── Calculator results ── */
+.inv-calc-results {
+  margin-top: 14px;
+  background: #1e1e1e;
+  border: 1px solid #3a3a3a;
+  border-radius: 8px;
+  padding: 10px 14px;
+}
+.inv-calc-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 5px 0;
+  font-size: 13px;
+}
+.inv-calc-label { color: #9ca3af; }
+.inv-calc-value { color: #e0e0e0; font-weight: 700; font-size: 14px; }
+.inv-calc-copyable { user-select: all; cursor: text; }
+.inv-calc-divider { border-top: 1px dashed #3a3a3a; margin: 6px 0; }
 
 /* ── Staff badge colors ── */
 .crm-staff-badge-在職 { background: #14532d; color: #86efac; }

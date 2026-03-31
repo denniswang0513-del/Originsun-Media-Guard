@@ -30,7 +30,7 @@
 <!-- Body -->
 <div class="crm-body">
   <div class="crm-list-panel">
-    <div class="crm-list-header pay-header-center">
+    <div class="crm-list-header acct-header">
       <span>日期</span>
       <span>摘要</span>
       <span>金額</span>
@@ -39,7 +39,7 @@
       <span>發票</span>
       <span>專案</span>
       <span>狀態</span>
-      <span style="width:50px;flex-shrink:0;"></span>
+      <span style="flex:0 0 50px;"></span>
     </div>
     <div id="pay-list-body"><div class="crm-empty">載入中...</div></div>
   </div>
@@ -95,12 +95,14 @@
             <option value="轉存">轉存</option>
           </select>
         </div>
-        <div class="crm-field">
-          <label>請款人</label>
+        <div class="crm-field" id="pay-payee-type-field" style="display:none;">
+          <label>報支項目</label>
           <select id="pay-f-payee_type" class="crm-input">
             <option value="">—</option>
-            <option value="勞報">勞報</option>
             <option value="內部人員">內部人員</option>
+            <option value="現金">現金</option>
+            <option value="勞報">勞報</option>
+            <option value="核銷">核銷</option>
           </select>
         </div>
         <div class="crm-field">

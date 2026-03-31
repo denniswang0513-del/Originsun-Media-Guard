@@ -52,18 +52,16 @@ function renderList() {
         return;
     }
     body.innerHTML = _payments.map(p => `
-        <div class="crm-row${p.id === _selectedId ? ' selected' : ''}" onclick="window._paySelect('${p.id}')">
-            <div class="crm-row-date">${p.request_date ? p.request_date.substring(0, 10) : '—'}</div>
-            <div class="crm-row-name">${_esc(p.summary)}</div>
-            <div class="crm-row-amount">$${_fmtNum(p.amount)}</div>
-            <div class="crm-row-cat">${_esc(p.category || '')}</div>
-            <div class="crm-row-client">${_esc(p.payee_name)}</div>
-            <div class="crm-row-inv">${p.category === '發票代開' && p.invoice_number ? _esc((() => { const inv = _invoiceList.find(i => i.invoice_number === p.invoice_number); return inv ? inv.title : p.invoice_number; })()) : ''}</div>
-            <div class="crm-row-proj">${_esc(p.project_name || p.project_label || '')}</div>
-            <div class="crm-row-status">${_statusBadge(p.payment_status)}</div>
-            <div class="crm-row-actions" style="flex:0 0 50px;" onclick="event.stopPropagation()">
-                <button class="crm-btn crm-btn-danger crm-btn-sm" onclick="window._payDelete('${p.id}')">刪</button>
-            </div>
+        <div class="crm-row pay-row${p.id === _selectedId ? ' selected' : ''}" onclick="window._paySelect('${p.id}')">
+            <span>${p.request_date ? p.request_date.substring(0, 10) : '—'}</span>
+            <span style="font-weight:600;color:#e0e0e0;">${_esc(p.summary)}</span>
+            <span style="font-weight:600;color:#e0e0e0;">$${_fmtNum(p.amount)}</span>
+            <span>${_esc(p.category || '')}</span>
+            <span>${_esc(p.payee_name)}</span>
+            <span>${p.category === '發票代開' && p.invoice_number ? _esc((() => { const inv = _invoiceList.find(i => i.invoice_number === p.invoice_number); return inv ? inv.title : p.invoice_number; })()) : ''}</span>
+            <span>${_esc(p.project_name || p.project_label || '')}</span>
+            <span>${_statusBadge(p.payment_status)}</span>
+            <span class="pay-cell-del" onclick="event.stopPropagation()"><button class="crm-btn crm-btn-danger crm-btn-sm" onclick="window._payDelete('${p.id}')">刪</button></span>
         </div>
     `).join('');
 }
@@ -79,6 +77,10 @@ const _PAY_EDIT_FIELDS = [
         {value:'專案雜支',label:'專案雜支'},{value:'設備耗材',label:'設備耗材'},
         {value:'發票代開',label:'發票代開'},{value:'零用金',label:'零用金'},
         {value:'薪資',label:'薪資'},{value:'轉存',label:'轉存'},{value:'其他',label:'其他'},
+    ]},
+    {name:'payee_type', label:'報支項目', type:'select', options:[
+        {value:'',label:'—'},{value:'內部人員',label:'內部人員'},{value:'現金',label:'現金'},
+        {value:'勞報',label:'勞報'},{value:'核銷',label:'核銷'},
     ]},
     {name:'request_date', label:'日期', type:'date'},
     // 付款資訊
@@ -106,6 +108,7 @@ function renderDetail(p) {
         ${prop('摘要', p.summary)}
         ${prop('金額', '$' + _fmtNum(p.amount))}
         ${prop('項目', p.category)}
+        ${p.category === '專案外包' && p.payee_type ? prop('報支項目', p.payee_type) : ''}
         ${prop('日期', p.request_date ? p.request_date.substring(0, 10) : '')}
         <div style="border-top:1px solid #2e2e2e;margin:8px 0;"></div>
         <div style="font-size:12px;font-weight:700;color:#6b7280;padding:4px 0;">付款資訊</div>
@@ -142,6 +145,8 @@ function _startInlineEdit(p) {
 
     const catOptions = ['','行政','其他','建構','專案外包','專案雜支','設備耗材','設備維護','軟體網路服務','發票代開','業務推廣','零用金','獎金','薪資','轉存']
         .map(v => `<option value="${v}"${v === (p.category||'') ? ' selected' : ''}>${v || '—'}</option>`).join('');
+    const payeeTypeOptions = ['','內部人員','現金','勞報','核銷']
+        .map(v => `<option value="${v}"${v === (p.payee_type||'') ? ' selected' : ''}>${v || '—'}</option>`).join('');
     const payeeOptions = `<option value="">— 選擇人員 —</option>` +
         _staffList.map(s => `<option value="${_esc(s.name)}" data-id="${_esc(s.id_number)}"${s.name === p.payee_name ? ' selected' : ''}>${_esc(s.name)} (${_esc(s.role)})</option>`).join('');
     const statusOptions = ['未付款','應付款','已付款']
@@ -153,6 +158,7 @@ function _startInlineEdit(p) {
             <div class="crm-field"><label>摘要</label><input id="ie-summary" type="text" class="crm-input" value="${_esc(p.summary)}"></div>
             <div class="crm-field"><label>金額</label><input id="ie-amount" type="number" class="crm-input" value="${p.amount || ''}"></div>
             <div class="crm-field"><label>項目</label><select id="ie-category" class="crm-input">${catOptions}</select></div>
+            <div class="crm-field" id="ie-payee-type-field" style="display:none;"><label>報支項目</label><select id="ie-payee_type" class="crm-input">${payeeTypeOptions}</select></div>
             <div class="crm-field"><label>日期</label><input id="ie-request_date" type="date" class="crm-input" value="${p.request_date ? p.request_date.substring(0,10) : ''}"></div>
         </div>
         <div class="crm-form-section">付款資訊</div>
@@ -178,6 +184,7 @@ function _startInlineEdit(p) {
         const status = document.getElementById('ie-payment_status').value;
         document.getElementById('ie-date-field').style.display = status === '已付款' ? '' : 'none';
         document.getElementById('ie-planned-field').style.display = status === '應付款' ? '' : 'none';
+        document.getElementById('ie-payee-type-field').style.display = cat === '專案外包' ? 'flex' : 'none';
         document.getElementById('ie-project-field').style.display = _PROJECT_CATEGORIES.includes(cat) || cat === '發票代開' ? '' : 'none';
         document.getElementById('ie-invoice-field').style.display = cat === '發票代開' ? '' : 'none';
         document.getElementById('ie-invnum-field').style.display = cat === '發票代開' ? '' : 'none';
@@ -246,6 +253,7 @@ function _startInlineEdit(p) {
             summary: document.getElementById('ie-summary').value,
             amount: parseInt(document.getElementById('ie-amount').value) || 0,
             category: cat,
+            payee_type: cat === '專案外包' ? (document.getElementById('ie-payee_type')?.value || '') : '',
             request_date: document.getElementById('ie-request_date').value || null,
             payee_name: document.getElementById('ie-payee_name').value,
             payee_id: document.getElementById('ie-payee_id').value,
@@ -301,12 +309,18 @@ function _updateExtraFields(category) {
     const invoiceNumField = document.getElementById('pay-invoice-number-field');
     const projectField = document.getElementById('pay-project-field');
     const dateField = document.getElementById('pay-date-field');
+    const payeeTypeField = document.getElementById('pay-payee-type-field');
     const payStatus = document.getElementById('pay-f-payment_status')?.value;
 
     // Hide all first
     if (invoiceField) invoiceField.style.display = 'none';
     if (invoiceNumField) invoiceNumField.style.display = 'none';
     if (projectField) projectField.style.display = 'none';
+    if (payeeTypeField) {
+        payeeTypeField.style.display = category === '專案外包' ? 'flex' : 'none';
+    } else {
+        console.warn('[Payments] pay-payee-type-field not found');
+    }
 
     if (category === '發票代開') {
         // Show invoice fields + optional project
