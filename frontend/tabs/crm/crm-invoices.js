@@ -614,7 +614,7 @@ async function doImport() {
 
 // ── Init ─────────────────────────────────────────────────────
 
-export function initCrmInvoicesTab() {
+export async function initCrmInvoicesTab() {
     for (const id of ['inv-modal', 'inv-import-modal', 'inv-calc-popup', 'inv-commission-popup', 'inv-applicant-popup']) {
         const el = document.getElementById(id);
         if (el) document.body.appendChild(el);
@@ -714,7 +714,7 @@ export function initCrmInvoicesTab() {
                 if (res.ok) {
                     payView.innerHTML = await res.text();
                     const mod = await import(baseUrl + '/tabs/crm/crm-payments.js' + _cb);
-                    mod.initCrmPaymentsTab();
+                    await mod.initCrmPaymentsTab();
                     _paymentsLoaded = true;
                 }
             } catch (e) { console.warn('[Payments] load failed:', e); }
@@ -733,7 +733,7 @@ export function initCrmInvoicesTab() {
                 if (res.ok) {
                     cashView.innerHTML = await res.text();
                     const mod = await import(baseUrl + '/tabs/crm/crm-cashbook.js' + _cb);
-                    mod.initCrmCashbookTab();
+                    await mod.initCrmCashbookTab();
                     _cashbookLoaded = true;
                 }
             } catch (e) { console.warn('[Cashbook] load failed:', e); }

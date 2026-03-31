@@ -342,7 +342,7 @@ async function doImport() {
 
 // ── Init ─────────────────────────────────────────────────────
 
-export function initCrmTab() {
+export async function initCrmTab() {
     // Move modals to document.body — parent section's `transform` class
     // creates a new containing block that breaks position:fixed
     for (const id of ['crm-modal', 'crm-import-modal']) {

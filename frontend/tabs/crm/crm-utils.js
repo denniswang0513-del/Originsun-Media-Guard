@@ -144,6 +144,44 @@ export function addEditButton(actionsElId, onEdit) {
     actions.insertBefore(btn, actions.firstChild);
 }
 
+/**
+ * Render a kebab menu (⋮) button for list rows.
+ * @param {string} id - record id
+ * @param {object} callbacks - { onEdit, onDuplicate, onDelete } window function names
+ * @returns {string} HTML string
+ */
+export function kebabMenuHtml(id, callbacks) {
+    return `<div class="crm-kebab-wrap" onclick="event.stopPropagation()">` +
+        `<button class="crm-kebab-btn" onclick="window._crmToggleKebab(this,'${esc(id)}')">&#x22EE;</button>` +
+        `<div class="crm-kebab-menu" data-kebab-id="${esc(id)}">` +
+        (callbacks.onEdit ? `<div class="crm-kebab-item" onclick="this.parentElement.classList.remove('open');window.${callbacks.onEdit}('${esc(id)}')">編輯</div>` : '') +
+        (callbacks.onDuplicate ? `<div class="crm-kebab-item" onclick="this.parentElement.classList.remove('open');window.${callbacks.onDuplicate}('${esc(id)}')">複製</div>` : '') +
+        (callbacks.onDelete ? `<div class="crm-kebab-item crm-kebab-danger" onclick="this.parentElement.classList.remove('open');window.${callbacks.onDelete}('${esc(id)}')">刪除</div>` : '') +
+        `</div></div>`;
+}
+
+/* Global kebab toggle — only one open at a time, position:fixed to escape overflow */
+window._crmToggleKebab = function (btn, id) {
+    const menu = btn.nextElementSibling;
+    const wasOpen = menu.classList.contains('open');
+    // close all menus first
+    document.querySelectorAll('.crm-kebab-menu.open').forEach(m => m.classList.remove('open'));
+    if (wasOpen) return;
+    // position fixed relative to the button
+    const rect = btn.getBoundingClientRect();
+    menu.style.position = 'fixed';
+    menu.style.top = rect.bottom + 2 + 'px';
+    menu.style.right = (window.innerWidth - rect.right) + 'px';
+    menu.style.left = 'auto';
+    menu.classList.add('open');
+};
+
+/* Close kebab on click outside */
+document.addEventListener('click', (e) => {
+    if (e.target.closest('.crm-kebab-wrap')) return;
+    document.querySelectorAll('.crm-kebab-menu.open').forEach(m => m.classList.remove('open'));
+});
+
 export function setupResizeHandle(handleId, panelId) {
     const resizeHandle = document.getElementById(handleId);
     const detailPanel = document.getElementById(panelId);

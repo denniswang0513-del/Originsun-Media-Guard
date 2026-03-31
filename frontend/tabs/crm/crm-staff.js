@@ -2,7 +2,7 @@
  * crm-staff.js — 人力資源 Tab
  */
 
-import { crmFetch as _fetch, esc as _esc, fmtNum as _fmtNum, setupResizeHandle, enableInlineEdit, addEditButton } from './crm-utils.js';
+import { crmFetch as _fetch, esc as _esc, fmtNum as _fmtNum, setupResizeHandle, enableInlineEdit, addEditButton, kebabMenuHtml } from './crm-utils.js';
 
 let _staff = [];
 let _selectedId = null;
@@ -48,10 +48,7 @@ function renderList() {
             <div class="crm-row-rate">$${_fmtNum(s.daily_rate)}</div>
             <div class="crm-row-status">${_sBadge(s.status)}</div>
             <div class="crm-row-phone">${_esc(s.phone)}</div>
-            <div class="crm-row-actions" onclick="event.stopPropagation()">
-                <button class="crm-btn crm-btn-secondary crm-btn-sm" onclick="window._staffEdit('${s.id}')">編輯</button>
-                <button class="crm-btn crm-btn-danger crm-btn-sm" onclick="window._staffDelete('${s.id}')">刪除</button>
-            </div>
+            ${kebabMenuHtml(s.id, { onEdit: '_staffEdit', onDuplicate: '_staffDup', onDelete: '_staffDelete' })}
         </div>
     `).join('');
 }
@@ -284,6 +281,10 @@ export function initCrmStaffTab() {
     window._staffSelect = selectStaff;
     window._staffEdit = (id) => { const s = _staff.find(x => x.id === id); if (s) openModal(s); };
     window._staffDelete = (id) => { const s = _staff.find(x => x.id === id); if (s) deleteStaff(s); };
+    window._staffDup = (id) => {
+        const s = _staff.find(x => x.id === id);
+        if (s) { openModal(s); _editingId = null; document.getElementById('staff-modal-title').textContent = '複製人員'; }
+    };
 
     let _t;
     document.getElementById('staff-search').addEventListener('input', e => {

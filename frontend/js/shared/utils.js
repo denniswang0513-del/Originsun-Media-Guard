@@ -480,6 +480,43 @@ export function setupInputDrop(inputId) {
     });
 }
 
+/**
+ * 將本機磁碟代號路徑轉為 UNC 路徑（如 T:\foo → \\NAS\share\foo）。
+ * 依賴 window._driveMap（由 /api/v1/utils/drive_map 取得）。
+ * 若尚未載入映射表或無對應映射，原樣回傳。
+ */
+export function toUncPath(filePath) {
+    const map = window._driveMap;
+    if (!filePath || !map) return filePath;
+    const drive = filePath.substring(0, 2).toUpperCase(); // "T:"
+    const unc = map[drive];
+    if (unc) {
+        return unc.replace(/\\/g, '/') + filePath.substring(2).replace(/\\/g, '/');
+    }
+    return filePath;
+}
+window.toUncPath = toUncPath;
+
+/**
+ * 確保 window._driveMap 已載入（best-effort）。
+ * 回傳映射表，或空物件。
+ */
+export async function ensureDriveMap() {
+    if (window._driveMap && Object.keys(window._driveMap).length > 0) {
+        return window._driveMap;
+    }
+    try {
+        const res = await fetch('/api/v1/utils/drive_map');
+        const data = await res.json();
+        if (data.status === 'ok' && data.mappings) {
+            window._driveMap = data.mappings;
+            return data.mappings;
+        }
+    } catch (_) { /* best-effort */ }
+    return window._driveMap || {};
+}
+window.ensureDriveMap = ensureDriveMap;
+
 export async function validateRemotePaths(hostIp, paths) {
     const url = 'http://' + hostIp + '/api/v1/validate_paths';
     const res = await fetch(url, {

@@ -45,7 +45,6 @@ function renderList() {
             <div class="crm-row-amount">$${_fmtNum(p.total_amount)}</div>
             <div class="crm-row-client" style="font-size:11px;">${_esc(p.bank_name ? p.bank_name + ' ' + p.bank_account : '')}</div>
             <div class="crm-row-status"><span class="${statusCls}">${statusText}</span></div>
-            <div class="crm-row-actions" onclick="event.stopPropagation()"></div>
         </div>`;
     }).join('');
 }

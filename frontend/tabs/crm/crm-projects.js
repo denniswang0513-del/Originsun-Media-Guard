@@ -568,7 +568,7 @@ async function doImport() {
 
 // ── Init ─────────────────────────────────────────────────────
 
-export function initCrmProjectsTab() {
+export async function initCrmProjectsTab() {
     // Move modals to body
     for (const id of ['proj-modal', 'proj-import-modal']) {
         const el = document.getElementById(id);

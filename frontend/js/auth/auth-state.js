@@ -92,6 +92,7 @@ window._authToggle = function() {
             html += _sep;
             html += _item('👥', '使用者管理', "window._openUserMgmt();document.getElementById('auth-dropdown')?.remove()");
             html += _item('🔰', '角色管理', "window._openRoleMgmt();document.getElementById('auth-dropdown')?.remove()");
+            html += _item('🚀', '版本發布', "window._openPublishMgmt();document.getElementById('auth-dropdown')?.remove()");
         }
 
         html += _sep;

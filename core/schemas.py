@@ -337,6 +337,8 @@ class CashEntryPayload(BaseModel):
     project_id: Optional[str] = None
     payment_date: Optional[str] = None
     payment_status: str = ""
+    invoice_id: Optional[str] = None
+    bank_fee: Optional[int] = None
 
 
 class InvoicePayload(BaseModel):

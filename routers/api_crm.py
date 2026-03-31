@@ -1715,7 +1715,7 @@ async def import_payments_csv(request: Request, file: UploadFile = File(...)):
 
 # ── Cash Entry (收支明細) ───────────────────────────────────
 
-def _to_cash_dict(e, project_name: str = "") -> dict:
+def _to_cash_dict(e, project_name: str = "", invoice_title: str = "") -> dict:
     return {
         "id": e.id,
         "entry_date": e.entry_date.isoformat() if e.entry_date else None,
@@ -1729,6 +1729,9 @@ def _to_cash_dict(e, project_name: str = "") -> dict:
         "project_name": project_name,
         "payment_date": e.payment_date.isoformat() if e.payment_date else None,
         "payment_status": e.payment_status or "",
+        "invoice_id": e.invoice_id or "",
+        "bank_fee": e.bank_fee,
+        "invoice_title": invoice_title,
         "created_at": e.created_at.isoformat() if e.created_at else None,
     }
 
@@ -1742,8 +1745,9 @@ async def list_cash_entries(
     factory = await _get_factory()
     async with factory() as session:
         query = (
-            select(CrmCashEntry, CrmProject.name.label("pn"))
+            select(CrmCashEntry, CrmProject.name.label("pn"), CrmInvoice.title.label("inv_title"))
             .outerjoin(CrmProject, CrmProject.id == CrmCashEntry.project_id)
+            .outerjoin(CrmInvoice, CrmInvoice.id == CrmCashEntry.invoice_id)
             .order_by(CrmCashEntry.entry_date.desc())
         )
         if category:
@@ -1756,7 +1760,7 @@ async def list_cash_entries(
             ql = f"%{q}%"
             query = query.where(or_(CrmCashEntry.summary.ilike(ql), CrmCashEntry.payee.ilike(ql)))
         rows = (await session.execute(query)).all()
-    return {"entries": [_to_cash_dict(r[0], r[1] or "") for r in rows], "total": len(rows)}
+    return {"entries": [_to_cash_dict(r[0], r[1] or "", r[2] or "") for r in rows], "total": len(rows)}
 
 
 @router.post("/cash-entries")
@@ -1770,6 +1774,10 @@ async def create_cash_entry(req: CashEntryPayload, request: Request):
     e = CrmCashEntry(id=uuid.uuid4().hex, **dates, created_at=_now(), **data)
     async with factory() as session:
         session.add(e)
+        if req.invoice_id and req.deposit:
+            inv = await session.get(CrmInvoice, req.invoice_id)
+            if inv:
+                inv.payment_status = "已收款"
         await session.commit()
     return {"status": "ok", "entry_id": e.id, "entry": {"id": e.id}}
 
@@ -1785,11 +1793,20 @@ async def update_cash_entry(entry_id: str, req: CashEntryPayload, request: Reque
         e = await session.get(CrmCashEntry, entry_id)
         if not e:
             raise HTTPException(status_code=404, detail="找不到此收支紀錄")
+        old_invoice_id = e.invoice_id
         for k, v in req.model_dump(exclude=date_fields).items():
             setattr(e, k, v)
         for k, v in dates.items():
             setattr(e, k, v)
         e.updated_at = _now()
+        if req.invoice_id and req.deposit:
+            inv = await session.get(CrmInvoice, req.invoice_id)
+            if inv:
+                inv.payment_status = "已收款"
+        if old_invoice_id and old_invoice_id != req.invoice_id:
+            old_inv = await session.get(CrmInvoice, old_invoice_id)
+            if old_inv and old_inv.payment_status == "已收款":
+                old_inv.payment_status = "未收款"
         await session.commit()
     return {"status": "ok"}
 
@@ -1803,6 +1820,10 @@ async def delete_cash_entry(entry_id: str, request: Request):
         e = await session.get(CrmCashEntry, entry_id)
         if not e:
             raise HTTPException(status_code=404, detail="找不到此收支紀錄")
+        if e.invoice_id and e.deposit:
+            inv = await session.get(CrmInvoice, e.invoice_id)
+            if inv and inv.payment_status == "已收款":
+                inv.payment_status = "未收款"
         await session.delete(e)
         await session.commit()
     return {"status": "ok"}

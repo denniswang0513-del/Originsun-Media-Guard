@@ -23,14 +23,15 @@
 <!-- Body -->
 <div class="crm-body">
   <div class="crm-list-panel">
-    <div class="crm-list-header">
-      <span class="crm-col-date">日期</span>
-      <span class="crm-col-name">摘要</span>
-      <span class="crm-col-amt-out">支出</span>
-      <span class="crm-col-amt-in">存入</span>
-      <span class="crm-col-client">收款人</span>
-      <span class="crm-col-status">類別</span>
-      <span class="crm-col-actions"></span>
+    <div class="crm-list-header acct-header">
+      <span>日期</span>
+      <span>內容</span>
+      <span>收入</span>
+      <span>支出</span>
+      <span>類別</span>
+      <span>專案</span>
+      <span>發票</span>
+      <span style="flex:0 0 36px;"></span>
     </div>
     <div id="cash-list-body"><div class="crm-empty">載入中...</div></div>
   </div>
@@ -55,67 +56,91 @@
       <button onclick="document.getElementById('cash-modal').style.display='none'" class="crm-detail-close">&#x2715;</button>
     </div>
     <div class="crm-modal-body">
+      <!-- 1. 收支 -->
+      <div class="crm-form-section">收支</div>
       <div class="crm-form-grid">
-        <div class="crm-field crm-field-full">
-          <label>摘要 <span class="crm-required">*</span></label>
-          <input id="cash-f-summary" type="text" class="crm-input">
-        </div>
         <div class="crm-field">
           <label>日期</label>
           <input id="cash-f-entry_date" type="date" class="crm-input">
+        </div>
+        <div class="crm-field">
+          <label>內容 <span class="crm-required">*</span></label>
+          <input id="cash-f-summary" type="text" class="crm-input">
+        </div>
+        <div class="crm-field">
+          <label>收入</label>
+          <input id="cash-f-deposit" type="number" class="crm-input" min="0">
         </div>
         <div class="crm-field">
           <label>支出</label>
           <input id="cash-f-expense" type="number" class="crm-input" min="0">
         </div>
         <div class="crm-field">
-          <label>請款</label>
-          <input id="cash-f-claim" type="number" class="crm-input" min="0">
-        </div>
-        <div class="crm-field">
-          <label>存入</label>
-          <input id="cash-f-deposit" type="number" class="crm-input" min="0">
-        </div>
-        <div class="crm-field">
           <label>類別</label>
           <select id="cash-f-category" class="crm-input">
             <option value="">—</option>
-            <option value="請款">請款</option>
-            <option value="收支">收支</option>
-            <option value="轉存">轉存</option>
-          </select>
-        </div>
-        <div class="crm-field">
-          <label>項目</label>
-          <select id="cash-f-item" class="crm-input">
-            <option value="">—</option>
-            <option value="專案">專案</option>
-            <option value="設備耗材">設備耗材</option>
+            <option value="水電網路">水電網路</option>
+            <option value="交際應酬">交際應酬</option>
             <option value="行政">行政</option>
+            <option value="其他">其他</option>
+            <option value="其他收入">其他收入</option>
+            <option value="房租">房租</option>
+            <option value="建構">建構</option>
+            <option value="專案">專案</option>
+            <option value="專案外包">專案外包</option>
+            <option value="專案雜支">專案雜支</option>
+            <option value="教育訓練">教育訓練</option>
+            <option value="設備耗材">設備耗材</option>
+            <option value="設備維護">設備維護</option>
+            <option value="軟體網路服務">軟體網路服務</option>
+            <option value="勞健保">勞健保</option>
+            <option value="發票代開">發票代開</option>
+            <option value="會計">會計</option>
+            <option value="業務推廣">業務推廣</option>
+            <option value="製作金">製作金</option>
+            <option value="銀行利息">銀行利息</option>
+            <option value="獎金">獎金</option>
+            <option value="請款單">請款單</option>
+            <option value="辦公室管理費">辦公室管理費</option>
+            <option value="營所稅">營所稅</option>
+            <option value="營業稅">營業稅</option>
+            <option value="薪資">薪資</option>
             <option value="轉存">轉存</option>
-          </select>
-        </div>
-        <div class="crm-field">
-          <label>收款人</label>
-          <select id="cash-f-payee" class="crm-input"><option value="">— 選擇人員 —</option></select>
-        </div>
-        <div class="crm-field">
-          <label>專案標籤</label>
-          <input id="cash-f-project_label" type="text" class="crm-input">
-        </div>
-        <div class="crm-field">
-          <label>付款狀態</label>
-          <select id="cash-f-payment_status" class="crm-input">
-            <option value="">—</option>
-            <option value="已付款">已付款</option>
-            <option value="未付款">未付款</option>
           </select>
         </div>
         <div class="crm-field crm-field-full">
-          <label>附註</label>
+          <label>備註</label>
           <input id="cash-f-note" type="text" class="crm-input">
         </div>
       </div>
+
+      <!-- 2. 關聯資訊 -->
+      <div class="crm-form-section">關聯資訊</div>
+      <div class="crm-form-grid">
+        <div class="crm-field crm-field-full">
+          <label>專案</label>
+          <select id="cash-f-project_id" class="crm-input"><option value="">— 不關聯 —</option></select>
+        </div>
+        <div class="crm-field">
+          <label>發票</label>
+          <select id="cash-f-invoice_id" class="crm-input"><option value="">— 不關聯 —</option></select>
+        </div>
+        <div class="crm-field">
+          <label>匯費</label>
+          <input id="cash-f-bank_fee" type="number" class="crm-input" min="0" value="0">
+        </div>
+      </div>
+      <div id="cash-verify-row" style="display:none;padding:8px 0;font-size:12px;color:#9ca3af;"></div>
+
+      <!-- 3. 補充資訊 -->
+      <div class="crm-form-section">補充資訊</div>
+      <div class="crm-form-grid">
+        <div class="crm-field">
+          <label>客戶</label>
+          <div id="cash-client-match" style="font-size:13px;color:#6b7280;padding:6px 0;">—</div>
+        </div>
+      </div>
+
       <div id="cash-modal-error" class="crm-error" style="display:none;"></div>
     </div>
     <div class="crm-modal-footer">

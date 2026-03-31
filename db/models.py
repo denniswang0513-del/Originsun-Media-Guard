@@ -403,6 +403,8 @@ class CrmCashEntry(Base):
     project_id = Column(String(32), nullable=True)               # 關聯專案
     payment_date = Column(DateTime(timezone=True), nullable=True)
     payment_status = Column(String(16), nullable=True)           # 已付款/未付款
+    invoice_id = Column(String(32), nullable=True)               # 關聯發票 ID
+    bank_fee = Column(Integer, nullable=True)                    # 匯費（計入支出）
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now())
 

@@ -8,6 +8,7 @@ import './js/auth/login-modal.js';
 import './js/auth/google-oauth.js';
 import './js/admin/user-mgmt.js';
 import './js/admin/role-mgmt.js';
+import './js/admin/publish-mgmt.js';
 import './js/admin/api-keys.js';
 import './js/update/version-check.js';
 import './js/update/update-modal.js';
@@ -139,7 +140,7 @@ if (typeof appendLog === 'undefined') {
                     if (clientsRes.ok) {
                         tabClients.innerHTML = await clientsRes.text();
                         const crmModule = await import(`./tabs/crm/crm.js${_cb}`);
-                        crmModule.initCrmTab();
+                        await crmModule.initCrmTab();
                     }
                 } catch (e) {
                     console.warn('[CRM Clients Tab] 載入失敗:', e);
@@ -152,7 +153,7 @@ if (typeof appendLog === 'undefined') {
                     if (projRes.ok) {
                         tabProjects.innerHTML = await projRes.text();
                         const projModule = await import(`./tabs/crm/crm-projects.js${_cb}`);
-                        projModule.initCrmProjectsTab();
+                        await projModule.initCrmProjectsTab();
                     }
                 } catch (e) {
                     console.warn('[CRM Projects Tab] 載入失敗:', e);
@@ -165,7 +166,7 @@ if (typeof appendLog === 'undefined') {
                     if (quotesRes.ok) {
                         tabQuotes.innerHTML = await quotesRes.text();
                         const quotesModule = await import(`./tabs/crm/crm-quotes.js${_cb}`);
-                        quotesModule.initCrmQuotesTab();
+                        await quotesModule.initCrmQuotesTab();
                     }
                 } catch (e) {
                     console.warn('[CRM Quotes Tab] 載入失敗:', e);
@@ -178,7 +179,7 @@ if (typeof appendLog === 'undefined') {
                     if (staffRes.ok) {
                         tabStaff.innerHTML = await staffRes.text();
                         const staffModule = await import(`./tabs/crm/crm-staff.js${_cb}`);
-                        staffModule.initCrmStaffTab();
+                        await staffModule.initCrmStaffTab();
                     }
                 } catch (e) {
                     console.warn('[CRM Staff Tab] 載入失敗:', e);
@@ -191,7 +192,7 @@ if (typeof appendLog === 'undefined') {
                     if (invRes.ok) {
                         tabInv.innerHTML = await invRes.text();
                         const invModule = await import(`./tabs/crm/crm-invoices.js${_cb}`);
-                        invModule.initCrmInvoicesTab();
+                        await invModule.initCrmInvoicesTab();
                     }
                 } catch (e) {
                     console.warn('[CRM Invoices Tab] 載入失敗:', e);
@@ -1564,32 +1565,13 @@ if (typeof appendLog === 'undefined') {
             ctx = Object.assign({}, ctx, { hosts: reachable });
 
             // ── 取得磁碟代號 → UNC 映射表，讓遠端主機不受磁碟掛載差異影響 ──
-            // 存放在 window 上，讓補轉邏輯也能共用同一份（避免閉包過期問題）
-            window._driveMap = {};
-            try {
-                const dmRes = await fetch('/api/v1/utils/drive_map');
-                const dmData = await dmRes.json();
-                if (dmData.status === 'ok' && dmData.mappings) {
-                    window._driveMap = dmData.mappings;
-                    const count = Object.keys(dmData.mappings).length;
-                    if (count > 0 && typeof appendLog === 'function') {
-                        appendLog('[UNC] 已載入 ' + count + ' 個磁碟映射，遠端路徑將自動轉換', 'system');
-                    }
-                }
-            } catch (_) { /* UNC conversion is best-effort */ }
-
-            function _toUnc(filePath) {
-                const map = window._driveMap;
-                if (!filePath || !map) return filePath;
-                const drive = filePath.substring(0, 2).toUpperCase(); // "T:"
-                const unc = map[drive];
-                if (unc) {
-                    return unc.replace(/\\/g, '/') + filePath.substring(2).replace(/\\/g, '/');
-                }
-                return filePath;
+            await window.ensureDriveMap();
+            const _toUnc = window.toUncPath || (x => x);
+            window._toUnc = _toUnc; // 保留給補轉邏輯的向後相容
+            const mapCount = Object.keys(window._driveMap || {}).length;
+            if (mapCount > 0 && typeof appendLog === 'function') {
+                appendLog('[UNC] 已載入 ' + mapCount + ' 個磁碟映射，遠端路徑將自動轉換', 'system');
             }
-            // 暴露給補轉邏輯使用
-            window._toUnc = _toUnc;
 
             // ── 掃描來源：按卡分別掃描，保留卡名 ──────────────────────────────
             // cards: [[cardName, srcPath], ...] 或 scanDir fallback
@@ -1997,7 +1979,7 @@ if (typeof appendLog === 'undefined') {
 
                                 let requestsStarted = 0;
                                 window._activeRemoteHosts = {}; // 重置，只追蹤補轉主機
-                                const _unc = window._toUnc || (x => x);
+                                const _unc = window.toUncPath || window._toUnc || (x => x);
                                 for (const dist of distributions) {
                                     for (const [cardName, srcFiles] of Object.entries(dist.byCard)) {
                                         const destDir = _unc(proxyRoot + '/' + projName + '/HostDispatch_Retry_' + dist.host.name.replace(/\s+/g, '_') + '/' + cardName);

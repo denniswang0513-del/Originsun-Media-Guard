@@ -513,7 +513,7 @@ async function _deleteTemplate(id) {
 
 // ── Init ─────────────────────────────────────────────────────
 
-export function initCrmQuotesTab() {
+export async function initCrmQuotesTab() {
     for (const id of ['quote-modal', 'quote-template-modal']) {
         const el = document.getElementById(id);
         if (el) document.body.appendChild(el);

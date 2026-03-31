@@ -15,14 +15,16 @@
 <div class="crm-toolbar">
   <input id="inv-search" type="search" placeholder="搜尋名稱、抬頭、發票號..." class="crm-search-input">
   <select id="inv-filter-type" class="crm-select">
-    <option value="">全部款項</option>
-    <option value="收款">收款</option>
-    <option value="付款">付款</option>
+    <option value="">全部狀態</option>
+    <option value="開立中">開立中</option>
+    <option value="已開立">已開立</option>
+    <option value="作廢">作廢</option>
   </select>
   <select id="inv-filter-cat" class="crm-select">
     <option value="">全部類別</option>
     <option value="專案">專案</option>
     <option value="內部代開">內部代開</option>
+    <option value="外部代開">外部代開</option>
   </select>
   <div class="crm-toolbar-right">
     <button id="inv-btn-import" class="crm-btn crm-btn-secondary">匯入 CSV</button>
@@ -33,13 +35,16 @@
 <!-- Body -->
 <div class="crm-body">
   <div class="crm-list-panel">
-    <div class="crm-list-header">
-      <span class="crm-col-name">名稱</span>
-      <span class="crm-col-status">款項</span>
-      <span class="crm-col-amount">金額</span>
-      <span class="crm-col-client">抬頭</span>
-      <span class="crm-col-date">日期</span>
-      <span class="crm-col-actions"></span>
+    <div class="crm-list-header acct-header">
+      <span>日期</span>
+      <span>名稱</span>
+      <span>含稅價</span>
+      <span>抬頭</span>
+      <span>統編</span>
+      <span>品項</span>
+      <span>類別</span>
+      <span>狀態</span>
+      <span style="flex:0 0 36px;"></span>
     </div>
     <div id="inv-list-body"><div class="crm-empty">載入中...</div></div>
   </div>
@@ -67,102 +72,207 @@
 
 <!-- Add/Edit Modal -->
 <div id="inv-modal" class="crm-modal-overlay" style="display:none;">
-  <div class="crm-modal">
+  <div class="crm-modal" style="max-width:680px;">
     <div class="crm-modal-header">
       <h3 id="inv-modal-title">新增發票</h3>
       <button onclick="document.getElementById('inv-modal').style.display='none'" class="crm-detail-close">&#x2715;</button>
     </div>
     <div class="crm-modal-body">
+      <!-- ── Top fields (date left, title right) ── -->
       <div class="crm-form-grid">
         <div class="crm-field">
-          <label>款項類型</label>
-          <select id="inv-f-payment_type" class="crm-input">
-            <option value="收款">收款</option>
-            <option value="付款">付款</option>
-          </select>
+          <label>日期</label>
+          <input id="inv-f-invoice_date" type="date" class="crm-input">
+        </div>
+        <div class="crm-field">
+          <label>名稱 <span class="crm-required">*</span></label>
+          <input id="inv-f-title" type="text" class="crm-input" placeholder="案件/項目名稱">
+        </div>
+      </div>
+
+      <!-- ── Section 1: 開立資訊 ── -->
+      <div class="inv-section-title">開立資訊</div>
+      <div class="crm-form-grid">
+        <div class="crm-field">
+          <label>發票編號</label>
+          <input id="inv-f-invoice_number" type="text" class="crm-input" placeholder="填入後自動變為已開立">
         </div>
         <div class="crm-field">
           <label>開立狀態</label>
           <select id="inv-f-issue_status" class="crm-input">
+            <option value="開立中">開立中</option>
             <option value="已開立">已開立</option>
             <option value="作廢">作廢</option>
           </select>
         </div>
         <div class="crm-field">
-          <label>發票編號</label>
-          <input id="inv-f-invoice_number" type="text" class="crm-input">
+          <label class="inv-label-row">未稅價
+            <button type="button" id="inv-calc-btn" class="inv-icon-btn" title="含稅轉未稅">含稅轉未稅</button>
+          </label>
+          <input id="inv-f-amount_ex_tax" type="number" class="crm-input" min="0" placeholder="輸入未稅金額">
         </div>
         <div class="crm-field">
-          <label>日期</label>
-          <input id="inv-f-invoice_date" type="date" class="crm-input">
-        </div>
-        <div class="crm-field crm-field-full">
-          <label>名稱 <span class="crm-required">*</span></label>
-          <input id="inv-f-title" type="text" class="crm-input" placeholder="案件/項目名稱">
-        </div>
-        <div class="crm-field">
-          <label>類別</label>
-          <select id="inv-f-category" class="crm-input">
-            <option value="專案">專案</option>
-            <option value="內部代開">內部代開</option>
-          </select>
-        </div>
-        <div class="crm-field">
-          <label>發票種類</label>
-          <select id="inv-f-invoice_kind" class="crm-input">
-            <option value="電子發票">電子發票</option>
-            <option value="紙本發票">紙本發票</option>
-          </select>
-        </div>
-        <div class="crm-field">
-          <label>未稅價</label>
-          <input id="inv-f-amount_ex_tax" type="number" class="crm-input" min="0">
-        </div>
-        <div class="crm-field">
-          <label>發票金額（含稅）</label>
-          <input id="inv-f-amount_total" type="number" class="crm-input" min="0">
-        </div>
-        <div class="crm-field">
-          <label>稅額</label>
-          <input id="inv-f-tax_amount" type="number" class="crm-input" min="0">
-        </div>
-        <div class="crm-field">
-          <label>代開應區</label>
-          <input id="inv-f-commission" type="number" class="crm-input" min="0">
-        </div>
-        <div class="crm-field">
-          <label>申請人</label>
-          <input id="inv-f-applicant" type="text" class="crm-input">
+          <label>含稅價</label>
+          <input id="inv-f-amount_total" type="number" class="crm-input crm-input-auto" min="0" readonly tabindex="-1">
         </div>
         <div class="crm-field">
           <label>抬頭</label>
-          <input id="inv-f-company_name" type="text" class="crm-input">
+          <select id="inv-f-company_name" class="crm-input">
+            <option value="">— 選擇客戶 —</option>
+          </select>
         </div>
         <div class="crm-field">
           <label>統編</label>
-          <input id="inv-f-tax_id" type="text" class="crm-input" maxlength="8">
+          <input id="inv-f-tax_id" type="text" class="crm-input crm-input-auto" maxlength="8" readonly tabindex="-1">
         </div>
-        <div class="crm-field">
+        <div class="crm-field crm-field-full">
           <label>品項</label>
           <input id="inv-f-item_type" type="text" class="crm-input" placeholder="影片製作/展場攝影...">
         </div>
+        <div class="crm-field crm-field-full">
+          <label>發票種類</label>
+          <div class="inv-radio-group">
+            <label class="inv-radio-label">
+              <input type="radio" name="inv-invoice-kind" value="電子發票" checked> 電子發票
+            </label>
+            <label class="inv-radio-label">
+              <input type="radio" name="inv-invoice-kind" value="紙本發票"> 紙本發票
+            </label>
+          </div>
+        </div>
+        <!-- Paper invoice fields (hidden by default) -->
+        <div id="inv-paper-fields" class="crm-field crm-field-full" style="display:none;">
+          <div class="crm-form-grid" style="margin:0;">
+            <div class="crm-field">
+              <label>收件人</label>
+              <input id="inv-f-recipient" type="text" class="crm-input">
+            </div>
+            <div class="crm-field">
+              <label>收件電話</label>
+              <input id="inv-f-recipient_phone" type="text" class="crm-input">
+            </div>
+            <div class="crm-field crm-field-full">
+              <label>收件地址</label>
+              <input id="inv-f-recipient_address" type="text" class="crm-input">
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ── Section 2: 補充資訊 ── -->
+      <div class="inv-section-title">補充資訊</div>
+      <div class="crm-form-grid">
         <div class="crm-field">
+          <label>申請人
+            <button type="button" id="inv-applicant-settings-btn" class="inv-icon-btn" title="管理申請人清單">⚙️</button>
+          </label>
+          <select id="inv-f-applicant" class="crm-input">
+            <option value="">— 選擇 —</option>
+          </select>
+        </div>
+        <div class="crm-field">
+          <label>發票類別
+            <button type="button" id="inv-commission-settings-btn" class="inv-icon-btn" title="代開手續費設定">⚙️</button>
+          </label>
+          <select id="inv-f-category" class="crm-input">
+            <option value="專案">專案</option>
+            <option value="內部代開">內部代開</option>
+            <option value="外部代開">外部代開</option>
+          </select>
+        </div>
+        <!-- Conditional: 專案 → 關聯專案 -->
+        <div id="inv-cond-project" class="crm-field crm-field-full">
           <label>關聯專案</label>
           <select id="inv-f-project_id" class="crm-input">
             <option value="">— 不關聯 —</option>
           </select>
+        </div>
+        <!-- Conditional: 內部代開 → 代開匯款 -->
+        <div id="inv-cond-internal" class="crm-field crm-field-full" style="display:none;">
+          <label>代開匯款</label>
+          <input id="inv-f-commission" type="number" class="crm-input crm-input-auto" min="0" readonly tabindex="-1">
+        </div>
+        <!-- Conditional: 外部代開 → 代開應匯 -->
+        <div id="inv-cond-external" class="crm-field crm-field-full" style="display:none;">
+          <label>代開應匯</label>
+          <input id="inv-f-commission_ext" type="number" class="crm-input crm-input-auto" min="0" readonly tabindex="-1">
         </div>
         <div class="crm-field crm-field-full">
           <label>備註</label>
           <input id="inv-f-notes" type="text" class="crm-input">
         </div>
       </div>
+
       <div id="inv-modal-error" class="crm-error" style="display:none;"></div>
     </div>
     <div class="crm-modal-footer">
       <button onclick="document.getElementById('inv-modal').style.display='none'" class="crm-btn crm-btn-secondary">取消</button>
       <button id="inv-btn-save" class="crm-btn crm-btn-primary">儲存</button>
     </div>
+  </div>
+</div>
+
+<!-- Tax Conversion Popup -->
+<div id="inv-calc-popup" class="inv-popup" style="display:none;">
+  <div class="inv-popup-header">
+    <span>含稅轉未稅</span>
+    <button type="button" class="crm-detail-close" onclick="document.getElementById('inv-calc-popup').style.display='none'">&#x2715;</button>
+  </div>
+  <div class="inv-popup-body">
+    <div class="crm-field" style="margin-bottom:10px;">
+      <label>含稅金額</label>
+      <input id="inv-calc-tax-incl" type="number" class="crm-input" min="0" placeholder="輸入含稅金額" autofocus>
+    </div>
+    <div class="inv-calc-results">
+      <div class="inv-calc-row">
+        <span class="inv-calc-label">未稅價</span>
+        <span id="inv-calc-r-ex" class="inv-calc-value inv-calc-copyable">—</span>
+      </div>
+      <div class="inv-calc-row">
+        <span class="inv-calc-label">稅額</span>
+        <span id="inv-calc-r-tax" class="inv-calc-value inv-calc-copyable">—</span>
+      </div>
+    </div>
+    <div style="text-align:right;margin-top:12px;">
+      <button type="button" id="inv-calc-apply" class="crm-btn crm-btn-primary crm-btn-sm" disabled>填入未稅價</button>
+    </div>
+  </div>
+</div>
+
+<!-- Commission Settings Popup -->
+<div id="inv-commission-popup" class="inv-popup" style="display:none;">
+  <div class="inv-popup-header">
+    <span>代開手續費設定</span>
+    <button type="button" class="crm-detail-close" onclick="document.getElementById('inv-commission-popup').style.display='none'">&#x2715;</button>
+  </div>
+  <div class="inv-popup-body">
+    <div class="crm-form-grid" style="gap:10px;">
+      <div class="crm-field">
+        <label>內部代開手續費 (%)</label>
+        <input id="inv-fee-internal" type="number" class="crm-input" value="8" min="0" step="0.1">
+      </div>
+      <div class="crm-field">
+        <label>外部代開手續費 (%)</label>
+        <input id="inv-fee-external" type="number" class="crm-input" value="10" min="0" step="0.1">
+      </div>
+    </div>
+    <p style="font-size:11px;color:#6b7280;margin:10px 0 0;">設定會自動儲存到瀏覽器。</p>
+  </div>
+</div>
+
+<!-- Applicant List Popup -->
+<div id="inv-applicant-popup" class="inv-popup" style="display:none;">
+  <div class="inv-popup-header">
+    <span>管理申請人清單</span>
+    <button type="button" class="crm-detail-close" onclick="document.getElementById('inv-applicant-popup').style.display='none'">&#x2715;</button>
+  </div>
+  <div class="inv-popup-body">
+    <div id="inv-applicant-list" style="margin-bottom:10px;"></div>
+    <div style="display:flex;gap:8px;">
+      <input id="inv-applicant-new" type="text" class="crm-input" placeholder="新增申請人姓名" style="flex:1;">
+      <button type="button" id="inv-applicant-add-btn" class="crm-btn crm-btn-primary crm-btn-sm">新增</button>
+    </div>
+    <p style="font-size:11px;color:#6b7280;margin:10px 0 0;">設定會自動儲存到瀏覽器。</p>
   </div>
 </div>
 
