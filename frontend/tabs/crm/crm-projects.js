@@ -83,7 +83,7 @@ function renderList() {
             <div class="crm-row-am">
                 ${p.am_username ? _avatar(p.am_username) + _esc(p.am_username) : '<span class="crm-muted">—</span>'}
             </div>
-            <div class="crm-row-date">${p.shoot_date ? p.shoot_date.substring(0, 10) : '—'}</div>
+            <div class="crm-row-date">${p.start_date ? p.start_date.substring(0, 10) : '—'}</div>
             ${kebabMenuHtml(p.id, { onEdit: '_projEdit', onDuplicate: '_projDup', onDelete: '_projDelete' })}
         </div>
     `).join('');
@@ -100,7 +100,6 @@ const _PROJ_EDIT_FIELDS = [
         {value:'進行中',label:'進行中'},{value:'已結案',label:'已結案'},
     ]},
     {name:'start_date', label:'起始日', type:'date'},
-    {name:'shoot_date', label:'拍攝日期', type:'date'},
     {name:'completion_date', label:'結案日', type:'date'},
     {name:'folder_path', label:'資料夾', type:'text'},
     {name:'description', label:'說明', type:'text'},
@@ -140,7 +139,6 @@ function renderDetail(project) {
         <div class="crm-detail-prop"><div class="crm-prop-label">狀態</div><div class="crm-prop-value">${_badge(project.status)}</div></div>
         ${prop('類型', project.project_type)}
         ${prop('起始日', project.start_date ? project.start_date.substring(0, 10) : '')}
-        ${prop('拍攝日期', project.shoot_date ? project.shoot_date.substring(0, 10) : '')}
         ${prop('結案日', project.completion_date ? project.completion_date.substring(0, 10) : '')}
         ${prop('資料夾', project.folder_path)}
         ${prop('說明', project.description)}

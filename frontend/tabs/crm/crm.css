@@ -120,10 +120,12 @@
   gap: 4px;
 }
 
-.crm-col-name    { flex: 2; }
-.crm-col-status  { flex: 1; }
-.crm-col-am      { flex: 1.2; }
-.crm-col-contact { flex: 1; text-align: right; }
+.crm-col-name    { flex: 1.5; min-width: 60px; }
+.crm-col-status  { flex: 0.6; min-width: 50px; }
+.crm-col-am      { flex: 0.8; min-width: 40px; }
+.crm-col-proj    { flex: 0.3; text-align: center; min-width: 30px; }
+.crm-col-revenue { flex: 0.8; text-align: right; min-width: 60px; }
+.crm-col-contact { flex: 0.7; text-align: right; min-width: 70px; }
 .crm-col-actions { width: 36px; flex-shrink: 0; }
 
 #crm-list-body {
@@ -143,10 +145,13 @@
 .crm-row:hover { background: #333; }
 .crm-row.selected { background: #1e3a5f; }
 
-.crm-row-name { flex: 2; font-weight: 600; color: #e0e0e0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.crm-row-status { flex: 1; }
-.crm-row-am { flex: 1.2; display: flex; align-items: center; gap: 6px; color: #9ca3af; font-size: 12px; }
-.crm-row-contact { flex: 1; text-align: right; color: #6b7280; font-size: 12px; }
+.crm-row-name { flex: 1.5; min-width: 60px; font-weight: 600; color: #e0e0e0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.crm-row-status { flex: 0.6; min-width: 50px; }
+.crm-row-am { flex: 0.8; min-width: 40px; display: flex; align-items: center; gap: 4px; color: #9ca3af; font-size: 12px; overflow: hidden; white-space: nowrap; }
+.crm-row-am span { overflow: hidden; text-overflow: ellipsis; }
+.crm-row-proj { flex: 0.3; min-width: 30px; text-align: center; font-size: 13px; color: #e0e0e0; }
+.crm-row-revenue { flex: 0.8; min-width: 60px; text-align: right; font-size: 12px; font-weight: 600; color: #fbbf24; white-space: nowrap; }
+.crm-row-contact { flex: 0.7; min-width: 70px; text-align: right; color: #6b7280; font-size: 12px; }
 .crm-row-actions { width: 36px; flex-shrink: 0; display: flex; gap: 4px; justify-content: flex-end; }
 
 .crm-avatar {
@@ -306,6 +311,9 @@
   padding: 14px 0 6px;
   border-bottom: 1px solid #3a3a3a;
   margin-top: 4px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
 }
 
 .crm-am-row { display: flex; align-items: center; gap: 8px; }
@@ -550,11 +558,90 @@
 
 /* ── Invoice badge colors ── */
 .crm-pay-badge-收款 { background: #14532d; color: #86efac; }
+.crm-pay-badge-未收款 { background: #3b2f1f; color: #fbbf24; }
 .crm-pay-badge-付款 { background: #3b2f1f; color: #fbbf24; }
 .crm-pay-badge-作廢 { background: #374151; color: #9ca3af; text-decoration: line-through; }
 
+/* ── Client project cards ── */
+.crm-project-card {
+  padding: 10px 14px;
+  border: 1px solid #2e2e2e;
+  border-radius: 6px;
+  margin: 6px 0;
+  cursor: pointer;
+  transition: border-color 0.15s;
+}
+.crm-project-card:hover { border-color: #3b82f6; }
+.crm-project-card-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 6px;
+}
+.crm-project-card-name { font-weight: 600; font-size: 13px; color: #e0e0e0; }
+.crm-project-card-meta {
+  display: flex;
+  gap: 16px;
+  font-size: 11px;
+  color: #9ca3af;
+}
+.crm-project-card-actions {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 6px;
+}
+/* ── Client performance cards ── */
+.crm-perf-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+.crm-perf-card {
+  background: #1e1e1e;
+  border: 1px solid #2e2e2e;
+  border-radius: 8px;
+  padding: 12px;
+  text-align: center;
+}
+.crm-perf-num {
+  font-size: 20px;
+  font-weight: 700;
+  color: #e0e0e0;
+}
+.crm-perf-label {
+  font-size: 11px;
+  color: #6b7280;
+  margin-top: 2px;
+}
+
+.crm-project-year-header {
+  font-size: 12px;
+  font-weight: 700;
+  color: #6b7280;
+  padding: 10px 0 4px;
+  margin-top: 4px;
+  border-bottom: 1px solid #2e2e2e;
+}
+
+/* ── Payable month group headers ── */
+.payable-month-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 6px 16px;
+  background: #1e1e1e;
+  border-bottom: 1px solid #2e2e2e;
+  font-size: 12px;
+  font-weight: 700;
+  color: #9ca3af;
+  position: sticky;
+  top: 0;
+  z-index: 1;
+}
+.payable-month-header span:last-child { color: #fbbf24; }
+
 /* ── Accounting tabs: centered, uniform columns ── */
-.acct-header span:not(:last-child) { flex: 1; text-align: center; }
+.acct-header span { flex: 1; text-align: center; }
 
 #inv-list-body .crm-row > div:not(.crm-kebab-wrap),
 #inv-list-body .crm-row > span:not(:last-child),
@@ -562,7 +649,8 @@
 #pay-list-body .crm-row > span:not(:last-child),
 #cash-list-body .crm-row > div:not(.crm-kebab-wrap),
 #cash-list-body .crm-row > span:not(:last-child),
-#payable-list-body .crm-row > div:not(.crm-kebab-wrap) {
+#payable-list-body .crm-row > div:not(.crm-kebab-wrap),
+#recv-list-body .crm-row > div:not(.crm-kebab-wrap) {
   flex: 1; text-align: center; font-size: 12px;
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }

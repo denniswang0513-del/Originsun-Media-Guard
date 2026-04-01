@@ -7,7 +7,6 @@
         <option value="潛在客戶">潛在客戶</option>
         <option value="新客戶">新客戶</option>
         <option value="舊客戶">舊客戶</option>
-        <option value="暫停合作">暫停合作</option>
       </select>
       <select id="crm-filter-am" class="crm-select">
         <option value="">全部 AM</option>
@@ -25,6 +24,8 @@
           <span class="crm-col-name">客戶代稱</span>
           <span class="crm-col-status">狀態</span>
           <span class="crm-col-am">AM</span>
+          <span class="crm-col-proj">專案</span>
+          <span class="crm-col-revenue">合約總額</span>
           <span class="crm-col-contact">更新日期</span>
           <span class="crm-col-actions"></span>
         </div>
@@ -40,6 +41,8 @@
           <div class="crm-detail-bar-tabs" id="crm-detail-tabs">
             <button class="crm-tab active" data-tab="info">客戶資訊</button>
             <button class="crm-tab" data-tab="rel">客戶關係</button>
+            <button class="crm-tab" data-tab="perf">客戶績效</button>
+            <button class="crm-tab" data-tab="projects">專案紀錄</button>
           </div>
           <div class="crm-detail-bar-actions" id="crm-bar-actions">
             <button id="crm-detail-close" class="crm-detail-close" title="關閉">✕</button>
@@ -48,6 +51,8 @@
         <div id="crm-detail-content" class="crm-detail-content">
           <div id="crm-detail-info"></div>
           <div id="crm-detail-rel" class="hidden"></div>
+          <div id="crm-detail-projects" class="hidden"></div>
+          <div id="crm-detail-perf" class="hidden"></div>
         </div>
       </div>
     </div>
@@ -86,15 +91,6 @@
 
       <div class="crm-form-section">客戶關係</div>
       <div class="crm-form-grid">
-        <div class="crm-field">
-          <label>狀態</label>
-          <select id="crm-f-status" class="crm-input">
-            <option value="潛在客戶">潛在客戶</option>
-            <option value="新客戶">新客戶</option>
-            <option value="舊客戶">舊客戶</option>
-            <option value="暫停合作">暫停合作</option>
-          </select>
-        </div>
         <div class="crm-field">
           <label>AM（業務）</label>
           <select id="crm-f-am_username" class="crm-input">

@@ -1,6 +1,10 @@
 /* ─── Originsun Media Guard Pro ─── */
 /* Extracted from index.html <style> blocks */
 
+        /* Global: dark calendar/month picker icons */
+        input[type="date"],
+        input[type="month"] { color-scheme: dark; }
+
         body {
             font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
         }

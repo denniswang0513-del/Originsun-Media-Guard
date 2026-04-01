@@ -1,5 +1,5 @@
 {
-  "version": "1.10.24",
-  "build_date": "2026-03-28",
-  "notes": "CRM quotation mgmt + project split"
+  "version": "1.10.65",
+  "build_date": "2026-04-02",
+  "notes": "CRM payables month-grouping + client performance tab + project linkage + performance optimization"
 }

@@ -49,12 +49,7 @@ function renderDetail(c) {
 
     const actionsArea = document.getElementById('recv-bar-actions');
     if (actionsArea) {
-        const hasUnpaid = c.items.some(it => it.payment_status !== '已收款');
-        actionsArea.innerHTML = `
-            <button class="crm-btn crm-btn-secondary crm-btn-sm" onclick="window._recvCopyInfo('${_esc(c.company_name)}')">複製客戶資訊</button>
-            ${hasUnpaid ? `<button class="crm-btn crm-btn-primary crm-btn-sm" onclick="window._recvReceiveAll('${_esc(c.company_name)}')">全部收款</button>` : ''}
-            <button id="recv-detail-close" class="crm-detail-close" title="關閉" onclick="window._recvClose()">&#x2715;</button>
-        `;
+        actionsArea.innerHTML = `<button id="recv-detail-close" class="crm-detail-close" title="關閉" onclick="window._recvClose()">&#x2715;</button>`;
     }
 
     const itemsHtml = c.items.map(it => {
@@ -62,14 +57,12 @@ function renderDetail(c) {
         const daysColor = it.days_since_issued > 60 ? '#ef4444' : it.days_since_issued > 30 ? '#fbbf24' : '#9ca3af';
         return `
         <div class="payable-item" id="recv-row-${it.id}">
+            <span class="payable-item-date">${it.invoice_date || '—'}</span>
             <span class="payable-item-summary">${_esc(it.title)}${it.invoice_number ? ' (' + _esc(it.invoice_number) + ')' : ''}</span>
             <span class="payable-item-cat">${_esc(it.project_name || it.category)}</span>
             <span class="payable-item-amt">$${_fmtNum(it.amount_total)}</span>
             <span style="min-width:50px;text-align:center;color:${daysColor};font-size:11px;">${it.days_since_issued}天</span>
-            ${isReceived
-                ? '<span style="min-width:80px;text-align:right;font-size:11px;color:#86efac;">已收款</span>'
-                : `<button class="crm-btn crm-btn-primary crm-btn-sm" style="min-width:80px;" onclick="window._recvSingleReceive(this,'${it.id}','${_esc(c.company_name)}')">未收款</button>`
-            }
+            <span style="min-width:60px;text-align:right;font-size:11px;color:${isReceived ? '#86efac' : '#fbbf24'};">${isReceived ? '已收款' : '未收款'}</span>
         </div>`;
     }).join('');
 
@@ -104,48 +97,6 @@ window._recvSelect = selectClient;
 window._recvClose = closeDetail;
 window._recvRefresh = () => loadReceivables();
 
-window._recvSingleReceive = async (btn, invoiceId, companyName) => {
-    if (!confirm('確定標記此發票為已收款？')) return;
-    try {
-        await _fetch('/invoices/batch-receive', {
-            method: 'PATCH',
-            body: JSON.stringify({ invoice_ids: [invoiceId] })
-        });
-        await loadReceivables();
-    } catch (e) { alert(e.message); }
-};
-
-window._recvCopyInfo = (name) => {
-    const c = _clients.find(x => x.company_name === name);
-    if (!c) return;
-    const unpaid = c.items.filter(it => it.payment_status !== '已收款');
-    const amount = unpaid.reduce((s, it) => s + it.amount_total, 0);
-    const text = [
-        '客戶: ' + c.company_name,
-        c.tax_id ? '統編: ' + c.tax_id : '',
-        c.payment_info ? '匯款資訊: ' + c.payment_info : '',
-        '應收金額: $' + amount.toLocaleString('zh-TW'),
-        '發票: ' + unpaid.map(it => it.invoice_number || it.title).join(', '),
-    ].filter(Boolean).join('\n');
-    navigator.clipboard.writeText(text).then(() => alert('已複製客戶資訊')).catch(() => {
-        prompt('請手動複製:', text);
-    });
-};
-
-window._recvReceiveAll = async (name) => {
-    const c = _clients.find(x => x.company_name === name);
-    if (!c) return;
-    const unpaidIds = c.items.filter(it => it.payment_status !== '已收款').map(it => it.id);
-    if (!unpaidIds.length) return;
-    if (!confirm(`確定將 ${name} 的 ${unpaidIds.length} 張發票全部標記為已收款？`)) return;
-    try {
-        await _fetch('/invoices/batch-receive', {
-            method: 'PATCH',
-            body: JSON.stringify({ invoice_ids: unpaidIds })
-        });
-        await loadReceivables();
-    } catch (e) { alert(e.message); }
-};
 
 export function initCrmReceivablesTab() {
     document.getElementById('recv-filter-status').addEventListener('change', loadReceivables);

@@ -3,7 +3,7 @@
  * 功能：列表視圖 + 詳情面板 + 新增/編輯 Modal + CSV 匯入
  */
 
-import { crmFetch as _fetch, esc as _esc, renderAvatar, populateUserSelect, setupResizeHandle, enableInlineEdit, addEditButton, kebabMenuHtml } from './crm-utils.js';
+import { crmFetch as _fetch, esc as _esc, fmtNum as _fmtNum, renderAvatar, populateUserSelect, setupResizeHandle, enableInlineEdit, addEditButton, kebabMenuHtml } from './crm-utils.js';
 
 // ── State ────────────────────────────────────────────────────
 
@@ -81,32 +81,297 @@ function renderList() {
         <div class="crm-row${c.id === _selectedId ? ' selected' : ''}" data-id="${c.id}" onclick="window._crmSelectClient('${c.id}')">
             <div class="crm-row-name">${_esc(c.short_name)}</div>
             <div class="crm-row-status">${_badge(c.status)}</div>
-            <div class="crm-row-am">
-                ${c.am_username ? _avatar(c.am_username) + _esc(c.am_username) : '<span class="crm-muted">—</span>'}
+            <div class="crm-row-am" title="${_esc(c.am_username || '')}">
+                ${c.am_username ? _avatar(c.am_username, 18) + '<span>' + _esc(c.am_username) + '</span>' : '<span class="crm-muted">—</span>'}
             </div>
+            <div class="crm-row-proj">${c.project_count || 0}</div>
+            <div class="crm-row-revenue">${c.total_contract ? '$' + _fmtNum(c.total_contract) : '<span class="crm-muted">—</span>'}</div>
             <div class="crm-row-contact">${c.updated_at ? c.updated_at.substring(0,10) : '—'}</div>
             ${kebabMenuHtml(c.id, { onEdit: '_crmEditClient', onDuplicate: '_crmDupClient', onDelete: '_crmDeleteClient' })}
         </div>
     `).join('');
 }
 
-const _CLIENT_EDIT_FIELDS = [
+const _INFO_EDIT_FIELDS = [
     {name:'short_name', label:'客戶代稱', type:'text'},
     {name:'full_name', label:'抬頭', type:'text'},
     {name:'tax_id', label:'統一編號', type:'text'},
-    {name:'status', label:'狀態', type:'select', options:[
-        {value:'潛在客戶',label:'潛在客戶'},{value:'新客戶',label:'新客戶'},
-        {value:'舊客戶',label:'舊客戶'},{value:'暫停合作',label:'暫停合作'},
-    ]},
+    {name:'payment_info', label:'匯款資訊', type:'text'},
+    {name:'payment_note', label:'匯款備註', type:'text'},
+];
+
+const _REL_EDIT_FIELDS = [
     {name:'am_username', label:'AM', type:'text'},
     {name:'source_channel', label:'來源管道', type:'text'},
     {name:'contact_person', label:'聯絡人', type:'text'},
     {name:'contact_method', label:'聯絡方式', type:'text'},
     {name:'cooperation_note', label:'合作契機', type:'text'},
-    {name:'payment_info', label:'匯款資訊', type:'text'},
-    {name:'payment_note', label:'匯款備註', type:'text'},
     {name:'notes', label:'備註', type:'textarea'},
 ];
+
+async function _loadClientPerformance(clientId) {
+    const container = document.getElementById('crm-detail-perf');
+    if (!container) return;
+    container.innerHTML = '<div class="crm-empty">載入中...</div>';
+    try {
+        const data = await _fetch('/projects?client_id=' + clientId);
+        const projects = data.projects || [];
+        if (projects.length === 0) {
+            container.innerHTML = '<div class="crm-empty">尚無專案資料</div>';
+            return;
+        }
+
+        const _n = (n) => (n || 0).toLocaleString('zh-TW');
+        const excludeStatus = new Set(['洽談中', '報價中']);
+        const activeProjects = projects.filter(p => !excludeStatus.has(p.status));
+        const totalProjects = activeProjects.length;
+        const totalRevenue = activeProjects.reduce((s, p) => s + (p.contract_amount || 0), 0);
+        const avgProject = totalProjects > 0 ? Math.round(totalRevenue / totalProjects) : 0;
+        const totalReceived = activeProjects.reduce((s, p) => s + (p.amount_received || 0), 0);
+        const collectRate = totalRevenue > 0 ? Math.round(totalReceived / totalRevenue * 100) : 0;
+
+        // Status breakdown
+        const statusCount = {};
+        for (const p of projects) {
+            const s = p.status || '其他';
+            statusCount[s] = (statusCount[s] || 0) + 1;
+        }
+        const statusColors = { '洽談中': '#3b82f6', '進行中': '#f59e0b', '報價中': '#8b5cf6', '已結案': '#22c55e', '已取消': '#6b7280' };
+
+        // Yearly revenue (only active projects)
+        const yearRevenue = {};
+        for (const p of activeProjects) {
+            const y = p.start_date ? p.start_date.substring(0, 4) : '未定';
+            yearRevenue[y] = (yearRevenue[y] || 0) + (p.contract_amount || 0);
+        }
+        const yearKeys = Object.keys(yearRevenue).sort().reverse();
+
+        const collectColor = collectRate >= 80 ? '#86efac' : collectRate >= 50 ? '#fbbf24' : '#fca5a5';
+
+        container.innerHTML = `
+            <div class="crm-perf-grid">
+                <div class="crm-perf-card">
+                    <div class="crm-perf-num">${totalProjects}</div>
+                    <div class="crm-perf-label">專案總數</div>
+                </div>
+                <div class="crm-perf-card">
+                    <div class="crm-perf-num">$${_n(totalRevenue)}</div>
+                    <div class="crm-perf-label">合約總額</div>
+                </div>
+                <div class="crm-perf-card">
+                    <div class="crm-perf-num">$${_n(avgProject)}</div>
+                    <div class="crm-perf-label">平均單價</div>
+                </div>
+                <div class="crm-perf-card">
+                    <div class="crm-perf-num" style="color:${collectColor};">${collectRate}%</div>
+                    <div class="crm-perf-label">收款率</div>
+                </div>
+            </div>
+
+            <div style="margin-top:16px;">
+                <div style="font-size:12px;font-weight:700;color:#6b7280;margin-bottom:8px;">專案狀態分布</div>
+                ${Object.entries(statusCount).map(([s, c]) => {
+                    const color = statusColors[s] || '#9ca3af';
+                    const pct = Math.round(c / totalProjects * 100);
+                    return `<div style="display:flex;align-items:center;gap:8px;margin-bottom:4px;">
+                        <span style="min-width:60px;font-size:12px;color:#9ca3af;">${_esc(s)}</span>
+                        <div style="flex:1;height:8px;background:#1e1e1e;border-radius:4px;overflow:hidden;">
+                            <div style="width:${pct}%;height:100%;background:${color};border-radius:4px;"></div>
+                        </div>
+                        <span style="font-size:11px;color:#e0e0e0;min-width:30px;text-align:right;">${c}</span>
+                    </div>`;
+                }).join('')}
+            </div>
+
+            <div style="margin-top:16px;">
+                <div style="font-size:12px;font-weight:700;color:#6b7280;margin-bottom:8px;">年度營收</div>
+                ${yearKeys.map(y => `
+                    <div style="display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid #2e2e2e;">
+                        <span style="font-size:13px;color:#e0e0e0;">${_esc(y)}</span>
+                        <span style="font-size:13px;font-weight:700;color:#fbbf24;">$${_n(yearRevenue[y])}</span>
+                    </div>
+                `).join('')}
+            </div>
+        `;
+    } catch (e) {
+        container.innerHTML = '<div class="crm-empty" style="color:#fca5a5;">載入失敗</div>';
+    }
+}
+
+async function _loadClientProjects(clientId) {
+    const container = document.getElementById('crm-detail-projects');
+    if (!container) return;
+    container.innerHTML = '<div class="crm-empty">載入中...</div>';
+    try {
+        const data = await _fetch('/projects?client_id=' + clientId);
+        const projects = data.projects || [];
+        if (projects.length === 0) {
+            container.innerHTML = '<div class="crm-empty">尚無專案紀錄</div>';
+            return;
+        }
+        const statusColors = { '洽談中': '#3b82f6', '執行中': '#f59e0b', '已完成': '#22c55e', '已取消': '#6b7280', '進行中': '#f59e0b', '報價中': '#8b5cf6', '已結案': '#22c55e' };
+        let lastYear = '';
+        container.innerHTML = projects.map(p => {
+            const color = statusColors[p.status] || '#9ca3af';
+            const startDate = p.start_date ? p.start_date.substring(0, 10) : '—';
+            const amount = p.contract_amount ? '$' + _fmtNum(p.contract_amount) : '—';
+            const payStatus = p.payment_status || '—';
+            const year = p.start_date ? p.start_date.substring(0, 4) : '';
+            let yearHeader = '';
+            if (year && year !== lastYear) {
+                lastYear = year;
+                yearHeader = `<div class="crm-project-year-header">${year}</div>`;
+            }
+            return `${yearHeader}
+            <div class="crm-project-card">
+                <div class="crm-project-card-header">
+                    <span class="crm-project-card-name">${_esc(p.name)}</span>
+                    <span class="crm-badge" style="background:${color}22;color:${color};border:1px solid ${color}44;">${_esc(p.status)}</span>
+                </div>
+                <div class="crm-project-card-meta">
+                    <span>起始日 ${startDate}</span>
+                    <span>合約 ${amount}</span>
+                    <span>收款 ${_esc(payStatus)}</span>
+                </div>
+                <div class="crm-project-card-actions">
+                    <button class="crm-btn crm-btn-secondary crm-btn-sm" onclick="window._crmShowProjectDetail('${_esc(p.id)}')">詳情</button>
+                </div>
+            </div>`;
+        }).join('');
+    } catch (e) {
+        container.innerHTML = '<div class="crm-empty" style="color:#fca5a5;">載入失敗</div>';
+    }
+}
+
+window._crmShowProjectDetail = async (projectId) => {
+    let modal = document.getElementById('crm-project-modal');
+    if (modal) modal.remove();
+
+    const _n = (n) => (n || 0).toLocaleString('zh-TW');
+    const prop = (label, value) => {
+        const isEmpty = !value;
+        return `<div class="crm-detail-prop"><div class="crm-prop-label">${label}</div><div class="crm-prop-value${isEmpty ? ' empty' : ''}">${isEmpty ? '—' : _esc(String(value))}</div></div>`;
+    };
+    const statusColors = { '洽談中': '#3b82f6', '進行中': '#f59e0b', '報價中': '#8b5cf6', '已結案': '#22c55e', '已取消': '#6b7280' };
+
+    try {
+        const [p, fin, staffData, quoteData] = await Promise.all([
+            _fetch('/projects/' + projectId),
+            _fetch('/projects/' + projectId + '/financial-summary').catch(() => null),
+            _fetch('/projects/' + projectId + '/staff').catch(() => ({ staff: [] })),
+            _fetch('/projects/' + projectId + '/quotations').catch(() => ({ quotations: [] })),
+        ]);
+
+        const color = statusColors[p.status] || '#9ca3af';
+        const staff = staffData.staff || [];
+        const quotes = quoteData.quotations || [];
+
+        // Tab 1: 專案資訊
+        const infoHtml = `
+            ${prop('客戶', p.client_short_name)}
+            <div class="crm-detail-prop"><div class="crm-prop-label">狀態</div><div class="crm-prop-value"><span class="crm-badge" style="background:${color}22;color:${color};border:1px solid ${color}44;">${_esc(p.status)}</span></div></div>
+            ${prop('類型', p.project_type)}
+            ${prop('起始日', p.start_date ? p.start_date.substring(0, 10) : '')}
+            ${prop('結案日', p.completion_date ? p.completion_date.substring(0, 10) : '')}
+            ${prop('資料夾', p.folder_path)}
+            ${prop('說明', p.description)}
+            ${prop('AM', p.am_username)}
+            ${prop('備註', p.notes)}
+        `;
+
+        // Tab 2: 人員配置
+        const staffHtml = staff.length === 0
+            ? '<div class="crm-empty">尚無派工</div>'
+            : staff.map(r => `
+                <div style="display:flex;justify-content:space-between;align-items:center;padding:6px 0;border-bottom:1px solid #2e2e2e;">
+                    <span>${_esc(r.staff_name)} <span style="color:#9ca3af;font-size:11px;">${_esc(r.staff_role)}</span></span>
+                    <span style="font-size:12px;">${r.days}天 × $${_n(r.rate)} = <b>$${_n(r.cost)}</b></span>
+                </div>
+            `).join('') + `<div style="text-align:right;font-weight:700;padding:8px 0;">合計: $${_n(staff.reduce((s, r) => s + r.cost, 0))}</div>`;
+
+        // Tab 3: 報價
+        const quoteHtml = quotes.length === 0
+            ? '<div class="crm-empty">尚無報價</div>'
+            : quotes.map(q => {
+                const qColor = statusColors[q.status] || '#9ca3af';
+                return `<div style="padding:8px 0;border-bottom:1px solid #2e2e2e;display:flex;justify-content:space-between;align-items:center;">
+                    <span>v${q.version} <span class="crm-badge" style="background:${qColor}22;color:${qColor};border:1px solid ${qColor}44;">${_esc(q.status)}</span></span>
+                    <span style="font-weight:700;">$${_n(q.final_price ?? q.total)}</span>
+                </div>`;
+            }).join('');
+
+        // Tab 4: 財務
+        let finHtml = '<div class="crm-empty">無財務資料</div>';
+        if (fin) {
+            const profitColor = fin.profit_rate >= 20 ? '#86efac' : fin.profit_rate >= 0 ? '#fbbf24' : '#fca5a5';
+            finHtml = `
+                ${prop('合約金額（含稅）', '$' + _n(fin.contract_amount))}
+                ${prop('未稅金額', '$' + _n(fin.ex_tax))}
+                ${prop('目標毛利 (' + fin.profit_target_pct + '%)', '$' + _n(fin.profit_target))}
+                <div style="border-top:1px solid #2e2e2e;margin:8px 0;"></div>
+                ${prop('外包預算', '$' + _n(fin.outsource_budget))}
+                ${prop('外包實際（派工）', '$' + _n(fin.staff_actual))}
+                <div style="border-top:1px solid #2e2e2e;margin:8px 0;"></div>
+                <div class="crm-detail-prop"><div class="crm-prop-label" style="font-weight:700;">實際毛利</div><div class="crm-prop-value" style="font-weight:700;color:${profitColor};">$${_n(fin.actual_profit)} (${fin.profit_rate}%)</div></div>
+                <div style="border-top:1px solid #2e2e2e;margin:8px 0;"></div>
+                ${prop('帳務狀況', fin.payment_status || '未到帳')}
+                ${prop('應收帳款', '$' + _n(fin.amount_receivable))}
+                ${prop('已收帳款', '$' + _n(fin.amount_received))}
+            `;
+        }
+
+        const html = `
+        <div id="crm-project-modal" class="crm-modal-overlay" style="display:flex;">
+            <div class="crm-modal" style="max-width:600px;">
+                <div class="crm-modal-header" style="flex-wrap:wrap;gap:8px;">
+                    <h3 style="flex:1;min-width:150px;">${_esc(p.name)}</h3>
+                    <div class="crm-pm-tabs" style="display:flex;gap:2px;">
+                        <button class="crm-tab active" data-pm-tab="info">專案資訊</button>
+                        <button class="crm-tab" data-pm-tab="staff">人員配置</button>
+                        <button class="crm-tab" data-pm-tab="quote">報價</button>
+                        <button class="crm-tab" data-pm-tab="finance">財務</button>
+                    </div>
+                    <button class="crm-detail-close" onclick="document.getElementById('crm-project-modal').remove()">&#x2715;</button>
+                </div>
+                <div class="crm-modal-body" style="max-height:60vh;overflow-y:auto;">
+                    <div id="pm-tab-info">${infoHtml}</div>
+                    <div id="pm-tab-staff" class="hidden">${staffHtml}</div>
+                    <div id="pm-tab-quote" class="hidden">${quoteHtml}</div>
+                    <div id="pm-tab-finance" class="hidden">${finHtml}</div>
+                </div>
+            </div>
+        </div>`;
+
+        document.body.insertAdjacentHTML('beforeend', html);
+
+        // Tab switching inside modal
+        document.querySelectorAll('.crm-pm-tabs .crm-tab').forEach(btn => {
+            btn.addEventListener('click', () => {
+                document.querySelectorAll('.crm-pm-tabs .crm-tab').forEach(b => b.classList.remove('active'));
+                btn.classList.add('active');
+                const t = btn.dataset.pmTab;
+                ['info', 'staff', 'quote', 'finance'].forEach(k => {
+                    document.getElementById('pm-tab-' + k).classList.toggle('hidden', k !== t);
+                });
+            });
+        });
+
+        // Close on overlay click
+        document.getElementById('crm-project-modal').addEventListener('click', e => {
+            if (e.target.id === 'crm-project-modal') e.target.remove();
+        });
+    } catch (e) {
+        alert('載入專案詳情失敗: ' + e.message);
+    }
+};
+
+window._crmGoToProject = (projectId) => {
+    const projTab = document.querySelector('[data-section="tab_crm_projects"]');
+    if (projTab) projTab.click();
+    setTimeout(() => {
+        if (window._projSelect) window._projSelect(projectId);
+    }, 300);
+};
 
 function renderDetail(client) {
     const prop = (label, value, empty = '空') => {
@@ -144,7 +409,8 @@ function renderDetail(client) {
             <div class="crm-prop-value">${amHtml}</div>
         </div>
         ${prop('來源管道', client.source_channel)}
-        ${prop('聯絡人', client.contact_person ? `${client.contact_person}${client.contact_method ? ' / ' + client.contact_method : ''}` : '')}
+        ${prop('聯絡人', client.contact_person)}
+        ${prop('聯絡方式', client.contact_method)}
         ${prop('合作契機', client.cooperation_note)}
         ${prop('備註', client.notes)}
         ${prop('修改日期', client.updated_at ? client.updated_at.substring(0,10) : '')}
@@ -155,10 +421,32 @@ function renderDetail(client) {
         actions.innerHTML = `<button class="crm-detail-close" title="關閉">✕</button>`;
         actions.querySelector('.crm-detail-close').addEventListener('click', closeDetail);
     }
+    // Tab 3: 專案紀錄
+    _loadClientProjects(client.id);
+    _loadClientPerformance(client.id);
+
     addEditButton('crm-bar-actions', () => {
-        enableInlineEdit('crm-detail-info', 'crm-bar-actions', _CLIENT_EDIT_FIELDS, client,
+        // Detect active tab
+        const activeTab = document.querySelector('#crm-detail-tabs .crm-tab.active');
+        const tab = activeTab?.dataset.tab || 'info';
+        if (tab !== 'info' && tab !== 'rel') return; // Only info & rel are editable
+
+        const containerId = tab === 'info' ? 'crm-detail-info' : 'crm-detail-rel';
+        let fields = tab === 'info' ? _INFO_EDIT_FIELDS : _REL_EDIT_FIELDS;
+        // Dynamically inject user options for AM select
+        if (tab === 'rel') {
+            const amOptions = [{value:'', label:'— 未指派 —'}, ..._users.map(u => ({value: u.username, label: u.username}))];
+            fields = fields.map(f => f.name === 'am_username' ? {...f, type:'select', options: amOptions} : f);
+        }
+
+        enableInlineEdit(containerId, 'crm-bar-actions', fields, client,
             async (payload) => {
-                await _fetch('/clients/' + client.id, { method: 'PUT', body: JSON.stringify(payload) });
+                // Only send fields that ClientPayload accepts
+                const allowed = ['short_name','full_name','tax_id','am_username','source_channel',
+                    'contact_person','contact_method','cooperation_note','payment_info','payment_note','notes'];
+                const full = {};
+                for (const k of allowed) full[k] = payload[k] ?? client[k] ?? '';
+                await _fetch('/clients/' + client.id, { method: 'PUT', body: JSON.stringify(full) });
                 const updated = await _fetch('/clients/' + client.id);
                 renderDetail(updated);
                 await loadClients();
@@ -208,7 +496,7 @@ function closeDetail() {
 // ── Add / Edit Modal ─────────────────────────────────────────
 
 const _FIELDS = ['short_name','full_name','tax_id','payment_info','payment_note',
-    'am_username','source_channel','contact_person','contact_method','status',
+    'am_username','source_channel','contact_person','contact_method',
     'cooperation_note','notes'];
 
 function openModal(client = null) {
@@ -407,6 +695,8 @@ export async function initCrmTab() {
             const tab = btn.dataset.tab;
             document.getElementById('crm-detail-info').classList.toggle('hidden', tab !== 'info');
             document.getElementById('crm-detail-rel').classList.toggle('hidden', tab !== 'rel');
+            document.getElementById('crm-detail-projects').classList.toggle('hidden', tab !== 'projects');
+            document.getElementById('crm-detail-perf').classList.toggle('hidden', tab !== 'perf');
         });
     });
 

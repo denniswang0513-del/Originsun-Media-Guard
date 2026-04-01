@@ -190,6 +190,28 @@ async def _on_startup():
                             await _s.rollback()
         except Exception:
             pass
+    # ── DB Migration: CRM performance indexes ──
+    if state.db_online:
+        try:
+            from db.session import get_session_factory
+            _fi = get_session_factory()
+            if _fi:
+                from sqlalchemy import text as _ti
+                async with _fi() as _si:
+                    for idx_sql in [
+                        "CREATE INDEX IF NOT EXISTS idx_quote_created ON crm_quotations(created_at)",
+                        "CREATE INDEX IF NOT EXISTS idx_invoice_issue_status ON crm_invoices(issue_status)",
+                        "CREATE INDEX IF NOT EXISTS idx_invoice_pay_status ON crm_invoices(payment_status)",
+                        "CREATE INDEX IF NOT EXISTS idx_payreq_planned_month ON crm_payment_requests(planned_month)",
+                        "CREATE INDEX IF NOT EXISTS idx_payreq_payee ON crm_payment_requests(payee_name)",
+                    ]:
+                        try:
+                            await _si.execute(_ti(idx_sql))
+                            await _si.commit()
+                        except Exception:
+                            await _si.rollback()
+        except Exception:
+            pass
     asyncio.create_task(_periodic_version_check())
     asyncio.create_task(_periodic_db_health())
     from core.scheduler import run_scheduler  # type: ignore

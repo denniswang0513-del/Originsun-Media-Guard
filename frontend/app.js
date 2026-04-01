@@ -133,70 +133,27 @@ if (typeof appendLog === 'undefined') {
                     console.warn('[TTS Tab] 載入失敗（開發中）:', ttsErr);
                 }
 
-                // Load CRM Clients Tab
-                try {
-                    const tabClients = document.getElementById('tab_crm_clients');
-                    const clientsRes = await fetch(`./tabs/crm/crm.html${_cb}`);
-                    if (clientsRes.ok) {
-                        tabClients.innerHTML = await clientsRes.text();
-                        const crmModule = await import(`./tabs/crm/crm.js${_cb}`);
-                        await crmModule.initCrmTab();
+                // Load all CRM tabs in parallel
+                const _loadCrmTab = async (containerId, htmlFile, jsFile, initFn) => {
+                    try {
+                        const el = document.getElementById(containerId);
+                        const res = await fetch(`./tabs/crm/${htmlFile}${_cb}`);
+                        if (res.ok) {
+                            el.innerHTML = await res.text();
+                            const mod = await import(`./tabs/crm/${jsFile}${_cb}`);
+                            await mod[initFn]();
+                        }
+                    } catch (e) {
+                        console.warn(`[CRM ${containerId}] 載入失敗:`, e);
                     }
-                } catch (e) {
-                    console.warn('[CRM Clients Tab] 載入失敗:', e);
-                }
-
-                // Load CRM Projects Tab
-                try {
-                    const tabProjects = document.getElementById('tab_crm_projects');
-                    const projRes = await fetch(`./tabs/crm/crm-projects.html${_cb}`);
-                    if (projRes.ok) {
-                        tabProjects.innerHTML = await projRes.text();
-                        const projModule = await import(`./tabs/crm/crm-projects.js${_cb}`);
-                        await projModule.initCrmProjectsTab();
-                    }
-                } catch (e) {
-                    console.warn('[CRM Projects Tab] 載入失敗:', e);
-                }
-
-                // Load CRM Quotes Tab
-                try {
-                    const tabQuotes = document.getElementById('tab_crm_quotes');
-                    const quotesRes = await fetch(`./tabs/crm/crm-quotes.html${_cb}`);
-                    if (quotesRes.ok) {
-                        tabQuotes.innerHTML = await quotesRes.text();
-                        const quotesModule = await import(`./tabs/crm/crm-quotes.js${_cb}`);
-                        await quotesModule.initCrmQuotesTab();
-                    }
-                } catch (e) {
-                    console.warn('[CRM Quotes Tab] 載入失敗:', e);
-                }
-
-                // Load CRM Staff Tab
-                try {
-                    const tabStaff = document.getElementById('tab_crm_staff');
-                    const staffRes = await fetch(`./tabs/crm/crm-staff.html${_cb}`);
-                    if (staffRes.ok) {
-                        tabStaff.innerHTML = await staffRes.text();
-                        const staffModule = await import(`./tabs/crm/crm-staff.js${_cb}`);
-                        await staffModule.initCrmStaffTab();
-                    }
-                } catch (e) {
-                    console.warn('[CRM Staff Tab] 載入失敗:', e);
-                }
-
-                // Load CRM Invoices Tab
-                try {
-                    const tabInv = document.getElementById('tab_crm_invoices');
-                    const invRes = await fetch(`./tabs/crm/crm-invoices.html${_cb}`);
-                    if (invRes.ok) {
-                        tabInv.innerHTML = await invRes.text();
-                        const invModule = await import(`./tabs/crm/crm-invoices.js${_cb}`);
-                        await invModule.initCrmInvoicesTab();
-                    }
-                } catch (e) {
-                    console.warn('[CRM Invoices Tab] 載入失敗:', e);
-                }
+                };
+                await Promise.all([
+                    _loadCrmTab('tab_crm_clients',  'crm.html',          'crm.js',          'initCrmTab'),
+                    _loadCrmTab('tab_crm_projects', 'crm-projects.html', 'crm-projects.js', 'initCrmProjectsTab'),
+                    _loadCrmTab('tab_crm_quotes',   'crm-quotes.html',   'crm-quotes.js',   'initCrmQuotesTab'),
+                    _loadCrmTab('tab_crm_staff',    'crm-staff.html',    'crm-staff.js',    'initCrmStaffTab'),
+                    _loadCrmTab('tab_crm_invoices', 'crm-invoices.html', 'crm-invoices.js', 'initCrmInvoicesTab'),
+                ]);
             } catch (err) {
                 console.error("Error loading tabs:", err);
             }
@@ -691,27 +648,7 @@ if (typeof appendLog === 'undefined') {
         window._activeJobTab = null; // 'backup' | 'verify' | 'transcode' | 'concat' | 'report'
 
         function playDing() {
-            try {
-                const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-                if (!audioCtx) return;
-                const oscillator = audioCtx.createOscillator();
-                const gainNode = audioCtx.createGain();
-
-                oscillator.type = 'sine';
-                oscillator.frequency.setValueAtTime(880, audioCtx.currentTime); // A5 note
-                oscillator.frequency.exponentialRampToValueAtTime(440, audioCtx.currentTime + 0.5);
-
-                gainNode.gain.setValueAtTime(0.5, audioCtx.currentTime);
-                gainNode.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.5);
-
-                oscillator.connect(gainNode);
-                gainNode.connect(audioCtx.destination);
-
-                oscillator.start();
-                oscillator.stop(audioCtx.currentTime + 0.5);
-            } catch (e) {
-                console.warn("Audio API failed to play:", e);
-            }
+            // Disabled — task completion sound removed per user request
         }
 
         // Start polling immediately and then every 3 seconds

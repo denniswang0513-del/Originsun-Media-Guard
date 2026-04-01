@@ -1,6 +1,6 @@
 # Originsun Media Guard Pro — Claude Code 完整交接文件
 
-> **版本**: v1.10.63（2026-03-30）
+> **版本**: v1.10.65（2026-04-02）
 > **目標讀者**: 接手開發的 AI 協作者（Claude Code）
 > **開發環境**: Windows 11、Python 3.11、Vanilla JS (ES Modules)
 > **啟動方式**: `d:\Antigravity\OriginsunTranscode\.venv\Scripts\python.exe main.py`
@@ -248,10 +248,11 @@ OriginsunTranscode/
 │       │                    #   子頁 1：📢 標準 TTS（Edge-TTS）
 │       │                    #   子頁 2：🎙️ 聲音複製（F5-TTS）
 │       │                    #   子頁 3：📖 正音字典編輯器
-│       ├── crm/             # CRM 模組（11 個前端檔案）
+│       ├── crm/             # CRM 模組（13 個前端檔案）
 │       │                    #   crm.html/js（客戶）、crm-projects（專案）、crm-quotes（報價）
 │       │                    #   crm-staff（人力）、crm-invoices（發票）、crm-payments（請款）
-│       │                    #   crm-cashbook（收支）、crm-payables（應付）、crm-utils.js（共用）
+│       │                    #   crm-cashbook（收支）、crm-payables（應付）、crm-receivables（應收）
+│       │                    #   crm-utils.js（共用）
 │       └── projects/        # 專案總覽頁籤
 │                            #   機器狀態、佇列管理、Agent 管理
 │
@@ -638,9 +639,9 @@ def _emit_sync(event: str, data: dict) -> None:
 | POST | `/api/v1/voice_profiles/{id}/cache` | 將 NAS 角色快取到本機 |
 
 
-### 7.15 CRM 模組（`routers/api_crm.py` — 62 端點）
+### 7.15 CRM 模組（`routers/api_crm.py` — 67 端點）
 
-CRM 系統包含 6 個獨立 Tab + 帳務管理的 4 個子視圖：
+CRM 系統包含 6 個獨立 Tab + 帳務管理的 5 個子視圖：
 
 | Tab | 前端檔案 | 端點數 | DB 表 |
 |-----|---------|--------|-------|
@@ -651,9 +652,18 @@ CRM 系統包含 6 個獨立 Tab + 帳務管理的 4 個子視圖：
 | 🧾 帳務—發票 | `crm/crm-invoices.html` + `.js` | 6 | `crm_invoices` |
 | 🧾 帳務—請款 | `crm/crm-payments.html` + `.js` | 7 | `crm_payment_requests` |
 | 🧾 帳務—收支明細 | `crm/crm-cashbook.html` + `.js` | 5 | `crm_cash_entries` |
-| 🧾 帳務—應付帳款 | `crm/crm-payables.html` + `.js` | 2 | (視圖，無獨立表) |
+| 🧾 帳務—應付帳款 | `crm/crm-payables.html` + `.js` | 3 | (視圖，含 batch-month) |
+| 🧾 帳務—應收帳款 | `crm/crm-receivables.html` + `.js` | 2 | (視圖，查詢 `crm_invoices`) |
 
-**共用模組**：`crm/crm-utils.js`（crmFetch, esc, fmtNum, renderAvatar, populateUserSelect, populateClientSelect, setupResizeHandle, enableInlineEdit, addEditButton）
+**客戶詳情面板**：4 個 Tab — 客戶資訊（inline 編輯）、客戶關係（inline 編輯）、客戶績效（專案統計/狀態分布/年度營收）、專案紀錄（卡片列表+詳情彈窗）
+
+**客戶狀態自動化**：`_auto_update_client_status()` 根據成案專案數量自動判定（0=潛在客戶, 1=新客戶, 2+=舊客戶），在專案建立/刪除時觸發
+
+**應付帳款重構**：按月份分組（已付款按 payment_date 月份、應付款按 planned_month），月份可調整（儲存按鈕確認）、付款狀態可雙向切換
+
+**效能優化**：CRM Tab 並行載入（`Promise.all`）、`crmFetch` GET 請求去重、`quotations/stats` SQL 聚合、`payables/receivables` JOIN 取代全表掃描、5 個新 DB 索引
+
+**共用模組**：`crm/crm-utils.js`（crmFetch + GET 請求去重, esc, fmtNum, renderAvatar, populateUserSelect, populateClientSelect, setupResizeHandle, enableInlineEdit, addEditButton）
 
 **手機版 RWD**：`/expense.html`（雜支登記）、`/invoice.html`（發票登記）
 
@@ -882,7 +892,7 @@ class ValidatePathsRequest(BaseModel):
 - [x] **CRM 專案管理 Tab**：CRUD + 財務系統（合約/帳務/雜支/財務摘要）+ CSV 匯入
 - [x] **CRM 報價管理 Tab**：報價 CRUD + 項目明細 + 範本 + 統計儀表板 + 內部成本 + 利潤率
 - [x] **CRM 人力資源 Tab**：人員庫 + 專案派工 + CSV 匯入 + 收款人聯動
-- [x] **CRM 帳務管理 Tab**：發票/請款/收支明細/應付帳款 四子視圖 + CSV 匯入
+- [x] **CRM 帳務管理 Tab**：發票/請款/收支明細/應付帳款/應收帳款 五子視圖 + CSV 匯入
 - [x] **CRM 雙向整合**：專案↔報價↔人力↔帳務 互通
 - [x] **CRM 手機版 RWD**：`/expense.html`（雜支）+ `/invoice.html`（發票）
 - [x] **CRM 全模組 Inline 編輯**：詳情面板直接編輯，不需 Modal

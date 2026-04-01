@@ -5,11 +5,28 @@
 
 const API = '/api/v1/crm';
 
+/* ── Request deduplication for GET requests ── */
+const _inflight = new Map();
+
 export async function crmFetch(path, opts = {}) {
     const token = localStorage.getItem('auth_token');
     const headers = { 'Content-Type': 'application/json', ...(opts.headers || {}) };
     if (token) headers['Authorization'] = `Bearer ${token}`;
-    const res = await fetch(API + path, { ...opts, headers });
+    const method = (opts.method || 'GET').toUpperCase();
+    const url = API + path;
+
+    // Deduplicate concurrent GET requests to the same URL
+    if (method === 'GET') {
+        if (_inflight.has(url)) return _inflight.get(url);
+        const p = _doFetch(url, { ...opts, headers }).finally(() => _inflight.delete(url));
+        _inflight.set(url, p);
+        return p;
+    }
+    return _doFetch(url, { ...opts, headers });
+}
+
+async function _doFetch(url, opts) {
+    const res = await fetch(url, opts);
     if (!res.ok) {
         const err = await res.json().catch(() => ({ detail: res.statusText }));
         throw new Error(err.detail || '請求失敗');
@@ -18,7 +35,7 @@ export async function crmFetch(path, opts = {}) {
 }
 
 export function esc(str) {
-    return String(str || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+    return String(str || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
 }
 
 export function renderAvatar(username, users, size = 22) {

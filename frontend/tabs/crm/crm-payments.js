@@ -72,7 +72,7 @@ function _buildEditFields() {
     const payeeTypeOpts = ['','內部人員','現金','勞報','核銷'].map(v => ({value:v, label:v || '—'}));
     const payeeOpts = [{value:'', label:'— 選擇人員 —'}].concat(
         _staffList.map(s => ({value:s.name, label:s.name + ' (' + s.role + ')'})));
-    const statusOpts = [{value:'未付款',label:'未付款'},{value:'應付款',label:'應付款'},{value:'已付款',label:'已付款'}];
+    const statusOpts = [{value:'應付款',label:'應付款'},{value:'已付款',label:'已付款'}];
     const projectOpts = [{value:'',label:'— 選擇專案 —'}].concat(
         _projects.map(pr => ({value:pr.id, label:pr.name + ' (' + (pr.client_short_name || '') + ')'})));
     const invoiceOpts = [{value:'',label:'— 選擇發票 —'}].concat(
@@ -89,9 +89,7 @@ function _buildEditFields() {
         // 付款資訊
         {name:'payee_name', label:'收款人', type:'select', options:payeeOpts},
         {name:'_payee_id_display', label:'身分證', type:'readonly'},
-        {name:'payment_status', label:'付款狀態', type:'select', options:statusOpts},
-        {name:'payment_date', label:'付款日', type:'date', _group:'paid'},
-        {name:'planned_month', label:'預計付款月', type:'month', _group:'planned'},
+        {name:'planned_month', label:'預計付款月', type:'month'},
         // 補充資訊
         {name:'_invoice_sel', label:'代開發票', type:'select', options:invoiceOpts, _group:'invoice'},
         {name:'invoice_number', label:'發票號碼', type:'text', _group:'invoice'},
@@ -119,23 +117,16 @@ function _wireEditDynamics(p) {
     }
 
     const catSel = content.querySelector('[data-field="category"]');
-    const statusSel = content.querySelector('[data-field="payment_status"]');
     const payeeSel = content.querySelector('[data-field="payee_name"]');
     const invSel = content.querySelector('[data-field="_invoice_sel"]');
 
     const payeeTypeRow = _findRow('payee_type');
-    const paidRow = _findRow('payment_date');
-    const plannedRow = _findRow('planned_month');
     const invoiceSelRow = _findRow('_invoice_sel');
     const invoiceNumRow = _findRow('invoice_number');
     const projectRow = _findRow('_project_sel');
     function _toggle() {
         const cat = catSel?.value || '';
-        const status = statusSel?.value || '';
-
         if (payeeTypeRow) payeeTypeRow.style.display = cat === '專案外包' ? '' : 'none';
-        if (paidRow) paidRow.style.display = status === '已付款' ? '' : 'none';
-        if (plannedRow) plannedRow.style.display = status === '應付款' ? '' : 'none';
         if (invoiceSelRow) invoiceSelRow.style.display = cat === '發票代開' ? '' : 'none';
         if (invoiceNumRow) invoiceNumRow.style.display = cat === '發票代開' ? '' : 'none';
         if (projectRow) projectRow.style.display = (_PROJECT_CATEGORIES.includes(cat) || cat === '發票代開') ? '' : 'none';
@@ -143,7 +134,6 @@ function _wireEditDynamics(p) {
     _toggle();
 
     if (catSel) catSel.addEventListener('change', _toggle);
-    if (statusSel) statusSel.addEventListener('change', _toggle);
 
     // 收款人 → 身分證 auto-fill
     if (payeeSel) {
@@ -191,9 +181,9 @@ function renderDetail(p) {
         <div style="border-top:1px solid #2e2e2e;margin:8px 0;"></div>
         <div style="font-size:12px;font-weight:700;color:#6b7280;padding:4px 0;">付款資訊</div>
         ${prop('收款人', p.payee_name + (p.payee_id ? ' (' + p.payee_id + ')' : ''))}
+        ${prop('預計付款月', p.planned_month)}
         <div class="crm-detail-prop"><div class="crm-prop-label">付款狀態</div><div class="crm-prop-value">${_statusBadge(p.payment_status)}</div></div>
-        ${p.payment_date ? prop('付款日', p.payment_date.substring(0, 10)) : ''}
-        ${p.planned_month ? prop('預計付款月', p.planned_month) : ''}
+        ${p.payment_status === '已付款' && p.payment_date ? prop('付款日', p.payment_date.substring(0, 10)) : ''}
         <div style="border-top:1px solid #2e2e2e;margin:8px 0;"></div>
         <div style="font-size:12px;font-weight:700;color:#6b7280;padding:4px 0;">補充資訊</div>
         ${p.category === '發票代開' && p.invoice_number ? (() => {
@@ -220,7 +210,9 @@ function renderDetail(p) {
             async (payload) => {
                 payload.amount = parseInt(payload.amount) || 0;
                 payload.request_date = payload.request_date || null;
-                payload.payment_date = payload.payment_date || null;
+                // Preserve existing payment_status and payment_date (managed by 應付帳款)
+                payload.payment_status = p.payment_status || '應付款';
+                payload.payment_date = p.payment_date || null;
                 // Resolve project_id from the right field depending on category
                 if (payload.category === '發票代開') {
                     payload.project_id = payload._invoice_sel || null;
@@ -282,9 +274,7 @@ function _updateExtraFields(category) {
     const invoiceField = document.getElementById('pay-invoice-field');
     const invoiceNumField = document.getElementById('pay-invoice-number-field');
     const projectField = document.getElementById('pay-project-field');
-    const dateField = document.getElementById('pay-date-field');
     const payeeTypeField = document.getElementById('pay-payee-type-field');
-    const payStatus = document.getElementById('pay-f-payment_status')?.value;
 
     // Hide all first
     if (invoiceField) invoiceField.style.display = 'none';
@@ -292,12 +282,9 @@ function _updateExtraFields(category) {
     if (projectField) projectField.style.display = 'none';
     if (payeeTypeField) {
         payeeTypeField.style.display = category === '專案外包' ? 'flex' : 'none';
-    } else {
-        console.warn('[Payments] pay-payee-type-field not found');
     }
 
     if (category === '發票代開') {
-        // Show invoice fields + optional project
         if (invoiceField) invoiceField.style.display = '';
         if (invoiceNumField) invoiceNumField.style.display = '';
         if (projectField) {
@@ -305,7 +292,6 @@ function _updateExtraFields(category) {
             const lbl = projectField.querySelector('label');
             if (lbl) lbl.innerHTML = '專案';
         }
-        // Populate invoice select
         const sel = document.getElementById('pay-f-project_id');
         if (sel) {
             const current = sel.value;
@@ -315,7 +301,6 @@ function _updateExtraFields(category) {
                 ).join('');
         }
     } else if (_PROJECT_CATEGORIES.includes(category)) {
-        // Show project field (required)
         if (projectField) {
             projectField.style.display = '';
             const lbl = projectField.querySelector('label');
@@ -323,11 +308,6 @@ function _updateExtraFields(category) {
         }
         _populateProject2Select('');
     }
-
-    // Payment date visibility
-    if (dateField) dateField.style.display = (payStatus === '已付款') ? '' : 'none';
-
-    _togglePlannedMonth(payStatus || '未付款');
 }
 
 function _populateProject2Select(selectedId) {
@@ -363,10 +343,6 @@ function openModal(p = null) {
     document.getElementById('pay-modal').style.display = 'flex';
 }
 
-function _togglePlannedMonth(status) {
-    const field = document.getElementById('pay-planned-month-field');
-    if (field) field.style.display = status === '應付款' ? '' : 'none';
-}
 
 async function savePayment() {
     const summary = document.getElementById('pay-f-summary').value.trim();
@@ -388,6 +364,8 @@ async function savePayment() {
         }
         payload[f] = val;
     }
+    // Auto-set payment_status for new payments
+    if (!_editingId) payload.payment_status = '應付款';
     // Validation
     if (_PROJECT_CATEGORIES.includes(cat) && !document.getElementById('pay-f-project_id2')?.value) {
         _showErr('請選擇專案'); return;
@@ -489,12 +467,6 @@ export async function initCrmPaymentsTab() {
     document.getElementById('pay-f-payee_name').addEventListener('change', e => {
         const opt = e.target.selectedOptions[0];
         document.getElementById('pay-f-payee_id').value = opt?.dataset.id || '';
-    });
-
-    // Show/hide planned_month when payment_status changes
-    // Payment status → toggle payment date + planned month
-    document.getElementById('pay-f-payment_status').addEventListener('change', e => {
-        _updateExtraFields(document.getElementById('pay-f-category')?.value || '');
     });
 
     // Category → toggle extra fields

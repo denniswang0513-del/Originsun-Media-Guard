@@ -100,6 +100,23 @@ from core.schemas import (ClientPayload, CrmProjectPayload, ProjectExpensePayloa
                          CashEntryPayload)
 
 
+async def _auto_update_client_status(session, client_id: str):
+    """根據專案數量自動更新客戶狀態：0=潛在客戶, 1=新客戶, 2+=舊客戶"""
+    from sqlalchemy import func as _fn
+    count = (await session.execute(
+        select(_fn.count()).where(CrmProject.client_id == client_id)
+    )).scalar() or 0
+    client = await session.get(Client, client_id)
+    if not client:
+        return
+    if count == 0:
+        client.status = "潛在客戶"
+    elif count == 1:
+        client.status = "新客戶"
+    else:
+        client.status = "舊客戶"
+
+
 # ── Endpoints ────────────────────────────────────────────────
 
 @router.get("/clients")
@@ -111,8 +128,26 @@ async def list_clients(
     _require_db()
     factory = await _get_factory()
 
+    from sqlalchemy import func as _fn, case as _case
+
+    # Subquery: per-client project stats (exclude 洽談中/報價中)
+    active_filter = CrmProject.status.notin_(["洽談中", "報價中"])
+    proj_sub = (
+        select(
+            CrmProject.client_id,
+            _fn.count(_case((active_filter, 1))).label("project_count"),
+            _fn.coalesce(_fn.sum(_case((active_filter, CrmProject.contract_amount), else_=0)), 0).label("total_contract"),
+        )
+        .group_by(CrmProject.client_id)
+        .subquery()
+    )
+
     async with factory() as session:
-        query = select(Client).order_by(Client.updated_at.desc())
+        query = (
+            select(Client, proj_sub.c.project_count, proj_sub.c.total_contract)
+            .outerjoin(proj_sub, proj_sub.c.client_id == Client.id)
+            .order_by(Client.updated_at.desc())
+        )
         if status:
             query = query.where(Client.status == status)
         if am:
@@ -124,10 +159,15 @@ async def list_clients(
                 Client.full_name.ilike(ql),
                 Client.contact_person.ilike(ql),
             ))
-        result = await session.execute(query)
-        clients = result.scalars().all()
+        rows = (await session.execute(query)).all()
 
-    return {"clients": [_to_dict(c) for c in clients], "total": len(clients)}
+    result = []
+    for c, proj_count, total_contract in rows:
+        d = _to_dict(c)
+        d["project_count"] = proj_count or 0
+        d["total_contract"] = total_contract or 0
+        result.append(d)
+    return {"clients": result, "total": len(result)}
 
 
 @router.post("/clients")
@@ -378,6 +418,7 @@ async def create_project(req: CrmProjectPayload, request: Request):
         client_name = client.short_name
 
         session.add(project)
+        await _auto_update_client_status(session, req.client_id)
         await session.commit()
         await session.refresh(project)
 
@@ -453,7 +494,9 @@ async def delete_project(project_id: str, request: Request):
         project = await session.get(CrmProject, project_id)
         if not project:
             raise HTTPException(status_code=404, detail="找不到此專案")
+        client_id = project.client_id
         await session.delete(project)
+        await _auto_update_client_status(session, client_id)
         await session.commit()
     return {"status": "ok"}
 
@@ -687,19 +730,23 @@ async def quotation_stats():
     now = _now()
     month_start = datetime(now.year, now.month, 1, tzinfo=now.tzinfo)
 
+    from sqlalchemy import func as sa_func, case
+
     async with factory() as session:
-        all_q = (await session.execute(select(CrmQuotation))).scalars().all()
+        price_col = sa_func.coalesce(CrmQuotation.final_price, CrmQuotation.total, 0)
+        row = (await session.execute(
+            select(
+                sa_func.count().label("total_count"),
+                sa_func.sum(case((CrmQuotation.status == "已寄送", 1), else_=0)).label("pending"),
+                sa_func.sum(case((CrmQuotation.status == "已簽核", 1), else_=0)).label("signed"),
+                sa_func.sum(case((CrmQuotation.created_at >= month_start, price_col), else_=0)).label("month_total"),
+            )
+        )).one()
 
-    month_total = sum(
-        (q.final_price if q.final_price is not None else q.total) or 0
-        for q in all_q if q.created_at and q.created_at >= month_start
-    )
-    pending = sum(1 for q in all_q if q.status == "已寄送")
-    signed = sum(1 for q in all_q if q.status == "已簽核")
-    total_count = len(all_q)
-
+    total_count = row.total_count or 0
+    signed = row.signed or 0
     return {
-        "month_total": month_total, "pending_count": pending,
+        "month_total": row.month_total or 0, "pending_count": row.pending or 0,
         "sign_rate": round(signed / total_count * 100) if total_count > 0 else 0,
         "total_count": total_count,
     }
@@ -1557,7 +1604,10 @@ async def list_payments(
         if category:
             query = query.where(CrmPaymentRequest.category == category)
         if payment_status:
-            query = query.where(CrmPaymentRequest.payment_status == payment_status)
+            if payment_status == "應付款":
+                query = query.where(CrmPaymentRequest.payment_status.in_(["應付款", "未付款"]))
+            else:
+                query = query.where(CrmPaymentRequest.payment_status == payment_status)
         if project_id:
             query = query.where(CrmPaymentRequest.project_id == project_id)
         if q:
@@ -1587,6 +1637,84 @@ async def create_payment(req: PaymentRequestPayload, request: Request):
         session.add(p)
         await session.commit()
     return {"status": "ok", "payment": _to_payment_dict(p)}
+
+
+@router.patch("/payments/batch-month")
+async def batch_update_month(request: Request):
+    """更新請款單的 planned_month。"""
+    _check_auth(request)
+    _require_db()
+    factory = await _get_factory()
+    body = await request.json()
+    ids = body.get("payment_ids", [])
+    planned_month = body.get("planned_month", "")
+    if not ids:
+        raise HTTPException(status_code=400, detail="請提供 payment_ids")
+
+    async with factory() as session:
+        updated = 0
+        for pid in ids:
+            p = await session.get(CrmPaymentRequest, pid)
+            if p:
+                p.planned_month = planned_month
+                p.updated_at = _now()
+                updated += 1
+        await session.commit()
+    return {"status": "ok", "updated": updated}
+
+
+@router.patch("/payments/batch-pay")
+async def batch_pay(request: Request):
+    _check_auth(request)
+    _require_db()
+    factory = await _get_factory()
+    body = await request.json()
+    ids = body.get("payment_ids", [])
+    pay_date = _parse_shoot_date(body.get("payment_date", "")) or _now()
+    if not ids:
+        raise HTTPException(status_code=400, detail="請提供 payment_ids")
+
+    async with factory() as session:
+        updated = 0
+        for pid in ids:
+            p = await session.get(CrmPaymentRequest, pid)
+            if not p:
+                continue
+            if p.payment_status != "已付款":
+                p.payment_status = "已付款"
+                p.payment_date = pay_date
+                p.updated_at = _now()
+                updated += 1
+            elif p.payment_date != pay_date:
+                p.payment_date = pay_date
+                p.updated_at = _now()
+                updated += 1
+        await session.commit()
+    return {"status": "ok", "updated": updated}
+
+
+@router.patch("/payments/batch-unpay")
+async def batch_unpay(request: Request):
+    """將已付款的請款單改回應付款。"""
+    _check_auth(request)
+    _require_db()
+    factory = await _get_factory()
+    body = await request.json()
+    ids = body.get("payment_ids", [])
+    if not ids:
+        raise HTTPException(status_code=400, detail="請提供 payment_ids")
+
+    async with factory() as session:
+        updated = 0
+        for pid in ids:
+            p = await session.get(CrmPaymentRequest, pid)
+            if p and p.payment_status == "已付款":
+                p.payment_status = "應付款"
+                p.payment_date = None
+                p.updated_at = _now()
+                updated += 1
+        await session.commit()
+    return {"status": "ok", "updated": updated}
 
 
 @router.get("/payments/{payment_id}")
@@ -1892,52 +2020,60 @@ async def import_cash_csv(request: Request, file: UploadFile = File(...)):
 
 @router.get("/payables/summary")
 async def payables_summary(month: str = Query(""), status: str = Query("")):
-    """當月請款彙總，按收款人分組，帶入銀行資訊。status=未付款 or 已付款 or 空=全部。"""
+    """請款彙總，按收款人分組。month=all 或空=全部應付款；month=YYYY-MM=該月。"""
     _require_db()
     factory = await _get_factory()
 
-    if not month:
-        now = _now()
-        month = f"{now.year}-{now.month:02d}"
-    parts = month.split("-")
-    try:
-        year, mon = int(parts[0]), int(parts[1])
-    except (IndexError, ValueError):
-        raise HTTPException(status_code=400, detail="month 格式無效，請使用 YYYY-MM")
-    from calendar import monthrange
-    try:
-        start = datetime(year, mon, 1, tzinfo=timezone.utc)
-    except ValueError:
-        raise HTTPException(status_code=400, detail="month 格式無效，請使用 YYYY-MM")
-    _, last_day = monthrange(year, mon)
-    end = datetime(year, mon, last_day, 23, 59, 59, tzinfo=timezone.utc)
+    filter_all = (not month) or month == "all"
 
     async with factory() as session:
-        # 應付帳款：用 planned_month 或 request_date 篩選
-        query = select(CrmPaymentRequest).order_by(CrmPaymentRequest.request_date)
+        query = (
+            select(CrmPaymentRequest, CrmStaff.id_number, CrmStaff.bank_name, CrmStaff.bank_account)
+            .outerjoin(CrmStaff, CrmStaff.name == CrmPaymentRequest.payee_name)
+            .order_by(CrmPaymentRequest.request_date)
+        )
 
-        # Filter: 應付款按 planned_month，其他按 request_date
-        query = query.where(or_(
-            CrmPaymentRequest.planned_month == month,
-            CrmPaymentRequest.request_date.between(start, end),
-        ))
+        if not filter_all:
+            parts = month.split("-")
+            try:
+                year, mon = int(parts[0]), int(parts[1])
+            except (IndexError, ValueError):
+                raise HTTPException(status_code=400, detail="month 格式無效，請使用 YYYY-MM")
+            from calendar import monthrange
+            try:
+                start = datetime(year, mon, 1, tzinfo=timezone.utc)
+            except ValueError:
+                raise HTTPException(status_code=400, detail="month 格式無效，請使用 YYYY-MM")
+            _, last_day = monthrange(year, mon)
+            end = datetime(year, mon, last_day, 23, 59, 59, tzinfo=timezone.utc)
+            query = query.where(or_(
+                CrmPaymentRequest.planned_month == month,
+                CrmPaymentRequest.request_date.between(start, end),
+            ))
 
-        if status:
-            query = query.where(CrmPaymentRequest.payment_status == status)
-        rows = (await session.execute(query)).scalars().all()
+        if status == "已付款":
+            query = query.where(CrmPaymentRequest.payment_status == "已付款")
+        elif status == "all":
+            pass  # 全部狀態，不加篩選
+        elif not status or status == "應付款":
+            # 預設：應付款（含舊資料的「未付款」）
+            query = query.where(CrmPaymentRequest.payment_status.in_(["應付款", "未付款"]))
 
-        staff_map = {s.name: s for s in (await session.execute(select(CrmStaff))).scalars().all()}
+        rows = (await session.execute(query)).all()
 
-    payee_groups = {}
-    for p in rows:
+    payee_groups: dict = {}
+    seen_ids: set = set()
+    for p, staff_id_number, staff_bank_name, staff_bank_account in rows:
+        if p.id in seen_ids:
+            continue
+        seen_ids.add(p.id)
         name = p.payee_name or "未指定"
         if name not in payee_groups:
-            staff = staff_map.get(name)
             payee_groups[name] = {
                 "payee_name": name,
-                "payee_id": p.payee_id or (staff.id_number if staff else "") or "",
-                "bank_name": (staff.bank_name if staff else "") or "",
-                "bank_account": (staff.bank_account if staff else "") or "",
+                "payee_id": p.payee_id or staff_id_number or "",
+                "bank_name": staff_bank_name or "",
+                "bank_account": staff_bank_account or "",
                 "total_amount": 0, "items": [],
             }
         payee_groups[name]["total_amount"] += p.amount or 0
@@ -1948,35 +2084,12 @@ async def payables_summary(month: str = Query(""), status: str = Query("")):
             "summary": p.summary or "",
             "category": p.category or "",
             "payment_status": p.payment_status or "",
-            "payment_date": p.payment_date.strftime("%Y/%m/%d") if p.payment_date else "",
+            "payment_date": p.payment_date.strftime("%Y-%m-%d") if p.payment_date else "",
+            "planned_month": p.planned_month or "",
         })
 
-    payees = sorted(payee_groups.values(), key=lambda x: x["payee_name"])
-    return {"month": month, "payees": payees, "grand_total": sum(pg["total_amount"] for pg in payees)}
-
-
-@router.patch("/payments/batch-pay")
-async def batch_pay(request: Request):
-    _check_auth(request)
-    _require_db()
-    factory = await _get_factory()
-    body = await request.json()
-    ids = body.get("payment_ids", [])
-    pay_date = _parse_shoot_date(body.get("payment_date", "")) or _now()
-    if not ids:
-        raise HTTPException(status_code=400, detail="請提供 payment_ids")
-
-    async with factory() as session:
-        updated = 0
-        for pid in ids:
-            p = await session.get(CrmPaymentRequest, pid)
-            if p and p.payment_status != "已付款":
-                p.payment_status = "已付款"
-                p.payment_date = pay_date
-                p.updated_at = _now()
-                updated += 1
-        await session.commit()
-    return {"status": "ok", "updated": updated}
+    payees = sorted(payee_groups.values(), key=lambda x: x["total_amount"], reverse=True)
+    return {"month": month or "all", "payees": payees, "grand_total": sum(pg["total_amount"] for pg in payees)}
 
 
 @router.get("/receivables/summary")
@@ -1987,29 +2100,32 @@ async def receivables_summary(status: str = Query("")):
 
     async with factory() as session:
         query = (
-            select(CrmInvoice, CrmProject.name.label("pn"))
+            select(CrmInvoice, CrmProject.name.label("pn"),
+                   Client.tax_id.label("c_tax_id"), Client.payment_info, Client.payment_note)
             .outerjoin(CrmProject, CrmProject.id == CrmInvoice.project_id)
+            .outerjoin(Client, Client.short_name == CrmInvoice.company_name)
             .where(CrmInvoice.issue_status == "已開立")
             .order_by(CrmInvoice.invoice_date.desc())
         )
         if status:
             query = query.where(CrmInvoice.payment_status == status)
         else:
-            query = query.where(CrmInvoice.payment_status != "已收款")
+            query = query.where(CrmInvoice.payment_status.notin_(["已收款", "作廢"]))
         rows = (await session.execute(query)).all()
 
-        client_map = {c.short_name: c for c in (await session.execute(select(Client))).scalars().all()}
-
     client_groups: dict = {}
-    for inv, proj_name in rows:
+    seen_ids: set = set()
+    for inv, proj_name, c_tax_id, c_payment_info, c_payment_note in rows:
+        if inv.id in seen_ids:
+            continue
+        seen_ids.add(inv.id)
         name = inv.company_name or "未指定"
         if name not in client_groups:
-            client = client_map.get(name)
             client_groups[name] = {
                 "company_name": name,
-                "tax_id": inv.tax_id or (client.tax_id if client else "") or "",
-                "payment_info": (client.payment_info if client else "") or "",
-                "payment_note": (client.payment_note if client else "") or "",
+                "tax_id": inv.tax_id or c_tax_id or "",
+                "payment_info": c_payment_info or "",
+                "payment_note": c_payment_note or "",
                 "total_amount": 0, "items": [],
             }
         client_groups[name]["total_amount"] += inv.amount_total or 0
@@ -2028,7 +2144,7 @@ async def receivables_summary(status: str = Query("")):
             "category": inv.category or "",
         })
 
-    clients = sorted(client_groups.values(), key=lambda x: x["company_name"])
+    clients = sorted(client_groups.values(), key=lambda x: x["total_amount"], reverse=True)
     return {"clients": clients, "grand_total": sum(c["total_amount"] for c in clients)}
 
 

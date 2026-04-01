@@ -221,6 +221,7 @@ class CrmQuotation(Base):
     __table_args__ = (
         Index("idx_quote_project", "project_id"),
         Index("idx_quote_status", "status"),
+        Index("idx_quote_created", "created_at"),
     )
 
 
@@ -348,6 +349,8 @@ class CrmInvoice(Base):
         Index("idx_invoice_date", "invoice_date"),
         Index("idx_invoice_payment", "payment_type"),
         Index("idx_invoice_project", "project_id"),
+        Index("idx_invoice_issue_status", "issue_status"),
+        Index("idx_invoice_pay_status", "payment_status"),
     )
 
 
@@ -378,6 +381,8 @@ class CrmPaymentRequest(Base):
     __table_args__ = (
         Index("idx_payreq_date", "request_date"),
         Index("idx_payreq_status", "payment_status"),
+        Index("idx_payreq_planned_month", "planned_month"),
+        Index("idx_payreq_payee", "payee_name"),
     )
 
 
