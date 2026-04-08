@@ -29,7 +29,10 @@ async function _doFetch(url, opts) {
     const res = await fetch(url, opts);
     if (!res.ok) {
         const err = await res.json().catch(() => ({ detail: res.statusText }));
-        throw new Error(err.detail || '請求失敗');
+        const detail = Array.isArray(err.detail)
+            ? err.detail.map(e => e.msg || e.message || JSON.stringify(e)).join('; ')
+            : (err.detail || '請求失敗');
+        throw new Error(detail);
     }
     return res.json();
 }
@@ -163,7 +166,7 @@ export function enableInlineEdit(contentElId, actionsElId, fields, data, onSave,
                 return;
             }
             let val = el.value;
-            if (intFields.includes(name)) val = val ? parseInt(val) : null;
+            if (intFields.includes(name)) val = val ? parseInt(val) : 0;
             if (el.type === 'date' || el.type === 'month') val = val || null;
             payload[name] = val;
         });
