@@ -1121,9 +1121,17 @@ async def import_staff_csv(request: Request, file: UploadFile = File(...)):
     except UnicodeDecodeError:
         text = content.decode("big5", errors="replace")
 
-    reader = csv.DictReader(io.StringIO(text))
-    headers = list(reader.fieldnames or [])
-    header_map = {h.lower(): h for h in headers}
+    # Auto-detect delimiter (comma, tab, semicolon)
+    first_line = text.split('\n', 1)[0]
+    dialect = None
+    try:
+        dialect = csv.Sniffer().sniff(first_line, delimiters=',\t;')
+    except csv.Error:
+        pass
+    reader = csv.DictReader(io.StringIO(text), dialect=dialect) if dialect else csv.DictReader(io.StringIO(text))
+    headers = [h.strip() for h in (reader.fieldnames or [])]
+    reader.fieldnames = headers
+    header_map = {h.lower(): h for h in headers if h}
     imported = updated = skipped = 0
     factory = await _get_factory()
 
