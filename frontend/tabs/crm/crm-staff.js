@@ -112,6 +112,17 @@ function renderDetail(s) {
             },
             () => renderDetail(s)
         );
+        // Inject ✎ button next to role select in inline edit
+        const roleSelect = document.querySelector('#staff-detail-info [data-field="role"]');
+        if (roleSelect && !roleSelect.nextElementSibling?.classList?.contains('crm-role-edit-btn')) {
+            const btn = document.createElement('button');
+            btn.className = 'crm-btn crm-btn-secondary crm-btn-sm crm-role-edit-btn';
+            btn.style.cssText = 'padding:2px 6px;margin-left:4px;';
+            btn.textContent = '✎';
+            btn.title = '編輯職能選項';
+            btn.onclick = (e) => { e.stopPropagation(); window._staffEditRoles(); };
+            roleSelect.parentNode.insertBefore(btn, roleSelect.nextSibling);
+        }
     });
 
     _loadStaffProjects(s.id);
@@ -297,6 +308,13 @@ function _populateRoleSelects() {
         const val = modal.value;
         modal.innerHTML = '<option value="">—</option>' + _roles.map(r => `<option value="${_esc(r)}">${_esc(r)}</option>`).join('');
         modal.value = val;
+    }
+    // Also refresh inline edit select if open
+    const inline = document.querySelector('#staff-detail-info [data-field="role"]');
+    if (inline) {
+        const val = inline.value;
+        inline.innerHTML = '<option value="">—</option>' + _roles.map(r => `<option value="${_esc(r)}">${_esc(r)}</option>`).join('');
+        inline.value = val;
     }
 }
 
