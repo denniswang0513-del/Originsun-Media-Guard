@@ -43,9 +43,16 @@ if (typeof appendLog === 'undefined') {
 
                 // Wait for auth so we know which modules to load
                 await window._authReady;
+                const _MEDIA_TABS = ['projects','backup','verify','transcode','concat','report','transcribe','tts'];
+                const loggedIn = !!window._authUser;
                 const modules = window._modules;
-                const showAll = !window._authUser || !modules || modules.length === 0;
-                const _should = (key) => showAll || modules.includes(key);
+                const hasModules = loggedIn && modules && modules.length > 0;
+                // Logged in with modules → only authorized tabs
+                // Logged in without modules (admin bootstrap) → all tabs
+                // Not logged in → media tabs only
+                const _should = (key) => hasModules ? modules.includes(key)
+                    : loggedIn ? true
+                    : _MEDIA_TABS.includes(key);
 
                 // Hide nav buttons & sections for unauthorized tabs immediately
                 const TAB_MAP = {
@@ -55,16 +62,14 @@ if (typeof appendLog === 'undefined') {
                     crm_clients:'tab_crm_clients', crm_projects:'tab_crm_projects',
                     crm_staff:'tab_crm_staff', crm_invoices:'tab_crm_invoices',
                 };
-                if (!showAll) {
-                    Object.entries(TAB_MAP).forEach(([key, tabId]) => {
-                        if (!modules.includes(key)) {
-                            const btn = document.getElementById('btn_' + tabId);
-                            if (btn) btn.style.display = 'none';
-                            const sec = document.getElementById(tabId);
-                            if (sec) sec.style.display = 'none';
-                        }
-                    });
-                }
+                Object.entries(TAB_MAP).forEach(([key, tabId]) => {
+                    if (!_should(key)) {
+                        const btn = document.getElementById('btn_' + tabId);
+                        if (btn) btn.style.display = 'none';
+                        const sec = document.getElementById(tabId);
+                        if (sec) sec.style.display = 'none';
+                    }
+                });
 
                 // Helper: load a single tab (fetch HTML + import JS + init)
                 const _loadTab = async (sectionId, htmlPath, jsPath, initFn) => {
@@ -104,7 +109,7 @@ if (typeof appendLog === 'undefined') {
                 );
 
                 // Auto-switch to first authorized tab
-                if (!showAll && modules.length > 0) {
+                if (hasModules) {
                     const firstTab = TAB_MAP[modules[0]];
                     if (firstTab) switchTab(firstTab);
                 }
