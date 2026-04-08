@@ -270,23 +270,9 @@ async def download_update(background_tasks: BackgroundTasks):
 
     def _build_zip() -> str:
         """Synchronous ZIP builder -- runs in thread pool."""
-        try:
-            from ota_manifest import AGENT_FILES, AGENT_DIRS, EXCLUDE_DIRS
-            files_to_include = list(AGENT_FILES)
-            dirs_to_include = list(AGENT_DIRS)
-        except ImportError:
-            files_to_include = [
-                "main.py", "config.py", "core_engine.py", "report_generator.py",
-                "notifier.py", "drive_sync.py", "transcriber.py", "tts_engine.py",
-                "taiwan_dict.json", "download_model.py", "version.json", "logo.ico",
-                "update_agent.bat", "update_agent.py", "update_monitor.py",
-                "preflight.py", "ota_manifest.py", "start_hidden.vbs",
-                "requirements_agent.txt", "bootstrap.py", "server.py",
-            ]
-            EXCLUDE_DIRS = {'.venv', 'venv', 'node_modules', '.git', '.claude', 'tests',
-                            'models', 'voice', 'credentials', '__pycache__', 'e2e',
-                            'python_embed', '_rollback'}
-            dirs_to_include = ["frontend", "templates", "core", "routers", "utils", "db"]
+        from ota_manifest import AGENT_FILES, AGENT_DIRS, EXCLUDE_DIRS
+        files_to_include = list(AGENT_FILES)
+        dirs_to_include = list(AGENT_DIRS)
 
         for entry in os.listdir(base_dir):
             if entry.startswith('.') or entry.startswith('_') or entry in EXCLUDE_DIRS:

@@ -58,9 +58,6 @@ OriginsunTranscode/
 │                            #   - _read_local_version()：讀取本機 version.json 版號
 │                            #   - _is_newer(remote, local)：語意版本比較（支援 v 前綴）
 │
-├── server.py                # ⚠️ 遺留的舊版單一大檔案伺服器（v1.4 以前）
-│                            #   保留作為歷史參考，不再使用，不可刪除（build_agent_zip.py 會打包它）
-│
 ├── core_engine.py           # 核心引擎類別 MediaGuardEngine（約 1200 行）
 │                            #   - run_backup_job()：備份邏輯（本機 + NAS 雙寫、衝突處理）
 │                            #   - run_transcode_job()：呼叫 ffmpeg.exe 進行 Proxy 轉檔
@@ -911,7 +908,7 @@ class ValidatePathsRequest(BaseModel):
    - 儘量使用 `utils.js` 的 `appendLog` 紀錄關鍵訊息。
    - 避免在 `app.js` 寫入過多與頁籤無關的可變狀態。
    - 新頁籤應建立獨立的 `tabs/<name>/` 目錄，包含 `.html` + `.js`。
-4. **`server.py` 不可刪除**：雖然已不再使用，但 `build_agent_zip.py` 會打包它。
+4. **OTA 清單同步**：新增根目錄 `.py` 檔案時，務必更新 `ota_manifest.py` 的 `AGENT_FILES`。
 
 ---
 

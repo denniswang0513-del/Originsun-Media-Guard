@@ -20,7 +20,7 @@ if not os.path.exists(dummy_video):
 # 2. Start the FastAPI Server
 print("[Test] Starting Originsun Media Guard Server...")
 log_file = open("server_test_log.txt", "w", encoding="utf-8")
-server_proc = subprocess.Popen(["python", "-u", "server.py"], cwd=r"d:\Antigravity\OriginsunTranscode", stdout=log_file, stderr=subprocess.STDOUT)
+server_proc = subprocess.Popen(["python", "-u", "main.py"], cwd=r"d:\Antigravity\OriginsunTranscode", stdout=log_file, stderr=subprocess.STDOUT)
 time.sleep(4) # Wait for startup
 
 try:

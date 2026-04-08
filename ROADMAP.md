@@ -198,7 +198,6 @@ routers/
 | `tts_engine.py` | 676 | TTS 引擎，單一職責 |
 | `core/worker.py` | 681 | 任務消費器，內聚 |
 | `core/auth.py` | 491 | Auth 核心，剛好 |
-| `server.py` | 1727 | 遺留（build 依賴，不可刪） |
 | `Anent_MediaGuard_Pro.py` | 2559 | 遺留舊版單檔，不動 |
 | 其餘 56 個 <500 行檔案 | — | 已經健康 |
 

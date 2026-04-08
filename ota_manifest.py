@@ -9,7 +9,6 @@ import re
 # ── Individual files synced to Agent ──
 AGENT_FILES = [
     "main.py",
-    "server.py",
     "config.py",
     "core_engine.py",
     "tts_engine.py",
