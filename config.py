@@ -43,6 +43,7 @@ _DEFAULT_SETTINGS: dict = {
         "report": 1,
     },
     "browse_roots": [],  # NAS 瀏覽器允許的根目錄，例 ["S:/", "R:/", "T:/"]
+    "staff_roles": ["攝影師", "剪輯師", "導演", "製片", "燈光", "收音", "空拍", "動畫"],
     "google_oauth": {
         "enabled": False,
         "client_id": "",

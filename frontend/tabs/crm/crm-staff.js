@@ -9,6 +9,8 @@ let _selectedId = null;
 let _editingId = null;
 let _filters = { q: '', role: '', status: '' };
 let _csvFile = null;
+const _DEFAULT_ROLES = ['攝影師','剪輯師','導演','製片','燈光','收音','空拍','動畫'];
+let _roles = [..._DEFAULT_ROLES];
 
 // ── Data ─────────────────────────────────────────────────────
 
@@ -26,13 +28,15 @@ async function loadStaff() {
 
 // ── Rendering ────────────────────────────────────────────────
 
-const _STATUS_CLS = { '在職': 'crm-staff-badge-在職', '兼職': 'crm-staff-badge-兼職', '專案': 'crm-staff-badge-專案' };
+const _STATUS_CLS = { '在職': 'crm-staff-badge-在職', '兼職': 'crm-staff-badge-兼職', '專案': 'crm-staff-badge-專案', '單位': 'crm-staff-badge-單位' };
 
 function _sBadge(status) {
     const s = status || '在職';
     const cls = _STATUS_CLS[s] || '';
     return `<span class="crm-badge ${cls}">${_esc(s)}</span>`;
 }
+
+const _STATUS_ORDER = { '在職': 0, '兼職': 1, '單位': 2, '專案': 3 };
 
 function renderList() {
     const body = document.getElementById('staff-list-body');
@@ -41,7 +45,12 @@ function renderList() {
         body.innerHTML = `<div class="crm-empty">尚無人員${_filters.q ? '，請調整搜尋' : ''}</div>`;
         return;
     }
-    body.innerHTML = _staff.map(s => `
+    const sorted = [..._staff].sort((a, b) => {
+        const sa = _STATUS_ORDER[a.status] ?? 9;
+        const sb = _STATUS_ORDER[b.status] ?? 9;
+        return sa !== sb ? sa - sb : (a.name || '').localeCompare(b.name || '', 'zh-TW');
+    });
+    body.innerHTML = sorted.map(s => `
         <div class="crm-row${s.id === _selectedId ? ' selected' : ''}" onclick="window._staffSelect('${s.id}')">
             <div class="crm-row-name">${_esc(s.name)}</div>
             <div class="crm-row-role">${_esc(s.role)}</div>
@@ -54,11 +63,11 @@ function renderList() {
 
 const _STAFF_EDIT_FIELDS = [
     {name:'name', label:'姓名', type:'text'},
-    {name:'role', label:'職能', type:'select', options:[{value:'',label:'—'},{value:'攝影師',label:'攝影師'},{value:'剪輯師',label:'剪輯師'},{value:'導演',label:'導演'},{value:'製片',label:'製片'},{value:'燈光',label:'燈光'},{value:'收音',label:'收音'},{value:'空拍',label:'空拍'},{value:'動畫',label:'動畫'}]},
-    {name:'status', label:'狀態', type:'select', options:[{value:'在職',label:'在職'},{value:'兼職',label:'兼職'},{value:'專案',label:'專案'}]},
+    {name:'role', label:'職能', type:'select', get options() { return [{value:'',label:'—'}, ..._roles.map(r => ({value:r,label:r}))]; }},
+    {name:'status', label:'狀態', type:'select', options:[{value:'在職',label:'在職'},{value:'兼職',label:'兼職'},{value:'專案',label:'專案'},{value:'單位',label:'單位'}]},
     {name:'phone', label:'電話', type:'text'},
     {name:'email', label:'Email', type:'text'},
-    {name:'id_number', label:'身分證', type:'text'},
+    {name:'id_number', label:'身分證 / 統編', type:'text'},
     {name:'address', label:'住址', type:'text'},
     {name:'bank_name', label:'銀行', type:'text'},
     {name:'bank_account', label:'帳號', type:'text'},
@@ -81,7 +90,7 @@ function renderDetail(s) {
         <div class="crm-detail-prop"><div class="crm-prop-label">狀態</div><div class="crm-prop-value">${_sBadge(s.status)}</div></div>
         ${prop('電話', s.phone)}
         ${prop('Email', s.email)}
-        ${prop('身分證', s.id_number)}
+        ${prop('身分證 / 統編', s.id_number)}
         ${prop('住址', s.address)}
         ${prop('銀行', s.bank_name ? s.bank_name + ' ' + (s.bank_account || '') : '')}
         ${s.portfolio_url ? `<div class="crm-detail-prop"><div class="crm-prop-label">作品集</div><div class="crm-prop-value"><a href="${_esc(s.portfolio_url)}" target="_blank" style="color:#3b82f6;">${_esc(s.portfolio_url)}</a></div></div>` : ''}
@@ -266,9 +275,101 @@ async function doImport() {
     }
 }
 
+// ── Role Management ─────────────────────────────────────────
+
+async function _loadRoles() {
+    try {
+        const s = await fetch('/api/settings/load').then(r => r.json());
+        _roles = s.staff_roles && s.staff_roles.length > 0 ? s.staff_roles : [..._DEFAULT_ROLES];
+    } catch (_) { _roles = [..._DEFAULT_ROLES]; }
+    _populateRoleSelects();
+}
+
+function _populateRoleSelects() {
+    const filter = document.getElementById('staff-filter-role');
+    if (filter) {
+        const val = filter.value;
+        filter.innerHTML = '<option value="">全部職能</option>' + _roles.map(r => `<option value="${_esc(r)}">${_esc(r)}</option>`).join('');
+        filter.value = val;
+    }
+    const modal = document.getElementById('staff-f-role');
+    if (modal) {
+        const val = modal.value;
+        modal.innerHTML = '<option value="">—</option>' + _roles.map(r => `<option value="${_esc(r)}">${_esc(r)}</option>`).join('');
+        modal.value = val;
+    }
+}
+
+async function _saveRoles() {
+    const token = localStorage.getItem('auth_token');
+    await fetch('/api/settings/save', {
+        method: 'POST', headers: { 'Content-Type': 'application/json', ...(token ? { 'Authorization': 'Bearer ' + token } : {}) },
+        body: JSON.stringify({ staff_roles: _roles })
+    });
+}
+
+window._staffEditRoles = function() {
+    let overlay = document.getElementById('staff-roles-overlay');
+    if (overlay) overlay.remove();
+    overlay = document.createElement('div');
+    overlay.id = 'staff-roles-overlay';
+    overlay.className = 'crm-modal-overlay';
+    overlay.style.display = 'flex';
+    overlay.addEventListener('click', e => { if (e.target === overlay) _closeRolesModal(); });
+
+    function _render() {
+        overlay.innerHTML = `
+          <div class="crm-modal" style="max-width:360px;">
+            <div class="crm-modal-header">
+              <h3>編輯職能選項</h3>
+              <button onclick="document.getElementById('staff-roles-overlay').remove()" class="crm-detail-close">✕</button>
+            </div>
+            <div class="crm-modal-body" style="max-height:400px;overflow-y:auto;">
+              ${_roles.map((r, i) => `<div style="display:flex;align-items:center;gap:6px;padding:6px 0;border-bottom:1px solid #2a2a2a;">
+                <span style="flex:1;font-size:14px;">${_esc(r)}</span>
+                <button class="crm-btn crm-btn-secondary crm-btn-sm" onclick="window._staffRenameRole(${i})" style="padding:2px 6px;">✎</button>
+                <button class="crm-btn crm-btn-danger crm-btn-sm" onclick="window._staffRemoveRole(${i})" style="padding:2px 6px;">✕</button>
+              </div>`).join('')}
+              <button class="crm-btn crm-btn-primary crm-btn-sm" onclick="window._staffAddRole()" style="margin-top:8px;width:100%;">+ 新增職能</button>
+            </div>
+          </div>`;
+    }
+
+    window._staffAddRole = async () => {
+        const name = prompt('輸入新職能名稱：');
+        if (!name || !name.trim()) return;
+        const n = name.trim();
+        if (_roles.includes(n)) { alert('已存在'); return; }
+        _roles.push(n);
+        await _saveRoles();
+        _populateRoleSelects();
+        _render();
+    };
+    window._staffRenameRole = async (i) => {
+        const old = _roles[i];
+        const name = prompt('修改職能名稱：', old);
+        if (!name || !name.trim() || name.trim() === old) return;
+        _roles[i] = name.trim();
+        await _saveRoles();
+        _populateRoleSelects();
+        _render();
+    };
+    window._staffRemoveRole = async (i) => {
+        if (!confirm(`確定刪除「${_roles[i]}」？已有此職能的人員不受影響。`)) return;
+        _roles.splice(i, 1);
+        await _saveRoles();
+        _populateRoleSelects();
+        _render();
+    };
+
+    function _closeRolesModal() { overlay.remove(); }
+    _render();
+    document.body.appendChild(overlay);
+};
+
 // ── Init ─────────────────────────────────────────────────────
 
-export function initCrmStaffTab() {
+export async function initCrmStaffTab() {
     for (const id of ['staff-modal', 'staff-import-modal']) {
         const el = document.getElementById(id);
         if (el) document.body.appendChild(el);
@@ -321,5 +422,6 @@ export function initCrmStaffTab() {
     }
 
     setupResizeHandle('staff-resize-handle', 'staff-detail-panel');
+    await _loadRoles();
     loadStaff();
 }

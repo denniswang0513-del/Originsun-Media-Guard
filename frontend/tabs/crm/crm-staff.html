@@ -4,20 +4,14 @@
   <input id="staff-search" type="search" placeholder="搜尋姓名、職能..." class="crm-search-input">
   <select id="staff-filter-role" class="crm-select">
     <option value="">全部職能</option>
-    <option value="攝影師">攝影師</option>
-    <option value="剪輯師">剪輯師</option>
-    <option value="導演">導演</option>
-    <option value="製片">製片</option>
-    <option value="燈光">燈光</option>
-    <option value="收音">收音</option>
-    <option value="空拍">空拍</option>
-    <option value="動畫">動畫</option>
   </select>
+  <button class="crm-btn crm-btn-secondary crm-btn-sm" onclick="window._staffEditRoles()" title="編輯職能選項" style="padding:4px 8px;">✎</button>
   <select id="staff-filter-status" class="crm-select">
     <option value="">全部狀態</option>
     <option value="在職">在職</option>
     <option value="兼職">兼職</option>
     <option value="專案">專案</option>
+    <option value="單位">單位</option>
   </select>
   <div class="crm-toolbar-right">
     <button id="staff-btn-import" class="crm-btn crm-btn-secondary">匯入 CSV</button>
@@ -78,14 +72,6 @@
           <label>職能</label>
           <select id="staff-f-role" class="crm-input">
             <option value="">—</option>
-            <option value="攝影師">攝影師</option>
-            <option value="剪輯師">剪輯師</option>
-            <option value="導演">導演</option>
-            <option value="製片">製片</option>
-            <option value="燈光">燈光</option>
-            <option value="收音">收音</option>
-            <option value="空拍">空拍</option>
-            <option value="動畫">動畫</option>
           </select>
         </div>
         <div class="crm-field">
@@ -101,6 +87,7 @@
           <select id="staff-f-status" class="crm-input">
             <option value="在職">在職</option>
             <option value="兼職">兼職</option>
+            <option value="單位">單位</option>
             <option value="專案">專案</option>
           </select>
         </div>
@@ -113,7 +100,7 @@
       <div class="crm-form-section">付款資訊（勞報用）</div>
       <div class="crm-form-grid">
         <div class="crm-field">
-          <label>身分證字號</label>
+          <label>身分證 / 統編</label>
           <input id="staff-f-id_number" type="text" class="crm-input" maxlength="10">
         </div>
         <div class="crm-field crm-field-full">
