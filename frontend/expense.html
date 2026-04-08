@@ -73,8 +73,14 @@ textarea { resize: vertical; min-height: 50px; font-family: inherit; }
         <option value="其他">其他</option>
       </select>
 
+      <label>細項</label>
+      <input id="exp-sub-item" type="text" placeholder="如：高鐵來回">
+
       <label>金額</label>
       <input id="exp-amount" type="number" inputmode="numeric" placeholder="0" min="0">
+
+      <label>請款人</label>
+      <input id="exp-payee" type="text" placeholder="選填">
 
       <label>備註</label>
       <input id="exp-notes" type="text" placeholder="選填">
@@ -103,6 +109,7 @@ textarea { resize: vertical; min-height: 50px; font-family: inherit; }
 const BASE = location.origin + '/api/v1/crm';
 let _token = localStorage.getItem('auth_token') || '';
 let _projectId = '';
+let _publicMode = false;
 
 function _headers() {
   const h = { 'Content-Type': 'application/json' };
@@ -111,6 +118,30 @@ function _headers() {
 }
 
 async function _init() {
+  // 公開模式：?project=PROJECT_ID
+  const params = new URLSearchParams(location.search);
+  const pubProjectId = params.get('project');
+  if (pubProjectId) {
+    _publicMode = true;
+    _projectId = pubProjectId;
+    try {
+      const r = await fetch(BASE + '/public/projects/' + pubProjectId + '/info');
+      if (!r.ok) throw new Error();
+      const info = await r.json();
+      const sel = document.getElementById('exp-project');
+      sel.innerHTML = '<option value="' + pubProjectId + '">' + (info.name || '專案') + '</option>';
+      sel.disabled = true;
+    } catch (_) {
+      const sel = document.getElementById('exp-project');
+      sel.innerHTML = '<option>無法載入專案</option>';
+    }
+    document.getElementById('main-section').style.display = '';
+    _loadHistory();
+    // Photo preview
+    document.getElementById('exp-file').addEventListener('change', _handlePhoto);
+    return;
+  }
+
   if (!_token) { document.getElementById('login-section').style.display = ''; return; }
   document.getElementById('main-section').style.display = '';
   // Load projects
@@ -126,15 +157,17 @@ async function _init() {
   } catch (_) {}
 
   // Photo preview
-  document.getElementById('exp-file').addEventListener('change', e => {
-    const file = e.target.files[0];
-    const area = document.getElementById('photo-area');
-    if (file) {
-      const reader = new FileReader();
-      reader.onload = ev => { area.innerHTML = '<img src="' + ev.target.result + '">'; area.classList.add('has-img'); };
-      reader.readAsDataURL(file);
-    }
-  });
+  document.getElementById('exp-file').addEventListener('change', _handlePhoto);
+}
+
+function _handlePhoto(e) {
+  const file = e.target.files[0];
+  const area = document.getElementById('photo-area');
+  if (file) {
+    const reader = new FileReader();
+    reader.onload = ev => { area.innerHTML = '<img src="' + ev.target.result + '">'; area.classList.add('has-img'); };
+    reader.readAsDataURL(file);
+  }
 }
 
 async function _login() {
@@ -171,11 +204,16 @@ async function _submit() {
 
   try {
     // Create expense
-    const r = await fetch(BASE + '/projects/' + _projectId + '/expenses', {
-      method: 'POST', headers: _headers(),
+    const expUrl = _publicMode
+      ? BASE + '/public/projects/' + _projectId + '/expenses'
+      : BASE + '/projects/' + _projectId + '/expenses';
+    const r = await fetch(expUrl, {
+      method: 'POST', headers: _publicMode ? { 'Content-Type': 'application/json' } : _headers(),
       body: JSON.stringify({
         category: document.getElementById('exp-category').value,
+        sub_item: document.getElementById('exp-sub-item').value,
         estimated: 0, actual: amount,
+        payee: document.getElementById('exp-payee').value,
         notes: document.getElementById('exp-notes').value,
       }),
     });
@@ -188,8 +226,11 @@ async function _submit() {
     if (file && expenseId) {
       const form = new FormData();
       form.append('file', file);
-      await fetch(BASE + '/project-expenses/' + expenseId + '/receipt', {
-        method: 'POST', headers: _token ? { 'Authorization': 'Bearer ' + _token } : {}, body: form,
+      const receiptUrl = _publicMode
+        ? BASE + '/public/projects/' + _projectId + '/receipts/' + expenseId
+        : BASE + '/projects/' + _projectId + '/receipts/' + expenseId;
+      await fetch(receiptUrl, {
+        method: 'POST', headers: _publicMode ? {} : { 'Authorization': 'Bearer ' + _token }, body: form,
       });
     }
 
@@ -212,7 +253,10 @@ async function _submit() {
 async function _loadHistory() {
   if (!_projectId) return;
   try {
-    const r = await fetch(BASE + '/projects/' + _projectId + '/expenses', { headers: _headers() });
+    const histUrl = _publicMode
+      ? BASE + '/public/projects/' + _projectId + '/expenses'
+      : BASE + '/projects/' + _projectId + '/expenses';
+    const r = await fetch(histUrl, { headers: _publicMode ? {} : _headers() });
     const data = await r.json();
     const list = document.getElementById('history-list');
     const exps = (data.expenses || []).reverse().slice(0, 10);

@@ -231,12 +231,16 @@ class CrmProjectPayload(BaseModel):
     amount_receivable: Optional[int] = None
     amount_received: Optional[int] = None
     transfer_fee: Optional[int] = None
+    receipt_path: str = ""
 
 
 class ProjectExpensePayload(BaseModel):
     category: str
     estimated: int = 0
     actual: int = 0
+    sub_item: str = ""
+    payee: str = ""
+    advance_id: str = ""
     notes: str = ""
 
 
@@ -314,8 +318,11 @@ class PaymentRequestPayload(BaseModel):
     project_id: Optional[str] = None
     project_label: str = ""
     payment_date: Optional[str] = None
-    payment_status: str = "未付款"
+    payment_status: str = "應付款"
     planned_month: str = ""
+    advance_by: str = ""
+    is_advance: int = 0
+    advance_returned: int = 0
     notes: str = ""
 
 
@@ -339,6 +346,42 @@ class CashEntryPayload(BaseModel):
     payment_status: str = ""
     invoice_id: Optional[str] = None
     bank_fee: Optional[int] = None
+    advance_payment_id: Optional[str] = None
+
+
+class CostLinePayload(BaseModel):
+    phase: str
+    item_name: str
+    sort_order: int = 0
+    estimated_unit_price: Optional[int] = None
+    estimated_quantity: Optional[int] = None
+    estimated_unit_type: Optional[str] = None
+    estimated_amount: Optional[int] = None
+    estimated_staff_id: Optional[str] = None
+    estimated_notes: str = ""
+    actual_unit_price: Optional[int] = None
+    actual_quantity: Optional[int] = None
+    actual_unit_type: Optional[str] = None
+    actual_amount: Optional[int] = None
+    actual_staff_id: Optional[str] = None
+    actual_notes: str = ""
+
+
+class CostLineUpdatePayload(BaseModel):
+    item_name: Optional[str] = None
+    sort_order: Optional[int] = None
+    estimated_unit_price: Optional[int] = None
+    estimated_quantity: Optional[int] = None
+    estimated_unit_type: Optional[str] = None
+    estimated_amount: Optional[int] = None
+    estimated_staff_id: Optional[str] = None
+    estimated_notes: Optional[str] = None
+    actual_unit_price: Optional[int] = None
+    actual_quantity: Optional[int] = None
+    actual_unit_type: Optional[str] = None
+    actual_amount: Optional[int] = None
+    actual_staff_id: Optional[str] = None
+    actual_notes: Optional[str] = None
 
 
 class InvoicePayload(BaseModel):

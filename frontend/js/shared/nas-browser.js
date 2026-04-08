@@ -11,6 +11,10 @@ function _fmt(bytes) {
     return (bytes / 1e3).toFixed(0) + ' KB';
 }
 
+function _esc(s) {
+    return String(s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+}
+
 /**
  * Open NAS browser modal and return selected path.
  * @param {object} opts
@@ -24,12 +28,12 @@ export function openNasBrowser(opts = {}) {
     return new Promise((resolve) => {
         _browserResolve = resolve;
         const title = opts.title || '選擇目錄';
-        const showFiles = opts.showFiles || opts.mode === 'file';
-        _showModal(title, opts.initialPath || '', showFiles, opts.mode || 'folder');
+        const showFiles = opts.showFiles !== false;
+        _showModal(title, opts.initialPath || '', showFiles, opts.mode || 'folder', opts.destPath || '');
     });
 }
 
-function _showModal(title, initialPath, showFiles, mode) {
+function _showModal(title, initialPath, showFiles, mode, destPath) {
     // Remove existing
     if (_browserModal) _browserModal.remove();
 
@@ -49,6 +53,10 @@ function _showModal(title, initialPath, showFiles, mode) {
                 <div style="text-align:center;color:#666;padding:40px;">載入中...</div>
             </div>
             <div style="padding:10px 16px;border-top:1px solid #333;display:flex;align-items:center;gap:8px;">
+                <div id="nb-mode-toggle" style="display:flex;border:1px solid #555;border-radius:4px;overflow:hidden;flex-shrink:0;">
+                    <button id="nb-mode-server" style="padding:4px 10px;font-size:11px;cursor:pointer;border:none;background:#1f538d;color:#fff;">伺服器</button>
+                    <button id="nb-mode-local" style="padding:4px 10px;font-size:11px;cursor:pointer;border:none;background:#333;color:#ccc;">本機上傳</button>
+                </div>
                 <input id="nb-path-input" type="text" value="" readonly
                     style="flex:1;background:#111;border:1px solid #444;border-radius:4px;padding:6px 10px;color:#ccc;font-size:12px;font-family:monospace;">
                 <button id="nb-cancel" style="background:#333;border:1px solid #555;color:#ccc;padding:6px 16px;border-radius:4px;cursor:pointer;font-size:12px;">取消</button>
@@ -63,7 +71,7 @@ function _showModal(title, initialPath, showFiles, mode) {
     // Store state
     overlay._showFiles = showFiles;
     overlay._mode = mode;
-    overlay._selectedPath = '';
+    overlay._selectedPath = destPath || '';
 
     // Events
     overlay.querySelector('#nb-close').onclick = () => _close('');
@@ -79,8 +87,27 @@ function _showModal(title, initialPath, showFiles, mode) {
     // Stop clicks inside the modal box from reaching the overlay
     overlay.firstElementChild.addEventListener('mousedown', (e) => e.stopPropagation());
 
-    // Load initial
-    _loadDir(initialPath, showFiles);
+    // Mode toggle
+    const btnServer = overlay.querySelector('#nb-mode-server');
+    const btnLocal = overlay.querySelector('#nb-mode-local');
+    const modeToggle = overlay.querySelector('#nb-mode-toggle');
+    // Hide toggle if showDirectoryPicker not supported
+    if (!window.showDirectoryPicker) modeToggle.style.display = 'none';
+
+    btnServer.onclick = () => {
+        btnServer.style.background = '#1f538d'; btnServer.style.color = '#fff';
+        btnLocal.style.background = '#333'; btnLocal.style.color = '#ccc';
+        overlay.querySelector('#nb-confirm').textContent = '確定';
+        _loadDir(overlay._selectedPath || initialPath || '', showFiles);
+    };
+    btnLocal.onclick = () => {
+        btnLocal.style.background = '#1f538d'; btnLocal.style.color = '#fff';
+        btnServer.style.background = '#333'; btnServer.style.color = '#ccc';
+        _showLocalBrowser(overlay);
+    };
+
+    // Load initial — use initialPath if provided, otherwise root
+    _loadDir(initialPath || '', showFiles);
 }
 
 function _close(result) {
@@ -102,7 +129,8 @@ async function _loadDir(path, showFiles) {
         const data = await res.json();
 
         if (data.status === 'error') {
-            listEl.innerHTML = `<div style="text-align:center;color:#ef4444;padding:40px;">${data.message}</div>`;
+            if (path) { _loadDir('', showFiles); return; }
+            listEl.innerHTML = `<div style="text-align:center;color:#ef4444;padding:40px;">${_esc(data.message)}</div>`;
             return;
         }
 
@@ -129,12 +157,12 @@ async function _loadDir(path, showFiles) {
             if (isDir) {
                 html += `<div style="display:flex;align-items:center;gap:8px;padding:6px 16px;cursor:pointer;font-size:13px;color:#e0e0e0;" ${bgHover}
                     data-path="${entry.path}" data-type="dir">
-                    ${icon} <span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${entry.name}</span>${sizeStr}
+                    ${icon} <span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${_esc(entry.name)}</span>${sizeStr}
                 </div>`;
             } else {
                 html += `<div style="display:flex;align-items:center;gap:8px;padding:6px 16px;cursor:pointer;font-size:13px;color:#aaa;" ${bgHover}
                     data-path="${entry.path}" data-type="file">
-                    ${icon} <span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${entry.name}</span>${sizeStr}
+                    ${icon} <span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${_esc(entry.name)}</span>${sizeStr}
                 </div>`;
             }
         }
@@ -173,7 +201,7 @@ async function _loadDir(path, showFiles) {
 
 function _renderBreadcrumb(el, currentPath, showFiles) {
     if (!el) return;
-    let html = '<span style="color:#888;font-size:11px;cursor:pointer;" data-bc-path="">Roots</span>';
+    let html = '<span style="color:#888;font-size:11px;cursor:pointer;" data-bc-path="">伺服器</span>';
 
     if (currentPath) {
         const normalized = currentPath.replace(/\\/g, '/');
@@ -208,6 +236,115 @@ if (!document.getElementById('nb-spin-style')) {
     style.id = 'nb-spin-style';
     style.textContent = '@keyframes spin { to { transform: rotate(360deg); } }';
     document.head.appendChild(style);
+}
+
+// ── Local Upload Mode ──────────────────────────────────────
+
+async function _showLocalBrowser(overlay) {
+    const listEl = document.getElementById('nb-list');
+    const breadcrumbEl = document.getElementById('nb-breadcrumb');
+    const inputEl = document.getElementById('nb-path-input');
+    const confirmBtn = document.getElementById('nb-confirm');
+    if (!listEl) return;
+
+    if (!window.showDirectoryPicker) {
+        listEl.innerHTML = '<div style="text-align:center;color:#ef4444;padding:40px;">此瀏覽器不支援本機資料夾存取</div>';
+        return;
+    }
+
+    breadcrumbEl.innerHTML = '<span style="color:#888;font-size:11px;">本機模式 - 選擇要上傳的資料夾</span>';
+    listEl.innerHTML = '<div style="text-align:center;color:#666;padding:40px;">正在開啟資料夾選擇器...</div>';
+
+    let dirHandle;
+    try {
+        dirHandle = await window.showDirectoryPicker({ mode: 'read' });
+    } catch (e) {
+        listEl.innerHTML = '<div style="text-align:center;color:#666;padding:40px;">已取消選擇</div>';
+        return;
+    }
+
+    // List files in selected directory
+    const files = [];
+    for await (const [name, handle] of dirHandle) {
+        if (handle.kind === 'file') {
+            files.push({ name, handle });
+        }
+    }
+
+    if (files.length === 0) {
+        listEl.innerHTML = '<div style="text-align:center;color:#666;padding:40px;">此資料夾沒有檔案</div>';
+        return;
+    }
+
+    breadcrumbEl.innerHTML = '<span style="color:#e0e0e0;font-size:11px;">' + dirHandle.name + '</span>' +
+        '<span style="color:#666;font-size:11px;margin-left:8px;">(' + files.length + ' 個檔案)</span>';
+    if (inputEl) inputEl.value = dirHandle.name;
+
+    // Render file list with checkboxes
+    let html = '<div style="padding:6px 16px;display:flex;align-items:center;gap:6px;">' +
+        '<label style="display:flex;align-items:center;gap:4px;cursor:pointer;font-size:11px;color:#9ca3af;">' +
+        '<input type="checkbox" id="nb-local-all" checked> 全選</label></div>';
+    files.sort((a, b) => a.name.localeCompare(b.name));
+    for (let i = 0; i < files.length; i++) {
+        const f = files[i];
+        const isImg = /\.(jpg|jpeg|png|gif|webp|heic)$/i.test(f.name);
+        const isPdf = /\.pdf$/i.test(f.name);
+        const icon = isImg ? '&#128247;' : isPdf ? '&#128196;' : '&#128462;';
+        html += '<div style="display:flex;align-items:center;gap:8px;padding:4px 16px;font-size:13px;color:#d1d5db;">' +
+            '<input type="checkbox" class="nb-local-check" data-idx="' + i + '" checked>' +
+            '<span style="color:#888;">' + icon + '</span>' +
+            '<span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + _esc(f.name) + '</span></div>';
+    }
+    listEl.innerHTML = html;
+
+    // Select all toggle
+    const allCheck = listEl.querySelector('#nb-local-all');
+    if (allCheck) {
+        allCheck.addEventListener('change', () => {
+            listEl.querySelectorAll('.nb-local-check').forEach(c => { c.checked = allCheck.checked; });
+        });
+    }
+
+    // Override confirm button for upload
+    confirmBtn.textContent = '上傳選取檔案';
+    confirmBtn.onclick = async () => {
+        let targetPath = overlay._selectedPath || inputEl.value;
+        if (!targetPath) {
+            targetPath = prompt('請輸入伺服器端目的資料夾路徑：');
+            if (!targetPath) return;
+        }
+        const checks = listEl.querySelectorAll('.nb-local-check:checked');
+        if (checks.length === 0) { alert('請勾選至少一個檔案'); return; }
+
+        confirmBtn.disabled = true;
+        confirmBtn.textContent = '上傳中 0/' + checks.length;
+        let done = 0;
+        let failed = 0;
+
+        for (const chk of checks) {
+            const idx = parseInt(chk.dataset.idx);
+            const fileEntry = files[idx];
+            try {
+                const file = await fileEntry.handle.getFile();
+                const form = new FormData();
+                form.append('file', file);
+                form.append('dest_path', targetPath);
+                const token = localStorage.getItem('auth_token');
+                const headers = token ? { 'Authorization': 'Bearer ' + token } : {};
+                await fetch('/api/v1/utils/upload_file', { method: 'POST', headers, body: form });
+                done++;
+            } catch (_) {
+                failed++;
+            }
+            confirmBtn.textContent = '上傳中 ' + (done + failed) + '/' + checks.length;
+        }
+
+        confirmBtn.disabled = false;
+        confirmBtn.textContent = '上傳完成';
+        const msg = '上傳完成：成功 ' + done + ' 個' + (failed ? '，失敗 ' + failed + ' 個' : '');
+        breadcrumbEl.innerHTML = '<span style="color:#86efac;font-size:11px;">' + msg + '</span>';
+        setTimeout(() => { confirmBtn.textContent = '確定'; confirmBtn.onclick = () => _close(targetPath); }, 2000);
+    };
 }
 
 // Expose

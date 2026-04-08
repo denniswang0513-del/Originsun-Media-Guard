@@ -1,0 +1,31 @@
+/**
+ * crm-projects-state.js — 共享狀態 + 回呼登記
+ * 所有 crm-projects-* 模組 import 此檔案存取共享狀態
+ */
+
+// ── Shared State ────────────────────────────────────────────
+export const state = {
+    projects: [],
+    clients: [],
+    users: [],
+    selectedId: null,
+    editingId: null,
+    staffList: [],
+    filters: { q: '', status: '', client_id: '', am: '' },
+};
+
+// ── Constants ──────────────────────────────────────────────
+export const EXPENSE_CATEGORIES = ['交通','住宿','飲食','提案','器材','其他'];
+
+// ── Callbacks (解耦跨模組依賴) ──────────────────────────────
+// 下游模組完成操作後呼叫對應 callback，上游模組在 init 時註冊實際函式
+export const callbacks = {
+    renderDetail: null,      // (project) => void — 重新渲染詳情面板
+    renderList: null,        // () => void — 重新渲染列表
+    loadProjects: null,      // () => Promise — 重新載入專案資料
+    loadFinancialSummary: null, // (projectId) => Promise — 刷新財務摘要
+    loadCostStaff: null,     // (projectId) => Promise — 刷新執行人員
+    loadAdvances: null,      // (projectId) => Promise — 刷新預支款
+    closeDetail: null,       // () => void — 關閉詳情面板
+    loadQuotations: null,    // (projectId) => Promise — 刷新報價單
+};

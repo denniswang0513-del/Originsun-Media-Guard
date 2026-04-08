@@ -833,6 +833,22 @@
     flex: 1;
 }
 
+.pj-machine-edit {
+    position: absolute;
+    top: 4px;
+    right: 24px;
+    font-size: 11px;
+    color: #555;
+    cursor: pointer;
+    background: none;
+    border: none;
+    font-family: inherit;
+    padding: 2px 4px;
+    line-height: 1;
+    transition: color 0.2s ease;
+}
+.pj-machine-edit:hover { color: #3b82f6; }
+
 .pj-machine-remove {
     position: absolute;
     top: 4px;
@@ -851,6 +867,37 @@
 .pj-machine-remove:hover {
     color: #ef4444;
 }
+
+/* Edit Agent Modal */
+.pj-edit-overlay {
+    position: fixed; inset: 0;
+    background: rgba(0,0,0,.55);
+    display: flex; align-items: center; justify-content: center;
+    z-index: 9999;
+}
+.pj-edit-modal {
+    background: #1e1e1e; border: 1px solid #333; border-radius: 8px;
+    padding: 20px 24px; min-width: 320px; color: #ccc;
+}
+.pj-edit-modal h3 { margin: 0 0 14px; font-size: 14px; color: #eee; }
+.pj-edit-modal label { display: block; font-size: 11px; color: #888; margin: 10px 0 4px; }
+.pj-edit-modal input {
+    width: 100%; box-sizing: border-box; padding: 6px 8px;
+    background: #111; border: 1px solid #444; border-radius: 4px;
+    color: #eee; font-size: 13px; outline: none;
+}
+.pj-edit-modal input:focus { border-color: #3b82f6; }
+.pj-edit-actions { display: flex; gap: 8px; justify-content: flex-end; margin-top: 16px; }
+.pj-edit-cancel {
+    padding: 5px 14px; background: #333; border: 1px solid #555;
+    border-radius: 4px; color: #ccc; cursor: pointer; font-size: 12px;
+}
+.pj-edit-cancel:hover { background: #444; }
+.pj-edit-save {
+    padding: 5px 14px; background: #3b82f6; border: none;
+    border-radius: 4px; color: #fff; cursor: pointer; font-size: 12px;
+}
+.pj-edit-save:hover { background: #2563eb; }
 
 .pj-machine-task {
     font-size: 11px;

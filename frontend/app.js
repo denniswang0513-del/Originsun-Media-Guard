@@ -150,7 +150,6 @@ if (typeof appendLog === 'undefined') {
                 await Promise.all([
                     _loadCrmTab('tab_crm_clients',  'crm.html',          'crm.js',          'initCrmTab'),
                     _loadCrmTab('tab_crm_projects', 'crm-projects.html', 'crm-projects.js', 'initCrmProjectsTab'),
-                    _loadCrmTab('tab_crm_quotes',   'crm-quotes.html',   'crm-quotes.js',   'initCrmQuotesTab'),
                     _loadCrmTab('tab_crm_staff',    'crm-staff.html',    'crm-staff.js',    'initCrmStaffTab'),
                     _loadCrmTab('tab_crm_invoices', 'crm-invoices.html', 'crm-invoices.js', 'initCrmInvoicesTab'),
                 ]);
@@ -1169,11 +1168,15 @@ if (typeof appendLog === 'undefined') {
 
         // ================= Tab 切換邏輯 =================
         function switchTab(tabId) {
+            if (typeof window._costCheckUnsaved === 'function' && Object.keys(window._costDirtyMap || {}).length > 0) {
+                window._costCheckUnsaved(function() { window._costDirtyMap = {}; switchTab(tabId); });
+                return;
+            }
             document.querySelectorAll('.tab-content').forEach(el => el.classList.add('hidden'));
             document.getElementById(tabId).classList.remove('hidden');
 
             // 重置按鈕樣式
-            const btnCols = ['btn_tab-projects', 'btn_tab_main', 'btn_tab_verify', 'btn_tab_transcode', 'btn_tab_concat', 'btn_tab_report', 'btn_tab_transcribe', 'btn_tab_tts', 'btn_tab_crm_clients', 'btn_tab_crm_projects', 'btn_tab_crm_quotes', 'btn_tab_crm_staff', 'btn_tab_crm_invoices'];
+            const btnCols = ['btn_tab-projects', 'btn_tab_main', 'btn_tab_verify', 'btn_tab_transcode', 'btn_tab_concat', 'btn_tab_report', 'btn_tab_transcribe', 'btn_tab_tts', 'btn_tab_crm_clients', 'btn_tab_crm_projects', 'btn_tab_crm_staff', 'btn_tab_crm_invoices'];
             btnCols.forEach(btn => {
                 const el = document.getElementById(btn);
                 if (el) {
@@ -1190,7 +1193,7 @@ if (typeof appendLog === 'undefined') {
             }
 
             // Hide progress/log sections for CRM tabs (no media tasks)
-            const crmTabs = ['tab_crm_clients', 'tab_crm_projects', 'tab_crm_quotes', 'tab_crm_staff', 'tab_crm_invoices'];
+            const crmTabs = ['tab_crm_clients', 'tab_crm_projects', 'tab_crm_staff', 'tab_crm_invoices'];
             const isCrm = crmTabs.includes(tabId);
             document.querySelectorAll('.media-task-section').forEach(el => el.style.display = isCrm ? 'none' : '');
 

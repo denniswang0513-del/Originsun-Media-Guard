@@ -117,17 +117,26 @@
       <!-- 2. 關聯資訊 -->
       <div class="crm-form-section">關聯資訊</div>
       <div class="crm-form-grid">
-        <div class="crm-field crm-field-full">
+        <div class="crm-field crm-field-full" id="cash-field-project">
           <label>專案</label>
           <select id="cash-f-project_id" class="crm-input"><option value="">— 不關聯 —</option></select>
         </div>
-        <div class="crm-field">
+        <div class="crm-field" id="cash-field-invoice">
           <label>發票</label>
           <select id="cash-f-invoice_id" class="crm-input"><option value="">— 不關聯 —</option></select>
         </div>
-        <div class="crm-field">
+        <div class="crm-field" id="cash-field-bankfee">
           <label>匯費</label>
           <input id="cash-f-bank_fee" type="number" class="crm-input" min="0" value="0">
+        </div>
+        <!-- 預支關聯（專案雜支時顯示） -->
+        <div id="cash-advance-section" class="crm-field crm-field-full" style="display:none;">
+          <label style="display:flex;align-items:center;gap:4px;cursor:pointer;margin:0;">
+            <input type="checkbox" id="cash-f-advance-check" onchange="window._cashToggleAdvance(this.checked)"> 預支關聯
+          </label>
+          <div style="font-size:11px;color:#6b7280;margin-top:4px;">填「支出」= 發款，填「收入」= 收款</div>
+          <div id="cash-advance-list" style="display:none;margin-top:8px;"></div>
+          <input type="hidden" id="cash-f-advance_payment_id" value="">
         </div>
       </div>
       <div id="cash-verify-row" style="display:none;padding:8px 0;font-size:12px;color:#9ca3af;"></div>

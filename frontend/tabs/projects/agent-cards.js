@@ -136,8 +136,15 @@ function _createMachineCard(agent) {
     }
     card.appendChild(versionRow);
 
-    // Remove button (admin only)
+    // Edit + Remove buttons (admin only)
     if (window._isAdmin) {
+        const editBtn = document.createElement('button');
+        editBtn.className = 'pj-machine-edit';
+        editBtn.textContent = '\u270E'; // ✎
+        editBtn.title = '編輯名稱 / IP';
+        editBtn.addEventListener('click', (e) => { e.stopPropagation(); _showEditModal(agent); });
+        card.appendChild(editBtn);
+
         const removeBtn = document.createElement('button');
         removeBtn.className = 'pj-machine-remove';
         removeBtn.textContent = '\u2715'; // ✕
@@ -396,6 +403,70 @@ export async function removeAgent(agentId) {
 
     _renderMachines();
     _syncComputeHosts();
+}
+
+// ── Edit Agent Modal ──
+
+function _showEditModal(agent) {
+    // Parse IP and port from URL
+    const urlMatch = (agent.url || '').match(/^https?:\/\/([^:\/]+)(?::(\d+))?/);
+    const currentIp = urlMatch ? urlMatch[1] : '';
+    const currentPort = urlMatch ? (urlMatch[2] || '8000') : '8000';
+
+    const overlay = document.createElement('div');
+    overlay.className = 'pj-edit-overlay';
+    overlay.innerHTML = `
+        <div class="pj-edit-modal">
+            <h3>編輯機器 — ${agent.name}</h3>
+            <label>名稱</label>
+            <input id="pj-edit-name" value="${agent.name || ''}" />
+            <label>IP 位址</label>
+            <input id="pj-edit-ip" value="${currentIp}" />
+            <label>Port</label>
+            <input id="pj-edit-port" value="${currentPort}" />
+            <div class="pj-edit-actions">
+                <button class="pj-edit-cancel">取消</button>
+                <button class="pj-edit-save">儲存</button>
+            </div>
+        </div>
+    `;
+    document.body.appendChild(overlay);
+
+    overlay.querySelector('.pj-edit-cancel').addEventListener('click', () => overlay.remove());
+    overlay.addEventListener('click', (e) => { if (e.target === overlay) overlay.remove(); });
+
+    overlay.querySelector('.pj-edit-save').addEventListener('click', async () => {
+        const newName = document.getElementById('pj-edit-name').value.trim();
+        const newIp = document.getElementById('pj-edit-ip').value.trim();
+        const newPort = document.getElementById('pj-edit-port').value.trim() || '8000';
+
+        if (!newName || !newIp) { alert('名稱和 IP 不可為空'); return; }
+
+        const newUrl = `http://${newIp}:${newPort}`;
+        try {
+            const res = await fetch(`/api/v1/agents/${encodeURIComponent(agent.id)}`, {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ name: newName, url: newUrl }),
+            });
+            if (!res.ok) {
+                const err = await res.json().catch(() => ({}));
+                alert(err.detail || '更新失敗');
+                return;
+            }
+            const data = await res.json();
+            const updated = data.agent;
+            // Update local state
+            const idx = _agents.findIndex(a => a.id === agent.id);
+            if (idx !== -1) _agents[idx] = { ..._agents[idx], ...updated };
+            overlay.remove();
+            _renderMachines();
+            _syncComputeHosts();
+            // Restart polling with new URL
+            _stopPolling(agent.id);
+            _startPolling(_agents.find(a => a.id === agent.id));
+        } catch (_) { alert('更新失敗'); }
+    });
 }
 
 // ── Expose via window for late binding ──

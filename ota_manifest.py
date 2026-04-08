@@ -65,7 +65,7 @@ EXCLUDE_DIRS = {
 
 # ── Python stdlib modules (excluded from dependency checks) ──
 STDLIB = {
-    "os", "sys", "json", "time", "re", "io", "math", "random", "uuid", "datetime",
+    "os", "sys", "json", "time", "re", "io", "math", "random", "uuid", "datetime", "calendar",
     "pathlib", "collections", "functools", "itertools", "typing", "enum", "dataclasses",
     "abc", "subprocess", "shutil", "tempfile", "zipfile", "hashlib", "socket", "signal",
     "threading", "asyncio", "concurrent", "http", "urllib", "email", "html", "xml",

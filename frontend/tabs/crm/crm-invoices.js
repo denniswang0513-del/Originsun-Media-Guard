@@ -214,14 +214,15 @@ function renderDetail(inv) {
         const empty = !value;
         return `<div class="crm-detail-prop"><div class="crm-prop-label">${label}</div><div class="crm-prop-value${empty ? ' empty' : ''}">${empty ? '空' : _esc(String(value))}</div></div>`;
     };
-    const section = (title) => `<div class="crm-detail-section">${title}</div>`;
+    const section = (title, extra = '') => `<div class="crm-detail-section">${title}${extra ? '<span style="margin-left:auto;">' + extra + '</span>' : ''}</div>`;
     const commLabel = inv.category === '外部代開' ? '代開應匯' : inv.category === '內部代開' ? '代開匯款' : '';
 
     let html = '';
     // ── 頂部
     html += prop('日期', inv.invoice_date ? inv.invoice_date.substring(0, 10) : '');
     // ── 開立資訊
-    html += section('開立資訊');
+    const payBadge = `<span class="crm-badge crm-pay-badge-${_esc(inv.payment_status === '已收款' ? '收款' : inv.payment_status || '未收款')}">${_esc(inv.payment_status || '未收款')}</span>`;
+    html += section('開立資訊', payBadge);
     html += prop('發票編號', inv.invoice_number);
     html += prop('開立狀態', inv.issue_status);
     html += prop('未稅價', inv.amount_ex_tax ? '$' + _fmtNum(inv.amount_ex_tax) : '');
@@ -387,6 +388,13 @@ function openModal(inv = null) {
     _editingId = inv ? inv.id : null;
     _editingPaymentStatus = inv?.payment_status || null;
     document.getElementById('inv-modal-title').textContent = inv ? '編輯發票' : '新增發票';
+    // Payment status badge
+    const badgeEl = document.getElementById('inv-modal-pay-badge');
+    if (badgeEl) {
+        const ps = inv?.payment_status || '未收款';
+        const cls = ps === '已收款' ? '收款' : ps === '作廢' ? '作廢' : '未收款';
+        badgeEl.innerHTML = inv ? `<span class="crm-badge crm-pay-badge-${cls}">${_esc(ps)}</span>` : '';
+    }
     const err = document.getElementById('inv-modal-error');
     err.textContent = ''; err.style.display = 'none';
     _populateProjectSelect(inv?.project_id || '');

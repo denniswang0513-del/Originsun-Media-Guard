@@ -1,4 +1,13 @@
 <div class="crm-root">
+<!-- Sub-tabs: 專案 / 報價總覽 -->
+<div class="crm-sub-tabs" id="proj-sub-tabs">
+  <button class="crm-sub-tab active" data-view="projects">專案</button>
+  <button class="crm-sub-tab" data-view="quotes">報價總覽</button>
+</div>
+
+<!-- ══ 專案子視圖 ══ -->
+<div id="proj-view-projects" style="display:flex;flex-direction:column;flex:1;min-height:0;overflow:hidden;">
+
 <!-- Project Toolbar -->
 <div class="crm-toolbar">
   <input id="proj-search" type="search" placeholder="搜尋專案名稱..." class="crm-search-input">
@@ -43,10 +52,10 @@
     <div class="crm-detail-bar">
       <div id="proj-detail-title" class="crm-detail-bar-title"></div>
       <div class="crm-detail-bar-tabs" id="proj-detail-tabs">
-        <button class="crm-tab active" data-tab="info">專案資訊</button>
+        <button class="crm-tab active" data-tab="info">專案總覽</button>
+        <button class="crm-tab" data-tab="quotes">報價管理</button>
         <button class="crm-tab" data-tab="team">人員配置</button>
-        <button class="crm-tab" data-tab="quotes">報價</button>
-        <button class="crm-tab" data-tab="finance">財務</button>
+        <button class="crm-tab" data-tab="finance">專案帳目</button>
       </div>
       <div class="crm-detail-bar-actions" id="proj-bar-actions">
         <button id="proj-detail-close" class="crm-detail-close" title="關閉">✕</button>
@@ -54,13 +63,18 @@
     </div>
     <div id="proj-detail-content" class="crm-detail-content">
       <div id="proj-detail-info"></div>
-      <div id="proj-detail-team" class="hidden"></div>
       <div id="proj-detail-quotes" class="hidden"></div>
+      <div id="proj-detail-team" class="hidden"></div>
       <div id="proj-detail-finance" class="hidden"></div>
     </div>
   </div>
 </div>
-</div>
+</div><!-- /proj-view-projects -->
+
+<!-- ══ 報價總覽子視圖 ══ -->
+<div id="proj-view-quotes" style="display:none;flex-direction:column;flex:1;min-height:0;overflow:hidden;"></div>
+
+</div><!-- /crm-root -->
 
 <!-- Add / Edit Project Modal -->
 <div id="proj-modal" class="crm-modal-overlay" style="display:none;">

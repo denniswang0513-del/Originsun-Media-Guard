@@ -25,11 +25,12 @@ from config import load_settings as _load_settings
 import core.state as state
 
 try:
-    from sqlalchemy import select, or_, delete
+    from sqlalchemy import select, or_, delete, update as sa_update
     from sqlalchemy.exc import IntegrityError
     from db.models import (Client, User, CrmProject, CrmQuotation, CrmQuotationItem,
                            CrmQuotationTemplate, CrmStaff, CrmProjectStaff, CrmProjectExpense,
-                           CrmInvoice, CrmPaymentRequest, CrmCashEntry)
+                           CrmInvoice, CrmPaymentRequest, CrmCashEntry,
+                           CrmProjectCostLine, CrmCostLineTemplate)
     _HAS_DB = True
 except ImportError:
     _HAS_DB = False
@@ -97,7 +98,7 @@ def _to_dict(c) -> dict:
 from core.schemas import (ClientPayload, CrmProjectPayload, ProjectExpensePayload,
                          QuotationPayload, QuotationItemPayload, QuotationTemplatePayload,
                          StaffPayload, ProjectStaffPayload, InvoicePayload, PaymentRequestPayload,
-                         CashEntryPayload)
+                         CashEntryPayload, CostLinePayload, CostLineUpdatePayload)
 
 
 async def _auto_update_client_status(session, client_id: str):
@@ -210,11 +211,23 @@ async def update_client(client_id: str, req: ClientPayload, request: Request):
         client = await session.get(Client, client_id)
         if not client:
             raise HTTPException(status_code=404, detail="找不到此客戶")
+        old_am = client.am_username
         for k, v in req.model_dump().items():
             setattr(client, k, v)
         client.updated_at = _now()
         await session.commit()
         await session.refresh(client)
+
+        # Sync AM to active projects when client AM changed
+        if req.am_username and req.am_username != old_am:
+            await session.execute(
+                sa_update(CrmProject)
+                .where(CrmProject.client_id == client_id)
+                .where(CrmProject.status.in_(["進行中", "報價中", "洽談中"]))
+                .values(am_username=req.am_username)
+            )
+            await session.commit()
+
     return {"status": "ok", "client": _to_dict(client)}
 
 
@@ -354,6 +367,7 @@ def _to_project_dict(p, client_short_name: str = "") -> dict:
         "amount_receivable": p.amount_receivable,
         "amount_received": p.amount_received,
         "transfer_fee": p.transfer_fee,
+        "receipt_path": p.receipt_path or "",
         "created_at": p.created_at.isoformat() if p.created_at else None,
         "updated_at": p.updated_at.isoformat() if p.updated_at else None,
     }
@@ -416,6 +430,10 @@ async def create_project(req: CrmProjectPayload, request: Request):
         if not client:
             raise HTTPException(status_code=404, detail="找不到指定的客戶")
         client_name = client.short_name
+
+        # Inherit AM from client if not explicitly set
+        if not project.am_username and client.am_username:
+            project.am_username = client.am_username
 
         session.add(project)
         await _auto_update_client_status(session, req.client_id)
@@ -512,11 +530,18 @@ async def update_project_status(project_id: str, request: Request):
     if new_status not in ("洽談中", "報價中", "進行中", "已結案"):
         raise HTTPException(status_code=400, detail="無效的狀態值")
 
+    contract_amount = body.get("contract_amount")
+    amount_receivable = body.get("amount_receivable")
+
     async with factory() as session:
         project = await session.get(CrmProject, project_id)
         if not project:
             raise HTTPException(status_code=404, detail="找不到此專案")
         project.status = new_status
+        if contract_amount is not None:
+            project.contract_amount = int(contract_amount)
+        if amount_receivable is not None:
+            project.amount_receivable = int(amount_receivable)
         project.updated_at = _now()
         await session.commit()
         await session.refresh(project)
@@ -1229,7 +1254,81 @@ async def list_project_expenses(project_id: str):
     return {"expenses": [{
         "id": e.id, "category": e.category,
         "estimated": e.estimated, "actual": e.actual,
+        "sub_item": e.sub_item or "", "payee": e.payee or "",
+        "advance_id": e.advance_id or "",
         "receipt_url": e.receipt_url or "", "notes": e.notes or "",
+        "created_at": e.created_at.isoformat()[:10] if e.created_at else None,
+    } for e in rows]}
+
+
+async def _create_expense(session, project_id: str, req, advance_id=None, payee_override=None):
+    """建立專案雜支的共用 helper。"""
+    e = CrmProjectExpense(
+        id=uuid.uuid4().hex, project_id=project_id,
+        category=req.category, estimated=req.estimated,
+        actual=req.actual, sub_item=req.sub_item or None,
+        payee=payee_override or req.payee or None,
+        advance_id=advance_id or req.advance_id or None,
+        notes=req.notes, created_at=_now(),
+    )
+    session.add(e)
+    await session.commit()
+    return e
+
+
+@router.post("/advance/{advance_id}/expenses")
+async def add_advance_expense(advance_id: str, req: ProjectExpensePayload):
+    """公開端點：透過預支款 ID 登記支出（不需登入）。"""
+    _require_db()
+    factory = await _get_factory()
+    async with factory() as session:
+        adv = await session.get(CrmPaymentRequest, advance_id)
+        if not adv or not adv.is_advance:
+            raise HTTPException(status_code=404, detail="找不到此預支款")
+        if not adv.project_id:
+            raise HTTPException(status_code=400, detail="此預支款未綁定專案")
+        e = await _create_expense(session, adv.project_id, req, advance_id=advance_id, payee_override=adv.payee_name)
+    return {"status": "ok", "expense_id": e.id, "expense": {"id": e.id}}
+
+
+@router.post("/public/projects/{project_id}/expenses")
+async def add_public_project_expense(project_id: str, req: ProjectExpensePayload):
+    """公開端點：透過專案 ID 登記雜支（不需登入）。"""
+    _require_db()
+    factory = await _get_factory()
+    async with factory() as session:
+        proj = await session.get(CrmProject, project_id)
+        if not proj:
+            raise HTTPException(status_code=404, detail="找不到此專案")
+        e = await _create_expense(session, project_id, req)
+    return {"status": "ok", "expense_id": e.id, "expense": {"id": e.id}}
+
+
+@router.get("/public/projects/{project_id}/info")
+async def get_public_project_info(project_id: str):
+    """公開端點：取得專案名稱（不需登入）。"""
+    _require_db()
+    factory = await _get_factory()
+    async with factory() as session:
+        proj = await session.get(CrmProject, project_id)
+        if not proj:
+            raise HTTPException(status_code=404, detail="找不到此專案")
+    return {"id": proj.id, "name": proj.name}
+
+
+@router.get("/public/projects/{project_id}/expenses")
+async def list_public_project_expenses(project_id: str):
+    """公開端點：列出專案雜支（不需登入）。"""
+    _require_db()
+    factory = await _get_factory()
+    async with factory() as session:
+        rows = (await session.execute(
+            select(CrmProjectExpense).where(CrmProjectExpense.project_id == project_id)
+        )).scalars().all()
+    return {"expenses": [{
+        "id": e.id, "category": e.category, "actual": e.actual,
+        "sub_item": e.sub_item or "", "payee": e.payee or "",
+        "created_at": e.created_at.isoformat()[:10] if e.created_at else None,
     } for e in rows]}
 
 
@@ -1239,14 +1338,28 @@ async def add_project_expense(project_id: str, req: ProjectExpensePayload, reque
     _require_db()
     factory = await _get_factory()
     async with factory() as session:
-        e = CrmProjectExpense(
-            id=uuid.uuid4().hex, project_id=project_id,
-            category=req.category, estimated=req.estimated,
-            actual=req.actual, notes=req.notes,
-        )
-        session.add(e)
-        await session.commit()
+        e = await _create_expense(session, project_id, req)
     return {"status": "ok", "expense_id": e.id, "expense": {"id": e.id}}
+
+
+@router.patch("/project-expenses/link-advance")
+async def link_expenses_to_advance(request: Request):
+    """批次綁定/解除雜支與預支款。body: {expense_ids: [...], advance_id: "..." 或 ""}"""
+    _check_auth(request)
+    _require_db()
+    body = await request.json()
+    expense_ids = body.get("expense_ids", [])
+    advance_id = body.get("advance_id")
+    if not expense_ids:
+        raise HTTPException(status_code=400, detail="缺少 expense_ids")
+    factory = await _get_factory()
+    async with factory() as session:
+        for eid in expense_ids:
+            e = await session.get(CrmProjectExpense, eid)
+            if e:
+                e.advance_id = advance_id if advance_id else None
+        await session.commit()
+    return {"status": "ok", "linked": len(expense_ids)}
 
 
 @router.put("/project-expenses/{expense_id}")
@@ -1261,6 +1374,9 @@ async def update_project_expense(expense_id: str, req: ProjectExpensePayload, re
         e.category = req.category
         e.estimated = req.estimated
         e.actual = req.actual
+        e.sub_item = req.sub_item or None
+        e.payee = req.payee or None
+        e.advance_id = req.advance_id or None
         e.notes = req.notes
         await session.commit()
     return {"status": "ok"}
@@ -1310,6 +1426,107 @@ async def upload_expense_receipt(expense_id: str, request: Request, file: Upload
     return {"status": "ok", "receipt_url": receipt_url}
 
 
+# ── Per-Project Receipt Storage ────────────────────────────
+
+@router.post("/projects/{project_id}/receipts/{expense_id}")
+async def upload_project_receipt(project_id: str, expense_id: str, request: Request, file: UploadFile = File(...)):
+    """上傳收據到專案收據資料夾。"""
+    _check_auth(request)
+    return await _save_receipt(project_id, expense_id, file)
+
+
+@router.post("/public/projects/{project_id}/receipts/{expense_id}")
+async def upload_project_receipt_public(project_id: str, expense_id: str, file: UploadFile = File(...)):
+    """公開端點：上傳收據。"""
+    return await _save_receipt(project_id, expense_id, file)
+
+
+async def _save_receipt(project_id: str, expense_id: str, file: UploadFile):
+    import re as _re
+    _require_db()
+    factory = await _get_factory()
+    async with factory() as session:
+        proj = await session.get(CrmProject, project_id)
+        if not proj:
+            raise HTTPException(status_code=404, detail="找不到此專案")
+        exp = await session.get(CrmProjectExpense, expense_id)
+        if not exp:
+            raise HTTPException(status_code=404, detail="找不到此支出")
+
+        # Determine save path
+        base = proj.receipt_path if proj.receipt_path else os.path.join(
+            os.getcwd(), "uploads", "receipts", proj.name or project_id)
+        os.makedirs(base, exist_ok=True)
+
+        # Build filename: date_category_subitem_payee_id.ext
+        date_str = exp.created_at.strftime("%Y%m%d") if exp.created_at else "nodate"
+        cat = _re.sub(r'[\\/:*?"<>|]', '', exp.category or "misc")
+        sub = _re.sub(r'[\\/:*?"<>|]', '', exp.sub_item or "")
+        payee = _re.sub(r'[\\/:*?"<>|]', '', exp.payee or "")
+        parts = [date_str, cat]
+        if sub:
+            parts.append(sub)
+        if payee:
+            parts.append(payee)
+        parts.append(expense_id[:8])
+        ext = os.path.splitext(file.filename or ".jpg")[1]
+        filename = "_".join(parts) + ext
+
+        filepath = os.path.join(base, filename)
+        content = await file.read()
+        with open(filepath, "wb") as f:
+            f.write(content)
+
+        # Save receipt_url to expense
+        exp.receipt_url = filepath
+        await session.commit()
+
+    return {"status": "ok", "path": filepath, "filename": filename}
+
+
+@router.get("/projects/{project_id}/receipts")
+async def list_project_receipts(project_id: str, request: Request):
+    """列出專案收據資料夾內的所有檔案。"""
+    _check_auth(request)
+    _require_db()
+    factory = await _get_factory()
+    async with factory() as session:
+        proj = await session.get(CrmProject, project_id)
+        if not proj:
+            raise HTTPException(status_code=404, detail="找不到此專案")
+    base = proj.receipt_path if proj.receipt_path else os.path.join(
+        os.getcwd(), "uploads", "receipts", proj.name or project_id)
+    if not os.path.isdir(base):
+        return {"receipts": [], "path": base}
+    files = []
+    for fn in sorted(os.listdir(base)):
+        fp = os.path.join(base, fn)
+        if os.path.isfile(fp):
+            files.append({"filename": fn, "path": fp, "size": os.path.getsize(fp)})
+    return {"receipts": files, "path": base}
+
+
+@router.get("/receipt-file")
+async def serve_receipt(path: str = Query(""), request: Request = None):
+    """提供收據檔案下載/檢視（限定 uploads/ 或專案 receipt_path）。"""
+    if not path or not os.path.isfile(path):
+        raise HTTPException(status_code=404, detail="檔案不存在")
+    abs_path = os.path.abspath(path)
+    uploads_dir = os.path.abspath(os.path.join(os.getcwd(), "uploads"))
+    if not abs_path.startswith(uploads_dir):
+        # 檢查是否在某個專案的 receipt_path 內
+        _require_db()
+        factory = await _get_factory()
+        async with factory() as session:
+            rows = (await session.execute(
+                select(CrmProject.receipt_path).where(CrmProject.receipt_path.isnot(None))
+            )).scalars().all()
+        if not any(rp and abs_path.startswith(os.path.abspath(rp)) for rp in rows):
+            raise HTTPException(status_code=403, detail="無權存取此路徑")
+    from starlette.responses import FileResponse
+    return FileResponse(path)
+
+
 @router.get("/projects/{project_id}/financial-summary")
 async def project_financial_summary(project_id: str):
     """專案財務摘要：含稅/未稅/毛利/雜支/外包 預估vs實際。"""
@@ -1338,6 +1555,14 @@ async def project_financial_summary(project_id: str):
         staff_estimated = staff_row[0] if staff_row else 0
         staff_actual = staff_row[1] if staff_row else 0
 
+        costline_row = (await session.execute(
+            select(sa_func.coalesce(sa_func.sum(CrmProjectCostLine.estimated_amount), 0),
+                   sa_func.coalesce(sa_func.sum(CrmProjectCostLine.actual_amount), 0))
+            .where(CrmProjectCostLine.project_id == project_id)
+        )).first()
+        costline_estimated = costline_row[0] if costline_row else 0
+        costline_actual = costline_row[1] if costline_row else 0
+
     contract = project.contract_amount or 0
     tax_rate = project.tax_rate or 5
     ex_tax = round(contract / (1 + tax_rate / 100))
@@ -1352,7 +1577,8 @@ async def project_financial_summary(project_id: str):
     return {
         "contract_amount": contract, "ex_tax": ex_tax,
         "profit_target": profit_target, "profit_target_pct": project.profit_target_pct or 20,
-        "misc_budget": misc_budget, "outsource_budget": outsource_budget,
+        "misc_budget": misc_budget, "misc_budget_pct": project.misc_budget_pct or 5,
+        "outsource_budget": outsource_budget,
         "expense_estimated": expense_estimated, "expense_actual": expense_actual,
         "staff_estimated": staff_estimated, "staff_actual": staff_actual,
         "total_cost": total_cost, "actual_profit": actual_profit, "profit_rate": profit_rate,
@@ -1360,7 +1586,352 @@ async def project_financial_summary(project_id: str):
         "amount_receivable": project.amount_receivable,
         "amount_received": project.amount_received,
         "transfer_fee": project.transfer_fee,
+        "costline_estimated": costline_estimated,
+        "costline_actual": costline_actual,
     }
+
+
+# ── Cost Line Default Templates ─────────────────────────────
+_COST_LINE_DEFAULTS = [
+    ("前期製作", "製片/專案管理", 0), ("前期製作", "導演", 1),
+    ("前期製作", "腳本", 2), ("前期製作", "視覺設計", 3),
+    ("前期製作", "分鏡圖", 4), ("前期製作", "其他", 5),
+    ("現場拍攝", "動態攝影", 0), ("現場拍攝", "平面攝影", 1),
+    ("現場拍攝", "攝影助理", 2), ("現場拍攝", "燈光師", 3),
+    ("現場拍攝", "收音師", 4), ("現場拍攝", "美術", 5),
+    ("現場拍攝", "服裝", 6), ("現場拍攝", "梳化", 7),
+    ("現場拍攝", "翻譯", 8), ("現場拍攝", "其他", 9),
+    ("後期製作", "剪輯", 0), ("後期製作", "調光", 1),
+    ("後期製作", "混音", 2), ("後期製作", "視覺包裝", 3),
+    ("後期製作", "動態設計", 4), ("後期製作", "錄音", 5),
+    ("後期製作", "配音", 6), ("後期製作", "翻譯", 7),
+    ("後期製作", "其他", 8),
+]
+
+
+def _cost_line_to_dict(line, staff_map: dict) -> dict:
+    est_staff = staff_map.get(line.estimated_staff_id or "", {})
+    act_staff = staff_map.get(line.actual_staff_id or "", {})
+    return {
+        "id": line.id, "project_id": line.project_id,
+        "phase": line.phase, "item_name": line.item_name,
+        "sort_order": line.sort_order,
+        "estimated_unit_price": line.estimated_unit_price,
+        "estimated_quantity": line.estimated_quantity,
+        "estimated_unit_type": line.estimated_unit_type or "",
+        "estimated_amount": line.estimated_amount,
+        "estimated_staff_id": line.estimated_staff_id or "",
+        "estimated_staff_name": est_staff.get("name", ""),
+        "estimated_notes": line.estimated_notes or "",
+        "actual_unit_price": line.actual_unit_price,
+        "actual_quantity": line.actual_quantity,
+        "actual_unit_type": line.actual_unit_type or "",
+        "actual_amount": line.actual_amount,
+        "actual_staff_id": line.actual_staff_id or "",
+        "actual_staff_name": act_staff.get("name", ""),
+        "actual_notes": line.actual_notes or "",
+    }
+
+
+# ── Project Cost Lines (成本估算) Endpoints ──────────────────
+
+@router.get("/projects/{project_id}/cost-lines")
+async def list_project_cost_lines(project_id: str):
+    """回傳成本估算明細，按 phase 分組。"""
+    _require_db()
+    factory = await _get_factory()
+    async with factory() as session:
+        rows = (await session.execute(
+            select(CrmProjectCostLine)
+            .where(CrmProjectCostLine.project_id == project_id)
+            .order_by(CrmProjectCostLine.phase, CrmProjectCostLine.sort_order)
+        )).scalars().all()
+
+        staff_ids = set()
+        for r in rows:
+            if r.estimated_staff_id: staff_ids.add(r.estimated_staff_id)
+            if r.actual_staff_id:    staff_ids.add(r.actual_staff_id)
+        staff_map = {}
+        if staff_ids:
+            staff_rows = (await session.execute(
+                select(CrmStaff).where(CrmStaff.id.in_(list(staff_ids)))
+            )).scalars().all()
+            staff_map = {s.id: {"name": s.name, "role": s.role} for s in staff_rows}
+
+    lines = [_cost_line_to_dict(r, staff_map) for r in rows]
+    phase_order = ["前期製作", "現場拍攝", "後期製作"]
+    grouped = {p: [] for p in phase_order}
+    for ln in lines:
+        ph = ln["phase"]
+        if ph not in grouped:
+            grouped[ph] = []
+        grouped[ph].append(ln)
+    return {
+        "cost_lines": lines,
+        "grouped": [{"phase": p, "lines": grouped[p]} for p in phase_order if grouped.get(p)],
+    }
+
+
+@router.post("/projects/{project_id}/cost-lines/init")
+async def init_project_cost_lines(project_id: str, request: Request):
+    """用預設清單初始化成本項目（跳過已存在的）。"""
+    _check_auth(request)
+    _require_db()
+    factory = await _get_factory()
+    async with factory() as session:
+        project = await session.get(CrmProject, project_id)
+        if not project:
+            raise HTTPException(status_code=404, detail="找不到此專案")
+        existing = (await session.execute(
+            select(CrmProjectCostLine.phase, CrmProjectCostLine.item_name)
+            .where(CrmProjectCostLine.project_id == project_id)
+        )).all()
+        existing_set = {(r[0], r[1]) for r in existing}
+
+        added = 0
+        for phase, item_name, sort_order in _COST_LINE_DEFAULTS:
+            if (phase, item_name) in existing_set:
+                continue
+            session.add(CrmProjectCostLine(
+                id=uuid.uuid4().hex, project_id=project_id,
+                phase=phase, item_name=item_name, sort_order=sort_order,
+            ))
+            added += 1
+        await session.commit()
+    return {"status": "ok", "added": added}
+
+
+@router.post("/projects/{project_id}/cost-lines")
+async def add_project_cost_line(project_id: str, req: CostLinePayload, request: Request):
+    """新增單一自訂成本項目。"""
+    _check_auth(request)
+    _require_db()
+    factory = await _get_factory()
+    async with factory() as session:
+        project = await session.get(CrmProject, project_id)
+        if not project:
+            raise HTTPException(status_code=404, detail="找不到此專案")
+        est_amt = req.estimated_amount
+        if req.estimated_unit_price and req.estimated_quantity:
+            est_amt = req.estimated_unit_price * req.estimated_quantity
+        act_amt = req.actual_amount
+        if req.actual_unit_price and req.actual_quantity:
+            act_amt = req.actual_unit_price * req.actual_quantity
+        line = CrmProjectCostLine(
+            id=uuid.uuid4().hex, project_id=project_id,
+            phase=req.phase, item_name=req.item_name, sort_order=req.sort_order,
+            estimated_unit_price=req.estimated_unit_price,
+            estimated_quantity=req.estimated_quantity,
+            estimated_unit_type=req.estimated_unit_type or None,
+            estimated_amount=est_amt,
+            estimated_staff_id=req.estimated_staff_id or None,
+            estimated_notes=req.estimated_notes,
+            actual_unit_price=req.actual_unit_price,
+            actual_quantity=req.actual_quantity,
+            actual_unit_type=req.actual_unit_type or None,
+            actual_amount=act_amt,
+            actual_staff_id=req.actual_staff_id or None,
+            actual_notes=req.actual_notes,
+        )
+        session.add(line)
+        await session.commit()
+    return {"status": "ok", "id": line.id}
+
+
+@router.put("/project-cost-lines/{line_id}")
+async def update_project_cost_line(line_id: str, req: CostLineUpdatePayload, request: Request):
+    """部分更新成本項目。"""
+    _check_auth(request)
+    _require_db()
+    factory = await _get_factory()
+    async with factory() as session:
+        line = await session.get(CrmProjectCostLine, line_id)
+        if not line:
+            raise HTTPException(status_code=404, detail="找不到此成本項目")
+        update_data = req.model_dump(exclude_none=True)
+        for fld in ("estimated_staff_id", "actual_staff_id"):
+            if fld in update_data and update_data[fld] == "":
+                update_data[fld] = None
+        for key, value in update_data.items():
+            setattr(line, key, value)
+        # Auto-calculate amount = unit_price × quantity
+        if "estimated_unit_price" in update_data or "estimated_quantity" in update_data:
+            up = line.estimated_unit_price or 0
+            qty = line.estimated_quantity or 0
+            line.estimated_amount = up * qty if (up and qty) else None
+        if "actual_unit_price" in update_data or "actual_quantity" in update_data:
+            up = line.actual_unit_price or 0
+            qty = line.actual_quantity or 0
+            line.actual_amount = up * qty if (up and qty) else None
+        from sqlalchemy import func as _fn
+        line.updated_at = _fn.now()
+        await session.commit()
+    return {"status": "ok"}
+
+
+@router.delete("/projects/{project_id}/cost-lines/phase")
+async def delete_project_cost_phase(project_id: str, request: Request):
+    """刪除指定 phase 的所有成本項目。"""
+    _check_auth(request)
+    _require_db()
+    body = await request.json()
+    phase = body.get("phase", "")
+    if not phase:
+        raise HTTPException(status_code=400, detail="需指定 phase")
+    factory = await _get_factory()
+    async with factory() as session:
+        await session.execute(
+            delete(CrmProjectCostLine).where(
+                CrmProjectCostLine.project_id == project_id,
+                CrmProjectCostLine.phase == phase,
+            )
+        )
+        await session.commit()
+    return {"status": "ok"}
+
+
+@router.delete("/project-cost-lines/{line_id}")
+async def delete_project_cost_line(line_id: str, request: Request):
+    """刪除成本項目。"""
+    _check_auth(request)
+    _require_db()
+    factory = await _get_factory()
+    async with factory() as session:
+        line = await session.get(CrmProjectCostLine, line_id)
+        if not line:
+            raise HTTPException(status_code=404, detail="找不到此成本項目")
+        await session.delete(line)
+        await session.commit()
+    return {"status": "ok"}
+
+
+# ── Cost Line Templates (成本估算範本) Endpoints ─────────────
+
+@router.get("/cost-line-templates")
+async def list_cost_line_templates():
+    """列出所有成本估算範本。"""
+    _require_db()
+    factory = await _get_factory()
+    async with factory() as session:
+        rows = (await session.execute(
+            select(CrmCostLineTemplate).order_by(CrmCostLineTemplate.created_at.desc())
+        )).scalars().all()
+    return {"templates": [{
+        "id": t.id, "name": t.name, "items": t.items or [],
+        "item_count": len(t.items or []),
+        "created_at": t.created_at.isoformat() if t.created_at else None,
+    } for t in rows]}
+
+
+@router.post("/cost-line-templates")
+async def create_cost_line_template(request: Request):
+    """從指定專案建立成本估算範本。"""
+    _check_auth(request)
+    _require_db()
+    body = await request.json()
+    name = body.get("name", "").strip()
+    project_id = body.get("project_id", "")
+    if not name:
+        raise HTTPException(status_code=400, detail="範本名稱不可為空")
+    factory = await _get_factory()
+    async with factory() as session:
+        # Support creating from defaults or from a project
+        if not project_id or project_id == "__defaults__":
+            items = [{"phase": p, "item_name": n, "sort_order": s} for p, n, s in _COST_LINE_DEFAULTS]
+            tpl = CrmCostLineTemplate(id=uuid.uuid4().hex, name=name, items=items)
+            session.add(tpl)
+            await session.commit()
+            return {"status": "ok", "id": tpl.id, "item_count": len(items)}
+        rows = (await session.execute(
+            select(CrmProjectCostLine)
+            .where(CrmProjectCostLine.project_id == project_id)
+            .order_by(CrmProjectCostLine.phase, CrmProjectCostLine.sort_order)
+        )).scalars().all()
+        items = [{"phase": r.phase, "item_name": r.item_name, "sort_order": r.sort_order} for r in rows]
+        tpl = CrmCostLineTemplate(id=uuid.uuid4().hex, name=name, items=items)
+        session.add(tpl)
+        await session.commit()
+    return {"status": "ok", "id": tpl.id, "item_count": len(items)}
+
+
+@router.post("/projects/{project_id}/cost-lines/apply-template")
+async def apply_cost_line_template(project_id: str, request: Request):
+    """套用範本到專案（覆蓋現有項目）。"""
+    _check_auth(request)
+    _require_db()
+    body = await request.json()
+    template_id = body.get("template_id", "")
+    factory = await _get_factory()
+    async with factory() as session:
+        project = await session.get(CrmProject, project_id)
+        if not project:
+            raise HTTPException(status_code=404, detail="找不到此專案")
+
+        # Get template items (or use defaults if template_id == "__default__")
+        if template_id == "__default__":
+            items = [{"phase": p, "item_name": n, "sort_order": s} for p, n, s in _COST_LINE_DEFAULTS]
+        else:
+            tpl = await session.get(CrmCostLineTemplate, template_id)
+            if not tpl:
+                raise HTTPException(status_code=404, detail="找不到此範本")
+            items = tpl.items or []
+
+        # Delete all existing cost lines and expenses for this project
+        await session.execute(
+            delete(CrmProjectCostLine).where(CrmProjectCostLine.project_id == project_id)
+        )
+        await session.execute(
+            delete(CrmProjectExpense).where(CrmProjectExpense.project_id == project_id)
+        )
+
+        added = 0
+        for item in items:
+            phase = item.get("phase", "")
+            item_name = item.get("item_name", "")
+            if not phase or not item_name:
+                continue
+            session.add(CrmProjectCostLine(
+                id=uuid.uuid4().hex, project_id=project_id,
+                phase=phase, item_name=item_name,
+                sort_order=item.get("sort_order", 0),
+            ))
+            added += 1
+        await session.commit()
+    return {"status": "ok", "added": added}
+
+
+@router.put("/cost-line-templates/{template_id}")
+async def update_cost_line_template(template_id: str, request: Request):
+    """修改範本名稱。"""
+    _check_auth(request)
+    _require_db()
+    body = await request.json()
+    name = body.get("name", "").strip()
+    if not name:
+        raise HTTPException(status_code=400, detail="名稱不可為空")
+    factory = await _get_factory()
+    async with factory() as session:
+        tpl = await session.get(CrmCostLineTemplate, template_id)
+        if not tpl:
+            raise HTTPException(status_code=404, detail="找不到此範本")
+        tpl.name = name
+        await session.commit()
+    return {"status": "ok"}
+
+
+@router.delete("/cost-line-templates/{template_id}")
+async def delete_cost_line_template(template_id: str, request: Request):
+    """刪除成本估算範本。"""
+    _check_auth(request)
+    _require_db()
+    factory = await _get_factory()
+    async with factory() as session:
+        tpl = await session.get(CrmCostLineTemplate, template_id)
+        if not tpl:
+            raise HTTPException(status_code=404, detail="找不到此範本")
+        await session.delete(tpl)
+        await session.commit()
+    return {"status": "ok"}
 
 
 # ── Invoice Helpers ─────────────────────────────────────────
@@ -1571,7 +2142,7 @@ def _to_payment_dict(p, project_name: str = "") -> dict:
     return {
         "id": p.id, "request_date": p.request_date.isoformat() if p.request_date else None,
         "amount": p.amount, "summary": p.summary or "",
-        "category": p.category or "專案外包",
+        "category": p.category or "",
         "payee_name": p.payee_name or "", "payee_id": p.payee_id or "",
         "payee_type": p.payee_type or "",
         "needs_invoice": p.needs_invoice, "invoice_number": p.invoice_number or "",
@@ -1581,6 +2152,9 @@ def _to_payment_dict(p, project_name: str = "") -> dict:
         "payment_date": p.payment_date.isoformat() if p.payment_date else None,
         "payment_status": p.payment_status or "未付款",
         "planned_month": p.planned_month or "",
+        "advance_by": p.advance_by or "",
+        "is_advance": p.is_advance or 0,
+        "advance_returned": p.advance_returned or 0,
         "notes": p.notes or "",
         "created_at": p.created_at.isoformat() if p.created_at else None,
     }
@@ -1637,6 +2211,92 @@ async def create_payment(req: PaymentRequestPayload, request: Request):
         session.add(p)
         await session.commit()
     return {"status": "ok", "payment": _to_payment_dict(p)}
+
+
+@router.get("/payments/advances")
+async def list_advance_payments(returned: int = -1, project_id: str = Query("")):
+    """列出預支款。returned=-1=全部，0=未結清，1=已結清。project_id 可過濾特定專案。"""
+    _require_db()
+    factory = await _get_factory()
+    async with factory() as session:
+        from sqlalchemy import func as sa_func
+        q = select(CrmPaymentRequest).where(CrmPaymentRequest.is_advance == 1)
+        if project_id:
+            q = q.where(CrmPaymentRequest.project_id == project_id)
+        rows = (await session.execute(q.order_by(CrmPaymentRequest.created_at.desc()))).scalars().all()
+
+        result = []
+        for p in rows:
+            # Calculate expenses by this payee in this project
+            expense_total = 0
+            exp_sum = (await session.execute(
+                select(sa_func.coalesce(sa_func.sum(CrmProjectExpense.actual), 0))
+                .where(CrmProjectExpense.advance_id == p.id)
+            )).scalar() or 0
+            expense_total = exp_sum
+
+            # Get project name
+            project_name = p.project_label or ""
+            if p.project_id and not project_name:
+                proj = await session.get(CrmProject, p.project_id)
+                if proj:
+                    project_name = proj.name
+
+            amt = p.amount or 0
+            # 發款: 收支明細中關聯此預支的支出合計 = 預支金額 → 已發款
+            cash_pay_total = (await session.execute(
+                select(sa_func.coalesce(sa_func.sum(CrmCashEntry.expense), 0))
+                .where(CrmCashEntry.advance_payment_id == p.id)
+                .where(CrmCashEntry.expense > 0)
+            )).scalar() or 0
+            is_paid = (cash_pay_total >= amt > 0)
+            # 收款: 收支明細中關聯此預支的收入 > 0 → 已收款
+            cash_return_total = (await session.execute(
+                select(sa_func.coalesce(sa_func.sum(CrmCashEntry.deposit), 0))
+                .where(CrmCashEntry.advance_payment_id == p.id)
+                .where(CrmCashEntry.deposit > 0)
+            )).scalar() or 0
+            is_returned = cash_return_total > 0
+            # 餘額 = 預支金額 − 支出 − 已收回
+            balance = amt - expense_total - cash_return_total
+            # 關聯的收支明細（發款/收款記錄）
+            linked_cash = (await session.execute(
+                select(CrmCashEntry)
+                .where(CrmCashEntry.advance_payment_id == p.id)
+                .order_by(CrmCashEntry.entry_date)
+            )).scalars().all()
+            cash_entries = [{
+                "id": c.id,
+                "entry_date": c.entry_date.isoformat()[:10] if c.entry_date else None,
+                "summary": c.summary or "",
+                "deposit": c.deposit or 0,
+                "expense": c.expense or 0,
+                "type": "收款" if (c.deposit or 0) > 0 else "發款",
+            } for c in linked_cash]
+            # 完成: 已發款 + 已收款 + 餘額為零
+            is_settled = is_paid and is_returned and balance == 0
+            result.append({
+                "id": p.id,
+                "payee_name": p.payee_name or "",
+                "amount": amt,
+                "project_id": p.project_id or "",
+                "project_name": project_name,
+                "payment_date": p.payment_date.isoformat() if p.payment_date else None,
+                "request_date": p.request_date.isoformat() if p.request_date else None,
+                "payment_status": p.payment_status or "應付款",
+                "is_paid": is_paid,
+                "is_returned": is_returned,
+                "is_settled": is_settled,
+                "expense_total": expense_total,
+                "balance": balance,
+                "cash_entries": cash_entries,
+            })
+    # Post-filter by settled status
+    if returned == 0:
+        result = [r for r in result if not r["is_settled"]]
+    elif returned == 1:
+        result = [r for r in result if r["is_settled"]]
+    return {"advances": result}
 
 
 @router.patch("/payments/batch-month")
@@ -1859,6 +2519,7 @@ def _to_cash_dict(e, project_name: str = "", invoice_title: str = "") -> dict:
         "payment_status": e.payment_status or "",
         "invoice_id": e.invoice_id or "",
         "bank_fee": e.bank_fee,
+        "advance_payment_id": e.advance_payment_id or "",
         "invoice_title": invoice_title,
         "created_at": e.created_at.isoformat() if e.created_at else None,
     }
@@ -2030,6 +2691,7 @@ async def payables_summary(month: str = Query(""), status: str = Query("")):
         query = (
             select(CrmPaymentRequest, CrmStaff.id_number, CrmStaff.bank_name, CrmStaff.bank_account)
             .outerjoin(CrmStaff, CrmStaff.name == CrmPaymentRequest.payee_name)
+            .where(or_(CrmPaymentRequest.is_advance == 0, CrmPaymentRequest.is_advance.is_(None)))
             .order_by(CrmPaymentRequest.request_date)
         )
 

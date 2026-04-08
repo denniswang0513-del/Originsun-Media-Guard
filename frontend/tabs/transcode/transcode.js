@@ -1,4 +1,4 @@
-import { getComputeBaseUrl, appendLog, pickPath, setupDragAndDrop, setupInputDrop, validateRemotePaths } from '../../js/shared/utils.js';
+import { getComputeBaseUrl, appendLog, pickPath, setupDragAndDrop, setupInputDrop, validateRemotePaths, toUncPath, ensureDriveMap } from '../../js/shared/utils.js';
 
 let tcSourceIndex = 0;
 
@@ -116,10 +116,11 @@ export async function submitTranscode() {
         return;
     }
 
-    // 驗證遠端主機路徑
+    // 驗證遠端主機路徑（先載入 UNC 映射再驗證）
     const remoteHosts = tcHosts.filter(h => h.ip !== 'local' && h.ip !== window.location.host);
     if (remoteHosts.length > 0) {
-        const pathsToCheck = [destDir, ...cards.map(c => c[2])];
+        await ensureDriveMap();
+        const pathsToCheck = [toUncPath(destDir), ...cards.map(c => toUncPath(c[2]))];
         for (const h of remoteHosts) {
             try {
                 const result = await validateRemotePaths(h.ip, pathsToCheck);

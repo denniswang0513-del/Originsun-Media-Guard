@@ -703,17 +703,64 @@ class MediaGuardEngine:
 
     @staticmethod
     def _get_video_duration(filepath: str) -> float:
-        """Call ffprobe to get video duration in seconds"""
-        cmd = [
-            "ffprobe", "-v", "error", "-show_entries", "format=duration",
-            "-of", "default=noprint_wrappers=1:nokey=1", filepath
-        ]
+        """Call ffprobe to get video duration in seconds.
+
+        Uses three fallback strategies:
+          1. format=duration (container-level, fast)
+          2. stream=duration (stream-level, catches some formats format misses)
+          3. Packet-scan: read all packets and use the last timestamp (slow but accurate)
+        """
+        _flags = getattr(subprocess, 'CREATE_NO_WINDOW', 0x08000000)
+
+        # Strategy 1: format duration (fastest)
         try:
-            res = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
-                                 text=True, timeout=5, creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0x08000000))
-            return float(res.stdout.strip())
+            cmd1 = [
+                "ffprobe", "-v", "error", "-show_entries", "format=duration",
+                "-of", "default=noprint_wrappers=1:nokey=1", filepath
+            ]
+            res = subprocess.run(cmd1, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+                                 text=True, timeout=10, creationflags=_flags)
+            val = res.stdout.strip()
+            if val and val != "N/A":
+                d = float(val)
+                if d > 0:
+                    return d
         except Exception:
-            return 0.0
+            pass
+
+        # Strategy 2: stream duration
+        try:
+            cmd2 = [
+                "ffprobe", "-v", "error", "-select_streams", "v:0",
+                "-show_entries", "stream=duration",
+                "-of", "default=noprint_wrappers=1:nokey=1", filepath
+            ]
+            res = subprocess.run(cmd2, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+                                 text=True, timeout=10, creationflags=_flags)
+            val = res.stdout.strip()
+            if val and val != "N/A":
+                d = float(val)
+                if d > 0:
+                    return d
+        except Exception:
+            pass
+
+        # Strategy 3: packet scan (slowest but most reliable — R3D/大檔案可能需要較久)
+        try:
+            cmd3 = [
+                "ffprobe", "-v", "error", "-select_streams", "v:0",
+                "-show_entries", "packet=pts_time",
+                "-of", "csv=p=0", filepath
+            ]
+            res = subprocess.run(cmd3, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+                                 text=True, timeout=120, creationflags=_flags)
+            lines = [l.strip() for l in res.stdout.strip().split('\n') if l.strip() and l.strip() != 'N/A']
+            if lines:
+                return float(lines[-1])
+        except Exception:
+            pass
+
+        return 0.0
 
     @staticmethod
     def get_video_metadata(filepath: str) -> Dict[str, Any]:
@@ -1006,15 +1053,84 @@ class MediaGuardEngine:
         import tempfile
         import uuid
         os.makedirs(dest_dir, exist_ok=True)
-        concat_list = os.path.join(tempfile.gettempdir(), f"Originsun_concat_list_{uuid.uuid4().hex[:8]}.txt")
-        with open(concat_list, "w", encoding="utf-8") as f:
-            for p in files:
-                safe_p = p.replace("'", "'\\''").replace("\\", "/")
-                # 取得準確秒數並強制寫入 concat list 中作為 duration 鎖定
-                dur = self._get_video_duration(p)
-                f.write(f"file '{safe_p}'\n")
-                if dur > 0:
-                    f.write(f"duration {dur:.3f}\n")
+
+        # ── Pre-scan: 驗證影片流 + 取得精確時長 ──
+        # 不可由 concat demuxer 處理的 RAW/影像格式（FFmpeg 無法解碼或非影片容器）
+        _RAW_WARN = {
+            '.braw': 'Blackmagic RAW（FFmpeg 不支援解碼，需先用 DaVinci Resolve 轉檔）',
+            '.ari':  'ARRI RAW 單幀格式（非影片容器，需先轉為 MOV/MXF）',
+            '.dng':  'CinemaDNG 靜態影像（非影片容器，需先轉為 MOV/MP4）',
+        }
+        _flags = getattr(subprocess, 'CREATE_NO_WINDOW', 0x08000000)
+
+        file_durations: list = []
+        skipped_reasons: list = []
+        self.log("[Pre-scan] 檢查所有影片的格式與時長...")
+        for idx, p in enumerate(files):
+            basename = os.path.basename(p)
+            ext_lower = os.path.splitext(p)[1].lower()
+            tag = f"[{idx+1}/{len(files)}]"
+
+            # 1) 已知不可串帶的 RAW 格式 — 直接跳過並給出明確提示
+            if ext_lower in _RAW_WARN:
+                self.log(f"  ⚠️ {tag} {basename} — 跳過：{_RAW_WARN[ext_lower]}")
+                file_durations.append(0.0)
+                skipped_reasons.append((basename, _RAW_WARN[ext_lower]))
+                continue
+
+            # 2) ffprobe 驗證是否含有可解碼的影片流
+            has_video = False
+            vcodec_name = ""
+            try:
+                probe_cmd = [
+                    "ffprobe", "-v", "error", "-select_streams", "v:0",
+                    "-show_entries", "stream=codec_name,codec_type",
+                    "-of", "json", p
+                ]
+                probe_res = subprocess.run(
+                    probe_cmd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+                    text=True, timeout=15, creationflags=_flags
+                )
+                if probe_res.returncode == 0:
+                    import json as _j
+                    probe_data = _j.loads(probe_res.stdout)
+                    streams = probe_data.get("streams", [])
+                    if streams and streams[0].get("codec_type") == "video":
+                        has_video = True
+                        vcodec_name = streams[0].get("codec_name", "unknown")
+            except Exception:
+                pass
+
+            if not has_video:
+                self.log(f"  ⚠️ {tag} {basename} — 跳過：FFmpeg 無法偵測到影片流（格式可能不受支援）")
+                file_durations.append(0.0)
+                skipped_reasons.append((basename, "無影片流"))
+                continue
+
+            # 3) 取得時長（三層 fallback）
+            dur = self._get_video_duration(p)
+            file_durations.append(dur)
+            if dur <= 0:
+                self.log(f"  ⚠️ {tag} {basename} [{vcodec_name}] — 無法取得時長，將被跳過")
+                skipped_reasons.append((basename, "時長偵測失敗"))
+            else:
+                mins = int(dur // 60)
+                secs = dur % 60
+                self.log(f"  ✓ {tag} {basename} [{vcodec_name}] — {mins}:{secs:05.2f}")
+
+        # 過濾掉無效的檔案
+        valid_pairs = [(f, d) for f, d in zip(files, file_durations) if d > 0]
+        if not valid_pairs:
+            self.err("[Engine] 所有影片均無法用於串帶，中止。")
+            if skipped_reasons:
+                for name, reason in skipped_reasons:
+                    self.err(f"  — {name}: {reason}")
+            return
+        if len(valid_pairs) < len(files):
+            skipped = len(files) - len(valid_pairs)
+            self.log(f"  ⚠️ 共跳過 {skipped} 個不相容的檔案，{len(valid_pairs)} 個有效檔案將進行串帶")
+        files = [p[0] for p in valid_pairs]
+        file_durations = [p[1] for p in valid_pairs]
 
         # 決定檔名與副檔名
         c_upper = codec.upper()
@@ -1028,7 +1144,7 @@ class MediaGuardEngine:
             else:
                 folder_name = "Standalone_Reel"
         reel_out = os.path.join(dest_dir, f"{folder_name}{ext}")
-        
+
         # 預先嘗試刪除已存在的輸出檔案，以避免 FFmpeg -y 在 NAS 上直接覆寫造成的各種死鎖問題
         if os.path.exists(reel_out):
             try:
@@ -1036,26 +1152,19 @@ class MediaGuardEngine:
             except OSError as e:
                 self.err(f"[系統阻擋] 無法覆寫 {os.path.basename(reel_out)} (檔案可能正被開啟、或遭系統鎖定): {e}")
                 return
-                
+
         self.log(f"目標輸出: {os.path.basename(reel_out)} (編碼: {codec})")
 
-        scale_filter = ""
-        if resolution == "720P":
-            scale_filter = "scale=-2:720"
-        elif resolution == "1080P":
-            scale_filter = "scale=-2:1080"
-        elif resolution == "Ultra HD":
-            scale_filter = "scale=-2:2160"
+        # ── 決定目標解析度（固定畫布大小，混合方向時 letterbox/pillarbox） ──
+        _res_map = {"720P": (1280, 720), "1080P": (1920, 1080), "Ultra HD": (3840, 2160)}
+        canvas_w, canvas_h = _res_map.get(resolution, (1920, 1080))
 
         win_dir = os.environ.get("WINDIR", "C:\\Windows")
-        
-        # 尋找支援中文字體的微軟正黑體，若無則降級為 Arial
         msjh_path = os.path.join(win_dir, "Fonts", "msjh.ttc")
         arial_path = os.path.join(win_dir, "Fonts", "arial.ttf")
         chosen_font = msjh_path if os.path.exists(msjh_path) else arial_path
-        
         font_path = chosen_font.replace("\\", "/").replace(":", "\\:")
-        
+
         # 決定編碼參數
         if "NVENC" in codec:
             vcodec_args = ["-c:v", "h264_nvenc", "-pix_fmt", "yuv420p", "-preset", "p4", "-cq", "23"]
@@ -1064,110 +1173,106 @@ class MediaGuardEngine:
             vcodec_args = ["-c:v", "libx264", "-pix_fmt", "yuv420p", "-preset", "fast", "-crf", "23"]
             acodec_args = ["-c:a", "aac", "-b:a", "192k"]
         else:
-            # 預設 ProRes
             vcodec_args = ["-c:v", "prores_ks", "-profile:v", "1"]
-            acodec_args = ["-c:a", "copy"]
+            acodec_args = ["-c:a", "pcm_s16le"]
 
-        # 計算時長與動態檔名壓印指令
-        concat_duration: float = 0.0
-        
-        # 由於 FFmpeg 不支援透過 sendcmd 在執行時期動態熱抽換 `textfile` 參數，
-        # 我們改採為每段影片建立一個獨立的 drawtext 濾鏡元件，並透過 enable=between(t,...) 來控制各自的顯示區間。
-        # 為避免命令列長度超過 Windows 限制，我們將所有濾鏡串聯寫入單一的 Filter Script 檔案中。
+        pix_fmt = "yuv420p" if ("NVENC" in codec or "軟體" in codec or "x264" in codec.lower()) else "yuv422p10le"
+
+        # ── 建構 concat filter complex script ──
+        # 使用 concat filter（非 concat demuxer），每個檔案獨立解碼再合併，
+        # 徹底解決混合取樣率 (44100/48000)、混合解析度、混合像素格式的問題。
+        concat_duration: float = sum(file_durations)
         filter_script_path = os.path.join(tempfile.gettempdir(), f"Originsun_filters_{uuid.uuid4().hex[:8]}.txt")
-        current_time_sec = 0.0
-        
-        # 動態折行邏輯 (以預期畫面寬度 80% 為界)
-        target_width_px = 720 # Default or minimum
-        if resolution == "1080P":
-            target_width_px = 1080
-        elif resolution == "Ultra HD":
-            target_width_px = 2160
-            
-        # 抓取第一支影片判斷是否為直式
-        is_vertical = False
-        if files:
-            try:
-                probe_cmd = ["ffprobe", "-v", "error", "-select_streams", "v:0", "-show_entries", "stream=width,height", "-of", "json", files[0]]
-                probe_res = subprocess.run(probe_cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0x08000000))
-                if probe_res.returncode == 0:
-                    import json as _j
-                    p_data = _j.loads(probe_res.stdout)
-                    streams = p_data.get("streams", [])
-                    if streams:
-                        w = int(streams[0].get("width", 1920))
-                        h = int(streams[0].get("height", 1080))
-                        is_vertical = w < h
-            except Exception:
-                pass
-        
-        actual_canvas_width = target_width_px if not is_vertical else (target_width_px * 9 // 16)
-        max_text_width = actual_canvas_width * 0.85 # 放寬至畫面 85% 作為最大單行寬度容忍值
 
-        # Pre-Scan: 全局掃描找出最長檔名的長度，決定整體的統一字體縮小倍率
-        # (將此步驟上移，確保右上角的時間碼也能共用這套精準的縮小邏輯)
+        # 檢查每個檔案是否有音訊流（用於決定是否需要生成靜音）
+        _has_audio = []
+        for p in files:
+            try:
+                _a_cmd = ["ffprobe", "-v", "error", "-select_streams", "a:0",
+                          "-show_entries", "stream=codec_type", "-of", "csv=p=0", p]
+                _a_res = subprocess.run(_a_cmd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+                                        text=True, timeout=10, creationflags=_flags)
+                _has_audio.append("audio" in _a_res.stdout)
+            except Exception:
+                _has_audio.append(False)
+
+        # Part 1: 每個檔案獨立做 video scale + audio resample，統一輸出規格
+        fc_lines = []
+        for i in range(len(files)):
+            # Video: format → scale（保持比例）→ pad 到固定畫布 → setsar
+            fc_lines.append(
+                f"[{i}:v]format={pix_fmt},"
+                f"scale={canvas_w}:{canvas_h}:force_original_aspect_ratio=decrease,"
+                f"pad={canvas_w}:{canvas_h}:(ow-iw)/2:(oh-ih)/2:black,setsar=1[v{i}];"
+            )
+            # Audio: resample 到 48kHz stereo（或生成靜音）
+            if _has_audio[i]:
+                fc_lines.append(f"[{i}:a]aresample=48000,aformat=sample_fmts=fltp:channel_layouts=stereo[a{i}];")
+            else:
+                fc_lines.append(f"anullsrc=r=48000:cl=stereo:d={file_durations[i]:.6f}[a{i}];")
+
+        # Part 2: concat filter 合併所有流
+        stream_labels = "".join(f"[v{i}][a{i}]" for i in range(len(files)))
+        fc_lines.append(f"{stream_labels}concat=n={len(files)}:v=1:a=1[vout][aout];")
+
+        # Part 3: drawtext overlays（在合併後的 [vout] 上）
+        max_text_width = canvas_w * 0.85
         global_max_w = 0
         if burn_filename:
             for p in files:
-                estimated_w = 0
-                for char in os.path.basename(p):
-                    if ord(char) > 127: estimated_w += 36
-                    else: estimated_w += 20
+                estimated_w = sum(36 if ord(c) > 127 else 20 for c in os.path.basename(p))
                 if estimated_w > global_max_w:
                     global_max_w = estimated_w
-                    
         global_fontsize = 36
         if global_max_w > max_text_width:
-            scale_ratio = max_text_width / global_max_w
-            global_fontsize = max(16, int(36 * scale_ratio)) # 底線保底 16px
+            global_fontsize = max(16, int(36 * max_text_width / global_max_w))
 
-        # 組合濾鏡 (Filters)
-        filters = []
-        if scale_filter:
-            filters.append(scale_filter)
+        overlay_filters = []
         if burn_timecode:
-            # [v1.0.180] 將時間碼的字級鎖死等於檔名字級，徹底達成兩個角落 1:1 的完美對稱視覺
-            filters.append(f"drawtext=fontfile='{font_path}':text='%{{pts\\:hms}}':x=w-tw-20:y=20:fontsize={global_fontsize}:fontcolor=white@0.5:box=1:boxcolor=black@0.25:boxborderw=6")
-
-        for idx, p in enumerate(files):
-            dur = self._get_video_duration(p)
+            overlay_filters.append(
+                f"drawtext=fontfile='{font_path}':text='%{{pts\\:hms}}':x=w-tw-20:y=20:"
+                f"fontsize={global_fontsize}:fontcolor=white@0.5:box=1:boxcolor=black@0.25:boxborderw=6"
+            )
+        current_time_sec = 0.0
+        for idx, (p, dur) in enumerate(zip(files, file_durations)):
             end_time = current_time_sec + dur
-            
             if burn_filename:
-                base_name = os.path.basename(p)
-                # 直接在 filter script 內使用安全的 escape 字串，免除實體文字檔傳遞
-                escaped_name = base_name.replace(":", "\\:").replace("'", "'\\''").replace("%", "\\%")
-                
-                filters.append(
+                escaped_name = os.path.basename(p).replace(":", "\\:").replace("'", "'\\''").replace("%", "\\%")
+                overlay_filters.append(
                     f"drawtext=fontfile='{font_path}':text='{escaped_name}':"
                     f"x=20:y=h-th-20:fontsize={global_fontsize}:fontcolor=white@0.8:box=1:boxcolor=black@0.4:boxborderw=6:"
                     f"enable='between(t,{current_time_sec:.3f},{end_time:.3f})'"
                 )
-                
             current_time_sec = end_time
-            concat_duration += dur
+
+        if overlay_filters:
+            fc_lines.append("[vout]" + ",\n".join(overlay_filters) + "[final]")
+            video_map = "[final]"
+        else:
+            video_map = "[vout]"
+
+        # 寫入 filter_complex_script 檔案
+        with open(filter_script_path, "w", encoding="utf-8") as fs:
+            fs.write("\n".join(fc_lines))
 
         self.log(f"總時長估算: {concat_duration:.2f} 秒，啟動 FFmpeg...")
-
-        vf_arg = []
-        if filters:
-            with open(filter_script_path, "w", encoding="utf-8") as fs:
-                # FFmpeg script 中的濾鏡必須用逗號分隔以串接成一條鍊
-                fs.write(",\n".join(filters))
-            # 使用 -filter_script:v 將長篇幅的影片濾鏡載入，保持與 -vf 相同的單一輸入流映射邏輯
-            vf_arg = ["-filter_script:v", filter_script_path]
 
         used_nvenc = "NVENC" in codec
         fallback_attempted = False
 
         # ── 可能執行兩次：第一次 NVENC，失敗則 fallback x264 ──
         while True:
+            # 建構 -i 參數（每個檔案一個獨立輸入）
+            input_args = []
+            for p in files:
+                input_args += ["-i", p]
+
             cmd = [
                 "ffmpeg", "-y", "-nostdin",
-                "-f", "concat", "-safe", "0",
-                "-i", concat_list,
-                "-map", "0:v", "-map", "0:a?"
-            ] + vf_arg + vcodec_args + acodec_args + [
+            ] + input_args + [
+                "-filter_complex_script", filter_script_path,
+                "-map", video_map, "-map", "[aout]",
+            ] + vcodec_args + acodec_args + [
                 "-progress", "pipe:1",
                 "-nostats",
                 reel_out
@@ -1253,9 +1358,8 @@ class MediaGuardEngine:
             break  # 正常結束或非 NVENC 失敗，跳出迴圈
 
         try:
-            os.remove(concat_list)
-            if os.path.exists(cmd_file_path):
-                os.remove(cmd_file_path)
+            if os.path.exists(filter_script_path):
+                os.remove(filter_script_path)
         except Exception:
             pass
 
@@ -1271,8 +1375,8 @@ class MediaGuardEngine:
                     err_txt = fe.read()
             except:
                 pass
-            if len(err_txt) > 500:
-                err_txt = "..." + err_txt[-500:]  # type: ignore
+            if len(err_txt) > 2000:
+                err_txt = "..." + err_txt[-2000:]  # type: ignore
             self.err(f"[!] 串帶失敗: \n{err_txt}")
         else:
             suffix = "（已自動降級為 x264 軟體編碼）" if fallback_attempted else ""

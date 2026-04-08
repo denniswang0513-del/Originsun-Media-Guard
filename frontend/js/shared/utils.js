@@ -82,7 +82,7 @@ export async function pickPath(inputId, type = 'folder') {
     if (window._isExternalAccess && typeof window.openNasBrowser === 'function') {
         const path = await window.openNasBrowser({
             title: type === 'folder' ? '選擇目錄' : '選擇檔案',
-            initialPath: el.value || '',
+            initialPath: '',
             mode: type,
             showFiles: type === 'file'
         });

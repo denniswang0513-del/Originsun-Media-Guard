@@ -1,0 +1,230 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>源日影像 — 預支支出登記</title>
+<style>
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body { background: #1a1a1a; color: #e0e0e0; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; min-height: 100vh; }
+.container { max-width: 480px; margin: 0 auto; padding: 16px; }
+h1 { font-size: 18px; font-weight: 700; text-align: center; padding: 12px 0; color: #fff; }
+h1 span { color: #3b82f6; }
+.card { background: #2a2a2a; border: 1px solid #3a3a3a; border-radius: 12px; padding: 16px; margin-bottom: 12px; }
+.info-row { display: flex; justify-content: space-between; padding: 6px 0; font-size: 13px; border-bottom: 1px solid #333; }
+.info-row:last-child { border-bottom: none; }
+.info-label { color: #6b7280; }
+.info-value { color: #e0e0e0; font-weight: 600; }
+.info-value.warn { color: #fb923c; }
+.info-value.ok { color: #86efac; }
+label { display: block; font-size: 12px; color: #9ca3af; margin-bottom: 4px; font-weight: 600; }
+select, input[type=number], input[type=text] {
+  width: 100%; background: #1e1e1e; border: 1px solid #3a3a3a; border-radius: 8px;
+  color: #e0e0e0; padding: 10px 12px; font-size: 15px; margin-bottom: 12px; outline: none;
+}
+select:focus, input:focus { border-color: #3b82f6; }
+.photo-area {
+  border: 2px dashed #3a3a3a; border-radius: 10px; padding: 20px; text-align: center;
+  color: #6b7280; font-size: 14px; cursor: pointer; margin-bottom: 12px;
+}
+.photo-area.has-img { border-color: #3b82f6; padding: 4px; }
+.photo-area img { max-width: 100%; max-height: 200px; border-radius: 8px; }
+.btn-submit {
+  width: 100%; background: #3b82f6; color: #fff; border: none; border-radius: 10px;
+  padding: 14px; font-size: 16px; font-weight: 700; cursor: pointer;
+}
+.btn-submit:disabled { opacity: 0.5; }
+.msg { padding: 10px; border-radius: 8px; text-align: center; font-size: 14px; margin-bottom: 12px; }
+.msg.ok { background: #14532d; color: #86efac; }
+.msg.err { background: #7f1d1d; color: #fca5a5; }
+.history-item { display: flex; justify-content: space-between; padding: 8px 0; border-bottom: 1px solid #333; font-size: 13px; }
+.history-item:last-child { border-bottom: none; }
+.loading { text-align: center; color: #6b7280; padding: 40px 0; }
+</style>
+</head>
+<body>
+<div class="container">
+  <h1>源日影像 — <span>預支支出登記</span></h1>
+
+  <div id="loading" class="loading">載入中...</div>
+
+  <!-- Advance Info -->
+  <div id="advance-info" class="card" style="display:none;">
+    <div class="info-row"><span class="info-label">專案</span><span class="info-value" id="adv-project"></span></div>
+    <div class="info-row"><span class="info-label">預支人</span><span class="info-value" id="adv-payee"></span></div>
+    <div class="info-row"><span class="info-label">預支金額</span><span class="info-value" id="adv-amount"></span></div>
+    <div class="info-row"><span class="info-label">已支出</span><span class="info-value" id="adv-spent"></span></div>
+    <div class="info-row"><span class="info-label">結算</span><span class="info-value" id="adv-balance"></span></div>
+  </div>
+
+  <!-- Form -->
+  <div id="form-section" class="card" style="display:none;">
+    <label>類別</label>
+    <select id="f-category">
+      <option value="交通">交通</option><option value="住宿">住宿</option>
+      <option value="飲食">飲食</option><option value="提案">提案</option>
+      <option value="器材">器材</option><option value="其他">其他</option>
+    </select>
+
+    <label>細項</label>
+    <input id="f-sub-item" type="text" placeholder="如：高鐵來回">
+
+    <label>金額</label>
+    <input id="f-amount" type="number" inputmode="numeric" placeholder="0" min="0">
+
+    <label>備註</label>
+    <input id="f-notes" type="text" placeholder="選填">
+
+    <label>收據</label>
+    <div class="photo-area" id="photo-area" onclick="document.getElementById('f-file').click()">
+      <div style="font-size:32px;margin-bottom:4px;">📷</div>
+      <div>點擊拍照或選擇圖片</div>
+    </div>
+    <input id="f-file" type="file" accept="image/*" capture="environment" style="display:none;">
+  </div>
+
+  <div id="msg" style="display:none;"></div>
+
+  <button class="btn-submit" id="btn-submit" style="display:none;" onclick="_submit()">送出</button>
+
+  <!-- History -->
+  <div id="history" class="card" style="display:none;margin-top:16px;">
+    <div style="font-size:14px;font-weight:700;margin-bottom:8px;color:#9ca3af;">已登記支出</div>
+    <div id="history-list"></div>
+  </div>
+</div>
+
+<script>
+const BASE = location.origin + '/api/v1/crm';
+const params = new URLSearchParams(location.search);
+const advanceId = params.get('id');
+let _advance = null;
+let _projectId = '';
+let _payeeName = '';
+
+async function _init() {
+  if (!advanceId) {
+    document.getElementById('loading').textContent = '無效的連結';
+    return;
+  }
+  try {
+    // Fetch advance info
+    const r = await fetch(BASE + '/payments/' + advanceId);
+    if (!r.ok) throw new Error('找不到預支款');
+    _advance = await r.json();
+    _projectId = _advance.project_id;
+    _payeeName = _advance.payee_name;
+
+    // Fetch advance summary
+    const ar = await fetch(BASE + '/payments/advances?returned=-1');
+    const advData = await ar.json();
+    const adv = (advData.advances || []).find(a => a.id === advanceId);
+
+    document.getElementById('adv-project').textContent = _advance.project_label || _advance.project_name || '—';
+    document.getElementById('adv-payee').textContent = _payeeName;
+    document.getElementById('adv-amount').textContent = '$' + (_advance.amount || 0).toLocaleString('zh-TW');
+
+    if (adv) {
+      document.getElementById('adv-spent').textContent = '$' + adv.expense_total.toLocaleString('zh-TW');
+      const balance = adv.amount - adv.expense_total;
+      const balEl = document.getElementById('adv-balance');
+      balEl.textContent = (balance > 0 ? '需還款 $' : balance < 0 ? '需補款 $' : '$') + Math.abs(balance).toLocaleString('zh-TW');
+      balEl.className = 'info-value ' + (balance > 0 ? 'warn' : balance < 0 ? 'err' : 'ok');
+    }
+
+    document.getElementById('loading').style.display = 'none';
+    document.getElementById('advance-info').style.display = '';
+    document.getElementById('form-section').style.display = '';
+    document.getElementById('btn-submit').style.display = '';
+    _loadHistory();
+  } catch (e) {
+    document.getElementById('loading').textContent = '載入失敗：' + e.message;
+  }
+}
+
+// Photo preview
+document.getElementById('f-file').addEventListener('change', function() {
+  const file = this.files[0];
+  const area = document.getElementById('photo-area');
+  if (file) {
+    const reader = new FileReader();
+    reader.onload = e => { area.innerHTML = '<img src="' + e.target.result + '">'; area.classList.add('has-img'); };
+    reader.readAsDataURL(file);
+  }
+});
+
+async function _submit() {
+  const amount = parseInt(document.getElementById('f-amount').value) || 0;
+  if (!amount) { _showMsg('請填寫金額', true); return; }
+  const btn = document.getElementById('btn-submit');
+  btn.disabled = true; btn.textContent = '送出中...';
+  try {
+    const r = await fetch(BASE + '/advance/' + advanceId + '/expenses', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        category: document.getElementById('f-category').value,
+        sub_item: document.getElementById('f-sub-item').value,
+        estimated: 0,
+        actual: amount,
+        payee: _payeeName,
+        notes: document.getElementById('f-notes').value,
+      }),
+    });
+    if (!r.ok) throw new Error((await r.json().catch(() => ({}))).detail || '建立失敗');
+    const created = await r.json();
+    const expenseId = created.expense_id;
+
+    // Upload receipt
+    const file = document.getElementById('f-file').files[0];
+    if (file && expenseId) {
+      const form = new FormData();
+      form.append('file', file);
+      await fetch(BASE + '/project-expenses/' + expenseId + '/receipt', { method: 'POST', body: form });
+    }
+
+    _showMsg('登記成功！', false);
+    document.getElementById('f-sub-item').value = '';
+    document.getElementById('f-amount').value = '';
+    document.getElementById('f-notes').value = '';
+    document.getElementById('f-file').value = '';
+    document.getElementById('photo-area').innerHTML = '<div style="font-size:32px;margin-bottom:4px;">📷</div><div>點擊拍照或選擇圖片</div>';
+    document.getElementById('photo-area').classList.remove('has-img');
+    _loadHistory();
+    _init(); // Refresh advance info
+  } catch (e) {
+    _showMsg(e.message, true);
+  } finally {
+    btn.disabled = false; btn.textContent = '送出';
+  }
+}
+
+async function _loadHistory() {
+  if (!_projectId) return;
+  try {
+    const r = await fetch(BASE + '/projects/' + _projectId + '/expenses');
+    const data = await r.json();
+    const expenses = (data.expenses || []).filter(e => e.payee === _payeeName);
+    const list = document.getElementById('history-list');
+    const hist = document.getElementById('history');
+    if (expenses.length === 0) { hist.style.display = 'none'; return; }
+    hist.style.display = '';
+    list.innerHTML = expenses.map(e => {
+      const label = e.sub_item ? e.category + ' · ' + e.sub_item : e.category;
+      return '<div class="history-item"><span>' + label + '</span><span>$' + (e.actual || 0).toLocaleString('zh-TW') + '</span></div>';
+    }).join('');
+  } catch (_) {}
+}
+
+function _showMsg(text, isErr) {
+  const el = document.getElementById('msg');
+  el.textContent = text;
+  el.className = 'msg ' + (isErr ? 'err' : 'ok');
+  el.style.display = '';
+  setTimeout(() => el.style.display = 'none', 3000);
+}
+
+_init();
+</script>
+</body>
+</html>

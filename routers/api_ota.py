@@ -10,10 +10,53 @@ import subprocess
 import sys
 import asyncio
 from datetime import datetime
-from fastapi import APIRouter, BackgroundTasks, Request  # type: ignore
+from fastapi import APIRouter, BackgroundTasks, Query, Request  # type: ignore
 from fastapi.responses import JSONResponse, FileResponse  # type: ignore
 
 router = APIRouter()
+
+
+def _launch_in_user_session(bat_path: str):
+    """Launch a BAT file in the interactive user's desktop session.
+
+    If the current process is in Session 0 (common after DETACHED_PROCESS restart),
+    child processes inherit Session 0 and cannot show GUI (tkinter dialogs, etc.).
+    Using schtasks /IT ensures the task runs in the logged-in user's session.
+    Falls back to DETACHED_PROCESS if schtasks fails (non-admin, etc.).
+    """
+    task_name = "OriginsunOtaRestart"
+    try:
+        # Delete stale task (ignore errors)
+        subprocess.run(
+            ["schtasks", "/Delete", "/TN", task_name, "/F"],
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+            creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0x08000000),
+        )
+        # Create + run a one-shot interactive task
+        subprocess.run(
+            ["schtasks", "/Create", "/TN", task_name, "/TR", f'cmd /c "{bat_path}"',
+             "/SC", "ONCE", "/ST", "00:00", "/F", "/IT"],
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+            creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0x08000000),
+            check=True,
+        )
+        subprocess.run(
+            ["schtasks", "/Run", "/TN", task_name],
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+            creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0x08000000),
+            check=True,
+        )
+        return
+    except Exception:
+        pass
+
+    # Fallback: DETACHED_PROCESS (will land in Session 0 but at least restarts)
+    subprocess.Popen(
+        ["cmd", "/c", bat_path],
+        creationflags=subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP
+        | getattr(subprocess, 'CREATE_NO_WINDOW', 0x08000000),
+        close_fds=True,
+    )
 
 
 def _check_admin(request: Request):
@@ -27,6 +70,7 @@ def _check_admin(request: Request):
 
 # ── Module-level state ──────────────────────────────────────────────────
 _publish_lock = asyncio.Lock()
+_publish_status: dict = {}  # {"job_id": {"status": "running"/"done"/"error", "log": "...", "version": "..."}}
 _PUBLISH_HISTORY_FILE = os.path.join(
     os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "publish_history.json"
 )
@@ -115,12 +159,12 @@ async def _do_update_restart():
     with open(bat_path, "w", encoding="ascii", errors="replace") as f:
         f.write("\r\n".join(bat_lines))
 
-    # Launch detached (survives os._exit)
-    subprocess.Popen(
-        ["cmd", "/c", bat_path],
-        creationflags=subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP,
-        close_fds=True,
-    )
+    # Launch in the interactive user session (not Session 0) using schtasks.
+    # If the server itself is in Session 0 (e.g. after a previous DETACHED restart),
+    # any child process will also land in Session 0, breaking GUI features like
+    # tkinter file dialogs. A scheduled task with /IT runs in the logged-in user's
+    # interactive desktop session.
+    _launch_in_user_session(bat_path)
 
     # Exit after response is sent
     asyncio.get_running_loop().call_later(1.0, os._exit, 0)
@@ -177,19 +221,32 @@ async def internal_restart(request: Request):
 @router.post("/api/admin/restart")
 async def admin_restart(request: Request):
     _check_admin(request)
-    import subprocess
+    import tempfile
     base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     vbs = os.path.join(base_dir, "start_hidden.vbs")
 
     async def _restart():
         await asyncio.sleep(1.5)
         try:
+            # Write a tiny BAT that kills old server then starts new one
+            bat_path = os.path.join(tempfile.gettempdir(), "originsun_restart.bat")
+            bat_lines = [
+                "@echo off",
+                f'cd /d "{base_dir}"',
+                'for /f "tokens=5" %%p in (\'netstat -aon ^| findstr ":8000 " ^| findstr "LISTENING"\') do (',
+                "    taskkill /PID %%p /F >nul 2>nul",
+                ")",
+                "timeout /t 2 /nobreak >nul",
+            ]
             if os.path.exists(vbs):
-                subprocess.Popen(["wscript.exe", vbs], shell=False)
+                bat_lines.append(f'wscript.exe "{vbs}"')
             else:
-                bat = os.path.join(base_dir, "update_agent.bat")
-                subprocess.Popen(bat, shell=True, creationflags=0x00000008)
-        except Exception: pass
+                bat_lines.append(f'start "" /B "{sys.executable}" -m uvicorn main:io_app --host 0.0.0.0 --port 8000')
+            with open(bat_path, "w", encoding="ascii", errors="replace") as f:
+                f.write("\r\n".join(bat_lines))
+            _launch_in_user_session(bat_path)
+        except Exception:
+            pass
         asyncio.get_running_loop().call_later(0.5, os._exit, 0)
 
     asyncio.create_task(_restart())
@@ -422,10 +479,9 @@ async def download_installer():
 
 @router.post("/api/v1/publish")
 async def publish_version(request: Request):
-    """Trigger version publish from the web UI. Requires admin. Concurrency-safe."""
+    """Trigger async version publish. Returns immediately with job_id; poll /publish/status for progress."""
     _check_admin(request)
 
-    # Concurrency lock -- only one publish at a time (no TOCTOU race)
     if _publish_lock.locked():
         return JSONResponse({"status": "error", "message": "另一次發布正在進行中，請稍後再試"}, 409)
 
@@ -445,37 +501,54 @@ async def publish_version(request: Request):
     if not os.path.exists(publish_script):
         return JSONResponse({"status": "error", "message": "publish_update.py not found"}, 500)
 
-    async with _publish_lock:
-        try:
-            result = await asyncio.to_thread(
-                subprocess.run,
-                [sys.executable, publish_script, "--version", version, "--notes", notes],
-                capture_output=True, text=True, timeout=600, cwd=base_dir,
-            )
-            log_output = (result.stdout or "") + (result.stderr or "")
-            success = result.returncode == 0
+    # Extract username before launching background task
+    pub_user = "admin"
+    try:
+        from core.auth import _extract_token
+        payload = _extract_token(request)
+        if payload:
+            pub_user = payload.get("sub", "admin")
+    except Exception:
+        pass
 
-            # Extract username from token
-            pub_user = "admin"
+    import uuid as _uuid
+    job_id = _uuid.uuid4().hex[:8]
+    _publish_status[job_id] = {"status": "running", "log": "", "version": version}
+
+    async def _run():
+        async with _publish_lock:
             try:
-                from core.auth import _extract_token
-                payload = _extract_token(request)
-                if payload:
-                    pub_user = payload.get("sub", "admin")
-            except Exception:
-                pass
-            _append_publish_history(version, notes, success, pub_user)
+                result = await asyncio.to_thread(
+                    subprocess.run,
+                    [sys.executable, publish_script, "--version", version, "--notes", notes],
+                    capture_output=True, text=True, timeout=600, cwd=base_dir,
+                )
+                log_output = (result.stdout or "") + (result.stderr or "")
+                success = result.returncode == 0
+                _append_publish_history(version, notes, success, pub_user)
+                _publish_status[job_id] = {
+                    "status": "done" if success else "error",
+                    "log": log_output,
+                    "version": version,
+                    "message": f"v{version} published" if success else f"Publish failed (exit {result.returncode})",
+                }
+            except subprocess.TimeoutExpired:
+                _append_publish_history(version, notes, False, "system")
+                _publish_status[job_id] = {"status": "error", "log": "", "version": version, "message": "Publish timed out (600s)"}
+            except Exception as e:
+                _append_publish_history(version, notes, False, "system")
+                _publish_status[job_id] = {"status": "error", "log": "", "version": version, "message": str(e)}
 
-            if success:
-                return {"status": "ok", "message": f"v{version} published", "log": log_output}
-            else:
-                return JSONResponse({"status": "error", "message": f"Publish failed (exit {result.returncode})", "log": log_output}, 500)
-        except subprocess.TimeoutExpired:
-            _append_publish_history(version, notes, False, "system")
-            return JSONResponse({"status": "error", "message": "Publish timed out (600s)"}, 500)
-        except Exception as e:
-            _append_publish_history(version, notes, False, "system")
-            return JSONResponse({"status": "error", "message": str(e)}, 500)
+    asyncio.create_task(_run())
+    return {"status": "ok", "job_id": job_id, "message": "發布已啟動，背景執行中..."}
+
+
+@router.get("/api/v1/publish/status")
+async def publish_status(job_id: str = Query("")):
+    """Poll publish job status."""
+    if not job_id or job_id not in _publish_status:
+        return {"status": "unknown", "message": "找不到此發布任務"}
+    return _publish_status[job_id]
 
 
 @router.get("/api/v1/publish/history")

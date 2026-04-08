@@ -8,7 +8,7 @@ import subprocess
 import asyncio
 import locale
 import time
-from fastapi import APIRouter  # type: ignore
+from fastapi import APIRouter, UploadFile, File, Form  # type: ignore
 from core.schemas import OpenFileRequest, ValidatePathsRequest  # type: ignore
 
 router = APIRouter()
@@ -35,33 +35,105 @@ async def open_local_folder(req: OpenFileRequest):
         return {"status": "error", "message": f"資料夾不存在: {folder_path}"}
     except Exception as e: return {"status": "error", "message": str(e)}
 
+def _run_picker_subprocess(mode: str, title: str) -> str:
+    """Run tkinter file/folder dialog in a fresh subprocess.
+
+    tkinter dialogs can fail inside the main server process (COM threading
+    issues, headless start via wscript, etc.). Spawning a dedicated process
+    avoids all these problems.
+    """
+    import sys, json as _j
+    script = (
+        "import tkinter as tk\n"
+        "from tkinter import filedialog\n"
+        "import json, sys\n"
+        "root = tk.Tk()\n"
+        "root.attributes('-topmost', True)\n"
+        "root.withdraw()\n"
+        f"path = filedialog.{'askdirectory' if mode == 'folder' else 'askopenfilename'}(title={title!r})\n"
+        "root.destroy()\n"
+        "sys.stdout.write(json.dumps({'path': path or ''}))\n"
+    )
+    try:
+        res = subprocess.run(
+            [sys.executable, "-c", script],
+            capture_output=True, text=True, timeout=120,
+            creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0),
+        )
+        if res.returncode == 0 and res.stdout.strip():
+            data = _j.loads(res.stdout.strip())
+            return data.get("path", "")
+    except Exception:
+        pass
+    return ""
+
+
 @router.get("/api/v1/utils/pick_folder")
 async def api_pick_folder(title: str = "選擇資料夾"):
-    def _pick():
-        import tkinter as tk
-        from tkinter import filedialog
-        root = tk.Tk()
-        root.attributes("-topmost", True)
-        root.withdraw()
-        path = filedialog.askdirectory(title=title)
-        root.destroy()
-        return path
-    selected = await asyncio.to_thread(_pick)  # type: ignore
+    selected = await asyncio.to_thread(_run_picker_subprocess, "folder", title)
     return {"path": selected}
 
 @router.get("/api/v1/utils/pick_file")
 async def api_pick_file(title: str = "選擇檔案"):
-    def _pick():
-        import tkinter as tk
-        from tkinter import filedialog
-        root = tk.Tk()
-        root.attributes("-topmost", True)
-        root.withdraw()
-        path = filedialog.askopenfilename(title=title)
-        root.destroy()
-        return path
-    selected = await asyncio.to_thread(_pick)  # type: ignore
+    selected = await asyncio.to_thread(_run_picker_subprocess, "file", title)
     return {"path": selected}
+
+@router.get("/api/v1/utils/browse_dir")
+async def browse_dir(path: str = ""):
+    """列出指定路徑下的子資料夾（供網頁版目錄瀏覽器使用）。"""
+    import string
+    if not path:
+        # Return available drive letters on Windows
+        drives = []
+        for letter in string.ascii_uppercase:
+            dp = f"{letter}:\\"
+            if os.path.isdir(dp):
+                drives.append({"name": f"{letter}:\\", "path": dp})
+        return {"items": drives, "current": ""}
+
+    abs_path = os.path.abspath(path)
+    if not os.path.isdir(abs_path):
+        from fastapi import HTTPException
+        raise HTTPException(status_code=404, detail="路徑不存在")
+
+    items = []
+    try:
+        for entry in sorted(os.scandir(abs_path), key=lambda e: e.name.lower()):
+            if entry.is_dir() and not entry.name.startswith('.'):
+                items.append({"name": entry.name, "path": entry.path})
+    except PermissionError:
+        pass
+    return {"items": items, "current": abs_path}
+
+@router.post("/api/v1/utils/upload_file")
+async def upload_file_to_path(dest_path: str = Form(""), file: UploadFile = File(...)):
+    """上傳檔案到指定伺服器路徑（限定 browse_roots 內）。"""
+    from fastapi import HTTPException
+    if not dest_path:
+        raise HTTPException(status_code=400, detail="缺少 dest_path")
+    abs_dest = os.path.abspath(dest_path)
+    # 安全驗證：限定在 browse_roots 或 uploads/ 目錄內
+    from config import load_settings
+    settings = load_settings()
+    roots = settings.get("browse_roots", [])
+    uploads_dir = os.path.abspath(os.path.join(os.getcwd(), "uploads"))
+    allowed = abs_dest.startswith(uploads_dir)
+    for r in roots:
+        if abs_dest.startswith(os.path.abspath(r)):
+            allowed = True
+            break
+    if not allowed:
+        raise HTTPException(status_code=403, detail="目的路徑不在允許範圍內")
+    os.makedirs(abs_dest, exist_ok=True)
+    # 防止路徑穿越：只取檔名
+    safe_name = os.path.basename(file.filename or "upload")
+    filepath = os.path.join(abs_dest, safe_name)
+    # 串流寫入避免大檔案佔滿記憶體
+    import shutil
+    with open(filepath, "wb") as f:
+        shutil.copyfileobj(file.file, f)
+    return {"status": "ok", "path": filepath}
+
 
 @router.post("/api/v1/utils/create_shortcut")
 async def create_desktop_shortcut():
@@ -252,9 +324,10 @@ async def browse_directory(path: str = "", show_files: bool = False):
     settings = load_settings()
     roots = settings.get("browse_roots", [])
 
-    # Auto-detect roots from common drive letters if not configured
+    # Auto-detect roots from all available drive letters if not configured
     if not roots:
-        for letter in ["S", "R", "T", "Z", "D"]:
+        import string
+        for letter in string.ascii_uppercase:
             drive = f"{letter}:/"
             if os.path.isdir(drive):
                 roots.append(drive)
@@ -302,7 +375,7 @@ async def browse_directory(path: str = "", show_files: bool = False):
                         "path": entry.path.replace("\\", "/"),
                         "type": "dir"
                     })
-                elif show_files and os.path.splitext(entry.name)[1].lower() in VIDEO_EXTS:
+                elif show_files:
                     try:
                         size = entry.stat().st_size
                     except Exception:

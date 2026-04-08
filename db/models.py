@@ -187,6 +187,7 @@ class CrmProject(Base):
     amount_receivable = Column(Integer, nullable=True)                # 應收帳款
     amount_received = Column(Integer, nullable=True)                  # 已收帳款
     transfer_fee = Column(Integer, nullable=True)                     # 帳款匯費
+    receipt_path = Column(String(512), nullable=True)                 # 收據儲存路徑
 
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now())
@@ -313,7 +314,54 @@ class CrmProjectExpense(Base):
     estimated = Column(Integer, nullable=False, default=0)      # 預估金額
     actual = Column(Integer, nullable=False, default=0)         # 實際金額
     receipt_url = Column(String(512), nullable=True)            # 收據連結 ← 財務預留
+    sub_item = Column(String(128), nullable=True)              # 細項
+    payee = Column(String(64), nullable=True)                  # 請款人
+    advance_id = Column(String(32), nullable=True)             # 關聯預支款 ID
     notes = Column(Text, nullable=True)
+    created_at = Column(DateTime(timezone=True), nullable=True)
+
+
+class CrmCostLineTemplate(Base):
+    """成本估算範本。"""
+    __tablename__ = "crm_cost_line_templates"
+
+    id = Column(String(32), primary_key=True)
+    name = Column(String(128), nullable=False)
+    items = Column(JSONB)       # [{phase, item_name, sort_order}, ...]
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+
+class CrmProjectCostLine(Base):
+    """專案成本估算明細（費用預估 vs 費用結算）。"""
+    __tablename__ = "crm_project_cost_lines"
+
+    id = Column(String(32), primary_key=True)
+    project_id = Column(String(32), nullable=False, index=True)
+    phase = Column(String(32), nullable=False)              # 前期製作/現場拍攝/後期製作/行政雜支
+    item_name = Column(String(128), nullable=False)         # 導演/剪輯/動態攝影...
+    sort_order = Column(Integer, nullable=False, default=0)
+    # 費用預估
+    estimated_unit_price = Column(Integer, nullable=True)   # 單價
+    estimated_quantity = Column(Integer, nullable=True)      # 數量
+    estimated_unit_type = Column(String(16), nullable=True)  # 單位類別（式/日/班/時/支/套/件）
+    estimated_amount = Column(Integer, nullable=True)        # 金額 = 單價 × 單位
+    estimated_staff_id = Column(String(32), nullable=True)  # soft FK → crm_staff
+    estimated_notes = Column(String(255), nullable=True)
+    # 費用結算
+    actual_unit_price = Column(Integer, nullable=True)
+    actual_quantity = Column(Integer, nullable=True)
+    actual_unit_type = Column(String(16), nullable=True)
+    actual_amount = Column(Integer, nullable=True)
+    actual_staff_id = Column(String(32), nullable=True)     # soft FK → crm_staff
+    actual_notes = Column(String(255), nullable=True)
+
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    __table_args__ = (
+        Index("idx_costline_project", "project_id"),
+        Index("idx_costline_phase", "project_id", "phase"),
+    )
 
 
 class CrmInvoice(Base):
@@ -374,6 +422,9 @@ class CrmPaymentRequest(Base):
     payment_date = Column(DateTime(timezone=True), nullable=True)       # 付款日
     payment_status = Column(String(16), nullable=False, default="未付款") # 未付款/應付款/已付款
     planned_month = Column(String(7), nullable=True)                    # 預計付款月 "2026-04"
+    advance_by = Column(String(64), nullable=True)                     # 代墊人（實際收款人）
+    is_advance = Column(Integer, nullable=False, default=0)            # 0=一般, 1=預支款
+    advance_returned = Column(Integer, nullable=False, default=0)      # 0=未歸還, 1=已歸還
     notes = Column(Text, nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now())
@@ -410,6 +461,7 @@ class CrmCashEntry(Base):
     payment_status = Column(String(16), nullable=True)           # 已付款/未付款
     invoice_id = Column(String(32), nullable=True)               # 關聯發票 ID
     bank_fee = Column(Integer, nullable=True)                    # 匯費（計入支出）
+    advance_payment_id = Column(String(32), nullable=True)       # 關聯預支款 ID
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now())
 

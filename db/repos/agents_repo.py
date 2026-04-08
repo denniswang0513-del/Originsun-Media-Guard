@@ -35,6 +35,14 @@ async def url_exists(session: AsyncSession, url: str) -> bool:
     return (count or 0) > 0
 
 
+async def update(session: AsyncSession, agent_id: str, name: str, url: str) -> bool:
+    from sqlalchemy import update as sa_update
+    result = await session.execute(
+        sa_update(Agent).where(Agent.id == agent_id).values(name=name, url=url)
+    )
+    return result.rowcount > 0
+
+
 async def remove(session: AsyncSession, agent_id: str) -> bool:
     result = await session.execute(delete(Agent).where(Agent.id == agent_id))
     return result.rowcount > 0

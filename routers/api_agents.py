@@ -110,6 +110,11 @@ class NewAgentRequest(BaseModel):
     url: str
 
 
+class UpdateAgentRequest(BaseModel):
+    name: str | None = None
+    url: str | None = None
+
+
 # ─── Endpoints ────────────────────────────────────────────
 
 @router.get("/agents")
@@ -315,6 +320,55 @@ async def get_agent_update_status(agent_id: str, since: float = 0):
         return {"phase": "done", "pct": 100, "version": version, "detail": detail}
 
     return await asyncio.to_thread(_poll)
+
+
+@router.put("/agents/{agent_id}")
+async def update_agent(agent_id: str, req: UpdateAgentRequest, request: Request):
+    _check_admin_agents(request)
+    if not req.name and not req.url:
+        raise HTTPException(status_code=400, detail="請提供至少一個要更新的欄位（name 或 url）")
+
+    if state.db_online:
+        try:
+            from db.session import get_session_factory
+            factory = get_session_factory()
+            if factory:
+                from db.repos import agents_repo
+                async with factory() as session:
+                    existing = await agents_repo.get(session, agent_id)
+                    if not existing:
+                        raise HTTPException(status_code=404, detail=f"找不到 ID 為 {agent_id} 的機器")
+                    new_name = req.name or existing["name"]
+                    new_url = (req.url.rstrip("/") if req.url else existing["url"])
+                    # Check URL uniqueness (exclude self)
+                    if new_url != existing["url"] and await agents_repo.url_exists(session, new_url):
+                        raise HTTPException(status_code=409, detail=f"已存在相同 URL 的機器：{new_url}")
+                    await agents_repo.update(session, agent_id, new_name, new_url)
+                    await session.commit()
+                    await _sync_db_to_nas(session, agents_repo)
+                    return {"status": "ok", "agent": {"id": agent_id, "name": new_name, "url": new_url}}
+        except HTTPException:
+            raise
+        except Exception:
+            pass
+
+    # Fallback to JSON
+    nas_dir = _get_nas_agents_dir()
+    if not nas_dir:
+        raise HTTPException(status_code=400, detail="尚未設定 nas_paths.agents_dir")
+    agents = _load_agents_json(nas_dir)
+    target = next((a for a in agents if a.get("id") == agent_id), None)
+    if not target:
+        raise HTTPException(status_code=404, detail=f"找不到 ID 為 {agent_id} 的機器")
+    new_url = req.url.rstrip("/") if req.url else target["url"]
+    if new_url != target["url"] and any(a.get("url", "").rstrip("/") == new_url for a in agents if a.get("id") != agent_id):
+        raise HTTPException(status_code=409, detail=f"已存在相同 URL 的機器：{new_url}")
+    if req.name:
+        target["name"] = req.name
+    if req.url:
+        target["url"] = new_url
+    _save_agents_json(nas_dir, agents)
+    return {"status": "ok", "agent": target}
 
 
 @router.delete("/agents/{agent_id}")

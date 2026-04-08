@@ -67,7 +67,7 @@ function renderList() {
 }
 
 function _buildEditFields() {
-    const catOpts = ['','行政','其他','建構','專案外包','專案雜支','設備耗材','設備維護','軟體網路服務','發票代開','業務推廣','零用金','獎金','薪資','轉存']
+    const catOpts = ['','行政','其他','建構','專案雜支','設備耗材','設備維護','軟體網路服務','發票代開','業務推廣','零用金','獎金','薪資','轉存']
         .map(v => ({value:v, label:v || '—'}));
     const payeeTypeOpts = ['','內部人員','現金','勞報','核銷'].map(v => ({value:v, label:v || '—'}));
     const payeeOpts = [{value:'', label:'— 選擇人員 —'}].concat(

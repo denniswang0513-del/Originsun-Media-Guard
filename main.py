@@ -212,6 +212,115 @@ async def _on_startup():
                             await _si.rollback()
         except Exception:
             pass
+
+    # ── DB Migration: crm_project_cost_lines table ──
+    if state.db_online:
+        try:
+            from db.session import get_session_factory
+            _fcl = get_session_factory()
+            if _fcl:
+                from sqlalchemy import text as _tcl
+                async with _fcl() as _scl:
+                    await _scl.execute(_tcl("""
+                        CREATE TABLE IF NOT EXISTS crm_project_cost_lines (
+                            id VARCHAR(32) PRIMARY KEY,
+                            project_id VARCHAR(32) NOT NULL,
+                            phase VARCHAR(32) NOT NULL,
+                            item_name VARCHAR(128) NOT NULL,
+                            sort_order INTEGER NOT NULL DEFAULT 0,
+                            estimated_amount INTEGER,
+                            estimated_staff_id VARCHAR(32),
+                            estimated_notes VARCHAR(255),
+                            actual_amount INTEGER,
+                            actual_staff_id VARCHAR(32),
+                            actual_notes VARCHAR(255),
+                            created_at TIMESTAMPTZ DEFAULT NOW(),
+                            updated_at TIMESTAMPTZ DEFAULT NOW()
+                        )
+                    """))
+                    await _scl.execute(_tcl(
+                        "CREATE INDEX IF NOT EXISTS idx_costline_project "
+                        "ON crm_project_cost_lines(project_id)"
+                    ))
+                    await _scl.execute(_tcl(
+                        "CREATE INDEX IF NOT EXISTS idx_costline_phase "
+                        "ON crm_project_cost_lines(project_id, phase)"
+                    ))
+                    await _scl.commit()
+        except Exception:
+            pass
+
+    # ── DB Migration: crm_project_expenses new columns ──
+    if state.db_online:
+        try:
+            from db.session import get_session_factory
+            _fex = get_session_factory()
+            if _fex:
+                from sqlalchemy import text as _tex
+                async with _fex() as _sex:
+                    for col_sql in [
+                        "ALTER TABLE crm_project_expenses ADD COLUMN IF NOT EXISTS sub_item VARCHAR(128)",
+                        "ALTER TABLE crm_project_expenses ADD COLUMN IF NOT EXISTS payee VARCHAR(64)",
+                        "ALTER TABLE crm_project_expenses ADD COLUMN IF NOT EXISTS advance_id VARCHAR(32)",
+                        "ALTER TABLE crm_project_expenses ADD COLUMN IF NOT EXISTS created_at TIMESTAMP",
+                        "ALTER TABLE crm_payment_requests ADD COLUMN IF NOT EXISTS advance_by VARCHAR(64)",
+                        "ALTER TABLE crm_payment_requests ADD COLUMN IF NOT EXISTS is_advance INTEGER DEFAULT 0",
+                        "ALTER TABLE crm_payment_requests ADD COLUMN IF NOT EXISTS advance_returned INTEGER DEFAULT 0",
+                        "ALTER TABLE crm_cash_entries ADD COLUMN IF NOT EXISTS advance_payment_id VARCHAR(32)",
+                        "ALTER TABLE crm_projects ADD COLUMN IF NOT EXISTS receipt_path VARCHAR(512)",
+                    ]:
+                        try:
+                            await _sex.execute(_tex(col_sql))
+                            await _sex.commit()
+                        except Exception:
+                            await _sex.rollback()
+        except Exception:
+            pass
+
+    # ── DB Migration: crm_cost_line_templates table ──
+    if state.db_online:
+        try:
+            from db.session import get_session_factory
+            _ftpl = get_session_factory()
+            if _ftpl:
+                from sqlalchemy import text as _ttpl
+                async with _ftpl() as _stpl:
+                    await _stpl.execute(_ttpl("""
+                        CREATE TABLE IF NOT EXISTS crm_cost_line_templates (
+                            id VARCHAR(32) PRIMARY KEY,
+                            name VARCHAR(128) NOT NULL,
+                            items JSONB,
+                            created_at TIMESTAMPTZ DEFAULT NOW()
+                        )
+                    """))
+                    await _stpl.commit()
+        except Exception:
+            pass
+
+    # ── DB Migration: crm_project_cost_lines new columns ──
+    if state.db_online:
+        try:
+            from db.session import get_session_factory
+            _fcln = get_session_factory()
+            if _fcln:
+                from sqlalchemy import text as _tcln
+                async with _fcln() as _scln:
+                    for col_sql in [
+                        "ALTER TABLE crm_project_cost_lines ADD COLUMN IF NOT EXISTS estimated_unit_price INTEGER",
+                        "ALTER TABLE crm_project_cost_lines ADD COLUMN IF NOT EXISTS estimated_quantity INTEGER",
+                        "ALTER TABLE crm_project_cost_lines ADD COLUMN IF NOT EXISTS actual_unit_price INTEGER",
+                        "ALTER TABLE crm_project_cost_lines ADD COLUMN IF NOT EXISTS actual_quantity INTEGER",
+                        "ALTER TABLE crm_project_cost_lines ADD COLUMN IF NOT EXISTS estimated_unit_type VARCHAR(16)",
+                        "ALTER TABLE crm_project_cost_lines ADD COLUMN IF NOT EXISTS actual_unit_type VARCHAR(16)",
+                    ]:
+                        try:
+                            await _scln.execute(_tcln(col_sql))
+                            await _scln.commit()
+                        except Exception:
+                            await _scln.rollback()
+        except Exception:
+            pass
+
     asyncio.create_task(_periodic_version_check())
     asyncio.create_task(_periodic_db_health())
     from core.scheduler import run_scheduler  # type: ignore

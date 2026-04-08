@@ -12,6 +12,14 @@ let _editingId = null;
 let _filters = { q: '', category: '', item: '' };
 let _csvFile = null;
 
+function _toggleAdvanceFields(isAdv) {
+    var ids = ['cash-advance-section', 'cash-field-project', 'cash-field-invoice', 'cash-field-bankfee'];
+    for (var i = 0; i < ids.length; i++) {
+        var el = document.getElementById(ids[i]);
+        if (el) el.style.display = (i === 0 ? isAdv : !isAdv) ? '' : 'none';
+    }
+}
+
 // ── Data Loading ────────────────────────────────────────────
 
 async function loadEntries() {
@@ -104,6 +112,9 @@ function renderDetail(e) {
         return note && e.summary && (e.summary.includes(note) || note.includes(e.summary));
     });
     html += prop('客戶', matchedClient ? matchedClient.short_name + (matchedClient.payment_info ? ' (' + matchedClient.payment_info + ')' : '') : '');
+    if (e.advance_payment_id) {
+        html += prop('預支關聯', e.advance_payment_id ? '已關聯' : '');
+    }
 
     document.getElementById('cash-detail-content').innerHTML = html;
 
@@ -167,7 +178,7 @@ function _buildEditFields() {
 
 // ── Modal ───────────────────────────────────────────────────
 
-const _FIELDS = ['summary', 'entry_date', 'expense', 'deposit', 'note', 'invoice_id', 'bank_fee', 'project_id', 'category'];
+const _FIELDS = ['summary', 'entry_date', 'expense', 'deposit', 'note', 'invoice_id', 'bank_fee', 'project_id', 'category', 'advance_payment_id'];
 const _INT_FIELDS = ['expense', 'deposit', 'bank_fee'];
 const _DATE_FIELDS = ['entry_date'];
 
@@ -250,6 +261,15 @@ function openModal(e = null) {
     }
     _updateVerifyRow();
     _updateClientMatch();
+    // Reset advance fields + toggle project/invoice visibility
+    var cat = e ? (e.category || '') : '';
+    _toggleAdvanceFields(cat === '專案雜支');
+    var advCheck = document.getElementById('cash-f-advance-check');
+    if (advCheck) advCheck.checked = !!(e && e.advance_payment_id);
+    var advList = document.getElementById('cash-advance-list');
+    if (advList) advList.style.display = (e && e.advance_payment_id) ? 'block' : 'none';
+    var advHidden = document.getElementById('cash-f-advance_payment_id');
+    if (advHidden) advHidden.value = (e && e.advance_payment_id) || '';
     document.getElementById('cash-modal').style.display = 'flex';
 }
 
@@ -275,11 +295,19 @@ async function saveEntry() {
         payload[f] = el ? el.value.trim() : '';
     }
     _cleanPayload(payload);
+    // 專案雜支 + 預支關聯 → 自動帶入預支款的專案
+    if (payload.advance_payment_id && !payload.project_id) {
+        var selRadio = document.querySelector('input[name="advance-select"]:checked');
+        if (selRadio && selRadio.dataset.projectId) {
+            payload.project_id = selRadio.dataset.projectId;
+        }
+    }
     const btn = document.getElementById('cash-btn-save');
     btn.disabled = true; btn.textContent = '儲存中...';
     try {
         if (_editingId) await _fetch('/cash-entries/' + _editingId, { method: 'PUT', body: JSON.stringify(payload) });
         else await _fetch('/cash-entries', { method: 'POST', body: JSON.stringify(payload) });
+        // 發款/收款狀態由後端自動計算，不需手動更新
         document.getElementById('cash-modal').style.display = 'none';
         await Promise.all([loadEntries(), _loadInvoiceList()]);
     } catch (e) { _showErr(e.message); }
@@ -291,6 +319,45 @@ async function deleteEntry(e) {
     try { await _fetch('/cash-entries/' + e.id, { method: 'DELETE' }); closeDetail(); await loadEntries(); }
     catch (err) { alert(err.message); }
 }
+
+window._cashToggleAdvance = async function(checked) {
+    var list = document.getElementById('cash-advance-list');
+    var hiddenInput = document.getElementById('cash-f-advance_payment_id');
+    if (!list) return;
+    if (!checked) {
+        list.style.display = 'none';
+        if (hiddenInput) hiddenInput.value = '';
+        return;
+    }
+    list.style.display = 'block';
+    list.innerHTML = '<div style="padding:8px;color:#9ca3af;font-size:11px;">載入中...</div>';
+    try {
+        var data = await _fetch('/payments/advances?returned=0');
+        var advances = data.advances || [];
+        if (advances.length === 0) {
+            list.innerHTML = '<div style="padding:8px;color:#6b7280;font-size:11px;">無預支款</div>';
+            return;
+        }
+        var html = '<div style="font-size:12px;color:#6b7280;margin-bottom:6px;">選擇預支款：</div>';
+        for (var i = 0; i < advances.length; i++) {
+            var a = advances[i];
+            var balance = (a.balance != null) ? a.balance : a.amount - a.expense_total;
+            var balanceText = balance > 0 ? '需還款 $' + _fmtNum(balance) : balance < 0 ? '需補款 $' + _fmtNum(Math.abs(balance)) : '已結清';
+            var balanceColor = balance > 0 ? '#fb923c' : balance < 0 ? '#fca5a5' : '#86efac';
+            var payTag = a.is_paid ? '<span style="color:#86efac;font-size:10px;">已發款</span>' : '<span style="color:#6b7280;font-size:10px;">未發款</span>';
+            var retTag = a.is_settled ? '<span style="color:#86efac;font-size:10px;">已結清</span>' : a.is_returned ? '<span style="color:#fb923c;font-size:10px;">已收款</span>' : '';
+            html += '<label style="display:flex;align-items:flex-start;gap:8px;padding:8px;border:1px solid #2e2e2e;border-radius:6px;margin-bottom:4px;cursor:pointer;background:#1a1a1a;">';
+            html += '<input type="radio" name="advance-select" value="' + a.id + '" data-project-id="' + _esc(a.project_id) + '" style="margin-top:3px;" onchange="document.getElementById(\'cash-f-advance_payment_id\').value=this.value;">';
+            html += '<div style="flex:1;">';
+            html += '<div style="font-weight:600;color:#d1d5db;">' + _esc(a.project_name) + ' — ' + _esc(a.payee_name) + ' ' + payTag + ' ' + retTag + '</div>';
+            html += '<div style="font-size:11px;color:#6b7280;">預支 $' + _fmtNum(a.amount) + '　支出 $' + _fmtNum(a.expense_total) + '　<span style="color:' + balanceColor + ';">' + balanceText + '</span></div>';
+            html += '</div></label>';
+        }
+        list.innerHTML = html;
+    } catch (e) {
+        list.innerHTML = '<div style="padding:8px;color:#fca5a5;">載入失敗</div>';
+    }
+};
 
 function _showErr(msg) { const el = document.getElementById('cash-modal-error'); el.textContent = msg; el.style.display = 'block'; }
 
@@ -361,6 +428,10 @@ export async function initCrmCashbookTab() {
     document.getElementById('cash-btn-save').addEventListener('click', saveEntry);
     document.getElementById('cash-detail-close').addEventListener('click', closeDetail);
     document.getElementById('cash-btn-do-import').addEventListener('click', doImport);
+
+    // Show/hide advance section + project/invoice based on category
+    var catEl = document.getElementById('cash-f-category');
+    if (catEl) catEl.addEventListener('change', function() { _toggleAdvanceFields(this.value === '專案雜支'); });
 
     // Modal dynamic: verify row + client match
     for (const id of ['cash-f-invoice_id', 'cash-f-deposit', 'cash-f-bank_fee', 'cash-f-summary', 'cash-f-note']) {

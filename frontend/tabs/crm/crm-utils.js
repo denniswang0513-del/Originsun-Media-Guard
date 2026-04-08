@@ -98,6 +98,11 @@ export function enableInlineEdit(contentElId, actionsElId, fields, data, onSave,
             input = `<select class="crm-input crm-inline-input" data-field="${f.name}">` +
                 f.options.map(o => `<option value="${esc(o.value)}"${String(val) === String(o.value) ? ' selected' : ''}>${esc(o.label)}</option>`).join('') +
                 `</select>`;
+        } else if (f.type === 'checkboxes' && f.options) {
+            const selected = Array.isArray(val) ? val : [];
+            input = `<div data-field="${f.name}" class="crm-checkbox-list crm-inline-input">` +
+                f.options.map(o => `<label class="crm-checkbox-item"><input type="checkbox" value="${esc(o.value)}"${selected.includes(o.value) ? ' checked' : ''}> ${esc(o.label)}</label>`).join('') +
+                `</div>`;
         } else if (f.type === 'textarea') {
             input = `<textarea class="crm-input crm-inline-input crm-textarea" data-field="${f.name}" rows="2">${esc(String(val))}</textarea>`;
         } else if (f.type === 'date') {
@@ -110,8 +115,31 @@ export function enableInlineEdit(contentElId, actionsElId, fields, data, onSave,
         } else {
             input = `<input type="text" class="crm-input crm-inline-input" data-field="${f.name}" value="${esc(String(val))}">`;
         }
+        if (f.type === 'folder') {
+            input += `<button class="crm-btn crm-btn-secondary crm-btn-sm _folder-pick" data-for="${f.name}" style="margin-left:4px;padding:2px 8px;flex-shrink:0;">📁</button>`;
+            return `<div class="crm-detail-prop"><div class="crm-prop-label">${f.label}</div><div class="crm-prop-value-edit" style="display:flex;align-items:center;">${input}</div></div>`;
+        }
         return `<div class="crm-detail-prop"><div class="crm-prop-label">${f.label}</div><div class="crm-prop-value-edit">${input}</div></div>`;
     }).join('');
+
+    // Bind folder picker buttons → use global pickPath mechanism
+    content.querySelectorAll('._folder-pick').forEach(btn => {
+        btn.addEventListener('click', async () => {
+            const fieldName = btn.dataset.for;
+            const inputEl = content.querySelector(`[data-field="${fieldName}"]`);
+            if (!inputEl) return;
+            if (window._isExternalAccess && typeof window.openNasBrowser === 'function') {
+                const path = await window.openNasBrowser({ title: '選擇資料夾', initialPath: inputEl.value || '' });
+                if (path) inputEl.value = path;
+            } else {
+                try {
+                    const r = await fetch('/api/v1/utils/pick_folder');
+                    const d = await r.json();
+                    if (d.path) inputEl.value = d.path;
+                } catch (_) {}
+            }
+        });
+    });
 
     // Replace action buttons
     const closeBtn = actions.querySelector('.crm-detail-close');
@@ -130,6 +158,10 @@ export function enableInlineEdit(contentElId, actionsElId, fields, data, onSave,
         const intFields = fields.filter(f => f.type === 'number').map(f => f.name);
         content.querySelectorAll('[data-field]').forEach(el => {
             const name = el.dataset.field;
+            if (el.classList.contains('crm-checkbox-list')) {
+                payload[name] = Array.from(el.querySelectorAll('input:checked')).map(cb => cb.value);
+                return;
+            }
             let val = el.value;
             if (intFields.includes(name)) val = val ? parseInt(val) : null;
             if (el.type === 'date' || el.type === 'month') val = val || null;
@@ -215,7 +247,7 @@ export function setupResizeHandle(handleId, panelId) {
 
         const onMove = ev => {
             const w = startW - (ev.clientX - startX);
-            detailPanel.style.width = Math.max(320, Math.min(800, w)) + 'px';
+            detailPanel.style.width = Math.max(320, Math.min(1200, w)) + 'px';
         };
         const onUp = () => {
             resizeHandle.classList.remove('dragging');
@@ -228,3 +260,4 @@ export function setupResizeHandle(handleId, panelId) {
         document.addEventListener('mouseup', onUp);
     });
 }
+

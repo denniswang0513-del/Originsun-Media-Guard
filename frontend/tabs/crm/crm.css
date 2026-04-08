@@ -8,6 +8,19 @@
   font-size: 14px;
 }
 
+/* ── Sub-tabs (專案/報價總覽) ── */
+.crm-sub-tabs {
+    display: flex; gap: 0; border-bottom: 1px solid #3a3a3a; padding: 0 16px;
+    flex-shrink: 0; background: #2a2a2a;
+}
+.crm-sub-tab {
+    background: none; border: none; border-bottom: 2px solid transparent;
+    color: #6b7280; font-size: 13px; font-weight: 600; padding: 10px 16px;
+    cursor: pointer; transition: color 0.15s, border-color 0.15s;
+}
+.crm-sub-tab:hover { color: #e0e0e0; }
+.crm-sub-tab.active { color: #fff; border-bottom-color: #3b82f6; }
+
 /* ── Toolbar ── */
 .crm-toolbar {
   display: flex;
@@ -197,9 +210,9 @@
 .crm-resize-handle.dragging { background: #3b82f6; }
 
 .crm-detail-panel {
-  width: 520px;
+  width: 65%;
   min-width: 320px;
-  max-width: 800px;
+  max-width: 1200px;
   flex-shrink: 0;
   display: flex;
   flex-direction: column;
@@ -813,3 +826,206 @@
 .expense-num { width: 80px; text-align: right; color: #e0e0e0; }
 .expense-receipt { width: 30px; text-align: center; }
 .expense-actions { width: 80px; display: flex; gap: 2px; justify-content: flex-end; }
+
+/* ── Cost Lines Table (成本估算) ── */
+.cost-table { font-size: 12px; margin: 4px 0; }
+.cost-row {
+    display: flex; align-items: center; gap: 4px;
+    padding: 4px 0; border-bottom: 1px solid #2e2e2e;
+}
+.cost-row:last-child { border-bottom: none; }
+.cost-row-header { color: #6b7280; font-weight: 600; font-size: 11px; }
+.cost-phase-header {
+    padding: 6px 0 2px; color: #9ca3af; font-weight: 700;
+    font-size: 11px; text-transform: uppercase; letter-spacing: 0.05em;
+    border-top: 1px solid #3a3a3a; margin-top: 4px;
+}
+.cost-phase-header:first-child { border-top: none; margin-top: 0; }
+.cost-row-subtotal { background: #1a1a1a; border-radius: 4px; padding: 4px 6px; }
+.cost-row-total {
+    font-weight: 700; border-top: 2px solid #3a3a3a;
+    padding-top: 6px; color: #e0e0e0;
+}
+.cost-col-item  { flex: 1; min-width: 60px; color: #d1d5db; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cost-col-price { flex: 1; min-width: 40px; text-align: right; color: #e0e0e0; }
+.cost-col-qty   { flex: 0.5; min-width: 24px; text-align: center; color: #e0e0e0; overflow: hidden; }
+.cost-col-qty input { width: 100%; max-width: 100%; box-sizing: border-box; -moz-appearance: textfield; }
+.cost-col-qty input::-webkit-inner-spin-button,
+.cost-col-qty input::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }
+.cost-col-unit  { flex: 0.5; min-width: 30px; }
+.cost-unit-sel  { width: 100%; font-size: 10px; padding: 1px 2px; }
+.cost-col-amt   { flex: 1; min-width: 40px; text-align: right; color: #9ca3af; overflow: hidden; }
+.cost-col-amt input, .cost-col-price input { width: 100%; max-width: 100%; box-sizing: border-box; -moz-appearance: textfield; }
+.cost-col-amt input::-webkit-inner-spin-button,
+.cost-col-amt input::-webkit-outer-spin-button,
+.cost-col-price input::-webkit-inner-spin-button,
+.cost-col-price input::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }
+.cost-col-staff { width: 110px; flex-shrink: 0; text-align: center; padding-left: 8px; }
+.cost-col-diff  { flex: 1; min-width: 50px; text-align: right; }
+.cost-col-actions { width: 24px; flex-shrink: 0; text-align: center; }
+.cost-editable  { cursor: pointer; }
+.cost-editable:hover { color: #93c5fd; }
+.cost-editable:hover .crm-muted { color: #93c5fd; }
+.cost-divider { margin-right: 0; border-right: 1px solid #3a3a3a; padding-right: 8px; }
+.cost-col-copy { width: 20px; flex-shrink: 0; text-align: center; color: #555; cursor: pointer; font-size: 12px; }
+.cost-col-copy:hover { color: #3b82f6; }
+.cost-row-header .cost-col-copy, .cost-row-subtotal .cost-col-copy, .cost-row-total .cost-col-copy { cursor: default; color: transparent; }
+.cost-staff-sel { width: 100%; font-size: 11px; padding: 2px 4px; }
+/* ── Project Info — 3-layer card layout ── */
+.pi-wrap { display: flex; flex-direction: column; gap: 12px; }
+.pi-empty { color: #4b5563; font-style: italic; }
+
+/* Layer 1: Summary bar */
+.pi-summary {
+    display: flex; gap: 1px; background: #2e2e2e; border-radius: 8px; overflow: hidden;
+}
+.pi-summary-cell {
+    flex: 1; background: #1e1e1e; padding: 10px 12px; text-align: center;
+}
+.pi-summary-cell:first-child { border-radius: 8px 0 0 8px; }
+.pi-summary-cell:last-child  { border-radius: 0 8px 8px 0; }
+.pi-summary-val {
+    font-size: 13px; font-weight: 600; color: #e0e0e0; margin-bottom: 3px;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    display: flex; align-items: center; justify-content: center; gap: 4px;
+}
+.pi-summary-label { font-size: 10px; color: #6b7280; }
+
+/* Layer 2: People row */
+.pi-people {
+    display: flex; gap: 12px; align-items: center; flex-wrap: wrap;
+    padding: 6px 12px; background: #1e1e1e; border: 1px solid #2e2e2e; border-radius: 8px;
+}
+.pi-person {
+    display: flex; align-items: center; gap: 5px; font-size: 12px; color: #d1d5db;
+}
+.pi-person-role {
+    font-size: 10px; font-weight: 700; color: #6b7280; min-width: 20px;
+}
+
+/* Layer 3: Budget cards (async, primary visual) */
+.pi-finance { display: flex; gap: 8px; }
+.pi-fin-card {
+    flex: 1; background: #1e1e1e; border: 1px solid #2e2e2e; border-radius: 8px;
+    padding: 10px 12px; text-align: center;
+}
+.pi-fin-label { font-size: 11px; color: #6b7280; margin-bottom: 4px; }
+.pi-fin-value { font-size: 18px; font-weight: 700; }
+.pi-fin-sub   { font-size: 10px; color: #555; margin-top: 2px; }
+
+/* Layer 4: Contract inline */
+.pi-contract-line {
+    display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+    font-size: 12px; color: #9ca3af; padding: 8px 12px;
+    background: #1e1e1e; border: 1px solid #2e2e2e; border-radius: 8px;
+}
+.pi-contract-line b { font-weight: 600; }
+.pi-dot { width: 3px; height: 3px; border-radius: 50%; background: #4b5563; flex-shrink: 0; }
+
+/* Budget meta (progress label + ratios) */
+.pi-budget-meta {
+    font-size: 11px; color: #6b7280; text-align: right; margin-top: -4px;
+}
+
+/* Activate project option */
+.pi-activate-option {
+    display: flex; align-items: center; justify-content: space-between; gap: 12px;
+    background: #1e1e1e; border: 1px solid #3a3a3a; border-radius: 6px;
+    padding: 10px 14px; cursor: pointer; color: #d1d5db; font-size: 13px;
+    transition: border-color 0.15s;
+}
+.pi-activate-option:hover { border-color: #3b82f6; background: #252525; }
+
+/* Section title with divider */
+.pi-section-title {
+    font-size: 11px; font-weight: 700; color: #6b7280; text-transform: uppercase;
+    letter-spacing: 0.5px; padding-bottom: 6px; margin-bottom: 4px;
+    border-bottom: 1px solid #3a3a3a;
+}
+
+/* Layer 5: Details card */
+.pi-details-card {
+    background: #1e1e1e; border: 1px solid #2e2e2e; border-radius: 8px; padding: 14px 16px;
+    display: flex; flex-direction: column; gap: 10px;
+}
+.pi-det-text { font-size: 13px; color: #d1d5db; line-height: 1.5; }
+.pi-det-paths { display: flex; flex-direction: column; gap: 4px; }
+.pi-det-path {
+    font-size: 12px; color: #9ca3af; display: flex; align-items: center; gap: 4px;
+    word-break: break-all;
+}
+.pi-det-note {
+    font-size: 12px; color: #6b7280; font-style: italic; line-height: 1.4;
+}
+
+/* ── Cost Dashboard (財務卡片 + 進度條) ── */
+.cost-dashboard {
+    display: flex; gap: 8px; margin-bottom: 10px;
+}
+.cost-card {
+    flex: 1; background: #1e1e1e; border: 1px solid #2e2e2e; border-radius: 8px;
+    padding: 10px 12px; text-align: center;
+}
+.cost-card-label { font-size: 11px; color: #6b7280; margin-bottom: 4px; }
+.cost-card-value { font-size: 18px; font-weight: 700; }
+.cost-card-sub { font-size: 10px; color: #555; margin-top: 2px; }
+.cost-progress-wrap {
+    height: 6px; background: #2e2e2e; border-radius: 3px; overflow: hidden; margin-bottom: 4px;
+}
+.cost-progress-bar { height: 100%; border-radius: 3px; transition: width 0.3s; }
+.cost-progress-label { font-size: 11px; color: #6b7280; text-align: right; margin-bottom: 8px; }
+.cost-dashboard-detail {
+    display: flex; gap: 16px; font-size: 11px; color: #9ca3af;
+    padding: 6px 0; border-top: 1px solid #2e2e2e; margin-bottom: 4px;
+}
+
+.cost-tpl-item {
+    padding: 6px 12px; cursor: pointer; font-size: 12px;
+    border-bottom: 1px solid #333; display: flex; justify-content: space-between;
+}
+.cost-tpl-item:last-child { border-bottom: none; }
+.cost-tpl-item:hover { background: #333; }
+
+/* ── Project Quote Tab ── */
+.pq-row {
+    display: flex; align-items: center; gap: 12px; padding: 8px 12px;
+    border-bottom: 1px solid #2e2e2e; cursor: pointer; font-size: 13px;
+    transition: background 0.1s;
+}
+.pq-row:hover { background: #2a2a2a; }
+.pq-row.selected { background: #1e3a5f; }
+.pq-version { font-weight: 600; color: #e0e0e0; min-width: 30px; }
+.pq-price { margin-left: auto; font-weight: 600; color: #60a5fa; }
+.pq-date { color: #6b7280; font-size: 12px; min-width: 80px; text-align: right; }
+.pq-detail-card {
+    background: #1e1e1e; border: 1px solid #2e2e2e; border-radius: 8px;
+    padding: 16px; margin-top: 12px;
+}
+.pq-detail-header {
+    display: flex; justify-content: space-between; align-items: center;
+    padding-bottom: 10px; border-bottom: 1px solid #2e2e2e; margin-bottom: 12px;
+}
+.pq-info-row {
+    display: flex; gap: 16px; font-size: 12px; color: #9ca3af;
+    padding-bottom: 10px; border-bottom: 1px solid #2e2e2e; margin-bottom: 12px;
+}
+.pq-group-header {
+    font-size: 11px; font-weight: 700; color: #6b7280; padding: 6px 0 4px;
+    border-bottom: 1px solid #2e2e2e;
+}
+.pq-item-row {
+    display: flex; align-items: center; gap: 8px; padding: 4px 0;
+    font-size: 12px; color: #d1d5db; border-bottom: 1px solid #1a1a1a;
+}
+.pq-item-desc { flex: 1; }
+.pq-item-qty { width: 60px; color: #9ca3af; text-align: center; }
+.pq-item-price { width: 80px; text-align: right; color: #9ca3af; }
+.pq-item-amount { width: 80px; text-align: right; font-weight: 600; }
+.pq-totals { margin-top: 12px; }
+.pq-total-row {
+    display: flex; justify-content: space-between; padding: 3px 0;
+    font-size: 12px; color: #9ca3af;
+}
+.pq-total-main { font-weight: 700; color: #e0e0e0; font-size: 13px; padding: 6px 0; }
+.pq-stages { font-size: 12px; color: #d1d5db; margin-top: 10px; padding-top: 8px; border-top: 1px solid #2e2e2e; }
+.pq-terms { font-size: 12px; color: #6b7280; font-style: italic; margin-top: 6px; }

@@ -1,5 +1,5 @@
 {
-  "version": "1.10.65",
+  "version": "1.10.66",
   "build_date": "2026-04-02",
-  "notes": "CRM payables month-grouping + client performance tab + project linkage + performance optimization"
+  "notes": "CRM 模組文件新增客戶績效/專案聯動/狀態自動化/效能優化說明，端點數更新至 67"
 }
