@@ -39,120 +39,75 @@ if (typeof appendLog === 'undefined') {
         // Dynamically load tabs
         async function loadTabs() {
             try {
-                // Load Backup Tab
-                const tabMain = document.getElementById('tab_main');
                 const _cb = `?t=${Date.now()}`;
 
-                // Load Projects Overview Tab (first, before backup)
-                try {
-                    const tabProjects = document.getElementById('tab-projects');
-                    const projRes = await fetch(`./tabs/projects/projects.html${_cb}`);
-                    if (projRes.ok) {
-                        tabProjects.innerHTML = await projRes.text();
-                        const projModule = await import(`./tabs/projects/projects.js${_cb}`);
-                        projModule.initTab();
-                    }
-                } catch (projErr) {
-                    console.warn('[Projects Tab] 載入失敗:', projErr);
-                }
-                const backupRes = await fetch(`./tabs/backup/backup.html${_cb}`);
-                if (backupRes.ok) {
-                    tabMain.innerHTML = await backupRes.text();
-                    // dynamically import module to avoid breaking global app.js scope
-                    const backupModule = await import(`./tabs/backup/backup.js${_cb}`);
-                    backupModule.initBackupTab();
-                } else {
-                    console.error("Failed to load Backup tab HTML:", backupRes.statusText);
+                // Wait for auth so we know which modules to load
+                await window._authReady;
+                const modules = window._modules;
+                const showAll = !window._authUser || !modules || modules.length === 0;
+                const _should = (key) => showAll || modules.includes(key);
+
+                // Hide nav buttons & sections for unauthorized tabs immediately
+                const TAB_MAP = {
+                    projects:'tab-projects', backup:'tab_main', verify:'tab_verify',
+                    transcode:'tab_transcode', concat:'tab_concat', report:'tab_report',
+                    transcribe:'tab_transcribe', tts:'tab_tts',
+                    crm_clients:'tab_crm_clients', crm_projects:'tab_crm_projects',
+                    crm_staff:'tab_crm_staff', crm_invoices:'tab_crm_invoices',
+                };
+                if (!showAll) {
+                    Object.entries(TAB_MAP).forEach(([key, tabId]) => {
+                        if (!modules.includes(key)) {
+                            const btn = document.getElementById('btn_' + tabId);
+                            if (btn) btn.style.display = 'none';
+                            const sec = document.getElementById(tabId);
+                            if (sec) sec.style.display = 'none';
+                        }
+                    });
                 }
 
-                // Load Verify Tab
-                const tabVerify = document.getElementById('tab_verify');
-                const verifyRes = await fetch(`./tabs/verify/verify.html${_cb}`);
-                if (verifyRes.ok) {
-                    tabVerify.innerHTML = await verifyRes.text();
-                    const verifyModule = await import(`./tabs/verify/verify.js${_cb}`);
-                    verifyModule.initVerifyTab();
-                } else {
-                    console.error("Failed to load Verify tab HTML:", verifyRes.statusText);
-                }
-
-                // Load Transcode Tab
-                const tabTranscode = document.getElementById('tab_transcode');
-                const transcodeRes = await fetch(`./tabs/transcode/transcode.html${_cb}`);
-                if (transcodeRes.ok) {
-                    tabTranscode.innerHTML = await transcodeRes.text();
-                    const tcModule = await import(`./tabs/transcode/transcode.js${_cb}`);
-                    tcModule.initTranscodeTab();
-                } else {
-                    console.error("Failed to load Transcode tab HTML:", transcodeRes.statusText);
-                }
-
-                // Load Concat Tab
-                const tabConcat = document.getElementById('tab_concat');
-                const concatRes = await fetch(`./tabs/concat/concat.html${_cb}`);
-                if (concatRes.ok) {
-                    tabConcat.innerHTML = await concatRes.text();
-                    const ccModule = await import(`./tabs/concat/concat.js${_cb}`);
-                    ccModule.initConcatTab();
-                } else {
-                    console.error("Failed to load Concat tab HTML:", concatRes.statusText);
-                }
-
-                // Load Report Tab
-                const tabReport = document.getElementById('tab_report');
-                const reportRes = await fetch(`./tabs/report/report.html${_cb}`);
-                if (reportRes.ok) {
-                    tabReport.innerHTML = await reportRes.text();
-                    const reportModule = await import(`./tabs/report/report.js${_cb}`);
-                    reportModule.initReportTab();
-                } else {
-                    console.error("Failed to load Report tab HTML:", reportRes.statusText);
-                }
-
-                // Load Transcribe Tab
-                const tabTranscribe = document.getElementById('tab_transcribe');
-                const transcribeRes = await fetch(`./tabs/transcribe/transcribe.html${_cb}`);
-                if (transcribeRes.ok) {
-                    tabTranscribe.innerHTML = await transcribeRes.text();
-                    const tsModule = await import(`./tabs/transcribe/transcribe.js${_cb}`);
-                    tsModule.initTranscribeTab();
-                } else {
-                    console.error("Failed to load Transcribe tab HTML:", transcribeRes.statusText);
-                }
-
-                // Load TTS Tab (🚧 開發中 - 載入失敗不影響其他分頁)
-                try {
-                    const tabTts = document.getElementById('tab_tts');
-                    const ttsRes = await fetch(`./tabs/tts/tts.html?t=${Date.now()}`);
-                    if (ttsRes.ok) {
-                        tabTts.innerHTML = await ttsRes.text();
-                        const ttsModule = await import(`./tabs/tts/tts.js?t=${Date.now()}`);
-                        ttsModule.initTtsTab();
-                    }
-                } catch (ttsErr) {
-                    console.warn('[TTS Tab] 載入失敗（開發中）:', ttsErr);
-                }
-
-                // Load all CRM tabs in parallel
-                const _loadCrmTab = async (containerId, htmlFile, jsFile, initFn) => {
+                // Helper: load a single tab (fetch HTML + import JS + init)
+                const _loadTab = async (sectionId, htmlPath, jsPath, initFn) => {
                     try {
-                        const el = document.getElementById(containerId);
-                        const res = await fetch(`./tabs/crm/${htmlFile}${_cb}`);
+                        const el = document.getElementById(sectionId);
+                        const res = await fetch(`${htmlPath}${_cb}`);
                         if (res.ok) {
                             el.innerHTML = await res.text();
-                            const mod = await import(`./tabs/crm/${jsFile}${_cb}`);
-                            await mod[initFn]();
+                            const mod = await import(`${jsPath}${_cb}`);
+                            if (typeof mod[initFn] === 'function') await mod[initFn]();
                         }
                     } catch (e) {
-                        console.warn(`[CRM ${containerId}] 載入失敗:`, e);
+                        console.warn(`[${sectionId}] 載入失敗:`, e);
                     }
                 };
-                await Promise.all([
-                    _loadCrmTab('tab_crm_clients',  'crm.html',          'crm.js',          'initCrmTab'),
-                    _loadCrmTab('tab_crm_projects', 'crm-projects.html', 'crm-projects.js', 'initCrmProjectsTab'),
-                    _loadCrmTab('tab_crm_staff',    'crm-staff.html',    'crm-staff.js',    'initCrmStaffTab'),
-                    _loadCrmTab('tab_crm_invoices', 'crm-invoices.html', 'crm-invoices.js', 'initCrmInvoicesTab'),
-                ]);
+
+                // Sequential media tabs — only load authorized ones
+                if (_should('projects'))   await _loadTab('tab-projects',    './tabs/projects/projects.html',       './tabs/projects/projects.js',       'initTab');
+                if (_should('backup'))     await _loadTab('tab_main',        './tabs/backup/backup.html',           './tabs/backup/backup.js',           'initBackupTab');
+                if (_should('verify'))     await _loadTab('tab_verify',      './tabs/verify/verify.html',           './tabs/verify/verify.js',           'initVerifyTab');
+                if (_should('transcode'))  await _loadTab('tab_transcode',   './tabs/transcode/transcode.html',     './tabs/transcode/transcode.js',     'initTranscodeTab');
+                if (_should('concat'))     await _loadTab('tab_concat',      './tabs/concat/concat.html',           './tabs/concat/concat.js',           'initConcatTab');
+                if (_should('report'))     await _loadTab('tab_report',      './tabs/report/report.html',           './tabs/report/report.js',           'initReportTab');
+                if (_should('transcribe')) await _loadTab('tab_transcribe',  './tabs/transcribe/transcribe.html',   './tabs/transcribe/transcribe.js',   'initTranscribeTab');
+                if (_should('tts'))        await _loadTab('tab_tts',         './tabs/tts/tts.html',                 './tabs/tts/tts.js',                 'initTtsTab');
+
+                // CRM tabs — load authorized ones in parallel
+                const _crmTabs = [
+                    ['crm_clients',  'tab_crm_clients',  'crm.html',          'crm.js',          'initCrmTab'],
+                    ['crm_projects', 'tab_crm_projects', 'crm-projects.html', 'crm-projects.js', 'initCrmProjectsTab'],
+                    ['crm_staff',    'tab_crm_staff',    'crm-staff.html',    'crm-staff.js',    'initCrmStaffTab'],
+                    ['crm_invoices', 'tab_crm_invoices', 'crm-invoices.html', 'crm-invoices.js', 'initCrmInvoicesTab'],
+                ];
+                await Promise.all(
+                    _crmTabs.filter(([key]) => _should(key))
+                            .map(([, id, html, js, init]) => _loadTab(id, `./tabs/crm/${html}`, `./tabs/crm/${js}`, init))
+                );
+
+                // Auto-switch to first authorized tab
+                if (!showAll && modules.length > 0) {
+                    const firstTab = TAB_MAP[modules[0]];
+                    if (firstTab) switchTab(firstTab);
+                }
             } catch (err) {
                 console.error("Error loading tabs:", err);
             }

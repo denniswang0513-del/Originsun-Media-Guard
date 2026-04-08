@@ -16,8 +16,8 @@
   <select id="staff-filter-status" class="crm-select">
     <option value="">全部狀態</option>
     <option value="在職">在職</option>
-    <option value="離職">離職</option>
     <option value="兼職">兼職</option>
+    <option value="專案">專案</option>
   </select>
   <div class="crm-toolbar-right">
     <button id="staff-btn-import" class="crm-btn crm-btn-secondary">匯入 CSV</button>
@@ -31,7 +31,6 @@
     <div class="crm-list-header">
       <span class="crm-col-name">姓名</span>
       <span class="crm-col-role">職能</span>
-      <span class="crm-col-rate">日費</span>
       <span class="crm-col-status">狀態</span>
       <span class="crm-col-phone">電話</span>
       <span class="crm-col-actions"></span>
@@ -90,14 +89,6 @@
           </select>
         </div>
         <div class="crm-field">
-          <label>日費</label>
-          <input id="staff-f-daily_rate" type="number" class="crm-input" min="0">
-        </div>
-        <div class="crm-field">
-          <label>時薪</label>
-          <input id="staff-f-hourly_rate" type="number" class="crm-input" min="0">
-        </div>
-        <div class="crm-field">
           <label>電話</label>
           <input id="staff-f-phone" type="text" class="crm-input">
         </div>
@@ -109,8 +100,8 @@
           <label>狀態</label>
           <select id="staff-f-status" class="crm-input">
             <option value="在職">在職</option>
-            <option value="離職">離職</option>
             <option value="兼職">兼職</option>
+            <option value="專案">專案</option>
           </select>
         </div>
         <div class="crm-field">

@@ -805,8 +805,8 @@
 
 /* ── Staff badge colors ── */
 .crm-staff-badge-在職 { background: #14532d; color: #86efac; }
-.crm-staff-badge-離職 { background: #374151; color: #9ca3af; }
 .crm-staff-badge-兼職 { background: #3b2f1f; color: #fbbf24; }
+.crm-staff-badge-專案 { background: #1e3a5f; color: #93c5fd; }
 
 /* ── Staff list columns ── */
 .crm-col-role  { flex: 1; }

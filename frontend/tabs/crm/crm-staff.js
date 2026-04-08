@@ -26,7 +26,7 @@ async function loadStaff() {
 
 // ── Rendering ────────────────────────────────────────────────
 
-const _STATUS_CLS = { '在職': 'crm-staff-badge-在職', '離職': 'crm-staff-badge-離職', '兼職': 'crm-staff-badge-兼職' };
+const _STATUS_CLS = { '在職': 'crm-staff-badge-在職', '兼職': 'crm-staff-badge-兼職', '專案': 'crm-staff-badge-專案' };
 
 function _sBadge(status) {
     const s = status || '在職';
@@ -45,7 +45,6 @@ function renderList() {
         <div class="crm-row${s.id === _selectedId ? ' selected' : ''}" onclick="window._staffSelect('${s.id}')">
             <div class="crm-row-name">${_esc(s.name)}</div>
             <div class="crm-row-role">${_esc(s.role)}</div>
-            <div class="crm-row-rate">$${_fmtNum(s.daily_rate)}</div>
             <div class="crm-row-status">${_sBadge(s.status)}</div>
             <div class="crm-row-phone">${_esc(s.phone)}</div>
             ${kebabMenuHtml(s.id, { onEdit: '_staffEdit', onDuplicate: '_staffDup', onDelete: '_staffDelete' })}
@@ -56,9 +55,7 @@ function renderList() {
 const _STAFF_EDIT_FIELDS = [
     {name:'name', label:'姓名', type:'text'},
     {name:'role', label:'職能', type:'select', options:[{value:'',label:'—'},{value:'攝影師',label:'攝影師'},{value:'剪輯師',label:'剪輯師'},{value:'導演',label:'導演'},{value:'製片',label:'製片'},{value:'燈光',label:'燈光'},{value:'收音',label:'收音'},{value:'空拍',label:'空拍'},{value:'動畫',label:'動畫'}]},
-    {name:'status', label:'狀態', type:'select', options:[{value:'在職',label:'在職'},{value:'離職',label:'離職'},{value:'兼職',label:'兼職'}]},
-    {name:'daily_rate', label:'日費', type:'number'},
-    {name:'hourly_rate', label:'時薪', type:'number'},
+    {name:'status', label:'狀態', type:'select', options:[{value:'在職',label:'在職'},{value:'兼職',label:'兼職'},{value:'專案',label:'專案'}]},
     {name:'phone', label:'電話', type:'text'},
     {name:'email', label:'Email', type:'text'},
     {name:'id_number', label:'身分證', type:'text'},
@@ -82,8 +79,6 @@ function renderDetail(s) {
     document.getElementById('staff-detail-info').innerHTML = `
         ${prop('職能', s.role)}
         <div class="crm-detail-prop"><div class="crm-prop-label">狀態</div><div class="crm-prop-value">${_sBadge(s.status)}</div></div>
-        ${prop('日費', s.daily_rate ? '$' + _fmtNum(s.daily_rate) : '')}
-        ${prop('時薪', s.hourly_rate ? '$' + _fmtNum(s.hourly_rate) : '')}
         ${prop('電話', s.phone)}
         ${prop('Email', s.email)}
         ${prop('身分證', s.id_number)}
@@ -160,7 +155,7 @@ function closeDetail() {
 
 // ── Modal ────────────────────────────────────────────────────
 
-const _FIELDS = ['name', 'role', 'daily_rate', 'hourly_rate', 'phone', 'email',
+const _FIELDS = ['name', 'role', 'phone', 'email',
     'status', 'portfolio_url', 'id_number', 'address', 'bank_name', 'bank_account', 'notes'];
 
 function openModal(staff = null) {
@@ -185,7 +180,6 @@ async function saveStaff() {
     for (const f of _FIELDS) {
         const el = document.getElementById(`staff-f-${f}`);
         let val = el ? el.value.trim() : '';
-        if (['daily_rate', 'hourly_rate'].includes(f)) val = parseInt(val) || 0;
         payload[f] = val;
     }
 
