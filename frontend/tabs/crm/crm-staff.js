@@ -251,7 +251,9 @@ async function doImport() {
         const data = await res.json();
         const result = document.getElementById('staff-import-result');
         result.className = 'crm-import-result';
-        result.innerHTML = `匯入完成<br>新增：<strong>${data.imported}</strong> ／ 更新：<strong>${data.updated}</strong> ／ 跳過：<strong>${data.skipped}</strong>`;
+        let msg = `匯入完成<br>新增：<strong>${data.imported}</strong> ／ 更新：<strong>${data.updated}</strong> ／ 跳過：<strong>${data.skipped}</strong>`;
+        if (data.hint) msg += `<br><span style="color:#fbbf24;font-size:12px;">${_esc(data.hint)}</span>`;
+        result.innerHTML = msg;
         result.style.display = 'block';
         await loadStaff();
     } catch (e) {

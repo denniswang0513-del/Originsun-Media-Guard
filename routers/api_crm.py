@@ -1083,16 +1083,16 @@ async def get_staff_projects(staff_id: str):
 # ── Staff CSV Import ────────────────────────────────────────
 
 _STAFF_COL_MAP = {
-    "name":          ["姓名", "收款人", "name"],
-    "role":          ["職能", "角色", "role"],
+    "name":          ["姓名", "收款人", "收款人姓名", "人員", "員工", "name"],
+    "role":          ["職能", "角色", "職稱", "role"],
     "daily_rate":    ["日費", "daily_rate"],
     "hourly_rate":   ["時薪", "hourly_rate"],
-    "phone":         ["電話", "phone"],
-    "email":         ["email", "信箱"],
-    "id_number":     ["身分證", "身份證字號", "身分證字號", "id_number"],
-    "address":       ["住址", "地址", "address"],
-    "bank_name":     ["銀行", "bank_name"],
-    "bank_account":  ["帳號", "bank_account"],
+    "phone":         ["電話", "聯絡電話", "手機", "phone"],
+    "email":         ["email", "信箱", "電子信箱", "e-mail"],
+    "id_number":     ["身分證", "身份證字號", "身分證字號", "身分證號碼", "id_number"],
+    "address":       ["住址", "地址", "通訊地址", "address"],
+    "bank_name":     ["銀行", "銀行名稱", "匯款銀行", "bank_name"],
+    "bank_account":  ["帳號", "銀行帳號", "匯款帳號", "bank_account"],
     "portfolio_url": ["作品集", "portfolio_url"],
     "status":        ["狀態", "status"],
     "notes":         ["備註", "notes"],
@@ -1148,7 +1148,10 @@ async def import_staff_csv(request: Request, file: UploadFile = File(...)):
                 existing_map[data["name"]] = s
                 imported += 1
         await session.commit()
-    return {"status": "ok", "imported": imported, "updated": updated, "skipped": skipped}
+    result = {"status": "ok", "imported": imported, "updated": updated, "skipped": skipped}
+    if skipped > 0 and imported == 0 and updated == 0:
+        result["hint"] = f"CSV 欄位：{headers}，未能匹配「姓名」欄位。請確認 CSV 包含「姓名」或「收款人」欄位。"
+    return result
 
 
 # ── Project Staff (派工) Endpoints ──────────────────────────
