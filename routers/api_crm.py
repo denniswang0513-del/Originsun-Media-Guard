@@ -178,14 +178,25 @@ async def create_client(req: ClientPayload, request: Request):
     factory = await _get_factory()
 
     now = _now()
-    client = Client(id=uuid.uuid4().hex, created_at=now, updated_at=now, **req.model_dump())
-    try:
-        async with factory() as session:
+    async with factory() as session:
+        # Check duplicate by full_name + tax_id
+        full_name = (req.full_name or "").strip()
+        tax_id = (req.tax_id or "").strip()
+        if full_name or tax_id:
+            dup = (await session.execute(
+                select(Client).where(Client.full_name == full_name, Client.tax_id == tax_id)
+            )).scalars().first()
+            if dup:
+                raise HTTPException(status_code=409,
+                    detail=f"已存在相同抬頭＋統編的客戶「{dup.short_name}」")
+
+        client = Client(id=uuid.uuid4().hex, created_at=now, updated_at=now, **req.model_dump())
+        try:
             session.add(client)
             await session.commit()
             await session.refresh(client)
-    except IntegrityError:
-        raise HTTPException(status_code=409, detail=f"客戶代稱「{req.short_name}」已存在")
+        except IntegrityError:
+            raise HTTPException(status_code=409, detail=f"客戶代稱「{req.short_name}」已存在")
     return {"status": "ok", "client": _to_dict(client)}
 
 
