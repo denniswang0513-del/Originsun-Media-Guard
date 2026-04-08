@@ -112,16 +112,19 @@ function renderDetail(s) {
             },
             () => renderDetail(s)
         );
-        // Inject ✎ button next to role select in inline edit
+        // Inject ✎ button next to role select in inline edit (same row)
         const roleSelect = document.querySelector('#staff-detail-info [data-field="role"]');
-        if (roleSelect && !roleSelect.nextElementSibling?.classList?.contains('crm-role-edit-btn')) {
+        if (roleSelect) {
+            const wrapper = roleSelect.parentNode;
+            wrapper.style.cssText = 'display:flex;align-items:center;gap:6px;';
+            roleSelect.style.flex = '1';
             const btn = document.createElement('button');
-            btn.className = 'crm-btn crm-btn-secondary crm-btn-sm crm-role-edit-btn';
-            btn.style.cssText = 'padding:2px 6px;margin-left:4px;';
+            btn.className = 'crm-btn crm-btn-secondary crm-btn-sm';
+            btn.style.cssText = 'padding:4px 8px;flex-shrink:0;';
             btn.textContent = '✎';
             btn.title = '編輯職能選項';
             btn.onclick = (e) => { e.stopPropagation(); window._staffEditRoles(); };
-            roleSelect.parentNode.insertBefore(btn, roleSelect.nextSibling);
+            wrapper.appendChild(btn);
         }
     });
 
