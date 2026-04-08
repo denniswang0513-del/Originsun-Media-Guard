@@ -141,9 +141,11 @@
 .crm-col-contact { flex: 0.7; text-align: right; min-width: 70px; }
 .crm-col-actions { width: 36px; flex-shrink: 0; }
 
-#crm-list-body {
+#crm-list-body,
+[id$="-list-body"] {
   flex: 1;
   overflow-y: auto;
+  min-height: 0;
 }
 
 .crm-row {
