@@ -276,6 +276,14 @@ class CrmStaff(Base):
     portfolio_url = Column(String(512), nullable=True)          # 作品集連結
     status = Column(String(32), nullable=False, default="在職")  # 在職/離職/兼職
     notes = Column(Text, nullable=True)
+    # Resume / portfolio fields
+    photo_url = Column(String(512), nullable=True)
+    bio = Column(Text, nullable=True)
+    skills = Column(JSONB, nullable=True)           # ["Premiere", "DaVinci", "FX6"]
+    education = Column(JSONB, nullable=True)         # [{"school":"...", "degree":"...", "year":"..."}]
+    experience = Column(JSONB, nullable=True)        # [{"company":"...", "role":"...", "period":"...", "desc":"..."}]
+    awards = Column(JSONB, nullable=True)            # [{"title":"...", "year":"...", "desc":"..."}]
+    resume_visible = Column(Boolean, nullable=True, default=False)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now())
 
@@ -283,6 +291,20 @@ class CrmStaff(Base):
         Index("idx_staff_role", "role"),
         Index("idx_staff_status", "status"),
     )
+
+
+class CrmStaffPortfolio(Base):
+    """人員作品集。"""
+    __tablename__ = "crm_staff_portfolio"
+
+    id = Column(String(32), primary_key=True)
+    staff_id = Column(String(32), nullable=False, index=True)
+    title = Column(String(256), nullable=False)
+    url = Column(String(512), nullable=False)
+    thumbnail_url = Column(String(512), nullable=True)
+    role_desc = Column(String(256), nullable=True)
+    sort_order = Column(Integer, default=0)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
 
 
 class CrmProjectStaff(Base):

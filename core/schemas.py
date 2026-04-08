@@ -291,6 +291,22 @@ class StaffPayload(BaseModel):
     notes: str = ""
 
 
+class ResumePayload(BaseModel):
+    bio: str = ""
+    skills: list = []
+    education: list = []
+    experience: list = []
+    awards: list = []
+    resume_visible: bool = False
+
+
+class PortfolioPayload(BaseModel):
+    title: str
+    url: str
+    role_desc: str = ""
+    sort_order: int = 0
+
+
 class ProjectStaffPayload(BaseModel):
     staff_id: str
     role_in_project: str = ""

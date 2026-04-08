@@ -28,7 +28,8 @@ try:
     from sqlalchemy import select, or_, delete, update as sa_update
     from sqlalchemy.exc import IntegrityError
     from db.models import (Client, User, CrmProject, CrmQuotation, CrmQuotationItem,
-                           CrmQuotationTemplate, CrmStaff, CrmProjectStaff, CrmProjectExpense,
+                           CrmQuotationTemplate, CrmStaff, CrmStaffPortfolio,
+                           CrmProjectStaff, CrmProjectExpense,
                            CrmInvoice, CrmPaymentRequest, CrmCashEntry,
                            CrmProjectCostLine, CrmCostLineTemplate)
     _HAS_DB = True
@@ -98,7 +99,8 @@ def _to_dict(c) -> dict:
 from core.schemas import (ClientPayload, CrmProjectPayload, ProjectExpensePayload,
                          QuotationPayload, QuotationItemPayload, QuotationTemplatePayload,
                          StaffPayload, ProjectStaffPayload, InvoicePayload, PaymentRequestPayload,
-                         CashEntryPayload, CostLinePayload, CostLineUpdatePayload)
+                         CashEntryPayload, CostLinePayload, CostLineUpdatePayload,
+                         ResumePayload, PortfolioPayload)
 
 
 async def _auto_update_client_status(session, client_id: str):
@@ -1005,6 +1007,13 @@ def _to_staff_dict(s) -> dict:
         "bank_name": s.bank_name or "",
         "bank_account": s.bank_account or "", "portfolio_url": s.portfolio_url or "",
         "status": s.status or "在職", "notes": s.notes or "",
+        "photo_url": s.photo_url or "",
+        "bio": s.bio or "",
+        "skills": s.skills or [],
+        "education": s.education or [],
+        "experience": s.experience or [],
+        "awards": s.awards or [],
+        "resume_visible": bool(s.resume_visible) if s.resume_visible is not None else False,
         "created_at": s.created_at.isoformat() if s.created_at else None,
         "updated_at": s.updated_at.isoformat() if s.updated_at else None,
     }
@@ -1188,6 +1197,213 @@ async def import_staff_csv(request: Request, file: UploadFile = File(...)):
     if skipped > 0 and imported == 0 and updated == 0:
         result["hint"] = f"CSV 欄位：{headers}，未能匹配「姓名」欄位。請確認 CSV 包含「姓名」或「收款人」欄位。"
     return result
+
+
+# ── Staff Resume / Portfolio Endpoints ─────────────────────
+
+_UPLOAD_BASE = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "uploads")
+
+
+def _to_portfolio_dict(p) -> dict:
+    return {
+        "id": p.id,
+        "staff_id": p.staff_id,
+        "title": p.title,
+        "url": p.url or "",
+        "thumbnail_url": p.thumbnail_url or "",
+        "role_desc": p.role_desc or "",
+        "sort_order": p.sort_order or 0,
+        "created_at": p.created_at.isoformat() if p.created_at else None,
+    }
+
+
+@router.put("/staff/{staff_id}/resume")
+async def update_staff_resume(staff_id: str, req: ResumePayload, request: Request):
+    """更新人員履歷/簡歷資訊。"""
+    _check_auth(request)
+    _require_db()
+    factory = await _get_factory()
+    async with factory() as session:
+        s = await session.get(CrmStaff, staff_id)
+        if not s:
+            raise HTTPException(status_code=404, detail="找不到此人員")
+        s.bio = req.bio
+        s.skills = req.skills
+        s.education = req.education
+        s.experience = req.experience
+        s.awards = req.awards
+        s.resume_visible = req.resume_visible
+        s.updated_at = _now()
+        await session.commit()
+        await session.refresh(s)
+    return {"status": "ok", "staff": _to_staff_dict(s)}
+
+
+@router.post("/staff/{staff_id}/photo")
+async def upload_staff_photo(staff_id: str, request: Request, file: UploadFile = File(...)):
+    """上傳人員照片。"""
+    _check_auth(request)
+    _require_db()
+    factory = await _get_factory()
+    async with factory() as session:
+        s = await session.get(CrmStaff, staff_id)
+        if not s:
+            raise HTTPException(status_code=404, detail="找不到此人員")
+    ext = os.path.splitext(file.filename or "photo.jpg")[1] or ".jpg"
+    upload_dir = os.path.join(_UPLOAD_BASE, "staff", staff_id)
+    os.makedirs(upload_dir, exist_ok=True)
+    # Remove old photos
+    for f in os.listdir(upload_dir):
+        if f.startswith("photo."):
+            try:
+                os.remove(os.path.join(upload_dir, f))
+            except OSError:
+                pass
+    dest = os.path.join(upload_dir, f"photo{ext}")
+    content = await file.read()
+    with open(dest, "wb") as fp:
+        fp.write(content)
+    url = f"/uploads/staff/{staff_id}/photo{ext}"
+    async with factory() as session:
+        s = await session.get(CrmStaff, staff_id)
+        if s:
+            s.photo_url = url
+            s.updated_at = _now()
+            await session.commit()
+    return {"status": "ok", "photo_url": url}
+
+
+@router.get("/staff/{staff_id}/portfolio")
+async def list_staff_portfolio(staff_id: str):
+    """列出人員的作品集。"""
+    _require_db()
+    factory = await _get_factory()
+    async with factory() as session:
+        rows = (await session.execute(
+            select(CrmStaffPortfolio)
+            .where(CrmStaffPortfolio.staff_id == staff_id)
+            .order_by(CrmStaffPortfolio.sort_order)
+        )).scalars().all()
+    return {"items": [_to_portfolio_dict(p) for p in rows]}
+
+
+@router.post("/staff/{staff_id}/portfolio")
+async def add_staff_portfolio(staff_id: str, request: Request,
+                              title: str = Query(...), url: str = Query(...),
+                              role_desc: str = Query(""), sort_order: int = Query(0),
+                              thumbnail: Optional[UploadFile] = File(None)):
+    """新增作品集項目（支援可選的縮圖上傳）。"""
+    _check_auth(request)
+    _require_db()
+    factory = await _get_factory()
+    # Verify staff exists
+    async with factory() as session:
+        s = await session.get(CrmStaff, staff_id)
+        if not s:
+            raise HTTPException(status_code=404, detail="找不到此人員")
+    item_id = uuid.uuid4().hex
+    thumbnail_url = ""
+    if thumbnail and thumbnail.filename:
+        ext = os.path.splitext(thumbnail.filename)[1] or ".jpg"
+        thumb_dir = os.path.join(_UPLOAD_BASE, "staff", staff_id, "portfolio")
+        os.makedirs(thumb_dir, exist_ok=True)
+        thumb_path = os.path.join(thumb_dir, f"{item_id}{ext}")
+        content = await thumbnail.read()
+        with open(thumb_path, "wb") as fp:
+            fp.write(content)
+        thumbnail_url = f"/uploads/staff/{staff_id}/portfolio/{item_id}{ext}"
+    p = CrmStaffPortfolio(
+        id=item_id, staff_id=staff_id, title=title, url=url,
+        thumbnail_url=thumbnail_url, role_desc=role_desc, sort_order=sort_order,
+        created_at=_now(),
+    )
+    async with factory() as session:
+        session.add(p)
+        await session.commit()
+        await session.refresh(p)
+    return {"status": "ok", "item": _to_portfolio_dict(p)}
+
+
+@router.put("/staff-portfolio/{item_id}")
+async def update_staff_portfolio(item_id: str, request: Request,
+                                 title: str = Query(...), url: str = Query(...),
+                                 role_desc: str = Query(""), sort_order: int = Query(0),
+                                 thumbnail: Optional[UploadFile] = File(None)):
+    """更新作品集項目（支援可選的縮圖上傳）。"""
+    _check_auth(request)
+    _require_db()
+    factory = await _get_factory()
+    async with factory() as session:
+        p = await session.get(CrmStaffPortfolio, item_id)
+        if not p:
+            raise HTTPException(status_code=404, detail="找不到此作品集項目")
+        p.title = title
+        p.url = url
+        p.role_desc = role_desc
+        p.sort_order = sort_order
+        if thumbnail and thumbnail.filename:
+            ext = os.path.splitext(thumbnail.filename)[1] or ".jpg"
+            thumb_dir = os.path.join(_UPLOAD_BASE, "staff", p.staff_id, "portfolio")
+            os.makedirs(thumb_dir, exist_ok=True)
+            thumb_path = os.path.join(thumb_dir, f"{item_id}{ext}")
+            content = await thumbnail.read()
+            with open(thumb_path, "wb") as fp:
+                fp.write(content)
+            p.thumbnail_url = f"/uploads/staff/{p.staff_id}/portfolio/{item_id}{ext}"
+        await session.commit()
+        await session.refresh(p)
+    return {"status": "ok", "item": _to_portfolio_dict(p)}
+
+
+@router.delete("/staff-portfolio/{item_id}")
+async def delete_staff_portfolio(item_id: str, request: Request):
+    """刪除作品集項目。"""
+    _check_auth(request)
+    _require_db()
+    factory = await _get_factory()
+    async with factory() as session:
+        p = await session.get(CrmStaffPortfolio, item_id)
+        if not p:
+            raise HTTPException(status_code=404, detail="找不到此作品集項目")
+        await session.delete(p)
+        await session.commit()
+    return {"status": "ok"}
+
+
+@router.get("/public/staff/{staff_id}/resume")
+async def get_public_staff_resume(staff_id: str):
+    """公開履歷頁面（無需認證），僅限 resume_visible=True 的人員。"""
+    _require_db()
+    factory = await _get_factory()
+    async with factory() as session:
+        s = await session.get(CrmStaff, staff_id)
+        if not s or not s.resume_visible:
+            raise HTTPException(status_code=404, detail="找不到此人員的公開履歷")
+        staff = _to_staff_dict(s)
+        # Portfolio items
+        rows = (await session.execute(
+            select(CrmStaffPortfolio)
+            .where(CrmStaffPortfolio.staff_id == staff_id)
+            .order_by(CrmStaffPortfolio.sort_order)
+        )).scalars().all()
+        portfolio = [_to_portfolio_dict(p) for p in rows]
+        # Project history
+        proj_rows = (await session.execute(
+            select(CrmProjectStaff, CrmProject.name.label("project_name"),
+                   Client.short_name.label("client_name"))
+            .outerjoin(CrmProject, CrmProject.id == CrmProjectStaff.project_id)
+            .outerjoin(Client, Client.id == CrmProject.client_id)
+            .where(CrmProjectStaff.staff_id == staff_id)
+        )).all()
+        projects = [{
+            "project_name": r[1] or "", "client_name": r[2] or "",
+            "role_in_project": r[0].role_in_project or "",
+            "days": r[0].days,
+        } for r in proj_rows]
+    # Strip sensitive fields for public view
+    for key in ("id_number", "address", "bank_name", "bank_account", "phone", "email"):
+        staff.pop(key, None)
+    return {"staff": staff, "portfolio": portfolio, "projects": projects}
 
 
 # ── Project Staff (派工) Endpoints ──────────────────────────

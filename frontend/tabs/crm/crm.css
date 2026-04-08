@@ -1033,3 +1033,103 @@
 .pq-total-main { font-weight: 700; color: #e0e0e0; font-size: 13px; padding: 6px 0; }
 .pq-stages { font-size: 12px; color: #d1d5db; margin-top: 10px; padding-top: 8px; border-top: 1px solid #2e2e2e; }
 .pq-terms { font-size: 12px; color: #6b7280; font-style: italic; margin-top: 6px; }
+
+/* ── Staff Resume Tab ── */
+.staff-resume-wrap {
+    padding: 16px;
+}
+.staff-resume-header {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    margin-bottom: 20px;
+}
+.staff-photo-circle {
+    width: 80px; height: 80px; border-radius: 50%;
+    background: #2a2a2a; border: 2px solid #3a3a3a;
+    display: flex; align-items: center; justify-content: center;
+    overflow: hidden; cursor: pointer; flex-shrink: 0;
+    transition: border-color 0.15s;
+}
+.staff-photo-circle:hover { border-color: #3b82f6; }
+.staff-photo-circle img { width: 100%; height: 100%; object-fit: cover; }
+.staff-photo-placeholder { font-size: 28px; opacity: 0.4; }
+.staff-resume-name-block { display: flex; flex-direction: column; gap: 2px; }
+.staff-resume-name { font-size: 18px; font-weight: 700; color: #e0e0e0; }
+.staff-resume-role { font-size: 13px; color: #9ca3af; }
+
+.staff-section-title {
+    font-size: 12px; font-weight: 700; color: #6b7280;
+    text-transform: uppercase; letter-spacing: 0.5px;
+    padding: 12px 0 6px; margin-top: 8px;
+    border-bottom: 1px solid #2a2a2a;
+}
+.staff-resume-textarea {
+    width: 100%; background: #1e1e1e; border: 1px solid #3a3a3a;
+    border-radius: 6px; color: #d1d5db; padding: 8px 10px;
+    font-size: 13px; resize: vertical; outline: none; margin-top: 6px;
+    font-family: inherit;
+}
+.staff-resume-textarea:focus { border-color: #3b82f6; }
+.staff-resume-save-bio { margin-top: 6px; }
+
+/* Skills tags */
+.staff-skills-wrap {
+    display: flex; flex-wrap: wrap; gap: 6px;
+    padding: 8px 0; align-items: center;
+}
+.staff-skill-tag {
+    display: inline-flex; align-items: center; gap: 4px;
+    background: #1e3a5f; color: #93c5fd; font-size: 12px;
+    padding: 3px 10px; border-radius: 12px; font-weight: 500;
+}
+.staff-skill-remove {
+    background: none; border: none; color: #93c5fd; cursor: pointer;
+    font-size: 14px; padding: 0 0 0 2px; line-height: 1; opacity: 0.6;
+}
+.staff-skill-remove:hover { opacity: 1; }
+.staff-skill-add-wrap { flex: 0 0 auto; }
+.staff-skill-input {
+    background: #1e1e1e; border: 1px solid #3a3a3a; border-radius: 12px;
+    color: #d1d5db; padding: 3px 10px; font-size: 12px; outline: none;
+    width: 120px;
+}
+.staff-skill-input:focus { border-color: #3b82f6; }
+
+/* Portfolio cards */
+.staff-portfolio-list { display: flex; flex-direction: column; gap: 8px; padding: 8px 0; }
+.staff-portfolio-card {
+    display: flex; align-items: center; gap: 10px;
+    background: #252525; border: 1px solid #2a2a2a; border-radius: 6px;
+    padding: 8px 10px;
+}
+.staff-portfolio-thumb {
+    width: 60px; height: 40px; border-radius: 4px; object-fit: cover;
+    flex-shrink: 0; background: #1e1e1e;
+}
+.staff-portfolio-thumb-empty { border: 1px dashed #3a3a3a; }
+.staff-portfolio-info { flex: 1; min-width: 0; }
+.staff-portfolio-title { font-size: 13px; color: #e0e0e0; font-weight: 600; }
+.staff-portfolio-actions { display: flex; gap: 4px; flex-shrink: 0; }
+
+/* Resume list rows (experience, education, awards) */
+.staff-resume-list-row {
+    display: flex; align-items: center; gap: 8px;
+    padding: 6px 0; border-bottom: 1px solid #2a2a2a; font-size: 13px;
+}
+.staff-resume-list-main { flex: 1; color: #e0e0e0; font-weight: 500; }
+
+/* Company projects in resume */
+.staff-resume-projects { padding: 8px 0; }
+.staff-resume-project-row {
+    display: flex; align-items: center; gap: 8px;
+    padding: 5px 0; border-bottom: 1px solid #1a1a1a; font-size: 13px;
+    color: #d1d5db;
+}
+.staff-resume-project-name { font-weight: 500; }
+
+/* Footer actions */
+.staff-resume-actions {
+    display: flex; gap: 8px; padding: 16px 0 8px;
+    margin-top: 12px; border-top: 1px solid #2a2a2a;
+}

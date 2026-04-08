@@ -160,11 +160,19 @@ async function _loadStaffProjects(staffId) {
 
 function selectStaff(id) {
     _selectedId = id;
+    _resumeLoaded = {};  // reset so resume tab reloads for new selection
     renderList();
     const panel = document.getElementById('staff-detail-panel');
     if (panel) panel.style.display = 'flex';
     const handle = document.getElementById('staff-resize-handle');
     if (handle) handle.style.display = '';
+    // Reset to info tab
+    document.querySelectorAll('#staff-detail-tabs .crm-tab').forEach(b => b.classList.remove('active'));
+    const infoTab = document.querySelector('#staff-detail-tabs .crm-tab[data-tab="info"]');
+    if (infoTab) infoTab.classList.add('active');
+    document.getElementById('staff-detail-info').classList.remove('hidden');
+    document.getElementById('staff-detail-projects').classList.add('hidden');
+    document.getElementById('staff-detail-resume').classList.add('hidden');
     const s = _staff.find(x => x.id === id);
     if (s) renderDetail(s);
 }
@@ -388,6 +396,445 @@ window._staffEditRoles = function() {
     document.body.appendChild(overlay);
 };
 
+// ── Resume Tab ──────────────────────────────────────────────
+
+let _resumeLoaded = {};  // staffId → true if already loaded
+
+async function _renderResumeTab(staffId) {
+    const container = document.getElementById('staff-detail-resume');
+    if (!container) return;
+    container.innerHTML = '<div class="crm-empty" style="padding:12px;">載入中...</div>';
+
+    let staff, projects, portfolio;
+    try {
+        [staff, projects, portfolio] = await Promise.all([
+            _fetch('/staff/' + staffId),
+            _fetch('/staff/' + staffId + '/projects').then(d => d.projects || []).catch(() => []),
+            _fetch('/staff/' + staffId + '/portfolio').catch(() => ({ items: [] }))
+        ]);
+    } catch (e) {
+        container.innerHTML = '<div class="crm-empty">載入失敗</div>';
+        return;
+    }
+
+    const bio = staff.bio || '';
+    const skills = staff.skills || [];
+    const education = staff.education || [];
+    const experience = staff.experience || [];
+    const awards = staff.awards || [];
+    const photoUrl = staff.photo_url || '';
+    const resumeVisible = !!staff.resume_visible;
+    const portfolioItems = portfolio.items || [];
+
+    container.innerHTML = `
+        <div class="staff-resume-wrap">
+            <!-- Header: Photo + Name -->
+            <div class="staff-resume-header">
+                <div class="staff-photo-circle" id="staff-resume-photo" title="點擊上傳照片">
+                    ${photoUrl
+                        ? `<img src="${_esc(photoUrl)}" alt="photo">`
+                        : `<span class="staff-photo-placeholder">📷</span>`}
+                </div>
+                <div class="staff-resume-name-block">
+                    <div class="staff-resume-name">${_esc(staff.name)}</div>
+                    <div class="staff-resume-role">${_esc(staff.role || '')}</div>
+                </div>
+            </div>
+
+            <!-- Bio -->
+            <div class="staff-section-title">自我介紹</div>
+            <textarea id="staff-resume-bio" class="staff-resume-textarea" rows="3"
+                placeholder="撰寫自我介紹...">${_esc(bio)}</textarea>
+            <button class="crm-btn crm-btn-secondary crm-btn-sm staff-resume-save-bio"
+                id="staff-resume-save-bio">儲存介紹</button>
+
+            <!-- Skills -->
+            <div class="staff-section-title">專業技能</div>
+            <div class="staff-skills-wrap" id="staff-resume-skills">
+                ${skills.map((sk, i) => `<span class="staff-skill-tag">${_esc(sk)}<button class="staff-skill-remove" data-idx="${i}">&times;</button></span>`).join('')}
+                <div class="staff-skill-add-wrap">
+                    <input type="text" class="staff-skill-input" id="staff-resume-skill-input" placeholder="新增技能 (Enter)">
+                </div>
+            </div>
+
+            <!-- Company projects -->
+            <div class="staff-section-title">公司專案作品</div>
+            <div class="staff-resume-projects" id="staff-resume-projects">
+                ${projects.length === 0
+                    ? '<div class="crm-empty" style="padding:8px 0;font-size:12px;">尚無專案紀錄</div>'
+                    : projects.map(p => `
+                        <div class="staff-resume-project-row">
+                            <span class="staff-resume-project-name">${_esc(p.project_name)}</span>
+                            <span class="crm-muted">${_esc(p.role_in_project)}</span>
+                            ${p.client_name ? `<span class="crm-muted">- ${_esc(p.client_name)}</span>` : ''}
+                        </div>`).join('')}
+            </div>
+
+            <!-- Portfolio -->
+            <div class="staff-section-title">個人作品集</div>
+            <div class="staff-portfolio-list" id="staff-resume-portfolio">
+                ${portfolioItems.map((item, i) => _portfolioCard(item, i)).join('')}
+            </div>
+            <button class="crm-btn crm-btn-secondary crm-btn-sm" id="staff-resume-add-portfolio">+ 新增作品</button>
+
+            <!-- Experience -->
+            <div class="staff-section-title">工作經歷</div>
+            <div id="staff-resume-experience">
+                ${experience.map((ex, i) => _expRow(ex, i)).join('')}
+            </div>
+            <button class="crm-btn crm-btn-secondary crm-btn-sm" id="staff-resume-add-exp">+ 新增</button>
+
+            <!-- Education -->
+            <div class="staff-section-title">學歷</div>
+            <div id="staff-resume-education">
+                ${education.map((ed, i) => _eduRow(ed, i)).join('')}
+            </div>
+            <button class="crm-btn crm-btn-secondary crm-btn-sm" id="staff-resume-add-edu">+ 新增</button>
+
+            <!-- Awards -->
+            <div class="staff-section-title">獲獎紀錄</div>
+            <div id="staff-resume-awards">
+                ${awards.map((aw, i) => _awardRow(aw, i)).join('')}
+            </div>
+            <button class="crm-btn crm-btn-secondary crm-btn-sm" id="staff-resume-add-award">+ 新增</button>
+
+            <!-- Footer actions -->
+            <div class="staff-resume-actions">
+                <button class="crm-btn crm-btn-secondary" onclick="window.open('/resume.html?id=${staffId}','_blank')">
+                    預覽簡歷
+                </button>
+                <button class="crm-btn crm-btn-secondary" onclick="window.open('/api/v1/crm/staff/${staffId}/resume-pdf','_blank')">
+                    下載 PDF
+                </button>
+                <button class="crm-btn ${resumeVisible ? 'crm-btn-primary' : 'crm-btn-secondary'}"
+                    id="staff-resume-toggle-visible">
+                    ${resumeVisible ? '公開中' : '私密'}
+                </button>
+            </div>
+        </div>
+    `;
+
+    // -- Wire up events --
+
+    // Photo upload
+    document.getElementById('staff-resume-photo').addEventListener('click', () => {
+        const input = document.createElement('input');
+        input.type = 'file'; input.accept = 'image/*';
+        input.onchange = async () => {
+            if (!input.files[0]) return;
+            const form = new FormData();
+            form.append('file', input.files[0]);
+            const token = localStorage.getItem('auth_token');
+            try {
+                await fetch(`/api/v1/crm/staff/${staffId}/photo`, {
+                    method: 'POST',
+                    headers: token ? { 'Authorization': 'Bearer ' + token } : {},
+                    body: form
+                });
+                _renderResumeTab(staffId);
+            } catch (e) { alert('上傳失敗: ' + e.message); }
+        };
+        input.click();
+    });
+
+    // Save bio
+    document.getElementById('staff-resume-save-bio').addEventListener('click', async () => {
+        const newBio = document.getElementById('staff-resume-bio').value;
+        try {
+            await _fetch('/staff/' + staffId + '/resume', { method: 'PUT', body: JSON.stringify({ bio: newBio }) });
+        } catch (e) { alert('儲存失敗: ' + e.message); }
+    });
+
+    // Skills: add on Enter
+    document.getElementById('staff-resume-skill-input').addEventListener('keydown', async (e) => {
+        if (e.key !== 'Enter') return;
+        const val = e.target.value.trim();
+        if (!val) return;
+        e.target.value = '';
+        const newSkills = [...skills, val];
+        try {
+            await _fetch('/staff/' + staffId + '/resume', { method: 'PUT', body: JSON.stringify({ skills: newSkills }) });
+            _renderResumeTab(staffId);
+        } catch (err) { alert('儲存失敗: ' + err.message); }
+    });
+
+    // Skills: remove
+    container.querySelectorAll('.staff-skill-remove').forEach(btn => {
+        btn.addEventListener('click', async () => {
+            const idx = parseInt(btn.dataset.idx);
+            const newSkills = skills.filter((_, i) => i !== idx);
+            try {
+                await _fetch('/staff/' + staffId + '/resume', { method: 'PUT', body: JSON.stringify({ skills: newSkills }) });
+                _renderResumeTab(staffId);
+            } catch (err) { alert('儲存失敗: ' + err.message); }
+        });
+    });
+
+    // Portfolio: add
+    document.getElementById('staff-resume-add-portfolio').addEventListener('click', () => {
+        _openPortfolioForm(staffId, null, portfolioItems);
+    });
+
+    // Portfolio: edit / delete
+    container.querySelectorAll('.staff-portfolio-edit').forEach(btn => {
+        btn.addEventListener('click', () => {
+            const idx = parseInt(btn.dataset.idx);
+            _openPortfolioForm(staffId, portfolioItems[idx], portfolioItems, btn.dataset.id);
+        });
+    });
+    container.querySelectorAll('.staff-portfolio-delete').forEach(btn => {
+        btn.addEventListener('click', async () => {
+            if (!confirm('確定刪除此作品？')) return;
+            const itemId = btn.dataset.id;
+            try {
+                await _fetch('/staff-portfolio/' + itemId, { method: 'DELETE' });
+                _renderResumeTab(staffId);
+            } catch (e) { alert('刪除失敗: ' + e.message); }
+        });
+    });
+
+    // Experience: add / edit / delete
+    _wireListSection(container, 'exp', experience, staffId, 'experience',
+        [{ key: 'company', label: '公司' }, { key: 'title', label: '職稱' }, { key: 'period', label: '期間' }]);
+
+    // Education: add / edit / delete
+    _wireListSection(container, 'edu', education, staffId, 'education',
+        [{ key: 'school', label: '學校' }, { key: 'degree', label: '學位' }, { key: 'year', label: '年份' }]);
+
+    // Awards: add / edit / delete
+    _wireListSection(container, 'award', awards, staffId, 'awards',
+        [{ key: 'name', label: '獎項' }, { key: 'year', label: '年份' }]);
+
+    // Toggle visibility
+    document.getElementById('staff-resume-toggle-visible').addEventListener('click', async () => {
+        try {
+            await _fetch('/staff/' + staffId + '/resume', {
+                method: 'PUT', body: JSON.stringify({ resume_visible: !resumeVisible })
+            });
+            _renderResumeTab(staffId);
+        } catch (e) { alert('儲存失敗: ' + e.message); }
+    });
+
+    _resumeLoaded[staffId] = true;
+}
+
+function _portfolioCard(item, idx) {
+    return `<div class="staff-portfolio-card" data-item-id="${item.id || ''}"
+        ${item.thumbnail_url
+            ? `<img src="${_esc(item.thumbnail_url)}" class="staff-portfolio-thumb" alt="">`
+            : `<div class="staff-portfolio-thumb staff-portfolio-thumb-empty"></div>`}
+        <div class="staff-portfolio-info">
+            <div class="staff-portfolio-title">${_esc(item.title || '未命名')}</div>
+            ${item.role ? `<div class="crm-muted" style="font-size:11px;">${_esc(item.role)}</div>` : ''}
+            ${item.url ? `<a href="${_esc(item.url)}" target="_blank" style="color:#3b82f6;font-size:11px;">連結</a>` : ''}
+        </div>
+        <div class="staff-portfolio-actions">
+            <button class="crm-btn crm-btn-secondary crm-btn-sm staff-portfolio-edit" data-id="${item.id || ''}" data-idx="${idx}">✎</button>
+            <button class="crm-btn crm-btn-danger crm-btn-sm staff-portfolio-delete" data-id="${item.id || ''}">&times;</button>
+        </div>
+    </div>`;
+}
+
+function _expRow(ex, i) {
+    return `<div class="staff-resume-list-row" data-section="exp" data-idx="${i}">
+        <span class="staff-resume-list-main">${_esc(ex.company || '')}</span>
+        <span class="crm-muted">${_esc(ex.title || '')}</span>
+        <span class="crm-muted">${_esc(ex.period || '')}</span>
+        <button class="crm-btn crm-btn-secondary crm-btn-sm staff-list-edit" data-section="exp" data-idx="${i}">✎</button>
+        <button class="crm-btn crm-btn-danger crm-btn-sm staff-list-delete" data-section="exp" data-idx="${i}">&times;</button>
+    </div>`;
+}
+
+function _eduRow(ed, i) {
+    return `<div class="staff-resume-list-row" data-section="edu" data-idx="${i}">
+        <span class="staff-resume-list-main">${_esc(ed.school || '')}</span>
+        <span class="crm-muted">${_esc(ed.degree || '')}</span>
+        <span class="crm-muted">${_esc(ed.year || '')}</span>
+        <button class="crm-btn crm-btn-secondary crm-btn-sm staff-list-edit" data-section="edu" data-idx="${i}">✎</button>
+        <button class="crm-btn crm-btn-danger crm-btn-sm staff-list-delete" data-section="edu" data-idx="${i}">&times;</button>
+    </div>`;
+}
+
+function _awardRow(aw, i) {
+    return `<div class="staff-resume-list-row" data-section="award" data-idx="${i}">
+        <span class="staff-resume-list-main">${_esc(aw.name || '')}</span>
+        <span class="crm-muted">${_esc(aw.year || '')}</span>
+        <button class="crm-btn crm-btn-secondary crm-btn-sm staff-list-edit" data-section="award" data-idx="${i}">✎</button>
+        <button class="crm-btn crm-btn-danger crm-btn-sm staff-list-delete" data-section="award" data-idx="${i}">&times;</button>
+    </div>`;
+}
+
+function _wireListSection(container, sectionName, items, staffId, fieldKey, fields) {
+    // Add button
+    const addBtn = document.getElementById(`staff-resume-add-${sectionName}`);
+    if (addBtn) {
+        addBtn.addEventListener('click', () => {
+            _openListItemForm(sectionName, fields, null, async (newItem) => {
+                const updated = [...items, newItem];
+                await _fetch('/staff/' + staffId + '/resume', { method: 'PUT', body: JSON.stringify({ [fieldKey]: updated }) });
+                _renderResumeTab(staffId);
+            });
+        });
+    }
+
+    // Edit buttons
+    container.querySelectorAll(`.staff-list-edit[data-section="${sectionName}"]`).forEach(btn => {
+        btn.addEventListener('click', () => {
+            const idx = parseInt(btn.dataset.idx);
+            _openListItemForm(sectionName, fields, items[idx], async (edited) => {
+                const updated = [...items];
+                updated[idx] = edited;
+                await _fetch('/staff/' + staffId + '/resume', { method: 'PUT', body: JSON.stringify({ [fieldKey]: updated }) });
+                _renderResumeTab(staffId);
+            });
+        });
+    });
+
+    // Delete buttons
+    container.querySelectorAll(`.staff-list-delete[data-section="${sectionName}"]`).forEach(btn => {
+        btn.addEventListener('click', async () => {
+            if (!confirm('確定刪除？')) return;
+            const idx = parseInt(btn.dataset.idx);
+            const updated = items.filter((_, i) => i !== idx);
+            try {
+                await _fetch('/staff/' + staffId + '/resume', { method: 'PUT', body: JSON.stringify({ [fieldKey]: updated }) });
+                _renderResumeTab(staffId);
+            } catch (e) { alert('刪除失敗: ' + e.message); }
+        });
+    });
+}
+
+function _openListItemForm(sectionName, fields, existing, onSave) {
+    // Create inline form overlay
+    let overlay = document.getElementById('staff-resume-form-overlay');
+    if (overlay) overlay.remove();
+
+    overlay = document.createElement('div');
+    overlay.id = 'staff-resume-form-overlay';
+    overlay.className = 'crm-modal-overlay';
+    overlay.style.display = 'flex';
+    overlay.addEventListener('click', e => { if (e.target === overlay) overlay.remove(); });
+
+    const fieldsHtml = fields.map(f =>
+        `<div class="crm-field" style="margin-bottom:8px;">
+            <label style="font-size:12px;color:#9ca3af;">${f.label}</label>
+            <input type="text" class="crm-input" data-key="${f.key}" value="${_esc((existing && existing[f.key]) || '')}">
+        </div>`
+    ).join('');
+
+    overlay.innerHTML = `
+        <div class="crm-modal" style="max-width:360px;">
+            <div class="crm-modal-header">
+                <h3>${existing ? '編輯' : '新增'}</h3>
+                <button class="crm-detail-close" id="staff-form-close">&times;</button>
+            </div>
+            <div class="crm-modal-body">${fieldsHtml}</div>
+            <div class="crm-modal-footer">
+                <button class="crm-btn crm-btn-secondary" id="staff-form-cancel">取消</button>
+                <button class="crm-btn crm-btn-primary" id="staff-form-save">儲存</button>
+            </div>
+        </div>`;
+
+    document.body.appendChild(overlay);
+
+    overlay.querySelector('#staff-form-close').addEventListener('click', () => overlay.remove());
+    overlay.querySelector('#staff-form-cancel').addEventListener('click', () => overlay.remove());
+    overlay.querySelector('#staff-form-save').addEventListener('click', async () => {
+        const result = {};
+        overlay.querySelectorAll('[data-key]').forEach(inp => {
+            result[inp.dataset.key] = inp.value.trim();
+        });
+        try {
+            await onSave(result);
+            overlay.remove();
+        } catch (e) { alert('儲存失敗: ' + e.message); }
+    });
+
+    // Focus first input
+    const firstInput = overlay.querySelector('input');
+    if (firstInput) firstInput.focus();
+}
+
+function _openPortfolioForm(staffId, existing, items, editItemId) {
+    let overlay = document.getElementById('staff-portfolio-form-overlay');
+    if (overlay) overlay.remove();
+
+    overlay = document.createElement('div');
+    overlay.id = 'staff-portfolio-form-overlay';
+    overlay.className = 'crm-modal-overlay';
+    overlay.style.display = 'flex';
+    overlay.addEventListener('click', e => { if (e.target === overlay) overlay.remove(); });
+
+    overlay.innerHTML = `
+        <div class="crm-modal" style="max-width:420px;">
+            <div class="crm-modal-header">
+                <h3>${existing ? '編輯作品' : '新增作品'}</h3>
+                <button class="crm-detail-close" id="staff-pf-close">&times;</button>
+            </div>
+            <div class="crm-modal-body">
+                <div class="crm-field" style="margin-bottom:8px;">
+                    <label style="font-size:12px;color:#9ca3af;">作品名稱</label>
+                    <input type="text" class="crm-input" id="staff-pf-title" value="${_esc((existing && existing.title) || '')}">
+                </div>
+                <div class="crm-field" style="margin-bottom:8px;">
+                    <label style="font-size:12px;color:#9ca3af;">角色</label>
+                    <input type="text" class="crm-input" id="staff-pf-role" value="${_esc((existing && existing.role) || '')}" placeholder="例：攝影師">
+                </div>
+                <div class="crm-field" style="margin-bottom:8px;">
+                    <label style="font-size:12px;color:#9ca3af;">連結 URL</label>
+                    <input type="url" class="crm-input" id="staff-pf-url" value="${_esc((existing && existing.url) || '')}" placeholder="https://...">
+                </div>
+                <div class="crm-field" style="margin-bottom:8px;">
+                    <label style="font-size:12px;color:#9ca3af;">縮圖</label>
+                    <input type="file" accept="image/*" id="staff-pf-thumb" class="crm-input" style="padding:4px;">
+                    ${existing && existing.thumbnail_url ? `<img src="${_esc(existing.thumbnail_url)}" style="width:60px;height:40px;object-fit:cover;border-radius:4px;margin-top:4px;">` : ''}
+                </div>
+                <div class="crm-field">
+                    <label style="font-size:12px;color:#9ca3af;">說明</label>
+                    <textarea class="crm-input crm-textarea" id="staff-pf-desc" rows="2">${_esc((existing && existing.description) || '')}</textarea>
+                </div>
+            </div>
+            <div class="crm-modal-footer">
+                <button class="crm-btn crm-btn-secondary" id="staff-pf-cancel">取消</button>
+                <button class="crm-btn crm-btn-primary" id="staff-pf-save">儲存</button>
+            </div>
+        </div>`;
+
+    document.body.appendChild(overlay);
+
+    overlay.querySelector('#staff-pf-close').addEventListener('click', () => overlay.remove());
+    overlay.querySelector('#staff-pf-cancel').addEventListener('click', () => overlay.remove());
+    overlay.querySelector('#staff-pf-save').addEventListener('click', async () => {
+        const title = document.getElementById('staff-pf-title').value.trim();
+        const url = document.getElementById('staff-pf-url').value.trim();
+        const role_desc = document.getElementById('staff-pf-role').value.trim();
+        if (!title) { alert('請輸入作品標題'); return; }
+
+        const params = new URLSearchParams({ title, url, role_desc, sort_order: 0 });
+        const form = new FormData();
+        const thumbFile = document.getElementById('staff-pf-thumb').files[0];
+        if (thumbFile) form.append('thumbnail', thumbFile);
+
+        const token = localStorage.getItem('auth_token');
+        const headers = token ? { 'Authorization': 'Bearer ' + token } : {};
+        try {
+            if (editItemId) {
+                await fetch(`/api/v1/crm/staff-portfolio/${editItemId}?${params}`, {
+                    method: 'PUT', headers, body: thumbFile ? form : undefined
+                });
+            } else {
+                await fetch(`/api/v1/crm/staff/${staffId}/portfolio?${params}`, {
+                    method: 'POST', headers, body: thumbFile ? form : undefined
+                });
+            }
+            overlay.remove();
+            _renderResumeTab(staffId);
+        } catch (e) { alert('儲存失敗: ' + e.message); }
+    });
+
+    document.getElementById('staff-pf-title').focus();
+}
+
 // ── Init ─────────────────────────────────────────────────────
 
 export async function initCrmStaffTab() {
@@ -434,6 +881,10 @@ export async function initCrmStaffTab() {
             const tab = btn.dataset.tab;
             document.getElementById('staff-detail-info').classList.toggle('hidden', tab !== 'info');
             document.getElementById('staff-detail-projects').classList.toggle('hidden', tab !== 'projects');
+            document.getElementById('staff-detail-resume').classList.toggle('hidden', tab !== 'resume');
+            if (tab === 'resume' && _selectedId && !_resumeLoaded[_selectedId]) {
+                _renderResumeTab(_selectedId);
+            }
         });
     });
 

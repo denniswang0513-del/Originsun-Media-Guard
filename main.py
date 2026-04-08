@@ -321,6 +321,53 @@ async def _on_startup():
         except Exception:
             pass
 
+    # ── DB Migration: crm_staff resume columns + crm_staff_portfolio table ──
+    if state.db_online:
+        try:
+            from db.session import get_session_factory
+            _fres = get_session_factory()
+            if _fres:
+                from sqlalchemy import text as _tres
+                async with _fres() as _sres:
+                    for col_sql in [
+                        "ALTER TABLE crm_staff ADD COLUMN IF NOT EXISTS photo_url VARCHAR(512)",
+                        "ALTER TABLE crm_staff ADD COLUMN IF NOT EXISTS bio TEXT",
+                        "ALTER TABLE crm_staff ADD COLUMN IF NOT EXISTS skills JSONB",
+                        "ALTER TABLE crm_staff ADD COLUMN IF NOT EXISTS education JSONB",
+                        "ALTER TABLE crm_staff ADD COLUMN IF NOT EXISTS experience JSONB",
+                        "ALTER TABLE crm_staff ADD COLUMN IF NOT EXISTS awards JSONB",
+                        "ALTER TABLE crm_staff ADD COLUMN IF NOT EXISTS resume_visible BOOLEAN DEFAULT FALSE",
+                    ]:
+                        try:
+                            await _sres.execute(_tres(col_sql))
+                            await _sres.commit()
+                        except Exception:
+                            await _sres.rollback()
+                    # Create portfolio table
+                    await _sres.execute(_tres("""
+                        CREATE TABLE IF NOT EXISTS crm_staff_portfolio (
+                            id VARCHAR(32) PRIMARY KEY,
+                            staff_id VARCHAR(32) NOT NULL,
+                            title VARCHAR(256) NOT NULL,
+                            url VARCHAR(512) NOT NULL,
+                            thumbnail_url VARCHAR(512),
+                            role_desc VARCHAR(256),
+                            sort_order INTEGER DEFAULT 0,
+                            created_at TIMESTAMPTZ DEFAULT NOW()
+                        )
+                    """))
+                    await _sres.commit()
+                    # Index on staff_id
+                    try:
+                        await _sres.execute(_tres(
+                            "CREATE INDEX IF NOT EXISTS idx_portfolio_staff_id ON crm_staff_portfolio (staff_id)"
+                        ))
+                        await _sres.commit()
+                    except Exception:
+                        await _sres.rollback()
+        except Exception:
+            pass
+
     asyncio.create_task(_periodic_version_check())
     asyncio.create_task(_periodic_db_health())
     from core.scheduler import run_scheduler  # type: ignore
@@ -435,8 +482,8 @@ async def serve_index():
         return resp
     return FileResponse("frontend/index.html")
 
-if os.path.isdir("uploads"):
-    app.mount("/uploads", StaticFiles(directory="uploads"), name="uploads")
+os.makedirs("uploads", exist_ok=True)
+app.mount("/uploads", StaticFiles(directory="uploads"), name="uploads")
 if os.path.exists("frontend"):
     app.mount("/", StaticFiles(directory="frontend", html=True), name="frontend")
 else:
