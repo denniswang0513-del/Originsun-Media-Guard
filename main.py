@@ -337,6 +337,8 @@ async def _on_startup():
                         "ALTER TABLE crm_staff ADD COLUMN IF NOT EXISTS experience JSONB",
                         "ALTER TABLE crm_staff ADD COLUMN IF NOT EXISTS awards JSONB",
                         "ALTER TABLE crm_staff ADD COLUMN IF NOT EXISTS resume_visible BOOLEAN DEFAULT FALSE",
+                        "ALTER TABLE crm_staff ADD COLUMN IF NOT EXISTS edit_token VARCHAR(512)",
+                        "ALTER TABLE crm_staff ADD COLUMN IF NOT EXISTS resume_editable BOOLEAN DEFAULT TRUE",
                     ]:
                         try:
                             await _sres.execute(_tres(col_sql))

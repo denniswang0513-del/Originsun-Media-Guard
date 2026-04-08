@@ -1,0 +1,848 @@
+<!DOCTYPE html>
+<html lang="zh-TW" data-theme="dark">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>編輯簡歷 — Originsun Studio</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&family=Noto+Sans+TC:wght@300;400;500;700&display=swap" rel="stylesheet">
+<style>
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+
+:root {
+  --bg: #0e0e0e; --bg2: #161616; --bg3: #1e1e1e;
+  --text: #e8e6e3; --text2: #9a9590; --text3: #5a5550;
+  --accent: #c8a45c; --accent2: #e8c97c;
+  --border: #2a2825; --border2: #3a3835;
+  --card: #141414; --card-hover: #1a1a1a;
+  --danger: #c44; --success: #4a8;
+  --font-display: 'Outfit', sans-serif;
+  --font-body: 'Noto Sans TC', sans-serif;
+  --radius: 2px;
+  --max-w: 720px;
+}
+
+html { scroll-behavior: smooth }
+body {
+  font-family: var(--font-body);
+  background: var(--bg);
+  color: var(--text);
+  line-height: 1.7;
+  font-size: 15px;
+  min-height: 100vh;
+}
+
+/* Grain overlay */
+body::before {
+  content: ''; position: fixed; inset: 0; z-index: 9999; pointer-events: none;
+  opacity: 0.03;
+  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+}
+
+/* Loading */
+#loading {
+  position: fixed; inset: 0; z-index: 1000;
+  background: var(--bg);
+  display: flex; align-items: center; justify-content: center; flex-direction: column; gap: 16px;
+  transition: opacity .5s;
+}
+#loading.fade { opacity: 0; pointer-events: none }
+.loading-bar { width: 120px; height: 2px; background: var(--border); border-radius: 1px; overflow: hidden }
+.loading-bar::after { content:''; display:block; width:40%; height:100%; background:var(--accent); animation: loadSlide 1s ease infinite }
+@keyframes loadSlide { 0%{transform:translateX(-100%)} 100%{transform:translateX(350%)} }
+.loading-text { font-family: var(--font-display); font-size: 11px; letter-spacing: 4px; text-transform: uppercase; color: var(--text3) }
+
+/* Error */
+#error { display:none; text-align:center; padding:120px 20px; color:var(--text3); font-family:var(--font-display) }
+#error h2 { font-size:48px; font-weight:300; color:var(--text2); margin-bottom:8px }
+#error p { font-size:14px; letter-spacing:1px }
+
+/* Read-only banner */
+.readonly-banner {
+  max-width: var(--max-w); margin: 0 auto 0; padding: 12px 20px;
+  background: var(--bg3); border: 1px solid var(--border);
+  border-radius: var(--radius); text-align: center;
+  font-size: 13px; color: var(--text2); letter-spacing: 0.5px;
+}
+
+/* Main layout */
+.resume {
+  max-width: var(--max-w); margin: 0 auto; padding: 48px 20px 80px;
+  opacity: 0; transform: translateY(20px); transition: all .6s ease;
+}
+.resume.visible { opacity: 1; transform: translateY(0) }
+
+/* Hero */
+.hero {
+  display: flex; align-items: center; gap: 24px;
+  padding-bottom: 36px; margin-bottom: 36px;
+  border-bottom: 1px solid var(--border);
+}
+.hero-photo {
+  width: 110px; height: 110px; border-radius: 50%; flex-shrink: 0;
+  background: var(--bg3); border: 2px solid var(--border);
+  overflow: hidden; position: relative; cursor: default;
+}
+.hero-photo.editable { cursor: pointer }
+.hero-photo.editable:hover .hero-photo-overlay { opacity: 1 }
+.hero-photo img { width: 100%; height: 100%; object-fit: cover }
+.hero-photo-empty {
+  width: 100%; height: 100%; display: flex; align-items: center; justify-content: center;
+  font-size: 40px; color: var(--text3); font-family: var(--font-display); font-weight: 300;
+}
+.hero-photo-overlay {
+  position: absolute; inset: 0; background: rgba(0,0,0,.55);
+  display: flex; align-items: center; justify-content: center;
+  font-size: 12px; color: #fff; letter-spacing: 1px; font-family: var(--font-display);
+  opacity: 0; transition: opacity .2s;
+}
+.hero-info { flex: 1; min-width: 0 }
+.hero-name {
+  font-family: var(--font-display); font-size: 30px; font-weight: 600;
+  line-height: 1.2; margin-bottom: 4px; letter-spacing: -0.5px;
+}
+.hero-role {
+  font-family: var(--font-display); font-size: 13px; font-weight: 400;
+  color: var(--accent); letter-spacing: 3px; text-transform: uppercase;
+}
+
+/* Section */
+.section { margin-bottom: 44px; animation: fadeUp .6s ease both }
+.section-label {
+  font-family: var(--font-display); font-size: 10px; font-weight: 500;
+  letter-spacing: 4px; text-transform: uppercase; color: var(--accent);
+  margin-bottom: 16px; display: flex; align-items: center; gap: 12px;
+}
+.section-label::after { content:''; flex:1; height:1px; background:var(--border) }
+
+/* Form elements */
+textarea, input[type="text"], input[type="url"] {
+  width: 100%; background: var(--bg2); border: 1px solid var(--border);
+  border-radius: var(--radius); color: var(--text); font-family: var(--font-body);
+  font-size: 14px; padding: 10px 14px; line-height: 1.7;
+  transition: border-color .2s;
+  outline: none;
+}
+textarea:focus, input[type="text"]:focus, input[type="url"]:focus {
+  border-color: var(--accent);
+}
+textarea { resize: none; overflow: hidden; min-height: 80px }
+
+/* Buttons */
+.btn {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 8px 18px; font-size: 12px; font-weight: 500;
+  font-family: var(--font-display); letter-spacing: 1px;
+  border: 1px solid var(--border); border-radius: var(--radius);
+  background: var(--bg3); color: var(--text2); cursor: pointer;
+  transition: all .2s; text-transform: uppercase;
+}
+.btn:hover { border-color: var(--accent); color: var(--accent) }
+.btn:active { transform: scale(.97) }
+.btn-accent {
+  background: var(--accent); border-color: var(--accent);
+  color: #0e0e0e; font-weight: 600;
+}
+.btn-accent:hover { background: var(--accent2); border-color: var(--accent2); color: #0e0e0e }
+.btn-sm { padding: 5px 12px; font-size: 11px }
+.btn-danger { color: var(--danger); border-color: transparent; background: transparent; padding: 4px 8px }
+.btn-danger:hover { color: #e55; border-color: transparent }
+
+.btn-row { display: flex; gap: 8px; margin-top: 10px; flex-wrap: wrap }
+
+/* Save feedback */
+.save-ok { color: var(--success); font-size: 12px; opacity: 0; transition: opacity .3s; margin-left: 8px }
+.save-ok.show { opacity: 1 }
+
+/* Skills tags */
+.skills { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 10px }
+.skill-tag {
+  padding: 6px 14px; font-size: 12px; font-weight: 500;
+  background: var(--bg3); border: 1px solid var(--border);
+  border-radius: 20px; color: var(--text2); letter-spacing: 0.5px;
+  font-family: var(--font-display); transition: all .3s;
+  display: inline-flex; align-items: center; gap: 6px;
+}
+.skill-tag .skill-remove {
+  cursor: pointer; font-size: 14px; color: var(--text3);
+  line-height: 1; transition: color .2s;
+}
+.skill-tag .skill-remove:hover { color: var(--danger) }
+.skill-input-row { display: flex; gap: 8px }
+.skill-input-row input { flex: 1 }
+
+/* Portfolio */
+.portfolio-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 14px; margin-bottom: 14px }
+.portfolio-card {
+  background: var(--card); border: 1px solid var(--border);
+  border-radius: var(--radius); overflow: hidden; transition: all .3s;
+  position: relative;
+}
+.portfolio-card:hover { border-color: var(--border2); background: var(--card-hover) }
+.portfolio-thumb {
+  width: 100%; aspect-ratio: 16/9; background: var(--bg3);
+  display: flex; align-items: center; justify-content: center;
+  overflow: hidden;
+}
+.portfolio-thumb img { width: 100%; height: 100%; object-fit: cover }
+.portfolio-thumb-empty { font-size: 28px; color: var(--text3) }
+.portfolio-info { padding: 12px 14px }
+.portfolio-title { font-weight: 500; font-size: 13px; margin-bottom: 2px }
+.portfolio-role { font-size: 12px; color: var(--text3) }
+.portfolio-delete {
+  position: absolute; top: 6px; right: 6px; width: 26px; height: 26px;
+  background: rgba(0,0,0,.6); border: none; border-radius: 50%;
+  color: #ccc; font-size: 14px; cursor: pointer;
+  display: flex; align-items: center; justify-content: center;
+  opacity: 0; transition: opacity .2s;
+}
+.portfolio-card:hover .portfolio-delete { opacity: 1 }
+.portfolio-delete:hover { background: var(--danger); color: #fff }
+
+/* Inline add form */
+.add-form {
+  background: var(--bg2); border: 1px solid var(--border);
+  border-radius: var(--radius); padding: 16px; margin-top: 12px;
+  display: none;
+}
+.add-form.open { display: block }
+.add-form .form-row { margin-bottom: 10px }
+.add-form label {
+  display: block; font-size: 11px; font-weight: 500;
+  letter-spacing: 1px; text-transform: uppercase;
+  color: var(--text3); margin-bottom: 4px;
+  font-family: var(--font-display);
+}
+.add-form input[type="file"] {
+  font-size: 12px; color: var(--text2);
+}
+.add-form input[type="file"]::file-selector-button {
+  background: var(--bg3); border: 1px solid var(--border);
+  color: var(--text2); padding: 5px 12px; border-radius: var(--radius);
+  font-family: var(--font-display); font-size: 11px; cursor: pointer;
+  margin-right: 8px;
+}
+
+/* Project cards (read-only) */
+.project-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 10px }
+.project-card {
+  padding: 14px 16px; background: var(--card); border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+.project-name { font-weight: 500; font-size: 13px; margin-bottom: 3px }
+.project-meta { font-size: 12px; color: var(--text3) }
+.project-role { color: var(--accent); font-size: 12px; font-family: var(--font-display) }
+
+/* Timeline items */
+.timeline { display: flex; flex-direction: column }
+.timeline-item {
+  display: flex; gap: 16px; padding: 14px 0;
+  border-bottom: 1px solid var(--border);
+  position: relative;
+}
+.timeline-item:last-child { border-bottom: none }
+.timeline-year {
+  width: 70px; flex-shrink: 0; font-family: var(--font-display);
+  font-size: 13px; color: var(--text3); padding-top: 2px;
+}
+.timeline-content { flex: 1; min-width: 0 }
+.timeline-title { font-weight: 500; font-size: 14px; margin-bottom: 2px }
+.timeline-subtitle { font-size: 13px; color: var(--text2) }
+.timeline-desc { font-size: 13px; color: var(--text3); margin-top: 4px }
+.timeline-delete {
+  position: absolute; top: 14px; right: 0;
+  background: none; border: none; color: var(--text3); cursor: pointer;
+  font-size: 14px; opacity: 0; transition: opacity .2s;
+}
+.timeline-item:hover .timeline-delete { opacity: 1 }
+.timeline-delete:hover { color: var(--danger) }
+
+/* Footer */
+.resume-footer {
+  text-align: center; padding-top: 36px; margin-top: 36px;
+  border-top: 1px solid var(--border);
+}
+.resume-footer .btn { margin-bottom: 20px }
+.resume-footer .branding {
+  font-family: var(--font-display); font-size: 11px;
+  letter-spacing: 2px; color: var(--text3);
+}
+
+/* Toast */
+.toast {
+  position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%) translateY(80px);
+  background: var(--bg3); border: 1px solid var(--border); border-radius: var(--radius);
+  padding: 10px 24px; font-size: 13px; color: var(--text2);
+  z-index: 2000; transition: transform .3s ease, opacity .3s;
+  opacity: 0; pointer-events: none;
+}
+.toast.show { transform: translateX(-50%) translateY(0); opacity: 1 }
+.toast.error { border-color: var(--danger); color: var(--danger) }
+
+/* Animations */
+@keyframes fadeUp { from { opacity:0; transform:translateY(16px) } to { opacity:1; transform:translateY(0) } }
+.section:nth-child(2) { animation-delay:.05s }
+.section:nth-child(3) { animation-delay:.1s }
+.section:nth-child(4) { animation-delay:.15s }
+.section:nth-child(5) { animation-delay:.2s }
+.section:nth-child(6) { animation-delay:.25s }
+.section:nth-child(7) { animation-delay:.3s }
+.section:nth-child(8) { animation-delay:.35s }
+.section:nth-child(9) { animation-delay:.4s }
+
+/* Mobile */
+@media (max-width: 600px) {
+  .hero { flex-direction: column; text-align: center; gap: 16px }
+  .hero-photo { width: 96px; height: 96px }
+  .hero-name { font-size: 24px }
+  .resume { padding: 32px 14px 60px }
+  .portfolio-grid, .project-grid { grid-template-columns: 1fr }
+  .timeline-item { flex-direction: column; gap: 2px }
+  .timeline-year { width: auto }
+  .timeline-delete { opacity: 1 }
+  .portfolio-delete { opacity: 1 }
+  .skill-input-row { flex-direction: column }
+}
+</style>
+</head>
+<body>
+
+<div id="loading">
+  <div class="loading-bar"></div>
+  <div class="loading-text">Loading</div>
+</div>
+
+<div id="error">
+  <h2>404</h2>
+  <p>連結無效或已過期</p>
+</div>
+
+<div id="readonly-banner" class="readonly-banner" style="display:none">
+  此簡歷目前為唯讀模式
+</div>
+
+<div class="resume" id="resume"></div>
+
+<div class="toast" id="toast"></div>
+
+<input type="file" id="photoFileInput" accept="image/*" style="display:none">
+
+<script>
+/* ── Globals ── */
+const params = new URLSearchParams(location.search);
+const TOKEN = params.get('token');
+let EDITABLE = false;
+let STAFF = {};
+let currentSkills = [];
+let currentExperience = [];
+let currentEducation = [];
+let currentAwards = [];
+let currentPortfolio = [];
+
+/* ── Helpers ── */
+function _esc(s) { const d = document.createElement('div'); d.textContent = s || ''; return d.innerHTML; }
+
+function _toast(msg, isError) {
+    const el = document.getElementById('toast');
+    el.textContent = msg;
+    el.className = 'toast show' + (isError ? ' error' : '');
+    clearTimeout(el._t);
+    el._t = setTimeout(() => el.className = 'toast', 2500);
+}
+
+function _videoId(url) {
+    if (!url) return null;
+    let m = url.match(/(?:youtube\.com\/watch\?v=|youtu\.be\/|youtube\.com\/embed\/)([a-zA-Z0-9_-]{11})/);
+    if (m) return { type: 'yt', id: m[1] };
+    m = url.match(/vimeo\.com\/(\d+)/);
+    if (m) return { type: 'vm', id: m[1] };
+    return null;
+}
+
+function _thumbUrl(item) {
+    if (item.thumbnail_url) return item.thumbnail_url;
+    const v = _videoId(item.url);
+    if (v && v.type === 'yt') return `https://img.youtube.com/vi/${v.id}/mqdefault.jpg`;
+    return '';
+}
+
+/* Auto-expand textarea */
+function _autoExpand(el) {
+    el.style.height = 'auto';
+    el.style.height = el.scrollHeight + 'px';
+}
+
+/* ── API helpers ── */
+async function _apiFetch(url, opts) {
+    try {
+        const res = await fetch(url, opts);
+        if (!res.ok) { _toast('儲存失敗 (' + res.status + ')', true); return null; }
+        return res;
+    } catch (e) { _toast('網路錯誤', true); return null; }
+}
+
+async function _saveResume(overrides) {
+    const body = {
+        bio: document.getElementById('bio-input') ? document.getElementById('bio-input').value : (STAFF.bio || ''),
+        skills: currentSkills,
+        education: currentEducation,
+        experience: currentExperience,
+        awards: currentAwards,
+        ...overrides
+    };
+    const res = await _apiFetch(`/api/v1/crm/public/staff-edit/${TOKEN}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body)
+    });
+    if (res) _toast('已儲存');
+    return res;
+}
+
+/* ── Load ── */
+async function _load() {
+    if (!TOKEN) { _showError(); return; }
+    try {
+        const res = await fetch(`/api/v1/crm/public/staff-edit/${TOKEN}`);
+        if (!res.ok) { _showError(); return; }
+        const data = await res.json();
+        EDITABLE = !!data.editable;
+        STAFF = data.staff || {};
+        currentSkills = (STAFF.skills || []).slice();
+        currentExperience = (STAFF.experience || []).slice();
+        currentEducation = (STAFF.education || []).slice();
+        currentAwards = (STAFF.awards || []).slice();
+        currentPortfolio = (data.portfolio || []).slice();
+        _render(data);
+    } catch (_) { _showError(); }
+}
+
+function _showError() {
+    document.getElementById('loading').classList.add('fade');
+    document.getElementById('error').style.display = 'block';
+}
+
+/* ── Render ── */
+function _render(data) {
+    const s = STAFF;
+    const portfolio = currentPortfolio;
+    const projects = data.projects || [];
+
+    document.title = (s.name || '編輯簡歷') + ' — Originsun Studio';
+
+    if (!EDITABLE) {
+        document.getElementById('readonly-banner').style.display = 'block';
+    }
+
+    let html = '';
+
+    /* ── Hero ── */
+    html += `<div class="hero">
+        <div class="hero-photo${EDITABLE ? ' editable' : ''}" id="heroPhoto">
+            ${s.photo_url
+                ? `<img src="${_esc(s.photo_url)}" alt="${_esc(s.name)}" id="heroImg">`
+                : `<div class="hero-photo-empty" id="heroEmpty">${_esc((s.name || '?')[0])}</div>`}
+            ${EDITABLE ? '<div class="hero-photo-overlay">更換照片</div>' : ''}
+        </div>
+        <div class="hero-info">
+            <div class="hero-name">${_esc(s.name)}</div>
+            ${s.role ? `<div class="hero-role">${_esc(s.role)}</div>` : ''}
+        </div>
+    </div>`;
+
+    /* ── Bio ── */
+    html += `<div class="section">
+        <div class="section-label">自我介紹</div>`;
+    if (EDITABLE) {
+        html += `<textarea id="bio-input" placeholder="介紹一下自己..." oninput="_autoExpand(this)">${_esc(s.bio || '')}</textarea>
+        <div class="btn-row">
+            <button class="btn btn-accent btn-sm" onclick="_saveBio()">儲存</button>
+            <span class="save-ok" id="bio-ok"></span>
+        </div>`;
+    } else {
+        html += `<div style="color:var(--text2);font-size:14px;line-height:1.8">${_esc(s.bio || '尚未填寫')}</div>`;
+    }
+    html += '</div>';
+
+    /* ── Skills ── */
+    html += `<div class="section">
+        <div class="section-label">專業技能</div>
+        <div class="skills" id="skillsContainer">${_renderSkillTags()}</div>`;
+    if (EDITABLE) {
+        html += `<div class="skill-input-row">
+            <input type="text" id="skillInput" placeholder="輸入技能名稱，按 Enter 新增">
+            <button class="btn btn-sm" onclick="_addSkill()">新增</button>
+        </div>`;
+    }
+    html += '</div>';
+
+    /* ── Portfolio ── */
+    html += `<div class="section">
+        <div class="section-label">個人作品集</div>
+        <div class="portfolio-grid" id="portfolioGrid">${_renderPortfolioCards()}</div>`;
+    if (EDITABLE) {
+        html += `<button class="btn btn-sm" onclick="_toggleForm('portfolioForm')">+ 新增作品</button>
+        <div class="add-form" id="portfolioForm">
+            <div class="form-row"><label>作品名稱</label><input type="text" id="pf-title" placeholder="作品名稱"></div>
+            <div class="form-row"><label>連結 (YouTube / Vimeo / 網址)</label><input type="url" id="pf-url" placeholder="https://..."></div>
+            <div class="form-row"><label>擔任角色</label><input type="text" id="pf-role" placeholder="導演 / 攝影 / 剪輯..."></div>
+            <div class="form-row"><label>縮圖 (選填)</label><input type="file" id="pf-thumb" accept="image/*"></div>
+            <div class="btn-row">
+                <button class="btn btn-accent btn-sm" onclick="_addPortfolio()">新增</button>
+                <button class="btn btn-sm" onclick="_toggleForm('portfolioForm')">取消</button>
+            </div>
+        </div>`;
+    }
+    html += '</div>';
+
+    /* ── Company Projects (read-only) ── */
+    if (projects.length > 0) {
+        html += `<div class="section">
+            <div class="section-label">公司專案</div>
+            <div class="project-grid">${projects.map(p => `
+                <div class="project-card">
+                    <div class="project-name">${_esc(p.project_name)}</div>
+                    <div class="project-meta">${_esc(p.client_name || '')}</div>
+                    ${p.role_in_project ? `<div class="project-role">${_esc(p.role_in_project)}</div>` : ''}
+                </div>
+            `).join('')}</div>
+        </div>`;
+    }
+
+    /* ── Experience ── */
+    html += `<div class="section">
+        <div class="section-label">工作經歷</div>
+        <div class="timeline" id="expTimeline">${_renderTimeline(currentExperience, 'exp')}</div>`;
+    if (EDITABLE) {
+        html += `<button class="btn btn-sm" onclick="_toggleForm('expForm')" style="margin-top:12px">+ 新增經歷</button>
+        <div class="add-form" id="expForm">
+            <div class="form-row"><label>公司 / 單位</label><input type="text" id="exp-company" placeholder="公司名稱"></div>
+            <div class="form-row"><label>職稱</label><input type="text" id="exp-role" placeholder="職稱"></div>
+            <div class="form-row"><label>期間</label><input type="text" id="exp-period" placeholder="2020 - 2023"></div>
+            <div class="form-row"><label>說明 (選填)</label><input type="text" id="exp-desc" placeholder="工作內容"></div>
+            <div class="btn-row">
+                <button class="btn btn-accent btn-sm" onclick="_addExperience()">新增</button>
+                <button class="btn btn-sm" onclick="_toggleForm('expForm')">取消</button>
+            </div>
+        </div>`;
+    }
+    html += '</div>';
+
+    /* ── Education ── */
+    html += `<div class="section">
+        <div class="section-label">學歷</div>
+        <div class="timeline" id="eduTimeline">${_renderTimeline(currentEducation, 'edu')}</div>`;
+    if (EDITABLE) {
+        html += `<button class="btn btn-sm" onclick="_toggleForm('eduForm')" style="margin-top:12px">+ 新增學歷</button>
+        <div class="add-form" id="eduForm">
+            <div class="form-row"><label>學校</label><input type="text" id="edu-school" placeholder="學校名稱"></div>
+            <div class="form-row"><label>學位 / 科系</label><input type="text" id="edu-degree" placeholder="傳播學系 學士"></div>
+            <div class="form-row"><label>年份</label><input type="text" id="edu-year" placeholder="2020"></div>
+            <div class="btn-row">
+                <button class="btn btn-accent btn-sm" onclick="_addEducation()">新增</button>
+                <button class="btn btn-sm" onclick="_toggleForm('eduForm')">取消</button>
+            </div>
+        </div>`;
+    }
+    html += '</div>';
+
+    /* ── Awards ── */
+    html += `<div class="section">
+        <div class="section-label">獲獎紀錄</div>
+        <div class="timeline" id="awardTimeline">${_renderTimeline(currentAwards, 'award')}</div>`;
+    if (EDITABLE) {
+        html += `<button class="btn btn-sm" onclick="_toggleForm('awardForm')" style="margin-top:12px">+ 新增獎項</button>
+        <div class="add-form" id="awardForm">
+            <div class="form-row"><label>獎項名稱</label><input type="text" id="award-title" placeholder="獎項名稱"></div>
+            <div class="form-row"><label>年份</label><input type="text" id="award-year" placeholder="2023"></div>
+            <div class="form-row"><label>說明 (選填)</label><input type="text" id="award-desc" placeholder="說明"></div>
+            <div class="btn-row">
+                <button class="btn btn-accent btn-sm" onclick="_addAward()">新增</button>
+                <button class="btn btn-sm" onclick="_toggleForm('awardForm')">取消</button>
+            </div>
+        </div>`;
+    }
+    html += '</div>';
+
+    /* ── Footer ── */
+    html += `<div class="resume-footer">`;
+    if (STAFF.id) {
+        html += `<a href="/resume.html?id=${encodeURIComponent(STAFF.id)}" target="_blank" class="btn" style="text-decoration:none;margin-bottom:16px;display:inline-flex">預覽公開簡歷 &rarr;</a><br>`;
+    }
+    html += `<div class="branding">Originsun Studio</div></div>`;
+
+    document.getElementById('resume').innerHTML = html;
+    document.getElementById('loading').classList.add('fade');
+    requestAnimationFrame(() => {
+        document.getElementById('resume').classList.add('visible');
+        const bio = document.getElementById('bio-input');
+        if (bio) _autoExpand(bio);
+    });
+
+    /* Bind events */
+    _bindPhotoUpload();
+    _bindSkillInput();
+    _bindPortfolioClicks();
+}
+
+/* ── Render helpers ── */
+function _renderSkillTags() {
+    return currentSkills.map((sk, i) =>
+        `<span class="skill-tag">${_esc(sk)}${EDITABLE ? `<span class="skill-remove" data-idx="${i}">&times;</span>` : ''}</span>`
+    ).join('');
+}
+
+function _renderPortfolioCards() {
+    return currentPortfolio.map((item, i) => {
+        const thumb = _thumbUrl(item);
+        return `<div class="portfolio-card" data-url="${_esc(item.url || '')}">
+            ${EDITABLE ? `<button class="portfolio-delete" data-pid="${_esc(String(item.id))}" title="刪除">&times;</button>` : ''}
+            <div class="portfolio-thumb">
+                ${thumb ? `<img src="${_esc(thumb)}" alt="${_esc(item.title)}">` : `<div class="portfolio-thumb-empty">&#9654;</div>`}
+            </div>
+            <div class="portfolio-info">
+                <div class="portfolio-title">${_esc(item.title)}</div>
+                ${item.role_desc ? `<div class="portfolio-role">${_esc(item.role_desc)}</div>` : ''}
+            </div>
+        </div>`;
+    }).join('');
+}
+
+function _renderTimeline(items, prefix) {
+    if (!items.length) return `<div style="color:var(--text3);font-size:13px">尚無資料</div>`;
+    return items.map((item, i) => {
+        let year = '', title = '', subtitle = '', desc = '';
+        if (prefix === 'exp') {
+            year = item.period || ''; title = item.company || ''; subtitle = item.role || ''; desc = item.desc || '';
+        } else if (prefix === 'edu') {
+            year = item.year || ''; title = item.school || ''; subtitle = item.degree || '';
+        } else if (prefix === 'award') {
+            year = item.year || ''; title = item.title || ''; desc = item.desc || '';
+        }
+        return `<div class="timeline-item">
+            <div class="timeline-year">${_esc(year)}</div>
+            <div class="timeline-content">
+                <div class="timeline-title">${_esc(title)}</div>
+                ${subtitle ? `<div class="timeline-subtitle">${_esc(subtitle)}</div>` : ''}
+                ${desc ? `<div class="timeline-desc">${_esc(desc)}</div>` : ''}
+            </div>
+            ${EDITABLE ? `<button class="timeline-delete" data-prefix="${prefix}" data-idx="${i}" title="刪除">&times;</button>` : ''}
+        </div>`;
+    }).join('');
+}
+
+/* ── Toggle form ── */
+function _toggleForm(id) {
+    const el = document.getElementById(id);
+    if (el) el.classList.toggle('open');
+}
+
+/* ── Photo upload ── */
+function _bindPhotoUpload() {
+    if (!EDITABLE) return;
+    const hero = document.getElementById('heroPhoto');
+    const fileInput = document.getElementById('photoFileInput');
+    if (hero) hero.addEventListener('click', () => fileInput.click());
+    fileInput.addEventListener('change', async () => {
+        const file = fileInput.files[0];
+        if (!file) return;
+        const fd = new FormData();
+        fd.append('file', file);
+        const res = await _apiFetch(`/api/v1/crm/public/staff-edit/${TOKEN}/photo`, { method: 'POST', body: fd });
+        if (res) {
+            const data = await res.json();
+            const img = document.getElementById('heroImg');
+            const empty = document.getElementById('heroEmpty');
+            if (data.photo_url) {
+                if (img) { img.src = data.photo_url; }
+                else if (empty) {
+                    empty.outerHTML = `<img src="${_esc(data.photo_url)}" alt="" id="heroImg">`;
+                }
+                _toast('照片已更新');
+            }
+        }
+        fileInput.value = '';
+    });
+}
+
+/* ── Skills ── */
+function _bindSkillInput() {
+    if (!EDITABLE) return;
+    const input = document.getElementById('skillInput');
+    if (!input) return;
+    input.addEventListener('keydown', e => {
+        if (e.key === 'Enter') { e.preventDefault(); _addSkill(); }
+    });
+    document.getElementById('skillsContainer').addEventListener('click', e => {
+        const rm = e.target.closest('.skill-remove');
+        if (!rm) return;
+        const idx = parseInt(rm.dataset.idx, 10);
+        _removeSkill(idx);
+    });
+}
+
+async function _addSkill() {
+    const input = document.getElementById('skillInput');
+    const val = (input.value || '').trim();
+    if (!val) return;
+    if (currentSkills.includes(val)) { _toast('技能已存在', true); return; }
+    currentSkills.push(val);
+    input.value = '';
+    document.getElementById('skillsContainer').innerHTML = _renderSkillTags();
+    await _saveResume();
+}
+
+async function _removeSkill(idx) {
+    currentSkills.splice(idx, 1);
+    document.getElementById('skillsContainer').innerHTML = _renderSkillTags();
+    await _saveResume();
+}
+
+/* ── Bio save ── */
+async function _saveBio() {
+    await _saveResume();
+}
+
+/* ── Portfolio ── */
+function _bindPortfolioClicks() {
+    document.getElementById('resume').addEventListener('click', e => {
+        /* Delete portfolio */
+        const del = e.target.closest('.portfolio-delete');
+        if (del) {
+            e.stopPropagation();
+            const pid = del.dataset.pid;
+            _deletePortfolio(pid);
+            return;
+        }
+        /* Open portfolio link */
+        const card = e.target.closest('.portfolio-card');
+        if (card && card.dataset.url) {
+            window.open(card.dataset.url, '_blank');
+        }
+        /* Delete timeline item */
+        const tdel = e.target.closest('.timeline-delete');
+        if (tdel) {
+            const prefix = tdel.dataset.prefix;
+            const idx = parseInt(tdel.dataset.idx, 10);
+            _removeTimelineItem(prefix, idx);
+        }
+    });
+}
+
+async function _addPortfolio() {
+    const title = document.getElementById('pf-title').value.trim();
+    const url = document.getElementById('pf-url').value.trim();
+    const role_desc = document.getElementById('pf-role').value.trim();
+    const thumbFile = document.getElementById('pf-thumb').files[0];
+    if (!title) { _toast('請輸入作品名稱', true); return; }
+
+    const params = new URLSearchParams();
+    params.set('title', title);
+    if (url) params.set('url', url);
+    if (role_desc) params.set('role_desc', role_desc);
+
+    let body = undefined;
+    let headers = undefined;
+    if (thumbFile) {
+        body = new FormData();
+        body.append('file', thumbFile);
+    }
+
+    const res = await _apiFetch(
+        `/api/v1/crm/public/staff-edit/${TOKEN}/portfolio?${params.toString()}`,
+        { method: 'POST', body }
+    );
+    if (res) {
+        const item = await res.json();
+        currentPortfolio.push(item);
+        document.getElementById('portfolioGrid').innerHTML = _renderPortfolioCards();
+        document.getElementById('pf-title').value = '';
+        document.getElementById('pf-url').value = '';
+        document.getElementById('pf-role').value = '';
+        document.getElementById('pf-thumb').value = '';
+        _toggleForm('portfolioForm');
+        _toast('作品已新增');
+    }
+}
+
+async function _deletePortfolio(pid) {
+    const res = await _apiFetch(`/api/v1/crm/public/staff-edit/${TOKEN}/portfolio/${pid}`, { method: 'DELETE' });
+    if (res) {
+        currentPortfolio = currentPortfolio.filter(p => String(p.id) !== String(pid));
+        document.getElementById('portfolioGrid').innerHTML = _renderPortfolioCards();
+        _toast('作品已刪除');
+    }
+}
+
+/* ── Timeline add/remove ── */
+async function _addExperience() {
+    const company = document.getElementById('exp-company').value.trim();
+    const role = document.getElementById('exp-role').value.trim();
+    const period = document.getElementById('exp-period').value.trim();
+    const desc = document.getElementById('exp-desc').value.trim();
+    if (!company) { _toast('請輸入公司名稱', true); return; }
+    currentExperience.push({ company, role, period, desc });
+    const res = await _saveResume();
+    if (res) {
+        document.getElementById('expTimeline').innerHTML = _renderTimeline(currentExperience, 'exp');
+        document.getElementById('exp-company').value = '';
+        document.getElementById('exp-role').value = '';
+        document.getElementById('exp-period').value = '';
+        document.getElementById('exp-desc').value = '';
+        _toggleForm('expForm');
+    }
+}
+
+async function _addEducation() {
+    const school = document.getElementById('edu-school').value.trim();
+    const degree = document.getElementById('edu-degree').value.trim();
+    const year = document.getElementById('edu-year').value.trim();
+    if (!school) { _toast('請輸入學校名稱', true); return; }
+    currentEducation.push({ school, degree, year });
+    const res = await _saveResume();
+    if (res) {
+        document.getElementById('eduTimeline').innerHTML = _renderTimeline(currentEducation, 'edu');
+        document.getElementById('edu-school').value = '';
+        document.getElementById('edu-degree').value = '';
+        document.getElementById('edu-year').value = '';
+        _toggleForm('eduForm');
+    }
+}
+
+async function _addAward() {
+    const title = document.getElementById('award-title').value.trim();
+    const year = document.getElementById('award-year').value.trim();
+    const desc = document.getElementById('award-desc').value.trim();
+    if (!title) { _toast('請輸入獎項名稱', true); return; }
+    currentAwards.push({ title, year, desc });
+    const res = await _saveResume();
+    if (res) {
+        document.getElementById('awardTimeline').innerHTML = _renderTimeline(currentAwards, 'award');
+        document.getElementById('award-title').value = '';
+        document.getElementById('award-year').value = '';
+        document.getElementById('award-desc').value = '';
+        _toggleForm('awardForm');
+    }
+}
+
+async function _removeTimelineItem(prefix, idx) {
+    if (prefix === 'exp') {
+        currentExperience.splice(idx, 1);
+        await _saveResume();
+        document.getElementById('expTimeline').innerHTML = _renderTimeline(currentExperience, 'exp');
+    } else if (prefix === 'edu') {
+        currentEducation.splice(idx, 1);
+        await _saveResume();
+        document.getElementById('eduTimeline').innerHTML = _renderTimeline(currentEducation, 'edu');
+    } else if (prefix === 'award') {
+        currentAwards.splice(idx, 1);
+        await _saveResume();
+        document.getElementById('awardTimeline').innerHTML = _renderTimeline(currentAwards, 'award');
+    }
+}
+
+/* ── Init ── */
+_load();
+</script>
+</body>
+</html>

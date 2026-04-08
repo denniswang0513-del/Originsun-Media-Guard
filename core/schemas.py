@@ -298,6 +298,7 @@ class ResumePayload(BaseModel):
     experience: list = []
     awards: list = []
     resume_visible: bool = False
+    resume_editable: bool = True
 
 
 class PortfolioPayload(BaseModel):

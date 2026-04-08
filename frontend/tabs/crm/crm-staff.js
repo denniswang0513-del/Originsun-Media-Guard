@@ -506,6 +506,13 @@ async function _renderResumeTab(staffId) {
                 <button class="crm-btn crm-btn-secondary" onclick="window.open('/api/v1/crm/staff/${staffId}/resume-pdf','_blank')">
                     下載 PDF
                 </button>
+                <button class="crm-btn crm-btn-secondary" id="staff-resume-share-link">
+                    🔗 分享編輯連結
+                </button>
+                <button class="crm-btn ${staff.resume_editable !== false ? 'crm-btn-primary' : 'crm-btn-secondary'}"
+                    id="staff-resume-toggle-editable">
+                    ${staff.resume_editable !== false ? '✎ 開放編輯' : '🔒 關閉編輯'}
+                </button>
                 <button class="crm-btn ${resumeVisible ? 'crm-btn-primary' : 'crm-btn-secondary'}"
                     id="staff-resume-toggle-visible">
                     ${resumeVisible ? '公開中' : '私密'}
@@ -613,6 +620,26 @@ async function _renderResumeTab(staffId) {
             });
             _renderResumeTab(staffId);
         } catch (e) { alert('儲存失敗: ' + e.message); }
+    });
+
+    // Toggle editable
+    document.getElementById('staff-resume-toggle-editable').addEventListener('click', async () => {
+        try {
+            await _fetch('/staff/' + staffId + '/resume', {
+                method: 'PUT', body: JSON.stringify({ resume_editable: !(staff.resume_editable !== false) })
+            });
+            _renderResumeTab(staffId);
+        } catch (e) { alert('儲存失敗: ' + e.message); }
+    });
+
+    // Generate share link
+    document.getElementById('staff-resume-share-link').addEventListener('click', async () => {
+        try {
+            const r = await _fetch('/staff/' + staffId + '/generate-edit-token', { method: 'POST', body: '{}' });
+            const fullUrl = location.origin + r.url;
+            await navigator.clipboard.writeText(fullUrl).catch(() => {});
+            alert('已複製分享連結：\n' + fullUrl);
+        } catch (e) { alert('產生連結失敗: ' + e.message); }
     });
 
     _resumeLoaded[staffId] = true;

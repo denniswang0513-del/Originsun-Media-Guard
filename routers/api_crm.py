@@ -1014,6 +1014,8 @@ def _to_staff_dict(s) -> dict:
         "experience": s.experience or [],
         "awards": s.awards or [],
         "resume_visible": bool(s.resume_visible) if s.resume_visible is not None else False,
+        "edit_token": s.edit_token or "",
+        "resume_editable": bool(s.resume_editable) if s.resume_editable is not None else True,
         "created_at": s.created_at.isoformat() if s.created_at else None,
         "updated_at": s.updated_at.isoformat() if s.updated_at else None,
     }
@@ -1234,6 +1236,7 @@ async def update_staff_resume(staff_id: str, req: ResumePayload, request: Reques
         s.experience = req.experience
         s.awards = req.awards
         s.resume_visible = req.resume_visible
+        s.resume_editable = req.resume_editable
         s.updated_at = _now()
         await session.commit()
         await session.refresh(s)
@@ -1506,6 +1509,169 @@ async def staff_resume_pdf(staff_id: str):
         filename=f"{safe_name}_Resume.pdf",
         background=BackgroundTask(lambda: os.unlink(tmp_pdf) if os.path.exists(tmp_pdf) else None),
     )
+
+
+# ── Staff Self-Edit via Token ─────────────────────────────
+
+async def _verify_edit_token(session, token: str, require_editable: bool = False):
+    """Verify staff edit token. Returns CrmStaff or raises HTTPException."""
+    from core.auth import verify_token
+    payload = verify_token(token)
+    if not payload or payload.get('scope') != 'resume_edit':
+        raise HTTPException(status_code=401, detail="無效的連結")
+    staff_id = payload.get('sub', '')
+    s = await session.get(CrmStaff, staff_id)
+    if not s or s.edit_token != token:
+        raise HTTPException(status_code=401, detail="連結已失效")
+    if require_editable and not s.resume_editable:
+        raise HTTPException(status_code=403, detail="管理員已關閉編輯權限")
+    return s
+
+
+@router.post("/staff/{staff_id}/generate-edit-token")
+async def generate_staff_edit_token(staff_id: str, request: Request):
+    """產生人員自編履歷的永久連結 Token。"""
+    _check_auth(request)
+    _require_db()
+    from core.auth import create_token
+    token = create_token({"sub": staff_id, "scope": "resume_edit"}, expires_days=36500)
+    factory = await _get_factory()
+    async with factory() as session:
+        s = await session.get(CrmStaff, staff_id)
+        if not s:
+            raise HTTPException(status_code=404, detail="找不到此人員")
+        s.edit_token = token
+        s.updated_at = _now()
+        await session.commit()
+    return {"status": "ok", "token": token, "url": f"/staff-edit.html?token={token}"}
+
+
+@router.get("/public/staff-edit/{token}")
+async def get_staff_edit_data(token: str):
+    """透過 Token 取得人員履歷資料（無需認證）。"""
+    _require_db()
+    factory = await _get_factory()
+    async with factory() as session:
+        s = await _verify_edit_token(session, token, require_editable=False)
+        staff = _to_staff_dict(s)
+        # Portfolio items
+        rows = (await session.execute(
+            select(CrmStaffPortfolio)
+            .where(CrmStaffPortfolio.staff_id == s.id)
+            .order_by(CrmStaffPortfolio.sort_order)
+        )).scalars().all()
+        portfolio = [_to_portfolio_dict(p) for p in rows]
+    # Strip sensitive fields
+    for key in ("id_number", "address", "bank_name", "bank_account",
+                "phone", "email", "daily_rate", "hourly_rate"):
+        staff.pop(key, None)
+    return {"staff": staff, "portfolio": portfolio}
+
+
+@router.put("/public/staff-edit/{token}")
+async def update_staff_edit_data(token: str, req: ResumePayload):
+    """透過 Token 更新人員履歷資料（無需認證）。"""
+    _require_db()
+    factory = await _get_factory()
+    async with factory() as session:
+        s = await _verify_edit_token(session, token, require_editable=True)
+        s.bio = req.bio
+        s.skills = req.skills
+        s.education = req.education
+        s.experience = req.experience
+        s.awards = req.awards
+        # Do NOT allow changing resume_visible or resume_editable (admin-only)
+        s.updated_at = _now()
+        await session.commit()
+    return {"status": "ok"}
+
+
+@router.post("/public/staff-edit/{token}/photo")
+async def upload_staff_edit_photo(token: str, file: UploadFile = File(...)):
+    """透過 Token 上傳人員照片（無需認證）。"""
+    _require_db()
+    factory = await _get_factory()
+    async with factory() as session:
+        s = await _verify_edit_token(session, token, require_editable=True)
+        staff_id = s.id
+    ext = (os.path.splitext(file.filename or "photo.jpg")[1] or ".jpg").lower()
+    if ext not in _ALLOWED_IMG_EXT:
+        raise HTTPException(status_code=400, detail=f"不支援的圖片格式：{ext}")
+    if not staff_id.isalnum():
+        raise HTTPException(status_code=400, detail="無效的人員 ID")
+    upload_dir = os.path.join(_UPLOAD_BASE, "staff", staff_id)
+    os.makedirs(upload_dir, exist_ok=True)
+    for f in os.listdir(upload_dir):
+        if f.startswith("photo."):
+            try:
+                os.remove(os.path.join(upload_dir, f))
+            except OSError:
+                pass
+    dest = os.path.join(upload_dir, f"photo{ext}")
+    content = await file.read()
+    with open(dest, "wb") as fp:
+        fp.write(content)
+    url = f"/uploads/staff/{staff_id}/photo{ext}"
+    async with factory() as session:
+        s = await session.get(CrmStaff, staff_id)
+        if s:
+            s.photo_url = url
+            s.updated_at = _now()
+            await session.commit()
+    return {"status": "ok", "photo_url": url}
+
+
+@router.post("/public/staff-edit/{token}/portfolio")
+async def add_staff_edit_portfolio(token: str,
+                                   title: str = Query(...), url: str = Query(...),
+                                   role_desc: str = Query(""), sort_order: int = Query(0),
+                                   thumbnail: Optional[UploadFile] = File(None)):
+    """透過 Token 新增作品集項目（無需認證）。"""
+    _require_db()
+    factory = await _get_factory()
+    async with factory() as session:
+        s = await _verify_edit_token(session, token, require_editable=True)
+        staff_id = s.id
+    item_id = uuid.uuid4().hex
+    thumbnail_url = ""
+    if thumbnail and thumbnail.filename:
+        ext = (os.path.splitext(thumbnail.filename)[1] or ".jpg").lower()
+        if ext not in _ALLOWED_IMG_EXT:
+            raise HTTPException(status_code=400, detail=f"不支援的圖片格式：{ext}")
+        thumb_dir = os.path.join(_UPLOAD_BASE, "staff", staff_id, "portfolio")
+        os.makedirs(thumb_dir, exist_ok=True)
+        thumb_path = os.path.join(thumb_dir, f"{item_id}{ext}")
+        content = await thumbnail.read()
+        with open(thumb_path, "wb") as fp:
+            fp.write(content)
+        thumbnail_url = f"/uploads/staff/{staff_id}/portfolio/{item_id}{ext}"
+    p = CrmStaffPortfolio(
+        id=item_id, staff_id=staff_id, title=title, url=url,
+        thumbnail_url=thumbnail_url, role_desc=role_desc, sort_order=sort_order,
+        created_at=_now(),
+    )
+    async with factory() as session:
+        session.add(p)
+        await session.commit()
+        await session.refresh(p)
+    return {"status": "ok", "item": _to_portfolio_dict(p)}
+
+
+@router.delete("/public/staff-edit/{token}/portfolio/{item_id}")
+async def delete_staff_edit_portfolio(token: str, item_id: str):
+    """透過 Token 刪除作品集項目（無需認證）。"""
+    _require_db()
+    factory = await _get_factory()
+    async with factory() as session:
+        s = await _verify_edit_token(session, token, require_editable=True)
+        p = await session.get(CrmStaffPortfolio, item_id)
+        if not p:
+            raise HTTPException(status_code=404, detail="找不到此作品集項目")
+        if p.staff_id != s.id:
+            raise HTTPException(status_code=403, detail="無權限刪除此作品集項目")
+        await session.delete(p)
+        await session.commit()
+    return {"status": "ok"}
 
 
 # ── Project Staff (派工) Endpoints ──────────────────────────

@@ -284,6 +284,8 @@ class CrmStaff(Base):
     experience = Column(JSONB, nullable=True)        # [{"company":"...", "role":"...", "period":"...", "desc":"..."}]
     awards = Column(JSONB, nullable=True)            # [{"title":"...", "year":"...", "desc":"..."}]
     resume_visible = Column(Boolean, nullable=True, default=False)
+    edit_token = Column(String(512), nullable=True)
+    resume_editable = Column(Boolean, nullable=True, default=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now())
 
