@@ -290,42 +290,58 @@ async def import_csv(request: Request, file: UploadFile = File(...)):
     except UnicodeDecodeError:
         text = content.decode("big5", errors="replace")
 
-    reader = csv.DictReader(io.StringIO(text))
-    headers = list(reader.fieldnames or [])
-    header_map = {h.lower(): h for h in headers}
+    # Auto-detect delimiter
+    first_line = text.split('\n', 1)[0].strip()
+    dialect = None
+    if first_line:
+        try:
+            dialect = csv.Sniffer().sniff(first_line, delimiters=',\t;')
+        except csv.Error:
+            pass
+    reader = csv.DictReader(io.StringIO(text), dialect=dialect) if dialect else csv.DictReader(io.StringIO(text))
+    headers = [h.strip() for h in (reader.fieldnames or [])]
+    reader.fieldnames = headers
+    header_map = {h.lower(): h for h in headers if h}
     imported = updated = skipped = 0
 
     factory = await _get_factory()
 
     async with factory() as session:
-        existing_map: dict = {
-            c.short_name: c
-            for c in (await session.execute(select(Client))).scalars().all()
-        }
+        # Build dedup index: (full_name, tax_id) → Client
+        all_clients = (await session.execute(select(Client))).scalars().all()
+        existing_keys = {(c.full_name or "", c.tax_id or "") for c in all_clients}
 
         for row in reader:
             data = _map_row(header_map, row)
-            if not data.get("short_name"):
+            full_name = data.get("full_name", "").strip()
+            tax_id = data.get("tax_id", "").strip()
+
+            if not full_name and not tax_id:
                 skipped += 1
                 continue
 
+            # Dedup by (抬頭, 統編)
+            key = (full_name, tax_id)
+            if key in existing_keys:
+                skipped += 1
+                continue
+
+            # No short_name → use full_name
+            if not data.get("short_name"):
+                data["short_name"] = full_name or tax_id
+
             now = _now()
-            existing = existing_map.get(data["short_name"])
-            if existing:
-                for k, v in data.items():
-                    if k != "short_name" and v:
-                        setattr(existing, k, v)
-                existing.updated_at = now
-                updated += 1
-            else:
-                new_client = Client(id=uuid.uuid4().hex, created_at=now, updated_at=now, **data)
-                session.add(new_client)
-                existing_map[data["short_name"]] = new_client
-                imported += 1
+            new_client = Client(id=uuid.uuid4().hex, created_at=now, updated_at=now, **data)
+            session.add(new_client)
+            existing_keys.add(key)
+            imported += 1
 
         await session.commit()
 
-    return {"status": "ok", "imported": imported, "updated": updated, "skipped": skipped}
+    result = {"status": "ok", "imported": imported, "updated": updated, "skipped": skipped}
+    if skipped > 0 and imported == 0:
+        result["hint"] = f"CSV 欄位：{headers}。以「抬頭＋統編」判斷重複，全部已存在則跳過。"
+    return result
 
 
 # ── Users for AM/PM pickers ──────────────────────────────────
