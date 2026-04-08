@@ -1,0 +1,350 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+<meta charset="UTF-8">
+<style>
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+body {
+  font-family: 'Microsoft JhengHei', 'PingFang TC', 'Noto Sans TC', 'Segoe UI', sans-serif;
+  color: #1a1815;
+  line-height: 1.7;
+  font-size: 13px;
+  background: #fff;
+}
+
+.page {
+  max-width: 100%;
+  padding: 0;
+}
+
+/* ── Header / Branding ── */
+.header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding-bottom: 16px;
+  margin-bottom: 24px;
+  border-bottom: 2px solid #c8a45c;
+}
+.brand {
+  font-size: 11px;
+  letter-spacing: 3px;
+  text-transform: uppercase;
+  color: #8a6a2a;
+  font-weight: 600;
+}
+.brand-sub {
+  font-size: 9px;
+  color: #999;
+  letter-spacing: 1px;
+}
+
+/* ── Hero ── */
+.hero {
+  display: flex;
+  align-items: center;
+  gap: 24px;
+  margin-bottom: 32px;
+}
+.hero-photo {
+  width: 100px;
+  height: 100px;
+  border-radius: 50%;
+  overflow: hidden;
+  flex-shrink: 0;
+  border: 2px solid #e0ddd8;
+  background: #f0eee9;
+}
+.hero-photo img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+.hero-photo-empty {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 36px;
+  color: #9a9590;
+  font-weight: 300;
+}
+.hero-name {
+  font-size: 28px;
+  font-weight: 700;
+  line-height: 1.2;
+  margin-bottom: 4px;
+  color: #1a1815;
+}
+.hero-role {
+  font-size: 12px;
+  font-weight: 500;
+  color: #8a6a2a;
+  letter-spacing: 2px;
+  text-transform: uppercase;
+  margin-bottom: 8px;
+}
+.hero-bio {
+  color: #6a6560;
+  font-size: 12px;
+  line-height: 1.7;
+}
+
+/* ── Section ── */
+.section {
+  margin-bottom: 24px;
+  break-inside: avoid;
+  page-break-inside: avoid;
+}
+.section-label {
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 3px;
+  text-transform: uppercase;
+  color: #8a6a2a;
+  margin-bottom: 12px;
+  padding-bottom: 4px;
+  border-bottom: 1px solid #e0ddd8;
+}
+
+/* ── Skills ── */
+.skills {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.skill-tag {
+  padding: 3px 12px;
+  font-size: 11px;
+  font-weight: 500;
+  background: #f5f2ed;
+  border: 1px solid #e0ddd8;
+  border-radius: 14px;
+  color: #6a6560;
+}
+
+/* ── Project grid ── */
+.project-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
+}
+.project-card {
+  padding: 10px 14px;
+  background: #faf8f5;
+  border: 1px solid #e0ddd8;
+  border-radius: 2px;
+  break-inside: avoid;
+  page-break-inside: avoid;
+}
+.project-name {
+  font-weight: 600;
+  font-size: 12px;
+  margin-bottom: 2px;
+}
+.project-meta {
+  font-size: 10px;
+  color: #9a9590;
+}
+.project-role {
+  color: #8a6a2a;
+  font-size: 10px;
+}
+
+/* ── Portfolio ── */
+.portfolio-list {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 8px;
+}
+.portfolio-item {
+  padding: 8px 14px;
+  background: #faf8f5;
+  border: 1px solid #e0ddd8;
+  border-radius: 2px;
+  break-inside: avoid;
+  page-break-inside: avoid;
+}
+.portfolio-title {
+  font-weight: 600;
+  font-size: 12px;
+}
+.portfolio-role {
+  font-size: 10px;
+  color: #9a9590;
+}
+.portfolio-url {
+  font-size: 9px;
+  color: #8a6a2a;
+  word-break: break-all;
+}
+
+/* ── Timeline ── */
+.timeline-item {
+  display: flex;
+  gap: 16px;
+  padding: 8px 0;
+  border-bottom: 1px solid #f0eee9;
+  break-inside: avoid;
+  page-break-inside: avoid;
+}
+.timeline-item:last-child { border-bottom: none; }
+.timeline-year {
+  width: 70px;
+  flex-shrink: 0;
+  font-size: 11px;
+  color: #9a9590;
+  padding-top: 1px;
+}
+.timeline-title {
+  font-weight: 600;
+  font-size: 12px;
+  margin-bottom: 1px;
+}
+.timeline-subtitle {
+  font-size: 11px;
+  color: #6a6560;
+}
+.timeline-desc {
+  font-size: 11px;
+  color: #9a9590;
+  margin-top: 2px;
+}
+
+/* ── Footer ── */
+.resume-footer {
+  text-align: center;
+  padding-top: 20px;
+  margin-top: 24px;
+  border-top: 1px solid #e0ddd8;
+  font-size: 9px;
+  letter-spacing: 2px;
+  color: #c0bbb5;
+}
+</style>
+</head>
+<body>
+<div class="page">
+
+  <!-- Header -->
+  <div class="header">
+    <div>
+      <div class="brand">Originsun Studio</div>
+      <div class="brand-sub">源日國際影視製作</div>
+    </div>
+    <div class="brand-sub">Staff Resume</div>
+  </div>
+
+  <!-- Hero -->
+  <div class="hero">
+    {% if staff.photo_url %}
+    <div class="hero-photo"><img src="{{ staff.photo_url }}" alt="{{ staff.name }}"></div>
+    {% else %}
+    <div class="hero-photo"><div class="hero-photo-empty">{{ staff.name[:1] if staff.name else '?' }}</div></div>
+    {% endif %}
+    <div>
+      <div class="hero-name">{{ staff.name }}</div>
+      {% if staff.role %}<div class="hero-role">{{ staff.role }}</div>{% endif %}
+      {% if staff.bio %}<div class="hero-bio">{{ staff.bio }}</div>{% endif %}
+    </div>
+  </div>
+
+  <!-- Skills -->
+  {% if staff.skills %}
+  <div class="section">
+    <div class="section-label">專業技能</div>
+    <div class="skills">
+      {% for sk in staff.skills %}<span class="skill-tag">{{ sk }}</span>{% endfor %}
+    </div>
+  </div>
+  {% endif %}
+
+  <!-- Company Projects -->
+  {% if projects %}
+  <div class="section">
+    <div class="section-label">公司專案</div>
+    <div class="project-grid">
+      {% for p in projects %}
+      <div class="project-card">
+        <div class="project-name">{{ p.project_name }}</div>
+        {% if p.client_name %}<div class="project-meta">{{ p.client_name }}</div>{% endif %}
+        {% if p.role_in_project %}<div class="project-role">{{ p.role_in_project }}</div>{% endif %}
+      </div>
+      {% endfor %}
+    </div>
+  </div>
+  {% endif %}
+
+  <!-- Portfolio -->
+  {% if portfolio %}
+  <div class="section">
+    <div class="section-label">作品集</div>
+    <div class="portfolio-list">
+      {% for item in portfolio %}
+      <div class="portfolio-item">
+        <div class="portfolio-title">{{ item.title }}</div>
+        {% if item.role_desc %}<div class="portfolio-role">{{ item.role_desc }}</div>{% endif %}
+        {% if item.url %}<div class="portfolio-url">{{ item.url }}</div>{% endif %}
+      </div>
+      {% endfor %}
+    </div>
+  </div>
+  {% endif %}
+
+  <!-- Experience -->
+  {% if staff.experience %}
+  <div class="section">
+    <div class="section-label">工作經歷</div>
+    {% for e in staff.experience %}
+    <div class="timeline-item">
+      <div class="timeline-year">{{ e.period if e.period is defined else '' }}</div>
+      <div>
+        <div class="timeline-title">{{ e.company if e.company is defined else '' }}</div>
+        <div class="timeline-subtitle">{{ e.role if e.role is defined else '' }}</div>
+        {% if e.desc is defined and e.desc %}<div class="timeline-desc">{{ e.desc }}</div>{% endif %}
+      </div>
+    </div>
+    {% endfor %}
+  </div>
+  {% endif %}
+
+  <!-- Education -->
+  {% if staff.education %}
+  <div class="section">
+    <div class="section-label">學歷</div>
+    {% for e in staff.education %}
+    <div class="timeline-item">
+      <div class="timeline-year">{{ e.year if e.year is defined else '' }}</div>
+      <div>
+        <div class="timeline-title">{{ e.school if e.school is defined else '' }}</div>
+        <div class="timeline-subtitle">{{ e.degree if e.degree is defined else '' }}</div>
+      </div>
+    </div>
+    {% endfor %}
+  </div>
+  {% endif %}
+
+  <!-- Awards -->
+  {% if staff.awards %}
+  <div class="section">
+    <div class="section-label">獲獎紀錄</div>
+    {% for a in staff.awards %}
+    <div class="timeline-item">
+      <div class="timeline-year">{{ a.year if a.year is defined else '' }}</div>
+      <div>
+        <div class="timeline-title">{{ a.title if a.title is defined else '' }}</div>
+        {% if a.desc is defined and a.desc %}<div class="timeline-desc">{{ a.desc }}</div>{% endif %}
+      </div>
+    </div>
+    {% endfor %}
+  </div>
+  {% endif %}
+
+  <!-- Footer -->
+  <div class="resume-footer">Originsun Studio &mdash; {{ generated_at }}</div>
+
+</div>
+</body>
+</html>

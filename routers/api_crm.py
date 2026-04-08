@@ -1406,6 +1406,98 @@ async def get_public_staff_resume(staff_id: str):
     return {"staff": staff, "portfolio": portfolio, "projects": projects}
 
 
+@router.get("/staff/{staff_id}/resume-pdf")
+async def staff_resume_pdf(staff_id: str):
+    """匯出人員履歷 PDF（無需認證，僅限 resume_visible=True）。"""
+    _require_db()
+    factory = await _get_factory()
+    async with factory() as session:
+        s = await session.get(CrmStaff, staff_id)
+        if not s or not s.resume_visible:
+            raise HTTPException(status_code=404, detail="找不到此人員的公開履歷")
+        staff = _to_staff_dict(s)
+        # Portfolio items
+        rows = (await session.execute(
+            select(CrmStaffPortfolio)
+            .where(CrmStaffPortfolio.staff_id == staff_id)
+            .order_by(CrmStaffPortfolio.sort_order)
+        )).scalars().all()
+        portfolio = [_to_portfolio_dict(p) for p in rows]
+        # Project history
+        proj_rows = (await session.execute(
+            select(CrmProjectStaff, CrmProject.name.label("project_name"),
+                   Client.short_name.label("client_name"))
+            .outerjoin(CrmProject, CrmProject.id == CrmProjectStaff.project_id)
+            .outerjoin(Client, Client.id == CrmProject.client_id)
+            .where(CrmProjectStaff.staff_id == staff_id)
+        )).all()
+        projects = [{
+            "project_name": r[1] or "", "client_name": r[2] or "",
+            "role_in_project": r[0].role_in_project or "",
+            "days": r[0].days,
+        } for r in proj_rows]
+    # Strip sensitive fields
+    for key in ("id_number", "address", "bank_name", "bank_account", "phone", "email"):
+        staff.pop(key, None)
+
+    # Render Jinja2 template → HTML string
+    from jinja2 import Environment, FileSystemLoader, select_autoescape as _sa
+    _base = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    _env = Environment(loader=FileSystemLoader(os.path.join(_base, "templates")),
+                       autoescape=_sa(["html"]))
+    _tmpl = _env.get_template("resume_pdf.html")
+    html_content = _tmpl.render(
+        staff=staff, portfolio=portfolio, projects=projects,
+        generated_at=datetime.now().strftime("%Y-%m-%d"),
+    )
+
+    # Write to temp file, convert to PDF via Playwright
+    import tempfile
+    tmp_fd, tmp_html = tempfile.mkstemp(suffix=".html", prefix="resume_")
+    os.close(tmp_fd)
+    with open(tmp_html, "w", encoding="utf-8") as f:
+        f.write(html_content)
+
+    tmp_pdf = tmp_html.replace(".html", ".pdf")
+    try:
+        from playwright.async_api import async_playwright
+        async with async_playwright() as p:
+            browser = await p.chromium.launch(headless=True)
+            page = await browser.new_page()
+            file_url = f"file:///{tmp_html.replace(os.sep, '/')}"
+            await page.goto(file_url, wait_until="networkidle")
+            await page.pdf(
+                path=tmp_pdf, format="A4", print_background=True,
+                margin={"top": "20mm", "bottom": "20mm",
+                        "left": "15mm", "right": "15mm"},
+            )
+            await browser.close()
+    except Exception as exc:
+        # Clean up temp files on error
+        for _f in (tmp_html, tmp_pdf):
+            try:
+                os.unlink(_f)
+            except OSError:
+                pass
+        raise HTTPException(status_code=500,
+                            detail=f"PDF 生成失敗：{exc}")
+    finally:
+        # Always remove the temp HTML
+        try:
+            os.unlink(tmp_html)
+        except OSError:
+            pass
+
+    from starlette.responses import FileResponse
+    from starlette.background import BackgroundTask
+    safe_name = (staff.get("name") or "staff").replace(" ", "_")
+    return FileResponse(
+        tmp_pdf, media_type="application/pdf",
+        filename=f"{safe_name}_Resume.pdf",
+        background=BackgroundTask(lambda: os.unlink(tmp_pdf) if os.path.exists(tmp_pdf) else None),
+    )
+
+
 # ── Project Staff (派工) Endpoints ──────────────────────────
 
 @router.get("/projects/{project_id}/staff")
