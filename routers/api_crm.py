@@ -1565,7 +1565,7 @@ async def get_staff_edit_data(token: str):
     for key in ("id_number", "address", "bank_name", "bank_account",
                 "phone", "email", "daily_rate", "hourly_rate"):
         staff.pop(key, None)
-    return {"staff": staff, "portfolio": portfolio}
+    return {"staff": staff, "portfolio": portfolio, "editable": bool(s.resume_editable) if s.resume_editable is not None else True}
 
 
 @router.put("/public/staff-edit/{token}")
