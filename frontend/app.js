@@ -2,6 +2,7 @@
 // Entry point — imports all extracted modules, then defines core app logic.
 
 // ── Module Imports (side-effect: each module registers its window.* globals) ──
+import { TAB_MAP, shouldShowTab } from './js/shared/tab-config.js';
 import './js/shared/modal-styles.js';
 import './js/auth/auth-state.js';
 import './js/auth/login-modal.js';
@@ -43,25 +44,11 @@ if (typeof appendLog === 'undefined') {
 
                 // Wait for auth so we know which modules to load
                 await window._authReady;
-                const _MEDIA_TABS = ['projects','backup','verify','transcode','concat','report','transcribe','tts'];
-                const loggedIn = !!window._authUser;
                 const modules = window._modules;
-                const hasModules = loggedIn && modules && modules.length > 0;
-                // Logged in with modules → only authorized tabs
-                // Logged in without modules (admin bootstrap) → all tabs
-                // Not logged in → media tabs only
-                const _should = (key) => hasModules ? modules.includes(key)
-                    : loggedIn ? true
-                    : _MEDIA_TABS.includes(key);
+                const hasModules = !!window._authUser && modules && modules.length > 0;
+                const _should = (key) => shouldShowTab(key, window._authUser, modules);
 
                 // Hide nav buttons & sections for unauthorized tabs immediately
-                const TAB_MAP = {
-                    projects:'tab-projects', backup:'tab_main', verify:'tab_verify',
-                    transcode:'tab_transcode', concat:'tab_concat', report:'tab_report',
-                    transcribe:'tab_transcribe', tts:'tab_tts',
-                    crm_clients:'tab_crm_clients', crm_projects:'tab_crm_projects',
-                    crm_staff:'tab_crm_staff', crm_invoices:'tab_crm_invoices',
-                };
                 Object.entries(TAB_MAP).forEach(([key, tabId]) => {
                     if (!_should(key)) {
                         const btn = document.getElementById('btn_' + tabId);
@@ -120,8 +107,7 @@ if (typeof appendLog === 'undefined') {
 
         // Initialize tabs immediately
         loadTabs().then(async () => {
-            // 等 auth 完成 + 頁籤載入完成 → 才套用偏好
-            await window._authReady;
+            // Auth already resolved inside loadTabs(); apply tab visibility as safety fallback
             if (typeof window._applyVisibleTabs === 'function') window._applyVisibleTabs();
 
             // Initialization after dynamic tabs load

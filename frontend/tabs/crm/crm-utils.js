@@ -34,12 +34,11 @@ const CACHE_TTL = 30_000; // 30 seconds
  * Call crmCacheInvalidate(key) after mutations to clear stale data.
  */
 export async function crmCacheFetch(key, path) {
-    const now = Date.now();
     const cached = _cache.get(key);
-    if (cached && now - cached.ts < CACHE_TTL) return cached.data;
-    // Reuse inflight via crmFetch (which already deduplicates)
+    if (cached && Date.now() - cached.ts < CACHE_TTL) return cached.data;
+    const ts = Date.now();
     const data = await crmFetch(path);
-    _cache.set(key, { data, ts: Date.now() });
+    _cache.set(key, { data, ts });
     return data;
 }
 

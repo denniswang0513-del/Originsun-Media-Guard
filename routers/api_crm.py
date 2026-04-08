@@ -1122,12 +1122,13 @@ async def import_staff_csv(request: Request, file: UploadFile = File(...)):
         text = content.decode("big5", errors="replace")
 
     # Auto-detect delimiter (comma, tab, semicolon)
-    first_line = text.split('\n', 1)[0]
+    first_line = text.split('\n', 1)[0].strip()
     dialect = None
-    try:
-        dialect = csv.Sniffer().sniff(first_line, delimiters=',\t;')
-    except csv.Error:
-        pass
+    if first_line:
+        try:
+            dialect = csv.Sniffer().sniff(first_line, delimiters=',\t;')
+        except csv.Error:
+            pass
     reader = csv.DictReader(io.StringIO(text), dialect=dialect) if dialect else csv.DictReader(io.StringIO(text))
     headers = [h.strip() for h in (reader.fieldnames or [])]
     reader.fieldnames = headers

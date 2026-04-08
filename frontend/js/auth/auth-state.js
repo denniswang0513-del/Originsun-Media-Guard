@@ -1,4 +1,5 @@
 // ─── Auth State (extracted from app.js) ─── //
+import { TAB_MAP, NAV_MAP, shouldShowTab } from '../shared/tab-config.js';
 
 // ─── Auth State Variables ─── //
 window._isAdmin = false;
@@ -154,13 +155,7 @@ export function _onLoginSuccess(d) {
 // ─── RBAC Module-based Tab Visibility ─── //
 export function _applyModuleTabs() {
     const modules = window._modules;
-    const TAB_MAP = {backup:'tab_main',verify:'tab_verify',transcode:'tab_transcode',concat:'tab_concat',report:'tab_report',transcribe:'tab_transcribe',tts:'tab_tts',projects:'tab-projects',crm_clients:'tab_crm_clients',crm_projects:'tab_crm_projects',crm_quotes:'tab_crm_quotes',crm_staff:'tab_crm_staff',crm_invoices:'tab_crm_invoices'};
-    const NAV_MAP = {backup:'備份',verify:'比對',transcode:'Proxy',concat:'串帶',report:'報表',transcribe:'逐字',tts:'語音',projects:'專案',crm_clients:'客戶',crm_projects:'專案管理',crm_quotes:'報價',crm_staff:'人力',crm_invoices:'帳務'};
-    const MEDIA = ['backup','verify','transcode','concat','report','transcribe','tts','projects'];
-    const loggedIn = !!window._authUser;
-    const hasModules = loggedIn && modules && modules.length > 0;
-    // Logged in + modules → only authorized; logged in no modules → all; not logged in → media only
-    const _show = (key) => hasModules ? modules.includes(key) : loggedIn ? true : MEDIA.includes(key);
+    const _show = (key) => shouldShowTab(key, window._authUser, modules);
     Object.entries(TAB_MAP).forEach(([key, id]) => {
         const el = document.getElementById(id);
         if (el) el.style.display = _show(key) ? '' : 'none';
