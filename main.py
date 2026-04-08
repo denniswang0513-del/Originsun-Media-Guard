@@ -367,6 +367,35 @@ async def _on_startup():
                         await _sres.commit()
                     except Exception:
                         await _sres.rollback()
+                    # Create project showcase table
+                    await _sres.execute(_tres("""
+                        CREATE TABLE IF NOT EXISTS crm_project_showcase (
+                            id VARCHAR(32) PRIMARY KEY,
+                            cover_url VARCHAR(512),
+                            description TEXT,
+                            video_url VARCHAR(512),
+                            gallery JSONB,
+                            process_mode VARCHAR(16) NOT NULL DEFAULT 'gallery',
+                            process_items JSONB,
+                            credits JSONB,
+                            tags JSONB,
+                            slug VARCHAR(128) UNIQUE,
+                            published BOOLEAN NOT NULL DEFAULT FALSE,
+                            published_at TIMESTAMPTZ,
+                            edit_token VARCHAR(512),
+                            editable BOOLEAN NOT NULL DEFAULT TRUE,
+                            created_at TIMESTAMPTZ DEFAULT NOW(),
+                            updated_at TIMESTAMPTZ DEFAULT NOW()
+                        )
+                    """))
+                    await _sres.commit()
+                    try:
+                        await _sres.execute(_tres(
+                            "CREATE UNIQUE INDEX IF NOT EXISTS idx_showcase_slug ON crm_project_showcase (slug) WHERE slug IS NOT NULL AND slug != ''"
+                        ))
+                        await _sres.commit()
+                    except Exception:
+                        await _sres.rollback()
         except Exception:
             pass
 

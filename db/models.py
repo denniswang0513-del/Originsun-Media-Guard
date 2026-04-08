@@ -295,6 +295,28 @@ class CrmStaff(Base):
     )
 
 
+class CrmProjectShowcase(Base):
+    """專案完稿結案 / 作品展示。"""
+    __tablename__ = "crm_project_showcase"
+
+    id = Column(String(32), primary_key=True)  # same as project_id (1:1)
+    cover_url = Column(String(512), nullable=True)
+    description = Column(Text, nullable=True)
+    video_url = Column(String(512), nullable=True)
+    gallery = Column(JSONB, nullable=True)  # [{url, caption}]
+    process_mode = Column(String(16), nullable=False, default='gallery')  # gallery|media|timeline
+    process_items = Column(JSONB, nullable=True)  # [{type, url, caption, phase, video_url}]
+    credits = Column(JSONB, nullable=True)  # [{name, role, staff_id, resume_url}]
+    tags = Column(JSONB, nullable=True)  # ["廣告", "MV"]
+    slug = Column(String(128), nullable=True, unique=True)
+    published = Column(Boolean, nullable=False, default=False)
+    published_at = Column(DateTime(timezone=True), nullable=True)
+    edit_token = Column(String(512), nullable=True)
+    editable = Column(Boolean, nullable=False, default=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), server_default=func.now())
+
+
 class CrmStaffPortfolio(Base):
     """人員作品集。"""
     __tablename__ = "crm_staff_portfolio"

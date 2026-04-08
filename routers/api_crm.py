@@ -31,7 +31,8 @@ try:
                            CrmQuotationTemplate, CrmStaff, CrmStaffPortfolio,
                            CrmProjectStaff, CrmProjectExpense,
                            CrmInvoice, CrmPaymentRequest, CrmCashEntry,
-                           CrmProjectCostLine, CrmCostLineTemplate)
+                           CrmProjectCostLine, CrmCostLineTemplate,
+                           CrmProjectShowcase)
     _HAS_DB = True
 except ImportError:
     _HAS_DB = False
@@ -100,7 +101,7 @@ from core.schemas import (ClientPayload, CrmProjectPayload, ProjectExpensePayloa
                          QuotationPayload, QuotationItemPayload, QuotationTemplatePayload,
                          StaffPayload, ProjectStaffPayload, InvoicePayload, PaymentRequestPayload,
                          CashEntryPayload, CostLinePayload, CostLineUpdatePayload,
-                         ResumePayload, PortfolioPayload)
+                         ResumePayload, PortfolioPayload, ShowcasePayload)
 
 
 async def _auto_update_client_status(session, client_id: str):
@@ -3424,3 +3425,492 @@ async def batch_receive(request: Request):
                 updated += 1
         await session.commit()
     return {"status": "ok", "updated": updated}
+
+
+# ── Project Showcase / Delivery Endpoints ──────────────────
+
+def _showcase_dir(project_id: str) -> str:
+    d = os.path.join(_UPLOAD_BASE, "projects", project_id, "showcase")
+    os.makedirs(d, exist_ok=True)
+    return d
+
+
+def _to_showcase_dict(s) -> dict:
+    return {
+        "id": s.id,
+        "cover_url": s.cover_url or "",
+        "description": s.description or "",
+        "video_url": s.video_url or "",
+        "gallery": s.gallery or [],
+        "process_mode": s.process_mode or "gallery",
+        "process_items": s.process_items or [],
+        "credits": s.credits or [],
+        "tags": s.tags or [],
+        "slug": s.slug or "",
+        "published": bool(s.published),
+        "published_at": s.published_at.isoformat() if s.published_at else None,
+        "edit_token": s.edit_token or "",
+        "editable": bool(s.editable) if s.editable is not None else True,
+        "created_at": s.created_at.isoformat() if s.created_at else None,
+        "updated_at": s.updated_at.isoformat() if s.updated_at else None,
+    }
+
+
+async def _verify_showcase_edit_token(session, token: str, require_editable: bool = False):
+    """Verify showcase edit token. Returns CrmProjectShowcase or raises HTTPException."""
+    from core.auth import verify_token
+    payload = verify_token(token)
+    if not payload or payload.get('scope') != 'showcase_edit':
+        raise HTTPException(status_code=401, detail="無效的連結")
+    project_id = payload.get('sub', '')
+    sc = await session.get(CrmProjectShowcase, project_id)
+    if not sc or sc.edit_token != token:
+        raise HTTPException(status_code=401, detail="連結已失效")
+    if require_editable and not sc.editable:
+        raise HTTPException(status_code=403, detail="管理員已關閉編輯權限")
+    return sc
+
+
+@router.get("/projects/{project_id}/showcase")
+async def get_project_showcase(project_id: str, request: Request):
+    """取得或建立專案 Showcase（1:1 關聯）。"""
+    _check_auth(request)
+    _require_db()
+    factory = await _get_factory()
+    async with factory() as session:
+        sc = await session.get(CrmProjectShowcase, project_id)
+        if not sc:
+            sc = CrmProjectShowcase(id=project_id)
+            session.add(sc)
+            await session.commit()
+            await session.refresh(sc)
+        return _to_showcase_dict(sc)
+
+
+@router.put("/projects/{project_id}/showcase")
+async def update_project_showcase(project_id: str, req: ShowcasePayload, request: Request):
+    """更新專案 Showcase 欄位。"""
+    _check_auth(request)
+    _require_db()
+    factory = await _get_factory()
+    async with factory() as session:
+        sc = await session.get(CrmProjectShowcase, project_id)
+        if not sc:
+            sc = CrmProjectShowcase(id=project_id)
+            session.add(sc)
+        sc.description = req.description
+        sc.video_url = req.video_url
+        sc.credits = req.credits
+        sc.tags = req.tags
+        sc.process_mode = req.process_mode
+        sc.slug = req.slug or None
+        sc.updated_at = _now()
+        await session.commit()
+        await session.refresh(sc)
+    return _to_showcase_dict(sc)
+
+
+@router.post("/projects/{project_id}/showcase/cover")
+async def upload_showcase_cover(project_id: str, request: Request, file: UploadFile = File(...)):
+    """上傳 Showcase 封面圖。"""
+    _check_auth(request)
+    _require_db()
+    ext = (os.path.splitext(file.filename or "cover.jpg")[1] or ".jpg").lower()
+    if ext not in _ALLOWED_IMG_EXT:
+        raise HTTPException(status_code=400, detail=f"不支援的圖片格式：{ext}")
+    sdir = _showcase_dir(project_id)
+    # Remove old covers
+    for f in os.listdir(sdir):
+        if f.startswith("cover."):
+            os.remove(os.path.join(sdir, f))
+    dest = os.path.join(sdir, f"cover{ext}")
+    content = await file.read()
+    with open(dest, "wb") as fp:
+        fp.write(content)
+    url = f"/uploads/projects/{project_id}/showcase/cover{ext}"
+    factory = await _get_factory()
+    async with factory() as session:
+        sc = await session.get(CrmProjectShowcase, project_id)
+        if not sc:
+            sc = CrmProjectShowcase(id=project_id, cover_url=url)
+            session.add(sc)
+        else:
+            sc.cover_url = url
+            sc.updated_at = _now()
+        await session.commit()
+    return {"status": "ok", "cover_url": url}
+
+
+@router.post("/projects/{project_id}/showcase/gallery")
+async def upload_showcase_gallery(project_id: str, request: Request,
+                                  file: UploadFile = File(...),
+                                  caption: str = Query("")):
+    """上傳 Showcase 圖庫圖片。"""
+    _check_auth(request)
+    _require_db()
+    ext = (os.path.splitext(file.filename or "img.jpg")[1] or ".jpg").lower()
+    if ext not in _ALLOWED_IMG_EXT:
+        raise HTTPException(status_code=400, detail=f"不支援的圖片格式：{ext}")
+    sdir = _showcase_dir(project_id)
+    fname = f"{uuid.uuid4().hex}{ext}"
+    dest = os.path.join(sdir, fname)
+    content = await file.read()
+    with open(dest, "wb") as fp:
+        fp.write(content)
+    url = f"/uploads/projects/{project_id}/showcase/{fname}"
+    factory = await _get_factory()
+    async with factory() as session:
+        sc = await session.get(CrmProjectShowcase, project_id)
+        if not sc:
+            sc = CrmProjectShowcase(id=project_id, gallery=[{"url": url, "caption": caption}])
+            session.add(sc)
+        else:
+            gallery = list(sc.gallery or [])
+            gallery.append({"url": url, "caption": caption})
+            sc.gallery = gallery
+            sc.updated_at = _now()
+        await session.commit()
+        await session.refresh(sc)
+    return {"status": "ok", "gallery": sc.gallery or []}
+
+
+@router.delete("/projects/{project_id}/showcase/gallery/{index}")
+async def delete_showcase_gallery(project_id: str, index: int, request: Request):
+    """刪除 Showcase 圖庫中指定索引的項目。"""
+    _check_auth(request)
+    _require_db()
+    factory = await _get_factory()
+    async with factory() as session:
+        sc = await session.get(CrmProjectShowcase, project_id)
+        if not sc:
+            raise HTTPException(status_code=404, detail="尚未建立 Showcase")
+        gallery = list(sc.gallery or [])
+        if index < 0 or index >= len(gallery):
+            raise HTTPException(status_code=400, detail="索引超出範圍")
+        removed = gallery.pop(index)
+        # Try to delete the file
+        file_url = removed.get("url", "")
+        if file_url.startswith("/uploads/"):
+            fpath = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                                 file_url.lstrip("/").replace("/", os.sep))
+            if os.path.isfile(fpath):
+                os.remove(fpath)
+        sc.gallery = gallery
+        sc.updated_at = _now()
+        await session.commit()
+    return {"status": "ok", "gallery": gallery}
+
+
+@router.post("/projects/{project_id}/showcase/process")
+async def upload_showcase_process(project_id: str, request: Request,
+                                  file: UploadFile = File(...),
+                                  caption: str = Query(""),
+                                  phase: str = Query(""),
+                                  item_type: str = Query("image")):
+    """上傳 Showcase 製程項目圖片。"""
+    _check_auth(request)
+    _require_db()
+    ext = (os.path.splitext(file.filename or "img.jpg")[1] or ".jpg").lower()
+    if ext not in _ALLOWED_IMG_EXT:
+        raise HTTPException(status_code=400, detail=f"不支援的圖片格式：{ext}")
+    sdir = _showcase_dir(project_id)
+    fname = f"process_{uuid.uuid4().hex}{ext}"
+    dest = os.path.join(sdir, fname)
+    content = await file.read()
+    with open(dest, "wb") as fp:
+        fp.write(content)
+    url = f"/uploads/projects/{project_id}/showcase/{fname}"
+    item = {"type": item_type, "url": url, "caption": caption, "phase": phase, "video_url": ""}
+    factory = await _get_factory()
+    async with factory() as session:
+        sc = await session.get(CrmProjectShowcase, project_id)
+        if not sc:
+            sc = CrmProjectShowcase(id=project_id, process_items=[item])
+            session.add(sc)
+        else:
+            items = list(sc.process_items or [])
+            items.append(item)
+            sc.process_items = items
+            sc.updated_at = _now()
+        await session.commit()
+        await session.refresh(sc)
+    return {"status": "ok", "process_items": sc.process_items or []}
+
+
+@router.delete("/projects/{project_id}/showcase/process/{index}")
+async def delete_showcase_process(project_id: str, index: int, request: Request):
+    """刪除 Showcase 製程項目中指定索引的項目。"""
+    _check_auth(request)
+    _require_db()
+    factory = await _get_factory()
+    async with factory() as session:
+        sc = await session.get(CrmProjectShowcase, project_id)
+        if not sc:
+            raise HTTPException(status_code=404, detail="尚未建立 Showcase")
+        items = list(sc.process_items or [])
+        if index < 0 or index >= len(items):
+            raise HTTPException(status_code=400, detail="索引超出範圍")
+        removed = items.pop(index)
+        file_url = removed.get("url", "")
+        if file_url.startswith("/uploads/"):
+            fpath = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                                 file_url.lstrip("/").replace("/", os.sep))
+            if os.path.isfile(fpath):
+                os.remove(fpath)
+        sc.process_items = items
+        sc.updated_at = _now()
+        await session.commit()
+    return {"status": "ok", "process_items": items}
+
+
+@router.post("/projects/{project_id}/showcase/publish")
+async def toggle_showcase_publish(project_id: str, request: Request):
+    """切換 Showcase 發布狀態。"""
+    _check_auth(request)
+    _require_db()
+    factory = await _get_factory()
+    async with factory() as session:
+        sc = await session.get(CrmProjectShowcase, project_id)
+        if not sc:
+            raise HTTPException(status_code=404, detail="尚未建立 Showcase")
+        sc.published = not sc.published
+        if sc.published:
+            sc.published_at = _now()
+        sc.updated_at = _now()
+        await session.commit()
+        await session.refresh(sc)
+    return _to_showcase_dict(sc)
+
+
+@router.get("/projects/{project_id}/showcase/credits/auto")
+async def auto_showcase_credits(project_id: str, request: Request):
+    """自動從專案派工生成 credits 列表。"""
+    _check_auth(request)
+    _require_db()
+    factory = await _get_factory()
+    async with factory() as session:
+        rows = (await session.execute(
+            select(CrmProjectStaff).where(CrmProjectStaff.project_id == project_id)
+        )).scalars().all()
+        credits = []
+        for ps in rows:
+            staff = await session.get(CrmStaff, ps.staff_id)
+            if not staff:
+                continue
+            resume_url = ""
+            if staff.resume_visible:
+                resume_url = f"/resume.html?id={staff.id}"
+            credits.append({
+                "name": staff.name,
+                "role": ps.role_in_project or staff.role or "",
+                "staff_id": staff.id,
+                "resume_url": resume_url,
+            })
+    return {"credits": credits}
+
+
+@router.post("/projects/{project_id}/showcase/generate-edit-token")
+async def generate_showcase_edit_token(project_id: str, request: Request):
+    """產生 Showcase 外部編輯永久連結 Token。"""
+    _check_auth(request)
+    _require_db()
+    from core.auth import create_token
+    token = create_token({"sub": project_id, "scope": "showcase_edit"}, expires_days=36500)
+    factory = await _get_factory()
+    async with factory() as session:
+        sc = await session.get(CrmProjectShowcase, project_id)
+        if not sc:
+            sc = CrmProjectShowcase(id=project_id, edit_token=token)
+            session.add(sc)
+        else:
+            sc.edit_token = token
+            sc.updated_at = _now()
+        await session.commit()
+    return {"status": "ok", "token": token, "url": f"/showcase-edit.html?token={token}"}
+
+
+# ── Showcase Public Endpoints ──────────────────────────────
+
+@router.get("/public/showcase/{project_id}")
+async def get_public_showcase(project_id: str):
+    """公開 Showcase 頁面資料（無需認證），僅限已發布。"""
+    _require_db()
+    factory = await _get_factory()
+    async with factory() as session:
+        sc = await session.get(CrmProjectShowcase, project_id)
+        if not sc or not sc.published:
+            raise HTTPException(status_code=404, detail="找不到此作品展示")
+        proj = await session.get(CrmProject, project_id)
+        client_name = ""
+        project_name = ""
+        if proj:
+            project_name = proj.name or ""
+            client = await session.get(Client, proj.client_id) if proj.client_id else None
+            client_name = client.short_name if client else ""
+        data = _to_showcase_dict(sc)
+        # Strip internal fields
+        data.pop("edit_token", None)
+        data.pop("editable", None)
+        data["project_name"] = project_name
+        data["client_name"] = client_name
+    return data
+
+
+@router.get("/public/showcase-edit/{token}")
+async def get_showcase_edit_data(token: str):
+    """透過 Token 取得 Showcase 編輯資料（無需認證）。"""
+    _require_db()
+    factory = await _get_factory()
+    async with factory() as session:
+        sc = await _verify_showcase_edit_token(session, token, require_editable=False)
+        proj = await session.get(CrmProject, sc.id)
+        project_name = proj.name if proj else ""
+        data = _to_showcase_dict(sc)
+        # Strip financial / internal fields
+        data.pop("edit_token", None)
+        data["project_name"] = project_name
+    return data
+
+
+@router.put("/public/showcase-edit/{token}")
+async def update_showcase_edit_data(token: str, request: Request):
+    """透過 Token 更新 Showcase 資料（無需認證）。"""
+    _require_db()
+    factory = await _get_factory()
+    body = await request.json()
+    async with factory() as session:
+        sc = await _verify_showcase_edit_token(session, token, require_editable=True)
+        if "description" in body:
+            sc.description = body["description"]
+        if "credits" in body:
+            sc.credits = body["credits"]
+        if "tags" in body:
+            sc.tags = body["tags"]
+        if "process_mode" in body:
+            sc.process_mode = body["process_mode"]
+        if "process_items" in body:
+            sc.process_items = body["process_items"]
+        sc.updated_at = _now()
+        await session.commit()
+    return {"status": "ok"}
+
+
+@router.post("/public/showcase-edit/{token}/gallery")
+async def upload_showcase_edit_gallery(token: str, file: UploadFile = File(...),
+                                       caption: str = Query("")):
+    """透過 Token 上傳 Showcase 圖庫圖片（無需認證）。"""
+    _require_db()
+    factory = await _get_factory()
+    async with factory() as session:
+        sc = await _verify_showcase_edit_token(session, token, require_editable=True)
+        project_id = sc.id
+    ext = (os.path.splitext(file.filename or "img.jpg")[1] or ".jpg").lower()
+    if ext not in _ALLOWED_IMG_EXT:
+        raise HTTPException(status_code=400, detail=f"不支援的圖片格式：{ext}")
+    sdir = _showcase_dir(project_id)
+    fname = f"{uuid.uuid4().hex}{ext}"
+    dest = os.path.join(sdir, fname)
+    content = await file.read()
+    with open(dest, "wb") as fp:
+        fp.write(content)
+    url = f"/uploads/projects/{project_id}/showcase/{fname}"
+    async with factory() as session:
+        sc = await session.get(CrmProjectShowcase, project_id)
+        gallery = list(sc.gallery or [])
+        gallery.append({"url": url, "caption": caption})
+        sc.gallery = gallery
+        sc.updated_at = _now()
+        await session.commit()
+        await session.refresh(sc)
+    return {"status": "ok", "gallery": sc.gallery or []}
+
+
+@router.post("/public/showcase-edit/{token}/process")
+async def upload_showcase_edit_process(token: str, file: UploadFile = File(...),
+                                       caption: str = Query(""),
+                                       phase: str = Query(""),
+                                       item_type: str = Query("image")):
+    """透過 Token 上傳 Showcase 製程項目圖片（無需認證）。"""
+    _require_db()
+    factory = await _get_factory()
+    async with factory() as session:
+        sc = await _verify_showcase_edit_token(session, token, require_editable=True)
+        project_id = sc.id
+    ext = (os.path.splitext(file.filename or "img.jpg")[1] or ".jpg").lower()
+    if ext not in _ALLOWED_IMG_EXT:
+        raise HTTPException(status_code=400, detail=f"不支援的圖片格式：{ext}")
+    sdir = _showcase_dir(project_id)
+    fname = f"process_{uuid.uuid4().hex}{ext}"
+    dest = os.path.join(sdir, fname)
+    content = await file.read()
+    with open(dest, "wb") as fp:
+        fp.write(content)
+    url = f"/uploads/projects/{project_id}/showcase/{fname}"
+    item = {"type": item_type, "url": url, "caption": caption, "phase": phase, "video_url": ""}
+    async with factory() as session:
+        sc = await session.get(CrmProjectShowcase, project_id)
+        items = list(sc.process_items or [])
+        items.append(item)
+        sc.process_items = items
+        sc.updated_at = _now()
+        await session.commit()
+        await session.refresh(sc)
+    return {"status": "ok", "process_items": sc.process_items or []}
+
+
+# ── Site API (for future website) ──────────────────────────
+
+@router.get("/public/site/works")
+async def list_published_works():
+    """列出所有已發布的 Showcase（供官網使用，無需認證）。"""
+    _require_db()
+    factory = await _get_factory()
+    async with factory() as session:
+        rows = (await session.execute(
+            select(CrmProjectShowcase)
+            .where(CrmProjectShowcase.published == True)  # noqa: E712
+            .order_by(CrmProjectShowcase.published_at.desc())
+        )).scalars().all()
+        works = []
+        for sc in rows:
+            proj = await session.get(CrmProject, sc.id)
+            client_name = ""
+            project_name = ""
+            if proj:
+                project_name = proj.name or ""
+                client = await session.get(Client, proj.client_id) if proj.client_id else None
+                client_name = client.short_name if client else ""
+            works.append({
+                "id": sc.id,
+                "project_name": project_name,
+                "client_name": client_name,
+                "cover_url": sc.cover_url or "",
+                "slug": sc.slug or "",
+                "tags": sc.tags or [],
+                "description": sc.description or "",
+                "video_url": sc.video_url or "",
+                "published_at": sc.published_at.isoformat() if sc.published_at else None,
+            })
+    return {"works": works}
+
+
+@router.get("/public/site/team")
+async def list_public_team():
+    """列出所有公開履歷的人員（供官網使用，無需認證）。"""
+    _require_db()
+    factory = await _get_factory()
+    async with factory() as session:
+        rows = (await session.execute(
+            select(CrmStaff)
+            .where(CrmStaff.resume_visible == True)  # noqa: E712
+            .order_by(CrmStaff.name)
+        )).scalars().all()
+        team = []
+        for s in rows:
+            team.append({
+                "id": s.id,
+                "name": s.name,
+                "role": s.role or "",
+                "photo_url": s.photo_url or "",
+            })
+    return {"team": team}

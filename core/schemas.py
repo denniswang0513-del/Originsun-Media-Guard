@@ -401,6 +401,15 @@ class CostLineUpdatePayload(BaseModel):
     actual_notes: Optional[str] = None
 
 
+class ShowcasePayload(BaseModel):
+    description: str = ""
+    video_url: str = ""
+    credits: list = []
+    tags: list = []
+    process_mode: str = "gallery"
+    slug: str = ""
+
+
 class InvoicePayload(BaseModel):
     payment_type: str = "收款"
     payment_status: str = "未收款"

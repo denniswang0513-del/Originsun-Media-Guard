@@ -23,6 +23,7 @@ import { renderDetail, initDetailHandlers } from './crm-projects-detail.js';
 import { _loadFinancialSummary, _showExpenseForm, initCostHandlers } from './crm-projects-cost.js';
 import { _loadCostStaff, _loadAdvances, _loadProjectStaff, initFinanceHandlers } from './crm-projects-finance.js';
 import { loadProjectQuotes, initQuoteHandlers } from './crm-projects-quotes.js';
+import { loadDeliveryTab, initDeliveryHandlers } from './crm-projects-delivery.js';
 
 // ── 回呼串接（解耦跨模組依賴） ──────────────────────────────
 
@@ -236,6 +237,7 @@ export async function initCrmProjectsTab() {
     initCostHandlers();
     initFinanceHandlers();
     initQuoteHandlers();
+    initDeliveryHandlers();
 
     // ── Search + filters ──
     let _searchTimer;
@@ -290,6 +292,8 @@ export async function initCrmProjectsTab() {
             if (tab === 'quotes' && state.selectedId) { loadProjectQuotes(state.selectedId); }
             if (tab === 'team' && state.selectedId) { _loadCostStaff(state.selectedId); _loadAdvances(state.selectedId); }
             document.getElementById('proj-detail-finance').classList.toggle('hidden', tab !== 'finance');
+            document.getElementById('proj-detail-delivery').classList.toggle('hidden', tab !== 'delivery');
+            if (tab === 'delivery' && state.selectedId) { loadDeliveryTab(state.selectedId); }
         });
     });
 
