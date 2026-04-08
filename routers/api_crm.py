@@ -261,9 +261,9 @@ async def delete_client(client_id: str, request: Request):
 
 # 欄位別名對照表（Notion export + Google Sheets 兩種格式）
 _COL_MAP = {
-    "short_name":        ["客戶代稱", "name", "客戶名稱", "名稱", "客戶"],
-    "full_name":         ["全稱", "full_name", "抬頭", "legal_name", "發票抬頭"],
-    "tax_id":            ["統編", "統一編號", "tax_id"],
+    "short_name":        ["客戶代稱", "name", "客戶名稱", "名稱", "客戶", "代稱", "簡稱"],
+    "full_name":         ["全稱", "full_name", "抬頭", "legal_name", "發票抬頭", "公司名稱", "公司", "公司全稱", "公司抬頭"],
+    "tax_id":            ["統編", "統一編號", "tax_id", "統編/身分證", "統編/身份證"],
     "am_username":       ["am", "業務", "am_username"],
     "source_channel":    ["來源管道", "source_channel"],
     "contact_person":    ["客戶聯絡人", "聯絡人", "contact_person", "客戶聯絡人/聯絡..."],
@@ -351,7 +351,7 @@ async def import_csv(request: Request, file: UploadFile = File(...)):
 
     result = {"status": "ok", "imported": imported, "updated": updated, "skipped": skipped}
     if skipped > 0 and imported == 0:
-        result["hint"] = f"CSV 欄位：{headers}。以「抬頭＋統編」判斷重複，全部已存在則跳過。"
+        result["hint"] = f"CSV 欄位：{[h for h in headers if h]}。需包含「抬頭」或「統編」欄位才能匯入。若全部重複則跳過。"
     return result
 
 

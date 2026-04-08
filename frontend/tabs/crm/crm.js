@@ -609,12 +609,9 @@ async function doImport() {
         const data = await _fetchMultipart('/clients/import_csv', form);
         const result = document.getElementById('crm-import-result');
         result.className = 'crm-import-result';
-        result.innerHTML = `
-            ✅ 匯入完成<br>
-            新增：<strong>${data.imported}</strong> 筆 ／
-            更新：<strong>${data.updated}</strong> 筆 ／
-            跳過：<strong>${data.skipped}</strong> 筆
-        `;
+        let msg = `✅ 匯入完成<br>新增：<strong>${data.imported}</strong> 筆 ／ 更新：<strong>${data.updated}</strong> 筆 ／ 跳過：<strong>${data.skipped}</strong> 筆`;
+        if (data.hint) msg += `<br><span style="color:#fbbf24;font-size:12px;">${_esc(data.hint)}</span>`;
+        result.innerHTML = msg;
         result.style.display = 'block';
         await loadClients();
     } catch (e) {
