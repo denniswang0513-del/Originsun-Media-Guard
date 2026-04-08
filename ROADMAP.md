@@ -4,7 +4,7 @@
 
 ---
 
-## 現況 (v1.10.22) 基準線
+## 現況 (v1.10.66) 基準線
 
 - ✅ 6 個完整工作流程（備份、比對、轉 Proxy、串帶、報表、AI 逐字稿）
 - ✅ 模組化後端：`main.py` + `core/` + `routers/`（router 容錯載入，缺模組跳過不 crash）
@@ -194,21 +194,12 @@ routers/
 
 | 檔案 | 行數 | 理由 |
 |------|------|------|
-| `core_engine.py` | 1452 | 核心引擎，邏輯內聚，拆了反而難維護 |
+| `core_engine.py` | 1556 | 核心引擎，邏輯內聚，拆了反而難維護 |
 | `tts_engine.py` | 676 | TTS 引擎，單一職責 |
 | `core/worker.py` | 681 | 任務消費器，內聚 |
 | `core/auth.py` | 491 | Auth 核心，剛好 |
 | `Anent_MediaGuard_Pro.py` | 2559 | 遺留舊版單檔，不動 |
-| 其餘 56 個 <500 行檔案 | — | 已經健康 |
-
-### 可清理的遺留檔案
-
-| 檔案 | 行數 | 說明 |
-|------|------|------|
-| `update_monitor.py` | 60 | 已棄用（port 8001 monitor 已移除） |
-| `patch_ui.py` | 298 | 一次性 patch 腳本 |
-| `Toolbox_Preview.py` | 68 | 工具預覽腳本 |
-| `debug_compare.py` | 35 | 除錯用 |
+| 其餘模組 | <500 | 已經健康 |
 | `remove_all_emojis.py` | 31 | 一次性工具 |
 | `backup_source.py` | 24 | 一次性工具 |
 

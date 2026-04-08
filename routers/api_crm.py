@@ -1608,6 +1608,21 @@ _COST_LINE_DEFAULTS = [
     ("後期製作", "其他", 8),
 ]
 
+# ── Quotation → Cost Line mapping helpers ──────────────────────
+_QUOTE_GROUP_TO_PHASE = {
+    "前期": "前期��作", "拍攝": "現場拍攝", "現場": "現場拍攝",
+    "後製": "後期製作", "後期": "後期製作",
+}
+_QUOTE_UNIT_MAP = {"天": "日"}
+
+
+def _map_group_to_phase(group_name: str) -> str:
+    g = (group_name or "").strip()
+    for keyword, phase in _QUOTE_GROUP_TO_PHASE.items():
+        if keyword in g:
+            return phase
+    return "前期製作"
+
 
 def _cost_line_to_dict(line, staff_map: dict) -> dict:
     est_staff = staff_map.get(line.estimated_staff_id or "", {})
@@ -1894,6 +1909,61 @@ async def apply_cost_line_template(project_id: str, request: Request):
                 id=uuid.uuid4().hex, project_id=project_id,
                 phase=phase, item_name=item_name,
                 sort_order=item.get("sort_order", 0),
+            ))
+            added += 1
+        await session.commit()
+    return {"status": "ok", "added": added}
+
+
+@router.post("/projects/{project_id}/cost-lines/import-from-quotation")
+async def import_cost_lines_from_quotation(project_id: str, request: Request):
+    """從報價單匯入成本項目（覆蓋現有項目，填入預估欄位）。"""
+    _check_auth(request)
+    _require_db()
+    body = await request.json()
+    quotation_id = body.get("quotation_id", "")
+    if not quotation_id:
+        raise HTTPException(status_code=400, detail="缺少 quotation_id")
+    factory = await _get_factory()
+    async with factory() as session:
+        project = await session.get(CrmProject, project_id)
+        if not project:
+            raise HTTPException(status_code=404, detail="找不到此專案")
+        quotation = await session.get(CrmQuotation, quotation_id)
+        if not quotation or quotation.project_id != project_id:
+            raise HTTPException(status_code=400, detail="報價不屬於此專案")
+
+        # Load quotation items
+        items = (await session.execute(
+            select(CrmQuotationItem)
+            .where(CrmQuotationItem.quotation_id == quotation_id)
+            .order_by(CrmQuotationItem.sort_order)
+        )).scalars().all()
+
+        # Delete existing cost lines + expenses (same as apply-template)
+        await session.execute(
+            delete(CrmProjectCostLine).where(CrmProjectCostLine.project_id == project_id)
+        )
+        await session.execute(
+            delete(CrmProjectExpense).where(CrmProjectExpense.project_id == project_id)
+        )
+
+        added = 0
+        for item in items:
+            desc = (item.description or "").strip()
+            if not desc:
+                continue
+            unit = (item.unit or "式").strip()
+            session.add(CrmProjectCostLine(
+                id=uuid.uuid4().hex, project_id=project_id,
+                phase=_map_group_to_phase(item.group_name),
+                item_name=desc,
+                sort_order=item.sort_order or 0,
+                estimated_unit_price=item.unit_price,
+                estimated_quantity=item.quantity,
+                estimated_unit_type=_QUOTE_UNIT_MAP.get(unit, unit),
+                estimated_amount=item.amount,
+                estimated_notes=item.note or None,
             ))
             added += 1
         await session.commit()

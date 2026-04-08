@@ -42,7 +42,7 @@ async function _loadFinancialSummary(projectId) {
               <div class="cost-card">
                 <div class="cost-card-label">剩餘預算</div>
                 <div class="cost-card-value" style="color:${rc};">$${fmtNum(d.remaining)}</div>
-                <div class="cost-card-sub">預算 - 預估成本 - 雜支</div>
+                <div class="cost-card-sub">預算 - 預估成本 - 預估雜支</div>
               </div>
               <div class="cost-card">
                 <div class="cost-card-label">專案結算</div>
@@ -119,7 +119,11 @@ function _renderCostLines(grouped, expenses, financialSummary) {
       </div>`;
 
     if (grouped.length === 0) {
-        html += '<div class="crm-empty" style="padding:16px 0;">尚無項目，點擊「初始化標準項目」載入預設清單</div>';
+        html += `<div class="crm-empty" style="padding:16px 0;text-align:center;">
+            <div style="margin-bottom:10px;color:#9ca3af;">尚無項目</div>
+            <button class="crm-btn crm-btn-secondary crm-btn-sm" onclick="window._projInitCostLines()">初始化標準項目</button>
+            <button class="crm-btn crm-btn-secondary crm-btn-sm" style="margin-left:8px;" onclick="window._costImportFromQuote()">從報價匯入</button>
+        </div>`;
     } else {
         html += `<div class="cost-table">
           <div class="cost-row cost-row-header">
@@ -664,6 +668,64 @@ window._projInitCostLines = async function() {
     } catch (e) { alert('初始化失敗：' + e.message); }
 };
 
+// ── Import cost lines from quotation ──────────────────────────
+window._costImportFromQuote = async function() {
+    if (!state.selectedId) return;
+    document.getElementById('cost-tpl-dropdown')?.style.setProperty('display', 'none');
+    try {
+        const data = await _fetch('/projects/' + state.selectedId + '/quotations');
+        const quots = data.quotations || [];
+        if (quots.length === 0) { alert('此專案尚無報價單'); return; }
+
+        if (quots.length === 1) {
+            await _doImportFromQuote(quots[0].id);
+            return;
+        }
+        // Multiple versions — show modal picker (same pattern as _projActivate)
+        let overlay = document.getElementById('cost-import-quote-overlay');
+        if (overlay) overlay.remove();
+        overlay = document.createElement('div');
+        overlay.id = 'cost-import-quote-overlay';
+        overlay.className = 'crm-modal-overlay';
+        overlay.style.display = 'flex';
+        overlay.addEventListener('click', e => { if (e.target === overlay) overlay.remove(); });
+        overlay.innerHTML = `
+          <div class="crm-modal" style="max-width:400px;">
+            <div class="crm-modal-header">
+              <h3>從報價匯入</h3>
+              <button onclick="document.getElementById('cost-import-quote-overlay').remove()" class="crm-detail-close">✕</button>
+            </div>
+            <div class="crm-modal-body">
+              <p style="font-size:13px;color:#9ca3af;margin-bottom:12px;">選擇報價版本匯入為成本項目（現有項目將被取代）</p>
+              <div style="display:flex;flex-direction:column;gap:6px;">
+                ${quots.map(q => {
+                    const price = q.final_price != null ? q.final_price : q.total;
+                    return `<button class="pi-activate-option" onclick="window._doImportFromQuote('${q.id}')">
+                      <span>v${q.version}</span>
+                      <span style="font-size:11px;color:#9ca3af;">${q.status}</span>
+                      <span style="font-weight:600;color:#e0e0e0;">$${(price ?? 0).toLocaleString()}</span>
+                    </button>`;
+                }).join('')}
+              </div>
+            </div>
+          </div>`;
+        document.body.appendChild(overlay);
+    } catch (e) { alert('匯入失敗：' + e.message); }
+};
+
+window._doImportFromQuote = async function(quotationId) {
+    const overlay = document.getElementById('cost-import-quote-overlay');
+    if (overlay) overlay.remove();
+    if (!confirm('將從報價匯入成本項目，現有成本項目將被取代。確定？')) return;
+    try {
+        const r = await _fetch('/projects/' + state.selectedId + '/cost-lines/import-from-quotation', {
+            method: 'POST', body: JSON.stringify({ quotation_id: quotationId })
+        });
+        _loadFinancialSummary(state.selectedId);
+        if (r.added === 0) alert('報價中沒有項目可匯入');
+    } catch (e) { alert('匯入失敗：' + e.message); }
+};
+
 // ── Delete entire phase ────────────────────────────────────────
 window._costDeletePhase = async function(phase) {
     if (!state.selectedId) return;
@@ -808,6 +870,8 @@ window._costToggleTplDropdown = async function() {
             </div>`;
         }
         if (tpls.length === 0) items += '<div style="padding:4px 12px;color:#6b7280;font-size:11px;">尚無自訂範本</div>';
+        items += '<div style="border-top:1px solid #3a3a3a;margin:4px 0;"></div>';
+        items += `<div class="cost-tpl-item" onclick="window._costImportFromQuote()">📄 從報價匯入...</div>`;
         dd.innerHTML = items;
     } catch (e) { dd.innerHTML = '<div style="padding:8px;color:#fca5a5;">載入失敗</div>'; }
     // Close on click outside

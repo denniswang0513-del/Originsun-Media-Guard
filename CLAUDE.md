@@ -1,6 +1,6 @@
 # Originsun Media Guard Pro — Claude Code 完整交接文件
 
-> **版本**: v1.10.65（2026-04-02）
+> **版本**: v1.10.66（2026-04-08）
 > **目標讀者**: 接手開發的 AI 協作者（Claude Code）
 > **開發環境**: Windows 11、Python 3.11、Vanilla JS (ES Modules)
 > **啟動方式**: `d:\Antigravity\OriginsunTranscode\.venv\Scripts\python.exe main.py`
@@ -58,7 +58,7 @@ OriginsunTranscode/
 │                            #   - _read_local_version()：讀取本機 version.json 版號
 │                            #   - _is_newer(remote, local)：語意版本比較（支援 v 前綴）
 │
-├── core_engine.py           # 核心引擎類別 MediaGuardEngine（約 1200 行）
+├── core_engine.py           # 核心引擎類別 MediaGuardEngine（約 1550 行）
 │                            #   - run_backup_job()：備份邏輯（本機 + NAS 雙寫、衝突處理）
 │                            #   - run_transcode_job()：呼叫 ffmpeg.exe 進行 Proxy 轉檔
 │                            #   - run_concat_job()：合併多個影片成一個 Reel
@@ -213,7 +213,7 @@ OriginsunTranscode/
 │   │                        #   - 各頁籤的 HTML 結構都在這個檔案內
 │   │                        #   - 底部載入 app.js 作為 type="module"
 │   │
-│   ├── app.js               # 主要應用邏輯（約 1800 行）
+│   ├── app.js               # 主要應用邏輯（約 2200 行）
 │   │                        #   - Socket.IO 連線管理（io()、'connect'、'disconnect'）
 │   │                        #   - 所有 Socket 事件的監聽（見第 4.1 節完整事件清單）
 │   │                        #   - 分散式轉檔派發（dispatchRemoteTranscode）
@@ -636,7 +636,7 @@ def _emit_sync(event: str, data: dict) -> None:
 | POST | `/api/v1/voice_profiles/{id}/cache` | 將 NAS 角色快取到本機 |
 
 
-### 7.15 CRM 模組（`routers/api_crm.py` — 67 端點）
+### 7.15 CRM 模組（`routers/api_crm.py` — 88 端點）
 
 CRM 系統包含 6 個獨立 Tab + 帳務管理的 5 個子視圖：
 
@@ -936,10 +936,10 @@ d:\Antigravity\OriginsunTranscode\.venv\Scripts\python.exe -m py_compile <modifi
 
 | 檔案 | 約行數 | 必須分段 |
 |------|--------|----------|
-| `routers/api_crm.py` | 2700+ | ✓ |
-| `frontend/app.js` | 1800+ | ✓ |
-| `frontend/tabs/crm/crm-projects.js` | 1700+ | ✓ |
-| `core_engine.py` | 1200+ | ✓ |
+| `routers/api_crm.py` | 2900+ | ✓ |
+| `frontend/app.js` | 2200+ | ✓ |
+| `core_engine.py` | 1550+ | ✓ |
+| `frontend/tabs/crm/crm-projects-cost.js` | 1000+ | ✓ |
 
 **超過 500 行的檔案，強制使用 `offset` + `limit` 分段讀取。禁止一次讀完後假裝看到了全部內容。**
 

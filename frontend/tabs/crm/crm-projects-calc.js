@@ -8,9 +8,9 @@ export function calcExecBudget(exTax, profitTarget) {
     return exTax - profitTarget;
 }
 
-/** 剩餘預算 = 執行預算 - 預估成本 - 雜支實際 */
-export function calcRemaining(execBudget, costlineEstimated, expenseActual) {
-    return execBudget - costlineEstimated - expenseActual;
+/** 剩餘預算 = 執行預算 - 預估成本 - 預估雜支 */
+export function calcRemaining(execBudget, costlineEstimated, expenseEstimated) {
+    return execBudget - costlineEstimated - expenseEstimated;
 }
 
 /** 毛利 = 未稅 - 實際總成本 */
@@ -31,7 +31,7 @@ export function calcUsagePct(execBudget, totalEstimated) {
 /** 從 financial-summary API 回應計算所有儀表板數值 */
 export function calcDashboard(f) {
     const execBudget = calcExecBudget(f.ex_tax, f.profit_target);
-    const totalEstimated = (f.costline_estimated || 0) + (f.expense_actual || 0);
+    const totalEstimated = (f.costline_estimated || 0) + (f.expense_estimated || 0);
     const totalActual = (f.costline_actual || 0) + (f.expense_actual || 0);
     const remaining = execBudget - totalEstimated;
     const actualProfit = f.ex_tax - totalActual;

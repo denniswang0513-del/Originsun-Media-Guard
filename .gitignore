@@ -69,3 +69,19 @@ python_embed/
 ffmpeg.exe
 ffprobe.exe
 get-pip.py
+
+# API keys & runtime secrets
+api_keys.json
+publish_history.json
+
+# Publish rollback artifacts
+_publish_rollback/
+
+# Test artifacts (one-off)
+TestWorkFlow_CRM/
+test_state.png
+
+# Claude Code working directories
+.claude/worktrees/
+.claude/plans/
+.claude/launch.json
