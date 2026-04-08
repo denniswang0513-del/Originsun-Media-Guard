@@ -1,7 +1,7 @@
 /**
  * crm-invoices.js — 帳務管理 Tab
  */
-import { crmFetch as _fetch, esc as _esc, fmtNum as _fmtNum, setupResizeHandle, enableInlineEdit, addEditButton, kebabMenuHtml } from './crm-utils.js';
+import { crmFetch as _fetch, crmCacheFetch, esc as _esc, fmtNum as _fmtNum, setupResizeHandle, enableInlineEdit, addEditButton, kebabMenuHtml } from './crm-utils.js';
 
 let _invoices = [];
 let _projects = [];
@@ -71,11 +71,11 @@ async function loadInvoices() {
 }
 
 async function loadProjects() {
-    try { _projects = (await _fetch('/projects')).projects || []; } catch(_) { _projects = []; }
+    try { _projects = (await crmCacheFetch('projects', '/projects')).projects || []; } catch(_) { _projects = []; }
 }
 
 async function loadClients() {
-    try { _clients = (await _fetch('/clients')).clients || []; } catch(_) { _clients = []; }
+    try { _clients = (await crmCacheFetch('clients', '/clients')).clients || []; } catch(_) { _clients = []; }
 }
 
 // ── Rendering ────────────────────────────────────────────────

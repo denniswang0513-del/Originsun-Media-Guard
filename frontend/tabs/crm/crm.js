@@ -3,7 +3,7 @@
  * 功能：列表視圖 + 詳情面板 + 新增/編輯 Modal + CSV 匯入
  */
 
-import { crmFetch as _fetch, esc as _esc, fmtNum as _fmtNum, renderAvatar, populateUserSelect, setupResizeHandle, enableInlineEdit, addEditButton, kebabMenuHtml } from './crm-utils.js';
+import { crmFetch as _fetch, crmCacheFetch, crmCacheInvalidate, esc as _esc, fmtNum as _fmtNum, renderAvatar, populateUserSelect, setupResizeHandle, enableInlineEdit, addEditButton, kebabMenuHtml } from './crm-utils.js';
 
 // ── State ────────────────────────────────────────────────────
 
@@ -47,7 +47,7 @@ async function loadClients() {
 
 async function loadUsers() {
     try {
-        const data = await _fetch('/users');
+        const data = await crmCacheFetch('users', '/users');
         _users = data.users || [];
         _populateSelect('crm-filter-am', '全部 AM');
     } catch (_) {
@@ -538,6 +538,7 @@ async function saveClient() {
         const resp = _editingId
             ? await _fetch(`/clients/${_editingId}`, { method: 'PUT', body: JSON.stringify(payload) })
             : await _fetch('/clients', { method: 'POST', body: JSON.stringify(payload) });
+        crmCacheInvalidate('clients');
         document.getElementById('crm-modal').style.display = 'none';
 
         // Use response data to update local state instead of re-fetching
@@ -570,6 +571,7 @@ async function deleteClient(client) {
     if (!confirm(`確定刪除「${client.short_name}」？此操作無法復原。`)) return;
     try {
         await _fetch(`/clients/${client.id}`, { method: 'DELETE' });
+        crmCacheInvalidate('clients');
         closeDetail();
         await loadClients();
     } catch (e) {

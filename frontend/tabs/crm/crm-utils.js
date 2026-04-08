@@ -25,6 +25,29 @@ export async function crmFetch(path, opts = {}) {
     return _doFetch(url, { ...opts, headers });
 }
 
+/* ── Shared data cache (cross-tab, TTL-based) ── */
+const _cache = new Map();
+const CACHE_TTL = 30_000; // 30 seconds
+
+/**
+ * Fetch with cache. Same-key concurrent calls share one request.
+ * Call crmCacheInvalidate(key) after mutations to clear stale data.
+ */
+export async function crmCacheFetch(key, path) {
+    const now = Date.now();
+    const cached = _cache.get(key);
+    if (cached && now - cached.ts < CACHE_TTL) return cached.data;
+    // Reuse inflight via crmFetch (which already deduplicates)
+    const data = await crmFetch(path);
+    _cache.set(key, { data, ts: Date.now() });
+    return data;
+}
+
+export function crmCacheInvalidate(...keys) {
+    if (keys.length === 0) _cache.clear();
+    else keys.forEach(k => _cache.delete(k));
+}
+
 async function _doFetch(url, opts) {
     const res = await fetch(url, opts);
     if (!res.ok) {

@@ -1,7 +1,7 @@
 /**
  * crm-projects-core.js — 列表 + CRUD Modal + CSV 匯入
  */
-import { crmFetch as _fetch, esc as _esc, renderAvatar, populateUserSelect, populateClientSelect, kebabMenuHtml } from './crm-utils.js';
+import { crmFetch as _fetch, crmCacheFetch, crmCacheInvalidate, esc as _esc, renderAvatar, populateUserSelect, populateClientSelect, kebabMenuHtml } from './crm-utils.js';
 import { state, callbacks } from './crm-projects-state.js';
 
 // ── Helpers ────────────────────────────────────────────────
@@ -81,7 +81,7 @@ export async function loadProjects() {
 
 export async function loadClients() {
     try {
-        const data = await _fetch('/clients');
+        const data = await crmCacheFetch('clients', '/clients');
         state.clients = data.clients || [];
         _populateClientFilter();
     } catch (_) {
@@ -91,7 +91,7 @@ export async function loadClients() {
 
 export async function loadUsers() {
     try {
-        const data = await _fetch('/users');
+        const data = await crmCacheFetch('users', '/users');
         state.users = data.users || [];
         _populateSelect('proj-filter-am', '全部 AM');
     } catch (_) {
@@ -100,7 +100,7 @@ export async function loadUsers() {
 }
 
 export async function loadStaffList() {
-    try { state.staffList = ((await _fetch('/staff')).staff || []); } catch (_) { state.staffList = []; }
+    try { state.staffList = ((await crmCacheFetch('staff', '/staff')).staff || []); } catch (_) { state.staffList = []; }
 }
 
 // ── List Rendering ──────────────────────────────────────────
@@ -225,6 +225,7 @@ export async function saveProject() {
         const resp = state.editingId
             ? await _fetch(`/projects/${state.editingId}`, { method: 'PUT', body: JSON.stringify(payload) })
             : await _fetch('/projects', { method: 'POST', body: JSON.stringify(payload) });
+        crmCacheInvalidate('projects', 'clients');
         document.getElementById('proj-modal').style.display = 'none';
 
         if (resp.project) {
@@ -248,6 +249,7 @@ export async function deleteProject(project) {
     if (!confirm(`確定刪除「${project.name}」？此操作無法復原。`)) return;
     try {
         await _fetch(`/projects/${project.id}`, { method: 'DELETE' });
+        crmCacheInvalidate('projects', 'clients');
         closeDetail();
         await loadProjects();
     } catch (e) {
