@@ -619,13 +619,13 @@ async function _renderResumeTab(staffId) {
 }
 
 function _portfolioCard(item, idx) {
-    return `<div class="staff-portfolio-card" data-item-id="${item.id || ''}"
+    return `<div class="staff-portfolio-card" data-item-id="${item.id || ''}">
         ${item.thumbnail_url
             ? `<img src="${_esc(item.thumbnail_url)}" class="staff-portfolio-thumb" alt="">`
             : `<div class="staff-portfolio-thumb staff-portfolio-thumb-empty"></div>`}
         <div class="staff-portfolio-info">
             <div class="staff-portfolio-title">${_esc(item.title || '未命名')}</div>
-            ${item.role ? `<div class="crm-muted" style="font-size:11px;">${_esc(item.role)}</div>` : ''}
+            ${item.role_desc ? `<div class="crm-muted" style="font-size:11px;">${_esc(item.role_desc)}</div>` : ''}
             ${item.url ? `<a href="${_esc(item.url)}" target="_blank" style="color:#3b82f6;font-size:11px;">連結</a>` : ''}
         </div>
         <div class="staff-portfolio-actions">

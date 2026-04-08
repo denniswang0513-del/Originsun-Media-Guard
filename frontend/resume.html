@@ -357,7 +357,7 @@ function _render(data) {
             <div class="project-grid">${projects.map(p => `
                 <div class="project-card">
                     <div class="project-name">${_esc(p.project_name)}</div>
-                    <div class="project-meta">${_esc(p.client_short_name || '')}</div>
+                    <div class="project-meta">${_esc(p.client_name || p.client_short_name || '')}</div>
                     ${p.role_in_project ? `<div class="project-role">${_esc(p.role_in_project)}</div>` : ''}
                 </div>
             `).join('')}</div>
@@ -371,7 +371,7 @@ function _render(data) {
             <div class="portfolio-grid">${portfolio.map(item => {
                 const thumb = _thumbUrl(item);
                 const isVideo = !!_videoId(item.url);
-                return `<div class="portfolio-card" onclick="${item.url ? `_openVideo('${_esc(item.url)}')` : ''}">
+                return `<div class="portfolio-card" data-url="${_esc(item.url || '')}">
                     <div class="portfolio-thumb">
                         ${thumb ? `<img src="${_esc(thumb)}" alt="${_esc(item.title)}">` : `<div class="portfolio-thumb-empty">▶</div>`}
                         ${isVideo ? `<div class="portfolio-play"><div class="portfolio-play-icon"></div></div>` : ''}
@@ -440,6 +440,14 @@ function _render(data) {
     document.getElementById('resume').innerHTML = html;
     document.getElementById('loading').classList.add('fade');
     requestAnimationFrame(() => document.getElementById('resume').classList.add('visible'));
+
+    // Portfolio click handler (avoids inline onclick XSS)
+    document.querySelectorAll('.portfolio-card[data-url]').forEach(card => {
+        card.addEventListener('click', () => {
+            const url = card.dataset.url;
+            if (url) _openVideo(url);
+        });
+    });
 }
 
 _load();

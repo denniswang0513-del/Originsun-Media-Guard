@@ -1202,6 +1202,7 @@ async def import_staff_csv(request: Request, file: UploadFile = File(...)):
 # ── Staff Resume / Portfolio Endpoints ─────────────────────
 
 _UPLOAD_BASE = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "uploads")
+_ALLOWED_IMG_EXT = {".jpg", ".jpeg", ".png", ".webp", ".heic"}
 
 
 def _to_portfolio_dict(p) -> dict:
@@ -1249,7 +1250,11 @@ async def upload_staff_photo(staff_id: str, request: Request, file: UploadFile =
         s = await session.get(CrmStaff, staff_id)
         if not s:
             raise HTTPException(status_code=404, detail="找不到此人員")
-    ext = os.path.splitext(file.filename or "photo.jpg")[1] or ".jpg"
+    ext = (os.path.splitext(file.filename or "photo.jpg")[1] or ".jpg").lower()
+    if ext not in _ALLOWED_IMG_EXT:
+        raise HTTPException(status_code=400, detail=f"不支援的圖片格式：{ext}")
+    if not staff_id.isalnum():
+        raise HTTPException(status_code=400, detail="無效的人員 ID")
     upload_dir = os.path.join(_UPLOAD_BASE, "staff", staff_id)
     os.makedirs(upload_dir, exist_ok=True)
     # Remove old photos
@@ -1274,8 +1279,9 @@ async def upload_staff_photo(staff_id: str, request: Request, file: UploadFile =
 
 
 @router.get("/staff/{staff_id}/portfolio")
-async def list_staff_portfolio(staff_id: str):
+async def list_staff_portfolio(staff_id: str, request: Request):
     """列出人員的作品集。"""
+    _check_auth(request)
     _require_db()
     factory = await _get_factory()
     async with factory() as session:
@@ -1304,7 +1310,9 @@ async def add_staff_portfolio(staff_id: str, request: Request,
     item_id = uuid.uuid4().hex
     thumbnail_url = ""
     if thumbnail and thumbnail.filename:
-        ext = os.path.splitext(thumbnail.filename)[1] or ".jpg"
+        ext = (os.path.splitext(thumbnail.filename)[1] or ".jpg").lower()
+        if ext not in _ALLOWED_IMG_EXT:
+            raise HTTPException(status_code=400, detail=f"不支援的圖片格式：{ext}")
         thumb_dir = os.path.join(_UPLOAD_BASE, "staff", staff_id, "portfolio")
         os.makedirs(thumb_dir, exist_ok=True)
         thumb_path = os.path.join(thumb_dir, f"{item_id}{ext}")
@@ -1342,7 +1350,9 @@ async def update_staff_portfolio(item_id: str, request: Request,
         p.role_desc = role_desc
         p.sort_order = sort_order
         if thumbnail and thumbnail.filename:
-            ext = os.path.splitext(thumbnail.filename)[1] or ".jpg"
+            ext = (os.path.splitext(thumbnail.filename)[1] or ".jpg").lower()
+            if ext not in _ALLOWED_IMG_EXT:
+                raise HTTPException(status_code=400, detail=f"不支援的圖片格式：{ext}")
             thumb_dir = os.path.join(_UPLOAD_BASE, "staff", p.staff_id, "portfolio")
             os.makedirs(thumb_dir, exist_ok=True)
             thumb_path = os.path.join(thumb_dir, f"{item_id}{ext}")
