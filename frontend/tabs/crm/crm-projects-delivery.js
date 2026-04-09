@@ -498,22 +498,24 @@ function _bindCreditEvents(container, projectId) {
 // ── Publish Control ────────────────────────────────────────
 
 function _renderPublish(sc, projectId) {
-    const published = sc.is_published;
+    const published = !!sc.published;
     const statusText = published ? '已發佈' : '未發佈';
     const statusClass = published ? 'showcase-status-published' : 'showcase-status-draft';
+    const publicUrl = published ? `${location.origin}/showcase.html?id=${projectId}` : '';
 
     return _section('發佈控制', `
         <div class="showcase-publish-bar" id="showcase-publish-bar">
             <span class="showcase-publish-status ${statusClass}">${statusText}</span>
             <div style="display:flex;gap:6px;align-items:center;">
-                ${sc.public_url ? `<a href="${_esc(sc.public_url)}" target="_blank" class="crm-btn crm-btn-secondary crm-btn-sm" title="預覽">預覽</a>` : ''}
+                ${publicUrl ? `<a href="${_esc(publicUrl)}" target="_blank" class="crm-btn crm-btn-secondary crm-btn-sm">預覽</a>` : ''}
                 <button class="crm-btn ${published ? 'crm-btn-secondary' : 'crm-btn-primary'} crm-btn-sm" id="showcase-toggle-publish">
                     ${published ? '取消發佈' : '發佈'}
                 </button>
                 <button class="crm-btn crm-btn-secondary crm-btn-sm" id="showcase-copy-share" title="複製協作連結">&#128279; 協作連結</button>
             </div>
         </div>
-        ${sc.share_token ? `<div style="margin-top:6px;font-size:12px;color:#6b7280;">協作連結: <code style="color:#9ca3af;">${_esc(location.origin + '/showcase/' + sc.share_token)}</code></div>` : ''}
+        ${publicUrl ? `<div style="margin-top:6px;font-size:12px;color:#6b7280;">公開連結: <a href="${_esc(publicUrl)}" target="_blank" style="color:#9ca3af;">${_esc(publicUrl)}</a></div>` : ''}
+        ${sc.edit_token ? `<div style="margin-top:4px;font-size:12px;color:#6b7280;">協作連結: <code style="color:#9ca3af;">${_esc(location.origin + '/showcase-edit.html?token=' + sc.edit_token)}</code></div>` : ''}
     `);
 }
 
