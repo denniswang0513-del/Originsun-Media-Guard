@@ -14,7 +14,7 @@ import re
 from core.schemas import (  # type: ignore
     BackupRequest, TranscodeRequest, ConcatRequest,
     VerifyRequest, TranscribeRequest, ReportJobRequest,
-    TtsRequest, TtsCloneRequest,
+    TtsRequest, TtsCloneRequest, DroneMetaRequest,
 )
 from core_engine import ReportManifest  # type: ignore
 
@@ -183,6 +183,9 @@ async def _execute_job(job: state.JobState):
 
         elif isinstance(task, TtsRequest):
             await _run_tts(job, task)
+
+        elif isinstance(task, DroneMetaRequest):
+            await _run_drone_meta(job, engine, task, _on_progress)
 
         # Mark done
         job.status = state.JobStatus.DONE
@@ -679,3 +682,293 @@ def _persist_job_history(job: state.JobState):
         })
     except Exception as e:
         print(f"Failed to persist job history: {e}")
+
+
+# ── Drone Metadata Writer ──────────────────────────────────────
+
+async def _run_drone_meta(job, engine, task: DroneMetaRequest, _on_progress):
+    await asyncio.to_thread(_drone_meta_sync, job, engine, task, _on_progress)
+
+
+def _drone_meta_sync(job, engine, task: DroneMetaRequest, _on_progress):
+    import subprocess
+    import datetime as _datetime
+
+    job_id = job.job_id
+    project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    exiftool = os.path.join(project_root, "exiftool.exe")
+    ffmpeg_bin = os.path.join(project_root, "ffmpeg.exe")
+    HNO = getattr(subprocess, 'CREATE_NO_WINDOW', 0x08000000)
+
+    # Validate tools
+    if not os.path.exists(exiftool):
+        _emit_sync_for_job(job_id, 'log', {'type': 'error', 'msg': f'找不到 exiftool.exe: {exiftool}'})
+        raise FileNotFoundError(f"exiftool.exe not found: {exiftool}")
+    if not os.path.exists(ffmpeg_bin):
+        _emit_sync_for_job(job_id, 'log', {'type': 'error', 'msg': f'找不到 ffmpeg.exe: {ffmpeg_bin}'})
+        raise FileNotFoundError(f"ffmpeg.exe not found: {ffmpeg_bin}")
+
+    # Parse datetime
+    try:
+        dt = _datetime.datetime.fromisoformat(task.date_time)
+    except Exception as e:
+        _emit_sync_for_job(job_id, 'log', {'type': 'error', 'msg': f'日期格式錯誤: {e}'})
+        raise ValueError(f"Invalid date_time: {e}")
+
+    exif_dt_str = dt.strftime("%Y:%m:%d %H:%M:%S")
+    iso_dt_str = dt.strftime("%Y-%m-%dT%H:%M:%SZ")
+
+    # Build description
+    desc = task.project_name
+    if task.road_section:
+        desc += f" | 路段: {task.road_section}"
+    if task.phase:
+        desc += f" | 階段: {task.phase}"
+    desc += " | 工程空拍紀錄"
+    if task.description:
+        desc += f" | {task.description}"
+
+    total = len(task.files)
+    success_count = 0
+    fail_list = []
+    new_file_paths = []
+
+    for idx, file_setting in enumerate(task.files):
+        fpath = file_setting.path
+        current_index = task.file_index + idx
+        new_name = f"MAX_{current_index:04d}.MOV"
+        out_dir = task.output_dir or os.path.dirname(fpath)
+        new_path = os.path.join(out_dir, new_name)
+
+        _on_progress({
+            'phase': 'drone_meta',
+            'total_files': total,
+            'done_files': idx,
+            'current_file': os.path.basename(fpath),
+            'target_file': new_name,
+            'file_pct': 0,
+            'total_pct': round(idx / total * 100, 1),
+        })
+        _emit_sync_for_job(job_id, 'log', {
+            'type': 'info',
+            'msg': f'[{idx + 1}/{total}] 處理中: {os.path.basename(fpath)} → {new_name}'
+        })
+
+        # Per-file time override
+        if file_setting.date_time_override:
+            file_dt = _datetime.datetime.fromisoformat(file_setting.date_time_override)
+        else:
+            file_dt = dt  # global datetime
+        file_exif_dt = file_dt.strftime("%Y:%m:%d %H:%M:%S")
+        file_iso_dt = file_dt.strftime("%Y-%m-%dT%H:%M:%SZ")
+
+        # Detect DJI and generate Autel subtitle
+        from utils.dji_meta_parser import parse_dji_meta
+        dji_data = parse_dji_meta(fpath, ffmpeg_path=ffmpeg_bin)
+        is_dji = dji_data.get('is_dji', False) and bool(dji_data.get('frames'))
+        autel_srt_path = None
+
+        if is_dji:
+            _emit_sync_for_job(job_id, 'log', {
+                'type': 'info',
+                'msg': f'偵測到 DJI 檔案 ({dji_data.get("device", "unknown")})，產生 Autel 字幕...'
+            })
+            autel_srt_path = os.path.join(out_dir, f"_autel_{current_index:04d}.srt")
+            home = dji_data['frames'][0]
+            with open(autel_srt_path, 'w', encoding='utf-8') as sf:
+                for i, frame in enumerate(dji_data['frames']):
+                    frame_dt = file_dt + _datetime.timedelta(seconds=i)
+                    dt_str = frame_dt.strftime("%Y-%m-%d %H:%M:%S")
+                    sf.write(f"{i+1}\n")
+                    t1 = f"{i//3600:02d}:{(i%3600)//60:02d}:{i%60:02d},000"
+                    t2 = f"{(i+1)//3600:02d}:{((i+1)%3600)//60:02d}:{(i+1)%60:02d},000"
+                    sf.write(f"{t1} --> {t2}\n")
+                    sf.write(f"HOME(E: {home['lon']:.6f}, N: {home['lat']:.6f}) {dt_str}")
+                    sf.write(f".GPS(E: {frame['lon']:.6f}, N: {frame['lat']:.6f}, {frame['alt']:.2f}m) ")
+                    sf.write(f".ISO:{int(frame['iso'])} SHUTTER:{int(frame['shutter'])} EV:{frame['ev']:.1f} F-NUM:{frame['fnum']:.1f} ")
+                    f_pry = frame.get('f_pry', (0, 0, 0))
+                    g_pry = frame.get('g_pry', (0, 0, 0))
+                    sf.write(f".F.PRY ({f_pry[0]:.1f}\u00b0, {f_pry[1]:.1f}\u00b0, {f_pry[2]:.1f}\u00b0), ")
+                    sf.write(f"G.PRY ({g_pry[0]:.1f}\u00b0, {g_pry[1]:.1f}\u00b0, {g_pry[2]:.1f}\u00b0)\n\n")
+
+        # Determine if re-encoding is needed
+        has_trim = file_setting.trim_in > 0 or file_setting.trim_out >= 0
+        has_color = (
+            file_setting.brightness != 0.0 or
+            file_setting.contrast != 1.0 or
+            file_setting.saturation != 1.0 or
+            file_setting.gamma != 1.0 or
+            file_setting.color_temp != 0.0
+        )
+        needs_reencode = has_trim or has_color
+
+        # Build ffmpeg command
+        ff_cmd = [ffmpeg_bin, "-y"]
+
+        if has_trim and file_setting.trim_in > 0:
+            ff_cmd += ["-ss", str(file_setting.trim_in)]
+
+        ff_cmd += ["-i", fpath]
+
+        # Add Autel SRT as second input if DJI
+        if is_dji and autel_srt_path:
+            ff_cmd += ["-i", autel_srt_path]
+
+        if has_trim and file_setting.trim_out >= 0:
+            duration = file_setting.trim_out - max(file_setting.trim_in, 0)
+            if duration > 0:
+                ff_cmd += ["-t", str(duration)]
+
+        if is_dji:
+            # DJI: map only video + audio, exclude DJI meta/dbgi tracks
+            ff_cmd += ["-map", "0:v", "-map", "0:a?"]
+            if autel_srt_path:
+                ff_cmd += ["-map", "1:0"]
+        else:
+            ff_cmd += ["-map", "0"]
+
+        if needs_reencode:
+            # Build video filter
+            vf_parts = []
+            eq_parts = []
+            if file_setting.brightness != 0.0:
+                eq_parts.append(f"brightness={file_setting.brightness}")
+            if file_setting.contrast != 1.0:
+                eq_parts.append(f"contrast={file_setting.contrast}")
+            if file_setting.saturation != 1.0:
+                eq_parts.append(f"saturation={file_setting.saturation}")
+            if file_setting.gamma != 1.0:
+                eq_parts.append(f"gamma={file_setting.gamma}")
+            if eq_parts:
+                vf_parts.append("eq=" + ":".join(eq_parts))
+            if file_setting.color_temp != 0.0:
+                t = file_setting.color_temp
+                vf_parts.append(f"colorbalance=rs={t}:gs=0:bs={-t}")
+            if vf_parts:
+                ff_cmd += ["-vf", ",".join(vf_parts)]
+
+            ff_cmd += [
+                "-c:v", "libx264", "-crf", "18", "-preset", "fast",
+                "-c:a", "aac", "-b:a", "192k",
+            ]
+        else:
+            ff_cmd += ["-c", "copy"]
+
+        # Subtitle codec for DJI→Autel SRT
+        if is_dji and autel_srt_path:
+            ff_cmd += ["-c:s", "mov_text"]
+
+        # Handler metadata
+        if is_dji:
+            ff_cmd += ["-metadata:s:v", "handler_name=Autel.Video"]
+            if autel_srt_path:
+                ff_cmd += ["-metadata:s:s", "handler_name=Autel.Subtitle"]
+
+        ff_cmd += ["-metadata", f"creation_time={file_iso_dt}", new_path]
+
+        ff_result = subprocess.run(
+            ff_cmd, capture_output=True, text=True,
+            encoding="utf-8", errors="ignore",
+            creationflags=HNO,
+        )
+        if ff_result.returncode != 0:
+            err = ff_result.stderr[-500:] if ff_result.stderr else "unknown error"
+            fail_list.append(f"{os.path.basename(fpath)}: ffmpeg 失敗 — {err}")
+            _emit_sync_for_job(job_id, 'log', {
+                'type': 'error', 'msg': f'ffmpeg 失敗: {os.path.basename(fpath)}'
+            })
+            continue
+
+        # exiftool write metadata (date stamps only)
+        exif_cmd = [
+            exiftool,
+            f"-CreateDate={file_exif_dt}",
+            f"-ModifyDate={file_exif_dt}",
+            f"-TrackCreateDate={file_exif_dt}",
+            f"-TrackModifyDate={file_exif_dt}",
+            f"-MediaCreateDate={file_exif_dt}",
+            f"-MediaModifyDate={file_exif_dt}",
+            f"-FileCreateDate={file_exif_dt}",
+            f"-FileModifyDate={file_exif_dt}",
+            "-Software=Lavf58.20.100",
+            "-overwrite_original",
+            new_path,
+        ]
+        exif_result = subprocess.run(
+            exif_cmd, capture_output=True, text=True,
+            encoding="utf-8", errors="ignore",
+            creationflags=HNO,
+        )
+        if exif_result.returncode != 0:
+            err = exif_result.stderr[-500:] if exif_result.stderr else "unknown error"
+            fail_list.append(f"{new_name}: exiftool 失敗 — {err}")
+            _emit_sync_for_job(job_id, 'log', {
+                'type': 'error', 'msg': f'exiftool 失敗: {new_name}'
+            })
+            # Clean up temp SRT even on failure
+            if autel_srt_path and os.path.exists(autel_srt_path):
+                try:
+                    os.remove(autel_srt_path)
+                except OSError:
+                    pass
+            continue
+
+        # Clean up temp Autel SRT file
+        if autel_srt_path and os.path.exists(autel_srt_path):
+            try:
+                os.remove(autel_srt_path)
+            except OSError:
+                pass
+
+        success_count += 1
+        new_file_paths.append(new_path)
+        _emit_sync_for_job(job_id, 'log', {
+            'type': 'info', 'msg': f'✓ {new_name} 完成'
+                + (f' (DJI→Autel 轉換)' if is_dji else '')
+        })
+
+    # Final progress
+    _on_progress({
+        'phase': 'drone_meta',
+        'total_files': total,
+        'done_files': total,
+        'total_pct': 100,
+    })
+
+    # Summary log
+    _emit_sync_for_job(job_id, 'log', {
+        'type': 'info',
+        'msg': f'Metadata 寫入完成: 成功 {success_count}/{total}'
+              + (f'，失敗 {len(fail_list)} 個' if fail_list else '')
+    })
+
+    job.total_files = total
+    job.done_files = success_count
+
+    # Optional concat
+    if task.do_concat and new_file_paths and task.concat_dest_dir:
+        _emit_sync_for_job(job_id, 'log', {
+            'type': 'info', 'msg': '開始串帶...'
+        })
+        _on_progress({'phase': 'concat', 'total_pct': 0, 'status': '串帶中...'})
+
+        try:
+            engine.run_concat_job(
+                sources=new_file_paths,
+                dest_dir=task.concat_dest_dir,
+                resolution=task.concat_resolution,
+                codec=task.concat_codec,
+                burn_timecode=task.concat_burn_timecode,
+                burn_filename=task.concat_burn_filename,
+                on_progress=_on_progress,
+            )
+            _emit_sync_for_job(job_id, 'log', {
+                'type': 'info', 'msg': '✓ 串帶完成'
+            })
+        except Exception as e:
+            _emit_sync_for_job(job_id, 'log', {
+                'type': 'error', 'msg': f'串帶失敗: {e}'
+            })
+
+    if fail_list and success_count == 0:
+        raise RuntimeError(f"全部 {total} 個檔案處理失敗")

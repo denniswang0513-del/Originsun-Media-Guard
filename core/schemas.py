@@ -132,6 +132,50 @@ class TtsCloneRequest(BaseModel):
     compute_hosts: list = []
 
 
+class DroneMetaScanRequest(BaseModel):
+    paths: List[str]
+
+
+class DroneMetaFileSetting(BaseModel):
+    path: str
+    trim_in: float = 0.0        # 秒，0 = 從頭
+    trim_out: float = -1.0      # 秒，-1 = 到尾
+    date_time_override: str = ""  # Per-file datetime override (ISO format), empty = use global
+    # 色彩調整
+    brightness: float = 0.0     # -1.0 ~ 1.0
+    contrast: float = 1.0       # 0.0 ~ 2.0
+    saturation: float = 1.0     # 0.0 ~ 3.0
+    gamma: float = 1.0          # 0.1 ~ 3.0
+    color_temp: float = 0.0     # -1.0 ~ 1.0（冷暖）
+
+
+class DroneMetaRequest(BaseModel):
+    task_type: str = "drone_meta"
+    job_id: str = ""
+    project_name: str
+    file_index: int = 1
+    files: List[DroneMetaFileSetting]
+    output_dir: str = ""
+    date_time: str              # ISO format
+    serial_number: str = ""
+    operator: str = ""
+    road_section: str = ""
+    phase: str = ""
+    company: str = ""
+    description: str = ""
+    drone_make: str = "Autel Robotics"
+    drone_model: str = "EVO Lite+"
+    lens_make: str = "Autel Robotics"
+    lens_model: str = "EVO Lite+ Camera"
+    # 串帶
+    do_concat: bool = False
+    concat_dest_dir: str = ""
+    concat_resolution: str = "1080P"
+    concat_codec: str = "H.264 (NVENC)"
+    concat_burn_timecode: bool = True
+    concat_burn_filename: bool = False
+
+
 class DownloadModelRequest(BaseModel):
     model_size: str
 
