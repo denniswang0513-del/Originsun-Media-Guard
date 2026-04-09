@@ -169,34 +169,37 @@ def _parse_frame(frame_buf):
         "f_pry": (0.0, 0.0, 0.0), "g_pry": (0.0, 0.0, 0.0),
     }
 
-    # Field 4 = GPS sub-message
-    gps_buf = _find_field(fields, 4)
-    if gps_buf and isinstance(gps_buf, (bytes, bytearray)):
-        gps_fields = _decode_all_fields(gps_buf)
-        # Sub-field 1 = lat/lon container
-        coord_buf = _find_field(gps_fields, 1)
-        if coord_buf and isinstance(coord_buf, (bytes, bytearray)):
-            coord_fields = _decode_all_fields(coord_buf)
-            # 2 = latitude (double, radians)
-            lat_raw = _find_field(coord_fields, 2)
-            if lat_raw and isinstance(lat_raw, (bytes, bytearray)) and len(lat_raw) == 8:
-                frame["lat"] = round(math.degrees(_bytes_to_double(lat_raw)), 6)
-            # 3 = longitude (double, radians)
-            lon_raw = _find_field(coord_fields, 3)
-            if lon_raw and isinstance(lon_raw, (bytes, bytearray)) and len(lon_raw) == 8:
-                frame["lon"] = round(math.degrees(_bytes_to_double(lon_raw)), 6)
+    # Field 3 = navigation sub-message (contains GPS + altitude)
+    nav_buf = _find_field(fields, 3)
+    if nav_buf and isinstance(nav_buf, (bytes, bytearray)):
+        nav_fields = _decode_all_fields(nav_buf)
+        # Nav field 4 = GPS sub-message
+        gps_buf = _find_field(nav_fields, 4)
+        if gps_buf and isinstance(gps_buf, (bytes, bytearray)):
+            gps_fields = _decode_all_fields(gps_buf)
+            # Sub-field 1 = lat/lon container
+            coord_buf = _find_field(gps_fields, 1)
+            if coord_buf and isinstance(coord_buf, (bytes, bytearray)):
+                coord_fields = _decode_all_fields(coord_buf)
+                # 2 = latitude (double, radians)
+                lat_raw = _find_field(coord_fields, 2)
+                if lat_raw and isinstance(lat_raw, (bytes, bytearray)) and len(lat_raw) == 8:
+                    frame["lat"] = round(math.degrees(_bytes_to_double(lat_raw)), 6)
+                # 3 = longitude (double, radians)
+                lon_raw = _find_field(coord_fields, 3)
+                if lon_raw and isinstance(lon_raw, (bytes, bytearray)) and len(lon_raw) == 8:
+                    frame["lon"] = round(math.degrees(_bytes_to_double(lon_raw)), 6)
 
-    # Field 5 = altitude sub-message
-    alt_buf = _find_field(fields, 5)
-    if alt_buf and isinstance(alt_buf, (bytes, bytearray)):
-        alt_fields = _decode_all_fields(alt_buf)
-        alt_raw = _find_field(alt_fields, 1)
-        if alt_raw and isinstance(alt_raw, (bytes, bytearray)) and len(alt_raw) == 4:
-            alt_val = _bytes_to_float(alt_raw)
-            # If value seems too large, divide by 1000
-            if abs(alt_val) > 10000:
-                alt_val /= 1000.0
-            frame["alt"] = round(alt_val, 2)
+        # Nav field 5 = altitude sub-message
+        alt_buf = _find_field(nav_fields, 5)
+        if alt_buf and isinstance(alt_buf, (bytes, bytearray)):
+            alt_fields = _decode_all_fields(alt_buf)
+            alt_raw = _find_field(alt_fields, 1)
+            if alt_raw and isinstance(alt_raw, (bytes, bytearray)) and len(alt_raw) == 4:
+                alt_val = _bytes_to_float(alt_raw)
+                if abs(alt_val) > 10000:
+                    alt_val /= 1000.0
+                frame["alt"] = round(alt_val, 2)
 
     # Field 2 = camera params sub-message
     cam_buf = _find_field(fields, 2)
@@ -227,10 +230,11 @@ def _parse_frame(frame_buf):
             if ap_raw is not None and isinstance(ap_raw, int):
                 frame["fnum"] = round(ap_raw / 2000.0, 1)
 
-    # Field 4, sub-field 4 = quaternion attitude
-    if gps_buf and isinstance(gps_buf, (bytes, bytearray)):
-        gps_fields_for_quat = _decode_all_fields(gps_buf)
-        quat_bufs = _find_fields(gps_fields_for_quat, 4)
+    # Field 4 = attitude sub-message, sub-field 4 = quaternion
+    att_buf = _find_field(fields, 4)
+    if att_buf and isinstance(att_buf, (bytes, bytearray)):
+        att_fields = _decode_all_fields(att_buf)
+        quat_bufs = _find_fields(att_fields, 4)
         # Typically two quaternion groups: flight (f_pry) and gimbal (g_pry)
         quats = []
         for qb in quat_bufs:
