@@ -852,11 +852,11 @@ def _drone_meta_sync(job, engine, task: DroneMetaRequest, _on_progress):
                 "-c:a", "aac", "-b:a", "192k",
             ]
         else:
-            ff_cmd += ["-c", "copy"]
-
-        # Subtitle codec for DJI→Autel SRT
-        if is_dji and autel_srt_path:
-            ff_cmd += ["-c:s", "mov_text"]
+            if is_dji and autel_srt_path:
+                # DJI: copy video/audio but encode subtitle as mov_text
+                ff_cmd += ["-c:v", "copy", "-c:a", "copy", "-c:s", "mov_text"]
+            else:
+                ff_cmd += ["-c", "copy"]
 
         # Handler metadata
         if is_dji:
@@ -864,7 +864,7 @@ def _drone_meta_sync(job, engine, task: DroneMetaRequest, _on_progress):
             if autel_srt_path:
                 ff_cmd += ["-metadata:s:s", "handler_name=Autel.Subtitle"]
 
-        ff_cmd += ["-metadata", f"creation_time={file_iso_dt}", new_path]
+        ff_cmd += ["-movflags", "+faststart", "-metadata", f"creation_time={file_iso_dt}", new_path]
 
         ff_result = subprocess.run(
             ff_cmd, capture_output=True, text=True,
