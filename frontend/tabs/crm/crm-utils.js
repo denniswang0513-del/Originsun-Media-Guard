@@ -98,6 +98,97 @@ export function populateClientSelect(elementId, clients, placeholder = '全部�
 }
 
 /**
+ * Upgrade a native <select> to a searchable dropdown.
+ * Hides the original select, inserts an input + dropdown panel.
+ * Call AFTER the select is populated with options.
+ */
+export function searchableSelect(sel, opts = {}) {
+    if (!sel || sel.dataset.searchable) return;
+    sel.dataset.searchable = '1';
+    const placeholder = opts.placeholder || '搜尋...';
+
+    const wrap = document.createElement('div');
+    wrap.className = 'ss-wrap';
+    wrap.style.position = 'relative';
+    sel.parentNode.insertBefore(wrap, sel);
+    wrap.appendChild(sel);
+    sel.style.display = 'none';
+
+    const input = document.createElement('input');
+    input.type = 'text';
+    input.className = 'crm-input ss-input';
+    input.placeholder = placeholder;
+    // Show current selected label
+    const curOpt = sel.options[sel.selectedIndex];
+    if (curOpt && curOpt.value) input.value = curOpt.textContent;
+    wrap.insertBefore(input, sel);
+
+    const panel = document.createElement('div');
+    panel.className = 'ss-panel';
+    wrap.appendChild(panel);
+
+    let items = [];
+    let activeIdx = -1;
+
+    function _buildItems() {
+        items = [];
+        for (const o of sel.options) {
+            items.push({ value: o.value, label: o.textContent });
+        }
+    }
+
+    function _render(filter) {
+        const q = (filter || '').toLowerCase();
+        const filtered = q ? items.filter(it => it.label.toLowerCase().includes(q)) : items;
+        activeIdx = -1;
+        panel.innerHTML = filtered.map((it, i) =>
+            `<div class="ss-item${it.value === sel.value ? ' ss-selected' : ''}" data-idx="${i}" data-value="${esc(it.value)}">${esc(it.label)}</div>`
+        ).join('') || '<div class="ss-empty">無結果</div>';
+        panel.style.display = 'block';
+
+        panel.querySelectorAll('.ss-item').forEach(el => {
+            el.addEventListener('mousedown', e => {
+                e.preventDefault();
+                _pick(el.dataset.value, el.textContent);
+            });
+        });
+    }
+
+    function _pick(value, label) {
+        sel.value = value;
+        input.value = value ? label : '';
+        panel.style.display = 'none';
+        sel.dispatchEvent(new Event('change', { bubbles: true }));
+    }
+
+    input.addEventListener('focus', () => { _buildItems(); _render(input.value); });
+    input.addEventListener('input', () => { _buildItems(); _render(input.value); });
+    input.addEventListener('blur', () => { setTimeout(() => panel.style.display = 'none', 150); });
+    input.addEventListener('keydown', e => {
+        const visible = panel.querySelectorAll('.ss-item');
+        if (e.key === 'ArrowDown') { e.preventDefault(); activeIdx = Math.min(activeIdx + 1, visible.length - 1); _highlight(visible); }
+        else if (e.key === 'ArrowUp') { e.preventDefault(); activeIdx = Math.max(activeIdx - 1, 0); _highlight(visible); }
+        else if (e.key === 'Enter') { e.preventDefault(); if (activeIdx >= 0 && visible[activeIdx]) { const el = visible[activeIdx]; _pick(el.dataset.value, el.textContent); } }
+        else if (e.key === 'Escape') { panel.style.display = 'none'; input.blur(); }
+    });
+
+    function _highlight(nodes) {
+        nodes.forEach((n, i) => n.classList.toggle('ss-active', i === activeIdx));
+        if (nodes[activeIdx]) nodes[activeIdx].scrollIntoView({ block: 'nearest' });
+    }
+
+    // Re-sync when select is repopulated externally
+    const observer = new MutationObserver(() => {
+        const curOpt = sel.options[sel.selectedIndex];
+        if (curOpt && curOpt.value) input.value = curOpt.textContent;
+        else input.value = '';
+    });
+    observer.observe(sel, { childList: true });
+
+    return { refresh: () => { _buildItems(); const o = sel.options[sel.selectedIndex]; input.value = o && o.value ? o.textContent : ''; } };
+}
+
+/**
  * Inline edit for detail panels.
  * @param {string} contentElId - detail content element ID
  * @param {string} actionsElId - detail bar actions element ID

@@ -1,3 +1,20 @@
+/* ── Searchable Select ── */
+.ss-wrap { position: relative; }
+.ss-input { width: 100%; }
+.ss-panel {
+  display: none; position: absolute; left: 0; right: 0; top: 100%; z-index: 200;
+  max-height: 200px; overflow-y: auto;
+  background: #2a2a2a; border: 1px solid #3a3a3a; border-radius: 4px;
+  margin-top: 2px; box-shadow: 0 4px 12px rgba(0,0,0,.5);
+}
+.ss-item {
+  padding: 6px 12px; font-size: 13px; cursor: pointer; color: #d1d5db;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.ss-item:hover, .ss-item.ss-active { background: #3b82f6; color: #fff; }
+.ss-item.ss-selected { color: #60a5fa; }
+.ss-empty { padding: 8px 12px; color: #6b7280; font-size: 12px; }
+
 /* CRM Tab Styles */
 
 .crm-root {

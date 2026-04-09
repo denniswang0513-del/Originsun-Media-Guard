@@ -5,7 +5,7 @@
 
 import { state, callbacks, EXPENSE_CATEGORIES } from './crm-projects-state.js';
 import { calcDashboard, remainColor, profitColor, barColor, diffLabel } from './crm-projects-calc.js';
-import { crmFetch as _fetch, esc as _esc, fmtNum } from './crm-utils.js';
+import { crmFetch as _fetch, esc as _esc, fmtNum, searchableSelect } from './crm-utils.js';
 
 // INT field names from _buildEditFields — inlined to avoid circular dep with detail module
 const _INT_FIELD_NAMES = [
@@ -63,6 +63,8 @@ async function _loadFinancialSummary(projectId) {
             ${_renderCostLines(costData.grouped || [], expData.expenses || [], f)}
         `;
         window._costDirtyMap = {};
+        // Upgrade all staff selects to searchable
+        container.querySelectorAll('.cost-staff-sel').forEach(sel => searchableSelect(sel, { placeholder: '搜尋人員...' }));
     } catch (_) {
         container.innerHTML = '<div class="crm-empty">載入失敗</div>';
     }

@@ -3,7 +3,7 @@
  */
 
 import { state, callbacks } from './crm-projects-state.js';
-import { _badge, _avatar, loadProjects } from './crm-projects-core.js';
+import { _badge, _avatar, loadProjects, getProjectTypes } from './crm-projects-core.js';
 import { calcDashboard, remainColor, profitColor, barColor } from './crm-projects-calc.js';
 import { crmFetch as _fetch, esc as _esc, fmtNum, enableInlineEdit, addEditButton } from './crm-utils.js';
 
@@ -24,10 +24,9 @@ function _buildEditFields() {
             {value:'洽談中',label:'洽談中'},{value:'報價中',label:'報價中'},
             {value:'進行中',label:'進行中'},{value:'已結案',label:'已結案'},
         ]},
-        {name:'project_type', label:'類型', type:'select', options:[
-            {value:'',label:'—'},{value:'紀實影片',label:'紀實影片'},{value:'活動紀實',label:'活動紀實'},
-            {value:'形象影片',label:'形象影片'},{value:'廣告',label:'廣告'},{value:'MV',label:'MV'},
-        ]},
+        {name:'project_type', label:'類型', type:'select', get options() {
+            return [{value:'',label:'—'}, ...getProjectTypes().map(t => ({value:t,label:t}))];
+        }},
         {name:'am_username', label:'AM', type:'select', options: userOpts},
         {name:'pm_usernames', label:'PM', type:'checkboxes', options: pmOpts},
         {name:'start_date', label:'起始日', type:'date'},

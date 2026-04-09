@@ -24,6 +24,7 @@ import { _loadFinancialSummary, _showExpenseForm, initCostHandlers } from './crm
 import { _loadCostStaff, _loadAdvances, _loadProjectStaff, initFinanceHandlers } from './crm-projects-finance.js';
 import { loadProjectQuotes, initQuoteHandlers } from './crm-projects-quotes.js';
 import { loadDeliveryTab, initDeliveryHandlers } from './crm-projects-delivery.js';
+import { loadProjectTypes } from './crm-projects-core.js';
 
 // ── 回呼串接（解耦跨模組依賴） ──────────────────────────────
 
@@ -318,7 +319,7 @@ export async function initCrmProjectsTab() {
     });
 
     // ── Load initial data ──
-    await Promise.all([loadClients(), loadUsers(), loadProjects(), loadStaffList()]);
+    await Promise.all([loadClients(), loadUsers(), loadProjects(), loadStaffList(), loadProjectTypes()]);
 }
 
 // ── Quotes overview lazy loader ──────────────────────────────

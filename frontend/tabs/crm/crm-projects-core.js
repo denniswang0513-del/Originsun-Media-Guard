@@ -1,8 +1,83 @@
 /**
  * crm-projects-core.js — 列表 + CRUD Modal + CSV 匯入
  */
-import { crmFetch as _fetch, crmCacheFetch, crmCacheInvalidate, esc as _esc, renderAvatar, populateUserSelect, populateClientSelect, kebabMenuHtml } from './crm-utils.js';
+import { crmFetch as _fetch, crmCacheFetch, crmCacheInvalidate, esc as _esc, renderAvatar, populateUserSelect, populateClientSelect, searchableSelect, kebabMenuHtml } from './crm-utils.js';
 import { state, callbacks } from './crm-projects-state.js';
+
+// ── Project Types (dynamic from settings) ─────────────────
+const _DEFAULT_TYPES = ['紀實影片', '活動紀實', '形象影片', '廣告', 'MV'];
+let _projectTypes = [..._DEFAULT_TYPES];
+
+export async function loadProjectTypes() {
+    try {
+        const s = await fetch('/api/settings/load').then(r => r.json());
+        _projectTypes = s.project_types && s.project_types.length > 0 ? s.project_types : [..._DEFAULT_TYPES];
+    } catch (_) { _projectTypes = [..._DEFAULT_TYPES]; }
+    _populateTypeSelects();
+}
+
+export function getProjectTypes() { return _projectTypes; }
+
+function _populateTypeSelects() {
+    const sel = document.getElementById('proj-f-project_type');
+    if (sel) {
+        const val = sel.value;
+        sel.innerHTML = '<option value="">—</option>' + _projectTypes.map(t => `<option value="${_esc(t)}">${_esc(t)}</option>`).join('');
+        sel.value = val;
+    }
+}
+
+async function _saveTypes() {
+    const token = localStorage.getItem('auth_token');
+    await fetch('/api/settings/save', {
+        method: 'POST', headers: { 'Content-Type': 'application/json', ...(token ? { 'Authorization': 'Bearer ' + token } : {}) },
+        body: JSON.stringify({ project_types: _projectTypes })
+    });
+}
+
+window._projEditTypes = function() {
+    let overlay = document.getElementById('proj-types-overlay');
+    if (overlay) overlay.remove();
+    overlay = document.createElement('div');
+    overlay.id = 'proj-types-overlay';
+    overlay.className = 'crm-modal-overlay';
+    overlay.style.display = 'flex';
+    overlay.addEventListener('click', e => { if (e.target === overlay) overlay.remove(); });
+
+    function _render() {
+        overlay.innerHTML = `
+          <div class="crm-modal" style="max-width:360px;">
+            <div class="crm-modal-header"><h3>編輯案件類型</h3>
+              <button onclick="document.getElementById('proj-types-overlay').remove()" class="crm-detail-close">✕</button>
+            </div>
+            <div class="crm-modal-body" style="max-height:400px;overflow-y:auto;">
+              ${_projectTypes.map((t, i) => `<div style="display:flex;align-items:center;gap:6px;padding:6px 0;border-bottom:1px solid #2a2a2a;">
+                <span style="flex:1;font-size:14px;">${_esc(t)}</span>
+                <button class="crm-btn crm-btn-secondary crm-btn-sm" data-action="rename" data-idx="${i}" style="padding:2px 6px;">✎</button>
+                <button class="crm-btn crm-btn-danger crm-btn-sm" data-action="delete" data-idx="${i}" style="padding:2px 6px;">✕</button>
+              </div>`).join('')}
+              <button class="crm-btn crm-btn-primary crm-btn-sm" data-action="add" style="margin-top:8px;width:100%;">+ 新增類型</button>
+            </div>
+          </div>`;
+        overlay.querySelectorAll('[data-action="add"]').forEach(b => b.addEventListener('click', async () => {
+            const n = prompt('輸入新案件類型：'); if (!n?.trim()) return;
+            if (_projectTypes.includes(n.trim())) { alert('已存在'); return; }
+            _projectTypes.push(n.trim()); await _saveTypes(); _populateTypeSelects(); _render();
+        }));
+        overlay.querySelectorAll('[data-action="rename"]').forEach(b => b.addEventListener('click', async () => {
+            const i = parseInt(b.dataset.idx), old = _projectTypes[i];
+            const n = prompt('修改名稱：', old); if (!n?.trim() || n.trim() === old) return;
+            _projectTypes[i] = n.trim(); await _saveTypes(); _populateTypeSelects(); _render();
+        }));
+        overlay.querySelectorAll('[data-action="delete"]').forEach(b => b.addEventListener('click', async () => {
+            const i = parseInt(b.dataset.idx);
+            if (!confirm(`確定刪除「${_projectTypes[i]}」？`)) return;
+            _projectTypes.splice(i, 1); await _saveTypes(); _populateTypeSelects(); _render();
+        }));
+    }
+    _render();
+    document.body.appendChild(overlay);
+};
 
 // ── Helpers ────────────────────────────────────────────────
 
@@ -30,6 +105,7 @@ function _populateClientDropdown(elementId, selectedId) {
     if (!sel) return;
     sel.innerHTML = `<option value="">— 選擇客戶 —</option>` +
         state.clients.map(c => `<option value="${c.id}"${c.id === selectedId ? ' selected' : ''}>${_esc(c.short_name)}</option>`).join('');
+    searchableSelect(sel, { placeholder: '搜尋客戶...' });
 }
 
 function _populatePmCheckboxes(selected = []) {
