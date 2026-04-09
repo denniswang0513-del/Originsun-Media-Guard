@@ -59,6 +59,16 @@ async function _doFetch(url, opts) {
     return res.json();
 }
 
+/** Save partial settings (merge-on-save). Used by staff_roles, project_types, etc. */
+export async function saveSettings(payload) {
+    const token = localStorage.getItem('auth_token');
+    return fetch('/api/settings/save', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...(token ? { 'Authorization': 'Bearer ' + token } : {}) },
+        body: JSON.stringify(payload)
+    });
+}
+
 export function esc(str) {
     return String(str || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
 }
@@ -185,7 +195,10 @@ export function searchableSelect(sel, opts = {}) {
     });
     observer.observe(sel, { childList: true });
 
-    return { refresh: () => { _buildItems(); const o = sel.options[sel.selectedIndex]; input.value = o && o.value ? o.textContent : ''; } };
+    return {
+        refresh: () => { _buildItems(); const o = sel.options[sel.selectedIndex]; input.value = o && o.value ? o.textContent : ''; },
+        destroy: () => { observer.disconnect(); wrap.replaceWith(sel); sel.style.display = ''; delete sel.dataset.searchable; }
+    };
 }
 
 /**

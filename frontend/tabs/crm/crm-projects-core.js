@@ -1,7 +1,7 @@
 /**
  * crm-projects-core.js — 列表 + CRUD Modal + CSV 匯入
  */
-import { crmFetch as _fetch, crmCacheFetch, crmCacheInvalidate, esc as _esc, renderAvatar, populateUserSelect, populateClientSelect, searchableSelect, kebabMenuHtml } from './crm-utils.js';
+import { crmFetch as _fetch, crmCacheFetch, crmCacheInvalidate, esc as _esc, renderAvatar, populateUserSelect, populateClientSelect, searchableSelect, saveSettings, kebabMenuHtml } from './crm-utils.js';
 import { state, callbacks } from './crm-projects-state.js';
 
 // ── Project Types (dynamic from settings) ─────────────────
@@ -28,11 +28,7 @@ function _populateTypeSelects() {
 }
 
 async function _saveTypes() {
-    const token = localStorage.getItem('auth_token');
-    await fetch('/api/settings/save', {
-        method: 'POST', headers: { 'Content-Type': 'application/json', ...(token ? { 'Authorization': 'Bearer ' + token } : {}) },
-        body: JSON.stringify({ project_types: _projectTypes })
-    });
+    await saveSettings({ project_types: _projectTypes });
 }
 
 window._projEditTypes = function() {

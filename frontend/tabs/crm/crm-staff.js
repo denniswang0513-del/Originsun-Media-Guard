@@ -2,7 +2,7 @@
  * crm-staff.js — 人力資源 Tab
  */
 
-import { crmFetch as _fetch, esc as _esc, fmtNum as _fmtNum, setupResizeHandle, enableInlineEdit, addEditButton, kebabMenuHtml } from './crm-utils.js';
+import { crmFetch as _fetch, esc as _esc, fmtNum as _fmtNum, setupResizeHandle, enableInlineEdit, addEditButton, kebabMenuHtml, saveSettings } from './crm-utils.js';
 
 let _staff = [];
 let _selectedId = null;
@@ -330,11 +330,7 @@ function _populateRoleSelects() {
 }
 
 async function _saveRoles() {
-    const token = localStorage.getItem('auth_token');
-    await fetch('/api/settings/save', {
-        method: 'POST', headers: { 'Content-Type': 'application/json', ...(token ? { 'Authorization': 'Bearer ' + token } : {}) },
-        body: JSON.stringify({ staff_roles: _roles })
-    });
+    await saveSettings({ staff_roles: _roles });
 }
 
 window._staffEditRoles = function() {
