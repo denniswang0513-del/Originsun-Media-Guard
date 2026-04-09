@@ -527,8 +527,8 @@ function _bindPublishEvents(container, projectId) {
 
     container.querySelector('#showcase-copy-share')?.addEventListener('click', async () => {
         try {
-            const data = await _fetch('/projects/' + projectId + '/showcase/share');
-            const url = location.origin + '/showcase/' + data.share_token;
+            const data = await _fetch('/projects/' + projectId + '/showcase/generate-edit-token', { method: 'POST', body: '{}' });
+            const url = location.origin + data.url;
             await navigator.clipboard.writeText(url);
             alert('已複製協作連結');
         } catch (err) { alert('取得連結失敗: ' + err.message); }
