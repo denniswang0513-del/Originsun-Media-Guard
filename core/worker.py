@@ -693,6 +693,7 @@ async def _run_drone_meta(job, engine, task: DroneMetaRequest, _on_progress):
 def _drone_meta_sync(job, engine, task: DroneMetaRequest, _on_progress):
     import subprocess
     import datetime as _datetime
+    import json
 
     job_id = job.job_id
     project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -762,6 +763,17 @@ def _drone_meta_sync(job, engine, task: DroneMetaRequest, _on_progress):
         file_exif_dt = file_dt.strftime("%Y:%m:%d %H:%M:%S")
         file_iso_dt = file_dt.strftime("%Y-%m-%dT%H:%M:%SZ")
 
+        # Get video duration via ffprobe
+        _probe_cmd = [ffmpeg_bin.replace('ffmpeg', 'ffprobe'), '-v', 'quiet',
+                      '-print_format', 'json', '-show_format', fpath]
+        _probe_r = subprocess.run(_probe_cmd, capture_output=True, text=True,
+                                  encoding='utf-8', errors='ignore', creationflags=HNO)
+        _file_duration = 0
+        try:
+            _file_duration = int(float(json.loads(_probe_r.stdout).get('format', {}).get('duration', 0)))
+        except Exception:
+            pass
+
         # Detect DJI and generate Autel subtitle
         from utils.dji_meta_parser import parse_dji_meta
         dji_data = parse_dji_meta(fpath, ffmpeg_path=ffmpeg_bin)
@@ -775,8 +787,14 @@ def _drone_meta_sync(job, engine, task: DroneMetaRequest, _on_progress):
             })
             autel_srt_path = os.path.join(out_dir, f"_autel_{current_index:04d}.srt")
             home = dji_data['frames'][0]
+            # Autel format: 1 subtitle entry per second
+            duration_sec = _file_duration or int(len(dji_data['frames']) / 60)
+            # Sample frames evenly: pick 1 per second
+            total_frames = len(dji_data['frames'])
+            step = max(1, total_frames // max(duration_sec, 1))
+            sampled = [dji_data['frames'][min(i * step, total_frames - 1)] for i in range(duration_sec)]
             with open(autel_srt_path, 'w', encoding='utf-8') as sf:
-                for i, frame in enumerate(dji_data['frames']):
+                for i, frame in enumerate(sampled):
                     frame_dt = file_dt + _datetime.timedelta(seconds=i)
                     dt_str = frame_dt.strftime("%Y-%m-%d %H:%M:%S")
                     sf.write(f"{i+1}\n")
@@ -854,7 +872,9 @@ def _drone_meta_sync(job, engine, task: DroneMetaRequest, _on_progress):
         else:
             if is_dji and autel_srt_path:
                 # DJI: copy video/audio but encode subtitle as mov_text
-                ff_cmd += ["-c:v", "copy", "-c:a", "copy", "-c:s", "mov_text"]
+                # Force 60fps timescale to match Autel (DJI uses 59.94)
+                ff_cmd += ["-c:v", "copy", "-c:a", "copy", "-c:s", "mov_text",
+                           "-video_track_timescale", "60000"]
             else:
                 ff_cmd += ["-c", "copy"]
 
@@ -891,6 +911,7 @@ def _drone_meta_sync(job, engine, task: DroneMetaRequest, _on_progress):
             f"-FileCreateDate={file_exif_dt}",
             f"-FileModifyDate={file_exif_dt}",
             "-Software=Lavf58.20.100",
+            "-QuickTime:SoftwareVersion=Lavf58.20.100",
             "-overwrite_original",
             new_path,
         ]
