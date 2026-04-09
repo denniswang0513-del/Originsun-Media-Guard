@@ -1208,6 +1208,21 @@ _UPLOAD_BASE = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__fi
 _ALLOWED_IMG_EXT = {".jpg", ".jpeg", ".png", ".webp", ".heic"}
 
 
+async def _save_image(file, dest_dir: str, filename: str) -> str:
+    """Validate image extension, save to dest_dir/filename.ext, return relative URL."""
+    ext = (os.path.splitext(file.filename or "img.jpg")[1] or ".jpg").lower()
+    if ext not in _ALLOWED_IMG_EXT:
+        raise HTTPException(status_code=400, detail=f"不支援的圖片格式：{ext}")
+    os.makedirs(dest_dir, exist_ok=True)
+    path = os.path.join(dest_dir, f"{filename}{ext}")
+    content = await file.read()
+    with open(path, "wb") as fp:
+        fp.write(content)
+    # Return path relative to uploads/
+    rel = os.path.relpath(path, os.path.dirname(_UPLOAD_BASE)).replace("\\", "/")
+    return "/" + rel
+
+
 def _to_portfolio_dict(p) -> dict:
     return {
         "id": p.id,
@@ -1514,19 +1529,22 @@ async def staff_resume_pdf(staff_id: str):
 
 # ── Staff Self-Edit via Token ─────────────────────────────
 
-async def _verify_edit_token(session, token: str, require_editable: bool = False):
-    """Verify staff edit token. Returns CrmStaff or raises HTTPException."""
+async def _verify_token_generic(session, token: str, scope: str, model_cls, editable_attr: str, require_editable: bool = False):
+    """Generic token verification for staff resume / showcase edit tokens."""
     from core.auth import verify_token
     payload = verify_token(token)
-    if not payload or payload.get('scope') != 'resume_edit':
+    if not payload or payload.get('scope') != scope:
         raise HTTPException(status_code=401, detail="無效的連結")
-    staff_id = payload.get('sub', '')
-    s = await session.get(CrmStaff, staff_id)
-    if not s or s.edit_token != token:
+    obj = await session.get(model_cls, payload.get('sub', ''))
+    if not obj or obj.edit_token != token:
         raise HTTPException(status_code=401, detail="連結已失效")
-    if require_editable and not s.resume_editable:
+    if require_editable and not getattr(obj, editable_attr, True):
         raise HTTPException(status_code=403, detail="管理員已關閉編輯權限")
-    return s
+    return obj
+
+
+async def _verify_edit_token(session, token: str, require_editable: bool = False):
+    return await _verify_token_generic(session, token, 'resume_edit', CrmStaff, 'resume_editable', require_editable)
 
 
 @router.post("/staff/{staff_id}/generate-edit-token")
@@ -3457,18 +3475,7 @@ def _to_showcase_dict(s) -> dict:
 
 
 async def _verify_showcase_edit_token(session, token: str, require_editable: bool = False):
-    """Verify showcase edit token. Returns CrmProjectShowcase or raises HTTPException."""
-    from core.auth import verify_token
-    payload = verify_token(token)
-    if not payload or payload.get('scope') != 'showcase_edit':
-        raise HTTPException(status_code=401, detail="無效的連結")
-    project_id = payload.get('sub', '')
-    sc = await session.get(CrmProjectShowcase, project_id)
-    if not sc or sc.edit_token != token:
-        raise HTTPException(status_code=401, detail="連結已失效")
-    if require_editable and not sc.editable:
-        raise HTTPException(status_code=403, detail="管理員已關閉編輯權限")
-    return sc
+    return await _verify_token_generic(session, token, 'showcase_edit', CrmProjectShowcase, 'editable', require_editable)
 
 
 @router.get("/projects/{project_id}/showcase")
