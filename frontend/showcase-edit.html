@@ -1,0 +1,345 @@
+<!DOCTYPE html>
+<html lang="zh-TW" data-theme="dark">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>編輯作品展示 — Originsun Studio</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&family=Noto+Sans+TC:wght@300;400;500;700&display=swap" rel="stylesheet">
+<style>
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+:root {
+  --bg:#0e0e0e;--bg2:#161616;--bg3:#1e1e1e;
+  --text:#e8e6e3;--text2:#9a9590;--text3:#5a5550;
+  --accent:#c8a45c;--accent2:#e8c97c;
+  --border:#2a2825;--border2:#3a3835;
+  --card:#141414;--danger:#c44;--success:#4a8;
+  --font-display:'Outfit',sans-serif;
+  --font-body:'Noto Sans TC',sans-serif;
+  --max-w:800px;
+}
+html{scroll-behavior:smooth}
+body{font-family:var(--font-body);background:var(--bg);color:var(--text);line-height:1.7;font-size:15px;min-height:100vh}
+body::before{content:'';position:fixed;inset:0;z-index:9999;pointer-events:none;opacity:.03;background-image:url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E")}
+
+#loading{position:fixed;inset:0;z-index:1000;background:var(--bg);display:flex;align-items:center;justify-content:center;flex-direction:column;gap:16px;transition:opacity .5s}
+#loading.fade{opacity:0;pointer-events:none}
+.loading-bar{width:120px;height:2px;background:var(--border);border-radius:1px;overflow:hidden}
+.loading-bar::after{content:'';display:block;width:40%;height:100%;background:var(--accent);animation:loadSlide 1s ease infinite}
+@keyframes loadSlide{0%{transform:translateX(-100%)}100%{transform:translateX(350%)}}
+.loading-text{font-family:var(--font-display);font-size:11px;letter-spacing:4px;text-transform:uppercase;color:var(--text3)}
+
+#error{display:none;text-align:center;padding:120px 20px;color:var(--text3);font-family:var(--font-display)}
+#error h2{font-size:48px;font-weight:300;color:var(--text2);margin-bottom:8px}
+
+.readonly-banner{background:var(--bg3);border:1px solid var(--border);border-radius:4px;padding:12px;text-align:center;color:var(--text2);font-size:13px;margin-bottom:24px}
+
+.page{max-width:var(--max-w);margin:0 auto;padding:40px 20px 80px;opacity:0;transform:translateY(12px);transition:all .5s}
+.page.visible{opacity:1;transform:translateY(0)}
+
+.page-title{font-family:var(--font-display);font-size:24px;font-weight:600;margin-bottom:4px}
+.page-sub{font-size:13px;color:var(--text3);margin-bottom:32px}
+
+.section{margin-bottom:40px}
+.section-label{font-family:var(--font-display);font-size:10px;font-weight:500;letter-spacing:4px;text-transform:uppercase;color:var(--accent);margin-bottom:14px;display:flex;align-items:center;gap:12px}
+.section-label::after{content:'';flex:1;height:1px;background:var(--border)}
+
+textarea,input[type="text"],input[type="url"]{width:100%;background:var(--bg3);border:1px solid var(--border);border-radius:4px;padding:10px 14px;color:var(--text);font-family:var(--font-body);font-size:14px;resize:vertical}
+textarea:focus,input:focus{outline:none;border-color:var(--accent)}
+textarea{min-height:80px}
+
+.btn{display:inline-flex;align-items:center;gap:6px;padding:8px 16px;border:1px solid var(--border);border-radius:4px;background:var(--bg3);color:var(--text2);font-size:13px;cursor:pointer;font-family:var(--font-body);transition:all .2s}
+.btn:hover{border-color:var(--accent);color:var(--text)}
+.btn-primary{background:var(--accent);color:#1a1a1a;border-color:var(--accent);font-weight:500}
+.btn-primary:hover{background:var(--accent2)}
+.btn-danger{color:var(--danger);border-color:var(--danger)}
+.btn-sm{padding:4px 10px;font-size:12px}
+
+.tag-list{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:8px}
+.tag{padding:4px 12px;font-size:12px;background:var(--bg3);border:1px solid var(--border);border-radius:16px;color:var(--text2);display:flex;align-items:center;gap:6px}
+.tag button{background:none;border:none;color:var(--text3);cursor:pointer;font-size:14px;padding:0;line-height:1}
+.tag-input{display:flex;gap:6px;align-items:center}
+.tag-input input{flex:1;max-width:200px}
+
+.gallery-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:10px;margin-bottom:12px}
+.gallery-item{position:relative;aspect-ratio:16/9;border-radius:4px;overflow:hidden;border:1px solid var(--border)}
+.gallery-item img{width:100%;height:100%;object-fit:cover}
+.gallery-item .del{position:absolute;top:4px;right:4px;width:22px;height:22px;border-radius:50%;background:rgba(0,0,0,.7);border:none;color:#fff;font-size:14px;cursor:pointer;display:flex;align-items:center;justify-content:center}
+
+.credit-row{display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid var(--border);font-size:14px}
+.credit-role{color:var(--accent);font-family:var(--font-display);font-size:12px;width:80px;flex-shrink:0}
+.credit-name{flex:1}
+.credit-link{color:var(--text3);font-size:12px;text-decoration:none}
+.credit-link:hover{color:var(--accent)}
+
+.process-item{display:flex;gap:12px;padding:12px 0;border-bottom:1px solid var(--border)}
+.process-item img{width:120px;height:68px;object-fit:cover;border-radius:4px;flex-shrink:0}
+.process-text{flex:1;font-size:13px;color:var(--text2)}
+
+.footer{text-align:center;padding-top:40px;margin-top:40px;border-top:1px solid var(--border);font-family:var(--font-display);font-size:11px;letter-spacing:2px;color:var(--text3)}
+
+.toast{position:fixed;bottom:24px;left:50%;transform:translateX(-50%);background:var(--success);color:#fff;padding:8px 20px;border-radius:20px;font-size:13px;opacity:0;transition:opacity .3s;pointer-events:none;z-index:100}
+.toast.show{opacity:1}
+
+@media(max-width:600px){.page{padding:24px 14px 60px}.gallery-grid{grid-template-columns:repeat(auto-fill,minmax(100px,1fr))}.credit-row{flex-wrap:wrap}.process-item{flex-direction:column}.process-item img{width:100%;height:auto}}
+</style>
+</head>
+<body>
+<div id="loading"><div class="loading-bar"></div><div class="loading-text">Loading</div></div>
+<div id="error"><h2>404</h2><p>此連結無效或已失效</p></div>
+<div class="page" id="page"></div>
+<div class="toast" id="toast"></div>
+
+<script>
+const TOKEN = new URLSearchParams(location.search).get('token') || '';
+const API = '/api/v1/crm/public/showcase-edit/' + TOKEN;
+let DATA = null;
+let EDITABLE = false;
+
+function _esc(s) { const d = document.createElement('div'); d.textContent = s || ''; return d.innerHTML; }
+function _toast(msg) { const t = document.getElementById('toast'); t.textContent = msg; t.classList.add('show'); setTimeout(() => t.classList.remove('show'), 2000); }
+
+async function _load() {
+    if (!TOKEN) { _showError(); return; }
+    try {
+        const res = await fetch(API);
+        if (!res.ok) { _showError(); return; }
+        DATA = await res.json();
+        EDITABLE = !!DATA.editable;
+        _render();
+    } catch (_) { _showError(); }
+}
+
+function _showError() {
+    document.getElementById('loading').classList.add('fade');
+    document.getElementById('error').style.display = 'block';
+}
+
+async function _save(body) {
+    const res = await fetch(API, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+    if (!res.ok) { const e = await res.json().catch(() => ({})); throw new Error(e.detail || '儲存失敗'); }
+    return res.json();
+}
+
+async function _upload(subpath, file) {
+    const form = new FormData();
+    form.append('file', file);
+    const res = await fetch(API + subpath, { method: 'POST', body: form });
+    if (!res.ok) { const e = await res.json().catch(() => ({})); throw new Error(e.detail || '上傳失敗'); }
+    return res.json();
+}
+
+function _render() {
+    const sc = DATA.showcase || {};
+    const gallery = sc.gallery || [];
+    const processItems = sc.process_items || [];
+    const credits = sc.credits || [];
+    const tags = sc.tags || [];
+    const projectName = DATA.project_name || '';
+
+    let html = '';
+
+    if (!EDITABLE) html += '<div class="readonly-banner">此頁面目前為唯讀模式</div>';
+
+    html += `<div class="page-title">${_esc(projectName)}</div>`;
+    html += `<div class="page-sub">作品展示編輯</div>`;
+
+    // Cover (read-only in edit page)
+    if (sc.cover_url) {
+        html += `<div class="section">
+            <div class="section-label">封面</div>
+            <div class="gallery-item" style="aspect-ratio:21/9;max-width:100%;"><img src="${_esc(sc.cover_url)}" alt="cover"></div>
+        </div>`;
+    }
+
+    // Description
+    html += `<div class="section" id="sec-desc">
+        <div class="section-label">專案描述</div>
+        ${EDITABLE
+            ? `<textarea id="inp-desc">${_esc(sc.description || '')}</textarea>
+               <div style="margin-top:8px;"><button class="btn btn-primary btn-sm" id="btn-save-desc">儲存</button></div>`
+            : `<p style="color:var(--text2);">${_esc(sc.description || '尚未填寫')}</p>`}
+    </div>`;
+
+    // Video URL
+    html += `<div class="section" id="sec-video">
+        <div class="section-label">主影片連結</div>
+        ${EDITABLE
+            ? `<div style="display:flex;gap:8px;"><input type="url" id="inp-video" value="${_esc(sc.video_url || '')}" placeholder="YouTube 或 Vimeo 連結">
+               <button class="btn btn-primary btn-sm" id="btn-save-video">儲存</button></div>`
+            : sc.video_url ? `<a href="${_esc(sc.video_url)}" target="_blank" style="color:var(--accent);">${_esc(sc.video_url)}</a>` : '<p style="color:var(--text3);">尚未設定</p>'}
+    </div>`;
+
+    // Gallery
+    html += `<div class="section" id="sec-gallery">
+        <div class="section-label">成品展示</div>
+        <div class="gallery-grid">${gallery.map((g, i) => `
+            <div class="gallery-item">
+                <img src="${_esc(g.url)}" alt="${_esc(g.caption || '')}">
+                ${EDITABLE ? `<button class="del" data-action="del-gallery" data-idx="${i}">✕</button>` : ''}
+            </div>`).join('')}
+        </div>
+        ${EDITABLE ? '<div><input type="file" id="inp-gallery" accept="image/*" multiple style="display:none"><button class="btn btn-sm" id="btn-add-gallery">+ 上傳圖片</button></div>' : ''}
+        ${gallery.length === 0 ? '<p style="color:var(--text3);font-size:13px;">尚無成品圖</p>' : ''}
+    </div>`;
+
+    // Process
+    html += `<div class="section" id="sec-process">
+        <div class="section-label">創作過程</div>
+        ${processItems.length > 0 ? processItems.map((p, i) => `
+            <div class="process-item">
+                ${p.url ? `<img src="${_esc(p.url)}" alt="">` : ''}
+                <div class="process-text">
+                    ${p.phase ? `<strong>${_esc(p.phase)}</strong> ` : ''}${_esc(p.caption || '')}
+                    ${p.video_url ? `<br><a href="${_esc(p.video_url)}" target="_blank" style="color:var(--accent);font-size:12px;">影片連結</a>` : ''}
+                </div>
+                ${EDITABLE ? `<button class="btn btn-danger btn-sm" data-action="del-process" data-idx="${i}">✕</button>` : ''}
+            </div>`).join('') : '<p style="color:var(--text3);font-size:13px;">尚無創作過程紀錄</p>'}
+        ${EDITABLE ? '<div style="margin-top:8px;"><input type="file" id="inp-process" accept="image/*" style="display:none"><button class="btn btn-sm" id="btn-add-process">+ 上傳過程圖</button></div>' : ''}
+    </div>`;
+
+    // Credits
+    html += `<div class="section" id="sec-credits">
+        <div class="section-label">Credit</div>
+        ${credits.map((c, i) => `
+            <div class="credit-row">
+                <span class="credit-role">${_esc(c.role || '')}</span>
+                <span class="credit-name">${_esc(c.name || '')}</span>
+                ${c.resume_url ? `<a class="credit-link" href="${_esc(c.resume_url)}" target="_blank">簡歷 →</a>` : ''}
+                ${EDITABLE ? `<button class="btn btn-danger btn-sm" data-action="del-credit" data-idx="${i}">✕</button>` : ''}
+            </div>`).join('')}
+        ${credits.length === 0 ? '<p style="color:var(--text3);font-size:13px;">尚無 Credit</p>' : ''}
+        ${EDITABLE ? `<div style="margin-top:8px;display:flex;gap:6px;flex-wrap:wrap;">
+            <input type="text" id="inp-credit-role" placeholder="職務" style="width:100px;">
+            <input type="text" id="inp-credit-name" placeholder="姓名" style="flex:1;min-width:100px;">
+            <button class="btn btn-sm" id="btn-add-credit">+ 新增</button>
+        </div>` : ''}
+    </div>`;
+
+    // Tags
+    html += `<div class="section" id="sec-tags">
+        <div class="section-label">標籤</div>
+        <div class="tag-list">${tags.map((t, i) => `<span class="tag">${_esc(t)}${EDITABLE ? `<button data-action="del-tag" data-idx="${i}">✕</button>` : ''}</span>`).join('')}</div>
+        ${EDITABLE ? `<div class="tag-input"><input type="text" id="inp-tag" placeholder="輸入標籤 + Enter" style="max-width:200px;"><button class="btn btn-sm" id="btn-add-tag">+</button></div>` : ''}
+    </div>`;
+
+    // Preview link
+    if (DATA.showcase && DATA.showcase.id) {
+        html += `<div style="text-align:center;margin-top:24px;">
+            <button class="btn" onclick="window.open('/showcase.html?id=${_esc(DATA.showcase.id)}','_blank')">預覽公開展示頁 →</button>
+        </div>`;
+    }
+
+    html += '<div class="footer">Originsun Studio</div>';
+
+    document.getElementById('page').innerHTML = html;
+    document.getElementById('loading').classList.add('fade');
+    requestAnimationFrame(() => document.getElementById('page').classList.add('visible'));
+
+    if (EDITABLE) _bindEvents();
+}
+
+function _bindEvents() {
+    const sc = DATA.showcase || {};
+
+    // Save description
+    document.getElementById('btn-save-desc')?.addEventListener('click', async () => {
+        try {
+            await _save({ description: document.getElementById('inp-desc').value });
+            _toast('已儲存');
+        } catch (e) { alert(e.message); }
+    });
+
+    // Save video
+    document.getElementById('btn-save-video')?.addEventListener('click', async () => {
+        try {
+            await _save({ video_url: document.getElementById('inp-video').value.trim() });
+            _toast('已儲存');
+        } catch (e) { alert(e.message); }
+    });
+
+    // Gallery upload
+    document.getElementById('btn-add-gallery')?.addEventListener('click', () => document.getElementById('inp-gallery').click());
+    document.getElementById('inp-gallery')?.addEventListener('change', async (e) => {
+        for (const file of e.target.files) {
+            try { await _upload('/gallery', file); } catch (err) { alert(err.message); }
+        }
+        await _reload();
+    });
+
+    // Gallery delete
+    document.querySelectorAll('[data-action="del-gallery"]').forEach(btn => {
+        btn.addEventListener('click', async () => {
+            const gallery = [...(sc.gallery || [])];
+            gallery.splice(parseInt(btn.dataset.idx), 1);
+            try { await _save({ gallery }); await _reload(); } catch (e) { alert(e.message); }
+        });
+    });
+
+    // Process upload
+    document.getElementById('btn-add-process')?.addEventListener('click', () => document.getElementById('inp-process').click());
+    document.getElementById('inp-process')?.addEventListener('change', async (e) => {
+        if (e.target.files[0]) {
+            try { await _upload('/process', e.target.files[0]); await _reload(); } catch (err) { alert(err.message); }
+        }
+    });
+
+    // Process delete
+    document.querySelectorAll('[data-action="del-process"]').forEach(btn => {
+        btn.addEventListener('click', async () => {
+            const items = [...(sc.process_items || [])];
+            items.splice(parseInt(btn.dataset.idx), 1);
+            try { await _save({ process_items: items }); await _reload(); } catch (e) { alert(e.message); }
+        });
+    });
+
+    // Credit add
+    document.getElementById('btn-add-credit')?.addEventListener('click', async () => {
+        const role = document.getElementById('inp-credit-role').value.trim();
+        const name = document.getElementById('inp-credit-name').value.trim();
+        if (!name) return;
+        const credits = [...(sc.credits || []), { name, role }];
+        try { await _save({ credits }); await _reload(); } catch (e) { alert(e.message); }
+    });
+
+    // Credit delete
+    document.querySelectorAll('[data-action="del-credit"]').forEach(btn => {
+        btn.addEventListener('click', async () => {
+            const credits = [...(sc.credits || [])];
+            credits.splice(parseInt(btn.dataset.idx), 1);
+            try { await _save({ credits }); await _reload(); } catch (e) { alert(e.message); }
+        });
+    });
+
+    // Tag add
+    const addTag = async () => {
+        const inp = document.getElementById('inp-tag');
+        const val = inp.value.trim();
+        if (!val) return;
+        const tags = [...(sc.tags || []), val];
+        try { await _save({ tags }); await _reload(); } catch (e) { alert(e.message); }
+    };
+    document.getElementById('btn-add-tag')?.addEventListener('click', addTag);
+    document.getElementById('inp-tag')?.addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); addTag(); } });
+
+    // Tag delete
+    document.querySelectorAll('[data-action="del-tag"]').forEach(btn => {
+        btn.addEventListener('click', async () => {
+            const tags = [...(sc.tags || [])];
+            tags.splice(parseInt(btn.dataset.idx), 1);
+            try { await _save({ tags }); await _reload(); } catch (e) { alert(e.message); }
+        });
+    });
+}
+
+async function _reload() {
+    try {
+        const res = await fetch(API);
+        if (res.ok) { DATA = await res.json(); _render(); }
+    } catch (_) {}
+}
+
+_load();
+</script>
+</body>
+</html>
