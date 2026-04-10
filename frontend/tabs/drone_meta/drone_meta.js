@@ -407,9 +407,6 @@ function _getFileSetting(idx) {
 }
 
 function collectDroneMetaPayload() {
-    const projectName = document.getElementById('dm_project_name').value.trim();
-    if (!projectName) { alert('請填寫專案名稱'); return { valid: false }; }
-
     const fileIndex = parseInt(document.getElementById('dm_file_index').value) || 1;
     const selectedFiles = [];
     for (let i = 0; i < _dmFiles.length; i++) {
@@ -417,26 +414,25 @@ function collectDroneMetaPayload() {
     }
     if (!selectedFiles.length) { alert('請至少勾選一個影片檔'); return { valid: false }; }
 
-    const dateStr = document.getElementById('dm_date').value;
-    const timeStr = document.getElementById('dm_time').value || '00:00:00';
-    if (!dateStr) { alert('請選擇拍攝日期'); return { valid: false }; }
-    const dateTime = `${dateStr}T${timeStr}`;
+    // Use first file's time as global fallback
+    const firstDate = selectedFiles[0]?.date_time_override || new Date().toISOString();
+    const dateTime = firstDate;
 
     const model = _getDroneModelInfo();
     const doConcat = document.getElementById('dm_do_concat').checked;
 
     const payload = {
-        project_name: projectName,
+        project_name: 'drone_convert',
         file_index: fileIndex,
         files: selectedFiles,
         output_dir: document.getElementById('dm_output_dir').value.trim(),
         date_time: dateTime,
-        serial_number: document.getElementById('dm_serial').value.trim(),
-        operator: document.getElementById('dm_operator').value.trim(),
-        road_section: document.getElementById('dm_road_section').value.trim(),
-        phase: document.getElementById('dm_phase').value.trim(),
-        company: document.getElementById('dm_company').value.trim(),
-        description: document.getElementById('dm_description').value.trim(),
+        serial_number: '',
+        operator: '',
+        road_section: '',
+        phase: '',
+        company: '',
+        description: '',
         drone_make: model.make,
         drone_model: model.model,
         lens_make: model.lensMake,
@@ -536,9 +532,5 @@ export async function initDroneMetaTab() {
     // Set default date/time to now
     const now = new Date();
     const dateStr = now.toISOString().split('T')[0];
-    const timeStr = now.toTimeString().split(' ')[0];
-    document.getElementById('dm_date').value = dateStr;
-    document.getElementById('dm_time').value = timeStr;
-
     _setupProgressListener();
 }
