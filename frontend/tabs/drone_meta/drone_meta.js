@@ -52,6 +52,7 @@ async function dmPickFolder() {
         const data = await res.json();
         if (data.path) {
             document.getElementById('dm_source_path').value = data.path;
+            dmScanFiles(); // auto scan after pick
         }
     } catch (e) { console.warn('pick folder failed:', e); }
 }
@@ -64,6 +65,7 @@ async function dmPickFiles() {
         if (data.path) {
             const cur = document.getElementById('dm_source_path').value.trim();
             document.getElementById('dm_source_path').value = cur ? cur + ', ' + data.path : data.path;
+            dmScanFiles(); // auto scan after pick
         }
     } catch (e) { console.warn('pick file failed:', e); }
 }
