@@ -4,49 +4,15 @@
   <!-- Left panel: source + settings -->
   <div style="width:380px;flex-shrink:0;overflow-y:auto;">
 
-<!-- ═══ 區塊一：檔案選擇 + 預覽列表 ═══ -->
+<!-- ═══ 區塊一：檔案匯入 ═══ -->
 <div class="mb-6">
     <div class="flex items-center gap-3 mb-3">
-        <label class="text-sm font-medium text-gray-400">影片來源</label>
         <button onclick="dmPickFolder()"
-            class="text-xs bg-[#333] hover:bg-[#444] px-3 py-1.5 rounded text-white border border-[#555]">📁 選擇資料夾</button>
-        <button onclick="dmPickFiles()"
-            class="text-xs bg-[#333] hover:bg-[#444] px-3 py-1.5 rounded text-white border border-[#555]">📄 選擇檔案</button>
-        <button onclick="dmScanFiles()"
-            class="text-xs bg-[#2a5a9e] hover:bg-[#3a6abe] px-3 py-1.5 rounded text-white border border-[#4a7ace]">🔍 掃描影片</button>
+            class="text-sm bg-[#2a5a9e] hover:bg-[#3a6abe] px-4 py-2 rounded text-white border border-[#4a7ace]">📁 選擇資料夾</button>
         <span id="dm_scan_status" class="text-xs text-gray-500"></span>
+        <button onclick="dmClearFiles()" class="text-xs text-red-400 hover:text-red-300 ml-auto hidden" id="dm_btn_clear">清空</button>
     </div>
-
-    <!-- 手動路徑輸入 -->
-    <div class="flex gap-2 mb-3">
-        <input type="text" id="dm_source_path"
-            class="flex-1 bg-[#1e1e1e] border border-[#444] rounded px-3 py-2 text-sm focus:outline-none focus:border-blue-500"
-            placeholder="輸入資料夾或檔案路徑，可用逗號分隔多個路徑...">
-    </div>
-
-    <!-- 全選/勾選統計 -->
-    <div id="dm_file_toolbar" class="hidden flex items-center gap-4 mb-2">
-        <label class="flex items-center gap-2 cursor-pointer text-sm">
-            <input type="checkbox" id="dm_select_all" onchange="dmToggleSelectAll(this.checked)"
-                class="form-checkbox text-blue-500 bg-[#1e1e1e] border-[#444] rounded">
-            <span class="text-gray-300">全選</span>
-        </label>
-        <span id="dm_select_count" class="text-xs text-gray-500">已勾選 0 個</span>
-        <button onclick="dmClearFiles()" class="text-xs text-red-400 hover:text-red-300 ml-auto">清空列表</button>
-    </div>
-
-    <!-- 批次時間工具 -->
-    <div id="dm_time_toolbar" class="hidden flex items-center gap-3 mb-2 p-2 bg-[#1a1a1a] border border-[#333] rounded">
-        <label class="text-xs text-gray-400">批次時間：</label>
-        <input type="date" id="dm_batch_date" class="bg-[#1e1e1e] border border-[#444] rounded px-2 py-1 text-xs">
-        <input type="time" id="dm_batch_time" step="1" class="bg-[#1e1e1e] border border-[#444] rounded px-2 py-1 text-xs">
-        <button onclick="dmBatchApplyTime()" class="text-xs bg-[#2a5a9e] hover:bg-[#3a6abe] px-3 py-1 rounded text-white">套用到已勾選</button>
-        <span class="text-xs text-gray-500">|</span>
-        <label class="text-xs text-gray-400">遞增</label>
-        <input type="number" id="dm_batch_increment" value="1" min="1" max="60" class="w-12 bg-[#1e1e1e] border border-[#444] rounded px-2 py-1 text-xs text-center">
-        <label class="text-xs text-gray-400">分鐘</label>
-        <button onclick="dmBatchIncrementTime()" class="text-xs bg-[#333] hover:bg-[#444] px-3 py-1 rounded text-white border border-[#555]">依序遞增</button>
-    </div>
+    <input type="hidden" id="dm_source_path">
 
     <!-- 檔案卡片列表 -->
     <div id="dm_file_list"

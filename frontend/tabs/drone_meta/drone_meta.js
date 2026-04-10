@@ -108,19 +108,19 @@ window.dmScanFiles = dmScanFiles;
 
 function _renderFileList() {
     const container = document.getElementById('dm_file_list');
-    const toolbar = document.getElementById('dm_file_toolbar');
-
-    const timeToolbar = document.getElementById('dm_time_toolbar');
+    const clearBtn = document.getElementById('dm_btn_clear');
 
     if (!_dmFiles.length) {
-        container.innerHTML = '<div class="text-sm text-gray-500 text-center py-4">找不到影片檔案</div>';
-        toolbar.classList.add('hidden');
-        if (timeToolbar) timeToolbar.classList.add('hidden');
+        container.innerHTML = '<div class="text-sm text-gray-500 text-center py-4">尚未匯入影片</div>';
+        if (clearBtn) clearBtn.classList.add('hidden');
         return;
     }
 
-    toolbar.classList.remove('hidden');
-    if (timeToolbar) timeToolbar.classList.remove('hidden');
+    if (clearBtn) clearBtn.classList.remove('hidden');
+    // Auto-select all on first render
+    if (_dmSelected.length === 0 || _dmSelected.every(s => !s)) {
+        _dmSelected = _dmFiles.map(() => true);
+    }
     _updateSelectCount();
 
     container.innerHTML = _dmFiles.map((f, i) => `
