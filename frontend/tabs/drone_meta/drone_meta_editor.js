@@ -43,6 +43,7 @@ export function renderClipDetail(clip, file, allClips, fmtDuration) {
 
     _currentClip = clip;
     _currentFile = file;
+    _currentFile = file;
 
     const duration = file.duration || 0;
     const filmstrip = file.filmstrip || [];
@@ -208,6 +209,7 @@ function _bindTrimInputEvents(clip, duration) {
 // ── Color events ──
 
 function _bindColorEvents(clip) {
+    let _colorDebounce = null;
     const sliders = document.querySelectorAll('#dm_detail_panel input[data-color-name]');
     sliders.forEach(slider => {
         slider.addEventListener('input', () => {
@@ -219,6 +221,10 @@ function _bindColorEvents(clip) {
             // Update clip object
             if (name === 'colorTemp') clip.colorTemp = val;
             else clip[name] = val;
+
+            // Debounced backend preview update
+            clearTimeout(_colorDebounce);
+            _colorDebounce = setTimeout(() => _fetchColorPreview(clip), 400);
         });
     });
 
@@ -237,6 +243,38 @@ function _bindColorEvents(clip) {
         });
     }
 }
+
+async function _fetchColorPreview(clip) {
+    if (!_currentFile) return;
+    const playhead = document.getElementById('dm_playhead');
+    const track = document.getElementById('dm_timeline_track');
+    if (!playhead || !track) return;
+    const pct = parseFloat(playhead.style.left) / track.offsetWidth;
+    const time = pct * (_currentFile.duration || 1);
+    const params = new URLSearchParams({
+        path: _currentFile.path,
+        time: time.toFixed(2),
+        brightness: clip.brightness,
+        contrast: clip.contrast,
+        saturation: clip.saturation,
+        color_temp: clip.colorTemp || 0,
+        width: 640,
+    });
+    const token = localStorage.getItem('auth_token');
+    try {
+        const res = await fetch(`/api/v1/drone_meta/frame?${params}`, {
+            headers: token ? { 'Authorization': 'Bearer ' + token } : {}
+        });
+        if (res.ok) {
+            const blob = await res.blob();
+            const url = URL.createObjectURL(blob);
+            const img = document.getElementById('dm_preview_img');
+            if (img) { if (img._prevUrl) URL.revokeObjectURL(img._prevUrl); img.src = url; img._prevUrl = url; }
+        }
+    } catch (_) {}
+}
+
+let _currentFile = null;
 
 // ── Action buttons ──
 

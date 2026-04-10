@@ -222,6 +222,7 @@ async def create_drone_meta_job(req: DroneMetaRequest):
 
 @router.get("/api/v1/drone_meta/frame")
 async def get_frame(
+    request: Request,
     path: str = Query(...),
     time: float = Query(0.0),
     brightness: float = Query(0.0),
@@ -231,8 +232,16 @@ async def get_frame(
     width: int = Query(640),
 ):
     """Extract a single frame with optional color grading, returned as JPEG."""
-    if not os.path.isfile(path):
+    from core.auth import check_admin
+    try:
+        check_admin(request)
+    except Exception:
+        return JSONResponse({"error": "未授權"}, status_code=401)
+    # Validate path is a real file (no traversal tricks)
+    real = os.path.realpath(path)
+    if not os.path.isfile(real):
         return JSONResponse({"error": "File not found"}, status_code=404)
+    path = real
 
     # Build video filter chain
     vf_parts = [f"eq=brightness={brightness}:contrast={contrast}:saturation={saturation}"]
