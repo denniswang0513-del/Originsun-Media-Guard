@@ -1,4 +1,4 @@
-<h2 class="text-lg font-semibold mb-4 text-[#e0e0e0] border-b border-[#3a3a3a] pb-2">空拍 Metadata 寫入</h2>
+<h2 class="text-lg font-semibold mb-4 text-[#e0e0e0] border-b border-[#3a3a3a] pb-2">空拍轉換</h2>
 
 <!-- ═══ 區塊一：檔案選擇 + 預覽列表 ═══ -->
 <div class="mb-6">
@@ -52,102 +52,59 @@
     </div>
 </div>
 
-<!-- ═══ 區塊二：Metadata 表單 ═══ -->
+<!-- ═══ 區塊二：轉換設定 ═══ -->
 <div class="mb-6">
-    <h3 class="text-sm font-semibold text-[#c0c0c0] mb-3 border-b border-[#333] pb-1">Metadata 設定</h3>
-    <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-        <!-- 左欄 -->
-        <div class="space-y-3">
-            <div>
-                <label class="block text-xs text-gray-400 mb-1">專案名稱 Project Name（必填）</label>
-                <input type="text" id="dm_project_name"
-                    class="w-full bg-[#1e1e1e] border border-[#444] rounded px-3 py-2 text-sm focus:outline-none focus:border-blue-500">
-            </div>
-            <div>
-                <label class="block text-xs text-gray-400 mb-1">檔案起始編號 File Index（必填）</label>
-                <input type="number" id="dm_file_index" value="1" min="1"
-                    class="w-full bg-[#1e1e1e] border border-[#444] rounded px-3 py-2 text-sm focus:outline-none focus:border-blue-500">
-            </div>
-            <div>
-                <label class="block text-xs text-gray-400 mb-1">無人機機型 Drone Model</label>
-                <select id="dm_drone_model"
-                    onchange="dmOnModelChange()"
-                    class="w-full bg-[#1e1e1e] border border-[#444] rounded px-3 py-2 text-sm focus:outline-none focus:border-blue-500">
-                    <option value="autel_evo_lite_plus">Autel Robotics EVO Lite+</option>
-                    <option value="dji_mavic3">DJI Mavic 3</option>
-                    <option value="dji_mini4pro">DJI Mini 4 Pro</option>
-                    <option value="dji_air3">DJI Air 3</option>
-                    <option value="custom">自訂...</option>
-                </select>
-                <div id="dm_custom_model_fields" class="hidden mt-2 grid grid-cols-2 gap-2">
-                    <input type="text" id="dm_custom_make" placeholder="Make (如: DJI)"
-                        class="bg-[#1e1e1e] border border-[#444] rounded px-2 py-1 text-xs">
-                    <input type="text" id="dm_custom_model" placeholder="Model (如: Mavic 3)"
-                        class="bg-[#1e1e1e] border border-[#444] rounded px-2 py-1 text-xs">
-                    <input type="text" id="dm_custom_lens_make" placeholder="Lens Make"
-                        class="bg-[#1e1e1e] border border-[#444] rounded px-2 py-1 text-xs">
-                    <input type="text" id="dm_custom_lens_model" placeholder="Lens Model"
-                        class="bg-[#1e1e1e] border border-[#444] rounded px-2 py-1 text-xs">
-                </div>
-            </div>
-            <div class="grid grid-cols-2 gap-2">
-                <div>
-                    <label class="block text-xs text-gray-400 mb-1">拍攝日期</label>
-                    <input type="date" id="dm_date"
-                        class="w-full bg-[#1e1e1e] border border-[#444] rounded px-3 py-2 text-sm focus:outline-none focus:border-blue-500">
-                </div>
-                <div>
-                    <label class="block text-xs text-gray-400 mb-1">拍攝時間</label>
-                    <input type="time" id="dm_time" step="1"
-                        class="w-full bg-[#1e1e1e] border border-[#444] rounded px-3 py-2 text-sm focus:outline-none focus:border-blue-500">
-                </div>
-            </div>
-            <div>
-                <label class="block text-xs text-gray-400 mb-1">機身序號 Serial Number</label>
-                <input type="text" id="dm_serial"
-                    class="w-full bg-[#1e1e1e] border border-[#444] rounded px-3 py-2 text-sm focus:outline-none focus:border-blue-500">
-            </div>
-            <div>
-                <label class="block text-xs text-gray-400 mb-1">操作員 Operator</label>
-                <input type="text" id="dm_operator"
-                    class="w-full bg-[#1e1e1e] border border-[#444] rounded px-3 py-2 text-sm focus:outline-none focus:border-blue-500">
+    <h3 class="text-sm font-semibold text-[#c0c0c0] mb-3 border-b border-[#333] pb-1">轉換設定</h3>
+    <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+        <div>
+            <label class="block text-xs text-gray-400 mb-1">檔案起始編號</label>
+            <input type="number" id="dm_file_index" value="1" min="1"
+                class="w-full bg-[#1e1e1e] border border-[#444] rounded px-3 py-2 text-sm focus:outline-none focus:border-blue-500">
+        </div>
+        <div>
+            <label class="block text-xs text-gray-400 mb-1">輸出機型</label>
+            <select id="dm_drone_model"
+                onchange="dmOnModelChange()"
+                class="w-full bg-[#1e1e1e] border border-[#444] rounded px-3 py-2 text-sm focus:outline-none focus:border-blue-500">
+                <option value="autel_evo_lite_plus">Autel Robotics EVO Lite+</option>
+                <option value="dji_mavic3">DJI Mavic 3</option>
+                <option value="dji_mini4pro">DJI Mini 4 Pro</option>
+                <option value="dji_air3">DJI Air 3</option>
+                <option value="custom">自訂...</option>
+            </select>
+            <div id="dm_custom_model_fields" class="hidden mt-2 grid grid-cols-2 gap-2">
+                <input type="text" id="dm_custom_make" placeholder="Make (如: DJI)"
+                    class="bg-[#1e1e1e] border border-[#444] rounded px-2 py-1 text-xs">
+                <input type="text" id="dm_custom_model" placeholder="Model (如: Mavic 3)"
+                    class="bg-[#1e1e1e] border border-[#444] rounded px-2 py-1 text-xs">
+                <input type="text" id="dm_custom_lens_make" placeholder="Lens Make"
+                    class="bg-[#1e1e1e] border border-[#444] rounded px-2 py-1 text-xs">
+                <input type="text" id="dm_custom_lens_model" placeholder="Lens Model"
+                    class="bg-[#1e1e1e] border border-[#444] rounded px-2 py-1 text-xs">
             </div>
         </div>
-        <!-- 右欄 -->
-        <div class="space-y-3">
-            <div>
-                <label class="block text-xs text-gray-400 mb-1">工程路段 Road Section</label>
-                <input type="text" id="dm_road_section"
-                    class="w-full bg-[#1e1e1e] border border-[#444] rounded px-3 py-2 text-sm focus:outline-none focus:border-blue-500">
-            </div>
-            <div>
-                <label class="block text-xs text-gray-400 mb-1">工程階段 Phase</label>
-                <input type="text" id="dm_phase"
-                    class="w-full bg-[#1e1e1e] border border-[#444] rounded px-3 py-2 text-sm focus:outline-none focus:border-blue-500">
-            </div>
-            <div>
-                <label class="block text-xs text-gray-400 mb-1">作業單位 Company</label>
-                <input type="text" id="dm_company"
-                    class="w-full bg-[#1e1e1e] border border-[#444] rounded px-3 py-2 text-sm focus:outline-none focus:border-blue-500">
-            </div>
-            <div>
-                <label class="block text-xs text-gray-400 mb-1">工程描述 Description</label>
-                <textarea id="dm_description" rows="3"
-                    class="w-full bg-[#1e1e1e] border border-[#444] rounded px-3 py-2 text-sm focus:outline-none focus:border-blue-500 resize-none"></textarea>
-            </div>
-            <div>
-                <label class="block text-xs text-gray-400 mb-1">輸出目錄（留空 = 來源同目錄）</label>
-                <div class="flex gap-2">
-                    <input type="text" id="dm_output_dir"
-                        class="flex-1 bg-[#1e1e1e] border border-[#444] rounded px-3 py-2 text-sm focus:outline-none focus:border-blue-500"
-                        placeholder="留空則輸出至來源檔案同目錄">
-                    <button onclick="pickPath('dm_output_dir', 'folder')"
-                        class="bg-[#333] hover:bg-[#444] px-3 rounded border border-[#555] text-gray-300">📁</button>
-                </div>
+        <div>
+            <label class="block text-xs text-gray-400 mb-1">輸出目錄（留空 = 來源同目錄）</label>
+            <div class="flex gap-2">
+                <input type="text" id="dm_output_dir"
+                    class="flex-1 bg-[#1e1e1e] border border-[#444] rounded px-3 py-2 text-sm focus:outline-none focus:border-blue-500"
+                    placeholder="留空則輸出至來源同目錄">
+                <button onclick="pickPath('dm_output_dir', 'folder')"
+                    class="bg-[#333] hover:bg-[#444] px-3 rounded border border-[#555] text-gray-300">📁</button>
             </div>
         </div>
     </div>
 </div>
+<!-- Hidden fields for backward compatibility -->
+<input type="hidden" id="dm_project_name" value="drone_convert">
+<input type="hidden" id="dm_date" value="">
+<input type="hidden" id="dm_time" value="">
+<input type="hidden" id="dm_serial" value="">
+<input type="hidden" id="dm_operator" value="">
+<input type="hidden" id="dm_road_section" value="">
+<input type="hidden" id="dm_phase" value="">
+<input type="hidden" id="dm_company" value="">
+<input type="hidden" id="dm_description" value="">
 
 <!-- ═══ 區塊三：串帶選項 ═══ -->
 <div class="mb-6">

@@ -11,6 +11,7 @@
       "report",
       "transcribe",
       "tts",
+      "drone_meta",
       "projects",
       "crm_clients",
       "crm_projects",
@@ -35,8 +36,9 @@
     "description": "剪輯師"
   },
   {
+    "id": 7,
     "name": "Finance",
-    "access_level": 1,
+    "access_level": 3,
     "modules": [
       "crm_clients",
       "crm_projects",
@@ -44,7 +46,6 @@
       "crm_staff",
       "crm_invoices"
     ],
-    "description": "",
-    "id": 7
+    "description": ""
   }
 ]
