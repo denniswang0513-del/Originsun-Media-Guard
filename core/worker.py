@@ -15,6 +15,7 @@ from core.schemas import (  # type: ignore
     BackupRequest, TranscodeRequest, ConcatRequest,
     VerifyRequest, TranscribeRequest, ReportJobRequest,
     TtsRequest, TtsCloneRequest, DroneMetaRequest,
+    TimelineExportRequest,
 )
 from core_engine import ReportManifest  # type: ignore
 
@@ -186,6 +187,9 @@ async def _execute_job(job: state.JobState):
 
         elif isinstance(task, DroneMetaRequest):
             await _run_drone_meta(job, engine, task, _on_progress)
+
+        elif isinstance(task, TimelineExportRequest):
+            await _run_timeline_export(job, engine, task, _on_progress)
 
         # Mark done
         job.status = state.JobStatus.DONE
@@ -983,3 +987,105 @@ def _drone_meta_sync(job, engine, task: DroneMetaRequest, _on_progress):
 
     if fail_list and success_count == 0:
         raise RuntimeError(f"全部 {total} 個檔案處理失敗")
+
+
+# ── Timeline Export ─────────────────────────────────────────
+
+async def _run_timeline_export(job, engine, task: TimelineExportRequest, _on_progress):
+    await asyncio.to_thread(_timeline_export_sync, job, engine, task, _on_progress)
+
+
+def _timeline_export_sync(job, engine, task: TimelineExportRequest, _on_progress):
+    """Export timeline clips as a single concatenated video with per-clip color grading."""
+    import subprocess
+
+    project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    ffmpeg_bin = os.path.join(project_root, "ffmpeg.exe")
+    HNO = getattr(subprocess, 'CREATE_NO_WINDOW', 0x08000000)
+    job_id = job.job_id
+
+    clips = task.clips
+    if not clips:
+        raise ValueError("No clips to export")
+
+    # Build ffmpeg command with filter_complex
+    ff_cmd = [ffmpeg_bin, "-y"]
+
+    # Add inputs with trim
+    for clip in clips:
+        if clip.trim_in > 0:
+            ff_cmd += ["-ss", str(clip.trim_in)]
+        ff_cmd += ["-i", clip.path]
+        if clip.trim_out >= 0:
+            duration = clip.trim_out - max(clip.trim_in, 0)
+            if duration > 0:
+                ff_cmd += ["-t", str(duration)]
+
+    # Build filter_complex
+    resolution_map = {"1080P": "1920:1080", "720P": "1280:720", "4K": "3840:2160"}
+    res = resolution_map.get(task.resolution, "1920:1080")
+
+    filter_parts = []
+    concat_inputs = []
+    for i, clip in enumerate(clips):
+        vf = []
+        # Color grading
+        eq_parts = []
+        if clip.brightness != 0.0:
+            eq_parts.append(f"brightness={clip.brightness}")
+        if clip.contrast != 1.0:
+            eq_parts.append(f"contrast={clip.contrast}")
+        if clip.saturation != 1.0:
+            eq_parts.append(f"saturation={clip.saturation}")
+        if eq_parts:
+            vf.append("eq=" + ":".join(eq_parts))
+        if clip.color_temp != 0.0:
+            t = clip.color_temp
+            vf.append(f"colorbalance=rs={t}:gs=0:bs={-t}")
+        # Scale + pad to target resolution
+        vf.append(
+            f"scale={res}:force_original_aspect_ratio=decrease,"
+            f"pad={res}:(ow-iw)/2:(oh-ih)/2:black,setsar=1"
+        )
+
+        filter_parts.append(f"[{i}:v]{','.join(vf)}[v{i}]")
+        filter_parts.append(
+            f"[{i}:a]aresample=48000,aformat=sample_fmts=fltp:channel_layouts=stereo[a{i}]"
+        )
+        concat_inputs.append(f"[v{i}][a{i}]")
+
+    concat_str = "".join(concat_inputs) + f"concat=n={len(clips)}:v=1:a=1[vout][aout]"
+    filter_parts.append(concat_str)
+
+    filter_complex = ";\n".join(filter_parts)
+
+    out_path = os.path.join(task.output_dir, task.output_name)
+    os.makedirs(task.output_dir, exist_ok=True)
+
+    ff_cmd += ["-filter_complex", filter_complex, "-map", "[vout]", "-map", "[aout]"]
+
+    # Codec
+    if "NVENC" in task.codec:
+        ff_cmd += ["-c:v", "h264_nvenc", "-preset", "p4", "-cq", "18"]
+    else:
+        ff_cmd += ["-c:v", "libx264", "-crf", "18", "-preset", "fast"]
+    ff_cmd += ["-c:a", "aac", "-b:a", "192k"]
+    ff_cmd += ["-movflags", "+faststart", out_path]
+
+    _emit_sync_for_job(job_id, 'log', {
+        'type': 'info', 'msg': f'開始匯出 {len(clips)} 個素材...'
+    })
+
+    result = subprocess.run(
+        ff_cmd, capture_output=True, text=True,
+        encoding='utf-8', errors='ignore', creationflags=HNO,
+    )
+
+    if result.returncode != 0:
+        err = result.stderr[-500:] if result.stderr else "unknown"
+        _emit_sync_for_job(job_id, 'log', {'type': 'error', 'msg': f'匯出失敗: {err}'})
+        raise RuntimeError(f"FFmpeg export failed: {err}")
+
+    _emit_sync_for_job(job_id, 'log', {
+        'type': 'info', 'msg': f'匯出完成: {task.output_name}'
+    })

@@ -1,9 +1,14 @@
 import { appendLog, resetProgress, pickPath } from '../../js/shared/utils.js';
+import { renderClipDetail } from './drone_meta_editor.js';
 
 // ── State ──
 let _dmFiles = [];       // scanned file objects from backend
 let _dmSelected = [];    // boolean array, same length as _dmFiles
 let _dmSubmitting = false;
+
+// ── Arrange Panel State ──
+let _arrangeClips = []; // [{id, fileIdx, in, out, brightness, contrast, saturation, gamma, colorTemp}]
+let _clipIdCounter = 0;
 
 const DRONE_MODELS = {
     autel_evo_lite_plus: { make: 'Autel Robotics', model: 'EVO Lite+', lensMake: 'Autel Robotics', lensModel: 'EVO Lite+ Camera' },
@@ -291,7 +296,11 @@ function dmClearFiles() {
 window.dmClearFiles = dmClearFiles;
 
 let _dmDragIdx = -1;
-function dmDragStart(e, idx) { _dmDragIdx = idx; e.dataTransfer.effectAllowed = 'move'; }
+function dmDragStart(e, idx) {
+    _dmDragIdx = idx;
+    e.dataTransfer.setData('application/dm-source-idx', String(idx));
+    e.dataTransfer.effectAllowed = 'copyMove';
+}
 window.dmDragStart = dmDragStart;
 function dmDragOver(e) { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; }
 window.dmDragOver = dmDragOver;
@@ -521,6 +530,149 @@ function _setupProgressListener() {
     });
 }
 
+// ── Arrange Panel ──
+
+function _addClipToArrange(fileIdx) {
+    const file = _dmFiles[fileIdx];
+    if (!file) return;
+    _arrangeClips.push({
+        id: 'clip_' + (++_clipIdCounter),
+        fileIdx,
+        in: 0,
+        out: file.duration || 0,
+        brightness: 0.0,
+        contrast: 1.0,
+        saturation: 1.0,
+        gamma: 1.0,
+        colorTemp: 0.0,
+    });
+    _renderArrangeClips();
+}
+
+function _renderArrangeClips() {
+    const container = document.getElementById('dm_arrange_clips');
+    if (!container) return;
+    if (_arrangeClips.length === 0) {
+        container.innerHTML = '<div class="text-sm text-gray-600 w-full text-center py-8">拖拽左側素材到此處排列</div>';
+        return;
+    }
+    container.innerHTML = _arrangeClips.map((clip, i) => {
+        const file = _dmFiles[clip.fileIdx];
+        const thumb = file?.thumbnail || '';
+        const fname = file?.filename || '?';
+        const durText = _fmtDuration(clip.out - clip.in);
+        return `<div class="dm-arrange-card" draggable="true" data-clip-idx="${i}"
+                    ondragstart="dmClipDragStart(event, ${i})"
+                    ondragover="dmClipDragOver(event, this)"
+                    ondragleave="dmClipDragLeave(this)"
+                    ondrop="dmClipDrop(event, ${i})"
+                    onclick="dmOpenDetail('${clip.id}')">
+            <img src="${thumb}" class="w-full h-20 object-cover rounded-t" onerror="this.style.display='none'">
+            <div class="px-2 py-1">
+                <div class="text-xs text-gray-300 truncate">${fname}</div>
+                <div class="text-xs text-gray-500">${durText}</div>
+            </div>
+            <button onclick="event.stopPropagation(); dmRemoveClip(${i})"
+                class="absolute top-1 right-1 w-5 h-5 bg-black/60 rounded-full text-white text-xs flex items-center justify-center hover:bg-red-600">\u2715</button>
+        </div>`;
+    }).join('');
+}
+
+// Clip reorder drag within arrange panel
+window.dmClipDragStart = function(e, clipIdx) {
+    e.dataTransfer.setData('application/dm-clip-idx', String(clipIdx));
+    e.dataTransfer.effectAllowed = 'move';
+    e.stopPropagation(); // don't trigger source drag
+};
+
+window.dmClipDragOver = function(e, el) {
+    e.preventDefault();
+    e.stopPropagation();
+    el.classList.add('dm-arrange-card-drop-target');
+};
+
+window.dmClipDragLeave = function(el) {
+    el.classList.remove('dm-arrange-card-drop-target');
+};
+
+window.dmClipDrop = function(e, toIdx) {
+    e.preventDefault();
+    e.stopPropagation();
+    e.currentTarget.classList.remove('dm-arrange-card-drop-target');
+
+    // Check if it's a clip reorder
+    const clipFromStr = e.dataTransfer.getData('application/dm-clip-idx');
+    if (clipFromStr !== '') {
+        const from = parseInt(clipFromStr);
+        if (!isNaN(from) && from !== toIdx) {
+            const [moved] = _arrangeClips.splice(from, 1);
+            _arrangeClips.splice(toIdx, 0, moved);
+            _renderArrangeClips();
+        }
+        return;
+    }
+
+    // Check if it's a source file drop
+    const srcStr = e.dataTransfer.getData('application/dm-source-idx');
+    if (srcStr !== '') {
+        const fileIdx = parseInt(srcStr);
+        if (!isNaN(fileIdx) && _dmFiles[fileIdx]) {
+            _addClipToArrange(fileIdx);
+        }
+    }
+};
+
+// Open detail panel for a clip
+window.dmOpenDetail = function(clipId) {
+    const clip = _arrangeClips.find(c => c.id === clipId);
+    if (!clip) return;
+    const file = _dmFiles[clip.fileIdx];
+    document.getElementById('dm_arrange_panel').classList.add('hidden');
+    document.getElementById('dm_detail_panel').classList.remove('hidden');
+    renderClipDetail(clip, file, _arrangeClips, _fmtDuration);
+};
+
+window.dmRemoveClip = function(idx) {
+    _arrangeClips.splice(idx, 1);
+    _renderArrangeClips();
+};
+
+window.dmBackToArrange = function() {
+    document.getElementById('dm_detail_panel').classList.add('hidden');
+    document.getElementById('dm_arrange_panel').classList.remove('hidden');
+    _renderArrangeClips();
+};
+
+function _initArrangePanel() {
+    const arrangeEl = document.getElementById('dm_arrange_clips');
+    if (!arrangeEl) return;
+
+    arrangeEl.addEventListener('dragover', e => {
+        e.preventDefault();
+        e.dataTransfer.dropEffect = 'copy';
+        arrangeEl.classList.add('dm-arrange-drop-active');
+    });
+    arrangeEl.addEventListener('dragleave', e => {
+        // Only remove if actually leaving the container
+        if (!arrangeEl.contains(e.relatedTarget)) {
+            arrangeEl.classList.remove('dm-arrange-drop-active');
+        }
+    });
+    arrangeEl.addEventListener('drop', e => {
+        e.preventDefault();
+        arrangeEl.classList.remove('dm-arrange-drop-active');
+
+        // Check if it's from source file list
+        const srcStr = e.dataTransfer.getData('application/dm-source-idx');
+        if (srcStr !== '') {
+            const fileIdx = parseInt(srcStr);
+            if (!isNaN(fileIdx) && _dmFiles[fileIdx]) {
+                _addClipToArrange(fileIdx);
+            }
+        }
+    });
+}
+
 // ── Init ──
 
 export async function initDroneMetaTab() {
@@ -528,4 +680,5 @@ export async function initDroneMetaTab() {
     const now = new Date();
     const dateStr = now.toISOString().split('T')[0];
     _setupProgressListener();
+    _initArrangePanel();
 }

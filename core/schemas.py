@@ -132,6 +132,26 @@ class TtsCloneRequest(BaseModel):
     compute_hosts: list = []
 
 
+class TimelineClip(BaseModel):
+    path: str
+    trim_in: float = 0.0
+    trim_out: float = -1.0  # -1 = full duration
+    brightness: float = 0.0
+    contrast: float = 1.0
+    saturation: float = 1.0
+    color_temp: float = 0.0
+
+
+class TimelineExportRequest(BaseModel):
+    task_type: str = "timeline_export"
+    job_id: str = ""
+    clips: List[TimelineClip]
+    output_dir: str
+    output_name: str = "output.MOV"
+    resolution: str = "1080P"
+    codec: str = "H.264 (NVENC)"
+
+
 class DroneMetaScanRequest(BaseModel):
     paths: List[str]
 

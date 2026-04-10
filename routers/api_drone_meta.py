@@ -7,14 +7,18 @@ import subprocess
 import asyncio
 import tempfile
 from typing import List
-from fastapi import APIRouter  # type: ignore
-from fastapi.responses import JSONResponse  # type: ignore
-from core.schemas import DroneMetaScanRequest, DroneMetaRequest  # type: ignore
+from fastapi import APIRouter, Query, Request  # type: ignore
+from fastapi.responses import JSONResponse, Response  # type: ignore
+from starlette.background import BackgroundTasks  # type: ignore
+from core.schemas import DroneMetaScanRequest, DroneMetaRequest, TimelineExportRequest  # type: ignore
 from core.worker import enqueue_job  # type: ignore
 
 router = APIRouter()
 
 HNO_WINDOW = getattr(subprocess, 'CREATE_NO_WINDOW', 0x08000000)
+
+_PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+_FFMPEG_BIN = os.path.join(_PROJECT_ROOT, "ffmpeg.exe")
 
 VIDEO_EXTS = {'.mp4', '.mov', '.MP4', '.MOV', '.mkv', '.avi', '.mts', '.m2ts'}
 
@@ -80,7 +84,7 @@ def _extract_thumbnail(filepath: str, seek: float = 1.0, width: int = 240) -> st
     return ""
 
 
-def _extract_filmstrip(filepath: str, duration: float, frames: int = 10, width: int = 160) -> List[str]:
+def _extract_filmstrip(filepath: str, duration: float, frames: int = 60, width: int = 320) -> List[str]:
     """Extract equally-spaced frames as individual base64 JPEGs."""
     if duration <= 0:
         return []
@@ -210,6 +214,63 @@ async def create_drone_meta_job(req: DroneMetaRequest):
     """Submit a drone metadata write job (optionally with concat)."""
     project_name = req.project_name or "unnamed"
     job_id, warning = await enqueue_job(req, project_name, "drone_meta")
+    resp = {"status": "queued", "job_id": job_id}
+    if warning:
+        resp["warning"] = warning
+    return resp
+
+
+@router.get("/api/v1/drone_meta/frame")
+async def get_frame(
+    path: str = Query(...),
+    time: float = Query(0.0),
+    brightness: float = Query(0.0),
+    contrast: float = Query(1.0),
+    saturation: float = Query(1.0),
+    color_temp: float = Query(0.0),
+    width: int = Query(640),
+):
+    """Extract a single frame with optional color grading, returned as JPEG."""
+    if not os.path.isfile(path):
+        return JSONResponse({"error": "File not found"}, status_code=404)
+
+    # Build video filter chain
+    vf_parts = [f"eq=brightness={brightness}:contrast={contrast}:saturation={saturation}"]
+    if color_temp != 0.0:
+        t = color_temp
+        vf_parts.append(f"colorbalance=rs={t}:gs=0:bs={-t}")
+    vf_parts.append(f"scale={width}:-2")
+    vf_str = ",".join(vf_parts)
+
+    cmd = [
+        _FFMPEG_BIN, "-y", "-nostdin",
+        "-ss", str(time),
+        "-i", path,
+        "-vf", vf_str,
+        "-frames:v", "1",
+        "-f", "image2pipe", "-vcodec", "mjpeg",
+        "pipe:1",
+    ]
+
+    def _run():
+        return subprocess.run(
+            cmd, capture_output=True, timeout=15,
+            creationflags=HNO_WINDOW,
+        )
+
+    result = await asyncio.to_thread(_run)
+    if result.returncode != 0 or not result.stdout:
+        err = (result.stderr or b"")[:300].decode("utf-8", errors="ignore")
+        return JSONResponse({"error": f"FFmpeg failed: {err}"}, status_code=500)
+
+    return Response(content=result.stdout, media_type="image/jpeg")
+
+
+@router.post("/api/v1/jobs/drone_timeline_export")
+async def submit_timeline_export(req: TimelineExportRequest):
+    """Submit a timeline export job to the task queue."""
+    project_name = req.output_name or "timeline_export"
+    job_id, warning = await enqueue_job(req, project_name, "timeline_export")
     resp = {"status": "queued", "job_id": job_id}
     if warning:
         resp["warning"] = warning
