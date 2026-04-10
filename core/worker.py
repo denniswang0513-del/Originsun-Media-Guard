@@ -719,16 +719,6 @@ def _drone_meta_sync(job, engine, task: DroneMetaRequest, _on_progress):
     exif_dt_str = dt.strftime("%Y:%m:%d %H:%M:%S")
     iso_dt_str = dt.strftime("%Y-%m-%dT%H:%M:%SZ")
 
-    # Build description
-    desc = task.project_name
-    if task.road_section:
-        desc += f" | 路段: {task.road_section}"
-    if task.phase:
-        desc += f" | 階段: {task.phase}"
-    desc += " | 工程空拍紀錄"
-    if task.description:
-        desc += f" | {task.description}"
-
     total = len(task.files)
     success_count = 0
     fail_list = []

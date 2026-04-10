@@ -152,17 +152,10 @@ class DroneMetaFileSetting(BaseModel):
 class DroneMetaRequest(BaseModel):
     task_type: str = "drone_meta"
     job_id: str = ""
-    project_name: str
     file_index: int = 1
     files: List[DroneMetaFileSetting]
     output_dir: str = ""
-    date_time: str              # ISO format
-    serial_number: str = ""
-    operator: str = ""
-    road_section: str = ""
-    phase: str = ""
-    company: str = ""
-    description: str = ""
+    date_time: str = ""         # ISO format (fallback, per-file override preferred)
     drone_make: str = "Autel Robotics"
     drone_model: str = "EVO Lite+"
     lens_make: str = "Autel Robotics"

@@ -422,17 +422,10 @@ function collectDroneMetaPayload() {
     const doConcat = document.getElementById('dm_do_concat').checked;
 
     const payload = {
-        project_name: 'drone_convert',
         file_index: fileIndex,
         files: selectedFiles,
         output_dir: document.getElementById('dm_output_dir').value.trim(),
         date_time: dateTime,
-        serial_number: '',
-        operator: '',
-        road_section: '',
-        phase: '',
-        company: '',
-        description: '',
         drone_make: model.make,
         drone_model: model.model,
         lens_make: model.lensMake,
