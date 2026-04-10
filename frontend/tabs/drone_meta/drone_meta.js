@@ -53,12 +53,10 @@ function _updateSelectCount() {
 
 async function dmPickFolder() {
     try {
-        const res = await fetch('/api/v1/utils/pick_folder?title=選擇空拍影片資料夾');
-        const data = await res.json();
-        if (data.path) {
-            document.getElementById('dm_source_path').value = data.path;
-            dmScanFiles(); // auto scan after pick
-        }
+        await pickPath('dm_source_path', 'folder');
+        // pickPath sets the input value; now auto-scan
+        const path = document.getElementById('dm_source_path').value;
+        if (path) dmScanFiles();
     } catch (e) { console.warn('pick folder failed:', e); }
 }
 window.dmPickFolder = dmPickFolder;
