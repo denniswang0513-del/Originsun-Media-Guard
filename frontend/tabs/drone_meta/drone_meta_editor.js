@@ -43,7 +43,6 @@ export function renderClipDetail(clip, file, allClips, fmtDuration) {
 
     _currentClip = clip;
     _currentFile = file;
-    _currentFile = file;
 
     const duration = file.duration || 0;
     const filmstrip = file.filmstrip || [];
@@ -273,8 +272,6 @@ async function _fetchColorPreview(clip) {
         }
     } catch (_) {}
 }
-
-let _currentFile = null;
 
 // ── Action buttons ──
 
