@@ -82,6 +82,7 @@ if (typeof appendLog === 'undefined') {
                 if (_should('report'))     await _loadTab('tab_report',      './tabs/report/report.html',           './tabs/report/report.js',           'initReportTab');
                 if (_should('transcribe')) await _loadTab('tab_transcribe',  './tabs/transcribe/transcribe.html',   './tabs/transcribe/transcribe.js',   'initTranscribeTab');
                 if (_should('tts'))        await _loadTab('tab_tts',         './tabs/tts/tts.html',                 './tabs/tts/tts.js',                 'initTtsTab');
+                if (_should('drone_meta')) await _loadTab('tab_drone_meta',  './tabs/drone_meta/drone_meta.html',   './tabs/drone_meta/drone_meta.js',   'initDroneMetaTab');
 
                 // CRM tabs — load authorized ones in parallel
                 const _crmTabs = [

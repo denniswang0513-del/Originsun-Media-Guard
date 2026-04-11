@@ -78,6 +78,7 @@ CONCURRENCY_LIMITS: Dict[str, int] = {
     "transcribe": 1,
     "report": 1,
     "tts": 1,
+    "drone_meta": 1,
 }
 
 _LOG_BUFFER_MAX = 500   # per-job log buffer limit

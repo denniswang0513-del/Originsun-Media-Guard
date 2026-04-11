@@ -297,65 +297,65 @@ async def _run_backup(job, engine, task: BackupRequest, _on_progress, _on_confli
             })
     elif getattr(task, "do_transcode", False):
         # 本機轉檔
-        try:
-            _tc_card_total = len(task.cards)
-            for _tc_card_idx, (card_name, _) in enumerate(task.cards):
-                if engine._stop_event.is_set():
-                    break
-                src_dir = os.path.join(task.local_root, task.project_name, card_name)
-                dest_dir = os.path.join(task.proxy_root, task.project_name, card_name)
-                if os.path.exists(src_dir):
-                    await asyncio.to_thread(
-                        engine.run_transcode_job,
-                        sources=[src_dir], dest_dir=dest_dir,
-                        on_progress=_make_card_progress(_tc_card_idx, _tc_card_total, _on_progress)
-                    )
-                else:
-                    _emit_sync_for_job(job.job_id, 'log', {
-                        'type': 'error',
-                        'msg': f'[transcode] 來源目錄不存在，已跳過: {src_dir}'
-                    })
-        except Exception as ex:
-            _emit_sync_for_job(job.job_id, 'log', {
-                'type': 'error',
-                'msg': f'[transcode] 轉檔階段發生錯誤（不影響後續串帶/報表）: {ex}'
-            })
+        _tc_card_total = len(task.cards)
+        for _tc_card_idx, (card_name, _) in enumerate(task.cards):
+            if engine._stop_event.is_set():
+                break
+            src_dir = os.path.join(task.local_root, task.project_name, card_name)
+            dest_dir = os.path.join(task.proxy_root, task.project_name, card_name)
+            if not os.path.exists(src_dir):
+                _emit_sync_for_job(job.job_id, 'log', {
+                    'type': 'error',
+                    'msg': f'[transcode] 來源目錄不存在，已跳過: {src_dir}'
+                })
+                continue
+            try:
+                await asyncio.to_thread(
+                    engine.run_transcode_job,
+                    sources=[src_dir], dest_dir=dest_dir,
+                    on_progress=_make_card_progress(_tc_card_idx, _tc_card_total, _on_progress)
+                )
+            except Exception as ex:
+                _emit_sync_for_job(job.job_id, 'log', {
+                    'type': 'error',
+                    'msg': f'[transcode] {card_name} 轉檔失敗（不影響其他卡及串帶/報表）: {ex}'
+                })
 
     # Chained concat (isolated — failure won't block report)
     if getattr(task, "do_concat", False):
-        try:
-            cc_resolution = getattr(task, 'concat_resolution', '720P')
-            cc_codec = getattr(task, 'concat_codec', 'H.264 (NVENC)')
-            cc_burn_tc = getattr(task, 'concat_burn_tc', True)
-            cc_burn_fn = getattr(task, 'concat_burn_fn', False)
-            _cc_total = len(task.cards)
-            for _cc_idx, (card_name, _) in enumerate(task.cards):
-                if engine._stop_event.is_set():
-                    break
-                src_dir = os.path.join(
-                    task.local_root,
-                    task.project_name, card_name
+        cc_resolution = getattr(task, 'concat_resolution', '720P')
+        cc_codec = getattr(task, 'concat_codec', 'H.264 (NVENC)')
+        cc_burn_tc = getattr(task, 'concat_burn_tc', True)
+        cc_burn_fn = getattr(task, 'concat_burn_fn', False)
+        _cc_total = len(task.cards)
+        for _cc_idx, (card_name, _) in enumerate(task.cards):
+            if engine._stop_event.is_set():
+                break
+            src_dir = os.path.join(
+                task.local_root,
+                task.project_name, card_name
+            )
+            dest_dir = os.path.join(task.proxy_root, task.project_name, card_name)
+            if not os.path.exists(src_dir):
+                _emit_sync_for_job(job.job_id, 'log', {
+                    'type': 'error',
+                    'msg': f'[concat] 來源目錄不存在，已跳過: {src_dir}'
+                })
+                continue
+            try:
+                await asyncio.to_thread(
+                    engine.run_concat_job,
+                    sources=[src_dir], dest_dir=dest_dir,
+                    custom_name=f"{task.project_name}_{card_name}_reel",
+                    resolution=cc_resolution, codec=cc_codec,
+                    burn_timecode=cc_burn_tc, burn_filename=cc_burn_fn,
+                    on_progress=_make_card_progress(_cc_idx, _cc_total, _on_progress, track_files=True)
                 )
-                dest_dir = os.path.join(task.proxy_root, task.project_name, card_name)
-                if os.path.exists(src_dir):
-                    await asyncio.to_thread(
-                        engine.run_concat_job,
-                        sources=[src_dir], dest_dir=dest_dir,
-                        custom_name=f"{task.project_name}_{card_name}_reel",
-                        resolution=cc_resolution, codec=cc_codec,
-                        burn_timecode=cc_burn_tc, burn_filename=cc_burn_fn,
-                        on_progress=_make_card_progress(_cc_idx, _cc_total, _on_progress, track_files=True)
-                    )
-                else:
-                    _emit_sync_for_job(job.job_id, 'log', {
-                        'type': 'error',
-                        'msg': f'[concat] 來源目錄不存在，已跳過: {src_dir}'
-                    })
-        except Exception as ex:
-            _emit_sync_for_job(job.job_id, 'log', {
-                'type': 'error',
-                'msg': f'[concat] 串帶階段發生錯誤（不影響後續報表）: {ex}'
-            })
+            except Exception as ex:
+                _emit_sync_for_job(job.job_id, 'log', {
+                    'type': 'error',
+                    'msg': f'[concat] {card_name} 串帶失敗（不影響其他卡及報表）: {ex}'
+                })
 
     # Post-task report (isolated)
     if isinstance(task, BackupRequest) and getattr(task, 'do_report', False):

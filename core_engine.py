@@ -884,8 +884,10 @@ class MediaGuardEngine:
 
         # 收集支援的檔案
         files = []
+        self.log(f"[Engine] 掃描來源路徑: {sources}")
         for token in sources:
             if not token: continue
+            self.log(f"[Engine] 檢查: {token} (exists={os.path.exists(token)}, isdir={os.path.isdir(token)})")
             if os.path.isfile(token) and token.lower().endswith(SUPPORTED_EXTS):
                 files.append(token)
             elif os.path.isdir(token):
@@ -896,7 +898,7 @@ class MediaGuardEngine:
 
         total = len(files)
         if total == 0:
-            self.err("[Engine] 未找到任何支援的影片檔可轉檔。")
+            self.err(f"[Engine] 未找到任何支援的影片檔可轉檔。來源: {sources}")
             return
 
         # 計算來源總容量
@@ -1196,6 +1198,111 @@ class MediaGuardEngine:
             except Exception:
                 _has_audio.append(False)
 
+        # ── 分批預合併（避免 FFmpeg 同時開啟過多檔案導致 WinError 1455） ──
+        _MAX_CONCAT_INPUTS = 20
+        _temp_intermediates = []
+        # 保留原始檔案清單，供 drawtext 壓印檔名使用
+        _original_files = list(files)
+        _original_durations = list(file_durations)
+
+        if len(files) > _MAX_CONCAT_INPUTS:
+            import gc
+            gc.collect()
+            batch_count = (len(files) + _MAX_CONCAT_INPUTS - 1) // _MAX_CONCAT_INPUTS
+            self.log(f"[Engine] 檔案數量 ({len(files)}) 較多，分 {batch_count} 批預合併以降低記憶體用量...")
+
+            new_files = []
+            new_durations = []
+            new_has_audio = []
+
+            for bi in range(batch_count):
+                if self._check_pause_stop():
+                    break
+                start = bi * _MAX_CONCAT_INPUTS
+                end = min(start + _MAX_CONCAT_INPUTS, len(files))
+                bf = files[start:end]
+                bd = file_durations[start:end]
+                ba = _has_audio[start:end]
+
+                self.log(f"  批次 {bi+1}/{batch_count}: 合併第 {start+1}~{end} 個檔案...")
+
+                # 建構批次 filter_complex（不含 drawtext）
+                bfc = []
+                for j in range(len(bf)):
+                    bfc.append(
+                        f"[{j}:v]format={pix_fmt},"
+                        f"scale={canvas_w}:{canvas_h}:force_original_aspect_ratio=decrease,"
+                        f"pad={canvas_w}:{canvas_h}:(ow-iw)/2:(oh-ih)/2:black,setsar=1[v{j}];"
+                    )
+                    if ba[j]:
+                        bfc.append(f"[{j}:a]aresample=48000,aformat=sample_fmts=fltp:channel_layouts=stereo[a{j}];")
+                    else:
+                        bfc.append(f"anullsrc=r=48000:cl=stereo:d={bd[j]:.6f}[a{j}];")
+                labels = "".join(f"[v{j}][a{j}]" for j in range(len(bf)))
+                bfc.append(f"{labels}concat=n={len(bf)}:v=1:a=1[vout][aout]")
+
+                b_script = os.path.join(tempfile.gettempdir(), f"OS_batch_{bi}_{uuid.uuid4().hex[:8]}.txt")
+                b_out = os.path.join(tempfile.gettempdir(), f"OS_batch_{bi}_{uuid.uuid4().hex[:8]}{ext}")
+
+                with open(b_script, "w", encoding="utf-8") as bfs:
+                    bfs.write("\n".join(bfc))
+
+                b_input_args = []
+                for p in bf:
+                    b_input_args += ["-i", p]
+
+                b_cmd = ["ffmpeg", "-y", "-nostdin"] + b_input_args + [
+                    "-filter_complex_script", b_script,
+                    "-map", "[vout]", "-map", "[aout]",
+                ] + vcodec_args + acodec_args + ["-nostats", b_out]
+
+                try:
+                    b_proc = subprocess.Popen(
+                        b_cmd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+                        text=True, creationflags=_flags,
+                    )
+                    for _ in (b_proc.stdout or []):
+                        if self._check_pause_stop():
+                            b_proc.terminate()
+                            break
+                    b_proc.wait(timeout=7200)
+                except OSError as e:
+                    self.err(f"[!] 批次 {bi+1} 啟動失敗: {e}")
+                    for tmp in _temp_intermediates:
+                        try: os.remove(tmp)
+                        except OSError: pass
+                    try: os.remove(b_script)
+                    except OSError: pass
+                    return
+                finally:
+                    try: os.remove(b_script)
+                    except OSError: pass
+
+                if b_proc.returncode != 0:
+                    self.err(f"[!] 批次 {bi+1} 串接失敗 (returncode={b_proc.returncode})")
+                    for tmp in _temp_intermediates:
+                        try: os.remove(tmp)
+                        except OSError: pass
+                    return
+
+                new_files.append(b_out)
+                new_durations.append(sum(bd))
+                new_has_audio.append(True)
+                _temp_intermediates.append(b_out)
+
+                if on_progress is not None:
+                    on_progress({
+                        "phase": "concat", "status": "processing",
+                        "current_file": f"預合併批次 {bi+1}/{batch_count}",
+                        "total_pct": (bi + 1) / batch_count * 30,
+                        "done_files": 0, "total_files": 1,
+                    })
+
+            files = new_files
+            file_durations = new_durations
+            _has_audio = new_has_audio
+            self.log(f"[Engine] 分批預合併完成，產生 {len(files)} 個中間檔，開始最終合併...")
+
         # Part 1: 每個檔案獨立做 video scale + audio resample，統一輸出規格
         fc_lines = []
         for i in range(len(files)):
@@ -1215,11 +1322,11 @@ class MediaGuardEngine:
         stream_labels = "".join(f"[v{i}][a{i}]" for i in range(len(files)))
         fc_lines.append(f"{stream_labels}concat=n={len(files)}:v=1:a=1[vout][aout];")
 
-        # Part 3: drawtext overlays（在合併後的 [vout] 上）
+        # Part 3: drawtext overlays（在合併後的 [vout] 上，使用原始檔名和時長）
         max_text_width = canvas_w * 0.85
         global_max_w = 0
         if burn_filename:
-            for p in files:
+            for p in _original_files:
                 estimated_w = sum(36 if ord(c) > 127 else 20 for c in os.path.basename(p))
                 if estimated_w > global_max_w:
                     global_max_w = estimated_w
@@ -1234,7 +1341,7 @@ class MediaGuardEngine:
                 f"fontsize={global_fontsize}:fontcolor=white@0.5:box=1:boxcolor=black@0.25:boxborderw=6"
             )
         current_time_sec = 0.0
-        for idx, (p, dur) in enumerate(zip(files, file_durations)):
+        for idx, (p, dur) in enumerate(zip(_original_files, _original_durations)):
             end_time = current_time_sec + dur
             if burn_filename:
                 escaped_name = os.path.basename(p).replace(":", "\\:").replace("'", "'\\''").replace("%", "\\%")
@@ -1285,7 +1392,15 @@ class MediaGuardEngine:
 
             err_log_file = os.path.join(tempfile.gettempdir(), f"Originsun_concat_err_{uuid.uuid4().hex[:8]}.log")
             f_err = open(err_log_file, "w", encoding="utf-8")
-            proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=f_err, encoding="utf-8", errors="replace", creationflags=creation_flags)
+            try:
+                proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=f_err, encoding="utf-8", errors="replace", creationflags=creation_flags)
+            except OSError as e:
+                f_err.close()
+                self.err(f"[!] FFmpeg 啟動失敗: {e}")
+                for tmp in _temp_intermediates:
+                    try: os.remove(tmp)
+                    except OSError: pass
+                return
 
             t_start = time.time()
             for cline in (proc.stdout or []):
@@ -1389,7 +1504,15 @@ class MediaGuardEngine:
                 os.remove(err_log_file)
         except:
             pass
-            
+
+        # 清理分批預合併的中間檔案
+        for tmp in _temp_intermediates:
+            try:
+                if os.path.exists(tmp):
+                    os.remove(tmp)
+            except OSError:
+                pass
+
     def run_verify_job(
         self,
         pairs: List[Tuple[str, str]],

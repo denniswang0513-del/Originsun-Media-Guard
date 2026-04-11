@@ -137,7 +137,7 @@ function _renderFileList() {
                 <div class="flex-1 min-w-0">
                     <div class="text-sm text-gray-200 truncate">${f.filename}</div>
                     <div class="text-xs text-gray-500">${f.width}x${f.height} | ${f.codec} | ${_fmtDuration(f.duration)} | ${_fmtSize(f.size)}</div>
-                    ${f.is_dji ? `<div class="text-xs text-blue-400 mt-1">\u{1F4CD} ${f.dji_gps.lat.toFixed(4)}\u00B0N, ${f.dji_gps.lon.toFixed(4)}\u00B0E | ${f.dji_gps.alt.toFixed(0)}m | ISO:${f.dji_camera.iso} | f/${f.dji_camera.fnum} | 1/${f.dji_camera.shutter}</div>` : ''}
+                    ${f.is_dji && f.dji_gps && f.dji_camera ? `<div class="text-xs text-blue-400 mt-1">\u{1F4CD} ${f.dji_gps.lat.toFixed(4)}\u00B0N, ${f.dji_gps.lon.toFixed(4)}\u00B0E | ${f.dji_gps.alt.toFixed(0)}m | ISO:${f.dji_camera.iso} | f/${f.dji_camera.fnum} | 1/${f.dji_camera.shutter}</div>` : ''}
                     <div class="flex items-center gap-2 mt-1">
                         <span class="text-xs text-gray-500">\u{1F4C5}</span>
                         <input type="date" class="dm-file-date bg-[#1e1e1e] border border-[#444] rounded px-2 py-0.5 text-xs"
@@ -452,7 +452,7 @@ function collectDroneMetaPayload() {
         return { valid: false };
     }
 
-    return { valid: true, payload, name: projectName };
+    return { valid: true, payload };
 }
 window.collectDroneMetaPayload = collectDroneMetaPayload;
 

@@ -25,6 +25,7 @@ _ROUTER_MODULES = [
     'api_job_history', 'api_queue', 'api_schedules', 'api_agents',
     'api_api_keys',
     'api_crm',
+    'api_drone_meta',
 ]
 _routers = {}
 for _mod_name in _ROUTER_MODULES:

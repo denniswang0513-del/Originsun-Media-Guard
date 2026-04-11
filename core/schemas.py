@@ -172,6 +172,7 @@ class DroneMetaFileSetting(BaseModel):
 class DroneMetaRequest(BaseModel):
     task_type: str = "drone_meta"
     job_id: str = ""
+    project_name: str = ""
     file_index: int = 1
     files: List[DroneMetaFileSetting]
     output_dir: str = ""
