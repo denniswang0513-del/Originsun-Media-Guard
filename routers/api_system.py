@@ -330,3 +330,60 @@ async def get_nas_version():
         return await asyncio.to_thread(_fetch)
     except Exception as e:
         return {"version": "unknown", "error": str(e)}
+
+
+# ── Fallback restart (duplicated from api_ota.py for resilience) ──────
+# If api_ota.py fails to load, this ensures remote updates still work.
+
+@router.post("/api/v1/system/restart")
+async def system_restart(request: Request):
+    """Minimal restart endpoint — fallback when api_ota.py fails to load."""
+    key = request.headers.get("X-Internal-Key", "")
+    if key != "originsun-internal-restart":
+        client_ip = request.client.host if request.client else ""
+        if client_ip not in ("127.0.0.1", "::1", "localhost"):
+            return JSONResponse({"detail": "Unauthorized"}, 403)
+
+    import tempfile, subprocess
+    base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    venv_py = os.path.join(base_dir, ".venv", "Scripts", "python.exe")
+    embed_py = os.path.join(base_dir, "python_embed", "python.exe")
+    py = venv_py if os.path.exists(venv_py) else (embed_py if os.path.exists(embed_py) else sys.executable)
+
+    bat_path = os.path.join(tempfile.gettempdir(), "originsun_sys_restart.bat")
+    vbs_path = os.path.join(base_dir, "start_hidden.vbs")
+    updater = os.path.join(base_dir, "update_agent.py")
+
+    lines = ["@echo off", f'cd /d "{base_dir}"', "del update_status.json >nul 2>nul"]
+    lines.append('for /f "tokens=5" %%p in (\'netstat -aon ^| findstr ":8000 " ^| findstr "LISTENING"\') do taskkill /PID %%p /F >nul 2>nul')
+    lines.append("timeout /t 3 /nobreak >nul")
+    if os.path.exists(updater):
+        lines.append(f'"{py}" "{updater}"')
+    if os.path.exists(vbs_path):
+        lines.append(f'wscript.exe "{vbs_path}"')
+    else:
+        lines.append(f'start "" /B "{py}" -m uvicorn main:io_app --host 0.0.0.0 --port 8000')
+
+    with open(bat_path, "w", encoding="ascii", errors="replace") as f:
+        f.write("\r\n".join(lines))
+
+    try:
+        subprocess.Popen(
+            ["schtasks", "/create", "/tn", "OriginsunRestart", "/tr", bat_path,
+             "/sc", "once", "/st", "00:00", "/f", "/rl", "highest"],
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0x08000000),
+        )
+        subprocess.Popen(
+            ["schtasks", "/run", "/tn", "OriginsunRestart"],
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0x08000000),
+        )
+    except Exception:
+        subprocess.Popen(
+            bat_path, shell=True,
+            creationflags=getattr(subprocess, "DETACHED_PROCESS", 0x00000008),
+        )
+
+    asyncio.get_running_loop().call_later(1.0, os._exit, 0)
+    return {"status": "updating"}

@@ -227,10 +227,12 @@ async def trigger_agent_update(agent_id: str, request: Request):
     base_url = agent.get("url", "").rstrip("/")
 
     def _trigger():
-        # Try internal/restart first (no JWT, simpler — both endpoints now run update_agent.py)
+        # Try multiple restart endpoints (newest first, then fallbacks for old agents)
         for endpoint, headers in [
             ("/api/v1/internal/restart", {"Content-Type": "application/json",
                                            "X-Internal-Key": "originsun-internal-restart"}),
+            ("/api/v1/system/restart", {"Content-Type": "application/json",
+                                         "X-Internal-Key": "originsun-internal-restart"}),
         ]:
             try:
                 url = base_url + endpoint

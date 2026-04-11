@@ -251,7 +251,85 @@ def main():
         print("\n[ERROR] 打包失敗，發布終止。")
         return 1
 
-    print("\n[OK] 發布完成！Agent 會自動偵測到新版本。")
+    # ── Post-publish: verify OTA ZIP ──
+    print("\n[*] 驗證 OTA 更新 ZIP...")
+    from ota_manifest import AGENT_FILES, AGENT_DIRS, EXCLUDE_DIRS
+    ota_total = 0
+    ota_count = 0
+    base = os.path.dirname(os.path.abspath(__file__))
+    dirs_to_include = list(AGENT_DIRS)
+    for entry in os.listdir(base):
+        if entry.startswith('.') or entry.startswith('_') or entry in EXCLUDE_DIRS:
+            continue
+        full = os.path.join(base, entry)
+        if os.path.isdir(full) and entry not in dirs_to_include:
+            if any(f.endswith('.py') for f in os.listdir(full)):
+                dirs_to_include.append(entry)
+
+    for f in AGENT_FILES:
+        fp = os.path.join(base, f)
+        if os.path.exists(fp):
+            ota_total += os.path.getsize(fp)
+            ota_count += 1
+    for d in dirs_to_include:
+        dp = os.path.join(base, d)
+        if not os.path.isdir(dp):
+            continue
+        for root, _, fnames in os.walk(dp):
+            if "__pycache__" in root:
+                continue
+            for fn in fnames:
+                fp = os.path.join(root, fn)
+                ota_total += os.path.getsize(fp)
+                ota_count += 1
+
+    ota_mb = ota_total / 1024 / 1024
+    print(f"  OTA 內容: {ota_count} 個檔案, {ota_mb:.1f} MB (未壓縮)")
+
+    if ota_mb > 10:
+        print(f"\n[ERROR] OTA ZIP 過大 ({ota_mb:.1f} MB > 10 MB)！")
+        print("  可能原因: AGENT_DIRS 包含了二進制檔案 (ffmpeg, python_embed 等)")
+        print(f"  目前 AGENT_DIRS: {dirs_to_include}")
+        print(f"  自動發現的目錄: {[d for d in dirs_to_include if d not in AGENT_DIRS]}")
+        # Rollback version.json
+        v_data["version"] = current_version
+        atomic_json_write(VERSION_FILE, v_data)
+        print(f"[*] 已回滾 {VERSION_FILE} 至 v{current_version}")
+        return 1
+    print(f"[OK] OTA 大小正常 ({ota_mb:.1f} MB)")
+
+    # ── Post-publish: restart server so it serves the new version ──
+    print("\n[*] 重啟主控端以載入新版本...")
+    import urllib.request
+    try:
+        # Try the admin restart endpoint (local only)
+        req = urllib.request.Request(
+            "http://127.0.0.1:8000/api/v1/system/restart",
+            method="POST", data=b'{}',
+            headers={"Content-Type": "application/json",
+                     "X-Internal-Key": "originsun-internal-restart"},
+        )
+        urllib.request.urlopen(req, timeout=5)
+    except Exception:
+        try:
+            req = urllib.request.Request(
+                "http://127.0.0.1:8000/api/v1/internal/restart",
+                method="POST", data=b'{}',
+                headers={"Content-Type": "application/json",
+                         "X-Internal-Key": "originsun-internal-restart"},
+            )
+            urllib.request.urlopen(req, timeout=5)
+        except Exception:
+            print("[WARN] 無法自動重啟主控端，請手動重啟:")
+            print(f"  wscript.exe start_hidden.vbs")
+
+    print(f"\n{'='*60}")
+    print(f"[OK] v{new_version} 發布完成！")
+    print(f"  - version.json 已更新")
+    print(f"  - update_manifest.json 已更新")
+    print(f"  - OTA ZIP: {ota_count} 檔, {ota_mb:.1f} MB")
+    print(f"  - 主控端正在重啟，約 5 秒後生效")
+    print(f"{'='*60}")
     return 0
 
 

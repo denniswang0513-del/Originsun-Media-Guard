@@ -1,5 +1,5 @@
 {
-  "version": "1.10.68",
-  "build_date": "2026-04-11",
-  "notes": "fix: OTA 更新 ZIP 移除 windows_helper 二進制檔（381MB→2MB）"
+  "version": "1.10.69",
+  "build_date": "2026-04-12",
+  "notes": "更新版本"
 }
