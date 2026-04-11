@@ -109,6 +109,29 @@ def download_update(master_url: str, dest_zip: str) -> bool:
         return False
 
 
+def _kill_port(port: int):
+    """Kill all processes listening on the given port."""
+    try:
+        out = subprocess.run(
+            f'netstat -aon | findstr ":{port} " | findstr "LISTENING"',
+            shell=True, capture_output=True, text=True, timeout=10,
+        ).stdout
+        pids = set()
+        for line in out.strip().splitlines():
+            parts = line.split()
+            if parts:
+                pids.add(parts[-1])
+        for pid in pids:
+            if pid and pid != "0":
+                log(f"Killing PID {pid} on port {port}")
+                subprocess.run(f"taskkill /F /PID {pid}", shell=True,
+                               capture_output=True, timeout=10)
+        if pids:
+            time.sleep(2)
+    except Exception as e:
+        log(f"Warning: kill_port failed: {e}")
+
+
 # ────────────────────────────────────────
 # Backup & Rollback
 # ────────────────────────────────────────
@@ -238,6 +261,10 @@ def run_update(master_url: str) -> int:
     if not download_update(master_url, zip_path):
         rollback("下載失敗")
         return 1
+
+    # Kill running server before extracting (avoid locked files on Windows)
+    write_status(4, 40, "正在停止服務...")
+    _kill_port(8000)
 
     # Extract
     write_status(4, 50, "正在解壓更新檔案...")
