@@ -1,5 +1,5 @@
 {
-  "version": "1.10.67",
+  "version": "1.10.68",
   "build_date": "2026-04-11",
-  "notes": "fix: 串接迴圈錯誤隔離 + 大量檔案分批預合併 + 空拍寫入 Tab"
+  "notes": "fix: OTA 更新 ZIP 移除 windows_helper 二進制檔（381MB→2MB）"
 }

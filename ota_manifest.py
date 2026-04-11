@@ -40,7 +40,6 @@ AGENT_DIRS = [
     "routers",
     "utils",
     "db",
-    "windows_helper",
 ]
 
 # ── Extra files only in full install ZIP (not in OTA update) ──
@@ -53,6 +52,7 @@ INSTALL_EXTRA_FILES = [
 # ── Extra dirs only in full install ZIP ──
 INSTALL_EXTRA_DIRS = [
     "python_embed",
+    "windows_helper",
 ]
 
 # ── Directories excluded from auto-discovery and import scanning ──
@@ -82,7 +82,7 @@ STDLIB = {
 
 # ── Local project modules (excluded from dependency checks) ──
 LOCAL_MODULES = {
-    "core", "routers", "utils", "db", "frontend", "templates", "windows_helper",
+    "core", "routers", "utils", "db", "frontend", "templates",
     "core_engine", "tts_engine", "transcriber", "notifier", "config",
     "report_generator", "drive_sync", "download_model", "bootstrap",
     "server", "main", "update_monitor", "build_agent_zip", "publish_update",
