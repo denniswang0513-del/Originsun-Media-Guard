@@ -617,15 +617,16 @@ function _setupProgressListener() {
 function _syncOrderFromAdvanced(e) {
     const paths = e.detail?.paths;
     if (!Array.isArray(paths) || !paths.length) return;
-    const selectedSet = new Set(e.detail?.selectedPaths || []);
+    // `in` check: empty selectedPaths (all unchecked) is valid, missing key is not.
+    const hasSelection = e.detail && ('selectedPaths' in e.detail);
+    const selectedSet = new Set(hasSelection ? (e.detail.selectedPaths || []) : []);
 
     const byPath = new Map(_dmFiles.map(f => [f.path, f]));
     const newOrder = [];
     for (const p of paths) {
         const f = byPath.get(p);
         if (f) {
-            // Sync selected flag if explicit selectedPaths was provided
-            if (e.detail?.selectedPaths) f.selected = selectedSet.has(p);
+            if (hasSelection) f.selected = selectedSet.has(p);
             newOrder.push(f);
             byPath.delete(p);
         }

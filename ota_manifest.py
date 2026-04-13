@@ -30,6 +30,8 @@ AGENT_FILES = [
     "requirements_agent.txt",
     "update_manifest.json",
     "Install_Originsun_Agent.bat",
+    "Install_or_Update.bat",
+    "Fix_Task.bat",
 ]
 
 # ── Directories synced to Agent (recursively) ──

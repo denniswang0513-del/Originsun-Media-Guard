@@ -78,7 +78,7 @@ export async function pickPath(inputId, type = 'folder') {
     const el = document.getElementById(inputId);
     if (!el) return;
 
-    // External access → use NAS browser modal instead of Windows picker
+    // External access (no LAN reach to Agent) → NAS browser modal
     if (window._isExternalAccess && typeof window.openNasBrowser === 'function') {
         const path = await window.openNasBrowser({
             title: type === 'folder' ? '選擇目錄' : '選擇檔案',
@@ -93,7 +93,7 @@ export async function pickPath(inputId, type = 'folder') {
         return;
     }
 
-    // LAN access → original Windows picker
+    // LAN access → native Windows picker via backend
     try {
         const endpoint = getAgentBaseUrl() + (type === 'folder' ? '/api/v1/utils/pick_folder' : '/api/v1/utils/pick_file');
         el.classList.add('animate-pulse', 'bg-blue-900', 'text-white');

@@ -125,7 +125,7 @@ function _applyAndClose() {
         detail: {
             paths: _clips.map(c => c.path),
             selectedPaths: _clips.filter(c => c.selected).map(c => c.path),
-        }
+        },
     }));
     _closeModal();
 }

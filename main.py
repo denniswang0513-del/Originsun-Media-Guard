@@ -100,6 +100,94 @@ for _mod_name, _mod in _routers.items():
     if hasattr(_mod, 'router'):
         app.include_router(_mod.router)
 
+def _self_heal_scheduled_task():
+    """Fix Agents stuck in Session 0 due to the old installer's `/rl highest`.
+
+    Why: b1b931c registered the scheduled task with `/rl highest`, which
+    forces Windows to launch the Agent in Session 0 (Services). Native
+    pickers (tkinter/WinForms) rendered there are invisible to the user.
+    We detect this on startup, re-register the task without elevation, then
+    spawn a detached helper that restarts us via `schtasks /run` — the new
+    process lands in the user's interactive Session 1 where pickers work.
+
+    Runs at most once per Agent process and exits silently on any error;
+    the Agent keeps serving even if self-heal can't run.
+    """
+    try:
+        import ctypes, sys, subprocess
+        from ctypes import wintypes
+
+        if sys.platform != "win32":
+            return
+
+        kernel32 = ctypes.WinDLL("Kernel32.dll")
+        pid = os.getpid()
+        ses = wintypes.DWORD()
+        if not kernel32.ProcessIdToSessionId(pid, ctypes.byref(ses)):
+            return
+        if ses.value != 0:
+            return  # Already in interactive session — nothing to fix.
+
+        # Confirm the OriginsunAgent scheduled task exists. If not, this
+        # Agent was launched some other way and we shouldn't touch it.
+        q = subprocess.run(
+            ["schtasks", "/query", "/tn", "OriginsunAgent"],
+            capture_output=True, text=True,
+            creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0),
+        )
+        if q.returncode != 0:
+            return
+
+        app_dir = os.path.dirname(os.path.abspath(__file__))
+        vbs_path = os.path.join(app_dir, "start_hidden.vbs")
+        if not os.path.isfile(vbs_path):
+            return
+
+        print("[SelfHeal] Agent running in Session 0 — re-registering task without /rl highest")
+
+        # Re-register the task without /rl highest so it runs in Session 1.
+        subprocess.run(
+            ["schtasks", "/delete", "/tn", "OriginsunAgent", "/f"],
+            capture_output=True,
+            creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0),
+        )
+        cr = subprocess.run(
+            ["schtasks", "/create", "/tn", "OriginsunAgent",
+             "/tr", f'wscript.exe "{vbs_path}"',
+             "/sc", "onlogon", "/f"],
+            capture_output=True, text=True,
+            creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0),
+        )
+        if cr.returncode != 0:
+            print(f"[SelfHeal] schtasks /create failed: {cr.stderr}")
+            return
+
+        # Spawn a detached cmd that waits for us to die, then re-runs the
+        # fixed task. The new process lands in Session 1.
+        helper = (
+            f'timeout /t 4 /nobreak >nul & '
+            f'taskkill /f /pid {pid} >nul 2>&1 & '
+            f'schtasks /run /tn "OriginsunAgent"'
+        )
+        DETACHED_PROCESS = 0x00000008
+        CREATE_NEW_PROCESS_GROUP = 0x00000200
+        subprocess.Popen(
+            ["cmd", "/c", helper],
+            creationflags=DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP |
+                          getattr(subprocess, 'CREATE_NO_WINDOW', 0),
+            close_fds=True,
+        )
+        print("[SelfHeal] Restart helper spawned — Agent will respawn in Session 1 shortly")
+    except Exception as e:
+        print(f"[SelfHeal] skipped: {e}")
+
+
+# Run self-heal synchronously at module import, before uvicorn starts
+# serving. If we're in Session 0, we re-register and let a helper kill us
+# — so we don't want to waste time loading models first.
+_self_heal_scheduled_task()
+
+
 @app.on_event("startup")
 async def _on_startup():
     state.set_main_loop(asyncio.get_running_loop())

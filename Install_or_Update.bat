@@ -149,10 +149,13 @@ REM Desktop shortcut via temp VBS (no nested quote hell)
 >>"%TEMP%\_originsun_mklnk.vbs" echo lnk.Save
 cscript //nologo "%TEMP%\_originsun_mklnk.vbs" >nul 2>&1
 
-REM Scheduled task onlogon
+REM Scheduled task onlogon — NO /rl highest: elevation forces task into
+REM Session 0 (Services) where tkinter/WinForms dialogs (pick_folder,
+REM pick_file) become invisible to the user. Limited level keeps the task
+REM in the user's interactive Session 1 so native Windows pickers work.
 schtasks /query /tn "OriginsunAgent" >nul 2>&1
 if %errorlevel% equ 0 schtasks /delete /tn "OriginsunAgent" /f >nul 2>&1
-schtasks /create /tn "OriginsunAgent" /tr "wscript.exe \"%APP_DIR%\start_hidden.vbs\"" /sc onlogon /rl highest /f >nul 2>&1
+schtasks /create /tn "OriginsunAgent" /tr "wscript.exe \"%APP_DIR%\start_hidden.vbs\"" /sc onlogon /f >nul 2>&1
 
 del "%TEMP%\_originsun_mklnk.vbs" >nul 2>&1
 exit /b 0

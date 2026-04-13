@@ -38,9 +38,12 @@ async def open_local_folder(req: OpenFileRequest):
 def _run_picker_subprocess(mode: str, title: str) -> str:
     """Run tkinter file/folder dialog in a fresh subprocess.
 
-    tkinter dialogs can fail inside the main server process (COM threading
-    issues, headless start via wscript, etc.). Spawning a dedicated process
-    avoids all these problems.
+    NOTE: This only works when the Agent runs in the user's interactive
+    session (Session 1). If `schtasks /rl highest` was used during install
+    the task is placed in Session 0 (Services) and tkinter dialogs are
+    invisible. Installer was fixed to register without /rl highest; existing
+    broken installs need `schtasks /delete /tn OriginsunAgent /f` + re-run
+    Install_or_Update.bat once.
     """
     import sys, json as _j
     script = (
