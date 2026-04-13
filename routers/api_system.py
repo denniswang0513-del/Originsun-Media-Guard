@@ -367,10 +367,14 @@ async def system_restart(request: Request):
     with open(bat_path, "w", encoding="ascii", errors="replace") as f:
         f.write("\r\n".join(lines))
 
+    # Use /IT (interactive) so the task runs in the user's Session 1, not
+    # Session 0 (which would make tkinter pickers invisible again). /ST 23:59
+    # is a valid future-time placeholder — the task is triggered immediately
+    # via /run below, so the scheduled time is never actually used.
     try:
         subprocess.Popen(
             ["schtasks", "/create", "/tn", "OriginsunRestart", "/tr", bat_path,
-             "/sc", "once", "/st", "00:00", "/f", "/rl", "highest"],
+             "/sc", "once", "/st", "23:59", "/f", "/it"],
             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
             creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0x08000000),
         )
