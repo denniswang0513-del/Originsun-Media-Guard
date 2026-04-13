@@ -101,39 +101,46 @@ export function renderInlineEditor(container, file, idx, fmtDuration) {
                     </div>
                 </div>
 
-                <!-- Right: Color grading -->
-                <div>
+                <!-- Right: Color grading (consolidated — all sliders + curve + mini preview) -->
+                <div class="bg-[#1e1e1e] border border-[#333] rounded-lg p-3">
                     <div class="flex items-center justify-between mb-3">
                         <h4 class="text-xs font-semibold text-gray-400">色彩調整</h4>
-                        <button id="dm_detail_reset_color" class="text-xs text-blue-400 hover:text-blue-300">重置</button>
+                        <button id="dm_detail_reset_color" class="text-xs text-blue-400 hover:text-blue-300">重置全部</button>
                     </div>
-                    <div class="space-y-3">
+
+                    <!-- All 8 sliders in 2 columns to save vertical space -->
+                    <div class="grid grid-cols-2 gap-x-4 gap-y-2">
                         ${_colorSliderHTML(idx, 'brightness', '亮度', -1, 1, 0, 0.05)}
+                        ${_colorSliderHTML(idx, 'shadows', '陰影', -1, 1, 0, 0.05)}
                         ${_colorSliderHTML(idx, 'contrast', '對比度', 0.5, 2, 1, 0.05)}
+                        ${_colorSliderHTML(idx, 'midtones', '中間調', -1, 1, 0, 0.05)}
                         ${_colorSliderHTML(idx, 'saturation', '飽和度', 0, 3, 1, 0.05)}
+                        ${_colorSliderHTML(idx, 'highlights', '高光', -1, 1, 0, 0.05)}
                         ${_colorSliderHTML(idx, 'gamma', 'Gamma', 0.1, 3, 1, 0.05)}
                         ${_colorSliderHTML(idx, 'color_temp', '色溫', -1, 1, 0, 0.05)}
                     </div>
 
-                    <!-- Tonal zones -->
-                    <div class="mt-4 pt-3 border-t border-[#333]">
-                        <h4 class="text-xs font-semibold text-gray-400 mb-2">影調區域</h4>
-                        <div class="space-y-3">
-                            ${_colorSliderHTML(idx, 'shadows', '陰影', -1, 1, 0, 0.05)}
-                            ${_colorSliderHTML(idx, 'midtones', '中間調', -1, 1, 0, 0.05)}
-                            ${_colorSliderHTML(idx, 'highlights', '高光', -1, 1, 0, 0.05)}
-                        </div>
-                    </div>
-
-                    <!-- Curves editor -->
+                    <!-- Curve + mini preview, side-by-side -->
                     <div class="mt-4 pt-3 border-t border-[#333]">
                         <div class="flex items-center justify-between mb-2">
-                            <h4 class="text-xs font-semibold text-gray-400">曲線</h4>
+                            <h4 class="text-xs font-semibold text-gray-400">曲線 · 預視</h4>
                             <button id="dm_curve_reset_${idx}" class="text-xs text-blue-400 hover:text-blue-300">重置曲線</button>
                         </div>
-                        <canvas id="dm_curve_canvas_${idx}" width="240" height="240"
-                            class="w-full bg-[#1a1a1a] border border-[#333] rounded cursor-crosshair" style="aspect-ratio:1/1;"></canvas>
-                        <div class="text-[10px] text-gray-600 mt-1">拖曳控制點 · 點擊空白新增 · 雙擊刪除</div>
+                        <div class="flex gap-3 items-start">
+                            <div class="flex-shrink-0">
+                                <canvas id="dm_curve_canvas_${idx}" width="160" height="160"
+                                    class="bg-[#1a1a1a] border border-[#333] rounded cursor-crosshair block"></canvas>
+                                <div class="text-[10px] text-gray-600 mt-1 leading-tight">拖曳控制點 · 點擊新增<br>雙擊刪除</div>
+                            </div>
+                            <div class="flex-1 min-w-0">
+                                <div class="text-[10px] text-gray-500 mb-1">調整後預視</div>
+                                <div class="rounded overflow-hidden border border-[#333] bg-[#111]">
+                                    ${thumb
+                                        ? `<img id="dm_mini_preview_img" src="${thumb}" class="w-full h-auto block">`
+                                        : '<div class="aspect-video flex items-center justify-center text-gray-600 text-xs">無預視</div>'}
+                                </div>
+                            </div>
+                        </div>
                     </div>
                 </div>
             </div>
@@ -355,8 +362,9 @@ function _buildCurveTable(shadows, mids, highs, curvePoints) {
 }
 
 function _applyLivePreview(idx) {
-    const img = document.getElementById('dm_preview_img');
-    if (!img) return;
+    const mainImg = document.getElementById('dm_preview_img');
+    const miniImg = document.getElementById('dm_mini_preview_img');
+    if (!mainImg && !miniImg) return;
     const get = (n, def) => parseFloat(document.getElementById(`dm_color_${n}_${idx}`)?.value ?? def) || def;
     const brightness = get('brightness', 0);      // -1..1 (ffmpeg eq brightness)
     const contrast = get('contrast', 1);          // 0.5..2
@@ -369,7 +377,9 @@ function _applyLivePreview(idx) {
 
     // Map ffmpeg eq brightness (-1..1, additive) to CSS brightness (multiplicative, 0..2)
     const cssBrightness = 1 + brightness;
-    img.style.filter = `brightness(${cssBrightness}) contrast(${contrast}) saturate(${saturation}) url(#${_SVG_FILTER_ID})`;
+    const filterStr = `brightness(${cssBrightness}) contrast(${contrast}) saturate(${saturation}) url(#${_SVG_FILTER_ID})`;
+    if (mainImg) mainImg.style.filter = filterStr;
+    if (miniImg) miniImg.style.filter = filterStr;
 
     // Update SVG filter: gamma, color_temp, curve
     const gammaEl = document.getElementById('dm-svg-gamma');
