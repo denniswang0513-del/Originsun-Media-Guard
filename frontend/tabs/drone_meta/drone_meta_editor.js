@@ -5,7 +5,7 @@
  * Exports a teardown helper to clear timers/caches on close.
  */
 
-import { secToHMS as _secToHMS, COLOR_DEFAULTS } from '../../js/shared/clip_utils.js';
+import { secToHMS as _secToHMS, COLOR_DEFAULTS, applyClipFilter } from '../../js/shared/clip_utils.js';
 
 function _fmtHMS(sec) {
     if (!sec || sec <= 0) return '00:00:00';
@@ -393,6 +393,13 @@ function _applyLivePreview(idx) {
     }
 }
 
+// Map slider DOM id back to the field key on the clip object.
+// "dm_color_brightness_3" -> "brightness"
+function _sliderFieldKey(sliderId) {
+    const m = sliderId.match(/^dm_color_(.+)_\d+$/);
+    return m ? m[1] : null;
+}
+
 function _bindColorEvents(idx, container) {
     if (!container) container = document;
     _ensureSvgFilter();
@@ -402,7 +409,24 @@ function _bindColorEvents(idx, container) {
             const valId = slider.id.replace(/_(\d+)$/, '_val_$1');
             const valEl = document.getElementById(valId);
             if (valEl) valEl.textContent = slider.value;
-            _applyLivePreview(idx);  // instant, no debounce / no server
+            // Persist slider value into the clip object so "套用到全部" sees
+            // current values without needing a separate DOM-read step, and
+            // so the clip's own card thumbnail reflects live changes too.
+            const key = _sliderFieldKey(slider.id);
+            if (key && _currentFile) _currentFile[key] = parseFloat(slider.value);
+            _applyLivePreview(idx);
+            // Live-update every visible card of this clip via the shared filter utility.
+            if (_currentFile) {
+                const allCards = document.querySelectorAll(`[data-idx="${idx}"].clip-card, .dm-file-card[data-idx="${idx}"]`);
+                allCards.forEach(card => {
+                    const thumb = card.querySelector('.clip-thumb');
+                    if (thumb) {
+                        const fid = thumb.dataset._liveFilterId || `clip-filter-live-${idx}`;
+                        thumb.dataset._liveFilterId = fid;
+                        applyClipFilter(thumb, _currentFile, fid);
+                    }
+                });
+            }
         });
     });
 
