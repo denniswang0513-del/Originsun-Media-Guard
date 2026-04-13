@@ -32,6 +32,7 @@ AGENT_FILES = [
     "Install_Originsun_Agent.bat",
     "Install_or_Update.bat",
     "Fix_Task.bat",
+    "exiftool.exe",
 ]
 
 # ── Directories synced to Agent (recursively) ──
@@ -42,6 +43,7 @@ AGENT_DIRS = [
     "routers",
     "utils",
     "db",
+    "exiftool_files",
 ]
 
 # ── Extra files only in full install ZIP (not in OTA update) ──
@@ -61,7 +63,7 @@ INSTALL_EXTRA_DIRS = [
 EXCLUDE_DIRS = {
     '.venv', 'venv', 'node_modules', '.git', '.claude', 'tests',
     'models', 'voice', 'credentials', '__pycache__', 'e2e',
-    '_rollback', 'python_embed',
+    '_rollback', 'python_embed', 'exiftool_files',
 }
 
 # ── Python stdlib modules (excluded from dependency checks) ──

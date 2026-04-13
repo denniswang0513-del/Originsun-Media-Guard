@@ -286,8 +286,8 @@ def main():
     ota_mb = ota_total / 1024 / 1024
     print(f"  OTA 內容: {ota_count} 個檔案, {ota_mb:.1f} MB (未壓縮)")
 
-    if ota_mb > 10:
-        print(f"\n[ERROR] OTA ZIP 過大 ({ota_mb:.1f} MB > 10 MB)！")
+    if ota_mb > 50:
+        print(f"\n[ERROR] OTA ZIP 過大 ({ota_mb:.1f} MB > 50 MB)！")
         print("  可能原因: AGENT_DIRS 包含了二進制檔案 (ffmpeg, python_embed 等)")
         print(f"  目前 AGENT_DIRS: {dirs_to_include}")
         print(f"  自動發現的目錄: {[d for d in dirs_to_include if d not in AGENT_DIRS]}")
