@@ -569,8 +569,24 @@ async function submitDroneMeta() {
         const result = await res.json();
         if (result.status === 'queued') {
             appendLog(`空拍寫入任務已提交至 [${hostName}] (job: ${result.job_id})`, 'info');
-            const progEl = document.getElementById('dm-progress');
-            if (progEl) progEl.classList.remove('hidden');
+            if (isLocal) {
+                const progEl = document.getElementById('dm-progress');
+                if (progEl) progEl.classList.remove('hidden');
+            } else if (window.initRemoteHostProgress && window.startHeartbeatMonitor) {
+                // Reuse the shared remote-host progress panel + heartbeat monitor.
+                window._activeRemoteHosts = window._activeRemoteHosts || {};
+                window._remoteJobType = 'drone_meta';
+                window.initRemoteHostProgress([{ name: hostName, ip: host.ip }]);
+                window.updateHostProgress && window.updateHostProgress(host.ip, 10, '任務已接收...', '#1f538d');
+                window._activeRemoteHosts[host.ip] = {
+                    host: { name: hostName, ip: host.ip },
+                    lastSeen: Date.now(),
+                    startTime: Date.now(),
+                    expectedJobs: 1,
+                    pct: 0,
+                };
+                window.startHeartbeatMonitor();
+            }
         } else {
             appendLog(`提交失敗: ${JSON.stringify(result)}`, 'error');
         }

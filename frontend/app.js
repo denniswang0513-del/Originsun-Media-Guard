@@ -1180,11 +1180,12 @@ if (typeof appendLog === 'undefined') {
         const JOB_LABELS = {
             transcode: '轉檔', verify: '比對', concat: '串帶',
             report: '報表', transcribe: '轉錄', tts: 'TTS 合成', tts_clone: '聲音複製',
+            drone_meta: '空拍寫入',
         };
 
         function initRemoteHostProgress(hosts) {
             const tab = window._activeJobTab || 'backup';
-            const prefixMap = { backup: 'bk', transcode: 'tc', concat: 'ct', verify: 'vf', report: 'rp', transcribe: 'tr', tts: 'tts' };
+            const prefixMap = { backup: 'bk', transcode: 'tc', concat: 'ct', verify: 'vf', report: 'rp', transcribe: 'tr', tts: 'tts', drone_meta: 'dm' };
             const prefix = prefixMap[tab];
             if (!prefix) return;
             const panel = document.getElementById(prefix + '-remote-hosts-progress');

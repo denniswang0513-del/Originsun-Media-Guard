@@ -165,7 +165,13 @@
         </div>
     </div>
 
-    <!-- 執行進度條 -->
+    <!-- 遠端主機執行進度 -->
+    <div id="dm-remote-hosts-progress" class="hidden mt-4 mb-2 p-3 bg-[#1a1a2e] border border-[#2e3a6e] rounded-lg">
+        <div class="text-xs text-blue-400 font-semibold mb-2">🖥️ 遠端主機空拍寫入進度</div>
+        <div id="dm-remote-host-rows" class="flex flex-col gap-2"></div>
+    </div>
+
+    <!-- 執行進度條（本機任務時顯示） -->
     <div id="dm-progress" class="mt-4 mb-2 hidden">
         <div class="flex justify-between text-xs text-gray-400 mb-1">
             <span id="dm-prog-label">進度：尚未開始</span>
