@@ -17,8 +17,8 @@ function _fmtHMS(sec) {
 
 function _colorSliderHTML(idx, name, label, min, max, def, step) {
     return `
-    <div class="grid grid-cols-[4.5rem_1fr_3rem] items-center gap-2.5 group">
-        <label class="text-[11px] text-gray-400 text-right select-none">${label}</label>
+    <div class="grid grid-cols-[7rem_1fr_3rem] items-center gap-2.5 group">
+        <label class="text-[11px] text-gray-400 text-left select-none truncate">${label}</label>
         <input type="range" id="dm_color_${name}_${idx}" min="${min}" max="${max}" step="${step}" value="${def}"
             class="w-full h-1.5 accent-blue-500 cursor-pointer">
         <input type="number" id="dm_color_${name}_val_${idx}" value="${def}" min="${min}" max="${max}" step="${step}"
@@ -115,30 +115,23 @@ export function renderInlineEditor(container, file, idx, fmtDuration) {
                         </div>
                     </div>
                     <div class="flex gap-5 p-4 items-stretch">
-                        <!-- Grouped sliders (single column for readability) -->
-                        <div class="flex-1 min-w-0 space-y-3.5">
-                            <div>
-                                <div class="text-[10px] uppercase tracking-widest text-gray-500 mb-1.5 font-medium">基本</div>
-                                <div class="space-y-1.5">
-                                    ${_colorSliderHTML(idx, 'brightness', '亮度', -1, 1, 0, 0.05)}
-                                    ${_colorSliderHTML(idx, 'contrast', '對比度', 0.5, 2, 1, 0.05)}
-                                    ${_colorSliderHTML(idx, 'saturation', '飽和度', 0, 3, 1, 0.05)}
-                                </div>
+                        <!-- Sliders (divider-separated groups, labels left-aligned) -->
+                        <div class="flex-1 min-w-0">
+                            <div class="space-y-1.5">
+                                ${_colorSliderHTML(idx, 'brightness', '亮度', -1, 1, 0, 0.05)}
+                                ${_colorSliderHTML(idx, 'contrast', '對比度', 0.5, 2, 1, 0.05)}
+                                ${_colorSliderHTML(idx, 'saturation', '飽和度', 0, 3, 1, 0.05)}
                             </div>
-                            <div>
-                                <div class="text-[10px] uppercase tracking-widest text-gray-500 mb-1.5 font-medium">色調</div>
-                                <div class="space-y-1.5">
-                                    ${_colorSliderHTML(idx, 'color_temp', '色溫 (藍↔黃)', -1, 1, 0, 0.05)}
-                                    ${_colorSliderHTML(idx, 'tint', '色相 (洋紅↔青綠)', -1, 1, 0, 0.05)}
-                                </div>
+                            <hr class="my-3 border-t border-[#2a2a2e]">
+                            <div class="space-y-1.5">
+                                ${_colorSliderHTML(idx, 'color_temp', '色溫 (藍↔黃)', -1, 1, 0, 0.05)}
+                                ${_colorSliderHTML(idx, 'tint', '色相 (洋紅↔青綠)', -1, 1, 0, 0.05)}
                             </div>
-                            <div>
-                                <div class="text-[10px] uppercase tracking-widest text-gray-500 mb-1.5 font-medium">影調區域</div>
-                                <div class="space-y-1.5">
-                                    ${_colorSliderHTML(idx, 'shadows', '陰影', -1, 1, 0, 0.05)}
-                                    ${_colorSliderHTML(idx, 'midtones', '中間調', -1, 1, 0, 0.05)}
-                                    ${_colorSliderHTML(idx, 'highlights', '高光', -1, 1, 0, 0.05)}
-                                </div>
+                            <hr class="my-3 border-t border-[#2a2a2e]">
+                            <div class="space-y-1.5">
+                                ${_colorSliderHTML(idx, 'shadows', '陰影', -1, 1, 0, 0.05)}
+                                ${_colorSliderHTML(idx, 'midtones', '中間調', -1, 1, 0, 0.05)}
+                                ${_colorSliderHTML(idx, 'highlights', '高光', -1, 1, 0, 0.05)}
                             </div>
                         </div>
                         <!-- Curve canvas (right side, height matches sliders column) -->
