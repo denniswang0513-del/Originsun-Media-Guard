@@ -124,8 +124,8 @@ export function renderInlineEditor(container, file, idx, fmtDuration) {
                             </div>
                             <hr class="my-3 border-t border-[#2a2a2e]">
                             <div class="space-y-1.5">
-                                ${_colorSliderHTML(idx, 'color_temp', '色溫 (藍↔黃)', -1, 1, 0, 0.05)}
-                                ${_colorSliderHTML(idx, 'tint', '色相 (洋紅↔青綠)', -1, 1, 0, 0.05)}
+                                ${_colorSliderHTML(idx, 'color_temp', '色溫', -1, 1, 0, 0.05)}
+                                ${_colorSliderHTML(idx, 'tint', '色調', -1, 1, 0, 0.05)}
                             </div>
                             <hr class="my-3 border-t border-[#2a2a2e]">
                             <div class="space-y-1.5">
