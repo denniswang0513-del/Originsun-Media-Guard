@@ -120,11 +120,24 @@ function _closeModal() {
 function _applyAndClose() {
     window._concatAdvancedClips = _clips.map(c => ({ ...c }));
     _updateConcatStatus();
-    // Broadcast new order + selection so drone_meta's outer grid can sync.
+    // Broadcast new order + selection + color/trim edits so drone_meta's
+    // outer grid can sync both ordering and thumbnail filter previews.
+    const colorFields = ['brightness', 'contrast', 'saturation', 'gamma',
+                         'color_temp', 'shadows', 'midtones', 'highlights',
+                         'curve_points', 'trim_in', 'trim_out'];
+    const edits = {};
+    _clips.forEach(c => {
+        const entry = {};
+        colorFields.forEach(f => {
+            if (c[f] !== undefined) entry[f] = c[f];
+        });
+        edits[c.path] = entry;
+    });
     window.dispatchEvent(new CustomEvent('dmfile:order-synced', {
         detail: {
             paths: _clips.map(c => c.path),
             selectedPaths: _clips.filter(c => c.selected).map(c => c.path),
+            edits,
         },
     }));
     _closeModal();

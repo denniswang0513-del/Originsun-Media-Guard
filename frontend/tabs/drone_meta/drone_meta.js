@@ -637,12 +637,17 @@ function _syncOrderFromAdvanced(e) {
     const hasSelection = e.detail && ('selectedPaths' in e.detail);
     const selectedSet = new Set(hasSelection ? (e.detail.selectedPaths || []) : []);
 
+    // Color/trim edits from modal (keyed by path). Missing = no edits on that clip.
+    const edits = (e.detail && e.detail.edits) || {};
+
     const byPath = new Map(_dmFiles.map(f => [f.path, f]));
     const newOrder = [];
     for (const p of paths) {
         const f = byPath.get(p);
         if (f) {
             if (hasSelection) f.selected = selectedSet.has(p);
+            const e = edits[p];
+            if (e) Object.assign(f, e);
             newOrder.push(f);
             byPath.delete(p);
         }
