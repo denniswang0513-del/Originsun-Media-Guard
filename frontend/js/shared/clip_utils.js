@@ -2,7 +2,7 @@
  * clip_utils.js — Shared helpers for clip-based editors (drone_meta, concat).
  */
 
-export const COLOR_FIELDS = ['brightness', 'contrast', 'saturation', 'gamma', 'color_temp'];
+export const COLOR_FIELDS = ['brightness', 'contrast', 'saturation', 'gamma', 'color_temp', 'hue'];
 
 export const COLOR_DEFAULTS = {
     brightness: 0,
@@ -10,6 +10,7 @@ export const COLOR_DEFAULTS = {
     saturation: 1,
     gamma: 1,
     color_temp: 0,
+    hue: 0,
 };
 
 export function fmtDuration(sec) {
@@ -104,6 +105,7 @@ export function applyClipFilter(imgEl, clip, filterId) {
     const s = parseFloat(clip.saturation) || 1;
     const g = parseFloat(clip.gamma)      || 1;
     const t = parseFloat(clip.color_temp) || 0;
+    const h = parseFloat(clip.hue)        || 0;
     const sh = parseFloat(clip.shadows)    || 0;
     const mi = parseFloat(clip.midtones)   || 0;
     const hi = parseFloat(clip.highlights) || 0;
@@ -140,7 +142,7 @@ export function applyClipFilter(imgEl, clip, filterId) {
     filter.querySelector('[data-role="curve"]').querySelectorAll('feFuncR,feFuncG,feFuncB')
         .forEach(el => el.setAttribute('tableValues', table));
 
-    imgEl.style.filter = `brightness(${1 + b}) contrast(${c}) saturate(${s}) url(#${filterId})`;
+    imgEl.style.filter = `brightness(${1 + b}) contrast(${c}) saturate(${s}) hue-rotate(${h}deg) url(#${filterId})`;
 }
 
 export function hasTrim(clip) {

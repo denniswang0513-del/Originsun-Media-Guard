@@ -128,7 +128,7 @@ export function renderInlineEditor(container, file, idx, fmtDuration) {
                             <div>
                                 <div class="text-[10px] uppercase tracking-widest text-gray-500 mb-1.5 font-medium">色調</div>
                                 <div class="space-y-1.5">
-                                    ${_colorSliderHTML(idx, 'gamma', '中階亮度', 0.1, 3, 1, 0.05)}
+                                    ${_colorSliderHTML(idx, 'hue', '色相', -180, 180, 0, 1)}
                                     ${_colorSliderHTML(idx, 'color_temp', '色溫', -1, 1, 0, 0.05)}
                                 </div>
                             </div>
@@ -379,15 +379,16 @@ function _applyLivePreview(idx) {
     const brightness = get('brightness', 0);      // -1..1 (ffmpeg eq brightness)
     const contrast = get('contrast', 1);          // 0.5..2
     const saturation = get('saturation', 1);      // 0..3
-    const gamma = get('gamma', 1);                // 0.1..3
+    const gamma = get('gamma', 1);                // 0.1..3 (kept for backward compat)
     const colorTemp = get('color_temp', 0);       // -1..1 (positive = warm)
+    const hue = get('hue', 0);                    // -180..180 deg
     const shadows = get('shadows', 0);            // -1..1
     const mids = get('midtones', 0);
     const highs = get('highlights', 0);
 
     // Map ffmpeg eq brightness (-1..1, additive) to CSS brightness (multiplicative, 0..2)
     const cssBrightness = 1 + brightness;
-    mainImg.style.filter = `brightness(${cssBrightness}) contrast(${contrast}) saturate(${saturation}) url(#${_SVG_FILTER_ID})`;
+    mainImg.style.filter = `brightness(${cssBrightness}) contrast(${contrast}) saturate(${saturation}) hue-rotate(${hue}deg) url(#${_SVG_FILTER_ID})`;
 
     // Update SVG filter: gamma, color_temp, curve
     const gammaEl = document.getElementById('dm-svg-gamma');
