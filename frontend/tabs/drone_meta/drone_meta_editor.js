@@ -114,7 +114,7 @@ export function renderInlineEditor(container, file, idx, fmtDuration) {
                             <button id="dm_detail_reset_color" class="px-2 py-1 rounded border border-[#333] bg-[#1a1a1d] text-gray-400 hover:text-blue-300 hover:border-blue-500/50 transition-colors">重置全部</button>
                         </div>
                     </div>
-                    <div class="flex gap-5 p-4 items-start">
+                    <div class="flex gap-5 p-4 items-stretch">
                         <!-- Grouped sliders (single column for readability) -->
                         <div class="flex-1 min-w-0 space-y-3.5">
                             <div>
@@ -128,7 +128,7 @@ export function renderInlineEditor(container, file, idx, fmtDuration) {
                             <div>
                                 <div class="text-[10px] uppercase tracking-widest text-gray-500 mb-1.5 font-medium">色調</div>
                                 <div class="space-y-1.5">
-                                    ${_colorSliderHTML(idx, 'gamma', 'Gamma', 0.1, 3, 1, 0.05)}
+                                    ${_colorSliderHTML(idx, 'gamma', '中階亮度', 0.1, 3, 1, 0.05)}
                                     ${_colorSliderHTML(idx, 'color_temp', '色溫', -1, 1, 0, 0.05)}
                                 </div>
                             </div>
@@ -141,15 +141,15 @@ export function renderInlineEditor(container, file, idx, fmtDuration) {
                                 </div>
                             </div>
                         </div>
-                        <!-- Curve canvas (compact, right side) -->
-                        <div class="flex-shrink-0 flex flex-col items-center">
-                            <div class="text-[10px] uppercase tracking-widest text-gray-500 mb-1.5 self-start font-medium">曲線</div>
-                            <div class="p-1.5 bg-[#0f0f11] border border-[#2a2a2e] rounded-lg">
-                                <canvas id="dm_curve_canvas_${idx}" width="160" height="160"
-                                    class="bg-[#0a0a0c] rounded cursor-crosshair block"></canvas>
+                        <!-- Curve canvas (right side, height matches sliders column) -->
+                        <div class="flex-shrink-0 flex flex-col">
+                            <div class="text-[10px] uppercase tracking-widest text-gray-500 mb-1.5 font-medium">曲線</div>
+                            <div class="flex-1 p-1.5 bg-[#0f0f11] border border-[#2a2a2e] rounded-lg flex items-center justify-center">
+                                <canvas id="dm_curve_canvas_${idx}" width="320" height="320"
+                                    class="bg-[#0a0a0c] rounded cursor-crosshair block" style="height:100%;width:auto;aspect-ratio:1/1;max-width:100%;"></canvas>
                             </div>
                             <div class="text-[10px] text-gray-600 mt-2 leading-snug text-center">
-                                拖曳控制點 · 點擊新增<br>雙擊刪除
+                                拖曳控制點 · 點擊新增 · 雙擊刪除
                             </div>
                         </div>
                     </div>
