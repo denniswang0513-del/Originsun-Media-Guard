@@ -2,7 +2,7 @@
  * clip_utils.js — Shared helpers for clip-based editors (drone_meta, concat).
  */
 
-export const COLOR_FIELDS = ['brightness', 'contrast', 'saturation', 'gamma', 'color_temp', 'hue'];
+export const COLOR_FIELDS = ['brightness', 'contrast', 'saturation', 'gamma', 'color_temp', 'tint'];
 
 export const COLOR_DEFAULTS = {
     brightness: 0,
@@ -10,7 +10,7 @@ export const COLOR_DEFAULTS = {
     saturation: 1,
     gamma: 1,
     color_temp: 0,
-    hue: 0,
+    tint: 0,  // -1..1, negative = magenta, positive = green
 };
 
 export function fmtDuration(sec) {
@@ -105,7 +105,7 @@ export function applyClipFilter(imgEl, clip, filterId) {
     const s = parseFloat(clip.saturation) || 1;
     const g = parseFloat(clip.gamma)      || 1;
     const t = parseFloat(clip.color_temp) || 0;
-    const h = parseFloat(clip.hue)        || 0;
+    const tn = parseFloat(clip.tint)      || 0;
     const sh = parseFloat(clip.shadows)    || 0;
     const mi = parseFloat(clip.midtones)   || 0;
     const hi = parseFloat(clip.highlights) || 0;
@@ -134,15 +134,17 @@ export function applyClipFilter(imgEl, clip, filterId) {
     const exp = (1 / g).toFixed(4);
     filter.querySelector('[data-role="gamma"]').querySelectorAll('feFuncR,feFuncG,feFuncB')
         .forEach(el => el.setAttribute('exponent', exp));
+    // Temp shifts R/B (blue↔yellow); tint shifts G channel (magenta↔green).
     const rScale = (1 + 0.3 * t).toFixed(4);
     const bScale = (1 - 0.3 * t).toFixed(4);
+    const gShift = (0.15 * tn).toFixed(4);
     filter.querySelector('[data-role="temp"]')
-        .setAttribute('values', `${rScale} 0 0 0 0  0 1 0 0 0  0 0 ${bScale} 0 0  0 0 0 1 0`);
+        .setAttribute('values', `${rScale} 0 0 0 0  0 1 0 0 ${gShift}  0 0 ${bScale} 0 0  0 0 0 1 0`);
     const table = _buildCurveTable(sh, mi, hi, curve);
     filter.querySelector('[data-role="curve"]').querySelectorAll('feFuncR,feFuncG,feFuncB')
         .forEach(el => el.setAttribute('tableValues', table));
 
-    imgEl.style.filter = `brightness(${1 + b}) contrast(${c}) saturate(${s}) hue-rotate(${h}deg) url(#${filterId})`;
+    imgEl.style.filter = `brightness(${1 + b}) contrast(${c}) saturate(${s}) url(#${filterId})`;
 }
 
 export function hasTrim(clip) {

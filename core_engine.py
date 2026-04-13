@@ -1593,7 +1593,7 @@ class MediaGuardEngine:
             saturation = float(c.get("saturation") or 1.0)
             gamma = float(c.get("gamma") or 1.0)
             color_temp = float(c.get("color_temp") or 0.0)
-            hue = float(c.get("hue") or 0.0)
+            tint = float(c.get("tint") or 0.0)
             shadows = float(c.get("shadows") or 0.0)
             midtones = float(c.get("midtones") or 0.0)
             highlights = float(c.get("highlights") or 0.0)
@@ -1604,10 +1604,9 @@ class MediaGuardEngine:
                 f"pad={W}:{H}:(ow-iw)/2:(oh-ih)/2:black,"
                 f"eq=brightness={brightness}:contrast={contrast}:saturation={saturation}:gamma={gamma}"
             )
-            if color_temp != 0.0:
-                vf += f",colorbalance=rs={color_temp}:gs=0:bs={-color_temp}"
-            if hue != 0.0:
-                vf += f",hue=h={hue}"
+            # color_temp: blue↔yellow via R/B shift; tint: magenta↔green via G shift.
+            if color_temp != 0.0 or tint != 0.0:
+                vf += f",colorbalance=rs={color_temp}:gs={tint}:bs={-color_temp}"
 
             # Build curves filter from user curve or shadows/midtones/highlights
             # Treat [[0,0],[1,1]] (identity) as "no curve set" so tonal zones still apply.

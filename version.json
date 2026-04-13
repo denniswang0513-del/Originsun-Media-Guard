@@ -1,5 +1,5 @@
 {
-  "version": "1.10.71",
-  "build_date": "2026-04-12",
-  "notes": "fix: OTA 解壓前殺 port 8000 避免檔案鎖定"
+  "version": "1.10.73",
+  "build_date": "2026-04-14",
+  "notes": "修 Session 0 picker 不彈窗 + Agent self-heal 批次修所有同事 + Fix_Task.bat 後備"
 }

@@ -123,7 +123,7 @@ function _applyAndClose() {
     // Broadcast new order + selection + color/trim edits so drone_meta's
     // outer grid can sync both ordering and thumbnail filter previews.
     const colorFields = ['brightness', 'contrast', 'saturation', 'gamma',
-                         'color_temp', 'hue', 'shadows', 'midtones', 'highlights',
+                         'color_temp', 'tint', 'shadows', 'midtones', 'highlights',
                          'curve_points', 'trim_in', 'trim_out'];
     const edits = {};
     _clips.forEach(c => {
