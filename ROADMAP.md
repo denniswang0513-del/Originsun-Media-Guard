@@ -4,7 +4,7 @@
 
 ---
 
-## 現況 (v1.10.73) 基準線
+## 現況 (v1.10.74) 基準線
 
 - ✅ 7 個完整工作流程（備份、比對、轉 Proxy、串帶、報表、AI 逐字稿、空拍寫入）
 - ✅ 模組化後端：`main.py` + `core/` + `routers/`（router 容錯載入，缺模組跳過不 crash）
@@ -566,7 +566,7 @@ tools:
     ▼ Phase J: CRM + 專案管理 + 帳務 (✅ 核心完成)
     │   → 64 API / 11 DB 表 / 6 Tab + 5 子視圖 + 手機版 RWD + Inline 編輯
     │
-現在 (v1.10.73) ← 你在這裡
+現在 (v1.10.74) ← 你在這裡
     │
     ▼ Phase J-3: 備份 Tab 整合 (⬜)
     │
@@ -600,6 +600,7 @@ tools:
 
 | 版本 | 日期 | 重點 |
 |------|------|------|
+| v1.10.74 | 2026-04-14 | 空拍進階編輯 UI 重排 + 色溫/色調 (tint) 取代 Gamma + 遠端主機進度面板 + exiftool 併入 OTA 修遠端寫入失敗 |
 | v1.10.73 | 2026-04-14 | 修 Session 0 問題：installer 移除 /rl highest + Agent self-heal + Fix_Task.bat 後備腳本（修復 picker 對話框不彈窗） |
 | v1.10.72 | 2026-04-13 | 進階編輯器加曲線/影調/即時 SVG 濾鏡預覽 + 套用到全部 + Install_or_Update 修 UNC/UAC + admin 按鈕修復 |
 | v1.10.71 | 2026-04-12 | OTA 解壓前殺 port 避免檔案鎖定 + `/publish` skill + system/restart fallback |
