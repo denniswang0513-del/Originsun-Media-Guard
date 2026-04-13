@@ -17,11 +17,12 @@ function _fmtHMS(sec) {
 
 function _colorSliderHTML(idx, name, label, min, max, def, step) {
     return `
-    <div class="flex items-center gap-2">
-        <label class="text-xs text-gray-500 w-20 flex-shrink-0">${label}</label>
+    <div class="grid grid-cols-[4.5rem_1fr_3rem] items-center gap-2.5 group">
+        <label class="text-[11px] text-gray-400 text-right select-none">${label}</label>
         <input type="range" id="dm_color_${name}_${idx}" min="${min}" max="${max}" step="${step}" value="${def}"
-            class="flex-1 h-1.5 accent-blue-500">
-        <span id="dm_color_${name}_val_${idx}" class="text-xs text-gray-400 w-10 text-right">${def}</span>
+            class="w-full h-1.5 accent-blue-500 cursor-pointer">
+        <input type="number" id="dm_color_${name}_val_${idx}" value="${def}" min="${min}" max="${max}" step="${step}"
+            class="bg-[#111] border border-[#2a2a2a] rounded px-1.5 py-0.5 text-[11px] text-gray-300 font-mono text-right focus:outline-none focus:border-blue-500 focus:text-white [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none">
     </div>`;
 }
 
@@ -101,32 +102,55 @@ export function renderInlineEditor(container, file, idx, fmtDuration) {
                     </div>
                 </div>
 
-                <!-- Right: Color grading (sliders + curve side-by-side in one row) -->
-                <div class="bg-[#1e1e1e] border border-[#333] rounded-lg p-3">
-                    <div class="flex items-center justify-between mb-3">
-                        <h4 class="text-xs font-semibold text-gray-400">色彩調整 · 曲線</h4>
-                        <div class="flex gap-3">
-                            <button id="dm_curve_reset_${idx}" class="text-xs text-blue-400 hover:text-blue-300">重置曲線</button>
-                            <button id="dm_detail_reset_color" class="text-xs text-blue-400 hover:text-blue-300">重置全部</button>
+                <!-- Right: Color grading (sliders grouped + curve side-by-side) -->
+                <div class="bg-gradient-to-b from-[#1f1f22] to-[#17171a] border border-[#2e2e33] rounded-lg shadow-inner">
+                    <div class="flex items-center justify-between px-4 py-2.5 border-b border-[#2a2a2e]">
+                        <div class="flex items-center gap-2">
+                            <span class="inline-block w-1.5 h-4 bg-blue-500 rounded-sm"></span>
+                            <h4 class="text-sm font-semibold text-gray-200 tracking-wide">色彩調整</h4>
+                        </div>
+                        <div class="flex items-center gap-2 text-[11px]">
+                            <button id="dm_curve_reset_${idx}" class="px-2 py-1 rounded border border-[#333] bg-[#1a1a1d] text-gray-400 hover:text-blue-300 hover:border-blue-500/50 transition-colors">重置曲線</button>
+                            <button id="dm_detail_reset_color" class="px-2 py-1 rounded border border-[#333] bg-[#1a1a1d] text-gray-400 hover:text-blue-300 hover:border-blue-500/50 transition-colors">重置全部</button>
                         </div>
                     </div>
-                    <div class="flex gap-4 items-start">
-                        <!-- 8 sliders in 2 cols -->
-                        <div class="flex-1 grid grid-cols-2 gap-x-4 gap-y-2 min-w-0">
-                            ${_colorSliderHTML(idx, 'brightness', '亮度', -1, 1, 0, 0.05)}
-                            ${_colorSliderHTML(idx, 'shadows', '陰影', -1, 1, 0, 0.05)}
-                            ${_colorSliderHTML(idx, 'contrast', '對比度', 0.5, 2, 1, 0.05)}
-                            ${_colorSliderHTML(idx, 'midtones', '中間調', -1, 1, 0, 0.05)}
-                            ${_colorSliderHTML(idx, 'saturation', '飽和度', 0, 3, 1, 0.05)}
-                            ${_colorSliderHTML(idx, 'highlights', '高光', -1, 1, 0, 0.05)}
-                            ${_colorSliderHTML(idx, 'gamma', 'Gamma', 0.1, 3, 1, 0.05)}
-                            ${_colorSliderHTML(idx, 'color_temp', '色溫', -1, 1, 0, 0.05)}
+                    <div class="flex gap-5 p-4 items-start">
+                        <!-- Grouped sliders (single column for readability) -->
+                        <div class="flex-1 min-w-0 space-y-3.5">
+                            <div>
+                                <div class="text-[10px] uppercase tracking-widest text-gray-500 mb-1.5 font-medium">基本</div>
+                                <div class="space-y-1.5">
+                                    ${_colorSliderHTML(idx, 'brightness', '亮度', -1, 1, 0, 0.05)}
+                                    ${_colorSliderHTML(idx, 'contrast', '對比度', 0.5, 2, 1, 0.05)}
+                                    ${_colorSliderHTML(idx, 'saturation', '飽和度', 0, 3, 1, 0.05)}
+                                </div>
+                            </div>
+                            <div>
+                                <div class="text-[10px] uppercase tracking-widest text-gray-500 mb-1.5 font-medium">色調</div>
+                                <div class="space-y-1.5">
+                                    ${_colorSliderHTML(idx, 'gamma', 'Gamma', 0.1, 3, 1, 0.05)}
+                                    ${_colorSliderHTML(idx, 'color_temp', '色溫', -1, 1, 0, 0.05)}
+                                </div>
+                            </div>
+                            <div>
+                                <div class="text-[10px] uppercase tracking-widest text-gray-500 mb-1.5 font-medium">影調區域</div>
+                                <div class="space-y-1.5">
+                                    ${_colorSliderHTML(idx, 'shadows', '陰影', -1, 1, 0, 0.05)}
+                                    ${_colorSliderHTML(idx, 'midtones', '中間調', -1, 1, 0, 0.05)}
+                                    ${_colorSliderHTML(idx, 'highlights', '高光', -1, 1, 0, 0.05)}
+                                </div>
+                            </div>
                         </div>
-                        <!-- Curve canvas -->
-                        <div class="flex-shrink-0">
-                            <canvas id="dm_curve_canvas_${idx}" width="160" height="160"
-                                class="bg-[#1a1a1a] border border-[#333] rounded cursor-crosshair block"></canvas>
-                            <div class="text-[10px] text-gray-600 mt-1 leading-tight">拖曳控制點<br>點擊新增·雙擊刪除</div>
+                        <!-- Curve canvas (compact, right side) -->
+                        <div class="flex-shrink-0 flex flex-col items-center">
+                            <div class="text-[10px] uppercase tracking-widest text-gray-500 mb-1.5 self-start font-medium">曲線</div>
+                            <div class="p-1.5 bg-[#0f0f11] border border-[#2a2a2e] rounded-lg">
+                                <canvas id="dm_curve_canvas_${idx}" width="160" height="160"
+                                    class="bg-[#0a0a0c] rounded cursor-crosshair block"></canvas>
+                            </div>
+                            <div class="text-[10px] text-gray-600 mt-2 leading-snug text-center">
+                                拖曳控制點 · 點擊新增<br>雙擊刪除
+                            </div>
                         </div>
                     </div>
                 </div>
@@ -398,30 +422,40 @@ function _bindColorEvents(idx, container) {
     if (!container) container = document;
     _ensureSvgFilter();
     const sliders = container.querySelectorAll('input[type="range"]');
+    const commitValue = (sliderId, rawValue) => {
+        const slider = document.getElementById(sliderId);
+        if (!slider) return;
+        const min = parseFloat(slider.min);
+        const max = parseFloat(slider.max);
+        let v = parseFloat(rawValue);
+        if (isNaN(v)) v = parseFloat(slider.value) || 0;
+        v = Math.max(min, Math.min(max, v));
+        slider.value = v;
+        const valEl = document.getElementById(sliderId.replace(/_(\d+)$/, '_val_$1'));
+        if (valEl && document.activeElement !== valEl) valEl.value = v;
+        const key = _sliderFieldKey(sliderId);
+        if (key && _currentFile) _currentFile[key] = v;
+        _applyLivePreview(idx);
+        if (_currentFile) {
+            const allCards = document.querySelectorAll(`[data-idx="${idx}"].clip-card, .dm-file-card[data-idx="${idx}"]`);
+            allCards.forEach(card => {
+                const thumb = card.querySelector('.clip-thumb');
+                if (thumb) {
+                    const fid = thumb.dataset._liveFilterId || `clip-filter-live-${idx}`;
+                    thumb.dataset._liveFilterId = fid;
+                    applyClipFilter(thumb, _currentFile, fid);
+                }
+            });
+        }
+    };
     sliders.forEach(slider => {
-        slider.addEventListener('input', () => {
-            const valId = slider.id.replace(/_(\d+)$/, '_val_$1');
-            const valEl = document.getElementById(valId);
-            if (valEl) valEl.textContent = slider.value;
-            // Persist slider value into the clip object so "套用到全部" sees
-            // current values without needing a separate DOM-read step, and
-            // so the clip's own card thumbnail reflects live changes too.
-            const key = _sliderFieldKey(slider.id);
-            if (key && _currentFile) _currentFile[key] = parseFloat(slider.value);
-            _applyLivePreview(idx);
-            // Live-update every visible card of this clip via the shared filter utility.
-            if (_currentFile) {
-                const allCards = document.querySelectorAll(`[data-idx="${idx}"].clip-card, .dm-file-card[data-idx="${idx}"]`);
-                allCards.forEach(card => {
-                    const thumb = card.querySelector('.clip-thumb');
-                    if (thumb) {
-                        const fid = thumb.dataset._liveFilterId || `clip-filter-live-${idx}`;
-                        thumb.dataset._liveFilterId = fid;
-                        applyClipFilter(thumb, _currentFile, fid);
-                    }
-                });
-            }
-        });
+        slider.addEventListener('input', () => commitValue(slider.id, slider.value));
+    });
+    // Numeric inputs mirror slider values — typing a number updates slider + preview.
+    const numInputs = container.querySelectorAll('input[type="number"][id^="dm_color_"][id*="_val_"]');
+    numInputs.forEach(ni => {
+        const sliderId = ni.id.replace('_val_', '_');
+        ni.addEventListener('input', () => commitValue(sliderId, ni.value));
     });
 
     const resetBtn = document.getElementById('dm_detail_reset_color');
@@ -431,13 +465,13 @@ function _bindColorEvents(idx, container) {
                 const el = document.getElementById(`dm_color_${name}_${idx}`);
                 const valEl = document.getElementById(`dm_color_${name}_val_${idx}`);
                 if (el) el.value = def;
-                if (valEl) valEl.textContent = def;
+                if (valEl) valEl.value = def;
             }
             for (const name of ['shadows', 'midtones', 'highlights']) {
                 const el = document.getElementById(`dm_color_${name}_${idx}`);
                 const valEl = document.getElementById(`dm_color_${name}_val_${idx}`);
                 if (el) el.value = 0;
-                if (valEl) valEl.textContent = 0;
+                if (valEl) valEl.value = '0';
             }
             if (_currentFile) _currentFile.curve_points = null;
             _renderCurveEditor(idx);

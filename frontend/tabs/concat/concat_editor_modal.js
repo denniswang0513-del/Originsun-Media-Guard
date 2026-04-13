@@ -371,14 +371,14 @@ function _openInline(idx) {
         const el = document.getElementById(`dm_color_${name}_${idx}`);
         const valEl = document.getElementById(`dm_color_${name}_val_${idx}`);
         if (el) el.value = clip[name];
-        if (valEl) valEl.textContent = clip[name];
+        if (valEl) valEl.value = clip[name];
     }
     for (const name of ['shadows', 'midtones', 'highlights']) {
         const v = clip[name] ?? 0;
         const el = document.getElementById(`dm_color_${name}_${idx}`);
         const valEl = document.getElementById(`dm_color_${name}_val_${idx}`);
         if (el) el.value = v;
-        if (valEl) valEl.textContent = v;
+        if (valEl) valEl.value = v;
     }
     const inTxt = document.getElementById(`dm_trim_in_txt_${idx}`);
     const outTxt = document.getElementById(`dm_trim_out_txt_${idx}`);
