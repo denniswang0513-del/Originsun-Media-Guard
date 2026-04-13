@@ -4,12 +4,12 @@
 
 ---
 
-## 現況 (v1.10.66) 基準線
+## 現況 (v1.10.72) 基準線
 
-- ✅ 6 個完整工作流程（備份、比對、轉 Proxy、串帶、報表、AI 逐字稿）
+- ✅ 7 個完整工作流程（備份、比對、轉 Proxy、串帶、報表、AI 逐字稿、空拍寫入）
 - ✅ 模組化後端：`main.py` + `core/` + `routers/`（router 容錯載入，缺模組跳過不 crash）
 - ✅ 模組化前端：`frontend/tabs/` 各分頁獨立
-- ✅ OTA 安全更新（4 層套件防線 + 7 階段更新流程 + publish.html 發布工具）
+- ✅ OTA 安全更新（4 層套件防線 + 7 階段更新流程 + 解壓前殺 port + `/publish` skill 自動驗證）
 - ✅ 語音生成 Tab — Edge-TTS + F5-TTS 聲音複製 + NAS 聲音庫 + 台灣正音引擎 + 佇列整合 + GPU 推理
 - ✅ 專案總覽 — 單行緊湊任務卡片 + 歷史搜尋篩選 + Log 查看器 + 佇列管理 + 排程
 - ✅ 處理主機 UI — 本機自動偵測整合 + 狀態燈（綠/紅）+ IP 去 port + 多選/單選分離
@@ -104,13 +104,15 @@
 - [x] **Manifest Safety Net**：`update_agent.py` Phase 5b 讀 `update_manifest.json` 補裝遺漏套件
 - [x] **動態 Preflight**：`preflight.py` 掃描所有 .py 的 import 逐一驗證，不靠硬編碼清單
 
-#### 版本發布工具（`publish.html`）
+#### 版本發布工具（`publish.html` + `/publish` skill）
 - [x] NAS 上的 Web UI，Admin 登入後可一鍵發布新版
+- [x] `/publish` Claude Code skill：一鍵 commit → 發布 → 驗證 OTA → 推送全部代理 → 驗證結果
 - [x] 並發鎖（`asyncio.Lock`，同一時間只能有一個 publish）
 - [x] 發布歷史紀錄（`publish_history.json`，最近 50 筆）
 - [x] 一鍵回滾（`POST /api/v1/publish/rollback`，還原上一版 version.json + ZIP）
 - [x] Agent 狀態總覽（publish 前顯示所有機器版本 + busy 狀態）
 - [x] 版本降級保護（前端 + 後端雙重驗證）
+- [x] 發布後自動驗證 OTA ZIP 大小（> 10MB 阻止發布）+ 自動重啟主控端
 
 #### 共享常數模組（`ota_manifest.py`）
 - [x] `STDLIB`、`LOCAL_MODULES`、`EXCLUDE_DIRS`、`IMPORT_TO_PIP`、`scan_imports()` 統一定義
@@ -118,12 +120,15 @@
 
 #### 遠端管理
 - [x] 遠端一鍵更新：主控端 proxy → Agent `/api/v1/internal/restart`
+- [x] `system/restart` fallback：當 `api_ota.py` 載入失敗時，`api_system.py` 提供備用重啟端點
 - [x] 更新進度監控：輪詢 `update_status.json` + health fallback（移除 port 8001 monitor 依賴）
 - [x] 批次更新：[全部更新 N 台過舊] 按鈕
 - [x] 版本狀態顯示 + 「有新版」橘色標記
 - [x] `Install_or_Update.bat`：自動找 Agent 目錄 + `pip install -r requirements_agent.txt` + 無硬編碼套件
 - [x] 版本 badge 本機更新：`control/update` 無需 JWT（localhost 限定）+ 前端步驟動畫 Modal
 - [x] OTA 簡化：移除 `update_monitor.py` port 8001 依賴，改用 detached BAT + `update_status.json`
+- [x] 解壓前殺 port 8000：避免 Windows 檔案鎖定導致 .py 覆蓋失敗
+- [x] OTA ZIP 瘦身：`AGENT_DIRS` 移除 `windows_helper`（381MB→567KB）
 
 ### 做完後你看到的改變
 
@@ -561,7 +566,7 @@ tools:
     ▼ Phase J: CRM + 專案管理 + 帳務 (✅ 核心完成)
     │   → 64 API / 11 DB 表 / 6 Tab + 5 子視圖 + 手機版 RWD + Inline 編輯
     │
-現在 (v1.10.64) ← 你在這裡
+現在 (v1.10.72) ← 你在這裡
     │
     ▼ Phase J-3: 備份 Tab 整合 (⬜)
     │
@@ -595,6 +600,11 @@ tools:
 
 | 版本 | 日期 | 重點 |
 |------|------|------|
+| v1.10.72 | 2026-04-13 | 進階編輯器加曲線/影調/即時 SVG 濾鏡預覽 + 套用到全部 + Install_or_Update 修 UNC/UAC + admin 按鈕修復 |
+| v1.10.71 | 2026-04-12 | OTA 解壓前殺 port 避免檔案鎖定 + `/publish` skill + system/restart fallback |
+| v1.10.70 | 2026-04-12 | 發布流程加 OTA 驗證 + 自動重啟 + 推送全代理驗證 |
+| v1.10.68 | 2026-04-11 | OTA ZIP 瘦身（381MB→567KB）— windows_helper 從 AGENT_DIRS 移除 |
+| v1.10.67 | 2026-04-11 | 串接迴圈錯誤隔離 + 大量檔案分批預合併避免 WinError 1455 + 空拍寫入 Tab |
 | v1.10.65 | 2026-04-02 | CRM 應付帳款按月分組 + 客戶績效 Tab + 專案聯動 + 效能優化 + 客戶狀態自動化 |
 | v1.10.64 | 2026-04-01 | CRM 應收帳款子視圖 + 列表置中對齊統一 |
 | v1.10.63 | 2026-03-30 | CRM 請款列表置中對齊 + 發票欄 + 欄寬優化 |

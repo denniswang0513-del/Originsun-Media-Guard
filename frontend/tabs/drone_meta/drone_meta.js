@@ -1,14 +1,27 @@
-import { appendLog, resetProgress, pickPath } from '../../js/shared/utils.js';
-import { renderClipDetail } from './drone_meta_editor.js';
+import { appendLog, resetProgress, pickPath, getComputeBaseUrl, validateRemotePaths, toUncPath, ensureDriveMap } from '../../js/shared/utils.js';
+import { fmtDuration as _fmtDuration, fmtSize as _fmtSize, parseCreationTimeLocal } from '../../js/shared/clip_utils.js';
+import { createClipCard } from '../../js/shared/clip_card.js';
+// Ensure openConcatEditor is available on window from drone_meta tab too
+import '../concat/concat_editor_modal.js';
 
-// ── State ──
-let _dmFiles = [];       // scanned file objects from backend
-let _dmSelected = [];    // boolean array, same length as _dmFiles
+let _dmFiles = [];  // each file carries `selected: boolean`
+// Exposed for concat_editor_modal.js to read current scan results.
+export function getDmFiles() { return _dmFiles; }
+window.getDmFiles = getDmFiles;
+
+// Scan state — polled by concat modal to show "scan in progress" prompt.
+let _dmScanState = { running: false, phase: '', done: 0, total: 0 };
+export function getDmScanState() { return { ..._dmScanState }; }
+window.getDmScanState = getDmScanState;
+
+// Notify listeners (e.g. concat modal) that a single clip's data changed.
+function _emitFileUpdated(idx) {
+    const f = _dmFiles[idx];
+    if (!f) return;
+    window.dispatchEvent(new CustomEvent('dmfile:updated', { detail: { idx, path: f.path } }));
+}
+
 let _dmSubmitting = false;
-
-// ── Arrange Panel State ──
-let _arrangeClips = []; // [{id, fileIdx, in, out, brightness, contrast, saturation, gamma, colorTemp}]
-let _clipIdCounter = 0;
 
 const DRONE_MODELS = {
     autel_evo_lite_plus: { make: 'Autel Robotics', model: 'EVO Lite+', lensMake: 'Autel Robotics', lensModel: 'EVO Lite+ Camera' },
@@ -17,34 +30,10 @@ const DRONE_MODELS = {
     dji_air3:            { make: 'DJI', model: 'Air 3', lensMake: 'DJI', lensModel: 'Air 3 Camera' },
 };
 
-// ── Helpers ──
-
-function _fmtDuration(sec) {
-    if (!sec || sec <= 0) return '0:00';
-    const m = Math.floor(sec / 60);
-    const s = Math.floor(sec % 60);
-    return `${m}:${s.toString().padStart(2, '0')}`;
-}
-
-function _fmtSize(bytes) {
-    if (!bytes) return '0 B';
-    if (bytes < 1024) return bytes + ' B';
-    if (bytes < 1048576) return (bytes / 1024).toFixed(1) + ' KB';
-    if (bytes < 1073741824) return (bytes / 1048576).toFixed(1) + ' MB';
-    return (bytes / 1073741824).toFixed(2) + ' GB';
-}
-
-function _secToHMS(sec) {
-    const h = Math.floor(sec / 3600);
-    const m = Math.floor((sec % 3600) / 60);
-    const s = (sec % 60).toFixed(1);
-    return h > 0 ? `${h}:${String(m).padStart(2,'0')}:${String(s).padStart(4,'0')}` : `${m}:${String(s).padStart(4,'0')}`;
-}
-
 function _updateSelectCount() {
-    const count = _dmSelected.filter(Boolean).length;
+    const count = _dmFiles.filter(f => f.selected).length;
     const el = document.getElementById('dm_select_count');
-    if (el) el.textContent = `已勾選 ${count} 個`;
+    if (el) el.textContent = `已勾選 ${count} / ${_dmFiles.length} 個`;
     const allCb = document.getElementById('dm_select_all');
     if (allCb) allCb.checked = count === _dmFiles.length && count > 0;
 }
@@ -54,7 +43,6 @@ function _updateSelectCount() {
 async function dmPickFolder() {
     try {
         await pickPath('dm_source_path', 'folder');
-        // pickPath sets the input value; now auto-scan
         const path = document.getElementById('dm_source_path').value;
         if (path) dmScanFiles();
     } catch (e) { console.warn('pick folder failed:', e); }
@@ -68,13 +56,13 @@ async function dmPickFiles() {
         if (data.path) {
             const cur = document.getElementById('dm_source_path').value.trim();
             document.getElementById('dm_source_path').value = cur ? cur + ', ' + data.path : data.path;
-            dmScanFiles(); // auto scan after pick
+            dmScanFiles();
         }
     } catch (e) { console.warn('pick file failed:', e); }
 }
 window.dmPickFiles = dmPickFiles;
 
-// ── Scan ──
+// ── Streaming Scan ──
 
 async function dmScanFiles() {
     const raw = document.getElementById('dm_source_path').value.trim();
@@ -82,250 +70,319 @@ async function dmScanFiles() {
 
     const paths = raw.split(',').map(p => p.trim()).filter(Boolean);
     const status = document.getElementById('dm_scan_status');
-    status.textContent = '掃描中...';
+    const scanProgress = document.getElementById('dm-scan-progress');
+    const scanBar = document.getElementById('dm-scan-bar');
+    const scanLabel = document.getElementById('dm-scan-label');
+    const scanCount = document.getElementById('dm-scan-count');
 
+    _dmFiles = [];
+    const grid = document.getElementById('dm_file_grid') || document.getElementById('dm_file_list');
+    if (grid) grid.innerHTML = '';
+    const gridToolbar = document.getElementById('dm_grid_toolbar');
+    if (gridToolbar) gridToolbar.classList.add('hidden');
+
+    status.textContent = '掃描中...';
+    if (scanProgress) { scanProgress.classList.remove('hidden'); }
+    if (scanBar) { scanBar.style.width = '0%'; }
+    if (scanLabel) { scanLabel.textContent = '掃描中...'; }
+    if (scanCount) { scanCount.textContent = ''; }
+
+    _dmScanState = { running: true, phase: 'init', done: 0, total: 0 };
+    let streamed = false;
+    // SSE three-phase: 1) filenames+size  2) thumbnails  3) ffprobe+DJI detail
     try {
-        const res = await fetch('/api/v1/drone_meta/scan', {
+        const res = await fetch('/api/v1/drone_meta/scan_stream', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ paths }),
         });
-        const data = await res.json();
-        _dmFiles = data.files || [];
-        _dmSelected = _dmFiles.map(() => true);
-        status.textContent = `找到 ${_dmFiles.length} 個影片`;
-        _renderFileList();
+        if (res.ok && res.body) {
+            const reader = res.body.getReader();
+            const decoder = new TextDecoder();
+            let buffer = '';
+            let total = 0;
+            let thumbCount = 0;
+            let detailCount = 0;
+
+            while (true) {
+                const { done, value } = await reader.read();
+                if (done) break;
+                buffer += decoder.decode(value, { stream: true });
+                const parts = buffer.split('\n\n');
+                buffer = parts.pop();
+
+                for (const part of parts) {
+                    const line = part.trim();
+                    if (!line.startsWith('data: ')) continue;
+                    let evt;
+                    try { evt = JSON.parse(line.slice(6)); } catch (_e) { continue; }
+
+                    if (evt.event === 'start') {
+                        total = evt.total;
+                        _dmScanState = { running: true, phase: 'files', done: 0, total };
+                        if (scanCount) scanCount.textContent = `0 / ${total}`;
+                        if (total === 0) { status.textContent = '找不到影片檔案'; if (scanProgress) scanProgress.classList.add('hidden'); _dmScanState.running = false; }
+
+                    } else if (evt.event === 'file') {
+                        streamed = true;
+                        evt.data.selected = true;
+                        _dmFiles.push(evt.data);
+                        _dmScanState.done = evt.index + 1;
+                        const pct = total > 0 ? ((evt.index + 1) / total * 100) : 0;
+                        if (scanBar) { scanBar.style.width = pct + '%'; scanBar.style.backgroundColor = '#3b82f6'; }
+                        if (scanCount) scanCount.textContent = `${evt.index + 1} / ${total}`;
+                        if (scanLabel) scanLabel.textContent = `列出檔案... ${evt.data.filename}`;
+                        _appendFileCard(evt.data, evt.index);
+                        _emitFileUpdated(evt.index);
+
+                    } else if (evt.event === 'files_done') {
+                        _dmScanState.phase = 'thumbs';
+                        _dmScanState.done = 0;
+                        status.textContent = `找到 ${total} 個影片，載入縮圖中...`;
+                        if (scanBar) { scanBar.style.width = '0%'; scanBar.style.backgroundColor = '#228b22'; }
+                        if (scanLabel) scanLabel.textContent = '載入縮圖...';
+                        if (scanCount) scanCount.textContent = `0 / ${total}`;
+                        const toolbar = document.getElementById('dm_grid_toolbar');
+                        const clearBtn = document.getElementById('dm_btn_clear');
+                        if (toolbar) toolbar.classList.remove('hidden');
+                        if (clearBtn) clearBtn.classList.remove('hidden');
+                        _updateSelectCount();
+
+                    } else if (evt.event === 'thumb') {
+                        thumbCount++;
+                        _dmScanState.done = thumbCount;
+                        const idx = evt.index;
+                        if (_dmFiles[idx]) _dmFiles[idx].thumbnail = evt.thumbnail;
+                        const cards = document.querySelectorAll('.dm-file-card');
+                        if (cards[idx]) {
+                            const wrap = cards[idx].querySelector('.clip-thumb-wrap');
+                            if (wrap) wrap.innerHTML = `<img src="${evt.thumbnail}" alt="" class="clip-thumb w-full h-full object-cover">`;
+                        }
+                        const pct = total > 0 ? (thumbCount / total * 100) : 0;
+                        if (scanBar) scanBar.style.width = pct + '%';
+                        if (scanCount) scanCount.textContent = `${thumbCount} / ${total}`;
+                        _emitFileUpdated(idx);
+
+                    } else if (evt.event === 'thumbs_done') {
+                        _dmScanState.phase = 'details';
+                        _dmScanState.done = 0;
+                        status.textContent = `讀取影片資訊中...`;
+                        if (scanBar) { scanBar.style.width = '0%'; scanBar.style.backgroundColor = '#d48a04'; }
+                        if (scanLabel) scanLabel.textContent = '讀取影片資訊...';
+                        if (scanCount) scanCount.textContent = `0 / ${total}`;
+
+                    } else if (evt.event === 'detail') {
+                        detailCount++;
+                        _dmScanState.done = detailCount;
+                        const idx = evt.index;
+                        const d = evt.data;
+                        if (_dmFiles[idx]) {
+                            for (const [k, v] of Object.entries(d)) {
+                                if (v !== '' && v !== null && !(Array.isArray(v) && v.length === 0)) {
+                                    _dmFiles[idx][k] = v;
+                                }
+                            }
+                        }
+                        _updateCardDetail(idx, d);
+                        const pct = total > 0 ? (detailCount / total * 100) : 0;
+                        if (scanBar) scanBar.style.width = pct + '%';
+                        if (scanCount) scanCount.textContent = `${detailCount} / ${total}`;
+                        if (scanLabel) scanLabel.textContent = `讀取資訊... ${d.filename}`;
+                        _emitFileUpdated(idx);
+
+                    } else if (evt.event === 'done') {
+                        streamed = true;
+                        _dmScanState.running = false;
+                    }
+                }
+            }
+        }
     } catch (e) {
-        status.textContent = '掃描失敗';
-        console.error('scan error:', e);
+        console.warn('[DM] SSE stream failed, falling back to batch scan:', e);
     }
+
+    // Fallback: batch scan (if SSE didn't produce results)
+    if (!streamed) {
+        if (scanLabel) scanLabel.textContent = '掃描中（批次模式）...';
+        try {
+            const res = await fetch('/api/v1/drone_meta/scan', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ paths }),
+            });
+            const data = await res.json();
+            _dmFiles = (data.files || []).map(f => ({ ...f, selected: true }));
+            _dmFiles.forEach((f, i) => _appendFileCard(f, i));
+        } catch (e) {
+            status.textContent = '掃描失敗';
+            if (scanProgress) scanProgress.classList.add('hidden');
+            console.error('[DM] batch scan error:', e);
+            _dmScanState.running = false;
+            return;
+        }
+    }
+
+    // Finalize
+    if (_dmFiles.length > 0) {
+        status.textContent = `找到 ${_dmFiles.length} 個影片`;
+        const toolbar = document.getElementById('dm_grid_toolbar');
+        const clearBtn = document.getElementById('dm_btn_clear');
+        if (toolbar) toolbar.classList.remove('hidden');
+        if (clearBtn) clearBtn.classList.remove('hidden');
+        _updateSelectCount();
+    }
+    if (scanProgress) scanProgress.classList.add('hidden');
+    _dmScanState.running = false;
 }
 window.dmScanFiles = dmScanFiles;
 
-// ── Render File List ──
+// ── Card Grid Rendering ──
 
-function _renderFileList() {
-    const container = document.getElementById('dm_file_list');
-    const clearBtn = document.getElementById('dm_btn_clear');
+function _appendFileCard(f, idx) {
+    const grid = document.getElementById('dm_file_grid') || document.getElementById('dm_file_list');
+    if (!grid) return;
+    const placeholder = grid.querySelector('.col-span-full') || grid.querySelector('.text-center');
+    if (placeholder) placeholder.remove();
 
+    const card = createClipCard(f, idx, {
+        cardClass: 'dm-file-card clip-card bg-[#252525] rounded-lg border border-[#3a3a3a] overflow-hidden cursor-grab',
+        accentColor: 'blue',
+        showAction: false,
+        showRefresh: true,
+        onToggle: (i, checked) => { if (_dmFiles[i]) _dmFiles[i].selected = checked; _updateSelectCount(); },
+        onRefresh: _refreshDmFile,
+        onReorder: _reorderDmFiles,
+    });
+    grid.appendChild(card);
+}
+
+async function _refreshDmFile(idx) {
+    const f = _dmFiles[idx];
+    if (!f?.path) return;
+    try {
+        const res = await fetch(`/api/v1/drone_meta/rescan_file?path=${encodeURIComponent(f.path)}`, { method: 'POST' });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const data = await res.json();
+        if (data?.path) {
+            // Replace fields in-place (preserve user edits like selected)
+            for (const [k, v] of Object.entries(data)) {
+                if (v !== '' && v !== null && !(Array.isArray(v) && v.length === 0)) {
+                    _dmFiles[idx][k] = v;
+                }
+            }
+            _updateCardDetail(idx, data);
+            // Also update thumbnail wrap
+            const cards = document.querySelectorAll('.dm-file-card');
+            if (cards[idx] && data.thumbnail) {
+                const wrap = cards[idx].querySelector('.clip-thumb-wrap');
+                if (wrap) wrap.innerHTML = `<img src="${data.thumbnail}" alt="" class="clip-thumb w-full h-full object-cover">`;
+            }
+            _emitFileUpdated(idx);
+        }
+    } catch (e) {
+        console.warn('[DM] refresh failed:', e);
+    }
+}
+
+function _reorderDmFiles(from, to) {
+    // DOM was already reordered live during dragover; sync _dmFiles to match.
+    const [file] = _dmFiles.splice(from, 1);
+    _dmFiles.splice(to, 0, file);
+    // Re-number dataset.idx so the next drag reads fresh positions.
+    const grid = document.getElementById('dm_file_grid') || document.getElementById('dm_file_list');
+    if (grid) for (let i = 0; i < grid.children.length; i++) grid.children[i].dataset.idx = i;
+}
+
+function _updateCardDetail(idx, d) {
+    const cards = document.querySelectorAll('.dm-file-card');
+    const card = cards[idx];
+    if (!card) return;
+
+    const metaEl = card.querySelector('.clip-meta');
+    if (metaEl && d.width && d.height) {
+        metaEl.textContent = `${d.width}x${d.height} | ${d.codec} | ${_fmtSize(d.size)}`;
+    }
+
+    if (d.duration) {
+        let badge = card.querySelector('.clip-dur-badge');
+        if (!badge) {
+            badge = document.createElement('span');
+            badge.className = 'absolute top-1 right-1 text-[10px] text-white bg-black/60 px-1 rounded clip-dur-badge';
+            const rel = card.querySelector('.relative');
+            if (rel) rel.appendChild(badge);
+        }
+        badge.textContent = _fmtDuration(d.duration);
+    }
+
+    const djiEl = card.querySelector('.clip-dji-info');
+    if (djiEl && d.is_dji && d.dji_gps && d.dji_camera) {
+        djiEl.innerHTML = `<div class="text-[10px] text-blue-400 mt-0.5">\u{1F4CD} ${d.dji_gps.lat.toFixed(4)}°N, ${d.dji_gps.lon.toFixed(4)}°E | ${d.dji_gps.alt.toFixed(0)}m</div>
+            <div class="text-[10px] text-blue-400">ISO:${d.dji_camera.iso} | f/${d.dji_camera.fnum} | 1/${d.dji_camera.shutter}</div>`;
+    }
+
+    if (d.creation_time) {
+        const { date, time } = parseCreationTimeLocal(d.creation_time);
+        const dateInput = card.querySelector('.clip-date');
+        const timeInput = card.querySelector('.clip-time');
+        if (dateInput && !dateInput.value && date) dateInput.value = date;
+        if (timeInput && !timeInput.value && time) timeInput.value = time;
+    }
+}
+
+function _renderFileGrid() {
+    const grid = document.getElementById('dm_file_grid') || document.getElementById('dm_file_list');
+    if (!grid) return;
     if (!_dmFiles.length) {
-        container.innerHTML = '<div class="text-sm text-gray-500 text-center py-4">尚未匯入影片</div>';
+        grid.innerHTML = '<div class="text-sm text-gray-500 text-center py-8 col-span-full">尚未掃描影片，請先選擇來源資料夾</div>';
+        const toolbar = document.getElementById('dm_grid_toolbar');
+        const clearBtn = document.getElementById('dm_btn_clear');
+        if (toolbar) toolbar.classList.add('hidden');
         if (clearBtn) clearBtn.classList.add('hidden');
         return;
     }
-
+    const toolbar = document.getElementById('dm_grid_toolbar');
+    const clearBtn = document.getElementById('dm_btn_clear');
+    if (toolbar) toolbar.classList.remove('hidden');
     if (clearBtn) clearBtn.classList.remove('hidden');
-    // Auto-select all on first render
-    if (_dmSelected.length === 0 || _dmSelected.every(s => !s)) {
-        _dmSelected = _dmFiles.map(() => true);
-    }
+
+    grid.innerHTML = '';
+    _dmFiles.forEach((f, i) => _appendFileCard(f, i));
     _updateSelectCount();
-
-    container.innerHTML = _dmFiles.map((f, i) => `
-        <div class="dm-file-card flex flex-col bg-[#252525] rounded border border-[#3a3a3a] overflow-hidden"
-             draggable="true" data-idx="${i}"
-             ondragstart="dmDragStart(event, ${i})" ondragover="dmDragOver(event)" ondrop="dmDrop(event, ${i})">
-            <!-- Main row -->
-            <div class="flex items-center gap-3 p-2">
-                <span class="cursor-grab text-gray-600 select-none" title="拖拽排序">⠿</span>
-                <input type="checkbox" ${_dmSelected[i] ? 'checked' : ''}
-                    onchange="dmToggleFile(${i}, this.checked)"
-                    data-idx="${i}"
-                    class="dm-file-check form-checkbox text-blue-500 bg-[#1e1e1e] border-[#444] rounded flex-shrink-0">
-                <img src="${f.thumbnail || ''}" alt="" class="w-24 h-14 object-cover rounded bg-[#1a1a1a] flex-shrink-0"
-                     onerror="this.style.display='none'">
-                <div class="flex-1 min-w-0">
-                    <div class="text-sm text-gray-200 truncate">${f.filename}</div>
-                    <div class="text-xs text-gray-500">${f.width}x${f.height} | ${f.codec} | ${_fmtDuration(f.duration)} | ${_fmtSize(f.size)}</div>
-                    ${f.is_dji && f.dji_gps && f.dji_camera ? `<div class="text-xs text-blue-400 mt-1">\u{1F4CD} ${f.dji_gps.lat.toFixed(4)}\u00B0N, ${f.dji_gps.lon.toFixed(4)}\u00B0E | ${f.dji_gps.alt.toFixed(0)}m | ISO:${f.dji_camera.iso} | f/${f.dji_camera.fnum} | 1/${f.dji_camera.shutter}</div>` : ''}
-                    <div class="flex items-center gap-2 mt-1">
-                        <span class="text-xs text-gray-500">\u{1F4C5}</span>
-                        <input type="date" class="dm-file-date bg-[#1e1e1e] border border-[#444] rounded px-2 py-0.5 text-xs"
-                            data-idx="${i}" value="${f.creation_time ? f.creation_time.substring(0,10) : ''}">
-                        <input type="time" class="dm-file-time bg-[#1e1e1e] border border-[#444] rounded px-2 py-0.5 text-xs"
-                            data-idx="${i}" step="1" value="${f.creation_time ? f.creation_time.substring(11,19) : ''}">
-                    </div>
-                </div>
-                <button onclick="dmToggleEdit(${i})"
-                    class="text-xs bg-[#333] hover:bg-[#444] px-2 py-1 rounded border border-[#555] text-gray-300 flex-shrink-0">
-                    🔧 修剪/色彩
-                </button>
-            </div>
-            <!-- Edit panel (hidden by default) -->
-            <div id="dm_edit_${i}" class="hidden border-t border-[#333] p-3 bg-[#1e1e1e]">
-                ${_renderEditPanel(f, i)}
-            </div>
-        </div>
-    `).join('');
 }
 
-function _renderEditPanel(file, idx) {
-    const dur = file.duration || 0;
-    const filmstripHtml = (file.filmstrip || []).map(src =>
-        `<img src="${src}" class="h-10 rounded-sm flex-shrink-0" onerror="this.style.display='none'">`
-    ).join('');
-
-    return `
-    <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-        <!-- 修剪 -->
-        <div>
-            <div class="text-xs text-gray-400 font-semibold mb-2">修剪 Trim</div>
-            <!-- Filmstrip -->
-            <div class="flex gap-0.5 mb-2 overflow-x-auto rounded">${filmstripHtml || '<span class="text-xs text-gray-600">無預覽幀</span>'}</div>
-            <!-- Dual range slider -->
-            <div class="dm-range-wrap relative h-6 mb-2">
-                <input type="range" id="dm_trim_in_${idx}" min="0" max="${dur}" step="0.1" value="0"
-                    class="dm-range dm-range-lo absolute w-full" oninput="dmUpdateTrim(${idx})">
-                <input type="range" id="dm_trim_out_${idx}" min="0" max="${dur}" step="0.1" value="${dur}"
-                    class="dm-range dm-range-hi absolute w-full" oninput="dmUpdateTrim(${idx})">
-            </div>
-            <div class="flex gap-2 items-center text-xs">
-                <label class="text-gray-500">In:</label>
-                <input type="text" id="dm_trim_in_txt_${idx}" value="0:00.0"
-                    class="w-20 bg-[#2a2a2a] border border-[#444] rounded px-1 py-0.5 text-xs text-center"
-                    onchange="dmTrimTextChanged(${idx}, 'in')">
-                <label class="text-gray-500">Out:</label>
-                <input type="text" id="dm_trim_out_txt_${idx}" value="${_secToHMS(dur)}"
-                    class="w-20 bg-[#2a2a2a] border border-[#444] rounded px-1 py-0.5 text-xs text-center"
-                    onchange="dmTrimTextChanged(${idx}, 'out')">
-                <span id="dm_trim_dur_${idx}" class="text-gray-500 ml-auto">時長: ${_secToHMS(dur)}</span>
-            </div>
-        </div>
-        <!-- 色彩 -->
-        <div>
-            <div class="flex items-center justify-between mb-2">
-                <span class="text-xs text-gray-400 font-semibold">色彩調整 Color</span>
-                <button onclick="dmResetColor(${idx})" class="text-xs text-blue-400 hover:text-blue-300">重置</button>
-            </div>
-            <div class="space-y-2">
-                ${_colorSlider(idx, 'brightness', '亮度', -1, 1, 0, 0.05)}
-                ${_colorSlider(idx, 'contrast', '對比度', 0, 2, 1, 0.05)}
-                ${_colorSlider(idx, 'saturation', '飽和度', 0, 3, 1, 0.05)}
-                ${_colorSlider(idx, 'gamma', 'Gamma', 0.1, 3, 1, 0.05)}
-                ${_colorSlider(idx, 'color_temp', '色溫 (冷←→暖)', -1, 1, 0, 0.05)}
-            </div>
-        </div>
-    </div>`;
-}
-
-function _colorSlider(idx, name, label, min, max, def, step) {
-    return `
-    <div class="flex items-center gap-2">
-        <label class="text-xs text-gray-500 w-24 flex-shrink-0">${label}</label>
-        <input type="range" id="dm_color_${name}_${idx}" min="${min}" max="${max}" step="${step}" value="${def}"
-            class="flex-1 h-1.5 accent-blue-500" oninput="dmColorChanged(${idx}, '${name}')">
-        <span id="dm_color_${name}_val_${idx}" class="text-xs text-gray-400 w-10 text-right">${def}</span>
-    </div>`;
-}
-
-// ── Edit Panel Toggle ──
-
-function dmToggleEdit(idx) {
-    const el = document.getElementById(`dm_edit_${idx}`);
-    if (el) el.classList.toggle('hidden');
-}
-window.dmToggleEdit = dmToggleEdit;
-
-// ── Trim Controls ──
-
-function dmUpdateTrim(idx) {
-    const loEl = document.getElementById(`dm_trim_in_${idx}`);
-    const hiEl = document.getElementById(`dm_trim_out_${idx}`);
-    let lo = parseFloat(loEl.value);
-    let hi = parseFloat(hiEl.value);
-    if (lo > hi) { lo = hi; loEl.value = lo; }
-    document.getElementById(`dm_trim_in_txt_${idx}`).value = _secToHMS(lo);
-    document.getElementById(`dm_trim_out_txt_${idx}`).value = _secToHMS(hi);
-    document.getElementById(`dm_trim_dur_${idx}`).textContent = `時長: ${_secToHMS(hi - lo)}`;
-}
-window.dmUpdateTrim = dmUpdateTrim;
-
-function dmTrimTextChanged(idx, which) {
-    // Parse M:SS.s or H:MM:SS.s
-    const txt = document.getElementById(`dm_trim_${which}_txt_${idx}`).value.trim();
-    const parts = txt.split(':').map(Number);
-    let sec = 0;
-    if (parts.length === 3) sec = parts[0] * 3600 + parts[1] * 60 + parts[2];
-    else if (parts.length === 2) sec = parts[0] * 60 + parts[1];
-    else sec = parts[0] || 0;
-    const slider = document.getElementById(`dm_trim_${which === 'in' ? 'in' : 'out'}_${idx}`);
-    slider.value = sec;
-    dmUpdateTrim(idx);
-}
-window.dmTrimTextChanged = dmTrimTextChanged;
-
-// ── Color Controls ──
-
-function dmColorChanged(idx, name) {
-    const val = document.getElementById(`dm_color_${name}_${idx}`).value;
-    document.getElementById(`dm_color_${name}_val_${idx}`).textContent = val;
-}
-window.dmColorChanged = dmColorChanged;
-
-function dmResetColor(idx) {
-    const defaults = { brightness: 0, contrast: 1, saturation: 1, gamma: 1, color_temp: 0 };
-    for (const [name, def] of Object.entries(defaults)) {
-        const el = document.getElementById(`dm_color_${name}_${idx}`);
-        if (el) { el.value = def; dmColorChanged(idx, name); }
-    }
-}
-window.dmResetColor = dmResetColor;
-
-// ── Select / Drag ──
+// ── Select / Clear ──
 
 function dmToggleFile(idx, checked) {
-    _dmSelected[idx] = checked;
+    if (_dmFiles[idx]) _dmFiles[idx].selected = checked;
     _updateSelectCount();
 }
 window.dmToggleFile = dmToggleFile;
 
 function dmToggleSelectAll(checked) {
-    _dmSelected = _dmSelected.map(() => checked);
-    document.querySelectorAll('#dm_file_list input[type="checkbox"]').forEach(cb => cb.checked = checked);
+    _dmFiles.forEach(f => { f.selected = checked; });
+    document.querySelectorAll('.clip-check').forEach(cb => cb.checked = checked);
     _updateSelectCount();
 }
 window.dmToggleSelectAll = dmToggleSelectAll;
 
 function dmClearFiles() {
     _dmFiles = [];
-    _dmSelected = [];
-    _renderFileList();
+    _renderFileGrid();
+    document.getElementById('dm_scan_status').textContent = '';
 }
 window.dmClearFiles = dmClearFiles;
-
-let _dmDragIdx = -1;
-function dmDragStart(e, idx) {
-    _dmDragIdx = idx;
-    e.dataTransfer.setData('application/dm-source-idx', String(idx));
-    e.dataTransfer.effectAllowed = 'copyMove';
-}
-window.dmDragStart = dmDragStart;
-function dmDragOver(e) { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; }
-window.dmDragOver = dmDragOver;
-function dmDrop(e, targetIdx) {
-    e.preventDefault();
-    if (_dmDragIdx < 0 || _dmDragIdx === targetIdx) return;
-    // Swap in arrays
-    const [file] = _dmFiles.splice(_dmDragIdx, 1);
-    const [sel] = _dmSelected.splice(_dmDragIdx, 1);
-    _dmFiles.splice(targetIdx, 0, file);
-    _dmSelected.splice(targetIdx, 0, sel);
-    _dmDragIdx = -1;
-    _renderFileList();
-}
-window.dmDrop = dmDrop;
 
 // ── Batch Time Functions ──
 
 window.dmBatchApplyTime = function() {
-    const date = document.getElementById('dm_batch_date').value;
-    const time = document.getElementById('dm_batch_time').value;
+    const date = document.getElementById('dm_batch_date')?.value;
+    const time = document.getElementById('dm_batch_time')?.value;
     if (!date || !time) { alert('請先設定日期和時間'); return; }
     document.querySelectorAll('.dm-file-card').forEach(card => {
-        const chk = card.querySelector('.dm-file-check');
+        const chk = card.querySelector('.clip-check');
         if (chk && chk.checked) {
-            const dateInput = card.querySelector('.dm-file-date');
-            const timeInput = card.querySelector('.dm-file-time');
+            const dateInput = card.querySelector('.clip-date');
+            const timeInput = card.querySelector('.clip-time');
             if (dateInput) dateInput.value = date;
             if (timeInput) timeInput.value = time;
         }
@@ -333,19 +390,19 @@ window.dmBatchApplyTime = function() {
 };
 
 window.dmBatchIncrementTime = function() {
-    const date = document.getElementById('dm_batch_date').value;
-    const time = document.getElementById('dm_batch_time').value;
-    const increment = parseInt(document.getElementById('dm_batch_increment').value) || 1;
+    const date = document.getElementById('dm_batch_date')?.value;
+    const time = document.getElementById('dm_batch_time')?.value;
+    const increment = parseInt(document.getElementById('dm_batch_increment')?.value) || 1;
     if (!date || !time) { alert('請先設定起始日期和時間'); return; }
 
     let baseTime = new Date(`${date}T${time}`);
     let count = 0;
     document.querySelectorAll('.dm-file-card').forEach(card => {
-        const chk = card.querySelector('.dm-file-check');
+        const chk = card.querySelector('.clip-check');
         if (chk && chk.checked) {
             const dt = new Date(baseTime.getTime() + count * increment * 60000);
-            const dateInput = card.querySelector('.dm-file-date');
-            const timeInput = card.querySelector('.dm-file-time');
+            const dateInput = card.querySelector('.clip-date');
+            const timeInput = card.querySelector('.clip-time');
             if (dateInput) dateInput.value = dt.toISOString().substring(0, 10);
             if (timeInput) timeInput.value = dt.toTimeString().substring(0, 8);
             count++;
@@ -366,6 +423,7 @@ window.dmOnModelChange = dmOnModelChange;
 function dmToggleConcat() {
     const checked = document.getElementById('dm_do_concat').checked;
     document.getElementById('dm_concat_options').classList.toggle('hidden', !checked);
+    document.getElementById('dm_concat_placeholder').classList.toggle('hidden', checked);
 }
 window.dmToggleConcat = dmToggleConcat;
 
@@ -386,31 +444,27 @@ function _getDroneModelInfo() {
 
 function _getFileSetting(idx) {
     const f = _dmFiles[idx];
-    const trimIn = parseFloat(document.getElementById(`dm_trim_in_${idx}`)?.value || '0');
-    const trimOutEl = document.getElementById(`dm_trim_out_${idx}`);
-    const trimOut = trimOutEl ? parseFloat(trimOutEl.value) : -1;
-    const dur = f.duration || 0;
-
-    // Per-file time override
+    // Per-file time override (from card's date/time inputs)
     const cards = document.querySelectorAll('.dm-file-card');
     let dateTimeOverride = '';
     if (cards[idx]) {
-        const dateInput = cards[idx].querySelector('.dm-file-date');
-        const timeInput = cards[idx].querySelector('.dm-file-time');
+        const dateInput = cards[idx].querySelector('.clip-date');
+        const timeInput = cards[idx].querySelector('.clip-time');
         const dateVal = dateInput?.value || '';
         const timeVal = timeInput?.value || '';
         if (dateVal && timeVal) dateTimeOverride = `${dateVal}T${timeVal}`;
     }
-
+    // Outer tab no longer has per-clip trim/color editor (moved to concat modal).
+    // Send defaults; user uses 進階編輯 modal for those.
     return {
         path: f.path,
-        trim_in: trimIn > 0 ? trimIn : 0,
-        trim_out: (trimOut < dur && trimOut >= 0) ? trimOut : -1,
-        brightness: parseFloat(document.getElementById(`dm_color_brightness_${idx}`)?.value || '0'),
-        contrast: parseFloat(document.getElementById(`dm_color_contrast_${idx}`)?.value || '1'),
-        saturation: parseFloat(document.getElementById(`dm_color_saturation_${idx}`)?.value || '1'),
-        gamma: parseFloat(document.getElementById(`dm_color_gamma_${idx}`)?.value || '1'),
-        color_temp: parseFloat(document.getElementById(`dm_color_color_temp_${idx}`)?.value || '0'),
+        trim_in: 0,
+        trim_out: -1,
+        brightness: 0,
+        contrast: 1,
+        saturation: 1,
+        gamma: 1,
+        color_temp: 0,
         date_time_override: dateTimeOverride,
     };
 }
@@ -418,14 +472,13 @@ function _getFileSetting(idx) {
 function collectDroneMetaPayload() {
     const fileIndex = parseInt(document.getElementById('dm_file_index').value) || 1;
     const selectedFiles = [];
+    // Collect in _dmFiles order (which is the user's drag-sorted order)
     for (let i = 0; i < _dmFiles.length; i++) {
-        if (_dmSelected[i]) selectedFiles.push(_getFileSetting(i));
+        if (_dmFiles[i].selected) selectedFiles.push(_getFileSetting(i));
     }
     if (!selectedFiles.length) { alert('請至少勾選一個影片檔'); return { valid: false }; }
 
-    // Use first file's time as global fallback
     const firstDate = selectedFiles[0]?.date_time_override || new Date().toISOString();
-    const dateTime = firstDate;
 
     const model = _getDroneModelInfo();
     const doConcat = document.getElementById('dm_do_concat').checked;
@@ -434,13 +487,14 @@ function collectDroneMetaPayload() {
         file_index: fileIndex,
         files: selectedFiles,
         output_dir: document.getElementById('dm_output_dir').value.trim(),
-        date_time: dateTime,
+        date_time: firstDate,
         drone_make: model.make,
         drone_model: model.model,
         lens_make: model.lensMake,
         lens_model: model.lensModel,
         do_concat: doConcat,
         concat_dest_dir: doConcat ? document.getElementById('dm_concat_dest').value.trim() : '',
+        concat_custom_name: document.getElementById('dm_concat_name')?.value.trim() || '',
         concat_resolution: document.getElementById('dm_concat_res').value,
         concat_codec: document.getElementById('dm_concat_codec').value,
         concat_burn_timecode: document.getElementById('dm_concat_tc').checked,
@@ -475,17 +529,46 @@ async function submitDroneMeta() {
         resetProgress();
         const collected = collectDroneMetaPayload();
         if (!collected.valid) return;
+        const payload = collected.payload;
 
-        window._lastJob = { url: '/api/v1/jobs/drone_meta', payload: collected.payload };
-        const res = await fetch(window._lastJob.url, {
+        const host = window.collectSelectedHost ? window.collectSelectedHost('dm_host_checkboxes') : { name: '本機', ip: 'local' };
+        const isLocal = host.ip === 'local';
+        const hostUrl = isLocal ? getComputeBaseUrl() : 'http://' + host.ip;
+        const hostName = host.name || host.ip;
+
+        if (!isLocal) {
+            // Convert paths to UNC so remote host can access via network share
+            await ensureDriveMap();
+            if (Array.isArray(payload.files)) {
+                payload.files = payload.files.map(f => ({ ...f, path: toUncPath(f.path) }));
+            }
+            if (payload.output_dir) payload.output_dir = toUncPath(payload.output_dir);
+            if (payload.concat_dest_dir) payload.concat_dest_dir = toUncPath(payload.concat_dest_dir);
+
+            const pathsToCheck = [payload.output_dir, ...(payload.files || []).map(f => f.path)];
+            if (payload.concat_dest_dir) pathsToCheck.push(payload.concat_dest_dir);
+            try {
+                const result = await validateRemotePaths(host.ip, pathsToCheck.filter(Boolean));
+                if (!result.ok) {
+                    alert(`\u26a0 遠端主機 [${hostName}] 路徑檢查失敗：\n\n${result.errors.join('\n')}\n\n請確認該主機是否已映射對應磁碟機。`);
+                    return;
+                }
+            } catch (e) {
+                alert(`\u26a0 無法連線至遠端主機 [${hostName}] 進行路徑驗證：${e.message}`);
+                return;
+            }
+        }
+
+        const url = hostUrl + '/api/v1/jobs/drone_meta';
+        window._lastJob = { url, payload };
+        const res = await fetch(url, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(collected.payload),
+            body: JSON.stringify(payload),
         });
         const result = await res.json();
         if (result.status === 'queued') {
-            appendLog(`空拍寫入任務已提交 (job: ${result.job_id})`, 'info');
-            // Show progress bar
+            appendLog(`空拍寫入任務已提交至 [${hostName}] (job: ${result.job_id})`, 'info');
             const progEl = document.getElementById('dm-progress');
             if (progEl) progEl.classList.remove('hidden');
         } else {
@@ -528,155 +611,33 @@ function _setupProgressListener() {
     });
 }
 
-// ── Arrange Panel ──
-
-function _addClipToArrange(fileIdx) {
-    const file = _dmFiles[fileIdx];
-    if (!file) return;
-    _arrangeClips.push({
-        id: 'clip_' + (++_clipIdCounter),
-        fileIdx,
-        in: 0,
-        out: file.duration || 0,
-        brightness: 0.0,
-        contrast: 1.0,
-        saturation: 1.0,
-        gamma: 1.0,
-        colorTemp: 0.0,
-    });
-    _renderArrangeClips();
-}
-
-function _renderArrangeClips() {
-    const container = document.getElementById('dm_arrange_clips');
-    if (!container) return;
-    if (_arrangeClips.length === 0) {
-        container.innerHTML = '<div class="text-sm text-gray-600 w-full text-center py-8">拖拽左側素材到此處排列</div>';
-        return;
-    }
-    container.innerHTML = _arrangeClips.map((clip, i) => {
-        const file = _dmFiles[clip.fileIdx];
-        const thumb = file?.thumbnail || '';
-        const fname = file?.filename || '?';
-        const durText = _fmtDuration(clip.out - clip.in);
-        return `<div class="dm-arrange-card" draggable="true" data-clip-idx="${i}"
-                    ondragstart="dmClipDragStart(event, ${i})"
-                    ondragover="dmClipDragOver(event, this)"
-                    ondragleave="dmClipDragLeave(this)"
-                    ondrop="dmClipDrop(event, ${i})"
-                    onclick="dmOpenDetail('${clip.id}')">
-            <img src="${thumb}" class="w-full h-20 object-cover rounded-t" onerror="this.style.display='none'">
-            <div class="px-2 py-1">
-                <div class="text-xs text-gray-300 truncate">${fname}</div>
-                <div class="text-xs text-gray-500">${durText}</div>
-            </div>
-            <button onclick="event.stopPropagation(); dmRemoveClip(${i})"
-                class="absolute top-1 right-1 w-5 h-5 bg-black/60 rounded-full text-white text-xs flex items-center justify-center hover:bg-red-600">\u2715</button>
-        </div>`;
-    }).join('');
-}
-
-// Clip reorder drag within arrange panel
-window.dmClipDragStart = function(e, clipIdx) {
-    e.dataTransfer.setData('application/dm-clip-idx', String(clipIdx));
-    e.dataTransfer.effectAllowed = 'move';
-    e.stopPropagation(); // don't trigger source drag
-};
-
-window.dmClipDragOver = function(e, el) {
-    e.preventDefault();
-    e.stopPropagation();
-    el.classList.add('dm-arrange-card-drop-target');
-};
-
-window.dmClipDragLeave = function(el) {
-    el.classList.remove('dm-arrange-card-drop-target');
-};
-
-window.dmClipDrop = function(e, toIdx) {
-    e.preventDefault();
-    e.stopPropagation();
-    e.currentTarget.classList.remove('dm-arrange-card-drop-target');
-
-    // Check if it's a clip reorder
-    const clipFromStr = e.dataTransfer.getData('application/dm-clip-idx');
-    if (clipFromStr !== '') {
-        const from = parseInt(clipFromStr);
-        if (!isNaN(from) && from !== toIdx) {
-            const [moved] = _arrangeClips.splice(from, 1);
-            _arrangeClips.splice(toIdx, 0, moved);
-            _renderArrangeClips();
-        }
-        return;
-    }
-
-    // Check if it's a source file drop
-    const srcStr = e.dataTransfer.getData('application/dm-source-idx');
-    if (srcStr !== '') {
-        const fileIdx = parseInt(srcStr);
-        if (!isNaN(fileIdx) && _dmFiles[fileIdx]) {
-            _addClipToArrange(fileIdx);
-        }
-    }
-};
-
-// Open detail panel for a clip
-window.dmOpenDetail = function(clipId) {
-    const clip = _arrangeClips.find(c => c.id === clipId);
-    if (!clip) return;
-    const file = _dmFiles[clip.fileIdx];
-    document.getElementById('dm_arrange_panel').classList.add('hidden');
-    document.getElementById('dm_detail_panel').classList.remove('hidden');
-    renderClipDetail(clip, file, _arrangeClips, _fmtDuration);
-};
-
-window.dmRemoveClip = function(idx) {
-    _arrangeClips.splice(idx, 1);
-    _renderArrangeClips();
-};
-
-window.dmBackToArrange = function() {
-    document.getElementById('dm_detail_panel').classList.add('hidden');
-    document.getElementById('dm_arrange_panel').classList.remove('hidden');
-    _renderArrangeClips();
-};
-
-function _initArrangePanel() {
-    const arrangeEl = document.getElementById('dm_arrange_clips');
-    if (!arrangeEl) return;
-
-    arrangeEl.addEventListener('dragover', e => {
-        e.preventDefault();
-        e.dataTransfer.dropEffect = 'copy';
-        arrangeEl.classList.add('dm-arrange-drop-active');
-    });
-    arrangeEl.addEventListener('dragleave', e => {
-        // Only remove if actually leaving the container
-        if (!arrangeEl.contains(e.relatedTarget)) {
-            arrangeEl.classList.remove('dm-arrange-drop-active');
-        }
-    });
-    arrangeEl.addEventListener('drop', e => {
-        e.preventDefault();
-        arrangeEl.classList.remove('dm-arrange-drop-active');
-
-        // Check if it's from source file list
-        const srcStr = e.dataTransfer.getData('application/dm-source-idx');
-        if (srcStr !== '') {
-            const fileIdx = parseInt(srcStr);
-            if (!isNaN(fileIdx) && _dmFiles[fileIdx]) {
-                _addClipToArrange(fileIdx);
-            }
-        }
-    });
-}
-
 // ── Init ──
 
+// Apply order + selection from advanced edit modal to outer grid.
+function _syncOrderFromAdvanced(e) {
+    const paths = e.detail?.paths;
+    if (!Array.isArray(paths) || !paths.length) return;
+    const selectedSet = new Set(e.detail?.selectedPaths || []);
+
+    const byPath = new Map(_dmFiles.map(f => [f.path, f]));
+    const newOrder = [];
+    for (const p of paths) {
+        const f = byPath.get(p);
+        if (f) {
+            // Sync selected flag if explicit selectedPaths was provided
+            if (e.detail?.selectedPaths) f.selected = selectedSet.has(p);
+            newOrder.push(f);
+            byPath.delete(p);
+        }
+    }
+    // Append any _dmFiles not covered by the event (safety)
+    for (const f of byPath.values()) newOrder.push(f);
+    _dmFiles = newOrder;
+    _renderFileGrid();
+    _updateSelectCount();
+}
+
 export async function initDroneMetaTab() {
-    // Set default date/time to now
-    const now = new Date();
-    const dateStr = now.toISOString().split('T')[0];
     _setupProgressListener();
-    _initArrangePanel();
+    window.addEventListener('dmfile:order-synced', _syncOrderFromAdvanced);
 }

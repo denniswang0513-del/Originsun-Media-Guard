@@ -3,6 +3,16 @@ title Originsun SaaS Agent Installer
 color 0B
 chcp 65001 >nul
 
+:: ── UAC Self-Elevate ──
+:: C:\OriginsunAgent requires Administrator. Without elevation, mkdir/Expand-Archive
+:: get silently virtualized to %LOCALAPPDATA%\VirtualStore — files never reach C:\.
+net session >nul 2>&1
+if %errorlevel% neq 0 (
+    echo [System] Requesting Administrator privileges...
+    powershell -ExecutionPolicy Bypass -Command "Start-Process '%~f0' -Verb RunAs"
+    exit /b
+)
+
 echo ===================================================
 echo   Originsun Media Guard Pro - Auto Installer
 echo ===================================================
@@ -18,12 +28,23 @@ echo [Info] Install target : %INSTALL_DIR%
 echo.
 
 :: Step 1: Create install directory
-if not exist "%INSTALL_DIR%" mkdir "%INSTALL_DIR%"
-if %errorlevel% neq 0 (
-    echo [Error] Cannot create %INSTALL_DIR%. Try running as Administrator.
+if not exist "%INSTALL_DIR%" mkdir "%INSTALL_DIR%" 2>nul
+if not exist "%INSTALL_DIR%" (
+    echo [Error] Cannot create %INSTALL_DIR%.
+    echo         This script requires Administrator privileges.
+    echo         Right-click the bat file and choose "Run as administrator".
     pause
     exit /b 1
 )
+:: Write-test to verify we actually have write access (not UAC-virtualized)
+echo test > "%INSTALL_DIR%\.writetest" 2>nul
+if not exist "%INSTALL_DIR%\.writetest" (
+    echo [Error] %INSTALL_DIR% exists but is not writable.
+    echo         Please run this installer as Administrator.
+    pause
+    exit /b 1
+)
+del /f /q "%INSTALL_DIR%\.writetest" >nul 2>&1
 echo [Step 1/5] Install directory ready.
 
 :: Step 2: Get the agent package (try NAS first, then HTTP)
@@ -48,12 +69,31 @@ if %errorlevel% neq 0 (
 echo [Step 2/5] Download complete.
 
 :extract
+:: Step 2.5: Kill any running Agent process (so .pyd files are not locked)
+echo [Step 2.5] Stopping running Agent if any...
+for /f "tokens=5" %%P in ('netstat -aon ^| findstr ":8000.*LISTENING" 2^>nul') do (
+    echo [System] Killing PID %%P on port 8000...
+    taskkill /F /PID %%P >nul 2>&1
+)
+taskkill /F /IM python.exe >nul 2>&1
+echo [Step 2.5] Waiting for file locks to release...
+ping 127.0.0.1 -n 8 >nul
+echo [Step 2.5] Agent stopped.
+
 :: Step 3: Extract
 echo [Step 3/5] Extracting... (this may take 1-2 minutes)
-powershell -ExecutionPolicy Bypass -Command "Expand-Archive -Path '%ZIP_FILE%' -DestinationPath '%INSTALL_DIR%' -Force"
+powershell -ExecutionPolicy Bypass -Command "$ErrorActionPreference='Stop'; try { Expand-Archive -Path '%ZIP_FILE%' -DestinationPath '%INSTALL_DIR%' -Force; exit 0 } catch { Write-Host $_.Exception.Message; exit 1 }"
 if %errorlevel% neq 0 (
     echo [Error] Extraction failed. Ensure at least 2GB free on C:\.
     echo         Try running as Administrator.
+    pause
+    exit /b 1
+)
+:: Verify main.py actually exists (catches silent redirect / partial extract)
+if not exist "%INSTALL_DIR%\main.py" (
+    echo [Error] Extraction appears to have succeeded but main.py is missing.
+    echo         Files may have been redirected to %%LOCALAPPDATA%%\VirtualStore.
+    echo         Please run this installer as Administrator.
     pause
     exit /b 1
 )

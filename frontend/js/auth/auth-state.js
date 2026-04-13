@@ -170,3 +170,4 @@ export function _applyModuleTabs() {
 // Legacy alias
 window._applyVisibleTabs = _applyModuleTabs;
 window._applyModuleTabs = _applyModuleTabs;
+window._applyAuthState = _applyAuthState;

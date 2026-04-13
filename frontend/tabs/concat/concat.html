@@ -14,6 +14,12 @@
                 style="resize: vertical;">
                 <!-- JS Generated -->
             </div>
+            <div class="mt-2 flex items-center gap-3">
+                <button onclick="openConcatEditor()"
+                    class="text-xs bg-[#6b3fa0] hover:bg-[#8254c0] px-3 py-1.5 rounded text-white border border-[#8254c0]">🎬 進階編輯...</button>
+                <span id="cc_editor_status" class="text-xs text-gray-500">尚未套用進階編輯</span>
+                <button onclick="clearConcatAdvanced()" id="cc_clear_advanced" class="text-xs text-red-400 hover:text-red-300 ml-auto hidden">清除進階設定</button>
+            </div>
         </div>
         <div>
             <label class="block text-sm font-medium text-gray-400 mb-1">目標輸出資料夾</label>
@@ -52,7 +58,7 @@
             <label class="block text-sm font-medium text-gray-400 mb-2">畫面浮水印附加 (Overlays)</label>
             <div class="flex flex-col gap-2">
                 <label class="flex items-center gap-2 cursor-pointer text-sm">
-                    <input type="checkbox" id="cc_burn_timecode" checked
+                    <input type="checkbox" id="cc_burn_timecode"
                         class="form-checkbox text-blue-500 bg-[#1e1e1e] border-[#444] rounded">
                     <span class="text-gray-300">壓印時間碼 (Timecode 右上)</span>
                 </label>

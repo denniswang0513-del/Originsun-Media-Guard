@@ -1,12 +1,22 @@
 import { appendLog, getComputeBaseUrl, addStandaloneSource, setupDragAndDrop, setupInputDrop, validateRemotePaths, toUncPath, ensureDriveMap } from '../../js/shared/utils.js';
+import { refreshConcatEditorStatus } from './concat_editor_modal.js';
 
 export function collectConcatPayload() {
     const rows = document.getElementById('cc_source_list').children;
-    const sources = Array.from(rows).map(row => row.querySelector('input').value.trim()).filter(v => v);
-    if (!sources.length) {
+    let sources = Array.from(rows).map(row => row.querySelector('input').value.trim()).filter(v => v);
+
+    // If advanced clips are set, derive sources from them (for compatibility with backend path validation)
+    const advancedClips = window._concatAdvancedClips || null;
+    const advancedSelected = advancedClips ? advancedClips.filter(c => c.selected) : null;
+
+    if (advancedSelected && advancedSelected.length) {
+        // Use clip paths as sources (ordered)
+        sources = advancedSelected.map(c => c.path);
+    } else if (!sources.length) {
         alert('需要提供來源！');
         return { valid: false };
     }
+
     const destDir = document.getElementById('cc_dest').value.trim();
     if (!destDir) {
         alert('請設定目標輸出資料夾！');
@@ -18,9 +28,21 @@ export function collectConcatPayload() {
         resolution: document.getElementById('cc_res').value,
         custom_name: document.getElementById('cc_name').value.trim(),
         codec: document.getElementById('cc_codec')?.value || 'ProRes',
-        burn_timecode: document.getElementById('cc_burn_timecode')?.checked !== false,
+        burn_timecode: document.getElementById('cc_burn_timecode')?.checked === true,
         burn_filename: document.getElementById('cc_burn_filename')?.checked === true,
     };
+    if (advancedSelected && advancedSelected.length) {
+        payload.advanced_clips = advancedSelected.map(c => ({
+            path: c.path,
+            trim_in: c.trim_in || 0,
+            trim_out: c.trim_out || -1,
+            brightness: c.brightness || 0,
+            contrast: c.contrast || 1,
+            saturation: c.saturation || 1,
+            gamma: c.gamma || 1,
+            color_temp: c.color_temp || 0,
+        }));
+    }
     return { valid: true, payload, name: '串帶' };
 }
 window.collectConcatPayload = collectConcatPayload;
@@ -115,6 +137,7 @@ export function initConcatTab() {
     addStandaloneSource('cc_source_list', '');
     setupDragAndDrop('cc_source_list', () => addStandaloneSource('cc_source_list', ''));
     setupInputDrop('cc_dest');
+    refreshConcatEditorStatus();
 }
 
 window.submitConcat = submitConcat;

@@ -12,7 +12,7 @@ from fastapi import FastAPI  # type: ignore
 from fastapi.staticfiles import StaticFiles  # type: ignore
 from fastapi.responses import FileResponse  # type: ignore
 from fastapi.middleware.cors import CORSMiddleware  # type: ignore
-from starlette.middleware.base import BaseHTTPMiddleware # type: ignore
+# BaseHTTPMiddleware removed — it buffers streaming responses (breaks SSE)
 
 from core.socket_mgr import sio  # type: ignore
 import core.state as state  # type: ignore
@@ -37,33 +37,50 @@ for _mod_name in _ROUTER_MODULES:
 
 app = FastAPI(title="Originsun Media Guard Web API")
 
-class NoCacheMiddleware(BaseHTTPMiddleware):
-    async def dispatch(self, request, call_next):
-        # Chrome Private Network Access (CORS-RFC1918) — required for
-        # cross-origin fetches between LAN machines (e.g. agent health polling).
-        # Must handle BEFORE CORSMiddleware sees the request, because Starlette's
-        # CORSMiddleware rejects unknown preflight headers with 400.
-        if (request.method == "OPTIONS"
-                and request.headers.get("access-control-request-private-network")):
-            from starlette.responses import Response as _Resp
-            origin = request.headers.get("origin", "*")
-            return _Resp(status_code=204, headers={
-                "Access-Control-Allow-Origin": origin,
-                "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, OPTIONS",
-                "Access-Control-Allow-Headers": request.headers.get(
-                    "access-control-request-headers", "*"),
-                "Access-Control-Allow-Credentials": "true",
-                "Access-Control-Allow-Private-Network": "true",
-                "Access-Control-Max-Age": "600",
-            })
+class NoCacheMiddleware:
+    """Pure ASGI middleware — does NOT buffer streaming responses (unlike BaseHTTPMiddleware).
+    This is critical for SSE endpoints like /drone_meta/scan_stream."""
 
-        response = await call_next(request)
-        if request.method == "GET":
-            response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
-            response.headers["Pragma"] = "no-cache"
-            response.headers["Expires"] = "0"
-        response.headers["Access-Control-Allow-Private-Network"] = "true"
-        return response
+    def __init__(self, app):
+        self.app = app
+
+    async def __call__(self, scope, receive, send):
+        if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
+
+        # Chrome Private Network Access (CORS-RFC1918) preflight handling
+        headers_raw = dict(scope.get("headers", []))
+        method = scope.get("method", "")
+        if (method == "OPTIONS"
+                and b"access-control-request-private-network" in headers_raw):
+            origin = headers_raw.get(b"origin", b"*").decode()
+            req_headers = headers_raw.get(b"access-control-request-headers", b"*").decode()
+            resp_headers = [
+                (b"access-control-allow-origin", origin.encode()),
+                (b"access-control-allow-methods", b"GET, POST, PUT, DELETE, OPTIONS"),
+                (b"access-control-allow-headers", req_headers.encode()),
+                (b"access-control-allow-credentials", b"true"),
+                (b"access-control-allow-private-network", b"true"),
+                (b"access-control-max-age", b"600"),
+            ]
+            await send({"type": "http.response.start", "status": 204, "headers": resp_headers})
+            await send({"type": "http.response.body", "body": b""})
+            return
+
+        # Wrap send to inject headers on response start (no buffering)
+        async def send_wrapper(message):
+            if message["type"] == "http.response.start":
+                headers = list(message.get("headers", []))
+                if method == "GET":
+                    headers.append((b"cache-control", b"no-store, no-cache, must-revalidate, max-age=0"))
+                    headers.append((b"pragma", b"no-cache"))
+                    headers.append((b"expires", b"0"))
+                headers.append((b"access-control-allow-private-network", b"true"))
+                message = {**message, "headers": headers}
+            await send(message)
+
+        await self.app(scope, receive, send_wrapper)
 
 app.add_middleware(
     CORSMiddleware,

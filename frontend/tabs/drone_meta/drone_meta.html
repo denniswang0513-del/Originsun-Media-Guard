@@ -1,12 +1,8 @@
 <h2 class="text-lg font-semibold mb-4 text-[#e0e0e0] border-b border-[#3a3a3a] pb-2">空拍轉換</h2>
 
-<div class="flex gap-4" style="min-height:calc(100vh - 200px);">
-  <!-- Left panel: source + settings -->
-  <div style="width:380px;flex-shrink:0;overflow-y:auto;">
-
-<!-- ═══ 區塊一：檔案匯入 ═══ -->
-<div class="mb-6">
-    <div class="flex items-center gap-3 mb-3">
+<!-- ═══ 區塊一：檔案匯入 + 掃描進度 ═══ -->
+<div class="mb-4">
+    <div class="flex items-center gap-3 mb-2">
         <button onclick="dmPickFolder()"
             class="text-sm bg-[#2a5a9e] hover:bg-[#3a6abe] px-4 py-2 rounded text-white border border-[#4a7ace]">📁 選擇資料夾</button>
         <span id="dm_scan_status" class="text-xs text-gray-500"></span>
@@ -14,117 +10,154 @@
     </div>
     <input type="hidden" id="dm_source_path">
 
-    <!-- 檔案卡片列表 -->
-    <div id="dm_file_list"
-        class="space-y-1 bg-[#1e1e1e] border border-[#444] rounded p-2 min-h-[60px] max-h-[500px] overflow-y-auto"
-        style="resize: vertical;">
-        <div class="text-sm text-gray-500 text-center py-4">尚未掃描影片，請先選擇來源並點擊「掃描影片」</div>
-    </div>
-</div>
-
-<!-- ═══ 區塊二：轉換設定 ═══ -->
-<div class="mb-6">
-    <h3 class="text-sm font-semibold text-[#c0c0c0] mb-3 border-b border-[#333] pb-1">轉換設定</h3>
-    <div class="grid grid-cols-1 gap-4">
-        <div>
-            <label class="block text-xs text-gray-400 mb-1">檔案起始編號</label>
-            <input type="number" id="dm_file_index" value="1" min="1"
-                class="w-full bg-[#1e1e1e] border border-[#444] rounded px-3 py-2 text-sm focus:outline-none focus:border-blue-500">
+    <!-- 掃描進度條 -->
+    <div id="dm-scan-progress" class="hidden mb-3">
+        <div class="flex justify-between text-xs text-gray-400 mb-1">
+            <span id="dm-scan-label">掃描中...</span>
+            <span id="dm-scan-count">0 / 0</span>
         </div>
-        <div>
-            <label class="block text-xs text-gray-400 mb-1">輸出機型</label>
-            <select id="dm_drone_model"
-                onchange="dmOnModelChange()"
-                class="w-full bg-[#1e1e1e] border border-[#444] rounded px-3 py-2 text-sm focus:outline-none focus:border-blue-500">
-                <option value="autel_evo_lite_plus">Autel Robotics EVO Lite+</option>
-                <option value="dji_mavic3">DJI Mavic 3</option>
-                <option value="dji_mini4pro">DJI Mini 4 Pro</option>
-                <option value="dji_air3">DJI Air 3</option>
-                <option value="custom">自訂...</option>
-            </select>
-            <div id="dm_custom_model_fields" class="hidden mt-2 grid grid-cols-2 gap-2">
-                <input type="text" id="dm_custom_make" placeholder="Make (如: DJI)"
-                    class="bg-[#1e1e1e] border border-[#444] rounded px-2 py-1 text-xs">
-                <input type="text" id="dm_custom_model" placeholder="Model (如: Mavic 3)"
-                    class="bg-[#1e1e1e] border border-[#444] rounded px-2 py-1 text-xs">
-                <input type="text" id="dm_custom_lens_make" placeholder="Lens Make"
-                    class="bg-[#1e1e1e] border border-[#444] rounded px-2 py-1 text-xs">
-                <input type="text" id="dm_custom_lens_model" placeholder="Lens Model"
-                    class="bg-[#1e1e1e] border border-[#444] rounded px-2 py-1 text-xs">
-            </div>
-        </div>
-        <div>
-            <label class="block text-xs text-gray-400 mb-1">輸出目錄（留空 = 來源同目錄）</label>
-            <div class="flex gap-2">
-                <input type="text" id="dm_output_dir"
-                    class="flex-1 bg-[#1e1e1e] border border-[#444] rounded px-3 py-2 text-sm focus:outline-none focus:border-blue-500"
-                    placeholder="留空則輸出至來源同目錄">
-                <button onclick="pickPath('dm_output_dir', 'folder')"
-                    class="bg-[#333] hover:bg-[#444] px-3 rounded border border-[#555] text-gray-300">📁</button>
-            </div>
+        <div class="w-full bg-[#1e1e1e] rounded-full h-3 border border-[#444] overflow-hidden">
+            <div id="dm-scan-bar" class="h-3 bg-blue-500 transition-all duration-200" style="width:0%"></div>
         </div>
     </div>
 </div>
 
-<!-- ═══ 區塊三：串帶選項 ═══ -->
-<div class="mb-6">
-    <label class="flex items-center gap-2 cursor-pointer text-sm mb-2">
-        <input type="checkbox" id="dm_do_concat" onchange="dmToggleConcat()"
-            class="form-checkbox text-blue-500 bg-[#1e1e1e] border-[#444] rounded">
-        <span class="text-gray-300 font-medium">寫入後串帶已勾選的影片</span>
-    </label>
-    <div id="dm_concat_options" class="hidden ml-6 p-3 bg-[#1a2a2a] border border-[#2a4a4a] rounded space-y-3">
-        <div class="grid grid-cols-1 gap-3">
+<!-- ═══ 區塊二：檔案卡片網格 ═══ -->
+<div class="mb-4">
+    <!-- 工具列 -->
+    <div id="dm_grid_toolbar" class="hidden flex items-center gap-3 mb-2 text-xs text-gray-400">
+        <label class="flex items-center gap-1 cursor-pointer">
+            <input type="checkbox" id="dm_select_all" checked onchange="dmToggleSelectAll(this.checked)"
+                class="form-checkbox text-blue-500 bg-[#1e1e1e] border-[#444] rounded">
+            全選
+        </label>
+        <span class="text-gray-600">|</span>
+        <span>拖曳卡片可調整排列順序</span>
+        <span id="dm_select_count" class="ml-auto text-gray-500"></span>
+    </div>
+
+    <!-- 卡片網格 -->
+    <div id="dm_file_grid"
+        class="grid gap-3 min-h-[80px]"
+        style="grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));">
+        <div class="text-sm text-gray-500 text-center py-8 col-span-full">尚未掃描影片，請先選擇來源資料夾</div>
+    </div>
+</div>
+
+<!-- ═══ 區塊三：轉換設定 + 串帶（水平排列） ═══ -->
+<div class="mb-4 grid grid-cols-1 lg:grid-cols-2 gap-4">
+    <!-- 左側：轉換設定 -->
+    <div class="bg-[#252525] border border-[#3a3a3a] rounded-lg p-4">
+        <h3 class="text-sm font-semibold text-[#c0c0c0] mb-3 border-b border-[#333] pb-1">轉換設定</h3>
+        <div class="grid grid-cols-2 gap-3">
             <div>
+                <label class="block text-xs text-gray-400 mb-1">檔案起始編號</label>
+                <input type="number" id="dm_file_index" value="1" min="1"
+                    class="w-full bg-[#1e1e1e] border border-[#444] rounded px-3 py-1.5 text-sm focus:outline-none focus:border-blue-500">
+            </div>
+            <div>
+                <label class="block text-xs text-gray-400 mb-1">輸出無人機機型</label>
+                <select id="dm_drone_model" onchange="dmOnModelChange()"
+                    class="w-full bg-[#1e1e1e] border border-[#444] rounded px-3 py-1.5 text-sm focus:outline-none focus:border-blue-500">
+                    <option value="autel_evo_lite_plus">Autel EVO Lite+</option>
+                    <option value="dji_mavic3">DJI Mavic 3</option>
+                    <option value="dji_mini4pro">DJI Mini 4 Pro</option>
+                    <option value="dji_air3">DJI Air 3</option>
+                    <option value="custom">自訂...</option>
+                </select>
+            </div>
+        </div>
+        <div id="dm_custom_model_fields" class="hidden mt-3 grid grid-cols-2 gap-3">
+            <div><label class="block text-xs text-gray-400 mb-1">廠牌</label>
+                <input type="text" id="dm_custom_make" class="w-full bg-[#1e1e1e] border border-[#444] rounded px-3 py-1.5 text-sm"></div>
+            <div><label class="block text-xs text-gray-400 mb-1">型號</label>
+                <input type="text" id="dm_custom_model" class="w-full bg-[#1e1e1e] border border-[#444] rounded px-3 py-1.5 text-sm"></div>
+            <div><label class="block text-xs text-gray-400 mb-1">鏡頭廠牌</label>
+                <input type="text" id="dm_custom_lens_make" class="w-full bg-[#1e1e1e] border border-[#444] rounded px-3 py-1.5 text-sm"></div>
+            <div><label class="block text-xs text-gray-400 mb-1">鏡頭型號</label>
+                <input type="text" id="dm_custom_lens_model" class="w-full bg-[#1e1e1e] border border-[#444] rounded px-3 py-1.5 text-sm"></div>
+        </div>
+        <div class="mt-3">
+            <label class="block text-xs text-gray-400 mb-1">輸出目錄</label>
+            <div class="flex gap-2">
+                <input type="text" id="dm_output_dir" placeholder="留空 = 同來源目錄"
+                    class="flex-1 bg-[#1e1e1e] border border-[#444] rounded px-3 py-1.5 text-sm focus:outline-none focus:border-blue-500">
+                <button onclick="pickPath('dm_output_dir','folder')"
+                    class="text-xs bg-[#333] hover:bg-[#444] px-3 py-1.5 rounded border border-[#555] text-gray-300">📁</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- 右側：串帶選項 -->
+    <div class="bg-[#252525] border border-[#3a3a3a] rounded-lg p-4">
+        <div class="flex items-center gap-2 mb-3 border-b border-[#333] pb-1">
+            <input type="checkbox" id="dm_do_concat" onchange="dmToggleConcat()"
+                class="form-checkbox text-blue-500 bg-[#1e1e1e] border-[#444] rounded">
+            <h3 class="text-sm font-semibold text-[#c0c0c0]">寫入後串帶已勾選的影片（按排列順序）</h3>
+            <button onclick="openConcatEditor()"
+                class="ml-auto text-xs bg-[#6b3fa0] hover:bg-[#8254c0] px-3 py-1 rounded text-white border border-[#8254c0]">🎬 進階編輯</button>
+        </div>
+        <div id="dm_concat_options" class="hidden">
+            <div class="mb-3">
                 <label class="block text-xs text-gray-400 mb-1">串帶輸出目錄</label>
                 <div class="flex gap-2">
                     <input type="text" id="dm_concat_dest"
-                        class="flex-1 bg-[#1e1e1e] border border-[#444] rounded px-2 py-1.5 text-sm focus:outline-none focus:border-blue-500">
-                    <button onclick="pickPath('dm_concat_dest', 'folder')"
-                        class="bg-[#333] hover:bg-[#444] px-2 rounded border border-[#555] text-gray-300 text-sm">📁</button>
+                        class="flex-1 bg-[#1e1e1e] border border-[#444] rounded px-3 py-1.5 text-sm focus:outline-none focus:border-blue-500">
+                    <button onclick="pickPath('dm_concat_dest','folder')"
+                        class="text-xs bg-[#333] hover:bg-[#444] px-3 py-1.5 rounded border border-[#555] text-gray-300">📁</button>
                 </div>
             </div>
-            <div>
-                <label class="block text-xs text-gray-400 mb-1">解析度</label>
-                <select id="dm_concat_res"
-                    class="w-full bg-[#1e1e1e] border border-[#444] rounded px-2 py-1.5 text-sm">
-                    <option value="1080P" selected>1080P</option>
-                    <option value="720P">720P</option>
-                    <option value="Ultra HD">4K (Ultra HD)</option>
-                </select>
+            <div class="mb-3">
+                <label class="block text-xs text-gray-400 mb-1">自訂串帶檔名（留空則用專案名）</label>
+                <input type="text" id="dm_concat_name" placeholder="例：台66_空拍_Reel"
+                    class="w-full bg-[#1e1e1e] border border-[#444] rounded px-3 py-1.5 text-sm focus:outline-none focus:border-blue-500">
+            </div>
+            <div class="grid grid-cols-2 gap-3 mb-3">
+                <div>
+                    <label class="block text-xs text-gray-400 mb-1">解析度</label>
+                    <select id="dm_concat_res" class="w-full bg-[#1e1e1e] border border-[#444] rounded px-3 py-1.5 text-sm">
+                        <option value="1080P">1080P</option>
+                        <option value="720P">720P</option>
+                        <option value="4K Ultra HD">4K Ultra HD</option>
+                    </select>
+                </div>
+                <div>
+                    <label class="block text-xs text-gray-400 mb-1">編碼</label>
+                    <select id="dm_concat_codec" class="w-full bg-[#1e1e1e] border border-[#444] rounded px-3 py-1.5 text-sm">
+                        <option value="H.264 (NVENC)">H.264 (NVENC)</option>
+                        <option value="H.264 (x264)">H.264 (x264)</option>
+                        <option value="ProRes">ProRes 422</option>
+                    </select>
+                </div>
+            </div>
+            <div class="flex gap-4 text-xs">
+                <label class="flex items-center gap-1 cursor-pointer">
+                    <input type="checkbox" id="dm_concat_tc"
+                        class="form-checkbox text-blue-500 bg-[#1e1e1e] border-[#444] rounded"> 燒錄 Timecode
+                </label>
+                <label class="flex items-center gap-1 cursor-pointer">
+                    <input type="checkbox" id="dm_concat_fn"
+                        class="form-checkbox text-blue-500 bg-[#1e1e1e] border-[#444] rounded"> 燒錄檔名
+                </label>
             </div>
         </div>
-        <div class="grid grid-cols-1 gap-3">
-            <div>
-                <label class="block text-xs text-gray-400 mb-1">編碼格式</label>
-                <select id="dm_concat_codec"
-                    class="w-full bg-[#1e1e1e] border border-[#444] rounded px-2 py-1.5 text-sm">
-                    <option value="H.264 (NVENC)" selected>H.264 NVENC</option>
-                    <option value="H.264 (軟體)">H.264 x264</option>
-                    <option value="ProRes">ProRes 422</option>
-                </select>
-            </div>
-            <div class="flex flex-col gap-1">
-                <label class="flex items-center gap-2 cursor-pointer text-xs">
-                    <input type="checkbox" id="dm_concat_tc" checked class="form-checkbox text-blue-500 bg-[#1e1e1e] border-[#444] rounded">
-                    <span class="text-gray-300">壓印 Timecode</span>
-                </label>
-                <label class="flex items-center gap-2 cursor-pointer text-xs">
-                    <input type="checkbox" id="dm_concat_fn" class="form-checkbox text-blue-500 bg-[#1e1e1e] border-[#444] rounded">
-                    <span class="text-gray-300">壓印原始檔名</span>
-                </label>
-            </div>
-        </div>
+        <div id="dm_concat_placeholder" class="text-xs text-gray-600 py-2">勾選上方啟用串帶功能</div>
     </div>
 </div>
 
-<!-- ═══ 區塊四：動作按鈕 + 進度 ═══ -->
+<!-- 處理主機（單選） -->
+<div id="dm_host_panel" class="hidden p-3 mb-4 bg-[#1a2a3a] border border-[#2e4a6e] rounded-lg">
+    <div class="text-xs text-blue-300 font-semibold mb-2">處理主機</div>
+    <div id="dm_host_checkboxes" class="flex flex-wrap gap-x-4 gap-y-1"></div>
+</div>
+
+<!-- ═══ 區塊五：動作按鈕 + 執行進度 ═══ -->
 <div class="border-t border-[#3a3a3a] pt-4">
     <div class="flex justify-between items-center">
         <div class="flex gap-2 dm-control-btns hidden">
-            <button onclick="dmApiControl('pause')" class="bg-[#7a5500] hover:bg-[#b07a00] text-white text-xs font-bold py-2 px-4 rounded shadow transition-colors">暫停</button>
-            <button onclick="dmApiControl('resume')" class="bg-[#3a5a3a] hover:bg-[#4a7a4a] text-white text-xs font-bold py-2 px-4 rounded shadow transition-colors">繼續</button>
-            <button onclick="dmApiControl('stop')" class="bg-[#8b0000] hover:bg-[#cc2200] text-white text-xs font-bold py-2 px-4 rounded shadow transition-colors">強制中止</button>
+            <button onclick="apiControl('pause')" class="bg-[#7a5500] hover:bg-[#b07a00] text-white text-xs font-bold py-2 px-4 rounded shadow transition-colors">暫停</button>
+            <button onclick="apiControl('resume')" class="bg-[#3a5a3a] hover:bg-[#4a7a4a] text-white text-xs font-bold py-2 px-4 rounded shadow transition-colors">繼續</button>
+            <button onclick="apiControl('stop')" class="bg-[#8b0000] hover:bg-[#cc2200] text-white text-xs font-bold py-2 px-4 rounded shadow transition-colors">強制中止</button>
         </div>
         <div class="flex gap-3 ml-auto">
             <button class="dm-start-btn bg-[#228b22] hover:bg-[#2eaa2e] text-white font-bold py-2 px-8 rounded shadow text-sm transition-colors"
@@ -132,7 +165,7 @@
         </div>
     </div>
 
-    <!-- 進度條 -->
+    <!-- 執行進度條 -->
     <div id="dm-progress" class="mt-4 mb-2 hidden">
         <div class="flex justify-between text-xs text-gray-400 mb-1">
             <span id="dm-prog-label">進度：尚未開始</span>
@@ -143,25 +176,4 @@
         </div>
         <div class="text-xs text-gray-500 mt-1"><span id="dm-prog-detail"></span></div>
     </div>
-</div>
-
-  </div><!-- end left panel -->
-
-  <!-- Right panel: editor -->
-  <div class="flex-1 flex flex-col" id="dm_editor_panel">
-    <!-- Arrange mode -->
-    <div id="dm_arrange_panel">
-      <h3 class="text-sm font-semibold text-[#c0c0c0] mb-2 border-b border-[#333] pb-1">排列順序</h3>
-      <div id="dm_arrange_clips"
-        class="flex flex-wrap gap-3 p-3 min-h-[120px] bg-[#1a1a1a] border-2 border-dashed border-[#333] rounded"
-        style="align-content:flex-start;">
-        <div class="text-sm text-gray-600 w-full text-center py-8">拖拽左側素材到此處排列</div>
-      </div>
-    </div>
-
-    <!-- Detail mode (hidden by default) -->
-    <div id="dm_detail_panel" class="hidden flex-1 flex flex-col">
-      <!-- Rendered by drone_meta_editor.js -->
-    </div>
-  </div>
 </div>

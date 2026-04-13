@@ -439,12 +439,14 @@ async def _run_transcode(job, engine, task: TranscodeRequest, _on_progress):
 
 
 async def _run_concat(job, engine, task: ConcatRequest, _on_progress):
+    advanced = [c.model_dump() for c in (task.advanced_clips or [])] or None
     await asyncio.to_thread(
         engine.run_concat_job,
         sources=task.sources, dest_dir=task.dest_dir,
         custom_name=task.custom_name,
         resolution=task.resolution, codec=task.codec,
         burn_timecode=task.burn_timecode, burn_filename=task.burn_filename,
+        advanced_clips=advanced,
         on_progress=_on_progress
     )
 
@@ -893,7 +895,7 @@ def _drone_meta_sync(job, engine, task: DroneMetaRequest, _on_progress):
             })
             continue
 
-        # exiftool write metadata (date stamps only)
+        # exiftool write metadata (date stamps + drone make/model/lens)
         exif_cmd = [
             exiftool,
             f"-CreateDate={file_exif_dt}",
@@ -904,6 +906,12 @@ def _drone_meta_sync(job, engine, task: DroneMetaRequest, _on_progress):
             f"-MediaModifyDate={file_exif_dt}",
             f"-FileCreateDate={file_exif_dt}",
             f"-FileModifyDate={file_exif_dt}",
+            f"-Make={task.drone_make}",
+            f"-Model={task.drone_model}",
+            f"-QuickTime:Make={task.drone_make}",
+            f"-QuickTime:Model={task.drone_model}",
+            f"-LensMake={task.lens_make}",
+            f"-LensModel={task.lens_model}",
             "-Software=Lavf58.20.100",
             "-QuickTime:SoftwareVersion=Lavf58.20.100",
             "-overwrite_original",
@@ -971,6 +979,7 @@ def _drone_meta_sync(job, engine, task: DroneMetaRequest, _on_progress):
             engine.run_concat_job(
                 sources=new_file_paths,
                 dest_dir=task.concat_dest_dir,
+                custom_name=getattr(task, 'concat_custom_name', '') or '',
                 resolution=task.concat_resolution,
                 codec=task.concat_codec,
                 burn_timecode=task.concat_burn_timecode,

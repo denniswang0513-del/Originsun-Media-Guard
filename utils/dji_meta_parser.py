@@ -286,6 +286,104 @@ def _is_dji_stream(video_path, ffprobe_path=None):
     return -1
 
 
+# ── Autel SRT subtitle fallback ──────────────────────────────────
+
+import re as _re
+
+_AUTEL_GPS_RE = _re.compile(
+    r"GPS\(E:\s*([-\d.]+),\s*N:\s*([-\d.]+),\s*([-\d.]+)m\)"
+)
+_AUTEL_HOME_RE = _re.compile(
+    r"HOME\(E:\s*([-\d.]+),\s*N:\s*([-\d.]+)\)"
+)
+_AUTEL_CAM_RE = _re.compile(
+    r"ISO:(\d+)\s+SHUTTER:(\d+)\s+EV:([-\d.]+)\s+F-NUM:([\d.]+)"
+)
+_AUTEL_FPRY_RE = _re.compile(
+    r"F\.PRY\s*\(([-\d.]+)[^\d-]+([-\d.]+)[^\d-]+([-\d.]+)"
+)
+_AUTEL_GPRY_RE = _re.compile(
+    r"G\.PRY\s*\(([-\d.]+)[^\d-]+([-\d.]+)[^\d-]+([-\d.]+)"
+)
+
+
+def _parse_autel_srt(video_path: str, ffmpeg_path: str) -> dict:
+    """Extract telemetry from Autel-style SRT subtitle track (our own output format).
+
+    Returns {'is_dji': True, 'frames': [...], ...} or None if no Autel subtitle found.
+    """
+    # Probe for subtitle streams; look for handler_name containing "Autel"
+    ffprobe_path = ffmpeg_path.replace("ffmpeg", "ffprobe")
+    try:
+        cmd = [ffprobe_path, "-v", "error", "-select_streams", "s",
+               "-show_entries", "stream=index:stream_tags=handler_name",
+               "-of", "json", video_path]
+        res = subprocess.run(cmd, capture_output=True, text=True,
+                             timeout=10, creationflags=_HNO)
+        data = json.loads(res.stdout or "{}")
+    except Exception:
+        return None
+
+    sub_idx = None
+    for s in data.get("streams", []):
+        handler = (s.get("tags", {}) or {}).get("handler_name", "")
+        if "Autel" in handler:
+            sub_idx = s.get("index")
+            break
+    if sub_idx is None:
+        return None
+
+    # Extract subtitle as SRT text
+    try:
+        cmd = [ffmpeg_path, "-hide_banner", "-v", "error", "-i", video_path,
+               "-map", f"0:{sub_idx}", "-f", "srt", "-"]
+        res = subprocess.run(cmd, capture_output=True, timeout=30, creationflags=_HNO)
+        srt_text = res.stdout.decode("utf-8", errors="ignore")
+    except Exception:
+        return None
+    if not srt_text.strip():
+        return None
+
+    frames = []
+    home = None
+    for line in srt_text.splitlines():
+        line = line.strip()
+        if "GPS(" not in line:
+            continue
+        if home is None:
+            m = _AUTEL_HOME_RE.search(line)
+            if m:
+                home = (float(m.group(1)), float(m.group(2)))
+        gm = _AUTEL_GPS_RE.search(line)
+        cm = _AUTEL_CAM_RE.search(line)
+        fm = _AUTEL_FPRY_RE.search(line)
+        gym = _AUTEL_GPRY_RE.search(line)
+        if not gm:
+            continue
+        frame = {
+            "lon": float(gm.group(1)), "lat": float(gm.group(2)), "alt": float(gm.group(3)),
+            "iso": int(cm.group(1)) if cm else 0,
+            "shutter": int(cm.group(2)) if cm else 0,
+            "ev": float(cm.group(3)) if cm else 0.0,
+            "fnum": float(cm.group(4)) if cm else 0.0,
+            "f_pry": (float(fm.group(1)), float(fm.group(2)), float(fm.group(3))) if fm else (0, 0, 0),
+            "g_pry": (float(gym.group(1)), float(gym.group(2)), float(gym.group(3))) if gym else (0, 0, 0),
+        }
+        frames.append(frame)
+
+    if not frames:
+        return None
+    return {
+        "is_dji": True,  # Flag used by caller; actually Autel here but shared structure
+        "device": "Autel",
+        "serial": "",
+        "lens": "EVO Lite+ Camera",
+        "home_lat": home[1] if home else frames[0]["lat"],
+        "home_lon": home[0] if home else frames[0]["lon"],
+        "frames": frames,
+    }
+
+
 # ── Main entry point ─────────────────────────────────────────────
 
 def parse_dji_meta(video_path: str, ffmpeg_path: str = None) -> dict:
@@ -312,6 +410,10 @@ def parse_dji_meta(video_path: str, ffmpeg_path: str = None) -> dict:
     # Step 1: Detect DJI stream
     dji_stream = _is_dji_stream(video_path, ffprobe_path)
     if dji_stream < 0:
+        # Fallback: try Autel SRT subtitle track (our own processed files have this)
+        autel = _parse_autel_srt(video_path, ffmpeg_path)
+        if autel:
+            return autel
         return {"is_dji": False}
 
     # Step 2: Extract the DJI meta stream to a temp binary file

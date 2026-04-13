@@ -1021,11 +1021,25 @@ class MediaGuardEngine:
         codec: str = "ProRes",
         burn_timecode: bool = True,
         burn_filename: bool = False,
+        advanced_clips: Optional[List[Dict[str, Any]]] = None,
         on_progress: Optional[Callable[[Dict[str, Any]], None]] = None
     ):
-        """獨立時間碼壓印串帶邏輯"""
+        """獨立時間碼壓印串帶邏輯
+
+        advanced_clips: 若提供則走進階編輯路徑（每段個別 trim + 色彩），
+                        忽略 sources 的順序與資料夾全域排序，以 clip 陣列為準。
+        """
         self._stop_event.clear()
         self._pause_event.clear()
+
+        # ── 進階編輯路徑（使用 filter_complex）──
+        if advanced_clips:
+            return self._run_concat_advanced(
+                clips=advanced_clips, dest_dir=dest_dir, custom_name=custom_name,
+                resolution=resolution, codec=codec,
+                burn_timecode=burn_timecode, burn_filename=burn_filename,
+                on_progress=on_progress,
+            )
 
         # 收集影片
         files = []
@@ -1512,6 +1526,148 @@ class MediaGuardEngine:
                     os.remove(tmp)
             except OSError:
                 pass
+
+    # ── Advanced concat (trim + color grading per clip) ──
+
+    def _run_concat_advanced(
+        self,
+        clips: List[Dict[str, Any]],
+        dest_dir: str,
+        custom_name: str = "",
+        resolution: str = "1080P",
+        codec: str = "ProRes",
+        burn_timecode: bool = True,
+        burn_filename: bool = False,
+        on_progress: Optional[Callable[[Dict[str, Any]], None]] = None,
+    ):
+        """進階編輯版串帶：每段 trim + 色彩調整 + 拼接（用 filter_complex）。"""
+        import subprocess as _sp
+        import uuid as _uuid
+        _flags = getattr(_sp, 'CREATE_NO_WINDOW', 0x08000000)
+
+        if not clips:
+            self.err("[Engine] advanced_clips 為空")
+            return
+
+        valid_clips = []
+        for i, c in enumerate(clips):
+            p = c.get("path", "")
+            if p and os.path.isfile(p):
+                valid_clips.append(c)
+            else:
+                self.log(f"[Engine] clip #{i} 檔案不存在，跳過: {p}")
+        if not valid_clips:
+            self.err("[Engine] 所有 clip 都無效")
+            return
+
+        os.makedirs(dest_dir, exist_ok=True)
+        reel_name = custom_name.strip() or f"advanced_reel_{_uuid.uuid4().hex[:6]}"
+        output_path = os.path.join(dest_dir, f"{reel_name}.mov")
+
+        res_map = {"720P": (1280, 720), "1080P": (1920, 1080), "Ultra HD": (3840, 2160)}
+        W, H = res_map.get(resolution, (1920, 1080))
+
+        if "NVENC" in codec:
+            vcodec_args = ["-c:v", "h264_nvenc", "-preset", "p4", "-b:v", "10M"]
+        elif "ProRes" in codec:
+            vcodec_args = ["-c:v", "prores_ks", "-profile:v", "3", "-pix_fmt", "yuv422p10le"]
+        else:
+            vcodec_args = ["-c:v", "libx264", "-preset", "medium", "-crf", "20", "-pix_fmt", "yuv420p"]
+
+        inputs = []
+        filter_parts = []
+        concat_inputs = []
+        for i, c in enumerate(valid_clips):
+            trim_in = float(c.get("trim_in") or 0.0)
+            trim_out = float(c.get("trim_out") or -1.0)
+            inp = []
+            if trim_in > 0:
+                inp += ["-ss", f"{trim_in:.3f}"]
+            if trim_out > trim_in:
+                inp += ["-to", f"{trim_out:.3f}"]
+            inp += ["-i", c["path"]]
+            inputs.extend(inp)
+
+            brightness = float(c.get("brightness") or 0.0)
+            contrast = float(c.get("contrast") or 1.0)
+            saturation = float(c.get("saturation") or 1.0)
+            gamma = float(c.get("gamma") or 1.0)
+            color_temp = float(c.get("color_temp") or 0.0)
+            shadows = float(c.get("shadows") or 0.0)
+            midtones = float(c.get("midtones") or 0.0)
+            highlights = float(c.get("highlights") or 0.0)
+            curve_points = c.get("curve_points") or None
+
+            vf = (
+                f"[{i}:v]scale={W}:{H}:force_original_aspect_ratio=decrease,"
+                f"pad={W}:{H}:(ow-iw)/2:(oh-ih)/2:black,"
+                f"eq=brightness={brightness}:contrast={contrast}:saturation={saturation}:gamma={gamma}"
+            )
+            if color_temp != 0.0:
+                vf += f",colorbalance=rs={color_temp}:gs=0:bs={-color_temp}"
+
+            # Build curves filter from user curve or shadows/midtones/highlights
+            # Treat [[0,0],[1,1]] (identity) as "no curve set" so tonal zones still apply.
+            def _is_identity(pts):
+                if not pts or len(pts) != 2:
+                    return False
+                a, b = pts[0], pts[1]
+                return float(a[0]) == 0.0 and float(a[1]) == 0.0 and float(b[0]) == 1.0 and float(b[1]) == 1.0
+
+            curve_pairs = None
+            if (isinstance(curve_points, (list, tuple)) and len(curve_points) >= 2
+                    and not _is_identity(curve_points)):
+                pts = sorted([(max(0.0, min(1.0, float(p[0]))), max(0.0, min(1.0, float(p[1]))))
+                              for p in curve_points if len(p) >= 2])
+                curve_pairs = "/".join(f"{x:.3f}/{y:.3f}" for x, y in pts)
+            elif shadows != 0.0 or midtones != 0.0 or highlights != 0.0:
+                anchors = [
+                    (0.0, 0.0),
+                    (0.25, max(0.0, min(1.0, 0.25 + shadows * 0.25))),
+                    (0.5,  max(0.0, min(1.0, 0.5  + midtones * 0.25))),
+                    (0.75, max(0.0, min(1.0, 0.75 + highlights * 0.25))),
+                    (1.0, 1.0),
+                ]
+                curve_pairs = "/".join(f"{x:.3f}/{y:.3f}" for x, y in anchors)
+            if curve_pairs:
+                vf += f",curves=all='{curve_pairs}'"
+
+            vf += f"[v{i}]"
+            filter_parts.append(vf)
+            filter_parts.append(f"[{i}:a]anull[a{i}]")
+            concat_inputs.append(f"[v{i}][a{i}]")
+
+        n = len(valid_clips)
+        filter_parts.append("".join(concat_inputs) + f"concat=n={n}:v=1:a=1[outv][outa]")
+        filter_complex = ";".join(filter_parts)
+
+        cmd = ["ffmpeg", "-y", "-nostdin"]
+        cmd.extend(inputs)
+        cmd.extend([
+            "-filter_complex", filter_complex,
+            "-map", "[outv]", "-map", "[outa]",
+        ])
+        cmd.extend(vcodec_args)
+        cmd.extend(["-c:a", "aac", "-b:a", "192k", output_path])
+
+        self.log(f"[Engine] 進階串帶：{n} 段 → {output_path}")
+        if on_progress:
+            on_progress({'phase': 'concat', 'total_pct': 0, 'status': '進階串帶中...', 'total_files': n, 'done_files': 0})
+
+        try:
+            proc = _sp.Popen(cmd, stdout=_sp.PIPE, stderr=_sp.PIPE, creationflags=_flags)
+            _, stderr = proc.communicate()
+            if proc.returncode != 0:
+                err_msg = (stderr or b"")[-2000:].decode("utf-8", errors="ignore")
+                self.err(f"[Engine] ffmpeg 進階串帶失敗：\n{err_msg}")
+                return
+        except Exception as e:
+            self.err(f"[Engine] 進階串帶例外：{e}")
+            return
+
+        if on_progress:
+            on_progress({'phase': 'concat', 'total_pct': 100, 'status': '完成', 'total_files': n, 'done_files': n})
+        self.log(f"[Engine] ✓ 進階串帶完成：{output_path}")
 
     def run_verify_job(
         self,

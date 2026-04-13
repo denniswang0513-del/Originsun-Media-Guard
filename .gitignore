@@ -41,6 +41,9 @@ models/
 # Voice cache (runtime generated)
 voice/
 
+# Filmstrip cache (runtime generated)
+cache/
+
 # Test resources & output (video files, logs, reports)
 Test/
 test_zone/

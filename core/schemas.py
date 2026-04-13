@@ -51,6 +51,22 @@ class TranscodeRequest(BaseModel):
     dest_dir: str
     compute_hosts: list = []
 
+class ClipSpec(BaseModel):
+    """Per-clip advanced edit spec for concat (order, trim, color grading)."""
+    path: str
+    trim_in: float = 0.0
+    trim_out: float = -1.0  # -1 = use full duration
+    brightness: float = 0.0
+    contrast: float = 1.0
+    saturation: float = 1.0
+    gamma: float = 1.0
+    color_temp: float = 0.0
+    shadows: float = 0.0
+    midtones: float = 0.0
+    highlights: float = 0.0
+    curve_points: Optional[List[Tuple[float, float]]] = None
+
+
 class ConcatRequest(BaseModel):
     task_type: str = "concat"
     job_id: str = ""
@@ -63,6 +79,9 @@ class ConcatRequest(BaseModel):
     burn_timecode: bool = True
     burn_filename: bool = False
     compute_hosts: list = []
+    # Advanced edit: if provided, each clip is trimmed + color-graded individually
+    # before concatenation. Overrides 'sources' ordering (uses clip order).
+    advanced_clips: Optional[List[ClipSpec]] = None
 
 class VerifyRequest(BaseModel):
     task_type: str = "verify"
@@ -184,6 +203,7 @@ class DroneMetaRequest(BaseModel):
     # 串帶
     do_concat: bool = False
     concat_dest_dir: str = ""
+    concat_custom_name: str = ""
     concat_resolution: str = "1080P"
     concat_codec: str = "H.264 (NVENC)"
     concat_burn_timecode: bool = True

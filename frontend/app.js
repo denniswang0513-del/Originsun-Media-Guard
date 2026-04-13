@@ -110,6 +110,12 @@ if (typeof appendLog === 'undefined') {
         loadTabs().then(async () => {
             // Auth already resolved inside loadTabs(); apply tab visibility as safety fallback
             if (typeof window._applyVisibleTabs === 'function') window._applyVisibleTabs();
+            // Re-apply admin-only / manager-only visibility to newly injected tab DOM
+            // (initial _applyAuthState runs before loadTabs completes, so querySelectorAll
+            // misses elements inside dynamically loaded .html files like projects.html)
+            if (typeof window._applyAuthState === 'function') {
+                window._applyAuthState(window._accessLevel >= 3);
+            }
 
             // Initialization after dynamic tabs load
             const today = new Date();
@@ -665,6 +671,7 @@ if (typeof appendLog === 'undefined') {
             { checkboxes: 'rpt_host_checkboxes',        panel: 'rpt_host_panel',        prefix: 'rpt_host_chk' },
             { checkboxes: 'tts_host_checkboxes',        panel: 'tts_host_panel',        prefix: 'tts_host_chk' },
             { checkboxes: 'tts_clone_host_checkboxes',  panel: 'tts_clone_host_panel',  prefix: 'tts_clone_host_chk' },
+            { checkboxes: 'dm_host_checkboxes',         panel: 'dm_host_panel',         prefix: 'dm_host_chk' },
         ];
         function renderStandaloneHostPanels() {
             const hosts = window._computeHosts || [];
