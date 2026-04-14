@@ -439,9 +439,13 @@ function _bindColorEvents(idx, container) {
         const key = _sliderFieldKey(sliderId);
         if (key && _currentFile) _currentFile[key] = v;
         _applyLivePreview(idx);
+        // Live-update the source card inside the MODAL only — the outer
+        // drone_meta tab has its own grid whose thumbs should NOT reflect
+        // mid-drag changes (it only re-renders on explicit 套用並關閉 save).
         if (_currentFile) {
-            const allCards = document.querySelectorAll(`[data-idx="${idx}"].clip-card, .dm-file-card[data-idx="${idx}"]`);
-            allCards.forEach(card => {
+            const modalRoot = container.closest?.('#cc_editor_overlay') || document.getElementById('cc_editor_overlay') || container;
+            const scopedCards = modalRoot.querySelectorAll(`[data-idx="${idx}"].clip-card`);
+            scopedCards.forEach(card => {
                 const thumb = card.querySelector('.clip-thumb');
                 if (thumb) {
                     const fid = thumb.dataset._liveFilterId || `clip-filter-live-${idx}`;
