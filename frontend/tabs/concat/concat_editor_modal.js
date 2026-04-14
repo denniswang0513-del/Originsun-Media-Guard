@@ -123,6 +123,15 @@ function _closeModal() {
 
 function _applyAndClose() {
     window._concatAdvancedClips = _clips.map(c => ({ ...c }));
+
+    // Persist transition settings on window so drone_meta can read them.
+    const xfEnabled = document.getElementById('cc_xfade_enabled');
+    const xfType = document.getElementById('cc_xfade_type');
+    const xfDuration = document.getElementById('cc_xfade_duration');
+    window._concatXfadeEnabled = !!(xfEnabled && xfEnabled.checked);
+    window._concatXfadeType = (xfType && xfType.value) || 'dissolve';
+    window._concatXfadeDuration = parseFloat(xfDuration && xfDuration.value) || 1.0;
+
     _updateConcatStatus();
     // Broadcast new order + selection + color/trim edits so drone_meta's
     // outer grid can sync both ordering and thumbnail filter previews.
@@ -214,6 +223,40 @@ function _renderModal() {
                 <!-- Inline editor (for single clip trim+color) -->
                 <div id="cc_inline_edit" class="hidden mb-4 bg-[#1e1e1e] border border-[#444] rounded-lg overflow-hidden"></div>
             </div>
+            <!-- Global transition settings (applies between adjacent clips) -->
+            <div class="flex items-center gap-4 px-5 py-3 border-t border-[#3a3a3a] bg-[#181818] text-xs text-gray-300">
+                <label class="flex items-center gap-2 cursor-pointer select-none">
+                    <input type="checkbox" id="cc_xfade_enabled"
+                        ${window._concatXfadeEnabled ? 'checked' : ''}
+                        class="form-checkbox text-purple-500 bg-[#1e1e1e] border-[#444] rounded">
+                    <span class="text-gray-200">片段轉場 (crossfade)</span>
+                </label>
+                <div class="flex items-center gap-2">
+                    <span class="text-gray-500">類型</span>
+                    <select id="cc_xfade_type"
+                        class="bg-[#111] border border-[#2a2a2a] rounded px-2 py-1 text-[11px] text-gray-200 focus:outline-none focus:border-purple-500">
+                        <option value="dissolve">dissolve（溶解，預設）</option>
+                        <option value="fade">fade（純淡入淡出）</option>
+                        <option value="fadeblack">fadeblack（過黑）</option>
+                        <option value="fadewhite">fadewhite（過白）</option>
+                        <option value="wipeleft">wipeleft（向左擦除）</option>
+                        <option value="wiperight">wiperight（向右擦除）</option>
+                        <option value="slideleft">slideleft（向左推移）</option>
+                        <option value="slideright">slideright（向右推移）</option>
+                        <option value="circleopen">circleopen（圓形展開）</option>
+                        <option value="circleclose">circleclose（圓形收合）</option>
+                        <option value="pixelize">pixelize（馬賽克）</option>
+                        <option value="zoomin">zoomin（推近）</option>
+                    </select>
+                </div>
+                <div class="flex items-center gap-2">
+                    <span class="text-gray-500">秒數</span>
+                    <input type="number" id="cc_xfade_duration" min="0.1" max="10" step="0.1"
+                        value="${window._concatXfadeDuration ?? 1.0}"
+                        class="w-16 bg-[#111] border border-[#2a2a2a] rounded px-2 py-1 text-[11px] text-gray-200 text-right focus:outline-none focus:border-purple-500 [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none">
+                </div>
+                <span class="text-[10px] text-gray-500 ml-auto">全域套用於相鄰片段；若片段有效長度 &lt; 秒數自動跳過該處</span>
+            </div>
             <div class="flex items-center justify-end gap-3 px-5 py-3 border-t border-[#3a3a3a] bg-[#1e1e1e]">
                 <button onclick="_ccmClose()" class="text-sm bg-[#333] hover:bg-[#444] px-4 py-2 rounded border border-[#555] text-gray-300">取消</button>
                 <button onclick="_ccmApply()" class="text-sm bg-[#228b22] hover:bg-[#2eaa2e] px-6 py-2 rounded text-white font-semibold">💾 套用並關閉</button>
@@ -224,6 +267,10 @@ function _renderModal() {
 
     _renderGrid();
     _updateSelCount();
+
+    // Restore saved transition type (dropdown value can't be set via template attr above)
+    const xfType = document.getElementById('cc_xfade_type');
+    if (xfType) xfType.value = window._concatXfadeType || 'dissolve';
 }
 
 // ── Grid ──

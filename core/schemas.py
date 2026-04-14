@@ -82,6 +82,12 @@ class ConcatRequest(BaseModel):
     # Advanced edit: if provided, each clip is trimmed + color-graded individually
     # before concatenation. Overrides 'sources' ordering (uses clip order).
     advanced_clips: Optional[List[ClipSpec]] = None
+    # Crossfade transition between adjacent clips (only applies when
+    # advanced_clips has >= 2 entries; per-transition auto-skip when any
+    # side's effective length < duration).
+    xfade_enabled: bool = False
+    xfade_type: str = "dissolve"
+    xfade_duration: float = 1.0
 
 class VerifyRequest(BaseModel):
     task_type: str = "verify"
@@ -213,6 +219,9 @@ class DroneMetaRequest(BaseModel):
     concat_codec: str = "H.264 (NVENC)"
     concat_burn_timecode: bool = True
     concat_burn_filename: bool = False
+    concat_xfade_enabled: bool = False
+    concat_xfade_type: str = "dissolve"
+    concat_xfade_duration: float = 1.0
 
 
 class DownloadModelRequest(BaseModel):

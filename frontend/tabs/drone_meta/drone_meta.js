@@ -505,6 +505,9 @@ function collectDroneMetaPayload() {
         concat_codec: document.getElementById('dm_concat_codec').value,
         concat_burn_timecode: document.getElementById('dm_concat_tc').checked,
         concat_burn_filename: document.getElementById('dm_concat_fn').checked,
+        concat_xfade_enabled: !!window._concatXfadeEnabled,
+        concat_xfade_type: window._concatXfadeType || 'dissolve',
+        concat_xfade_duration: parseFloat(window._concatXfadeDuration) || 1.0,
     };
 
     if (doConcat && !payload.concat_dest_dir) {

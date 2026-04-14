@@ -1022,12 +1022,17 @@ class MediaGuardEngine:
         burn_timecode: bool = True,
         burn_filename: bool = False,
         advanced_clips: Optional[List[Dict[str, Any]]] = None,
+        xfade_enabled: bool = False,
+        xfade_type: str = "dissolve",
+        xfade_duration: float = 1.0,
         on_progress: Optional[Callable[[Dict[str, Any]], None]] = None
     ):
         """獨立時間碼壓印串帶邏輯
 
         advanced_clips: 若提供則走進階編輯路徑（每段個別 trim + 色彩），
                         忽略 sources 的順序與資料夾全域排序，以 clip 陣列為準。
+        xfade_*: 若啟用且 advanced_clips >= 2，相鄰片段間套 crossfade
+                 轉場（ffmpeg xfade + acrossfade）。
         """
         self._stop_event.clear()
         self._pause_event.clear()
@@ -1038,6 +1043,8 @@ class MediaGuardEngine:
                 clips=advanced_clips, dest_dir=dest_dir, custom_name=custom_name,
                 resolution=resolution, codec=codec,
                 burn_timecode=burn_timecode, burn_filename=burn_filename,
+                xfade_enabled=xfade_enabled, xfade_type=xfade_type,
+                xfade_duration=xfade_duration,
                 on_progress=on_progress,
             )
 
@@ -1538,6 +1545,9 @@ class MediaGuardEngine:
         codec: str = "ProRes",
         burn_timecode: bool = True,
         burn_filename: bool = False,
+        xfade_enabled: bool = False,
+        xfade_type: str = "dissolve",
+        xfade_duration: float = 1.0,
         on_progress: Optional[Callable[[Dict[str, Any]], None]] = None,
     ):
         """進階編輯版串帶：每段 trim + 色彩調整 + 拼接（用 filter_complex）。"""
@@ -1647,7 +1657,60 @@ class MediaGuardEngine:
             concat_inputs.append(f"[v{i}][a{i}]")
 
         n = len(valid_clips)
-        filter_parts.append("".join(concat_inputs) + f"concat=n={n}:v=1:a=1[outv][outa]")
+
+        # ── Decide concat strategy: plain concat vs crossfade chain ──
+        use_xfade = bool(xfade_enabled) and n >= 2 and float(xfade_duration) > 0
+        xfade_parts = None
+        if use_xfade:
+            # Get effective clip lengths (seconds after trim).
+            lens = []
+            for c in valid_clips:
+                ti = float(c.get("trim_in") or 0.0)
+                to = float(c.get("trim_out") or -1.0)
+                if to > ti:
+                    lens.append(to - ti)
+                else:
+                    # Probe full duration, subtract trim_in
+                    try:
+                        probe = _sp.run(
+                            ["ffprobe", "-v", "error", "-show_entries", "format=duration",
+                             "-of", "default=noprint_wrappers=1:nokey=1", c["path"]],
+                            capture_output=True, text=True, timeout=10,
+                            creationflags=_flags,
+                        )
+                        full = float((probe.stdout or "0").strip() or 0.0)
+                        lens.append(max(0.0, full - ti))
+                    except Exception:
+                        lens.append(0.0)
+
+            D = float(xfade_duration)
+            xfade_parts = []
+            prev_v, prev_a = "v0", "a0"
+            cumulative = lens[0]
+            abort = False
+            for i in range(1, n):
+                # Per-pair duration clamp: can't exceed either side's length.
+                d = min(D, max(0.0, lens[i - 1] - 0.05), max(0.0, lens[i] - 0.05))
+                if d <= 0:
+                    self.log(f"[Engine] clip #{i-1} 或 #{i} 有效長度太短，xfade 無法套用，改用直接串接")
+                    abort = True
+                    break
+                offset = cumulative - d
+                out_v = f"vx{i}" if i < n - 1 else "outv"
+                out_a = f"ax{i}" if i < n - 1 else "outa"
+                xfade_parts.append(f"[{prev_v}][v{i}]xfade=transition={xfade_type}:duration={d:.3f}:offset={offset:.3f}[{out_v}]")
+                xfade_parts.append(f"[{prev_a}][a{i}]acrossfade=d={d:.3f}[{out_a}]")
+                cumulative = cumulative + lens[i] - d
+                prev_v, prev_a = out_v, out_a
+            if abort:
+                xfade_parts = None
+                use_xfade = False
+
+        if use_xfade and xfade_parts:
+            filter_parts.extend(xfade_parts)
+            self.log(f"[Engine] 啟用 xfade 轉場：{xfade_type}，秒數 {float(xfade_duration):.2f}，{n-1} 處切換")
+        else:
+            filter_parts.append("".join(concat_inputs) + f"concat=n={n}:v=1:a=1[outv][outa]")
         filter_complex = ";".join(filter_parts)
 
         cmd = ["ffmpeg", "-y", "-nostdin"]

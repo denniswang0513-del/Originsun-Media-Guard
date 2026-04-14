@@ -447,6 +447,9 @@ async def _run_concat(job, engine, task: ConcatRequest, _on_progress):
         resolution=task.resolution, codec=task.codec,
         burn_timecode=task.burn_timecode, burn_filename=task.burn_filename,
         advanced_clips=advanced,
+        xfade_enabled=getattr(task, 'xfade_enabled', False),
+        xfade_type=getattr(task, 'xfade_type', 'dissolve'),
+        xfade_duration=getattr(task, 'xfade_duration', 1.0),
         on_progress=_on_progress
     )
 
@@ -1021,6 +1024,17 @@ def _drone_meta_sync(job, engine, task: DroneMetaRequest, _on_progress):
         _on_progress({'phase': 'concat', 'total_pct': 0, 'status': '串帶中...'})
 
         try:
+            # xfade requires advanced_clips (with per-clip lens info). The
+            # per-file ffmpeg pass already applied trim + color, so the new
+            # files are "ready"; we send trim_in=0, trim_out=-1 and let the
+            # concat engine probe each file's actual duration.
+            xfade_on = bool(getattr(task, 'concat_xfade_enabled', False))
+            advanced_clips = None
+            if xfade_on:
+                advanced_clips = [
+                    {'path': p, 'trim_in': 0.0, 'trim_out': -1.0}
+                    for p in new_file_paths
+                ]
             engine.run_concat_job(
                 sources=new_file_paths,
                 dest_dir=task.concat_dest_dir,
@@ -1029,6 +1043,10 @@ def _drone_meta_sync(job, engine, task: DroneMetaRequest, _on_progress):
                 codec=task.concat_codec,
                 burn_timecode=task.concat_burn_timecode,
                 burn_filename=task.concat_burn_filename,
+                advanced_clips=advanced_clips,
+                xfade_enabled=xfade_on,
+                xfade_type=getattr(task, 'concat_xfade_type', 'dissolve'),
+                xfade_duration=getattr(task, 'concat_xfade_duration', 1.0),
                 on_progress=_on_progress,
             )
             _emit_sync_for_job(job_id, 'log', {
