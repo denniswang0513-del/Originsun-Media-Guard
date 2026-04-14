@@ -913,6 +913,13 @@ def _drone_meta_sync(job, engine, task: DroneMetaRequest, _on_progress):
                 "-c:v", "libx264", "-crf", "18", "-preset", "fast",
                 "-c:a", "aac", "-b:a", "192k",
             ]
+            # DJI + Autel SRT injected as stream 1: subrip source must be
+            # transcoded to mov_text for MOV container (copy path does this;
+            # re-encode path was missing it → "Could not find tag for codec
+            # subrip" / "ffmpeg 失敗" on every DJI file when user enables
+            # any color adjustment).
+            if is_dji and autel_srt_path:
+                ff_cmd += ["-c:s", "mov_text"]
         else:
             if is_dji and autel_srt_path:
                 # DJI: copy video/audio but encode subtitle as mov_text
@@ -936,10 +943,16 @@ def _drone_meta_sync(job, engine, task: DroneMetaRequest, _on_progress):
             creationflags=HNO,
         )
         if ff_result.returncode != 0:
-            err = ff_result.stderr[-500:] if ff_result.stderr else "unknown error"
+            err = ff_result.stderr[-800:] if ff_result.stderr else "unknown error"
+            # Compact stderr: drop banner lines, keep anything with Error/Invalid/bitstream.
+            err_lines = [ln for ln in err.splitlines() if ln.strip()]
+            concise = '\n'.join(err_lines[-8:])  # last 8 non-blank lines usually carry the cause
             fail_list.append(f"{os.path.basename(fpath)}: ffmpeg 失敗 — {err}")
             _emit_sync_for_job(job_id, 'log', {
-                'type': 'error', 'msg': f'ffmpeg 失敗: {os.path.basename(fpath)}'
+                'type': 'error', 'msg': f'ffmpeg 失敗: {os.path.basename(fpath)}\n{concise}'
+            })
+            _emit_sync_for_job(job_id, 'log', {
+                'type': 'info', 'msg': f'ffmpeg 指令: {" ".join(ff_cmd)}'
             })
             continue
 
