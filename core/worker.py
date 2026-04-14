@@ -808,21 +808,11 @@ def _drone_meta_sync(job, engine, task: DroneMetaRequest, _on_progress):
                     sf.write(f".F.PRY ({f_pry[0]:.1f}\u00b0, {f_pry[1]:.1f}\u00b0, {f_pry[2]:.1f}\u00b0), ")
                     sf.write(f"G.PRY ({g_pry[0]:.1f}\u00b0, {g_pry[1]:.1f}\u00b0, {g_pry[2]:.1f}\u00b0)\n\n")
 
-        # Determine if re-encoding is needed
+        # Per-file step does TRIM + metadata only. Color grading is deferred
+        # to the concat step (via advanced_clips) so raw clips aren't
+        # re-encoded twice and the SRT track stays trivially copyable.
         has_trim = file_setting.trim_in > 0 or file_setting.trim_out >= 0
-        has_color = (
-            file_setting.brightness != 0.0 or
-            file_setting.contrast != 1.0 or
-            file_setting.saturation != 1.0 or
-            file_setting.gamma != 1.0 or
-            file_setting.color_temp != 0.0 or
-            getattr(file_setting, 'tint', 0.0) != 0.0 or
-            getattr(file_setting, 'shadows', 0.0) != 0.0 or
-            getattr(file_setting, 'midtones', 0.0) != 0.0 or
-            getattr(file_setting, 'highlights', 0.0) != 0.0 or
-            bool(getattr(file_setting, 'curve_points', None))
-        )
-        needs_reencode = has_trim or has_color
+        needs_reencode = has_trim
 
         # Build ffmpeg command
         ff_cmd = [ffmpeg_bin, "-y"]
@@ -850,74 +840,11 @@ def _drone_meta_sync(job, engine, task: DroneMetaRequest, _on_progress):
             ff_cmd += ["-map", "0"]
 
         if needs_reencode:
-            # Build video filter
-            vf_parts = []
-            eq_parts = []
-            if file_setting.brightness != 0.0:
-                eq_parts.append(f"brightness={file_setting.brightness}")
-            if file_setting.contrast != 1.0:
-                eq_parts.append(f"contrast={file_setting.contrast}")
-            if file_setting.saturation != 1.0:
-                eq_parts.append(f"saturation={file_setting.saturation}")
-            if file_setting.gamma != 1.0:
-                eq_parts.append(f"gamma={file_setting.gamma}")
-            if eq_parts:
-                vf_parts.append("eq=" + ":".join(eq_parts))
-
-            # color_temp + tint via colorchannelmixer (full-image R/B scale
-            # + G-channel additive). Matches frontend SVG feColorMatrix and
-            # concat pipeline. format=gbrap guarantees alpha=1 so `ga` works
-            # on YUV sources.
-            ct = float(file_setting.color_temp or 0.0)
-            tn = float(getattr(file_setting, 'tint', 0.0) or 0.0)
-            if ct != 0.0 or tn != 0.0:
-                rr = 1.0 + 0.3 * ct
-                bb = 1.0 - 0.3 * ct
-                ga = 0.15 * tn
-                vf_parts.append(f"format=gbrap,colorchannelmixer=rr={rr:.4f}:bb={bb:.4f}:ga={ga:.4f}")
-
-            # Tonal curves (shadows/midtones/highlights) or user curve.
-            sh = float(getattr(file_setting, 'shadows', 0.0) or 0.0)
-            mi = float(getattr(file_setting, 'midtones', 0.0) or 0.0)
-            hi = float(getattr(file_setting, 'highlights', 0.0) or 0.0)
-            curve_pts = getattr(file_setting, 'curve_points', None)
-
-            def _is_identity_curve(pts):
-                if not pts or len(pts) != 2:
-                    return False
-                a, b = pts[0], pts[1]
-                return float(a[0]) == 0.0 and float(a[1]) == 0.0 and float(b[0]) == 1.0 and float(b[1]) == 1.0
-
-            curve_pairs = None
-            if isinstance(curve_pts, (list, tuple)) and len(curve_pts) >= 2 and not _is_identity_curve(curve_pts):
-                pts = sorted([
-                    (max(0.0, min(1.0, float(p[0]))), max(0.0, min(1.0, float(p[1]))))
-                    for p in curve_pts if len(p) >= 2
-                ])
-                curve_pairs = "/".join(f"{x:.3f}/{y:.3f}" for x, y in pts)
-            elif sh != 0.0 or mi != 0.0 or hi != 0.0:
-                anchors = [
-                    (0.0, 0.0),
-                    (0.25, max(0.0, min(1.0, 0.25 + sh * 0.25))),
-                    (0.5,  max(0.0, min(1.0, 0.5  + mi * 0.25))),
-                    (0.75, max(0.0, min(1.0, 0.75 + hi * 0.25))),
-                    (1.0, 1.0),
-                ]
-                curve_pairs = "/".join(f"{x:.3f}/{y:.3f}" for x, y in anchors)
-            if curve_pairs:
-                vf_parts.append(f"curves=all='{curve_pairs}'")
-            if vf_parts:
-                ff_cmd += ["-vf", ",".join(vf_parts)]
-
+            # Trim-only re-encode (color is applied later at concat step).
             ff_cmd += [
                 "-c:v", "libx264", "-crf", "18", "-preset", "fast",
                 "-c:a", "aac", "-b:a", "192k",
             ]
-            # DJI + Autel SRT injected as stream 1: subrip source must be
-            # transcoded to mov_text for MOV container (copy path does this;
-            # re-encode path was missing it → "Could not find tag for codec
-            # subrip" / "ffmpeg 失敗" on every DJI file when user enables
-            # any color adjustment).
             if is_dji and autel_srt_path:
                 ff_cmd += ["-c:s", "mov_text"]
         else:
@@ -1037,17 +964,42 @@ def _drone_meta_sync(job, engine, task: DroneMetaRequest, _on_progress):
         _on_progress({'phase': 'concat', 'total_pct': 0, 'status': '串帶中...'})
 
         try:
-            # xfade requires advanced_clips (with per-clip lens info). The
-            # per-file ffmpeg pass already applied trim + color, so the new
-            # files are "ready"; we send trim_in=0, trim_out=-1 and let the
-            # concat engine probe each file's actual duration.
+            # Per-file pass did trim + metadata only. Color grading is
+            # applied here at concat time via advanced_clips — preserves
+            # raw quality (no double re-encode) and matches frontend preview.
             xfade_on = bool(getattr(task, 'concat_xfade_enabled', False))
+
+            def _has_color(fs):
+                return (fs.brightness != 0.0 or fs.contrast != 1.0
+                        or fs.saturation != 1.0 or fs.gamma != 1.0
+                        or fs.color_temp != 0.0
+                        or getattr(fs, 'tint', 0.0) != 0.0
+                        or getattr(fs, 'shadows', 0.0) != 0.0
+                        or getattr(fs, 'midtones', 0.0) != 0.0
+                        or getattr(fs, 'highlights', 0.0) != 0.0
+                        or bool(getattr(fs, 'curve_points', None)))
+
+            any_color = any(_has_color(fs) for fs in task.files)
             advanced_clips = None
-            if xfade_on:
-                advanced_clips = [
-                    {'path': p, 'trim_in': 0.0, 'trim_out': -1.0}
-                    for p in new_file_paths
-                ]
+            if xfade_on or any_color:
+                advanced_clips = []
+                for i, fs in enumerate(task.files):
+                    if i >= len(new_file_paths):
+                        break
+                    advanced_clips.append({
+                        'path': new_file_paths[i],
+                        'trim_in': 0.0, 'trim_out': -1.0,  # per-file pass trimmed already
+                        'brightness': fs.brightness,
+                        'contrast': fs.contrast,
+                        'saturation': fs.saturation,
+                        'gamma': fs.gamma,
+                        'color_temp': fs.color_temp,
+                        'tint': getattr(fs, 'tint', 0.0),
+                        'shadows': getattr(fs, 'shadows', 0.0),
+                        'midtones': getattr(fs, 'midtones', 0.0),
+                        'highlights': getattr(fs, 'highlights', 0.0),
+                        'curve_points': getattr(fs, 'curve_points', None),
+                    })
             engine.run_concat_job(
                 sources=new_file_paths,
                 dest_dir=task.concat_dest_dir,
