@@ -1715,16 +1715,20 @@ if (typeof appendLog === 'undefined') {
                                         const blacklist = new Set(window._retryFailedHosts || []);
                                         const candidates = (window._originalDispatchHosts || []).filter(h => !blacklist.has(h.ip));
                                         const localUrl = getComputeBaseUrl();
-                                        // Ping candidates once; first reachable is primary concat host.
+                                        // Parallel ping — first reachable candidate wins (avoids
+                                        // O(N) worst-case when multiple hosts are unreachable).
                                         let concatHost = null;
-                                        for (const h of candidates) {
+                                        if (candidates.length) {
                                             try {
-                                                const ctrl = new AbortController();
-                                                const t = setTimeout(() => ctrl.abort(), 2500);
-                                                const ping = await fetch('http://' + h.ip + '/api/v1/health', { signal: ctrl.signal });
-                                                clearTimeout(t);
-                                                if (ping.ok) { concatHost = h; break; }
-                                            } catch (_) { /* try next */ }
+                                                concatHost = await Promise.any(candidates.map(async h => {
+                                                    const ctrl = new AbortController();
+                                                    const t = setTimeout(() => ctrl.abort(), 2500);
+                                                    const ping = await fetch('http://' + h.ip + '/api/v1/health', { signal: ctrl.signal });
+                                                    clearTimeout(t);
+                                                    if (!ping.ok) throw new Error('not ok');
+                                                    return h;
+                                                }));
+                                            } catch (_) { /* all failed — concatHost stays null */ }
                                         }
                                         const concatUrl = concatHost ? ('http://' + concatHost.ip + '/api/v1/jobs/concat') : (localUrl + '/api/v1/jobs/concat');
                                         const concatHostName = concatHost ? concatHost.name : '本機';
