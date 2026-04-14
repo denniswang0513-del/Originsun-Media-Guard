@@ -1659,6 +1659,17 @@ class MediaGuardEngine:
         n = len(valid_clips)
 
         # ── Decide concat strategy: plain concat vs crossfade chain ──
+        # Whitelist xfade_type — backend-authoritative, not frontend-trusted,
+        # since this string is interpolated into the ffmpeg filter_complex.
+        _XFADE_ALLOWED = {
+            'dissolve', 'fade', 'fadeblack', 'fadewhite',
+            'wipeleft', 'wiperight', 'wipeup', 'wipedown',
+            'slideleft', 'slideright', 'slideup', 'slidedown',
+            'circleopen', 'circleclose', 'pixelize', 'zoomin',
+            'smoothleft', 'smoothright', 'smoothup', 'smoothdown',
+            'radial', 'fadegrays',
+        }
+        xfade_type_safe = xfade_type if xfade_type in _XFADE_ALLOWED else 'dissolve'
         use_xfade = bool(xfade_enabled) and n >= 2 and float(xfade_duration) > 0
         xfade_parts = None
         if use_xfade:
@@ -1698,7 +1709,7 @@ class MediaGuardEngine:
                 offset = cumulative - d
                 out_v = f"vx{i}" if i < n - 1 else "outv"
                 out_a = f"ax{i}" if i < n - 1 else "outa"
-                xfade_parts.append(f"[{prev_v}][v{i}]xfade=transition={xfade_type}:duration={d:.3f}:offset={offset:.3f}[{out_v}]")
+                xfade_parts.append(f"[{prev_v}][v{i}]xfade=transition={xfade_type_safe}:duration={d:.3f}:offset={offset:.3f}[{out_v}]")
                 xfade_parts.append(f"[{prev_a}][a{i}]acrossfade=d={d:.3f}[{out_a}]")
                 cumulative = cumulative + lens[i] - d
                 prev_v, prev_a = out_v, out_a
@@ -1708,7 +1719,7 @@ class MediaGuardEngine:
 
         if use_xfade and xfade_parts:
             filter_parts.extend(xfade_parts)
-            self.log(f"[Engine] 啟用 xfade 轉場：{xfade_type}，秒數 {float(xfade_duration):.2f}，{n-1} 處切換")
+            self.log(f"[Engine] 啟用 xfade 轉場：{xfade_type_safe}，秒數 {float(xfade_duration):.2f}，{n-1} 處切換")
         else:
             filter_parts.append("".join(concat_inputs) + f"concat=n={n}:v=1:a=1[outv][outa]")
         filter_complex = ";".join(filter_parts)
