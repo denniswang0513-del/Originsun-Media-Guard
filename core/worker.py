@@ -808,53 +808,30 @@ def _drone_meta_sync(job, engine, task: DroneMetaRequest, _on_progress):
                     sf.write(f".F.PRY ({f_pry[0]:.1f}\u00b0, {f_pry[1]:.1f}\u00b0, {f_pry[2]:.1f}\u00b0), ")
                     sf.write(f"G.PRY ({g_pry[0]:.1f}\u00b0, {g_pry[1]:.1f}\u00b0, {g_pry[2]:.1f}\u00b0)\n\n")
 
-        # Per-file step does TRIM + metadata only. Color grading is deferred
-        # to the concat step (via advanced_clips) so raw clips aren't
-        # re-encoded twice and the SRT track stays trivially copyable.
-        has_trim = file_setting.trim_in > 0 or file_setting.trim_out >= 0
-        needs_reencode = has_trim
+        # Per-file step = pure container remux: rename, write creation_time,
+        # normalize DJI → Autel (inject SRT subtitle, set handler names).
+        # ABSOLUTELY NO trim / color / re-encode — all advanced edits happen
+        # at the concat step via advanced_clips so raw clips stay untouched.
+        ff_cmd = [ffmpeg_bin, "-y", "-i", fpath]
 
-        # Build ffmpeg command
-        ff_cmd = [ffmpeg_bin, "-y"]
-
-        if has_trim and file_setting.trim_in > 0:
-            ff_cmd += ["-ss", str(file_setting.trim_in)]
-
-        ff_cmd += ["-i", fpath]
-
-        # Add Autel SRT as second input if DJI
         if is_dji and autel_srt_path:
             ff_cmd += ["-i", autel_srt_path]
 
-        if has_trim and file_setting.trim_out >= 0:
-            duration = file_setting.trim_out - max(file_setting.trim_in, 0)
-            if duration > 0:
-                ff_cmd += ["-t", str(duration)]
-
         if is_dji:
-            # DJI: map only video + audio, exclude DJI meta/dbgi tracks
+            # Exclude DJI private meta/dbgi tracks, keep only v+a
             ff_cmd += ["-map", "0:v", "-map", "0:a?"]
             if autel_srt_path:
                 ff_cmd += ["-map", "1:0"]
         else:
             ff_cmd += ["-map", "0"]
 
-        if needs_reencode:
-            # Trim-only re-encode (color is applied later at concat step).
-            ff_cmd += [
-                "-c:v", "libx264", "-crf", "18", "-preset", "fast",
-                "-c:a", "aac", "-b:a", "192k",
-            ]
-            if is_dji and autel_srt_path:
-                ff_cmd += ["-c:s", "mov_text"]
+        if is_dji and autel_srt_path:
+            # Copy av streams; transcode SRT to mov_text for MOV container.
+            # Force 60fps timescale to match Autel (DJI uses 59.94).
+            ff_cmd += ["-c:v", "copy", "-c:a", "copy", "-c:s", "mov_text",
+                       "-video_track_timescale", "60000"]
         else:
-            if is_dji and autel_srt_path:
-                # DJI: copy video/audio but encode subtitle as mov_text
-                # Force 60fps timescale to match Autel (DJI uses 59.94)
-                ff_cmd += ["-c:v", "copy", "-c:a", "copy", "-c:s", "mov_text",
-                           "-video_track_timescale", "60000"]
-            else:
-                ff_cmd += ["-c", "copy"]
+            ff_cmd += ["-c", "copy"]
 
         # Handler metadata
         if is_dji:
@@ -964,13 +941,14 @@ def _drone_meta_sync(job, engine, task: DroneMetaRequest, _on_progress):
         _on_progress({'phase': 'concat', 'total_pct': 0, 'status': '串帶中...'})
 
         try:
-            # Per-file pass did trim + metadata only. Color grading is
-            # applied here at concat time via advanced_clips — preserves
-            # raw quality (no double re-encode) and matches frontend preview.
+            # Per-file pass did NOT touch trim/color — it only remuxed the
+            # container and wrote metadata. All advanced edits (trim, color,
+            # curves, xfade) are applied here at concat time via advanced_clips.
             xfade_on = bool(getattr(task, 'concat_xfade_enabled', False))
 
-            def _has_color(fs):
-                return (fs.brightness != 0.0 or fs.contrast != 1.0
+            def _has_advanced(fs):
+                return (fs.trim_in > 0 or (fs.trim_out >= 0)
+                        or fs.brightness != 0.0 or fs.contrast != 1.0
                         or fs.saturation != 1.0 or fs.gamma != 1.0
                         or fs.color_temp != 0.0
                         or getattr(fs, 'tint', 0.0) != 0.0
@@ -979,16 +957,17 @@ def _drone_meta_sync(job, engine, task: DroneMetaRequest, _on_progress):
                         or getattr(fs, 'highlights', 0.0) != 0.0
                         or bool(getattr(fs, 'curve_points', None)))
 
-            any_color = any(_has_color(fs) for fs in task.files)
+            any_advanced = any(_has_advanced(fs) for fs in task.files)
             advanced_clips = None
-            if xfade_on or any_color:
+            if xfade_on or any_advanced:
                 advanced_clips = []
                 for i, fs in enumerate(task.files):
                     if i >= len(new_file_paths):
                         break
                     advanced_clips.append({
                         'path': new_file_paths[i],
-                        'trim_in': 0.0, 'trim_out': -1.0,  # per-file pass trimmed already
+                        'trim_in': fs.trim_in,
+                        'trim_out': fs.trim_out,
                         'brightness': fs.brightness,
                         'contrast': fs.contrast,
                         'saturation': fs.saturation,
