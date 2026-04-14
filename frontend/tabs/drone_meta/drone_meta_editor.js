@@ -81,25 +81,32 @@ export function renderInlineEditor(container, file, idx, fmtDuration) {
                         </div>
                     </div>
 
-                    <!-- In/Out -->
+                    <!-- In/Out — initialize from saved clip values so re-open shows prior state -->
+                    ${(() => {
+                        const savedIn = (typeof file.trim_in === 'number' && file.trim_in > 0) ? file.trim_in : 0;
+                        const rawOut = (typeof file.trim_out === 'number') ? file.trim_out : duration;
+                        const savedOut = (rawOut >= 0 && rawOut <= duration) ? rawOut : duration;
+                        const effDur = Math.max(0, savedOut - savedIn);
+                        return `
                     <div class="grid grid-cols-3 gap-3 items-center">
                         <div>
                             <label class="block text-xs text-gray-500 mb-1">In</label>
-                            <input type="text" id="dm_trim_in_txt_${idx}" value="${_secToHMS(0)}"
+                            <input type="text" id="dm_trim_in_txt_${idx}" value="${_secToHMS(savedIn)}"
                                 class="w-full bg-[#2a2a2a] border border-[#444] rounded px-2 py-1 text-xs font-mono text-center">
-                            <input type="hidden" id="dm_trim_in_${idx}" value="0">
+                            <input type="hidden" id="dm_trim_in_${idx}" value="${savedIn}">
                         </div>
                         <div>
                             <label class="block text-xs text-gray-500 mb-1">Out</label>
-                            <input type="text" id="dm_trim_out_txt_${idx}" value="${_secToHMS(duration)}"
+                            <input type="text" id="dm_trim_out_txt_${idx}" value="${_secToHMS(savedOut)}"
                                 class="w-full bg-[#2a2a2a] border border-[#444] rounded px-2 py-1 text-xs font-mono text-center">
-                            <input type="hidden" id="dm_trim_out_${idx}" value="${duration}">
+                            <input type="hidden" id="dm_trim_out_${idx}" value="${savedOut}">
                         </div>
                         <div>
                             <label class="block text-xs text-gray-500 mb-1">有效時長</label>
-                            <div id="dm_trim_dur_${idx}" class="text-sm text-gray-300 font-mono text-center">${_secToHMS(duration)}</div>
+                            <div id="dm_trim_dur_${idx}" class="text-sm text-gray-300 font-mono text-center">${_secToHMS(effDur)}</div>
                         </div>
-                    </div>
+                    </div>`;
+                    })()}
                 </div>
 
                 <!-- Right: Color grading (sliders grouped + curve side-by-side) -->

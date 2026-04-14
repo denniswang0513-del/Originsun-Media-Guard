@@ -425,8 +425,26 @@ function _ccmCloseInline(idx) {
     // curve_points is updated live on the clip object by the editor; nothing to copy
     const inHidden = document.getElementById(`dm_trim_in_${idx}`);
     const outHidden = document.getElementById(`dm_trim_out_${idx}`);
-    if (inHidden) clip.trim_in = parseFloat(inHidden.value) || 0;
-    if (outHidden) clip.trim_out = parseFloat(outHidden.value) || clip.duration;
+    if (inHidden) clip.trim_in = parseFloat(inHidden.value);
+    if (outHidden) clip.trim_out = parseFloat(outHidden.value);
+    if (!(clip.trim_in >= 0)) clip.trim_in = 0;
+    if (!(clip.trim_out >= 0)) clip.trim_out = clip.duration || -1;
+
+    // Broadcast THIS single clip's edits to outer drone_meta so 儲存 takes
+    // effect immediately without requiring 套用並關閉. Use outer's current
+    // path order to avoid unintended reordering from modal drag state.
+    const colorFields = ['brightness', 'contrast', 'saturation', 'gamma',
+                         'color_temp', 'tint', 'shadows', 'midtones', 'highlights',
+                         'curve_points', 'trim_in', 'trim_out'];
+    const entry = {};
+    colorFields.forEach(f => { if (clip[f] !== undefined) entry[f] = clip[f]; });
+    const outerFiles = (typeof window.getDmFiles === 'function') ? window.getDmFiles() : [];
+    const outerPaths = outerFiles.map(f => f.path);
+    if (outerPaths.length) {
+        window.dispatchEvent(new CustomEvent('dmfile:order-synced', {
+            detail: { paths: outerPaths, edits: { [clip.path]: entry } },
+        }));
+    }
 
     _inlineEditIdx = -1;
     document.getElementById('cc_inline_edit')?.classList.add('hidden');
