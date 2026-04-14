@@ -1710,17 +1710,30 @@ if (typeof appendLog === 'undefined') {
                             if (typeof appendLog === 'function') appendLog('🔄 自動觸發後續作業...', 'system');
                             setTimeout(async () => {
                                 try {
-                                    // ── 串帶 ──
+                                    // ── 串帶：優先遠端 (扣黑名單) → 失敗退回本機 ──
                                     if (flags.do_concat && Array.isArray(flags.cards) && flags.cards.length) {
-                                        const concatUrl = (flags.concat_host_url || getComputeBaseUrl()) + '/api/v1/jobs/concat';
-                                        const concatHostName = flags.concat_host_name || '本機';
-                                        if (typeof appendLog === 'function') appendLog('🏗️ 串帶將由 [' + concatHostName + '] 執行', 'system');
+                                        const blacklist = new Set(window._retryFailedHosts || []);
+                                        const candidates = (window._originalDispatchHosts || []).filter(h => !blacklist.has(h.ip));
+                                        const localUrl = getComputeBaseUrl();
+                                        // Ping candidates once; first reachable is primary concat host.
+                                        let concatHost = null;
+                                        for (const h of candidates) {
+                                            try {
+                                                const ctrl = new AbortController();
+                                                const t = setTimeout(() => ctrl.abort(), 2500);
+                                                const ping = await fetch('http://' + h.ip + '/api/v1/health', { signal: ctrl.signal });
+                                                clearTimeout(t);
+                                                if (ping.ok) { concatHost = h; break; }
+                                            } catch (_) { /* try next */ }
+                                        }
+                                        const concatUrl = concatHost ? ('http://' + concatHost.ip + '/api/v1/jobs/concat') : (localUrl + '/api/v1/jobs/concat');
+                                        const concatHostName = concatHost ? concatHost.name : '本機';
+                                        if (typeof appendLog === 'function') appendLog('🏗️ 串帶將由 [' + concatHostName + '] 執行' + (concatHost ? '（遠端優先）' : '（遠端不可用，退回本機）'), 'system');
                                         window._concatMultiCard = { total: flags.cards.length, done: 0, jobIds: [] };
                                         for (let ci = 0; ci < flags.cards.length; ci++) {
                                             const cardEntry = flags.cards[ci];
                                             const cardName = Array.isArray(cardEntry) ? cardEntry[0] : cardEntry;
                                             if (!cardName) continue;
-                                            // 串帶來源：用原始影片（local_root），與本機備份流程一致
                                             const concatSrcDir = flags.local_root + '/' + flags.project_name + '/' + cardName;
                                             const concatDestDir = flags.proxy_root + '/' + flags.project_name + '/' + cardName;
                                             const concatPayload = {
@@ -1732,11 +1745,30 @@ if (typeof appendLog === 'undefined') {
                                                 burn_timecode: flags.concat_burn_tc ?? true,
                                                 burn_filename: flags.concat_burn_fn ?? false
                                             };
-                                            const r3 = await fetch(concatUrl, {
-                                                method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(concatPayload)
-                                            });
-                                            const j3 = await r3.json();
-                                            if (typeof appendLog === 'function') appendLog('📌 串帶 [' + cardName + '] 排隊中，任務 ID: ' + (j3.job_id || '?'), 'system');
+                                            // Try remote first; on connection failure fall back to local.
+                                            let submitted = false;
+                                            try {
+                                                const r3 = await fetch(concatUrl, {
+                                                    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(concatPayload)
+                                                });
+                                                const j3 = await r3.json();
+                                                if (typeof appendLog === 'function') appendLog('📌 串帶 [' + cardName + '] 排隊中 @ ' + concatHostName + '，任務 ID: ' + (j3.job_id || '?'), 'system');
+                                                submitted = true;
+                                            } catch (err) {
+                                                if (typeof appendLog === 'function') appendLog('⚠️ 遠端串帶失敗 (' + err.message + ') — 退回本機', 'error');
+                                            }
+                                            if (!submitted && concatHost) {
+                                                // Remote died mid-dispatch → fall back to local for this card.
+                                                try {
+                                                    const r3b = await fetch(localUrl + '/api/v1/jobs/concat', {
+                                                        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(concatPayload)
+                                                    });
+                                                    const j3b = await r3b.json();
+                                                    if (typeof appendLog === 'function') appendLog('📌 串帶 [' + cardName + '] 改由本機排隊，任務 ID: ' + (j3b.job_id || '?'), 'system');
+                                                } catch (err2) {
+                                                    if (typeof appendLog === 'function') appendLog('❌ 串帶 [' + cardName + '] 本機也失敗: ' + err2.message, 'error');
+                                                }
+                                            }
                                         }
                                     }
 
