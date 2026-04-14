@@ -17,8 +17,8 @@ function _fmtHMS(sec) {
 
 function _colorSliderHTML(idx, name, label, min, max, def, step) {
     return `
-    <div class="grid grid-cols-[7rem_1fr_3rem] items-center gap-2.5 group">
-        <label class="text-[11px] text-gray-400 text-left select-none truncate">${label}</label>
+    <div class="grid grid-cols-[auto_1fr_3rem] items-center gap-2 group">
+        <label class="text-[11px] text-gray-400 text-left select-none whitespace-nowrap pr-1">${label}</label>
         <input type="range" id="dm_color_${name}_${idx}" min="${min}" max="${max}" step="${step}" value="${def}"
             class="w-full h-1.5 accent-blue-500 cursor-pointer">
         <input type="number" id="dm_color_${name}_val_${idx}" value="${def}" min="${min}" max="${max}" step="${step}"
@@ -405,6 +405,13 @@ function _applyLivePreview(idx) {
         const table = _buildCurveTable(shadows, mids, highs, clip.curve_points);
         curveEl.querySelectorAll('feFuncR, feFuncG, feFuncB').forEach(el => el.setAttribute('tableValues', table));
     }
+    // Chrome caches SVG url(#...) filter output aggressively — toggling the
+    // filter string forces re-evaluation so shadow/midtone/highlight changes
+    // (which only mutate attributes inside the filter) become visible.
+    const currentFilter = mainImg.style.filter;
+    mainImg.style.filter = 'none';
+    void mainImg.offsetHeight;
+    mainImg.style.filter = currentFilter;
 }
 
 // Map slider DOM id back to the field key on the clip object.
