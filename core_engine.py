@@ -1604,15 +1604,16 @@ class MediaGuardEngine:
                 f"pad={W}:{H}:(ow-iw)/2:(oh-ih)/2:black,"
                 f"eq=brightness={brightness}:contrast={contrast}:saturation={saturation}:gamma={gamma}"
             )
-            # color_temp (R/B scale) + tint (G channel additive via alpha trick).
-            # Matches frontend SVG feColorMatrix exactly — affects the whole
-            # image, not just shadows (colorbalance=rs/gs/bs only shifted
-            # shadows which caused preview vs output divergence).
+            # color_temp (R/B scale) + tint (G channel additive via alpha).
+            # Matches frontend SVG feColorMatrix. `ga=X` only adds X when
+            # alpha=1 per pixel, so explicitly promote to gbrap (planar RGB
+            # + alpha=opaque) before the mixer to make the tint additive
+            # independent of source pixel format.
             if color_temp != 0.0 or tint != 0.0:
                 rr = 1.0 + 0.3 * color_temp
                 bb = 1.0 - 0.3 * color_temp
                 ga = 0.15 * tint
-                vf += f",colorchannelmixer=rr={rr:.4f}:bb={bb:.4f}:ga={ga:.4f}"
+                vf += f",format=gbrap,colorchannelmixer=rr={rr:.4f}:bb={bb:.4f}:ga={ga:.4f}"
 
             # Build curves filter from user curve or shadows/midtones/highlights
             # Treat [[0,0],[1,1]] (identity) as "no curve set" so tonal zones still apply.
