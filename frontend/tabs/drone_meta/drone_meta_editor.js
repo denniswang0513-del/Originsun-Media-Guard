@@ -15,6 +15,48 @@ function _fmtHMS(sec) {
     return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
 }
 
+// Parse "HH:MM:SS" / "MM:SS" / "SS" strings to seconds. Returns fallback on failure.
+function _parseHMS(str, fallback) {
+    const parts = (str || '').trim().split(':').map(Number);
+    let v = NaN;
+    if (parts.length === 3) v = parts[0] * 3600 + parts[1] * 60 + parts[2];
+    else if (parts.length === 2) v = parts[0] * 60 + parts[1];
+    else if (parts.length === 1) v = parts[0];
+    return (isNaN(v) ? fallback : v);
+}
+
+// Write trim_in / trim_out to every part of the UI + clip state.
+// Single source of truth shared by drag handles, text inputs, keyboard I/O,
+// and double-click reset. Caller provides idx so DOM refs stay scoped.
+function _applyTrimToUI(idx, inVal, outVal, duration) {
+    inVal = Math.max(0, Math.min(inVal, duration));
+    outVal = Math.max(inVal, Math.min(outVal, duration));
+    const inHidden = document.getElementById(`dm_trim_in_${idx}`);
+    const outHidden = document.getElementById(`dm_trim_out_${idx}`);
+    const inTxt = document.getElementById(`dm_trim_in_txt_${idx}`);
+    const outTxt = document.getElementById(`dm_trim_out_txt_${idx}`);
+    const durEl = document.getElementById(`dm_trim_dur_${idx}`);
+    const region = document.getElementById('dm_trim_region');
+    const inHandle = document.getElementById('dm_trim_in_handle');
+    const outHandle = document.getElementById('dm_trim_out_handle');
+    if (inHidden) inHidden.value = inVal;
+    if (outHidden) outHidden.value = outVal;
+    if (inTxt && document.activeElement !== inTxt) inTxt.value = _secToHMS(inVal);
+    if (outTxt && document.activeElement !== outTxt) outTxt.value = _secToHMS(outVal);
+    if (durEl) durEl.textContent = _secToHMS(outVal - inVal);
+    if (region && duration > 0) {
+        region.style.left = (inVal / duration * 100) + '%';
+        region.style.right = ((1 - outVal / duration) * 100) + '%';
+    }
+    if (inHandle) inHandle.style.left = (inVal / duration * 100) + '%';
+    if (outHandle) outHandle.style.right = ((1 - outVal / duration) * 100) + '%';
+    if (_currentFile) {
+        _currentFile.trim_in = inVal;
+        _currentFile.trim_out = outVal;
+    }
+    return { inVal, outVal };
+}
+
 function _colorSliderHTML(idx, name, label, min, max, def, step) {
     return `
     <div class="grid grid-cols-[auto_1fr_3rem] items-center gap-2 group">
@@ -250,9 +292,6 @@ function _bindTimelineEvents(idx, duration) {
     const playhead = document.getElementById('dm_playhead');
     const inHidden = document.getElementById(`dm_trim_in_${idx}`);
     const outHidden = document.getElementById(`dm_trim_out_${idx}`);
-    const inTxt = document.getElementById(`dm_trim_in_txt_${idx}`);
-    const outTxt = document.getElementById(`dm_trim_out_txt_${idx}`);
-    const durEl = document.getElementById(`dm_trim_dur_${idx}`);
     const timeLabel = document.getElementById('dm_current_time');
 
     const getTrimValues = () => {
@@ -260,26 +299,7 @@ function _bindTimelineEvents(idx, duration) {
         const outVal = parseFloat(outHidden?.value);
         return { inVal, outVal: (outVal >= 0 ? outVal : duration) };
     };
-
-    const applyTrim = (inVal, outVal) => {
-        inVal = Math.max(0, Math.min(inVal, duration));
-        outVal = Math.max(inVal, Math.min(outVal, duration));
-        if (inHidden) inHidden.value = inVal;
-        if (outHidden) outHidden.value = outVal;
-        if (inTxt) inTxt.value = _secToHMS(inVal);
-        if (outTxt) outTxt.value = _secToHMS(outVal);
-        if (durEl) durEl.textContent = _secToHMS(outVal - inVal);
-        if (region) {
-            region.style.left = (inVal / duration * 100) + '%';
-            region.style.right = ((1 - outVal / duration) * 100) + '%';
-        }
-        if (inHandle) inHandle.style.left = (inVal / duration * 100) + '%';
-        if (outHandle) outHandle.style.right = ((1 - outVal / duration) * 100) + '%';
-        if (_currentFile) {
-            _currentFile.trim_in = inVal;
-            _currentFile.trim_out = outVal;
-        }
-    };
+    const applyTrim = (inVal, outVal) => _applyTrimToUI(idx, inVal, outVal, duration);
 
     const setPlayhead = (sec) => {
         _currentPlayheadSec = Math.max(0, Math.min(sec, duration));
@@ -397,46 +417,13 @@ function _bindTimelineEvents(idx, duration) {
 function _bindTrimInputEvents(idx, duration) {
     const inTxt = document.getElementById(`dm_trim_in_txt_${idx}`);
     const outTxt = document.getElementById(`dm_trim_out_txt_${idx}`);
-    const inHidden = document.getElementById(`dm_trim_in_${idx}`);
-    const outHidden = document.getElementById(`dm_trim_out_${idx}`);
-    const durEl = document.getElementById(`dm_trim_dur_${idx}`);
-    const regionEl = document.getElementById('dm_trim_region');
-
     if (!inTxt || !outTxt) return;
 
     const update = () => {
-        const parts = inTxt.value.trim().split(':').map(Number);
-        let inVal = 0;
-        if (parts.length === 3) inVal = parts[0] * 3600 + parts[1] * 60 + parts[2];
-        else if (parts.length === 2) inVal = parts[0] * 60 + parts[1];
-        else inVal = parts[0] || 0;
-
-        const oParts = outTxt.value.trim().split(':').map(Number);
-        let outVal = duration;
-        if (oParts.length === 3) outVal = oParts[0] * 3600 + oParts[1] * 60 + oParts[2];
-        else if (oParts.length === 2) outVal = oParts[0] * 60 + oParts[1];
-        else outVal = oParts[0] || duration;
-
-        inVal = Math.max(0, Math.min(inVal, duration));
-        outVal = Math.max(inVal, Math.min(outVal, duration));
-
-        if (inHidden) inHidden.value = inVal;
-        if (outHidden) outHidden.value = outVal;
-        if (durEl) durEl.textContent = _secToHMS(outVal - inVal);
-        const inHandle = document.getElementById('dm_trim_in_handle');
-        const outHandle = document.getElementById('dm_trim_out_handle');
-        if (regionEl && duration > 0) {
-            regionEl.style.left = (inVal / duration * 100) + '%';
-            regionEl.style.right = (100 - outVal / duration * 100) + '%';
-        }
-        if (inHandle) inHandle.style.left = (inVal / duration * 100) + '%';
-        if (outHandle) outHandle.style.right = ((1 - outVal / duration) * 100) + '%';
-        if (_currentFile) {
-            _currentFile.trim_in = inVal;
-            _currentFile.trim_out = outVal;
-        }
+        const inVal = _parseHMS(inTxt.value, 0);
+        const outVal = _parseHMS(outTxt.value, duration);
+        _applyTrimToUI(idx, inVal, outVal, duration);
     };
-
     inTxt.addEventListener('change', update);
     outTxt.addEventListener('change', update);
 }
