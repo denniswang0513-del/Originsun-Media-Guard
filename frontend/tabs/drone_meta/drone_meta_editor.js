@@ -32,6 +32,9 @@ let _currentIdx = -1;
 let _colorDebounceTimer = null;
 let _filmstripCache = {};  // path → filmstrip array
 let _currentFilmstrip = [];  // live ref used by timeline drag handler
+let _timelineKeyHandler = null;
+let _timelineDragCleanup = null;
+let _currentPlayheadSec = 0;
 
 // ── Render ──
 
@@ -71,13 +74,28 @@ export function renderInlineEditor(container, file, idx, fmtDuration) {
                             <span id="dm_current_time" class="text-xs text-gray-400 font-mono w-16">${_fmtHMS(0)}</span>
                             <span class="text-xs text-gray-600">/ ${_fmtHMS(duration)}</span>
                         </div>
-                        <div id="dm_timeline_track" class="relative h-12 bg-[#1a1a1a] rounded cursor-pointer overflow-hidden border border-[#333]">
+                        <div id="dm_timeline_track" class="relative h-12 bg-[#1a1a1a] rounded overflow-hidden border border-[#333] select-none" style="cursor:crosshair">
                             <div id="dm_filmstrip_bar" class="absolute inset-0 flex">
                                 <div class="flex items-center justify-center w-full text-xs text-gray-600">載入時間軸中...</div>
                             </div>
-                            <div id="dm_trim_region" class="absolute top-0 bottom-0 bg-blue-500/15 border-l-2 border-r-2 border-blue-500 pointer-events-none"
-                                style="left:0%;right:0%;"></div>
-                            <div id="dm_playhead" class="absolute top-0 bottom-0 w-0.5 bg-red-500 z-10 pointer-events-none" style="left:0%;"></div>
+                            <!-- trim region: draggable middle (shift both handles), visual blue shade -->
+                            <div id="dm_trim_region" class="absolute top-0 bottom-0 bg-blue-500/15 z-10" style="left:0%;right:0%;cursor:grab" title="拖曳整段移動 In/Out"></div>
+                            <!-- In handle: left edge, draggable -->
+                            <div id="dm_trim_in_handle" class="absolute top-0 bottom-0 w-2 bg-blue-500 hover:bg-blue-400 z-20 flex items-center justify-center" style="left:0%;cursor:ew-resize" title="拖曳設 In 點（雙擊重置為 0）">
+                                <div class="w-0.5 h-4 bg-white/70 pointer-events-none"></div>
+                            </div>
+                            <!-- Out handle: right edge, draggable -->
+                            <div id="dm_trim_out_handle" class="absolute top-0 bottom-0 w-2 bg-blue-500 hover:bg-blue-400 z-20 flex items-center justify-center" style="right:0%;cursor:ew-resize" title="拖曳設 Out 點（雙擊重置為結尾）">
+                                <div class="w-0.5 h-4 bg-white/70 pointer-events-none"></div>
+                            </div>
+                            <div id="dm_playhead" class="absolute top-0 bottom-0 w-0.5 bg-red-500 z-30 pointer-events-none" style="left:0%;"></div>
+                        </div>
+                        <div class="text-[10px] text-gray-600 mt-1 flex items-center gap-3">
+                            <span>拖曳藍色手把調整 In/Out</span>
+                            <span class="text-gray-700">·</span>
+                            <span>點時間軸移動紅線 / 按 <kbd class="px-1 bg-[#333] rounded border border-[#555]">I</kbd> 設 In / <kbd class="px-1 bg-[#333] rounded border border-[#555]">O</kbd> 設 Out</span>
+                            <span class="text-gray-700">·</span>
+                            <span>Shift+拖曳 = 整秒對齊</span>
                         </div>
                     </div>
 
@@ -163,7 +181,7 @@ export function renderInlineEditor(container, file, idx, fmtDuration) {
     _renderCurveEditor(idx);
     // Bind timeline drag immediately (uses _currentFilmstrip that fills in later)
     _currentFilmstrip = [];
-    _bindTimelineEvents(duration);
+    _bindTimelineEvents(idx, duration);
 
     _loadFilmstrip(file, duration);
 }
@@ -222,33 +240,156 @@ function _renderFilmstripBar(barEl, filmstrip, _duration) {
 
 // ── Timeline events ──
 
-function _bindTimelineEvents(duration) {
+function _bindTimelineEvents(idx, duration) {
     const track = document.getElementById('dm_timeline_track');
     if (!track || duration <= 0) return;
 
-    const updatePlayhead = (e) => {
-        const rect = track.getBoundingClientRect();
-        const x = Math.max(0, Math.min(e.clientX - rect.left, rect.width));
-        const pct = x / rect.width;
-        const time = pct * duration;
+    const inHandle = document.getElementById('dm_trim_in_handle');
+    const outHandle = document.getElementById('dm_trim_out_handle');
+    const region = document.getElementById('dm_trim_region');
+    const playhead = document.getElementById('dm_playhead');
+    const inHidden = document.getElementById(`dm_trim_in_${idx}`);
+    const outHidden = document.getElementById(`dm_trim_out_${idx}`);
+    const inTxt = document.getElementById(`dm_trim_in_txt_${idx}`);
+    const outTxt = document.getElementById(`dm_trim_out_txt_${idx}`);
+    const durEl = document.getElementById(`dm_trim_dur_${idx}`);
+    const timeLabel = document.getElementById('dm_current_time');
 
-        const playhead = document.getElementById('dm_playhead');
-        if (playhead) playhead.style.left = (pct * 100) + '%';
+    const getTrimValues = () => {
+        const inVal = parseFloat(inHidden?.value) || 0;
+        const outVal = parseFloat(outHidden?.value);
+        return { inVal, outVal: (outVal >= 0 ? outVal : duration) };
+    };
 
-        const timeLabel = document.getElementById('dm_current_time');
-        if (timeLabel) timeLabel.textContent = _fmtHMS(time);
+    const applyTrim = (inVal, outVal) => {
+        inVal = Math.max(0, Math.min(inVal, duration));
+        outVal = Math.max(inVal, Math.min(outVal, duration));
+        if (inHidden) inHidden.value = inVal;
+        if (outHidden) outHidden.value = outVal;
+        if (inTxt) inTxt.value = _secToHMS(inVal);
+        if (outTxt) outTxt.value = _secToHMS(outVal);
+        if (durEl) durEl.textContent = _secToHMS(outVal - inVal);
+        if (region) {
+            region.style.left = (inVal / duration * 100) + '%';
+            region.style.right = ((1 - outVal / duration) * 100) + '%';
+        }
+        if (inHandle) inHandle.style.left = (inVal / duration * 100) + '%';
+        if (outHandle) outHandle.style.right = ((1 - outVal / duration) * 100) + '%';
+        if (_currentFile) {
+            _currentFile.trim_in = inVal;
+            _currentFile.trim_out = outVal;
+        }
+    };
 
+    const setPlayhead = (sec) => {
+        _currentPlayheadSec = Math.max(0, Math.min(sec, duration));
+        if (playhead) playhead.style.left = (_currentPlayheadSec / duration * 100) + '%';
+        if (timeLabel) timeLabel.textContent = _fmtHMS(_currentPlayheadSec);
         const strip = _currentFilmstrip;
         if (strip.length > 0) {
-            const frameIdx = Math.min(Math.floor(pct * strip.length), strip.length - 1);
+            const frameIdx = Math.min(Math.floor((_currentPlayheadSec / duration) * strip.length), strip.length - 1);
             const img = document.getElementById('dm_preview_img');
             if (img && strip[frameIdx]) img.src = strip[frameIdx];
         }
     };
 
-    // Hover scrubs: red line and preview follow cursor directly
-    track.style.cursor = 'crosshair';
-    track.addEventListener('mousemove', updatePlayhead);
+    const xToSec = (clientX, shiftKey) => {
+        const rect = track.getBoundingClientRect();
+        const pct = Math.max(0, Math.min((clientX - rect.left) / rect.width, 1));
+        let sec = pct * duration;
+        if (shiftKey) sec = Math.round(sec);
+        return sec;
+    };
+
+    // Click on empty track → jump playhead
+    const onTrackClick = (e) => {
+        if (e.target.closest('#dm_trim_in_handle, #dm_trim_out_handle, #dm_trim_region')) return;
+        setPlayhead(xToSec(e.clientX, e.shiftKey));
+    };
+    track.addEventListener('click', onTrackClick);
+
+    // Hover → scrub playhead (keep existing behavior for preview)
+    track.addEventListener('mousemove', (e) => {
+        if (e.buttons) return;
+        setPlayhead(xToSec(e.clientX, e.shiftKey));
+    });
+
+    // Drag handles — mousedown starts drag, window mousemove/mouseup manages it
+    const startDrag = (mode, e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        const startVals = getTrimValues();
+        const startX = e.clientX;
+        const onMove = (me) => {
+            const rect = track.getBoundingClientRect();
+            const deltaPct = (me.clientX - startX) / rect.width;
+            const deltaSec = deltaPct * duration;
+            let inVal = startVals.inVal, outVal = startVals.outVal;
+            if (mode === 'in') inVal = startVals.inVal + deltaSec;
+            else if (mode === 'out') outVal = startVals.outVal + deltaSec;
+            else if (mode === 'region') {
+                const span = startVals.outVal - startVals.inVal;
+                inVal = startVals.inVal + deltaSec;
+                outVal = inVal + span;
+                if (inVal < 0) { inVal = 0; outVal = span; }
+                if (outVal > duration) { outVal = duration; inVal = duration - span; }
+            }
+            if (me.shiftKey) {
+                inVal = Math.round(inVal);
+                outVal = Math.round(outVal);
+            }
+            applyTrim(inVal, outVal);
+            setPlayhead(mode === 'out' ? outVal : inVal);
+        };
+        const onUp = () => {
+            window.removeEventListener('mousemove', onMove);
+            window.removeEventListener('mouseup', onUp);
+        };
+        window.addEventListener('mousemove', onMove);
+        window.addEventListener('mouseup', onUp);
+    };
+    if (inHandle) inHandle.addEventListener('mousedown', (e) => startDrag('in', e));
+    if (outHandle) outHandle.addEventListener('mousedown', (e) => startDrag('out', e));
+    if (region) region.addEventListener('mousedown', (e) => startDrag('region', e));
+
+    // Double-click handles to reset
+    if (inHandle) inHandle.addEventListener('dblclick', (e) => {
+        e.stopPropagation();
+        const { outVal } = getTrimValues();
+        applyTrim(0, outVal);
+    });
+    if (outHandle) outHandle.addEventListener('dblclick', (e) => {
+        e.stopPropagation();
+        const { inVal } = getTrimValues();
+        applyTrim(inVal, duration);
+    });
+
+    // Keyboard I/O to set trim at playhead (only when editor open, ignore when typing in inputs)
+    _timelineKeyHandler = (e) => {
+        const tag = (e.target.tagName || '').toLowerCase();
+        if (tag === 'input' || tag === 'textarea') return;
+        const k = e.key.toLowerCase();
+        if (k === 'i') {
+            e.preventDefault();
+            const { outVal } = getTrimValues();
+            applyTrim(_currentPlayheadSec, outVal);
+        } else if (k === 'o') {
+            e.preventDefault();
+            const { inVal } = getTrimValues();
+            applyTrim(inVal, _currentPlayheadSec);
+        }
+    };
+    window.addEventListener('keydown', _timelineKeyHandler);
+
+    // Initial sync from hidden values (saved state)
+    const init = getTrimValues();
+    applyTrim(init.inVal, init.outVal);
+
+    // Track cleanup function for teardownInlineEditor
+    _timelineDragCleanup = () => {
+        if (_timelineKeyHandler) window.removeEventListener('keydown', _timelineKeyHandler);
+        _timelineKeyHandler = null;
+    };
 }
 
 // ── Trim input events ──
@@ -282,9 +423,17 @@ function _bindTrimInputEvents(idx, duration) {
         if (inHidden) inHidden.value = inVal;
         if (outHidden) outHidden.value = outVal;
         if (durEl) durEl.textContent = _secToHMS(outVal - inVal);
+        const inHandle = document.getElementById('dm_trim_in_handle');
+        const outHandle = document.getElementById('dm_trim_out_handle');
         if (regionEl && duration > 0) {
             regionEl.style.left = (inVal / duration * 100) + '%';
             regionEl.style.right = (100 - outVal / duration * 100) + '%';
+        }
+        if (inHandle) inHandle.style.left = (inVal / duration * 100) + '%';
+        if (outHandle) outHandle.style.right = ((1 - outVal / duration) * 100) + '%';
+        if (_currentFile) {
+            _currentFile.trim_in = inVal;
+            _currentFile.trim_out = outVal;
         }
     };
 
@@ -645,6 +794,7 @@ function _renderCurveEditor(idx) {
 // doesn't fire stale fetches or leak object URLs.
 export function teardownInlineEditor() {
     if (_colorDebounceTimer) { clearTimeout(_colorDebounceTimer); _colorDebounceTimer = null; }
+    if (_timelineDragCleanup) { _timelineDragCleanup(); _timelineDragCleanup = null; }
     const img = document.getElementById('dm_preview_img');
     if (img && img._prevUrl) { URL.revokeObjectURL(img._prevUrl); img._prevUrl = null; }
     _currentFile = null;
