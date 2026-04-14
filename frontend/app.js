@@ -1503,6 +1503,11 @@ if (typeof appendLog === 'undefined') {
 
             ctx = Object.assign({}, ctx, { hosts: reachable });
 
+            // Stash validated+reachable hosts so retry rounds can re-ping
+            // them later without re-running the full selection UI flow.
+            window._originalDispatchHosts = reachable.map(h => ({ ...h }));
+            window._originalSourceDirs = sourceDirsForCheck.slice();
+
             // ── 取得磁碟代號 → UNC 映射表，讓遠端主機不受磁碟掛載差異影響 ──
             await window.ensureDriveMap();
             const _toUnc = window.toUncPath || (x => x);
@@ -1842,9 +1847,45 @@ if (typeof appendLog === 'undefined') {
                                 return;
                             }
 
-                            // ── 補轉策略：第1次換遠端主機 → 第2次本機轉 → 第3次本機再試 ──
+                            // ── 補轉策略：前幾次都派給當下可執行的遠端主機
+                            //    (re-ping + path validate)，最後一輪才本機補轉 ──
                             const retryCount = window._remoteDispatchExpectedRetryCount;
-                            const useLocal = retryCount >= 2; // 第2次起用本機
+                            const LAST_LOCAL_ROUND = 3; // round 1-2 remote, round 3 local
+                            let useLocal = retryCount >= LAST_LOCAL_ROUND;
+                            let liveRemoteHosts = [];
+
+                            if (!useLocal) {
+                                const origHosts = window._originalDispatchHosts || [];
+                                const origSrcDirs = window._originalSourceDirs || [];
+                                // Re-ping + re-validate to get currently working remotes.
+                                await Promise.all(origHosts.map(async h => {
+                                    try {
+                                        const c1 = new AbortController();
+                                        const t1 = setTimeout(() => c1.abort(), 3000);
+                                        const ping = await fetch('http://' + h.ip + '/api/v1/health', { signal: c1.signal });
+                                        clearTimeout(t1);
+                                        if (!ping.ok) return;
+                                        if (origSrcDirs.length) {
+                                            const c2 = new AbortController();
+                                            const t2 = setTimeout(() => c2.abort(), 4000);
+                                            const vr = await fetch('http://' + h.ip + '/api/v1/validate_paths', {
+                                                method: 'POST', headers: { 'Content-Type': 'application/json' },
+                                                body: JSON.stringify({ paths: origSrcDirs }),
+                                                signal: c2.signal,
+                                            });
+                                            clearTimeout(t2);
+                                            const vd = await vr.json();
+                                            const ok = Object.values(vd.results || {}).every(v => v.path_exists);
+                                            if (!ok) return;
+                                        }
+                                        liveRemoteHosts.push(h);
+                                    } catch (_) { /* unreachable — skip */ }
+                                }));
+                                if (liveRemoteHosts.length === 0) {
+                                    if (typeof appendLog === 'function') appendLog('[>] 目前無可執行的遠端主機，改用本機補轉', 'system');
+                                    useLocal = true;
+                                }
+                            }
 
                             if (useLocal) {
                                 // 本機補轉：直接送到 localhost，100% 路徑可達
@@ -1885,31 +1926,10 @@ if (typeof appendLog === 'undefined') {
                                     if (window.executePostMergeJobs) window.executePostMergeJobs(flags);
                                 }
                             } else {
-                                // 第1次補轉：換不同的遠端主機
-                                const activeHostsObj = window._activeRemoteHosts || {};
-                                const activeHostNames = Object.keys(activeHostsObj);
-                                // 找出哪些主機上次失敗了 — 排除它們
-                                const failedHosts = new Set(window._retryFailedHosts || []);
-                                const candidateIps = activeHostNames.filter(ip => !failedHosts.has(ip));
+                                // 遠端補轉：平均派給當下 ping+path 驗證都通過的主機
+                                if (typeof appendLog === 'function') appendLog(`[>] 第 ${retryCount} 次補轉：平均派給 ${liveRemoteHosts.length} 台可執行的遠端主機`, 'system');
 
-                                if (candidateIps.length === 0) {
-                                    // 所有遠端主機都失敗過 → 直接走本機
-                                    if (typeof appendLog === 'function') appendLog('[>] 所有遠端主機都曾失敗，改用本機補轉', 'system');
-                                    window._remoteDispatchExpectedRetryCount = 2; // 跳到本機流程
-                                    window.verifyAndRetryMissingProxies(proxyRoot, projName, flags);
-                                    return;
-                                }
-
-                                const reachable = candidateIps.map(ip => ({
-                                    ip,
-                                    name: (activeHostsObj[ip].host && activeHostsObj[ip].host.name) || ip
-                                }));
-                                if (typeof appendLog === 'function') appendLog(`[>] 第1次補轉：使用 ${reachable.length} 台備選遠端主機`, 'system');
-
-                                // 記住這次用的主機（如果又失敗就列入黑名單）
-                                window._retryFailedHosts = [...failedHosts, ...reachable.map(h => h.ip)];
-
-                                const distributions = reachable.map(h => ({ host: h, byCard: {} }));
+                                const distributions = liveRemoteHosts.map(h => ({ host: h, byCard: {} }));
                                 allMissing.forEach(({ cardName, sourceFile }, i) => {
                                     const dist = distributions[i % distributions.length];
                                     if (!dist.byCard[cardName]) dist.byCard[cardName] = [];
