@@ -1457,6 +1457,45 @@ if (typeof appendLog === 'undefined') {
                 if (typeof appendLog === 'function') appendLog('❌ 所有遠端主機均無法連線，分派取消。', 'error');
                 return;
             }
+
+            // Path-access pre-flight: each host must see ALL source card dirs.
+            // Catches the "picked master but files are on SOCA" mistake so we
+            // don't silently ship unreachable paths to a host and fail there.
+            const sourceDirsForCheck = (ctx.cards || []).map(c => c[2]).filter(Boolean);
+            if (sourceDirsForCheck.length) {
+                const accessible = [];
+                await Promise.all(reachable.map(async h => {
+                    try {
+                        const ctrl = new AbortController();
+                        const t = setTimeout(() => ctrl.abort(), 4000);
+                        const r = await fetch('http://' + h.ip + '/api/v1/validate_paths', {
+                            method: 'POST', headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ paths: sourceDirsForCheck }),
+                            signal: ctrl.signal,
+                        });
+                        clearTimeout(t);
+                        const d = await r.json();
+                        const results = d.results || {};
+                        const missing = Object.entries(results).filter(([_p, v]) => !v.path_exists).map(([p]) => p);
+                        if (missing.length) {
+                            updateHostProgress(h.ip, 0, '✗ 無法存取來源', '#8b0000');
+                            if (typeof appendLog === 'function') appendLog('⚠️ ' + h.name + ' 看不到來源：' + missing.join(', ') + ' — 跳過此主機', 'error');
+                        } else {
+                            accessible.push(h);
+                        }
+                    } catch (e) {
+                        updateHostProgress(h.ip, 0, '✗ 驗證失敗', '#8b0000');
+                        if (typeof appendLog === 'function') appendLog('⚠️ ' + h.name + ' 路徑驗證失敗: ' + e.message + ' — 跳過', 'error');
+                    }
+                }));
+                if (!accessible.length) {
+                    if (typeof appendLog === 'function') appendLog('❌ 沒有任何主機能存取所有來源路徑，分派取消。請確認來源卡片插在哪台並勾選該主機。', 'error');
+                    return;
+                }
+                reachable.length = 0;
+                accessible.forEach(h => reachable.push(h));
+            }
+
             ctx = Object.assign({}, ctx, { hosts: reachable });
 
             // ── 取得磁碟代號 → UNC 映射表，讓遠端主機不受磁碟掛載差異影響 ──
