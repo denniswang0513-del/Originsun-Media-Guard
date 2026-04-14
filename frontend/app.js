@@ -1458,12 +1458,15 @@ if (typeof appendLog === 'undefined') {
                 return;
             }
 
-            // Path-access pre-flight: each host must see ALL source card dirs.
-            // Catches the "picked master but files are on SOCA" mistake so we
-            // don't silently ship unreachable paths to a host and fail there.
+            // Path-access pre-flight (transcode only): all selected hosts
+            // MUST see all source paths — transcode sources live on shared
+            // NAS, so if any host can't reach them, the setup is wrong
+            // (e.g. user pointed at a card drive G:\ instead of the NAS
+            // copy). Abort and report so the user fixes it, rather than
+            // silently ship a doomed task.
             const sourceDirsForCheck = (ctx.cards || []).map(c => c[2]).filter(Boolean);
             if (sourceDirsForCheck.length) {
-                const accessible = [];
+                const hostMissing = {};  // host.ip → [missing_paths]
                 await Promise.all(reachable.map(async h => {
                     try {
                         const ctrl = new AbortController();
@@ -1477,23 +1480,25 @@ if (typeof appendLog === 'undefined') {
                         const d = await r.json();
                         const results = d.results || {};
                         const missing = Object.entries(results).filter(([_p, v]) => !v.path_exists).map(([p]) => p);
-                        if (missing.length) {
-                            updateHostProgress(h.ip, 0, '✗ 無法存取來源', '#8b0000');
-                            if (typeof appendLog === 'function') appendLog('⚠️ ' + h.name + ' 看不到來源：' + missing.join(', ') + ' — 跳過此主機', 'error');
-                        } else {
-                            accessible.push(h);
-                        }
+                        if (missing.length) hostMissing[h.ip] = { host: h, missing };
                     } catch (e) {
-                        updateHostProgress(h.ip, 0, '✗ 驗證失敗', '#8b0000');
-                        if (typeof appendLog === 'function') appendLog('⚠️ ' + h.name + ' 路徑驗證失敗: ' + e.message + ' — 跳過', 'error');
+                        hostMissing[h.ip] = { host: h, missing: sourceDirsForCheck, err: e.message };
                     }
                 }));
-                if (!accessible.length) {
-                    if (typeof appendLog === 'function') appendLog('❌ 沒有任何主機能存取所有來源路徑，分派取消。請確認來源卡片插在哪台並勾選該主機。', 'error');
+                const offenders = Object.values(hostMissing);
+                if (offenders.length) {
+                    for (const o of offenders) {
+                        updateHostProgress(o.host.ip, 0, '✗ 看不到來源', '#8b0000');
+                        if (typeof appendLog === 'function') {
+                            const detail = o.err ? `驗證失敗: ${o.err}` : `看不到來源路徑: ${o.missing.join(', ')}`;
+                            appendLog(`❌ ${o.host.name} ${detail}`, 'error');
+                        }
+                    }
+                    if (typeof appendLog === 'function') {
+                        appendLog('❌ 轉檔分派中止：所有選取主機必須都能看到來源路徑（通常應是 NAS 共享路徑）。請改點選有掛到該路徑的主機，或把來源放到 NAS 上所有機器都能存取的位置。', 'error');
+                    }
                     return;
                 }
-                reachable.length = 0;
-                accessible.forEach(h => reachable.push(h));
             }
 
             ctx = Object.assign({}, ctx, { hosts: reachable });
