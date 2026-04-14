@@ -13,13 +13,17 @@ let _clips = [];
 let _inlineEditIdx = -1;
 
 function _cloneClip(f) {
-    // Preserve all drone_meta fields (codec, size, is_dji, dji_gps, dji_camera, creation_time, filmstrip, ...)
+    // Defaults first so any color field already on `f` (from a prior save
+    // round-trip via _dmFiles) wins over the default, instead of being wiped.
+    // Preserves drone_meta fields (codec, size, is_dji, dji_gps, ...).
     return {
+        ...COLOR_DEFAULTS,
+        shadows: 0, midtones: 0, highlights: 0,
+        curve_points: null,
         ...f,
         selected: true,
-        trim_in: 0,
-        trim_out: f.duration || -1,
-        ...COLOR_DEFAULTS,
+        trim_in: (typeof f.trim_in === 'number') ? f.trim_in : 0,
+        trim_out: (typeof f.trim_out === 'number') ? f.trim_out : (f.duration || -1),
     };
 }
 
@@ -397,8 +401,9 @@ function _openInline(idx) {
     container.appendChild(applyAllBtn);
 
     const closeBtn = document.createElement('button');
-    closeBtn.textContent = '✕ 收合並套用';
-    closeBtn.className = 'absolute top-2 right-2 text-xs bg-[#333] hover:bg-[#444] px-2 py-1 rounded border border-[#555] text-gray-300 z-10';
+    closeBtn.textContent = '💾 儲存';
+    closeBtn.className = 'absolute top-2 right-2 text-xs bg-[#228b22] hover:bg-[#2eaa2e] px-3 py-1 rounded border border-[#2eaa2e] text-white font-semibold z-10';
+    closeBtn.title = '儲存此片段的設定（僅影響當前素材，套用到全部請按左側紫色按鈕）';
     closeBtn.onclick = () => _ccmCloseInline(idx);
     container.appendChild(closeBtn);
 
