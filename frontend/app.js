@@ -1668,6 +1668,8 @@ if (typeof appendLog === 'undefined') {
                     updateHostProgress(h.ip, 20, '轉檔中...', '#d48a04');
                     window._activeRemoteHosts[h.ip] = { host: h, files: allCardFiles.map(cf => cf.file), lastSeen: Date.now(), startTime: Date.now(), expectedJobs: cardNames.length, pct: 0 };
                 } else {
+                    // Blacklist this host so retry rounds skip it.
+                    window._retryFailedHosts = [...new Set([...(window._retryFailedHosts || []), h.ip])];
                     updateHostProgress(h.ip, 0, '連線失敗', '#8b0000');
                 }
             }
@@ -1857,8 +1859,13 @@ if (typeof appendLog === 'undefined') {
                             if (!useLocal) {
                                 const origHosts = window._originalDispatchHosts || [];
                                 const origSrcDirs = window._originalSourceDirs || [];
-                                // Re-ping + re-validate to get currently working remotes.
-                                await Promise.all(origHosts.map(async h => {
+                                const blacklist = new Set(window._retryFailedHosts || []);
+                                const candidates = origHosts.filter(h => !blacklist.has(h.ip));
+                                if (blacklist.size > 0 && typeof appendLog === 'function') {
+                                    appendLog(`[i] 跳過黑名單主機 (${[...blacklist].join(', ')})`, 'system');
+                                }
+                                // Re-ping + re-validate surviving candidates.
+                                await Promise.all(candidates.map(async h => {
                                     try {
                                         const c1 = new AbortController();
                                         const t1 = setTimeout(() => c1.abort(), 3000);
@@ -1882,7 +1889,7 @@ if (typeof appendLog === 'undefined') {
                                     } catch (_) { /* unreachable — skip */ }
                                 }));
                                 if (liveRemoteHosts.length === 0) {
-                                    if (typeof appendLog === 'function') appendLog('[>] 目前無可執行的遠端主機，改用本機補轉', 'system');
+                                    if (typeof appendLog === 'function') appendLog('[>] 目前無可執行的遠端主機（黑名單外都不可達或看不到來源），改用本機補轉', 'system');
                                     useLocal = true;
                                 }
                             }
@@ -1958,6 +1965,8 @@ if (typeof appendLog === 'undefined') {
                                             };
                                         } catch (err) {
                                             if (typeof appendLog === 'function') appendLog(`[X] ${dist.host.name} [${cardName}] 補轉失敗: ${err.message}`, 'error');
+                                            // Blacklist so next retry round skips this host.
+                                            window._retryFailedHosts = [...new Set([...(window._retryFailedHosts || []), dist.host.ip])];
                                         }
                                     }
                                 }
