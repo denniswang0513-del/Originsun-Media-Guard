@@ -61,6 +61,7 @@ class ClipSpec(BaseModel):
     saturation: float = 1.0
     gamma: float = 1.0
     color_temp: float = 0.0
+    tint: float = 0.0
     shadows: float = 0.0
     midtones: float = 0.0
     highlights: float = 0.0
