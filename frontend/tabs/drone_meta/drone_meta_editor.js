@@ -104,7 +104,7 @@ export function renderInlineEditor(container, file, idx, fmtDuration) {
 
                 <!-- Right: Color grading (sliders grouped + curve side-by-side) -->
                 <div class="bg-gradient-to-b from-[#1f1f22] to-[#17171a] border border-[#2e2e33] rounded-lg shadow-inner">
-                    <div class="flex items-center justify-between px-4 py-2.5 border-b border-[#2a2a2e]">
+                    <div class="flex items-center justify-between px-2 py-2 border-b border-[#2a2a2e]">
                         <div class="flex items-center gap-2">
                             <span class="inline-block w-1.5 h-4 bg-blue-500 rounded-sm"></span>
                             <h4 class="text-sm font-semibold text-gray-200 tracking-wide">色彩調整</h4>
@@ -114,7 +114,7 @@ export function renderInlineEditor(container, file, idx, fmtDuration) {
                             <button id="dm_detail_reset_color" class="px-2 py-1 rounded border border-[#333] bg-[#1a1a1d] text-gray-400 hover:text-blue-300 hover:border-blue-500/50 transition-colors">重置全部</button>
                         </div>
                     </div>
-                    <div class="flex gap-5 p-4 items-stretch">
+                    <div class="flex gap-3 p-2 items-stretch">
                         <!-- Sliders (divider-separated groups, labels left-aligned) -->
                         <div class="flex-1 min-w-0">
                             <div class="space-y-1.5">
