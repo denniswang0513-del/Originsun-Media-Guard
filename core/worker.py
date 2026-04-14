@@ -812,7 +812,12 @@ def _drone_meta_sync(job, engine, task: DroneMetaRequest, _on_progress):
             file_setting.contrast != 1.0 or
             file_setting.saturation != 1.0 or
             file_setting.gamma != 1.0 or
-            file_setting.color_temp != 0.0
+            file_setting.color_temp != 0.0 or
+            getattr(file_setting, 'tint', 0.0) != 0.0 or
+            getattr(file_setting, 'shadows', 0.0) != 0.0 or
+            getattr(file_setting, 'midtones', 0.0) != 0.0 or
+            getattr(file_setting, 'highlights', 0.0) != 0.0 or
+            bool(getattr(file_setting, 'curve_points', None))
         )
         needs_reencode = has_trim or has_color
 
@@ -855,9 +860,49 @@ def _drone_meta_sync(job, engine, task: DroneMetaRequest, _on_progress):
                 eq_parts.append(f"gamma={file_setting.gamma}")
             if eq_parts:
                 vf_parts.append("eq=" + ":".join(eq_parts))
-            if file_setting.color_temp != 0.0:
-                t = file_setting.color_temp
-                vf_parts.append(f"colorbalance=rs={t}:gs=0:bs={-t}")
+
+            # color_temp + tint via colorchannelmixer (full-image R/B scale
+            # + G-channel additive). Matches frontend SVG feColorMatrix and
+            # concat pipeline. format=gbrap guarantees alpha=1 so `ga` works
+            # on YUV sources.
+            ct = float(file_setting.color_temp or 0.0)
+            tn = float(getattr(file_setting, 'tint', 0.0) or 0.0)
+            if ct != 0.0 or tn != 0.0:
+                rr = 1.0 + 0.3 * ct
+                bb = 1.0 - 0.3 * ct
+                ga = 0.15 * tn
+                vf_parts.append(f"format=gbrap,colorchannelmixer=rr={rr:.4f}:bb={bb:.4f}:ga={ga:.4f}")
+
+            # Tonal curves (shadows/midtones/highlights) or user curve.
+            sh = float(getattr(file_setting, 'shadows', 0.0) or 0.0)
+            mi = float(getattr(file_setting, 'midtones', 0.0) or 0.0)
+            hi = float(getattr(file_setting, 'highlights', 0.0) or 0.0)
+            curve_pts = getattr(file_setting, 'curve_points', None)
+
+            def _is_identity_curve(pts):
+                if not pts or len(pts) != 2:
+                    return False
+                a, b = pts[0], pts[1]
+                return float(a[0]) == 0.0 and float(a[1]) == 0.0 and float(b[0]) == 1.0 and float(b[1]) == 1.0
+
+            curve_pairs = None
+            if isinstance(curve_pts, (list, tuple)) and len(curve_pts) >= 2 and not _is_identity_curve(curve_pts):
+                pts = sorted([
+                    (max(0.0, min(1.0, float(p[0]))), max(0.0, min(1.0, float(p[1]))))
+                    for p in curve_pts if len(p) >= 2
+                ])
+                curve_pairs = "/".join(f"{x:.3f}/{y:.3f}" for x, y in pts)
+            elif sh != 0.0 or mi != 0.0 or hi != 0.0:
+                anchors = [
+                    (0.0, 0.0),
+                    (0.25, max(0.0, min(1.0, 0.25 + sh * 0.25))),
+                    (0.5,  max(0.0, min(1.0, 0.5  + mi * 0.25))),
+                    (0.75, max(0.0, min(1.0, 0.75 + hi * 0.25))),
+                    (1.0, 1.0),
+                ]
+                curve_pairs = "/".join(f"{x:.3f}/{y:.3f}" for x, y in anchors)
+            if curve_pairs:
+                vf_parts.append(f"curves=all='{curve_pairs}'")
             if vf_parts:
                 ff_cmd += ["-vf", ",".join(vf_parts)]
 

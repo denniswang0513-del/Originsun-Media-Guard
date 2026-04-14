@@ -181,11 +181,16 @@ class DroneMetaFileSetting(BaseModel):
     trim_out: float = -1.0      # 秒，-1 = 到尾
     date_time_override: str = ""  # Per-file datetime override (ISO format), empty = use global
     # 色彩調整
-    brightness: float = 0.0     # -1.0 ~ 1.0
+    brightness: float = 0.0     # -1.0 ~ 1.0 (additive)
     contrast: float = 1.0       # 0.0 ~ 2.0
     saturation: float = 1.0     # 0.0 ~ 3.0
     gamma: float = 1.0          # 0.1 ~ 3.0
-    color_temp: float = 0.0     # -1.0 ~ 1.0（冷暖）
+    color_temp: float = 0.0     # -1.0 ~ 1.0（藍↔黃）
+    tint: float = 0.0           # -1.0 ~ 1.0（洋紅↔青綠）
+    shadows: float = 0.0        # -1.0 ~ 1.0
+    midtones: float = 0.0
+    highlights: float = 0.0
+    curve_points: Optional[List[Tuple[float, float]]] = None
 
 
 class DroneMetaRequest(BaseModel):

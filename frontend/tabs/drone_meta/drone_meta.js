@@ -454,17 +454,23 @@ function _getFileSetting(idx) {
         const timeVal = timeInput?.value || '';
         if (dateVal && timeVal) dateTimeOverride = `${dateVal}T${timeVal}`;
     }
-    // Outer tab no longer has per-clip trim/color editor (moved to concat modal).
-    // Send defaults; user uses 進階編輯 modal for those.
+    // Color/trim fields live on _dmFiles[idx] (written back by advanced
+    // edit modal via dmfile:order-synced event). Read them through.
+    const num = (v, def) => (typeof v === 'number' && !isNaN(v)) ? v : def;
     return {
         path: f.path,
-        trim_in: 0,
-        trim_out: -1,
-        brightness: 0,
-        contrast: 1,
-        saturation: 1,
-        gamma: 1,
-        color_temp: 0,
+        trim_in: num(f.trim_in, 0),
+        trim_out: num(f.trim_out, -1),
+        brightness: num(f.brightness, 0),
+        contrast: num(f.contrast, 1),
+        saturation: num(f.saturation, 1),
+        gamma: num(f.gamma, 1),
+        color_temp: num(f.color_temp, 0),
+        tint: num(f.tint, 0),
+        shadows: num(f.shadows, 0),
+        midtones: num(f.midtones, 0),
+        highlights: num(f.highlights, 0),
+        curve_points: Array.isArray(f.curve_points) ? f.curve_points : null,
         date_time_override: dateTimeOverride,
     };
 }
