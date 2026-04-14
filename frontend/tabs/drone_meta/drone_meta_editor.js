@@ -297,6 +297,11 @@ function _ensureSvgFilter() {
     svg.setAttribute('height', '0');
     svg.style.cssText = 'position:absolute;width:0;height:0;pointer-events:none';
     svg.innerHTML = `<defs><filter id="${_SVG_FILTER_ID}" color-interpolation-filters="sRGB">
+        <feComponentTransfer id="dm-svg-brightness">
+            <feFuncR type="linear" slope="1" intercept="0"/>
+            <feFuncG type="linear" slope="1" intercept="0"/>
+            <feFuncB type="linear" slope="1" intercept="0"/>
+        </feComponentTransfer>
         <feComponentTransfer id="dm-svg-gamma">
             <feFuncR type="gamma" amplitude="1" exponent="1" offset="0"/>
             <feFuncG type="gamma" amplitude="1" exponent="1" offset="0"/>
@@ -379,10 +384,15 @@ function _applyLivePreview(idx) {
     const mids = get('midtones', 0);
     const highs = get('highlights', 0);
 
-    // Map ffmpeg eq brightness (-1..1, additive) to CSS brightness (multiplicative, 0..2)
-    const cssBrightness = 1 + brightness;
-    mainImg.style.filter = `brightness(${cssBrightness}) contrast(${contrast}) saturate(${saturation}) url(#${_SVG_FILTER_ID})`;
+    // Brightness is handled INSIDE the SVG filter as additive intercept
+    // (matches ffmpeg `eq=brightness` semantics) — not CSS brightness()
+    // which is multiplicative and would diverge from backend output.
+    mainImg.style.filter = `contrast(${contrast}) saturate(${saturation}) url(#${_SVG_FILTER_ID})`;
 
+    const brEl = document.getElementById('dm-svg-brightness');
+    if (brEl) {
+        brEl.querySelectorAll('feFuncR, feFuncG, feFuncB').forEach(el => el.setAttribute('intercept', brightness.toFixed(4)));
+    }
     // Update SVG filter: gamma, color_temp, curve
     const gammaEl = document.getElementById('dm-svg-gamma');
     if (gammaEl) {

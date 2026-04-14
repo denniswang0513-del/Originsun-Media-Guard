@@ -118,6 +118,11 @@ export function applyClipFilter(imgEl, clip, filterId) {
         filter.id = filterId;
         filter.setAttribute('color-interpolation-filters', 'sRGB');
         filter.innerHTML = `
+            <feComponentTransfer data-role="brightness">
+                <feFuncR type="linear" slope="1" intercept="0"/>
+                <feFuncG type="linear" slope="1" intercept="0"/>
+                <feFuncB type="linear" slope="1" intercept="0"/>
+            </feComponentTransfer>
             <feComponentTransfer data-role="gamma">
                 <feFuncR type="gamma" amplitude="1" exponent="1" offset="0"/>
                 <feFuncG type="gamma" amplitude="1" exponent="1" offset="0"/>
@@ -131,6 +136,8 @@ export function applyClipFilter(imgEl, clip, filterId) {
             </feComponentTransfer>`;
         defs.appendChild(filter);
     }
+    filter.querySelector('[data-role="brightness"]').querySelectorAll('feFuncR,feFuncG,feFuncB')
+        .forEach(el => el.setAttribute('intercept', b.toFixed(4)));
     const exp = (1 / g).toFixed(4);
     filter.querySelector('[data-role="gamma"]').querySelectorAll('feFuncR,feFuncG,feFuncB')
         .forEach(el => el.setAttribute('exponent', exp));
@@ -144,7 +151,9 @@ export function applyClipFilter(imgEl, clip, filterId) {
     filter.querySelector('[data-role="curve"]').querySelectorAll('feFuncR,feFuncG,feFuncB')
         .forEach(el => el.setAttribute('tableValues', table));
 
-    imgEl.style.filter = `brightness(${1 + b}) contrast(${c}) saturate(${s}) url(#${filterId})`;
+    // Brightness is done inside the SVG filter (additive, matches ffmpeg
+    // `eq=brightness`); CSS brightness() is multiplicative and would diverge.
+    imgEl.style.filter = `contrast(${c}) saturate(${s}) url(#${filterId})`;
 }
 
 export function hasTrim(clip) {
