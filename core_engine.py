@@ -1797,7 +1797,7 @@ class MediaGuardEngine:
         if on_progress:
             on_progress({'phase': 'concat', 'total_pct': 0, 'status': '進階串帶中...', 'total_files': n, 'done_files': 0})
 
-        def _run_once(final_cmd, label):
+        def _run_once(final_cmd):
             try:
                 proc = _sp.Popen(final_cmd, stdout=_sp.PIPE, stderr=_sp.PIPE, creationflags=_flags)
                 _, stderr = proc.communicate()
@@ -1806,7 +1806,7 @@ class MediaGuardEngine:
             except Exception as e:
                 return -1, str(e)
 
-        rc, err_msg = _run_once(cmd, "primary")
+        rc, err_msg = _run_once(cmd)
 
         # NVENC driver mismatch (SOCA-style) → auto fallback to libx264.
         nvenc_fail = ("nvenc" in err_msg.lower() and
@@ -1817,7 +1817,6 @@ class MediaGuardEngine:
             self.log("[Engine] 偵測到 NVENC 驅動不相容，自動改用 libx264 軟編重試")
             # Replace encoder args in-place: NVENC → libx264
             new_cmd = []
-            skip = 0
             i = 0
             while i < len(cmd):
                 arg = cmd[i]
@@ -1830,7 +1829,7 @@ class MediaGuardEngine:
                     continue
                 new_cmd.append(arg)
                 i += 1
-            rc, err_msg = _run_once(new_cmd, "fallback-libx264")
+            rc, err_msg = _run_once(new_cmd)
 
         if rc != 0:
             self.err(f"[Engine] ffmpeg 進階串帶失敗：\n{err_msg}")
