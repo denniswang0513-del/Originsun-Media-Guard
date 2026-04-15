@@ -68,6 +68,32 @@ class MediaGuardEngine:
         buf_msg = f"[{datetime.now().strftime('%H:%M:%S')}] {msg}"
         self._log_buffer.append(buf_msg)
         self._log_cb(msg)
+
+    def nvenc_available(self):
+        """Probe NVENC via a tiny lavfi test-encode; cache result.
+        Returns False on old NVIDIA drivers (< 570) or no GPU."""
+        cached = getattr(self, '_nvenc_cached', None)
+        if cached is not None:
+            return cached
+        try:
+            import subprocess as _sp_probe
+            r = _sp_probe.run(
+                ['ffmpeg', '-hide_banner', '-loglevel', 'error',
+                 '-f', 'lavfi', '-i', 'color=black:s=64x64:d=0.1:r=30',
+                 '-c:v', 'h264_nvenc', '-t', '0.1', '-f', 'null', '-'],
+                capture_output=True, timeout=10,
+                creationflags=getattr(_sp_probe, 'CREATE_NO_WINDOW', 0x08000000),
+            )
+            self._nvenc_cached = (r.returncode == 0)
+            if not self._nvenc_cached:
+                stderr = (r.stderr or b"").decode('utf-8', errors='ignore')[-300:]
+                self.log(f"[Engine] NVENC 不可用 (驅動過舊或無 NVIDIA GPU)，將使用 libx264 軟編")
+                if 'Required' in stderr and 'Found' in stderr:
+                    self.log(f"[Engine] NVENC 錯誤訊息: {stderr.strip()[:200]}")
+        except Exception as e:
+            self._nvenc_cached = False
+            self.log(f"[Engine] NVENC 探測失敗: {e}，將使用 libx264")
+        return self._nvenc_cached
         
     def err(self, msg: str):
         buf_msg = f"[{datetime.now().strftime('%H:%M:%S')}] {msg}"
@@ -1188,7 +1214,9 @@ class MediaGuardEngine:
         chosen_font = msjh_path if os.path.exists(msjh_path) else arial_path
         font_path = chosen_font.replace("\\", "/").replace(":", "\\:")
 
-        # 決定編碼參數
+        # 決定編碼參數（NVENC 不可用時自動切 libx264）
+        if "NVENC" in codec and not self.nvenc_available():
+            codec = "H.264 (x264)"
         if "NVENC" in codec:
             vcodec_args = ["-c:v", "h264_nvenc", "-pix_fmt", "yuv420p", "-preset", "p4", "-cq", "23"]
             acodec_args = ["-c:a", "aac", "-b:a", "192k"]
@@ -1577,6 +1605,8 @@ class MediaGuardEngine:
         res_map = {"720P": (1280, 720), "1080P": (1920, 1080), "Ultra HD": (3840, 2160)}
         W, H = res_map.get(resolution, (1920, 1080))
 
+        if "NVENC" in codec and not self.nvenc_available():
+            codec = "H.264 (x264)"
         if "NVENC" in codec:
             vcodec_args = ["-c:v", "h264_nvenc", "-preset", "p4", "-b:v", "10M"]
         elif "ProRes" in codec:
@@ -1767,15 +1797,43 @@ class MediaGuardEngine:
         if on_progress:
             on_progress({'phase': 'concat', 'total_pct': 0, 'status': '進階串帶中...', 'total_files': n, 'done_files': 0})
 
-        try:
-            proc = _sp.Popen(cmd, stdout=_sp.PIPE, stderr=_sp.PIPE, creationflags=_flags)
-            _, stderr = proc.communicate()
-            if proc.returncode != 0:
-                err_msg = (stderr or b"")[-2000:].decode("utf-8", errors="ignore")
-                self.err(f"[Engine] ffmpeg 進階串帶失敗：\n{err_msg}")
-                return
-        except Exception as e:
-            self.err(f"[Engine] 進階串帶例外：{e}")
+        def _run_once(final_cmd, label):
+            try:
+                proc = _sp.Popen(final_cmd, stdout=_sp.PIPE, stderr=_sp.PIPE, creationflags=_flags)
+                _, stderr = proc.communicate()
+                err_txt = (stderr or b"")[-3000:].decode("utf-8", errors="ignore")
+                return proc.returncode, err_txt
+            except Exception as e:
+                return -1, str(e)
+
+        rc, err_msg = _run_once(cmd, "primary")
+
+        # NVENC driver mismatch (SOCA-style) → auto fallback to libx264.
+        nvenc_fail = ("nvenc" in err_msg.lower() and
+                      ("api version" in err_msg.lower() or
+                       "minimum required" in err_msg.lower() or
+                       "could not open encoder" in err_msg.lower()))
+        if rc != 0 and nvenc_fail and "NVENC" in codec:
+            self.log("[Engine] 偵測到 NVENC 驅動不相容，自動改用 libx264 軟編重試")
+            # Replace encoder args in-place: NVENC → libx264
+            new_cmd = []
+            skip = 0
+            i = 0
+            while i < len(cmd):
+                arg = cmd[i]
+                if arg == "-c:v" and i + 1 < len(cmd) and cmd[i + 1] == "h264_nvenc":
+                    new_cmd += ["-c:v", "libx264", "-preset", "medium", "-crf", "20", "-pix_fmt", "yuv420p"]
+                    i += 2
+                    # Also skip original NVENC-specific args that follow (-preset, -b:v)
+                    while i < len(cmd) and cmd[i] in ("-preset", "-b:v"):
+                        i += 2
+                    continue
+                new_cmd.append(arg)
+                i += 1
+            rc, err_msg = _run_once(new_cmd, "fallback-libx264")
+
+        if rc != 0:
+            self.err(f"[Engine] ffmpeg 進階串帶失敗：\n{err_msg}")
             return
 
         if on_progress:
