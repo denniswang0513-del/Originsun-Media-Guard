@@ -1584,6 +1584,28 @@ class MediaGuardEngine:
         else:
             vcodec_args = ["-c:v", "libx264", "-preset", "medium", "-crf", "20", "-pix_fmt", "yuv420p"]
 
+        # Probe each clip for audio stream presence. If ANY clip lacks audio
+        # (common for drone footage), the filter chain's [i:a] selector would
+        # fail for that input; we drop audio from the output entirely.
+        has_audio = []
+        for c in valid_clips:
+            try:
+                probe = _sp.run(
+                    ["ffprobe", "-v", "error", "-select_streams", "a",
+                     "-show_entries", "stream=codec_type", "-of",
+                     "default=noprint_wrappers=1:nokey=1", c["path"]],
+                    capture_output=True, text=True, timeout=10,
+                    creationflags=_flags,
+                )
+                has_audio.append(bool((probe.stdout or "").strip()))
+            except Exception:
+                has_audio.append(False)
+        any_audio_missing = not all(has_audio)
+        include_audio = not any_audio_missing
+        if any_audio_missing:
+            missing_count = sum(1 for h in has_audio if not h)
+            self.log(f"[Engine] {missing_count}/{n_clips} 個素材無音訊軌，輸出將為靜音".replace('{n_clips}', str(len(valid_clips))))
+
         inputs = []
         filter_parts = []
         concat_inputs = []
@@ -1653,8 +1675,11 @@ class MediaGuardEngine:
 
             vf += f"[v{i}]"
             filter_parts.append(vf)
-            filter_parts.append(f"[{i}:a]anull[a{i}]")
-            concat_inputs.append(f"[v{i}][a{i}]")
+            if include_audio:
+                filter_parts.append(f"[{i}:a]anull[a{i}]")
+                concat_inputs.append(f"[v{i}][a{i}]")
+            else:
+                concat_inputs.append(f"[v{i}]")
 
         n = len(valid_clips)
 
@@ -1710,7 +1735,8 @@ class MediaGuardEngine:
                 out_v = f"vx{i}" if i < n - 1 else "outv"
                 out_a = f"ax{i}" if i < n - 1 else "outa"
                 xfade_parts.append(f"[{prev_v}][v{i}]xfade=transition={xfade_type_safe}:duration={d:.3f}:offset={offset:.3f}[{out_v}]")
-                xfade_parts.append(f"[{prev_a}][a{i}]acrossfade=d={d:.3f}[{out_a}]")
+                if include_audio:
+                    xfade_parts.append(f"[{prev_a}][a{i}]acrossfade=d={d:.3f}[{out_a}]")
                 cumulative = cumulative + lens[i] - d
                 prev_v, prev_a = out_v, out_a
             if abort:
@@ -1721,17 +1747,22 @@ class MediaGuardEngine:
             filter_parts.extend(xfade_parts)
             self.log(f"[Engine] 啟用 xfade 轉場：{xfade_type_safe}，秒數 {float(xfade_duration):.2f}，{n-1} 處切換")
         else:
-            filter_parts.append("".join(concat_inputs) + f"concat=n={n}:v=1:a=1[outv][outa]")
+            a_flag = 1 if include_audio else 0
+            filter_parts.append("".join(concat_inputs) + f"concat=n={n}:v=1:a={a_flag}" + ("[outv][outa]" if include_audio else "[outv]"))
         filter_complex = ";".join(filter_parts)
 
         cmd = ["ffmpeg", "-y", "-nostdin"]
         cmd.extend(inputs)
         cmd.extend([
             "-filter_complex", filter_complex,
-            "-map", "[outv]", "-map", "[outa]",
+            "-map", "[outv]",
         ])
+        if include_audio:
+            cmd += ["-map", "[outa]"]
         cmd.extend(vcodec_args)
-        cmd.extend(["-c:a", "aac", "-b:a", "192k", output_path])
+        if include_audio:
+            cmd += ["-c:a", "aac", "-b:a", "192k"]
+        cmd.append(output_path)
 
         self.log(f"[Engine] 進階串帶：{n} 段 → {output_path}")
         if on_progress:
