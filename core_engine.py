@@ -1600,11 +1600,10 @@ class MediaGuardEngine:
                 has_audio.append(bool((probe.stdout or "").strip()))
             except Exception:
                 has_audio.append(False)
-        any_audio_missing = not all(has_audio)
-        include_audio = not any_audio_missing
-        if any_audio_missing:
-            missing_count = sum(1 for h in has_audio if not h)
-            self.log(f"[Engine] {missing_count}/{n_clips} 個素材無音訊軌，輸出將為靜音".replace('{n_clips}', str(len(valid_clips))))
+        include_audio = all(has_audio)
+        if not include_audio:
+            missing = sum(1 for h in has_audio if not h)
+            self.log(f"[Engine] {missing}/{len(valid_clips)} 個素材無音訊軌，輸出將為靜音")
 
         inputs = []
         filter_parts = []
