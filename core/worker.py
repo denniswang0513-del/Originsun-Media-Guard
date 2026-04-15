@@ -839,7 +839,12 @@ def _drone_meta_sync(job, engine, task: DroneMetaRequest, _on_progress):
             if autel_srt_path:
                 ff_cmd += ["-metadata:s:s", "handler_name=Autel.Subtitle"]
 
-        ff_cmd += ["-movflags", "+faststart", "-metadata", f"creation_time={file_iso_dt}", new_path]
+        # NO +faststart on intermediate files — these go straight into concat,
+        # never streamed via web. faststart forces a 2-pass IO write that
+        # roughly doubles wall time for multi-GB 4K HEVC drone clips on NAS.
+        # The final concat output (line 1089) keeps faststart since that's
+        # the user-facing reel that may be browser-previewed.
+        ff_cmd += ["-metadata", f"creation_time={file_iso_dt}", new_path]
 
         ff_result = subprocess.run(
             ff_cmd, capture_output=True, text=True,
