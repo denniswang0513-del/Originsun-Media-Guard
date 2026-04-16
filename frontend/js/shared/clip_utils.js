@@ -154,14 +154,13 @@ export function applyClipFilter(imgEl, clip, filterId) {
     // Brightness is done inside the SVG filter (additive, matches ffmpeg
     // `eq=brightness`); CSS brightness() is multiplicative and would diverge.
     // Chrome caches SVG url(#...) filter output aggressively when only the
-    // filter's inner attributes change — toggling the style string forces
-    // a re-evaluation so card thumbnails pick up slider changes live.
-    const next = `contrast(${c}) saturate(${s}) url(#${filterId})`;
-    if (imgEl.style.filter === next) {
-        imgEl.style.filter = 'none';
-        void imgEl.offsetHeight;
-    }
-    imgEl.style.filter = next;
+    // filter's inner attributes change (gamma exponent, curve tableValues,
+    // etc). Toggling style.filter + forced reflow EVERY call defeats the
+    // cache — the `style.filter === next` check I had before was wrong
+    // because style string stays identical when only filter internals changed.
+    imgEl.style.filter = 'none';
+    void imgEl.offsetHeight;
+    imgEl.style.filter = `contrast(${c}) saturate(${s}) url(#${filterId})`;
 }
 
 export function hasTrim(clip) {
