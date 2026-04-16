@@ -154,10 +154,13 @@
 <!-- ═══ 區塊五：動作按鈕 + 執行進度 ═══ -->
 <div class="border-t border-[#3a3a3a] pt-4">
     <div class="flex justify-between items-center">
-        <div class="flex gap-2 dm-control-btns hidden">
-            <button onclick="apiControl('pause')" class="bg-[#7a5500] hover:bg-[#b07a00] text-white text-xs font-bold py-2 px-4 rounded shadow transition-colors">暫停</button>
-            <button onclick="apiControl('resume')" class="bg-[#3a5a3a] hover:bg-[#4a7a4a] text-white text-xs font-bold py-2 px-4 rounded shadow transition-colors">繼續</button>
-            <button onclick="apiControl('stop')" class="bg-[#8b0000] hover:bg-[#cc2200] text-white text-xs font-bold py-2 px-4 rounded shadow transition-colors">強制中止</button>
+        <div class="flex gap-2 tab-control-btns dm-control-btns hidden">
+            <button onclick="apiControl('pause')"
+                class="bg-[#7a5500] hover:bg-[#b07a00] text-white text-xs font-bold py-2 px-4 rounded shadow transition-colors">暫停</button>
+            <button onclick="apiControl('resume')"
+                class="bg-[#3a5a3a] hover:bg-[#4a7a4a] text-white text-xs font-bold py-2 px-4 rounded shadow transition-colors">繼續</button>
+            <button onclick="apiControl('stop')"
+                class="bg-[#8b0000] hover:bg-[#cc2200] text-white text-xs font-bold py-2 px-4 rounded shadow transition-colors">強制中止</button>
         </div>
         <div class="flex gap-3 ml-auto">
             <button onclick="scheduleJob('drone_meta')"
