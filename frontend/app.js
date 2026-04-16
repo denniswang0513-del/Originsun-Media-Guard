@@ -2144,6 +2144,7 @@ if (typeof appendLog === 'undefined') {
             'tts': 'collectTtsPayload',
             'clone': 'collectClonePayload',
             'report': 'collectReportPayload',
+            'drone_meta': 'collectDroneMetaPayload',
         };
 
 // ── Schedule Modal ──────────────────────────────

@@ -160,8 +160,12 @@
             <button onclick="apiControl('stop')" class="bg-[#8b0000] hover:bg-[#cc2200] text-white text-xs font-bold py-2 px-4 rounded shadow transition-colors">強制中止</button>
         </div>
         <div class="flex gap-3 ml-auto">
-            <button class="dm-start-btn bg-[#228b22] hover:bg-[#2eaa2e] text-white font-bold py-2 px-8 rounded shadow text-sm transition-colors"
-                onclick="submitDroneMeta()" data-idle-text="開始執行" data-busy-text="佇列中">開始執行</button>
+            <button onclick="scheduleJob('drone_meta')"
+                class="bg-[#333] hover:bg-[#444] text-gray-300 font-bold py-2 px-6 rounded shadow text-sm transition-colors border border-[#555]">
+                排程
+            </button>
+            <button class="tab-start-btn dm-start-btn bg-[#1f538d] hover:bg-[#2a6cbf] text-white font-bold py-2 px-8 rounded shadow text-sm transition-colors"
+                onclick="submitDroneMeta()" data-idle-text="開始" data-busy-text="開始新佇列">開始</button>
         </div>
     </div>
 
