@@ -153,7 +153,15 @@ export function applyClipFilter(imgEl, clip, filterId) {
 
     // Brightness is done inside the SVG filter (additive, matches ffmpeg
     // `eq=brightness`); CSS brightness() is multiplicative and would diverge.
-    imgEl.style.filter = `contrast(${c}) saturate(${s}) url(#${filterId})`;
+    // Chrome caches SVG url(#...) filter output aggressively when only the
+    // filter's inner attributes change — toggling the style string forces
+    // a re-evaluation so card thumbnails pick up slider changes live.
+    const next = `contrast(${c}) saturate(${s}) url(#${filterId})`;
+    if (imgEl.style.filter === next) {
+        imgEl.style.filter = 'none';
+        void imgEl.offsetHeight;
+    }
+    imgEl.style.filter = next;
 }
 
 export function hasTrim(clip) {

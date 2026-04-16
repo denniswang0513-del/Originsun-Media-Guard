@@ -599,11 +599,13 @@ function _bindColorEvents(idx, container) {
         // Live-update the source card inside the MODAL only — the outer
         // drone_meta tab has its own grid whose thumbs should NOT reflect
         // mid-drag changes (it only re-renders on explicit 套用並關閉 save).
+        // Modal cards use class 'cc-clip-card' (not 'clip-card'), so match
+        // any element with the right data-idx inside the modal root.
         if (_currentFile) {
             const modalRoot = container.closest?.('#cc_editor_overlay') || document.getElementById('cc_editor_overlay') || container;
-            const scopedCards = modalRoot.querySelectorAll(`[data-idx="${idx}"].clip-card`);
+            const scopedCards = modalRoot.querySelectorAll(`[data-idx="${idx}"]`);
             scopedCards.forEach(card => {
-                const thumb = card.querySelector('.clip-thumb');
+                const thumb = card.querySelector?.('.clip-thumb');
                 if (thumb) {
                     const fid = thumb.dataset._liveFilterId || `clip-filter-live-${idx}`;
                     thumb.dataset._liveFilterId = fid;
