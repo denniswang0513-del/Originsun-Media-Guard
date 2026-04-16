@@ -76,6 +76,10 @@ async function dmScanFiles() {
     const scanCount = document.getElementById('dm-scan-count');
 
     _dmFiles = [];
+    // Clear persisted advanced-editor state so modal re-opens fresh against
+    // the new scan. Xfade prefs (enabled/type/duration) are kept intentionally
+    // as user preferences that should persist across batches.
+    window._concatAdvancedClips = null;
     const grid = document.getElementById('dm_file_grid') || document.getElementById('dm_file_list');
     if (grid) grid.innerHTML = '';
     const gridToolbar = document.getElementById('dm_grid_toolbar');
@@ -367,6 +371,7 @@ window.dmToggleSelectAll = dmToggleSelectAll;
 
 function dmClearFiles() {
     _dmFiles = [];
+    window._concatAdvancedClips = null;
     _renderFileGrid();
     document.getElementById('dm_scan_status').textContent = '';
 }
