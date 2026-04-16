@@ -1224,6 +1224,9 @@ if (typeof appendLog === 'undefined') {
 
         function startHeartbeatMonitor() {
             if (window._heartbeatTimer) clearInterval(window._heartbeatTimer);
+            // 統一入口：只要 heartbeat 啟動 = 有遠端任務執行中，按鈕列切成
+            // running 露出暫停/繼續/中止。每個 tab 不用各自呼叫。
+            if (typeof updateActionBarState === 'function') updateActionBarState('running');
             window._heartbeatTimer = setInterval(async () => {
                 const now = Date.now();
                 for (const [ip, info] of Object.entries(window._activeRemoteHosts || {})) {
@@ -1394,6 +1397,10 @@ if (typeof appendLog === 'undefined') {
         function stopHeartbeatMonitor() {
             if (window._heartbeatTimer) { clearInterval(window._heartbeatTimer); window._heartbeatTimer = null; }
             window._remoteDispatching = false;
+            // Mirror of startHeartbeatMonitor: 沒 heartbeat = 沒遠端任務跑，
+            // 按鈕列切回 idle。個別呼叫點後續若還要另外切 'idle'（transcode
+            // 補轉流程）再蓋回去無妨。
+            if (typeof updateActionBarState === 'function') updateActionBarState('idle');
         }
 
         // 顯示對應 TAB 的主進度條（多機模式，不經過 progress Socket 事件）
