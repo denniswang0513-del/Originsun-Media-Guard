@@ -586,6 +586,9 @@ async function submitDroneMeta() {
             if (isLocal) {
                 const progEl = document.getElementById('dm-progress');
                 if (progEl) progEl.classList.remove('hidden');
+                // 本機任務會由 local socket 的 task_status event 觸發按鈕切換，
+                // 但避免時序空窗，這裡先 optimistic 切一次
+                if (window.updateActionBarState) window.updateActionBarState('running');
             } else if (window.initRemoteHostProgress && window.startHeartbeatMonitor) {
                 // Reuse the shared remote-host progress panel + heartbeat monitor.
                 window._activeRemoteHosts = window._activeRemoteHosts || {};
@@ -600,6 +603,9 @@ async function submitDroneMeta() {
                     pct: 0,
                 };
                 window.startHeartbeatMonitor();
+                // 遠端任務：local socket 收不到 remote 的 task_status，手動切
+                // 按鈕為 running，heartbeat 偵測全部完成時會再切回 idle
+                if (window.updateActionBarState) window.updateActionBarState('running');
             }
         } else {
             appendLog(`提交失敗: ${JSON.stringify(result)}`, 'error');

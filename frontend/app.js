@@ -1364,7 +1364,7 @@ if (typeof appendLog === 'undefined') {
                             if (typeof appendLog === 'function') appendLog(`✅ 遠端${_jl}任務已完成。`, 'system');
                             // 更新主進度條為完成狀態（嘗試 dash 和 underscore 兩種命名）
                             const _tab = window._activeJobTab || 'backup';
-                            const _pfxMap = { backup: 'bk', transcode: 'tc', concat: 'ct', verify: 'vf', report: 'rp', transcribe: 'tr', tts: 'tts' };
+                            const _pfxMap = { backup: 'bk', transcode: 'tc', concat: 'ct', verify: 'vf', report: 'rp', transcribe: 'tr', tts: 'tts', drone_meta: 'dm' };
                             const _pfx = _pfxMap[_tab];
                             if (_pfx) {
                                 const _bar = document.getElementById(_pfx + '-prog-bar') || document.getElementById(_pfx + '_prog_bar');
