@@ -1224,8 +1224,13 @@ if (typeof appendLog === 'undefined') {
 
         function startHeartbeatMonitor() {
             if (window._heartbeatTimer) clearInterval(window._heartbeatTimer);
-            // 統一入口：只要 heartbeat 啟動 = 有遠端任務執行中，按鈕列切成
-            // running 露出暫停/繼續/中止。每個 tab 不用各自呼叫。
+            // 統一入口：heartbeat 啟動 = 有遠端任務執行中。
+            // 若有 pending idle 切換（stopHeartbeat 留的 3 秒寬限），取消之 —
+            // 避免 transcode 補轉流程 stop→merge→restart 中間閃 idle。
+            if (window._idleSwitchTimer) {
+                clearTimeout(window._idleSwitchTimer);
+                window._idleSwitchTimer = null;
+            }
             if (typeof updateActionBarState === 'function') updateActionBarState('running');
             window._heartbeatTimer = setInterval(async () => {
                 const now = Date.now();
@@ -1397,10 +1402,13 @@ if (typeof appendLog === 'undefined') {
         function stopHeartbeatMonitor() {
             if (window._heartbeatTimer) { clearInterval(window._heartbeatTimer); window._heartbeatTimer = null; }
             window._remoteDispatching = false;
-            // Mirror of startHeartbeatMonitor: 沒 heartbeat = 沒遠端任務跑，
-            // 按鈕列切回 idle。個別呼叫點後續若還要另外切 'idle'（transcode
-            // 補轉流程）再蓋回去無妨。
-            if (typeof updateActionBarState === 'function') updateActionBarState('idle');
+            // Debounced idle switch：給 3 秒寬限讓下一輪 heartbeat 有機會接手
+            // （transcode 補轉/merge 流程）。如果真的完成，3 秒後自然切 idle。
+            if (window._idleSwitchTimer) clearTimeout(window._idleSwitchTimer);
+            window._idleSwitchTimer = setTimeout(() => {
+                window._idleSwitchTimer = null;
+                if (typeof updateActionBarState === 'function') updateActionBarState('idle');
+            }, 3000);
         }
 
         // 顯示對應 TAB 的主進度條（多機模式，不經過 progress Socket 事件）
