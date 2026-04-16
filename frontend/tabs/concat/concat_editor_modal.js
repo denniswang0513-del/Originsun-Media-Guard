@@ -7,7 +7,7 @@
 
 import { COLOR_DEFAULTS, fmtDuration as _fmtDuration, secToHMS as _secToHMS } from '../../js/shared/clip_utils.js';
 import { createClipCard } from '../../js/shared/clip_card.js';
-import { renderInlineEditor, teardownInlineEditor } from '../drone_meta/drone_meta_editor.js';
+import { renderInlineEditor, teardownInlineEditor, refreshInlinePreview } from '../drone_meta/drone_meta_editor.js';
 
 let _clips = [];
 let _inlineEditIdx = -1;
@@ -435,6 +435,12 @@ function _openInline(idx) {
     const outTxt = document.getElementById(`dm_trim_out_txt_${idx}`);
     if (inTxt && clip.trim_in) inTxt.value = _secToHMS(clip.trim_in);
     if (outTxt && clip.trim_out > 0) outTxt.value = _secToHMS(clip.trim_out);
+
+    // Slider VALUEs were just overridden with saved clip data above, but
+    // the preview (#dm_preview_img + card thumb filter) was already painted
+    // based on the template's hardcoded defaults. Re-apply to sync the
+    // preview with the actual saved state.
+    refreshInlinePreview(idx);
 
     const applyAllBtn = document.createElement('button');
     applyAllBtn.textContent = '↪ 套用到全部';

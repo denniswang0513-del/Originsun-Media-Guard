@@ -513,6 +513,10 @@ function _buildCurveTable(shadows, mids, highs, curvePoints) {
     return vals.join(' ');
 }
 
+export function refreshInlinePreview(idx) {
+    _applyLivePreview(idx);
+}
+
 function _applyLivePreview(idx) {
     const mainImg = document.getElementById('dm_preview_img');
     if (!mainImg) return;
