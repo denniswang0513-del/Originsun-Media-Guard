@@ -97,7 +97,9 @@ function _buildCurveTable(shadows, mids, highs, curvePoints) {
 }
 
 // Apply a live color preview to an <img> element based on clip's settings.
-// filterId must be unique per displayed clip (caller supplies a stable string).
+// filterId is treated as a BASE — we append a unique revision suffix each
+// call so Chrome cannot reuse a stale SVG filter output (it caches url(#...)
+// aggressively and won't invalidate when only inner attrs change).
 export function applyClipFilter(imgEl, clip, filterId) {
     if (!imgEl) return;
     const b = parseFloat(clip.brightness) || 0;
@@ -112,36 +114,42 @@ export function applyClipFilter(imgEl, clip, filterId) {
     const curve = clip.curve_points;
 
     const defs = _ensureSvgDefs();
-    let filter = document.getElementById(filterId);
-    if (!filter) {
-        filter = document.createElementNS('http://www.w3.org/2000/svg', 'filter');
-        filter.id = filterId;
-        filter.setAttribute('color-interpolation-filters', 'sRGB');
-        filter.innerHTML = `
-            <feComponentTransfer data-role="brightness">
-                <feFuncR type="linear" slope="1" intercept="0"/>
-                <feFuncG type="linear" slope="1" intercept="0"/>
-                <feFuncB type="linear" slope="1" intercept="0"/>
-            </feComponentTransfer>
-            <feComponentTransfer data-role="gamma">
-                <feFuncR type="gamma" amplitude="1" exponent="1" offset="0"/>
-                <feFuncG type="gamma" amplitude="1" exponent="1" offset="0"/>
-                <feFuncB type="gamma" amplitude="1" exponent="1" offset="0"/>
-            </feComponentTransfer>
-            <feColorMatrix data-role="temp" type="matrix" values="1 0 0 0 0  0 1 0 0 0  0 0 1 0 0  0 0 0 1 0"/>
-            <feComponentTransfer data-role="curve">
-                <feFuncR type="table" tableValues="0 1"/>
-                <feFuncG type="table" tableValues="0 1"/>
-                <feFuncB type="table" tableValues="0 1"/>
-            </feComponentTransfer>`;
-        defs.appendChild(filter);
+    // Remove any previous filter this img was using (avoid defs pollution).
+    const prevId = imgEl.dataset._prevFilter;
+    if (prevId) {
+        const prev = document.getElementById(prevId);
+        if (prev) prev.remove();
     }
+    // Fresh unique ID every call.
+    const uniqueId = `${filterId}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`;
+    const filter = document.createElementNS('http://www.w3.org/2000/svg', 'filter');
+    filter.id = uniqueId;
+    filter.setAttribute('color-interpolation-filters', 'sRGB');
+    filter.innerHTML = `
+        <feComponentTransfer data-role="brightness">
+            <feFuncR type="linear" slope="1" intercept="0"/>
+            <feFuncG type="linear" slope="1" intercept="0"/>
+            <feFuncB type="linear" slope="1" intercept="0"/>
+        </feComponentTransfer>
+        <feComponentTransfer data-role="gamma">
+            <feFuncR type="gamma" amplitude="1" exponent="1" offset="0"/>
+            <feFuncG type="gamma" amplitude="1" exponent="1" offset="0"/>
+            <feFuncB type="gamma" amplitude="1" exponent="1" offset="0"/>
+        </feComponentTransfer>
+        <feColorMatrix data-role="temp" type="matrix" values="1 0 0 0 0  0 1 0 0 0  0 0 1 0 0  0 0 0 1 0"/>
+        <feComponentTransfer data-role="curve">
+            <feFuncR type="table" tableValues="0 1"/>
+            <feFuncG type="table" tableValues="0 1"/>
+            <feFuncB type="table" tableValues="0 1"/>
+        </feComponentTransfer>`;
+    defs.appendChild(filter);
+    imgEl.dataset._prevFilter = uniqueId;
+
     filter.querySelector('[data-role="brightness"]').querySelectorAll('feFuncR,feFuncG,feFuncB')
         .forEach(el => el.setAttribute('intercept', b.toFixed(4)));
     const exp = (1 / g).toFixed(4);
     filter.querySelector('[data-role="gamma"]').querySelectorAll('feFuncR,feFuncG,feFuncB')
         .forEach(el => el.setAttribute('exponent', exp));
-    // Temp shifts R/B (blue↔yellow); tint shifts G channel (magenta↔green).
     const rScale = (1 + 0.3 * t).toFixed(4);
     const bScale = (1 - 0.3 * t).toFixed(4);
     const gShift = (0.15 * tn).toFixed(4);
@@ -151,16 +159,10 @@ export function applyClipFilter(imgEl, clip, filterId) {
     filter.querySelector('[data-role="curve"]').querySelectorAll('feFuncR,feFuncG,feFuncB')
         .forEach(el => el.setAttribute('tableValues', table));
 
-    // Brightness is done inside the SVG filter (additive, matches ffmpeg
-    // `eq=brightness`); CSS brightness() is multiplicative and would diverge.
-    // Chrome caches SVG url(#...) filter output aggressively when only the
-    // filter's inner attributes change (gamma exponent, curve tableValues,
-    // etc). Toggling style.filter + forced reflow EVERY call defeats the
-    // cache — the `style.filter === next` check I had before was wrong
-    // because style string stays identical when only filter internals changed.
-    imgEl.style.filter = 'none';
-    void imgEl.offsetHeight;
-    imgEl.style.filter = `contrast(${c}) saturate(${s}) url(#${filterId})`;
+    // Brightness is done inside the SVG filter (additive, matches ffmpeg).
+    // Using uniqueId means the url() reference is always new — Chrome can't
+    // cache a "previous" output for this filter URL, so every apply is fresh.
+    imgEl.style.filter = `contrast(${c}) saturate(${s}) url(#${uniqueId})`;
 }
 
 export function hasTrim(clip) {

@@ -103,22 +103,15 @@ export function createClipCard(clip, idx, opts = {}) {
     card.dataset.idx = idx;
     card.innerHTML = buildClipCardHTML(clip, idx, opts);
 
-    // Apply live color-preview filter to the card thumbnail so color edits
-    // (and "套用到全部") reflect visually without needing to re-encode.
-    // NOTE: applyClipFilter's internal reflow trick (void offsetHeight) only
-    // works on attached elements. At this point the card is still detached,
-    // so we also queue a post-attach re-apply via requestAnimationFrame to
-    // guarantee Chrome picks up the latest filter attrs instead of cached.
+    // Apply color-preview filter. applyClipFilter generates a unique
+    // per-call SVG filter ID internally, bypassing Chrome's url(#...)
+    // output cache — so one call is enough, even on detached elements.
     const thumbImg = card.querySelector('.clip-thumb');
     if (thumbImg) {
         const key = clip.path
             ? btoa(unescape(encodeURIComponent(clip.path))).replace(/[^a-z0-9]/gi, '').slice(0, 12)
             : String(idx);
-        const filterId = `clip-filter-${opts.filterPrefix || 'c'}-${key}`;
-        applyClipFilter(thumbImg, clip, filterId);
-        requestAnimationFrame(() => {
-            if (thumbImg.isConnected) applyClipFilter(thumbImg, clip, filterId);
-        });
+        applyClipFilter(thumbImg, clip, `clip-filter-${opts.filterPrefix || 'c'}-${key}`);
     }
 
     const getIdx = () => parseInt(card.dataset.idx);
