@@ -482,17 +482,41 @@ function _getFileSetting(idx) {
 
 function collectDroneMetaPayload() {
     const fileIndex = parseInt(document.getElementById('dm_file_index').value) || 1;
-    const selectedFiles = [];
+    let selectedFiles = [];
     // Collect in _dmFiles order (which is the user's drag-sorted order)
     for (let i = 0; i < _dmFiles.length; i++) {
         if (_dmFiles[i].selected) selectedFiles.push(_getFileSetting(i));
     }
     if (!selectedFiles.length) { alert('請至少勾選一個影片檔'); return { valid: false }; }
 
+    const doConcat = document.getElementById('dm_do_concat').checked;
+
+    // 「只轉檔串帶中的鏡頭」過濾：僅在有串帶時生效，取與進階編輯 modal
+    // 選取片段的交集。不勾 = 全部外層勾選的鏡頭都轉（預設）。
+    const convertOnlyUsed = document.getElementById('dm_convert_only_used')?.checked;
+    if (doConcat && convertOnlyUsed) {
+        const modalClips = window._concatAdvancedClips || [];
+        const usedPaths = new Set(
+            modalClips.filter(c => c.selected !== false).map(c => c.path)
+        );
+        if (!usedPaths.size) {
+            alert('⚠️ 勾了「只轉檔串帶中的鏡頭」但進階編輯裡沒勾任何片段。\n請先打開進階編輯 modal 勾選素材，或取消此選項。');
+            return { valid: false };
+        }
+        const before = selectedFiles.length;
+        selectedFiles = selectedFiles.filter(f => usedPaths.has(f.path));
+        if (!selectedFiles.length) {
+            alert('⚠️ 外層勾選的素材與串帶選取的素材沒有交集。\n請檢查兩邊勾選狀態。');
+            return { valid: false };
+        }
+        if (before !== selectedFiles.length) {
+            appendLog(`📋 「只轉檔串帶中的鏡頭」啟用：${before} 個 → ${selectedFiles.length} 個將被處理`, 'system');
+        }
+    }
+
     const firstDate = selectedFiles[0]?.date_time_override || new Date().toISOString();
 
     const model = _getDroneModelInfo();
-    const doConcat = document.getElementById('dm_do_concat').checked;
 
     const payload = {
         file_index: fileIndex,
@@ -682,4 +706,12 @@ function _syncOrderFromAdvanced(e) {
 export async function initDroneMetaTab() {
     _setupProgressListener();
     window.addEventListener('dmfile:order-synced', _syncOrderFromAdvanced);
+    // Persist 「只轉檔串帶中的鏡頭」 checkbox across tab re-renders.
+    const onlyUsed = document.getElementById('dm_convert_only_used');
+    if (onlyUsed) {
+        onlyUsed.checked = !!window._dmConvertOnlyUsed;
+        onlyUsed.addEventListener('change', () => {
+            window._dmConvertOnlyUsed = onlyUsed.checked;
+        });
+    }
 }
