@@ -7,7 +7,7 @@
         <span id="dm_watcher_status_badge" class="ml-2 text-xs text-gray-400"></span>
     </summary>
     <div class="p-4 border-t border-[#2e4a6e] text-sm">
-        <div class="flex items-center gap-3 mb-3">
+        <div class="flex items-center gap-3 mb-3 relative">
             <label class="flex items-center gap-2 cursor-pointer">
                 <input type="checkbox" id="dmw_enabled"
                     class="form-checkbox text-blue-500 bg-[#1e1e1e] border-[#444] rounded">
@@ -17,6 +17,12 @@
             <label class="text-xs text-gray-400">每日執行時間</label>
             <input type="time" id="dmw_run_time" value="02:00"
                 class="bg-[#1e1e1e] border border-[#444] rounded px-2 py-1 text-xs text-gray-200 focus:outline-none focus:border-blue-500">
+            <button onclick="dmwToggleSnapshotPopover(event)"
+                class="ml-auto bg-[#333] hover:bg-[#444] text-gray-200 text-xs py-1.5 px-3 rounded border border-[#555]"
+                title="檢視目前儲存的快照，與主面板當前值比對">ℹ️ 檢視轉檔設定</button>
+            <div id="dmw_snapshot_popover"
+                class="hidden absolute z-50 top-full right-0 mt-1 p-3 bg-[#1a1a1a] border border-[#444] rounded-lg shadow-xl text-xs"
+                style="min-width:360px;max-width:520px;"></div>
         </div>
 
         <div class="grid grid-cols-1 gap-2 mb-3">
@@ -58,6 +64,8 @@
                 class="bg-[#1f538d] hover:bg-[#2a6cbf] text-white text-xs py-1.5 px-4 rounded border border-[#2a6cbf]">💾 儲存（快照主面板）</button>
             <button onclick="dmwRunNow()"
                 class="bg-[#7a5500] hover:bg-[#b07a00] text-white text-xs py-1.5 px-4 rounded border border-[#b07a00]">🔄 立即執行一次</button>
+            <button onclick="dmwCancelAll()"
+                class="bg-[#8b0000] hover:bg-[#cc2200] text-white text-xs py-1.5 px-4 rounded border border-[#cc2200]">🛑 取消全部空拍任務</button>
             <span id="dmw_next_run" class="ml-auto text-[11px] text-gray-400"></span>
         </div>
 

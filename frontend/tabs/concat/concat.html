@@ -5,9 +5,14 @@
         <div>
             <div class="flex justify-between items-center mb-1">
                 <label class="block text-sm font-medium text-gray-400">碎片影片來源 (依檔序排列)</label>
-                <button onclick="addStandaloneSource('cc_source_list')"
-                    class="text-xs bg-[#333] hover:bg-[#444] px-2 py-1 rounded text-white border border-[#555]">+
-                    新增來源</button>
+                <div class="flex gap-1">
+                    <button onclick="ccAddFiles()"
+                        class="text-xs bg-[#1f538d] hover:bg-[#2a6cbf] px-2 py-1 rounded text-white border border-[#2a6cbf]">📄 新增檔案（可多選）</button>
+                    <button onclick="ccAddFolder()"
+                        class="text-xs bg-[#1f538d] hover:bg-[#2a6cbf] px-2 py-1 rounded text-white border border-[#2a6cbf]">📁 新增資料夾</button>
+                    <button onclick="addStandaloneSource('cc_source_list')"
+                        class="text-xs bg-[#333] hover:bg-[#444] px-2 py-1 rounded text-white border border-[#555]">+ 空白列</button>
+                </div>
             </div>
             <div id="cc_source_list"
                 class="space-y-2 bg-[#1e1e1e] border border-[#444] rounded p-2 min-h-[120px] max-h-[600px] overflow-y-auto"
@@ -15,10 +20,38 @@
                 <!-- JS Generated -->
             </div>
             <div class="mt-2 flex items-center gap-3">
+                <button onclick="ccScanSources()"
+                    class="text-xs bg-[#1f538d] hover:bg-[#2a6cbf] px-3 py-1.5 rounded text-white border border-[#2a6cbf]">🔍 掃描顯示縮圖</button>
                 <button onclick="openConcatEditor()"
                     class="text-xs bg-[#6b3fa0] hover:bg-[#8254c0] px-3 py-1.5 rounded text-white border border-[#8254c0]">🎬 進階編輯...</button>
                 <span id="cc_editor_status" class="text-xs text-gray-500">尚未套用進階編輯</span>
                 <button onclick="clearConcatAdvanced()" id="cc_clear_advanced" class="text-xs text-red-400 hover:text-red-300 ml-auto hidden">清除進階設定</button>
+            </div>
+
+            <!-- Scan progress + thumbnail grid -->
+            <div id="cc-scan-progress" class="hidden mt-3 mb-2">
+                <div class="flex justify-between text-xs text-gray-400 mb-1">
+                    <span id="cc-scan-label">掃描中...</span>
+                    <span id="cc-scan-count">0 / 0</span>
+                </div>
+                <div class="w-full bg-[#1e1e1e] rounded-full h-3 border border-[#444] overflow-hidden">
+                    <div id="cc-scan-bar" class="h-3 bg-blue-500 transition-all duration-200" style="width:0%"></div>
+                </div>
+            </div>
+            <div id="cc_grid_toolbar" class="hidden flex items-center gap-3 mt-3 mb-2 text-xs text-gray-400">
+                <label class="flex items-center gap-1 cursor-pointer">
+                    <input type="checkbox" id="cc_select_all" checked onchange="ccToggleSelectAll(this.checked)"
+                        class="form-checkbox text-blue-500 bg-[#1e1e1e] border-[#444] rounded">
+                    全選
+                </label>
+                <span class="text-gray-600">|</span>
+                <span>拖曳卡片可調整排列順序</span>
+                <span id="cc_select_count" class="ml-auto text-gray-500"></span>
+                <button onclick="ccClearScan()" class="text-red-400 hover:text-red-300">清空</button>
+            </div>
+            <div id="cc_file_grid"
+                class="grid gap-3 hidden"
+                style="grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));">
             </div>
         </div>
         <div>

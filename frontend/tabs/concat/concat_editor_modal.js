@@ -49,11 +49,26 @@ function _mergeFresh(stored, freshByPath) {
 
 const _PHASE_LABEL = { init: '準備中', files: '列出檔案', thumbs: '載入縮圖', details: '讀取資訊' };
 
+function _activeScanSource() {
+    // Prefer currently-visible tab's scan. Both tabs scan via the same
+    // /api/v1/drone_meta/scan_stream endpoint; which getter we call only
+    // decides whose in-memory list the modal edits.
+    const cc = (typeof window.getCcFiles === 'function') ? window.getCcFiles() : [];
+    const dm = (typeof window.getDmFiles === 'function') ? window.getDmFiles() : [];
+    const ccVisible = document.getElementById('tab_concat')
+        && !document.getElementById('tab_concat').classList.contains('hidden');
+    if (ccVisible && cc.length) return cc;
+    if (!ccVisible && dm.length) return dm;
+    return cc.length ? cc : dm;
+}
+
 export function openConcatEditor() {
-    const scanned = (typeof window.getDmFiles === 'function') ? window.getDmFiles() : [];
+    const scanned = _activeScanSource();
     const byPath = new Map(scanned.map(f => [f.path, f]));
 
-    // If drone_meta scan is still running, warn user (data will auto-refresh live)
+    // Live refresh is a drone_meta-side signal; skip the "still scanning" warn
+    // for concat because concat's scan is synchronous enough that the user
+    // wouldn't click this button before it finishes.
     const scan = (typeof window.getDmScanState === 'function') ? window.getDmScanState() : null;
     if (scan && scan.running) {
         const phaseName = _PHASE_LABEL[scan.phase] || scan.phase;
@@ -65,7 +80,7 @@ export function openConcatEditor() {
         _clips = window._concatAdvancedClips.map(c => _mergeFresh({ ...c }, byPath));
     } else {
         if (!scanned.length) {
-            alert('請先到「空拍寫入」Tab 掃描檔案後再打開進階編輯。');
+            alert('請先在此 Tab 掃描影片後再打開進階編輯\n（製作串帶：先按「🔍 掃描顯示縮圖」；空拍寫入：先選擇資料夾）');
             return;
         }
         _clips = scanned.map(_cloneClip);

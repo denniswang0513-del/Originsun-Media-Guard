@@ -835,19 +835,176 @@ async function dmwSave() {
 }
 
 async function dmwRunNow() {
-    if (!confirm('立即執行一次空拍排程掃描？\n（會依當前已儲存的設定執行，未儲存的主面板異動不會生效）')) return;
+    const payload = {
+        enabled: true,
+        run_time: document.getElementById('dmw_run_time')?.value || '02:00',
+        source_root: document.getElementById('dmw_source_root')?.value?.trim() || '',
+        dest_root: document.getElementById('dmw_dest_root')?.value?.trim() || '',
+        concat_dest_root: document.getElementById('dmw_concat_dest_root')?.value?.trim() || '',
+        snapshot: _dmwSnapshotMainPanel(),
+    };
+    if (!payload.source_root || !payload.dest_root) {
+        alert('請先填寫來源與目的根目錄');
+        return;
+    }
     appendLog('🔄 空拍排程手動觸發中...', 'system');
     try {
-        const r = await fetch('/api/v1/drone_watcher/run_now', { method: 'POST' });
+        const r = await fetch('/api/v1/drone_watcher/run_now', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload),
+        });
         const data = await r.json();
         if (!r.ok) { alert('執行失敗: ' + (data.error || r.status)); return; }
         if (data.error) { alert('執行失敗: ' + data.error); return; }
         appendLog(`✅ 掃描完成：${data.folders} 個資料夾 / ${data.files} 個檔案已派發佇列`, 'system');
+
+        // Jobs just entered the queue; surface pause/stop buttons immediately
+        // so the user can intervene while the worker processes them.
+        window._activeJobTab = 'drone_meta';
+        const progEl = document.getElementById('dm-progress');
+        if (progEl) progEl.classList.remove('hidden');
+        if (window.updateActionBarState) window.updateActionBarState('running');
+
         _dmwLoadConfig();
     } catch (e) {
         alert('執行失敗: ' + e.message);
     }
 }
 
+async function dmwCancelAll() {
+    if (!confirm('確定要取消全部空拍任務嗎？\n這會刪除所有排隊中的空拍任務，並中止目前正在執行的那一個。')) return;
+    try {
+        const r = await fetch('/api/v1/drone_watcher/cancel_all', { method: 'POST' });
+        const data = await r.json();
+        if (!r.ok) { alert('取消失敗: ' + (data.error || r.status)); return; }
+        const q = data.cancelled_queued || 0;
+        const s = data.stopped_running || 0;
+        appendLog(`🛑 已取消空拍任務：排隊 ${q} 個 + 執行中 ${s} 個`, 'system');
+        if (window.updateActionBarState && s > 0) window.updateActionBarState('idle');
+    } catch (e) {
+        alert('取消失敗: ' + e.message);
+    }
+}
+
+// ── Snapshot inspector popover ─────────────────────────────
+
+const _DMW_MODEL_LABELS = {
+    'autel_evo_lite_plus': 'Autel EVO Lite+',
+    'dji_mavic3': 'DJI Mavic 3',
+    'dji_mini4pro': 'DJI Mini 4 Pro',
+    'dji_air3': 'DJI Air 3',
+    'custom': '自訂',
+};
+
+function _dmwFmtBool(v) { return v ? '✓ 開' : '✗ 關'; }
+
+function _dmwFmtModel(snap) {
+    const key = snap?.drone_model_key || '';
+    const label = _DMW_MODEL_LABELS[key] || key || '(未設定)';
+    if (key === 'custom') {
+        const extra = [snap.custom_make, snap.custom_model].filter(Boolean).join(' ');
+        return extra ? `${label} — ${extra}` : label;
+    }
+    return label;
+}
+
+function _dmwBuildSnapshotHtml(cfg, saved, current) {
+    const topRows = [
+        ['啟用',        cfg.enabled ? '✓ 已啟用' : '✗ 未啟用'],
+        ['每日執行時間', cfg.run_time || '(未設定)'],
+        ['來源根目錄',   cfg.source_root || '(未設定)'],
+        ['目的根目錄',   cfg.dest_root || '(未設定)'],
+        ['串帶目的根目錄', cfg.concat_dest_root || '(與目的根同)'],
+    ];
+
+    const snapFields = [
+        ['drone_model_key', '目標機種',  _dmwFmtModel],
+        ['file_index',      '檔案起始編號', v => v ?? 1],
+        ['do_concat',       '串帶',      _dmwFmtBool],
+        ['concat_custom_name', '自訂串帶檔名', v => v || '(空=用資料夾名)'],
+        ['concat_resolution',  '解析度',   v => v || '-'],
+        ['concat_codec',       '編碼器',   v => v || '-'],
+        ['concat_burn_timecode', '燒錄 TC',   _dmwFmtBool],
+        ['concat_burn_filename', '燒錄檔名',  _dmwFmtBool],
+        ['concat_xfade_enabled', '轉場',     _dmwFmtBool],
+        ['concat_xfade_type',    '轉場類型', v => v || '-'],
+        ['concat_xfade_duration','轉場秒數', v => `${v ?? 1}s`],
+    ];
+
+    const esc = (s) => String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+
+    const topHtml = topRows.map(([label, val]) =>
+        `<div class="flex justify-between gap-3 py-0.5"><span class="text-gray-500">${label}</span><span class="text-gray-200 text-right truncate">${esc(val)}</span></div>`
+    ).join('');
+
+    let diffCount = 0;
+    const snapHtml = snapFields.map(([key, label, fmt]) => {
+        const sv = (key === 'drone_model_key') ? fmt(saved) : fmt(saved[key]);
+        const cv = (key === 'drone_model_key') ? fmt(current) : fmt(current[key]);
+        const dirty = sv !== cv;
+        if (dirty) diffCount++;
+        const dirtyMark = dirty
+            ? ` <span class="text-yellow-400 ml-1">⚠ 主面板:</span> <span class="text-yellow-200">${esc(cv)}</span>`
+            : '';
+        const rowClass = dirty ? 'bg-yellow-900/20 rounded px-1' : '';
+        return `<div class="flex justify-between gap-3 py-0.5 ${rowClass}"><span class="text-gray-500">${label}</span><span class="text-gray-200 text-right">${esc(sv)}${dirtyMark}</span></div>`;
+    }).join('');
+
+    const footer = diffCount > 0
+        ? `<div class="mt-2 pt-2 border-t border-[#333] text-yellow-400">⚠ 有 ${diffCount} 項與主面板不同，重按「💾 儲存」才會讓排程用新的值</div>`
+        : `<div class="mt-2 pt-2 border-t border-[#333] text-green-400">✓ 快照與主面板一致</div>`;
+
+    return `
+        <div class="text-gray-300 font-semibold mb-1">排程本身</div>
+        ${topHtml}
+        <div class="text-gray-300 font-semibold mt-3 mb-1">快照（每日執行時會使用的值）</div>
+        ${snapHtml}
+        ${footer}
+    `;
+}
+
+let _dmwPopoverCloseHandler = null;
+
+function _dmwClosePopover(pop) {
+    pop.classList.add('hidden');
+    if (_dmwPopoverCloseHandler) {
+        document.removeEventListener('click', _dmwPopoverCloseHandler);
+        _dmwPopoverCloseHandler = null;
+    }
+}
+
+async function dmwToggleSnapshotPopover(evt) {
+    // stopPropagation prevents the outside-click handler (bubble-phase)
+    // from firing for this same click — so toggle-close via button works.
+    if (evt) evt.stopPropagation();
+    const pop = document.getElementById('dmw_snapshot_popover');
+    if (!pop) return;
+    if (!pop.classList.contains('hidden')) {
+        _dmwClosePopover(pop);
+        return;
+    }
+    try {
+        const res = await fetch('/api/v1/drone_watcher/config');
+        const data = await res.json();
+        const cfg = data.config || {};
+        const saved = cfg.snapshot || {};
+        const current = _dmwSnapshotMainPanel();
+        pop.innerHTML = _dmwBuildSnapshotHtml(cfg, saved, current);
+        pop.classList.remove('hidden');
+
+        _dmwPopoverCloseHandler = (e) => {
+            if (!pop.contains(e.target)) _dmwClosePopover(pop);
+        };
+        // Defer to next tick so the opening click doesn't immediately match this handler
+        setTimeout(() => document.addEventListener('click', _dmwPopoverCloseHandler), 0);
+    } catch (e) {
+        pop.innerHTML = `<div class="text-red-400">讀取失敗：${e.message}</div>`;
+        pop.classList.remove('hidden');
+    }
+}
+
 window.dmwSave = dmwSave;
 window.dmwRunNow = dmwRunNow;
+window.dmwCancelAll = dmwCancelAll;
+window.dmwToggleSnapshotPopover = dmwToggleSnapshotPopover;

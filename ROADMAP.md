@@ -4,7 +4,7 @@
 
 ---
 
-## 現況 (v1.10.79) 基準線
+## 現況 (v1.10.80) 基準線
 
 - ✅ 7 個完整工作流程（備份、比對、轉 Proxy、串帶、報表、AI 逐字稿、空拍寫入）
 - ✅ 模組化後端：`main.py` + `core/` + `routers/`（router 容錯載入，缺模組跳過不 crash）
@@ -566,7 +566,7 @@ tools:
     ▼ Phase J: CRM + 專案管理 + 帳務 (✅ 核心完成)
     │   → 64 API / 11 DB 表 / 6 Tab + 5 子視圖 + 手機版 RWD + Inline 編輯
     │
-現在 (v1.10.79) ← 你在這裡
+現在 (v1.10.80) ← 你在這裡
     │
     ▼ Phase J-3: 備份 Tab 整合 (⬜)
     │
@@ -600,6 +600,7 @@ tools:
 
 | 版本 | 日期 | 重點 |
 |------|------|------|
+| v1.10.80 | 2026-04-19 | 製作串帶功能對齊空拍寫入（payload 補齊 tint/影調/curves/xfade + 主面板縮圖網格 + 檔案多選/資料夾/空白列）+ Watcher 面板強化（立即執行讀 UI 不需先存、取消全部任務按鈕、檢視轉檔設定 popover 含 dirty 標註）+ Worker 自動 makedirs 修空目錄 crash + NVENC probe 影格 64→256 修 false negative + 空拍寫入 tab 未選時 reset 色 |
 | v1.10.79 | 2026-04-18 | 空拍轉場預設改 fade（前後交融）+ 排程監控（每日指定時間掃來源根目錄，自動轉檔+串帶，完成通知 Google Chat/LINE）+ 串帶檔名 fallback 修復（project_name 從來源資料夾末段推導，剝除副檔名） |
 | v1.10.78 | 2026-04-17 | 空拍編輯 UX：縮圖即時調色(unique SVG filter ID 繞 Chrome cache)、重開保留預覽、scan 清除舊狀態；按鈕列對齊+遠端任務顯示暫停/中止(3秒 debounce 不閃爍) |
 | v1.10.77 | 2026-04-16 | NVENC 驅動過舊自動退軟編 (fix SOCA etc. 舊驅動) — proactive probe + reactive fallback |

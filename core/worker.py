@@ -733,6 +733,13 @@ def _drone_meta_sync(job, engine, task: DroneMetaRequest, _on_progress):
     fail_list = []
     new_file_paths = []
 
+    # Pre-create output dirs — watcher may target a fresh sub-dir that
+    # doesn't exist yet; also protects users who typed a non-existent path.
+    if task.output_dir:
+        os.makedirs(task.output_dir, exist_ok=True)
+    if task.do_concat and task.concat_dest_dir:
+        os.makedirs(task.concat_dest_dir, exist_ok=True)
+
     for idx, file_setting in enumerate(task.files):
         fpath = file_setting.path
         current_index = task.file_index + idx

@@ -71,7 +71,13 @@ class MediaGuardEngine:
 
     def nvenc_available(self):
         """Probe NVENC via a tiny lavfi test-encode; cache result.
-        Returns False on old NVIDIA drivers (< 570) or no GPU."""
+        Returns False on old NVIDIA drivers (< 570) or no GPU.
+
+        Frame size must clear NVENC's minimum supported dimension, which
+        varies by GPU generation — some newer cards reject <128px with
+        "Frame Dimension less than the minimum supported value". Using
+        256x256 safely clears all current NVENC implementations.
+        """
         cached = getattr(self, '_nvenc_cached', None)
         if cached is not None:
             return cached
@@ -79,7 +85,7 @@ class MediaGuardEngine:
             import subprocess as _sp_probe
             r = _sp_probe.run(
                 ['ffmpeg', '-hide_banner', '-loglevel', 'error',
-                 '-f', 'lavfi', '-i', 'color=black:s=64x64:d=0.1:r=30',
+                 '-f', 'lavfi', '-i', 'color=black:s=256x256:d=0.1:r=30',
                  '-c:v', 'h264_nvenc', '-t', '0.1', '-f', 'null', '-'],
                 capture_output=True, timeout=10,
                 creationflags=getattr(_sp_probe, 'CREATE_NO_WINDOW', 0x08000000),
@@ -88,8 +94,8 @@ class MediaGuardEngine:
             if not self._nvenc_cached:
                 stderr = (r.stderr or b"").decode('utf-8', errors='ignore')[-300:]
                 self.log(f"[Engine] NVENC 不可用 (驅動過舊或無 NVIDIA GPU)，將使用 libx264 軟編")
-                if 'Required' in stderr and 'Found' in stderr:
-                    self.log(f"[Engine] NVENC 錯誤訊息: {stderr.strip()[:200]}")
+                if stderr.strip():
+                    self.log(f"[Engine] NVENC 錯誤訊息: {stderr.strip()[:300]}")
         except Exception as e:
             self._nvenc_cached = False
             self.log(f"[Engine] NVENC 探測失敗: {e}，將使用 libx264")

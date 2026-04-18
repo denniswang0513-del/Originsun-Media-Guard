@@ -430,6 +430,18 @@ window.pickPath = pickPath;
 window.getComputeBaseUrl = getComputeBaseUrl;
 window.resetProgress = resetProgress;
 
+export async function pickFiles(title = '選擇影片（可多選）') {
+    try {
+        const res = await fetch('/api/v1/utils/pick_files?title=' + encodeURIComponent(title));
+        if (!res.ok) return [];
+        const data = await res.json();
+        return data.paths || [];
+    } catch (_) {
+        return [];
+    }
+}
+window.pickFiles = pickFiles;
+
 export function addStandaloneSource(listId, defaultPath = '') {
     const container = document.getElementById(listId);
     if (!container) return;

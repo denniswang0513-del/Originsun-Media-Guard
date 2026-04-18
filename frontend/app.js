@@ -1130,7 +1130,7 @@ if (typeof appendLog === 'undefined') {
             document.getElementById(tabId).classList.remove('hidden');
 
             // 重置按鈕樣式
-            const btnCols = ['btn_tab-projects', 'btn_tab_main', 'btn_tab_verify', 'btn_tab_transcode', 'btn_tab_concat', 'btn_tab_report', 'btn_tab_transcribe', 'btn_tab_tts', 'btn_tab_crm_clients', 'btn_tab_crm_projects', 'btn_tab_crm_staff', 'btn_tab_crm_invoices'];
+            const btnCols = ['btn_tab-projects', 'btn_tab_main', 'btn_tab_verify', 'btn_tab_transcode', 'btn_tab_concat', 'btn_tab_report', 'btn_tab_transcribe', 'btn_tab_tts', 'btn_tab_drone_meta', 'btn_tab_crm_clients', 'btn_tab_crm_projects', 'btn_tab_crm_staff', 'btn_tab_crm_invoices'];
             btnCols.forEach(btn => {
                 const el = document.getElementById(btn);
                 if (el) {

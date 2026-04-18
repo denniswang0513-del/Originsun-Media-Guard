@@ -35,8 +35,17 @@ async def open_local_folder(req: OpenFileRequest):
         return {"status": "error", "message": f"資料夾不存在: {folder_path}"}
     except Exception as e: return {"status": "error", "message": str(e)}
 
-def _run_picker_subprocess(mode: str, title: str) -> str:
+_VIDEO_FILETYPES = (
+    "(('Video', '*.mov *.mp4 *.mkv *.mxf *.avi *.mts *.m2ts *.MOV *.MP4'),"
+    " ('All files', '*.*'))"
+)
+
+
+def _run_picker_subprocess(mode: str, title: str):
     """Run tkinter file/folder dialog in a fresh subprocess.
+
+    Modes: 'folder' → askdirectory (str), 'file' → askopenfilename (str),
+    'files' → askopenfilenames with video filter (list[str]).
 
     NOTE: This only works when the Agent runs in the user's interactive
     session (Session 1). If `schtasks /rl highest` was used during install
@@ -46,6 +55,15 @@ def _run_picker_subprocess(mode: str, title: str) -> str:
     Install_or_Update.bat once.
     """
     import sys, json as _j
+    if mode == "folder":
+        dialog_call = f"filedialog.askdirectory(title={title!r})"
+        out_expr = "{'path': result or ''}"
+    elif mode == "files":
+        dialog_call = f"filedialog.askopenfilenames(title={title!r}, filetypes={_VIDEO_FILETYPES})"
+        out_expr = "{'paths': list(result) if result else []}"
+    else:
+        dialog_call = f"filedialog.askopenfilename(title={title!r})"
+        out_expr = "{'path': result or ''}"
     script = (
         "import tkinter as tk\n"
         "from tkinter import filedialog\n"
@@ -53,9 +71,9 @@ def _run_picker_subprocess(mode: str, title: str) -> str:
         "root = tk.Tk()\n"
         "root.attributes('-topmost', True)\n"
         "root.withdraw()\n"
-        f"path = filedialog.{'askdirectory' if mode == 'folder' else 'askopenfilename'}(title={title!r})\n"
+        f"result = {dialog_call}\n"
         "root.destroy()\n"
-        "sys.stdout.write(json.dumps({'path': path or ''}))\n"
+        f"sys.stdout.write(json.dumps({out_expr}))\n"
     )
     try:
         res = subprocess.run(
@@ -65,10 +83,10 @@ def _run_picker_subprocess(mode: str, title: str) -> str:
         )
         if res.returncode == 0 and res.stdout.strip():
             data = _j.loads(res.stdout.strip())
-            return data.get("path", "")
+            return data.get("paths", []) if mode == "files" else data.get("path", "")
     except Exception:
         pass
-    return ""
+    return [] if mode == "files" else ""
 
 
 @router.get("/api/v1/utils/pick_folder")
@@ -80,6 +98,11 @@ async def api_pick_folder(title: str = "選擇資料夾"):
 async def api_pick_file(title: str = "選擇檔案"):
     selected = await asyncio.to_thread(_run_picker_subprocess, "file", title)
     return {"path": selected}
+
+@router.get("/api/v1/utils/pick_files")
+async def api_pick_files(title: str = "選擇影片（可多選）"):
+    paths = await asyncio.to_thread(_run_picker_subprocess, "files", title)
+    return {"paths": paths}
 
 @router.get("/api/v1/utils/browse_dir")
 async def browse_dir(path: str = ""):
