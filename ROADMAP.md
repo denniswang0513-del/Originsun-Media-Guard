@@ -34,6 +34,8 @@
 - ✅ NAS 瀏覽器 — 外網使用者用 Web Modal 取代 Windows 對話框，自動偵測磁碟根目錄 + 白名單安全限制
 - ✅ API 目錄瀏覽端點 — `GET /api/v1/browse` 支援 `browse_roots` 白名單 + 自動偵測磁碟
 - ✅ CRM 客戶管理 Tab — `routers/api_crm.py` 7 端點 + `frontend/tabs/crm/` + CSV 匯入（Notion/Google Sheets）
+- ✅ 空拍排程監控（v1.10.79/80）— 每日指定時間掃來源根目錄 → 自動轉檔 + 串帶到目的；完成通知 Google Chat/LINE；取消全部任務按鈕；「檢視轉檔設定」popover（快照顯示 + dirty 項高亮與主面板比對）；立即執行讀 UI 不需先存
+- ✅ 製作串帶對齊空拍寫入（v1.10.80）— Payload 補齊 tint/影調/curves/xfade（silent bug）；主面板縮圖網格（複用 clip_card.js）；新增來源三鈕（多選檔案/資料夾/空白列）；Modal 依可見 tab 自動切資料源
 
 ---
 
