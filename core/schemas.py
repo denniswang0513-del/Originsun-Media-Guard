@@ -87,7 +87,7 @@ class ConcatRequest(BaseModel):
     # advanced_clips has >= 2 entries; per-transition auto-skip when any
     # side's effective length < duration).
     xfade_enabled: bool = False
-    xfade_type: str = "dissolve"
+    xfade_type: str = "fade"
     xfade_duration: float = 1.0
 
 class VerifyRequest(BaseModel):
@@ -221,8 +221,36 @@ class DroneMetaRequest(BaseModel):
     concat_burn_timecode: bool = True
     concat_burn_filename: bool = False
     concat_xfade_enabled: bool = False
-    concat_xfade_type: str = "dissolve"
+    concat_xfade_type: str = "fade"
     concat_xfade_duration: float = 1.0
+
+
+class DroneWatcherSnapshot(BaseModel):
+    """快照主面板當前設定 — 排程執行時完全照此設定重現。"""
+    drone_model_key: str = "autel_evo_lite_plus"
+    custom_make: str = ""
+    custom_model: str = ""
+    custom_lens_make: str = ""
+    custom_lens_model: str = ""
+    file_index: int = 1
+    do_concat: bool = True
+    concat_custom_name: str = ""
+    concat_resolution: str = "1080P"
+    concat_codec: str = "H.264 (NVENC)"
+    concat_burn_timecode: bool = True
+    concat_burn_filename: bool = False
+    concat_xfade_enabled: bool = False
+    concat_xfade_type: str = "fade"
+    concat_xfade_duration: float = 1.0
+
+
+class DroneWatcherConfig(BaseModel):
+    enabled: bool = False
+    run_time: str = "02:00"           # 每日執行時間 HH:MM
+    source_root: str = ""              # 來源根目錄（內含多個子卡資料夾）
+    dest_root: str = ""                # MAX_* 輸出的根目錄
+    concat_dest_root: str = ""         # 串帶輸出根目錄（空則與 dest_root 同）
+    snapshot: DroneWatcherSnapshot = DroneWatcherSnapshot()
 
 
 class DownloadModelRequest(BaseModel):

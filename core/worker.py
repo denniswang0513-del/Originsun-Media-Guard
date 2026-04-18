@@ -987,7 +987,7 @@ def _drone_meta_sync(job, engine, task: DroneMetaRequest, _on_progress):
             engine.run_concat_job(
                 sources=new_file_paths,
                 dest_dir=task.concat_dest_dir,
-                custom_name=getattr(task, 'concat_custom_name', '') or '',
+                custom_name=(getattr(task, 'concat_custom_name', '') or task.project_name or '').strip(),
                 resolution=task.concat_resolution,
                 codec=task.concat_codec,
                 burn_timecode=task.concat_burn_timecode,

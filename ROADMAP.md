@@ -4,7 +4,7 @@
 
 ---
 
-## 現況 (v1.10.78) 基準線
+## 現況 (v1.10.79) 基準線
 
 - ✅ 7 個完整工作流程（備份、比對、轉 Proxy、串帶、報表、AI 逐字稿、空拍寫入）
 - ✅ 模組化後端：`main.py` + `core/` + `routers/`（router 容錯載入，缺模組跳過不 crash）
@@ -566,7 +566,7 @@ tools:
     ▼ Phase J: CRM + 專案管理 + 帳務 (✅ 核心完成)
     │   → 64 API / 11 DB 表 / 6 Tab + 5 子視圖 + 手機版 RWD + Inline 編輯
     │
-現在 (v1.10.78) ← 你在這裡
+現在 (v1.10.79) ← 你在這裡
     │
     ▼ Phase J-3: 備份 Tab 整合 (⬜)
     │
@@ -600,6 +600,7 @@ tools:
 
 | 版本 | 日期 | 重點 |
 |------|------|------|
+| v1.10.79 | 2026-04-18 | 空拍轉場預設改 fade（前後交融）+ 排程監控（每日指定時間掃來源根目錄，自動轉檔+串帶，完成通知 Google Chat/LINE）+ 串帶檔名 fallback 修復（project_name 從來源資料夾末段推導，剝除副檔名） |
 | v1.10.78 | 2026-04-17 | 空拍編輯 UX：縮圖即時調色(unique SVG filter ID 繞 Chrome cache)、重開保留預覽、scan 清除舊狀態；按鈕列對齊+遠端任務顯示暫停/中止(3秒 debounce 不閃爍) |
 | v1.10.77 | 2026-04-16 | NVENC 驅動過舊自動退軟編 (fix SOCA etc. 舊驅動) — proactive probe + reactive fallback |
 | v1.10.76 | 2026-04-15 | drone_meta 重構：第一階段純規格化、色彩/trim/xfade 全部延後到串帶；xfade 12 種類型；Trim 拖曳手把+I/O鍵;無音訊素材自動處理；中間檔移除 faststart 砍 50% IO |

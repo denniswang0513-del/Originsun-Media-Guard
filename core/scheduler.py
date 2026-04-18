@@ -406,4 +406,10 @@ async def run_scheduler():
             await asyncio.to_thread(_check_and_dispatch)
         except Exception:
             _log.exception("排程檢查迴圈發生異常")
+        # 空拍排程監控（每日指定時間觸發）
+        try:
+            from core import drone_watcher  # type: ignore
+            await asyncio.to_thread(drone_watcher.check_and_fire)
+        except Exception:
+            _log.exception("空拍排程監控檢查異常")
         await asyncio.sleep(60)

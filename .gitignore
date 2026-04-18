@@ -29,6 +29,8 @@ settings.json
 bookmarks.json
 scheduled_jobs.json
 job_history.json
+watcher_config.json
+watcher_history.json
 update_status.json
 
 # OS

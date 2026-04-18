@@ -129,7 +129,7 @@ function _applyAndClose() {
     const xfType = document.getElementById('cc_xfade_type');
     const xfDuration = document.getElementById('cc_xfade_duration');
     window._concatXfadeEnabled = !!(xfEnabled && xfEnabled.checked);
-    window._concatXfadeType = (xfType && xfType.value) || 'dissolve';
+    window._concatXfadeType = (xfType && xfType.value) || 'fade';
     window._concatXfadeDuration = parseFloat(xfDuration && xfDuration.value) || 1.0;
 
     _updateConcatStatus();
@@ -235,8 +235,8 @@ function _renderModal() {
                     <span class="text-gray-500">類型</span>
                     <select id="cc_xfade_type"
                         class="bg-[#111] border border-[#2a2a2a] rounded px-2 py-1 text-[11px] text-gray-200 focus:outline-none focus:border-purple-500">
-                        <option value="dissolve">dissolve（溶解，預設）</option>
-                        <option value="fade">fade（純淡入淡出）</option>
+                        <option value="fade">fade（前後交融，預設）</option>
+                        <option value="dissolve">dissolve（顆粒溶解）</option>
                         <option value="fadeblack">fadeblack（過黑）</option>
                         <option value="fadewhite">fadewhite（過白）</option>
                         <option value="wipeleft">wipeleft（向左擦除）</option>
@@ -270,7 +270,7 @@ function _renderModal() {
 
     // Restore saved transition type (dropdown value can't be set via template attr above)
     const xfType = document.getElementById('cc_xfade_type');
-    if (xfType) xfType.value = window._concatXfadeType || 'dissolve';
+    if (xfType) xfType.value = window._concatXfadeType || 'fade';
 }
 
 // ── Grid ──

@@ -518,7 +518,22 @@ function collectDroneMetaPayload() {
 
     const model = _getDroneModelInfo();
 
+    // Derive project_name from source path: prefer picked folder/file last
+    // segment, fall back to the first scanned file's parent dir if source
+    // path is empty (e.g. user typed nothing, file list was populated another
+    // way). Strip video extensions so a single-file pick doesn't produce
+    // `clip.mov.mp4` at concat time.
+    const srcPath = document.getElementById('dm_source_path')?.value?.trim() || '';
+    const firstToken = (srcPath.split(',')[0] || '').trim();
+    let lastSegment = firstToken.split(/[\\/]/).filter(Boolean).pop() || '';
+    if (!lastSegment && _dmFiles.length) {
+        const firstFileDir = (_dmFiles[0].path || '').split(/[\\/]/).slice(0, -1).filter(Boolean).pop() || '';
+        lastSegment = firstFileDir;
+    }
+    const folderName = lastSegment.replace(/\.(mov|mp4|mkv|mxf|avi|mts|m2ts)$/i, '');
+
     const payload = {
+        project_name: folderName,
         file_index: fileIndex,
         files: selectedFiles,
         output_dir: document.getElementById('dm_output_dir').value.trim(),
@@ -535,7 +550,7 @@ function collectDroneMetaPayload() {
         concat_burn_timecode: document.getElementById('dm_concat_tc').checked,
         concat_burn_filename: document.getElementById('dm_concat_fn').checked,
         concat_xfade_enabled: !!window._concatXfadeEnabled,
-        concat_xfade_type: window._concatXfadeType || 'dissolve',
+        concat_xfade_type: window._concatXfadeType || 'fade',
         concat_xfade_duration: parseFloat(window._concatXfadeDuration) || 1.0,
     };
 
@@ -714,4 +729,125 @@ export async function initDroneMetaTab() {
             window._dmConvertOnlyUsed = onlyUsed.checked;
         });
     }
+    _dmwLoadConfig();
 }
+
+// ── 排程自動執行（Watcher） ─────────────────────────────────
+
+function _dmwSnapshotMainPanel() {
+    return {
+        drone_model_key: document.getElementById('dm_drone_model')?.value || 'autel_evo_lite_plus',
+        custom_make: document.getElementById('dm_custom_make')?.value || '',
+        custom_model: document.getElementById('dm_custom_model')?.value || '',
+        custom_lens_make: document.getElementById('dm_custom_lens_make')?.value || '',
+        custom_lens_model: document.getElementById('dm_custom_lens_model')?.value || '',
+        file_index: parseInt(document.getElementById('dm_file_index')?.value) || 1,
+        do_concat: !!document.getElementById('dm_do_concat')?.checked,
+        concat_custom_name: document.getElementById('dm_concat_name')?.value?.trim() || '',
+        concat_resolution: document.getElementById('dm_concat_res')?.value || '1080P',
+        concat_codec: document.getElementById('dm_concat_codec')?.value || 'H.264 (NVENC)',
+        concat_burn_timecode: !!document.getElementById('dm_concat_tc')?.checked,
+        concat_burn_filename: !!document.getElementById('dm_concat_fn')?.checked,
+        concat_xfade_enabled: !!window._concatXfadeEnabled,
+        concat_xfade_type: window._concatXfadeType || 'fade',
+        concat_xfade_duration: parseFloat(window._concatXfadeDuration) || 1.0,
+    };
+}
+
+async function _dmwLoadConfig() {
+    try {
+        const r = await fetch('/api/v1/drone_watcher/config');
+        if (!r.ok) return;
+        const data = await r.json();
+        const cfg = data.config || {};
+        const e = document.getElementById('dmw_enabled');
+        const t = document.getElementById('dmw_run_time');
+        const sr = document.getElementById('dmw_source_root');
+        const dr = document.getElementById('dmw_dest_root');
+        const cdr = document.getElementById('dmw_concat_dest_root');
+        if (e) e.checked = !!cfg.enabled;
+        if (t && cfg.run_time) t.value = cfg.run_time;
+        if (sr) sr.value = cfg.source_root || '';
+        if (dr) dr.value = cfg.dest_root || '';
+        if (cdr) cdr.value = cfg.concat_dest_root || '';
+        _dmwRenderStatus(data);
+    } catch (_) { /* silent */ }
+}
+
+function _dmwRenderStatus(data) {
+    const badge = document.getElementById('dm_watcher_status_badge');
+    const nextRun = document.getElementById('dmw_next_run');
+    const history = document.getElementById('dmw_history');
+    const cfg = data.config || {};
+
+    if (badge) {
+        badge.textContent = cfg.enabled
+            ? `已啟用 · 每日 ${cfg.run_time || '02:00'}`
+            : '未啟用';
+        badge.style.color = cfg.enabled ? '#4ade80' : '#888';
+    }
+    if (nextRun) {
+        nextRun.textContent = data.next_run
+            ? `下次執行: ${data.next_run.replace('T', ' ')}`
+            : '';
+    }
+    if (history) {
+        const items = data.history || [];
+        if (!items.length) {
+            history.innerHTML = '<div class="text-gray-600">尚無紀錄</div>';
+        } else {
+            history.innerHTML = items.map(h => {
+                const icon = h.status === 'error' ? '❌' : (h.status === 'partial' ? '⚠️' : '✅');
+                const trig = h.trigger === 'manual' ? '手動' : '排程';
+                const note = h.note || `處理 ${h.folder_count || 0} 個資料夾 / ${h.file_count || 0} 個檔案`;
+                return `<div class="text-gray-400">${icon} ${h.ts.replace('T', ' ')} · ${trig} · ${note}</div>`;
+            }).join('');
+        }
+    }
+}
+
+async function dmwSave() {
+    const payload = {
+        enabled: !!document.getElementById('dmw_enabled')?.checked,
+        run_time: document.getElementById('dmw_run_time')?.value || '02:00',
+        source_root: document.getElementById('dmw_source_root')?.value?.trim() || '',
+        dest_root: document.getElementById('dmw_dest_root')?.value?.trim() || '',
+        concat_dest_root: document.getElementById('dmw_concat_dest_root')?.value?.trim() || '',
+        snapshot: _dmwSnapshotMainPanel(),
+    };
+    if (payload.enabled && (!payload.source_root || !payload.dest_root)) {
+        alert('請填寫來源與目的根目錄');
+        return;
+    }
+    try {
+        const r = await fetch('/api/v1/drone_watcher/config', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload),
+        });
+        if (!r.ok) { alert('儲存失敗: ' + r.status); return; }
+        const data = await r.json();
+        appendLog('✅ 空拍排程設定已儲存（已快照主面板當前值）', 'system');
+        _dmwRenderStatus(data);
+    } catch (e) {
+        alert('儲存失敗: ' + e.message);
+    }
+}
+
+async function dmwRunNow() {
+    if (!confirm('立即執行一次空拍排程掃描？\n（會依當前已儲存的設定執行，未儲存的主面板異動不會生效）')) return;
+    appendLog('🔄 空拍排程手動觸發中...', 'system');
+    try {
+        const r = await fetch('/api/v1/drone_watcher/run_now', { method: 'POST' });
+        const data = await r.json();
+        if (!r.ok) { alert('執行失敗: ' + (data.error || r.status)); return; }
+        if (data.error) { alert('執行失敗: ' + data.error); return; }
+        appendLog(`✅ 掃描完成：${data.folders} 個資料夾 / ${data.files} 個檔案已派發佇列`, 'system');
+        _dmwLoadConfig();
+    } catch (e) {
+        alert('執行失敗: ' + e.message);
+    }
+}
+
+window.dmwSave = dmwSave;
+window.dmwRunNow = dmwRunNow;
