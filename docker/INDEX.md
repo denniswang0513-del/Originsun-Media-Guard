@@ -17,17 +17,12 @@ Phase M 官網 NAS 部署相關設定。
 
 ```
 /share/Container/AI_Workspace/Originsun_Web/
-├── nginx/                              (既有，複用)
-│   └── conf.d/originsun.conf           ← 從本目錄 symlink 或複製
+├── nginx/              (既有，複用；conf.d/originsun.conf 從本目錄複製)
 └── Website/
-    ├── repo/                           git clone 整個 repo（包含此目錄）
-    ├── dist/                           Astro build 產物
-    ├── uploads/                        使用者上傳
-    └── docker/                         本目錄的容器設定
+    ├── repo/           git clone（含此目錄）
+    ├── dist/           Astro build 產物
+    ├── uploads/        使用者上傳
+    └── docker/         本目錄的容器設定
 ```
 
-## Nginx 關鍵設定
-
-- `/`              → `/var/www/originsun/*`（掛載自 `Website/dist/`）
-- `/api/website/*` → `proxy_pass http://website-api:8001`
-- `/uploads/*`     → `/var/www/originsun/uploads/`
+完整 nginx 設定與容器網路細節見 [`docs/WEBSITE_ARCHITECTURE.md`](../docs/WEBSITE_ARCHITECTURE.md) 第 9.2 節。
