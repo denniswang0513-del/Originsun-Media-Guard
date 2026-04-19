@@ -13,7 +13,8 @@ const _ABOUT_FIELDS = [
     { key: 'about.team_intro_zh', label: '團隊介紹（中文）', long: true },
 ];
 
-export default async function render(container) {
+export default async function render(container, ctx = {}) {
+    const { isCurrent = () => true } = ctx;
     container.innerHTML = '<h2>👥 關於我們</h2><div style="color:#888;padding:20px;">載入中…</div>';
     let settings = {};
     let team = [];
@@ -22,10 +23,11 @@ export default async function render(container) {
             websiteFetch('/api/website/admin/settings'),
             websiteFetch('/api/website/team'),
         ]);
-        if (!container.isConnected) return;
+        if (!isCurrent()) return;
         settings = s?.settings || {};
         team = t?.items || [];
     } catch (e) {
+        if (!isCurrent()) return;
         renderLoadError(container, '👥 關於我們', e);
         return;
     }

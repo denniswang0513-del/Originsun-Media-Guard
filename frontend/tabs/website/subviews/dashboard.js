@@ -4,11 +4,12 @@
  */
 import { websiteFetch, esc, fmtRelative, renderLoadError, inquiryStatusLabel } from '../website-utils.js';
 
-export default async function render(container) {
+export default async function render(container, ctx = {}) {
+    const { isCurrent = () => true } = ctx;
     container.innerHTML = '<h2>📊 儀表板</h2><div style="color:#888;padding:20px;">載入中…</div>';
     try {
         const stats = await websiteFetch('/api/website/admin/stats');
-        if (!container.isConnected) return;
+        if (!isCurrent()) return;
         container.innerHTML = `
             <h2>📊 儀表板</h2>
 
@@ -31,6 +32,7 @@ export default async function render(container) {
             </div>
         `;
     } catch (e) {
+        if (!isCurrent()) return;
         renderLoadError(container, '📊 儀表板', e, '確認 NAS website-api 已啟動：uvicorn main_website:app --port 8001');
     }
 }

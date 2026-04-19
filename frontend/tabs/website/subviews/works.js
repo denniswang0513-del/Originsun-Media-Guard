@@ -9,17 +9,19 @@ import { websiteFetch, esc, toastOk, toastErr, renderLoadError, debounce } from 
 let _works = [];
 let _categories = [];
 
-export default async function render(container) {
+export default async function render(container, ctx = {}) {
+    const { isCurrent = () => true } = ctx;
     container.innerHTML = '<h2>🎬 作品集管理</h2><div style="color:#888;padding:20px;">載入中…</div>';
     try {
         const [worksRes, catsRes] = await Promise.all([
             websiteFetch('/api/website/admin/works?include_non_public=true'),
             websiteFetch('/api/website/admin/categories'),
         ]);
-        if (!container.isConnected) return;
+        if (!isCurrent()) return;
         _works = worksRes?.items || [];
         _categories = catsRes?.items || [];
     } catch (e) {
+        if (!isCurrent()) return;
         renderLoadError(container, '🎬 作品集管理', e);
         return;
     }

@@ -17,6 +17,7 @@ const SUBVIEWS = [
 ];
 
 let _activeSubview = 'dashboard';
+let _switchToken = 0;          // bump on每次 switch，讓 async 延續能辨識自己是否還在檯面上
 let _healthTimer = null;
 let _badgeTimer = null;
 
@@ -46,6 +47,8 @@ window.initWebsiteTab = initWebsiteTab;
 async function switchSubview(name) {
     if (!SUBVIEWS.includes(name)) return;
     _activeSubview = name;
+    const myToken = ++_switchToken;
+    const isCurrent = () => myToken === _switchToken;
 
     document.querySelectorAll('.website-nav-btn').forEach(b =>
         b.classList.toggle('active', b.dataset.subview === name)
@@ -57,14 +60,15 @@ async function switchSubview(name) {
 
     try {
         const mod = await import(`./subviews/${name}.js`);
+        if (!isCurrent()) return;  // 使用者在 import 期間切走了
         if (typeof mod.default === 'function') {
-            await mod.default(content);
+            await mod.default(content, { isCurrent });
         } else {
             content.innerHTML = `<div style="color:#f88;padding:24px;">子視圖 ${name} 缺少 default export</div>`;
         }
     } catch (e) {
         console.error(`[website] load subview '${name}' failed:`, e);
-        content.innerHTML = `<div style="color:#f88;padding:24px;">子視圖載入失敗：${e.message}</div>`;
+        if (isCurrent()) content.innerHTML = `<div style="color:#f88;padding:24px;">子視圖載入失敗：${e.message}</div>`;
     }
 }
 window.websiteSwitchSubview = switchSubview;

@@ -5,13 +5,15 @@ import { websiteFetch, esc, toastOk, toastErr, renderLoadError } from '../websit
 
 let _cats = [];
 
-export default async function render(container) {
+export default async function render(container, ctx = {}) {
+    const { isCurrent = () => true } = ctx;
     container.innerHTML = '<h2>🏷️ 作品分類</h2><div style="color:#888;padding:20px;">載入中…</div>';
     try {
         const data = await websiteFetch('/api/website/admin/categories');
-        if (!container.isConnected) return;
+        if (!isCurrent()) return;
         _cats = data?.items || [];
     } catch (e) {
+        if (!isCurrent()) return;
         renderLoadError(container, '🏷️ 作品分類', e);
         return;
     }

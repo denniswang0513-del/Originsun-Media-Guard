@@ -12,14 +12,16 @@ const _FIELDS = [
     { key: 'home.cta_url', label: 'CTA 連結', placeholder: '/contact' },
 ];
 
-export default async function render(container) {
+export default async function render(container, ctx = {}) {
+    const { isCurrent = () => true } = ctx;
     container.innerHTML = '<h2>🏠 首頁設定</h2><div style="color:#888;padding:20px;">載入中…</div>';
     let settings = {};
     try {
         const data = await websiteFetch('/api/website/admin/settings');
-        if (!container.isConnected) return;
+        if (!isCurrent()) return;
         settings = data?.settings || {};
     } catch (e) {
+        if (!isCurrent()) return;
         renderLoadError(container, '🏠 首頁設定', e);
         return;
     }

@@ -5,7 +5,8 @@
  */
 import { websiteFetch, esc, toastOk, toastErr, renderLoadError } from '../website-utils.js';
 
-export default async function render(container) {
+export default async function render(container, ctx = {}) {
+    const { isCurrent = () => true } = ctx;
     container.innerHTML = '<h2>📝 部落格</h2><div style="color:#888;padding:20px;">載入中…</div>';
 
     let status = {};
@@ -15,8 +16,9 @@ export default async function render(container) {
             websiteFetch('/api/website/admin/notion/status'),
             websiteFetch('/api/website/admin/rebuild/status'),
         ]);
-        if (!container.isConnected) return;
+        if (!isCurrent()) return;
     } catch (e) {
+        if (!isCurrent()) return;
         renderLoadError(container, '📝 部落格', e);
         return;
     }
