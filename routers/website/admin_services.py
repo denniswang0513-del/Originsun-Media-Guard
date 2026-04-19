@@ -10,9 +10,11 @@ Endpoints (prefix `/api/website/admin`):
 """
 from __future__ import annotations
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException
+from sqlalchemy.exc import IntegrityError
+from sqlalchemy.ext.asyncio import AsyncSession
 
-from ._common import check_admin, get_factory, require_db
+from ._common import admin_session
 from core.schemas_website import ServiceCreate, ServiceUpdate
 from services.website import service_service
 
@@ -20,48 +22,42 @@ router = APIRouter(prefix="/api/website/admin", tags=["website-admin-services"])
 
 
 @router.get("/services")
-async def list_admin_services(request: Request):
-    check_admin(request)
-    require_db()
-    factory = await get_factory()
-    async with factory() as session:
-        items = await service_service.list_admin_services(session)
+async def list_admin_services(session: AsyncSession = Depends(admin_session)):
+    items = await service_service.list_admin_services(session)
     return {"items": items}
 
 
 @router.post("/services", status_code=201)
-async def create_service(req: ServiceCreate, request: Request):
-    check_admin(request)
-    require_db()
-    factory = await get_factory()
-    async with factory() as session:
-        try:
-            item = await service_service.create_service(session, req.model_dump())
-        except Exception as e:
-            raise HTTPException(status_code=400, detail=f"Create failed: {e}")
-    return item
+async def create_service(
+    req: ServiceCreate,
+    session: AsyncSession = Depends(admin_session),
+):
+    try:
+        return await service_service.create_service(session, req.model_dump())
+    except IntegrityError:
+        raise HTTPException(status_code=409, detail=f"Slug '{req.slug}' already exists")
 
 
 @router.put("/services/{service_id}")
-async def update_service(service_id: int, req: ServiceUpdate, request: Request):
-    check_admin(request)
-    require_db()
-    updates = req.model_dump(exclude_none=True)
-    factory = await get_factory()
-    async with factory() as session:
-        item = await service_service.update_service(session, service_id, updates)
+async def update_service(
+    service_id: int,
+    req: ServiceUpdate,
+    session: AsyncSession = Depends(admin_session),
+):
+    item = await service_service.update_service(
+        session, service_id, req.model_dump(exclude_none=True)
+    )
     if not item:
         raise HTTPException(status_code=404, detail="Service not found")
     return item
 
 
 @router.delete("/services/{service_id}")
-async def delete_service(service_id: int, request: Request):
-    check_admin(request)
-    require_db()
-    factory = await get_factory()
-    async with factory() as session:
-        ok = await service_service.delete_service(session, service_id)
+async def delete_service(
+    service_id: int,
+    session: AsyncSession = Depends(admin_session),
+):
+    ok = await service_service.delete_service(session, service_id)
     if not ok:
         raise HTTPException(status_code=404, detail="Service not found")
     return {"ok": True}

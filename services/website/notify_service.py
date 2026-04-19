@@ -1,8 +1,9 @@
 """services/website/notify_service.py
 ---
-聯絡表單 4 通道通知：Email / LINE / Google Chat / 自動回覆。
+聯絡表單通知：走 notifier.notify_tab("inquiry_received", **vars) 觸發 Google
+Chat / LINE（依 settings.json notification_channels 開關）+ log 出 email stub。
 
-設計：輕量封裝，不自行實作傳輸層，複用既有 notifier.py 的 send_* 函式。
+Email 傳送留 log stub；正式接 SMTP 在 M-F 部署時補。
 """
 from __future__ import annotations
 
@@ -12,23 +13,21 @@ from typing import Optional
 logger = logging.getLogger(__name__)
 
 
-def _format_inquiry_body(inq: dict) -> str:
-    """組裝給內部通知用的訊息內容。"""
-    return (
-        f"【新的網站詢問】#{inq.get('id', '?')}\n"
-        f"姓名：{inq.get('name', '-')}\n"
-        f"Email：{inq.get('email', '-')}\n"
-        f"電話：{inq.get('phone', '-')}\n"
-        f"公司：{inq.get('company', '-')}\n"
-        f"服務類型：{inq.get('service_type', '-')}\n"
-        f"預算：{inq.get('budget_range', '-')}\n"
-        f"來源頁：{inq.get('source', '-')}\n\n"
-        f"訊息：\n{inq.get('message', '')}"
-    )
+def _template_vars(inq: dict) -> dict:
+    """組出 inquiry_received 範本需要的變數（與 notifier.py _defaults 對齊）。"""
+    return {
+        "id": inq.get("id", "?"),
+        "name": inq.get("name") or "-",
+        "email": inq.get("email") or "-",
+        "phone": inq.get("phone") or "-",
+        "company": inq.get("company") or "-",
+        "service_type": inq.get("service_type") or "-",
+        "budget_range": inq.get("budget_range") or "-",
+        "message": inq.get("message") or "",
+    }
 
 
-def _format_autoreply_body(inq: dict, company_name: str, reply_email: str) -> str:
-    """給填表人的自動回覆。"""
+def _format_autoreply(inq: dict, company_name: str, reply_email: str) -> str:
     return (
         f"您好 {inq.get('name', '')}，\n\n"
         f"感謝您透過 {company_name} 官網與我們聯繫。\n"
@@ -42,46 +41,34 @@ def _format_autoreply_body(inq: dict, company_name: str, reply_email: str) -> st
 
 
 async def notify_new_inquiry(inq: dict, settings: dict) -> dict:
-    """發送 4 通道通知。
+    """發送聯絡表單通知。
 
-    Returns: dict of {"channel": bool success} — 失敗個別 channel 不阻塞其他。
+    Google Chat / LINE 走 notifier.notify_tab，讀 settings.notification_channels.inquiry
+    決定實際 channel 開關。Email（內部 + 自動回覆）目前只記 log，M-F 接 SMTP。
     """
-    result = {"google_chat": False, "line": False, "email_internal": False, "autoreply": False}
+    result = {"chat_sent": False, "email_internal": False, "autoreply": False}
 
-    # Google Chat / LINE：複用既有 notifier.py
     try:
-        from notifier import send_google_chat, send_line_notify
-        body = _format_inquiry_body(inq)
-        try:
-            result["google_chat"] = bool(send_google_chat(
-                project_name=body[:200],  # notifier 原簽名限制，這裡塞全文會被截
-            ))
-        except Exception as e:
-            logger.warning("[notify] google_chat failed: %s", e)
-        try:
-            result["line"] = bool(send_line_notify(
-                project_name=body[:200],
-            ))
-        except Exception as e:
-            logger.warning("[notify] line failed: %s", e)
-    except ImportError:
-        logger.warning("[notify] notifier.py unavailable, skip chat/line")
+        from notifier import notify_tab
+        notify_tab("inquiry_received", **_template_vars(inq))
+        result["chat_sent"] = True
+    except Exception as e:
+        logger.warning("[notify] notify_tab failed: %s", e)
 
-    # Email 內部 + 自動回覆：最小實作，stub 記 log（M-F 接 SMTP 時補）
     reply_email = settings.get("company.email", "")
     company_name = settings.get("company.name_zh", "Originsun")
     internal_recipient = settings.get("notify.email_to", reply_email)
 
     if internal_recipient:
         logger.info(
-            "[notify] email-internal → %s\nsubject: 新詢問 #%s\n%s",
-            internal_recipient, inq.get("id"), _format_inquiry_body(inq),
+            "[notify] email-internal stub → %s (inquiry #%s)",
+            internal_recipient, inq.get("id"),
         )
         result["email_internal"] = True
     if inq.get("email"):
         logger.info(
-            "[notify] autoreply → %s\n%s",
-            inq["email"], _format_autoreply_body(inq, company_name, reply_email),
+            "[notify] autoreply stub → %s\n%s",
+            inq["email"], _format_autoreply(inq, company_name, reply_email),
         )
         result["autoreply"] = True
 

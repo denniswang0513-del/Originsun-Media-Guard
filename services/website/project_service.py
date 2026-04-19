@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import logging
+from collections import defaultdict
 from typing import Optional
 
 from sqlalchemy import and_, delete, func, select, update
@@ -20,6 +21,23 @@ logger = logging.getLogger(__name__)
 
 def _youtube_thumbnail(video_id: Optional[str]) -> Optional[str]:
     return f"https://img.youtube.com/vi/{video_id}/maxresdefault.jpg" if video_id else None
+
+
+async def _categories_for_projects(
+    session: AsyncSession, project_ids: list[str]
+) -> dict[str, list[str]]:
+    """Batch fetch：一次 JOIN 取所有專案的分類 slug，避免 N+1。"""
+    if not project_ids:
+        return {}
+    stmt = (
+        select(WebsiteProjectCategory.project_id, WebsiteCategory.slug)
+        .join(WebsiteCategory, WebsiteCategory.id == WebsiteProjectCategory.category_id)
+        .where(WebsiteProjectCategory.project_id.in_(project_ids))
+    )
+    out: dict[str, list[str]] = defaultdict(list)
+    for pid, slug in await session.execute(stmt):
+        out[pid].append(slug)
+    return out
 
 
 def _to_public_dict(p: CrmProject, categories: Optional[list[str]] = None) -> dict:
@@ -49,15 +67,6 @@ def _to_admin_dict(p: CrmProject, categories: Optional[list[str]] = None) -> dic
     return d
 
 
-async def _categories_for_project(session: AsyncSession, project_id: str) -> list[str]:
-    stmt = (
-        select(WebsiteCategory.slug)
-        .join(WebsiteProjectCategory, WebsiteProjectCategory.category_id == WebsiteCategory.id)
-        .where(WebsiteProjectCategory.project_id == project_id)
-    )
-    return [row[0] for row in await session.execute(stmt)]
-
-
 async def list_public_projects(
     session: AsyncSession,
     category_slug: Optional[str] = None,
@@ -82,14 +91,9 @@ async def list_public_projects(
         CrmProject.public_published_at.desc().nullslast(),
     ).offset((page - 1) * limit).limit(limit)
 
-    result = await session.execute(stmt)
-    projects = result.scalars().all()
-
-    out = []
-    for p in projects:
-        cats = await _categories_for_project(session, p.id)
-        out.append(_to_public_dict(p, cats))
-    return out, total
+    projects = list((await session.execute(stmt)).scalars())
+    cat_map = await _categories_for_projects(session, [p.id for p in projects])
+    return [_to_public_dict(p, cat_map.get(p.id, [])) for p in projects], total
 
 
 async def get_public_project_by_slug(session: AsyncSession, slug: str) -> Optional[dict]:
@@ -101,8 +105,8 @@ async def get_public_project_by_slug(session: AsyncSession, slug: str) -> Option
     if not project:
         return None
 
-    cats = await _categories_for_project(session, project.id)
-    data = _to_public_dict(project, cats)
+    cat_map = await _categories_for_projects(session, [project.id])
+    data = _to_public_dict(project, cat_map.get(project.id, []))
     data["credits"] = project.public_credits or {}
     data["published_at"] = project.public_published_at.isoformat() if project.public_published_at else None
     return data
@@ -129,11 +133,8 @@ async def list_featured_projects(session: AsyncSession, limit: int = 6) -> list[
         ).limit(remaining)
         featured.extend((await session.execute(fb_stmt)).scalars())
 
-    out = []
-    for p in featured:
-        cats = await _categories_for_project(session, p.id)
-        out.append(_to_public_dict(p, cats))
-    return out
+    cat_map = await _categories_for_projects(session, [p.id for p in featured])
+    return [_to_public_dict(p, cat_map.get(p.id, [])) for p in featured]
 
 
 async def list_admin_projects(
@@ -145,11 +146,9 @@ async def list_admin_projects(
         stmt = stmt.where(CrmProject.public.is_(True))
     stmt = stmt.order_by(CrmProject.updated_at.desc().nullslast())
 
-    out = []
-    for p in (await session.execute(stmt)).scalars():
-        cats = await _categories_for_project(session, p.id)
-        out.append(_to_admin_dict(p, cats))
-    return out
+    projects = list((await session.execute(stmt)).scalars())
+    cat_map = await _categories_for_projects(session, [p.id for p in projects])
+    return [_to_admin_dict(p, cat_map.get(p.id, [])) for p in projects]
 
 
 _UPDATABLE_FIELDS = {

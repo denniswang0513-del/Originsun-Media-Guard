@@ -11,9 +11,11 @@ Endpoints (prefix `/api/website/admin`):
 """
 from __future__ import annotations
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException
+from sqlalchemy.exc import IntegrityError
+from sqlalchemy.ext.asyncio import AsyncSession
 
-from ._common import check_admin, get_factory, require_db
+from ._common import admin_session
 from core.schemas_website import CategoryCreate, CategoryReorder, CategoryUpdate
 from services.website import category_service
 
@@ -21,58 +23,51 @@ router = APIRouter(prefix="/api/website/admin", tags=["website-admin-categories"
 
 
 @router.get("/categories")
-async def list_admin_categories(request: Request):
-    check_admin(request)
-    require_db()
-    factory = await get_factory()
-    async with factory() as session:
-        items = await category_service.list_admin_categories(session)
+async def list_admin_categories(session: AsyncSession = Depends(admin_session)):
+    items = await category_service.list_admin_categories(session)
     return {"items": items}
 
 
 @router.post("/categories", status_code=201)
-async def create_category(req: CategoryCreate, request: Request):
-    check_admin(request)
-    require_db()
-    factory = await get_factory()
-    async with factory() as session:
-        try:
-            item = await category_service.create_category(session, req.model_dump())
-        except Exception as e:
-            raise HTTPException(status_code=400, detail=f"Create failed: {e}")
-    return item
+async def create_category(
+    req: CategoryCreate,
+    session: AsyncSession = Depends(admin_session),
+):
+    try:
+        return await category_service.create_category(session, req.model_dump())
+    except IntegrityError:
+        raise HTTPException(status_code=409, detail=f"Slug '{req.slug}' already exists")
 
 
 @router.put("/categories/{category_id}")
-async def update_category(category_id: int, req: CategoryUpdate, request: Request):
-    check_admin(request)
-    require_db()
-    updates = req.model_dump(exclude_none=True)
-    factory = await get_factory()
-    async with factory() as session:
-        item = await category_service.update_category(session, category_id, updates)
+async def update_category(
+    category_id: int,
+    req: CategoryUpdate,
+    session: AsyncSession = Depends(admin_session),
+):
+    item = await category_service.update_category(
+        session, category_id, req.model_dump(exclude_none=True)
+    )
     if not item:
         raise HTTPException(status_code=404, detail="Category not found")
     return item
 
 
 @router.delete("/categories/{category_id}")
-async def delete_category(category_id: int, request: Request):
-    check_admin(request)
-    require_db()
-    factory = await get_factory()
-    async with factory() as session:
-        ok = await category_service.delete_category(session, category_id)
+async def delete_category(
+    category_id: int,
+    session: AsyncSession = Depends(admin_session),
+):
+    ok = await category_service.delete_category(session, category_id)
     if not ok:
         raise HTTPException(status_code=404, detail="Category not found")
     return {"ok": True}
 
 
 @router.post("/categories/reorder")
-async def reorder_categories(req: CategoryReorder, request: Request):
-    check_admin(request)
-    require_db()
-    factory = await get_factory()
-    async with factory() as session:
-        await category_service.reorder_categories(session, req.order)
+async def reorder_categories(
+    req: CategoryReorder,
+    session: AsyncSession = Depends(admin_session),
+):
+    await category_service.reorder_categories(session, req.order)
     return {"ok": True, "count": len(req.order)}

@@ -172,6 +172,7 @@ def notify_tab(template_key: str, **variables) -> None:
         "verify_success":    "🔍 【比對完成】{project_name}\n✅ 通過：{pass_count} | ❌ 失敗：{fail_count} | 共 {total_count} 個",
         "transcribe_success":"🎙️ 【逐字稿完成】{project_name} 已生成！\n📂 輸出至：{dest_dir} | 共 {file_count} 個檔案",
         "drone_watcher_success":"🛸 【空拍排程】已掃描 {folder_count} 個資料夾、{file_count} 個檔案（{trigger}）\n⏱ 耗時：{duration}",
+        "inquiry_received":  "📬 【官網新詢問】#{id} 來自 {name}\n📧 Email：{email}\n📱 電話：{phone}\n🏢 公司：{company}\n💼 服務類型：{service_type}\n💰 預算：{budget_range}\n\n訊息：\n{message}",
     }
 
     raw_tpl = tpls.get(template_key) or _defaults.get(template_key, "")

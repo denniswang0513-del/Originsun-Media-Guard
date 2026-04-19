@@ -4,24 +4,38 @@
 
 架構：rebuild 是 long-running（npm ci + build，數十秒），因此用 asyncio.create_task
 在背景執行，endpoint 立即回傳「已排入」；狀態存在 module-level _status dict。
+
+**單一 worker 限制**：`_REBUILD_STATUS` 是 process-local。若 uvicorn 以 `--workers N`
+啟動，每個 worker 有獨立狀態——rebuild 觸發於 A、查詢可能落在 B 會看到 idle。
+NAS website-api container 應以 1 worker 跑（小網站足夠），見 docker-compose.yml。
 """
 from __future__ import annotations
 
 import asyncio
 import logging
 import os
-import subprocess
 import time
 from pathlib import Path
-from typing import Optional
+from typing import Literal, TypedDict
 
 logger = logging.getLogger(__name__)
 
-_REBUILD_STATUS: dict = {
-    "state": "idle",        # idle / running / success / error
+RebuildState = Literal["idle", "running", "success", "error"]
+
+
+class RebuildStatus(TypedDict):
+    state: RebuildState
+    started_at: float | None
+    finished_at: float | None
+    output_tail: str
+    error: str | None
+
+
+_REBUILD_STATUS: RebuildStatus = {
+    "state": "idle",
     "started_at": None,
     "finished_at": None,
-    "output_tail": "",      # 最後 N 行 stdout/stderr
+    "output_tail": "",
     "error": None,
 }
 
