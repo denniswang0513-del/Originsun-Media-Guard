@@ -11,16 +11,14 @@
 import BaseLayout from "../../layouts/BaseLayout.astro";
 import CategoryFilter from "../../components/works/CategoryFilter.astro";
 import WorkCard from "../../components/works/WorkCard.astro";
-import { fetchMeta, fetchWorks, fetchCategories } from "../../lib/crm-client";
+import { fetchMeta, fetchCategories, fetchAllWorksCached } from "../../lib/crm-client";
 import { STR } from "../../lib/i18n";
 
-const [meta, worksRes, categories] = await Promise.all([
+const [meta, allWorks, categories] = await Promise.all([
     fetchMeta(),
-    fetchWorks({ limit: 100 }),  // build-time 一次撈全部，client-side 篩選
+    fetchAllWorksCached(),   // 共用 cache，與 [slug].astro / related 共享
     fetchCategories(),
 ]);
-
-const allWorks = worksRes.items;
 
 // SSR/SSG 不認 query，但我們可在 frontmatter 讀 Astro.url.searchParams
 // 在純 SSG 下此值為 undefined；靠 client-side script 根據實際 URL 再篩。

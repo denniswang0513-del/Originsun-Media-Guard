@@ -8,7 +8,7 @@
  * Runtime 的只有 POST /api/website/contact，那個用 client-side fetch。
  */
 
-import { WEBSITE_API_BASE } from "./config";
+import { WEBSITE_API_BASE, LIMITS } from "./config";
 import type {
     IPublicProject,
     IPublicProjectDetail,
@@ -23,6 +23,7 @@ async function _get<T>(path: string): Promise<T> {
     const url = `${WEBSITE_API_BASE}${path}`;
     const res = await fetch(url, {
         headers: { Accept: "application/json" },
+        signal: AbortSignal.timeout(10000),  // 10s 一根吊死端點不拖垮整個 build
     });
     if (!res.ok) {
         const text = await res.text().catch(() => "");
@@ -32,7 +33,7 @@ async function _get<T>(path: string): Promise<T> {
 }
 
 
-/** 處理 API 連不上時用的 fallback（build 不中斷，顯示空狀態） */
+/** 非關鍵資料：API 離線時用 fallback，build 不中斷但會顯示空狀態 */
 async function _safeGet<T>(path: string, fallback: T, label = path): Promise<T> {
     try {
         return await _get<T>(path);
@@ -40,6 +41,19 @@ async function _safeGet<T>(path: string, fallback: T, label = path): Promise<T> 
         console.warn(`[crm-client] ${label} 取用 fallback:`, (e as Error).message);
         return fallback;
     }
+}
+
+
+/** 模組級 cache：build 期間一次撈全量，related / getStaticPaths 共用，避免 N+1 */
+let _worksCachePromise: Promise<IPublicProject[]> | null = null;
+
+export function clearWorksCache(): void { _worksCachePromise = null; }
+
+export async function fetchAllWorksCached(): Promise<IPublicProject[]> {
+    if (!_worksCachePromise) {
+        _worksCachePromise = fetchWorks({ limit: LIMITS.BUILD_MAX_WORKS }).then(r => r.items);
+    }
+    return _worksCachePromise;
 }
 
 
@@ -111,6 +125,11 @@ export async function fetchTeam(): Promise<ITeamMember[]> {
 }
 
 
+/**
+ * fetchMeta() — 關鍵：API 離線或回空資料時走 fallback 但 console.error。
+ * Fallback 內容就是 base seed 值（與 db/seed_website.py 一致）。
+ * 生產 build 若拿到全空 meta 應該調查 API，不該默默部署空殼站。
+ */
 export async function fetchMeta(): Promise<IWebsiteMeta> {
     const fallback: IWebsiteMeta = {
         company_name_zh: "源日影像",
@@ -125,5 +144,15 @@ export async function fetchMeta(): Promise<IWebsiteMeta> {
         seo_default_description: "Best Story, Best Production.",
         categories: [],
     };
-    return _safeGet<IWebsiteMeta>("/api/website/meta", fallback, "fetchMeta");
+    try {
+        const data = await _get<IWebsiteMeta>("/api/website/meta");
+        if (!data.company_name_zh && !data.company_name_en) {
+            console.error("[crm-client] fetchMeta 回空資料 — DB settings 未 seed？走 fallback");
+            return fallback;
+        }
+        return data;
+    } catch (e) {
+        console.error(`[crm-client] fetchMeta 失敗（API 離線？）走 fallback:`, (e as Error).message);
+        return fallback;
+    }
 }

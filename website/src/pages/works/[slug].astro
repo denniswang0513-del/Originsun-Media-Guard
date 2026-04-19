@@ -7,35 +7,37 @@
  */
 import BaseLayout from "../../layouts/BaseLayout.astro";
 import WorkCard from "../../components/works/WorkCard.astro";
-import { fetchMeta, fetchWorks, fetchWorkBySlug } from "../../lib/crm-client";
+import { fetchMeta, fetchWorkBySlug, fetchAllWorksCached } from "../../lib/crm-client";
 import { youtubeWatchUrl, isValidYouTubeId } from "../../lib/youtube";
 import { videoObjectSchema } from "../../lib/seo";
 import { STR } from "../../lib/i18n";
+import { LIMITS, SITE_URL_FALLBACK } from "../../lib/config";
 
 export async function getStaticPaths() {
-    const res = await fetchWorks({ limit: 200 });
-    return res.items
-        .filter(w => w.slug)
-        .map(w => ({ params: { slug: w.slug } }));
+    // 共用 cached list（fetchAllWorksCached 在 crm-client.ts 用模組級 Promise 記憶化）
+    const items = await fetchAllWorksCached();
+    return items.filter(w => w.slug).map(w => ({ params: { slug: w.slug } }));
 }
 
 const { slug } = Astro.params;
-const [meta, work] = await Promise.all([
+const [meta, work, allWorks] = await Promise.all([
     fetchMeta(),
     fetchWorkBySlug(slug!),
+    fetchAllWorksCached(),
 ]);
 
 if (!work) {
     return Astro.redirect("/works");
 }
 
-// 相關作品：同分類其他作品
-const relatedRes = work.categories.length
-    ? await fetchWorks({ category: work.categories[0], limit: 7 })
-    : { items: [] };
-const related = relatedRes.items.filter(w => w.slug !== work.slug).slice(0, 3);
+// 相關作品：從 cache 內篩選（同分類 + 排除自己），避免額外 HTTP
+const activeCat = work.categories[0];
+const related = activeCat
+    ? allWorks.filter(w => w.slug !== work.slug && w.categories.includes(activeCat))
+              .slice(0, LIMITS.RELATED_WORKS)
+    : [];
 
-const siteUrl = Astro.site?.toString() || "https://originsun-studio.com";
+const siteUrl = Astro.site?.toString() || SITE_URL_FALLBACK;
 const schemaData = isValidYouTubeId(work.youtube_id)
     ? [videoObjectSchema(work, siteUrl)]
     : [];

@@ -21,6 +21,17 @@ const ICON_MAP: Record<string, string> = {
 function iconChar(key?: string | null): string {
     return ICON_MAP[key || "default"] || ICON_MAP.default;
 }
+
+// Build-time：收集 admin 設了但 ICON_MAP 沒收的 key，警示需補貢獻
+const _unknownIcons = services
+    .map(s => s.icon)
+    .filter((k): k is string => !!k && !(k in ICON_MAP));
+if (_unknownIcons.length) {
+    console.warn(
+        `[ServicesGrid] 未知 icon key（落回預設 ◇）：${[...new Set(_unknownIcons)].join(", ")}。` +
+        `支援的 key：${Object.keys(ICON_MAP).filter(k => k !== "default").join(", ")}`
+    );
+}
 ---
 
 <section class="bg-neutral-950 py-24 sm:py-32">

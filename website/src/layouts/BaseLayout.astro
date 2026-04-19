@@ -11,6 +11,7 @@
 import Header from "../components/layout/Header.astro";
 import Footer from "../components/layout/Footer.astro";
 import type { IWebsiteMeta } from "../types/meta";
+import { SITE_URL_FALLBACK } from "../lib/config";
 import "../styles/global.css";
 
 interface Props {
@@ -26,7 +27,7 @@ const { title, description, meta, noindex = true, schemaData = [], ogImage } = A
 
 const fullTitle = title === meta.company_name_zh ? title : `${title} | ${meta.company_name_zh}`;
 const desc = description || meta.seo_default_description;
-const canonical = new URL(Astro.url.pathname, Astro.site || "https://originsun-studio.com").toString();
+const canonical = new URL(Astro.url.pathname, Astro.site || SITE_URL_FALLBACK).toString();
 ---
 
 <!doctype html>

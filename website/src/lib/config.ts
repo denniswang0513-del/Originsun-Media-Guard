@@ -13,3 +13,16 @@ export const TURNSTILE_SITE_KEY =
     import.meta.env.PUBLIC_TURNSTILE_SITE_KEY?.toString() || "";
 
 export const IS_DEV = import.meta.env.DEV === true;
+
+
+/** 正式網域 fallback（未設 Astro.site 時的預設） */
+export const SITE_URL_FALLBACK = "https://originsun-studio.com";
+
+
+/** 各頁面/元件共用的數量上限，集中避免散落 magic numbers */
+export const LIMITS = {
+    HOME_FEATURED: 6,       // 首頁精選作品數
+    RELATED_WORKS: 3,       // 作品詳情頁相關作品數
+    WORKS_PAGE_SIZE: 12,    // /works 分頁大小（client-side filter 已廢用）
+    BUILD_MAX_WORKS: 200,   // 建置時從 API 撈的作品上限（超過需調 API）
+} as const;

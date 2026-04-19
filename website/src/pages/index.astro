@@ -9,10 +9,11 @@ import FeaturedWorks from "../components/home/FeaturedWorks.astro";
 import ServicesGrid from "../components/home/ServicesGrid.astro";
 import { fetchMeta, fetchFeatured, fetchServices } from "../lib/crm-client";
 import { organizationSchema } from "../lib/seo";
+import { LIMITS, SITE_URL_FALLBACK } from "../lib/config";
 
 const [meta, featured, services] = await Promise.all([
     fetchMeta(),
-    fetchFeatured(6),
+    fetchFeatured(LIMITS.HOME_FEATURED),
     fetchServices(),
 ]);
 
@@ -20,7 +21,7 @@ const [meta, featured, services] = await Promise.all([
 // 目前 fetchMeta() 回的 IWebsiteMeta 未含此欄位，走靜態 gradient fallback。
 const heroYoutubeId: string | null = null;
 
-const siteUrl = Astro.site?.toString() || "https://originsun-studio.com";
+const siteUrl = Astro.site?.toString() || SITE_URL_FALLBACK;
 const schemaData = [organizationSchema(meta, siteUrl)];
 ---
 
