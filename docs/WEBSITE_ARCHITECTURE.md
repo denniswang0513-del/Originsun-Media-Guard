@@ -19,50 +19,94 @@
 
 ---
 
-## 2. 整體架構
+## 2. 整體架構（**100% 部署 NAS、Windows 關機不影響**）
 
 ```
 潛在客戶瀏覽器
        │
-       ▼ originsun-studio.com / preview.originsun-studio.com
+       ▼ originsun-studio.com
 ┌──────────────────────────────────┐
 │ Cloudflare                        │
 │  • DNS + SSL 自動續               │
-│  • CDN 邊緣快取（靜態資源）       │
+│  • CDN 邊緣快取                   │
 │  • Tunnel（零 port 暴露）         │
 │  • Turnstile 反機器人             │
 └──────────┬───────────────────────┘
-           │ cloudflared
+           │ cloudflared tunnel
            ▼
-┌──────────────────────────────────┐
-│ NAS（QNAP Container Station）     │
-│                                   │
-│  ┌─────────────┐  ┌────────────┐ │
-│  │ cloudflared │─▶│ Nginx      │ │
-│  └─────────────┘  └──────┬─────┘ │
-│                          │       │
-│           ┌──────────────┼─────┐ │
-│           ▼              ▼     │ │
-│    ┌──────────┐  ┌─────────────┐│
-│    │ Astro 站 │  │ FastAPI     ││
-│    │（靜態檔）│  │（port 8000）││
-│    └──────────┘  └──────┬──────┘│
-│                         │        │
-│                 ┌───────▼─────┐ │
-│                 │ PostgreSQL  │ │
-│                 └─────────────┘ │
-└──────────────────────────────────┘
+┌──────────────────────────────────────────┐
+│ NAS (QNAP Container Station)              │
+│                                           │
+│  ┌─────────────┐    ┌─────────────────┐  │
+│  │ cloudflared │───▶│ nginx           │  │
+│  │ (容器)      │    │ (容器)          │  │
+│  └─────────────┘    └──┬────────┬─────┘  │
+│                        │        │         │
+│         ┌──────────────┼────────┼────┐   │
+│         ▼              ▼        ▼    │   │
+│   ┌──────────┐  ┌──────────┐  ┌─────┴┐  │
+│   │  /       │  │/api/     │  │/up-  │  │
+│   │  Astro   │  │ website/ │  │loads/│  │
+│   │  dist/   │  │          │  │      │  │
+│   └──────────┘  └────┬─────┘  └──────┘  │
+│                      │                    │
+│                      ▼                    │
+│               ┌─────────────────┐        │
+│               │ NAS FastAPI     │        │
+│               │ container       │        │
+│               │ (main_website.  │        │
+│               │  py, port 8001) │        │
+│               └────────┬────────┘        │
+│                        │                  │
+│                ┌───────▼──────┐          │
+│                │ PostgreSQL   │          │
+│                │ (既有容器)    │          │
+│                └──────────────┘          │
+│                                           │
+│  /share/Web/originsun/                   │
+│  ├── repo/      (git clone)              │
+│  ├── dist/      (Astro build 產物)        │
+│  └── uploads/   (使用者上傳圖片)           │
+└──────────────────────────────────────────┘
+
+員工內網（上班時才用）
+┌──────────────────────────────────────────┐
+│ Windows 192.168.1.11:8000 (既有系統)      │
+│  └── Originsun Transcode main UI          │
+│      ├── CRM / Backup / Transcode 等      │
+│      └── 官網管理 Tab 前端                 │
+│          └── fetch 跨機呼叫               │
+│              http://<NAS>:8001/           │
+│              api/website/admin/...        │
+│              （共用 JWT secret + CORS）   │
+└──────────────────────────────────────────┘
 ```
 
 ### 路由分工
 
 | 路徑 | 服務者 | 內容 |
 |---|---|---|
-| `/` `/about` `/services` `/contact` | Astro SSG | 靜態頁 |
-| `/works` `/works/[slug]` | Astro SSG（build 時撈 CRM API） | 作品集 |
-| `/news/*` | Astro SSG（build 時撈 Notion API） | 部落格 |
-| `/api/website/*` | FastAPI（公開 API） | 前端 runtime 用 |
-| `/api/website/admin/*` | FastAPI（需 RBAC） | 官網管理 Tab 用 |
+| `/` `/about` `/services` `/contact` | NAS nginx → Astro dist/ | 靜態頁 |
+| `/works` `/works/[slug]` | NAS nginx → Astro dist/（build 時撈 CRM API） | 作品集 |
+| `/news/*` | NAS nginx → Astro dist/（build 時撈 Notion API） | 部落格 |
+| `/uploads/*` | NAS nginx → 檔案系統直 serve | 上傳的圖片 |
+| `/api/website/*` (public) | NAS nginx → NAS FastAPI container :8001 | 聯絡表單等 runtime API |
+| `/api/website/admin/*` | NAS FastAPI container :8001 | 給官網管理 Tab 跨機呼叫 |
+
+### 程式碼共用策略（單一 repo）
+
+```python
+# main.py                Windows 入口（既有，不動）
+#   載入所有 routers: api_auth, api_crm, api_backup, ... 
+#   但不載入 routers/website/（網站 API 全在 NAS）
+
+# main_website.py        NAS container 入口（新增，~30 行）
+#   只載入 routers/website/public + admin
+#   連 NAS PostgreSQL
+#   共用 db/, core/, notifier.py
+```
+
+部署時 NAS container 跑 `python main_website.py`，Windows 照常跑 `python main.py`。
 
 ---
 
@@ -208,11 +252,15 @@ d:\Antigravity\OriginsunTranscode\
 │   └── public/
 │       └── robots.txt                    開發期 Disallow: /
 │
+├── main_website.py                       🆕 NAS container 入口（~30 行）
+│                                         (只載入 routers/website/)
+│
 └── docker/                               🆕 Website 部署
     ├── INDEX.md
-    ├── docker-compose.website.yml
+    ├── docker-compose.website.yml         cloudflared + nginx + website-api
+    ├── Dockerfile.website                 NAS FastAPI 容器映像
     ├── cloudflared/config.yml
-    └── nginx/originsun.conf
+    └── nginx/originsun.conf               反代 + 靜態 + /uploads
 ```
 
 ---
@@ -379,23 +427,38 @@ CREATE TABLE website_contact_inquiries (
 
 前 3 種完全不碰 DNS、不碰 NAS、不碰舊站。
 
-### 9.2 Stage 2：NAS 部署（Week 7-8）— 不碰 DNS
+### 9.2 Stage 2：NAS 部署（Week 7-8）— 100% 在 NAS、不碰 DNS
 
-**網站跑在哪**：NAS QNAP Container Station
+**網站跑在哪**：NAS QNAP Container Station（完全 24/7 運作）
+
+**3 個 Docker container**：
+```yaml
+# docker/docker-compose.website.yml
+services:
+  cloudflared:            # 對外 tunnel
+  nginx:                  # 反代 + 靜態檔 + /uploads 直 serve
+  website-api:            # NAS FastAPI (python main_website.py)
+                          # 連 NAS PostgreSQL（既有）
+                          # 掛載 /share/Web/originsun/uploads/ 給 admin 寫入
+```
 
 **部署步驟**：
-1. NAS `docker-compose.website.yml`：起 `cloudflared` + `nginx` 兩個容器
-2. `/share/Web/originsun/` 放 git repo clone + `dist/`（build 產物）
-3. `nginx.conf`：
-   - `/` → 直接 serve `dist/` 靜態檔
-   - `/api/website/contact` → `proxy_pass http://192.168.1.11:8000/`（轉回 Windows FastAPI）
-4. `cloudflared` 暫用 CF 的 temp 網址（`xxx.trycloudflare.com`）
-5. 驗證 build/deploy 流程、API 反代、所有頁面都正常
+1. NAS `/share/Web/originsun/` git clone 整個 repo
+2. Docker build `website-api` image（`Dockerfile.website`）
+3. 起 3 個 container via `docker-compose up -d`
+4. `nginx.conf`：
+   - `/`               → `/share/Web/originsun/dist/*`（Astro build 產物）
+   - `/api/website/*`  → `proxy_pass http://website-api:8001`
+   - `/uploads/*`      → `/share/Web/originsun/uploads/`（直接 serve）
+5. `cloudflared` 暫用 CF 的 temp 網址（`xxx.trycloudflare.com`）
+6. 驗證：build/deploy、API 反代、uploads 讀寫、所有頁面都正常
 
 **Build 觸發方式**（可擇一）：
 - 手動 SSH 到 NAS 執行 `git pull && npm run build`
-- 官網管理 Tab「立即重建」按鈕 → POST 到 NAS 的 build 腳本
+- 官網管理 Tab「立即重建」按鈕 → POST 到 NAS `website-api` 的 rebuild endpoint
 - Git push 觸發 GitHub Actions → SSH deploy
+
+**穩定性測試**：Windows 192.168.1.11 關機，確認網站對外頁面 + 聯絡表單送出 + 4 通道通知全部仍正常。
 
 ### 9.3 Stage 3：DNS 切換（Week 9-10）— 最後才做
 
@@ -420,12 +483,21 @@ Step 7  新增 preview.originsun-studio.com A record → NAS Tunnel
 - 7/1：送 Google Search Console 新 sitemap
 - 7/1 ~ 7/7：舊站內容保留為 fallback（Cloudflare Workers redirect 或另存 git branch）
 
-### 9.4 為什麼 API 留在 Windows
+### 9.4 為什麼 100% 部署 NAS（不搞 Windows / NAS 混合）
 
-- 大部分 API 在 **build time** 就執行完（Astro SSG），產出靜態 HTML
-- **Runtime 只剩 1 個端點**：`POST /api/website/contact`（聯絡表單）
-- 搬整個 FastAPI 上 NAS = 大工程、風險高、無顯著好處
-- 只搬**靜態網站 + 反代 + Tunnel** = 工作量少、效益最大
+原本考慮過「API 留 Windows、靜態網站搬 NAS」，但使用者要求最高穩定性，所以決定**全部都在 NAS**：
+
+| 考量 | Windows + NAS 混合 | 100% NAS |
+|---|---|---|
+| Windows 關機 | ❌ 聯絡表單失效 | ✅ 網站全部正常 |
+| 穩定性 | ⚠️ 兩台都要開 | ✅ 只靠 NAS（設計為 24/7） |
+| 資料位置 | 分散 | ✅ 全部集中 NAS |
+| 部署複雜度 | 1 個 container | 3 個 container（cloudflared / nginx / website-api） |
+| 程式碼複製 | 需同步兩台 | ✅ Git pull NAS 即可 |
+
+**實作成本**：多 1 個 Python container + ~30 行 `main_website.py` 入口，換來 Windows 可自由關機。
+
+**程式碼零重複**：`routers/website/` 原始碼完全共用，只是 Windows `main.py` 不掛載這些路由（網站邏輯純在 NAS 跑），而 NAS container `main_website.py` 只掛載這些路由。
 
 ---
 

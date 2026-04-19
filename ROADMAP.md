@@ -465,7 +465,7 @@ routers/
 **優先等級**：🔴 高 — 6/1 NAS Staging / 7/1 正式切換
 **時程**：2026-04-20 ~ 2026-07-01（10 週）
 **網域**：`originsun-studio.com`（沿用舊站、DNS 轉 Cloudflare）
-**部署**：NAS QNAP Container Station（cloudflared + nginx + 靜態網站），Windows 保留既有 FastAPI
+**部署目標**：**所有網站功能 100% 在 NAS**（穩定 24/7）
 **分支**：`feature/website-m`
 **完整文件**：[`docs/WEBSITE_ARCHITECTURE.md`](docs/WEBSITE_ARCHITECTURE.md)
 
@@ -477,18 +477,34 @@ routers/
   └── npm run dev → localhost:4321
       └── 連到 localhost:8000 (現有 FastAPI)
 
-部署階段 (M-F ~ M-H，Week 7-10)
-  NAS QNAP Container Station           Windows 192.168.1.11
-  ├── cloudflared container             └── FastAPI main (既有)
-  ├── nginx container                       ├── CRM Tab
-  │   ├── /    → Astro dist/ 靜態檔          ├── 官網管理 Tab
-  │   └── /api → 轉送到 Windows 8000         └── /api/website/contact
+部署階段 (M-F ~ M-H，Week 7-10) — 全部在 NAS
+  NAS QNAP Container Station
+  ├── cloudflared container         對外 originsun-studio.com
+  ├── nginx container
+  │   ├── /              → Astro dist/ 靜態檔
+  │   ├── /api/website/* → NAS FastAPI container :8001
+  │   └── /uploads/*     → /share/Web/originsun/uploads/ (直 serve)
+  ├── NAS FastAPI container (新，入口 main_website.py)
+  │   ├── routers/website/public.py    (public API)
+  │   └── routers/website/admin_*.py   (admin API，給管理 Tab 用)
   ├── PostgreSQL (既有)
-  └── /share/Web/originsun/dist/
+  └── /share/Web/originsun/
+      ├── repo/          (git clone)
+      ├── dist/          (Astro build 產物，nginx serve)
+      └── uploads/       (使用者上傳圖片)
+
+Windows 192.168.1.11 (員工內網、既有系統)
+  └── FastAPI main (既有：CRM / Transcode / Backup…)
+      └── 官網管理 Tab 前端
+          └── fetch('http://<NAS_IP>:8001/api/website/admin/...')
+              → 跨機呼叫 NAS FastAPI（共用 JWT secret + CORS）
 ```
 
-**關鍵設計**：大部分 API 在 **build time** 執行完（Astro SSG）→ 產出靜態 HTML。
-Runtime 只剩 `POST /api/website/contact` 需要 FastAPI，走 nginx 反代回 Windows 主機。
+**關鍵設計**：
+- **網站穩定性 100% 靠 NAS**：Windows 關機、重開都不影響網站
+- **程式碼單一 repo**，兩個 entry point：`main.py` (Windows 既有) / `main_website.py` (NAS 新)
+- **JWT secret 共用**：Windows + NAS 用同一把 secret，管理 Tab 跨機呼叫免重新登入
+- **大部分 API 在 build time 就執行**（Astro SSG → 靜態 HTML），Runtime API 只服務聯絡表單與 admin Tab
 
 ### 執行階段（3 大 Stage 共 8 個子階段）
 
@@ -537,22 +553,33 @@ Runtime 只剩 `POST /api/website/contact` 需要 FastAPI，走 nginx 反代回 
 - [ ] NAS QNAP Container Station 建立 `docker-compose.website.yml`
   - `cloudflared` container（暫用 temp 網址）
   - `nginx` container（反代 + 靜態檔 mount）
-- [ ] NAS 建立 `/share/Web/originsun/` git repo clone
+  - **`website-api` container**：Python FastAPI，入口 `main_website.py`
+- [ ] 新增 `main_website.py`（~30 行，只載入 `routers/website/`）
+- [ ] 新增 `Dockerfile.website`（python:3.11-slim + 最小依賴）
+- [ ] NAS 建立 `/share/Web/originsun/`：
+  - `repo/`（git repo clone）
+  - `dist/`（Astro build 產物）
+  - `uploads/`（使用者上傳圖片，nginx 直 serve）
 - [ ] Astro build script：on-demand 或 git hook 觸發
 - [ ] nginx `originsun.conf`：
-  - `/` → `/share/Web/originsun/dist/*`
-  - `/api/website/*` → `http://192.168.1.11:8000`
-- [ ] Windows FastAPI CORS 白名單加 NAS 來源
-- [ ] 臨時測試：NAS 跑 Hello World、Windows API 通
+  - `/`               → `/share/Web/originsun/dist/*`
+  - `/api/website/*`  → `http://website-api:8001`
+  - `/uploads/*`      → `/share/Web/originsun/uploads/`
+- [ ] NAS FastAPI 連 NAS PostgreSQL（既有）
+- [ ] JWT secret 從 NAS settings.json 共用（與 Windows 同步）
+- [ ] NAS FastAPI CORS 白名單：`192.168.1.11:8000`, `originsun-studio.com`, localhost（開發）
 
 **M-G NAS Staging 完整驗證**（Week 8）
-- [ ] 完整 build + deploy 流程可重複執行
-- [ ] `POST /api/website/contact` 從 NAS 轉到 Windows 成功
-- [ ] PostgreSQL 連線正常（已在 NAS 本機）
+- [ ] 完整 build + deploy 流程可重複執行（pull → build → nginx reload）
+- [ ] `POST /api/website/contact` 從 nginx 進入 NAS FastAPI 成功（4 通道通知發送）
+- [ ] 官網管理 Tab 從 Windows 跨機呼叫 NAS admin API 成功
+- [ ] PostgreSQL 連線正常（NAS 本機）
+- [ ] uploads 上傳流程測試（Admin Tab 上傳 → NAS FastAPI → 寫入 NAS 檔案系統 → nginx serve）
 - [ ] 所有靜態資源 cache header 正確
 - [ ] Lighthouse ≥ 95（Performance / Accessibility / Best Practices / SEO）
 - [ ] SEO 結構化資料 + Schema.org VideoObject + sitemap
 - [ ] Google Search Console + GA4（接手舊站歷史資料）
+- [ ] **穩定性測試**：Windows 關機，確認網站 + 表單仍正常運作
 
 #### Stage 3：DNS 切換上線（Week 9-10）
 
@@ -568,8 +595,9 @@ Runtime 只剩 `POST /api/website/contact` 需要 FastAPI，走 nginx 反代回 
 
 ### 做完後你看到的改變
 
-- 公司有現代化 SEO 友善官方網站，**部署在 NAS 上 24/7 運作**
-- Windows 開發機重開、關機都不影響網站運行
+- 公司有現代化 SEO 友善官方網站，**100% 部署在 NAS 上 24/7 穩定運作**
+- **Windows 主機關機、重開、維護都不影響網站**（連聯絡表單都正常）
+- 所有網站持久資料都在 NAS：DB、上傳檔案、build 產物
 - 作品自動從 CRM 已結案 + 公開的專案拉出，不需雙寫維護
 - 聯絡表單直接進 CRM 變潛在客戶（`website_contact_inquiries` → `clients`）
 - 非工程師（行銷/PM）可在 Notion 寫部落格、在官網管理 Tab 調作品排序
