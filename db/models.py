@@ -190,17 +190,18 @@ class CrmProject(Base):
     receipt_path = Column(String(512), nullable=True)                 # 收據儲存路徑
 
     # Phase M: 對外官網展示
-    # (實體欄位與索引都由 db/migrations_website.py 建立在既有 DB 上；
-    #  這裡 index=True 是給 Base.metadata.create_all() 的全新 DB / 測試用)
-    public = Column(Boolean, nullable=True, default=False, index=True)
-    public_slug = Column(String(100), nullable=True, index=True)
+    # (實體欄位 + 索引由 db/migrations_website.py 建立；這裡的宣告 + __table_args__
+    #  中的 Index() 是給 Base.metadata.create_all() 的全新 DB / 測試用，名稱與
+    #  migration 保持一致避免 fresh DB vs migrated DB 索引命名分歧)
+    public = Column(Boolean, nullable=True, default=False)
+    public_slug = Column(String(100), nullable=True)
     public_title = Column(String(200), nullable=True)
     public_client = Column(String(100), nullable=True)
     public_youtube_id = Column(String(20), nullable=True)
     public_description = Column(Text, nullable=True)
     public_credits = Column(JSONB, nullable=True)
     public_year = Column(Integer, nullable=True)
-    public_featured = Column(Boolean, nullable=True, default=False, index=True)
+    public_featured = Column(Boolean, nullable=True, default=False)
     public_sort_order = Column(Integer, nullable=True, default=0)
     public_published_at = Column(DateTime(timezone=True), nullable=True)
 
@@ -210,6 +211,9 @@ class CrmProject(Base):
     __table_args__ = (
         Index("idx_crmproj_client", "client_id"),
         Index("idx_crmproj_status", "status"),
+        Index("idx_crmproj_public", "public"),
+        Index("idx_crmproj_slug", "public_slug"),
+        Index("idx_crmproj_featured", "public_featured"),
     )
 
 
