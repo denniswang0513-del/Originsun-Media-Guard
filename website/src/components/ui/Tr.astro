@@ -1,0 +1,41 @@
+---
+/**
+ * Tr.astro — 雙語文字輸出元件（統一取代 `<span data-lang-zh>...</span><span data-lang-en>...</span>` pattern）
+ *
+ * 用法：
+ *   <Tr k="nav_works" />                   <!-- 從 lib/i18n.ts 的 STR 取 -->
+ *   <Tr zh="客製中文" en="Custom EN" />    <!-- 直接指定 -->
+ *
+ * 渲染輸出與原 pattern 完全相同（兩個 span 各附 data-lang-*），CSS 控顯隱。
+ * 這讓替換是純字面改動，Lighthouse / a11y 行為不變。
+ */
+import { STR, type StrKey } from "../../lib/i18n";
+
+interface Props {
+    /** 對照 STR 字典的 key（推薦用法） */
+    k?: StrKey;
+    /** 或直接指定中文 */
+    zh?: string;
+    /** 或直接指定英文 */
+    en?: string;
+    /** 可選變數替換，僅 k= 模式有效：{year: 2026} 會把 {year} 換成 2026 */
+    vars?: Record<string, string | number>;
+}
+
+const { k, zh, en, vars } = Astro.props;
+
+let zhText = zh || "";
+let enText = en || "";
+
+if (k) {
+    zhText = STR[k].zh;
+    enText = STR[k].en;
+    if (vars) {
+        for (const [vk, vv] of Object.entries(vars)) {
+            zhText = zhText.replace(`{${vk}}`, String(vv));
+            enText = enText.replace(`{${vk}}`, String(vv));
+        }
+    }
+}
+---
+<span data-lang-zh>{zhText}</span><span data-lang-en>{enText}</span>

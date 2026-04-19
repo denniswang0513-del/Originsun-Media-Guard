@@ -1,0 +1,141 @@
+---
+/**
+ * about.astro — 關於我們（/about）
+ * 公司介紹 + 團隊成員 + 地址
+ * 公司文案從 website_settings 取（fetchMeta 目前不包含 about.* 欄位，之後擴充 meta API）。
+ * 團隊成員從 /api/website/team（crm_staff where show_on_website=true）。
+ */
+import BaseLayout from "../layouts/BaseLayout.astro";
+import Tr from "../components/ui/Tr.astro";
+import { fetchMeta, fetchTeam } from "../lib/crm-client";
+
+const [meta, team] = await Promise.all([
+    fetchMeta(),
+    fetchTeam(),
+]);
+
+// 地圖連結：如果有地址就產 Google Maps 導航 URL
+const mapsUrl = meta.address
+    ? `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(meta.address)}`
+    : null;
+---
+
+<BaseLayout title="關於我們 About" meta={meta}>
+    <!-- Hero -->
+    <section class="pt-32 pb-16 bg-black">
+        <div class="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 text-center">
+            <p class="text-xs tracking-[0.4em] text-neutral-500 uppercase mb-3">About</p>
+            <h1 class="text-4xl sm:text-6xl font-light tracking-tight mb-6">
+                <Tr zh="關於我們" en="About Us" />
+            </h1>
+            <p class="text-xl text-neutral-300 tracking-wide font-light">
+                {meta.tagline}
+            </p>
+        </div>
+    </section>
+
+    <!-- 公司故事 -->
+    <section class="bg-black pb-16">
+        <div class="max-w-3xl mx-auto px-4 sm:px-6 lg:px-8">
+            <div class="prose prose-invert max-w-none">
+                <p class="text-lg text-neutral-300 leading-relaxed tracking-wide mb-6">
+                    <Tr zh={`${meta.company_name_zh}（${meta.company_name_en}）專注於影像製作與行銷規劃。`}
+                        en={`${meta.company_name_en} focuses on video production and marketing planning.`} />
+                </p>
+                <p class="text-base text-neutral-400 leading-relaxed tracking-wide mb-6">
+                    <Tr zh="我們相信每一支影片都應該是一則有力的故事。從商業廣告到紀實短片，從活動紀錄到動畫設計，我們用影像陪伴品牌與人們訴說重要的事。"
+                        en="We believe every film should tell a compelling story. From commercials to documentaries, event coverage to motion graphics, we help brands and people share what matters." />
+                </p>
+                <p class="text-base text-neutral-400 leading-relaxed tracking-wide">
+                    <Tr zh="位於台北中山，我們團隊結合了導演、製片、攝影、剪輯與動畫設計師，提供完整的一條龍影像服務。"
+                        en="Based in Zhongshan, Taipei, our team combines directors, producers, cinematographers, editors and motion designers to deliver end-to-end production." />
+                </p>
+            </div>
+        </div>
+    </section>
+
+    <!-- 團隊 -->
+    {team.length > 0 && (
+        <section class="bg-neutral-950 py-20">
+            <div class="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8">
+                <div class="text-center mb-12">
+                    <p class="text-xs tracking-[0.4em] text-neutral-500 uppercase mb-2">Team</p>
+                    <h2 class="text-3xl font-light tracking-tight">
+                        <Tr zh="我們的團隊" en="Our Team" />
+                    </h2>
+                </div>
+                <div class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-6">
+                    {team.map(m => (
+                        <article class="text-center">
+                            {m.photo_url ? (
+                                <img src={m.photo_url}
+                                     alt={m.name}
+                                     loading="lazy"
+                                     class="w-32 h-32 rounded-full object-cover mx-auto mb-4 bg-neutral-800" />
+                            ) : (
+                                <div class="w-32 h-32 rounded-full bg-neutral-800 mx-auto mb-4 flex items-center justify-center text-3xl text-neutral-600">
+                                    {m.name.charAt(0)}
+                                </div>
+                            )}
+                            <h3 class="text-base font-light tracking-wide text-white">{m.name}</h3>
+                            {m.role && <p class="text-xs text-neutral-400 tracking-widest mt-1">{m.role}</p>}
+                            {m.bio && <p class="text-xs text-neutral-500 mt-3 leading-relaxed px-2">{m.bio}</p>}
+                        </article>
+                    ))}
+                </div>
+            </div>
+        </section>
+    )}
+
+    <!-- 聯絡資訊 + 地址 -->
+    <section class="bg-black py-20">
+        <div class="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8">
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-12">
+                <div>
+                    <h3 class="text-xs tracking-[0.4em] uppercase text-neutral-500 mb-5">
+                        <Tr zh="聯絡資訊" en="Contact" />
+                    </h3>
+                    <dl class="space-y-3 text-neutral-300">
+                        {meta.address && (
+                            <div>
+                                <dt class="text-xs text-neutral-500 tracking-widest mb-1">
+                                    <Tr zh="地址" en="Address" />
+                                </dt>
+                                <dd>
+                                    {mapsUrl ? (
+                                        <a href={mapsUrl} target="_blank" rel="noopener" class="hover:text-white transition-colors">
+                                            {meta.address} ↗
+                                        </a>
+                                    ) : meta.address}
+                                </dd>
+                            </div>
+                        )}
+                        {meta.phone && (
+                            <div>
+                                <dt class="text-xs text-neutral-500 tracking-widest mb-1">
+                                    <Tr zh="電話" en="Phone" />
+                                </dt>
+                                <dd><a href={`tel:${meta.phone}`} class="hover:text-white transition-colors">{meta.phone}</a></dd>
+                            </div>
+                        )}
+                        {meta.email && (
+                            <div>
+                                <dt class="text-xs text-neutral-500 tracking-widest mb-1">
+                                    <Tr zh="Email" en="Email" />
+                                </dt>
+                                <dd><a href={`mailto:${meta.email}`} class="hover:text-white transition-colors">{meta.email}</a></dd>
+                            </div>
+                        )}
+                    </dl>
+                </div>
+                <div class="flex items-center">
+                    <a href="/contact"
+                       class="inline-flex items-center gap-2 text-sm tracking-widest uppercase border border-neutral-500 px-8 py-3 hover:bg-white hover:text-black transition-colors">
+                        <Tr zh="開始合作" en="Start a Project" />
+                        <span>→</span>
+                    </a>
+                </div>
+            </div>
+        </div>
+    </section>
+</BaseLayout>
