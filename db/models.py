@@ -189,6 +189,19 @@ class CrmProject(Base):
     transfer_fee = Column(Integer, nullable=True)                     # 帳款匯費
     receipt_path = Column(String(512), nullable=True)                 # 收據儲存路徑
 
+    # Phase M: 對外官網展示（實體欄位由 db/migrations_website.py 建立）
+    public = Column(Boolean, nullable=True, default=False)
+    public_slug = Column(String(100), nullable=True)
+    public_title = Column(String(200), nullable=True)
+    public_client = Column(String(100), nullable=True)
+    public_youtube_id = Column(String(20), nullable=True)
+    public_description = Column(Text, nullable=True)
+    public_credits = Column(JSONB, nullable=True)
+    public_year = Column(Integer, nullable=True)
+    public_featured = Column(Boolean, nullable=True, default=False)
+    public_sort_order = Column(Integer, nullable=True, default=0)
+    public_published_at = Column(DateTime(timezone=True), nullable=True)
+
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now())
 
@@ -286,6 +299,8 @@ class CrmStaff(Base):
     resume_visible = Column(Boolean, nullable=True, default=False)
     edit_token = Column(String(512), nullable=True)
     resume_editable = Column(Boolean, nullable=True, default=True)
+    # Phase M: 對外官網團隊頁顯示開關
+    show_on_website = Column(Boolean, nullable=True, default=False)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now())
 
