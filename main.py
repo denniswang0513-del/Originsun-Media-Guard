@@ -506,6 +506,19 @@ async def _on_startup():
         except Exception:
             pass
 
+    # ── Phase M: Website migrations (ALTER crm_projects/crm_staff + 5 new tables) + seed ──
+    if state.db_online:
+        try:
+            from db.session import get_session_factory
+            _f_web = get_session_factory()
+            if _f_web:
+                from db.migrations_website import run_website_migrations
+                from db.seed_website import seed_website_if_empty
+                await run_website_migrations(_f_web)
+                await seed_website_if_empty(_f_web)
+        except Exception as _e_web:
+            print(f"[startup] Website migration/seed failed: {_e_web}")
+
     asyncio.create_task(_periodic_version_check())
     asyncio.create_task(_periodic_db_health())
     from core.scheduler import run_scheduler  # type: ignore
