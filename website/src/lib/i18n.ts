@@ -19,6 +19,7 @@ export const STR = {
     nav_services: { zh: "服務項目", en: "Services" },
     nav_about:    { zh: "關於我們", en: "About" },
     nav_news:     { zh: "部落格",   en: "Insight" },
+    nav_portfolio: { zh: "歷年作品", en: "Portfolio" },
     nav_contact:  { zh: "聯絡",     en: "Contact" },
 
     hero_cta:       { zh: "了解我們的作品", en: "Explore Our Work" },

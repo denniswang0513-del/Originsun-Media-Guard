@@ -11,12 +11,13 @@ interface Props { meta: IWebsiteMeta }
 const { meta } = Astro.props;
 
 const navItems = [
-    { href: "/",         k: "nav_home" as const },
-    { href: "/works",    k: "nav_works" as const },
-    { href: "/services", k: "nav_services" as const },
-    { href: "/about",    k: "nav_about" as const },
-    { href: "/news",     k: "nav_news" as const },
-    { href: "/contact",  k: "nav_contact" as const },
+    { href: "/",          k: "nav_home" as const },
+    { href: "/works",     k: "nav_works" as const },
+    { href: "/portfolio", k: "nav_portfolio" as const },
+    { href: "/services",  k: "nav_services" as const },
+    { href: "/about",     k: "nav_about" as const },
+    { href: "/news",      k: "nav_news" as const },
+    { href: "/contact",   k: "nav_contact" as const },
 ];
 
 const currentPath = Astro.url.pathname;
