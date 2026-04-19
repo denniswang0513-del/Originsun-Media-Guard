@@ -19,6 +19,11 @@ Originsun_Agent.zip
 dist/
 build/
 
+# Node.js / Astro (Phase M website/)
+node_modules/
+.astro/
+.DS_Store
+
 # IDE
 .vscode/
 .idea/
