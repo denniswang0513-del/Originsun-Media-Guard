@@ -1,0 +1,87 @@
+<!--
+    website.html — 官網管理 Tab 主殼
+    左側 9 子視圖導覽 + 右側內容容器。子視圖用 lazy dynamic import。
+-->
+<div id="website-root" style="display:flex;min-height:600px;background:#1a1a1a;">
+
+    <!-- 左側導覽 -->
+    <nav id="website-nav" style="width:200px;border-right:1px solid #2a2a2a;padding:16px 0;flex-shrink:0;">
+        <div style="padding:0 16px 12px;font-size:11px;color:#666;letter-spacing:0.08em;">官網管理</div>
+        <button class="website-nav-btn active" data-subview="dashboard">📊 儀表板</button>
+        <button class="website-nav-btn" data-subview="home">🏠 首頁設定</button>
+        <button class="website-nav-btn" data-subview="works">🎬 作品集管理</button>
+        <button class="website-nav-btn" data-subview="categories">🏷️ 作品分類</button>
+        <button class="website-nav-btn" data-subview="services">🧩 服務項目</button>
+        <button class="website-nav-btn" data-subview="about">👥 關於我們</button>
+        <button class="website-nav-btn" data-subview="inquiries">📬 聯絡詢問 <span id="website-inq-badge" class="website-badge" style="display:none;"></span></button>
+        <button class="website-nav-btn" data-subview="blog">📝 部落格</button>
+        <button class="website-nav-btn" data-subview="settings">⚙️ 網站設定</button>
+
+        <div style="padding:16px;margin-top:20px;font-size:11px;color:#555;border-top:1px solid #2a2a2a;">
+            <div style="margin-bottom:6px;">API: <span id="website-api-base-display"></span></div>
+            <div>狀態: <span id="website-api-health" style="color:#888;">檢查中…</span></div>
+        </div>
+    </nav>
+
+    <!-- 右側內容區（子視圖載入進這裡）-->
+    <main id="website-content" style="flex:1;padding:24px;overflow:auto;">
+        <div id="website-loading" style="color:#888;padding:40px;text-align:center;">載入中…</div>
+    </main>
+</div>
+
+<style>
+    .website-nav-btn {
+        display: block; width: 100%; text-align: left;
+        padding: 10px 16px; background: transparent; color: #ccc;
+        border: none; border-left: 3px solid transparent;
+        cursor: pointer; font-size: 13px; transition: all 0.15s;
+    }
+    .website-nav-btn:hover {
+        background: #252525; color: #fff;
+    }
+    .website-nav-btn.active {
+        background: #2a2a2a; color: #fff;
+        border-left-color: #3b82f6;
+        font-weight: 600;
+    }
+    .website-badge {
+        display: inline-block; background: #dc2626; color: #fff;
+        font-size: 10px; padding: 1px 6px; border-radius: 8px;
+        margin-left: 6px; font-weight: 600;
+    }
+    #website-content h2 {
+        color: #fff; font-size: 18px; margin: 0 0 16px 0; font-weight: 600;
+    }
+    #website-content .card {
+        background: #2a2a2a; border: 1px solid #3a3a3a; border-radius: 8px;
+        padding: 16px; margin-bottom: 12px;
+    }
+    #website-content .btn {
+        background: #3b82f6; color: #fff; border: none; padding: 6px 12px;
+        border-radius: 4px; font-size: 12px; cursor: pointer;
+    }
+    #website-content .btn:hover { background: #2563eb; }
+    #website-content .btn.btn-sm { padding: 4px 8px; font-size: 11px; }
+    #website-content .btn.btn-danger { background: #dc2626; }
+    #website-content .btn.btn-danger:hover { background: #b91c1c; }
+    #website-content .btn.btn-ghost { background: transparent; border: 1px solid #444; color: #ccc; }
+    #website-content .btn.btn-ghost:hover { background: #333; }
+    #website-content input, #website-content textarea, #website-content select {
+        background: #1a1a1a; border: 1px solid #3a3a3a; color: #fff;
+        padding: 6px 10px; border-radius: 4px; font-size: 13px;
+    }
+    #website-content table { width: 100%; border-collapse: collapse; font-size: 13px; }
+    #website-content th, #website-content td {
+        padding: 8px 12px; border-bottom: 1px solid #2a2a2a; text-align: left; color: #ddd;
+    }
+    #website-content th { color: #888; font-weight: 500; font-size: 11px; letter-spacing: 0.05em; }
+    #website-content tr:hover td { background: #252525; }
+    .website-pill {
+        display: inline-block; padding: 2px 8px; border-radius: 10px;
+        font-size: 11px; background: #333; color: #ccc;
+    }
+    .website-pill.status-new      { background: #1e3a5f; color: #8bb8e8; }
+    .website-pill.status-in_progress { background: #5f3f1e; color: #e8b08b; }
+    .website-pill.status-converted { background: #1e5f2e; color: #8be8a5; }
+    .website-pill.status-spam     { background: #5f1e1e; color: #e88b8b; }
+</style>
