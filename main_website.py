@@ -32,15 +32,21 @@ async def _lifespan(app: FastAPI):
         from db.seed_website import seed_website_if_empty
         import core.state as state
 
-        await init_db()
+        # init_db 回傳連線是否成功；必須顯式寫回 state.db_online
+        # （與 main.py startup 模式一致 — _common.require_db 靠這個 flag）
+        ok = await init_db()
+        state.db_online = bool(ok)
+
         if state.db_online:
             factory = get_session_factory()
             if factory:
                 await run_website_migrations(factory)
                 await seed_website_if_empty(factory)
-        logger.info("website-api startup complete")
+            print("[website-api] startup OK (DB online)")
+        else:
+            print("[website-api] startup WITHOUT DB — public endpoints will 503")
     except Exception as e:
-        logger.error("startup failed: %s", e)
+        print(f"[website-api] startup failed: {e}")
     yield
 
 

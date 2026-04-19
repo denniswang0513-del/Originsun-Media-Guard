@@ -37,7 +37,7 @@ async def list_works(
     request: Request,
     category: str | None = Query(None),
     page: int = Query(1, ge=1),
-    limit: int = Query(12, ge=1, le=50),
+    limit: int = Query(12, ge=1, le=500),  # 上限 500：SSG build 一次撈全部；正常前端 ≤ 50
     session: AsyncSession = Depends(public_session),
 ):
     rate_limit(request, max_per_minute=60)

@@ -44,15 +44,20 @@ async function _safeGet<T>(path: string, fallback: T, label = path): Promise<T> 
 }
 
 
-/** 模組級 cache：build 期間一次撈全量，related / getStaticPaths 共用，避免 N+1 */
+/** 模組級 cache：build 期間一次撈全量，related / getStaticPaths 共用，避免 N+1。
+ * 空結果不 cache（避免 API 短暫離線後 dev server 永遠顯示空資料）。
+ */
 let _worksCachePromise: Promise<IPublicProject[]> | null = null;
 
 export function clearWorksCache(): void { _worksCachePromise = null; }
 
 export async function fetchAllWorksCached(): Promise<IPublicProject[]> {
-    if (!_worksCachePromise) {
-        _worksCachePromise = fetchWorks({ limit: LIMITS.BUILD_MAX_WORKS }).then(r => r.items);
+    if (_worksCachePromise) {
+        const cached = await _worksCachePromise;
+        if (cached.length > 0) return cached;
+        _worksCachePromise = null;  // 空陣列不 cache，下次重試
     }
+    _worksCachePromise = fetchWorks({ limit: LIMITS.BUILD_MAX_WORKS }).then(r => r.items);
     return _worksCachePromise;
 }
 
@@ -127,15 +132,23 @@ export async function fetchTeam(): Promise<ITeamMember[]> {
 
 /**
  * fetchMeta() — 模組級 memoize（同 fetchAllWorksCached 模式），避免多頁重複打 API。
- * API 離線或回空資料時走 fallback 但 console.error。
- * Fallback 內容就是 base seed 值（與 db/seed_website.py 一致）。
+ * API 離線或回空資料時走 fallback 但 console.error；fallback 不 cache 以便之後重試。
  */
 let _metaCachePromise: Promise<IWebsiteMeta> | null = null;
 
 export function clearMetaCache(): void { _metaCachePromise = null; }
 
+function _isFallbackMeta(m: IWebsiteMeta): boolean {
+    // fallback 特徵：沒 address + 沒 phone + 沒 email（真實 seed 三者至少有一）
+    return !m.address && !m.phone && !m.email;
+}
+
 export async function fetchMeta(): Promise<IWebsiteMeta> {
-    if (_metaCachePromise) return _metaCachePromise;
+    if (_metaCachePromise) {
+        const cached = await _metaCachePromise;
+        if (!_isFallbackMeta(cached)) return cached;
+        _metaCachePromise = null;  // fallback 不 cache，下次重試
+    }
     _metaCachePromise = _doFetchMeta();
     return _metaCachePromise;
 }
