@@ -1,0 +1,174 @@
+---
+/**
+ * HomeSlideshow.astro — 首頁全螢幕精選作品輪播
+ *
+ * 對齊原 originsun-studio.com 設計：
+ * - 全 viewport 大圖（YouTube maxresdefault 縮圖）
+ * - 底部左下 CLIENT / FILM 作品資訊
+ * - 兩側垂直 PREV / NEXT 文字按鈕
+ * - 下方 dot indicators
+ * - 6 秒自動輪播、hover 暫停、方向鍵左右切換
+ * - 點播放鈕或整張圖 → /works/[slug]
+ */
+import type { IPublicProject } from "../../types/project";
+import { resolveThumbnail } from "../../lib/youtube";
+
+interface Props { works: IPublicProject[] }
+const { works } = Astro.props;
+
+// 取前 6 個，無 youtube_id / 測試 ID 會自動走 picsum placeholder
+const slides = works.slice(0, 6).map(w => ({
+    ...w,
+    _thumb: resolveThumbnail(w.youtube_id, w.slug, "maxres"),
+}));
+---
+
+<section id="home-slideshow"
+         class="relative h-screen min-h-[600px] w-full overflow-hidden bg-black">
+
+    {slides.length === 0 ? (
+        <div class="h-full flex items-center justify-center text-neutral-500">
+            <span data-lang-zh>尚無精選作品（到官網管理 Tab → 作品集 → 勾選精選）</span>
+            <span data-lang-en>No featured works yet</span>
+        </div>
+    ) : (
+        <>
+            <!-- Slides -->
+            <div class="absolute inset-0" data-slides>
+                {slides.map((w, i) => (
+                    <a href={`/works/${w.slug}`}
+                       class="absolute inset-0 transition-opacity duration-[1200ms] ease-in-out"
+                       data-slide-index={i}
+                       data-slide-slug={w.slug}
+                       data-slide-client={w.client || ""}
+                       data-slide-title={w.title}
+                       style={i === 0 ? "opacity:1;" : "opacity:0;pointer-events:none;"}>
+                        <img src={w._thumb || ""}
+                             alt={w.title}
+                             loading={i === 0 ? "eager" : "lazy"}
+                             class="absolute inset-0 w-full h-full object-cover"
+                             onerror="this.style.opacity='0.2'" />
+                        <!-- 漸層遮罩：底部加深讓資訊文字可讀 -->
+                        <div class="absolute inset-0 bg-gradient-to-t from-black/85 via-black/10 to-black/30"></div>
+                    </a>
+                ))}
+            </div>
+
+            <!-- PREV / NEXT（兩側垂直文字）-->
+            <button type="button" data-slide-prev
+                    class="absolute left-4 top-1/2 -translate-y-1/2 z-20 text-neutral-400 hover:text-white text-xs tracking-[0.4em] writing-mode-vertical px-2 py-6 transition-colors"
+                    style="writing-mode:vertical-rl;text-orientation:mixed;"
+                    aria-label="Previous slide">PREV</button>
+
+            <button type="button" data-slide-next
+                    class="absolute right-4 top-1/2 -translate-y-1/2 z-20 text-neutral-400 hover:text-white text-xs tracking-[0.4em] writing-mode-vertical px-2 py-6 transition-colors"
+                    style="writing-mode:vertical-rl;text-orientation:mixed;"
+                    aria-label="Next slide">NEXT</button>
+
+            <!-- 底部資訊 overlay -->
+            <div class="absolute inset-x-0 bottom-0 z-10 p-6 sm:p-10 pointer-events-none">
+                <div class="flex items-end gap-8 pointer-events-auto">
+                    <div class="flex-1 min-w-0">
+                        <div class="flex items-baseline gap-6 flex-wrap text-white">
+                            <span class="text-xs tracking-[0.4em] text-neutral-400 uppercase">Client</span>
+                            <span class="text-sm sm:text-base tracking-wide truncate" data-slide-client-out></span>
+                        </div>
+                        <div class="flex items-baseline gap-6 flex-wrap mt-2 text-white">
+                            <span class="text-xs tracking-[0.4em] text-neutral-400 uppercase">Film</span>
+                            <span class="text-lg sm:text-2xl tracking-wide font-light truncate" data-slide-title-out></span>
+                            <a data-slide-play-link href="#"
+                               class="inline-flex items-center justify-center w-8 h-8 rounded-full border border-white/60 hover:bg-white hover:text-black transition-colors"
+                               aria-label="Play">
+                                <svg width="10" height="10" viewBox="0 0 10 10" fill="currentColor">
+                                    <path d="M1 0 L10 5 L1 10 Z" />
+                                </svg>
+                            </a>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Dot indicators -->
+                <div class="mt-6 flex gap-2" data-slide-dots>
+                    {slides.map((_, i) => (
+                        <button type="button"
+                                data-slide-dot={i}
+                                class="h-[2px] transition-all duration-500"
+                                style={`width: ${i === 0 ? '40px' : '16px'}; background: ${i === 0 ? '#fff' : '#555'};`}
+                                aria-label={`Slide ${i + 1}`}></button>
+                    ))}
+                </div>
+            </div>
+        </>
+    )}
+</section>
+
+<script>
+(() => {
+    const root = document.getElementById("home-slideshow");
+    if (!root) return;
+    const slides = Array.from(root.querySelectorAll<HTMLElement>("[data-slide-index]"));
+    if (slides.length === 0) return;
+
+    const clientOut = root.querySelector<HTMLElement>("[data-slide-client-out]");
+    const titleOut  = root.querySelector<HTMLElement>("[data-slide-title-out]");
+    const playLink  = root.querySelector<HTMLAnchorElement>("[data-slide-play-link]");
+    const dots      = Array.from(root.querySelectorAll<HTMLElement>("[data-slide-dot]"));
+
+    let idx = 0;
+    let timer: number | null = null;
+    const ROTATE_MS = 6000;
+
+    function render() {
+        slides.forEach((el, i) => {
+            const active = i === idx;
+            el.style.opacity = active ? "1" : "0";
+            el.style.pointerEvents = active ? "auto" : "none";
+        });
+        const active = slides[idx];
+        const slug = active.getAttribute("data-slide-slug") || "";
+        if (clientOut) clientOut.textContent = active.getAttribute("data-slide-client") || "—";
+        if (titleOut)  titleOut.textContent = active.getAttribute("data-slide-title") || "";
+        if (playLink)  playLink.href = `/works/${slug}`;
+        dots.forEach((d, i) => {
+            const on = i === idx;
+            d.style.width = on ? "40px" : "16px";
+            d.style.background = on ? "#fff" : "#555";
+        });
+    }
+
+    function go(to: number) {
+        idx = (to + slides.length) % slides.length;
+        render();
+    }
+
+    function next() { go(idx + 1); }
+    function prev() { go(idx - 1); }
+
+    function startTimer() {
+        stopTimer();
+        timer = window.setInterval(next, ROTATE_MS);
+    }
+    function stopTimer() {
+        if (timer !== null) { clearInterval(timer); timer = null; }
+    }
+
+    // 綁事件
+    root.querySelector("[data-slide-next]")?.addEventListener("click", () => { next(); startTimer(); });
+    root.querySelector("[data-slide-prev]")?.addEventListener("click", () => { prev(); startTimer(); });
+    dots.forEach(d => d.addEventListener("click", () => {
+        const i = parseInt(d.getAttribute("data-slide-dot") || "0", 10);
+        go(i); startTimer();
+    }));
+
+    root.addEventListener("mouseenter", stopTimer);
+    root.addEventListener("mouseleave", startTimer);
+
+    document.addEventListener("keydown", (e) => {
+        if (e.key === "ArrowLeft")  { prev(); startTimer(); }
+        if (e.key === "ArrowRight") { next(); startTimer(); }
+    });
+
+    render();
+    startTimer();
+})();
+</script>

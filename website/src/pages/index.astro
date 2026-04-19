@@ -4,7 +4,7 @@
  * 組合：Hero（YouTube 背景）+ Featured Works + Services
  */
 import BaseLayout from "../layouts/BaseLayout.astro";
-import HeroReel from "../components/home/HeroReel.astro";
+import HomeSlideshow from "../components/home/HomeSlideshow.astro";
 import FeaturedWorks from "../components/home/FeaturedWorks.astro";
 import ServicesGrid from "../components/home/ServicesGrid.astro";
 import { fetchMeta, fetchFeatured, fetchServices } from "../lib/crm-client";
@@ -17,9 +17,6 @@ const [meta, featured, services] = await Promise.all([
     fetchServices(),
 ]);
 
-// Hero YouTube ID 由 website_settings.home.hero_youtube_id 驅動（admin 從官網管理 Tab 設定）
-const heroYoutubeId = meta.home_hero_youtube_id || null;
-
 const siteUrl = Astro.site?.toString() || SITE_URL_FALLBACK;
 const schemaData = [organizationSchema(meta, siteUrl)];
 ---
@@ -28,7 +25,7 @@ const schemaData = [organizationSchema(meta, siteUrl)];
             description={meta.seo_default_description}
             meta={meta}
             schemaData={schemaData}>
-    <HeroReel meta={meta} heroYoutubeId={heroYoutubeId} />
+    <HomeSlideshow works={featured} />
     <FeaturedWorks works={featured} />
     <ServicesGrid services={services} />
 </BaseLayout>

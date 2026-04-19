@@ -1,59 +1,47 @@
 ---
 /**
  * WorkCard.astro — 作品縮圖卡（首頁精選 + 作品列表共用）
+ * 白底設計：圖 + 下方標題區（不再文字壓在圖上）
  */
 import type { IPublicProject } from "../../types/project";
-import { youtubeThumbnail } from "../../lib/youtube";
+import { resolveThumbnail } from "../../lib/youtube";
 
 interface Props {
     work: IPublicProject;
-    priority?: boolean;  // 首屏圖片可設 true
+    priority?: boolean;
 }
-
 const { work, priority = false } = Astro.props;
-const thumb = work.thumbnail_url || youtubeThumbnail(work.youtube_id, "hq");
+const thumb = resolveThumbnail(work.youtube_id, work.slug, "hq");
 ---
 
-<a href={`/works/${work.slug}`}
-   class="group block relative overflow-hidden bg-neutral-950 aspect-video">
-
-    {thumb && (
+<a href={`/works/${work.slug}`} class="group block">
+    <div class="relative overflow-hidden aspect-video bg-neutral-100 mb-4">
         <img src={thumb}
              alt={work.title}
              loading={priority ? "eager" : "lazy"}
-             class="absolute inset-0 w-full h-full object-cover transition-transform duration-700 group-hover:scale-105"
-             onerror="this.style.display='none'" />
-    )}
-
-    {!thumb && (
-        <div class="absolute inset-0 bg-gradient-to-br from-neutral-900 to-neutral-800 flex items-center justify-center">
-            <span class="text-neutral-600 text-xs tracking-widest uppercase">No Preview</span>
-        </div>
-    )}
-
-    <!-- Hover 遮罩 -->
-    <div class="absolute inset-0 bg-gradient-to-t from-black/90 via-black/30 to-transparent opacity-60 group-hover:opacity-100 transition-opacity"></div>
-
-    <div class="absolute inset-x-0 bottom-0 p-4 sm:p-5">
-        <div class="flex items-center gap-2 mb-2">
-            {work.year && (
-                <span class="text-xs text-neutral-400 tracking-widest">{work.year}</span>
-            )}
-            {work.categories.slice(0, 2).map(cat => (
-                <span class="text-[10px] uppercase tracking-[0.2em] text-neutral-500">· {cat}</span>
-            ))}
-        </div>
-        <h3 class="text-base sm:text-lg font-light text-white tracking-wide leading-snug">
-            {work.title}
-        </h3>
-        {work.client && (
-            <p class="text-xs text-neutral-400 mt-1 tracking-wide">{work.client}</p>
+             class="absolute inset-0 w-full h-full object-cover transition-transform duration-700 group-hover:scale-[1.04]" />
+        {work.featured && (
+            <div class="absolute top-3 left-3 text-[10px] tracking-[0.25em] uppercase px-2 py-1 bg-white/95 text-[#c9372c] border border-[#c9372c]/30">
+                Featured
+            </div>
         )}
     </div>
 
-    {work.featured && (
-        <div class="absolute top-3 right-3 text-[10px] tracking-[0.2em] uppercase px-2 py-1 bg-black/60 border border-white/20 text-white/90">
-            Featured
+    <div>
+        <div class="flex items-center gap-2 mb-2 text-[10px] tracking-[0.3em] uppercase text-neutral-500">
+            {work.categories.slice(0, 2).map((cat, i) => (
+                <>{i > 0 && <span>·</span>}<span>{cat}</span></>
+            ))}
+            {work.year && <>
+                <span>·</span>
+                <span>{work.year}</span>
+            </>}
         </div>
-    )}
+        <h3 class="text-base sm:text-lg font-medium text-neutral-900 tracking-wide leading-snug group-hover:text-[#c9372c] transition-colors">
+            {work.title}
+        </h3>
+        {work.client && (
+            <p class="text-sm text-neutral-500 mt-1 tracking-wide">{work.client}</p>
+        )}
+    </div>
 </a>

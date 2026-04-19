@@ -55,3 +55,36 @@ export function youtubeEmbedUrl(
 export function youtubeWatchUrl(videoId: string | null | undefined): string | null {
     return videoId ? `https://www.youtube.com/watch?v=${videoId}` : null;
 }
+
+
+/**
+ * placeholderImage() — 圖片 fallback
+ * 用 picsum.photos 產 deterministic 圖（seed 基於 slug 所以同作品每次相同）。
+ * 使用情境：
+ *   1. youtube_id 是測試假 ID（test_vid*）→ YouTube CDN 回 404
+ *   2. 管理者還沒設 youtube_id 的作品
+ *   3. 縮圖載入失敗的 onerror fallback
+ */
+export function placeholderImage(seed: string, w = 1600, h = 900): string {
+    const safe = encodeURIComponent(seed || "originsun");
+    return `https://picsum.photos/seed/${safe}/${w}/${h}`;
+}
+
+
+/**
+ * resolveThumbnail() — 解析最終要顯示的圖片 URL
+ * 真 YouTube ID → 用 maxresdefault；test_/空值 → picsum placeholder
+ */
+export function resolveThumbnail(
+    videoId: string | null | undefined,
+    seed: string,
+    quality: "maxres" | "hq" | "default" = "maxres",
+): string {
+    if (videoId && !videoId.startsWith("test_") && isValidYouTubeId(videoId)) {
+        return youtubeThumbnail(videoId, quality)!;
+    }
+    const dims = quality === "maxres" ? [1600, 900]
+                : quality === "hq" ? [800, 450]
+                : [320, 180];
+    return placeholderImage(seed, dims[0], dims[1]);
+}

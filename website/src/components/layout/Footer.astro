@@ -1,8 +1,9 @@
 ---
 /**
- * Footer.astro — 頁尾
+ * Footer.astro — 頁尾（白底設計）
  */
 import type { IWebsiteMeta } from "../../types/meta";
+import Tr from "../ui/Tr.astro";
 import { t } from "../../lib/i18n";
 
 interface Props { meta: IWebsiteMeta }
@@ -16,11 +17,11 @@ const socials = [
 ].filter(s => !!s.url);
 ---
 
-<footer class="mt-32 border-t border-neutral-900/80 bg-black">
-    <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-12">
-        <div class="grid grid-cols-1 md:grid-cols-3 gap-8 mb-10">
+<footer class="mt-24 border-t border-neutral-200 bg-white">
+    <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-16">
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-10 mb-10">
             <div>
-                <div class="text-xl tracking-widest font-light mb-2">
+                <div class="text-lg tracking-[0.25em] font-light mb-2 text-neutral-900">
                     <span data-lang-zh>{meta.company_name_zh}</span>
                     <span data-lang-en>{meta.company_name_en}</span>
                 </div>
@@ -28,32 +29,30 @@ const socials = [
             </div>
 
             <div>
-                <h4 class="text-xs tracking-widest text-neutral-400 uppercase mb-3">
-                    <span data-lang-zh>聯絡</span>
-                    <span data-lang-en>Contact</span>
+                <h4 class="text-xs tracking-[0.3em] text-neutral-500 uppercase mb-3">
+                    <Tr zh="聯絡" en="Contact" />
                 </h4>
-                <div class="text-sm text-neutral-300 space-y-1">
+                <div class="text-sm text-neutral-700 space-y-1">
                     {meta.address && <div>{meta.address}</div>}
-                    {meta.phone && <div>Tel: <a href={`tel:${meta.phone}`} class="hover:text-white">{meta.phone}</a></div>}
-                    {meta.email && <div>Email: <a href={`mailto:${meta.email}`} class="hover:text-white">{meta.email}</a></div>}
+                    {meta.phone && <div>Tel: <a href={`tel:${meta.phone}`} class="hover:text-[#c9372c]">{meta.phone}</a></div>}
+                    {meta.email && <div>Email: <a href={`mailto:${meta.email}`} class="hover:text-[#c9372c]">{meta.email}</a></div>}
                 </div>
             </div>
 
             <div>
-                <h4 class="text-xs tracking-widest text-neutral-400 uppercase mb-3">
-                    <span data-lang-zh>社群</span>
-                    <span data-lang-en>Follow</span>
+                <h4 class="text-xs tracking-[0.3em] text-neutral-500 uppercase mb-3">
+                    <Tr zh="社群" en="Follow" />
                 </h4>
                 <div class="flex flex-col gap-1 text-sm">
                     {socials.map(s => (
                         <a href={s.url} target="_blank" rel="noopener"
-                           class="text-neutral-300 hover:text-white">{s.label} →</a>
+                           class="text-neutral-700 hover:text-[#c9372c] transition-colors">{s.label} →</a>
                     ))}
                 </div>
             </div>
         </div>
 
-        <div class="pt-6 border-t border-neutral-900/60 text-xs text-neutral-500 tracking-wide">
+        <div class="pt-6 border-t border-neutral-200 text-xs text-neutral-500 tracking-wide">
             <span data-lang-zh>{t("copyright", "zh", { year })}</span>
             <span data-lang-en>{t("copyright", "en", { year })}</span>
         </div>

@@ -1,10 +1,9 @@
 ---
 /**
- * CategoryFilter.astro — 作品集頁的分類篩選 pills
- * 純 link 切換（帶 ?category=slug query），不需 JS
+ * CategoryFilter.astro — 作品集分類 pills（白底）
  */
 import type { ICategory } from "../../types/category";
-import { STR } from "../../lib/i18n";
+import Tr from "../ui/Tr.astro";
 
 interface Props {
     categories: ICategory[];
@@ -14,28 +13,26 @@ interface Props {
 const { categories, activeSlug = null, basePath = "/works" } = Astro.props;
 ---
 
-<div class="flex flex-wrap gap-2 mb-10 justify-center">
+<div class="flex flex-wrap gap-2 mb-12 justify-center">
     <a href={basePath}
        class:list={[
-           "px-4 py-2 text-xs tracking-widest uppercase border transition-colors",
+           "px-5 py-2 text-xs tracking-[0.25em] uppercase border transition-colors",
            !activeSlug
-               ? "border-white text-white bg-white/5"
-               : "border-neutral-700 text-neutral-400 hover:text-white hover:border-neutral-500",
+               ? "border-neutral-900 bg-neutral-900 text-white"
+               : "border-neutral-300 text-neutral-500 hover:border-neutral-900 hover:text-neutral-900",
        ]}>
-        <span data-lang-zh>{STR.works_filter_all.zh}</span>
-        <span data-lang-en>{STR.works_filter_all.en}</span>
+        <Tr k="works_filter_all" />
     </a>
     {categories.map(cat => (
         <a href={`${basePath}?category=${cat.slug}`}
            class:list={[
-               "px-4 py-2 text-xs tracking-widest uppercase border transition-colors",
+               "px-5 py-2 text-xs tracking-[0.25em] uppercase border transition-colors",
                activeSlug === cat.slug
-                   ? "border-white text-white bg-white/5"
-                   : "border-neutral-700 text-neutral-400 hover:text-white hover:border-neutral-500",
+                   ? "border-neutral-900 bg-neutral-900 text-white"
+                   : "border-neutral-300 text-neutral-500 hover:border-neutral-900 hover:text-neutral-900",
            ]}>
-            <span data-lang-zh>{cat.name_zh}</span>
-            <span data-lang-en>{cat.name_en || cat.name_zh}</span>
-            <span class="text-neutral-600">({cat.count})</span>
+            <Tr zh={cat.name_zh} en={cat.name_en || cat.name_zh} />
+            <span class="text-neutral-400 ml-1">({cat.count})</span>
         </a>
     ))}
 </div>

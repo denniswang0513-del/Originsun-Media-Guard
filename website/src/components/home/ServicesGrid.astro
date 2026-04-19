@@ -1,10 +1,9 @@
 ---
 /**
- * ServicesGrid.astro — 首頁服務項目區塊
- * 4 格網格，hover 反白，點擊導到相關分類作品頁
+ * ServicesGrid.astro — 首頁服務項目（白底，微灰分隔）
  */
 import type { IService } from "../../types/service";
-import { STR } from "../../lib/i18n";
+import Tr from "../ui/Tr.astro";
 import { iconChar, warnUnknownIcons } from "../../lib/service-icons";
 
 interface Props { services: IService[] }
@@ -13,42 +12,36 @@ const { services } = Astro.props;
 warnUnknownIcons(services.map(s => s.icon), "ServicesGrid");
 ---
 
-<section class="bg-neutral-950 py-24 sm:py-32">
+<section class="bg-neutral-50 py-24 sm:py-32 border-y border-neutral-200">
     <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
         <div class="text-center mb-16">
-            <p class="text-xs tracking-[0.4em] text-neutral-500 uppercase mb-2">
-                <span data-lang-zh>服務</span>
-                <span data-lang-en>Services</span>
-            </p>
-            <h2 class="text-3xl sm:text-4xl font-light tracking-tight">
-                <span data-lang-zh>{STR.services_title.zh}</span>
-                <span data-lang-en>{STR.services_title.en}</span>
+            <p class="text-xs tracking-[0.4em] text-neutral-500 uppercase mb-2">Services</p>
+            <h2 class="text-3xl sm:text-4xl font-light tracking-tight text-neutral-900">
+                <Tr k="services_title" />
             </h2>
         </div>
 
         {services.length > 0 ? (
-            <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-px bg-neutral-900">
+            <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-px bg-neutral-200">
                 {services.map(s => (
                     <a href={s.related_category_slug ? `/works?category=${s.related_category_slug}` : "/services"}
-                       class="group bg-black p-8 sm:p-10 hover:bg-neutral-900 transition-colors">
-                        <div class="text-3xl mb-4 text-neutral-500 group-hover:text-white transition-colors">
+                       class="group bg-white p-8 sm:p-10 hover:bg-neutral-50 transition-colors">
+                        <div class="text-3xl mb-4 text-neutral-300 group-hover:text-[#c9372c] transition-colors">
                             {iconChar(s.icon)}
                         </div>
-                        <h3 class="text-lg font-light tracking-wide mb-2">{s.title}</h3>
+                        <h3 class="text-lg font-medium tracking-wide mb-2 text-neutral-900">{s.title}</h3>
                         {s.short_desc && (
-                            <p class="text-sm text-neutral-400 leading-relaxed tracking-wide">{s.short_desc}</p>
+                            <p class="text-sm text-neutral-500 leading-relaxed tracking-wide">{s.short_desc}</p>
                         )}
-                        <div class="mt-4 text-xs tracking-widest text-neutral-600 group-hover:text-neutral-300 uppercase">
-                            <span data-lang-zh>查看作品 →</span>
-                            <span data-lang-en>View works →</span>
+                        <div class="mt-4 text-xs tracking-[0.25em] text-neutral-400 group-hover:text-[#c9372c] uppercase">
+                            <Tr zh="查看作品 →" en="View works →" />
                         </div>
                     </a>
                 ))}
             </div>
         ) : (
             <div class="py-20 text-center text-neutral-500">
-                <span data-lang-zh>服務項目載入中…</span>
-                <span data-lang-en>Loading services…</span>
+                <Tr zh="服務項目載入中…" en="Loading services…" />
             </div>
         )}
     </div>

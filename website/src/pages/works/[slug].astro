@@ -1,20 +1,16 @@
 ---
 /**
- * works/[slug].astro — 作品詳情頁
+ * works/[slug].astro — 作品詳情頁（白底，對齊 originsun-studio.com 舊站）
  *
- * SSG：`getStaticPaths` 於 build 時列出所有 public_slug，為每個 slug 產靜態頁。
- * Runtime 新增作品需 rebuild。
+ * 結構：影片 → 類別標籤 → 大標題 → 描述 → — CREDIT LIST — → NEXT ▸
  */
 import BaseLayout from "../../layouts/BaseLayout.astro";
-import WorkCard from "../../components/works/WorkCard.astro";
 import { fetchMeta, fetchWorkBySlug, fetchAllWorksCached } from "../../lib/crm-client";
-import { youtubeWatchUrl, isValidYouTubeId } from "../../lib/youtube";
+import { isValidYouTubeId, resolveThumbnail } from "../../lib/youtube";
 import { videoObjectSchema } from "../../lib/seo";
-import { STR } from "../../lib/i18n";
-import { LIMITS, SITE_URL_FALLBACK } from "../../lib/config";
+import { SITE_URL_FALLBACK } from "../../lib/config";
 
 export async function getStaticPaths() {
-    // 共用 cached list（fetchAllWorksCached 在 crm-client.ts 用模組級 Promise 記憶化）
     const items = await fetchAllWorksCached();
     return items.filter(w => w.slug).map(w => ({ params: { slug: w.slug } }));
 }
@@ -26,23 +22,35 @@ const [meta, work, allWorks] = await Promise.all([
     fetchAllWorksCached(),
 ]);
 
-if (!work) {
-    return Astro.redirect("/works");
-}
+if (!work) return Astro.redirect("/works");
 
-// 相關作品：從 cache 內篩選（同分類 + 排除自己），避免額外 HTTP
-const activeCat = work.categories[0];
-const related = activeCat
-    ? allWorks.filter(w => w.slug !== work.slug && w.categories.includes(activeCat))
-              .slice(0, LIMITS.RELATED_WORKS)
-    : [];
+// 下一個作品（循環）
+const curIdx = allWorks.findIndex(w => w.slug === work.slug);
+const nextWork = curIdx >= 0 && curIdx < allWorks.length - 1 ? allWorks[curIdx + 1] : allWorks[0];
+
+const categoryLabel = (work.categories[0] || "WORK").toUpperCase();
 
 const siteUrl = Astro.site?.toString() || SITE_URL_FALLBACK;
-const schemaData = isValidYouTubeId(work.youtube_id)
-    ? [videoObjectSchema(work, siteUrl)]
-    : [];
+const schemaData = isValidYouTubeId(work.youtube_id) ? [videoObjectSchema(work, siteUrl)] : [];
 
-const ytWatch = youtubeWatchUrl(work.youtube_id);
+// Credits 排序 + 中英對照
+const CREDIT_EN: Record<string, string> = {
+    客戶: "Client", 導演: "Director", 製片: "Producer",
+    攝影: "Photographer", 剪輯: "Editor", 調光: "Colorist",
+    配樂: "Music", 動畫指導: "Animation Director",
+    製作助理: "Production Assistant", 剪輯助理: "Assistant Editor",
+    混音: "Re-Recording Mixer",
+};
+const CREDIT_ORDER = Object.keys(CREDIT_EN);
+
+const credits = Object.entries(work.credits || {});
+credits.sort((a, b) => {
+    const ia = CREDIT_ORDER.indexOf(a[0]);
+    const ib = CREDIT_ORDER.indexOf(b[0]);
+    return (ia === -1 ? 999 : ia) - (ib === -1 ? 999 : ib);
+});
+
+const nextThumb = nextWork ? resolveThumbnail(nextWork.youtube_id, nextWork.slug, "hq") : null;
 ---
 
 <BaseLayout title={work.title}
@@ -51,15 +59,15 @@ const ytWatch = youtubeWatchUrl(work.youtube_id);
             schemaData={schemaData}
             ogImage={work.thumbnail_url || undefined}>
 
-    <!-- 影片主體（lite-youtube-embed：點擊才載 iframe，Lighthouse 友善） -->
-    <section class="pt-20 bg-black">
-        <div class="max-w-6xl mx-auto">
+    <!-- 頂部影片 -->
+    <section class="pt-24 sm:pt-28 bg-white">
+        <div class="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8">
             {isValidYouTubeId(work.youtube_id) ? (
                 <lite-youtube videoid={work.youtube_id}
                               class="block aspect-video"
                               playlabel={work.title}></lite-youtube>
             ) : (
-                <div class="aspect-video bg-neutral-900 flex items-center justify-center text-neutral-500">
+                <div class="aspect-video bg-neutral-100 flex items-center justify-center text-neutral-400">
                     <span data-lang-zh>影片暫無法使用</span>
                     <span data-lang-en>Video unavailable</span>
                 </div>
@@ -67,77 +75,82 @@ const ytWatch = youtubeWatchUrl(work.youtube_id);
         </div>
     </section>
 
-    <!-- 作品資訊 -->
-    <section class="bg-black py-16">
-        <div class="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8">
-            <div class="grid grid-cols-1 lg:grid-cols-3 gap-10">
-                <!-- 左側：主資訊 -->
-                <div class="lg:col-span-2">
-                    <div class="flex items-center gap-3 mb-4 text-xs tracking-[0.2em] uppercase text-neutral-500">
-                        {work.year && <span>{work.year}</span>}
-                        {work.categories.map(c => <span>· {c}</span>)}
+    <!-- 類別 + 標題 + 描述 + Credits -->
+    <section class="bg-white py-12 sm:py-16">
+        <div class="max-w-3xl mx-auto px-4 sm:px-6 lg:px-8">
+
+            <div class="text-xs tracking-[0.4em] uppercase text-neutral-500 mb-5">
+                {categoryLabel}
+            </div>
+
+            <h1 class="text-3xl sm:text-5xl font-bold tracking-tight text-neutral-900 mb-8 leading-tight">
+                {work.title}
+            </h1>
+
+            {work.description && (
+                <div class="text-base text-neutral-600 leading-[1.85] tracking-wide mb-14 whitespace-pre-line">
+                    {work.description}
+                </div>
+            )}
+
+            {credits.length > 0 && (
+                <>
+                    <div class="flex items-center gap-4 mb-8 text-xs tracking-[0.4em] text-neutral-600 uppercase">
+                        <span class="h-px w-6 bg-neutral-300"></span>
+                        <span>Credit List</span>
+                        <span class="h-px w-6 bg-neutral-300"></span>
                     </div>
 
-                    <h1 class="text-3xl sm:text-5xl font-light tracking-tight mb-6">{work.title}</h1>
-
-                    {work.client && (
-                        <p class="text-neutral-400 text-sm mb-6">
-                            <span data-lang-zh>{STR.work_client.zh}：</span>
-                            <span data-lang-en>{STR.work_client.en}: </span>
-                            <span class="text-white">{work.client}</span>
-                        </p>
-                    )}
-
-                    {work.description && (
-                        <p class="text-neutral-300 leading-relaxed tracking-wide whitespace-pre-line">
-                            {work.description}
-                        </p>
-                    )}
-
-                    {ytWatch && (
-                        <a href={ytWatch} target="_blank" rel="noopener"
-                           class="inline-flex items-center gap-2 mt-8 text-sm tracking-widest uppercase border border-neutral-500 px-6 py-3 hover:bg-white hover:text-black transition-colors">
-                            <span data-lang-zh>{STR.work_watch_yt.zh}</span>
-                            <span data-lang-en>{STR.work_watch_yt.en}</span>
-                            <span>↗</span>
-                        </a>
-                    )}
-                </div>
-
-                <!-- 右側：職員表 / credits -->
-                {Object.keys(work.credits || {}).length > 0 && (
-                    <aside>
-                        <h3 class="text-xs tracking-[0.4em] uppercase text-neutral-500 mb-4">
-                            <span data-lang-zh>{STR.work_credits.zh}</span>
-                            <span data-lang-en>{STR.work_credits.en}</span>
-                        </h3>
-                        <dl class="space-y-3 text-sm">
-                            {Object.entries(work.credits).map(([role, name]) => (
-                                <div>
-                                    <dt class="text-neutral-500 tracking-wide text-xs">{role}</dt>
-                                    <dd class="text-neutral-200 mt-1">
-                                        {Array.isArray(name) ? name.join(", ") : name}
-                                    </dd>
-                                </div>
-                            ))}
-                        </dl>
-                    </aside>
-                )}
-            </div>
+                    <dl class="space-y-3 text-[15px]">
+                        {credits.map(([role, name]) => (
+                            <div class="flex items-baseline gap-3 flex-wrap">
+                                <dt class="text-neutral-500 tracking-wide min-w-[160px]">
+                                    <span>{role}</span>
+                                    {CREDIT_EN[role] && (
+                                        <span class="text-neutral-400 text-sm ml-1">{CREDIT_EN[role]}</span>
+                                    )}
+                                </dt>
+                                <span class="text-neutral-300">｜</span>
+                                <dd class="text-neutral-800 tracking-wide flex-1">
+                                    {Array.isArray(name) ? name.join(" ") : name}
+                                </dd>
+                            </div>
+                        ))}
+                    </dl>
+                </>
+            )}
         </div>
     </section>
 
-    <!-- 相關作品 -->
-    {related.length > 0 && (
-        <section class="bg-neutral-950 py-16">
-            <div class="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8">
-                <h3 class="text-xs tracking-[0.4em] uppercase text-neutral-500 mb-8 text-center">
-                    <span data-lang-zh>{STR.work_related.zh}</span>
-                    <span data-lang-en>{STR.work_related.en}</span>
-                </h3>
-                <div class="grid grid-cols-1 sm:grid-cols-3 gap-6">
-                    {related.map(w => <WorkCard work={w} />)}
-                </div>
+    <!-- 底部分隔線 -->
+    <div class="max-w-3xl mx-auto px-4 sm:px-6 lg:px-8">
+        <hr class="border-neutral-200" />
+    </div>
+
+    <!-- NEXT 區域 -->
+    {nextWork && (
+        <section class="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 py-14">
+            <div class="flex items-center justify-between">
+                <a href="/works" class="text-neutral-400 hover:text-[#c9372c] transition-colors" aria-label="All works">
+                    <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                        <rect x="3" y="6" width="18" height="12" rx="1" />
+                        <line x1="7" y1="6" x2="7" y2="18" />
+                        <line x1="17" y1="6" x2="17" y2="18" />
+                    </svg>
+                </a>
+                <a href={`/works/${nextWork.slug}`} class="group flex items-center gap-4">
+                    <div class="text-right">
+                        <div class="text-xs tracking-[0.4em] uppercase text-neutral-500 mb-1">Next</div>
+                        <div class="text-sm text-neutral-700 group-hover:text-[#c9372c] transition-colors max-w-[300px] truncate">{nextWork.title}</div>
+                    </div>
+                    {nextThumb && (
+                        <div class="w-24 h-14 overflow-hidden bg-neutral-100">
+                            <img src={nextThumb}
+                                 alt={nextWork.title}
+                                 class="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500" />
+                        </div>
+                    )}
+                </a>
             </div>
         </section>
     )}

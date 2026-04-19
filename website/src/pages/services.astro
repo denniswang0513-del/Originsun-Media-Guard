@@ -19,14 +19,14 @@ warnUnknownIcons(services.map(s => s.icon), "services.astro");
 ---
 
 <BaseLayout title="服務項目 Services" meta={meta}>
-    <section class="pt-32 pb-20 bg-black">
+    <section class="pt-32 pb-20 bg-white">
         <div class="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8">
             <div class="text-center mb-16">
                 <p class="text-xs tracking-[0.4em] text-neutral-500 uppercase mb-3">Services</p>
                 <h1 class="text-4xl sm:text-5xl font-light tracking-tight mb-6">
                     <Tr zh="我們能為您做的" en="What We Can Do" />
                 </h1>
-                <p class="max-w-2xl mx-auto text-neutral-400 leading-relaxed tracking-wide">
+                <p class="max-w-2xl mx-auto text-neutral-600 leading-relaxed tracking-wide">
                     <Tr zh="從前期腳本發想到後期交付，一條龍完成您的影像需求。"
                         en="End-to-end production from concept development to final delivery." />
                 </p>
@@ -37,21 +37,21 @@ warnUnknownIcons(services.map(s => s.icon), "services.astro");
                     <Tr zh="服務項目載入中…" en="Loading services…" />
                 </div>
             ) : (
-                <div class="space-y-px bg-neutral-900">
+                <div class="space-y-px bg-neutral-200">
                     {services.map(s => {
                         const cat = s.related_category_slug ? catBySlug.get(s.related_category_slug) : null;
                         return (
-                            <article class="bg-black p-8 md:p-12 grid grid-cols-1 md:grid-cols-[80px_1fr_auto] gap-6 md:gap-10 items-start">
+                            <article class="bg-white p-8 md:p-12 grid grid-cols-1 md:grid-cols-[80px_1fr_auto] gap-6 md:gap-10 items-start">
                                 <div class="text-5xl text-neutral-500">{iconChar(s.icon)}</div>
                                 <div>
                                     <h2 class="text-2xl font-light tracking-wide mb-3">{s.title}</h2>
                                     {s.short_desc && (
-                                        <p class="text-neutral-300 leading-relaxed tracking-wide mb-2">{s.short_desc}</p>
+                                        <p class="text-neutral-700 leading-relaxed tracking-wide mb-2">{s.short_desc}</p>
                                     )}
                                 </div>
                                 {cat && (
                                     <a href={`/works?category=${cat.slug}`}
-                                       class="md:self-center inline-flex items-center gap-2 text-xs tracking-widest uppercase border border-neutral-700 px-5 py-2 hover:bg-white hover:text-black hover:border-white transition-colors whitespace-nowrap">
+                                       class="md:self-center inline-flex items-center gap-2 text-xs tracking-widest uppercase border border-neutral-900 px-5 py-2 hover:bg-white hover:text-white hover:border-white transition-colors whitespace-nowrap">
                                         <Tr zh={`看 ${cat.name_zh} 作品`} en={`View ${cat.name_en || cat.name_zh}`} />
                                         <span>→</span>
                                     </a>
@@ -65,17 +65,17 @@ warnUnknownIcons(services.map(s => s.icon), "services.astro");
     </section>
 
     <!-- CTA 區塊 -->
-    <section class="bg-neutral-950 py-20">
+    <section class="bg-neutral-50 py-20">
         <div class="max-w-3xl mx-auto px-4 text-center">
             <h2 class="text-2xl sm:text-3xl font-light tracking-tight mb-6">
                 <Tr zh="有影像製作需求？" en="Have a Project in Mind?" />
             </h2>
-            <p class="text-neutral-400 mb-8 tracking-wide">
+            <p class="text-neutral-600 mb-8 tracking-wide">
                 <Tr zh="不論是品牌形象片、紀實短片或活動紀錄，我們都樂意傾聽您的想法。"
                     en="From brand films to documentaries and event recaps — we'd love to hear your story." />
             </p>
             <a href="/contact"
-               class="inline-flex items-center gap-2 text-sm tracking-widest uppercase border border-neutral-500 px-8 py-3 hover:bg-white hover:text-black transition-colors">
+               class="inline-flex items-center gap-2 text-sm tracking-widest uppercase border border-neutral-500 px-8 py-3 hover:bg-white hover:text-white transition-colors">
                 <Tr zh="聯絡我們" en="Get in Touch" />
                 <span>→</span>
             </a>

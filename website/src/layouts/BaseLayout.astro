@@ -77,7 +77,7 @@ const canonical = new URL(Astro.url.pathname, Astro.site || SITE_URL_FALLBACK).t
             })();
         </script>
     </head>
-    <body class="bg-black text-neutral-100 antialiased">
+    <body class="bg-white text-neutral-800 antialiased">
         <Header meta={meta} />
         <main class="min-h-screen">
             <slot />
@@ -91,13 +91,19 @@ const canonical = new URL(Astro.url.pathname, Astro.site || SITE_URL_FALLBACK).t
     html[data-lang="zh"] [data-lang-en] { display: none !important; }
     html[data-lang="en"] [data-lang-zh] { display: none !important; }
 
-    /* 平滑滾動 */
     html { scroll-behavior: smooth; }
 
-    /* 極簡配色：黑底 + 灰階文字 + 少量金屬色強調 */
+    /* 白底配色 —— 對齊 originsun-studio.com 舊站風格
+       accent 為 Logo 紅，少量使用在 hover / 裝飾線 */
     :root {
-        --accent: #c9a24a;       /* 金屬金 — 電影感 */
-        --accent-hover: #e3bc5d;
-        --line: #1a1a1a;
+        --accent: #c9372c;
+        --accent-hover: #a02921;
+        --text-strong: #111;
+        --text: #333;
+        --text-muted: #888;
+        --line: #e5e5e5;
     }
+
+    body { color: var(--text); }
+    h1, h2, h3, h4 { color: var(--text-strong); }
 </style>
