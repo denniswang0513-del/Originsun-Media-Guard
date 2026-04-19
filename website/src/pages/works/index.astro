@@ -1,0 +1,80 @@
+---
+/**
+ * works/index.astro — 作品集列表（/works，可帶 ?category=slug）
+ *
+ * 靜態生成注意：Astro 預設 SSG 不會為每個 query string 產生不同頁面。
+ * 為了在純靜態下也能依分類篩選，使用 client-side filter：
+ * - 建置時載入所有 public works
+ * - 頁面渲染時全部寫到 DOM
+ * - JS 根據 URL query 決定顯示哪些卡片（CategoryFilter 的 link 觸發 reload）
+ */
+import BaseLayout from "../../layouts/BaseLayout.astro";
+import CategoryFilter from "../../components/works/CategoryFilter.astro";
+import WorkCard from "../../components/works/WorkCard.astro";
+import { fetchMeta, fetchWorks, fetchCategories } from "../../lib/crm-client";
+import { STR } from "../../lib/i18n";
+
+const [meta, worksRes, categories] = await Promise.all([
+    fetchMeta(),
+    fetchWorks({ limit: 100 }),  // build-time 一次撈全部，client-side 篩選
+    fetchCategories(),
+]);
+
+const allWorks = worksRes.items;
+
+// SSR/SSG 不認 query，但我們可在 frontmatter 讀 Astro.url.searchParams
+// 在純 SSG 下此值為 undefined；靠 client-side script 根據實際 URL 再篩。
+const activeCategory = Astro.url.searchParams.get("category") || null;
+---
+
+<BaseLayout title="作品集 Works" meta={meta}>
+    <section class="pt-32 pb-20 bg-black">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+            <div class="text-center mb-12">
+                <p class="text-xs tracking-[0.4em] text-neutral-500 uppercase mb-3">Portfolio</p>
+                <h1 class="text-4xl sm:text-5xl font-light tracking-tight">
+                    <span data-lang-zh>{STR.works_title.zh}</span>
+                    <span data-lang-en>{STR.works_title.en}</span>
+                </h1>
+            </div>
+
+            <CategoryFilter categories={categories} activeSlug={activeCategory} />
+
+            <div id="works-grid"
+                 data-active-category={activeCategory || ""}
+                 class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-6">
+                {allWorks.map(work => (
+                    <div class="work-item" data-categories={work.categories.join(",")}>
+                        <WorkCard work={work} />
+                    </div>
+                ))}
+            </div>
+
+            <div id="works-empty" class="py-20 text-center text-neutral-500 hidden">
+                <span data-lang-zh>{STR.works_no_items.zh}</span>
+                <span data-lang-en>{STR.works_no_items.en}</span>
+            </div>
+        </div>
+    </section>
+</BaseLayout>
+
+<script>
+    // Client-side 分類過濾（純 SSG 下 query 不會在 build 時套用）
+    const params = new URLSearchParams(window.location.search);
+    const cat = params.get("category") || "";
+    if (cat) {
+        let visible = 0;
+        document.querySelectorAll<HTMLElement>(".work-item").forEach(el => {
+            const cats = (el.dataset.categories || "").split(",");
+            const show = cats.includes(cat);
+            el.style.display = show ? "" : "none";
+            if (show) visible++;
+        });
+        const empty = document.getElementById("works-empty");
+        const grid = document.getElementById("works-grid");
+        if (visible === 0 && empty && grid) {
+            grid.classList.add("hidden");
+            empty.classList.remove("hidden");
+        }
+    }
+</script>

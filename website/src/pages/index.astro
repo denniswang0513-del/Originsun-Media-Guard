@@ -1,17 +1,34 @@
 ---
+/**
+ * index.astro — 首頁（/）
+ * 組合：Hero（YouTube 背景）+ Featured Works + Services
+ */
+import BaseLayout from "../layouts/BaseLayout.astro";
+import HeroReel from "../components/home/HeroReel.astro";
+import FeaturedWorks from "../components/home/FeaturedWorks.astro";
+import ServicesGrid from "../components/home/ServicesGrid.astro";
+import { fetchMeta, fetchFeatured, fetchServices } from "../lib/crm-client";
+import { organizationSchema } from "../lib/seo";
 
+const [meta, featured, services] = await Promise.all([
+    fetchMeta(),
+    fetchFeatured(6),
+    fetchServices(),
+]);
+
+// Hero YouTube ID 之後由 website_settings.home.hero_youtube_id 驅動。
+// 目前 fetchMeta() 回的 IWebsiteMeta 未含此欄位，走靜態 gradient fallback。
+const heroYoutubeId: string | null = null;
+
+const siteUrl = Astro.site?.toString() || "https://originsun-studio.com";
+const schemaData = [organizationSchema(meta, siteUrl)];
 ---
 
-<html lang="en">
-	<head>
-		<meta charset="utf-8" />
-		<link rel="icon" type="image/svg+xml" href="/favicon.svg" />
-		<link rel="icon" href="/favicon.ico" />
-		<meta name="viewport" content="width=device-width" />
-		<meta name="generator" content={Astro.generator} />
-		<title>Astro</title>
-	</head>
-	<body>
-		<h1>Astro</h1>
-	</body>
-</html>
+<BaseLayout title={meta.company_name_zh}
+            description={meta.seo_default_description}
+            meta={meta}
+            schemaData={schemaData}>
+    <HeroReel meta={meta} heroYoutubeId={heroYoutubeId} />
+    <FeaturedWorks works={featured} />
+    <ServicesGrid services={services} />
+</BaseLayout>

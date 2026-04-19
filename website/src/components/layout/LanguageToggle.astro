@@ -1,0 +1,24 @@
+---
+/**
+ * LanguageToggle.astro — 中/EN 切換按鈕
+ * 更新 html[data-lang] + localStorage；雙語字串用 CSS 依 data-lang 顯隱
+ */
+---
+
+<button type="button"
+        class="text-xs tracking-widest px-2 py-1 text-neutral-400 hover:text-white transition-colors"
+        data-lang-toggle>
+    <span data-lang-zh>EN</span>
+    <span data-lang-en>中文</span>
+</button>
+
+<script>
+    const btn = document.querySelector("[data-lang-toggle]");
+    btn?.addEventListener("click", () => {
+        const cur = document.documentElement.getAttribute("data-lang") || "zh";
+        const next = cur === "zh" ? "en" : "zh";
+        document.documentElement.setAttribute("data-lang", next);
+        document.documentElement.setAttribute("lang", next === "zh" ? "zh-Hant" : "en");
+        try { localStorage.setItem("lang", next); } catch (_) {}
+    });
+</script>

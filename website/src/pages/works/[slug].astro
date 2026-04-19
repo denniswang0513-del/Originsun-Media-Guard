@@ -1,0 +1,142 @@
+---
+/**
+ * works/[slug].astro — 作品詳情頁
+ *
+ * SSG：`getStaticPaths` 於 build 時列出所有 public_slug，為每個 slug 產靜態頁。
+ * Runtime 新增作品需 rebuild。
+ */
+import BaseLayout from "../../layouts/BaseLayout.astro";
+import WorkCard from "../../components/works/WorkCard.astro";
+import { fetchMeta, fetchWorks, fetchWorkBySlug } from "../../lib/crm-client";
+import { youtubeWatchUrl, isValidYouTubeId } from "../../lib/youtube";
+import { videoObjectSchema } from "../../lib/seo";
+import { STR } from "../../lib/i18n";
+
+export async function getStaticPaths() {
+    const res = await fetchWorks({ limit: 200 });
+    return res.items
+        .filter(w => w.slug)
+        .map(w => ({ params: { slug: w.slug } }));
+}
+
+const { slug } = Astro.params;
+const [meta, work] = await Promise.all([
+    fetchMeta(),
+    fetchWorkBySlug(slug!),
+]);
+
+if (!work) {
+    return Astro.redirect("/works");
+}
+
+// 相關作品：同分類其他作品
+const relatedRes = work.categories.length
+    ? await fetchWorks({ category: work.categories[0], limit: 7 })
+    : { items: [] };
+const related = relatedRes.items.filter(w => w.slug !== work.slug).slice(0, 3);
+
+const siteUrl = Astro.site?.toString() || "https://originsun-studio.com";
+const schemaData = isValidYouTubeId(work.youtube_id)
+    ? [videoObjectSchema(work, siteUrl)]
+    : [];
+
+const ytWatch = youtubeWatchUrl(work.youtube_id);
+---
+
+<BaseLayout title={work.title}
+            description={work.description || work.title}
+            meta={meta}
+            schemaData={schemaData}
+            ogImage={work.thumbnail_url || undefined}>
+
+    <!-- 影片主體（lite-youtube-embed：點擊才載 iframe，Lighthouse 友善） -->
+    <section class="pt-20 bg-black">
+        <div class="max-w-6xl mx-auto">
+            {isValidYouTubeId(work.youtube_id) ? (
+                <lite-youtube videoid={work.youtube_id}
+                              class="block aspect-video"
+                              playlabel={work.title}></lite-youtube>
+            ) : (
+                <div class="aspect-video bg-neutral-900 flex items-center justify-center text-neutral-500">
+                    <span data-lang-zh>影片暫無法使用</span>
+                    <span data-lang-en>Video unavailable</span>
+                </div>
+            )}
+        </div>
+    </section>
+
+    <!-- 作品資訊 -->
+    <section class="bg-black py-16">
+        <div class="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8">
+            <div class="grid grid-cols-1 lg:grid-cols-3 gap-10">
+                <!-- 左側：主資訊 -->
+                <div class="lg:col-span-2">
+                    <div class="flex items-center gap-3 mb-4 text-xs tracking-[0.2em] uppercase text-neutral-500">
+                        {work.year && <span>{work.year}</span>}
+                        {work.categories.map(c => <span>· {c}</span>)}
+                    </div>
+
+                    <h1 class="text-3xl sm:text-5xl font-light tracking-tight mb-6">{work.title}</h1>
+
+                    {work.client && (
+                        <p class="text-neutral-400 text-sm mb-6">
+                            <span data-lang-zh>{STR.work_client.zh}：</span>
+                            <span data-lang-en>{STR.work_client.en}: </span>
+                            <span class="text-white">{work.client}</span>
+                        </p>
+                    )}
+
+                    {work.description && (
+                        <p class="text-neutral-300 leading-relaxed tracking-wide whitespace-pre-line">
+                            {work.description}
+                        </p>
+                    )}
+
+                    {ytWatch && (
+                        <a href={ytWatch} target="_blank" rel="noopener"
+                           class="inline-flex items-center gap-2 mt-8 text-sm tracking-widest uppercase border border-neutral-500 px-6 py-3 hover:bg-white hover:text-black transition-colors">
+                            <span data-lang-zh>{STR.work_watch_yt.zh}</span>
+                            <span data-lang-en>{STR.work_watch_yt.en}</span>
+                            <span>↗</span>
+                        </a>
+                    )}
+                </div>
+
+                <!-- 右側：職員表 / credits -->
+                {Object.keys(work.credits || {}).length > 0 && (
+                    <aside>
+                        <h3 class="text-xs tracking-[0.4em] uppercase text-neutral-500 mb-4">
+                            <span data-lang-zh>{STR.work_credits.zh}</span>
+                            <span data-lang-en>{STR.work_credits.en}</span>
+                        </h3>
+                        <dl class="space-y-3 text-sm">
+                            {Object.entries(work.credits).map(([role, name]) => (
+                                <div>
+                                    <dt class="text-neutral-500 tracking-wide text-xs">{role}</dt>
+                                    <dd class="text-neutral-200 mt-1">
+                                        {Array.isArray(name) ? name.join(", ") : name}
+                                    </dd>
+                                </div>
+                            ))}
+                        </dl>
+                    </aside>
+                )}
+            </div>
+        </div>
+    </section>
+
+    <!-- 相關作品 -->
+    {related.length > 0 && (
+        <section class="bg-neutral-950 py-16">
+            <div class="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8">
+                <h3 class="text-xs tracking-[0.4em] uppercase text-neutral-500 mb-8 text-center">
+                    <span data-lang-zh>{STR.work_related.zh}</span>
+                    <span data-lang-en>{STR.work_related.en}</span>
+                </h3>
+                <div class="grid grid-cols-1 sm:grid-cols-3 gap-6">
+                    {related.map(w => <WorkCard work={w} />)}
+                </div>
+            </div>
+        </section>
+    )}
+</BaseLayout>

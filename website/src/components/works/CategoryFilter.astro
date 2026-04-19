@@ -1,0 +1,41 @@
+---
+/**
+ * CategoryFilter.astro — 作品集頁的分類篩選 pills
+ * 純 link 切換（帶 ?category=slug query），不需 JS
+ */
+import type { ICategory } from "../../types/category";
+import { STR } from "../../lib/i18n";
+
+interface Props {
+    categories: ICategory[];
+    activeSlug?: string | null;
+    basePath?: string;
+}
+const { categories, activeSlug = null, basePath = "/works" } = Astro.props;
+---
+
+<div class="flex flex-wrap gap-2 mb-10 justify-center">
+    <a href={basePath}
+       class:list={[
+           "px-4 py-2 text-xs tracking-widest uppercase border transition-colors",
+           !activeSlug
+               ? "border-white text-white bg-white/5"
+               : "border-neutral-700 text-neutral-400 hover:text-white hover:border-neutral-500",
+       ]}>
+        <span data-lang-zh>{STR.works_filter_all.zh}</span>
+        <span data-lang-en>{STR.works_filter_all.en}</span>
+    </a>
+    {categories.map(cat => (
+        <a href={`${basePath}?category=${cat.slug}`}
+           class:list={[
+               "px-4 py-2 text-xs tracking-widest uppercase border transition-colors",
+               activeSlug === cat.slug
+                   ? "border-white text-white bg-white/5"
+                   : "border-neutral-700 text-neutral-400 hover:text-white hover:border-neutral-500",
+           ]}>
+            <span data-lang-zh>{cat.name_zh}</span>
+            <span data-lang-en>{cat.name_en || cat.name_zh}</span>
+            <span class="text-neutral-600">({cat.count})</span>
+        </a>
+    ))}
+</div>

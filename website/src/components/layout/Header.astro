@@ -1,0 +1,76 @@
+---
+/**
+ * Header.astro — 頂部導覽列
+ */
+import type { IWebsiteMeta } from "../../types/meta";
+import LanguageToggle from "./LanguageToggle.astro";
+import { STR } from "../../lib/i18n";
+
+interface Props { meta: IWebsiteMeta }
+const { meta } = Astro.props;
+
+const navItems = [
+    { href: "/works",    key: "nav_works" as const },
+    { href: "/services", key: "nav_services" as const },
+    { href: "/about",    key: "nav_about" as const },
+    { href: "/news",     key: "nav_news" as const },
+    { href: "/contact",  key: "nav_contact" as const },
+];
+
+const currentPath = Astro.url.pathname;
+---
+
+<header class="fixed top-0 inset-x-0 z-50 backdrop-blur-md bg-black/60 border-b border-neutral-900/80">
+    <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
+        <a href="/" class="group flex items-center gap-2 flex-shrink-0">
+            <span class="text-xl tracking-widest font-light">
+                <span data-lang-zh>{meta.company_name_zh}</span>
+                <span data-lang-en>{meta.company_name_en}</span>
+            </span>
+        </a>
+
+        <nav class="hidden md:flex items-center gap-8 text-sm tracking-wide">
+            {navItems.map(item => (
+                <a href={item.href}
+                   class:list={[
+                       "transition-colors hover:text-white",
+                       currentPath.startsWith(item.href) ? "text-white" : "text-neutral-400",
+                   ]}>
+                    <span data-lang-zh>{STR[item.key].zh}</span>
+                    <span data-lang-en>{STR[item.key].en}</span>
+                </a>
+            ))}
+        </nav>
+
+        <div class="flex items-center gap-4">
+            <LanguageToggle />
+            <button type="button"
+                    aria-label="menu"
+                    class="md:hidden text-neutral-300"
+                    data-mobile-nav-toggle>
+                <svg width="24" height="24" fill="none" stroke="currentColor" stroke-width="1.5">
+                    <path stroke-linecap="round" d="M3 6h18M3 12h18M3 18h18" />
+                </svg>
+            </button>
+        </div>
+    </div>
+
+    <!-- Mobile nav (≤ md) -->
+    <nav class="hidden flex-col gap-4 px-6 py-4 bg-black/90 border-t border-neutral-900" data-mobile-nav>
+        {navItems.map(item => (
+            <a href={item.href} class="text-neutral-300 hover:text-white text-base">
+                <span data-lang-zh>{STR[item.key].zh}</span>
+                <span data-lang-en>{STR[item.key].en}</span>
+            </a>
+        ))}
+    </nav>
+</header>
+
+<script>
+    const toggle = document.querySelector("[data-mobile-nav-toggle]");
+    const nav = document.querySelector("[data-mobile-nav]");
+    toggle?.addEventListener("click", () => {
+        nav?.classList.toggle("hidden");
+        nav?.classList.toggle("flex");
+    });
+</script>

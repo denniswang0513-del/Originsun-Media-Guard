@@ -1,0 +1,70 @@
+---
+/**
+ * HeroReel.astro — 首頁 Hero 區塊
+ * 背景 YouTube 影片（muted + autoplay + loop）+ 中央標語 + CTA
+ */
+import type { IWebsiteMeta } from "../../types/meta";
+import { youtubeEmbedUrl } from "../../lib/youtube";
+import { STR } from "../../lib/i18n";
+
+interface Props {
+    meta: IWebsiteMeta;
+    heroYoutubeId?: string | null;
+}
+
+const { meta, heroYoutubeId } = Astro.props;
+const embedUrl = youtubeEmbedUrl(heroYoutubeId, {
+    autoplay: true, mute: true, loop: true, controls: false,
+});
+---
+
+<section class="relative h-screen min-h-[600px] w-full overflow-hidden bg-black">
+    {embedUrl && (
+        <div class="absolute inset-0 z-0">
+            <!-- YouTube 背景影片（16:9，縮放填滿 viewport，過曝會被底下漸層壓暗） -->
+            <div class="absolute inset-0 scale-150 md:scale-125">
+                <iframe src={embedUrl}
+                        class="absolute inset-0 w-full h-full border-0"
+                        style="pointer-events:none;"
+                        allow="autoplay; encrypted-media"
+                        allowfullscreen></iframe>
+            </div>
+            <!-- 漸層遮罩讓文字可讀 -->
+            <div class="absolute inset-0 bg-gradient-to-b from-black/40 via-black/30 to-black"></div>
+        </div>
+    )}
+
+    {!embedUrl && (
+        <div class="absolute inset-0 z-0 bg-gradient-to-br from-neutral-950 via-black to-neutral-950"></div>
+    )}
+
+    <!-- 中央文字 -->
+    <div class="relative z-10 h-full flex flex-col justify-center items-center text-center px-4">
+        <p class="text-xs sm:text-sm tracking-[0.4em] text-neutral-400 uppercase mb-6">
+            {meta.subtitle}
+        </p>
+        <h1 class="text-4xl sm:text-6xl md:text-7xl font-light tracking-tight leading-tight mb-4">
+            <span class="block">{meta.tagline}</span>
+        </h1>
+        <p class="max-w-xl text-base sm:text-lg text-neutral-300 tracking-wide mb-10">
+            <span data-lang-zh>{meta.company_name_zh}</span>
+            <span data-lang-en>{meta.company_name_en}</span>
+        </p>
+
+        <a href="/works"
+           class="group inline-flex items-center gap-2 text-sm tracking-widest uppercase border border-neutral-500 px-8 py-3 hover:bg-white hover:text-black transition-colors">
+            <span data-lang-zh>{STR.hero_cta.zh}</span>
+            <span data-lang-en>{STR.hero_cta.en}</span>
+            <span class="inline-block translate-x-0 group-hover:translate-x-1 transition-transform">→</span>
+        </a>
+    </div>
+
+    <!-- 向下滾動提示 -->
+    <div class="absolute bottom-8 inset-x-0 flex justify-center z-10">
+        <a href="#featured" class="text-xs tracking-widest text-neutral-400 uppercase">
+            <span data-lang-zh>{STR.hero_scroll.zh}</span>
+            <span data-lang-en>{STR.hero_scroll.en}</span>
+            <span class="block mt-2 mx-auto w-px h-8 bg-neutral-500 animate-pulse"></span>
+        </a>
+    </div>
+</section>

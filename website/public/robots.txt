@@ -1,0 +1,4 @@
+# 開發 / staging 期間：完全拒絕搜尋引擎索引
+# 7/1 正式切換後改為：User-agent: * + Allow: /
+User-agent: *
+Disallow: /

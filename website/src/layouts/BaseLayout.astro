@@ -1,0 +1,102 @@
+---
+/**
+ * BaseLayout.astro — 全站外殼（<html> + <head> + <body> + Header/Footer）
+ * Props:
+ * - title: 頁面標題（會接上 company name）
+ * - description: SEO 描述
+ * - meta: 全站 metadata（從 fetchMeta() 來）
+ * - noindex: 設為 true 時加 robots noindex（開發期用）
+ * - schemaData: 可選的 Schema.org JSON-LD 陣列
+ */
+import Header from "../components/layout/Header.astro";
+import Footer from "../components/layout/Footer.astro";
+import type { IWebsiteMeta } from "../types/meta";
+import "../styles/global.css";
+
+interface Props {
+    title: string;
+    description?: string;
+    meta: IWebsiteMeta;
+    noindex?: boolean;
+    schemaData?: Record<string, unknown>[];
+    ogImage?: string;
+}
+
+const { title, description, meta, noindex = true, schemaData = [], ogImage } = Astro.props;
+
+const fullTitle = title === meta.company_name_zh ? title : `${title} | ${meta.company_name_zh}`;
+const desc = description || meta.seo_default_description;
+const canonical = new URL(Astro.url.pathname, Astro.site || "https://originsun-studio.com").toString();
+---
+
+<!doctype html>
+<html lang="zh-Hant" data-lang="zh">
+    <head>
+        <meta charset="UTF-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1" />
+        <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+
+        <title>{fullTitle}</title>
+        <meta name="description" content={desc} />
+        <link rel="canonical" href={canonical} />
+
+        {noindex && <meta name="robots" content="noindex, nofollow" />}
+
+        <!-- Open Graph -->
+        <meta property="og:type" content="website" />
+        <meta property="og:title" content={fullTitle} />
+        <meta property="og:description" content={desc} />
+        <meta property="og:url" content={canonical} />
+        {ogImage && <meta property="og:image" content={ogImage} />}
+
+        <!-- Twitter Card -->
+        <meta name="twitter:card" content="summary_large_image" />
+        <meta name="twitter:title" content={fullTitle} />
+        <meta name="twitter:description" content={desc} />
+        {ogImage && <meta name="twitter:image" content={ogImage} />}
+
+        {schemaData.map((d) => (
+            <script is:inline type="application/ld+json" set:html={JSON.stringify(d)} />
+        ))}
+
+        <!-- lite-youtube-embed（輕量 YouTube 佔位元件，只在點擊時載入 iframe） -->
+        <script is:inline src="https://cdn.jsdelivr.net/npm/lite-youtube-embed@0.3.3/src/lite-yt-embed.js" defer></script>
+        <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/lite-youtube-embed@0.3.3/src/lite-yt-embed.css" />
+
+        <!-- 早期套用 localStorage 語系避免閃爍 -->
+        <script is:inline>
+            (function () {
+                try {
+                    const saved = localStorage.getItem("lang");
+                    if (saved === "zh" || saved === "en") {
+                        document.documentElement.setAttribute("data-lang", saved);
+                        document.documentElement.setAttribute("lang", saved === "zh" ? "zh-Hant" : "en");
+                    }
+                } catch (_) {}
+            })();
+        </script>
+    </head>
+    <body class="bg-black text-neutral-100 antialiased">
+        <Header meta={meta} />
+        <main class="min-h-screen">
+            <slot />
+        </main>
+        <Footer meta={meta} />
+    </body>
+</html>
+
+<style is:global>
+    /* 雙語切換：data-lang=zh 時隱藏 en，反之亦然 */
+    html[data-lang="zh"] [data-lang-en] { display: none !important; }
+    html[data-lang="en"] [data-lang-zh] { display: none !important; }
+
+    /* 平滑滾動 */
+    html { scroll-behavior: smooth; }
+
+    /* 極簡配色：黑底 + 灰階文字 + 少量金屬色強調 */
+    :root {
+        --accent: #c9a24a;       /* 金屬金 — 電影感 */
+        --accent-hover: #e3bc5d;
+        --line: #1a1a1a;
+    }
+</style>
