@@ -1,6 +1,13 @@
 /**
  * inquiries.js — 聯絡詢問收件箱
  * 列表 + 詳情面板 + 狀態切換 + 轉 CRM client + 刪除
+ *
+ * 備註：此檔使用 id-based DOM guard（document.getElementById('inq-list') 等）
+ * 而非其他子視圖的 token-based isCurrent callback。原因：本檔有多個非 render
+ * 的 async 函式（_reloadList / _renderDetail / window._website* handlers）會
+ * 在多個時間點 await，且這些 ID 在 innerHTML 替換時真的會消失——id-check 能
+ * 正確偵測 stale context。新增的子視圖優先採用 token pattern（render(container,
+ * { isCurrent })）。
  */
 import { websiteFetch, esc, fmtDt, fmtRelative, toastOk, toastErr, renderLoadError, INQUIRY_STATUSES, inquiryStatusLabel } from '../website-utils.js';
 
