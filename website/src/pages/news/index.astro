@@ -1,0 +1,160 @@
+---
+/**
+ * news/index.astro — 影像專欄列表（/news）
+ * 對齊原 originsun-studio.com Insight 頁結構：深色 hero + 分類 tabs + 3 欄文章網格
+ */
+import BaseLayout from "../../layouts/BaseLayout.astro";
+import Tr from "../../components/ui/Tr.astro";
+import { fetchMeta } from "../../lib/crm-client";
+import { fetchPosts } from "../../lib/posts";
+import { POST_CATEGORIES } from "../../types/post";
+import { placeholderImage } from "../../lib/youtube";
+
+const [meta, posts] = await Promise.all([
+    fetchMeta(),
+    fetchPosts(),
+]);
+
+// Hero 背景圖：用 placeholder 直到 admin 可在 settings 設 news.hero_image
+const heroBgUrl = placeholderImage("news_hero_studio", 2400, 900);
+---
+
+<BaseLayout title="影像專欄 Insight" meta={meta}>
+
+    <!-- Hero 深色背景 + 置中標題 -->
+    <section class="relative h-[60vh] min-h-[400px] w-full overflow-hidden bg-neutral-900">
+        <img src={heroBgUrl}
+             alt=""
+             class="absolute inset-0 w-full h-full object-cover opacity-60" />
+        <div class="absolute inset-0 bg-gradient-to-b from-black/40 via-black/30 to-black/40"></div>
+        <div class="relative z-10 h-full flex flex-col items-center justify-center text-center pt-16 px-4">
+            <p class="text-xs tracking-[0.5em] text-white/80 uppercase mb-5">Insight</p>
+            <h1 class="text-4xl sm:text-6xl font-bold tracking-wider text-white">
+                <Tr zh="影像專欄" en="Insight" />
+            </h1>
+        </div>
+    </section>
+
+    <!-- 介紹段落 -->
+    <section class="bg-white pt-16 pb-10">
+        <div class="max-w-3xl mx-auto px-4 sm:px-6 lg:px-8">
+            <p class="text-base text-neutral-600 leading-[1.85] tracking-wide text-center">
+                <Tr zh="源日影像專欄內容涵蓋影像製作的常見流程，並深入解析各階段的專業技術。希望透過具體案例分享，將實際經驗轉化為實用建議，幫助讀者面對各種影像挑戰時，擁有更全面的認識與應對策略。"
+                    en="Our Insight column covers every stage of video production with in-depth technical analysis. Through real case studies, we turn hands-on experience into practical advice — helping you tackle video challenges with broader perspective and better strategy." />
+            </p>
+        </div>
+    </section>
+
+    <!-- 分類 tabs -->
+    <section class="bg-white pt-8 pb-12">
+        <div class="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8">
+            <div class="flex flex-wrap justify-center gap-x-10 gap-y-3 border-b border-neutral-200 pb-1">
+                {POST_CATEGORIES.map(c => (
+                    <button type="button"
+                            data-cat-filter={c.value}
+                            class:list={[
+                                "news-cat-btn relative text-sm tracking-[0.2em] uppercase py-3 transition-colors",
+                                c.value === "all"
+                                    ? "text-neutral-900 font-medium"
+                                    : "text-neutral-500 hover:text-neutral-900",
+                            ]}>
+                        <Tr zh={c.label_zh} en={c.label_en} />
+                    </button>
+                ))}
+            </div>
+            <!-- 底線 indicator（active 分類下方的紅線）-->
+            <div class="relative">
+                <div id="news-cat-indicator"
+                     class="absolute h-[2px] bg-[#c9372c] transition-all duration-300"
+                     style="width:60px;left:0;top:-2px;"></div>
+            </div>
+        </div>
+    </section>
+
+    <!-- 文章網格 -->
+    <section class="bg-white pb-24">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+            {posts.length === 0 ? (
+                <div class="py-20 text-center text-neutral-500">
+                    <Tr zh="尚無文章" en="No posts yet" />
+                </div>
+            ) : (
+                <div id="news-grid" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-x-8 gap-y-12">
+                    {posts.map((p, i) => (
+                        <a href={`/news/${p.slug}`}
+                           class="post-card group block"
+                           data-post-category={p.category}>
+                            <div class="relative overflow-hidden aspect-video bg-neutral-100 mb-4">
+                                <img src={p.cover_url}
+                                     alt={p.title}
+                                     loading={i < 3 ? "eager" : "lazy"}
+                                     class="absolute inset-0 w-full h-full object-cover transition-transform duration-700 group-hover:scale-[1.04]" />
+                            </div>
+                            <div>
+                                <div class="text-[10px] tracking-[0.3em] uppercase text-[#c9372c] mb-2">
+                                    {p.category_label_en}
+                                </div>
+                                <h3 class="text-lg font-medium text-neutral-900 tracking-wide leading-snug group-hover:text-[#c9372c] transition-colors mb-2">
+                                    {p.title}
+                                </h3>
+                                <p class="text-sm text-neutral-500 line-clamp-2 leading-relaxed">{p.excerpt}</p>
+                            </div>
+                        </a>
+                    ))}
+                </div>
+            )}
+
+            <div id="news-empty" class="py-20 text-center text-neutral-500 hidden">
+                <Tr zh="此分類尚無文章" en="No posts in this category yet" />
+            </div>
+        </div>
+    </section>
+</BaseLayout>
+
+<script>
+const btns = Array.from(document.querySelectorAll<HTMLButtonElement>(".news-cat-btn"));
+const cards = Array.from(document.querySelectorAll<HTMLElement>(".post-card"));
+const indicator = document.getElementById("news-cat-indicator");
+const empty = document.getElementById("news-empty");
+const grid = document.getElementById("news-grid");
+
+function setActive(btn: HTMLButtonElement) {
+    btns.forEach(b => {
+        b.classList.toggle("text-neutral-900", b === btn);
+        b.classList.toggle("font-medium", b === btn);
+        b.classList.toggle("text-neutral-500", b !== btn);
+    });
+    if (indicator) {
+        const rect = btn.getBoundingClientRect();
+        const parentRect = btn.parentElement!.getBoundingClientRect();
+        indicator.style.left = `${rect.left - parentRect.left}px`;
+        indicator.style.width = `${rect.width}px`;
+    }
+}
+
+function applyFilter(cat: string) {
+    let visible = 0;
+    cards.forEach(card => {
+        const show = cat === "all" || card.dataset.postCategory === cat;
+        card.style.display = show ? "" : "none";
+        if (show) visible++;
+    });
+    if (grid && empty) {
+        grid.classList.toggle("hidden", visible === 0);
+        empty.classList.toggle("hidden", visible > 0);
+    }
+}
+
+btns.forEach(btn => {
+    btn.addEventListener("click", () => {
+        setActive(btn);
+        applyFilter(btn.dataset.catFilter || "all");
+    });
+});
+
+// 初始化 indicator 位置
+requestAnimationFrame(() => {
+    const first = btns[0];
+    if (first) setActive(first);
+});
+</script>

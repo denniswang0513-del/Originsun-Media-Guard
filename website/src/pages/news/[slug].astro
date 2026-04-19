@@ -1,0 +1,116 @@
+---
+/**
+ * news/[slug].astro — 專欄文章詳情頁
+ */
+import BaseLayout from "../../layouts/BaseLayout.astro";
+import Tr from "../../components/ui/Tr.astro";
+import { fetchMeta } from "../../lib/crm-client";
+import { fetchPosts, fetchPostBySlug } from "../../lib/posts";
+
+export async function getStaticPaths() {
+    const posts = await fetchPosts();
+    return posts.map(p => ({ params: { slug: p.slug } }));
+}
+
+const { slug } = Astro.params;
+const [meta, post, allPosts] = await Promise.all([
+    fetchMeta(),
+    fetchPostBySlug(slug!),
+    fetchPosts(),
+]);
+
+if (!post) return Astro.redirect("/news");
+
+// 下一篇 / 前一篇（同分類優先，否則整體）
+const sameCat = allPosts.filter(p => p.category === post.category && p.slug !== post.slug);
+const pool = sameCat.length > 0 ? sameCat : allPosts.filter(p => p.slug !== post.slug);
+const related = pool.slice(0, 3);
+
+const publishedDate = new Date(post.published_at).toLocaleDateString("zh-TW", {
+    year: "numeric", month: "long", day: "numeric",
+});
+---
+
+<BaseLayout title={post.title}
+            description={post.excerpt}
+            meta={meta}
+            ogImage={post.cover_url}>
+
+    <!-- Hero cover -->
+    <section class="pt-24 sm:pt-28 bg-white">
+        <div class="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8">
+            <div class="aspect-[16/9] overflow-hidden bg-neutral-100">
+                <img src={post.cover_url} alt={post.title}
+                     class="w-full h-full object-cover" />
+            </div>
+        </div>
+    </section>
+
+    <!-- 類別 + 標題 + meta + body -->
+    <article class="bg-white py-12 sm:py-16">
+        <div class="max-w-3xl mx-auto px-4 sm:px-6 lg:px-8">
+            <div class="text-xs tracking-[0.4em] uppercase text-[#c9372c] mb-5">
+                <Tr zh={post.category_label_zh} en={post.category_label_en} />
+            </div>
+
+            <h1 class="text-3xl sm:text-5xl font-bold tracking-tight text-neutral-900 mb-6 leading-tight">
+                {post.title}
+            </h1>
+
+            <div class="flex items-center gap-4 text-xs tracking-widest text-neutral-500 mb-12">
+                <span>{publishedDate}</span>
+                {post.read_time_min && <>
+                    <span>·</span>
+                    <span><Tr zh={`${post.read_time_min} 分鐘閱讀`} en={`${post.read_time_min} min read`} /></span>
+                </>}
+            </div>
+
+            <!-- 內文 -->
+            {post.body ? (
+                <div class="prose prose-lg max-w-none text-neutral-700 leading-[1.95] tracking-wide whitespace-pre-line">
+                    {post.body}
+                </div>
+            ) : (
+                <p class="text-lg text-neutral-600 leading-[1.85] tracking-wide">{post.excerpt}</p>
+            )}
+        </div>
+    </article>
+
+    <!-- 底部分隔 -->
+    <div class="max-w-3xl mx-auto px-4 sm:px-6 lg:px-8">
+        <hr class="border-neutral-200" />
+    </div>
+
+    <!-- 相關文章 -->
+    {related.length > 0 && (
+        <section class="bg-neutral-50 py-16 mt-8">
+            <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+                <h2 class="text-xs tracking-[0.4em] uppercase text-neutral-500 mb-8 text-center">
+                    <Tr zh="更多文章" en="More Articles" />
+                </h2>
+                <div class="grid grid-cols-1 sm:grid-cols-3 gap-8">
+                    {related.map(p => (
+                        <a href={`/news/${p.slug}`} class="group block">
+                            <div class="relative overflow-hidden aspect-video bg-neutral-200 mb-3">
+                                <img src={p.cover_url} alt={p.title}
+                                     class="w-full h-full object-cover transition-transform duration-700 group-hover:scale-[1.04]" />
+                            </div>
+                            <div class="text-[10px] tracking-[0.3em] uppercase text-[#c9372c] mb-1">
+                                {p.category_label_en}
+                            </div>
+                            <h3 class="text-base font-medium text-neutral-900 leading-snug group-hover:text-[#c9372c] transition-colors">
+                                {p.title}
+                            </h3>
+                        </a>
+                    ))}
+                </div>
+            </div>
+        </section>
+    )}
+</BaseLayout>
+
+<style>
+    .prose h2 { font-size: 1.5rem; font-weight: 700; color: #111; margin: 2em 0 0.6em; letter-spacing: 0.02em; }
+    .prose h3 { font-size: 1.15rem; font-weight: 600; color: #222; margin: 1.8em 0 0.5em; }
+    .prose p  { margin: 1em 0; }
+</style>
