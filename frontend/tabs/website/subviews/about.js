@@ -4,7 +4,7 @@
  * 修改 crm_staff.show_on_website 的部分暫時未做（需要後端 admin endpoint）。
  * 此版本僅顯示已勾選的團隊成員清單 + 編輯公司文案。
  */
-import { websiteFetch, esc, toastOk, toastErr } from '../website-utils.js';
+import { websiteFetch, esc, toastOk, toastErr, renderLoadError } from '../website-utils.js';
 
 const _ABOUT_FIELDS = [
     { key: 'about.intro_zh', label: '公司介紹（中文）', long: true, placeholder: '源日影像是一間位於台北的...' },
@@ -22,10 +22,11 @@ export default async function render(container) {
             websiteFetch('/api/website/admin/settings'),
             websiteFetch('/api/website/team'),
         ]);
+        if (!container.isConnected) return;
         settings = s?.settings || {};
         team = t?.items || [];
     } catch (e) {
-        container.innerHTML = `<h2>👥 關於我們</h2><div class="card" style="color:#f87171;">${esc(e.message)}</div>`;
+        renderLoadError(container, '👥 關於我們', e);
         return;
     }
 

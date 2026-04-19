@@ -2,12 +2,13 @@
  * dashboard.js — 儀表板子視圖
  * 顯示月詢問統計、公開作品數、精選數、最新詢問、熱門分類
  */
-import { websiteFetch, esc, fmtRelative } from '../website-utils.js';
+import { websiteFetch, esc, fmtRelative, renderLoadError, inquiryStatusLabel } from '../website-utils.js';
 
 export default async function render(container) {
     container.innerHTML = '<h2>📊 儀表板</h2><div style="color:#888;padding:20px;">載入中…</div>';
     try {
         const stats = await websiteFetch('/api/website/admin/stats');
+        if (!container.isConnected) return;
         container.innerHTML = `
             <h2>📊 儀表板</h2>
 
@@ -30,15 +31,7 @@ export default async function render(container) {
             </div>
         `;
     } catch (e) {
-        container.innerHTML = `
-            <h2>📊 儀表板</h2>
-            <div class="card" style="color:#f87171;">
-                <strong>無法載入：</strong> ${esc(e.message)}
-                <div style="color:#888;margin-top:8px;font-size:12px;">
-                    確認 NAS website-api 服務已啟動：<code>uvicorn main_website:app --port 8001</code>
-                </div>
-            </div>
-        `;
+        renderLoadError(container, '📊 儀表板', e, '確認 NAS website-api 已啟動：uvicorn main_website:app --port 8001');
     }
 }
 
@@ -55,7 +48,7 @@ function _renderInquiryList(list) {
     if (!list?.length) return '<div style="color:#888;font-size:12px;">尚無詢問</div>';
     return list.map(inq => `
         <div style="padding:8px 0;border-bottom:1px solid #333;font-size:12px;">
-            <span class="website-pill status-${inq.status}" style="float:right;">${_statusLabel(inq.status)}</span>
+            <span class="website-pill status-${esc(inq.status)}" style="float:right;">${esc(inquiryStatusLabel(inq.status, true))}</span>
             <div style="color:#fff;">${esc(inq.name || '匿名')} · ${esc(inq.company || '-')}</div>
             <div style="color:#888;margin-top:2px;">${esc((inq.message || '').slice(0, 50))}${inq.message?.length > 50 ? '…' : ''}</div>
             <div style="color:#666;font-size:11px;margin-top:2px;">${fmtRelative(inq.created_at)}</div>
@@ -71,8 +64,4 @@ function _renderCategoryList(list) {
             <span style="color:#3b82f6;font-weight:600;">${c.project_count ?? 0}</span>
         </div>
     `).join('');
-}
-
-function _statusLabel(s) {
-    return { new: '新', in_progress: '處理中', converted: '已轉換', spam: '垃圾' }[s] || s;
 }

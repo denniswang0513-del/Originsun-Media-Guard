@@ -2,22 +2,20 @@
  * inquiries.js — 聯絡詢問收件箱
  * 列表 + 詳情面板 + 狀態切換 + 轉 CRM client + 刪除
  */
-import { websiteFetch, esc, fmtDt, fmtRelative, toastOk, toastErr } from '../website-utils.js';
+import { websiteFetch, esc, fmtDt, fmtRelative, toastOk, toastErr, renderLoadError, INQUIRY_STATUSES, inquiryStatusLabel } from '../website-utils.js';
 
 let _inquiries = [];
 let _selectedId = null;
 let _filter = { status: '' };
 
 export default async function render(container) {
+    const statusOpts = INQUIRY_STATUSES.map(s => `<option value="${s.value}">${esc(s.labelZh)}</option>`).join('');
     container.innerHTML = `
         <h2>📬 聯絡詢問</h2>
         <div style="margin-bottom:12px;display:flex;gap:8px;align-items:center;">
             <select id="inq-status-filter" style="min-width:140px;">
                 <option value="">所有狀態</option>
-                <option value="new">新詢問</option>
-                <option value="in_progress">處理中</option>
-                <option value="converted">已轉換</option>
-                <option value="spam">垃圾</option>
+                ${statusOpts}
             </select>
             <span id="inq-total" style="color:#888;font-size:12px;"></span>
         </div>
@@ -41,15 +39,18 @@ export default async function render(container) {
 
 async function _reloadList() {
     const listEl = document.getElementById('inq-list');
-    const totalEl = document.getElementById('inq-total');
+    if (!listEl) return;
     listEl.innerHTML = '<div style="padding:20px;color:#888;">載入中…</div>';
     try {
         const qs = _filter.status ? `?status=${_filter.status}` : '';
         const data = await websiteFetch(`/api/website/admin/inquiries${qs}`);
+        if (!document.getElementById('inq-list')) return;  // 使用者切換走了
         _inquiries = data?.items || [];
-        totalEl.textContent = `共 ${data?.total ?? _inquiries.length} 筆`;
+        const totalEl = document.getElementById('inq-total');
+        if (totalEl) totalEl.textContent = `共 ${data?.total ?? _inquiries.length} 筆`;
     } catch (e) {
-        listEl.innerHTML = `<div style="padding:20px;color:#f87171;">${esc(e.message)}</div>`;
+        const el = document.getElementById('inq-list');
+        if (el) el.innerHTML = `<div style="padding:20px;color:#f87171;">${esc(e.message)}</div>`;
         return;
     }
     _renderList();
@@ -57,6 +58,7 @@ async function _reloadList() {
 
 function _renderList() {
     const listEl = document.getElementById('inq-list');
+    if (!listEl) return;
     if (!_inquiries.length) {
         listEl.innerHTML = '<div style="padding:40px;color:#888;text-align:center;">沒有詢問</div>';
         return;
@@ -67,7 +69,7 @@ function _renderList() {
              onclick="window._websiteSelectInquiry(${inq.id})">
             <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px;">
                 <span style="color:#fff;font-weight:500;">${esc(inq.name || '匿名')}</span>
-                <span class="website-pill status-${inq.status}">${_statusLabel(inq.status)}</span>
+                <span class="website-pill status-${esc(inq.status)}">${esc(inquiryStatusLabel(inq.status))}</span>
             </div>
             <div style="color:#aaa;font-size:12px;margin-bottom:3px;">${esc(inq.company || inq.email || '-')}</div>
             <div style="color:#888;font-size:11px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${esc(inq.message || '')}</div>
@@ -84,16 +86,19 @@ window._websiteSelectInquiry = async (id) => {
 
 async function _renderDetail(id) {
     const detail = document.getElementById('inq-detail');
+    if (!detail) return;
     detail.innerHTML = '<div style="color:#888;padding:20px;">載入中…</div>';
     try {
         const inq = await websiteFetch(`/api/website/admin/inquiries/${id}`);
-        detail.innerHTML = `
+        const detailNow = document.getElementById('inq-detail');
+        if (!detailNow) return;
+        detailNow.innerHTML = `
             <div style="display:flex;justify-content:space-between;align-items:start;margin-bottom:16px;">
                 <div>
                     <h3 style="color:#fff;margin:0 0 4px 0;font-size:16px;">詢問 #${inq.id}</h3>
                     <div style="color:#888;font-size:12px;">${fmtDt(inq.created_at)} · 來源 ${esc(inq.source || '-')}</div>
                 </div>
-                <span class="website-pill status-${inq.status}">${_statusLabel(inq.status)}</span>
+                <span class="website-pill status-${esc(inq.status)}">${esc(inquiryStatusLabel(inq.status))}</span>
             </div>
 
             <div style="display:grid;grid-template-columns:100px 1fr;gap:6px 12px;font-size:13px;color:#ddd;margin-bottom:16px;">
@@ -120,10 +125,7 @@ async function _renderDetail(id) {
 
             <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;">
                 <select id="inq-status-select">
-                    <option value="new" ${inq.status === 'new' ? 'selected' : ''}>新詢問</option>
-                    <option value="in_progress" ${inq.status === 'in_progress' ? 'selected' : ''}>處理中</option>
-                    <option value="converted" ${inq.status === 'converted' ? 'selected' : ''}>已轉換</option>
-                    <option value="spam" ${inq.status === 'spam' ? 'selected' : ''}>垃圾</option>
+                    ${INQUIRY_STATUSES.map(s => `<option value="${s.value}" ${inq.status === s.value ? 'selected' : ''}>${esc(s.labelZh)}</option>`).join('')}
                 </select>
                 <button class="btn" onclick="window._websiteUpdateInquiry(${inq.id})">💾 儲存狀態與備註</button>
                 ${!inq.converted_client_id ? `<button class="btn btn-ghost" onclick="window._websiteConvertInquiry(${inq.id})">→ 轉為 CRM 客戶</button>` : ''}
@@ -131,7 +133,8 @@ async function _renderDetail(id) {
             </div>
         `;
     } catch (e) {
-        detail.innerHTML = `<div style="color:#f87171;padding:20px;">${esc(e.message)}</div>`;
+        const detailNow = document.getElementById('inq-detail');
+        if (detailNow) detailNow.innerHTML = `<div style="color:#f87171;padding:20px;">${esc(e.message)}</div>`;
     }
 }
 
@@ -168,11 +171,8 @@ window._websiteDeleteInquiry = async (id) => {
         await websiteFetch(`/api/website/admin/inquiries/${id}`, { method: 'DELETE' });
         toastOk('已刪除');
         _selectedId = null;
-        document.getElementById('inq-detail').innerHTML = '<div style="color:#666;padding:40px;text-align:center;">← 從左側選擇一筆詢問</div>';
+        const detail = document.getElementById('inq-detail');
+        if (detail) detail.innerHTML = '<div style="color:#666;padding:40px;text-align:center;">← 從左側選擇一筆詢問</div>';
         await _reloadList();
     } catch (e) { toastErr(e.message); }
 };
-
-function _statusLabel(s) {
-    return { new: '新詢問', in_progress: '處理中', converted: '已轉換', spam: '垃圾' }[s] || s;
-}

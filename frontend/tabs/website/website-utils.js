@@ -8,9 +8,8 @@
  * 其他基礎工具（esc、fmtNum、renderAvatar）沿用 CRM 的 crm-utils.js 避免重複。
  */
 
-export {
-    esc, fmtNum, renderAvatar,
-} from '../crm/crm-utils.js';
+import { esc, fmtNum, renderAvatar } from '../crm/crm-utils.js';
+export { esc, fmtNum, renderAvatar };
 
 
 const DEFAULT_API_BASE = 'http://localhost:8001';
@@ -119,4 +118,46 @@ export function fmtRelative(iso) {
     } catch {
         return iso;
     }
+}
+
+
+// ── InquiryStatus 集中定義（對應 core/schemas_website.py InquiryStatus Literal） ──
+
+export const INQUIRY_STATUSES = [
+    { value: 'new',         labelZh: '新詢問', labelShort: '新' },
+    { value: 'in_progress', labelZh: '處理中', labelShort: '處理中' },
+    { value: 'converted',   labelZh: '已轉換', labelShort: '已轉換' },
+    { value: 'spam',        labelZh: '垃圾',   labelShort: '垃圾' },
+];
+
+const _STATUS_MAP = Object.fromEntries(INQUIRY_STATUSES.map(s => [s.value, s]));
+
+export function inquiryStatusLabel(status, short = false) {
+    const s = _STATUS_MAP[status];
+    return s ? (short ? s.labelShort : s.labelZh) : status;
+}
+
+
+// ── 載入失敗統一渲染（8 個 subviews 原本各自寫一次 try/catch innerHTML） ──
+
+export function renderLoadError(container, title, err, hint = '') {
+    if (!container) return;
+    container.innerHTML = `
+        <h2>${esc(title)}</h2>
+        <div class="card" style="color:#f87171;">
+            <strong>無法載入：</strong> ${esc(err?.message || String(err))}
+            ${hint ? `<div style="color:#888;margin-top:8px;font-size:12px;">${esc(hint)}</div>` : ''}
+        </div>
+    `;
+}
+
+
+// ── Debounce (給 works filter input 用) ──
+
+export function debounce(fn, ms = 150) {
+    let t = null;
+    return (...args) => {
+        if (t) clearTimeout(t);
+        t = setTimeout(() => fn(...args), ms);
+    };
 }

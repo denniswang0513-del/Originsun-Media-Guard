@@ -4,7 +4,7 @@
  * 實際「對外欄位編輯」建議走 CRM 專案 Tab 的「對外展示」子區塊（M-D-4），
  * 這裡提供輕量編輯 + 排序 + 精選 toggle。
  */
-import { websiteFetch, esc, toastOk, toastErr } from '../website-utils.js';
+import { websiteFetch, esc, toastOk, toastErr, renderLoadError, debounce } from '../website-utils.js';
 
 let _works = [];
 let _categories = [];
@@ -16,10 +16,11 @@ export default async function render(container) {
             websiteFetch('/api/website/admin/works?include_non_public=true'),
             websiteFetch('/api/website/admin/categories'),
         ]);
+        if (!container.isConnected) return;
         _works = worksRes?.items || [];
         _categories = catsRes?.items || [];
     } catch (e) {
-        container.innerHTML = `<h2>🎬 作品集管理</h2><div class="card" style="color:#f87171;">${esc(e.message)}</div>`;
+        renderLoadError(container, '🎬 作品集管理', e);
         return;
     }
 
@@ -42,13 +43,15 @@ export default async function render(container) {
         </div>
     `;
 
-    document.getElementById('works-filter').addEventListener('input', _renderTable);
+    document.getElementById('works-filter').addEventListener('input', debounce(_renderTable, 150));
     document.getElementById('works-cat-filter').addEventListener('change', _renderTable);
     document.getElementById('works-public-only').addEventListener('change', _renderTable);
     _renderTable();
 }
 
 function _renderTable() {
+    const table = document.getElementById('works-table');
+    if (!table) return;
     const q = (document.getElementById('works-filter')?.value || '').toLowerCase().trim();
     const catId = document.getElementById('works-cat-filter')?.value || '';
     const publicOnly = document.getElementById('works-public-only')?.checked;
@@ -63,7 +66,6 @@ function _renderTable() {
         return true;
     });
 
-    const table = document.getElementById('works-table');
     if (!rows.length) {
         table.innerHTML = '<tr><td colspan="7" style="color:#888;text-align:center;padding:30px;">沒有符合條件的作品</td></tr>';
         return;

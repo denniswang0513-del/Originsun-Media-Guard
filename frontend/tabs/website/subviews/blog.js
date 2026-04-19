@@ -3,7 +3,7 @@
  * Notion token + database_id 存在 website_settings，實際同步邏輯在
  * M-E 階段 Astro build 時實作。此視圖提供連線狀態 + 手動觸發 rebuild。
  */
-import { websiteFetch, esc, toastOk, toastErr } from '../website-utils.js';
+import { websiteFetch, esc, toastOk, toastErr, renderLoadError } from '../website-utils.js';
 
 export default async function render(container) {
     container.innerHTML = '<h2>📝 部落格</h2><div style="color:#888;padding:20px;">載入中…</div>';
@@ -15,8 +15,9 @@ export default async function render(container) {
             websiteFetch('/api/website/admin/notion/status'),
             websiteFetch('/api/website/admin/rebuild/status'),
         ]);
+        if (!container.isConnected) return;
     } catch (e) {
-        container.innerHTML = `<h2>📝 部落格</h2><div class="card" style="color:#f87171;">${esc(e.message)}</div>`;
+        renderLoadError(container, '📝 部落格', e);
         return;
     }
 

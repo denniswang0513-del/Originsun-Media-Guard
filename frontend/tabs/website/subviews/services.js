@@ -1,7 +1,7 @@
 /**
  * services.js — 服務項目 CRUD（首頁「服務」區塊用）
  */
-import { websiteFetch, esc, toastOk, toastErr } from '../website-utils.js';
+import { websiteFetch, esc, toastOk, toastErr, renderLoadError } from '../website-utils.js';
 
 let _services = [];
 let _cats = [];
@@ -13,10 +13,11 @@ export default async function render(container) {
             websiteFetch('/api/website/admin/services'),
             websiteFetch('/api/website/admin/categories'),
         ]);
+        if (!container.isConnected) return;
         _services = s?.items || [];
         _cats = c?.items || [];
     } catch (e) {
-        container.innerHTML = `<h2>🧩 服務項目</h2><div class="card" style="color:#f87171;">${esc(e.message)}</div>`;
+        renderLoadError(container, '🧩 服務項目', e);
         return;
     }
 

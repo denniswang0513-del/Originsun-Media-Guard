@@ -2,7 +2,7 @@
  * home.js — 首頁設定（Hero YouTube + 標語 + CTA + 精選作品）
  * 實際資料存在 website_settings（home.* key），寫入共用 /admin/settings。
  */
-import { websiteFetch, esc, toastOk, toastErr } from '../website-utils.js';
+import { websiteFetch, esc, toastOk, toastErr, renderLoadError } from '../website-utils.js';
 
 const _FIELDS = [
     { key: 'home.hero_youtube_id', label: 'Hero 影片 YouTube ID', placeholder: 'e.g. lQYKHJ7sryM', hint: '首頁背景播放的影片（建議 muted + loop）' },
@@ -17,9 +17,10 @@ export default async function render(container) {
     let settings = {};
     try {
         const data = await websiteFetch('/api/website/admin/settings');
+        if (!container.isConnected) return;
         settings = data?.settings || {};
     } catch (e) {
-        container.innerHTML = `<h2>🏠 首頁設定</h2><div class="card" style="color:#f87171;">${esc(e.message)}</div>`;
+        renderLoadError(container, '🏠 首頁設定', e);
         return;
     }
 

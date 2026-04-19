@@ -69,10 +69,19 @@ async function switchSubview(name) {
 }
 window.websiteSwitchSubview = switchSubview;
 
+function _tabIsVisible() {
+    // 瀏覽器分頁不在前景 → 停
+    if (document.visibilityState === 'hidden') return false;
+    // Tab section 被 switchTab 設 hidden（使用者切到 CRM 等別的 tab）→ 停
+    const section = document.getElementById('tab_website');
+    return !!section && !section.classList.contains('hidden');
+}
+
 function _startHealthCheck() {
     const el = document.getElementById('website-api-health');
     if (!el) return;
     const ping = async () => {
+        if (!_tabIsVisible()) return;
         try {
             await websiteFetch('/healthz');
             el.textContent = '✓ 連線正常';
@@ -89,6 +98,7 @@ function _startHealthCheck() {
 }
 
 async function _refreshInquiryBadge() {
+    if (!_tabIsVisible()) return;
     const badge = document.getElementById('website-inq-badge');
     if (!badge) return;
     try {

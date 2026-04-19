@@ -1,7 +1,7 @@
 /**
  * categories.js — 作品分類 CRUD
  */
-import { websiteFetch, esc, toastOk, toastErr } from '../website-utils.js';
+import { websiteFetch, esc, toastOk, toastErr, renderLoadError } from '../website-utils.js';
 
 let _cats = [];
 
@@ -9,9 +9,10 @@ export default async function render(container) {
     container.innerHTML = '<h2>🏷️ 作品分類</h2><div style="color:#888;padding:20px;">載入中…</div>';
     try {
         const data = await websiteFetch('/api/website/admin/categories');
+        if (!container.isConnected) return;
         _cats = data?.items || [];
     } catch (e) {
-        container.innerHTML = `<h2>🏷️ 作品分類</h2><div class="card" style="color:#f87171;">${esc(e.message)}</div>`;
+        renderLoadError(container, '🏷️ 作品分類', e);
         return;
     }
 

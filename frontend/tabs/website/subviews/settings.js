@@ -2,7 +2,7 @@
  * settings.js — 網站設定（website_settings key-value）
  * 依 key 前綴分群：company / social / seo / analytics / notify / turnstile
  */
-import { websiteFetch, esc, toastOk, toastErr } from '../website-utils.js';
+import { websiteFetch, esc, toastOk, toastErr, renderLoadError } from '../website-utils.js';
 
 const _GROUPS = [
     { prefix: 'company', label: '🏢 公司資訊', color: '#3b82f6' },
@@ -19,9 +19,10 @@ export default async function render(container) {
     container.innerHTML = '<h2>⚙️ 網站設定</h2><div style="color:#888;padding:20px;">載入中…</div>';
     try {
         const data = await websiteFetch('/api/website/admin/settings');
+        if (!container.isConnected) return;
         _settings = data?.settings || {};
     } catch (e) {
-        container.innerHTML = `<h2>⚙️ 網站設定</h2><div class="card" style="color:#f87171;">${esc(e.message)}</div>`;
+        renderLoadError(container, '⚙️ 網站設定', e);
         return;
     }
 
