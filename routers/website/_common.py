@@ -88,29 +88,48 @@ def check_admin(request: Request) -> None:
 
 
 def current_username(request: Request) -> str:
-    """從 JWT 取使用者名稱（for audit fields like handled_by）。"""
+    """從 JWT 取使用者名稱（for audit fields like handled_by）。
+
+    既有 JWT payload 用 `sub` key（見 core/auth.py create_token 及 api_auth 的
+    login flow），`username` 是 fallback。之前寫錯讓所有 inquiry.handled_by
+    都被記成 "admin"。
+    """
     try:
         from core.auth import _extract_token
         payload = _extract_token(request)
         if payload:
-            return payload.get("username", "admin")
+            return payload.get("sub") or payload.get("username") or "admin"
     except Exception:
         pass
     return "admin"
 
 
+def admin_guard(request: Request) -> None:
+    """FastAPI Depends：純管理端 auth check（不需要 DB session 的 endpoint 用）。
+
+    例：rebuild 觸發、notion-sync、純 SPA action。
+    """
+    check_admin(request)
+
+
 async def admin_session(request: Request):
-    """FastAPI Depends：管理端通用 guard + DB session。
+    """FastAPI Depends：管理端 guard + DB session。
 
     合併 check_admin + require_db + get_factory + async with session，
     讓 admin router 只需宣告：
         async def foo(session = Depends(admin_session)): ...
+
+    例外時 rollback 避免髒交易 leak 到 pool。
     """
     check_admin(request)
     require_db()
     factory = await get_factory()
     async with factory() as session:
-        yield session
+        try:
+            yield session
+        except Exception:
+            await session.rollback()
+            raise
 
 
 async def public_session():
@@ -121,4 +140,8 @@ async def public_session():
     require_db()
     factory = await get_factory()
     async with factory() as session:
-        yield session
+        try:
+            yield session
+        except Exception:
+            await session.rollback()
+            raise

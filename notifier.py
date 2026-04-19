@@ -179,7 +179,6 @@ def notify_tab(template_key: str, **variables) -> None:
     if not raw_tpl:
         return
 
-    # Substitute all provided variables; unknown placeholders remain as-is
     msg = raw_tpl
     for k, v in variables.items():
         if isinstance(v, float):
@@ -190,6 +189,10 @@ def notify_tab(template_key: str, **variables) -> None:
         else:
             v_str = str(v)
         msg = msg.replace(f"{{{k}}}", v_str)
+
+    # 缺漏變數不該洩漏成字面值（保護 inquiry_received 等複雜範本）
+    import re
+    msg = re.sub(r"\{[a-z_][a-z0-9_]*\}", "-", msg)
 
     gchat_url = os.environ.get("GOOGLE_CHAT_WEBHOOK") or notif.get("google_chat_webhook", "")
     line_token = os.environ.get("LINE_NOTIFY_TOKEN") or notif.get("line_notify_token", "")

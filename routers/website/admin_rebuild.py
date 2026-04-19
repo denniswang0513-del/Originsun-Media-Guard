@@ -11,10 +11,10 @@ Endpoints (prefix `/api/website/admin`):
 """
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from ._common import admin_session, check_admin
+from ._common import admin_guard, admin_session
 from services.website import (
     category_service, inquiry_service, project_service,
     rebuild_service, settings_service,
@@ -43,14 +43,12 @@ async def get_stats(session: AsyncSession = Depends(admin_session)):
 
 
 @router.post("/rebuild")
-async def trigger_rebuild(request: Request):
-    check_admin(request)
+async def trigger_rebuild(_: None = Depends(admin_guard)):
     return await rebuild_service.trigger_rebuild()
 
 
 @router.get("/rebuild/status")
-async def rebuild_status(request: Request):
-    check_admin(request)
+async def rebuild_status(_: None = Depends(admin_guard)):
     return rebuild_service.get_rebuild_status()
 
 
@@ -61,6 +59,5 @@ async def notion_status(session: AsyncSession = Depends(admin_session)):
 
 
 @router.post("/notion/sync")
-async def notion_sync(request: Request):
-    check_admin(request)
+async def notion_sync(_: None = Depends(admin_guard)):
     return await rebuild_service.trigger_notion_sync()

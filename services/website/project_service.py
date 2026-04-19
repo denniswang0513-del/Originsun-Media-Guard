@@ -177,8 +177,10 @@ async def update_project_public(
         await session.execute(
             delete(WebsiteProjectCategory).where(WebsiteProjectCategory.project_id == project_id)
         )
-        for cat_id in category_ids:
-            session.add(WebsiteProjectCategory(project_id=project_id, category_id=cat_id))
+        session.add_all([
+            WebsiteProjectCategory(project_id=project_id, category_id=cid)
+            for cid in category_ids
+        ])
 
     await session.commit()
     return True
