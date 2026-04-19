@@ -19,7 +19,7 @@
 
 ---
 
-## 2. 整體架構（**100% 部署 NAS、Windows 關機不影響**）
+## 2. 整體架構（**100% 部署 NAS、Windows 關機不影響、複用既有 nginx**）
 
 ```
 潛在客戶瀏覽器
@@ -34,53 +34,60 @@
 └──────────┬───────────────────────┘
            │ cloudflared tunnel
            ▼
-┌──────────────────────────────────────────┐
-│ NAS (QNAP Container Station)              │
-│                                           │
-│  ┌─────────────┐    ┌─────────────────┐  │
-│  │ cloudflared │───▶│ nginx           │  │
-│  │ (容器)      │    │ (容器)          │  │
-│  └─────────────┘    └──┬────────┬─────┘  │
-│                        │        │         │
-│         ┌──────────────┼────────┼────┐   │
-│         ▼              ▼        ▼    │   │
-│   ┌──────────┐  ┌──────────┐  ┌─────┴┐  │
-│   │  /       │  │/api/     │  │/up-  │  │
-│   │  Astro   │  │ website/ │  │loads/│  │
-│   │  dist/   │  │          │  │      │  │
-│   └──────────┘  └────┬─────┘  └──────┘  │
-│                      │                    │
-│                      ▼                    │
-│               ┌─────────────────┐        │
-│               │ NAS FastAPI     │        │
-│               │ container       │        │
-│               │ (main_website.  │        │
-│               │  py, port 8001) │        │
-│               └────────┬────────┘        │
-│                        │                  │
-│                ┌───────▼──────┐          │
-│                │ PostgreSQL   │          │
-│                │ (既有容器)    │          │
-│                └──────────────┘          │
-│                                           │
-│  /share/Web/originsun/                   │
-│  ├── repo/      (git clone)              │
-│  ├── dist/      (Astro build 產物)        │
-│  └── uploads/   (使用者上傳圖片)           │
-└──────────────────────────────────────────┘
+┌────────────────────────────────────────────────┐
+│ NAS 192.168.1.132 (QNAP Container Station)      │
+│                                                 │
+│  ┌─────────────┐    ┌─────────────────────┐   │
+│  │ cloudflared │───▶│ 既有 nginx (複用)    │   │
+│  │ 容器 (新)   │    │ 新增 originsun.conf  │   │
+│  └─────────────┘    └──┬────────┬─────────┘   │
+│                        │        │               │
+│           ┌────────────┼────────┼────────┐     │
+│           ▼            ▼        ▼        ▼     │
+│     ┌──────────┐ ┌────────┐ ┌────┐ ┌─────────┐│
+│     │  /       │ │/api/   │ │ /  │ │既有站點 ││
+│     │  Astro   │ │website/│ │up- │ │FileRe-  ││
+│     │  dist/   │ │        │ │lo- │ │port 等  ││
+│     │          │ │        │ │ads/│ │         ││
+│     └──────────┘ └───┬────┘ └────┘ └─────────┘│
+│                      │                          │
+│                      ▼                          │
+│            ┌────────────────────┐              │
+│            │ website-api 容器   │              │
+│            │ 入口 main_website. │              │
+│            │ py, port 8001      │              │
+│            └──────┬─────────────┘              │
+│                   │                             │
+│            ┌──────▼───────┐                    │
+│            │ PostgreSQL   │                    │
+│            │ (既有容器)    │                    │
+│            └──────────────┘                    │
+│                                                 │
+│  /share/Container/AI_Workspace/Originsun_Web/  │
+│  ├── FileReport/ (既有，nginx 原本 serve)       │
+│  ├── Agents/     (既有)                         │
+│  ├── Logs/       (既有)                         │
+│  ├── nginx/      (既有，新增一個 vhost)          │
+│  └── Website/    🆕                             │
+│      ├── repo/     (git clone)                  │
+│      ├── dist/     (Astro build)                │
+│      └── uploads/  (使用者上傳)                  │
+└────────────────────────────────────────────────┘
 
 員工內網（上班時才用）
-┌──────────────────────────────────────────┐
-│ Windows 192.168.1.11:8000 (既有系統)      │
-│  └── Originsun Transcode main UI          │
-│      ├── CRM / Backup / Transcode 等      │
-│      └── 官網管理 Tab 前端                 │
-│          └── fetch 跨機呼叫               │
-│              http://<NAS>:8001/           │
-│              api/website/admin/...        │
-│              （共用 JWT secret + CORS）   │
-└──────────────────────────────────────────┘
+┌────────────────────────────────────────────┐
+│ Windows 192.168.1.11:8000 (既有系統)        │
+│  └── Originsun Transcode main UI            │
+│      ├── CRM / Backup / Transcode 等        │
+│      └── 官網管理 Tab 前端                   │
+│          └── fetch 跨機呼叫                 │
+│              http://192.168.1.132:8001/     │
+│              api/website/admin/...          │
+│              （共用 JWT secret + CORS）     │
+└────────────────────────────────────────────┘
 ```
+
+**本次新增容器**：僅 **2 個**（cloudflared + website-api），nginx 複用既有（Phase I 視覺報表已在用）。
 
 ### 路由分工
 
@@ -429,33 +436,47 @@ CREATE TABLE website_contact_inquiries (
 
 ### 9.2 Stage 2：NAS 部署（Week 7-8）— 100% 在 NAS、不碰 DNS
 
-**網站跑在哪**：NAS QNAP Container Station（完全 24/7 運作）
+**網站跑在哪**：NAS 192.168.1.132 QNAP Container Station（完全 24/7 運作）
 
-**3 個 Docker container**：
+**新增容器只有 2 個**（複用既有 nginx）：
 ```yaml
-# docker/docker-compose.website.yml
+# /share/Container/AI_Workspace/Originsun_Web/Website/docker/docker-compose.website-api.yml
 services:
-  cloudflared:            # 對外 tunnel
-  nginx:                  # 反代 + 靜態檔 + /uploads 直 serve
-  website-api:            # NAS FastAPI (python main_website.py)
+  cloudflared:            # 對外 tunnel（新增）
+  website-api:            # FastAPI (python main_website.py)（新增）
                           # 連 NAS PostgreSQL（既有）
-                          # 掛載 /share/Web/originsun/uploads/ 給 admin 寫入
+                          # 掛載 Website/uploads/ 給 admin 寫入
+# 不起 nginx — 複用既有 nginx container（Phase I 報表已在用）
+```
+
+**既有 nginx 的 docker-compose.yml 需要加 2 個 volume mount**（一次性設定）：
+```yaml
+# 既有 nginx 原本的 docker-compose.yml，加這兩行 volume：
+services:
+  nginx:
+    volumes:
+      # ... 既有的 mount ...
+      - /share/Container/AI_Workspace/Originsun_Web/Website/dist:/var/www/originsun:ro
+      - /share/Container/AI_Workspace/Originsun_Web/Website/uploads:/var/www/originsun/uploads:ro
+      - /share/Container/AI_Workspace/Originsun_Web/Website/nginx-conf-originsun.conf:/etc/nginx/conf.d/originsun.conf:ro
 ```
 
 **部署步驟**：
-1. NAS `/share/Web/originsun/` git clone 整個 repo
-2. Docker build `website-api` image（`Dockerfile.website`）
-3. 起 3 個 container via `docker-compose up -d`
-4. `nginx.conf`：
-   - `/`               → `/share/Web/originsun/dist/*`（Astro build 產物）
+1. NAS `/share/Container/AI_Workspace/Originsun_Web/Website/` git clone 整個 repo
+2. 新增 nginx virtual host 設定 `originsun.conf`（支援 `originsun-studio.com` + preview）：
+   - `/`               → `/var/www/originsun/*`（Astro build 產物）
    - `/api/website/*`  → `proxy_pass http://website-api:8001`
-   - `/uploads/*`      → `/share/Web/originsun/uploads/`（直接 serve）
-5. `cloudflared` 暫用 CF 的 temp 網址（`xxx.trycloudflare.com`）
-6. 驗證：build/deploy、API 反代、uploads 讀寫、所有頁面都正常
+   - `/uploads/*`      → `/var/www/originsun/uploads/`（直接 serve）
+3. 既有 nginx reload（既有站點不受影響）
+4. Docker build `website-api` image（`Dockerfile.website`）
+5. 起 2 個新 container via `docker-compose up -d`（cloudflared + website-api）
+6. `cloudflared` 暫用 CF 的 temp 網址（`xxx.trycloudflare.com`）
+7. 驗證：build/deploy、API 反代、uploads 讀寫、所有頁面都正常
+8. 驗證既有視覺報表站點不受影響
 
 **Build 觸發方式**（可擇一）：
-- 手動 SSH 到 NAS 執行 `git pull && npm run build`
-- 官網管理 Tab「立即重建」按鈕 → POST 到 NAS `website-api` 的 rebuild endpoint
+- 手動 SSH 到 NAS 執行 `cd repo && git pull && npm run build`
+- 官網管理 Tab「立即重建」按鈕 → POST 到 website-api 的 rebuild endpoint
 - Git push 觸發 GitHub Actions → SSH deploy
 
 **穩定性測試**：Windows 192.168.1.11 關機，確認網站對外頁面 + 聯絡表單送出 + 4 通道通知全部仍正常。

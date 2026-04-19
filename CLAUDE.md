@@ -6,9 +6,10 @@
 > **啟動方式**: `d:\Antigravity\OriginsunTranscode\.venv\Scripts\python.exe main.py`
 > **🚀 進行中專案**: Phase M — 對外官方網站（`originsun-studio.com`）
 > • 開發：Windows 本機（`website/` 目錄、Astro + Tailwind、localhost:4321）
-> • 部署：**100% 在 NAS**（cloudflared + nginx + Astro dist + FastAPI container + PostgreSQL + uploads），Windows 關機不影響網站運作
+> • 部署：**100% 在 NAS 192.168.1.132**，路徑 `/share/Container/AI_Workspace/Originsun_Web/Website/`
+> • 新增容器僅 2 個（cloudflared + website-api），**複用既有 nginx**（Phase I 視覺報表已在用）
 > • NAS 入口 `main_website.py`（只載 `routers/website/`）；Windows 既有 `main.py` 不動
-> • 官網管理 Tab 前端在 Windows、fetch 跨機呼叫 NAS API（JWT secret 共用）
+> • 官網管理 Tab 前端在 Windows、fetch 跨機呼叫 `http://192.168.1.132:8001/api/website/admin/*`（JWT secret 共用）
 > • 分支 `feature/website-m`，完整規劃見 [`docs/WEBSITE_ARCHITECTURE.md`](docs/WEBSITE_ARCHITECTURE.md)
 
 ---

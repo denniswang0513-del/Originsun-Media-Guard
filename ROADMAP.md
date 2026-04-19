@@ -477,21 +477,27 @@ routers/
   └── npm run dev → localhost:4321
       └── 連到 localhost:8000 (現有 FastAPI)
 
-部署階段 (M-F ~ M-H，Week 7-10) — 全部在 NAS
+部署階段 (M-F ~ M-H，Week 7-10) — 全部在 NAS 192.168.1.132
   NAS QNAP Container Station
-  ├── cloudflared container         對外 originsun-studio.com
-  ├── nginx container
-  │   ├── /              → Astro dist/ 靜態檔
-  │   ├── /api/website/* → NAS FastAPI container :8001
-  │   └── /uploads/*     → /share/Web/originsun/uploads/ (直 serve)
-  ├── NAS FastAPI container (新，入口 main_website.py)
+  ├── cloudflared container         對外 originsun-studio.com（新增）
+  ├── 既有 nginx container          複用（Phase I 報表已在用）
+  │   └── 新增 originsun.conf virtual host
+  │       ├── /              → Astro dist/ 靜態檔
+  │       ├── /api/website/* → website-api container :8001
+  │       └── /uploads/*     → Website/uploads/ (直 serve)
+  ├── website-api container (新，入口 main_website.py)
   │   ├── routers/website/public.py    (public API)
   │   └── routers/website/admin_*.py   (admin API，給管理 Tab 用)
   ├── PostgreSQL (既有)
-  └── /share/Web/originsun/
-      ├── repo/          (git clone)
-      ├── dist/          (Astro build 產物，nginx serve)
-      └── uploads/       (使用者上傳圖片)
+  └── /share/Container/AI_Workspace/Originsun_Web/
+      ├── FileReport/    (既有，nginx 原本 serve)
+      ├── Agents/        (既有)
+      ├── Logs/          (既有)
+      ├── nginx/         (既有，新增一個 vhost 設定)
+      └── Website/       🆕
+          ├── repo/      (git clone)
+          ├── dist/      (Astro build 產物，nginx serve)
+          └── uploads/   (使用者上傳圖片)
 
 Windows 192.168.1.11 (員工內網、既有系統)
   └── FastAPI main (既有：CRM / Transcode / Backup…)
@@ -549,25 +555,29 @@ Windows 192.168.1.11 (員工內網、既有系統)
 
 #### Stage 2：NAS 部署（Week 7-8，不碰 DNS）
 
-**M-F NAS 容器部署**（Week 7）
-- [ ] NAS QNAP Container Station 建立 `docker-compose.website.yml`
-  - `cloudflared` container（暫用 temp 網址）
-  - `nginx` container（反代 + 靜態檔 mount）
-  - **`website-api` container**：Python FastAPI，入口 `main_website.py`
-- [ ] 新增 `main_website.py`（~30 行，只載入 `routers/website/`）
-- [ ] 新增 `Dockerfile.website`（python:3.11-slim + 最小依賴）
-- [ ] NAS 建立 `/share/Web/originsun/`：
+**M-F NAS 容器部署**（Week 7）— 2 容器（複用既有 nginx）
+- [ ] 確認既有 nginx 設定目錄位置（通常在 `/share/Container/AI_Workspace/Originsun_Web/nginx/` 或 `/share/Container/nginx/`）
+- [ ] NAS 建立 `/share/Container/AI_Workspace/Originsun_Web/Website/`：
   - `repo/`（git repo clone）
   - `dist/`（Astro build 產物）
-  - `uploads/`（使用者上傳圖片，nginx 直 serve）
-- [ ] Astro build script：on-demand 或 git hook 觸發
-- [ ] nginx `originsun.conf`：
-  - `/`               → `/share/Web/originsun/dist/*`
+  - `uploads/`（使用者上傳圖片）
+- [ ] 在既有 nginx 設定目錄新增 `conf.d/originsun.conf`（virtual host）：
+  - 監聽 `originsun-studio.com` + preview 子網域
+  - `/`               → `/share/Container/AI_Workspace/Originsun_Web/Website/dist/*`
   - `/api/website/*`  → `http://website-api:8001`
-  - `/uploads/*`      → `/share/Web/originsun/uploads/`
-- [ ] NAS FastAPI 連 NAS PostgreSQL（既有）
+  - `/uploads/*`      → `/share/Container/AI_Workspace/Originsun_Web/Website/uploads/`
+- [ ] 既有 nginx `docker-compose.yml` 加 volume mount：
+  - `Website/dist` → container 內路徑
+  - `Website/uploads` → container 內路徑
+  - `Website/nginx-conf-originsun.conf` → `/etc/nginx/conf.d/originsun.conf`
+- [ ] nginx reload 後既有報表站仍正常、原本 serve 不受影響
+- [ ] 新增 `main_website.py`（~30 行，只載入 `routers/website/`）
+- [ ] 新增 `Dockerfile.website`（python:3.11-slim + 最小依賴）
+- [ ] 新增 `docker-compose.website-api.yml`：只起 cloudflared + website-api（2 容器）
+- [ ] Astro build script：on-demand 或 git hook 觸發
+- [ ] website-api container 連 NAS PostgreSQL（既有 `192.168.1.132:5432/mediaguard`）
 - [ ] JWT secret 從 NAS settings.json 共用（與 Windows 同步）
-- [ ] NAS FastAPI CORS 白名單：`192.168.1.11:8000`, `originsun-studio.com`, localhost（開發）
+- [ ] website-api CORS 白名單：`192.168.1.11:8000`, `originsun-studio.com`, localhost（開發）
 
 **M-G NAS Staging 完整驗證**（Week 8）
 - [ ] 完整 build + deploy 流程可重複執行（pull → build → nginx reload）
