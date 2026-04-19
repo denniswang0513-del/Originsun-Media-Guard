@@ -37,8 +37,8 @@ update_status.json
 .DS_Store
 Thumbs.db
 
-# AI Models (20GB+, downloaded on demand)
-models/
+# AI Models (20GB+, downloaded on demand) — 只 match 根目錄，避免誤傷 db/models/
+/models/
 
 # Voice cache (runtime generated)
 voice/
