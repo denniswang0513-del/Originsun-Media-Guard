@@ -19,60 +19,79 @@
 
 ---
 
-## 2. 整體架構（**100% 部署 NAS、Windows 關機不影響、複用既有 nginx**）
+## 2. 整體架構（**100% 部署 NAS、Windows 關機不影響、複用既有 cloudflared**）
+
+### 關鍵事實（NAS 實況稽核）
+
+| 既有組件 | 狀態 | 用途 |
+|---|---|---|
+| `cloudflared` (macvlan, 192.168.1.137) | 運行中 | Tunnel Token 模式，CF 儀表板管 routing |
+| `FileReport_Nginx` (bridge, 10.0.3.2) | 運行中，port 8080→80 | 專用服務視覺報表 |
+| PostgreSQL (既有容器) | 運行中 | 192.168.1.132:5432/mediaguard |
+
+**Phase M 採取原則**：不動既有容器，新增獨立專用的 Website_Nginx + website-api（共 2 個新容器）。既有 cloudflared 透過 CF 儀表板加 public hostname 即可為新站服務。
 
 ```
 潛在客戶瀏覽器
        │
        ▼ originsun-studio.com
-┌──────────────────────────────────┐
-│ Cloudflare                        │
-│  • DNS + SSL 自動續               │
-│  • CDN 邊緣快取                   │
-│  • Tunnel（零 port 暴露）         │
-│  • Turnstile 反機器人             │
-└──────────┬───────────────────────┘
-           │ cloudflared tunnel
+┌────────────────────────────────────────┐
+│ Cloudflare                              │
+│  • DNS + SSL 自動續 + CDN               │
+│  • Tunnel（零 port 暴露）               │
+│  • Turnstile 反機器人                   │
+│  • Zero Trust 儀表板加 public hostname  │
+└──────────┬─────────────────────────────┘
+           │
            ▼
-┌────────────────────────────────────────────────┐
-│ NAS 192.168.1.132 (QNAP Container Station)      │
-│                                                 │
-│  ┌─────────────┐    ┌─────────────────────┐   │
-│  │ cloudflared │───▶│ 既有 nginx (複用)    │   │
-│  │ 容器 (新)   │    │ 新增 originsun.conf  │   │
-│  └─────────────┘    └──┬────────┬─────────┘   │
-│                        │        │               │
-│           ┌────────────┼────────┼────────┐     │
-│           ▼            ▼        ▼        ▼     │
-│     ┌──────────┐ ┌────────┐ ┌────┐ ┌─────────┐│
-│     │  /       │ │/api/   │ │ /  │ │既有站點 ││
-│     │  Astro   │ │website/│ │up- │ │FileRe-  ││
-│     │  dist/   │ │        │ │lo- │ │port 等  ││
-│     │          │ │        │ │ads/│ │         ││
-│     └──────────┘ └───┬────┘ └────┘ └─────────┘│
-│                      │                          │
-│                      ▼                          │
-│            ┌────────────────────┐              │
-│            │ website-api 容器   │              │
-│            │ 入口 main_website. │              │
-│            │ py, port 8001      │              │
-│            └──────┬─────────────┘              │
-│                   │                             │
-│            ┌──────▼───────┐                    │
-│            │ PostgreSQL   │                    │
-│            │ (既有容器)    │                    │
-│            └──────────────┘                    │
-│                                                 │
-│  /share/Container/AI_Workspace/Originsun_Web/  │
-│  ├── FileReport/ (既有，nginx 原本 serve)       │
-│  ├── Agents/     (既有)                         │
-│  ├── Logs/       (既有)                         │
-│  ├── nginx/      (既有，新增一個 vhost)          │
-│  └── Website/    🆕                             │
-│      ├── repo/     (git clone)                  │
-│      ├── dist/     (Astro build)                │
-│      └── uploads/  (使用者上傳)                  │
-└────────────────────────────────────────────────┘
+┌──────────────────────────────────────────────────────┐
+│ NAS 192.168.1.132 (QNAP Container Station)            │
+│                                                       │
+│ 既有容器（不動）                                        │
+│ ┌──────────────┐ ┌──────────────┐ ┌───────────────┐ │
+│ │ cloudflared  │ │FileReport_   │ │originsun_     │ │
+│ │ macvlan      │ │  Nginx       │ │ postgres      │ │
+│ │ 192.168.1.137│ │ bridge A     │ │ bridge B      │ │
+│ │ (Token mode) │ │ 10.0.3.2     │ │ 172.29.20.2   │ │
+│ │              │ │ 8080 → 80    │ │ 5432          │ │
+│ └──────┬───────┘ └──────────────┘ └───────▲───────┘ │
+│        │                                   │         │
+│        │  CF Tunnel 儀表板加：              │         │
+│        │  originsun-studio.com              │         │
+│        │    → http://192.168.1.132:8081     │         │
+│        │                                    │         │
+│ 🆕 Phase M 新增 2 容器（在新 bridge `originsun_web`）│
+│        │                                    │         │
+│        ▼                                    │         │
+│ ┌───────────────────┐                       │         │
+│ │ Website_Nginx     │                       │         │
+│ │ bridge originsun_web                      │         │
+│ │ port 8081 → 80    │                       │         │
+│ │                   │                       │         │
+│ │ /         → dist/ │                       │         │
+│ │ /uploads  → uploads/                      │         │
+│ │ /api/website/* ─────┐                     │         │
+│ └───────────────────┘ │                     │         │
+│                       ▼                     │         │
+│             ┌───────────────────┐           │         │
+│             │ website-api       │           │         │
+│             │ bridge originsun_web          │         │
+│             │ port 8001 (內部)  │           │         │
+│             │ main_website.py   │           │         │
+│             └─────────┬─────────┘           │         │
+│                       │                     │         │
+│                       └─→ 192.168.1.132:5432┘         │
+│                          (透過 host port 連 postgres)│
+│                                                       │
+│ 檔案系統：/share/Container/AI_Workspace/Originsun_Web/│
+│  ├── FileReport/ (既有，FileReport_Nginx serve)       │
+│  ├── Agents/、Logs/ (既有)                            │
+│  └── Website/                 🆕                      │
+│      ├── repo/     (git clone)                        │
+│      ├── dist/     (Astro build 產物)                 │
+│      ├── uploads/  (使用者上傳)                        │
+│      └── docker/   (含 docker-compose + Dockerfile)   │
+└──────────────────────────────────────────────────────┘
 
 員工內網（上班時才用）
 ┌────────────────────────────────────────────┐
@@ -81,24 +100,34 @@
 │      ├── CRM / Backup / Transcode 等        │
 │      └── 官網管理 Tab 前端                   │
 │          └── fetch 跨機呼叫                 │
-│              http://192.168.1.132:8001/     │
-│              api/website/admin/...          │
+│              http://192.168.1.132:8081/api/ │
+│              website/admin/...              │
+│              （走 Website_Nginx 代理）       │
 │              （共用 JWT secret + CORS）     │
 └────────────────────────────────────────────┘
 ```
 
-**本次新增容器**：僅 **2 個**（cloudflared + website-api），nginx 複用既有（Phase I 視覺報表已在用）。
+**本次新增容器**：僅 **2 個**（Website_Nginx + website-api），既有 cloudflared / FileReport_Nginx / postgres 全部不動，只在 CF Zero Trust 儀表板加一個 public hostname。
 
 ### 路由分工
 
-| 路徑 | 服務者 | 內容 |
+| 路徑 | 處理者 | 內容 |
 |---|---|---|
-| `/` `/about` `/services` `/contact` | NAS nginx → Astro dist/ | 靜態頁 |
-| `/works` `/works/[slug]` | NAS nginx → Astro dist/（build 時撈 CRM API） | 作品集 |
-| `/news/*` | NAS nginx → Astro dist/（build 時撈 Notion API） | 部落格 |
-| `/uploads/*` | NAS nginx → 檔案系統直 serve | 上傳的圖片 |
-| `/api/website/*` (public) | NAS nginx → NAS FastAPI container :8001 | 聯絡表單等 runtime API |
-| `/api/website/admin/*` | NAS FastAPI container :8001 | 給官網管理 Tab 跨機呼叫 |
+| `/` `/about` `/services` `/contact` | Website_Nginx → Astro dist/ | 靜態頁 |
+| `/works` `/works/[slug]` | Website_Nginx → Astro dist/（build 時撈 CRM API） | 作品集 |
+| `/news/*` | Website_Nginx → Astro dist/（build 時撈 Notion API） | 部落格 |
+| `/uploads/*` | Website_Nginx → 檔案系統直 serve | 上傳的圖片 |
+| `/api/website/*` (public) | Website_Nginx → website-api:8001 | 聯絡表單等 runtime API |
+| `/api/website/admin/*` | Website_Nginx → website-api:8001 | 給官網管理 Tab 跨機呼叫 |
+
+### 網路拓撲摘要（5 既有 + 2 新增 = 7 容器）
+
+| 網路 | Containers | 用途 |
+|---|---|---|
+| macvlan LAN | cloudflared、MCP、n8n | 需要獨立 LAN IP 的服務 |
+| bridge A (10.0.3.x) | FileReport_Nginx | 報表站（獨立） |
+| bridge B (172.29.20.x) | originsun_postgres | 主資料庫 |
+| bridge `originsun_web` 🆕 | Website_Nginx、website-api | Phase M 專用 |
 
 ### 程式碼共用策略（單一 repo）
 
@@ -438,44 +467,81 @@ CREATE TABLE website_contact_inquiries (
 
 **網站跑在哪**：NAS 192.168.1.132 QNAP Container Station（完全 24/7 運作）
 
-**新增容器只有 2 個**（複用既有 nginx）：
+**新增容器只有 2 個**，既有 cloudflared / FileReport_Nginx / postgres 完全不動：
+
 ```yaml
-# /share/Container/AI_Workspace/Originsun_Web/Website/docker/docker-compose.website-api.yml
+# /share/Container/AI_Workspace/Originsun_Web/Website/docker/docker-compose.yml
+networks:
+  originsun_web:        # 新建專用 bridge 網路
+    driver: bridge
+
 services:
-  cloudflared:            # 對外 tunnel（新增）
-  website-api:            # FastAPI (python main_website.py)（新增）
-                          # 連 NAS PostgreSQL（既有）
-                          # 掛載 Website/uploads/ 給 admin 寫入
-# 不起 nginx — 複用既有 nginx container（Phase I 報表已在用）
+  Website_Nginx:        # 新增（專用，非複用 FileReport_Nginx）
+    image: nginx:alpine
+    ports:
+      - "8081:80"       # 只對 NAS 本機暴露，cloudflared 經 host 連接
+    volumes:
+      - /share/Container/AI_Workspace/Originsun_Web/Website/dist:/usr/share/nginx/html:ro
+      - /share/Container/AI_Workspace/Originsun_Web/Website/uploads:/usr/share/nginx/html/uploads:ro
+      - ./nginx/originsun.conf:/etc/nginx/conf.d/default.conf:ro
+    networks:
+      - originsun_web
+    restart: unless-stopped
+
+  website-api:          # 新增 FastAPI
+    build:
+      context: /share/Container/AI_Workspace/Originsun_Web/Website/repo
+      dockerfile: docker/Dockerfile.website
+    expose:
+      - "8001"          # 只在 originsun_web 網路內可見，不對外
+    environment:
+      - DATABASE_URL=postgresql+asyncpg://originsun:originsun2026@192.168.1.132:5432/mediaguard
+      - JWT_SECRET=${JWT_SECRET}
+    volumes:
+      - /share/Container/AI_Workspace/Originsun_Web/Website/uploads:/app/uploads
+    networks:
+      - originsun_web
+    restart: unless-stopped
 ```
 
-**既有 nginx 的 docker-compose.yml 需要加 2 個 volume mount**（一次性設定）：
-```yaml
-# 既有 nginx 原本的 docker-compose.yml，加這兩行 volume：
-services:
-  nginx:
-    volumes:
-      # ... 既有的 mount ...
-      - /share/Container/AI_Workspace/Originsun_Web/Website/dist:/var/www/originsun:ro
-      - /share/Container/AI_Workspace/Originsun_Web/Website/uploads:/var/www/originsun/uploads:ro
-      - /share/Container/AI_Workspace/Originsun_Web/Website/nginx-conf-originsun.conf:/etc/nginx/conf.d/originsun.conf:ro
+**nginx 設定**（`docker/nginx/originsun.conf`）：
+```nginx
+server {
+  listen 80;
+  server_name _;
+
+  root /usr/share/nginx/html;
+  index index.html;
+
+  location /api/website/ {
+    proxy_pass http://website-api:8001;
+    proxy_set_header Host $host;
+    proxy_set_header X-Real-IP $remote_addr;
+  }
+
+  location /uploads/ {
+    alias /usr/share/nginx/html/uploads/;
+    expires 7d;
+  }
+
+  location / {
+    try_files $uri $uri/ /index.html;
+  }
+}
 ```
 
 **部署步驟**：
-1. NAS `/share/Container/AI_Workspace/Originsun_Web/Website/` git clone 整個 repo
-2. 新增 nginx virtual host 設定 `originsun.conf`（支援 `originsun-studio.com` + preview）：
-   - `/`               → `/var/www/originsun/*`（Astro build 產物）
-   - `/api/website/*`  → `proxy_pass http://website-api:8001`
-   - `/uploads/*`      → `/var/www/originsun/uploads/`（直接 serve）
-3. 既有 nginx reload（既有站點不受影響）
-4. Docker build `website-api` image（`Dockerfile.website`）
-5. 起 2 個新 container via `docker-compose up -d`（cloudflared + website-api）
-6. `cloudflared` 暫用 CF 的 temp 網址（`xxx.trycloudflare.com`）
-7. 驗證：build/deploy、API 反代、uploads 讀寫、所有頁面都正常
-8. 驗證既有視覺報表站點不受影響
+1. NAS SSH 到 `/share/Container/AI_Workspace/Originsun_Web/Website/`，`git clone` 整個 repo
+2. 進入 `repo/website/` 跑 `npm ci && npm run build` 產出 `../../dist/`
+3. `cd docker && docker-compose up -d`（起 Website_Nginx + website-api 2 容器）
+4. **Cloudflare Zero Trust 儀表板**：到既有 tunnel 的「Public Hostnames」頁
+   - 加 `originsun-studio.com` → Service: `HTTP://192.168.1.132:8081`
+   - 加 `preview.originsun-studio.com` → 同樣的 service（開發期用）
+5. 驗證：原有 FileReport / cloudflared / postgres / MCP / n8n 全部仍正常
+6. 驗證：新增的 Website 頁面可通、聯絡表單可送出
 
 **Build 觸發方式**（可擇一）：
-- 手動 SSH 到 NAS 執行 `cd repo && git pull && npm run build`
+- 手動 SSH：`cd repo && git pull && cd website && npm ci && npm run build`
 - 官網管理 Tab「立即重建」按鈕 → POST 到 website-api 的 rebuild endpoint
 - Git push 觸發 GitHub Actions → SSH deploy
 

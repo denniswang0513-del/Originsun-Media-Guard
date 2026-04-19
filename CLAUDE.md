@@ -7,9 +7,11 @@
 > **🚀 進行中專案**: Phase M — 對外官方網站（`originsun-studio.com`）
 > • 開發：Windows 本機（`website/` 目錄、Astro + Tailwind、localhost:4321）
 > • 部署：**100% 在 NAS 192.168.1.132**，路徑 `/share/Container/AI_Workspace/Originsun_Web/Website/`
-> • 新增容器僅 2 個（cloudflared + website-api），**複用既有 nginx**（Phase I 視覺報表已在用）
+> • 新增容器 2 個：**專用** `Website_Nginx`（port 8081→80）+ `website-api`（8001 內部），在新 bridge `originsun_web`
+> • 既有 5 容器全部不動：cloudflared (macvlan) / FileReport_Nginx / originsun_postgres / MCP / n8n
+> • cloudflared 複用：在 CF Zero Trust 儀表板加 public hostname `originsun-studio.com → 192.168.1.132:8081`
 > • NAS 入口 `main_website.py`（只載 `routers/website/`）；Windows 既有 `main.py` 不動
-> • 官網管理 Tab 前端在 Windows、fetch 跨機呼叫 `http://192.168.1.132:8001/api/website/admin/*`（JWT secret 共用）
+> • 官網管理 Tab 前端在 Windows、fetch 跨機呼叫 `http://192.168.1.132:8081/api/website/admin/*`（JWT secret 共用）
 > • 分支 `feature/website-m`，完整規劃見 [`docs/WEBSITE_ARCHITECTURE.md`](docs/WEBSITE_ARCHITECTURE.md)
 
 ---
