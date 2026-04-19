@@ -9,6 +9,7 @@ export const TAB_MAP = {
     crm_clients: 'tab_crm_clients', crm_projects: 'tab_crm_projects',
     crm_quotes: 'tab_crm_quotes', crm_staff: 'tab_crm_staff',
     crm_invoices: 'tab_crm_invoices',
+    website_admin: 'tab_website',
 };
 
 export const NAV_MAP = {
@@ -16,6 +17,7 @@ export const NAV_MAP = {
     report: '報表', transcribe: '逐字', tts: '語音', drone_meta: '空拍寫入', projects: '專案總覽',
     crm_clients: '客戶', crm_projects: '專案管理', crm_quotes: '報價',
     crm_staff: '人力', crm_invoices: '帳務',
+    website_admin: '官網',
 };
 
 export const MEDIA_TABS = ['projects', 'backup', 'verify', 'transcode', 'concat', 'report', 'transcribe', 'tts', 'drone_meta'];

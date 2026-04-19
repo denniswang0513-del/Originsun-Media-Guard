@@ -3,8 +3,8 @@ import { _ensureModalStyles, _createFormModal } from '../shared/modal-styles.js'
 
 const TAB_NAMES = {backup:'備份並轉檔',verify:'檔案比對',transcode:'轉 Proxy',concat:'製作串帶',report:'檔案視覺報表',transcribe:'AI 逐字稿',tts:'語音生成'};
 
-const ALL_MODULES = ['backup','verify','transcode','concat','report','transcribe','tts','drone_meta','projects','crm_clients','crm_projects','crm_quotes','crm_staff','crm_invoices'];
-const MODULE_LABELS = {backup:'備份',verify:'比對',transcode:'轉檔',concat:'串帶',report:'報表',transcribe:'逐字稿',tts:'語音',drone_meta:'空拍寫入',projects:'專案',crm_clients:'客戶',crm_projects:'專案管理',crm_quotes:'報價',crm_staff:'人力',crm_invoices:'帳務'};
+const ALL_MODULES = ['backup','verify','transcode','concat','report','transcribe','tts','drone_meta','projects','crm_clients','crm_projects','crm_quotes','crm_staff','crm_invoices','website_admin'];
+const MODULE_LABELS = {backup:'備份',verify:'比對',transcode:'轉檔',concat:'串帶',report:'報表',transcribe:'逐字稿',tts:'語音',drone_meta:'空拍寫入',projects:'專案',crm_clients:'客戶',crm_projects:'專案管理',crm_quotes:'報價',crm_staff:'人力',crm_invoices:'帳務',website_admin:'官網'};
 
 // ─── RBAC: cached roles list for user mgmt ─── //
 let _cachedRoles = [];

@@ -79,8 +79,8 @@ async def init_db() -> bool:
 # ── RBAC seed & migration ──
 
 _DEFAULT_ROLES = [
-    {"name": "admin",     "access_level": 3, "modules": ["backup","verify","transcode","concat","report","transcribe","tts","drone_meta","projects","crm_clients","crm_projects","crm_quotes","crm_staff","crm_invoices"], "description": "系統管理員"},
-    {"name": "producer",  "access_level": 2, "modules": ["backup","verify","report","transcode","concat","transcribe","drone_meta","projects","crm_clients","crm_projects","crm_quotes","crm_staff","crm_invoices"],       "description": "製片"},
+    {"name": "admin",     "access_level": 3, "modules": ["backup","verify","transcode","concat","report","transcribe","tts","drone_meta","projects","crm_clients","crm_projects","crm_quotes","crm_staff","crm_invoices","website_admin"], "description": "系統管理員"},
+    {"name": "producer",  "access_level": 2, "modules": ["backup","verify","report","transcode","concat","transcribe","drone_meta","projects","crm_clients","crm_projects","crm_quotes","crm_staff","crm_invoices","website_admin"],       "description": "製片"},
     {"name": "editor",    "access_level": 1, "modules": ["transcode","concat","verify","transcribe"],                                    "description": "剪輯師"},
     {"name": "cameraman", "access_level": 1, "modules": ["backup","verify","report","drone_meta"],                                       "description": "攝影師"},
     {"name": "assistant", "access_level": 1, "modules": ["backup","verify"],                                                             "description": "助理"},

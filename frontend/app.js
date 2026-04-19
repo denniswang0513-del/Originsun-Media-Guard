@@ -96,6 +96,9 @@ if (typeof appendLog === 'undefined') {
                             .map(([, id, html, js, init]) => _loadTab(id, `./tabs/crm/${html}`, `./tabs/crm/${js}`, init))
                 );
 
+                // Website management tab
+                if (_should('website_admin')) await _loadTab('tab_website', './tabs/website/website.html', './tabs/website/website.js', 'initWebsiteTab');
+
                 // Auto-switch to first authorized tab
                 if (hasModules) {
                     const firstTab = TAB_MAP[modules[0]];
