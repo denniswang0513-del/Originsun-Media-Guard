@@ -460,6 +460,75 @@ routers/
 
 ---
 
+## Phase M：對外官方網站 + 官網管理 Tab
+
+**優先等級**：🔴 高 — 6/1 Staging 初版 / 7/1 正式切換
+**時程**：2026-04-20 ~ 2026-07-01（10 週）
+**網域**：`originsun-studio.com`（沿用舊站、DNS 轉 Cloudflare）
+**分支**：`feature/website-m`
+**完整文件**：[`docs/WEBSITE_ARCHITECTURE.md`](docs/WEBSITE_ARCHITECTURE.md)
+
+### 要建置的東西
+
+#### 架構面
+- [ ] Astro 4 + Tailwind（靜態 + build 時撈 CRM/Notion）
+- [ ] Cloudflare Tunnel + Nginx 反向代理（Docker Compose）
+- [ ] AI 友善檔案結構（每檔 ≤ 400 行、每目錄 `INDEX.md`）
+
+#### 資料層
+- [ ] `crm_projects` 擴充 11 對外欄位（public、slug、youtube_id…）
+- [ ] 新表 `website_categories`（作品分類 CRUD、多對多）
+- [ ] 新表 `website_project_categories`（關聯表）
+- [ ] 新表 `website_settings`（key-value 全站設定）
+- [ ] 新表 `website_services`（服務項目）
+- [ ] 新表 `website_contact_inquiries`（聯絡表單收件）
+- [ ] `crm_staff` 擴充 `show_on_website`
+
+#### 後端（`routers/website/` 拆 7 檔）
+- [ ] `public.py` 對外 API（含 Turnstile 驗證）
+- [ ] `admin_works.py` / `admin_categories.py` / `admin_services.py`
+- [ ] `admin_inquiries.py` / `admin_settings.py` / `admin_rebuild.py`
+- [ ] `services/website/` 業務邏輯層（project / category / inquiry / notify / rebuild）
+- [ ] Rate limit + CORS 白名單（只允許 `originsun-studio.com`）
+
+#### 官網管理 Tab（9 子視圖）
+- [ ] RBAC 新模組 `website_admin`（4 處更新：user-mgmt.js / auth-state.js / db/session.py / index.html）
+- [ ] 儀表板 / 首頁設定 / 作品集管理 / 作品分類 / 服務項目
+- [ ] 關於我們 / 聯絡詢問 / 部落格同步 / 網站設定
+- [ ] CRM 專案 Tab 加「🌐 對外展示」子區塊
+
+#### 前端網站（`website/src/`）
+- [ ] Base Layout + Header + Footer + 繁中/英文雙語切換
+- [ ] 首頁（YouTube Hero 背景 + 精選作品 6 宮格）
+- [ ] 作品集列表（分類篩選）
+- [ ] 作品詳情（lite-youtube-embed + 職員表）
+- [ ] 關於我們（含 `crm_staff` 團隊成員）
+- [ ] 服務項目
+- [ ] 聯絡頁（Cloudflare Turnstile + 4 通道通知）
+- [ ] 部落格（Notion as CMS）
+
+#### 發布策略（舊站不中斷）
+- [ ] DNS 轉移：遠振 → Cloudflare（A 記錄保持原 IP，舊站不斷線）
+- [ ] `preview.originsun-studio.com` 指向 Tunnel（開發期，robots noindex）
+- [ ] 6/30：DNS TTL 預降至 300 秒
+- [ ] 7/1：root + www. 切換指向 Tunnel、拔 robots、送 GSC sitemap
+- [ ] 7/1 ~ 7/7：舊站內容保留為 fallback
+
+#### SEO + 分析
+- [ ] Sitemap 自動生成、Schema.org VideoObject 結構化資料
+- [ ] Google Search Console + GA4（接手舊站歷史資料）
+- [ ] Lighthouse ≥ 95（Performance / Accessibility / Best Practices / SEO）
+
+### 做完後你看到的改變
+
+- 公司有現代化 SEO 友善官方網站
+- 作品自動從 CRM 已結案 + 公開的專案拉出，不需雙寫維護
+- 聯絡表單直接進 CRM 變潛在客戶（`website_contact_inquiries` → `clients`）
+- 非工程師（行銷/PM）可在 Notion 寫部落格、在官網管理 Tab 調作品排序
+- 所有檔案 ≤ 400 行，未來 AI 協作更順
+
+---
+
 ## Phase C：Webhook / 事件通知
 
 **優先等級**：🟡 中 — 自動化串接的核心
@@ -570,6 +639,10 @@ tools:
     │
 現在 (v1.10.80) ← 你在這裡
     │
+    ▼ Phase M: 對外官方網站 (🚀 進行中 2026-04-20 ~ 07-01)
+    │   → originsun-studio.com + CF Tunnel + Astro + 9 子視圖管理 Tab
+    │   → 🎯 6/1 Staging 初版 / 7/1 正式切換上線
+    │
     ▼ Phase J-3: 備份 Tab 整合 (⬜)
     │
     ▼ Phase L: 行動端適配 (🟡 部分完成)
@@ -594,7 +667,7 @@ tools:
         → 集中 Log + 營運儀表板
 ```
 
-**下一步**：Phase J-3（備份 Tab 整合）。
+**下一步**：Phase M（對外官方網站，2026-04-20 ~ 2026-07-01）。
 
 ---
 
