@@ -94,7 +94,7 @@ _TEST_PROJECTS: list[dict] = [
         "public_slug": "abc-group-60th-anniversary",
         "public_title": "ABC 集團 60 週年紀念影片",
         "public_client": "ABC 集團",
-        "public_youtube_id": "dQw4w9WgXcQ",
+        "public_youtube_id": "test_vid003",
         "public_description": (
             "ABC 集團六十週年紀念影片，回顧從創業初期至今的關鍵時刻。"
             "結合歷史照片與現場訪談，呈現集團文化傳承與未來展望。"
@@ -113,7 +113,7 @@ _TEST_PROJECTS: list[dict] = [
         "public_slug": "tech-summit-2024-recap",
         "public_title": "2024 科技創新峰會精彩回顧",
         "public_client": "經濟部工業局",
-        "public_youtube_id": "jNQXAC9IVRw",
+        "public_youtube_id": "test_vid004",
         "public_description": (
             "2024 科技創新峰會全程活動紀實。兩天議程濃縮成 3 分鐘精華，"
             "涵蓋主題演講、展區亮點與專家座談，活動結束 48 小時內交付。"
@@ -132,7 +132,7 @@ _TEST_PROJECTS: list[dict] = [
         "public_slug": "film-festival-opening-2024",
         "public_title": "2024 金馬影展開幕精華",
         "public_client": "台北金馬影展執委會",
-        "public_youtube_id": "9bZkp7q19f0",
+        "public_youtube_id": "test_vid005",
         "public_description": (
             "金馬影展開幕夜活動紀實，從紅毯到頒獎典禮，捕捉每一個閃光燈下的瞬間。"
         ),
@@ -150,7 +150,7 @@ _TEST_PROJECTS: list[dict] = [
         "public_slug": "def-tech-brand-animation",
         "public_title": "DEF 科技企業介紹動畫",
         "public_client": "DEF 科技",
-        "public_youtube_id": "kJQP7kiw5Fk",
+        "public_youtube_id": "test_vid006",
         "public_description": (
             "2D 動畫企業介紹影片。以輕快節奏與活潑插畫風格呈現產品線與服務流程，"
             "適用於官網首頁與展場投影。"
@@ -169,7 +169,7 @@ _TEST_PROJECTS: list[dict] = [
         "public_slug": "functional-food-product-video",
         "public_title": "機能食品產品影片",
         "public_client": "GHI 健康食品",
-        "public_youtube_id": "RgKAFK5djSk",
+        "public_youtube_id": "test_vid007",
         "public_description": (
             "結合實拍與動畫的產品介紹影片，動畫段落說明成分機制，實拍段落呈現使用情境。"
         ),
@@ -211,11 +211,15 @@ _TEST_STAFF: list[dict] = [
 
 
 def _inquiry(days_ago: int, **kw) -> dict:
+    """建構 inquiry dict；非 new/spam 狀態自動補 handled_at/handled_by 保持資料合理。"""
     now = datetime.now(timezone.utc)
-    return {
-        "created_at": now - timedelta(days=days_ago, hours=days_ago * 2),
-        **kw,
-    }
+    created = now - timedelta(days=days_ago, hours=days_ago * 2)
+    row = {"created_at": created, **kw}
+    status = row.get("status", "new")
+    if status in ("in_progress", "converted") and "handled_at" not in row:
+        row["handled_at"] = created + timedelta(hours=4)
+        row.setdefault("handled_by", "test_admin")
+    return row
 
 
 _TEST_INQUIRIES: list[dict] = [
@@ -284,12 +288,13 @@ async def seed_test_data(session_factory: Callable) -> None:
             ))
         }
 
-        # 3. Projects + category links
+        # 3. Projects + category links (不 mutate module-level _TEST_PROJECTS)
         for proj in _TEST_PROJECTS:
-            categories = proj.pop("categories", [])
+            categories = proj.get("categories", [])
+            proj_values = {k: v for k, v in proj.items() if k != "categories"}
             await session.execute(
                 insert(CrmProject).values({
-                    **proj,
+                    **proj_values,
                     "client_id": _TEST_CLIENT_ID,
                     "status": "已結案",
                     "public_published_at": datetime.now(timezone.utc),

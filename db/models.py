@@ -189,16 +189,18 @@ class CrmProject(Base):
     transfer_fee = Column(Integer, nullable=True)                     # 帳款匯費
     receipt_path = Column(String(512), nullable=True)                 # 收據儲存路徑
 
-    # Phase M: 對外官網展示（實體欄位由 db/migrations_website.py 建立）
-    public = Column(Boolean, nullable=True, default=False)
-    public_slug = Column(String(100), nullable=True)
+    # Phase M: 對外官網展示
+    # (實體欄位與索引都由 db/migrations_website.py 建立在既有 DB 上；
+    #  這裡 index=True 是給 Base.metadata.create_all() 的全新 DB / 測試用)
+    public = Column(Boolean, nullable=True, default=False, index=True)
+    public_slug = Column(String(100), nullable=True, index=True)
     public_title = Column(String(200), nullable=True)
     public_client = Column(String(100), nullable=True)
     public_youtube_id = Column(String(20), nullable=True)
     public_description = Column(Text, nullable=True)
     public_credits = Column(JSONB, nullable=True)
     public_year = Column(Integer, nullable=True)
-    public_featured = Column(Boolean, nullable=True, default=False)
+    public_featured = Column(Boolean, nullable=True, default=False, index=True)
     public_sort_order = Column(Integer, nullable=True, default=0)
     public_published_at = Column(DateTime(timezone=True), nullable=True)
 
