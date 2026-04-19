@@ -462,20 +462,45 @@ routers/
 
 ## Phase M：對外官方網站 + 官網管理 Tab
 
-**優先等級**：🔴 高 — 6/1 Staging 初版 / 7/1 正式切換
+**優先等級**：🔴 高 — 6/1 NAS Staging / 7/1 正式切換
 **時程**：2026-04-20 ~ 2026-07-01（10 週）
 **網域**：`originsun-studio.com`（沿用舊站、DNS 轉 Cloudflare）
+**部署**：NAS QNAP Container Station（cloudflared + nginx + 靜態網站），Windows 保留既有 FastAPI
 **分支**：`feature/website-m`
 **完整文件**：[`docs/WEBSITE_ARCHITECTURE.md`](docs/WEBSITE_ARCHITECTURE.md)
 
-### 要建置的東西
+### 部署架構
 
-#### 架構面
-- [ ] Astro 4 + Tailwind（靜態 + build 時撈 CRM/Notion）
-- [ ] Cloudflare Tunnel + Nginx 反向代理（Docker Compose）
-- [ ] AI 友善檔案結構（每檔 ≤ 400 行、每目錄 `INDEX.md`）
+```
+開發階段 (M-A ~ M-E，Week 1-6)
+  Windows 本機 (你電腦)
+  └── npm run dev → localhost:4321
+      └── 連到 localhost:8000 (現有 FastAPI)
 
-#### 資料層
+部署階段 (M-F ~ M-H，Week 7-10)
+  NAS QNAP Container Station           Windows 192.168.1.11
+  ├── cloudflared container             └── FastAPI main (既有)
+  ├── nginx container                       ├── CRM Tab
+  │   ├── /    → Astro dist/ 靜態檔          ├── 官網管理 Tab
+  │   └── /api → 轉送到 Windows 8000         └── /api/website/contact
+  ├── PostgreSQL (既有)
+  └── /share/Web/originsun/dist/
+```
+
+**關鍵設計**：大部分 API 在 **build time** 執行完（Astro SSG）→ 產出靜態 HTML。
+Runtime 只剩 `POST /api/website/contact` 需要 FastAPI，走 nginx 反代回 Windows 主機。
+
+### 執行階段（3 大 Stage 共 8 個子階段）
+
+#### Stage 1：本機開發（Week 1-6，零風險）
+
+**M-A 本機專案骨架**（Week 1）
+- [ ] 建立 `feature/website-m` 分支
+- [ ] Astro 4 + Tailwind 本機初始化（`website/` 目錄）
+- [ ] 空目錄骨架 + 每個目錄一份 `INDEX.md`
+- [ ] AI 友善檔案結構（每檔 ≤ 400 行）
+
+**M-B 資料層**（Week 2）
 - [ ] `crm_projects` 擴充 11 對外欄位（public、slug、youtube_id…）
 - [ ] 新表 `website_categories`（作品分類 CRUD、多對多）
 - [ ] 新表 `website_project_categories`（關聯表）
@@ -483,45 +508,68 @@ routers/
 - [ ] 新表 `website_services`（服務項目）
 - [ ] 新表 `website_contact_inquiries`（聯絡表單收件）
 - [ ] `crm_staff` 擴充 `show_on_website`
+- [ ] Seed data（舊站 4 分類 + 4 服務項目 + 14 筆 settings）
 
-#### 後端（`routers/website/` 拆 7 檔）
-- [ ] `public.py` 對外 API（含 Turnstile 驗證）
-- [ ] `admin_works.py` / `admin_categories.py` / `admin_services.py`
-- [ ] `admin_inquiries.py` / `admin_settings.py` / `admin_rebuild.py`
-- [ ] `services/website/` 業務邏輯層（project / category / inquiry / notify / rebuild）
-- [ ] Rate limit + CORS 白名單（只允許 `originsun-studio.com`）
+**M-C 後端 API**（Week 3）
+- [ ] `routers/website/public.py` 對外 API（含 Turnstile 驗證）
+- [ ] `routers/website/admin_*.py` 6 支管理端點
+- [ ] `services/website/` 業務邏輯層 5 檔
+- [ ] Rate limit + CORS 白名單（dev: localhost、prod: originsun-studio.com）
 
-#### 官網管理 Tab（9 子視圖）
-- [ ] RBAC 新模組 `website_admin`（4 處更新：user-mgmt.js / auth-state.js / db/session.py / index.html）
-- [ ] 儀表板 / 首頁設定 / 作品集管理 / 作品分類 / 服務項目
-- [ ] 關於我們 / 聯絡詢問 / 部落格同步 / 網站設定
+**M-D 官網管理 Tab**（Week 4）
+- [ ] RBAC 4 處更新（`website_admin` 模組）
+- [ ] 9 子視圖：儀表板 / 首頁 / 作品集 / 分類 / 服務 / 關於 / 詢問 / 部落格 / 設定
 - [ ] CRM 專案 Tab 加「🌐 對外展示」子區塊
 
-#### 前端網站（`website/src/`）
+**M-E 前端 Astro 網站**（Week 5-6）
 - [ ] Base Layout + Header + Footer + 繁中/英文雙語切換
 - [ ] 首頁（YouTube Hero 背景 + 精選作品 6 宮格）
-- [ ] 作品集列表（分類篩選）
-- [ ] 作品詳情（lite-youtube-embed + 職員表）
-- [ ] 關於我們（含 `crm_staff` 團隊成員）
-- [ ] 服務項目
+- [ ] 作品集列表 + 詳情（lite-youtube-embed）
+- [ ] 關於我們（含 `crm_staff` 團隊成員）+ 服務項目
 - [ ] 聯絡頁（Cloudflare Turnstile + 4 通道通知）
 - [ ] 部落格（Notion as CMS）
+- [ ] 🚀 **本機 `localhost:4321` 完整可看**（~5/31）
+- [ ] 臨時網址 `cloudflared tunnel --url localhost:4321` 供遠端 review
 
-#### 發布策略（舊站不中斷）
-- [ ] DNS 轉移：遠振 → Cloudflare（A 記錄保持原 IP，舊站不斷線）
-- [ ] `preview.originsun-studio.com` 指向 Tunnel（開發期，robots noindex）
-- [ ] 6/30：DNS TTL 預降至 300 秒
-- [ ] 7/1：root + www. 切換指向 Tunnel、拔 robots、送 GSC sitemap
-- [ ] 7/1 ~ 7/7：舊站內容保留為 fallback
+#### Stage 2：NAS 部署（Week 7-8，不碰 DNS）
 
-#### SEO + 分析
-- [ ] Sitemap 自動生成、Schema.org VideoObject 結構化資料
-- [ ] Google Search Console + GA4（接手舊站歷史資料）
+**M-F NAS 容器部署**（Week 7）
+- [ ] NAS QNAP Container Station 建立 `docker-compose.website.yml`
+  - `cloudflared` container（暫用 temp 網址）
+  - `nginx` container（反代 + 靜態檔 mount）
+- [ ] NAS 建立 `/share/Web/originsun/` git repo clone
+- [ ] Astro build script：on-demand 或 git hook 觸發
+- [ ] nginx `originsun.conf`：
+  - `/` → `/share/Web/originsun/dist/*`
+  - `/api/website/*` → `http://192.168.1.11:8000`
+- [ ] Windows FastAPI CORS 白名單加 NAS 來源
+- [ ] 臨時測試：NAS 跑 Hello World、Windows API 通
+
+**M-G NAS Staging 完整驗證**（Week 8）
+- [ ] 完整 build + deploy 流程可重複執行
+- [ ] `POST /api/website/contact` 從 NAS 轉到 Windows 成功
+- [ ] PostgreSQL 連線正常（已在 NAS 本機）
+- [ ] 所有靜態資源 cache header 正確
 - [ ] Lighthouse ≥ 95（Performance / Accessibility / Best Practices / SEO）
+- [ ] SEO 結構化資料 + Schema.org VideoObject + sitemap
+- [ ] Google Search Console + GA4（接手舊站歷史資料）
+
+#### Stage 3：DNS 切換上線（Week 9-10）
+
+**M-H DNS 轉移 + 正式切換**（Week 9-10）
+- [ ] 遠振後台 DNS 稽核（使用者執行，填 A/MX/TXT/CNAME 清單）
+- [ ] Cloudflare 新帳號 add site + 匯入 DNS + 設 DNS only
+- [ ] 遠振改 NS 指向 Cloudflare，等 24-48 小時 propagation
+- [ ] 舊站 `www.` + root 持續運作驗證
+- [ ] 新增 `preview.originsun-studio.com` A record → NAS Tunnel（robots noindex）
+- [ ] 6/30：DNS TTL 預降至 300 秒
+- [ ] **7/1**：root + `www.` 切換指向 NAS Tunnel、拔 robots、送 GSC sitemap
+- [ ] 7/1 ~ 7/7：舊站內容保留為 fallback
 
 ### 做完後你看到的改變
 
-- 公司有現代化 SEO 友善官方網站
+- 公司有現代化 SEO 友善官方網站，**部署在 NAS 上 24/7 運作**
+- Windows 開發機重開、關機都不影響網站運行
 - 作品自動從 CRM 已結案 + 公開的專案拉出，不需雙寫維護
 - 聯絡表單直接進 CRM 變潛在客戶（`website_contact_inquiries` → `clients`）
 - 非工程師（行銷/PM）可在 Notion 寫部落格、在官網管理 Tab 調作品排序

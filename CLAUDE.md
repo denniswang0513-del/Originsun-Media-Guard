@@ -4,7 +4,10 @@
 > **目標讀者**: 接手開發的 AI 協作者（Claude Code）
 > **開發環境**: Windows 11、Python 3.11、Vanilla JS (ES Modules)
 > **啟動方式**: `d:\Antigravity\OriginsunTranscode\.venv\Scripts\python.exe main.py`
-> **🚀 進行中專案**: Phase M — 對外官方網站（`originsun-studio.com`），分支 `feature/website-m`，完整規劃見 [`docs/WEBSITE_ARCHITECTURE.md`](docs/WEBSITE_ARCHITECTURE.md)
+> **🚀 進行中專案**: Phase M — 對外官方網站（`originsun-studio.com`）
+> • 開發：Windows 本機（`website/` 目錄、Astro + Tailwind、localhost:4321）
+> • 部署：NAS QNAP Container Station（cloudflared + nginx + 靜態檔），Windows 保留既有 FastAPI 供 `/api/website/contact` 反代
+> • 分支 `feature/website-m`，完整規劃見 [`docs/WEBSITE_ARCHITECTURE.md`](docs/WEBSITE_ARCHITECTURE.md)
 
 ---
 
