@@ -6,6 +6,7 @@
 import BaseLayout from "../layouts/BaseLayout.astro";
 import Tr from "../components/ui/Tr.astro";
 import { fetchMeta, fetchServices, fetchCategories } from "../lib/crm-client";
+import { iconChar, warnUnknownIcons } from "../lib/service-icons";
 
 const [meta, services, categories] = await Promise.all([
     fetchMeta(),
@@ -14,11 +15,7 @@ const [meta, services, categories] = await Promise.all([
 ]);
 
 const catBySlug = new Map(categories.map(c => [c.slug, c]));
-
-const ICON_MAP: Record<string, string> = {
-    video: "◉", film: "◆", camera: "◯", sparkles: "✦", mic: "◐", default: "◇",
-};
-const iconChar = (k?: string | null): string => ICON_MAP[k || "default"] || ICON_MAP.default;
+warnUnknownIcons(services.map(s => s.icon), "services.astro");
 ---
 
 <BaseLayout title="服務項目 Services" meta={meta}>

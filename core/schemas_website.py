@@ -248,3 +248,10 @@ class WebsiteMeta(BaseModel):
     seo_default_title: str = ""
     seo_default_description: str = ""
     categories: list[CategoryPublicResponse] = Field(default_factory=list)
+    # About 頁面文案（非工程師從官網管理 Tab 編輯 website_settings.about.*）
+    about_intro_zh: str = ""
+    about_intro_en: str = ""
+    about_founded_year: str = ""
+    about_team_intro_zh: str = ""
+    # Home Hero 影片 YouTube ID（admin 從官網管理 Tab 設定 home.hero_youtube_id）
+    home_hero_youtube_id: str = ""

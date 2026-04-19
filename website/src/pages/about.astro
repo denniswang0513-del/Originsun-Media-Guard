@@ -34,22 +34,40 @@ const mapsUrl = meta.address
         </div>
     </section>
 
-    <!-- 公司故事 -->
+    <!-- 公司故事（優先讀 website_settings.about.*，admin 可從官網管理 Tab 編輯） -->
     <section class="bg-black pb-16">
         <div class="max-w-3xl mx-auto px-4 sm:px-6 lg:px-8">
             <div class="prose prose-invert max-w-none">
-                <p class="text-lg text-neutral-300 leading-relaxed tracking-wide mb-6">
-                    <Tr zh={`${meta.company_name_zh}（${meta.company_name_en}）專注於影像製作與行銷規劃。`}
-                        en={`${meta.company_name_en} focuses on video production and marketing planning.`} />
-                </p>
-                <p class="text-base text-neutral-400 leading-relaxed tracking-wide mb-6">
-                    <Tr zh="我們相信每一支影片都應該是一則有力的故事。從商業廣告到紀實短片，從活動紀錄到動畫設計，我們用影像陪伴品牌與人們訴說重要的事。"
-                        en="We believe every film should tell a compelling story. From commercials to documentaries, event coverage to motion graphics, we help brands and people share what matters." />
-                </p>
-                <p class="text-base text-neutral-400 leading-relaxed tracking-wide">
-                    <Tr zh="位於台北中山，我們團隊結合了導演、製片、攝影、剪輯與動畫設計師，提供完整的一條龍影像服務。"
-                        en="Based in Zhongshan, Taipei, our team combines directors, producers, cinematographers, editors and motion designers to deliver end-to-end production." />
-                </p>
+                {meta.about_intro_zh || meta.about_intro_en ? (
+                    <>
+                        {meta.about_intro_zh && (
+                            <p data-lang-zh class="text-lg text-neutral-300 leading-relaxed tracking-wide whitespace-pre-line">
+                                {meta.about_intro_zh}
+                            </p>
+                        )}
+                        {meta.about_intro_en && (
+                            <p data-lang-en class="text-lg text-neutral-300 leading-relaxed tracking-wide whitespace-pre-line">
+                                {meta.about_intro_en}
+                            </p>
+                        )}
+                    </>
+                ) : (
+                    /* Fallback：admin 尚未填 about.intro_* 時的預設文案 */
+                    <>
+                        <p class="text-lg text-neutral-300 leading-relaxed tracking-wide mb-6">
+                            <Tr zh={`${meta.company_name_zh}（${meta.company_name_en}）專注於影像製作與行銷規劃。`}
+                                en={`${meta.company_name_en} focuses on video production and marketing planning.`} />
+                        </p>
+                        <p class="text-base text-neutral-400 leading-relaxed tracking-wide mb-6">
+                            <Tr zh="我們相信每一支影片都應該是一則有力的故事。從商業廣告到紀實短片，從活動紀錄到動畫設計，我們用影像陪伴品牌與人們訴說重要的事。"
+                                en="We believe every film should tell a compelling story. From commercials to documentaries, event coverage to motion graphics, we help brands and people share what matters." />
+                        </p>
+                        <p class="text-base text-neutral-400 leading-relaxed tracking-wide">
+                            <Tr zh="位於台北中山，我們團隊結合了導演、製片、攝影、剪輯與動畫設計師，提供完整的一條龍影像服務。"
+                                en="Based in Zhongshan, Taipei, our team combines directors, producers, cinematographers, editors and motion designers to deliver end-to-end production." />
+                        </p>
+                    </>
+                )}
             </div>
         </div>
     </section>

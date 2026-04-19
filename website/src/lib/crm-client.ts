@@ -126,11 +126,21 @@ export async function fetchTeam(): Promise<ITeamMember[]> {
 
 
 /**
- * fetchMeta() — 關鍵：API 離線或回空資料時走 fallback 但 console.error。
+ * fetchMeta() — 模組級 memoize（同 fetchAllWorksCached 模式），避免多頁重複打 API。
+ * API 離線或回空資料時走 fallback 但 console.error。
  * Fallback 內容就是 base seed 值（與 db/seed_website.py 一致）。
- * 生產 build 若拿到全空 meta 應該調查 API，不該默默部署空殼站。
  */
+let _metaCachePromise: Promise<IWebsiteMeta> | null = null;
+
+export function clearMetaCache(): void { _metaCachePromise = null; }
+
 export async function fetchMeta(): Promise<IWebsiteMeta> {
+    if (_metaCachePromise) return _metaCachePromise;
+    _metaCachePromise = _doFetchMeta();
+    return _metaCachePromise;
+}
+
+async function _doFetchMeta(): Promise<IWebsiteMeta> {
     const fallback: IWebsiteMeta = {
         company_name_zh: "源日影像",
         company_name_en: "OriginsunStudio",

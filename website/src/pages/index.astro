@@ -17,9 +17,8 @@ const [meta, featured, services] = await Promise.all([
     fetchServices(),
 ]);
 
-// Hero YouTube ID 之後由 website_settings.home.hero_youtube_id 驅動。
-// 目前 fetchMeta() 回的 IWebsiteMeta 未含此欄位，走靜態 gradient fallback。
-const heroYoutubeId: string | null = null;
+// Hero YouTube ID 由 website_settings.home.hero_youtube_id 驅動（admin 從官網管理 Tab 設定）
+const heroYoutubeId = meta.home_hero_youtube_id || null;
 
 const siteUrl = Astro.site?.toString() || SITE_URL_FALLBACK;
 const schemaData = [organizationSchema(meta, siteUrl)];

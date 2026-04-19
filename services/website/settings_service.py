@@ -21,25 +21,33 @@ async def get_all_settings(session: AsyncSession) -> dict[str, Any]:
 
 
 async def get_meta(session: AsyncSession) -> dict[str, Any]:
-    """公開端 /meta：只回傳對外需要的欄位（company.*、seo.*、social.*）。"""
-    all_settings = await get_all_settings(session)
-    out: dict[str, Any] = {
-        "company_name_zh": all_settings.get("company.name_zh", ""),
-        "company_name_en": all_settings.get("company.name_en", ""),
-        "tagline": all_settings.get("company.tagline", ""),
-        "subtitle": all_settings.get("company.subtitle", ""),
-        "address": all_settings.get("company.address", ""),
-        "phone": all_settings.get("company.phone", ""),
-        "email": all_settings.get("company.email", ""),
-        "seo_default_title": all_settings.get("seo.default_title", ""),
-        "seo_default_description": all_settings.get("seo.default_description", ""),
+    """公開端 /meta：對外需要的欄位（company / seo / social / about / home.hero）。
+
+    這些欄位皆對應 website_settings 表中的 key，admin 在「🌐 官網管理」Tab 可編輯。
+    前端（Astro build）一次撈全部，避免多次 round-trip。
+    """
+    s = await get_all_settings(session)
+    return {
+        "company_name_zh": s.get("company.name_zh", ""),
+        "company_name_en": s.get("company.name_en", ""),
+        "tagline": s.get("company.tagline", ""),
+        "subtitle": s.get("company.subtitle", ""),
+        "address": s.get("company.address", ""),
+        "phone": s.get("company.phone", ""),
+        "email": s.get("company.email", ""),
+        "seo_default_title": s.get("seo.default_title", ""),
+        "seo_default_description": s.get("seo.default_description", ""),
         "social": {
-            "youtube": all_settings.get("social.youtube", ""),
-            "instagram": all_settings.get("social.instagram", ""),
-            "facebook": all_settings.get("social.facebook", ""),
+            "youtube": s.get("social.youtube", ""),
+            "instagram": s.get("social.instagram", ""),
+            "facebook": s.get("social.facebook", ""),
         },
+        "about_intro_zh": s.get("about.intro_zh", ""),
+        "about_intro_en": s.get("about.intro_en", ""),
+        "about_founded_year": s.get("about.founded_year", ""),
+        "about_team_intro_zh": s.get("about.team_intro_zh", ""),
+        "home_hero_youtube_id": s.get("home.hero_youtube_id", ""),
     }
-    return out
 
 
 async def update_settings(

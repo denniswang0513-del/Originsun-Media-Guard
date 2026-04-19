@@ -5,33 +5,12 @@
  */
 import type { IService } from "../../types/service";
 import { STR } from "../../lib/i18n";
+import { iconChar, warnUnknownIcons } from "../../lib/service-icons";
 
 interface Props { services: IService[] }
 const { services } = Astro.props;
 
-// 簡短 unicode icon 對照（避免 icon library 依賴）
-const ICON_MAP: Record<string, string> = {
-    video:    "◉",
-    film:     "◆",
-    camera:   "◯",
-    sparkles: "✦",
-    mic:      "◐",
-    default:  "◇",
-};
-function iconChar(key?: string | null): string {
-    return ICON_MAP[key || "default"] || ICON_MAP.default;
-}
-
-// Build-time：收集 admin 設了但 ICON_MAP 沒收的 key，警示需補貢獻
-const _unknownIcons = services
-    .map(s => s.icon)
-    .filter((k): k is string => !!k && !(k in ICON_MAP));
-if (_unknownIcons.length) {
-    console.warn(
-        `[ServicesGrid] 未知 icon key（落回預設 ◇）：${[...new Set(_unknownIcons)].join(", ")}。` +
-        `支援的 key：${Object.keys(ICON_MAP).filter(k => k !== "default").join(", ")}`
-    );
-}
+warnUnknownIcons(services.map(s => s.icon), "ServicesGrid");
 ---
 
 <section class="bg-neutral-950 py-24 sm:py-32">

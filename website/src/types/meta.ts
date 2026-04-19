@@ -21,6 +21,12 @@ export interface IWebsiteMeta {
     seo_default_title: string;
     seo_default_description: string;
     categories: ICategory[];
+    // Admin 可編輯（website_settings.about.* / home.*）
+    about_intro_zh?: string;
+    about_intro_en?: string;
+    about_founded_year?: string;
+    about_team_intro_zh?: string;
+    home_hero_youtube_id?: string;
 }
 
 export interface ITeamMember {
