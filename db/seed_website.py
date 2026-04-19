@@ -14,7 +14,6 @@ Seed 內容：
 """
 from __future__ import annotations
 
-import json
 import logging
 from typing import Callable
 
@@ -123,90 +122,81 @@ _SEED_SERVICES: list[dict[str, object]] = [
 async def seed_website_if_empty(session_factory: Callable) -> None:
     """若 website_settings 為空則寫入初始資料。
 
-    再次呼叫時會自動 skip（讓使用者後台調整的值不被覆寫）。
+    幂等：檢查 settings 非空就 skip，讓使用者後台調整的值永遠不被覆寫。
+    整批 ORM insert().on_conflict_do_nothing() 單一 commit。
     """
     try:
-        from sqlalchemy import text
+        from sqlalchemy import text, select
+        from sqlalchemy.dialects.postgresql import insert
+        from db.models_website import (
+            WebsiteSetting, WebsiteCategory, WebsiteService,
+        )
     except ImportError:
-        logger.warning("[website-seed] SQLAlchemy unavailable, skip seeding")
+        logger.warning("[website-seed] SQLAlchemy/models unavailable, skip")
         return
 
     async with session_factory() as session:
-        # 檢查是否已經 seed 過
         try:
-            result = await session.execute(
+            count = (await session.execute(
                 text("SELECT COUNT(*) FROM website_settings")
-            )
-            count = result.scalar() or 0
-            if count > 0:
-                logger.info("[website-seed] Already seeded (%d settings), skip", count)
-                return
+            )).scalar() or 0
         except Exception as e:
-            logger.warning("[website-seed] Check failed: %s", e)
+            logger.warning("[website-seed] pre-check failed: %s", e)
             return
 
-        # Seed settings
-        for key, value in _SEED_SETTINGS.items():
-            try:
-                await session.execute(
-                    text(
-                        "INSERT INTO website_settings (key, value, updated_by) "
-                        "VALUES (:k, :v::jsonb, :u) ON CONFLICT (key) DO NOTHING"
-                    ),
-                    {"k": key, "v": json.dumps(value), "u": "seed"},
-                )
-            except Exception as e:
-                logger.warning("[website-seed] setting %s failed: %s", key, e)
+        if count > 0:
+            logger.info("[website-seed] already seeded (%d settings), skip", count)
+            return
 
-        # Seed categories
-        for cat in _SEED_CATEGORIES:
-            try:
-                await session.execute(
-                    text(
-                        "INSERT INTO website_categories "
-                        "(slug, name_zh, name_en, description, sort_order, visible) "
-                        "VALUES (:slug, :nz, :ne, :desc, :so, :vis) "
-                        "ON CONFLICT (slug) DO NOTHING"
-                    ),
-                    {
-                        "slug": cat["slug"], "nz": cat["name_zh"], "ne": cat["name_en"],
-                        "desc": cat["description"], "so": cat["sort_order"], "vis": cat["visible"],
-                    },
-                )
-            except Exception as e:
-                logger.warning("[website-seed] category %s failed: %s", cat["slug"], e)
-
-        # Seed services (先抓剛剛建的 categories 對應的 id)
-        cat_id_map: dict[str, int] = {}
         try:
-            res = await session.execute(text("SELECT id, slug FROM website_categories"))
-            for row in res.fetchall():
-                cat_id_map[row[1]] = row[0]
-        except Exception as e:
-            logger.warning("[website-seed] fetch category ids failed: %s", e)
-
-        for svc in _SEED_SERVICES:
-            related_cat_id = cat_id_map.get(svc.get("related_category_slug", ""))
-            try:
-                await session.execute(
-                    text(
-                        "INSERT INTO website_services "
-                        "(slug, title, icon, short_desc, full_desc, related_category_id, "
-                        "sort_order, visible) "
-                        "VALUES (:slug, :t, :i, :sd, :fd, :rc, :so, :vis) "
-                        "ON CONFLICT (slug) DO NOTHING"
-                    ),
-                    {
-                        "slug": svc["slug"], "t": svc["title"], "i": svc["icon"],
-                        "sd": svc["short_desc"], "fd": svc["full_desc"],
-                        "rc": related_cat_id, "so": svc["sort_order"], "vis": svc["visible"],
-                    },
+            settings_rows = [
+                {"key": k, "value": v, "updated_by": "seed"}
+                for k, v in _SEED_SETTINGS.items()
+            ]
+            await session.execute(
+                insert(WebsiteSetting).values(settings_rows).on_conflict_do_nothing(
+                    index_elements=["key"]
                 )
-            except Exception as e:
-                logger.warning("[website-seed] service %s failed: %s", svc["slug"], e)
+            )
 
-        await session.commit()
-        logger.info(
-            "[website-seed] Seeded %d settings + %d categories + %d services",
-            len(_SEED_SETTINGS), len(_SEED_CATEGORIES), len(_SEED_SERVICES),
-        )
+            # RETURNING id, slug lets us map category slug→id without a second SELECT
+            category_rows = [
+                {
+                    "slug": c["slug"], "name_zh": c["name_zh"], "name_en": c["name_en"],
+                    "description": c["description"], "sort_order": c["sort_order"],
+                    "visible": c["visible"],
+                }
+                for c in _SEED_CATEGORIES
+            ]
+            cat_result = await session.execute(
+                insert(WebsiteCategory).values(category_rows).on_conflict_do_nothing(
+                    index_elements=["slug"]
+                ).returning(WebsiteCategory.id, WebsiteCategory.slug)
+            )
+            cat_id_map: dict[str, int] = {row.slug: row.id for row in cat_result}
+
+            service_rows = [
+                {
+                    "slug": s["slug"], "title": s["title"], "icon": s["icon"],
+                    "short_desc": s["short_desc"], "full_desc": s["full_desc"],
+                    "related_category_id": cat_id_map.get(
+                        s.get("related_category_slug", "")  # type: ignore[arg-type]
+                    ),
+                    "sort_order": s["sort_order"], "visible": s["visible"],
+                }
+                for s in _SEED_SERVICES
+            ]
+            await session.execute(
+                insert(WebsiteService).values(service_rows).on_conflict_do_nothing(
+                    index_elements=["slug"]
+                )
+            )
+
+            await session.commit()
+            logger.info(
+                "[website-seed] seeded %d settings + %d categories + %d services",
+                len(_SEED_SETTINGS), len(_SEED_CATEGORIES), len(_SEED_SERVICES),
+            )
+        except Exception as e:
+            await session.rollback()
+            logger.error("[website-seed] batch failed, rolled back: %s", e)

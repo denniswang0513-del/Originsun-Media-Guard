@@ -13,15 +13,11 @@ Phase M 官網模組 Pydantic schemas。
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Any, Optional
+from typing import Any, Literal, Optional
 
-try:
-    from pydantic import BaseModel, Field
-except ImportError:  # pragma: no cover
-    class BaseModel:  # type: ignore
-        pass
-    def Field(*a, **kw):  # type: ignore
-        return None
+from pydantic import BaseModel, Field
+
+InquiryStatus = Literal["new", "in_progress", "converted", "spam"]
 
 
 # ══════════════════════════════════════════════════════════
@@ -192,7 +188,7 @@ class ContactInquiryResponse(BaseModel):
     budget_range: Optional[str] = None
     message: Optional[str] = None
     source: Optional[str] = None
-    status: str = "new"
+    status: InquiryStatus = "new"
     converted_client_id: Optional[str] = None
     ip_address: Optional[str] = None
     created_at: Optional[datetime] = None
@@ -202,7 +198,7 @@ class ContactInquiryResponse(BaseModel):
 
 
 class ContactInquiryUpdate(BaseModel):
-    status: Optional[str] = None        # new / in_progress / converted / spam
+    status: Optional[InquiryStatus] = None
     notes: Optional[str] = None
 
 

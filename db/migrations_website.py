@@ -126,52 +126,31 @@ _CREATE_INDEXES: list[str] = [
 async def run_website_migrations(session_factory: Callable) -> None:
     """Execute Phase M DB migrations.
 
-    Safe to call repeatedly (every statement uses IF NOT EXISTS).
-    Errors for individual statements are logged but don't abort the run.
+    All 27 DDL statements batched in a single transaction (1 commit vs 27).
+    Every statement uses IF NOT EXISTS so re-runs are no-op on server side.
+    On any failure, whole batch rolls back; next startup will retry idempotently.
     """
     try:
         from sqlalchemy import text
     except ImportError:
-        logger.warning("[website-migration] SQLAlchemy unavailable, skip migration")
+        logger.warning("[website-migration] SQLAlchemy unavailable, skip")
         return
 
+    stmts: list[str] = [
+        *[f"ALTER TABLE crm_projects ADD COLUMN IF NOT EXISTS {c} {t}"
+          for c, t in _CRM_PROJECTS_COLUMNS],
+        *[f"ALTER TABLE crm_staff ADD COLUMN IF NOT EXISTS {c} {t}"
+          for c, t in _CRM_STAFF_COLUMNS],
+        *_CREATE_TABLES,
+        *_CREATE_INDEXES,
+    ]
+
     async with session_factory() as session:
-        # ALTER TABLE crm_projects
-        for col, coltype in _CRM_PROJECTS_COLUMNS:
-            sql = f"ALTER TABLE crm_projects ADD COLUMN IF NOT EXISTS {col} {coltype}"
-            try:
+        try:
+            for sql in stmts:
                 await session.execute(text(sql))
-                await session.commit()
-            except Exception as e:
-                logger.warning("[website-migration] %s failed: %s", sql, e)
-                await session.rollback()
-
-        # ALTER TABLE crm_staff
-        for col, coltype in _CRM_STAFF_COLUMNS:
-            sql = f"ALTER TABLE crm_staff ADD COLUMN IF NOT EXISTS {col} {coltype}"
-            try:
-                await session.execute(text(sql))
-                await session.commit()
-            except Exception as e:
-                logger.warning("[website-migration] %s failed: %s", sql, e)
-                await session.rollback()
-
-        # CREATE TABLE 5 new tables
-        for ddl in _CREATE_TABLES:
-            try:
-                await session.execute(text(ddl))
-                await session.commit()
-            except Exception as e:
-                logger.warning("[website-migration] CREATE TABLE failed: %s", e)
-                await session.rollback()
-
-        # CREATE INDEX
-        for ddl in _CREATE_INDEXES:
-            try:
-                await session.execute(text(ddl))
-                await session.commit()
-            except Exception as e:
-                logger.warning("[website-migration] %s failed: %s", ddl, e)
-                await session.rollback()
-
-    logger.info("[website-migration] Phase M migrations completed")
+            await session.commit()
+            logger.info("[website-migration] %d statements applied in 1 commit", len(stmts))
+        except Exception as e:
+            await session.rollback()
+            logger.error("[website-migration] batch failed, rolled back: %s", e)
