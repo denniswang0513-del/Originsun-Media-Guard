@@ -59,77 +59,69 @@ const nextThumb = nextWork ? resolveThumbnail(nextWork.youtube_id, nextWork.slug
             schemaData={schemaData}
             ogImage={work.thumbnail_url || undefined}>
 
-    <!-- 頂部影片 -->
-    <section class="pt-24 sm:pt-28 bg-white">
-        <div class="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8">
-            {isValidYouTubeId(work.youtube_id) ? (
-                <lite-youtube videoid={work.youtube_id}
-                              class="block aspect-video"
-                              playlabel={work.title}></lite-youtube>
-            ) : (
-                <div class="aspect-video bg-neutral-100 flex items-center justify-center text-neutral-400">
-                    <span data-lang-zh>影片暫無法使用</span>
-                    <span data-lang-en>Video unavailable</span>
+    <!-- 兩欄主體：左=標題/敘述/credits、右=影片（sticky 跟著滾） -->
+    <section class="bg-white pt-24 sm:pt-28 pb-16 sm:pb-24">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-10 grid grid-cols-1 lg:grid-cols-12 gap-10 lg:gap-14">
+
+            <!-- 左欄：文字 -->
+            <div class="lg:col-span-5 lg:pr-4 pt-2">
+                <div class="text-xs tracking-[0.4em] uppercase text-[#c9372c] mb-5">
+                    {categoryLabel}
                 </div>
-            )}
-        </div>
-    </section>
 
-    <!-- 類別 + 標題 + 描述 + Credits -->
-    <section class="bg-white py-12 sm:py-16">
-        <div class="max-w-3xl mx-auto px-4 sm:px-6 lg:px-8">
+                <h1 class="text-4xl sm:text-5xl lg:text-6xl font-bold tracking-tight uppercase text-neutral-900 leading-[1.05] mb-10">
+                    {work.title}
+                </h1>
 
-            <div class="text-xs tracking-[0.4em] uppercase text-neutral-500 mb-5">
-                {categoryLabel}
-            </div>
-
-            <h1 class="text-3xl sm:text-5xl font-bold tracking-tight text-neutral-900 mb-8 leading-tight">
-                {work.title}
-            </h1>
-
-            {work.description && (
-                <div class="text-base text-neutral-600 leading-[1.85] tracking-wide mb-14 whitespace-pre-line">
-                    {work.description}
-                </div>
-            )}
-
-            {credits.length > 0 && (
-                <>
-                    <div class="flex items-center gap-4 mb-8 text-xs tracking-[0.4em] text-neutral-600 uppercase">
-                        <span class="h-px w-6 bg-neutral-300"></span>
-                        <span>Credit List</span>
-                        <span class="h-px w-6 bg-neutral-300"></span>
+                {work.description && (
+                    <div class="text-[15px] sm:text-base text-neutral-700 leading-[1.85] tracking-wide mb-12 whitespace-pre-line space-y-5">
+                        {work.description.split(/\n\s*\n/).filter(Boolean).map(p => <p>{p}</p>)}
                     </div>
+                )}
 
-                    <dl class="space-y-3 text-[15px]">
+                {credits.length > 0 && (
+                    <dl class="space-y-3 text-[15px] leading-relaxed">
                         {credits.map(([role, name]) => (
-                            <div class="flex items-baseline gap-3 flex-wrap">
-                                <dt class="text-neutral-500 tracking-wide min-w-[160px]">
-                                    <span>{role}</span>
-                                    {CREDIT_EN[role] && (
-                                        <span class="text-neutral-400 text-sm ml-1">{CREDIT_EN[role]}</span>
-                                    )}
+                            <div>
+                                <dt class="inline font-bold text-neutral-900 tracking-wide">
+                                    {role}
+                                    {CREDIT_EN[role] && <span class="text-neutral-500 text-sm font-normal ml-1.5">{CREDIT_EN[role]}</span>}
                                 </dt>
-                                <span class="text-neutral-300">｜</span>
-                                <dd class="text-neutral-800 tracking-wide flex-1">
-                                    {Array.isArray(name) ? name.join(" ") : name}
+                                <dd class="inline ml-2 text-neutral-700 tracking-wide">
+                                    {Array.isArray(name) ? name.join(" · ") : name}
                                 </dd>
                             </div>
                         ))}
                     </dl>
-                </>
-            )}
+                )}
+            </div>
+
+            <!-- 右欄：大影片 + 可選 key art thumb（sticky 跟著滾） -->
+            <div class="lg:col-span-7">
+                <div class="lg:sticky lg:top-24 space-y-4">
+                    {isValidYouTubeId(work.youtube_id) ? (
+                        <lite-youtube videoid={work.youtube_id}
+                                      class="block aspect-video"
+                                      playlabel={work.title}></lite-youtube>
+                    ) : (
+                        <div class="aspect-video bg-neutral-100 flex items-center justify-center text-neutral-400">
+                            <span data-lang-zh>影片暫無法使用</span>
+                            <span data-lang-en>Video unavailable</span>
+                        </div>
+                    )}
+                </div>
+            </div>
         </div>
     </section>
 
     <!-- 底部分隔線 -->
-    <div class="max-w-3xl mx-auto px-4 sm:px-6 lg:px-8">
+    <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-10">
         <hr class="border-neutral-200" />
     </div>
 
     <!-- NEXT 區域 -->
     {nextWork && (
-        <section class="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 py-14">
+        <section class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-10 py-14">
             <div class="flex items-center justify-between">
                 <a href="/works" class="text-neutral-400 hover:text-[#c9372c] transition-colors" aria-label="All works">
                     <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">

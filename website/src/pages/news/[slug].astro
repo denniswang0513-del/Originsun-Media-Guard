@@ -6,6 +6,14 @@ import BaseLayout from "../../layouts/BaseLayout.astro";
 import Tr from "../../components/ui/Tr.astro";
 import { fetchMeta } from "../../lib/crm-client";
 import { fetchPosts, fetchPostBySlug } from "../../lib/posts";
+import { isValidYouTubeId } from "../../lib/youtube";
+import type { PostBlockWidth } from "../../types/post";
+
+const WIDTH_CLASS: Record<PostBlockWidth, string> = {
+    content: "max-w-[680px]",
+    wide:    "max-w-4xl",
+    full:    "max-w-none",
+};
 
 export async function getStaticPaths() {
     const posts = await fetchPosts();
@@ -46,9 +54,9 @@ const publishedDate = new Date(post.published_at).toLocaleDateString("zh-TW", {
         </div>
     </section>
 
-    <!-- 類別 + 標題 + meta + body -->
-    <article class="bg-white py-12 sm:py-16">
-        <div class="max-w-3xl mx-auto px-4 sm:px-6 lg:px-8">
+    <!-- 類別 + 標題 + meta -->
+    <article class="bg-white pt-12 sm:pt-16 pb-8">
+        <div class="max-w-[680px] mx-auto px-4 sm:px-6 lg:px-8">
             <div class="text-xs tracking-[0.4em] uppercase text-[#c9372c] mb-5">
                 <Tr zh={post.category_label_zh} en={post.category_label_en} />
             </div>
@@ -57,23 +65,107 @@ const publishedDate = new Date(post.published_at).toLocaleDateString("zh-TW", {
                 {post.title}
             </h1>
 
-            <div class="flex items-center gap-4 text-xs tracking-widest text-neutral-500 mb-12">
+            <div class="flex items-center gap-4 text-xs tracking-widest text-neutral-500 mb-4">
                 <span>{publishedDate}</span>
                 {post.read_time_min && <>
                     <span>·</span>
                     <span><Tr zh={`${post.read_time_min} 分鐘閱讀`} en={`${post.read_time_min} min read`} /></span>
                 </>}
             </div>
-
-            <!-- 內文 -->
-            {post.body ? (
-                <div class="prose prose-lg max-w-none text-neutral-700 leading-[1.95] tracking-wide whitespace-pre-line">
-                    {post.body}
-                </div>
-            ) : (
-                <p class="text-lg text-neutral-600 leading-[1.85] tracking-wide">{post.excerpt}</p>
-            )}
         </div>
+    </article>
+
+    <!-- 內文 blocks -->
+    <article class="bg-white pb-16 sm:pb-24 post-body">
+        {post.body && post.body.length > 0 ? (
+            post.body.map(block => {
+                if (block.type === "paragraph") {
+                    const size = block.lead ? "text-xl sm:text-2xl text-neutral-800 leading-[1.7]" : "text-[17px] sm:text-lg text-neutral-700 leading-[1.95]";
+                    return (
+                        <div class="max-w-[680px] mx-auto px-4 sm:px-6 lg:px-8 my-6">
+                            <p class={`${size} tracking-wide`}>{block.text}</p>
+                        </div>
+                    );
+                }
+                if (block.type === "heading") {
+                    const cls = block.level === 2
+                        ? "text-2xl sm:text-3xl font-bold text-neutral-900 mt-14 mb-4 tracking-tight"
+                        : "text-xl sm:text-2xl font-semibold text-neutral-900 mt-10 mb-3 tracking-tight";
+                    return (
+                        <div class="max-w-[680px] mx-auto px-4 sm:px-6 lg:px-8">
+                            {block.level === 2 ? <h2 class={cls}>{block.text}</h2> : <h3 class={cls}>{block.text}</h3>}
+                        </div>
+                    );
+                }
+                if (block.type === "image") {
+                    const widthCls = WIDTH_CLASS[block.width ?? "content"];
+                    return (
+                        <figure class={`${widthCls} mx-auto px-4 sm:px-6 lg:px-8 my-10 sm:my-14`}>
+                            <img src={block.src} alt={block.alt ?? ""} loading="lazy"
+                                 class="w-full h-auto" />
+                            {block.caption && (
+                                <figcaption class="text-xs text-neutral-500 tracking-wide mt-3 text-center">
+                                    {block.caption}
+                                </figcaption>
+                            )}
+                        </figure>
+                    );
+                }
+                if (block.type === "video") {
+                    const widthCls = WIDTH_CLASS[block.width ?? "content"];
+                    return (
+                        <figure class={`${widthCls} mx-auto px-4 sm:px-6 lg:px-8 my-10 sm:my-14`}>
+                            {isValidYouTubeId(block.youtube_id) ? (
+                                <lite-youtube videoid={block.youtube_id}
+                                              class="block aspect-video"
+                                              playlabel={block.caption ?? "Play video"}></lite-youtube>
+                            ) : (
+                                <div class="aspect-video bg-neutral-100 flex items-center justify-center text-neutral-400 text-sm">
+                                    影片無法載入
+                                </div>
+                            )}
+                            {block.caption && (
+                                <figcaption class="text-xs text-neutral-500 tracking-wide mt-3 text-center">
+                                    {block.caption}
+                                </figcaption>
+                            )}
+                        </figure>
+                    );
+                }
+                if (block.type === "quote") {
+                    return (
+                        <div class="max-w-[680px] mx-auto px-4 sm:px-6 lg:px-8 my-10 sm:my-14">
+                            <blockquote class="border-l-2 border-[#c9372c] pl-6 sm:pl-8 py-2">
+                                <p class="text-xl sm:text-2xl font-light text-neutral-800 leading-[1.6] tracking-wide italic">
+                                    「{block.text}」
+                                </p>
+                                {block.author && (
+                                    <cite class="block not-italic text-xs tracking-[0.3em] uppercase text-neutral-500 mt-4">
+                                        — {block.author}
+                                    </cite>
+                                )}
+                            </blockquote>
+                        </div>
+                    );
+                }
+                if (block.type === "list") {
+                    const Tag = block.ordered ? "ol" : "ul";
+                    const listCls = block.ordered ? "list-decimal" : "list-disc";
+                    return (
+                        <div class="max-w-[680px] mx-auto px-4 sm:px-6 lg:px-8 my-6">
+                            <Tag class={`${listCls} pl-6 space-y-2 text-[17px] sm:text-lg text-neutral-700 leading-[1.85] tracking-wide marker:text-[#c9372c]`}>
+                                {block.items.map(item => <li>{item}</li>)}
+                            </Tag>
+                        </div>
+                    );
+                }
+                return null;
+            })
+        ) : (
+            <div class="max-w-[680px] mx-auto px-4 sm:px-6 lg:px-8">
+                <p class="text-lg text-neutral-600 leading-[1.85] tracking-wide">{post.excerpt}</p>
+            </div>
+        )}
     </article>
 
     <!-- 底部分隔 -->
@@ -110,7 +202,7 @@ const publishedDate = new Date(post.published_at).toLocaleDateString("zh-TW", {
 </BaseLayout>
 
 <style>
-    .prose h2 { font-size: 1.5rem; font-weight: 700; color: #111; margin: 2em 0 0.6em; letter-spacing: 0.02em; }
-    .prose h3 { font-size: 1.15rem; font-weight: 600; color: #222; margin: 1.8em 0 0.5em; }
-    .prose p  { margin: 1em 0; }
+    /* 段落之間視覺節奏：第一段與標題連動時收斂上邊距 */
+    .post-body h2 + div p,
+    .post-body h3 + div p { margin-top: 0; }
 </style>

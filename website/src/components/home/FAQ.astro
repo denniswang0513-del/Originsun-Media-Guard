@@ -1,0 +1,63 @@
+---
+/**
+ * FAQ.astro — 常見問題（消除詢問前的疑慮）
+ *
+ * 用原生 <details>/<summary> 做手風琴，零 JS。
+ * 版面：左欄標題，右欄問題清單。
+ */
+import Tr from "../ui/Tr.astro";
+import { FAKE_FAQ } from "../../lib/fake-data";
+---
+
+<section class="bg-neutral-50 py-24 sm:py-32 border-t border-neutral-200">
+    <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 grid grid-cols-1 lg:grid-cols-12 gap-10 lg:gap-16">
+
+        <!-- 左：章節標題 + 引導 -->
+        <div class="lg:col-span-4">
+            <p class="text-xs tracking-[0.4em] text-[#c9372c] uppercase mb-3">FAQ</p>
+            <h2 class="text-3xl sm:text-5xl font-bold tracking-tight text-neutral-900 leading-tight mb-6">
+                <Tr zh="還有疑問？" en="Any Questions?" />
+            </h2>
+            <p class="text-sm sm:text-base text-neutral-500 leading-[1.85] tracking-wide max-w-sm">
+                <Tr zh="這裡是客戶最常問我們的問題。沒看到你要問的？直接寫訊息給我們。"
+                    en="The questions we get most often. Not listed? Reach out directly." />
+            </p>
+            <a href="/contact"
+               class="mt-8 inline-flex items-center gap-3 text-xs tracking-[0.3em] uppercase text-neutral-900 border-b border-[#c9372c] pb-1 hover:text-[#c9372c] transition-colors">
+                <Tr zh="寫訊息給我們" en="Ask us directly" />
+                <span>→</span>
+            </a>
+        </div>
+
+        <!-- 右：問題清單 -->
+        <div class="lg:col-span-8">
+            <ol class="border-t border-neutral-300">
+                {FAKE_FAQ.map((f, i) => (
+                    <li class="border-b border-neutral-300">
+                        <details class="group">
+                            <summary class="flex items-start gap-6 py-6 sm:py-7 cursor-pointer list-none hover:bg-white transition-colors -mx-2 px-2">
+                                <span class="text-xs tracking-[0.3em] text-neutral-400 mt-1.5 min-w-[2.5rem]">
+                                    /{String(i + 1).padStart(2, "0")}
+                                </span>
+                                <span class="flex-1 text-lg sm:text-xl font-medium text-neutral-900 tracking-wide leading-snug">
+                                    <Tr zh={f.q_zh} en={f.q_en} />
+                                </span>
+                                <span class="text-2xl text-neutral-400 group-open:rotate-45 transition-transform leading-none mt-1">+</span>
+                            </summary>
+                            <div class="pl-[calc(2.5rem+1.5rem)] pr-10 pb-7 -mt-1">
+                                <p class="text-[15px] text-neutral-600 leading-[1.9] tracking-wide max-w-2xl">
+                                    <Tr zh={f.a_zh} en={f.a_en} />
+                                </p>
+                            </div>
+                        </details>
+                    </li>
+                ))}
+            </ol>
+        </div>
+    </div>
+</section>
+
+<style>
+    details > summary::-webkit-details-marker { display: none; }
+    details > summary { list-style: none; }
+</style>

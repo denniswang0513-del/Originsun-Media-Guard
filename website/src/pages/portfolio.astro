@@ -1,189 +1,142 @@
 ---
 /**
- * portfolio.astro — 歷年作品一頁式簡介（/portfolio）
+ * portfolio.astro — 歷年作品一頁式清單（/portfolio）
  *
- * 設計目的：客戶拿此頁給主管參考。
- * - 依年份倒序分組
- * - 資訊緊湊（一行一作品）
- * - 可列印（@media print 隱藏 nav/footer、字級調整、年份不分頁）
- * - 頁首含 Logo + 公司名 + 聯絡資訊，印出來就是完整簡介
+ * 設計目的：客戶主管參考用的列印簡介。
+ * 極簡路線：單欄、純文字、時間軸。
+ *
+ * 結構：
+ *   [頁首]   標題 + 列印按鈕
+ *   [列印頁首]  公司名 + 聯絡（僅列印時顯示）
+ *   [時間軸]  年份大字 + 該年作品清單（客戶 — 標題）
+ *   [列印頁尾]  © 公司名 + 網址
+ *
+ * @media print：隱藏 nav/footer/button，單色列印、不分頁符。
  */
 import BaseLayout from "../layouts/BaseLayout.astro";
 import Tr from "../components/ui/Tr.astro";
 import { fetchMeta, fetchAllWorksCached } from "../lib/crm-client";
-import { resolveThumbnail } from "../lib/youtube";
+import type { IPublicProject } from "../types/project";
 
 const [meta, allWorks] = await Promise.all([
     fetchMeta(),
     fetchAllWorksCached(),
 ]);
 
-// 依年份倒序分組（無年份放最下面 "未分類"）
-type YearGroup = { year: number | null; works: typeof allWorks };
-const groupMap = new Map<number | null, typeof allWorks>();
-for (const w of allWorks) {
-    const y = w.year ?? null;
-    if (!groupMap.has(y)) groupMap.set(y, []);
-    groupMap.get(y)!.push(w);
+// 年份分組（desc，無年份放最後）
+function groupByYear(works: IPublicProject[]): Array<{ year: number | null; works: IPublicProject[] }> {
+    const m = new Map<number | null, IPublicProject[]>();
+    for (const w of works) {
+        const y = w.year ?? null;
+        if (!m.has(y)) m.set(y, []);
+        m.get(y)!.push(w);
+    }
+    return Array.from(m.entries())
+        .sort((a, b) => {
+            if (a[0] === null) return 1;
+            if (b[0] === null) return -1;
+            return b[0] - a[0];
+        })
+        .map(([year, works]) => ({ year, works }));
 }
-const groups: YearGroup[] = Array.from(groupMap.entries())
-    .sort((a, b) => {
-        if (a[0] === null) return 1;
-        if (b[0] === null) return -1;
-        return b[0] - a[0];  // desc
-    })
-    .map(([year, works]) => ({ year, works }));
 
+const years = groupByYear(allWorks);
 const totalCount = allWorks.length;
 ---
 
 <BaseLayout title="歷年作品 Portfolio" meta={meta}>
 
-    <!-- 頁首（印出時保留）-->
-    <section class="bg-white pt-28 sm:pt-32 pb-10 print:pt-0 print:pb-4">
-        <div class="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8">
-
-            <!-- 列印專用頁首（只在列印時顯示）-->
-            <div class="hidden print:block mb-6 pb-4 border-b border-neutral-300">
-                <div class="flex justify-between items-start">
-                    <div>
-                        <div class="text-xl font-bold text-neutral-900">{meta.company_name_zh}</div>
-                        <div class="text-xs text-neutral-600 tracking-widest">{meta.company_name_en}</div>
-                    </div>
-                    <div class="text-right text-xs text-neutral-600">
-                        {meta.phone && <div>Tel: {meta.phone}</div>}
-                        {meta.email && <div>{meta.email}</div>}
-                        {meta.address && <div>{meta.address}</div>}
-                    </div>
+    <!-- 頁首：標題 + 列印按鈕（列印時隱藏） -->
+    <section class="bg-white pt-28 sm:pt-32 pb-12 print:hidden">
+        <div class="max-w-3xl mx-auto px-4 sm:px-6 lg:px-8">
+            <p class="text-xs tracking-[0.4em] text-neutral-500 uppercase mb-3">Portfolio</p>
+            <div class="flex items-end justify-between flex-wrap gap-4">
+                <div>
+                    <h1 class="text-4xl sm:text-5xl font-bold tracking-tight text-neutral-900 mb-3">
+                        <Tr zh="歷年作品" en="Our Portfolio" />
+                    </h1>
+                    <p class="text-neutral-600 tracking-wide">
+                        <Tr zh={`${meta.company_name_zh} 歷年製作一覽（共 ${totalCount} 件）`}
+                            en={`A chronological list from ${meta.company_name_en} — ${totalCount} projects`} />
+                    </p>
                 </div>
-            </div>
-
-            <!-- 螢幕專用頁首 -->
-            <div class="print:hidden">
-                <p class="text-xs tracking-[0.4em] text-neutral-500 uppercase mb-3">Portfolio</p>
-                <h1 class="text-4xl sm:text-5xl font-bold tracking-tight text-neutral-900 mb-4">
-                    <Tr zh="歷年作品" en="Our Portfolio" />
-                </h1>
-                <p class="text-neutral-600 tracking-wide max-w-2xl mb-6">
-                    <Tr zh={`${meta.company_name_zh} 歷年製作的精選作品一覽，依年份排列共 ${totalCount} 件。`}
-                        en={`A chronological overview of selected works from ${meta.company_name_en}. ${totalCount} projects total.`} />
-                </p>
-
-                <div class="flex flex-wrap gap-3 items-center">
-                    <button type="button" onclick="window.print()"
-                            class="inline-flex items-center gap-2 text-xs tracking-[0.25em] uppercase border border-neutral-900 text-neutral-900 px-5 py-2 hover:bg-neutral-900 hover:text-white transition-colors">
-                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
-                            <path d="M6 9V2h12v7M6 18H4a2 2 0 01-2-2v-5a2 2 0 012-2h16a2 2 0 012 2v5a2 2 0 01-2 2h-2M6 14h12v8H6z" />
-                        </svg>
-                        <Tr zh="列印 / 另存 PDF" en="Print / Save PDF" />
-                    </button>
-                    <a href="/contact"
-                       class="inline-flex items-center gap-2 text-xs tracking-[0.25em] uppercase text-neutral-600 hover:text-[#c9372c] transition-colors">
-                        <Tr zh="聯絡我們 →" en="Contact us →" />
-                    </a>
-                </div>
+                <button type="button" onclick="window.print()"
+                        class="inline-flex items-center gap-2 text-xs tracking-[0.25em] uppercase border border-neutral-900 text-neutral-900 px-5 py-2 hover:bg-neutral-900 hover:text-white transition-colors">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                        <path d="M6 9V2h12v7M6 18H4a2 2 0 01-2-2v-5a2 2 0 012-2h16a2 2 0 012 2v5a2 2 0 01-2 2h-2M6 14h12v8H6z" />
+                    </svg>
+                    <Tr zh="列印 / 另存 PDF" en="Print / Save PDF" />
+                </button>
             </div>
         </div>
     </section>
 
-    <!-- 年份分組主體 -->
+    <!-- 列印專用頁首 -->
+    <div class="hidden print:block mb-6 pb-4 border-b border-neutral-300 mx-8 mt-4">
+        <div class="flex justify-between items-start">
+            <div>
+                <div class="text-xl font-bold text-neutral-900">{meta.company_name_zh}</div>
+                <div class="text-xs text-neutral-600 tracking-widest">{meta.company_name_en} · Portfolio</div>
+            </div>
+            <div class="text-right text-xs text-neutral-600">
+                {meta.phone && <div>Tel: {meta.phone}</div>}
+                {meta.email && <div>{meta.email}</div>}
+                {meta.address && <div>{meta.address}</div>}
+            </div>
+        </div>
+    </div>
+
+    <!-- 時間軸主體（單欄、純文字） -->
     <section class="bg-white pb-20 print:pb-0">
-        <div class="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8">
-            {groups.length === 0 ? (
-                <div class="py-20 text-center text-neutral-500">
-                    <Tr zh="尚無作品資料" en="No works yet" />
-                </div>
-            ) : (
-                groups.map(group => (
-                    <div class="year-block mb-14 print:mb-8 print:break-inside-avoid">
-                        <!-- 年份標題 -->
-                        <div class="flex items-baseline gap-6 mb-6 pb-3 border-b border-neutral-200">
-                            <h2 class="text-3xl sm:text-4xl font-bold tracking-tight text-neutral-900">
-                                {group.year ?? "—"}
-                            </h2>
-                            <span class="text-xs tracking-[0.3em] uppercase text-neutral-400">
-                                <Tr zh={`${group.works.length} 件作品`} en={`${group.works.length} works`} />
-                            </span>
-                        </div>
-
-                        <!-- 作品列表（每列一筆） -->
-                        <ul class="divide-y divide-neutral-100">
-                            {group.works.map(w => {
-                                const thumb = resolveThumbnail(w.youtube_id, w.slug, "hq");
-                                return (
-                                    <li>
-                                        <a href={`/works/${w.slug}`}
-                                           class="group flex items-center gap-4 sm:gap-6 py-4 hover:bg-neutral-50 px-2 sm:px-3 -mx-2 sm:-mx-3 transition-colors print:hover:bg-transparent">
-                                            <!-- 縮圖 -->
-                                            <div class="w-20 sm:w-28 aspect-video overflow-hidden bg-neutral-100 flex-shrink-0">
-                                                <img src={thumb}
-                                                     alt={w.title}
-                                                     loading="lazy"
-                                                     class="w-full h-full object-cover" />
-                                            </div>
-
-                                            <!-- 主資訊 -->
-                                            <div class="flex-1 min-w-0">
-                                                <div class="text-[10px] tracking-[0.3em] uppercase text-neutral-500 mb-1">
-                                                    {w.categories.slice(0, 2).join(" · ")}
-                                                </div>
-                                                <div class="text-base sm:text-lg font-medium text-neutral-900 group-hover:text-[#c9372c] transition-colors truncate">
-                                                    {w.title}
-                                                </div>
-                                            </div>
-
-                                            <!-- 客戶 -->
-                                            <div class="hidden sm:block text-right flex-shrink-0 min-w-[120px]">
-                                                <div class="text-[10px] tracking-[0.3em] uppercase text-neutral-400 mb-1">Client</div>
-                                                <div class="text-sm text-neutral-700 truncate">{w.client || "—"}</div>
-                                            </div>
-
-                                            {w.featured && (
-                                                <span class="hidden md:inline text-[10px] tracking-[0.2em] uppercase text-[#c9372c] border border-[#c9372c]/30 px-2 py-1">
-                                                    Featured
-                                                </span>
-                                            )}
-                                        </a>
-                                    </li>
-                                );
-                            })}
-                        </ul>
+        <div class="max-w-3xl mx-auto px-4 sm:px-6 lg:px-8">
+            {years.map(yg => (
+                <div class="mb-12 print:mb-6 print:break-inside-avoid">
+                    <!-- 年份標 -->
+                    <div class="flex items-center gap-4 mb-6 print:mb-3">
+                        <span class="text-3xl sm:text-4xl font-bold tracking-tight text-[#c9372c]">
+                            {yg.year ?? "—"}
+                        </span>
+                        <span class="flex-1 h-px bg-neutral-200"></span>
+                        <span class="text-xs tracking-[0.25em] uppercase text-neutral-400">
+                            {yg.works.length} <Tr zh="件" en="works" />
+                        </span>
                     </div>
-                ))
-            )}
 
-            <!-- 列印頁尾 -->
-            <div class="hidden print:block mt-8 pt-4 border-t border-neutral-300 text-xs text-neutral-600 text-center">
-                © {new Date().getFullYear()} {meta.company_name_zh} {meta.company_name_en}.
-                <a href="/" class="ml-2">originsun-studio.com</a>
-            </div>
+                    <!-- 作品清單（一行一件：客戶 — 標題） -->
+                    <ul class="space-y-2.5 print:space-y-1">
+                        {yg.works.map(w => (
+                            <li class="grid grid-cols-[auto_1fr] gap-x-4 text-[15px] leading-relaxed">
+                                <span class="text-neutral-900 font-medium tracking-wide min-w-[8em]">
+                                    {w.client || "—"}
+                                </span>
+                                <a href={`/works/${w.slug}`}
+                                   class="text-neutral-600 tracking-wide hover:text-[#c9372c] transition-colors print:pointer-events-none">
+                                    {w.title}
+                                </a>
+                            </li>
+                        ))}
+                    </ul>
+                </div>
+            ))}
         </div>
     </section>
+
+    <!-- 列印頁尾 -->
+    <div class="hidden print:block mt-6 pt-4 border-t border-neutral-300 text-xs text-neutral-600 text-center mx-8">
+        © {new Date().getFullYear()} {meta.company_name_zh} {meta.company_name_en} · originsun-studio.com
+    </div>
 </BaseLayout>
 
 <style>
-    /* 列印樣式：去掉 header / footer、字級縮小、年份不要被切斷 */
     @media print {
-        /* 隱藏導覽列與頁尾（站內的不是本頁的） */
-        :global(header[id="site-header"]),
-        :global(footer) {
+        :global(header[id="site-header"]), :global(footer) {
             display: none !important;
         }
-
-        /* 全頁背景白、無陰影 */
         :global(body) {
             background: white !important;
             color: #111 !important;
-            font-size: 11pt;
+            font-size: 10.5pt;
         }
-
-        /* 連結顏色保持黑色 + 無底線 */
         a { color: #111 !important; text-decoration: none !important; }
-
-        /* 年份區塊盡量不在頁面切半 */
-        .year-block {
-            page-break-inside: avoid;
-            break-inside: avoid;
-        }
     }
 </style>

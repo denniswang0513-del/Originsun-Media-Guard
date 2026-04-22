@@ -1,0 +1,73 @@
+---
+/**
+ * ProcessNumbered.astro — /01 /02 /03 /04 工作流程
+ *
+ * 參考：astralab numbered section style（斜線 + 兩位數編號）
+ * 4 列橫排，每列編號、名字、敘述、時程。不是整段文字，是一個清單。
+ */
+import Tr from "../ui/Tr.astro";
+
+const steps = [
+    { no: "01", name_zh: "認識合作", name_en: "Kickoff",
+      body_zh: "我們先聊你的品牌、聽你想說什麼，而不是直接報價。第一次見面 100% 免費，沒有義務繼續。",
+      body_en: "We start by listening — not quoting. First meeting is free with zero obligation.",
+      time_zh: "30 分鐘", time_en: "30 min" },
+    { no: "02", name_zh: "企劃發想", name_en: "Concept",
+      body_zh: "交付企劃書、腳本、分鏡。所有關鍵決定在拍攝前講清楚，不在片場臨時改。",
+      body_en: "Delivering planning docs, script, storyboard. All key decisions locked pre-shoot.",
+      time_zh: "1-2 週", time_en: "1-2 weeks" },
+    { no: "03", name_zh: "拍攝執行", name_en: "Production",
+      body_zh: "3 機位以上的標配 + 導演加製片雙軌管理。我們自己解決現場所有問題，你只需要出現就好。",
+      body_en: "Three-plus cameras, director + producer dual-track. We solve everything on set.",
+      time_zh: "1-3 天", time_en: "1-3 days" },
+    { no: "04", name_zh: "後期交片", name_en: "Delivery",
+      body_zh: "剪輯、調色、配樂、混音全部內部完成。3-5 個工作天交初剪，2 輪修改內結案。",
+      body_en: "Edit, color, music, mix — all in-house. First cut in 3-5 days, final within two revisions.",
+      time_zh: "3-5 天", time_en: "3-5 days" },
+];
+---
+
+<section class="bg-white py-24 sm:py-32">
+    <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+
+        <div class="flex items-end justify-between mb-14 sm:mb-20 flex-wrap gap-4">
+            <div>
+                <p class="text-xs tracking-[0.4em] text-[#c9372c] uppercase mb-3">Process</p>
+                <h2 class="text-3xl sm:text-5xl font-bold tracking-tight text-neutral-900 leading-tight">
+                    <Tr zh="從認識到交片" en="From First Call to Final Cut" />
+                </h2>
+            </div>
+            <p class="text-sm text-neutral-500 tracking-wide max-w-sm">
+                <Tr zh="4 個清楚的階段，讓你隨時知道進度在哪。"
+                    en="Four clear stages — you always know where we are." />
+            </p>
+        </div>
+
+        <ol class="border-t border-neutral-200">
+            {steps.map(step => (
+                <li class="group grid grid-cols-12 gap-3 sm:gap-8 py-8 sm:py-10 border-b border-neutral-200 hover:bg-neutral-50 transition-colors">
+
+                    <!-- 編號 /01 -->
+                    <div class="col-span-3 sm:col-span-2">
+                        <div class="text-xs tracking-[0.3em] text-neutral-400">/{step.no}</div>
+                    </div>
+
+                    <!-- 階段名 + 時程 -->
+                    <div class="col-span-9 sm:col-span-3">
+                        <div class="text-xl sm:text-2xl font-bold text-neutral-900 tracking-tight mb-1 group-hover:text-[#c9372c] transition-colors">
+                            <Tr zh={step.name_zh} en={step.name_en} />
+                        </div>
+                        <div class="text-xs tracking-[0.2em] uppercase text-neutral-400">
+                            <Tr zh={step.time_zh} en={step.time_en} />
+                        </div>
+                    </div>
+
+                    <!-- 說明 -->
+                    <div class="col-span-12 sm:col-span-7 text-[15px] sm:text-base text-neutral-600 leading-[1.85] tracking-wide">
+                        <Tr zh={step.body_zh} en={step.body_en} />
+                    </div>
+                </li>
+            ))}
+        </ol>
+    </div>
+</section>

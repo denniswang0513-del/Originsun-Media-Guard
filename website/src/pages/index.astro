@@ -1,21 +1,43 @@
 ---
 /**
  * index.astro — 首頁（/）
- * 組合：Hero（YouTube 背景）+ Featured Works + Services
+ *
+ * Hero 後 9 段：
+ *   01 Hero slideshow       — 震撼入場
+ *   02 WhoWeAre             — 自介 + 數字 + Showreel + 創辦人署名（合一）
+ *   03 ServicesWithCounts   — 4 服務 × 各自專案數
+ *   04 FeaturedWorks        — 3×3 精選作品（正方形）
+ *   05 ProcessNumbered      — /01-04 流程
+ *   06 Testimonials         — 客戶證言 + 4.9 評分
+ *   07 HomeInsight          — 3 篇最新專欄
+ *   08 FAQ                  — 6 題常見問題
+ *   09 ContactCTA           — 深色卡 + 寫訊息
  */
 import BaseLayout from "../layouts/BaseLayout.astro";
 import HomeSlideshow from "../components/home/HomeSlideshow.astro";
+import WhoWeAre from "../components/home/WhoWeAre.astro";
+import ServicesWithCounts from "../components/home/ServicesWithCounts.astro";
 import FeaturedWorks from "../components/home/FeaturedWorks.astro";
-import ServicesGrid from "../components/home/ServicesGrid.astro";
-import { fetchMeta, fetchFeatured, fetchServices } from "../lib/crm-client";
+import ProcessNumbered from "../components/home/ProcessNumbered.astro";
+import Testimonials from "../components/home/Testimonials.astro";
+import HomeInsight from "../components/home/HomeInsight.astro";
+import FAQ from "../components/home/FAQ.astro";
+import ContactCTA from "../components/home/ContactCTA.astro";
+import { fetchMeta, fetchFeatured } from "../lib/crm-client";
 import { organizationSchema } from "../lib/seo";
 import { LIMITS, SITE_URL_FALLBACK } from "../lib/config";
+import { FAKE_FEATURED } from "../lib/fake-data";
 
-const [meta, featured, services] = await Promise.all([
+const [meta, featured] = await Promise.all([
     fetchMeta(),
     fetchFeatured(LIMITS.HOME_FEATURED),
-    fetchServices(),
 ]);
+
+// 若 API 回的作品不足 9 筆（例如前期 seed 資料還少），用 FAKE_FEATURED 補齊到 9，
+// 讓 3×3 電影牆不會出現空格。真實資料累積夠之後，補齊自然退場。
+const seenSlugs = new Set(featured.map(w => w.slug));
+const padding = FAKE_FEATURED.filter(w => !seenSlugs.has(w.slug));
+const featured9 = [...featured, ...padding].slice(0, 9);
 
 const siteUrl = Astro.site?.toString() || SITE_URL_FALLBACK;
 const schemaData = [organizationSchema(meta, siteUrl)];
@@ -26,6 +48,12 @@ const schemaData = [organizationSchema(meta, siteUrl)];
             meta={meta}
             schemaData={schemaData}>
     <HomeSlideshow works={featured} />
-    <FeaturedWorks works={featured} />
-    <ServicesGrid services={services} />
+    <WhoWeAre />
+    <ServicesWithCounts />
+    <FeaturedWorks works={featured9} />
+    <ProcessNumbered />
+    <Testimonials />
+    <HomeInsight />
+    <FAQ />
+    <ContactCTA meta={meta} />
 </BaseLayout>

@@ -1,0 +1,60 @@
+---
+/**
+ * HomeInsight.astro — 首頁 Insight 專欄預覽
+ *
+ * 3 篇最新文章卡，引導使用者進入 /news 頁。
+ * 用途：證明「我們不只會做，我們懂這個領域」（thought leadership）。
+ */
+import Tr from "../ui/Tr.astro";
+import { fetchPosts } from "../../lib/posts";
+
+const allPosts = await fetchPosts();
+const shown = allPosts.slice(0, 3);
+
+function fmtDate(iso: string): string {
+    return new Date(iso).toLocaleDateString("zh-TW", {
+        year: "numeric", month: "long", day: "numeric",
+    });
+}
+---
+
+<section class="bg-white py-24 sm:py-32 border-t border-neutral-200">
+    <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+
+        <div class="flex items-end justify-between mb-14 flex-wrap gap-4">
+            <div>
+                <p class="text-xs tracking-[0.4em] text-[#c9372c] uppercase mb-3">Insight</p>
+                <h2 class="text-3xl sm:text-5xl font-bold tracking-tight text-neutral-900 leading-tight">
+                    <Tr zh="影像思考" en="Behind the Craft" />
+                </h2>
+            </div>
+            <a href="/news"
+               class="inline-flex items-center gap-3 text-xs tracking-[0.3em] uppercase text-neutral-500 hover:text-[#c9372c] transition-colors">
+                <Tr zh="所有文章" en="All articles" />
+                <span>→</span>
+            </a>
+        </div>
+
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-8 sm:gap-10">
+            {shown.map(p => (
+                <a href={`/news/${p.slug}`} class="group block">
+                    <div class="relative overflow-hidden aspect-[16/10] bg-neutral-100 mb-5">
+                        <img src={p.cover_url} alt={p.title} loading="lazy"
+                             class="absolute inset-0 w-full h-full object-cover transition-transform duration-700 group-hover:scale-[1.04]" />
+                    </div>
+                    <div class="flex items-center gap-3 text-[10px] tracking-[0.3em] uppercase text-[#c9372c] mb-3">
+                        <span>{p.category_label_en}</span>
+                        <span class="text-neutral-300">·</span>
+                        <span class="text-neutral-500">{fmtDate(p.published_at)}</span>
+                    </div>
+                    <h3 class="text-lg sm:text-xl font-bold text-neutral-900 leading-snug tracking-tight mb-3 group-hover:text-[#c9372c] transition-colors">
+                        {p.title}
+                    </h3>
+                    <p class="text-sm text-neutral-500 leading-relaxed tracking-wide line-clamp-2">
+                        {p.excerpt}
+                    </p>
+                </a>
+            ))}
+        </div>
+    </div>
+</section>

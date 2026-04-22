@@ -17,7 +17,8 @@
       "crm_projects",
       "crm_quotes",
       "crm_staff",
-      "crm_invoices"
+      "crm_invoices",
+      "website_admin"
     ],
     "description": "系統管理員"
   },

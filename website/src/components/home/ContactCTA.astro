@@ -1,0 +1,48 @@
+---
+/**
+ * ContactCTA.astro — 首頁底部 CTA（astralab-風，不過度嚴肅）
+ *
+ * 版面：白底 → 大字 → 按鈕 → 次要聯絡方式
+ * 比之前的黑底 + 巨字版溫和一些，符合 astralab 的「親切專業」調性。
+ */
+import Tr from "../ui/Tr.astro";
+import type { IWebsiteMeta } from "../../types/meta";
+
+interface Props {
+    meta: IWebsiteMeta;
+}
+const { meta } = Astro.props;
+---
+
+<section class="bg-neutral-900 text-white py-24 sm:py-32">
+    <div class="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8">
+
+        <!-- 主 CTA 卡 -->
+        <div class="bg-neutral-800 p-10 sm:p-16 lg:p-20 text-center border border-white/10">
+
+            <p class="text-xs tracking-[0.5em] text-[#c9372c] uppercase mb-6">Contact</p>
+
+            <h2 class="text-3xl sm:text-5xl lg:text-6xl font-bold tracking-tight leading-[1.1] mb-8">
+                <Tr zh="準備好說你的故事了嗎？"
+                    en="Ready to tell your story?" />
+            </h2>
+
+            <p class="max-w-xl mx-auto text-sm sm:text-base text-white/60 leading-[1.85] tracking-wide mb-10">
+                <Tr zh="第一次諮詢 30 分鐘，免費、無負擔。我們會在 1-2 個工作天內回覆你。"
+                    en="Free 30-min consultation, no strings. We reply within 1-2 business days." />
+            </p>
+
+            <a href="/contact"
+               class="inline-flex items-center gap-4 bg-white text-neutral-900 px-10 sm:px-12 py-4 sm:py-5 text-sm tracking-[0.3em] uppercase hover:bg-[#c9372c] hover:text-white transition-colors">
+                <Tr zh="開始對話" en="Start a conversation" />
+                <span class="text-lg leading-none">→</span>
+            </a>
+
+            <!-- 次要聯絡方式 -->
+            <div class="flex flex-wrap justify-center items-center gap-x-8 gap-y-3 mt-12 text-xs tracking-[0.2em] text-white/50">
+                {meta.email && <a href={`mailto:${meta.email}`} class="hover:text-white transition-colors">✉ {meta.email}</a>}
+                {meta.phone && <a href={`tel:${meta.phone}`} class="hover:text-white transition-colors">☎ {meta.phone}</a>}
+            </div>
+        </div>
+    </div>
+</section>

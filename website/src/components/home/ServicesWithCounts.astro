@@ -1,0 +1,70 @@
+---
+/**
+ * ServicesWithCounts.astro — 服務 × 專案數（取代 home ServicesGrid）
+ *
+ * 參考：astralab "Branding · 26 projects" 風格
+ * 每一項服務直接附「做過多少個」，把社會證明做在服務卡上，不用另外一段。
+ */
+import Tr from "../ui/Tr.astro";
+import { FAKE_SERVICES_WITH_COUNTS } from "../../lib/fake-data";
+---
+
+<section class="bg-neutral-50 py-24 sm:py-32 border-y border-neutral-200">
+    <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+
+        <div class="flex items-end justify-between mb-14 sm:mb-20 flex-wrap gap-4">
+            <div>
+                <p class="text-xs tracking-[0.4em] text-[#c9372c] uppercase mb-3">Services</p>
+                <h2 class="text-3xl sm:text-5xl font-bold tracking-tight text-neutral-900 leading-tight">
+                    <Tr zh="我們做四件事" en="We Do Four Things" />
+                </h2>
+                <p class="mt-4 text-sm sm:text-base text-neutral-500 tracking-wide max-w-xl">
+                    <Tr zh="並把每一件做到專精。過去 10 年累積了 300 支作品。"
+                        en="And we do each one well. 300+ projects across a decade." />
+                </p>
+            </div>
+            <a href="/services"
+               class="inline-flex items-center gap-3 text-xs tracking-[0.3em] uppercase text-neutral-500 hover:text-[#c9372c] transition-colors">
+                <Tr zh="服務細節" en="All services" />
+                <span>→</span>
+            </a>
+        </div>
+
+        <!-- 四個服務卡（每卡一個編號 + 名字 + 專案數 + 簡介） -->
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-px bg-neutral-200">
+            {FAKE_SERVICES_WITH_COUNTS.map((s, i) => (
+                <a href={`/works?category=${s.slug}`}
+                   class="group bg-white p-8 sm:p-10 lg:p-12 hover:bg-white transition-all flex flex-col min-h-[260px]">
+
+                    <!-- 編號 + 服務標題同一列 -->
+                    <div class="flex items-start justify-between mb-5">
+                        <div class="text-xs tracking-[0.3em] text-neutral-400 uppercase">
+                            /{String(i + 1).padStart(2, "0")}
+                        </div>
+                        <div class="text-right">
+                            <div class="text-3xl sm:text-4xl font-bold tracking-tight text-neutral-900 leading-none group-hover:text-[#c9372c] transition-colors">
+                                {s.count}
+                            </div>
+                            <div class="text-[10px] tracking-[0.3em] uppercase text-neutral-400 mt-2">
+                                <Tr zh="件作品" en="Projects" />
+                            </div>
+                        </div>
+                    </div>
+
+                    <h3 class="text-2xl sm:text-3xl font-bold text-neutral-900 tracking-tight mb-3 group-hover:text-[#c9372c] transition-colors">
+                        <Tr zh={s.name_zh} en={s.name_en} />
+                    </h3>
+
+                    <p class="text-sm sm:text-base text-neutral-500 leading-[1.85] tracking-wide flex-1 max-w-sm">
+                        <Tr zh={s.short_zh} en={s.short_en} />
+                    </p>
+
+                    <div class="mt-8 inline-flex items-center gap-3 text-xs tracking-[0.3em] uppercase text-neutral-400 group-hover:text-[#c9372c] transition-colors">
+                        <Tr zh="看作品" en="View works" />
+                        <span>→</span>
+                    </div>
+                </a>
+            ))}
+        </div>
+    </div>
+</section>

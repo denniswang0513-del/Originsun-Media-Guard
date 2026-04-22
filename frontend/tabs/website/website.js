@@ -13,7 +13,7 @@ import { getApiBase, websiteFetch } from './website-utils.js';
 
 const SUBVIEWS = [
     'dashboard', 'home', 'works', 'categories',
-    'services', 'about', 'inquiries', 'blog', 'settings',
+    'services', 'about', 'inquiries', 'blog', 'seo', 'settings',
 ];
 
 let _activeSubview = 'dashboard';

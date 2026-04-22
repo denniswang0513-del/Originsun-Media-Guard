@@ -5,7 +5,7 @@ Astro 元件依「功能」分目錄。每檔 ≤ 200 行、單一職責。
 | 目錄 | 用途 |
 |---|---|
 | `layout/` | Header、Footer、Navigation、LanguageToggle、SEO |
-| `home/` | 首頁專用（HeroReel、FeaturedWorks、ServicesGrid） |
+| `home/` | 首頁 6 幕節奏（HomeSlideshow → Statement → FeaturedWorks → FullBleedFeature → HowWeWork → ContactCTA） |
 | `works/` | 作品集（WorkCard、CategoryFilter、VideoPlayer） |
 | `about/` | 關於我們（TeamGrid、CompanyInfo、Map） |
 | `contact/` | 聯絡頁（ContactForm + Turnstile） |

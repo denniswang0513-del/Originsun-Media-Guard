@@ -17,6 +17,7 @@ import type {
 import type { ICategory } from "../types/category";
 import type { IService } from "../types/service";
 import type { ITeamMember, IWebsiteMeta } from "../types/meta";
+import { FAKE_FEATURED, FAKE_SERVICES, FAKE_CATEGORIES, FAKE_TEAM } from "./fake-data";
 
 
 async function _get<T>(path: string): Promise<T> {
@@ -72,9 +73,13 @@ export async function fetchWorks(opts: {
     if (opts.page) q.set("page", String(opts.page));
     if (opts.limit) q.set("limit", String(opts.limit));
     const qs = q.toString();
+    // API 離線 fallback：用 fake-data 的作品集（可依 category 過濾）
+    const fakeItems = opts.category
+        ? FAKE_FEATURED.filter(w => w.categories.includes(opts.category!))
+        : FAKE_FEATURED;
     return _safeGet<IWorksListResponse>(
         `/api/website/works${qs ? `?${qs}` : ""}`,
-        { items: [], total: 0, page: opts.page || 1, limit: opts.limit || 12 },
+        { items: fakeItems, total: fakeItems.length, page: opts.page || 1, limit: opts.limit || 12 },
         "fetchWorks",
     );
 }
@@ -93,7 +98,7 @@ export async function fetchWorkBySlug(slug: string): Promise<IPublicProjectDetai
 export async function fetchFeatured(limit = 6): Promise<IPublicProject[]> {
     const data = await _safeGet<{ items: IPublicProject[] }>(
         `/api/website/featured?limit=${limit}`,
-        { items: [] },
+        { items: FAKE_FEATURED.slice(0, limit) },
         "fetchFeatured",
     );
     return data.items;
@@ -103,7 +108,7 @@ export async function fetchFeatured(limit = 6): Promise<IPublicProject[]> {
 export async function fetchCategories(): Promise<ICategory[]> {
     const data = await _safeGet<{ items: ICategory[] }>(
         "/api/website/categories",
-        { items: [] },
+        { items: FAKE_CATEGORIES },
         "fetchCategories",
     );
     return data.items;
@@ -113,7 +118,7 @@ export async function fetchCategories(): Promise<ICategory[]> {
 export async function fetchServices(): Promise<IService[]> {
     const data = await _safeGet<{ items: IService[] }>(
         "/api/website/services",
-        { items: [] },
+        { items: FAKE_SERVICES },
         "fetchServices",
     );
     return data.items;
@@ -123,7 +128,7 @@ export async function fetchServices(): Promise<IService[]> {
 export async function fetchTeam(): Promise<ITeamMember[]> {
     const data = await _safeGet<{ items: ITeamMember[] }>(
         "/api/website/team",
-        { items: [] },
+        { items: FAKE_TEAM },
         "fetchTeam",
     );
     return data.items;
@@ -132,37 +137,37 @@ export async function fetchTeam(): Promise<ITeamMember[]> {
 
 /**
  * fetchMeta() — 模組級 memoize（同 fetchAllWorksCached 模式），避免多頁重複打 API。
- * API 離線或回空資料時走 fallback 但 console.error；fallback 不 cache 以便之後重試。
+ * API 離線時走 fallback 但不 cache（以便後續重試成功後能切回真實資料）。
  */
-let _metaCachePromise: Promise<IWebsiteMeta> | null = null;
+let _metaCachePromise: Promise<{ meta: IWebsiteMeta; ok: boolean }> | null = null;
 
 export function clearMetaCache(): void { _metaCachePromise = null; }
-
-function _isFallbackMeta(m: IWebsiteMeta): boolean {
-    // fallback 特徵：沒 address + 沒 phone + 沒 email（真實 seed 三者至少有一）
-    return !m.address && !m.phone && !m.email;
-}
 
 export async function fetchMeta(): Promise<IWebsiteMeta> {
     if (_metaCachePromise) {
         const cached = await _metaCachePromise;
-        if (!_isFallbackMeta(cached)) return cached;
-        _metaCachePromise = null;  // fallback 不 cache，下次重試
+        if (cached.ok) return cached.meta;
+        _metaCachePromise = null;  // 上次抓失敗，下次重試
     }
     _metaCachePromise = _doFetchMeta();
-    return _metaCachePromise;
+    const { meta } = await _metaCachePromise;
+    return meta;
 }
 
-async function _doFetchMeta(): Promise<IWebsiteMeta> {
+async function _doFetchMeta(): Promise<{ meta: IWebsiteMeta; ok: boolean }> {
+    // 離線預覽用：補齊 contact 資訊讓首頁 CTA / 關於頁看起來完整
     const fallback: IWebsiteMeta = {
         company_name_zh: "源日影像",
         company_name_en: "OriginsunStudio",
         tagline: "Best Story, Best Production",
         subtitle: "影像製作 | 行銷規劃",
-        address: "",
-        phone: "",
-        email: "",
-        social: {},
+        address: "台北市中山區南京東路二段 1 號 3 樓",
+        phone: "+886 2 1234 5678",
+        email: "hello@originsun-studio.com",
+        social: {
+            instagram: "https://instagram.com/originsun_studio",
+            youtube: "https://youtube.com/@originsun_studio",
+        },
         seo_default_title: "源日影像 OriginsunStudio",
         seo_default_description: "Best Story, Best Production.",
         categories: [],
@@ -171,11 +176,11 @@ async function _doFetchMeta(): Promise<IWebsiteMeta> {
         const data = await _get<IWebsiteMeta>("/api/website/meta");
         if (!data.company_name_zh && !data.company_name_en) {
             console.error("[crm-client] fetchMeta 回空資料 — DB settings 未 seed？走 fallback");
-            return fallback;
+            return { meta: fallback, ok: false };
         }
-        return data;
+        return { meta: data, ok: true };
     } catch (e) {
         console.error(`[crm-client] fetchMeta 失敗（API 離線？）走 fallback:`, (e as Error).message);
-        return fallback;
+        return { meta: fallback, ok: false };
     }
 }

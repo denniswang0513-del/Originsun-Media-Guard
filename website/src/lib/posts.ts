@@ -4,7 +4,7 @@
  * fetchPosts() / fetchPostBySlug() 的介面設計成 async，未來改接 Notion API
  * 時只換實作不動呼叫端。
  */
-import type { IPost } from "../types/post";
+import type { IPost, PostBlock } from "../types/post";
 import { placeholderImage } from "./youtube";
 
 const _PLACEHOLDER_POSTS: IPost[] = [
@@ -18,19 +18,39 @@ const _PLACEHOLDER_POSTS: IPost[] = [
         excerpt: "受訪者面對鏡頭常有設防反應。透過精心設計的場景與時機，讓真實情感自然流露，創造出打動人心的訪談片段。",
         published_at: "2026-04-15",
         read_time_min: 6,
-        body: `訪談是紀錄片最核心的環節。受訪者面對鏡頭常會自動進入「受訪模式」——字斟句酌、語調平穩、表情收斂。但真實情感的火花，往往在意料之外的瞬間才會浮現。
-
-## 1. 從側面切入
-
-不要一開始就問大問題。先聊天氣、聊今天來的路上、聊他手上拿的東西，讓受訪者的身體姿態放鬆下來。
-
-## 2. 預備一個驚喜
-
-如果你知道受訪者的重要親友、舊物、某段歷史影片，準備好在訪談中途拿出來。那一刻的反應往往是整支片的黃金 3 秒。
-
-## 3. 停下來等他說完
-
-專業訪談者最容易犯的錯是急著問下一題。每個回答後空出 3 秒，讓受訪者有空間再補上他真正想說的話。`,
+        body: [
+            { type: "paragraph", lead: true,
+              text: "訪談是紀錄片最核心的環節。受訪者面對鏡頭常會自動進入「受訪模式」——字斟句酌、語調平穩、表情收斂。但真實情感的火花，往往在意料之外的瞬間才會浮現。" },
+            { type: "heading", level: 2, text: "從側面切入" },
+            { type: "paragraph",
+              text: "不要一開始就問大問題。先聊天氣、聊今天來的路上、聊他手上拿的東西，讓受訪者的身體姿態放鬆下來。鏡頭也不要急著特寫——先讓它停在中景，給彼此一個心理距離。" },
+            { type: "image",
+              src: placeholderImage("post_interview_side_angle", 1600, 900),
+              alt: "中景訪談鏡位",
+              caption: "中景訪談鏡位：受訪者能看見自己的手與身體，身體語言自然流露。",
+              width: "wide" },
+            { type: "heading", level: 2, text: "預備一個驚喜" },
+            { type: "paragraph",
+              text: "如果你知道受訪者的重要親友、舊物、某段歷史影片，準備好在訪談中途拿出來。那一刻的反應往往是整支片的黃金 3 秒。" },
+            { type: "quote",
+              text: "最動人的畫面從來不是排演過的表情，而是受訪者忘記鏡頭存在的那一瞬間。",
+              author: "源日影像 · 紀錄片團隊" },
+            { type: "heading", level: 2, text: "停下來等他說完" },
+            { type: "paragraph",
+              text: "專業訪談者最容易犯的錯是急著問下一題。每個回答後空出 3 秒，讓受訪者有空間再補上他真正想說的話——那往往才是真正重要的那句。" },
+            { type: "video",
+              youtube_id: "dQw4w9WgXcQ",
+              caption: "範例：一次完整訪談的沉默處理（片段節選）",
+              width: "content" },
+            { type: "heading", level: 3, text: "延伸練習" },
+            { type: "list",
+              items: [
+                "訪前訪問前花 10 分鐘只聊生活，不開錄。",
+                "準備一個受訪者沒預期的物件，中途拿出。",
+                "每個答案後默數 3 秒再問下一題。",
+                "結束時問：「有沒有什麼我沒問到但你想說的？」",
+              ] },
+        ] as PostBlock[],
     },
     {
         slug: "questionnaire-touching-interview",

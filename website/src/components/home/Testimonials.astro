@@ -1,0 +1,72 @@
+---
+/**
+ * Testimonials.astro — 客戶證言段（信任堆疊最重要的一環）
+ *
+ * 版面：上方顯著的整體評分（4.9/5 + 25 則評價），下方 3 欄證言卡。
+ * 不用 JS 輪播（避免 JS cost）；4 則顯示前 3 則，桌機 3-col、手機直排。
+ */
+import Tr from "../ui/Tr.astro";
+import { FAKE_TESTIMONIALS } from "../../lib/fake-data";
+
+const shown = FAKE_TESTIMONIALS.slice(0, 3);
+---
+
+<section class="bg-neutral-100 py-24 sm:py-32">
+    <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+
+        <!-- 章節 header：左邊標題、右邊整體評分 -->
+        <div class="flex items-end justify-between mb-14 flex-wrap gap-6">
+            <div>
+                <p class="text-xs tracking-[0.4em] text-[#c9372c] uppercase mb-3">Testimonials</p>
+                <h2 class="text-3xl sm:text-5xl font-bold tracking-tight text-neutral-900 leading-tight max-w-xl">
+                    <Tr zh="客戶的真實回饋" en="What Clients Say" />
+                </h2>
+            </div>
+
+            <!-- 整體評分 badge -->
+            <div class="flex items-center gap-4 bg-white px-6 py-4 border border-neutral-200">
+                <div class="text-4xl font-bold tracking-tight text-neutral-900">4.9</div>
+                <div>
+                    <div class="text-[#c9372c] text-sm tracking-widest">★★★★★</div>
+                    <div class="text-xs text-neutral-500 tracking-wide mt-1">
+                        <Tr zh="基於 25 則真實評價" en="From 25 client reviews" />
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- 3 欄證言 -->
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
+            {shown.map(t => (
+                <article class="bg-white p-8 sm:p-10 flex flex-col">
+                    <!-- 星星 -->
+                    <div class="text-[#c9372c] text-sm tracking-widest mb-5">
+                        {"★".repeat(t.rating)}
+                    </div>
+
+                    <!-- 引言 -->
+                    <blockquote class="text-[15px] sm:text-base text-neutral-700 leading-[1.85] tracking-wide flex-1 mb-8">
+                        <span data-lang-zh>「{t.quote_zh}」</span>
+                        <span data-lang-en>"{t.quote_en}"</span>
+                    </blockquote>
+
+                    <!-- 作者資訊 -->
+                    <div class="flex items-center gap-3 border-t border-neutral-200 pt-5">
+                        <div class="w-11 h-11 rounded-full overflow-hidden bg-neutral-100 flex-shrink-0">
+                            <img src={t.avatar} alt={t.author_zh} loading="lazy"
+                                 class="w-full h-full object-cover" />
+                        </div>
+                        <div class="min-w-0">
+                            <div class="text-sm font-bold text-neutral-900 tracking-wide truncate">
+                                <Tr zh={t.author_zh} en={t.author_en} />
+                            </div>
+                            <div class="text-xs text-neutral-500 tracking-wide truncate">
+                                <Tr zh={t.role_zh} en={t.role_en} /> · {t.company}
+                            </div>
+                        </div>
+                    </div>
+                </article>
+            ))}
+        </div>
+    </div>
+</section>
