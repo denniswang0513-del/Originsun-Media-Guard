@@ -68,10 +68,12 @@ async function _loadFinancialSummary(projectId) {
             ${f.transfer_fee ? `<div style="font-size:11px;color:#6b7280;margin-bottom:4px;">帳款匯費 $${fmtNum(f.transfer_fee)}</div>` : ''}
             ${alert}
             <div id="cost-groups-switcher"></div>
+            <div id="cost-group-dashboard"></div>
             ${_renderCostLines(costData.grouped || [], expData.expenses || [], f)}
         `;
         window._costDirtyMap = {};
         callbacks.renderGroupSwitcher?.();
+        callbacks.renderGroupDashboard?.();
         container.querySelectorAll('.cost-staff-sel').forEach(sel => searchableSelect(sel, { placeholder: '搜尋人員...' }));
     } catch (_) {
         container.innerHTML = '<div class="crm-empty">載入失敗</div>';
@@ -347,7 +349,7 @@ function _renderCostLines(grouped, expenses, financialSummary) {
         const totalDiffColor = totalDiff < 0 ? '#86efac' : totalDiff > 0 ? '#fca5a5' : '#9ca3af';
         html += `
           <div class="cost-row cost-row-total">
-            <span class="cost-col-item">合計</span>
+            <span class="cost-col-item">本子表合計</span>
             <span class="cost-col-price"></span>
             <span class="cost-col-qty"></span>
             <span class="cost-col-unit"></span>

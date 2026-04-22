@@ -88,6 +88,75 @@ function _statusBadge(total, used, pct) {
     return '<span class="cg-badge cg-badge-ok">✓ 預算內</span>';
 }
 
+// ── Render: 當前子表儀表板（名稱/日期 + 4 卡 + 進度條）─────────
+
+export function renderGroupDashboard() {
+    const host = document.getElementById('cost-group-dashboard');
+    if (!host) return;
+    const g = state.costGroups.find(x => x.id === state.selectedGroupId);
+    if (!g) { host.innerHTML = ''; return; }
+
+    const s = g.summary || {};
+    const budget = g.budget_amount || 0;
+    const miscBudget = g.misc_budget_amount || 0;
+    const totalBudget = budget + miscBudget;
+    const totalActual = s.total_actual || 0;
+    const remain = totalBudget - totalActual;
+    const pct = totalBudget > 0 ? Math.round(totalActual / totalBudget * 100) : null;
+    const remainColor = remain >= 0 ? '#86efac' : '#fca5a5';
+
+    const headerBits = [];
+    if (g.shoot_date) headerBits.push(_esc(g.shoot_date));
+    if (g.notes) headerBits.push(_esc(g.notes));
+    const header = `
+        <div class="cg-dashboard-header">
+            <strong>${_esc(g.name)}</strong>
+            ${headerBits.length ? ' · ' + headerBits.join(' · ') : ''}
+        </div>
+    `;
+
+    if (totalBudget === 0) {
+        host.innerHTML = `
+            ${header}
+            <div class="cg-dashboard-empty">
+                💡 此子表尚未設定預算
+                <button class="crm-btn crm-btn-primary crm-btn-sm" onclick="window._cgEdit('${g.id}')">設定預算</button>
+            </div>
+        `;
+        return;
+    }
+
+    host.innerHTML = `
+        ${header}
+        <div class="cg-dashboard">
+            <div class="cg-dash-card">
+                <div class="cg-dash-label">執行預算</div>
+                <div class="cg-dash-value" style="color:#60a5fa;">$${fmtNum(totalBudget)}</div>
+                <div class="cg-dash-sub">成本 $${fmtNum(budget)} + 雜支 $${fmtNum(miscBudget)}</div>
+            </div>
+            <div class="cg-dash-card">
+                <div class="cg-dash-label">剩餘預算</div>
+                <div class="cg-dash-value" style="color:${remainColor};">$${fmtNum(remain)}</div>
+                <div class="cg-dash-sub">${remain >= 0 ? '預算內' : '已超支'}</div>
+            </div>
+            <div class="cg-dash-card">
+                <div class="cg-dash-label">本表結算</div>
+                <div class="cg-dash-value" style="color:#fb923c;">$${fmtNum(totalActual)}</div>
+                <div class="cg-dash-sub">成本 $${fmtNum(s.cost_actual || 0)} + 雜支 $${fmtNum(s.expense_actual || 0)}</div>
+            </div>
+            <div class="cg-dash-card">
+                <div class="cg-dash-label">本表預估</div>
+                <div class="cg-dash-value" style="color:#d1d5db;">$${fmtNum(s.total_estimated || 0)}</div>
+                <div class="cg-dash-sub">${s.cost_lines_count || 0} 項 + ${s.expenses_count || 0} 筆雜支</div>
+            </div>
+        </div>
+        <div class="cg-dashboard-bar">
+            <div class="cg-dashboard-bar-fill" style="width:${Math.min(pct, 100)}%;background:${_pctColor(pct)};"></div>
+        </div>
+        <div class="cg-dashboard-bar-label">本子表預算使用 ${pct}% ($${fmtNum(totalActual)} / $${fmtNum(totalBudget)})</div>
+    `;
+}
+
 // ── Select ─────────────────────────────────────────────────────
 
 export async function selectGroup(gid) {

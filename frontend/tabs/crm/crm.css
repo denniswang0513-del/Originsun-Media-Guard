@@ -1389,3 +1389,44 @@
 }
 .cg-alloc-ok { background: #1e3a5f; color: #93c5fd; }
 .cg-alloc-danger { background: #7f1d1d; color: #fca5a5; }
+
+/* Sub-table dashboard (區塊 6) */
+.cg-dashboard-header {
+    font-size: 13px; color: #d1d5db;
+    padding: 10px 12px;
+    background: #141414; border: 1px solid #2e2e2e;
+    border-radius: 6px 6px 0 0;
+    border-bottom: none;
+}
+.cg-dashboard-header strong { color: #e5e7eb; font-weight: 700; }
+.cg-dashboard {
+    display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px;
+    padding: 10px;
+    background: #141414; border-left: 1px solid #2e2e2e; border-right: 1px solid #2e2e2e;
+}
+.cg-dash-card {
+    background: #1a1a1a; border-radius: 6px;
+    padding: 10px 12px; text-align: center;
+}
+.cg-dash-label { font-size: 11px; color: #6b7280; margin-bottom: 4px; }
+.cg-dash-value { font-size: 18px; font-weight: 700; margin-bottom: 2px; }
+.cg-dash-sub { font-size: 10px; color: #6b7280; }
+.cg-dashboard-bar {
+    height: 6px; background: #2e2e2e;
+    margin: 0 10px;
+    overflow: hidden;
+}
+.cg-dashboard-bar-fill { height: 100%; transition: width 0.2s; }
+.cg-dashboard-bar-label {
+    font-size: 11px; color: #9ca3af;
+    padding: 6px 12px 10px;
+    background: #141414; border: 1px solid #2e2e2e;
+    border-top: none; border-radius: 0 0 6px 6px;
+}
+.cg-dashboard-empty {
+    padding: 16px 12px;
+    background: #141414; border: 1px solid #2e2e2e;
+    border-top: none; border-radius: 0 0 6px 6px;
+    font-size: 13px; color: #9ca3af;
+    display: flex; align-items: center; gap: 12px;
+}
