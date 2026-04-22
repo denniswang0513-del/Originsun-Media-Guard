@@ -10,6 +10,7 @@
  */
 import { crmFetch as _fetch, esc as _esc, fmtNum } from './crm-utils.js';
 import { state, callbacks } from './crm-projects-state.js';
+import { barColor, remainColor } from './crm-projects-calc.js';
 
 // ── Data ──────────────────────────────────────────────────────
 
@@ -55,7 +56,7 @@ function _renderChip(g, active, canDelete) {
     const s = g.summary || {};
     const total = (g.budget_amount || 0) + (g.misc_budget_amount || 0);
     const used = s.total_actual || 0;
-    const pct = total > 0 ? Math.min(Math.round(used / total * 100), 999) : null;
+    const pct = _usagePct(used, total);
     const date = g.shoot_date ? `<div class="cg-chip-date">${_esc(g.shoot_date)}</div>` : '<div class="cg-chip-date">&nbsp;</div>';
     const actions = canDelete || active
         ? `<button class="cg-chip-menu" onclick="event.stopPropagation();window._cgMenu('${g.id}',event)" title="選項">⋯</button>`
@@ -67,18 +68,17 @@ function _renderChip(g, active, canDelete) {
             ${date}
             <div class="cg-chip-budget">預算 ${total > 0 ? '$' + fmtNum(total) : '<span class="cg-muted">未設</span>'}</div>
             <div class="cg-chip-actual">結算 ${used > 0 ? '$' + fmtNum(used) : '<span class="cg-muted">—</span>'}</div>
-            <div class="cg-chip-bar"><div class="cg-chip-bar-fill" style="width:${pct == null ? 0 : Math.min(pct, 100)}%;background:${_pctColor(pct)};"></div></div>
+            <div class="cg-chip-bar"><div class="cg-chip-bar-fill" style="width:${Math.min(pct ?? 0, 100)}%;background:${_pctColor(pct)};"></div></div>
             <div class="cg-chip-status">${_statusBadge(total, used, pct)}</div>
         </div>
     `;
 }
 
-function _pctColor(pct) {
-    if (pct == null) return '#4b5563';
-    if (pct > 100) return '#ef4444';
-    if (pct > 80) return '#f59e0b';
-    return '#3b82f6';
+function _usagePct(actual, budget) {
+    return budget > 0 ? Math.round(actual / budget * 100) : null;
 }
+
+const _pctColor = (pct) => pct == null ? '#4b5563' : barColor(pct);
 
 function _statusBadge(total, used, pct) {
     if (total === 0) return '<span class="cg-badge cg-badge-hint">💡 未設預算</span>';
@@ -88,7 +88,22 @@ function _statusBadge(total, used, pct) {
     return '<span class="cg-badge cg-badge-ok">✓ 預算內</span>';
 }
 
-// ── Render: 當前子表儀表板（名稱/日期 + 4 卡 + 進度條）─────────
+// ── Render: Dashboard ─────────────────────────────────────────
+
+function _dashCard(label, value, sub, color) {
+    return `
+        <div class="cg-dash-card">
+            <div class="cg-dash-label">${label}</div>
+            <div class="cg-dash-value"${color ? ` style="color:${color};"` : ''}>${value}</div>
+            <div class="cg-dash-sub">${sub}</div>
+        </div>
+    `;
+}
+
+function _groupHeader(g) {
+    const meta = [g.shoot_date, g.notes].filter(Boolean).map(_esc).join(' · ');
+    return `<div class="cg-dashboard-header"><strong>${_esc(g.name)}</strong>${meta ? ' · ' + meta : ''}</div>`;
+}
 
 export function renderGroupDashboard() {
     const host = document.getElementById('cost-group-dashboard');
@@ -102,22 +117,11 @@ export function renderGroupDashboard() {
     const totalBudget = budget + miscBudget;
     const totalActual = s.total_actual || 0;
     const remain = totalBudget - totalActual;
-    const pct = totalBudget > 0 ? Math.round(totalActual / totalBudget * 100) : null;
-    const remainColor = remain >= 0 ? '#86efac' : '#fca5a5';
-
-    const headerBits = [];
-    if (g.shoot_date) headerBits.push(_esc(g.shoot_date));
-    if (g.notes) headerBits.push(_esc(g.notes));
-    const header = `
-        <div class="cg-dashboard-header">
-            <strong>${_esc(g.name)}</strong>
-            ${headerBits.length ? ' · ' + headerBits.join(' · ') : ''}
-        </div>
-    `;
+    const pct = _usagePct(totalActual, totalBudget);
 
     if (totalBudget === 0) {
         host.innerHTML = `
-            ${header}
+            ${_groupHeader(g)}
             <div class="cg-dashboard-empty">
                 💡 此子表尚未設定預算
                 <button class="crm-btn crm-btn-primary crm-btn-sm" onclick="window._cgEdit('${g.id}')">設定預算</button>
@@ -127,33 +131,21 @@ export function renderGroupDashboard() {
     }
 
     host.innerHTML = `
-        ${header}
+        ${_groupHeader(g)}
         <div class="cg-dashboard">
-            <div class="cg-dash-card">
-                <div class="cg-dash-label">執行預算</div>
-                <div class="cg-dash-value" style="color:#60a5fa;">$${fmtNum(totalBudget)}</div>
-                <div class="cg-dash-sub">成本 $${fmtNum(budget)} + 雜支 $${fmtNum(miscBudget)}</div>
-            </div>
-            <div class="cg-dash-card">
-                <div class="cg-dash-label">剩餘預算</div>
-                <div class="cg-dash-value" style="color:${remainColor};">$${fmtNum(remain)}</div>
-                <div class="cg-dash-sub">${remain >= 0 ? '預算內' : '已超支'}</div>
-            </div>
-            <div class="cg-dash-card">
-                <div class="cg-dash-label">本表結算</div>
-                <div class="cg-dash-value" style="color:#fb923c;">$${fmtNum(totalActual)}</div>
-                <div class="cg-dash-sub">成本 $${fmtNum(s.cost_actual || 0)} + 雜支 $${fmtNum(s.expense_actual || 0)}</div>
-            </div>
-            <div class="cg-dash-card">
-                <div class="cg-dash-label">本表預估</div>
-                <div class="cg-dash-value" style="color:#d1d5db;">$${fmtNum(s.total_estimated || 0)}</div>
-                <div class="cg-dash-sub">${s.cost_lines_count || 0} 項 + ${s.expenses_count || 0} 筆雜支</div>
-            </div>
+            ${_dashCard('執行預算', '$' + fmtNum(totalBudget),
+                `成本 $${fmtNum(budget)} + 雜支 $${fmtNum(miscBudget)}`, '#60a5fa')}
+            ${_dashCard('剩餘預算', '$' + fmtNum(remain),
+                remain >= 0 ? '預算內' : '已超支', remainColor(remain))}
+            ${_dashCard('本表結算', '$' + fmtNum(totalActual),
+                `成本 $${fmtNum(s.cost_actual || 0)} + 雜支 $${fmtNum(s.expense_actual || 0)}`, '#fb923c')}
+            ${_dashCard('本表預估', '$' + fmtNum(s.total_estimated || 0),
+                `${s.cost_lines_count || 0} 項 + ${s.expenses_count || 0} 筆雜支`, '#d1d5db')}
         </div>
         <div class="cg-dashboard-bar">
-            <div class="cg-dashboard-bar-fill" style="width:${Math.min(pct, 100)}%;background:${_pctColor(pct)};"></div>
+            <div class="cg-dashboard-bar-fill" style="width:${Math.min(pct ?? 0, 100)}%;background:${_pctColor(pct)};"></div>
         </div>
-        <div class="cg-dashboard-bar-label">本子表預算使用 ${pct}% ($${fmtNum(totalActual)} / $${fmtNum(totalBudget)})</div>
+        <div class="cg-dashboard-bar-label">本子表預算使用 ${pct ?? 0}% ($${fmtNum(totalActual)} / $${fmtNum(totalBudget)})</div>
     `;
 }
 
