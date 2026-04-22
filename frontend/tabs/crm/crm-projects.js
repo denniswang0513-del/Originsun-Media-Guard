@@ -25,7 +25,7 @@ import { _loadCostStaff, _loadAdvances, _loadProjectStaff, initFinanceHandlers }
 import { loadProjectQuotes, initQuoteHandlers } from './crm-projects-quotes.js';
 import { loadDeliveryTab, initDeliveryHandlers } from './crm-projects-delivery.js';
 import { loadProjectTypes } from './crm-projects-core.js';
-import { loadCostGroups, initCostGroupsHandlers } from './crm-projects-cost-groups.js';
+import { loadCostGroups, renderGroupSwitcher, initCostGroupsHandlers } from './crm-projects-cost-groups.js';
 
 // ── 回呼串接（解耦跨模組依賴） ──────────────────────────────
 
@@ -40,6 +40,7 @@ callbacks.loadCostStaff = _loadCostStaff;
 callbacks.loadAdvances = _loadAdvances;
 callbacks.closeDetail = closeDetail;
 callbacks.loadCostGroups = loadCostGroups;
+callbacks.renderGroupSwitcher = renderGroupSwitcher;
 
 // ── Init ─────────────────────────────────────────────────────
 

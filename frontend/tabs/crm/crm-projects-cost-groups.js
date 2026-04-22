@@ -20,18 +20,19 @@ export async function loadCostGroups(projectId) {
     } catch (_) {
         state.costGroups = [];
     }
-    // 維持既有選擇；若不存在則切到第一張
-    const valid = state.costGroups.some(g => g.id === state.selectedGroupId);
-    if (!valid) {
+    // selectedGroupId 維持既有選擇；不存在則切到第一張。渲染交給 caller
+    // （避免在 host DOM 還沒建好時 render 一次、之後又 render 第二次）
+    const stillValid = state.selectedGroupId
+        && state.costGroups.some(g => g.id === state.selectedGroupId);
+    if (!stillValid) {
         state.selectedGroupId = state.costGroups[0]?.id || null;
     }
-    renderGroupSwitcher(projectId);
     return state.costGroups;
 }
 
 // ── Render: 切換卡 ─────────────────────────────────────────────
 
-export function renderGroupSwitcher(projectId) {
+export function renderGroupSwitcher() {
     const host = document.getElementById('cost-groups-switcher');
     if (!host) return;
     const groups = state.costGroups;
@@ -54,11 +55,8 @@ function _renderChip(g, active, canDelete) {
     const s = g.summary || {};
     const total = (g.budget_amount || 0) + (g.misc_budget_amount || 0);
     const used = s.total_actual || 0;
-    const badge = _statusBadge(g, s, total, used);
-    const date = g.shoot_date ? `<div class="cg-chip-date">${_esc(g.shoot_date)}</div>` : '<div class="cg-chip-date">&nbsp;</div>';
     const pct = total > 0 ? Math.min(Math.round(used / total * 100), 999) : null;
-    const barColor = pct == null ? '#4b5563' : pct > 100 ? '#ef4444' : pct > 80 ? '#f59e0b' : '#3b82f6';
-    const barPct = pct == null ? 0 : Math.min(pct, 100);
+    const date = g.shoot_date ? `<div class="cg-chip-date">${_esc(g.shoot_date)}</div>` : '<div class="cg-chip-date">&nbsp;</div>';
     const actions = canDelete || active
         ? `<button class="cg-chip-menu" onclick="event.stopPropagation();window._cgMenu('${g.id}',event)" title="選項">⋯</button>`
         : '';
@@ -69,16 +67,22 @@ function _renderChip(g, active, canDelete) {
             ${date}
             <div class="cg-chip-budget">預算 ${total > 0 ? '$' + fmtNum(total) : '<span class="cg-muted">未設</span>'}</div>
             <div class="cg-chip-actual">結算 ${used > 0 ? '$' + fmtNum(used) : '<span class="cg-muted">—</span>'}</div>
-            <div class="cg-chip-bar"><div class="cg-chip-bar-fill" style="width:${barPct}%;background:${barColor};"></div></div>
-            <div class="cg-chip-status">${badge}</div>
+            <div class="cg-chip-bar"><div class="cg-chip-bar-fill" style="width:${pct == null ? 0 : Math.min(pct, 100)}%;background:${_pctColor(pct)};"></div></div>
+            <div class="cg-chip-status">${_statusBadge(total, used, pct)}</div>
         </div>
     `;
 }
 
-function _statusBadge(g, s, total, used) {
+function _pctColor(pct) {
+    if (pct == null) return '#4b5563';
+    if (pct > 100) return '#ef4444';
+    if (pct > 80) return '#f59e0b';
+    return '#3b82f6';
+}
+
+function _statusBadge(total, used, pct) {
     if (total === 0) return '<span class="cg-badge cg-badge-hint">💡 未設預算</span>';
     if (used === 0) return '<span class="cg-badge cg-badge-idle">未開始</span>';
-    const pct = Math.round(used / total * 100);
     if (pct > 100) return `<span class="cg-badge cg-badge-danger">↑ 超支 $${fmtNum(used - total)}</span>`;
     if (pct > 80) return '<span class="cg-badge cg-badge-warn">⚠ 接近上限</span>';
     return '<span class="cg-badge cg-badge-ok">✓ 預算內</span>';
@@ -86,30 +90,28 @@ function _statusBadge(g, s, total, used) {
 
 // ── Select ─────────────────────────────────────────────────────
 
-export async function selectGroup(projectId, gid) {
+export async function selectGroup(gid) {
     if (gid === state.selectedGroupId) return;
-    // dirty map 檢查
     const dirty = Object.keys(window._costDirtyMap || {}).length > 0;
     if (dirty && typeof window._costCheckUnsaved === 'function') {
         window._costCheckUnsaved(function() {
             window._costDirtyMap = {};
-            _doSelect(projectId, gid);
+            _doSelect(gid);
         });
         return;
     }
-    _doSelect(projectId, gid);
+    _doSelect(gid);
 }
 
-function _doSelect(projectId, gid) {
+function _doSelect(gid) {
     state.selectedGroupId = gid;
-    renderGroupSwitcher(projectId);
-    // 觸發 cost.js 重載該子表的 cost_lines + expenses
-    callbacks.loadFinancialSummary?.(projectId);
+    renderGroupSwitcher();
+    callbacks.loadFinancialSummary?.(state.selectedId);
 }
 
 // ── Add / Edit Modal ───────────────────────────────────────────
 
-function _openEditModal(gid = null) {
+async function _openEditModal(gid = null) {
     const isEdit = !!gid;
     const g = isEdit ? state.costGroups.find(x => x.id === gid) : null;
     const title = isEdit ? '編輯子表' : '新增子表';
@@ -119,6 +121,13 @@ function _openEditModal(gid = null) {
     const allocatedOther = state.costGroups
         .filter(x => !isEdit || x.id !== gid)
         .reduce((sum, x) => sum + (x.budget_amount || 0) + (x.misc_budget_amount || 0), 0);
+
+    // 執行預算在 modal 開啟期間不會變，只抓一次
+    let execBudget = 0;
+    try {
+        const fs = await _fetch('/projects/' + projectId + '/financial-summary');
+        execBudget = (fs.ex_tax || 0) - (fs.profit_target || 0);
+    } catch (_) {}
 
     _closeOverlay('cg-edit-overlay');
     const overlay = document.createElement('div');
@@ -180,38 +189,27 @@ function _openEditModal(gid = null) {
     `;
     document.body.appendChild(overlay);
 
-    // Live 分配提示
-    _updateAllocHint(projectId, allocatedOther);
+    const renderHint = () => _renderAllocHint(execBudget, allocatedOther);
+    renderHint();
     ['cg-f-budget_amount', 'cg-f-misc_budget_amount'].forEach(id => {
-        document.getElementById(id).addEventListener('input', () => _updateAllocHint(projectId, allocatedOther));
+        document.getElementById(id).addEventListener('input', renderHint);
     });
 
     document.getElementById('cg-f-name').focus();
     document.getElementById('cg-modal-save').addEventListener('click', () => _saveEditModal(projectId, gid));
 }
 
-async function _updateAllocHint(projectId, allocatedOther) {
+function _renderAllocHint(execBudget, allocatedOther) {
     const el = document.getElementById('cg-alloc-hint');
     if (!el) return;
     const b = parseInt(document.getElementById('cg-f-budget_amount').value) || 0;
     const mb = parseInt(document.getElementById('cg-f-misc_budget_amount').value) || 0;
-    const totalThis = b + mb;
-    const totalAllocated = allocatedOther + totalThis;
-
-    // 取合約執行預算
-    let execBudget = 0;
-    try {
-        const fs = await _fetch('/projects/' + projectId + '/financial-summary');
-        execBudget = (fs.ex_tax || 0) - (fs.profit_target || 0);
-    } catch(_) {}
-
+    const totalAllocated = allocatedOther + b + mb;
     const remain = execBudget - totalAllocated;
-    let cls = 'cg-alloc-ok';
-    let icon = '💡';
-    if (execBudget > 0 && totalAllocated > execBudget) { cls = 'cg-alloc-danger'; icon = '⚠'; }
+    const over = execBudget > 0 && totalAllocated > execBudget;
     el.innerHTML = `
-        <div class="${cls}">
-            ${icon} 合約執行預算：$${fmtNum(execBudget)}<br>
+        <div class="${over ? 'cg-alloc-danger' : 'cg-alloc-ok'}">
+            ${over ? '⚠' : '💡'} 合約執行預算：$${fmtNum(execBudget)}<br>
             已分配（含本筆）：$${fmtNum(totalAllocated)}<br>
             ${remain >= 0 ? `尚可分配：$${fmtNum(remain)}` : `已超出：$${fmtNum(-remain)}`}
         </div>
@@ -250,7 +248,6 @@ async function _saveEditModal(projectId, gid) {
         if (!gid && newGid) {
             state.selectedGroupId = newGid;
         }
-        renderGroupSwitcher(projectId);
         callbacks.loadFinancialSummary?.(projectId);
     } catch (e) {
         _showError('儲存失敗：' + e.message);
@@ -385,7 +382,6 @@ function _openDuplicateModal(gid) {
             const newGid = r.cost_group?.id;
             await loadCostGroups(state.selectedId);
             if (newGid) state.selectedGroupId = newGid;
-            renderGroupSwitcher(state.selectedId);
             callbacks.loadFinancialSummary?.(state.selectedId);
         } catch (e) {
             alert('複製失敗：' + e.message);
@@ -396,8 +392,18 @@ function _openDuplicateModal(gid) {
 
 // ── Menu (⋯) — edit / duplicate / delete ──────────────────────
 
-function _openMenu(gid, ev) {
+let _menuCloseHandler = null;
+
+function _closeMenu() {
     _closeOverlay('cg-menu-pop');
+    if (_menuCloseHandler) {
+        document.removeEventListener('click', _menuCloseHandler);
+        _menuCloseHandler = null;
+    }
+}
+
+function _openMenu(gid, ev) {
+    _closeMenu();
     const pop = document.createElement('div');
     pop.id = 'cg-menu-pop';
     pop.className = 'cg-menu-pop';
@@ -412,25 +418,19 @@ function _openMenu(gid, ev) {
     pop.style.left = Math.max(rect.left - 80, 8) + 'px';
     pop.style.zIndex = '1000';
     document.body.appendChild(pop);
-    // 點空白關閉
     setTimeout(() => {
-        const close = (e) => {
-            if (!pop.contains(e.target)) {
-                pop.remove();
-                document.removeEventListener('click', close);
-            }
-        };
-        document.addEventListener('click', close);
+        _menuCloseHandler = (e) => { if (!pop.contains(e.target)) _closeMenu(); };
+        document.addEventListener('click', _menuCloseHandler);
     }, 0);
 }
 
 // ── Init ───────────────────────────────────────────────────────
 
 export function initCostGroupsHandlers() {
-    window._cgSelect = (gid) => selectGroup(state.selectedId, gid);
+    window._cgSelect = (gid) => selectGroup(gid);
     window._cgAdd = () => _openEditModal(null);
-    window._cgEdit = (gid) => { _closeOverlay('cg-menu-pop'); _openEditModal(gid); };
-    window._cgDelete = (gid) => { _closeOverlay('cg-menu-pop'); _openDeleteModal(gid); };
-    window._cgDuplicate = (gid) => { _closeOverlay('cg-menu-pop'); _openDuplicateModal(gid); };
+    window._cgEdit = (gid) => { _closeMenu(); _openEditModal(gid); };
+    window._cgDelete = (gid) => { _closeMenu(); _openDeleteModal(gid); };
+    window._cgDuplicate = (gid) => { _closeMenu(); _openDuplicateModal(gid); };
     window._cgMenu = (gid, ev) => _openMenu(gid, ev);
 }

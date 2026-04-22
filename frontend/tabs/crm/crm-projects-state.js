@@ -32,4 +32,5 @@ export const callbacks = {
     closeDetail: null,       // () => void — 關閉詳情面板
     loadQuotations: null,    // (projectId) => Promise — 刷新報價單
     loadCostGroups: null,    // (projectId) => Promise — 刷新子表列表
+    renderGroupSwitcher: null, // () => void — 重新渲染子表切換器（DOM 已備好時）
 };

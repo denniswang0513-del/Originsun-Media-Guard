@@ -71,10 +71,7 @@ async function _loadFinancialSummary(projectId) {
             ${_renderCostLines(costData.grouped || [], expData.expenses || [], f)}
         `;
         window._costDirtyMap = {};
-        // Render switcher after innerHTML set（switcher 讀 state.costGroups 即可，已由 loadCostGroups 填入）
-        callbacks.loadCostGroups && document.getElementById('cost-groups-switcher') &&
-            (await import('./crm-projects-cost-groups.js')).renderGroupSwitcher(projectId);
-        // Upgrade all staff selects to searchable
+        callbacks.renderGroupSwitcher?.();
         container.querySelectorAll('.cost-staff-sel').forEach(sel => searchableSelect(sel, { placeholder: '搜尋人員...' }));
     } catch (_) {
         container.innerHTML = '<div class="crm-empty">載入失敗</div>';
