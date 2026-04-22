@@ -560,16 +560,14 @@ async def _on_startup():
                         except Exception:
                             pass
                     await _scg.commit()
-                    # 3. 為每個還沒有 cost_group 的專案建「主表」並回填 cost_lines + expenses
-                    rows = (await _scg.execute(_tcg("SELECT id FROM crm_projects"))).fetchall()
-                    for (pid,) in rows:
+                    # 3. 只迭代尚未有 cost_group 的專案（migration 完成後此 query 通常回 0 筆）
+                    pending = (await _scg.execute(_tcg(
+                        "SELECT id FROM crm_projects WHERE id NOT IN "
+                        "(SELECT DISTINCT project_id FROM crm_project_cost_groups "
+                        " WHERE project_id IS NOT NULL)"
+                    ))).fetchall()
+                    for (pid,) in pending:
                         try:
-                            has = (await _scg.execute(
-                                _tcg("SELECT 1 FROM crm_project_cost_groups WHERE project_id = :pid LIMIT 1"),
-                                {"pid": pid}
-                            )).first()
-                            if has:
-                                continue
                             gid = _uuid_cg.uuid4().hex
                             await _scg.execute(_tcg(
                                 "INSERT INTO crm_project_cost_groups (id, project_id, name, sort_order) "

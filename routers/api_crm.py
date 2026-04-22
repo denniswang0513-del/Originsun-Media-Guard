@@ -1818,18 +1818,15 @@ async def list_project_expenses(project_id: str, group_id: Optional[str] = Query
             "sub_item": e.sub_item or "", "payee": e.payee or "",
             "advance_id": e.advance_id or "",
             "receipt_url": e.receipt_url or "", "notes": e.notes or "",
-            "created_at": e.created_at.isoformat()[:10] if e.created_at else None,
+            "created_at": _fmt_date(e.created_at),
         }
 
     expenses = [_e_to_dict(e) for e in rows]
-    grouped_by_group = []
-    for g in groups:
-        g_expenses = [_e_to_dict(e) for e in rows if e.cost_group_id == g.id]
-        grouped_by_group.append({
-            "group_id": g.id, "group_name": g.name,
-            "shoot_date": g.shoot_date.isoformat()[:10] if g.shoot_date else None,
-            "expenses": g_expenses,
-        })
+    grouped_by_group = [{
+        "group_id": g.id, "group_name": g.name,
+        "shoot_date": _fmt_date(g.shoot_date),
+        "expenses": [_e_to_dict(e) for e in rows if e.cost_group_id == g.id],
+    } for g in groups]
     return {"expenses": expenses, "grouped_by_group": grouped_by_group}
 
 
@@ -1896,7 +1893,7 @@ async def get_public_project_info(project_id: str):
         "id": proj.id, "name": proj.name,
         "cost_groups": [{
             "id": g.id, "name": g.name,
-            "shoot_date": g.shoot_date.isoformat()[:10] if g.shoot_date else None,
+            "shoot_date": _fmt_date(g.shoot_date),
         } for g in groups],
     }
 
@@ -1913,7 +1910,7 @@ async def list_public_project_expenses(project_id: str):
     return {"expenses": [{
         "id": e.id, "category": e.category, "actual": e.actual,
         "sub_item": e.sub_item or "", "payee": e.payee or "",
-        "created_at": e.created_at.isoformat()[:10] if e.created_at else None,
+        "created_at": _fmt_date(e.created_at),
     } for e in rows]}
 
 
@@ -2151,17 +2148,26 @@ async def project_financial_summary(project_id: str):
         costline_estimated = costline_row[0] if costline_row else 0
         costline_actual = costline_row[1] if costline_row else 0
 
-        # 跨子表彙總（預算分配）
-        group_rows = (await session.execute(
-            select(CrmProjectCostGroup)
+        # 跨子表彙總（預算分配）— 單次聚合，不 hydrate ORM 物件
+        from sqlalchemy import case as _case
+        g_row = (await session.execute(
+            select(
+                sa_func.coalesce(sa_func.sum(
+                    sa_func.coalesce(CrmProjectCostGroup.budget_amount, 0)
+                    + sa_func.coalesce(CrmProjectCostGroup.misc_budget_amount, 0)
+                ), 0),
+                sa_func.count(CrmProjectCostGroup.id),
+                sa_func.coalesce(sa_func.sum(_case(
+                    (CrmProjectCostGroup.budget_amount.is_(None)
+                     & CrmProjectCostGroup.misc_budget_amount.is_(None), 1),
+                    else_=0,
+                )), 0),
+            )
             .where(CrmProjectCostGroup.project_id == project_id)
-        )).scalars().all()
-        allocated_budget_sum = sum((g.budget_amount or 0) + (g.misc_budget_amount or 0) for g in group_rows)
-        groups_count = len(group_rows)
-        groups_missing_budget_count = sum(
-            1 for g in group_rows
-            if g.budget_amount is None and g.misc_budget_amount is None
-        )
+        )).first()
+        allocated_budget_sum = int(g_row[0] or 0) if g_row else 0
+        groups_count = int(g_row[1] or 0) if g_row else 0
+        groups_missing_budget_count = int(g_row[2] or 0) if g_row else 0
 
     contract = project.contract_amount or 0
     tax_rate = project.tax_rate or 5
@@ -2193,6 +2199,33 @@ async def project_financial_summary(project_id: str):
         "groups_count": groups_count,
         "groups_missing_budget_count": groups_missing_budget_count,
     }
+
+
+# ── Phase helpers ────────────────────────────────────────────
+PHASE_ORDER = ("前期製作", "現場拍攝", "後期製作")
+
+
+def _fmt_date(dt) -> Optional[str]:
+    """Datetime → 'YYYY-MM-DD'，None 時回 None。"""
+    return dt.isoformat()[:10] if dt else None
+
+
+def _phase_group(lines: list) -> list:
+    """[{phase, lines}, ...]，PHASE_ORDER 優先排序，其他 phase 追加末尾。"""
+    from collections import defaultdict
+    buckets = defaultdict(list)
+    for ln in lines:
+        buckets[ln["phase"]].append(ln)
+    seen = set()
+    result = []
+    for p in PHASE_ORDER:
+        if buckets.get(p):
+            result.append({"phase": p, "lines": buckets[p]})
+            seen.add(p)
+    for p, ls in buckets.items():
+        if p not in seen and ls:
+            result.append({"phase": p, "lines": ls})
+    return result
 
 
 # ── Cost Line Default Templates ─────────────────────────────
@@ -2281,46 +2314,26 @@ async def list_project_cost_lines(project_id: str, group_id: Optional[str] = Que
             )).scalars().all()
             staff_map = {s.id: {"name": s.name, "role": s.role} for s in staff_rows}
 
-        # 取所有子表資訊，用於 grouped_by_group
-        groups = (await session.execute(
-            select(CrmProjectCostGroup)
-            .where(CrmProjectCostGroup.project_id == project_id)
-            .order_by(CrmProjectCostGroup.sort_order, CrmProjectCostGroup.created_at)
-        )).scalars().all()
+        # 指定單組 → 不需要列出所有子表（grouped_by_group 留空即可）
+        groups = []
+        if not group_id:
+            groups = (await session.execute(
+                select(CrmProjectCostGroup)
+                .where(CrmProjectCostGroup.project_id == project_id)
+                .order_by(CrmProjectCostGroup.sort_order, CrmProjectCostGroup.created_at)
+            )).scalars().all()
 
     lines = [_cost_line_to_dict(r, staff_map) for r in rows]
-    phase_order = ["前期製作", "現場拍攝", "後期製作"]
-    def _phase_group(ls):
-        from collections import defaultdict
-        g = defaultdict(list)
-        for ln in ls:
-            g[ln["phase"]].append(ln)
-        # phase_order phases first, then any unknown phases appended
-        seen = set()
-        result = []
-        for p in phase_order:
-            if g.get(p):
-                result.append({"phase": p, "lines": g[p]})
-                seen.add(p)
-        for p, ls_ in g.items():
-            if p not in seen and ls_:
-                result.append({"phase": p, "lines": ls_})
-        return result
-
-    # grouped_by_group：每張子表含自己的 phase 分組
-    grouped_by_group = []
-    for g in groups:
-        g_lines = [_cost_line_to_dict(r, staff_map) for r in rows if r.cost_group_id == g.id]
-        grouped_by_group.append({
-            "group_id": g.id, "group_name": g.name,
-            "shoot_date": g.shoot_date.isoformat()[:10] if g.shoot_date else None,
-            "sort_order": g.sort_order,
-            "phases": _phase_group(g_lines),
-        })
+    grouped_by_group = [{
+        "group_id": g.id, "group_name": g.name,
+        "shoot_date": _fmt_date(g.shoot_date),
+        "sort_order": g.sort_order,
+        "phases": _phase_group([_cost_line_to_dict(r, staff_map) for r in rows if r.cost_group_id == g.id]),
+    } for g in groups]
 
     return {
         "cost_lines": lines,
-        "grouped": _phase_group(lines),  # backward-compat (= 當前過濾範圍的 phase 分組)
+        "grouped": _phase_group(lines),  # backward-compat (frontend crm-projects-cost.js 仍在讀)
         "grouped_by_group": grouped_by_group,
     }
 
@@ -2541,7 +2554,6 @@ async def apply_cost_line_template(project_id: str, request: Request):
 
         target_gid = await _resolve_target_group(session, project_id, body.get("cost_group_id"))
 
-        # Get template items (or use defaults if template_id == "__default__")
         if template_id == "__default__":
             items = [{"phase": p, "item_name": n, "sort_order": s} for p, n, s in _COST_LINE_DEFAULTS]
         else:
@@ -2550,26 +2562,11 @@ async def apply_cost_line_template(project_id: str, request: Request):
                 raise HTTPException(status_code=404, detail="找不到此範本")
             items = tpl.items or []
 
-        # 只刪目標子表的 cost_lines
-        await session.execute(
-            delete(CrmProjectCostLine).where(
-                CrmProjectCostLine.project_id == project_id,
-                CrmProjectCostLine.cost_group_id == target_gid,
-            )
-        )
-
-        added = 0
-        for item in items:
-            phase = item.get("phase", "")
-            item_name = item.get("item_name", "")
-            if not phase or not item_name:
-                continue
-            session.add(CrmProjectCostLine(
-                id=uuid.uuid4().hex, project_id=project_id, cost_group_id=target_gid,
-                phase=phase, item_name=item_name,
-                sort_order=item.get("sort_order", 0),
-            ))
-            added += 1
+        new_lines = [
+            {"phase": it["phase"], "item_name": it["item_name"], "sort_order": it.get("sort_order", 0)}
+            for it in items if it.get("phase") and it.get("item_name")
+        ]
+        added = await _replace_group_cost_lines(session, project_id, target_gid, new_lines)
         await session.commit()
     return {"status": "ok", "added": added, "cost_group_id": target_gid}
 
@@ -2596,39 +2593,29 @@ async def import_cost_lines_from_quotation(project_id: str, request: Request):
 
         target_gid = await _resolve_target_group(session, project_id, body.get("cost_group_id"))
 
-        # Load quotation items
         items = (await session.execute(
             select(CrmQuotationItem)
             .where(CrmQuotationItem.quotation_id == quotation_id)
             .order_by(CrmQuotationItem.sort_order)
         )).scalars().all()
 
-        # 只刪目標子表的 cost_lines
-        await session.execute(
-            delete(CrmProjectCostLine).where(
-                CrmProjectCostLine.project_id == project_id,
-                CrmProjectCostLine.cost_group_id == target_gid,
-            )
-        )
-
-        added = 0
-        for item in items:
-            desc = (item.description or "").strip()
+        new_lines = []
+        for it in items:
+            desc = (it.description or "").strip()
             if not desc:
                 continue
-            unit = (item.unit or "式").strip()
-            session.add(CrmProjectCostLine(
-                id=uuid.uuid4().hex, project_id=project_id, cost_group_id=target_gid,
-                phase=_map_group_to_phase(item.group_name),
-                item_name=desc,
-                sort_order=item.sort_order or 0,
-                estimated_unit_price=item.unit_price,
-                estimated_quantity=item.quantity,
-                estimated_unit_type=_QUOTE_UNIT_MAP.get(unit, unit),
-                estimated_amount=item.amount,
-                estimated_notes=item.note or None,
-            ))
-            added += 1
+            unit = (it.unit or "式").strip()
+            new_lines.append({
+                "phase": _map_group_to_phase(it.group_name),
+                "item_name": desc,
+                "sort_order": it.sort_order or 0,
+                "estimated_unit_price": it.unit_price,
+                "estimated_quantity": it.quantity,
+                "estimated_unit_type": _QUOTE_UNIT_MAP.get(unit, unit),
+                "estimated_amount": it.amount,
+                "estimated_notes": it.note or None,
+            })
+        added = await _replace_group_cost_lines(session, project_id, target_gid, new_lines)
         await session.commit()
     return {"status": "ok", "added": added, "cost_group_id": target_gid}
 
@@ -2694,6 +2681,23 @@ async def _resolve_target_group(session, project_id: str, supplied: Optional[str
     return gid
 
 
+async def _replace_group_cost_lines(session, project_id: str, group_id: str, new_lines: list) -> int:
+    """清空目標子表 cost_lines 並插入 new_lines；回傳新增筆數。
+    new_lines 為 dict list，dict 內容是 CrmProjectCostLine 的 kwargs
+    （不含 id/project_id/cost_group_id）。呼叫端自行 commit。"""
+    await session.execute(
+        delete(CrmProjectCostLine).where(
+            CrmProjectCostLine.project_id == project_id,
+            CrmProjectCostLine.cost_group_id == group_id,
+        )
+    )
+    for kw in new_lines:
+        session.add(CrmProjectCostLine(
+            id=uuid.uuid4().hex, project_id=project_id, cost_group_id=group_id, **kw
+        ))
+    return len(new_lines)
+
+
 async def _compute_group_summary(session, group_id: str) -> dict:
     """彙總單一子表：cost_estimated / cost_actual / expense_estimated / expense_actual。"""
     from sqlalchemy import func as _fn
@@ -2729,7 +2733,7 @@ def _cost_group_to_dict(g, summary: Optional[dict] = None) -> dict:
     total_budget = (g.budget_amount or 0) + (g.misc_budget_amount or 0)
     d = {
         "id": g.id, "project_id": g.project_id, "name": g.name,
-        "shoot_date": g.shoot_date.isoformat()[:10] if g.shoot_date else None,
+        "shoot_date": _fmt_date(g.shoot_date),
         "notes": g.notes or "",
         "sort_order": g.sort_order,
         "budget_amount": g.budget_amount,
@@ -2840,9 +2844,11 @@ async def update_cost_group(group_id: str, req: CostGroupUpdate, request: Reques
             g.name = data["name"].strip() or g.name
         if "shoot_date" in data:
             g.shoot_date = _parse_shoot_date(data["shoot_date"]) if data["shoot_date"] else None
-        for fld in ("notes", "sort_order", "budget_amount", "misc_budget_amount", "profit_target_pct"):
+        if "notes" in data:
+            g.notes = data["notes"] or None
+        for fld in ("sort_order", "budget_amount", "misc_budget_amount", "profit_target_pct"):
             if fld in data:
-                setattr(g, fld, data[fld] or None if fld == "notes" else data[fld])
+                setattr(g, fld, data[fld])
         from sqlalchemy import func as _fn
         g.updated_at = _fn.now()
         await session.commit()
