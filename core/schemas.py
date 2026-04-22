@@ -363,7 +363,7 @@ class ProjectExpensePayload(BaseModel):
     payee: str = ""
     advance_id: str = ""
     notes: str = ""
-    cost_group_id: Optional[str] = None  # target sub-table; backend falls back to 主表 if None
+    cost_group_id: Optional[str] = None
 
 
 class QuotationItemPayload(BaseModel):
@@ -492,7 +492,7 @@ class CostLinePayload(BaseModel):
     phase: str
     item_name: str
     sort_order: int = 0
-    cost_group_id: Optional[str] = None  # target sub-table; backend falls back to 主表 if None
+    cost_group_id: Optional[str] = None
     estimated_unit_price: Optional[int] = None
     estimated_quantity: Optional[int] = None
     estimated_unit_type: Optional[str] = None

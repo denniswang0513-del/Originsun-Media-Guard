@@ -563,26 +563,30 @@ async def _on_startup():
                     # 3. 為每個還沒有 cost_group 的專案建「主表」並回填 cost_lines + expenses
                     rows = (await _scg.execute(_tcg("SELECT id FROM crm_projects"))).fetchall()
                     for (pid,) in rows:
-                        has = (await _scg.execute(
-                            _tcg("SELECT 1 FROM crm_project_cost_groups WHERE project_id = :pid LIMIT 1"),
-                            {"pid": pid}
-                        )).first()
-                        if has:
-                            continue
-                        gid = _uuid_cg.uuid4().hex
-                        await _scg.execute(_tcg(
-                            "INSERT INTO crm_project_cost_groups (id, project_id, name, sort_order) "
-                            "VALUES (:id, :pid, '主表', 0)"
-                        ), {"id": gid, "pid": pid})
-                        await _scg.execute(_tcg(
-                            "UPDATE crm_project_cost_lines SET cost_group_id = :gid "
-                            "WHERE project_id = :pid AND cost_group_id IS NULL"
-                        ), {"gid": gid, "pid": pid})
-                        await _scg.execute(_tcg(
-                            "UPDATE crm_project_expenses SET cost_group_id = :gid "
-                            "WHERE project_id = :pid AND cost_group_id IS NULL"
-                        ), {"gid": gid, "pid": pid})
-                    await _scg.commit()
+                        try:
+                            has = (await _scg.execute(
+                                _tcg("SELECT 1 FROM crm_project_cost_groups WHERE project_id = :pid LIMIT 1"),
+                                {"pid": pid}
+                            )).first()
+                            if has:
+                                continue
+                            gid = _uuid_cg.uuid4().hex
+                            await _scg.execute(_tcg(
+                                "INSERT INTO crm_project_cost_groups (id, project_id, name, sort_order) "
+                                "VALUES (:id, :pid, '主表', 0)"
+                            ), {"id": gid, "pid": pid})
+                            await _scg.execute(_tcg(
+                                "UPDATE crm_project_cost_lines SET cost_group_id = :gid "
+                                "WHERE project_id = :pid AND cost_group_id IS NULL"
+                            ), {"gid": gid, "pid": pid})
+                            await _scg.execute(_tcg(
+                                "UPDATE crm_project_expenses SET cost_group_id = :gid "
+                                "WHERE project_id = :pid AND cost_group_id IS NULL"
+                            ), {"gid": gid, "pid": pid})
+                            await _scg.commit()
+                        except Exception as _e_pid:
+                            await _scg.rollback()
+                            print(f"[startup] cost_groups backfill for project {pid} failed: {_e_pid}")
         except Exception as _e_cg:
             print(f"[startup] cost_groups migration failed: {_e_cg}")
 

@@ -469,16 +469,12 @@ async def create_project(req: CrmProjectPayload, request: Request):
 
         session.add(project)
         await _auto_update_client_status(session, req.client_id)
+        # 同時建立第一張子表「主表」— 與 project insert 共用一次 commit
+        session.add(CrmProjectCostGroup(
+            id=uuid.uuid4().hex, project_id=project.id, name="主表", sort_order=0,
+        ))
         await session.commit()
         await session.refresh(project)
-        # 自動建立第一張子表「主表」
-        try:
-            session.add(CrmProjectCostGroup(
-                id=uuid.uuid4().hex, project_id=project.id, name="主表", sort_order=0,
-            ))
-            await session.commit()
-        except Exception:
-            await session.rollback()
 
     # Folder template copy (best-effort)
     warning = ""
@@ -1839,10 +1835,7 @@ async def list_project_expenses(project_id: str, group_id: Optional[str] = Query
 
 async def _create_expense(session, project_id: str, req, advance_id=None, payee_override=None):
     """建立專案雜支的共用 helper。"""
-    # 決定 cost_group_id：payload 指定 → payload；否則歸主表
-    cost_group_id = getattr(req, "cost_group_id", None)
-    if not cost_group_id:
-        cost_group_id = await _get_or_create_default_group(session, project_id)
+    cost_group_id = await _resolve_target_group(session, project_id, req.cost_group_id)
     e = CrmProjectExpense(
         id=uuid.uuid4().hex, project_id=project_id,
         cost_group_id=cost_group_id,
@@ -2298,13 +2291,21 @@ async def list_project_cost_lines(project_id: str, group_id: Optional[str] = Que
     lines = [_cost_line_to_dict(r, staff_map) for r in rows]
     phase_order = ["前期製作", "現場拍攝", "後期製作"]
     def _phase_group(ls):
-        g = {p: [] for p in phase_order}
+        from collections import defaultdict
+        g = defaultdict(list)
         for ln in ls:
-            ph = ln["phase"]
-            if ph not in g:
-                g[ph] = []
-            g[ph].append(ln)
-        return [{"phase": p, "lines": g[p]} for p in phase_order if g.get(p)]
+            g[ln["phase"]].append(ln)
+        # phase_order phases first, then any unknown phases appended
+        seen = set()
+        result = []
+        for p in phase_order:
+            if g.get(p):
+                result.append({"phase": p, "lines": g[p]})
+                seen.add(p)
+        for p, ls_ in g.items():
+            if p not in seen and ls_:
+                result.append({"phase": p, "lines": ls_})
+        return result
 
     # grouped_by_group：每張子表含自己的 phase 分組
     grouped_by_group = []
@@ -2340,7 +2341,7 @@ async def init_project_cost_lines(project_id: str, request: Request):
         project = await session.get(CrmProject, project_id)
         if not project:
             raise HTTPException(status_code=404, detail="找不到此專案")
-        target_gid = body.get("cost_group_id") or await _get_or_create_default_group(session, project_id)
+        target_gid = await _resolve_target_group(session, project_id, body.get("cost_group_id"))
         existing = (await session.execute(
             select(CrmProjectCostLine.phase, CrmProjectCostLine.item_name)
             .where(CrmProjectCostLine.project_id == project_id,
@@ -2371,7 +2372,7 @@ async def add_project_cost_line(project_id: str, req: CostLinePayload, request: 
         project = await session.get(CrmProject, project_id)
         if not project:
             raise HTTPException(status_code=404, detail="找不到此專案")
-        target_gid = req.cost_group_id or await _get_or_create_default_group(session, project_id)
+        target_gid = await _resolve_target_group(session, project_id, req.cost_group_id)
         est_amt = req.estimated_amount
         if req.estimated_unit_price and req.estimated_quantity:
             est_amt = req.estimated_unit_price * req.estimated_quantity
@@ -2538,7 +2539,7 @@ async def apply_cost_line_template(project_id: str, request: Request):
         if not project:
             raise HTTPException(status_code=404, detail="找不到此專案")
 
-        target_gid = body.get("cost_group_id") or await _get_or_create_default_group(session, project_id)
+        target_gid = await _resolve_target_group(session, project_id, body.get("cost_group_id"))
 
         # Get template items (or use defaults if template_id == "__default__")
         if template_id == "__default__":
@@ -2593,7 +2594,7 @@ async def import_cost_lines_from_quotation(project_id: str, request: Request):
         if not quotation or quotation.project_id != project_id:
             raise HTTPException(status_code=400, detail="報價不屬於此專案")
 
-        target_gid = body.get("cost_group_id") or await _get_or_create_default_group(session, project_id)
+        target_gid = await _resolve_target_group(session, project_id, body.get("cost_group_id"))
 
         # Load quotation items
         items = (await session.execute(
@@ -2668,21 +2669,28 @@ async def delete_cost_line_template(template_id: str, request: Request):
 
 # ── Cost Groups (成本子表) Endpoints ─────────────────────────
 
-async def _get_or_create_default_group(session, project_id: str) -> str:
-    """取回或建立專案的「主表」子表，回傳 group_id。新專案自動觸發；
-    舊資料走 startup migration 補上。"""
-    from sqlalchemy import func as _fn
-    row = (await session.execute(
-        select(CrmProjectCostGroup)
+async def _get_first_group_id(session, project_id: str) -> Optional[str]:
+    """專案的首張子表 id（依 sort_order + created_at）。純查詢，無副作用。"""
+    return (await session.execute(
+        select(CrmProjectCostGroup.id)
         .where(CrmProjectCostGroup.project_id == project_id)
         .order_by(CrmProjectCostGroup.sort_order, CrmProjectCostGroup.created_at)
         .limit(1)
     )).scalar_one_or_none()
-    if row:
-        return row.id
+
+
+async def _resolve_target_group(session, project_id: str, supplied: Optional[str]) -> str:
+    """回傳目標子表 id：供給者優先，否則取首張（主表）。
+    若專案完全沒有子表（migration 漏網 / create_project 失敗），
+    自我修復建立主表（flush，不 commit，交由外層 commit）。"""
+    if supplied:
+        return supplied
+    gid = await _get_first_group_id(session, project_id)
+    if gid:
+        return gid
     gid = uuid.uuid4().hex
     session.add(CrmProjectCostGroup(id=gid, project_id=project_id, name="主表", sort_order=0))
-    await session.commit()
+    await session.flush()
     return gid
 
 
@@ -2743,21 +2751,52 @@ def _cost_group_to_dict(g, summary: Optional[dict] = None) -> dict:
 
 @router.get("/projects/{project_id}/cost-groups")
 async def list_project_cost_groups(project_id: str):
-    """列出指定專案的所有子表，附每張子表的 summary。"""
+    """列出指定專案的所有子表 + 每組 summary。純讀取：依賴
+    migration + create_project 保證主表存在，避免 GET 寫入。"""
     _require_db()
     factory = await _get_factory()
+    from sqlalchemy import func as _fn
     async with factory() as session:
-        # 惰性建立主表：若此專案還沒有任何子表（新 migration 前的漏網之魚）
-        await _get_or_create_default_group(session, project_id)
         rows = (await session.execute(
             select(CrmProjectCostGroup)
             .where(CrmProjectCostGroup.project_id == project_id)
             .order_by(CrmProjectCostGroup.sort_order, CrmProjectCostGroup.created_at)
         )).scalars().all()
-        result = []
-        for g in rows:
-            s = await _compute_group_summary(session, g.id)
-            result.append(_cost_group_to_dict(g, s))
+        if not rows:
+            return {"cost_groups": []}
+
+        # 單次 GROUP BY 聚合，避免 O(groups) 次子查詢
+        cl_rows = (await session.execute(
+            select(CrmProjectCostLine.cost_group_id,
+                   _fn.coalesce(_fn.sum(CrmProjectCostLine.estimated_amount), 0),
+                   _fn.coalesce(_fn.sum(CrmProjectCostLine.actual_amount), 0),
+                   _fn.count(CrmProjectCostLine.id))
+            .where(CrmProjectCostLine.project_id == project_id)
+            .group_by(CrmProjectCostLine.cost_group_id)
+        )).all()
+        cl_map = {r[0]: (int(r[1] or 0), int(r[2] or 0), int(r[3] or 0)) for r in cl_rows}
+
+        ex_rows = (await session.execute(
+            select(CrmProjectExpense.cost_group_id,
+                   _fn.coalesce(_fn.sum(CrmProjectExpense.estimated), 0),
+                   _fn.coalesce(_fn.sum(CrmProjectExpense.actual), 0),
+                   _fn.count(CrmProjectExpense.id))
+            .where(CrmProjectExpense.project_id == project_id)
+            .group_by(CrmProjectExpense.cost_group_id)
+        )).all()
+        ex_map = {r[0]: (int(r[1] or 0), int(r[2] or 0), int(r[3] or 0)) for r in ex_rows}
+
+    result = []
+    for g in rows:
+        ce, ca, cc = cl_map.get(g.id, (0, 0, 0))
+        ee, ea, ec = ex_map.get(g.id, (0, 0, 0))
+        summary = {
+            "cost_estimated": ce, "cost_actual": ca,
+            "expense_estimated": ee, "expense_actual": ea,
+            "total_estimated": ce + ee, "total_actual": ca + ea,
+            "cost_lines_count": cc, "expenses_count": ec,
+        }
+        result.append(_cost_group_to_dict(g, summary))
     return {"cost_groups": result}
 
 
@@ -2803,7 +2842,7 @@ async def update_cost_group(group_id: str, req: CostGroupUpdate, request: Reques
             g.shoot_date = _parse_shoot_date(data["shoot_date"]) if data["shoot_date"] else None
         for fld in ("notes", "sort_order", "budget_amount", "misc_budget_amount", "profit_target_pct"):
             if fld in data:
-                setattr(g, fld, data[fld] if data[fld] != "" else None)
+                setattr(g, fld, data[fld] or None if fld == "notes" else data[fld])
         from sqlalchemy import func as _fn
         g.updated_at = _fn.now()
         await session.commit()
