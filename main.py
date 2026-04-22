@@ -519,6 +519,73 @@ async def _on_startup():
         except Exception as _e_web:
             print(f"[startup] Website migration/seed failed: {_e_web}")
 
+    # ── Phase J-5: crm_project_cost_groups table + backfill 主表 ──
+    if state.db_online:
+        try:
+            import uuid as _uuid_cg
+            from db.session import get_session_factory
+            _fcg = get_session_factory()
+            if _fcg:
+                from sqlalchemy import text as _tcg
+                async with _fcg() as _scg:
+                    # 1. 建新表
+                    await _scg.execute(_tcg("""
+                        CREATE TABLE IF NOT EXISTS crm_project_cost_groups (
+                            id VARCHAR(32) PRIMARY KEY,
+                            project_id VARCHAR(32) NOT NULL,
+                            name VARCHAR(128) NOT NULL,
+                            shoot_date TIMESTAMPTZ,
+                            notes TEXT,
+                            sort_order INTEGER NOT NULL DEFAULT 0,
+                            budget_amount INTEGER,
+                            misc_budget_amount INTEGER,
+                            profit_target_pct INTEGER,
+                            created_at TIMESTAMPTZ DEFAULT NOW(),
+                            updated_at TIMESTAMPTZ DEFAULT NOW()
+                        )
+                    """))
+                    await _scg.execute(_tcg(
+                        "CREATE INDEX IF NOT EXISTS idx_costgroup_project "
+                        "ON crm_project_cost_groups(project_id, sort_order)"
+                    ))
+                    # 2. cost_lines + expenses 加 cost_group_id 欄位
+                    for col_sql in [
+                        "ALTER TABLE crm_project_cost_lines ADD COLUMN IF NOT EXISTS cost_group_id VARCHAR(32)",
+                        "ALTER TABLE crm_project_expenses  ADD COLUMN IF NOT EXISTS cost_group_id VARCHAR(32)",
+                        "CREATE INDEX IF NOT EXISTS idx_cl_group  ON crm_project_cost_lines(cost_group_id)",
+                        "CREATE INDEX IF NOT EXISTS idx_exp_group ON crm_project_expenses(cost_group_id)",
+                    ]:
+                        try:
+                            await _scg.execute(_tcg(col_sql))
+                        except Exception:
+                            pass
+                    await _scg.commit()
+                    # 3. 為每個還沒有 cost_group 的專案建「主表」並回填 cost_lines + expenses
+                    rows = (await _scg.execute(_tcg("SELECT id FROM crm_projects"))).fetchall()
+                    for (pid,) in rows:
+                        has = (await _scg.execute(
+                            _tcg("SELECT 1 FROM crm_project_cost_groups WHERE project_id = :pid LIMIT 1"),
+                            {"pid": pid}
+                        )).first()
+                        if has:
+                            continue
+                        gid = _uuid_cg.uuid4().hex
+                        await _scg.execute(_tcg(
+                            "INSERT INTO crm_project_cost_groups (id, project_id, name, sort_order) "
+                            "VALUES (:id, :pid, '主表', 0)"
+                        ), {"id": gid, "pid": pid})
+                        await _scg.execute(_tcg(
+                            "UPDATE crm_project_cost_lines SET cost_group_id = :gid "
+                            "WHERE project_id = :pid AND cost_group_id IS NULL"
+                        ), {"gid": gid, "pid": pid})
+                        await _scg.execute(_tcg(
+                            "UPDATE crm_project_expenses SET cost_group_id = :gid "
+                            "WHERE project_id = :pid AND cost_group_id IS NULL"
+                        ), {"gid": gid, "pid": pid})
+                    await _scg.commit()
+        except Exception as _e_cg:
+            print(f"[startup] cost_groups migration failed: {_e_cg}")
+
     asyncio.create_task(_periodic_version_check())
     asyncio.create_task(_periodic_db_health())
     from core.scheduler import run_scheduler  # type: ignore

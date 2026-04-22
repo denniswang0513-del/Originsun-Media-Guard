@@ -363,6 +363,7 @@ class ProjectExpensePayload(BaseModel):
     payee: str = ""
     advance_id: str = ""
     notes: str = ""
+    cost_group_id: Optional[str] = None  # target sub-table; backend falls back to 主表 if None
 
 
 class QuotationItemPayload(BaseModel):
@@ -491,6 +492,7 @@ class CostLinePayload(BaseModel):
     phase: str
     item_name: str
     sort_order: int = 0
+    cost_group_id: Optional[str] = None  # target sub-table; backend falls back to 主表 if None
     estimated_unit_price: Optional[int] = None
     estimated_quantity: Optional[int] = None
     estimated_unit_type: Optional[str] = None
@@ -503,6 +505,31 @@ class CostLinePayload(BaseModel):
     actual_amount: Optional[int] = None
     actual_staff_id: Optional[str] = None
     actual_notes: str = ""
+
+
+class CostGroupCreate(BaseModel):
+    name: str
+    shoot_date: Optional[str] = None        # "YYYY-MM-DD"
+    notes: Optional[str] = None
+    sort_order: int = 0
+    budget_amount: Optional[int] = None
+    misc_budget_amount: Optional[int] = None
+    profit_target_pct: Optional[int] = None
+
+
+class CostGroupUpdate(BaseModel):
+    name: Optional[str] = None
+    shoot_date: Optional[str] = None
+    notes: Optional[str] = None
+    sort_order: Optional[int] = None
+    budget_amount: Optional[int] = None
+    misc_budget_amount: Optional[int] = None
+    profit_target_pct: Optional[int] = None
+
+
+class CostGroupDuplicate(BaseModel):
+    name: str
+    shoot_date: Optional[str] = None
 
 
 class CostLineUpdatePayload(BaseModel):

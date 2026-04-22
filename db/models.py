@@ -372,11 +372,12 @@ class CrmProjectStaff(Base):
 
 
 class CrmProjectExpense(Base):
-    """專案雜支明細。"""
+    """專案雜支明細（歸屬於 cost_group）。"""
     __tablename__ = "crm_project_expenses"
 
     id = Column(String(32), primary_key=True)
     project_id = Column(String(32), nullable=False, index=True)
+    cost_group_id = Column(String(32), nullable=True, index=True)  # FK → crm_project_cost_groups
     category = Column(String(64), nullable=False)               # 交通/住宿/飲食/提案/其他
     estimated = Column(Integer, nullable=False, default=0)      # 預估金額
     actual = Column(Integer, nullable=False, default=0)         # 實際金額
@@ -386,6 +387,28 @@ class CrmProjectExpense(Base):
     advance_id = Column(String(32), nullable=True)             # 關聯預支款 ID
     notes = Column(Text, nullable=True)
     created_at = Column(DateTime(timezone=True), nullable=True)
+
+
+class CrmProjectCostGroup(Base):
+    """專案成本子表 — 一張完整財務表單（預算 / 成本 / 雜支）。"""
+    __tablename__ = "crm_project_cost_groups"
+
+    id = Column(String(32), primary_key=True)
+    project_id = Column(String(32), nullable=False)
+    name = Column(String(128), nullable=False)                 # 主表 / 5-15 外景 / 棚拍
+    shoot_date = Column(DateTime(timezone=True), nullable=True)
+    notes = Column(Text, nullable=True)
+    sort_order = Column(Integer, nullable=False, default=0)
+    # 預算（全可 NULL，UI 會提示未設）
+    budget_amount = Column(Integer, nullable=True)             # 成本預算（未稅）
+    misc_budget_amount = Column(Integer, nullable=True)        # 雜支預算
+    profit_target_pct = Column(Integer, nullable=True)         # 可 override 專案預設
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    __table_args__ = (
+        Index("idx_costgroup_project", "project_id", "sort_order"),
+    )
 
 
 class CrmCostLineTemplate(Base):
@@ -399,11 +422,12 @@ class CrmCostLineTemplate(Base):
 
 
 class CrmProjectCostLine(Base):
-    """專案成本估算明細（費用預估 vs 費用結算）。"""
+    """專案成本估算明細（費用預估 vs 費用結算）— 歸屬於 cost_group。"""
     __tablename__ = "crm_project_cost_lines"
 
     id = Column(String(32), primary_key=True)
     project_id = Column(String(32), nullable=False, index=True)
+    cost_group_id = Column(String(32), nullable=True, index=True)  # FK → crm_project_cost_groups
     phase = Column(String(32), nullable=False)              # 前期製作/現場拍攝/後期製作/行政雜支
     item_name = Column(String(128), nullable=False)         # 導演/剪輯/動態攝影...
     sort_order = Column(Integer, nullable=False, default=0)
