@@ -25,6 +25,7 @@ import { _loadCostStaff, _loadAdvances, _loadProjectStaff, initFinanceHandlers }
 import { loadProjectQuotes, initQuoteHandlers } from './crm-projects-quotes.js';
 import { loadDeliveryTab, initDeliveryHandlers } from './crm-projects-delivery.js';
 import { loadProjectTypes } from './crm-projects-core.js';
+import { loadCostGroups, initCostGroupsHandlers } from './crm-projects-cost-groups.js';
 
 // ── 回呼串接（解耦跨模組依賴） ──────────────────────────────
 
@@ -38,6 +39,7 @@ callbacks.loadFinancialSummary = _loadFinancialSummary;
 callbacks.loadCostStaff = _loadCostStaff;
 callbacks.loadAdvances = _loadAdvances;
 callbacks.closeDetail = closeDetail;
+callbacks.loadCostGroups = loadCostGroups;
 
 // ── Init ─────────────────────────────────────────────────────
 
@@ -138,6 +140,7 @@ export async function initCrmProjectsTab() {
             actual: parseInt(document.getElementById('exp-modal-act').value) || 0,
             payee: document.getElementById('exp-modal-payee').value,
             notes: document.getElementById('exp-modal-notes').value,
+            cost_group_id: state.selectedGroupId,
         };
         try {
             const r = await _fetch('/projects/' + state.selectedId + '/expenses', { method: 'POST', body: JSON.stringify(payload) });
@@ -162,6 +165,7 @@ export async function initCrmProjectsTab() {
             estimated: parseInt(document.getElementById('exp-f-est').value) || 0,
             actual: parseInt(document.getElementById('exp-f-act').value) || 0,
             notes: document.getElementById('exp-f-notes').value,
+            cost_group_id: state.selectedGroupId,
         };
         try {
             let expenseId = editId;
@@ -239,6 +243,7 @@ export async function initCrmProjectsTab() {
     initFinanceHandlers();
     initQuoteHandlers();
     initDeliveryHandlers();
+    initCostGroupsHandlers();
 
     // ── Search + filters ──
     let _searchTimer;

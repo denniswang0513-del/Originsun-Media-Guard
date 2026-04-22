@@ -12,6 +12,9 @@ export const state = {
     editingId: null,
     staffList: [],
     filters: { q: '', status: '', client_id: '', am: '' },
+    // 多子表狀態
+    costGroups: [],           // [{id, name, shoot_date, budget_amount, misc_budget_amount, summary, ...}]
+    selectedGroupId: null,    // 當前選中的子表 id
 };
 
 // ── Constants ──────────────────────────────────────────────
@@ -28,4 +31,5 @@ export const callbacks = {
     loadAdvances: null,      // (projectId) => Promise — 刷新預支款
     closeDetail: null,       // () => void — 關閉詳情面板
     loadQuotations: null,    // (projectId) => Promise — 刷新報價單
+    loadCostGroups: null,    // (projectId) => Promise — 刷新子表列表
 };

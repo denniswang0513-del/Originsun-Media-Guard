@@ -22,15 +22,21 @@ async function _loadFinancialSummary(projectId) {
     if (!container) return;
     container.innerHTML = '<div class="crm-empty" style="padding:8px;">載入中...</div>';
     try {
+        // 先載子表列表 + 決定當前選中（loadCostGroups 會保證 selectedGroupId 設定）
+        await callbacks.loadCostGroups?.(projectId);
+        const gid = state.selectedGroupId;
+        const scopeQ = gid ? ('?group_id=' + encodeURIComponent(gid)) : '';
+
         const [f, costData, expData] = await Promise.all([
             _fetch('/projects/' + projectId + '/financial-summary'),
-            _fetch('/projects/' + projectId + '/cost-lines'),
-            _fetch('/projects/' + projectId + '/expenses'),
+            _fetch('/projects/' + projectId + '/cost-lines' + scopeQ),
+            _fetch('/projects/' + projectId + '/expenses' + scopeQ),
         ]);
         const d = calcDashboard(f);
         const rc = remainColor(d.remaining);
         const pc = profitColor(d.profitPct);
         const bc = barColor(d.usagePct);
+        const alert = _renderAllocationAlert(f, d);
 
         container.innerHTML = `
             <div class="cost-dashboard" data-ex-tax="${f.ex_tax}" data-profit-target="${f.profit_target}">
@@ -60,14 +66,36 @@ async function _loadFinancialSummary(projectId) {
             </div>
             <div class="cost-progress-label">預算已使用 ${d.usagePct}% ($${fmtNum(d.totalEstimated)} / $${fmtNum(d.execBudget)})</div>
             ${f.transfer_fee ? `<div style="font-size:11px;color:#6b7280;margin-bottom:4px;">帳款匯費 $${fmtNum(f.transfer_fee)}</div>` : ''}
+            ${alert}
+            <div id="cost-groups-switcher"></div>
             ${_renderCostLines(costData.grouped || [], expData.expenses || [], f)}
         `;
         window._costDirtyMap = {};
+        // Render switcher after innerHTML set（switcher 讀 state.costGroups 即可，已由 loadCostGroups 填入）
+        callbacks.loadCostGroups && document.getElementById('cost-groups-switcher') &&
+            (await import('./crm-projects-cost-groups.js')).renderGroupSwitcher(projectId);
         // Upgrade all staff selects to searchable
         container.querySelectorAll('.cost-staff-sel').forEach(sel => searchableSelect(sel, { placeholder: '搜尋人員...' }));
     } catch (_) {
         container.innerHTML = '<div class="crm-empty">載入失敗</div>';
     }
+}
+
+function _renderAllocationAlert(f, d) {
+    const execBudget = d.execBudget || 0;
+    const allocated = f.allocated_budget_sum || 0;
+    const missing = f.groups_missing_budget_count || 0;
+    const diff = allocated - execBudget;
+    let msgs = [];
+    if (execBudget > 0 && diff > 0) {
+        msgs.push('<div class="cg-alert cg-alert-danger">⚠ 子表預算加總超出合約執行預算 $' + fmtNum(diff) + ' — 建議調整</div>');
+    } else if (execBudget > 0 && diff < 0 && missing === 0) {
+        msgs.push('<div class="cg-alert cg-alert-ok">✓ 尚可分配 $' + fmtNum(-diff) + '</div>');
+    }
+    if (missing > 0) {
+        msgs.push('<div class="cg-alert cg-alert-hint">💡 還有 ' + missing + ' 張子表未設預算</div>');
+    }
+    return msgs.join('');
 }
 
 // ── Expense Form ───────────────────────────────────────────────
@@ -664,7 +692,10 @@ window._costSaveAll = async function() {
 window._projInitCostLines = async function() {
     if (!state.selectedId) return;
     try {
-        const r = await _fetch('/projects/' + state.selectedId + '/cost-lines/init', { method: 'POST', body: '{}' });
+        const r = await _fetch('/projects/' + state.selectedId + '/cost-lines/init', {
+            method: 'POST',
+            body: JSON.stringify({ cost_group_id: state.selectedGroupId })
+        });
         _loadFinancialSummary(state.selectedId);
         if (r.added === 0) alert('所有標準項目已存在，無需初始化');
     } catch (e) { alert('初始化失敗：' + e.message); }
@@ -718,10 +749,12 @@ window._costImportFromQuote = async function() {
 window._doImportFromQuote = async function(quotationId) {
     const overlay = document.getElementById('cost-import-quote-overlay');
     if (overlay) overlay.remove();
-    if (!confirm('將從報價匯入成本項目，現有成本項目將被取代。確定？')) return;
+    const groupName = state.costGroups.find(g => g.id === state.selectedGroupId)?.name || '主表';
+    if (!confirm('將從報價匯入成本項目到「' + groupName + '」，該子表現有項目將被取代。確定？')) return;
     try {
         const r = await _fetch('/projects/' + state.selectedId + '/cost-lines/import-from-quotation', {
-            method: 'POST', body: JSON.stringify({ quotation_id: quotationId })
+            method: 'POST',
+            body: JSON.stringify({ quotation_id: quotationId, cost_group_id: state.selectedGroupId })
         });
         _loadFinancialSummary(state.selectedId);
         if (r.added === 0) alert('報價中沒有項目可匯入');
@@ -734,7 +767,8 @@ window._costDeletePhase = async function(phase) {
     if (!confirm('確定刪除「' + phase + '」所有項目？')) return;
     try {
         await _fetch('/projects/' + state.selectedId + '/cost-lines/phase', {
-            method: 'DELETE', body: JSON.stringify({ phase: phase })
+            method: 'DELETE',
+            body: JSON.stringify({ phase: phase, group_id: state.selectedGroupId })
         });
         _loadFinancialSummary(state.selectedId);
     } catch (e) { alert('刪除失敗：' + e.message); }
@@ -842,6 +876,7 @@ window._costDoAddItem = async function(phase) {
         await _fetch('/projects/' + state.selectedId + '/cost-lines', {
             method: 'POST', body: JSON.stringify({
                 phase: phase, item_name: name, sort_order: 99,
+                cost_group_id: state.selectedGroupId,
                 estimated_unit_price: price, estimated_quantity: qty,
                 estimated_unit_type: unitType, estimated_amount: amt,
                 estimated_staff_id: staffId
@@ -886,9 +921,12 @@ const _COST_LINE_DEFAULT_COUNT = 25;
 window._costApplyTemplate = async function(templateId) {
     if (!state.selectedId) return;
     document.getElementById('cost-tpl-dropdown').style.display = 'none';
+    const groupName = state.costGroups.find(g => g.id === state.selectedGroupId)?.name || '主表';
+    if (!confirm('將範本套用到「' + groupName + '」，該子表現有項目將被取代。確定？')) return;
     try {
         const r = await _fetch('/projects/' + state.selectedId + '/cost-lines/apply-template', {
-            method: 'POST', body: JSON.stringify({ template_id: templateId })
+            method: 'POST',
+            body: JSON.stringify({ template_id: templateId, cost_group_id: state.selectedGroupId })
         });
         _loadFinancialSummary(state.selectedId);
         if (r.added === 0) alert('所有項目已存在，無需新增');

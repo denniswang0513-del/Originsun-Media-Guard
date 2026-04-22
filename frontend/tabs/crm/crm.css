@@ -1283,3 +1283,109 @@
 .showcase-publish-status { font-size: 13px; font-weight: 600; }
 .showcase-status-published { color: #22c55e; }
 .showcase-status-draft { color: #6b7280; }
+
+/* ───────── Cost Groups (成本子表切換器) ───────── */
+.cg-switcher-title {
+    font-size: 12px; font-weight: 700; color: #6b7280;
+    margin: 16px 0 8px; padding-top: 10px;
+    border-top: 1px solid #2e2e2e;
+}
+.cg-switcher {
+    display: flex; gap: 8px;
+    overflow-x: auto;
+    padding: 4px 2px 10px;
+    scrollbar-width: thin;
+}
+.cg-switcher::-webkit-scrollbar { height: 6px; }
+.cg-switcher::-webkit-scrollbar-thumb { background: #374151; border-radius: 3px; }
+.cg-chip {
+    position: relative;
+    flex: 0 0 auto;
+    width: 160px;
+    padding: 10px 10px 8px;
+    border-radius: 8px;
+    background: #1f2937;
+    border: 1px solid #374151;
+    cursor: pointer;
+    transition: border-color 0.15s, background 0.15s;
+    display: flex; flex-direction: column; gap: 3px;
+}
+.cg-chip:hover { border-color: #4b5563; background: #263244; }
+.cg-chip.active { border: 2px solid #3b82f6; background: #1e3a5f; padding: 9px 9px 7px; }
+.cg-chip-menu {
+    position: absolute; top: 4px; right: 4px;
+    background: transparent; border: none; color: #6b7280;
+    cursor: pointer; font-size: 14px; line-height: 1;
+    padding: 2px 6px; border-radius: 3px;
+}
+.cg-chip-menu:hover { background: rgba(255,255,255,0.08); color: #e5e7eb; }
+.cg-chip-name {
+    font-size: 13px; font-weight: 700; color: #e5e7eb;
+    padding-right: 18px;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.cg-chip-date { font-size: 11px; color: #9ca3af; margin-bottom: 3px; }
+.cg-chip-budget, .cg-chip-actual { font-size: 11px; color: #d1d5db; }
+.cg-chip .cg-muted { color: #6b7280; }
+.cg-chip-bar {
+    height: 3px; background: #374151; border-radius: 2px;
+    margin-top: 4px; overflow: hidden;
+}
+.cg-chip-bar-fill { height: 100%; border-radius: 2px; transition: width 0.2s; }
+.cg-chip-status { font-size: 10px; margin-top: 4px; }
+.cg-chip-add {
+    width: 120px;
+    justify-content: center; align-items: center;
+    border: 1px dashed #4b5563; background: transparent;
+    color: #9ca3af;
+}
+.cg-chip-add:hover { border-color: #60a5fa; color: #60a5fa; background: rgba(59,130,246,0.08); }
+.cg-chip-add-icon { font-size: 20px; line-height: 1; }
+
+.cg-badge {
+    display: inline-block;
+    padding: 2px 6px; border-radius: 3px;
+    font-size: 10px; font-weight: 600;
+}
+.cg-badge-hint { background: #1e3a5f; color: #60a5fa; }
+.cg-badge-idle { background: #374151; color: #9ca3af; }
+.cg-badge-ok { background: #064e3b; color: #86efac; }
+.cg-badge-warn { background: #3f2d0b; color: #fbbf24; }
+.cg-badge-danger { background: #7f1d1d; color: #fca5a5; }
+
+/* Menu popover */
+.cg-menu-pop {
+    background: #2a2a2a;
+    border: 1px solid #3a3a3a;
+    border-radius: 6px;
+    padding: 4px;
+    min-width: 120px;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.4);
+    display: flex; flex-direction: column;
+}
+.cg-menu-item {
+    background: transparent; border: none;
+    color: #e5e7eb; text-align: left;
+    padding: 6px 10px; border-radius: 4px;
+    cursor: pointer; font-size: 12px;
+}
+.cg-menu-item:hover { background: #374151; }
+.cg-menu-danger { color: #fca5a5; }
+.cg-menu-danger:hover { background: #7f1d1d; color: #fecaca; }
+
+/* Allocation hints */
+.cg-alert {
+    padding: 8px 12px; border-radius: 6px;
+    font-size: 12px; margin: 8px 0 4px;
+}
+.cg-alert-danger { background: #7f1d1d; color: #fca5a5; }
+.cg-alert-ok { background: #064e3b; color: #86efac; font-size: 11px; padding: 4px 10px; }
+.cg-alert-hint { background: #1e3a5f; color: #60a5fa; font-size: 11px; padding: 4px 10px; }
+
+/* Modal allocation hint */
+.cg-alloc-hint { margin: 12px 0 0; }
+.cg-alloc-ok, .cg-alloc-danger {
+    padding: 10px 12px; border-radius: 6px; font-size: 12px; line-height: 1.6;
+}
+.cg-alloc-ok { background: #1e3a5f; color: #93c5fd; }
+.cg-alloc-danger { background: #7f1d1d; color: #fca5a5; }

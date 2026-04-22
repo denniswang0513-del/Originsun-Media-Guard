@@ -434,6 +434,7 @@ window._advAddExpense = function(payeeName, advanceId) {
                     payee: payeeName,
                     advance_id: advanceId || '',
                     notes: document.getElementById('adv-exp-notes').value,
+                    cost_group_id: state.selectedGroupId,
                 })
             });
             overlay.remove();
