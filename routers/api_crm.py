@@ -1996,6 +1996,29 @@ async def add_project_expense(project_id: str, req: ProjectExpensePayload, reque
     return {"status": "ok", "expense_id": e.id, "expense": {"id": e.id}}
 
 
+@router.patch("/project-expenses/{expense_id}")
+async def patch_project_expense(expense_id: str, request: Request):
+    """部分更新雜支欄位（供前端 inline edit 使用）。body 只需傳有改動的欄位。"""
+    _check_auth(request)
+    _require_db()
+    body = await request.json()
+    factory = await _get_factory()
+    async with factory() as session:
+        e = await session.get(CrmProjectExpense, expense_id)
+        if not e:
+            raise HTTPException(status_code=404, detail="找不到此雜支")
+        editable = ("category", "sub_item", "payee", "actual", "estimated",
+                    "notes", "cost_group_id", "advance_id")
+        for key in editable:
+            if key in body:
+                val = body[key]
+                if key in ("sub_item", "payee", "notes", "advance_id", "cost_group_id") and val == "":
+                    val = None
+                setattr(e, key, val)
+        await session.commit()
+    return {"status": "ok"}
+
+
 @router.patch("/project-expenses/link-advance")
 async def link_expenses_to_advance(request: Request):
     """批次綁定/解除雜支與預支款。body: {expense_ids: [...], advance_id: "..." 或 ""}"""

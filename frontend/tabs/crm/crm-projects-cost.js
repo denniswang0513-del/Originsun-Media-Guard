@@ -15,6 +15,7 @@ const _INT_FIELD_NAMES = [
 
 // ── Dirty map ──────────────────────────────────────────────────
 window._costDirtyMap = {};
+window._expDirtyMap = {};  // {expId: {field: value}} 行政雜支 inline edit
 
 // ── Financial Summary ──────────────────────────────────────────
 async function _loadFinancialSummary(projectId) {
@@ -71,6 +72,7 @@ async function _loadFinancialSummary(projectId) {
             ${_renderCostLines(costData.grouped || [], expData.expenses || [], f)}
         `;
         window._costDirtyMap = {};
+        window._expDirtyMap = {};
         callbacks.renderGroupSwitcher?.();
         container.querySelectorAll('.cost-staff-sel').forEach(sel => searchableSelect(sel, { placeholder: '搜尋人員...' }));
     } catch (_) {
@@ -301,15 +303,19 @@ function _renderCostLines(grouped, expenses, financialSummary) {
 
         if (expenses && expenses.length > 0) {
             for (const e of expenses) {
-                const label = e.sub_item ? _esc(e.category) + ' · ' + _esc(e.sub_item) : _esc(e.category);
                 const dateStr = e.created_at ? `<span style="color:#4b5563;font-size:10px;margin-left:6px;">${e.created_at}</span>` : '';
+                const catCell = `<span class="cost-editable" onclick="window._expEdit(this,'${e.id}','category','${_esc(e.category)}')">${_esc(e.category)}</span>`;
+                const subDisplay = e.sub_item ? _esc(e.sub_item) : '<span class="crm-muted">—</span>';
+                const subCell = `<span class="cost-editable" onclick="window._expEdit(this,'${e.id}','sub_item','${_esc(e.sub_item || '')}')">${subDisplay}</span>`;
+                const payeeDisplay = e.payee ? _esc(e.payee) : '<span class="crm-muted">—</span>';
+                const payeeCell = `<span class="cost-editable" onclick="window._expEdit(this,'${e.id}','payee','${_esc(e.payee || '')}')">${payeeDisplay}</span>`;
                 html += `
                   <div class="cost-row">
-                    <span class="cost-col-item">${label}${dateStr}</span>
+                    <span class="cost-col-item">${catCell} · ${subCell}${dateStr}</span>
                     <span class="cost-col-amt"></span>
                     <span class="cost-col-staff"></span>
-                    <span class="cost-col-amt">$${fmtNum(e.actual)}</span>
-                    <span class="cost-col-staff" style="font-size:11px;color:#9ca3af;">${_esc(e.payee || '')}</span>
+                    <span class="cost-col-amt cost-editable" onclick="window._expEdit(this,'${e.id}','actual',${e.actual || 0})">$${fmtNum(e.actual)}</span>
+                    <span class="cost-col-staff" style="font-size:11px;color:#9ca3af;">${payeeCell}</span>
                     <span class="cost-col-diff">${e.receipt_url ? '<a href="' + e.receipt_url + '" target="_blank" style="color:#3b82f6;">📎</a>' : '—'}</span>
                     <span class="cost-col-actions">
                       <button class="crm-btn crm-btn-danger crm-btn-sm" style="padding:1px 5px;"
@@ -639,6 +645,7 @@ window._costSaveAll = async function() {
     var saveBtn = document.getElementById('_inline-save');
     if (saveBtn) { saveBtn.disabled = true; saveBtn.textContent = '儲存中...'; }
     var costEntries = Object.entries(window._costDirtyMap || {});
+    var expEntries = Object.entries(window._expDirtyMap || {});
 
     // Also check if enableInlineEdit fields are present (edit button was clicked)
     var infoPayload = null;
@@ -654,23 +661,26 @@ window._costSaveAll = async function() {
         });
     }
 
-    if (costEntries.length === 0 && !infoPayload) {
+    if (costEntries.length === 0 && expEntries.length === 0 && !infoPayload) {
         if (saveBtn) { saveBtn.disabled = false; saveBtn.textContent = '儲存'; }
         return;
     }
     try {
-        // Save project info if edited
         if (infoPayload && state.selectedId) {
             await _fetch('/projects/' + state.selectedId, { method: 'PUT', body: JSON.stringify(infoPayload) });
         }
-        // Save cost line edits
         for (var i = 0; i < costEntries.length; i++) {
             await _fetch('/project-cost-lines/' + costEntries[i][0], {
                 method: 'PUT', body: JSON.stringify(costEntries[i][1])
             });
         }
+        for (var j = 0; j < expEntries.length; j++) {
+            await _fetch('/project-expenses/' + expEntries[j][0], {
+                method: 'PATCH', body: JSON.stringify(expEntries[j][1])
+            });
+        }
         window._costDirtyMap = {};
-        // Restore and reload
+        window._expDirtyMap = {};
         var proj = state.projects.find(function(p) { return p.id === state.selectedId; });
         if (infoPayload) await callbacks.loadProjects?.();
         var updated = proj;
@@ -778,6 +788,72 @@ window._projDeleteCostLine = async function(lineId) {
         await _fetch('/project-cost-lines/' + lineId, { method: 'DELETE' });
         _loadFinancialSummary(state.selectedId);
     } catch (e) { alert(e.message); }
+};
+
+// ── Inline edit: 行政雜支（類別/細項/金額/請款人）─────────────
+window._expEdit = function(cell, expId, field, currentVal) {
+    if (cell.querySelector('input, select')) return;
+    window._costShowSaveBtn(true);
+    const isCategory = field === 'category';
+    const isAmount = field === 'actual';
+    let input;
+    if (isCategory) {
+        input = document.createElement('select');
+        input.innerHTML = EXPENSE_CATEGORIES.map(c =>
+            `<option value="${c}"${c === currentVal ? ' selected' : ''}>${c}</option>`
+        ).join('');
+    } else {
+        input = document.createElement('input');
+        input.type = isAmount ? 'number' : 'text';
+        if (isAmount) input.min = '0';
+        input.value = currentVal !== null && currentVal !== undefined ? currentVal : '';
+    }
+    input.className = 'crm-input';
+    input.style.cssText = 'width:100%;max-width:100%;box-sizing:border-box;padding:2px 4px;font-size:11px;' +
+        (isAmount ? 'text-align:right;' : '');
+    cell.innerHTML = '';
+    cell.appendChild(input);
+    input.focus();
+    if (input.select) input.select();
+
+    const commit = function() {
+        let val = input.value;
+        if (isAmount) val = val === '' ? 0 : parseInt(val) || 0;
+        window._expDirtyMap[expId] = window._expDirtyMap[expId] || {};
+        window._expDirtyMap[expId][field] = val;
+        // Display
+        if (isAmount) {
+            cell.textContent = '$' + fmtNum(val);
+        } else if (isCategory) {
+            cell.textContent = val;
+        } else {
+            cell.innerHTML = val ? _esc(val) : '<span class="crm-muted">—</span>';
+        }
+    };
+
+    if (isCategory) {
+        input.addEventListener('change', commit);
+        input.addEventListener('blur', function() {
+            // select 的 blur 也送一次 commit（避免直接點到其他地方）
+            if (!cell.querySelector('select')) return;
+            commit();
+        });
+    } else {
+        input.addEventListener('blur', commit);
+    }
+    input.addEventListener('keydown', function(e) {
+        if (e.key === 'Enter') { e.preventDefault(); input.blur(); }
+        if (e.key === 'Escape') {
+            // restore original
+            if (isAmount) {
+                cell.textContent = '$' + fmtNum(parseInt(currentVal) || 0);
+            } else if (isCategory) {
+                cell.textContent = currentVal;
+            } else {
+                cell.innerHTML = currentVal ? _esc(currentVal) : '<span class="crm-muted">—</span>';
+            }
+        }
+    });
 };
 
 // ── Edit item name ─────────────────────────────────────────────
@@ -963,7 +1039,9 @@ window._costDeleteTemplate = async function(templateId) {
 
 // ── Unsaved changes guard ──────────────────────────────────────
 window._costCheckUnsaved = function(callback) {
-    if (Object.keys(window._costDirtyMap || {}).length === 0) {
+    var dirty = Object.keys(window._costDirtyMap || {}).length
+              + Object.keys(window._expDirtyMap || {}).length;
+    if (dirty === 0) {
         if (callback) callback();
         return true;
     }
@@ -988,6 +1066,7 @@ window._costCheckUnsaved = function(callback) {
     document.getElementById('_unsaved-discard').addEventListener('click', function() {
         overlay.remove();
         window._costDirtyMap = {};
+        window._expDirtyMap = {};
         callback();
     });
     document.getElementById('_unsaved-save').addEventListener('click', async function() {
@@ -1033,6 +1112,7 @@ window._costShowSaveBtn = function(show) {
 
 window._costCancelAll = function() {
     window._costDirtyMap = {};
+    window._expDirtyMap = {};
     var project = state.projects.find(function(p) { return p.id === state.selectedId; });
     if (project) callbacks.renderDetail?.(project);
     if (state.selectedId) _loadFinancialSummary(state.selectedId);
@@ -1041,7 +1121,9 @@ window._costCancelAll = function() {
 // ── Init: register all window handlers + beforeunload ──────────
 function initCostHandlers() {
     window.addEventListener('beforeunload', function(e) {
-        if (Object.keys(window._costDirtyMap || {}).length > 0) {
+        var dirty = Object.keys(window._costDirtyMap || {}).length
+                  + Object.keys(window._expDirtyMap || {}).length;
+        if (dirty > 0) {
             e.preventDefault();
             e.returnValue = '';
         }
