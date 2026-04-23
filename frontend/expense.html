@@ -63,6 +63,11 @@ textarea { resize: vertical; min-height: 50px; font-family: inherit; }
       <label>專案</label>
       <select id="exp-project"></select>
 
+      <div id="exp-group-row" style="display:none;">
+        <label>子表</label>
+        <select id="exp-group"></select>
+      </div>
+
       <label>類別</label>
       <select id="exp-category">
         <option value="交通">交通</option>
@@ -131,13 +136,13 @@ async function _init() {
       const sel = document.getElementById('exp-project');
       sel.innerHTML = '<option value="' + pubProjectId + '">' + (info.name || '專案') + '</option>';
       sel.disabled = true;
+      _populateGroups(info.cost_groups || []);
     } catch (_) {
       const sel = document.getElementById('exp-project');
       sel.innerHTML = '<option>無法載入專案</option>';
     }
     document.getElementById('main-section').style.display = '';
     _loadHistory();
-    // Photo preview
     document.getElementById('exp-file').addEventListener('change', _handlePhoto);
     return;
   }
@@ -152,12 +157,45 @@ async function _init() {
     sel.innerHTML = (data.projects || []).map(p =>
       '<option value="' + p.id + '">' + p.name + ' (' + (p.client_short_name || '') + ')</option>'
     ).join('');
-    if (data.projects?.length) { _projectId = data.projects[0].id; _loadHistory(); }
-    sel.addEventListener('change', e => { _projectId = e.target.value; _loadHistory(); });
+    if (data.projects?.length) {
+      _projectId = data.projects[0].id;
+      await _loadGroups(_projectId);
+      _loadHistory();
+    }
+    sel.addEventListener('change', async e => {
+      _projectId = e.target.value;
+      await _loadGroups(_projectId);
+      _loadHistory();
+    });
   } catch (_) {}
 
-  // Photo preview
   document.getElementById('exp-file').addEventListener('change', _handlePhoto);
+}
+
+async function _loadGroups(projectId) {
+  try {
+    const r = await fetch(BASE + '/projects/' + projectId + '/cost-groups', { headers: _headers() });
+    const data = await r.json();
+    _populateGroups(data.cost_groups || []);
+  } catch (_) {
+    _populateGroups([]);
+  }
+}
+
+function _populateGroups(groups) {
+  const sel = document.getElementById('exp-group');
+  const row = document.getElementById('exp-group-row');
+  if (groups.length === 0) {
+    sel.innerHTML = '';
+    row.style.display = 'none';
+    return;
+  }
+  sel.innerHTML = groups.map(g => {
+    const date = g.shoot_date ? ' (' + g.shoot_date + ')' : '';
+    return '<option value="' + g.id + '">' + g.name + date + '</option>';
+  }).join('');
+  // 只有主表時隱藏下拉，減少視覺雜訊
+  row.style.display = groups.length > 1 ? '' : 'none';
 }
 
 function _handlePhoto(e) {
@@ -207,6 +245,7 @@ async function _submit() {
     const expUrl = _publicMode
       ? BASE + '/public/projects/' + _projectId + '/expenses'
       : BASE + '/projects/' + _projectId + '/expenses';
+    const groupId = document.getElementById('exp-group').value || null;
     const r = await fetch(expUrl, {
       method: 'POST', headers: _publicMode ? { 'Content-Type': 'application/json' } : _headers(),
       body: JSON.stringify({
@@ -215,6 +254,7 @@ async function _submit() {
         estimated: 0, actual: amount,
         payee: document.getElementById('exp-payee').value,
         notes: document.getElementById('exp-notes').value,
+        cost_group_id: groupId,
       }),
     });
     if (!r.ok) throw new Error((await r.json().catch(() => ({}))).detail || '建立失敗');
