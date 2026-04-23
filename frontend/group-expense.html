@@ -193,13 +193,15 @@ async function _submit() {
       });
     }
 
-    _showMsg('登記成功！', false);
+    _showMsg('✓ 已送出 · 可繼續登記下一筆', false);
+    // 清空輸入欄位（保留請款人，通常同一人連續登記）
     document.getElementById('f-sub-item').value = '';
     document.getElementById('f-amount').value = '';
     document.getElementById('f-notes').value = '';
     document.getElementById('f-file').value = '';
     document.getElementById('photo-area').innerHTML = '<div style="font-size:32px;margin-bottom:4px;">📷</div><div>點擊拍照或選擇圖片</div>';
     document.getElementById('photo-area').classList.remove('has-img');
+    window.scrollTo({ top: 0, behavior: 'smooth' });
     _loadHistory();
   } catch (e) {
     _showMsg(e.message, true);

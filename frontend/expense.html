@@ -282,14 +282,16 @@ async function _submit() {
       });
     }
 
-    _showMsg('登記成功！', false);
-    // Reset form
+    _showMsg('✓ 已送出 · 可繼續登記下一筆', false);
+    // 清空輸入欄位（保留專案/子表/類別/請款人，通常連續登記同一人同類別）
+    document.getElementById('exp-sub-item').value = '';
     document.getElementById('exp-amount').value = '';
     document.getElementById('exp-notes').value = '';
     document.getElementById('exp-file').value = '';
     const area = document.getElementById('photo-area');
     area.innerHTML = '<div class="cam-icon">📷</div><div>點擊拍照或選擇圖片</div>';
     area.classList.remove('has-img');
+    window.scrollTo({ top: 0, behavior: 'smooth' });
     _loadHistory();
   } catch (e) {
     _showMsg(e.message, true);

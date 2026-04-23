@@ -183,13 +183,14 @@ async function _submit() {
       await fetch(BASE + '/project-expenses/' + expenseId + '/receipt', { method: 'POST', body: form });
     }
 
-    _showMsg('登記成功！', false);
+    _showMsg('✓ 已送出 · 可繼續登記下一筆', false);
     document.getElementById('f-sub-item').value = '';
     document.getElementById('f-amount').value = '';
     document.getElementById('f-notes').value = '';
     document.getElementById('f-file').value = '';
     document.getElementById('photo-area').innerHTML = '<div style="font-size:32px;margin-bottom:4px;">📷</div><div>點擊拍照或選擇圖片</div>';
     document.getElementById('photo-area').classList.remove('has-img');
+    window.scrollTo({ top: 0, behavior: 'smooth' });
     _loadHistory();
     _init(); // Refresh advance info
   } catch (e) {
