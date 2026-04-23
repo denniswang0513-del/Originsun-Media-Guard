@@ -1342,16 +1342,51 @@
 .cg-chip-add:hover { border-color: #60a5fa; color: #60a5fa; background: rgba(59,130,246,0.08); }
 .cg-chip-add-icon { font-size: 20px; line-height: 1; }
 
-.cg-badge {
-    display: inline-block;
-    padding: 2px 6px; border-radius: 3px;
-    font-size: 10px; font-weight: 600;
+/* Chip state variants — 用底色表達預算狀態（取代 badge） */
+.cg-chip-warn { background: #3f2d0b; border-color: #78350f; }
+.cg-chip-warn:hover { background: #4a350e; }
+.cg-chip-warn.active { background: #4a350e; border-color: #f59e0b; }
+
+.cg-chip-danger { background: #3b1212; border-color: #7f1d1d; }
+.cg-chip-danger:hover { background: #4a1717; }
+.cg-chip-danger.active { background: #4a1717; border-color: #ef4444; }
+
+/* Chip rows — 剩餘 / 進度條 + % / 未設預算提示 / 編輯按鈕 */
+.cg-chip-remain { font-size: 11px; color: #d1d5db; }
+.cg-chip-remain-over { color: #fca5a5; font-weight: 700; }
+.cg-chip .cg-muted.cg-chip-remain,
+.cg-chip-remain.cg-muted { color: #6b7280; }
+
+.cg-chip-bar-row {
+    display: flex; align-items: center; gap: 6px;
+    margin-top: 4px;
 }
-.cg-badge-hint { background: #1e3a5f; color: #60a5fa; }
-.cg-badge-idle { background: #374151; color: #9ca3af; }
-.cg-badge-ok { background: #064e3b; color: #86efac; }
-.cg-badge-warn { background: #3f2d0b; color: #fbbf24; }
-.cg-badge-danger { background: #7f1d1d; color: #fca5a5; }
+.cg-chip-bar-row .cg-chip-bar { flex: 1; }
+.cg-chip-pct {
+    font-size: 10px; color: #9ca3af;
+    min-width: 34px; text-align: right; font-variant-numeric: tabular-nums;
+}
+.cg-chip-danger .cg-chip-pct { color: #fca5a5; font-weight: 700; }
+
+.cg-chip-hint {
+    font-size: 11px; color: #60a5fa;
+    padding: 4px 0 2px;
+}
+
+.cg-chip-edit {
+    margin-top: 8px;
+    padding: 4px 8px;
+    background: #374151; color: #e5e7eb;
+    border: 1px solid #4b5563; border-radius: 4px;
+    font-size: 11px; font-weight: 600;
+    cursor: pointer; width: 100%;
+    transition: background 0.15s;
+}
+.cg-chip-edit:hover { background: #4b5563; }
+.cg-chip-edit-primary {
+    background: #3b82f6; border-color: #2563eb; color: #fff;
+}
+.cg-chip-edit-primary:hover { background: #2563eb; }
 
 /* Menu popover */
 .cg-menu-pop {
@@ -1390,56 +1425,3 @@
 .cg-alloc-ok { background: #1e3a5f; color: #93c5fd; }
 .cg-alloc-danger { background: #7f1d1d; color: #fca5a5; }
 
-/* Sub-table dashboard (區塊 6 — 簡化版單列) */
-.cg-dash-header {
-    display: flex; justify-content: space-between; align-items: center; gap: 12px;
-    padding: 10px 12px;
-    background: #141414; border: 1px solid #2e2e2e;
-    border-radius: 6px 6px 0 0;
-    border-bottom: none;
-    transition: background 0.2s, border-color 0.2s;
-}
-.cg-dash-title {
-    font-size: 13px; color: #d1d5db;
-    flex: 1; min-width: 0;
-    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-}
-.cg-dash-title strong { color: #e5e7eb; font-weight: 700; }
-.cg-dash-header-over { background: #3b1212; border-color: #7f1d1d; }
-.cg-dash-header-over .cg-dash-title,
-.cg-dash-header-over .cg-dash-title strong { color: #fca5a5; }
-
-.cg-dash-strip {
-    padding: 10px 12px;
-    background: #141414;
-    border-left: 1px solid #2e2e2e; border-right: 1px solid #2e2e2e;
-    font-size: 13px; color: #d1d5db;
-}
-.cg-dash-strip-over {
-    background: #1f0e0e;
-    border-left-color: #7f1d1d; border-right-color: #7f1d1d;
-}
-.cg-dash-sep { color: #4b5563; margin: 0 4px; }
-.cg-dash-ok { color: #86efac; font-weight: 600; }
-.cg-dash-over { color: #fca5a5; font-weight: 700; }
-
-.cg-dash-empty {
-    padding: 14px 12px;
-    background: #141414; border: 1px solid #2e2e2e;
-    border-top: none; border-radius: 0 0 6px 6px;
-    font-size: 13px; color: #9ca3af;
-}
-
-/* Progress bar (共用於一般 / 超支狀態) */
-.cg-dashboard-bar {
-    height: 6px; background: #2e2e2e;
-    border-left: 1px solid #2e2e2e; border-right: 1px solid #2e2e2e;
-    overflow: hidden;
-}
-.cg-dashboard-bar-fill { height: 100%; transition: width 0.2s; }
-.cg-dashboard-bar-label {
-    font-size: 11px; color: #9ca3af;
-    padding: 6px 12px 10px;
-    background: #141414; border: 1px solid #2e2e2e;
-    border-top: none; border-radius: 0 0 6px 6px;
-}

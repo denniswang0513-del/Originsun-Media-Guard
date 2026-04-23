@@ -10,7 +10,7 @@
  */
 import { crmFetch as _fetch, esc as _esc, fmtNum } from './crm-utils.js';
 import { state, callbacks } from './crm-projects-state.js';
-import { barColor, remainColor } from './crm-projects-calc.js';
+import { barColor } from './crm-projects-calc.js';
 
 // ── Data ──────────────────────────────────────────────────────
 
@@ -56,20 +56,43 @@ function _renderChip(g, active, canDelete) {
     const s = g.summary || {};
     const total = (g.budget_amount || 0) + (g.misc_budget_amount || 0);
     const used = s.total_actual || 0;
+    const remain = total - used;
     const pct = _usagePct(used, total);
+    const hasBudget = total > 0;
+    const over = hasBudget && remain < 0;
+    const nearLimit = hasBudget && !over && pct > 80;
+    const stateClass = over ? 'cg-chip-danger' : nearLimit ? 'cg-chip-warn' : '';
+
     const date = g.shoot_date ? `<div class="cg-chip-date">${_esc(g.shoot_date)}</div>` : '<div class="cg-chip-date">&nbsp;</div>';
     const actions = canDelete || active
         ? `<button class="cg-chip-menu" onclick="event.stopPropagation();window._cgMenu('${g.id}',event)" title="選項">⋯</button>`
         : '';
+
+    const remainRow = hasBudget
+        ? `<div class="cg-chip-remain ${over ? 'cg-chip-remain-over' : ''}">${over ? '超支' : '剩餘'} $${fmtNum(Math.abs(remain))}</div>`
+        : '<div class="cg-chip-remain cg-muted">剩餘 —</div>';
+
+    const barRow = hasBudget
+        ? `<div class="cg-chip-bar-row">
+               <div class="cg-chip-bar"><div class="cg-chip-bar-fill" style="width:${Math.min(pct ?? 0, 100)}%;background:${_pctColor(pct)};"></div></div>
+               <span class="cg-chip-pct">${pct}%${over ? ' ↑' : ''}</span>
+           </div>`
+        : '<div class="cg-chip-hint">💡 未設預算</div>';
+
+    const editBtn = active
+        ? `<button class="cg-chip-edit ${hasBudget ? '' : 'cg-chip-edit-primary'}" onclick="event.stopPropagation();window._cgEdit('${g.id}')">✎ ${hasBudget ? '編輯' : '設定預算'}</button>`
+        : '';
+
     return `
-        <div class="cg-chip ${active ? 'active' : ''}" onclick="window._cgSelect('${g.id}')">
+        <div class="cg-chip ${stateClass} ${active ? 'active' : ''}" onclick="window._cgSelect('${g.id}')">
             ${actions}
             <div class="cg-chip-name">${_esc(g.name)}</div>
             ${date}
-            <div class="cg-chip-budget">預算 ${total > 0 ? '$' + fmtNum(total) : '<span class="cg-muted">未設</span>'}</div>
+            <div class="cg-chip-budget">預算 ${hasBudget ? '$' + fmtNum(total) : '<span class="cg-muted">未設</span>'}</div>
             <div class="cg-chip-actual">結算 ${used > 0 ? '$' + fmtNum(used) : '<span class="cg-muted">—</span>'}</div>
-            <div class="cg-chip-bar"><div class="cg-chip-bar-fill" style="width:${Math.min(pct ?? 0, 100)}%;background:${_pctColor(pct)};"></div></div>
-            <div class="cg-chip-status">${_statusBadge(total, used, pct)}</div>
+            ${remainRow}
+            ${barRow}
+            ${editBtn}
         </div>
     `;
 }
@@ -79,71 +102,6 @@ function _usagePct(actual, budget) {
 }
 
 const _pctColor = (pct) => pct == null ? '#4b5563' : barColor(pct);
-
-function _statusBadge(total, used, pct) {
-    if (total === 0) return '<span class="cg-badge cg-badge-hint">💡 未設預算</span>';
-    if (used === 0) return '<span class="cg-badge cg-badge-idle">未開始</span>';
-    if (pct > 100) return `<span class="cg-badge cg-badge-danger">↑ 超支 $${fmtNum(used - total)}</span>`;
-    if (pct > 80) return '<span class="cg-badge cg-badge-warn">⚠ 接近上限</span>';
-    return '<span class="cg-badge cg-badge-ok">✓ 預算內</span>';
-}
-
-// ── Render: Dashboard ─────────────────────────────────────────
-
-function _renderHeader(g, over, hasBudget) {
-    const meta = [g.shoot_date, g.notes].filter(Boolean).map(_esc).join(' · ');
-    const editLabel = hasBudget ? '編輯' : '設定預算';
-    return `
-        <div class="cg-dash-header ${over ? 'cg-dash-header-over' : ''}">
-            <div class="cg-dash-title">
-                <strong>${_esc(g.name)}</strong>${meta ? ' · ' + meta : ''}
-            </div>
-            <button class="crm-btn ${hasBudget ? 'crm-btn-secondary' : 'crm-btn-primary'} crm-btn-sm"
-                    onclick="window._cgEdit('${g.id}')">✎ ${editLabel}</button>
-        </div>
-    `;
-}
-
-export function renderGroupDashboard() {
-    const host = document.getElementById('cost-group-dashboard');
-    if (!host) return;
-    const g = state.costGroups.find(x => x.id === state.selectedGroupId);
-    if (!g) { host.innerHTML = ''; return; }
-
-    const s = g.summary || {};
-    const totalBudget = (g.budget_amount || 0) + (g.misc_budget_amount || 0);
-    const totalActual = s.total_actual || 0;
-    const remain = totalBudget - totalActual;
-    const pct = _usagePct(totalActual, totalBudget);
-    const over = totalBudget > 0 && remain < 0;
-
-    if (totalBudget === 0) {
-        host.innerHTML = `
-            ${_renderHeader(g, false, false)}
-            <div class="cg-dash-empty">💡 此子表尚未設定預算 · 已用 $${fmtNum(totalActual)}</div>
-        `;
-        return;
-    }
-
-    const remainText = over
-        ? `<span class="cg-dash-over">超支 $${fmtNum(-remain)} ⚠</span>`
-        : `<span class="cg-dash-ok">剩餘 $${fmtNum(remain)} ✓</span>`;
-
-    host.innerHTML = `
-        ${_renderHeader(g, over, true)}
-        <div class="cg-dash-strip ${over ? 'cg-dash-strip-over' : ''}">
-            預算 $${fmtNum(totalBudget)}
-            <span class="cg-dash-sep">·</span>
-            已用 $${fmtNum(totalActual)}
-            <span class="cg-dash-sep">·</span>
-            ${remainText}
-        </div>
-        <div class="cg-dashboard-bar">
-            <div class="cg-dashboard-bar-fill" style="width:${Math.min(pct ?? 0, 100)}%;background:${_pctColor(pct)};"></div>
-        </div>
-        <div class="cg-dashboard-bar-label">本子表預算使用 ${pct ?? 0}%${over ? ' ↑' : ''}</div>
-    `;
-}
 
 // ── Select ─────────────────────────────────────────────────────
 

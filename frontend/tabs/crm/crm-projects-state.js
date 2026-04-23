@@ -33,5 +33,4 @@ export const callbacks = {
     loadQuotations: null,    // (projectId) => Promise — 刷新報價單
     loadCostGroups: null,    // (projectId) => Promise — 刷新子表列表
     renderGroupSwitcher: null, // () => void — 重新渲染子表切換器（DOM 已備好時）
-    renderGroupDashboard: null, // () => void — 重新渲染當前子表儀表板
 };
