@@ -1390,30 +1390,50 @@
 .cg-alloc-ok { background: #1e3a5f; color: #93c5fd; }
 .cg-alloc-danger { background: #7f1d1d; color: #fca5a5; }
 
-/* Sub-table dashboard (區塊 6) */
-.cg-dashboard-header {
-    font-size: 13px; color: #d1d5db;
+/* Sub-table dashboard (區塊 6 — 簡化版單列) */
+.cg-dash-header {
+    display: flex; justify-content: space-between; align-items: center; gap: 12px;
     padding: 10px 12px;
     background: #141414; border: 1px solid #2e2e2e;
     border-radius: 6px 6px 0 0;
     border-bottom: none;
+    transition: background 0.2s, border-color 0.2s;
 }
-.cg-dashboard-header strong { color: #e5e7eb; font-weight: 700; }
-.cg-dashboard {
-    display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px;
-    padding: 10px;
-    background: #141414; border-left: 1px solid #2e2e2e; border-right: 1px solid #2e2e2e;
+.cg-dash-title {
+    font-size: 13px; color: #d1d5db;
+    flex: 1; min-width: 0;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
-.cg-dash-card {
-    background: #1a1a1a; border-radius: 6px;
-    padding: 10px 12px; text-align: center;
+.cg-dash-title strong { color: #e5e7eb; font-weight: 700; }
+.cg-dash-header-over { background: #3b1212; border-color: #7f1d1d; }
+.cg-dash-header-over .cg-dash-title,
+.cg-dash-header-over .cg-dash-title strong { color: #fca5a5; }
+
+.cg-dash-strip {
+    padding: 10px 12px;
+    background: #141414;
+    border-left: 1px solid #2e2e2e; border-right: 1px solid #2e2e2e;
+    font-size: 13px; color: #d1d5db;
 }
-.cg-dash-label { font-size: 11px; color: #6b7280; margin-bottom: 4px; }
-.cg-dash-value { font-size: 18px; font-weight: 700; margin-bottom: 2px; }
-.cg-dash-sub { font-size: 10px; color: #6b7280; }
+.cg-dash-strip-over {
+    background: #1f0e0e;
+    border-left-color: #7f1d1d; border-right-color: #7f1d1d;
+}
+.cg-dash-sep { color: #4b5563; margin: 0 4px; }
+.cg-dash-ok { color: #86efac; font-weight: 600; }
+.cg-dash-over { color: #fca5a5; font-weight: 700; }
+
+.cg-dash-empty {
+    padding: 14px 12px;
+    background: #141414; border: 1px solid #2e2e2e;
+    border-top: none; border-radius: 0 0 6px 6px;
+    font-size: 13px; color: #9ca3af;
+}
+
+/* Progress bar (共用於一般 / 超支狀態) */
 .cg-dashboard-bar {
     height: 6px; background: #2e2e2e;
-    margin: 0 10px;
+    border-left: 1px solid #2e2e2e; border-right: 1px solid #2e2e2e;
     overflow: hidden;
 }
 .cg-dashboard-bar-fill { height: 100%; transition: width 0.2s; }
@@ -1422,11 +1442,4 @@
     padding: 6px 12px 10px;
     background: #141414; border: 1px solid #2e2e2e;
     border-top: none; border-radius: 0 0 6px 6px;
-}
-.cg-dashboard-empty {
-    padding: 16px 12px;
-    background: #141414; border: 1px solid #2e2e2e;
-    border-top: none; border-radius: 0 0 6px 6px;
-    font-size: 13px; color: #9ca3af;
-    display: flex; align-items: center; gap: 12px;
 }

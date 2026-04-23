@@ -90,19 +90,18 @@ function _statusBadge(total, used, pct) {
 
 // ── Render: Dashboard ─────────────────────────────────────────
 
-function _dashCard(label, value, sub, color) {
+function _renderHeader(g, over, hasBudget) {
+    const meta = [g.shoot_date, g.notes].filter(Boolean).map(_esc).join(' · ');
+    const editLabel = hasBudget ? '編輯' : '設定預算';
     return `
-        <div class="cg-dash-card">
-            <div class="cg-dash-label">${label}</div>
-            <div class="cg-dash-value"${color ? ` style="color:${color};"` : ''}>${value}</div>
-            <div class="cg-dash-sub">${sub}</div>
+        <div class="cg-dash-header ${over ? 'cg-dash-header-over' : ''}">
+            <div class="cg-dash-title">
+                <strong>${_esc(g.name)}</strong>${meta ? ' · ' + meta : ''}
+            </div>
+            <button class="crm-btn ${hasBudget ? 'crm-btn-secondary' : 'crm-btn-primary'} crm-btn-sm"
+                    onclick="window._cgEdit('${g.id}')">✎ ${editLabel}</button>
         </div>
     `;
-}
-
-function _groupHeader(g) {
-    const meta = [g.shoot_date, g.notes].filter(Boolean).map(_esc).join(' · ');
-    return `<div class="cg-dashboard-header"><strong>${_esc(g.name)}</strong>${meta ? ' · ' + meta : ''}</div>`;
 }
 
 export function renderGroupDashboard() {
@@ -112,40 +111,37 @@ export function renderGroupDashboard() {
     if (!g) { host.innerHTML = ''; return; }
 
     const s = g.summary || {};
-    const budget = g.budget_amount || 0;
-    const miscBudget = g.misc_budget_amount || 0;
-    const totalBudget = budget + miscBudget;
+    const totalBudget = (g.budget_amount || 0) + (g.misc_budget_amount || 0);
     const totalActual = s.total_actual || 0;
     const remain = totalBudget - totalActual;
     const pct = _usagePct(totalActual, totalBudget);
+    const over = totalBudget > 0 && remain < 0;
 
     if (totalBudget === 0) {
         host.innerHTML = `
-            ${_groupHeader(g)}
-            <div class="cg-dashboard-empty">
-                💡 此子表尚未設定預算
-                <button class="crm-btn crm-btn-primary crm-btn-sm" onclick="window._cgEdit('${g.id}')">設定預算</button>
-            </div>
+            ${_renderHeader(g, false, false)}
+            <div class="cg-dash-empty">💡 此子表尚未設定預算 · 已用 $${fmtNum(totalActual)}</div>
         `;
         return;
     }
 
+    const remainText = over
+        ? `<span class="cg-dash-over">超支 $${fmtNum(-remain)} ⚠</span>`
+        : `<span class="cg-dash-ok">剩餘 $${fmtNum(remain)} ✓</span>`;
+
     host.innerHTML = `
-        ${_groupHeader(g)}
-        <div class="cg-dashboard">
-            ${_dashCard('執行預算', '$' + fmtNum(totalBudget),
-                `成本 $${fmtNum(budget)} + 雜支 $${fmtNum(miscBudget)}`, '#60a5fa')}
-            ${_dashCard('剩餘預算', '$' + fmtNum(remain),
-                remain >= 0 ? '預算內' : '已超支', remainColor(remain))}
-            ${_dashCard('本表結算', '$' + fmtNum(totalActual),
-                `成本 $${fmtNum(s.cost_actual || 0)} + 雜支 $${fmtNum(s.expense_actual || 0)}`, '#fb923c')}
-            ${_dashCard('本表預估', '$' + fmtNum(s.total_estimated || 0),
-                `${s.cost_lines_count || 0} 項 + ${s.expenses_count || 0} 筆雜支`, '#d1d5db')}
+        ${_renderHeader(g, over, true)}
+        <div class="cg-dash-strip ${over ? 'cg-dash-strip-over' : ''}">
+            預算 $${fmtNum(totalBudget)}
+            <span class="cg-dash-sep">·</span>
+            已用 $${fmtNum(totalActual)}
+            <span class="cg-dash-sep">·</span>
+            ${remainText}
         </div>
         <div class="cg-dashboard-bar">
             <div class="cg-dashboard-bar-fill" style="width:${Math.min(pct ?? 0, 100)}%;background:${_pctColor(pct)};"></div>
         </div>
-        <div class="cg-dashboard-bar-label">本子表預算使用 ${pct ?? 0}% ($${fmtNum(totalActual)} / $${fmtNum(totalBudget)})</div>
+        <div class="cg-dashboard-bar-label">本子表預算使用 ${pct ?? 0}%${over ? ' ↑' : ''}</div>
     `;
 }
 
