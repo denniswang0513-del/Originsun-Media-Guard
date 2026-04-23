@@ -295,7 +295,7 @@ function _renderCostLines(grouped, expenses, financialSummary) {
             <span style="font-weight:400;font-size:11px;color:#6b7280;">預估 $${fmtNum(miscBudget)}</span>
             <button class="crm-btn crm-btn-secondary crm-btn-sm" style="padding:0 6px;font-size:11px;line-height:18px;" onclick="window._projShowExpenseModal()">+</button>
             <button class="crm-btn crm-btn-secondary crm-btn-sm" style="padding:0 6px;font-size:11px;line-height:18px;" onclick="window._projBrowseReceipts()" title="瀏覽收據">&#128065;</button>
-            <button class="crm-btn crm-btn-secondary crm-btn-sm" style="padding:0 6px;font-size:11px;line-height:18px;" onclick="window._projShareExpenseLink()" title="公開登記連結">🔗</button>
+            <button class="crm-btn crm-btn-secondary crm-btn-sm" style="padding:0 6px;font-size:11px;line-height:18px;" onclick="window._projShareExpenseLink()" title="複製當前子表的雜支登記連結">🔗</button>
           </div>
         </div>`;
 

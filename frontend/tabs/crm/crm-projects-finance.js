@@ -314,6 +314,12 @@ window._projBrowseReceipts = async function() {
 
 window._projShareExpenseLink = function() {
     if (!state.selectedId) return;
+    // 優先使用當前選中子表的專屬連結（與切換卡上的 🔗 按鈕同邏輯 + toast）
+    if (state.selectedGroupId && typeof window._cgShareLink === 'function') {
+        window._cgShareLink(state.selectedGroupId, null);
+        return;
+    }
+    // Fallback：沒子表狀態時退回專案層級連結
     var url = location.origin + '/expense.html?project=' + state.selectedId;
     navigator.clipboard.writeText(url).then(function() {
         alert('公開雜支登記連結已複製：\n' + url);
