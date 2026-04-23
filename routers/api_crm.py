@@ -1875,6 +1875,78 @@ async def add_public_project_expense(project_id: str, req: ProjectExpensePayload
     return {"status": "ok", "expense_id": e.id, "expense": {"id": e.id}}
 
 
+@router.get("/public/cost-groups/{group_id}/info")
+async def get_public_cost_group_info(group_id: str):
+    """公開端點：取得子表 + 所屬專案資訊（不需登入，供 /group-expense.html 使用）。"""
+    _require_db()
+    factory = await _get_factory()
+    async with factory() as session:
+        g = await session.get(CrmProjectCostGroup, group_id)
+        if not g:
+            raise HTTPException(status_code=404, detail="找不到此子表")
+        proj = await session.get(CrmProject, g.project_id)
+    return {
+        "group": {
+            "id": g.id, "name": g.name,
+            "shoot_date": _fmt_date(g.shoot_date),
+            "notes": g.notes or "",
+            "budget_amount": g.budget_amount,
+            "misc_budget_amount": g.misc_budget_amount,
+        },
+        "project": {"id": proj.id, "name": proj.name} if proj else None,
+    }
+
+
+@router.get("/public/cost-groups/{group_id}/expenses")
+async def list_public_cost_group_expenses(group_id: str):
+    """公開端點：列出該子表已登記的雜支（僅此子表 scope，不含專案其他子表）。"""
+    _require_db()
+    factory = await _get_factory()
+    async with factory() as session:
+        g = await session.get(CrmProjectCostGroup, group_id)
+        if not g:
+            raise HTTPException(status_code=404, detail="找不到此子表")
+        rows = (await session.execute(
+            select(CrmProjectExpense)
+            .where(CrmProjectExpense.cost_group_id == group_id)
+            .order_by(CrmProjectExpense.created_at.desc())
+        )).scalars().all()
+    return {"expenses": [{
+        "id": e.id, "category": e.category, "actual": e.actual,
+        "sub_item": e.sub_item or "", "payee": e.payee or "",
+        "created_at": _fmt_date(e.created_at),
+    } for e in rows]}
+
+
+@router.post("/public/cost-groups/{group_id}/expenses")
+async def add_public_cost_group_expense(group_id: str, req: ProjectExpensePayload):
+    """公開端點：登記雜支到指定子表（強制 cost_group_id = URL 參數，防呼叫端注入）。"""
+    _require_db()
+    factory = await _get_factory()
+    async with factory() as session:
+        g = await session.get(CrmProjectCostGroup, group_id)
+        if not g:
+            raise HTTPException(status_code=404, detail="找不到此子表")
+        req.cost_group_id = group_id  # 覆寫 payload 以強制歸屬
+        e = await _create_expense(session, g.project_id, req)
+    return {"status": "ok", "expense_id": e.id, "expense": {"id": e.id}, "project_id": g.project_id}
+
+
+@router.post("/public/cost-groups/{group_id}/receipts/{expense_id}")
+async def upload_public_cost_group_receipt(group_id: str, expense_id: str, file: UploadFile = File(...)):
+    """公開端點：上傳收據到指定子表的 expense。"""
+    _require_db()
+    factory = await _get_factory()
+    async with factory() as session:
+        g = await session.get(CrmProjectCostGroup, group_id)
+        if not g:
+            raise HTTPException(status_code=404, detail="找不到此子表")
+        e = await session.get(CrmProjectExpense, expense_id)
+        if not e or e.cost_group_id != group_id:
+            raise HTTPException(status_code=404, detail="此雜支不屬於此子表")
+    return await _save_receipt(g.project_id, expense_id, file)
+
+
 @router.get("/public/projects/{project_id}/info")
 async def get_public_project_info(project_id: str):
     """公開端點：取得專案名稱 + 子表列表（不需登入，供公開雜支頁選子表）。"""

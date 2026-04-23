@@ -1387,6 +1387,26 @@
     background: #3b82f6; border-color: #2563eb; color: #fff;
 }
 .cg-chip-edit-primary:hover { background: #2563eb; }
+.cg-chip-edit-success {
+    background: #14532d !important; border-color: #22c55e !important; color: #86efac !important;
+}
+
+/* Toast (分享連結複製回饋) */
+.cg-toast {
+    position: fixed; top: 20px; left: 50%;
+    background: #1f2937; color: #e5e7eb;
+    padding: 10px 18px; border-radius: 8px;
+    border: 1px solid #3b82f6;
+    font-size: 13px; font-weight: 600;
+    box-shadow: 0 4px 16px rgba(0,0,0,0.5);
+    transform: translate(-50%, -20px);
+    opacity: 0;
+    transition: transform 0.25s, opacity 0.25s;
+    z-index: 10000;
+    pointer-events: none;
+    white-space: nowrap;
+}
+.cg-toast.show { transform: translate(-50%, 0); opacity: 1; }
 
 /* Menu popover */
 .cg-menu-pop {

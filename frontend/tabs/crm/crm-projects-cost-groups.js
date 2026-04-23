@@ -79,9 +79,14 @@ function _renderChip(g, active, canDelete) {
            </div>`
         : '<div class="cg-chip-hint">💡 未設預算</div>';
 
-    const editBtn = active
-        ? `<button class="cg-chip-edit ${hasBudget ? '' : 'cg-chip-edit-primary'}" onclick="event.stopPropagation();window._cgEdit('${g.id}')">✎ ${hasBudget ? '編輯' : '設定預算'}</button>`
-        : '';
+    let bottomBtn = '';
+    if (active) {
+        if (hasBudget) {
+            bottomBtn = `<button class="cg-chip-edit" onclick="event.stopPropagation();window._cgShareLink('${g.id}',event)">🔗 雜支登記連結</button>`;
+        } else {
+            bottomBtn = `<button class="cg-chip-edit cg-chip-edit-primary" onclick="event.stopPropagation();window._cgEdit('${g.id}')">✎ 設定預算</button>`;
+        }
+    }
 
     return `
         <div class="cg-chip ${stateClass} ${active ? 'active' : ''}" onclick="window._cgSelect('${g.id}')">
@@ -92,7 +97,7 @@ function _renderChip(g, active, canDelete) {
             <div class="cg-chip-actual">結算 ${used > 0 ? '$' + fmtNum(used) : '<span class="cg-muted">—</span>'}</div>
             ${remainRow}
             ${barRow}
-            ${editBtn}
+            ${bottomBtn}
         </div>
     `;
 }
@@ -405,6 +410,45 @@ function _openDuplicateModal(gid) {
     });
 }
 
+// ── Share link (雜支登記連結) ─────────────────────────────────
+
+async function _shareLink(gid, ev) {
+    const url = `${window.location.origin}/group-expense.html?id=${gid}`;
+    const btn = ev?.currentTarget || ev?.target;
+    try {
+        await navigator.clipboard.writeText(url);
+        _toast('✓ 已複製雜支登記連結');
+        if (btn) {
+            const orig = btn.textContent;
+            btn.textContent = '✓ 已複製';
+            btn.classList.add('cg-chip-edit-success');
+            setTimeout(() => {
+                btn.textContent = orig;
+                btn.classList.remove('cg-chip-edit-success');
+            }, 1200);
+        }
+    } catch (_) {
+        // 退回：用 prompt 顯示讓使用者手動複製
+        window.prompt('複製此連結傳給外場人員：', url);
+    }
+}
+
+function _toast(msg) {
+    let el = document.getElementById('cg-toast');
+    if (el) el.remove();
+    el = document.createElement('div');
+    el.id = 'cg-toast';
+    el.className = 'cg-toast';
+    el.textContent = msg;
+    document.body.appendChild(el);
+    // force reflow to trigger transition
+    requestAnimationFrame(() => el.classList.add('show'));
+    setTimeout(() => {
+        el.classList.remove('show');
+        setTimeout(() => el.remove(), 250);
+    }, 2000);
+}
+
 // ── Menu (⋯) — edit / duplicate / delete ──────────────────────
 
 let _menuCloseHandler = null;
@@ -448,4 +492,5 @@ export function initCostGroupsHandlers() {
     window._cgDelete = (gid) => { _closeMenu(); _openDeleteModal(gid); };
     window._cgDuplicate = (gid) => { _closeMenu(); _openDuplicateModal(gid); };
     window._cgMenu = (gid, ev) => _openMenu(gid, ev);
+    window._cgShareLink = (gid, ev) => _shareLink(gid, ev);
 }
