@@ -303,23 +303,18 @@ function _renderCostLines(grouped, expenses, financialSummary) {
 
         if (expenses && expenses.length > 0) {
             for (const e of expenses) {
-                const dateStr = e.created_at
-                    ? `<span class="exp-date-col">${e.created_at}</span>`
-                    : '<span class="exp-date-col"></span>';
-                const catCell = `<span class="exp-cat-col cost-editable" onclick="window._expEdit(this,'${e.id}','category','${_esc(e.category)}')">${_esc(e.category)}</span>`;
+                const dateStr = e.created_at ? _esc(e.created_at) : '';
                 const subDisplay = e.sub_item ? _esc(e.sub_item) : '<span class="crm-muted">—</span>';
-                const subCell = `<span class="exp-sub-col cost-editable" onclick="window._expEdit(this,'${e.id}','sub_item','${_esc(e.sub_item || '')}')">${subDisplay}</span>`;
                 const payeeDisplay = e.payee ? _esc(e.payee) : '<span class="crm-muted">—</span>';
-                const payeeCell = `<span class="cost-editable" onclick="window._expEdit(this,'${e.id}','payee','${_esc(e.payee || '')}')">${payeeDisplay}</span>`;
                 html += `
-                  <div class="cost-row">
-                    <span class="cost-col-item">${dateStr}${catCell}${subCell}</span>
-                    <span class="cost-col-amt"></span>
-                    <span class="cost-col-staff"></span>
-                    <span class="cost-col-amt cost-editable" onclick="window._expEdit(this,'${e.id}','actual',${e.actual || 0})">$${fmtNum(e.actual)}</span>
-                    <span class="cost-col-staff" style="font-size:11px;color:#9ca3af;">${payeeCell}</span>
-                    <span class="cost-col-diff">${e.receipt_url ? '<a href="' + e.receipt_url + '" target="_blank" style="color:#3b82f6;">📎</a>' : '—'}</span>
-                    <span class="cost-col-actions">
+                  <div class="cost-row cost-row-expense">
+                    <span class="exp-col-date">${dateStr}</span>
+                    <span class="exp-col-cat cost-editable" onclick="window._expEdit(this,'${e.id}','category','${_esc(e.category)}')">${_esc(e.category)}</span>
+                    <span class="exp-col-sub cost-editable" onclick="window._expEdit(this,'${e.id}','sub_item','${_esc(e.sub_item || '')}')">${subDisplay}</span>
+                    <span class="exp-col-amt cost-editable" onclick="window._expEdit(this,'${e.id}','actual',${e.actual || 0})">$${fmtNum(e.actual)}</span>
+                    <span class="exp-col-payee cost-editable" onclick="window._expEdit(this,'${e.id}','payee','${_esc(e.payee || '')}')">${payeeDisplay}</span>
+                    <span class="exp-col-receipt">${e.receipt_url ? '<a href="' + e.receipt_url + '" target="_blank" style="color:#3b82f6;">📎</a>' : '—'}</span>
+                    <span class="exp-col-action">
                       <button class="crm-btn crm-btn-danger crm-btn-sm" style="padding:1px 5px;"
                               onclick="window._projDeleteExpense('${e.id}')">✕</button>
                     </span>

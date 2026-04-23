@@ -888,28 +888,43 @@
 .cost-editable:hover { color: #93c5fd; }
 .cost-editable:hover .crm-muted { color: #93c5fd; }
 
-/* 行政雜支列：日期/類別/細項 3 分欄對齊 */
-.exp-date-col {
-    display: inline-block;
-    min-width: 80px;
-    margin-right: 8px;
-    color: #6b7280;
-    font-size: 10px;
+/* 行政雜支列：獨立欄位布局（不走成本估算的 14 欄 grid）
+   細項保留最大寬度，避免被擠壓成「0...」 */
+.cost-row-expense {
+    display: flex; align-items: center; gap: 8px;
+    padding: 4px 0; border-bottom: 1px solid #2e2e2e;
+}
+.cost-row-expense .exp-col-date {
+    flex: 0 0 80px;
+    color: #6b7280; font-size: 10px;
     font-variant-numeric: tabular-nums;
 }
-.exp-cat-col {
-    display: inline-block;
-    min-width: 56px;
-    margin-right: 12px;
+.cost-row-expense .exp-col-cat {
+    flex: 0 0 56px;
+    color: #d1d5db;
 }
-.exp-sub-col {
-    display: inline-block;
-    min-width: 0;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-    vertical-align: bottom;
-    max-width: calc(100% - 180px);
+.cost-row-expense .exp-col-sub {
+    flex: 1 1 auto; min-width: 0;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    color: #d1d5db;
+}
+.cost-row-expense .exp-col-amt {
+    flex: 0 0 100px;
+    text-align: right; color: #e0e0e0;
+    font-variant-numeric: tabular-nums;
+}
+.cost-row-expense .exp-col-payee {
+    flex: 0 0 90px;
+    font-size: 11px; color: #9ca3af;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.cost-row-expense .exp-col-receipt {
+    flex: 0 0 40px;
+    text-align: center; color: #9ca3af;
+}
+.cost-row-expense .exp-col-action {
+    flex: 0 0 32px;
+    text-align: center;
 }
 .cost-divider { margin-right: 0; border-right: 1px solid #3a3a3a; padding-right: 8px; }
 .cost-col-copy { width: 20px; flex-shrink: 0; text-align: center; color: #555; cursor: pointer; font-size: 12px; }
