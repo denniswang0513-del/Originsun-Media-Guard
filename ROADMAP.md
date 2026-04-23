@@ -4,7 +4,7 @@
 
 ---
 
-## 現況 (v1.10.81) 基準線
+## 現況 (v1.10.82) 基準線
 
 - ✅ 7 個完整工作流程（備份、比對、轉 Proxy、串帶、報表、AI 逐字稿、空拍寫入）
 - ✅ 模組化後端：`main.py` + `core/` + `routers/`（router 容錯載入，缺模組跳過不 crash）
@@ -439,6 +439,17 @@ routers/
 - [x] **客戶列表擴充**：專案數量 + 合約總額欄位（SQL subquery 聚合）
 - [x] **CRM 效能優化**：Tab 並行載入 + GET 請求去重 + SQL JOIN/聚合取代全表掃描 + DB 索引
 
+### J-5：成本子表 ✅
+- [x] 專案帳目支援多張成本子表（拍攝日 / 子專案）
+- [x] 每張子表獨立管理：預算 / 成本估算 / 雜支
+- [x] DB 新表 `crm_project_cost_groups` + startup migration
+- [x] 10 個新/改 API（CRUD + 跨組彙總 + `/public/cost-groups/*` × 4）
+- [x] 前端模組 `crm-projects-cost-groups.js`（切換卡 + 4 Modal + state-aware 按鈕）
+- [x] 子表儀表板整併到 chip（刪除獨立 strip 避免資訊重複）
+- [x] 行政雜支列 inline edit（類別/細項/金額/請款人 + 新 PATCH 端點 + 並發 save）
+- [x] 獨立公開雜支頁 `/group-expense.html`（每子表一個唯一 URL + 手機 RWD + 拍照/相簿選擇）
+- [x] `/expense.html` 加子表下拉 + 支援 preset_project/preset_group URL 參數
+
 ### J-3：備份 Tab 整合（⬜ 下一步）
 
 - [ ] 備份頁籤新增「選擇現有專案」下拉選項
@@ -724,7 +735,7 @@ tools:
     ▼ Phase J: CRM + 專案管理 + 帳務 (✅ 核心完成)
     │   → 64 API / 11 DB 表 / 6 Tab + 5 子視圖 + 手機版 RWD + Inline 編輯
     │
-現在 (v1.10.81) ← 你在這裡
+現在 (v1.10.82) ← 你在這裡
     │
     ▼ Phase M: 對外官方網站 (🚀 進行中 2026-04-20 ~ 07-01)
     │   → originsun-studio.com + CF Tunnel + Astro + 9 子視圖管理 Tab
@@ -762,6 +773,7 @@ tools:
 
 | 版本 | 日期 | 重點 |
 |------|------|------|
+| v1.10.82 | 2026-04-23 | **Phase J-5 成本子表完整出貨**：每個 CRM 專案可建多張子表（拍攝日/子專案），每張子表獨立管「預算 + 成本估算 + 雜支 + 公開雜支登記連結」。後端 DB 新表 `crm_project_cost_groups` + cost_lines/expenses 加 `cost_group_id` + startup migration；10 個新/改 API 端點（CRUD + 跨組彙總 + 4 個 `/public/cost-groups/*`）。前端新模組 `crm-projects-cost-groups.js`（切換卡 + 新增/編輯/刪除/複製 Modal + state-aware 分享按鈕）+ 子表層級儀表板整併到 chip；行政雜支列支援 inline 編輯（類別/細項/金額/請款人）+ 新 `PATCH /project-expenses/{id}` 端點 + 並發 save；新 `/group-expense.html` 公開頁面（手機 RWD + 拍照/相簿選擇 + 送出後表單重置 + 捲到頂）。20 commits（含 4 輪 /simplify 清理 23 項發現） |
 | v1.10.81 | 2026-04-22 | Phase M 階段性出貨：官網管理 Tab 主殼 + 9 子視圖（新增 SEO 子視圖）+ RBAC `website_admin` 模組；DB 擴充 5 張 `website_*` 表 + `crm_projects` 11 個 `public_*` 欄位；後端 services 層 + 對內/對外 API + NAS 專用入口 `main_website.py`；Astro 4 對外網站骨架（首頁/作品集/關於/服務/聯絡/Insight 專欄/portfolio 一頁式）於 `website/`（**不進 OTA**，獨立部署到 NAS） |
 | v1.10.80 | 2026-04-19 | 製作串帶功能對齊空拍寫入（payload 補齊 tint/影調/curves/xfade + 主面板縮圖網格 + 檔案多選/資料夾/空白列）+ Watcher 面板強化（立即執行讀 UI 不需先存、取消全部任務按鈕、檢視轉檔設定 popover 含 dirty 標註）+ Worker 自動 makedirs 修空目錄 crash + NVENC probe 影格 64→256 修 false negative + 空拍寫入 tab 未選時 reset 色 |
 | v1.10.79 | 2026-04-18 | 空拍轉場預設改 fade（前後交融）+ 排程監控（每日指定時間掃來源根目錄，自動轉檔+串帶，完成通知 Google Chat/LINE）+ 串帶檔名 fallback 修復（project_name 從來源資料夾末段推導，剝除副檔名） |
