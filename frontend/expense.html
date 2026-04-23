@@ -149,17 +149,23 @@ async function _init() {
 
   if (!_token) { document.getElementById('login-section').style.display = ''; return; }
   document.getElementById('main-section').style.display = '';
-  // Load projects
+  // Presets from caller (e.g. CRM 專案 Tab 的雜支登記按鈕帶 context 來)
+  const presetProject = params.get('preset_project') || '';
+  const presetGroup = params.get('preset_group') || '';
   try {
     const r = await fetch(BASE + '/projects', { headers: _headers() });
     const data = await r.json();
     const sel = document.getElementById('exp-project');
-    sel.innerHTML = (data.projects || []).map(p =>
+    const projects = data.projects || [];
+    sel.innerHTML = projects.map(p =>
       '<option value="' + p.id + '">' + p.name + ' (' + (p.client_short_name || '') + ')</option>'
     ).join('');
-    if (data.projects?.length) {
-      _projectId = data.projects[0].id;
-      await _loadGroups(_projectId);
+    if (projects.length) {
+      const pick = presetProject && projects.some(p => p.id === presetProject)
+          ? presetProject : projects[0].id;
+      sel.value = pick;
+      _projectId = pick;
+      await _loadGroups(_projectId, presetGroup);
       _loadHistory();
     }
     sel.addEventListener('change', async e => {
@@ -172,17 +178,17 @@ async function _init() {
   document.getElementById('exp-file').addEventListener('change', _handlePhoto);
 }
 
-async function _loadGroups(projectId) {
+async function _loadGroups(projectId, presetGroupId) {
   try {
     const r = await fetch(BASE + '/projects/' + projectId + '/cost-groups', { headers: _headers() });
     const data = await r.json();
-    _populateGroups(data.cost_groups || []);
+    _populateGroups(data.cost_groups || [], presetGroupId);
   } catch (_) {
-    _populateGroups([]);
+    _populateGroups([], null);
   }
 }
 
-function _populateGroups(groups) {
+function _populateGroups(groups, presetGroupId) {
   const sel = document.getElementById('exp-group');
   const row = document.getElementById('exp-group-row');
   if (groups.length === 0) {
@@ -194,7 +200,9 @@ function _populateGroups(groups) {
     const date = g.shoot_date ? ' (' + g.shoot_date + ')' : '';
     return '<option value="' + g.id + '">' + g.name + date + '</option>';
   }).join('');
-  // 只有主表時隱藏下拉，減少視覺雜訊
+  if (presetGroupId && groups.some(g => g.id === presetGroupId)) {
+    sel.value = presetGroupId;
+  }
   row.style.display = groups.length > 1 ? '' : 'none';
 }
 

@@ -71,6 +71,13 @@ export async function initCrmProjectsTab() {
     // ── Expense handlers (cross-module: use cost + state) ──
     window._projAddExpense = () => _showExpenseForm();
     window._projEditExpense = (id, cat, est, act, notes) => _showExpenseForm(id, cat, est, act, notes);
+    window._projOpenExpensePage = () => {
+        const p = new URLSearchParams();
+        if (state.selectedId) p.set('preset_project', state.selectedId);
+        if (state.selectedGroupId) p.set('preset_group', state.selectedGroupId);
+        const qs = p.toString();
+        window.open('/expense.html' + (qs ? '?' + qs : ''), '_blank', 'width=480,height=800');
+    };
     window._projShowExpenseModal = () => {
         if (!state.selectedId) return;
         const proj = state.projects.find(p => p.id === state.selectedId);
