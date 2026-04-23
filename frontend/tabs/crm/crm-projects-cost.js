@@ -304,16 +304,16 @@ function _renderCostLines(grouped, expenses, financialSummary) {
         if (expenses && expenses.length > 0) {
             for (const e of expenses) {
                 const dateStr = e.created_at
-                    ? `<span style="color:#6b7280;font-size:10px;margin-right:8px;display:inline-block;min-width:72px;">${e.created_at}</span>`
-                    : '<span style="display:inline-block;min-width:72px;margin-right:8px;"></span>';
-                const catCell = `<span class="cost-editable" onclick="window._expEdit(this,'${e.id}','category','${_esc(e.category)}')">${_esc(e.category)}</span>`;
+                    ? `<span class="exp-date-col">${e.created_at}</span>`
+                    : '<span class="exp-date-col"></span>';
+                const catCell = `<span class="exp-cat-col cost-editable" onclick="window._expEdit(this,'${e.id}','category','${_esc(e.category)}')">${_esc(e.category)}</span>`;
                 const subDisplay = e.sub_item ? _esc(e.sub_item) : '<span class="crm-muted">—</span>';
-                const subCell = `<span class="cost-editable" onclick="window._expEdit(this,'${e.id}','sub_item','${_esc(e.sub_item || '')}')">${subDisplay}</span>`;
+                const subCell = `<span class="exp-sub-col cost-editable" onclick="window._expEdit(this,'${e.id}','sub_item','${_esc(e.sub_item || '')}')">${subDisplay}</span>`;
                 const payeeDisplay = e.payee ? _esc(e.payee) : '<span class="crm-muted">—</span>';
                 const payeeCell = `<span class="cost-editable" onclick="window._expEdit(this,'${e.id}','payee','${_esc(e.payee || '')}')">${payeeDisplay}</span>`;
                 html += `
                   <div class="cost-row">
-                    <span class="cost-col-item">${dateStr}${catCell} · ${subCell}</span>
+                    <span class="cost-col-item">${dateStr}${catCell}${subCell}</span>
                     <span class="cost-col-amt"></span>
                     <span class="cost-col-staff"></span>
                     <span class="cost-col-amt cost-editable" onclick="window._expEdit(this,'${e.id}','actual',${e.actual || 0})">$${fmtNum(e.actual)}</span>

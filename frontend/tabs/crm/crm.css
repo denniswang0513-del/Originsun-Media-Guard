@@ -887,6 +887,30 @@
 .cost-editable  { cursor: pointer; }
 .cost-editable:hover { color: #93c5fd; }
 .cost-editable:hover .crm-muted { color: #93c5fd; }
+
+/* 行政雜支列：日期/類別/細項 3 分欄對齊 */
+.exp-date-col {
+    display: inline-block;
+    min-width: 80px;
+    margin-right: 8px;
+    color: #6b7280;
+    font-size: 10px;
+    font-variant-numeric: tabular-nums;
+}
+.exp-cat-col {
+    display: inline-block;
+    min-width: 56px;
+    margin-right: 12px;
+}
+.exp-sub-col {
+    display: inline-block;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    vertical-align: bottom;
+    max-width: calc(100% - 180px);
+}
 .cost-divider { margin-right: 0; border-right: 1px solid #3a3a3a; padding-right: 8px; }
 .cost-col-copy { width: 20px; flex-shrink: 0; text-align: center; color: #555; cursor: pointer; font-size: 12px; }
 .cost-col-copy:hover { color: #3b82f6; }
