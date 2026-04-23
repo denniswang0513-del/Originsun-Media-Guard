@@ -99,6 +99,7 @@ def _to_dict(c) -> dict:
 
 
 from core.schemas import (ClientPayload, CrmProjectPayload, ProjectExpensePayload,
+                         ProjectExpensePatchPayload,
                          QuotationPayload, QuotationItemPayload, QuotationTemplatePayload,
                          StaffPayload, ProjectStaffPayload, InvoicePayload, PaymentRequestPayload,
                          CashEntryPayload, CostLinePayload, CostLineUpdatePayload,
@@ -1899,7 +1900,7 @@ async def get_public_cost_group_info(group_id: str):
 
 @router.get("/public/cost-groups/{group_id}/expenses")
 async def list_public_cost_group_expenses(group_id: str):
-    """公開端點：列出該子表已登記的雜支（僅此子表 scope，不含專案其他子表）。"""
+    """公開端點：列出該子表最近 20 筆已登記雜支（前端只渲染 10 筆，多撈一些保留彈性）。"""
     _require_db()
     factory = await _get_factory()
     async with factory() as session:
@@ -1910,6 +1911,7 @@ async def list_public_cost_group_expenses(group_id: str):
             select(CrmProjectExpense)
             .where(CrmProjectExpense.cost_group_id == group_id)
             .order_by(CrmProjectExpense.created_at.desc())
+            .limit(20)
         )).scalars().all()
     return {"expenses": [{
         "id": e.id, "category": e.category, "actual": e.actual,
@@ -1997,24 +1999,23 @@ async def add_project_expense(project_id: str, req: ProjectExpensePayload, reque
 
 
 @router.patch("/project-expenses/{expense_id}")
-async def patch_project_expense(expense_id: str, request: Request):
-    """部分更新雜支欄位（供前端 inline edit 使用）。body 只需傳有改動的欄位。"""
+async def patch_project_expense(expense_id: str, req: ProjectExpensePatchPayload, request: Request):
+    """部分更新雜支欄位（供前端 inline edit 使用）。僅動 payload 有給的欄位。"""
     _check_auth(request)
     _require_db()
-    body = await request.json()
+    data = req.model_dump(exclude_unset=True)  # 只要有帶就進，None 也算
+    if not data:
+        return {"status": "ok"}
     factory = await _get_factory()
+    _NULLABLE_TEXT = {"sub_item", "payee", "notes", "advance_id", "cost_group_id"}
     async with factory() as session:
         e = await session.get(CrmProjectExpense, expense_id)
         if not e:
             raise HTTPException(status_code=404, detail="找不到此雜支")
-        editable = ("category", "sub_item", "payee", "actual", "estimated",
-                    "notes", "cost_group_id", "advance_id")
-        for key in editable:
-            if key in body:
-                val = body[key]
-                if key in ("sub_item", "payee", "notes", "advance_id", "cost_group_id") and val == "":
-                    val = None
-                setattr(e, key, val)
+        for key, val in data.items():
+            if key in _NULLABLE_TEXT and val == "":
+                val = None
+            setattr(e, key, val)
         await session.commit()
     return {"status": "ok"}
 

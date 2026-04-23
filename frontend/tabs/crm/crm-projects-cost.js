@@ -295,9 +295,9 @@ function _renderCostLines(grouped, expenses, financialSummary) {
           <span>行政雜支</span>
           <div style="display:flex;gap:6px;align-items:center;">
             <span style="font-weight:400;font-size:11px;color:#6b7280;">預估 $${fmtNum(miscBudget)}</span>
-            <button class="crm-btn crm-btn-secondary crm-btn-sm" style="padding:0 6px;font-size:11px;line-height:18px;" onclick="window._projShowExpenseModal()">+</button>
-            <button class="crm-btn crm-btn-secondary crm-btn-sm" style="padding:0 6px;font-size:11px;line-height:18px;" onclick="window._projBrowseReceipts()" title="瀏覽收據">&#128065;</button>
-            <button class="crm-btn crm-btn-secondary crm-btn-sm" style="padding:0 6px;font-size:11px;line-height:18px;" onclick="window._projShareExpenseLink()" title="複製當前子表的雜支登記連結">🔗</button>
+            <button class="crm-btn crm-btn-secondary cost-toolbar-btn" onclick="window._projShowExpenseModal()">+</button>
+            <button class="crm-btn crm-btn-secondary cost-toolbar-btn" onclick="window._projBrowseReceipts()" title="瀏覽收據">&#128065;</button>
+            <button class="crm-btn crm-btn-secondary cost-toolbar-btn" onclick="window._projShareExpenseLink()" title="複製當前子表的雜支登記連結">🔗</button>
           </div>
         </div>`;
 
@@ -666,16 +666,19 @@ window._costSaveAll = async function() {
         if (infoPayload && state.selectedId) {
             await _fetch('/projects/' + state.selectedId, { method: 'PUT', body: JSON.stringify(infoPayload) });
         }
-        for (var i = 0; i < costEntries.length; i++) {
-            await _fetch('/project-cost-lines/' + costEntries[i][0], {
-                method: 'PUT', body: JSON.stringify(costEntries[i][1])
-            });
-        }
-        for (var j = 0; j < expEntries.length; j++) {
-            await _fetch('/project-expenses/' + expEntries[j][0], {
-                method: 'PATCH', body: JSON.stringify(expEntries[j][1])
-            });
-        }
+        // 每筆 cost-line / expense 彼此獨立，併發發送避免 N 筆 × 50ms 累加延遲
+        await Promise.all([
+            ...costEntries.map(function(entry) {
+                return _fetch('/project-cost-lines/' + entry[0], {
+                    method: 'PUT', body: JSON.stringify(entry[1])
+                });
+            }),
+            ...expEntries.map(function(entry) {
+                return _fetch('/project-expenses/' + entry[0], {
+                    method: 'PATCH', body: JSON.stringify(entry[1])
+                });
+            }),
+        ]);
         window._costDirtyMap = {};
         window._expDirtyMap = {};
         var proj = state.projects.find(function(p) { return p.id === state.selectedId; });
@@ -818,7 +821,6 @@ window._expEdit = function(cell, expId, field, currentVal) {
         if (isAmount) val = val === '' ? 0 : parseInt(val) || 0;
         window._expDirtyMap[expId] = window._expDirtyMap[expId] || {};
         window._expDirtyMap[expId][field] = val;
-        // Display
         if (isAmount) {
             cell.textContent = '$' + fmtNum(val);
         } else if (isCategory) {
@@ -841,7 +843,6 @@ window._expEdit = function(cell, expId, field, currentVal) {
     input.addEventListener('keydown', function(e) {
         if (e.key === 'Enter') { e.preventDefault(); input.blur(); }
         if (e.key === 'Escape') {
-            // restore original
             if (isAmount) {
                 cell.textContent = '$' + fmtNum(parseInt(currentVal) || 0);
             } else if (isCategory) {

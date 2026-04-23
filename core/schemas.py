@@ -366,6 +366,18 @@ class ProjectExpensePayload(BaseModel):
     cost_group_id: Optional[str] = None
 
 
+class ProjectExpensePatchPayload(BaseModel):
+    """供 inline edit 用的部分更新 payload — 所有欄位 optional。"""
+    category: Optional[str] = None
+    estimated: Optional[int] = None
+    actual: Optional[int] = None
+    sub_item: Optional[str] = None
+    payee: Optional[str] = None
+    advance_id: Optional[str] = None
+    notes: Optional[str] = None
+    cost_group_id: Optional[str] = None
+
+
 class QuotationItemPayload(BaseModel):
     group_name: str = ""
     description: str

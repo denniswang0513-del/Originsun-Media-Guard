@@ -888,6 +888,12 @@
 .cost-editable:hover { color: #93c5fd; }
 .cost-editable:hover .crm-muted { color: #93c5fd; }
 
+.cost-toolbar-btn {
+    padding: 0 6px;
+    font-size: 11px;
+    line-height: 18px;
+}
+
 /* 行政雜支列：獨立欄位布局（不走成本估算的 14 欄 grid）
    細項保留最大寬度，避免被擠壓成「0...」 */
 .cost-row-expense {
