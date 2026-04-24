@@ -26,3 +26,10 @@ google-api-python-client
 
 # ── Auto-detected by publish ──
 # (calendar is stdlib, not needed here)
+
+# ── Auto-detected by publish ──
+
+httpx
+
+# ── Auto-detected by publish ──
+

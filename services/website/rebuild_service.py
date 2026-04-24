@@ -12,11 +12,19 @@ NAS website-api container 應以 1 worker 跑（小網站足夠），見 docker-
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import os
 import time
 from pathlib import Path
-from typing import Literal, TypedDict
+from typing import Literal, Optional, TypedDict
+
+from core.schemas_website import (
+    NotionCategorySummary, NotionPostSummary, NotionSyncResult,
+    NotionSyncSkipped, SyncType,
+)
+
+from . import notion_service
 
 logger = logging.getLogger(__name__)
 
@@ -117,10 +125,123 @@ async def get_notion_status(settings: dict) -> dict:
     }
 
 
-async def trigger_notion_sync() -> dict:
-    """觸發 Notion 文章同步（M-E 部落格階段實作 Notion 撈文邏輯）。
+# ══════════════════════════════════════════════════════════
+# Notion sync（Phase M-E-8）
+# ══════════════════════════════════════════════════════════
 
-    目前版本只觸發一次 rebuild，因為 Notion 在 build time 被 Astro 撈。
-    """
-    status = await trigger_rebuild()
-    return {**status, "sync_type": "notion-via-rebuild"}
+_NOTION_SETTINGS_MISSING_MSG = (
+    "Notion token 或 database_id 未設定（請到「⚙️ 網站設定」填入 "
+    "notion.token 與 notion.database_id）"
+)
+
+
+def _posts_json_path() -> Path:
+    return _website_dir() / "src" / "content" / "posts.json"
+
+
+def _categories_json_path() -> Path:
+    return _website_dir() / "src" / "content" / "categories.json"
+
+
+def _media_root() -> Path:
+    return _website_dir() / "public" / "notion-media"
+
+
+def _to_summary(
+    result: dict,
+    sync_type: SyncType,
+    *,
+    posts_path: Optional[str] = None,
+    cats_path: Optional[str] = None,
+    rebuild_queued: bool = False,
+) -> NotionSyncResult:
+    """Unified factory: notion_service result dict → NotionSyncResult pydantic."""
+    return NotionSyncResult(
+        ok=result["ok"],
+        sync_type=sync_type,
+        posts_count=len(result["posts"]),
+        categories_count=len(result["categories"]),
+        posts=[NotionPostSummary.model_validate(p) for p in result["posts"]],
+        categories=[NotionCategorySummary.model_validate(c) for c in result["categories"]],
+        skipped=[NotionSyncSkipped.model_validate(s) for s in result["skipped"]],
+        warnings=result["warnings"],
+        duration_ms=result["duration_ms"],
+        error=result["error"],
+        posts_json_path=posts_path,
+        categories_json_path=cats_path,
+        rebuild_queued=rebuild_queued,
+    )
+
+
+def _missing_settings(sync_type: SyncType) -> NotionSyncResult:
+    return NotionSyncResult(
+        ok=False, sync_type=sync_type, error=_NOTION_SETTINGS_MISSING_MSG,
+    )
+
+
+async def preview_notion_sync(settings: dict) -> NotionSyncResult:
+    """Dry-run：撈 Notion 但不寫檔、不下載圖片、不觸發 rebuild。"""
+    token = settings.get("notion.token", "")
+    db_id = settings.get("notion.database_id", "")
+    if not (token and db_id):
+        return _missing_settings("preview")
+
+    result = await notion_service.run_full_sync(
+        token=token, db_id=db_id, media_root=_media_root(), dry_run=True,
+    )
+    return _to_summary(result, "preview")
+
+
+def _dump_json(path: Path, data) -> None:
+    """Blocking JSON writer — caller uses asyncio.to_thread."""
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(data, f, ensure_ascii=False, indent=2)
+
+
+async def trigger_notion_sync(settings: dict, do_rebuild: bool = True) -> NotionSyncResult:
+    """撈 Notion → 寫 posts.json + categories.json → 選擇性觸發 Astro rebuild。"""
+    token = settings.get("notion.token", "")
+    db_id = settings.get("notion.database_id", "")
+    if not (token and db_id):
+        return _missing_settings("sync")
+
+    result = await notion_service.run_full_sync(
+        token=token, db_id=db_id, media_root=_media_root(), dry_run=False,
+    )
+    if not result["ok"]:
+        return _to_summary(result, "sync")
+
+    posts_path = _posts_json_path()
+    cats_path = _categories_json_path()
+    try:
+        posts_path.parent.mkdir(parents=True, exist_ok=True)
+        await asyncio.gather(
+            asyncio.to_thread(_dump_json, posts_path, result["posts"]),
+            asyncio.to_thread(_dump_json, cats_path, result["categories"]),
+        )
+        logger.info(
+            "[notion-sync] wrote %d posts + %d categories to %s",
+            len(result["posts"]), len(result["categories"]), posts_path.parent,
+        )
+    except Exception as e:
+        logger.exception("[notion-sync] failed to write JSON")
+        return _to_summary(
+            {**result, "ok": False, "error": f"JSON 寫檔失敗：{e}"}, "sync",
+        )
+
+    rebuild_queued = False
+    if do_rebuild:
+        rb = await trigger_rebuild()
+        rebuild_queued = bool(rb.get("queued"))
+        if not rebuild_queued:
+            result["warnings"].append(
+                f"Astro rebuild 未排入（{rb.get('reason', 'unknown')}），"
+                f"JSON 已更新但網站需手動 rebuild"
+            )
+
+    return _to_summary(
+        result, "sync",
+        posts_path=str(posts_path),
+        cats_path=str(cats_path),
+        rebuild_queued=rebuild_queued,
+    )

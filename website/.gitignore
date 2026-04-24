@@ -3,6 +3,11 @@ dist/
 # generated types
 .astro/
 
+# Notion sync artifacts（由 services/website/notion_service.py 產生）
+src/content/posts.json
+src/content/categories.json
+public/notion-media/
+
 # dependencies
 node_modules/
 

@@ -255,3 +255,50 @@ class WebsiteMeta(BaseModel):
     about_team_intro_zh: str = ""
     # Home Hero 影片 YouTube ID（admin 從官網管理 Tab 設定 home.hero_youtube_id）
     home_hero_youtube_id: str = ""
+
+
+# ══════════════════════════════════════════════════════════
+# Notion Sync（Phase M-E-8 部落格 Notion-as-CMS）
+# ══════════════════════════════════════════════════════════
+
+SyncType = Literal["preview", "sync"]
+
+
+class NotionCategorySummary(BaseModel):
+    id: str
+    name: str
+    label_zh: str
+    label_en: str
+    color: str = "default"
+    count: int = 0
+
+
+class NotionPostSummary(BaseModel):
+    slug: str
+    title: str
+    category: Optional[str] = None
+    category_label_zh: Optional[str] = None
+    cover_url: Optional[str] = None
+    excerpt: str = ""
+    published_at: str = ""
+
+
+class NotionSyncSkipped(BaseModel):
+    title: str
+    reason: str
+
+
+class NotionSyncResult(BaseModel):
+    ok: bool
+    sync_type: SyncType
+    posts_count: int = 0
+    categories_count: int = 0
+    posts: list[NotionPostSummary] = Field(default_factory=list)
+    categories: list[NotionCategorySummary] = Field(default_factory=list)
+    skipped: list[NotionSyncSkipped] = Field(default_factory=list)
+    warnings: list[str] = Field(default_factory=list)
+    duration_ms: int = 0
+    error: Optional[str] = None
+    posts_json_path: Optional[str] = None
+    categories_json_path: Optional[str] = None
+    rebuild_queued: bool = False

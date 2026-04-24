@@ -7,7 +7,8 @@ Endpoints (prefix `/api/website/admin`):
 - POST /rebuild           觸發 npm run build（背景）
 - GET  /rebuild/status    查詢 rebuild 狀態
 - GET  /notion/status     Notion 連線狀態
-- POST /notion/sync       觸發 Notion 同步（目前等同 rebuild）
+- GET  /notion/preview    Dry-run 同步：回傳將被同步的文章清單 + 警告（不寫檔）
+- POST /notion/sync       實際同步：寫 posts.json/categories.json + 觸發 rebuild
 """
 from __future__ import annotations
 
@@ -58,6 +59,15 @@ async def notion_status(session: AsyncSession = Depends(admin_session)):
     return await rebuild_service.get_notion_status(settings)
 
 
+@router.get("/notion/preview")
+async def notion_preview(session: AsyncSession = Depends(admin_session)):
+    """Dry-run 同步：撈 Notion 看看有哪些會被同步，不寫檔、不觸發 rebuild。"""
+    settings = await settings_service.get_all_settings(session)
+    return await rebuild_service.preview_notion_sync(settings)
+
+
 @router.post("/notion/sync")
-async def notion_sync(_: None = Depends(admin_guard)):
-    return await rebuild_service.trigger_notion_sync()
+async def notion_sync(session: AsyncSession = Depends(admin_session)):
+    """實際同步：撈 Notion → 寫 posts.json/categories.json → 觸發 Astro rebuild。"""
+    settings = await settings_service.get_all_settings(session)
+    return await rebuild_service.trigger_notion_sync(settings, do_rebuild=True)
