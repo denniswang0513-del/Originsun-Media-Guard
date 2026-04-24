@@ -1,9 +1,11 @@
 /**
  * website-utils.js — Phase M 官網管理 Tab 共用工具
  *
- * 跨機呼叫 NAS website-api（:8001）。預設 http://localhost:8001，可用
- * localStorage 覆寫：
- *     localStorage.setItem('website_api_base', 'http://192.168.1.132:8081')
+ * 預設同源 fetch（相對路徑，跟著當前頁面 origin 走）：
+ *   - 從 localhost:8000 或 Cloudflare Tunnel 進入 → main.py 同源處理
+ *     （[DEV BRIDGE] 期間 main.py 也掛了 routers/website）
+ *   - M-F NAS 部署後，跨機呼叫 NAS website-api 改用 localStorage 覆寫：
+ *     localStorage.setItem('website_api_base', 'https://originsun-studio.com')
  *
  * 其他基礎工具（esc、fmtNum、renderAvatar）沿用 CRM 的 crm-utils.js 避免重複。
  */
@@ -12,7 +14,7 @@ import { esc, fmtNum, renderAvatar } from '../crm/crm-utils.js';
 export { esc, fmtNum, renderAvatar };
 
 
-const DEFAULT_API_BASE = 'http://localhost:8001';
+const DEFAULT_API_BASE = '';
 
 export function getApiBase() {
     try {

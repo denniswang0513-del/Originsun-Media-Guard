@@ -1149,10 +1149,10 @@ if (typeof appendLog === 'undefined') {
                 activeBtn.classList.add('bg-[#2a2a2a]', 'border', 'border-b-0', 'border-[#3a3a3a]', 'text-blue-400');
             }
 
-            // Hide progress/log sections for CRM tabs (no media tasks)
-            const crmTabs = ['tab_crm_clients', 'tab_crm_projects', 'tab_crm_staff', 'tab_crm_invoices'];
-            const isCrm = crmTabs.includes(tabId);
-            document.querySelectorAll('.media-task-section').forEach(el => el.style.display = isCrm ? 'none' : '');
+            // Hide progress/log sections for tabs without media tasks (CRM + 官網管理)
+            const nonTaskTabs = ['tab_crm_clients', 'tab_crm_projects', 'tab_crm_staff', 'tab_crm_invoices', 'tab_website'];
+            const hideTaskLog = nonTaskTabs.includes(tabId);
+            document.querySelectorAll('.media-task-section').forEach(el => el.style.display = hideTaskLog ? 'none' : '');
 
             // Notify projects tab of visibility change
             document.dispatchEvent(new CustomEvent('tab-changed', { detail: { tab: tabId } }));

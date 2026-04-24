@@ -60,6 +60,7 @@ _allowed_origins = [
     o.strip() for o in os.environ.get(
         "WEBSITE_CORS_ORIGINS",
         "http://localhost:4321,http://127.0.0.1:4321,"
+        "http://localhost:8000,http://127.0.0.1:8000,"
         "http://192.168.1.11:8000,"
         "https://originsun-studio.com,https://www.originsun-studio.com,"
         "https://preview.originsun-studio.com",

@@ -101,6 +101,23 @@ for _mod_name, _mod in _routers.items():
     if hasattr(_mod, 'router'):
         app.include_router(_mod.router)
 
+# [DEV BRIDGE — Phase M] 讓 Windows main.py 同時服務 /api/website/*，使官網管理
+# Tab 在透過 Cloudflare Tunnel (foundry.originsun-studio.com) 存取時也能走同源
+# fetch。瀏覽器從外部 origin 連不到 main_website.py:8001（localhost 指向用戶端
+# 機器；HTTPS 頁面也無法 fetch HTTP 資源）。M-F NAS 部署完成後移除此區塊，
+# website routers 應只跑在 NAS website-api container。
+try:
+    from routers.website import router as _website_router
+    app.include_router(_website_router)
+
+    @app.get("/healthz")
+    async def _website_healthz():
+        return {"ok": True, "service": "main.py [dev bridge]"}
+
+    print("[DEV BRIDGE] routers/website mounted on main.py (remove after M-F)")
+except Exception as _e:
+    print(f"[WARN] website router load failed: {_e}")
+
 def _self_heal_scheduled_task():
     """Fix Agents stuck in Session 0 due to the old installer's `/rl highest`.
 
