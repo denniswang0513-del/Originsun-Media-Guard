@@ -13,6 +13,7 @@ import asyncio
 import csv
 import io
 import os
+import re
 import shutil
 import uuid
 from datetime import date, datetime, timezone
@@ -3972,6 +3973,67 @@ async def _verify_showcase_edit_token(session, token: str, require_editable: boo
     return await _verify_token_generic(session, token, 'showcase_edit', CrmProjectShowcase, 'editable', require_editable)
 
 
+# Phase M-W Showcase 雙向支援：
+#   - Sync hook：Showcase 儲存時鏡像 5 欄到 crm_projects.public_*
+#     (Astro 官網讀 public_*，編輯在 Showcase 端；hook 讓資料一致)
+#   - Showcase edit token：CRM 完稿 Tab 與官網管理 Tab iframe 共用同一把鑰匙
+from services.website.notion_service import _extract_youtube_id as _parse_youtube_id
+
+SHOWCASE_EDIT_SCOPE = "showcase_edit"
+SHOWCASE_EDIT_EXPIRES_DAYS = 36500  # ~100 年，實務上永久
+
+
+async def _sync_showcase_to_public(session, sc) -> None:
+    """把 Showcase 可鏡像欄位同步到 crm_projects.public_*（呼叫者統一 commit）。
+
+    同步範圍（5 欄）：
+      sc.description  → public_description
+      sc.slug         → public_slug
+      sc.video_url    → public_youtube_id（parse YT ID）
+      sc.published    → public + public_published_at
+
+    不同步 title/client/year — 這些讓 Astro read-time 從 project.name / client
+    動態 join，避免雙寫需要刷新的複雜度。
+    """
+    project = await session.get(CrmProject, sc.id)
+    if not project:
+        return
+    project.public_description = sc.description or None
+    project.public_slug = sc.slug or None
+    yt_id = _parse_youtube_id(sc.video_url or "")
+    if yt_id:
+        project.public_youtube_id = yt_id
+    project.public = bool(sc.published)
+    project.public_published_at = sc.published_at if sc.published else None
+
+
+async def _mint_showcase_edit_token(
+    session, project_id: str, *, reuse_existing: bool = False,
+) -> tuple[str, CrmProjectShowcase]:
+    """取得/產生 Showcase edit token，upsert CrmProjectShowcase row。
+
+    Args:
+        reuse_existing: True 時如果 sc.edit_token 已存在就重用（冪等），不動 updated_at；
+                        False 時永遠產新 token 覆寫（CRM 完稿 Tab「重新產生分享連結」的語義）。
+
+    回傳 (token, showcase_row)。不 commit，caller 統一 commit。
+    新建 showcase 時才設 editable=True；既有 row 保留 CRM 管理員手動設的 editable 值。
+    """
+    from core.auth import create_token
+    sc = await session.get(CrmProjectShowcase, project_id)
+    if sc and reuse_existing and sc.edit_token:
+        return sc.edit_token, sc
+    token = create_token({"sub": project_id, "scope": SHOWCASE_EDIT_SCOPE},
+                         expires_days=SHOWCASE_EDIT_EXPIRES_DAYS)
+    if not sc:
+        sc = CrmProjectShowcase(id=project_id, edit_token=token, editable=True)
+        session.add(sc)
+    else:
+        sc.edit_token = token
+        sc.updated_at = _now()
+    return token, sc
+
+
 @router.get("/projects/{project_id}/showcase")
 async def get_project_showcase(project_id: str, request: Request):
     """取得或建立專案 Showcase（1:1 關聯）。"""
@@ -4006,6 +4068,7 @@ async def update_project_showcase(project_id: str, req: ShowcasePayload, request
         sc.process_mode = req.process_mode
         sc.slug = req.slug or None
         sc.updated_at = _now()
+        await _sync_showcase_to_public(session, sc)
         await session.commit()
         await session.refresh(sc)
     return _to_showcase_dict(sc)
@@ -4178,6 +4241,7 @@ async def toggle_showcase_publish(project_id: str, request: Request):
         if sc.published:
             sc.published_at = _now()
         sc.updated_at = _now()
+        await _sync_showcase_to_public(session, sc)
         await session.commit()
         await session.refresh(sc)
     return _to_showcase_dict(sc)
@@ -4212,20 +4276,12 @@ async def auto_showcase_credits(project_id: str, request: Request):
 
 @router.post("/projects/{project_id}/showcase/generate-edit-token")
 async def generate_showcase_edit_token(project_id: str, request: Request):
-    """產生 Showcase 外部編輯永久連結 Token。"""
+    """產生 Showcase 外部編輯永久連結 Token（永遠產新 token，為分享連結「重發」語義）。"""
     _check_auth(request)
     _require_db()
-    from core.auth import create_token
-    token = create_token({"sub": project_id, "scope": "showcase_edit"}, expires_days=36500)
     factory = await _get_factory()
     async with factory() as session:
-        sc = await session.get(CrmProjectShowcase, project_id)
-        if not sc:
-            sc = CrmProjectShowcase(id=project_id, edit_token=token)
-            session.add(sc)
-        else:
-            sc.edit_token = token
-            sc.updated_at = _now()
+        token, _sc = await _mint_showcase_edit_token(session, project_id, reuse_existing=False)
         await session.commit()
     return {"status": "ok", "token": token, "url": f"/showcase-edit.html?token={token}"}
 
@@ -4291,7 +4347,12 @@ async def update_showcase_edit_data(token: str, request: Request):
             sc.process_mode = body["process_mode"]
         if "process_items" in body:
             sc.process_items = body["process_items"]
+        if "video_url" in body:
+            sc.video_url = body["video_url"]
+        if "slug" in body:
+            sc.slug = body["slug"] or None
         sc.updated_at = _now()
+        await _sync_showcase_to_public(session, sc)
         await session.commit()
     return {"status": "ok"}
 

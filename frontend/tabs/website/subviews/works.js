@@ -1,13 +1,22 @@
 /**
  * works.js — 作品集管理子視圖
- * 列出所有作品（含未公開），可切換公開狀態、切精選、編輯對外欄位、刪除分類關聯。
- * 實際「對外欄位編輯」建議走 CRM 專案 Tab 的「對外展示」子區塊（M-D-4），
- * 這裡提供輕量編輯 + 排序 + 精選 toggle。
+ *
+ * 網站管理員（role=website_admin）的作品全流程：列表/搜尋/篩選、新增、編輯、
+ * 公開/精選切換。編輯 UI 透過 iframe 嵌入 /showcase-edit.html?token=XXX —
+ * 重用既有 showcase-edit.html 避免重寫 544 行的 CRM 完稿 Tab 編輯器。
  */
 import { websiteFetch, esc, toastOk, toastErr, renderLoadError, debounce } from '../website-utils.js';
 
 let _works = [];
 let _categories = [];
+
+async function _reloadWorks() {
+    try {
+        const res = await websiteFetch('/api/website/admin/works?include_non_public=true');
+        _works = res?.items || [];
+        _renderTable();
+    } catch { /* silently skip — user can reload manually */ }
+}
 
 export default async function render(container, ctx = {}) {
     const { isCurrent = () => true } = ctx;
@@ -29,8 +38,9 @@ export default async function render(container, ctx = {}) {
     container.innerHTML = `
         <h2>🎬 作品集管理 <span style="color:#888;font-size:13px;font-weight:400;">· ${_works.length} 件作品</span></h2>
 
-        <div style="margin-bottom:12px;display:flex;gap:8px;align-items:center;">
-            <input id="works-filter" type="text" placeholder="搜尋標題 / 客戶 / slug…" style="flex:1;max-width:320px;" />
+        <div style="margin-bottom:12px;display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
+            <button class="btn" onclick="window._websiteNewWork()" style="background:#059669;">➕ 新增作品</button>
+            <input id="works-filter" type="text" placeholder="搜尋標題 / 客戶 / slug…" style="flex:1;min-width:240px;max-width:320px;" />
             <select id="works-cat-filter" style="min-width:140px;">
                 <option value="">所有分類</option>
                 ${_categories.map(c => `<option value="${c.id}">${esc(c.name_zh)}</option>`).join('')}
@@ -49,6 +59,7 @@ export default async function render(container, ctx = {}) {
     document.getElementById('works-cat-filter').addEventListener('change', _renderTable);
     document.getElementById('works-public-only').addEventListener('change', _renderTable);
     _renderTable();
+    _ensureEditPanel();
 }
 
 function _renderTable() {
@@ -110,7 +121,7 @@ function _renderTable() {
                         </label>
                     </td>
                     <td>
-                        <a href="http://localhost:8000/#crm_projects" class="btn btn-sm btn-ghost" style="text-decoration:none;">CRM 詳編</a>
+                        <button class="btn btn-sm" onclick="window._websiteEditWork('${esc(w.id)}')">✎ 編輯</button>
                     </td>
                 </tr>
                 `;
@@ -147,4 +158,112 @@ window._websiteToggleFeatured = async (pid, val) => {
         toastErr(e.message);
         _renderTable();
     }
+};
+
+
+// ══════════════════════════════════════════════════════════
+// Edit panel（iframe 嵌 /showcase-edit.html?token=XXX）
+// ══════════════════════════════════════════════════════════
+
+function _ensureEditPanel() {
+    if (document.getElementById('website-edit-panel-overlay')) return;
+    const overlay = document.createElement('div');
+    overlay.id = 'website-edit-panel-overlay';
+    overlay.style.cssText = `
+        position:fixed;inset:0;background:rgba(0,0,0,0.5);z-index:9000;
+        display:none;align-items:stretch;justify-content:flex-end;
+    `;
+    overlay.innerHTML = `
+        <div id="website-edit-panel" style="
+            width:75%;max-width:960px;height:100%;background:#0e0e0e;
+            border-left:1px solid #2a2a2a;display:flex;flex-direction:column;
+            box-shadow:-8px 0 24px rgba(0,0,0,0.6);
+        ">
+            <div style="display:flex;align-items:center;gap:12px;padding:10px 14px;border-bottom:1px solid #2a2a2a;background:#161616;flex-shrink:0;">
+                <strong id="website-edit-panel-title" style="color:#fff;font-size:14px;flex:1;">編輯作品</strong>
+                <button class="btn btn-sm btn-ghost" onclick="window._websiteCloseEditPanel()">✕ 關閉並重新整理</button>
+            </div>
+            <iframe id="website-edit-panel-iframe" style="flex:1;width:100%;border:0;background:#0e0e0e;"></iframe>
+        </div>
+    `;
+    overlay.addEventListener('click', (e) => {
+        if (e.target === overlay) window._websiteCloseEditPanel();
+    });
+    document.body.appendChild(overlay);
+}
+
+function _openEditPanel(url, title) {
+    _ensureEditPanel();
+    const overlay = document.getElementById('website-edit-panel-overlay');
+    const iframe = document.getElementById('website-edit-panel-iframe');
+    const titleEl = document.getElementById('website-edit-panel-title');
+    if (titleEl) titleEl.textContent = title || '編輯作品';
+    iframe.src = url;
+    overlay.style.display = 'flex';
+}
+
+window._websiteCloseEditPanel = () => {
+    const overlay = document.getElementById('website-edit-panel-overlay');
+    if (!overlay) return;
+    overlay.style.display = 'none';
+    const iframe = document.getElementById('website-edit-panel-iframe');
+    if (iframe) iframe.src = 'about:blank';
+    // Fire-and-forget reload to pick up changes saved in iframe
+    _reloadWorks();
+};
+
+window._websiteEditWork = async (pid) => {
+    try {
+        const r = await websiteFetch(`/api/website/admin/works/${pid}/edit-url`, { method: 'POST' });
+        const w = _works.find(x => x.id === pid);
+        _openEditPanel(r.edit_url, `編輯：${w?.public_title || w?.name || pid}`);
+    } catch (e) {
+        toastErr(e.message);
+    }
+};
+
+
+// ══════════════════════════════════════════════════════════
+// 新增作品 modal（走 window._createFormModal，styling 統一）
+// ══════════════════════════════════════════════════════════
+
+window._websiteNewWork = async () => {
+    let clients = [];
+    try {
+        const r = await websiteFetch('/api/website/admin/clients/lookup');
+        clients = r?.items || [];
+    } catch { /* 允許無客戶列表，使用者可不選 */ }
+
+    window._createFormModal({
+        id: 'website-new-work-modal',
+        title: '➕ 新增作品',
+        submitLabel: '建立並開編輯',
+        fields: [
+            { key: 'name', label: '作品名稱', type: 'text', required: true, autofocus: true },
+            { key: 'client_id', label: '客戶（可選）', type: 'select',
+              options: [{ value: '', label: '（不指定）' },
+                        ...clients.map(c => ({ value: c.id, label: c.name }))] },
+            { key: 'year', label: '年份（可選）', type: 'number',
+              placeholder: `例如 ${new Date().getFullYear()}` },
+        ],
+        onSubmit: async (vals, setError, close) => {
+            const name = (vals.name || '').trim();
+            if (!name) { setError('請輸入作品名稱'); return; }
+            const payload = { name };
+            if (vals.client_id) payload.client_id = vals.client_id;
+            const year = Number(vals.year);
+            if (year) payload.year = year;
+            try {
+                const r = await websiteFetch('/api/website/admin/works/create', {
+                    method: 'POST', body: payload,
+                });
+                close();
+                toastOk('作品已建立');
+                _openEditPanel(r.edit_url, `編輯:${name}`);
+                _reloadWorks();
+            } catch (e) {
+                setError(e.message || '建立失敗');
+            }
+        },
+    });
 };

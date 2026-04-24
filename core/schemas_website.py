@@ -158,6 +158,32 @@ class ProjectReorder(BaseModel):
     order: list[str]  # ordered list of crm_project.id
 
 
+# Phase M-W：網站管理員在「作品集管理」新增作品
+class WorkCreateRequest(BaseModel):
+    name: str = Field(..., min_length=1, max_length=200)
+    client_id: Optional[str] = None
+    year: Optional[int] = None
+
+
+class WorkCreateResponse(BaseModel):
+    id: str
+    name: str
+    edit_url: str
+
+
+class EditUrlResponse(BaseModel):
+    edit_url: str
+
+
+class ClientLookupItem(BaseModel):
+    id: str
+    name: str
+
+
+class ClientLookupResponse(BaseModel):
+    items: list[ClientLookupItem] = Field(default_factory=list)
+
+
 # ══════════════════════════════════════════════════════════
 # Contact Inquiry（聯絡表單收件箱）
 # ══════════════════════════════════════════════════════════
