@@ -1,11 +1,14 @@
 /**
  * post.ts — Insight / 專欄文章 TS interface
  *
- * 目前資料源：lib/posts.ts 硬編（6 篇假文章 + picsum 封面）。
- * M-E-5.2 後改接 Notion as CMS 時，保持此 interface 形狀不變即可。
+ * 資料源：lib/posts.ts → src/content/posts.json
+ *   （Python notion_service 同步時產生；無檔案時 lib 會 fallback 空陣列）
+ *
+ * 分類為動態 — Notion 「分類」multi_select 改了 lib/categories.ts 自動跟上，
+ * 所以 PostCategory 是 plain string 而非 literal union。
  */
 
-export type PostCategory = "documentary" | "post-production" | "project-review" | "workflow";
+export type PostCategory = string;
 
 /**
  * PostBlock — 文章內容區塊（對齊 Notion block 概念）
@@ -39,16 +42,16 @@ export interface IPost {
     read_time_min?: number;
 }
 
+/**
+ * IPostCategoryOption — 對應 lib/categories.ts 載入的單筆 category。
+ * 欄位形狀對齊 Python notion_service 同步輸出 + 一個特殊 id="all" pseudo-category
+ * 給篩選器當「全部」按鈕。
+ */
 export interface IPostCategoryOption {
-    value: PostCategory | "all";
+    id: string;        // category slug (e.g. "documentary"，"all" 為篩選器全部按鈕)
+    name: string;      // 原 Notion option name（debug / fallback 顯示）
     label_zh: string;
     label_en: string;
+    color?: string;    // Notion option color
+    count?: number;    // 該分類下的文章數
 }
-
-export const POST_CATEGORIES: IPostCategoryOption[] = [
-    { value: "all",             label_zh: "全部",   label_en: "All" },
-    { value: "documentary",     label_zh: "紀錄片", label_en: "Documentary" },
-    { value: "post-production", label_zh: "後期",   label_en: "Post-production" },
-    { value: "project-review",  label_zh: "案件回顧", label_en: "Project Review" },
-    { value: "workflow",        label_zh: "工作流程", label_en: "Workflow" },
-];

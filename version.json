@@ -1,5 +1,5 @@
 {
-  "version": "1.10.80",
-  "build_date": "2026-04-19",
-  "notes": "製作串帶對齊空拍寫入（payload 補齊 + 縮圖網格 + 檔案多選/資料夾）；Watcher 強化（立即執行讀 UI 不需先存、取消全部按鈕、檢視轉檔設定 popover 含 dirty 標註）；Worker 自動建立輸出目錄修 crash；NVENC probe 影格 64→256 修 false negative；空拍寫入 tab 未選時顏色修正"
+  "version": "1.10.83",
+  "build_date": "2026-04-25",
+  "notes": "DJI Mavic 3 attached_pic 轉檔修復 + ffmpeg stderr 黑洞修復 + Session 0 self-heal 擴充 + Phase M 官網管理 Tab 作品共用 + Notion CMS 骨架 + CF Tunnel 同源修復"
 }

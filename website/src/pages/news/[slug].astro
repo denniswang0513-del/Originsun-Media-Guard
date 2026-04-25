@@ -15,6 +15,21 @@ const WIDTH_CLASS: Record<PostBlockWidth, string> = {
     full:    "max-w-none",
 };
 
+// notion_service 把 paragraph/quote/list 內的 inline 連結存成 markdown `[text](url)`。
+// 這個 helper 把那段 markdown 還原成 <a>。content 已是 Notion 來的可信來源，但仍
+// HTML-escape 文字部分 + URL attr，避免奇怪字元意外注入 markup。
+const _ESC = (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+const _MD_LINK = /\[([^\]]+)\]\(([^)\s]+)\)/g;
+function renderInline(text: string): string {
+    if (!text) return "";
+    // 先全文 escape，避免 < & " 等出現在 plain text 時破壞渲染
+    const escaped = _ESC(text);
+    // 再把 markdown link 模式還原（_ESC 不會碰到 [ ] ( ) 等字元，所以模式仍可匹配）
+    return escaped.replace(_MD_LINK, (_, label, href) =>
+        `<a href="${_ESC(href)}" target="_blank" rel="noopener noreferrer" class="text-[#c9372c] underline hover:text-[#a02a23]">${label}</a>`
+    );
+}
+
 export async function getStaticPaths() {
     const posts = await fetchPosts();
     return posts.map(p => ({ params: { slug: p.slug } }));
@@ -83,7 +98,7 @@ const publishedDate = new Date(post.published_at).toLocaleDateString("zh-TW", {
                     const size = block.lead ? "text-xl sm:text-2xl text-neutral-800 leading-[1.7]" : "text-[17px] sm:text-lg text-neutral-700 leading-[1.95]";
                     return (
                         <div class="max-w-[680px] mx-auto px-4 sm:px-6 lg:px-8 my-6">
-                            <p class={`${size} tracking-wide`}>{block.text}</p>
+                            <p class={`${size} tracking-wide`} set:html={renderInline(block.text)} />
                         </div>
                     );
                 }
@@ -136,9 +151,8 @@ const publishedDate = new Date(post.published_at).toLocaleDateString("zh-TW", {
                     return (
                         <div class="max-w-[680px] mx-auto px-4 sm:px-6 lg:px-8 my-10 sm:my-14">
                             <blockquote class="border-l-2 border-[#c9372c] pl-6 sm:pl-8 py-2">
-                                <p class="text-xl sm:text-2xl font-light text-neutral-800 leading-[1.6] tracking-wide italic">
-                                    「{block.text}」
-                                </p>
+                                <p class="text-xl sm:text-2xl font-light text-neutral-800 leading-[1.6] tracking-wide italic"
+                                   set:html={`「${renderInline(block.text)}」`} />
                                 {block.author && (
                                     <cite class="block not-italic text-xs tracking-[0.3em] uppercase text-neutral-500 mt-4">
                                         — {block.author}
@@ -154,7 +168,7 @@ const publishedDate = new Date(post.published_at).toLocaleDateString("zh-TW", {
                     return (
                         <div class="max-w-[680px] mx-auto px-4 sm:px-6 lg:px-8 my-6">
                             <Tag class={`${listCls} pl-6 space-y-2 text-[17px] sm:text-lg text-neutral-700 leading-[1.85] tracking-wide marker:text-[#c9372c]`}>
-                                {block.items.map(item => <li>{item}</li>)}
+                                {block.items.map(item => <li set:html={renderInline(item)} />)}
                             </Tag>
                         </div>
                     );

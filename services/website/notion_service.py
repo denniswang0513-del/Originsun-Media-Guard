@@ -65,14 +65,40 @@ PUBLISHED_STATUSES = {"上架官網"}
 
 EXCERPT_MAX_CHARS = 100
 
+# 容錯：使用者可能把整段 Notion URL 貼進 database_id 欄位，或殘留前後空白、
+# 中間有 dash。Notion API 接受 dashed/undashed 32-hex，但 URL/空白會直接 400。
+_NOTION_ID_PATTERN = re.compile(
+    r"([0-9a-f]{8})-?([0-9a-f]{4})-?([0-9a-f]{4})-?([0-9a-f]{4})-?([0-9a-f]{12})",
+    re.IGNORECASE,
+)
+
+
+def _normalize_notion_id(raw: str) -> str:
+    """從各種使用者輸入抽出乾淨的 32-char hex ID。
+
+    - 'https://notion.so/workspace/Page-58dd13b5f07d45e6ad7c7732fc6e0add?v=...' → 抽 ID
+    - '58dd13b5-f07d-45e6-ad7c-7732fc6e0add' → 去 dash
+    - '  58dd13b5f07d45e6ad7c7732fc6e0add  ' → trim
+    - 完全不是 ID 格式 → 原樣回傳（讓下游以 invalid_request_url 失敗，但訊息更清楚）
+    """
+    if not raw:
+        return ""
+    s = raw.strip()
+    m = _NOTION_ID_PATTERN.search(s)
+    if m:
+        return "".join(m.groups()).lower()
+    return s
+
 # 支援的 Notion block 類型（其餘略過）
 SUPPORTED_BLOCK_TYPES = {
     "paragraph", "heading_1", "heading_2", "heading_3",
     "bulleted_list_item", "numbered_list_item",
     "quote", "callout", "image", "video",
+    "bookmark", "embed", "link_preview",
 }
 
-# 單純 rich_text 包出來的 block 用 lookup 避免複製貼上四個 branch
+# 單純 rich_text 包出來的 block 用 lookup 避免複製貼上四個 branch。
+# 這些 block 都會保留 inline 連結（rich_text 裡的 href 轉成 markdown-like 格式）。
 _SIMPLE_TEXT_BLOCK_BUILDERS: dict[str, Callable[[str], dict]] = {
     "paragraph": lambda t: {"type": "paragraph", "text": t},
     "quote": lambda t: {"type": "quote", "text": t},
@@ -155,6 +181,30 @@ def _plain_text(rich_text: list[dict] | None) -> str:
     if not rich_text:
         return ""
     return "".join(rt.get("plain_text", "") for rt in rich_text)
+
+
+def _rich_text_md(rich_text: list[dict] | None) -> str:
+    """轉成 markdown-like 字串保留 inline 連結。Astro 端用 regex 還原成 <a> 標籤。
+
+    範例：[{plain_text: "see ", href: null}, {plain_text: "this", href: "https://x"}]
+       → "see [this](https://x)"
+
+    Heading 不需要呼叫此函式（Astro 渲染 heading 時不解析 markdown）；
+    paragraph / quote / list / callout 用得到。
+    """
+    if not rich_text:
+        return ""
+    parts = []
+    for rt in rich_text:
+        text = rt.get("plain_text", "")
+        href = rt.get("href")
+        if href and text:
+            # 防止 markdown 衝突：清理 ] ) 等字元（罕見，但安全處理）
+            safe_text = text.replace("[", "(").replace("]", ")")
+            parts.append(f"[{safe_text}]({href})")
+        else:
+            parts.append(text)
+    return "".join(parts)
 
 
 def _prop_title(page_properties: dict, key: str = PROP_TITLE) -> str:
@@ -375,7 +425,10 @@ async def _download_media(
             with open(dest_file, "wb") as f:
                 async for chunk in resp.aiter_bytes(chunk_size=65536):
                     f.write(chunk)
-        rel = dest_file.relative_to(dest_dir.parent)
+        # dest_dir = .../public/notion-media/{slug}; parent.parent = .../public
+        # → 相對路徑 = notion-media/{slug}/{name}.{ext} → URL: /notion-media/{slug}/{name}.{ext}
+        # （Astro 把 public/ 整個 serve 在 root）
+        rel = dest_file.relative_to(dest_dir.parent.parent)
         return "/" + str(rel).replace("\\", "/")
     except Exception as e:
         logger.warning("[notion-media] download failed for %s: %s", url, e)
@@ -427,9 +480,25 @@ def _video_to_post_block(video: dict, ctx: BlockContext) -> dict | None:
 
 def _callout_to_post_block(callout: dict) -> dict | None:
     emoji = (callout.get("icon") or {}).get("emoji", "")
-    text = _plain_text(callout.get("rich_text"))
+    text = _rich_text_md(callout.get("rich_text"))
     merged = f"{emoji} {text}".strip() if emoji else text
     return {"type": "paragraph", "text": merged} if merged else None
+
+
+def _link_block_to_post_block(block: dict, btype: str) -> dict | None:
+    """bookmark / embed / link_preview → 渲染成 paragraph with markdown link。
+
+    Notion 三種「外部資源」block 結構幾乎一樣：都有 url，bookmark 有 caption。
+    全部 normalize 成 [caption-or-url](url) 的 paragraph，Astro 會解析成 <a>。
+    """
+    data = block.get(btype) or {}
+    url = data.get("url", "").strip()
+    if not url:
+        return None
+    caption = _plain_text(data.get("caption") or [])
+    label = caption.strip() or url
+    safe_label = label.replace("[", "(").replace("]", ")")
+    return {"type": "paragraph", "text": f"[{safe_label}]({url})"}
 
 
 async def _block_to_post_block(
@@ -442,10 +511,12 @@ async def _block_to_post_block(
 
     builder = _SIMPLE_TEXT_BLOCK_BUILDERS.get(btype)
     if builder is not None:
-        text = _plain_text(block[btype].get("rich_text"))
+        # 用 _rich_text_md 保留 inline 連結（href 變成 [text](url)）
+        text = _rich_text_md(block[btype].get("rich_text"))
         return builder(text) if text else None
 
     # heading_1 映射到 level 2 是因為 PostBlock 不支援 h1（h1 留給頁面 title）
+    # heading 不解析 markdown link，內嵌連結會以純文字呈現
     heading_level = _HEADING_LEVELS.get(btype)
     if heading_level is not None:
         return {
@@ -459,6 +530,8 @@ async def _block_to_post_block(
         return await _image_to_post_block(block["image"], block_idx, ctx)
     if btype == "video":
         return _video_to_post_block(block["video"], ctx)
+    if btype in ("bookmark", "embed", "link_preview"):
+        return _link_block_to_post_block(block, btype)
     return None
 
 
@@ -486,6 +559,55 @@ def _extract_excerpt(post_blocks: list[dict], limit: int = EXCERPT_MAX_CHARS) ->
             if text:
                 return text[:limit] + ("…" if len(text) > limit else "")
     return ""
+
+
+# Originsun 文章模板：以特定 heading 文字標記封面區與正文起點
+COVER_HEADING_TEXTS = {"封面圖", "封面", "Cover", "cover"}
+BODY_START_HEADING_TEXTS = {"內文與內文配圖", "內文", "正文", "Body", "Content"}
+
+
+def _split_cover_and_body(
+    blocks: list[dict],
+) -> tuple[str | None, list[dict]]:
+    """根據 Originsun 文章模板的 section markers 切出封面與正文。
+
+    模板約定：
+      heading "封面圖"           ← 標記封面區（區內第一張 image 當 cover_url）
+      image                       ← 取為 cover
+      heading "內文與內文配圖"   ← 標記正文起點
+      ...                          ← 正文內容
+
+    沒任何 marker 的文章 → 視為自由格式，全部 block 當正文（cover_url=None）。
+    只有「封面圖」沒有「內文與內文配圖」 → 圖後內容自動視為正文。
+    區段標題本身不進 body（避免重複看到「封面圖」「內文與內文配圖」字樣）。
+    """
+    cover_url: str | None = None
+    body: list[dict] = []
+    section = "pre"  # pre / cover / post_cover / body
+    cover_taken = False
+
+    for blk in blocks:
+        if blk.get("type") == "heading":
+            text = (blk.get("text") or "").strip()
+            if text in COVER_HEADING_TEXTS:
+                section = "cover"
+                continue
+            if text in BODY_START_HEADING_TEXTS:
+                section = "body"
+                continue
+
+        if section == "cover":
+            if blk.get("type") == "image" and not cover_taken:
+                cover_url = blk.get("src")
+                cover_taken = True
+                section = "post_cover"  # 封面已收，後續若無 body marker 自動視為正文
+            # 封面 section 內其他內容（caption、額外 heading）不進 body
+            continue
+
+        # pre / post_cover / body 都進 body
+        body.append(blk)
+
+    return cover_url, body
 
 
 # ══════════════════════════════════════════════════════════
@@ -558,12 +680,20 @@ async def _process_pages(
         )
         body = _merge_consecutive_lists([b for b in raw_bodies if b])
 
+        # 套用「封面圖 / 內文與內文配圖」模板切分：拆出 cover、過濾區段標題
+        template_cover, body = _split_cover_and_body(body)
+
         excerpt = _extract_excerpt(body)
         if not excerpt:
             warnings.append(f"文章 #{slug}：內文沒有 paragraph，摘要為空")
 
         label_zh = cat_entry["label_zh"] if cat_entry else category_name
         label_en = cat_entry["label_en"] if cat_entry else category_name
+
+        # 封面優先級：Notion page cover（頁面頂部拖曳那張）> 模板「封面圖」section 的圖
+        # （page cover 若是 file type 會 1hr 過期；模板 cover 已下載到 public/notion-media，
+        #  所以實務上模板 cover 較穩。如果 page cover 是 external URL（unsplash 等）也 OK。）
+        cover = _page_cover_url(page) or template_cover or ""
 
         # A2: 排序用 last_edited_time（使用者決策）
         posts.append({
@@ -572,7 +702,7 @@ async def _process_pages(
             "category": category_id,
             "category_label_zh": label_zh,
             "category_label_en": label_en,
-            "cover_url": _page_cover_url(page) or "",
+            "cover_url": cover,
             "excerpt": excerpt,
             "published_at": page.get("last_edited_time") or "",
             "body": body,
@@ -622,6 +752,9 @@ async def run_full_sync(
     Returns dict matching `_sync_result()` shape.
     """
     t0 = time.time()
+    db_id = _normalize_notion_id(db_id)
+    if not db_id:
+        return _sync_error(t0, "database_id 為空")
     try:
         async with httpx.AsyncClient(timeout=REQUEST_TIMEOUT) as client:
             # Schema fetch 與 page list 兩個獨立 API call，平行

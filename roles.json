@@ -48,5 +48,22 @@
       "crm_invoices"
     ],
     "description": ""
+  },
+  {
+    "name": "Assitance",
+    "access_level": 2,
+    "modules": [
+      "backup",
+      "verify",
+      "transcode",
+      "concat",
+      "report",
+      "transcribe",
+      "tts",
+      "drone_meta",
+      "website_admin"
+    ],
+    "description": "",
+    "id": 8
   }
 ]

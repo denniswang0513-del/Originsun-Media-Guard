@@ -86,11 +86,12 @@ STDLIB = {
 
 # ── Local project modules (excluded from dependency checks) ──
 LOCAL_MODULES = {
-    "core", "routers", "utils", "db", "frontend", "templates",
+    "core", "routers", "utils", "db", "frontend", "templates", "services",
     "core_engine", "tts_engine", "transcriber", "notifier", "config",
     "report_generator", "drive_sync", "download_model", "bootstrap",
-    "server", "main", "update_monitor", "build_agent_zip", "publish_update",
-    "update_agent", "preflight", "ota_manifest", "patch_ui", "debug_compare",
+    "server", "main", "main_website", "update_monitor", "build_agent_zip",
+    "publish_update", "update_agent", "preflight", "ota_manifest",
+    "patch_ui", "debug_compare",
     "backup_source", "env_setup", "extract_frames", "remove_all_emojis",
 }
 

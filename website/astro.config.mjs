@@ -11,6 +11,10 @@ export default defineConfig({
   server: {
     host: true,
   },
+  // 關掉 dev 模式右下角的 Astro Dev Toolbar（Astro logo + Inspect + Audit + 設定）
+  devToolbar: {
+    enabled: false,
+  },
   vite: {
     plugins: [tailwindcss()],
     server: {

@@ -7,12 +7,13 @@ import BaseLayout from "../../layouts/BaseLayout.astro";
 import Tr from "../../components/ui/Tr.astro";
 import { fetchMeta } from "../../lib/crm-client";
 import { fetchPosts } from "../../lib/posts";
-import { POST_CATEGORIES } from "../../types/post";
+import { fetchCategories } from "../../lib/categories";
 import { placeholderImage } from "../../lib/youtube";
 
-const [meta, posts] = await Promise.all([
+const [meta, posts, categories] = await Promise.all([
     fetchMeta(),
     fetchPosts(),
+    fetchCategories(),
 ]);
 
 // Hero 背景圖：用 placeholder 直到 admin 可在 settings 設 news.hero_image
@@ -49,12 +50,12 @@ const heroBgUrl = placeholderImage("news_hero_studio", 2400, 900);
     <section class="bg-white pt-8 pb-12">
         <div class="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8">
             <div class="flex flex-wrap justify-center gap-x-10 gap-y-3 border-b border-neutral-200 pb-1">
-                {POST_CATEGORIES.map(c => (
+                {categories.map(c => (
                     <button type="button"
-                            data-cat-filter={c.value}
+                            data-cat-filter={c.id}
                             class:list={[
                                 "news-cat-btn relative text-sm tracking-[0.2em] uppercase py-3 transition-colors",
-                                c.value === "all"
+                                c.id === "all"
                                     ? "text-neutral-900 font-medium"
                                     : "text-neutral-500 hover:text-neutral-900",
                             ]}>
