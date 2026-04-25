@@ -7,6 +7,7 @@ import threading
 import base64
 import json
 import tempfile
+from collections import deque
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Callable, Any, Dict, List, Tuple, Optional
@@ -734,6 +735,39 @@ class MediaGuardEngine:
                 
 
     @staticmethod
+    def _spawn_with_stderr_tail(cmd: List[str], maxlen: int = 40):
+        """Spawn an ffmpeg subprocess and start a daemon thread that captures
+        the last ``maxlen`` stderr lines into a ring buffer.
+
+        Caller drains ``proc.stdout``, calls ``proc.wait()``, then
+        ``thread.join()`` to flush the buffer. Use ``_log_stderr_tail()`` to
+        surface the captured lines on failure — DEVNULL'd stderr was the root
+        cause of an undiagnosable DJI bug ("Could not find tag for codec
+        prores in stream #1") that took hours to reproduce.
+
+        Returns: ``(proc, tail: deque, thread)``.
+        """
+        proc = subprocess.Popen(
+            cmd,
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+            text=True, encoding="utf-8", errors="replace",
+            creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0x08000000),
+        )
+        tail: deque = deque(maxlen=maxlen)
+        thread = threading.Thread(
+            target=lambda: tail.extend(line.rstrip() for line in proc.stderr),
+            daemon=True,
+        )
+        thread.start()
+        return proc, tail, thread
+
+    def _log_stderr_tail(self, tail, max_lines: int = 12) -> None:
+        """Emit the last non-empty lines of an ffmpeg stderr ring buffer."""
+        lines = [l for l in tail if l.strip()][-max_lines:]
+        for line in lines:
+            self.err(f"    ffmpeg: {line}")
+
+    @staticmethod
     def _get_video_duration(filepath: str) -> float:
         """Call ffprobe to get video duration in seconds.
 
@@ -965,10 +999,15 @@ class MediaGuardEngine:
             self.log(f"[{i+1}/{total}] 正在轉檔: {os.path.basename(src_file)}")
             duration = self._get_video_duration(src_file)
 
+            # -map 0:v:0 (not 0:v) skips attached_pic streams. DJI Mavic 3+
+            # embeds an mjpeg thumbnail as Stream #0:3 disposition=attached_pic;
+            # 0:v selects it too and prores_ks can't tag it for the mov muxer,
+            # killing the whole file with "Could not find tag for codec prores
+            # in stream #1". 0:a:0? likewise picks only the first audio track.
             cmd = [
                 "ffmpeg", "-y", "-nostdin",
                 "-i", src_file,
-                "-map", "0:v", "-map", "0:a?",
+                "-map", "0:v:0", "-map", "0:a:0?",
                 "-vf", "scale=-2:720",
                 "-c:v", "prores_ks", "-profile:v", "1",
                 "-c:a", "copy",
@@ -977,7 +1016,7 @@ class MediaGuardEngine:
                 proxy_out
             ]
 
-            proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True, creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0x08000000))
+            proc, stderr_tail, stderr_thread = self._spawn_with_stderr_tail(cmd)
             t_start = time.time()
 
             # 解析 FFmpeg 進度
@@ -1016,6 +1055,7 @@ class MediaGuardEngine:
             except subprocess.TimeoutExpired:
                 proc.kill()
                 proc.wait()
+            stderr_thread.join(timeout=2)
 
             if self._stop_event.is_set():
                 self.log(f"[X] {os.path.basename(src_file)} 轉檔已強制中止。")
@@ -1031,6 +1071,7 @@ class MediaGuardEngine:
 
             if proc.returncode != 0:
                 self.err(f"[!] 轉檔失敗: {os.path.basename(src_file)}")
+                self._log_stderr_tail(stderr_tail)
                 err_count += 1  # type: ignore
             else:
                 self.log(f"[OK] 完成: {os.path.basename(proxy_out)}")
@@ -1312,15 +1353,13 @@ class MediaGuardEngine:
                 ] + vcodec_args + acodec_args + ["-nostats", b_out]
 
                 try:
-                    b_proc = subprocess.Popen(
-                        b_cmd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
-                        text=True, creationflags=_flags,
-                    )
+                    b_proc, b_tail, b_thread = self._spawn_with_stderr_tail(b_cmd)
                     for _ in (b_proc.stdout or []):
                         if self._check_pause_stop():
                             b_proc.terminate()
                             break
                     b_proc.wait(timeout=7200)
+                    b_thread.join(timeout=2)
                 except OSError as e:
                     self.err(f"[!] 批次 {bi+1} 啟動失敗: {e}")
                     for tmp in _temp_intermediates:
@@ -1335,6 +1374,7 @@ class MediaGuardEngine:
 
                 if b_proc.returncode != 0:
                     self.err(f"[!] 批次 {bi+1} 串接失敗 (returncode={b_proc.returncode})")
+                    self._log_stderr_tail(b_tail)
                     for tmp in _temp_intermediates:
                         try: os.remove(tmp)
                         except OSError: pass

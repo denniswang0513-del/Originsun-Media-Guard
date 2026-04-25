@@ -146,31 +146,38 @@ def _self_heal_scheduled_task():
         if ses.value != 0:
             return  # Already in interactive session — nothing to fix.
 
-        # Confirm the OriginsunAgent scheduled task exists. If not, this
-        # Agent was launched some other way and we shouldn't touch it.
-        q = subprocess.run(
-            ["schtasks", "/query", "/tn", "OriginsunAgent"],
-            capture_output=True, text=True,
-            creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0),
-        )
-        if q.returncode != 0:
-            return
-
         app_dir = os.path.dirname(os.path.abspath(__file__))
         vbs_path = os.path.join(app_dir, "start_hidden.vbs")
         if not os.path.isfile(vbs_path):
             return
 
-        print("[SelfHeal] Agent running in Session 0 — re-registering task without /rl highest")
+        # Find an existing Originsun boot task (name varies across installs:
+        # OriginsunAgent from one-shot installer, OriginsunBoot from older
+        # Install_or_Update). If none exist this Agent was launched some
+        # other way (manual run, service wrapper) and we shouldn't touch it.
+        task_name = None
+        for candidate in ("OriginsunAgent", "OriginsunBoot"):
+            q = subprocess.run(
+                ["schtasks", "/query", "/tn", candidate],
+                capture_output=True, text=True,
+                creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0),
+            )
+            if q.returncode == 0:
+                task_name = candidate
+                break
+        if not task_name:
+            return
+
+        print(f"[SelfHeal] Agent running in Session 0 — re-registering {task_name} without /rl highest")
 
         # Re-register the task without /rl highest so it runs in Session 1.
         subprocess.run(
-            ["schtasks", "/delete", "/tn", "OriginsunAgent", "/f"],
+            ["schtasks", "/delete", "/tn", task_name, "/f"],
             capture_output=True,
             creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0),
         )
         cr = subprocess.run(
-            ["schtasks", "/create", "/tn", "OriginsunAgent",
+            ["schtasks", "/create", "/tn", task_name,
              "/tr", f'wscript.exe "{vbs_path}"',
              "/sc", "onlogon", "/f"],
             capture_output=True, text=True,
@@ -185,7 +192,7 @@ def _self_heal_scheduled_task():
         helper = (
             f'timeout /t 4 /nobreak >nul & '
             f'taskkill /f /pid {pid} >nul 2>&1 & '
-            f'schtasks /run /tn "OriginsunAgent"'
+            f'schtasks /run /tn "{task_name}"'
         )
         DETACHED_PROCESS = 0x00000008
         CREATE_NEW_PROCESS_GROUP = 0x00000200

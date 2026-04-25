@@ -825,8 +825,10 @@ def _drone_meta_sync(job, engine, task: DroneMetaRequest, _on_progress):
             ff_cmd += ["-i", autel_srt_path]
 
         if is_dji:
-            # Exclude DJI private meta/dbgi tracks, keep only v+a
-            ff_cmd += ["-map", "0:v", "-map", "0:a?"]
+            # Exclude DJI private meta/dbgi tracks AND the mjpeg attached_pic
+            # thumbnail Mavic 3+ embeds (without :0 it sneaks in as a second
+            # video stream and breaks downstream concat / re-mux steps).
+            ff_cmd += ["-map", "0:v:0", "-map", "0:a:0?"]
             if autel_srt_path:
                 ff_cmd += ["-map", "1:0"]
         else:
