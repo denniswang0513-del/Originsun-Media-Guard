@@ -2,7 +2,7 @@
 // Entry point — imports all extracted modules, then defines core app logic.
 
 // ── Module Imports (side-effect: each module registers its window.* globals) ──
-import { TAB_MAP, shouldShowTab } from './js/shared/tab-config.js';
+import { TAB_MAP, TAB_LOADERS, shouldShowTab } from './js/shared/tab-config.js';
 import './js/shared/modal-styles.js';
 import './js/auth/auth-state.js';
 import './js/auth/login-modal.js';
@@ -58,14 +58,18 @@ if (typeof appendLog === 'undefined') {
                     }
                 });
 
-                // Helper: load a single tab (fetch HTML + import JS + init)
+                // Helper: load a single tab. fetch(html) and import(js) run in
+                // parallel — the module doesn't depend on the DOM until initFn
+                // runs, so awaiting them sequentially wastes ~1 RTT per tab.
                 const _loadTab = async (sectionId, htmlPath, jsPath, initFn) => {
                     try {
                         const el = document.getElementById(sectionId);
-                        const res = await fetch(`${htmlPath}${_cb}`);
+                        const [res, mod] = await Promise.all([
+                            fetch(`${htmlPath}${_cb}`),
+                            import(`${jsPath}${_cb}`),
+                        ]);
                         if (res.ok) {
                             el.innerHTML = await res.text();
-                            const mod = await import(`${jsPath}${_cb}`);
                             if (typeof mod[initFn] === 'function') await mod[initFn]();
                         }
                     } catch (e) {
@@ -73,31 +77,13 @@ if (typeof appendLog === 'undefined') {
                     }
                 };
 
-                // Sequential media tabs — only load authorized ones
-                if (_should('projects'))   await _loadTab('tab-projects',    './tabs/projects/projects.html',       './tabs/projects/projects.js',       'initTab');
-                if (_should('backup'))     await _loadTab('tab_main',        './tabs/backup/backup.html',           './tabs/backup/backup.js',           'initBackupTab');
-                if (_should('verify'))     await _loadTab('tab_verify',      './tabs/verify/verify.html',           './tabs/verify/verify.js',           'initVerifyTab');
-                if (_should('transcode'))  await _loadTab('tab_transcode',   './tabs/transcode/transcode.html',     './tabs/transcode/transcode.js',     'initTranscodeTab');
-                if (_should('concat'))     await _loadTab('tab_concat',      './tabs/concat/concat.html',           './tabs/concat/concat.js',           'initConcatTab');
-                if (_should('report'))     await _loadTab('tab_report',      './tabs/report/report.html',           './tabs/report/report.js',           'initReportTab');
-                if (_should('transcribe')) await _loadTab('tab_transcribe',  './tabs/transcribe/transcribe.html',   './tabs/transcribe/transcribe.js',   'initTranscribeTab');
-                if (_should('tts'))        await _loadTab('tab_tts',         './tabs/tts/tts.html',                 './tabs/tts/tts.js',                 'initTtsTab');
-                if (_should('drone_meta')) await _loadTab('tab_drone_meta',  './tabs/drone_meta/drone_meta.html',   './tabs/drone_meta/drone_meta.js',   'initDroneMetaTab');
-
-                // CRM tabs — load authorized ones in parallel
-                const _crmTabs = [
-                    ['crm_clients',  'tab_crm_clients',  'crm.html',          'crm.js',          'initCrmTab'],
-                    ['crm_projects', 'tab_crm_projects', 'crm-projects.html', 'crm-projects.js', 'initCrmProjectsTab'],
-                    ['crm_staff',    'tab_crm_staff',    'crm-staff.html',    'crm-staff.js',    'initCrmStaffTab'],
-                    ['crm_invoices', 'tab_crm_invoices', 'crm-invoices.html', 'crm-invoices.js', 'initCrmInvoicesTab'],
-                ];
+                // All authorized tabs load in parallel. Section IDs come from
+                // TAB_MAP so loadTabs and _applyModuleTabs share one truth.
                 await Promise.all(
-                    _crmTabs.filter(([key]) => _should(key))
-                            .map(([, id, html, js, init]) => _loadTab(id, `./tabs/crm/${html}`, `./tabs/crm/${js}`, init))
+                    TAB_LOADERS
+                        .filter(([key]) => _should(key))
+                        .map(([key, html, js, init]) => _loadTab(TAB_MAP[key], html, js, init))
                 );
-
-                // Website management tab
-                if (_should('website_admin')) await _loadTab('tab_website', './tabs/website/website.html', './tabs/website/website.js', 'initWebsiteTab');
 
                 // Auto-switch to first authorized tab
                 if (hasModules) {

@@ -1,32 +1,92 @@
 // ─── Auth State (extracted from app.js) ─── //
 import { TAB_MAP, NAV_MAP, shouldShowTab } from '../shared/tab-config.js';
 
+const STORAGE_KEYS = { TOKEN: 'auth_token', USER: 'auth_user' };
+
 // ─── Auth State Variables ─── //
 window._isAdmin = false;
 window._accessLevel = 0;     // RBAC: 0=readonly, 1=operator, 2=manager, 3=superadmin
 window._modules = [];         // RBAC: visible module keys from role
-window._authToken = localStorage.getItem('auth_token') || '';
+window._authToken = localStorage.getItem(STORAGE_KEYS.TOKEN) || '';
 window._authUser = null;
 
-// Check saved token on load（存 Promise 供 loadTabs 等待）
-window._authReady = (async function _initAuth() {
-    if (!window._authToken) { _applyAuthState(false); return; }
-    try {
-        const r = await fetch('/api/v1/auth/me', { headers: { 'Authorization': 'Bearer ' + window._authToken } });
-        if (r.ok) {
-            const d = await r.json();
-            window._authUser = d;
-            window._accessLevel = d.access_level || 0;
-            window._modules = d.modules || [];
-            _applyAuthState(window._accessLevel >= 3);
-            // _applyModuleTabs 延後到 loadTabs 完成後執行
-        } else {
-            localStorage.removeItem('auth_token');
-            window._authToken = '';
+// Optimistic auth: hydrate window state synchronously from a cached user
+// (written by _onLoginSuccess + each successful revalidate) so loadTabs()
+// doesn't wait on /auth/me. Background revalidate reconciles by reloading
+// the page only when the role's modules / access_level actually changed.
+function _readCachedUser() {
+    try { return JSON.parse(localStorage.getItem(STORAGE_KEYS.USER) || 'null'); }
+    catch (_) { return null; }
+}
+function _writeCachedUser(d) {
+    try { localStorage.setItem(STORAGE_KEYS.USER, JSON.stringify(d)); } catch (_) {}
+}
+function _clearCachedUser() {
+    try { localStorage.removeItem(STORAGE_KEYS.USER); } catch (_) {}
+}
+
+async function _fetchMe() {
+    const r = await fetch('/api/v1/auth/me', { headers: { 'Authorization': 'Bearer ' + window._authToken } });
+    if (!r.ok) { const e = new Error('auth/me failed'); e.status = r.status; throw e; }
+    return r.json();
+}
+
+function _adoptUser(d) {
+    window._authUser = d;
+    window._accessLevel = d.access_level || 0;
+    window._modules = d.modules || [];
+    _writeCachedUser(d);
+    _applyAuthState(window._accessLevel >= 3);
+}
+
+const _cached = window._authToken ? _readCachedUser() : null;
+if (_cached) {
+    window._authUser = _cached;
+    window._accessLevel = _cached.access_level || 0;
+    window._modules = _cached.modules || [];
+    _applyAuthState(window._accessLevel >= 3);
+}
+
+window._authReady = _cached
+    ? Promise.resolve()
+    : (async function _initAuth() {
+        if (!window._authToken) { _applyAuthState(false); return; }
+        try {
+            _adoptUser(await _fetchMe());
+        } catch (e) {
+            if (e.status) {
+                localStorage.removeItem(STORAGE_KEYS.TOKEN);
+                _clearCachedUser();
+                window._authToken = '';
+            }
             _applyAuthState(false);
         }
-    } catch (_) { _applyAuthState(false); }
-})();
+    })();
+
+// Background revalidate — only when hydrated from cache. Reload if role
+// shifted; trust cache on network failure (offline use case).
+if (_cached && window._authToken) {
+    setTimeout(() => {
+        // Logout (or 401) may have cleared the token while we were waiting.
+        if (!window._authToken) return;
+        _fetchMe()
+            .then(d => {
+                const before = JSON.stringify((_cached.modules || []).slice().sort());
+                const after = JSON.stringify((d.modules || []).slice().sort());
+                _writeCachedUser(d);
+                if (before !== after || (_cached.access_level || 0) !== (d.access_level || 0)) {
+                    location.reload();
+                }
+            })
+            .catch(e => {
+                if (e.status === 401) {
+                    localStorage.removeItem(STORAGE_KEYS.TOKEN);
+                    _clearCachedUser();
+                    location.reload();
+                }
+            });
+    }, 100);
+}
 
 export function _applyAuthState(isAdmin) {
     window._isAdmin = isAdmin;
@@ -126,7 +186,8 @@ window._restartAgent = async function() {
 };
 
 window._authLogout = function() {
-    localStorage.removeItem('auth_token');
+    localStorage.removeItem(STORAGE_KEYS.TOKEN);
+    _clearCachedUser();
     window._authToken = '';
     window._authUser = null;
     window._accessLevel = 0;
@@ -140,11 +201,8 @@ window._authLogout = function() {
 // ─── Shared Login Success Handler ─── //
 export function _onLoginSuccess(d) {
     window._authToken = d.token;
-    window._authUser = d;
-    window._accessLevel = d.access_level || 0;
-    window._modules = d.modules || [];
-    localStorage.setItem('auth_token', d.token);
-    _applyAuthState(window._accessLevel >= 3);
+    localStorage.setItem(STORAGE_KEYS.TOKEN, d.token);
+    _adoptUser(d);
     _applyModuleTabs();
     document.getElementById('auth-login-modal')?.classList.add('hidden');
     if (d.first_login) {

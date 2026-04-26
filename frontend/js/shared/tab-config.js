@@ -22,6 +22,27 @@ export const NAV_MAP = {
 
 export const MEDIA_TABS = ['projects', 'backup', 'verify', 'transcode', 'concat', 'report', 'transcribe', 'tts', 'drone_meta'];
 
+// Tab loader registry — paths and init function names cannot be derived from
+// keys by convention (crm tabs share a folder; init names are inconsistent).
+// Section IDs deliberately mirror TAB_MAP so loadTabs and _applyModuleTabs
+// stay in sync without duplication.
+export const TAB_LOADERS = [
+    ['projects',      './tabs/projects/projects.html',       './tabs/projects/projects.js',       'initTab'],
+    ['backup',        './tabs/backup/backup.html',           './tabs/backup/backup.js',           'initBackupTab'],
+    ['verify',        './tabs/verify/verify.html',           './tabs/verify/verify.js',           'initVerifyTab'],
+    ['transcode',     './tabs/transcode/transcode.html',     './tabs/transcode/transcode.js',     'initTranscodeTab'],
+    ['concat',        './tabs/concat/concat.html',           './tabs/concat/concat.js',           'initConcatTab'],
+    ['report',        './tabs/report/report.html',           './tabs/report/report.js',           'initReportTab'],
+    ['transcribe',    './tabs/transcribe/transcribe.html',   './tabs/transcribe/transcribe.js',   'initTranscribeTab'],
+    ['tts',           './tabs/tts/tts.html',                 './tabs/tts/tts.js',                 'initTtsTab'],
+    ['drone_meta',    './tabs/drone_meta/drone_meta.html',   './tabs/drone_meta/drone_meta.js',   'initDroneMetaTab'],
+    ['crm_clients',   './tabs/crm/crm.html',                 './tabs/crm/crm.js',                 'initCrmTab'],
+    ['crm_projects',  './tabs/crm/crm-projects.html',        './tabs/crm/crm-projects.js',        'initCrmProjectsTab'],
+    ['crm_staff',     './tabs/crm/crm-staff.html',           './tabs/crm/crm-staff.js',           'initCrmStaffTab'],
+    ['crm_invoices',  './tabs/crm/crm-invoices.html',        './tabs/crm/crm-invoices.js',        'initCrmInvoicesTab'],
+    ['website_admin', './tabs/website/website.html',         './tabs/website/website.js',         'initWebsiteTab'],
+];
+
 export function shouldShowTab(key, authUser, modules) {
     const loggedIn = !!authUser;
     const hasModules = loggedIn && modules && modules.length > 0;
