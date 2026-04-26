@@ -145,7 +145,13 @@ IMPLICIT_DEPS = {
 
 
 def scan_imports(base_dir: str) -> set:
-    """Scan all .py files under base_dir and return set of top-level import names."""
+    """Scan all .py files under base_dir and return set of top-level import names.
+
+    Empty strings are filtered: relative imports like `from . import foo`
+    match the regex with `m='.'` which splits to `['', '']`, and the empty
+    top-level would otherwise leak into resolve_new_deps and end up written
+    as a blank line under a new # Auto-detected header in requirements_agent.
+    """
     imported = set()
     for root, dirs, files in os.walk(base_dir):
         dirs[:] = [d for d in dirs if d not in EXCLUDE_DIRS]
@@ -153,9 +159,12 @@ def scan_imports(base_dir: str) -> set:
             if not f.endswith(".py"):
                 continue
             try:
-                content = open(os.path.join(root, f), encoding="utf-8", errors="ignore").read()
+                with open(os.path.join(root, f), encoding="utf-8", errors="ignore") as fh:
+                    content = fh.read()
                 for m in re.findall(r"^\s*(?:from|import)\s+([\w.]+)", content, re.MULTILINE):
-                    imported.add(m.split(".")[0].lower())
+                    name = m.split(".")[0].lower()
+                    if name:
+                        imported.add(name)
             except Exception:
                 pass
     return imported
