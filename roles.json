@@ -41,11 +41,14 @@
     "name": "Finance",
     "access_level": 3,
     "modules": [
+      "backup",
+      "drone_meta",
       "crm_clients",
       "crm_projects",
       "crm_quotes",
       "crm_staff",
-      "crm_invoices"
+      "crm_invoices",
+      "website_admin"
     ],
     "description": ""
   },

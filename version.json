@@ -1,5 +1,5 @@
 {
-  "version": "1.10.83",
-  "build_date": "2026-04-25",
-  "notes": "DJI Mavic 3 attached_pic 轉檔修復 + ffmpeg stderr 黑洞修復 + Session 0 self-heal 擴充 + Phase M 官網管理 Tab 作品共用 + Notion CMS 骨架 + CF Tunnel 同源修復"
+  "version": "1.10.84",
+  "build_date": "2026-04-26",
+  "notes": "登入流程優化：first paint ~370ms → ~50ms（7x）。樂觀 auth 快取 + 14 tab Promise.all 並行 + fetch/import 並行 + dedup helpers + 修登出 race。Finance 角色補加 backup/drone_meta/website_admin 權限"
 }
