@@ -941,6 +941,11 @@
 .pi-wrap { display: flex; flex-direction: column; gap: 12px; }
 .pi-empty { color: #4b5563; font-style: italic; }
 
+/* Cell-by-cell click-to-edit hover affordance */
+.pi-edit-cell { cursor: pointer; border-bottom: 1px dashed transparent; transition: border-color 0.15s; }
+.pi-edit-cell:hover { border-bottom-color: #4b5563; }
+.pi-pm-popover label:hover { background: #2a2a2a; }
+
 /* Layer 1: Summary bar */
 .pi-summary {
     display: flex; gap: 1px; background: #2e2e2e; border-radius: 8px; overflow: hidden;

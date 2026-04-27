@@ -203,8 +203,11 @@ export function renderList() {
 // ── Selection & Close ───────────────────────────────────────
 
 export function selectProject(id) {
-    if (id !== state.selectedId && Object.keys(window._costDirtyMap || {}).length > 0) {
-        window._costCheckUnsaved(function() { window._costDirtyMap = {}; selectProject(id); });
+    if (id !== state.selectedId && window._allDirtyCount?.() > 0) {
+        window._costCheckUnsaved(function() {
+            window._clearAllDirty();
+            selectProject(id);
+        });
         return;
     }
     state.selectedId = id;
@@ -222,8 +225,11 @@ export function selectProject(id) {
 }
 
 export function closeDetail() {
-    if (Object.keys(window._costDirtyMap || {}).length > 0) {
-        window._costCheckUnsaved(function() { window._costDirtyMap = {}; closeDetail(); });
+    if (window._allDirtyCount?.() > 0) {
+        window._costCheckUnsaved(function() {
+            window._clearAllDirty();
+            closeDetail();
+        });
         return;
     }
     state.selectedId = null;

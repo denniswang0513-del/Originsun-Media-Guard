@@ -7,15 +7,82 @@ import { state, callbacks, EXPENSE_CATEGORIES } from './crm-projects-state.js';
 import { calcDashboard, remainColor, profitColor, barColor, diffLabel } from './crm-projects-calc.js';
 import { crmFetch as _fetch, esc as _esc, fmtNum, searchableSelect } from './crm-utils.js';
 
-// INT field names from _buildEditFields — inlined to avoid circular dep with detail module
-const _INT_FIELD_NAMES = [
-    'contract_amount', 'tax_rate', 'profit_target_pct', 'misc_budget_pct',
-    'amount_receivable', 'amount_received', 'transfer_fee',
-];
-
 // ── Dirty map ──────────────────────────────────────────────────
 window._costDirtyMap = {};
 window._expDirtyMap = {};  // {expId: {field: value}} 行政雜支 inline edit
+window._projDirtyMap = {}; // {field: value} 專案資訊 cell-by-cell inline edit
+
+window._allDirtyCount = function() {
+    return Object.keys(window._costDirtyMap || {}).length
+         + Object.keys(window._expDirtyMap || {}).length
+         + Object.keys(window._projDirtyMap || {}).length;
+};
+window._clearAllDirty = function() {
+    window._costDirtyMap = {};
+    window._expDirtyMap = {};
+    window._projDirtyMap = {};
+};
+
+// ── Auto-save state (1-sec debounce) ───────────────────────────
+const AUTOSAVE_DEBOUNCE_MS = 1000;
+const STATUS_REFRESH_MS = 10000;
+// Fields that appear on the project-list cards (left panel). Edits to other
+// fields don't need a full list refetch.
+const _PROJ_LIST_FIELDS = ['name', 'client_id', 'status', 'am_username', 'start_date'];
+let _autosaveTimer = null;
+let _autosaveState = 'idle';   // 'idle' | 'pending' | 'saving' | 'saved' | 'error'
+let _autosaveLastTs = 0;
+let _autosaveStatusTimer = null;
+
+function _setAutosaveState(s, ts) {
+    if (s === _autosaveState && !ts) return;   // no-op guard avoids DOM thrash on rapid edits
+    _autosaveState = s;
+    if (ts) _autosaveLastTs = ts;
+    _renderSaveControls();
+}
+
+function _scheduleAutoSave() {
+    if (_autosaveTimer) clearTimeout(_autosaveTimer);
+    _setAutosaveState('pending');
+    _autosaveTimer = setTimeout(function() {
+        _autosaveTimer = null;
+        _flushAutoSave();
+    }, AUTOSAVE_DEBOUNCE_MS);
+}
+
+async function _flushAutoSave() {
+    if (_autosaveTimer) { clearTimeout(_autosaveTimer); _autosaveTimer = null; }
+    if (window._allDirtyCount() === 0) return true;
+    _setAutosaveState('saving');
+    try {
+        await _autoSaveCostExpenses();
+        _setAutosaveState('saved', Date.now());
+        return true;
+    } catch (e) {
+        _setAutosaveState('error');
+        // dirty map intact (restored by _autoSaveCostExpenses catch) — user
+        // can retry from the 🔴 indicator or trigger another edit.
+        return false;
+    }
+}
+window._costFlushAutoSave = _flushAutoSave;        // exposed for tab/project switch guards
+window._costScheduleAutoSave = _scheduleAutoSave;  // exposed for project info inline edits
+
+function _relativeTime(ts) {
+    var sec = Math.floor((Date.now() - ts) / 1000);
+    if (sec < 5) return '剛剛';
+    if (sec < 60) return sec + ' 秒前';
+    if (sec < 3600) return Math.floor(sec / 60) + ' 分鐘前';
+    return new Date(ts).toLocaleTimeString('en-US', { hour12: false });
+}
+
+// Refresh "X 秒前" display every 10s so it doesn't feel stale.
+if (!_autosaveStatusTimer) {
+    _autosaveStatusTimer = setInterval(function() {
+        if (_autosaveState === 'saved') _renderSaveControls();
+    }, STATUS_REFRESH_MS);
+}
+
 
 // ── Financial Summary ──────────────────────────────────────────
 async function _loadFinancialSummary(projectId) {
@@ -71,10 +138,16 @@ async function _loadFinancialSummary(projectId) {
             <div id="cost-groups-switcher"></div>
             ${_renderCostLines(costData.grouped || [], expData.expenses || [], f)}
         `;
-        window._costDirtyMap = {};
-        window._expDirtyMap = {};
+        // DO NOT clear dirty maps here. Reload may happen via enableInlineEdit's
+        // post-save renderDetail() while a cost cell auto-save is still pending
+        // (debounced 1s timer hasn't fired). Wiping the buffer would lose that
+        // edit forever. selectProject / closeDetail / selectGroup all flush via
+        // _costCheckUnsaved before triggering reload, so by the time we get
+        // here in those flows the maps are already empty.
         callbacks.renderGroupSwitcher?.();
         container.querySelectorAll('.cost-staff-sel').forEach(sel => searchableSelect(sel, { placeholder: '搜尋人員...' }));
+        // Inject the [🟢 已自動儲存] indicator into the detail bar.
+        _renderSaveControls();
     } catch (_) {
         container.innerHTML = '<div class="crm-empty">載入失敗</div>';
     }
@@ -376,7 +449,6 @@ function _renderCostLines(grouped, expenses, financialSummary) {
 window._costCopyToActual = function(lineId) {
     var row = document.querySelector('[data-line-id="' + lineId + '"]');
     if (!row) return;
-    window._costShowSaveBtn(true);
     var dirty = window._costDirtyMap[lineId] = Object.assign({}, window._costDirtyMap[lineId] || {});
 
     // Read estimated values from cells or dirty map
@@ -415,12 +487,18 @@ window._costCopyToActual = function(lineId) {
 
     if (actPriceEl && price != null) actPriceEl.innerHTML = '$' + fmtNum(price);
     if (actQtyEl && qty != null) actQtyEl.textContent = qty;
-    if (actStaffEl) actStaffEl.value = staffId;
+    if (actStaffEl) {
+        actStaffEl.value = staffId;
+        // searchableSelect wraps the <select> with a visible <input>; setting
+        // .value directly skips the input, so the user sees stale "搜尋人員...".
+        if (typeof actStaffEl._syncSsValue === 'function') actStaffEl._syncSsValue();
+    }
     if (actUnitEl) actUnitEl.value = unitType;
     if (amtCells[1] && amt != null) amtCells[1].innerHTML = '$' + fmtNum(amt);
 
     _costUpdateDiff(row);
     _costUpdateDashboard();
+    _scheduleAutoSave();
 };
 
 // ── Subtotal / Dashboard live update ───────────────────────────
@@ -562,7 +640,6 @@ function _costUpdateDiff(row) {
 // ── Inline edit: numeric fields ────────────────────────────────
 window._costStartEdit = function(cell, lineId, field, currentVal) {
     if (cell.querySelector('input')) return;
-    window._costShowSaveBtn(true);
     var isQty = field.indexOf('quantity') >= 0;
     var isUnitOrQty = field.indexOf('unit_price') >= 0 || isQty;
     var input = document.createElement('input');
@@ -582,6 +659,7 @@ window._costStartEdit = function(cell, lineId, field, currentVal) {
             var parsed = val === '' ? null : parseInt(val);
             window._costDirtyMap[lineId] = Object.assign({}, window._costDirtyMap[lineId] || {});
             window._costDirtyMap[lineId][field] = parsed;
+            _scheduleAutoSave();
             // Display: no $ for quantity fields
             if (isQty) {
                 cell.innerHTML = val === '' ? '<span class="crm-muted">—</span>' : val;
@@ -634,39 +712,30 @@ window._costStartEdit = function(cell, lineId, field, currentVal) {
 window._costMarkDirtyField = function(lineId, field, value) {
     window._costDirtyMap[lineId] = Object.assign({}, window._costDirtyMap[lineId] || {});
     window._costDirtyMap[lineId][field] = value || null;
-    window._costShowSaveBtn(true);
+    _scheduleAutoSave();
 };
 
-// ── Save all dirty edits ───────────────────────────────────────
-window._costSaveAll = async function() {
-    var saveBtn = document.getElementById('_inline-save');
-    if (saveBtn) { saveBtn.disabled = true; saveBtn.textContent = '儲存中...'; }
-    var costEntries = Object.entries(window._costDirtyMap || {});
-    var expEntries = Object.entries(window._expDirtyMap || {});
+// ── Auto-save cost lines + expenses + project info ────────────────
+// Endpoints take entry IDs (line / expense / project_id captured up-front),
+// so dirty edits can be saved even after the user has navigated away.
+async function _autoSaveCostExpenses() {
+    // Snapshot-then-clear: subsequent edits during in-flight PUT go to the
+    // fresh map and survive (the previous "wipe after PUT" pattern lost any
+    // edit done during the network roundtrip).
+    var savingCost = window._costDirtyMap;
+    var savingExp = window._expDirtyMap;
+    var savingProj = window._projDirtyMap;
+    window._costDirtyMap = {};
+    window._expDirtyMap = {};
+    window._projDirtyMap = {};
 
-    // Also check if enableInlineEdit fields are present (edit button was clicked)
-    var infoPayload = null;
-    var infoFields = document.querySelectorAll('#proj-detail-info [data-field]');
-    if (infoFields.length > 0) {
-        infoPayload = {};
-        infoFields.forEach(function(el) {
-            var name = el.dataset.field;
-            var val = el.value;
-            if (_INT_FIELD_NAMES.indexOf(name) >= 0) val = val ? parseInt(val) : null;
-            if (el.type === 'date' || el.type === 'month') val = val || null;
-            infoPayload[name] = val;
-        });
-    }
+    var costEntries = Object.entries(savingCost);
+    var expEntries = Object.entries(savingExp);
+    var projHasDirty = Object.keys(savingProj).length > 0;
+    if (costEntries.length === 0 && expEntries.length === 0 && !projHasDirty) return;
 
-    if (costEntries.length === 0 && expEntries.length === 0 && !infoPayload) {
-        if (saveBtn) { saveBtn.disabled = false; saveBtn.textContent = '儲存'; }
-        return;
-    }
+    var projectId = state.selectedId;  // capture so a mid-flight nav can't redirect the PUT
     try {
-        if (infoPayload && state.selectedId) {
-            await _fetch('/projects/' + state.selectedId, { method: 'PUT', body: JSON.stringify(infoPayload) });
-        }
-        // 每筆 cost-line / expense 彼此獨立，併發發送避免 N 筆 × 50ms 累加延遲
         await Promise.all([
             ...costEntries.map(function(entry) {
                 return _fetch('/project-cost-lines/' + entry[0], {
@@ -678,22 +747,29 @@ window._costSaveAll = async function() {
                     method: 'PATCH', body: JSON.stringify(entry[1])
                 });
             }),
-        ]);
-        window._costDirtyMap = {};
-        window._expDirtyMap = {};
-        var proj = state.projects.find(function(p) { return p.id === state.selectedId; });
-        if (infoPayload) await callbacks.loadProjects?.();
-        var updated = proj;
-        if (infoPayload) {
-            updated = await _fetch('/projects/' + state.selectedId);
+            projHasDirty && projectId
+                ? _fetch('/projects/' + projectId, { method: 'PUT', body: JSON.stringify(savingProj) })
+                : null,
+        ].filter(Boolean));
+        // Refresh project list cache only if a list-displayed field changed
+        // (left panel cards show name / client / status / am / start_date).
+        // Skipping for description/notes/contract/etc avoids fetching all
+        // projects on every keystroke burst.
+        if (projHasDirty && _PROJ_LIST_FIELDS.some(f => f in savingProj)) {
+            callbacks.loadProjects?.();
         }
-        callbacks.renderDetail?.(updated || proj);
-        _loadFinancialSummary(state.selectedId);
     } catch (e) {
-        alert('儲存失敗: ' + e.message);
-        if (saveBtn) { saveBtn.disabled = false; saveBtn.textContent = '儲存'; }
+        // Restore so user can retry. New edits added during the failed PUT
+        // take precedence over the stale saving values.
+        window._costDirtyMap = Object.assign({}, savingCost, window._costDirtyMap);
+        window._expDirtyMap = Object.assign({}, savingExp, window._expDirtyMap);
+        window._projDirtyMap = Object.assign({}, savingProj, window._projDirtyMap);
+        throw e;
     }
-};
+    // No reload — client-side updates (subtotals/dashboard/diff) already ran
+    // on the edit events; reloading would destroy input focus / select dropdowns.
+}
+
 
 // ── Init cost lines (standard template) ────────────────────────
 window._projInitCostLines = async function() {
@@ -793,7 +869,6 @@ window._projDeleteCostLine = async function(lineId) {
 // ── Inline edit: 行政雜支（類別/細項/金額/請款人）─────────────
 window._expEdit = function(cell, expId, field, currentVal) {
     if (cell.querySelector('input, select')) return;
-    window._costShowSaveBtn(true);
     const isCategory = field === 'category';
     const isAmount = field === 'actual';
     let input;
@@ -823,11 +898,16 @@ window._expEdit = function(cell, expId, field, currentVal) {
         window._expDirtyMap[expId][field] = val;
         if (isAmount) {
             cell.textContent = '$' + fmtNum(val);
+            // Admin expense amount changed → client-side recalc subtotals + dashboard
+            // (without this the 行政雜支 小計 stays at $0 until next reload).
+            _costUpdateSubtotals();
+            _costUpdateDashboard();
         } else if (isCategory) {
             cell.textContent = val;
         } else {
             cell.innerHTML = val ? _esc(val) : '<span class="crm-muted">—</span>';
         }
+        _scheduleAutoSave();
     };
 
     if (isCategory) {
@@ -857,7 +937,6 @@ window._expEdit = function(cell, expId, field, currentVal) {
 // ── Edit item name ─────────────────────────────────────────────
 window._costEditName = function(cell, lineId, currentName) {
     if (cell.querySelector('input')) return;
-    window._costShowSaveBtn(true);
     var input = document.createElement('input');
     input.type = 'text';
     input.className = 'crm-input';
@@ -1036,98 +1115,62 @@ window._costDeleteTemplate = async function(templateId) {
 };
 
 // ── Unsaved changes guard ──────────────────────────────────────
-window._costCheckUnsaved = function(callback) {
-    var dirty = Object.keys(window._costDirtyMap || {}).length
-              + Object.keys(window._expDirtyMap || {}).length;
-    if (dirty === 0) {
-        if (callback) callback();
-        return true;
-    }
-    // If no callback, use sync confirm (for beforeunload etc)
-    if (!callback) {
-        return confirm('有未儲存的修改，確定要離開嗎？');
-    }
-    // Show custom modal
-    var overlay = document.createElement('div');
-    overlay.className = 'crm-modal-overlay';
-    overlay.style.display = 'flex';
-    overlay.innerHTML = '<div class="crm-modal" style="max-width:360px;">' +
-        '<div class="crm-modal-header"><h3>未儲存的修改</h3></div>' +
-        '<div class="crm-modal-body" style="padding:16px;color:#d1d5db;">你有尚未儲存的成本估算修改，要如何處理？</div>' +
-        '<div class="crm-modal-footer" style="display:flex;gap:8px;justify-content:flex-end;">' +
-            '<button id="_unsaved-cancel" class="crm-btn crm-btn-secondary crm-btn-sm">取消</button>' +
-            '<button id="_unsaved-discard" class="crm-btn crm-btn-secondary crm-btn-sm" style="color:#fca5a5;">不儲存</button>' +
-            '<button id="_unsaved-save" class="crm-btn crm-btn-primary crm-btn-sm">儲存</button>' +
-        '</div></div>';
-    document.body.appendChild(overlay);
-    document.getElementById('_unsaved-cancel').addEventListener('click', function() { overlay.remove(); });
-    document.getElementById('_unsaved-discard').addEventListener('click', function() {
-        overlay.remove();
-        window._costDirtyMap = {};
-        window._expDirtyMap = {};
-        callback();
-    });
-    document.getElementById('_unsaved-save').addEventListener('click', async function() {
-        overlay.remove();
-        await window._costSaveAll();
-        callback();
-    });
-    return false;
-};
-
-window._costShowSaveBtn = function(show) {
+// ── Render persistent [auto-save status] in the detail bar ────
+function _renderSaveControls() {
     var actions = document.getElementById('proj-bar-actions');
     if (!actions) return;
-    // Already showing save buttons? skip
-    if (show && document.getElementById('_inline-save')) return;
-    if (!show) return; // hide is handled by renderDetail on reload
 
-    // Copy the exact pattern from enableInlineEdit (line 116-123 of crm-utils.js)
-    var closeBtn = actions.querySelector('.crm-detail-close');
-    var closeHtml = closeBtn ? closeBtn.outerHTML : '';
-    actions.innerHTML =
-        '<button class="crm-btn crm-btn-secondary crm-btn-sm" id="_inline-cancel">取消</button>' +
-        '<button class="crm-btn crm-btn-primary crm-btn-sm" id="_inline-save">儲存</button>' +
-        closeHtml;
-
-    document.getElementById('_inline-cancel').addEventListener('click', function() {
-        window._costCancelAll();
-    });
-    document.getElementById('_inline-save').addEventListener('click', function() {
-        window._costSaveAll();
-    });
-    // Re-attach close handler
-    var newClose = actions.querySelector('.crm-detail-close');
-    if (newClose) {
-        newClose.addEventListener('click', function() {
-            document.getElementById('proj-detail-panel').style.display = 'none';
-            document.getElementById('proj-resize-handle').style.display = 'none';
-            state.selectedId = null;
-            callbacks.renderList?.();
-        });
+    var status = actions.querySelector('._cost-save-status');
+    if (!status) {
+        status = document.createElement('span');
+        status.className = '_cost-save-status';
+        status.style.cssText = 'font-size:11px;color:#9ca3af;margin:0 8px;display:inline-flex;align-items:center;gap:4px;';
+        actions.insertBefore(status, actions.firstChild);
     }
-};
 
-window._costCancelAll = function() {
-    window._costDirtyMap = {};
-    window._expDirtyMap = {};
-    var project = state.projects.find(function(p) { return p.id === state.selectedId; });
-    if (project) callbacks.renderDetail?.(project);
-    if (state.selectedId) _loadFinancialSummary(state.selectedId);
+    if (_autosaveState === 'pending')      status.innerHTML = '🟡 編輯中…';
+    else if (_autosaveState === 'saving')  status.innerHTML = '🔵 正在儲存…';
+    else if (_autosaveState === 'error')   status.innerHTML = '🔴 儲存失敗 <a href="#" style="color:#fca5a5;text-decoration:underline;">重試</a>';
+    else if (_autosaveState === 'saved')   status.innerHTML = '🟢 已自動儲存 ' + _relativeTime(_autosaveLastTs);
+    else status.innerHTML = '';
+    if (_autosaveState === 'error') {
+        status.querySelector('a').addEventListener('click', function(e) { e.preventDefault(); _flushAutoSave(); });
+    }
+}
+
+// Backwards-compat: cost-groups.js calls _costCheckUnsaved(callback) when
+// switching sub-tables. With auto-save we just flush pending dirty then run
+// the callback — no modal needed.
+window._costCheckUnsaved = function(callback) {
+    if (window._allDirtyCount() === 0) { callback?.(); return true; }
+    if (!callback) {
+        // beforeunload sync path — flush is best-effort, browser may not wait.
+        _flushAutoSave();
+        return true;
+    }
+    // Run callback only when flush succeeds. On failure, dirty map is intact
+    // (restored by _autoSaveCostExpenses) and user sees 🔴 indicator — staying
+    // on the current project lets them retry. Skipping callback also blocks
+    // the navigation that would have wiped the dirty map.
+    _flushAutoSave().then(function(ok) { if (ok) callback(); });
+    return false;
 };
+// detail.js calls this after renderDetail wipes the actions area, to re-inject
+// the auto-save status indicator. Same function as the internal _renderSaveControls.
+window._costShowSaveBtn = _renderSaveControls;
 
 // ── Init: register all window handlers + beforeunload ──────────
 function initCostHandlers() {
     window.addEventListener('beforeunload', function(e) {
-        var dirty = Object.keys(window._costDirtyMap || {}).length
-                  + Object.keys(window._expDirtyMap || {}).length;
-        if (dirty > 0) {
+        if (window._allDirtyCount() > 0) {
+            // Best-effort flush; modern browsers ignore async work in beforeunload
+            // but fetch with keepalive can still complete.
+            _flushAutoSave();
             e.preventDefault();
             e.returnValue = '';
         }
     });
-    // All window.* handlers are already assigned above at module level.
-    // This function exists as a hook for the parent module to call during init.
+    _renderSaveControls();
 }
 
 // ── Exports ────────────────────────────────────────────────────

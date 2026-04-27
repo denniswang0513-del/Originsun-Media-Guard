@@ -112,10 +112,9 @@ const _pctColor = (pct) => pct == null ? '#4b5563' : barColor(pct);
 
 export async function selectGroup(gid) {
     if (gid === state.selectedGroupId) return;
-    const dirty = Object.keys(window._costDirtyMap || {}).length > 0;
-    if (dirty && typeof window._costCheckUnsaved === 'function') {
+    if (window._allDirtyCount?.() > 0 && typeof window._costCheckUnsaved === 'function') {
         window._costCheckUnsaved(function() {
-            window._costDirtyMap = {};
+            window._clearAllDirty();
             _doSelect(gid);
         });
         return;

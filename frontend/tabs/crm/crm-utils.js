@@ -195,9 +195,16 @@ export function searchableSelect(sel, opts = {}) {
     });
     observer.observe(sel, { childList: true });
 
+    // Expose a sync handle on the element so callers that mutate `sel.value`
+    // (e.g. _costCopyToActual) can repaint the visible input.
+    sel._syncSsValue = () => {
+        const o = sel.options[sel.selectedIndex];
+        input.value = (o && o.value) ? o.textContent : '';
+    };
+
     return {
-        refresh: () => { _buildItems(); const o = sel.options[sel.selectedIndex]; input.value = o && o.value ? o.textContent : ''; },
-        destroy: () => { observer.disconnect(); wrap.replaceWith(sel); sel.style.display = ''; delete sel.dataset.searchable; }
+        refresh: () => { _buildItems(); sel._syncSsValue(); },
+        destroy: () => { observer.disconnect(); wrap.replaceWith(sel); sel.style.display = ''; delete sel.dataset.searchable; delete sel._syncSsValue; }
     };
 }
 
@@ -212,6 +219,24 @@ export function searchableSelect(sel, opts = {}) {
  * @param {function} onSave - async (payload) => void
  * @param {function} onCancel - () => void (re-render detail)
  */
+
+/**
+ * Open a folder picker — NAS browser when accessing via tunnel, else native
+ * tkinter dialog through the local agent. Returns selected path or '' on cancel.
+ */
+export async function pickFolderPath(initialPath) {
+    if (window._isExternalAccess && typeof window.openNasBrowser === 'function') {
+        return (await window.openNasBrowser({ title: '選擇資料夾', initialPath: initialPath || '' })) || '';
+    }
+    try {
+        const r = await fetch('/api/v1/utils/pick_folder');
+        const d = await r.json();
+        return d.path || '';
+    } catch (_) {
+        return '';
+    }
+}
+
 export function enableInlineEdit(contentElId, actionsElId, fields, data, onSave, onCancel) {
     const content = document.getElementById(contentElId);
     const actions = document.getElementById(actionsElId);
@@ -257,16 +282,8 @@ export function enableInlineEdit(contentElId, actionsElId, fields, data, onSave,
             const fieldName = btn.dataset.for;
             const inputEl = content.querySelector(`[data-field="${fieldName}"]`);
             if (!inputEl) return;
-            if (window._isExternalAccess && typeof window.openNasBrowser === 'function') {
-                const path = await window.openNasBrowser({ title: '選擇資料夾', initialPath: inputEl.value || '' });
-                if (path) inputEl.value = path;
-            } else {
-                try {
-                    const r = await fetch('/api/v1/utils/pick_folder');
-                    const d = await r.json();
-                    if (d.path) inputEl.value = d.path;
-                } catch (_) {}
-            }
+            const path = await pickFolderPath(inputEl.value || '');
+            if (path) inputEl.value = path;
         });
     });
 
