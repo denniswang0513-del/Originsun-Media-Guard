@@ -111,21 +111,21 @@ function _populateClientDropdown(elementId, selectedId) {
 }
 
 function _populatePmCheckboxes(selected = []) {
-    // PM checkboxes — same source as AM (人力資源), not system users.
-    const container = document.getElementById('proj-f-pm_usernames');
-    if (!container) return;
-    container.innerHTML = (state.staffList || []).map(s => `
-        <label class="crm-checkbox-item">
-            <input type="checkbox" value="${_esc(s.name)}" ${selected.includes(s.name) ? 'checked' : ''}>
-            ${_esc(s.name)}${s.role ? ` <span style="color:#6b7280;">(${_esc(s.role)})</span>` : ''}
-        </label>
-    `).join('');
+    // PM is a single-select — DB column is still a JSON array, so we
+    // pre-select the first element if present and store back as `[name]`.
+    const sel = document.getElementById('proj-f-pm_usernames');
+    if (!sel) return;
+    const cur = Array.isArray(selected) && selected.length > 0 ? selected[0] : '';
+    sel.innerHTML = `<option value="">— 未指派 —</option>` +
+        (state.staffList || []).map(s =>
+            `<option value="${_esc(s.name)}"${s.name === cur ? ' selected' : ''}>${_esc(s.name)}${s.role ? ` (${_esc(s.role)})` : ''}</option>`
+        ).join('');
 }
 
 function _getSelectedPms() {
-    const container = document.getElementById('proj-f-pm_usernames');
-    if (!container) return [];
-    return Array.from(container.querySelectorAll('input:checked')).map(cb => cb.value);
+    const sel = document.getElementById('proj-f-pm_usernames');
+    if (!sel) return [];
+    return sel.value ? [sel.value] : [];
 }
 
 function _showListError(msg) {

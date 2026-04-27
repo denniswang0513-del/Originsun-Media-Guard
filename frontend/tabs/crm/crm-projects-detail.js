@@ -29,7 +29,6 @@ function _buildEditFields() {
         state.clients.map(c => ({value: c.id, label: c.short_name}))
     );
     const amOpts = _staffOptions(true);
-    const pmOpts = _staffOptions(false);
     return [
         {name:'client_id', label:'客戶', type:'select', options: clientOpts},
         {name:'name', label:'專案名稱', type:'text'},
@@ -41,7 +40,10 @@ function _buildEditFields() {
             return [{value:'',label:'—'}, ...getProjectTypes().map(t => ({value:t,label:t}))];
         }},
         {name:'am_username', label:'AM', type:'select', options: amOpts},
-        {name:'pm_usernames', label:'PM', type:'checkboxes', options: pmOpts},
+        // PM is single-select but the DB column is a JSON array — wrap on
+        // commit (`[value]` / `[]`) and unwrap on read (first element). Lets
+        // us flip UX without a DB migration.
+        {name:'pm_usernames', label:'PM', type:'select', options: amOpts, listWrap: true},
         {name:'start_date', label:'起始日', type:'date'},
         {name:'completion_date', label:'結案日', type:'date'},
         {name:'folder_path', label:'資料夾', type:'folder'},
@@ -109,7 +111,12 @@ window._projEdit = function(cell) {
     if (!fieldDef) return;
     const project = state.projects.find(p => p.id === state.selectedId);
     if (!project) return;
-    const orig = project[field];
+    const rawOrig = project[field];
+    // listWrap fields (pm_usernames) store as JSON array but render as
+    // single-select — unwrap to the first element for input population.
+    const orig = fieldDef.listWrap
+        ? (Array.isArray(rawOrig) && rawOrig.length > 0 ? rawOrig[0] : '')
+        : rawOrig;
     const t = fieldDef.type;
 
     let input;
@@ -152,10 +159,15 @@ window._projEdit = function(cell) {
         let val = input.value;
         if (t === 'number') val = val === '' ? null : parseInt(val);
         if (t === 'date' || t === 'month') val = val || null;
-        const changed = (val ?? null) !== (orig ?? null);
+        // listWrap: single-select UI but DB column is a JSON array. Wrap
+        // before sending so backend gets `["王士源"]` or `[]` as expected.
+        const stored = fieldDef.listWrap ? (val ? [val] : []) : val;
+        const changed = fieldDef.listWrap
+            ? JSON.stringify(stored) !== JSON.stringify(rawOrig || [])
+            : (val ?? null) !== (orig ?? null);
         if (changed) {
-            window._projDirtyMap[field] = val;
-            project[field] = val;
+            window._projDirtyMap[field] = stored;
+            project[field] = stored;
             window._costScheduleAutoSave?.();
         }
         // Only re-render when the field affects badge / stage card / budget /
@@ -196,58 +208,8 @@ function _projDisplayValue(field, val, fieldDef) {
     return _esc(String(val));
 }
 
-// PM 多選用 popover，因為概覽 layout 不適合 inline checkbox 列表。
-window._projEditPm = function(cell) {
-    const project = state.projects.find(p => p.id === state.selectedId);
-    if (!project) return;
-    const selected = new Set(project.pm_usernames || []);
-
-    document.querySelectorAll('.pi-pm-popover').forEach(el => el.remove());
-
-    const pop = document.createElement('div');
-    pop.className = 'pi-pm-popover';
-    pop.style.cssText = 'position:absolute;background:#1e1e1e;border:1px solid #555;border-radius:6px;padding:8px;z-index:1000;max-height:300px;overflow:auto;box-shadow:0 4px 12px rgba(0,0,0,0.5);';
-    pop.innerHTML = (state.staffList || []).map(s => `
-        <label style="display:block;padding:4px 8px;cursor:pointer;font-size:12px;color:#d1d5db;border-radius:3px;">
-            <input type="checkbox" value="${_esc(s.name)}"${selected.has(s.name) ? ' checked' : ''} style="margin-right:6px;">
-            ${_esc(s.name)}${s.role ? `<span style="color:#6b7280;"> (${_esc(s.role)})</span>` : ''}
-        </label>
-    `).join('') + `
-        <div style="margin-top:8px;display:flex;gap:6px;justify-content:flex-end;border-top:1px solid #333;padding-top:6px;">
-            <button class="crm-btn crm-btn-secondary crm-btn-sm" id="_proj-pm-cancel">取消</button>
-            <button class="crm-btn crm-btn-primary crm-btn-sm" id="_proj-pm-confirm">確定</button>
-        </div>
-    `;
-
-    const rect = cell.getBoundingClientRect();
-    pop.style.left = rect.left + 'px';
-    pop.style.top = (rect.bottom + 4) + 'px';
-    document.body.appendChild(pop);
-
-    // Single close path so confirm / cancel / outside-click all detach the
-    // outside-click listener (previously cancel/confirm leaked it).
-    const dismiss = () => {
-        document.removeEventListener('click', _outside);
-        pop.remove();
-    };
-    function _outside(e) {
-        if (!pop.contains(e.target) && !cell.contains(e.target)) dismiss();
-    }
-
-    document.getElementById('_proj-pm-confirm').addEventListener('click', () => {
-        const newPms = Array.from(pop.querySelectorAll('input[type="checkbox"]:checked')).map(c => c.value);
-        const oldPms = project.pm_usernames || [];
-        if (JSON.stringify(newPms.slice().sort()) !== JSON.stringify([...oldPms].sort())) {
-            window._projDirtyMap['pm_usernames'] = newPms;
-            project.pm_usernames = newPms;
-            window._costScheduleAutoSave?.();
-        }
-        dismiss();
-        _scheduleRender(project);
-    });
-    document.getElementById('_proj-pm-cancel').addEventListener('click', dismiss);
-    setTimeout(() => document.addEventListener('click', _outside), 50);
-};
+// (removed _projEditPm — PM is now a single-select handled by _projEdit
+// with listWrap=true; the multi-select popover is no longer needed.)
 
 // Folder picker for inline-editable folder fields.
 window._projEditFolder = async function(field) {
@@ -328,7 +290,7 @@ function renderDetail(project) {
         <!-- Layer 1b: 人員 + 合約帳務 (always rendered for inline edit) -->
         <div class="pi-contract-line">
           <span class="pi-edit-cell" data-field="am_username" onclick="window._projEdit(this)" style="cursor:pointer;">${_amHtml}</span>
-          <span class="pi-edit-cell" onclick="window._projEditPm(this)" style="cursor:pointer;">${_pmHtml}</span>
+          <span class="pi-edit-cell" data-field="pm_usernames" onclick="window._projEdit(this)" style="cursor:pointer;">${_pmHtml}</span>
           <span class="pi-dot"></span>
           <span>合約 <b style="color:#60a5fa;">${_editCell('contract_amount', _$(project.contract_amount))}</b></span>
           <span class="pi-dot"></span>
@@ -408,7 +370,7 @@ function renderDetail(project) {
         </div>
         <div class="crm-detail-prop">
             <div class="crm-prop-label">PM</div>
-            <div class="crm-prop-value" id="proj-pm-display"><span class="pi-edit-cell" onclick="window._projEditPm(this)" style="cursor:pointer;display:inline-block;">${_pmHtmlT}</span></div>
+            <div class="crm-prop-value" id="proj-pm-display"><span class="pi-edit-cell" data-field="pm_usernames" onclick="window._projEdit(this)" style="cursor:pointer;display:inline-block;">${_pmHtmlT}</span></div>
         </div>
         <div style="margin-top:12px;border-top:1px solid #2e2e2e;padding-top:12px;">
             <div style="margin-bottom:8px;">
