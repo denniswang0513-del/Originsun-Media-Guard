@@ -478,10 +478,13 @@ async def create_project(req: CrmProjectPayload, request: Request):
 
         session.add(project)
         await _auto_update_client_status(session, req.client_id)
-        # 同時建立第一張子表「主表」— 與 project insert 共用一次 commit
+        # 同時建立第一張子表「主表」+ 預設 10 個行政雜支類別 row。
+        # 共用同一次 commit。
+        main_group_id = uuid.uuid4().hex
         session.add(CrmProjectCostGroup(
-            id=uuid.uuid4().hex, project_id=project.id, name="主表", sort_order=0,
+            id=main_group_id, project_id=project.id, name="主表", sort_order=0,
         ))
+        await _seed_default_expenses(session, project.id, main_group_id)
         await session.commit()
         await session.refresh(project)
 
@@ -2349,6 +2352,41 @@ _COST_LINE_DEFAULTS = [
     ("後期製作", "其他", 8),
 ]
 
+# Default 行政雜支 categories — auto-seeded as $0 rows on each new
+# (project, cost-group) pair so users can just fill amounts in instead
+# of clicking "+ 新增雜支" first. Order matches the production-team's
+# usual filing flow.
+_EXPENSE_CATEGORY_DEFAULTS = [
+    "交通", "住宿", "飲食", "場地", "車馬",
+    "器材", "印刷", "服裝", "提案", "其他",
+]
+
+
+async def _seed_default_expenses(session, project_id: str, cost_group_id: str) -> int:
+    """Insert one $0 expense row per default category not yet present
+    on (project_id, cost_group_id). Caller commits. Idempotent."""
+    rows = (await session.execute(
+        select(CrmProjectExpense.category).where(
+            CrmProjectExpense.project_id == project_id,
+            CrmProjectExpense.cost_group_id == cost_group_id,
+        )
+    )).scalars().all()
+    existing = set(rows)
+    now = _now()
+    added = 0
+    for cat in _EXPENSE_CATEGORY_DEFAULTS:
+        if cat in existing:
+            continue
+        session.add(CrmProjectExpense(
+            id=uuid.uuid4().hex,
+            project_id=project_id, cost_group_id=cost_group_id,
+            category=cat, estimated=0, actual=0,
+            created_at=now,
+        ))
+        added += 1
+    return added
+
+
 # ── Quotation → Cost Line mapping helpers ──────────────────────
 _QUOTE_GROUP_TO_PHASE = {
     "前期": "前期��作", "拍攝": "現場拍攝", "現場": "現場拍攝",
@@ -2475,8 +2513,12 @@ async def init_project_cost_lines(project_id: str, request: Request):
                 phase=phase, item_name=item_name, sort_order=sort_order,
             ))
             added += 1
+        # Also back-fill the 10 default 行政雜支 categories — legacy projects
+        # created before this feature won't have them.
+        added_exp = await _seed_default_expenses(session, project_id, target_gid)
         await session.commit()
-    return {"status": "ok", "added": added, "cost_group_id": target_gid}
+    return {"status": "ok", "added": added, "added_expenses": added_exp,
+            "cost_group_id": target_gid}
 
 
 @router.post("/projects/{project_id}/cost-lines")
@@ -2931,6 +2973,7 @@ async def create_cost_group(project_id: str, req: CostGroupCreate, request: Requ
             profit_target_pct=req.profit_target_pct,
         )
         session.add(g)
+        await _seed_default_expenses(session, project_id, g.id)
         await session.commit()
         await session.refresh(g)
         summary = await _compute_group_summary(session, g.id)
@@ -3033,6 +3076,7 @@ async def duplicate_cost_group(group_id: str, req: CostGroupDuplicate, request: 
                 estimated_notes=l.estimated_notes,
                 # 結算欄位不複製
             ))
+        await _seed_default_expenses(session, src.project_id, new_g.id)
         await session.commit()
         await session.refresh(new_g)
         summary = await _compute_group_summary(session, new_g.id)

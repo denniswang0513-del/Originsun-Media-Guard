@@ -1,13 +1,9 @@
-"""Regression test for the cost-line PUT payload "explicit null" handling.
+"""Pin CostLineUpdatePayload `exclude_unset` semantics.
 
-Bug (pre-v1.10.95): the endpoint used `req.model_dump(exclude_none=True)`,
-which silently dropped any field set to null. The frontend's blur handler
-sends `{"estimated_quantity": null}` when the user clears a numeric input;
-the backend then ignored the clear and the field never updated, so after
-switching projects the user saw the old value reappear.
-
-Fix: switch to `exclude_unset=True`, which keeps explicit nulls and only
-strips fields the client didn't send at all.
+The PUT /project-cost-lines endpoint relies on `model_dump(exclude_unset=True)`
+to distinguish "client sent null to clear this field" from "client didn't
+mention this field at all". If `exclude_none=True` is used by mistake,
+explicit-null clears get silently dropped and the column never updates.
 """
 import json
 
@@ -23,13 +19,10 @@ def test_explicit_zero_round_trips():
 def test_explicit_null_is_preserved_for_clearing():
     p = CostLineUpdatePayload.model_validate_json(
         json.dumps({"estimated_quantity": None}))
-    # The fix: null must reach the update_data so setattr can clear the column.
     assert p.model_dump(exclude_unset=True) == {"estimated_quantity": None}
-    # Confirm the buggy behaviour exclude_unset replaces:
-    assert p.model_dump(exclude_none=True) == {}, (
-        "exclude_none drops explicit null — that's the bug. "
-        "If this assertion fails, Pydantic's behaviour changed and the fix "
-        "may need re-validating.")
+    # Pin the contrast: exclude_none drops explicit null. If Pydantic ever
+    # changes this, re-evaluate whether the endpoint can switch back.
+    assert p.model_dump(exclude_none=True) == {}
 
 
 def test_unset_fields_are_omitted():
