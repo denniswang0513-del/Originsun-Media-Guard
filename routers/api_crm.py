@@ -3977,7 +3977,6 @@ async def _verify_showcase_edit_token(session, token: str, require_editable: boo
 #   - Sync hook：Showcase 儲存時鏡像 5 欄到 crm_projects.public_*
 #     (Astro 官網讀 public_*，編輯在 Showcase 端；hook 讓資料一致)
 #   - Showcase edit token：CRM 完稿 Tab 與官網管理 Tab iframe 共用同一把鑰匙
-from services.website.notion_service import _extract_youtube_id as _parse_youtube_id
 
 SHOWCASE_EDIT_SCOPE = "showcase_edit"
 SHOWCASE_EDIT_EXPIRES_DAYS = 36500  # ~100 年，實務上永久
@@ -4000,7 +3999,11 @@ async def _sync_showcase_to_public(session, sc) -> None:
         return
     project.public_description = sc.description or None
     project.public_slug = sc.slug or None
-    yt_id = _parse_youtube_id(sc.video_url or "")
+    # Lazy import — services/website/ is NAS-only and not in OTA AGENT_DIRS,
+    # so a top-level import would crash agent boot and 404 every CRM endpoint.
+    # Showcase publish only fires on master where the file is present.
+    from services.website.notion_service import _extract_youtube_id
+    yt_id = _extract_youtube_id(sc.video_url or "")
     if yt_id:
         project.public_youtube_id = yt_id
     project.public = bool(sc.published)
