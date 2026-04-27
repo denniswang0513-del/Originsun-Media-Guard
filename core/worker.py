@@ -799,6 +799,7 @@ def _process_image_metadata_sync(
         ]
 
     # ── Level 1: rewrite identity to Autel (both paths) ──
+    autel_firmware = "V2.1.8.27"
     args += [
         f"-Make={drone_make}",
         f"-Model={drone_model}",
@@ -808,7 +809,7 @@ def _process_image_metadata_sync(
         f"-LensModel={lens_model}",
         # Autel reference DNG has no LensInfo; clear it.
         "-LensInfo=",
-        "-Software=V2.1.8.27",
+        f"-Software={autel_firmware}",
         f"-ProfileCopyright={drone_make}",
         # Date stamps — write every variant readers might consult.
         f"-CreateDate={file_exif_dt}",
@@ -816,11 +817,17 @@ def _process_image_metadata_sync(
         f"-DateTimeOriginal={file_exif_dt}",
         f"-FileCreateDate={file_exif_dt}",
         f"-FileModifyDate={file_exif_dt}",
-        # Re-seed minimal XMP date entries (after wipe / after rebuild's
-        # -all= which doesn't preserve XMP either).
-        f"-XMP:CreateDate={file_exif_dt}",
-        f"-XMP:ModifyDate={file_exif_dt}",
-        f"-XMP:DateTimeOriginal={file_exif_dt}",
+        # XMP block — written to byte-match Autel reference (5 fields, exact
+        # same namespaces). Autel uses Adobe's XMP Core library so we
+        # override exiftool's auto-stamped "Image::ExifTool 13.42" toolkit
+        # signature. CreatorTool + DateCreated are part of Autel's standard
+        # output; DateTimeOriginal in XMP is NOT (Autel only writes it in
+        # EXIF), so we don't add it here.
+        "-XMP-x:XMPToolkit=XMP Core 5.5.0",
+        f"-XMP-xmp:CreatorTool={autel_firmware}",
+        f"-XMP-xmp:CreateDate={file_exif_dt}",
+        f"-XMP-xmp:ModifyDate={file_exif_dt}",
+        f"-XMP-photoshop:DateCreated={file_exif_dt}",
     ]
 
     args += ["-overwrite_original", dst_path]
