@@ -712,29 +712,42 @@ def _process_image_metadata_sync(
 ):
     """Disguise a single image as Autel and rewrite all timestamps.
 
-    Both Level 1 (identity rewrite) and Level 2 (DJI XMP/MakerNotes/color
-    science strip) are always applied — no toggle.
+    Both Level 1 (identity rewrite) and Level 2 (DJI XMP/MakerNotes strip)
+    always applied — no toggle.
 
-    JPEG path uses rebuild (-all= + tagsfromfile filtered copy-back). The
-    plain MakerNotes:All= leaves a 4-byte "DJI" inline residue in the
+    JPEG: rebuild path (-all= + tagsfromfile filtered copy-back). Plain
+    MakerNotes:All= would leave a 4-byte "DJI" inline residue in the
     MakerNote IFD entry that exiftool can't delete via standard tags;
-    rebuild eliminates it cleanly. Cost: DJI's MPF secondary embedded
-    preview (~1 MB) doesn't survive the rebuild — a niche feature most
-    viewers don't use. Acceptable trade.
+    rebuild eliminates it cleanly. Cost: DJI MPF secondary embedded
+    preview (~1 MB) doesn't survive the rebuild — niche feature most
+    viewers don't use.
 
-    DNG / ARW / CR3 / NEF / RAF use single-pass strip. Rebuild on raw
-    formats would break SubIFD raw decoding; the single-pass approach
-    already leaves zero forensic traces on raw containers because the
-    DJI MakerNotes there is parsed differently and clears fully.
-
-    Sensor-essential fields (BlackLevel/WhiteLevel/LinearizationTable/
-    AsShotNeutral/CFA pattern) are kept so the raw stays decodable.
+    DNG / ARW / CR3 / NEF / RAF: single-pass surgical strip. We keep
+    ColorMatrix / ProfileHueSatMap / ProfileToneCurve / NoiseProfile /
+    OpcodeList intact — Lightroom looks up the camera profile via
+    UniqueCameraModel ("XL720"), so embedded matrices are dead data
+    for raw rendering and stripping them only saves ~17 KB while making
+    the file structurally hollower than a real Autel raw (which has
+    these populated). Only the actual smoking guns (DJI MakerNotes 30 KB,
+    XMP flight metadata, identifying serial / lens / description fields)
+    are wiped.
     """
     import shutil
     import subprocess
     HNO = getattr(subprocess, 'CREATE_NO_WINDOW', 0x08000000)
 
-    shutil.copy2(src_path, dst_path)
+    # Wrap the source→dest copy. shutil.copy2 can raise on transient disk /
+    # network / permission issues — without this, the per-file loop dies
+    # mid-batch and the post-loop concat trigger never runs.
+    class _CopyFailed:
+        def __init__(self, e):
+            self.returncode = 1
+            self.stdout = ""
+            self.stderr = f"copy failed: {type(e).__name__}: {e}"
+    try:
+        shutil.copy2(src_path, dst_path)
+    except (OSError, FileNotFoundError, PermissionError) as e:
+        return _CopyFailed(e)
 
     file_exif_dt = file_dt.strftime("%Y:%m:%d %H:%M:%S")
 
@@ -768,28 +781,20 @@ def _process_image_metadata_sync(
         ]
     else:
         # ── DNG / ARW / CR3 / NEF / RAF: single-pass strip ──
+        # We keep ColorMatrix / ProfileHueSatMap / ProfileToneCurve /
+        # NoiseProfile / OpcodeList intact. Lightroom looks up the camera
+        # profile via UniqueCameraModel (which we rewrite to "XL720" below),
+        # so embedded matrices are dead data for raw rendering — stripping
+        # them only saved ~45 KB while making the file structurally hollower
+        # than a real Autel raw (which has these fields populated). Only
+        # blow away the actual smoking guns: MakerNotes (DJI debug 30 KB),
+        # XMP (DJI flight metadata + Hasselblad-flavoured XMPToolkit),
+        # and identifying serial / lens fingerprints.
         args += [
-            # Wipe XMP entirely — DJI flight data lives there
-            # (GimbalYawDegree, FlightXSpeed, ProductName=DJIMavic3, ...).
             "-XMP:All=",
-            # Wipe DJI debug binary blobs (AE/AWB/AF/ADJ Debug, histograms).
             "-MakerNotes:All=",
-            # Drop camera-specific colour science. Without ColorMatrix +
-            # ProfileHueSatMap, Lightroom falls back to its generic DNG
-            # profile, so the file no longer reads as "Hasselblad L2D-20c".
-            "-ColorMatrix1=", "-ColorMatrix2=",
-            "-CalibrationIlluminant1=", "-CalibrationIlluminant2=",
             "-ProfileName=",
-            "-ProfileCalibrationSignature=",
-            "-ProfileEmbedPolicy=",
-            "-ProfileHueSatMapDims=",
-            "-ProfileHueSatMapData1=", "-ProfileHueSatMapData2=",
-            "-ProfileToneCurve=",
-            "-ProfileLookTableDims=", "-ProfileLookTableData=",
-            # NoiseProfile is marked permanent on IFD0 in exiftool's tag
-            # table — the plain unprefixed form silently no-ops.
-            "-IFD0:NoiseProfile=",
-            "-OpcodeList1=", "-OpcodeList2=", "-OpcodeList3=",
+            "-ProfileCopyright=",
             "-SerialNumber=",
             "-CameraSerialNumber=",
             "-LensSerialNumber=",
@@ -884,11 +889,22 @@ def _drone_meta_sync(job, engine, task: DroneMetaRequest, _on_progress):
     if task.do_concat and task.concat_dest_dir:
         os.makedirs(task.concat_dest_dir, exist_ok=True)
 
+    # DJI cameras shoot DNG + JPG pairs that share a basename
+    # (DJI_0923.DNG / DJI_0923.JPG). Group output indices by source stem
+    # so paired raw + jpg both come out as MAX_0001.{ext}, keeping the
+    # pairing intact.
+    stem_to_index = {}
+    next_index = task.file_index
+
     for idx, file_setting in enumerate(task.files):
         fpath = file_setting.path
-        current_index = task.file_index + idx
         src_ext = os.path.splitext(fpath)[1].lower()
         is_image = src_ext in DRONE_META_IMAGE_EXTS
+        src_stem = os.path.splitext(os.path.basename(fpath))[0]
+        if src_stem not in stem_to_index:
+            stem_to_index[src_stem] = next_index
+            next_index += 1
+        current_index = stem_to_index[src_stem]
         # Videos always normalise to MOV (container remux). Images keep the
         # original extension (uppercase) so MAX_0001.DNG vs MAX_0001.JPG is
         # visible at a glance.
@@ -1126,10 +1142,13 @@ def _drone_meta_sync(job, engine, task: DroneMetaRequest, _on_progress):
     job.total_files = total
     job.done_files = success_count
 
-    # Optional concat
+    # Optional concat — surface explicit skip reasons so users can tell
+    # from the log why a reel didn't appear (image-only folder, all videos
+    # failed, do_concat unset, etc.).
     if task.do_concat and new_file_paths and task.concat_dest_dir:
         _emit_sync_for_job(job_id, 'log', {
-            'type': 'info', 'msg': '開始串帶...'
+            'type': 'info',
+            'msg': f'開始串帶（{len(new_file_paths)} 支影片）...'
         })
         _on_progress({'phase': 'concat', 'total_pct': 0, 'status': '串帶中...'})
 
@@ -1198,6 +1217,24 @@ def _drone_meta_sync(job, engine, task: DroneMetaRequest, _on_progress):
             _emit_sync_for_job(job_id, 'log', {
                 'type': 'error', 'msg': f'串帶失敗: {e}'
             })
+    elif task.do_concat:
+        # do_concat was requested but skipped. Tell the user why.
+        if not new_file_paths:
+            video_count = sum(
+                1 for fs in task.files
+                if os.path.splitext(fs.path)[1].lower() not in DRONE_META_IMAGE_EXTS
+            )
+            if video_count == 0:
+                reason = '無影片可串帶（資料夾內全為圖片）'
+            else:
+                reason = f'無串帶成果輸出（{video_count} 支影片全處理失敗）'
+        elif not task.concat_dest_dir:
+            reason = '未設定串帶目的目錄'
+        else:
+            reason = '條件未滿足'
+        _emit_sync_for_job(job_id, 'log', {
+            'type': 'info', 'msg': f'略過串帶：{reason}'
+        })
 
     if fail_list and success_count == 0:
         raise RuntimeError(f"全部 {total} 個檔案處理失敗")
