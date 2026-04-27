@@ -1,5 +1,5 @@
 {
-  "version": "1.10.85",
+  "version": "1.10.86",
   "build_date": "2026-04-27",
-  "notes": "CRM agent 404 hotfix（Phase M-W top-level import services.website 讓代理機 CRM 全 404，4 天 bug，lazy import 修復）+ 專案管理 cell-by-cell auto-save（拿掉 ✎ 編輯 modal，所有欄位點擊即可編輯，1 秒 debounce）+ snapshot-then-clear race fix"
+  "notes": "強制重發 v1.10.85（公用-器材 解壓鎖定 race，本版號 bump 強制 update_agent 重抓 routers/api_crm.py）"
 }
