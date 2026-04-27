@@ -2527,7 +2527,11 @@ async def update_project_cost_line(line_id: str, req: CostLineUpdatePayload, req
         line = await session.get(CrmProjectCostLine, line_id)
         if not line:
             raise HTTPException(status_code=404, detail="找不到此成本項目")
-        update_data = req.model_dump(exclude_none=True)
+        # exclude_unset (not exclude_none): keeps explicit nulls so frontend
+        # can clear a numeric field by sending {"estimated_quantity": null}.
+        # exclude_none would silently drop the null and the field would never
+        # update — user sees "saved" status but the DB never changed.
+        update_data = req.model_dump(exclude_unset=True)
         for fld in ("estimated_staff_id", "actual_staff_id"):
             if fld in update_data and update_data[fld] == "":
                 update_data[fld] = None
