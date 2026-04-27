@@ -20,6 +20,13 @@ _HISTORY_PATH = os.path.join(_BASE_DIR, "watcher_history.json")
 _HISTORY_MAX = 50
 
 _VIDEO_EXTS = {".mov", ".mp4", ".mkv", ".mxf", ".avi", ".mts", ".m2ts"}
+# Photos go through exiftool-only path in worker._drone_meta_sync. Kept in
+# sync with DRONE_META_IMAGE_EXTS in core/worker.py.
+_IMAGE_EXTS = {
+    ".dng", ".jpg", ".jpeg", ".arw", ".cr2", ".cr3",
+    ".nef", ".raf", ".orf", ".rw2", ".tif", ".tiff",
+}
+_MEDIA_EXTS = _VIDEO_EXTS | _IMAGE_EXTS
 
 _file_lock = threading.Lock()
 
@@ -127,32 +134,57 @@ def append_history(entry: dict) -> None:
 def _probe_creation_time(path: str) -> str:
     """Return original-source datetime as naive local ISO string.
 
-    Tries ffprobe's `format_tags:creation_time` first (camera-recorded UTC).
-    Falls back to file mtime so we never write the scan-time on a file that
-    happens to have no embedded creation_time.
+    Videos: ffprobe `format_tags:creation_time` (UTC) → local naive ISO.
+    Images: exiftool DateTimeOriginal/CreateDate (already local) → naive ISO.
+    Both: fall back to file mtime so we never silently write scan-time.
 
-    Returns '' if both fail. Worker treats empty override as "use global dt".
+    Returns '' if everything fails. Worker treats empty override as "use
+    global dt".
     """
-    ffprobe = os.path.join(_BASE_DIR, "ffprobe.exe")
     HNO = getattr(subprocess, 'CREATE_NO_WINDOW', 0x08000000)
-    if os.path.exists(ffprobe):
-        try:
-            r = subprocess.run(
-                [ffprobe, "-v", "quiet", "-print_format", "json",
-                 "-show_entries", "format_tags=creation_time", path],
-                capture_output=True, text=True, encoding='utf-8',
-                errors='ignore', creationflags=HNO, timeout=5,
-            )
-            ct = (json.loads(r.stdout or "{}")
-                  .get("format", {}).get("tags", {}).get("creation_time", ""))
-            if ct:
-                # ffprobe returns UTC ISO with 'Z'; convert to local naive
-                # to match the manual path's convention (worker parses with
-                # fromisoformat → naive datetime treated as local).
-                d_utc = datetime.fromisoformat(ct.replace("Z", "+00:00"))
-                return d_utc.astimezone().strftime("%Y-%m-%dT%H:%M:%S")
-        except Exception:
-            pass
+    ext = os.path.splitext(path)[1].lower()
+
+    if ext in _IMAGE_EXTS:
+        exiftool = os.path.join(_BASE_DIR, "exiftool.exe")
+        if os.path.exists(exiftool):
+            try:
+                # -d outputs YYYY-MM-DDTHH:MM:SS directly. -s -s = bare
+                # values, no group/tag prefix. First non-empty wins.
+                r = subprocess.run(
+                    [exiftool, "-s", "-s", "-s",
+                     "-d", "%Y-%m-%dT%H:%M:%S",
+                     "-DateTimeOriginal", "-CreateDate", "-ModifyDate",
+                     path],
+                    capture_output=True, text=True, encoding='utf-8',
+                    errors='ignore', creationflags=HNO, timeout=5,
+                )
+                for line in (r.stdout or "").splitlines():
+                    line = line.strip()
+                    if line and len(line) == 19 and line[10] == "T":
+                        return line
+            except Exception:
+                pass
+    else:
+        ffprobe = os.path.join(_BASE_DIR, "ffprobe.exe")
+        if os.path.exists(ffprobe):
+            try:
+                r = subprocess.run(
+                    [ffprobe, "-v", "quiet", "-print_format", "json",
+                     "-show_entries", "format_tags=creation_time", path],
+                    capture_output=True, text=True, encoding='utf-8',
+                    errors='ignore', creationflags=HNO, timeout=5,
+                )
+                ct = (json.loads(r.stdout or "{}")
+                      .get("format", {}).get("tags", {}).get("creation_time", ""))
+                if ct:
+                    # ffprobe returns UTC ISO with 'Z'; convert to local naive
+                    # to match the manual path's convention (worker parses with
+                    # fromisoformat → naive datetime treated as local).
+                    d_utc = datetime.fromisoformat(ct.replace("Z", "+00:00"))
+                    return d_utc.astimezone().strftime("%Y-%m-%dT%H:%M:%S")
+            except Exception:
+                pass
+
     try:
         return datetime.fromtimestamp(
             os.path.getmtime(path)
@@ -165,11 +197,15 @@ def _probe_creation_time(path: str) -> str:
 
 def _scan_candidates(source_root: str, dest_root: str) -> List[Tuple[str, List[str]]]:
     """
-    回傳 [(子資料夾絕對路徑, [影片絕對路徑, ...]), ...]
-    跳過目的地已有 MAX_*.MOV 的子資料夾。
+    回傳 [(子資料夾絕對路徑, [媒體檔絕對路徑, ...]), ...]
+    跳過目的地已有任何 MAX_* 輸出檔（影片或照片）的子資料夾。
     """
     if not os.path.isdir(source_root):
         return []
+
+    # All extensions that the worker may produce as MAX_*.{ext} output:
+    # videos remux to .MOV, photos keep their original extension uppercased.
+    _MAX_OUT_EXTS = (".MOV",) + tuple(e.upper() for e in _IMAGE_EXTS)
 
     candidates = []
     for name in sorted(os.listdir(source_root)):
@@ -177,24 +213,24 @@ def _scan_candidates(source_root: str, dest_root: str) -> List[Tuple[str, List[s
         if not os.path.isdir(sub):
             continue
 
-        # Self-healing skip: presence of MAX_*.MOV in dest means this folder
+        # Self-healing skip: any MAX_*.<ext> in dest means this folder
         # already ran successfully. No ledger file needed.
         dest_sub = os.path.join(dest_root, name)
         if os.path.isdir(dest_sub):
             try:
-                if any(f.upper().startswith("MAX_") and f.upper().endswith(".MOV")
+                if any(f.upper().startswith("MAX_") and f.upper().endswith(_MAX_OUT_EXTS)
                        for f in os.listdir(dest_sub)):
                     continue
             except OSError:
                 pass
 
-        videos = []
+        media = []
         for root, _dirs, files in os.walk(sub):
             for fn in files:
-                if os.path.splitext(fn)[1].lower() in _VIDEO_EXTS:
-                    videos.append(os.path.join(root, fn))
-        if videos:
-            candidates.append((sub, sorted(videos)))
+                if os.path.splitext(fn)[1].lower() in _MEDIA_EXTS:
+                    media.append(os.path.join(root, fn))
+        if media:
+            candidates.append((sub, sorted(media)))
 
     return candidates
 

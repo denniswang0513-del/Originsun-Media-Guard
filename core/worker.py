@@ -695,6 +695,111 @@ def _persist_job_history(job: state.JobState):
 
 # ── Drone Metadata Writer ──────────────────────────────────────
 
+# Image formats supported by drone_meta. Photos go through exiftool-only path
+# (no ffmpeg / DJI parser / Autel SRT). Always normalised to lowercase before
+# matching.
+DRONE_META_IMAGE_EXTS = {
+    ".dng", ".jpg", ".jpeg", ".arw", ".cr2", ".cr3",
+    ".nef", ".raf", ".orf", ".rw2", ".tif", ".tiff",
+}
+
+
+def _process_image_metadata_sync(
+    src_path: str, dst_path: str, file_dt,
+    drone_make: str, drone_model: str,
+    lens_make: str, lens_model: str,
+    exiftool_bin: str,
+):
+    """Disguise a single image as Autel and rewrite all timestamps.
+
+    Both Level 1 (identity rewrite) and Level 2 (DJI XMP/MakerNotes/color
+    science strip) are always applied — no toggle. The colour matrices and
+    profiles get cleared so Lightroom falls back to a generic DNG profile
+    instead of recognising it as the original Hasselblad/L2D-20c.
+
+    Sensor-essential fields (BlackLevel/WhiteLevel/LinearizationTable/
+    AsShotNeutral/CFA pattern) are kept so the raw is still decodable.
+    """
+    import shutil
+    import subprocess
+    HNO = getattr(subprocess, 'CREATE_NO_WINDOW', 0x08000000)
+
+    shutil.copy2(src_path, dst_path)
+
+    file_exif_dt = file_dt.strftime("%Y:%m:%d %H:%M:%S")
+
+    # Map "EVO Lite+" → its internal "XL720" codename used in
+    # UniqueCameraModel/LocalizedCameraModel; otherwise reuse model name.
+    autel_unique = "XL720" if "EVO Lite" in drone_model else drone_model
+
+    args = [exiftool_bin]
+
+    # ── Level 2: strip DJI / Hasselblad traces ──
+    args += [
+        # Wipe XMP entirely — that's where DJI flight data lives
+        # (GimbalYawDegree, FlightXSpeed, ProductName=DJIMavic3, ...).
+        "-XMP:All=",
+        # Wipe DJI debug binary blobs (AE/AWB/AF/ADJ Debug, histograms).
+        "-MakerNotes:All=",
+        # Drop camera-specific colour science. Without ColorMatrix +
+        # ProfileHueSatMap, Lightroom falls back to its generic DNG profile,
+        # so the file no longer reads as "Hasselblad L2D-20c".
+        "-ColorMatrix1=", "-ColorMatrix2=",
+        "-CalibrationIlluminant1=", "-CalibrationIlluminant2=",
+        "-ProfileName=",
+        "-ProfileCalibrationSignature=",
+        "-ProfileEmbedPolicy=",
+        "-ProfileHueSatMapDims=",
+        "-ProfileHueSatMapData1=", "-ProfileHueSatMapData2=",
+        "-ProfileToneCurve=",
+        "-ProfileLookTableDims=", "-ProfileLookTableData=",
+        # NoiseProfile is marked permanent on IFD0 in exiftool's tag table —
+        # the plain unprefixed form silently no-ops. Force the IFD0 group.
+        "-IFD0:NoiseProfile=",
+        "-OpcodeList1=", "-OpcodeList2=", "-OpcodeList3=",
+        # Camera serials & lens telemetry
+        "-SerialNumber=",
+        "-CameraSerialNumber=",
+        "-LensSerialNumber=",
+        "-ImageDescription=",
+        "-XPComment=",
+        "-XPKeywords=",
+    ]
+
+    # ── Level 1: rewrite identity to Autel ──
+    args += [
+        f"-Make={drone_make}",
+        f"-Model={drone_model}",
+        f"-UniqueCameraModel={autel_unique}",
+        f"-LocalizedCameraModel={autel_unique}",
+        f"-LensMake={lens_make}",
+        f"-LensModel={lens_model}",
+        # Autel reference DNG has no LensInfo; clear it (Hasselblad's said
+        # "24mm f/2.8-11" which would betray the source).
+        "-LensInfo=",
+        "-Software=V2.1.8.27",
+        f"-ProfileCopyright={drone_make}",
+        # Date stamps — write every variant the readers might consult.
+        f"-CreateDate={file_exif_dt}",
+        f"-ModifyDate={file_exif_dt}",
+        f"-DateTimeOriginal={file_exif_dt}",
+        f"-FileCreateDate={file_exif_dt}",
+        f"-FileModifyDate={file_exif_dt}",
+        # Re-seed minimal XMP after the All-wipe above.
+        f"-XMP:CreateDate={file_exif_dt}",
+        f"-XMP:ModifyDate={file_exif_dt}",
+        f"-XMP:DateTimeOriginal={file_exif_dt}",
+    ]
+
+    args += ["-overwrite_original", dst_path]
+
+    return subprocess.run(
+        args, capture_output=True, text=True,
+        encoding="utf-8", errors="ignore",
+        creationflags=HNO,
+    )
+
+
 async def _run_drone_meta(job, engine, task: DroneMetaRequest, _on_progress):
     await asyncio.to_thread(_drone_meta_sync, job, engine, task, _on_progress)
 
@@ -743,7 +848,15 @@ def _drone_meta_sync(job, engine, task: DroneMetaRequest, _on_progress):
     for idx, file_setting in enumerate(task.files):
         fpath = file_setting.path
         current_index = task.file_index + idx
-        new_name = f"MAX_{current_index:04d}.MOV"
+        src_ext = os.path.splitext(fpath)[1].lower()
+        is_image = src_ext in DRONE_META_IMAGE_EXTS
+        # Videos always normalise to MOV (container remux). Images keep the
+        # original extension (uppercase) so MAX_0001.DNG vs MAX_0001.JPG is
+        # visible at a glance.
+        if is_image:
+            new_name = f"MAX_{current_index:04d}{os.path.splitext(fpath)[1].upper()}"
+        else:
+            new_name = f"MAX_{current_index:04d}.MOV"
         out_dir = task.output_dir or os.path.dirname(fpath)
         new_path = os.path.join(out_dir, new_name)
 
@@ -768,6 +881,33 @@ def _drone_meta_sync(job, engine, task: DroneMetaRequest, _on_progress):
             file_dt = dt  # global datetime
         file_exif_dt = file_dt.strftime("%Y:%m:%d %H:%M:%S")
         file_iso_dt = file_dt.strftime("%Y-%m-%dT%H:%M:%SZ")
+
+        # ── Image fast-path: skip ffmpeg/DJI parser/Autel SRT ──
+        if is_image:
+            img_result = _process_image_metadata_sync(
+                fpath, new_path, file_dt,
+                task.drone_make, task.drone_model,
+                task.lens_make, task.lens_model,
+                exiftool,
+            )
+            if img_result.returncode != 0:
+                err = (img_result.stderr or "")[-500:] or "unknown error"
+                fail_list.append(f"{new_name}: 圖片 metadata 寫入失敗 — {err}")
+                _emit_sync_for_job(job_id, 'log', {
+                    'type': 'error', 'msg': f'圖片寫入失敗: {new_name}\n{err}'
+                })
+                if os.path.exists(new_path):
+                    try:
+                        os.remove(new_path)
+                    except OSError:
+                        pass
+                continue
+            success_count += 1
+            # Images do NOT go into new_file_paths — concat takes videos only.
+            _emit_sync_for_job(job_id, 'log', {
+                'type': 'info', 'msg': f'✓ {new_name} 完成 (圖片)'
+            })
+            continue
 
         # Get video duration via ffprobe
         _probe_cmd = [ffmpeg_bin.replace('ffmpeg', 'ffprobe'), '-v', 'quiet',
@@ -971,11 +1111,16 @@ def _drone_meta_sync(job, engine, task: DroneMetaRequest, _on_progress):
                         or getattr(fs, 'highlights', 0.0) != 0.0
                         or bool(getattr(fs, 'curve_points', None)))
 
-            any_advanced = any(_has_advanced(fs) for fs in task.files)
+            # Concat operates on videos only — images skipped the video path
+            # and never landed in new_file_paths, so we must skip their entries
+            # in task.files when zipping advanced edits to outputs.
+            video_settings = [fs for fs in task.files
+                              if os.path.splitext(fs.path)[1].lower() not in DRONE_META_IMAGE_EXTS]
+            any_advanced = any(_has_advanced(fs) for fs in video_settings)
             advanced_clips = None
             if xfade_on or any_advanced:
                 advanced_clips = []
-                for i, fs in enumerate(task.files):
+                for i, fs in enumerate(video_settings):
                     if i >= len(new_file_paths):
                         break
                     advanced_clips.append({
