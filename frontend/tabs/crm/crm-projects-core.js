@@ -1,7 +1,7 @@
 /**
  * crm-projects-core.js — 列表 + CRUD Modal + CSV 匯入
  */
-import { crmFetch as _fetch, crmCacheFetch, crmCacheInvalidate, esc as _esc, renderAvatar, populateUserSelect, populateClientSelect, searchableSelect, saveSettings, kebabMenuHtml } from './crm-utils.js';
+import { crmFetch as _fetch, crmCacheFetch, crmCacheInvalidate, esc as _esc, renderAvatar, populateClientSelect, searchableSelect, saveSettings, kebabMenuHtml } from './crm-utils.js';
 import { state, callbacks } from './crm-projects-state.js';
 
 // ── Project Types (dynamic from settings) ─────────────────
@@ -89,7 +89,13 @@ export function _avatar(username, size = 22) {
 }
 
 function _populateSelect(elementId, placeholder) {
-    populateUserSelect(elementId, state.users, placeholder);
+    // AM dropdown — pulls from 人力資源 (crm_staff), not system users.
+    const sel = document.getElementById(elementId);
+    if (!sel) return;
+    const opts = (state.staffList || []).map(s =>
+        `<option value="${_esc(s.name)}">${_esc(s.name)}${s.role ? ` (${_esc(s.role)})` : ''}</option>`
+    ).join('');
+    sel.innerHTML = `<option value="">${placeholder}</option>${opts}`;
 }
 
 function _populateClientFilter() {
@@ -105,12 +111,13 @@ function _populateClientDropdown(elementId, selectedId) {
 }
 
 function _populatePmCheckboxes(selected = []) {
+    // PM checkboxes — same source as AM (人力資源), not system users.
     const container = document.getElementById('proj-f-pm_usernames');
     if (!container) return;
-    container.innerHTML = state.users.map(u => `
+    container.innerHTML = (state.staffList || []).map(s => `
         <label class="crm-checkbox-item">
-            <input type="checkbox" value="${_esc(u.username)}" ${selected.includes(u.username) ? 'checked' : ''}>
-            ${_avatar(u.username, 18)} ${_esc(u.username)}
+            <input type="checkbox" value="${_esc(s.name)}" ${selected.includes(s.name) ? 'checked' : ''}>
+            ${_esc(s.name)}${s.role ? ` <span style="color:#6b7280;">(${_esc(s.role)})</span>` : ''}
         </label>
     `).join('');
 }

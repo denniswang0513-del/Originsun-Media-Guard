@@ -12,14 +12,24 @@ import { crmFetch as _fetch, esc as _esc, fmtNum, pickFolderPath } from './crm-u
 
 // ── Edit Fields ────────────────────────────────────────────
 
+// AM (業務) and PM (專案經理) options come from 人力資源 (crm_staff),
+// not the system users list. Stored value = staff name (the column is a
+// generic text field, originally `username` but now used for any assigned
+// person — legacy rows with system usernames continue to render as-is).
+function _staffOptions(includePlaceholder = false) {
+    const opts = (state.staffList || []).map(s => ({
+        value: s.name,
+        label: s.role ? `${s.name} (${s.role})` : s.name,
+    }));
+    return includePlaceholder ? [{value:'',label:'— 未指派 —'}, ...opts] : opts;
+}
+
 function _buildEditFields() {
     const clientOpts = [{value:'',label:'— 選擇客戶 —'}].concat(
         state.clients.map(c => ({value: c.id, label: c.short_name}))
     );
-    const userOpts = [{value:'',label:'— 未指派 —'}].concat(
-        state.users.map(u => ({value: u.username, label: u.username}))
-    );
-    const pmOpts = state.users.map(u => ({value: u.username, label: u.username}));
+    const amOpts = _staffOptions(true);
+    const pmOpts = _staffOptions(false);
     return [
         {name:'client_id', label:'客戶', type:'select', options: clientOpts},
         {name:'name', label:'專案名稱', type:'text'},
@@ -30,7 +40,7 @@ function _buildEditFields() {
         {name:'project_type', label:'類型', type:'select', get options() {
             return [{value:'',label:'—'}, ...getProjectTypes().map(t => ({value:t,label:t}))];
         }},
-        {name:'am_username', label:'AM', type:'select', options: userOpts},
+        {name:'am_username', label:'AM', type:'select', options: amOpts},
         {name:'pm_usernames', label:'PM', type:'checkboxes', options: pmOpts},
         {name:'start_date', label:'起始日', type:'date'},
         {name:'completion_date', label:'結案日', type:'date'},
@@ -197,10 +207,10 @@ window._projEditPm = function(cell) {
     const pop = document.createElement('div');
     pop.className = 'pi-pm-popover';
     pop.style.cssText = 'position:absolute;background:#1e1e1e;border:1px solid #555;border-radius:6px;padding:8px;z-index:1000;max-height:300px;overflow:auto;box-shadow:0 4px 12px rgba(0,0,0,0.5);';
-    pop.innerHTML = state.users.map(u => `
+    pop.innerHTML = (state.staffList || []).map(s => `
         <label style="display:block;padding:4px 8px;cursor:pointer;font-size:12px;color:#d1d5db;border-radius:3px;">
-            <input type="checkbox" value="${_esc(u.username)}"${selected.has(u.username) ? ' checked' : ''} style="margin-right:6px;">
-            ${_esc(u.username)}
+            <input type="checkbox" value="${_esc(s.name)}"${selected.has(s.name) ? ' checked' : ''} style="margin-right:6px;">
+            ${_esc(s.name)}${s.role ? `<span style="color:#6b7280;"> (${_esc(s.role)})</span>` : ''}
         </label>
     `).join('') + `
         <div style="margin-top:8px;display:flex;gap:6px;justify-content:flex-end;border-top:1px solid #333;padding-top:6px;">
