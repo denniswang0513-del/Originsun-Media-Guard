@@ -2354,11 +2354,11 @@ _COST_LINE_DEFAULTS = [
 
 # Default 行政雜支 categories — auto-seeded as $0 rows on each new
 # (project, cost-group) pair so users can just fill amounts in instead
-# of clicking "+ 新增雜支" first. Order matches the production-team's
-# usual filing flow.
+# of clicking "+ 新增雜支" first. Kept aligned with EXPENSE_CATEGORIES
+# in frontend/tabs/crm/crm-projects-state.js — the inline-edit dropdown
+# must offer every seeded category.
 _EXPENSE_CATEGORY_DEFAULTS = [
-    "交通", "住宿", "飲食", "場地", "車馬",
-    "器材", "印刷", "服裝", "提案", "其他",
+    "交通", "住宿", "飲食", "提案", "器材", "其他",
 ]
 
 

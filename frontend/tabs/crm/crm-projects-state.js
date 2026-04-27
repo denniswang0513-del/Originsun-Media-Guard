@@ -19,10 +19,7 @@ export const state = {
 
 // ── Constants ──────────────────────────────────────────────
 // Keep in sync with _EXPENSE_CATEGORY_DEFAULTS in routers/api_crm.py.
-export const EXPENSE_CATEGORIES = [
-    '交通','住宿','飲食','場地','車馬',
-    '器材','印刷','服裝','提案','其他',
-];
+export const EXPENSE_CATEGORIES = ['交通','住宿','飲食','提案','器材','其他'];
 
 // ── Callbacks (解耦跨模組依賴) ──────────────────────────────
 // 下游模組完成操作後呼叫對應 callback，上游模組在 init 時註冊實際函式

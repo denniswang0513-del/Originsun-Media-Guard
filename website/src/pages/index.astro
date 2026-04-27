@@ -26,18 +26,15 @@ import ContactCTA from "../components/home/ContactCTA.astro";
 import { fetchMeta, fetchFeatured } from "../lib/crm-client";
 import { organizationSchema } from "../lib/seo";
 import { LIMITS, SITE_URL_FALLBACK } from "../lib/config";
-import { FAKE_FEATURED } from "../lib/fake-data";
 
 const [meta, featured] = await Promise.all([
     fetchMeta(),
     fetchFeatured(LIMITS.HOME_FEATURED),
 ]);
 
-// 若 API 回的作品不足 9 筆（例如前期 seed 資料還少），用 FAKE_FEATURED 補齊到 9，
-// 讓 3×3 電影牆不會出現空格。真實資料累積夠之後，補齊自然退場。
-const seenSlugs = new Set(featured.map(w => w.slug));
-const padding = FAKE_FEATURED.filter(w => !seenSlugs.has(w.slug));
-const featured9 = [...featured, ...padding].slice(0, 9);
+// Show real published works only — no FAKE_FEATURED padding. The grid
+// layout collapses gracefully when fewer than 9 works are returned.
+const featured9 = featured.slice(0, 9);
 
 const siteUrl = Astro.site?.toString() || SITE_URL_FALLBACK;
 const schemaData = [organizationSchema(meta, siteUrl)];

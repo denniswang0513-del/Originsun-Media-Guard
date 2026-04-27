@@ -17,7 +17,6 @@ import type {
 import type { ICategory } from "../types/category";
 import type { IService } from "../types/service";
 import type { ITeamMember, IWebsiteMeta } from "../types/meta";
-import { FAKE_FEATURED, FAKE_SERVICES, FAKE_CATEGORIES, FAKE_TEAM } from "./fake-data";
 
 
 async function _get<T>(path: string): Promise<T> {
@@ -73,13 +72,10 @@ export async function fetchWorks(opts: {
     if (opts.page) q.set("page", String(opts.page));
     if (opts.limit) q.set("limit", String(opts.limit));
     const qs = q.toString();
-    // API 離線 fallback：用 fake-data 的作品集（可依 category 過濾）
-    const fakeItems = opts.category
-        ? FAKE_FEATURED.filter(w => w.categories.includes(opts.category!))
-        : FAKE_FEATURED;
+    // API offline → empty list. Page renders the no-items empty state.
     return _safeGet<IWorksListResponse>(
         `/api/website/works${qs ? `?${qs}` : ""}`,
-        { items: fakeItems, total: fakeItems.length, page: opts.page || 1, limit: opts.limit || 12 },
+        { items: [], total: 0, page: opts.page || 1, limit: opts.limit || 12 },
         "fetchWorks",
     );
 }
@@ -98,7 +94,7 @@ export async function fetchWorkBySlug(slug: string): Promise<IPublicProjectDetai
 export async function fetchFeatured(limit = 6): Promise<IPublicProject[]> {
     const data = await _safeGet<{ items: IPublicProject[] }>(
         `/api/website/featured?limit=${limit}`,
-        { items: FAKE_FEATURED.slice(0, limit) },
+        { items: [] },
         "fetchFeatured",
     );
     return data.items;
@@ -108,7 +104,7 @@ export async function fetchFeatured(limit = 6): Promise<IPublicProject[]> {
 export async function fetchCategories(): Promise<ICategory[]> {
     const data = await _safeGet<{ items: ICategory[] }>(
         "/api/website/categories",
-        { items: FAKE_CATEGORIES },
+        { items: [] },
         "fetchCategories",
     );
     return data.items;
@@ -118,7 +114,7 @@ export async function fetchCategories(): Promise<ICategory[]> {
 export async function fetchServices(): Promise<IService[]> {
     const data = await _safeGet<{ items: IService[] }>(
         "/api/website/services",
-        { items: FAKE_SERVICES },
+        { items: [] },
         "fetchServices",
     );
     return data.items;
@@ -128,7 +124,7 @@ export async function fetchServices(): Promise<IService[]> {
 export async function fetchTeam(): Promise<ITeamMember[]> {
     const data = await _safeGet<{ items: ITeamMember[] }>(
         "/api/website/team",
-        { items: FAKE_TEAM },
+        { items: [] },
         "fetchTeam",
     );
     return data.items;

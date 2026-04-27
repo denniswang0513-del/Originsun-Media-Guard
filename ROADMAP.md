@@ -735,7 +735,7 @@ tools:
     ▼ Phase J: CRM + 專案管理 + 帳務 (✅ 核心完成)
     │   → 64 API / 11 DB 表 / 6 Tab + 5 子視圖 + 手機版 RWD + Inline 編輯
     │
-現在 (v1.10.96) ← 你在這裡
+現在 (v1.10.97) ← 你在這裡
     │
     ▼ Phase M: 對外官方網站 (🚀 進行中 2026-04-20 ~ 07-01)
     │   → originsun-studio.com + CF Tunnel + Astro + 9 子視圖管理 Tab
@@ -773,6 +773,7 @@ tools:
 
 | 版本 | 日期 | 重點 |
 |------|------|------|
+| v1.10.97 | 2026-04-28 | **行政雜支類別 10→6 收斂 + 對外網站拿掉假作品 fallback**：(1) v1.10.96 預設 10 類別超出原本 6 個下拉選單範圍，使用者 push back 改回 6（交通/住宿/飲食/提案/器材/其他）。`_EXPENSE_CATEGORY_DEFAULTS` + `EXPENSE_CATEGORIES` + 3 個 public expense form HTML 全部回退；歐姆龍專案的 12 個 v1.10.96 back-fill 出來的 $0 row（場地/車馬/印刷/服裝 × 3 子表）一次清乾淨。(2) Astro 對外網站（works / featured）原本 `crm-client.ts` 在 API 失敗或結果不足 9 筆時 fallback 到 `FAKE_FEATURED`（XYZ 集團/雲山會館/兒童福利聯盟等），使用者刪掉假作品 row 後網站靜態 HTML 還在顯示。改成空陣列 fallback + `index.astro` 拿掉 9 筆補齊邏輯，只渲染真實 published 作品。注意：website/ 不在 OTA AGENT_DIRS，這部分變更**需要在 NAS 端 `npm run build` 重 build** 才會生效。 |
 | v1.10.96 | 2026-04-28 | **CRM 行政雜支自動預設 10 個拍片常用類別**：每個新專案/子表建立時自動 seed 10 筆 $0 雜支 row（交通/住宿/飲食/場地/車馬/器材/印刷/服裝/提案/其他），使用者打開直接填金額而不是先按 ➕。三個 hook 點：`POST /projects`（建專案 + 主表）、`POST /projects/{id}/cost-groups`（手動新子表）、`POST /cost-groups/{id}/duplicate`（複製子表）。`POST /projects/{id}/cost-lines/init` 同步擴充：legacy 專案點一次「初始化」就會把 10 個雜支類別補進去，已存在的類別跳過（不覆蓋使用者的金額）。`EXPENSE_CATEGORIES` 從 6 → 10，前後端跟 3 個 public expense form HTML（expense.html、advance-expense.html、group-expense.html）的 `<select>` 同步更新。實測新專案 / 新子表 / 既有專案 init 都 seed 出正確 10 個類別、舊的 飲食 等 row 不被覆蓋。 |
 | v1.10.95 | 2026-04-28 | **CRM 成本估算欄位清空後沒儲存修復（exclude_unset）**：`/project-cost-lines/{id}` PUT 端點原本用 `req.model_dump(exclude_none=True)`，把所有 None 值剝光。前端 inline edit 在輸入空字串時送 `{"estimated_quantity": null}`（試圖清空欄位），後端 silently 把 null 扔了 → DB 沒寫入 → 自動儲存指示「已儲存」但實際沒儲存 → 切回專案值還是舊的。改成 `exclude_unset=True`：保留 explicit null（client 真的有送這個欄位），但仍排除 client 沒送的欄位（避免覆蓋整列）。實測 PUT `{"estimated_quantity": null}` 從 silently dropped → 真的清空欄位。加 4 個 unit test (`tests/unit/test_cost_line_payload.py`) 鎖死 explicit-null / explicit-zero / unset / partial-update 四種行為。 |
 | v1.10.94 | 2026-04-28 | **OTA 中斷防護 + drone_meta 斷點續傳**：解決「OTA 推送把跑數小時的 drone_meta job 砍掉、reel 沒出」的根本問題。三層防護：(1) **L2 OTA busy check** — `routers/api_agents.py:trigger_agent_update` 推送前先 GET agent 的 `/api/v1/status`，看到 `busy=true` / `queue_length>0` / `active_jobs` 非空 → 回 HTTP 409 + 詳情（agent_name, busy, queue_length, active_jobs 摘要, hint）拒絕，要加 `?force=true` 才強推。urllib 包進 `asyncio.to_thread` 不阻塞 event loop。(2) **L3(a) 斷點續傳 manifest** — worker 在每個 dest 子資料夾寫 `_drone_meta_manifest.json`（atomic .tmp + replace），結構 `{version, stems: {basename: {index, exts:[]}}, next_index}`，每次成功處理一檔就更新。watcher `_scan_candidates` 讀 manifest 對比 source：已記錄的 (stem, ext) + 對應 MAX_NNNN 檔存在 → 跳過；剩下的當「需處理」回傳。沒 manifest 但有 MAX_*.{ext} → 走舊版相容跳過邏輯。worker 端的 `_drone_meta_sync` 也同步讀 manifest hydrate `stem_to_index` + `next_index`，循環裡看到 (stem, ext) 已在 manifest 直接 continue（手動 UI 跑也保護）。(3) **L1 文件化** — CLAUDE.md 9.5 加「規則 0：發版前必看 agent 是否在忙」。Simplify pass 順手清理：抽 `_record_manifest_success` 消去 image/video 兩分支 7 行寫入重複、`import json` 提到模組頂部、watcher scan 用 `os.listdir` 取一次 set 取代 N 次 `os.path.isfile` syscall、修死變數 next_index、簡化不可讀的三元、加 None entry guard。 |
