@@ -1,5 +1,5 @@
 {
-  "version": "1.10.86",
+  "version": "1.10.87",
   "build_date": "2026-04-27",
-  "notes": "強制重發 v1.10.85（公用-器材 解壓鎖定 race，本版號 bump 強制 update_agent 重抓 routers/api_crm.py）"
+  "notes": "防禦性修復：api_crm.py 加 from __future__ import annotations，避免缺 sqlalchemy 的 agent type annotation NameError 炸 CRM router"
 }

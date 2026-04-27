@@ -735,7 +735,7 @@ tools:
     ▼ Phase J: CRM + 專案管理 + 帳務 (✅ 核心完成)
     │   → 64 API / 11 DB 表 / 6 Tab + 5 子視圖 + 手機版 RWD + Inline 編輯
     │
-現在 (v1.10.86) ← 你在這裡
+現在 (v1.10.87) ← 你在這裡
     │
     ▼ Phase M: 對外官方網站 (🚀 進行中 2026-04-20 ~ 07-01)
     │   → originsun-studio.com + CF Tunnel + Astro + 9 子視圖管理 Tab
@@ -773,6 +773,7 @@ tools:
 
 | 版本 | 日期 | 重點 |
 |------|------|------|
+| v1.10.87 | 2026-04-27 | **api_crm.py 加 `from __future__ import annotations`**：防禦性修復。原本 `routers/api_crm.py:4015` function signature 直接用 `CrmProjectShowcase` 做 type hint，但該 class 在 `try/except ImportError` 內，沒裝 sqlalchemy 的 agent 會 NameError → router 載入失敗 → CRM 全 404。實際在公用-器材 (192.168.1.5) 踩到，同 session 已手動 `pip install sqlalchemy[asyncio] asyncpg` 救了。本版改用 PEP 563 lazy annotation 一勞永逸 — 未來缺 sqlalchemy 的 agent 也能載入 router（runtime 讀 DB 仍由 `_require_db()` 擋下）。 |
 | v1.10.86 | 2026-04-27 | **強制重發補拉 v1.10.85**：v1.10.85 OTA 在公用-器材 (192.168.1.5) 解壓時 routers/api_crm.py 被 uvicorn 鎖住沒覆蓋成功（version.json 寫了但 .py 還是舊壞版），導致該機 CRM 仍 404。本版號純 metadata bump 強制 update_agent 重抓一次：解壓前 kill port 8000，process 死透才覆蓋 .py，避免鎖定。其他 7 台代理只是換版號，內容無變。 |
 | v1.10.85 | 2026-04-26 | **CRM agent 端 404 hotfix + 專案管理 cell-by-cell auto-save**：(1) **致命 hotfix** — Phase M-W (a7eb47d) 在 `routers/api_crm.py` 加了 module top-level 的 `from services.website.notion_service import _extract_youtube_id`，但 `services/` 不在 OTA AGENT_DIRS（NAS 部署目錄不打包），導致 v1.10.81 ~ v1.10.84 共 4 天所有代理機 import 失敗 → CRM router 沒註冊 → 所有 `/api/v1/crm/*` 全部 404。同事用任何代理機操作 CRM 都讀不到資料。修法：lazy import 移進 `_sync_showcase_to_public` 函式內。(2) **CRM 專案管理 cell-by-cell auto-save** — 拿掉 ✎ 編輯 modal、所有欄位點擊即可編輯、1 秒 debounce auto-save、PM popover、共用 `pickFolderPath` helper、deferred render 避免按鈕被銷毀的 race；snapshot-then-clear pattern 防 in-flight PUT 期間新編輯遺失；`_loadFinancialSummary` 不再清 dirty buffer 防 reload 蓋掉 pending 編輯；`_costCheckUnsaved` PUT 失敗時不執行導航 callback；抽 `_allDirtyCount` / `_clearAllDirty` helper 5 處去重；`searchableSelect` 暴露 `_syncSsValue` 修「→ 複製預估到結算」人員顯示 bug |
 | v1.10.84 | 2026-04-25 | **登入流程優化 — first paint ~370ms → ~50ms（7x）**：(1) auth-state.js 樂觀 auth 快取 — localStorage 存 auth_user，模組載入時同步 hydrate window 狀態，`_authReady` 立即 resolve，loadTabs 不再等 /auth/me；100ms 後背景 revalidate，僅在 modules / access_level 真的變動時 location.reload()，網路斷線視為信任 cache（離線可用）。(2) app.js loadTabs 全 14 個 tab 一次 Promise.all（原本 9 串行 + 4 並行 + 1 串行）。(3) `_loadTab` 內部 `fetch(html)` 跟 `import(js)` 並行（兩者沒依賴），每 tab 省 ~1 RTT。(4) `TAB_LOADERS` 移到 tab-config.js 跟 `TAB_MAP` 同檔，sectionId 由 `TAB_MAP[key]` 統一查表。Simplify pass 順帶：修登出 race（revalidate setTimeout 加 token 守衛）+ 抽 `_fetchMe()` / `_adoptUser()` helpers + `STORAGE_KEYS` 常數消 8 處 magic string。Finance 角色補加 backup / drone_meta / website_admin 權限 |
