@@ -9,6 +9,13 @@ Endpoints:
   POST   /api/v1/crm/clients/import_csv   — CSV 匯入（Notion / Google Sheets 格式）
   GET    /api/v1/crm/users               — 取得可選 AM/PM 使用者列表
 """
+# Lazy annotations (PEP 563) — keeps function signatures parsing on agents
+# without sqlalchemy / asyncpg installed. db.models classes referenced as
+# type hints would otherwise NameError when the optional DB import branch
+# fails (per the try/except below), preventing the whole CRM router from
+# loading. See bug: agent 192.168.1.5 had this exact failure mode.
+from __future__ import annotations
+
 import asyncio
 import csv
 import io
