@@ -1,6 +1,6 @@
 # Originsun Media Guard Pro — Claude Code 完整交接文件
 
-> **版本**: v1.10.93（2026-04-27）
+> **版本**: v1.10.94（2026-04-28）
 > **目標讀者**: 接手開發的 AI 協作者（Claude Code）
 > **開發環境**: Windows 11、Python 3.11、Vanilla JS (ES Modules)
 > **啟動方式**: `d:\Antigravity\OriginsunTranscode\.venv\Scripts\python.exe main.py`
@@ -937,6 +937,18 @@ class ValidatePathsRequest(BaseModel):
 ## 9.5 AI 協作者行為準則（強制執行）
 
 > 以下規則適用於所有 AI 協作者（Claude Code / Copilot 等），違反任何一條視為任務未完成。
+
+### 規則 0：發版前必看 agent 是否在忙（OTA 安全）
+
+長時間任務（drone_meta 一個資料夾 100+ 檔案常跑數小時）很常碰到 OTA。
+**v1.10.94 起 `/api/v1/agents/{id}/update` 預設會做 busy check**：agent 的
+`/api/v1/status` 顯示 `busy=true` 或 `queue_length>0` 或有 `active_jobs` →
+回 HTTP 409 拒絕推送（除非加 `?force=true`）。
+
+執行 `/publish` skill 時若有 agent 回 409，**先確認可以中斷該任務再強推**。
+被砍掉的 in-flight job：drone_meta 有 manifest 機制（`_drone_meta_manifest.json`
+寫在每個 dest 子資料夾），watcher 下次掃描會自動跳過已處理 (stem, ext)、
+只補處理沒做完的，所以強推風險已降低（但串帶 reel 會少一次，需要重跑）。
 
 ### 規則 A：強制驗證，不准說「Done」就跑
 

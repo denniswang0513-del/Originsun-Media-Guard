@@ -1,5 +1,6 @@
 import os
 import asyncio
+import json
 import uuid
 from typing import Any
 from datetime import datetime as _dt
@@ -703,6 +704,58 @@ DRONE_META_IMAGE_EXTS = {
     ".nef", ".raf", ".orf", ".rw2", ".tif", ".tiff",
 }
 
+# Manifest filename written into each dest sub-folder. Lets watcher
+# detect partial completion (worker killed mid-batch by OTA / crash) and
+# only re-process the missing files instead of the whole folder.
+DRONE_META_MANIFEST = "_drone_meta_manifest.json"
+
+
+def _load_drone_manifest(dest_dir: str) -> dict:
+    """Read the per-folder manifest. Returns {} on any failure."""
+    if not dest_dir:
+        return {}
+    path = os.path.join(dest_dir, DRONE_META_MANIFEST)
+    if not os.path.isfile(path):
+        return {}
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        return data if isinstance(data, dict) else {}
+    except Exception:
+        return {}
+
+
+def _save_drone_manifest(dest_dir: str, manifest: dict) -> None:
+    """Atomic write of manifest (.tmp + replace) so partial writes can't corrupt."""
+    if not dest_dir:
+        return
+    try:
+        path = os.path.join(dest_dir, DRONE_META_MANIFEST)
+        tmp = path + ".tmp"
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump(manifest, f, ensure_ascii=False, indent=2)
+        os.replace(tmp, path)
+    except Exception:
+        pass  # Best-effort; never let manifest write break the actual job
+
+
+def _record_manifest_success(
+    manifest_dir: str,
+    manifest: dict,
+    manifest_stems: dict,
+    src_stem: str,
+    current_index: int,
+    ext_key: str,
+    next_index: int,
+) -> None:
+    """Mark (src_stem, ext_key) processed and persist manifest atomically."""
+    entry = manifest_stems.setdefault(src_stem, {"index": current_index, "exts": []})
+    entry["index"] = current_index
+    if ext_key not in entry["exts"]:
+        entry["exts"].append(ext_key)
+    manifest["next_index"] = next_index
+    _save_drone_manifest(manifest_dir, manifest)
+
 
 def _process_image_metadata_sync(
     src_path: str, dst_path: str, file_dt,
@@ -851,7 +904,6 @@ async def _run_drone_meta(job, engine, task: DroneMetaRequest, _on_progress):
 def _drone_meta_sync(job, engine, task: DroneMetaRequest, _on_progress):
     import subprocess
     import datetime as _datetime
-    import json
 
     job_id = job.job_id
     project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -889,12 +941,28 @@ def _drone_meta_sync(job, engine, task: DroneMetaRequest, _on_progress):
     if task.do_concat and task.concat_dest_dir:
         os.makedirs(task.concat_dest_dir, exist_ok=True)
 
-    # DJI cameras shoot DNG + JPG pairs that share a basename
-    # (DJI_0923.DNG / DJI_0923.JPG). Group output indices by source stem
-    # so paired raw + jpg both come out as MAX_0001.{ext}, keeping the
-    # pairing intact.
-    stem_to_index = {}
-    next_index = task.file_index
+    # DJI cameras shoot DNG + JPG pairs that share a basename — group
+    # output indices by source stem so MAX_0001.DNG / MAX_0001.JPG stay
+    # paired. On resume, hydrate the index map from a previous run's
+    # manifest so already-done (stem, ext) pairs reuse the same MAX_NNNN.
+    manifest_dir = task.output_dir
+    manifest = _load_drone_manifest(manifest_dir)
+    manifest.setdefault("version", 1)
+    manifest_stems = manifest.setdefault("stems", {})
+    stem_to_index = {
+        s: int(v["index"])
+        for s, v in manifest_stems.items()
+        if isinstance(v, dict) and v.get("index")
+    }
+    next_index = (
+        int(manifest.get("next_index") or task.file_index)
+        if stem_to_index else task.file_index
+    )
+    if manifest_stems:
+        _emit_sync_for_job(job_id, 'log', {
+            'type': 'info',
+            'msg': f'偵測到既有 manifest（{len(manifest_stems)} 個來源已處理），續傳模式',
+        })
 
     for idx, file_setting in enumerate(task.files):
         fpath = file_setting.path
@@ -914,6 +982,22 @@ def _drone_meta_sync(job, engine, task: DroneMetaRequest, _on_progress):
             new_name = f"MAX_{current_index:04d}.MOV"
         out_dir = task.output_dir or os.path.dirname(fpath)
         new_path = os.path.join(out_dir, new_name)
+
+        # Resume: if manifest already covers this (stem, ext), skip re-do.
+        # Output file existence is the truth (manifest could be stale if user
+        # manually deleted dest files); both need to agree.
+        ext_key = src_ext.upper() if is_image else ".MOV"
+        manifest_entry = manifest_stems.get(src_stem) or {}
+        already_done_exts = manifest_entry.get("exts") or []
+        if ext_key in already_done_exts and os.path.isfile(new_path):
+            success_count += 1
+            if not is_image:
+                # Videos already in new_file_paths means concat will pick them up.
+                new_file_paths.append(new_path)
+            _emit_sync_for_job(job_id, 'log', {
+                'type': 'info', 'msg': f'⤿ {new_name} 已存在（manifest 略過）'
+            })
+            continue
 
         _on_progress({
             'phase': 'drone_meta',
@@ -958,6 +1042,8 @@ def _drone_meta_sync(job, engine, task: DroneMetaRequest, _on_progress):
                         pass
                 continue
             success_count += 1
+            _record_manifest_success(manifest_dir, manifest, manifest_stems,
+                                     src_stem, current_index, ext_key, next_index)
             # Images do NOT go into new_file_paths — concat takes videos only.
             _emit_sync_for_job(job_id, 'log', {
                 'type': 'info', 'msg': f'✓ {new_name} 完成 (圖片)'
@@ -1119,6 +1205,8 @@ def _drone_meta_sync(job, engine, task: DroneMetaRequest, _on_progress):
 
         success_count += 1
         new_file_paths.append(new_path)
+        _record_manifest_success(manifest_dir, manifest, manifest_stems,
+                                 src_stem, current_index, ext_key, next_index)
         _emit_sync_for_job(job_id, 'log', {
             'type': 'info', 'msg': f'✓ {new_name} 完成'
                 + (f' (DJI→Autel 轉換)' if is_dji else '')

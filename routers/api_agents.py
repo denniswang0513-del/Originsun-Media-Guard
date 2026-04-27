@@ -13,6 +13,7 @@ import asyncio
 import urllib.request
 import urllib.error
 from fastapi import APIRouter, HTTPException, Request
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 from config import load_settings
 import core.state as state
@@ -218,13 +219,45 @@ async def proxy_agent_health(agent_id: str):
 
 
 @router.post("/agents/{agent_id}/update")
-async def trigger_agent_update(agent_id: str, request: Request):
+async def trigger_agent_update(agent_id: str, request: Request, force: bool = False):
     """Trigger OTA update on a remote Agent.
     Uses /api/admin/restart which calls start_hidden.vbs → update_agent.py → uvicorn.
-    This works on ALL agent versions because start_hidden.vbs triggers the full update cycle."""
+    This works on ALL agent versions because start_hidden.vbs triggers the full update cycle.
+
+    Pre-flight busy check: refuses to push if the agent has an active job
+    (drone transcode of 100+ files takes hours; OTA mid-job kills work
+    and watcher's MAX_* skip logic then marks the folder as 'done' even
+    though it's incomplete). Pass `?force=true` to override.
+    """
     _check_admin_agents(request)
     agent = await _find_agent(agent_id)
     base_url = agent.get("url", "").rstrip("/")
+
+    if not force:
+        def _fetch_status():
+            try:
+                with urllib.request.urlopen(base_url + "/api/v1/status", timeout=5) as resp:
+                    return json.loads(resp.read().decode("utf-8"))
+            except Exception:
+                return None  # unreachable / parse error → don't gate
+        status = await asyncio.to_thread(_fetch_status)
+        if status is not None:
+            busy = bool(status.get("busy")) or int(status.get("queue_length", 0) or 0) > 0
+            active = status.get("active_jobs") or {}
+            if busy or active:
+                return JSONResponse(status_code=409, content={
+                    "status": "busy",
+                    "agent_id": agent_id,
+                    "agent_name": agent.get("name", agent_id),
+                    "busy": bool(status.get("busy")),
+                    "queue_length": int(status.get("queue_length", 0) or 0),
+                    "active_jobs": [
+                        {"task_type": v.get("task_type"),
+                         "project_name": v.get("project_name")}
+                        for v in active.values() if isinstance(v, dict)
+                    ],
+                    "hint": "加 ?force=true 強制推送（會中斷正在跑的任務）",
+                })
 
     def _trigger():
         # Try multiple restart endpoints (newest first, then fallbacks for old agents)

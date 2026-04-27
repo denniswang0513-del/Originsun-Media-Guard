@@ -198,13 +198,19 @@ def _probe_creation_time(path: str) -> str:
 def _scan_candidates(source_root: str, dest_root: str) -> List[Tuple[str, List[str]]]:
     """
     回傳 [(子資料夾絕對路徑, [媒體檔絕對路徑, ...]), ...]
-    跳過目的地已有任何 MAX_* 輸出檔（影片或照片）的子資料夾。
+
+    每個子資料夾的處理狀態判定：
+    - dest 有 manifest (`_drone_meta_manifest.json`) → 用 manifest 對比 source。
+      已處理的 (stem, ext) 從清單剔除，剩下的當未處理回傳。manifest 顯示
+      所有 source 都已處理 → 整個資料夾跳過。
+    - 沒 manifest 但 dest 有 MAX_*.{ext} → 舊版相容路徑，視為已處理整批跳過
+      （v1.10.93 之前的 worker 不寫 manifest，這個 fallback 才不會把那些
+      已完成的資料夾誤判成「未處理」拿去重跑）。
+    - 沒 manifest 也沒 MAX_* → 全 source 當未處理。
     """
     if not os.path.isdir(source_root):
         return []
 
-    # All extensions that the worker may produce as MAX_*.{ext} output:
-    # videos remux to .MOV, photos keep their original extension uppercased.
     _MAX_OUT_EXTS = (".MOV",) + tuple(e.upper() for e in _IMAGE_EXTS)
 
     candidates = []
@@ -213,9 +219,48 @@ def _scan_candidates(source_root: str, dest_root: str) -> List[Tuple[str, List[s
         if not os.path.isdir(sub):
             continue
 
-        # Self-healing skip: any MAX_*.<ext> in dest means this folder
-        # already ran successfully. No ledger file needed.
+        media = []
+        for root, _dirs, files in os.walk(sub):
+            for fn in files:
+                if os.path.splitext(fn)[1].lower() in _MEDIA_EXTS:
+                    media.append(os.path.join(root, fn))
+        media.sort()
+        if not media:
+            continue
+
         dest_sub = os.path.join(dest_root, name)
+        manifest = _read_manifest(dest_sub)
+
+        if manifest is not None:
+            # Filter media against manifest. Manifest entry AND actual file
+            # must both confirm "done" — manifest can be stale if user
+            # manually deleted dest files. List dest once into a set so
+            # the per-source check is O(1) instead of N stat() syscalls.
+            stems = manifest.get("stems") or {}
+            try:
+                dest_files = {f.upper() for f in os.listdir(dest_sub)}
+            except OSError:
+                dest_files = set()
+            unprocessed = []
+            for p in media:
+                stem = os.path.splitext(os.path.basename(p))[0]
+                ext = os.path.splitext(p)[1].lower()
+                # Worker outputs videos as .MOV, images keep their own ext.
+                ext_key = ext.upper() if ext in _IMAGE_EXTS else ".MOV"
+                entry = stems.get(stem) if isinstance(stems.get(stem), dict) else None
+                if entry and ext_key in (entry.get("exts") or []):
+                    expected = f"MAX_{int(entry.get('index', 0)):04d}{ext_key}"
+                    if expected in dest_files:
+                        continue  # done — skip
+                unprocessed.append(p)
+            if not unprocessed:
+                continue  # whole folder done
+            candidates.append((sub, unprocessed))
+            continue
+
+        # Legacy path (no manifest): if dest has any MAX_*.<ext>, this
+        # folder was processed by an older worker — preserve old skip
+        # behaviour to avoid re-processing existing work.
         if os.path.isdir(dest_sub):
             try:
                 if any(f.upper().startswith("MAX_") and f.upper().endswith(_MAX_OUT_EXTS)
@@ -224,15 +269,24 @@ def _scan_candidates(source_root: str, dest_root: str) -> List[Tuple[str, List[s
             except OSError:
                 pass
 
-        media = []
-        for root, _dirs, files in os.walk(sub):
-            for fn in files:
-                if os.path.splitext(fn)[1].lower() in _MEDIA_EXTS:
-                    media.append(os.path.join(root, fn))
-        if media:
-            candidates.append((sub, sorted(media)))
+        candidates.append((sub, media))
 
     return candidates
+
+
+def _read_manifest(dest_sub: str) -> Optional[dict]:
+    """Read `_drone_meta_manifest.json` from dest sub-folder. None on missing/error."""
+    if not os.path.isdir(dest_sub):
+        return None
+    path = os.path.join(dest_sub, "_drone_meta_manifest.json")
+    if not os.path.isfile(path):
+        return None
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        return data if isinstance(data, dict) else None
+    except Exception:
+        return None
 
 
 # ── 執行一次 ──────────────────────────────────────────────────
