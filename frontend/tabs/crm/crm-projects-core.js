@@ -195,7 +195,7 @@ export function renderList() {
                 ${p.am_username ? _avatar(p.am_username) + _esc(p.am_username) : '<span class="crm-muted">—</span>'}
             </div>
             <div class="crm-row-date">${p.start_date ? p.start_date.substring(0, 10) : '—'}</div>
-            ${kebabMenuHtml(p.id, { onEdit: '_projEdit', onDuplicate: '_projDup', onDelete: '_projDelete' })}
+            ${kebabMenuHtml(p.id, { onEdit: '_projOpenForm', onDuplicate: '_projDup', onDelete: '_projDelete' })}
         </div>
     `).join('');
 }

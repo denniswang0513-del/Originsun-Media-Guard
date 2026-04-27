@@ -735,7 +735,7 @@ tools:
     ▼ Phase J: CRM + 專案管理 + 帳務 (✅ 核心完成)
     │   → 64 API / 11 DB 表 / 6 Tab + 5 子視圖 + 手機版 RWD + Inline 編輯
     │
-現在 (v1.10.97) ← 你在這裡
+現在 (v1.10.98) ← 你在這裡
     │
     ▼ Phase M: 對外官方網站 (🚀 進行中 2026-04-20 ~ 07-01)
     │   → originsun-studio.com + CF Tunnel + Astro + 9 子視圖管理 Tab
@@ -773,6 +773,7 @@ tools:
 
 | 版本 | 日期 | 重點 |
 |------|------|------|
+| v1.10.98 | 2026-04-28 | **CRM 專案資訊編輯三聯修**：(1) `window._projEdit` name collision — `crm-projects.js` 的 modal handler `(id) => openModal(p)` 在 `crm-projects-detail.js` 的 cell handler `(cell) => ...` 之後載入，把 cell handler 蓋掉，所有 cell 點擊靜默走 modal handler 但拿到 DOM element 不是 id，find 不到 → 整個 cell-by-cell 編輯系統實際失效。Rename modal handler 成 `_projOpenForm`，kebab menu 改用新名，cell handler 留原 `_projEdit`。(2) PUT `/projects/{id}` 用 `CrmProjectPayload`（`name+client_id` 必填）→ cell auto-save 只送 dirty field 必 422，static error 但前端 catch 沒 surface，使用者看到「已儲存」實際被拒絕。新增 `CrmProjectPatchPayload`（全 Optional） + 改 endpoint 用 `exclude_unset=True`，partial update 真的能進 DB。client_id 變更時保留原本的客戶存在性檢查。(3) UI 在合約資訊列尾巴加「✎ 編輯」按鈕（`_projOpenForm`），給使用者一個明顯的「打開完整表單」入口，不依賴每 cell 都看出可點擊。順帶把 `_buildEditFields` 的 `description` label 從「說明 / 備註」拆成「說明」+ 補上漏掉的 `notes` 欄位（label「備註」），「+ 加備註」cell 終於能用。 |
 | v1.10.97 | 2026-04-28 | **行政雜支類別 10→6 收斂 + 對外網站拿掉假作品 fallback**：(1) v1.10.96 預設 10 類別超出原本 6 個下拉選單範圍，使用者 push back 改回 6（交通/住宿/飲食/提案/器材/其他）。`_EXPENSE_CATEGORY_DEFAULTS` + `EXPENSE_CATEGORIES` + 3 個 public expense form HTML 全部回退；歐姆龍專案的 12 個 v1.10.96 back-fill 出來的 $0 row（場地/車馬/印刷/服裝 × 3 子表）一次清乾淨。(2) Astro 對外網站（works / featured）原本 `crm-client.ts` 在 API 失敗或結果不足 9 筆時 fallback 到 `FAKE_FEATURED`（XYZ 集團/雲山會館/兒童福利聯盟等），使用者刪掉假作品 row 後網站靜態 HTML 還在顯示。改成空陣列 fallback + `index.astro` 拿掉 9 筆補齊邏輯，只渲染真實 published 作品。注意：website/ 不在 OTA AGENT_DIRS，這部分變更**需要在 NAS 端 `npm run build` 重 build** 才會生效。 |
 | v1.10.96 | 2026-04-28 | **CRM 行政雜支自動預設 10 個拍片常用類別**：每個新專案/子表建立時自動 seed 10 筆 $0 雜支 row（交通/住宿/飲食/場地/車馬/器材/印刷/服裝/提案/其他），使用者打開直接填金額而不是先按 ➕。三個 hook 點：`POST /projects`（建專案 + 主表）、`POST /projects/{id}/cost-groups`（手動新子表）、`POST /cost-groups/{id}/duplicate`（複製子表）。`POST /projects/{id}/cost-lines/init` 同步擴充：legacy 專案點一次「初始化」就會把 10 個雜支類別補進去，已存在的類別跳過（不覆蓋使用者的金額）。`EXPENSE_CATEGORIES` 從 6 → 10，前後端跟 3 個 public expense form HTML（expense.html、advance-expense.html、group-expense.html）的 `<select>` 同步更新。實測新專案 / 新子表 / 既有專案 init 都 seed 出正確 10 個類別、舊的 飲食 等 row 不被覆蓋。 |
 | v1.10.95 | 2026-04-28 | **CRM 成本估算欄位清空後沒儲存修復（exclude_unset）**：`/project-cost-lines/{id}` PUT 端點原本用 `req.model_dump(exclude_none=True)`，把所有 None 值剝光。前端 inline edit 在輸入空字串時送 `{"estimated_quantity": null}`（試圖清空欄位），後端 silently 把 null 扔了 → DB 沒寫入 → 自動儲存指示「已儲存」但實際沒儲存 → 切回專案值還是舊的。改成 `exclude_unset=True`：保留 explicit null（client 真的有送這個欄位），但仍排除 client 沒送的欄位（避免覆蓋整列）。實測 PUT `{"estimated_quantity": null}` 從 silently dropped → 真的清空欄位。加 4 個 unit test (`tests/unit/test_cost_line_payload.py`) 鎖死 explicit-null / explicit-zero / unset / partial-update 四種行為。 |

@@ -35,7 +35,8 @@ function _buildEditFields() {
         {name:'start_date', label:'起始日', type:'date'},
         {name:'completion_date', label:'結案日', type:'date'},
         {name:'folder_path', label:'資料夾', type:'folder'},
-        {name:'description', label:'說明 / 備註', type:'textarea'},
+        {name:'description', label:'說明', type:'textarea'},
+        {name:'notes', label:'備註', type:'textarea'},
         {name:'contract_amount', label:'合約金額（含稅）', type:'number'},
         {name:'tax_rate', label:'稅率(%)', type:'number'},
         {name:'profit_target_pct', label:'目標毛利率(%)', type:'number'},
@@ -330,6 +331,8 @@ function renderDetail(project) {
           <span>匯費 ${_editCell('transfer_fee', project.transfer_fee ? '$' + fmtNum(project.transfer_fee) : _placeholder('—'))}</span>
           <span class="pi-dot"></span>
           ${_editCell('payment_status', _pBadge(project.payment_status))}
+          <button class="crm-btn crm-btn-secondary crm-btn-sm" style="margin-left:auto;padding:2px 10px;font-size:11px;"
+                  onclick="window._projOpenForm('${project.id}')" title="編輯所有專案資訊">✎ 編輯</button>
         </div>
 
         <!-- Layer 2: Stage card (conditional) -->

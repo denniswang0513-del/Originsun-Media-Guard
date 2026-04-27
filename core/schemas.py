@@ -355,6 +355,35 @@ class CrmProjectPayload(BaseModel):
     receipt_path: str = ""
 
 
+class CrmProjectPatchPayload(BaseModel):
+    """Partial-update body for PUT /projects/{id}. All fields Optional so the
+    cell-by-cell auto-save can send just the dirty fields without 422-ing on
+    missing name/client_id (the inline-edit flow only knows what the user
+    just changed).
+    """
+    name: Optional[str] = None
+    client_id: Optional[str] = None
+    status: Optional[str] = None
+    am_username: Optional[str] = None
+    pm_usernames: Optional[List[str]] = None
+    shoot_date: Optional[str] = None
+    start_date: Optional[str] = None
+    completion_date: Optional[str] = None
+    project_type: Optional[str] = None
+    folder_path: Optional[str] = None
+    description: Optional[str] = None
+    notes: Optional[str] = None
+    contract_amount: Optional[int] = None
+    tax_rate: Optional[int] = None
+    profit_target_pct: Optional[int] = None
+    misc_budget_pct: Optional[int] = None
+    payment_status: Optional[str] = None
+    amount_receivable: Optional[int] = None
+    amount_received: Optional[int] = None
+    transfer_fee: Optional[int] = None
+    receipt_path: Optional[str] = None
+
+
 class ProjectExpensePayload(BaseModel):
     category: str
     estimated: int = 0

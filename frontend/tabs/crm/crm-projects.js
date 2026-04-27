@@ -55,7 +55,12 @@ export async function initCrmProjectsTab() {
 
     // ── Core handlers ──
     window._projSelect = selectProject;
-    window._projEdit = (id) => {
+    // _projEdit (cell-by-cell inline edit) is registered at module load by
+    // crm-projects-detail.js. The kebab "✎ 編輯" path uses _projOpenForm
+    // to open the full modal. Don't reuse the _projEdit name here — both
+    // handlers were claiming the same global and the last-loaded one
+    // (modal) silently no-op'd every cell click.
+    window._projOpenForm = (id) => {
         const p = state.projects.find(x => x.id === id);
         if (p) openModal(p);
     };

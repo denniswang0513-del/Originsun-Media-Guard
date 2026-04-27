@@ -106,7 +106,8 @@ def _to_dict(c) -> dict:
     }
 
 
-from core.schemas import (ClientPayload, CrmProjectPayload, ProjectExpensePayload,
+from core.schemas import (ClientPayload, CrmProjectPayload, CrmProjectPatchPayload,
+                         ProjectExpensePayload,
                          ProjectExpensePatchPayload,
                          QuotationPayload, QuotationItemPayload, QuotationTemplatePayload,
                          StaffPayload, ProjectStaffPayload, InvoicePayload, PaymentRequestPayload,
@@ -521,31 +522,38 @@ async def get_project(project_id: str):
 
 
 @router.put("/projects/{project_id}")
-async def update_project(project_id: str, req: CrmProjectPayload, request: Request):
+async def update_project(project_id: str, req: CrmProjectPatchPayload, request: Request):
+    """Partial update — only fields the client included in the body are
+    touched. The cell-by-cell auto-save sends just the dirty field, so a
+    full-payload schema would 422 on missing name/client_id."""
     _check_auth(request)
     _require_db()
     factory = await _get_factory()
 
     date_fields = {"shoot_date", "start_date", "completion_date"}
-    dates = {f: _parse_shoot_date(getattr(req, f)) for f in date_fields}
+    update_data = req.model_dump(exclude_unset=True)
 
     async with factory() as session:
         project = await session.get(CrmProject, project_id)
         if not project:
             raise HTTPException(status_code=404, detail="找不到此專案")
 
-        client = await session.get(Client, req.client_id)
-        if not client:
-            raise HTTPException(status_code=404, detail="找不到指定的客戶")
+        # If client_id is changing, validate the new client exists.
+        if "client_id" in update_data:
+            new_client = await session.get(Client, update_data["client_id"])
+            if not new_client:
+                raise HTTPException(status_code=404, detail="找不到指定的客戶")
 
-        for k, v in req.model_dump(exclude=date_fields).items():
-            setattr(project, k, v)
-        for k, v in dates.items():
-            setattr(project, k, v)
+        for k, v in update_data.items():
+            if k in date_fields:
+                setattr(project, k, _parse_shoot_date(v))
+            else:
+                setattr(project, k, v)
         project.updated_at = _now()
         await session.commit()
         await session.refresh(project)
-        client_name = client.short_name
+        client = await session.get(Client, project.client_id)
+        client_name = client.short_name if client else ""
 
     return {"status": "ok", "project": _to_project_dict(project, client_name)}
 
