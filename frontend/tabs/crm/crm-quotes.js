@@ -15,6 +15,7 @@ let _selectedId = null;
 let _editingId = null;  // null=新增, string=編輯
 let _editingProjectId = null;
 let _filters = { q: '', status: '', client_id: '' };
+let _tabInitDone = false;  // idempotent guard — multiple lazy-loaders may call
 
 // ── Data Loading ─────────────────────────────────────────────
 
@@ -514,6 +515,14 @@ async function _deleteTemplate(id) {
 // ── Init ─────────────────────────────────────────────────────
 
 export async function initCrmQuotesTab() {
+    // Guard against double-init: this Tab has two lazy-loaders (the outer
+    // "報價總覽" sub-tab in crm-projects.js and the project-detail "報價管理"
+    // sub-tab via crm-projects-quotes.js). Each had its own loaded flag,
+    // so without this guard event listeners would double-bind on the second
+    // entry path → duplicate fetches, stacked modals, etc.
+    if (_tabInitDone) return;
+    _tabInitDone = true;
+
     for (const id of ['quote-modal', 'quote-template-modal']) {
         const el = document.getElementById(id);
         if (el) document.body.appendChild(el);

@@ -155,16 +155,50 @@ async function _renderQuoteDetail(quoteId) {
 
 // ── Window handlers ──────────────────────────────────────────
 
+// crm-quotes.js (the one that registers _openQuoteModalForProject /
+// _openQuoteModalForEdit / _openQuoteModalForDuplicate) is lazy-loaded by
+// the OUTER "報價總覽" sub-tab in crm-projects.js. If the user enters a
+// project's "報價管理" sub-tab first, those window functions are still
+// undefined and the buttons silently no-op. Mirror the load steps here.
+let _ensurePromise = null;
+async function _ensureQuotesModule() {
+    if (window._openQuoteModalForProject) return;
+    if (!_ensurePromise) {
+        _ensurePromise = (async () => {
+            const container = document.getElementById('proj-view-quotes');
+            if (container && !container.innerHTML.trim()) {
+                try {
+                    const res = await fetch('./tabs/crm/crm-quotes.html');
+                    if (res.ok) {
+                        container.innerHTML = await res.text();
+                        const inner = container.querySelector('.crm-root');
+                        if (inner) {
+                            inner.style.height = '100%';
+                            inner.style.minHeight = '0';
+                            inner.style.maxHeight = 'none';
+                        }
+                    }
+                } catch (_) { /* HTML load best-effort */ }
+            }
+            const mod = await import('./crm-quotes.js');
+            await mod.initCrmQuotesTab();
+        })();
+    }
+    return _ensurePromise;
+}
+
 function initQuoteHandlers() {
     window._pqSelect = (quoteId) => _renderQuoteDetail(quoteId);
 
-    window._pqEdit = (quoteId) => {
+    window._pqEdit = async (quoteId) => {
+        await _ensureQuotesModule();
         if (window._openQuoteModalForEdit) {
             window._openQuoteModalForEdit(quoteId);
         }
     };
 
     window._pqDuplicate = async (quoteId) => {
+        await _ensureQuotesModule();
         if (window._openQuoteModalForDuplicate) {
             window._openQuoteModalForDuplicate(quoteId);
         }
@@ -178,8 +212,9 @@ function initQuoteHandlers() {
         } catch (e) { alert('刪除失敗：' + e.message); }
     };
 
-    window._projAddQuote = () => {
+    window._projAddQuote = async () => {
         if (!state.selectedId) return;
+        await _ensureQuotesModule();
         if (window._openQuoteModalForProject) {
             window._openQuoteModalForProject(state.selectedId);
         }
