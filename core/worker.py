@@ -713,12 +713,22 @@ def _process_image_metadata_sync(
     """Disguise a single image as Autel and rewrite all timestamps.
 
     Both Level 1 (identity rewrite) and Level 2 (DJI XMP/MakerNotes/color
-    science strip) are always applied — no toggle. The colour matrices and
-    profiles get cleared so Lightroom falls back to a generic DNG profile
-    instead of recognising it as the original Hasselblad/L2D-20c.
+    science strip) are always applied — no toggle.
+
+    JPEG path uses rebuild (-all= + tagsfromfile filtered copy-back). The
+    plain MakerNotes:All= leaves a 4-byte "DJI" inline residue in the
+    MakerNote IFD entry that exiftool can't delete via standard tags;
+    rebuild eliminates it cleanly. Cost: DJI's MPF secondary embedded
+    preview (~1 MB) doesn't survive the rebuild — a niche feature most
+    viewers don't use. Acceptable trade.
+
+    DNG / ARW / CR3 / NEF / RAF use single-pass strip. Rebuild on raw
+    formats would break SubIFD raw decoding; the single-pass approach
+    already leaves zero forensic traces on raw containers because the
+    DJI MakerNotes there is parsed differently and clears fully.
 
     Sensor-essential fields (BlackLevel/WhiteLevel/LinearizationTable/
-    AsShotNeutral/CFA pattern) are kept so the raw is still decodable.
+    AsShotNeutral/CFA pattern) are kept so the raw stays decodable.
     """
     import shutil
     import subprocess
@@ -732,41 +742,63 @@ def _process_image_metadata_sync(
     # UniqueCameraModel/LocalizedCameraModel; otherwise reuse model name.
     autel_unique = "XL720" if "EVO Lite" in drone_model else drone_model
 
+    ext_lower = os.path.splitext(src_path)[1].lower()
+    is_jpeg = ext_lower in ('.jpg', '.jpeg')
+
     args = [exiftool_bin]
 
-    # ── Level 2: strip DJI / Hasselblad traces ──
-    args += [
-        # Wipe XMP entirely — that's where DJI flight data lives
-        # (GimbalYawDegree, FlightXSpeed, ProductName=DJIMavic3, ...).
-        "-XMP:All=",
-        # Wipe DJI debug binary blobs (AE/AWB/AF/ADJ Debug, histograms).
-        "-MakerNotes:All=",
-        # Drop camera-specific colour science. Without ColorMatrix +
-        # ProfileHueSatMap, Lightroom falls back to its generic DNG profile,
-        # so the file no longer reads as "Hasselblad L2D-20c".
-        "-ColorMatrix1=", "-ColorMatrix2=",
-        "-CalibrationIlluminant1=", "-CalibrationIlluminant2=",
-        "-ProfileName=",
-        "-ProfileCalibrationSignature=",
-        "-ProfileEmbedPolicy=",
-        "-ProfileHueSatMapDims=",
-        "-ProfileHueSatMapData1=", "-ProfileHueSatMapData2=",
-        "-ProfileToneCurve=",
-        "-ProfileLookTableDims=", "-ProfileLookTableData=",
-        # NoiseProfile is marked permanent on IFD0 in exiftool's tag table —
-        # the plain unprefixed form silently no-ops. Force the IFD0 group.
-        "-IFD0:NoiseProfile=",
-        "-OpcodeList1=", "-OpcodeList2=", "-OpcodeList3=",
-        # Camera serials & lens telemetry
-        "-SerialNumber=",
-        "-CameraSerialNumber=",
-        "-LensSerialNumber=",
-        "-ImageDescription=",
-        "-XPComment=",
-        "-XPKeywords=",
-    ]
+    if is_jpeg:
+        # ── JPEG: rebuild approach ──
+        # 1. -all=  wipes every metadata block (kills MakerNote IFD entry too)
+        # 2. -tagsfromfile @ -EXIF:all -GPS:all  copies back EXIF + GPS only
+        # 3. --<excludes>  prevents re-introduction of MakerNotes and the
+        #    identity tags we'll overwrite below (also catches the LensInfo
+        #    "24mm f/2.8-11" Hasselblad fingerprint).
+        args += [
+            "-all=",
+            "-tagsfromfile", "@",
+            "-EXIF:all", "-GPS:all",
+            "--MakerNotes",
+            "--IFD0:Make", "--IFD0:Model", "--IFD0:Software",
+            "--IFD0:UniqueCameraModel",
+            "--ExifIFD:UniqueCameraModel",
+            "--ExifIFD:SerialNumber", "--ExifIFD:LensInfo",
+            "--IFD0:CameraSerialNumber", "--ExifIFD:LensSerialNumber",
+            "--IFD0:ImageDescription", "--IFD0:XPComment", "--IFD0:XPKeywords",
+        ]
+    else:
+        # ── DNG / ARW / CR3 / NEF / RAF: single-pass strip ──
+        args += [
+            # Wipe XMP entirely — DJI flight data lives there
+            # (GimbalYawDegree, FlightXSpeed, ProductName=DJIMavic3, ...).
+            "-XMP:All=",
+            # Wipe DJI debug binary blobs (AE/AWB/AF/ADJ Debug, histograms).
+            "-MakerNotes:All=",
+            # Drop camera-specific colour science. Without ColorMatrix +
+            # ProfileHueSatMap, Lightroom falls back to its generic DNG
+            # profile, so the file no longer reads as "Hasselblad L2D-20c".
+            "-ColorMatrix1=", "-ColorMatrix2=",
+            "-CalibrationIlluminant1=", "-CalibrationIlluminant2=",
+            "-ProfileName=",
+            "-ProfileCalibrationSignature=",
+            "-ProfileEmbedPolicy=",
+            "-ProfileHueSatMapDims=",
+            "-ProfileHueSatMapData1=", "-ProfileHueSatMapData2=",
+            "-ProfileToneCurve=",
+            "-ProfileLookTableDims=", "-ProfileLookTableData=",
+            # NoiseProfile is marked permanent on IFD0 in exiftool's tag
+            # table — the plain unprefixed form silently no-ops.
+            "-IFD0:NoiseProfile=",
+            "-OpcodeList1=", "-OpcodeList2=", "-OpcodeList3=",
+            "-SerialNumber=",
+            "-CameraSerialNumber=",
+            "-LensSerialNumber=",
+            "-ImageDescription=",
+            "-XPComment=",
+            "-XPKeywords=",
+        ]
 
-    # ── Level 1: rewrite identity to Autel ──
+    # ── Level 1: rewrite identity to Autel (both paths) ──
     args += [
         f"-Make={drone_make}",
         f"-Model={drone_model}",
@@ -774,18 +806,18 @@ def _process_image_metadata_sync(
         f"-LocalizedCameraModel={autel_unique}",
         f"-LensMake={lens_make}",
         f"-LensModel={lens_model}",
-        # Autel reference DNG has no LensInfo; clear it (Hasselblad's said
-        # "24mm f/2.8-11" which would betray the source).
+        # Autel reference DNG has no LensInfo; clear it.
         "-LensInfo=",
         "-Software=V2.1.8.27",
         f"-ProfileCopyright={drone_make}",
-        # Date stamps — write every variant the readers might consult.
+        # Date stamps — write every variant readers might consult.
         f"-CreateDate={file_exif_dt}",
         f"-ModifyDate={file_exif_dt}",
         f"-DateTimeOriginal={file_exif_dt}",
         f"-FileCreateDate={file_exif_dt}",
         f"-FileModifyDate={file_exif_dt}",
-        # Re-seed minimal XMP after the All-wipe above.
+        # Re-seed minimal XMP date entries (after wipe / after rebuild's
+        # -all= which doesn't preserve XMP either).
         f"-XMP:CreateDate={file_exif_dt}",
         f"-XMP:ModifyDate={file_exif_dt}",
         f"-XMP:DateTimeOriginal={file_exif_dt}",

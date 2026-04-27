@@ -735,7 +735,7 @@ tools:
     ▼ Phase J: CRM + 專案管理 + 帳務 (✅ 核心完成)
     │   → 64 API / 11 DB 表 / 6 Tab + 5 子視圖 + 手機版 RWD + Inline 編輯
     │
-現在 (v1.10.89) ← 你在這裡
+現在 (v1.10.90) ← 你在這裡
     │
     ▼ Phase M: 對外官方網站 (🚀 進行中 2026-04-20 ~ 07-01)
     │   → originsun-studio.com + CF Tunnel + Astro + 9 子視圖管理 Tab
@@ -773,6 +773,7 @@ tools:
 
 | 版本 | 日期 | 重點 |
 |------|------|------|
+| v1.10.90 | 2026-04-27 | **drone_meta JPG 完美偽裝（修 MakerNoteUnknownText: DJI 漏網之魚）**：v1.10.89 後發現 JPG 處理後 ExifIFD 仍殘留 4 byte `MakerNoteUnknownText: DJI` — 是 exiftool 在 wipe MakerNotes 後從 IFD entry 的 inline 4-byte 值 (`44 4a 49 00`) 推回的「DJI」字串，標準 `-MakerNoteUnknownText=` 改不掉（permanent flag），byte 替換還會反讓 exiftool 重新挖出整段 30+KB DJI 私有 binary。改用 rebuild 法：`-all=` + `-tagsfromfile @ -EXIF:all -GPS:all --MakerNotes --(身分欄位)` 一次清光重建，零 DJI 痕跡。代價：DJI MPF secondary embedded preview (~1MB) 不保留（多數 viewer 不依賴）。實測 grep DJI/Hasselblad/Mavic/L2D/SN 命中數從 1 → 0、validate warning 從 10 → 0、size 17MB → 15.9MB。DNG 路徑不動（rebuild 會破 SubIFD raw decoding，且單 pass 已無漏網）。 |
 | v1.10.89 | 2026-04-27 | **drone_meta 支援空拍照片（DJI→Autel 偽裝 Level 1+2 全做）**：影片流程平行擴充到 `.dng/.jpg/.jpeg/.arw/.cr2/.cr3/.nef/.raf/.orf/.rw2/.tif/.tiff` 12 種圖檔副檔名。輸出檔保留原副檔名大寫（`MAX_0001.DNG / MAX_0001.JPG`）。worker 跳過 ffmpeg/DJI 字幕/Autel SRT，圖片走 `shutil.copy2` + exiftool 一條路。**Level 1（識別覆寫）**：Make/Model/UniqueCameraModel/LocalizedCameraModel/LensMake/LensModel/Software/ProfileCopyright + 8 個時間欄位（CreateDate/ModifyDate/DateTimeOriginal/FileCreate/FileModify + XMP 三變體）。**Level 2（DJI 痕跡清光）**：`-XMP:All=`（清掉 GimbalYaw/FlightYaw/ProductName=DJIMavic3 等飛行 metadata）+ `-MakerNotes:All=`（清掉 30+KB DJI 私有 binary）+ `-IFD0:NoiseProfile=`（permanent 旗標需強制 IFD0 prefix）+ ColorMatrix1/2/CalibrationIlluminant1/2/Profile* 7 項/OpcodeList1-3/SerialNumber/CameraSerialNumber/LensSerialNumber/LensInfo/ImageDescription/XPComment/XPKeywords。**保留 sensor-essential**：DNGVersion/BlackLevel/WhiteLevel/AsShotNeutral/CFAPattern/LinearizationTable（不留 raw 仍可開）。watcher `_VIDEO_EXTS` → `_MEDIA_EXTS`、skip 檢查改吃所有 MAX_* 副檔名、`_probe_creation_time` 為圖檔走 exiftool 撈 `DateTimeOriginal/CreateDate`（ffprobe 對 DNG raw 失靈）。concat 自動跳過圖檔、advanced_clips 對齊用 `video_settings` 過濾。實測 DJI_0923.DNG 偽裝後 exiftool `-validate` 通過、JPG 警告 13→10（清掉 DJI bad MakerNotes 反而更乾淨）。 |
 | v1.10.88 | 2026-04-27 | **空拍排程時間戳記修復**：drone_watcher 排程觸發時，輸出檔的 8 個時間欄位（`CreateDate / ModifyDate / TrackCreate/Modify / MediaCreate/Modify / FileCreate/Modify` + MOV `creation_time`）被一律寫成「掃描那一刻」的時間（`start_ts = datetime.now()`），而非來源檔的拍攝時間。修法：`core/drone_watcher.py` 加 `_probe_creation_time()` helper，優先 ffprobe 撈 `format_tags:creation_time`（UTC→ 本地 naive ISO），失敗 fallback `os.path.getmtime`，再 fallback 才用 `start_ts`。掃描迴圈每支影片帶 `date_time_override`，全域 `date_time` 改用第一支偵測到的時間。`history` 中的 `ts` 仍為掃描時間（正確，那是 run record）。 |
 | v1.10.87 | 2026-04-27 | **api_crm.py 加 `from __future__ import annotations`**：防禦性修復。原本 `routers/api_crm.py:4015` function signature 直接用 `CrmProjectShowcase` 做 type hint，但該 class 在 `try/except ImportError` 內，沒裝 sqlalchemy 的 agent 會 NameError → router 載入失敗 → CRM 全 404。實際在公用-器材 (192.168.1.5) 踩到，同 session 已手動 `pip install sqlalchemy[asyncio] asyncpg` 救了。本版改用 PEP 563 lazy annotation 一勞永逸 — 未來缺 sqlalchemy 的 agent 也能載入 router（runtime 讀 DB 仍由 `_require_db()` 擋下）。 |
