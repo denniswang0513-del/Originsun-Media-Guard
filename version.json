@@ -1,5 +1,5 @@
 {
-  "version": "1.10.84",
-  "build_date": "2026-04-26",
-  "notes": "登入流程優化：first paint ~370ms → ~50ms（7x）。樂觀 auth 快取 + 14 tab Promise.all 並行 + fetch/import 並行 + dedup helpers + 修登出 race。Finance 角色補加 backup/drone_meta/website_admin 權限"
+  "version": "1.10.85",
+  "build_date": "2026-04-27",
+  "notes": "CRM agent 404 hotfix（Phase M-W top-level import services.website 讓代理機 CRM 全 404，4 天 bug，lazy import 修復）+ 專案管理 cell-by-cell auto-save（拿掉 ✎ 編輯 modal，所有欄位點擊即可編輯，1 秒 debounce）+ snapshot-then-clear race fix"
 }

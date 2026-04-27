@@ -735,7 +735,7 @@ tools:
     ▼ Phase J: CRM + 專案管理 + 帳務 (✅ 核心完成)
     │   → 64 API / 11 DB 表 / 6 Tab + 5 子視圖 + 手機版 RWD + Inline 編輯
     │
-現在 (v1.10.84) ← 你在這裡
+現在 (v1.10.85) ← 你在這裡
     │
     ▼ Phase M: 對外官方網站 (🚀 進行中 2026-04-20 ~ 07-01)
     │   → originsun-studio.com + CF Tunnel + Astro + 9 子視圖管理 Tab
@@ -773,6 +773,7 @@ tools:
 
 | 版本 | 日期 | 重點 |
 |------|------|------|
+| v1.10.85 | 2026-04-26 | **CRM agent 端 404 hotfix + 專案管理 cell-by-cell auto-save**：(1) **致命 hotfix** — Phase M-W (a7eb47d) 在 `routers/api_crm.py` 加了 module top-level 的 `from services.website.notion_service import _extract_youtube_id`，但 `services/` 不在 OTA AGENT_DIRS（NAS 部署目錄不打包），導致 v1.10.81 ~ v1.10.84 共 4 天所有代理機 import 失敗 → CRM router 沒註冊 → 所有 `/api/v1/crm/*` 全部 404。同事用任何代理機操作 CRM 都讀不到資料。修法：lazy import 移進 `_sync_showcase_to_public` 函式內。(2) **CRM 專案管理 cell-by-cell auto-save** — 拿掉 ✎ 編輯 modal、所有欄位點擊即可編輯、1 秒 debounce auto-save、PM popover、共用 `pickFolderPath` helper、deferred render 避免按鈕被銷毀的 race；snapshot-then-clear pattern 防 in-flight PUT 期間新編輯遺失；`_loadFinancialSummary` 不再清 dirty buffer 防 reload 蓋掉 pending 編輯；`_costCheckUnsaved` PUT 失敗時不執行導航 callback；抽 `_allDirtyCount` / `_clearAllDirty` helper 5 處去重；`searchableSelect` 暴露 `_syncSsValue` 修「→ 複製預估到結算」人員顯示 bug |
 | v1.10.84 | 2026-04-25 | **登入流程優化 — first paint ~370ms → ~50ms（7x）**：(1) auth-state.js 樂觀 auth 快取 — localStorage 存 auth_user，模組載入時同步 hydrate window 狀態，`_authReady` 立即 resolve，loadTabs 不再等 /auth/me；100ms 後背景 revalidate，僅在 modules / access_level 真的變動時 location.reload()，網路斷線視為信任 cache（離線可用）。(2) app.js loadTabs 全 14 個 tab 一次 Promise.all（原本 9 串行 + 4 並行 + 1 串行）。(3) `_loadTab` 內部 `fetch(html)` 跟 `import(js)` 並行（兩者沒依賴），每 tab 省 ~1 RTT。(4) `TAB_LOADERS` 移到 tab-config.js 跟 `TAB_MAP` 同檔，sectionId 由 `TAB_MAP[key]` 統一查表。Simplify pass 順帶：修登出 race（revalidate setTimeout 加 token 守衛）+ 抽 `_fetchMe()` / `_adoptUser()` helpers + `STORAGE_KEYS` 常數消 8 處 magic string。Finance 角色補加 backup / drone_meta / website_admin 權限 |
 | v1.10.83 | 2026-04-25 | **轉檔/串帶 hotfix + Phase M 持續推進**：(1) DJI Mavic 3+ 轉檔修復 — `-map 0:v` 把 attached_pic mjpeg 縮圖一併選進來，prores_ks 在 mov 容器寫不出 codec tag 導致 8/8 檔失敗，改 `-map 0:v:0`；空拍寫入 worker 同根因同 fix。(2) ffmpeg stderr 黑洞修復 — 抽 `_spawn_with_stderr_tail()` + `_log_stderr_tail()` helper，失敗時自動印最後 12 行錯誤；串帶批次預合併也改用 helper（順帶得益）。(3) `_self_heal_scheduled_task` 認 OriginsunBoot 任務（不只 OriginsunAgent），救援 Session 0 環境讓 picker 對話框不再隱形。(4) Regression test 鎖死 `-map 0:v:0` / `-map 0:a:0?` / `stderr=PIPE` 三條 invariant。(5) Phase M：M-W 官網管理 Tab 作品新增/編輯（與 CRM 完稿共用資料）、M-E-8 Notion-as-CMS 後端骨架、M-D Cloudflare Tunnel 同源修復 |
 | v1.10.82 | 2026-04-23 | **Phase J-5 成本子表完整出貨**：每個 CRM 專案可建多張子表（拍攝日/子專案），每張子表獨立管「預算 + 成本估算 + 雜支 + 公開雜支登記連結」。後端 DB 新表 `crm_project_cost_groups` + cost_lines/expenses 加 `cost_group_id` + startup migration；10 個新/改 API 端點（CRUD + 跨組彙總 + 4 個 `/public/cost-groups/*`）。前端新模組 `crm-projects-cost-groups.js`（切換卡 + 新增/編輯/刪除/複製 Modal + state-aware 分享按鈕）+ 子表層級儀表板整併到 chip；行政雜支列支援 inline 編輯（類別/細項/金額/請款人）+ 新 `PATCH /project-expenses/{id}` 端點 + 並發 save；新 `/group-expense.html` 公開頁面（手機 RWD + 拍照/相簿選擇 + 送出後表單重置 + 捲到頂）。20 commits（含 4 輪 /simplify 清理 23 項發現） |
