@@ -88,14 +88,19 @@ export function _avatar(username, size = 22) {
     return renderAvatar(username, state.users, size);
 }
 
-function _populateSelect(elementId, placeholder) {
+function _populateSelect(elementId, placeholder, currentValue = '') {
     // AM dropdown — pulls from 人力資源 (crm_staff), not system users.
+    // Wrapped with searchableSelect for type-to-filter (same UX as 客戶).
     const sel = document.getElementById(elementId);
     if (!sel) return;
     const opts = (state.staffList || []).map(s =>
-        `<option value="${_esc(s.name)}">${_esc(s.name)}${s.role ? ` (${_esc(s.role)})` : ''}</option>`
+        `<option value="${_esc(s.name)}"${s.name === currentValue ? ' selected' : ''}>${_esc(s.name)}${s.role ? ` (${_esc(s.role)})` : ''}</option>`
     ).join('');
     sel.innerHTML = `<option value="">${placeholder}</option>${opts}`;
+    searchableSelect(sel, { placeholder: '搜尋人員...' });
+    // Refresh the visible search-input on modal reopen (searchableSelect
+    // no-ops on already-wrapped selects so the input is otherwise stale).
+    sel._syncSsValue?.();
 }
 
 function _populateClientFilter() {
@@ -108,11 +113,13 @@ function _populateClientDropdown(elementId, selectedId) {
     sel.innerHTML = `<option value="">— 選擇客戶 —</option>` +
         state.clients.map(c => `<option value="${c.id}"${c.id === selectedId ? ' selected' : ''}>${_esc(c.short_name)}</option>`).join('');
     searchableSelect(sel, { placeholder: '搜尋客戶...' });
+    sel._syncSsValue?.();
 }
 
 function _populatePmCheckboxes(selected = []) {
     // PM is a single-select — DB column is still a JSON array, so we
     // pre-select the first element if present and store back as `[name]`.
+    // Wrapped with searchableSelect for type-to-filter (same as AM).
     const sel = document.getElementById('proj-f-pm_usernames');
     if (!sel) return;
     const cur = Array.isArray(selected) && selected.length > 0 ? selected[0] : '';
@@ -120,6 +127,8 @@ function _populatePmCheckboxes(selected = []) {
         (state.staffList || []).map(s =>
             `<option value="${_esc(s.name)}"${s.name === cur ? ' selected' : ''}>${_esc(s.name)}${s.role ? ` (${_esc(s.role)})` : ''}</option>`
         ).join('');
+    searchableSelect(sel, { placeholder: '搜尋人員...' });
+    sel._syncSsValue?.();
 }
 
 function _getSelectedPms() {
@@ -262,7 +271,7 @@ export function openModal(project = null) {
     errEl.style.display = 'none';
 
     _populateClientDropdown('proj-f-client_id', project ? project.client_id : '');
-    _populateSelect('proj-f-am_username', '— 未指派 —');
+    _populateSelect('proj-f-am_username', '— 未指派 —', project?.am_username || '');
     _populatePmCheckboxes(project ? (project.pm_usernames || []) : []);
 
     const dateFields = ['shoot_date', 'start_date', 'completion_date'];

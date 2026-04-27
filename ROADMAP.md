@@ -735,7 +735,7 @@ tools:
     ▼ Phase J: CRM + 專案管理 + 帳務 (✅ 核心完成)
     │   → 64 API / 11 DB 表 / 6 Tab + 5 子視圖 + 手機版 RWD + Inline 編輯
     │
-現在 (v1.10.100) ← 你在這裡
+現在 (v1.10.101) ← 你在這裡
     │
     ▼ Phase M: 對外官方網站 (🚀 進行中 2026-04-20 ~ 07-01)
     │   → originsun-studio.com + CF Tunnel + Astro + 9 子視圖管理 Tab
@@ -773,6 +773,7 @@ tools:
 
 | 版本 | 日期 | 重點 |
 |------|------|------|
+| v1.10.101 | 2026-04-28 | **CRM 專案 AM/PM 加 searchable dropdown（同客戶欄）+ 修 modal reopen 顯示舊值 bug**：AM/PM 套用既有的 `searchableSelect` widget — 點擊就跳搜尋框 + 過濾面板，跟新增專案的「客戶」欄一樣的 UX。三個地方加 wrapping：(1) modal `_populateSelect`（AM）、(2) `_populatePmCheckboxes`（PM）、(3) detail panel cell-by-cell `_projEdit` 的 select 分支。順手修 modal reopen 時搜尋輸入框顯示前一個專案值的 stale-display bug：`searchableSelect` 對已包裝的 select 會 no-op，導致 innerHTML 重建後 visible input 沒同步；3 個 populate 函式都加 `sel._syncSsValue?.()` 強制刷新，並把 currentValue 透過參數傳進 `_populateSelect`（之前 AM 沒傳，每次都從第一個 option 開始）。`_projEdit` 內加 `_committed` 旗標防止「pick → change → commit + 同時 blur → 二次 commit」競爭，順帶為 select 分支加 Escape 取消邏輯。 |
 | v1.10.100 | 2026-04-28 | **CRM 專案 PM 改單選下拉（DB 仍是 JSON array）**：原本 PM 是多選 checkbox（detail panel popover + modal checkbox-list），改成單選 dropdown。**DB 不動** — `pm_usernames` 欄位仍是 `JSONB` array，前端塞進 `[name]` (1 元素) 或 `[]` (空)，backend 透明處理、舊資料不丟、不需 migration。實作方法：`_buildEditFields` 加 `listWrap: true` flag 表示「UI 單選但 DB 是 list」，`_projEdit` commit 時包進 `val ? [val] : []`、edit 時取 `rawOrig[0]` 還原成單選；變動偵測用 `JSON.stringify` 比較整個 array。3 處同步：(1) detail panel cell-by-cell（PM cell `data-field="pm_usernames"` + `_projEdit` handler，移除 `_projEditPm` popover 約 50 行）、(2) modal `<div class="checkbox-list">` → `<select>`、(3) `_populatePmCheckboxes` / `_getSelectedPms` 同步切單選邏輯。實測 PUT `["王士源"]` / `[]` 都 200 + 持久化正常。 |
 | v1.10.99 | 2026-04-28 | **CRM 專案 AM/PM 改從人力資源拉**：原本 AM 下拉 + PM 多選都 from `state.users`（系統登入帳號 admin/denniswang0513/OriginsunFinance），改成 from `state.staffList`（crm_staff 人力資源表，顯示「姓名 (角色)」）。共 5 處同步：(1) 詳情面板 cell-by-cell 編輯 `_buildEditFields()` 抽 `_staffOptions(includePlaceholder)` helper、(2) 詳情面板 PM 多選 popover (`_projEditPm`)、(3) 新增/編輯 modal AM select (`_populateSelect`)、(4) modal PM checkboxes (`_populatePmCheckboxes`)、(5) 列表頁頂部「全部 AM」filter（共用 `_populateSelect`）。儲存格式：staff.name 字串塞進 `am_username` / `pm_usernames` 欄位（DB column 是泛用 String，名字只是歷史命名）。順手把已不用的 `populateUserSelect` import 從 crm-projects-core.js 拿掉。**轉移期注意**：legacy 資料儲存的是系統 username（denniswang0513 等），新 dropdown 不會 match 既有值 → 顯示成「未指派」直到使用者重選 staff 名字；原欄位內容不丟、純 UI 顯示行為。 |
 | v1.10.98 | 2026-04-28 | **CRM 專案資訊編輯三聯修**：(1) `window._projEdit` name collision — `crm-projects.js` 的 modal handler `(id) => openModal(p)` 在 `crm-projects-detail.js` 的 cell handler `(cell) => ...` 之後載入，把 cell handler 蓋掉，所有 cell 點擊靜默走 modal handler 但拿到 DOM element 不是 id，find 不到 → 整個 cell-by-cell 編輯系統實際失效。Rename modal handler 成 `_projOpenForm`，kebab menu 改用新名，cell handler 留原 `_projEdit`。(2) PUT `/projects/{id}` 用 `CrmProjectPayload`（`name+client_id` 必填）→ cell auto-save 只送 dirty field 必 422，static error 但前端 catch 沒 surface，使用者看到「已儲存」實際被拒絕。新增 `CrmProjectPatchPayload`（全 Optional） + 改 endpoint 用 `exclude_unset=True`，partial update 真的能進 DB。client_id 變更時保留原本的客戶存在性檢查。(3) UI 在合約資訊列尾巴加「✎ 編輯」按鈕（`_projOpenForm`），給使用者一個明顯的「打開完整表單」入口，不依賴每 cell 都看出可點擊。順帶把 `_buildEditFields` 的 `description` label 從「說明 / 備註」拆成「說明」+ 補上漏掉的 `notes` 欄位（label「備註」），「+ 加備註」cell 終於能用。 |

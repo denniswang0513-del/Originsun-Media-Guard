@@ -8,7 +8,7 @@
 import { state, callbacks } from './crm-projects-state.js';
 import { _badge, _avatar, getProjectTypes } from './crm-projects-core.js';
 import { calcDashboard, remainColor, profitColor, barColor } from './crm-projects-calc.js';
-import { crmFetch as _fetch, esc as _esc, fmtNum, pickFolderPath } from './crm-utils.js';
+import { crmFetch as _fetch, esc as _esc, fmtNum, pickFolderPath, searchableSelect } from './crm-utils.js';
 
 // ── Edit Fields ────────────────────────────────────────────
 
@@ -152,10 +152,11 @@ window._projEdit = function(cell) {
     input.style.cssText += 'min-width:80px;padding:2px 6px;font-size:inherit;width:100%;box-sizing:border-box;';
     cell.innerHTML = '';
     cell.appendChild(input);
-    input.focus();
-    if (input.select) input.select();
 
+    let _committed = false;
     const commit = () => {
+        if (_committed) return;
+        _committed = true;
         let val = input.value;
         if (t === 'number') val = val === '' ? null : parseInt(val);
         if (t === 'date' || t === 'month') val = val || null;
@@ -179,13 +180,38 @@ window._projEdit = function(cell) {
             cell.innerHTML = _projDisplayValue(field, val, fieldDef);
         }
     };
-    input.addEventListener('blur', commit);
-    input.addEventListener('keydown', e => {
-        if (e.key === 'Enter' && t !== 'textarea') { e.preventDefault(); input.blur(); }
-        if (e.key === 'Escape') {
-            cell.innerHTML = _projDisplayValue(field, orig, fieldDef);
+
+    if (t === 'select') {
+        // Type-to-search wrapper (same widget the modal client field uses).
+        // Hides the native select, shows a text input + filtered panel.
+        searchableSelect(input, { placeholder: '搜尋' + (fieldDef.label || '') + '...' });
+        const searchInput = cell.querySelector('.ss-input');
+        if (searchInput) {
+            searchInput.focus();
+            searchInput.select?.();
+            // Click-outside without picking → still commit (no-op if unchanged).
+            searchInput.addEventListener('blur', commit);
+            searchInput.addEventListener('keydown', e => {
+                if (e.key === 'Escape') {
+                    _committed = true;  // suppress the upcoming blur-commit
+                    cell.innerHTML = _projDisplayValue(field, orig, fieldDef);
+                }
+            });
         }
-    });
+        // searchableSelect dispatches `change` on the hidden select on pick.
+        input.addEventListener('change', commit);
+    } else {
+        input.focus();
+        if (input.select) input.select();
+        input.addEventListener('blur', commit);
+        input.addEventListener('keydown', e => {
+            if (e.key === 'Enter' && t !== 'textarea') { e.preventDefault(); input.blur(); }
+            if (e.key === 'Escape') {
+                _committed = true;
+                cell.innerHTML = _projDisplayValue(field, orig, fieldDef);
+            }
+        });
+    }
 };
 
 // Format a project field value for the inline cell display (mirrors what
