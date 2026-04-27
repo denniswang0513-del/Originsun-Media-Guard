@@ -735,7 +735,7 @@ tools:
     ▼ Phase J: CRM + 專案管理 + 帳務 (✅ 核心完成)
     │   → 64 API / 11 DB 表 / 6 Tab + 5 子視圖 + 手機版 RWD + Inline 編輯
     │
-現在 (v1.10.87) ← 你在這裡
+現在 (v1.10.88) ← 你在這裡
     │
     ▼ Phase M: 對外官方網站 (🚀 進行中 2026-04-20 ~ 07-01)
     │   → originsun-studio.com + CF Tunnel + Astro + 9 子視圖管理 Tab
@@ -773,6 +773,7 @@ tools:
 
 | 版本 | 日期 | 重點 |
 |------|------|------|
+| v1.10.88 | 2026-04-27 | **空拍排程時間戳記修復**：drone_watcher 排程觸發時，輸出檔的 8 個時間欄位（`CreateDate / ModifyDate / TrackCreate/Modify / MediaCreate/Modify / FileCreate/Modify` + MOV `creation_time`）被一律寫成「掃描那一刻」的時間（`start_ts = datetime.now()`），而非來源檔的拍攝時間。修法：`core/drone_watcher.py` 加 `_probe_creation_time()` helper，優先 ffprobe 撈 `format_tags:creation_time`（UTC→ 本地 naive ISO），失敗 fallback `os.path.getmtime`，再 fallback 才用 `start_ts`。掃描迴圈每支影片帶 `date_time_override`，全域 `date_time` 改用第一支偵測到的時間。`history` 中的 `ts` 仍為掃描時間（正確，那是 run record）。 |
 | v1.10.87 | 2026-04-27 | **api_crm.py 加 `from __future__ import annotations`**：防禦性修復。原本 `routers/api_crm.py:4015` function signature 直接用 `CrmProjectShowcase` 做 type hint，但該 class 在 `try/except ImportError` 內，沒裝 sqlalchemy 的 agent 會 NameError → router 載入失敗 → CRM 全 404。實際在公用-器材 (192.168.1.5) 踩到，同 session 已手動 `pip install sqlalchemy[asyncio] asyncpg` 救了。本版改用 PEP 563 lazy annotation 一勞永逸 — 未來缺 sqlalchemy 的 agent 也能載入 router（runtime 讀 DB 仍由 `_require_db()` 擋下）。 |
 | v1.10.86 | 2026-04-27 | **強制重發補拉 v1.10.85**：v1.10.85 OTA 在公用-器材 (192.168.1.5) 解壓時 routers/api_crm.py 被 uvicorn 鎖住沒覆蓋成功（version.json 寫了但 .py 還是舊壞版），導致該機 CRM 仍 404。本版號純 metadata bump 強制 update_agent 重抓一次：解壓前 kill port 8000，process 死透才覆蓋 .py，避免鎖定。其他 7 台代理只是換版號，內容無變。 |
 | v1.10.85 | 2026-04-26 | **CRM agent 端 404 hotfix + 專案管理 cell-by-cell auto-save**：(1) **致命 hotfix** — Phase M-W (a7eb47d) 在 `routers/api_crm.py` 加了 module top-level 的 `from services.website.notion_service import _extract_youtube_id`，但 `services/` 不在 OTA AGENT_DIRS（NAS 部署目錄不打包），導致 v1.10.81 ~ v1.10.84 共 4 天所有代理機 import 失敗 → CRM router 沒註冊 → 所有 `/api/v1/crm/*` 全部 404。同事用任何代理機操作 CRM 都讀不到資料。修法：lazy import 移進 `_sync_showcase_to_public` 函式內。(2) **CRM 專案管理 cell-by-cell auto-save** — 拿掉 ✎ 編輯 modal、所有欄位點擊即可編輯、1 秒 debounce auto-save、PM popover、共用 `pickFolderPath` helper、deferred render 避免按鈕被銷毀的 race；snapshot-then-clear pattern 防 in-flight PUT 期間新編輯遺失；`_loadFinancialSummary` 不再清 dirty buffer 防 reload 蓋掉 pending 編輯；`_costCheckUnsaved` PUT 失敗時不執行導航 callback；抽 `_allDirtyCount` / `_clearAllDirty` helper 5 處去重；`searchableSelect` 暴露 `_syncSsValue` 修「→ 複製預估到結算」人員顯示 bug |

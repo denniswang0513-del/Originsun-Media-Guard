@@ -9,6 +9,7 @@
 
 import os
 import json
+import subprocess
 import threading
 from datetime import datetime
 from typing import List, Tuple, Optional
@@ -121,6 +122,45 @@ def append_history(entry: dict) -> None:
         os.replace(tmp, _HISTORY_PATH)
 
 
+# ── 原始時間戳記偵測 ──────────────────────────────────────────
+
+def _probe_creation_time(path: str) -> str:
+    """Return original-source datetime as naive local ISO string.
+
+    Tries ffprobe's `format_tags:creation_time` first (camera-recorded UTC).
+    Falls back to file mtime so we never write the scan-time on a file that
+    happens to have no embedded creation_time.
+
+    Returns '' if both fail. Worker treats empty override as "use global dt".
+    """
+    ffprobe = os.path.join(_BASE_DIR, "ffprobe.exe")
+    HNO = getattr(subprocess, 'CREATE_NO_WINDOW', 0x08000000)
+    if os.path.exists(ffprobe):
+        try:
+            r = subprocess.run(
+                [ffprobe, "-v", "quiet", "-print_format", "json",
+                 "-show_entries", "format_tags=creation_time", path],
+                capture_output=True, text=True, encoding='utf-8',
+                errors='ignore', creationflags=HNO, timeout=5,
+            )
+            ct = (json.loads(r.stdout or "{}")
+                  .get("format", {}).get("tags", {}).get("creation_time", ""))
+            if ct:
+                # ffprobe returns UTC ISO with 'Z'; convert to local naive
+                # to match the manual path's convention (worker parses with
+                # fromisoformat → naive datetime treated as local).
+                d_utc = datetime.fromisoformat(ct.replace("Z", "+00:00"))
+                return d_utc.astimezone().strftime("%Y-%m-%dT%H:%M:%S")
+        except Exception:
+            pass
+    try:
+        return datetime.fromtimestamp(
+            os.path.getmtime(path)
+        ).strftime("%Y-%m-%dT%H:%M:%S")
+    except Exception:
+        return ""
+
+
 # ── 掃描邏輯 ──────────────────────────────────────────────────
 
 def _scan_candidates(source_root: str, dest_root: str) -> List[Tuple[str, List[str]]]:
@@ -208,8 +248,24 @@ def run_watcher_scan(cfg: Optional[dict] = None, trigger: str = "scheduled") -> 
         folder_name = os.path.basename(sub_path)
         output_dir = os.path.join(dest_root, folder_name)
 
-        files = [DroneMetaFileSetting(path=p) for p in videos]
+        # Probe each source file's original creation_time so the scheduled
+        # path writes the *recording* time, not the scan time. Falls back to
+        # mtime; only if everything fails do we leave the override empty
+        # (worker then uses the global date_time below).
+        files = [
+            DroneMetaFileSetting(path=p, date_time_override=_probe_creation_time(p))
+            for p in videos
+        ]
         total_files += len(files)
+
+        # Global date_time is just the worker's last-resort fallback. Use the
+        # first probed time so any file without an override still gets a
+        # source-derived stamp; only if every probe failed do we land on
+        # start_ts (truly the worst case).
+        global_dt = next(
+            (f.date_time_override for f in files if f.date_time_override),
+            start_ts.isoformat(timespec="seconds"),
+        )
 
         concat_dest = ""
         if snapshot.get("do_concat", True):
@@ -220,7 +276,7 @@ def run_watcher_scan(cfg: Optional[dict] = None, trigger: str = "scheduled") -> 
             file_index=int(snapshot.get("file_index", 1) or 1),
             files=files,
             output_dir=output_dir,
-            date_time=start_ts.isoformat(timespec="seconds"),
+            date_time=global_dt,
             drone_make=model_info["drone_make"],
             drone_model=model_info["drone_model"],
             lens_make=model_info["lens_make"],
