@@ -8,7 +8,7 @@
  *   3. 新增 / 編輯 / 刪除 / 複製 4 個 Modal
  *   4. 切換子表時通知 cost.js 重載範圍
  */
-import { crmFetch as _fetch, esc as _esc, fmtNum } from './crm-utils.js';
+import { crmFetch as _fetch, esc as _esc, fmtNum, pickFolderPath } from './crm-utils.js';
 import { state, callbacks } from './crm-projects-state.js';
 import { barColor } from './crm-projects-calc.js';
 
@@ -195,6 +195,13 @@ async function _openEditModal(gid = null) {
                 <label>自訂目標毛利率（%）</label>
                 <input id="cg-f-profit_target_pct" type="number" class="crm-input" placeholder="沿用專案預設" value="${g?.profit_target_pct ?? ''}" min="0" max="100">
               </div>
+              <div class="crm-field crm-field-full">
+                <label>收據資料夾（選填）</label>
+                <div style="display:flex;gap:6px;align-items:center;">
+                  <input id="cg-f-receipt_path" type="text" class="crm-input" placeholder="未設則存到 uploads/receipts/{專案}/{子表}/" value="${_esc(g?.receipt_path || '')}" style="flex:1;">
+                  <button type="button" id="cg-f-receipt_path-pick" class="crm-btn crm-btn-secondary crm-btn-sm" title="瀏覽選擇" style="flex-shrink:0;">📁</button>
+                </div>
+              </div>
             </div>
 
             <div class="cg-alloc-hint" id="cg-alloc-hint"></div>
@@ -212,6 +219,12 @@ async function _openEditModal(gid = null) {
     renderHint();
     ['cg-f-budget_amount', 'cg-f-misc_budget_amount'].forEach(id => {
         document.getElementById(id).addEventListener('input', renderHint);
+    });
+
+    document.getElementById('cg-f-receipt_path-pick').addEventListener('click', async () => {
+        const inputEl = document.getElementById('cg-f-receipt_path');
+        const path = await pickFolderPath(inputEl.value || '');
+        if (path) inputEl.value = path;
     });
 
     document.getElementById('cg-f-name').focus();
@@ -249,6 +262,7 @@ async function _saveEditModal(projectId, gid) {
         budget_amount: _intOrNull('cg-f-budget_amount'),
         misc_budget_amount: _intOrNull('cg-f-misc_budget_amount'),
         profit_target_pct: _intOrNull('cg-f-profit_target_pct'),
+        receipt_path: document.getElementById('cg-f-receipt_path').value.trim() || '',
     };
     const btn = document.getElementById('cg-modal-save');
     btn.disabled = true; btn.textContent = '儲存中...';

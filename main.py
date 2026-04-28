@@ -398,7 +398,25 @@ async def _on_startup():
                         "ALTER TABLE crm_payment_requests ADD COLUMN IF NOT EXISTS is_advance INTEGER DEFAULT 0",
                         "ALTER TABLE crm_payment_requests ADD COLUMN IF NOT EXISTS advance_returned INTEGER DEFAULT 0",
                         "ALTER TABLE crm_cash_entries ADD COLUMN IF NOT EXISTS advance_payment_id VARCHAR(32)",
-                        "ALTER TABLE crm_projects ADD COLUMN IF NOT EXISTS receipt_path VARCHAR(512)",
+                        # receipt_path 從 crm_projects 下放到 crm_project_cost_groups。
+                        # 第一行先確保 cost_groups 有此欄位；接著一次性把舊值搬到
+                        # 該專案 sort_order 最小的子表（且子表還沒設值時）；最後 DROP
+                        # 掉 crm_projects 的舊欄位。三句都 idempotent，跑多次無害。
+                        "ALTER TABLE crm_project_cost_groups ADD COLUMN IF NOT EXISTS receipt_path VARCHAR(512)",
+                        """
+                        UPDATE crm_project_cost_groups cg
+                           SET receipt_path = p.receipt_path
+                          FROM crm_projects p
+                         WHERE cg.project_id = p.id
+                           AND p.receipt_path IS NOT NULL
+                           AND p.receipt_path <> ''
+                           AND (cg.receipt_path IS NULL OR cg.receipt_path = '')
+                           AND cg.sort_order = (
+                               SELECT MIN(sort_order) FROM crm_project_cost_groups
+                                WHERE project_id = p.id
+                           )
+                        """,
+                        "ALTER TABLE crm_projects DROP COLUMN IF EXISTS receipt_path",
                     ]:
                         try:
                             await _sex.execute(_tex(col_sql))

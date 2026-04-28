@@ -39,7 +39,9 @@ function _showModal(title, initialPath, showFiles, mode, destPath) {
 
     const overlay = document.createElement('div');
     overlay.id = 'nas-browser-modal';
-    overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.7);z-index:200;display:flex;align-items:center;justify-content:center;backdrop-filter:blur(2px);';
+    // z-index 2000：壓過 CRM modal (1000) 與 inv-popup (1100)，但低於 toast (9999)。
+    // 必須 ≥ CRM modal 才能在「編輯子表」/「新增專案」等 modal 內當 folder picker 用。
+    overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.7);z-index:2000;display:flex;align-items:center;justify-content:center;backdrop-filter:blur(2px);';
 
     overlay.innerHTML = `
         <div style="background:#1e1e1e;border:1px solid #444;border-radius:8px;width:680px;max-width:95vw;max-height:80vh;display:flex;flex-direction:column;box-shadow:0 8px 32px rgba(0,0,0,0.6);">

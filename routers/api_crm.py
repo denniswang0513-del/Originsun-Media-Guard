@@ -409,7 +409,6 @@ def _to_project_dict(p, client_short_name: str = "") -> dict:
         "amount_receivable": p.amount_receivable,
         "amount_received": p.amount_received,
         "transfer_fee": p.transfer_fee,
-        "receipt_path": p.receipt_path or "",
         "created_at": p.created_at.isoformat() if p.created_at else None,
         "updated_at": p.updated_at.isoformat() if p.updated_at else None,
     }
@@ -2152,9 +2151,15 @@ async def _save_receipt(project_id: str, expense_id: str, file: UploadFile):
         if not exp:
             raise HTTPException(status_code=404, detail="找不到此支出")
 
-        # Determine save path
-        base = proj.receipt_path if proj.receipt_path else os.path.join(
-            os.getcwd(), "uploads", "receipts", proj.name or project_id)
+        # 路徑優先序：cost_group.receipt_path → uploads/receipts/{project_name}/{group_name}/
+        # 沒 cost_group 關聯時 fallback 到專案層級 uploads 子目錄。
+        cg = await session.get(CrmProjectCostGroup, exp.cost_group_id) if exp.cost_group_id else None
+        if cg and cg.receipt_path:
+            base = cg.receipt_path
+        else:
+            sub = (cg.name if cg and cg.name else "main")
+            base = os.path.join(os.getcwd(), "uploads", "receipts",
+                                proj.name or project_id, sub)
         os.makedirs(base, exist_ok=True)
 
         # Build filename: date_category_subitem_payee_id.ext
@@ -2185,7 +2190,7 @@ async def _save_receipt(project_id: str, expense_id: str, file: UploadFile):
 
 @router.get("/projects/{project_id}/receipts")
 async def list_project_receipts(project_id: str, request: Request):
-    """列出專案收據資料夾內的所有檔案。"""
+    """列出專案下所有子表的收據檔（依 cost_group 聚合）。"""
     _check_auth(request)
     _require_db()
     factory = await _get_factory()
@@ -2193,8 +2198,44 @@ async def list_project_receipts(project_id: str, request: Request):
         proj = await session.get(CrmProject, project_id)
         if not proj:
             raise HTTPException(status_code=404, detail="找不到此專案")
-    base = proj.receipt_path if proj.receipt_path else os.path.join(
-        os.getcwd(), "uploads", "receipts", proj.name or project_id)
+        groups = (await session.execute(
+            select(CrmProjectCostGroup)
+            .where(CrmProjectCostGroup.project_id == project_id)
+            .order_by(CrmProjectCostGroup.sort_order, CrmProjectCostGroup.created_at)
+        )).scalars().all()
+
+    result_groups = []
+    for g in groups:
+        base = g.receipt_path if g.receipt_path else os.path.join(
+            os.getcwd(), "uploads", "receipts", proj.name or project_id, g.name or "main")
+        files = []
+        if os.path.isdir(base):
+            for fn in sorted(os.listdir(base)):
+                fp = os.path.join(base, fn)
+                if os.path.isfile(fp):
+                    files.append({"filename": fn, "path": fp, "size": os.path.getsize(fp)})
+        result_groups.append({
+            "cost_group_id": g.id, "cost_group_name": g.name,
+            "path": base, "receipts": files,
+        })
+    return {"groups": result_groups}
+
+
+@router.get("/cost-groups/{group_id}/receipts")
+async def list_cost_group_receipts(group_id: str, request: Request):
+    """列出單一子表收據資料夾內的所有檔案。"""
+    _check_auth(request)
+    _require_db()
+    factory = await _get_factory()
+    async with factory() as session:
+        g = await session.get(CrmProjectCostGroup, group_id)
+        if not g:
+            raise HTTPException(status_code=404, detail="找不到此子表")
+        proj = await session.get(CrmProject, g.project_id)
+
+    base = g.receipt_path if g.receipt_path else os.path.join(
+        os.getcwd(), "uploads", "receipts",
+        (proj.name if proj else g.project_id), g.name or "main")
     if not os.path.isdir(base):
         return {"receipts": [], "path": base}
     files = []
@@ -2207,18 +2248,19 @@ async def list_project_receipts(project_id: str, request: Request):
 
 @router.get("/receipt-file")
 async def serve_receipt(path: str = Query(""), request: Request = None):
-    """提供收據檔案下載/檢視（限定 uploads/ 或專案 receipt_path）。"""
+    """提供收據檔案下載/檢視（限定 uploads/ 或子表 receipt_path）。"""
     if not path or not os.path.isfile(path):
         raise HTTPException(status_code=404, detail="檔案不存在")
     abs_path = os.path.abspath(path)
     uploads_dir = os.path.abspath(os.path.join(os.getcwd(), "uploads"))
     if not abs_path.startswith(uploads_dir):
-        # 檢查是否在某個專案的 receipt_path 內
+        # 檢查是否在某個子表的 receipt_path 內
         _require_db()
         factory = await _get_factory()
         async with factory() as session:
             rows = (await session.execute(
-                select(CrmProject.receipt_path).where(CrmProject.receipt_path.isnot(None))
+                select(CrmProjectCostGroup.receipt_path)
+                .where(CrmProjectCostGroup.receipt_path.isnot(None))
             )).scalars().all()
         if not any(rp and abs_path.startswith(os.path.abspath(rp)) for rp in rows):
             raise HTTPException(status_code=403, detail="無權存取此路徑")
@@ -2897,6 +2939,7 @@ def _cost_group_to_dict(g, summary: Optional[dict] = None) -> dict:
         "budget_amount": g.budget_amount,
         "misc_budget_amount": g.misc_budget_amount,
         "profit_target_pct": g.profit_target_pct,
+        "receipt_path": g.receipt_path or "",
         "total_budget": total_budget if (g.budget_amount is not None or g.misc_budget_amount is not None) else None,
         "created_at": g.created_at.isoformat() if g.created_at else None,
         "updated_at": g.updated_at.isoformat() if g.updated_at else None,
@@ -2979,6 +3022,7 @@ async def create_cost_group(project_id: str, req: CostGroupCreate, request: Requ
             sort_order=req.sort_order,
             budget_amount=req.budget_amount, misc_budget_amount=req.misc_budget_amount,
             profit_target_pct=req.profit_target_pct,
+            receipt_path=(req.receipt_path or None),
         )
         session.add(g)
         await _seed_default_expenses(session, project_id, g.id)
@@ -3005,6 +3049,8 @@ async def update_cost_group(group_id: str, req: CostGroupUpdate, request: Reques
             g.shoot_date = _parse_shoot_date(data["shoot_date"]) if data["shoot_date"] else None
         if "notes" in data:
             g.notes = data["notes"] or None
+        if "receipt_path" in data:
+            g.receipt_path = data["receipt_path"] or None
         for fld in ("sort_order", "budget_amount", "misc_budget_amount", "profit_target_pct"):
             if fld in data:
                 setattr(g, fld, data[fld])
@@ -3064,6 +3110,7 @@ async def duplicate_cost_group(group_id: str, req: CostGroupDuplicate, request: 
             notes=src.notes, sort_order=(max_sort or 0) + 1,
             budget_amount=src.budget_amount, misc_budget_amount=src.misc_budget_amount,
             profit_target_pct=src.profit_target_pct,
+            receipt_path=src.receipt_path,
         )
         session.add(new_g)
         # 複製 cost_lines（結算欄位清空）

@@ -187,7 +187,8 @@ class CrmProject(Base):
     amount_receivable = Column(Integer, nullable=True)                # 應收帳款
     amount_received = Column(Integer, nullable=True)                  # 已收帳款
     transfer_fee = Column(Integer, nullable=True)                     # 帳款匯費
-    receipt_path = Column(String(512), nullable=True)                 # 收據儲存路徑
+    # NOTE: receipt_path 已下放到 crm_project_cost_groups（每張子表獨立資料夾）。
+    # 啟動時 migration 會把舊值搬到該專案 sort_order 最小的子表，再 DROP COLUMN。
 
     # Phase M: 對外官網展示
     # (實體欄位 + 索引由 db/migrations_website.py 建立；這裡的宣告 + __table_args__
@@ -403,6 +404,7 @@ class CrmProjectCostGroup(Base):
     budget_amount = Column(Integer, nullable=True)             # 成本預算（未稅）
     misc_budget_amount = Column(Integer, nullable=True)        # 雜支預算
     profit_target_pct = Column(Integer, nullable=True)         # 可 override 專案預設
+    receipt_path = Column(String(512), nullable=True)          # 此子表收據資料夾（空字串/NULL = 用 fallback）
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now())
 

@@ -59,7 +59,6 @@ function _buildEditFields() {
         {name:'amount_receivable', label:'應收帳款', type:'number'},
         {name:'amount_received', label:'已收帳款', type:'number'},
         {name:'transfer_fee', label:'帳款匯費', type:'number'},
-        {name:'receipt_path', label:'收據資料夾', type:'folder'},
     ];
 }
 
@@ -345,7 +344,6 @@ function renderDetail(project) {
           <div class="pi-det-text">${_editCell('description', project.description ? _esc(project.description) : _placeholder('+ 加說明'))}</div>
           <div class="pi-det-paths">
             <div class="pi-det-path">&#128193; ${_editCell('folder_path', project.folder_path ? _esc(project.folder_path) : _placeholder('+ 加專案資料夾'))} <button class="crm-btn crm-btn-secondary crm-btn-sm" onclick="window._projEditFolder('folder_path')" style="padding:1px 5px;font-size:10px;" title="瀏覽選擇">📁</button>${project.folder_path ? `<button class="crm-btn crm-btn-secondary crm-btn-sm _open-folder-btn" data-folder-path="${_esc(project.folder_path)}" style="padding:1px 5px;font-size:10px;" title="開啟">↗</button>` : ''}</div>
-            <div class="pi-det-path">&#128203; ${_editCell('receipt_path', project.receipt_path ? _esc(project.receipt_path) : _placeholder('+ 加收據資料夾'))} <button class="crm-btn crm-btn-secondary crm-btn-sm" onclick="window._projEditFolder('receipt_path')" style="padding:1px 5px;font-size:10px;" title="瀏覽選擇">📁</button>${project.receipt_path ? `<button class="crm-btn crm-btn-secondary crm-btn-sm _open-folder-btn" data-folder-path="${_esc(project.receipt_path)}" style="padding:1px 5px;font-size:10px;" title="開啟">↗</button>` : ''}</div>
           </div>
           <div class="pi-det-note">${_editCell('notes', project.notes ? _esc(project.notes) : _placeholder('+ 加備註'))}</div>
         </div>

@@ -300,14 +300,25 @@ window._advEditAmount = async function(advanceId, currentAmount) {
 
 window._projBrowseReceipts = async function() {
     if (!state.selectedId) return;
-    var proj = state.projects.find(function(p) { return p.id === state.selectedId; });
-    var receiptPath = proj ? (proj.receipt_path || '') : '';
-    if (typeof window.openNasBrowser === 'function') {
+    // 收據資料夾下放到子表 — 用當前選中的子表 receipt_path
+    var g = state.costGroups.find(function(x) { return x.id === state.selectedGroupId; });
+    var receiptPath = g ? (g.receipt_path || '') : '';
+    if (!receiptPath) {
+        alert('此子表尚未設定收據資料夾。\n請點擊子表上方「⋯」→「✎ 編輯」→ 設定「收據資料夾」。');
+        return;
+    }
+    if (window._isExternalAccess && typeof window.openNasBrowser === 'function') {
         await window.openNasBrowser({
-            title: '收據資料夾',
+            title: '收據資料夾 — ' + (g.name || ''),
             initialPath: receiptPath,
             destPath: receiptPath,
             showFiles: true,
+        });
+    } else {
+        fetch('/api/v1/utils/open_folder', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ path: receiptPath }),
         });
     }
 };

@@ -202,12 +202,19 @@ window._authLogout = function() {
 };
 
 // ─── Shared Login Success Handler ─── //
-export function _onLoginSuccess(d) {
+export async function _onLoginSuccess(d) {
     window._authToken = d.token;
     localStorage.setItem(STORAGE_KEYS.TOKEN, d.token);
     _adoptUser(d);
     _applyModuleTabs();
     document.getElementById('auth-login-modal')?.classList.add('hidden');
+    // _applyModuleTabs only flips visibility — sections gated out of the
+    // boot-time loadTabs() filter (no token → CRM/admin skipped) still
+    // have empty innerHTML. Inject them now or first-login users hit a
+    // blank 專案管理 forever.
+    if (typeof window._ensureTabsLoaded === 'function') {
+        await window._ensureTabsLoaded();
+    }
     if (d.first_login) {
         alert('首次登入，請到系統設定修改密碼。');
     }

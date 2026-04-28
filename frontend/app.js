@@ -37,8 +37,11 @@ if (typeof appendLog === 'undefined') {
         window.currentSocketUrl = window.location.origin;
         let socket = null;
 
-        // Dynamically load tabs
-        async function loadTabs() {
+        // Idempotent — re-running loadTabs() after login skips already-loaded
+        // sections instead of clobbering their state.
+        const _loadedTabs = new Set();
+
+        async function loadTabs({ autoSwitch = true } = {}) {
             try {
                 const _cb = `?t=${Date.now()}`;
 
@@ -62,8 +65,10 @@ if (typeof appendLog === 'undefined') {
                 // parallel — the module doesn't depend on the DOM until initFn
                 // runs, so awaiting them sequentially wastes ~1 RTT per tab.
                 const _loadTab = async (sectionId, htmlPath, jsPath, initFn) => {
+                    if (_loadedTabs.has(sectionId)) return;
                     try {
                         const el = document.getElementById(sectionId);
+                        if (!el) return;
                         const [res, mod] = await Promise.all([
                             fetch(`${htmlPath}${_cb}`),
                             import(`${jsPath}${_cb}`),
@@ -71,6 +76,7 @@ if (typeof appendLog === 'undefined') {
                         if (res.ok) {
                             el.innerHTML = await res.text();
                             if (typeof mod[initFn] === 'function') await mod[initFn]();
+                            _loadedTabs.add(sectionId);
                         }
                     } catch (e) {
                         console.warn(`[${sectionId}] 載入失敗:`, e);
@@ -85,8 +91,10 @@ if (typeof appendLog === 'undefined') {
                         .map(([key, html, js, init]) => _loadTab(TAB_MAP[key], html, js, init))
                 );
 
-                // Auto-switch to first authorized tab
-                if (hasModules) {
+                // Auto-switch to first authorized tab. Skipped on the
+                // post-login re-call so the user isn't yanked away from
+                // whatever tab they were already on.
+                if (autoSwitch && hasModules) {
                     const firstTab = TAB_MAP[modules[0]];
                     if (firstTab) switchTab(firstTab);
                 }
@@ -94,6 +102,10 @@ if (typeof appendLog === 'undefined') {
                 console.error("Error loading tabs:", err);
             }
         }
+
+        // Post-login hook: inject tabs that became authorized but weren't
+        // loaded at boot (no token at boot → filter excluded CRM/admin tabs).
+        window._ensureTabsLoaded = () => loadTabs({ autoSwitch: false });
 
         // Initialize tabs immediately
         loadTabs().then(async () => {

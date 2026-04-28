@@ -352,7 +352,6 @@ class CrmProjectPayload(BaseModel):
     amount_receivable: Optional[int] = None
     amount_received: Optional[int] = None
     transfer_fee: Optional[int] = None
-    receipt_path: str = ""
 
 
 class CrmProjectPatchPayload(CrmProjectPayload):
@@ -538,6 +537,7 @@ class CostGroupCreate(BaseModel):
     budget_amount: Optional[int] = None
     misc_budget_amount: Optional[int] = None
     profit_target_pct: Optional[int] = None
+    receipt_path: Optional[str] = None
 
 
 class CostGroupUpdate(BaseModel):
@@ -548,6 +548,8 @@ class CostGroupUpdate(BaseModel):
     budget_amount: Optional[int] = None
     misc_budget_amount: Optional[int] = None
     profit_target_pct: Optional[int] = None
+    # 空字串視為清空（搭配 model_dump(exclude_none=True) 讓未送的欄位不動）
+    receipt_path: Optional[str] = None
 
 
 class CostGroupDuplicate(BaseModel):
