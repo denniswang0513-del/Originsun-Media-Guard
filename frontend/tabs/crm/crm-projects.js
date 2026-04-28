@@ -18,6 +18,7 @@ import {
     renderList, selectProject, closeDetail,
     openModal, saveProject, deleteProject,
     openImportModal, setCsvFile, doImport,
+    _hydrateProjectsFromCache,
 } from './crm-projects-core.js';
 import { renderDetail, initDetailHandlers } from './crm-projects-detail.js';
 import { _loadFinancialSummary, _showExpenseForm, initCostHandlers } from './crm-projects-cost.js';
@@ -335,6 +336,11 @@ export async function initCrmProjectsTab() {
             if (view === 'quotes') _initQuotesOverview();
         });
     });
+
+    // SWR: paint cached project list immediately so the user sees their
+    // last-known data while the fresh fetch is still in-flight. Coworkers
+    // used to see "找不到專案" briefly and assume nothing was there.
+    _hydrateProjectsFromCache();
 
     // ── Load initial data ──
     await Promise.all([loadClients(), loadUsers(), loadProjects(), loadStaffList(), loadProjectTypes()]);

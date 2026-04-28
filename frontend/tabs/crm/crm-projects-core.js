@@ -150,6 +150,40 @@ function _showModalError(msg) {
 
 // ── Data Loading ────────────────────────────────────────────
 
+// Stale-while-revalidate cache (localStorage). Lets the project list render
+// instantly on tab open from last session's data, while a fresh fetch runs
+// in the background and re-renders when it lands. Coworkers used to see an
+// empty "找不到專案" until the first fetch returned; now they see real data
+// immediately on cached visits.
+const _SWR_KEY = 'crm_projects_swr_v1';
+
+export function _hydrateProjectsFromCache() {
+    try {
+        const cached = JSON.parse(localStorage.getItem(_SWR_KEY) || 'null');
+        if (cached && Array.isArray(cached.projects) && cached.projects.length > 0) {
+            state.projects = cached.projects;
+            renderList();
+            return true;
+        }
+    } catch (_) { /* corrupt cache — ignore */ }
+    return false;
+}
+
+function _writeProjectsCache() {
+    // Only cache the unfiltered view — filtered results would mislead next
+    // boot when filters are reset.
+    if (state.filters.q || state.filters.status || state.filters.client_id || state.filters.am) return;
+    try {
+        localStorage.setItem(_SWR_KEY, JSON.stringify({
+            projects: state.projects, ts: Date.now(),
+        }));
+    } catch (_) { /* quota / private mode — best-effort */ }
+}
+
+export function _clearProjectsCache() {
+    try { localStorage.removeItem(_SWR_KEY); } catch (_) {}
+}
+
 export async function loadProjects() {
     const params = new URLSearchParams();
     if (state.filters.q)         params.set('q', state.filters.q);
@@ -160,8 +194,11 @@ export async function loadProjects() {
     try {
         const data = await _fetch(`/projects?${params}`);
         state.projects = data.projects || [];
+        state.projectsLoaded = true;
+        _writeProjectsCache();
     } catch (e) {
-        state.projects = [];
+        // Keep cached projects on fetch failure — better than wiping to empty.
+        if (!state.projectsLoaded) state.projects = [];
         _showListError(e.message);
     }
     renderList();
@@ -198,6 +235,10 @@ export function renderList() {
     if (!body) return;
 
     if (state.projects.length === 0) {
+        if (!state.projectsLoaded) {
+            body.innerHTML = `<div class="crm-empty">載入中…</div>`;
+            return;
+        }
         body.innerHTML = `<div class="crm-empty">找不到專案${state.filters.q ? '，請調整搜尋條件' : ''}</div>`;
         return;
     }

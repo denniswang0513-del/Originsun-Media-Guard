@@ -735,7 +735,7 @@ tools:
     ▼ Phase J: CRM + 專案管理 + 帳務 (✅ 核心完成)
     │   → 64 API / 11 DB 表 / 6 Tab + 5 子視圖 + 手機版 RWD + Inline 編輯
     │
-現在 (v1.10.101) ← 你在這裡
+現在 (v1.10.102) ← 你在這裡
     │
     ▼ Phase M: 對外官方網站 (🚀 進行中 2026-04-20 ~ 07-01)
     │   → originsun-studio.com + CF Tunnel + Astro + 9 子視圖管理 Tab
@@ -773,6 +773,7 @@ tools:
 
 | 版本 | 日期 | 重點 |
 |------|------|------|
+| v1.10.102 | 2026-04-28 | **CRM 專案清單 SWR 快取 + 載入中指示**：同事反映「登入後 CRM 沒讀到資料」其實是渲染順序問題 — `initCrmProjectsTab()` 等 5 個 GET 並行完成才有資料，這段空窗 `renderList` 顯示「找不到專案」讓人誤會。兩個修法：(1) **SWR cache** — `loadProjects` 成功後把 unfiltered `state.projects` 寫進 localStorage (`crm_projects_swr_v1`)，下次 tab init 先 `_hydrateProjectsFromCache()` 用 cache 秒渲染、再背景 fetch 新資料覆蓋。fetch 失敗時保留 cache 不洗成空，比之前更穩。(2) **`state.projectsLoaded` 旗標** — 第一次 fetch 完成（成功或失敗）才 flip 成 true，`renderList` 在沒資料且 `!projectsLoaded` 時顯示「載入中…」而非「找不到專案」，使用者馬上知道是還在載而不是真沒資料。logout 時順手清 SWR cache 避免下個登入者看到上一個人的資料。 |
 | v1.10.101 | 2026-04-28 | **CRM 專案 AM/PM 加 searchable dropdown（同客戶欄）+ 修 modal reopen 顯示舊值 bug**：AM/PM 套用既有的 `searchableSelect` widget — 點擊就跳搜尋框 + 過濾面板，跟新增專案的「客戶」欄一樣的 UX。三個地方加 wrapping：(1) modal `_populateSelect`（AM）、(2) `_populatePmCheckboxes`（PM）、(3) detail panel cell-by-cell `_projEdit` 的 select 分支。順手修 modal reopen 時搜尋輸入框顯示前一個專案值的 stale-display bug：`searchableSelect` 對已包裝的 select 會 no-op，導致 innerHTML 重建後 visible input 沒同步；3 個 populate 函式都加 `sel._syncSsValue?.()` 強制刷新，並把 currentValue 透過參數傳進 `_populateSelect`（之前 AM 沒傳，每次都從第一個 option 開始）。`_projEdit` 內加 `_committed` 旗標防止「pick → change → commit + 同時 blur → 二次 commit」競爭，順帶為 select 分支加 Escape 取消邏輯。 |
 | v1.10.100 | 2026-04-28 | **CRM 專案 PM 改單選下拉（DB 仍是 JSON array）**：原本 PM 是多選 checkbox（detail panel popover + modal checkbox-list），改成單選 dropdown。**DB 不動** — `pm_usernames` 欄位仍是 `JSONB` array，前端塞進 `[name]` (1 元素) 或 `[]` (空)，backend 透明處理、舊資料不丟、不需 migration。實作方法：`_buildEditFields` 加 `listWrap: true` flag 表示「UI 單選但 DB 是 list」，`_projEdit` commit 時包進 `val ? [val] : []`、edit 時取 `rawOrig[0]` 還原成單選；變動偵測用 `JSON.stringify` 比較整個 array。3 處同步：(1) detail panel cell-by-cell（PM cell `data-field="pm_usernames"` + `_projEdit` handler，移除 `_projEditPm` popover 約 50 行）、(2) modal `<div class="checkbox-list">` → `<select>`、(3) `_populatePmCheckboxes` / `_getSelectedPms` 同步切單選邏輯。實測 PUT `["王士源"]` / `[]` 都 200 + 持久化正常。 |
 | v1.10.99 | 2026-04-28 | **CRM 專案 AM/PM 改從人力資源拉**：原本 AM 下拉 + PM 多選都 from `state.users`（系統登入帳號 admin/denniswang0513/OriginsunFinance），改成 from `state.staffList`（crm_staff 人力資源表，顯示「姓名 (角色)」）。共 5 處同步：(1) 詳情面板 cell-by-cell 編輯 `_buildEditFields()` 抽 `_staffOptions(includePlaceholder)` helper、(2) 詳情面板 PM 多選 popover (`_projEditPm`)、(3) 新增/編輯 modal AM select (`_populateSelect`)、(4) modal PM checkboxes (`_populatePmCheckboxes`)、(5) 列表頁頂部「全部 AM」filter（共用 `_populateSelect`）。儲存格式：staff.name 字串塞進 `am_username` / `pm_usernames` 欄位（DB column 是泛用 String，名字只是歷史命名）。順手把已不用的 `populateUserSelect` import 從 crm-projects-core.js 拿掉。**轉移期注意**：legacy 資料儲存的是系統 username（denniswang0513 等），新 dropdown 不會 match 既有值 → 顯示成「未指派」直到使用者重選 staff 名字；原欄位內容不丟、純 UI 顯示行為。 |

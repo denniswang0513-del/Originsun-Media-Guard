@@ -188,6 +188,9 @@ window._restartAgent = async function() {
 window._authLogout = function() {
     localStorage.removeItem(STORAGE_KEYS.TOKEN);
     _clearCachedUser();
+    // Wipe per-user SWR caches so the next person to log in on this
+    // browser doesn't briefly see the previous user's data.
+    try { localStorage.removeItem('crm_projects_swr_v1'); } catch (_) {}
     window._authToken = '';
     window._authUser = null;
     window._accessLevel = 0;

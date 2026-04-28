@@ -6,6 +6,11 @@
 // ── Shared State ────────────────────────────────────────────
 export const state = {
     projects: [],
+    projectsLoaded: false,    // false until the first /projects fetch resolves
+                              // (success or error). Lets renderList distinguish
+                              // "still loading" from "really empty" — without
+                              // this users see "找不到專案" during the boot
+                              // window and assume their data is gone.
     clients: [],
     users: [],
     selectedId: null,
