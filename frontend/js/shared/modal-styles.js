@@ -1,4 +1,5 @@
 // ─── Modal Shared Styles & Form Builder (extracted from app.js) ─── //
+import { searchableSelect } from '../../tabs/crm/crm-utils.js';
 
 export function _ensureModalStyles() {
     if (document.getElementById('_formModalStyles')) return;
@@ -75,7 +76,10 @@ export function _createFormModal({ id, title, fields, onSubmit, submitLabel = '�
             const opts = (f.options || []).map(o =>
                 `<option value="${o.value}" ${o.value === f.defaultValue ? 'selected' : ''}>${o.label}</option>`
             ).join('');
-            bodyHtml += `<select data-field="${f.key}" class="_fm-select">${opts}</select>`;
+            // f.searchable=true → 套 searchableSelect 包裝（同 CRM 專案客戶欄）。
+            // data-ss-placeholder 給 init 時讀取 placeholder 文字。
+            const ssAttr = f.searchable ? ` data-ss="1" data-ss-placeholder="${f.placeholder || '搜尋...'}"` : '';
+            bodyHtml += `<select data-field="${f.key}" class="_fm-select"${ssAttr}>${opts}</select>`;
         } else if (f.type === 'checkboxes') {
             if (f.label) bodyHtml += `<label class="_fm-label">${f.label}</label>`;
             bodyHtml += `<div class="_fm-checkgrid">`;
@@ -110,6 +114,12 @@ export function _createFormModal({ id, title, fields, onSubmit, submitLabel = '�
     `;
     overlay.appendChild(modal);
     document.body.appendChild(overlay);
+
+    // 掛上後才能 wrap searchable select（searchableSelect 用 insertBefore，
+    // 需要 select 已在 DOM）。CSS 來自全域載入的 crm.css 的 .ss-* class。
+    modal.querySelectorAll('select[data-ss="1"]').forEach(sel => {
+        searchableSelect(sel, { placeholder: sel.dataset.ssPlaceholder });
+    });
 
     const close = () => { overlay.style.animation = 'none'; overlay.remove(); };
     const errEl = modal.querySelector('[data-error]');

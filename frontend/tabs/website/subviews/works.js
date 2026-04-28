@@ -232,7 +232,11 @@ window._websiteNewWork = async () => {
     try {
         const r = await websiteFetch('/api/website/admin/clients/lookup');
         clients = r?.items || [];
-    } catch { /* 允許無客戶列表，使用者可不選 */ }
+    } catch (e) {
+        // 允許無客戶列表（使用者可不選），但留 console 痕跡 — 否則
+        // 端點 500 了 dropdown 顯示「無結果」，使用者只看得到空選單。
+        console.warn('[website/works] clients/lookup 失敗:', e.message || e);
+    }
 
     window._createFormModal({
         id: 'website-new-work-modal',
@@ -240,7 +244,8 @@ window._websiteNewWork = async () => {
         submitLabel: '建立並開編輯',
         fields: [
             { key: 'name', label: '作品名稱', type: 'text', required: true, autofocus: true },
-            { key: 'client_id', label: '客戶（可選）', type: 'select',
+            { key: 'client_id', label: '客戶（可選）', type: 'select', searchable: true,
+              placeholder: '輸入客戶名稱搜尋…',
               options: [{ value: '', label: '（不指定）' },
                         ...clients.map(c => ({ value: c.id, label: c.name }))] },
             { key: 'year', label: '年份（可選）', type: 'number',

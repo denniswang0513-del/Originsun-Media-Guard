@@ -135,8 +135,8 @@ async def get_work_edit_url(
 async def lookup_clients(session: AsyncSession = Depends(admin_session)):
     """回傳客戶 name-only 列表（新增作品 modal 選客戶用；不含聯絡方式等敏感資料）。"""
     rows = (await session.execute(
-        select(Client.id, Client.short_name, Client.name)
-        .order_by(Client.short_name, Client.name)
+        select(Client.id, Client.short_name, Client.full_name)
+        .order_by(Client.short_name, Client.full_name)
         .limit(500)
     )).all()
     items = [
