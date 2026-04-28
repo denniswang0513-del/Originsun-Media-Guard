@@ -26,4 +26,3 @@ google-api-python-client
 
 # ── Auto-detected by publish ──
 httpx
-
