@@ -37,6 +37,7 @@ async def get_meta(session: AsyncSession) -> dict[str, Any]:
         "email": s.get("company.email", ""),
         "seo_default_title": s.get("seo.default_title", ""),
         "seo_default_description": s.get("seo.default_description", ""),
+        "seo_og_image": s.get("seo.og_image", ""),
         "social": {
             "youtube": s.get("social.youtube", ""),
             "instagram": s.get("social.instagram", ""),

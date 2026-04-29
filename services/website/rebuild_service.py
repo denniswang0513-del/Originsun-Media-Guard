@@ -281,6 +281,31 @@ async def _run_subprocess(
     return proc.returncode, tail
 
 
+async def _read_setting(key: str) -> str:
+    """讀 website_settings 一個 key 的字串值。沒設或 DB 不通 → 空字串。"""
+    try:
+        from db.session import get_session_factory
+        from sqlalchemy import text
+        factory = get_session_factory()
+        if not factory:
+            return ""
+        async with factory() as session:
+            row = (await session.execute(
+                text("SELECT value FROM website_settings WHERE key = :k"),
+                {"k": key},
+            )).first()
+            if not row or row[0] is None:
+                return ""
+            v = row[0]
+            # value 是 JSONB — 字串 key 用 strip quotes，也可能是 dict / number
+            if isinstance(v, str):
+                return v
+            return str(v) if v else ""
+    except Exception as e:
+        logger.warning("[rebuild] _read_setting(%s) failed: %s", key, e)
+        return ""
+
+
 async def _push_dist_to_nas(dist_dir: Path) -> tuple[int, str]:
     """scp -r dist/ 到 NAS。回傳 (returncode, log_tail)。
 
@@ -308,12 +333,18 @@ async def _run_build(website_dir: Path) -> None:
     任一步失敗 → state=error。stdout tail 拼接兩階段方便 debug。
     """
     try:
-        # Astro build 期間 fetch master 自身的 /api/website/*。預設 8001 是規劃中的
-        # NAS website-api container；現階段資料源在 master:8000（[DEV BRIDGE] 設定）。
+        # Astro build env：
+        #   - WEBSITE_API_BASE：build 時 fetch /api/website/*（用 master 自己的）
+        #   - PUBLIC_TURNSTILE_SITE_KEY：Astro 把它注進客戶端 JS（聯絡表單 widget）
+        build_env = {"WEBSITE_API_BASE": "http://localhost:8000"}
+        ts_key = await _read_setting("turnstile.site_key")
+        if ts_key:
+            build_env["PUBLIC_TURNSTILE_SITE_KEY"] = ts_key
+
         rc, build_tail = await _run_subprocess(
             "build", "npm", "run", "build",
             cwd=str(website_dir),
-            extra_env={"WEBSITE_API_BASE": "http://localhost:8000"},
+            extra_env=build_env,
         )
         if rc != 0:
             _REBUILD_STATUS.update({

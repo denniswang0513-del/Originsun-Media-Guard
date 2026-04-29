@@ -1,4 +1,8 @@
-# 開發 / staging 期間：完全拒絕搜尋引擎索引
-# 7/1 正式切換後改為：User-agent: * + Allow: /
+# Staging 期間：完全拒絕搜尋引擎索引
+# 7/1 正式切換時：拿掉 `Disallow: /`、加 `Disallow: /showcase-edit.html`
 User-agent: *
 Disallow: /
+
+# Astro @astrojs/sitemap 自動生成 — 即使現在禁索引也先 reference 好
+# 切換正式時 Google 看到 sitemap-index.xml 就會主動掃
+Sitemap: https://test.originsun-studio.com/sitemap-index.xml

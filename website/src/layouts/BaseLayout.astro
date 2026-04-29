@@ -26,8 +26,16 @@ interface Props {
 const { title, description, meta, noindex = true, schemaData = [], ogImage } = Astro.props;
 
 const fullTitle = title === meta.company_name_zh ? title : `${title} | ${meta.company_name_zh}`;
-const desc = description || meta.seo_default_description;
+// SEO：description 超過 160 字會被 Google 截 → 自己截好避免在中間被切。
+// 取掉換行也避免 meta tag 怪怪的。
+function _truncate(s: string, max = 155): string {
+    const oneLine = s.replace(/\s+/g, " ").trim();
+    return oneLine.length <= max ? oneLine : oneLine.slice(0, max - 1) + "…";
+}
+const desc = _truncate(description || meta.seo_default_description || "");
 const canonical = new URL(Astro.url.pathname, Astro.site || SITE_URL_FALLBACK).toString();
+// 預設 OG image（站台 logo / 公司圖）— 個別頁面沒給時用站台預設
+const finalOgImage = ogImage || meta.seo_og_image || undefined;
 ---
 
 <!doctype html>
@@ -48,13 +56,14 @@ const canonical = new URL(Astro.url.pathname, Astro.site || SITE_URL_FALLBACK).t
         <meta property="og:title" content={fullTitle} />
         <meta property="og:description" content={desc} />
         <meta property="og:url" content={canonical} />
-        {ogImage && <meta property="og:image" content={ogImage} />}
+        <meta property="og:site_name" content={meta.company_name_zh} />
+        {finalOgImage && <meta property="og:image" content={finalOgImage} />}
 
         <!-- Twitter Card -->
         <meta name="twitter:card" content="summary_large_image" />
         <meta name="twitter:title" content={fullTitle} />
         <meta name="twitter:description" content={desc} />
-        {ogImage && <meta name="twitter:image" content={ogImage} />}
+        {finalOgImage && <meta name="twitter:image" content={finalOgImage} />}
 
         {schemaData.map((d) => (
             <script is:inline type="application/ld+json" set:html={JSON.stringify(d)} />

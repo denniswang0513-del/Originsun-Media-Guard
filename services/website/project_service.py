@@ -40,9 +40,15 @@ async def _categories_for_projects(
     return out
 
 
+def _slug_or_fallback(p: CrmProject) -> str:
+    """slug 沒設時用 project id 前 8 字元 fallback。
+    避免 '/works/' 空連結讓使用者點不進去；admin 自己填 slug 後立即生效。"""
+    return (p.public_slug or "").strip() or (p.id or "")[:8]
+
+
 def _to_public_dict(p: CrmProject, categories: Optional[list[str]] = None) -> dict:
     return {
-        "slug": p.public_slug or "",
+        "slug": _slug_or_fallback(p),
         "title": p.public_title or p.name,
         "client": p.public_client,
         "youtube_id": p.public_youtube_id,
@@ -97,11 +103,19 @@ async def list_public_projects(
 
 
 async def get_public_project_by_slug(session: AsyncSession, slug: str) -> Optional[dict]:
-    """單一公開作品詳情。"""
+    """單一公開作品詳情。slug 對得上 public_slug 直接拿；對不上就 fallback 到
+    用 id 前 8 字元當 slug 找（搭配 _slug_or_fallback）。"""
     stmt = select(CrmProject).where(
         and_(CrmProject.public.is_(True), CrmProject.public_slug == slug)
     )
     project = (await session.execute(stmt)).scalar_one_or_none()
+    if not project and len(slug) == 8:
+        # fallback：把 slug 當 project id 前綴找
+        from sqlalchemy import func as _fn
+        stmt = select(CrmProject).where(
+            and_(CrmProject.public.is_(True), _fn.substring(CrmProject.id, 1, 8) == slug)
+        )
+        project = (await session.execute(stmt)).scalar_one_or_none()
     if not project:
         return None
 

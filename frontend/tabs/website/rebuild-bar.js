@@ -1,17 +1,18 @@
 /**
- * rebuild-bar.js — 對外網站 rebuild 狀態列（網站 Tab 頂部，跨 subview 共用）
+ * rebuild-bar.js — 對外網站 rebuild 狀態 widget（網站 Tab 左側欄底部）
  *
  * 顯示：
- *   - 上次發布時間（相對 / 絕對切換）
- *   - 待發布變動數
- *   - 自動 rebuild 倒數（debounce 期間）
  *   - state badge（idle / running / error）
- *   - 立即重建按鈕
+ *   - 上次發布時間（相對）
+ *   - 待發布變動數 / 自動 rebuild 倒數
+ *   - 立即發布按鈕
  *
  * 機制：
  *   - 進 Tab 時 init 一次，啟 polling /api/website/admin/rebuild/status
  *   - polling 間隔依 state 動態調整：running/debounce 5s、idle/success 30s
  *   - 多人協作 debouncer 在 server 端，前端純顯示
+ *
+ * 版面：垂直緊湊（適合 200px 寬側邊欄），跟既有 API/狀態 區塊風格一致。
  */
 import { websiteFetch, esc, fmtRelative, toastOk, toastErr } from './website-utils.js';
 
@@ -19,20 +20,17 @@ const POLL_INTERVAL_FAST = 5000;   // running / debounce 倒數中
 const POLL_INTERVAL_SLOW = 30000;  // idle
 
 let _poll = null;
-let _state = null;  // 最後一次 status 回應
 
 export function initRebuildBar(host) {
     if (!host) return;
     host.id = 'website-rebuild-bar';
-    host.style.cssText = 'padding:10px 14px;background:#222;border-bottom:1px solid #3a3a3a;font-size:12px;color:#ccc;display:flex;align-items:center;gap:14px;flex-wrap:wrap;';
-    host.innerHTML = `<span style="color:#888;">對外網站發布狀態：載入中…</span>`;
+    host.style.cssText = 'padding:12px 16px;border-top:1px solid #2a2a2a;font-size:11px;color:#999;line-height:1.6;';
+    host.innerHTML = `<div style="color:#666;">對外網站發布狀態：載入中…</div>`;
     _refresh(host);
-    _scheduleNext(host, POLL_INTERVAL_FAST);
 }
 
 export function destroyRebuildBar() {
     if (_poll) { clearTimeout(_poll); _poll = null; }
-    _state = null;
 }
 
 function _scheduleNext(host, ms) {
@@ -43,55 +41,54 @@ function _scheduleNext(host, ms) {
 async function _refresh(host) {
     try {
         const s = await websiteFetch('/api/website/admin/rebuild/status');
-        _state = s;
-        host.innerHTML = _renderBar(s);
+        host.innerHTML = _renderSidebar(s);
         _bindActions(host);
         const fast = (s.state === 'running') || (s.auto_rebuild_fires_at);
         _scheduleNext(host, fast ? POLL_INTERVAL_FAST : POLL_INTERVAL_SLOW);
     } catch (e) {
-        host.innerHTML = `<span style="color:#f87171;">⚠ rebuild 狀態查詢失敗：${esc(e.message || e)}</span>`;
+        host.innerHTML = `<div style="color:#f87171;font-size:11px;">⚠ 發布狀態查詢失敗</div>
+            <div style="color:#666;font-size:10px;margin-top:2px;">${esc(e.message || e)}</div>`;
         _scheduleNext(host, POLL_INTERVAL_SLOW);
     }
 }
 
-function _renderBar(s) {
+function _renderSidebar(s) {
     const stateLabel = {
-        idle: { txt: '✓ 已同步', color: '#10b981' },
-        running: { txt: '⟳ 發布中…', color: '#3b82f6' },
-        success: { txt: '✓ 已發布', color: '#10b981' },
-        error: { txt: '✗ 發布失敗', color: '#ef4444' },
+        idle: { txt: '✓ 已同步', color: '#4ade80' },
+        running: { txt: '⟳ 發布中…', color: '#60a5fa' },
+        success: { txt: '✓ 已發布', color: '#4ade80' },
+        error: { txt: '✗ 發布失敗', color: '#f87171' },
     }[s.state || 'idle'] || { txt: s.state, color: '#888' };
 
     const last = s.last_success_at
-        ? `上次發布：${fmtRelative(new Date(s.last_success_at * 1000).toISOString())}`
+        ? fmtRelative(new Date(s.last_success_at * 1000).toISOString())
         : '尚未發布過';
 
-    const pending = (s.pending_count || 0) > 0
-        ? `<span style="color:#f59e0b;font-weight:600;">${s.pending_count} 筆未發布變動</span>`
-        : `<span style="color:#666;">無待發布變動</span>`;
+    const pendingLine = (s.pending_count || 0) > 0
+        ? `<div style="color:#f59e0b;">📝 ${s.pending_count} 筆未發布</div>`
+        : `<div style="color:#666;">無待發布變動</div>`;
 
-    let countdown = '';
+    let countdownLine = '';
     if (s.auto_rebuild_fires_at && s.state !== 'running') {
         const sec = Math.max(0, Math.round(s.auto_rebuild_fires_at - Date.now() / 1000));
-        countdown = `<span style="color:#888;">· ${sec}s 後自動發布</span>`;
+        countdownLine = `<div style="color:#888;font-size:10px;">${sec}s 後自動發布</div>`;
     }
 
     const btn = s.state === 'running'
-        ? `<button class="btn btn-sm" disabled style="opacity:0.6;cursor:not-allowed;">發布中…</button>`
-        : `<button class="btn btn-sm" data-action="rebuild-now" title="跳過倒數立即發布">立即發布</button>`;
+        ? `<button class="btn btn-sm" disabled style="width:100%;opacity:0.6;cursor:not-allowed;">發布中…</button>`
+        : `<button class="btn btn-sm" data-action="rebuild-now" title="跳過倒數立即發布" style="width:100%;">立即發布</button>`;
 
     const errMsg = s.state === 'error' && s.error
-        ? `<div style="color:#fca5a5;font-size:11px;width:100%;margin-top:6px;">${esc(s.error)}</div>`
+        ? `<div style="color:#fca5a5;font-size:10px;margin-top:6px;word-break:break-all;">${esc(s.error)}</div>`
         : '';
 
     return `
-        <span style="color:${stateLabel.color};font-weight:600;">${stateLabel.txt}</span>
-        <span style="color:#666;">|</span>
-        <span>${esc(last)}</span>
-        <span style="color:#666;">|</span>
-        ${pending}
-        ${countdown}
-        <span style="margin-left:auto;">${btn}</span>
+        <div style="margin-bottom:6px;">對外網站發布</div>
+        <div style="color:${stateLabel.color};font-weight:600;margin-bottom:4px;">${stateLabel.txt}</div>
+        <div style="color:#888;">上次發布：${esc(last)}</div>
+        ${pendingLine}
+        ${countdownLine}
+        <div style="margin-top:8px;">${btn}</div>
         ${errMsg}
     `;
 }

@@ -10,7 +10,8 @@ const _GROUPS = [
     { prefix: 'seo', label: '🔍 SEO 預設', color: '#10b981' },
     { prefix: 'analytics', label: '📊 分析追蹤', color: '#f59e0b' },
     { prefix: 'notify', label: '🔔 通知設定', color: '#dc2626' },
-    { prefix: 'turnstile', label: '🛡️ Turnstile 反機器人', color: '#ec4899' },
+    { prefix: 'turnstile', label: '🛡️ Turnstile 反機器人', color: '#ec4899',
+      knownKeys: ['site_key', 'secret'] },
     // knownKeys: 即使 DB 沒這個 key 也渲染空欄讓使用者填（首次設定 Notion 用）
     { prefix: 'notion', label: '📝 Notion 部落格', color: '#06b6d4',
       knownKeys: ['token', 'database_id'] },

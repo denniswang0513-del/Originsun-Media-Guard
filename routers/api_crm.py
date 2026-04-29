@@ -4058,6 +4058,36 @@ def _showcase_dir(project_id: str) -> str:
     return d
 
 
+def _save_image_as_webp(content: bytes, dest_dir: str, base_name: str) -> str:
+    """寫圖檔到 dest_dir/<base_name>.webp。原始 JPG/PNG/HEIC 也轉成 WebP。
+
+    回傳寫好的檔案路徑（含副檔名）。Pillow 的 WebP encoder 預設 quality=80，
+    對作品集封面 / 圖庫足夠。WebP 通常比 JPG 小 30%，比 PNG 小 50-70%。
+
+    fallback：Pillow 不可用 / 開檔失敗 → 直接寫原始 bytes 到原副檔名。
+    """
+    webp_path = os.path.join(dest_dir, base_name + ".webp")
+    try:
+        from PIL import Image
+        import io
+        img = Image.open(io.BytesIO(content))
+        # GIF / animated WebP 邏輯先不處理；第一格即可
+        if img.mode in ("RGBA", "LA"):
+            img = img.convert("RGBA")
+        else:
+            img = img.convert("RGB")
+        img.save(webp_path, "WEBP", quality=82, method=6)
+        return webp_path
+    except Exception as e:
+        import logging
+        logging.getLogger(__name__).warning("[upload] WebP convert failed (%s) — fallback raw", e)
+        # fallback to raw bytes (won't have .webp extension to be honest about format)
+        raw_path = webp_path.replace(".webp", ".bin")
+        with open(raw_path, "wb") as f:
+            f.write(content)
+        return raw_path
+
+
 def _to_showcase_dict(s) -> dict:
     return {
         "id": s.id,
@@ -4194,15 +4224,14 @@ async def upload_showcase_cover(project_id: str, request: Request, file: UploadF
     if ext not in _ALLOWED_IMG_EXT:
         raise HTTPException(status_code=400, detail=f"不支援的圖片格式：{ext}")
     sdir = _showcase_dir(project_id)
-    # Remove old covers
+    # Remove old covers (任何副檔名)
     for f in os.listdir(sdir):
         if f.startswith("cover."):
             os.remove(os.path.join(sdir, f))
-    dest = os.path.join(sdir, f"cover{ext}")
     content = await file.read()
-    with open(dest, "wb") as fp:
-        fp.write(content)
-    url = f"/uploads/projects/{project_id}/showcase/cover{ext}"
+    saved = _save_image_as_webp(content, sdir, "cover")
+    fname = os.path.basename(saved)
+    url = f"/uploads/projects/{project_id}/showcase/{fname}"
     factory = await _get_factory()
     async with factory() as session:
         sc = await session.get(CrmProjectShowcase, project_id)
@@ -4227,11 +4256,9 @@ async def upload_showcase_gallery(project_id: str, request: Request,
     if ext not in _ALLOWED_IMG_EXT:
         raise HTTPException(status_code=400, detail=f"不支援的圖片格式：{ext}")
     sdir = _showcase_dir(project_id)
-    fname = f"{uuid.uuid4().hex}{ext}"
-    dest = os.path.join(sdir, fname)
     content = await file.read()
-    with open(dest, "wb") as fp:
-        fp.write(content)
+    saved = _save_image_as_webp(content, sdir, uuid.uuid4().hex)
+    fname = os.path.basename(saved)
     url = f"/uploads/projects/{project_id}/showcase/{fname}"
     factory = await _get_factory()
     async with factory() as session:
@@ -4289,11 +4316,9 @@ async def upload_showcase_process(project_id: str, request: Request,
     if ext not in _ALLOWED_IMG_EXT:
         raise HTTPException(status_code=400, detail=f"不支援的圖片格式：{ext}")
     sdir = _showcase_dir(project_id)
-    fname = f"process_{uuid.uuid4().hex}{ext}"
-    dest = os.path.join(sdir, fname)
     content = await file.read()
-    with open(dest, "wb") as fp:
-        fp.write(content)
+    saved = _save_image_as_webp(content, sdir, f"process_{uuid.uuid4().hex}")
+    fname = os.path.basename(saved)
     url = f"/uploads/projects/{project_id}/showcase/{fname}"
     item = {"type": item_type, "url": url, "caption": caption, "phase": phase, "video_url": ""}
     factory = await _get_factory()
@@ -4517,11 +4542,9 @@ async def upload_showcase_edit_gallery(token: str, file: UploadFile = File(...),
     if ext not in _ALLOWED_IMG_EXT:
         raise HTTPException(status_code=400, detail=f"不支援的圖片格式：{ext}")
     sdir = _showcase_dir(project_id)
-    fname = f"{uuid.uuid4().hex}{ext}"
-    dest = os.path.join(sdir, fname)
     content = await file.read()
-    with open(dest, "wb") as fp:
-        fp.write(content)
+    saved = _save_image_as_webp(content, sdir, uuid.uuid4().hex)
+    fname = os.path.basename(saved)
     url = f"/uploads/projects/{project_id}/showcase/{fname}"
     async with factory() as session:
         sc = await session.get(CrmProjectShowcase, project_id)
@@ -4549,11 +4572,9 @@ async def upload_showcase_edit_process(token: str, file: UploadFile = File(...),
     if ext not in _ALLOWED_IMG_EXT:
         raise HTTPException(status_code=400, detail=f"不支援的圖片格式：{ext}")
     sdir = _showcase_dir(project_id)
-    fname = f"process_{uuid.uuid4().hex}{ext}"
-    dest = os.path.join(sdir, fname)
     content = await file.read()
-    with open(dest, "wb") as fp:
-        fp.write(content)
+    saved = _save_image_as_webp(content, sdir, f"process_{uuid.uuid4().hex}")
+    fname = os.path.basename(saved)
     url = f"/uploads/projects/{project_id}/showcase/{fname}"
     item = {"type": item_type, "url": url, "caption": caption, "phase": phase, "video_url": ""}
     async with factory() as session:

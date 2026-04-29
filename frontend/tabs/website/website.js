@@ -47,10 +47,11 @@ export async function initWebsiteTab() {
 }
 
 function _initRebuildBarOnce() {
-    const main = document.getElementById('website-content');
-    if (!main || main.parentElement?.querySelector('#website-rebuild-bar')) return;
+    const nav = document.getElementById('website-nav');
+    if (!nav || nav.querySelector('#website-rebuild-bar')) return;
     const bar = document.createElement('div');
-    main.parentElement.insertBefore(bar, main);
+    // 加在 nav 末尾（既有「API: ... 狀態: ...」資訊 block 後面）
+    nav.appendChild(bar);
     initRebuildBar(bar);
 }
 

@@ -62,8 +62,11 @@ _allowed_origins = [
         "http://localhost:4321,http://127.0.0.1:4321,"
         "http://localhost:8000,http://127.0.0.1:8000,"
         "http://192.168.1.11:8000,"
+        # 對外網站 + admin Tab 都走 cloudflared，三個 hostname 都要白
         "https://originsun-studio.com,https://www.originsun-studio.com,"
-        "https://preview.originsun-studio.com",
+        "https://test.originsun-studio.com,"
+        "https://preview.originsun-studio.com,"
+        "https://foundry.originsun-studio.com",
     ).split(",") if o.strip()
 ]
 

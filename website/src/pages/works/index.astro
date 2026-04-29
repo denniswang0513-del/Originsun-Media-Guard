@@ -23,6 +23,9 @@ const tags = categories.filter(c => c.kind === "tag");
 ---
 
 <BaseLayout title="作品集 Works" meta={meta}>
+    <!-- Pagefind 搜尋（靜態站全站索引），CSS 從 npm 包載 -->
+    <link rel="stylesheet" href="/pagefind/pagefind-ui.css" />
+
     <section class="pt-32 pb-20 bg-white">
         <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
             <div class="text-center mb-12">
@@ -31,6 +34,9 @@ const tags = categories.filter(c => c.kind === "tag");
                     <Tr k="works_title" />
                 </h1>
             </div>
+
+            <!-- 搜尋框：作品多時派得上用場（少時直接看 chips 即可）-->
+            <div id="works-search" class="max-w-md mx-auto mb-10"></div>
 
             <CategoryFilter categories={cats} activeSlug={activeCategory} label="分類" />
             {tags.length > 0 && (
@@ -72,4 +78,20 @@ const tags = categories.filter(c => c.kind === "tag");
             empty.classList.remove("hidden");
         }
     }
+</script>
+
+<!-- Pagefind UI 動態載入 — pagefind-ui.js 會在 build 時 npm 包進 dist/pagefind/ -->
+<script type="module">
+    // @ts-expect-error - Pagefind 由 build 時 cli 自動 emit 到 /pagefind/
+    const { PagefindUI } = await import("/pagefind/pagefind-ui.js");
+    new PagefindUI({
+        element: "#works-search",
+        showImages: false,           // 作品 thumbnail 已經在卡片，不重複顯示
+        showSubResults: false,
+        resetStyles: false,
+        translations: {
+            placeholder: "搜尋作品名稱、客戶、Credits…",
+            zero_results: "找不到符合 [SEARCH_TERM] 的結果",
+        },
+    });
 </script>
