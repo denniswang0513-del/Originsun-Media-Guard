@@ -55,13 +55,11 @@ _REBUILD_STATUS: RebuildStatus = {
     "error": None,
 }
 
-# ── 持久化欄位（跨主控端重啟仍要記得「上次發布時間」+「未發布變動數」）──
-# 寫進 services/website/.rebuild_meta.json，main.py startup 不需處理。
-_PERSIST_FIELDS = {
-    "last_success_at": None,   # float epoch sec, last successful rebuild+deploy
-    "pending_count": 0,         # int, public-affecting CRUD since last success
-}
-_meta_lock = asyncio.Lock()
+# ── 持久化（DB-backed singleton row）──
+# 為什麼不用檔案：master + NAS website-api 都會呼叫 mark_dirty / 讀 status，
+# 用檔案會雙寫不同步。改用 DB 一張單列表 (website_rebuild_state) 確保所有
+# instance 看到同一個值。schema 由 db/migrations_website.py 建立。
+_PERSIST_FIELDS = {"last_success_at": None, "pending_count": 0}
 
 # ── Auto-rebuild debounce ──
 # 任何公開內容變動 → mark_dirty() → 排定 60 秒後自動 rebuild。
@@ -73,42 +71,76 @@ _debounce_task: Optional[asyncio.Task] = None
 _debounce_fires_at: Optional[float] = None  # epoch sec, for UI countdown
 
 
-def _meta_path() -> Path:
-    return Path(__file__).resolve().parent / ".rebuild_meta.json"
-
-
-def _load_meta() -> dict:
-    p = _meta_path()
-    if not p.exists():
-        return dict(_PERSIST_FIELDS)
+async def _load_meta() -> dict:
+    """讀 website_rebuild_state singleton row。DB 不可用時回 default 值。"""
     try:
-        d = json.loads(p.read_text(encoding="utf-8"))
-        return {**_PERSIST_FIELDS, **d}
-    except Exception:
-        return dict(_PERSIST_FIELDS)
-
-
-def _save_meta(d: dict) -> None:
-    p = _meta_path()
-    try:
-        # 只寫已知欄位，避免外部塞髒資料
-        clean = {k: d.get(k, v) for k, v in _PERSIST_FIELDS.items()}
-        p.write_text(json.dumps(clean, ensure_ascii=False), encoding="utf-8")
+        from db.session import get_session_factory
+        from sqlalchemy import text
+        factory = get_session_factory()
+        if not factory:
+            return dict(_PERSIST_FIELDS)
+        async with factory() as session:
+            row = (await session.execute(
+                text("SELECT last_success_at, pending_count FROM website_rebuild_state WHERE id = 1")
+            )).first()
+            if not row:
+                return dict(_PERSIST_FIELDS)
+            return {"last_success_at": row[0], "pending_count": row[1] or 0}
     except Exception as e:
-        logger.warning("[rebuild] meta save failed: %s", e)
+        logger.warning("[rebuild] _load_meta DB read failed: %s", e)
+        return dict(_PERSIST_FIELDS)
+
+
+async def _save_meta(*, last_success_at: Optional[float] = None,
+                     pending_count: Optional[int] = None) -> None:
+    """更新 singleton row。只動傳入的欄位，其他保持現值。"""
+    try:
+        from db.session import get_session_factory
+        from sqlalchemy import text
+        factory = get_session_factory()
+        if not factory:
+            return
+        sets, params = [], {}
+        if last_success_at is not None:
+            sets.append("last_success_at = :ls")
+            params["ls"] = last_success_at
+        if pending_count is not None:
+            sets.append("pending_count = :pc")
+            params["pc"] = pending_count
+        if not sets:
+            return
+        async with factory() as session:
+            await session.execute(
+                text(f"UPDATE website_rebuild_state SET {', '.join(sets)} WHERE id = 1"),
+                params,
+            )
+            await session.commit()
+    except Exception as e:
+        logger.warning("[rebuild] _save_meta DB write failed: %s", e)
 
 
 async def mark_dirty() -> int:
     """公開內容變動時呼叫一次 — counter +1，且 reset 60 秒 debounce。
 
-    回傳新 pending_count。多處 CRUD 同時呼叫安全（asyncio.Lock）。
+    回傳新 pending_count。DB UPDATE atomic 不需 asyncio.Lock。
     """
     global _debounce_task, _debounce_fires_at
-    async with _meta_lock:
-        meta = _load_meta()
-        meta["pending_count"] = int(meta.get("pending_count", 0)) + 1
-        _save_meta(meta)
-        new_count = meta["pending_count"]
+    try:
+        from db.session import get_session_factory
+        from sqlalchemy import text
+        factory = get_session_factory()
+        if not factory:
+            return 0
+        async with factory() as session:
+            row = (await session.execute(
+                text("UPDATE website_rebuild_state SET pending_count = pending_count + 1 "
+                     "WHERE id = 1 RETURNING pending_count")
+            )).first()
+            await session.commit()
+            new_count = int(row[0]) if row else 0
+    except Exception as e:
+        logger.warning("[rebuild] mark_dirty failed: %s", e)
+        new_count = 0
 
     # Reset debounce timer — 取消舊的、排新的
     if _debounce_task and not _debounce_task.done():
@@ -123,8 +155,7 @@ async def _auto_rebuild_after_delay() -> None:
     global _debounce_fires_at
     try:
         await asyncio.sleep(_DEBOUNCE_DELAY_SEC)
-        # 期間可能被手動 rebuild 消化掉了 → 檢查一下
-        meta = _load_meta()
+        meta = await _load_meta()
         if int(meta.get("pending_count", 0)) > 0:
             logger.info("[rebuild] debounce fired → trigger_rebuild")
             await trigger_rebuild()
@@ -150,16 +181,30 @@ def _default_status() -> dict:
     return dict(_REBUILD_STATUS)
 
 
-def get_rebuild_status() -> dict:
-    """回傳當前 build/deploy 狀態 + 持久化「上次成功時間」「待發布變動數」+ debounce 倒數。"""
+async def get_rebuild_status() -> dict:
+    """回傳當前 build/deploy 狀態 + 持久化「上次成功時間」「待發布變動數」+ debounce 倒數。
+
+    DB-backed meta：master + NAS website-api 看同一個 row。debounce timer 是
+    in-memory 各自一份，但 UI 端只看 pending_count + last_success_at 不受影響。
+    """
     s = dict(_REBUILD_STATUS)
-    s.update(_load_meta())
+    s.update(await _load_meta())
     s["auto_rebuild_fires_at"] = _debounce_fires_at
     return s
 
 
 async def trigger_rebuild() -> dict:
-    """排入一個背景 build task。若已在跑就回 'running'。"""
+    """排入一個背景 build task。
+
+    NAS website-api 容器跑不了 npm（image 無 node）— 透過 env `MASTER_RELAY_URL`
+    把 trigger 轉給 master:8000，由 master 執行 npm build + scp NAS。NAS 端
+    僅做 HTTP forward，不更新自己的 _REBUILD_STATUS（會造成假狀態）。
+    若 master 離線 → 回 502 友善訊息，pending_count 維持，等 master 上線重試。
+    """
+    relay = os.environ.get("MASTER_RELAY_URL", "").strip()
+    if relay:
+        return await _relay_to_master(relay)
+
     if _REBUILD_STATUS["state"] == "running":
         return {"queued": False, "reason": "another build in progress",
                 **_default_status()}
@@ -179,6 +224,27 @@ async def trigger_rebuild() -> dict:
 
     asyncio.create_task(_run_build(website))
     return {"queued": True, **_default_status()}
+
+
+async def _relay_to_master(relay_url: str) -> dict:
+    """NAS website-api 把 rebuild trigger 轉給 master:8000。
+
+    用 X-Internal-Key (= JWT secret) 而非使用者 token — 內部 service-to-service。
+    """
+    import httpx
+    from core.auth import _get_secret
+    url = f"{relay_url.rstrip('/')}/api/website/admin/internal/rebuild"
+    try:
+        async with httpx.AsyncClient(timeout=8.0) as client:
+            r = await client.post(url, headers={"X-Internal-Key": _get_secret()})
+            if r.status_code == 200:
+                return r.json()
+            return {"queued": False, "reason": f"master relay failed (HTTP {r.status_code})"}
+    except (httpx.TimeoutException, httpx.ConnectError):
+        return {"queued": False,
+                "reason": "master 離線或無回應 — pending 變動會等 master 上線後再發布"}
+    except Exception as e:
+        return {"queued": False, "reason": f"relay 錯誤: {e}"}
 
 
 def _resolve_exe(name: str) -> str:
@@ -267,12 +333,8 @@ async def _run_build(website_dir: Path) -> None:
             })
             return
 
-        # 全程成功 → 持久化 + 重置 pending counter
-        async with _meta_lock:
-            _save_meta({
-                "last_success_at": time.time(),
-                "pending_count": 0,
-            })
+        # 全程成功 → 持久化（DB 一行 UPDATE atomic）+ 重置 pending counter
+        await _save_meta(last_success_at=time.time(), pending_count=0)
         _REBUILD_STATUS.update({
             "state": "success", "finished_at": time.time(),
             "output_tail": merged_tail, "error": None,

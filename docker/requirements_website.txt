@@ -1,0 +1,25 @@
+# website-api container minimal deps
+# 跟 master 主應用 requirements_agent.txt 重疊但只取 web 需要的部分
+# 故意極簡 — agent OTA 包含的 ffmpeg / torch / TTS 等通通不要
+
+# Web framework
+fastapi
+uvicorn[standard]
+pydantic
+
+# DB（asyncpg 是 PG 非同步 driver）
+sqlalchemy[asyncio]
+asyncpg
+greenlet
+
+# 雜項
+httpx
+python-multipart
+aiofiles
+
+# Notion sync（routers/website/admin_rebuild.py → notion_service 用到）
+# 若不需要 notion 功能可拿掉，但留著也不貴
+notion-client
+
+# Pillow — 圖片處理（uploads/ resize 等）
+Pillow

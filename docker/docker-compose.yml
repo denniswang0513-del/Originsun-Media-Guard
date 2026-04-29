@@ -1,0 +1,47 @@
+# NAS 部署的 docker-compose — 啟動 website-api 容器
+#
+# 使用：在 NAS 上 cd 到此目錄後跑 `docker compose up -d`
+# 更新 code：master 端 rsync 推 ../code/ 到 NAS 後 `docker restart website-api`
+# .env 在同層放（不進 git，內含 DATABASE_URL / JWT_SECRET / CORS）
+
+services:
+  website-api:
+    container_name: website-api
+    build:
+      context: .
+      dockerfile: Dockerfile.website
+    image: originsun/website-api:latest
+    restart: unless-stopped
+    ports:
+      - "8001:8001"
+    volumes:
+      # master 端 rsync 把 code/ 同步到這個 NAS path（M2 自動同步機制）
+      # 容器內看到的就是 /app（main_website.py、routers/、services/、core/、db/）
+      # 不加 :ro — 因為要在 /app/uploads 掛子 volume，read-only 父目錄不能在
+      # 啟動時建子掛點。容器本身不會寫 /app（程式檔不會自改），實務無風險。
+      - ../code:/app
+      # uploads 目錄需可寫（圖片上傳走容器，不走 master）
+      - ../uploads:/app/uploads
+    environment:
+      DATABASE_URL: ${DATABASE_URL}
+      JWT_SECRET: ${JWT_SECRET}
+      WEBSITE_CORS_ORIGINS: ${WEBSITE_CORS_ORIGINS}
+      # 收到 rebuild trigger 後 forward 給 master（npm 在 master 跑）
+      # master 離線 → relay 失敗回友善錯誤，pending_count 維持等下次
+      MASTER_RELAY_URL: ${MASTER_RELAY_URL}
+    networks:
+      # 既有 postgres 容器 (originsun_postgres) 在 postgres_default 上。
+      # QNAP 防火牆擋新 bridge 建立，所以只用既有的；nginx 之後也接這條
+      # 即可用 container name 互相解析。
+      - postgres_default
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:8001/healthz"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+networks:
+  # external — 由既有 originsun_postgres 容器建立，docker compose 不重建
+  postgres_default:
+    external: true

@@ -2,7 +2,10 @@
 from __future__ import annotations
 
 import asyncio
+import os
 from typing import Optional, AsyncGenerator
+
+_DEFAULT_DB_URL = "postgresql+asyncpg://originsun:originsun2026@192.168.1.132:5432/mediaguard"
 
 try:
     from sqlalchemy.ext.asyncio import (
@@ -26,16 +29,15 @@ _session_factory = None
 
 
 def get_database_url() -> str:
-    """Read database_url from settings.json (or return default)."""
+    """env DATABASE_URL（NAS container）→ settings.json（master）→ default。"""
+    env_url = os.environ.get("DATABASE_URL", "").strip()
+    if env_url:
+        return env_url
     try:
         from config import load_settings
-        settings = load_settings()
-        return settings.get(
-            "database_url",
-            "postgresql+asyncpg://originsun:originsun2026@192.168.1.132:5432/mediaguard",
-        )
+        return load_settings().get("database_url", _DEFAULT_DB_URL)
     except Exception:
-        return "postgresql+asyncpg://originsun:originsun2026@192.168.1.132:5432/mediaguard"
+        return _DEFAULT_DB_URL
 
 
 async def init_db() -> bool:

@@ -1,0 +1,21 @@
+# Website-api container — runs main_website.py on NAS
+# Image stays slim: only python deps baked in. Code mounted as volume at runtime.
+# To update code: master rsync /app sources to NAS, then `docker restart website-api`.
+FROM python:3.11-slim
+
+# curl: docker healthcheck 用。其他系統套件不裝 — asyncpg/Pillow 在 cp311
+# linux 都有 prebuilt wheel，requirements 內套件都不需要 gcc 編譯。
+# 若哪天加了沒 wheel 的 native dep，build 會 fail，再回頭加 gcc 即可。
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends curl && \
+    rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+COPY requirements_website.txt /tmp/requirements.txt
+RUN pip install --no-cache-dir -r /tmp/requirements.txt
+
+EXPOSE 8001
+
+# 程式碼透過 docker-compose volume mount 進來，container 啟動時就生效
+CMD ["uvicorn", "main_website:app", "--host", "0.0.0.0", "--port", "8001"]

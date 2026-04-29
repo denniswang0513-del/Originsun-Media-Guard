@@ -92,6 +92,18 @@ _CREATE_TABLES: list[str] = [
         created_at TIMESTAMPTZ DEFAULT NOW()
     )
     """,
+    # Singleton row for rebuild state — master + NAS website-api 看同一個 source。
+    # 之前 master 用 .rebuild_meta.json file-based，NAS 也獨立寫一份 → 雙寫，
+    # admin Tab 跨機後 pending_count 跟 last_success_at 會不一致。
+    """
+    CREATE TABLE IF NOT EXISTS website_rebuild_state (
+        id INTEGER PRIMARY KEY DEFAULT 1,
+        last_success_at DOUBLE PRECISION,
+        pending_count INTEGER NOT NULL DEFAULT 0,
+        CONSTRAINT website_rebuild_state_singleton CHECK (id = 1)
+    )
+    """,
+    "INSERT INTO website_rebuild_state (id, pending_count) VALUES (1, 0) ON CONFLICT (id) DO NOTHING",
     """
     CREATE TABLE IF NOT EXISTS website_contact_inquiries (
         id SERIAL PRIMARY KEY,

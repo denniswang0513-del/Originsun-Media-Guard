@@ -1,11 +1,14 @@
 /**
  * website-utils.js — Phase M 官網管理 Tab 共用工具
  *
- * 預設同源 fetch（相對路徑，跟著當前頁面 origin 走）：
- *   - 從 localhost:8000 或 Cloudflare Tunnel 進入 → main.py 同源處理
- *     （[DEV BRIDGE] 期間 main.py 也掛了 routers/website）
- *   - M-F NAS 部署後，跨機呼叫 NAS website-api 改用 localStorage 覆寫：
- *     localStorage.setItem('website_api_base', 'https://originsun-studio.com')
+ * 預設打 NAS website-api（cloudflared tunnel）— 這樣 admin Tab 不依賴 master
+ * 開機。PM 在家用瀏覽器開 admin Tab → 透過 cloudflared 直接戳 NAS API。
+ *
+ * 規則：
+ *   1. localStorage `website_api_base` 覆寫優先（除錯用）
+ *   2. 同源 LAN（master 192.168.1.11:8000、localhost:8000） → 走 LAN 直連 NAS:8090
+ *      省 cloudflared hop，且不需要 NAS 對外開 admin endpoint
+ *   3. 其他來源（cloudflared 進來、PM 在家） → 走 cloudflared origin
  *
  * 其他基礎工具（esc、fmtNum、renderAvatar）沿用 CRM 的 crm-utils.js 避免重複。
  */
@@ -14,14 +17,22 @@ import { esc, fmtNum, renderAvatar } from '../crm/crm-utils.js';
 export { esc, fmtNum, renderAvatar };
 
 
-const DEFAULT_API_BASE = '';
+// NAS Website_Nginx LAN 入口（同公司網段時 admin Tab 直連、省 cloudflared）
+const NAS_LAN_BASE = 'http://192.168.1.132:8090';
+// 對外 cloudflared tunnel hostname（master 關機 / PM 在家走這條）
+const NAS_PUBLIC_BASE = 'https://test.originsun-studio.com';
+
+function _isLanOrigin() {
+    const h = window.location.hostname;
+    return h === 'localhost' || h === '127.0.0.1' || h.startsWith('192.168.') || h === '192.168.1.11';
+}
 
 export function getApiBase() {
     try {
-        return localStorage.getItem('website_api_base') || DEFAULT_API_BASE;
-    } catch {
-        return DEFAULT_API_BASE;
-    }
+        const override = localStorage.getItem('website_api_base');
+        if (override) return override;
+    } catch { /* SSR / no localStorage */ }
+    return _isLanOrigin() ? NAS_LAN_BASE : NAS_PUBLIC_BASE;
 }
 
 /**

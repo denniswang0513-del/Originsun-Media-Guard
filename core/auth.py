@@ -41,8 +41,22 @@ def verify_password(password: str, stored: str) -> bool:
 
 # ── JWT Token (minimal, stdlib-based) ──
 
+_cached_secret: Optional[str] = None
+
+
 def _get_secret() -> str:
-    """Get or create JWT secret from settings.json."""
+    """JWT secret: env var（containers）→ settings.json（master）→ raise。
+
+    每個 JWT verify 都呼叫一次，cache 進 module 變數避免每次讀檔。
+    secret 只在啟動時產生 / 載入，永遠不輪替；rotate 時手動重啟 process。
+    """
+    global _cached_secret
+    if _cached_secret is not None:
+        return _cached_secret
+    env_secret = os.environ.get('JWT_SECRET', '').strip()
+    if env_secret:
+        _cached_secret = env_secret
+        return env_secret
     try:
         from config import load_settings, save_settings
         settings = load_settings()
@@ -51,9 +65,11 @@ def _get_secret() -> str:
             secret = secrets.token_hex(32)
             settings['jwt_secret'] = secret
             save_settings(settings)
+        _cached_secret = secret
         return secret
-    except Exception:
-        return 'originsun-fallback-secret-key'
+    except Exception as e:
+        # 不 fallback 到已知字串 — 寧可 hard-fail 也不要 silent 降為弱 key
+        raise RuntimeError(f"JWT secret unavailable: {e}") from e
 
 
 def _b64url_encode(data: bytes) -> str:

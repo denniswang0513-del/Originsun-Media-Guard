@@ -737,9 +737,10 @@ tools:
     │
 現在 (v1.10.106) ← 你在這裡
     │
-    ▼ Phase M: 對外官方網站 (🚀 進行中 2026-04-20 ~ 07-01)
-    │   → originsun-studio.com + CF Tunnel + Astro + 9 子視圖管理 Tab
-    │   → 🎯 6/1 Staging 初版 / 7/1 正式切換上線
+    ▼ Phase M: 對外官方網站 (✅ 完整版 A 部署完成 2026-04-29)
+    │   → NAS Website_Nginx (8090) + website-api 容器 + cloudflared tunnel
+    │   → admin Tab 跨機 fetch、master 關機對外不掉、聯絡表單 e2e 通
+    │   → /publish 自動 sync code 到 NAS 容器、DB-backed rebuild state
     │
     ▼ Phase J-3: 備份 Tab 整合 (⬜)
     │

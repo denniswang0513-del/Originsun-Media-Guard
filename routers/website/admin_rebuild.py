@@ -5,6 +5,7 @@
 Endpoints (prefix `/api/website/admin`):
 - GET  /stats             儀表板指標（本月詢問/轉換、公開作品數、最新詢問）
 - POST /rebuild           觸發 npm run build（背景）
+- POST /internal/rebuild  NAS website-api 用的內部 forward 端點（X-Internal-Key 認證）
 - GET  /rebuild/status    查詢 rebuild 狀態
 - GET  /notion/status     Notion 連線狀態
 - GET  /notion/preview    Dry-run 同步：回傳將被同步的文章清單 + 警告（不寫檔）
@@ -12,7 +13,9 @@ Endpoints (prefix `/api/website/admin`):
 """
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends
+import os
+
+from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ._common import admin_guard, admin_session
@@ -48,9 +51,22 @@ async def trigger_rebuild(_: None = Depends(admin_guard)):
     return await rebuild_service.trigger_rebuild()
 
 
+@router.post("/internal/rebuild")
+async def trigger_rebuild_internal(request: Request):
+    """內部 forward 端點 — NAS website-api 收到使用者 rebuild 請求後 relay 到這裡。
+    用 X-Internal-Key (= JWT secret，master + NAS 已經共用) 認證。
+    """
+    from core.auth import _get_secret
+    expected = _get_secret()
+    got = request.headers.get("X-Internal-Key", "")
+    if not expected or got != expected:
+        raise HTTPException(status_code=403, detail="forbidden")
+    return await rebuild_service.trigger_rebuild()
+
+
 @router.get("/rebuild/status")
 async def rebuild_status(_: None = Depends(admin_guard)):
-    return rebuild_service.get_rebuild_status()
+    return await rebuild_service.get_rebuild_status()
 
 
 @router.get("/notion/status")

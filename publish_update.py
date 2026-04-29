@@ -23,6 +23,25 @@ VERSION_FILE = "version.json"
 MANIFEST_FILE = "update_manifest.json"
 BUILD_SCRIPT = "build_agent_zip.py"
 
+# ── NAS website-api 同步目標 ──
+# /publish 跑完後把這些路徑 scp 到 NAS（讓對外 website-api 拿最新 code）。
+# 不在這份 list 裡的東西不會傳（避免污染 NAS container）。
+NAS_HOST = "admin@192.168.1.132"
+NAS_CODE_DIR = "/share/CACHEDEV1_DATA/Container/AI_Workspace/Originsun_Web/Website/code"
+NAS_DOCKER_DIR = "/share/CACHEDEV1_DATA/Container/AI_Workspace/Originsun_Web/Website/docker"
+SSH_KEY_PATH = os.path.join(
+    os.environ.get("USERPROFILE", os.path.expanduser("~")),
+    ".ssh", "id_originsun_nas",
+)
+SSH_DOCKER = "/share/CACHEDEV1_DATA/.qpkg/container-station/bin/docker"
+
+# website-api container 需要的 code 路徑（routers/website/ 跨 import 到 api_crm
+# 等模組，所以 routers/ 整個傳；core/db/services/ 同理）
+NAS_SYNC_PATHS = [
+    "main_website.py", "config.py",
+    "routers", "services", "core", "db",
+]
+
 
 # ────────────────────────────────────────
 # Version Utilities
@@ -140,6 +159,68 @@ def generate_manifest(version: str) -> list:
         print(f"\n[*] {MANIFEST_FILE}: all dependencies covered by requirements_agent.txt")
 
     return new_deps
+
+
+# ────────────────────────────────────────
+# NAS website-api code sync
+# ────────────────────────────────────────
+
+def sync_website_to_nas() -> bool:
+    """scp code paths to NAS + restart website-api container.
+
+    回 True = 全程 OK；False = 任一步失敗（publish 不因此 abort，因為主流程
+    cancel 了還會留下尷尬狀態。只記錄 warning 讓使用者手動補）。
+
+    SSH key 不存在直接跳過（dev 環境沒設 NAS access）。
+    """
+    if not os.path.exists(SSH_KEY_PATH):
+        print(f"[NAS sync] SSH key 不存在 ({SSH_KEY_PATH})，跳過同步")
+        return False
+
+    base = os.path.dirname(os.path.abspath(__file__))
+    print(f"\n[*] 同步 code 到 NAS ({NAS_HOST})...")
+
+    # scp 不認資料夾不存在 — 先 ssh mkdir 確保 NAS 結構存在
+    ssh_cmd = ["ssh", "-i", SSH_KEY_PATH, "-o", "StrictHostKeyChecking=no", NAS_HOST]
+    try:
+        subprocess.run(
+            ssh_cmd + [f"mkdir -p {NAS_CODE_DIR}"],
+            check=True, capture_output=True, timeout=10,
+        )
+    except subprocess.CalledProcessError as e:
+        print(f"[NAS sync] mkdir 失敗: {e.stderr.decode(errors='replace')[:200]}")
+        return False
+
+    # scp 每個路徑（檔案 + 目錄）
+    for rel in NAS_SYNC_PATHS:
+        src = os.path.join(base, rel)
+        if not os.path.exists(src):
+            print(f"[NAS sync] 跳過 (不存在): {rel}")
+            continue
+        scp_args = ["scp", "-i", SSH_KEY_PATH, "-o", "StrictHostKeyChecking=no", "-q"]
+        if os.path.isdir(src):
+            scp_args += ["-r", src + "/.", f"{NAS_HOST}:{NAS_CODE_DIR}/{rel}/"]
+        else:
+            scp_args += [src, f"{NAS_HOST}:{NAS_CODE_DIR}/{rel}"]
+        try:
+            subprocess.run(scp_args, check=True, capture_output=True, timeout=120)
+            print(f"[NAS sync] OK: {rel}")
+        except subprocess.CalledProcessError as e:
+            print(f"[NAS sync] FAIL: {rel} — {e.stderr.decode(errors='replace')[:200]}")
+            return False
+
+    # Restart website-api container 讓新 code 生效
+    print(f"[*] 重啟 NAS website-api container...")
+    try:
+        subprocess.run(
+            ssh_cmd + [f"{SSH_DOCKER} restart website-api"],
+            check=True, capture_output=True, timeout=15,
+        )
+        print(f"[OK] NAS website-api 已重啟")
+        return True
+    except subprocess.CalledProcessError as e:
+        print(f"[NAS sync] container restart 失敗: {e.stderr.decode(errors='replace')[:200]}")
+        return False
 
 
 # ────────────────────────────────────────
@@ -323,11 +404,15 @@ def main():
             print("[WARN] 無法自動重啟主控端，請手動重啟:")
             print(f"  wscript.exe start_hidden.vbs")
 
+    # ── NAS website-api code sync（讓對外網站 admin endpoint 拿到新 code）──
+    nas_ok = sync_website_to_nas()
+
     print(f"\n{'='*60}")
     print(f"[OK] v{new_version} 發布完成！")
     print(f"  - version.json 已更新")
     print(f"  - update_manifest.json 已更新")
     print(f"  - OTA ZIP: {ota_count} 檔, {ota_mb:.1f} MB")
+    print(f"  - NAS website-api: {'已同步並重啟' if nas_ok else '同步失敗（手動跑 NAS sync）'}")
     print(f"  - 主控端正在重啟，約 5 秒後生效")
     print(f"{'='*60}")
     return 0

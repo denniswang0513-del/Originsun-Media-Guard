@@ -4,15 +4,24 @@
 > **目標讀者**: 接手開發的 AI 協作者（Claude Code）
 > **開發環境**: Windows 11、Python 3.11、Vanilla JS (ES Modules)
 > **啟動方式**: `d:\Antigravity\OriginsunTranscode\.venv\Scripts\python.exe main.py`
-> **🚀 進行中專案**: Phase M — 對外官方網站（`originsun-studio.com`）
-> • 開發：Windows 本機（`website/` 目錄、Astro + Tailwind、localhost:4321）
-> • 部署：**100% 在 NAS 192.168.1.132**，路徑 `/share/Container/AI_Workspace/Originsun_Web/Website/`
-> • 新增容器 2 個：**專用** `Website_Nginx`（port 8081→80）+ `website-api`（8001 內部），在新 bridge `originsun_web`
-> • 既有 5 容器全部不動：cloudflared (macvlan) / FileReport_Nginx / originsun_postgres / MCP / n8n
-> • cloudflared 複用：在 CF Zero Trust 儀表板加 public hostname `originsun-studio.com → 192.168.1.132:8081`
-> • NAS 入口 `main_website.py`（只載 `routers/website/`）；Windows 既有 `main.py` 不動
-> • 官網管理 Tab 前端在 Windows、fetch 跨機呼叫 `http://192.168.1.132:8081/api/website/admin/*`（JWT secret 共用）
-> • 分支 `feature/website-m`，完整規劃見 [`docs/WEBSITE_ARCHITECTURE.md`](docs/WEBSITE_ARCHITECTURE.md)
+> **✅ Phase M 完整版 A 部署完成**: 對外官方網站（`originsun-studio.com`）
+> • 對外服務 24/7 在 NAS（192.168.1.132），master Windows 可隨時關機/重啟對外不掉
+> • **NAS 容器**：`Website_Nginx`（port 8090→80，serve dist/ + proxy /api/website/*）
+>   + `website-api`（8001 內部，FastAPI 跑 routers/website/）— 共用既有 `postgres_default` bridge
+> • **既有 5 容器不動**：cloudflared / FileReport_Nginx / originsun_postgres / MCP / n8n
+> • **cloudflared**：在 CF Zero Trust 儀表板把 `test.originsun-studio.com` 路由到
+>   `192.168.1.132:8090`（不再指 master:4321）
+> • **編輯流程**：admin Tab 跨機 fetch NAS website-api（`getApiBase()` 自動選 LAN/cloudflared）
+>   → 寫 NAS Postgres → mark_dirty 入 DB singleton row → 60s debounce → forward 給 master
+>   跑 npm build → master scp dist/ 到 NAS → 對外網站立即更新
+> • **PM 在家編輯**：cloudflared tunnel 直連 NAS website-api，master 關著也能改作品
+>   （但 master 不在線時無法 trigger rebuild — pending 累積等 master 上線消化）
+> • **/publish 自動 sync**：master /publish 流程末段 scp `routers/services/core/db/main_website.py/config.py`
+>   到 NAS code/ + `docker restart website-api`，container 拿到最新 endpoint 邏輯
+> • **JWT 共用**：master + NAS website-api 都讀同一個 jwt_secret（NAS 容器透過 env，
+>   master 從 settings.json 讀）— admin token 跨機可驗
+> • 分支 `feature/website-m`，完整規劃見 [`docs/WEBSITE_ARCHITECTURE.md`](docs/WEBSITE_ARCHITECTURE.md)，
+>   實際部署細節見 [`docker/INDEX.md`](docker/INDEX.md)
 
 ---
 
