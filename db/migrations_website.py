@@ -129,6 +129,50 @@ _CREATE_TABLES: list[str] = [
         notes TEXT
     )
     """,
+    # SEO 內容三表：FAQ / Testimonials / QuickFacts
+    """
+    CREATE TABLE IF NOT EXISTS website_faqs (
+        id SERIAL PRIMARY KEY,
+        question_zh VARCHAR(300) NOT NULL,
+        question_en VARCHAR(300),
+        answer_zh TEXT NOT NULL,
+        answer_en TEXT,
+        sort_order INTEGER NOT NULL DEFAULT 0,
+        visible BOOLEAN NOT NULL DEFAULT TRUE,
+        created_at TIMESTAMPTZ DEFAULT NOW(),
+        updated_at TIMESTAMPTZ DEFAULT NOW()
+    )
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS website_testimonials (
+        id SERIAL PRIMARY KEY,
+        author_zh VARCHAR(100) NOT NULL,
+        author_en VARCHAR(100),
+        role_zh VARCHAR(100),
+        role_en VARCHAR(100),
+        company VARCHAR(200),
+        rating INTEGER NOT NULL DEFAULT 5,
+        content_zh TEXT,
+        content_en TEXT,
+        sort_order INTEGER NOT NULL DEFAULT 0,
+        visible BOOLEAN NOT NULL DEFAULT TRUE,
+        date_published DATE,
+        created_at TIMESTAMPTZ DEFAULT NOW(),
+        updated_at TIMESTAMPTZ DEFAULT NOW()
+    )
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS website_quick_facts (
+        id SERIAL PRIMARY KEY,
+        label_zh VARCHAR(100) NOT NULL,
+        label_en VARCHAR(100),
+        value VARCHAR(300) NOT NULL,
+        sort_order INTEGER NOT NULL DEFAULT 0,
+        visible BOOLEAN NOT NULL DEFAULT TRUE,
+        created_at TIMESTAMPTZ DEFAULT NOW(),
+        updated_at TIMESTAMPTZ DEFAULT NOW()
+    )
+    """,
 ]
 
 _CREATE_INDEXES: list[str] = [
@@ -140,6 +184,10 @@ _CREATE_INDEXES: list[str] = [
     "CREATE INDEX IF NOT EXISTS idx_websvc_sort ON website_services (sort_order)",
     "CREATE INDEX IF NOT EXISTS idx_inq_status ON website_contact_inquiries (status)",
     "CREATE INDEX IF NOT EXISTS idx_inq_created ON website_contact_inquiries (created_at)",
+    # SEO 三表：visible+sort 經常一起查（公開端點 visible=true ORDER BY sort）
+    "CREATE INDEX IF NOT EXISTS idx_webfaq_visible_sort ON website_faqs (visible, sort_order)",
+    "CREATE INDEX IF NOT EXISTS idx_webtst_visible_sort ON website_testimonials (visible, sort_order)",
+    "CREATE INDEX IF NOT EXISTS idx_webqf_visible_sort ON website_quick_facts (visible, sort_order)",
     # 對外作品查詢加速
     "CREATE INDEX IF NOT EXISTS idx_crmproj_public ON crm_projects (public)",
     "CREATE INDEX IF NOT EXISTS idx_crmproj_featured ON crm_projects (public_featured)",

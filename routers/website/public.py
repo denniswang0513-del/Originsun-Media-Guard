@@ -24,7 +24,7 @@ from ._common import client_ip, public_session, rate_limit
 from core.schemas_website import ContactInquiryCreate
 from services.website import (
     category_service, inquiry_service, notify_service,
-    project_service, service_service, settings_service,
+    project_service, seo_service, service_service, settings_service,
 )
 
 logger = logging.getLogger(__name__)
@@ -116,6 +116,24 @@ async def get_meta(
     meta = await settings_service.get_meta(session)
     meta["categories"] = await category_service.list_public_categories(session)
     return meta
+
+
+@router.get("/faqs")
+async def list_public_faqs(request: Request, session: AsyncSession = Depends(public_session)):
+    rate_limit(request, max_per_minute=60)
+    return {"items": await seo_service.list_faqs(session, visible_only=True)}
+
+
+@router.get("/testimonials")
+async def list_public_testimonials(request: Request, session: AsyncSession = Depends(public_session)):
+    rate_limit(request, max_per_minute=60)
+    return {"items": await seo_service.list_testimonials(session, visible_only=True)}
+
+
+@router.get("/quick_facts")
+async def list_public_quick_facts(request: Request, session: AsyncSession = Depends(public_session)):
+    rate_limit(request, max_per_minute=60)
+    return {"items": await seo_service.list_quick_facts(session, visible_only=True)}
 
 
 @router.post("/contact", status_code=201)

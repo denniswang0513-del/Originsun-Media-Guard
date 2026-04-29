@@ -94,17 +94,30 @@ export function toastErr(msg) {
     _toast(`❌ ${msg}`, '#8b1d1d');
 }
 
+// 多 toast 同時出現時垂直 stack，避免互相蓋住（5 個 save 同時觸發只看到最後一個）
+let _toastCount = 0;
+
 function _toast(msg, bg) {
     const div = document.createElement('div');
     div.textContent = msg;
+    const top = 20 + _toastCount * 50;
+    _toastCount++;
     div.style.cssText = `
-        position: fixed; top: 20px; right: 20px; z-index: 10000;
+        position: fixed; top: ${top}px; right: 20px; z-index: 10000;
         background: ${bg}; color: white; padding: 10px 16px;
         border-radius: 6px; font-size: 13px; max-width: 400px;
         box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+        transition: opacity 0.3s, transform 0.3s;
     `;
     document.body.appendChild(div);
-    setTimeout(() => div.remove(), 3500);
+    setTimeout(() => {
+        div.style.opacity = '0';
+        div.style.transform = 'translateX(20px)';
+        setTimeout(() => {
+            div.remove();
+            _toastCount = Math.max(0, _toastCount - 1);
+        }, 300);
+    }, 3500);
 }
 
 /** ISO string → 本地時間顯示（精度到分） */

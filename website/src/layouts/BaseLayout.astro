@@ -28,11 +28,14 @@ interface Props {
     description: string;          // 必填 — SEO 核心欄位，每頁都要寫
     schemaData: SchemaObject[];   // 必填 — 至少 1 個 schema
     meta: IWebsiteMeta;
-    noindex?: boolean;
+    noindex?: boolean;            // 不傳 → 走 meta.indexable；傳 true/false → 強制覆寫
     ogImage?: string;
 }
 
-const { title, description, schemaData, meta, noindex = true, ogImage } = Astro.props;
+// 預設：admin 在 settings 把 seo.indexable 打開後對外網站才允許索引；
+// 個別頁面（如 thank-you / utility 頁）可以傳 noindex={true} 強制隱藏。
+const { title, description, schemaData, meta, ogImage } = Astro.props;
+const noindex = Astro.props.noindex ?? !meta.indexable;
 
 const fullTitle = title === meta.company_name_zh ? title : `${title} | ${meta.company_name_zh}`;
 

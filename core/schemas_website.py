@@ -280,6 +280,7 @@ class WebsiteMeta(BaseModel):
     social: dict[str, str] = Field(default_factory=dict)
     seo_default_title: str = ""
     seo_default_description: str = ""
+    seo_og_image: str = ""
     categories: list[CategoryPublicResponse] = Field(default_factory=list)
     # About 頁面文案（非工程師從官網管理 Tab 編輯 website_settings.about.*）
     about_intro_zh: str = ""
@@ -288,6 +289,110 @@ class WebsiteMeta(BaseModel):
     about_team_intro_zh: str = ""
     # Home Hero 影片 YouTube ID（admin 從官網管理 Tab 設定 home.hero_youtube_id）
     home_hero_youtube_id: str = ""
+    # SEO 索引控制（admin 從「網站設定」打開 seo.indexable 後對外網站才允許 Google 索引）
+    indexable: bool = False
+    # robots.txt 是否允許 AI 爬蟲（GPTBot / ClaudeBot / PerplexityBot / Google-Extended）
+    ai_allow: bool = False
+
+
+# ══════════════════════════════════════════════════════════
+# SEO 內容（FAQ / Testimonial / QuickFact）
+# ══════════════════════════════════════════════════════════
+
+class WebsiteFAQResponse(BaseModel):
+    id: int
+    question_zh: str
+    question_en: Optional[str] = None
+    answer_zh: str
+    answer_en: Optional[str] = None
+    sort_order: int = 0
+    visible: bool = True
+
+
+class WebsiteFAQCreate(BaseModel):
+    question_zh: str = Field(..., min_length=1, max_length=300)
+    question_en: Optional[str] = Field(None, max_length=300)
+    answer_zh: str = Field(..., min_length=1)
+    answer_en: Optional[str] = None
+    sort_order: int = 0
+    visible: bool = True
+
+
+class WebsiteFAQUpdate(BaseModel):
+    question_zh: Optional[str] = None
+    question_en: Optional[str] = None
+    answer_zh: Optional[str] = None
+    answer_en: Optional[str] = None
+    sort_order: Optional[int] = None
+    visible: Optional[bool] = None
+
+
+class WebsiteTestimonialResponse(BaseModel):
+    id: int
+    author_zh: str
+    author_en: Optional[str] = None
+    role_zh: Optional[str] = None
+    role_en: Optional[str] = None
+    company: Optional[str] = None
+    rating: int = 5
+    content_zh: Optional[str] = None
+    content_en: Optional[str] = None
+    sort_order: int = 0
+    visible: bool = True
+    date_published: Optional[str] = None  # ISO date string
+
+
+class WebsiteTestimonialCreate(BaseModel):
+    author_zh: str = Field(..., min_length=1, max_length=100)
+    author_en: Optional[str] = Field(None, max_length=100)
+    role_zh: Optional[str] = Field(None, max_length=100)
+    role_en: Optional[str] = Field(None, max_length=100)
+    company: Optional[str] = Field(None, max_length=200)
+    rating: int = Field(5, ge=1, le=5)
+    content_zh: Optional[str] = None
+    content_en: Optional[str] = None
+    sort_order: int = 0
+    visible: bool = True
+    date_published: Optional[str] = None
+
+
+class WebsiteTestimonialUpdate(BaseModel):
+    author_zh: Optional[str] = None
+    author_en: Optional[str] = None
+    role_zh: Optional[str] = None
+    role_en: Optional[str] = None
+    company: Optional[str] = None
+    rating: Optional[int] = Field(None, ge=1, le=5)
+    content_zh: Optional[str] = None
+    content_en: Optional[str] = None
+    sort_order: Optional[int] = None
+    visible: Optional[bool] = None
+    date_published: Optional[str] = None
+
+
+class WebsiteQuickFactResponse(BaseModel):
+    id: int
+    label_zh: str
+    label_en: Optional[str] = None
+    value: str
+    sort_order: int = 0
+    visible: bool = True
+
+
+class WebsiteQuickFactCreate(BaseModel):
+    label_zh: str = Field(..., min_length=1, max_length=100)
+    label_en: Optional[str] = Field(None, max_length=100)
+    value: str = Field(..., min_length=1, max_length=300)
+    sort_order: int = 0
+    visible: bool = True
+
+
+class WebsiteQuickFactUpdate(BaseModel):
+    label_zh: Optional[str] = None
+    label_en: Optional[str] = None
+    value: Optional[str] = None
+    sort_order: Optional[int] = None
+    visible: Optional[bool] = None
 
 
 # ══════════════════════════════════════════════════════════

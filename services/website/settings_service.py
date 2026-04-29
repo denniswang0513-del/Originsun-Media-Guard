@@ -48,6 +48,10 @@ async def get_meta(session: AsyncSession) -> dict[str, Any]:
         "about_founded_year": s.get("about.founded_year", ""),
         "about_team_intro_zh": s.get("about.team_intro_zh", ""),
         "home_hero_youtube_id": s.get("home.hero_youtube_id", ""),
+        # SEO 索引控制（影響 BaseLayout noindex meta + robots.txt 動態端點）。
+        # `is True` 比 `bool()` 嚴：避免使用者誤把 "false" 字串塞進去後變 truthy。
+        "indexable": s.get("seo.indexable") is True,
+        "ai_allow": s.get("seo.ai_allow") is True,
     }
 
 

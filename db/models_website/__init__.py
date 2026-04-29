@@ -13,6 +13,7 @@ from .project_category import WebsiteProjectCategory
 from .setting import WebsiteSetting
 from .service import WebsiteService
 from .inquiry import WebsiteContactInquiry
+from .seo import WebsiteFAQ, WebsiteTestimonial, WebsiteQuickFact
 
 __all__ = [
     "WebsiteCategory",
@@ -20,4 +21,7 @@ __all__ = [
     "WebsiteSetting",
     "WebsiteService",
     "WebsiteContactInquiry",
+    "WebsiteFAQ",
+    "WebsiteTestimonial",
+    "WebsiteQuickFact",
 ]

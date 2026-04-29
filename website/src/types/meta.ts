@@ -28,6 +28,11 @@ export interface IWebsiteMeta {
     about_founded_year?: string;
     about_team_intro_zh?: string;
     home_hero_youtube_id?: string;
+    // SEO 索引控制（admin 在「網站設定」打開後 BaseLayout 移除 noindex meta，
+    // robots.txt endpoint 改 Allow:/）
+    indexable?: boolean;
+    // 是否允許 AI 爬蟲（GPTBot/ClaudeBot/PerplexityBot/Google-Extended）讀取
+    ai_allow?: boolean;
 }
 
 export interface ITeamMember {
