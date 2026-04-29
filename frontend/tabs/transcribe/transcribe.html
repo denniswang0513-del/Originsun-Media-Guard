@@ -1,5 +1,17 @@
 <h2 class="text-lg font-semibold mb-4 text-[#e0e0e0] border-b border-[#3a3a3a] pb-2">🎙️ AI 逐字稿產生器</h2>
 
+<!-- Top-level mode toggle: 自動辨識 vs 對齊已有文字稿 -->
+<div class="flex rounded-lg overflow-hidden border border-[#444] mb-4" id="ai_mode_toggle">
+    <button type="button" data-ai-mode="transcribe"
+        class="flex-1 px-4 py-2 text-sm font-semibold bg-emerald-800 text-emerald-100 border-r border-[#444] transition-colors"
+        onclick="setAiMode('transcribe')">🎙️ 自動辨識</button>
+    <button type="button" data-ai-mode="align"
+        class="flex-1 px-4 py-2 text-sm font-semibold bg-[#1e1e1e] text-gray-400 transition-colors"
+        onclick="setAiMode('align')">🎯 對齊已有文字稿</button>
+</div>
+
+<!-- ────────── 自動辨識區塊 (existing) ────────── -->
+<div id="transcribe_section">
 <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
     <!-- Left: Dropzone + Output path -->
     <div class="space-y-4">
@@ -141,4 +153,164 @@
     <div class="text-xs text-blue-300 mb-2 font-semibold">🖥️ 遠端主機進度</div>
     <div id="tr-remote-host-rows" class="flex flex-col gap-2"></div>
 </div>
+</div>
+</div><!-- end #transcribe_section -->
+
+<!-- ────────── 對齊已有文字稿區塊 ────────── -->
+<div id="align_section" class="hidden">
+    <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+        <!-- Left: 影片 ⇄ 文字稿配對 -->
+        <div class="space-y-4">
+            <div>
+                <div class="flex justify-between items-center mb-1">
+                    <label class="block text-sm font-medium text-gray-400">影片 ⇄ 文字稿配對 (1:1)</label>
+                    <div class="flex gap-2">
+                        <button type="button" id="btn_align_batch_import"
+                            class="text-xs bg-amber-900 border-amber-700 hover:bg-amber-700 px-2 py-1 rounded text-white border transition-colors shadow-sm text-[11px]"
+                            title="選資料夾,自動建立配對 + 同名 .txt/.srt 自動綁定">📂 批次匯入</button>
+                        <button type="button" id="btn_align_multi_pick"
+                            class="text-xs bg-indigo-900 border-indigo-700 hover:bg-indigo-700 px-2 py-1 rounded text-white border transition-colors shadow-sm text-[11px]">📁 多選影片</button>
+                        <button type="button" id="btn_align_add"
+                            class="text-xs bg-[#333] hover:bg-[#444] px-2 py-1 rounded text-white border border-[#555] text-[11px]">+ 新增</button>
+                    </div>
+                </div>
+                <div id="align_pair_list"
+                    class="space-y-1.5 bg-[#1e1e1e] border border-[#444] rounded p-2 min-h-[120px] max-h-[600px] overflow-y-auto"
+                    style="resize: vertical;">
+                    <!-- JS Generated -->
+                </div>
+            </div>
+
+            <div>
+                <label class="block text-sm font-medium text-gray-400 mb-1">輸出資料夾 (SRT 輸出位置)</label>
+                <div class="flex gap-2">
+                    <input type="text" id="align_dest"
+                        class="flex-1 bg-[#1e1e1e] border border-[#444] rounded px-3 py-2 text-sm focus:outline-none focus:border-emerald-500"
+                        value="" placeholder="指定輸出路徑...">
+                    <button type="button" id="btn_align_dest_pick"
+                        class="bg-[#333] hover:bg-[#444] px-3 rounded border border-[#555] text-gray-300">📁</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Right: Settings -->
+        <div class="space-y-4">
+            <div>
+                <label class="block text-sm font-medium text-gray-400 mb-1">辨識模型 (Whisper backbone)</label>
+                <select id="align_model"
+                    class="w-full bg-[#1e1e1e] text-sm border border-[#444] rounded px-3 py-2 focus:outline-none focus:border-emerald-500">
+                    <option value="turbo" selected>⚡ Turbo (推薦)</option>
+                    <option value="large-v3">🎯 Large-v3 (極致精準 — 較慢)</option>
+                    <option value="medium">🚀 Medium</option>
+                </select>
+                <p class="text-[10px] text-gray-600 mt-1">與「自動辨識」共用模型，已下載過的可直接使用</p>
+            </div>
+
+            <div>
+                <label class="block text-sm font-medium text-gray-400 mb-1">音訊語言</label>
+                <select id="align_language"
+                    class="w-full bg-[#1e1e1e] text-sm border border-[#444] rounded px-3 py-2 focus:outline-none focus:border-emerald-500">
+                    <option value="zh" selected>中文</option>
+                    <option value="en">英文 (English)</option>
+                    <option value="ja">日文 (日本語)</option>
+                    <option value="ko">韓文 (한국어)</option>
+                </select>
+            </div>
+
+            <div>
+                <label class="block text-sm font-medium text-gray-400 mb-2">字幕時間優化</label>
+                <label class="flex items-center gap-2 cursor-pointer text-sm">
+                    <input type="checkbox" id="align_polish" checked
+                        class="form-checkbox text-emerald-500 rounded bg-[#1e1e1e] border-[#444]">
+                    <span class="text-gray-300">✨ 套用影片字幕專用時間打磨</span>
+                </label>
+                <p class="text-[10px] text-gray-600 mt-1 ml-6">Frame 對齊、最短顯示時間 1s、字幕間插 2 影格間隔</p>
+            </div>
+
+            <div class="bg-[#1e1e1e] border border-[#333] rounded p-3 text-xs text-gray-500 leading-relaxed">
+                💡 上傳已校稿過的文字稿，系統用 stable-ts 強制對齊到影片音訊。<br>
+                <strong class="text-gray-400">不會修改你的文字</strong>，只標時間戳。<br>
+                文字稿的原始換行（單行 / 空行分段）就是字幕的條目邊界。
+            </div>
+        </div>
+    </div>
+
+    <div class="mt-6 border-t border-[#3a3a3a] pt-4">
+        <div class="flex justify-between items-center">
+            <div class="flex gap-2 tab-control-btns hidden">
+                <button onclick="apiControl('pause')" class="bg-[#7a5500] hover:bg-[#b07a00] text-white text-xs font-bold py-2 px-4 rounded shadow">暫停</button>
+                <button onclick="apiControl('resume')" class="bg-[#3a5a3a] hover:bg-[#4a7a4a] text-white text-xs font-bold py-2 px-4 rounded shadow">繼續</button>
+                <button onclick="apiControl('stop')" class="bg-[#8b0000] hover:bg-[#cc2200] text-white text-xs font-bold py-2 px-4 rounded shadow">強制中止</button>
+            </div>
+            <div class="flex gap-3 ml-auto">
+                <button id="align_submit_btn" onclick="if(window.submitAlignJob) window.submitAlignJob()"
+                    class="bg-emerald-700 hover:bg-emerald-600 disabled:bg-[#333] disabled:cursor-not-allowed text-white font-bold py-2 px-8 rounded shadow text-sm transition-colors">
+                    開始對齊
+                </button>
+            </div>
+        </div>
+
+        <!-- Progress (shared with transcribe) -->
+        <div id="align_progress_area" class="hidden mt-4 p-4 bg-[#1e1e1e] border border-[#333] rounded-lg">
+            <div class="flex justify-between text-xs text-gray-400 mb-1">
+                <span id="align_prog_label">準備中...</span>
+                <span id="align_prog_pct">0%</span>
+            </div>
+            <div class="w-full bg-[#2a2a2a] rounded-full h-3 border border-[#444] overflow-hidden">
+                <div id="align_prog_bar" class="h-3 rounded-full transition-all duration-300" style="width: 0%; background: linear-gradient(90deg, #059669, #10b981);"></div>
+            </div>
+        </div>
+
+        <!-- Quality summary (post-completion) -->
+        <div id="align_summary" class="hidden mt-4 p-4 bg-[#1e1e1e] border border-[#444] rounded-lg">
+            <div class="flex justify-between items-center mb-3">
+                <div class="text-sm font-bold text-emerald-400">✅ 對齊完成</div>
+                <button type="button" onclick="document.getElementById('align_summary').classList.add('hidden')"
+                    class="text-gray-500 hover:text-white text-xs">收起</button>
+            </div>
+            <div id="align_summary_rows" class="space-y-2"></div>
+        </div>
+    </div>
+</div><!-- end #align_section -->
+
+<!-- ────────── 文字稿綁定 Modal ────────── -->
+<div id="align_bind_modal" class="hidden fixed inset-0 bg-black/70 z-50 flex items-center justify-center p-4">
+    <div class="bg-[#1a1a1a] border border-[#444] rounded-lg p-5 w-full max-w-2xl max-h-[85vh] flex flex-col">
+        <div class="flex justify-between items-center mb-3 border-b border-[#333] pb-2">
+            <div class="text-base font-bold text-gray-200">為 <span id="align_bind_title" class="text-emerald-400">影片</span> 綁定文字稿</div>
+            <button type="button" onclick="if(window.closeAlignBindModal) window.closeAlignBindModal()" class="text-gray-500 hover:text-white text-xl leading-none">×</button>
+        </div>
+
+        <div class="flex gap-4 mb-3 text-sm">
+            <label class="flex items-center gap-2 cursor-pointer">
+                <input type="radio" name="align_bind_src" value="paste" checked onchange="window._alignBindSrc='paste'">
+                <span class="text-gray-300">貼上文字</span>
+            </label>
+            <label class="flex items-center gap-2 cursor-pointer">
+                <input type="radio" name="align_bind_src" value="upload" onchange="if(window.alignBindUploadClick) window.alignBindUploadClick()">
+                <span class="text-gray-300">上傳檔案 (.txt / .srt)</span>
+            </label>
+            <input type="file" id="align_bind_file_input" accept=".txt,.srt" class="hidden">
+        </div>
+
+        <textarea id="align_bind_text"
+            class="flex-1 min-h-[260px] bg-[#0e0e0e] border border-[#444] rounded p-3 text-sm text-gray-200 font-mono focus:outline-none focus:border-emerald-500 resize-vertical"
+            placeholder="把校稿過的文字稿貼進來。每段（空行分隔）或每行（無空行時）會變成一條字幕。
+
+例：
+今天我想聊一個備份的話題
+
+備份其實有三個層次
+第一個是本機備份"></textarea>
+
+        <div class="flex justify-between items-center mt-3 text-xs">
+            <div id="align_bind_summary" class="text-gray-500">尚未輸入</div>
+            <div class="flex gap-2">
+                <button type="button" onclick="if(window.closeAlignBindModal) window.closeAlignBindModal()"
+                    class="bg-[#333] hover:bg-[#444] px-4 py-1.5 rounded text-gray-300 text-sm border border-[#555]">取消</button>
+                <button type="button" id="align_bind_confirm" onclick="if(window.confirmAlignBind) window.confirmAlignBind()"
+                    class="bg-emerald-700 hover:bg-emerald-600 px-4 py-1.5 rounded text-white text-sm font-semibold">確認綁定</button>
+            </div>
+        </div>
+    </div>
 </div>

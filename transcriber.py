@@ -6,26 +6,11 @@ import tempfile
 import json
 from typing import List, Callable, Optional
 
-
-def _detect_device():
-    """安全偵測 CUDA，torch 不存在時自動用 CPU"""
-    try:
-        import torch  # type: ignore
-        if torch.cuda.is_available():
-            return "cuda", "float16"
-    except ImportError:
-        pass
-    return "cpu", "int8"
-
-
-def _cleanup_gpu():
-    """安全釋放 GPU 記憶體，torch 不存在時跳過"""
-    try:
-        import torch  # type: ignore
-        if torch.cuda.is_available():
-            torch.cuda.empty_cache()
-    except Exception:
-        pass
+from core.whisper_helpers import (  # type: ignore
+    detect_device as _detect_device,
+    cleanup_gpu as _cleanup_gpu,
+    format_srt_timestamp as _format_timestamp,
+)
 
 
 def _ensure_dependencies():
@@ -69,15 +54,6 @@ def _get_video_info(file_path: str) -> dict:
         return {"has_video": has_video, "duration": duration}
     except Exception:
         return {"has_video": False, "duration": 0}
-
-
-def _format_timestamp(seconds: float) -> str:
-    """將秒數轉為 SRT 時間碼格式 HH:MM:SS,mmm"""
-    ms = int((seconds % 1) * 1000)
-    s = int(seconds)
-    m, s = divmod(s, 60)
-    h, m = divmod(m, 60)
-    return f"{h:02d}:{m:02d}:{s:02d},{ms:03d}"
 
 
 def _run_individual_mode(

@@ -14,7 +14,7 @@ import re
 
 from core.schemas import (  # type: ignore
     BackupRequest, TranscodeRequest, ConcatRequest,
-    VerifyRequest, TranscribeRequest, ReportJobRequest,
+    VerifyRequest, TranscribeRequest, AlignRequest, ReportJobRequest,
     TtsRequest, TtsCloneRequest, DroneMetaRequest,
     TimelineExportRequest,
 )
@@ -173,6 +173,9 @@ async def _execute_job(job: state.JobState):
 
         elif isinstance(task, TranscribeRequest):
             await _run_transcribe(job, engine, task)
+
+        elif isinstance(task, AlignRequest):
+            await _run_align(job, engine, task)
 
         elif isinstance(task, VerifyRequest):
             await _run_verify(job, engine, task, _on_progress)
@@ -516,6 +519,99 @@ async def _run_transcribe(job, engine, task: TranscribeRequest):
         await sio.emit('log', {'type': 'error', 'msg': f'逐字稿發生錯誤: {err_msg}', 'job_id': job_id})
         await asyncio.sleep(0.1)
         await sio.emit('transcribe_error', {'msg': err_msg, 'job_id': job_id})
+        raise Exception(err_msg)
+
+
+async def _run_align(job, engine, task: AlignRequest):
+    """Forced alignment: known text + video audio → timed SRT.
+
+    Reuses `transcribe_progress` event for the progress bar (shared UI),
+    emits `align_done` with per-file quality info for the summary panel,
+    falls back to `transcribe_error` on failure.
+    """
+    job_id = job.job_id
+    try:
+        import aligner  # type: ignore
+        import importlib
+        importlib.reload(aligner)
+    except ImportError as ie:
+        err_msg = f"無法載入對齊模組: {ie}"
+        await sio.emit('log', {'type': 'error', 'msg': err_msg, 'job_id': job_id})
+        await sio.emit('transcribe_error', {'msg': err_msg, 'job_id': job_id})
+        return
+
+    _loop = asyncio.get_running_loop()
+    total = len(task.tasks)
+
+    def _on_prog(pct, msg):
+        if engine._stop_event and engine._stop_event.is_set():
+            raise Exception("使用者強制中止任務")
+        m = re.match(r'\[(\d+)/(\d+)\]', msg)
+        done = int(m.group(1)) if m else 0
+        tot = int(m.group(2)) if m else total
+        asyncio.run_coroutine_threadsafe(
+            sio.emit('transcribe_progress', {
+                'pct': pct, 'msg': msg, 'job_id': job_id,
+                'done_files': done, 'total_files': tot,
+                'mode': 'align',
+            }),
+            _loop,
+        )
+
+    tasks_payload = [{
+        "source": t.source,
+        "transcript": t.transcript,
+        "transcript_format": t.transcript_format,
+    } for t in task.tasks]
+
+    res = await asyncio.to_thread(
+        aligner.run_align_job,
+        tasks=tasks_payload,
+        dest_dir=task.dest_dir,
+        model_size=task.model_size,
+        language=task.language,
+        anchor_threshold=task.anchor_threshold,
+        subtitle_polish=task.subtitle_polish,
+        fps_override=task.fps_override,
+        min_duration=task.min_duration,
+        max_duration=task.max_duration,
+        min_gap_frames=task.min_gap_frames,
+        encoding_bom=task.encoding_bom,
+        progress_callback=_on_prog,
+        check_cancel_cb=engine._stop_event.is_set,
+    )
+
+    if res.get("success"):
+        await sio.emit('align_done', {
+            'job_id': job_id,
+            'dest_dir': res.get("dest_dir"),
+            'file_count': res.get("file_count"),
+            'output_files': res.get("output_files", []),
+            'qualities': res.get("qualities", []),
+        })
+        # Also fire transcribe_done so the shared progress bar UI hides itself
+        await sio.emit('transcribe_done', {
+            'dest_dir': res.get("dest_dir"), 'job_id': job_id, 'mode': 'align',
+        })
+        try:
+            from notifier import notify_tab  # type: ignore
+            _proj = os.path.basename(task.dest_dir.rstrip("\\/")) or "align"
+            await asyncio.to_thread(
+                notify_tab, "transcribe_success",
+                project_name=_proj, dest_dir=task.dest_dir,
+                file_count=res.get("file_count", 0),
+            )
+        except Exception:
+            pass
+    else:
+        err_msg = res.get("error", "未知錯誤")
+        await sio.emit('log', {
+            'type': 'error', 'msg': f'對齊發生錯誤: {err_msg}', 'job_id': job_id,
+        })
+        await asyncio.sleep(0.1)
+        await sio.emit('transcribe_error', {
+            'msg': err_msg, 'job_id': job_id, 'mode': 'align',
+        })
         raise Exception(err_msg)
 
 

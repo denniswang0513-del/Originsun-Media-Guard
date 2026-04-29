@@ -104,6 +104,30 @@ async def api_pick_files(title: str = "選擇影片（可多選）"):
     paths = await asyncio.to_thread(_run_picker_subprocess, "files", title)
     return {"paths": paths}
 
+
+@router.get("/api/v1/utils/read_text")
+async def read_text_file(path: str, max_bytes: int = 4 * 1024 * 1024):
+    """Read a small text file (default cap 4 MB). Used by align mode to
+    auto-load matched .txt/.srt files when batch-importing a video folder."""
+    try:
+        if not os.path.isfile(path):
+            return {"ok": False, "error": "file not found"}
+        size = os.path.getsize(path)
+        if size > max_bytes:
+            return {"ok": False, "error": f"檔案過大 ({size} bytes > {max_bytes})"}
+        with open(path, "rb") as f:
+            raw = f.read()
+        if raw.startswith(b"\xef\xbb\xbf"):
+            raw = raw[3:]
+        for enc in ("utf-8", "utf-16", "big5", "gbk"):
+            try:
+                return {"ok": True, "text": raw.decode(enc), "encoding": enc}
+            except UnicodeDecodeError:
+                continue
+        return {"ok": False, "error": "無法解碼（嘗試 utf-8/utf-16/big5/gbk 都失敗）"}
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
+
 @router.get("/api/v1/utils/browse_dir")
 async def browse_dir(path: str = ""):
     """列出指定路徑下的子資料夾（供網頁版目錄瀏覽器使用）。"""

@@ -104,6 +104,7 @@ export async function pickPath(inputId, type = 'folder') {
         if (data.path) {
             el.value = data.path;
             _autoFillCardName(el, inputId, data.path);
+            el.dispatchEvent(new Event('input', { bubbles: true }));
         }
     } catch (e) {
         console.error("Picker failed:", e);
@@ -488,7 +489,12 @@ export function setupInputDrop(inputId) {
             if (textData) path = textData.trim();
         }
 
-        if (path) el.value = path;
+        if (path) {
+            el.value = path;
+            // Notify state-tracking listeners (e.g. align-pair Map sync) since
+            // assigning `.value` doesn't fire `input` natively.
+            el.dispatchEvent(new Event('input', { bubbles: true }));
+        }
     });
 }
 

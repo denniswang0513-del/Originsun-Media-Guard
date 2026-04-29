@@ -16,6 +16,8 @@ AGENT_FILES = [
     "notifier.py",
     "drive_sync.py",
     "transcriber.py",
+    "aligner.py",  # align job（forced-align 文字稿到影片音訊）— 用 stable-ts，
+                   # agent 端 lazy import 時若沒裝 stable-ts 會優雅 fail
     "download_model.py",
     "taiwan_dict.json",
     "version.json",
@@ -93,6 +95,7 @@ LOCAL_MODULES = {
     "publish_update", "update_agent", "preflight", "ota_manifest",
     "patch_ui", "debug_compare",
     "backup_source", "env_setup", "extract_frames", "remove_all_emojis",
+    "aligner",  # root-level WIP module — align job 用，附在 AGENT_FILES
 }
 
 # ── Import name → pip package name mapping ──
@@ -122,6 +125,10 @@ SERVER_ONLY_PKGS = {
     "huggingface-hub",
     # DB packages — optional, agents use JSON fallback when not installed
     "sqlalchemy[asyncio]", "sqlalchemy", "asyncpg",
+    # stable-ts (Python module name `stable_whisper`) — align job 用，
+    # 只在 master 跑 alignment 時才需要；agent 不需要
+    "stable-ts", "stable_whisper",
+    "pysrt",  # SRT 解析，align job 用
 }
 
 # ── Import name corrections (scan finds lowercase but Python needs exact case) ──
@@ -135,6 +142,8 @@ OPTIONAL_IMPORTS = {
     "faster_whisper", "ctranslate2", "edge_tts", "f5_tts",
     "pydub", "playwright", "weasyprint", "tkinterdnd2",
     "cv2", "sklearn", "asyncpg", "sqlalchemy",
+    # align job 用的 stable-ts + pysrt；agent 不跑 align，沒裝 OK
+    "stable_whisper", "pysrt",
 }
 
 # ── Implicit deps (installing X also requires Y) ──

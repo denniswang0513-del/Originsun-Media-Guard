@@ -128,6 +128,37 @@ class TranscribeRequest(BaseModel):
     individual_mode: bool = False
     compute_hosts: list = []
 
+
+class AlignTask(BaseModel):
+    """One video ⇄ one transcript pair for forced alignment."""
+    source: str                          # Video file path
+    transcript: str                      # Raw transcript content (txt or srt body)
+    transcript_format: str = "auto"      # "auto" | "txt" | "srt"
+
+
+class AlignRequest(BaseModel):
+    """Force-align known transcripts to video audio, output SRT.
+
+    Per CLAUDE.md規劃 v4：使用者文字段落保留為字幕邊界，不自動分行；
+    錨點 + 線性內插保證頭尾對齊；字幕時間後處理（frame snap / min duration / gap）。
+    """
+    task_type: str = "align"
+    job_id: str = ""
+    project_name: str = ""
+    tasks: List[AlignTask]               # 1-to-1 video⇄transcript pairs
+    dest_dir: str
+    model_size: str = "turbo"
+    language: str = "zh"
+    anchor_threshold: float = 0.4
+    # Subtitle timing polish (專業字幕後處理)
+    subtitle_polish: bool = True
+    fps_override: Optional[float] = None  # None = auto-detect via ffprobe
+    min_duration: float = 1.0
+    max_duration: float = 7.0
+    min_gap_frames: int = 2
+    encoding_bom: bool = True             # UTF-8 BOM for Premiere compatibility
+    compute_hosts: list = []
+
 class TtsRequest(BaseModel):
     task_type: str = "tts"
     job_id: str = ""
