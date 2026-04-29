@@ -41,9 +41,17 @@ async def _categories_for_projects(
 
 
 def _slug_or_fallback(p: CrmProject) -> str:
-    """slug 沒設時用 project id 前 8 字元 fallback。
-    避免 '/works/' 空連結讓使用者點不進去；admin 自己填 slug 後立即生效。"""
-    return (p.public_slug or "").strip() or (p.id or "")[:8]
+    """slug 優先序：admin 自訂 > public_number（1, 2, 3...）> 'work' 兜底。
+
+    public_number 在第一次 publish 時 auto-assign（在 toggle_public），永久不變
+    避免 republish 改編號破壞 SEO 連結。fresh public 還沒分配 number → 用
+    'work' 字串避免空 URL；理論上不該發生（toggle_public 會分配）。"""
+    custom = (p.public_slug or "").strip()
+    if custom:
+        return custom
+    if p.public_number is not None:
+        return str(p.public_number)
+    return "work"
 
 
 def _to_public_dict(p: CrmProject, categories: Optional[list[str]] = None) -> dict:
@@ -103,17 +111,17 @@ async def list_public_projects(
 
 
 async def get_public_project_by_slug(session: AsyncSession, slug: str) -> Optional[dict]:
-    """單一公開作品詳情。slug 對得上 public_slug 直接拿；對不上就 fallback 到
-    用 id 前 8 字元當 slug 找（搭配 _slug_or_fallback）。"""
+    """單一公開作品詳情。slug 解析順序：
+       1. public_slug（admin 自訂語意 slug）
+       2. public_number（純數字 slug，第一次 publish 時 auto-assign）
+    """
     stmt = select(CrmProject).where(
         and_(CrmProject.public.is_(True), CrmProject.public_slug == slug)
     )
     project = (await session.execute(stmt)).scalar_one_or_none()
-    if not project and len(slug) == 8:
-        # fallback：把 slug 當 project id 前綴找
-        from sqlalchemy import func as _fn
+    if not project and slug.isdigit():
         stmt = select(CrmProject).where(
-            and_(CrmProject.public.is_(True), _fn.substring(CrmProject.id, 1, 8) == slug)
+            and_(CrmProject.public.is_(True), CrmProject.public_number == int(slug))
         )
         project = (await session.execute(stmt)).scalar_one_or_none()
     if not project:
@@ -178,7 +186,11 @@ async def update_project_public(
     updates: dict,
     category_ids: Optional[list[int]] = None,
 ) -> bool:
-    """更新 crm_projects.public_* 欄位 + 重置分類關聯。"""
+    """更新 crm_projects.public_* 欄位 + 重置分類關聯。
+
+    若 updates 把 public 從 False 切到 True 且 project 還沒分配 public_number，
+    自動 assign max+1。Unpublish 不釋放號碼避免 republish 編號跳動。
+    """
     project = await session.get(CrmProject, project_id)
     if not project:
         return False
@@ -186,6 +198,10 @@ async def update_project_public(
     for k, v in updates.items():
         if k in _UPDATABLE_FIELDS:
             setattr(project, k, v)
+
+    # First-publish auto-number
+    if project.public and project.public_number is None:
+        project.public_number = await _next_public_number(session)
 
     if category_ids is not None:
         await session.execute(
@@ -198,6 +214,24 @@ async def update_project_public(
 
     await session.commit()
     return True
+
+
+async def _next_public_number(session: AsyncSession) -> int:
+    """取下一個 public_number — 從 1 開始，避免跳號。"""
+    n = (await session.execute(
+        select(func.coalesce(func.max(CrmProject.public_number), 0) + 1)
+    )).scalar_one()
+    return int(n)
+
+
+async def assign_public_number_if_needed(session: AsyncSession, project_id: str) -> Optional[int]:
+    """showcase publish flow（_sync_showcase_to_public）也走這條 — 若 project
+    切到 public 但還沒有 number 就配一個。"""
+    project = await session.get(CrmProject, project_id)
+    if not project or not project.public or project.public_number is not None:
+        return None
+    project.public_number = await _next_public_number(session)
+    return project.public_number
 
 
 async def reorder_projects(session: AsyncSession, ordered_ids: list[str]) -> None:

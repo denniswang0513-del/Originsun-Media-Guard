@@ -310,17 +310,29 @@ async def _push_dist_to_nas(dist_dir: Path) -> tuple[int, str]:
     """scp -r dist/ 到 NAS。回傳 (returncode, log_tail)。
 
     用 scp -r 而非 rsync 因為 master Windows 內建 OpenSSH 沒 rsync。
-    Trade-off：scp 不刪 NAS 端 stale 檔（無 --delete），但 Astro 內容大多是
-    content-hashed 檔名（_astro/*.css 等），舊檔留著無害。/works/{slug}/
-    這種 path-based 頁面若刪除作品會殘留 — 由前端發布按鈕的「全清」選項處理（未來）。
+    scp 沒 --delete → stale 檔殘留問題：/works/{slug}/ 這類 path-based
+    頁面若 slug 改變或作品退掉 public，舊 dir 會留在 NAS。
+    解法：scp 之前先 ssh 清掉 path-based 子目錄（works / news），
+    其他 (_astro/、index.html 等) 由 scp 直接覆蓋即可。
     """
     if not dist_dir.exists():
         return 1, f"dist/ not found at {dist_dir}"
-    return await _run_subprocess(
+
+    # Step 1: clean stale path-based dirs on NAS（不能整個 dist 砍 — 會有
+    # 短暫 502；只清 path-based 那些）
+    cleanup_rc, cleanup_tail = await _run_subprocess(
+        "ssh-clean",
+        "ssh", "-i", _SSH_KEY_PATH, "-o", "StrictHostKeyChecking=no",
+        _NAS_HOST,
+        f"rm -rf {_NAS_DIST_DIR}/works {_NAS_DIST_DIR}/news 2>/dev/null; true",
+    )
+    # Step 2: scp 整個 dist（_astro hash 檔不刪、works/news 重建）
+    push_rc, push_tail = await _run_subprocess(
         "scp",
         "scp", "-i", _SSH_KEY_PATH, "-o", "StrictHostKeyChecking=no",
         "-r", str(dist_dir) + "/.", f"{_NAS_HOST}:{_NAS_DIST_DIR}/",
     )
+    return push_rc, f"=== ssh-clean ===\n{cleanup_tail}\n=== scp ===\n{push_tail}"
 
 
 async def _run_build(website_dir: Path) -> None:

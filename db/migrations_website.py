@@ -20,7 +20,7 @@ from typing import Callable
 logger = logging.getLogger(__name__)
 
 
-# ── ALTER TABLE: crm_projects 擴充 11 對外欄位 ──
+# ── ALTER TABLE: crm_projects 擴充 對外欄位 ──
 _CRM_PROJECTS_COLUMNS: list[tuple[str, str]] = [
     ("public", "BOOLEAN DEFAULT FALSE"),
     ("public_slug", "VARCHAR(100)"),
@@ -33,6 +33,10 @@ _CRM_PROJECTS_COLUMNS: list[tuple[str, str]] = [
     ("public_featured", "BOOLEAN DEFAULT FALSE"),
     ("public_sort_order", "INTEGER DEFAULT 0"),
     ("public_published_at", "TIMESTAMPTZ"),
+    # 對外作品編號（1, 2, 3, ...）— slug 沒設時走這個。
+    # 第一次 publish 時 auto-assign max+1，永久綁定（unpublish 不釋放號碼，
+    # 避免 republish 時編號改變破壞 permalink / Google 索引）。
+    ("public_number", "INTEGER"),
 ]
 
 # ── ALTER TABLE: crm_staff 擴充 ──
@@ -140,7 +144,25 @@ _CREATE_INDEXES: list[str] = [
     "CREATE INDEX IF NOT EXISTS idx_crmproj_public ON crm_projects (public)",
     "CREATE INDEX IF NOT EXISTS idx_crmproj_featured ON crm_projects (public_featured)",
     "CREATE INDEX IF NOT EXISTS idx_crmproj_slug ON crm_projects (public_slug)",
+    "CREATE UNIQUE INDEX IF NOT EXISTS idx_crmproj_pubnum ON crm_projects (public_number) WHERE public_number IS NOT NULL",
 ]
+
+
+# 既有公開作品 backfill：第一次跑時依 published_at 給 1,2,3...
+# 之後新 publish 走 auto-assign（max+1）邏輯。
+_BACKFILL_PUBLIC_NUMBER = """
+WITH numbered AS (
+    SELECT id, ROW_NUMBER() OVER (
+        ORDER BY public_published_at NULLS LAST, created_at NULLS LAST, id
+    ) AS rn
+    FROM crm_projects
+    WHERE public IS TRUE AND public_number IS NULL
+)
+UPDATE crm_projects
+   SET public_number = numbered.rn
+  FROM numbered
+ WHERE crm_projects.id = numbered.id
+"""
 
 
 async def run_website_migrations(session_factory: Callable) -> None:
@@ -166,6 +188,8 @@ async def run_website_migrations(session_factory: Callable) -> None:
         *[f"ALTER TABLE website_categories ADD COLUMN IF NOT EXISTS {c} {t}"
           for c, t in _WEBCAT_COLUMNS],
         *_CREATE_INDEXES,
+        # 既有 public 作品 backfill 編號（idempotent — 已有 public_number 的會跳過）
+        _BACKFILL_PUBLIC_NUMBER,
     ]
 
     async with session_factory() as session:

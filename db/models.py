@@ -205,6 +205,7 @@ class CrmProject(Base):
     public_featured = Column(Boolean, nullable=True, default=False)
     public_sort_order = Column(Integer, nullable=True, default=0)
     public_published_at = Column(DateTime(timezone=True), nullable=True)
+    public_number = Column(Integer, nullable=True)  # 1, 2, 3...slug 沒設時用
 
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now())

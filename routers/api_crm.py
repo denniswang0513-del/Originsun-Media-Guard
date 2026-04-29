@@ -4147,6 +4147,10 @@ async def _sync_showcase_to_public(session, sc) -> None:
         project.public_youtube_id = yt_id
     project.public = bool(sc.published)
     project.public_published_at = sc.published_at if sc.published else None
+    # 第一次 publish → auto-assign 連續編號（unpublish 不收回，避免 republish 改號）
+    if project.public and project.public_number is None:
+        from services.website.project_service import _next_public_number
+        project.public_number = await _next_public_number(session)
 
 
 async def _mint_showcase_edit_token(
