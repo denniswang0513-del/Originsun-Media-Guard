@@ -8,7 +8,7 @@ import CategoryFilter from "../../components/works/CategoryFilter.astro";
 import WorkCard from "../../components/works/WorkCard.astro";
 import Tr from "../../components/ui/Tr.astro";
 import { fetchMeta, fetchCategories, fetchAllWorksCached } from "../../lib/crm-client";
-import { buildBasicPageSeo } from "../../lib/seo";
+import { buildBasicPageSeo, breadcrumb2 } from "../../lib/seo";
 
 const [meta, allWorks, categories] = await Promise.all([
     fetchMeta(),
@@ -30,6 +30,7 @@ const seo = buildBasicPageSeo(Astro, {
     description: activeName
         ? `${meta.company_name_zh} ${activeName} 類別作品集 — 從商業廣告、紀錄片到活動紀錄，瀏覽 ${meta.company_name_zh} 影像製作成果。`
         : `${meta.company_name_zh}歷年作品集 — 商業廣告、紀錄片、活動紀錄、動畫設計，共 ${allWorks.length} 件作品按類別瀏覽，台北中山影像製作公司。`,
+    breadcrumbs: breadcrumb2("作品集", "/works"),
 });
 ---
 

@@ -7,7 +7,7 @@ import BaseLayout from "../layouts/BaseLayout.astro";
 import Tr from "../components/ui/Tr.astro";
 import { fetchMeta, fetchServices, fetchCategories } from "../lib/crm-client";
 import { iconChar, warnUnknownIcons } from "../lib/service-icons";
-import { buildBasicPageSeo } from "../lib/seo";
+import { buildBasicPageSeo, breadcrumb2, pageSchemas, resolveSiteUrl } from "../lib/seo";
 
 const [meta, services, categories] = await Promise.all([
     fetchMeta(),
@@ -18,10 +18,14 @@ const [meta, services, categories] = await Promise.all([
 const catBySlug = new Map(categories.map(c => [c.slug, c]));
 warnUnknownIcons(services.map(s => s.icon), "services.astro");
 
+const siteUrl = resolveSiteUrl(Astro.site);
 const seo = buildBasicPageSeo(Astro, {
     title: "服務項目 Services",
     description: `${meta.company_name_zh}服務項目 — 商業廣告、紀錄片、活動紀錄、動畫設計一條龍製作。從前期腳本發想到後期交付，台北中山專業影像團隊。`,
+    breadcrumbs: breadcrumb2("服務項目", "/services"),
 });
+// 每個服務一個 Service schema → Google 服務搜尋
+seo.schemaData.push(...services.map(s => pageSchemas.service(s, meta, siteUrl)));
 ---
 
 <BaseLayout {...seo} meta={meta}>

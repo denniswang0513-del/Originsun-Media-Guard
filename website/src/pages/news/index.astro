@@ -9,7 +9,7 @@ import { fetchMeta } from "../../lib/crm-client";
 import { fetchPosts } from "../../lib/posts";
 import { fetchCategories } from "../../lib/categories";
 import { placeholderImage } from "../../lib/youtube";
-import { buildBasicPageSeo } from "../../lib/seo";
+import { buildBasicPageSeo, breadcrumb2 } from "../../lib/seo";
 
 const [meta, posts, categories] = await Promise.all([
     fetchMeta(),
@@ -23,6 +23,7 @@ const heroBgUrl = placeholderImage("news_hero_studio", 2400, 900);
 const seo = buildBasicPageSeo(Astro, {
     title: "影像專欄 Insight",
     description: `${meta.company_name_zh}影像專欄 Insight — 團隊分享製作幕後、業界觀察、技術筆記與作品故事，幫助你理解影像製作的每個階段。`,
+    breadcrumbs: breadcrumb2("影像專欄", "/news"),
 });
 ---
 

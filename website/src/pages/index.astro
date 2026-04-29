@@ -23,13 +23,15 @@ import Testimonials from "../components/home/Testimonials.astro";
 import HomeInsight from "../components/home/HomeInsight.astro";
 import FAQ from "../components/home/FAQ.astro";
 import ContactCTA from "../components/home/ContactCTA.astro";
-import { fetchMeta, fetchFeatured } from "../lib/crm-client";
+import { fetchMeta, fetchFeatured, fetchFaqs, fetchTestimonials } from "../lib/crm-client";
 import { pageSchemas, resolveSiteUrl, ensureMinDescription } from "../lib/seo";
 import { LIMITS } from "../lib/config";
 
-const [meta, featured] = await Promise.all([
+const [meta, featured, faqs, testimonials] = await Promise.all([
     fetchMeta(),
     fetchFeatured(LIMITS.HOME_FEATURED),
+    fetchFaqs(),
+    fetchTestimonials(),
 ]);
 
 // Show real published works only — no FAKE_FEATURED padding. The grid
@@ -41,7 +43,21 @@ const description = ensureMinDescription(
     meta.seo_default_description,
     `${meta.company_name_zh}（${meta.company_name_en}）— 商業廣告、紀錄片、活動紀錄、動畫設計，台北中山專業影像製作公司。`,
 );
-const schemaData = [pageSchemas.organization(meta, siteUrl)];
+
+// 全部從 admin「網站設定 + SEO 內容」即時來源生成，無寫死。
+const schemaData = [
+    pageSchemas.organization(meta, siteUrl),
+    pageSchemas.localBusiness(meta, siteUrl),
+    pageSchemas.website(meta, siteUrl),
+    ...pageSchemas.testimonialBundle(testimonials),
+];
+
+const visibleFaqs = faqs.filter(f => f.visible);
+if (visibleFaqs.length > 0) {
+    schemaData.push(pageSchemas.faqPage(
+        visibleFaqs.map(f => ({ question: f.question_zh, answer: f.answer_zh })),
+    ));
+}
 ---
 
 <BaseLayout title={meta.company_name_zh}

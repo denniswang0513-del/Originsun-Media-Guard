@@ -7,7 +7,7 @@ import Tr from "../../components/ui/Tr.astro";
 import { fetchMeta } from "../../lib/crm-client";
 import { fetchPosts, fetchPostBySlug } from "../../lib/posts";
 import { isValidYouTubeId } from "../../lib/youtube";
-import { pageSchemas, resolveSiteUrl, ensureMinDescription } from "../../lib/seo";
+import { pageSchemas, resolveSiteUrl, ensureMinDescription, breadcrumb3 } from "../../lib/seo";
 import type { PostBlockWidth } from "../../types/post";
 
 const WIDTH_CLASS: Record<PostBlockWidth, string> = {
@@ -55,13 +55,13 @@ const publishedDate = new Date(post.published_at).toLocaleDateString("zh-TW", {
 });
 
 const siteUrl = resolveSiteUrl(Astro.site);
-const postUrl = `${siteUrl}/news/${post.slug}`;
 const description = ensureMinDescription(
     post.excerpt,
     `${post.title} — ${meta.company_name_zh}影像專欄 Insight，分享影像製作幕後與業界觀察。`,
 );
 const schemaData = [
-    pageSchemas.webPage({ title: post.title, description, url: postUrl }),
+    pageSchemas.newsArticle(post, meta, siteUrl),
+    pageSchemas.breadcrumb(breadcrumb3("影像專欄", "/news", post.title, `/news/${post.slug}`), siteUrl),
 ];
 ---
 

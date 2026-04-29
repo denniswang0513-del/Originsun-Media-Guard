@@ -11,7 +11,7 @@ import type { IService } from "../types/service";
 import type { IWebsiteMeta } from "../types/meta";
 import type { IPost } from "../types/post";
 import type {
-    SchemaObject, BreadcrumbItem, FAQItem, ReviewItem, RatingStats,
+    SchemaObject, BreadcrumbItem, FAQItem, ReviewItem, RatingStats, ITestimonial,
 } from "../types/seo";
 
 const SCHEMA_CTX = "https://schema.org";
@@ -44,19 +44,43 @@ export function ensureMinDescription(
  * 通用頁面 SEO baseline — 給沒有更專屬 schema 的頁面用
  *
  * 回傳 { title, description, schemaData } 可直接展開到 BaseLayout：
- *   const seo = buildBasicPageSeo(Astro, { title, description });
+ *   const seo = buildBasicPageSeo(Astro, {
+ *       title, description,
+ *       breadcrumbs: breadcrumb2('作品集', '/works'),
+ *   });
  *   <BaseLayout {...seo} meta={meta}>
+ *
+ * 傳 breadcrumbs 自動加 BreadcrumbList schema 給 SERP 麵包屑使用。
  */
 export function buildBasicPageSeo(
     astro: { url: URL; site: URL | undefined },
-    opts: { title: string; description: string },
+    opts: {
+        title: string;
+        description: string;
+        breadcrumbs?: BreadcrumbItem[];
+    },
 ): { title: string; description: string; schemaData: SchemaObject[] } {
     const url = canonicalUrl(astro.site, astro.url.pathname);
-    return {
-        title: opts.title,
-        description: opts.description,
-        schemaData: [pageSchemas.webPage({ title: opts.title, description: opts.description, url })],
-    };
+    const schemaData: SchemaObject[] = [
+        pageSchemas.webPage({ title: opts.title, description: opts.description, url }),
+    ];
+    if (opts.breadcrumbs?.length) {
+        schemaData.push(pageSchemas.breadcrumb(opts.breadcrumbs, resolveSiteUrl(astro.site)));
+    }
+    return { title: opts.title, description: opts.description, schemaData };
+}
+
+
+// ── BreadcrumbList 預設「首頁 → ...」起點，集中字串避免 6+ 頁重複 ──
+
+const HOME_CRUMB: BreadcrumbItem = { name: "首頁", url: "/" };
+
+export function breadcrumb2(name: string, url: string): BreadcrumbItem[] {
+    return [HOME_CRUMB, { name, url }];
+}
+
+export function breadcrumb3(midName: string, midUrl: string, leafName: string, leafUrl: string): BreadcrumbItem[] {
+    return [HOME_CRUMB, { name: midName, url: midUrl }, { name: leafName, url: leafUrl }];
 }
 
 
@@ -196,6 +220,28 @@ export const pageSchemas = {
             bestRating: stats.bestRating ?? 5,
             worstRating: stats.worstRating ?? 1,
         };
+    },
+
+    /**
+     * Testimonial 套組 — 從 admin Tab 的 testimonials 表生成 Review + AggregateRating。
+     * `includeReviews=N` 額外輸出前 N 則 Review schema（首頁通常只要 AggregateRating
+     * 摘要，about 頁可以鋪 5 則完整 Review）。空 list 直接回 [] 不汙染 schemaData。
+     */
+    testimonialBundle(testimonials: ITestimonial[], opts: { includeReviews?: number } = {}): SchemaObject[] {
+        const visible = testimonials.filter(t => t.visible);
+        if (!visible.length) return [];
+        const avg = Number((visible.reduce((s, t) => s + t.rating, 0) / visible.length).toFixed(1));
+        const out: SchemaObject[] = [];
+        if (opts.includeReviews) {
+            out.push(...visible.slice(0, opts.includeReviews).map(t => pageSchemas.review({
+                author: t.author_zh,
+                rating: t.rating,
+                body: t.content_zh ?? undefined,
+                datePublished: t.date_published ?? undefined,
+            })));
+        }
+        out.push(pageSchemas.aggregateRating({ ratingValue: avg, reviewCount: visible.length }));
+        return out;
     },
 
     /** Review — 單則客戶證言 */

@@ -16,7 +16,7 @@
 import BaseLayout from "../layouts/BaseLayout.astro";
 import Tr from "../components/ui/Tr.astro";
 import { fetchMeta, fetchAllWorksCached } from "../lib/crm-client";
-import { buildBasicPageSeo } from "../lib/seo";
+import { buildBasicPageSeo, breadcrumb2 } from "../lib/seo";
 import type { IPublicProject } from "../types/project";
 
 const [meta, allWorks] = await Promise.all([
@@ -47,6 +47,7 @@ const totalCount = allWorks.length;
 const seo = buildBasicPageSeo(Astro, {
     title: "歷年作品 Portfolio",
     description: `${meta.company_name_zh}歷年作品列表 — 共 ${totalCount} 件影像製作作品按年份排序，含商業廣告、紀錄片、活動紀錄、動畫設計，可列印或另存 PDF。`,
+    breadcrumbs: breadcrumb2("歷年作品", "/portfolio"),
 });
 ---
 

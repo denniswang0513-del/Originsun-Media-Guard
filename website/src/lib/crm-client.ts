@@ -17,6 +17,7 @@ import type {
 import type { ICategory } from "../types/category";
 import type { IService } from "../types/service";
 import type { ITeamMember, IWebsiteMeta } from "../types/meta";
+import type { IFAQ, ITestimonial, IQuickFact } from "../types/seo";
 
 
 async function _get<T>(path: string): Promise<T> {
@@ -129,6 +130,33 @@ export async function fetchTeam(): Promise<ITeamMember[]> {
     );
     return data.items;
 }
+
+
+/**
+ * 對 SSG build 期間多頁共用的 list endpoint memoize：N 頁需要 = 1 次 HTTP。
+ * 空陣列不 cache（API 短暫離線後重試能拿到真資料）。
+ */
+function _memoizeList<T>(loader: () => Promise<{ items: T[] }>): () => Promise<T[]> {
+    let cache: Promise<T[]> | null = null;
+    return async () => {
+        if (cache) {
+            const v = await cache;
+            if (v.length > 0) return v;
+            cache = null;
+        }
+        cache = loader().then(d => d.items);
+        return cache;
+    };
+}
+
+export const fetchFaqs = _memoizeList<IFAQ>(() =>
+    _safeGet<{ items: IFAQ[] }>("/api/website/faqs", { items: [] }, "fetchFaqs"));
+
+export const fetchTestimonials = _memoizeList<ITestimonial>(() =>
+    _safeGet<{ items: ITestimonial[] }>("/api/website/testimonials", { items: [] }, "fetchTestimonials"));
+
+export const fetchQuickFacts = _memoizeList<IQuickFact>(() =>
+    _safeGet<{ items: IQuickFact[] }>("/api/website/quick_facts", { items: [] }, "fetchQuickFacts"));
 
 
 /**

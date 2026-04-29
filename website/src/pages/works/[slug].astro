@@ -7,7 +7,7 @@
 import BaseLayout from "../../layouts/BaseLayout.astro";
 import { fetchMeta, fetchWorkBySlug, fetchAllWorksCached } from "../../lib/crm-client";
 import { isValidYouTubeId, resolveThumbnail } from "../../lib/youtube";
-import { pageSchemas, resolveSiteUrl, ensureMinDescription } from "../../lib/seo";
+import { pageSchemas, resolveSiteUrl, ensureMinDescription, breadcrumb3 } from "../../lib/seo";
 
 export async function getStaticPaths() {
     const items = await fetchAllWorksCached();
@@ -35,9 +35,12 @@ const description = ensureMinDescription(
     work.description || work.title,
     [work.client, work.year, `${meta.company_name_zh}作品`].filter(Boolean).join(" · "),
 );
-const schemaData = isValidYouTubeId(work.youtube_id)
-    ? [pageSchemas.videoObject(work, siteUrl)]
-    : [pageSchemas.webPage({ title: work.title, description, url: workUrl })];
+const schemaData = [
+    isValidYouTubeId(work.youtube_id)
+        ? pageSchemas.videoObject(work, siteUrl)
+        : pageSchemas.webPage({ title: work.title, description, url: workUrl }),
+    pageSchemas.breadcrumb(breadcrumb3("作品集", "/works", work.title, `/works/${work.slug}`), siteUrl),
+];
 
 // Credits 排序 + 中英對照
 const CREDIT_EN: Record<string, string> = {

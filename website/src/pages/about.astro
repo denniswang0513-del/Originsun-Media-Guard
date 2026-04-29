@@ -7,12 +7,13 @@
  */
 import BaseLayout from "../layouts/BaseLayout.astro";
 import Tr from "../components/ui/Tr.astro";
-import { fetchMeta, fetchTeam } from "../lib/crm-client";
-import { buildBasicPageSeo } from "../lib/seo";
+import { fetchMeta, fetchTeam, fetchTestimonials } from "../lib/crm-client";
+import { buildBasicPageSeo, breadcrumb2, pageSchemas } from "../lib/seo";
 
-const [meta, team] = await Promise.all([
+const [meta, team, testimonials] = await Promise.all([
     fetchMeta(),
     fetchTeam(),
+    fetchTestimonials(),
 ]);
 
 // 地圖連結：如果有地址就產 Google Maps 導航 URL
@@ -23,7 +24,10 @@ const mapsUrl = meta.address
 const seo = buildBasicPageSeo(Astro, {
     title: "關於我們 About",
     description: `${meta.company_name_zh}（${meta.company_name_en}）團隊介紹 — 位於台北中山的影像製作公司，提供商業廣告、紀錄片、活動紀錄與動畫設計一條龍服務。`,
+    breadcrumbs: breadcrumb2("關於我們", "/about"),
 });
+// 5 則完整 Review + AggregateRating（JSON-LD 過長會拖慢 Google parse；5 則是 Google 建議上限）
+seo.schemaData.push(...pageSchemas.testimonialBundle(testimonials, { includeReviews: 5 }));
 ---
 
 <BaseLayout {...seo} meta={meta}>
