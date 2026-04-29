@@ -417,6 +417,9 @@ async def _on_startup():
                            )
                         """,
                         "ALTER TABLE crm_projects DROP COLUMN IF EXISTS receipt_path",
+                        # freeform sc.tags 廢除，統一走 website_categories（kind=tag）。
+                        # 舊資料一併刪除（使用者確認）。
+                        "ALTER TABLE crm_project_showcase DROP COLUMN IF EXISTS tags",
                     ]:
                         try:
                             await _sex.execute(_tex(col_sql))
@@ -527,7 +530,6 @@ async def _on_startup():
                             process_mode VARCHAR(16) NOT NULL DEFAULT 'gallery',
                             process_items JSONB,
                             credits JSONB,
-                            tags JSONB,
                             slug VARCHAR(128) UNIQUE,
                             published BOOLEAN NOT NULL DEFAULT FALSE,
                             published_at TIMESTAMPTZ,

@@ -29,6 +29,7 @@ class CategoryPublicResponse(BaseModel):
     name_zh: str
     name_en: Optional[str] = None
     count: int = 0
+    kind: str = "category"  # 'category' | 'tag'
 
 
 class CategoryAdminResponse(BaseModel):
@@ -40,6 +41,7 @@ class CategoryAdminResponse(BaseModel):
     cover_image: Optional[str] = None
     sort_order: int = 0
     visible: bool = True
+    kind: str = "category"
     project_count: int = 0
 
 
@@ -51,6 +53,7 @@ class CategoryCreate(BaseModel):
     cover_image: Optional[str] = None
     sort_order: int = 0
     visible: bool = True
+    kind: str = Field("category", pattern=r"^(category|tag)$")
 
 
 class CategoryUpdate(BaseModel):
@@ -61,6 +64,7 @@ class CategoryUpdate(BaseModel):
     cover_image: Optional[str] = None
     sort_order: Optional[int] = None
     visible: Optional[bool] = None
+    kind: Optional[str] = Field(None, pattern=r"^(category|tag)$")
 
 
 class CategoryReorder(BaseModel):
@@ -163,6 +167,9 @@ class WorkCreateRequest(BaseModel):
     name: str = Field(..., min_length=1, max_length=200)
     client_id: Optional[str] = None
     year: Optional[int] = None
+    # 一次帶上分類 + 標籤 ID（共用同一張 website_categories 表，後端不分 kind）。
+    # 空 list / None 都允許，使用者也可以晚點再進編輯頁勾選。
+    category_ids: Optional[list[int]] = None
 
 
 class WorkCreateResponse(BaseModel):

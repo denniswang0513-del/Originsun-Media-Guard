@@ -18,17 +18,29 @@ export default async function render(container, ctx = {}) {
         return;
     }
 
+    const catCount = _cats.filter(c => (c.kind || 'category') === 'category').length;
+    const tagCount = _cats.filter(c => c.kind === 'tag').length;
     container.innerHTML = `
-        <h2>🏷️ 作品分類 <span style="color:#888;font-size:13px;font-weight:400;">· ${_cats.length} 類</span></h2>
+        <h2>🏷️ 作品分類 / 標籤 <span style="color:#888;font-size:13px;font-weight:400;">· ${catCount} 分類 + ${tagCount} 標籤</span></h2>
 
         <div class="card" style="margin-bottom:12px;">
-            <h3 style="color:#fff;margin:0 0 8px 0;font-size:13px;">新增分類</h3>
-            <div style="display:grid;grid-template-columns:repeat(4,1fr) auto;gap:8px;align-items:end;">
-                <div><label style="color:#888;font-size:11px;">slug</label><input id="cat-new-slug" type="text" style="width:100%;" placeholder="e.g. tvc" /></div>
-                <div><label style="color:#888;font-size:11px;">中文名</label><input id="cat-new-name-zh" type="text" style="width:100%;" placeholder="商業廣告" /></div>
+            <h3 style="color:#fff;margin:0 0 8px 0;font-size:13px;">新增</h3>
+            <div style="display:grid;grid-template-columns:90px repeat(4,1fr) auto;gap:8px;align-items:end;">
+                <div><label style="color:#888;font-size:11px;">類型</label>
+                    <select id="cat-new-kind" style="width:100%;">
+                        <option value="category">分類</option>
+                        <option value="tag">標籤</option>
+                    </select>
+                </div>
+                <div><label style="color:#888;font-size:11px;">slug</label><input id="cat-new-slug" type="text" style="width:100%;" placeholder="e.g. tvc / exhibition" /></div>
+                <div><label style="color:#888;font-size:11px;">中文名</label><input id="cat-new-name-zh" type="text" style="width:100%;" placeholder="商業廣告 / 展覽" /></div>
                 <div><label style="color:#888;font-size:11px;">英文名（選填）</label><input id="cat-new-name-en" type="text" style="width:100%;" /></div>
                 <div><label style="color:#888;font-size:11px;">排序</label><input id="cat-new-sort" type="number" value="0" style="width:100%;" /></div>
                 <button class="btn" onclick="window._websiteCreateCategory()">+ 新增</button>
+            </div>
+            <div style="color:#666;font-size:11px;margin-top:8px;">
+                <strong>分類</strong>：製作類型（形象/廣告/MV…）　<strong>標籤</strong>：使用場景（展覽/講座…）。
+                兩者共用 slug，名稱不能撞。對外作品頁會分兩排顯示。
             </div>
         </div>
 
@@ -42,17 +54,23 @@ export default async function render(container, ctx = {}) {
 function _renderTable() {
     const t = document.getElementById('cat-table');
     if (!_cats.length) {
-        t.innerHTML = '<tr><td colspan="6" style="padding:30px;text-align:center;color:#888;">尚無分類</td></tr>';
+        t.innerHTML = '<tr><td colspan="9" style="padding:30px;text-align:center;color:#888;">尚無分類</td></tr>';
         return;
     }
     t.innerHTML = `
         <thead><tr>
-            <th>ID</th><th>Slug</th><th>中文名</th><th>英文名</th><th>作品數</th><th>可見</th><th>排序</th><th>操作</th>
+            <th>ID</th><th>類型</th><th>Slug</th><th>中文名</th><th>英文名</th><th>作品數</th><th>可見</th><th>排序</th><th>操作</th>
         </tr></thead>
         <tbody>
             ${_cats.map(c => `
                 <tr>
                     <td style="color:#666;font-size:11px;">${c.id}</td>
+                    <td>
+                        <select data-id="${c.id}" data-field="kind" style="width:80px;">
+                            <option value="category" ${(c.kind || 'category') === 'category' ? 'selected' : ''}>分類</option>
+                            <option value="tag" ${c.kind === 'tag' ? 'selected' : ''}>標籤</option>
+                        </select>
+                    </td>
                     <td><input data-id="${c.id}" data-field="slug" value="${esc(c.slug)}" style="width:100px;" /></td>
                     <td><input data-id="${c.id}" data-field="name_zh" value="${esc(c.name_zh)}" style="width:140px;" /></td>
                     <td><input data-id="${c.id}" data-field="name_en" value="${esc(c.name_en || '')}" style="width:140px;" /></td>
@@ -73,6 +91,7 @@ window._websiteSaveCat = async (id) => {
     const patch = {};
     document.querySelectorAll(`#cat-table [data-id="${id}"]`).forEach(el => {
         const f = el.dataset.field;
+        // <select> 在 input/checkbox/number 三分支之外，落到 default 取 .value 即可
         patch[f] = el.type === 'checkbox' ? el.checked : (el.type === 'number' ? Number(el.value) : el.value);
     });
     try {
@@ -95,6 +114,7 @@ window._websiteDeleteCat = async (id) => {
 
 window._websiteCreateCategory = async () => {
     const body = {
+        kind: document.getElementById('cat-new-kind').value || 'category',
         slug: document.getElementById('cat-new-slug').value.trim(),
         name_zh: document.getElementById('cat-new-name-zh').value.trim(),
         name_en: document.getElementById('cat-new-name-en').value.trim() || null,

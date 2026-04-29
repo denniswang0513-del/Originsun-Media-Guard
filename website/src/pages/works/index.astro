@@ -16,6 +16,10 @@ const [meta, allWorks, categories] = await Promise.all([
 ]);
 
 const activeCategory = Astro.url.searchParams.get("category") || null;
+
+// 依 kind 切兩排：分類（製作類型）+ 標籤（使用場景）。舊資料 kind 為空當分類處理。
+const cats = categories.filter(c => (c.kind ?? "category") === "category");
+const tags = categories.filter(c => c.kind === "tag");
 ---
 
 <BaseLayout title="作品集 Works" meta={meta}>
@@ -28,7 +32,10 @@ const activeCategory = Astro.url.searchParams.get("category") || null;
                 </h1>
             </div>
 
-            <CategoryFilter categories={categories} activeSlug={activeCategory} />
+            <CategoryFilter categories={cats} activeSlug={activeCategory} label="分類" />
+            {tags.length > 0 && (
+                <CategoryFilter categories={tags} activeSlug={activeCategory} showAll={false} label="標籤" />
+            )}
 
             <div id="works-grid"
                  data-active-category={activeCategory || ""}

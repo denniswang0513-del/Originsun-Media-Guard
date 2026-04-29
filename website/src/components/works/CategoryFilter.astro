@@ -1,6 +1,9 @@
 ---
 /**
- * CategoryFilter.astro — 作品集分類 pills（白底）
+ * CategoryFilter.astro — 作品集分類 / 標籤 pills（白底）
+ *
+ * showAll=true 時渲染「全部」chip（第一排放，第二排不放避免重複）。
+ * label 標題顯示在 chip 列前方左側（如「分類」「標籤」）；空字串則隱藏。
  */
 import type { ICategory } from "../../types/category";
 import Tr from "../ui/Tr.astro";
@@ -9,20 +12,33 @@ interface Props {
     categories: ICategory[];
     activeSlug?: string | null;
     basePath?: string;
+    showAll?: boolean;
+    label?: string;
 }
-const { categories, activeSlug = null, basePath = "/works" } = Astro.props;
+const {
+    categories,
+    activeSlug = null,
+    basePath = "/works",
+    showAll = true,
+    label = "",
+} = Astro.props;
 ---
 
-<div class="flex flex-wrap gap-2 mb-12 justify-center">
-    <a href={basePath}
-       class:list={[
-           "px-5 py-2 text-xs tracking-[0.25em] uppercase border transition-colors",
-           !activeSlug
-               ? "border-neutral-900 bg-neutral-900 text-white"
-               : "border-neutral-300 text-neutral-500 hover:border-neutral-900 hover:text-neutral-900",
-       ]}>
-        <Tr k="works_filter_all" />
-    </a>
+<div class="flex flex-wrap gap-2 mb-6 justify-center items-center">
+    {label && (
+        <span class="text-xs tracking-[0.3em] uppercase text-neutral-400 mr-2">{label}</span>
+    )}
+    {showAll && (
+        <a href={basePath}
+           class:list={[
+               "px-5 py-2 text-xs tracking-[0.25em] uppercase border transition-colors",
+               !activeSlug
+                   ? "border-neutral-900 bg-neutral-900 text-white"
+                   : "border-neutral-300 text-neutral-500 hover:border-neutral-900 hover:text-neutral-900",
+           ]}>
+            <Tr k="works_filter_all" />
+        </a>
+    )}
     {categories.map(cat => (
         <a href={`${basePath}?category=${cat.slug}`}
            class:list={[

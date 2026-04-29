@@ -228,29 +228,46 @@ window._websiteEditWork = async (pid) => {
 // ══════════════════════════════════════════════════════════
 
 window._websiteNewWork = async () => {
-    let clients = [];
-    try {
-        const r = await websiteFetch('/api/website/admin/clients/lookup');
-        clients = r?.items || [];
-    } catch (e) {
-        // 允許無客戶列表（使用者可不選），但留 console 痕跡 — 否則
-        // 端點 500 了 dropdown 顯示「無結果」，使用者只看得到空選單。
-        console.warn('[website/works] clients/lookup 失敗:', e.message || e);
+    // 並行抓客戶 + 分類，兩個都允許失敗（給空陣列 fallback）— 任一個壞掉
+    // 不該擋住整個新增流程。失敗時 console.warn 留痕跡。
+    const [clients, allCats] = await Promise.all([
+        websiteFetch('/api/website/admin/clients/lookup')
+            .then(r => r?.items || [])
+            .catch(e => { console.warn('[website/works] clients/lookup 失敗:', e.message || e); return []; }),
+        websiteFetch('/api/website/admin/categories')
+            .then(r => r?.items || [])
+            .catch(e => { console.warn('[website/works] categories 失敗:', e.message || e); return []; }),
+    ]);
+
+    const cats = allCats.filter(c => (c.kind || 'category') === 'category');
+    const tags = allCats.filter(c => c.kind === 'tag');
+    const _opt = (c) => ({ value: c.id, label: c.name_zh });
+
+    const fields = [
+        { key: 'name', label: '作品名稱', type: 'text', required: true, autofocus: true },
+        { key: 'client_id', label: '客戶（可選）', type: 'select', searchable: true,
+          placeholder: '輸入客戶名稱搜尋…',
+          options: [{ value: '', label: '（不指定）' },
+                    ...clients.map(c => ({ value: c.id, label: c.name }))] },
+        { key: 'year', label: '年份（可選）', type: 'number',
+          placeholder: `例如 ${new Date().getFullYear()}` },
+    ];
+    if (cats.length) {
+        fields.push({ type: 'divider' });
+        fields.push({ key: 'category_ids', label: '分類（可複選）', type: 'checkboxes',
+                      options: cats.map(_opt) });
+    }
+    if (tags.length) {
+        if (!cats.length) fields.push({ type: 'divider' });
+        fields.push({ key: 'tag_ids', label: '標籤（可複選）', type: 'checkboxes',
+                      options: tags.map(_opt) });
     }
 
     window._createFormModal({
         id: 'website-new-work-modal',
         title: '➕ 新增作品',
         submitLabel: '建立並開編輯',
-        fields: [
-            { key: 'name', label: '作品名稱', type: 'text', required: true, autofocus: true },
-            { key: 'client_id', label: '客戶（可選）', type: 'select', searchable: true,
-              placeholder: '輸入客戶名稱搜尋…',
-              options: [{ value: '', label: '（不指定）' },
-                        ...clients.map(c => ({ value: c.id, label: c.name }))] },
-            { key: 'year', label: '年份（可選）', type: 'number',
-              placeholder: `例如 ${new Date().getFullYear()}` },
-        ],
+        fields,
         onSubmit: async (vals, setError, close) => {
             const name = (vals.name || '').trim();
             if (!name) { setError('請輸入作品名稱'); return; }
@@ -258,6 +275,10 @@ window._websiteNewWork = async () => {
             if (vals.client_id) payload.client_id = vals.client_id;
             const year = Number(vals.year);
             if (year) payload.year = year;
+            // checkbox 收回的是 string[]，後端要 int[]
+            const ids = [...(vals.category_ids || []), ...(vals.tag_ids || [])]
+                .map(Number).filter(n => Number.isFinite(n));
+            if (ids.length) payload.category_ids = ids;
             try {
                 const r = await websiteFetch('/api/website/admin/works/create', {
                     method: 'POST', body: payload,

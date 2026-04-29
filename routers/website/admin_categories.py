@@ -17,7 +17,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from ._common import admin_session
 from core.schemas_website import CategoryCreate, CategoryReorder, CategoryUpdate
-from services.website import category_service
+from services.website import category_service, rebuild_service
 
 router = APIRouter(prefix="/api/website/admin", tags=["website-admin-categories"])
 
@@ -34,9 +34,11 @@ async def create_category(
     session: AsyncSession = Depends(admin_session),
 ):
     try:
-        return await category_service.create_category(session, req.model_dump())
+        result = await category_service.create_category(session, req.model_dump())
     except IntegrityError:
         raise HTTPException(status_code=409, detail=f"Slug '{req.slug}' already exists")
+    await rebuild_service.mark_dirty()
+    return result
 
 
 @router.put("/categories/{category_id}")
@@ -50,6 +52,7 @@ async def update_category(
     )
     if not item:
         raise HTTPException(status_code=404, detail="Category not found")
+    await rebuild_service.mark_dirty()
     return item
 
 
@@ -61,6 +64,7 @@ async def delete_category(
     ok = await category_service.delete_category(session, category_id)
     if not ok:
         raise HTTPException(status_code=404, detail="Category not found")
+    await rebuild_service.mark_dirty()
     return {"ok": True}
 
 
@@ -70,4 +74,5 @@ async def reorder_categories(
     session: AsyncSession = Depends(admin_session),
 ):
     await category_service.reorder_categories(session, req.order)
+    await rebuild_service.mark_dirty()
     return {"ok": True, "count": len(req.order)}

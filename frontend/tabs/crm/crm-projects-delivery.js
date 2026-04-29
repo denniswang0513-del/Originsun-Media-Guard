@@ -129,13 +129,10 @@ async function _uploadCover(projectId, file) {
     } catch (err) { alert('上傳失敗: ' + err.message); }
 }
 
-// ── Info (description, video, slug, tags) ──────────────────
+// ── Info (description, video, slug) ────────────────────────
+// 標籤系統已統一改用 website_categories（kind=tag），freeform sc.tags 廢除。
 
 function _renderInfo(sc, projectId) {
-    const tagsHtml = (sc.tags || []).map((t, i) =>
-        `<span class="showcase-tag">${_esc(t)}<button class="showcase-tag-remove" data-idx="${i}">&times;</button></span>`
-    ).join('');
-
     return _section('基本資訊', `
         <div class="showcase-info-grid">
             <div class="crm-field crm-field-full">
@@ -150,55 +147,18 @@ function _renderInfo(sc, projectId) {
                 <label>SEO Slug</label>
                 <input id="showcase-slug" type="text" class="crm-input" value="${_esc(sc.slug || '')}" placeholder="project-name">
             </div>
-            <div class="crm-field crm-field-full">
-                <label>標籤</label>
-                <div class="showcase-tags-wrap">
-                    <div class="showcase-tags-list" id="showcase-tags-list">${tagsHtml}</div>
-                    <div class="showcase-tag-add-wrap">
-                        <input type="text" class="showcase-tag-input" id="showcase-tag-input" placeholder="新增標籤 (Enter)">
-                    </div>
-                </div>
-            </div>
         </div>
+        <p style="color:#888;font-size:12px;margin-top:6px;">作品分類 / 標籤請至「對外官網管理 → 作品集管理 → 編輯作品」設定。</p>
         <button class="crm-btn crm-btn-primary crm-btn-sm" id="showcase-save-info" style="margin-top:10px;">儲存基本資訊</button>
     `);
 }
 
 function _bindInfoEvents(container, projectId) {
-    // Tag add via Enter
-    const tagInput = container.querySelector('#showcase-tag-input');
-    if (tagInput) {
-        tagInput.addEventListener('keydown', e => {
-            if (e.key === 'Enter') {
-                e.preventDefault();
-                const val = tagInput.value.trim();
-                if (!val) return;
-                _addTag(container, val);
-                tagInput.value = '';
-            }
-        });
-    }
-
-    // Tag remove
-    container.querySelector('#showcase-tags-list')?.addEventListener('click', e => {
-        const btn = e.target.closest('.showcase-tag-remove');
-        if (btn) {
-            btn.closest('.showcase-tag')?.remove();
-        }
-    });
-
-    // Save
     container.querySelector('#showcase-save-info')?.addEventListener('click', async () => {
-        const tags = [];
-        container.querySelectorAll('#showcase-tags-list .showcase-tag').forEach(el => {
-            const text = el.childNodes[0]?.textContent?.trim();
-            if (text) tags.push(text);
-        });
         const payload = {
             description: container.querySelector('#showcase-description')?.value || '',
             video_url: container.querySelector('#showcase-video-url')?.value || '',
             slug: container.querySelector('#showcase-slug')?.value || '',
-            tags,
         };
         try {
             await _fetch('/projects/' + projectId + '/showcase', {
@@ -207,16 +167,6 @@ function _bindInfoEvents(container, projectId) {
             alert('已儲存');
         } catch (err) { alert('儲存失敗: ' + err.message); }
     });
-}
-
-function _addTag(container, text) {
-    const list = container.querySelector('#showcase-tags-list');
-    if (!list) return;
-    const idx = list.children.length;
-    const span = document.createElement('span');
-    span.className = 'showcase-tag';
-    span.innerHTML = `${_esc(text)}<button class="showcase-tag-remove" data-idx="${idx}">&times;</button>`;
-    list.appendChild(span);
 }
 
 // ── Gallery (成品展示) ─────────────────────────────────────

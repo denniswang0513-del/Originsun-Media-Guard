@@ -22,6 +22,7 @@ def _to_admin_dict(c: WebsiteCategory, count: int = 0) -> dict:
         "cover_image": c.cover_image,
         "sort_order": c.sort_order,
         "visible": c.visible,
+        "kind": c.kind or "category",
         "project_count": count,
     }
 
@@ -32,6 +33,7 @@ def _to_public_dict(c: WebsiteCategory, count: int = 0) -> dict:
         "name_zh": c.name_zh,
         "name_en": c.name_en,
         "count": count,
+        "kind": c.kind or "category",
     }
 
 
@@ -74,6 +76,7 @@ async def create_category(session: AsyncSession, data: dict) -> dict:
         cover_image=data.get("cover_image"),
         sort_order=data.get("sort_order", 0),
         visible=data.get("visible", True),
+        kind=data.get("kind", "category"),
     )
     session.add(cat)
     await session.commit()

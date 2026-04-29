@@ -329,7 +329,8 @@ class CrmProjectShowcase(Base):
     process_mode = Column(String(16), nullable=False, default='gallery')  # gallery|media|timeline
     process_items = Column(JSONB, nullable=True)  # [{type, url, caption, phase, video_url}]
     credits = Column(JSONB, nullable=True)  # [{name, role, staff_id, resume_url}]
-    tags = Column(JSONB, nullable=True)  # ["廣告", "MV"]
+    # NOTE: 舊 freeform tags 已廢除，統一改用 website_categories（kind=tag）。
+    # 啟動時 migration DROP COLUMN，舊資料一併刪除（使用者確認）。
     slug = Column(String(128), nullable=True, unique=True)
     published = Column(Boolean, nullable=False, default=False)
     published_at = Column(DateTime(timezone=True), nullable=True)

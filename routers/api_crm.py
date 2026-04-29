@@ -4068,7 +4068,6 @@ def _to_showcase_dict(s) -> dict:
         "process_mode": s.process_mode or "gallery",
         "process_items": s.process_items or [],
         "credits": s.credits or [],
-        "tags": s.tags or [],
         "slug": s.slug or "",
         "published": bool(s.published),
         "published_at": s.published_at.isoformat() if s.published_at else None,
@@ -4177,7 +4176,6 @@ async def update_project_showcase(project_id: str, req: ShowcasePayload, request
         sc.description = req.description
         sc.video_url = req.video_url
         sc.credits = req.credits
-        sc.tags = req.tags
         sc.process_mode = req.process_mode
         sc.slug = req.slug or None
         sc.updated_at = _now()
@@ -4429,6 +4427,7 @@ async def get_public_showcase(project_id: str):
 @router.get("/public/showcase-edit/{token}")
 async def get_showcase_edit_data(token: str):
     """透過 Token 取得 Showcase 編輯資料（無需認證）。"""
+    from db.models_website import WebsiteCategory, WebsiteProjectCategory
     _require_db()
     factory = await _get_factory()
     async with factory() as session:
@@ -4439,12 +4438,30 @@ async def get_showcase_edit_data(token: str):
         # Strip financial / internal fields
         data.pop("edit_token", None)
         data["project_name"] = project_name
+
+        # 對外 categories 候選清單（含 kind）+ 此作品已勾選的 ID
+        cat_rows = (await session.execute(
+            select(WebsiteCategory)
+            .where(WebsiteCategory.visible.is_(True))
+            .order_by(WebsiteCategory.sort_order, WebsiteCategory.id)
+        )).scalars().all()
+        data["categories_available"] = [
+            {"id": c.id, "slug": c.slug, "name_zh": c.name_zh,
+             "name_en": c.name_en, "kind": c.kind or "category"}
+            for c in cat_rows
+        ]
+        sel_rows = (await session.execute(
+            select(WebsiteProjectCategory.category_id)
+            .where(WebsiteProjectCategory.project_id == sc.id)
+        )).scalars().all()
+        data["selected_category_ids"] = list(sel_rows)
     return data
 
 
 @router.put("/public/showcase-edit/{token}")
 async def update_showcase_edit_data(token: str, request: Request):
     """透過 Token 更新 Showcase 資料（無需認證）。"""
+    from db.models_website import WebsiteProjectCategory
     _require_db()
     factory = await _get_factory()
     body = await request.json()
@@ -4454,8 +4471,6 @@ async def update_showcase_edit_data(token: str, request: Request):
             sc.description = body["description"]
         if "credits" in body:
             sc.credits = body["credits"]
-        if "tags" in body:
-            sc.tags = body["tags"]
         if "process_mode" in body:
             sc.process_mode = body["process_mode"]
         if "process_items" in body:
@@ -4464,9 +4479,28 @@ async def update_showcase_edit_data(token: str, request: Request):
             sc.video_url = body["video_url"]
         if "slug" in body:
             sc.slug = body["slug"] or None
+        # 對外作品分類 / 標籤關聯（共用 website_categories 表，後端不分 kind）：
+        # 全量替換 — delete all then re-add，避免 diff 邏輯 race。
+        if "category_ids" in body:
+            ids = [int(x) for x in (body["category_ids"] or []) if str(x).isdigit() or isinstance(x, int)]
+            await session.execute(
+                delete(WebsiteProjectCategory)
+                .where(WebsiteProjectCategory.project_id == sc.id)
+            )
+            for cid in ids:
+                session.add(WebsiteProjectCategory(project_id=sc.id, category_id=cid))
         sc.updated_at = _now()
         await _sync_showcase_to_public(session, sc)
         await session.commit()
+    # 觸發對外網站 rebuild（debounce 60s）— 不論作品 published 與否都標 dirty，
+    # 邏輯簡單；publish=false 的作品最壞情況是浪費一次 rebuild cycle。
+    try:
+        from services.website import rebuild_service
+        await rebuild_service.mark_dirty()
+    except Exception as e:
+        # 對外 rebuild 失敗不該擋編輯儲存
+        import logging
+        logging.getLogger(__name__).warning("[showcase token PUT] mark_dirty 失敗: %s", e)
     return {"status": "ok"}
 
 
@@ -4561,7 +4595,6 @@ async def list_published_works():
                 "client_name": client_name,
                 "cover_url": sc.cover_url or "",
                 "slug": sc.slug or "",
-                "tags": sc.tags or [],
                 "description": sc.description or "",
                 "video_url": sc.video_url or "",
                 "published_at": sc.published_at.isoformat() if sc.published_at else None,

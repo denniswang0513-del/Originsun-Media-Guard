@@ -20,9 +20,13 @@ class WebsiteCategory(Base):
     cover_image = Column(Text)
     sort_order = Column(Integer, nullable=False, default=0)
     visible = Column(Boolean, nullable=False, default=True)
+    # 'category' = 製作類型（形象/廣告/MV…）；'tag' = 使用場景（展覽/講座…）。
+    # 共用同一張表 + slug namespace，渲染時前端依 kind 分兩排 chip。
+    kind = Column(String(16), nullable=False, default="category")
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
     __table_args__ = (
         Index("idx_webcat_visible", "visible"),
         Index("idx_webcat_sort", "sort_order"),
+        Index("idx_webcat_kind", "kind"),
     )

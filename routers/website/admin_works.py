@@ -28,7 +28,7 @@ from core.schemas_website import (
 )
 from db.models import Client, CrmProject
 from routers.api_crm import _mint_showcase_edit_token
-from services.website import project_service
+from services.website import project_service, rebuild_service
 
 router = APIRouter(prefix="/api/website/admin", tags=["website-admin-works"])
 
@@ -56,6 +56,7 @@ async def update_work(
     )
     if not ok:
         raise HTTPException(status_code=404, detail="Project not found")
+    await rebuild_service.mark_dirty()
     return {"ok": True}
 
 
@@ -65,6 +66,7 @@ async def reorder_works(
     session: AsyncSession = Depends(admin_session),
 ):
     await project_service.reorder_projects(session, req.order)
+    await rebuild_service.mark_dirty()
     return {"ok": True, "count": len(req.order)}
 
 
@@ -78,6 +80,7 @@ async def set_featured(
     ok = await project_service.toggle_featured(session, project_id, featured)
     if not ok:
         raise HTTPException(status_code=404, detail="Project not found")
+    await rebuild_service.mark_dirty()
     return {"ok": True, "featured": featured}
 
 
@@ -100,6 +103,7 @@ async def create_work(
     session: AsyncSession = Depends(admin_session),
 ):
     """建立作品 skeleton，同步產生 showcase edit token 讓 UI 直接打開編輯器。"""
+    from db.models_website import WebsiteProjectCategory
     project_id = uuid.uuid4().hex
     now = datetime.now(timezone.utc)
     session.add(CrmProject(
@@ -109,6 +113,9 @@ async def create_work(
         public=False, public_year=req.year, public_sort_order=0,
         created_at=now, updated_at=now,
     ))
+    # 同 commit 寫入 category 關聯（含分類 + 標籤；表共用，後端不分 kind）
+    for cid in (req.category_ids or []):
+        session.add(WebsiteProjectCategory(project_id=project_id, category_id=cid))
     token, _sc = await _mint_showcase_edit_token(session, project_id, reuse_existing=False)
     await session.commit()
     return WorkCreateResponse(

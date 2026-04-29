@@ -10,6 +10,7 @@
  */
 
 import { getApiBase, websiteFetch } from './website-utils.js';
+import { initRebuildBar, destroyRebuildBar } from './rebuild-bar.js';
 
 const SUBVIEWS = [
     'dashboard', 'home', 'works', 'categories',
@@ -34,12 +35,23 @@ export async function initWebsiteTab() {
         });
     });
 
+    // Rebuild 狀態列（網站 Tab 頂部，跨 subview 共用）
+    _initRebuildBarOnce();
+
     // 初次載入預設子視圖
     await switchSubview('dashboard');
 
     // 背景任務
     _startHealthCheck();
     _startBadgeRefresh();
+}
+
+function _initRebuildBarOnce() {
+    const main = document.getElementById('website-content');
+    if (!main || main.parentElement?.querySelector('#website-rebuild-bar')) return;
+    const bar = document.createElement('div');
+    main.parentElement.insertBefore(bar, main);
+    initRebuildBar(bar);
 }
 
 window.initWebsiteTab = initWebsiteTab;

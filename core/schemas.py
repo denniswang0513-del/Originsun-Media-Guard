@@ -578,7 +578,6 @@ class ShowcasePayload(BaseModel):
     description: str = ""
     video_url: str = ""
     credits: list = []
-    tags: list = []
     process_mode: str = "gallery"
     slug: str = ""
 

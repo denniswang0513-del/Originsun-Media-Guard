@@ -40,6 +40,12 @@ _CRM_STAFF_COLUMNS: list[tuple[str, str]] = [
     ("show_on_website", "BOOLEAN DEFAULT FALSE"),
 ]
 
+# ── ALTER TABLE: website_categories 擴充 ──
+# kind: 'category' = 製作類型（形象/廣告/MV…），'tag' = 使用場景（展覽/講座…）
+_WEBCAT_COLUMNS: list[tuple[str, str]] = [
+    ("kind", "VARCHAR(16) NOT NULL DEFAULT 'category'"),
+]
+
 # ── CREATE TABLE IF NOT EXISTS: 5 新表 ──
 _CREATE_TABLES: list[str] = [
     """
@@ -52,6 +58,7 @@ _CREATE_TABLES: list[str] = [
         cover_image TEXT,
         sort_order INTEGER NOT NULL DEFAULT 0,
         visible BOOLEAN NOT NULL DEFAULT TRUE,
+        kind VARCHAR(16) NOT NULL DEFAULT 'category',
         created_at TIMESTAMPTZ DEFAULT NOW()
     )
     """,
@@ -111,6 +118,7 @@ _CREATE_TABLES: list[str] = [
 _CREATE_INDEXES: list[str] = [
     "CREATE INDEX IF NOT EXISTS idx_webcat_visible ON website_categories (visible)",
     "CREATE INDEX IF NOT EXISTS idx_webcat_sort ON website_categories (sort_order)",
+    "CREATE INDEX IF NOT EXISTS idx_webcat_kind ON website_categories (kind)",
     "CREATE INDEX IF NOT EXISTS idx_wpc_category ON website_project_categories (category_id)",
     "CREATE INDEX IF NOT EXISTS idx_websvc_visible ON website_services (visible)",
     "CREATE INDEX IF NOT EXISTS idx_websvc_sort ON website_services (sort_order)",
@@ -141,7 +149,10 @@ async def run_website_migrations(session_factory: Callable) -> None:
           for c, t in _CRM_PROJECTS_COLUMNS],
         *[f"ALTER TABLE crm_staff ADD COLUMN IF NOT EXISTS {c} {t}"
           for c, t in _CRM_STAFF_COLUMNS],
+        # CREATE TABLE 必須先跑，ALTER 才有對象（fresh DB 沒這張表）
         *_CREATE_TABLES,
+        *[f"ALTER TABLE website_categories ADD COLUMN IF NOT EXISTS {c} {t}"
+          for c, t in _WEBCAT_COLUMNS],
         *_CREATE_INDEXES,
     ]
 
