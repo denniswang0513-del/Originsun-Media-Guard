@@ -82,13 +82,26 @@ export async function fetchWorks(opts: {
 }
 
 
-export async function fetchWorkBySlug(slug: string): Promise<IPublicProjectDetail | null> {
-    try {
-        return await _get<IPublicProjectDetail>(`/api/website/works/${slug}`);
-    } catch (e) {
+// SSG build 期間 /works/[slug].astro + /works/[slug].md.ts 各自 fetch 同一個 slug
+// = 200 works × 2 = 400 HTTP；memoize 砍半到 200。失敗不 cache 讓重試有機會。
+const _slugCache = new Map<string, Promise<IPublicProjectDetail | null>>();
+
+export function fetchWorkBySlug(slug: string): Promise<IPublicProjectDetail | null> {
+    const cached = _slugCache.get(slug);
+    if (cached) return cached;
+    const p = _get<IPublicProjectDetail>(`/api/website/works/${slug}`).catch(e => {
         console.warn(`[crm-client] fetchWorkBySlug(${slug}) 失敗:`, (e as Error).message);
+        _slugCache.delete(slug);
         return null;
-    }
+    });
+    _slugCache.set(slug, p);
+    return p;
+}
+
+/** 共用 getStaticPaths 來源：works/[slug].astro + .md.ts 都用這個 */
+export async function getWorkSlugPaths(): Promise<{ params: { slug: string } }[]> {
+    const items = await fetchAllWorksCached();
+    return items.filter(w => w.slug).map(w => ({ params: { slug: w.slug } }));
 }
 
 

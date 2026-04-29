@@ -76,6 +76,10 @@ const finalOgImage = ogImage || meta.seo_og_image || undefined;
         <meta name="twitter:description" content={desc} />
         {finalOgImage && <meta name="twitter:image" content={finalOgImage} />}
 
+        <!-- AI / RSS feeds — discovery for ChatGPT/Perplexity/Feedly etc -->
+        <link rel="alternate" type="application/feed+json" href="/feed.json" title={`${meta.company_name_zh} 影像專欄`} />
+        <link rel="alternate" type="application/rss+xml" href="/rss.xml" title={`${meta.company_name_zh} 影像專欄`} />
+
         {schemaData.map((d) => (
             <script is:inline type="application/ld+json" set:html={JSON.stringify(d)} />
         ))}

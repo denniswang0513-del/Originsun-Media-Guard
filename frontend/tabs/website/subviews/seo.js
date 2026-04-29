@@ -549,8 +549,8 @@ ${s['seo.default_description'] || '影像製作公司，提供商業廣告、紀
     toastOk('已套用範本（記得按儲存）');
 };
 
-// TODO(Stage 3): build /llms.txt endpoint — 目前 preview 期預期 404
 _seo.llmsPreview = () => {
+    // localhost 開發機沒部署 dist，跳到 cloudflared 看實際對外版本
     const origin = window.location.origin.includes('localhost')
         ? 'https://test.originsun-studio.com'
         : window.location.origin;

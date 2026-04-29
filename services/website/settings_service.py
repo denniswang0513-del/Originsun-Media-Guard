@@ -52,6 +52,8 @@ async def get_meta(session: AsyncSession) -> dict[str, Any]:
         # `is True` 比 `bool()` 嚴：避免使用者誤把 "false" 字串塞進去後變 truthy。
         "indexable": s.get("seo.indexable") is True,
         "ai_allow": s.get("seo.ai_allow") is True,
+        # admin 在「llms.txt 編輯器」自填的 body；空則 /llms.txt 走自動生成
+        "llms_txt_body": s.get("seo.llms_txt_body", ""),
     }
 
 

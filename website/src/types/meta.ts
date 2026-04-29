@@ -33,6 +33,8 @@ export interface IWebsiteMeta {
     indexable?: boolean;
     // 是否允許 AI 爬蟲（GPTBot/ClaudeBot/PerplexityBot/Google-Extended）讀取
     ai_allow?: boolean;
+    // admin 自填的 llms.txt 內容；空則 /llms.txt endpoint 走自動生成
+    llms_txt_body?: string;
 }
 
 export interface ITeamMember {

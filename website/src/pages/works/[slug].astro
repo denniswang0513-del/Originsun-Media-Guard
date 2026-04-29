@@ -5,14 +5,11 @@
  * 結構：影片 → 類別標籤 → 大標題 → 描述 → — CREDIT LIST — → NEXT ▸
  */
 import BaseLayout from "../../layouts/BaseLayout.astro";
-import { fetchMeta, fetchWorkBySlug, fetchAllWorksCached } from "../../lib/crm-client";
+import { fetchMeta, fetchWorkBySlug, fetchAllWorksCached, getWorkSlugPaths } from "../../lib/crm-client";
 import { isValidYouTubeId, resolveThumbnail } from "../../lib/youtube";
 import { pageSchemas, resolveSiteUrl, ensureMinDescription, breadcrumb3 } from "../../lib/seo";
 
-export async function getStaticPaths() {
-    const items = await fetchAllWorksCached();
-    return items.filter(w => w.slug).map(w => ({ params: { slug: w.slug } }));
-}
+export const getStaticPaths = getWorkSlugPaths;
 
 const { slug } = Astro.params;
 const [meta, work, allWorks] = await Promise.all([

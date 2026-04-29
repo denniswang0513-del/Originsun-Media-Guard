@@ -10,7 +10,7 @@
  */
 import type { APIRoute } from "astro";
 import { fetchMeta } from "../lib/crm-client";
-import { resolveSiteUrl } from "../lib/seo";
+import { resolveSiteUrl, textResponse } from "../lib/seo";
 
 const AI_BOTS = ["GPTBot", "ClaudeBot", "PerplexityBot", "Google-Extended"] as const;
 
@@ -34,12 +34,7 @@ export const GET: APIRoute = async ({ site }) => {
         }
     }
 
-    lines.push(`Sitemap: ${siteUrl.replace(/\/$/, "")}/sitemap-index.xml`);
+    lines.push(`Sitemap: ${siteUrl}/sitemap-index.xml`);
 
-    return new Response(lines.join("\n"), {
-        headers: {
-            "Content-Type": "text/plain; charset=utf-8",
-            "Cache-Control": "public, max-age=3600",
-        },
-    });
+    return textResponse(lines.join("\n"), "text/plain");
 };

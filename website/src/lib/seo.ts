@@ -19,14 +19,46 @@ const SCHEMA_CTX = "https://schema.org";
 
 // === 共用 SEO helper ===
 
-/** 從 Astro.site 推導站台 URL，缺值時 fallback 到 config 預設 */
+/**
+ * 從 Astro.site 推導站台 URL，缺值時 fallback 到 config 預設。
+ * 一律 strip 尾斜線：endpoints 用 `${siteUrl}/path` 拼接才不會出現 `//`，
+ * canonicalUrl 用 new URL() 不受影響。
+ */
 export function resolveSiteUrl(astroSite?: URL): string {
-    return astroSite?.toString() || SITE_URL_FALLBACK;
+    const raw = astroSite?.toString() || SITE_URL_FALLBACK;
+    return raw.replace(/\/$/, "");
 }
 
 /** 將 pathname 組成完整 canonical URL */
 export function canonicalUrl(astroSite: URL | undefined, pathname: string): string {
     return new URL(pathname, resolveSiteUrl(astroSite)).toString();
+}
+
+/**
+ * 動態 endpoint 共用 Response builder（robots.txt / llms*.txt / *.md / feed.json / rss.xml）。
+ * 預設 1h cache：admin 寫入後 60s 觸發 rebuild 覆蓋 dist/，所以最差 1h 後對外一定看到新版。
+ */
+export function textResponse(body: string, contentType: string, maxAge = 3600): Response {
+    return new Response(body, {
+        headers: {
+            "Content-Type": `${contentType}; charset=utf-8`,
+            "Cache-Control": `public, max-age=${maxAge}`,
+        },
+    });
+}
+
+/**
+ * 公司資訊 markdown block — llms.txt / llms-full.txt / about.md 共用。
+ * heading="聯絡資訊" 時用「地址」字眼，其他用「地點」。
+ */
+export function companyInfoMd(meta: IWebsiteMeta, siteUrl: string, heading = "公司資訊"): string[] {
+    const out = [`## ${heading}`];
+    if (meta.about_founded_year) out.push(`- 成立：${meta.about_founded_year}`);
+    if (meta.address) out.push(`- ${heading === "聯絡資訊" ? "地址" : "地點"}：${meta.address}`);
+    if (meta.phone) out.push(`- 電話：${meta.phone}`);
+    if (meta.email) out.push(`- Email：${meta.email}`);
+    out.push(`- 網址：${siteUrl}`, "");
+    return out;
 }
 
 /** 確保 description 至少 minLen 字（過短時附加 fallback 字串） */

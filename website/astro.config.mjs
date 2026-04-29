@@ -13,8 +13,12 @@ export default defineConfig({
 
   integrations: [
     sitemap({
-      // 排除 _astro 內部資源 + showcase token-based 編輯頁（不該被收進搜尋）
-      filter: (page) => !page.includes('/_astro/') && !page.includes('/showcase'),
+      // 排除 _astro 內部資源 + showcase token-based 編輯頁 + AI/feed 端點
+      // （robots.txt / llms*.txt / feed.json / rss.xml / *.md 不該出現在 sitemap）
+      filter: (page) =>
+        !page.includes('/_astro/') &&
+        !page.includes('/showcase') &&
+        !/\.(txt|json|xml|md)\/?$/.test(page),
     }),
     // SEO 鐵閘 ③：build 末段掃 dist/ HTML，缺 title/desc/canonical/JSON-LD/h1/img-alt 即 fail
     seoAudit(),

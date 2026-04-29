@@ -293,6 +293,8 @@ class WebsiteMeta(BaseModel):
     indexable: bool = False
     # robots.txt 是否允許 AI 爬蟲（GPTBot / ClaudeBot / PerplexityBot / Google-Extended）
     ai_allow: bool = False
+    # admin 自填的 llms.txt 內容；空則 /llms.txt 走自動生成
+    llms_txt_body: str = ""
 
 
 # ══════════════════════════════════════════════════════════
