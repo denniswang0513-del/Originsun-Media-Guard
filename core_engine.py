@@ -46,6 +46,17 @@ class ReportManifest:
 
 SUPPORTED_EXTS = ('.mov', '.mp4', '.mkv', '.mxf', '.r3d', '.ari', '.braw', '.dng', '.avi', '.mts', '.m2ts')
 
+def is_junk_file(path_or_name: str) -> bool:
+    """macOS AppleDouble (._*)、Windows Thumbs.db / .DS_Store 等系統垃圾檔。
+    來源資料夾被 macOS Finder 摸過後會在每個影片旁產生 ._<filename> sidecar，
+    ffmpeg 開不起來也不該被備份。接受 basename 或完整路徑。"""
+    fname = os.path.basename(path_or_name)
+    if fname.startswith("._"):
+        return True
+    if fname in ("Thumbs.db", ".DS_Store", "desktop.ini"):
+        return True
+    return False
+
 def _short_hash(h: Optional[str]) -> str:
     if not h: return "None"
     out = ""
@@ -360,6 +371,8 @@ class MediaGuardEngine:
                     rel_dir = os.path.relpath(dirpath, src_root).lstrip("\\/")
                     empty_dirs.append((card, rel_dir))
                 for fname in filenames:
+                    if is_junk_file(fname):
+                        continue
                     src_abs = os.path.join(dirpath, fname)
                     rel = os.path.relpath(src_abs, src_root).lstrip("\\/")
                     all_items.append((card, rel, src_abs))
@@ -954,11 +967,13 @@ class MediaGuardEngine:
         for token in sources:
             if not token: continue
             self.log(f"[Engine] 檢查: {token} (exists={os.path.exists(token)}, isdir={os.path.isdir(token)})")
-            if os.path.isfile(token) and token.lower().endswith(SUPPORTED_EXTS):
+            if os.path.isfile(token) and token.lower().endswith(SUPPORTED_EXTS) and not is_junk_file(token):
                 files.append(token)
             elif os.path.isdir(token):
                 for root, _, fnames in os.walk(token):
                     for fname in sorted(fnames):
+                        if is_junk_file(fname):
+                            continue
                         if fname.lower().endswith(SUPPORTED_EXTS):
                             files.append(os.path.join(root, fname))
 
@@ -1125,11 +1140,13 @@ class MediaGuardEngine:
         files = []
         for token in sources:
             if not token: continue
-            if os.path.isfile(token) and token.lower().endswith(SUPPORTED_EXTS):
+            if os.path.isfile(token) and token.lower().endswith(SUPPORTED_EXTS) and not is_junk_file(token):
                 files.append(token)
             elif os.path.isdir(token):
                 for root, _, fnames in os.walk(token):
                     for fname in sorted(fnames):
+                        if is_junk_file(fname):
+                            continue
                         if fname.lower().endswith(SUPPORTED_EXTS):
                             files.append(os.path.join(root, fname))
 
@@ -1924,13 +1941,15 @@ class MediaGuardEngine:
             if ";" in src_input or os.path.isfile(src_input):
                 for fpath in src_input.split(";"):
                     fpath = fpath.strip()
-                    if fpath and os.path.isfile(fpath):
+                    if fpath and os.path.isfile(fpath) and not is_junk_file(fpath):
                         all_files.append(fpath)
             elif os.path.isdir(src_input):
                 for root, dirnames, files in os.walk(src_input):
                     if not files and not dirnames:
                         verify_empty_dirs.append(os.path.relpath(root, src_input))
                     for f in files:
+                        if is_junk_file(f):
+                            continue
                         all_files.append(os.path.join(root, f))
             
             # 決定是「資料夾對資料夾」還是「檔案對檔案」模式

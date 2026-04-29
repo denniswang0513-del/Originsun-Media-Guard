@@ -9,7 +9,7 @@ from core.socket_mgr import sio  # type: ignore
 from core.logger import _write_log_to_file, _emit_sync_for_job  # type: ignore
 import core.state as state  # type: ignore
 from core.schemas import ReportJobRequest  # type: ignore
-from core_engine import MediaGuardEngine, ReportManifest, FileRecord, SUPPORTED_EXTS  # type: ignore
+from core_engine import MediaGuardEngine, ReportManifest, FileRecord, SUPPORTED_EXTS, is_junk_file  # type: ignore
 from report_generator import save_report, generate_pdf_from_html  # type: ignore
 from config import load_settings
 from utils.formatting import fmt_size
@@ -61,6 +61,8 @@ async def _run_report_job(req: ReportJobRequest, job_id: str = ""):
                 ]
                 dirs[:] = _valid_dirs  # type: ignore
             for fn in fnames:
+                if is_junk_file(fn):
+                    continue
                 if fn.lower().endswith(SUPPORTED_EXTS):
                     all_files.append(os.path.join(root, fn))  # type: ignore[arg-type]
         all_files.sort()

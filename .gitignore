@@ -95,3 +95,5 @@ test_state.png
 .claude/worktrees/
 .claude/plans/
 .claude/launch.json
+.rebuild_meta.json
+*.rebuild_meta.json

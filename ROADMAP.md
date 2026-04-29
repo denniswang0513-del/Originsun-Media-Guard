@@ -4,7 +4,7 @@
 
 ---
 
-## 現況 (v1.10.82) 基準線
+## 現況 (v1.10.109) 基準線
 
 - ✅ 7 個完整工作流程（備份、比對、轉 Proxy、串帶、報表、AI 逐字稿、空拍寫入）
 - ✅ 模組化後端：`main.py` + `core/` + `routers/`（router 容錯載入，缺模組跳過不 crash）
@@ -735,7 +735,7 @@ tools:
     ▼ Phase J: CRM + 專案管理 + 帳務 (✅ 核心完成)
     │   → 64 API / 11 DB 表 / 6 Tab + 5 子視圖 + 手機版 RWD + Inline 編輯
     │
-現在 (v1.10.107) ← 你在這裡
+現在 (v1.10.109) ← 你在這裡
     │
     ▼ Phase M: 對外官方網站 (✅ 完整版 A 部署完成 2026-04-29)
     │   → NAS Website_Nginx (8090) + website-api 容器 + cloudflared tunnel
@@ -774,6 +774,7 @@ tools:
 
 | 版本 | 日期 | 重點 |
 |------|------|------|
+| v1.10.109 | 2026-04-30 | **過濾 macOS AppleDouble 垃圾檔 + Whisper 模型跨 job 快取**：(1) **AppleDouble 過濾**：客戶從 Mac 拷來的素材每個影片旁都會殘留 `._<filename>` sidecar（macOS Finder 在非 HFS 磁碟存 metadata 的小檔），ffmpeg 開不起來，使用者 backup 任務 transcode 階段每個 `._A084C001_260410NZ.MXF` 都炸 `[!] 轉檔失敗 / Invalid data found when processing input`。新增 module-level helper `core_engine.is_junk_file(path_or_name)` 過濾 `._*` 前綴 + `Thumbs.db` / `.DS_Store` / `desktop.ini`，在 `run_backup_job` / `run_transcode_job` / `run_concat_job` / `run_verify_job` 4 處 + `core/report_job.py:_run_report_job` 1 處掃描迴圈統一用 — 備份不再把垃圾拷到 NAS、轉檔/串帶/報表/驗證不再誤觸。helper 接受 basename 或完整路徑（內部跑 `os.path.basename`），單檔分支 3 個 caller 簡化掉 inline `os.path.basename(token)` 包裝。函式從 `_is_junk_file` 改名 `is_junk_file`（無底線），因為 cross-module 從 `report_job.py` import 不該標記 private。(2) **stable_whisper 模型跨 job 快取**：`aligner.py` 加 module-level `_MODEL_CACHE: Dict[(model_size, device, compute_type), model]`，第一次 load 5-30s，後續同樣參數的對齊 job 直接命中（佇列常一連跑同模型不同影片）；`run_align_job` finally 移除 `del model`，只清 GPU transient state、保留 cache。(3) **配套 worker.py reload 移除**：`core/worker.py` 拿掉 `_run_transcribe` / `_run_align` 的 `importlib.reload(transcriber/aligner)`，reload 會把 `_MODEL_CACHE` 跟 `transcriber` 既有 lazy state 整個清掉，跟 (2) 直接打架。(4) **`.gitignore` 加 `*.rebuild_meta.json`** — Phase M 對外網站 rebuild 流程的工作檔，不該入版。 |
 | v1.10.107 | 2026-04-29 | **Phase M 完整版 A 部署 + 高 ROI 6 項技術升級**：(1) **NAS website-api 容器** + Website_Nginx (8090) — admin Tab 跨機 fetch、master 關機對外 24/7 不掉、PM 在家可改作品。(2) **DB-backed website_rebuild_state** — master/NAS 共讀 singleton row，pending_count + last_success_at 不雙寫。NAS 收到 rebuild trigger 經 MASTER_RELAY_URL forward master 跑 npm（容器無 node）。(3) **/publish 自動 sync** — scp routers/services/core/db/main_website.py/config.py 到 NAS code/ + ssh docker restart website-api。(4) **DB 自動備份** — NAS cron 每日 03:30 docker exec pg_dump.gz, 30 天 retention, QNAP 持久化 crontab。(5) **Sitemap.xml + robots.txt** — @astrojs/sitemap plugin、自動 emit sitemap-index.xml + 12 URLs。(6) **Per-work SEO meta** — description 截 155 字、og:site_name、og_image fallback chain（work thumb → site default）。(7) **WebP 自動轉檔** — 4 個 showcase upload endpoint 統一走 _save_image_as_webp，省 ~30-60% 檔案大小。(8) **Pagefind 全文搜尋** — npm build 內建 pagefind-cli，647KB index，/works 加搜尋 widget。(9) **slug fallback 改用 public_number** — 1, 2, 3...第一次 publish 時 auto-assign max+1，永久綁定避免 republish 改編號破壞 SEO 連結；既有 1 件 public 作品 backfill = 1。(10) **Astro stale URL 清理** — scp 前 ssh 清 NAS /works/* /news/* 子目錄，避免改 slug 後舊 URL 殘留。(11) **JWT secret env var 優先** + module cache（避免每次 verify 讀檔）+ 拿掉 hardcoded fallback secret raise instead。(12) **DATABASE_URL env var 優先** — NAS container 透過 .env 注入，不用 mount settings.json。(13) **Dockerfile -200MB image size** — 拿掉 gcc（asyncpg / Pillow 都有 prebuilt wheel）。(14) **nginx config 整理** — `^~ /_astro/` prefix match、`add_header always`、提升 root 到 server 層。 |
 | v1.10.106 | 2026-04-28 | **再修 OTA：清掉 requirements_agent.txt 殘留 stale auto-detect**：v1.10.105 推完仍 rollback。讀 agent `/api/v1/update_status` 看到真正錯誤是 `pip install failed: stable_whisper`（PyPI 上不存在的 package）。原因：`requirements_agent.txt` 在 v1.10.104 publish 時被 `publish_update.py` 的 auto-detect 機制看到 WIP `aligner.py`/`worker.py` 的 import，把 `aligner`、`pysrt`、`stable_whisper` 三條塞進去；v1.10.105 只 stash WIP code、沒清 requirements，OTA agent pip install 必然失敗 → rollback。本版手動清掉那 3 行 stale entries（confirm scan_imports 重跑沒任何新 import 會被加回）。教訓：`publish_update.py` auto-append 是**單向**的——一旦寫入就不會自動移除，如果 WIP 改動後又退掉（git stash / revert），requirements_agent.txt 殘留會炸 OTA。發版前要驗 agent `/api/v1/update_status` 確認真正失敗訊息，不要只看 master 端 OK。 |
 | v1.10.105 | 2026-04-28 | **重新打包 v1.10.104 修 OTA preflight 失敗**：v1.10.104 推送 9 台 agent 全部 rollback 到 1.10.103。原因：build 時把工作樹未 commit 的 transcribe 對齊 WIP（`core/worker.py` 多了 `import aligner`、`routers/api_transcribe.py` 多了 `from core.schemas import AlignRequest`、新檔 `aligner.py` + `core/whisper_helpers.py`）打進 OTA ZIP，但 `aligner.py` 不在 `ota_manifest.AGENT_FILES` 白名單裡 → 進不了 ZIP → agent 解壓後 preflight 嘗試 `import aligner` 失敗 → rollback。本次先 `git stash` 把 transcribe WIP 隔離，重 publish 確保 OTA ZIP 純淨：v1.10.104 的 admin_works.py / works.js / modal-styles.js 修法照舊保留。教訓：build 機制 = 打包工作樹（不是 git HEAD），所以未 commit 的 WIP 會悄悄混進去；以後 publish 前用 `git status` 嚴格檢查未 commit 的 root-level .py 是否會被 import 但沒進 AGENT_FILES。 |

@@ -462,8 +462,6 @@ async def _run_transcribe(job, engine, task: TranscribeRequest):
     job_id = job.job_id
     try:
         import transcriber  # type: ignore
-        import importlib
-        importlib.reload(transcriber)
     except ImportError as ie:
         err_msg = f"無法載入語音辨識模組: {ie}"
         await sio.emit('log', {'type': 'error', 'msg': err_msg, 'job_id': job_id})
@@ -532,8 +530,6 @@ async def _run_align(job, engine, task: AlignRequest):
     job_id = job.job_id
     try:
         import aligner  # type: ignore
-        import importlib
-        importlib.reload(aligner)
     except ImportError as ie:
         err_msg = f"無法載入對齊模組: {ie}"
         await sio.emit('log', {'type': 'error', 'msg': err_msg, 'job_id': job_id})

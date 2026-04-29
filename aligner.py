@@ -42,6 +42,26 @@ SOURCE_INTERPOLATED = "interpolated"
 SOURCE_EDGE_FILL = "edge_fill"
 
 
+# Module-level model cache — keyed by (model_size, device, compute_type).
+# stable_whisper model loading is 5-30s; reusing across jobs is a big win
+# since the queue often runs the same model back-to-back on different videos.
+_MODEL_CACHE: Dict[Tuple[str, str, str], Any] = {}
+
+
+def _get_or_load_model(model_size: str, device: str, compute_type: str, models_dir: str):
+    key = (model_size, device, compute_type)
+    cached = _MODEL_CACHE.get(key)
+    if cached is not None:
+        return cached
+    import stable_whisper  # type: ignore
+    model = stable_whisper.load_faster_whisper(
+        model_size, device=device, compute_type=compute_type,
+        download_root=models_dir,
+    )
+    _MODEL_CACHE[key] = model
+    return model
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # Data structures
 # ─────────────────────────────────────────────────────────────────────────────
@@ -685,10 +705,7 @@ def run_align_job(
 
     _prog(3.0, f"啟動對齊引擎 (Model: {model_size})... 初次載入可能較久")
     try:
-        model = stable_whisper.load_faster_whisper(
-            model_size, device=device, compute_type=compute_type,
-            download_root=models_dir,
-        )
+        model = _get_or_load_model(model_size, device, compute_type, models_dir)
     except Exception as e:
         return {"success": False, "error": f"模型載入失敗: {e}"}
 
@@ -826,10 +843,7 @@ def run_align_job(
     except Exception as e:
         return {"success": False, "error": str(e)}
     finally:
-        try:
-            del model
-        except Exception:
-            pass
+        # Keep model in _MODEL_CACHE — only clean up transient GPU state.
         _cleanup_gpu()
 
 
