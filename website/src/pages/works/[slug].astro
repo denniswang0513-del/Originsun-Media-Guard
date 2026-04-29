@@ -7,8 +7,7 @@
 import BaseLayout from "../../layouts/BaseLayout.astro";
 import { fetchMeta, fetchWorkBySlug, fetchAllWorksCached } from "../../lib/crm-client";
 import { isValidYouTubeId, resolveThumbnail } from "../../lib/youtube";
-import { videoObjectSchema } from "../../lib/seo";
-import { SITE_URL_FALLBACK } from "../../lib/config";
+import { pageSchemas, resolveSiteUrl, ensureMinDescription } from "../../lib/seo";
 
 export async function getStaticPaths() {
     const items = await fetchAllWorksCached();
@@ -30,8 +29,15 @@ const nextWork = curIdx >= 0 && curIdx < allWorks.length - 1 ? allWorks[curIdx +
 
 const categoryLabel = (work.categories[0] || "WORK").toUpperCase();
 
-const siteUrl = Astro.site?.toString() || SITE_URL_FALLBACK;
-const schemaData = isValidYouTubeId(work.youtube_id) ? [videoObjectSchema(work, siteUrl)] : [];
+const siteUrl = resolveSiteUrl(Astro.site);
+const workUrl = `${siteUrl}/works/${work.slug}`;
+const description = ensureMinDescription(
+    work.description || work.title,
+    [work.client, work.year, `${meta.company_name_zh}作品`].filter(Boolean).join(" · "),
+);
+const schemaData = isValidYouTubeId(work.youtube_id)
+    ? [pageSchemas.videoObject(work, siteUrl)]
+    : [pageSchemas.webPage({ title: work.title, description, url: workUrl })];
 
 // Credits 排序 + 中英對照
 const CREDIT_EN: Record<string, string> = {
@@ -54,7 +60,7 @@ const nextThumb = nextWork ? resolveThumbnail(nextWork.youtube_id, nextWork.slug
 ---
 
 <BaseLayout title={work.title}
-            description={work.description || work.title}
+            description={description}
             meta={meta}
             schemaData={schemaData}
             ogImage={work.thumbnail_url || undefined}>

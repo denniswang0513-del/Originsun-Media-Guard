@@ -8,6 +8,7 @@ import CategoryFilter from "../../components/works/CategoryFilter.astro";
 import WorkCard from "../../components/works/WorkCard.astro";
 import Tr from "../../components/ui/Tr.astro";
 import { fetchMeta, fetchCategories, fetchAllWorksCached } from "../../lib/crm-client";
+import { buildBasicPageSeo } from "../../lib/seo";
 
 const [meta, allWorks, categories] = await Promise.all([
     fetchMeta(),
@@ -20,9 +21,19 @@ const activeCategory = Astro.url.searchParams.get("category") || null;
 // 依 kind 切兩排：分類（製作類型）+ 標籤（使用場景）。舊資料 kind 為空當分類處理。
 const cats = categories.filter(c => (c.kind ?? "category") === "category");
 const tags = categories.filter(c => c.kind === "tag");
+
+const activeName = activeCategory
+    ? categories.find(c => c.slug === activeCategory)?.name_zh || activeCategory
+    : null;
+const seo = buildBasicPageSeo(Astro, {
+    title: "作品集 Works",
+    description: activeName
+        ? `${meta.company_name_zh} ${activeName} 類別作品集 — 從商業廣告、紀錄片到活動紀錄，瀏覽 ${meta.company_name_zh} 影像製作成果。`
+        : `${meta.company_name_zh}歷年作品集 — 商業廣告、紀錄片、活動紀錄、動畫設計，共 ${allWorks.length} 件作品按類別瀏覽，台北中山影像製作公司。`,
+});
 ---
 
-<BaseLayout title="作品集 Works" meta={meta}>
+<BaseLayout {...seo} meta={meta}>
     <!-- Pagefind 搜尋（靜態站全站索引），CSS 從 npm 包載 -->
     <link rel="stylesheet" href="/pagefind/pagefind-ui.css" />
 

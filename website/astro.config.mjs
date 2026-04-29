@@ -3,6 +3,7 @@ import { defineConfig } from 'astro/config';
 
 import tailwindcss from '@tailwindcss/vite';
 import sitemap from '@astrojs/sitemap';
+import seoAudit from './integrations/seo-audit.mjs';
 
 // https://astro.build/config
 export default defineConfig({
@@ -15,6 +16,8 @@ export default defineConfig({
       // 排除 _astro 內部資源 + showcase token-based 編輯頁（不該被收進搜尋）
       filter: (page) => !page.includes('/_astro/') && !page.includes('/showcase'),
     }),
+    // SEO 鐵閘 ③：build 末段掃 dist/ HTML，缺 title/desc/canonical/JSON-LD/h1/img-alt 即 fail
+    seoAudit(),
   ],
 
   // 允許從 Cloudflare Tunnel / LAN 其他機器透過 hostname 訪問 dev server。

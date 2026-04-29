@@ -24,8 +24,8 @@ import HomeInsight from "../components/home/HomeInsight.astro";
 import FAQ from "../components/home/FAQ.astro";
 import ContactCTA from "../components/home/ContactCTA.astro";
 import { fetchMeta, fetchFeatured } from "../lib/crm-client";
-import { organizationSchema } from "../lib/seo";
-import { LIMITS, SITE_URL_FALLBACK } from "../lib/config";
+import { pageSchemas, resolveSiteUrl, ensureMinDescription } from "../lib/seo";
+import { LIMITS } from "../lib/config";
 
 const [meta, featured] = await Promise.all([
     fetchMeta(),
@@ -36,14 +36,20 @@ const [meta, featured] = await Promise.all([
 // layout collapses gracefully when fewer than 9 works are returned.
 const featured9 = featured.slice(0, 9);
 
-const siteUrl = Astro.site?.toString() || SITE_URL_FALLBACK;
-const schemaData = [organizationSchema(meta, siteUrl)];
+const siteUrl = resolveSiteUrl(Astro.site);
+const description = ensureMinDescription(
+    meta.seo_default_description,
+    `${meta.company_name_zh}（${meta.company_name_en}）— 商業廣告、紀錄片、活動紀錄、動畫設計，台北中山專業影像製作公司。`,
+);
+const schemaData = [pageSchemas.organization(meta, siteUrl)];
 ---
 
 <BaseLayout title={meta.company_name_zh}
-            description={meta.seo_default_description}
+            description={description}
             meta={meta}
             schemaData={schemaData}>
+    <!-- SEO h1：對螢幕閱讀器與爬蟲提供清楚的頁面主題；視覺上隱藏不影響設計 -->
+    <h1 class="sr-only">{meta.company_name_zh} — {meta.tagline || meta.subtitle || "專業影像製作"}</h1>
     <HomeSlideshow works={featured} />
     <WhoWeAre />
     <ServicesWithCounts />

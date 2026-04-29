@@ -8,6 +8,7 @@
 import BaseLayout from "../layouts/BaseLayout.astro";
 import Tr from "../components/ui/Tr.astro";
 import { fetchMeta, fetchTeam } from "../lib/crm-client";
+import { buildBasicPageSeo } from "../lib/seo";
 
 const [meta, team] = await Promise.all([
     fetchMeta(),
@@ -18,9 +19,14 @@ const [meta, team] = await Promise.all([
 const mapsUrl = meta.address
     ? `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(meta.address)}`
     : null;
+
+const seo = buildBasicPageSeo(Astro, {
+    title: "關於我們 About",
+    description: `${meta.company_name_zh}（${meta.company_name_en}）團隊介紹 — 位於台北中山的影像製作公司，提供商業廣告、紀錄片、活動紀錄與動畫設計一條龍服務。`,
+});
 ---
 
-<BaseLayout title="關於我們 About" meta={meta}>
+<BaseLayout {...seo} meta={meta}>
     <!-- Hero -->
     <section class="pt-32 pb-16 bg-white">
         <div class="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 text-center">

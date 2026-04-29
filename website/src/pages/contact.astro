@@ -6,11 +6,17 @@ import BaseLayout from "../layouts/BaseLayout.astro";
 import Tr from "../components/ui/Tr.astro";
 import ContactForm from "../components/contact/ContactForm.astro";
 import { fetchMeta } from "../lib/crm-client";
+import { buildBasicPageSeo } from "../lib/seo";
 
 const meta = await fetchMeta();
+
+const seo = buildBasicPageSeo(Astro, {
+    title: "聯絡我們 Contact",
+    description: `聯絡${meta.company_name_zh} — 商業影片製作、報價諮詢、合作邀約。台北市中山區，1-2 個工作天內回覆，安排第一次諮詢。`,
+});
 ---
 
-<BaseLayout title="聯絡我們 Contact" meta={meta}>
+<BaseLayout {...seo} meta={meta}>
     <section class="pt-32 pb-16 bg-white">
         <div class="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 text-center">
             <p class="text-xs tracking-[0.4em] text-neutral-500 uppercase mb-3">Contact</p>
