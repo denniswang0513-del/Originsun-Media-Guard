@@ -69,7 +69,11 @@ export default async function render(container, ctx = {}) {
         _state.quickFacts = qfacts?.items || [];
     } catch (e) {
         if (!isCurrent()) return;
-        renderLoadError(container, '🔍 SEO / AI SEO 管理', e);
+        // 404 = 新 admin SEO endpoint 在 NAS website-api 不存在 → 大概率部署落後
+        const hint = e.status === 404
+            ? 'NAS website-api 可能跑舊版（沒 admin_seo router）。請在 master 跑 /publish 同步後端到 NAS。'
+            : '';
+        renderLoadError(container, '🔍 SEO / AI SEO 管理', e, hint);
         return;
     }
 
