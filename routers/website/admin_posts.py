@@ -1,18 +1,22 @@
 """routers/website/admin_posts.py
 ---
-管理端：部落格文章 + 文章分類 CRUD + Notion 匯入 + 強制 redirect 同步。
+管理端：部落格文章 + 文章分類 CRUD + Notion 匯入 + 強制 redirect 同步 + 圖片上傳。
 
 文章 CRUD: 標準 list/create/update/delete + on_change=mark_dirty
 分類 CRUD: 同上
 額外端點:
 - POST /admin/posts/import-notion          觸發 Notion 抓 + DB upsert
-- POST /admin/posts/redirects/sync          強制重生 nginx redirects.conf 推 NAS
+- POST /admin/posts/redirects/sync         強制重生 nginx redirects.conf 推 NAS
+- POST /admin/posts/{id}/upload-image      上傳 block 內 image，自動 WebP 轉檔
 """
 from __future__ import annotations
 
+import io
 import logging
+import os
+import uuid
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ._common import admin_session, register_crud
@@ -21,11 +25,42 @@ from core.schemas_website import (
     PostCategoryCreate, PostCategoryUpdate,
     NotionImportRequest, PostImportResult, RedirectSyncResult,
 )
+from db.models_website import WebsitePost
 from services.website import notion_service, post_service, rebuild_service
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/website/admin", tags=["website-admin-posts"])
+
+# 上傳基礎路徑（NAS container：/app/uploads/，host：/share/.../Website/uploads/）
+_UPLOAD_BASE = os.path.join(
+    os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
+    "uploads",
+)
+_ALLOWED_IMG_EXT = {".jpg", ".jpeg", ".png", ".webp", ".gif", ".heic"}
+
+
+def _save_image_as_webp(content: bytes, dest_dir: str, base_name: str) -> str:
+    """寫圖檔到 dest_dir/<base_name>.webp，原始格式自動轉 WebP（quality 82）。
+
+    Pillow 不可用 / 開檔失敗 → fallback 寫原 bytes 到 .bin（罕見）。
+    """
+    webp_path = os.path.join(dest_dir, base_name + ".webp")
+    try:
+        from PIL import Image
+        img = Image.open(io.BytesIO(content))
+        if img.mode in ("RGBA", "LA"):
+            img = img.convert("RGBA")
+        else:
+            img = img.convert("RGB")
+        img.save(webp_path, "WEBP", quality=82, method=6)
+        return webp_path
+    except Exception as e:
+        logger.warning("[upload] WebP convert failed (%s) — fallback raw", e)
+        raw_path = webp_path.replace(".webp", ".bin")
+        with open(raw_path, "wb") as f:
+            f.write(content)
+        return raw_path
 
 
 # ── 標準 CRUD: posts ──
@@ -135,3 +170,51 @@ async def force_sync_redirects(_session: AsyncSession = Depends(admin_session)):
         ok=ok,
         error=None if ok else "sync 失敗，看 master log",
     )
+
+
+# ── 單一文章詳情（含完整 body）— 編輯 Modal 開啟時用 ──
+
+@router.get("/posts/{post_id}")
+async def get_post_detail(
+    post_id: int,
+    session: AsyncSession = Depends(admin_session),
+):
+    item = await post_service.get_post(session, post_id)
+    if not item:
+        raise HTTPException(status_code=404, detail="文章不存在")
+    return item
+
+
+# ── 圖片上傳（block 內 image block 用） ──
+
+@router.post("/posts/{post_id}/upload-image")
+async def upload_post_image(
+    post_id: int,
+    file: UploadFile = File(...),
+    session: AsyncSession = Depends(admin_session),
+):
+    """上傳 block 內圖片到 /uploads/posts/{post_id}/{uuid}.webp。
+
+    - 自動 WebP 轉檔（PIL）— 比 JPG 小 30%，比 PNG 小 50-70%
+    - 不檢查 post 是否已 publish（draft 也能上傳）
+    - 回傳的 url 可直接塞進 image block 的 src 欄位
+    - 不寫 DB（只寫檔），post.body 由 admin 編輯時 PUT 更新
+    """
+    post = await session.get(WebsitePost, post_id)
+    if not post:
+        raise HTTPException(status_code=404, detail="文章不存在")
+
+    ext = (os.path.splitext(file.filename or "image.jpg")[1] or ".jpg").lower()
+    if ext not in _ALLOWED_IMG_EXT:
+        raise HTTPException(status_code=400, detail=f"不支援的圖片格式：{ext}")
+
+    upload_dir = os.path.join(_UPLOAD_BASE, "posts", str(post_id))
+    os.makedirs(upload_dir, exist_ok=True)
+    base_name = uuid.uuid4().hex[:12]
+    content = await file.read()
+    if len(content) > 10 * 1024 * 1024:
+        raise HTTPException(status_code=413, detail="圖片大於 10MB")
+
+    saved = _save_image_as_webp(content, upload_dir, base_name)
+    rel = os.path.relpath(saved, _UPLOAD_BASE).replace("\\", "/")
+    return {"url": f"/uploads/{rel}", "filename": os.path.basename(saved)}
