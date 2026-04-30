@@ -1,15 +1,17 @@
 ---
 /**
  * SmartImage.astro — Astro `<Image>` wrapper，遇到 sharp 無法處理的 URL
- * （目前只有 picsum.photos 因為它回 302 redirect，Astro 不會 follow）
  * 自動降級成原生 `<img>`，仍保留 width/height 防 CLS。
  *
- * 介面接近 Astro Image 但收斂到實際會用的 prop：
- *   - src / alt / width / height（必填）
- *   - widths / sizes（給 srcset，sharp-only）
- *   - loading / class
+ * 「可優化」判定：
+ * 1. 本地路徑（/foo, ./foo, ../foo）→ 直接走 sharp
+ * 2. 遠端 URL 屬於 ALLOWED_REMOTE_HOSTS（必須跟 astro.config.mjs `image.domains` 同步）
+ *    → 走 sharp
+ * 3. 其他遠端（picsum.photos / Gravatar / 任意 CDN）→ 降級回 `<img>`
+ *    避免 build fail（sharp 拒收 redirect / 未授權 host）
  *
- * 新頁面所有遠端來源圖片優先用這個，避免 placeholder URL 炸掉 build。
+ * 介面收斂到實際會用的 prop：src / alt / width / height（必填）+
+ * widths / sizes（給 srcset，sharp-only）+ loading / class。
  */
 import { Image } from "astro:assets";
 
@@ -26,9 +28,16 @@ interface Props {
 
 const { src, alt, width, height, widths, sizes, loading, class: className } = Astro.props;
 
-// 已知會 302 redirect 的網域：sharp 不會 follow 直接 fail build。
-// 命中時降級走原生 <img>（沒 srcset 但仍有 width/height 防 CLS）。
-const optimizable = !src.includes("picsum.photos");
+// 必須跟 astro.config.mjs `image.domains` 同步。新增遠端來源時兩邊都要加。
+const ALLOWED_REMOTE_HOSTS = new Set([
+    "img.youtube.com",
+    "i.ytimg.com",
+]);
+
+const hostMatch = src.match(/^https?:\/\/([^/]+)/);
+const isRemote = !!hostMatch;
+const isAllowedRemote = isRemote && ALLOWED_REMOTE_HOSTS.has(hostMatch[1]);
+const optimizable = !isRemote || isAllowedRemote;
 ---
 
 {optimizable ? (

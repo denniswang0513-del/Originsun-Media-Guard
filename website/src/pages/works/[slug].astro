@@ -5,6 +5,7 @@
  * 結構：影片 → 類別標籤 → 大標題 → 描述 → — CREDIT LIST — → NEXT ▸
  */
 import BaseLayout from "../../layouts/BaseLayout.astro";
+import SmartImage from "../../components/ui/SmartImage.astro";
 import { fetchMeta, fetchWorkBySlug, fetchAllWorksCached, getWorkSlugPaths } from "../../lib/crm-client";
 import { isValidYouTubeId, resolveThumbnail } from "../../lib/youtube";
 import { pageSchemas, resolveSiteUrl, ensureMinDescription, breadcrumb3 } from "../../lib/seo";
@@ -143,9 +144,11 @@ const nextThumb = nextWork ? resolveThumbnail(nextWork.youtube_id, nextWork.slug
                     </div>
                     {nextThumb && (
                         <div class="w-24 h-14 overflow-hidden bg-neutral-100">
-                            <img src={nextThumb}
-                                 alt={nextWork.title}
-                                 class="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500" />
+                            <SmartImage src={nextThumb}
+                                        alt={nextWork.title}
+                                        width={192} height={112}
+                                        loading="lazy"
+                                        class="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500" />
                         </div>
                     )}
                 </a>

@@ -10,6 +10,7 @@
  * - 6 秒自動輪播、hover 暫停、方向鍵左右切換
  * - 點播放鈕或整張圖 → /works/[slug]
  */
+import SmartImage from "../ui/SmartImage.astro";
 import type { IPublicProject } from "../../types/project";
 import { resolveThumbnail } from "../../lib/youtube";
 
@@ -43,11 +44,13 @@ const slides = works.slice(0, 6).map(w => ({
                        data-slide-client={w.client || ""}
                        data-slide-title={w.title}
                        style={i === 0 ? "opacity:1;" : "opacity:0;pointer-events:none;"}>
-                        <img src={w._thumb || ""}
-                             alt={w.title}
-                             loading={i === 0 ? "eager" : "lazy"}
-                             class="absolute inset-0 w-full h-full object-cover"
-                             onerror="this.style.opacity='0.2'" />
+                        <SmartImage src={w._thumb || ""}
+                                    alt={w.title}
+                                    width={1920} height={1080}
+                                    widths={[800, 1280, 1920]}
+                                    sizes="100vw"
+                                    loading={i === 0 ? "eager" : "lazy"}
+                                    class="absolute inset-0 w-full h-full object-cover" />
                         <!-- 漸層遮罩：底部加深讓資訊文字可讀 -->
                         <div class="absolute inset-0 bg-gradient-to-t from-black/85 via-black/10 to-black/30"></div>
                     </a>

@@ -6,6 +6,7 @@
  * 團隊成員從 /api/website/team（crm_staff where show_on_website=true）。
  */
 import BaseLayout from "../layouts/BaseLayout.astro";
+import SmartImage from "../components/ui/SmartImage.astro";
 import Tr from "../components/ui/Tr.astro";
 import { fetchMeta, fetchTeam, fetchTestimonials } from "../lib/crm-client";
 import { buildBasicPageSeo, breadcrumb2, pageSchemas } from "../lib/seo";
@@ -96,10 +97,11 @@ seo.schemaData.push(...pageSchemas.testimonialBundle(testimonials, { includeRevi
                     {team.map(m => (
                         <article class="text-center">
                             {m.photo_url ? (
-                                <img src={m.photo_url}
-                                     alt={m.name}
-                                     loading="lazy"
-                                     class="w-32 h-32 rounded-full object-cover mx-auto mb-4 bg-neutral-100" />
+                                <SmartImage src={m.photo_url}
+                                            alt={m.name}
+                                            width={256} height={256}
+                                            loading="lazy"
+                                            class="w-32 h-32 rounded-full object-cover mx-auto mb-4 bg-neutral-100" />
                             ) : (
                                 <div class="w-32 h-32 rounded-full bg-neutral-100 mx-auto mb-4 flex items-center justify-center text-3xl text-neutral-600">
                                     {m.name.charAt(0)}

@@ -5,6 +5,7 @@
  * 版面：上方顯著的整體評分（4.9/5 + 25 則評價），下方 3 欄證言卡。
  * 不用 JS 輪播（避免 JS cost）；4 則顯示前 3 則，桌機 3-col、手機直排。
  */
+import SmartImage from "../ui/SmartImage.astro";
 import Tr from "../ui/Tr.astro";
 import { FAKE_TESTIMONIALS } from "../../lib/fake-data";
 
@@ -53,8 +54,10 @@ const shown = FAKE_TESTIMONIALS.slice(0, 3);
                     <!-- 作者資訊 -->
                     <div class="flex items-center gap-3 border-t border-neutral-200 pt-5">
                         <div class="w-11 h-11 rounded-full overflow-hidden bg-neutral-100 flex-shrink-0">
-                            <img src={t.avatar} alt={t.author_zh} loading="lazy"
-                                 class="w-full h-full object-cover" />
+                            <SmartImage src={t.avatar} alt={t.author_zh}
+                                        width={88} height={88}
+                                        loading="lazy"
+                                        class="w-full h-full object-cover" />
                         </div>
                         <div class="min-w-0">
                             <div class="text-sm font-bold text-neutral-900 tracking-wide truncate">
