@@ -415,10 +415,15 @@ def polish_subtitle_timeline(
     max_duration: float = 7.0,
     min_gap_frames: int = 2,
     audio_duration: Optional[float] = None,
+    hold_until_next: bool = True,
 ) -> Dict[str, Any]:
-    """In-place: snap to frame, enforce min duration / min gap, collect warnings.
+    """In-place: snap to frame, enforce timing rules, collect warnings.
 
     NEVER modifies cue text. Only adjusts start/end times.
+
+    When hold_until_next=True (Netflix-style), each cue.end is extended to the
+    next cue.start (last cue → audio_duration). min_duration / min_gap rules
+    are skipped because the hold step already satisfies them with zero gap.
 
     Returns a stats dict for QA reporting.
     """
@@ -426,6 +431,7 @@ def polish_subtitle_timeline(
         "frame_snapped": 0,
         "min_duration_extended": 0,
         "gap_inserted": 0,
+        "hold_extended": 0,
         "max_duration_warnings": [],
         "reading_speed_warnings": [],
     }
@@ -448,30 +454,48 @@ def polish_subtitle_timeline(
         if c.end < c.start:
             c.end = c.start
 
-    # 2. Min duration — extend, but never overlap next cue
-    for i, c in enumerate(cues):
-        if c.end - c.start >= min_duration:
-            continue
-        target_end = _snap(c.start + min_duration)
-        if i + 1 < len(cues):
-            cap = _snap(cues[i + 1].start - min_gap)
-            target_end = min(target_end, cap)
-        elif audio_duration is not None:
-            target_end = min(target_end, _snap(audio_duration))
-        if target_end > c.end:
-            c.end = target_end
-            stats["min_duration_extended"] += 1
+    if hold_until_next:
+        # Each cue persists until the next one starts (zero gap).
+        # Last cue extends to audio_duration if known, else stays put.
+        for i in range(len(cues) - 1):
+            cur, nxt = cues[i], cues[i + 1]
+            target_end = _snap(nxt.start)
+            if target_end < cur.start:
+                target_end = cur.start  # don't invert
+            if target_end != cur.end:
+                cur.end = target_end
+                stats["hold_extended"] += 1
+        if audio_duration is not None and cues:
+            last = cues[-1]
+            target_end = _snap(audio_duration)
+            if target_end > last.end:
+                last.end = target_end
+                stats["hold_extended"] += 1
+    else:
+        # 2. Min duration — extend, but never overlap next cue
+        for i, c in enumerate(cues):
+            if c.end - c.start >= min_duration:
+                continue
+            target_end = _snap(c.start + min_duration)
+            if i + 1 < len(cues):
+                cap = _snap(cues[i + 1].start - min_gap)
+                target_end = min(target_end, cap)
+            elif audio_duration is not None:
+                target_end = min(target_end, _snap(audio_duration))
+            if target_end > c.end:
+                c.end = target_end
+                stats["min_duration_extended"] += 1
 
-    # 3. Min gap between consecutive cues
-    for i in range(len(cues) - 1):
-        cur, nxt = cues[i], cues[i + 1]
-        if nxt.start - cur.end < min_gap:
-            new_end = _snap(nxt.start - min_gap)
-            if new_end < cur.start:
-                new_end = cur.start  # don't invert
-            if new_end < cur.end:
-                cur.end = new_end
-                stats["gap_inserted"] += 1
+        # 3. Min gap between consecutive cues
+        for i in range(len(cues) - 1):
+            cur, nxt = cues[i], cues[i + 1]
+            if nxt.start - cur.end < min_gap:
+                new_end = _snap(nxt.start - min_gap)
+                if new_end < cur.start:
+                    new_end = cur.start  # don't invert
+                if new_end < cur.end:
+                    cur.end = new_end
+                    stats["gap_inserted"] += 1
 
     # 4. Warnings — informational only, no time changes
     for c in cues:
@@ -664,6 +688,7 @@ def run_align_job(
     min_duration: float = 1.0,
     max_duration: float = 7.0,
     min_gap_frames: int = 2,
+    hold_until_next: bool = True,
     encoding_bom: bool = True,
     progress_callback: Optional[Callable[[float, str], None]] = None,
     check_cancel_cb: Optional[Callable[[], bool]] = None,
@@ -796,6 +821,7 @@ def run_align_job(
                         max_duration=max_duration,
                         min_gap_frames=min_gap_frames,
                         audio_duration=audio_dur,
+                        hold_until_next=hold_until_next,
                     )
 
                 # Write SRT

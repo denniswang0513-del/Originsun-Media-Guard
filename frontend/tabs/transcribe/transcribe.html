@@ -196,13 +196,21 @@
         <!-- Right: Settings -->
         <div class="space-y-4">
             <div>
-                <label class="block text-sm font-medium text-gray-400 mb-1">辨識模型 (Whisper backbone)</label>
-                <select id="align_model"
-                    class="w-full bg-[#1e1e1e] text-sm border border-[#444] rounded px-3 py-2 focus:outline-none focus:border-emerald-500">
-                    <option value="turbo" selected>⚡ Turbo (推薦)</option>
-                    <option value="large-v3">🎯 Large-v3 (極致精準 — 較慢)</option>
-                    <option value="medium">🚀 Medium</option>
-                </select>
+                <div class="flex justify-between items-center mb-1">
+                    <label class="block text-sm font-medium text-gray-400">辨識模型 (Whisper backbone)</label>
+                    <span id="align_model_status_badge" class="px-2 py-0.5 rounded text-xs bg-[#333] text-gray-400">檢查中...</span>
+                </div>
+                <div class="flex gap-2 items-center">
+                    <select id="align_model" onchange="if(window.updateAlignModelStatus) window.updateAlignModelStatus()"
+                        class="flex-1 bg-[#1e1e1e] text-sm border border-[#444] rounded px-3 py-2 focus:outline-none focus:border-emerald-500">
+                        <option value="turbo" selected>⚡ Turbo (推薦)</option>
+                        <option value="large-v3">🎯 Large-v3 (極致精準 — 較慢)</option>
+                        <option value="medium">🚀 Medium</option>
+                    </select>
+                    <button id="btn_align_download_model" onclick="if(window.downloadSelectedModel) window.downloadSelectedModel('align')" class="hidden bg-blue-600 hover:bg-blue-500 text-white px-3 py-2 rounded text-sm whitespace-nowrap shadow-sm transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed">
+                        ⬇️ 下載模型
+                    </button>
+                </div>
                 <p class="text-[10px] text-gray-600 mt-1">與「自動辨識」共用模型，已下載過的可直接使用</p>
             </div>
 
@@ -224,7 +232,15 @@
                         class="form-checkbox text-emerald-500 rounded bg-[#1e1e1e] border-[#444]">
                     <span class="text-gray-300">✨ 套用影片字幕專用時間打磨</span>
                 </label>
-                <p class="text-[10px] text-gray-600 mt-1 ml-6">Frame 對齊、最短顯示時間 1s、字幕間插 2 影格間隔</p>
+                <p id="align_polish_hint" class="text-[10px] text-gray-600 mt-1 ml-6">Frame 對齊 ＋ ✓ 持續顯示模式（連續無空白）</p>
+                <div class="ml-6 mt-2 pl-3 border-l-2 border-[#3a3a3a]">
+                    <label id="align_hold_label" class="flex items-center gap-2 cursor-pointer text-sm transition-opacity">
+                        <input type="checkbox" id="align_hold_until_next" checked
+                            class="form-checkbox text-emerald-500 rounded bg-[#1e1e1e] border-[#444]">
+                        <span class="text-gray-300">⏱️ 延長至下一句字幕（持續顯示，無空白）</span>
+                    </label>
+                    <p class="text-[10px] text-gray-600 mt-1 ml-6">取消勾選將改用「最短 1s + 2 影格間隔」規則</p>
+                </div>
             </div>
 
             <div class="bg-[#1e1e1e] border border-[#333] rounded p-3 text-xs text-gray-500 leading-relaxed">

@@ -572,6 +572,7 @@ async def _run_align(job, engine, task: AlignRequest):
         min_duration=task.min_duration,
         max_duration=task.max_duration,
         min_gap_frames=task.min_gap_frames,
+        hold_until_next=task.hold_until_next,
         encoding_bom=task.encoding_bom,
         progress_callback=_on_prog,
         check_cancel_cb=engine._stop_event.is_set,

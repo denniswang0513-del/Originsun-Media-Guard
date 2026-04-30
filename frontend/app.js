@@ -374,15 +374,8 @@ if (typeof appendLog === 'undefined') {
 
             socket.on('model_download_error', (data) => {
                 window.isDownloadingModel = false;
-                const btn = document.getElementById('btn_download_model');
-                if (btn) {
-                    btn.disabled = false;
-                    btn.textContent = '⬇️ 下載模型';
-                }
-                const badge = document.getElementById('model_status_badge');
-                if (badge) {
-                    badge.textContent = '❌ 下載失敗';
-                    badge.className = 'px-2 py-0.5 rounded text-xs bg-red-900/50 text-red-400 border border-red-800';
+                if (typeof window.setAllModelErrorUI === 'function') {
+                    window.setAllModelErrorUI();
                 }
             });
 

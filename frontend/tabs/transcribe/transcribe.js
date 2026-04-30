@@ -10,6 +10,7 @@ export async function fetchModelStatus() {
         if (data.status) {
             window.modelCacheStatus = data.status;
             window.updateModelStatus();
+            window.updateAlignModelStatus();
         }
     } catch (e) {
         console.error("無法取得模型狀態", e);
@@ -33,18 +34,23 @@ export async function pickMultiFiles() {
     }
 }
 
-export function updateModelStatus() {
-    const selector = document.getElementById('transcribe_model');
-    const badge = document.getElementById('model_status_badge');
-    const btn = document.getElementById('btn_download_model');
+const _MODEL_UI = {
+    transcribe: { selectId: 'transcribe_model', badgeId: 'model_status_badge', btnId: 'btn_download_model' },
+    align:      { selectId: 'align_model',      badgeId: 'align_model_status_badge', btnId: 'btn_align_download_model' },
+};
+
+function _renderModelStatus(mode) {
+    const ids = _MODEL_UI[mode];
+    if (!ids) return;
+    const selector = document.getElementById(ids.selectId);
+    const badge = document.getElementById(ids.badgeId);
+    const btn = document.getElementById(ids.btnId);
     if (!selector || !badge || !btn) return;
-    
+
+    if (window.isDownloadingModel) return;
+
     const size = selector.value;
     const isCached = window.modelCacheStatus[size] === true;
-    
-    if (window.isDownloadingModel) {
-         return;
-    }
 
     btn.disabled = false;
     btn.textContent = '⬇️ 下載模型';
@@ -60,17 +66,49 @@ export function updateModelStatus() {
     }
 }
 
-export async function downloadSelectedModel() {
-    const size = document.getElementById('transcribe_model').value;
+export function updateModelStatus() {
+    _renderModelStatus('transcribe');
+}
+
+export function updateAlignModelStatus() {
+    _renderModelStatus('align');
+}
+
+// Download state is global (one model at a time, all UIs reflect it).
+function _broadcastModelUI(badgeText, badgeClass, btnText, btnDisabled) {
+    Object.values(_MODEL_UI).forEach(ids => {
+        const btn = document.getElementById(ids.btnId);
+        const badge = document.getElementById(ids.badgeId);
+        if (btn) { btn.disabled = btnDisabled; btn.textContent = btnText; }
+        if (badge) { badge.textContent = badgeText; badge.className = badgeClass; }
+    });
+}
+
+export function setAllModelDownloadingUI() {
+    _broadcastModelUI(
+        '🔄 模型下載中...',
+        'px-2 py-0.5 rounded text-xs bg-blue-900/50 text-blue-400 border border-blue-800',
+        '⏳ 下載中...',
+        true,
+    );
+}
+
+export function setAllModelErrorUI() {
+    _broadcastModelUI(
+        '❌ 下載失敗',
+        'px-2 py-0.5 rounded text-xs bg-red-900/50 text-red-400 border border-red-800',
+        '⬇️ 下載模型',
+        false,
+    );
+}
+
+export async function downloadSelectedModel(mode = 'transcribe') {
+    const ids = _MODEL_UI[mode] || _MODEL_UI.transcribe;
+    const sel = document.getElementById(ids.selectId);
+    const size = sel?.value;
     if (!size) return;
-    
-    const btn = document.getElementById('btn_download_model');
-    const badge = document.getElementById('model_status_badge');
-    
-    btn.disabled = true;
-    btn.textContent = '⏳ 下載中...';
-    badge.textContent = '🔄 模型下載中...';
-    badge.className = 'px-2 py-0.5 rounded text-xs bg-blue-900/50 text-blue-400 border border-blue-800';
+
+    setAllModelDownloadingUI();
     window.isDownloadingModel = true;
 
     try {
@@ -85,6 +123,7 @@ export async function downloadSelectedModel() {
         alert("啟動下載失敗");
         window.isDownloadingModel = false;
         window.updateModelStatus();
+        window.updateAlignModelStatus();
     }
 }
 
@@ -255,6 +294,8 @@ window.fetchModelStatus = fetchModelStatus;
 window.pickMultiFiles = pickMultiFiles;
 window.pickTranscribeFolder = pickTranscribeFolder;
 window.updateModelStatus = updateModelStatus;
+window.updateAlignModelStatus = updateAlignModelStatus;
+window.setAllModelErrorUI = setAllModelErrorUI;
 window.downloadSelectedModel = downloadSelectedModel;
 window.setTranscribeMode = setTranscribeMode;
 window.submitTranscribeJob = submitTranscribeJob;
@@ -675,6 +716,7 @@ export async function submitAlignJob() {
         model_size: document.getElementById('align_model')?.value || 'turbo',
         language: document.getElementById('align_language')?.value || 'zh',
         subtitle_polish: document.getElementById('align_polish')?.checked !== false,
+        hold_until_next: document.getElementById('align_hold_until_next')?.checked !== false,
         anchor_threshold: 0.4,  // backend default; advanced users edit settings.json
     };
 
@@ -786,9 +828,14 @@ export function onAlignDone(data) {
         _appendDiv(stats, 'text-gray-600', `邊緣補 ${edgPct}%`);
         row.appendChild(stats);
 
-        if (polish.gap_inserted || polish.min_duration_extended || polish.frame_snapped) {
-            _appendDiv(row, 'mt-1 text-[10px] text-gray-500',
-                `時間優化：snap ${polish.frame_snapped || 0} / 延長 ${polish.min_duration_extended || 0} / 補間隔 ${polish.gap_inserted || 0}`);
+        if (polish.gap_inserted || polish.min_duration_extended || polish.frame_snapped || polish.hold_extended) {
+            const parts = [`snap ${polish.frame_snapped || 0}`];
+            if (polish.hold_extended) {
+                parts.push(`持續延長 ${polish.hold_extended}`);
+            } else {
+                parts.push(`延長 ${polish.min_duration_extended || 0}`, `補間隔 ${polish.gap_inserted || 0}`);
+            }
+            _appendDiv(row, 'mt-1 text-[10px] text-gray-500', `時間優化：${parts.join(' / ')}`);
         }
         if ((polish.reading_speed_warnings || []).length > 0) {
             _appendDiv(row, 'mt-1 text-[10px] text-yellow-500',
@@ -868,6 +915,31 @@ function _wireAlignTab() {
         dest.addEventListener('input', updateAlignSubmitBtn);
         setupInputDrop('align_dest');
     }
+
+    // Polish + hold checkbox interaction: hold is a sub-option of polish.
+    // When polish is unchecked, hold is moot → disable + gray out.
+    // The parent hint reflects which timing strategy is currently active.
+    const polish = document.getElementById('align_polish');
+    const hold = document.getElementById('align_hold_until_next');
+    const hint = document.getElementById('align_polish_hint');
+    const holdLabel = document.getElementById('align_hold_label');
+    const _refreshPolishHint = () => {
+        if (!polish || !hold || !hint) return;
+        if (!polish.checked) {
+            hint.textContent = '未啟用 — 字幕使用對齊算出的原始時間';
+            hold.disabled = true;
+            if (holdLabel) holdLabel.classList.add('opacity-40', 'cursor-not-allowed');
+        } else {
+            hold.disabled = false;
+            if (holdLabel) holdLabel.classList.remove('opacity-40', 'cursor-not-allowed');
+            hint.textContent = hold.checked
+                ? 'Frame 對齊 ＋ ✓ 持續顯示模式（連續無空白）'
+                : 'Frame 對齊 ＋ 最短 1s ＋ 字幕間插 2 影格間隔';
+        }
+    };
+    if (polish) polish.addEventListener('change', _refreshPolishHint);
+    if (hold) hold.addEventListener('change', _refreshPolishHint);
+    _refreshPolishHint();
 
     // Toolbar buttons — programmatic binding (avoids inline-onclick
     // 'window.X is undefined' silent-fail when module loads after HTML).

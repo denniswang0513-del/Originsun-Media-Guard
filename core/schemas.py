@@ -156,6 +156,7 @@ class AlignRequest(BaseModel):
     min_duration: float = 1.0
     max_duration: float = 7.0
     min_gap_frames: int = 2
+    hold_until_next: bool = True          # Each cue.end = next.start (Netflix-style continuous)
     encoding_bom: bool = True             # UTF-8 BOM for Premiere compatibility
     compute_hosts: list = []
 

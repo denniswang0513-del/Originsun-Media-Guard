@@ -350,7 +350,7 @@ class TestPolishSubtitleTimeline:
             Cue(index=2, text="再見", start=5.0, end=6.0),
         ]
         stats = polish_subtitle_timeline(cues, fps=25.0, min_duration=1.0,
-                                         min_gap_frames=2)
+                                         min_gap_frames=2, hold_until_next=False)
         assert cues[0].end >= 1.0 - 1e-6
         assert stats["min_duration_extended"] >= 1
 
@@ -361,7 +361,7 @@ class TestPolishSubtitleTimeline:
             Cue(index=2, text="b", start=0.3, end=1.0),
         ]
         polish_subtitle_timeline(cues, fps=25.0, min_duration=1.0,
-                                 min_gap_frames=2)
+                                 min_gap_frames=2, hold_until_next=False)
         gap = 2.0 / 25.0
         # cue 1 end must not exceed cue 2 start - gap
         assert cues[0].end <= cues[1].start - gap + 1e-6
@@ -374,10 +374,36 @@ class TestPolishSubtitleTimeline:
             Cue(index=2, text="b", start=2.0, end=4.0),  # touching — needs gap
         ]
         stats = polish_subtitle_timeline(cues, fps=25.0, min_duration=0.0,
-                                         min_gap_frames=2)
+                                         min_gap_frames=2, hold_until_next=False)
         gap = 2.0 / 25.0
         assert cues[1].start - cues[0].end >= gap - 1e-6
         assert stats["gap_inserted"] >= 1
+
+    def test_hold_until_next_extends_to_neighbor(self):
+        # 3 cues with big gaps — hold mode should make each end at next.start
+        cues = [
+            Cue(index=1, text="a", start=0.0, end=1.0),
+            Cue(index=2, text="b", start=5.0, end=6.0),
+            Cue(index=3, text="c", start=10.0, end=11.0),
+        ]
+        stats = polish_subtitle_timeline(
+            cues, fps=25.0, audio_duration=15.0, hold_until_next=True,
+        )
+        assert abs(cues[0].end - 5.0) < 1e-6   # holds until cue2.start
+        assert abs(cues[1].end - 10.0) < 1e-6  # holds until cue3.start
+        assert abs(cues[2].end - 15.0) < 1e-6  # last cue → audio end
+        assert stats["hold_extended"] == 3
+        assert stats["min_duration_extended"] == 0  # not used in hold mode
+        assert stats["gap_inserted"] == 0
+
+    def test_hold_until_next_off_keeps_legacy_behavior(self):
+        cues = [
+            Cue(index=1, text="a", start=0.0, end=1.0),
+            Cue(index=2, text="b", start=5.0, end=6.0),
+        ]
+        polish_subtitle_timeline(cues, fps=25.0, hold_until_next=False)
+        # cue 1 end should NOT be extended to cue 2 start
+        assert cues[0].end < 5.0 - 0.1
 
     def test_reading_speed_warning(self):
         # 30 chars in 1s = 30 chars/sec → over 18 limit
