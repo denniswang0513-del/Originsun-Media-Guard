@@ -248,11 +248,17 @@ _blog.openCreatePost = () => {
     _showPostModal('新增文章');
 };
 
-_blog.openEditPost = (id) => {
-    const p = _state.posts.find(x => x.id === id);
-    if (!p) { toastErr('找不到此文章'); return; }
-    _editingPost = { ...p };
-    _showPostModal(`編輯文章 #${p.slug}`);
+_blog.openEditPost = async (id) => {
+    const summary = _state.posts.find(x => x.id === id);
+    if (!summary) { toastErr('找不到此文章'); return; }
+    // 列表 API 不回 body 省 payload；編輯 Modal 開啟時才拉完整資料（含 body block 陣列）
+    try {
+        const full = await websiteFetch(`/api/website/admin/posts/${id}`);
+        _editingPost = { ...full, body: full.body || [] };
+        _showPostModal(`編輯文章 #${summary.slug}`);
+    } catch (e) {
+        toastErr(e.message);
+    }
 };
 
 function _showPostModal(title) {
@@ -266,19 +272,29 @@ function _showPostModal(title) {
     const inner = `
         <div style="
             padding:16px 20px;border-bottom:1px solid #2a2a2a;
-            display:flex;justify-content:space-between;align-items:center;
+            display:flex;justify-content:space-between;align-items:center;gap:10px;
             position:sticky;top:0;background:#1a1a1a;z-index:1;
         ">
             <h3 style="color:#fff;margin:0;font-size:15px;">${esc(title)}</h3>
-            <button onclick="window._blog.closeModal()" style="background:transparent;border:none;color:#888;cursor:pointer;font-size:20px;">✕</button>
+            <div style="display:flex;gap:8px;align-items:center;">
+                ${isNew ? '' : `<button class="btn btn-sm btn-ghost" onclick="window._blog.togglePreview()">${_previewVisible ? '隱藏預覽' : '👁 預覽'}</button>`}
+                <button onclick="window._blog.closeModal()" style="background:transparent;border:none;color:#888;cursor:pointer;font-size:20px;">✕</button>
+            </div>
         </div>
 
-        <div style="padding:20px;">
-            ${_modalBasicSection(p, isNew, pubLocal)}
-            ${_modalCategorySection(p)}
-            ${_modalSEOSection(p)}
-            ${_modalRedirectsSection(p)}
-            ${isNew ? '' : _modalBodyHint()}
+        <div id="post-modal-body" style="display:flex;gap:0;align-items:stretch;">
+            <div id="post-modal-edit" style="flex:1 1 auto;padding:20px;min-width:0;">
+                ${_modalBasicSection(p, isNew, pubLocal)}
+                ${_modalCategorySection(p)}
+                ${isNew ? _modalEmptyBlocksHint() : _modalBlockEditor(p)}
+                ${_modalSEOSection(p)}
+                ${_modalRedirectsSection(p)}
+                ${isNew ? '' : _modalSEOHealth(p)}
+            </div>
+            ${isNew || !_previewVisible ? '' : `
+                <div id="post-modal-preview" style="flex:0 0 50%;border-left:1px solid #2a2a2a;background:#fafafa;color:#222;padding:20px;overflow-y:auto;max-height:80vh;">
+                    ${_renderPreview(p)}
+                </div>`}
         </div>
 
         <div style="
@@ -293,8 +309,10 @@ function _showPostModal(title) {
             </div>
         </div>
     `;
-    openModal('post-modal', inner, { width: '720px' });
+    openModal('post-modal', inner, { width: _previewVisible ? '1180px' : '760px' });
 }
+
+let _previewVisible = false;
 
 function _modalBasicSection(p, isNew, pubLocal) {
     return `
@@ -421,14 +439,590 @@ function _modalRedirectsSection(p) {
     `;
 }
 
-function _modalBodyHint() {
+function _modalEmptyBlocksHint() {
     return `
         <div class="card" style="background:#1f2937;border-left:3px solid #3b82f6;color:#aaa;font-size:12px;padding:10px 12px;">
-            ℹ️ <strong style="color:#fff;">內文 body 編輯</strong>：Phase C 上線後可在此 Modal 加入 block 編輯器
-            （paragraph / heading / image / video / quote / list 拖拉排序）。<br/>
-            目前若需改內文，請從 Notion 編輯後到「📥 從 Notion」分頁按「強制重新匯入」。
+            ℹ️ 新文章先按「💾 儲存」建立草稿，重開編輯 Modal 即可寫內文。
         </div>
     `;
+}
+
+
+// ══════════════════════════════════════════════════════════
+// Block Editor — 6 種 block (paragraph/heading/image/video/quote/list)
+// ══════════════════════════════════════════════════════════
+
+// ── inline updateBlockField binding helpers ──
+// 集中於三個 cast 模式（text/checkbox/number），消除 ~30 處重複的 oninput 字串
+const _bindText = (idx, field) =>
+    `oninput="window._blog.updateBlockField(${idx}, '${field}', this.value)"`;
+const _bindCheck = (idx, field) =>
+    `onchange="window._blog.updateBlockField(${idx}, '${field}', this.checked)"`;
+const _bindNumber = (idx, field) =>
+    `onchange="window._blog.updateBlockField(${idx}, '${field}', Number(this.value))"`;
+
+
+function _modalBlockEditor(p) {
+    const blocks = p.body || [];
+    return `
+        <div class="card" style="border-left:3px solid #f59e0b;">
+            <h4 style="color:#fff;margin:0 0 8px;font-size:13px;">📝 內文 (${blocks.length} blocks)</h4>
+
+            <div style="background:#0d0d0d;padding:6px 8px;border-radius:4px;margin-bottom:12px;display:flex;gap:6px;flex-wrap:wrap;align-items:center;">
+                <span style="color:#666;font-size:11px;">快速插入到結尾：</span>
+                ${Object.entries(BLOCK_REGISTRY).map(([key, t]) =>
+                    `<button class="btn btn-sm btn-ghost" onclick="window._blog.appendBlock('${key}')" style="font-size:11px;padding:3px 8px;">${t.label}</button>`
+                ).join('')}
+            </div>
+
+            <div id="post-blocks">
+                ${blocks.length === 0
+                    ? '<div style="color:#666;font-size:12px;text-align:center;padding:20px;">無內容；用上方按鈕加第一個 block</div>'
+                    : blocks.map((b, i) => _renderBlockItem(b, i, blocks.length)).join('')}
+            </div>
+        </div>
+    `;
+}
+
+
+function _renderBlockItem(b, idx, total) {
+    const formFn = BLOCK_REGISTRY[b.type]?.form || _UNKNOWN_BLOCK_FORM;
+    return `
+        <div data-block-idx="${idx}" style="border:1px solid #2a2a2a;border-radius:6px;margin-bottom:8px;background:#1d1d1d;">
+            <div style="display:flex;justify-content:space-between;align-items:center;padding:6px 10px;background:#252525;border-bottom:1px solid #2a2a2a;">
+                <span style="color:#888;font-size:11px;">#${idx + 1} · ${esc(b.type)}</span>
+                <div style="display:flex;gap:4px;">
+                    <button class="btn btn-sm btn-ghost" onclick="window._blog.moveBlockUp(${idx})" ${idx === 0 ? 'disabled' : ''} title="上移" style="padding:2px 6px;font-size:11px;">↑</button>
+                    <button class="btn btn-sm btn-ghost" onclick="window._blog.moveBlockDown(${idx})" ${idx === total - 1 ? 'disabled' : ''} title="下移" style="padding:2px 6px;font-size:11px;">↓</button>
+                    <button class="btn btn-sm btn-danger" onclick="window._blog.removeBlock(${idx})" title="刪除" style="padding:2px 6px;font-size:11px;">✕</button>
+                </div>
+            </div>
+            <div style="padding:10px;">
+                ${formFn(b, idx)}
+            </div>
+            <div style="border-top:1px dashed #2a2a2a;padding:4px 10px;display:flex;align-items:center;gap:6px;">
+                <span style="color:#666;font-size:11px;">+ 在此後插入</span>
+                <select onchange="if(this.value){window._blog.insertBlockAt(${idx + 1}, this.value);this.value='';}" style="font-size:11px;padding:2px 4px;">
+                    <option value="">－選擇－</option>
+                    ${BLOCK_INSERT_OPTIONS}
+                </select>
+            </div>
+        </div>
+    `;
+}
+
+
+// === 6 個 block-type form renderer ===
+// 每個 input 用 oninput 直接更新 _editingPost.body[idx][field]
+// 不觸發整個 Modal re-render（保持 cursor focus），只在新增/刪除/排序時 refresh
+
+// ── BLOCK_REGISTRY：每種 block type 一個物件含 label / defaults / form / preview ──
+// 加新 block type 只需在這裡加一筆（不再需要動 BLOCK_TYPES + BLOCK_FORMS + switch 三處）
+
+const BLOCK_REGISTRY = {
+    paragraph: {
+        label: '¶ 段落',
+        defaults: { type: 'paragraph', text: '' },
+        form: (b, idx) => `
+            <textarea rows="3" style="width:100%;font-family:inherit;" ${_bindText(idx, 'text')}>${esc(b.text || '')}</textarea>
+            <label style="display:flex;gap:6px;align-items:center;color:#aaa;font-size:11px;margin-top:6px;cursor:pointer;">
+                <input type="checkbox" ${b.lead ? 'checked' : ''} ${_bindCheck(idx, 'lead')} />
+                Lead 段（首段引言放大字）
+            </label>
+        `,
+        preview: (b) => {
+            const cls = b.lead
+                ? 'style="font-size:18px;line-height:1.7;color:#333;margin:0 0 14px;"'
+                : 'style="font-size:14px;line-height:1.7;color:#444;margin:0 0 12px;"';
+            return `<p ${cls}>${esc(b.text || '')}</p>`;
+        },
+    },
+
+    heading: {
+        label: 'H 標題',
+        defaults: { type: 'heading', level: 2, text: '' },
+        form: (b, idx) => `
+            <div style="display:grid;grid-template-columns:80px 1fr;gap:8px;align-items:center;">
+                <select ${_bindNumber(idx, 'level')} style="font-size:11px;">
+                    <option value="2" ${b.level === 2 ? 'selected' : ''}>H2</option>
+                    <option value="3" ${b.level === 3 ? 'selected' : ''}>H3</option>
+                </select>
+                <input type="text" value="${esc(b.text || '')}" placeholder="標題文字"
+                       style="width:100%;font-size:14px;font-weight:600;" ${_bindText(idx, 'text')} />
+            </div>
+        `,
+        preview: (b) => {
+            const tag = b.level === 2 ? 'h2' : 'h3';
+            const size = b.level === 2 ? '20px' : '17px';
+            return `<${tag} style="font-size:${size};font-weight:700;margin:18px 0 8px;color:#222;">${esc(b.text || '')}</${tag}>`;
+        },
+    },
+
+    image: {
+        label: '🖼 圖片',
+        defaults: { type: 'image', src: '', alt: '', caption: '', width: 'content' },
+        form: (b, idx) => {
+            const previewSrc = b.src || '';
+            const altWarn = !b.alt ? `<span style="color:#f59e0b;">⚠ 缺 alt 影響 SEO + 無障礙</span>` : '';
+            const noPostId = !_editingPost?.id;
+            const uploadDisabled = noPostId
+                ? 'disabled style="opacity:0.5;cursor:not-allowed;" title="新文章請先儲存草稿才能上傳圖片"'
+                : '';
+            return `
+                ${previewSrc
+                    ? `<img src="${esc(previewSrc)}" style="max-width:100%;max-height:160px;display:block;margin-bottom:6px;border:1px solid #2a2a2a;border-radius:4px;background:#0d0d0d;" onerror="this.style.opacity='0.3'" />`
+                    : '<div style="background:#0d0d0d;border:1px dashed #333;border-radius:4px;padding:30px;text-align:center;color:#555;font-size:12px;margin-bottom:6px;">尚未上傳圖片</div>'}
+
+                <div style="display:flex;gap:6px;margin-bottom:6px;align-items:center;">
+                    <label class="btn btn-sm btn-ghost" style="margin:0;cursor:${noPostId ? 'not-allowed' : 'pointer'};font-size:11px;${noPostId ? 'opacity:0.5;' : ''}" ${noPostId ? 'title="新文章請先儲存草稿"' : ''}>
+                        📤 ${previewSrc ? '換圖' : '上傳檔案'}
+                        <input type="file" accept="image/*" style="display:none;" ${uploadDisabled}
+                               onchange="window._blog.uploadBlockImage(${idx}, this)" />
+                    </label>
+                    <input type="text" value="${esc(previewSrc)}" placeholder="或貼 URL"
+                           style="flex:1;font-size:11px;"
+                           oninput="window._blog.updateBlockField(${idx}, 'src', this.value);window._blog.refreshBlockItem(${idx});" />
+                </div>
+
+                <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-bottom:4px;">
+                    <input type="text" value="${esc(b.alt || '')}" placeholder="alt 文字（必填）"
+                           style="width:100%;font-size:11px;" ${_bindText(idx, 'alt')} />
+                    <input type="text" value="${esc(b.caption || '')}" placeholder="caption（選填）"
+                           style="width:100%;font-size:11px;" ${_bindText(idx, 'caption')} />
+                </div>
+
+                <div style="display:flex;justify-content:space-between;align-items:center;font-size:11px;color:#888;">
+                    <span>${altWarn}</span>
+                    <label>寬度：
+                        <select ${_bindText(idx, 'width').replace('oninput', 'onchange')} style="font-size:11px;padding:2px 4px;">
+                            <option value="content" ${(b.width || 'content') === 'content' ? 'selected' : ''}>content (680px)</option>
+                            <option value="wide"    ${b.width === 'wide' ? 'selected' : ''}>wide (1024px)</option>
+                            <option value="full"    ${b.width === 'full' ? 'selected' : ''}>full (滿版)</option>
+                        </select>
+                    </label>
+                </div>
+            `;
+        },
+        preview: (b) => {
+            const w = b.width === 'full' ? '100%' : b.width === 'wide' ? '110%' : '100%';
+            const cap = b.caption
+                ? `<figcaption style="text-align:center;color:#888;font-size:11px;margin-top:4px;">${esc(b.caption)}</figcaption>`
+                : '';
+            return `<figure style="margin:14px 0;width:${w};">
+                ${b.src
+                    ? `<img src="${esc(b.src)}" alt="${esc(b.alt || '')}" style="width:100%;border-radius:4px;display:block;" />`
+                    : '<div style="background:#eee;padding:30px;text-align:center;color:#999;font-size:12px;border-radius:4px;">未設圖</div>'}
+                ${cap}
+            </figure>`;
+        },
+    },
+
+    video: {
+        label: '▶ YouTube',
+        defaults: { type: 'video', youtube_id: '', caption: '', width: 'content' },
+        form: (b, idx) => {
+            const id = b.youtube_id || '';
+            const validId = /^[A-Za-z0-9_-]{11}$/.test(id);
+            const thumb = validId ? `https://img.youtube.com/vi/${id}/hqdefault.jpg` : '';
+            return `
+                <div style="display:flex;gap:8px;align-items:flex-start;">
+                    ${thumb
+                        ? `<img src="${thumb}" alt="YouTube preview" style="width:120px;height:68px;object-fit:cover;border-radius:4px;flex-shrink:0;" />`
+                        : '<div style="width:120px;height:68px;background:#0d0d0d;border:1px dashed #333;border-radius:4px;display:flex;align-items:center;justify-content:center;color:#555;font-size:11px;flex-shrink:0;">無預覽</div>'}
+                    <div style="flex:1;min-width:0;">
+                        <input type="text" value="${esc(id)}" placeholder="YouTube URL 或 11-char ID"
+                               style="width:100%;font-size:11px;margin-bottom:4px;"
+                               oninput="window._blog.parseYoutubeAndStore(${idx}, this.value);" />
+                        <div style="font-size:10px;color:${validId ? '#4ade80' : '#f59e0b'};margin-bottom:6px;">
+                            ${validId ? `✓ ID: ${id}` : '⚠ 解析中...貼 https://youtu.be/XXX 或 https://youtube.com/watch?v=XXX'}
+                        </div>
+                        <input type="text" value="${esc(b.caption || '')}" placeholder="caption（選填）"
+                               style="width:100%;font-size:11px;margin-bottom:4px;" ${_bindText(idx, 'caption')} />
+                        <label style="font-size:11px;color:#888;">寬度：
+                            <select ${_bindText(idx, 'width').replace('oninput', 'onchange')} style="font-size:11px;padding:2px 4px;">
+                                <option value="content" ${(b.width || 'content') === 'content' ? 'selected' : ''}>content</option>
+                                <option value="wide"    ${b.width === 'wide' ? 'selected' : ''}>wide</option>
+                                <option value="full"    ${b.width === 'full' ? 'selected' : ''}>full</option>
+                            </select>
+                        </label>
+                    </div>
+                </div>
+            `;
+        },
+        preview: (b) => {
+            const validId = /^[A-Za-z0-9_-]{11}$/.test(b.youtube_id || '');
+            const cap = b.caption
+                ? `<figcaption style="text-align:center;color:#888;font-size:11px;margin-top:4px;">${esc(b.caption)}</figcaption>`
+                : '';
+            return `<figure style="margin:14px 0;">
+                ${validId
+                    ? `<div style="position:relative;padding-bottom:56.25%;height:0;border-radius:4px;overflow:hidden;background:#000;">
+                        <img src="https://img.youtube.com/vi/${b.youtube_id}/hqdefault.jpg" style="position:absolute;inset:0;width:100%;height:100%;object-fit:cover;" />
+                        <div style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;font-size:48px;color:#fff;text-shadow:0 0 8px rgba(0,0,0,0.6);">▶</div>
+                       </div>`
+                    : '<div style="background:#eee;padding:30px;text-align:center;color:#999;font-size:12px;border-radius:4px;">未設 YouTube ID</div>'}
+                ${cap}
+            </figure>`;
+        },
+    },
+
+    quote: {
+        label: '❝ 引言',
+        defaults: { type: 'quote', text: '', author: '' },
+        form: (b, idx) => `
+            <textarea rows="2" placeholder="引用內容" style="width:100%;font-style:italic;font-family:inherit;" ${_bindText(idx, 'text')}>${esc(b.text || '')}</textarea>
+            <input type="text" value="${esc(b.author || '')}" placeholder="作者 / 出處（選填）"
+                   style="width:100%;font-size:11px;margin-top:4px;" ${_bindText(idx, 'author')} />
+        `,
+        preview: (b) => `
+            <blockquote style="border-left:3px solid #c9372c;padding:6px 14px;margin:14px 0;color:#444;font-style:italic;">
+                ${esc(b.text || '')}
+                ${b.author ? `<footer style="font-size:11px;color:#888;margin-top:6px;font-style:normal;">— ${esc(b.author)}</footer>` : ''}
+            </blockquote>
+        `,
+    },
+
+    list: {
+        label: '• 列表',
+        defaults: { type: 'list', items: [''], ordered: false },
+        form: (b, idx) => {
+            const items = b.items || [''];
+            return `
+                <label style="display:flex;gap:6px;align-items:center;color:#aaa;font-size:11px;margin-bottom:6px;cursor:pointer;">
+                    <input type="checkbox" ${b.ordered ? 'checked' : ''} ${_bindCheck(idx, 'ordered')} />
+                    編號列表（1. 2. 3.）
+                </label>
+                <div id="list-items-${idx}">
+                    ${items.map((it, i) => `
+                        <div style="display:flex;gap:4px;margin-bottom:4px;">
+                            <span style="color:#666;font-size:11px;width:18px;text-align:center;flex-shrink:0;padding-top:6px;">${b.ordered ? i + 1 + '.' : '•'}</span>
+                            <input type="text" value="${esc(it)}" placeholder="條目"
+                                   style="flex:1;font-size:12px;"
+                                   oninput="window._blog.updateListItem(${idx}, ${i}, this.value)" />
+                            <button class="btn btn-sm btn-danger" style="padding:2px 6px;font-size:10px;"
+                                    onclick="window._blog.removeListItem(${idx}, ${i})">✕</button>
+                        </div>
+                    `).join('')}
+                </div>
+                <button class="btn btn-sm btn-ghost" onclick="window._blog.addListItem(${idx})" style="margin-top:4px;font-size:11px;">+ 加一項</button>
+            `;
+        },
+        preview: (b) => {
+            const tag = b.ordered ? 'ol' : 'ul';
+            const items = (b.items || []).map(it => `<li style="margin-bottom:4px;">${esc(it)}</li>`).join('');
+            return `<${tag} style="font-size:14px;line-height:1.6;color:#444;padding-left:24px;margin:12px 0;">${items}</${tag}>`;
+        },
+    },
+};
+
+const BLOCK_INSERT_OPTIONS = Object.entries(BLOCK_REGISTRY).map(([key, t]) =>
+    `<option value="${key}">${t.label}</option>`
+).join('');
+
+const _UNKNOWN_BLOCK_FORM = (b) =>
+    `<pre style="color:#f87171;font-size:11px;background:#0d0d0d;padding:6px;border-radius:4px;">不認識的 block type "${esc(b.type)}"，原始 JSON：\n${esc(JSON.stringify(b, null, 2))}</pre>`;
+const _UNKNOWN_BLOCK_PREVIEW = (b) =>
+    `<pre style="background:#fee;color:#900;padding:6px;font-size:11px;">未知 block: ${esc(b.type)}</pre>`;
+
+
+// ══════════════════════════════════════════════════════════
+// Block 操作 handlers
+// ══════════════════════════════════════════════════════════
+
+function _refreshBlocks() {
+    if (!_editingPost) return;
+    const host = document.getElementById('post-blocks');
+    if (host) {
+        const blocks = _editingPost.body || [];
+        host.innerHTML = blocks.length === 0
+            ? '<div style="color:#666;font-size:12px;text-align:center;padding:20px;">無內容；用上方按鈕加第一個 block</div>'
+            : blocks.map((b, i) => _renderBlockItem(b, i, blocks.length)).join('');
+    }
+    _refreshPreview();
+    _refreshSEOHealth();
+}
+
+_blog.refreshBlockItem = (idx) => {
+    if (!_editingPost) return;
+    const wrap = document.querySelector(`[data-block-idx="${idx}"]`);
+    if (!wrap) return;
+    const blocks = _editingPost.body || [];
+    wrap.outerHTML = _renderBlockItem(blocks[idx], idx, blocks.length);
+    _refreshPreview();
+};
+
+_blog.updateBlockField = (idx, field, value) => {
+    if (!_editingPost?.body?.[idx]) return;
+    _editingPost.body[idx][field] = value;
+    _refreshPreview();
+    _refreshSEOHealth();
+};
+
+_blog.appendBlock = (type) => {
+    if (!_editingPost) return;
+    const def = BLOCK_REGISTRY[type]?.defaults;
+    if (!def) return;
+    _editingPost.body = _editingPost.body || [];
+    _editingPost.body.push({ ...def });
+    _refreshBlocks();
+};
+
+_blog.insertBlockAt = (idx, type) => {
+    if (!_editingPost) return;
+    const def = BLOCK_REGISTRY[type]?.defaults;
+    if (!def) return;
+    _editingPost.body = _editingPost.body || [];
+    _editingPost.body.splice(idx, 0, { ...def });
+    _refreshBlocks();
+};
+
+_blog.removeBlock = (idx) => {
+    if (!_editingPost?.body?.[idx]) return;
+    if (!confirm('刪除此 block？')) return;
+    _editingPost.body.splice(idx, 1);
+    _refreshBlocks();
+};
+
+_blog.moveBlockUp = (idx) => {
+    if (!_editingPost?.body || idx <= 0) return;
+    const arr = _editingPost.body;
+    [arr[idx - 1], arr[idx]] = [arr[idx], arr[idx - 1]];
+    _refreshBlocks();
+};
+
+_blog.moveBlockDown = (idx) => {
+    if (!_editingPost?.body || idx >= (_editingPost.body.length - 1)) return;
+    const arr = _editingPost.body;
+    [arr[idx + 1], arr[idx]] = [arr[idx], arr[idx + 1]];
+    _refreshBlocks();
+};
+
+_blog.updateListItem = (blockIdx, itemIdx, value) => {
+    const block = _editingPost?.body?.[blockIdx];
+    if (!block?.items) return;
+    block.items[itemIdx] = value;
+    _refreshPreview();
+};
+
+_blog.addListItem = (blockIdx) => {
+    const block = _editingPost?.body?.[blockIdx];
+    if (!block?.items) return;
+    block.items.push('');
+    _refreshBlocks();
+};
+
+_blog.removeListItem = (blockIdx, itemIdx) => {
+    const block = _editingPost?.body?.[blockIdx];
+    if (!block?.items || block.items.length <= 1) return;
+    block.items.splice(itemIdx, 1);
+    _refreshBlocks();
+};
+
+
+// ── 圖片上傳 ──
+
+_blog.uploadBlockImage = async (idx, fileInput) => {
+    const file = fileInput.files?.[0];
+    if (!file) return;
+    if (!_editingPost?.id) {
+        toastErr('新文章請先儲存草稿（取得 ID）才能上傳圖片');
+        fileInput.value = '';
+        return;
+    }
+    const fd = new FormData();
+    fd.append('file', file);
+    try {
+        const r = await websiteFetch(`/api/website/admin/posts/${_editingPost.id}/upload-image`, {
+            method: 'POST', body: fd,
+        });
+        _blog.updateBlockField(idx, 'src', r.url);
+        toastOk(`已上傳 ${r.filename}`);
+        _blog.refreshBlockItem(idx);
+    } catch (e) {
+        toastErr(`上傳失敗：${e.message}`);
+    } finally {
+        fileInput.value = '';
+    }
+};
+
+
+// ── YouTube URL → 11 字 ID 解析 ──
+
+const _YT_RE = /(?:youtu\.be\/|youtube\.com\/(?:watch\?v=|embed\/|v\/)|^)([A-Za-z0-9_-]{11})(?:[?&]|$)/;
+
+_blog.parseYoutubeAndStore = (idx, raw) => {
+    const trimmed = (raw || '').trim();
+    let id = trimmed;
+    if (trimmed.length !== 11 || !/^[A-Za-z0-9_-]{11}$/.test(trimmed)) {
+        const m = trimmed.match(_YT_RE);
+        if (m) id = m[1];
+    }
+    _blog.updateBlockField(idx, 'youtube_id', id);
+    _blog.refreshBlockItem(idx);
+};
+
+
+// ══════════════════════════════════════════════════════════
+// Live Preview Pane (mirror Astro 渲染)
+// ══════════════════════════════════════════════════════════
+
+function _renderPreview(p) {
+    const blocks = p.body || [];
+    const titleHtml = `<h1 style="font-size:24px;font-weight:700;margin:0 0 12px;color:#111;line-height:1.3;">${esc(p.title || '(未命名)')}</h1>`;
+    const metaHtml = p.published_at || p.author_name
+        ? `<div style="color:#888;font-size:12px;margin-bottom:16px;">${[
+            p.author_name, p.published_at ? new Date(p.published_at).toLocaleDateString() : null,
+          ].filter(Boolean).join(' · ')}</div>`
+        : '';
+    const cover = p.cover_url
+        ? `<img src="${esc(p.cover_url)}" style="width:100%;max-height:240px;object-fit:cover;border-radius:6px;margin-bottom:16px;" />`
+        : '';
+    const excerpt = p.excerpt
+        ? `<p style="color:#555;font-size:14px;font-style:italic;border-left:3px solid #c9372c;padding-left:10px;margin:0 0 16px;">${esc(p.excerpt)}</p>`
+        : '';
+    const body = blocks.length === 0
+        ? '<div style="color:#999;font-size:13px;padding:20px;text-align:center;">無內文</div>'
+        : blocks.map(_renderPreviewBlock).join('');
+
+    return cover + titleHtml + metaHtml + excerpt + body;
+}
+
+function _renderPreviewBlock(b) {
+    switch (b.type) {
+        case 'paragraph': {
+            const cls = b.lead
+                ? 'style="font-size:18px;line-height:1.7;color:#333;margin:0 0 14px;"'
+                : 'style="font-size:14px;line-height:1.7;color:#444;margin:0 0 12px;"';
+            return `<p ${cls}>${esc(b.text || '')}</p>`;
+        }
+        case 'heading': {
+            const tag = b.level === 2 ? 'h2' : 'h3';
+            const size = b.level === 2 ? '20px' : '17px';
+            return `<${tag} style="font-size:${size};font-weight:700;margin:18px 0 8px;color:#222;">${esc(b.text || '')}</${tag}>`;
+        }
+        case 'image': {
+            const w = b.width === 'full' ? '100%' : b.width === 'wide' ? '110%' : '100%';
+            const cap = b.caption
+                ? `<figcaption style="text-align:center;color:#888;font-size:11px;margin-top:4px;">${esc(b.caption)}</figcaption>`
+                : '';
+            return `<figure style="margin:14px 0;width:${w};">
+                ${b.src
+                    ? `<img src="${esc(b.src)}" alt="${esc(b.alt || '')}" style="width:100%;border-radius:4px;display:block;" />`
+                    : '<div style="background:#eee;padding:30px;text-align:center;color:#999;font-size:12px;border-radius:4px;">未設圖</div>'}
+                ${cap}
+            </figure>`;
+        }
+        case 'video': {
+            const validId = /^[A-Za-z0-9_-]{11}$/.test(b.youtube_id || '');
+            const cap = b.caption
+                ? `<figcaption style="text-align:center;color:#888;font-size:11px;margin-top:4px;">${esc(b.caption)}</figcaption>`
+                : '';
+            return `<figure style="margin:14px 0;">
+                ${validId
+                    ? `<div style="position:relative;padding-bottom:56.25%;height:0;border-radius:4px;overflow:hidden;background:#000;">
+                        <img src="https://img.youtube.com/vi/${b.youtube_id}/hqdefault.jpg" style="position:absolute;inset:0;width:100%;height:100%;object-fit:cover;" />
+                        <div style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;font-size:48px;color:#fff;text-shadow:0 0 8px rgba(0,0,0,0.6);">▶</div>
+                       </div>`
+                    : '<div style="background:#eee;padding:30px;text-align:center;color:#999;font-size:12px;border-radius:4px;">未設 YouTube ID</div>'}
+                ${cap}
+            </figure>`;
+        }
+        case 'quote': {
+            return `<blockquote style="border-left:3px solid #c9372c;padding:6px 14px;margin:14px 0;color:#444;font-style:italic;">
+                ${esc(b.text || '')}
+                ${b.author ? `<footer style="font-size:11px;color:#888;margin-top:6px;font-style:normal;">— ${esc(b.author)}</footer>` : ''}
+            </blockquote>`;
+        }
+        case 'list': {
+            const tag = b.ordered ? 'ol' : 'ul';
+            const items = (b.items || []).map(it => `<li style="margin-bottom:4px;">${esc(it)}</li>`).join('');
+            return `<${tag} style="font-size:14px;line-height:1.6;color:#444;padding-left:24px;margin:12px 0;">${items}</${tag}>`;
+        }
+        default:
+            return `<pre style="background:#fee;color:#900;padding:6px;font-size:11px;">未知 block: ${esc(b.type)}</pre>`;
+    }
+}
+
+function _refreshPreview() {
+    const pane = document.getElementById('post-modal-preview');
+    if (pane && _editingPost) {
+        pane.innerHTML = _renderPreview(_editingPost);
+    }
+}
+
+_blog.togglePreview = () => {
+    _previewVisible = !_previewVisible;
+    if (!_editingPost) return;
+    const isNew = !_editingPost.id;
+    _showPostModal(isNew ? '新增文章' : `編輯文章 #${_editingPost.slug}`);
+};
+
+
+// ══════════════════════════════════════════════════════════
+// SEO 健康度 widget（編輯時即時評分）
+// ══════════════════════════════════════════════════════════
+
+function _modalSEOHealth(p) {
+    const checks = _seoChecks(p);
+    const passed = checks.filter(c => c.pass).length;
+    const pct = Math.round((passed / checks.length) * 100);
+    const color = pct >= 80 ? '#4ade80' : pct >= 50 ? '#f59e0b' : '#f87171';
+
+    const items = checks.map(c => `
+        <li style="display:flex;gap:6px;padding:3px 0;font-size:11px;color:${c.pass ? '#aaa' : '#ddd'};">
+            <span style="color:${c.pass ? '#4ade80' : '#f87171'};">${c.pass ? '✓' : '✗'}</span>
+            <span>${esc(c.label)}</span>
+        </li>
+    `).join('');
+
+    return `
+        <div id="seo-health-widget" class="card" style="border-left:3px solid ${color};">
+            <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:6px;">
+                <h4 style="color:#fff;margin:0;font-size:13px;">🎯 SEO 健康度（即時）</h4>
+                <span style="color:${color};font-size:18px;font-weight:700;">${pct}<span style="font-size:11px;">% (${passed}/${checks.length})</span></span>
+            </div>
+            <ul style="list-style:none;margin:0;padding:0;">${items}</ul>
+        </div>
+    `;
+}
+
+function _seoChecks(p) {
+    const blocks = p.body || [];
+    const titleLen = (p.title || '').length;
+    const descSrc = p.seo_description || p.excerpt || '';
+    const descLen = descSrc.length;
+    const wordCount = blocks.reduce((sum, b) => {
+        if (b.type === 'paragraph' || b.type === 'heading' || b.type === 'quote') return sum + (b.text || '').length;
+        if (b.type === 'list') return sum + (b.items || []).reduce((s, x) => s + x.length, 0);
+        return sum;
+    }, 0);
+    const imgs = blocks.filter(b => b.type === 'image');
+    const imgsWithoutAlt = imgs.filter(b => !(b.alt && b.alt.trim())).length;
+    const hasInternalLink = blocks.some(b =>
+        (b.type === 'paragraph' || b.type === 'list') &&
+        /\[[^\]]+\]\(\/news\/|\/works\/|\/services/.test(JSON.stringify(b))
+    );
+
+    return [
+        { label: `Title 長度 ${titleLen} 字（建議 30-60）`,        pass: titleLen >= 30 && titleLen <= 60 },
+        { label: `Description ${descLen} 字（建議 60-160）`,        pass: descLen >= 60 && descLen <= 160 },
+        { label: `OG image 已設`,                                    pass: !!(p.og_image_url || p.cover_url) },
+        { label: `字數 ${wordCount}（建議 ≥ 800）`,                  pass: wordCount >= 800 },
+        { label: `至少 1 張內文圖`,                                   pass: imgs.length >= 1 },
+        { label: `所有內文圖有 alt（${imgsWithoutAlt} 張缺）`,       pass: imgsWithoutAlt === 0 },
+        { label: `Author 已填（E-E-A-T 加分）`,                       pass: !!(p.author_name && p.author_name.trim()) },
+        { label: `已填舊網址轉址 — SEO 權重連續性`,                   pass: (p.old_urls || []).length > 0 },
+        { label: `published_at 不是未來時間`,                          pass: !p.published_at || new Date(p.published_at) <= new Date() },
+        { label: `內文有內鏈到其他文章/作品/服務`,                     pass: hasInternalLink },
+    ];
+}
+
+function _refreshSEOHealth() {
+    if (!_editingPost) return;
+    const widget = document.getElementById('seo-health-widget');
+    if (widget) {
+        widget.outerHTML = _modalSEOHealth(_editingPost);
+    }
 }
 
 _blog.closeModal = () => {
