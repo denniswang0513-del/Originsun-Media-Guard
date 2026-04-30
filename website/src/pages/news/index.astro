@@ -95,6 +95,7 @@ const seo = buildBasicPageSeo(Astro, {
                             <div class="relative overflow-hidden aspect-video bg-neutral-100 mb-4">
                                 <img src={p.cover_url}
                                      alt={p.title}
+                                     width="1280" height="720"
                                      loading={i < 3 ? "eager" : "lazy"}
                                      class="absolute inset-0 w-full h-full object-cover transition-transform duration-700 group-hover:scale-[1.04]" />
                             </div>

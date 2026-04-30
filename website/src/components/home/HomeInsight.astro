@@ -39,7 +39,8 @@ function fmtDate(iso: string): string {
             {shown.map(p => (
                 <a href={`/news/${p.slug}`} class="group block">
                     <div class="relative overflow-hidden aspect-[16/10] bg-neutral-100 mb-5">
-                        <img src={p.cover_url} alt={p.title} loading="lazy"
+                        <img src={p.cover_url} alt={p.title}
+                             width="1200" height="750" loading="lazy"
                              class="absolute inset-0 w-full h-full object-cover transition-transform duration-700 group-hover:scale-[1.04]" />
                     </div>
                     <div class="flex items-center gap-3 text-[10px] tracking-[0.3em] uppercase text-[#c9372c] mb-3">

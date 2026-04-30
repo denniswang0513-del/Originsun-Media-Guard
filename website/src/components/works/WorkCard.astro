@@ -18,6 +18,7 @@ const thumb = resolveThumbnail(work.youtube_id, work.slug, "hq");
     <div class="relative overflow-hidden aspect-video bg-neutral-100 mb-4">
         <img src={thumb}
              alt={work.title}
+             width="1280" height="720"
              loading={priority ? "eager" : "lazy"}
              class="absolute inset-0 w-full h-full object-cover transition-transform duration-700 group-hover:scale-[1.04]" />
         {work.featured && (
