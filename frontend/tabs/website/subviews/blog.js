@@ -7,8 +7,8 @@
  *   📥 從 Notion   — 匯入器（Phase A 後 Notion 只是 seed，不再是 truth）
  *   🌐 SEO 移轉    — 軟+硬 301 計數 + 強制同步 + 跨域遷移指引
  *
- * Body block 編輯器在 Phase C；目前 metadata Modal 不含 body 編輯（draft 文章
- * 先存空 body，admin 過目時提示「Phase C 上線後再編內容」）。
+ * Modal 含完整 block 編輯器（6 種 block：paragraph / heading / image / video /
+ * quote / list）+ 圖片上傳 + YouTube 解析 + 即時預覽 + SEO health widget。
  */
 import {
     websiteFetch, esc, toastOk, toastErr, renderLoadError,
@@ -286,10 +286,10 @@ function _showPostModal(title) {
             <div id="post-modal-edit" style="flex:1 1 auto;padding:20px;min-width:0;">
                 ${_modalBasicSection(p, isNew, pubLocal)}
                 ${_modalCategorySection(p)}
-                ${isNew ? _modalEmptyBlocksHint() : _modalBlockEditor(p)}
+                ${_modalBlockEditor(p)}
                 ${_modalSEOSection(p)}
                 ${_modalRedirectsSection(p)}
-                ${isNew ? '' : _modalSEOHealth(p)}
+                ${_modalSEOHealth(p)}
             </div>
             ${isNew || !_previewVisible ? '' : `
                 <div id="post-modal-preview" style="flex:0 0 50%;border-left:1px solid #2a2a2a;background:#fafafa;color:#222;padding:20px;overflow-y:auto;max-height:80vh;">
@@ -385,7 +385,7 @@ function _modalSEOSection(p) {
                 <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">
                     <div>
                         <label style="color:#888;font-size:11px;display:block;margin-bottom:3px;">SEO Title 覆寫</label>
-                        <input id="m-seo-title" type="text" value="${esc(p.seo_title || '')}" style="width:100%;" />
+                        <input id="m-seo-title" type="text" value="${esc(p.seo_title || '')}" maxlength="200" style="width:100%;" />
                     </div>
                     <div>
                         <label style="color:#888;font-size:11px;display:block;margin-bottom:3px;">OG Image 覆寫</label>
@@ -394,7 +394,7 @@ function _modalSEOSection(p) {
                 </div>
                 <div style="margin-top:10px;">
                     <label style="color:#888;font-size:11px;display:block;margin-bottom:3px;">SEO Description 覆寫（不填用 excerpt）</label>
-                    <textarea id="m-seo-desc" rows="2" style="width:100%;">${esc(p.seo_description || '')}</textarea>
+                    <textarea id="m-seo-desc" rows="2" maxlength="300" style="width:100%;">${esc(p.seo_description || '')}</textarea>
                 </div>
                 <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:10px;">
                     <div>
@@ -438,15 +438,6 @@ function _modalRedirectsSection(p) {
         </details>
     `;
 }
-
-function _modalEmptyBlocksHint() {
-    return `
-        <div class="card" style="background:#1f2937;border-left:3px solid #3b82f6;color:#aaa;font-size:12px;padding:10px 12px;">
-            ℹ️ 新文章先按「💾 儲存」建立草稿，重開編輯 Modal 即可寫內文。
-        </div>
-    `;
-}
-
 
 // ══════════════════════════════════════════════════════════
 // Block Editor — 6 種 block (paragraph/heading/image/video/quote/list)
@@ -1001,6 +992,9 @@ function _readModalForm() {
         category_slugs: checkedCats,
         status: document.getElementById('m-status').value,
         published_at,
+        // body 不在 DOM 表單裡 — 隨 _editingPost 維護的 PostBlock 陣列直接送
+        // （block 編輯器即時改 _editingPost.body[i].field，不存就會丟）
+        body: _editingPost?.body || [],
         seo_title: document.getElementById('m-seo-title').value.trim() || null,
         seo_description: document.getElementById('m-seo-desc').value.trim() || null,
         og_image_url: document.getElementById('m-og-image').value.trim() || null,

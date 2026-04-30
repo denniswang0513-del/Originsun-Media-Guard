@@ -1,11 +1,12 @@
 /**
  * post.ts — Insight / 專欄文章 TS interface
  *
- * 資料源：lib/posts.ts → src/content/posts.json
- *   （Python notion_service 同步時產生；無檔案時 lib 會 fallback 空陣列）
+ * 資料源：lib/posts.ts → fetch /api/website/posts（DB-as-truth，PostgreSQL）
+ *         lib/categories.ts → fetch /api/website/post_categories
+ *   （Phase A 起取代 src/content/posts.json + categories.json，
+ *    admin 在「部落格管理」Tab 編輯，60s debounce 觸發 Astro rebuild）
  *
- * 分類為動態 — Notion 「分類」multi_select 改了 lib/categories.ts 自動跟上，
- * 所以 PostCategory 是 plain string 而非 literal union。
+ * 分類為動態 — admin 可任意新增/改名，所以 PostCategory 是 plain string 而非 literal union。
  */
 
 export type PostCategory = string;
