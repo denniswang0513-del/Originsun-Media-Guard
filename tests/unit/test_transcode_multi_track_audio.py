@@ -111,3 +111,40 @@ def test_proxy_audio_always_aac_for_concat_compat(monkeypatch, tmp_path):
         f"got: {cmd_str}"
     )
     assert "-c:a aac" in cmd_str, "Expected aac re-encode for downstream compat"
+
+
+@pytest.mark.parametrize("filename", [
+    "clip.mp4",                 # OBS / 螢幕錄影 / 雙麥 hot-shoe — 可能多軌
+    "field_recording.mxf",      # 專業外景 — 多麥多軌典型
+    "drone.mov",                # action cam 系列
+    "broadcast.mts",            # AVCHD 多語系廣播
+    "raw.r3d",                  # RED RAW
+])
+def test_audio_handling_independent_of_container(filename, monkeypatch, tmp_path):
+    """Bug surfaced on .mp4 too — the fix must not be ext-gated. ffprobe
+    reads stream count from the actual file, not the ext, so the cmd shape
+    must be identical across all supported containers when stream count is
+    the same."""
+    captured = {"cmd": None}
+
+    def fake_popen(cmd, *args, **kwargs):
+        captured["cmd"] = list(cmd)
+        return _FakeProc()
+
+    monkeypatch.setattr(MediaGuardEngine, "_get_video_duration", staticmethod(lambda p: 10.0))
+    monkeypatch.setattr(MediaGuardEngine, "_probe_audio_stream_count", staticmethod(lambda p: 3))
+    monkeypatch.setattr(subprocess, "Popen", fake_popen)
+
+    src = tmp_path / filename
+    src.write_bytes(b"\x00" * 16)
+    dest = tmp_path / "out"
+    dest.mkdir()
+
+    engine = MediaGuardEngine(logger_cb=lambda m: None, error_cb=lambda m: None)
+    engine.run_transcode_job([str(src)], str(dest))
+
+    cmd_str = " ".join(captured["cmd"])
+    assert "amerge=inputs=3" in cmd_str, (
+        f"{filename} with 3 audio streams must amerge — fix must not ext-gate. "
+        f"Got: {cmd_str}"
+    )
