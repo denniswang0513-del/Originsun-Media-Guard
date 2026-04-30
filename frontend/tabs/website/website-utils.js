@@ -187,3 +187,65 @@ export function debounce(fn, ms = 150) {
         t = setTimeout(() => fn(...args), ms);
     };
 }
+
+
+// ── Inline-edit row helper（categories / seo / blog 子視圖共用） ──
+
+/**
+ * 把指定 row 內的 input/checkbox/number/textarea 收成 patch dict。
+ * - data-id="<rowId>"   標出哪一列
+ * - data-field="<key>"  標 patch 欄位名稱
+ * type=number 自動 Number()，NaN → null
+ */
+export function readRowPatch(scopeSel, id) {
+    const patch = {};
+    document.querySelectorAll(`${scopeSel} [data-id="${id}"]`).forEach(el => {
+        const f = el.dataset.field;
+        if (el.type === 'checkbox') {
+            patch[f] = el.checked;
+        } else if (el.type === 'number') {
+            const n = Number(el.value);
+            patch[f] = Number.isNaN(n) ? null : n;
+        } else {
+            patch[f] = el.value;
+        }
+    });
+    return patch;
+}
+
+
+// ── Modal overlay helper（admin Tab 多處 modal 共用 chrome） ──
+
+/**
+ * 建立 modal overlay，append 到 body，回 modal element。
+ * 同 id 的舊 modal 會先 remove（防 double-open 殘骸）。
+ *
+ * 用法：
+ *   const m = openModal('my-modal', '<div>...</div>', { width: '720px' });
+ *   // 內容裡的 onclick 用 closeModal('my-modal') 關閉
+ */
+export function openModal(id, innerHtml, { width = '720px', onClose } = {}) {
+    closeModal(id);
+    const m = document.createElement('div');
+    m.id = id;
+    m.style.cssText = `
+        position:fixed;inset:0;z-index:9999;
+        background:rgba(0,0,0,0.7);
+        display:flex;align-items:center;justify-content:center;padding:20px;
+    `;
+    m.innerHTML = `
+        <div style="
+            background:#1a1a1a;border:1px solid #3a3a3a;border-radius:8px;
+            width:100%;max-width:${width};max-height:90vh;overflow-y:auto;
+            box-shadow:0 12px 40px rgba(0,0,0,0.5);
+        ">${innerHtml}</div>
+    `;
+    document.body.appendChild(m);
+    if (onClose) m.dataset._onClose = '1';   // marker；暫時用 ad-hoc 機制
+    return m;
+}
+
+export function closeModal(id) {
+    const m = document.getElementById(id);
+    if (m) m.remove();
+}

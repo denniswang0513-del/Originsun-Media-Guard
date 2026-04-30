@@ -1,7 +1,7 @@
 /**
  * categories.js — 作品分類 CRUD
  */
-import { websiteFetch, esc, toastOk, toastErr, renderLoadError } from '../website-utils.js';
+import { websiteFetch, esc, toastOk, toastErr, renderLoadError, readRowPatch } from '../website-utils.js';
 
 let _cats = [];
 
@@ -88,12 +88,7 @@ function _renderTable() {
 }
 
 window._websiteSaveCat = async (id) => {
-    const patch = {};
-    document.querySelectorAll(`#cat-table [data-id="${id}"]`).forEach(el => {
-        const f = el.dataset.field;
-        // <select> 在 input/checkbox/number 三分支之外，落到 default 取 .value 即可
-        patch[f] = el.type === 'checkbox' ? el.checked : (el.type === 'number' ? Number(el.value) : el.value);
-    });
+    const patch = readRowPatch('#cat-table', id);
     try {
         await websiteFetch(`/api/website/admin/categories/${id}`, { method: 'PUT', body: patch });
         toastOk('已更新');

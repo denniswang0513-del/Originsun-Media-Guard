@@ -10,13 +10,28 @@
  * Body block 編輯器在 Phase C；目前 metadata Modal 不含 body 編輯（draft 文章
  * 先存空 body，admin 過目時提示「Phase C 上線後再編內容」）。
  */
-import { websiteFetch, esc, toastOk, toastErr, renderLoadError } from '../website-utils.js';
+import {
+    websiteFetch, esc, toastOk, toastErr, renderLoadError,
+    readRowPatch, openModal, closeModal,
+} from '../website-utils.js';
 
 const SUB_TABS = ['posts', 'categories', 'notion', 'seo-migration'];
-const STATUS_LABELS = { draft: '草稿', published: '已發布', archived: '已下架' };
-const STATUS_COLORS = {
-    draft: '#5f3f1e', published: '#1e5f2e', archived: '#3a3a3a',
+
+// 文章狀態 metadata 集中（label + 顯示色 + emoji 一處改全套同步）
+const STATUS = {
+    draft:     { label: '草稿',   color: '#5f3f1e', emoji: '📝' },
+    published: { label: '已發布', color: '#1e5f2e', emoji: '🚀' },
+    archived:  { label: '已下架', color: '#3a3a3a', emoji: '🗄' },
 };
+const STATUS_FALLBACK = { label: '?', color: '#444', emoji: '❓' };
+
+const EMPTY_POST = Object.freeze({
+    id: null, slug: '', title: '', excerpt: '', cover_url: '',
+    body: [], category_slugs: [], status: 'draft', published_at: null,
+    seo_title: '', seo_description: '', og_image_url: '', canonical_url: '',
+    noindex: false, author_name: '', author_url: '',
+    ai_allow_override: null, old_urls: [],
+});
 
 let _state = {
     activeTab: 'posts',
@@ -108,13 +123,17 @@ _blog.switchTab = (id) => {
     _renderShell();
 };
 
+const VIEW_RENDERERS = {
+    'posts':          _viewPosts,
+    'categories':     _viewCategories,
+    'notion':         _viewNotion,
+    'seo-migration':  _viewSEOMigration,
+};
+
 function _renderActive() {
     const body = document.getElementById('blog-tab-body');
     if (!body) return;
-    if (_state.activeTab === 'posts') body.innerHTML = _viewPosts();
-    else if (_state.activeTab === 'categories') body.innerHTML = _viewCategories();
-    else if (_state.activeTab === 'notion') body.innerHTML = _viewNotion();
-    else if (_state.activeTab === 'seo-migration') body.innerHTML = _viewSEOMigration();
+    body.innerHTML = VIEW_RENDERERS[_state.activeTab]?.() ?? '';
 }
 
 
@@ -184,7 +203,7 @@ function _postRow(p) {
         const c = _state.categories.find(x => x.slug === slug);
         return c ? c.label_zh : slug;
     });
-    const status = p.status || 'draft';
+    const meta = STATUS[p.status] ?? STATUS_FALLBACK;
     const pub = p.published_at
         ? new Date(p.published_at).toISOString().slice(0, 10)
         : '-';
@@ -196,7 +215,7 @@ function _postRow(p) {
                 ${p.notion_page_id ? '<div style="color:#666;font-size:10px;">📥 Notion 匯入</div>' : ''}
             </td>
             <td>${catLabels.map(l => `<span class="website-pill">${esc(l)}</span>`).join(' ') || '<span style="color:#666;">未分類</span>'}</td>
-            <td><span class="website-pill" style="background:${STATUS_COLORS[status]};color:#fff;">${STATUS_LABELS[status]}</span></td>
+            <td><span class="website-pill" style="background:${meta.color};color:#fff;">${meta.label}</span></td>
             <td style="color:#888;font-family:monospace;font-size:11px;">${pub}</td>
             <td style="text-align:center;color:${p.redirect_count ? '#f59e0b' : '#666'};">${p.redirect_count || 0}</td>
             <td>
@@ -225,13 +244,7 @@ _blog.setFilter = (field, value) => {
 let _editingPost = null;     // 目前編輯中的 post object（null = 新增模式）
 
 _blog.openCreatePost = () => {
-    _editingPost = {
-        id: null, slug: '', title: '', excerpt: '', cover_url: '',
-        category_slugs: [], status: 'draft', published_at: null,
-        seo_title: '', seo_description: '', og_image_url: '', canonical_url: '',
-        noindex: false, author_name: '', author_url: '',
-        ai_allow_override: null, old_urls: [],
-    };
+    _editingPost = { ...EMPTY_POST };
     _showPostModal('新增文章');
 };
 
@@ -250,50 +263,37 @@ function _showPostModal(title) {
         ? new Date(p.published_at).toISOString().slice(0, 16)
         : '';
 
-    const modal = document.createElement('div');
-    modal.id = 'post-modal';
-    modal.style.cssText = `
-        position:fixed;inset:0;z-index:9999;
-        background:rgba(0,0,0,0.7);
-        display:flex;align-items:center;justify-content:center;padding:20px;
-    `;
-    modal.innerHTML = `
+    const inner = `
         <div style="
-            background:#1a1a1a;border:1px solid #3a3a3a;border-radius:8px;
-            width:100%;max-width:720px;max-height:90vh;overflow-y:auto;
-            box-shadow:0 12px 40px rgba(0,0,0,0.5);
+            padding:16px 20px;border-bottom:1px solid #2a2a2a;
+            display:flex;justify-content:space-between;align-items:center;
+            position:sticky;top:0;background:#1a1a1a;z-index:1;
         ">
-            <div style="
-                padding:16px 20px;border-bottom:1px solid #2a2a2a;
-                display:flex;justify-content:space-between;align-items:center;
-                position:sticky;top:0;background:#1a1a1a;z-index:1;
-            ">
-                <h3 style="color:#fff;margin:0;font-size:15px;">${esc(title)}</h3>
-                <button onclick="window._blog.closeModal()" style="background:transparent;border:none;color:#888;cursor:pointer;font-size:20px;">✕</button>
-            </div>
+            <h3 style="color:#fff;margin:0;font-size:15px;">${esc(title)}</h3>
+            <button onclick="window._blog.closeModal()" style="background:transparent;border:none;color:#888;cursor:pointer;font-size:20px;">✕</button>
+        </div>
 
-            <div style="padding:20px;">
-                ${_modalBasicSection(p, isNew, pubLocal)}
-                ${_modalCategorySection(p)}
-                ${_modalSEOSection(p)}
-                ${_modalRedirectsSection(p)}
-                ${isNew ? '' : _modalBodyHint(p)}
-            </div>
+        <div style="padding:20px;">
+            ${_modalBasicSection(p, isNew, pubLocal)}
+            ${_modalCategorySection(p)}
+            ${_modalSEOSection(p)}
+            ${_modalRedirectsSection(p)}
+            ${isNew ? '' : _modalBodyHint()}
+        </div>
 
-            <div style="
-                padding:14px 20px;border-top:1px solid #2a2a2a;
-                display:flex;justify-content:space-between;align-items:center;gap:8px;
-                position:sticky;bottom:0;background:#1a1a1a;
-            ">
-                <button class="btn btn-ghost btn-sm" onclick="window._blog.closeModal()">取消</button>
-                <div style="display:flex;gap:8px;">
-                    ${isNew ? '' : `<button class="btn btn-sm btn-ghost" onclick="window._blog.saveAndPublish()">💾 儲存並發布</button>`}
-                    <button class="btn" onclick="window._blog.savePost()">💾 儲存</button>
-                </div>
+        <div style="
+            padding:14px 20px;border-top:1px solid #2a2a2a;
+            display:flex;justify-content:space-between;align-items:center;gap:8px;
+            position:sticky;bottom:0;background:#1a1a1a;
+        ">
+            <button class="btn btn-ghost btn-sm" onclick="window._blog.closeModal()">取消</button>
+            <div style="display:flex;gap:8px;">
+                ${isNew ? '' : `<button class="btn btn-sm btn-ghost" onclick="window._blog.saveAndPublish()">💾 儲存並發布</button>`}
+                <button class="btn" onclick="window._blog.savePost()">💾 儲存</button>
             </div>
         </div>
     `;
-    document.body.appendChild(modal);
+    openModal('post-modal', inner, { width: '720px' });
 }
 
 function _modalBasicSection(p, isNew, pubLocal) {
@@ -323,9 +323,9 @@ function _modalBasicSection(p, isNew, pubLocal) {
                 <div>
                     <label style="color:#aaa;font-size:11px;display:block;margin-bottom:4px;">狀態</label>
                     <select id="m-status" style="width:100%;">
-                        <option value="draft"     ${p.status === 'draft'     ? 'selected' : ''}>📝 草稿</option>
-                        <option value="published" ${p.status === 'published' ? 'selected' : ''}>🚀 已發布</option>
-                        <option value="archived"  ${p.status === 'archived'  ? 'selected' : ''}>🗄 已下架</option>
+                        ${Object.entries(STATUS).map(([key, m]) =>
+                            `<option value="${key}" ${p.status === key ? 'selected' : ''}>${m.emoji} ${m.label}</option>`
+                        ).join('')}
                     </select>
                 </div>
                 <div>
@@ -421,7 +421,7 @@ function _modalRedirectsSection(p) {
     `;
 }
 
-function _modalBodyHint(_p) {
+function _modalBodyHint() {
     return `
         <div class="card" style="background:#1f2937;border-left:3px solid #3b82f6;color:#aaa;font-size:12px;padding:10px 12px;">
             ℹ️ <strong style="color:#fff;">內文 body 編輯</strong>：Phase C 上線後可在此 Modal 加入 block 編輯器
@@ -432,8 +432,7 @@ function _modalBodyHint(_p) {
 }
 
 _blog.closeModal = () => {
-    const m = document.getElementById('post-modal');
-    if (m) m.remove();
+    closeModal('post-modal');
     _editingPost = null;
 };
 
@@ -465,8 +464,8 @@ function _readModalForm() {
     };
 }
 
-_blog.savePost = async () => {
-    const data = _readModalForm();
+_blog.savePost = async (overrides = {}) => {
+    const data = { ..._readModalForm(), ...overrides };
     if (!data.title) { toastErr('標題必填'); return; }
     try {
         const isNew = !_editingPost.id;
@@ -487,19 +486,17 @@ _blog.savePost = async () => {
     } catch (e) { toastErr(e.message); }
 };
 
-_blog.saveAndPublish = async () => {
-    document.getElementById('m-status').value = 'published';
-    if (!document.getElementById('m-published').value) {
-        // 沒設發布時間 → 用現在
-        const now = new Date();
-        document.getElementById('m-published').value = now.toISOString().slice(0, 16);
-    }
-    await _blog.savePost();
+_blog.saveAndPublish = () => {
+    // 沒設發布時間 → 用現在
+    const pubLocal = document.getElementById('m-published').value;
+    const published_at = pubLocal ? new Date(pubLocal).toISOString() : new Date().toISOString();
+    return _blog.savePost({ status: 'published', published_at });
 };
 
 _blog.deletePost = async (id) => {
     const p = _state.posts.find(x => x.id === id);
-    if (!confirm(`刪除「${p?.title || `#${id}`}」？\n（會一併刪除其 SEO 301 轉址）`)) return;
+    const label = p?.title || `#${id}`;
+    if (!confirm(`刪除「${label}」？\n（會一併刪除其 SEO 301 轉址）`)) return;
     try {
         await websiteFetch(`/api/website/admin/posts/${id}`, { method: 'DELETE' });
         _state.posts = _state.posts.filter(x => x.id !== id);
@@ -568,19 +565,6 @@ function _categoryRow(c) {
     `;
 }
 
-function _readCategoryRowPatch(id) {
-    const patch = {};
-    document.querySelectorAll(`#blog-tab-body [data-id="${id}"]`).forEach(el => {
-        const f = el.dataset.field;
-        if (el.type === 'checkbox') patch[f] = el.checked;
-        else if (el.type === 'number') {
-            const n = Number(el.value);
-            patch[f] = Number.isNaN(n) ? null : n;
-        } else patch[f] = el.value;
-    });
-    return patch;
-}
-
 _blog.createCategory = async () => {
     const body = {
         slug: document.getElementById('cat-new-slug').value.trim(),
@@ -601,7 +585,7 @@ _blog.createCategory = async () => {
 _blog.saveCategory = async (id) => {
     try {
         const updated = await websiteFetch(`/api/website/admin/post_categories/${id}`, {
-            method: 'PUT', body: _readCategoryRowPatch(id),
+            method: 'PUT', body: readRowPatch('#blog-tab-body', id),
         });
         const idx = _state.categories.findIndex(c => c.id === id);
         if (idx >= 0) _state.categories[idx] = { ..._state.categories[idx], ...updated };
@@ -703,9 +687,10 @@ _blog.runNotionImport = async () => {
         `;
         toastOk(`新增 ${r.inserted}、跳過 ${r.skipped}、覆寫 ${r.overwritten}`);
 
-        // refresh post list
+        // refresh post list + 更新 tab btn 計數
         const posts = await websiteFetch('/api/website/admin/posts');
         _state.posts = posts?.items || [];
+        _renderShell();
     } catch (e) {
         toastErr(e.message);
         if (host) host.innerHTML = `<div class="card" style="color:#f87171;">匯入失敗：${esc(e.message)}</div>`;

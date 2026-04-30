@@ -12,7 +12,7 @@
  *
  * 任一寫入後端會 mark_dirty → 60s debounce 觸發 Astro rebuild → 對外網站更新。
  */
-import { websiteFetch, esc, toastOk, toastErr, renderLoadError } from '../website-utils.js';
+import { websiteFetch, esc, toastOk, toastErr, renderLoadError, readRowPatch } from '../website-utils.js';
 
 const HEALTH_RULES = [
     { id: 'noindex',     label: '允許 Google/Bing 索引（seo.indexable=true）',
@@ -342,23 +342,6 @@ async function _saveSettings(patch) {
     return result;
 }
 
-// 全部 inline editor 共用：把指定 row 內的 input/checkbox/number 收成 patch dict
-function _readRowPatch(scopeSel, id) {
-    const patch = {};
-    document.querySelectorAll(`${scopeSel} [data-id="${id}"]`).forEach(el => {
-        const f = el.dataset.field;
-        if (el.type === 'checkbox') {
-            patch[f] = el.checked;
-        } else if (el.type === 'number') {
-            const n = Number(el.value);
-            patch[f] = Number.isNaN(n) ? null : n;
-        } else {
-            patch[f] = el.value;
-        }
-    });
-    return patch;
-}
-
 function _bindDescCounter() {
     const el = document.getElementById('seo-desc');
     const counter = document.getElementById('seo-desc-count');
@@ -421,7 +404,7 @@ _seo.createQF = async () => {
 _seo.saveQF = async (id) => {
     try {
         const updated = await websiteFetch(`/api/website/admin/quick_facts/${id}`, {
-            method: 'PUT', body: _readRowPatch('.card [data-id]', id),
+            method: 'PUT', body: readRowPatch('.card [data-id]', id),
         });
         const idx = _state.quickFacts.findIndex(f => f.id === id);
         if (idx >= 0) _state.quickFacts[idx] = updated;
@@ -460,7 +443,7 @@ _seo.createFAQ = async () => {
 _seo.saveFAQ = async (id) => {
     try {
         const updated = await websiteFetch(`/api/website/admin/faqs/${id}`, {
-            method: 'PUT', body: _readRowPatch('.card [data-id]', id),
+            method: 'PUT', body: readRowPatch('.card [data-id]', id),
         });
         const idx = _state.faqs.findIndex(f => f.id === id);
         if (idx >= 0) _state.faqs[idx] = updated;
@@ -502,7 +485,7 @@ _seo.createT = async () => {
 _seo.saveT = async (id) => {
     try {
         const updated = await websiteFetch(`/api/website/admin/testimonials/${id}`, {
-            method: 'PUT', body: _readRowPatch('.card [data-id]', id),
+            method: 'PUT', body: readRowPatch('.card [data-id]', id),
         });
         const idx = _state.testimonials.findIndex(t => t.id === id);
         if (idx >= 0) _state.testimonials[idx] = updated;
