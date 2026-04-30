@@ -1,10 +1,17 @@
 import os
+import sys
+import subprocess
 from fastapi import APIRouter  # type: ignore
 from fastapi.responses import JSONResponse  # type: ignore
 from core.schemas import TranscribeRequest, AlignRequest  # type: ignore
 from core.worker import enqueue_job  # type: ignore
 
 router = APIRouter()
+
+# PyPI package name → import name. The align flow needs both.
+# Listed here (not in requirements_agent.txt) because they're heavy and
+# only needed by users who actually run align on this agent.
+_ALIGN_DEPS = [("stable-ts", "stable_whisper"), ("pysrt", "pysrt")]
 
 @router.post("/api/v1/jobs/transcribe")
 async def create_transcribe_job(req: TranscribeRequest):
@@ -40,3 +47,52 @@ async def create_align_job(req: AlignRequest):
     if warning:
         resp["warning"] = warning
     return resp
+
+
+@router.get("/api/v1/jobs/align/check_deps")
+async def check_align_deps():
+    """Pre-flight: tell the frontend which align deps are missing on this agent.
+
+    Used by submitAlignJob to skip the failing-server-roundtrip on agents that
+    don't have stable-ts / pysrt installed (heavy ML deps not in
+    requirements_agent.txt).
+    """
+    missing = []
+    for pkg, import_name in _ALIGN_DEPS:
+        try:
+            __import__(import_name)
+        except ImportError:
+            missing.append(pkg)
+    return {"ok": len(missing) == 0, "missing": missing}
+
+
+@router.post("/api/v1/jobs/align/install_deps")
+async def install_align_deps():
+    """Run pip install for missing align deps in this agent's venv.
+
+    Streamed via JSON response (not SSE) — the frontend just shows the final
+    log; install typically takes 30-90s for stable-ts + torch + faster-whisper.
+    """
+    cmd = [sys.executable, "-m", "pip", "install", "-U"]
+    cmd.extend(pkg for pkg, _ in _ALIGN_DEPS)
+    try:
+        proc = subprocess.run(
+            cmd, capture_output=True, text=True, timeout=600,
+            encoding="utf-8", errors="replace",
+        )
+        return {
+            "ok": proc.returncode == 0,
+            "returncode": proc.returncode,
+            "stdout": proc.stdout[-4000:],
+            "stderr": proc.stderr[-2000:],
+        }
+    except subprocess.TimeoutExpired:
+        return JSONResponse(
+            {"ok": False, "detail": "pip install 超時(>10 分鐘)"},
+            status_code=504,
+        )
+    except Exception as e:
+        return JSONResponse(
+            {"ok": False, "detail": f"執行失敗: {e}"},
+            status_code=500,
+        )

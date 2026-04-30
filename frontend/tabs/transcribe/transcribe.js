@@ -689,12 +689,127 @@ export function confirmAlignBind() {
     updateAlignSubmitBtn();
 }
 
+// ─── Dependency pre-flight ──────────────────────────────────────────────
+// stable-ts + pysrt are NOT in requirements_agent.txt (heavy ML deps).
+// Detect missing on the active agent before submit; let users self-install
+// without RDPing into the box.
+
+async function _checkAlignDeps() {
+    try {
+        const r = await fetch(getAgentBaseUrl() + '/api/v1/jobs/align/check_deps');
+        return await r.json();
+    } catch (e) {
+        return { ok: false, missing: [], _err: e.message };
+    }
+}
+
+async function _installAlignDeps(logEl) {
+    if (logEl) logEl.textContent = '⏳ 安裝中...這通常需要 30-90 秒（首次安裝會下載 stable-ts + faster-whisper 共約 50MB）';
+    try {
+        const r = await fetch(getAgentBaseUrl() + '/api/v1/jobs/align/install_deps', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+        });
+        const d = await r.json();
+        if (logEl) {
+            const tail = (d.stderr || '') + '\n' + (d.stdout || '');
+            logEl.textContent = (d.ok ? '✅ 安裝成功\n' : '❌ 安裝失敗\n') + tail.trim().slice(-2000);
+        }
+        return d.ok === true;
+    } catch (e) {
+        if (logEl) logEl.textContent = '❌ 連線失敗: ' + e.message;
+        return false;
+    }
+}
+
+function _showAlignDepsModal(missing) {
+    return new Promise(resolve => {
+        const overlay = document.createElement('div');
+        overlay.className = 'fixed inset-0 bg-black/70 z-50 flex items-center justify-center p-4';
+        const installCmd = `pip install ${missing.join(' ')}`;
+        overlay.innerHTML = `
+            <div class="bg-[#1a1a1a] border border-[#444] rounded-lg p-5 w-full max-w-2xl flex flex-col gap-3">
+                <div class="flex justify-between items-center border-b border-[#333] pb-2">
+                    <div class="text-base font-bold text-yellow-400">⚠️ 對齊功能需要安裝套件</div>
+                    <button type="button" data-action="cancel" class="text-gray-500 hover:text-white text-xl leading-none">×</button>
+                </div>
+                <div class="text-sm text-gray-300">
+                    這台 agent 缺少以下套件：
+                    <code class="px-2 py-0.5 bg-[#0e0e0e] border border-[#333] rounded text-emerald-400 ml-1">${missing.join(', ')}</code>
+                </div>
+                <div class="text-xs text-gray-500">
+                    💡 也可以遠端到該機器手動執行下列指令（venv 啟用後）：
+                </div>
+                <div class="flex gap-2">
+                    <code class="flex-1 px-3 py-2 bg-[#0e0e0e] border border-[#333] rounded text-emerald-400 text-xs font-mono break-all">${installCmd}</code>
+                    <button type="button" data-action="copy" class="bg-[#333] hover:bg-[#444] px-3 rounded text-gray-300 text-xs border border-[#555]">📋 複製</button>
+                </div>
+                <pre id="_align_deps_log" class="text-[11px] text-gray-400 bg-[#0e0e0e] border border-[#333] rounded p-2 max-h-40 overflow-y-auto whitespace-pre-wrap hidden"></pre>
+                <div class="flex justify-end gap-2 mt-1">
+                    <button type="button" data-action="cancel" class="bg-[#333] hover:bg-[#444] px-4 py-1.5 rounded text-gray-300 text-sm border border-[#555]">取消</button>
+                    <button type="button" data-action="install" class="bg-blue-600 hover:bg-blue-500 px-4 py-1.5 rounded text-white text-sm font-semibold">🔧 一鍵安裝（在這台 agent 上）</button>
+                </div>
+            </div>`;
+        document.body.appendChild(overlay);
+        const close = (ok) => {
+            document.body.removeChild(overlay);
+            resolve(ok);
+        };
+        overlay.addEventListener('click', async (e) => {
+            const action = e.target.closest('[data-action]')?.dataset.action;
+            if (action === 'cancel') return close(false);
+            if (action === 'copy') {
+                try { await navigator.clipboard.writeText(installCmd); }
+                catch { /* clipboard blocked */ }
+                e.target.closest('[data-action]').textContent = '✓ 已複製';
+                return;
+            }
+            if (action === 'install') {
+                const installBtn = overlay.querySelector('[data-action="install"]');
+                const cancelBtn = overlay.querySelector('button[data-action="cancel"]:not(:first-of-type)');
+                installBtn.disabled = true;
+                installBtn.textContent = '⏳ 安裝中...';
+                if (cancelBtn) cancelBtn.disabled = true;
+                const logEl = overlay.querySelector('#_align_deps_log');
+                logEl.classList.remove('hidden');
+                const ok = await _installAlignDeps(logEl);
+                if (ok) {
+                    setTimeout(() => close(true), 1200);
+                } else {
+                    installBtn.disabled = false;
+                    installBtn.textContent = '🔄 重試';
+                    if (cancelBtn) cancelBtn.disabled = false;
+                }
+            }
+        });
+    });
+}
+
+async function _ensureAlignDeps() {
+    const r = await _checkAlignDeps();
+    if (r.ok) return true;
+    if (!r.missing || r.missing.length === 0) {
+        // Endpoint unreachable — let user proceed (and see the original error)
+        appendLog('⚠️ 無法檢查對齊套件狀態（agent 可能版本太舊），仍嘗試送出', 'system');
+        return true;
+    }
+    appendLog(`⚠️ Agent 缺套件：${r.missing.join(', ')}`, 'system');
+    const installed = await _showAlignDepsModal(r.missing);
+    if (installed) {
+        appendLog('✅ 套件安裝完成，繼續送出對齊任務', 'system');
+    }
+    return installed;
+}
+
 // ─── Submit ─────────────────────────────────────────────────────────────
 
 export async function submitAlignJob() {
     const dest = document.getElementById('align_dest')?.value.trim();
     if (!dest) { alert('請指定輸出資料夾'); return; }
     if (window._alignPairs.size === 0) { alert('請至少新增一個配對'); return; }
+
+    const depsOk = await _ensureAlignDeps();
+    if (!depsOk) return;
 
     const tasks = [];
     for (const [, st] of window._alignPairs) {
