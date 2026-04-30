@@ -888,59 +888,7 @@ function _renderPreview(p) {
 }
 
 function _renderPreviewBlock(b) {
-    switch (b.type) {
-        case 'paragraph': {
-            const cls = b.lead
-                ? 'style="font-size:18px;line-height:1.7;color:#333;margin:0 0 14px;"'
-                : 'style="font-size:14px;line-height:1.7;color:#444;margin:0 0 12px;"';
-            return `<p ${cls}>${esc(b.text || '')}</p>`;
-        }
-        case 'heading': {
-            const tag = b.level === 2 ? 'h2' : 'h3';
-            const size = b.level === 2 ? '20px' : '17px';
-            return `<${tag} style="font-size:${size};font-weight:700;margin:18px 0 8px;color:#222;">${esc(b.text || '')}</${tag}>`;
-        }
-        case 'image': {
-            const w = b.width === 'full' ? '100%' : b.width === 'wide' ? '110%' : '100%';
-            const cap = b.caption
-                ? `<figcaption style="text-align:center;color:#888;font-size:11px;margin-top:4px;">${esc(b.caption)}</figcaption>`
-                : '';
-            return `<figure style="margin:14px 0;width:${w};">
-                ${b.src
-                    ? `<img src="${esc(b.src)}" alt="${esc(b.alt || '')}" style="width:100%;border-radius:4px;display:block;" />`
-                    : '<div style="background:#eee;padding:30px;text-align:center;color:#999;font-size:12px;border-radius:4px;">未設圖</div>'}
-                ${cap}
-            </figure>`;
-        }
-        case 'video': {
-            const validId = /^[A-Za-z0-9_-]{11}$/.test(b.youtube_id || '');
-            const cap = b.caption
-                ? `<figcaption style="text-align:center;color:#888;font-size:11px;margin-top:4px;">${esc(b.caption)}</figcaption>`
-                : '';
-            return `<figure style="margin:14px 0;">
-                ${validId
-                    ? `<div style="position:relative;padding-bottom:56.25%;height:0;border-radius:4px;overflow:hidden;background:#000;">
-                        <img src="https://img.youtube.com/vi/${b.youtube_id}/hqdefault.jpg" style="position:absolute;inset:0;width:100%;height:100%;object-fit:cover;" />
-                        <div style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;font-size:48px;color:#fff;text-shadow:0 0 8px rgba(0,0,0,0.6);">▶</div>
-                       </div>`
-                    : '<div style="background:#eee;padding:30px;text-align:center;color:#999;font-size:12px;border-radius:4px;">未設 YouTube ID</div>'}
-                ${cap}
-            </figure>`;
-        }
-        case 'quote': {
-            return `<blockquote style="border-left:3px solid #c9372c;padding:6px 14px;margin:14px 0;color:#444;font-style:italic;">
-                ${esc(b.text || '')}
-                ${b.author ? `<footer style="font-size:11px;color:#888;margin-top:6px;font-style:normal;">— ${esc(b.author)}</footer>` : ''}
-            </blockquote>`;
-        }
-        case 'list': {
-            const tag = b.ordered ? 'ol' : 'ul';
-            const items = (b.items || []).map(it => `<li style="margin-bottom:4px;">${esc(it)}</li>`).join('');
-            return `<${tag} style="font-size:14px;line-height:1.6;color:#444;padding-left:24px;margin:12px 0;">${items}</${tag}>`;
-        }
-        default:
-            return `<pre style="background:#fee;color:#900;padding:6px;font-size:11px;">未知 block: ${esc(b.type)}</pre>`;
-    }
+    return BLOCK_REGISTRY[b.type]?.preview(b) ?? _UNKNOWN_BLOCK_PREVIEW(b);
 }
 
 function _refreshPreview() {
@@ -951,8 +899,11 @@ function _refreshPreview() {
 }
 
 _blog.togglePreview = () => {
-    _previewVisible = !_previewVisible;
     if (!_editingPost) return;
+    // 先把 Modal 上 metadata 表單值 merge 進 _editingPost — 切換預覽會 re-render
+    // 整個 Modal，沒先存就會把使用者剛改的 title/excerpt/SEO/old_urls 全丟掉
+    Object.assign(_editingPost, _readModalForm());
+    _previewVisible = !_previewVisible;
     const isNew = !_editingPost.id;
     _showPostModal(isNew ? '新增文章' : `編輯文章 #${_editingPost.slug}`);
 };
@@ -998,10 +949,13 @@ function _seoChecks(p) {
     }, 0);
     const imgs = blocks.filter(b => b.type === 'image');
     const imgsWithoutAlt = imgs.filter(b => !(b.alt && b.alt.trim())).length;
-    const hasInternalLink = blocks.some(b =>
-        (b.type === 'paragraph' || b.type === 'list') &&
-        /\[[^\]]+\]\(\/news\/|\/works\/|\/services/.test(JSON.stringify(b))
-    );
+    // 內鏈格式：markdown `[文字](/news/X)` / `(/works/X)` / `(/services...)`
+    const _LINK_RE = /\[[^\]]+\]\((?:\/news\/|\/works\/|\/services)/;
+    const hasInternalLink = blocks.some(b => {
+        if (b.type === 'paragraph' || b.type === 'quote') return _LINK_RE.test(b.text || '');
+        if (b.type === 'list') return (b.items || []).some(it => _LINK_RE.test(it));
+        return false;
+    });
 
     return [
         { label: `Title 長度 ${titleLen} 字（建議 30-60）`,        pass: titleLen >= 30 && titleLen <= 60 },
