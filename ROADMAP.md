@@ -4,7 +4,7 @@
 
 ---
 
-## 現況 (v1.10.116) 基準線
+## 現況 (v1.10.117) 基準線
 
 - ✅ 7 個完整工作流程（備份、比對、轉 Proxy、串帶、報表、AI 逐字稿、空拍寫入）
 - ✅ 模組化後端：`main.py` + `core/` + `routers/`（router 容錯載入，缺模組跳過不 crash）
@@ -735,7 +735,7 @@ tools:
     ▼ Phase J: CRM + 專案管理 + 帳務 (✅ 核心完成)
     │   → 64 API / 11 DB 表 / 6 Tab + 5 子視圖 + 手機版 RWD + Inline 編輯
     │
-現在 (v1.10.116) ← 你在這裡
+現在 (v1.10.117) ← 你在這裡
     │
     ▼ Phase M: 對外官方網站 (✅ 完整版 A 部署完成 2026-04-29)
     │   → NAS Website_Nginx (8090) + website-api 容器 + cloudflared tunnel
@@ -774,6 +774,7 @@ tools:
 
 | 版本 | 日期 | 重點 |
 |------|------|------|
+| v1.10.117 | 2026-04-30 | **fix(blog): block 編輯內容存檔遺失 + 新文章 UX 修正**：(1) **CRITICAL BUG FIX** — [`frontend/tabs/website/subviews/blog.js:_readModalForm()`](frontend/tabs/website/subviews/blog.js) 漏了把 `body` 加進 payload。block 編輯器是即時更新 `_editingPost.body[i].field` 的記憶體陣列，不在 DOM form 裡，導致按「💾 儲存」時 body 整個被忽略——使用者排好的 paragraph/heading/image/video/quote/list 全部丟失，只有 metadata 存進去。新增 `body: _editingPost?.body || []` 一行修好（payload 直接帶 PostBlock 陣列）。(2) 拿掉新文章的 `_modalEmptyBlocksHint()` 「先存再編」佔位 — 現在新文章直接顯示 block 編輯器，不需先儲存草稿才能寫內容（一鍵寫完一鍵發）。(3) 新文章 Modal 也顯示 SEO 健康度 widget（之前 `isNew` guard 把它擋掉）— admin 邊寫邊看 SEO 評分而不是發完才知道。 |
 | v1.10.116 | 2026-04-30 | **Phase C 完整收尾 + SEO 移轉手冊（Phase A-C 全收官）**：(1) [`frontend/tabs/website/subviews/blog.js`](frontend/tabs/website/subviews/blog.js) 把 Phase B/C 兩段疊代收成單一 1359 行完整版 — block 編輯器 6 種類型（paragraph 含 lead 段勾選 / heading H2-H3 切換 / image 上傳+URL 雙模式含 alt+caption+width 三層 / video YouTube 11-char ID 自動解析+縮圖即時預覽 / quote 引用+作者 / list 有序無序切換含 items 動態增減），每個 block 配 [↑↓✕] + 「+ 在此後插入 ▾」下拉；快速插入工具列 6 種一鍵加結尾；即時預覽 pane 鏡像 Astro 輸出風格、200 字以下行為 trivial 不需 debounce；SEO health widget 即時 10 條檢查（title 長度、desc 長度、og image、字數、內文圖數、img alt 完整性、author E-E-A-T、舊網址轉址、published_at、內鏈密度）彩色分數 + 問題列出；YouTube parser 接受 youtu.be / watch?v= / 11-char ID。image block 在 post 還沒存（沒 ID）時 disable 上傳 UI 防止 404。(2) [`docs/SEO_MIGRATION_GUIDE.md`](docs/SEO_MIGRATION_GUIDE.md) 9KB 跨域文章遷移完整手冊：同域 slug 變動 4 步操作（系統自動處理軟+硬 301）、跨域遷移 5 步（本系統設定 + 舊域 nginx 301 + GSC Change of Address + Bing Webmaster Tools + AI 爬蟲通知）、即時/中期/長期驗收方法（curl / Search Console / 移轉中心 widget）、8 個 FAQ（軟 vs 硬 301 / 舊網域留多久 / archived 文章 SEO / published_at 回填等）、5 個監測工具表、工程細節 path（DB schema → service → API → Astro/nginx）。連回 CLAUDE.md 規則 G + NEW_PAGE_CHECKLIST.md。**Phase A+B+C+docs 部落格 DB 系列規劃全部完成**：admin 在 Web UI 完整建構部落格、Notion 降格 seed/匯入器、SEO 移轉雙保險（軟 301 meta refresh + 硬 301 nginx）+ 完整 admin 操作手冊。 |
 | v1.10.115 | 2026-04-30 | **Phase C — 部落格 Block 編輯器 + 即時預覽 + SEO 健康檢查**：[`frontend/tabs/website/subviews/blog.js`](frontend/tabs/website/subviews/blog.js) +549/-18，把 Phase B 的 metadata Modal 從「占位提示」擴成完整 block-based 編輯器。**核心改動**：(1) `openEditPost(id)` 改 async — 列表 API 不回 body 省 payload，編輯時才拉 `/admin/posts/{id}` 完整資料含 body block 陣列。(2) Modal 內加 `_modalBlockEditor()` — block 列表（heading/paragraph/list/image/youtube）支援上下移動 (`moveBlockUp/Down`)、新增、刪除；`uploadBlockImage()` 串 v1.10.114 的 `/posts/{id}/upload-image` endpoint，回傳 `/uploads/...` URL 直接塞 image block src；`parseYoutubeAndStore()` 解析 youtu.be / watch?v= / embed/ 三種格式抽 video_id 存 block。(3) **即時預覽 pane**：右側可摺疊 50% 寬度區塊（Modal width 760px ↔ 1180px 動態切換），`_renderPreview()` 把 block 陣列渲染成接近實際前台樣式的 HTML 給 admin 預覽（`_previewVisible` flag + `togglePreview()` 切換）。`_refreshPreview()` 在 block 變動後同步重渲。(4) **SEO 健康檢查**：`_modalSEOHealth()` 顯示問題列表 — `_seoChecks(p)` 跑 ~10 條規則（title 30-200 字、description 30-200 字、cover_url 必填、slug 格式、og_image fallback、noindex 警告、author 缺失等），按健康度紅/黃/綠標示；`_refreshSEOHealth()` 在 metadata 改動後即時重算。(5) `savePost(overrides = {})` 改成接 overrides，supports「💾 儲存」與「💾 儲存並發布」雙路徑（原本直接改 DOM 是 anti-pattern）。Phase C 完成後 admin 在 Web UI 就能完整建構部落格內容，不需 Notion。 |
 | v1.10.114 | 2026-04-30 | **Phase C 前置：blog post 圖片上傳 endpoint（auto WebP）**：[`routers/website/admin_posts.py`](routers/website/admin_posts.py) 新增 `POST /admin/posts/{post_id}/upload-image`，給 Phase C block 編輯器內 image block 用。允許白名單 `.jpg/.jpeg/.png/.webp/.gif/.heic`，10MB 大小上限，存到 `/uploads/posts/{post_id}/<uuid12>.webp`，自動透過 PIL 轉 WebP（quality 82, method 6）— 比 JPG 小 ~30%、比 PNG 小 50-70%；Pillow 失敗時 fallback 寫原 bytes 到 `.bin`（罕見）；不檢查 post 是否 published（draft 也能上傳）；不寫 DB（純檔案），post.body 由 admin 編輯時 PUT 更新。`_save_image_as_webp()` helper 處理 RGBA/LA → RGB 透明圖通道相容、`_UPLOAD_BASE` 用 `os.path.dirname` 三層回到 project root（NAS container `/app/uploads/`、master `/share/.../Website/uploads/` 都通）。回傳 `{"url": "/uploads/posts/{id}/{name}.webp", "filename": ...}` 可直接塞 image block 的 src 欄位。 |
