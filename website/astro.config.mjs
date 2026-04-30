@@ -24,6 +24,18 @@ export default defineConfig({
     seoAudit(),
   ],
 
+  // Astro <Image> 用 sharp 自動轉 WebP / 產 srcset（透過 SmartImage wrapper）。
+  // 遠端來源必須白名單；本地 /notion-media/ 等不需設定。
+  // picsum.photos 不能加（會 302 redirect → sharp 拒收）— 由 SmartImage
+  // 偵測後降級到原生 <img>，仍保 width/height 防 CLS。
+  image: {
+    service: { entrypoint: 'astro/assets/services/sharp' },
+    domains: [
+      'img.youtube.com',     // YouTube 縮圖（resolveThumbnail）
+      'i.ytimg.com',         // YouTube 替代 CDN
+    ],
+  },
+
   // 允許從 Cloudflare Tunnel / LAN 其他機器透過 hostname 訪問 dev server。
   // Vite 預設會擋 non-localhost hostname（防 DNS rebinding 攻擊），
   // 所以要白名單列出 tunnel 會用到的網域。

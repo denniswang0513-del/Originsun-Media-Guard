@@ -11,6 +11,7 @@ SEO 鐵閘會擋掉常見漏項，但有些細節仍要人工確認。
 ## 2. BaseLayout SEO props 必填（TS 強制）
 
 [`BaseLayout`](../website/src/layouts/BaseLayout.astro) 的 props：
+
 - `description`：30-200 字，每頁獨立寫
 - `schemaData`：至少 1 個 schema
 
@@ -18,16 +19,16 @@ SEO 鐵閘會擋掉常見漏項，但有些細節仍要人工確認。
 
 ## 3. 挑對的 schema.org 類型
 
-| 頁面類型 | Schema 工廠 |
-|---------|-----------|
-| 通用頁面 | `pageSchemas.webPage` |
-| 服務項目 | `pageSchemas.service` per item |
-| 作品詳情 | `pageSchemas.videoObject` |
-| 部落格詳情 | `pageSchemas.newsArticle` |
-| 任何詳情頁 | + `pageSchemas.breadcrumb` |
-| 首頁 | `organization + localBusiness + website` 三件套 |
-| FAQ 頁 | `pageSchemas.faqPage` |
-| 證言頁 | `pageSchemas.testimonialBundle({includeReviews: 5})` |
+| 頁面類型     | Schema 工廠                                            |
+| ------------ | ------------------------------------------------------ |
+| 通用頁面     | `pageSchemas.webPage`                                  |
+| 服務項目     | `pageSchemas.service` per item                         |
+| 作品詳情     | `pageSchemas.videoObject`                              |
+| 部落格詳情   | `pageSchemas.newsArticle`                              |
+| 任何詳情頁   | + `pageSchemas.breadcrumb`                             |
+| 首頁         | `organization + localBusiness + website` 三件套        |
+| FAQ 頁       | `pageSchemas.faqPage`                                  |
+| 證言頁       | `pageSchemas.testimonialBundle({includeReviews: 5})`   |
 
 `testimonialBundle` 內部會吐 `review` × N + `aggregateRating`，這兩個通常不直接呼叫；
 `aggregateRating` 也可手動嵌入 Organization/LocalBusiness 物件內當 `aggregateRating` 欄位。
@@ -55,6 +56,7 @@ breadcrumb3("作品集", "/works", work.title, `/works/${work.slug}`)
 ## 6. AI SEO 鏡像
 
 需要被 ChatGPT/Claude/Perplexity 引用的內容 → 加 markdown 鏡像端點：
+
 - 範例：[`services.md.ts`](../website/src/pages/services.md.ts) /
   [`about.md.ts`](../website/src/pages/about.md.ts) /
   [`works/[slug].md.ts`](../website/src/pages/works/[slug].md.ts)
@@ -66,14 +68,26 @@ breadcrumb3("作品集", "/works", work.title, `/works/${work.slug}`)
 - 主要頁面：`Header.astro` nav 加 entry
 - 詳情頁：相關卡片區塊互相 link
 
-## 8. 圖片 alt + width/height
+## 8. 圖片：用 SmartImage 自動 WebP/srcset
 
+優先用 [`SmartImage`](../website/src/components/ui/SmartImage.astro) 取代 `<img>`：
+sharp 自動轉 WebP/AVIF，srcset 依 widths 給瀏覽器挑對的解析度，
+遇到 picsum.photos 等 redirect URL 自動降級回 `<img>`。
+
+```astro
+import SmartImage from "../components/ui/SmartImage.astro";
+
+<SmartImage src={thumb} alt={title}
+            width={1280} height={720}
+            widths={[400, 800, 1280]}
+            sizes="(max-width: 640px) 100vw, 33vw"
+            loading="lazy" />
+```
+
+- `width` `height` 必填（防 CLS，比例 match 容器 aspect-video=16:9 / aspect-[16/10]）
 - 所有 `<img>` 必須有 `alt=` 屬性（裝飾圖用 `alt=""`）
-- 主視覺圖片補 `width` `height` 防 CLS：
-  ```astro
-  <img src={thumb} alt={title} width="1280" height="720" loading="lazy" />
-  ```
-- 容器 aspect-video → 1280×720（YouTube hq/maxres 比例）
+- 新遠端來源網域要在 [`astro.config.mjs`](../website/astro.config.mjs) `image.domains` 白名單加，否則 build fail
+- Notion body 動態圖片（dimensions 不定）保留 plain `<img>` 即可
 
 ## 9. 多語
 
@@ -107,6 +121,7 @@ breadcrumb3("作品集", "/works", work.title, `/works/${work.slug}`)
 ## SEO 鐵閘執行檢查
 
 build 時 [`integrations/seo-audit.mjs`](../website/integrations/seo-audit.mjs) 自動掃 `dist/*.html`：
+
 - `<title>` 存在
 - `<meta description>` 30-200 字
 - `<link canonical>`
@@ -115,6 +130,7 @@ build 時 [`integrations/seo-audit.mjs`](../website/integrations/seo-audit.mjs) 
 - 所有 `<img>` 有 alt
 
 任一缺 → build fail。本機驗：
+
 ```bash
 cd website && npm run build
 ```
@@ -123,25 +139,25 @@ cd website && npm run build
 
 ## 對外可見性檢查清單（上線前）
 
-| 項目 | 位置 | 狀態 |
-|------|------|------|
-| `seo.indexable` 設 true | admin Tab → SEO 子視圖 → Card 1 | 預設 false（staging 期） |
-| `robots.txt` 移除 `Disallow: /` | 自動由 indexable 控制 | 動態 |
-| `meta name=robots` 移除 noindex | BaseLayout 自動由 meta.indexable 控制 | 動態 |
-| `astro.config.mjs site` 切正式網域 | `https://originsun-studio.com` | DNS 切換時手動改 |
-| Google Search Console 驗證 | 加 `<meta name="google-site-verification">` | 上線當天設定 |
-| Bing Webmaster Tools 驗證 | 同上 | 上線當天 |
-| `seo.ai_allow` 設 true | admin Tab → Card 1 | 視 AI SEO 策略決定 |
-| `seo.llms_txt_body` 設值 | admin Tab → Card 6 | 自動 fallback OK，但建議手動寫 |
+| 項目                              | 位置                                               | 狀態                                |
+| --------------------------------- | -------------------------------------------------- | ----------------------------------- |
+| `seo.indexable` 設 true           | admin Tab → SEO 子視圖 → Card 1                    | 預設 false（staging 期）            |
+| `robots.txt` 移除 `Disallow: /`   | 自動由 indexable 控制                              | 動態                                |
+| `meta name=robots` 移除 noindex   | BaseLayout 自動由 meta.indexable 控制              | 動態                                |
+| `astro.config.mjs site` 切正式網域 | `https://originsun-studio.com`                     | DNS 切換時手動改                    |
+| Google Search Console 驗證        | 加 `<meta name="google-site-verification">`        | 上線當天設定                        |
+| Bing Webmaster Tools 驗證         | 同上                                               | 上線當天                            |
+| `seo.ai_allow` 設 true            | admin Tab → Card 1                                 | 視 AI SEO 策略決定                  |
+| `seo.llms_txt_body` 設值          | admin Tab → Card 6                                 | 自動 fallback OK，但建議手動寫      |
 
 ---
 
 ## 監測（上線後）
 
-| 工具 | 用途 |
-|------|------|
-| [Google Rich Results Test](https://search.google.com/test/rich-results) | 驗證 JSON-LD schema 被 Google 識別 |
-| [PageSpeed Insights](https://pagespeed.web.dev/) | Core Web Vitals + Lighthouse 分數 |
-| [Schema.org Validator](https://validator.schema.org/) | 驗證 schema 結構 |
-| Google Search Console | 索引狀態 + 點擊率 + 關鍵字 |
-| `curl /llms.txt /llms-full.txt /feed.json /rss.xml` | 動態端點輸出檢查 |
+| 工具                                                              | 用途                                  |
+| ----------------------------------------------------------------- | ------------------------------------- |
+| [Google Rich Results Test](https://search.google.com/test/rich-results) | 驗證 JSON-LD schema 被 Google 識別    |
+| [PageSpeed Insights](https://pagespeed.web.dev/)                  | Core Web Vitals + Lighthouse 分數     |
+| [Schema.org Validator](https://validator.schema.org/)             | 驗證 schema 結構                      |
+| Google Search Console                                             | 索引狀態 + 點擊率 + 關鍵字            |
+| `curl /llms.txt /llms-full.txt /feed.json /rss.xml`               | 動態端點輸出檢查                      |

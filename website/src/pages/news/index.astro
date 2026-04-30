@@ -3,6 +3,7 @@
  * news/index.astro — 影像專欄列表（/news）
  * 對齊原 originsun-studio.com Insight 頁結構：深色 hero + 分類 tabs + 3 欄文章網格
  */
+import SmartImage from "../../components/ui/SmartImage.astro";
 import BaseLayout from "../../layouts/BaseLayout.astro";
 import Tr from "../../components/ui/Tr.astro";
 import { fetchMeta } from "../../lib/crm-client";
@@ -93,11 +94,13 @@ const seo = buildBasicPageSeo(Astro, {
                            class="post-card group block"
                            data-post-category={p.category}>
                             <div class="relative overflow-hidden aspect-video bg-neutral-100 mb-4">
-                                <img src={p.cover_url}
-                                     alt={p.title}
-                                     width="1280" height="720"
-                                     loading={i < 3 ? "eager" : "lazy"}
-                                     class="absolute inset-0 w-full h-full object-cover transition-transform duration-700 group-hover:scale-[1.04]" />
+                                <SmartImage src={p.cover_url}
+                                            alt={p.title}
+                                            width={1280} height={720}
+                                            widths={[400, 800, 1280]}
+                                            sizes="(max-width: 640px) 100vw, (max-width: 1024px) 50vw, 33vw"
+                                            loading={i < 3 ? "eager" : "lazy"}
+                                            class="absolute inset-0 w-full h-full object-cover transition-transform duration-700 group-hover:scale-[1.04]" />
                             </div>
                             <div>
                                 <div class="text-[10px] tracking-[0.3em] uppercase text-[#c9372c] mb-2">

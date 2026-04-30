@@ -2,6 +2,7 @@
 /**
  * news/[slug].astro — 專欄文章詳情頁
  */
+import SmartImage from "../../components/ui/SmartImage.astro";
 import BaseLayout from "../../layouts/BaseLayout.astro";
 import Tr from "../../components/ui/Tr.astro";
 import { fetchMeta } from "../../lib/crm-client";
@@ -75,9 +76,12 @@ const schemaData = [
     <section class="pt-24 sm:pt-28 bg-white">
         <div class="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8">
             <div class="aspect-[16/9] overflow-hidden bg-neutral-100">
-                <img src={post.cover_url} alt={post.title}
-                     width="1280" height="720"
-                     class="w-full h-full object-cover" />
+                <SmartImage src={post.cover_url} alt={post.title}
+                            width={1280} height={720}
+                            widths={[400, 800, 1280, 1920]}
+                            sizes="(max-width: 768px) 100vw, 1280px"
+                            loading="eager"
+                            class="w-full h-full object-cover" />
             </div>
         </div>
     </section>
@@ -211,8 +215,12 @@ const schemaData = [
                     {related.map(p => (
                         <a href={`/news/${p.slug}`} class="group block">
                             <div class="relative overflow-hidden aspect-video bg-neutral-200 mb-3">
-                                <img src={p.cover_url} alt={p.title}
-                                     class="w-full h-full object-cover transition-transform duration-700 group-hover:scale-[1.04]" />
+                                <SmartImage src={p.cover_url} alt={p.title}
+                                            width={800} height={450}
+                                            widths={[400, 800]}
+                                            sizes="(max-width: 640px) 100vw, 33vw"
+                                            loading="lazy"
+                                            class="w-full h-full object-cover transition-transform duration-700 group-hover:scale-[1.04]" />
                             </div>
                             <div class="text-[10px] tracking-[0.3em] uppercase text-[#c9372c] mb-1">
                                 {p.category_label_en}

@@ -11,6 +11,7 @@
  *
  * 箭頭只需要 ~15 行 inline JS；若無 JS 使用者仍可用觸控 / 滾輪橫向捲。
  */
+import SmartImage from "../ui/SmartImage.astro";
 import type { IPublicProject } from "../../types/project";
 import { resolveThumbnail } from "../../lib/youtube";
 import Tr from "../ui/Tr.astro";
@@ -65,11 +66,13 @@ const { works } = Astro.props;
                     <a href={`/works/${w.slug}`}
                        aria-label={w.title}
                        class="group relative block aspect-video overflow-hidden bg-neutral-900 snap-start">
-                        <img src={resolveThumbnail(w.youtube_id, w.slug, "maxres")}
-                             alt={w.title}
-                             width="1280" height="720"
-                             loading={i < 4 ? "eager" : "lazy"}
-                             class="absolute inset-0 w-full h-full object-cover transition-transform duration-700 group-hover:scale-[1.05]" />
+                        <SmartImage src={resolveThumbnail(w.youtube_id, w.slug, "maxres")}
+                                    alt={w.title}
+                                    width={1280} height={720}
+                                    widths={[480, 800, 1280]}
+                                    sizes="(max-width: 640px) 50vw, (max-width: 1024px) 33vw, 25vw"
+                                    loading={i < 4 ? "eager" : "lazy"}
+                                    class="absolute inset-0 w-full h-full object-cover transition-transform duration-700 group-hover:scale-[1.05]" />
 
                         <!-- hover / focus 時浮現標題 -->
                         <div class="absolute inset-0 flex items-end bg-gradient-to-t from-black/85 via-black/0 to-transparent opacity-0 group-hover:opacity-100 group-focus-visible:opacity-100 transition-opacity duration-300">

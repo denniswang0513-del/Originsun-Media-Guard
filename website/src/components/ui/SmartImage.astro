@@ -1,0 +1,43 @@
+---
+/**
+ * SmartImage.astro — Astro `<Image>` wrapper，遇到 sharp 無法處理的 URL
+ * （目前只有 picsum.photos 因為它回 302 redirect，Astro 不會 follow）
+ * 自動降級成原生 `<img>`，仍保留 width/height 防 CLS。
+ *
+ * 介面接近 Astro Image 但收斂到實際會用的 prop：
+ *   - src / alt / width / height（必填）
+ *   - widths / sizes（給 srcset，sharp-only）
+ *   - loading / class
+ *
+ * 新頁面所有遠端來源圖片優先用這個，避免 placeholder URL 炸掉 build。
+ */
+import { Image } from "astro:assets";
+
+interface Props {
+    src: string;
+    alt: string;
+    width: number;
+    height: number;
+    widths?: number[];
+    sizes?: string;
+    loading?: "eager" | "lazy";
+    class?: string;
+}
+
+const { src, alt, width, height, widths, sizes, loading, class: className } = Astro.props;
+
+// 已知會 302 redirect 的網域：sharp 不會 follow 直接 fail build。
+// 命中時降級走原生 <img>（沒 srcset 但仍有 width/height 防 CLS）。
+const optimizable = !src.includes("picsum.photos");
+---
+
+{optimizable ? (
+    <Image src={src} alt={alt}
+           width={width} height={height}
+           widths={widths} sizes={sizes}
+           loading={loading} class={className} />
+) : (
+    <img src={src} alt={alt}
+         width={width} height={height}
+         loading={loading} class={className} />
+)}
