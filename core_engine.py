@@ -842,6 +842,82 @@ class MediaGuardEngine:
         return 0.0
 
     @staticmethod
+    def _probe_audio_stream_count(filepath: str) -> int:
+        """Return the number of audio streams in filepath (0 if none / probe fails).
+
+        Used by proxy transcode to decide audio-handling strategy:
+          - 0 streams → silent proxy (no audio args)
+          - 1 stream  → normalize to stereo
+          - N streams → amerge all into stereo (multi-mic MXF)
+        """
+        _flags = getattr(subprocess, 'CREATE_NO_WINDOW', 0x08000000)
+        try:
+            cmd = ["ffprobe", "-v", "error", "-select_streams", "a",
+                   "-show_entries", "stream=index", "-of", "csv=p=0", filepath]
+            res = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+                                 text=True, timeout=10, creationflags=_flags)
+            return len([ln for ln in (res.stdout or "").splitlines() if ln.strip()])
+        except Exception:
+            return 0
+
+    @staticmethod
+    def _build_proxy_transcode_cmd(
+        src_file: str, proxy_out: str, n_audio_streams: int,
+    ) -> List[str]:
+        """Build ffmpeg cmd for proxy transcode.
+
+        Audio strategy keyed off n_audio_streams (probed upstream):
+          - 0 → no audio args at all
+          - 1 → normalize single stream to stereo (handles mono / left-only sources
+                that would otherwise leave one channel silent in downstream concat)
+          - N>1 → amerge all streams into one + force stereo (multi-mic MXF)
+
+        Always re-encodes audio to AAC. -c:a copy can't survive amerge and breaks
+        the moment a multi-stream source enters the chain — uniform AAC keeps
+        every proxy in the same shape so concat doesn't have to special-case.
+
+        Video stays as before: ``-map 0:v:0`` (skips DJI attached_pic), prores_ks,
+        scale=-2:720.
+        """
+        if n_audio_streams == 0:
+            video_filter = "[0:v:0]scale=-2:720[vout]"
+            return [
+                "ffmpeg", "-y", "-nostdin",
+                "-i", src_file,
+                "-filter_complex", video_filter,
+                "-map", "[vout]",
+                "-c:v", "prores_ks", "-profile:v", "1",
+                "-progress", "pipe:1", "-nostats",
+                proxy_out,
+            ]
+
+        if n_audio_streams == 1:
+            audio_filter = (
+                "[0:a:0]aresample=48000,"
+                "aformat=sample_fmts=fltp:channel_layouts=stereo[aout]"
+            )
+        else:
+            # amerge takes N inputs, outputs single stream with N*ch_per_input channels.
+            # Then aformat to stereo downmixes safely (ffmpeg picks sane mix matrix).
+            audio_filter = (
+                f"[0:a]amerge=inputs={n_audio_streams},"
+                "aresample=48000,"
+                "aformat=sample_fmts=fltp:channel_layouts=stereo[aout]"
+            )
+
+        filter_complex = f"[0:v:0]scale=-2:720[vout];{audio_filter}"
+        return [
+            "ffmpeg", "-y", "-nostdin",
+            "-i", src_file,
+            "-filter_complex", filter_complex,
+            "-map", "[vout]", "-map", "[aout]",
+            "-c:v", "prores_ks", "-profile:v", "1",
+            "-c:a", "aac", "-b:a", "192k",
+            "-progress", "pipe:1", "-nostats",
+            proxy_out,
+        ]
+
+    @staticmethod
     def get_video_metadata(filepath: str) -> Dict[str, Any]:
         """Use ffprobe to extract FPS, resolution, codec, and duration from a video file."""
         cmd = [
@@ -1013,23 +1089,11 @@ class MediaGuardEngine:
             _src_sz = os.path.getsize(src_file) if os.path.exists(src_file) else 0
             self.log(f"[{i+1}/{total}] 正在轉檔: {os.path.basename(src_file)}")
             duration = self._get_video_duration(src_file)
+            n_audio = self._probe_audio_stream_count(src_file)
+            if n_audio > 1:
+                self.log(f"  [audio] 多軌音訊 ({n_audio} 軌)，merge 成單一 stereo")
 
-            # -map 0:v:0 (not 0:v) skips attached_pic streams. DJI Mavic 3+
-            # embeds an mjpeg thumbnail as Stream #0:3 disposition=attached_pic;
-            # 0:v selects it too and prores_ks can't tag it for the mov muxer,
-            # killing the whole file with "Could not find tag for codec prores
-            # in stream #1". 0:a:0? likewise picks only the first audio track.
-            cmd = [
-                "ffmpeg", "-y", "-nostdin",
-                "-i", src_file,
-                "-map", "0:v:0", "-map", "0:a:0?",
-                "-vf", "scale=-2:720",
-                "-c:v", "prores_ks", "-profile:v", "1",
-                "-c:a", "copy",
-                "-progress", "pipe:1",
-                "-nostats",
-                proxy_out
-            ]
+            cmd = self._build_proxy_transcode_cmd(src_file, proxy_out, n_audio)
 
             proc, stderr_tail, stderr_thread = self._spawn_with_stderr_tail(cmd)
             t_start = time.time()
@@ -1768,7 +1832,13 @@ class MediaGuardEngine:
             vf += f"[v{i}]"
             filter_parts.append(vf)
             if include_audio:
-                filter_parts.append(f"[{i}:a]anull[a{i}]")
+                # Normalize sample rate + channel layout so mono+stereo mixes
+                # don't break concat. Standard concat path (line ~1351) does
+                # the same — keep them in sync.
+                filter_parts.append(
+                    f"[{i}:a]aresample=48000,"
+                    f"aformat=sample_fmts=fltp:channel_layouts=stereo[a{i}]"
+                )
                 concat_inputs.append(f"[v{i}][a{i}]")
             else:
                 concat_inputs.append(f"[v{i}]")

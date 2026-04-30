@@ -42,6 +42,9 @@ def transcode_call(monkeypatch, tmp_path):
         return _FakeProc()
 
     monkeypatch.setattr(MediaGuardEngine, "_get_video_duration", staticmethod(lambda p: 10.0))
+    # DJI source has 1 audio stream; multi-track audio behavior is covered
+    # in test_transcode_multi_track_audio.py
+    monkeypatch.setattr(MediaGuardEngine, "_probe_audio_stream_count", staticmethod(lambda p: 1))
     monkeypatch.setattr(subprocess, "Popen", fake_popen)
     # The stderr-reader thread runs against FakeProc.stderr (empty iter)
     # and exits cleanly — no patching of threading needed.
@@ -58,29 +61,23 @@ def transcode_call(monkeypatch, tmp_path):
     return captured
 
 
-def _video_maps(cmd):
-    return [cmd[i + 1] for i, a in enumerate(cmd)
-            if a == "-map" and i + 1 < len(cmd) and cmd[i + 1].startswith("0:v")]
-
-
-def _audio_maps(cmd):
-    return [cmd[i + 1] for i, a in enumerate(cmd)
-            if a == "-map" and i + 1 < len(cmd) and cmd[i + 1].startswith("0:a")]
+def _video_filter_uses_first_stream(cmd):
+    """Check filter_complex selects 0:v:0 (first video stream) — protects
+    against DJI attached_pic which is also tagged as a video stream."""
+    cmd_str = " ".join(cmd)
+    return "[0:v:0]" in cmd_str and "[0:v]" not in cmd_str.replace("[0:v:0]", "")
 
 
 def test_transcode_uses_first_video_stream_only(transcode_call):
-    """``-map 0:v:0`` must be passed (not ``0:v``) to skip attached_pic."""
-    maps = _video_maps(transcode_call["cmd"])
-    assert maps == ["0:v:0"], (
-        f"Expected video map to be ['0:v:0'], got {maps}. "
-        "Bare 0:v sweeps in DJI's attached_pic and breaks prores_ks."
+    """Filter chain must reference 0:v:0 (not bare 0:v) to skip attached_pic.
+
+    DJI Mavic 3+ embeds an mjpeg thumbnail tagged as a video stream;
+    bare 0:v sweeps it in and prores_ks chokes on the mov muxer tag.
+    """
+    assert _video_filter_uses_first_stream(transcode_call["cmd"]), (
+        "Filter chain must use [0:v:0], not bare [0:v]. "
+        f"Got cmd: {' '.join(transcode_call['cmd'])}"
     )
-
-
-def test_transcode_uses_first_audio_stream_only(transcode_call):
-    """``-map 0:a:0?`` defends against multi-track audio sources."""
-    maps = _audio_maps(transcode_call["cmd"])
-    assert maps == ["0:a:0?"], f"Expected audio map to be ['0:a:0?'], got {maps}."
 
 
 def test_transcode_captures_stderr(transcode_call):
