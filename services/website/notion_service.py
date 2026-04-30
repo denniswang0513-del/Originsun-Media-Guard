@@ -698,6 +698,7 @@ async def _process_pages(
         # A2: 排序用 last_edited_time（使用者決策）
         posts.append({
             "slug": slug,
+            "notion_page_id": page_id,            # 給 DB upsert match 用
             "title": title,
             "category": category_id,
             "category_label_zh": label_zh,
@@ -734,6 +735,57 @@ def _sync_error(t0: float, error: str) -> dict:
     return _sync_result(
         ok=False, posts=[], categories=[], skipped=[], warnings=[], t0=t0, error=error,
     )
+
+
+async def fetch_from_notion() -> dict:
+    """admin Tab「import-notion」入口：讀 settings → 抓 → 回傳給 post_service.upsert_from_notion。
+
+    Categories 的形狀調整（id → slug 重命名）讓 post_service 直接吃。
+    Token / database_id 從 website_settings.notion.* 拿。
+    Media 下載到本機（NAS container 跑時 = /uploads/notion-media/）— 跟既有 Astro
+    public/notion-media 路徑相容；之後 build 把它一起 ship 到 dist。
+    """
+    from db.session import get_session_factory
+    from services.website import settings_service
+
+    factory = get_session_factory()
+    if not factory:
+        raise RuntimeError("DB 未初始化")
+    async with factory() as session:
+        settings = await settings_service.get_all_settings(session)
+
+    token = (settings.get("notion.token") or "").strip()
+    db_id = (settings.get("notion.database_id") or "").strip()
+    if not token or not db_id:
+        raise ValueError("notion.token 或 notion.database_id 未設定（admin Tab → 網站設定）")
+
+    # NAS container 寫到容器內 /app/uploads/notion-media/，被 Website_Nginx
+    # 直接從 /uploads/ volume 拿，對外 URL = /notion-media/{slug}/file
+    media_root = Path("uploads/notion-media")
+    media_root.mkdir(parents=True, exist_ok=True)
+
+    raw = await run_full_sync(token, db_id, media_root, dry_run=False)
+    if not raw["ok"]:
+        raise RuntimeError(raw.get("error") or "Notion 同步失敗")
+
+    # categories: id → slug 重命名，給 post_service.upsert_from_notion 吃
+    cats_for_db = [
+        {
+            "slug": c.get("id"),
+            "label_zh": c.get("label_zh"),
+            "label_en": c.get("label_en"),
+            "color": c.get("color"),
+        }
+        for c in raw.get("categories", [])
+        if c.get("id")
+    ]
+
+    return {
+        "posts": raw.get("posts", []),
+        "categories": cats_for_db,
+        "skipped": raw.get("skipped", []),
+        "warnings": raw.get("warnings", []),
+    }
 
 
 async def run_full_sync(

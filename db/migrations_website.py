@@ -173,6 +173,55 @@ _CREATE_TABLES: list[str] = [
         updated_at TIMESTAMPTZ DEFAULT NOW()
     )
     """,
+    # 部落格三表（DB-as-truth，Notion 只是匯入器）
+    """
+    CREATE TABLE IF NOT EXISTS website_posts (
+        id SERIAL PRIMARY KEY,
+        slug VARCHAR(50) UNIQUE NOT NULL,
+        title TEXT NOT NULL,
+        excerpt TEXT,
+        cover_url TEXT,
+        body JSONB NOT NULL DEFAULT '[]'::jsonb,
+        published_at TIMESTAMPTZ,
+        date_modified TIMESTAMPTZ,
+        read_time_min INTEGER,
+        status VARCHAR(16) NOT NULL DEFAULT 'draft',
+        sort_order INTEGER NOT NULL DEFAULT 0,
+        notion_page_id VARCHAR(64),
+        imported_from_notion_at TIMESTAMPTZ,
+        seo_title VARCHAR(200),
+        seo_description VARCHAR(300),
+        og_image_url TEXT,
+        canonical_url TEXT,
+        noindex BOOLEAN NOT NULL DEFAULT FALSE,
+        author_name VARCHAR(100),
+        author_url TEXT,
+        ai_allow_override BOOLEAN,
+        old_urls JSONB NOT NULL DEFAULT '[]'::jsonb,
+        created_at TIMESTAMPTZ DEFAULT NOW(),
+        updated_at TIMESTAMPTZ DEFAULT NOW()
+    )
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS website_post_categories (
+        id SERIAL PRIMARY KEY,
+        slug VARCHAR(50) UNIQUE NOT NULL,
+        label_zh VARCHAR(100) NOT NULL,
+        label_en VARCHAR(100),
+        color VARCHAR(20),
+        sort_order INTEGER NOT NULL DEFAULT 0,
+        visible BOOLEAN NOT NULL DEFAULT TRUE,
+        created_at TIMESTAMPTZ DEFAULT NOW(),
+        updated_at TIMESTAMPTZ DEFAULT NOW()
+    )
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS website_post_category_links (
+        post_id INTEGER NOT NULL REFERENCES website_posts(id) ON DELETE CASCADE,
+        category_id INTEGER NOT NULL REFERENCES website_post_categories(id) ON DELETE CASCADE,
+        PRIMARY KEY (post_id, category_id)
+    )
+    """,
 ]
 
 _CREATE_INDEXES: list[str] = [
@@ -188,6 +237,11 @@ _CREATE_INDEXES: list[str] = [
     "CREATE INDEX IF NOT EXISTS idx_webfaq_visible_sort ON website_faqs (visible, sort_order)",
     "CREATE INDEX IF NOT EXISTS idx_webtst_visible_sort ON website_testimonials (visible, sort_order)",
     "CREATE INDEX IF NOT EXISTS idx_webqf_visible_sort ON website_quick_facts (visible, sort_order)",
+    # Posts 公開查詢：WHERE status='published' AND published_at<=NOW() ORDER BY published_at DESC
+    "CREATE INDEX IF NOT EXISTS idx_post_status_pub ON website_posts (status, published_at)",
+    "CREATE INDEX IF NOT EXISTS idx_post_notion_page ON website_posts (notion_page_id)",
+    "CREATE INDEX IF NOT EXISTS idx_postcat_visible_sort ON website_post_categories (visible, sort_order)",
+    "CREATE INDEX IF NOT EXISTS idx_pcl_category ON website_post_category_links (category_id)",
     # 對外作品查詢加速
     "CREATE INDEX IF NOT EXISTS idx_crmproj_public ON crm_projects (public)",
     "CREATE INDEX IF NOT EXISTS idx_crmproj_featured ON crm_projects (public_featured)",

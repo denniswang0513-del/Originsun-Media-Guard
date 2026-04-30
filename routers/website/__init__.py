@@ -17,6 +17,7 @@ from .admin_inquiries import router as _admin_inquiries_router
 from .admin_settings import router as _admin_settings_router
 from .admin_rebuild import router as _admin_rebuild_router
 from .admin_seo import router as _admin_seo_router
+from .admin_posts import router as _admin_posts_router
 
 router = APIRouter()
 router.include_router(_public_router)
@@ -27,5 +28,6 @@ router.include_router(_admin_inquiries_router)
 router.include_router(_admin_settings_router)
 router.include_router(_admin_rebuild_router)
 router.include_router(_admin_seo_router)
+router.include_router(_admin_posts_router)
 
 __all__ = ["router"]

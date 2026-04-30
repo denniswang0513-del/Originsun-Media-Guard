@@ -4,9 +4,14 @@ import { defineConfig } from 'astro/config';
 import tailwindcss from '@tailwindcss/vite';
 import sitemap from '@astrojs/sitemap';
 import seoAudit from './integrations/seo-audit.mjs';
+import { fetchRedirects } from './integrations/build-redirects.mjs';
+
+// Build init：fetch redirect map from NAS website-api。離線時回 {}，build 不中斷。
+const redirects = await fetchRedirects();
 
 // https://astro.build/config
 export default defineConfig({
+  redirects,    // {"/old/path": "/news/11", ...} → 軟 301（meta refresh + canonical）
   // 設 site URL → 影響 canonical、OG URL、sitemap.xml 的 base URL。
   // 7/1 正式切換時改 https://originsun-studio.com 並重 build。
   site: 'https://test.originsun-studio.com',

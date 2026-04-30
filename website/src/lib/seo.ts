@@ -316,18 +316,30 @@ export const pageSchemas = {
 
     /** NewsArticle — /news/[slug] 部落格文章 */
     newsArticle(post: IPost, meta: IWebsiteMeta, siteUrl: string): SchemaObject {
+        // 個人作者 → Person schema（E-E-A-T 加分）；空 → 公司
+        const author = post.author_name
+            ? {
+                "@type": "Person",
+                name: post.author_name,
+                url: post.author_url || siteUrl,
+            }
+            : {
+                "@type": "Organization",
+                name: meta.company_name_zh,
+                url: siteUrl,
+            };
+        const img = post.og_image_url || post.cover_url;
+
         return {
             "@context": SCHEMA_CTX,
             "@type": "NewsArticle",
             headline: post.title,
-            description: post.excerpt,
-            image: post.cover_url ? [post.cover_url] : undefined,
+            description: post.seo_description || post.excerpt,
+            image: img ? [img] : undefined,
             datePublished: post.published_at,
-            author: {
-                "@type": "Organization",
-                name: meta.company_name_zh,
-                url: siteUrl,
-            },
+            // 內容新鮮度信號（Google E-E-A-T）— admin 編過就比 published_at 新
+            dateModified: post.date_modified || post.published_at,
+            author,
             publisher: {
                 "@type": "Organization",
                 name: meta.company_name_zh,

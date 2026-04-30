@@ -8,12 +8,13 @@ import type { APIRoute } from "astro";
 import {
     fetchMeta, fetchServices, fetchFeatured, fetchFaqs, fetchQuickFacts,
 } from "../lib/crm-client";
+import { fetchPosts } from "../lib/posts";
 import { companyInfoMd, resolveSiteUrl, textResponse } from "../lib/seo";
 
 export const GET: APIRoute = async ({ site }) => {
-    const [meta, services, works, faqs, quickFacts] = await Promise.all([
+    const [meta, services, works, faqs, quickFacts, posts] = await Promise.all([
         fetchMeta(), fetchServices(), fetchFeatured(30),
-        fetchFaqs(), fetchQuickFacts(),
+        fetchFaqs(), fetchQuickFacts(), fetchPosts(),
     ]);
     const siteUrl = resolveSiteUrl(site);
     const lines: string[] = [
@@ -60,6 +61,20 @@ export const GET: APIRoute = async ({ site }) => {
         for (const f of visibleFaqs) {
             lines.push(`**Q: ${f.question_zh}**`, f.answer_zh, "");
         }
+    }
+
+    if (posts.length) {
+        lines.push("## 影像專欄");
+        for (const p of posts.slice(0, 30)) {
+            const dateLine = p.published_at
+                ? ` (${new Date(p.published_at).toISOString().slice(0, 10)})`
+                : "";
+            lines.push(`- [${p.title}](${siteUrl}/news/${p.slug})${dateLine}`);
+            if (p.excerpt) {
+                lines.push(`  ${p.excerpt.replace(/\s+/g, " ").slice(0, 200)}${p.excerpt.length > 200 ? "…" : ""}`);
+            }
+        }
+        lines.push("");
     }
 
     lines.push(

@@ -398,6 +398,179 @@ class WebsiteQuickFactUpdate(BaseModel):
 
 
 # ══════════════════════════════════════════════════════════
+# Blog Posts（DB-as-truth，Notion 只是匯入器）
+# ══════════════════════════════════════════════════════════
+
+PostStatus = Literal["draft", "published", "archived"]
+
+
+# ── 文章分類（M2M relation 用） ──
+
+class PostCategoryResponse(BaseModel):
+    id: int
+    slug: str
+    label_zh: str
+    label_en: Optional[str] = None
+    color: Optional[str] = None
+    sort_order: int = 0
+    visible: bool = True
+    post_count: int = 0   # 列表查詢時 join 統計（admin 看，公開端點忽略）
+
+
+class PostCategoryCreate(BaseModel):
+    slug: str = Field(..., min_length=2, max_length=50, pattern=r"^[a-z0-9-]+$")
+    label_zh: str = Field(..., min_length=1, max_length=100)
+    label_en: Optional[str] = Field(None, max_length=100)
+    color: Optional[str] = Field(None, max_length=20)
+    sort_order: int = 0
+    visible: bool = True
+
+
+class PostCategoryUpdate(BaseModel):
+    slug: Optional[str] = None
+    label_zh: Optional[str] = None
+    label_en: Optional[str] = None
+    color: Optional[str] = None
+    sort_order: Optional[int] = None
+    visible: Optional[bool] = None
+
+
+# ── 文章主體 ──
+
+class PostListItem(BaseModel):
+    """admin 列表頁用的精簡型（不含 body 避免 payload 過大）。"""
+    id: int
+    slug: str
+    title: str
+    excerpt: Optional[str] = None
+    cover_url: Optional[str] = None
+    category_slugs: list[str] = Field(default_factory=list)
+    status: PostStatus = "draft"
+    published_at: Optional[datetime] = None
+    date_modified: Optional[datetime] = None
+    sort_order: int = 0
+    notion_page_id: Optional[str] = None
+    redirect_count: int = 0    # len(old_urls)
+
+
+class PostResponse(PostListItem):
+    """完整型（含 body + per-post SEO）。"""
+    body: list[Any] = Field(default_factory=list)
+    read_time_min: Optional[int] = None
+    imported_from_notion_at: Optional[datetime] = None
+    # SEO
+    seo_title: Optional[str] = None
+    seo_description: Optional[str] = None
+    og_image_url: Optional[str] = None
+    canonical_url: Optional[str] = None
+    noindex: bool = False
+    author_name: Optional[str] = None
+    author_url: Optional[str] = None
+    ai_allow_override: Optional[bool] = None
+    old_urls: list[str] = Field(default_factory=list)
+
+
+class PostPublicResponse(BaseModel):
+    """對外 Astro 端拿的形狀（去掉 admin-only 欄位）。"""
+    slug: str
+    title: str
+    excerpt: Optional[str] = None
+    cover_url: Optional[str] = None
+    category_slugs: list[str] = Field(default_factory=list)
+    body: list[Any] = Field(default_factory=list)
+    published_at: Optional[datetime] = None
+    date_modified: Optional[datetime] = None
+    read_time_min: Optional[int] = None
+    # 對外渲染需要的 SEO 欄位
+    seo_title: Optional[str] = None
+    seo_description: Optional[str] = None
+    og_image_url: Optional[str] = None
+    canonical_url: Optional[str] = None
+    noindex: bool = False
+    author_name: Optional[str] = None
+    author_url: Optional[str] = None
+    ai_allow_override: Optional[bool] = None
+
+
+class PostCreate(BaseModel):
+    slug: Optional[str] = None             # 不給 → service 自動 max+1
+    title: str = Field(..., min_length=1)
+    excerpt: Optional[str] = None
+    cover_url: Optional[str] = None
+    body: list[Any] = Field(default_factory=list)
+    category_slugs: list[str] = Field(default_factory=list)
+    status: PostStatus = "draft"
+    published_at: Optional[datetime] = None
+    sort_order: int = 0
+    seo_title: Optional[str] = None
+    seo_description: Optional[str] = None
+    og_image_url: Optional[str] = None
+    canonical_url: Optional[str] = None
+    noindex: bool = False
+    author_name: Optional[str] = None
+    author_url: Optional[str] = None
+    ai_allow_override: Optional[bool] = None
+    old_urls: list[str] = Field(default_factory=list)
+
+
+class PostUpdate(BaseModel):
+    """所有欄位 Optional — 用 model_dump(exclude_unset=True) partial update。"""
+    slug: Optional[str] = None
+    title: Optional[str] = None
+    excerpt: Optional[str] = None
+    cover_url: Optional[str] = None
+    body: Optional[list[Any]] = None
+    category_slugs: Optional[list[str]] = None
+    status: Optional[PostStatus] = None
+    published_at: Optional[datetime] = None
+    sort_order: Optional[int] = None
+    seo_title: Optional[str] = None
+    seo_description: Optional[str] = None
+    og_image_url: Optional[str] = None
+    canonical_url: Optional[str] = None
+    noindex: Optional[bool] = None
+    author_name: Optional[str] = None
+    author_url: Optional[str] = None
+    ai_allow_override: Optional[bool] = None
+    old_urls: Optional[list[str]] = None
+
+
+# ── Notion 匯入請求 ──
+
+class NotionImportRequest(BaseModel):
+    """admin Tab「實際同步」按鈕送來的請求。"""
+    force: bool = False           # True = 已存在 notion_page_id 的文章整篇覆寫；
+                                  # False（預設）= 跳過已存在的（DB 為真）
+
+
+class PostImportResult(BaseModel):
+    inserted: int = 0
+    skipped: int = 0
+    overwritten: int = 0
+    failed: int = 0
+    new_categories: list[str] = Field(default_factory=list)  # 自動新建的分類 slug
+    warnings: list[str] = Field(default_factory=list)
+    duration_ms: int = 0
+
+
+# ── Redirects（軟+硬 301 來源） ──
+
+class RedirectMap(BaseModel):
+    """GET /api/website/redirects 回傳形狀。"""
+    items: dict[str, str] = Field(default_factory=dict)  # {"/old": "/new", ...}
+    count: int = 0
+
+
+class RedirectSyncResult(BaseModel):
+    """POST /api/website/admin/redirects/sync 回傳。"""
+    synced: int
+    last_sync: Optional[datetime] = None
+    method: str = "nginx-hard-301"
+    ok: bool = True
+    error: Optional[str] = None
+
+
+# ══════════════════════════════════════════════════════════
 # Notion Sync（Phase M-E-8 部落格 Notion-as-CMS）
 # ══════════════════════════════════════════════════════════
 

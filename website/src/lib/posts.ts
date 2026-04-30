@@ -1,48 +1,52 @@
 /**
- * posts.ts — 從 src/content/posts.json 讀取已同步的文章
+ * posts.ts — 從 DB API 撈已發布的部落格文章
  *
- * 資料來源：services/website/notion_service.py 透過管理 Tab「📝 部落格」的
- * 「同步 Notion」按鈕產生。檔案不存在時（fresh clone、未同步、build 環境隔離）
- * 回傳空陣列讓網站正常 build —— Insight 列表頁會顯示「尚無文章」。
+ * 資料來源：NAS website-api `/api/website/posts`（DB 為真，取代舊 posts.json）。
+ * 後端已 filter status='published' AND published_at<=now，這裡只負責後處理：
+ *   - 把 category_slugs 攤平回 IPost 介面的 category / category_label_*（向下相容既有頁面）
+ *   - cover_url 空時 fallback placeholder
  *
- * 兩個 entry 都同步：fetchPosts() 取全部，fetchPostBySlug(slug) 用列表查詢。
- * 一次讀檔後 module-level cache，多個 Astro page 共用。
+ * 走 crm-client.ts 的 _memoizeList → build 期 N 頁共用 1 次 HTTP。
  */
-import fs from "node:fs/promises";
-import path from "node:path";
-import type { IPost } from "../types/post";
+import { fetchRawPosts, fetchRawPostCategories } from "./crm-client";
 import { placeholderImage } from "./youtube";
+import type { IPost } from "../types/post";
 
-const POSTS_JSON = path.join(process.cwd(), "src", "content", "posts.json");
-
-let _cache: IPost[] | null = null;
-let _cacheMtime = -1;
-
-// mtime-based cache invalidation：dev server 模組長壽，sync 後 JSON 換新需要重讀。
-// 沒這個檢查時 module-level cache 會卡住空陣列（dev 啟動時 JSON 還不存在的情況）。
-async function _loadAll(): Promise<IPost[]> {
-    try {
-        const stat = await fs.stat(POSTS_JSON);
-        if (_cache !== null && stat.mtimeMs === _cacheMtime) return _cache;
-        const raw = await fs.readFile(POSTS_JSON, "utf-8");
-        const arr = JSON.parse(raw) as IPost[];
-        _cache = arr.map(p => ({
-            ...p,
-            cover_url: p.cover_url || placeholderImage(`post_${p.slug}`, 1200, 675),
-        }));
-        _cacheMtime = stat.mtimeMs;
-    } catch {
-        _cache = [];
-        _cacheMtime = 0;
-    }
-    return _cache;
-}
 
 export async function fetchPosts(): Promise<IPost[]> {
-    return _loadAll();
+    const [raw, cats] = await Promise.all([fetchRawPosts(), fetchRawPostCategories()]);
+    const catBySlug = new Map(cats.map(c => [c.slug, c]));
+
+    return raw.map(p => {
+        const primary = p.category_slugs[0] || "";
+        const cat = catBySlug.get(primary);
+        return {
+            slug: p.slug,
+            title: p.title,
+            category: primary,
+            category_slugs: p.category_slugs,
+            category_label_zh: cat?.label_zh || primary || "未分類",
+            category_label_en: cat?.label_en || cat?.label_zh || primary || "Uncategorized",
+            cover_url: p.cover_url || placeholderImage(`post_${p.slug}`, 1200, 675),
+            excerpt: p.excerpt || "",
+            published_at: p.published_at || "",
+            body: p.body || [],
+            read_time_min: p.read_time_min ?? undefined,
+            // SEO 欄位透傳給 pageSchemas.newsArticle / BaseLayout SEO 覆寫用
+            date_modified: p.date_modified ?? undefined,
+            author_name: p.author_name ?? undefined,
+            author_url: p.author_url ?? undefined,
+            seo_title: p.seo_title ?? undefined,
+            seo_description: p.seo_description ?? undefined,
+            og_image_url: p.og_image_url ?? undefined,
+            canonical_url: p.canonical_url ?? undefined,
+            noindex: p.noindex || undefined,
+        };
+    });
 }
 
+
 export async function fetchPostBySlug(slug: string): Promise<IPost | null> {
-    const posts = await _loadAll();
+    const posts = await fetchPosts();
     return posts.find(p => p.slug === slug) ?? null;
 }

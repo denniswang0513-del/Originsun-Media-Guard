@@ -14,6 +14,7 @@ from .setting import WebsiteSetting
 from .service import WebsiteService
 from .inquiry import WebsiteContactInquiry
 from .seo import WebsiteFAQ, WebsiteTestimonial, WebsiteQuickFact
+from .post import WebsitePost, WebsitePostCategory, WebsitePostCategoryLink
 
 __all__ = [
     "WebsiteCategory",
@@ -24,4 +25,7 @@ __all__ = [
     "WebsiteFAQ",
     "WebsiteTestimonial",
     "WebsiteQuickFact",
+    "WebsitePost",
+    "WebsitePostCategory",
+    "WebsitePostCategoryLink",
 ]

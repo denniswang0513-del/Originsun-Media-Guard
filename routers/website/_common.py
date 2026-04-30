@@ -11,7 +11,7 @@ import time
 from collections import defaultdict, deque
 from typing import Callable
 
-from fastapi import HTTPException, Request
+from fastapi import Depends, HTTPException, Request
 
 import core.state as state
 
@@ -145,3 +145,60 @@ async def public_session():
         except Exception:
             await session.rollback()
             raise
+
+
+# ── CRUD 工廠：admin_seo / admin_posts / admin_post_categories 共用 ──
+
+from typing import Awaitable, Callable, Optional, Type
+
+from fastapi import APIRouter
+from pydantic import BaseModel
+from sqlalchemy.ext.asyncio import AsyncSession
+
+
+def register_crud(
+    router: APIRouter,
+    *,
+    prefix: str,
+    name: str,
+    list_fn: Callable[[AsyncSession], Awaitable[list]],
+    create_fn: Callable[[AsyncSession, dict], Awaitable[dict]],
+    update_fn: Callable[[AsyncSession, int, dict], Awaitable[Optional[dict]]],
+    delete_fn: Callable[[AsyncSession, int], Awaitable[bool]],
+    create_schema: Type[BaseModel],
+    update_schema: Type[BaseModel],
+    on_change: Optional[Callable[[], Awaitable[None]]] = None,
+) -> None:
+    """為 prefix 註冊 list/create/update/delete 4 個 endpoint，全部走 admin_session。
+
+    on_change 在每次 create/update/delete 成功後呼叫（通常是 rebuild_service.mark_dirty）。
+    """
+
+    async def _list(session: AsyncSession = Depends(admin_session)):
+        return {"items": await list_fn(session)}
+
+    async def _create(req: create_schema, session: AsyncSession = Depends(admin_session)):  # type: ignore[valid-type]
+        item = await create_fn(session, req.model_dump())
+        if on_change:
+            await on_change()
+        return item
+
+    async def _update(item_id: int, req: update_schema, session: AsyncSession = Depends(admin_session)):  # type: ignore[valid-type]
+        item = await update_fn(session, item_id, req.model_dump(exclude_unset=True))
+        if not item:
+            raise HTTPException(status_code=404, detail=f"{name} not found")
+        if on_change:
+            await on_change()
+        return item
+
+    async def _delete(item_id: int, session: AsyncSession = Depends(admin_session)):
+        if not await delete_fn(session, item_id):
+            raise HTTPException(status_code=404, detail=f"{name} not found")
+        if on_change:
+            await on_change()
+        return {"ok": True}
+
+    router.get(f"/{prefix}", name=f"list_{prefix}")(_list)
+    router.post(f"/{prefix}", status_code=201, name=f"create_{prefix}")(_create)
+    router.put(f"/{prefix}/{{item_id}}", name=f"update_{prefix}")(_update)
+    router.delete(f"/{prefix}/{{item_id}}", name=f"delete_{prefix}")(_delete)

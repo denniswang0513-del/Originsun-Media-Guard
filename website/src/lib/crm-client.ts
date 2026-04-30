@@ -172,6 +172,46 @@ export const fetchQuickFacts = _memoizeList<IQuickFact>(() =>
     _safeGet<{ items: IQuickFact[] }>("/api/website/quick_facts", { items: [] }, "fetchQuickFacts"));
 
 
+// ── Blog Posts (DB-as-truth；取代舊 src/content/posts.json) ──
+
+/** API 回傳的 post 形狀（對應 PostPublicResponse），給 lib/posts.ts 後處理 */
+export interface IRawPublicPost {
+    slug: string;
+    title: string;
+    excerpt: string | null;
+    cover_url: string | null;
+    category_slugs: string[];
+    body: any[];
+    published_at: string | null;
+    date_modified: string | null;
+    read_time_min: number | null;
+    seo_title: string | null;
+    seo_description: string | null;
+    og_image_url: string | null;
+    canonical_url: string | null;
+    noindex: boolean;
+    author_name: string | null;
+    author_url: string | null;
+    ai_allow_override: boolean | null;
+}
+
+export interface IRawPostCategory {
+    id: number;
+    slug: string;
+    label_zh: string;
+    label_en: string | null;
+    color: string | null;
+    sort_order: number;
+    visible: boolean;
+}
+
+export const fetchRawPosts = _memoizeList<IRawPublicPost>(() =>
+    _safeGet<{ items: IRawPublicPost[] }>("/api/website/posts", { items: [] }, "fetchRawPosts"));
+
+export const fetchRawPostCategories = _memoizeList<IRawPostCategory>(() =>
+    _safeGet<{ items: IRawPostCategory[] }>("/api/website/post_categories", { items: [] }, "fetchRawPostCategories"));
+
+
 /**
  * fetchMeta() — 模組級 memoize（同 fetchAllWorksCached 模式），避免多頁重複打 API。
  * API 離線時走 fallback 但不 cache（以便後續重試成功後能切回真實資料）。
