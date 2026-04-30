@@ -11,7 +11,7 @@ import time
 from collections import defaultdict, deque
 from typing import Callable
 
-from fastapi import Depends, HTTPException, Request
+from fastapi import Body, Depends, HTTPException, Request
 
 import core.state as state
 
@@ -177,19 +177,28 @@ def register_crud(
     async def _list(session: AsyncSession = Depends(admin_session)):
         return {"items": await list_fn(session)}
 
-    async def _create(req: create_schema, session: AsyncSession = Depends(admin_session)):  # type: ignore[valid-type]
+    # 注：req 的型別不能寫成 `req: create_schema`，因為這個檔頂部有
+    # `from __future__ import annotations`（PEP 563）會把所有 annotation 變成
+    # 字串，FastAPI 用 get_type_hints() 要從 module globals 解析 'create_schema'
+    # 但它是 register_crud 的閉包變數不在 globals → resolve 失敗 → 退回當 query
+    # 參數 → 報 [{"type":"missing","loc":["query","req"]}]。
+    # 改用 default value (= Body(...)) + manual __annotations__ 寫入實際 class，
+    # 跳過字串 lookup。
+    async def _create(req=Body(...), session: AsyncSession = Depends(admin_session)):
         item = await create_fn(session, req.model_dump())
         if on_change:
             await on_change()
         return item
+    _create.__annotations__["req"] = create_schema
 
-    async def _update(item_id: int, req: update_schema, session: AsyncSession = Depends(admin_session)):  # type: ignore[valid-type]
+    async def _update(item_id: int, req=Body(...), session: AsyncSession = Depends(admin_session)):
         item = await update_fn(session, item_id, req.model_dump(exclude_unset=True))
         if not item:
             raise HTTPException(status_code=404, detail=f"{name} not found")
         if on_change:
             await on_change()
         return item
+    _update.__annotations__["req"] = update_schema
 
     async def _delete(item_id: int, session: AsyncSession = Depends(admin_session)):
         if not await delete_fn(session, item_id):
