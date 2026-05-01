@@ -6,6 +6,7 @@
 import type { APIRoute, GetStaticPaths } from "astro";
 import { fetchMeta, fetchWorkBySlug, getWorkSlugPaths } from "../../lib/crm-client";
 import { resolveSiteUrl, textResponse } from "../../lib/seo";
+import { normalizeCredits } from "../../lib/credits";
 
 export const getStaticPaths: GetStaticPaths = getWorkSlugPaths;
 
@@ -31,17 +32,30 @@ export const GET: APIRoute = async ({ params, site }) => {
     if (work.description) {
         lines.push(work.description.trim(), "");
     }
-    const credits = Object.entries(work.credits || {});
-    if (credits.length) {
+    const blocks = normalizeCredits(work.credits);
+    const hasCredits = blocks.some(b => (b.entries || []).some(e => e.name));
+    if (hasCredits) {
         lines.push("## Credits");
-        for (const [role, name] of credits) {
-            const value = Array.isArray(name) ? name.join(" · ") : name;
-            lines.push(`- **${role}**: ${value}`);
+        for (const block of blocks) {
+            const valid = (block.entries || []).filter(e => e.name);
+            if (!valid.length) continue;
+            const heading = block.name_zh || "其他";
+            const en = block.name_en ? ` (${block.name_en})` : "";
+            const items = valid.map(e => e.duty ? `${e.duty} ${e.name}` : e.name).join(" · ");
+            lines.push(`- **${heading}${en}**: ${items}`);
         }
         lines.push("");
     }
     if (work.youtube_id) {
         lines.push(`## 影片`, `https://www.youtube.com/watch?v=${work.youtube_id}`, "");
+    }
+    // 曾用 URL — 給 LLM 知道此作品的歷史路徑變遷（SEO 301 來源）
+    if (work.old_urls && work.old_urls.length) {
+        lines.push("## 曾用 URL");
+        for (const u of work.old_urls) {
+            lines.push(`- ${siteUrl}${u}`);
+        }
+        lines.push("");
     }
     lines.push(
         "---",

@@ -188,13 +188,14 @@ export const pageSchemas = {
     },
 
     /** WebPage — 任何頁面的最低基線 schema */
-    webPage(opts: { title: string; description: string; url: string }): SchemaObject {
+    webPage(opts: { title: string; description: string; url: string; sameAs?: string[] }): SchemaObject {
         return {
             "@context": SCHEMA_CTX,
             "@type": "WebPage",
             name: opts.title,
             description: opts.description,
             url: opts.url,
+            sameAs: opts.sameAs?.length ? opts.sameAs : undefined,
         };
     },
 
@@ -300,6 +301,8 @@ export const pageSchemas = {
         const embedUrl = work.youtube_id
             ? `https://www.youtube-nocookie.com/embed/${work.youtube_id}`
             : null;
+        // sameAs：列出舊 URL（slug 變動歷史），讓 Google 認知 PageRank 合併
+        const sameAs = (work.old_urls || []).map(u => `${siteUrl}${u}`);
 
         return {
             "@context": SCHEMA_CTX,
@@ -311,6 +314,7 @@ export const pageSchemas = {
             embedUrl: embedUrl || undefined,
             contentUrl: work.youtube_id ? `https://www.youtube.com/watch?v=${work.youtube_id}` : undefined,
             url: `${siteUrl}/works/${work.slug}`,
+            sameAs: sameAs.length ? sameAs : undefined,
         };
     },
 

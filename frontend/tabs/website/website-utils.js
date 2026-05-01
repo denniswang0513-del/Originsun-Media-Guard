@@ -164,6 +164,21 @@ export function inquiryStatusLabel(status, short = false) {
 }
 
 
+// ── 空狀態統一渲染（10+ 處原本散落 inline padding/color 字串） ──
+
+/** 表格 tbody 空狀態（colspan 配對欄位數）。 */
+export function emptyRow(colspan, msg) {
+    return `<tr><td colspan="${colspan}" style="padding:30px;text-align:center;color:#888;">${esc(msg)}</td></tr>`;
+}
+
+/** Card / div 空狀態（給 grid / list / chip 用）。 */
+export function emptyHint(msg, opts = {}) {
+    const { padding = 20, fontSize = 12, gridFull = false } = opts;
+    const gridStyle = gridFull ? 'grid-column:1/-1;' : '';
+    return `<div style="${gridStyle}color:#888;font-size:${fontSize}px;padding:${padding}px;text-align:center;">${esc(msg)}</div>`;
+}
+
+
 // ── 載入失敗統一渲染（8 個 subviews 原本各自寫一次 try/catch innerHTML） ──
 
 export function renderLoadError(container, title, err, hint = '') {

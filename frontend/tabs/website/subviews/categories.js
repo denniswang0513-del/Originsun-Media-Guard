@@ -1,7 +1,7 @@
 /**
  * categories.js — 作品分類 CRUD
  */
-import { websiteFetch, esc, toastOk, toastErr, renderLoadError, readRowPatch } from '../website-utils.js';
+import { websiteFetch, esc, toastOk, toastErr, renderLoadError, readRowPatch, emptyRow } from '../website-utils.js';
 
 let _cats = [];
 
@@ -54,7 +54,7 @@ export default async function render(container, ctx = {}) {
 function _renderTable() {
     const t = document.getElementById('cat-table');
     if (!_cats.length) {
-        t.innerHTML = '<tr><td colspan="9" style="padding:30px;text-align:center;color:#888;">尚無分類</td></tr>';
+        t.innerHTML = emptyRow(9, '尚無分類');
         return;
     }
     t.innerHTML = `

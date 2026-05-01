@@ -110,7 +110,7 @@ from core.schemas import (ClientPayload, CrmProjectPayload, CrmProjectPatchPaylo
                          ProjectExpensePayload,
                          ProjectExpensePatchPayload,
                          QuotationPayload, QuotationItemPayload, QuotationTemplatePayload,
-                         StaffPayload, ProjectStaffPayload, InvoicePayload, PaymentRequestPayload,
+                         StaffPayload, StaffQuickAddPayload, ProjectStaffPayload, InvoicePayload, PaymentRequestPayload,
                          CashEntryPayload, CostLinePayload, CostLineUpdatePayload,
                          CostGroupCreate, CostGroupUpdate, CostGroupDuplicate,
                          ResumePayload, PortfolioPayload, ShowcasePayload)
@@ -1024,6 +1024,11 @@ async def delete_template(template_id: str, request: Request):
 
 # ── Staff Helpers ───────────────────────────────────────────
 
+# crm_staff.created_via 列舉值（避免 magic string 散落）
+STAFF_CREATED_VIA_ADMIN = "admin"
+STAFF_CREATED_VIA_SHOWCASE_EDIT = "showcase_edit"
+
+
 def _to_staff_dict(s) -> dict:
     return {
         "id": s.id, "name": s.name, "role": s.role or "",
@@ -1042,8 +1047,20 @@ def _to_staff_dict(s) -> dict:
         "resume_visible": bool(s.resume_visible) if s.resume_visible is not None else False,
         "edit_token": s.edit_token or "",
         "resume_editable": bool(s.resume_editable) if s.resume_editable is not None else True,
+        "created_via": s.created_via or STAFF_CREATED_VIA_ADMIN,
+        "created_for_project_id": s.created_for_project_id,
         "created_at": s.created_at.isoformat() if s.created_at else None,
         "updated_at": s.updated_at.isoformat() if s.updated_at else None,
+    }
+
+
+def _to_staff_public_dict(s) -> dict:
+    """精簡版（無敏感欄位），給 token endpoint / autocomplete chip 用。"""
+    return {
+        "id": s.id, "name": s.name, "role": s.role or "",
+        "photo_url": s.photo_url or "",
+        "resume_visible": bool(s.resume_visible),
+        "daily_rate": s.daily_rate,
     }
 
 
@@ -1110,6 +1127,9 @@ async def update_staff(staff_id: str, req: StaffPayload, request: Request):
 
 @router.delete("/staff/{staff_id}")
 async def delete_staff(staff_id: str, request: Request):
+    """刪除人員。同時清除 showcase.credits.entries 內所有此 staff_id 引用
+    （保留 name snapshot，移除 staff_id + resume_url 避免 dangling reference）。
+    """
     _check_auth(request)
     _require_db()
     factory = await _get_factory()
@@ -1117,6 +1137,13 @@ async def delete_staff(staff_id: str, request: Request):
         s = await session.get(CrmStaff, staff_id)
         if not s:
             raise HTTPException(status_code=404, detail="找不到此人員")
+        # Cascade：清除 showcase 引用，避免對外作品頁簡歷連結 404
+        try:
+            from services.website.credit_service import cleanup_staff_id_from_credits
+            await cleanup_staff_id_from_credits(session, staff_id)
+        except ImportError:
+            # services/website/ 在純 agent 環境可能不存在 — 不阻擋刪除
+            pass
         await session.delete(s)
         await session.commit()
     return {"status": "ok"}
@@ -1124,10 +1151,13 @@ async def delete_staff(staff_id: str, request: Request):
 
 @router.get("/staff/{staff_id}/projects")
 async def get_staff_projects(staff_id: str):
-    """查詢人員的專案執行紀錄。"""
+    """查詢人員的專案紀錄（派工 + 演職員 credit 出現位置）。"""
+    from collections import defaultdict
     _require_db()
     factory = await _get_factory()
     async with factory() as session:
+        # 派工（既有）— crm_project_staff 沒對 (staff_id, project_id) 加 unique，
+        # 同 staff 在同 project 多階段（前期/拍攝/後期）會有多筆，依派工 row id 留全。
         rows = (await session.execute(
             select(CrmProjectStaff, CrmProject.name.label("project_name"),
                    Client.short_name.label("client_name"))
@@ -1135,13 +1165,53 @@ async def get_staff_projects(staff_id: str):
             .outerjoin(Client, Client.id == CrmProject.client_id)
             .where(CrmProjectStaff.staff_id == staff_id)
         )).all()
-    return {"projects": [{
-        "id": r[0].id, "project_id": r[0].project_id,
-        "project_name": r[1] or "", "client_name": r[2] or "",
-        "role_in_project": r[0].role_in_project or "",
-        "days": r[0].days, "cost": r[0].cost,
-        "notes": r[0].notes or "",
-    } for r in rows]}
+        assigned_pids = {r[0].project_id for r in rows}
+
+        # showcase.credits 反查 — 委派 service 層（避免 lazy import 失敗時整個 endpoint 壞）
+        try:
+            from services.website.credit_service import find_projects_by_staff
+            credit_rows = await find_projects_by_staff(session, staff_id)
+        except ImportError:
+            credit_rows = []
+
+        credits_by_pid: dict[str, list[dict]] = defaultdict(list)
+        for cr in credit_rows:
+            credits_by_pid[cr["project_id"]].append({
+                "role_zh": cr["role_zh"],
+                "duty": cr["duty"],
+            })
+
+        # 派工每筆獨立保留（同專案多階段不合併）；credit_in_project 每筆派工都帶
+        # 同樣的 project credit 列表（前端按 project_id 分組顯示時用）。
+        projects = [{
+            "id": r[0].id, "project_id": r[0].project_id,
+            "project_name": r[1] or "", "client_name": r[2] or "",
+            "role_in_project": r[0].role_in_project or "",
+            "days": r[0].days, "cost": r[0].cost,
+            "notes": r[0].notes or "",
+            "credits_in_project": credits_by_pid.get(r[0].project_id, []),
+        } for r in rows]
+
+        # 沒派工但出現在 credit 的作品
+        credit_only_pids = set(credits_by_pid.keys()) - assigned_pids
+        credit_only = []
+        if credit_only_pids:
+            co_rows = (await session.execute(
+                select(CrmProject.id, CrmProject.name, Client.short_name)
+                .outerjoin(Client, Client.id == CrmProject.client_id)
+                .where(CrmProject.id.in_(credit_only_pids))
+            )).all()
+            co_by_id = {r[0]: (r[1] or "", r[2] or "") for r in co_rows}
+            for pid in credit_only_pids:
+                name, client = co_by_id.get(pid, ("", ""))
+                credit_only.append({
+                    "project_id": pid,
+                    "project_name": name,
+                    "client_name": client,
+                    "credits_in_project": credits_by_pid[pid],
+                })
+
+    return {"projects": projects, "credit_only_projects": credit_only}
 
 
 # ── Staff CSV Import ────────────────────────────────────────
@@ -4124,20 +4194,36 @@ SHOWCASE_EDIT_EXPIRES_DAYS = 36500  # ~100 年，實務上永久
 async def _sync_showcase_to_public(session, sc) -> None:
     """把 Showcase 可鏡像欄位同步到 crm_projects.public_*（呼叫者統一 commit）。
 
-    同步範圍（5 欄）：
+    同步範圍（7 欄 + slug detection）：
       sc.description  → public_description
-      sc.slug         → public_slug
+      sc.slug         → public_slug（含 SEO 301：舊 slug 自動 append 到 public_old_slugs）
       sc.video_url    → public_youtube_id（parse YT ID）
-      sc.published    → public + public_published_at
+      sc.credits      → public_credits（block-structured snapshot）
+      sc.cover_url    → public_cover_url（OG image fallback 用）
+      sc.published    → public + public_published_at（first publish auto-assign number）
 
     不同步 title/client/year — 這些讓 Astro read-time 從 project.name / client
     動態 join，避免雙寫需要刷新的複雜度。
+
+    credits 是 block 結構（list of dict）— 直接整份覆寫到 public_credits 作快照，
+    這樣將來職位庫改名（rename role_zh）時歷史作品不會被動跟著改（snapshot 隔離）。
     """
     project = await session.get(CrmProject, sc.id)
     if not project:
         return
+    # SEO 301：先偵測 slug 變動再覆寫 — 跟 update_project_public 同邏輯
+    new_slug = sc.slug or None
+    try:
+        from services.website.project_service import append_old_slug_if_changed
+        append_old_slug_if_changed(project, new_slug)
+    except ImportError:
+        pass
     project.public_description = sc.description or None
-    project.public_slug = sc.slug or None
+    project.public_slug = new_slug
+    # Block-structured credits → public_credits（snapshot；rename role 不影響歷史）
+    project.public_credits = sc.credits or []
+    # Cover image → public_cover_url（OG image fallback 用）
+    project.public_cover_url = sc.cover_url or None
     # Lazy import — services/website/ is NAS-only and not in OTA AGENT_DIRS,
     # so a top-level import would crash agent boot and 404 every CRM endpoint.
     # Showcase publish only fires on master where the file is present.
@@ -4196,6 +4282,33 @@ async def get_project_showcase(project_id: str, request: Request):
         return _to_showcase_dict(sc)
 
 
+# Showcase 可從 admin (PUT /projects/{id}/showcase) 跟 token (PUT /public/showcase-edit/{token})
+# 兩條路徑改 — 共用此 helper 統一欄位 setattr + slug 正規化（None 取代空字串）。
+_SHOWCASE_UPDATABLE_FIELDS = (
+    "description", "video_url", "credits", "process_mode", "process_items", "slug",
+)
+
+
+def _apply_showcase_fields(sc, payload: dict) -> None:
+    """Set sc 可更新欄位 — caller 統一 commit + _sync_showcase_to_public。
+
+    payload 可以是 Pydantic model_dump (admin path) 或 raw body dict (token path)。
+    缺欄位的不動（partial update 語意）。
+
+    slug 特殊：空字串 → None。原因是 sc.slug 鏡像到 crm_projects.public_slug
+    （有 unique index），空字串視為「使用 public_number 作 URL」，必須存 NULL
+    避免兩個 project 都用空字串撞 unique。其他欄位（description / video_url）
+    空字串是合法值，不轉 None。
+    """
+    for field in _SHOWCASE_UPDATABLE_FIELDS:
+        if field in payload:
+            value = payload[field]
+            if field == "slug":
+                value = value or None
+            setattr(sc, field, value)
+    sc.updated_at = _now()
+
+
 @router.put("/projects/{project_id}/showcase")
 async def update_project_showcase(project_id: str, req: ShowcasePayload, request: Request):
     """更新專案 Showcase 欄位。"""
@@ -4207,12 +4320,7 @@ async def update_project_showcase(project_id: str, req: ShowcasePayload, request
         if not sc:
             sc = CrmProjectShowcase(id=project_id)
             session.add(sc)
-        sc.description = req.description
-        sc.video_url = req.video_url
-        sc.credits = req.credits
-        sc.process_mode = req.process_mode
-        sc.slug = req.slug or None
-        sc.updated_at = _now()
+        _apply_showcase_fields(sc, req.model_dump())
         await _sync_showcase_to_public(session, sc)
         await session.commit()
         await session.refresh(sc)
@@ -4484,7 +4592,64 @@ async def get_showcase_edit_data(token: str):
             .where(WebsiteProjectCategory.project_id == sc.id)
         )).scalars().all()
         data["selected_category_ids"] = list(sel_rows)
+
+        # 演職員職位庫 + 模板候選清單（給 showcase-edit 編輯器用）。
+        # 委派 service 層維持單一 hydrate 真相源；list_roles 多回的 sort_order /
+        # visible / usage_count 前端忽略無妨。
+        from services.website import credit_service
+        data["credit_roles_available"] = await credit_service.list_roles(
+            session, visible_only=True
+        )
+        data["credit_templates_available"] = await credit_service.list_templates(session)
     return data
+
+
+@router.get("/public/showcase-edit/{token}/staff_search")
+async def search_staff_via_token(token: str, q: str = Query("")):
+    """透過 token 搜尋 crm_staff（給 showcase-edit autocomplete 用）。
+
+    回傳前 10 筆，name 或 role 包含 q（case-insensitive）。
+    q 為空時回傳前 10 筆 name 字典序（給 input focus 但還沒打字時的初始下拉）。
+    """
+    _require_db()
+    factory = await _get_factory()
+    async with factory() as session:
+        await _verify_showcase_edit_token(session, token, require_editable=False)
+        query = select(CrmStaff).order_by(CrmStaff.name)
+        if q.strip():
+            ql = f"%{q.strip()}%"
+            query = query.where(or_(CrmStaff.name.ilike(ql), CrmStaff.role.ilike(ql)))
+        query = query.limit(10)
+        rows = (await session.execute(query)).scalars().all()
+    return {"items": [_to_staff_public_dict(s) for s in rows]}
+
+
+@router.post("/public/showcase-edit/{token}/staff_quick_add")
+async def quick_add_staff_via_token(token: str, req: StaffQuickAddPayload):
+    """透過 token 快速建 minimal staff（給 showcase-edit「找不到→建立」用）。
+
+    最小欄位：name + role。狀態預設「專案」、resume_visible 預設 false。
+    自動標記 created_via='showcase_edit' + created_for_project_id=當前作品 id。
+    """
+    _require_db()
+    factory = await _get_factory()
+    now = _now()
+    async with factory() as session:
+        sc = await _verify_showcase_edit_token(session, token, require_editable=True)
+        s = CrmStaff(
+            id=uuid.uuid4().hex,
+            name=req.name.strip(),
+            role=(req.role or "").strip(),
+            status="專案",
+            resume_visible=False,
+            created_via=STAFF_CREATED_VIA_SHOWCASE_EDIT,
+            created_for_project_id=sc.id,
+            created_at=now, updated_at=now,
+        )
+        session.add(s)
+        await session.commit()
+        await session.refresh(s)
+    return _to_staff_public_dict(s)
 
 
 @router.put("/public/showcase-edit/{token}")
@@ -4496,18 +4661,7 @@ async def update_showcase_edit_data(token: str, request: Request):
     body = await request.json()
     async with factory() as session:
         sc = await _verify_showcase_edit_token(session, token, require_editable=True)
-        if "description" in body:
-            sc.description = body["description"]
-        if "credits" in body:
-            sc.credits = body["credits"]
-        if "process_mode" in body:
-            sc.process_mode = body["process_mode"]
-        if "process_items" in body:
-            sc.process_items = body["process_items"]
-        if "video_url" in body:
-            sc.video_url = body["video_url"]
-        if "slug" in body:
-            sc.slug = body["slug"] or None
+        _apply_showcase_fields(sc, body)
         # 對外作品分類 / 標籤關聯（共用 website_categories 表，後端不分 kind）：
         # 全量替換 — delete all then re-add，避免 diff 邏輯 race。
         if "category_ids" in body:
@@ -4518,7 +4672,6 @@ async def update_showcase_edit_data(token: str, request: Request):
             )
             for cid in ids:
                 session.add(WebsiteProjectCategory(project_id=sc.id, category_id=cid))
-        sc.updated_at = _now()
         await _sync_showcase_to_public(session, sc)
         await session.commit()
     # 觸發對外網站 rebuild（debounce 60s）— 不論作品 published 與否都標 dirty，

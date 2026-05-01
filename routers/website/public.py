@@ -23,8 +23,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from ._common import client_ip, public_session, rate_limit
 from core.schemas_website import ContactInquiryCreate
 from services.website import (
-    category_service, inquiry_service, notify_service, post_service,
-    project_service, seo_service, service_service, settings_service,
+    category_service, credit_service, inquiry_service, notify_service,
+    post_service, project_service, seo_service, service_service, settings_service,
 )
 
 logger = logging.getLogger(__name__)
@@ -136,6 +136,13 @@ async def list_public_quick_facts(request: Request, session: AsyncSession = Depe
     return {"items": await seo_service.list_quick_facts(session, visible_only=True)}
 
 
+@router.get("/credit_roles")
+async def list_public_credit_roles(request: Request, session: AsyncSession = Depends(public_session)):
+    """對外可見的職位庫（visible=true）— Astro / showcase-edit.html 都會用。"""
+    rate_limit(request, max_per_minute=60)
+    return {"items": await credit_service.list_roles(session, visible_only=True)}
+
+
 # ── Posts（DB-as-truth，取代舊 posts.json） ──
 
 @router.get("/posts")
@@ -172,13 +179,21 @@ async def list_public_post_categories(
 async def list_public_redirects(
     request: Request, session: AsyncSession = Depends(public_session),
 ):
-    """聚合所有 visible post.old_urls → 新 URL 對應表。
+    """聚合所有 visible post + public works 的 old URL → 新 URL 對應表。
 
     Astro build 期 fetch 一次塞進 astro.config.mjs `redirects`；
     publish_update.sync_redirects_to_nas() 也撈這個生成 nginx config。
+
+    /news/* 跟 /works/* 命名空間不重疊，merge 後不會撞 key。
     """
     rate_limit(request, max_per_minute=60)
-    items = await post_service.list_redirects(session)
+    posts = await post_service.list_redirects(session)
+    works = await project_service.list_redirects(session)
+    # 衝突偵測：/news/* vs /works/* 不該重疊，重疊代表資料異常 — log 不阻擋
+    overlap = posts.keys() & works.keys()
+    if overlap:
+        logger.warning("[redirects] posts × works key overlap: %s — works override", sorted(overlap))
+    items = {**posts, **works}
     return {"items": items, "count": len(items)}
 
 

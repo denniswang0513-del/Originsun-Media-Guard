@@ -206,6 +206,12 @@ class CrmProject(Base):
     public_sort_order = Column(Integer, nullable=True, default=0)
     public_published_at = Column(DateTime(timezone=True), nullable=True)
     public_number = Column(Integer, nullable=True)  # 1, 2, 3...slug 沒設時用
+    # SEO 301 來源舊 slug — admin 改 public_slug 時自動 append（軟+硬 301 雙保險）
+    public_old_slugs = Column(JSONB, nullable=False, default=list)
+    # OG image — _sync_showcase_to_public 從 sc.cover_url 鏡像；admin 不直接 PUT
+    public_cover_url = Column(Text, nullable=True)
+    # per-work SEO 索引控制（false = 跟著站級 meta.indexable；true = 強制 noindex）
+    public_noindex = Column(Boolean, nullable=True, default=False)
 
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now())
@@ -309,6 +315,9 @@ class CrmStaff(Base):
     resume_editable = Column(Boolean, nullable=True, default=True)
     # Phase M: 對外官網團隊頁顯示開關
     show_on_website = Column(Boolean, nullable=True, default=False)
+    # showcase-edit quick_add 來源追蹤
+    created_via = Column(String(20), nullable=True, default="admin")
+    created_for_project_id = Column(String(32), nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now())
 

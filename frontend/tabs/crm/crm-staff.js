@@ -95,6 +95,13 @@ function renderDetail(s) {
         ${prop('銀行', s.bank_name ? s.bank_name + ' ' + (s.bank_account || '') : '')}
         ${s.portfolio_url ? `<div class="crm-detail-prop"><div class="crm-prop-label">作品集</div><div class="crm-prop-value"><a href="${_esc(s.portfolio_url)}" target="_blank" style="color:#3b82f6;">${_esc(s.portfolio_url)}</a></div></div>` : ''}
         ${prop('備註', s.notes)}
+        ${(s.created_via === 'showcase_edit' && !s.phone && !s.email) ? `
+            <div class="crm-info-box">
+                📥 由作品編輯時快速建立
+                ${s.created_for_project_id ? '<span class="crm-info-box-sub" style="margin-top:0;">(專案 #' + _esc(s.created_for_project_id) + ')</span>' : ''}
+                <div class="crm-info-box-sub">請補完聯絡方式、勞報資料以利日後派工</div>
+            </div>
+        ` : ''}
     `;
 
     const actions = document.getElementById('staff-bar-actions');
@@ -138,19 +145,61 @@ async function _loadStaffProjects(staffId) {
     try {
         const data = await _fetch('/staff/' + staffId + '/projects');
         const projects = data.projects || [];
-        if (projects.length === 0) {
+        const creditOnly = data.credit_only_projects || [];
+
+        if (!projects.length && !creditOnly.length) {
             container.innerHTML = '<div class="crm-empty" style="padding:12px 0;">尚無專案紀錄</div>';
             return;
         }
-        const totalEarned = projects.reduce((s, p) => s + p.cost, 0);
-        container.innerHTML = projects.map(p => `
-            <div class="quote-item-row" style="padding:8px 0;">
-                <span class="quote-item-desc">${_esc(p.project_name)} <span class="crm-muted">${_esc(p.client_name)}</span></span>
-                <span class="quote-item-qty">${_esc(p.role_in_project)}</span>
-                <span class="quote-item-price">${p.days}天</span>
-                <span class="quote-item-amount">$${_fmtNum(p.cost)}</span>
+
+        const totalEarned = projects.reduce((s, p) => s + (p.cost || 0), 0);
+
+        const orphanAssigned = projects.filter(p => !(p.credits_in_project || []).length).length;
+
+        const _statChip = (label, value, variant = '') =>
+            `<div class="crm-stat-chip${variant ? ' ' + variant : ''}">
+                <div class="crm-stat-chip-label">${label}</div>
+                <div class="crm-stat-chip-value">${value}</div>
+            </div>`;
+
+        const chipsHtml = `
+            <div class="crm-stat-chips">
+                ${_statChip('派工', `${projects.length} 件`)}
+                ${_statChip('累計費用', `$${_fmtNum(totalEarned)}`)}
+                ${orphanAssigned > 0 ? _statChip('⚠ 派工未掛 credit', `${orphanAssigned} 件`, 'warn') : ''}
+                ${creditOnly.length > 0 ? _statChip('外部演員（無派工）', `${creditOnly.length} 件`, 'info') : ''}
             </div>
-        `).join('') + `<div style="text-align:right;font-weight:700;padding:8px 0;color:#e0e0e0;">累計費用: $${_fmtNum(totalEarned)}</div>`;
+        `;
+
+        const _renderProjectRow = (p, opts = {}) => {
+            const { isCreditOnly = false } = opts;
+            const credits = (p.credits_in_project || [])
+                .map(c => `${_esc(c.role_zh)}${c.duty ? ' / ' + _esc(c.duty) : ''}`)
+                .join('、');
+            return `
+                <div class="crm-project-row">
+                    <div class="crm-project-row-title">
+                        ${_esc(p.project_name)}
+                        <span class="crm-muted" style="font-weight:400;margin-left:8px;font-size:12px;">
+                            ${_esc(p.client_name) || '（無客戶）'}
+                        </span>
+                    </div>
+                    ${isCreditOnly
+                        ? `<div class="crm-project-row-meta assigned">📋 派工：（無）</div>`
+                        : `<div class="crm-project-row-meta assigned">📋 派工：${_esc(p.role_in_project) || '—'} · ${p.days || 0}天 · $${_fmtNum(p.cost || 0)}</div>`}
+                    ${credits
+                        ? `<div class="crm-project-row-meta credit">🎬 演職員：${credits}</div>`
+                        : (!isCreditOnly
+                              ? `<div class="crm-project-row-meta warn">⚠ 演職員：未掛 credit</div>`
+                              : '')}
+                </div>
+            `;
+        };
+
+        const projectsHtml = projects.map(p => _renderProjectRow(p)).join('');
+        const creditOnlyHtml = creditOnly.map(p => _renderProjectRow(p, {isCreditOnly: true})).join('');
+
+        container.innerHTML = chipsHtml + projectsHtml + creditOnlyHtml;
     } catch (_) {
         container.innerHTML = '<div class="crm-empty">載入失敗</div>';
     }

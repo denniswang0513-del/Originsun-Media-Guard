@@ -1,4 +1,4 @@
-from pydantic import BaseModel  # type: ignore
+from pydantic import BaseModel, Field  # type: ignore
 from typing import List, Optional, Tuple
 
 
@@ -465,6 +465,11 @@ class StaffPayload(BaseModel):
     portfolio_url: str = ""
     status: str = "在職"
     notes: str = ""
+
+
+class StaffQuickAddPayload(BaseModel):
+    name: str = Field(..., min_length=1, max_length=64)
+    role: Optional[str] = ""
 
 
 class ResumePayload(BaseModel):

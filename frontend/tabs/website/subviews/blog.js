@@ -1909,12 +1909,14 @@ function _viewSEOMigration() {
 
     return `
         <div class="card" style="margin-bottom:12px;">
-            <h3 style="color:#fff;margin:0 0 10px;font-size:14px;">🌐 SEO 移轉中心</h3>
+            <h3 style="color:#fff;margin:0 0 10px;font-size:14px;">🌐 SEO 移轉中心
+                <span style="color:#888;font-size:11px;font-weight:400;">· 文章 + 作品集 統一管理</span>
+            </h3>
             <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:14px;">
                 <div style="background:#1f1f1f;padding:12px;border-radius:6px;border-left:3px solid #4ade80;">
                     <div style="color:#888;font-size:11px;">軟 301（Astro 靜態頁）</div>
                     <div style="color:#fff;font-size:20px;font-weight:600;margin:4px 0;">${cnt}</div>
-                    <div style="color:#888;font-size:11px;">每次 build 自動為每個舊 URL 產一張</div>
+                    <div style="color:#888;font-size:11px;">每次 build 自動為每個舊 URL 產一張（含 /news/* 跟 /works/*）</div>
                 </div>
                 <div style="background:#1f1f1f;padding:12px;border-radius:6px;border-left:3px solid #f59e0b;">
                     <div style="color:#888;font-size:11px;">硬 301（NAS nginx）</div>
@@ -1927,7 +1929,8 @@ function _viewSEOMigration() {
                 <button class="btn btn-ghost" onclick="window._blog.forceSyncRedirects()">🔄 強制重新同步硬 301</button>
             </div>
             <div style="color:#888;font-size:11px;margin-top:10px;line-height:1.6;">
-                ℹ️ 任何文章編輯後 publish 流程末段會自動同步硬 301。手動按鈕用於 admin 看到計數對不上時自救。
+                ℹ️ 文章 / 作品集編輯後 publish 流程末段會自動同步硬 301（兩者共用同一條 nginx config）。
+                手動按鈕用於 admin 看到計數對不上時自救。作品集改 slug 時舊 slug 會自動加進 redirect 清單。
             </div>
         </div>
 
@@ -1952,6 +1955,7 @@ _blog.viewAllRedirects = async () => {
     try {
         const r = await websiteFetch('/api/website/redirects');
         const items = r.items || {};
+        // 文章 + 作品 標題 lookup（顯示 redirect 目標時帶上人類可讀名稱）
         const slugLookup = new Map(_state.posts.map(p => [`/news/${p.slug}`, p.title]));
 
         const modal = document.createElement('div');
@@ -1989,7 +1993,7 @@ _blog.viewAllRedirects = async () => {
 
 _blog.forceSyncRedirects = async () => {
     try {
-        const r = await websiteFetch('/api/website/admin/posts/redirects/sync', { method: 'POST' });
+        const r = await websiteFetch('/api/website/admin/redirects/sync', { method: 'POST' });
         _state.redirectSyncOk = r.ok;
         _state.lastRedirectSyncAt = r.last_sync || new Date().toISOString();
         toastOk(r.ok ? `已同步 ${r.synced} 條硬 301` : (r.error || '同步失敗'));

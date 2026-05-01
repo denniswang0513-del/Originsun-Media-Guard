@@ -14,7 +14,7 @@ import { initRebuildBar, destroyRebuildBar } from './rebuild-bar.js';
 
 const SUBVIEWS = [
     'dashboard', 'home', 'works', 'categories',
-    'services', 'about', 'inquiries', 'blog', 'seo', 'settings',
+    'services', 'credits', 'about', 'inquiries', 'blog', 'seo', 'settings',
 ];
 
 let _activeSubview = 'dashboard';

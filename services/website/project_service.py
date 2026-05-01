@@ -54,7 +54,36 @@ def _slug_or_fallback(p: CrmProject) -> str:
     return "work"
 
 
+def _credits_summary(credits: Optional[list]) -> str:
+    """從 block 結構 credits 抽前 2 個 entry 組「主演 邱雲福 · 導演 王小明」摘要。
+
+    限制 ~30 字（給 list card 一行顯示），超過截斷 + …。空或非 block 結構回 ""。
+    """
+    if not isinstance(credits, list) or not credits:
+        return ""
+    parts: list[str] = []
+    for block in credits:
+        if not isinstance(block, dict):
+            continue
+        for entry in (block.get("entries") or []):
+            if not isinstance(entry, dict) or not entry.get("name"):
+                continue
+            label = block.get("name_zh") or ""
+            if entry.get("duty"):
+                label = f"{label} {entry['duty']}".strip() if label else entry["duty"]
+            parts.append(f"{label} {entry['name']}".strip() if label else entry["name"])
+            if len(parts) >= 2:
+                break
+        if len(parts) >= 2:
+            break
+    summary = " · ".join(parts)
+    return summary if len(summary) <= 30 else summary[:29] + "…"
+
+
 def _to_public_dict(p: CrmProject, categories: Optional[list[str]] = None) -> dict:
+    """投影 public 欄位到 dict — caller 必須保證 p 是 public（list/get caller 都在 SQL 層
+    `WHERE public.is_(True)` 過濾過）。本函式不檢查 public flag，避免 admin path
+    （_to_admin_dict）誤拒未公開作品。新增 caller 時請 SQL 層先過濾。"""
     return {
         "slug": _slug_or_fallback(p),
         "title": p.public_title or p.name,
@@ -64,7 +93,14 @@ def _to_public_dict(p: CrmProject, categories: Optional[list[str]] = None) -> di
         "year": p.public_year,
         "categories": categories or [],
         "thumbnail_url": _youtube_thumbnail(p.public_youtube_id),
+        # OG image fallback chain：work cover > YouTube thumb > BaseLayout meta.seo_og_image
+        "cover_url": p.public_cover_url or _youtube_thumbnail(p.public_youtube_id),
         "featured": bool(p.public_featured),
+        "noindex": bool(p.public_noindex),
+        # SEO 301 來源舊 URL — Astro JSON-LD sameAs / markdown 「曾用 URL」用
+        "old_urls": [f"/works/{s}" for s in (p.public_old_slugs or []) if s],
+        # 列表卡片摘要 — 給 WorkCard 一行顯示用
+        "credits_summary": _credits_summary(p.public_credits),
     }
 
 
@@ -75,8 +111,9 @@ def _to_admin_dict(p: CrmProject, categories: Optional[list[str]] = None) -> dic
         "name": p.name,
         "public": bool(p.public),
         "public_sort_order": p.public_sort_order or 0,
-        "credits": p.public_credits or {},
+        "credits": p.public_credits or [],
         "published_at": p.public_published_at.isoformat() if p.public_published_at else None,
+        "redirect_count": len(p.public_old_slugs or []),
     })
     return d
 
@@ -129,8 +166,18 @@ async def get_public_project_by_slug(session: AsyncSession, slug: str) -> Option
 
     cat_map = await _categories_for_projects(session, [project.id])
     data = _to_public_dict(project, cat_map.get(project.id, []))
-    data["credits"] = project.public_credits or {}
+    data["credits"] = project.public_credits or []
     data["published_at"] = project.public_published_at.isoformat() if project.public_published_at else None
+
+    # Detail-only：撈 showcase 的 gallery / process_items（list endpoint 不帶 — 太大）
+    try:
+        from db.models import CrmProjectShowcase
+        sc = await session.get(CrmProjectShowcase, project.id)
+        if sc:
+            data["gallery"] = sc.gallery or []
+            data["process_items"] = sc.process_items or []
+    except ImportError:
+        pass
     return data
 
 
@@ -175,9 +222,33 @@ async def list_admin_projects(
 
 _UPDATABLE_FIELDS = {
     "public", "public_slug", "public_title", "public_client", "public_youtube_id",
-    "public_description", "public_credits", "public_year", "public_featured",
-    "public_sort_order", "public_published_at",
+    "public_description", "public_year", "public_featured",
+    "public_sort_order", "public_published_at", "public_old_slugs", "public_noindex",
+    # 不含 public_credits / public_cover_url — credits / cover 只能從 showcase-edit
+    # 編輯走 _sync_showcase_to_public 反向 mirror。若這裡也允許 admin Tab 直寫，
+    # 下次 PM save showcase 會整個覆蓋。
 }
+
+
+def append_old_slug_if_changed(project: CrmProject, new_slug):
+    """偵測 public_slug 變動 → 把舊 slug 加進 public_old_slugs（去重）。
+
+    呼叫前 setattr 還沒跑，project.public_slug 仍是舊值。回傳 True 表示有 append。
+    純數字 slug（=public_number）不加，避免污染 redirect map（number 路由仍 work）。
+    """
+    old = (project.public_slug or "").strip()
+    new = (new_slug or "").strip()
+    if not old or old == new or old.isdigit():
+        return False
+    existing = list(project.public_old_slugs or [])
+    if old in existing:
+        return False
+    if new and new in existing:
+        # 新 slug 曾是舊 slug — 從 old_slugs 移除（避免 redirect 自循環）
+        existing = [s for s in existing if s != new]
+    existing.append(old)
+    project.public_old_slugs = existing
+    return True
 
 
 async def update_project_public(
@@ -194,6 +265,10 @@ async def update_project_public(
     project = await session.get(CrmProject, project_id)
     if not project:
         return False
+
+    # SEO 301：偵測 slug 變動 — 先讀舊值再 setattr
+    if "public_slug" in updates:
+        append_old_slug_if_changed(project, updates["public_slug"])
 
     for k, v in updates.items():
         if k in _UPDATABLE_FIELDS:
@@ -253,3 +328,33 @@ async def toggle_featured(session: AsyncSession, project_id: str, featured: bool
     )
     await session.commit()
     return result.rowcount > 0
+
+
+# ── Redirects（聚合所有 public works 的 public_old_slugs） ──
+
+async def list_redirects(session: AsyncSession) -> dict[str, str]:
+    """聚合所有 public works 的 old_slugs → 新 URL。
+
+    衝突（同 old_url 對應多個 work）：依 public_published_at 排序，最新的勝
+    （跟 post_service.list_redirects 同邏輯）。Unpublish 的作品不算（public=False
+    時 redirects 不該繼續生效）。
+    """
+    stmt = (
+        select(CrmProject)
+        .where(and_(CrmProject.public.is_(True),
+                    func.jsonb_array_length(CrmProject.public_old_slugs) > 0))
+        .order_by(CrmProject.public_published_at.is_(None).asc(),
+                  CrmProject.public_published_at.asc())
+    )
+    out: dict[str, str] = {}
+    for project in (await session.execute(stmt)).scalars():
+        new_url = f"/works/{_slug_or_fallback(project)}"
+        for old_slug in (project.public_old_slugs or []):
+            if not old_slug or not isinstance(old_slug, str):
+                continue
+            old_url = f"/works/{old_slug}"
+            # 跳過自循環（理論不該發生，append_old_slug_if_changed 已防護）
+            if old_url == new_url:
+                continue
+            out[old_url] = new_url   # 後寫入勝
+    return out

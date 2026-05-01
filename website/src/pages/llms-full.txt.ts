@@ -10,11 +10,23 @@ import {
 } from "../lib/crm-client";
 import { fetchPosts } from "../lib/posts";
 import { companyInfoMd, resolveSiteUrl, textResponse } from "../lib/seo";
+import { WEBSITE_API_BASE } from "../lib/config";
+
+async function _fetchRedirects(): Promise<Record<string, string>> {
+    try {
+        const r = await fetch(`${WEBSITE_API_BASE}/api/website/redirects`, {
+            signal: AbortSignal.timeout(10_000),
+        });
+        if (!r.ok) return {};
+        const d = await r.json();
+        return (d && d.items) || {};
+    } catch { return {}; }
+}
 
 export const GET: APIRoute = async ({ site }) => {
-    const [meta, services, works, faqs, quickFacts, posts] = await Promise.all([
+    const [meta, services, works, faqs, quickFacts, posts, redirects] = await Promise.all([
         fetchMeta(), fetchServices(), fetchFeatured(30),
-        fetchFaqs(), fetchQuickFacts(), fetchPosts(),
+        fetchFaqs(), fetchQuickFacts(), fetchPosts(), _fetchRedirects(),
     ]);
     const siteUrl = resolveSiteUrl(site);
     const lines: string[] = [
@@ -73,6 +85,17 @@ export const GET: APIRoute = async ({ site }) => {
             if (p.excerpt) {
                 lines.push(`  ${p.excerpt.replace(/\s+/g, " ").slice(0, 200)}${p.excerpt.length > 200 ? "…" : ""}`);
             }
+        }
+        lines.push("");
+    }
+
+    // URL 變更歷史 — 給 LLM 認知同一資源的多個 URL（PageRank 合併信號）
+    const redirectEntries = Object.entries(redirects);
+    if (redirectEntries.length) {
+        lines.push("## URL 變更紀錄（301 redirects）");
+        lines.push("以下舊 URL 已 301 轉址至新位置，引用時請優先使用新 URL：");
+        for (const [oldPath, newPath] of redirectEntries) {
+            lines.push(`- ${siteUrl}${oldPath} → ${siteUrl}${newPath}`);
         }
         lines.push("");
     }

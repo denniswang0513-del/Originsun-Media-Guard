@@ -1472,3 +1472,32 @@
 .cg-alloc-ok { background: #1e3a5f; color: #93c5fd; }
 .cg-alloc-danger { background: #7f1d1d; color: #fca5a5; }
 
+/* Staff detail panel — 專案紀錄 tab 統計 chip + project row + quick_add hint */
+.crm-stat-chips { display: flex; gap: 12px; flex-wrap: wrap; margin-bottom: 12px; }
+.crm-stat-chip {
+    background: #1f2937; border-radius: 6px; padding: 8px 14px;
+}
+.crm-stat-chip-label { color: #9ca3af; font-size: 11px; }
+.crm-stat-chip-value { color: #e0e0e0; font-size: 18px; font-weight: 700; }
+.crm-stat-chip.warn { background: #7c2d12; }
+.crm-stat-chip.warn .crm-stat-chip-label { color: #fbbf24; }
+.crm-stat-chip.warn .crm-stat-chip-value { color: #fef3c7; }
+.crm-stat-chip.info { background: #1e3a8a; }
+.crm-stat-chip.info .crm-stat-chip-label { color: #93c5fd; }
+.crm-stat-chip.info .crm-stat-chip-value { color: #dbeafe; }
+
+.crm-project-row { padding: 10px 0; border-bottom: 1px solid #2a2a2a; }
+.crm-project-row-title { color: #e0e0e0; font-weight: 500; margin-bottom: 4px; }
+.crm-project-row-meta { font-size: 12px; padding: 2px 0; }
+.crm-project-row-meta.assigned { color: #9ca3af; }
+.crm-project-row-meta.credit { color: #86efac; }
+.crm-project-row-meta.warn { color: #fbbf24; }
+
+.crm-info-box {
+    margin-top: 14px; padding: 10px 12px;
+    background: #1e3a5f; border-left: 3px solid #3b82f6; border-radius: 4px;
+    color: #dbeafe; font-size: 12px; line-height: 1.5;
+}
+.crm-info-box-sub { color: #93c5fd; margin-top: 4px; font-size: 11px; }
+
+

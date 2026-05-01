@@ -72,6 +72,16 @@ textarea{min-height:80px}
 .credit-name{flex:1}
 .credit-link{color:var(--text3);font-size:12px;text-decoration:none}
 .credit-link:hover{color:var(--accent)}
+.credit-link-dot{transition:transform .15s,box-shadow .15s}
+.credit-link-dot:hover{transform:translateY(-50%) scale(1.4);box-shadow:0 0 6px var(--success)}
+.credit-name-dropdown{font-family:var(--font-body)}
+.credit-name-dropdown::-webkit-scrollbar{width:6px}
+.credit-name-dropdown::-webkit-scrollbar-thumb{background:var(--border2);border-radius:3px}
+
+.modal-overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,0.6);z-index:200;align-items:center;justify-content:center}
+.modal-overlay.show{display:flex}
+.modal-overlay input[type="text"],.modal-overlay select{background:var(--bg3);border:1px solid var(--border);border-radius:4px;padding:8px 12px;color:var(--text);font-family:var(--font-body);font-size:14px}
+.modal-overlay input[type="text"]:focus,.modal-overlay select:focus{outline:none;border-color:var(--accent)}
 
 .process-item{display:flex;gap:12px;padding:12px 0;border-bottom:1px solid var(--border)}
 .process-item img{width:120px;height:68px;object-fit:cover;border-radius:4px;flex-shrink:0}
@@ -89,6 +99,31 @@ textarea{min-height:80px}
 <div id="loading"><div class="loading-bar"></div><div class="loading-text">Loading</div></div>
 <div id="error"><h2>404</h2><p>此連結無效或已失效</p></div>
 <div class="page" id="page"></div>
+
+<div id="staff-quick-add-modal" class="modal-overlay">
+    <div style="background:var(--bg2);padding:24px;border-radius:6px;width:420px;max-width:calc(100vw - 32px);border:1px solid var(--border);">
+        <h3 style="margin:0 0 16px;color:var(--text);font-family:var(--font-display);font-weight:500;">建立新人員</h3>
+
+        <label style="display:block;margin-bottom:6px;color:var(--text2);font-size:12px;">姓名 *</label>
+        <input id="qa-name" type="text" style="width:100%;margin-bottom:14px;">
+
+        <label style="display:block;margin-bottom:6px;color:var(--text2);font-size:12px;">職能（選填）</label>
+        <select id="qa-role" style="width:100%;margin-bottom:14px;">
+            <option value="">— 不指定 —</option>
+        </select>
+
+        <p style="color:var(--text3);font-size:11px;line-height:1.5;margin:8px 0 16px;">
+            ⚠ 此人員會新增到「人力資源」資料庫，狀態預設「專案」、對外簡歷預設關閉。
+            可稍後在人力資源 Tab 補完聯絡方式、勞報資料。
+        </p>
+
+        <div style="display:flex;gap:8px;justify-content:flex-end;">
+            <button id="qa-cancel" class="btn">取消</button>
+            <button id="qa-submit" class="btn btn-primary">建立並選用</button>
+        </div>
+    </div>
+</div>
+
 <div class="toast" id="toast"></div>
 
 <script>
@@ -99,6 +134,29 @@ let EDITABLE = false;
 
 function _esc(s) { const d = document.createElement('div'); d.textContent = s || ''; return d.innerHTML; }
 function _toast(msg) { const t = document.getElementById('toast'); t.textContent = msg; t.classList.add('show'); setTimeout(() => t.classList.remove('show'), 2000); }
+
+// 把舊 flat 格式 credits 轉成 block 格式（向下相容讀取，寫入永遠是新格式）
+function _normalizeCredits(raw) {
+    const arr = Array.isArray(raw) ? raw : [];
+    if (!arr.length) return [];
+    if (arr[0] && typeof arr[0] === 'object' && 'entries' in arr[0]) return arr;  // 已是新格式
+    // fallback block 留空 name — _renderBlock + Astro [slug].astro 兩端各自有「其他」fallback。
+    return [{
+        role_id: null,
+        name_zh: '',
+        name_en: '',
+        entries: arr.map(c => ({
+            duty: c.role || '',
+            name: c.name || '',
+            resume_url: c.resume_url || '',
+        })),
+    }];
+}
+
+// 取得當前 blocks（已 normalize），用於 mutation 起點
+function _currentBlocks() {
+    return _normalizeCredits((DATA && DATA.credits) || []);
+}
 
 async function _load() {
     if (!TOKEN) { _showError(); return; }
@@ -127,6 +185,22 @@ async function _upload(subpath, file) {
     form.append('file', file);
     const res = await fetch(API + subpath, { method: 'POST', body: form });
     if (!res.ok) { const e = await res.json().catch(() => ({})); throw new Error(e.detail || '上傳失敗'); }
+    return res.json();
+}
+
+async function _searchStaff(q) {
+    const res = await fetch(`${API}/staff_search?q=${encodeURIComponent(q || '')}`);
+    if (!res.ok) throw new Error('搜尋失敗');
+    return (await res.json()).items || [];
+}
+
+async function _quickAddStaff(name, role) {
+    const res = await fetch(`${API}/staff_quick_add`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name, role }),
+    });
+    if (!res.ok) { const e = await res.json().catch(() => ({})); throw new Error(e.detail || '建立失敗'); }
     return res.json();
 }
 
@@ -200,22 +274,80 @@ function _render() {
         ${EDITABLE ? '<div style="margin-top:8px;"><input type="file" id="inp-process" accept="image/*" style="display:none"><button class="btn btn-sm" id="btn-add-process">+ 上傳過程圖</button></div>' : ''}
     </div>`;
 
-    // Credits
+    // Credits — block 結構編輯器
+    const blocks = _normalizeCredits(credits);
+    const rolesAvail = DATA.credit_roles_available || [];
+    const tplsAvail = DATA.credit_templates_available || [];
+    const usedRoleIds = new Set(blocks.map(b => b.role_id).filter(x => x != null));
+    const availRoleOptions = rolesAvail.filter(r => !usedRoleIds.has(r.id));
+
+    const _renderBlock = (block, bIdx) => {
+        const entries = block.entries || [];
+        const rowsHtml = entries.map((entry, eIdx) => `
+            <div class="credit-row" data-bidx="${bIdx}" data-eidx="${eIdx}" style="gap:8px;">
+                <input type="text" class="credit-duty" data-bidx="${bIdx}" data-eidx="${eIdx}"
+                       value="${_esc(entry.duty || '')}" placeholder="職務（可空）"
+                       style="width:120px;${EDITABLE ? '' : 'pointer-events:none;'}">
+                <div class="credit-name-cell" data-bidx="${bIdx}" data-eidx="${eIdx}"
+                     style="position:relative;flex:1;min-width:100px;">
+                    <input type="text" class="credit-name-input" data-bidx="${bIdx}" data-eidx="${eIdx}"
+                           value="${_esc(entry.name || '')}" placeholder="姓名（搜尋既有人員...）"
+                           autocomplete="off"
+                           style="width:100%;${entry.staff_id ? 'padding-right:24px;' : ''}${EDITABLE ? '' : 'pointer-events:none;'}">
+                    ${entry.staff_id ? `<span class="credit-link-dot" data-bidx="${bIdx}" data-eidx="${eIdx}"
+                                              title="已連結人員，點擊解除"
+                                              style="position:absolute;right:8px;top:50%;transform:translateY(-50%);
+                                                     width:8px;height:8px;border-radius:50%;background:var(--success);
+                                                     cursor:pointer;"></span>` : ''}
+                </div>
+                ${entry.resume_url ? `<a class="credit-link" href="${_esc(entry.resume_url)}" target="_blank">簡歷 →</a>` : ''}
+                ${EDITABLE ? `<button class="btn btn-danger btn-sm" data-action="del-entry" data-bidx="${bIdx}" data-eidx="${eIdx}">✕</button>` : ''}
+            </div>`).join('');
+        return `
+            <div class="credit-block" data-bidx="${bIdx}"
+                 ${EDITABLE ? `draggable="true"` : ''}
+                 style="background:var(--bg3);border:1px solid var(--border);border-radius:4px;padding:12px;margin-bottom:8px;">
+                <div style="display:flex;justify-content:space-between;align-items:center;border-bottom:1px solid var(--border);padding-bottom:6px;margin-bottom:8px;">
+                    <div>
+                        <strong style="color:var(--accent);">${_esc(block.name_zh || '其他')}</strong>
+                        ${block.name_en ? `<span style="color:var(--text3);font-size:12px;margin-left:6px;">${_esc(block.name_en)}</span>` : ''}
+                    </div>
+                    ${EDITABLE ? `<div style="display:flex;gap:6px;align-items:center;">
+                        <span style="color:var(--text3);font-size:11px;cursor:grab;" title="拖曳排序">↕</span>
+                        <button class="btn btn-danger btn-sm" data-action="del-block" data-bidx="${bIdx}">✕</button>
+                    </div>` : ''}
+                </div>
+                ${rowsHtml}
+                ${entries.length === 0 ? `<p style="color:var(--text3);font-size:12px;padding:6px 0;">尚無條目</p>` : ''}
+                ${EDITABLE ? `<div style="margin-top:8px;text-align:right;">
+                    <button class="btn btn-sm" data-action="add-entry" data-bidx="${bIdx}">+ 新增條目</button>
+                </div>` : ''}
+            </div>`;
+    };
+
+    const roleOptionsHtml = availRoleOptions.map(r =>
+        `<option value="${r.id}">${_esc(r.name_zh)}${r.name_en ? ' / ' + _esc(r.name_en) : ''}</option>`
+    ).join('');
+    const tplOptionsHtml = tplsAvail.map(t => {
+        const roleNames = (t.roles || []).map(r => r.name_zh).join('、');
+        return `<option value="${t.id}">${_esc(t.name)}${roleNames ? ' (' + _esc(roleNames) + ')' : ''}</option>`;
+    }).join('');
+
     html += `<div class="section" id="sec-credits">
-        <div class="section-label">Credit</div>
-        ${credits.map((c, i) => `
-            <div class="credit-row">
-                <span class="credit-role">${_esc(c.role || '')}</span>
-                <span class="credit-name">${_esc(c.name || '')}</span>
-                ${c.resume_url ? `<a class="credit-link" href="${_esc(c.resume_url)}" target="_blank">簡歷 →</a>` : ''}
-                ${EDITABLE ? `<button class="btn btn-danger btn-sm" data-action="del-credit" data-idx="${i}">✕</button>` : ''}
-            </div>`).join('')}
-        ${credits.length === 0 ? '<p style="color:var(--text3);font-size:13px;">尚無 Credit</p>' : ''}
-        ${EDITABLE ? `<div style="margin-top:8px;display:flex;gap:6px;flex-wrap:wrap;">
-            <input type="text" id="inp-credit-role" placeholder="職務" style="width:100px;">
-            <input type="text" id="inp-credit-name" placeholder="姓名" style="flex:1;min-width:100px;">
-            <button class="btn btn-sm" id="btn-add-credit">+ 新增</button>
+        <div class="section-label">演職員表 / Credits</div>
+        ${EDITABLE ? `<div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px;">
+            <select id="sel-add-role" class="btn btn-sm" style="padding:6px 10px;">
+                <option value="">+ 新增職位 ▾</option>
+                ${roleOptionsHtml}
+                <option value="__custom__">+ 自訂分類…</option>
+            </select>
+            ${tplsAvail.length > 0 ? `<select id="sel-apply-tpl" class="btn btn-sm" style="padding:6px 10px;">
+                <option value="">📦 套用模板 ▾</option>
+                ${tplOptionsHtml}
+            </select>` : ''}
         </div>` : ''}
+        <div id="credit-blocks-container">${blocks.map((b, i) => _renderBlock(b, i)).join('')}</div>
+        ${blocks.length === 0 ? '<p style="color:var(--text3);font-size:13px;">尚無演職員資料</p>' : ''}
     </div>`;
 
     // Website categories / tags (kind=category | tag)
@@ -311,21 +443,303 @@ function _bindEvents() {
         });
     });
 
-    // Credit add
-    document.getElementById('btn-add-credit')?.addEventListener('click', async () => {
-        const role = document.getElementById('inp-credit-role').value.trim();
-        const name = document.getElementById('inp-credit-name').value.trim();
-        if (!name) return;
-        const credits = [...(sc.credits || []), { name, role }];
-        try { await _save({ credits }); await _reload(); } catch (e) { alert(e.message); }
+    // === Credits block 編輯器 ===
+    const _saveBlocks = async (blocks) => {
+        try { await _save({ credits: blocks }); await _reload(); }
+        catch (e) { alert(e.message); }
+    };
+
+    // 新增職位 dropdown（含「自訂分類」選項）
+    document.getElementById('sel-add-role')?.addEventListener('change', async (ev) => {
+        const val = ev.target.value;
+        if (!val) return;
+        const blocks = _currentBlocks();
+        if (val === '__custom__') {
+            const nameZh = (prompt('自訂分類中文名（例：友情客串）') || '').trim();
+            if (!nameZh) { ev.target.value = ''; return; }
+            const nameEn = (prompt('自訂分類英文名（可空）') || '').trim();
+            blocks.push({ role_id: null, name_zh: nameZh, name_en: nameEn, entries: [] });
+        } else {
+            const roleId = parseInt(val);
+            const role = (DATA.credit_roles_available || []).find(r => r.id === roleId);
+            if (!role) { ev.target.value = ''; return; }
+            blocks.push({ role_id: role.id, name_zh: role.name_zh, name_en: role.name_en || '', entries: [] });
+        }
+        ev.target.value = '';
+        await _saveBlocks(blocks);
     });
 
-    // Credit delete
-    document.querySelectorAll('[data-action="del-credit"]').forEach(btn => {
+    // 套用模板：把 template 的 roles 中尚未在 credits 的逐一加入
+    document.getElementById('sel-apply-tpl')?.addEventListener('change', async (ev) => {
+        const val = ev.target.value;
+        if (!val) return;
+        const tplId = parseInt(val);
+        const tpl = (DATA.credit_templates_available || []).find(t => t.id === tplId);
+        ev.target.value = '';
+        if (!tpl) return;
+        const blocks = _currentBlocks();
+        const used = new Set(blocks.map(b => b.role_id).filter(x => x != null));
+        let added = 0;
+        for (const role of (tpl.roles || [])) {
+            if (used.has(role.id)) continue;
+            blocks.push({ role_id: role.id, name_zh: role.name_zh, name_en: role.name_en || '', entries: [] });
+            used.add(role.id);
+            added++;
+        }
+        if (!added) { _toast('模板職位皆已存在'); return; }
+        await _saveBlocks(blocks);
+    });
+
+    // 刪除整個 block
+    document.querySelectorAll('[data-action="del-block"]').forEach(btn => {
         btn.addEventListener('click', async () => {
-            const credits = [...(sc.credits || [])];
-            credits.splice(parseInt(btn.dataset.idx), 1);
-            try { await _save({ credits }); await _reload(); } catch (e) { alert(e.message); }
+            if (!confirm('刪除這個職位區塊？')) return;
+            const bIdx = parseInt(btn.dataset.bidx);
+            const blocks = _currentBlocks();
+            blocks.splice(bIdx, 1);
+            await _saveBlocks(blocks);
+        });
+    });
+
+    document.querySelectorAll('[data-action="add-entry"]').forEach(btn => {
+        btn.addEventListener('click', async () => {
+            const bIdx = parseInt(btn.dataset.bidx);
+            const blocks = _currentBlocks();
+            if (!blocks[bIdx]) return;
+            (blocks[bIdx].entries = blocks[bIdx].entries || []).push({ duty: '', name: '', resume_url: '' });
+            await _saveBlocks(blocks);
+        });
+    });
+
+    document.querySelectorAll('[data-action="del-entry"]').forEach(btn => {
+        btn.addEventListener('click', async () => {
+            const bIdx = parseInt(btn.dataset.bidx);
+            const eIdx = parseInt(btn.dataset.eidx);
+            const blocks = _currentBlocks();
+            if (!blocks[bIdx] || !blocks[bIdx].entries) return;
+            blocks[bIdx].entries.splice(eIdx, 1);
+            await _saveBlocks(blocks);
+        });
+    });
+
+    // 編輯 duty / name — blur 時 save
+    // name 改變且原本掛 staff_id → 自動清連結（避免「掛 staff #17 但 name 變成別人」的髒資料）
+    const _onEntryFieldBlur = async (input, field) => {
+        const bIdx = parseInt(input.dataset.bidx);
+        const eIdx = parseInt(input.dataset.eidx);
+        const blocks = _currentBlocks();
+        const entry = blocks[bIdx]?.entries?.[eIdx];
+        if (!entry) return;
+        const newVal = input.value.trim();
+        if ((entry[field] || '') === newVal) return;  // 沒變不存
+        entry[field] = newVal;
+        if (field === 'name' && entry.staff_id) {
+            entry.staff_id = null;
+            entry.resume_url = '';
+            _toast('已解除人員連結，姓名保留為純文字');
+        }
+        await _saveBlocks(blocks);
+    };
+    document.querySelectorAll('.credit-duty').forEach(inp => {
+        inp.addEventListener('blur', () => _onEntryFieldBlur(inp, 'duty'));
+    });
+
+    // === Staff combobox ===
+    const _closeStaffDropdown = (input) => {
+        const cell = input.closest('.credit-name-cell');
+        if (!cell) return;
+        const dd = cell.querySelector('.credit-name-dropdown');
+        if (dd) dd.remove();
+    };
+
+    const _selectStaff = async (input, s) => {
+        const bIdx = parseInt(input.dataset.bidx);
+        const eIdx = parseInt(input.dataset.eidx);
+        const blocks = _currentBlocks();
+        if (!blocks[bIdx]?.entries?.[eIdx]) return;
+        blocks[bIdx].entries[eIdx] = {
+            ...blocks[bIdx].entries[eIdx],
+            name: s.name,
+            staff_id: s.id,
+            resume_url: s.resume_visible ? `/resume.html?id=${s.id}` : '',
+        };
+        _closeStaffDropdown(input);
+        await _saveBlocks(blocks);
+    };
+
+    const _openQuickAddModal = (prefilledName, targetInput) => {
+        const m = document.getElementById('staff-quick-add-modal');
+        document.getElementById('qa-name').value = prefilledName || '';
+
+        const sel = document.getElementById('qa-role');
+        sel.innerHTML = '<option value="">— 不指定 —</option>' +
+            (DATA.credit_roles_available || []).map(r =>
+                `<option value="${_esc(r.name_zh)}">${_esc(r.name_zh)}${r.name_en ? ' / ' + _esc(r.name_en) : ''}</option>`
+            ).join('');
+        sel.value = '';
+
+        m.classList.add('show');
+        document.getElementById('qa-name').focus();
+
+        document.getElementById('qa-cancel').onclick = () => { m.classList.remove('show'); };
+        document.getElementById('qa-submit').onclick = async () => {
+            const name = document.getElementById('qa-name').value.trim();
+            const role = document.getElementById('qa-role').value;
+            if (!name) { alert('姓名必填'); return; }
+            try {
+                const newStaff = await _quickAddStaff(name, role);
+                m.classList.remove('show');
+                await _selectStaff(targetInput, newStaff);
+            } catch (e) {
+                alert(e.message);
+            }
+        };
+    };
+
+    const _renderStaffDropdown = (input, items, q) => {
+        const cell = input.closest('.credit-name-cell');
+        if (!cell) return;
+        const old = cell.querySelector('.credit-name-dropdown');
+        if (old) old.remove();
+
+        const itemsHtml = (items || []).map(s => {
+            const avatar = s.photo_url
+                ? `<img src="${_esc(s.photo_url)}" style="width:24px;height:24px;border-radius:50%;object-fit:cover;">`
+                : `<div style="width:24px;height:24px;border-radius:50%;background:var(--bg3);display:flex;align-items:center;justify-content:center;color:var(--text2);font-size:11px;">${_esc((s.name || '').charAt(0))}</div>`;
+            const nameColor = s.resume_visible ? 'var(--success)' : 'var(--text)';
+            const dot = s.resume_visible ? '🟢' : '⚪';
+            return `<div class="credit-staff-item" data-staff-id="${_esc(s.id)}"
+                         style="display:flex;align-items:center;gap:10px;padding:8px 12px;cursor:pointer;border-bottom:1px solid var(--border);"
+                         onmouseover="this.style.background='var(--bg3)'"
+                         onmouseout="this.style.background=''">
+                    ${avatar}
+                    <div style="flex:1;min-width:0;">
+                        <div style="color:${nameColor};font-size:13px;font-weight:500;">
+                            ${dot} ${_esc(s.name)}
+                        </div>
+                        <div style="color:var(--text3);font-size:11px;">
+                            ${_esc(s.role || '—')} · 日費 ${s.daily_rate || 0}
+                        </div>
+                    </div>
+                </div>`;
+        }).join('');
+
+        const hasQuery = !!(q && q.length > 0);
+        const createHtml = hasQuery
+            ? `<div class="credit-staff-create" data-name="${_esc(q)}"
+                    style="display:flex;align-items:center;gap:10px;padding:8px 12px;cursor:pointer;color:var(--accent);background:var(--bg3);"
+                    onmouseover="this.style.opacity='0.8'"
+                    onmouseout="this.style.opacity=''">
+                    ➕ 建立新人員「${_esc(q)}」
+                </div>`
+            : '';
+
+        const emptyHtml = (!items || items.length === 0) && !hasQuery
+            ? `<div style="padding:12px;color:var(--text3);font-size:12px;text-align:center;">無符合人員</div>`
+            : '';
+
+        const dd = document.createElement('div');
+        dd.className = 'credit-name-dropdown';
+        dd.style.cssText = 'position:absolute;top:100%;left:0;right:0;z-index:100;background:var(--bg2);border:1px solid var(--border2);border-radius:4px;margin-top:2px;max-height:280px;overflow-y:auto;box-shadow:0 4px 12px rgba(0,0,0,0.4);';
+        dd.innerHTML = itemsHtml + emptyHtml + createHtml;
+        cell.appendChild(dd);
+
+        // bind item click（用 mousedown 搶在 input blur 前）
+        dd.querySelectorAll('.credit-staff-item').forEach(it => {
+            it.addEventListener('mousedown', (e) => {
+                e.preventDefault();
+                const sid = it.dataset.staffId;
+                const picked = (items || []).find(x => String(x.id) === String(sid));
+                if (picked) _selectStaff(input, picked);
+            });
+        });
+        const createEl = dd.querySelector('.credit-staff-create');
+        if (createEl) {
+            createEl.addEventListener('mousedown', (e) => {
+                e.preventDefault();
+                _closeStaffDropdown(input);
+                _openQuickAddModal(createEl.dataset.name || '', input);
+            });
+        }
+    };
+
+    // name input：focus / input / blur
+    // _searchSeq 防 race — 慢網路下舊 fetch 後到別覆蓋新 dropdown
+    let _searchTimer = null;
+    let _searchSeq = 0;
+    document.querySelectorAll('.credit-name-input').forEach(inp => {
+        inp.addEventListener('focus', async () => {
+            const mySeq = ++_searchSeq;
+            try {
+                const items = await _searchStaff('');
+                if (mySeq !== _searchSeq) return;
+                _renderStaffDropdown(inp, items, '');
+            } catch (_) {}
+        });
+        inp.addEventListener('input', () => {
+            if (_searchTimer) clearTimeout(_searchTimer);
+            const q = inp.value.trim();
+            const mySeq = ++_searchSeq;
+            _searchTimer = setTimeout(async () => {
+                try {
+                    const items = await _searchStaff(q);
+                    if (mySeq !== _searchSeq) return;
+                    _renderStaffDropdown(inp, items, q);
+                } catch (_) {}
+            }, 200);
+        });
+        inp.addEventListener('blur', () => {
+            // 150ms 延遲讓 dropdown click 先觸發
+            setTimeout(() => _closeStaffDropdown(inp), 150);
+            // 仍跑既有 name 欄位 save（包含 staff_id 自動清除）
+            _onEntryFieldBlur(inp, 'name');
+        });
+    });
+
+    // 綠點解除連結
+    document.querySelectorAll('.credit-link-dot').forEach(dot => {
+        dot.addEventListener('click', async (e) => {
+            e.stopPropagation();
+            if (!confirm('解除此人員連結？姓名會保留為純文字。')) return;
+            const bIdx = parseInt(dot.dataset.bidx);
+            const eIdx = parseInt(dot.dataset.eidx);
+            const blocks = _currentBlocks();
+            const entry = blocks[bIdx]?.entries?.[eIdx];
+            if (!entry) return;
+            entry.staff_id = null;
+            entry.resume_url = '';
+            await _saveBlocks(blocks);
+        });
+    });
+
+    // Block 拖曳排序（HTML5 native drag）
+    let _dragBIdx = null;
+    document.querySelectorAll('.credit-block').forEach(el => {
+        el.addEventListener('dragstart', (e) => {
+            _dragBIdx = parseInt(el.dataset.bidx);
+            if (e.dataTransfer) {
+                e.dataTransfer.effectAllowed = 'move';
+                try { e.dataTransfer.setData('text/plain', String(_dragBIdx)); } catch {}
+            }
+            el.style.opacity = '0.4';
+        });
+        el.addEventListener('dragend', () => { el.style.opacity = ''; });
+        el.addEventListener('dragover', (e) => {
+            e.preventDefault();
+            if (e.dataTransfer) e.dataTransfer.dropEffect = 'move';
+        });
+        el.addEventListener('drop', async (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            const targetIdx = parseInt(el.dataset.bidx);
+            if (_dragBIdx == null || _dragBIdx === targetIdx) { _dragBIdx = null; return; }
+            const blocks = _currentBlocks();
+            const moved = blocks.splice(_dragBIdx, 1)[0];
+            // splice 後 target 位置可能左移：放回 target 之前。
+            const insertAt = targetIdx > _dragBIdx ? targetIdx - 1 : targetIdx;
+            blocks.splice(insertAt, 0, moved);
+            _dragBIdx = null;
+            await _saveBlocks(blocks);
         });
     });
 

@@ -47,5 +47,10 @@ const thumb = resolveThumbnail(work.youtube_id, work.slug, "hq");
         {work.client && (
             <p class="text-sm text-neutral-500 mt-1 tracking-wide">{work.client}</p>
         )}
+        {work.credits_summary && (
+            <p class="text-xs text-neutral-400 mt-1 tracking-wide line-clamp-1">
+                {work.credits_summary}
+            </p>
+        )}
     </div>
 </a>

@@ -589,18 +589,34 @@ function _render(data) {
     html += '</div>';
   }
 
-  // Credits
-  if (credits.length > 0) {
+  // Credits — 過渡期支援兩種格式（新 block list / 舊 flat array）
+  // block: [{role_id, name_zh, name_en, entries: [{duty, name, resume_url}]}]
+  // flat:  [{role, name, resume_url}]（v1.10.118 之前；migration 跑完後消失）
+  var flatCredits = [];
+  credits.forEach(function(c) {
+    if (c && c.entries) {
+      // block 格式 → 每個 entry 當一個 credit row，role label = block.name_zh + duty
+      var blockTitle = c.name_zh || '';
+      (c.entries || []).forEach(function(e) {
+        if (!e || !e.name) return;
+        var label = blockTitle;
+        if (e.duty) label = label ? (label + ' / ' + e.duty) : e.duty;
+        flatCredits.push({ role: label, name: e.name, resume_url: e.resume_url || '' });
+      });
+    } else if (c && c.name) {
+      // 舊 flat 格式 — 直接帶過
+      flatCredits.push({ role: c.role || '', name: c.name, resume_url: c.resume_url || '' });
+    }
+  });
+
+  if (flatCredits.length > 0) {
     html += '<div class="sc-section">' +
       '<div class="sc-label">Credits</div>' +
       '<div class="sc-credits">' +
-      credits.map(function(c) {
-        var nameHtml = '';
-        if (c.resume_url) {
-          nameHtml = '<a href="' + _esc(c.resume_url) + '" target="_blank">' + _esc(c.name) + '</a>';
-        } else {
-          nameHtml = _esc(c.name);
-        }
+      flatCredits.map(function(c) {
+        var nameHtml = c.resume_url
+          ? '<a href="' + _esc(c.resume_url) + '" target="_blank">' + _esc(c.name) + '</a>'
+          : _esc(c.name);
         return '<div class="sc-credit">' +
           '<div class="sc-credit-role">' + _esc(c.role) + '</div>' +
           '<div class="sc-credit-name">' + nameHtml + '</div>' +

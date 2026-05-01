@@ -142,6 +142,7 @@ def real_server():
     env = os.environ.copy()
     env["MOCK_FFMPEG"] = "1"
     env["MOCK_NAS"] = "1"
+    env["ORIGINSUN_DISABLE_SELFHEAL"] = "1"  # 沒這行 _self_heal_scheduled_task 在 Session 0 會 4s 後 taskkill server
 
     # Use DEVNULL to prevent pipe buffer deadlock (64KB buffer on Windows
     # fills up when server writes logs, blocking the event loop)

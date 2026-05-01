@@ -34,9 +34,15 @@ _CRM_PROJECTS_COLUMNS: list[tuple[str, str]] = [
     ("public_sort_order", "INTEGER DEFAULT 0"),
     ("public_published_at", "TIMESTAMPTZ"),
     # 對外作品編號（1, 2, 3, ...）— slug 沒設時走這個。
-    # 第一次 publish 時 auto-assign max+1，永久綁定（unpublish 不釋放號碼，
+    # 第一次 publish 時 auto-assign max+1，永久綁定（unpublish 不釋放號碼,
     # 避免 republish 時編號改變破壞 permalink / Google 索引）。
     ("public_number", "INTEGER"),
+    # SEO 301 來源舊 slug 陣列（軟+硬 301 雙保險，跟 website_posts.old_urls 對齊）
+    ("public_old_slugs", "JSONB NOT NULL DEFAULT '[]'::jsonb"),
+    # OG image — _sync_showcase_to_public 從 sc.cover_url 鏡像
+    ("public_cover_url", "TEXT"),
+    # per-work SEO 索引控制（true = 強制 noindex；null/false = 跟站級 indexable）
+    ("public_noindex", "BOOLEAN DEFAULT FALSE"),
 ]
 
 # ── ALTER TABLE: crm_staff 擴充 ──
@@ -222,6 +228,29 @@ _CREATE_TABLES: list[str] = [
         PRIMARY KEY (post_id, category_id)
     )
     """,
+    # 演職員職位主檔 + 模板（block 結構演職員表的後盾）
+    """
+    CREATE TABLE IF NOT EXISTS website_credit_roles (
+        id SERIAL PRIMARY KEY,
+        name_zh VARCHAR(80) UNIQUE NOT NULL,
+        name_en VARCHAR(80) NOT NULL,
+        sort_order INTEGER NOT NULL DEFAULT 0,
+        visible BOOLEAN NOT NULL DEFAULT TRUE,
+        created_at TIMESTAMPTZ DEFAULT NOW(),
+        updated_at TIMESTAMPTZ DEFAULT NOW()
+    )
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS website_credit_templates (
+        id SERIAL PRIMARY KEY,
+        name VARCHAR(120) NOT NULL,
+        description TEXT,
+        role_ids JSONB NOT NULL DEFAULT '[]'::jsonb,
+        sort_order INTEGER NOT NULL DEFAULT 0,
+        created_at TIMESTAMPTZ DEFAULT NOW(),
+        updated_at TIMESTAMPTZ DEFAULT NOW()
+    )
+    """,
 ]
 
 _CREATE_INDEXES: list[str] = [
@@ -247,6 +276,100 @@ _CREATE_INDEXES: list[str] = [
     "CREATE INDEX IF NOT EXISTS idx_crmproj_featured ON crm_projects (public_featured)",
     "CREATE INDEX IF NOT EXISTS idx_crmproj_slug ON crm_projects (public_slug)",
     "CREATE UNIQUE INDEX IF NOT EXISTS idx_crmproj_pubnum ON crm_projects (public_number) WHERE public_number IS NOT NULL",
+    # 演職員職位查詢：visible+sort
+    "CREATE INDEX IF NOT EXISTS idx_credit_role_visible_sort ON website_credit_roles (visible, sort_order)",
+]
+
+
+# ── 舊 flat array credits 一次性 migration（idempotent — 條件守門避免重轉） ──
+# 條件：sc.credits 是非空 array 且首元素無 'entries' 鍵。已是 block 結構不影響。
+# DO 區塊 + to_regclass 守門：fresh DB 還沒 crm_project_showcases / crm_projects 表時
+# 整個 batch 會 rollback 把 CREATE TABLE 也廢掉，所以必須在表存在才跑。
+def _build_flat_credits_migration_sql(table: str, col: str) -> str:
+    return f"""
+    DO $migrate$
+    BEGIN
+        IF to_regclass('public.{table}') IS NOT NULL THEN
+            UPDATE {table}
+            SET {col} = jsonb_build_array(jsonb_build_object(
+                'role_id', null, 'name_zh', '', 'name_en', '',
+                'entries', COALESCE((
+                    SELECT jsonb_agg(jsonb_build_object(
+                        'duty', COALESCE(elem->>'role', ''),
+                        'name', COALESCE(elem->>'name', ''),
+                        'resume_url', COALESCE(elem->>'resume_url', '')))
+                    FROM jsonb_array_elements({col}) elem
+                    WHERE elem->>'name' IS NOT NULL AND elem->>'name' <> ''
+                ), '[]'::jsonb)
+            ))
+            WHERE jsonb_typeof({col}) = 'array'
+              AND jsonb_array_length({col}) > 0
+              AND NOT ({col}->0 ? 'entries');
+        END IF;
+    END
+    $migrate$;
+    """
+
+
+_MIGRATE_FLAT_CREDITS_SHOWCASE = _build_flat_credits_migration_sql(
+    "crm_project_showcase", "credits"
+)
+_MIGRATE_FLAT_CREDITS_PROJECT = _build_flat_credits_migration_sql(
+    "crm_projects", "public_credits"
+)
+
+
+# ── 演職員職位庫 + 模板 seed（idempotent — 重跑不會炸） ──
+# Roles 用 ON CONFLICT (name_zh) DO NOTHING；
+# Templates 用 NOT EXISTS 子查詢避免重複，role_ids 透過子查詢動態解析 id（避免 hardcode）。
+_SEED_CREDIT_ROLES = """
+INSERT INTO website_credit_roles (name_zh, name_en, sort_order, visible) VALUES
+    ('製作', 'Production', 10, true),
+    ('導演', 'Director', 20, true),
+    ('編劇', 'Writer', 30, true),
+    ('攝影指導', 'DP', 40, true),
+    ('燈光', 'Gaffer', 50, true),
+    ('收音', 'Sound', 60, true),
+    ('剪輯', 'Editor', 70, true),
+    ('後製', 'Post-Production', 80, true),
+    ('演員', 'Cast', 90, true),
+    ('配樂', 'Music', 100, true),
+    ('美術', 'Art', 110, true),
+    ('造型', 'Stylist', 120, true)
+ON CONFLICT (name_zh) DO NOTHING
+"""
+
+# 模板 seed：4 欄定義（name/desc/sort/roles）→ generator 組成 NOT EXISTS-guarded INSERT。
+# 子查詢用 array_position 把 role_ids JSONB array 按 _SEED_TEMPLATES 中羅列的順序排好。
+# Seed 是內部固定字串、無使用者輸入 → 直接 f-string interpolate 不需 parameterize。
+_SEED_TEMPLATES: list[tuple[str, str, int, list[str]]] = [
+    ("商業廣告標準", "適用於 30 / 60 秒 TVC、品牌形象片", 10,
+     ["製作", "導演", "攝影指導", "燈光", "剪輯", "後製", "演員"]),
+    ("MV 完整版", "音樂錄影帶常用 9 職位組合", 20,
+     ["製作", "導演", "攝影指導", "燈光", "剪輯", "後製", "演員", "造型", "美術"]),
+    ("企業形象片精簡版", "小型製作或內部宣傳片用 4 職位", 30,
+     ["製作", "導演", "攝影指導", "剪輯"]),
+]
+
+
+def _build_template_seed_sql(name: str, desc: str, sort: int, roles: list[str]) -> str:
+    arr = ",".join(f"'{r}'" for r in roles)
+    return f"""
+    INSERT INTO website_credit_templates (name, description, role_ids, sort_order)
+    SELECT '{name}', '{desc}',
+           COALESCE(jsonb_agg(id ORDER BY rn), '[]'::jsonb), {sort}
+    FROM (
+        SELECT id, array_position(ARRAY[{arr}]::varchar[], name_zh::varchar) AS rn
+        FROM website_credit_roles
+        WHERE name_zh IN ({arr})
+    ) t
+    WHERE NOT EXISTS (SELECT 1 FROM website_credit_templates WHERE name = '{name}')
+    """
+
+
+_SEED_CREDIT_TEMPLATES: list[str] = [
+    _build_template_seed_sql(name, desc, sort, roles)
+    for name, desc, sort, roles in _SEED_TEMPLATES
 ]
 
 
@@ -292,6 +415,12 @@ async def run_website_migrations(session_factory: Callable) -> None:
         *_CREATE_INDEXES,
         # 既有 public 作品 backfill 編號（idempotent — 已有 public_number 的會跳過）
         _BACKFILL_PUBLIC_NUMBER,
+        # 演職員職位庫 seed（roles 必先於 templates，因為 templates 子查詢要查 role.id）
+        _SEED_CREDIT_ROLES,
+        *_SEED_CREDIT_TEMPLATES,
+        # 舊 flat array credits 升級為 block 結構（idempotent，已轉過的不再變動）
+        _MIGRATE_FLAT_CREDITS_SHOWCASE,
+        _MIGRATE_FLAT_CREDITS_PROJECT,
     ]
 
     async with session_factory() as session:

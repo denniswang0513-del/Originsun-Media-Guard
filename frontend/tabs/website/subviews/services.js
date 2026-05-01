@@ -1,7 +1,7 @@
 /**
  * services.js — 服務項目 CRUD（首頁「服務」區塊用）
  */
-import { websiteFetch, esc, toastOk, toastErr, renderLoadError } from '../website-utils.js';
+import { websiteFetch, esc, toastOk, toastErr, renderLoadError, emptyRow } from '../website-utils.js';
 
 let _services = [];
 let _cats = [];
@@ -56,7 +56,7 @@ function _renderTable() {
         _cats.map(c => `<option value="${c.id}" ${c.id === currentId ? 'selected' : ''}>${esc(c.name_zh)}</option>`).join('');
 
     if (!_services.length) {
-        t.innerHTML = '<tr><td colspan="7" style="padding:30px;text-align:center;color:#888;">尚無服務</td></tr>';
+        t.innerHTML = emptyRow(7, '尚無服務');
         return;
     }
     t.innerHTML = `

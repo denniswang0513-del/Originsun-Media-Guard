@@ -93,6 +93,7 @@ function _renderTable() {
                 <th>年份</th>
                 <th>公開</th>
                 <th>精選</th>
+                <th title="個別作品強制 noindex（站級允許索引仍會被擋）">noindex</th>
                 <th>操作</th>
             </tr>
         </thead>
@@ -106,7 +107,12 @@ function _renderTable() {
                     <td>${thumb}</td>
                     <td>
                         <div style="color:#fff;">${esc(w.public_title || w.name)}</div>
-                        <div style="color:#888;font-size:11px;">${esc(w.slug || '(未設 slug)')}</div>
+                        <div style="color:#888;font-size:11px;">
+                            ${esc(w.slug || '(未設 slug)')}
+                            ${w.redirect_count > 0
+                                ? `<span title="此作品有 ${w.redirect_count} 條舊 slug 被 301 轉址到目前 slug" style="color:#3b82f6;margin-left:6px;">↪ ${w.redirect_count}</span>`
+                                : ''}
+                        </div>
                     </td>
                     <td>${(w.categories || []).map(s => `<span class="website-pill">${esc(s)}</span>`).join(' ') || '<span style="color:#666;">-</span>'}</td>
                     <td>${w.year ?? '-'}</td>
@@ -121,6 +127,11 @@ function _renderTable() {
                         </label>
                     </td>
                     <td>
+                        <label style="cursor:pointer;" title="勾選後此作品強制 noindex">
+                            <input type="checkbox" ${w.noindex ? 'checked' : ''} onchange="window._websiteToggleNoindex('${esc(w.id)}', this.checked)" />
+                        </label>
+                    </td>
+                    <td>
                         <button class="btn btn-sm" onclick="window._websiteEditWork('${esc(w.id)}')">✎ 編輯</button>
                     </td>
                 </tr>
@@ -130,35 +141,36 @@ function _renderTable() {
     `;
 }
 
-window._websiteTogglePublic = async (pid, val) => {
+async function _toggleWorkFlag(pid, val, opts) {
+    // opts: { endpoint, method='PUT', body, stateField, onLabel, offLabel }
     try {
-        await websiteFetch(`/api/website/admin/works/${pid}`, {
-            method: 'PUT',
-            body: { public: val },
-        });
+        await websiteFetch(opts.endpoint, { method: opts.method || 'PUT', body: opts.body });
         const w = _works.find(x => x.id === pid);
-        if (w) w.public = val;
-        toastOk(`已${val ? '公開' : '下架'}作品`);
+        if (w) w[opts.stateField] = val;
+        toastOk(`已${val ? opts.onLabel : opts.offLabel}`);
     } catch (e) {
         toastErr(e.message);
         _renderTable();
     }
-};
+}
 
-window._websiteToggleFeatured = async (pid, val) => {
-    try {
-        await websiteFetch(`/api/website/admin/works/${pid}/featured`, {
-            method: 'POST',
-            body: { featured: val },
-        });
-        const w = _works.find(x => x.id === pid);
-        if (w) w.featured = val;
-        toastOk(`已${val ? '設為' : '取消'}精選`);
-    } catch (e) {
-        toastErr(e.message);
-        _renderTable();
-    }
-};
+window._websiteTogglePublic = (pid, val) => _toggleWorkFlag(pid, val, {
+    endpoint: `/api/website/admin/works/${pid}`,
+    body: { public: val },
+    stateField: 'public', onLabel: '公開作品', offLabel: '下架作品',
+});
+
+window._websiteToggleFeatured = (pid, val) => _toggleWorkFlag(pid, val, {
+    endpoint: `/api/website/admin/works/${pid}/featured`, method: 'POST',
+    body: { featured: val },
+    stateField: 'featured', onLabel: '設為精選', offLabel: '取消精選',
+});
+
+window._websiteToggleNoindex = (pid, val) => _toggleWorkFlag(pid, val, {
+    endpoint: `/api/website/admin/works/${pid}`,
+    body: { public_noindex: val },
+    stateField: 'noindex', onLabel: '設為 noindex', offLabel: '取消 noindex',
+});
 
 
 // ══════════════════════════════════════════════════════════

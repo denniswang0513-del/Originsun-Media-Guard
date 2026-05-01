@@ -8,12 +8,12 @@ SEO 內容（FAQ / Testimonial / QuickFact）CRUD。
 from __future__ import annotations
 
 from datetime import date as _date
-from typing import Any, Optional
+from typing import Any
 
-from sqlalchemy import asc, delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from db.models_website import WebsiteFAQ, WebsiteTestimonial, WebsiteQuickFact
+from . import _crud_base as _crud
 
 
 def _faq_to_dict(o: WebsiteFAQ) -> dict[str, Any]:
@@ -56,77 +56,48 @@ def _quick_fact_to_dict(o: WebsiteQuickFact) -> dict[str, Any]:
     }
 
 
-_TO_DICT = {
-    WebsiteFAQ: _faq_to_dict,
-    WebsiteTestimonial: _testimonial_to_dict,
-    WebsiteQuickFact: _quick_fact_to_dict,
-}
+def _coerce_testimonial_date(data: dict) -> dict:
+    """testimonial 的 date_published ISO string → date 物件。
 
-
-def _coerce_date(value: Any) -> Any:
-    """字串 ISO date → date 物件；其他直接回傳。"""
-    if isinstance(value, str) and value:
-        try:
-            return _date.fromisoformat(value)
-        except ValueError:
-            return None
-    return value
-
-
-async def _list(session: AsyncSession, model, visible_only: bool) -> list[dict]:
-    stmt = select(model).order_by(asc(model.sort_order), asc(model.id))
-    if visible_only:
-        stmt = stmt.where(model.visible.is_(True))
-    return [_TO_DICT[model](o) for o in (await session.execute(stmt)).scalars()]
-
-
-async def _create(session: AsyncSession, model, data: dict) -> dict:
-    if model is WebsiteTestimonial and "date_published" in data:
-        data["date_published"] = _coerce_date(data["date_published"])
-    obj = model(**data)
-    session.add(obj)
-    await session.commit()
-    await session.refresh(obj)
-    return _TO_DICT[model](obj)
-
-
-async def _update(session: AsyncSession, model, item_id: int, data: dict) -> Optional[dict]:
-    obj = await session.get(model, item_id)
-    if not obj:
-        return None
-    if model is WebsiteTestimonial and "date_published" in data:
-        data["date_published"] = _coerce_date(data["date_published"])
-    # data 來自 model_dump(exclude_unset=True)：每個 key 都是 client 主動送的
-    # （null = 明確清空、值 = 更新）。NOT NULL columns 由 DB constraint 把關。
-    for k, v in data.items():
-        setattr(obj, k, v)
-    await session.commit()
-    await session.refresh(obj)
-    return _TO_DICT[model](obj)
-
-
-async def _delete(session: AsyncSession, model, item_id: int) -> bool:
-    result = await session.execute(delete(model).where(model.id == item_id))
-    await session.commit()
-    return (result.rowcount or 0) > 0
+    純函式：回傳新 dict 不 mutate 入參，避免污染 caller payload（log / retry 用）。
+    """
+    if "date_published" not in data or not isinstance(data["date_published"], str):
+        return data
+    try:
+        coerced = _date.fromisoformat(data["date_published"]) if data["date_published"] else None
+    except ValueError:
+        coerced = None
+    return {**data, "date_published": coerced}
 
 
 # ── FAQ ──
-async def list_faqs(session, visible_only=False):     return await _list(session, WebsiteFAQ, visible_only)
-async def create_faq(session, data):                  return await _create(session, WebsiteFAQ, data)
-async def update_faq(session, item_id, data):         return await _update(session, WebsiteFAQ, item_id, data)
-async def delete_faq(session, item_id):               return await _delete(session, WebsiteFAQ, item_id)
+async def list_faqs(session, visible_only=False):
+    return await _crud.list_items(session, WebsiteFAQ, _faq_to_dict, visible_only=visible_only)
+async def create_faq(session, data):
+    return await _crud.create_item(session, WebsiteFAQ, data, _faq_to_dict)
+async def update_faq(session, item_id, data):
+    return await _crud.update_item(session, WebsiteFAQ, item_id, data, _faq_to_dict)
+async def delete_faq(session, item_id):
+    return await _crud.delete_item(session, WebsiteFAQ, item_id)
 
 
 # ── Testimonial ──
-async def list_testimonials(session, visible_only=False):  return await _list(session, WebsiteTestimonial, visible_only)
-async def create_testimonial(session, data):               return await _create(session, WebsiteTestimonial, data)
-async def update_testimonial(session, item_id, data):      return await _update(session, WebsiteTestimonial, item_id, data)
-async def delete_testimonial(session, item_id):            return await _delete(session, WebsiteTestimonial, item_id)
+async def list_testimonials(session, visible_only=False):
+    return await _crud.list_items(session, WebsiteTestimonial, _testimonial_to_dict, visible_only=visible_only)
+async def create_testimonial(session, data):
+    return await _crud.create_item(session, WebsiteTestimonial, data, _testimonial_to_dict, pre_write=_coerce_testimonial_date)
+async def update_testimonial(session, item_id, data):
+    return await _crud.update_item(session, WebsiteTestimonial, item_id, data, _testimonial_to_dict, pre_write=_coerce_testimonial_date)
+async def delete_testimonial(session, item_id):
+    return await _crud.delete_item(session, WebsiteTestimonial, item_id)
 
 
 # ── Quick Fact ──
-async def list_quick_facts(session, visible_only=False):   return await _list(session, WebsiteQuickFact, visible_only)
-async def create_quick_fact(session, data):                return await _create(session, WebsiteQuickFact, data)
-async def update_quick_fact(session, item_id, data):       return await _update(session, WebsiteQuickFact, item_id, data)
-async def delete_quick_fact(session, item_id):             return await _delete(session, WebsiteQuickFact, item_id)
+async def list_quick_facts(session, visible_only=False):
+    return await _crud.list_items(session, WebsiteQuickFact, _quick_fact_to_dict, visible_only=visible_only)
+async def create_quick_fact(session, data):
+    return await _crud.create_item(session, WebsiteQuickFact, data, _quick_fact_to_dict)
+async def update_quick_fact(session, item_id, data):
+    return await _crud.update_item(session, WebsiteQuickFact, item_id, data, _quick_fact_to_dict)
+async def delete_quick_fact(session, item_id):
+    return await _crud.delete_item(session, WebsiteQuickFact, item_id)

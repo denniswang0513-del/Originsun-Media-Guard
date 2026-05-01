@@ -137,6 +137,8 @@ def _self_heal_scheduled_task():
 
         if sys.platform != "win32":
             return
+        if os.environ.get("ORIGINSUN_DISABLE_SELFHEAL") == "1":
+            return  # Test fixtures set this to prevent the helper from killing the test server
 
         kernel32 = ctypes.WinDLL("Kernel32.dll")
         pid = os.getpid()
@@ -491,6 +493,8 @@ async def _on_startup():
                         "ALTER TABLE crm_staff ADD COLUMN IF NOT EXISTS resume_visible BOOLEAN DEFAULT FALSE",
                         "ALTER TABLE crm_staff ADD COLUMN IF NOT EXISTS edit_token VARCHAR(512)",
                         "ALTER TABLE crm_staff ADD COLUMN IF NOT EXISTS resume_editable BOOLEAN DEFAULT TRUE",
+                        "ALTER TABLE crm_staff ADD COLUMN IF NOT EXISTS created_via VARCHAR(20) DEFAULT 'admin'",
+                        "ALTER TABLE crm_staff ADD COLUMN IF NOT EXISTS created_for_project_id VARCHAR(32)",
                     ]:
                         try:
                             await _sres.execute(_tres(col_sql))

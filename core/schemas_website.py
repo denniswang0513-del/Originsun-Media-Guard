@@ -134,11 +134,19 @@ class ProjectPublicResponse(BaseModel):
     year: Optional[int] = None
     categories: list[str] = Field(default_factory=list)  # category slugs
     thumbnail_url: Optional[str] = None                   # 自 YouTube API 組合
+    cover_url: Optional[str] = None                       # OG image — sc.cover_url 鏡像
     featured: bool = False
+    noindex: bool = False                                 # per-work 強制 noindex
+    # SEO 301 來源舊 URL 陣列（給 Astro JSON-LD sameAs / markdown 鏡像列「曾用 URL」用）
+    old_urls: list[str] = Field(default_factory=list)
+    # 列表卡片用的 credits 摘要（「主演 邱雲福 · 導演 王小明」最多 ~30 字）
+    credits_summary: str = ""
 
 
 class ProjectPublicDetail(ProjectPublicResponse):
-    credits: dict[str, Any] = Field(default_factory=dict)
+    # Block 結構（見下方 CreditBlock）；舊資料若仍是 dict / flat array
+    # 由 Astro [slug].astro 端轉型，後端不做相容處理。
+    credits: list[CreditBlock] = Field(default_factory=list)
     published_at: Optional[datetime] = None
     related: list[ProjectPublicResponse] = Field(default_factory=list)
 
@@ -151,7 +159,12 @@ class ProjectAdminUpdate(BaseModel):
     public_client: Optional[str] = None
     public_youtube_id: Optional[str] = None
     public_description: Optional[str] = None
-    public_credits: Optional[dict[str, Any]] = None
+    # public_credits / public_cover_url 不允許從 admin Tab 直接改 — credits / cover_url
+    # 唯一 source of truth 是 crm_project_showcases（PM 從 showcase-edit 編輯），透過
+    # _sync_showcase_to_public 反向 mirror。admin Tab 編輯路徑就只 toggle
+    # public/featured/sort/category/noindex/old_slugs。
+    public_old_slugs: Optional[list[str]] = None
+    public_noindex: Optional[bool] = None
     public_year: Optional[int] = None
     public_featured: Optional[bool] = None
     public_sort_order: Optional[int] = None
@@ -395,6 +408,79 @@ class WebsiteQuickFactUpdate(BaseModel):
     value: Optional[str] = None
     sort_order: Optional[int] = None
     visible: Optional[bool] = None
+
+
+# ══════════════════════════════════════════════════════════
+# Credit Roles & Templates（演職員職位庫 + 模板）
+# ══════════════════════════════════════════════════════════
+
+class CreditRoleResponse(BaseModel):
+    id: int
+    name_zh: str
+    name_en: str
+    sort_order: int = 0
+    visible: bool = True
+    usage_count: int = 0  # 多少件作品的 credits 用到此 role_id（admin list 才填）
+
+
+class CreditRoleCreate(BaseModel):
+    name_zh: str = Field(..., min_length=1, max_length=80)
+    name_en: str = Field(..., min_length=1, max_length=80)
+    sort_order: int = 0
+    visible: bool = True
+
+
+class CreditRoleUpdate(BaseModel):
+    name_zh: Optional[str] = Field(None, min_length=1, max_length=80)
+    name_en: Optional[str] = Field(None, min_length=1, max_length=80)
+    sort_order: Optional[int] = None
+    visible: Optional[bool] = None
+
+
+class CreditTemplateRoleSummary(BaseModel):
+    """模板 list 回傳時 hydrate 進去的 role 摘要。"""
+    id: int
+    name_zh: str
+    name_en: str
+
+
+class CreditTemplateResponse(BaseModel):
+    id: int
+    name: str
+    description: Optional[str] = None
+    role_ids: list[int] = Field(default_factory=list)
+    roles: list[CreditTemplateRoleSummary] = Field(default_factory=list)  # hydrated
+    sort_order: int = 0
+
+
+class CreditTemplateCreate(BaseModel):
+    name: str = Field(..., min_length=1, max_length=120)
+    description: Optional[str] = None
+    role_ids: list[int] = Field(default_factory=list)
+    sort_order: int = 0
+
+
+class CreditTemplateUpdate(BaseModel):
+    name: Optional[str] = Field(None, min_length=1, max_length=120)
+    description: Optional[str] = None
+    role_ids: Optional[list[int]] = None
+    sort_order: Optional[int] = None
+
+
+# ── Block 結構 schemas（showcase.credits / public_credits 共用，與 TS ICreditBlock 對齊） ──
+
+class CreditEntry(BaseModel):
+    duty: Optional[str] = ""
+    name: str
+    resume_url: Optional[str] = ""
+
+
+class CreditBlock(BaseModel):
+    """演職員 block — 一個職位下的多筆人員 entries。"""
+    role_id: Optional[int] = None  # null = 自由分類（未從職位庫挑）
+    name_zh: str = ""
+    name_en: Optional[str] = ""
+    entries: list[CreditEntry] = Field(default_factory=list)
 
 
 # ══════════════════════════════════════════════════════════

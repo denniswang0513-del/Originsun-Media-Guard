@@ -10,6 +10,7 @@ import Tr from "../ui/Tr.astro";
 
 interface Props {
     categories: ICategory[];
+    queryKey: "category" | "tag";   // URL query 軸 — required，防止新 caller 忘記傳
     activeSlug?: string | null;
     basePath?: string;
     showAll?: boolean;
@@ -17,6 +18,7 @@ interface Props {
 }
 const {
     categories,
+    queryKey,
     activeSlug = null,
     basePath = "/works",
     showAll = true,
@@ -40,7 +42,7 @@ const {
         </a>
     )}
     {categories.map(cat => (
-        <a href={`${basePath}?category=${cat.slug}`}
+        <a href={`${basePath}?${queryKey}=${cat.slug}`}
            class:list={[
                "px-5 py-2 text-xs tracking-[0.25em] uppercase border transition-colors",
                activeSlug === cat.slug

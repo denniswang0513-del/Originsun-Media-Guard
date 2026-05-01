@@ -17,6 +17,7 @@ const [meta, allWorks, categories] = await Promise.all([
 ]);
 
 const activeCategory = Astro.url.searchParams.get("category") || null;
+const activeTag = Astro.url.searchParams.get("tag") || null;
 
 // 依 kind 切兩排：分類（製作類型）+ 標籤（使用場景）。舊資料 kind 為空當分類處理。
 const cats = categories.filter(c => (c.kind ?? "category") === "category");
@@ -24,7 +25,7 @@ const tags = categories.filter(c => c.kind === "tag");
 
 const activeName = activeCategory
     ? categories.find(c => c.slug === activeCategory)?.name_zh || activeCategory
-    : null;
+    : (activeTag ? categories.find(c => c.slug === activeTag)?.name_zh || activeTag : null);
 const seo = buildBasicPageSeo(Astro, {
     title: "作品集 Works",
     description: activeName
@@ -50,13 +51,14 @@ const seo = buildBasicPageSeo(Astro, {
             <!-- 搜尋框：作品多時派得上用場（少時直接看 chips 即可）-->
             <div id="works-search" class="max-w-md mx-auto mb-10"></div>
 
-            <CategoryFilter categories={cats} activeSlug={activeCategory} label="分類" />
+            <CategoryFilter categories={cats} activeSlug={activeCategory} label="分類" queryKey="category" />
             {tags.length > 0 && (
-                <CategoryFilter categories={tags} activeSlug={activeCategory} showAll={false} label="標籤" />
+                <CategoryFilter categories={tags} activeSlug={activeTag} showAll={false} label="標籤" queryKey="tag" />
             )}
 
             <div id="works-grid"
                  data-active-category={activeCategory || ""}
+                 data-active-tag={activeTag || ""}
                  class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-8 sm:gap-10">
                 {allWorks.map(work => (
                     <div class="work-item" data-categories={work.categories.join(",")}>
@@ -75,11 +77,13 @@ const seo = buildBasicPageSeo(Astro, {
 <script>
     const params = new URLSearchParams(window.location.search);
     const cat = params.get("category") || "";
-    if (cat) {
+    const tag = params.get("tag") || "";
+    // category + tag 都可同時 active — 都過則作品需含兩個（AND 邏輯）
+    if (cat || tag) {
         let visible = 0;
         document.querySelectorAll<HTMLElement>(".work-item").forEach(el => {
-            const cats = (el.dataset.categories || "").split(",");
-            const show = cats.includes(cat);
+            const slugs = (el.dataset.categories || "").split(",");
+            const show = (!cat || slugs.includes(cat)) && (!tag || slugs.includes(tag));
             el.style.display = show ? "" : "none";
             if (show) visible++;
         });

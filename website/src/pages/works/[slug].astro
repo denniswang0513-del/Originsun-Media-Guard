@@ -9,6 +9,8 @@ import SmartImage from "../../components/ui/SmartImage.astro";
 import { fetchMeta, fetchWorkBySlug, fetchAllWorksCached, getWorkSlugPaths } from "../../lib/crm-client";
 import { isValidYouTubeId, resolveThumbnail } from "../../lib/youtube";
 import { pageSchemas, resolveSiteUrl, ensureMinDescription, breadcrumb3 } from "../../lib/seo";
+import { normalizeCredits } from "../../lib/credits";
+import type { ICreditBlock } from "../../types/project";
 
 export const getStaticPaths = getWorkSlugPaths;
 
@@ -25,6 +27,17 @@ if (!work) return Astro.redirect("/works");
 const curIdx = allWorks.findIndex(w => w.slug === work.slug);
 const nextWork = curIdx >= 0 && curIdx < allWorks.length - 1 ? allWorks[curIdx + 1] : allWorks[0];
 
+// 相關作品：同 category 排除自己，最多 3 件；不足時 fallback 用 published_at 鄰近作品
+const workCategories = new Set(work.categories || []);
+const sameCategoryWorks = allWorks
+    .filter(w => w.slug !== work.slug && w.categories.some(c => workCategories.has(c)))
+    .slice(0, 3);
+const relatedWorks = sameCategoryWorks.length >= 3
+    ? sameCategoryWorks
+    : [...sameCategoryWorks, ...allWorks
+        .filter(w => w.slug !== work.slug && !sameCategoryWorks.includes(w))
+        .slice(0, 3 - sameCategoryWorks.length)];
+
 const categoryLabel = (work.categories[0] || "WORK").toUpperCase();
 
 const siteUrl = resolveSiteUrl(Astro.site);
@@ -33,29 +46,16 @@ const description = ensureMinDescription(
     work.description || work.title,
     [work.client, work.year, `${meta.company_name_zh}作品`].filter(Boolean).join(" · "),
 );
+// sameAs：列出舊 URL（slug 變動歷史），讓 Google 認知 PageRank 合併
+const sameAs = (work.old_urls || []).map(u => `${siteUrl}${u}`);
 const schemaData = [
     isValidYouTubeId(work.youtube_id)
         ? pageSchemas.videoObject(work, siteUrl)
-        : pageSchemas.webPage({ title: work.title, description, url: workUrl }),
+        : pageSchemas.webPage({ title: work.title, description, url: workUrl, sameAs }),
     pageSchemas.breadcrumb(breadcrumb3("作品集", "/works", work.title, `/works/${work.slug}`), siteUrl),
 ];
 
-// Credits 排序 + 中英對照
-const CREDIT_EN: Record<string, string> = {
-    客戶: "Client", 導演: "Director", 製片: "Producer",
-    攝影: "Photographer", 剪輯: "Editor", 調光: "Colorist",
-    配樂: "Music", 動畫指導: "Animation Director",
-    製作助理: "Production Assistant", 剪輯助理: "Assistant Editor",
-    混音: "Re-Recording Mixer",
-};
-const CREDIT_ORDER = Object.keys(CREDIT_EN);
-
-const credits = Object.entries(work.credits || {});
-credits.sort((a, b) => {
-    const ia = CREDIT_ORDER.indexOf(a[0]);
-    const ib = CREDIT_ORDER.indexOf(b[0]);
-    return (ia === -1 ? 999 : ia) - (ib === -1 ? 999 : ib);
-});
+const blocks: ICreditBlock[] = normalizeCredits(work.credits);
 
 const nextThumb = nextWork ? resolveThumbnail(nextWork.youtube_id, nextWork.slug, "hq") : null;
 ---
@@ -64,7 +64,8 @@ const nextThumb = nextWork ? resolveThumbnail(nextWork.youtube_id, nextWork.slug
             description={description}
             meta={meta}
             schemaData={schemaData}
-            ogImage={work.thumbnail_url || undefined}>
+            noindex={work.noindex || undefined}
+            ogImage={work.cover_url || work.thumbnail_url || undefined}>
 
     <!-- 兩欄主體：左=標題/敘述/credits、右=影片（sticky 跟著滾） -->
     <section class="bg-white pt-24 sm:pt-28 pb-16 sm:pb-24">
@@ -86,19 +87,40 @@ const nextThumb = nextWork ? resolveThumbnail(nextWork.youtube_id, nextWork.slug
                     </div>
                 )}
 
-                {credits.length > 0 && (
+                {blocks.length > 0 && (
                     <dl class="space-y-3 text-[15px] leading-relaxed">
-                        {credits.map(([role, name]) => (
-                            <div>
-                                <dt class="inline font-bold text-neutral-900 tracking-wide">
-                                    {role}
-                                    {CREDIT_EN[role] && <span class="text-neutral-500 text-sm font-normal ml-1.5">{CREDIT_EN[role]}</span>}
-                                </dt>
-                                <dd class="inline ml-2 text-neutral-700 tracking-wide">
-                                    {Array.isArray(name) ? name.join(" · ") : name}
-                                </dd>
-                            </div>
-                        ))}
+                        {blocks.map(block => {
+                            const valid = (block.entries || []).filter(e => e.name);
+                            if (!valid.length) return null;
+                            return (
+                                <div>
+                                    <dt class="inline font-bold text-neutral-900 tracking-wide">
+                                        {block.name_zh || "其他"}
+                                        {block.name_en && (
+                                            <span class="text-neutral-500 text-sm font-normal ml-1.5">
+                                                {block.name_en}
+                                            </span>
+                                        )}
+                                    </dt>
+                                    <dd class="inline ml-2 text-neutral-700 tracking-wide">
+                                        {valid.map((e, i) => (
+                                            <span>
+                                                {i > 0 && <span class="mx-1.5 text-neutral-400">·</span>}
+                                                {e.duty && <span class="text-neutral-500 mr-1">{e.duty}</span>}
+                                                {e.name}
+                                                {e.resume_url && (
+                                                    <a href={e.resume_url}
+                                                       class="ml-1.5 text-xs text-neutral-500 hover:text-[#c9372c] transition-colors"
+                                                       target="_blank" rel="noopener">
+                                                        簡歷 →
+                                                    </a>
+                                                )}
+                                            </span>
+                                        ))}
+                                    </dd>
+                                </div>
+                            );
+                        })}
                     </dl>
                 )}
             </div>
@@ -121,10 +143,60 @@ const nextThumb = nextWork ? resolveThumbnail(nextWork.youtube_id, nextWork.slug
         </div>
     </section>
 
+    <!-- Gallery 多媒體（如果有） -->
+    {work.gallery && work.gallery.length > 0 && (
+        <section class="bg-white pt-4 pb-12">
+            <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-10">
+                <div class="text-xs tracking-[0.4em] uppercase text-neutral-500 mb-6">Gallery</div>
+                <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                    {work.gallery.map(g => (
+                        <figure class="aspect-video overflow-hidden bg-neutral-100">
+                            <SmartImage src={g.url}
+                                        alt={g.caption || work.title}
+                                        width={800} height={450}
+                                        loading="lazy"
+                                        class="w-full h-full object-cover hover:scale-[1.02] transition-transform duration-500" />
+                            {g.caption && (
+                                <figcaption class="mt-2 text-xs text-neutral-500 tracking-wide">
+                                    {g.caption}
+                                </figcaption>
+                            )}
+                        </figure>
+                    ))}
+                </div>
+            </div>
+        </section>
+    )}
+
     <!-- 底部分隔線 -->
     <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-10">
         <hr class="border-neutral-200" />
     </div>
+
+    <!-- 相關作品（同 category 優先；不足時補最新 public） -->
+    {relatedWorks.length > 0 && (
+        <section class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-10 py-14 bg-white">
+            <div class="text-xs tracking-[0.4em] uppercase text-neutral-500 mb-6">Related</div>
+            <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-8">
+                {relatedWorks.map(rw => (
+                    <a href={`/works/${rw.slug}`} class="group block">
+                        <div class="aspect-video overflow-hidden bg-neutral-100 mb-3">
+                            {resolveThumbnail(rw.youtube_id, rw.slug, "hq") && (
+                                <SmartImage src={resolveThumbnail(rw.youtube_id, rw.slug, "hq")!}
+                                            alt={rw.title}
+                                            width={640} height={360}
+                                            loading="lazy"
+                                            class="w-full h-full object-cover group-hover:scale-[1.04] transition-transform duration-700" />
+                            )}
+                        </div>
+                        <div class="text-sm text-neutral-700 group-hover:text-[#c9372c] transition-colors tracking-wide">
+                            {rw.title}
+                        </div>
+                    </a>
+                ))}
+            </div>
+        </section>
+    )}
 
     <!-- NEXT 區域 -->
     {nextWork && (

@@ -12,7 +12,7 @@
  *
  * 任一寫入後端會 mark_dirty → 60s debounce 觸發 Astro rebuild → 對外網站更新。
  */
-import { websiteFetch, esc, toastOk, toastErr, renderLoadError, readRowPatch } from '../website-utils.js';
+import { websiteFetch, esc, toastOk, toastErr, renderLoadError, readRowPatch, emptyRow } from '../website-utils.js';
 
 const HEALTH_RULES = [
     { id: 'noindex',     label: '允許 Google/Bing 索引（seo.indexable=true）',
@@ -185,7 +185,7 @@ function _cardQuickFacts() {
         </div>
         <table>
             <thead><tr><th style="width:30%;">標籤</th><th>內容</th><th style="width:60px;">排序</th><th style="width:60px;">可見</th><th></th></tr></thead>
-            <tbody>${rows || '<tr><td colspan="5" style="padding:20px;text-align:center;color:#888;">尚無 Quick Fact，新增上方第一條</td></tr>'}</tbody>
+            <tbody>${rows || ${emptyRow(5, '尚無 Quick Fact，新增上方第一條')}}</tbody>
         </table>
     </div>`;
 }
@@ -220,7 +220,7 @@ function _cardFAQ() {
         </div>
         <table>
             <thead><tr><th style="width:50px;">#</th><th style="width:25%;">問題</th><th>答案</th><th style="width:60px;">排序</th><th style="width:60px;">顯示</th><th></th></tr></thead>
-            <tbody>${rows || '<tr><td colspan="6" style="padding:20px;text-align:center;color:#888;">尚無 FAQ</td></tr>'}</tbody>
+            <tbody>${rows || ${emptyRow(6, '尚無 FAQ')}}</tbody>
         </table>
     </div>`;
 }
@@ -260,7 +260,7 @@ function _cardTestimonials() {
         </div>
         <table>
             <thead><tr><th>客戶</th><th>職稱</th><th>公司</th><th>評分</th><th>內容</th><th style="width:50px;">顯示</th><th></th></tr></thead>
-            <tbody>${rows || '<tr><td colspan="7" style="padding:20px;text-align:center;color:#888;">尚無證言</td></tr>'}</tbody>
+            <tbody>${rows || ${emptyRow(7, '尚無證言')}}</tbody>
         </table>
     </div>`;
 }

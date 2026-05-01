@@ -6,7 +6,8 @@
 分類 CRUD: 同上
 額外端點:
 - POST /admin/posts/import-notion          觸發 Notion 抓 + DB upsert
-- POST /admin/posts/redirects/sync         強制重生 nginx redirects.conf 推 NAS
+- POST /admin/redirects/sync               強制重生 nginx redirects.conf 推 NAS（posts+works）
+- POST /admin/posts/redirects/sync         (Deprecated) 同上之 alias
 - POST /admin/posts/{id}/upload-image      上傳 block 內 image，自動 WebP 轉檔
 """
 from __future__ import annotations
@@ -146,12 +147,14 @@ async def import_from_notion(
 
 
 # ── 強制重新同步 redirects 到 NAS nginx ──
+# /admin/redirects/sync 是新統一名（含 posts + works）。/admin/posts/redirects/sync
+# 是舊 alias 保留 backward compat（既有部署的 admin Tab 還在用）。
 
-@router.post("/posts/redirects/sync", response_model=RedirectSyncResult)
-async def force_sync_redirects(_session: AsyncSession = Depends(admin_session)):
-    """admin 點「🔄 強制重新同步」時呼叫。
+async def _force_sync_redirects_impl():
+    """admin 點「🔄 強制重新同步」時的共用邏輯。
 
     通常 publish 流程會自動 sync；這個 endpoint 是當 admin 看到計數對不上時的自救用。
+    /api/website/redirects 已 merge posts + works，sync 動作影響全部 namespace。
     """
     from datetime import datetime, timezone
     try:
@@ -170,6 +173,18 @@ async def force_sync_redirects(_session: AsyncSession = Depends(admin_session)):
         ok=ok,
         error=None if ok else "sync 失敗，看 master log",
     )
+
+
+@router.post("/redirects/sync", response_model=RedirectSyncResult)
+async def force_sync_redirects(_session: AsyncSession = Depends(admin_session)):
+    """同步 posts + works 全部 redirects 到 NAS nginx。"""
+    return await _force_sync_redirects_impl()
+
+
+@router.post("/posts/redirects/sync", response_model=RedirectSyncResult, deprecated=True)
+async def force_sync_redirects_legacy(_session: AsyncSession = Depends(admin_session)):
+    """[Deprecated] 用 /admin/redirects/sync — 此 alias 保留 backward compat。"""
+    return await _force_sync_redirects_impl()
 
 
 # ── 單一文章詳情（含完整 body）— 編輯 Modal 開啟時用 ──
