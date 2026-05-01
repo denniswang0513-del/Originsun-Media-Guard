@@ -12,10 +12,21 @@
  */
 import {
     websiteFetch, esc, toastOk, toastErr, renderLoadError,
-    readRowPatch, openModal, closeModal,
+    readRowPatch, openModal, closeModal, getApiBase,
 } from '../website-utils.js';
 
 const SUB_TABS = ['posts', 'categories', 'notion', 'seo-migration'];
+
+// upload endpoint 回的 URL 是相對路徑 /uploads/posts/{id}/{name}.webp，
+// 但 admin Tab 是從 master Web UI 開啟的（origin = master），那邊沒這個路徑。
+// 圖片實際存在 NAS website 容器 → 預覽時要 prepend NAS API base。
+// 完整 URL（http/https/data/blob） 原樣 passthrough。
+function _resolveImageUrl(url) {
+    if (!url) return '';
+    if (/^(https?:|data:|blob:)/i.test(url)) return url;
+    if (url.startsWith('/')) return getApiBase() + url;
+    return url;
+}
 
 // 文章狀態 metadata 集中（label + 顯示色 + emoji 一處改全套同步）
 const STATUS = {
@@ -394,7 +405,7 @@ function _showPostModal(title) {
     openModal('post-modal', inner, { width: _previewVisible ? '1180px' : '780px' });
 }
 
-let _previewVisible = false;
+let _previewVisible = true;
 
 function _modalBasicSection(p, isNew, pubLocal) {
     const noPostId = !p.id;
@@ -931,7 +942,7 @@ const BLOCK_REGISTRY = {
                 : '';
             return `
                 ${previewSrc
-                    ? `<img src="${esc(previewSrc)}" style="max-width:100%;max-height:140px;display:block;margin-bottom:6px;border:1px solid #2a2a2a;border-radius:4px;background:#0d0d0d;" onerror="this.style.opacity='0.3'" />`
+                    ? `<img src="${esc(_resolveImageUrl(previewSrc))}" style="max-width:100%;max-height:140px;display:block;margin-bottom:6px;border:1px solid #2a2a2a;border-radius:4px;background:#0d0d0d;" onerror="this.style.opacity='0.3'" />`
                     : '<div style="background:#0d0d0d;border:1px dashed #333;border-radius:4px;padding:14px;text-align:center;color:#555;font-size:11px;margin-bottom:6px;">📷 尚未上傳圖片（拖檔或貼 URL）</div>'}
 
                 <div style="display:flex;gap:6px;margin-bottom:6px;align-items:center;">
@@ -971,7 +982,7 @@ const BLOCK_REGISTRY = {
                 : '';
             return `<figure style="margin:14px 0;width:${w};">
                 ${b.src
-                    ? `<img src="${esc(b.src)}" alt="${esc(b.alt || '')}" style="width:100%;border-radius:4px;display:block;" />`
+                    ? `<img src="${esc(_resolveImageUrl(b.src))}" alt="${esc(b.alt || '')}" style="width:100%;border-radius:4px;display:block;" />`
                     : '<div style="background:#eee;padding:30px;text-align:center;color:#999;font-size:12px;border-radius:4px;">未設圖</div>'}
                 ${cap}
             </figure>`;
@@ -1089,15 +1100,14 @@ const _UNKNOWN_BLOCK_PREVIEW = (b) =>
 function _refreshBlocks() {
     if (!_editingPost) return;
     const blocks = _editingPost.body || [];
-    // 視覺模式：只重畫 block list（不動 toolbar）
-    // 文字模式：blocks 是 textarea 之外被改的（不太會發生）— 重新 serialize
-    const host = document.getElementById('post-blocks');
-    if (host && !_textMode) {
-        host.innerHTML = blocks.length === 0
-            ? `<div style="color:#666;font-size:12px;text-align:center;padding:24px;border:1px dashed #2a2a2a;border-radius:4px;">
-                 尚無內文 — 用上方按鈕新增第一個 block
-               </div>`
-            : blocks.map((b, i) => _renderBlockItem(b, i, blocks.length)).join('');
+    // 視覺模式：重 render 整個 #post-blocks-host（含 toolbar + 內容）。
+    // 之前只重畫 #post-blocks，但空 body 時 _visualModeView 不會生那個容器
+    // → 第一個 block 加進來時找不到 host → 畫面卡在「尚無內文」狀態。
+    if (!_textMode) {
+        const host = document.getElementById('post-blocks-host');
+        if (host) {
+            host.innerHTML = _visualModeView(blocks);
+        }
     }
     if (_textMode) {
         const ta = document.getElementById('m-body-text');
@@ -1317,8 +1327,9 @@ function _coverThumbHtml(url) {
             <div>無封面</div>
         </div>`;
     }
-    return `<div id="m-cover-thumb" style="width:80px;height:80px;border-radius:4px;border:1px solid #333;flex-shrink:0;background:#0d0d0d;background-image:url('${esc(url)}');background-size:cover;background-position:center;position:relative;overflow:hidden;">
-        <img src="${esc(url)}" alt="" style="width:100%;height:100%;object-fit:cover;display:block;"
+    const resolved = _resolveImageUrl(url);
+    return `<div id="m-cover-thumb" style="width:80px;height:80px;border-radius:4px;border:1px solid #333;flex-shrink:0;background:#0d0d0d;background-image:url('${esc(resolved)}');background-size:cover;background-position:center;position:relative;overflow:hidden;">
+        <img src="${esc(resolved)}" alt="" style="width:100%;height:100%;object-fit:cover;display:block;"
              onerror="this.style.display='none';this.parentElement.innerHTML='<div style=\\'width:100%;height:100%;display:flex;flex-direction:column;align-items:center;justify-content:center;color:#888;font-size:10px;text-align:center;line-height:1.3;padding:4px;box-sizing:border-box;\\'><div style=\\'font-size:18px;color:#f87171;\\'>⚠</div>圖片載入失敗</div>'" />
     </div>`;
 }
@@ -1489,7 +1500,7 @@ function _renderPreview(p) {
           ].filter(Boolean).join(' · ')}</div>`
         : '';
     const cover = p.cover_url
-        ? `<img src="${esc(p.cover_url)}" style="width:100%;max-height:240px;object-fit:cover;border-radius:6px;margin-bottom:16px;" />`
+        ? `<img src="${esc(_resolveImageUrl(p.cover_url))}" style="width:100%;max-height:240px;object-fit:cover;border-radius:6px;margin-bottom:16px;" />`
         : '';
     const excerpt = p.excerpt
         ? `<p style="color:#555;font-size:14px;font-style:italic;border-left:3px solid #c9372c;padding-left:10px;margin:0 0 16px;">${esc(p.excerpt)}</p>`

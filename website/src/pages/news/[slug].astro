@@ -12,8 +12,8 @@ import { pageSchemas, resolveSiteUrl, ensureMinDescription, breadcrumb3 } from "
 import type { PostBlockWidth } from "../../types/post";
 
 const WIDTH_CLASS: Record<PostBlockWidth, string> = {
-    content: "max-w-[680px]",
-    wide:    "max-w-4xl",
+    content: "max-w-4xl",
+    wide:    "max-w-5xl",
     full:    "max-w-none",
 };
 
@@ -88,7 +88,7 @@ const schemaData = [
 
     <!-- 類別 + 標題 + meta -->
     <article class="bg-white pt-12 sm:pt-16 pb-8">
-        <div class="max-w-[680px] mx-auto px-4 sm:px-6 lg:px-8">
+        <div class="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8">
             <div class="text-xs tracking-[0.4em] uppercase text-[#c9372c] mb-5">
                 <Tr zh={post.category_label_zh} en={post.category_label_en} />
             </div>
@@ -114,7 +114,7 @@ const schemaData = [
                 if (block.type === "paragraph") {
                     const size = block.lead ? "text-xl sm:text-2xl text-neutral-800 leading-[1.7]" : "text-[17px] sm:text-lg text-neutral-700 leading-[1.95]";
                     return (
-                        <div class="max-w-[680px] mx-auto px-4 sm:px-6 lg:px-8 my-6">
+                        <div class="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 my-6">
                             <p class={`${size} tracking-wide`} set:html={renderInline(block.text)} />
                         </div>
                     );
@@ -124,7 +124,7 @@ const schemaData = [
                         ? "text-2xl sm:text-3xl font-bold text-neutral-900 mt-14 mb-4 tracking-tight"
                         : "text-xl sm:text-2xl font-semibold text-neutral-900 mt-10 mb-3 tracking-tight";
                     return (
-                        <div class="max-w-[680px] mx-auto px-4 sm:px-6 lg:px-8">
+                        <div class="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8">
                             {block.level === 2 ? <h2 class={cls}>{block.text}</h2> : <h3 class={cls}>{block.text}</h3>}
                         </div>
                     );
@@ -166,7 +166,7 @@ const schemaData = [
                 }
                 if (block.type === "quote") {
                     return (
-                        <div class="max-w-[680px] mx-auto px-4 sm:px-6 lg:px-8 my-10 sm:my-14">
+                        <div class="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 my-10 sm:my-14">
                             <blockquote class="border-l-2 border-[#c9372c] pl-6 sm:pl-8 py-2">
                                 <p class="text-xl sm:text-2xl font-light text-neutral-800 leading-[1.6] tracking-wide italic"
                                    set:html={`「${renderInline(block.text)}」`} />
@@ -183,7 +183,7 @@ const schemaData = [
                     const Tag = block.ordered ? "ol" : "ul";
                     const listCls = block.ordered ? "list-decimal" : "list-disc";
                     return (
-                        <div class="max-w-[680px] mx-auto px-4 sm:px-6 lg:px-8 my-6">
+                        <div class="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 my-6">
                             <Tag class={`${listCls} pl-6 space-y-2 text-[17px] sm:text-lg text-neutral-700 leading-[1.85] tracking-wide marker:text-[#c9372c]`}>
                                 {block.items.map(item => <li set:html={renderInline(item)} />)}
                             </Tag>
@@ -193,7 +193,7 @@ const schemaData = [
                 return null;
             })
         ) : (
-            <div class="max-w-[680px] mx-auto px-4 sm:px-6 lg:px-8">
+            <div class="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8">
                 <p class="text-lg text-neutral-600 leading-[1.85] tracking-wide">{post.excerpt}</p>
             </div>
         )}

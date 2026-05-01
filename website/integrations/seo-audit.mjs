@@ -103,8 +103,14 @@ export default function seoAudit(opts = {}) {
                         skipped++;
                         continue;
                     }
-                    audited++;
                     const html = readFileSync(file, 'utf-8');
+                    // 跳過 Astro auto-generated redirect 頁（軟 301）— 純跳轉不該套
+                    // 內容頁規則。Astro redirect 頁固定含 <meta http-equiv="refresh">。
+                    if (/<meta\s+http-equiv=["']refresh["']/i.test(html)) {
+                        skipped++;
+                        continue;
+                    }
+                    audited++;
                     const issues = auditHtml(html, config);
                     if (issues.length) {
                         errors.push({ page: rel, issues });
