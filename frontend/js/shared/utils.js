@@ -101,6 +101,11 @@ export async function pickPath(inputId, type = 'folder') {
         const data = await res.json();
         el.classList.remove('animate-pulse', 'bg-blue-900', 'text-white');
 
+        if (data.error === 'session_0') {
+            alert(data.message || 'Master 跑在 Session 0,picker 無法顯示。');
+            return;
+        }
+
         if (data.path) {
             el.value = data.path;
             _autoFillCardName(el, inputId, data.path);
@@ -436,6 +441,10 @@ export async function pickFiles(title = '選擇影片（可多選）') {
         const res = await fetch('/api/v1/utils/pick_files?title=' + encodeURIComponent(title));
         if (!res.ok) return [];
         const data = await res.json();
+        if (data.error === 'session_0') {
+            alert(data.message || 'Master 跑在 Session 0,picker 無法顯示。');
+            return [];
+        }
         return data.paths || [];
     } catch (_) {
         return [];

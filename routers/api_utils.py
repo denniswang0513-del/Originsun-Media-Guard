@@ -5,6 +5,7 @@ Split from api_system.py — all endpoint paths remain unchanged.
 import os
 import re
 import subprocess
+import sys
 import asyncio
 import locale
 import time
@@ -12,6 +13,35 @@ from fastapi import APIRouter, UploadFile, File, Form  # type: ignore
 from core.schemas import OpenFileRequest, ValidatePathsRequest  # type: ignore
 
 router = APIRouter()
+
+
+def _is_session_0() -> bool:
+    """Return True if this process runs in Session 0 (Services session).
+
+    tkinter file/folder dialogs spawned from Session 0 render to the
+    non-interactive desktop and are invisible to logged-in users in
+    Session 1. Detect early so picker endpoints can fail-fast with a
+    helpful message instead of hanging on the 120s subprocess timeout.
+    """
+    if sys.platform != "win32":
+        return False
+    try:
+        import ctypes
+        from ctypes import wintypes
+        kernel32 = ctypes.WinDLL("Kernel32.dll")
+        ses = wintypes.DWORD()
+        if not kernel32.ProcessIdToSessionId(os.getpid(), ctypes.byref(ses)):
+            return False
+        return ses.value == 0
+    except Exception:
+        return False
+
+
+_SESSION_0_HINT = (
+    "主控端跑在 Session 0(Services session),tkinter picker 視窗會渲染到非互動桌面,"
+    "你看不到也點不到。修法:雙擊主控端桌面的 start_hidden.vbs 重啟,或登出 Windows 再登入"
+    "(OriginsunBoot 排程任務會自動把主控端拉回你的 Session 1)。"
+)
 
 
 @router.post("/api/v1/utils/open_file")
@@ -47,14 +77,15 @@ def _run_picker_subprocess(mode: str, title: str):
     Modes: 'folder' → askdirectory (str), 'file' → askopenfilename (str),
     'files' → askopenfilenames with video filter (list[str]).
 
-    NOTE: This only works when the Agent runs in the user's interactive
-    session (Session 1). If `schtasks /rl highest` was used during install
-    the task is placed in Session 0 (Services) and tkinter dialogs are
-    invisible. Installer was fixed to register without /rl highest; existing
-    broken installs need `schtasks /delete /tn OriginsunAgent /f` + re-run
-    Install_or_Update.bat once.
+    Returns either the picked path/list of paths, or a dict with key
+    `_error`/`_message` if pre-check failed (Session 0). Endpoints unwrap
+    the dict and surface error in the JSON response so frontend can show
+    an actionable message instead of silently waiting 120s.
     """
-    import sys, json as _j
+    if _is_session_0():
+        return {"_error": "session_0", "_message": _SESSION_0_HINT}
+
+    import json as _j
     if mode == "folder":
         dialog_call = f"filedialog.askdirectory(title={title!r})"
         out_expr = "{'path': result or ''}"
@@ -89,20 +120,29 @@ def _run_picker_subprocess(mode: str, title: str):
     return [] if mode == "files" else ""
 
 
+def _unwrap_picker_result(result, list_mode: bool):
+    """Translate _run_picker_subprocess return into endpoint JSON shape."""
+    if isinstance(result, dict) and "_error" in result:
+        if list_mode:
+            return {"paths": [], "error": result["_error"], "message": result["_message"]}
+        return {"path": "", "error": result["_error"], "message": result["_message"]}
+    return {"paths": result} if list_mode else {"path": result}
+
+
 @router.get("/api/v1/utils/pick_folder")
 async def api_pick_folder(title: str = "選擇資料夾"):
-    selected = await asyncio.to_thread(_run_picker_subprocess, "folder", title)
-    return {"path": selected}
+    result = await asyncio.to_thread(_run_picker_subprocess, "folder", title)
+    return _unwrap_picker_result(result, list_mode=False)
 
 @router.get("/api/v1/utils/pick_file")
 async def api_pick_file(title: str = "選擇檔案"):
-    selected = await asyncio.to_thread(_run_picker_subprocess, "file", title)
-    return {"path": selected}
+    result = await asyncio.to_thread(_run_picker_subprocess, "file", title)
+    return _unwrap_picker_result(result, list_mode=False)
 
 @router.get("/api/v1/utils/pick_files")
 async def api_pick_files(title: str = "選擇影片（可多選）"):
-    paths = await asyncio.to_thread(_run_picker_subprocess, "files", title)
-    return {"paths": paths}
+    result = await asyncio.to_thread(_run_picker_subprocess, "files", title)
+    return _unwrap_picker_result(result, list_mode=True)
 
 
 @router.get("/api/v1/utils/read_text")
