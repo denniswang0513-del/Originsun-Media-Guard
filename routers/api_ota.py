@@ -16,45 +16,46 @@ from fastapi.responses import JSONResponse, FileResponse  # type: ignore
 router = APIRouter()
 
 
-def _launch_in_user_session(bat_path: str):
-    """Launch a BAT file in the interactive user's desktop session.
+_NO_WINDOW = getattr(subprocess, 'CREATE_NO_WINDOW', 0x08000000)
 
-    If the current process is in Session 0 (common after DETACHED_PROCESS restart),
-    child processes inherit Session 0 and cannot show GUI (tkinter dialogs, etc.).
-    Using schtasks /IT ensures the task runs in the logged-in user's session.
-    Falls back to DETACHED_PROCESS if schtasks fails (non-admin, etc.).
+
+def _launch_in_user_session(bat_path: str, task_name: str = "OriginsunOtaRestart"):
+    """Launch a BAT in the interactive user's desktop session via schtasks /IT.
+
+    Session 0 caller → child inherits Session 0 → tkinter pickers invisible.
+    /IT routes the spawn through the logged-in user's session.
+
+    Sequential subprocess.run with check=True (not Popen): /run must wait
+    for /create to finish registering, else schtasks races and /run fires
+    against a not-yet-existent task. Each call has timeout=10 so a hung
+    schtasks can't block forever.
     """
-    task_name = "OriginsunOtaRestart"
     try:
-        # Delete stale task (ignore errors)
-        subprocess.run(
-            ["schtasks", "/Delete", "/TN", task_name, "/F"],
-            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-            creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0x08000000),
-        )
-        # Create + run a one-shot interactive task
         subprocess.run(
             ["schtasks", "/Create", "/TN", task_name, "/TR", f'cmd /c "{bat_path}"',
              "/SC", "ONCE", "/ST", "00:00", "/F", "/IT"],
             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-            creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0x08000000),
-            check=True,
+            creationflags=_NO_WINDOW, check=True, timeout=10,
         )
         subprocess.run(
             ["schtasks", "/Run", "/TN", task_name],
             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-            creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0x08000000),
-            check=True,
+            creationflags=_NO_WINDOW, check=True, timeout=10,
         )
         return
-    except Exception:
+    except (subprocess.CalledProcessError, subprocess.TimeoutExpired,
+            FileNotFoundError, OSError):
         pass
 
-    # Fallback: DETACHED_PROCESS (will land in Session 0 but at least restarts)
+    # Fallback: cmd /c BAT directly. CREATE_NO_WINDOW only — DETACHED_PROCESS
+    # strips the console, BAT internals (timeout/move/start /B) silently fail.
+    # Best-effort recovery; may still land in Session 0.
     subprocess.Popen(
         ["cmd", "/c", bat_path],
-        creationflags=subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP
-        | getattr(subprocess, 'CREATE_NO_WINDOW', 0x08000000),
+        creationflags=_NO_WINDOW,
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
         close_fds=True,
     )
 
@@ -166,15 +167,17 @@ async def _do_update_restart():
     with open(bat_path, "w", encoding="ascii", errors="replace") as f:
         f.write("\r\n".join(bat_lines))
 
-    # Launch in the interactive user session (not Session 0) using schtasks.
-    # If the server itself is in Session 0 (e.g. after a previous DETACHED restart),
-    # any child process will also land in Session 0, breaking GUI features like
-    # tkinter file dialogs. A scheduled task with /IT runs in the logged-in user's
-    # interactive desktop session.
-    _launch_in_user_session(bat_path)
+    # Schtasks calls (up to 2×10s timeout) run in a thread + the os._exit
+    # is scheduled afterwards, so the HTTP response returns immediately
+    # rather than holding the connection open for up to 20s. Without this,
+    # publish_update.py's urlopen(timeout=5) raises before schtasks finishes
+    # and the publisher thinks the restart failed.
+    async def _spawn_and_exit():
+        await asyncio.to_thread(_launch_in_user_session, bat_path)
+        await asyncio.sleep(1.0)
+        os._exit(0)
 
-    # Exit after response is sent
-    asyncio.get_running_loop().call_later(1.0, os._exit, 0)
+    asyncio.create_task(_spawn_and_exit())
     return {"status": "updating"}
 
 
@@ -240,29 +243,28 @@ async def admin_restart(request: Request):
 
     async def _restart():
         await asyncio.sleep(1.5)
+        # BAT goes direct to `start "" /B uvicorn` — vbs's WshShell.Run
+        # silently fails for the final uvicorn launch when invoked from
+        # schtasks /run /it (seen in v1.10.122-125 publish tests).
+        bat_path = os.path.join(tempfile.gettempdir(), "originsun_restart.bat")
+        bat_lines = [
+            "@echo off",
+            f'cd /d "{base_dir}"',
+            'for /f "tokens=5" %%p in (\'netstat -aon ^| findstr ":8000 " ^| findstr "LISTENING"\') do (',
+            "    taskkill /PID %%p /F >nul 2>nul",
+            ")",
+            "timeout /t 2 /nobreak >nul",
+            f'del "{out_log}.bak" >nul 2>nul',
+            f'move /Y "{out_log}" "{out_log}.bak" >nul 2>nul',
+            f'del "{err_log}.bak" >nul 2>nul',
+            f'move /Y "{err_log}" "{err_log}.bak" >nul 2>nul',
+            f'start "" /B "{py}" -m uvicorn main:io_app --host 0.0.0.0 --port 8000 > "{out_log}" 2> "{err_log}"',
+        ]
         try:
-            # Write a tiny BAT that kills old server, rotates logs, then starts uvicorn directly.
-            # We DON'T go through start_hidden.vbs — vbs's final WshShell.Run for uvicorn
-            # silently fails when the BAT runs from `schtasks /run /it` (observed in
-            # v1.10.122-125 /publish tests). Direct `start "" /B` works.
-            bat_path = os.path.join(tempfile.gettempdir(), "originsun_restart.bat")
-            bat_lines = [
-                "@echo off",
-                f'cd /d "{base_dir}"',
-                'for /f "tokens=5" %%p in (\'netstat -aon ^| findstr ":8000 " ^| findstr "LISTENING"\') do (',
-                "    taskkill /PID %%p /F >nul 2>nul",
-                ")",
-                "timeout /t 2 /nobreak >nul",
-                f'del "{out_log}.bak" >nul 2>nul',
-                f'move /Y "{out_log}" "{out_log}.bak" >nul 2>nul',
-                f'del "{err_log}.bak" >nul 2>nul',
-                f'move /Y "{err_log}" "{err_log}.bak" >nul 2>nul',
-                f'start "" /B "{py}" -m uvicorn main:io_app --host 0.0.0.0 --port 8000 > "{out_log}" 2> "{err_log}"',
-            ]
             with open(bat_path, "w", encoding="ascii", errors="replace") as f:
                 f.write("\r\n".join(bat_lines))
-            _launch_in_user_session(bat_path)
-        except Exception:
+            await asyncio.to_thread(_launch_in_user_session, bat_path)
+        except OSError:
             pass
         asyncio.get_running_loop().call_later(0.5, os._exit, 0)
 

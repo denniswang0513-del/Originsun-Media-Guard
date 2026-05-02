@@ -332,74 +332,59 @@ async def get_nas_version():
         return {"version": "unknown", "error": str(e)}
 
 
-# ── Fallback restart (duplicated from api_ota.py for resilience) ──────
-# If api_ota.py fails to load, this ensures remote updates still work.
+# ── Restart endpoint (delegates schtasks plumbing to api_ota) ──────
 
 @router.post("/api/v1/system/restart")
 async def system_restart(request: Request):
-    """Minimal restart endpoint — fallback when api_ota.py fails to load."""
+    """Restart endpoint mirroring /api/v1/internal/restart with the
+    `OriginsunRestart` task name (so it can co-exist if both endpoints
+    are ever pinged in sequence)."""
     key = request.headers.get("X-Internal-Key", "")
     if key != "originsun-internal-restart":
         client_ip = request.client.host if request.client else ""
         if client_ip not in ("127.0.0.1", "::1", "localhost"):
             return JSONResponse({"detail": "Unauthorized"}, 403)
 
-    import tempfile, subprocess
+    import tempfile
+    from routers.api_ota import _launch_in_user_session
     base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     venv_py = os.path.join(base_dir, ".venv", "Scripts", "python.exe")
     embed_py = os.path.join(base_dir, "python_embed", "python.exe")
     py = venv_py if os.path.exists(venv_py) else (embed_py if os.path.exists(embed_py) else sys.executable)
 
     bat_path = os.path.join(tempfile.gettempdir(), "originsun_sys_restart.bat")
-    vbs_path = os.path.join(base_dir, "start_hidden.vbs")
     updater = os.path.join(base_dir, "update_agent.py")
-
     out_log = os.path.join(base_dir, "uvicorn_out.log")
     err_log = os.path.join(base_dir, "uvicorn_err.log")
     out_bak = out_log + ".bak"
     err_bak = err_log + ".bak"
-    lines = ["@echo off", f'cd /d "{base_dir}"', "del update_status.json >nul 2>nul"]
-    lines.append('for /f "tokens=5" %%p in (\'netstat -aon ^| findstr ":8000 " ^| findstr "LISTENING"\') do taskkill /PID %%p /F >nul 2>nul')
-    lines.append("timeout /t 3 /nobreak >nul")
+    lines = [
+        "@echo off",
+        f'cd /d "{base_dir}"',
+        "del update_status.json >nul 2>nul",
+        'for /f "tokens=5" %%p in (\'netstat -aon ^| findstr ":8000 " ^| findstr "LISTENING"\') do taskkill /PID %%p /F >nul 2>nul',
+        "timeout /t 3 /nobreak >nul",
+    ]
     if os.path.exists(updater):
         lines.append(f'"{py}" "{updater}"')
-    # Rotate logs so this restart's output doesn't tail-onto the previous run.
-    lines.append(f'del "{out_bak}" >nul 2>nul')
-    lines.append(f'move /Y "{out_log}" "{out_bak}" >nul 2>nul')
-    lines.append(f'del "{err_bak}" >nul 2>nul')
-    lines.append(f'move /Y "{err_log}" "{err_bak}" >nul 2>nul')
-    # Direct uvicorn launch — skips start_hidden.vbs which fails to start
-    # uvicorn when this BAT is run from `schtasks /run /it` context (vbs's
-    # final `WshShell.Run cmd, 0, False` returns success but the cmd /c
-    # child silently never starts uvicorn — observed across v1.10.122-125
-    # /publish tests). `start "" /B` detaches uvicorn from BAT so BAT can
-    # exit cleanly; uvicorn keeps running.
-    lines.append(f'start "" /B "{py}" -m uvicorn main:io_app --host 0.0.0.0 --port 8000 > "{out_log}" 2> "{err_log}"')
-
+    lines += [
+        f'del "{out_bak}" >nul 2>nul',
+        f'move /Y "{out_log}" "{out_bak}" >nul 2>nul',
+        f'del "{err_bak}" >nul 2>nul',
+        f'move /Y "{err_log}" "{err_bak}" >nul 2>nul',
+        # Direct `start "" /B uvicorn` — vbs's WshShell.Run silently
+        # fails for the final uvicorn launch from schtasks /run /it.
+        f'start "" /B "{py}" -m uvicorn main:io_app --host 0.0.0.0 --port 8000 > "{out_log}" 2> "{err_log}"',
+    ]
     with open(bat_path, "w", encoding="ascii", errors="replace") as f:
         f.write("\r\n".join(lines))
 
-    # Use /IT (interactive) so the task runs in the user's Session 1, not
-    # Session 0 (which would make tkinter pickers invisible again). /ST 23:59
-    # is a valid future-time placeholder — the task is triggered immediately
-    # via /run below, so the scheduled time is never actually used.
-    try:
-        subprocess.Popen(
-            ["schtasks", "/create", "/tn", "OriginsunRestart", "/tr", bat_path,
-             "/sc", "once", "/st", "23:59", "/f", "/it"],
-            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0x08000000),
-        )
-        subprocess.Popen(
-            ["schtasks", "/run", "/tn", "OriginsunRestart"],
-            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0x08000000),
-        )
-    except Exception:
-        subprocess.Popen(
-            bat_path, shell=True,
-            creationflags=getattr(subprocess, "DETACHED_PROCESS", 0x00000008),
-        )
+    # Schtasks runs in a thread + os._exit is scheduled afterwards so the
+    # HTTP response returns immediately rather than blocking up to 20s.
+    async def _spawn_and_exit():
+        await asyncio.to_thread(_launch_in_user_session, bat_path, "OriginsunRestart")
+        await asyncio.sleep(1.0)
+        os._exit(0)
 
-    asyncio.get_running_loop().call_later(1.0, os._exit, 0)
+    asyncio.create_task(_spawn_and_exit())
     return {"status": "updating"}

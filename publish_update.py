@@ -471,12 +471,14 @@ def main():
     print(f"[OK] OTA 大小正常 ({ota_mb:.1f} MB)")
 
     # ── Post-publish: restart server so it serves the new version ──
+    # Primary: /internal/restart (api_ota path). /system/restart is the
+    # legacy duplicate kept only for in-place upgrades from older agents
+    # that still call it via /publish.
     print("\n[*] 重啟主控端以載入新版本...")
     import urllib.request
     try:
-        # Try the admin restart endpoint (local only)
         req = urllib.request.Request(
-            "http://127.0.0.1:8000/api/v1/system/restart",
+            "http://127.0.0.1:8000/api/v1/internal/restart",
             method="POST", data=b'{}',
             headers={"Content-Type": "application/json",
                      "X-Internal-Key": "originsun-internal-restart"},
@@ -485,7 +487,7 @@ def main():
     except Exception:
         try:
             req = urllib.request.Request(
-                "http://127.0.0.1:8000/api/v1/internal/restart",
+                "http://127.0.0.1:8000/api/v1/system/restart",
                 method="POST", data=b'{}',
                 headers={"Content-Type": "application/json",
                          "X-Internal-Key": "originsun-internal-restart"},
