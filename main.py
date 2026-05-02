@@ -248,12 +248,16 @@ def _self_heal_scheduled_task():
         except Exception as e:
             print(f"[SelfHeal] write recover bat failed: {e}")
             return
-        DETACHED_PROCESS = 0x00000008
-        CREATE_NEW_PROCESS_GROUP = 0x00000200
+        # NB: only CREATE_NO_WINDOW — DETACHED_PROCESS strips the console
+        # which makes BAT internals (`timeout`, redirection) silently fail
+        # to run. CREATE_NEW_PROCESS_GROUP is also dropped (we don't need
+        # to send Ctrl+C to children).
         subprocess.Popen(
             ["cmd", "/c", bat_path],
-            creationflags=DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP |
-                          getattr(subprocess, 'CREATE_NO_WINDOW', 0),
+            creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0),
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
             close_fds=True,
         )
         print("[SelfHeal] Restart helper spawned — Agent will respawn in Session 1 shortly")

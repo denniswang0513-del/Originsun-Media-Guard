@@ -1,5 +1,5 @@
 {
-  "version": "1.10.125",
+  "version": "1.10.126",
   "build_date": "2026-05-02",
-  "notes": "hotfix(main.py): SelfHeal helper 改直接 spawn uvicorn — wscript 在 detached 環境下會 hang"
+  "notes": "hotfix: /publish + OTA + SelfHeal helper 全跳過 vbs，BAT 直接 start uvicorn"
 }
