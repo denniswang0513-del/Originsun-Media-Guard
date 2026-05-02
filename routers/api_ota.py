@@ -151,16 +151,17 @@ async def _do_update_restart():
         bat_lines.append(f'"{py}" "{updater_path}"')
     bat_lines += [
         "",
-        "REM Step 3: Rotate logs + start server directly (skip vbs).",
-        "REM   vbs's WshShell.Run for the final uvicorn launch silently fails",
-        "REM   when this BAT runs from `schtasks /run /it` context — observed",
-        "REM   across v1.10.122-125 /publish tests where vbs returned cleanly",
-        "REM   but no uvicorn process appeared. `start \"\" /B` from BAT works.",
+        "REM Step 3: Rotate logs + run uvicorn inline (BAT blocks until exit).",
+        "REM   `start \"\" /B` looked clean but uvicorn shares its BAT's console;",
+        "REM   when BAT exits, schtasks task ends and console destruction sends",
+        "REM   CTRL_CLOSE_EVENT to uvicorn — master died silently 2-7 min later.",
+        "REM   Inline (blocking) run keeps the cmd→BAT→python chain alive, so",
+        "REM   the console persists until next /system/restart kills port 8000.",
         f'del "{out_log}.bak" >nul 2>nul',
         f'move /Y "{out_log}" "{out_log}.bak" >nul 2>nul',
         f'del "{err_log}.bak" >nul 2>nul',
         f'move /Y "{err_log}" "{err_log}.bak" >nul 2>nul',
-        f'start "" /B "{py}" -m uvicorn main:io_app --host 0.0.0.0 --port 8000 > "{out_log}" 2> "{err_log}"',
+        f'"{py}" -m uvicorn main:io_app --host 0.0.0.0 --port 8000 > "{out_log}" 2> "{err_log}"',
         "",
     ]
 
@@ -243,9 +244,8 @@ async def admin_restart(request: Request):
 
     async def _restart():
         await asyncio.sleep(1.5)
-        # BAT goes direct to `start "" /B uvicorn` — vbs's WshShell.Run
-        # silently fails for the final uvicorn launch when invoked from
-        # schtasks /run /it (seen in v1.10.122-125 publish tests).
+        # uvicorn runs inline (no `start /B`) — see _do_update_restart for why:
+        # `start /B` lets cmd exit then console takedown CTRL_CLOSE_EVENTs uvicorn.
         bat_path = os.path.join(tempfile.gettempdir(), "originsun_restart.bat")
         bat_lines = [
             "@echo off",
@@ -258,7 +258,7 @@ async def admin_restart(request: Request):
             f'move /Y "{out_log}" "{out_log}.bak" >nul 2>nul',
             f'del "{err_log}.bak" >nul 2>nul',
             f'move /Y "{err_log}" "{err_log}.bak" >nul 2>nul',
-            f'start "" /B "{py}" -m uvicorn main:io_app --host 0.0.0.0 --port 8000 > "{out_log}" 2> "{err_log}"',
+            f'"{py}" -m uvicorn main:io_app --host 0.0.0.0 --port 8000 > "{out_log}" 2> "{err_log}"',
         ]
         try:
             with open(bat_path, "w", encoding="ascii", errors="replace") as f:

@@ -372,9 +372,10 @@ async def system_restart(request: Request):
         f'move /Y "{out_log}" "{out_bak}" >nul 2>nul',
         f'del "{err_bak}" >nul 2>nul',
         f'move /Y "{err_log}" "{err_bak}" >nul 2>nul',
-        # Direct `start "" /B uvicorn` — vbs's WshShell.Run silently
-        # fails for the final uvicorn launch from schtasks /run /it.
-        f'start "" /B "{py}" -m uvicorn main:io_app --host 0.0.0.0 --port 8000 > "{out_log}" 2> "{err_log}"',
+        # uvicorn runs inline (no `start /B`): `start /B` lets cmd exit
+        # which destroys the shared console and CTRL_CLOSE_EVENTs uvicorn.
+        # Inline keeps cmd→BAT→python alive so console persists.
+        f'"{py}" -m uvicorn main:io_app --host 0.0.0.0 --port 8000 > "{out_log}" 2> "{err_log}"',
     ]
     with open(bat_path, "w", encoding="ascii", errors="replace") as f:
         f.write("\r\n".join(lines))
