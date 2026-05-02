@@ -1,5 +1,5 @@
 {
-  "version": "1.10.127",
+  "version": "1.10.130",
   "build_date": "2026-05-02",
-  "notes": "fix: SelfHeal helper Popen 拿掉 DETACHED_PROCESS（BAT 內 timeout 需要 console）"
+  "notes": "自動啟動連根拔起:從 schtasks 改用 Windows Startup folder shortcut,徹底斬掉 Session 0 silent fail 路徑;picker 永遠 Session 1 工作。順帶 picker Session 0 fail-fast alert。"
 }
