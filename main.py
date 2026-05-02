@@ -564,6 +564,9 @@ async def _on_startup():
                 from db.seed_website import seed_website_if_empty
                 await run_website_migrations(_f_web)
                 await seed_website_if_empty(_f_web)
+                # AI SEO runner 排程 loop（每 60s 檢查 cron 是否到期）
+                from services.website import seo_runner
+                seo_runner.start_scheduler_task()
         except Exception as _e_web:
             print(f"[startup] Website migration/seed failed: {_e_web}")
 

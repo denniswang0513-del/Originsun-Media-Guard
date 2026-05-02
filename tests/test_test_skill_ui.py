@@ -6,7 +6,6 @@ test_test_skill_ui.py — Phase 4 Playwright UI for /test skill.
 - crm-staff（×2）：人力資源 Tab — fresh staff 空狀態 / 外部演員 chip
 - showcase-edit（×3）：dropdown 浮出 / debounce 搜尋＋click 連結 / quick_add modal
 - works-admin：作品集管理 Tab（NAS-only，預期 hint 文字）
-- showcase-public：showcase.html block credits 渲染（含 role label）
 
 跑：`pytest tests/test_test_skill_ui.py -v`
 首次跑前：`.venv/Scripts/python.exe -m playwright install chromium`
@@ -487,54 +486,6 @@ class TestWorksAdminTab:
         # 至少其中一個 hint pattern 應出現（多檔/多語可能寫法）
         assert any(kw in body_text for kw in ["無法載入", "404", "請在 master", "Failed", "Not Found"]), \
             f"NAS-only endpoint 應顯示不可用 hint，實際 body 前 500 字: {body_text[:500]!r}"
-
-
-# ══════════════════════════════════════════════════════════
-# Flow 4: showcase.html 公開頁 — credits block 渲染（含 role label）
-# ══════════════════════════════════════════════════════════
-
-class TestShowcasePublic:
-    def test_block_credits_render_with_role_label(self, page: Page, real_server):
-        """showcase.html 拿到 block credits → role / duty 攤平成 .sc-credit row。
-
-        block.name_zh + entry.duty → "演員 / 主演" label
-        entry.name → name 欄
-        """
-        proj = _run(seed_test_project())
-        sc = _run(seed_test_showcase_with_token(proj["id"]))
-        base = real_server["base_url"]
-
-        _put_credits(base, sc["token"], [{
-            "role_id": None, "name_zh": "演員", "name_en": "Cast",
-            "entries": [{"duty": "主演", "name": "張三", "resume_url": ""}],
-        }])
-
-        # mark published
-        async def _publish():
-            from db.models import CrmProjectShowcase
-            from tests.fixtures.test_data import _get_session_factory
-            factory = await _get_session_factory()
-            async with factory() as session:
-                row = await session.get(CrmProjectShowcase, proj["id"])
-                if row:
-                    row.published = True
-                    await session.commit()
-        _run(_publish())
-
-        page.goto(f"{base}/showcase.html?id={proj['id']}", timeout=30_000)
-        page.wait_for_load_state("domcontentloaded")
-        page.wait_for_selector(".sc-credit", timeout=10_000)
-
-        credits = page.locator(".sc-credit")
-        assert credits.count() >= 1
-
-        role_text = page.locator(".sc-credit-role").first.inner_text()
-        # block.name_zh="演員" + entry.duty="主演" → "演員 / 主演"
-        assert "演員" in role_text and "主演" in role_text, \
-            f"role label 應含 block name_zh + duty，實際 {role_text!r}"
-
-        name_text = page.locator(".sc-credit-name").first.inner_text()
-        assert "張三" in name_text
 
 
 if __name__ == "__main__":

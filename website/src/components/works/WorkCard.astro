@@ -32,25 +32,30 @@ const thumb = resolveThumbnail(work.youtube_id, work.slug, "hq");
     </div>
 
     <div>
-        <div class="flex items-center gap-2 mb-2 text-[10px] tracking-[0.3em] uppercase text-neutral-500">
-            {work.categories.slice(0, 2).map((cat, i) => (
-                <>{i > 0 && <span>·</span>}<span>{cat}</span></>
-            ))}
-            {work.year && <>
-                <span>·</span>
-                <span>{work.year}</span>
-            </>}
-        </div>
+        {(work.categories.length > 0 || work.client) && (
+            <div class="flex items-center gap-2 mb-2 text-[10px] text-[#c9372c] flex-wrap">
+                {work.categories.slice(0, 2).map((cat, i) => (
+                    <>{i > 0 && <span class="text-[#c9372c]/40">·</span>}<span class="tracking-[0.3em] uppercase">{cat}</span></>
+                ))}
+                {work.client && (
+                    <>
+                        {work.categories.length > 0 && <span class="text-[#c9372c]/40">·</span>}
+                        <span class="tracking-wider">{work.client}</span>
+                    </>
+                )}
+            </div>
+        )}
         <h3 class="text-base sm:text-lg font-medium text-neutral-900 tracking-wide leading-snug group-hover:text-[#c9372c] transition-colors">
             {work.title}
         </h3>
-        {work.client && (
-            <p class="text-sm text-neutral-500 mt-1 tracking-wide">{work.client}</p>
-        )}
-        {work.credits_summary && (
-            <p class="text-xs text-neutral-400 mt-1 tracking-wide line-clamp-1">
-                {work.credits_summary}
-            </p>
+        {work.tags && work.tags.length > 0 && (
+            <div class="flex flex-wrap gap-1.5 mt-2">
+                {work.tags.slice(0, 3).map(t => (
+                    <span class="text-[10px] tracking-wider text-neutral-500 bg-neutral-100 px-2 py-0.5 rounded-sm">
+                        #{t.replace(/^tag-/, "")}
+                    </span>
+                ))}
+            </div>
         )}
     </div>
 </a>

@@ -30,6 +30,7 @@ interface Props {
     meta: IWebsiteMeta;
     noindex?: boolean;            // 不傳 → 走 meta.indexable；傳 true/false → 強制覆寫
     ogImage?: string;
+    canonical?: string;           // 跨站發布時指向原作（少用）— 不傳預設走 Astro.url.pathname
 }
 
 // 預設：admin 在 settings 把 seo.indexable 打開後對外網站才允許索引；
@@ -45,7 +46,8 @@ function _truncate(s: string, max = 155): string {
     return oneLine.length <= max ? oneLine : oneLine.slice(0, max - 1) + "…";
 }
 const desc = _truncate(description);
-const canonical = canonicalUrl(Astro.site, Astro.url.pathname);
+// canonical 優先序：caller 傳入（per-page override）> Astro.url.pathname 自動算
+const canonical = Astro.props.canonical || canonicalUrl(Astro.site, Astro.url.pathname);
 const finalOgImage = ogImage || meta.seo_og_image || undefined;
 ---
 

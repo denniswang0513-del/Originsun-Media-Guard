@@ -47,7 +47,7 @@ const HEALTH_RULES = [
       help: '待 i18n 多語路由完成後自動 pass' },
 ];
 
-let _state = { settings: {}, faqs: [], testimonials: [], quickFacts: [] };
+let _state = { settings: {}, faqs: [], testimonials: [], quickFacts: [], aiRunner: null };
 let _container = null;
 
 export default async function render(container, ctx = {}) {
@@ -56,17 +56,19 @@ export default async function render(container, ctx = {}) {
     container.innerHTML = '<h2>🔍 SEO / AI SEO 管理</h2><div style="color:#888;padding:20px;">載入中…</div>';
 
     try {
-        const [settings, faqs, testi, qfacts] = await Promise.all([
+        const [settings, faqs, testi, qfacts, runner] = await Promise.all([
             websiteFetch('/api/website/admin/settings'),
             websiteFetch('/api/website/admin/faqs'),
             websiteFetch('/api/website/admin/testimonials'),
             websiteFetch('/api/website/admin/quick_facts'),
+            websiteFetch('/api/website/admin/seo/runner/settings').catch(() => null),
         ]);
         if (!isCurrent()) return;
         _state.settings = settings?.settings || {};
         _state.faqs = faqs?.items || [];
         _state.testimonials = testi?.items || [];
         _state.quickFacts = qfacts?.items || [];
+        _state.aiRunner = runner;
     } catch (e) {
         if (!isCurrent()) return;
         // 404 = 新 admin SEO endpoint 在 NAS website-api 不存在 → 大概率部署落後
@@ -84,6 +86,7 @@ function _renderAll() {
     _container.innerHTML = `
         <h2>🔍 SEO / AI SEO 管理</h2>
         <div style="display:grid;grid-template-columns:1fr;gap:16px;max-width:1100px;">
+            ${_cardAiRunner()}
             ${_cardMeta()}
             ${_cardQuickFacts()}
             ${_cardFAQ()}
@@ -94,6 +97,126 @@ function _renderAll() {
         </div>
     `;
     _bindDescCounter();
+    _bindAiRunner();
+}
+
+// ===== 0. AI SEO Runner 排程 =====
+function _cardAiRunner() {
+    const r = _state.aiRunner;
+    if (r === null) {
+        // endpoint 不存在（NAS website-api 跑舊版）
+        return `<div class="card" style="border-left:3px solid #6b7280;">
+            <h3 style="color:#fff;margin:0 0 8px;font-size:15px;">🤖 AI SEO 排程</h3>
+            <div style="color:#888;font-size:12px;">NAS website-api 尚未支援此 endpoint，請在 master 跑 /publish 同步後端。</div>
+        </div>`;
+    }
+    const enabled = !!r.enabled;
+    const cron = r.cron || '0 3 * * *';
+    const batch = r.batch_size || 10;
+    const lastAt = r.last_run_at
+        ? new Date(r.last_run_at * 1000).toLocaleString('zh-TW')
+        : '從未執行';
+    const summary = r.last_run_summary || {};
+    const sumText = summary && (summary.processed != null)
+        ? `處理 ${summary.processed} 筆 / 失敗 ${summary.errors || 0} 筆`
+        : '';
+    return `<div class="card" style="border-left:3px solid #c8a45c;">
+        <h3 style="color:#fff;margin:0 0 12px;font-size:15px;">🤖 AI SEO 排程
+            <span style="color:#888;font-size:11px;font-weight:400;margin-left:8px;">
+                透過 claude --print 自動補作品 SEO 內容（吃 Max 訂閱額度）
+            </span>
+        </h3>
+
+        <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:14px;margin-bottom:12px;">
+            <div>
+                <label style="color:#888;font-size:11px;display:block;margin-bottom:6px;">啟用排程</label>
+                <label style="display:flex;align-items:center;gap:8px;cursor:pointer;color:#ddd;">
+                    <input type="checkbox" id="ai-runner-enabled" ${enabled ? 'checked' : ''} style="width:16px;height:16px;" />
+                    <span>${enabled ? '✓ 已啟用' : '⚠ 未啟用（手動觸發仍可用）'}</span>
+                </label>
+            </div>
+            <div>
+                <label style="color:#888;font-size:11px;display:block;margin-bottom:6px;">Cron（主機本地時區）</label>
+                <input id="ai-runner-cron" type="text" value="${esc(cron)}"
+                    placeholder="0 3 * * *" style="width:100%;font-family:ui-monospace,monospace;font-size:12px;" />
+                <div style="color:#666;font-size:10px;margin-top:2px;">預設「每日凌晨 3 點」= <code>0 3 * * *</code></div>
+            </div>
+            <div>
+                <label style="color:#888;font-size:11px;display:block;margin-bottom:6px;">單次最多處理</label>
+                <input id="ai-runner-batch" type="number" min="1" max="50" value="${batch}" style="width:100%;" />
+                <div style="color:#666;font-size:10px;margin-top:2px;">超過此數的待處理作品下次再跑</div>
+            </div>
+        </div>
+
+        <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:8px;">
+            <button id="ai-runner-save" class="btn btn-sm btn-primary">💾 儲存排程設定</button>
+            <button id="ai-runner-preview" class="btn btn-sm">👁 預覽（dry-run）</button>
+            <button id="ai-runner-now" class="btn btn-sm">▶ 立即執行</button>
+        </div>
+
+        <div style="color:#888;font-size:11px;padding-top:8px;border-top:1px solid #2a2a2a;">
+            上次執行：<span style="color:#ddd;">${esc(lastAt)}</span>
+            ${sumText ? `<span style="color:#666;">·</span> <span style="color:#ddd;">${esc(sumText)}</span>` : ''}
+        </div>
+    </div>`;
+}
+
+function _bindAiRunner() {
+    const enabledEl = document.getElementById('ai-runner-enabled');
+    const cronEl = document.getElementById('ai-runner-cron');
+    const batchEl = document.getElementById('ai-runner-batch');
+    if (!enabledEl) return; // endpoint 不可用時 _cardAiRunner 是 fallback、無這些 input
+
+    document.getElementById('ai-runner-save')?.addEventListener('click', async () => {
+        try {
+            await websiteFetch('/api/website/admin/seo/runner/settings', {
+                method: 'PUT',
+                body: {
+                    enabled: enabledEl.checked,
+                    cron: cronEl.value.trim() || '0 3 * * *',
+                    batch_size: Math.max(1, Math.min(50, Number(batchEl.value) || 10)),
+                },
+            });
+            toastOk('排程設定已儲存');
+        } catch (e) { toastErr('儲存失敗：' + (e.message || e)); }
+    });
+
+    document.getElementById('ai-runner-preview')?.addEventListener('click', async () => {
+        try {
+            const r = await websiteFetch('/api/website/admin/seo/runner/run?dry_run=1', { method: 'POST' });
+            const n = (r.works || []).length;
+            toastOk(`Dry-run：將處理 ${n} 筆作品（不實際送 LLM）`);
+        } catch (e) { toastErr('預覽失敗：' + (e.message || e)); }
+    });
+
+    document.getElementById('ai-runner-now')?.addEventListener('click', async () => {
+        const btn = document.getElementById('ai-runner-now');
+        const orig = btn.textContent;
+        btn.disabled = true;
+        btn.textContent = '⏳ 執行中…（每筆約 30-60 秒）';
+        try {
+            const r = await websiteFetch('/api/website/admin/seo/runner/run', { method: 'POST' });
+            if (r.status === 'busy') {
+                toastErr('已有 AI runner 在跑');
+            } else {
+                const failed = (r.works || []).find(w => w.status !== 'ok' && w.status !== 'would_process');
+                const detail = failed ? `（首件錯誤：${failed.detail || failed.status}）` : '';
+                if ((r.errors || 0) > 0) {
+                    toastErr(`處理 ${r.processed} 筆 / 失敗 ${r.errors} 筆 ${detail}`);
+                } else {
+                    toastOk(`完成：處理 ${r.processed} 筆`);
+                }
+                // 重 load 顯示 last_run
+                _state.aiRunner = await websiteFetch('/api/website/admin/seo/runner/settings');
+                _renderAll();
+            }
+        } catch (e) {
+            toastErr('執行失敗：' + (e.message || e));
+        } finally {
+            btn.disabled = false;
+            btn.textContent = orig;
+        }
+    });
 }
 
 
@@ -185,7 +308,7 @@ function _cardQuickFacts() {
         </div>
         <table>
             <thead><tr><th style="width:30%;">標籤</th><th>內容</th><th style="width:60px;">排序</th><th style="width:60px;">可見</th><th></th></tr></thead>
-            <tbody>${rows || ${emptyRow(5, '尚無 Quick Fact，新增上方第一條')}}</tbody>
+            <tbody>${rows || emptyRow(5, '尚無 Quick Fact，新增上方第一條')}</tbody>
         </table>
     </div>`;
 }
@@ -220,7 +343,7 @@ function _cardFAQ() {
         </div>
         <table>
             <thead><tr><th style="width:50px;">#</th><th style="width:25%;">問題</th><th>答案</th><th style="width:60px;">排序</th><th style="width:60px;">顯示</th><th></th></tr></thead>
-            <tbody>${rows || ${emptyRow(6, '尚無 FAQ')}}</tbody>
+            <tbody>${rows || emptyRow(6, '尚無 FAQ')}</tbody>
         </table>
     </div>`;
 }
@@ -260,7 +383,7 @@ function _cardTestimonials() {
         </div>
         <table>
             <thead><tr><th>客戶</th><th>職稱</th><th>公司</th><th>評分</th><th>內容</th><th style="width:50px;">顯示</th><th></th></tr></thead>
-            <tbody>${rows || ${emptyRow(7, '尚無證言')}}</tbody>
+            <tbody>${rows || emptyRow(7, '尚無證言')}</tbody>
         </table>
     </div>`;
 }

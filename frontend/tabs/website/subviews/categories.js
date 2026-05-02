@@ -1,85 +1,131 @@
 /**
- * categories.js — 作品分類 CRUD
+ * categories.js — 作品分類 + 標籤 CRUD（兩區塊獨立管理）
+ *
+ * 「分類」（kind=category）放上排，主要用來標製作類型（形象/廣告/MV…）。
+ * 「標籤」（kind=tag）放下排，標使用場景（展覽/講座/海外…）。
+ * 兩者共用同一張 website_categories 表，差別只在 kind 欄。
  */
 import { websiteFetch, esc, toastOk, toastErr, renderLoadError, readRowPatch, emptyRow } from '../website-utils.js';
 
 let _cats = [];
 
+const KIND_META = {
+    category: {
+        title: '🎬 分類（製作類型）',
+        hint: '製作類型例：商業廣告、紀錄片、MV、動畫等。對外作品頁第一排。',
+        slugPlaceholder: 'e.g. commercial / documentary',
+        namePlaceholder: '商業廣告',
+        addBtn: '+ 新增分類',
+        emptyMsg: '尚無分類，從上方表單新增第一個',
+    },
+    tag: {
+        title: '🏷️ 標籤（使用場景）',
+        hint: '使用場景例：展覽、講座、海外、線上獨家等。對外作品頁第二排（標籤雲樣式）。',
+        slugPlaceholder: 'e.g. tag-exhibition / tag-overseas',
+        namePlaceholder: '展覽',
+        addBtn: '+ 新增標籤',
+        emptyMsg: '尚無標籤，從上方表單新增第一個',
+    },
+};
+
+
 export default async function render(container, ctx = {}) {
     const { isCurrent = () => true } = ctx;
-    container.innerHTML = '<h2>🏷️ 作品分類</h2><div style="color:#888;padding:20px;">載入中…</div>';
+    container.innerHTML = '<h2>🏷️ 作品分類 / 標籤</h2><div style="color:#888;padding:20px;">載入中…</div>';
     try {
         const data = await websiteFetch('/api/website/admin/categories');
         if (!isCurrent()) return;
         _cats = data?.items || [];
     } catch (e) {
         if (!isCurrent()) return;
-        renderLoadError(container, '🏷️ 作品分類', e);
+        renderLoadError(container, '🏷️ 作品分類 / 標籤', e);
         return;
     }
 
     const catCount = _cats.filter(c => (c.kind || 'category') === 'category').length;
     const tagCount = _cats.filter(c => c.kind === 'tag').length;
+
     container.innerHTML = `
-        <h2>🏷️ 作品分類 / 標籤 <span style="color:#888;font-size:13px;font-weight:400;">· ${catCount} 分類 + ${tagCount} 標籤</span></h2>
+        <h2>🏷️ 作品分類 / 標籤
+            <span style="color:#888;font-size:13px;font-weight:400;">· ${catCount} 分類 + ${tagCount} 標籤</span>
+        </h2>
+        <p style="color:#666;font-size:12px;margin:0 0 20px;">
+            兩者共用 slug 命名空間（不能撞）。對外作品集頁會分兩個區塊顯示。
+        </p>
+
+        ${_renderSectionHtml('category')}
+
+        <div style="height:24px;"></div>
+
+        ${_renderSectionHtml('tag')}
+    `;
+
+    _renderTable('category');
+    _renderTable('tag');
+}
+
+
+function _renderSectionHtml(kind) {
+    const meta = KIND_META[kind];
+    const accent = kind === 'tag' ? '#9333ea' : '#3b82f6';  // 紫=tag, 藍=category
+    return `
+        <div style="border-left:3px solid ${accent};padding-left:14px;margin-bottom:12px;">
+            <h3 style="color:#fff;margin:0 0 4px;font-size:15px;">${meta.title}</h3>
+            <p style="color:#888;font-size:11px;margin:0 0 10px;">${meta.hint}</p>
+        </div>
 
         <div class="card" style="margin-bottom:12px;">
-            <h3 style="color:#fff;margin:0 0 8px 0;font-size:13px;">新增</h3>
-            <div style="display:grid;grid-template-columns:90px repeat(4,1fr) auto;gap:8px;align-items:end;">
-                <div><label style="color:#888;font-size:11px;">類型</label>
-                    <select id="cat-new-kind" style="width:100%;">
-                        <option value="category">分類</option>
-                        <option value="tag">標籤</option>
-                    </select>
-                </div>
-                <div><label style="color:#888;font-size:11px;">slug</label><input id="cat-new-slug" type="text" style="width:100%;" placeholder="e.g. tvc / exhibition" /></div>
-                <div><label style="color:#888;font-size:11px;">中文名</label><input id="cat-new-name-zh" type="text" style="width:100%;" placeholder="商業廣告 / 展覽" /></div>
-                <div><label style="color:#888;font-size:11px;">英文名（選填）</label><input id="cat-new-name-en" type="text" style="width:100%;" /></div>
-                <div><label style="color:#888;font-size:11px;">排序</label><input id="cat-new-sort" type="number" value="0" style="width:100%;" /></div>
-                <button class="btn" onclick="window._websiteCreateCategory()">+ 新增</button>
-            </div>
-            <div style="color:#666;font-size:11px;margin-top:8px;">
-                <strong>分類</strong>：製作類型（形象/廣告/MV…）　<strong>標籤</strong>：使用場景（展覽/講座…）。
-                兩者共用 slug，名稱不能撞。對外作品頁會分兩排顯示。
+            <h4 style="color:#fff;margin:0 0 8px;font-size:12px;">新增</h4>
+            <div style="display:grid;grid-template-columns:1fr 1fr 1fr 80px auto;gap:8px;align-items:end;">
+                <div><label style="color:#888;font-size:11px;">slug</label>
+                    <input id="${kind}-new-slug" type="text" style="width:100%;" placeholder="${meta.slugPlaceholder}" /></div>
+                <div><label style="color:#888;font-size:11px;">中文名</label>
+                    <input id="${kind}-new-name-zh" type="text" style="width:100%;" placeholder="${meta.namePlaceholder}" /></div>
+                <div><label style="color:#888;font-size:11px;">英文名（選填）</label>
+                    <input id="${kind}-new-name-en" type="text" style="width:100%;" /></div>
+                <div><label style="color:#888;font-size:11px;">排序</label>
+                    <input id="${kind}-new-sort" type="number" value="0" style="width:100%;" /></div>
+                <button class="btn" onclick="window._websiteCreateCat('${kind}')">${meta.addBtn}</button>
             </div>
         </div>
 
         <div class="card" style="padding:0;">
-            <table id="cat-table"></table>
+            <table id="${kind}-table"></table>
         </div>
     `;
-    _renderTable();
 }
 
-function _renderTable() {
-    const t = document.getElementById('cat-table');
-    if (!_cats.length) {
-        t.innerHTML = emptyRow(9, '尚無分類');
+
+function _renderTable(kind) {
+    const meta = KIND_META[kind];
+    const rows = _cats.filter(c => (c.kind || 'category') === kind);
+    const t = document.getElementById(`${kind}-table`);
+    if (!t) return;
+    if (!rows.length) {
+        t.innerHTML = emptyRow(8, meta.emptyMsg);
         return;
     }
     t.innerHTML = `
         <thead><tr>
-            <th>ID</th><th>類型</th><th>Slug</th><th>中文名</th><th>英文名</th><th>作品數</th><th>可見</th><th>排序</th><th>操作</th>
+            <th>ID</th><th>Slug</th><th>中文名</th><th>英文名</th>
+            <th>作品數</th><th>可見</th><th>排序</th><th>操作</th>
         </tr></thead>
         <tbody>
-            ${_cats.map(c => `
+            ${rows.map(c => `
                 <tr>
                     <td style="color:#666;font-size:11px;">${c.id}</td>
-                    <td>
-                        <select data-id="${c.id}" data-field="kind" style="width:80px;">
-                            <option value="category" ${(c.kind || 'category') === 'category' ? 'selected' : ''}>分類</option>
-                            <option value="tag" ${c.kind === 'tag' ? 'selected' : ''}>標籤</option>
-                        </select>
-                    </td>
-                    <td><input data-id="${c.id}" data-field="slug" value="${esc(c.slug)}" style="width:100px;" /></td>
-                    <td><input data-id="${c.id}" data-field="name_zh" value="${esc(c.name_zh)}" style="width:140px;" /></td>
-                    <td><input data-id="${c.id}" data-field="name_en" value="${esc(c.name_en || '')}" style="width:140px;" /></td>
+                    <td><input data-id="${c.id}" data-field="slug" value="${esc(c.slug)}" style="width:120px;" /></td>
+                    <td><input data-id="${c.id}" data-field="name_zh" value="${esc(c.name_zh)}" style="width:160px;" /></td>
+                    <td><input data-id="${c.id}" data-field="name_en" value="${esc(c.name_en || '')}" style="width:160px;" /></td>
                     <td>${c.project_count ?? 0}</td>
                     <td><input type="checkbox" data-id="${c.id}" data-field="visible" ${c.visible ? 'checked' : ''} /></td>
                     <td><input type="number" data-id="${c.id}" data-field="sort_order" value="${c.sort_order}" style="width:60px;" /></td>
                     <td>
-                        <button class="btn btn-sm" onclick="window._websiteSaveCat(${c.id})">💾</button>
-                        <button class="btn btn-sm btn-danger" onclick="window._websiteDeleteCat(${c.id})">🗑</button>
+                        <button class="btn btn-sm" onclick="window._websiteSaveCat(${c.id}, '${kind}')">💾</button>
+                        <button class="btn btn-sm btn-danger" onclick="window._websiteDeleteCat(${c.id}, '${kind}')">🗑</button>
+                        ${kind === 'category'
+                            ? `<button class="btn btn-sm btn-ghost" title="改為標籤" onclick="window._websiteSwitchKind(${c.id}, 'tag')">→ 標籤</button>`
+                            : `<button class="btn btn-sm btn-ghost" title="改為分類" onclick="window._websiteSwitchKind(${c.id}, 'category')">→ 分類</button>`}
                     </td>
                 </tr>
             `).join('')}
@@ -87,8 +133,9 @@ function _renderTable() {
     `;
 }
 
-window._websiteSaveCat = async (id) => {
-    const patch = readRowPatch('#cat-table', id);
+
+window._websiteSaveCat = async (id, kind) => {
+    const patch = readRowPatch(`#${kind}-table`, id);
     try {
         await websiteFetch(`/api/website/admin/categories/${id}`, { method: 'PUT', body: patch });
         toastOk('已更新');
@@ -97,31 +144,53 @@ window._websiteSaveCat = async (id) => {
     } catch (e) { toastErr(e.message); }
 };
 
-window._websiteDeleteCat = async (id) => {
-    if (!confirm('確定刪除此分類？所有作品的此分類關聯會一併清除。')) return;
+
+window._websiteDeleteCat = async (id, kind) => {
+    const label = kind === 'tag' ? '標籤' : '分類';
+    if (!confirm(`確定刪除此${label}？所有作品的此關聯會一併清除。`)) return;
     try {
         await websiteFetch(`/api/website/admin/categories/${id}`, { method: 'DELETE' });
         toastOk('已刪除');
         _cats = _cats.filter(c => c.id !== id);
-        _renderTable();
+        _renderTable(kind);
     } catch (e) { toastErr(e.message); }
 };
 
-window._websiteCreateCategory = async () => {
+
+window._websiteSwitchKind = async (id, newKind) => {
+    const target = newKind === 'tag' ? '標籤' : '分類';
+    if (!confirm(`將此項移到「${target}」區塊？`)) return;
+    try {
+        await websiteFetch(`/api/website/admin/categories/${id}`, {
+            method: 'PUT', body: { kind: newKind },
+        });
+        toastOk(`已移到${target}`);
+        const idx = _cats.findIndex(c => c.id === id);
+        if (idx >= 0) _cats[idx].kind = newKind;
+        _renderTable('category');
+        _renderTable('tag');
+    } catch (e) { toastErr(e.message); }
+};
+
+
+window._websiteCreateCat = async (kind) => {
     const body = {
-        kind: document.getElementById('cat-new-kind').value || 'category',
-        slug: document.getElementById('cat-new-slug').value.trim(),
-        name_zh: document.getElementById('cat-new-name-zh').value.trim(),
-        name_en: document.getElementById('cat-new-name-en').value.trim() || null,
-        sort_order: Number(document.getElementById('cat-new-sort').value || 0),
+        kind,
+        slug: document.getElementById(`${kind}-new-slug`).value.trim(),
+        name_zh: document.getElementById(`${kind}-new-name-zh`).value.trim(),
+        name_en: document.getElementById(`${kind}-new-name-en`).value.trim() || null,
+        sort_order: Number(document.getElementById(`${kind}-new-sort`).value || 0),
         visible: true,
     };
     if (!body.slug || !body.name_zh) { toastErr('slug 與中文名必填'); return; }
     try {
         const created = await websiteFetch('/api/website/admin/categories', { method: 'POST', body });
         _cats.push({ ...created, project_count: 0 });
-        toastOk('已新增');
-        ['cat-new-slug','cat-new-name-zh','cat-new-name-en'].forEach(id => document.getElementById(id).value = '');
-        _renderTable();
+        const label = kind === 'tag' ? '標籤' : '分類';
+        toastOk(`已新增${label}`);
+        [`${kind}-new-slug`, `${kind}-new-name-zh`, `${kind}-new-name-en`].forEach(
+            id => document.getElementById(id).value = ''
+        );
+        _renderTable(kind);
     } catch (e) { toastErr(e.message); }
 };

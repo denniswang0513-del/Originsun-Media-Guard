@@ -188,7 +188,10 @@ export const pageSchemas = {
     },
 
     /** WebPage — 任何頁面的最低基線 schema */
-    webPage(opts: { title: string; description: string; url: string; sameAs?: string[] }): SchemaObject {
+    webPage(opts: {
+        title: string; description: string; url: string;
+        sameAs?: string[]; keywords?: string;
+    }): SchemaObject {
         return {
             "@context": SCHEMA_CTX,
             "@type": "WebPage",
@@ -196,6 +199,7 @@ export const pageSchemas = {
             description: opts.description,
             url: opts.url,
             sameAs: opts.sameAs?.length ? opts.sameAs : undefined,
+            keywords: opts.keywords || undefined,
         };
     },
 
@@ -303,6 +307,10 @@ export const pageSchemas = {
             : null;
         // sameAs：列出舊 URL（slug 變動歷史），讓 Google 認知 PageRank 合併
         const sameAs = (work.old_urls || []).map(u => `${siteUrl}${u}`);
+        // keywords：tag slug + category slug 一起塞，給搜尋引擎 / AI 抓主題
+        const keywords = [...(work.categories || []), ...(work.tags || [])]
+            .map(s => s.replace(/^tag-/, ""))
+            .join(", ");
 
         return {
             "@context": SCHEMA_CTX,
@@ -313,8 +321,10 @@ export const pageSchemas = {
             uploadDate: work.published_at || undefined,
             embedUrl: embedUrl || undefined,
             contentUrl: work.youtube_id ? `https://www.youtube.com/watch?v=${work.youtube_id}` : undefined,
-            url: `${siteUrl}/works/${work.slug}`,
+            // canonical 優先（跨站發布時 PM 設定）— 否則本站 /works/{slug}
+            url: work.canonical_url || `${siteUrl}/works/${work.slug}`,
             sameAs: sameAs.length ? sameAs : undefined,
+            keywords: keywords || undefined,
         };
     },
 

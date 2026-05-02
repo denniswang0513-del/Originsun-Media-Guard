@@ -222,7 +222,28 @@ async def trigger_rebuild() -> dict:
         "error": None,
     })
 
-    asyncio.create_task(_run_build(website))
+    # add_done_callback 攔 task 任何 unhandled exception → 寫進 _REBUILD_STATUS
+    # 並落 stderr，避免「state 卡 running、無 traceback」黑洞。
+    task = asyncio.create_task(_run_build(website))
+
+    def _on_done(t: asyncio.Task) -> None:
+        if t.cancelled():
+            logger.warning("[rebuild] task cancelled")
+            _REBUILD_STATUS.update({
+                "state": "error", "finished_at": time.time(),
+                "error": "task cancelled",
+            })
+            return
+        exc = t.exception()
+        if exc is not None:
+            logger.exception("[rebuild] task crashed", exc_info=exc)
+            _REBUILD_STATUS.update({
+                "state": "error", "finished_at": time.time(),
+                "error": f"{type(exc).__name__}: {exc}",
+            })
+
+    task.add_done_callback(_on_done)
+    logger.info("[rebuild] background task scheduled (cwd=%s)", website)
     return {"queued": True, **_default_status()}
 
 
@@ -253,6 +274,13 @@ def _resolve_exe(name: str) -> str:
     return shutil.which(name) or name
 
 
+_SUBPROCESS_TIMEOUTS = {
+    "build": 600,    # npm build：理論 ~5s，給 10 分鐘 buffer 涵蓋 cold cache
+    "scp": 120,      # scp dist/ 到 NAS：通常 < 30s
+    "ssh-clean": 30, # ssh rm -rf：應該 < 5s
+}
+
+
 async def _run_subprocess(
     label: str, *args: str,
     cwd: Optional[str] = None,
@@ -262,6 +290,9 @@ async def _run_subprocess(
 
     第一個 arg 會走 shutil.which 解析，避免 Windows 上 .cmd / .bat / .exe
     extension 問題（WinError 2）。
+
+    Timeout 防呆：每個 label 有預設秒數，超時 SIGKILL 子 process 並回 rc=-1。
+    避免 build/scp 永久 hang 卡住 _REBUILD_STATUS["state"]="running"。
     """
     resolved = (_resolve_exe(args[0]),) + args[1:]
     env = {**os.environ}
@@ -274,7 +305,17 @@ async def _run_subprocess(
         stderr=asyncio.subprocess.STDOUT,
         env=env,
     )
-    out_bytes, _ = await proc.communicate()
+    timeout = _SUBPROCESS_TIMEOUTS.get(label, 300)
+    try:
+        out_bytes, _ = await asyncio.wait_for(proc.communicate(), timeout=timeout)
+    except asyncio.TimeoutError:
+        logger.error("[rebuild:%s] timeout after %ds — killing pid=%s", label, timeout, proc.pid)
+        try:
+            proc.kill()
+            await proc.wait()
+        except Exception:
+            pass
+        return -1, f"timeout after {timeout}s"
     output = out_bytes.decode("utf-8", errors="replace") if out_bytes else ""
     tail = "\n".join(output.splitlines()[-30:])
     logger.info("[rebuild:%s] exit=%d", label, proc.returncode)
@@ -343,7 +384,10 @@ async def _run_build(website_dir: Path) -> None:
       2. scp -r dist/ → NAS（讓對外網站立即看到新版）
       3. 成功才重置 pending_count
     任一步失敗 → state=error。stdout tail 拼接兩階段方便 debug。
+
+    每階段 logger.info 落 uvicorn_out.log，異常用 logger.exception 拿 traceback。
     """
+    logger.info("[rebuild] _run_build entered (cwd=%s)", website_dir)
     try:
         # Astro build env：
         #   - WEBSITE_API_BASE：build 時 fetch /api/website/*（用 master 自己的）
@@ -353,11 +397,13 @@ async def _run_build(website_dir: Path) -> None:
         if ts_key:
             build_env["PUBLIC_TURNSTILE_SITE_KEY"] = ts_key
 
+        logger.info("[rebuild] launching `npm run build` in %s", website_dir)
         rc, build_tail = await _run_subprocess(
             "build", "npm", "run", "build",
             cwd=str(website_dir),
             extra_env=build_env,
         )
+        logger.info("[rebuild] npm exit=%d, tail=%s", rc, build_tail[-300:] if build_tail else "(empty)")
         if rc != 0:
             _REBUILD_STATUS.update({
                 "state": "error", "finished_at": time.time(),
@@ -366,7 +412,9 @@ async def _run_build(website_dir: Path) -> None:
             return
 
         # Push 階段
+        logger.info("[rebuild] launching scp to NAS")
         push_rc, push_tail = await _push_dist_to_nas(website_dir / "dist")
+        logger.info("[rebuild] scp exit=%d, tail=%s", push_rc, push_tail[-300:] if push_tail else "(empty)")
         merged_tail = f"=== build OK ===\n{build_tail}\n=== scp ===\n{push_tail}"
         if push_rc != 0:
             _REBUILD_STATUS.update({
@@ -382,12 +430,13 @@ async def _run_build(website_dir: Path) -> None:
             "state": "success", "finished_at": time.time(),
             "output_tail": merged_tail, "error": None,
         })
+        logger.info("[rebuild] success, pending_count reset")
     except Exception as e:
         _REBUILD_STATUS.update({
             "state": "error", "finished_at": time.time(),
-            "error": str(e),
+            "error": f"{type(e).__name__}: {e}",
         })
-        logger.error("[rebuild] failed: %s", e)
+        logger.exception("[rebuild] _run_build raised")
 
 
 async def get_notion_status(settings: dict) -> dict:

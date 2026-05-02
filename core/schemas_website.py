@@ -132,7 +132,11 @@ class ProjectPublicResponse(BaseModel):
     youtube_id: Optional[str] = None
     description: Optional[str] = None
     year: Optional[int] = None
-    categories: list[str] = Field(default_factory=list)  # category slugs
+    categories: list[str] = Field(default_factory=list)  # 製作類型 slug — kind=category
+    tags: list[str] = Field(default_factory=list)         # 使用場景 slug — kind=tag
+    # credits 雙模式：'block' (沿用 credits 結構化 blocks) / 'text' (純文字貼上)
+    credits_mode: Literal["block", "text"] = "text"
+    credits_text: Optional[str] = None
     thumbnail_url: Optional[str] = None                   # 自 YouTube API 組合
     cover_url: Optional[str] = None                       # OG image — sc.cover_url 鏡像
     featured: bool = False
@@ -408,6 +412,76 @@ class WebsiteQuickFactUpdate(BaseModel):
     value: Optional[str] = None
     sort_order: Optional[int] = None
     visible: Optional[bool] = None
+
+
+# ══════════════════════════════════════════════════════════
+# 作品級 SEO / AI SEO Pipeline
+# ══════════════════════════════════════════════════════════
+
+class ProjectSeoKeyFact(BaseModel):
+    label: str = Field(..., min_length=1, max_length=80)
+    value: str = Field(..., min_length=1, max_length=300)
+
+
+class ProjectSeoFAQ(BaseModel):
+    q: str = Field(..., min_length=1, max_length=300)
+    a: str = Field(..., min_length=1, max_length=2000)
+
+
+class ProjectSeoResponse(BaseModel):
+    project_id: str
+    seo_title: Optional[str] = None
+    seo_description: Optional[str] = None
+    keywords: list[str] = []
+    canonical_url: Optional[str] = None
+    narrative_long: Optional[str] = None
+    key_facts: list[ProjectSeoKeyFact] = []
+    faqs: list[ProjectSeoFAQ] = []
+    needs_ai_review: bool = True
+    last_ai_review_at: Optional[str] = None
+    last_ai_review_by: Optional[str] = None
+    ai_review_notes: Optional[str] = None
+
+
+class ProjectSeoUpdate(BaseModel):
+    """PATCH body — 全欄位 optional。Claude / admin 一次填多少都行。
+    keywords / key_facts / faqs 如果送了空 list = 明確清空（不是「不動」）。
+    需要「不動」就不要帶該 key（exclude_unset 已處理）。
+    """
+    seo_title: Optional[str] = Field(None, max_length=120)
+    seo_description: Optional[str] = Field(None, max_length=500)
+    keywords: Optional[list[str]] = None
+    canonical_url: Optional[str] = Field(None, max_length=500)
+    narrative_long: Optional[str] = None
+    key_facts: Optional[list[ProjectSeoKeyFact]] = None
+    faqs: Optional[list[ProjectSeoFAQ]] = None
+    ai_review_notes: Optional[str] = None
+
+
+class ProjectSeoAuditItem(BaseModel):
+    project_id: str
+    title: str
+    slug: Optional[str] = None
+    client: Optional[str] = None
+    year: Optional[int] = None
+    completeness: int = 0          # 0-6
+    needs_ai_review: bool = True
+    last_ai_review_at: Optional[str] = None
+    last_ai_review_by: Optional[str] = None
+
+
+class ProjectSeoDraftContext(BaseModel):
+    """draft endpoint 回給 Claude / admin 的完整上下文。"""
+    project_id: str
+    title: str
+    client: Optional[str] = None
+    year: Optional[int] = None
+    youtube_id: Optional[str] = None
+    description: Optional[str] = None
+    credits: list = []
+    credits_text: Optional[str] = None
+    credits_mode: Literal["block", "text"] = "text"
+    current_seo: ProjectSeoResponse
 
 
 # ══════════════════════════════════════════════════════════

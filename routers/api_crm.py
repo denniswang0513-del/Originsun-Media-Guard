@@ -4168,6 +4168,8 @@ def _to_showcase_dict(s) -> dict:
         "process_mode": s.process_mode or "gallery",
         "process_items": s.process_items or [],
         "credits": s.credits or [],
+        "credits_mode": s.credits_mode or "block",
+        "credits_text": s.credits_text or "",
         "slug": s.slug or "",
         "published": bool(s.published),
         "published_at": s.published_at.isoformat() if s.published_at else None,
@@ -4222,6 +4224,9 @@ async def _sync_showcase_to_public(session, sc) -> None:
     project.public_slug = new_slug
     # Block-structured credits → public_credits（snapshot；rename role 不影響歷史）
     project.public_credits = sc.credits or []
+    # Credits 雙模式 mirror — admin 在 showcase-edit 切「結構化」/「純文字」模式
+    project.public_credits_mode = sc.credits_mode or "block"
+    project.public_credits_text = sc.credits_text
     # Cover image → public_cover_url（OG image fallback 用）
     project.public_cover_url = sc.cover_url or None
     # Lazy import — services/website/ is NAS-only and not in OTA AGENT_DIRS,
@@ -4231,6 +4236,9 @@ async def _sync_showcase_to_public(session, sc) -> None:
     yt_id = _extract_youtube_id(sc.video_url or "")
     if yt_id:
         project.public_youtube_id = yt_id
+    # 自動補 published_at — 從未發布變為發布時 set now（避免 admin/PM toggle 公開時忘了帶日期）
+    if sc.published and not sc.published_at:
+        sc.published_at = _now()
     project.public = bool(sc.published)
     project.public_published_at = sc.published_at if sc.published else None
     # 第一次 publish → auto-assign 連續編號（unpublish 不收回，避免 republish 改號）
@@ -4279,13 +4287,33 @@ async def get_project_showcase(project_id: str, request: Request):
             session.add(sc)
             await session.commit()
             await session.refresh(sc)
-        return _to_showcase_dict(sc)
+        data = _to_showcase_dict(sc)
+        # 對外公開連結 — 給 delivery Tab「預覽」按鈕直接連到 originsun-studio.com/works/{slug}
+        proj = await session.get(CrmProject, project_id)
+        public_url = ""
+        if proj and proj.public:
+            try:
+                from services.website import settings_service
+                _all_settings = await settings_service.get_all_settings(session)
+                _site_url = (_all_settings.get("seo.site_url") or "").strip()
+            except Exception:
+                _site_url = ""
+            site = (_site_url or "https://originsun-studio.com").rstrip("/")
+            url_slug = (proj.public_slug or "").strip() or (
+                str(proj.public_number) if proj.public_number is not None else ""
+            )
+            if url_slug:
+                public_url = f"{site}/works/{url_slug}"
+        data["public_url"] = public_url
+        return data
 
 
 # Showcase 可從 admin (PUT /projects/{id}/showcase) 跟 token (PUT /public/showcase-edit/{token})
 # 兩條路徑改 — 共用此 helper 統一欄位 setattr + slug 正規化（None 取代空字串）。
 _SHOWCASE_UPDATABLE_FIELDS = (
-    "description", "video_url", "credits", "process_mode", "process_items", "slug",
+    "description", "video_url", "credits", "credits_mode", "credits_text",
+    "process_mode", "process_items", "slug",
+    "published",  # showcase-edit toggle 公開 — _sync 會鏡射到 project.public
 )
 
 
@@ -4307,6 +4335,32 @@ def _apply_showcase_fields(sc, payload: dict) -> None:
                 value = value or None
             setattr(sc, field, value)
     sc.updated_at = _now()
+
+
+# 作品基本資料 — showcase-edit token 路徑也允許編，token 是 trusted（內部 PM）
+_PROJECT_PUBLIC_FIELDS = (
+    "public_title", "public_client", "public_year",
+    "public_featured", "public_noindex",
+)
+
+
+def _apply_project_public_fields(project, payload: dict) -> None:
+    """直接寫 project 的 public_* 欄位（標題 / 客戶 / 年份 / featured / noindex）。
+
+    payload 可以含 public_published（boolean，True → 公開 + 設 published_at）
+    這個 flow 跟 _sync_showcase_to_public 的 sc.published 鏡射並存：
+      - 若 payload 有 public_published 就直接寫 project.public（不過濾 sc.published）
+      - 後續 _sync_showcase_to_public 仍會以 sc.published 為準覆寫（鏡射優先）
+    所以「立即發布／下架」實務上要從 sc.published 改，這條只當 fallback。
+    """
+    for field in _PROJECT_PUBLIC_FIELDS:
+        if field in payload:
+            setattr(project, field, payload[field])
+    # public_old_slugs：admin 想刪掉某個舊 slug 重定向時走這條（取代整個 list）
+    # normalize 跟 update_project_public 同步：strip 網域、trim 結尾 /、去重
+    if "public_old_slugs" in payload and isinstance(payload["public_old_slugs"], list):
+        from services.website.project_service import normalize_old_slugs_input
+        project.public_old_slugs = normalize_old_slugs_input(payload["public_old_slugs"])
 
 
 @router.put("/projects/{project_id}/showcase")
@@ -4535,30 +4589,8 @@ async def generate_showcase_edit_token(project_id: str, request: Request):
 
 
 # ── Showcase Public Endpoints ──────────────────────────────
-
-@router.get("/public/showcase/{project_id}")
-async def get_public_showcase(project_id: str):
-    """公開 Showcase 頁面資料（無需認證），僅限已發布。"""
-    _require_db()
-    factory = await _get_factory()
-    async with factory() as session:
-        sc = await session.get(CrmProjectShowcase, project_id)
-        if not sc or not sc.published:
-            raise HTTPException(status_code=404, detail="找不到此作品展示")
-        proj = await session.get(CrmProject, project_id)
-        client_name = ""
-        project_name = ""
-        if proj:
-            project_name = proj.name or ""
-            client = await session.get(Client, proj.client_id) if proj.client_id else None
-            client_name = client.short_name if client else ""
-        data = _to_showcase_dict(sc)
-        # Strip internal fields
-        data.pop("edit_token", None)
-        data.pop("editable", None)
-        data["project_name"] = project_name
-        data["client_name"] = client_name
-    return data
+# 舊版 /showcase.html 公開預覽頁已移除（對外網站 originsun-studio.com/works/{slug} 取代）。
+# 編輯入口仍在 /public/showcase-edit/{token}（透過 token 授權給 PM/客戶協作）。
 
 
 @router.get("/public/showcase-edit/{token}")
@@ -4575,6 +4607,29 @@ async def get_showcase_edit_data(token: str):
         # Strip financial / internal fields
         data.pop("edit_token", None)
         data["project_name"] = project_name
+        # 作品基本資料 — 給 showcase-edit 編輯器一頁全包
+        if proj:
+            data["public_title"] = proj.public_title or ""
+            data["public_client"] = proj.public_client or ""
+            data["public_year"] = proj.public_year
+            data["public_featured"] = bool(proj.public_featured)
+            data["public_noindex"] = bool(proj.public_noindex)
+            data["public_published"] = bool(proj.public)
+            data["public_old_slugs"] = list(proj.public_old_slugs or [])
+            # 對外公開 URL — 給 showcase-edit「網站連結」直接組公開網址用
+            # site_url 從 website_settings 讀，沒設 fallback 到 production 網域
+            try:
+                from services.website import settings_service
+                _all_settings = await settings_service.get_all_settings(session)
+                _site_url = (_all_settings.get("seo.site_url") or "").strip()
+            except Exception:
+                _site_url = ""
+            data["public_site_url"] = _site_url or "https://originsun-studio.com"
+            # URL slug 解析優先序：admin 自訂 slug > public_number（1, 2, 3）> 無法產 URL
+            url_slug = (proj.public_slug or "").strip() or (
+                str(proj.public_number) if proj.public_number is not None else ""
+            )
+            data["public_url_path"] = f"/works/{url_slug}" if url_slug else ""
 
         # 對外 categories 候選清單（含 kind）+ 此作品已勾選的 ID
         cat_rows = (await session.execute(
@@ -4596,11 +4651,13 @@ async def get_showcase_edit_data(token: str):
         # 演職員職位庫 + 模板候選清單（給 showcase-edit 編輯器用）。
         # 委派 service 層維持單一 hydrate 真相源；list_roles 多回的 sort_order /
         # visible / usage_count 前端忽略無妨。
-        from services.website import credit_service
+        from services.website import credit_service, seo_service
         data["credit_roles_available"] = await credit_service.list_roles(
             session, visible_only=True
         )
         data["credit_templates_available"] = await credit_service.list_templates(session)
+        # 作品級 SEO（pipeline 寫入 — PM 可在 showcase-edit 看 + 改覆寫欄位 + 觸發 AI 重生）
+        data["seo"] = await seo_service.get_project_seo(session, sc.id)
     return data
 
 
@@ -4622,6 +4679,30 @@ async def search_staff_via_token(token: str, q: str = Query("")):
         query = query.limit(10)
         rows = (await session.execute(query)).scalars().all()
     return {"items": [_to_staff_public_dict(s) for s in rows]}
+
+
+@router.get("/public/showcase-edit/{token}/clients_search")
+async def search_clients_via_token(token: str, q: str = Query("")):
+    """透過 token 搜尋 clients（給 showcase-edit「客戶」欄 autocomplete 用）。
+
+    回傳前 10 筆，short_name 或 full_name 包含 q（case-insensitive）。
+    q 為空時回傳前 10 筆 short_name 字典序。
+    回傳簡化欄位：id / short_name / full_name（避免洩漏 tax_id / payment_info 等敏感欄位）。
+    """
+    _require_db()
+    factory = await _get_factory()
+    async with factory() as session:
+        await _verify_showcase_edit_token(session, token, require_editable=False)
+        query = select(Client).order_by(Client.short_name)
+        if q.strip():
+            ql = f"%{q.strip()}%"
+            query = query.where(or_(Client.short_name.ilike(ql), Client.full_name.ilike(ql)))
+        query = query.limit(10)
+        rows = (await session.execute(query)).scalars().all()
+    return {"items": [
+        {"id": c.id, "short_name": c.short_name, "full_name": c.full_name or ""}
+        for c in rows
+    ]}
 
 
 @router.post("/public/showcase-edit/{token}/staff_quick_add")
@@ -4672,6 +4753,23 @@ async def update_showcase_edit_data(token: str, request: Request):
             )
             for cid in ids:
                 session.add(WebsiteProjectCategory(project_id=sc.id, category_id=cid))
+        # 作品基本資料（public_title / client / year / featured / noindex / old_slugs）
+        # token 路徑信任 PM 編輯所有作品相關欄位。_sync_showcase_to_public 不會覆蓋這些欄位。
+        project = await session.get(CrmProject, sc.id)
+        if project:
+            _apply_project_public_fields(project, body)
+        # SEO 覆寫欄位 — 只接 SHOWCASE_EDIT_PATCHABLE_FIELDS allowlist 內的鍵
+        # narrative_long / key_facts / faqs 由 admin Tab + AI pipeline 寫，token 路徑不暴露
+        if isinstance(body.get("seo"), dict):
+            from services.website import seo_service
+            seo_payload = {
+                k: v for k, v in body["seo"].items()
+                if k in seo_service.SHOWCASE_EDIT_PATCHABLE_FIELDS
+            }
+            if seo_payload:
+                await seo_service.update_project_seo(
+                    session, sc.id, seo_payload, by="showcase-edit",
+                )
         await _sync_showcase_to_public(session, sc)
         await session.commit()
     # 觸發對外網站 rebuild（debounce 60s）— 不論作品 published 與否都標 dirty，
@@ -4684,6 +4782,36 @@ async def update_showcase_edit_data(token: str, request: Request):
         import logging
         logging.getLogger(__name__).warning("[showcase token PUT] mark_dirty 失敗: %s", e)
     return {"status": "ok"}
+
+
+@router.post("/public/showcase-edit/{token}/request_ai_review")
+async def request_ai_review_via_token(token: str):
+    """PM 從 showcase-edit 觸發「請 AI 重新生」— mark needs_ai_review=True 讓
+    Claude 下次跑 audit 會撈到此作品。不直接呼 LLM，pipeline 由 admin/Claude
+    自行決定何時跑（避免 PM 點按鈕直接打 LLM 帳）。"""
+    _require_db()
+    factory = await _get_factory()
+    async with factory() as session:
+        sc = await _verify_showcase_edit_token(session, token, require_editable=True)
+        from services.website import seo_service
+        await seo_service.mark_project_seo_needs_review(session, sc.id)
+    return {"status": "ok"}
+
+
+@router.post("/public/showcase-edit/{token}/run_ai_now")
+async def run_ai_now_via_token(token: str):
+    """PM 從 showcase-edit 觸發「立即執行此作品」— 直接呼 claude --print
+    生 SEO 內容寫進 DB。耗 Max 訂閱額度。每作品 30-60 秒。
+    """
+    _require_db()
+    factory = await _get_factory()
+    async with factory() as session:
+        sc = await _verify_showcase_edit_token(session, token, require_editable=True)
+        from services.website import seo_runner, rebuild_service
+        result = await seo_runner.run_pipeline(session, target_project_id=sc.id)
+        if result.get("processed", 0) > 0:
+            await rebuild_service.mark_dirty()
+        return result
 
 
 @router.post("/public/showcase-edit/{token}/gallery")

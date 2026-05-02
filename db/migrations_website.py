@@ -43,6 +43,9 @@ _CRM_PROJECTS_COLUMNS: list[tuple[str, str]] = [
     ("public_cover_url", "TEXT"),
     # per-work SEO 索引控制（true = 強制 noindex；null/false = 跟站級 indexable）
     ("public_noindex", "BOOLEAN DEFAULT FALSE"),
+    # credits 雙模式：'block' (JSONB blocks) / 'text' (純文字貼上)
+    ("public_credits_mode", "VARCHAR(16) NOT NULL DEFAULT 'text'"),
+    ("public_credits_text", "TEXT"),
 ]
 
 # ── ALTER TABLE: crm_staff 擴充 ──
@@ -50,10 +53,22 @@ _CRM_STAFF_COLUMNS: list[tuple[str, str]] = [
     ("show_on_website", "BOOLEAN DEFAULT FALSE"),
 ]
 
+# ── ALTER TABLE: crm_project_showcase 擴充（既有部署補欄）──
+_CRM_PROJECT_SHOWCASE_COLUMNS: list[tuple[str, str]] = [
+    # credits 雙模式：'block' (JSONB blocks) / 'text' (純文字貼上)
+    ("credits_mode", "VARCHAR(16) NOT NULL DEFAULT 'text'"),
+    ("credits_text", "TEXT"),
+]
+
 # ── ALTER TABLE: website_categories 擴充 ──
 # kind: 'category' = 製作類型（形象/廣告/MV…），'tag' = 使用場景（展覽/講座…）
 _WEBCAT_COLUMNS: list[tuple[str, str]] = [
     ("kind", "VARCHAR(16) NOT NULL DEFAULT 'category'"),
+]
+
+# ── ALTER TABLE: website_project_seo 擴充（既有部署補欄）──
+_WEBPROJSEO_COLUMNS: list[tuple[str, str]] = [
+    ("canonical_url", "VARCHAR(500)"),
 ]
 
 # ── CREATE TABLE IF NOT EXISTS: 5 新表 ──
@@ -179,6 +194,25 @@ _CREATE_TABLES: list[str] = [
         updated_at TIMESTAMPTZ DEFAULT NOW()
     )
     """,
+    # 作品級 SEO / AI SEO 內容（1:1 with crm_projects；給 AI/SEO 生成 pipeline 寫入）
+    """
+    CREATE TABLE IF NOT EXISTS website_project_seo (
+        project_id VARCHAR(32) PRIMARY KEY,
+        seo_title VARCHAR(120),
+        seo_description VARCHAR(500),
+        keywords JSONB NOT NULL DEFAULT '[]'::jsonb,
+        canonical_url VARCHAR(500),
+        narrative_long TEXT,
+        key_facts JSONB NOT NULL DEFAULT '[]'::jsonb,
+        faqs JSONB NOT NULL DEFAULT '[]'::jsonb,
+        needs_ai_review BOOLEAN NOT NULL DEFAULT TRUE,
+        last_ai_review_at TIMESTAMPTZ,
+        last_ai_review_by VARCHAR(64),
+        ai_review_notes TEXT,
+        created_at TIMESTAMPTZ DEFAULT NOW(),
+        updated_at TIMESTAMPTZ DEFAULT NOW()
+    )
+    """,
     # 部落格三表（DB-as-truth，Notion 只是匯入器）
     """
     CREATE TABLE IF NOT EXISTS website_posts (
@@ -243,7 +277,7 @@ _CREATE_TABLES: list[str] = [
     """
     CREATE TABLE IF NOT EXISTS website_credit_templates (
         id SERIAL PRIMARY KEY,
-        name VARCHAR(120) NOT NULL,
+        name VARCHAR(120) NOT NULL UNIQUE,
         description TEXT,
         role_ids JSONB NOT NULL DEFAULT '[]'::jsonb,
         sort_order INTEGER NOT NULL DEFAULT 0,
@@ -266,6 +300,8 @@ _CREATE_INDEXES: list[str] = [
     "CREATE INDEX IF NOT EXISTS idx_webfaq_visible_sort ON website_faqs (visible, sort_order)",
     "CREATE INDEX IF NOT EXISTS idx_webtst_visible_sort ON website_testimonials (visible, sort_order)",
     "CREATE INDEX IF NOT EXISTS idx_webqf_visible_sort ON website_quick_facts (visible, sort_order)",
+    # 作品級 SEO：audit 端點頻繁查 needs_ai_review=true → 索引加速
+    "CREATE INDEX IF NOT EXISTS idx_webprojseo_needs_review ON website_project_seo (needs_ai_review)",
     # Posts 公開查詢：WHERE status='published' AND published_at<=NOW() ORDER BY published_at DESC
     "CREATE INDEX IF NOT EXISTS idx_post_status_pub ON website_posts (status, published_at)",
     "CREATE INDEX IF NOT EXISTS idx_post_notion_page ON website_posts (notion_page_id)",
@@ -354,6 +390,11 @@ _SEED_TEMPLATES: list[tuple[str, str, int, list[str]]] = [
 
 def _build_template_seed_sql(name: str, desc: str, sort: int, roles: list[str]) -> str:
     arr = ",".join(f"'{r}'" for r in roles)
+    # ON CONFLICT (name) DO NOTHING + UNIQUE constraint 雙保險。
+    # 之前用 WHERE NOT EXISTS 過濾 SELECT，但 SELECT 帶 jsonb_agg 是 implicit aggregate
+    # 不論 input rows 多少都會產出 1 row（input 0 rows → COALESCE 給 '[]'），WHERE 對
+    # aggregate 結果無效 → 每次跑 migration 都會多 INSERT 一筆 role_ids=[] 的空模板，
+    # production 累積 148 筆 duplicate（修復於 v1.10.121）。
     return f"""
     INSERT INTO website_credit_templates (name, description, role_ids, sort_order)
     SELECT '{name}', '{desc}',
@@ -363,7 +404,7 @@ def _build_template_seed_sql(name: str, desc: str, sort: int, roles: list[str]) 
         FROM website_credit_roles
         WHERE name_zh IN ({arr})
     ) t
-    WHERE NOT EXISTS (SELECT 1 FROM website_credit_templates WHERE name = '{name}')
+    ON CONFLICT (name) DO NOTHING
     """
 
 
@@ -371,6 +412,81 @@ _SEED_CREDIT_TEMPLATES: list[str] = [
     _build_template_seed_sql(name, desc, sort, roles)
     for name, desc, sort, roles in _SEED_TEMPLATES
 ]
+
+
+# ── v1.10.121 修復：清掉舊版 WHERE NOT EXISTS bug 累積的 duplicate templates ──
+# 同名留 role_ids 最多 + created_at 最早 + id 最小那筆，刪其餘。idempotent。
+_CLEANUP_TEMPLATE_DUPLICATES = """
+DO $cleanup_tmpl$
+BEGIN
+    IF to_regclass('public.website_credit_templates') IS NOT NULL THEN
+        DELETE FROM website_credit_templates
+        WHERE id IN (
+            SELECT id FROM (
+                SELECT id,
+                       ROW_NUMBER() OVER (
+                           PARTITION BY name
+                           ORDER BY jsonb_array_length(COALESCE(role_ids, '[]'::jsonb)) DESC,
+                                    created_at ASC, id ASC
+                       ) AS rn
+                FROM website_credit_templates
+            ) ranked
+            WHERE rn > 1
+        );
+    END IF;
+END
+$cleanup_tmpl$;
+"""
+
+# 補上 UNIQUE(name) constraint — 既有 table 沒這個約束，加上後 ON CONFLICT 才生效。
+# 查 pg_constraint 守門避免 ALTER raise duplicate_table（constraint 帶隱含 index 名稱）。
+_ADD_TEMPLATE_NAME_UNIQUE = """
+DO $add_uniq$
+BEGIN
+    IF to_regclass('public.website_credit_templates') IS NOT NULL
+       AND NOT EXISTS (
+           SELECT 1 FROM pg_constraint
+           WHERE conname = 'website_credit_templates_name_key'
+             AND conrelid = 'public.website_credit_templates'::regclass
+       ) THEN
+        ALTER TABLE website_credit_templates
+            ADD CONSTRAINT website_credit_templates_name_key UNIQUE (name);
+    END IF;
+END
+$add_uniq$;
+"""
+
+
+# Seed 預設使用場景標籤（kind='tag'）— 給空 DB 一些 sample，admin 可自行增刪。
+#
+# 跑過一次就在 website_settings 寫 'defaults.tags_seeded' 旗標；之後啟動會 skip。
+# 為什麼不靠 ON CONFLICT slug DO NOTHING：admin DELETE 後，row 不存在 → 沒 conflict
+# → INSERT 成功 → tag 自動復活。Bug：使用者刪掉的 tag 重啟後又長回來。
+#
+# 用 WHERE NOT EXISTS 子查詢 + key 寫旗標：兩條 SQL 必須在同一個 batch commit 內，
+# 否則第一次跑的中間若 crash，下次會雙寫。本檔案的 run_website_migrations 用單一
+# commit 包整批，符合此 invariant。
+_SEED_DEFAULT_TAGS = """
+INSERT INTO website_categories (slug, name_zh, name_en, description, sort_order, visible, kind)
+SELECT * FROM (VALUES
+    ('tag-vr',         'VR/360 沉浸式',   'VR/360 Immersive',   '用於 VR 頭顯 / 360 全景場景的影像',     1, TRUE, 'tag'),
+    ('tag-onsite',     '現場活動',        'On-site Event',      '線下活動現場拍攝、即時投影或快剪',      2, TRUE, 'tag'),
+    ('tag-online',     '線上獨家',        'Online Exclusive',   '專為網路平台投放、社群傳播設計',        3, TRUE, 'tag'),
+    ('tag-overseas',   '海外拍攝',        'Overseas Shoot',     '海外或境外取景的製作案',                 4, TRUE, 'tag'),
+    ('tag-public-good','公益／非營利',     'Public Good',        '公益、NGO、政府宣導等非商業性質',        5, TRUE, 'tag')
+) AS v(slug, name_zh, name_en, description, sort_order, visible, kind)
+WHERE NOT EXISTS (
+    SELECT 1 FROM website_settings WHERE key = 'defaults.tags_seeded'
+)
+ON CONFLICT (slug) DO NOTHING
+"""
+
+# 同 batch commit 內標記旗標 — 之後啟動 _SEED_DEFAULT_TAGS 的 WHERE NOT EXISTS 會擋下
+_MARK_DEFAULT_TAGS_SEEDED = """
+INSERT INTO website_settings (key, value)
+VALUES ('defaults.tags_seeded', 'true'::jsonb)
+ON CONFLICT (key) DO NOTHING
+"""
 
 
 # 既有公開作品 backfill：第一次跑時依 published_at 給 1,2,3...
@@ -408,11 +524,22 @@ async def run_website_migrations(session_factory: Callable) -> None:
           for c, t in _CRM_PROJECTS_COLUMNS],
         *[f"ALTER TABLE crm_staff ADD COLUMN IF NOT EXISTS {c} {t}"
           for c, t in _CRM_STAFF_COLUMNS],
+        *[f"ALTER TABLE crm_project_showcase ADD COLUMN IF NOT EXISTS {c} {t}"
+          for c, t in _CRM_PROJECT_SHOWCASE_COLUMNS],
         # CREATE TABLE 必須先跑，ALTER 才有對象（fresh DB 沒這張表）
         *_CREATE_TABLES,
         *[f"ALTER TABLE website_categories ADD COLUMN IF NOT EXISTS {c} {t}"
           for c, t in _WEBCAT_COLUMNS],
+        *[f"ALTER TABLE website_project_seo ADD COLUMN IF NOT EXISTS {c} {t}"
+          for c, t in _WEBPROJSEO_COLUMNS],
         *_CREATE_INDEXES,
+        # v1.10.121 修復 — 既有部署 templates 表無 UNIQUE constraint，先清重複再補
+        _CLEANUP_TEMPLATE_DUPLICATES,
+        _ADD_TEMPLATE_NAME_UNIQUE,
+        # Seed 5 個預設 tag — 一次性，靠 'defaults.tags_seeded' 旗標 idempotent
+        # （admin 刪掉之後不會自動重新 seed 復活）
+        _SEED_DEFAULT_TAGS,
+        _MARK_DEFAULT_TAGS_SEEDED,
         # 既有 public 作品 backfill 編號（idempotent — 已有 public_number 的會跳過）
         _BACKFILL_PUBLIC_NUMBER,
         # 演職員職位庫 seed（roles 必先於 templates，因為 templates 子查詢要查 role.id）

@@ -3,7 +3,7 @@
  * CategoryFilter.astro — 作品集分類 / 標籤 pills（白底）
  *
  * showAll=true 時渲染「全部」chip（第一排放，第二排不放避免重複）。
- * label 標題顯示在 chip 列前方左側（如「分類」「標籤」）；空字串則隱藏。
+ * label 顯示在 chip 列「上方」獨立一排、置中（如「分類」「標籤」）；空字串則隱藏。
  */
 import type { ICategory } from "../../types/category";
 import Tr from "../ui/Tr.astro";
@@ -15,6 +15,8 @@ interface Props {
     basePath?: string;
     showAll?: boolean;
     label?: string;
+    /** 串到每個 chip href 後的 query string（如 `tag=exhibition`）— 切分類不丟 tag */
+    extraQuery?: string;
 }
 const {
     categories,
@@ -23,34 +25,42 @@ const {
     basePath = "/works",
     showAll = true,
     label = "",
+    extraQuery = "",
 } = Astro.props;
+
+const allHref = extraQuery ? `${basePath}?${extraQuery}` : basePath;
+const chipSep = extraQuery ? "&" : "";
 ---
 
-<div class="flex flex-wrap gap-2 mb-6 justify-center items-center">
+<div class="mb-6 text-center">
     {label && (
-        <span class="text-xs tracking-[0.3em] uppercase text-neutral-400 mr-2">{label}</span>
+        <h2 class="text-xs tracking-[0.4em] uppercase text-neutral-500 mb-4">{label}</h2>
     )}
-    {showAll && (
-        <a href={basePath}
-           class:list={[
-               "px-5 py-2 text-xs tracking-[0.25em] uppercase border transition-colors",
-               !activeSlug
-                   ? "border-neutral-900 bg-neutral-900 text-white"
-                   : "border-neutral-300 text-neutral-500 hover:border-neutral-900 hover:text-neutral-900",
-           ]}>
-            <Tr k="works_filter_all" />
-        </a>
-    )}
-    {categories.map(cat => (
-        <a href={`${basePath}?${queryKey}=${cat.slug}`}
-           class:list={[
-               "px-5 py-2 text-xs tracking-[0.25em] uppercase border transition-colors",
-               activeSlug === cat.slug
-                   ? "border-neutral-900 bg-neutral-900 text-white"
-                   : "border-neutral-300 text-neutral-500 hover:border-neutral-900 hover:text-neutral-900",
-           ]}>
-            <Tr zh={cat.name_zh} en={cat.name_en || cat.name_zh} />
-            <span class="text-neutral-400 ml-1">({cat.count})</span>
-        </a>
-    ))}
+    <div class="flex flex-wrap gap-2 justify-center items-center">
+        {showAll && (
+            <a href={allHref}
+               data-chip-axis={queryKey} data-chip-slug=""
+               class:list={[
+                   "px-5 py-2 text-xs tracking-[0.25em] uppercase border transition-colors",
+                   !activeSlug
+                       ? "border-neutral-900 bg-neutral-900 text-white"
+                       : "border-neutral-300 text-neutral-500 hover:border-neutral-900 hover:text-neutral-900",
+               ]}>
+                <Tr k="works_filter_all" />
+            </a>
+        )}
+        {categories.map(cat => (
+            <a href={`${basePath}?${queryKey}=${cat.slug}${chipSep}${extraQuery}`}
+               data-chip-axis={queryKey} data-chip-slug={cat.slug}
+               class:list={[
+                   "px-5 py-2 text-xs tracking-[0.25em] uppercase border transition-colors",
+                   activeSlug === cat.slug
+                       ? "border-neutral-900 bg-neutral-900 text-white"
+                       : "border-neutral-300 text-neutral-500 hover:border-neutral-900 hover:text-neutral-900",
+               ]}>
+                <Tr zh={cat.name_zh} en={cat.name_en || cat.name_zh} />
+                <span class="text-neutral-400 ml-1">({cat.count})</span>
+            </a>
+        ))}
+    </div>
 </div>

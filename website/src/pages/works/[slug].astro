@@ -27,10 +27,11 @@ if (!work) return Astro.redirect("/works");
 const curIdx = allWorks.findIndex(w => w.slug === work.slug);
 const nextWork = curIdx >= 0 && curIdx < allWorks.length - 1 ? allWorks[curIdx + 1] : allWorks[0];
 
-// 相關作品：同 category 排除自己，最多 3 件；不足時 fallback 用 published_at 鄰近作品
+// 相關作品：同製作類型（categories）排除自己，最多 3 件；不足時 fallback 用 published_at 鄰近
+// 用 categories 而非 tags — 製作類型才是品牌定位（兩件商業廣告比兩件「都帶展覽 tag」更近）
 const workCategories = new Set(work.categories || []);
 const sameCategoryWorks = allWorks
-    .filter(w => w.slug !== work.slug && w.categories.some(c => workCategories.has(c)))
+    .filter(w => w.slug !== work.slug && (w.categories || []).some(c => workCategories.has(c)))
     .slice(0, 3);
 const relatedWorks = sameCategoryWorks.length >= 3
     ? sameCategoryWorks
@@ -42,104 +43,151 @@ const categoryLabel = (work.categories[0] || "WORK").toUpperCase();
 
 const siteUrl = resolveSiteUrl(Astro.site);
 const workUrl = `${siteUrl}/works/${work.slug}`;
+// description 優先序：seo_description（pipeline 寫入）> public_description > title 兜底
 const description = ensureMinDescription(
-    work.description || work.title,
+    work.seo_description || work.description || work.title,
     [work.client, work.year, `${meta.company_name_zh}作品`].filter(Boolean).join(" · "),
 );
 // sameAs：列出舊 URL（slug 變動歷史），讓 Google 認知 PageRank 合併
 const sameAs = (work.old_urls || []).map(u => `${siteUrl}${u}`);
+// keywords：seo_keywords 優先（pipeline 細調），fallback categories + tags
+const keywords = (work.seo_keywords && work.seo_keywords.length > 0)
+    ? work.seo_keywords.join(", ")
+    : [...(work.categories || []), ...(work.tags || [])]
+        .map(s => s.replace(/^tag-/, ""))
+        .join(", ");
+// SEO title — 跟 H1 區分（H1 用 work.title 完整作品名；title bar 可較短）
+const pageTitle = work.seo_title || work.title;
+
+// schemaData 三件套（VideoObject / WebPage / Breadcrumb）+ 條件性 FAQPage
+// schema 的 url 也吃 canonical（跨站發布時跟 <link rel="canonical"> 同步）
+const schemaUrl = work.canonical_url || workUrl;
 const schemaData = [
     isValidYouTubeId(work.youtube_id)
         ? pageSchemas.videoObject(work, siteUrl)
-        : pageSchemas.webPage({ title: work.title, description, url: workUrl, sameAs }),
+        : pageSchemas.webPage({ title: pageTitle, description, url: schemaUrl, sameAs, keywords }),
     pageSchemas.breadcrumb(breadcrumb3("作品集", "/works", work.title, `/works/${work.slug}`), siteUrl),
 ];
+// FAQPage schema — 只有當 SEO pipeline 填了 faqs 才注入
+if (work.faqs && work.faqs.length > 0) {
+    schemaData.push(pageSchemas.faqPage(
+        work.faqs.map(f => ({ question: f.q, answer: f.a }))
+    ));
+}
 
 const blocks: ICreditBlock[] = normalizeCredits(work.credits);
 
 const nextThumb = nextWork ? resolveThumbnail(nextWork.youtube_id, nextWork.slug, "hq") : null;
 ---
 
-<BaseLayout title={work.title}
+<BaseLayout title={pageTitle}
             description={description}
             meta={meta}
             schemaData={schemaData}
             noindex={work.noindex || undefined}
-            ogImage={work.cover_url || work.thumbnail_url || undefined}>
+            ogImage={work.cover_url || work.thumbnail_url || undefined}
+            canonical={work.canonical_url || undefined}>
 
-    <!-- 兩欄主體：左=標題/敘述/credits、右=影片（sticky 跟著滾） -->
+    <!-- 單欄上下流：標題 → 影片 → 文字 → credits（→ tags 探索小尾巴） -->
     <section class="bg-white pt-24 sm:pt-28 pb-16 sm:pb-24">
-        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-10 grid grid-cols-1 lg:grid-cols-12 gap-10 lg:gap-14">
 
-            <!-- 左欄：文字 -->
-            <div class="lg:col-span-5 lg:pr-4 pt-2">
-                <div class="text-xs tracking-[0.4em] uppercase text-[#c9372c] mb-5">
-                    {categoryLabel}
-                </div>
-
-                <h1 class="text-4xl sm:text-5xl lg:text-6xl font-bold tracking-tight uppercase text-neutral-900 leading-[1.05] mb-10">
-                    {work.title}
-                </h1>
-
-                {work.description && (
-                    <div class="text-[15px] sm:text-base text-neutral-700 leading-[1.85] tracking-wide mb-12 whitespace-pre-line space-y-5">
-                        {work.description.split(/\n\s*\n/).filter(Boolean).map(p => <p>{p}</p>)}
-                    </div>
-                )}
-
-                {blocks.length > 0 && (
-                    <dl class="space-y-3 text-[15px] leading-relaxed">
-                        {blocks.map(block => {
-                            const valid = (block.entries || []).filter(e => e.name);
-                            if (!valid.length) return null;
-                            return (
-                                <div>
-                                    <dt class="inline font-bold text-neutral-900 tracking-wide">
-                                        {block.name_zh || "其他"}
-                                        {block.name_en && (
-                                            <span class="text-neutral-500 text-sm font-normal ml-1.5">
-                                                {block.name_en}
-                                            </span>
-                                        )}
-                                    </dt>
-                                    <dd class="inline ml-2 text-neutral-700 tracking-wide">
-                                        {valid.map((e, i) => (
-                                            <span>
-                                                {i > 0 && <span class="mx-1.5 text-neutral-400">·</span>}
-                                                {e.duty && <span class="text-neutral-500 mr-1">{e.duty}</span>}
-                                                {e.name}
-                                                {e.resume_url && (
-                                                    <a href={e.resume_url}
-                                                       class="ml-1.5 text-xs text-neutral-500 hover:text-[#c9372c] transition-colors"
-                                                       target="_blank" rel="noopener">
-                                                        簡歷 →
-                                                    </a>
-                                                )}
-                                            </span>
-                                        ))}
-                                    </dd>
-                                </div>
-                            );
-                        })}
-                    </dl>
+        <!-- 1. 標題區（窄欄置中） -->
+        <div class="max-w-3xl mx-auto px-4 sm:px-6 lg:px-10 mb-10 sm:mb-14 text-center">
+            <div class="mb-4 text-xs text-[#c9372c] flex items-center justify-center gap-2 flex-wrap">
+                <span class="tracking-[0.4em] uppercase">{categoryLabel}</span>
+                {work.client && (
+                    <>
+                        <span class="text-[#c9372c]/40">·</span>
+                        <span class="tracking-wider">{work.client}</span>
+                    </>
                 )}
             </div>
+            <h1 class="text-2xl sm:text-3xl lg:text-4xl font-bold tracking-tight text-neutral-900 leading-tight">
+                {work.title}
+            </h1>
+        </div>
 
-            <!-- 右欄：大影片 + 可選 key art thumb（sticky 跟著滾） -->
-            <div class="lg:col-span-7">
-                <div class="lg:sticky lg:top-24 space-y-4">
-                    {isValidYouTubeId(work.youtube_id) ? (
-                        <lite-youtube videoid={work.youtube_id}
-                                      class="block aspect-video"
-                                      playlabel={work.title}></lite-youtube>
-                    ) : (
-                        <div class="aspect-video bg-neutral-100 flex items-center justify-center text-neutral-400">
-                            <span data-lang-zh>影片暫無法使用</span>
-                            <span data-lang-en>Video unavailable</span>
-                        </div>
-                    )}
+        <!-- 2. 影片 hero — 用 YouTube 預設 player（lite-youtube 點擊 lazy load，UI 維持 YT 原樣） -->
+        <!-- 注意：lite-youtube 預設 max-width:720px，必須用 inline style 解除才能填滿外層容器 -->
+        <div class="max-w-5xl mx-auto px-4 sm:px-6 lg:px-10 mb-10 sm:mb-14">
+            {isValidYouTubeId(work.youtube_id) ? (
+                <lite-youtube videoid={work.youtube_id}
+                              class="block aspect-video w-full"
+                              style="max-width: 100%;"
+                              playlabel={work.title}
+                              params="modestbranding=1&rel=0&iv_load_policy=3&playsinline=1"></lite-youtube>
+            ) : (
+                <div class="aspect-video bg-neutral-100 flex items-center justify-center text-neutral-400">
+                    <span data-lang-zh>影片暫無法使用</span>
+                    <span data-lang-en>Video unavailable</span>
                 </div>
-            </div>
+            )}
+        </div>
+
+        <!-- 3. 文字 + 4. credits（窄欄 3xl 易讀） -->
+        <div class="max-w-3xl mx-auto px-4 sm:px-6 lg:px-10">
+            {work.description && (
+                <div class="text-[15px] sm:text-base text-neutral-700 leading-[1.85] tracking-wide mb-12 whitespace-pre-line space-y-5">
+                    {work.description.split(/\n\s*\n/).filter(Boolean).map(p => <p>{p}</p>)}
+                </div>
+            )}
+
+            {/* Credits — text mode：純文字貼上原樣顯示；block mode：結構化 dl 渲染 */}
+            {work.credits_mode === "text" && work.credits_text ? (
+                <pre class="whitespace-pre-wrap font-sans text-[15px] text-neutral-700 leading-[1.85] tracking-wide mb-10">
+{work.credits_text}
+                </pre>
+            ) : blocks.length > 0 && (
+                <dl class="space-y-3 text-[15px] leading-relaxed mb-10">
+                    {blocks.map(block => {
+                        const valid = (block.entries || []).filter(e => e.name);
+                        if (!valid.length) return null;
+                        return (
+                            <div>
+                                <dt class="inline font-bold text-neutral-900 tracking-wide">
+                                    {block.name_zh || "其他"}
+                                    {block.name_en && (
+                                        <span class="text-neutral-500 text-sm font-normal ml-1.5">
+                                            {block.name_en}
+                                        </span>
+                                    )}
+                                </dt>
+                                <dd class="inline ml-2 text-neutral-700 tracking-wide">
+                                    {valid.map((e, i) => (
+                                        <span>
+                                            {i > 0 && <span class="mx-1.5 text-neutral-400">·</span>}
+                                            {e.duty && <span class="text-neutral-500 mr-1">{e.duty}</span>}
+                                            {e.name}
+                                            {e.resume_url && (
+                                                <a href={e.resume_url}
+                                                   class="ml-1.5 text-xs text-neutral-500 hover:text-[#c9372c] transition-colors"
+                                                   target="_blank" rel="noopener">
+                                                    簡歷 →
+                                                </a>
+                                            )}
+                                        </span>
+                                    ))}
+                                </dd>
+                            </div>
+                        );
+                    })}
+                </dl>
+            )}
+
+            {/* key_facts / faqs / narrative_long 不在 HTML 顯示 — PM/客戶頁面要乾淨。
+                這些內容透過：(1) <head> JSON-LD FAQPage schema、(2) /works/{slug}.md 鏡像、
+                (3) /llms-full.txt 提供給 AI/搜尋爬蟲，視覺端使用者看不到。 */}
+
+            {work.tags && work.tags.length > 0 && (
+                <div class="pt-8 border-t border-neutral-200 flex flex-wrap gap-2">
+                    {work.tags.map(t => (
+                        <a href={`/tags/${t}/`}
+                           class="text-[11px] tracking-wider text-neutral-500 bg-neutral-100 hover:bg-neutral-200 hover:text-[#c9372c] px-2.5 py-1 rounded-sm transition-colors">
+                            #{t.replace(/^tag-/, "")}
+                        </a>
+                    ))}
+                </div>
+            )}
         </div>
     </section>
 

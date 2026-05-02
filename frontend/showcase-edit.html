@@ -44,7 +44,10 @@ body::before{content:'';position:fixed;inset:0;z-index:9999;pointer-events:none;
 .section-label{font-family:var(--font-display);font-size:10px;font-weight:500;letter-spacing:4px;text-transform:uppercase;color:var(--accent);margin-bottom:14px;display:flex;align-items:center;gap:12px}
 .section-label::after{content:'';flex:1;height:1px;background:var(--border)}
 
-textarea,input[type="text"],input[type="url"]{width:100%;background:var(--bg3);border:1px solid var(--border);border-radius:4px;padding:10px 14px;color:var(--text);font-family:var(--font-body);font-size:14px;resize:vertical}
+textarea,input[type="text"],input[type="url"],input[type="number"]{width:100%;background:var(--bg3);border:1px solid var(--border);border-radius:4px;padding:10px 14px;color:var(--text);font-family:var(--font-body);font-size:14px;resize:vertical}
+/* Hide number input spinner — 設計上不需要箭頭 */
+input[type="number"]::-webkit-outer-spin-button,input[type="number"]::-webkit-inner-spin-button{-webkit-appearance:none;margin:0}
+input[type="number"]{-moz-appearance:textfield}
 textarea:focus,input:focus{outline:none;border-color:var(--accent)}
 textarea{min-height:80px}
 
@@ -158,6 +161,99 @@ function _currentBlocks() {
     return _normalizeCredits((DATA && DATA.credits) || []);
 }
 
+// ── 統一 SEO 區塊：301 轉址 + SEO 覆寫 + AI SEO 規劃 一個 section（位置：「網站連結」之下）
+function _renderSeoSection(sc) {
+    const seo = sc.seo || {};
+    const oldSlugs = sc.public_old_slugs || [];
+    const kw = Array.isArray(seo.keywords) ? seo.keywords.join(', ') : '';
+    const reviewedAt = seo.last_ai_review_at
+        ? new Date(seo.last_ai_review_at).toLocaleDateString('zh-TW')
+        : '尚未生成';
+    const reviewedBy = seo.last_ai_review_by || '—';
+    const needsReview = seo.needs_ai_review !== false;
+    const facts = Array.isArray(seo.key_facts) ? seo.key_facts : [];
+    const faqs = Array.isArray(seo.faqs) ? seo.faqs : [];
+    const factsHtml = facts.length
+        ? facts.map(f => `<li><strong>${_esc(f.label || '')}</strong>：${_esc(f.value || '')}</li>`).join('')
+        : '<li style="color:var(--text3);">（尚未生成）</li>';
+    const faqsHtml = faqs.length
+        ? faqs.map(f => `<li style="margin-bottom:8px;"><strong>Q：${_esc(f.q || '')}</strong><br>A：${_esc(f.a || '')}</li>`).join('')
+        : '<li style="color:var(--text3);">（尚未生成）</li>';
+    const statusBadge = needsReview
+        ? '<span style="color:#f59e0b;font-size:11px;">● 等待 AI 重新生</span>'
+        : '<span style="color:var(--success);font-size:11px;">✓ 已審核</span>';
+
+    const _h = (label, hint) => `
+        <div style="margin-top:18px;margin-bottom:8px;padding-bottom:6px;border-bottom:1px solid var(--border);">
+            <span style="color:var(--accent);font-size:11px;font-weight:600;letter-spacing:1px;text-transform:uppercase;">${label}</span>
+            ${hint ? `<span style="color:var(--text3);font-size:11px;margin-left:8px;">${hint}</span>` : ''}
+        </div>`;
+
+    return `<div class="section" style="margin-top:24px;">
+        <div class="section-label">SEO</div>
+
+        ${_h('🔗 SEO 301 轉址', `（${oldSlugs.length} 條 · 從舊網址轉到此作品）`)}
+        <div style="color:var(--text3);font-size:11px;margin-bottom:6px;line-height:1.6;">
+            一行一個舊網址（純字串自動展為 <code>/works/{slug}</code>、<code>/</code> 開頭視為完整路徑）。<br>
+            軟 301（Astro）+ 硬 301（NAS nginx）雙保險，Google 將舊 URL 權重轉到此作品。
+        </div>
+        <textarea id="inp-old-slugs" rows="3"
+            placeholder="/portfolio/abc&#10;/2024/03/exhibition&#10;old-name"
+            style="width:100%;font-family:ui-monospace,monospace;font-size:12px;">${_esc(oldSlugs.join('\n'))}</textarea>
+
+        ${_h('🔍 SEO 覆寫', '（選填，空則自動推算）')}
+        <div style="display:grid;grid-template-columns:1fr;gap:10px;">
+            <div>
+                <label style="display:block;color:var(--text3);font-size:11px;margin-bottom:4px;">SEO Title 覆寫（不填用作品標題）</label>
+                <input id="inp-seo-title" type="text" maxlength="120"
+                    value="${_esc(seo.seo_title || '')}"
+                    placeholder="搜尋結果標題，建議 50-60 字以內" style="width:100%;">
+            </div>
+            <div>
+                <label style="display:block;color:var(--text3);font-size:11px;margin-bottom:4px;">SEO Description 覆寫（不填用作品描述）</label>
+                <textarea id="inp-seo-desc" maxlength="500" rows="2"
+                    placeholder="搜尋結果摘要，建議中文 60-100 字最佳" style="width:100%;">${_esc(seo.seo_description || '')}</textarea>
+            </div>
+            <div>
+                <label style="display:block;color:var(--text3);font-size:11px;margin-bottom:4px;">Keywords（逗號分隔；不填用分類+標籤）</label>
+                <input id="inp-seo-keywords" type="text"
+                    value="${_esc(kw)}"
+                    placeholder="如:紀錄片, 展覽, 美術館" style="width:100%;">
+            </div>
+            <div>
+                <label style="display:block;color:var(--text3);font-size:11px;margin-bottom:4px;">Canonical URL（跨站發布時指向原作；少用）</label>
+                <input id="inp-seo-canonical" type="text" maxlength="500"
+                    value="${_esc(seo.canonical_url || '')}"
+                    placeholder="https://other-site.com/original-article" style="width:100%;">
+            </div>
+        </div>
+
+        ${_h('🤖 AI SEO 規劃', '（自動生成預覽，不顯示在頁面 HTML，給 AI 爬蟲讀）')}
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;font-size:11px;color:var(--text3);">
+            <span>上次審閱：${_esc(reviewedAt)} by ${_esc(reviewedBy)}</span>
+            ${statusBadge}
+        </div>
+        <div style="margin-bottom:10px;">
+            <label style="display:block;color:var(--text3);font-size:11px;margin-bottom:4px;">詳細介紹</label>
+            <textarea readonly rows="4"
+                style="width:100%;font-size:12px;background:var(--bg3);color:var(--text2);cursor:default;">${_esc(seo.narrative_long || '（尚未生成；請點下方「請 AI 重新生」按鈕，下次 admin/Claude 跑 pipeline 時會補）')}</textarea>
+        </div>
+        <div style="margin-bottom:10px;">
+            <div style="color:var(--text3);font-size:11px;margin-bottom:4px;">作品事實</div>
+            <ul style="margin:0;padding-left:20px;font-size:12px;color:var(--text2);">${factsHtml}</ul>
+        </div>
+        <div style="margin-bottom:12px;">
+            <div style="color:var(--text3);font-size:11px;margin-bottom:4px;">常見問題</div>
+            <ul style="margin:0;padding-left:20px;font-size:12px;color:var(--text2);">${faqsHtml}</ul>
+        </div>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;">
+            <button id="btn-request-ai-review" type="button" class="btn btn-sm" title="標記等待 AI，下次排程才實際跑（不耗額度）">🔄 請 AI 重新生</button>
+            <button id="btn-run-ai-now" type="button" class="btn btn-sm" title="立即呼叫 Claude 跑此作品 SEO（耗 Max 額度，30-60 秒）">▶ 立即執行此作品</button>
+        </div>
+    </div>`;
+}
+
+
 async function _load() {
     if (!TOKEN) { _showError(); return; }
     try {
@@ -217,8 +313,64 @@ function _render() {
 
     if (!EDITABLE) html += '<div class="readonly-banner">此頁面目前為唯讀模式</div>';
 
-    html += `<div class="page-title">${_esc(projectName)}</div>`;
+    // Sticky 頂部儲存 bar — master save + dirty indicator
+    if (EDITABLE) {
+        html += `<div id="save-bar"
+            style="position:sticky;top:0;z-index:50;background:var(--bg);padding:12px 0;
+                   margin:-12px 0 16px;border-bottom:1px solid var(--border);
+                   display:flex;align-items:center;gap:12px;">
+            <button id="btn-master-save" class="btn btn-primary"
+                style="padding:8px 18px;font-weight:500;">💾 儲存所有變更</button>
+            <span id="save-status" style="color:var(--text3);font-size:12px;">所有變更已儲存</span>
+        </div>`;
+    }
+
+    // 頂部大標題吃 public_title（對外顯示）— 留空 fallback 到專案名；下方輸入框 input 即時連動
+    const _displayTitle = (sc.public_title || '').trim() || projectName;
+    html += `<div class="page-title" id="page-title">${_esc(_displayTitle)}</div>`;
     html += `<div class="page-sub">作品展示編輯</div>`;
+
+    // === 作品基本資料（從 CrmProject.public_* 鏡射；對外顯示用） ===
+    if (EDITABLE) {
+        html += `<div class="section">
+            <div class="section-label">作品基本資料</div>
+            <!-- Row 1：標題 / 客戶（autocomplete）兩欄 -->
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;">
+                <div>
+                    <label style="display:block;color:var(--text3);font-size:11px;margin-bottom:4px;">標題（對外顯示）</label>
+                    <input type="text" id="inp-public-title" data-field="public_title"
+                        value="${_esc(sc.public_title || '')}"
+                        placeholder="${_esc(projectName)}（留空用專案名）" style="width:100%;">
+                </div>
+                <div style="position:relative;">
+                    <label style="display:block;color:var(--text3);font-size:11px;margin-bottom:4px;">客戶</label>
+                    <input type="text" id="inp-public-client" data-field="public_client" autocomplete="off"
+                        value="${_esc(sc.public_client || '')}" placeholder="輸入或選擇客戶" style="width:100%;">
+                    <div id="client-dropdown" style="display:none;position:absolute;top:100%;left:0;right:0;z-index:100;background:var(--bg2);border:1px solid var(--border2);border-radius:4px;margin-top:2px;max-height:280px;overflow-y:auto;box-shadow:0 4px 12px rgba(0,0,0,0.4);"></div>
+                </div>
+            </div>
+            <!-- Row 2：年份（窄）+ 公開 + 精選 + noindex 同行 -->
+            <div style="display:flex;gap:18px;align-items:end;margin-top:14px;flex-wrap:wrap;">
+                <div style="width:100px;flex-shrink:0;">
+                    <label style="display:block;color:var(--text3);font-size:11px;margin-bottom:4px;">年份</label>
+                    <input type="number" id="inp-public-year" data-field="public_year"
+                        value="${sc.public_year || ''}" placeholder="2024" style="width:100%;">
+                </div>
+                <label style="display:flex;align-items:center;gap:6px;color:var(--text);font-size:13px;cursor:pointer;padding-bottom:6px;">
+                    <input type="checkbox" id="inp-published" data-field="published"
+                        ${sc.published ? 'checked' : ''}> 🌐 公開
+                </label>
+                <label style="display:flex;align-items:center;gap:6px;color:var(--text);font-size:13px;cursor:pointer;padding-bottom:6px;">
+                    <input type="checkbox" id="inp-public-featured" data-field="public_featured"
+                        ${sc.public_featured ? 'checked' : ''}> ⭐ 首頁精選
+                </label>
+                <label style="display:flex;align-items:center;gap:6px;color:var(--text);font-size:13px;cursor:pointer;padding-bottom:6px;">
+                    <input type="checkbox" id="inp-public-noindex" data-field="public_noindex"
+                        ${sc.public_noindex ? 'checked' : ''}> 🚫 noindex
+                </label>
+            </div>
+        </div>`;
+    }
 
     // Cover (read-only in edit page)
     if (sc.cover_url) {
@@ -228,21 +380,20 @@ function _render() {
         </div>`;
     }
 
-    // Description
+    // Description（無個別儲存按鈕，跟著 master save）
     html += `<div class="section" id="sec-desc">
         <div class="section-label">專案描述</div>
         ${EDITABLE
-            ? `<textarea id="inp-desc">${_esc(sc.description || '')}</textarea>
-               <div style="margin-top:8px;"><button class="btn btn-primary btn-sm" id="btn-save-desc">儲存</button></div>`
+            ? `<textarea id="inp-desc" data-field="description">${_esc(sc.description || '')}</textarea>`
             : `<p style="color:var(--text2);">${_esc(sc.description || '尚未填寫')}</p>`}
     </div>`;
 
-    // Video URL
+    // Video URL（無個別儲存按鈕）
     html += `<div class="section" id="sec-video">
         <div class="section-label">主影片連結</div>
         ${EDITABLE
-            ? `<div style="display:flex;gap:8px;"><input type="url" id="inp-video" value="${_esc(sc.video_url || '')}" placeholder="YouTube 或 Vimeo 連結">
-               <button class="btn btn-primary btn-sm" id="btn-save-video">儲存</button></div>`
+            ? `<input type="url" id="inp-video" data-field="video_url"
+                value="${_esc(sc.video_url || '')}" placeholder="YouTube 或 Vimeo 連結" style="width:100%;">`
             : sc.video_url ? `<a href="${_esc(sc.video_url)}" target="_blank" style="color:var(--accent);">${_esc(sc.video_url)}</a>` : '<p style="color:var(--text3);">尚未設定</p>'}
     </div>`;
 
@@ -333,21 +484,51 @@ function _render() {
         return `<option value="${t.id}">${_esc(t.name)}${roleNames ? ' (' + _esc(roleNames) + ')' : ''}</option>`;
     }).join('');
 
+    // 預設純文字（PM 從劇組拿到的就是文字稿，比 block 結構化容易上手）
+    const creditsMode = DATA.credits_mode === 'block' ? 'block' : 'text';
+    const creditsText = DATA.credits_text || '';
+    const _modeBtnCls = (active) => `btn btn-sm${active ? ' btn-primary' : ''}`;
+
     html += `<div class="section" id="sec-credits">
         <div class="section-label">演職員表 / Credits</div>
-        ${EDITABLE ? `<div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px;">
-            <select id="sel-add-role" class="btn btn-sm" style="padding:6px 10px;">
-                <option value="">+ 新增職位 ▾</option>
-                ${roleOptionsHtml}
-                <option value="__custom__">+ 自訂分類…</option>
-            </select>
-            ${tplsAvail.length > 0 ? `<select id="sel-apply-tpl" class="btn btn-sm" style="padding:6px 10px;">
-                <option value="">📦 套用模板 ▾</option>
-                ${tplOptionsHtml}
-            </select>` : ''}
+        ${EDITABLE ? `<div style="display:flex;gap:6px;margin-bottom:12px;font-size:12px;">
+            <button id="btn-mode-block" type="button" class="${_modeBtnCls(creditsMode === 'block')}"
+                    style="padding:5px 12px;">📝 結構化</button>
+            <button id="btn-mode-text" type="button" class="${_modeBtnCls(creditsMode === 'text')}"
+                    style="padding:5px 12px;">📄 純文字</button>
+            <span style="color:var(--text3);font-size:11px;align-self:center;margin-left:6px;">
+                ${creditsMode === 'text'
+                    ? '純文字：直接貼上劇組給的文字稿'
+                    : '結構化：用下拉選單建立職位 + 人員（含 staff 連結）'}
+            </span>
         </div>` : ''}
-        <div id="credit-blocks-container">${blocks.map((b, i) => _renderBlock(b, i)).join('')}</div>
-        ${blocks.length === 0 ? '<p style="color:var(--text3);font-size:13px;">尚無演職員資料</p>' : ''}
+
+        <!-- 結構化模式區塊 -->
+        <div id="credits-block-mode" style="display:${creditsMode === 'block' ? '' : 'none'};">
+            ${EDITABLE ? `<div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px;">
+                <select id="sel-add-role" class="btn btn-sm" style="padding:6px 10px;">
+                    <option value="">+ 新增職位 ▾</option>
+                    ${roleOptionsHtml}
+                    <option value="__custom__">+ 自訂分類…</option>
+                </select>
+                ${tplsAvail.length > 0 ? `<select id="sel-apply-tpl" class="btn btn-sm" style="padding:6px 10px;">
+                    <option value="">📦 套用模板 ▾</option>
+                    ${tplOptionsHtml}
+                </select>` : ''}
+            </div>` : ''}
+            <div id="credit-blocks-container">${blocks.map((b, i) => _renderBlock(b, i)).join('')}</div>
+            ${blocks.length === 0 ? '<p style="color:var(--text3);font-size:13px;">尚無演職員資料</p>' : ''}
+        </div>
+
+        <!-- 純文字模式區塊（跟著 master save，不再有獨立儲存按鈕） -->
+        <div id="credits-text-mode" style="display:${creditsMode === 'text' ? '' : 'none'};">
+            ${EDITABLE ? `
+                <textarea id="inp-credits-text" data-field="credits_text" rows="14"
+                    style="width:100%;font-family:ui-monospace,monospace;font-size:13px;line-height:1.7;padding:12px;border:1px solid var(--border2);border-radius:4px;background:var(--bg2);color:var(--text);"
+                    placeholder="直接貼上劇組給的 credits 文字稿，存檔後對外作品頁原樣顯示。例：&#10;&#10;製作 王小明&#10;導演 李大華&#10;攝影 張三&#10;演員 邱雲福 / 周大力">${_esc(creditsText)}</textarea>
+                <div style="color:var(--text3);font-size:11px;margin-top:6px;">點頂部「💾 儲存所有變更」存檔；存檔後 60 秒內觸發對外網站重建</div>
+            ` : `<pre style="white-space:pre-wrap;font-family:ui-monospace,monospace;font-size:13px;line-height:1.8;padding:12px;background:var(--bg2);border-radius:4px;">${_esc(creditsText) || '（尚無內容）'}</pre>`}
+        </div>
     </div>`;
 
     // Website categories / tags (kind=category | tag)
@@ -373,11 +554,34 @@ function _render() {
     html += _renderCatSection('作品分類', 'category', 'sec-website-cats');
     html += _renderCatSection('作品標籤', 'tag', 'sec-website-tags');
 
-    // Preview link — DATA.id 即 showcase.id（與 project_id 1:1）
-    if (DATA.id) {
-        html += `<div style="text-align:center;margin-top:24px;">
-            <button class="btn" onclick="window.open('/showcase.html?id=${_esc(DATA.id)}','_blank')">預覽公開展示頁 →</button>
+    // 對外公開連結 — 直接顯示官網網址（未發布或無 slug 時顯示提示）
+    const siteUrl = (DATA.public_site_url || '').replace(/\/$/, '');
+    const urlPath = DATA.public_url_path || '';
+    const publicUrl = (siteUrl && urlPath) ? `${siteUrl}${urlPath}` : '';
+    if (siteUrl) {
+        html += `<div class="section" style="margin-top:24px;">
+            <div class="section-label">網站連結</div>
+            ${publicUrl ? `
+                <div style="display:flex;gap:8px;align-items:center;">
+                    <input id="preview-url-input" type="text" readonly value="${_esc(publicUrl)}"
+                        onclick="this.select()" style="flex:1;font-family:ui-monospace,monospace;font-size:13px;cursor:pointer;">
+                    <button id="btn-copy-url" class="btn" type="button" title="複製連結">📋 複製</button>
+                    <button class="btn" type="button" onclick="window.open('${_esc(publicUrl)}','_blank')" title="另開新分頁">↗ 開新分頁</button>
+                </div>
+                <div style="color:var(--text3);font-size:11px;margin-top:6px;">
+                    點輸入框自動全選複製。${DATA.public_published ? '' : '此作品尚未公開（勾「🌐 公開」+ 儲存後對外可見）。'}
+                </div>
+            ` : `
+                <div style="color:var(--text3);font-size:13px;padding:12px;background:var(--bg3);border-radius:4px;">
+                    尚未產生公開 URL — 第一次勾「🌐 公開」+ 儲存後會 auto-assign 編號（或填 slug 自訂）。
+                </div>
+            `}
         </div>`;
+    }
+
+    // SEO 統一區塊（301 轉址 + SEO 覆寫 + AI SEO 規劃）— 放在「網站連結」之下、footer 之上
+    if (EDITABLE) {
+        html += _renderSeoSection(sc);
     }
 
     html += '<div class="footer">Originsun Studio</div>';
@@ -392,20 +596,217 @@ function _render() {
 function _bindEvents() {
     const sc = DATA || {};
 
-    // Save description
-    document.getElementById('btn-save-desc')?.addEventListener('click', async () => {
+    // === Dirty tracker + master save ===
+    // 所有 [data-field] 元素的 input/change 事件都會觸發 dirty=true
+    let _dirty = false;
+    const _statusEl = document.getElementById('save-status');
+    const _btnMaster = document.getElementById('btn-master-save');
+    const setDirty = (val) => {
+        _dirty = val;
+        if (!_statusEl) return;
+        if (val) {
+            _statusEl.textContent = '● 有未儲存的變更';
+            _statusEl.style.color = '#f59e0b';
+        } else {
+            _statusEl.textContent = '✓ 所有變更已儲存';
+            _statusEl.style.color = 'var(--text3)';
+        }
+    };
+    document.querySelectorAll('[data-field]').forEach(el => {
+        const evt = (el.type === 'checkbox' || el.tagName === 'SELECT') ? 'change' : 'input';
+        el.addEventListener(evt, () => setDirty(true));
+    });
+    // 對外標題即時連動到頂部 page-title + parent iframe panel 標題 — 三處同步
+    const _titleInp = document.getElementById('inp-public-title');
+    const _titleEl = document.getElementById('page-title');
+    if (_titleInp) {
+        const _projName = DATA.project_name || '';
+        const _syncTitle = () => {
+            const t = _titleInp.value.trim() || _projName;
+            if (_titleEl) _titleEl.textContent = t;
+            // 通知 parent admin iframe panel 上方「編輯：XXX」label 跟進
+            try { window.parent?.postMessage({ type: 'showcase-title-change', title: t }, '*'); } catch (_) {}
+        };
+        _titleInp.addEventListener('input', _syncTitle);
+        _syncTitle();  // 初次載入也 sync 一次（iframe 開啟時 parent 標題會帶 client prefix）
+    }
+    // === 複製預覽連結到剪貼簿 ===
+    document.getElementById('btn-copy-url')?.addEventListener('click', async () => {
+        const inp = document.getElementById('preview-url-input');
+        if (!inp) return;
+        const btn = document.getElementById('btn-copy-url');
+        const orig = btn.textContent;
         try {
-            await _save({ description: document.getElementById('inp-desc').value });
-            _toast('已儲存');
-        } catch (e) { alert(e.message); }
+            await navigator.clipboard.writeText(inp.value);
+        } catch (_) {
+            // navigator.clipboard 在 http:// 沒有 — fallback 用 select+execCommand
+            inp.select();
+            document.execCommand('copy');
+        }
+        btn.textContent = '✓ 已複製';
+        setTimeout(() => { btn.textContent = orig; }, 1500);
     });
 
-    // Save video
-    document.getElementById('btn-save-video')?.addEventListener('click', async () => {
+    // === 客戶 autocomplete combobox ===
+    (() => {
+        const inp = document.getElementById('inp-public-client');
+        const dd = document.getElementById('client-dropdown');
+        if (!inp || !dd) return;
+        let timer = null;
+        let seq = 0;  // race protection — 慢網路下舊 fetch 後到不蓋掉新 dropdown
+
+        const renderItems = (items, q) => {
+            if (!items || !items.length) {
+                dd.innerHTML = `<div style="padding:10px;color:var(--text3);font-size:12px;text-align:center;">${q ? '無符合客戶' : '尚無客戶資料'}</div>`;
+                dd.style.display = 'block';
+                return;
+            }
+            dd.innerHTML = items.map(c => `
+                <div class="client-item" data-name="${_esc(c.short_name)}"
+                     style="padding:8px 12px;cursor:pointer;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:10px;"
+                     onmouseover="this.style.background='var(--bg3)'"
+                     onmouseout="this.style.background=''">
+                    <div style="flex:1;min-width:0;">
+                        <div style="color:var(--text);font-size:13px;font-weight:500;">${_esc(c.short_name)}</div>
+                        ${c.full_name ? `<div style="color:var(--text3);font-size:11px;">${_esc(c.full_name)}</div>` : ''}
+                    </div>
+                </div>
+            `).join('');
+            dd.querySelectorAll('.client-item').forEach(it => {
+                it.addEventListener('mousedown', (ev) => {
+                    ev.preventDefault();
+                    inp.value = it.dataset.name;
+                    setDirty(true);
+                    dd.style.display = 'none';
+                });
+            });
+            dd.style.display = 'block';
+        };
+
+        const search = async (q) => {
+            const mySeq = ++seq;
+            try {
+                const res = await fetch(`${API}/clients_search?q=${encodeURIComponent(q)}`);
+                if (!res.ok) return;
+                const data = await res.json();
+                if (mySeq !== seq) return;
+                renderItems(data.items || [], q);
+            } catch (_) {}
+        };
+
+        inp.addEventListener('focus', () => search(''));
+        inp.addEventListener('input', () => {
+            if (timer) clearTimeout(timer);
+            timer = setTimeout(() => search(inp.value.trim()), 200);
+        });
+        inp.addEventListener('blur', () => {
+            // 150ms 延遲讓 mousedown 先觸發
+            setTimeout(() => { dd.style.display = 'none'; }, 150);
+        });
+    })();
+
+    // textarea 舊 URL — 任何鍵盤動作 mark dirty（內容轉成 list 在 master save 時做）
+    document.getElementById('inp-old-slugs')?.addEventListener('input', () => setDirty(true));
+
+    // SEO 覆寫欄位 — 4 個 input/textarea 任一動就 mark dirty
+    ['inp-seo-title', 'inp-seo-desc', 'inp-seo-keywords', 'inp-seo-canonical'].forEach(id => {
+        document.getElementById(id)?.addEventListener('input', () => setDirty(true));
+    });
+
+    // 「請 AI 重新生」— mark needs_ai_review=True，下次排程自動跑（不耗 LLM 額度）
+    document.getElementById('btn-request-ai-review')?.addEventListener('click', async () => {
+        const btn = document.getElementById('btn-request-ai-review');
+        const orig = btn.textContent;
+        btn.disabled = true;
+        btn.textContent = '⏳ 請求中...';
         try {
-            await _save({ video_url: document.getElementById('inp-video').value.trim() });
-            _toast('已儲存');
-        } catch (e) { alert(e.message); }
+            const res = await fetch(`${API}/request_ai_review`, { method: 'POST' });
+            if (!res.ok) throw new Error(await res.text() || '請求失敗');
+            btn.textContent = '✓ 已加入 AI 待生清單';
+            _toast('已標記，下次排程自動補');
+            if (DATA && DATA.seo) DATA.seo.needs_ai_review = true;
+            await _load();
+        } catch (e) {
+            btn.textContent = orig;
+            btn.disabled = false;
+            alert('請求失敗：' + e.message);
+        }
+    });
+
+    // 「立即執行此作品」— 直接呼 claude --print，30-60 秒，耗 Max 額度
+    document.getElementById('btn-run-ai-now')?.addEventListener('click', async () => {
+        const btn = document.getElementById('btn-run-ai-now');
+        const orig = btn.textContent;
+        btn.disabled = true;
+        btn.textContent = '⏳ Claude 撰寫中…';
+        try {
+            const res = await fetch(`${API}/run_ai_now`, { method: 'POST' });
+            const data = await res.json().catch(() => ({}));
+            if (!res.ok) throw new Error(data.detail || data.error || '執行失敗');
+            if (data.status === 'busy') {
+                _toast('已有 AI runner 在跑，請稍後再試');
+            } else if (data.processed > 0) {
+                _toast('AI 已生成，重新載入內容');
+                await _load();
+            } else {
+                const w = (data.works || [])[0];
+                _toast(`未生成：${w?.detail || data.error || '請看 master log'}`);
+            }
+        } catch (e) {
+            alert('執行失敗：' + e.message);
+        } finally {
+            btn.disabled = false;
+            btn.textContent = orig;
+        }
+    });
+
+    // Master save：收所有 [data-field] 現值 + old_slugs 一次 PUT
+    _btnMaster?.addEventListener('click', async () => {
+        const payload = {};
+        document.querySelectorAll('[data-field]').forEach(el => {
+            const f = el.dataset.field;
+            if (el.type === 'checkbox') {
+                payload[f] = el.checked;
+            } else if (el.type === 'number') {
+                const n = el.value === '' ? null : Number(el.value);
+                payload[f] = Number.isNaN(n) ? null : n;
+            } else {
+                payload[f] = el.value;
+            }
+        });
+        // old_slugs 從 textarea 解析：一行一個、trim、過濾空行
+        const oldUrlsRaw = document.getElementById('inp-old-slugs')?.value || '';
+        payload.public_old_slugs = oldUrlsRaw.split(/\r?\n/).map(s => s.trim()).filter(Boolean);
+
+        // SEO 覆寫欄位 — 4 個輸入；keywords 接受 ASCII 半形 + 中文全形 + 頓號分隔
+        const kwRaw = document.getElementById('inp-seo-keywords')?.value || '';
+        payload.seo = {
+            seo_title: (document.getElementById('inp-seo-title')?.value || '').trim() || null,
+            seo_description: (document.getElementById('inp-seo-desc')?.value || '').trim() || null,
+            keywords: kwRaw.split(/[,，、]/).map(s => s.trim()).filter(Boolean),
+            canonical_url: (document.getElementById('inp-seo-canonical')?.value || '').trim() || null,
+        };
+        _btnMaster.disabled = true;
+        const orig = _btnMaster.textContent;
+        _btnMaster.textContent = '⏳ 儲存中...';
+        try {
+            await _save(payload);
+            setDirty(false);
+            _btnMaster.textContent = '✓ 已儲存';
+            setTimeout(() => { _btnMaster.textContent = orig; _btnMaster.disabled = false; }, 1500);
+            await _reload();
+            // 通知 parent admin Tab：作品標題 / 客戶 / 公開狀態都可能變了，去 reload 列表
+            try { window.parent?.postMessage({ type: 'showcase-saved' }, '*'); } catch (_) {}
+        } catch (e) {
+            alert(e.message);
+            _btnMaster.textContent = orig;
+            _btnMaster.disabled = false;
+        }
+    });
+
+    // 離頁前未存提示
+    window.addEventListener('beforeunload', (e) => {
+        if (_dirty) { e.preventDefault(); e.returnValue = ''; }
     });
 
     // Gallery upload
@@ -442,6 +843,23 @@ function _bindEvents() {
             try { await _save({ process_items: items }); await _reload(); } catch (e) { alert(e.message); }
         });
     });
+
+    // === Credits 雙模式 toggle（結構化 ↔ 純文字）===
+    const _switchCreditsMode = async (mode) => {
+        try {
+            await _save({ credits_mode: mode });
+            await _reload();
+        } catch (e) { alert(e.message); }
+    };
+    document.getElementById('btn-mode-block')?.addEventListener('click', () => {
+        if (DATA.credits_mode === 'block') return;
+        _switchCreditsMode('block');
+    });
+    document.getElementById('btn-mode-text')?.addEventListener('click', () => {
+        if (DATA.credits_mode === 'text') return;
+        _switchCreditsMode('text');
+    });
+    // 純文字模式 — 個別儲存按鈕已移除，改走 master save
 
     // === Credits block 編輯器 ===
     const _saveBlocks = async (blocks) => {

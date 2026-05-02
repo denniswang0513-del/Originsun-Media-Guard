@@ -80,15 +80,23 @@ function _renderTable() {
     });
 
     if (!rows.length) {
-        table.innerHTML = '<tr><td colspan="7" style="color:#888;text-align:center;padding:30px;">沒有符合條件的作品</td></tr>';
+        table.innerHTML = '<tr><td colspan="10" style="color:#888;text-align:center;padding:30px;">沒有符合條件的作品</td></tr>';
         return;
     }
+
+    // 唯讀狀態徽章 — 比 disabled checkbox 更顯眼，使用者能一眼看出 on/off
+    // 修改入口在右側「✎ 編輯」按鈕，不靠 inline toggle
+    const _roBadge = (on) => on
+        ? '<span style="display:inline-flex;align-items:center;justify-content:center;width:22px;height:22px;background:#3b82f6;color:#fff;border-radius:4px;font-size:14px;font-weight:bold;cursor:default;">✓</span>'
+        : '<span style="display:inline-flex;align-items:center;justify-content:center;width:22px;height:22px;background:transparent;border:1px solid #4b5563;border-radius:4px;cursor:default;"></span>';
 
     table.innerHTML = `
         <thead>
             <tr>
                 <th>縮圖</th>
-                <th>標題 / slug</th>
+                <th>客戶</th>
+                <th>標題</th>
+                <th>slug</th>
                 <th>分類</th>
                 <th>年份</th>
                 <th>公開</th>
@@ -105,32 +113,19 @@ function _renderTable() {
                 return `
                 <tr data-id="${esc(w.id)}">
                     <td>${thumb}</td>
-                    <td>
-                        <div style="color:#fff;">${esc(w.public_title || w.name)}</div>
-                        <div style="color:#888;font-size:11px;">
-                            ${esc(w.slug || '(未設 slug)')}
-                            ${w.redirect_count > 0
-                                ? `<span title="此作品有 ${w.redirect_count} 條舊 slug 被 301 轉址到目前 slug" style="color:#3b82f6;margin-left:6px;">↪ ${w.redirect_count}</span>`
-                                : ''}
-                        </div>
+                    <td style="color:#fff;">${esc(w.client || '-')}</td>
+                    <td style="color:#fff;">${esc(w.title || w.name)}</td>
+                    <td style="color:#888;font-size:12px;">
+                        ${esc(w.slug || '(未設)')}
+                        ${w.redirect_count > 0
+                            ? `<span title="此作品有 ${w.redirect_count} 條舊 slug 被 301 轉址到目前 slug" style="color:#3b82f6;margin-left:6px;">↪ ${w.redirect_count}</span>`
+                            : ''}
                     </td>
                     <td>${(w.categories || []).map(s => `<span class="website-pill">${esc(s)}</span>`).join(' ') || '<span style="color:#666;">-</span>'}</td>
                     <td>${w.year ?? '-'}</td>
-                    <td>
-                        <label style="cursor:pointer;">
-                            <input type="checkbox" ${w.public ? 'checked' : ''} onchange="window._websiteTogglePublic('${esc(w.id)}', this.checked)" />
-                        </label>
-                    </td>
-                    <td>
-                        <label style="cursor:pointer;">
-                            <input type="checkbox" ${w.featured ? 'checked' : ''} onchange="window._websiteToggleFeatured('${esc(w.id)}', this.checked)" />
-                        </label>
-                    </td>
-                    <td>
-                        <label style="cursor:pointer;" title="勾選後此作品強制 noindex">
-                            <input type="checkbox" ${w.noindex ? 'checked' : ''} onchange="window._websiteToggleNoindex('${esc(w.id)}', this.checked)" />
-                        </label>
-                    </td>
+                    <td title="${w.public ? '已公開' : '未公開'}（僅顯示，請進編輯頁修改）">${_roBadge(w.public)}</td>
+                    <td title="${w.featured ? '已設精選' : '未設精選'}（僅顯示，請進編輯頁修改）">${_roBadge(w.featured)}</td>
+                    <td title="${w.noindex ? '已設 noindex' : '允許索引'}（僅顯示，請進編輯頁修改）">${_roBadge(w.noindex)}</td>
                     <td>
                         <button class="btn btn-sm" onclick="window._websiteEditWork('${esc(w.id)}')">✎ 編輯</button>
                     </td>
@@ -141,43 +136,32 @@ function _renderTable() {
     `;
 }
 
-async function _toggleWorkFlag(pid, val, opts) {
-    // opts: { endpoint, method='PUT', body, stateField, onLabel, offLabel }
-    try {
-        await websiteFetch(opts.endpoint, { method: opts.method || 'PUT', body: opts.body });
-        const w = _works.find(x => x.id === pid);
-        if (w) w[opts.stateField] = val;
-        toastOk(`已${val ? opts.onLabel : opts.offLabel}`);
-    } catch (e) {
-        toastErr(e.message);
-        _renderTable();
-    }
-}
-
-window._websiteTogglePublic = (pid, val) => _toggleWorkFlag(pid, val, {
-    endpoint: `/api/website/admin/works/${pid}`,
-    body: { public: val },
-    stateField: 'public', onLabel: '公開作品', offLabel: '下架作品',
-});
-
-window._websiteToggleFeatured = (pid, val) => _toggleWorkFlag(pid, val, {
-    endpoint: `/api/website/admin/works/${pid}/featured`, method: 'POST',
-    body: { featured: val },
-    stateField: 'featured', onLabel: '設為精選', offLabel: '取消精選',
-});
-
-window._websiteToggleNoindex = (pid, val) => _toggleWorkFlag(pid, val, {
-    endpoint: `/api/website/admin/works/${pid}`,
-    body: { public_noindex: val },
-    stateField: 'noindex', onLabel: '設為 noindex', offLabel: '取消 noindex',
-});
 
 
 // ══════════════════════════════════════════════════════════
 // Edit panel（iframe 嵌 /showcase-edit.html?token=XXX）
 // ══════════════════════════════════════════════════════════
 
+// iframe → parent postMessage 監聽：
+//   showcase-saved   → reload 列表（public_title / 客戶 / 公開狀態都可能變了）
+//   showcase-title-change → live update 上方「編輯：XXX」label，三處紅框同步
+let _msgListenerInstalled = false;
+function _installMessageListener() {
+    if (_msgListenerInstalled) return;
+    _msgListenerInstalled = true;
+    window.addEventListener('message', (e) => {
+        const t = e?.data?.type;
+        if (t === 'showcase-saved') {
+            _reloadWorks();
+        } else if (t === 'showcase-title-change') {
+            const titleEl = document.getElementById('website-edit-panel-title');
+            if (titleEl && e.data.title) titleEl.textContent = `編輯：${e.data.title}`;
+        }
+    });
+}
+
 function _ensureEditPanel() {
+    _installMessageListener();
     if (document.getElementById('website-edit-panel-overlay')) return;
     const overlay = document.createElement('div');
     overlay.id = 'website-edit-panel-overlay';

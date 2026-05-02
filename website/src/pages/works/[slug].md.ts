@@ -32,6 +32,18 @@ export const GET: APIRoute = async ({ params, site }) => {
     if (work.description) {
         lines.push(work.description.trim(), "");
     }
+    // AI-targeted long narrative — SEO pipeline 寫的、不顯示在 HTML、給 LLM crawler 理解
+    if (work.narrative_long) {
+        lines.push("## 詳細介紹", work.narrative_long.trim(), "");
+    }
+    // Key Facts — 結構化事實清單
+    if (work.key_facts && work.key_facts.length) {
+        lines.push("## 作品事實");
+        for (const f of work.key_facts) {
+            lines.push(`- **${f.label}**: ${f.value}`);
+        }
+        lines.push("");
+    }
     const blocks = normalizeCredits(work.credits);
     const hasCredits = blocks.some(b => (b.entries || []).some(e => e.name));
     if (hasCredits) {
@@ -48,6 +60,13 @@ export const GET: APIRoute = async ({ params, site }) => {
     }
     if (work.youtube_id) {
         lines.push(`## 影片`, `https://www.youtube.com/watch?v=${work.youtube_id}`, "");
+    }
+    // FAQs — SEO pipeline 寫的問答；給 LLM 直接理解常見疑問
+    if (work.faqs && work.faqs.length) {
+        lines.push("## 常見問題");
+        for (const f of work.faqs) {
+            lines.push(`### ${f.q}`, f.a, "");
+        }
     }
     // 曾用 URL — 給 LLM 知道此作品的歷史路徑變遷（SEO 301 來源）
     if (work.old_urls && work.old_urls.length) {

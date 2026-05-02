@@ -5,6 +5,7 @@
  */
 import BaseLayout from "../../layouts/BaseLayout.astro";
 import CategoryFilter from "../../components/works/CategoryFilter.astro";
+import TagCloud from "../../components/works/TagCloud.astro";
 import WorkCard from "../../components/works/WorkCard.astro";
 import Tr from "../../components/ui/Tr.astro";
 import { fetchMeta, fetchCategories, fetchAllWorksCached } from "../../lib/crm-client";
@@ -22,6 +23,11 @@ const activeTag = Astro.url.searchParams.get("tag") || null;
 // 依 kind 切兩排：分類（製作類型）+ 標籤（使用場景）。舊資料 kind 為空當分類處理。
 const cats = categories.filter(c => (c.kind ?? "category") === "category");
 const tags = categories.filter(c => c.kind === "tag");
+
+// 切軸時保留另一軸：點分類不丟 tag、點 tag 不丟分類。傳給 chip 元件當 extraQuery。
+const catQueryStr = activeCategory ? `category=${activeCategory}` : "";
+const tagQueryStr = activeTag ? `tag=${activeTag}` : "";
+const tagAllHref = catQueryStr ? `/works?${catQueryStr}` : "/works";
 
 const activeName = activeCategory
     ? categories.find(c => c.slug === activeCategory)?.name_zh || activeCategory
@@ -51,17 +57,30 @@ const seo = buildBasicPageSeo(Astro, {
             <!-- 搜尋框：作品多時派得上用場（少時直接看 chips 即可）-->
             <div id="works-search" class="max-w-md mx-auto mb-10"></div>
 
-            <CategoryFilter categories={cats} activeSlug={activeCategory} label="分類" queryKey="category" />
+            <CategoryFilter categories={cats} activeSlug={activeCategory}
+                            label="分類" queryKey="category"
+                            extraQuery={tagQueryStr} />
             {tags.length > 0 && (
-                <CategoryFilter categories={tags} activeSlug={activeTag} showAll={false} label="標籤" queryKey="tag" />
+                <div class="mt-6 text-center">
+                    <h2 class="text-xs tracking-[0.4em] uppercase text-neutral-500 mb-4">Tags</h2>
+                    <div class="flex justify-center">
+                        <TagCloud tags={tags} activeSlug={activeTag}
+                                  linkBase="/works?tag="
+                                  showAll={true}
+                                  allHref={tagAllHref}
+                                  extraQuery={catQueryStr} />
+                    </div>
+                </div>
             )}
 
             <div id="works-grid"
                  data-active-category={activeCategory || ""}
                  data-active-tag={activeTag || ""}
-                 class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-8 sm:gap-10">
+                 class="mt-16 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-8 sm:gap-10">
                 {allWorks.map(work => (
-                    <div class="work-item" data-categories={work.categories.join(",")}>
+                    <div class="work-item"
+                         data-categories={(work.categories || []).join(",")}
+                         data-tags={(work.tags || []).join(",")}>
                         <WorkCard work={work} />
                     </div>
                 ))}
@@ -78,21 +97,63 @@ const seo = buildBasicPageSeo(Astro, {
     const params = new URLSearchParams(window.location.search);
     const cat = params.get("category") || "";
     const tag = params.get("tag") || "";
-    // category + tag 都可同時 active — 都過則作品需含兩個（AND 邏輯）
-    if (cat || tag) {
-        let visible = 0;
-        document.querySelectorAll<HTMLElement>(".work-item").forEach(el => {
-            const slugs = (el.dataset.categories || "").split(",");
-            const show = (!cat || slugs.includes(cat)) && (!tag || slugs.includes(tag));
-            el.style.display = show ? "" : "none";
-            if (show) visible++;
-        });
-        const empty = document.getElementById("works-empty");
-        const grid = document.getElementById("works-grid");
-        if (visible === 0 && empty && grid) {
-            grid.classList.add("hidden");
-            empty.classList.remove("hidden");
+
+    // ── Step 1: 重寫所有 chip href，保留 cross-axis ──
+    // Astro SSG build 時 Astro.url.searchParams 永遠空，靜態頁裡的 chip 預設都丟掉另一軸；
+    // 在 client-side 根據實際 URL 重新組 href，讓 user 點 chip 不會清掉另一軸。
+    function buildHref(axis: string, slug: string): string {
+        const next = new URLSearchParams();
+        if (axis === "category") {
+            if (slug) next.set("category", slug);
+            if (tag) next.set("tag", tag);
+        } else if (axis === "tag") {
+            if (slug) next.set("tag", slug);
+            if (cat) next.set("category", cat);
         }
+        const qs = next.toString();
+        return qs ? `/works?${qs}` : "/works";
+    }
+
+    // ── Step 2: 切 active class（Astro SSG 看不到實際 query，預設都把「全部」反白；
+    //              client 根據真實 URL 修正 active 標）──
+    // 統一色系：兩軸 active 都用黑底白字、inactive 中性灰；axis 差異只在邊框（cat 有 / tag 無）
+    const CAT_ACTIVE = ["border-neutral-900", "bg-neutral-900", "text-white"];
+    const CAT_INACTIVE = ["border-neutral-300", "text-neutral-500", "hover:border-neutral-900", "hover:text-neutral-900"];
+    const TAG_ACTIVE = ["bg-neutral-900", "text-white", "hover:bg-neutral-800"];
+    const TAG_INACTIVE = ["bg-neutral-100", "text-neutral-500", "hover:bg-neutral-200", "hover:text-neutral-900"];
+
+    function applyChipState(): void {
+        document.querySelectorAll<HTMLAnchorElement>("[data-chip-axis]").forEach(a => {
+            const axis = a.dataset.chipAxis || "";
+            const slug = a.dataset.chipSlug || "";
+            a.href = buildHref(axis, slug);
+            const isActive = axis === "category" ? slug === cat : slug === tag;
+            const [activeCls, inactiveCls] = axis === "category"
+                ? [CAT_ACTIVE, CAT_INACTIVE]
+                : [TAG_ACTIVE, TAG_INACTIVE];
+            a.classList.remove(...activeCls, ...inactiveCls);
+            a.classList.add(...(isActive ? activeCls : inactiveCls));
+        });
+    }
+    applyChipState();
+
+    // ── Step 3: 過濾作品卡片（AND of cat + tag；空表示「全部」）──
+    let visible = 0;
+    document.querySelectorAll<HTMLElement>(".work-item").forEach(el => {
+        const cats = (el.dataset.categories || "").split(",");
+        const tagsArr = (el.dataset.tags || "").split(",");
+        const show = (!cat || cats.includes(cat)) && (!tag || tagsArr.includes(tag));
+        el.style.display = show ? "" : "none";
+        if (show) visible++;
+    });
+    const empty = document.getElementById("works-empty");
+    const grid = document.getElementById("works-grid");
+    if (visible === 0 && empty && grid) {
+        grid.classList.add("hidden");
+        empty.classList.remove("hidden");
+    } else if (grid && empty) {
+        grid.classList.remove("hidden");
+        empty.classList.add("hidden");
     }
 </script>
 

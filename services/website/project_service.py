@@ -25,19 +25,28 @@ def _youtube_thumbnail(video_id: Optional[str]) -> Optional[str]:
 
 async def _categories_for_projects(
     session: AsyncSession, project_ids: list[str]
-) -> dict[str, list[str]]:
-    """Batch fetch：一次 JOIN 取所有專案的分類 slug，避免 N+1。"""
+) -> dict[str, dict[str, list[str]]]:
+    """Batch fetch：一次 JOIN 取所有專案的分類/標籤 slug，依 kind 拆兩個 list。
+
+    回傳 {project_id: {'categories': [slug...], 'tags': [slug...]}}。
+    kind 為 NULL 或 'category' 視為分類；'tag' 視為標籤。
+    """
     if not project_ids:
         return {}
     stmt = (
-        select(WebsiteProjectCategory.project_id, WebsiteCategory.slug)
+        select(WebsiteProjectCategory.project_id, WebsiteCategory.slug, WebsiteCategory.kind)
         .join(WebsiteCategory, WebsiteCategory.id == WebsiteProjectCategory.category_id)
         .where(WebsiteProjectCategory.project_id.in_(project_ids))
     )
-    out: dict[str, list[str]] = defaultdict(list)
-    for pid, slug in await session.execute(stmt):
-        out[pid].append(slug)
+    out: dict[str, dict[str, list[str]]] = defaultdict(lambda: {"categories": [], "tags": []})
+    for pid, slug, kind in await session.execute(stmt):
+        bucket = "tags" if kind == "tag" else "categories"
+        out[pid][bucket].append(slug)
     return out
+
+
+def _empty_cat_data() -> dict[str, list[str]]:
+    return {"categories": [], "tags": []}
 
 
 def _slug_or_fallback(p: CrmProject) -> str:
@@ -52,6 +61,76 @@ def _slug_or_fallback(p: CrmProject) -> str:
     if p.public_number is not None:
         return str(p.public_number)
     return "work"
+
+
+def _old_slug_to_url(s: str) -> str:
+    """把 public_old_slugs 一筆轉成完整 URL path。
+
+    語意：純字串（如 'miriam-cahn'）→ '/works/miriam-cahn'（向下相容）
+         '/' 開頭（如 '/portfolio/abc'）→ 原樣保留（網站重建從外部 CMS 遷入用）
+
+    跨網域 URL（含 http://）一律當外部、本系統不接，回空字串讓 caller 過濾。
+    （理論上 normalize_old_slug_input 會在 save 時 strip 掉，但保留防呆。）
+    """
+    if not s:
+        return ""
+    s = s.strip()
+    if not s:
+        return ""
+    if s.startswith("http://") or s.startswith("https://"):
+        return ""  # cross-domain — 應該已被 normalize 移除網域；走到這代表 normalize 沒跑
+    if s.startswith("/"):
+        return s   # full path — 已是完整本網域路徑
+    return f"/works/{s}"  # bare slug — 舊行為
+
+
+def normalize_old_slug_input(raw: str) -> Optional[str]:
+    """把 PM 從各種來源貼進來的舊網址正規化成內部儲存格式。
+
+    支援輸入：
+      - 完整 URL（含網域）：`https://www.originsun-studio.com/portfolio/abc/` → `/portfolio/abc`
+      - 相對路徑：`/portfolio/abc/` → `/portfolio/abc`
+      - 純字串 slug：`old-name` → `old-name`（讀取時 _old_slug_to_url 會展為 /works/）
+
+    跟 post_service._normalize_old_url 行為一致（strip 網域 + trim trailing /）。
+    控制字元 / 引號 / 空白 → return None 讓 caller 過濾。
+    """
+    s = (raw or "").strip()
+    if not s:
+        return None
+    # 完整 URL → 取 path（不論網域是不是本站，PM 貼啥都 strip）
+    if s.startswith("http://") or s.startswith("https://"):
+        from urllib.parse import urlparse
+        try:
+            s = urlparse(s).path or ""
+        except Exception:
+            return None
+        if not s:
+            return None
+    # 結尾 / 去掉（避免 /portfolio/abc 跟 /portfolio/abc/ 視為兩條）
+    if len(s) > 1 and s.endswith("/"):
+        s = s.rstrip("/")
+    # 控制字元 / 引號 / 空白拒收
+    import re
+    if re.search(r"[\s\"'\x00-\x1f]", s):
+        return None
+    return s
+
+
+def normalize_old_slugs_input(raw_list) -> list[str]:
+    """批次正規化 + 去重（保序）。"""
+    if not raw_list:
+        return []
+    out: list[str] = []
+    seen: set[str] = set()
+    for raw in raw_list:
+        if not isinstance(raw, str):
+            continue
+        n = normalize_old_slug_input(raw)
+        if n and n not in seen:
+            seen.add(n)
+            out.append(n)
+    return out
 
 
 def _credits_summary(credits: Optional[list]) -> str:
@@ -80,10 +159,14 @@ def _credits_summary(credits: Optional[list]) -> str:
     return summary if len(summary) <= 30 else summary[:29] + "…"
 
 
-def _to_public_dict(p: CrmProject, categories: Optional[list[str]] = None) -> dict:
+def _to_public_dict(p: CrmProject, cat_data: Optional[dict[str, list[str]]] = None) -> dict:
     """投影 public 欄位到 dict — caller 必須保證 p 是 public（list/get caller 都在 SQL 層
     `WHERE public.is_(True)` 過濾過）。本函式不檢查 public flag，避免 admin path
-    （_to_admin_dict）誤拒未公開作品。新增 caller 時請 SQL 層先過濾。"""
+    （_to_admin_dict）誤拒未公開作品。新增 caller 時請 SQL 層先過濾。
+
+    cat_data: {"categories": [...], "tags": [...]} — _categories_for_projects 的單筆。
+    """
+    cd = cat_data or _empty_cat_data()
     return {
         "slug": _slug_or_fallback(p),
         "title": p.public_title or p.name,
@@ -91,21 +174,25 @@ def _to_public_dict(p: CrmProject, categories: Optional[list[str]] = None) -> di
         "youtube_id": p.public_youtube_id,
         "description": p.public_description,
         "year": p.public_year,
-        "categories": categories or [],
+        "categories": cd.get("categories") or [],
+        "tags": cd.get("tags") or [],
+        "credits_mode": p.public_credits_mode or "block",
+        "credits_text": p.public_credits_text,
         "thumbnail_url": _youtube_thumbnail(p.public_youtube_id),
         # OG image fallback chain：work cover > YouTube thumb > BaseLayout meta.seo_og_image
         "cover_url": p.public_cover_url or _youtube_thumbnail(p.public_youtube_id),
         "featured": bool(p.public_featured),
         "noindex": bool(p.public_noindex),
         # SEO 301 來源舊 URL — Astro JSON-LD sameAs / markdown 「曾用 URL」用
-        "old_urls": [f"/works/{s}" for s in (p.public_old_slugs or []) if s],
+        # 支援兩種寫法：純 slug（自動 prepend /works/）+ '/' 開頭完整路徑（外部 CMS 遷入）
+        "old_urls": [u for u in (_old_slug_to_url(s) for s in (p.public_old_slugs or [])) if u],
         # 列表卡片摘要 — 給 WorkCard 一行顯示用
         "credits_summary": _credits_summary(p.public_credits),
     }
 
 
-def _to_admin_dict(p: CrmProject, categories: Optional[list[str]] = None) -> dict:
-    d = _to_public_dict(p, categories)
+def _to_admin_dict(p: CrmProject, cat_data: Optional[dict[str, list[str]]] = None) -> dict:
+    d = _to_public_dict(p, cat_data)
     d.update({
         "id": p.id,
         "name": p.name,
@@ -144,7 +231,7 @@ async def list_public_projects(
 
     projects = list((await session.execute(stmt)).scalars())
     cat_map = await _categories_for_projects(session, [p.id for p in projects])
-    return [_to_public_dict(p, cat_map.get(p.id, [])) for p in projects], total
+    return [_to_public_dict(p, cat_map.get(p.id)) for p in projects], total
 
 
 async def get_public_project_by_slug(session: AsyncSession, slug: str) -> Optional[dict]:
@@ -165,19 +252,28 @@ async def get_public_project_by_slug(session: AsyncSession, slug: str) -> Option
         return None
 
     cat_map = await _categories_for_projects(session, [project.id])
-    data = _to_public_dict(project, cat_map.get(project.id, []))
+    data = _to_public_dict(project, cat_map.get(project.id))
     data["credits"] = project.public_credits or []
     data["published_at"] = project.public_published_at.isoformat() if project.public_published_at else None
 
-    # Detail-only：撈 showcase 的 gallery / process_items（list endpoint 不帶 — 太大）
-    try:
-        from db.models import CrmProjectShowcase
-        sc = await session.get(CrmProjectShowcase, project.id)
-        if sc:
-            data["gallery"] = sc.gallery or []
-            data["process_items"] = sc.process_items or []
-    except ImportError:
-        pass
+    # Detail-only：showcase（gallery/process_items）+ SEO（faqs/narrative...）並行撈（同 PK 兩張表）
+    from db.models import CrmProjectShowcase
+    import asyncio
+    from . import seo_service
+    sc, seo = await asyncio.gather(
+        session.get(CrmProjectShowcase, project.id),
+        seo_service.get_project_seo(session, project.id),
+    )
+    if sc:
+        data["gallery"] = sc.gallery or []
+        data["process_items"] = sc.process_items or []
+    data["seo_title"] = seo["seo_title"]
+    data["seo_description"] = seo["seo_description"]
+    data["seo_keywords"] = seo["keywords"]
+    data["canonical_url"] = seo["canonical_url"]
+    data["narrative_long"] = seo["narrative_long"]
+    data["key_facts"] = seo["key_facts"]
+    data["faqs"] = seo["faqs"]
     return data
 
 
@@ -203,7 +299,7 @@ async def list_featured_projects(session: AsyncSession, limit: int = 6) -> list[
         featured.extend((await session.execute(fb_stmt)).scalars())
 
     cat_map = await _categories_for_projects(session, [p.id for p in featured])
-    return [_to_public_dict(p, cat_map.get(p.id, [])) for p in featured]
+    return [_to_public_dict(p, cat_map.get(p.id)) for p in featured]
 
 
 async def list_admin_projects(
@@ -217,7 +313,7 @@ async def list_admin_projects(
 
     projects = list((await session.execute(stmt)).scalars())
     cat_map = await _categories_for_projects(session, [p.id for p in projects])
-    return [_to_admin_dict(p, cat_map.get(p.id, [])) for p in projects]
+    return [_to_admin_dict(p, cat_map.get(p.id)) for p in projects]
 
 
 _UPDATABLE_FIELDS = {
@@ -269,6 +365,10 @@ async def update_project_public(
     # SEO 301：偵測 slug 變動 — 先讀舊值再 setattr
     if "public_slug" in updates:
         append_old_slug_if_changed(project, updates["public_slug"])
+
+    # public_old_slugs 寫入前 normalize（strip 網域、trim 結尾 /、去重）
+    if "public_old_slugs" in updates and isinstance(updates["public_old_slugs"], list):
+        updates = {**updates, "public_old_slugs": normalize_old_slugs_input(updates["public_old_slugs"])}
 
     for k, v in updates.items():
         if k in _UPDATABLE_FIELDS:
@@ -350,9 +450,11 @@ async def list_redirects(session: AsyncSession) -> dict[str, str]:
     for project in (await session.execute(stmt)).scalars():
         new_url = f"/works/{_slug_or_fallback(project)}"
         for old_slug in (project.public_old_slugs or []):
-            if not old_slug or not isinstance(old_slug, str):
+            if not isinstance(old_slug, str):
                 continue
-            old_url = f"/works/{old_slug}"
+            old_url = _old_slug_to_url(old_slug)
+            if not old_url:
+                continue  # 跨網域 URL 或空字串 — 跳過
             # 跳過自循環（理論不該發生，append_old_slug_if_changed 已防護）
             if old_url == new_url:
                 continue

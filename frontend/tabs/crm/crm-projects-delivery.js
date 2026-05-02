@@ -451,7 +451,8 @@ function _renderPublish(sc, projectId) {
     const published = !!sc.published;
     const statusText = published ? '已發佈' : '未發佈';
     const statusClass = published ? 'showcase-status-published' : 'showcase-status-draft';
-    const publicUrl = published ? `${location.origin}/showcase.html?id=${projectId}` : '';
+    // 對外公開連結 — 後端已在 /projects/{id}/showcase 回傳 public_url（指向 originsun-studio.com/works/{slug}）
+    const publicUrl = sc.public_url || '';
 
     return _section('發佈控制', `
         <div class="showcase-publish-bar" id="showcase-publish-bar">

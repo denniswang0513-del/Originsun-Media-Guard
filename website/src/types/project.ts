@@ -10,7 +10,8 @@ export interface IPublicProject {
     youtube_id?: string | null;
     description?: string | null;
     year?: number | null;
-    categories: string[];          // category slugs
+    categories: string[];          // 製作類型 slug（kind=category）
+    tags: string[];                // 使用場景 slug（kind=tag）
     thumbnail_url?: string | null; // YouTube maxresdefault
     cover_url?: string | null;     // OG image — sc.cover_url 鏡像，作品集卡片用
     featured: boolean;
@@ -19,6 +20,9 @@ export interface IPublicProject {
     old_urls?: string[];
     // 列表卡片用 credits 摘要（「主演 邱雲福 · 導演 王小明」）
     credits_summary?: string;
+    // credits 雙模式：'block' (用 credits[]) / 'text' (用 credits_text 純文字)
+    credits_mode?: "block" | "text";
+    credits_text?: string | null;
 }
 
 export interface ICreditEntry {
@@ -49,12 +53,30 @@ export interface IProcessItem {
     video_url?: string;
 }
 
+export interface ISeoKeyFact {
+    label: string;
+    value: string;
+}
+
+export interface ISeoFAQ {
+    q: string;
+    a: string;
+}
+
 export interface IPublicProjectDetail extends IPublicProject {
     credits: CreditsData;
     published_at?: string | null;
     related?: IPublicProject[];
     gallery?: IGalleryItem[];
     process_items?: IProcessItem[];
+    // 作品級 SEO / AI SEO 內容（從 website_project_seo 表來；沒設則為 null/空陣列）
+    seo_title?: string | null;
+    seo_description?: string | null;
+    seo_keywords?: string[];
+    canonical_url?: string | null;
+    narrative_long?: string | null;
+    key_facts?: ISeoKeyFact[];
+    faqs?: ISeoFAQ[];
 }
 
 export interface IWorksListResponse {
