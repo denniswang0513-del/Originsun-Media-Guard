@@ -1,5 +1,5 @@
 {
-  "version": "1.10.123",
+  "version": "1.10.125",
   "build_date": "2026-05-02",
-  "notes": "hotfix(main.py): SelfHeal helper 改直接 wscript spawn — schtasks /run 無法從 Session 0 啟動 Interactive-only 任務"
+  "notes": "hotfix(main.py): SelfHeal helper 改直接 spawn uvicorn — wscript 在 detached 環境下會 hang"
 }

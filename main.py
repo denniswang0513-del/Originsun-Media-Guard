@@ -214,26 +214,44 @@ def _self_heal_scheduled_task():
         except Exception:
             pass
 
-        # Spawn a detached cmd that waits for us to die, then re-launches vbs.
-        # NB: we DON'T use `schtasks /run /tn TASK_NAME` — that targets the
-        # task we just re-registered, but `/sc onlogon` tasks are flagged
-        # "Interactive only" by Windows regardless of /it, and `schtasks /run`
-        # invoked from Session 0 silently fails to start them (Last Run stays
-        # at the 1999/11/30 placeholder, Last Result 267011/SCHED_S_TASK_HAS_NOT_RUN).
-        # Direct wscript spawn bypasses that — the new uvicorn lands in the
-        # same Session 0 but the marker file we just wrote means the second
-        # SelfHeal pass skips, letting startup complete. Pickers stay broken
-        # in Session 0 until the user logs out + back in (OriginsunBoot then
-        # fires correctly via the onlogon trigger in Session 1).
-        helper = (
-            f'timeout /t 4 /nobreak >nul & '
-            f'taskkill /f /pid {pid} >nul 2>&1 & '
-            f'wscript.exe "{vbs_path}"'
-        )
+        # Spawn a detached cmd that waits for us to die, then directly
+        # launches uvicorn — bypassing schtasks (Interactive-only blocks
+        # /run from Session 0) and start_hidden.vbs (DETACHED_PROCESS +
+        # CREATE_NO_WINDOW makes vbs's WshShell.Run hang).
+        #
+        # Approach: write a temp BAT file with the recovery sequence, then
+        # spawn `cmd /c "BAT"`. BAT files sidestep subprocess.list2cmdline's
+        # quote-escape (which turns `"path"` into `\"path\"` — cmd doesn't
+        # recognize `\"` as an escape, so paths get a literal backslash
+        # prefix and `cd`/python invocation fails silently).
+        #
+        # Marker file ensures the new uvicorn's SelfHeal skips this branch
+        # and lets startup complete. update_agent.py / OTA download is
+        # intentionally skipped here — recovery from a kill loop ≠ OTA
+        # update; OTA already ran in the BAT/vbs that started this chain.
+        # Pickers stay broken in Session 0 until next user logout/login
+        # (OriginsunBoot's onlogon trigger then lands in Session 1).
+        sys_python = sys.executable
+        outLog = os.path.join(app_dir, "uvicorn_out.log")
+        errLog = os.path.join(app_dir, "uvicorn_err.log")
+        bat_path = os.path.join(tempfile.gettempdir(), "originsun_selfheal_recover.bat")
+        bat_lines = [
+            "@echo off",
+            "timeout /t 4 /nobreak >nul",
+            f"taskkill /f /pid {pid} >nul 2>&1",
+            f'cd /d "{app_dir}"',
+            f'"{sys_python}" -m uvicorn main:io_app --host 0.0.0.0 --port 8000 > "{outLog}" 2> "{errLog}"',
+        ]
+        try:
+            with open(bat_path, "w", encoding="ascii", errors="replace") as f:
+                f.write("\r\n".join(bat_lines))
+        except Exception as e:
+            print(f"[SelfHeal] write recover bat failed: {e}")
+            return
         DETACHED_PROCESS = 0x00000008
         CREATE_NEW_PROCESS_GROUP = 0x00000200
         subprocess.Popen(
-            ["cmd", "/c", helper],
+            ["cmd", "/c", bat_path],
             creationflags=DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP |
                           getattr(subprocess, 'CREATE_NO_WINDOW', 0),
             close_fds=True,

@@ -354,15 +354,27 @@ async def system_restart(request: Request):
     vbs_path = os.path.join(base_dir, "start_hidden.vbs")
     updater = os.path.join(base_dir, "update_agent.py")
 
+    out_log = os.path.join(base_dir, "uvicorn_out.log")
+    err_log = os.path.join(base_dir, "uvicorn_err.log")
+    out_bak = out_log + ".bak"
+    err_bak = err_log + ".bak"
     lines = ["@echo off", f'cd /d "{base_dir}"', "del update_status.json >nul 2>nul"]
     lines.append('for /f "tokens=5" %%p in (\'netstat -aon ^| findstr ":8000 " ^| findstr "LISTENING"\') do taskkill /PID %%p /F >nul 2>nul')
     lines.append("timeout /t 3 /nobreak >nul")
     if os.path.exists(updater):
         lines.append(f'"{py}" "{updater}"')
-    if os.path.exists(vbs_path):
-        lines.append(f'wscript.exe "{vbs_path}"')
-    else:
-        lines.append(f'start "" /B "{py}" -m uvicorn main:io_app --host 0.0.0.0 --port 8000')
+    # Rotate logs so this restart's output doesn't tail-onto the previous run.
+    lines.append(f'del "{out_bak}" >nul 2>nul')
+    lines.append(f'move /Y "{out_log}" "{out_bak}" >nul 2>nul')
+    lines.append(f'del "{err_bak}" >nul 2>nul')
+    lines.append(f'move /Y "{err_log}" "{err_bak}" >nul 2>nul')
+    # Direct uvicorn launch — skips start_hidden.vbs which fails to start
+    # uvicorn when this BAT is run from `schtasks /run /it` context (vbs's
+    # final `WshShell.Run cmd, 0, False` returns success but the cmd /c
+    # child silently never starts uvicorn — observed across v1.10.122-125
+    # /publish tests). `start "" /B` detaches uvicorn from BAT so BAT can
+    # exit cleanly; uvicorn keeps running.
+    lines.append(f'start "" /B "{py}" -m uvicorn main:io_app --host 0.0.0.0 --port 8000 > "{out_log}" 2> "{err_log}"')
 
     with open(bat_path, "w", encoding="ascii", errors="replace") as f:
         f.write("\r\n".join(lines))

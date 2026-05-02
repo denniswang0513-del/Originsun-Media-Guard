@@ -129,6 +129,8 @@ async def _do_update_restart():
     vbs_path = os.path.join(base_dir, "start_hidden.vbs")
     updater_path = os.path.join(base_dir, "update_agent.py")
 
+    out_log = os.path.join(base_dir, "uvicorn_out.log")
+    err_log = os.path.join(base_dir, "uvicorn_err.log")
     bat_lines = [
         "@echo off",
         f'cd /d "{base_dir}"',
@@ -148,13 +150,18 @@ async def _do_update_restart():
         bat_lines.append(f'"{py}" "{updater_path}"')
     bat_lines += [
         "",
-        "REM Step 3: Start server",
+        "REM Step 3: Rotate logs + start server directly (skip vbs).",
+        "REM   vbs's WshShell.Run for the final uvicorn launch silently fails",
+        "REM   when this BAT runs from `schtasks /run /it` context — observed",
+        "REM   across v1.10.122-125 /publish tests where vbs returned cleanly",
+        "REM   but no uvicorn process appeared. `start \"\" /B` from BAT works.",
+        f'del "{out_log}.bak" >nul 2>nul',
+        f'move /Y "{out_log}" "{out_log}.bak" >nul 2>nul',
+        f'del "{err_log}.bak" >nul 2>nul',
+        f'move /Y "{err_log}" "{err_log}.bak" >nul 2>nul',
+        f'start "" /B "{py}" -m uvicorn main:io_app --host 0.0.0.0 --port 8000 > "{out_log}" 2> "{err_log}"',
+        "",
     ]
-    if os.path.exists(vbs_path):
-        bat_lines.append(f'wscript.exe "{vbs_path}"')
-    else:
-        bat_lines.append(f'start "" /B "{py}" -m uvicorn main:io_app --host 0.0.0.0 --port 8000')
-    bat_lines.append("")
 
     with open(bat_path, "w", encoding="ascii", errors="replace") as f:
         f.write("\r\n".join(bat_lines))
@@ -225,10 +232,19 @@ async def admin_restart(request: Request):
     base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     vbs = os.path.join(base_dir, "start_hidden.vbs")
 
+    out_log = os.path.join(base_dir, "uvicorn_out.log")
+    err_log = os.path.join(base_dir, "uvicorn_err.log")
+    venv_py = os.path.join(base_dir, ".venv", "Scripts", "python.exe")
+    embed_py = os.path.join(base_dir, "python_embed", "python.exe")
+    py = venv_py if os.path.exists(venv_py) else (embed_py if os.path.exists(embed_py) else sys.executable)
+
     async def _restart():
         await asyncio.sleep(1.5)
         try:
-            # Write a tiny BAT that kills old server then starts new one
+            # Write a tiny BAT that kills old server, rotates logs, then starts uvicorn directly.
+            # We DON'T go through start_hidden.vbs — vbs's final WshShell.Run for uvicorn
+            # silently fails when the BAT runs from `schtasks /run /it` (observed in
+            # v1.10.122-125 /publish tests). Direct `start "" /B` works.
             bat_path = os.path.join(tempfile.gettempdir(), "originsun_restart.bat")
             bat_lines = [
                 "@echo off",
@@ -237,11 +253,12 @@ async def admin_restart(request: Request):
                 "    taskkill /PID %%p /F >nul 2>nul",
                 ")",
                 "timeout /t 2 /nobreak >nul",
+                f'del "{out_log}.bak" >nul 2>nul',
+                f'move /Y "{out_log}" "{out_log}.bak" >nul 2>nul',
+                f'del "{err_log}.bak" >nul 2>nul',
+                f'move /Y "{err_log}" "{err_log}.bak" >nul 2>nul',
+                f'start "" /B "{py}" -m uvicorn main:io_app --host 0.0.0.0 --port 8000 > "{out_log}" 2> "{err_log}"',
             ]
-            if os.path.exists(vbs):
-                bat_lines.append(f'wscript.exe "{vbs}"')
-            else:
-                bat_lines.append(f'start "" /B "{sys.executable}" -m uvicorn main:io_app --host 0.0.0.0 --port 8000')
             with open(bat_path, "w", encoding="ascii", errors="replace") as f:
                 f.write("\r\n".join(bat_lines))
             _launch_in_user_session(bat_path)

@@ -97,3 +97,4 @@ test_state.png
 .claude/launch.json
 .rebuild_meta.json
 *.rebuild_meta.json
+uvicorn_*.log*
