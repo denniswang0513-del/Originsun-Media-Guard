@@ -138,24 +138,35 @@ exit /b 0
 :autostart
 REM %1 = APP_DIR (with quotes)
 set "APP_DIR=%~1"
-echo [AutoStart] Creating shortcuts and scheduled task...
+echo [AutoStart] Creating Desktop + Startup shortcuts...
 
-REM Desktop shortcut via temp VBS (no nested quote hell)
+REM 用 Startup folder shortcut 取代 schtasks /sc onlogon /it 排程任務 —
+REM 後者在 Session 0 觸發 /it 任務時會 silent fail (SCHED_S_TASK_HAS_NOT_RUN
+REM 267011),導致 master 卡 Session 0、tkinter picker 看不到。Startup folder
+REM 的 .lnk 是由使用者 Session 1 的 explorer.exe 在 logon 觸發,blame chain
+REM 永遠在 Session 1,picker 永遠工作。
+REM
+REM 同時清掉舊的 OriginsunAgent / OriginsunBoot 排程任務,完整切換不留歷史包袱。
+
+REM Build a single VBS that creates: Desktop shortcut + Startup folder shortcut
 > "%TEMP%\_originsun_mklnk.vbs" echo Set WshShell = CreateObject("WScript.Shell")
->>"%TEMP%\_originsun_mklnk.vbs" echo Set lnk = WshShell.CreateShortcut(WshShell.SpecialFolders("Desktop") ^& "\Originsun Agent.lnk")
->>"%TEMP%\_originsun_mklnk.vbs" echo lnk.TargetPath = "wscript.exe"
->>"%TEMP%\_originsun_mklnk.vbs" echo lnk.Arguments  = """%APP_DIR%\start_hidden.vbs"""
->>"%TEMP%\_originsun_mklnk.vbs" echo lnk.WorkingDirectory = "%APP_DIR%"
->>"%TEMP%\_originsun_mklnk.vbs" echo lnk.Save
+>>"%TEMP%\_originsun_mklnk.vbs" echo Set lnkDesk = WshShell.CreateShortcut(WshShell.SpecialFolders("Desktop") ^& "\Originsun Agent.lnk")
+>>"%TEMP%\_originsun_mklnk.vbs" echo lnkDesk.TargetPath = "wscript.exe"
+>>"%TEMP%\_originsun_mklnk.vbs" echo lnkDesk.Arguments  = """%APP_DIR%\start_hidden.vbs"""
+>>"%TEMP%\_originsun_mklnk.vbs" echo lnkDesk.WorkingDirectory = "%APP_DIR%"
+>>"%TEMP%\_originsun_mklnk.vbs" echo lnkDesk.Save
+>>"%TEMP%\_originsun_mklnk.vbs" echo Set lnkBoot = WshShell.CreateShortcut(WshShell.SpecialFolders("Startup") ^& "\Originsun Master.lnk")
+>>"%TEMP%\_originsun_mklnk.vbs" echo lnkBoot.TargetPath = "wscript.exe"
+>>"%TEMP%\_originsun_mklnk.vbs" echo lnkBoot.Arguments  = """%APP_DIR%\start_hidden.vbs"""
+>>"%TEMP%\_originsun_mklnk.vbs" echo lnkBoot.WorkingDirectory = "%APP_DIR%"
+>>"%TEMP%\_originsun_mklnk.vbs" echo lnkBoot.WindowStyle = 7
+>>"%TEMP%\_originsun_mklnk.vbs" echo lnkBoot.Save
 cscript //nologo "%TEMP%\_originsun_mklnk.vbs" >nul 2>&1
-
-REM Scheduled task onlogon — NO /rl highest: elevation forces task into
-REM Session 0 (Services) where tkinter/WinForms dialogs (pick_folder,
-REM pick_file) become invisible to the user. Limited level keeps the task
-REM in the user's interactive Session 1 so native Windows pickers work.
-schtasks /query /tn "OriginsunAgent" >nul 2>&1
-if %errorlevel% equ 0 schtasks /delete /tn "OriginsunAgent" /f >nul 2>&1
-schtasks /create /tn "OriginsunAgent" /tr "wscript.exe \"%APP_DIR%\start_hidden.vbs\"" /sc onlogon /f >nul 2>&1
-
 del "%TEMP%\_originsun_mklnk.vbs" >nul 2>&1
+
+REM Cleanup legacy scheduled tasks (OriginsunBoot / OriginsunAgent) — those
+REM had Session 0 silent-fail issues. Startup folder shortcut replaces them.
+schtasks /delete /tn "OriginsunAgent" /f >nul 2>&1
+schtasks /delete /tn "OriginsunBoot" /f >nul 2>&1
+
 exit /b 0

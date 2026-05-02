@@ -237,8 +237,21 @@ powershell -ExecutionPolicy Bypass -Command "Expand-Archive -Path '%UPDATE_ZIP%'
 del /f /q "%UPDATE_ZIP%" >nul 2>&1
 
 echo.
-echo [OK] 升級完成！正在重新啟動 Agent...
+echo [OK] 升級完成！正在處理自動啟動設定...
 echo.
+
+:: Migrate to Startup-folder shortcut (Session 1 guaranteed) + delete legacy schtasks
+> "%TEMP%\\_originsun_boot_lnk.vbs" echo Set WshShell = CreateObject("WScript.Shell")
+>>"%TEMP%\\_originsun_boot_lnk.vbs" echo Set lnk = WshShell.CreateShortcut(WshShell.SpecialFolders("Startup") ^& "\\Originsun Master.lnk")
+>>"%TEMP%\\_originsun_boot_lnk.vbs" echo lnk.TargetPath = "wscript.exe"
+>>"%TEMP%\\_originsun_boot_lnk.vbs" echo lnk.Arguments  = """%INSTALL_DIR%\\start_hidden.vbs"""
+>>"%TEMP%\\_originsun_boot_lnk.vbs" echo lnk.WorkingDirectory = "%INSTALL_DIR%"
+>>"%TEMP%\\_originsun_boot_lnk.vbs" echo lnk.WindowStyle = 7
+>>"%TEMP%\\_originsun_boot_lnk.vbs" echo lnk.Save
+cscript //nologo "%TEMP%\\_originsun_boot_lnk.vbs" >nul 2>&1
+del "%TEMP%\\_originsun_boot_lnk.vbs" >nul 2>&1
+schtasks /delete /tn "OriginsunBoot" /f >nul 2>&1
+schtasks /delete /tn "OriginsunAgent" /f >nul 2>&1
 
 :: Restart agent
 cd /d "%INSTALL_DIR%"
@@ -311,7 +324,27 @@ Write-Host '[System] Extracting update...'
 Expand-Archive -Path $zipPath -DestinationPath $installDir -Force
 Remove-Item $zipPath -Force -ErrorAction SilentlyContinue
 
-# 5. Restart agent
+# 5. Ensure Startup-folder shortcut exists (replaces legacy schtasks).
+#    Startup folder shortcut is triggered by user's Session 1 explorer on
+#    every logon, guaranteeing master always lands in interactive session
+#    where tkinter/WinForms pickers can render.
+Write-Host '[System] Ensuring Startup folder shortcut...'
+try {{
+    $startupFolder = [System.Environment]::GetFolderPath('Startup')
+    $lnkPath = Join-Path $startupFolder 'Originsun Master.lnk'
+    $WshShell = New-Object -ComObject WScript.Shell
+    $lnk = $WshShell.CreateShortcut($lnkPath)
+    $lnk.TargetPath = 'wscript.exe'
+    $lnk.Arguments  = '"' + (Join-Path $installDir 'start_hidden.vbs') + '"'
+    $lnk.WorkingDirectory = $installDir
+    $lnk.WindowStyle = 7
+    $lnk.Save()
+    # Cleanup legacy schtasks paths (Session 0 silent-fail risk)
+    schtasks /delete /tn 'OriginsunBoot' /f *>$null
+    schtasks /delete /tn 'OriginsunAgent' /f *>$null
+}} catch {{}}
+
+# 6. Restart agent
 Write-Host ''
 Write-Host '[OK] Upgrade complete! Restarting Agent...' -ForegroundColor Green
 $vbs = Join-Path $installDir 'start_hidden.vbs'
