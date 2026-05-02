@@ -250,7 +250,12 @@ function _startPolling(agent) {
     if (!_agentStatus[agent.id]) {
         _agentStatus[agent.id] = { online: undefined, slow: false, data: {} };
     }
-    _pollAgent(agent);
+    // Jitter 0-2s — without it, all N agents poll at once and the 6-per-origin
+    // browser concurrency limit serializes them. When many agents are dead,
+    // healthy ones (incl. master self-poll) wait behind dead timeouts and get
+    // marked slow (>3s elapsed) → orange dot.
+    const jitter = Math.floor(Math.random() * 2000);
+    _agentStatus[agent.id].timerId = setTimeout(() => _pollAgent(agent), jitter);
 }
 
 async function _pollAgent(agent) {

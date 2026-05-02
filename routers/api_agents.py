@@ -203,14 +203,21 @@ async def add_agent(req: NewAgentRequest, request: Request):
 
 @router.get("/agents/{agent_id}/health")
 async def proxy_agent_health(agent_id: str):
-    """Proxy health check — avoids browser CORS/Private Network issues."""
+    """Proxy health check — avoids browser CORS/Private Network issues.
+
+    Timeout=1.5s: live LAN agents respond in ~50ms; 1.5s is enough headroom
+    for slow but reachable agents. Lower than the previous 4s because the
+    browser caps concurrent connections per origin at 6 — when many agents
+    are dead, master's own self-proxy can queue behind dead-agent timeouts
+    and appear slow (>3s = orange dot in UI).
+    """
     agent = await _find_agent(agent_id)
     url = agent.get("url", "").rstrip("/") + "/api/v1/health"
 
     def _fetch_health():
         try:
             r = urllib.request.Request(url, method="GET")
-            with urllib.request.urlopen(r, timeout=4) as resp:
+            with urllib.request.urlopen(r, timeout=1.5) as resp:
                 return json.loads(resp.read().decode("utf-8"))
         except Exception:
             return {"status": "offline"}
