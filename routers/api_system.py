@@ -332,60 +332,19 @@ async def get_nas_version():
         return {"version": "unknown", "error": str(e)}
 
 
-# ── Restart endpoint (delegates schtasks plumbing to api_ota) ──────
+# ── Restart endpoint (delegates spawn to core.process_spawn) ──────
 
 @router.post("/api/v1/system/restart")
 async def system_restart(request: Request):
-    """Restart endpoint mirroring /api/v1/internal/restart with the
-    `OriginsunRestart` task name (so it can co-exist if both endpoints
-    are ever pinged in sequence)."""
+    """Restart endpoint — delegates to core.process_spawn helper which
+    spawns a detached restart sequence (kill port + OTA + rotate + uvicorn)."""
     key = request.headers.get("X-Internal-Key", "")
     if key != "originsun-internal-restart":
         client_ip = request.client.host if request.client else ""
         if client_ip not in ("127.0.0.1", "::1", "localhost"):
             return JSONResponse({"detail": "Unauthorized"}, 403)
 
-    import tempfile
-    from routers.api_ota import _launch_in_user_session
-    base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    venv_py = os.path.join(base_dir, ".venv", "Scripts", "python.exe")
-    embed_py = os.path.join(base_dir, "python_embed", "python.exe")
-    py = venv_py if os.path.exists(venv_py) else (embed_py if os.path.exists(embed_py) else sys.executable)
-
-    bat_path = os.path.join(tempfile.gettempdir(), "originsun_sys_restart.bat")
-    updater = os.path.join(base_dir, "update_agent.py")
-    out_log = os.path.join(base_dir, "uvicorn_out.log")
-    err_log = os.path.join(base_dir, "uvicorn_err.log")
-    out_bak = out_log + ".bak"
-    err_bak = err_log + ".bak"
-    lines = [
-        "@echo off",
-        f'cd /d "{base_dir}"',
-        "del update_status.json >nul 2>nul",
-        'for /f "tokens=5" %%p in (\'netstat -aon ^| findstr ":8000 " ^| findstr "LISTENING"\') do taskkill /PID %%p /F >nul 2>nul',
-        "timeout /t 3 /nobreak >nul",
-    ]
-    if os.path.exists(updater):
-        lines.append(f'"{py}" "{updater}"')
-    lines += [
-        f'del "{out_bak}" >nul 2>nul',
-        f'move /Y "{out_log}" "{out_bak}" >nul 2>nul',
-        f'del "{err_bak}" >nul 2>nul',
-        f'move /Y "{err_log}" "{err_bak}" >nul 2>nul',
-        # uvicorn runs inline (no `start /B`): `start /B` lets cmd exit
-        # which destroys the shared console and CTRL_CLOSE_EVENTs uvicorn.
-        # Inline keeps cmd→BAT→python alive so console persists.
-        f'"{py}" -m uvicorn main:io_app --host 0.0.0.0 --port 8000 > "{out_log}" 2> "{err_log}"',
-    ]
-    with open(bat_path, "w", encoding="ascii", errors="replace") as f:
-        f.write("\r\n".join(lines))
-
-    # Schtasks runs in a thread + os._exit is scheduled afterwards so the
-    # HTTP response returns immediately rather than blocking up to 20s.
-    async def _spawn_and_exit():
-        await asyncio.to_thread(_launch_in_user_session, bat_path, "OriginsunRestart")
-        await asyncio.sleep(1.0)
-        os._exit(0)
-
-    asyncio.create_task(_spawn_and_exit())
+    from core.process_spawn import trigger_detached_restart
+    trigger_detached_restart(run_ota=True)
+    asyncio.get_running_loop().call_later(1.0, os._exit, 0)
     return {"status": "updating"}

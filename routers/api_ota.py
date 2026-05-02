@@ -16,50 +16,6 @@ from fastapi.responses import JSONResponse, FileResponse  # type: ignore
 router = APIRouter()
 
 
-_NO_WINDOW = getattr(subprocess, 'CREATE_NO_WINDOW', 0x08000000)
-
-
-def _launch_in_user_session(bat_path: str, task_name: str = "OriginsunOtaRestart"):
-    """Launch a BAT in the interactive user's desktop session via schtasks /IT.
-
-    Session 0 caller → child inherits Session 0 → tkinter pickers invisible.
-    /IT routes the spawn through the logged-in user's session.
-
-    Sequential subprocess.run with check=True (not Popen): /run must wait
-    for /create to finish registering, else schtasks races and /run fires
-    against a not-yet-existent task. Each call has timeout=10 so a hung
-    schtasks can't block forever.
-    """
-    try:
-        subprocess.run(
-            ["schtasks", "/Create", "/TN", task_name, "/TR", f'cmd /c "{bat_path}"',
-             "/SC", "ONCE", "/ST", "00:00", "/F", "/IT"],
-            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-            creationflags=_NO_WINDOW, check=True, timeout=10,
-        )
-        subprocess.run(
-            ["schtasks", "/Run", "/TN", task_name],
-            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-            creationflags=_NO_WINDOW, check=True, timeout=10,
-        )
-        return
-    except (subprocess.CalledProcessError, subprocess.TimeoutExpired,
-            FileNotFoundError, OSError):
-        pass
-
-    # Fallback: cmd /c BAT directly. CREATE_NO_WINDOW only — DETACHED_PROCESS
-    # strips the console, BAT internals (timeout/move/start /B) silently fail.
-    # Best-effort recovery; may still land in Session 0.
-    subprocess.Popen(
-        ["cmd", "/c", bat_path],
-        creationflags=_NO_WINDOW,
-        stdin=subprocess.DEVNULL,
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
-        close_fds=True,
-    )
-
-
 def _check_admin(request: Request):
     """Check admin permission. No-op if auth module not available."""
     try:
@@ -102,83 +58,16 @@ def _append_publish_history(version: str, notes: str, success: bool, user: str =
 # ── Shared restart logic ────────────────────────────────────────────────
 
 async def _do_update_restart():
-    """Shared logic for OTA update + restart. Used by both control/update and internal/restart.
+    """OTA update + restart, used by /control/update and /internal/restart.
 
-    Equivalent to Install_or_Update.bat:
-      1. Kill port 8000
-      2. Run update_agent.py (download + extract + pip + preflight)
-      3. Start server via start_hidden.vbs
-
-    A tiny BAT is written to TEMP and launched detached so it survives os._exit().
-    Progress is written to update_status.json by update_agent.py (7-phase format).
+    Spawns a detached helper (see core.process_spawn) that waits for us
+    to exit, then runs update_agent.py (download + extract + pip + preflight)
+    and finally spawns a new uvicorn. Helper writes update_status.json
+    along the way (read by master after restart to surface OTA result).
     """
-    base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-
-    # Detect Python: .venv > python_embed > sys.executable
-    venv_py = os.path.join(base_dir, ".venv", "Scripts", "python.exe")
-    embed_py = os.path.join(base_dir, "python_embed", "python.exe")
-    if os.path.exists(venv_py):
-        py = venv_py
-    elif os.path.exists(embed_py):
-        py = embed_py
-    else:
-        py = sys.executable
-
-    # Write a minimal BAT — same logic as Install_or_Update.bat
-    import tempfile
-    bat_path = os.path.join(tempfile.gettempdir(), "originsun_ota.bat")
-    vbs_path = os.path.join(base_dir, "start_hidden.vbs")
-    updater_path = os.path.join(base_dir, "update_agent.py")
-
-    out_log = os.path.join(base_dir, "uvicorn_out.log")
-    err_log = os.path.join(base_dir, "uvicorn_err.log")
-    bat_lines = [
-        "@echo off",
-        f'cd /d "{base_dir}"',
-        "",
-        "REM Clear stale update status so master doesn't read old results",
-        "del update_status.json >nul 2>nul",
-        "",
-        "REM Step 1: Kill old server on port 8000",
-        'for /f "tokens=5" %%p in (\'netstat -aon ^| findstr ":8000 " ^| findstr "LISTENING"\') do (',
-        "    taskkill /PID %%p /F >nul 2>nul",
-        ")",
-        "timeout /t 3 /nobreak >nul",
-        "",
-        "REM Step 2: Run OTA updater (downloads new version if available)",
-    ]
-    if os.path.exists(updater_path):
-        bat_lines.append(f'"{py}" "{updater_path}"')
-    bat_lines += [
-        "",
-        "REM Step 3: Rotate logs + run uvicorn inline (BAT blocks until exit).",
-        "REM   `start \"\" /B` looked clean but uvicorn shares its BAT's console;",
-        "REM   when BAT exits, schtasks task ends and console destruction sends",
-        "REM   CTRL_CLOSE_EVENT to uvicorn — master died silently 2-7 min later.",
-        "REM   Inline (blocking) run keeps the cmd→BAT→python chain alive, so",
-        "REM   the console persists until next /system/restart kills port 8000.",
-        f'del "{out_log}.bak" >nul 2>nul',
-        f'move /Y "{out_log}" "{out_log}.bak" >nul 2>nul',
-        f'del "{err_log}.bak" >nul 2>nul',
-        f'move /Y "{err_log}" "{err_log}.bak" >nul 2>nul',
-        f'"{py}" -m uvicorn main:io_app --host 0.0.0.0 --port 8000 > "{out_log}" 2> "{err_log}"',
-        "",
-    ]
-
-    with open(bat_path, "w", encoding="ascii", errors="replace") as f:
-        f.write("\r\n".join(bat_lines))
-
-    # Schtasks calls (up to 2×10s timeout) run in a thread + the os._exit
-    # is scheduled afterwards, so the HTTP response returns immediately
-    # rather than holding the connection open for up to 20s. Without this,
-    # publish_update.py's urlopen(timeout=5) raises before schtasks finishes
-    # and the publisher thinks the restart failed.
-    async def _spawn_and_exit():
-        await asyncio.to_thread(_launch_in_user_session, bat_path)
-        await asyncio.sleep(1.0)
-        os._exit(0)
-
-    asyncio.create_task(_spawn_and_exit())
+    from core.process_spawn import trigger_detached_restart
+    trigger_detached_restart(run_ota=True)
+    asyncio.get_running_loop().call_later(1.0, os._exit, 0)
     return {"status": "updating"}
 
 
@@ -232,43 +121,9 @@ async def internal_restart(request: Request):
 @router.post("/api/admin/restart")
 async def admin_restart(request: Request):
     _check_admin(request)
-    import tempfile
-    base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    vbs = os.path.join(base_dir, "start_hidden.vbs")
-
-    out_log = os.path.join(base_dir, "uvicorn_out.log")
-    err_log = os.path.join(base_dir, "uvicorn_err.log")
-    venv_py = os.path.join(base_dir, ".venv", "Scripts", "python.exe")
-    embed_py = os.path.join(base_dir, "python_embed", "python.exe")
-    py = venv_py if os.path.exists(venv_py) else (embed_py if os.path.exists(embed_py) else sys.executable)
-
-    async def _restart():
-        await asyncio.sleep(1.5)
-        # uvicorn runs inline (no `start /B`) — see _do_update_restart for why:
-        # `start /B` lets cmd exit then console takedown CTRL_CLOSE_EVENTs uvicorn.
-        bat_path = os.path.join(tempfile.gettempdir(), "originsun_restart.bat")
-        bat_lines = [
-            "@echo off",
-            f'cd /d "{base_dir}"',
-            'for /f "tokens=5" %%p in (\'netstat -aon ^| findstr ":8000 " ^| findstr "LISTENING"\') do (',
-            "    taskkill /PID %%p /F >nul 2>nul",
-            ")",
-            "timeout /t 2 /nobreak >nul",
-            f'del "{out_log}.bak" >nul 2>nul',
-            f'move /Y "{out_log}" "{out_log}.bak" >nul 2>nul',
-            f'del "{err_log}.bak" >nul 2>nul',
-            f'move /Y "{err_log}" "{err_log}.bak" >nul 2>nul',
-            f'"{py}" -m uvicorn main:io_app --host 0.0.0.0 --port 8000 > "{out_log}" 2> "{err_log}"',
-        ]
-        try:
-            with open(bat_path, "w", encoding="ascii", errors="replace") as f:
-                f.write("\r\n".join(bat_lines))
-            await asyncio.to_thread(_launch_in_user_session, bat_path)
-        except OSError:
-            pass
-        asyncio.get_running_loop().call_later(0.5, os._exit, 0)
-
-    asyncio.create_task(_restart())
+    from core.process_spawn import trigger_detached_restart
+    trigger_detached_restart(run_ota=False)
+    asyncio.get_running_loop().call_later(1.5, os._exit, 0)
     return {"status": "restarting", "message": "Agent 正在重新啟動，請稍後重新整理頁面..."}
 
 
