@@ -4,7 +4,7 @@
 
 ---
 
-## 現況 (v1.10.126) 基準線
+## 現況 (v1.10.127) 基準線
 
 - ✅ 7 個完整工作流程（備份、比對、轉 Proxy、串帶、報表、AI 逐字稿、空拍寫入）
 - ✅ 模組化後端：`main.py` + `core/` + `routers/`（router 容錯載入，缺模組跳過不 crash）
@@ -735,7 +735,7 @@ tools:
     ▼ Phase J: CRM + 專案管理 + 帳務 (✅ 核心完成)
     │   → 64 API / 11 DB 表 / 6 Tab + 5 子視圖 + 手機版 RWD + Inline 編輯
     │
-現在 (v1.10.126) ← 你在這裡
+現在 (v1.10.127) ← 你在這裡
     │
     ▼ Phase M: 對外官方網站 (✅ 完整版 A 部署完成 2026-04-29)
     │   → NAS Website_Nginx (8090) + website-api 容器 + cloudflared tunnel
@@ -774,6 +774,7 @@ tools:
 
 | 版本 | 日期 | 重點 |
 |------|------|------|
+| v1.10.127 | 2026-05-02 | **HOTFIX: SelfHeal helper Popen 拿掉 DETACHED_PROCESS**。延續 v1.10.126 — helper 寫了 BAT 但 cmd /c BAT 沒實際拉起 uvicorn。根因：`DETACHED_PROCESS` flag 把 child cmd 從 console 切斷，BAT 內 `timeout` 等指令需要 console handle 才能跑，沒就 silent fail；其餘指令也跟著失常。改用 `CREATE_NO_WINDOW` only + DEVNULL stdin/stdout/stderr，cmd 仍隱形但保留必要 handles。實機驗證：直接從 PowerShell `Start-Process cmd ... -CreateNoWindow` 跑同一個 BAT 能拉起 uvicorn，DETACHED_PROCESS 跑就死。 |
 | v1.10.126 | 2026-05-02 | **HOTFIX: /publish 重啟流程 + agent OTA + SelfHeal helper 全部跳過 start_hidden.vbs，BAT 直接 `start "" /B uvicorn`**。診斷收集：v1.10.122-125 publish 重啟測試一致失敗 — vbs 收到 BAT 的 `wscript "vbs"` 後跑完 update_agent.py、log rotation 都成功，但最後 `WshShell.Run cmd, 0, False` for uvicorn 看似 return 0，cmd /c 子程序卻沒實際啟動 uvicorn（process 不在、port 8000 不開、log 0 byte）。手動 `wscript vbs` 在 bash 環境下做同樣事情卻成功，差別在 BAT 是從 `schtasks /run /it` 觸發、無 console 的 detached 環境。改法：(1) `routers/api_system.py:system_restart`（/publish 用）BAT 拿掉 `wscript "{vbs}"` 直接 `start "" /B "{py}" -m uvicorn ... > out.log 2> err.log`；(2) `routers/api_ota.py:_do_update_restart`（agent OTA 用）同樣處理；(3) `routers/api_ota.py:admin_restart` 同樣處理；(4) `main.py:_self_heal_scheduled_task` helper 改寫 temp BAT 檔再 `cmd /c BAT`，避免 `subprocess.list2cmdline` 把路徑 `"D:\..."` 轉成 `\"D:\...\"` 餵給 cmd（cmd 不認 `\"` 反而當字面值使路徑變壞）。BAT 都加 log rotation（rename `.log` → `.log.bak`）保留前次 traceback。副作用：start_hidden.vbs 變成「只在使用者雙擊 / 桌面捷徑啟動」時用，自動化路徑全走 BAT。 |
 | v1.10.125 | 2026-05-02 | **HOTFIX(main.py): SelfHeal helper 改直接 spawn uvicorn，跳過 vbs/update_agent.py 整段**。v1.10.123 的 wscript 直 spawn 在實機跑 v1.10.124 publish 時還是失敗：DETACHED_PROCESS + CREATE_NO_WINDOW 環境下 spawn 出來的 wscript 會在 vbs 裡 hang 住（觀察到 30+ 秒 wscript zombie，沒 child process、port 8000 永遠不開）。猜測是無 console 的 detached 環境讓 vbs 的 `WshShell.Run "cmd /c ...", 0, True` 同步等待機制壞掉。修法：helper 改直接 `cmd /c "cd /d ... & python -m uvicorn ... > out.log 2> err.log"`，徹底跳過 vbs 跟 update_agent.py。副作用是 SelfHeal 復活路徑不再走 OTA，但這本來也不該 — OTA 已經在最初的 BAT/vbs chain 跑過了，這裡只是 kill loop 復活。 |
 | v1.10.124 | 2026-05-02 | **No-op publish — 驗證 v1.10.123 的 SelfHeal fix 在實際 /publish 重啟流程下能自動復活**（marker idempotency lock + helper 改 wscript 直接 spawn 兩段 fix 是否真的閉環）。 |

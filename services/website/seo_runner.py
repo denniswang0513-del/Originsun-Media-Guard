@@ -44,6 +44,72 @@ _run_lock = asyncio.Lock()
 _failure_counts: dict[str, int] = {}
 _FAILURE_THRESHOLD = 3
 
+# 禁止 AI 在生成內容裡提及的人名（內部要求）。
+# 政策是「整段資訊一起清」而不是「只刪名字留半句」 — 避免「製片：、攝影：張三」
+# 這種半截殘骸暗示有第三人存在。三層防護：
+# (1) input scrub — 送進 LLM 前，含禁名的整個句子 / credits entry 全部丟掉；
+# (2) prompt 規則明示；
+# (3) output scrub — 萬一 AI 從訓練資料記得，含禁名的整句也兜底拿掉。
+_EXCLUDED_NAMES: tuple[str, ...] = ("鄭曉駿",)
+
+
+def _has_excluded_name(s: str) -> bool:
+    if not s or not _EXCLUDED_NAMES:
+        return False
+    return any(n in s for n in _EXCLUDED_NAMES)
+
+
+def _scrub_sentences(text: str) -> str:
+    """中文文本中含禁名的「整句」全部丟掉。
+
+    切句邊界：。！？換行（保留標點隨上一句留下，避免分號/逗號被名字夾在中間時整段被切散）。
+    例：「攝影黃聖鈞掌鏡。混音由鄭曉駿處理。剪接由王士源完成。」
+        → 「攝影黃聖鈞掌鏡。剪接由王士源完成。」
+    """
+    if not text or not _EXCLUDED_NAMES:
+        return text
+    parts = re.split(r"(?<=[。！？\n])", text)
+    kept = [p for p in parts if not _has_excluded_name(p)]
+    return "".join(kept)
+
+
+def _scrub_credits_block(credits: list) -> list:
+    """credits block JSON 中名字命中禁名的 entry 整筆 drop；entry 全空的角色塊一起丟。
+
+    結構：[{role/name_zh/name_en, entries: [{name, staff_id, resume_url, duty}]}]
+    flat array fallback：[{name, ...}, ...]
+    """
+    if not isinstance(credits, list) or not _EXCLUDED_NAMES:
+        return credits
+    out: list = []
+    for block in credits:
+        if not isinstance(block, dict):
+            continue
+        # block 自己有 name 欄位（flat array 情境）→ 整筆 drop
+        if _has_excluded_name(str(block.get("name") or "")):
+            continue
+        entries = block.get("entries")
+        if isinstance(entries, list):
+            kept_entries = [
+                e for e in entries
+                if isinstance(e, dict) and not _has_excluded_name(str(e.get("name") or ""))
+            ]
+            if not kept_entries:
+                continue  # 整個角色塊空了，連標籤也不要露
+            block = {**block, "entries": kept_entries}
+        out.append(block)
+    return out
+
+
+def _scrub_credits_text(text: str) -> str:
+    """純文字 credits 一行一個職位（職位：名字 / 名字、名字）— 含禁名的整行 drop。"""
+    if not text or not _EXCLUDED_NAMES:
+        return text
+    lines = text.split("\n")
+    kept = [ln for ln in lines if not _has_excluded_name(ln)]
+    return "\n".join(kept)
+
+
 # subprocess timeout — 給 LLM 充裕回應時間，30 個作品 batch 不應整個 batch timeout
 # 實測單筆 ~25s，留 6x buffer 給網路抖動 / Claude 排隊
 _CLAUDE_TIMEOUT_SEC = 180
@@ -68,30 +134,54 @@ JSON 必須含這 6 個欄位（鍵名固定）：
 - key_facts 必須從 context 撈得到的事實，不能編造
 - faqs 答案要是 1-2 句話、訊息密度高
 - 不要寫「源日影像專業團隊精心製作...」這類空話
-
+{exclusion_clause}
 作品 context：
 {context}
 """
 
 
+def _build_exclusion_clause() -> str:
+    """產生 prompt 的「禁止提及人名」段落（_EXCLUDED_NAMES 為空時回空字串）。"""
+    if not _EXCLUDED_NAMES:
+        return ""
+    names = "、".join(_EXCLUDED_NAMES)
+    return (
+        f"- **禁止提及以下人名與其相關資訊（內部要求，無條件遵守）**：{names}\n"
+        f"  context 已主動移除這些人物的整段資訊（包括其擔任的角色與所做的工作）。\n"
+        f"  你不應該在 seo_title / seo_description / narrative_long / key_facts / faqs 任何位置：\n"
+        f"  (a) 提到這些名字；(b) 用「製片」「攝影師」之類的角色名暗指他們；\n"
+        f"  (c) 描述他們具體做了什麼工作（例如「混音由某人處理」即使不點名也不可寫）。\n"
+        f"  如果整個 context 都沒提到他們，這條規則不會影響你。\n"
+    )
+
+
 def _build_prompt(draft: dict) -> str:
-    """從 draft endpoint 回傳組 LLM prompt context。"""
+    """從 draft endpoint 回傳組 LLM prompt context。
+
+    所有 free-form 欄位都先做「整段移除」（含禁名的句子/entry 全部丟掉，
+    不留半截殘骸） — AI 連看到角色標籤都看不到，自然不會在輸出裡帶到。
+    """
     parts = [
         f"作品名稱：{draft.get('title') or '(無)'}",
         f"客戶：{draft.get('client') or '(未填)'}",
         f"年份：{draft.get('year') or '(未填)'}",
         f"YouTube ID：{draft.get('youtube_id') or '(無影片)'}",
     ]
-    desc = (draft.get("description") or "").strip()
+    desc = _scrub_sentences((draft.get("description") or "").strip())
     if desc:
         parts.append(f"\n描述：\n{desc}")
-    credits_text = (draft.get("credits_text") or "").strip()
+    credits_text = _scrub_credits_text((draft.get("credits_text") or "").strip())
     credits = draft.get("credits") or []
     if credits_text:
         parts.append(f"\nCredits（純文字）：\n{credits_text}")
     elif credits:
-        parts.append(f"\nCredits（block JSON）：\n{json.dumps(credits, ensure_ascii=False, indent=2)}")
-    return _PROMPT_TEMPLATE.format(context="\n".join(parts))
+        scrubbed_credits = _scrub_credits_block(credits)
+        if scrubbed_credits:
+            parts.append(f"\nCredits（block JSON）：\n{json.dumps(scrubbed_credits, ensure_ascii=False, indent=2)}")
+    return _PROMPT_TEMPLATE.format(
+        context="\n".join(parts),
+        exclusion_clause=_build_exclusion_clause(),
+    )
 
 
 async def _call_claude(prompt: str) -> tuple[Optional[str], str]:
@@ -192,15 +282,27 @@ def _parse_response(text: str) -> Optional[dict]:
         if not isinstance(q, dict) or not q.get("q") or not q.get("a"):
             logger.warning("[seo_runner] faqs entry 結構錯：%s", q)
             return None
+
+    # 三層防護的最後一層 — 萬一 AI 仍從訓練資料記得名字並輸出，這裡兜底清掉。
+    # 政策是整段資訊一起拿掉：含禁名的整個句子/keyword/key_fact/faq 直接 drop。
+    out_keywords = [str(k) for k in data["keywords"] if k and not _has_excluded_name(str(k))][:15]
+    out_key_facts = [
+        {"label": str(f["label"])[:80], "value": str(f["value"])[:300]}
+        for f in data["key_facts"]
+        if not _has_excluded_name(str(f["label"])) and not _has_excluded_name(str(f["value"]))
+    ]
+    out_faqs = [
+        {"q": str(q["q"])[:300], "a": str(q["a"])[:2000]}
+        for q in data["faqs"]
+        if not _has_excluded_name(str(q["q"])) and not _has_excluded_name(str(q["a"]))
+    ]
     return {
-        "seo_title": str(data["seo_title"])[:120],
-        "seo_description": str(data["seo_description"])[:500],
-        "keywords": [str(k) for k in data["keywords"] if k][:15],
-        "narrative_long": str(data["narrative_long"]),
-        "key_facts": [{"label": str(f["label"])[:80], "value": str(f["value"])[:300]}
-                      for f in data["key_facts"]],
-        "faqs": [{"q": str(q["q"])[:300], "a": str(q["a"])[:2000]}
-                 for q in data["faqs"]],
+        "seo_title": _scrub_sentences(str(data["seo_title"]))[:120],
+        "seo_description": _scrub_sentences(str(data["seo_description"]))[:500],
+        "keywords": out_keywords,
+        "narrative_long": _scrub_sentences(str(data["narrative_long"])),
+        "key_facts": out_key_facts,
+        "faqs": out_faqs,
     }
 
 

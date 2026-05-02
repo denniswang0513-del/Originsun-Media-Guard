@@ -1,5 +1,5 @@
 {
-  "version": "1.10.126",
+  "version": "1.10.127",
   "build_date": "2026-05-02",
-  "notes": "hotfix: /publish + OTA + SelfHeal helper 全跳過 vbs，BAT 直接 start uvicorn"
+  "notes": "fix: SelfHeal helper Popen 拿掉 DETACHED_PROCESS（BAT 內 timeout 需要 console）"
 }
