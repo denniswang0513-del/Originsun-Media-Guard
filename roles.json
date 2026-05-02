@@ -53,8 +53,9 @@
     "description": ""
   },
   {
+    "id": 8,
     "name": "Assitance",
-    "access_level": 2,
+    "access_level": 3,
     "modules": [
       "backup",
       "verify",
@@ -66,7 +67,6 @@
       "drone_meta",
       "website_admin"
     ],
-    "description": "",
-    "id": 8
+    "description": ""
   }
 ]

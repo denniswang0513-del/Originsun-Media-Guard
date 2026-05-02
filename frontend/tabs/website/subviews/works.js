@@ -188,7 +188,12 @@ function _ensureEditPanel() {
     document.body.appendChild(overlay);
 }
 
-function _openEditPanel(url, title) {
+// 從「跳過小表單」流程建出來的 skeleton project_id；overlay 關閉時呼叫
+// if-skeleton 清掉沒被填內容的孤兒紀錄。從「✎ 編輯」既有作品開的 overlay 不會
+// 設這個值，關閉時不會誤刪。
+let _pendingSkeletonId = null;
+
+function _openEditPanel(url, title, { skeletonProjectId = null } = {}) {
     _ensureEditPanel();
     const overlay = document.getElementById('website-edit-panel-overlay');
     const iframe = document.getElementById('website-edit-panel-iframe');
@@ -196,15 +201,29 @@ function _openEditPanel(url, title) {
     if (titleEl) titleEl.textContent = title || '編輯作品';
     iframe.src = url;
     overlay.style.display = 'flex';
+    _pendingSkeletonId = skeletonProjectId;
 }
 
-window._websiteCloseEditPanel = () => {
+window._websiteCloseEditPanel = async () => {
     const overlay = document.getElementById('website-edit-panel-overlay');
     if (!overlay) return;
     overlay.style.display = 'none';
     const iframe = document.getElementById('website-edit-panel-iframe');
     if (iframe) iframe.src = 'about:blank';
-    // Fire-and-forget reload to pick up changes saved in iframe
+
+    // 跳過小表單流程下的 skeleton：使用者開了 overlay 但什麼都沒填就關掉
+    // → 呼叫 if-skeleton 讓後端決定刪不刪（後端 sanity check name + 各 public_*
+    // 是否仍空）。await 完才 reload，避免列表還秀著待刪的 skeleton。
+    const skId = _pendingSkeletonId;
+    _pendingSkeletonId = null;
+    if (skId) {
+        try {
+            await websiteFetch(`/api/website/admin/works/${skId}/if-skeleton`, { method: 'DELETE' });
+        } catch (e) {
+            // 失敗就留著（DB 中保留 skeleton，下次列表會看到，使用者可手動處理）
+            console.warn('[website/works] if-skeleton 清理失敗:', e.message || e);
+        }
+    }
     _reloadWorks();
 };
 
@@ -220,72 +239,21 @@ window._websiteEditWork = async (pid) => {
 
 
 // ══════════════════════════════════════════════════════════
-// 新增作品 modal（走 window._createFormModal，styling 統一）
+// 新增作品：直接建 skeleton 後跳編輯 overlay（跳過小表單）
 // ══════════════════════════════════════════════════════════
+// 客戶/年份/分類都改在編輯頁裡填。Overlay 關閉時 _websiteCloseEditPanel
+// 會呼叫 /works/{id}/if-skeleton；後端確認 name 仍是 sentinel 且各 public_*
+// 都沒填內容才刪掉，避免使用者開了又馬上關留下空殼紀錄。
 
 window._websiteNewWork = async () => {
-    // 並行抓客戶 + 分類，兩個都允許失敗（給空陣列 fallback）— 任一個壞掉
-    // 不該擋住整個新增流程。失敗時 console.warn 留痕跡。
-    const [clients, allCats] = await Promise.all([
-        websiteFetch('/api/website/admin/clients/lookup')
-            .then(r => r?.items || [])
-            .catch(e => { console.warn('[website/works] clients/lookup 失敗:', e.message || e); return []; }),
-        websiteFetch('/api/website/admin/categories')
-            .then(r => r?.items || [])
-            .catch(e => { console.warn('[website/works] categories 失敗:', e.message || e); return []; }),
-    ]);
-
-    const cats = allCats.filter(c => (c.kind || 'category') === 'category');
-    const tags = allCats.filter(c => c.kind === 'tag');
-    const _opt = (c) => ({ value: c.id, label: c.name_zh });
-
-    const fields = [
-        { key: 'name', label: '作品名稱', type: 'text', required: true, autofocus: true },
-        { key: 'client_id', label: '客戶（可選）', type: 'select', searchable: true,
-          placeholder: '輸入客戶名稱搜尋…',
-          options: [{ value: '', label: '（不指定）' },
-                    ...clients.map(c => ({ value: c.id, label: c.name }))] },
-        { key: 'year', label: '年份（可選）', type: 'number',
-          placeholder: `例如 ${new Date().getFullYear()}` },
-    ];
-    if (cats.length) {
-        fields.push({ type: 'divider' });
-        fields.push({ key: 'category_ids', label: '分類（可複選）', type: 'checkboxes',
-                      options: cats.map(_opt) });
+    try {
+        // POST 不帶 body — 後端塞 sentinel name「（未命名作品）」、status 預設「已結案」
+        const r = await websiteFetch('/api/website/admin/works/create', {
+            method: 'POST', body: {},
+        });
+        toastOk('已建立空作品 — 在編輯頁填寫資訊後按儲存');
+        _openEditPanel(r.edit_url, `編輯：${r.name}`, { skeletonProjectId: r.id });
+    } catch (e) {
+        toastErr(e.message || '建立失敗');
     }
-    if (tags.length) {
-        if (!cats.length) fields.push({ type: 'divider' });
-        fields.push({ key: 'tag_ids', label: '標籤（可複選）', type: 'checkboxes',
-                      options: tags.map(_opt) });
-    }
-
-    window._createFormModal({
-        id: 'website-new-work-modal',
-        title: '➕ 新增作品',
-        submitLabel: '建立並開編輯',
-        fields,
-        onSubmit: async (vals, setError, close) => {
-            const name = (vals.name || '').trim();
-            if (!name) { setError('請輸入作品名稱'); return; }
-            const payload = { name };
-            if (vals.client_id) payload.client_id = vals.client_id;
-            const year = Number(vals.year);
-            if (year) payload.year = year;
-            // checkbox 收回的是 string[]，後端要 int[]
-            const ids = [...(vals.category_ids || []), ...(vals.tag_ids || [])]
-                .map(Number).filter(n => Number.isFinite(n));
-            if (ids.length) payload.category_ids = ids;
-            try {
-                const r = await websiteFetch('/api/website/admin/works/create', {
-                    method: 'POST', body: payload,
-                });
-                close();
-                toastOk('作品已建立');
-                _openEditPanel(r.edit_url, `編輯:${name}`);
-                _reloadWorks();
-            } catch (e) {
-                setError(e.message || '建立失敗');
-            }
-        },
-    });
 };

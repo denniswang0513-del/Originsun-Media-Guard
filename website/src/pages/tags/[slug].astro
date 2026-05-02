@@ -1,0 +1,96 @@
+---
+/**
+ * tags/[slug].astro — 單一標籤的作品列表頁（/tags/<slug>，白底）
+ *
+ * 跟 /works?tag=<slug> 不同：每個 tag 一個獨立 SEO landing page，
+ * 自帶 breadcrumb / canonical / CollectionPage schema，sitemap 會自動收錄。
+ * works/[slug].astro 的 tag chips 連到這裡（內鏈強化）。
+ */
+import BaseLayout from "../../layouts/BaseLayout.astro";
+import WorkCard from "../../components/works/WorkCard.astro";
+import TagCloud from "../../components/works/TagCloud.astro";
+import Tr from "../../components/ui/Tr.astro";
+import { fetchMeta, fetchCategories, fetchAllWorksCached } from "../../lib/crm-client";
+import { buildBasicPageSeo, breadcrumb3 } from "../../lib/seo";
+
+export async function getStaticPaths() {
+    const cats = await fetchCategories();
+    return cats
+        .filter(c => c.kind === "tag")
+        .map(c => ({ params: { slug: c.slug }, props: { tag: c } }));
+}
+
+const { slug } = Astro.params;
+const { tag } = Astro.props;
+
+const [meta, allTags, allWorks] = await Promise.all([
+    fetchMeta(),
+    fetchCategories().then(cs => cs.filter(c => c.kind === "tag")),
+    fetchAllWorksCached(),
+]);
+
+// 此 tag 的作品（filter）
+const works = allWorks.filter(w => (w.tags || []).includes(slug!));
+
+const tagLabel = tag?.name_zh || slug!.replace(/^tag-/, "");
+const seo = buildBasicPageSeo(Astro, {
+    title: `${tagLabel} 作品集`,
+    description: works.length > 0
+        ? `${meta.company_name_zh} ${tagLabel} 相關作品 ${works.length} 件 — 影像製作 / 商業廣告 / 紀錄片合輯，瀏覽 ${tagLabel} 場景影片創作。`
+        : `${meta.company_name_zh} ${tagLabel} 標籤 — 標記為 ${tagLabel} 的影像作品集，目前無公開作品。`,
+    breadcrumbs: breadcrumb3("作品集", "/works", tagLabel, `/tags/${slug}`),
+});
+---
+
+<BaseLayout {...seo} meta={meta}>
+    <section class="pt-32 pb-20 bg-white">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+            <div class="text-center mb-12">
+                <p class="text-xs tracking-[0.4em] text-neutral-500 uppercase mb-3">Tag</p>
+                <h1 class="text-4xl sm:text-5xl font-light tracking-tight text-neutral-900">
+                    #{tagLabel}
+                </h1>
+                {tag?.description && (
+                    <p class="mt-4 text-sm text-neutral-500 max-w-2xl mx-auto leading-relaxed">
+                        {tag.description}
+                    </p>
+                )}
+                <div class="mt-4 text-xs tracking-wider text-neutral-400">
+                    {works.length} 件作品
+                </div>
+            </div>
+
+            {works.length > 0 ? (
+                <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-8 sm:gap-10">
+                    {works.map(work => (
+                        <WorkCard work={work} />
+                    ))}
+                </div>
+            ) : (
+                <div class="py-20 text-center text-neutral-500">
+                    <Tr k="works_no_items" />
+                    <div class="mt-6">
+                        <a href="/works" class="text-xs tracking-wider text-[#c9372c] hover:underline">
+                            ← 回作品集首頁
+                        </a>
+                    </div>
+                </div>
+            )}
+
+            {works.length > 0 && (
+                <div class="mt-16 text-center">
+                    <a href="/works" class="text-xs tracking-[0.3em] uppercase text-neutral-500 hover:text-[#c9372c] transition-colors">
+                        ← 看全部作品
+                    </a>
+                </div>
+            )}
+
+            {allTags.length > 1 && (
+                <div class="mt-20 pt-12 border-t border-neutral-200 text-center">
+                    <h2 class="text-xs tracking-[0.4em] uppercase text-neutral-500 mb-5">Popular Tags</h2>
+                    <TagCloud tags={allTags} activeSlug={slug} linkBase="/tags/" />
+                </div>
+            )}
+        </div>
+    </section>
+</BaseLayout>

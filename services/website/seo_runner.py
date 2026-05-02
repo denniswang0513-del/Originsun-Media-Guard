@@ -23,6 +23,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import os
 import re
 import shutil
 import time
@@ -44,7 +45,8 @@ _failure_counts: dict[str, int] = {}
 _FAILURE_THRESHOLD = 3
 
 # subprocess timeout — 給 LLM 充裕回應時間，30 個作品 batch 不應整個 batch timeout
-_CLAUDE_TIMEOUT_SEC = 90
+# 實測單筆 ~25s，留 6x buffer 給網路抖動 / Claude 排隊
+_CLAUDE_TIMEOUT_SEC = 180
 
 _PROMPT_TEMPLATE = """你是繁體中文網站的 SEO 內容生成助手，專門替「源日影像」（影像製作公司）作品集頁面生內容。
 
@@ -92,36 +94,60 @@ def _build_prompt(draft: dict) -> str:
     return _PROMPT_TEMPLATE.format(context="\n".join(parts))
 
 
-async def _call_claude(prompt: str) -> Optional[str]:
-    """subprocess call `claude --print`，回 stdout。失敗回 None。"""
+async def _call_claude(prompt: str) -> tuple[Optional[str], str]:
+    """subprocess call `claude --print`，回 (stdout, error_detail)。
+
+    成功 → (stdout, "")；失敗 → (None, 中文診斷訊息)。把錯誤理由帶回給呼叫端，
+    讓 admin 從 toast 直接看到「不在 PATH / timeout / exit=N stderr=...」而非通用訊息。
+    """
     claude_exe = shutil.which("claude")
     if not claude_exe:
-        logger.error("[seo_runner] `claude` CLI 不在 PATH — 安裝 Claude Code 或設 PATH")
-        return None
-    proc = await asyncio.create_subprocess_exec(
-        claude_exe, "--print",
-        stdin=asyncio.subprocess.PIPE,
-        stdout=asyncio.subprocess.PIPE,
-        stderr=asyncio.subprocess.PIPE,
-    )
+        msg = "claude CLI 不在 PATH（uvicorn 程序看不到 claude.exe — 重啟服務或把 WinGet 路徑加進系統 PATH）"
+        logger.error("[seo_runner] %s", msg)
+        return None, msg
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            claude_exe, "--print",
+            stdin=asyncio.subprocess.PIPE,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+    except NotImplementedError:
+        # Selector loop on Windows 不支援 subprocess — uvicorn 預設用 Proactor，
+        # 但若被改了會走到這裡。
+        msg = "asyncio 事件迴圈不支援 subprocess（Windows Selector loop？）"
+        logger.error("[seo_runner] %s", msg)
+        return None, msg
+    except OSError as e:
+        msg = f"啟動 claude.exe 失敗：{e}"
+        logger.error("[seo_runner] %s", msg)
+        return None, msg
     try:
         out, err = await asyncio.wait_for(
             proc.communicate(input=prompt.encode("utf-8")),
             timeout=_CLAUDE_TIMEOUT_SEC,
         )
     except asyncio.TimeoutError:
-        logger.warning("[seo_runner] claude --print timeout (%ds)", _CLAUDE_TIMEOUT_SEC)
+        msg = f"claude --print 超時（{_CLAUDE_TIMEOUT_SEC}s 未回應）"
+        logger.warning("[seo_runner] %s", msg)
         try:
             proc.kill()
             await proc.wait()
         except Exception:
             pass
-        return None
+        return None, msg
     if proc.returncode != 0:
-        logger.warning("[seo_runner] claude exit=%d, stderr=%s",
-                       proc.returncode, err[:300].decode("utf-8", errors="replace"))
-        return None
-    return out.decode("utf-8", errors="replace")
+        err_text = err[:300].decode("utf-8", errors="replace").strip()
+        msg = f"claude 結束碼={proc.returncode}；stderr={err_text!r}"
+        logger.warning("[seo_runner] %s", msg)
+        return None, msg
+    text = out.decode("utf-8", errors="replace")
+    if not text.strip():
+        err_text = err[:300].decode("utf-8", errors="replace").strip()
+        msg = f"claude --print 回傳空字串（stderr={err_text!r}）"
+        logger.warning("[seo_runner] %s", msg)
+        return None, msg
+    return text, ""
 
 
 def _parse_response(text: str) -> Optional[dict]:
@@ -178,6 +204,48 @@ def _parse_response(text: str) -> Optional[dict]:
     }
 
 
+async def _relay_run_to_master(
+    relay_url: str,
+    *,
+    target_project_id: Optional[str],
+    batch_size: int,
+) -> dict:
+    """NAS website-api 容器把 SEO runner 請求轉給 master:8000，
+    由 master 的 claude.exe 真的跑。用 X-Internal-Key (= JWT secret)
+    內部認證（master/NAS 共用同一個 secret）。
+
+    單筆執行（target_project_id 非空）和整批執行走不同 endpoint。
+    pipeline 整批最久要跑 batch_size × 180s + buffer，timeout 給夠。
+    """
+    import httpx
+    from core.auth import _get_secret
+    if target_project_id:
+        url = f"{relay_url.rstrip('/')}/api/website/admin/internal/seo/projects/{target_project_id}/run"
+    else:
+        url = f"{relay_url.rstrip('/')}/api/website/admin/internal/seo/run?batch_size={batch_size}"
+    # 整批 batch_size=10 × 180s = 1800s 上限，加 buffer 給網路抖動
+    timeout = 60.0 if target_project_id else float(batch_size) * 200.0 + 60.0
+    try:
+        async with httpx.AsyncClient(timeout=timeout) as client:
+            r = await client.post(url, headers={"X-Internal-Key": _get_secret()})
+            if r.status_code == 200:
+                return r.json()
+            return {
+                "processed": 0, "skipped": 0, "errors": 1, "works": [],
+                "error": f"master relay 失敗 (HTTP {r.status_code}): {r.text[:200]}",
+            }
+    except (httpx.TimeoutException, httpx.ConnectError) as e:
+        return {
+            "processed": 0, "skipped": 0, "errors": 1, "works": [],
+            "error": f"master 離線或超時：{e}",
+        }
+    except Exception as e:
+        return {
+            "processed": 0, "skipped": 0, "errors": 1, "works": [],
+            "error": f"relay 錯誤：{e}",
+        }
+
+
 async def _process_one(session: AsyncSession, project_id: str) -> tuple[str, str]:
     """處理單一作品。回傳 (status, detail)：status ∈ {ok, parse_error, llm_error, no_draft}"""
     draft = await seo_service.get_project_seo_draft_context(session, project_id)
@@ -186,9 +254,9 @@ async def _process_one(session: AsyncSession, project_id: str) -> tuple[str, str
     prompt = _build_prompt(draft)
     logger.info("[seo_runner] %s: prompt %d chars", project_id, len(prompt))
 
-    raw = await _call_claude(prompt)
+    raw, call_err = await _call_claude(prompt)
     if not raw:
-        return ("llm_error", "claude --print 無回應或失敗")
+        return ("llm_error", call_err or "claude --print 無回應或失敗")
 
     parsed = _parse_response(raw)
     if not parsed:
@@ -234,6 +302,16 @@ async def run_pipeline(
     Returns:
         {processed: N, skipped: N, errors: N, works: [{project_id, status, detail}]}
     """
+    # NAS website-api 容器跑不了 `claude` CLI（image 是 python:3.11-slim，
+    # 也沒登入 Anthropic）— 透過 env `MASTER_RELAY_URL` 把整個 pipeline forward
+    # 給 master:8000，由 master 的 claude.exe 跑、結果回傳給 admin。
+    # master 本身沒設這個 env，會走本機路徑。
+    relay = os.environ.get("MASTER_RELAY_URL", "").strip()
+    if relay and not dry_run:
+        return await _relay_run_to_master(
+            relay, target_project_id=target_project_id, batch_size=batch_size,
+        )
+
     # 用 timeout=0 的 acquire 確認不會有兩個 caller 同時 pass pre-check 進入 runner
     try:
         await asyncio.wait_for(_run_lock.acquire(), timeout=0.001)

@@ -128,11 +128,15 @@ def _self_heal_scheduled_task():
     spawn a detached helper that restarts us via `schtasks /run` — the new
     process lands in the user's interactive Session 1 where pickers work.
 
-    Runs at most once per Agent process and exits silently on any error;
-    the Agent keeps serving even if self-heal can't run.
+    Idempotency lock: writes a marker file in TEMP after triggering once.
+    If we re-enter SelfHeal within 5 minutes we skip — without this guard,
+    Session 0 → kill self → schtasks /run → new process also Session 0 →
+    kill self ... infinite loop that strands master/agents in
+    "Waiting for application startup" forever (caused the 2026-05-02
+    /publish OTA-bricks-all-agents incident).
     """
     try:
-        import ctypes, sys, subprocess
+        import ctypes, sys, subprocess, tempfile, time
         from ctypes import wintypes
 
         if sys.platform != "win32":
@@ -147,6 +151,15 @@ def _self_heal_scheduled_task():
             return
         if ses.value != 0:
             return  # Already in interactive session — nothing to fix.
+
+        # Idempotency lock — break Session 0 → kill → respawn → Session 0 loops.
+        marker = os.path.join(tempfile.gettempdir(), "originsun_selfheal.lock")
+        try:
+            if os.path.isfile(marker) and (time.time() - os.path.getmtime(marker)) < 300:
+                print("[SelfHeal] Recently attempted (<5min ago) — skipping to avoid kill loop")
+                return
+        except Exception:
+            pass
 
         app_dir = os.path.dirname(os.path.abspath(__file__))
         vbs_path = os.path.join(app_dir, "start_hidden.vbs")
@@ -173,6 +186,11 @@ def _self_heal_scheduled_task():
         print(f"[SelfHeal] Agent running in Session 0 — re-registering {task_name} without /rl highest")
 
         # Re-register the task without /rl highest so it runs in Session 1.
+        # NB: NOT adding /it — Interactive-only tasks can't be triggered by
+        # `schtasks /run` from Session 0, so the helper's respawn step below
+        # would silently fail (task Last Run stays "1999/11/30 placeholder").
+        # Letting the task run in any session keeps recovery working; the
+        # marker file below is what actually breaks the kill loop.
         subprocess.run(
             ["schtasks", "/delete", "/tn", task_name, "/f"],
             capture_output=True,
@@ -189,12 +207,28 @@ def _self_heal_scheduled_task():
             print(f"[SelfHeal] schtasks /create failed: {cr.stderr}")
             return
 
-        # Spawn a detached cmd that waits for us to die, then re-runs the
-        # fixed task. The new process lands in Session 1.
+        # Write marker BEFORE spawning helper so the next process sees it.
+        try:
+            with open(marker, "w") as f:
+                f.write(str(int(time.time())))
+        except Exception:
+            pass
+
+        # Spawn a detached cmd that waits for us to die, then re-launches vbs.
+        # NB: we DON'T use `schtasks /run /tn TASK_NAME` — that targets the
+        # task we just re-registered, but `/sc onlogon` tasks are flagged
+        # "Interactive only" by Windows regardless of /it, and `schtasks /run`
+        # invoked from Session 0 silently fails to start them (Last Run stays
+        # at the 1999/11/30 placeholder, Last Result 267011/SCHED_S_TASK_HAS_NOT_RUN).
+        # Direct wscript spawn bypasses that — the new uvicorn lands in the
+        # same Session 0 but the marker file we just wrote means the second
+        # SelfHeal pass skips, letting startup complete. Pickers stay broken
+        # in Session 0 until the user logs out + back in (OriginsunBoot then
+        # fires correctly via the onlogon trigger in Session 1).
         helper = (
             f'timeout /t 4 /nobreak >nul & '
             f'taskkill /f /pid {pid} >nul 2>&1 & '
-            f'schtasks /run /tn "{task_name}"'
+            f'wscript.exe "{vbs_path}"'
         )
         DETACHED_PROCESS = 0x00000008
         CREATE_NEW_PROCESS_GROUP = 0x00000200

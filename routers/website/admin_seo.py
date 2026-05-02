@@ -174,3 +174,51 @@ async def seo_runner_run_one(
     if result.get("processed", 0) > 0:
         await rebuild_service.mark_dirty()
     return result
+
+
+# ── Internal forward endpoints（NAS website-api → master）──────────
+# claude.exe 只在 master Windows 上能跑（吃用戶 Max 訂閱）。NAS container
+# 是 python:3.11-slim 沒 claude，也沒登入 Anthropic — 收到 admin 請求後
+# relay 到這裡。X-Internal-Key (= JWT secret，master/NAS 共用) 認證。
+
+def _check_internal_key(request: Request) -> None:
+    from core.auth import _get_secret
+    expected = _get_secret()
+    got = request.headers.get("X-Internal-Key", "")
+    if not expected or got != expected:
+        raise HTTPException(status_code=403, detail="forbidden")
+
+
+def _admin_session_for_internal():
+    """避開 admin_session 的 JWT user 守衛 — 只給 internal key 通過的進來用 DB。"""
+    from db.session import get_session_factory
+    factory = get_session_factory()
+    if factory is None:
+        raise HTTPException(status_code=503, detail="db not ready")
+    return factory()
+
+
+@router.post("/internal/seo/run")
+async def seo_runner_run_internal(request: Request):
+    """NAS website-api 把整批 run 轉給 master。"""
+    _check_internal_key(request)
+    try:
+        batch_size = int(request.query_params.get("batch_size", "10"))
+    except ValueError:
+        batch_size = 10
+    async with _admin_session_for_internal() as session:
+        result = await seo_runner.run_pipeline(session, batch_size=batch_size)
+        if result.get("processed", 0) > 0:
+            await rebuild_service.mark_dirty()
+        return result
+
+
+@router.post("/internal/seo/projects/{project_id}/run")
+async def seo_runner_run_one_internal(project_id: str, request: Request):
+    """NAS website-api 把單筆 run 轉給 master。"""
+    _check_internal_key(request)
+    async with _admin_session_for_internal() as session:
+        result = await seo_runner.run_pipeline(session, target_project_id=project_id)
+        if result.get("processed", 0) > 0:
+            await rebuild_service.mark_dirty()
+        return result

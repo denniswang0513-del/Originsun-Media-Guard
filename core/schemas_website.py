@@ -181,7 +181,10 @@ class ProjectReorder(BaseModel):
 
 # Phase M-W：網站管理員在「作品集管理」新增作品
 class WorkCreateRequest(BaseModel):
-    name: str = Field(..., min_length=1, max_length=200)
+    # name 可選 — 跳過小表單流程下，前端不傳 name，後端塞 sentinel 「（未命名作品）」，
+    # 由使用者進編輯頁後直接填。Overlay 關閉時若仍是 sentinel 且各 public_* 都空，
+    # /works/{id}/if-skeleton 會把這筆 skeleton 刪掉避免留垃圾。
+    name: Optional[str] = Field(None, max_length=200)
     client_id: Optional[str] = None
     year: Optional[int] = None
     # 一次帶上分類 + 標籤 ID（共用同一張 website_categories 表，後端不分 kind）。

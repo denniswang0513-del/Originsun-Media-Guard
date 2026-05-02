@@ -9,6 +9,7 @@ Endpoints (prefix `/api/website/admin`):
 - POST /works/{id}/featured        切換精選 ({"featured": true/false})
 - POST /works/create               (Phase M-W) 建立作品 skeleton → 回傳 edit URL
 - POST /works/{id}/edit-url        (Phase M-W) 產生既有作品的 showcase-edit token URL
+- DELETE /works/{id}/if-skeleton   (Phase M-W) 編輯 overlay 關閉時清除沒填內容的 skeleton
 - GET  /clients/lookup             (Phase M-W) 客戶 name-only 簡化列表（新增作品 modal）
 """
 from __future__ import annotations
@@ -93,8 +94,13 @@ async def set_featured(
 # 3. 查客戶 name list（新增作品時選客戶）
 # ══════════════════════════════════════════════════════════
 
-# Skeleton 建立時預設狀態 — 日後 CRM 管理員可手動調整
-_DEFAULT_WORK_STATUS = "進行中"
+# Skeleton 建立時預設狀態 — 作品集上架的本來就是已完成的成品，預設「已結案」
+# 比「進行中」對齊使用情境；後續 CRM 管理員仍可手動調整。
+_DEFAULT_WORK_STATUS = "已結案"
+
+# 跳過小表單流程下沒填名稱用的 sentinel；/works/{id}/if-skeleton 用這個值判定是否為
+# 「使用者開了 overlay 但什麼都沒填就關掉」的孤兒紀錄。
+_SKELETON_NAME = "（未命名作品）"
 
 
 @router.post("/works/create", response_model=WorkCreateResponse)
@@ -106,9 +112,14 @@ async def create_work(
     from db.models_website import WebsiteProjectCategory
     project_id = uuid.uuid4().hex
     now = datetime.now(timezone.utc)
+    name = (req.name or "").strip() or _SKELETON_NAME
+    # crm_projects.client_id 是 NOT NULL（soft FK，沒實際 FK constraint）— 使用者
+    # 跳過小表單沒選客戶時，塞空字串而不是 None；使用者進編輯頁可填，if-skeleton
+    # 清理時也會被連帶刪掉，不會留 client_id="" 的孤兒紀錄。
+    client_id = (req.client_id or "").strip()
     session.add(CrmProject(
-        id=project_id, name=req.name,
-        client_id=req.client_id or None,
+        id=project_id, name=name,
+        client_id=client_id,
         status=_DEFAULT_WORK_STATUS,
         public=False, public_year=req.year, public_sort_order=0,
         created_at=now, updated_at=now,
@@ -119,9 +130,70 @@ async def create_work(
     token, _sc = await _mint_showcase_edit_token(session, project_id, reuse_existing=False)
     await session.commit()
     return WorkCreateResponse(
-        id=project_id, name=req.name,
+        id=project_id, name=name,
         edit_url=f"/showcase-edit.html?token={token}",
     )
+
+
+@router.delete("/works/{project_id}/if-skeleton")
+async def delete_work_if_skeleton(
+    project_id: str,
+    session: AsyncSession = Depends(admin_session),
+):
+    """Overlay 關閉時前端呼叫：如果這筆是「沒填內容就被關掉」的 skeleton，刪掉避免留垃圾。
+
+    判定條件（全部成立才刪）：
+      - crm_projects.name 仍是 sentinel（使用者沒按儲存改名）
+      - public_title / public_youtube_id / public_description 全部空
+      - public_credits_text 也空、public_credits 也空
+      - 對應 crm_project_showcase row 也沒填內容（cover/desc/video/gallery/credits）
+
+    任一欄位有值 → 視為使用者已開始填內容，回 {deleted: false} 不動。
+
+    刪除時連帶清除 crm_project_showcase + website_project_categories 兩張關聯表
+    （沒設 cascade，要手動）。
+    """
+    from db.models import CrmProjectShowcase
+    from db.models_website import WebsiteProjectCategory
+    from sqlalchemy import delete as sa_delete
+
+    p = await session.get(CrmProject, project_id)
+    if not p:
+        return {"deleted": False, "reason": "not_found"}
+
+    if (p.name or "").strip() != _SKELETON_NAME:
+        return {"deleted": False, "reason": "name_changed"}
+    if (
+        (p.public_title or "").strip()
+        or (p.public_youtube_id or "").strip()
+        or (p.public_description or "").strip()
+        or (p.public_credits_text or "").strip()
+        or (p.public_credits and len(p.public_credits) > 0)
+    ):
+        return {"deleted": False, "reason": "has_public_content"}
+
+    sc = await session.get(CrmProjectShowcase, project_id)
+    if sc and (
+        (sc.cover_url or "").strip()
+        or (sc.description or "").strip()
+        or (sc.video_url or "").strip()
+        or (sc.credits_text or "").strip()
+        or (sc.gallery and len(sc.gallery) > 0)
+        or (sc.process_items and len(sc.process_items) > 0)
+        or (sc.credits and len(sc.credits) > 0)
+    ):
+        return {"deleted": False, "reason": "has_showcase_content"}
+
+    if sc:
+        await session.delete(sc)
+    await session.execute(
+        sa_delete(WebsiteProjectCategory).where(
+            WebsiteProjectCategory.project_id == project_id
+        )
+    )
+    await session.delete(p)
+    await session.commit()
+    return {"deleted": True}
 
 
 @router.post("/works/{project_id}/edit-url", response_model=EditUrlResponse)

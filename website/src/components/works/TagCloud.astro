@@ -1,0 +1,77 @@
+---
+/**
+ * TagCloud.astro — Popular Tags 風格的標籤雲（統一色系：黑色 active / 中性灰 inactive）
+ *
+ * 視覺跟 CategoryFilter 一致 — active 黑底白字、inactive 淺灰底中性字。
+ * 不再依 count 變灰階深淺（多色系視覺打架，count 數字已標在後面）。
+ *
+ * linkBase 兩種用法：
+ *   - `/works?tag=` → 留在列表頁做 in-place AND 過濾（搭 ?category=）
+ *   - `/tags/`     → 跳到獨立 SEO landing page
+ */
+import type { ICategory } from "../../types/category";
+
+interface Props {
+    tags: ICategory[];
+    activeSlug?: string | null;
+    linkBase: string;
+    /** 標籤文字轉換 — 預設拿掉 'tag-' 前綴 */
+    label?: (cat: ICategory) => string;
+    /** 區塊標題（例：'Popular Tags' / '其他標籤'）— 留空不顯示 */
+    title?: string;
+    /** 是否渲染「全部」chip（讓使用者清掉 tag 篩選回到全部）— 列表頁用 true、tag landing page 用 false */
+    showAll?: boolean;
+    /** 「全部」chip 的 href — 通常是 linkBase 去掉 query 後的根路徑 + 保留另一軸 query */
+    allHref?: string;
+    /** 接到每個 tag chip href 後面的 query string（如 `category=ad`）— 切 tag 不丟 category */
+    extraQuery?: string;
+}
+
+const {
+    tags, activeSlug = null, linkBase, label, title,
+    showAll = false, allHref = "/works", extraQuery = "",
+} = Astro.props;
+
+// 統一色系：active 黑底白字（跟 CategoryFilter 一致），inactive 淺灰底中性字
+const ACTIVE_CLASS = "bg-neutral-900 text-white hover:bg-neutral-800";
+const INACTIVE_CLASS = "bg-neutral-100 text-neutral-500 hover:bg-neutral-200 hover:text-neutral-900";
+
+function buildHref(slug: string): string {
+    // 容忍兩種 base：'/tags/' 結尾、或 '/works?tag=' query
+    const base = linkBase.endsWith("/") ? `${linkBase}${slug}/` : `${linkBase}${slug}`;
+    // extraQuery 只對 query 模式（含 '?'）有意義 — '/tags/' SEO landing page 不串
+    if (!extraQuery || !linkBase.includes("?")) return base;
+    return `${base}&${extraQuery}`;
+}
+---
+
+{title && (
+    <h2 class="text-lg sm:text-xl font-bold tracking-wide text-neutral-900 mb-4">
+        {title}
+    </h2>
+)}
+
+<div class="flex flex-wrap justify-center gap-2 sm:gap-2.5">
+    {showAll && (
+        <a href={allHref}
+           data-chip-axis="tag" data-chip-slug=""
+           class={`inline-flex items-center text-xs sm:text-sm tracking-wide px-3 py-1.5 rounded-full transition-all duration-200 ${
+               !activeSlug ? ACTIVE_CLASS : INACTIVE_CLASS
+           }`}>
+            <span class="font-medium">全部</span>
+        </a>
+    )}
+    {tags.map(t => {
+        const isActive = activeSlug === t.slug;
+        const cls = isActive ? ACTIVE_CLASS : INACTIVE_CLASS;
+        const display = label ? label(t) : (t.name_zh || t.slug.replace(/^tag-/, ""));
+        return (
+            <a href={buildHref(t.slug)}
+               data-chip-axis="tag" data-chip-slug={t.slug}
+               class={`inline-flex items-center text-xs sm:text-sm tracking-wide px-3 py-1.5 rounded-full transition-all duration-200 ${cls}`}>
+                <span class="font-medium">{display}</span>
+                <span class="ml-1.5 text-[10px] opacity-70">({t.count || 0})</span>
+            </a>
+        );
+    })}
+</div>

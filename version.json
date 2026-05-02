@@ -1,5 +1,5 @@
 {
-  "version": "1.10.87",
-  "build_date": "2026-04-27",
-  "notes": "防禦性修復：api_crm.py 加 from __future__ import annotations，避免缺 sqlalchemy 的 agent type annotation NameError 炸 CRM router"
+  "version": "1.10.123",
+  "build_date": "2026-05-02",
+  "notes": "hotfix(main.py): SelfHeal helper 改直接 wscript spawn — schtasks /run 無法從 Session 0 啟動 Interactive-only 任務"
 }
