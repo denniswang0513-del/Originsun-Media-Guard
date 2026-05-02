@@ -78,29 +78,42 @@ export async function pickPath(inputId, type = 'folder') {
     const el = document.getElementById(inputId);
     if (!el) return;
 
-    // 永遠走 web-based modal (openNasBrowser),不再呼叫後端 tkinter picker。
-    // tkinter dialog 渲染依賴 OS desktop session,master 一旦在 Session 0
-    // (Services session) — 比如 cmd shell 啟動、SelfHeal 復活、某些 OTA chain
-    // 都可能落 Session 0 — picker 會渲染到非互動桌面,使用者完全看不到。
-    // openNasBrowser 是純 HTML/JS modal,呼叫 /api/v1/browse 拿目錄列表,
-    // 跟 OS session 完全解耦,不管 master 在哪個 session 都能用。
-    // 順帶:外部存取 (cloudflared) 路徑跟 LAN 路徑統一成同一條,UX 一致。
-    if (typeof window.openNasBrowser !== 'function') {
-        console.error('openNasBrowser not loaded — picker unavailable');
+    // External access (no LAN reach to Agent) → NAS browser modal
+    if (window._isExternalAccess && typeof window.openNasBrowser === 'function') {
+        const path = await window.openNasBrowser({
+            title: type === 'folder' ? '選擇目錄' : '選擇檔案',
+            initialPath: '',
+            mode: type,
+            showFiles: type === 'file'
+        });
+        if (path) {
+            el.value = path;
+            _autoFillCardName(el, inputId, path);
+        }
         return;
     }
 
-    const path = await window.openNasBrowser({
-        title: type === 'folder' ? '選擇目錄' : '選擇檔案',
-        initialPath: el.value || '',
-        mode: type,
-        showFiles: type === 'file',
-    });
+    // LAN access → native Windows picker via backend
+    try {
+        const endpoint = getAgentBaseUrl() + (type === 'folder' ? '/api/v1/utils/pick_folder' : '/api/v1/utils/pick_file');
+        el.classList.add('animate-pulse', 'bg-blue-900', 'text-white');
+        const res = await fetch(endpoint);
+        const data = await res.json();
+        el.classList.remove('animate-pulse', 'bg-blue-900', 'text-white');
 
-    if (path) {
-        el.value = path;
-        _autoFillCardName(el, inputId, path);
-        el.dispatchEvent(new Event('input', { bubbles: true }));
+        if (data.error === 'session_0') {
+            alert(data.message || 'Master 跑在 Session 0,picker 無法顯示。');
+            return;
+        }
+
+        if (data.path) {
+            el.value = data.path;
+            _autoFillCardName(el, inputId, data.path);
+            el.dispatchEvent(new Event('input', { bubbles: true }));
+        }
+    } catch (e) {
+        console.error("Picker failed:", e);
+        el.classList.remove('animate-pulse', 'bg-blue-900', 'text-white');
     }
 }
 
