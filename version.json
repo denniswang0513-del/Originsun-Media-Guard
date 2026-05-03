@@ -1,5 +1,5 @@
 {
-  "version": "1.10.130",
-  "build_date": "2026-05-02",
-  "notes": "自動啟動連根拔起:從 schtasks 改用 Windows Startup folder shortcut,徹底斬掉 Session 0 silent fail 路徑;picker 永遠 Session 1 工作。順帶 picker Session 0 fail-fast alert。"
+  "version": "1.10.131",
+  "build_date": "2026-05-04",
+  "notes": "HOTFIX: api_ota router 整個沒載入(/download_update 404 → agent OTA 全失敗)+ pythonw 避免 Windows Terminal 視窗。整個 v1.10.130 期間 master OTA endpoint 全失靈,本版修補。"
 }
