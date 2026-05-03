@@ -41,12 +41,24 @@ def _base_dir() -> str:
     return os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 
-def find_python() -> str:
-    """Resolve the Python interpreter: .venv > python_embed > sys.executable."""
+def find_python(gui: bool = True) -> str:
+    """Resolve Python interpreter. Default gui=True returns pythonw.exe (no
+    console) so spawned uvicorn doesn't trigger Windows Terminal window
+    on Windows 11 (default terminal app intercepts console-exe launches
+    and shows itself even when STARTUPINFO requests SW_HIDE)."""
     base = _base_dir()
+    name = "pythonw.exe" if gui else "python.exe"
     for c in (
-        os.path.join(base, ".venv", "Scripts", "python.exe"),
-        os.path.join(base, "python_embed", "python.exe"),
+        os.path.join(base, ".venv", "Scripts", name),
+        os.path.join(base, "python_embed", name),
+    ):
+        if os.path.isfile(c):
+            return c
+    # Fallback: try the alternate variant before falling back to sys.executable
+    alt = "python.exe" if gui else "pythonw.exe"
+    for c in (
+        os.path.join(base, ".venv", "Scripts", alt),
+        os.path.join(base, "python_embed", alt),
     ):
         if os.path.isfile(c):
             return c

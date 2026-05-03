@@ -24,13 +24,21 @@ Dim sDir
 sDir = Left(WScript.ScriptFullName, InStrRev(WScript.ScriptFullName, "\"))
 If Right(sDir, 1) = "\" Then sDir = Left(sDir, Len(sDir) - 1)
 
+' 優先用 pythonw.exe (Windows GUI 版 Python — 不分配 console)。Windows 11
+' 預設終端機是 Windows Terminal,console exe 啟動時 WT 會接管 console host
+' 並彈出視窗,即使 WshShell.Run 用 Window=0 (SW_HIDE) 也擋不住。pythonw 根
+' 本沒 console,從源頭避開 WT 接管路徑,master 啟動完全靜默。
 Dim pyExe
-If fso.FileExists(sDir & "\.venv\Scripts\python.exe") Then
+If fso.FileExists(sDir & "\.venv\Scripts\pythonw.exe") Then
+    pyExe = sDir & "\.venv\Scripts\pythonw.exe"
+ElseIf fso.FileExists(sDir & "\python_embed\pythonw.exe") Then
+    pyExe = sDir & "\python_embed\pythonw.exe"
+ElseIf fso.FileExists(sDir & "\.venv\Scripts\python.exe") Then
     pyExe = sDir & "\.venv\Scripts\python.exe"
 ElseIf fso.FileExists(sDir & "\python_embed\python.exe") Then
     pyExe = sDir & "\python_embed\python.exe"
 Else
-    pyExe = "python"
+    pyExe = "pythonw"
 End If
 
 Dim spawnPy

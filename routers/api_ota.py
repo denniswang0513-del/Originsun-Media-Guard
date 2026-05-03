@@ -244,7 +244,7 @@ echo.
 > "%TEMP%\\_originsun_boot_lnk.vbs" echo Set WshShell = CreateObject("WScript.Shell")
 >>"%TEMP%\\_originsun_boot_lnk.vbs" echo Set lnk = WshShell.CreateShortcut(WshShell.SpecialFolders("Startup") ^& "\\Originsun Master.lnk")
 >>"%TEMP%\\_originsun_boot_lnk.vbs" echo lnk.TargetPath = "wscript.exe"
->>"%TEMP%\\_originsun_boot_lnk.vbs" echo lnk.Arguments  = """%INSTALL_DIR%\\start_hidden.vbs"""
+>>"%TEMP%\\_originsun_boot_lnk.vbs" echo lnk.Arguments  = "%INSTALL_DIR%\\start_hidden.vbs"
 >>"%TEMP%\\_originsun_boot_lnk.vbs" echo lnk.WorkingDirectory = "%INSTALL_DIR%"
 >>"%TEMP%\\_originsun_boot_lnk.vbs" echo lnk.WindowStyle = 7
 >>"%TEMP%\\_originsun_boot_lnk.vbs" echo lnk.Save
