@@ -548,7 +548,7 @@ function _render() {
         return `<div class="section" id="${sectionId}">
             <div class="section-label">${label}</div>
             <div class="tag-list">${chips}</div>
-            ${EDITABLE ? `<p style="color:var(--text3);font-size:12px;">點擊切換選取（會立即儲存）</p>` : ''}
+            ${EDITABLE ? `<p style="color:var(--text3);font-size:12px;">點擊切換選取；按頂部「💾 儲存所有變更」存檔</p>` : ''}
         </div>`;
     };
     html += _renderCatSection('作品分類', 'category', 'sec-website-cats');
@@ -777,6 +777,9 @@ function _bindEvents() {
         // old_slugs 從 textarea 解析：一行一個、trim、過濾空行
         const oldUrlsRaw = document.getElementById('inp-old-slugs')?.value || '';
         payload.public_old_slugs = oldUrlsRaw.split(/\r?\n/).map(s => s.trim()).filter(Boolean);
+
+        // 作品分類 / 標籤 — toggle handler 已即時更新 DATA.selected_category_ids
+        payload.category_ids = DATA.selected_category_ids || [];
 
         // SEO 覆寫欄位 — 4 個輸入；keywords 接受 ASCII 半形 + 中文全形 + 頓號分隔
         const kwRaw = document.getElementById('inp-seo-keywords')?.value || '';
@@ -1161,17 +1164,18 @@ function _bindEvents() {
         });
     });
 
-    // Website category / tag toggle — 共用同一個 PUT category_ids 端點
+    // Website category / tag toggle — in-memory; master save 一次提交 category_ids
     document.querySelectorAll('[data-action="toggle-cat"]').forEach(el => {
-        el.addEventListener('click', async () => {
+        el.addEventListener('click', () => {
             const id = parseInt(el.dataset.id);
             const cur = new Set(DATA.selected_category_ids || []);
-            if (cur.has(id)) cur.delete(id); else cur.add(id);
-            try {
-                await _save({ category_ids: [...cur] });
-                _toast('已儲存');
-                await _reload();
-            } catch (e) { alert(e.message); }
+            const on = !cur.has(id);
+            if (on) cur.add(id); else cur.delete(id);
+            DATA.selected_category_ids = [...cur];
+            el.classList.toggle('tag-on', on);
+            const name = el.textContent.replace(/^✓\s*/, '');
+            el.textContent = on ? `✓ ${name}` : name;
+            setDirty(true);
         });
     });
 }

@@ -14,6 +14,7 @@ Windows `192.168.1.11:8000` 與 `originsun-studio.com`）。
 """
 from __future__ import annotations
 
+import asyncio
 import logging
 import os
 from contextlib import asynccontextmanager
@@ -22,6 +23,30 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 logger = logging.getLogger("website-api")
+
+
+async def _periodic_db_check():
+    """每 60s 重探 DB,讓 startup 抓到 init 失敗 / postgres 重啟 / idle timeout
+    都能自我修復。沒這個迴圈,容器要重啟才會復活,所有 endpoint 卡 503。
+    對齊 main.py:_periodic_db_check。
+    """
+    import core.state as state
+    from db.session import init_db, db_available
+
+    while True:
+        try:
+            await asyncio.sleep(60)
+            was = state.db_online
+            state.db_online = await db_available()
+            if not was and state.db_online:
+                print("[website-api] DB 連線恢復")
+            elif was and not state.db_online:
+                print("[website-api] DB 中斷,嘗試重新初始化")
+                state.db_online = await init_db()
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            state.db_online = False
 
 
 @asynccontextmanager
@@ -44,10 +69,19 @@ async def _lifespan(app: FastAPI):
                 await seed_website_if_empty(factory)
             print("[website-api] startup OK (DB online)")
         else:
-            print("[website-api] startup WITHOUT DB — public endpoints will 503")
+            print("[website-api] startup WITHOUT DB — 60s 後自動重試")
     except Exception as e:
         print(f"[website-api] startup failed: {e}")
-    yield
+
+    db_check_task = asyncio.create_task(_periodic_db_check())
+    try:
+        yield
+    finally:
+        db_check_task.cancel()
+        try:
+            await db_check_task
+        except (asyncio.CancelledError, Exception):
+            pass
 
 
 app = FastAPI(

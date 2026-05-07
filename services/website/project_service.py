@@ -13,7 +13,7 @@ from typing import Optional
 from sqlalchemy import and_, delete, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from db.models import CrmProject
+from db.models import Client, CrmProject
 from db.models_website import WebsiteCategory, WebsiteProjectCategory
 
 logger = logging.getLogger(__name__)
@@ -47,6 +47,28 @@ async def _categories_for_projects(
 
 def _empty_cat_data() -> dict[str, list[str]]:
     return {"categories": [], "tags": []}
+
+
+async def _clients_for_projects(
+    session: AsyncSession, project_ids: list[str]
+) -> dict[str, str]:
+    """Batch fetch:project_id → client display name(short_name 優先、空值 fallback full_name)。
+
+    給 _to_public_dict 用,讓 client 顯示 fallback chain 是
+    `public_client || client.short_name || client.full_name || ""`,
+    這樣 CRM 改 client_id 立刻反映到作品集 Tab 跟對外網站,不需 PM 重存 showcase。
+    """
+    if not project_ids:
+        return {}
+    stmt = (
+        select(CrmProject.id, Client.short_name, Client.full_name)
+        .join(Client, Client.id == CrmProject.client_id)
+        .where(CrmProject.id.in_(project_ids))
+    )
+    out: dict[str, str] = {}
+    for pid, short, full in await session.execute(stmt):
+        out[pid] = (short or "").strip() or (full or "").strip()
+    return out
 
 
 def _slug_or_fallback(p: CrmProject) -> str:
@@ -159,18 +181,25 @@ def _credits_summary(credits: Optional[list]) -> str:
     return summary if len(summary) <= 30 else summary[:29] + "…"
 
 
-def _to_public_dict(p: CrmProject, cat_data: Optional[dict[str, list[str]]] = None) -> dict:
+def _to_public_dict(
+    p: CrmProject,
+    cat_data: Optional[dict[str, list[str]]] = None,
+    client_name: Optional[str] = None,
+) -> dict:
     """投影 public 欄位到 dict — caller 必須保證 p 是 public（list/get caller 都在 SQL 層
     `WHERE public.is_(True)` 過濾過）。本函式不檢查 public flag，避免 admin path
     （_to_admin_dict）誤拒未公開作品。新增 caller 時請 SQL 層先過濾。
 
     cat_data: {"categories": [...], "tags": [...]} — _categories_for_projects 的單筆。
+    client_name: _clients_for_projects 解析的 client 顯示名(short_name fallback full_name)。
+        Source of truth 是 CRM 的 client_id;public_client 純 SEO 覆寫,空值就 fallback。
+        title 同理:public_title 空就 fallback 到 name。
     """
     cd = cat_data or _empty_cat_data()
     return {
         "slug": _slug_or_fallback(p),
-        "title": p.public_title or p.name,
-        "client": p.public_client,
+        "title": (p.public_title or "").strip() or p.name,
+        "client": (p.public_client or "").strip() or (client_name or ""),
         "youtube_id": p.public_youtube_id,
         "description": p.public_description,
         "year": p.public_year,
@@ -191,8 +220,12 @@ def _to_public_dict(p: CrmProject, cat_data: Optional[dict[str, list[str]]] = No
     }
 
 
-def _to_admin_dict(p: CrmProject, cat_data: Optional[dict[str, list[str]]] = None) -> dict:
-    d = _to_public_dict(p, cat_data)
+def _to_admin_dict(
+    p: CrmProject,
+    cat_data: Optional[dict[str, list[str]]] = None,
+    client_name: Optional[str] = None,
+) -> dict:
+    d = _to_public_dict(p, cat_data, client_name)
     d.update({
         "id": p.id,
         "name": p.name,
@@ -230,8 +263,13 @@ async def list_public_projects(
     ).offset((page - 1) * limit).limit(limit)
 
     projects = list((await session.execute(stmt)).scalars())
-    cat_map = await _categories_for_projects(session, [p.id for p in projects])
-    return [_to_public_dict(p, cat_map.get(p.id)) for p in projects], total
+    pids = [p.id for p in projects]
+    cat_map = await _categories_for_projects(session, pids)
+    client_map = await _clients_for_projects(session, pids)
+    return [
+        _to_public_dict(p, cat_map.get(p.id), client_map.get(p.id))
+        for p in projects
+    ], total
 
 
 async def get_public_project_by_slug(session: AsyncSession, slug: str) -> Optional[dict]:
@@ -252,7 +290,8 @@ async def get_public_project_by_slug(session: AsyncSession, slug: str) -> Option
         return None
 
     cat_map = await _categories_for_projects(session, [project.id])
-    data = _to_public_dict(project, cat_map.get(project.id))
+    client_map = await _clients_for_projects(session, [project.id])
+    data = _to_public_dict(project, cat_map.get(project.id), client_map.get(project.id))
     data["credits"] = project.public_credits or []
     data["published_at"] = project.public_published_at.isoformat() if project.public_published_at else None
 
@@ -298,8 +337,13 @@ async def list_featured_projects(session: AsyncSession, limit: int = 6) -> list[
         ).limit(remaining)
         featured.extend((await session.execute(fb_stmt)).scalars())
 
-    cat_map = await _categories_for_projects(session, [p.id for p in featured])
-    return [_to_public_dict(p, cat_map.get(p.id)) for p in featured]
+    pids = [p.id for p in featured]
+    cat_map = await _categories_for_projects(session, pids)
+    client_map = await _clients_for_projects(session, pids)
+    return [
+        _to_public_dict(p, cat_map.get(p.id), client_map.get(p.id))
+        for p in featured
+    ]
 
 
 async def list_admin_projects(
@@ -312,8 +356,13 @@ async def list_admin_projects(
     stmt = stmt.order_by(CrmProject.updated_at.desc().nullslast())
 
     projects = list((await session.execute(stmt)).scalars())
-    cat_map = await _categories_for_projects(session, [p.id for p in projects])
-    return [_to_admin_dict(p, cat_map.get(p.id)) for p in projects]
+    pids = [p.id for p in projects]
+    cat_map = await _categories_for_projects(session, pids)
+    client_map = await _clients_for_projects(session, pids)
+    return [
+        _to_admin_dict(p, cat_map.get(p.id), client_map.get(p.id))
+        for p in projects
+    ]
 
 
 _UPDATABLE_FIELDS = {

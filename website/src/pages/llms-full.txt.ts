@@ -25,7 +25,7 @@ async function _fetchRedirects(): Promise<Record<string, string>> {
 
 export const GET: APIRoute = async ({ site }) => {
     const [meta, services, works, faqs, quickFacts, posts, redirects] = await Promise.all([
-        fetchMeta(), fetchServices(), fetchFeatured(30),
+        fetchMeta(), fetchServices(), fetchFeatured(12),
         fetchFaqs(), fetchQuickFacts(), fetchPosts(), _fetchRedirects(),
     ]);
     const siteUrl = resolveSiteUrl(site);

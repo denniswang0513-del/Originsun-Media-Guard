@@ -32,13 +32,22 @@ def client_ip(request: Request) -> str:
     return request.client.host if request.client else "unknown"
 
 
+_LOOPBACK_IPS = frozenset({"127.0.0.1", "::1"})
+
+
 def rate_limit(request: Request, max_per_minute: int = 30) -> None:
     """簡易 sliding-window rate limit（per-IP，記憶體內）。
 
     Website-api 是單一 container，記憶體夠用。每 5 分鐘清一次空 bucket
     避免 bot 掃描造成的無界記憶體成長。
+
+    Loopback (127.0.0.1 / ::1) 完全 bypass — Astro build 跑在 master 自己的機器上,
+    一個 build 會發 100+ 平行請求(每作品頁、分類、首頁),60/min 撐不住。對外 abuse
+    只會走 Cloudflare → cf-connecting-ip,本機 build 不會帶這個 header。
     """
     ip = client_ip(request)
+    if ip in _LOOPBACK_IPS:
+        return
     now = time.time()
 
     if now - _LAST_SWEEP[0] > 300.0:

@@ -88,3 +88,45 @@ export function resolveThumbnail(
                 : [320, 180];
     return placeholderImage(seed, dims[0], dims[1]);
 }
+
+
+/**
+ * resolveThumbnailAsync() — 同 resolveThumbnail 但 build-time HEAD 檢查 maxresdefault
+ * 是否存在(YouTube 對沒上 HD 的舊片不發 maxres,直接 404)。404 → 自動 fallback 到 hq。
+ *
+ * 為什麼:Astro `<Image>` build 時會 fetch 圖片做 sharp 處理,maxresdefault 404 會直接
+ * 中斷 build。homepage hero / featured grid 用 maxres 畫質,在 frontmatter 用這個。
+ *
+ * 一次 HEAD ~50ms,9 張平行 < 200ms,不影響 build 速度。
+ */
+const _maxresAvailableCache = new Map<string, Promise<boolean>>();
+
+async function _hasMaxresThumb(videoId: string): Promise<boolean> {
+    const cached = _maxresAvailableCache.get(videoId);
+    if (cached) return cached;
+    const p = (async () => {
+        try {
+            const r = await fetch(
+                `https://img.youtube.com/vi/${videoId}/maxresdefault.jpg`,
+                { method: "HEAD", signal: AbortSignal.timeout(5000) },
+            );
+            return r.ok;
+        } catch {
+            return false;
+        }
+    })();
+    _maxresAvailableCache.set(videoId, p);
+    return p;
+}
+
+export async function resolveThumbnailAsync(
+    videoId: string | null | undefined,
+    seed: string,
+    quality: "maxres" | "hq" | "default" = "maxres",
+): Promise<string> {
+    if (quality === "maxres" && videoId && !videoId.startsWith("test_")
+        && isValidYouTubeId(videoId) && !(await _hasMaxresThumb(videoId))) {
+        return youtubeThumbnail(videoId, "hq")!;
+    }
+    return resolveThumbnail(videoId, seed, quality);
+}

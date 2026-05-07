@@ -106,40 +106,11 @@ export async function getWorkSlugPaths(): Promise<{ params: { slug: string } }[]
 
 
 export async function fetchFeatured(limit = 6): Promise<IPublicProject[]> {
-    const data = await _safeGet<{ items: IPublicProject[] }>(
+    // Build-critical: 用 _get 而非 _safeGet,fetch error 會 throw 中斷 build。
+    // 避免 master 重啟期間 build 抓到空就部署 placeholder。HTTP 200 但空陣列
+    // 是合法狀態(剛上線沒精選),不會 throw。
+    const data = await _get<{ items: IPublicProject[] }>(
         `/api/website/featured?limit=${limit}`,
-        { items: [] },
-        "fetchFeatured",
-    );
-    return data.items;
-}
-
-
-export async function fetchCategories(): Promise<ICategory[]> {
-    const data = await _safeGet<{ items: ICategory[] }>(
-        "/api/website/categories",
-        { items: [] },
-        "fetchCategories",
-    );
-    return data.items;
-}
-
-
-export async function fetchServices(): Promise<IService[]> {
-    const data = await _safeGet<{ items: IService[] }>(
-        "/api/website/services",
-        { items: [] },
-        "fetchServices",
-    );
-    return data.items;
-}
-
-
-export async function fetchTeam(): Promise<ITeamMember[]> {
-    const data = await _safeGet<{ items: ITeamMember[] }>(
-        "/api/website/team",
-        { items: [] },
-        "fetchTeam",
     );
     return data.items;
 }
@@ -161,6 +132,21 @@ function _memoizeList<T>(loader: () => Promise<{ items: T[] }>): () => Promise<T
         return cache;
     };
 }
+
+
+// 這三個被很多頁面用,build 不 memoize 會 35 頁 × 3 endpoint = 105 個 hit,
+// 觸發 master /api/website/* 的 60/min rate limit → 假性 build 失敗。
+export const fetchCategories = _memoizeList<ICategory>(() =>
+    _safeGet<{ items: ICategory[] }>(
+        "/api/website/categories", { items: [] }, "fetchCategories"));
+
+export const fetchServices = _memoizeList<IService>(() =>
+    _safeGet<{ items: IService[] }>(
+        "/api/website/services", { items: [] }, "fetchServices"));
+
+export const fetchTeam = _memoizeList<ITeamMember>(() =>
+    _safeGet<{ items: ITeamMember[] }>(
+        "/api/website/team", { items: [] }, "fetchTeam"));
 
 export const fetchFaqs = _memoizeList<IFAQ>(() =>
     _safeGet<{ items: IFAQ[] }>("/api/website/faqs", { items: [] }, "fetchFaqs"));

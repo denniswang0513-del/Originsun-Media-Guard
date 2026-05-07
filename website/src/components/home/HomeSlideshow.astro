@@ -12,16 +12,15 @@
  */
 import SmartImage from "../ui/SmartImage.astro";
 import type { IPublicProject } from "../../types/project";
-import { resolveThumbnail } from "../../lib/youtube";
+import { resolveThumbnailAsync } from "../../lib/youtube";
 
 interface Props { works: IPublicProject[] }
 const { works } = Astro.props;
 
-// 取前 6 個，無 youtube_id / 測試 ID 會自動走 picsum placeholder
-const slides = works.slice(0, 6).map(w => ({
-    ...w,
-    _thumb: resolveThumbnail(w.youtube_id, w.slug, "maxres"),
-}));
+const slides = works.slice(0, 6);
+const thumbs = await Promise.all(
+    slides.map(w => resolveThumbnailAsync(w.youtube_id, w.slug, "maxres")),
+);
 ---
 
 <section id="home-slideshow"
@@ -44,7 +43,7 @@ const slides = works.slice(0, 6).map(w => ({
                        data-slide-client={w.client || ""}
                        data-slide-title={w.title}
                        style={i === 0 ? "opacity:1;" : "opacity:0;pointer-events:none;"}>
-                        <SmartImage src={w._thumb || ""}
+                        <SmartImage src={thumbs[i]}
                                     alt={w.title}
                                     width={1920} height={1080}
                                     widths={[800, 1280, 1920]}

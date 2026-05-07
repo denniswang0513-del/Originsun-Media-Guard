@@ -13,11 +13,17 @@
  */
 import SmartImage from "../ui/SmartImage.astro";
 import type { IPublicProject } from "../../types/project";
-import { resolveThumbnail } from "../../lib/youtube";
+import { resolveThumbnailAsync } from "../../lib/youtube";
 import Tr from "../ui/Tr.astro";
 
 interface Props { works: IPublicProject[] }
 const { works } = Astro.props;
+
+// build-time HEAD check 過濾沒 maxres 的舊片(YouTube 對非 HD 上傳不發 maxresdefault),
+// 自動降到 hq 避免 sharp 抓 404 中斷 build。
+const thumbs = await Promise.all(
+    works.map(w => resolveThumbnailAsync(w.youtube_id, w.slug, "maxres")),
+);
 ---
 
 <section id="featured" class="bg-white py-24 sm:py-32">
@@ -66,7 +72,7 @@ const { works } = Astro.props;
                     <a href={`/works/${w.slug}`}
                        aria-label={w.title}
                        class="group relative block aspect-video overflow-hidden bg-neutral-900 snap-start">
-                        <SmartImage src={resolveThumbnail(w.youtube_id, w.slug, "maxres")}
+                        <SmartImage src={thumbs[i]}
                                     alt={w.title}
                                     width={1280} height={720}
                                     widths={[480, 800, 1280]}
