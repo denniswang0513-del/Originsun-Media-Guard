@@ -396,6 +396,34 @@ def append_old_slug_if_changed(project: CrmProject, new_slug):
     return True
 
 
+async def mirror_public_to_crm(session: AsyncSession, project: CrmProject, updates: dict) -> None:
+    """Option B mirror — 寫 public_* 時回寫到 CRM source-of-truth 欄位。
+
+    `name` / `client_id` 是 CRM 專案管理 Tab 的顯示欄位,`public_title` / `public_client` 是
+    SEO 覆寫層。從作品集 Tab 新增的作品 `name` 卡 sentinel `「（未命名作品）」`、`client_id`
+    空白,PM 在 showcase-edit / 作品集 Tab 編輯填的標題/客戶若不回寫,CRM Tab 永遠顯示
+    sentinel。寫入時鏡射兩條:
+
+    - `public_title`(strip 後非空) → `name`
+    - `public_client`(strip 後非空)若精確匹配既有 `Client.short_name` → 設 `client_id`
+      (autocomplete dropdown 點選時 input 直接帶 short_name,精確比對最安全;
+      模糊比對誤判風險高,留給人工)
+
+    呼叫者:`update_project_public`(作品集 admin Tab edit)+ token PUT(showcase-edit)。
+    """
+    new_title = (updates.get("public_title") or "").strip()
+    if new_title:
+        project.name = new_title
+
+    new_client_text = (updates.get("public_client") or "").strip()
+    if new_client_text:
+        c = (await session.execute(
+            select(Client).where(Client.short_name == new_client_text)
+        )).scalar_one_or_none()
+        if c:
+            project.client_id = c.id
+
+
 async def update_project_public(
     session: AsyncSession,
     project_id: str,
@@ -422,6 +450,8 @@ async def update_project_public(
     for k, v in updates.items():
         if k in _UPDATABLE_FIELDS:
             setattr(project, k, v)
+
+    await mirror_public_to_crm(session, project, updates)
 
     # First-publish auto-number
     if project.public and project.public_number is None:

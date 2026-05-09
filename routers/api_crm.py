@@ -4758,6 +4758,8 @@ async def update_showcase_edit_data(token: str, request: Request):
         project = await session.get(CrmProject, sc.id)
         if project:
             _apply_project_public_fields(project, body)
+            from services.website.project_service import mirror_public_to_crm
+            await mirror_public_to_crm(session, project, body)
         # SEO 覆寫欄位 — 只接 SHOWCASE_EDIT_PATCHABLE_FIELDS allowlist 內的鍵
         # narrative_long / key_facts / faqs 由 admin Tab + AI pipeline 寫，token 路徑不暴露
         if isinstance(body.get("seo"), dict):
