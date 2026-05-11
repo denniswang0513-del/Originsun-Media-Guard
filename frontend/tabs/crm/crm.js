@@ -3,7 +3,7 @@
  * 功能：列表視圖 + 詳情面板 + 新增/編輯 Modal + CSV 匯入
  */
 
-import { crmFetch as _fetch, crmCacheFetch, crmCacheInvalidate, esc as _esc, fmtNum as _fmtNum, renderAvatar, populateUserSelect, setupResizeHandle, enableInlineEdit, addEditButton, kebabMenuHtml } from './crm-utils.js';
+import { crmFetch as _fetch, crmCacheFetch, crmCacheInvalidate, esc as _esc, fmtNum as _fmtNum, renderAvatar, populateUserSelect, setupResizeHandle, enableInlineEdit, addEditButton, kebabMenuHtml, createSortable, enumIndex } from './crm-utils.js';
 
 // ── State ────────────────────────────────────────────────────
 
@@ -68,16 +68,34 @@ function _avatar(username, size = 22) {
     return renderAvatar(username, _users, size);
 }
 
+// 客戶狀態工作流順序;_sorter 用這個 index 而非字串比較
+const _CLIENT_STATUS_ORDER = ['潛在客戶', '新客戶', '舊客戶'];
+const _sorter = createSortable({
+    storageKey: 'crm_clients_sort',
+    defaultSort: { key: 'updated', dir: 'desc' },
+    panelId: 'crm-list-panel',
+    onChange: () => renderList(),
+    getters: {
+        name:    c => (c.short_name || '').toLowerCase(),
+        status:  c => enumIndex(_CLIENT_STATUS_ORDER, c.status, '潛在客戶'),
+        am:      c => (c.am_username || '').toLowerCase(),
+        proj:    c => c.project_count || 0,
+        revenue: c => c.total_contract || 0,
+        updated: c => c.updated_at || '',
+    },
+});
+
 function renderList() {
     const body = document.getElementById('crm-list-body');
     if (!body) return;
+    _sorter.attach();
 
     if (_clients.length === 0) {
         body.innerHTML = `<div class="crm-empty">找不到客戶資料${_filters.q ? '，請調整搜尋條件' : ''}</div>`;
         return;
     }
 
-    body.innerHTML = _clients.map(c => `
+    body.innerHTML = _sorter.sorted(_clients).map(c => `
         <div class="crm-row${c.id === _selectedId ? ' selected' : ''}" data-id="${c.id}" onclick="window._crmSelectClient('${c.id}')">
             <div class="crm-row-name">${_esc(c.short_name)}</div>
             <div class="crm-row-status">${_badge(c.status)}</div>

@@ -1,7 +1,7 @@
 /**
  * crm-payables.js — 應付帳款子視圖（按月份分組）
  */
-import { crmFetch as _fetch, esc as _esc, fmtNum as _fmtNum, setupResizeHandle } from './crm-utils.js';
+import { crmFetch as _fetch, esc as _esc, fmtNum as _fmtNum, setupResizeHandle, createSortable } from './crm-utils.js';
 
 let _payees = [];       // raw API data (grouped by payee)
 let _monthGroups = [];  // restructured: grouped by month, then payee
@@ -81,10 +81,27 @@ async function loadPayables() {
     }
 }
 
-/* ── 列表渲染（月份標題 + 收款人行）── */
+// 排序在 month group 內,group 自己保持月份序列(資料已 buildMonthGroups 排好)
+const _allPaid = (p) => p.items.every(it => it.payment_status === '已付款');
+const _sorter = createSortable({
+    storageKey: 'crm_payables_sort',
+    defaultSort: { key: 'amount', dir: 'desc' },
+    panelId: 'payable-list-panel',
+    onChange: () => renderList(),
+    getters: {
+        payee:  p => (p.payee_name || '').toLowerCase(),
+        amount: p => p.month_amount || 0,
+        bank:   p => (p.bank_name || '') + ' ' + (p.bank_account || ''),
+        // 應付款 < 已付款:asc 把待處理排前
+        status: p => _allPaid(p) ? 1 : 0,
+    },
+});
+
+/* ── 列表渲染（月份標題 + 收款人行;sort 在 group 內,group 順序維持月份）── */
 function renderList() {
     const body = document.getElementById('payable-list-body');
     if (!body) return;
+    _sorter.attach();
     if (_monthGroups.length === 0) {
         body.innerHTML = '<div class="crm-empty">無應付帳款</div>';
         return;
@@ -95,9 +112,9 @@ function renderList() {
             <span>${_esc(g.label)}</span>
             <span>小計 $${_fmtNum(g.month_total)}</span>
         </div>`;
-        for (const p of g.payees) {
+        for (const p of _sorter.sorted(g.payees)) {
             const key = p.payee_name + '|' + g.month;
-            const allPaid = p.items.every(it => it.payment_status === '已付款');
+            const allPaid = _allPaid(p);
             const statusCls = allPaid ? 'crm-badge crm-pay-全額到帳' : 'crm-badge crm-pay-未到帳';
             const statusText = allPaid ? '已付款' : '應付款';
             html += `

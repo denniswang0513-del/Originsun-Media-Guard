@@ -1,7 +1,7 @@
 /**
  * crm-payments.js — 請款管理子視圖
  */
-import { crmFetch as _fetch, esc as _esc, fmtNum as _fmtNum, setupResizeHandle, enableInlineEdit, addEditButton, kebabMenuHtml } from './crm-utils.js';
+import { crmFetch as _fetch, esc as _esc, fmtNum as _fmtNum, setupResizeHandle, enableInlineEdit, addEditButton, kebabMenuHtml, createSortable, enumIndex } from './crm-utils.js';
 
 let _payments = [];
 let _projects = [];
@@ -44,14 +44,34 @@ function _statusBadge(s) {
     return `<span class="${cls}">${_esc(s)}</span>`;
 }
 
+// 應付款 → 已付款:asc 把待處理(應付款)排前面
+const _PAY_STATUS_ORDER = ['應付款', '已付款'];
+const _sorter = createSortable({
+    storageKey: 'crm_payments_sort',
+    defaultSort: { key: 'date', dir: 'desc' },
+    panelId: 'pay-list-panel',
+    onChange: () => renderList(),
+    getters: {
+        date:     p => p.request_date || '',
+        summary:  p => (p.summary || '').toLowerCase(),
+        amount:   p => p.amount || 0,
+        category: p => (p.category || '').toLowerCase(),
+        payee:    p => (p.payee_name || '').toLowerCase(),
+        invoice:  p => (p.invoice_number || '').toLowerCase(),
+        project:  p => (p.project_name || p.project_label || '').toLowerCase(),
+        status:   p => enumIndex(_PAY_STATUS_ORDER, p.payment_status, '應付款'),
+    },
+});
+
 function renderList() {
     const body = document.getElementById('pay-list-body');
     if (!body) return;
+    _sorter.attach();
     if (_payments.length === 0) {
         body.innerHTML = `<div class="crm-empty">尚無請款${_filters.q ? '，請調整搜尋' : ''}</div>`;
         return;
     }
-    body.innerHTML = _payments.map(p => `
+    body.innerHTML = _sorter.sorted(_payments).map(p => `
         <div class="crm-row pay-row${p.id === _selectedId ? ' selected' : ''}" onclick="window._paySelect('${p.id}')">
             <span>${p.request_date ? p.request_date.substring(0, 10) : '—'}</span>
             <span style="font-weight:600;color:#e0e0e0;">${_esc(p.summary)}</span>

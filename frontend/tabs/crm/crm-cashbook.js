@@ -1,7 +1,7 @@
 /**
  * crm-cashbook.js — 收支明細子視圖
  */
-import { crmFetch as _fetch, esc as _esc, fmtNum as _fmtNum, setupResizeHandle, enableInlineEdit, addEditButton, kebabMenuHtml } from './crm-utils.js';
+import { crmFetch as _fetch, esc as _esc, fmtNum as _fmtNum, setupResizeHandle, enableInlineEdit, addEditButton, kebabMenuHtml, createSortable } from './crm-utils.js';
 
 let _entries = [];
 let _invoiceList = [];
@@ -46,14 +46,31 @@ async function _loadClientList() {
 
 // ── List ────────────────────────────────────────────────────
 
+const _sorter = createSortable({
+    storageKey: 'crm_cashbook_sort',
+    defaultSort: { key: 'date', dir: 'desc' },
+    panelId: 'cash-list-panel',
+    onChange: () => renderList(),
+    getters: {
+        date:     e => e.entry_date || '',
+        summary:  e => (e.summary || '').toLowerCase(),
+        deposit:  e => e.deposit || 0,
+        expense:  e => (e.expense || 0) + (e.bank_fee || 0),
+        category: e => (e.category || '').toLowerCase(),
+        project:  e => (e.project_name || '').toLowerCase(),
+        invoice:  e => (e.invoice_title || '').toLowerCase(),
+    },
+});
+
 function renderList() {
     const body = document.getElementById('cash-list-body');
     if (!body) return;
+    _sorter.attach();
     if (_entries.length === 0) {
         body.innerHTML = `<div class="crm-empty">尚無收支紀錄${_filters.q ? '，請調整搜尋' : ''}</div>`;
         return;
     }
-    body.innerHTML = _entries.map(e => `
+    body.innerHTML = _sorter.sorted(_entries).map(e => `
         <div class="crm-row${e.id === _selectedId ? ' selected' : ''}" onclick="window._cashSelect('${e.id}')">
             <div class="crm-row-date">${e.entry_date ? e.entry_date.substring(0, 10) : '—'}</div>
             <div class="crm-row-name">${_esc(e.summary)}</div>

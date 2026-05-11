@@ -3,6 +3,10 @@
  * 所有 crm-projects-* 模組 import 此檔案存取共享狀態
  */
 
+// 工作流順序 — 點欄頭以「狀態」排序時走這個 index,而非字串比較。
+// 未列出的狀態(自訂)排在最後。新增狀態時請同步更新 crm-projects.html 的下拉選單。
+export const STATUS_ORDER = ['洽談中', '報價中', '進行中', '已結案', '已取消'];
+
 // ── Shared State ────────────────────────────────────────────
 export const state = {
     projects: [],

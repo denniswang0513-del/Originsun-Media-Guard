@@ -407,3 +407,102 @@ export function setupResizeHandle(handleId, panelId) {
     });
 }
 
+
+/* enumIndex — 工作流順序排序的小工具:`['草稿','已送','已簽']` 找出 val 的 index,
+ * 找不到回 arr.length(排尾)。給 createSortable 的 getters 用,避免每個 list 各自寫
+ * 「const i = arr.indexOf(val||default); return i === -1 ? arr.length : i;」三行。
+ */
+export const enumIndex = (arr, val, fallback) => {
+    const i = arr.indexOf(val ?? fallback);
+    return i === -1 ? arr.length : i;
+};
+
+
+/* ── Sortable list headers ──────────────────────────────────
+ *
+ * 通用列表排序器:點欄頭 toggle asc/desc、localStorage 持久化、render 後重綁。
+ *
+ * 列表 panel 內的 <span data-sort-key="X">標題 <span class="crm-sort-ind">↕</span></span>
+ * 會被 attach() 綁 onclick + 持續維護 indicator(▴/▾/↕)+ active 樣式。
+ *
+ * Usage:
+ *   const sorter = createSortable({
+ *       storageKey: 'crm_projects_sort',
+ *       defaultSort: { key: 'status', dir: 'asc' },
+ *       panelId:    'proj-list-panel',
+ *       onChange:   () => renderList(),
+ *       getters:    { status: p => ..., name: p => ..., ... },
+ *   });
+ *   body.innerHTML = sorter.sorted(state.projects).map(...).join('');
+ *   sorter.attach();  // idempotent — 每次 render 後呼叫安全
+ *
+ * getters 約定:fn 回 number 走數值比較;否則 String + zh-Hant localeCompare;
+ *   '' / null / undefined 視為空值,asc/desc 都排尾(避免空值蓋掉資料)。
+ *   未匹配 sort key 的 getter 自動回空字串(同空值處理)。
+ *
+ * 進階:傳 `getValue: (item, key) => ...` 取代 `getters`,給需要 dynamic key 行為的場景。
+ */
+export function createSortable({ storageKey, defaultSort, panelId, getters, getValue, onChange }) {
+    const _getValue = getValue || ((item, k) => getters?.[k]?.(item) ?? '');
+    let _sort = (() => {
+        try {
+            const v = JSON.parse(localStorage.getItem(storageKey) || 'null');
+            if (v && typeof v.key === 'string' && (v.dir === 'asc' || v.dir === 'desc')) return v;
+        } catch (_) {}
+        return { ...defaultSort };
+    })();
+
+    const _save = () => {
+        try { localStorage.setItem(storageKey, JSON.stringify(_sort)); } catch (_) {}
+    };
+
+    const _setSort = (key) => {
+        _sort = (_sort.key === key)
+            ? { key, dir: _sort.dir === 'asc' ? 'desc' : 'asc' }
+            : { key, dir: 'asc' };
+        _save();
+        onChange?.();
+    };
+
+    const _isEmpty = (v) => v === '' || v == null;
+    const sorted = (items) => {
+        const sign = _sort.dir === 'desc' ? -1 : 1;
+        // copy first — caller 的原陣列保留輸入順序(下游可能也要用)
+        return [...items].sort((a, b) => {
+            const va = _getValue(a, _sort.key);
+            const vb = _getValue(b, _sort.key);
+            const ae = _isEmpty(va), be = _isEmpty(vb);
+            // 空值永遠排尾(populated 先,跟方向無關 — 避免 desc 時空值跑到頂遮資料)
+            if (ae !== be) return ae ? 1 : -1;
+            if (ae) return 0;
+            if (typeof va === 'number' && typeof vb === 'number') return (va - vb) * sign;
+            return String(va).localeCompare(String(vb), 'zh-Hant') * sign;
+        });
+    };
+
+    const attach = () => {
+        const panel = document.getElementById(panelId);
+        if (!panel) return;
+        panel.querySelectorAll('.crm-list-header [data-sort-key]').forEach(el => {
+            const k = el.dataset.sortKey;
+            // 用 dataset flag 避免重複 bind(每次 render 後 caller 都呼叫 attach,header 元素不變但 onclick 不能重疊)
+            if (!el.dataset.sortBound) {
+                el.addEventListener('click', () => _setSort(k));
+                el.dataset.sortBound = '1';
+            }
+            const ind = el.querySelector('.crm-sort-ind');
+            if (ind) {
+                if (k === _sort.key) {
+                    ind.textContent = _sort.dir === 'asc' ? '▴' : '▾';
+                    el.classList.add('crm-sort-active');
+                } else {
+                    ind.textContent = '↕';
+                    el.classList.remove('crm-sort-active');
+                }
+            }
+        });
+    };
+
+    return { sorted, attach, setSort: _setSort };
+}
+

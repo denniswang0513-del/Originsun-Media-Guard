@@ -1,7 +1,7 @@
 /**
  * crm-invoices.js — 帳務管理 Tab
  */
-import { crmFetch as _fetch, crmCacheFetch, esc as _esc, fmtNum as _fmtNum, setupResizeHandle, enableInlineEdit, addEditButton, kebabMenuHtml } from './crm-utils.js';
+import { crmFetch as _fetch, crmCacheFetch, esc as _esc, fmtNum as _fmtNum, setupResizeHandle, enableInlineEdit, addEditButton, kebabMenuHtml, createSortable, enumIndex } from './crm-utils.js';
 
 let _invoices = [];
 let _projects = [];
@@ -86,14 +86,34 @@ function _statusBadge(status) {
     return `<span class="crm-badge crm-pay-badge-付款">${_esc(status || '開立中')}</span>`;
 }
 
+// 開立中 → 已開立 → 作廢:工作流順序,asc 把待處理(開立中)排前面
+const _INV_STATUS_ORDER = ['開立中', '已開立', '作廢'];
+const _sorter = createSortable({
+    storageKey: 'crm_invoices_sort',
+    defaultSort: { key: 'date', dir: 'desc' },
+    panelId: 'inv-list-panel',
+    onChange: () => renderList(),
+    getters: {
+        date:     i => i.invoice_date || '',
+        title:    i => (i.title || '').toLowerCase(),
+        amount:   i => i.amount_total || 0,
+        company:  i => (i.company_name || '').toLowerCase(),
+        tax_id:   i => (i.tax_id || '').toLowerCase(),
+        item:     i => (i.item_type || '').toLowerCase(),
+        category: i => (i.category || '').toLowerCase(),
+        status:   i => enumIndex(_INV_STATUS_ORDER, i.issue_status, '開立中'),
+    },
+});
+
 function renderList() {
     const body = document.getElementById('inv-list-body');
     if (!body) return;
+    _sorter.attach();
     if (_invoices.length === 0) {
         body.innerHTML = `<div class="crm-empty">尚無發票${_filters.q ? '，請調整搜尋' : ''}</div>`;
         return;
     }
-    body.innerHTML = _invoices.map(inv => `
+    body.innerHTML = _sorter.sorted(_invoices).map(inv => `
         <div class="crm-row${inv.id === _selectedId ? ' selected' : ''}" onclick="window._invSelect('${inv.id}')">
             <div class="crm-row-date">${inv.invoice_date ? inv.invoice_date.substring(0, 10) : '—'}</div>
             <div class="crm-row-name">${_esc(inv.title)}</div>

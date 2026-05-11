@@ -1,7 +1,7 @@
 /**
  * crm-receivables.js — 應收帳款子視圖
  */
-import { crmFetch as _fetch, esc as _esc, fmtNum as _fmtNum, setupResizeHandle } from './crm-utils.js';
+import { crmFetch as _fetch, esc as _esc, fmtNum as _fmtNum, setupResizeHandle, createSortable } from './crm-utils.js';
 
 let _clients = [];
 let _selectedName = null;
@@ -24,15 +24,31 @@ async function loadReceivables() {
     }
 }
 
+// `c.items` 預期非空(API 過濾過 ≥1 張未收發票),空時 _maxDays 回 0
+const _maxDays = (c) => Math.max(0, ...c.items.map(it => it.days_since_issued || 0));
+const _sorter = createSortable({
+    storageKey: 'crm_receivables_sort',
+    defaultSort: { key: 'days', dir: 'desc' },
+    panelId: 'recv-list-panel',
+    onChange: () => renderList(),
+    getters: {
+        client: c => (c.company_name || '').toLowerCase(),
+        amount: c => c.total_amount || 0,
+        count:  c => c.items?.length || 0,
+        days:   c => _maxDays(c),
+    },
+});
+
 function renderList() {
     const body = document.getElementById('recv-list-body');
     if (!body) return;
+    _sorter.attach();
     if (_clients.length === 0) {
         body.innerHTML = '<div class="crm-empty">無應收帳款</div>';
         return;
     }
-    body.innerHTML = _clients.map(c => {
-        const maxDays = Math.max(0, ...c.items.map(it => it.days_since_issued || 0));
+    body.innerHTML = _sorter.sorted(_clients).map(c => {
+        const maxDays = _maxDays(c);
         const daysColor = maxDays > 60 ? '#ef4444' : maxDays > 30 ? '#fbbf24' : '#9ca3af';
         return `
         <div class="crm-row${c.company_name === _selectedName ? ' selected' : ''}" onclick="window._recvSelect('${_esc(c.company_name)}')">

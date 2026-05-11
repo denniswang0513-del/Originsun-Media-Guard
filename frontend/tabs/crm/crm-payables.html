@@ -14,12 +14,12 @@
 
 <!-- Body: list + detail -->
 <div class="crm-body">
-  <div class="crm-list-panel">
+  <div class="crm-list-panel" id="payable-list-panel">
     <div class="crm-list-header acct-header">
-      <span>收款人</span>
-      <span>應付金額</span>
-      <span>銀行帳號</span>
-      <span>狀態</span>
+      <span data-sort-key="payee">收款人 <span class="crm-sort-ind">↕</span></span>
+      <span data-sort-key="amount">應付金額 <span class="crm-sort-ind">↕</span></span>
+      <span data-sort-key="bank">銀行帳號 <span class="crm-sort-ind">↕</span></span>
+      <span data-sort-key="status">狀態 <span class="crm-sort-ind">↕</span></span>
     </div>
     <div id="payable-list-body"><div class="crm-empty">載入中...</div></div>
   </div>

@@ -2,7 +2,7 @@
  * crm-staff.js — 人力資源 Tab
  */
 
-import { crmFetch as _fetch, esc as _esc, fmtNum as _fmtNum, setupResizeHandle, enableInlineEdit, addEditButton, kebabMenuHtml, saveSettings } from './crm-utils.js';
+import { crmFetch as _fetch, esc as _esc, fmtNum as _fmtNum, setupResizeHandle, enableInlineEdit, addEditButton, kebabMenuHtml, saveSettings, createSortable } from './crm-utils.js';
 
 let _staff = [];
 let _selectedId = null;
@@ -38,19 +38,28 @@ function _sBadge(status) {
 
 const _STATUS_ORDER = { '在職': 0, '兼職': 1, '單位': 2, '專案': 3 };
 
+const _sorter = createSortable({
+    storageKey: 'crm_staff_sort',
+    defaultSort: { key: 'status', dir: 'asc' },
+    panelId: 'staff-list-panel',
+    onChange: () => renderList(),
+    getters: {
+        name:   s => (s.name || '').toLowerCase(),
+        role:   s => (s.role || '').toLowerCase(),
+        status: s => _STATUS_ORDER[s.status] ?? 9,
+        phone:  s => (s.phone || ''),
+    },
+});
+
 function renderList() {
     const body = document.getElementById('staff-list-body');
     if (!body) return;
+    _sorter.attach();
     if (_staff.length === 0) {
         body.innerHTML = `<div class="crm-empty">尚無人員${_filters.q ? '，請調整搜尋' : ''}</div>`;
         return;
     }
-    const sorted = [..._staff].sort((a, b) => {
-        const sa = _STATUS_ORDER[a.status] ?? 9;
-        const sb = _STATUS_ORDER[b.status] ?? 9;
-        return sa !== sb ? sa - sb : (a.name || '').localeCompare(b.name || '', 'zh-TW');
-    });
-    body.innerHTML = sorted.map(s => `
+    body.innerHTML = _sorter.sorted(_staff).map(s => `
         <div class="crm-row${s.id === _selectedId ? ' selected' : ''}" onclick="window._staffSelect('${s.id}')">
             <div class="crm-row-name">${_esc(s.name)}</div>
             <div class="crm-row-role">${_esc(s.role)}</div>

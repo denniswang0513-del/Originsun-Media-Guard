@@ -13,12 +13,12 @@
 
 <!-- Body: list + detail -->
 <div class="crm-body">
-  <div class="crm-list-panel">
+  <div class="crm-list-panel" id="recv-list-panel">
     <div class="crm-list-header acct-header">
-      <span>客戶</span>
-      <span>應收金額</span>
-      <span>發票數</span>
-      <span>最久天數</span>
+      <span data-sort-key="client">客戶 <span class="crm-sort-ind">↕</span></span>
+      <span data-sort-key="amount">應收金額 <span class="crm-sort-ind">↕</span></span>
+      <span data-sort-key="count">發票數 <span class="crm-sort-ind">↕</span></span>
+      <span data-sort-key="days">最久天數 <span class="crm-sort-ind">↕</span></span>
     </div>
     <div id="recv-list-body"><div class="crm-empty">載入中...</div></div>
   </div>

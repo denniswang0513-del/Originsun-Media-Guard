@@ -2,7 +2,7 @@
  * crm-quotes.js — 報價管理 Tab
  */
 
-import { crmFetch as _fetch, esc as _esc, populateClientSelect, fmtNum as _fmtNum, setupResizeHandle, enableInlineEdit, addEditButton, kebabMenuHtml } from './crm-utils.js';
+import { crmFetch as _fetch, esc as _esc, populateClientSelect, fmtNum as _fmtNum, setupResizeHandle, enableInlineEdit, addEditButton, kebabMenuHtml, createSortable, enumIndex } from './crm-utils.js';
 
 // ── State ────────────────────────────────────────────────────
 
@@ -81,14 +81,30 @@ function _qBadge(status) {
     return `<span class="${cls}">${_esc(s)}</span>`;
 }
 
+// _QUOTE_STATUSES 已定義在上面 — 工作流順序:草稿→已寄送→已簽核→已拒絕
+const _sorter = createSortable({
+    storageKey: 'crm_quotes_sort',
+    defaultSort: { key: 'date', dir: 'desc' },
+    panelId: 'quote-list-panel',
+    onChange: () => renderList(),
+    getters: {
+        name:   q => `${q.project_name || ''}-v${q.version || 0}`.toLowerCase(),
+        client: q => (q.client_short_name || q.project_name || '').toLowerCase(),
+        status: q => enumIndex(_QUOTE_STATUSES, q.status, '草稿'),
+        amount: q => q.final_price ?? q.total ?? 0,
+        date:   q => q.quote_date || '',
+    },
+});
+
 function renderList() {
     const body = document.getElementById('quote-list-body');
     if (!body) return;
+    _sorter.attach();
     if (_quotations.length === 0) {
         body.innerHTML = `<div class="crm-empty">尚無報價單${_filters.q ? '，請調整搜尋條件' : ''}</div>`;
         return;
     }
-    body.innerHTML = _quotations.map(q => {
+    body.innerHTML = _sorter.sorted(_quotations).map(q => {
         const price = q.final_price !== null && q.final_price !== undefined ? q.final_price : q.total;
         return `
         <div class="crm-row${q.id === _selectedId ? ' selected' : ''}" onclick="window._quoteSelect('${q.id}')">

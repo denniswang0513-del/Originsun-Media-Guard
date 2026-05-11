@@ -1,8 +1,25 @@
 /**
  * crm-projects-core.js — 列表 + CRUD Modal + CSV 匯入
  */
-import { crmFetch as _fetch, crmCacheFetch, crmCacheInvalidate, esc as _esc, renderAvatar, populateClientSelect, searchableSelect, saveSettings, kebabMenuHtml } from './crm-utils.js';
-import { state, callbacks } from './crm-projects-state.js';
+import { crmFetch as _fetch, crmCacheFetch, crmCacheInvalidate, esc as _esc, renderAvatar, populateClientSelect, searchableSelect, saveSettings, kebabMenuHtml, createSortable, enumIndex } from './crm-utils.js';
+import { state, callbacks, STATUS_ORDER } from './crm-projects-state.js';
+
+// ── Sortable list ──────────────────────────────────────────
+// 狀態走 STATUS_ORDER index(工作流順序);其他欄轉小寫做中文 localeCompare;
+// 空值由 createSortable 內部統一排尾。
+const _sorter = createSortable({
+    storageKey: 'crm_projects_sort',
+    defaultSort: { key: 'status', dir: 'asc' },
+    panelId: 'proj-list-panel',
+    onChange: () => renderList(),
+    getters: {
+        status: p => enumIndex(STATUS_ORDER, p.status, '洽談中'),
+        name:   p => (p.name || '').toLowerCase(),
+        client: p => (p.client_short_name || '').toLowerCase(),
+        am:     p => (p.am_username || '').toLowerCase(),
+        date:   p => p.start_date || '',
+    },
+});
 
 // ── Project Types (dynamic from settings) ─────────────────
 const _DEFAULT_TYPES = ['紀實影片', '活動紀實', '形象影片', '廣告', 'MV'];
@@ -234,6 +251,8 @@ export function renderList() {
     const body = document.getElementById('proj-list-body');
     if (!body) return;
 
+    _sorter.attach();  // idempotent;每次 render 後重新整 indicator + 確保 onclick 綁好
+
     if (state.projects.length === 0) {
         if (!state.projectsLoaded) {
             body.innerHTML = `<div class="crm-empty">載入中…</div>`;
@@ -243,7 +262,7 @@ export function renderList() {
         return;
     }
 
-    body.innerHTML = state.projects.map(p => `
+    body.innerHTML = _sorter.sorted(state.projects).map(p => `
         <div class="crm-row${p.id === state.selectedId ? ' selected' : ''}" data-id="${p.id}" onclick="window._projSelect('${p.id}')">
             <div class="crm-row-name">${_esc(p.name)}</div>
             <div class="crm-row-client">${_esc(p.client_short_name)}</div>
