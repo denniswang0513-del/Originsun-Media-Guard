@@ -1,5 +1,5 @@
 {
-  "version": "1.10.132",
-  "build_date": "2026-05-07",
-  "notes": "對外網站精選 假性空 build 修復 + NAS website-api DB 卡死自我修復(60s) + 作品 title/client source-of-truth 改 CRM(public_* 為 SEO 覆寫)+ showcase-edit 分類標籤改手動儲存"
+  "version": "1.10.133",
+  "build_date": "2026-05-11",
+  "notes": "9 個 CRM list 共用 createSortable 排序 helper(點欄頭 + localStorage)+ enumIndex 收斂工作流查表"
 }
