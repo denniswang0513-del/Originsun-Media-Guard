@@ -35,7 +35,7 @@ const HEALTH_RULES = [
       help: '在「2️⃣ Quick Facts」新增成立年/地點/規模等基本事實' },
     { id: 'awards',      label: '獎項紀錄已建立（站級榮譽）',
       check: s => s.awards.some(a => a.visible),
-      help: '在「🏆 獎項紀錄」新增至少 1 筆並設為可見，會顯示在 /portfolio 頁面頂部' },
+      help: '在「🏆 獎項紀錄」子視圖新增至少 1 筆並設為可見，會顯示在 /portfolio 頁面頂部' },
     { id: 'sitemap',     label: 'sitemap.xml 已自動生成',
       check: () => true,    // @astrojs/sitemap 已裝
       help: '' },
@@ -96,7 +96,6 @@ function _renderAll() {
             ${_cardQuickFacts()}
             ${_cardFAQ()}
             ${_cardTestimonials()}
-            ${_cardAwards()}
             ${_cardServicesHint()}
             ${_cardLlmsTxt()}
             ${_cardHealth()}
@@ -395,73 +394,6 @@ function _cardTestimonials() {
 }
 
 
-// ===== 4.5 Awards（站級獎項紀錄）=====
-const _AWARD_LEVELS = ['獲獎', '入圍'];
-
-function _levelOptions(selected) {
-    return _AWARD_LEVELS.map(l =>
-        `<option value="${l}" ${l === selected ? 'selected' : ''}>${l}</option>`
-    ).join('');
-}
-
-function _cardAwards() {
-    let visibleCount = 0, winCount = 0, nomCount = 0;
-    for (const a of _state.awards) {
-        if (!a.visible) continue;
-        visibleCount++;
-        if (a.level === '獲獎') winCount++;
-        else if (a.level === '入圍') nomCount++;
-    }
-    const rows = _state.awards.map(a => `
-        <tr>
-            <td><input type="number" data-id="${a.id}" data-field="year" value="${a.year}" style="width:70px;" /></td>
-            <td><input data-id="${a.id}" data-field="name_zh" value="${esc(a.name_zh)}" style="width:100%;" placeholder="獎項名稱" /></td>
-            <td><input data-id="${a.id}" data-field="category" value="${esc(a.category || '')}" style="width:100%;" placeholder="類別" /></td>
-            <td>
-                <select data-id="${a.id}" data-field="level" style="width:100%;">${_levelOptions(a.level)}</select>
-            </td>
-            <td><input data-id="${a.id}" data-field="work_title" value="${esc(a.work_title || '')}" style="width:100%;" placeholder="作品" /></td>
-            <td><input data-id="${a.id}" data-field="recipient" value="${esc(a.recipient || '')}" style="width:100%;" placeholder="得獎人" /></td>
-            <td><input data-id="${a.id}" data-field="org" value="${esc(a.org || '')}" style="width:100%;" placeholder="頒獎單位" /></td>
-            <td><input type="number" data-id="${a.id}" data-field="sort_order" value="${a.sort_order}" style="width:55px;" /></td>
-            <td style="text-align:center;"><input type="checkbox" data-id="${a.id}" data-field="visible" ${a.visible ? 'checked' : ''} /></td>
-            <td style="text-align:right;white-space:nowrap;">
-                <button class="btn btn-sm" onclick="window._seo.saveAward(${a.id})">💾</button>
-                <button class="btn btn-sm btn-danger" onclick="window._seo.deleteAward(${a.id})">🗑</button>
-            </td>
-        </tr>
-    `).join('');
-    return `<div class="card" style="border-left:3px solid #c8a45c;">
-        <h3 style="color:#fff;margin:0 0 8px;font-size:15px;">🏆 獎項紀錄
-            <span style="color:#888;font-size:11px;font-weight:400;">· ${visibleCount} 筆顯示中 · 獲獎 ${winCount} / 入圍 ${nomCount} · /portfolio 頁面頂部顯示</span>
-        </h3>
-        <div style="display:grid;grid-template-columns:70px 1.3fr 1fr 75px 1.3fr 1fr 1fr 55px auto;gap:6px;margin-bottom:8px;align-items:end;">
-            <div><label style="color:#888;font-size:11px;">年份</label>
-                <input id="aw-new-year" type="number" min="1900" max="2100" placeholder="2024" style="width:100%;" /></div>
-            <div><label style="color:#888;font-size:11px;">獎項名稱 *</label>
-                <input id="aw-new-name" type="text" placeholder="第 60 屆金鐘獎" style="width:100%;" /></div>
-            <div><label style="color:#888;font-size:11px;">類別</label>
-                <input id="aw-new-cat" type="text" placeholder="商業類" style="width:100%;" /></div>
-            <div><label style="color:#888;font-size:11px;">等級</label>
-                <select id="aw-new-level" style="width:100%;">${_levelOptions('獲獎')}</select></div>
-            <div><label style="color:#888;font-size:11px;">作品</label>
-                <input id="aw-new-work" type="text" placeholder="《父親的後座》" style="width:100%;" /></div>
-            <div><label style="color:#888;font-size:11px;">得獎人</label>
-                <input id="aw-new-recipient" type="text" placeholder="王小明（導演）" style="width:100%;" /></div>
-            <div><label style="color:#888;font-size:11px;">頒獎單位</label>
-                <input id="aw-new-org" type="text" placeholder="文化部影視局" style="width:100%;" /></div>
-            <div><label style="color:#888;font-size:11px;">排序</label>
-                <input id="aw-new-sort" type="number" value="0" style="width:100%;" /></div>
-            <button class="btn" onclick="window._seo.createAward()">+ 新增</button>
-        </div>
-        <table>
-            <thead><tr><th style="width:70px;">年份</th><th>獎項</th><th>類別</th><th style="width:75px;">等級</th><th>作品</th><th>得獎人</th><th>頒獎單位</th><th style="width:55px;">排序</th><th style="width:50px;">顯示</th><th></th></tr></thead>
-            <tbody>${rows || emptyRow(10, '尚無獎項，新增上方第一筆')}</tbody>
-        </table>
-    </div>`;
-}
-
-
 // ===== 5. Services hint =====
 function _cardServicesHint() {
     return `<div class="card" style="border-left:3px solid #ec4899;">
@@ -694,51 +626,6 @@ _seo.deleteT = async (id) => {
     try {
         await websiteFetch(`/api/website/admin/testimonials/${id}`, { method: 'DELETE' });
         _state.testimonials = _state.testimonials.filter(t => t.id !== id);
-        toastOk('已刪除');
-        _renderAll();
-    } catch (e) { toastErr(e.message); }
-};
-
-
-// Card 4.5：Awards
-_seo.createAward = async () => {
-    const body = {
-        year: Number(document.getElementById('aw-new-year').value || 0),
-        name_zh: document.getElementById('aw-new-name').value.trim(),
-        category: document.getElementById('aw-new-cat').value.trim() || null,
-        level: document.getElementById('aw-new-level').value,
-        work_title: document.getElementById('aw-new-work').value.trim() || null,
-        recipient: document.getElementById('aw-new-recipient').value.trim() || null,
-        org: document.getElementById('aw-new-org').value.trim() || null,
-        sort_order: Number(document.getElementById('aw-new-sort').value || 0),
-        visible: true,
-    };
-    if (!body.name_zh) { toastErr('獎項名稱必填'); return; }
-    if (!body.year || body.year < 1900 || body.year > 2100) { toastErr('請填入有效年份'); return; }
-    try {
-        const created = await websiteFetch('/api/website/admin/awards', { method: 'POST', body });
-        _state.awards.push(created);
-        toastOk('已新增獎項');
-        _renderAll();
-    } catch (e) { toastErr(e.message); }
-};
-
-_seo.saveAward = async (id) => {
-    try {
-        const updated = await websiteFetch(`/api/website/admin/awards/${id}`, {
-            method: 'PUT', body: readRowPatch('.card [data-id]', id),
-        });
-        const idx = _state.awards.findIndex(a => a.id === id);
-        if (idx >= 0) _state.awards[idx] = updated;
-        toastOk('已更新');
-    } catch (e) { toastErr(e.message); }
-};
-
-_seo.deleteAward = async (id) => {
-    if (!confirm('確定刪除此獎項？')) return;
-    try {
-        await websiteFetch(`/api/website/admin/awards/${id}`, { method: 'DELETE' });
-        _state.awards = _state.awards.filter(a => a.id !== id);
         toastOk('已刪除');
         _renderAll();
     } catch (e) { toastErr(e.message); }
