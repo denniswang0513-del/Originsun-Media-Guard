@@ -99,65 +99,66 @@ const seo = buildBasicPageSeo(Astro, {
     </section>
 
     {hasAwards && (
-        <section class="bg-white pb-14">
+        <section class="bg-white pb-20">
             <div class="max-w-3xl mx-auto px-4 sm:px-6 lg:px-8">
-                <div class="mb-6">
-                    <p class="text-xs tracking-[0.4em] text-neutral-500 uppercase mb-2">Honors &amp; Awards</p>
-                    <div class="h-px bg-neutral-200"></div>
+                <div class="flex items-baseline justify-between mb-8 pb-4 border-b border-neutral-900">
+                    <p class="text-xs tracking-[0.4em] text-neutral-900 uppercase">Honors &amp; Awards</p>
+                    <p class="text-[11px] tracking-[0.2em] uppercase text-neutral-400">
+                        {winCount > 0 && <span>{winCount} Won</span>}
+                        {winCount > 0 && nomCount > 0 && <span class="mx-2 text-neutral-300">/</span>}
+                        {nomCount > 0 && <span>{nomCount} Nominated</span>}
+                    </p>
                 </div>
-                <ul class="space-y-3">
+                <ul class="divide-y divide-neutral-200">
                     {sortedAwards.map(a => {
                         const isWin = a.level === "獲獎";
                         return (
-                            <li class="group border border-neutral-200 hover:border-[#c9372c] transition-colors overflow-hidden">
-                                <div class="flex items-stretch gap-0">
-                                    {a.cert_url && (
-                                        <a href={a.cert_url} target="_blank" rel="noopener"
-                                           class="flex-shrink-0 block w-32 sm:w-48 self-stretch bg-neutral-100 overflow-hidden hover:opacity-90 transition-opacity"
-                                           title={`${a.work_title || a.name_zh} 作品圖`}>
-                                            <img src={a.cert_url} alt={`${a.work_title || a.name_zh} 作品圖`}
-                                                 loading="lazy"
-                                                 class="w-full h-full object-cover" />
-                                        </a>
-                                    )}
-                                    <div class="flex-1 min-w-0 p-5 flex items-start gap-4">
-                                        <div class="flex-shrink-0 w-14 text-2xl font-bold tracking-tight text-[#c9372c] leading-none pt-1">
-                                            {a.year}
-                                        </div>
-                                        <div class="flex-1 min-w-0">
-                                            <div class="flex items-center gap-3 flex-wrap mb-1.5">
-                                                <span class={`inline-block text-[10px] tracking-[0.2em] uppercase px-2 py-1 ${
-                                                    isWin
-                                                        ? "bg-[#c8a45c] text-white"
-                                                        : "bg-neutral-200 text-neutral-700"
-                                                }`}>
-                                                    {a.level}
-                                                </span>
-                                                <span class="text-[15px] font-medium text-neutral-900 tracking-wide">
-                                                    {a.name_zh}
-                                                    {a.category && (
-                                                        <span class="text-neutral-500 font-normal"> · {a.category}</span>
-                                                    )}
-                                                </span>
-                                            </div>
-                                            {(a.work_title || a.recipient) && (
-                                                <div class="text-sm text-neutral-700 tracking-wide">
-                                                    {a.work_title}
-                                                    {a.work_title && a.recipient && (
-                                                        <span class="text-neutral-400 mx-2">·</span>
-                                                    )}
-                                                    {a.recipient && (
-                                                        <span class="text-neutral-500">{a.recipient}</span>
-                                                    )}
-                                                </div>
-                                            )}
-                                            {a.org && (
-                                                <div class="mt-1 text-xs text-neutral-500 tracking-wider">
-                                                    {a.org}
-                                                </div>
-                                            )}
-                                        </div>
+                            <li class="group grid sm:grid-cols-[240px_1fr] gap-5 sm:gap-10 py-8 first:pt-2">
+                                {a.cert_url ? (
+                                    <a href={a.cert_url} target="_blank" rel="noopener"
+                                       class="block aspect-[16/9] bg-neutral-100 overflow-hidden"
+                                       title={`${a.work_title || a.name_zh} 作品圖`}>
+                                        <img src={a.cert_url} alt={`${a.work_title || a.name_zh} 作品圖`}
+                                             loading="lazy"
+                                             class="w-full h-full object-cover transition-transform duration-700 group-hover:scale-[1.03]" />
+                                    </a>
+                                ) : (
+                                    <div class="hidden sm:block"></div>
+                                )}
+                                <div class="flex flex-col min-w-0">
+                                    <div class="flex items-baseline gap-3 mb-3">
+                                        <span class="text-sm font-medium tracking-[0.1em] text-[#c9372c]">{a.year}</span>
+                                        <span class="text-neutral-300 text-xs">·</span>
+                                        <span class={`text-[11px] tracking-[0.3em] uppercase font-medium ${
+                                            isWin ? "text-[#c8a45c]" : "text-neutral-500"
+                                        }`}>
+                                            {a.level}
+                                        </span>
                                     </div>
+                                    <h3 class="text-xl sm:text-2xl font-light tracking-tight text-neutral-900 leading-snug mb-1.5">
+                                        {a.name_zh}
+                                    </h3>
+                                    {a.category && (
+                                        <p class="text-sm text-neutral-500 tracking-wide mb-4">{a.category}</p>
+                                    )}
+                                    {(a.work_title || a.recipient) && (
+                                        <div class="text-[15px] tracking-wide leading-relaxed">
+                                            {a.work_title && (
+                                                <span class="text-neutral-900 font-medium">{a.work_title}</span>
+                                            )}
+                                            {a.work_title && a.recipient && (
+                                                <span class="text-neutral-300 mx-2">·</span>
+                                            )}
+                                            {a.recipient && (
+                                                <span class="text-neutral-600">{a.recipient}</span>
+                                            )}
+                                        </div>
+                                    )}
+                                    {a.org && (
+                                        <p class="mt-auto pt-4 text-[11px] uppercase tracking-[0.2em] text-neutral-400">
+                                            {a.org}
+                                        </p>
+                                    )}
                                 </div>
                             </li>
                         );
