@@ -109,51 +109,55 @@ const seo = buildBasicPageSeo(Astro, {
                     {sortedAwards.map(a => {
                         const isWin = a.level === "獲獎";
                         return (
-                            <li class="group border border-neutral-200 hover:border-[#c9372c] transition-colors p-5">
-                                <div class="flex items-start gap-4">
-                                    <div class="flex-shrink-0 w-16 text-2xl font-bold tracking-tight text-[#c9372c] leading-none pt-1">
-                                        {a.year}
-                                    </div>
-                                    <div class="flex-1 min-w-0">
-                                        <div class="flex items-center gap-3 flex-wrap mb-1.5">
-                                            <span class={`inline-block text-[10px] tracking-[0.2em] uppercase px-2 py-1 ${
-                                                isWin
-                                                    ? "bg-[#c8a45c] text-white"
-                                                    : "bg-neutral-200 text-neutral-700"
-                                            }`}>
-                                                {a.level}
-                                            </span>
-                                            <span class="text-[15px] font-medium text-neutral-900 tracking-wide">
-                                                {a.name_zh}
-                                                {a.category && (
-                                                    <span class="text-neutral-500 font-normal"> · {a.category}</span>
-                                                )}
-                                            </span>
-                                        </div>
-                                        {(a.work_title || a.recipient) && (
-                                            <div class="text-sm text-neutral-700 tracking-wide">
-                                                {a.work_title}
-                                                {a.work_title && a.recipient && (
-                                                    <span class="text-neutral-400 mx-2">·</span>
-                                                )}
-                                                {a.recipient && (
-                                                    <span class="text-neutral-500">{a.recipient}</span>
-                                                )}
-                                            </div>
-                                        )}
-                                        {a.org && (
-                                            <div class="mt-1 text-xs text-neutral-500 tracking-wider">
-                                                {a.org}
-                                            </div>
-                                        )}
-                                    </div>
+                            <li class="group border border-neutral-200 hover:border-[#c9372c] transition-colors overflow-hidden">
+                                <div class="flex items-stretch gap-0">
                                     {a.cert_url && (
-                                        <a href={a.cert_url} target="_blank" rel="noopener" class="flex-shrink-0 block w-20 h-20 sm:w-24 sm:h-24 bg-neutral-100 overflow-hidden hover:opacity-90 transition-opacity"
-                                           title={`查看 ${a.name_zh} 證書/獎杯`}>
-                                            <img src={a.cert_url} alt={`${a.name_zh} 證書`} loading="lazy"
+                                        <a href={a.cert_url} target="_blank" rel="noopener"
+                                           class="flex-shrink-0 block w-32 sm:w-48 self-stretch bg-neutral-100 overflow-hidden hover:opacity-90 transition-opacity"
+                                           title={`${a.work_title || a.name_zh} 作品圖`}>
+                                            <img src={a.cert_url} alt={`${a.work_title || a.name_zh} 作品圖`}
+                                                 loading="lazy"
                                                  class="w-full h-full object-cover" />
                                         </a>
                                     )}
+                                    <div class="flex-1 min-w-0 p-5 flex items-start gap-4">
+                                        <div class="flex-shrink-0 w-14 text-2xl font-bold tracking-tight text-[#c9372c] leading-none pt-1">
+                                            {a.year}
+                                        </div>
+                                        <div class="flex-1 min-w-0">
+                                            <div class="flex items-center gap-3 flex-wrap mb-1.5">
+                                                <span class={`inline-block text-[10px] tracking-[0.2em] uppercase px-2 py-1 ${
+                                                    isWin
+                                                        ? "bg-[#c8a45c] text-white"
+                                                        : "bg-neutral-200 text-neutral-700"
+                                                }`}>
+                                                    {a.level}
+                                                </span>
+                                                <span class="text-[15px] font-medium text-neutral-900 tracking-wide">
+                                                    {a.name_zh}
+                                                    {a.category && (
+                                                        <span class="text-neutral-500 font-normal"> · {a.category}</span>
+                                                    )}
+                                                </span>
+                                            </div>
+                                            {(a.work_title || a.recipient) && (
+                                                <div class="text-sm text-neutral-700 tracking-wide">
+                                                    {a.work_title}
+                                                    {a.work_title && a.recipient && (
+                                                        <span class="text-neutral-400 mx-2">·</span>
+                                                    )}
+                                                    {a.recipient && (
+                                                        <span class="text-neutral-500">{a.recipient}</span>
+                                                    )}
+                                                </div>
+                                            )}
+                                            {a.org && (
+                                                <div class="mt-1 text-xs text-neutral-500 tracking-wider">
+                                                    {a.org}
+                                                </div>
+                                            )}
+                                        </div>
+                                    </div>
                                 </div>
                             </li>
                         );

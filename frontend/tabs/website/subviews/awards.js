@@ -43,7 +43,7 @@ function _renderAll() {
     }
     const rows = _awards.map(a => {
         const thumb = a.cert_url
-            ? `<a href="${esc(a.cert_url)}" target="_blank" rel="noopener" title="點擊看原圖" style="display:inline-block;"><img src="${esc(a.cert_url)}" style="width:42px;height:42px;object-fit:cover;border-radius:3px;background:#222;border:1px solid #333;" onerror="this.style.display='none';this.nextElementSibling.style.display='inline-block'" /><span style="display:none;color:#666;font-size:11px;">URL 失效</span></a>`
+            ? `<a href="${esc(a.cert_url)}" target="_blank" rel="noopener" title="點擊看原圖" style="display:inline-block;"><img src="${esc(a.cert_url)}" style="width:64px;height:36px;object-fit:cover;border-radius:3px;background:#222;border:1px solid #333;" onerror="this.style.display='none';this.nextElementSibling.style.display='inline-block'" /><span style="display:none;color:#666;font-size:11px;">URL 失效</span></a>`
             : '<span style="color:#444;font-size:11px;">—</span>';
         return `
         <tr>
@@ -94,11 +94,11 @@ function _renderAll() {
                 <button class="btn" onclick="window._awardsCreate()">+ 新增</button>
             </div>
             <div style="margin-bottom:12px;">
-                <label style="color:#888;font-size:11px;display:block;margin-bottom:3px;">證書 / 獎杯照片 URL（選填）</label>
-                <input id="aw-new-cert-url" type="url" placeholder="https://drive.google.com/... 或圖片直接連結（建議 JPG/PNG，會出現在 /portfolio 卡片上）" style="width:100%;" />
+                <label style="color:#888;font-size:11px;display:block;margin-bottom:3px;">🖼️ 作品圖 URL（選填，建議 16:9 橫式 JPG/PNG）</label>
+                <input id="aw-new-cert-url" type="url" placeholder="https://... 圖片直連 URL，會出現在 /portfolio 卡片上" style="width:100%;" />
             </div>
             <table>
-                <thead><tr><th style="width:70px;">年份</th><th>獎項</th><th>類別</th><th style="width:75px;">等級</th><th>作品</th><th>得獎人</th><th>頒獎單位</th><th style="width:50px;">照片</th><th style="min-width:160px;">照片 URL</th><th style="width:55px;">排序</th><th style="width:50px;">顯示</th><th></th></tr></thead>
+                <thead><tr><th style="width:70px;">年份</th><th>獎項</th><th>類別</th><th style="width:75px;">等級</th><th>作品</th><th>得獎人</th><th>頒獎單位</th><th style="width:70px;">作品圖</th><th style="min-width:160px;">圖片 URL</th><th style="width:55px;">排序</th><th style="width:50px;">顯示</th><th></th></tr></thead>
                 <tbody>${rows || emptyRow(12, '尚無獎項，新增上方第一筆')}</tbody>
             </table>
         </div>
