@@ -136,6 +136,13 @@ async def list_public_quick_facts(request: Request, session: AsyncSession = Depe
     return {"items": await seo_service.list_quick_facts(session, visible_only=True)}
 
 
+@router.get("/awards")
+async def list_public_awards(request: Request, session: AsyncSession = Depends(public_session)):
+    """站級獎項紀錄（visible=true）— /portfolio 頁面頂部「Honors & Awards」用。"""
+    rate_limit(request, max_per_minute=60)
+    return {"items": await seo_service.list_awards(session, visible_only=True)}
+
+
 @router.get("/credit_roles")
 async def list_public_credit_roles(request: Request, session: AsyncSession = Depends(public_session)):
     """對外可見的職位庫（visible=true）— Astro / showcase-edit.html 都會用。"""

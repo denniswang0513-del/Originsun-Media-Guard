@@ -285,6 +285,25 @@ _CREATE_TABLES: list[str] = [
         updated_at TIMESTAMPTZ DEFAULT NOW()
     )
     """,
+    # 站級獎項紀錄（公司榮譽，不綁特定作品 — work_title 是純文字）
+    """
+    CREATE TABLE IF NOT EXISTS website_awards (
+        id SERIAL PRIMARY KEY,
+        name_zh VARCHAR(200) NOT NULL,
+        name_en VARCHAR(200),
+        year INTEGER NOT NULL,
+        category VARCHAR(200),
+        org VARCHAR(200),
+        level VARCHAR(20) NOT NULL DEFAULT '獲獎',
+        work_title VARCHAR(300),
+        recipient VARCHAR(200),
+        cert_url VARCHAR(500),
+        sort_order INTEGER NOT NULL DEFAULT 0,
+        visible BOOLEAN NOT NULL DEFAULT TRUE,
+        created_at TIMESTAMPTZ DEFAULT NOW(),
+        updated_at TIMESTAMPTZ DEFAULT NOW()
+    )
+    """,
 ]
 
 _CREATE_INDEXES: list[str] = [
@@ -296,10 +315,12 @@ _CREATE_INDEXES: list[str] = [
     "CREATE INDEX IF NOT EXISTS idx_websvc_sort ON website_services (sort_order)",
     "CREATE INDEX IF NOT EXISTS idx_inq_status ON website_contact_inquiries (status)",
     "CREATE INDEX IF NOT EXISTS idx_inq_created ON website_contact_inquiries (created_at)",
-    # SEO 三表：visible+sort 經常一起查（公開端點 visible=true ORDER BY sort）
+    # SEO 四表（FAQ/Testimonial/QuickFact/Award）：visible+sort 經常一起查
+    # 公開端點都是 visible=true ORDER BY sort_order
     "CREATE INDEX IF NOT EXISTS idx_webfaq_visible_sort ON website_faqs (visible, sort_order)",
     "CREATE INDEX IF NOT EXISTS idx_webtst_visible_sort ON website_testimonials (visible, sort_order)",
     "CREATE INDEX IF NOT EXISTS idx_webqf_visible_sort ON website_quick_facts (visible, sort_order)",
+    "CREATE INDEX IF NOT EXISTS idx_award_visible_sort ON website_awards (visible, sort_order)",
     # 作品級 SEO：audit 端點頻繁查 needs_ai_review=true → 索引加速
     "CREATE INDEX IF NOT EXISTS idx_webprojseo_needs_review ON website_project_seo (needs_ai_review)",
     # Posts 公開查詢：WHERE status='published' AND published_at<=NOW() ORDER BY published_at DESC

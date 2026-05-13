@@ -1,9 +1,9 @@
 """db/models_website/seo.py
 ---
-SEO 內容資料表：站級 FAQ / Testimonial / QuickFact + 作品級 ProjectSeo。
+SEO 內容資料表：站級 FAQ / Testimonial / QuickFact / Award + 作品級 ProjectSeo。
 
-站級三表對應前端「🔍 SEO / AI SEO 管理」子視圖的 CRUD 卡片，輸出為 schema.org
-JSON-LD（FAQPage / Review / dl 條列事實）。
+站級四表對應前端「🔍 SEO / AI SEO 管理」子視圖的 CRUD 卡片，輸出為 schema.org
+JSON-LD（FAQPage / Review / dl 條列事實）或 /portfolio 頁面榮譽牆。
 
 作品級 WebsiteProjectSeo 是 1:1 擴充 crm_projects，存 AI/SEO 生成 pipeline 內容
 （seo_title / seo_description / keywords / narrative_long / key_facts / faqs）+
@@ -57,6 +57,30 @@ class WebsiteQuickFact(Base):
     label_zh = Column(String(100), nullable=False)
     label_en = Column(String(100))
     value = Column(String(300), nullable=False)
+    sort_order = Column(Integer, nullable=False, default=0)
+    visible = Column(Boolean, nullable=False, default=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+
+class WebsiteAward(Base):
+    """站級獎項紀錄（公司榮譽，不綁特定作品）。
+
+    對應 /portfolio 頁面頂部「Honors & Awards」區塊。work_title 用純文字而非 FK
+    （pre-CRM 老作品也能登錄），level 用 String 而非 Enum（未來想加金/銀/銅獎不用 migration）。
+    """
+    __tablename__ = "website_awards"
+
+    id = Column(Integer, primary_key=True)
+    name_zh = Column(String(200), nullable=False)
+    name_en = Column(String(200))
+    year = Column(Integer, nullable=False)
+    category = Column(String(200))
+    org = Column(String(200))
+    level = Column(String(20), nullable=False, default="獲獎")
+    work_title = Column(String(300))
+    recipient = Column(String(200))
+    cert_url = Column(String(500))
     sort_order = Column(Integer, nullable=False, default=0)
     visible = Column(Boolean, nullable=False, default=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())

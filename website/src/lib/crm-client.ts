@@ -17,7 +17,7 @@ import type {
 import type { ICategory } from "../types/category";
 import type { IService } from "../types/service";
 import type { ITeamMember, IWebsiteMeta } from "../types/meta";
-import type { IFAQ, ITestimonial, IQuickFact } from "../types/seo";
+import type { IFAQ, ITestimonial, IQuickFact, IAward } from "../types/seo";
 
 
 async function _get<T>(path: string): Promise<T> {
@@ -156,6 +156,9 @@ export const fetchTestimonials = _memoizeList<ITestimonial>(() =>
 
 export const fetchQuickFacts = _memoizeList<IQuickFact>(() =>
     _safeGet<{ items: IQuickFact[] }>("/api/website/quick_facts", { items: [] }, "fetchQuickFacts"));
+
+export const fetchAwards = _memoizeList<IAward>(() =>
+    _safeGet<{ items: IAward[] }>("/api/website/awards", { items: [] }, "fetchAwards"));
 
 
 // ── Blog Posts (DB-as-truth；取代舊 src/content/posts.json) ──

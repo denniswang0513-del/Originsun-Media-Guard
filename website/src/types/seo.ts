@@ -76,3 +76,20 @@ export interface IQuickFact {
     sort_order: number;
     visible: boolean;
 }
+
+export type AwardLevel = "獲獎" | "入圍";
+
+export interface IAward {
+    id: number;
+    name_zh: string;
+    name_en: string | null;
+    year: number;
+    category: string | null;
+    org: string | null;
+    level: AwardLevel;
+    work_title: string | null;
+    recipient: string | null;
+    cert_url: string | null;
+    sort_order: number;
+    visible: boolean;
+}

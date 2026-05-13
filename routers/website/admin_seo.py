@@ -15,6 +15,7 @@ from core.schemas_website import (
     WebsiteFAQCreate, WebsiteFAQUpdate,
     WebsiteTestimonialCreate, WebsiteTestimonialUpdate,
     WebsiteQuickFactCreate, WebsiteQuickFactUpdate,
+    WebsiteAwardCreate, WebsiteAwardUpdate,
     ProjectSeoUpdate,
 )
 from services.website import rebuild_service, seo_service
@@ -55,6 +56,18 @@ register_crud(
     delete_fn=seo_service.delete_quick_fact,
     create_schema=WebsiteQuickFactCreate,
     update_schema=WebsiteQuickFactUpdate,
+    on_change=rebuild_service.mark_dirty,
+)
+
+register_crud(
+    router,
+    prefix="awards", name="Award",
+    list_fn=seo_service.list_awards,
+    create_fn=seo_service.create_award,
+    update_fn=seo_service.update_award,
+    delete_fn=seo_service.delete_award,
+    create_schema=WebsiteAwardCreate,
+    update_schema=WebsiteAwardUpdate,
     on_change=rebuild_service.mark_dirty,
 )
 

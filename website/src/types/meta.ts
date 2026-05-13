@@ -35,6 +35,8 @@ export interface IWebsiteMeta {
     ai_allow?: boolean;
     // admin 自填的 llms.txt 內容；空則 /llms.txt endpoint 走自動生成
     llms_txt_body?: string;
+    // /portfolio 頁面頂部「下載作品集 PDF」按鈕連結；空則隱藏按鈕
+    portfolio_pdf_url?: string;
 }
 
 export interface ITeamMember {

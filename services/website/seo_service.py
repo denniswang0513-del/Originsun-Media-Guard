@@ -1,8 +1,8 @@
 """services/website/seo_service.py
 ---
-SEO 內容（FAQ / Testimonial / QuickFact）CRUD。
+SEO 內容（FAQ / Testimonial / QuickFact / Award）CRUD。
 
-3 個實體共用同一套 list/create/update/delete 模式 — 以 `_create/_update/_delete/_list`
+4 個實體共用同一套 list/create/update/delete 模式 — 以 `_create/_update/_delete/_list`
 泛型函式接受 model class，每實體只要 4 行 thin wrapper。
 """
 from __future__ import annotations
@@ -17,6 +17,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from db.models import CrmProject
 from db.models_website import (
     WebsiteFAQ, WebsiteTestimonial, WebsiteQuickFact, WebsiteProjectSeo,
+    WebsiteAward,
 )
 from . import _crud_base as _crud
 
@@ -108,6 +109,40 @@ async def update_quick_fact(session, item_id, data):
     return await _crud.update_item(session, WebsiteQuickFact, item_id, data, _quick_fact_to_dict)
 async def delete_quick_fact(session, item_id):
     return await _crud.delete_item(session, WebsiteQuickFact, item_id)
+
+
+# ── Award（站級獎項） ──
+def _award_to_dict(o: WebsiteAward) -> dict[str, Any]:
+    return {
+        "id": o.id,
+        "name_zh": o.name_zh,
+        "name_en": o.name_en,
+        "year": o.year,
+        "category": o.category,
+        "org": o.org,
+        "level": o.level,
+        "work_title": o.work_title,
+        "recipient": o.recipient,
+        "cert_url": o.cert_url,
+        "sort_order": o.sort_order,
+        "visible": o.visible,
+    }
+
+
+async def list_awards(session, visible_only=False):
+    return await _crud.list_items(session, WebsiteAward, _award_to_dict, visible_only=visible_only)
+
+
+async def create_award(session, data):
+    return await _crud.create_item(session, WebsiteAward, data, _award_to_dict)
+
+
+async def update_award(session, item_id, data):
+    return await _crud.update_item(session, WebsiteAward, item_id, data, _award_to_dict)
+
+
+async def delete_award(session, item_id):
+    return await _crud.delete_item(session, WebsiteAward, item_id)
 
 
 # ══════════════════════════════════════════════════════════

@@ -13,7 +13,10 @@ from .project_category import WebsiteProjectCategory
 from .setting import WebsiteSetting
 from .service import WebsiteService
 from .inquiry import WebsiteContactInquiry
-from .seo import WebsiteFAQ, WebsiteTestimonial, WebsiteQuickFact, WebsiteProjectSeo
+from .seo import (
+    WebsiteFAQ, WebsiteTestimonial, WebsiteQuickFact, WebsiteProjectSeo,
+    WebsiteAward,
+)
 from .post import WebsitePost, WebsitePostCategory, WebsitePostCategoryLink
 from .credit_role import WebsiteCreditRole
 from .credit_template import WebsiteCreditTemplate
@@ -33,4 +36,5 @@ __all__ = [
     "WebsitePostCategoryLink",
     "WebsiteCreditRole",
     "WebsiteCreditTemplate",
+    "WebsiteAward",
 ]

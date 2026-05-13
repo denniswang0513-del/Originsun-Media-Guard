@@ -418,6 +418,56 @@ class WebsiteQuickFactUpdate(BaseModel):
 
 
 # ══════════════════════════════════════════════════════════
+# 站級獎項紀錄
+# ══════════════════════════════════════════════════════════
+
+AwardLevel = Literal["獲獎", "入圍"]
+
+
+class WebsiteAwardResponse(BaseModel):
+    id: int
+    name_zh: str
+    name_en: Optional[str] = None
+    year: int
+    category: Optional[str] = None
+    org: Optional[str] = None
+    level: AwardLevel = "獲獎"
+    work_title: Optional[str] = None
+    recipient: Optional[str] = None
+    cert_url: Optional[str] = None
+    sort_order: int = 0
+    visible: bool = True
+
+
+class WebsiteAwardCreate(BaseModel):
+    name_zh: str = Field(..., min_length=1, max_length=200)
+    name_en: Optional[str] = Field(None, max_length=200)
+    year: int = Field(..., ge=1900, le=2100)
+    category: Optional[str] = Field(None, max_length=200)
+    org: Optional[str] = Field(None, max_length=200)
+    level: AwardLevel = "獲獎"
+    work_title: Optional[str] = Field(None, max_length=300)
+    recipient: Optional[str] = Field(None, max_length=200)
+    cert_url: Optional[str] = Field(None, max_length=500)
+    sort_order: int = 0
+    visible: bool = True
+
+
+class WebsiteAwardUpdate(BaseModel):
+    name_zh: Optional[str] = None
+    name_en: Optional[str] = None
+    year: Optional[int] = Field(None, ge=1900, le=2100)
+    category: Optional[str] = None
+    org: Optional[str] = None
+    level: Optional[AwardLevel] = None
+    work_title: Optional[str] = None
+    recipient: Optional[str] = None
+    cert_url: Optional[str] = None
+    sort_order: Optional[int] = None
+    visible: Optional[bool] = None
+
+
+# ══════════════════════════════════════════════════════════
 # 作品級 SEO / AI SEO Pipeline
 # ══════════════════════════════════════════════════════════
 

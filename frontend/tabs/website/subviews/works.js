@@ -21,14 +21,17 @@ async function _reloadWorks() {
 export default async function render(container, ctx = {}) {
     const { isCurrent = () => true } = ctx;
     container.innerHTML = '<h2>🎬 作品集管理</h2><div style="color:#888;padding:20px;">載入中…</div>';
+    let portfolioPdfUrl = '';
     try {
-        const [worksRes, catsRes] = await Promise.all([
+        const [worksRes, catsRes, settingsRes] = await Promise.all([
             websiteFetch('/api/website/admin/works?include_non_public=true'),
             websiteFetch('/api/website/admin/categories'),
+            websiteFetch('/api/website/admin/settings'),
         ]);
         if (!isCurrent()) return;
         _works = worksRes?.items || [];
         _categories = catsRes?.items || [];
+        portfolioPdfUrl = (settingsRes?.settings?.['portfolio.pdf_url'] || '').toString();
     } catch (e) {
         if (!isCurrent()) return;
         renderLoadError(container, '🎬 作品集管理', e);
@@ -37,6 +40,22 @@ export default async function render(container, ctx = {}) {
 
     container.innerHTML = `
         <h2>🎬 作品集管理 <span style="color:#888;font-size:13px;font-weight:400;">· ${_works.length} 件作品</span></h2>
+
+        <div class="card" style="border-left:3px solid #c8a45c;margin-bottom:12px;">
+            <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
+                <label style="color:#ddd;font-size:13px;font-weight:600;white-space:nowrap;">📄 歷年作品 PDF</label>
+                <input id="portfolio-pdf-url" type="url" value="${esc(portfolioPdfUrl)}"
+                    placeholder="https://drive.google.com/... 或 https://originsun-studio.com/files/portfolio.pdf"
+                    style="flex:1;min-width:320px;" />
+                <button class="btn btn-sm" onclick="window._websiteSavePortfolioPdf()">💾 儲存</button>
+                ${portfolioPdfUrl
+                    ? `<a class="btn btn-sm btn-ghost" href="${esc(portfolioPdfUrl)}" target="_blank" rel="noopener">↗ 預覽</a>`
+                    : ''}
+            </div>
+            <div style="color:#888;font-size:11px;margin-top:6px;">
+                填值後 /portfolio 頁面頂部會顯示「下載作品集 PDF」按鈕；留空則隱藏。儲存後 60 秒內對外網站重 build。
+            </div>
+        </div>
 
         <div style="margin-bottom:12px;display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
             <button class="btn" onclick="window._websiteNewWork()" style="background:#059669;">➕ 新增作品</button>
@@ -61,6 +80,22 @@ export default async function render(container, ctx = {}) {
     _renderTable();
     _ensureEditPanel();
 }
+
+
+window._websiteSavePortfolioPdf = async () => {
+    const url = (document.getElementById('portfolio-pdf-url')?.value || '').trim();
+    if (url && !/^https?:\/\//i.test(url)) {
+        toastErr('PDF 連結必須是 http:// 或 https:// 開頭');
+        return;
+    }
+    try {
+        await websiteFetch('/api/website/admin/settings', {
+            method: 'PUT',
+            body: { values: { 'portfolio.pdf_url': url } },
+        });
+        toastOk(url ? '已儲存 PDF 連結（60 秒後對外網站重 build）' : '已清除 PDF 連結');
+    } catch (e) { toastErr(e.message || '儲存失敗'); }
+};
 
 function _renderTable() {
     const table = document.getElementById('works-table');

@@ -2,26 +2,26 @@
 /**
  * portfolio.astro — 歷年作品一頁式清單（/portfolio）
  *
- * 設計目的：客戶主管參考用的列印簡介。
- * 極簡路線：單欄、純文字、時間軸。
+ * 設計目的：客戶主管參考用的網頁簡介。
  *
  * 結構：
- *   [頁首]   標題 + 列印按鈕
- *   [列印頁首]  公司名 + 聯絡（僅列印時顯示）
- *   [時間軸]  年份大字 + 該年作品清單（客戶 — 標題）
- *   [列印頁尾]  © 公司名 + 網址
+ *   [頁首]        標題 + 下載 PDF 連結（admin 設定後出現）
+ *   [榮譽牆]      Honors & Awards 單欄卡片直列（站級獎項）
+ *   [時間軸]      年份大字 + 該年作品清單（作品 — 客戶）
  *
- * @media print：隱藏 nav/footer/button，單色列印、不分頁符。
+ * PDF 由 admin 在「作品集管理」Tab 頂部上傳 / 設定 URL（settings.portfolio_pdf_url），
+ * 未設定時隱藏下載按鈕。此頁不再走瀏覽器列印路線。
  */
 import BaseLayout from "../layouts/BaseLayout.astro";
 import Tr from "../components/ui/Tr.astro";
-import { fetchMeta, fetchAllWorksCached } from "../lib/crm-client";
+import { fetchMeta, fetchAllWorksCached, fetchAwards } from "../lib/crm-client";
 import { buildBasicPageSeo, breadcrumb2 } from "../lib/seo";
 import type { IPublicProject } from "../types/project";
 
-const [meta, allWorks] = await Promise.all([
+const [meta, allWorks, awards] = await Promise.all([
     fetchMeta(),
     fetchAllWorksCached(),
+    fetchAwards(),
 ]);
 
 // 年份分組（desc，無年份放最後）
@@ -44,17 +44,32 @@ function groupByYear(works: IPublicProject[]): Array<{ year: number | null; work
 const years = groupByYear(allWorks);
 const totalCount = allWorks.length;
 
+const sortedAwards = [...awards].sort((a, b) => {
+    if (b.year !== a.year) return b.year - a.year;
+    return a.sort_order - b.sort_order;
+});
+let winCount = 0, nomCount = 0;
+for (const a of awards) {
+    if (a.level === "獲獎") winCount++;
+    else if (a.level === "入圍") nomCount++;
+}
+const hasAwards = sortedAwards.length > 0;
+const honorsSubtitleZh = hasAwards ? ` · ${winCount} 項獲獎・${nomCount} 項入圍` : "";
+const honorsSubtitleEn = hasAwards ? ` · ${winCount} won / ${nomCount} nominated` : "";
+
+const pdfUrl = (meta.portfolio_pdf_url || "").trim();
+
 const seo = buildBasicPageSeo(Astro, {
     title: "歷年作品 Portfolio",
-    description: `${meta.company_name_zh}歷年作品列表 — 共 ${totalCount} 件影像製作作品按年份排序，含商業廣告、紀錄片、活動紀錄、動畫設計，可列印或另存 PDF。`,
+    description: `${meta.company_name_zh}歷年作品列表 — 共 ${totalCount} 件影像製作作品按年份排序${honorsSubtitleZh}，含商業廣告、紀錄片、活動紀錄、動畫設計。`,
     breadcrumbs: breadcrumb2("歷年作品", "/portfolio"),
 });
 ---
 
 <BaseLayout {...seo} meta={meta}>
 
-    <!-- 頁首：標題 + 列印按鈕（列印時隱藏） -->
-    <section class="bg-white pt-28 sm:pt-32 pb-12 print:hidden">
+    <!-- 頁首：標題 + PDF 下載（如已設定） -->
+    <section class="bg-white pt-28 sm:pt-32 pb-12">
         <div class="max-w-3xl mx-auto px-4 sm:px-6 lg:px-8">
             <p class="text-xs tracking-[0.4em] text-neutral-500 uppercase mb-3">Portfolio</p>
             <div class="flex items-end justify-between flex-wrap gap-4">
@@ -63,43 +78,91 @@ const seo = buildBasicPageSeo(Astro, {
                         <Tr zh="歷年作品" en="Our Portfolio" />
                     </h1>
                     <p class="text-neutral-600 tracking-wide">
-                        <Tr zh={`${meta.company_name_zh} 歷年製作一覽（共 ${totalCount} 件）`}
-                            en={`A chronological list from ${meta.company_name_en} — ${totalCount} projects`} />
+                        <Tr zh={`${meta.company_name_zh} 歷年製作一覽（共 ${totalCount} 件${honorsSubtitleZh}）`}
+                            en={`${meta.company_name_en} — ${totalCount} projects${honorsSubtitleEn}`} />
                     </p>
                 </div>
-                <button type="button" onclick="window.print()"
-                        class="inline-flex items-center gap-2 text-xs tracking-[0.25em] uppercase border border-neutral-900 text-neutral-900 px-5 py-2 hover:bg-neutral-900 hover:text-white transition-colors">
-                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
-                        <path d="M6 9V2h12v7M6 18H4a2 2 0 01-2-2v-5a2 2 0 012-2h16a2 2 0 012 2v5a2 2 0 01-2 2h-2M6 14h12v8H6z" />
-                    </svg>
-                    <Tr zh="列印 / 另存 PDF" en="Print / Save PDF" />
-                </button>
+                {pdfUrl && (
+                    <a href={pdfUrl} target="_blank" rel="noopener"
+                       class="inline-flex items-center gap-2 text-xs tracking-[0.25em] uppercase border border-neutral-900 text-neutral-900 px-5 py-2 hover:bg-neutral-900 hover:text-white transition-colors">
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                            <path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z" />
+                            <polyline points="14 2 14 8 20 8" />
+                            <line x1="12" y1="18" x2="12" y2="12" />
+                            <polyline points="9 15 12 18 15 15" />
+                        </svg>
+                        <Tr zh="作品集 PDF" en="Portfolio PDF" />
+                    </a>
+                )}
             </div>
         </div>
     </section>
 
-    <!-- 列印專用頁首 -->
-    <div class="hidden print:block mb-6 pb-4 border-b border-neutral-300 mx-8 mt-4">
-        <div class="flex justify-between items-start">
-            <div>
-                <div class="text-xl font-bold text-neutral-900">{meta.company_name_zh}</div>
-                <div class="text-xs text-neutral-600 tracking-widest">{meta.company_name_en} · Portfolio</div>
+    {hasAwards && (
+        <section class="bg-white pb-14">
+            <div class="max-w-3xl mx-auto px-4 sm:px-6 lg:px-8">
+                <div class="mb-6">
+                    <p class="text-xs tracking-[0.4em] text-neutral-500 uppercase mb-2">Honors &amp; Awards</p>
+                    <div class="h-px bg-neutral-200"></div>
+                </div>
+                <ul class="space-y-3">
+                    {sortedAwards.map(a => {
+                        const isWin = a.level === "獲獎";
+                        return (
+                            <li class="group border border-neutral-200 hover:border-[#c9372c] transition-colors p-5">
+                                <div class="flex items-start gap-4">
+                                    <div class="flex-shrink-0 w-16 text-2xl font-bold tracking-tight text-[#c9372c] leading-none pt-1">
+                                        {a.year}
+                                    </div>
+                                    <div class="flex-1 min-w-0">
+                                        <div class="flex items-center gap-3 flex-wrap mb-1.5">
+                                            <span class={`inline-block text-[10px] tracking-[0.2em] uppercase px-2 py-1 ${
+                                                isWin
+                                                    ? "bg-[#c8a45c] text-white"
+                                                    : "bg-neutral-200 text-neutral-700"
+                                            }`}>
+                                                {a.level}
+                                            </span>
+                                            <span class="text-[15px] font-medium text-neutral-900 tracking-wide">
+                                                {a.name_zh}
+                                                {a.category && (
+                                                    <span class="text-neutral-500 font-normal"> · {a.category}</span>
+                                                )}
+                                            </span>
+                                        </div>
+                                        {(a.work_title || a.recipient) && (
+                                            <div class="text-sm text-neutral-700 tracking-wide">
+                                                {a.work_title}
+                                                {a.work_title && a.recipient && (
+                                                    <span class="text-neutral-400 mx-2">·</span>
+                                                )}
+                                                {a.recipient && (
+                                                    <span class="text-neutral-500">{a.recipient}</span>
+                                                )}
+                                            </div>
+                                        )}
+                                        {a.org && (
+                                            <div class="mt-1 text-xs text-neutral-500 tracking-wider">
+                                                {a.org}
+                                            </div>
+                                        )}
+                                    </div>
+                                </div>
+                            </li>
+                        );
+                    })}
+                </ul>
             </div>
-            <div class="text-right text-xs text-neutral-600">
-                {meta.phone && <div>Tel: {meta.phone}</div>}
-                {meta.email && <div>{meta.email}</div>}
-                {meta.address && <div>{meta.address}</div>}
-            </div>
-        </div>
-    </div>
+        </section>
+    )}
 
     <!-- 時間軸主體（單欄、純文字） -->
-    <section class="bg-white pb-20 print:pb-0">
+    <section class="bg-white pb-20">
         <div class="max-w-3xl mx-auto px-4 sm:px-6 lg:px-8">
             {years.map(yg => (
-                <div class="mb-12 print:mb-6 print:break-inside-avoid">
+                <div class="mb-12">
                     <!-- 年份標 -->
-                    <div class="flex items-center gap-4 mb-6 print:mb-3">
+                    <div class="flex items-center gap-4 mb-6">
                         <span class="text-3xl sm:text-4xl font-bold tracking-tight text-[#c9372c]">
                             {yg.year ?? "—"}
                         </span>
@@ -110,11 +173,11 @@ const seo = buildBasicPageSeo(Astro, {
                     </div>
 
                     <!-- 作品清單（一行一件：作品齊左、客戶齊右） -->
-                    <ul class="space-y-2.5 print:space-y-1">
+                    <ul class="space-y-2.5">
                         {yg.works.map(w => (
                             <li class="flex items-baseline gap-x-4 text-[15px] leading-relaxed">
                                 <a href={`/works/${w.slug}`}
-                                   class="flex-1 text-neutral-900 font-medium tracking-wide hover:text-[#c9372c] transition-colors print:pointer-events-none">
+                                   class="flex-1 text-neutral-900 font-medium tracking-wide hover:text-[#c9372c] transition-colors">
                                     {w.title}
                                 </a>
                                 <span class="flex-shrink-0 text-neutral-500 text-sm tracking-wide text-right">
@@ -127,23 +190,4 @@ const seo = buildBasicPageSeo(Astro, {
             ))}
         </div>
     </section>
-
-    <!-- 列印頁尾 -->
-    <div class="hidden print:block mt-6 pt-4 border-t border-neutral-300 text-xs text-neutral-600 text-center mx-8">
-        © {new Date().getFullYear()} {meta.company_name_zh} {meta.company_name_en} · originsun-studio.com
-    </div>
 </BaseLayout>
-
-<style>
-    @media print {
-        :global(header[id="site-header"]), :global(footer) {
-            display: none !important;
-        }
-        :global(body) {
-            background: white !important;
-            color: #111 !important;
-            font-size: 10.5pt;
-        }
-        a { color: #111 !important; text-decoration: none !important; }
-    }
-</style>
