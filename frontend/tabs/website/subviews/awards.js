@@ -41,7 +41,11 @@ function _renderAll() {
         if (a.level === '獲獎') winCount++;
         else if (a.level === '入圍') nomCount++;
     }
-    const rows = _awards.map(a => `
+    const rows = _awards.map(a => {
+        const thumb = a.cert_url
+            ? `<a href="${esc(a.cert_url)}" target="_blank" rel="noopener" title="點擊看原圖" style="display:inline-block;"><img src="${esc(a.cert_url)}" style="width:42px;height:42px;object-fit:cover;border-radius:3px;background:#222;border:1px solid #333;" onerror="this.style.display='none';this.nextElementSibling.style.display='inline-block'" /><span style="display:none;color:#666;font-size:11px;">URL 失效</span></a>`
+            : '<span style="color:#444;font-size:11px;">—</span>';
+        return `
         <tr>
             <td><input type="number" data-id="${a.id}" data-field="year" value="${a.year}" style="width:70px;" /></td>
             <td><input data-id="${a.id}" data-field="name_zh" value="${esc(a.name_zh)}" style="width:100%;" placeholder="獎項名稱" /></td>
@@ -52,6 +56,8 @@ function _renderAll() {
             <td><input data-id="${a.id}" data-field="work_title" value="${esc(a.work_title || '')}" style="width:100%;" placeholder="作品" /></td>
             <td><input data-id="${a.id}" data-field="recipient" value="${esc(a.recipient || '')}" style="width:100%;" placeholder="得獎人" /></td>
             <td><input data-id="${a.id}" data-field="org" value="${esc(a.org || '')}" style="width:100%;" placeholder="頒獎單位" /></td>
+            <td style="text-align:center;">${thumb}</td>
+            <td><input type="url" data-id="${a.id}" data-field="cert_url" value="${esc(a.cert_url || '')}" style="width:100%;" placeholder="https://..." /></td>
             <td><input type="number" data-id="${a.id}" data-field="sort_order" value="${a.sort_order}" style="width:55px;" /></td>
             <td style="text-align:center;"><input type="checkbox" data-id="${a.id}" data-field="visible" ${a.visible ? 'checked' : ''} /></td>
             <td style="text-align:right;white-space:nowrap;">
@@ -59,7 +65,8 @@ function _renderAll() {
                 <button class="btn btn-sm btn-danger" onclick="window._awardsDelete(${a.id})">🗑</button>
             </td>
         </tr>
-    `).join('');
+        `;
+    }).join('');
 
     _container.innerHTML = `
         <h2>🏆 獎項紀錄 <span style="color:#888;font-size:13px;font-weight:400;">· ${visibleCount} 筆顯示中 · 獲獎 ${winCount} / 入圍 ${nomCount}</span></h2>
@@ -86,9 +93,13 @@ function _renderAll() {
                     <input id="aw-new-sort" type="number" value="0" style="width:100%;" /></div>
                 <button class="btn" onclick="window._awardsCreate()">+ 新增</button>
             </div>
+            <div style="margin-bottom:12px;">
+                <label style="color:#888;font-size:11px;display:block;margin-bottom:3px;">證書 / 獎杯照片 URL（選填）</label>
+                <input id="aw-new-cert-url" type="url" placeholder="https://drive.google.com/... 或圖片直接連結（建議 JPG/PNG，會出現在 /portfolio 卡片上）" style="width:100%;" />
+            </div>
             <table>
-                <thead><tr><th style="width:70px;">年份</th><th>獎項</th><th>類別</th><th style="width:75px;">等級</th><th>作品</th><th>得獎人</th><th>頒獎單位</th><th style="width:55px;">排序</th><th style="width:50px;">顯示</th><th></th></tr></thead>
-                <tbody>${rows || emptyRow(10, '尚無獎項，新增上方第一筆')}</tbody>
+                <thead><tr><th style="width:70px;">年份</th><th>獎項</th><th>類別</th><th style="width:75px;">等級</th><th>作品</th><th>得獎人</th><th>頒獎單位</th><th style="width:50px;">照片</th><th style="min-width:160px;">照片 URL</th><th style="width:55px;">排序</th><th style="width:50px;">顯示</th><th></th></tr></thead>
+                <tbody>${rows || emptyRow(12, '尚無獎項，新增上方第一筆')}</tbody>
             </table>
         </div>
     `;
@@ -104,6 +115,7 @@ window._awardsCreate = async () => {
         work_title: document.getElementById('aw-new-work').value.trim() || null,
         recipient: document.getElementById('aw-new-recipient').value.trim() || null,
         org: document.getElementById('aw-new-org').value.trim() || null,
+        cert_url: document.getElementById('aw-new-cert-url').value.trim() || null,
         sort_order: Number(document.getElementById('aw-new-sort').value || 0),
         visible: true,
     };

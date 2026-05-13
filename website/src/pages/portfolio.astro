@@ -147,6 +147,13 @@ const seo = buildBasicPageSeo(Astro, {
                                             </div>
                                         )}
                                     </div>
+                                    {a.cert_url && (
+                                        <a href={a.cert_url} target="_blank" rel="noopener" class="flex-shrink-0 block w-20 h-20 sm:w-24 sm:h-24 bg-neutral-100 overflow-hidden hover:opacity-90 transition-opacity"
+                                           title={`查看 ${a.name_zh} 證書/獎杯`}>
+                                            <img src={a.cert_url} alt={`${a.name_zh} 證書`} loading="lazy"
+                                                 class="w-full h-full object-cover" />
+                                        </a>
+                                    )}
                                 </div>
                             </li>
                         );
