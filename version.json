@@ -1,5 +1,5 @@
 {
-  "version": "1.10.133",
-  "build_date": "2026-05-11",
-  "notes": "9 個 CRM list 共用 createSortable 排序 helper(點欄頭 + localStorage)+ enumIndex 收斂工作流查表"
+  "version": "1.10.134",
+  "build_date": "2026-05-13",
+  "notes": "feat(website): /portfolio 加站級獎項紀錄 + 作品集 PDF 下載入口 — WebsiteAward 表 + Admin SEO 卡 + Astro Honors & Awards 直列卡片 + 4 輪 simplify 共 15 項清理"
 }
