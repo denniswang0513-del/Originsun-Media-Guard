@@ -99,9 +99,9 @@ const seo = buildBasicPageSeo(Astro, {
     </section>
 
     {hasAwards && (
-        <section class="bg-white pb-20">
-            <div class="max-w-3xl mx-auto px-4 sm:px-6 lg:px-8">
-                <div class="flex items-baseline justify-between mb-8 pb-4 border-b border-neutral-900">
+        <section class="bg-white pb-24 sm:pb-32">
+            <div class="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8">
+                <div class="max-w-3xl mx-auto flex items-baseline justify-between mb-12 sm:mb-16 pb-4 border-b border-neutral-900">
                     <p class="text-xs tracking-[0.4em] text-neutral-900 uppercase">Honors &amp; Awards</p>
                     <p class="text-[11px] tracking-[0.2em] uppercase text-neutral-400">
                         {winCount > 0 && <span>{winCount} Won</span>}
@@ -109,53 +109,52 @@ const seo = buildBasicPageSeo(Astro, {
                         {nomCount > 0 && <span>{nomCount} Nominated</span>}
                     </p>
                 </div>
-                <ul class="divide-y divide-neutral-200">
+                <ul class="space-y-20 sm:space-y-28">
                     {sortedAwards.map(a => {
                         const isWin = a.level === "獲獎";
                         return (
-                            <li class="group grid sm:grid-cols-[240px_1fr] gap-5 sm:gap-10 py-8 first:pt-2">
-                                {a.cert_url ? (
+                            <li class="group">
+                                {a.cert_url && (
                                     <a href={a.cert_url} target="_blank" rel="noopener"
-                                       class="block aspect-[16/9] bg-neutral-100 overflow-hidden"
+                                       class="block aspect-video bg-neutral-100 overflow-hidden mb-8 sm:mb-10"
                                        title={`${a.work_title || a.name_zh} 作品圖`}>
                                         <img src={a.cert_url} alt={`${a.work_title || a.name_zh} 作品圖`}
                                              loading="lazy"
-                                             class="w-full h-full object-cover transition-transform duration-700 group-hover:scale-[1.03]" />
+                                             class="w-full h-full object-cover transition-transform duration-[1200ms] ease-out group-hover:scale-[1.02]" />
                                     </a>
-                                ) : (
-                                    <div class="hidden sm:block"></div>
                                 )}
-                                <div class="flex flex-col min-w-0">
-                                    <div class="flex items-baseline gap-3 mb-3">
-                                        <span class="text-sm font-medium tracking-[0.1em] text-[#c9372c]">{a.year}</span>
-                                        <span class="text-neutral-300 text-xs">·</span>
-                                        <span class={`text-[11px] tracking-[0.3em] uppercase font-medium ${
+                                <div class="grid sm:grid-cols-[auto_1fr_auto] gap-6 sm:gap-12 items-start">
+                                    <div class="flex sm:flex-col items-baseline sm:items-start gap-3 sm:gap-2">
+                                        <span class="text-4xl sm:text-5xl font-light tracking-tight text-[#c9372c] leading-none">{a.year}</span>
+                                        <span class={`text-[11px] tracking-[0.35em] uppercase font-medium ${
                                             isWin ? "text-[#c8a45c]" : "text-neutral-500"
                                         }`}>
                                             {a.level}
                                         </span>
                                     </div>
-                                    <h3 class="text-xl sm:text-2xl font-light tracking-tight text-neutral-900 leading-snug mb-1.5">
-                                        {a.name_zh}
-                                    </h3>
-                                    {a.category && (
-                                        <p class="text-sm text-neutral-500 tracking-wide mb-4">{a.category}</p>
-                                    )}
-                                    {(a.work_title || a.recipient) && (
-                                        <div class="text-[15px] tracking-wide leading-relaxed">
-                                            {a.work_title && (
-                                                <span class="text-neutral-900 font-medium">{a.work_title}</span>
-                                            )}
-                                            {a.work_title && a.recipient && (
-                                                <span class="text-neutral-300 mx-2">·</span>
-                                            )}
-                                            {a.recipient && (
-                                                <span class="text-neutral-600">{a.recipient}</span>
-                                            )}
-                                        </div>
-                                    )}
+                                    <div class="min-w-0">
+                                        <h3 class="text-2xl sm:text-3xl font-light tracking-tight text-neutral-900 leading-tight mb-2 sm:mb-3">
+                                            {a.name_zh}
+                                        </h3>
+                                        {a.category && (
+                                            <p class="text-sm sm:text-base text-neutral-500 tracking-wide mb-5 sm:mb-6">{a.category}</p>
+                                        )}
+                                        {(a.work_title || a.recipient) && (
+                                            <div class="text-base sm:text-lg tracking-wide leading-relaxed">
+                                                {a.work_title && (
+                                                    <span class="text-neutral-900 font-medium">{a.work_title}</span>
+                                                )}
+                                                {a.work_title && a.recipient && (
+                                                    <span class="text-neutral-300 mx-2">·</span>
+                                                )}
+                                                {a.recipient && (
+                                                    <span class="text-neutral-600">{a.recipient}</span>
+                                                )}
+                                            </div>
+                                        )}
+                                    </div>
                                     {a.org && (
-                                        <p class="mt-auto pt-4 text-[11px] uppercase tracking-[0.2em] text-neutral-400">
+                                        <p class="sm:text-right text-[11px] uppercase tracking-[0.2em] text-neutral-400 sm:max-w-[180px]">
                                             {a.org}
                                         </p>
                                     )}
