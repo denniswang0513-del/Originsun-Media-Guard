@@ -17,6 +17,10 @@ import Tr from "../components/ui/Tr.astro";
 import { fetchMeta, fetchAllWorksCached, fetchAwards } from "../lib/crm-client";
 import { buildBasicPageSeo, breadcrumb2 } from "../lib/seo";
 import type { IPublicProject } from "../types/project";
+import type { AwardLevel } from "../types/seo";
+
+const AWARD_WIN: AwardLevel = "獲獎";
+const AWARD_NOMINEE: AwardLevel = "入圍";
 
 const [meta, allWorks, awards] = await Promise.all([
     fetchMeta(),
@@ -46,8 +50,8 @@ const totalCount = allWorks.length;
 
 let winCount = 0, nomCount = 0;
 for (const a of awards) {
-    if (a.level === "獲獎") winCount++;
-    else if (a.level === "入圍") nomCount++;
+    if (a.level === AWARD_WIN) winCount++;
+    else if (a.level === AWARD_NOMINEE) nomCount++;
 }
 const hasAwards = awards.length > 0;
 
@@ -129,7 +133,7 @@ const seo = buildBasicPageSeo(Astro, {
                                 </td>
                                 <td class="py-4">
                                     {g.items.map(a => {
-                                        const isWin = a.level === "獲獎";
+                                        const isWin = a.level === AWARD_WIN;
                                         const awardText = [a.name_zh, a.category].filter(Boolean).join(" · ");
                                         return (
                                             <div class="flex items-baseline gap-3 sm:gap-5 py-1 first:pt-0 last:pb-0">
