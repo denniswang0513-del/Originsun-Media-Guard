@@ -115,7 +115,9 @@ const seo = buildBasicPageSeo(Astro, {
     {hasAwards && (
         <section class="bg-white pb-20">
             <div class="max-w-3xl mx-auto px-4 sm:px-6 lg:px-8">
-                <h2 class="text-3xl sm:text-4xl font-bold tracking-tight text-[#c9372c] mb-8">
+                {/* inline color：BaseLayout 的全域 h1-h4 規則是 unlayered,
+                    會蓋過 Tailwind layered utility,故用 inline style 強制 */}
+                <h2 class="text-3xl sm:text-4xl font-bold tracking-tight mb-8" style="color:#c9372c;">
                     AWARDS
                 </h2>
                 <table class="w-full border-collapse">
