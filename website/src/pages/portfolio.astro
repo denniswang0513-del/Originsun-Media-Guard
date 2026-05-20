@@ -44,16 +44,30 @@ function groupByYear(works: IPublicProject[]): Array<{ year: number | null; work
 const years = groupByYear(allWorks);
 const totalCount = allWorks.length;
 
-const sortedAwards = [...awards].sort((a, b) => {
-    if (b.year !== a.year) return b.year - a.year;
-    return a.sort_order - b.sort_order;
-});
 let winCount = 0, nomCount = 0;
 for (const a of awards) {
     if (a.level === "獲獎") winCount++;
     else if (a.level === "入圍") nomCount++;
 }
-const hasAwards = sortedAwards.length > 0;
+const hasAwards = awards.length > 0;
+
+// 依作品分組：同一個 work_title 的多個獎項合併成一組。
+// 無 work_title 的獎項各自成組（key 用唯一 id 避免互相併入）。
+type AwardGroup = { work: string; items: typeof awards };
+const _awardGroups = new Map<string, AwardGroup>();
+for (const a of awards) {
+    const work = (a.work_title || "").trim();
+    const key = work || `__solo_${a.id}`;
+    if (!_awardGroups.has(key)) _awardGroups.set(key, { work, items: [] });
+    _awardGroups.get(key)!.items.push(a);
+}
+// 組內依年份新→舊；組間依該作品最新得獎年份新→舊
+const awardGroups = Array.from(_awardGroups.values())
+    .map(g => ({
+        ...g,
+        items: [...g.items].sort((a, b) => b.year - a.year || a.sort_order - b.sort_order),
+    }))
+    .sort((a, b) => Math.max(...b.items.map(i => i.year)) - Math.max(...a.items.map(i => i.year)));
 const honorsSubtitleZh = hasAwards ? ` · ${winCount} 項獲獎・${nomCount} 項入圍` : "";
 const honorsSubtitleEn = hasAwards ? ` · ${winCount} won / ${nomCount} nominated` : "";
 
@@ -101,29 +115,33 @@ const seo = buildBasicPageSeo(Astro, {
     {hasAwards && (
         <section class="bg-white pb-20">
             <div class="max-w-3xl mx-auto px-4 sm:px-6 lg:px-8">
-                <p class="text-xs tracking-[0.4em] text-neutral-500 uppercase mb-8">Awards</p>
+                <h2 class="text-3xl sm:text-4xl font-bold tracking-tight text-[#c9372c] mb-8">
+                    AWARDS
+                </h2>
                 <table class="w-full border-collapse">
                     <tbody>
-                        {sortedAwards.map(a => {
-                            const isWin = a.level === "獲獎";
-                            const awardText = [a.name_zh, a.category].filter(Boolean).join(" · ");
-                            return (
-                                <tr class="align-baseline">
-                                    <td class="py-3 pr-4 sm:pr-6 text-[#c9372c] font-medium tabular-nums whitespace-nowrap align-baseline">
-                                        {a.year}
-                                    </td>
-                                    <td class="py-3 pr-4 sm:pr-6 text-neutral-900 font-medium tracking-wide align-baseline">
-                                        {a.work_title || "—"}
-                                    </td>
-                                    <td class="py-3 text-sm sm:text-[15px] text-neutral-600 tracking-wide leading-relaxed align-baseline">
-                                        {awardText}
-                                        <span class={`ml-1.5 whitespace-nowrap text-xs tracking-wider ${
-                                            isWin ? "text-[#c8a45c]" : "text-neutral-400"
-                                        }`}>〔{a.level}〕</span>
-                                    </td>
-                                </tr>
-                            );
-                        })}
+                        {awardGroups.map(g => (
+                            <tr class="align-top">
+                                <td class="py-4 pr-4 sm:pr-6 text-neutral-900 font-medium tracking-wide whitespace-nowrap">
+                                    {g.work || "—"}
+                                </td>
+                                <td class="py-4">
+                                    {g.items.map(a => {
+                                        const isWin = a.level === "獲獎";
+                                        const awardText = [a.name_zh, a.category].filter(Boolean).join(" · ");
+                                        return (
+                                            <div class="flex items-baseline gap-3 sm:gap-5 py-1 first:pt-0 last:pb-0">
+                                                <span class="text-[#c9372c] font-medium tabular-nums whitespace-nowrap">{a.year}</span>
+                                                <span class="flex-1 text-sm sm:text-[15px] text-neutral-600 tracking-wide leading-relaxed">{awardText}</span>
+                                                <span class={`whitespace-nowrap text-sm tracking-wide ${
+                                                    isWin ? "text-[#c8a45c] font-medium" : "text-neutral-400"
+                                                }`}>{a.level}</span>
+                                            </div>
+                                        );
+                                    })}
+                                </td>
+                            </tr>
+                        ))}
                     </tbody>
                 </table>
             </div>
