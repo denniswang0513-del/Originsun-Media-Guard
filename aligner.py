@@ -100,11 +100,11 @@ def parse_transcript(content: str, fmt: str = "auto") -> List[str]:
 
     Rules:
         - .srt: each entry's text (without timestamps) is one segment.
-        - .txt with blank-line separators: split on blank lines.
-        - .txt without blank lines: split on single newlines.
+        - .txt: every non-blank line is one segment (blank lines ignored).
         - 'auto': sniff for SRT signature, else .txt rules.
 
-    Internal newlines within a segment are preserved (multi-line cue).
+    Internal newlines within a segment are preserved — but only .srt entries
+    can carry them; .txt segments are always single-line.
     Empty/whitespace-only segments are dropped.
     """
     if not content or not content.strip():
@@ -125,14 +125,17 @@ def parse_transcript(content: str, fmt: str = "auto") -> List[str]:
 
 
 def _parse_txt_segments(text: str) -> List[str]:
-    text = text.replace("\r\n", "\n").replace("\r", "\n").strip()
-    if not text:
-        return []
-    if re.search(r"\n\s*\n", text):
-        parts = re.split(r"\n\s*\n+", text)
-    else:
-        parts = text.split("\n")
-    return [p.strip() for p in parts if p.strip()]
+    """Every non-blank line becomes one cue. Blank lines are treated purely
+    as separators (ignored) — NOT as paragraph boundaries.
+
+    This guarantees "one line = one subtitle" regardless of whether the
+    transcript also contains blank lines between paragraphs. The old
+    either/or rule flipped the whole file into blank-line mode the moment a
+    single blank line appeared, silently merging consecutive lines into one
+    multi-line cue.
+    """
+    text = text.replace("\r\n", "\n").replace("\r", "\n")
+    return [ln.strip() for ln in text.split("\n") if ln.strip()]
 
 
 def _parse_srt_segments(text: str) -> List[str]:

@@ -262,6 +262,9 @@ export function initTranscribeTab() {
     setupInputDrop('transcribe_dest');
     // Wire align mode UI (lives in the same tab)
     if (typeof _wireAlignTab === 'function') _wireAlignTab();
+    // Render host panels now that this tab's DOM exists (covers the case
+    // where the agents list resolved before the tab HTML was injected).
+    if (window.renderStandaloneHostPanels) window.renderStandaloneHostPanels();
 }
 
 export async function pickTranscribeFolder() {
@@ -632,13 +635,10 @@ function countSegments(text, fmt) {
         // Count "-->" lines
         return (text.match(/-->/g) || []).length;
     }
-    // txt: blank lines if any, else single newlines
-    const t = text.replace(/\r\n/g, '\n').replace(/\r/g, '\n').trim();
-    if (!t) return 0;
-    if (/\n\s*\n/.test(t)) {
-        return t.split(/\n\s*\n+/).filter(s => s.trim()).length;
-    }
-    return t.split('\n').filter(s => s.trim()).length;
+    // txt: every non-blank line is one cue (blank lines ignored).
+    // Must match aligner.py _parse_txt_segments exactly.
+    return text.replace(/\r\n/g, '\n').replace(/\r/g, '\n')
+        .split('\n').filter(s => s.trim()).length;
 }
 
 function updateAlignBindSummary() {
@@ -653,9 +653,7 @@ function updateAlignBindSummary() {
     }
     const fmt = detectTranscriptFormat(text);
     const n = countSegments(text, fmt);
-    const fmtLabel = fmt === 'srt' ? '.srt 格式' : (
-        /\n\s*\n/.test(text) ? '.txt（空行分段）' : '.txt（單行分段）'
-    );
+    const fmtLabel = fmt === 'srt' ? '.srt 格式' : '.txt（每行一句）';
     summary.textContent = `偵測到 ${n} 段 ｜ ${fmtLabel}`;
     summary.className = n > 0 ? 'text-emerald-400' : 'text-yellow-500';
 }
@@ -694,19 +692,19 @@ export function confirmAlignBind() {
 // Detect missing on the active agent before submit; let users self-install
 // without RDPing into the box.
 
-async function _checkAlignDeps() {
+async function _checkAlignDeps(hostUrl) {
     try {
-        const r = await fetch(getAgentBaseUrl() + '/api/v1/jobs/align/check_deps');
+        const r = await fetch(hostUrl + '/api/v1/jobs/align/check_deps');
         return await r.json();
     } catch (e) {
         return { ok: false, missing: [], _err: e.message };
     }
 }
 
-async function _installAlignDeps(logEl) {
+async function _installAlignDeps(logEl, hostUrl) {
     if (logEl) logEl.textContent = '⏳ 安裝中...這通常需要 30-90 秒（首次安裝會下載 stable-ts + faster-whisper 共約 50MB）';
     try {
-        const r = await fetch(getAgentBaseUrl() + '/api/v1/jobs/align/install_deps', {
+        const r = await fetch(hostUrl + '/api/v1/jobs/align/install_deps', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
         });
@@ -722,7 +720,7 @@ async function _installAlignDeps(logEl) {
     }
 }
 
-function _showAlignDepsModal(missing) {
+function _showAlignDepsModal(missing, hostUrl) {
     return new Promise(resolve => {
         const overlay = document.createElement('div');
         overlay.className = 'fixed inset-0 bg-black/70 z-50 flex items-center justify-center p-4';
@@ -772,7 +770,7 @@ function _showAlignDepsModal(missing) {
                 if (cancelBtn) cancelBtn.disabled = true;
                 const logEl = overlay.querySelector('#_align_deps_log');
                 logEl.classList.remove('hidden');
-                const ok = await _installAlignDeps(logEl);
+                const ok = await _installAlignDeps(logEl, hostUrl);
                 if (ok) {
                     setTimeout(() => close(true), 1200);
                 } else {
@@ -785,20 +783,90 @@ function _showAlignDepsModal(missing) {
     });
 }
 
-async function _ensureAlignDeps() {
-    const r = await _checkAlignDeps();
+async function _ensureAlignDeps(hostUrl) {
+    const r = await _checkAlignDeps(hostUrl);
     if (r.ok) return true;
     if (!r.missing || r.missing.length === 0) {
         // Endpoint unreachable — let user proceed (and see the original error)
         appendLog('⚠️ 無法檢查對齊套件狀態（agent 可能版本太舊），仍嘗試送出', 'system');
         return true;
     }
-    appendLog(`⚠️ Agent 缺套件：${r.missing.join(', ')}`, 'system');
-    const installed = await _showAlignDepsModal(r.missing);
+    appendLog(`⚠️ 處理主機缺套件：${r.missing.join(', ')}`, 'system');
+    const installed = await _showAlignDepsModal(r.missing, hostUrl);
     if (installed) {
         appendLog('✅ 套件安裝完成，繼續送出對齊任務', 'system');
     }
     return installed;
+}
+
+// Write the align progress bar (label / pct / width). Shared by the local
+// socket path (onAlignProgress) and the remote poll (_startRemoteAlignPoll).
+function _setAlignProgress(pct, text) {
+    const p = Math.max(0, Math.min(100, Math.round(pct)));
+    const lbl = document.getElementById('align_prog_label');
+    const num = document.getElementById('align_prog_pct');
+    const bar = document.getElementById('align_prog_bar');
+    if (lbl) lbl.textContent = text;
+    if (num) num.textContent = p + '%';
+    if (bar) bar.style.width = p + '%';
+}
+
+// ─── Remote progress polling ────────────────────────────────────────────
+// When align is dispatched to another host, this browser's socket never
+// receives that job's align_progress / align_done events (they fire on the
+// remote agent). Poll its /api/v1/status to drive the shared progress bar.
+
+function _startRemoteAlignPoll(hostUrl, hostName, dest) {
+    if (window._alignRemotePoll) clearInterval(window._alignRemotePoll);
+    const finish = () => {
+        clearInterval(window._alignRemotePoll);
+        window._alignRemotePoll = null;
+        const sbtn = document.getElementById('align_submit_btn');
+        if (sbtn) { sbtn.disabled = false; updateAlignSubmitBtn(); }
+    };
+    _setAlignProgress(5, `已送至 [${hostName}]，等待執行...`);
+
+    const startTime = Date.now();
+    let lastOk = Date.now();
+    let logOffset = 0;
+    window._alignRemotePoll = setInterval(async () => {
+        try {
+            const ctrl = new AbortController();
+            const t = setTimeout(() => ctrl.abort(), 4000);
+            const r = await fetch(hostUrl + '/api/v1/status?log_offset=' + logOffset, { signal: ctrl.signal });
+            clearTimeout(t);
+            if (!r.ok) return;
+            const d = await r.json();
+            lastOk = Date.now();
+            logOffset = d.new_log_offset || logOffset;
+            (d.logs || []).forEach(msg => appendLog(`[${hostName}] ${String(msg).replace(/^\[.*?\]\s*/, '')}`, 'info'));
+
+            let pct = 0, txt = '對齊處理中...';
+            const jobs = d.active_jobs ? Object.values(d.active_jobs) : [];
+            if (jobs.length) {
+                pct = jobs.reduce((s, j) => s + ((j.progress && (j.progress.total_pct || j.progress.pct)) || 0), 0) / jobs.length;
+                const running = jobs.find(j => j.status === 'running');
+                if (running && running.progress && running.progress.msg) txt = running.progress.msg;
+            }
+            if (pct > 0) _setAlignProgress(pct, txt);
+
+            // Done: worker idle + queue drained, after a min wait to avoid
+            // a false positive while the job is still being picked up.
+            if (!d.busy && (d.queue_length || 0) === 0 && Date.now() - startTime > 12000) {
+                _setAlignProgress(100, `✅ 遠端對齊完成 — SRT 已輸出至 ${dest}`);
+                appendLog(`🎯 [${hostName}] 對齊完成，SRT 已輸出至 ${dest}`, 'system');
+                finish();
+            }
+        } catch (_) {
+            // transient network error — keep polling unless the host has
+            // been unreachable for too long.
+            if (Date.now() - lastOk > 90000) {
+                _setAlignProgress(0, `⚠️ 無法連線到 [${hostName}]，請至該主機確認結果`);
+                appendLog(`⚠️ [${hostName}] 連線逾時，對齊任務可能仍在執行 — 請至該主機畫面或輸出資料夾確認`, 'error');
+                finish();
+            }
+        }
+    }, 4000);
 }
 
 // ─── Submit ─────────────────────────────────────────────────────────────
@@ -808,7 +876,15 @@ export async function submitAlignJob() {
     if (!dest) { alert('請指定輸出資料夾'); return; }
     if (window._alignPairs.size === 0) { alert('請至少新增一個配對'); return; }
 
-    const depsOk = await _ensureAlignDeps();
+    // 處理主機 — 對齊需要 stable-ts/Whisper 環境，多數 agent 沒裝；
+    // 讓使用者把任務派到有完整 ML 環境的主機（通常是錄音室電腦）。
+    const alHostObj = window.collectSelectedHost
+        ? window.collectSelectedHost('al_host_checkboxes')
+        : { name: '本機', ip: 'local' };
+    const isLocal = alHostObj.ip === 'local';
+    const alHostUrl = isLocal ? getAgentBaseUrl() : 'http://' + alHostObj.ip;
+
+    const depsOk = await _ensureAlignDeps(alHostUrl);
     if (!depsOk) return;
 
     const tasks = [];
@@ -855,15 +931,18 @@ export async function submitAlignJob() {
     }
 
     try {
-        const res = await fetch(getAgentBaseUrl() + '/api/v1/jobs/align', {
+        const res = await fetch(alHostUrl + '/api/v1/jobs/align', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(payload),
         });
         const result = await res.json();
         if (res.ok) {
-            appendLog(`✅ 對齊任務已送進佇列 (${tasks.length} 支影片)`, 'system');
+            appendLog(`✅ 對齊任務已送進佇列 (${tasks.length} 支影片) → [${alHostObj.name}]`, 'system');
             if (result.warning) appendLog(`⚠️ ${result.warning}`, 'system');
+            // Remote host: this browser's socket won't get align events —
+            // poll the remote /status to drive the progress bar instead.
+            if (!isLocal) _startRemoteAlignPoll(alHostUrl, alHostObj.name, dest);
         } else {
             alert(`提交失敗: ${result.detail || JSON.stringify(result)}`);
             if (btn) { btn.disabled = false; btn.textContent = orig; }
@@ -880,13 +959,7 @@ export function onAlignProgress(data) {
     if (!data || data.mode !== 'align') return;
     const area = document.getElementById('align_progress_area');
     if (area) area.classList.remove('hidden');
-    const pct = Math.max(0, Math.min(100, Math.round(data.pct || 0)));
-    const lbl = document.getElementById('align_prog_label');
-    const num = document.getElementById('align_prog_pct');
-    const bar = document.getElementById('align_prog_bar');
-    if (lbl) lbl.textContent = data.msg || '進行中...';
-    if (num) num.textContent = pct + '%';
-    if (bar) bar.style.width = pct + '%';
+    _setAlignProgress(data.pct || 0, data.msg || '進行中...');
 }
 
 function _appendDiv(parent, className, text) {

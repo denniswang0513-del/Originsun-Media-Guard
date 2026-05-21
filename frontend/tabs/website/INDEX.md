@@ -16,7 +16,7 @@ Phase M「🌐 官網管理」Tab 前端。**跑在 Windows 既有 FastAPI 上**
 |---|---|---|
 | `dashboard.js` | 78 | 4 張 stat card + 最新詢問 + 熱門分類 |
 | `home.js` | 72 | Hero YouTube 設定 + 預覽 + 精選作品引導 |
-| `works.js` | 146 | 列表 + 分類/公開篩選 + toggle 公開/精選 |
+| `works.js` | 352 | 列表 + 分類/公開篩選 + 新增/編輯（iframe）+ AI SEO 狀態欄（待生成→一鍵生成） |
 | `categories.js` | 109 | 分類 CRUD（inline edit + 新增列） |
 | `services.js` | 128 | 服務 CRUD + 關聯分類下拉 |
 | `about.js` | 75 | 公司文案 key-value + 團隊成員預覽 |

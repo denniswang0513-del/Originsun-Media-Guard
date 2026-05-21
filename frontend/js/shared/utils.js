@@ -301,22 +301,37 @@ function _isLocalHost(agentIp) {
 // 頁面載入時立即偵測本機 IP
 _detectLocalIp();
 
-// 偵測所有主機連線狀態，更新狀態燈
+// 偵測所有主機連線狀態，更新狀態燈。
+//
+// 走 server proxy（/api/v1/agents/{id}/health）讓主控端代為 ping agent，而不是
+// 瀏覽器直連 http://<agent-LAN-IP>/...。直連的舊作法在「從遠端 https 網域
+// （foundry.originsun-studio.com / cloudflared）開後台」時會全滅：
+//   1. mixed content — https 頁面不准 fetch http 資源，瀏覽器直接擋
+//   2. 網段不通 — 遠端瀏覽器不在 192.168.1.x 內網，連不到 LAN IP
+// 這也讓本面板的燈號與「專案總覽」的機器卡片（agent-cards.js 早就用 proxy）一致。
 let _hostHealthTimer = null;
 async function _checkHostHealth() {
     const hosts = window._computeHosts || [];
     for (const h of hosts) {
         const dotId = 'host-dot-' + (h.ip || '').replace(/[.:]/g, '_');
         const dots = document.querySelectorAll(`[id="${dotId}"]`);
+        if (!h.id) continue;  // 沒 agent id 無法走 proxy — 留灰，不誤判紅
+        const setRed = () => dots.forEach(el => { el.style.background = '#ef4444'; el.style.boxShadow = 'none'; });
         try {
-            const r = await fetch('http://' + h.ip + '/api/v1/health', { signal: AbortSignal.timeout(3000) });
-            if (r.ok) {
+            const r = await fetch('/api/v1/agents/' + encodeURIComponent(h.id) + '/health',
+                                  { signal: AbortSignal.timeout(6000) });
+            let online = r.ok;
+            if (online) {
+                const d = await r.json().catch(() => null);
+                if (d && d.status === 'offline') online = false;
+            }
+            if (online) {
                 dots.forEach(el => { el.style.background = '#22c55e'; el.style.boxShadow = '0 0 4px #22c55e'; });
             } else {
-                dots.forEach(el => { el.style.background = '#ef4444'; el.style.boxShadow = 'none'; });
+                setRed();
             }
         } catch {
-            dots.forEach(el => { el.style.background = '#ef4444'; el.style.boxShadow = 'none'; });
+            setRed();
         }
     }
 }

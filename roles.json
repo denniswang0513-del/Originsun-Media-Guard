@@ -64,7 +64,15 @@
       "report",
       "transcribe",
       "tts",
-      "drone_meta",
+      "drone_meta"
+    ],
+    "description": ""
+  },
+  {
+    "id": 9,
+    "name": "Web",
+    "access_level": 3,
+    "modules": [
       "website_admin"
     ],
     "description": ""

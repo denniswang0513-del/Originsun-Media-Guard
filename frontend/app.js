@@ -154,6 +154,7 @@ if (typeof appendLog === 'undefined') {
                 .then(data => {
                     if (data) {
                         window._computeHosts = (data.agents || []).map(a => ({
+                            id: a.id,
                             name: a.name,
                             ip: (a.url || '').replace(/^https?:\/\//, '')
                         }));
@@ -662,6 +663,7 @@ if (typeof appendLog === 'undefined') {
             { checkboxes: 'cc_host_checkboxes',         panel: 'cc_host_panel',         prefix: 'cc_host_chk' },
             { checkboxes: 'vf_host_checkboxes',         panel: 'vf_host_panel',         prefix: 'vf_host_chk' },
             { checkboxes: 'tr_host_checkboxes',         panel: 'tr_host_panel',         prefix: 'tr_host_chk' },
+            { checkboxes: 'al_host_checkboxes',         panel: 'al_host_panel',         prefix: 'al_host_chk' },
             { checkboxes: 'rpt_host_checkboxes',        panel: 'rpt_host_panel',        prefix: 'rpt_host_chk' },
             { checkboxes: 'tts_host_checkboxes',        panel: 'tts_host_panel',        prefix: 'tts_host_chk' },
             { checkboxes: 'tts_clone_host_checkboxes',  panel: 'tts_clone_host_panel',  prefix: 'tts_clone_host_chk' },

@@ -1,5 +1,5 @@
 {
-  "version": "1.10.134",
-  "build_date": "2026-05-13",
-  "notes": "feat(website): /portfolio 加站級獎項紀錄 + 作品集 PDF 下載入口 — WebsiteAward 表 + Admin SEO 卡 + Astro Honors & Awards 直列卡片 + 4 輪 simplify 共 15 項清理"
+  "version": "1.10.135",
+  "build_date": "2026-05-15",
+  "notes": "refactor(website/awards): 獎項紀錄拆獨立子視圖 + 作品圖欄位 + /portfolio 看板尺度重做"
 }

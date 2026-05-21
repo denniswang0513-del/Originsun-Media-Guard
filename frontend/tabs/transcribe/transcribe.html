@@ -246,7 +246,13 @@
             <div class="bg-[#1e1e1e] border border-[#333] rounded p-3 text-xs text-gray-500 leading-relaxed">
                 💡 上傳已校稿過的文字稿，系統用 stable-ts 強制對齊到影片音訊。<br>
                 <strong class="text-gray-400">不會修改你的文字</strong>，只標時間戳。<br>
-                文字稿的原始換行（單行 / 空行分段）就是字幕的條目邊界。
+                文字稿<strong class="text-gray-400">每一行就是一條字幕</strong>（空行會自動忽略）。
+            </div>
+
+            <div id="al_host_panel" class="hidden p-3 bg-[#1a2a3a] border border-[#2e4a6e] rounded-lg">
+                <div class="text-xs text-blue-300 font-semibold mb-2">處理主機</div>
+                <div id="al_host_checkboxes" class="flex flex-wrap gap-x-4 gap-y-1"></div>
+                <p class="text-[10px] text-gray-500 mt-2">對齊需 stable-ts / Whisper 環境，建議選擇已安裝的主機（如錄音室電腦）。</p>
             </div>
         </div>
     </div>
@@ -311,11 +317,10 @@
 
         <textarea id="align_bind_text"
             class="flex-1 min-h-[260px] bg-[#0e0e0e] border border-[#444] rounded p-3 text-sm text-gray-200 font-mono focus:outline-none focus:border-emerald-500 resize-vertical"
-            placeholder="把校稿過的文字稿貼進來。每段（空行分隔）或每行（無空行時）會變成一條字幕。
+            placeholder="把校稿過的文字稿貼進來。每一行會變成一條字幕（空行會自動忽略）。
 
 例：
 今天我想聊一個備份的話題
-
 備份其實有三個層次
 第一個是本機備份"></textarea>
 

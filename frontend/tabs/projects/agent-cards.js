@@ -17,6 +17,7 @@ import { _text, _isNewer } from './projects.js';
 
 function _syncComputeHosts() {
     window._computeHosts = _agents.map(a => ({
+        id: a.id,
         name: a.name,
         ip: (a.url || '').replace(/^https?:\/\//, '')
     }));

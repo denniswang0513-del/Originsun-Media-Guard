@@ -545,6 +545,13 @@ async def _run_align(job, engine, task: AlignRequest):
         m = re.match(r'\[(\d+)/(\d+)\]', msg)
         done = int(m.group(1)) if m else 0
         tot = int(m.group(2)) if m else total
+        # Keep job.progress fresh: align can run cross-machine (the 處理主機
+        # selector dispatches it to a host with the ML stack), and a remote
+        # browser polls /api/v1/status — which surfaces active_jobs[id].progress.
+        job.progress = {
+            'total_pct': pct, 'pct': pct, 'msg': msg,
+            'done_files': done, 'total_files': tot, 'mode': 'align',
+        }
         asyncio.run_coroutine_threadsafe(
             sio.emit('transcribe_progress', {
                 'pct': pct, 'msg': msg, 'job_id': job_id,

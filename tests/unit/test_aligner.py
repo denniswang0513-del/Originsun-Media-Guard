@@ -32,13 +32,14 @@ class TestParseTranscript:
         segs = parse_transcript(text, "txt")
         assert segs == ["第一行", "第二行", "第三行"]
 
-    def test_txt_blank_lines_take_priority(self):
-        # Has blank lines → split on blanks, each para keeps its inner \n
+    def test_txt_every_line_is_one_cue(self):
+        # Every non-blank line is its own cue; blank lines are ignored —
+        # consecutive lines are NEVER merged into a multi-line cue, even
+        # when blank lines appear elsewhere in the file.
         text = "第一段第一行\n第一段第二行\n\n第二段"
         segs = parse_transcript(text, "txt")
-        assert len(segs) == 2
-        assert segs[0] == "第一段第一行\n第一段第二行"
-        assert segs[1] == "第二段"
+        assert segs == ["第一段第一行", "第一段第二行", "第二段"]
+        assert all("\n" not in s for s in segs)
 
     def test_txt_empty(self):
         assert parse_transcript("", "txt") == []
