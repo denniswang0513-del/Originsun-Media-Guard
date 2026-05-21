@@ -1,5 +1,5 @@
 {
-  "version": "1.10.135",
-  "build_date": "2026-05-15",
-  "notes": "refactor(website/awards): 獎項紀錄拆獨立子視圖 + 作品圖欄位 + /portfolio 看板尺度重做"
+  "version": "1.10.136",
+  "build_date": "2026-05-21",
+  "notes": "fix(website+agents): 處理主機健康燈走 server proxy 修遠端後台全紅 + 子視圖載入重試 + 新增作品 skeleton 流程 + SEO runner master relay"
 }
