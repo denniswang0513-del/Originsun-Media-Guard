@@ -52,19 +52,44 @@
 
 ## 2. 快速啟動
 
+> ⚠️ **本機（`e:\Dev` 開發 checkout）與生產主 agent 共存，務必先讀第 2.1 節共存守則。**
+> 簡言之：**dev 一律用 8001 啟動、絕不在本機 `/publish`**。生產主 agent
+> （`C:\OriginsunAgent`，v1.10.131）開機自啟、佔用 **8000**，別去碰它。
+
 ```powershell
-# 開發模式（無熱重載）
-e:\Dev\Originsun-Media-Guard\.venv\Scripts\python.exe main.py
-
-# 開發模式（有熱重載，推薦）
-# 注意：hot reload 只能用於 FastAPI 路由，不包含 tts_engine.py 頂部的 patch 副作用
-e:\Dev\Originsun-Media-Guard\.venv\Scripts\uvicorn.exe main:io_app --host 0.0.0.0 --port 8000 --reload
-
-# 背景無視窗啟動（正式部署方式）
-wscript.exe start_hidden.vbs
+# ✅ 開發模式（熱重載，dev 專用 8001）— 本機唯一正確的啟動方式
+e:\Dev\Originsun-Media-Guard\dev_start.ps1
+# 等同：.venv\Scripts\uvicorn.exe main:io_app --host 0.0.0.0 --port 8001 --reload
+# 注意：hot reload 只能用於 FastAPI 路由，不含 tts_engine.py 頂部的 patch 副作用
 ```
 
-服務啟動後，前端在 `http://localhost:8000`（或 `http://192.168.1.11:8000`）。
+```powershell
+# ❌ 危險：以下指令會綁 8000，在本機 = 撞生產主 agent，禁止使用
+#   .venv\Scripts\python.exe main.py            ← main.py 預設 port=8000
+#   .venv\Scripts\uvicorn.exe ... --port 8000   ← 同上
+#   wscript.exe start_hidden.vbs                ← start_hidden.vbs→main.py→8000
+# 這三條只適用於「乾淨的生產機」，不適用於跑著 agent 的本開發機。
+```
+
+dev 服務啟動後在 `http://localhost:8001`；生產 agent 在 `http://localhost:8000`。
+
+### 2.1 開發 / 生產共存守則（本機 `e:\Dev` 必讀）
+
+本開發機同時存在兩套實例，**資料層已隔離、但操作層有兩個地雷**：
+
+| 實例 | 路徑 | Port | DB | 啟動方式 |
+|------|------|------|----|---------|
+| **dev checkout** | `e:\Dev\Originsun-Media-Guard` | 8001 | `mediaguard_dev` | 手動 `dev_start.ps1` |
+| **生產主 agent** | `C:\OriginsunAgent` | 8000 | `mediaguard`（生產） | 開機自啟（Startup 捷徑） |
+
+- ✅ **DB 已分離**：dev→`mediaguard_dev`、生產→`mediaguard`（同 NAS Postgres 不同庫）。
+  dev 測試的任務歷史 / CRM / 使用者 / 報表索引 / 排程都進 `_dev`，**不污染生產、排程不重複觸發**。
+- 🔴 **地雷 1：Port 8000**。`python main.py` 預設 8000，會撞生產 agent。**dev 只用 8001**。
+- 🔴 **地雷 2：`/publish`**。dev 的 `agents` 清單＝真實生產機隊（192.168.1.120/.107）。
+  在本機 `/publish` 或 OTA 會把 dev 程式碼推到整個生產機隊。**本機不發版**，要發版去乾淨環境或明確確認。
+- 🟡 NAS 檔案夾（reports/voice）與 JWT secret 為 dev/生產共用，影響小（索引已 DB 分離）。
+- ⚠️ autostart 腳本（`create_startup_shortcut.ps1` 等）**不可**改指 `e:\Dev`——
+  會讓 dev 開機自啟在 8000，每次開機撞生產 agent。維持指向 `C:\OriginsunAgent` 或棄用。
 
 ---
 
