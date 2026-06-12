@@ -1,0 +1,30 @@
+# ─── Originsun Media Guard Pro — Full Server Dependencies ───
+# 主控端（master / 開發機）完整依賴。新機搬遷一次裝齊：
+#   .venv\Scripts\python.exe -m pip install -r requirements_server.txt
+#
+# 與其他 requirements 檔的分工：
+#   requirements.txt        — 精簡核心（被 f5-tts 等帶出大量相依）
+#   requirements_agent.txt  — 代理機精簡版（故意排除 torch/whisper/TTS/DB 等 server-only）
+#   requirements_server.txt — 本檔，主控端完整版（= 核心 + server-only，釘版號）
+#
+# server-only 套件版本以 2026-06-13 搬遷時實裝為準；升級後請同步更新。
+
+# ── 核心（沿用 requirements.txt）──
+-r requirements.txt
+
+# ── server-only：語音辨識 / 報表 PDF / 排程 ──
+faster-whisper==1.2.1      # Whisper 逐字稿 + F5-TTS 參考音轉錄
+playwright==1.60.0         # 報表 PDF 輸出 + e2e / /test UI（裝後需 `python -m playwright install chromium`）
+croniter==6.2.2            # core/scheduler.py cron 排程
+
+# ── server-only：集中資料庫（PostgreSQL）──
+SQLAlchemy==2.0.50
+asyncpg==0.31.0
+
+# ── server-only：音訊 / IO（多為相依，明列避免漏裝）──
+soundfile==0.14.0          # tts_engine.py torchaudio.load patch 用
+aiofiles==24.1.0
+python-multipart==0.0.32
+httpx==0.28.1
+Pillow==12.2.0
+torch==2.12.0              # f5-tts 會帶，明列以固定版本

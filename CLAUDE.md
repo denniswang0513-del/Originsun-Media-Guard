@@ -3,7 +3,7 @@
 > **版本**: v1.10.136（2026-05-21）
 > **目標讀者**: 接手開發的 AI 協作者（Claude Code）
 > **開發環境**: Windows 11、Python 3.11、Vanilla JS (ES Modules)
-> **啟動方式**: `d:\Antigravity\OriginsunTranscode\.venv\Scripts\python.exe main.py`
+> **啟動方式**: `e:\Dev\Originsun-Media-Guard\.venv\Scripts\python.exe main.py`
 > **✅ Phase M 完整版 A 部署完成**: 對外官方網站（`originsun-studio.com`）
 > • 對外服務 24/7 在 NAS（192.168.1.132），master Windows 可隨時關機/重啟對外不掉
 > • **NAS 容器**：`Website_Nginx`（port 8090→80，serve dist/ + proxy /api/website/*）
@@ -54,11 +54,11 @@
 
 ```powershell
 # 開發模式（無熱重載）
-d:\Antigravity\OriginsunTranscode\.venv\Scripts\python.exe main.py
+e:\Dev\Originsun-Media-Guard\.venv\Scripts\python.exe main.py
 
 # 開發模式（有熱重載，推薦）
 # 注意：hot reload 只能用於 FastAPI 路由，不包含 tts_engine.py 頂部的 patch 副作用
-d:\Antigravity\OriginsunTranscode\.venv\Scripts\uvicorn.exe main:io_app --host 0.0.0.0 --port 8000 --reload
+e:\Dev\Originsun-Media-Guard\.venv\Scripts\uvicorn.exe main:io_app --host 0.0.0.0 --port 8000 --reload
 
 # 背景無視窗啟動（正式部署方式）
 wscript.exe start_hidden.vbs
@@ -964,7 +964,7 @@ class ValidatePathsRequest(BaseModel):
 檔案寫入磁碟 ≠ 任務完成。每次修改 `.py` 檔案後，必須執行：
 ```bash
 # Python 語法檢查
-d:\Antigravity\OriginsunTranscode\.venv\Scripts\python.exe -m py_compile <modified_file>
+e:\Dev\Originsun-Media-Guard\.venv\Scripts\python.exe -m py_compile <modified_file>
 ```
 前端 `.js` / `.html` 修改後，必須確認：
 - HTML div/tag 平衡（特別是 CRM 巢狀模板字串）
