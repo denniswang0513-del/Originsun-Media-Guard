@@ -13,7 +13,7 @@ Generate a session briefing for the Originsun Media Guard Pro project. This skil
 
 ### Step 2: Read Memory files (run ALL in parallel)
 
-Read the following files from the memory directory `C:\Users\XXX\.claude\projects\d--Antigravity-OriginsunTranscode\memory\`:
+Read the following files from the memory directory `C:\Users\originsun\.claude\projects\e--Dev-Originsun-Media-Guard\memory\`:
 
 1. `MEMORY.md` — index of all memories
 2. `project_overall_progress.md` — completed phases and next steps
