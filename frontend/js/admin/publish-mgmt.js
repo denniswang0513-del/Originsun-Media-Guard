@@ -118,13 +118,24 @@ window._openPublishMgmt = async function () {
     overlay.appendChild(modal);
     document.body.appendChild(overlay);
 
-    // Dev test server (port 8001) only: expose "deploy to prod 8000" button.
-    if (window.location.port === '8001') {
-        const db = document.getElementById('pub-deploy-btn');
-        const dh = document.getElementById('pub-deploy-hint');
-        if (db) db.style.display = 'flex';
-        if (dh) dh.style.display = 'block';
-    }
+    // Show "deploy to prod 8000" only when the BACKEND says this is a dev
+    // checkout (not the prod checkout). Robust across localhost / LAN /
+    // cloudflared tunnel — unlike a client-side window.location.port check.
+    fetch('/api/v1/deploy_to_prod', { headers: _authHeaders(), signal: AbortSignal.timeout(5000) })
+        .then(r => r.json())
+        .then(d => {
+            if (!d || !d.eligible) return;
+            const db = document.getElementById('pub-deploy-btn');
+            const dh = document.getElementById('pub-deploy-hint');
+            if (db) db.style.display = 'flex';
+            if (dh) {
+                dh.style.display = 'block';
+                dh.textContent = '把這台 dev 的程式碼複製進 ' + (d.prod_dir || 'C:\\OriginsunAgent') +
+                    (d.prod_version ? '（目前生產 v' + d.prod_version + '）' : '') +
+                    ' 並重啟 8000；不會動到機隊。settings/字典/帳號保留。';
+            }
+        })
+        .catch(() => { /* offline / no backend — leave button hidden */ });
 
     // Inject bump button styles
     if (!document.getElementById('_pubBumpStyles')) {

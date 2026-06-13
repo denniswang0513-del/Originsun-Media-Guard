@@ -575,6 +575,39 @@ def _deploy_to_prod_sync(version: str, notes: str) -> dict:
     return {"ok": True, "log": "\n".join(log)}
 
 
+@router.get("/api/v1/deploy_to_prod")
+async def deploy_to_prod_eligible():
+    """Report whether THIS instance may deploy to the production master.
+
+    Used by the publish modal to decide whether to show the deploy button —
+    robust across access paths (localhost / LAN / cloudflared tunnel), unlike
+    a client-side window.location.port check. Eligible when this checkout is
+    not the prod checkout and the prod checkout exists.
+    """
+    src = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    same = os.path.normcase(os.path.abspath(src)) == os.path.normcase(os.path.abspath(_PROD_DIR))
+    prod_ok = os.path.isdir(_PROD_DIR) and os.path.exists(os.path.join(_PROD_DIR, "main.py"))
+    prod_version = None
+    if prod_ok:
+        try:
+            with open(os.path.join(_PROD_DIR, "version.json"), "r", encoding="utf-8") as f:
+                prod_version = json.load(f).get("version")
+        except Exception:
+            pass
+    reason = ""
+    if same:
+        reason = "目前就在生產 checkout，無需部署"
+    elif not prod_ok:
+        reason = f"生產目錄不存在: {_PROD_DIR}"
+    return {
+        "eligible": (not same) and prod_ok,
+        "reason": reason,
+        "prod_dir": _PROD_DIR,
+        "prod_version": prod_version,
+        "this_dir": src,
+    }
+
+
 @router.post("/api/v1/deploy_to_prod")
 async def deploy_to_prod(request: Request):
     """Deploy this dev checkout's code into the production master (8000) and
