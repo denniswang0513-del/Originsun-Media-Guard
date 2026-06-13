@@ -455,6 +455,63 @@ async def publish_status(job_id: str = Query("")):
     return _publish_status[job_id]
 
 
+@router.get("/api/v1/publish/suggest_notes")
+async def suggest_release_notes(since_version: str = Query("")):
+    """Suggest release notes from git commit subjects since a baseline version.
+
+    Baseline = ``since_version`` if given (e.g. prod's version when deploying
+    8001→8000), else this checkout's current version.json. Finds the
+    release/bump commit that introduced that version and lists the commit
+    subjects after it, filtering version-bump / doc-bump noise. Falls back to
+    the most recent commits when the base can't be located or git is absent.
+    """
+    base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+    def _git(args, timeout=8):
+        try:
+            r = subprocess.run(["git"] + args, cwd=base_dir, capture_output=True,
+                               text=True, timeout=timeout, encoding="utf-8", errors="replace")
+            return r.stdout.strip() if r.returncode == 0 else ""
+        except Exception:
+            return ""
+
+    baseline = (since_version or "").strip()
+    if not baseline:
+        vpath = os.path.join(base_dir, "version.json")
+        if os.path.exists(vpath):
+            try:
+                with open(vpath, "r", encoding="utf-8") as f:
+                    baseline = json.load(f).get("version", "")
+            except Exception:
+                baseline = ""
+
+    base_sha = _git(["log", "-n", "1", "--format=%H", "--grep", re.escape(baseline)]) if baseline else ""
+    if base_sha:
+        raw = _git(["log", f"{base_sha}..HEAD", "--no-merges", "--format=%s"])
+    else:
+        raw = _git(["log", "-n", "20", "--no-merges", "--format=%s"])
+
+    if not raw:
+        return {"notes": "", "baseline_version": baseline, "base": base_sha, "count": 0, "total": 0}
+
+    # Drop version-bump / release / doc-bump commits — keep real changes.
+    noise = re.compile(r"^(chore\(release\)|chore\(publish\)|docs\(release\)|chore\(docs\).*bump)", re.I)
+    subjects, seen = [], set()
+    for s in (ln.strip() for ln in raw.splitlines()):
+        if not s or noise.search(s) or s in seen:
+            continue
+        seen.add(s)
+        subjects.append(s)
+
+    total = len(subjects)
+    CAP = 12
+    notes = "; ".join(subjects[:CAP])
+    if total > CAP:
+        notes += f"; …等共 {total} 項變更"
+    return {"notes": notes, "baseline_version": baseline, "base": base_sha,
+            "count": min(total, CAP), "total": total}
+
+
 @router.get("/api/v1/publish/history")
 async def get_publish_history():
     """Return recent publish history."""

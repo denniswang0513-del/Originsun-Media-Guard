@@ -19,6 +19,7 @@ function _compareSemver(a, b) {
 }
 
 let _curVer = '';
+let _notesBaseline = '';  // version to diff release notes against (prod ver when deploying)
 
 window._openPublishMgmt = async function () {
     _ensureModalStyles();
@@ -60,8 +61,10 @@ window._openPublishMgmt = async function () {
                 <button class="_pub-bump" onclick="window._pubBump('major')">+1.0.0 Major</button>
             </div>
             <div class="_fm-field">
-                <label class="_fm-label">Release Notes</label>
-                <textarea id="pub-notes" class="_fm-input" placeholder="此版本的變更內容..." rows="2" style="resize:vertical;min-height:50px;"></textarea>
+                <label class="_fm-label">Release Notes
+                    <button type="button" onclick="window._pubSuggestNotes(true)" title="從上次版本以來的 git 變更自動產生" style="margin-left:6px;background:none;border:1px solid #555;color:#aaa;border-radius:4px;padding:1px 7px;cursor:pointer;font-size:10px;">↻ 自動產生</button>
+                </label>
+                <textarea id="pub-notes" class="_fm-input" placeholder="開啟時自動帶入 git 變更，可手動編輯…" rows="2" style="resize:vertical;min-height:50px;"></textarea>
             </div>
 
             <!-- Publish Button -->
@@ -124,18 +127,23 @@ window._openPublishMgmt = async function () {
     fetch('/api/v1/deploy_to_prod', { headers: _authHeaders(), signal: AbortSignal.timeout(5000) })
         .then(r => r.json())
         .then(d => {
-            if (!d || !d.eligible) return;
-            const db = document.getElementById('pub-deploy-btn');
-            const dh = document.getElementById('pub-deploy-hint');
-            if (db) db.style.display = 'flex';
-            if (dh) {
-                dh.style.display = 'block';
-                dh.textContent = '把這台 dev 的程式碼複製進 ' + (d.prod_dir || 'C:\\OriginsunAgent') +
-                    (d.prod_version ? '（目前生產 v' + d.prod_version + '）' : '') +
-                    ' 並重啟 8000；不會動到機隊。settings/字典/帳號保留。';
+            if (d && d.eligible) {
+                const db = document.getElementById('pub-deploy-btn');
+                const dh = document.getElementById('pub-deploy-hint');
+                if (db) db.style.display = 'flex';
+                if (dh) {
+                    dh.style.display = 'block';
+                    dh.textContent = '把這台 dev 的程式碼複製進 ' + (d.prod_dir || 'C:\\OriginsunAgent') +
+                        (d.prod_version ? '（目前生產 v' + d.prod_version + '）' : '') +
+                        ' 並重啟 8000；不會動到機隊。settings/字典/帳號保留。';
+                }
+                // When deploying to prod, diff notes against PROD's version.
+                _notesBaseline = d.prod_version || '';
             }
+            // else: normal publish — backend defaults baseline to current version.json
+            window._pubSuggestNotes(false);
         })
-        .catch(() => { /* offline / no backend — leave button hidden */ });
+        .catch(() => { window._pubSuggestNotes(false); });
 
     // Inject bump button styles
     if (!document.getElementById('_pubBumpStyles')) {
@@ -182,6 +190,24 @@ window._pubBump = function (type) {
     if (type === 'major') { p[0]++; p[1] = 0; p[2] = 0; }
     const el = document.getElementById('pub-new-ver');
     if (el) el.value = p.join('.');
+};
+
+// Auto-fill Release Notes from git commit subjects since the baseline version.
+// force=false: only fills when the field is empty (won't clobber user input).
+// force=true:  always regenerate (the ↻ button).
+window._pubSuggestNotes = async function (force) {
+    const ta = document.getElementById('pub-notes');
+    if (!ta) return;
+    if (!force && ta.value.trim()) return;
+    try {
+        const q = _notesBaseline ? ('?since_version=' + encodeURIComponent(_notesBaseline)) : '';
+        const r = await fetch('/api/v1/publish/suggest_notes' + q, {
+            headers: _authHeaders(), signal: AbortSignal.timeout(8000),
+        });
+        const d = await r.json().catch(() => null);
+        if (d && d.notes) ta.value = d.notes;
+        else if (force) _setStatus('err', '沒有可用的 git 變更可帶入');
+    } catch (_) { /* offline / no git — leave field as-is */ }
 };
 
 window._pubLoadAgents = async function () {
