@@ -32,6 +32,17 @@ _PUBLISH_HISTORY_FILE = os.path.join(
     os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "publish_history.json"
 )
 
+# ── Dev → Prod deploy (8001 dev checkout → 8000 production master) ────────
+# Same machine (192.168.1.107): copy dev code into the production checkout,
+# then restart 8000 so it loads the new code. Fleet stays on its own OTA.
+_PROD_DIR = r"C:\OriginsunAgent"
+_PROD_RESTART_URL = "http://127.0.0.1:8000/api/v1/internal/restart"
+# Runtime-state files that live in AGENT_FILES but must NOT clobber prod:
+#   settings.json   → prod DB config (mediaguard, not _dev) + notify tokens
+#   taiwan_dict.json→ hot-edited on prod via the 正音字典 UI
+#   users.json      → prod accounts (not in AGENT_FILES, excluded defensively)
+_DEPLOY_EXCLUDE_FILES = {"settings.json", "taiwan_dict.json", "users.json"}
+
 
 def _append_publish_history(version: str, notes: str, success: bool, user: str = "admin"):
     """Append a publish record to publish_history.json."""
@@ -189,7 +200,7 @@ async def download_updater(request: Request):
     """Generate a one-click updater bat for first-time migration to HTTP OTA."""
     from fastapi.responses import Response
     # Use the request's host so the bat always points back to this server
-    server_url = f"http://{request.headers.get('host', '192.168.1.11:8000')}"
+    server_url = f"http://{request.headers.get('host', '192.168.1.107:8000')}"
     bat_content = f"""@echo off
 chcp 65001 >nul
 title Originsun Agent - 一鍵升級
@@ -274,7 +285,7 @@ ping 127.0.0.1 -n 3 >nul
 async def bootstrap_ps1(request: Request):
     """Serve a PowerShell bootstrap script for one-command agent migration."""
     from fastapi.responses import Response
-    server_url = f"http://{request.headers.get('host', '192.168.1.11:8000')}"
+    server_url = f"http://{request.headers.get('host', '192.168.1.107:8000')}"
     ps_content = f"""# Originsun Agent - One-Command Upgrade
 # Usage: powershell -c "irm {server_url}/bootstrap.ps1 | iex"
 [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
@@ -487,3 +498,157 @@ async def publish_rollback(request: Request):
         return {"status": "ok", "message": f"Rolled back to v{ver}"}
     except Exception as e:
         return JSONResponse({"status": "error", "message": str(e)}, 500)
+
+
+# ── Dev → Prod deploy ─────────────────────────────────────────────────────
+
+def _deploy_to_prod_sync(version: str, notes: str) -> dict:
+    """Copy this (dev) checkout's code into the production checkout (_PROD_DIR),
+    bumping version.json and skipping runtime-state files. Runs in a thread.
+
+    Returns {"ok": bool, "log": str}. Does NOT restart 8000 (caller does).
+    """
+    from ota_manifest import AGENT_FILES, AGENT_DIRS, EXCLUDE_DIRS
+    src = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    dst = _PROD_DIR
+    log: list = []
+
+    # ── Guards ──
+    if os.path.normcase(os.path.abspath(src)) == os.path.normcase(os.path.abspath(dst)):
+        return {"ok": False, "log": f"來源與目標相同（{src}）— 這不是 dev checkout，拒絕部署。"}
+    if not os.path.isdir(dst) or not os.path.exists(os.path.join(dst, "main.py")):
+        return {"ok": False, "log": f"生產目錄不存在或不是 agent checkout: {dst}"}
+
+    # ── Preflight on dev code BEFORE touching prod ──
+    preflight = os.path.join(src, "preflight.py")
+    if os.path.exists(preflight):
+        pf = subprocess.run([sys.executable, preflight], capture_output=True, text=True,
+                            timeout=60, cwd=src)
+        if pf.returncode != 0:
+            return {"ok": False, "log": "Preflight 失敗，未動生產：\n" + (pf.stdout or pf.stderr)[:1500]}
+        log.append("[OK] Preflight 通過")
+
+    # ── Bump dev version.json (gets copied to prod below) ──
+    vpath = os.path.join(src, "version.json")
+    vdata = {}
+    if os.path.exists(vpath):
+        with open(vpath, "r", encoding="utf-8") as f:
+            vdata = json.load(f)
+    vdata["version"] = version
+    vdata["build_date"] = datetime.now().strftime("%Y-%m-%d")
+    vdata["notes"] = notes
+    tmp = vpath + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as f:
+        json.dump(vdata, f, indent=2, ensure_ascii=False)
+    os.replace(tmp, vpath)
+    log.append(f"[OK] dev version.json → v{version}")
+
+    # ── Copy files ──
+    copied = 0
+    for fn in AGENT_FILES:
+        if fn in _DEPLOY_EXCLUDE_FILES:
+            log.append(f"[SKIP] {fn}（生產執行期資料，保留不覆蓋）")
+            continue
+        sp = os.path.join(src, fn)
+        if os.path.exists(sp):
+            shutil.copy2(sp, os.path.join(dst, fn))
+            copied += 1
+
+    # ── Copy dirs (recursive, skip excluded dirs / __pycache__ / state files) ──
+    for d in AGENT_DIRS:
+        sdir = os.path.join(src, d)
+        if not os.path.isdir(sdir):
+            continue
+        for root, dirs, files in os.walk(sdir):
+            dirs[:] = [x for x in dirs if x not in EXCLUDE_DIRS and x != "__pycache__"]
+            rel = os.path.relpath(root, src)
+            tgt = os.path.join(dst, rel)
+            os.makedirs(tgt, exist_ok=True)
+            for f in files:
+                if f in _DEPLOY_EXCLUDE_FILES:
+                    continue
+                shutil.copy2(os.path.join(root, f), os.path.join(tgt, f))
+                copied += 1
+        log.append(f"[OK] 目錄 {d}/ 已複製")
+
+    log.append(f"[OK] 共 {copied} 個檔案 → {dst}")
+    return {"ok": True, "log": "\n".join(log)}
+
+
+@router.post("/api/v1/deploy_to_prod")
+async def deploy_to_prod(request: Request):
+    """Deploy this dev checkout's code into the production master (8000) and
+    restart it. Same-machine local copy; fleet agents are NOT touched.
+
+    Returns immediately with job_id; poll /api/v1/publish/status for progress.
+    """
+    _check_admin(request)
+
+    if _publish_lock.locked():
+        return JSONResponse({"status": "error", "message": "另一次發布/部署正在進行中，請稍後再試"}, 409)
+
+    body = await request.json()
+    version = body.get("version", "").strip()
+    notes = body.get("notes", "").strip()
+    if not version or not re.match(r"^\d+\.\d+\.\d+$", version):
+        return JSONResponse({"status": "error", "message": f"版本格式需為 X.Y.Z: {version}"}, 400)
+    if not notes:
+        notes = "Deploy to prod"
+
+    pub_user = "admin"
+    try:
+        from core.auth import _extract_token
+        payload = _extract_token(request)
+        if payload:
+            pub_user = payload.get("sub", "admin")
+    except Exception:
+        pass
+
+    import uuid as _uuid
+    job_id = _uuid.uuid4().hex[:8]
+    _publish_status[job_id] = {"status": "running", "log": "", "version": version}
+
+    async def _run():
+        async with _publish_lock:
+            try:
+                result = await asyncio.to_thread(_deploy_to_prod_sync, version, notes)
+                deploy_log = result.get("log", "")
+                if not result.get("ok"):
+                    _append_publish_history(version, f"DEPLOY→8000 FAILED: {notes}", False, pub_user)
+                    _publish_status[job_id] = {
+                        "status": "error", "log": deploy_log, "version": version,
+                        "message": "部署失敗（生產未重啟）",
+                    }
+                    return
+
+                # ── Restart 8000 so it loads the freshly-copied code ──
+                # internal/restart works on the currently-running (old) 8000 too;
+                # its OTA step no-ops (same version), then the detached helper
+                # relaunches uvicorn on the new on-disk code.
+                restart_msg = ""
+                def _restart():
+                    import urllib.request
+                    req = urllib.request.Request(
+                        _PROD_RESTART_URL, method="POST", data=b"{}",
+                        headers={"Content-Type": "application/json",
+                                 "X-Internal-Key": "originsun-internal-restart"},
+                    )
+                    urllib.request.urlopen(req, timeout=5)
+                try:
+                    await asyncio.to_thread(_restart)
+                    restart_msg = "已觸發 8000 重啟"
+                except Exception as e:
+                    restart_msg = f"檔案已部署，但重啟 8000 失敗（請手動重啟）: {e}"
+
+                _append_publish_history(version, f"DEPLOY→8000: {notes}", True, pub_user)
+                _publish_status[job_id] = {
+                    "status": "done", "log": deploy_log + f"\n[OK] {restart_msg}",
+                    "version": version,
+                    "message": f"v{version} 已部署到生產 8000；{restart_msg}（約 10 秒後生效）",
+                }
+            except Exception as e:
+                _append_publish_history(version, f"DEPLOY→8000 ERROR: {notes}", False, "system")
+                _publish_status[job_id] = {"status": "error", "log": "", "version": version, "message": str(e)}
+
+    asyncio.create_task(_run())
+    return {"status": "started", "job_id": job_id}

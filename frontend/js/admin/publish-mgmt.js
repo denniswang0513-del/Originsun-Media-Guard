@@ -68,6 +68,13 @@ window._openPublishMgmt = async function () {
             <button id="pub-btn" onclick="window._pubPublish()" style="width:100%;padding:10px;background:linear-gradient(135deg,#6d28d9,#8b5cf6);color:#fff;border:none;border-radius:8px;font-size:14px;font-weight:600;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:8px;">
                 🚀 發布
             </button>
+
+            <!-- Deploy to prod 8000 (dev/8001 only — shown at runtime) -->
+            <button id="pub-deploy-btn" onclick="window._pubDeployProd()" style="display:none;width:100%;padding:10px;margin-top:8px;background:linear-gradient(135deg,#0f766e,#14b8a6);color:#fff;border:none;border-radius:8px;font-size:14px;font-weight:600;cursor:pointer;align-items:center;justify-content:center;gap:8px;">
+                📦 部署到生產 8000
+            </button>
+            <div id="pub-deploy-hint" style="display:none;margin-top:6px;font-size:11px;color:#5eead4;">把這台 dev(8001) 的程式碼複製進 C:\\OriginsunAgent 並重啟 8000；不會動到機隊。settings/字典/帳號保留。</div>
+
             <div style="display:flex;gap:8px;margin-top:8px;">
                 <button onclick="window._pubRollback()" style="padding:5px 12px;border-radius:6px;font-size:11px;border:1px solid rgba(239,68,68,0.4);background:transparent;color:#f87171;cursor:pointer;">回滾到上一版</button>
             </div>
@@ -110,6 +117,14 @@ window._openPublishMgmt = async function () {
     `;
     overlay.appendChild(modal);
     document.body.appendChild(overlay);
+
+    // Dev test server (port 8001) only: expose "deploy to prod 8000" button.
+    if (window.location.port === '8001') {
+        const db = document.getElementById('pub-deploy-btn');
+        const dh = document.getElementById('pub-deploy-hint');
+        if (db) db.style.display = 'flex';
+        if (dh) dh.style.display = 'block';
+    }
 
     // Inject bump button styles
     if (!document.getElementById('_pubBumpStyles')) {
@@ -301,6 +316,72 @@ window._pubPublish = async function () {
         logBox.innerHTML += '\n<span style="color:#ef4444">[ERROR] ' + _esc(e.message) + '</span>';
         btn.disabled = false;
         btn.innerHTML = '🚀 發布';
+    }
+};
+
+// Deploy this dev (8001) checkout's code → production master (8000) + restart 8000.
+// Fleet agents are NOT touched. Shown only when running on port 8001.
+window._pubDeployProd = async function () {
+    const version = document.getElementById('pub-new-ver')?.value.trim();
+    const notes = document.getElementById('pub-notes')?.value.trim();
+    const btn = document.getElementById('pub-deploy-btn');
+    const logBox = document.getElementById('pub-log');
+
+    if (!version || !/^\d+\.\d+\.\d+$/.test(version)) { _setStatus('err', '版本格式需為 X.Y.Z'); return; }
+    if (!notes) { _setStatus('err', '請輸入 Release Notes'); return; }
+
+    if (!confirm('📦 部署到生產 8000？\n\n會把這台 dev(8001) 的程式碼複製進 C:\\OriginsunAgent，' +
+        '寫成 v' + version + ' 並重啟 8000。\n\n• 不會推送到機隊（120/107…）\n' +
+        '• 保留生產的 settings.json / 正音字典 / 帳號\n\nNotes: ' + notes)) return;
+
+    btn.disabled = true;
+    const _orig = btn.innerHTML;
+    btn.innerHTML = '<span style="display:inline-block;width:14px;height:14px;border:2px solid #555;border-top-color:#14b8a6;border-radius:50%;animation:spin .8s linear infinite;"></span> 部署中...';
+    _setStatus('loading', '部署到生產 8000 中...');
+    logBox.textContent = '[' + new Date().toLocaleTimeString() + '] Deploying v' + version + ' → 8000...\n';
+
+    const _done = (ok, msg) => { btn.disabled = false; btn.innerHTML = _orig; _setStatus(ok ? 'ok' : 'err', msg); };
+
+    try {
+        const r = await fetch('/api/v1/deploy_to_prod', {
+            method: 'POST', headers: _authHeaders(),
+            body: JSON.stringify({ version, notes }),
+        });
+        if (r.status === 401) { _done(false, '認證已過期，請重新登入'); return; }
+        if (r.status === 409) { _done(false, '另一個發布/部署正在進行中'); return; }
+        const d = await r.json().catch(() => null);
+        if (!d || !d.job_id) { _done(false, d?.message || '部署啟動失敗'); return; }
+
+        logBox.innerHTML += '[' + new Date().toLocaleTimeString() + '] 部署任務已啟動 (job: ' + d.job_id + ')...\n';
+        const jobId = d.job_id;
+        const poll = setInterval(async () => {
+            try {
+                const sr = await fetch('/api/v1/publish/status?job_id=' + jobId, { headers: _authHeaders() });
+                const sd = await sr.json().catch(() => null);
+                if (!sd || sd.status === 'running') return;
+                clearInterval(poll);
+                if (sd.log) {
+                    logBox.innerHTML += '\n' + _esc(sd.log)
+                        .replace(/\[OK\]/g, '<span style="color:#22c55e">[OK]</span>')
+                        .replace(/\[SKIP\]/g, '<span style="color:#fbbf24">[SKIP]</span>')
+                        .replace(/Preflight 失敗/g, '<span style="color:#ef4444">Preflight 失敗</span>');
+                    logBox.scrollTop = logBox.scrollHeight;
+                }
+                if (sd.status === 'done') {
+                    _done(true, sd.message || ('v' + version + ' 已部署到 8000'));
+                    setTimeout(() => { _loadHistory(); }, 1500);
+                } else {
+                    _done(false, sd.message || '部署失敗');
+                }
+            } catch (_) { /* retry next interval */ }
+        }, 2000);
+        setTimeout(() => {
+            clearInterval(poll);
+            if (btn.disabled) _done(false, '部署逾時（10 分鐘）');
+        }, 600000);
+    } catch (e) {
+        _done(false, 'Error: ' + e.message);
+        logBox.innerHTML += '\n<span style="color:#ef4444">[ERROR] ' + _esc(e.message) + '</span>';
     }
 };
 
