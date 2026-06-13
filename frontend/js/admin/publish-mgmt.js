@@ -78,6 +78,12 @@ window._openPublishMgmt = async function () {
             </button>
             <div id="pub-deploy-hint" style="display:none;margin-top:6px;font-size:11px;color:#5eead4;">把這台 dev(8001) 的程式碼複製進 C:\\OriginsunAgent 並重啟 8000；不會動到機隊。settings/字典/帳號保留。</div>
 
+            <!-- Push to entire fleet (dev only) — agents pull from master 8000 -->
+            <button id="pub-fleet-btn" onclick="window._pubPushFleet()" style="display:none;width:100%;padding:10px;margin-top:8px;background:linear-gradient(135deg,#9a3412,#ea580c);color:#fff;border:none;border-radius:8px;font-size:14px;font-weight:600;cursor:pointer;align-items:center;justify-content:center;gap:8px;">
+                📡 推送全機隊 OTA
+            </button>
+            <div id="pub-fleet-hint" style="display:none;margin-top:6px;font-size:11px;color:#fdba74;">先「部署到生產 8000」更新主控端，再按這裡讓全部機台從 8000 拉新碼並重啟。會先 dry-run 預覽，busy/離線自動跳過。</div>
+
             <div style="display:flex;gap:8px;margin-top:8px;">
                 <button onclick="window._pubRollback()" style="padding:5px 12px;border-radius:6px;font-size:11px;border:1px solid rgba(239,68,68,0.4);background:transparent;color:#f87171;cursor:pointer;">回滾到上一版</button>
             </div>
@@ -137,6 +143,10 @@ window._openPublishMgmt = async function () {
                         (d.prod_version ? '（目前生產 v' + d.prod_version + '）' : '') +
                         ' 並重啟 8000；不會動到機隊。settings/字典/帳號保留。';
                 }
+                const fb = document.getElementById('pub-fleet-btn');
+                const fh = document.getElementById('pub-fleet-hint');
+                if (fb) fb.style.display = 'flex';
+                if (fh) fh.style.display = 'block';
                 // When deploying to prod, diff notes against PROD's version.
                 _notesBaseline = d.prod_version || '';
             }
@@ -420,6 +430,64 @@ window._pubDeployProd = async function () {
         _done(false, 'Error: ' + e.message);
         logBox.innerHTML += '\n<span style="color:#ef4444">[ERROR] ' + _esc(e.message) + '</span>';
     }
+};
+
+// Run a push_fleet job (dry or real) and resolve with its final status object.
+async function _pubRunFleet(dry) {
+    try {
+        const r = await fetch('/api/v1/push_fleet?dry_run=' + (dry ? 'true' : 'false'), {
+            method: 'POST', headers: _authHeaders(),
+        });
+        if (r.status === 409) { _setStatus('err', '另一個發布/部署/推送進行中'); return null; }
+        const d = await r.json().catch(() => null);
+        if (!d || !d.job_id) { _setStatus('err', d?.message || '啟動失敗'); return null; }
+        return await new Promise(resolve => {
+            const poll = setInterval(async () => {
+                try {
+                    const sr = await fetch('/api/v1/publish/status?job_id=' + d.job_id, { headers: _authHeaders() });
+                    const sd = await sr.json().catch(() => null);
+                    if (!sd || sd.status === 'running') return;
+                    clearInterval(poll); resolve(sd);
+                } catch (_) { /* retry */ }
+            }, 2000);
+            setTimeout(() => { clearInterval(poll); resolve(null); }, 300000);
+        });
+    } catch (e) { _setStatus('err', 'Error: ' + e.message); return null; }
+}
+
+// Push to the WHOLE production fleet: dry-run preview → confirm → real push.
+window._pubPushFleet = async function () {
+    const btn = document.getElementById('pub-fleet-btn');
+    const logBox = document.getElementById('pub-log');
+
+    _setStatus('loading', '預覽機隊狀態（dry-run）...');
+    logBox.textContent = '[' + new Date().toLocaleTimeString() + '] 預覽機隊（dry-run，不會推送）...\n';
+    const preview = await _pubRunFleet(true);
+    if (!preview || preview.status !== 'done') { _setStatus('err', (preview && preview.message) || '預覽失敗'); return; }
+    const rs = preview.results || [];
+    const pushable = rs.filter(r => r.result === 'would-push').length;
+    const skip = rs.length - pushable;
+    if (preview.log) { logBox.innerHTML += _esc(preview.log) + '\n'; logBox.scrollTop = logBox.scrollHeight; }
+
+    if (!confirm('📡 推送到全部生產機台？\n\n共 ' + rs.length + ' 台：可推 ' + pushable +
+        ' 台、busy/離線 ' + skip + ' 台會自動跳過。\n\n會讓這些機從主控端 8000 拉新碼並重啟' +
+        '（前提：8000 已是目標版本）。\n\n確定推送？')) { _setStatus('', '已取消'); return; }
+
+    btn.disabled = true; const _orig = btn.innerHTML;
+    btn.innerHTML = '<span style="display:inline-block;width:14px;height:14px;border:2px solid #555;border-top-color:#ea580c;border-radius:50%;animation:spin .8s linear infinite;"></span> 推送中...';
+    _setStatus('loading', '推送全機隊中...');
+    const res = await _pubRunFleet(false);
+    btn.disabled = false; btn.innerHTML = _orig;
+    if (!res || res.status !== 'done') { _setStatus('err', (res && res.message) || '推送失敗'); return; }
+    if (res.log) {
+        logBox.innerHTML += '\n' + _esc(res.log)
+            .replace(/triggered/g, '<span style="color:#22c55e">triggered</span>')
+            .replace(/skipped-busy/g, '<span style="color:#fbbf24">skipped-busy</span>')
+            .replace(/error/g, '<span style="color:#ef4444">error</span>') + '\n';
+        logBox.scrollTop = logBox.scrollHeight;
+    }
+    _setStatus('ok', res.message || '推送完成');
+    setTimeout(() => window._pubLoadAgents(), 2000);
 };
 
 window._pubRollback = async function () {

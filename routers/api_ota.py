@@ -742,3 +742,144 @@ async def deploy_to_prod(request: Request):
 
     asyncio.create_task(_run())
     return {"status": "started", "job_id": job_id}
+
+
+# ── Push to the entire production fleet (dev → all agents via master 8000) ──
+_MASTER_BASE = "http://127.0.0.1:8000"
+
+
+def _master_login() -> str:
+    """Get an admin token from the production master (8000). Tries admin/admin."""
+    import urllib.request
+    body = json.dumps({"username": "admin", "password": "admin"}).encode()
+    req = urllib.request.Request(_MASTER_BASE + "/api/v1/auth/login", method="POST",
+                                 data=body, headers={"Content-Type": "application/json"})
+    with urllib.request.urlopen(req, timeout=6) as r:
+        return json.loads(r.read().decode("utf-8")).get("token", "")
+
+
+def _master_get(path: str, token: str):
+    import urllib.request
+    req = urllib.request.Request(_MASTER_BASE + path, headers={"Authorization": f"Bearer {token}"})
+    with urllib.request.urlopen(req, timeout=8) as r:
+        return json.loads(r.read().decode("utf-8"))
+
+
+def _push_fleet_sync(dry_run: bool) -> dict:
+    """Trigger OTA update on every production agent via the master (8000).
+
+    Pull-model: each agent downloads from the master's /download_update, so the
+    master must ALREADY hold the target version (use 部署到生產 8000 first).
+    No force → the master's per-agent busy-check (409) skips busy machines.
+    dry_run=True only previews health/busy, never triggers an update.
+    """
+    import urllib.request
+    import urllib.error
+    try:
+        token = _master_login()
+    except Exception as e:
+        return {"ok": False, "error": f"登入主控端 8000 失敗：{e}（admin/admin 不對請改帳密）"}
+    if not token:
+        return {"ok": False, "error": "登入主控端 8000 取不到 token"}
+    try:
+        agents = (_master_get("/api/v1/agents", token).get("agents") or [])
+    except Exception as e:
+        return {"ok": False, "error": f"取機隊清單失敗：{e}"}
+
+    results = []
+    for a in agents:
+        aid = a.get("id"); name = a.get("name"); url = (a.get("url") or "").rstrip("/")
+        entry = {"id": aid, "name": name, "url": url}
+        if dry_run:
+            try:
+                h = _master_get(f"/api/v1/agents/{aid}/health", token)
+                entry["reachable"] = (h.get("status") == "ok")
+                entry["version"] = h.get("version")
+                entry["busy"] = bool(h.get("worker_busy"))
+                entry["result"] = ("busy(會跳過)" if entry["busy"]
+                                   else ("would-push" if entry["reachable"] else "離線(會跳過)"))
+            except Exception as e:
+                entry["reachable"] = False
+                entry["result"] = "離線(會跳過)"
+                entry["detail"] = str(e)[:100]
+            results.append(entry)
+            continue
+        # real push — no force, master returns 409 to skip busy agents
+        try:
+            req = urllib.request.Request(
+                _MASTER_BASE + f"/api/v1/agents/{aid}/update", method="POST", data=b"{}",
+                headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"})
+            with urllib.request.urlopen(req, timeout=25) as r:
+                resp = json.loads(r.read().decode("utf-8"))
+            entry["result"] = "skipped-busy" if resp.get("status") == "busy" else "triggered"
+            entry["detail"] = resp.get("status", "")
+        except urllib.error.HTTPError as e:
+            if e.code == 409:
+                try:
+                    bd = json.loads(e.read().decode("utf-8"))
+                except Exception:
+                    bd = {}
+                jobs = [j.get("task_type") for j in bd.get("active_jobs", []) if isinstance(j, dict)]
+                entry["result"] = "skipped-busy"
+                entry["detail"] = f"queue={bd.get('queue_length', 0)} jobs={jobs}"
+            else:
+                entry["result"] = "error"; entry["detail"] = f"HTTP {e.code}"
+        except Exception as e:
+            entry["result"] = "error"; entry["detail"] = str(e)[:100]
+        results.append(entry)
+    return {"ok": True, "dry_run": dry_run, "count": len(agents), "results": results}
+
+
+@router.post("/api/v1/push_fleet")
+async def push_fleet(request: Request, dry_run: bool = False):
+    """Trigger OTA on the entire production fleet via master 8000 (dev-only orchestration).
+
+    dry_run=True previews machines (busy/reachable) WITHOUT pushing.
+    Returns immediately with job_id; poll /api/v1/publish/status.
+    """
+    _check_admin(request)
+    if _publish_lock.locked():
+        return JSONResponse({"status": "error", "message": "另一次發布/部署/推送正在進行中"}, 409)
+
+    pub_user = "admin"
+    try:
+        from core.auth import _extract_token
+        payload = _extract_token(request)
+        if payload:
+            pub_user = payload.get("sub", "admin")
+    except Exception:
+        pass
+
+    import uuid as _uuid
+    job_id = _uuid.uuid4().hex[:8]
+    _publish_status[job_id] = {"status": "running", "log": "", "version": "fleet"}
+
+    async def _run():
+        async with _publish_lock:
+            try:
+                res = await asyncio.to_thread(_push_fleet_sync, dry_run)
+                if not res.get("ok"):
+                    _publish_status[job_id] = {"status": "error", "log": "", "version": "fleet",
+                                               "message": res.get("error", "推送失敗")}
+                    return
+                rs = res["results"]
+                tag = "[DRY-RUN 預覽] " if dry_run else ""
+                lines = [f"{tag}機隊共 {res['count']} 台："]
+                for r in rs:
+                    lines.append(f"  {r.get('name')} ({r.get('url')}): {r.get('result')} {r.get('detail', '')}".rstrip())
+                if dry_run:
+                    pushable = sum(1 for r in rs if r.get("result") == "would-push")
+                    summary = f"{tag}{res['count']} 台；可推 {pushable}、busy/離線跳過 {res['count'] - pushable}"
+                else:
+                    trig = sum(1 for r in rs if r.get("result") == "triggered")
+                    busy = sum(1 for r in rs if r.get("result") == "skipped-busy")
+                    err = sum(1 for r in rs if r.get("result") == "error")
+                    summary = f"推送完成：triggered {trig}、busy 跳過 {busy}、error {err}（共 {res['count']} 台）"
+                    _append_publish_history("fleet", f"PUSH_FLEET: {summary}", err == 0, pub_user)
+                _publish_status[job_id] = {"status": "done", "log": "\n".join(lines), "version": "fleet",
+                                           "message": summary, "results": rs, "dry_run": dry_run}
+            except Exception as e:
+                _publish_status[job_id] = {"status": "error", "log": "", "version": "fleet", "message": str(e)}
+
+    asyncio.create_task(_run())
+    return {"status": "started", "job_id": job_id}
