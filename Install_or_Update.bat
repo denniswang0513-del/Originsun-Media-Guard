@@ -9,7 +9,7 @@ echo.
 echo Path: %~f0
 echo.
 
-set "SERVER=http://192.168.1.11:8000"
+set "SERVER=http://192.168.1.107:8000"
 set "INSTALL_DIR=C:\OriginsunAgent"
 set "SELF=%~f0"
 set "LOCAL_COPY=%TEMP%\Originsun_Install_Update.bat"

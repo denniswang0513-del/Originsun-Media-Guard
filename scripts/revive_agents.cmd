@@ -27,7 +27,7 @@ echo [1/4] Ping check...
 echo.
 
 REM --- Agent 列表 ---
-call :check "錄音室白(master)"     192.168.1.11   agent_2
+call :check "錄音室白(master)"     192.168.1.107   agent_2
 call :check "SOCA電腦"             192.168.1.89   soca
 call :check "備檔電腦"             192.168.1.120  agent_5
 call :check "公用電腦(剪輯側)"     192.168.1.8    agent_8

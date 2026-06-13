@@ -513,7 +513,7 @@ routers/
       ├── uploads/   (使用者上傳圖片)
       └── docker/    (docker-compose.yml + Dockerfile + nginx.conf)
 
-Windows 192.168.1.11 (員工內網、既有系統)
+Windows 192.168.1.107 (員工內網、既有系統)
   └── FastAPI main (既有：CRM / Transcode / Backup…)
       └── 官網管理 Tab 前端
           └── fetch('http://<NAS_IP>:8001/api/website/admin/...')
@@ -588,7 +588,7 @@ Windows 192.168.1.11 (員工內網、既有系統)
   - 加 `originsun-studio.com` → Service: `HTTP://192.168.1.132:8081`
   - 加 `preview.originsun-studio.com` → 同上
 - [ ] website-api 環境變數：`DATABASE_URL`（走 host `192.168.1.132:5432`，跟 Windows 相同）、`JWT_SECRET`（共用）
-- [ ] website-api CORS：`192.168.1.11:8000`（Windows Tab）、`originsun-studio.com`、localhost
+- [ ] website-api CORS：`192.168.1.107:8000`（Windows Tab）、`originsun-studio.com`、localhost
 - [ ] 驗證既有 5 容器（cloudflared / FileReport_Nginx / postgres / MCP / n8n）全部仍正常
 
 **M-G NAS Staging 完整驗證**（Week 8）

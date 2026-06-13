@@ -6,7 +6,7 @@
  *
  * 規則：
  *   1. localStorage `website_api_base` 覆寫優先（除錯用）
- *   2. 同源 LAN（master 192.168.1.11:8000、localhost:8000） → 走 LAN 直連 NAS:8090
+ *   2. 同源 LAN（master 192.168.1.107:8000、localhost:8000） → 走 LAN 直連 NAS:8090
  *      省 cloudflared hop，且不需要 NAS 對外開 admin endpoint
  *   3. 其他來源（cloudflared 進來、PM 在家） → 走 cloudflared origin
  *
@@ -24,7 +24,7 @@ const NAS_PUBLIC_BASE = 'https://test.originsun-studio.com';
 
 function _isLanOrigin() {
     const h = window.location.hostname;
-    return h === 'localhost' || h === '127.0.0.1' || h.startsWith('192.168.') || h === '192.168.1.11';
+    return h === 'localhost' || h === '127.0.0.1' || h.startsWith('192.168.') || h === '192.168.1.107';
 }
 
 export function getApiBase() {

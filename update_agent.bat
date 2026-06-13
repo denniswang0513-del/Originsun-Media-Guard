@@ -31,7 +31,7 @@ if "%INSTALL_DIR:~-1%"=="\" set "INSTALL_DIR=%INSTALL_DIR:~0,-1%"
 if not "%~3"=="" (
     set "MASTER_URL=%~3"
 ) else (
-    set "MASTER_URL=http://192.168.1.11:8000"
+    set "MASTER_URL=http://192.168.1.107:8000"
 )
 
 :: ---- Guard: must run from local disk, not NAS ----

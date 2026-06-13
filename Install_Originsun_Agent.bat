@@ -19,7 +19,7 @@ echo ===================================================
 echo.
 
 set "INSTALL_DIR=C:\OriginsunAgent"
-set "SERVER_URL=http://192.168.1.11:8000"
+set "SERVER_URL=http://192.168.1.107:8000"
 rem NAS_ZIP left empty — install always downloads from server HTTP endpoint
 set "NAS_ZIP="
 set "ZIP_FILE=%TEMP%\Originsun_Agent.zip"

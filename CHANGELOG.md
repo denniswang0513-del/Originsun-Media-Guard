@@ -143,7 +143,7 @@
 - `version.json` — 移除版本號中的 `v` 前綴（`v1.8.2` → `1.8.2`），統一格式
 
 ### 技術備註
-- v1.7.0 的舊前端無 `update_available` 監聽，仍需透過主控端網頁（192.168.1.11:8000）查看更新通知，或手動更新一次
+- v1.7.0 的舊前端無 `update_available` 監聽，仍需透過主控端網頁（192.168.1.107:8000）查看更新通知，或手動更新一次
 - 後端推播不取代前端輪詢，兩者互補：前端每次載入仍會執行 `checkAgentVersion()`，後端則在瀏覽器開啟期間持續推播
 
 ---
@@ -187,7 +187,7 @@
 
 ### 新增
 - `routers/api_system.py` — 新增 `GET /download_update` 端點，即時打包輕量 OTA 更新 ZIP（~200KB，僅程式碼）
-- `config.py` — 新增 `master_server` 預設值（`http://192.168.1.11:8000`），供 Agent 識別主控端位址
+- `config.py` — 新增 `master_server` 預設值（`http://192.168.1.107:8000`），供 Agent 識別主控端位址
 
 ### 修改
 - `routers/api_system.py` — `GET /api/v1/nas_version` 改為透過 HTTP 從主控端取得版號（取代 NAS SMB 讀取）
@@ -197,7 +197,7 @@
 - `frontend/app.js` — 更新 tooltip 與確認對話框文字
 
 ### 技術備註
-- OTA 更新完全不依賴 NAS SMB，Agent 直接從主控端 `http://192.168.1.11:8000/download_update` 下載
+- OTA 更新完全不依賴 NAS SMB，Agent 直接從主控端 `http://192.168.1.107:8000/download_update` 下載
 - 更新 ZIP 排除 `python_embed/`、`ffmpeg.exe`、`ffprobe.exe`、`windows_helper/`，僅包含程式碼與前端
 - 套件需求變動時（`0225_requirements.txt`），更新腳本會自動執行 `pip install`
 - 主控端的 `master_server` 設定留空即可（不會從自己更新自己）

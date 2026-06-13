@@ -101,7 +101,7 @@ async function updateAgent() {
         _showMigrationOverlay();
 
         // 3) 同時複製 PowerShell 指令到剪貼簿（備用）
-        const serverHost = window.location.host || '192.168.1.11:8000';
+        const serverHost = window.location.host || '192.168.1.107:8000';
         const psCmd = `powershell -ExecutionPolicy Bypass -c "irm http://${serverHost}/bootstrap.ps1 | iex"`;
         try { await navigator.clipboard.writeText(psCmd); } catch(e) {}
 

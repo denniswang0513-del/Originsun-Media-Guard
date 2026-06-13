@@ -95,7 +95,7 @@
 
 員工內網（上班時才用）
 ┌────────────────────────────────────────────┐
-│ Windows 192.168.1.11:8000 (既有系統)        │
+│ Windows 192.168.1.107:8000 (既有系統)        │
 │  └── Originsun Transcode main UI            │
 │      ├── CRM / Backup / Transcode 等        │
 │      └── 官網管理 Tab 前端                   │
@@ -458,7 +458,7 @@ CREATE TABLE website_contact_inquiries (
 | 方式 | 技術 | 何時用 |
 |---|---|---|
 | 1. `localhost:4321` | `astro dev` | 開發自測 |
-| 2. `192.168.1.11:4321` | `astro dev --host` | 公司內網同事看 |
+| 2. `192.168.1.107:4321` | `astro dev --host` | 公司內網同事看 |
 | 3. `xxx.trycloudflare.com` | `cloudflared tunnel --url localhost:4321` | 外部人員臨時看（零 DNS） |
 
 前 3 種完全不碰 DNS、不碰 NAS、不碰舊站。
@@ -545,7 +545,7 @@ server {
 - 官網管理 Tab「立即重建」按鈕 → POST 到 website-api 的 rebuild endpoint
 - Git push 觸發 GitHub Actions → SSH deploy
 
-**穩定性測試**：Windows 192.168.1.11 關機，確認網站對外頁面 + 聯絡表單送出 + 4 通道通知全部仍正常。
+**穩定性測試**：Windows 192.168.1.107 關機，確認網站對外頁面 + 聯絡表單送出 + 4 通道通知全部仍正常。
 
 ### 9.3 Stage 3：DNS 切換（Week 9-10）— 最後才做
 

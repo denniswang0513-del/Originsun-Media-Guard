@@ -120,7 +120,7 @@ def run_update(server_url=""):
     if not server_url:
         server_url = _read_master_server(base_dir)
     if not server_url:
-        server_url = "http://192.168.1.11:8000"
+        server_url = "http://192.168.1.107:8000"
     server_url = server_url.rstrip("/")
 
     print("=" * 52)

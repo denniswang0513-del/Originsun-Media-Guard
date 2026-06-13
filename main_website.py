@@ -3,7 +3,7 @@
 NAS website-api container 入口（精簡版 FastAPI）。
 
 僅載入 `routers/website/*`，連同一個 PostgreSQL（共享 JWT secret、CORS 允許
-Windows `192.168.1.11:8000` 與 `originsun-studio.com`）。
+Windows `192.168.1.107:8000` 與 `originsun-studio.com`）。
 
 啟動（容器內）：
     uvicorn main_website:app --host 0.0.0.0 --port 8001
@@ -95,7 +95,7 @@ _allowed_origins = [
         "WEBSITE_CORS_ORIGINS",
         "http://localhost:4321,http://127.0.0.1:4321,"
         "http://localhost:8000,http://127.0.0.1:8000,"
-        "http://192.168.1.11:8000,"
+        "http://192.168.1.107:8000,"
         # 對外網站 + admin Tab 都走 cloudflared，三個 hostname 都要白
         "https://originsun-studio.com,https://www.originsun-studio.com,"
         "https://test.originsun-studio.com,"

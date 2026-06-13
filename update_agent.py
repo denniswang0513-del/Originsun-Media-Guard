@@ -26,7 +26,7 @@ PREFLIGHT_SCRIPT = os.path.join(INSTALL_DIR, "preflight.py")
 PYTHON = sys.executable
 
 # ── Default master server ──
-DEFAULT_MASTER = "http://192.168.1.11:8000"
+DEFAULT_MASTER = "http://192.168.1.107:8000"
 
 
 # ────────────────────────────────────────

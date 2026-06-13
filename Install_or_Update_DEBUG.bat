@@ -52,7 +52,7 @@ if %errorlevel% equ 0 (
 
 echo.
 echo [DEBUG] Testing server connectivity...
-powershell -Command "try { (Invoke-WebRequest -Uri 'http://192.168.1.11:8000/api/v1/version' -UseBasicParsing -TimeoutSec 5).StatusCode } catch { Write-Host ('ERROR: ' + $_.Exception.Message) }"
+powershell -Command "try { (Invoke-WebRequest -Uri 'http://192.168.1.107:8000/api/v1/version' -UseBasicParsing -TimeoutSec 5).StatusCode } catch { Write-Host ('ERROR: ' + $_.Exception.Message) }"
 echo.
 
 echo [DEBUG] Existing C:\OriginsunAgent?
