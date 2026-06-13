@@ -12,10 +12,12 @@
 
 ## 參數 `$ARGUMENTS`
 
-- （空）或 `start` → 啟動開發伺服器
-- `stop` → 停止開發伺服器
+- （空）或 `start` → 啟動後端開發伺服器（FastAPI，8001）
+- `stop` → 停止後端開發伺服器
 - `status` → 查詢狀態（不改動）
 - `restart` → 先 stop 再 start
+- `web` → 啟動**對外網站 Astro dev 預覽**（port 4321，熱重載）供遠端 Mac 用 SSH tunnel 開
+- `web-stop` → 停止 Astro dev（4321）
 
 ## Workflow
 
@@ -54,6 +56,29 @@ try { $r = Invoke-WebRequest "http://localhost:8001/api/v1/health" -TimeoutSec 3
 ### `restart`
 
 依序執行 `stop` → 等 2 秒 → `start`。
+
+### `web`（對外網站 Astro dev 預覽，port 4321）
+
+用途：讓從遠端 Mac SSH 進來的開發者，在瀏覽器預覽對外 Astro 網站的 dev 版本，**不發到生產 cloudflare**。
+
+1. **先確保後端 8001 在線**（Astro build/dev 期會 fetch `WEBSITE_API_BASE=http://localhost:8001` 拿 works/posts）。探測 8001，DOWN 就先跑上面的 `start`。
+2. **探測 4321**：`Invoke-WebRequest http://localhost:4321/`，已 UP → 回報「Astro 預覽已在執行」並給存取方式，結束（冪等）。
+3. **背景分離啟動 astro dev**：
+   ```powershell
+   Start-Process powershell -ArgumentList '-ExecutionPolicy','Bypass','-NoExit','-Command','Set-Location E:\Dev\Originsun-Media-Guard\website; npm run dev' -WorkingDirectory 'E:\Dev\Originsun-Media-Guard\website' -WindowStyle Minimized
+   ```
+   （`npm run dev` = `astro dev --host 0.0.0.0`，astro.config 已設 `server.host:true` + allowedHosts 含 `.trycloudflare.com`）
+4. **輪詢** `http://localhost:4321/` 最多 ~60s（首次編譯較久），UP 即停。
+5. **回報存取方式**（遠端 Mac）：
+   ```
+   # Mac 開新終端，host 用平常 SSH 的位址：
+   ssh -L 4321:localhost:4321 originsun@<dev機位址>
+   # 然後 Mac 瀏覽器開 http://localhost:4321
+   ```
+
+### `web-stop`
+
+取 4321 PID（`Get-NetTCPConnection -LocalPort 4321 -State Listen`）→ `Stop-Process -Id <pid> -Force`。注意 astro dev 可能是 node 行程；只停 4321 owner，**嚴禁** `taskkill /IM node.exe`（會誤殺其他 node）。
 
 ## 「遠端啟動」的能力邊界（如實告知）
 
