@@ -251,7 +251,7 @@ OriginsunTranscode/
 │
 │  ── 【認證與權限】
 ├── core/
-│   ├── auth.py              # JWT 認證 + RBAC 權限守衛（check_admin, get_current_user, find_role_by_name）
+│   ├── auth.py              # JWT 認證 + 權限守衛（check_admin=Lv3 / check_admin_or_module=Lv3 或指定模組；RBAC v2 無角色層）
 │   └── google_auth.py       # Google ID Token 驗證（GIS credential 模式，不需 client_secret）
 ├── db/
 │   ├── models.py            # SQLAlchemy ORM（User + Role + Client 表，User 含 google_id/email/avatar_url）
@@ -802,15 +802,18 @@ CRM 系統包含 6 個獨立 Tab + 帳務管理的 5 個子視圖：
 | POST | `/api/v1/auth/login` | 密碼登入（返回 JWT） |
 | GET | `/api/v1/auth/me` | 取得當前登入使用者資訊 |
 | GET | `/api/v1/auth/users` | 列出所有使用者（需 admin） |
-| POST | `/api/v1/auth/users` | 新增使用者（需 admin） |
-| PUT | `/api/v1/auth/users/{username}` | 修改使用者角色/密碼（需 admin） |
+| POST | `/api/v1/auth/users` | 新增使用者：`{username, password, modules[], access_level}`（需 admin） |
+| PUT | `/api/v1/auth/users/{username}` | 修改使用者：`{password?, modules?, access_level?}`（需 admin） |
 | DELETE | `/api/v1/auth/users/{username}` | 刪除使用者（需 admin） |
 | GET | `/api/v1/auth/google/config` | 取得 Google OAuth 設定（公開） |
 | POST | `/api/v1/auth/google/login` | Google ID Token 登入 |
-| GET | `/api/v1/roles` | 列出所有角色 |
-| POST | `/api/v1/roles` | 新增角色（需 admin） |
-| PUT | `/api/v1/roles/{id}` | 修改角色權限/模組（需 admin） |
-| DELETE | `/api/v1/roles/{id}` | 刪除角色（需 admin） |
+
+> **RBAC v2（角色層已移除）**：權限直接綁帳號 —— 每個 User 有 `modules`（可用模組）
+> + `access_level`（3=管理員 / 1=一般，唯一硬閘門是 Lv3）。沒有角色表、沒有
+> `/api/v1/roles` 端點、沒有「角色管理」UI。前端「使用者管理」直接編每個帳號的
+> 4 群模組勾選 + 管理員開關。官網寫入守衛（`routers/website/_common.py`）用
+> `core.auth.check_admin_or_module(request, 'website_admin')`：管理員 OR 擁有官網模組
+> 即可寫入；全域 `check_admin` 仍只認 Lv3。
 
 ### 7.12 Pydantic Schema 完整清單 (`core/schemas.py`)
 

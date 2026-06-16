@@ -8,7 +8,6 @@ import './js/auth/auth-state.js';
 import './js/auth/login-modal.js';
 import './js/auth/google-oauth.js';
 import './js/admin/user-mgmt.js';
-import './js/admin/role-mgmt.js';
 import './js/admin/publish-mgmt.js';
 import './js/admin/api-keys.js';
 import './js/update/version-check.js';

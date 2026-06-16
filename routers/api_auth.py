@@ -17,7 +17,7 @@ from core.auth import (
     hash_password, verify_password, create_token, verify_token,
     _extract_token, check_admin,
     load_users_json, save_users_json, sync_user_to_json, remove_user_from_json,
-    load_roles_json, LEGACY_ROLE_LEVELS, ALL_MODULES,
+    LEGACY_ROLE_LEVELS, ALL_MODULES,
 )
 try:
     from core.google_auth import verify_google_id_token, GoogleTokenError
@@ -91,25 +91,15 @@ def _compute_auth_method(u: dict) -> str:
     return 'both' if has_pwd and has_google else ('google' if has_google else 'password')
 
 
-def _enrich_user(u_dict: dict, role) -> dict:
+def _enrich_user(u_dict: dict) -> dict:
     """Attach authorization (modules + access_level) to a user dict.
 
-    RBAC v2: per-user `modules` + `access_level` are authoritative. `role`
-    (the legacy Role join) is only a fallback for users not yet backfilled off
-    the old role layer.
+    RBAC v2: per-user `modules` + `access_level` are authoritative (no role
+    layer). The legacy `role` string is only a fallback for any pre-migration
+    user row that somehow lacks the per-user fields.
     """
-    has_own = u_dict.get('modules') is not None and u_dict.get('access_level') is not None
-    if has_own:
+    if u_dict.get('modules') is not None and u_dict.get('access_level') is not None:
         u_dict.setdefault('role_name', u_dict.get('role') or DEFAULT_ROLE)
-    elif role and hasattr(role, 'name'):
-        # ORM object
-        u_dict['role_name'] = role.name
-        u_dict['access_level'] = role.access_level
-        u_dict['modules'] = role.modules or []
-    elif role and isinstance(role, dict):
-        u_dict['role_name'] = role['name']
-        u_dict['access_level'] = role['access_level']
-        u_dict['modules'] = role.get('modules', [])
     else:
         u_dict.setdefault('role_name', u_dict.get('role', 'editor'))
         u_dict.setdefault('access_level', LEGACY_ROLE_LEVELS.get(u_dict.get('role', ''), 0))
@@ -130,28 +120,20 @@ async def _get_all_users() -> list:
             from db.session import get_session_factory
             factory = get_session_factory()
             if factory:
-                from sqlalchemy import select, outerjoin
-                from db.models import User, Role
+                from sqlalchemy import select
+                from db.models import User
                 async with factory() as session:
-                    stmt = select(User, Role).select_from(
-                        outerjoin(User, Role, User.role_id == Role.id)
-                    )
-                    rows = (await session.execute(stmt)).all()
-                    db_users = [_enrich_user(_user_orm_to_dict(u), r) for u, r in rows]
+                    rows = (await session.execute(select(User))).scalars().all()
+                    db_users = [_enrich_user(_user_orm_to_dict(u)) for u in rows]
         except Exception:
             pass
     # Merge with JSON: add any JSON-only users not found in DB
     json_users = load_users_json()
-    roles = load_roles_json()
-    role_map = {r['id']: r for r in roles}
-    role_name_map = {r['name']: r for r in roles}
     db_usernames = {u['username'] for u in db_users}
     for u in json_users:
         if u['username'] in db_usernames:
             continue
-        role = role_map.get(u.get('role_id')) or role_name_map.get(u.get('role_name')) or role_name_map.get(u.get('role'))
-        _enrich_user(u, role)
-        db_users.append(u)
+        db_users.append(_enrich_user(u))
     return db_users
 
 
@@ -168,34 +150,25 @@ async def _find_user_by(column_name: str, value) -> Optional[dict]:
             from db.session import get_session_factory
             factory = get_session_factory()
             if factory:
-                from sqlalchemy import select, outerjoin
-                from db.models import User, Role
+                from sqlalchemy import select
+                from db.models import User
                 async with factory() as session:
                     col = getattr(User, column_name, None)
-                    if col is None:
-                        # Column doesn't exist on the ORM model — skip DB, try JSON
-                        pass
-                    else:
-                        stmt = select(User, Role).select_from(
-                            outerjoin(User, Role, User.role_id == Role.id)
-                        ).where(col == value)
-                        row = (await session.execute(stmt)).first()
-                        if row:
-                            u, r = row
-                            return _enrich_user(_user_orm_to_dict(u), r)
+                    if col is not None:
+                        u = (await session.execute(
+                            select(User).where(col == value)
+                        )).scalars().first()
+                        if u:
+                            return _enrich_user(_user_orm_to_dict(u))
                         # DB returned no rows — fall through to JSON
         except Exception:
             pass
     # JSON fallback (always checked if DB didn't find the user)
     users = load_users_json()
-    roles = load_roles_json()
-    role_map = {r['id']: r for r in roles}
-    role_name_map = {r['name']: r for r in roles}
     for u in users:
         if u.get(column_name) != value:
             continue
-        role = role_map.get(u.get('role_id')) or role_name_map.get(u.get('role_name')) or role_name_map.get(u.get('role'))
-        return _enrich_user(u, role)
+        return _enrich_user(u)
     return None
 
 

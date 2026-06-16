@@ -233,7 +233,6 @@ def require_access_level(min_level: int):
 
 _BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 _USERS_JSON = os.path.join(_BASE_DIR, 'users.json')
-_ROLES_JSON = os.path.join(_BASE_DIR, 'roles.json')
 
 
 def _load_json(path: str) -> list:
@@ -280,62 +279,6 @@ def sync_user_to_json(user_data: dict):
 
 def remove_user_from_json(username: str):
     _remove_from_json(_USERS_JSON, 'username', username)
-
-
-# ── Roles JSON (public API, delegates to generic helpers) ──
-
-def load_roles_json() -> list:
-    return _load_json_cached(_ROLES_JSON)
-
-def save_roles_json(roles: list):
-    _save_json(_ROLES_JSON, roles)
-
-def sync_role_to_json(role_data: dict):
-    _sync_to_json(_ROLES_JSON, role_data, 'id')
-
-def remove_role_from_json(role_id: int):
-    _remove_from_json(_ROLES_JSON, 'id', role_id)
-
-
-# ── Shared async role query helpers (used by api_auth + api_roles) ──
-
-def _role_to_dict(r) -> dict:
-    """Convert a Role ORM object to a serializable dict."""
-    return {'id': r.id, 'name': r.name, 'access_level': r.access_level,
-            'modules': r.modules or [], 'description': r.description or ''}
-
-
-async def get_all_roles(*, order_by_level: bool = False) -> list:
-    """Get roles from DB or JSON fallback. Shared by api_auth and api_roles."""
-    import core.state as state
-    if state.db_online:
-        try:
-            from db.session import get_session_factory
-            factory = get_session_factory()
-            if factory:
-                from sqlalchemy import select
-                from db.models import Role
-                async with factory() as session:
-                    stmt = select(Role)
-                    if order_by_level:
-                        stmt = stmt.order_by(Role.access_level.desc(), Role.id)
-                    result = await session.execute(stmt)
-                    return [_role_to_dict(r) for r in result.scalars().all()]
-        except Exception:
-            pass
-    return load_roles_json()
-
-
-async def find_role_by_name(name: str):
-    """Find a single role by name. Returns dict or None."""
-    roles = await get_all_roles()
-    return next((r for r in roles if r['name'] == name), None)
-
-
-async def find_role_by_id(role_id: int):
-    """Find a single role by id. Returns dict or None."""
-    roles = await get_all_roles()
-    return next((r for r in roles if r['id'] == role_id), None)
 
 
 # ── API Key Authentication ──

@@ -8,19 +8,6 @@ const TAB_NAMES = {backup:'備份並轉檔',verify:'檔案比對',transcode:'轉
 const ALL_MODULES = ['backup','verify','transcode','concat','report','transcribe','tts','drone_meta','projects','crm_clients','crm_projects','crm_quotes','crm_staff','crm_invoices','website_admin'];
 const MODULE_LABELS = {backup:'備份',verify:'比對',transcode:'轉檔',concat:'串帶',report:'報表',transcribe:'逐字稿',tts:'語音',drone_meta:'空拍寫入',projects:'專案',crm_clients:'客戶',crm_projects:'專案管理',crm_quotes:'報價',crm_staff:'人力',crm_invoices:'帳務',website_admin:'官網'};
 
-// ─── RBAC: cached roles list for user mgmt ─── //
-let _cachedRoles = [];
-async function _fetchRoles() {
-    try {
-        const r = await fetch('/api/v1/roles');
-        if (r.ok) _cachedRoles = await r.json();
-    } catch (_) {}
-    return _cachedRoles;
-}
-
-// Export for role-mgmt.js (legacy — removed in Phase 2)
-export { _cachedRoles, _fetchRoles, ALL_MODULES, MODULE_LABELS };
-
 // Render the editable, 4-group permission cell for one user. `locked` disables
 // everything (built-in admin: prevent self-lockout). When 管理員 is on, modules
 // are implied (full access) so the grid is dimmed.

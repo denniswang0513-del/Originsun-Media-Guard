@@ -108,14 +108,9 @@ class Report(Base):
     )
 
 
-class Role(Base):
-    __tablename__ = "roles"
-
-    id = Column(Integer, primary_key=True, autoincrement=True)
-    name = Column(String(32), unique=True, nullable=False)
-    access_level = Column(Integer, nullable=False, default=1)
-    modules = Column(JSONB, nullable=False, default=list)
-    description = Column(String(255), nullable=True)
+# NOTE: RBAC v2 移除角色層——Role model 已刪除。權限直接綁 users.modules +
+# users.access_level（見 User）。users.role / users.role_id 欄位保留 dormant（不再
+# 決定權限）；既有 DB 的 roles 表不再被讀寫，可日後手動 DROP。
 
 
 class User(Base):
