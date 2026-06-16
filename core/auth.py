@@ -479,6 +479,9 @@ def _build_user_payload_for_api_key(username: str) -> Optional[dict]:
     role_name = user.get('role_name') or user.get('role', 'editor')
     access_level = user.get('access_level', 1)
     modules = user.get('modules', [])
+    # 管理員（Lv3）= 完整權限（與 _enrich_user 一致）。
+    if (access_level or 0) >= 3:
+        modules = list(ALL_MODULES)
 
     return {
         'sub': username,

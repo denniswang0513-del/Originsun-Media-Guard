@@ -98,10 +98,10 @@ def _enrich_user(u_dict: dict, role) -> dict:
     (the legacy Role join) is only a fallback for users not yet backfilled off
     the old role layer.
     """
-    if u_dict.get('modules') is not None and u_dict.get('access_level') is not None:
+    has_own = u_dict.get('modules') is not None and u_dict.get('access_level') is not None
+    if has_own:
         u_dict.setdefault('role_name', u_dict.get('role') or DEFAULT_ROLE)
-        return u_dict
-    if role and hasattr(role, 'name'):
+    elif role and hasattr(role, 'name'):
         # ORM object
         u_dict['role_name'] = role.name
         u_dict['access_level'] = role.access_level
@@ -114,6 +114,11 @@ def _enrich_user(u_dict: dict, role) -> dict:
         u_dict.setdefault('role_name', u_dict.get('role', 'editor'))
         u_dict.setdefault('access_level', LEGACY_ROLE_LEVELS.get(u_dict.get('role', ''), 0))
         u_dict.setdefault('modules', [])
+    # 管理員（Lv3）= 完整權限：一律享有全部模組。前端 shouldShowTab 只看 modules，
+    # access_level 不會自動放行分頁，所以這裡把管理員的 modules 補成全部，避免
+    # 舊資料 modules 不全導致管理員看不到所有分頁。
+    if (u_dict.get('access_level') or 0) >= 3:
+        u_dict['modules'] = list(ALL_MODULES)
     return u_dict
 
 
