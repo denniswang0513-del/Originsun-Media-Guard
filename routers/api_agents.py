@@ -201,28 +201,58 @@ async def add_agent(req: NewAgentRequest, request: Request):
     return {"status": "ok", "agent": new_agent}
 
 
+# ── Health proxy cache ─────────────────────────────────────────────
+# Each browser/tab polls /agents/{id}/health per agent on a timer. Without
+# caching, every poll fires a live urlopen in a worker thread; an OFFLINE
+# agent blocks that thread for the full timeout. With several clients/tabs ×
+# several agents, dead-agent checks pile up, saturate the thread pool and
+# starve request handling — every endpoint (even /health, /crm) then stalls
+# ~timeout per offline agent. A short server-side cache + per-agent lock
+# collapse N concurrent polls into at most ONE live check per agent per TTL,
+# independent of how many clients poll. (root-caused 2026-06-15)
+_health_cache: dict = {}          # agent_id -> (loop_ts, result)
+_health_locks: dict = {}          # agent_id -> asyncio.Lock
+_HEALTH_TTL = 5.0                  # seconds; machine-status staleness tolerance
+
+
 @router.get("/agents/{agent_id}/health")
 async def proxy_agent_health(agent_id: str):
     """Proxy health check — avoids browser CORS/Private Network issues.
 
-    Timeout=1.5s: live LAN agents respond in ~50ms; 1.5s is enough headroom
-    for slow but reachable agents. Lower than the previous 4s because the
-    browser caps concurrent connections per origin at 6 — when many agents
-    are dead, master's own self-proxy can queue behind dead-agent timeouts
-    and appear slow (>3s = orange dot in UI).
+    Cached for _HEALTH_TTL seconds so repeated polls (many clients/tabs) don't
+    each spawn a blocking live check. Timeout=1.5s: live LAN agents respond in
+    ~50ms; an offline agent blocks the worker thread for the full timeout, so
+    the cache + lock below ensure that cost is paid at most once per TTL per
+    agent rather than once per poll per client.
     """
-    agent = await _find_agent(agent_id)
-    url = agent.get("url", "").rstrip("/") + "/api/v1/health"
+    loop = asyncio.get_running_loop()
+    cached = _health_cache.get(agent_id)
+    if cached and (loop.time() - cached[0]) < _HEALTH_TTL:
+        return cached[1]
 
-    def _fetch_health():
-        try:
-            r = urllib.request.Request(url, method="GET")
-            with urllib.request.urlopen(r, timeout=1.5) as resp:
-                return json.loads(resp.read().decode("utf-8"))
-        except Exception:
-            return {"status": "offline"}
+    lock = _health_locks.get(agent_id)
+    if lock is None:
+        lock = _health_locks.setdefault(agent_id, asyncio.Lock())
+    async with lock:
+        # Another waiter may have refreshed the cache while we held off.
+        cached = _health_cache.get(agent_id)
+        if cached and (loop.time() - cached[0]) < _HEALTH_TTL:
+            return cached[1]
 
-    return await asyncio.to_thread(_fetch_health)
+        agent = await _find_agent(agent_id)
+        url = agent.get("url", "").rstrip("/") + "/api/v1/health"
+
+        def _fetch_health():
+            try:
+                r = urllib.request.Request(url, method="GET")
+                with urllib.request.urlopen(r, timeout=1.5) as resp:
+                    return json.loads(resp.read().decode("utf-8"))
+            except Exception:
+                return {"status": "offline"}
+
+        result = await asyncio.to_thread(_fetch_health)
+        _health_cache[agent_id] = (loop.time(), result)
+        return result
 
 
 @router.post("/agents/{agent_id}/update")
