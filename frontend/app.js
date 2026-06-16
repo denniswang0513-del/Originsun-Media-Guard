@@ -2,7 +2,7 @@
 // Entry point — imports all extracted modules, then defines core app logic.
 
 // ── Module Imports (side-effect: each module registers its window.* globals) ──
-import { TAB_MAP, TAB_LOADERS, shouldShowTab, TAB_GROUPS, groupForSection, isMediaSection } from './js/shared/tab-config.js';
+import { TAB_MAP, TAB_LOADERS, shouldShowTab, TAB_GROUPS, groupKeys, groupForSection, isMediaSection } from './js/shared/tab-config.js';
 import './js/shared/modal-styles.js';
 import './js/auth/auth-state.js';
 import './js/auth/login-modal.js';
@@ -49,11 +49,10 @@ if (typeof appendLog === 'undefined') {
                 await window._authReady;
                 const modules = window._modules;
                 const hasModules = !!window._authUser && modules && modules.length > 0;
-                const _should = (key) => shouldShowTab(key, window._authUser, modules);
 
                 // Hide nav buttons & sections for unauthorized tabs immediately
                 Object.entries(TAB_MAP).forEach(([key, tabId]) => {
-                    if (!_should(key)) {
+                    if (!_authed(key)) {
                         const btn = document.getElementById('btn_' + tabId);
                         if (btn) btn.style.display = 'none';
                         const sec = document.getElementById(tabId);
@@ -87,7 +86,7 @@ if (typeof appendLog === 'undefined') {
                 // TAB_MAP so loadTabs and _applyModuleTabs share one truth.
                 await Promise.all(
                     TAB_LOADERS
-                        .filter(([key]) => _should(key))
+                        .filter(([key]) => _authed(key))
                         .map(([key, html, js, init]) => _loadTab(TAB_MAP[key], html, js, init))
                 );
 
@@ -95,6 +94,7 @@ if (typeof appendLog === 'undefined') {
                 // post-login re-call so the user isn't yanked away from
                 // whatever tab they were already on.
                 if (autoSwitch) {
+                    renderGroupNav(); // build top bar with resolved auth before first switch
                     // Logged-out users get media tools only → land on 備份並轉檔
                     // (the historical default tab), derived from TAB_MAP not a literal.
                     const firstTab = hasModules ? TAB_MAP[modules[0]] : TAB_MAP.backup;
@@ -109,8 +109,8 @@ if (typeof appendLog === 'undefined') {
         // loaded at boot (no token at boot → filter excluded CRM/admin tabs).
         window._ensureTabsLoaded = () => loadTabs({ autoSwitch: false });
 
-        // Initialize tabs immediately
-        renderGroupNav();
+        // Initialize tabs immediately (grouped nav is rendered inside loadTabs
+        // once auth resolves, so it reflects the user's authorized tabs)
         loadTabs().then(async () => {
             // Auth already resolved inside loadTabs(); apply tab visibility as safety fallback
             if (typeof window._applyVisibleTabs === 'function') window._applyVisibleTabs();
@@ -1127,10 +1127,27 @@ if (typeof appendLog === 'undefined') {
         const _groupLastTab = {};   // groupId -> last-active section id (restore on re-open)
         let _sidebarGroupId = null; // group currently rendered into #group-sidebar
 
+        // RBAC: is this tab key visible for the current user? (single source = shouldShowTab)
+        function _authed(key) { return shouldShowTab(key, window._authUser, window._modules); }
+
+        // First section the current user may see — logout / redirect fallback.
+        function _firstAuthorizedSection() {
+            for (const g of TAB_GROUPS) {
+                for (const key of groupKeys(g)) if (_authed(key)) return TAB_MAP[key];
+            }
+            return TAB_MAP.backup;
+        }
+
+        function _isTabAuthorized(sectionId) {
+            const g = groupForSection(sectionId);
+            if (!g) return true; // admin / non-group sections are gated elsewhere
+            return groupKeys(g).some((k) => TAB_MAP[k] === sectionId && _authed(k));
+        }
+
         function _sectionForGroup(group) {
             if (_groupLastTab[group.id]) return _groupLastTab[group.id];
             if (group.single) return TAB_MAP[group.single];
-            const first = (group.items || []).find((it) => TAB_MAP[it.key]);
+            const first = (group.items || []).find((it) => TAB_MAP[it.key] && _authed(it.key));
             return first ? TAB_MAP[first.key] : null;
         }
 
@@ -1139,6 +1156,7 @@ if (typeof appendLog === 'undefined') {
             if (!top) return;
             top.innerHTML = '';
             TAB_GROUPS.forEach((g) => {
+                if (!groupKeys(g).some(_authed)) return; // hide groups with no authorized tab
                 const b = document.createElement('button');
                 b.id = 'gbtn_' + g.id;
                 b.className = 'group-top-btn';
@@ -1158,7 +1176,7 @@ if (typeof appendLog === 'undefined') {
             side.innerHTML = '';
             group.items.forEach((it) => {
                 const sec = TAB_MAP[it.key];
-                if (!sec) return;
+                if (!sec || !_authed(it.key)) return; // RBAC: skip unauthorized items
                 const b = document.createElement('button');
                 b.id = 'sbtn_' + sec;
                 b.className = 'group-side-btn';
@@ -1175,6 +1193,18 @@ if (typeof appendLog === 'undefined') {
             const target = _sectionForGroup(g);
             if (target) switchTab(target);
         }
+
+        // Re-render grouped nav for the current user (called on login/logout). Redirect
+        // off the active tab if it is no longer authorized.
+        function refreshGroupNav() {
+            _sidebarGroupId = null;          // force sidebar rebuild to reflect new perms
+            renderGroupNav();
+            // The visible section IS the current tab (single source = the DOM).
+            const cur = document.querySelector('.tab-content:not(.hidden)')?.id;
+            if (cur && _isTabAuthorized(cur)) _syncGroupChrome(cur);
+            else switchTab(_firstAuthorizedSection());
+        }
+        window._refreshGroupNav = refreshGroupNav;
 
         // Keep top-bar + sidebar in sync with the section switchTab just showed.
         function _syncGroupChrome(tabId) {

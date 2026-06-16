@@ -1,5 +1,5 @@
 // ─── Auth State (extracted from app.js) ─── //
-import { TAB_MAP, NAV_MAP, shouldShowTab } from '../shared/tab-config.js';
+import { TAB_MAP, shouldShowTab } from '../shared/tab-config.js';
 
 const STORAGE_KEYS = { TOKEN: 'auth_token', USER: 'auth_user' };
 
@@ -224,16 +224,16 @@ export async function _onLoginSuccess(d) {
 export function _applyModuleTabs() {
     const modules = window._modules;
     const _show = (key) => shouldShowTab(key, window._authUser, modules);
+    // Section-level hiding — retained as the defense-in-depth fallback layer so a
+    // section is never visible even if reached outside the grouped nav.
     Object.entries(TAB_MAP).forEach(([key, id]) => {
         const el = document.getElementById(id);
         if (el) el.style.display = _show(key) ? '' : 'none';
     });
-    document.querySelectorAll('nav button').forEach(btn => {
-        const text = btn.textContent;
-        Object.entries(NAV_MAP).forEach(([key, label]) => {
-            if (text.includes(label)) btn.style.display = _show(key) ? '' : 'none';
-        });
-    });
+    // Grouped nav (top bar + left sidebar) is RBAC-rendered in app.js; re-render it
+    // for the new auth state — hides unauthorized groups/items and redirects off the
+    // current tab if it is no longer allowed.
+    if (typeof window._refreshGroupNav === 'function') window._refreshGroupNav();
 }
 // Legacy alias
 window._applyVisibleTabs = _applyModuleTabs;

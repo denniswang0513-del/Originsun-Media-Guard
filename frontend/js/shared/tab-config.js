@@ -12,14 +12,6 @@ export const TAB_MAP = {
     website_admin: 'tab_website',
 };
 
-export const NAV_MAP = {
-    backup: '備份', verify: '比對', transcode: 'Proxy', concat: '串帶',
-    report: '報表', transcribe: '逐字', tts: '語音', drone_meta: '空拍寫入', projects: '專案總覽',
-    crm_clients: '客戶', crm_projects: '專案管理', crm_quotes: '報價',
-    crm_staff: '人力', crm_invoices: '帳務',
-    website_admin: '官網',
-};
-
 export const MEDIA_TABS = ['projects', 'backup', 'verify', 'transcode', 'concat', 'report', 'transcribe', 'tts', 'drone_meta'];
 
 // Tab loader registry — paths and init function names cannot be derived from
