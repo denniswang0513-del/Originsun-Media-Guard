@@ -85,3 +85,33 @@ export function groupForSection(sectionId) {
 export function isMediaSection(sectionId) {
     return MEDIA_TABS.some((k) => TAB_MAP[k] === sectionId);
 }
+
+// ── Permission grouping (RBAC editor / display) ─────────────────────────
+// Single source of truth that maps EVERY assignable RBAC module to one of the
+// 4 top-level groups, mirroring the grouped navigation. Unlike TAB_GROUPS
+// (nav-only — `groupKeys` filters out keys without a section), this covers ALL
+// modules so the permission editor never silently hides one. `crm_quotes`
+// (報價) has no top-level tab but is a real business module → folded into 業務管理.
+export const PERMISSION_GROUPS = [
+    { id: 'projects',   label: '📊 專案總覽', modules: ['projects'] },
+    { id: 'production', label: '🎬 製作工具', modules: ['backup', 'verify', 'transcode', 'concat', 'drone_meta', 'report', 'transcribe', 'tts'] },
+    { id: 'business',   label: '💼 業務管理', modules: ['crm_clients', 'crm_projects', 'crm_quotes', 'crm_staff', 'crm_invoices'] },
+    { id: 'website',    label: '🌐 官網管理', modules: ['website_admin'] },
+];
+
+// Group a module list into PERMISSION_GROUPS order, keeping only modules present
+// in the input. Any module not listed in any group (future-proofing if the
+// module set grows but PERMISSION_GROUPS isn't updated) falls into a trailing
+// '其他' group so it can never be silently dropped. Empty groups are omitted.
+export function groupModules(modules) {
+    const want = new Set(modules || []);
+    const seen = new Set();
+    const out = PERMISSION_GROUPS.map((g) => {
+        const mods = g.modules.filter((m) => want.has(m));
+        mods.forEach((m) => seen.add(m));
+        return { id: g.id, label: g.label, modules: mods };
+    });
+    const leftover = [...want].filter((m) => !seen.has(m));
+    if (leftover.length) out.push({ id: 'other', label: '🔧 其他', modules: leftover });
+    return out.filter((g) => g.modules.length);
+}

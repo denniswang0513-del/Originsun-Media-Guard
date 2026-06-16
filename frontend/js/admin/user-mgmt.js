@@ -1,5 +1,7 @@
 // ─── User Management (extracted from app.js) ─── //
+// RBAC v2: 權限直接綁帳號（角色層已移除）。每個帳號 = 一組可勾選模組 + 「管理員」開關。
 import { _ensureModalStyles, _createFormModal } from '../shared/modal-styles.js';
+import { groupModules } from '../shared/tab-config.js';
 
 const TAB_NAMES = {backup:'備份並轉檔',verify:'檔案比對',transcode:'轉 Proxy',concat:'製作串帶',report:'檔案視覺報表',transcribe:'AI 逐字稿',tts:'語音生成'};
 
@@ -16,13 +18,43 @@ async function _fetchRoles() {
     return _cachedRoles;
 }
 
-// Export for role-mgmt.js
+// Export for role-mgmt.js (legacy — removed in Phase 2)
 export { _cachedRoles, _fetchRoles, ALL_MODULES, MODULE_LABELS };
 
-function _renderModuleTags(modules) {
-    return (modules && modules.length)
-        ? modules.map(m => `<span style="display:inline-block;background:#2a2a2a;border:1px solid #3a3a3a;border-radius:4px;padding:1px 7px;font-size:10px;color:#999;">${MODULE_LABELS[m]||m}</span>`).join(' ')
-        : '<span style="color:#555;font-size:11px;">未設定</span>';
+// Render the editable, 4-group permission cell for one user. `locked` disables
+// everything (built-in admin: prevent self-lockout). When 管理員 is on, modules
+// are implied (full access) so the grid is dimmed.
+function _renderUserPermCell(username, userModules, isAdminUser, locked) {
+    const groups = groupModules(ALL_MODULES);   // editor shows ALL modules grouped
+    const dis = locked ? 'disabled' : '';
+    const adminRow = `
+        <label class="_fm-chk" style="padding:3px 6px;font-weight:600;color:${isAdminUser ? '#a78bfa' : '#999'};">
+            <input type="checkbox" data-uadmin-user="${username}" ${isAdminUser ? 'checked' : ''} ${dis}
+                   onchange="window._onUserAdminToggle('${username}', this.checked)">
+            👑 管理員（完整權限：使用者 / 設定 / 發版）
+        </label>`;
+    const groupsHtml = groups.map(g => {
+        const total = g.modules.length;
+        const checkedN = g.modules.filter(m => userModules.includes(m)).length;
+        const allOn = checkedN === total && total > 0;
+        const boxes = g.modules.map(m => `
+            <label class="_fm-chk" style="min-width:auto;padding:2px 6px;">
+                <input type="checkbox" data-umod-user="${username}" data-group="${g.id}" value="${m}"
+                       ${userModules.includes(m) ? 'checked' : ''} ${dis}
+                       onchange="window._syncUserGroupMaster('${username}','${g.id}')"> ${MODULE_LABELS[m] || m}
+            </label>`).join('');
+        return `
+            <div style="margin-bottom:4px;">
+                <label class="_fm-chk" style="font-weight:600;color:#bbb;padding:2px 6px;">
+                    <input type="checkbox" data-umaster-user="${username}" data-group="${g.id}" ${allOn ? 'checked' : ''} ${dis}
+                           onchange="window._toggleUserGroup('${username}','${g.id}',this.checked)"> ${g.label}
+                    <span data-ucount-user="${username}" data-group="${g.id}" style="color:#666;font-size:10px;font-weight:400;margin-left:4px;">${checkedN}/${total}</span>
+                </label>
+                <div style="display:flex;flex-wrap:wrap;gap:1px;padding-left:18px;">${boxes}</div>
+            </div>`;
+    }).join('');
+    return `${adminRow}
+        <div data-uperm-user="${username}" style="margin-top:2px;opacity:${isAdminUser ? '0.45' : '1'};pointer-events:${isAdminUser ? 'none' : 'auto'};">${groupsHtml}</div>`;
 }
 
 window._openUserMgmt = async function() {
@@ -105,25 +137,18 @@ async function _loadUserList() {
     const container = document.getElementById('umgmt-list');
     if (!container) return;
     try {
-        const [rolesResult, r] = await Promise.all([
-            _fetchRoles(),
-            fetch('/api/v1/auth/users', { headers: { 'Authorization': 'Bearer ' + (localStorage.getItem('auth_token') || '') } }),
-        ]);
-        const roles = _cachedRoles;
+        const r = await fetch('/api/v1/auth/users', { headers: { 'Authorization': 'Bearer ' + (localStorage.getItem('auth_token') || '') } });
         if (!r.ok) { container.innerHTML = '<div style="text-align:center;color:#f87171;padding:20px;">載入失敗（需要管理員權限）</div>'; return; }
         const users = await r.json();
-        const roleOptions = roles.map(rl =>
-            `<option value="${rl.name}">${rl.name} (Lv${rl.access_level})</option>`
-        ).join('');
 
         // Table header
-        let html = `<div style="display:grid;grid-template-columns:140px 150px 1fr auto;gap:0;font-size:11px;color:#666;padding:0 16px 8px;font-weight:600;letter-spacing:0.5px;text-transform:uppercase;">
-            <span>帳號</span><span>角色</span><span>可用模組</span><span>操作</span>
+        let html = `<div style="display:grid;grid-template-columns:170px 1fr auto;gap:0;font-size:11px;color:#666;padding:0 16px 8px;font-weight:600;letter-spacing:0.5px;text-transform:uppercase;">
+            <span>帳號</span><span>權限</span><span>操作</span>
         </div>`;
         html += users.map(u => {
-            const userRole = u.role_name || u.role || 'editor';
             const modules = u.modules || [];
-            const moduleTags = _renderModuleTags(modules);
+            const isAdminUser = (u.access_level || 0) >= 3;
+            const locked = (u.username === 'admin');   // 內建超級帳號鎖定，避免把自己鎖在外
             const am = u.auth_method || 'password';
             const authBadge = am === 'google'
                 ? '<span style="display:inline-block;background:#4285f422;color:#8ab4f8;font-size:9px;padding:1px 5px;border-radius:3px;margin-left:4px;vertical-align:middle;">G</span>'
@@ -137,25 +162,29 @@ async function _loadUserList() {
                 ? `<div style="font-size:10px;color:#666;margin-top:1px;">${u.email}</div>`
                 : '';
             return `
-            <div style="display:grid;grid-template-columns:140px 150px 1fr auto;gap:12px;align-items:center;padding:12px 16px;margin-bottom:1px;background:#1e1e1e;border:1px solid #2e2e2e;border-radius:8px;transition:border-color .15s;" onmouseenter="this.style.borderColor='#444'" onmouseleave="this.style.borderColor='#2e2e2e'">
-                <div>
+            <div style="display:grid;grid-template-columns:170px 1fr auto;gap:12px;align-items:start;padding:12px 16px;margin-bottom:1px;background:#1e1e1e;border:1px solid #2e2e2e;border-radius:8px;transition:border-color .15s;" onmouseenter="this.style.borderColor='#444'" onmouseleave="this.style.borderColor='#2e2e2e'">
+                <div style="padding-top:4px;">
                     <div>${avatarImg}<span style="color:#f0f0f0;font-weight:600;font-size:13px;">${u.username}</span>${u.username === 'admin' ? '<span style="display:inline-block;background:#7c3aed22;color:#a78bfa;font-size:9px;padding:1px 5px;border-radius:3px;margin-left:4px;vertical-align:middle;">SUPER</span>' : ''}${authBadge}</div>
                     ${emailLine}
                 </div>
-                <div>
-                    <select data-role-user="${u.username}" class="_fm-select" style="padding:4px 8px;font-size:11px;border-radius:5px;" onchange="window._onUserRoleChange(this)">
-                        ${roleOptions.replace(`value="${userRole}"`, `value="${userRole}" selected`)}
-                    </select>
-                </div>
-                <div data-modules-user="${u.username}" style="display:flex;flex-wrap:wrap;gap:4px;line-height:1.6;">${moduleTags}</div>
-                <div style="display:flex;gap:6px;align-items:center;">
+                <div style="min-width:0;">${_renderUserPermCell(u.username, modules, isAdminUser, locked)}</div>
+                <div style="display:flex;gap:6px;align-items:center;padding-top:4px;">
                     <button onclick="window._changeUserPwd('${u.username}')" class="_fm-btn-cancel" style="padding:3px 10px;font-size:11px;">改密碼</button>
-                    <button onclick="window._saveUserSettings('${u.username}')" class="_fm-btn-submit" style="padding:3px 12px;font-size:11px;font-weight:500;">儲存</button>
+                    ${locked ? '' : `<button onclick="window._saveUserSettings('${u.username}')" class="_fm-btn-submit" style="padding:3px 12px;font-size:11px;font-weight:500;">儲存</button>`}
                     ${u.username !== 'admin' ? `<button onclick="window._deleteUser('${u.username}')" style="background:transparent;border:1px solid rgba(239,68,68,0.3);color:#f87171;border-radius:6px;padding:3px 10px;cursor:pointer;font-size:11px;transition:all .15s;" onmouseenter="this.style.borderColor='#ef4444';this.style.background='rgba(239,68,68,0.08)'" onmouseleave="this.style.borderColor='rgba(239,68,68,0.3)';this.style.background='transparent'">刪除</button>` : ''}
                 </div>
             </div>`;
         }).join('');
         container.innerHTML = html;
+
+        // Reflect partial-group state (indeterminate can't be set via HTML attr).
+        container.querySelectorAll('input[data-umaster-user]').forEach(master => {
+            const u = master.getAttribute('data-umaster-user');
+            const g = master.getAttribute('data-group');
+            const boxes = [...container.querySelectorAll(`input[data-umod-user="${u}"][data-group="${g}"]`)];
+            const checked = boxes.filter(b => b.checked).length;
+            master.indeterminate = checked > 0 && checked < boxes.length;
+        });
     } catch (_) {
         container.innerHTML = '<div style="text-align:center;color:#f87171;padding:20px;">載入失敗</div>';
     }
@@ -163,10 +192,9 @@ async function _loadUserList() {
 
 // ─── Add User (styled modal) ─── //
 window._addUserPrompt = async function() {
-    const roles = _cachedRoles.length ? _cachedRoles : await _fetchRoles();
-    const roleOptions = roles.map(r => ({
-        value: r.name,
-        label: `${r.name} (Lv${r.access_level})`,
+    const moduleGroups = groupModules(ALL_MODULES).map(g => ({
+        label: g.label,
+        options: g.modules.map(m => ({ value: m, label: MODULE_LABELS[m] || m, checked: false })),
     }));
     _createFormModal({
         id: 'add-user-modal',
@@ -178,18 +206,23 @@ window._addUserPrompt = async function() {
             { key: 'password', label: '密碼', type: 'password', required: true, placeholder: '設定密碼' },
             { key: 'password2', label: '確認密碼', type: 'password', required: true, placeholder: '再次輸入密碼' },
             { type: 'divider' },
-            { type: 'section', label: '權限指派' },
-            { key: 'role_name', label: '角色', type: 'select', options: roleOptions, defaultValue: 'editor' },
+            { type: 'section', label: '管理身分' },
+            { key: 'is_admin', type: 'checkboxes', options: [{ value: 'admin', label: '👑 管理員（完整權限：使用者 / 設定 / 發版）' }] },
+            { type: 'section', label: '可用模組（非管理員才需勾選）' },
+            { key: 'modules', type: 'checkboxes', groups: moduleGroups },
         ],
         onSubmit: async (vals, setError, close) => {
             if (!vals.username) { setError('請輸入帳號'); return; }
             if (!vals.password) { setError('請輸入密碼'); return; }
             if (vals.password !== vals.password2) { setError('兩次密碼不一致'); return; }
             if (vals.password.length < 3) { setError('密碼至少需要 3 個字元'); return; }
+            const isAdmin = (vals.is_admin || []).includes('admin');
+            const modules = isAdmin ? ALL_MODULES.slice() : (vals.modules || []);
+            const access_level = isAdmin ? 3 : 1;
             try {
                 const r = await fetch('/api/v1/auth/users', {
                     method: 'POST', headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ username: vals.username, password: vals.password, role_name: vals.role_name }),
+                    body: JSON.stringify({ username: vals.username, password: vals.password, modules, access_level }),
                 });
                 const d = await r.json();
                 if (!r.ok) { setError(d.detail || '新增失敗'); return; }
@@ -200,30 +233,51 @@ window._addUserPrompt = async function() {
     });
 };
 
-window._onUserRoleChange = function(selectEl) {
-    const username = selectEl.getAttribute('data-role-user');
-    const roleName = selectEl.value;
-    const role = _cachedRoles.find(r => r.name === roleName);
-    const modulesDiv = document.querySelector(`[data-modules-user="${username}"]`);
-    if (!modulesDiv || !role) return;
-    const modules = role.modules || [];
-    modulesDiv.innerHTML = _renderModuleTags(modules);
+// ─── Per-user permission editing (group master + admin toggle) ─── //
+window._toggleUserGroup = function(username, groupId, checked) {
+    document.querySelectorAll(`input[data-umod-user="${username}"][data-group="${groupId}"]`)
+        .forEach(cb => { cb.checked = checked; });
+    window._syncUserGroupMaster(username, groupId);
+};
+
+window._syncUserGroupMaster = function(username, groupId) {
+    const boxes = [...document.querySelectorAll(`input[data-umod-user="${username}"][data-group="${groupId}"]`)];
+    const checked = boxes.filter(b => b.checked).length;
+    const master = document.querySelector(`input[data-umaster-user="${username}"][data-group="${groupId}"]`);
+    if (master) {
+        master.checked = checked === boxes.length && boxes.length > 0;
+        master.indeterminate = checked > 0 && checked < boxes.length;
+    }
+    const count = document.querySelector(`span[data-ucount-user="${username}"][data-group="${groupId}"]`);
+    if (count) count.textContent = `${checked}/${boxes.length}`;
+};
+
+// 管理員 on = full access (modules implied) → dim the module grid. off = re-enable.
+window._onUserAdminToggle = function(username, checked) {
+    const perm = document.querySelector(`[data-uperm-user="${username}"]`);
+    if (!perm) return;
+    perm.style.opacity = checked ? '0.45' : '1';
+    perm.style.pointerEvents = checked ? 'none' : 'auto';
 };
 
 window._saveUserSettings = async function(username) {
-    const roleSelect = document.querySelector(`select[data-role-user="${username}"]`);
-    const role_name = roleSelect ? roleSelect.value : 'editor';
+    const adminEl = document.querySelector(`input[data-uadmin-user="${username}"]`);
+    const isAdmin = !!(adminEl && adminEl.checked);
+    const modules = isAdmin
+        ? ALL_MODULES.slice()
+        : [...document.querySelectorAll(`input[data-umod-user="${username}"]:checked`)].map(cb => cb.value);
+    const access_level = isAdmin ? 3 : 1;
     try {
         const r = await fetch('/api/v1/auth/users/' + username, {
             method: 'PUT', headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ role_name }),
+            body: JSON.stringify({ modules, access_level }),
         });
         if (r.ok) {
             const btns = document.querySelectorAll('#umgmt-list button');
             btns.forEach(b => {
                 if (b.textContent.includes('儲存') && b.onclick?.toString().includes(username)) {
                     b.textContent = '✅ 已儲存'; b.style.background = '#22c55e';
-                    setTimeout(() => { b.textContent = '💾 儲存'; b.style.background = '#3b82f6'; }, 1500);
+                    setTimeout(() => { b.textContent = '儲存'; b.style.background = ''; }, 1500);
                 }
             });
         } else { alert('儲存失敗'); }

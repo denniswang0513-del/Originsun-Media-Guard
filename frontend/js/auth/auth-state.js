@@ -105,17 +105,17 @@ export function _applyAuthState(isAdmin) {
             btn.style.padding = '0';
             btn.style.overflow = 'hidden';
             btn.style.borderColor = window._accessLevel > 0 ? '#22c55e' : '#60a5fa';
-            btn.title = window._authUser.username + ' (' + (window._authUser.role_name || '') + ')';
+            btn.title = window._authUser.username + ' (' + (window._accessLevel >= 3 ? '管理員' : '一般') + ')';
         } else if (window._authUser && window._accessLevel > 0) {
             btn.textContent = '👤';
             btn.style.color = '#22c55e';
             btn.style.borderColor = '#22c55e';
-            btn.title = window._authUser.username + ' (' + (window._authUser.role_name || '') + ')';
+            btn.title = window._authUser.username + ' (' + (window._accessLevel >= 3 ? '管理員' : '一般') + ')';
         } else if (window._authUser) {
             btn.textContent = '👤';
             btn.style.color = '#60a5fa';
             btn.style.borderColor = '#60a5fa';
-            btn.title = window._authUser.username + ' (' + (window._authUser.role_name || '') + ')';
+            btn.title = window._authUser.username + ' (' + (window._accessLevel >= 3 ? '管理員' : '一般') + ')';
         } else {
             btn.textContent = '👤';
             btn.style.color = '#888';
@@ -138,8 +138,8 @@ window._authToggle = function() {
     let html = '';
 
     if (window._authUser) {
-        // 已登入 — 顯示角色名稱
-        const roleName = window._authUser.role_name || window._authUser.role || '';
+        // 已登入 — 顯示管理身分（RBAC v2 無角色概念）
+        const roleName = window._accessLevel >= 3 ? '管理員' : '一般';
         html += `<div style="padding:6px 14px 8px;color:#aaa;font-size:11px;">👤 ${window._authUser.username} <span style="color:#60a5fa;">(${roleName})</span></div>`;
         html += _sep;
 
@@ -152,7 +152,6 @@ window._authToggle = function() {
         if (window._accessLevel >= 3) {
             html += _sep;
             html += _item('👥', '使用者管理', "window._openUserMgmt();document.getElementById('auth-dropdown')?.remove()");
-            html += _item('🔰', '角色管理', "window._openRoleMgmt();document.getElementById('auth-dropdown')?.remove()");
             html += _item('🚀', '版本發布', "window._openPublishMgmt();document.getElementById('auth-dropdown')?.remove()");
         }
 

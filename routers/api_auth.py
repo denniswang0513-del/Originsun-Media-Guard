@@ -17,8 +17,7 @@ from core.auth import (
     hash_password, verify_password, create_token, verify_token,
     _extract_token, check_admin,
     load_users_json, save_users_json, sync_user_to_json, remove_user_from_json,
-    load_roles_json, LEGACY_ROLE_LEVELS,
-    get_all_roles, find_role_by_name,
+    load_roles_json, LEGACY_ROLE_LEVELS, ALL_MODULES,
 )
 try:
     from core.google_auth import verify_google_id_token, GoogleTokenError
@@ -42,12 +41,14 @@ class LoginRequest(BaseModel):
 class CreateUserRequest(BaseModel):
     username: str
     password: str
-    role_name: str = "editor"
+    modules: List[str] = []        # 直接授權的模組清單
+    access_level: int = 1          # 3=管理員, 1=一般
 
 
 class UpdateUserRequest(BaseModel):
     password: Optional[str] = None
-    role_name: Optional[str] = None
+    modules: Optional[List[str]] = None
+    access_level: Optional[int] = None
 
 
 class UpdateMeRequest(BaseModel):
@@ -69,6 +70,8 @@ def _user_orm_to_dict(u) -> dict:
     return {
         'username': u.username, 'password_hash': u.password_hash,
         'role': u.role, 'role_id': u.role_id,
+        'modules': getattr(u, 'modules', None),            # RBAC v2: per-user
+        'access_level': getattr(u, 'access_level', None),  # RBAC v2: per-user
         'visible_tabs': u.visible_tabs, 'first_login': u.first_login,
         'google_id': getattr(u, 'google_id', None),
         'email': getattr(u, 'email', None),
@@ -89,7 +92,15 @@ def _compute_auth_method(u: dict) -> str:
 
 
 def _enrich_user(u_dict: dict, role) -> dict:
-    """Attach role info to a user dict. `role` is a Role ORM object or a dict, or None."""
+    """Attach authorization (modules + access_level) to a user dict.
+
+    RBAC v2: per-user `modules` + `access_level` are authoritative. `role`
+    (the legacy Role join) is only a fallback for users not yet backfilled off
+    the old role layer.
+    """
+    if u_dict.get('modules') is not None and u_dict.get('access_level') is not None:
+        u_dict.setdefault('role_name', u_dict.get('role') or DEFAULT_ROLE)
+        return u_dict
     if role and hasattr(role, 'name'):
         # ORM object
         u_dict['role_name'] = role.name
@@ -211,6 +222,8 @@ async def _save_user_to_db(user_data: dict):
                 password_hash=user_data.get('password_hash'),
                 role=user_data.get('role_name', user_data.get('role', 'editor')),
                 role_id=user_data.get('role_id'),
+                modules=user_data.get('modules'),
+                access_level=user_data.get('access_level'),
                 visible_tabs=user_data.get('visible_tabs'),
                 first_login=user_data.get('first_login', False),
                 google_id=user_data.get('google_id'),
@@ -222,6 +235,8 @@ async def _save_user_to_db(user_data: dict):
                     'password_hash': user_data.get('password_hash'),
                     'role': user_data.get('role_name', user_data.get('role', 'editor')),
                     'role_id': user_data.get('role_id'),
+                    'modules': user_data.get('modules'),
+                    'access_level': user_data.get('access_level'),
                     'visible_tabs': user_data.get('visible_tabs'),
                     'first_login': user_data.get('first_login', False),
                     'google_id': user_data.get('google_id'),
@@ -286,17 +301,13 @@ async def login(req: LoginRequest):
     if not user and req.username == 'admin' and req.password == 'admin':
         all_users = await _get_all_users()
         if not all_users:
-            # Find admin role
-            admin_role = await find_role_by_name('admin')
-            role_id = admin_role['id'] if admin_role else None
-            access_level = admin_role['access_level'] if admin_role else 3
-            modules = admin_role['modules'] if admin_role else []
-
+            # Bootstrap admin (no users yet): full modules + Lv3.
+            access_level = 3
+            modules = list(ALL_MODULES)
             user_data = {
                 'username': 'admin',
                 'password_hash': hash_password('admin'),
                 'role_name': 'admin',
-                'role_id': role_id,
                 'access_level': access_level,
                 'modules': modules,
                 'first_login': True,
@@ -418,18 +429,13 @@ async def create_user(req: CreateUserRequest, request: Request):
     if existing:
         raise HTTPException(status_code=409, detail=f"使用者 '{req.username}' 已存在")
 
-    # Look up role by name
-    role = await find_role_by_name(req.role_name)
-    if not role:
-        raise HTTPException(status_code=400, detail=f"角色 '{req.role_name}' 不存在")
-
+    access_level = 3 if req.access_level >= 3 else 1
     user_data = {
         'username': req.username,
         'password_hash': hash_password(req.password),
-        'role_name': role['name'],
-        'role_id': role['id'],
-        'access_level': role['access_level'],
-        'modules': role['modules'],
+        'role_name': 'admin' if access_level >= 3 else 'user',  # 裝飾性，僅供顯示
+        'access_level': access_level,
+        'modules': req.modules,
         'first_login': False,
     }
     await _persist_user(user_data)
@@ -447,14 +453,11 @@ async def update_user(username: str, req: UpdateUserRequest, request: Request):
 
     if req.password:
         user['password_hash'] = hash_password(req.password)
-    if req.role_name:
-        role = await find_role_by_name(req.role_name)
-        if not role:
-            raise HTTPException(status_code=400, detail=f"角色 '{req.role_name}' 不存在")
-        user['role_name'] = role['name']
-        user['role_id'] = role['id']
-        user['access_level'] = role['access_level']
-        user['modules'] = role['modules']
+    if req.modules is not None:
+        user['modules'] = req.modules
+    if req.access_level is not None:
+        user['access_level'] = 3 if req.access_level >= 3 else 1
+        user['role_name'] = 'admin' if user['access_level'] >= 3 else 'user'  # 裝飾性
 
     await _persist_user(user)
     return {'status': 'ok'}
@@ -569,11 +572,14 @@ async def google_login(req: GoogleLoginRequest):
                 })
                 with urllib.request.urlopen(_req, timeout=10) as r:
                     result = _json.loads(r.read().decode())
-                    # Sync the user locally so agent knows about them
+                    # Sync the user locally so agent knows about them. Mirror the
+                    # master's authoritative per-user authorization too.
                     if result.get("username"):
-                        _persist_user({
+                        await _persist_user({
                             "username": result["username"],
                             "role_name": result.get("role_name", DEFAULT_ROLE),
+                            "access_level": result.get("access_level", 1),
+                            "modules": result.get("modules", []),
                             "google_id": result.get("google_id", ""),
                             "email": result.get("email", ""),
                             "avatar_url": result.get("avatar_url", ""),
@@ -621,23 +627,16 @@ async def google_login(req: GoogleLoginRequest):
             sync_user_to_json(_build_json_mirror(user))
             await _save_user_to_db(user)
         else:
-            # 3. Auto-create new user
-            default_role_name = g.get("default_role", "editor")
-            role = await find_role_by_name(default_role_name)
-            if not role:
-                role = await find_role_by_name("editor")
-            if not role:
-                # Absolute fallback
-                role = {'id': None, 'name': 'editor', 'access_level': 1, 'modules': []}
-
+            # 3. Auto-create new user — least privilege (RBAC v2): 一般使用者、
+            #    預設模組可由 settings.google_oauth.default_modules 指定，否則空。
+            #    管理員之後在「使用者管理」直接授權。
             username = _generate_unique_username(email, name, load_users_json())
             user = {
                 'username': username,
                 'password_hash': None,
-                'role_name': role['name'],
-                'role_id': role['id'],
-                'access_level': role['access_level'],
-                'modules': role.get('modules', []),
+                'role_name': 'user',
+                'access_level': 1,
+                'modules': g.get('default_modules', []),
                 'google_id': google_id,
                 'email': email,
                 'avatar_url': picture,

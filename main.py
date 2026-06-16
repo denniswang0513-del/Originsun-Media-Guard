@@ -296,6 +296,8 @@ async def _on_startup():
                         ("google_id", "VARCHAR(255)"),
                         ("email", "VARCHAR(255)"),
                         ("avatar_url", "VARCHAR(512)"),
+                        ("modules", "JSONB"),          # RBAC v2: 權限直接綁帳號
+                        ("access_level", "INTEGER"),   # RBAC v2: 3=管理員, 1=一般
                     ]:
                         try:
                             await session.execute(text(f"ALTER TABLE users ADD COLUMN IF NOT EXISTS {col} {coltype}"))
@@ -308,6 +310,32 @@ async def _on_startup():
                         await session.commit()
                     except Exception:
                         await session.rollback()
+                    # ── RBAC v2 一次性回填：把角色權限複製到 per-user 欄位 ──
+                    # idempotent — 只填還是 NULL 的 row，跑多次無害。確保上線後
+                    # 沒有人掉權限；之後角色層即可淘汰（Phase 2）。
+                    import json as _json_rbac
+                    _all_mods_sql = _json_rbac.dumps([
+                        "backup", "verify", "transcode", "concat", "report",
+                        "transcribe", "tts", "drone_meta", "projects",
+                        "crm_clients", "crm_projects", "crm_quotes",
+                        "crm_staff", "crm_invoices", "website_admin",
+                    ])
+                    for _bf_sql in [
+                        # 1) 有 role_id 的使用者：複製其角色的 modules + access_level
+                        "UPDATE users u SET modules = r.modules, access_level = r.access_level "
+                        "FROM roles r WHERE u.role_id = r.id AND u.modules IS NULL",
+                        # 2) admin 保險（萬一沒有 role_id）：給全模組 + Lv3
+                        f"UPDATE users SET access_level = 3, modules = '{_all_mods_sql}'::jsonb "
+                        "WHERE username = 'admin' AND modules IS NULL",
+                        # 3) 其餘殘留 NULL → 一般使用者、空模組（管理員可再授權）
+                        "UPDATE users SET access_level = 1 WHERE access_level IS NULL",
+                        "UPDATE users SET modules = '[]'::jsonb WHERE modules IS NULL",
+                    ]:
+                        try:
+                            await session.execute(text(_bf_sql))
+                            await session.commit()
+                        except Exception:
+                            await session.rollback()
         except Exception:
             pass
     # ── DB Migration: api_keys table ──

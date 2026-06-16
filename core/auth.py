@@ -120,6 +120,15 @@ def verify_token(token: str) -> Optional[dict]:
 
 LEGACY_ROLE_LEVELS = {'admin': 3, 'editor': 1, 'viewer': 0}
 
+# Canonical module keys (mirrors frontend tab-config.js ALL_MODULES). Source of
+# truth now that the role layer is gone — used for the bootstrap admin and as
+# the "grant everything" set.
+ALL_MODULES = [
+    'backup', 'verify', 'transcode', 'concat', 'report', 'transcribe', 'tts',
+    'drone_meta', 'projects', 'crm_clients', 'crm_projects', 'crm_quotes',
+    'crm_staff', 'crm_invoices', 'website_admin',
+]
+
 
 # ── Role Decorator ──
 
@@ -465,20 +474,11 @@ def _build_user_payload_for_api_key(username: str) -> Optional[dict]:
     if not user:
         return None
 
-    # Build payload matching JWT format
+    # Build payload matching JWT format. RBAC v2: authorization is per-user —
+    # read modules + access_level straight off the user row (no role lookup).
     role_name = user.get('role_name') or user.get('role', 'editor')
     access_level = user.get('access_level', 1)
     modules = user.get('modules', [])
-
-    # If user has role_id, try to get role details from JSON
-    role_id = user.get('role_id')
-    if role_id:
-        roles = load_roles_json()
-        role = next((r for r in roles if r.get('id') == role_id), None)
-        if role:
-            role_name = role.get('name', role_name)
-            access_level = role.get('access_level', access_level)
-            modules = role.get('modules', modules)
 
     return {
         'sub': username,

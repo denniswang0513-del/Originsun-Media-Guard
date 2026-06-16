@@ -82,13 +82,26 @@ export function _createFormModal({ id, title, fields, onSubmit, submitLabel = 'å
             bodyHtml += `<select data-field="${f.key}" class="_fm-select"${ssAttr}>${opts}</select>`;
         } else if (f.type === 'checkboxes') {
             if (f.label) bodyHtml += `<label class="_fm-label">${f.label}</label>`;
-            bodyHtml += `<div class="_fm-checkgrid">`;
-            for (const o of (f.options || [])) {
-                bodyHtml += `<label class="_fm-chk">
+            // Render one _fm-checkgrid of options. Inputs keep data-field=key so
+            // getValues collects them regardless of grouping.
+            const _grid = (options) => {
+                let h = `<div class="_fm-checkgrid">`;
+                for (const o of (options || [])) {
+                    h += `<label class="_fm-chk">
                     <input type="checkbox" data-field="${f.key}" value="${o.value}" ${o.checked ? 'checked' : ''}> ${o.label}
                 </label>`;
+                }
+                return h + `</div>`;
+            };
+            // f.groups = [{ label, options:[...] }] â†’ render a sub-header per group.
+            if (f.groups) {
+                for (const g of f.groups) {
+                    bodyHtml += `<div class="_fm-section-label" style="margin:10px 0 4px;">${g.label}</div>`;
+                    bodyHtml += _grid(g.options);
+                }
+            } else {
+                bodyHtml += _grid(f.options);
             }
-            bodyHtml += `</div>`;
         } else {
             bodyHtml += `<input data-field="${f.key}" type="${f.type || 'text'}" placeholder="${f.placeholder || ''}" ${f.autofocus ? 'autofocus' : ''} class="_fm-input">`;
         }

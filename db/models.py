@@ -125,7 +125,11 @@ class User(Base):
     password_hash = Column(String(255), nullable=True)                  # nullable: Google-only 使用者無密碼
     role = Column(String(16), nullable=False, default="editor")         # 舊欄位，過渡期保留
     visible_tabs = Column(JSONB)                                        # 舊欄位，過渡期保留
-    role_id = Column(Integer, nullable=True)                            # 新 RBAC FK（過渡期 nullable）
+    role_id = Column(Integer, nullable=True)                            # 舊 RBAC FK（角色層已淘汰，過渡期保留可回退）
+    # ── RBAC v2：權限直接綁帳號（移除角色層）。以下兩欄為唯一授權來源；
+    #    role/role_id 僅保留作回退，不再決定權限。 ──
+    modules = Column(JSONB, nullable=True)                              # 可用模組 key 清單
+    access_level = Column(Integer, nullable=True)                       # 3=管理員, 1=一般（唯一硬閘門 Lv3）
     first_login = Column(Boolean, default=False)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     # ── Google OAuth 欄位 ──
