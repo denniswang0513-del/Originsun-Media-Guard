@@ -2,7 +2,7 @@
 // Entry point — imports all extracted modules, then defines core app logic.
 
 // ── Module Imports (side-effect: each module registers its window.* globals) ──
-import { TAB_MAP, TAB_LOADERS, shouldShowTab } from './js/shared/tab-config.js';
+import { TAB_MAP, TAB_LOADERS, shouldShowTab, TAB_GROUPS, groupForSection, isMediaSection } from './js/shared/tab-config.js';
 import './js/shared/modal-styles.js';
 import './js/auth/auth-state.js';
 import './js/auth/login-modal.js';
@@ -94,8 +94,10 @@ if (typeof appendLog === 'undefined') {
                 // Auto-switch to first authorized tab. Skipped on the
                 // post-login re-call so the user isn't yanked away from
                 // whatever tab they were already on.
-                if (autoSwitch && hasModules) {
-                    const firstTab = TAB_MAP[modules[0]];
+                if (autoSwitch) {
+                    // Logged-out users get media tools only → land on 備份並轉檔
+                    // (the historical default tab), derived from TAB_MAP not a literal.
+                    const firstTab = hasModules ? TAB_MAP[modules[0]] : TAB_MAP.backup;
                     if (firstTab) switchTab(firstTab);
                 }
             } catch (err) {
@@ -108,6 +110,7 @@ if (typeof appendLog === 'undefined') {
         window._ensureTabsLoaded = () => loadTabs({ autoSwitch: false });
 
         // Initialize tabs immediately
+        renderGroupNav();
         loadTabs().then(async () => {
             // Auth already resolved inside loadTabs(); apply tab visibility as safety fallback
             if (typeof window._applyVisibleTabs === 'function') window._applyVisibleTabs();
@@ -1116,6 +1119,76 @@ if (typeof appendLog === 'undefined') {
         }
 
 
+        // ============ Grouped nav (官網-style top groups + left sidebar) ============
+        // Single source of truth = TAB_GROUPS (tab-config.js). Top bar = group
+        // buttons; sidebar groups show a left list of their tabs. switchTab stays
+        // the ONLY place that toggles section visibility — these helpers just keep
+        // the surrounding chrome (top highlight + sidebar) in sync.
+        const _groupLastTab = {};   // groupId -> last-active section id (restore on re-open)
+        let _sidebarGroupId = null; // group currently rendered into #group-sidebar
+
+        function _sectionForGroup(group) {
+            if (_groupLastTab[group.id]) return _groupLastTab[group.id];
+            if (group.single) return TAB_MAP[group.single];
+            const first = (group.items || []).find((it) => TAB_MAP[it.key]);
+            return first ? TAB_MAP[first.key] : null;
+        }
+
+        function renderGroupNav() {
+            const top = document.getElementById('top-group-nav');
+            if (!top) return;
+            top.innerHTML = '';
+            TAB_GROUPS.forEach((g) => {
+                const b = document.createElement('button');
+                b.id = 'gbtn_' + g.id;
+                b.className = 'group-top-btn';
+                b.textContent = g.label;
+                b.onclick = () => selectGroup(g.id);
+                top.appendChild(b);
+            });
+        }
+
+        function renderGroupSidebar(group) {
+            const side = document.getElementById('group-sidebar');
+            if (!side) return;
+            const gid = group ? group.id : null;
+            if (gid === _sidebarGroupId) return; // unchanged — keep DOM + active state
+            _sidebarGroupId = gid;
+            if (!group) { side.classList.add('hidden'); side.innerHTML = ''; return; }
+            side.innerHTML = '';
+            group.items.forEach((it) => {
+                const sec = TAB_MAP[it.key];
+                if (!sec) return;
+                const b = document.createElement('button');
+                b.id = 'sbtn_' + sec;
+                b.className = 'group-side-btn';
+                b.textContent = it.label;
+                b.onclick = () => switchTab(sec);
+                side.appendChild(b);
+            });
+            side.classList.remove('hidden');
+        }
+
+        function selectGroup(groupId) {
+            const g = TAB_GROUPS.find((x) => x.id === groupId);
+            if (!g) return;
+            const target = _sectionForGroup(g);
+            if (target) switchTab(target);
+        }
+
+        // Keep top-bar + sidebar in sync with the section switchTab just showed.
+        function _syncGroupChrome(tabId) {
+            const g = groupForSection(tabId);
+            document.querySelectorAll('#top-group-nav .group-top-btn')
+                .forEach((b) => b.classList.toggle('active', !!g && b.id === 'gbtn_' + g.id));
+            renderGroupSidebar(g && g.items ? g : null);
+            if (g && g.items) {
+                document.querySelectorAll('#group-sidebar .group-side-btn')
+                    .forEach((b) => b.classList.toggle('active', b.id === 'sbtn_' + tabId));
+            }
+            if (g) _groupLastTab[g.id] = tabId;
+        }
+
         // ================= Tab 切換邏輯 =================
         function switchTab(tabId) {
             if (typeof window._costCheckUnsaved === 'function' && Object.keys(window._costDirtyMap || {}).length > 0) {
@@ -1125,26 +1198,11 @@ if (typeof appendLog === 'undefined') {
             document.querySelectorAll('.tab-content').forEach(el => el.classList.add('hidden'));
             document.getElementById(tabId).classList.remove('hidden');
 
-            // 重置按鈕樣式
-            const btnCols = ['btn_tab-projects', 'btn_tab_main', 'btn_tab_verify', 'btn_tab_transcode', 'btn_tab_concat', 'btn_tab_report', 'btn_tab_transcribe', 'btn_tab_tts', 'btn_tab_drone_meta', 'btn_tab_crm_clients', 'btn_tab_crm_projects', 'btn_tab_crm_staff', 'btn_tab_crm_invoices'];
-            btnCols.forEach(btn => {
-                const el = document.getElementById(btn);
-                if (el) {
-                    el.classList.remove('bg-[#2a2a2a]', 'text-blue-400', 'text-amber-300', 'border', 'border-b-0', 'border-[#3a3a3a]');
-                    el.classList.add('bg-[#1e1e1e]', 'text-white', 'border-transparent');
-                }
-            });
+            // Sync grouped-nav chrome (top-bar highlight + left sidebar)
+            _syncGroupChrome(tabId);
 
-            // 啟動當前
-            const activeBtn = document.getElementById('btn_' + tabId);
-            if (activeBtn) {
-                activeBtn.classList.remove('bg-[#1e1e1e]', 'text-white', 'text-amber-400', 'border-transparent');
-                activeBtn.classList.add('bg-[#2a2a2a]', 'border', 'border-b-0', 'border-[#3a3a3a]', 'text-blue-400');
-            }
-
-            // Hide progress/log sections for tabs without media tasks (CRM + 官網管理)
-            const nonTaskTabs = ['tab_crm_clients', 'tab_crm_projects', 'tab_crm_staff', 'tab_crm_invoices', 'tab_website'];
-            const hideTaskLog = nonTaskTabs.includes(tabId);
+            // Hide the shared 執行控制與日誌 panel for non-media sections (CRM / 官網 / admin)
+            const hideTaskLog = !isMediaSection(tabId);
             document.querySelectorAll('.media-task-section').forEach(el => el.style.display = hideTaskLog ? 'none' : '');
 
             // Notify projects tab of visibility change

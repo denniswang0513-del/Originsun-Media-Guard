@@ -48,3 +48,48 @@ export function shouldShowTab(key, authUser, modules) {
     const hasModules = loggedIn && modules && modules.length > 0;
     return hasModules ? modules.includes(key) : loggedIn ? true : MEDIA_TABS.includes(key);
 }
+
+// ── Top-level grouping (官網-style left-sidebar groups) ──────────────────
+// Single source of truth for the grouped navigation. A group is either a
+// standalone tab (`single`) or a left-sidebar group (`items` = ordered keys).
+// `key` values are TAB_MAP keys; sidebar labels live here so nav + RBAC +
+// switchTab all derive from one place.
+export const TAB_GROUPS = [
+    { id: 'projects',   label: '📊 專案總覽', single: 'projects' },
+    { id: 'production', label: '🎬 製作工具', items: [
+        { key: 'backup',     label: '📦 備份並轉檔' },
+        { key: 'verify',     label: '✔️ 檔案比對' },
+        { key: 'transcode',  label: '✂️ 轉 Proxy' },
+        { key: 'concat',     label: '🎞️ 製作串帶' },
+        { key: 'drone_meta', label: '🛸 空拍寫入' },
+        { key: 'report',     label: '📊 檔案視覺報表' },
+        { key: 'transcribe', label: '🎙️ AI 逐字稿' },
+        { key: 'tts',        label: '🔊 語音生成' },
+    ] },
+    { id: 'business',   label: '💼 業務管理', items: [
+        { key: 'crm_clients',  label: '🤝 客戶管理' },
+        { key: 'crm_projects', label: '📁 專案管理' },
+        { key: 'crm_staff',    label: '👥 人力資源' },
+        { key: 'crm_invoices', label: '🧾 帳務管理' },
+    ] },
+    { id: 'website',    label: '🌐 官網管理', single: 'website_admin' },
+];
+
+// Keys belonging to a group — filtered to keys that actually have a section in
+// TAB_MAP so an orphan RBAC key (e.g. crm_quotes, no loader/section) can't
+// create a phantom group member.
+export function groupKeys(group) {
+    const keys = group.single ? [group.single] : group.items.map((i) => i.key);
+    return keys.filter((k) => TAB_MAP[k]);
+}
+
+// Reverse lookup: a section id (e.g. 'tab_main') → its TAB_GROUPS entry.
+export function groupForSection(sectionId) {
+    return TAB_GROUPS.find((g) => groupKeys(g).some((k) => TAB_MAP[k] === sectionId)) || null;
+}
+
+// Section ids whose group shows the shared 執行控制與日誌 panel (media tasks).
+// Derived from MEDIA_TABS so the hardcoded list in switchTab can be retired.
+export function isMediaSection(sectionId) {
+    return MEDIA_TABS.some((k) => TAB_MAP[k] === sectionId);
+}

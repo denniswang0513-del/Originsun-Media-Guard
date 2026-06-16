@@ -1,6 +1,37 @@
 /* ─── Originsun Media Guard Pro ─── */
 /* Extracted from index.html <style> blocks */
 
+/* ─── Grouped navigation (top group bar + left sidebar, 官網-style) ─── */
+.group-top-btn {
+    padding: 12px 20px; font-size: 14px; font-weight: 600;
+    border-top-left-radius: 8px; border-top-right-radius: 8px;
+    background: #1e1e1e; color: #fff; border: 1px solid transparent;
+    margin-right: 4px; cursor: pointer; transition: background .15s, color .15s;
+}
+.group-top-btn:hover { background: #252525; }
+.group-top-btn.active {
+    background: #2a2a2a; color: #60a5fa;
+    border: 1px solid #3a3a3a; border-bottom-color: transparent;
+}
+.group-sidebar {
+    width: 200px; flex-shrink: 0; padding: 12px 0;
+    background: #1f1f1f; border: 1px solid #3a3a3a; border-right: none;
+    border-bottom-left-radius: 8px; align-self: stretch;
+}
+/* Left-sidebar item — shared by the grouped nav AND the 官網管理 sidebar
+   (.website-nav-btn) so the two look identical from one source of truth. */
+.group-side-btn, .website-nav-btn {
+    display: block; width: 100%; text-align: left;
+    padding: 10px 16px; background: transparent; color: #ccc;
+    border: none; border-left: 3px solid transparent;
+    cursor: pointer; font-size: 13px; transition: all .15s;
+}
+.group-side-btn:hover, .website-nav-btn:hover { background: #252525; color: #fff; }
+.group-side-btn.active, .website-nav-btn.active {
+    background: #2a2a2a; color: #fff;
+    border-left-color: #3b82f6; font-weight: 600;
+}
+
         /* Global: dark calendar/month picker icons */
         input[type="date"],
         input[type="month"] { color-scheme: dark; }
