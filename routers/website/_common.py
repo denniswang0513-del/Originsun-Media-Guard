@@ -83,17 +83,19 @@ async def get_factory() -> Callable:
 
 
 def check_admin(request: Request) -> None:
-    """管理端 guard：沿用 core.auth.check_admin。
+    """官網管理 guard：管理員 OR 擁有「官網」模組(website_admin) 即可（RBAC v2）。
 
-    若 core.auth 無法 import 視為安全事件（網站 container 應該有 auth 模組）——
-    raise 503 而非靜默放行，防止意外 auth bypass。
+    官網寫入不再要求全站管理員——只要帳號被授予 website_admin 模組就能編輯官網，
+    但不獲得其他管理權限（使用者/發版/機器/CRM 仍要全站管理員）。全站管理員照舊放行。
+    admin_session / admin_guard / register_crud 全部走這個 wrapper，所以官網所有
+    寫入端點一次涵蓋。若 core.auth 無法 import 視為安全事件 → 503 而非靜默放行。
     """
     try:
-        from core.auth import check_admin as _ca
+        from core.auth import check_admin_or_module
     except ImportError:
         logger.error("core.auth import failed in website container — refusing admin request")
         raise HTTPException(status_code=503, detail="Auth module unavailable")
-    _ca(request)
+    check_admin_or_module(request, 'website_admin')
 
 
 def current_username(request: Request) -> str:

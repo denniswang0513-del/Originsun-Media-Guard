@@ -170,6 +170,27 @@ def check_admin(request: Request):
     raise HTTPException(status_code=403, detail="權限不足")
 
 
+def check_admin_or_module(request: Request, *module_keys: str):
+    """Like check_admin, but ALSO passes if the token grants any of module_keys.
+
+    For subsystem guards (e.g. 官網管理) that a non-admin should be able to use
+    when their per-account `modules` includes the relevant key — WITHOUT granting
+    global admin. Full admins (access_level>=3 / legacy role) always pass. The
+    `modules` list is server-set at login and HMAC-signed in the JWT, so it
+    can't be forged client-side. Does NOT replace check_admin — call this only
+    from the specific subsystem guard you want to open up.
+    """
+    payload = _extract_token(request)
+    if payload is None:
+        raise HTTPException(status_code=401, detail="未登入或 token 已過期")
+    if payload.get('access_level', -1) >= 3 or payload.get('role') == 'admin':
+        return payload
+    user_modules = payload.get('modules') or []
+    if any(k in user_modules for k in module_keys):
+        return payload
+    raise HTTPException(status_code=403, detail="權限不足")
+
+
 def require_role(*roles: str):
     """FastAPI dependency: require authenticated user with specified role.
     Supports both role_name (new RBAC) and role (legacy) fields.
