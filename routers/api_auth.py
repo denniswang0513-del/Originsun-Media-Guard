@@ -17,7 +17,7 @@ from core.auth import (
     hash_password, verify_password, create_token, verify_token,
     _extract_token, check_admin,
     load_users_json, save_users_json, sync_user_to_json, remove_user_from_json,
-    LEGACY_ROLE_LEVELS, ALL_MODULES,
+    LEGACY_ROLE_LEVELS, ALL_MODULES, grant_admin_all_modules,
 )
 try:
     from core.google_auth import verify_google_id_token, GoogleTokenError
@@ -104,11 +104,8 @@ def _enrich_user(u_dict: dict) -> dict:
         u_dict.setdefault('role_name', u_dict.get('role', 'editor'))
         u_dict.setdefault('access_level', LEGACY_ROLE_LEVELS.get(u_dict.get('role', ''), 0))
         u_dict.setdefault('modules', [])
-    # 管理員（Lv3）= 完整權限：一律享有全部模組。前端 shouldShowTab 只看 modules，
-    # access_level 不會自動放行分頁，所以這裡把管理員的 modules 補成全部，避免
-    # 舊資料 modules 不全導致管理員看不到所有分頁。
-    if (u_dict.get('access_level') or 0) >= 3:
-        u_dict['modules'] = list(ALL_MODULES)
+    # 管理員（Lv3）= 完整權限：見 core.auth.grant_admin_all_modules（單一來源）。
+    u_dict['modules'] = grant_admin_all_modules(u_dict.get('access_level'), u_dict.get('modules'))
     return u_dict
 
 

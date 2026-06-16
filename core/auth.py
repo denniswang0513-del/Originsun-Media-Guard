@@ -130,6 +130,17 @@ ALL_MODULES = [
 ]
 
 
+def grant_admin_all_modules(access_level, modules):
+    """RBAC v2 invariant (single source of truth): an admin (access_level>=3)
+    implicitly holds every module. The frontend shouldShowTab gates nav purely
+    by `modules` (access_level doesn't auto-grant tabs), so an admin must carry
+    the full set or they'd lose tabs when stored modules are incomplete. Both
+    the JWT-payload builder and api_auth._enrich_user funnel through here so the
+    rule can't drift between them.
+    """
+    return list(ALL_MODULES) if (access_level or 0) >= 3 else modules
+
+
 # ── Role Decorator ──
 
 def _extract_token(request: Request) -> Optional[dict]:
@@ -442,10 +453,7 @@ def _build_user_payload_for_api_key(username: str) -> Optional[dict]:
     # read modules + access_level straight off the user row (no role lookup).
     role_name = user.get('role_name') or user.get('role', 'editor')
     access_level = user.get('access_level', 1)
-    modules = user.get('modules', [])
-    # 管理員（Lv3）= 完整權限（與 _enrich_user 一致）。
-    if (access_level or 0) >= 3:
-        modules = list(ALL_MODULES)
+    modules = grant_admin_all_modules(access_level, user.get('modules', []))
 
     return {
         'sub': username,

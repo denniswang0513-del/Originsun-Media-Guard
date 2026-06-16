@@ -314,12 +314,8 @@ async def _on_startup():
                     # idempotent — 只填還是 NULL 的 row，跑多次無害。確保上線後
                     # 沒有人掉權限；之後角色層即可淘汰（Phase 2）。
                     import json as _json_rbac
-                    _all_mods_sql = _json_rbac.dumps([
-                        "backup", "verify", "transcode", "concat", "report",
-                        "transcribe", "tts", "drone_meta", "projects",
-                        "crm_clients", "crm_projects", "crm_quotes",
-                        "crm_staff", "crm_invoices", "website_admin",
-                    ])
+                    from core.auth import ALL_MODULES as _all_mods
+                    _all_mods_sql = _json_rbac.dumps(list(_all_mods))
                     for _bf_sql in [
                         # 1) 有 role_id 的使用者：複製其角色的 modules + access_level
                         "UPDATE users u SET modules = r.modules, access_level = r.access_level "

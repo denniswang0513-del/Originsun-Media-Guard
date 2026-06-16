@@ -99,6 +99,11 @@ export const PERMISSION_GROUPS = [
     { id: 'website',    label: '🌐 官網管理', modules: ['website_admin'] },
 ];
 
+// Flat list of every assignable RBAC module key — derived from PERMISSION_GROUPS
+// so there is one source of truth (order follows group order). Consumed by the
+// user-management permission editor.
+export const ALL_MODULES = PERMISSION_GROUPS.flatMap((g) => g.modules);
+
 // Group a module list into PERMISSION_GROUPS order, keeping only modules present
 // in the input. Any module not listed in any group (future-proofing if the
 // module set grows but PERMISSION_GROUPS isn't updated) falls into a trailing

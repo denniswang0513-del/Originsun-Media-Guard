@@ -1,18 +1,19 @@
 // ─── User Management (extracted from app.js) ─── //
 // RBAC v2: 權限直接綁帳號（角色層已移除）。每個帳號 = 一組可勾選模組 + 「管理員」開關。
 import { _ensureModalStyles, _createFormModal } from '../shared/modal-styles.js';
-import { groupModules } from '../shared/tab-config.js';
+import { groupModules, ALL_MODULES } from '../shared/tab-config.js';
 
-const TAB_NAMES = {backup:'備份並轉檔',verify:'檔案比對',transcode:'轉 Proxy',concat:'製作串帶',report:'檔案視覺報表',transcribe:'AI 逐字稿',tts:'語音生成'};
-
-const ALL_MODULES = ['backup','verify','transcode','concat','report','transcribe','tts','drone_meta','projects','crm_clients','crm_projects','crm_quotes','crm_staff','crm_invoices','website_admin'];
 const MODULE_LABELS = {backup:'備份',verify:'比對',transcode:'轉檔',concat:'串帶',report:'報表',transcribe:'逐字稿',tts:'語音',drone_meta:'空拍寫入',projects:'專案',crm_clients:'客戶',crm_projects:'專案管理',crm_quotes:'報價',crm_staff:'人力',crm_invoices:'帳務',website_admin:'官網'};
+
+// The 4-group structure is identical for every user (it's all modules grouped),
+// so compute it once rather than per user row / per modal open.
+const _PERM_GROUPS = groupModules(ALL_MODULES);
 
 // Render the editable, 4-group permission cell for one user. `locked` disables
 // everything (built-in admin: prevent self-lockout). When 管理員 is on, modules
 // are implied (full access) so the grid is dimmed.
 function _renderUserPermCell(username, userModules, isAdminUser, locked) {
-    const groups = groupModules(ALL_MODULES);   // editor shows ALL modules grouped
+    const groups = _PERM_GROUPS;
     const dis = locked ? 'disabled' : '';
     const adminRow = `
         <label class="_fm-chk" style="padding:3px 6px;font-weight:600;color:${isAdminUser ? '#a78bfa' : '#999'};">
@@ -179,7 +180,7 @@ async function _loadUserList() {
 
 // ─── Add User (styled modal) ─── //
 window._addUserPrompt = async function() {
-    const moduleGroups = groupModules(ALL_MODULES).map(g => ({
+    const moduleGroups = _PERM_GROUPS.map(g => ({
         label: g.label,
         options: g.modules.map(m => ({ value: m, label: MODULE_LABELS[m] || m, checked: false })),
     }));
