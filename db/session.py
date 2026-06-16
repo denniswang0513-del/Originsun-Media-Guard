@@ -55,7 +55,10 @@ async def init_db() -> bool:
             pool_size=5,
             max_overflow=10,
             pool_timeout=5,
-            pool_recycle=1800,
+            pool_recycle=600,        # recycle conns >10min old (NAS may drop idle TCP)
+            pool_pre_ping=True,      # ping before checkout → discard stale/dead conns so a
+                                     # dropped connection can't fail db_available() and flip
+                                     # state.db_online false (which blanks DB-gated views).
             echo=False,
             connect_args={"timeout": 3},  # asyncpg connection timeout (seconds)
         )
