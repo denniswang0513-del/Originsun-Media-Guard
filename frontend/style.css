@@ -32,6 +32,23 @@
     border-left-color: #3b82f6; font-weight: 600;
 }
 
+/* Mobile (≤768px): stack content under a horizontal-scrolling sidebar strip;
+   active marker moves from left-border to bottom-border. */
+@media (max-width: 768px) {
+    #top-group-nav { flex-wrap: wrap; }
+    .group-top-btn { padding: 10px 12px; font-size: 13px; }
+    #app-body { flex-direction: column; }
+    .group-sidebar {
+        width: 100%; display: flex; overflow-x: auto; padding: 0;
+        border: 1px solid #3a3a3a; border-radius: 8px 8px 0 0;
+    }
+    .group-side-btn {
+        width: auto; white-space: nowrap;
+        border-left: none; border-bottom: 3px solid transparent;
+    }
+    .group-side-btn.active { border-left-color: transparent; border-bottom-color: #3b82f6; }
+}
+
         /* Global: dark calendar/month picker icons */
         input[type="date"],
         input[type="month"] { color-scheme: dark; }

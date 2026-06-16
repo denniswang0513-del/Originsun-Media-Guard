@@ -95,9 +95,12 @@ if (typeof appendLog === 'undefined') {
                 // whatever tab they were already on.
                 if (autoSwitch) {
                     renderGroupNav(); // build top bar with resolved auth before first switch
-                    // Logged-out users get media tools only → land on 備份並轉檔
+                    // Deep-link: honor a #section in the URL if it exists and is allowed.
+                    const hashTab = location.hash.slice(1);
+                    const fromHash = _isNavigable(hashTab) ? hashTab : null;
+                    // Else logged-out users get media tools only → land on 備份並轉檔
                     // (the historical default tab), derived from TAB_MAP not a literal.
-                    const firstTab = hasModules ? TAB_MAP[modules[0]] : TAB_MAP.backup;
+                    const firstTab = fromHash || (hasModules ? TAB_MAP[modules[0]] : TAB_MAP.backup);
                     if (firstTab) switchTab(firstTab);
                 }
             } catch (err) {
@@ -1144,6 +1147,11 @@ if (typeof appendLog === 'undefined') {
             return groupKeys(g).some((k) => TAB_MAP[k] === sectionId && _authed(k));
         }
 
+        // A section id we may navigate to: it exists in the DOM and is authorized.
+        function _isNavigable(sectionId) {
+            return !!(sectionId && document.getElementById(sectionId) && _isTabAuthorized(sectionId));
+        }
+
         function _sectionForGroup(group) {
             if (_groupLastTab[group.id]) return _groupLastTab[group.id];
             if (group.single) return TAB_MAP[group.single];
@@ -1206,6 +1214,13 @@ if (typeof appendLog === 'undefined') {
         }
         window._refreshGroupNav = refreshGroupNav;
 
+        // Deep-link: react to manual hash changes (back/forward, pasted URL).
+        window.addEventListener('hashchange', () => {
+            const t = location.hash.slice(1);
+            const cur = document.querySelector('.tab-content:not(.hidden)')?.id;
+            if (t !== cur && _isNavigable(t)) switchTab(t);
+        });
+
         // Keep top-bar + sidebar in sync with the section switchTab just showed.
         function _syncGroupChrome(tabId) {
             const g = groupForSection(tabId);
@@ -1225,8 +1240,10 @@ if (typeof appendLog === 'undefined') {
                 window._costCheckUnsaved(function() { window._costDirtyMap = {}; switchTab(tabId); });
                 return;
             }
+            const _section = document.getElementById(tabId);
+            if (!_section) return; // unknown/orphan tabId (e.g. a granted-but-pageless module) — no-op
             document.querySelectorAll('.tab-content').forEach(el => el.classList.add('hidden'));
-            document.getElementById(tabId).classList.remove('hidden');
+            _section.classList.remove('hidden');
 
             // Sync grouped-nav chrome (top-bar highlight + left sidebar)
             _syncGroupChrome(tabId);
@@ -1248,6 +1265,10 @@ if (typeof appendLog === 'undefined') {
                 }
                 if (window.loadReportHistory) window.loadReportHistory();
             }
+
+            // Reflect the active tab in the URL (shareable/bookmarkable). replaceState
+            // fires no hashchange, so this can't loop with the hashchange listener.
+            if (('#' + tabId) !== location.hash) history.replaceState(null, '', '#' + tabId);
         }
 
         // ===== 全域：記錄上一次任務，供重試使用 =====
