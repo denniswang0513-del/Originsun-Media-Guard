@@ -746,8 +746,66 @@ async def _on_startup():
 
     asyncio.create_task(_periodic_version_check())
     asyncio.create_task(_periodic_db_health())
+    asyncio.create_task(_loop_heartbeat())
+    import threading as _wd_threading
+    _wd_threading.Thread(target=_wedge_watchdog, daemon=True, name="wedge-watchdog").start()
     from core.scheduler import run_scheduler  # type: ignore
     asyncio.create_task(run_scheduler())
+
+
+# ── Wedge watchdog: guaranteed recovery ──────────────────────────────────
+# Several in-process fixes (pool_pre_ping, non-blocking agent polls,
+# SelectorEventLoop, asyncpg command_timeout) each failed to fully stop 8000
+# from occasionally wedging — db_online sticks false / the loop stalls (CPU 0%,
+# every endpoint slow), recoverable ONLY by a process restart. Since restart
+# ALWAYS clears it, a daemon THREAD (off the event loop, so it survives a loop
+# stall) clean-restarts the process when the wedge is detected. This is the
+# safety net until the true root is found. (2026-06-18)
+import time as _wd_time
+_WD_LAST_BEAT = [0.0]            # monotonic ts stamped by _loop_heartbeat
+_WD_DB_OFFLINE_SINCE = [0.0]     # monotonic ts when db_online first went false
+_WD_PROC_START = _wd_time.monotonic()
+
+
+async def _loop_heartbeat():
+    """Stamp a heartbeat every 10s so the watchdog thread can detect a stalled loop."""
+    while True:
+        _WD_LAST_BEAT[0] = _wd_time.monotonic()
+        await asyncio.sleep(10)
+
+
+def _wedge_watchdog():
+    """Daemon thread (NOT on the event loop). Clean-restarts the process if
+    db_online is stuck false >120s or the loop heartbeat goes stale >90s. A
+    3-min min-uptime guard prevents restart loops."""
+    import time
+    while True:
+        time.sleep(15)
+        try:
+            now = time.monotonic()
+            if now - _WD_PROC_START < 180:
+                continue  # let a freshly-started process settle before any restart
+            if not state.db_online:
+                if _WD_DB_OFFLINE_SINCE[0] == 0.0:
+                    _WD_DB_OFFLINE_SINCE[0] = now
+            else:
+                _WD_DB_OFFLINE_SINCE[0] = 0.0
+            db_stuck = _WD_DB_OFFLINE_SINCE[0] and (now - _WD_DB_OFFLINE_SINCE[0] > 120)
+            beat_age = (now - _WD_LAST_BEAT[0]) if _WD_LAST_BEAT[0] else 0
+            loop_dead = beat_age > 90
+            if db_stuck or loop_dead:
+                why = (f"db_online offline {int(now - _WD_DB_OFFLINE_SINCE[0])}s"
+                       if db_stuck else f"loop heartbeat stale {int(beat_age)}s")
+                print(f"[WATCHDOG] {why} — clean-restarting 8000")
+                try:
+                    from core.process_spawn import trigger_detached_restart
+                    trigger_detached_restart(run_ota=False)
+                except Exception as e:
+                    print(f"[WATCHDOG] restart spawn failed: {e}")
+                time.sleep(1.5)
+                os._exit(1)
+        except Exception as e:
+            print(f"[WATCHDOG] error: {e}")
 
 
 async def _periodic_db_health():

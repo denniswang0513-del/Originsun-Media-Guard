@@ -214,10 +214,8 @@ export async function _onLoginSuccess(d) {
     if (typeof window._ensureTabsLoaded === 'function') {
         await window._ensureTabsLoaded();
     }
-    // 內建 admin 帳號略過「首次登入改密碼」提示，直接登入（其他新帳號仍提醒）
-    if (d.first_login && d.username !== 'admin') {
-        alert('首次登入，請到系統設定修改密碼。');
-    }
+    // （移除「首次登入改密碼」的 blocking alert：UI 建立的帳號 first_login=False、
+    //   Google 帳號根本沒密碼可改，這提示實際只會擋到 admin/自己 → 直接登入）
 }
 
 // ─── RBAC Module-based Tab Visibility ─── //
