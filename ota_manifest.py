@@ -144,6 +144,8 @@ OPTIONAL_IMPORTS = {
     "cv2", "sklearn", "asyncpg", "sqlalchemy",
     # align job 用的 stable-ts + pysrt；agent 不跑 align，沒裝 OK
     "stable_whisper", "pysrt",
+    # httpx：master 端非阻塞 agent 健康輪詢用（lazy import）；agent 不輪詢，沒裝也 OK
+    "httpx",
 }
 
 # ── Implicit deps (installing X also requires Y) ──

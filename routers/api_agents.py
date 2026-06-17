@@ -222,28 +222,45 @@ async def add_agent(req: NewAgentRequest, request: Request):
 
 
 # ── Health proxy cache ─────────────────────────────────────────────
-# Each browser/tab polls /agents/{id}/health per agent on a timer. Without
-# caching, every poll fires a live urlopen in a worker thread; an OFFLINE
-# agent blocks that thread for the full timeout. With several clients/tabs ×
-# several agents, dead-agent checks pile up, saturate the thread pool and
-# starve request handling — every endpoint (even /health, /crm) then stalls
-# ~timeout per offline agent. A short server-side cache + per-agent lock
-# collapse N concurrent polls into at most ONE live check per agent per TTL,
-# independent of how many clients poll. (root-caused 2026-06-15)
+# Each browser/tab polls /agents/{id}/health per agent on a timer. The live
+# check is fully ASYNC (httpx): an unreachable agent costs awaited time on the
+# event loop, never a blocked worker-thread — so N offline agents × M polling
+# clients can't saturate the thread pool and starve the whole server (the
+# 2026-06 wedge: every endpoint, even /health, stalled). On top of that a short
+# server-side cache + per-agent lock collapse N concurrent polls into at most
+# ONE live check per agent per TTL, independent of client count.
 _health_cache: dict = {}          # agent_id -> (loop_ts, result)
 _health_locks: dict = {}          # agent_id -> asyncio.Lock
 _HEALTH_TTL = 5.0                  # seconds; machine-status staleness tolerance
+
+
+async def _async_get_json(url: str, timeout: float):
+    """Non-blocking HTTP GET → parsed JSON, or None on any failure/timeout.
+
+    Uses httpx (async) so a slow/dead host costs *awaited* time on the event
+    loop, never a blocked thread. httpx is lazy-imported — only the master
+    polls agents, so agent machines that lack it never hit this path; if it is
+    somehow missing we return None (caller treats as offline) instead of crashing.
+    """
+    try:
+        import httpx
+    except Exception:
+        return None
+    try:
+        async with httpx.AsyncClient(timeout=timeout) as client:
+            r = await client.get(url)
+            r.raise_for_status()
+            return r.json()
+    except Exception:
+        return None
 
 
 @router.get("/agents/{agent_id}/health")
 async def proxy_agent_health(agent_id: str):
     """Proxy health check — avoids browser CORS/Private Network issues.
 
-    Cached for _HEALTH_TTL seconds so repeated polls (many clients/tabs) don't
-    each spawn a blocking live check. Timeout=1.5s: live LAN agents respond in
-    ~50ms; an offline agent blocks the worker thread for the full timeout, so
-    the cache + lock below ensure that cost is paid at most once per TTL per
-    agent rather than once per poll per client.
+    Cached for _HEALTH_TTL seconds; the live check is async (non-blocking) so an
+    offline agent never holds a worker-thread. See _async_get_json above.
     """
     loop = asyncio.get_running_loop()
     cached = _health_cache.get(agent_id)
@@ -261,16 +278,7 @@ async def proxy_agent_health(agent_id: str):
 
         agent = await _find_agent(agent_id)
         url = agent.get("url", "").rstrip("/") + "/api/v1/health"
-
-        def _fetch_health():
-            try:
-                r = urllib.request.Request(url, method="GET")
-                with urllib.request.urlopen(r, timeout=1.5) as resp:
-                    return json.loads(resp.read().decode("utf-8"))
-            except Exception:
-                return {"status": "offline"}
-
-        result = await asyncio.to_thread(_fetch_health)
+        result = await _async_get_json(url, timeout=1.5) or {"status": "offline"}
         _health_cache[agent_id] = (loop.time(), result)
         return result
 

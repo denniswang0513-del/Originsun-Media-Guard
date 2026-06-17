@@ -68,18 +68,25 @@ def _append_publish_history(version: str, notes: str, success: bool, user: str =
 
 # ── Shared restart logic ────────────────────────────────────────────────
 
-async def _do_update_restart():
+async def _do_update_restart(run_ota: bool = True):
     """OTA update + restart, used by /control/update and /internal/restart.
 
     Spawns a detached helper (see core.process_spawn) that waits for us
     to exit, then runs update_agent.py (download + extract + pip + preflight)
     and finally spawns a new uvicorn. Helper writes update_status.json
     along the way (read by master after restart to surface OTA result).
+
+    run_ota=False → skip the OTA download/extract entirely and just respawn
+    uvicorn on the current on-disk code. Used by deploy_to_prod, which already
+    copied the new code locally: making the master OTA-download from *itself*
+    while it is exiting failed ("無法連線到主控端") and left a uvicorn spawned
+    from the wrong working dir → `No module named 'db'` crash (2026-06-18).
+    The run_ota=False path goes straight to spawn_uvicorn_detached (cwd=base).
     """
     from core.process_spawn import trigger_detached_restart
-    trigger_detached_restart(run_ota=True)
+    trigger_detached_restart(run_ota=run_ota)
     asyncio.get_running_loop().call_later(1.0, os._exit, 0)
-    return {"status": "updating"}
+    return {"status": "updating" if run_ota else "restarting"}
 
 
 # ── Endpoints ───────────────────────────────────────────────────────────
@@ -126,7 +133,9 @@ async def internal_restart(request: Request):
     key = request.headers.get("X-Internal-Key", "")
     if key != "originsun-internal-restart":
         return JSONResponse({"detail": "Invalid internal key"}, 401)
-    return await _do_update_restart()
+    # ?ota=0 → clean restart, no OTA (deploy_to_prod already copied the code).
+    run_ota = request.query_params.get("ota", "1") not in ("0", "false", "no")
+    return await _do_update_restart(run_ota=run_ota)
 
 
 @router.post("/api/admin/restart")
@@ -712,14 +721,14 @@ async def deploy_to_prod(request: Request):
                     return
 
                 # ── Restart 8000 so it loads the freshly-copied code ──
-                # internal/restart works on the currently-running (old) 8000 too;
-                # its OTA step no-ops (same version), then the detached helper
-                # relaunches uvicorn on the new on-disk code.
+                # ?ota=0: code is already copied, so do a clean restart (no OTA).
+                # The OTA path made the master download from itself while exiting
+                # → spawned uvicorn from the wrong cwd → 'No module named db' crash.
                 restart_msg = ""
                 def _restart():
                     import urllib.request
                     req = urllib.request.Request(
-                        _PROD_RESTART_URL, method="POST", data=b"{}",
+                        _PROD_RESTART_URL + "?ota=0", method="POST", data=b"{}",
                         headers={"Content-Type": "application/json",
                                  "X-Internal-Key": "originsun-internal-restart"},
                     )
