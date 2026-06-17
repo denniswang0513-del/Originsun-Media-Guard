@@ -188,8 +188,8 @@ def check_admin_or_module(request: Request, *module_keys: str):
     when their per-account `modules` includes the relevant key — WITHOUT granting
     global admin. Full admins (access_level>=3 / legacy role) always pass. The
     `modules` list is server-set at login and HMAC-signed in the JWT, so it
-    can't be forged client-side. Does NOT replace check_admin — call this only
-    from the specific subsystem guard you want to open up.
+    can't be forged client-side. Does NOT replace check_admin — call it only
+    within the specific subsystem guard you want to open up.
     """
     payload = _extract_token(request)
     if payload is None:
