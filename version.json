@@ -1,5 +1,5 @@
 {
-  "version": "1.10.138",
-  "build_date": "2026-06-17",
-  "notes": "RBAC v2 帳號授權 + 官網模組寫入 + DB self-heal 穩定性根治（canary 8000，未推全機隊）"
+  "version": "1.10.139",
+  "build_date": "2026-06-18",
+  "notes": "非阻塞 agent 健康輪詢(httpx) + deploy 乾淨重啟(根治 wedge + 修重啟崩潰)"
 }
