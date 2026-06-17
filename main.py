@@ -4,8 +4,31 @@ os.environ.setdefault('CUDA_DEVICE_ORDER', 'PCI_BUS_ID')
 os.environ.setdefault('CUDA_VISIBLE_DEVICES', '0')
 
 import asyncio
+import sys as _sys
+if _sys.platform == "win32":
+    # asyncpg is unstable on Windows' default ProactorEventLoop: under sustained
+    # real load its connections silently wedge, db_available() then fails forever
+    # and ONLY a full process restart recovers (the in-process pool rebuild in
+    # _periodic_db_health also stalls on the same wedged loop). asyncpg is built
+    # for SelectorEventLoop, so force it here — before uvicorn creates the loop.
+    # Trade-off: SelectorEventLoop can't run asyncio subprocesses on Windows, so
+    # ALL subprocess work goes through core.subproc (subprocess.run in a thread).
+    # (2026-06-18 — root fix for the chronic 8000 wedge)
+    asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
 import socketio  # type: ignore
 import uvicorn  # type: ignore
+if _sys.platform == "win32":
+    # uvicorn 0.49 hard-codes ProactorEventLoop on Windows via
+    # Config.get_loop_factory() — it overrides the policy set above. Point that
+    # factory at our Selector factory so the server loop is actually Selector.
+    # No-ops silently if a future uvicorn renames get_loop_factory → the [LOOP]
+    # line printed at startup (see _on_startup) will then show Proactor.
+    try:
+        import uvicorn.config as _uvcfg  # type: ignore
+        from core.loopsetup import selector_loop_factory as _sel_factory
+        _uvcfg.Config.get_loop_factory = lambda self: _sel_factory
+    except Exception:
+        pass
 import threading
 import webbrowser
 from fastapi import FastAPI  # type: ignore
@@ -273,8 +296,10 @@ _self_heal_scheduled_task()
 
 @app.on_event("startup")
 async def _on_startup():
-    state.set_main_loop(asyncio.get_running_loop())
+    _loop = asyncio.get_running_loop()
+    state.set_main_loop(_loop)
     state.init_concurrency()
+    print(f"[LOOP] event loop = {type(_loop).__name__}")  # expect SelectorEventLoop on Windows (asyncpg stability)
     # ── PostgreSQL 連線 ──
     try:
         from db.session import init_db

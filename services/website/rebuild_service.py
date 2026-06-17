@@ -298,28 +298,21 @@ async def _run_subprocess(
     env = {**os.environ}
     if extra_env:
         env.update(extra_env)
-    proc = await asyncio.create_subprocess_exec(
-        *resolved,
-        cwd=cwd,
-        stdout=asyncio.subprocess.PIPE,
-        stderr=asyncio.subprocess.STDOUT,
-        env=env,
-    )
     timeout = _SUBPROCESS_TIMEOUTS.get(label, 300)
-    try:
-        out_bytes, _ = await asyncio.wait_for(proc.communicate(), timeout=timeout)
-    except asyncio.TimeoutError:
-        logger.error("[rebuild:%s] timeout after %ds — killing pid=%s", label, timeout, proc.pid)
-        try:
-            proc.kill()
-            await proc.wait()
-        except Exception:
-            pass
-        return -1, f"timeout after {timeout}s"
-    output = out_bytes.decode("utf-8", errors="replace") if out_bytes else ""
+    # Selector-loop-safe: subprocess.run in a thread (asyncio subprocess is
+    # unavailable on Windows SelectorEventLoop). stderr merged into stdout.
+    from core.subproc import run_capture
+    rc, out, err = await run_capture(
+        list(resolved), cwd=cwd, env=env, timeout=timeout, merge_stderr=True,
+    )
+    output = (out or b"").decode("utf-8", errors="replace")
+    if rc == -1:
+        reason = (err or b"").decode("utf-8", errors="replace") or "unknown error"
+        logger.error("[rebuild:%s] %s", label, reason)
+        return -1, reason
     tail = "\n".join(output.splitlines()[-30:])
-    logger.info("[rebuild:%s] exit=%d", label, proc.returncode)
-    return proc.returncode, tail
+    logger.info("[rebuild:%s] exit=%d", label, rc)
+    return rc, tail
 
 
 async def _read_setting(key: str) -> str:

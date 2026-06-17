@@ -195,45 +195,26 @@ async def _call_claude(prompt: str) -> tuple[Optional[str], str]:
         msg = "claude CLI 不在 PATH（uvicorn 程序看不到 claude.exe — 重啟服務或把 WinGet 路徑加進系統 PATH）"
         logger.error("[seo_runner] %s", msg)
         return None, msg
-    try:
-        proc = await asyncio.create_subprocess_exec(
-            claude_exe, "--print",
-            stdin=asyncio.subprocess.PIPE,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-        )
-    except NotImplementedError:
-        # Selector loop on Windows 不支援 subprocess — uvicorn 預設用 Proactor，
-        # 但若被改了會走到這裡。
-        msg = "asyncio 事件迴圈不支援 subprocess（Windows Selector loop？）"
-        logger.error("[seo_runner] %s", msg)
-        return None, msg
-    except OSError as e:
-        msg = f"啟動 claude.exe 失敗：{e}"
-        logger.error("[seo_runner] %s", msg)
-        return None, msg
-    try:
-        out, err = await asyncio.wait_for(
-            proc.communicate(input=prompt.encode("utf-8")),
-            timeout=_CLAUDE_TIMEOUT_SEC,
-        )
-    except asyncio.TimeoutError:
-        msg = f"claude --print 超時（{_CLAUDE_TIMEOUT_SEC}s 未回應）"
-        logger.warning("[seo_runner] %s", msg)
-        try:
-            proc.kill()
-            await proc.wait()
-        except Exception:
-            pass
-        return None, msg
-    if proc.returncode != 0:
-        err_text = err[:300].decode("utf-8", errors="replace").strip()
-        msg = f"claude 結束碼={proc.returncode}；stderr={err_text!r}"
+    # Selector-loop-safe: run claude.exe via subprocess.run in a thread
+    # (asyncio subprocess is unavailable on Windows SelectorEventLoop).
+    from core.subproc import run_capture
+    rc, out, err = await run_capture(
+        [claude_exe, "--print"],
+        input_bytes=prompt.encode("utf-8"),
+        timeout=_CLAUDE_TIMEOUT_SEC,
+    )
+    if rc == -1:
+        reason = (err or b"").decode("utf-8", errors="replace") or "未知錯誤"
+        logger.warning("[seo_runner] claude 失敗：%s", reason)
+        return None, f"claude --print {reason}"
+    if rc != 0:
+        err_text = (err or b"")[:300].decode("utf-8", errors="replace").strip()
+        msg = f"claude 結束碼={rc}；stderr={err_text!r}"
         logger.warning("[seo_runner] %s", msg)
         return None, msg
-    text = out.decode("utf-8", errors="replace")
+    text = (out or b"").decode("utf-8", errors="replace")
     if not text.strip():
-        err_text = err[:300].decode("utf-8", errors="replace").strip()
+        err_text = (err or b"")[:300].decode("utf-8", errors="replace").strip()
         msg = f"claude --print 回傳空字串（stderr={err_text!r}）"
         logger.warning("[seo_runner] %s", msg)
         return None, msg

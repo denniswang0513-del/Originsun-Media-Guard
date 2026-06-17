@@ -144,17 +144,27 @@ async def download_model_endpoint(req: DownloadModelRequest, background_tasks: B
         await sio.emit('log', {'type': 'system', 'msg': f'⏳ 開始在背景為您下載模型: {size} ... (需時數分鐘，請勿關機)'})
         base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
         downloader = os.path.join(base_dir, "download_model.py")
-        p = await asyncio.create_subprocess_exec(sys.executable, downloader, size, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
-        async def read_stream(stream):
-            while True:
-                line = await stream.readline()
-                if not line: break
-                text = line.decode('utf-8', errors='replace').strip()
+        loop = asyncio.get_running_loop()
+        # Selector-loop-safe: Popen in a worker thread + stream progress lines
+        # back onto the loop (asyncio subprocess is unavailable on Windows
+        # SelectorEventLoop). stderr merged into stdout so either stream shows.
+        def _run_blocking() -> int:
+            CNW = 0x08000000 if sys.platform == "win32" else 0
+            p = subprocess.Popen(
+                [sys.executable, downloader, size],
+                stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                text=True, encoding='utf-8', errors='replace',
+                creationflags=CNW,
+            )
+            for line in p.stdout:
+                text = line.strip()
                 if text and ("MB/" in text or "%" in text or "Downloading" in text or text.startswith("[")):
-                    await sio.emit('log', {'type': 'system', 'msg': text})
-        await asyncio.gather(read_stream(p.stdout), read_stream(p.stderr))
-        await p.wait()
-        if p.returncode == 0:
+                    asyncio.run_coroutine_threadsafe(
+                        sio.emit('log', {'type': 'system', 'msg': text}), loop)
+            p.wait()
+            return p.returncode
+        rc = await asyncio.to_thread(_run_blocking)
+        if rc == 0:
             await sio.emit('log', {'type': 'system', 'msg': f'🎉 模型 {size} 下載並部署完成！'})
             await sio.emit('model_download_done', {'model_size': size})
         else:
