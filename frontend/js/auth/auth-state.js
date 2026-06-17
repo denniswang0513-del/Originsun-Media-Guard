@@ -214,7 +214,8 @@ export async function _onLoginSuccess(d) {
     if (typeof window._ensureTabsLoaded === 'function') {
         await window._ensureTabsLoaded();
     }
-    if (d.first_login) {
+    // 內建 admin 帳號略過「首次登入改密碼」提示，直接登入（其他新帳號仍提醒）
+    if (d.first_login && d.username !== 'admin') {
         alert('首次登入，請到系統設定修改密碼。');
     }
 }
