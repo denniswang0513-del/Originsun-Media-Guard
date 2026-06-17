@@ -796,12 +796,23 @@ def _wedge_watchdog():
             if db_stuck or loop_dead:
                 why = (f"db_online offline {int(now - _WD_DB_OFFLINE_SINCE[0])}s"
                        if db_stuck else f"loop heartbeat stale {int(beat_age)}s")
-                print(f"[WATCHDOG] {why} — clean-restarting 8000")
+                print(f"[WATCHDOG] {why} — dumping stacks + clean-restarting 8000", flush=True)
+                # Dump EVERY thread's stack (incl. the stalled event-loop thread) so the
+                # next wedge finally reveals WHERE the loop is stuck — the root we
+                # couldn't pin from 4 hypotheses. Appended to wedge_dump.txt.
+                try:
+                    import faulthandler
+                    _dump = os.path.join(os.path.dirname(os.path.abspath(__file__)), "wedge_dump.txt")
+                    with open(_dump, "a", encoding="utf-8") as _fd:
+                        _fd.write(f"\n===== WEDGE {why} @ uptime {int(now - _WD_PROC_START)}s =====\n")
+                        faulthandler.dump_traceback(file=_fd, all_threads=True)
+                except Exception as e:
+                    print(f"[WATCHDOG] stack dump failed: {e}", flush=True)
                 try:
                     from core.process_spawn import trigger_detached_restart
                     trigger_detached_restart(run_ota=False)
                 except Exception as e:
-                    print(f"[WATCHDOG] restart spawn failed: {e}")
+                    print(f"[WATCHDOG] restart spawn failed: {e}", flush=True)
                 time.sleep(1.5)
                 os._exit(1)
         except Exception as e:
