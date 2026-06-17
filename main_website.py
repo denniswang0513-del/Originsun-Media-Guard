@@ -26,23 +26,34 @@ logger = logging.getLogger("website-api")
 
 
 async def _periodic_db_check():
-    """每 60s 重探 DB,讓 startup 抓到 init 失敗 / postgres 重啟 / idle timeout
-    都能自我修復。沒這個迴圈,容器要重啟才會復活,所有 endpoint 卡 503。
-    對齊 main.py:_periodic_db_check。
+    """每 60s 重探 DB；offline 時「重建連線池」而非只重試,讓 init 失敗 /
+    postgres 重啟 / idle timeout / ProactorEventLoop wedge 都能自我修復。
+    沒這個迴圈,容器要重啟才會復活,所有 endpoint 卡 503。對齊 main.py:_periodic_db_health。
+
+    關鍵:db_available() 用現有 engine/pool,若 pool wedge 掉會一直失敗,光重試救不回;
+    所以 offline 就先 dispose 壞 engine 再 init_db() 重建。全部 wait_for 包住,
+    避免恢復檢查本身卡死 event loop。
     """
     import core.state as state
-    from db.session import init_db, db_available
+    from db.session import init_db, db_available, close_db
 
     while True:
         try:
             await asyncio.sleep(60)
-            was = state.db_online
-            state.db_online = await db_available()
-            if not was and state.db_online:
-                print("[website-api] DB 連線恢復")
-            elif was and not state.db_online:
-                print("[website-api] DB 中斷,嘗試重新初始化")
-                state.db_online = await init_db()
+            if state.db_online:
+                ok = await asyncio.wait_for(db_available(), timeout=8)
+                if not ok:
+                    print("[website-api] DB 中斷,下一輪重建連線池")
+                    state.db_online = False
+            else:
+                try:
+                    await asyncio.wait_for(close_db(), timeout=8)
+                except Exception:
+                    pass
+                ok = await asyncio.wait_for(init_db(), timeout=15)
+                state.db_online = bool(ok)
+                if ok:
+                    print("[website-api] DB 連線恢復（已重建連線池）")
         except asyncio.CancelledError:
             raise
         except Exception:
