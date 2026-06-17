@@ -726,21 +726,39 @@ async def _on_startup():
 
 
 async def _periodic_db_health():
-    """每 60 秒檢查 DB 連線，斷線時自動重連。"""
+    """每 60 秒檢查 DB 連線；斷線時「重建連線池」而非只重試。
+
+    關鍵：db_available() 用的是現有 engine/pool —— 若 pool 在 Windows
+    ProactorEventLoop 上 wedge 掉，db_available() 會一直失敗，光重試永遠救不回。
+    所以只要目前是 offline，就先 dispose 壞掉的 engine 再 init_db() 重建全新 pool。
+    全部包 wait_for，確保「恢復檢查」本身不會卡死 event loop（卡死會讓整站變慢）。
+    """
     try:
-        from db.session import db_available, init_db
+        from db.session import db_available, init_db, close_db
     except ImportError:
         return  # 代理端沒有 db 模組，直接退出
     while True:
         await asyncio.sleep(60)
         try:
-            was_online = state.db_online
-            state.db_online = await db_available()
-            if not was_online and state.db_online:
-                print("[DB] PostgreSQL 連線恢復")
-            elif was_online and not state.db_online:
-                print("[DB] PostgreSQL 連線中斷，切換至 JSON fallback")
-                state.db_online = await init_db()
+            if state.db_online:
+                # 還在線：便宜探測；失敗就標記離線，下一輪重建
+                ok = await asyncio.wait_for(db_available(), timeout=8)
+                if not ok:
+                    print("[DB] PostgreSQL 連線中斷，下一輪重建連線池")
+                    state.db_online = False
+            else:
+                # 離線：重建。先丟掉（可能 wedge 的）舊 engine，避免壞連線殘留
+                # 拖累 event loop，再用全新 pool 測試連線。
+                try:
+                    await asyncio.wait_for(close_db(), timeout=8)
+                except Exception:
+                    pass
+                ok = await asyncio.wait_for(init_db(), timeout=15)
+                state.db_online = bool(ok)
+                if ok:
+                    print("[DB] PostgreSQL 連線恢復（已重建連線池）")
+        except asyncio.TimeoutError:
+            state.db_online = False
         except Exception:
             state.db_online = False
 

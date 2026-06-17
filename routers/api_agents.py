@@ -30,16 +30,6 @@ def _check_admin_agents(request):
         pass
 
 
-def _find_agent_sync(agent_id: str) -> dict:
-    """Find agent by ID from NAS JSON or local JSON. Raises 404 if not found."""
-    nas_dir = _get_nas_agents_dir()
-    agents = _load_agents_json(nas_dir)
-    agent = next((a for a in agents if a.get("id") == agent_id), None)
-    if not agent:
-        raise HTTPException(status_code=404, detail=f"找不到 ID 為 {agent_id} 的機器")
-    return agent
-
-
 async def _find_agent(agent_id: str) -> dict:
     """Find agent by ID from DB (preferred) or JSON fallback. Raises 404 if not found."""
     # Try DB first
@@ -55,8 +45,12 @@ async def _find_agent(agent_id: str) -> dict:
                         return agent
         except Exception:
             pass
-    # Fallback to JSON
-    return _find_agent_sync(agent_id)
+    # Fallback to JSON (cached + off-loop — never block the loop on slow SMB)
+    agents = await _load_agents_json_cached()
+    agent = next((a for a in agents if a.get("id") == agent_id), None)
+    if not agent:
+        raise HTTPException(status_code=404, detail=f"找不到 ID 為 {agent_id} 的機器")
+    return agent
 
 
 # ─── JSON Fallback Helpers (保留原有邏輯) ─────────────────
@@ -82,10 +76,35 @@ def _load_agents_json(nas_dir: str) -> list:
         return []
 
 
+# Cached, off-loop read of the NAS agents.json. The file lives on an SMB share
+# whose latency varies; reading it directly inside an async handler blocks the
+# whole event loop. During a db_online=false window EVERY /agents + health poll
+# hits this fallback, so an un-threaded read there can freeze the server and
+# even prevent DB recovery from running. Short-TTL cache + asyncio.to_thread
+# keep it cheap and off the loop, independent of how many clients poll.
+# (root-caused 2026-06-17)
+_agents_json_cache: dict = {"ts": 0.0, "data": None}
+_AGENTS_JSON_TTL = 10.0
+
+
+async def _load_agents_json_cached() -> list:
+    import time as _t
+    now = _t.monotonic()
+    c = _agents_json_cache
+    if c["data"] is not None and (now - c["ts"]) < _AGENTS_JSON_TTL:
+        return c["data"]
+    nas_dir = _get_nas_agents_dir()
+    data = await asyncio.to_thread(_load_agents_json, nas_dir)
+    _agents_json_cache["ts"] = now
+    _agents_json_cache["data"] = data
+    return data
+
+
 def _save_agents_json(nas_dir: str, agents: list):
     os.makedirs(nas_dir, exist_ok=True)
     with open(_agents_file(nas_dir), "w", encoding="utf-8") as fp:
         json.dump(agents, fp, ensure_ascii=False, indent=2)
+    _agents_json_cache["data"] = None  # invalidate read cache after a write
 
 
 def _make_id(name: str) -> str:
@@ -141,9 +160,10 @@ async def list_agents():
                     return {"agents": db_agents, "nas_configured": True, "source": "db"}
         except Exception:
             pass
-    # Fallback to JSON when DB offline
+    # Fallback to JSON when DB offline — cached + off-loop so a slow SMB read
+    # can't stall the whole server during a db-offline window.
     nas_dir = _get_nas_agents_dir()
-    agents = _load_agents_json(nas_dir)
+    agents = await _load_agents_json_cached()
     return {"agents": agents, "nas_configured": bool(nas_dir), "source": "json"}
 
 
