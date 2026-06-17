@@ -27,6 +27,7 @@ except ImportError:
 from config import load_settings
 import core.state as state
 import re
+import asyncio
 
 router = APIRouter(prefix="/api/v1/auth", tags=["Auth"])
 
@@ -465,10 +466,35 @@ async def delete_user(username: str, request: Request):
 
 # ── Google OAuth Endpoints ──
 
+def _master_is_self(master_url: str) -> bool:
+    """True if master_url points at THIS machine (localhost / own IP).
+
+    The master's master_server points at itself (e.g. .107). google_config must
+    NOT fetch its google config FROM ITSELF: a synchronous urlopen on the event
+    loop to our own server DEADLOCKS the loop (it cannot serve the self-request
+    while it is blocked making it) → the whole server wedges. This is the actual
+    root cause of the 2026-06 8000 wedges (confirmed by a watchdog stack dump:
+    the event-loop thread frozen in google_config → urlopen → socket.readinto).
+    """
+    try:
+        from urllib.parse import urlparse
+        import socket
+        host = (urlparse(master_url).hostname or "").lower()
+        if host in ("", "127.0.0.1", "localhost", "::1"):
+            return True
+        hn = socket.gethostname()
+        if host == hn.lower():
+            return True
+        local = {info[4][0] for info in socket.getaddrinfo(hn, None)}
+        return host in local
+    except Exception:
+        return False
+
+
 @router.get("/google/config")
 async def google_config():
     """Return Google OAuth config for frontend (public, no auth required).
-    If local settings have no google_oauth, try fetching from master server."""
+    If local settings have no google_oauth, AGENT machines fetch from master."""
     settings = load_settings()
     g = settings.get("google_oauth", {})
 
@@ -476,15 +502,20 @@ async def google_config():
     if g.get("enabled") and g.get("client_id"):
         return {"enabled": True, "client_id": g["client_id"]}
 
-    # Otherwise try master server (agent machines don't have google_oauth in settings)
+    # Agent fallback: fetch from master. Two guards (see _master_is_self):
+    #  (a) NEVER fetch from ourselves — the master's master_server is itself, and
+    #      a sync urlopen to self on the loop deadlocks the whole server.
+    #  (b) run the fetch in a THREAD so a slow/hung master can never block the loop.
     master = settings.get("master_server", "")
-    if master:
-        try:
+    if master and not _master_is_self(master):
+        def _fetch():
             import urllib.request, json as _json
             url = f"{master.rstrip('/')}/api/v1/auth/google/config"
             req = urllib.request.Request(url, headers={"User-Agent": "OriginsunAgent/2.0"})
             with urllib.request.urlopen(req, timeout=3) as r:
                 return _json.loads(r.read().decode())
+        try:
+            return await asyncio.to_thread(_fetch)
         except Exception:
             pass
 
