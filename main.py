@@ -263,7 +263,7 @@ def _self_heal_scheduled_task():
             "timeout /t 4 /nobreak >nul",
             f"taskkill /f /pid {pid} >nul 2>&1",
             f'cd /d "{app_dir}"',
-            f'"{sys_python}" -m uvicorn main:io_app --host 0.0.0.0 --port 8000 > "{outLog}" 2> "{errLog}"',
+            f'"{sys_python}" -m uvicorn main:io_app --host 0.0.0.0 --port 8000 --loop core.loopsetup:selector_loop_factory > "{outLog}" 2> "{errLog}"',
         ]
         try:
             with open(bat_path, "w", encoding="ascii", errors="replace") as f:
@@ -890,4 +890,5 @@ if __name__ == "__main__":
     port = 8000
     print(f"[Server] 啟動 FastAPI 服務於 port {port}")
     # threading.Timer(1.0, lambda: webbrowser.open(f"http://localhost:{port}")).start()
-    uvicorn.run(io_app, host="0.0.0.0", port=port, log_level="error")
+    uvicorn.run(io_app, host="0.0.0.0", port=port, log_level="error",
+                loop="core.loopsetup:selector_loop_factory")  # SelectorEventLoop (asyncpg stability)

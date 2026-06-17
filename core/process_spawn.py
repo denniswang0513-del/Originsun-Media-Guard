@@ -141,7 +141,10 @@ def spawn_uvicorn_detached(base_dir: Optional[str] = None, port: int = 8000) -> 
     try:
         proc = subprocess.Popen(
             [py, "-m", "uvicorn", "main:io_app",
-             "--host", "0.0.0.0", "--port", str(port)],
+             "--host", "0.0.0.0", "--port", str(port),
+             # Force SelectorEventLoop on Windows (asyncpg stability — see
+             # core/loopsetup.py). uvicorn else hard-codes ProactorEventLoop.
+             "--loop", "core.loopsetup:selector_loop_factory"],
             cwd=base_dir,
             stdin=subprocess.DEVNULL,
             stdout=out_fh,
