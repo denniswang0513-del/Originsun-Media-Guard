@@ -766,8 +766,10 @@ async def _periodic_db_health():
         await asyncio.sleep(60)
         try:
             if state.db_online:
-                # 還在線：便宜探測；失敗就標記離線，下一輪重建
-                ok = await asyncio.wait_for(db_available(), timeout=8)
+                # 還在線：便宜探測。timeout=15 > connect_args.command_timeout(8)+reconnect，
+                # 讓 db_available() 的 pre_ping 有時間「砍掉 black-hole 連線→重連」自我恢復，
+                # 不會在恢復途中被 wait_for 取消而誤判離線。
+                ok = await asyncio.wait_for(db_available(), timeout=15)
                 if not ok:
                     print("[DB] PostgreSQL 連線中斷，下一輪重建連線池")
                     state.db_online = False

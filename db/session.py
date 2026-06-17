@@ -55,12 +55,22 @@ async def init_db() -> bool:
             pool_size=5,
             max_overflow=10,
             pool_timeout=5,
-            pool_recycle=600,        # recycle conns >10min old (NAS may drop idle TCP)
-            pool_pre_ping=True,      # ping before checkout → discard stale/dead conns so a
-                                     # dropped connection can't fail db_available() and flip
-                                     # state.db_online false (which blanks DB-gated views).
+            pool_recycle=180,        # recycle idle conns >3min old, BEFORE a NAT/router
+                                     # silently drops them (the black-hole that wedged 8000).
+            pool_pre_ping=True,      # ping before checkout → discard stale/dead conns.
             echo=False,
-            connect_args={"timeout": 3},  # asyncpg connection timeout (seconds)
+            connect_args={
+                "timeout": 3,           # asyncpg CONNECT timeout (seconds)
+                "command_timeout": 8,   # per-QUERY timeout. THE root fix: without it, a query
+                                        # (incl pool_pre_ping's test) on a black-holed/half-open
+                                        # idle connection HANGS FOREVER — NAS still thinks the
+                                        # conn is alive (no RST), packets just vanish. That hang
+                                        # made db_available() stick, db_online flip false, and
+                                        # the whole event loop wedge (CPU 0%, /health 3s+),
+                                        # recoverable ONLY by a process restart. With it the
+                                        # ping fails fast → pre_ping discards the dead conn →
+                                        # reconnects → db stays available. (2026-06-18)
+            },
         )
         _session_factory = async_sessionmaker(_engine, expire_on_commit=False)
 
