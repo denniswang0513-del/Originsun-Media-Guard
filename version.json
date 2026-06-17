@@ -1,5 +1,5 @@
 {
-  "version": "1.10.137",
-  "build_date": "2026-06-14",
-  "notes": "feat(ota): 發布/部署 Release Notes 自動帶入 git 變更; fix(ota): 部署按鈕顯示改用後端偵測（修 cloudflared tunnel 存取看不到）; feat(ota): 8001 dev 一鍵部署到生產 8000; feat(publish): 新增 /publish slash command（發版 + 機隊 OTA 推送）; fix(ota): 主控端舊 IP 192.168.1.11 → 192.168.1.107 全面汰換; feat(dev): /dev web 啟動對外網站 Astro 預覽(4321) 供遠端 SSH tunnel 測試; feat(dev): 新增 /dev slash command 啟動/停止開發伺服器(8001); chore(cleanup): 移除指向舊機路徑的兩個 autostart 腳本; docs(setup): 新增 dev/生產共存守則 + 啟動指令防撞 8000 警告; docs(setup): 修正啟動指令 venv 路徑 + 新增 requirements_server.txt; chore(dev): 新增開發伺服器啟動腳本 + 修正 briefing memory 路徑; fix(website+agents): 處理主機健康燈走 proxy + 子視圖載入重試 + 新增作品 skeleton 流程; …等共 25 項變更"
+  "version": "1.10.138",
+  "build_date": "2026-06-17",
+  "notes": "RBAC v2 帳號授權 + 官網模組寫入 + DB self-heal 穩定性根治（canary 8000，未推全機隊）"
 }
