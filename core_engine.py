@@ -869,15 +869,14 @@ class MediaGuardEngine:
         Audio strategy keyed off n_audio_streams (probed upstream):
           - 0 → no audio args at all
           - 1 → normalize single stream to stereo (handles mono / left-only sources
-                that would otherwise leave one channel silent in downstream concat)
-          - N>1 → amerge all streams into one + force stereo (multi-mic MXF)
+                that would otherwise leave one channel silent)
+          - N>1 → PRESERVE every track (map all streams, re-encode each to AAC).
+                  (Was: amerge into one stereo track — that dropped multi-track
+                  field audio, e.g. 4-track → 1 merged track. The reel/concat is
+                  unaffected: it reads original sources, not these proxies.)
 
-        Always re-encodes audio to AAC. -c:a copy can't survive amerge and breaks
-        the moment a multi-stream source enters the chain — uniform AAC keeps
-        every proxy in the same shape so concat doesn't have to special-case.
-
-        Video stays as before: ``-map 0:v:0`` (skips DJI attached_pic), prores_ks,
-        scale=-2:720.
+        Always re-encodes audio to AAC (uniform codec across proxies).
+        Video: ``-map [vout]`` from scale=-2:720 (skips DJI attached_pic), prores_ks.
         """
         if n_audio_streams == 0:
             video_filter = "[0:v:0]scale=-2:720[vout]"
@@ -892,27 +891,37 @@ class MediaGuardEngine:
             ]
 
         if n_audio_streams == 1:
-            audio_filter = (
+            # single stream → normalize to stereo (fixes mono / left-only sources
+            # that would otherwise leave one channel silent downstream)
+            filter_complex = (
+                "[0:v:0]scale=-2:720[vout];"
                 "[0:a:0]aresample=48000,"
                 "aformat=sample_fmts=fltp:channel_layouts=stereo[aout]"
             )
-        else:
-            # amerge takes N inputs, outputs single stream with N*ch_per_input channels.
-            # Then aformat to stereo downmixes safely (ffmpeg picks sane mix matrix).
-            audio_filter = (
-                f"[0:a]amerge=inputs={n_audio_streams},"
-                "aresample=48000,"
-                "aformat=sample_fmts=fltp:channel_layouts=stereo[aout]"
-            )
+            return [
+                "ffmpeg", "-y", "-nostdin",
+                "-i", src_file,
+                "-filter_complex", filter_complex,
+                "-map", "[vout]", "-map", "[aout]",
+                "-c:v", "prores_ks", "-profile:v", "1",
+                "-c:a", "aac", "-b:a", "192k",
+                "-progress", "pipe:1", "-nostats",
+                proxy_out,
+            ]
 
-        filter_complex = f"[0:v:0]scale=-2:720[vout];{audio_filter}"
+        # N>1: PRESERVE every audio track separately (editors need all mic tracks,
+        # e.g. 4-track field recordings). Map ALL audio streams (-map 0:a) and
+        # re-encode each to AAC 48k — do NOT amerge/downmix into one stereo track
+        # (that was the bug: 4-track sources came out as a single merged track).
+        # Video via filter (scale to 720, -map [vout] skips DJI attached_pic).
+        # The reel/concat is unaffected — it reads the original sources, not proxies.
         return [
             "ffmpeg", "-y", "-nostdin",
             "-i", src_file,
-            "-filter_complex", filter_complex,
-            "-map", "[vout]", "-map", "[aout]",
+            "-filter_complex", "[0:v:0]scale=-2:720[vout]",
+            "-map", "[vout]", "-map", "0:a",
             "-c:v", "prores_ks", "-profile:v", "1",
-            "-c:a", "aac", "-b:a", "192k",
+            "-c:a", "aac", "-b:a", "192k", "-ar", "48000",
             "-progress", "pipe:1", "-nostats",
             proxy_out,
         ]
@@ -1091,7 +1100,7 @@ class MediaGuardEngine:
             duration = self._get_video_duration(src_file)
             n_audio = self._probe_audio_stream_count(src_file)
             if n_audio > 1:
-                self.log(f"  [audio] 多軌音訊 ({n_audio} 軌)，merge 成單一 stereo")
+                self.log(f"  [audio] 多軌音訊 ({n_audio} 軌)，保留全部 {n_audio} 軌（各軌轉 AAC）")
 
             cmd = self._build_proxy_transcode_cmd(src_file, proxy_out, n_audio)
 
