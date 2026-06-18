@@ -994,6 +994,10 @@ class MediaGuardEngine:
                 cmd = [
                     "ffmpeg", "-y", "-nostdin",
                     "-ss", str(t),
+                    "-noaccurate_seek",   # land on the nearest keyframe instead of
+                                          # decoding forward to the exact frame — fine
+                                          # for a thumbnail, and HUGE on long-GOP HEVC/6K
+                                          # (the per-frame decode that was timing out)
                     "-i", filepath,
                     "-vf", f"scale={thumb_width}:-1",
                     "-vframes", "1",
@@ -1002,14 +1006,19 @@ class MediaGuardEngine:
                 ]
                 try:
                     subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-                                   timeout=15, creationflags=HNO_WINDOW)
+                                   timeout=30, creationflags=HNO_WINDOW)
                     if os.path.exists(out_path):
                         return out_path
                 except Exception:
                     pass
                 return None
 
-            with concurrent.futures.ThreadPoolExecutor(max_workers=frames) as executor:
+            # 6K HEVC frame decode is CPU-bound; running all `frames` decodes at
+            # once thrashes the CPU and the slow ones hit the timeout → get dropped
+            # → incomplete (stretched) strip. Cap parallelism to ~half the cores so
+            # each decode gets enough CPU to finish (scales with the machine).
+            max_workers = max(2, min(frames, (os.cpu_count() or 4) // 2))
+            with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
                 results = list(executor.map(extract_frame, range(frames)))
 
             thumb_list = [p for p in results if p is not None]
