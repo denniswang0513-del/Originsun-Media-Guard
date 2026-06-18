@@ -78,6 +78,12 @@ window._openPublishMgmt = async function () {
             </button>
             <div id="pub-deploy-hint" style="display:none;margin-top:6px;font-size:11px;color:#5eead4;">把這台 dev(8001) 的程式碼複製進 C:\\OriginsunAgent 並重啟 8000；不會動到機隊。settings/字典/帳號保留。</div>
 
+            <!-- Deploy website frontend (dev only) — sync website/ source + rebuild -->
+            <button id="pub-web-btn" onclick="window._pubDeployWebsite()" style="display:none;width:100%;padding:10px;margin-top:8px;background:linear-gradient(135deg,#1e40af,#3b82f6);color:#fff;border:none;border-radius:8px;font-size:14px;font-weight:600;cursor:pointer;align-items:center;justify-content:center;gap:8px;">
+                🌐 發布官網前端
+            </button>
+            <div id="pub-web-hint" style="display:none;margin-top:6px;font-size:11px;color:#93c5fd;">把 website/ 原始碼（不含 node_modules）同步到 8000 → 觸發官網重建 → dist 推 NAS。改了官網版面/頁面/外觀後按這個上線（只改內容用作品集管理 Tab 即可）。</div>
+
             <!-- Push to entire fleet (dev only) — agents pull from master 8000 -->
             <button id="pub-fleet-btn" onclick="window._pubPushFleet()" style="display:none;width:100%;padding:10px;margin-top:8px;background:linear-gradient(135deg,#9a3412,#ea580c);color:#fff;border:none;border-radius:8px;font-size:14px;font-weight:600;cursor:pointer;align-items:center;justify-content:center;gap:8px;">
                 📡 推送全機隊 OTA
@@ -147,6 +153,10 @@ window._openPublishMgmt = async function () {
                 const fh = document.getElementById('pub-fleet-hint');
                 if (fb) fb.style.display = 'flex';
                 if (fh) fh.style.display = 'block';
+                const wb = document.getElementById('pub-web-btn');
+                const wh = document.getElementById('pub-web-hint');
+                if (wb) wb.style.display = 'flex';
+                if (wh) wh.style.display = 'block';
                 // When deploying to prod, diff notes against PROD's version.
                 _notesBaseline = d.prod_version || '';
             }
@@ -430,6 +440,42 @@ window._pubDeployProd = async function () {
         _done(false, 'Error: ' + e.message);
         logBox.innerHTML += '\n<span style="color:#ef4444">[ERROR] ' + _esc(e.message) + '</span>';
     }
+};
+
+// Sync website/ source → 8000 + trigger master rebuild → dist to NAS. Dev (8001) only.
+window._pubDeployWebsite = async function () {
+    const btn = document.getElementById('pub-web-btn');
+    const logBox = document.getElementById('pub-log');
+    if (!confirm('🌐 發布官網前端？\n\n會把 website/ 原始碼同步到 8000，然後重建官網並推到對外站（約 30-60 秒）。\n\n• 改了官網版面/頁面/外觀才需要這個\n• 只改內容（作品/文案/SEO）用作品集管理 Tab 即可')) return;
+    btn.disabled = true; const _orig = btn.innerHTML;
+    btn.innerHTML = '<span style="display:inline-block;width:14px;height:14px;border:2px solid #555;border-top-color:#3b82f6;border-radius:50%;animation:spin .8s linear infinite;"></span> 發布官網中...';
+    _setStatus('loading', '同步 website/ + 重建官網中（約 30-60 秒）...');
+    logBox.textContent = '[' + new Date().toLocaleTimeString() + '] 發布官網前端...\n';
+    const _done = (ok, msg) => { btn.disabled = false; btn.innerHTML = _orig; _setStatus(ok ? 'ok' : 'err', msg); };
+    try {
+        const r = await fetch('/api/v1/deploy_website', { method: 'POST', headers: _authHeaders() });
+        if (r.status === 401) { _done(false, '認證已過期，請重新登入'); return; }
+        if (r.status === 409) { _done(false, '另一個發布/部署進行中'); return; }
+        const d = await r.json().catch(() => null);
+        if (!d || !d.job_id) { _done(false, d?.message || '啟動失敗'); return; }
+        const jobId = d.job_id;
+        const poll = setInterval(async () => {
+            try {
+                const sr = await fetch('/api/v1/publish/status?job_id=' + jobId, { headers: _authHeaders() });
+                const sd = await sr.json().catch(() => null);
+                if (!sd || sd.status === 'running') return;
+                clearInterval(poll);
+                if (sd.log) {
+                    logBox.innerHTML += '\n' + _esc(sd.log)
+                        .replace(/\[OK\]/g, '<span style="color:#22c55e">[OK]</span>')
+                        .replace(/\[ERROR\]/g, '<span style="color:#ef4444">[ERROR]</span>');
+                    logBox.scrollTop = logBox.scrollHeight;
+                }
+                _done(sd.status === 'done', sd.message || (sd.status === 'done' ? '官網已發布 🌐' : '發布失敗'));
+            } catch (_) { /* retry */ }
+        }, 2500);
+        setTimeout(() => { clearInterval(poll); if (btn.disabled) _done(false, '逾時'); }, 300000);
+    } catch (e) { _done(false, 'Error: ' + e.message); }
 };
 
 // Run a push_fleet job (dry or real) and resolve with its final status object.

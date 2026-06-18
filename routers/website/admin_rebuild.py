@@ -64,6 +64,17 @@ async def trigger_rebuild_internal(request: Request):
     return await rebuild_service.trigger_rebuild()
 
 
+@router.get("/internal/rebuild/status")
+async def rebuild_status_internal(request: Request):
+    """內部狀態查詢（X-Internal-Key）— dev 8001「發布官網前端」流程輪詢 master 重建進度。"""
+    from core.auth import _get_secret
+    expected = _get_secret()
+    got = request.headers.get("X-Internal-Key", "")
+    if not expected or got != expected:
+        raise HTTPException(status_code=403, detail="forbidden")
+    return await rebuild_service.get_rebuild_status()
+
+
 @router.get("/rebuild/status")
 async def rebuild_status(_: None = Depends(admin_guard)):
     return await rebuild_service.get_rebuild_status()

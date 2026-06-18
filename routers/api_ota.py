@@ -753,6 +753,130 @@ async def deploy_to_prod(request: Request):
     return {"status": "started", "job_id": job_id}
 
 
+# ── Deploy website/ frontend (dev 8001 → prod 8000) + trigger rebuild ──────
+# 「🌐 發布官網前端」按鈕用：把 website/ 原始碼（不含 node_modules）同步到
+# C:\OriginsunAgent\website，再叫 master 8000 重建（npm build → scp dist 到 NAS）。
+# website/ 不在 OTA AGENT_DIRS（含 node_modules 太大），所以 deploy_to_prod 不帶它。
+_WEBSITE_EXCLUDE_DIRS = {"node_modules", "dist", ".astro", "__pycache__", ".git"}
+
+
+def _deploy_website_sync() -> dict:
+    """把 dev checkout 的 website/ 原始碼複製到 prod website/（排除 node_modules/
+    dist/.astro）。在 thread 跑。回 {ok, log}。"""
+    src_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    src = os.path.join(src_root, "website")
+    dst = os.path.join(_PROD_DIR, "website")
+    if os.path.normcase(os.path.abspath(src_root)) == os.path.normcase(os.path.abspath(_PROD_DIR)):
+        return {"ok": False, "log": "來源與目標相同 — 這不是 dev checkout，拒絕。"}
+    if not os.path.isdir(src):
+        return {"ok": False, "log": f"dev website/ 不存在：{src}"}
+    if not os.path.isdir(os.path.join(dst, "node_modules")):
+        return {"ok": False, "log": f"生產 website/ 缺 node_modules（{dst}）— 需先把完整 website/（含 node_modules）放到 8000 一次。"}
+    copied = 0
+    for root, dirs, files in os.walk(src):
+        dirs[:] = [d for d in dirs if d not in _WEBSITE_EXCLUDE_DIRS]
+        rel = os.path.relpath(root, src)
+        tgt = dst if rel == "." else os.path.join(dst, rel)
+        os.makedirs(tgt, exist_ok=True)
+        for f in files:
+            shutil.copy2(os.path.join(root, f), os.path.join(tgt, f))
+            copied += 1
+    return {"ok": True, "log": f"[OK] website/ 原始碼已同步（{copied} 檔，排除 node_modules/dist/.astro）→ {dst}"}
+
+
+def _trigger_master_rebuild_blocking(log: list) -> bool:
+    """POST master 8000 /internal/rebuild，再輪詢 /internal/rebuild/status 直到完成。
+    X-Internal-Key = JWT secret。回 True=build 成功。在 thread 跑。"""
+    import urllib.request
+    import time as _time
+    from core.auth import _get_secret
+    base = "http://127.0.0.1:8000"
+    key = _get_secret()
+
+    def _post(path):
+        req = urllib.request.Request(base + path, method="POST", data=b"{}",
+            headers={"Content-Type": "application/json", "X-Internal-Key": key})
+        with urllib.request.urlopen(req, timeout=15) as r:
+            return json.loads(r.read().decode())
+
+    def _get(path):
+        req = urllib.request.Request(base + path, headers={"X-Internal-Key": key})
+        with urllib.request.urlopen(req, timeout=10) as r:
+            return json.loads(r.read().decode())
+
+    try:
+        trig = _post("/api/website/admin/internal/rebuild")
+    except Exception as e:
+        log.append(f"[ERROR] 觸發 master 重建失敗：{e}")
+        return False
+    if trig.get("reason") and not trig.get("queued"):
+        log.append(f"[ERROR] master 拒絕重建：{trig.get('reason')}")
+        return False
+    log.append(f"[OK] master 重建已觸發（state={trig.get('state')}）")
+    for _ in range(60):  # ~3 分鐘（60 × 3s）
+        _time.sleep(3)
+        try:
+            st = _get("/api/website/admin/internal/rebuild/status")
+        except Exception:
+            continue
+        s = st.get("state")
+        if s == "success":
+            log.append("[OK] 官網重建完成、dist 已推到 NAS")
+            return True
+        if s == "error":
+            log.append(f"[ERROR] 重建失敗：{st.get('error')}\n{(st.get('output_tail') or '')[-400:]}")
+            return False
+    log.append("[ERROR] 重建逾時（3 分鐘）")
+    return False
+
+
+@router.get("/api/v1/deploy_website")
+async def deploy_website_eligible():
+    """是否可發布官網前端（dev checkout + 生產已有 website/node_modules）。"""
+    src_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    same = os.path.normcase(os.path.abspath(src_root)) == os.path.normcase(os.path.abspath(_PROD_DIR))
+    has_src = os.path.isdir(os.path.join(src_root, "website"))
+    prod_ok = os.path.isdir(_PROD_DIR) and os.path.exists(os.path.join(_PROD_DIR, "main.py"))
+    prod_has_nm = os.path.isdir(os.path.join(_PROD_DIR, "website", "node_modules"))
+    return {"eligible": (not same) and prod_ok and has_src and prod_has_nm}
+
+
+@router.post("/api/v1/deploy_website")
+async def deploy_website(request: Request):
+    """同步 website/ 原始碼 → 8000 + 觸發 master 重建 → dist 上 NAS。輪詢 /publish/status。"""
+    _check_admin(request)
+    if _publish_lock.locked():
+        return JSONResponse({"status": "error", "message": "另一次發布/部署正在進行中"}, 409)
+    import uuid as _uuid
+    job_id = _uuid.uuid4().hex[:8]
+    _publish_status[job_id] = {"status": "running", "log": "", "version": "website"}
+
+    async def _run():
+        async with _publish_lock:
+            log: list = []
+            try:
+                sync = await asyncio.to_thread(_deploy_website_sync)
+                if sync.get("log"):
+                    log.append(sync["log"])
+                if not sync.get("ok"):
+                    _publish_status[job_id] = {"status": "error", "log": "\n".join(log),
+                                               "version": "website", "message": "website/ 同步失敗"}
+                    return
+                ok = await asyncio.to_thread(_trigger_master_rebuild_blocking, log)
+                _publish_status[job_id] = {
+                    "status": "done" if ok else "error",
+                    "log": "\n".join(log), "version": "website",
+                    "message": "官網前端已發布、對外站已更新 🌐" if ok else "同步成功，但重建失敗",
+                }
+                _append_publish_history("website", "發布官網前端 → NAS", ok, "admin")
+            except Exception as e:
+                _publish_status[job_id] = {"status": "error", "log": "\n".join(log),
+                                           "version": "website", "message": str(e)}
+
+    asyncio.create_task(_run())
+    return {"status": "started", "job_id": job_id}
+
+
 # ── Push to the entire production fleet (dev → all agents via master 8000) ──
 _MASTER_BASE = "http://127.0.0.1:8000"
 
