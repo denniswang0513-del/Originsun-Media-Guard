@@ -184,15 +184,36 @@ def _build_prompt(draft: dict) -> str:
     )
 
 
+def _resolve_claude_exe() -> Optional[str]:
+    """找出 claude CLI 路徑。先 shutil.which（PATH）；找不到再從已知安裝位置 fallback。
+
+    為什麼需要 fallback：master 8000 的 uvicorn 由開機 start_hidden.vbs 啟動，
+    繼承的 PATH 很精簡、看不到 ~/.local/bin（standalone/WinGet 安裝把 claude.exe
+    放在那），所以 which() 在 master 上回 None — 即使 claude 已安裝且已登入認證。
+    （2026-06-18 AI SEO「生成」鈕壞掉的根因。）
+    """
+    found = shutil.which("claude")
+    if found:
+        return found
+    for c in (
+        os.path.expanduser(r"~\.local\bin\claude.exe"),
+        os.path.expandvars(r"%LOCALAPPDATA%\Microsoft\WinGet\Links\claude.exe"),
+        os.path.expandvars(r"%LOCALAPPDATA%\Programs\claude\claude.exe"),
+    ):
+        if c and os.path.isfile(c):
+            return c
+    return None
+
+
 async def _call_claude(prompt: str) -> tuple[Optional[str], str]:
     """subprocess call `claude --print`，回 (stdout, error_detail)。
 
     成功 → (stdout, "")；失敗 → (None, 中文診斷訊息)。把錯誤理由帶回給呼叫端，
     讓 admin 從 toast 直接看到「不在 PATH / timeout / exit=N stderr=...」而非通用訊息。
     """
-    claude_exe = shutil.which("claude")
+    claude_exe = _resolve_claude_exe()
     if not claude_exe:
-        msg = "claude CLI 不在 PATH（uvicorn 程序看不到 claude.exe — 重啟服務或把 WinGet 路徑加進系統 PATH）"
+        msg = "找不到 claude CLI（PATH 與 ~/.local/bin、WinGet Links 都沒有 claude.exe — 請確認已安裝並 `claude` 登入）"
         logger.error("[seo_runner] %s", msg)
         return None, msg
     # Selector-loop-safe: run claude.exe via subprocess.run in a thread

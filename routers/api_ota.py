@@ -80,7 +80,7 @@ async def _do_update_restart(run_ota: bool = True):
     uvicorn on the current on-disk code. Used by deploy_to_prod, which already
     copied the new code locally: making the master OTA-download from *itself*
     while it is exiting failed ("無法連線到主控端") and left a uvicorn spawned
-    from the wrong working dir → `No module named 'db'` crash (2026-06-18).
+    in the wrong working dir → `No module named 'db'` crash (2026-06-18).
     The run_ota=False path goes straight to spawn_uvicorn_detached (cwd=base).
     """
     from core.process_spawn import trigger_detached_restart

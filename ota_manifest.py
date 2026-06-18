@@ -45,6 +45,7 @@ AGENT_DIRS = [
     "routers",
     "utils",
     "db",
+    "services",
     "exiftool_files",
 ]
 
