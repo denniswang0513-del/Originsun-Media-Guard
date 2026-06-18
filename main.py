@@ -6,29 +6,17 @@ os.environ.setdefault('CUDA_VISIBLE_DEVICES', '0')
 import asyncio
 import sys as _sys
 if _sys.platform == "win32":
-    # asyncpg is unstable on Windows' default ProactorEventLoop: under sustained
-    # real load its connections silently wedge, db_available() then fails forever
-    # and ONLY a full process restart recovers (the in-process pool rebuild in
-    # _periodic_db_health also stalls on the same wedged loop). asyncpg is built
-    # for SelectorEventLoop, so force it here — before uvicorn creates the loop.
-    # Trade-off: SelectorEventLoop can't run asyncio subprocesses on Windows, so
-    # ALL subprocess work goes through core.subproc (subprocess.run in a thread).
-    # (2026-06-18 — root fix for the chronic 8000 wedge)
+    # The server runs on SelectorEventLoop (asyncpg subprocess work goes through
+    # core.subproc; see core/loopsetup.py). The mechanism that actually takes
+    # effect is the `--loop core.loopsetup:selector_loop_factory` flag passed on
+    # every launch (core/process_spawn.py, main __main__, self-heal relaunch) —
+    # uvicorn resolves that import-string itself. This policy line is just a cheap
+    # fallback for any loop created WITHOUT that flag (e.g. dev launch / a stray
+    # asyncio.run). NOTE: setting the policy alone does NOT redirect uvicorn (it
+    # hard-codes ProactorEventLoop on Windows), which is why the flag is required.
     asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
 import socketio  # type: ignore
 import uvicorn  # type: ignore
-if _sys.platform == "win32":
-    # uvicorn 0.49 hard-codes ProactorEventLoop on Windows via
-    # Config.get_loop_factory() — it overrides the policy set above. Point that
-    # factory at our Selector factory so the server loop is actually Selector.
-    # No-ops silently if a future uvicorn renames get_loop_factory → the [LOOP]
-    # line printed at startup (see _on_startup) will then show Proactor.
-    try:
-        import uvicorn.config as _uvcfg  # type: ignore
-        from core.loopsetup import selector_loop_factory as _sel_factory
-        _uvcfg.Config.get_loop_factory = lambda self: _sel_factory
-    except Exception:
-        pass
 import threading
 import webbrowser
 from fastapi import FastAPI  # type: ignore

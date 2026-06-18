@@ -466,6 +466,26 @@ async def delete_user(username: str, request: Request):
 
 # ── Google OAuth Endpoints ──
 
+_LOCAL_HOSTS = None  # cached {hostname, own IPs, localhost...} — constant per process
+
+
+def _local_hosts() -> set:
+    """This machine's host identifiers, computed once (getaddrinfo is constant
+    for the process lifetime, so don't re-resolve it on every call)."""
+    global _LOCAL_HOSTS
+    if _LOCAL_HOSTS is None:
+        hosts = {"", "127.0.0.1", "localhost", "::1"}
+        try:
+            import socket
+            hn = socket.gethostname()
+            hosts.add(hn.lower())
+            hosts.update(info[4][0] for info in socket.getaddrinfo(hn, None))
+        except Exception:
+            pass
+        _LOCAL_HOSTS = hosts
+    return _LOCAL_HOSTS
+
+
 def _master_is_self(master_url: str) -> bool:
     """True if master_url points at THIS machine (localhost / own IP).
 
@@ -478,15 +498,8 @@ def _master_is_self(master_url: str) -> bool:
     """
     try:
         from urllib.parse import urlparse
-        import socket
         host = (urlparse(master_url).hostname or "").lower()
-        if host in ("", "127.0.0.1", "localhost", "::1"):
-            return True
-        hn = socket.gethostname()
-        if host == hn.lower():
-            return True
-        local = {info[4][0] for info in socket.getaddrinfo(hn, None)}
-        return host in local
+        return host in _local_hosts()
     except Exception:
         return False
 

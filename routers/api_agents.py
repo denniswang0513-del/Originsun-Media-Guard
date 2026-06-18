@@ -234,23 +234,37 @@ _health_locks: dict = {}          # agent_id -> asyncio.Lock
 _HEALTH_TTL = 5.0                  # seconds; machine-status staleness tolerance
 
 
+_http_client = None  # shared lazy httpx.AsyncClient, reused across health polls
+
+
+def _get_http_client():
+    """One reused httpx.AsyncClient (lazy). Building a client per call costs
+    ~400ms on Windows; reusing one also gives keep-alive to live agents. httpx
+    is lazy-imported — only the master polls, so agents that lack it never hit
+    this; returns None if it's unavailable (caller treats the agent as offline)."""
+    global _http_client
+    if _http_client is None:
+        try:
+            import httpx
+            _http_client = httpx.AsyncClient()
+        except Exception:
+            return None
+    return _http_client
+
+
 async def _async_get_json(url: str, timeout: float):
     """Non-blocking HTTP GET → parsed JSON, or None on any failure/timeout.
 
-    Uses httpx (async) so a slow/dead host costs *awaited* time on the event
-    loop, never a blocked thread. httpx is lazy-imported — only the master
-    polls agents, so agent machines that lack it never hit this path; if it is
-    somehow missing we return None (caller treats as offline) instead of crashing.
+    Async (httpx) so a slow/dead host costs *awaited* time on the event loop,
+    never a blocked thread. Uses the shared client (see _get_http_client).
     """
-    try:
-        import httpx
-    except Exception:
+    client = _get_http_client()
+    if client is None:
         return None
     try:
-        async with httpx.AsyncClient(timeout=timeout) as client:
-            r = await client.get(url)
-            r.raise_for_status()
-            return r.json()
+        r = await client.get(url, timeout=timeout)
+        r.raise_for_status()
+        return r.json()
     except Exception:
         return None
 
