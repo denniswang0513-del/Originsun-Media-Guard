@@ -124,6 +124,7 @@ LEGACY_ROLE_LEVELS = {'admin': 3, 'editor': 1, 'viewer': 0}
 # truth now that the role layer is gone — used for the bootstrap admin and as
 # the "grant everything" set.
 ALL_MODULES = [
+    'preprod_plan',
     'backup', 'verify', 'transcode', 'concat', 'report', 'transcribe', 'tts',
     'drone_meta', 'projects', 'crm_clients', 'crm_projects', 'crm_quotes',
     'crm_staff', 'crm_invoices', 'website_admin',

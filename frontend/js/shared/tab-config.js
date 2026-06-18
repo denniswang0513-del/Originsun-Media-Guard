@@ -3,7 +3,9 @@
  */
 
 export const TAB_MAP = {
-    projects: 'tab-projects', backup: 'tab_main', verify: 'tab_verify',
+    projects: 'tab-projects',
+    preprod_plan: 'tab_preprod_plan',
+    backup: 'tab_main', verify: 'tab_verify',
     transcode: 'tab_transcode', concat: 'tab_concat', report: 'tab_report',
     transcribe: 'tab_transcribe', tts: 'tab_tts', drone_meta: 'tab_drone_meta',
     crm_clients: 'tab_crm_clients', crm_projects: 'tab_crm_projects',
@@ -20,6 +22,7 @@ export const MEDIA_TABS = ['projects', 'backup', 'verify', 'transcode', 'concat'
 // stay in sync without duplication.
 export const TAB_LOADERS = [
     ['projects',      './tabs/projects/projects.html',       './tabs/projects/projects.js',       'initTab'],
+    ['preprod_plan',  './tabs/preprod/preprod.html',         './tabs/preprod/preprod.js',         'initPreprodTab'],
     ['backup',        './tabs/backup/backup.html',           './tabs/backup/backup.js',           'initBackupTab'],
     ['verify',        './tabs/verify/verify.html',           './tabs/verify/verify.js',           'initVerifyTab'],
     ['transcode',     './tabs/transcode/transcode.html',     './tabs/transcode/transcode.js',     'initTranscodeTab'],
@@ -48,7 +51,10 @@ export function shouldShowTab(key, authUser, modules) {
 // switchTab all derive from one place.
 export const TAB_GROUPS = [
     { id: 'projects',   label: '📊 專案總覽', single: 'projects' },
-    { id: 'production', label: '🎬 製作工具', items: [
+    { id: 'preprod',    label: '📝 前期製作', items: [
+        { key: 'preprod_plan', label: '📋 拍攝企劃' },
+    ] },
+    { id: 'production', label: '🎬 後期製作', items: [
         { key: 'backup',     label: '📦 備份並轉檔' },
         { key: 'verify',     label: '✔️ 檔案比對' },
         { key: 'transcode',  label: '✂️ 轉 Proxy' },
@@ -94,7 +100,8 @@ export function isMediaSection(sectionId) {
 // (報價) has no top-level tab but is a real business module → folded into 業務管理.
 export const PERMISSION_GROUPS = [
     { id: 'projects',   label: '📊 專案總覽', modules: ['projects'] },
-    { id: 'production', label: '🎬 製作工具', modules: ['backup', 'verify', 'transcode', 'concat', 'drone_meta', 'report', 'transcribe', 'tts'] },
+    { id: 'preprod',    label: '📝 前期製作', modules: ['preprod_plan'] },
+    { id: 'production', label: '🎬 後期製作', modules: ['backup', 'verify', 'transcode', 'concat', 'drone_meta', 'report', 'transcribe', 'tts'] },
     { id: 'business',   label: '💼 業務管理', modules: ['crm_clients', 'crm_projects', 'crm_quotes', 'crm_staff', 'crm_invoices'] },
     { id: 'website',    label: '🌐 官網管理', modules: ['website_admin'] },
 ];
