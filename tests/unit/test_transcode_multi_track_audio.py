@@ -1,14 +1,18 @@
-"""Regression: multi-track audio MXF (e.g. multi-mic shoot — each mic on its
-own mono stream) lost all audio except stream 0 when transcoded to proxy.
+"""Regression: multi-track audio (multi-mic shoot — each mic on its own stream)
+must be PRESERVED in the proxy, not collapsed.
 
-Bug context: ``-map 0:a:0?`` picked only the first audio stream from the
-source. Sources with N>1 audio streams (typical pro audio MXF + multi-mic
-field recorders) silently lost streams 1..N-1, then concat blew up because
-some clips ended up mono and others stereo.
+History:
+  1. Original bug: ``-map 0:a:0?`` mapped only stream 0 → dropped streams 1+.
+  2. Interim: amerge'd all streams into ONE stereo track → still lost the
+     separate tracks (a 4-track source became 1 merged track — colleague report).
+  3. Now (correct): ``-map 0:a`` maps EVERY audio stream, each re-encoded to AAC,
+     so a 4-track source yields a 4-track proxy. Editors need every mic; the
+     reel/concat is unaffected (it reads the original sources, not the proxies).
 
-Lock the cmd shape: proxy must always end up with a single stereo audio
-stream regardless of source layout (0 / 1 / N audio streams), so downstream
-concat sees a uniform shape.
+Cmd shape per source audio layout:
+  - 0 streams → no audio args (silent proxy)
+  - 1 stream  → normalize to stereo (fixes mono / left-only sources)
+  - N>1       → -map 0:a (preserve ALL tracks), each re-encoded to AAC
 """
 import subprocess
 import pytest
@@ -60,17 +64,23 @@ def _run_transcode_with_audio_streams(monkeypatch, tmp_path, n_audio_streams):
     return captured["cmd"]
 
 
-def test_multi_stream_audio_uses_amerge(monkeypatch, tmp_path):
-    """Source with 4 audio streams (4-mic boom rig) must merge all into
-    stereo proxy, not silently drop streams 1-3."""
+def test_multi_stream_audio_preserved(monkeypatch, tmp_path):
+    """Source with 4 audio streams (4-mic boom rig / field recorder) must KEEP
+    all 4 tracks in the proxy (editors need every mic) — map every stream via
+    `-map 0:a` and re-encode each to AAC. Must NOT amerge/merge into one track
+    and must NOT drop streams 1+ via the old `-map 0:a:0?`."""
     cmd = _run_transcode_with_audio_streams(monkeypatch, tmp_path, n_audio_streams=4)
     cmd_str = " ".join(cmd)
-    assert "amerge=inputs=4" in cmd_str, (
-        f"Expected amerge=inputs=4 in filter_complex, got cmd: {cmd_str}"
+    assert "0:a" in cmd, (
+        f"Expected -map 0:a (preserve ALL audio streams), got cmd: {cmd_str}"
     )
-    assert "-map 0:a:0?" not in cmd_str, (
-        "Old buggy mapping -map 0:a:0? still present — it drops streams 1+"
+    assert "amerge" not in cmd_str, (
+        f"Proxy must NOT merge multi-track audio into one track, got: {cmd_str}"
     )
+    assert "0:a:0?" not in cmd and "0:a:0" not in cmd, (
+        "Old buggy single-stream mapping (drops streams 1+) must be gone"
+    )
+    assert "aac" in cmd, "every track must be re-encoded to AAC"
 
 
 def test_single_stream_audio_normalized_to_stereo(monkeypatch, tmp_path):
@@ -101,16 +111,19 @@ def test_zero_audio_source_no_audio_codec(monkeypatch, tmp_path):
     assert "-c:a" not in cmd, "Silent source must not specify audio codec"
 
 
-def test_proxy_audio_always_aac_for_concat_compat(monkeypatch, tmp_path):
-    """Proxy audio must be re-encoded to AAC (not copied) so multi-stream
-    sources can be merged. -c:a copy fails when amerge is in the chain."""
+def test_proxy_audio_always_aac(monkeypatch, tmp_path):
+    """Proxy audio must be re-encoded to AAC (uniform codec across proxies),
+    never copied."""
     cmd = _run_transcode_with_audio_streams(monkeypatch, tmp_path, n_audio_streams=2)
     cmd_str = " ".join(cmd)
     assert "-c:a copy" not in cmd_str, (
-        "Multi-stream proxy must re-encode audio (amerge needs decoded streams), "
-        f"got: {cmd_str}"
+        f"Proxy must re-encode audio, not copy, got: {cmd_str}"
     )
-    assert "-c:a aac" in cmd_str, "Expected aac re-encode for downstream compat"
+    assert "-c:a aac" in cmd_str, "Expected aac re-encode"
+    # 2-track source must keep BOTH tracks (preserve, don't merge)
+    assert "0:a" in cmd and "amerge" not in cmd_str, (
+        f"2-track source must preserve both tracks (-map 0:a, no amerge), got: {cmd_str}"
+    )
 
 
 @pytest.mark.parametrize("filename", [
@@ -144,7 +157,7 @@ def test_audio_handling_independent_of_container(filename, monkeypatch, tmp_path
     engine.run_transcode_job([str(src)], str(dest))
 
     cmd_str = " ".join(captured["cmd"])
-    assert "amerge=inputs=3" in cmd_str, (
-        f"{filename} with 3 audio streams must amerge — fix must not ext-gate. "
-        f"Got: {cmd_str}"
+    assert "0:a" in captured["cmd"] and "amerge" not in cmd_str, (
+        f"{filename} with 3 audio streams must preserve ALL tracks (-map 0:a, "
+        f"no amerge) — fix must not ext-gate. Got: {cmd_str}"
     )
