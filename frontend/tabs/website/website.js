@@ -9,7 +9,7 @@
  * 子視圖實作：./subviews/<name>.js，匯出 default async function render(container)
  */
 
-import { getApiBase, websiteFetch, esc } from './website-utils.js';
+import { getApiBase, websiteFetch, esc, detectDevMode } from './website-utils.js';
 import { initRebuildBar, destroyRebuildBar } from './rebuild-bar.js';
 
 const SUBVIEWS = [
@@ -23,9 +23,13 @@ let _healthTimer = null;
 let _badgeTimer = null;
 
 export async function initWebsiteTab() {
+    // dev(8001) 偵測：決定 getApiBase 走同源（本地 dev 資料）還是 NAS（正式）。
+    // 必須在任何 websiteFetch 之前完成。
+    await detectDevMode();
+
     // 顯示當前 API base（給使用者除錯參考）
     const apiDisplay = document.getElementById('website-api-base-display');
-    if (apiDisplay) apiDisplay.textContent = getApiBase();
+    if (apiDisplay) apiDisplay.textContent = getApiBase() || '(本地 dev 同源)';
 
     // 綁左側導覽
     document.querySelectorAll('.website-nav-btn').forEach(btn => {

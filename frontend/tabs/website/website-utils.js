@@ -27,11 +27,33 @@ function _isLanOrigin() {
     return h === 'localhost' || h === '127.0.0.1' || h.startsWith('192.168.') || h === '192.168.1.107';
 }
 
+// Dev 模式（8001 = dev checkout）：官網管理 Tab 改走「同源」（相對路徑 → 打到服務
+// 這個頁面的 dev agent 8001 → mediaguard_dev），與正式隔離、無跨域 CORS 問題。
+// 偵測沿用 publish modal 的 /api/v1/deploy_to_prod（eligible=true ⇒ dev checkout），
+// 跨 localhost / LAN / cloudflared tunnel 都準。生產 8000 = eligible false → 維持走 NAS。
+let _devMode = false;
+
+export async function detectDevMode() {
+    try {
+        const token = localStorage.getItem('auth_token');
+        const r = await fetch('/api/v1/deploy_to_prod', {
+            headers: token ? { 'Authorization': `Bearer ${token}` } : {},
+            signal: AbortSignal.timeout(5000),
+        });
+        const d = await r.json();
+        _devMode = !!(d && d.eligible);
+    } catch { _devMode = false; }
+    return _devMode;
+}
+
+export function isDevMode() { return _devMode; }
+
 export function getApiBase() {
     try {
         const override = localStorage.getItem('website_api_base');
         if (override) return override;
     } catch { /* SSR / no localStorage */ }
+    if (_devMode) return '';  // 同源：打本地 8001 的 /api/website/* → mediaguard_dev
     return _isLanOrigin() ? NAS_LAN_BASE : NAS_PUBLIC_BASE;
 }
 
