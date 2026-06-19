@@ -367,7 +367,10 @@ async def _process_one(session: AsyncSession, project_id: str) -> tuple[str, str
         return ("parse_error", f"JSON 解析失敗（前 80 字：{raw[:80]!r}）")
 
     await seo_service.update_project_seo(session, project_id, parsed, by="ai-runner")
-    return ("ok", "PATCH 完成")
+    # 自動核准：清掉 needs_ai_review，讓這件退出 audit 待審清單 → 下一輪推進到下一批，
+    # 不會卡在固定重做同一批（單一 admin 自跑流程，前端無人工審核 UI，狀態欄只看 completeness）。
+    await seo_service.approve_project_seo(session, project_id)
+    return ("ok", "PATCH + 自動核准完成")
 
 
 def _bump_failure(project_id: str) -> int:
@@ -422,10 +425,11 @@ async def run_pipeline(
         targets = [target_project_id]
     else:
         audit = await seo_service.list_seo_audit(session)
-        targets = [
-            it["project_id"] for it in audit
-            if it.get("needs_ai_review")
-        ][:batch_size]
+        # 「最缺 SEO 的先做」（completeness 低→高），讓每輪都真的推進 backlog、優先補
+        # completeness=0 的待生成作品；而不是固定重做 sort_order 最前那批已完成的。
+        pending = [it for it in audit if it.get("needs_ai_review")]
+        pending.sort(key=lambda it: it.get("completeness") or 0)
+        targets = [it["project_id"] for it in pending][:batch_size]
 
     if dry_run:
         return {
