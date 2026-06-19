@@ -416,7 +416,25 @@ async def run_pipeline(
             relay, target_project_id=target_project_id, batch_size=batch_size,
         )
 
-    # 用 timeout=0 的 acquire 確認不會有兩個 caller 同時 pass pre-check 進入 runner
+    # targets 計算放鎖外：dry-run / 列出待處理只是讀 audit，不需要序列化鎖
+    # （否則整批在跑時按「預覽」會搶不到鎖、誤回 busy/0 筆）。
+    if target_project_id:
+        targets = [target_project_id]
+    else:
+        audit = await seo_service.list_seo_audit(session)
+        targets = [
+            it["project_id"] for it in audit
+            if it.get("needs_ai_review")
+        ][:batch_size]
+
+    if dry_run:
+        return {
+            "dry_run": True,
+            "processed": 0, "skipped": 0, "errors": 0,
+            "works": [{"project_id": t, "status": "would_process"} for t in targets],
+        }
+
+    # 真正執行才取鎖（timeout=0 確認不會兩個 caller 同時進 runner）
     try:
         await asyncio.wait_for(_run_lock.acquire(), timeout=0.001)
     except asyncio.TimeoutError:
@@ -424,22 +442,6 @@ async def run_pipeline(
                 "error": "另一輪 AI runner 正在跑，請稍後再試"}
 
     try:
-        if target_project_id:
-            targets = [target_project_id]
-        else:
-            audit = await seo_service.list_seo_audit(session)
-            targets = [
-                it["project_id"] for it in audit
-                if it.get("needs_ai_review")
-            ][:batch_size]
-
-        if dry_run:
-            return {
-                "dry_run": True,
-                "processed": 0, "skipped": 0, "errors": 0,
-                "works": [{"project_id": t, "status": "would_process"} for t in targets],
-            }
-
         processed = errors = 0
         works: list[dict] = []
         for pid in targets:
@@ -463,6 +465,11 @@ async def run_pipeline(
                     except Exception as e:
                         logger.warning("[seo_runner] mark_persistent_failure 失敗：%s", e)
             works.append({"project_id": pid, "status": status, "detail": detail})
+            if target_project_id is None:  # 整批：每筆更新進度給前端輪詢
+                try:
+                    await update_settings(session, {"seo.ai_runner.progress": f"{len(works)}/{len(targets)}"})
+                except Exception:
+                    pass
 
         # 持久化 last_run（只在非單筆觸發時記錄整批 summary）
         summary = {"processed": processed, "errors": errors, "works": works}
@@ -480,6 +487,96 @@ async def run_pipeline(
         _run_lock.release()
 
 
+# ── 「立即執行」整批 = 非同步背景跑 ────────────────────────────────────
+# 整批要跑 N 筆 × claude（每筆 ~30-60s），同步請求會被 cloudflared(~100s)/nginx
+# 切斷 → 前端「執行失敗」（但後端其實跑完）。改成：端點立即回 {started}、背景跑、
+# 前端輪詢 /seo/runner/settings 的 running/progress/last_run_at。
+_batch_task: Optional[asyncio.Task] = None
+
+
+def is_batch_running() -> bool:
+    return _batch_task is not None and not _batch_task.done()
+
+
+async def _batch_runner(batch_size: int) -> None:
+    """背景跑整批：自管 session、設 running/progress、跑完 mark_dirty。"""
+    from db.session import get_session_factory
+    factory = get_session_factory()
+    if factory is None:
+        return
+    try:
+        async with factory() as s:
+            await update_settings(s, {"seo.ai_runner.running": True,
+                                      "seo.ai_runner.progress": f"0/{batch_size}"})
+    except Exception:
+        logger.warning("[seo_runner] 設 running 旗標失敗")
+    result = None
+    try:
+        async with factory() as s:
+            result = await run_pipeline(s, batch_size=batch_size)
+    except Exception:
+        logger.exception("[seo_runner] _batch_runner 異常")
+    processed = (result or {}).get("processed", 0)
+    busy = (result or {}).get("status") == "busy"
+    try:
+        async with factory() as s:
+            patch = {"seo.ai_runner.running": False}
+            # run_pipeline 只在「正常整批完成」時推進 last_run_at；busy（cron/單筆佔鎖）
+            # 或例外時，這裡補一個 terminal last_run，讓前端輪詢（靠 last_run_at 前進判定
+            # 完成）能結束、不會卡在「啟動中…」直到 20 分逾時。
+            if result is None or busy:
+                patch["seo.ai_runner.last_run_at"] = time.time()
+                patch["seo.ai_runner.last_run_summary"] = {
+                    "processed": 0, "errors": 0, "works": [],
+                    "note": "另一輪 AI runner 正在跑，已略過" if busy else "背景執行異常",
+                }
+            await update_settings(s, patch)
+    except Exception:
+        pass
+    if processed > 0:
+        try:
+            from . import rebuild_service
+            await rebuild_service.mark_dirty()
+        except Exception as e:
+            logger.warning("[seo_runner] mark_dirty 失敗：%s", e)
+
+
+def start_batch_bg(batch_size: int) -> bool:
+    """背景啟動整批 run（立即回）。回 False = 已有一輪在跑（含 cron 排程或單筆 run
+    正佔住 _run_lock）→ 上游直接回 {busy}，前端立刻提示、不會啟動一個註定卡住的背景。"""
+    global _batch_task
+    if is_batch_running() or _run_lock.locked():
+        return False
+    _batch_task = asyncio.create_task(_batch_runner(batch_size))
+    return True
+
+
+async def _relay_start_to_master(relay_url: str, batch_size: int) -> dict:
+    """NAS → master 的「啟動」relay：master 收到會背景啟動、立即回，所以 timeout 短。"""
+    import httpx
+    from core.auth import _get_secret
+    url = f"{relay_url.rstrip('/')}/api/website/admin/internal/seo/run?batch_size={batch_size}"
+    try:
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            r = await client.post(url, headers={"X-Internal-Key": _get_secret()})
+            if r.status_code == 200:
+                return r.json()
+            return {"status": "error", "error": f"master relay 失敗 (HTTP {r.status_code})"}
+    except (httpx.TimeoutException, httpx.ConnectError) as e:
+        return {"status": "error", "error": f"master 離線或超時：{e}"}
+
+
+async def trigger_batch(session: AsyncSession, batch_size: int) -> dict:
+    """「立即執行」整批的非同步觸發點：一律立即回 {started}/{busy}/{error}，避免
+    長同步請求被代理切斷。NAS 端 forward 給 master 背景跑；master/本機直接背景跑。"""
+    relay = os.environ.get("MASTER_RELAY_URL", "").strip()
+    if relay:
+        return await _relay_start_to_master(relay, batch_size)
+    if not start_batch_bg(batch_size):
+        return {"status": "busy"}
+    return {"status": "started"}
+
+
 async def get_runner_settings(session: AsyncSession) -> dict:
     """讀 ai_runner 排程設定（給 admin UI 顯示用）。"""
     s = await get_all_settings(session)
@@ -489,6 +586,8 @@ async def get_runner_settings(session: AsyncSession) -> dict:
         "batch_size": int(s.get("seo.ai_runner.batch_size") or 10),
         "last_run_at": s.get("seo.ai_runner.last_run_at"),
         "last_run_summary": s.get("seo.ai_runner.last_run_summary"),
+        "running": s.get("seo.ai_runner.running") is True,
+        "progress": str(s.get("seo.ai_runner.progress") or ""),
     }
 
 
@@ -532,6 +631,16 @@ async def _scheduler_loop() -> None:
 
     from db.session import get_session_factory
     await asyncio.sleep(45)  # 等服務 stable + DB ready
+
+    # 開機一次性：清掉可能殘留的 running 旗標（重啟後 in-memory _batch_task 必為 None；
+    # 若上次整批被 OTA/crash/watchdog 中途殺掉，DB 的 running 會卡 True）。
+    try:
+        _f = get_session_factory()
+        if _f:
+            async with _f() as _s:
+                await update_settings(_s, {"seo.ai_runner.running": False})
+    except Exception:
+        pass
 
     while True:
         try:

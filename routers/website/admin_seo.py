@@ -167,15 +167,16 @@ async def seo_runner_run_now(
     request: Request,
     session: AsyncSession = Depends(admin_session),
 ):
-    """立即執行 — 跑整個 audit list，受 batch_size 限制。可帶 ?dry_run=true 預覽。"""
+    """立即執行整個 audit list（受 batch_size 限制）。
+    dry_run=true → 同步回預覽；否則 → 非同步背景跑（立即回 {started}），前端輪詢
+    /seo/runner/settings 的 running/progress/last_run_at（避免長同步請求被 cloudflared 切斷）。"""
     dry = request.query_params.get("dry_run", "").lower() in {"1", "true"}
     settings = await seo_runner.get_runner_settings(session)
-    result = await seo_runner.run_pipeline(
-        session, batch_size=settings["batch_size"], dry_run=dry,
-    )
-    if not dry and result.get("processed", 0) > 0:
-        await rebuild_service.mark_dirty()
-    return result
+    if dry:
+        return await seo_runner.run_pipeline(
+            session, batch_size=settings["batch_size"], dry_run=True,
+        )
+    return await seo_runner.trigger_batch(session, batch_size=settings["batch_size"])
 
 
 @router.post("/seo/projects/{project_id}/run")
@@ -213,17 +214,16 @@ def _admin_session_for_internal():
 
 @router.post("/internal/seo/run")
 async def seo_runner_run_internal(request: Request):
-    """NAS website-api 把整批 run 轉給 master。"""
+    """NAS website-api 把整批 run 轉給 master。master 背景跑、立即回（避免 NAS relay
+    與 cloudflared 長時間阻塞）；mark_dirty 由背景 runner 在跑完後處理。"""
     _check_internal_key(request)
     try:
         batch_size = int(request.query_params.get("batch_size", "10"))
     except ValueError:
         batch_size = 10
-    async with _admin_session_for_internal() as session:
-        result = await seo_runner.run_pipeline(session, batch_size=batch_size)
-        if result.get("processed", 0) > 0:
-            await rebuild_service.mark_dirty()
-        return result
+    if not seo_runner.start_batch_bg(batch_size):
+        return {"status": "busy"}
+    return {"status": "started"}
 
 
 @router.post("/internal/seo/projects/{project_id}/run")

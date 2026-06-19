@@ -195,31 +195,47 @@ function _bindAiRunner() {
     });
 
     document.getElementById('ai-runner-now')?.addEventListener('click', async () => {
+        // 整批改非同步：端點立即回 {started}，後端背景跑，這裡輪詢 settings 的
+        // running/progress/last_run_at（last_run_at 前進 = 整批跑完）。避開 cloudflared 逾時。
         const btn = document.getElementById('ai-runner-now');
         const orig = btn.textContent;
+        const startAt = Number(_state.aiRunner?.last_run_at || 0);
+        let poll = null, safety = null;
+        const finish = (fn, msg) => {
+            if (poll) { clearInterval(poll); poll = null; }
+            if (safety) { clearTimeout(safety); safety = null; }
+            btn.disabled = false; btn.textContent = orig;
+            fn(msg);
+        };
         btn.disabled = true;
-        btn.textContent = '⏳ 執行中…（每筆約 30-60 秒）';
+        btn.textContent = '⏳ 啟動中…';
         try {
             const r = await websiteFetch('/api/website/admin/seo/runner/run', { method: 'POST' });
-            if (r.status === 'busy') {
-                toastErr('已有 AI runner 在跑');
-            } else {
-                const failed = (r.works || []).find(w => w.status !== 'ok' && w.status !== 'would_process');
-                const detail = failed ? `（首件錯誤：${failed.detail || failed.status}）` : '';
-                if ((r.errors || 0) > 0) {
-                    toastErr(`處理 ${r.processed} 筆 / 失敗 ${r.errors} 筆 ${detail}`);
-                } else {
-                    toastOk(`完成：處理 ${r.processed} 筆`);
-                }
-                // 重 load 顯示 last_run
-                _state.aiRunner = await websiteFetch('/api/website/admin/seo/runner/settings');
-                _renderAll();
-            }
+            if (r.status === 'busy') { finish(toastErr, '已有 AI runner 在跑'); return; }
+            if (r.status === 'error' || r.error) { finish(toastErr, '啟動失敗：' + (r.error || '未知')); return; }
+            toastOk('已開始背景執行，進度更新中…');
+            poll = setInterval(async () => {
+                try {
+                    const s = await websiteFetch('/api/website/admin/seo/runner/settings');
+                    _state.aiRunner = s;
+                    if (Number(s.last_run_at || 0) > startAt) {      // 整批跑完（last_run_at 前進）
+                        const sum = s.last_run_summary || {};
+                        if ((sum.errors || 0) > 0) finish(toastErr, `處理 ${sum.processed || 0} 筆 / 失敗 ${sum.errors} 筆`);
+                        else if (sum.note) finish(toastErr, sum.note);   // busy/異常的 terminal 訊息
+                        else finish(toastOk, `完成：處理 ${sum.processed || 0} 筆`);
+                        _renderAll();   // finish 之後再重建卡片（避免寫到 detached 的舊按鈕）
+                    } else {
+                        btn.textContent = s.running ? `⏳ 執行中… ${s.progress || ''}` : '⏳ 啟動中…';
+                    }
+                } catch (_) { /* 輪詢失敗下次再試 */ }
+            }, 5000);
+            safety = setTimeout(() => {                              // 安全逾時 20 分
+                if (poll) { clearInterval(poll); poll = null; }
+                safety = null;
+                btn.disabled = false; btn.textContent = orig;
+            }, 20 * 60 * 1000);
         } catch (e) {
-            toastErr('執行失敗：' + (e.message || e));
-        } finally {
-            btn.disabled = false;
-            btn.textContent = orig;
+            finish(toastErr, '執行失敗：' + (e.message || e));
         }
     });
 }
