@@ -53,6 +53,21 @@ const HEALTH_RULES = [
 let _state = { settings: {}, faqs: [], testimonials: [], quickFacts: [], awards: [], aiRunner: null };
 let _container = null;
 
+// 排程「時間選單」預設項 — value 是後端要的 cron 字串（croniter），label 給人看。
+// 主機在台灣 → cron 以本地時區解讀。待處理作品多時可選「每 N 小時」加速清 backlog。
+const CRON_PRESETS = [
+    { v: '0 3 * * *',    label: '每日 · 凌晨 03:00（預設 · 離峰）' },
+    { v: '0 6 * * *',    label: '每日 · 早上 06:00' },
+    { v: '0 9 * * *',    label: '每日 · 上午 09:00' },
+    { v: '0 12 * * *',   label: '每日 · 中午 12:00' },
+    { v: '0 18 * * *',   label: '每日 · 傍晚 18:00' },
+    { v: '0 22 * * *',   label: '每日 · 晚上 22:00' },
+    { v: '0 */12 * * *', label: '每 12 小時' },
+    { v: '0 */6 * * *',  label: '每 6 小時' },
+    { v: '0 */3 * * *',  label: '每 3 小時（快速清待處理）' },
+    { v: '0 * * * *',    label: '每小時（最快 · 較吃額度）' },
+];
+
 export default async function render(container, ctx = {}) {
     const { isCurrent = () => true } = ctx;
     _container = container;
@@ -118,6 +133,14 @@ function _cardAiRunner() {
     const enabled = !!r.enabled;
     const cron = r.cron || '0 3 * * *';
     const batch = r.batch_size || 10;
+    // cron 字串 → 友善「時間選單」；目前值非預設則加「自訂」選項保留顯示
+    const presetVals = CRON_PRESETS.map(p => p.v);
+    let cronOptions = CRON_PRESETS.map(p =>
+        `<option value="${p.v}"${p.v === cron ? ' selected' : ''}>${p.label}</option>`
+    ).join('');
+    if (!presetVals.includes(cron)) {
+        cronOptions = `<option value="${esc(cron)}" selected>自訂：${esc(cron)}</option>` + cronOptions;
+    }
     const lastAt = r.last_run_at
         ? new Date(r.last_run_at * 1000).toLocaleString('zh-TW')
         : '從未執行';
@@ -141,10 +164,11 @@ function _cardAiRunner() {
                 </label>
             </div>
             <div>
-                <label style="color:#888;font-size:11px;display:block;margin-bottom:6px;">Cron（主機本地時區）</label>
-                <input id="ai-runner-cron" type="text" value="${esc(cron)}"
-                    placeholder="0 3 * * *" style="width:100%;font-family:ui-monospace,monospace;font-size:12px;" />
-                <div style="color:#666;font-size:10px;margin-top:2px;">預設「每日凌晨 3 點」= <code>0 3 * * *</code></div>
+                <label style="color:#888;font-size:11px;display:block;margin-bottom:6px;">執行時間（主機本地時區）</label>
+                <select id="ai-runner-cron" style="width:100%;font-size:12px;padding:4px;background:#1a1a1a;color:#ddd;border:1px solid #3a3a3a;border-radius:4px;">
+                    ${cronOptions}
+                </select>
+                <div style="color:#666;font-size:10px;margin-top:2px;">選離峰時段；待處理作品多時可選「每 N 小時」加快清完</div>
             </div>
             <div>
                 <label style="color:#888;font-size:11px;display:block;margin-bottom:6px;">單次最多處理</label>

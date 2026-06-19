@@ -602,13 +602,20 @@ async def update_runner_settings(session: AsyncSession, payload: dict, *, by: Op
     """
     ALLOWED = {"enabled", "cron", "batch_size"}
     to_write = {f"seo.ai_runner.{k}": v for k, v in payload.items() if k in ALLOWED}
-    # 驗證 cron — 非法字串排程 loop 會靜默 no-op，admin 拿不到回饋
+    # 驗證 cron — 非法字串排程 loop 會靜默 no-op，admin 拿不到回饋。
+    # ⚠ NAS website-api 容器是 python:3.11-slim、沒裝 croniter：ImportError 時退化成
+    # 基本 5 欄位結構檢查（否則任何排程都被當非法 → admin 存不進、422）。真正排程在
+    # master 跑（有 croniter），執行點會再驗一次。
     if "cron" in payload and payload["cron"]:
+        cron_str = str(payload["cron"])
         try:
             from croniter import croniter
-            croniter(str(payload["cron"]))
+            croniter(cron_str)
+        except ImportError:
+            if len(cron_str.split()) != 5:
+                raise ValueError(f"cron 需 5 個欄位（分 時 日 月 週）：{cron_str!r}")
         except Exception as e:
-            raise ValueError(f"cron 字串不合法：{payload['cron']!r}（{e}）")
+            raise ValueError(f"cron 字串不合法：{cron_str!r}（{e}）")
     if to_write:
         await update_settings(session, to_write, updated_by=by)
     return await get_runner_settings(session)
@@ -631,6 +638,15 @@ async def _scheduler_loop() -> None:
         from croniter import croniter
     except ImportError:
         logger.warning("[seo_runner] croniter 未安裝，排程 loop 不啟動")
+        return
+
+    # ⚠ 只在「有 claude 的機器」（= master）跑 AI SEO 排程。整個生產機隊共用同一個
+    # mediaguard、每台 agent 都會起這個 loop，但只有 master 裝了 claude + 登入 Max。
+    # 不 gate 的後果：fleet agent 沒 claude → 排程一觸發就秒 llm_error，還搶先把
+    # last_run_at 往前推（claude 那台跑 ~200s 還沒做完，就被當成「這輪已跑過」），
+    # master 反而永遠輪不到 → 排程看起來都在失敗、作品集永遠沒進度。
+    if _resolve_claude_exe() is None:
+        logger.info("[seo_runner] 本機無 claude CLI — AI SEO 排程 loop 不啟動（只在 master 跑）")
         return
 
     from db.session import get_session_factory
