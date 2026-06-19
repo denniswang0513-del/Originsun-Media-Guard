@@ -15,25 +15,29 @@ const seo = buildBasicPageSeo(Astro, {
     description: `聯絡${meta.company_name_zh} — 商業影片製作、報價諮詢、合作邀約。台北市中山區，1-2 個工作天內回覆，安排第一次諮詢。`,
     breadcrumbs: breadcrumb2("聯絡我們", "/contact"),
 });
+
+// admin 可編輯的頁面文案（copy.contact.*）；未設則用以下硬寫 fallback。
+// 註：聯絡表單欄位 / 選項屬 Phase 3，不在此處理。
+const cp = meta.copy?.contact ?? {};
 ---
 
 <BaseLayout {...seo} meta={meta}>
     <section class="pt-32 pb-16 bg-white">
         <div class="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 text-center">
-            <p class="text-xs tracking-[0.4em] text-neutral-500 uppercase mb-3">Contact</p>
+            <p class="text-xs tracking-[0.4em] text-neutral-500 uppercase mb-3">{cp.hero_eyebrow ?? "Contact"}</p>
             <h1 class="text-4xl sm:text-6xl font-light tracking-tight mb-6">
-                <Tr zh="聯絡我們" en="Let's Talk" />
+                <Tr zh={cp.hero_title_zh ?? "聯絡我們"} en={cp.hero_title_en ?? "Let's Talk"} />
             </h1>
             <p class="max-w-2xl mx-auto text-neutral-500 leading-relaxed tracking-wide">
-                <Tr zh="告訴我們您的需求，我們會在 1-2 個工作天內回覆，安排第一次諮詢。"
-                    en="Tell us about your project. We'll reply within 1-2 business days to schedule a first call." />
+                <Tr zh={cp.hero_intro_zh ?? "告訴我們您的需求，我們會在 1-2 個工作天內回覆，安排第一次諮詢。"}
+                    en={cp.hero_intro_en ?? "Tell us about your project. We'll reply within 1-2 business days to schedule a first call."} />
             </p>
         </div>
     </section>
 
     <section class="bg-white pb-20">
         <div class="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8">
-            <ContactForm />
+            <ContactForm meta={meta} />
         </div>
     </section>
 
@@ -41,7 +45,7 @@ const seo = buildBasicPageSeo(Astro, {
     <section class="bg-neutral-50 py-16">
         <div class="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8">
             <h3 class="text-xs tracking-[0.4em] uppercase text-neutral-500 mb-6 text-center">
-                <Tr zh="也可直接聯絡" en="Or reach us directly" />
+                <Tr zh={cp.direct_heading_zh ?? "也可直接聯絡"} en={cp.direct_heading_en ?? "Or reach us directly"} />
             </h3>
             <div class="grid grid-cols-1 md:grid-cols-3 gap-6 text-center">
                 {meta.phone && (

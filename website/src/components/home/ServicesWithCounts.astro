@@ -6,21 +6,48 @@
  * 每一項服務直接附「做過多少個」，把社會證明做在服務卡上，不用另外一段。
  */
 import Tr from "../ui/Tr.astro";
-import { FAKE_SERVICES_WITH_COUNTS } from "../../lib/fake-data";
+import type { IService } from "../../types/service";
+import type { ICategory } from "../../types/category";
+
+interface Props {
+    /** DB 服務項目（admin「服務項目」可編）；空陣列則整段不渲染。 */
+    services?: IService[];
+    /** DB 分類（含公開作品計數）— 用 related_category_slug 對映出每服務的作品數。 */
+    categories?: ICategory[];
+    /** admin 可編輯的首頁文案（copy.home.*）；空欄位則用硬寫 fallback。 */
+    copy?: Record<string, string>;
+}
+const { services = [], categories = [], copy = {} } = Astro.props;
+
+// slug → category（取 count 與英文名）
+const catBySlug = new Map(categories.map(c => [c.slug, c]));
+
+// 首頁只展示前 4 個服務（維持 2×2 版面），附上對映分類的作品數。
+const cards = services.slice(0, 4).map(s => {
+    const cat = s.related_category_slug ? catBySlug.get(s.related_category_slug) : undefined;
+    return {
+        slug: cat?.slug || s.related_category_slug || s.slug,
+        title: s.title,
+        short_desc: s.short_desc || "",
+        count: cat?.count ?? 0,
+    };
+});
 ---
+
+{cards.length > 0 && (
 
 <section class="bg-neutral-50 py-24 sm:py-32 border-y border-neutral-200">
     <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
 
         <div class="flex items-end justify-between mb-14 sm:mb-20 flex-wrap gap-4">
             <div>
-                <p class="text-xs tracking-[0.4em] text-[#c9372c] uppercase mb-3">Services</p>
+                <p class="text-xs tracking-[0.4em] text-[#c9372c] uppercase mb-3">{copy.services_eyebrow ?? "Services"}</p>
                 <h2 class="text-3xl sm:text-5xl font-bold tracking-tight text-neutral-900 leading-tight">
-                    <Tr zh="我們做四件事" en="We Do Four Things" />
+                    <Tr zh={copy.services_title_zh ?? "我們做四件事"} en={copy.services_title_en ?? "We Do Four Things"} />
                 </h2>
                 <p class="mt-4 text-sm sm:text-base text-neutral-500 tracking-wide max-w-xl">
-                    <Tr zh="並把每一件做到專精。過去 10 年累積了 300 支作品。"
-                        en="And we do each one well. 300+ projects across a decade." />
+                    <Tr zh={copy.services_intro_zh ?? "並把每一件做到專精。過去 10 年累積了 300 支作品。"}
+                        en={copy.services_intro_en ?? "And we do each one well. 300+ projects across a decade."} />
                 </p>
             </div>
             <a href="/services"
@@ -32,7 +59,7 @@ import { FAKE_SERVICES_WITH_COUNTS } from "../../lib/fake-data";
 
         <!-- 四個服務卡（每卡一個編號 + 名字 + 專案數 + 簡介） -->
         <div class="grid grid-cols-1 md:grid-cols-2 gap-px bg-neutral-200">
-            {FAKE_SERVICES_WITH_COUNTS.map((s, i) => (
+            {cards.map((s, i) => (
                 <a href={`/works?category=${s.slug}`}
                    class="group bg-white p-8 sm:p-10 lg:p-12 hover:bg-white transition-all flex flex-col min-h-[260px]">
 
@@ -52,11 +79,11 @@ import { FAKE_SERVICES_WITH_COUNTS } from "../../lib/fake-data";
                     </div>
 
                     <h3 class="text-2xl sm:text-3xl font-bold text-neutral-900 tracking-tight mb-3 group-hover:text-[#c9372c] transition-colors">
-                        <Tr zh={s.name_zh} en={s.name_en} />
+                        {s.title}
                     </h3>
 
                     <p class="text-sm sm:text-base text-neutral-500 leading-[1.85] tracking-wide flex-1 max-w-sm">
-                        <Tr zh={s.short_zh} en={s.short_en} />
+                        {s.short_desc}
                     </p>
 
                     <div class="mt-8 inline-flex items-center gap-3 text-xs tracking-[0.3em] uppercase text-neutral-400 group-hover:text-[#c9372c] transition-colors">
@@ -68,3 +95,4 @@ import { FAKE_SERVICES_WITH_COUNTS } from "../../lib/fake-data";
         </div>
     </div>
 </section>
+)}

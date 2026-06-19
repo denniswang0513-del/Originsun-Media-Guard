@@ -6,17 +6,32 @@
  * 版面：左欄標題，右欄問題清單。
  */
 import Tr from "../ui/Tr.astro";
-import { FAKE_FAQ } from "../../lib/fake-data";
+import type { IFAQ } from "../../types/seo";
+
+interface Props {
+    /** DB FAQ（admin「SEO 內容」可編）；空陣列則整段不渲染。 */
+    faqs?: IFAQ[];
+    /** admin 可編輯的首頁文案（copy.home.*）；空欄位則用硬寫 fallback。 */
+    copy?: Record<string, string>;
+}
+const { faqs = [], copy = {} } = Astro.props;
+
+// 只顯示 visible 的，並照 sort_order 排序（index.astro 已只傳 visible，這裡再保險一次）
+const items = faqs
+    .filter(f => f.visible)
+    .sort((a, b) => a.sort_order - b.sort_order);
 ---
+
+{items.length > 0 && (
 
 <section class="bg-neutral-50 py-24 sm:py-32 border-t border-neutral-200">
     <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 grid grid-cols-1 lg:grid-cols-12 gap-10 lg:gap-16">
 
         <!-- 左：章節標題 + 引導 -->
         <div class="lg:col-span-4">
-            <p class="text-xs tracking-[0.4em] text-[#c9372c] uppercase mb-3">FAQ</p>
+            <p class="text-xs tracking-[0.4em] text-[#c9372c] uppercase mb-3">{copy.faq_eyebrow ?? "FAQ"}</p>
             <h2 class="text-3xl sm:text-5xl font-bold tracking-tight text-neutral-900 leading-tight mb-6">
-                <Tr zh="還有疑問？" en="Any Questions?" />
+                <Tr zh={copy.faq_title_zh ?? "還有疑問？"} en={copy.faq_title_en ?? "Any Questions?"} />
             </h2>
             <p class="text-sm sm:text-base text-neutral-500 leading-[1.85] tracking-wide max-w-sm">
                 <Tr zh="這裡是客戶最常問我們的問題。沒看到你要問的？直接寫訊息給我們。"
@@ -32,7 +47,7 @@ import { FAKE_FAQ } from "../../lib/fake-data";
         <!-- 右：問題清單 -->
         <div class="lg:col-span-8">
             <ol class="border-t border-neutral-300">
-                {FAKE_FAQ.map((f, i) => (
+                {items.map((f, i) => (
                     <li class="border-b border-neutral-300">
                         <details class="group">
                             <summary class="flex items-start gap-6 py-6 sm:py-7 cursor-pointer list-none hover:bg-white transition-colors -mx-2 px-2">
@@ -40,13 +55,13 @@ import { FAKE_FAQ } from "../../lib/fake-data";
                                     /{String(i + 1).padStart(2, "0")}
                                 </span>
                                 <span class="flex-1 text-lg sm:text-xl font-medium text-neutral-900 tracking-wide leading-snug">
-                                    <Tr zh={f.q_zh} en={f.q_en} />
+                                    <Tr zh={f.question_zh} en={f.question_en || f.question_zh} />
                                 </span>
                                 <span class="text-2xl text-neutral-400 group-open:rotate-45 transition-transform leading-none mt-1">+</span>
                             </summary>
                             <div class="pl-[calc(2.5rem+1.5rem)] pr-10 pb-7 -mt-1">
                                 <p class="text-[15px] text-neutral-600 leading-[1.9] tracking-wide max-w-2xl">
-                                    <Tr zh={f.a_zh} en={f.a_en} />
+                                    <Tr zh={f.answer_zh} en={f.answer_en || f.answer_zh} />
                                 </p>
                             </div>
                         </details>
@@ -56,6 +71,7 @@ import { FAKE_FAQ } from "../../lib/fake-data";
         </div>
     </div>
 </section>
+)}
 
 <style>
     details > summary::-webkit-details-marker { display: none; }

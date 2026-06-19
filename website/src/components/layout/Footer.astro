@@ -15,6 +15,13 @@ const socials = [
     { key: "instagram", label: "Instagram", url: meta.social.instagram },
     { key: "facebook",  label: "Facebook",  url: meta.social.facebook },
 ].filter(s => !!s.url);
+
+// admin 可編輯的頁尾文案（copy.footer.*）；未設則用 i18n.ts 硬寫 fallback。
+// copyright 支援 {year} 佔位符（與 i18n.ts STR.copyright 一致）。
+const fcp = meta.copy?.footer ?? {};
+const sub = (s: string) => s.replace("{year}", String(year));
+const copyrightZh = fcp.copyright_zh ? sub(fcp.copyright_zh) : t("copyright", "zh", { year });
+const copyrightEn = fcp.copyright_en ? sub(fcp.copyright_en) : t("copyright", "en", { year });
 ---
 
 <footer class="mt-24 border-t border-neutral-200 bg-white">
@@ -30,7 +37,7 @@ const socials = [
 
             <div>
                 <h4 class="text-xs tracking-[0.3em] text-neutral-500 uppercase mb-3">
-                    <Tr zh="聯絡" en="Contact" />
+                    <Tr zh={fcp.contact_heading_zh ?? "聯絡"} en={fcp.contact_heading_en ?? "Contact"} />
                 </h4>
                 <div class="text-sm text-neutral-700 space-y-1">
                     {meta.address && <div>{meta.address}</div>}
@@ -41,7 +48,7 @@ const socials = [
 
             <div>
                 <h4 class="text-xs tracking-[0.3em] text-neutral-500 uppercase mb-3">
-                    <Tr zh="社群" en="Follow" />
+                    <Tr zh={fcp.social_heading_zh ?? "社群"} en={fcp.social_heading_en ?? "Follow"} />
                 </h4>
                 <div class="flex flex-col gap-1 text-sm">
                     {socials.map(s => (
@@ -53,8 +60,8 @@ const socials = [
         </div>
 
         <div class="pt-6 border-t border-neutral-200 text-xs text-neutral-500 tracking-wide">
-            <span data-lang-zh>{t("copyright", "zh", { year })}</span>
-            <span data-lang-en>{t("copyright", "en", { year })}</span>
+            <span data-lang-zh>{copyrightZh}</span>
+            <span data-lang-en>{copyrightEn}</span>
         </div>
     </div>
 </footer>

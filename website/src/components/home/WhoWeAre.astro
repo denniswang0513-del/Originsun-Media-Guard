@@ -13,29 +13,53 @@
  * 視覺節奏：敘述收斂 → 影片打開 → 數字收尾 + 行動
  */
 import Tr from "../ui/Tr.astro";
-import { FAKE_STATS } from "../../lib/fake-data";
+
+interface StatItem { value: string; label_zh: string; label_en: string }
 
 interface Props {
-    /** Showreel YouTube ID */
+    /** Showreel YouTube ID（admin「🏠 首頁設定」可編，預設 DRavYkTojAo） */
     showreel_id?: string;
+    /** 4 欄信任數字（admin「🏠 首頁設定」可編，空則用預設） */
+    stats?: StatItem[];
+    /** admin 可編輯的首頁文案（copy.home.*）；空欄位則用硬寫 fallback。 */
+    copy?: Record<string, string>;
 }
-const { showreel_id = "DRavYkTojAo" } = Astro.props;
+
+/** 預設 4 欄 stats（admin 未設定時沿用原首頁數字） */
+const DEFAULT_STATS: StatItem[] = [
+    { value: "10+",  label_zh: "年製作經驗", label_en: "Years" },
+    { value: "300+", label_zh: "完成作品",   label_en: "Projects" },
+    { value: "80+",  label_zh: "合作品牌",   label_en: "Brands" },
+    { value: "4.9",  label_zh: "平均評分",   label_en: "Rating" },
+];
+
+const { showreel_id = "DRavYkTojAo", stats = [], copy = {} } = Astro.props;
+
+// 逐欄 fallback：admin 只填了部分欄位時，未填的沿用預設值，版面始終 4 欄完整。
+const shownStats: StatItem[] = DEFAULT_STATS.map((d, i) => {
+    const s = stats[i];
+    return {
+        value: s?.value || d.value,
+        label_zh: s?.label_zh || d.label_zh,
+        label_en: s?.label_en || d.label_en,
+    };
+});
 ---
 
 <section class="bg-white py-24 sm:py-32">
 
     <!-- 1. 自介文字（窄置中） -->
     <div class="max-w-3xl mx-auto px-4 sm:px-6 lg:px-8 text-center mb-16 sm:mb-20">
-        <p class="text-xs tracking-[0.4em] text-[#c9372c] uppercase mb-6">About Us</p>
+        <p class="text-xs tracking-[0.4em] text-[#c9372c] uppercase mb-6">{copy.whoweare_eyebrow ?? "About Us"}</p>
 
         <h2 class="text-3xl sm:text-5xl font-bold tracking-tight text-neutral-900 leading-[1.15] mb-8">
-            <Tr zh="我們是源日影像——過去 10 年說了 300 個故事"
-                en="We're OriginsunStudio — 300 stories told over ten years" />
+            <Tr zh={copy.whoweare_heading_zh ?? "我們是源日影像——過去 10 年說了 300 個故事"}
+                en={copy.whoweare_heading_en ?? "We're OriginsunStudio — 300 stories told over ten years"} />
         </h2>
 
         <p class="max-w-xl mx-auto text-base sm:text-lg text-neutral-600 leading-[1.9] tracking-wide">
-            <Tr zh="從商業廣告到紀實短片，從活動紀錄到動態設計。一支影片的起點，是長時間的聆聽，而不是按下 REC。"
-                en="Commercials, documentaries, events, motion graphics — every project starts with listening, not recording." />
+            <Tr zh={copy.whoweare_intro_zh ?? "從商業廣告到紀實短片，從活動紀錄到動態設計。一支影片的起點，是長時間的聆聽，而不是按下 REC。"}
+                en={copy.whoweare_intro_en ?? "Commercials, documentaries, events, motion graphics — every project starts with listening, not recording."} />
         </p>
     </div>
 
@@ -53,7 +77,7 @@ const { showreel_id = "DRavYkTojAo" } = Astro.props;
     <div class="max-w-3xl mx-auto px-4 sm:px-6 lg:px-8 text-center mt-16 sm:mt-20">
         <!-- stats：4 欄不折行 -->
         <ul class="grid grid-cols-4 divide-x divide-neutral-200 mb-12">
-            {FAKE_STATS.map(s => (
+            {shownStats.map(s => (
                 <li class="px-2 sm:px-4 text-center">
                     <div class="text-xl sm:text-3xl font-bold tracking-tight text-neutral-900 leading-none whitespace-nowrap">
                         {s.value}

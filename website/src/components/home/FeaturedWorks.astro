@@ -15,9 +15,14 @@ import SmartImage from "../ui/SmartImage.astro";
 import type { IPublicProject } from "../../types/project";
 import { resolveThumbnailAsync } from "../../lib/youtube";
 import Tr from "../ui/Tr.astro";
+import { STR } from "../../lib/i18n";
 
-interface Props { works: IPublicProject[] }
-const { works } = Astro.props;
+interface Props {
+    works: IPublicProject[];
+    /** admin 可編輯的首頁文案（copy.home.*）；空欄位則用硬寫 fallback。 */
+    copy?: Record<string, string>;
+}
+const { works, copy = {} } = Astro.props;
 
 // build-time HEAD check 過濾沒 maxres 的舊片(YouTube 對非 HD 上傳不發 maxresdefault),
 // 自動降到 hq 避免 sharp 抓 404 中斷 build。
@@ -32,9 +37,9 @@ const thumbs = await Promise.all(
     <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 mb-12 sm:mb-16">
         <div class="flex items-end justify-between gap-6 flex-wrap">
             <div>
-                <p class="text-xs tracking-[0.4em] text-[#c9372c] uppercase mb-3">Selected</p>
+                <p class="text-xs tracking-[0.4em] text-[#c9372c] uppercase mb-3">{copy.featured_eyebrow ?? "Selected"}</p>
                 <h2 class="text-3xl sm:text-5xl font-bold tracking-tight text-neutral-900 leading-tight">
-                    <Tr k="featured_title" />
+                    <Tr zh={copy.featured_title_zh ?? STR.featured_title.zh} en={copy.featured_title_en ?? STR.featured_title.en} />
                 </h2>
             </div>
 

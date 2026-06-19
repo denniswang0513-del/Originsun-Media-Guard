@@ -23,15 +23,17 @@ import Testimonials from "../components/home/Testimonials.astro";
 import HomeInsight from "../components/home/HomeInsight.astro";
 import FAQ from "../components/home/FAQ.astro";
 import ContactCTA from "../components/home/ContactCTA.astro";
-import { fetchMeta, fetchFeatured, fetchFaqs, fetchTestimonials } from "../lib/crm-client";
+import { fetchMeta, fetchFeatured, fetchFaqs, fetchTestimonials, fetchServices, fetchCategories } from "../lib/crm-client";
 import { pageSchemas, resolveSiteUrl, ensureMinDescription } from "../lib/seo";
 import { LIMITS } from "../lib/config";
 
-const [meta, featured, faqs, testimonials] = await Promise.all([
+const [meta, featured, faqs, testimonials, services, categories] = await Promise.all([
     fetchMeta(),
     fetchFeatured(LIMITS.HOME_FEATURED),
     fetchFaqs(),
     fetchTestimonials(),
+    fetchServices(),
+    fetchCategories(),
 ]);
 
 // Show real published works only — no FAKE_FEATURED padding. The grid
@@ -58,6 +60,17 @@ if (visibleFaqs.length > 0) {
         visibleFaqs.map(f => ({ question: f.question_zh, answer: f.answer_zh })),
     ));
 }
+
+// admin「🏠 首頁設定」可編的 home.* 設定（透過 /meta 暴露；空則元件用各自預設）。
+// Showreel 優先用專屬 home.showreel_id，未設則沿用原 home.hero_youtube_id。
+const showreelId = meta.home_showreel_id || meta.home_hero_youtube_id || "DRavYkTojAo";
+const homeStats = meta.home_stats || [];
+const ratingValue = meta.home_rating_value || "4.9";
+const ratingCount = meta.home_rating_count || "25";
+
+// admin 可編輯的首頁文案（copy.home.*）；未設則各元件用硬寫 fallback。
+// 統一傳一個 copy 物件給各 home 元件（DRY：元件內 `copy.<block>_zh ?? "literal"`）。
+const homeCopy = meta.copy?.home ?? {};
 ---
 
 <BaseLayout title={meta.company_name_zh}
@@ -67,12 +80,12 @@ if (visibleFaqs.length > 0) {
     <!-- SEO h1：對螢幕閱讀器與爬蟲提供清楚的頁面主題；視覺上隱藏不影響設計 -->
     <h1 class="sr-only">{meta.company_name_zh} — {meta.tagline || meta.subtitle || "專業影像製作"}</h1>
     <HomeSlideshow works={featured} />
-    <WhoWeAre />
-    <ServicesWithCounts />
-    <FeaturedWorks works={featured9} />
+    <WhoWeAre showreel_id={showreelId} stats={homeStats} copy={homeCopy} />
+    <ServicesWithCounts services={services} categories={categories} copy={homeCopy} />
+    <FeaturedWorks works={featured9} copy={homeCopy} />
     <ProcessNumbered />
-    <Testimonials />
-    <HomeInsight />
-    <FAQ />
-    <ContactCTA meta={meta} />
+    <Testimonials testimonials={testimonials} ratingValue={ratingValue} ratingCount={ratingCount} copy={homeCopy} />
+    <HomeInsight copy={homeCopy} />
+    <FAQ faqs={visibleFaqs} copy={homeCopy} />
+    <ContactCTA meta={meta} copy={homeCopy} />
 </BaseLayout>

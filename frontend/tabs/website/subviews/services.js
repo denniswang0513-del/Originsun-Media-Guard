@@ -1,22 +1,35 @@
 /**
  * services.js — 服務項目 CRUD（首頁「服務」區塊用）
  */
-import { websiteFetch, esc, toastOk, toastErr, renderLoadError, emptyRow } from '../website-utils.js';
+import { websiteFetch, esc, toastOk, toastErr, renderLoadError, emptyRow, renderCopyCard } from '../website-utils.js';
 
 let _services = [];
 let _cats = [];
 
+// /services 頁面行銷文案（對應 services.astro 的 copy.services.* fallback）
+const COPY_BLOCKS = [
+    { key: 'hero_eyebrow', label: 'Hero 上方小字（eyebrow）', type: 'text', placeholderZh: 'Services' },
+    { key: 'hero_title', label: 'Hero 標題', placeholderZh: '我們能為您做的', placeholderEn: 'What We Can Do' },
+    { key: 'hero_intro', label: 'Hero 介紹段', long: true, placeholderZh: '從前期腳本發想到後期交付…' },
+    { key: 'cta_heading', label: '底部 CTA 標題', placeholderZh: '有影像製作需求？', placeholderEn: 'Have a Project in Mind?' },
+    { key: 'cta_body', label: '底部 CTA 內文', long: true, placeholderZh: '不論是品牌形象片…' },
+    { key: 'cta_button', label: '底部 CTA 按鈕', placeholderZh: '聯絡我們', placeholderEn: 'Get in Touch' },
+];
+
 export default async function render(container, ctx = {}) {
     const { isCurrent = () => true } = ctx;
     container.innerHTML = '<h2>🧩 服務項目</h2><div style="color:#888;padding:20px;">載入中…</div>';
+    let _settings = {};
     try {
-        const [s, c] = await Promise.all([
+        const [s, c, st] = await Promise.all([
             websiteFetch('/api/website/admin/services'),
             websiteFetch('/api/website/admin/categories'),
+            websiteFetch('/api/website/admin/settings'),
         ]);
         if (!isCurrent()) return;
         _services = s?.items || [];
         _cats = c?.items || [];
+        _settings = st?.settings || {};
     } catch (e) {
         if (!isCurrent()) return;
         renderLoadError(container, '🧩 服務項目', e);
@@ -27,6 +40,8 @@ export default async function render(container, ctx = {}) {
 
     container.innerHTML = `
         <h2>🧩 服務項目 <span style="color:#888;font-size:13px;font-weight:400;">· ${_services.length} 項</span></h2>
+
+        ${renderCopyCard('copy.services', _settings, COPY_BLOCKS, { title: '📝 服務頁文案', note: '對應 /services 頁的標題與 CTA；留空則維持預設文案。' })}
 
         <div class="card" style="margin-bottom:12px;">
             <h3 style="color:#fff;margin:0 0 8px 0;font-size:13px;">新增服務</h3>

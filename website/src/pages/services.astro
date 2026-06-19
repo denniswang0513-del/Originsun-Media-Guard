@@ -26,19 +26,22 @@ const seo = buildBasicPageSeo(Astro, {
 });
 // 每個服務一個 Service schema → Google 服務搜尋
 seo.schemaData.push(...services.map(s => pageSchemas.service(s, meta, siteUrl)));
+
+// admin 可編輯的頁面文案（copy.services.*）；未設則用以下硬寫 fallback。
+const cp = meta.copy?.services ?? {};
 ---
 
 <BaseLayout {...seo} meta={meta}>
     <section class="pt-32 pb-20 bg-white">
         <div class="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8">
             <div class="text-center mb-16">
-                <p class="text-xs tracking-[0.4em] text-neutral-500 uppercase mb-3">Services</p>
+                <p class="text-xs tracking-[0.4em] text-neutral-500 uppercase mb-3">{cp.hero_eyebrow ?? "Services"}</p>
                 <h1 class="text-4xl sm:text-5xl font-light tracking-tight mb-6">
-                    <Tr zh="我們能為您做的" en="What We Can Do" />
+                    <Tr zh={cp.hero_title_zh ?? "我們能為您做的"} en={cp.hero_title_en ?? "What We Can Do"} />
                 </h1>
                 <p class="max-w-2xl mx-auto text-neutral-600 leading-relaxed tracking-wide">
-                    <Tr zh="從前期腳本發想到後期交付，一條龍完成您的影像需求。"
-                        en="End-to-end production from concept development to final delivery." />
+                    <Tr zh={cp.hero_intro_zh ?? "從前期腳本發想到後期交付，一條龍完成您的影像需求。"}
+                        en={cp.hero_intro_en ?? "End-to-end production from concept development to final delivery."} />
                 </p>
             </div>
 
@@ -78,15 +81,15 @@ seo.schemaData.push(...services.map(s => pageSchemas.service(s, meta, siteUrl)))
     <section class="bg-neutral-50 py-20">
         <div class="max-w-3xl mx-auto px-4 text-center">
             <h2 class="text-2xl sm:text-3xl font-light tracking-tight mb-6">
-                <Tr zh="有影像製作需求？" en="Have a Project in Mind?" />
+                <Tr zh={cp.cta_heading_zh ?? "有影像製作需求？"} en={cp.cta_heading_en ?? "Have a Project in Mind?"} />
             </h2>
             <p class="text-neutral-600 mb-8 tracking-wide">
-                <Tr zh="不論是品牌形象片、紀實短片或活動紀錄，我們都樂意傾聽您的想法。"
-                    en="From brand films to documentaries and event recaps — we'd love to hear your story." />
+                <Tr zh={cp.cta_body_zh ?? "不論是品牌形象片、紀實短片或活動紀錄，我們都樂意傾聽您的想法。"}
+                    en={cp.cta_body_en ?? "From brand films to documentaries and event recaps — we'd love to hear your story."} />
             </p>
             <a href="/contact"
                class="inline-flex items-center gap-2 text-sm tracking-widest uppercase border border-neutral-500 px-8 py-3 hover:bg-white hover:text-white transition-colors">
-                <Tr zh="聯絡我們" en="Get in Touch" />
+                <Tr zh={cp.cta_button_zh ?? "聯絡我們"} en={cp.cta_button_en ?? "Get in Touch"} />
                 <span>→</span>
             </a>
         </div>

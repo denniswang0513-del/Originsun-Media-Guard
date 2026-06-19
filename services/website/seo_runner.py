@@ -195,12 +195,26 @@ def _resolve_claude_exe() -> Optional[str]:
     found = shutil.which("claude")
     if found:
         return found
-    for c in (
+    cands = [
         os.path.expanduser(r"~\.local\bin\claude.exe"),
         os.path.expandvars(r"%LOCALAPPDATA%\Microsoft\WinGet\Links\claude.exe"),
         os.path.expandvars(r"%LOCALAPPDATA%\Programs\claude\claude.exe"),
-    ):
-        if c and os.path.isfile(c):
+    ]
+    # The autostart (start_hidden.vbs) launches uvicorn with a STRIPPED env where
+    # %USERPROFILE% / %LOCALAPPDATA% can be ABSENT — then expanduser("~") and
+    # expandvars don't resolve, so the real path (C:\Users\<user>\.local\bin) is
+    # never even checked → "找不到 claude CLI" → whole AI SEO 排程 fails. USERNAME is
+    # almost always present even in a stripped env, so derive the home from it too.
+    # (root cause of the 2026-06-19 排程「失敗 10 筆」). %-unexpanded paths are skipped.
+    try:
+        import getpass
+        u = getpass.getuser()
+        if u:
+            cands.insert(1, os.path.join("C:\\Users", u, ".local", "bin", "claude.exe"))
+    except Exception:
+        pass
+    for c in cands:
+        if c and "%" not in c and os.path.isfile(c):
             return c
     return None
 

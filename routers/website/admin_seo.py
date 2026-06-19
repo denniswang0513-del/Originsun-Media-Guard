@@ -10,15 +10,18 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from datetime import datetime
+
 from ._common import admin_session, current_username, register_crud
 from core.schemas_website import (
     WebsiteFAQCreate, WebsiteFAQUpdate,
     WebsiteTestimonialCreate, WebsiteTestimonialUpdate,
     WebsiteQuickFactCreate, WebsiteQuickFactUpdate,
-    WebsiteAwardCreate, WebsiteAwardUpdate,
+    WebsiteAwardCreate, WebsiteAwardUpdate, WebsiteAwardBulkImport,
+    NavItemCreate, NavItemUpdate,
     ProjectSeoUpdate,
 )
-from services.website import rebuild_service, seo_service
+from services.website import nav_service, rebuild_service, seo_service
 
 router = APIRouter(prefix="/api/website/admin", tags=["website-admin-seo"])
 
@@ -68,6 +71,43 @@ register_crud(
     delete_fn=seo_service.delete_award,
     create_schema=WebsiteAwardCreate,
     update_schema=WebsiteAwardUpdate,
+    on_change=rebuild_service.mark_dirty,
+)
+
+
+@router.post("/awards/bulk_import")
+async def awards_bulk_import(
+    req: WebsiteAwardBulkImport,
+    session: AsyncSession = Depends(admin_session),
+):
+    """貼整段「歷年作品（獎項）」純文字 → film-centric 解析 → 建 WebsiteAward rows。
+
+    body: {text, dry_run=true, now_year?}
+      - dry_run=true（預設）：回 {dry_run, works, total_works, total_lines, warnings}
+        不寫 DB（給前端「預覽」用）。
+      - dry_run=false：建 row 後回 {dry_run, created, total_works, warnings} + mark_dirty。
+
+    解析規則見 seo_service.parse_awards_bulk。是 film-centric 專用端點、不走 register_crud。
+    """
+    now_year = req.now_year or datetime.now().year
+    result = await seo_service.bulk_import_awards(
+        session, req.text, now_year=now_year, dry_run=req.dry_run,
+    )
+    if not req.dry_run and result.get("created", 0) > 0:
+        await rebuild_service.mark_dirty()
+    return result
+
+# 頂部導覽選單（label / href / 排序 / 顯示隱藏）— admin「🧭 導覽選單」子視圖。
+# 任一寫入 mark_dirty → rebuild → Header.astro 重 fetch /api/website/nav。
+register_crud(
+    router,
+    prefix="nav", name="Nav item",
+    list_fn=nav_service.list_nav,
+    create_fn=nav_service.create_nav,
+    update_fn=nav_service.update_nav,
+    delete_fn=nav_service.delete_nav,
+    create_schema=NavItemCreate,
+    update_schema=NavItemUpdate,
     on_change=rebuild_service.mark_dirty,
 )
 

@@ -4,9 +4,9 @@
  */
 import { websiteFetch, esc, toastOk, toastErr, renderLoadError } from '../website-utils.js';
 
+// 公司資訊(company.*) + 社群連結(social.*) 已移到「📬 聯絡」子視圖管理（屬對外聯絡頁內容）
+const _CONTACT_MOVED = ['company.', 'social.'];
 const _GROUPS = [
-    { prefix: 'company', label: '🏢 公司資訊', color: '#3b82f6' },
-    { prefix: 'social', label: '🔗 社群連結', color: '#8b5cf6' },
     { prefix: 'seo', label: '🔍 SEO 預設', color: '#10b981' },
     { prefix: 'analytics', label: '📊 分析追蹤', color: '#f59e0b' },
     { prefix: 'notify', label: '🔔 通知設定', color: '#dc2626' },
@@ -39,10 +39,14 @@ export default async function render(container, ctx = {}) {
         return [...new Set([...known, ...existing])].sort();
     };
 
-    const ungrouped = Object.keys(_settings).filter(k => !_GROUPS.some(g => k.startsWith(g.prefix + '.'))).sort();
+    const ungrouped = Object.keys(_settings).filter(k =>
+        !_GROUPS.some(g => k.startsWith(g.prefix + '.')) &&
+        !_CONTACT_MOVED.some(p => k.startsWith(p))   // company.*/social.* 改在「📬 聯絡」管
+    ).sort();
 
     container.innerHTML = `
         <h2>⚙️ 網站設定 <span style="color:#888;font-size:12px;font-weight:400;">· ${Object.keys(_settings).length} 項</span></h2>
+        <div style="color:#888;font-size:11px;margin:-4px 0 12px;">📇 公司資訊 / 社群連結已移至「📬 聯絡」子視圖管理。</div>
 
         <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(400px,1fr));gap:12px;margin-bottom:16px;">
             ${_GROUPS.map(g => _renderGroup(g, groupKeys(g))).join('')}

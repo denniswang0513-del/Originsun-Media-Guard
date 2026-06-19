@@ -317,6 +317,11 @@ class CrmStaff(Base):
     resume_editable = Column(Boolean, nullable=True, default=True)
     # Phase M: 對外官網團隊頁顯示開關
     show_on_website = Column(Boolean, nullable=True, default=False)
+    # Phase M: 官網團隊頁顯示覆寫（不動 CRM 正本 name/role/photo_url/bio；空 → fallback 正本）
+    website_title = Column(String(128), nullable=True)        # 官網顯示職稱（空 → fallback role）
+    website_photo_url = Column(String(512), nullable=True)    # 官網頭像（空 → fallback photo_url）
+    website_bio = Column(Text, nullable=True)                 # 官網簡介（空 → fallback bio）
+    website_sort_order = Column(Integer, nullable=True, default=0)  # 官網團隊頁排序
     # showcase-edit quick_add 來源追蹤
     created_via = Column(String(20), nullable=True, default="admin")
     created_for_project_id = Column(String(32), nullable=True)
@@ -327,6 +332,14 @@ class CrmStaff(Base):
         Index("idx_staff_role", "role"),
         Index("idx_staff_status", "status"),
     )
+
+
+# 官網團隊頁覆寫欄位（單一真相）：admin_team PUT 白名單 + CRM staff PUT 「動到官網欄位才 rebuild」
+# 的判定都引用這份，避免兩個 router 各自維護一份而漂移。
+WEBSITE_TEAM_OVERRIDE_FIELDS = (
+    "show_on_website", "website_title", "website_photo_url",
+    "website_bio", "website_sort_order",
+)
 
 
 class CrmProjectShowcase(Base):

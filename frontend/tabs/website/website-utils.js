@@ -286,3 +286,84 @@ export function closeModal(id) {
     const m = document.getElementById(id);
     if (m) m.remove();
 }
+
+
+// ── 📝 頁面文案編輯卡（共用：services / about / contact / blog / home 子視圖）──
+//
+// 對外 Astro 各頁的硬寫行銷文案改成 website_settings 的 `copy.<page>.<block>_<lang>`
+// KV key。settings_service.get_meta 掃 copy.* 組成 meta.copy[page][block]，各 .astro
+// 用 meta.copy?.<page>?.<block>_zh ?? "<硬寫 fallback>" 渲染（留空則維持原樣）。
+//
+// blocks descriptor 每筆：
+//   { key, label, type, long, placeholderZh, placeholderEn, hint }
+//   - type 'bilingual'（預設）→ 產 <prefix>.<key>_zh + _en 兩個輸入框
+//   - type 'text'              → 產 <prefix>.<key> 單一輸入框（如 news hero_image URL）
+//   - long: true               → 用 textarea（多行文案 / 介紹段落）
+//
+// 用法（subview render 內）：
+//   container.insertAdjacentHTML('beforeend',
+//       renderCopyCard('copy.services', settings, SERVICES_COPY_BLOCKS));
+//   // settings = await websiteFetch('/api/website/admin/settings') 的 .settings
+//
+// 卡內「💾 儲存頁面文案」按鈕 onclick 統一呼叫 window._websiteSaveCopyCard(cardId)。
+
+let _copyCardSeq = 0;
+
+export function renderCopyCard(prefix, settings = {}, blocks = [], opts = {}) {
+    const { title = '📝 頁面文案', note = '留空則對外網站維持原本的預設文案。' } = opts;
+    const cardId = `copy-card-${++_copyCardSeq}`;
+
+    const inputHtml = (fullKey, value, placeholder, long) => long
+        ? `<textarea data-copy-key="${esc(fullKey)}" rows="3" style="width:100%;resize:vertical;" placeholder="${esc(placeholder || '')}">${esc(value || '')}</textarea>`
+        : `<input data-copy-key="${esc(fullKey)}" value="${esc(value || '')}" placeholder="${esc(placeholder || '')}" style="width:100%;" />`;
+
+    const rows = blocks.map(b => {
+        const type = b.type || 'bilingual';
+        if (type === 'text') {
+            const k = `${prefix}.${b.key}`;
+            return `
+                <div style="margin-bottom:12px;">
+                    <label style="color:#888;font-size:11px;display:block;margin-bottom:3px;">${esc(b.label)}</label>
+                    ${inputHtml(k, settings[k], b.placeholderZh, b.long)}
+                    ${b.hint ? `<div style="color:#666;font-size:10px;margin-top:2px;">${esc(b.hint)}</div>` : ''}
+                </div>`;
+        }
+        // bilingual：zh + en 並排
+        const kZh = `${prefix}.${b.key}_zh`;
+        const kEn = `${prefix}.${b.key}_en`;
+        return `
+            <div style="margin-bottom:12px;">
+                <label style="color:#888;font-size:11px;display:block;margin-bottom:3px;">${esc(b.label)}</label>
+                <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">
+                    <div>${inputHtml(kZh, settings[kZh], b.placeholderZh || '中文', b.long)}</div>
+                    <div>${inputHtml(kEn, settings[kEn], b.placeholderEn || 'English', b.long)}</div>
+                </div>
+                ${b.hint ? `<div style="color:#666;font-size:10px;margin-top:2px;">${esc(b.hint)}</div>` : ''}
+            </div>`;
+    }).join('');
+
+    return `
+        <div id="${cardId}" class="card" style="margin-bottom:16px;border-left:3px solid #3b82f6;">
+            <h3 style="color:#fff;margin:0 0 4px 0;font-size:14px;">${esc(title)}</h3>
+            <p style="color:#888;font-size:11px;margin:0 0 12px 0;">${esc(note)}</p>
+            ${rows}
+            <button class="btn btn-sm" onclick="window._websiteSaveCopyCard('${cardId}')">💾 儲存頁面文案</button>
+        </div>`;
+}
+
+// 共用儲存：掃指定卡內 [data-copy-key] → 只送有「變更或非空」的值。
+// 為了讓「清空欄位 = 回退到 Astro 硬寫 fallback」可行，空字串也會寫入（settings 存空字串，
+// get_meta 掃出 ""，Astro 的 `?? fallback` 因 nullish 不觸發 → 仍顯示空）；因此這裡一律送全部值。
+window._websiteSaveCopyCard = async (cardId) => {
+    const card = document.getElementById(cardId);
+    if (!card) { toastErr('找不到文案卡'); return; }
+    const values = {};
+    card.querySelectorAll('[data-copy-key]').forEach(el => {
+        values[el.dataset.copyKey] = el.value;
+    });
+    if (!Object.keys(values).length) { toastOk('沒有可儲存的欄位'); return; }
+    try {
+        const r = await websiteFetch('/api/website/admin/settings', { method: 'PUT', body: { values } });
+        toastOk(`已更新 ${r.updated} 項頁面文案`);
+    } catch (e) { toastErr(e.message); }
+};

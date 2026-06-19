@@ -7,17 +7,23 @@
     <!-- 左側導覽 -->
     <nav id="website-nav" style="width:200px;border-right:1px solid #2a2a2a;padding:16px 0;flex-shrink:0;">
         <div style="padding:0 16px 12px;font-size:11px;color:#666;letter-spacing:0.08em;">官網管理</div>
-        <button class="website-nav-btn active" data-subview="dashboard">📊 儀表板</button>
-        <button class="website-nav-btn" data-subview="home">🏠 首頁設定</button>
-        <button class="website-nav-btn" data-subview="works">🎬 作品集管理</button>
-        <button class="website-nav-btn" data-subview="categories">🏷️ 作品分類</button>
+        <!-- 官網欄目：一一對應官網導覽列（首頁/作品集/歷年作品/服務項目/關於我們/部落格/聯絡）順序 -->
+        <div style="padding:4px 16px;font-size:10px;color:#555;letter-spacing:0.1em;">📄 官網欄目</div>
+        <button class="website-nav-btn" data-subview="home">🏠 首頁</button>
+        <button class="website-nav-btn" data-subview="works">🎬 作品集</button>
+        <button class="website-nav-btn" data-subview="awards">🏆 歷年作品（獎項）</button>
         <button class="website-nav-btn" data-subview="services">🧩 服務項目</button>
-        <button class="website-nav-btn" data-subview="credits">🎭 演職員</button>
         <button class="website-nav-btn" data-subview="about">👥 關於我們</button>
-        <button class="website-nav-btn" data-subview="inquiries">📬 聯絡詢問 <span id="website-inq-badge" class="website-badge" style="display:none;"></span></button>
         <button class="website-nav-btn" data-subview="blog">📝 部落格</button>
+        <button class="website-nav-btn" data-subview="inquiries">📬 聯絡 <span id="website-inq-badge" class="website-badge" style="display:none;"></span></button>
+
+        <!-- 網站工具：非導覽欄目（全站性 / 支援功能） -->
+        <div style="padding:14px 16px 4px;font-size:10px;color:#555;letter-spacing:0.1em;">🛠️ 網站工具</div>
+        <button class="website-nav-btn active" data-subview="dashboard">📊 儀表板</button>
+        <button class="website-nav-btn" data-subview="categories">🏷️ 作品分類</button>
+        <button class="website-nav-btn" data-subview="credits">🎭 演職員</button>
         <button class="website-nav-btn" data-subview="seo">🔍 SEO / AI SEO</button>
-        <button class="website-nav-btn" data-subview="awards">🏆 獎項紀錄</button>
+        <button class="website-nav-btn" data-subview="nav">🧭 導覽選單</button>
         <button class="website-nav-btn" data-subview="settings">⚙️ 網站設定</button>
 
         <div style="padding:16px;margin-top:20px;font-size:11px;color:#555;border-top:1px solid #2a2a2a;">

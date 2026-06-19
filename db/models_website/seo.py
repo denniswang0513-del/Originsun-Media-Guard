@@ -64,10 +64,20 @@ class WebsiteQuickFact(Base):
 
 
 class WebsiteAward(Base):
-    """站級獎項紀錄（公司榮譽，不綁特定作品）。
+    """站級獎項紀錄，以「作品」為中心分組（公司榮譽，不綁 CRM 作品 FK）。
 
-    對應 /portfolio 頁面頂部「Honors & Awards」區塊。work_title 用純文字而非 FK
-    （pre-CRM 老作品也能登錄），level 用 String 而非 Enum（未來想加金/銀/銅獎不用 migration）。
+    對應 /portfolio 頁面頂部「Honors & Awards」區塊。每一筆 = 一行獎項/影展文字
+    （name_zh = 整行純文字），多筆共用同一 work_title + work_type + work_year =
+    同一部作品的多項榮譽。
+
+    分組欄位（film-centric rework）：
+      - work_type：作品類型純文字（劇情短片 / 紀錄短片 / 紀錄片 / MV…），可空。
+      - work_title：作品標題（《…》內文字），純文字而非 FK（pre-CRM 老作品也能登錄）。
+      - work_year：作品所屬年度（批次匯入時 `YYYY |` 群組標頭）。
+      - year：該單行獎項本身的年份（行首 \\d{4} 或 fallback 到 work_year）。
+
+    level 保留欄位但新資料不再分類（B 案決議：獎項行是純文字，不分獲獎/入圍），
+    新匯入一律寫預設 "獲獎"，前端與 /portfolio 不再顯示 win/nom 統計。
     """
     __tablename__ = "website_awards"
 
@@ -78,7 +88,9 @@ class WebsiteAward(Base):
     category = Column(String(200))
     org = Column(String(200))
     level = Column(String(20), nullable=False, default="獲獎")
+    work_type = Column(String(64), nullable=True)   # 作品類型（劇情短片/紀錄短片…）
     work_title = Column(String(300))
+    work_year = Column(Integer, nullable=True)       # 作品所屬年度（YYYY | 群組）
     recipient = Column(String(200))
     cert_url = Column(String(500))
     sort_order = Column(Integer, nullable=False, default=0)

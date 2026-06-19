@@ -74,6 +74,18 @@ _SEED_CATEGORIES: list[dict[str, object]] = [
     },
 ]
 
+# ── 7 筆頂部導覽選單（對齊 Header.astro navItems + i18n.ts nav_* labels） ──
+# 與對外網站當前導覽完全一致，seed 後 Header 改走 DB 但顯示不變。
+_SEED_NAV_ITEMS: list[dict[str, object]] = [
+    {"label_zh": "首頁",     "label_en": "Home",      "href": "/",          "sort_order": 1},
+    {"label_zh": "作品集",   "label_en": "Works",     "href": "/works",     "sort_order": 2},
+    {"label_zh": "歷年作品", "label_en": "Portfolio", "href": "/portfolio", "sort_order": 3},
+    {"label_zh": "服務項目", "label_en": "Services",  "href": "/services",  "sort_order": 4},
+    {"label_zh": "關於我們", "label_en": "About",     "href": "/about",     "sort_order": 5},
+    {"label_zh": "部落格",   "label_en": "Insight",   "href": "/news",      "sort_order": 6},
+    {"label_zh": "聯絡",     "label_en": "Contact",   "href": "/contact",   "sort_order": 7},
+]
+
 # ── 4 筆服務項目（對應 4 大類） ──
 _SEED_SERVICES: list[dict[str, object]] = [
     {
@@ -119,11 +131,54 @@ _SEED_SERVICES: list[dict[str, object]] = [
 ]
 
 
+async def seed_nav_if_empty(session_factory: Callable) -> None:
+    """若 website_nav_items 為空則寫入 7 筆預設導覽（對齊 Header.astro navItems）。
+
+    獨立於 settings gate：website_nav_items 是 Phase 3 新表，既有部署 settings 早已
+    seed 過（seed_website_if_empty 會 early-return），所以 nav 必須用自己的 emptiness
+    閘門才能在升級後補 seed。幂等：表非空就 skip（使用者刪改過的不被覆蓋）。
+    """
+    try:
+        from sqlalchemy import text
+        from sqlalchemy.dialects.postgresql import insert
+        from db.models_website import WebsiteNavItem
+    except ImportError:
+        logger.warning("[website-seed] SQLAlchemy/models unavailable, skip nav")
+        return
+
+    async with session_factory() as session:
+        try:
+            count = (await session.execute(
+                text("SELECT COUNT(*) FROM website_nav_items")
+            )).scalar() or 0
+        except Exception as e:
+            logger.warning("[website-seed] nav pre-check failed: %s", e)
+            return
+
+        if count > 0:
+            return
+
+        try:
+            await session.execute(
+                insert(WebsiteNavItem).values([
+                    {**n, "visible": True} for n in _SEED_NAV_ITEMS
+                ]).on_conflict_do_nothing()
+            )
+            await session.commit()
+            logger.info("[website-seed] seeded %d nav items", len(_SEED_NAV_ITEMS))
+        except Exception as e:
+            await session.rollback()
+            logger.error("[website-seed] nav seed failed, rolled back: %s", e)
+
+
 async def seed_website_if_empty(session_factory: Callable) -> None:
     """若 website_settings 為空則寫入初始資料。
 
     幂等：檢查 settings 非空就 skip，讓使用者後台調整的值永遠不被覆寫。
     整批 ORM insert().on_conflict_do_nothing() 單一 commit。
+
+    導覽選單（website_nav_items）走獨立 emptiness 閘門（見 seed_nav_if_empty），
+    在 settings gate 之外先跑，確保既有部署升級後也會補上 7 筆預設導覽。
     """
     try:
         from sqlalchemy import text, select
@@ -134,6 +189,9 @@ async def seed_website_if_empty(session_factory: Callable) -> None:
     except ImportError:
         logger.warning("[website-seed] SQLAlchemy/models unavailable, skip")
         return
+
+    # 導覽選單獨立 seed（不受 settings gate 影響 — 新表升級補種）
+    await seed_nav_if_empty(session_factory)
 
     async with session_factory() as session:
         try:

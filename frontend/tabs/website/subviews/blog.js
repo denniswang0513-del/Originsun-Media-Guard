@@ -12,10 +12,18 @@
  */
 import {
     websiteFetch, esc, toastOk, toastErr, renderLoadError,
-    readRowPatch, openModal, closeModal, getApiBase,
+    readRowPatch, openModal, closeModal, getApiBase, renderCopyCard,
 } from '../website-utils.js';
 
 const SUB_TABS = ['posts', 'categories', 'notion', 'seo-migration'];
+
+// /news（影像專欄列表）頁面行銷文案（對應 news/index.astro 的 copy.news.* fallback）
+const NEWS_COPY_BLOCKS = [
+    { key: 'hero_eyebrow', label: 'Hero 上方小字（eyebrow）', type: 'text', placeholderZh: 'Insight' },
+    { key: 'hero_title', label: 'Hero 標題', placeholderZh: '影像專欄', placeholderEn: 'Insight' },
+    { key: 'hero_image', label: 'Hero 背景圖（URL / 路徑）', type: 'text', placeholderZh: '留空用預設 placeholder 圖', hint: '深色 hero 的滿版背景圖；可貼完整 URL 或 /uploads/... 路徑。' },
+    { key: 'intro', label: '介紹段落', long: true, placeholderZh: '源日影像專欄內容涵蓋影像製作的常見流程…' },
+];
 
 // upload endpoint 回的 URL 是相對路徑 /uploads/posts/{id}/{name}.webp，
 // 但 admin Tab 是從 master Web UI 開啟的（origin = master），那邊沒這個路徑。
@@ -54,6 +62,7 @@ let _state = {
     redirectSyncOk: null,    // null = 未試過 / true / false
     lastRedirectSyncAt: null,
     filters: { status: '', category: '', q: '' },
+    settings: {},            // website_settings（給 /news 頁面文案卡用）
 };
 let _container = null;
 
@@ -66,12 +75,13 @@ export default async function render(container, ctx = {}) {
     container.innerHTML = '<h2>📝 部落格</h2><div style="color:#888;padding:20px;">載入中…</div>';
 
     try {
-        const [posts, cats, notion, rebuild, redirects] = await Promise.all([
+        const [posts, cats, notion, rebuild, redirects, settings] = await Promise.all([
             websiteFetch('/api/website/admin/posts'),
             websiteFetch('/api/website/admin/post_categories'),
             websiteFetch('/api/website/admin/notion/status'),
             websiteFetch('/api/website/admin/rebuild/status'),
             websiteFetch('/api/website/redirects'),
+            websiteFetch('/api/website/admin/settings'),
         ]);
         if (!isCurrent()) return;
         _state.posts = posts?.items || [];
@@ -79,6 +89,7 @@ export default async function render(container, ctx = {}) {
         _state.notionStatus = notion || _state.notionStatus;
         _state.rebuildStatus = rebuild || _state.rebuildStatus;
         _state.redirectCount = redirects?.count || 0;
+        _state.settings = settings?.settings || {};
     } catch (e) {
         if (!isCurrent()) return;
         const hint = e.status === 404
@@ -98,6 +109,8 @@ export default async function render(container, ctx = {}) {
 function _renderShell() {
     _container.innerHTML = `
         <h2>📝 部落格管理 <span style="color:#888;font-size:12px;font-weight:400;">· DB-as-truth · Notion 是匯入器</span></h2>
+
+        ${renderCopyCard('copy.news', _state.settings, NEWS_COPY_BLOCKS, { title: '📝 專欄列表頁文案', note: '對應 /news 列表頁的 hero、背景圖與介紹段；留空則維持預設。' })}
 
         <div class="card" style="padding:0;margin-bottom:12px;">
             <div style="display:flex;border-bottom:1px solid #2a2a2a;">

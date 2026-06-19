@@ -87,7 +87,9 @@ export interface IAward {
     category: string | null;
     org: string | null;
     level: AwardLevel;
+    work_type: string | null;   // 作品類型（劇情短片/紀錄短片/紀錄片/MV…）
     work_title: string | null;
+    work_year: number | null;   // 作品所屬年度（批次匯入 YYYY | 群組）
     recipient: string | null;
     cert_url: string | null;
     sort_order: number;

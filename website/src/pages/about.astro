@@ -29,6 +29,9 @@ const seo = buildBasicPageSeo(Astro, {
 });
 // 5 則完整 Review + AggregateRating（JSON-LD 過長會拖慢 Google parse；5 則是 Google 建議上限）
 seo.schemaData.push(...pageSchemas.testimonialBundle(testimonials, { includeReviews: 5 }));
+
+// admin 可編輯的頁面文案（copy.about.*）；未設則用以下硬寫 fallback。
+const cp = meta.copy?.about ?? {};
 ---
 
 <BaseLayout {...seo} meta={meta}>
@@ -37,7 +40,7 @@ seo.schemaData.push(...pageSchemas.testimonialBundle(testimonials, { includeRevi
         <div class="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 text-center">
             <p class="text-xs tracking-[0.4em] text-neutral-500 uppercase mb-3">About</p>
             <h1 class="text-4xl sm:text-6xl font-light tracking-tight mb-6">
-                <Tr zh="關於我們" en="About Us" />
+                <Tr zh={cp.hero_title_zh ?? "關於我們"} en={cp.hero_title_en ?? "About Us"} />
             </h1>
             <p class="text-xl text-neutral-700 tracking-wide font-light">
                 {meta.tagline}
@@ -63,19 +66,19 @@ seo.schemaData.push(...pageSchemas.testimonialBundle(testimonials, { includeRevi
                         )}
                     </>
                 ) : (
-                    /* Fallback：admin 尚未填 about.intro_* 時的預設文案 */
+                    /* Fallback：admin 尚未填 about.intro_* 時的預設故事文案（copy.about.story_p{1,2,3}_* 可編輯） */
                     <>
                         <p class="text-lg text-neutral-700 leading-relaxed tracking-wide mb-6">
-                            <Tr zh={`${meta.company_name_zh}（${meta.company_name_en}）專注於影像製作與行銷規劃。`}
-                                en={`${meta.company_name_en} focuses on video production and marketing planning.`} />
+                            <Tr zh={cp.story_p1_zh ?? `${meta.company_name_zh}（${meta.company_name_en}）專注於影像製作與行銷規劃。`}
+                                en={cp.story_p1_en ?? `${meta.company_name_en} focuses on video production and marketing planning.`} />
                         </p>
                         <p class="text-base text-neutral-500 leading-relaxed tracking-wide mb-6">
-                            <Tr zh="我們相信每一支影片都應該是一則有力的故事。從商業廣告到紀實短片，從活動紀錄到動畫設計，我們用影像陪伴品牌與人們訴說重要的事。"
-                                en="We believe every film should tell a compelling story. From commercials to documentaries, event coverage to motion graphics, we help brands and people share what matters." />
+                            <Tr zh={cp.story_p2_zh ?? "我們相信每一支影片都應該是一則有力的故事。從商業廣告到紀實短片，從活動紀錄到動畫設計，我們用影像陪伴品牌與人們訴說重要的事。"}
+                                en={cp.story_p2_en ?? "We believe every film should tell a compelling story. From commercials to documentaries, event coverage to motion graphics, we help brands and people share what matters."} />
                         </p>
                         <p class="text-base text-neutral-500 leading-relaxed tracking-wide">
-                            <Tr zh="位於台北中山，我們團隊結合了導演、製片、攝影、剪輯與動畫設計師，提供完整的一條龍影像服務。"
-                                en="Based in Zhongshan, Taipei, our team combines directors, producers, cinematographers, editors and motion designers to deliver end-to-end production." />
+                            <Tr zh={cp.story_p3_zh ?? "位於台北中山，我們團隊結合了導演、製片、攝影、剪輯與動畫設計師，提供完整的一條龍影像服務。"}
+                                en={cp.story_p3_en ?? "Based in Zhongshan, Taipei, our team combines directors, producers, cinematographers, editors and motion designers to deliver end-to-end production."} />
                         </p>
                     </>
                 )}
@@ -90,7 +93,7 @@ seo.schemaData.push(...pageSchemas.testimonialBundle(testimonials, { includeRevi
                 <div class="text-center mb-12">
                     <p class="text-xs tracking-[0.4em] text-neutral-500 uppercase mb-2">Team</p>
                     <h2 class="text-3xl font-light tracking-tight">
-                        <Tr zh="我們的團隊" en="Our Team" />
+                        <Tr zh={cp.team_heading_zh ?? "我們的團隊"} en={cp.team_heading_en ?? "Our Team"} />
                     </h2>
                 </div>
                 <div class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-6">
@@ -123,7 +126,7 @@ seo.schemaData.push(...pageSchemas.testimonialBundle(testimonials, { includeRevi
             <div class="grid grid-cols-1 md:grid-cols-2 gap-12">
                 <div>
                     <h3 class="text-xs tracking-[0.4em] uppercase text-neutral-500 mb-5">
-                        <Tr zh="聯絡資訊" en="Contact" />
+                        <Tr zh={cp.contact_heading_zh ?? "聯絡資訊"} en={cp.contact_heading_en ?? "Contact"} />
                     </h3>
                     <dl class="space-y-3 text-neutral-700">
                         {meta.address && (
@@ -161,7 +164,7 @@ seo.schemaData.push(...pageSchemas.testimonialBundle(testimonials, { includeRevi
                 <div class="flex items-center">
                     <a href="/contact"
                        class="inline-flex items-center gap-2 text-sm tracking-widest uppercase border border-neutral-900 px-8 py-3 hover:bg-neutral-900 hover:text-white transition-colors">
-                        <Tr zh="開始合作" en="Start a Project" />
+                        <Tr zh={cp.cta_button_zh ?? "開始合作"} en={cp.cta_button_en ?? "Start a Project"} />
                         <span>→</span>
                     </a>
                 </div>

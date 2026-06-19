@@ -23,7 +23,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from ._common import client_ip, public_session, rate_limit
 from core.schemas_website import ContactInquiryCreate
 from services.website import (
-    category_service, credit_service, inquiry_service, notify_service,
+    category_service, credit_service, inquiry_service, nav_service, notify_service,
     post_service, project_service, seo_service, service_service, settings_service,
 )
 
@@ -95,11 +95,25 @@ async def list_team(
 ):
     rate_limit(request, max_per_minute=60)
     try:
+        from sqlalchemy import func
         from db.models import CrmStaff
-        stmt = select(CrmStaff).where(CrmStaff.show_on_website.is_(True)).order_by(CrmStaff.id)
+        # 官網覆寫優先（website_*），空則 fallback 到 CRM 正本。回傳 key 與舊版一致
+        # （name/role/photo_url/bio）→ about.astro / ITeamMember 不需改。
+        # 排序：website_sort_order（NULL 視為 0）, id。
+        stmt = (
+            select(CrmStaff)
+            .where(CrmStaff.show_on_website.is_(True))
+            .order_by(func.coalesce(CrmStaff.website_sort_order, 0), CrmStaff.id)
+        )
         staff = list((await session.execute(stmt)).scalars())
         return {"items": [
-            {"id": s.id, "name": s.name, "role": s.role, "bio": s.bio, "photo_url": s.photo_url}
+            {
+                "id": s.id,
+                "name": s.name,
+                "role": s.website_title or s.role,
+                "bio": s.website_bio or s.bio,
+                "photo_url": s.website_photo_url or s.photo_url,
+            }
             for s in staff
         ]}
     except Exception as e:
@@ -115,6 +129,9 @@ async def get_meta(
     rate_limit(request, max_per_minute=60)
     meta = await settings_service.get_meta(session)
     meta["categories"] = await category_service.list_public_categories(session)
+    # 導覽選單（visible=true ORDER BY sort_order）— Header.astro 透過 meta.nav 讀，
+    # 省一次 build 期 round-trip。空 list → Header 用硬寫 7 筆 fallback。
+    meta["nav"] = await nav_service.list_nav(session, visible_only=True)
     return meta
 
 
@@ -141,6 +158,16 @@ async def list_public_awards(request: Request, session: AsyncSession = Depends(p
     """站級獎項紀錄（visible=true）— /portfolio 頁面頂部「Honors & Awards」用。"""
     rate_limit(request, max_per_minute=60)
     return {"items": await seo_service.list_awards(session, visible_only=True)}
+
+
+@router.get("/nav")
+async def list_public_nav(request: Request, session: AsyncSession = Depends(public_session)):
+    """頂部導覽選單（visible=true ORDER BY sort_order）— Header.astro fetch。
+
+    空 list → Header.astro fallback 到硬寫的 7 筆 navItems（對外網站零變化）。
+    """
+    rate_limit(request, max_per_minute=60)
+    return {"items": await nav_service.list_nav(session, visible_only=True)}
 
 
 @router.get("/credit_roles")

@@ -20,6 +20,7 @@ from .seo import (
 from .post import WebsitePost, WebsitePostCategory, WebsitePostCategoryLink
 from .credit_role import WebsiteCreditRole
 from .credit_template import WebsiteCreditTemplate
+from .nav_item import WebsiteNavItem
 
 __all__ = [
     "WebsiteCategory",
@@ -37,4 +38,5 @@ __all__ = [
     "WebsiteCreditRole",
     "WebsiteCreditTemplate",
     "WebsiteAward",
+    "WebsiteNavItem",
 ]

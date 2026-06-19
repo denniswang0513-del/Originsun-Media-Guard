@@ -51,6 +51,11 @@ _CRM_PROJECTS_COLUMNS: list[tuple[str, str]] = [
 # ── ALTER TABLE: crm_staff 擴充 ──
 _CRM_STAFF_COLUMNS: list[tuple[str, str]] = [
     ("show_on_website", "BOOLEAN DEFAULT FALSE"),
+    # Phase M: 官網團隊頁顯示覆寫（不動 CRM 正本 name/role/photo_url/bio；空 → fallback 正本）
+    ("website_title", "VARCHAR(128)"),       # 官網顯示職稱（空 → fallback role）
+    ("website_photo_url", "VARCHAR(512)"),   # 官網頭像（空 → fallback photo_url）
+    ("website_bio", "TEXT"),                 # 官網簡介（空 → fallback bio）
+    ("website_sort_order", "INTEGER DEFAULT 0"),  # 官網團隊頁排序
 ]
 
 # ── ALTER TABLE: crm_project_showcase 擴充（既有部署補欄）──
@@ -69,6 +74,13 @@ _WEBCAT_COLUMNS: list[tuple[str, str]] = [
 # ── ALTER TABLE: website_project_seo 擴充（既有部署補欄）──
 _WEBPROJSEO_COLUMNS: list[tuple[str, str]] = [
     ("canonical_url", "VARCHAR(500)"),
+]
+
+# ── ALTER TABLE: website_awards 擴充（film-centric rework 補欄）──
+# work_type = 作品類型純文字（劇情短片/紀錄短片…），work_year = 作品所屬年度（YYYY | 群組）。
+_WEBAWARD_COLUMNS: list[tuple[str, str]] = [
+    ("work_type", "VARCHAR(64)"),
+    ("work_year", "INTEGER"),
 ]
 
 # ── CREATE TABLE IF NOT EXISTS: 5 新表 ──
@@ -285,7 +297,20 @@ _CREATE_TABLES: list[str] = [
         updated_at TIMESTAMPTZ DEFAULT NOW()
     )
     """,
+    # 頂部導覽選單項目（可改名 / 排序 / 顯示隱藏）— admin「🧭 導覽選單」管理
+    """
+    CREATE TABLE IF NOT EXISTS website_nav_items (
+        id SERIAL PRIMARY KEY,
+        label_zh VARCHAR(100) NOT NULL,
+        label_en VARCHAR(100),
+        href VARCHAR(200) NOT NULL,
+        sort_order INTEGER NOT NULL DEFAULT 0,
+        visible BOOLEAN NOT NULL DEFAULT TRUE,
+        created_at TIMESTAMPTZ DEFAULT NOW()
+    )
+    """,
     # 站級獎項紀錄（公司榮譽，不綁特定作品 — work_title 是純文字）
+    # film-centric：work_type + work_year 把同一作品的多行獎項分組。
     """
     CREATE TABLE IF NOT EXISTS website_awards (
         id SERIAL PRIMARY KEY,
@@ -295,7 +320,9 @@ _CREATE_TABLES: list[str] = [
         category VARCHAR(200),
         org VARCHAR(200),
         level VARCHAR(20) NOT NULL DEFAULT '獲獎',
+        work_type VARCHAR(64),
         work_title VARCHAR(300),
+        work_year INTEGER,
         recipient VARCHAR(200),
         cert_url VARCHAR(500),
         sort_order INTEGER NOT NULL DEFAULT 0,
@@ -335,6 +362,8 @@ _CREATE_INDEXES: list[str] = [
     "CREATE UNIQUE INDEX IF NOT EXISTS idx_crmproj_pubnum ON crm_projects (public_number) WHERE public_number IS NOT NULL",
     # 演職員職位查詢：visible+sort
     "CREATE INDEX IF NOT EXISTS idx_credit_role_visible_sort ON website_credit_roles (visible, sort_order)",
+    # 頂部導覽：公開端 visible=true ORDER BY sort_order
+    "CREATE INDEX IF NOT EXISTS idx_webnav_visible_sort ON website_nav_items (visible, sort_order)",
 ]
 
 
@@ -553,6 +582,8 @@ async def run_website_migrations(session_factory: Callable) -> None:
           for c, t in _WEBCAT_COLUMNS],
         *[f"ALTER TABLE website_project_seo ADD COLUMN IF NOT EXISTS {c} {t}"
           for c, t in _WEBPROJSEO_COLUMNS],
+        *[f"ALTER TABLE website_awards ADD COLUMN IF NOT EXISTS {c} {t}"
+          for c, t in _WEBAWARD_COLUMNS],
         *_CREATE_INDEXES,
         # v1.10.121 修復 — 既有部署 templates 表無 UNIQUE constraint，先清重複再補
         _CLEANUP_TEMPLATE_DUPLICATES,

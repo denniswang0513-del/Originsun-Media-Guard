@@ -17,8 +17,13 @@ from services.website import rebuild_service, settings_service
 
 # 影響對外 HTML / 公開 endpoint 的 setting key 才要 mark_dirty 觸發 rebuild。
 # Notion token / 內部通知設定改了不需要重 build 對外網站。
+# - copy.*  頁面行銷文案覆寫（Phase 2 各頁 + Phase 3 footer/contact 表單欄位）
+# - forms.* 聯絡表單選項清單（Phase 3 service_types / budget_ranges）
+# - home.*  首頁 hero / showreel / stats / rating（admin「🏠 首頁設定」）
+# - portfolio.* /portfolio 頁 PDF 連結
 _PUBLIC_AFFECTING_PREFIXES = (
     "company.", "social.", "seo.", "about.", "turnstile.",
+    "copy.", "forms.", "home.", "portfolio.",
 )
 
 router = APIRouter(prefix="/api/website/admin", tags=["website-admin-settings"])

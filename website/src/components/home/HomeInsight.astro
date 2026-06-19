@@ -9,6 +9,12 @@ import SmartImage from "../ui/SmartImage.astro";
 import Tr from "../ui/Tr.astro";
 import { fetchPosts } from "../../lib/posts";
 
+interface Props {
+    /** admin 可編輯的首頁文案（copy.home.*）；空欄位則用硬寫 fallback。 */
+    copy?: Record<string, string>;
+}
+const { copy = {} } = Astro.props;
+
 const allPosts = await fetchPosts();
 const shown = allPosts.slice(0, 3);
 
@@ -24,9 +30,9 @@ function fmtDate(iso: string): string {
 
         <div class="flex items-end justify-between mb-14 flex-wrap gap-4">
             <div>
-                <p class="text-xs tracking-[0.4em] text-[#c9372c] uppercase mb-3">Insight</p>
+                <p class="text-xs tracking-[0.4em] text-[#c9372c] uppercase mb-3">{copy.insight_eyebrow ?? "Insight"}</p>
                 <h2 class="text-3xl sm:text-5xl font-bold tracking-tight text-neutral-900 leading-tight">
-                    <Tr zh="影像思考" en="Behind the Craft" />
+                    <Tr zh={copy.insight_title_zh ?? "影像思考"} en={copy.insight_title_en ?? "Behind the Craft"} />
                 </h2>
             </div>
             <a href="/news"

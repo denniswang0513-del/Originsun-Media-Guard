@@ -122,6 +122,42 @@ class ServiceUpdate(BaseModel):
 
 
 # ══════════════════════════════════════════════════════════
+# Nav Item（頂部導覽選單）
+# ══════════════════════════════════════════════════════════
+
+class NavItemPublicResponse(BaseModel):
+    label_zh: str
+    label_en: Optional[str] = None
+    href: str
+    sort_order: int = 0
+
+
+class NavItemResponse(BaseModel):
+    id: int
+    label_zh: str
+    label_en: Optional[str] = None
+    href: str
+    sort_order: int = 0
+    visible: bool = True
+
+
+class NavItemCreate(BaseModel):
+    label_zh: str = Field(..., min_length=1, max_length=100)
+    label_en: Optional[str] = Field(None, max_length=100)
+    href: str = Field(..., min_length=1, max_length=200)
+    sort_order: int = 0
+    visible: bool = True
+
+
+class NavItemUpdate(BaseModel):
+    label_zh: Optional[str] = Field(None, min_length=1, max_length=100)
+    label_en: Optional[str] = None
+    href: Optional[str] = Field(None, min_length=1, max_length=200)
+    sort_order: Optional[int] = None
+    visible: Optional[bool] = None
+
+
+# ══════════════════════════════════════════════════════════
 # Project (對外作品 — 從 crm_projects 的 public_* 欄位投影)
 # ══════════════════════════════════════════════════════════
 
@@ -315,6 +351,15 @@ class WebsiteMeta(BaseModel):
     ai_allow: bool = False
     # admin 自填的 llms.txt 內容；空則 /llms.txt 走自動生成
     llms_txt_body: str = ""
+    # 頁面行銷文案覆寫（copy.<page>.<block>_<lang>）。巢狀 dict：copy[page][block_lang]。
+    # 由 settings_service.get_meta 掃 copy.* key 組成；空則 Astro 各頁用硬寫 fallback。
+    # 屬性名用 copy_overrides 避免 shadow pydantic BaseModel.copy()；wire/JSON key 仍是 "copy"（alias）。
+    copy_overrides: dict[str, dict[str, str]] = Field(default_factory=dict, alias="copy")
+    # 頂部導覽選單（visible=true ORDER BY sort_order）。空則 Header.astro 用硬寫 7 筆 fallback。
+    nav: list[NavItemPublicResponse] = Field(default_factory=list)
+    # 表單選項清單（forms.contact.service_types / budget_ranges）。每項 {value,label_zh,label_en}；
+    # value 穩定不可變（後端 / CRM 存這個），只 label 可編。空則 ContactForm.astro 用硬寫 fallback。
+    forms: dict[str, dict[str, list[dict[str, str]]]] = Field(default_factory=dict)
 
 
 # ══════════════════════════════════════════════════════════
@@ -432,7 +477,9 @@ class WebsiteAwardResponse(BaseModel):
     category: Optional[str] = None
     org: Optional[str] = None
     level: AwardLevel = "獲獎"
+    work_type: Optional[str] = None
     work_title: Optional[str] = None
+    work_year: Optional[int] = None
     recipient: Optional[str] = None
     cert_url: Optional[str] = None
     sort_order: int = 0
@@ -446,7 +493,9 @@ class WebsiteAwardCreate(BaseModel):
     category: Optional[str] = Field(None, max_length=200)
     org: Optional[str] = Field(None, max_length=200)
     level: AwardLevel = "獲獎"
+    work_type: Optional[str] = Field(None, max_length=64)
     work_title: Optional[str] = Field(None, max_length=300)
+    work_year: Optional[int] = Field(None, ge=1900, le=2100)
     recipient: Optional[str] = Field(None, max_length=200)
     cert_url: Optional[str] = Field(None, max_length=500)
     sort_order: int = 0
@@ -460,11 +509,25 @@ class WebsiteAwardUpdate(BaseModel):
     category: Optional[str] = None
     org: Optional[str] = None
     level: Optional[AwardLevel] = None
+    work_type: Optional[str] = None
     work_title: Optional[str] = None
+    work_year: Optional[int] = Field(None, ge=1900, le=2100)
     recipient: Optional[str] = None
     cert_url: Optional[str] = None
     sort_order: Optional[int] = None
     visible: Optional[bool] = None
+
+
+class WebsiteAwardBulkImport(BaseModel):
+    """貼上整段「歷年作品（獎項）」純文字 → 解析成 film-centric 結構。
+
+    text 規則見 routers/website/admin_seo.py 的 _parse_awards_bulk。
+    dry_run=true（預設）只回 parsed 結構不寫 DB；false 才真的建 row。
+    now_year 供 runtime 無法呼叫 Date 時帶入（fallback 用）；空則用伺服器當年。
+    """
+    text: str = Field(..., min_length=1)
+    dry_run: bool = True
+    now_year: Optional[int] = Field(None, ge=1900, le=2100)
 
 
 # ══════════════════════════════════════════════════════════
@@ -828,3 +891,29 @@ class NotionSyncResult(BaseModel):
     posts_json_path: Optional[str] = None
     categories_json_path: Optional[str] = None
     rebuild_queued: bool = False
+
+
+# ══════════════════════════════════════════════════════════
+# Team (官網團隊頁顯示覆寫 — crm_staff 的 website_* 欄位)
+# ══════════════════════════════════════════════════════════
+# 正本 name/role/photo_url/bio 在 CRM「人力資源」，官網管理端**永不寫入**正本，
+# 只批次更新 show_on_website + website_*。see routers/website/admin_team.py
+
+
+class TeamOverrideItem(BaseModel):
+    """單筆團隊成員的官網顯示覆寫（不含正本欄位）。
+
+    id 為 crm_staff.id（String）。website_* 欄位皆 exclude_unset 友善：
+    沒帶的欄位 admin_team router 不會 setattr，已有值保持不變。
+    """
+    id: str
+    show_on_website: Optional[bool] = None
+    website_title: Optional[str] = Field(None, max_length=128)
+    website_photo_url: Optional[str] = Field(None, max_length=512)
+    website_bio: Optional[str] = None
+    website_sort_order: Optional[int] = None
+
+
+class TeamOverrideBatch(BaseModel):
+    """PUT /api/website/admin/team body — 批次更新。"""
+    items: list[TeamOverrideItem] = Field(default_factory=list)

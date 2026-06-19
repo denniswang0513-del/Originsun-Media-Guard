@@ -436,7 +436,9 @@ class QuotationTemplatePayload(BaseModel):
 
 
 class StaffPayload(BaseModel):
-    name: str
+    # name 設為 Optional 以支援「部分更新」(PUT 只送變動欄位，如官網呈現 section 只送
+    # show_on_website + website_*)。create_staff 端會明確檢查 name 必填，不靠 schema 強制。
+    name: Optional[str] = None
     role: str = ""
     daily_rate: int = 0
     hourly_rate: int = 0
@@ -449,6 +451,14 @@ class StaffPayload(BaseModel):
     portfolio_url: str = ""
     status: str = "在職"
     notes: str = ""
+    # 官網呈現覆寫（與「官網管理 › 關於我們」團隊卡同步寫同一批 crm_staff 欄位）。
+    # 全為 Optional/None → 配合 update_staff 的 model_dump(exclude_unset=True)，
+    # 未送的欄位不會被寫入，避免任一側部分更新覆蓋另一側的覆寫值。
+    show_on_website: Optional[bool] = None
+    website_title: Optional[str] = None
+    website_photo_url: Optional[str] = None
+    website_bio: Optional[str] = None
+    website_sort_order: Optional[int] = None
 
 
 class StaffQuickAddPayload(BaseModel):

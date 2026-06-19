@@ -41,7 +41,8 @@ try:
                            CrmInvoice, CrmPaymentRequest, CrmCashEntry,
                            CrmProjectCostLine, CrmCostLineTemplate,
                            CrmProjectCostGroup,
-                           CrmProjectShowcase)
+                           CrmProjectShowcase,
+                           WEBSITE_TEAM_OVERRIDE_FIELDS)
     _HAS_DB = True
 except ImportError:
     _HAS_DB = False
@@ -1047,6 +1048,12 @@ def _to_staff_dict(s) -> dict:
         "resume_visible": bool(s.resume_visible) if s.resume_visible is not None else False,
         "edit_token": s.edit_token or "",
         "resume_editable": bool(s.resume_editable) if s.resume_editable is not None else True,
+        # 官網呈現覆寫（與「官網管理 › 關於我們」團隊卡同步，寫同一批 crm_staff 欄位）
+        "show_on_website": bool(s.show_on_website) if s.show_on_website is not None else False,
+        "website_title": s.website_title or "",
+        "website_photo_url": s.website_photo_url or "",
+        "website_bio": s.website_bio or "",
+        "website_sort_order": s.website_sort_order if s.website_sort_order is not None else 0,
         "created_via": s.created_via or STAFF_CREATED_VIA_ADMIN,
         "created_for_project_id": s.created_for_project_id,
         "created_at": s.created_at.isoformat() if s.created_at else None,
@@ -1087,9 +1094,15 @@ async def list_staff(q: str = Query(""), role: str = Query(""), status: str = Qu
 async def create_staff(req: StaffPayload, request: Request):
     _check_auth(request)
     _require_db()
+    # name 在 schema 已放寬為 Optional（讓 PUT 可部分更新）；新增時這裡明確要求。
+    if not (req.name or "").strip():
+        raise HTTPException(status_code=422, detail="姓名為必填")
     factory = await _get_factory()
     now = _now()
-    s = CrmStaff(id=uuid.uuid4().hex, created_at=now, updated_at=now, **req.model_dump())
+    # exclude_unset：未送的官網覆寫欄位（Optional=None）交給 column default（False/0），
+    # 不存 explicit None；正本欄位有自己的 schema 預設值，照常帶入。
+    s = CrmStaff(id=uuid.uuid4().hex, created_at=now, updated_at=now,
+                 **req.model_dump(exclude_unset=True))
     async with factory() as session:
         session.add(s)
         await session.commit()
@@ -1117,12 +1130,27 @@ async def update_staff(staff_id: str, req: StaffPayload, request: Request):
         s = await session.get(CrmStaff, staff_id)
         if not s:
             raise HTTPException(status_code=404, detail="找不到此人員")
-        for k, v in req.model_dump().items():
+        # exclude_unset：只寫前端「實際送出」的欄位。前端的 inline 編輯 / 新增 modal /
+        # 官網呈現 section 各自只送自己那組欄位 — 部分更新時，沒送到的欄位（含正本
+        # name/role/rates 與官網 website_* 覆寫）一律保持原值，不會被 None 蓋掉。
+        patch = req.model_dump(exclude_unset=True)
+        for k, v in patch.items():
             setattr(s, k, v)
         s.updated_at = _now()
         await session.commit()
         await session.refresh(s)
-    return {"status": "ok", "staff": _to_staff_dict(s)}
+        result = _to_staff_dict(s)
+    # 若這次更新動到任何官網呈現欄位 → 觸發官網 rebuild（與官網管理端團隊卡一致）。
+    # 欄位集引用 db.models 的單一定義（與 admin_team 白名單同源）。
+    # lazy import + 寬鬆 except：純 agent 環境沒有 services/website 或 DB 不可用時，
+    # CRM 編輯絕不可因此失敗。
+    if set(WEBSITE_TEAM_OVERRIDE_FIELDS) & patch.keys():
+        try:
+            from services.website import rebuild_service
+            await rebuild_service.mark_dirty()
+        except Exception:
+            pass
+    return {"status": "ok", "staff": result}
 
 
 @router.delete("/staff/{staff_id}")

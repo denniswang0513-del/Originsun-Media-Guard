@@ -121,7 +121,9 @@ def _award_to_dict(o: WebsiteAward) -> dict[str, Any]:
         "category": o.category,
         "org": o.org,
         "level": o.level,
+        "work_type": o.work_type,
         "work_title": o.work_title,
+        "work_year": o.work_year,
         "recipient": o.recipient,
         "cert_url": o.cert_url,
         "sort_order": o.sort_order,
@@ -143,6 +145,139 @@ async def update_award(session, item_id, data):
 
 async def delete_award(session, item_id):
     return await _crud.delete_item(session, WebsiteAward, item_id)
+
+
+# ── Award 批次匯入（貼整段「歷年作品（獎項）」純文字） ──
+import re as _re
+
+# 年度群組標頭：`2026 |`（後面可有空白）
+_AWARD_YEAR_HEADER = _re.compile(r"^\s*(\d{4})\s*\|")
+# 新作品行的啟發式：（可空的短類型前綴，≤8 字）+《標題》+ 後面沒有實質內容。
+# 例：`劇情短片《自主揮棒》`、`紀錄片《京戲啟是路》 `（trailing space OK）、`《回家的路》`。
+# 反例（仍是獎項行）：`衛福部《看不見的傷》影展佳作` — 《》前面是長機構名、後面還有字。
+_AWARD_FILM_LINE = _re.compile(r"^\s*\S{0,8}《([^》]+)》\s*$")
+# 取作品行《》前的類型字（可空）
+_AWARD_FILM_TYPE = _re.compile(r"^\s*(\S{0,8})《")
+# 行首 4 位年份（獎項行用來決定該行 year）
+_AWARD_LINE_YEAR = _re.compile(r"^\s*(\d{4})")
+
+
+def parse_awards_bulk(text: str, now_year: int) -> dict[str, Any]:
+    """把整段「歷年作品（獎項）」純文字解析成 film-centric 結構（純函式，不碰 DB）。
+
+    規則：
+      - `^\\s*(\\d{4})\\s*\\|`     → 設定目前群組年度 work_year（不產 row）。
+      - 符合 _AWARD_FILM_LINE   → 開新作品：work_type = 《前的類型字（trim），
+                                  work_title = 《》內文字，work_year = 目前群組年度。
+      - 其他非空行              → 目前作品的一行獎項：name_zh = 整行（trim verbatim）；
+                                  year = 行首 \\d{4}，否則 work_year，否則 now_year；
+                                  level 一律預設 "獲獎"（不分類）；sort_order 作品內遞增。
+      - 空行                    → 跳過。
+      - 任何作品出現前的孤兒獎項行 → 跳過 + 在 warnings 記一筆。
+
+    回傳：{works:[{work_type, work_title, work_year, lines:[{year, name_zh, level,
+    sort_order}]}], total_lines, total_works, warnings}
+    """
+    works: list[dict[str, Any]] = []
+    warnings: list[str] = []
+    cur_work_year: Optional[int] = None
+    cur_film: Optional[dict[str, Any]] = None
+    total_lines = 0
+
+    for raw in (text or "").splitlines():
+        line = raw.strip()
+        if not line:
+            continue
+
+        m_year = _AWARD_YEAR_HEADER.match(raw)
+        if m_year:
+            cur_work_year = int(m_year.group(1))
+            continue
+
+        m_film = _AWARD_FILM_LINE.match(raw)
+        if m_film:
+            title = m_film.group(1).strip()
+            type_m = _AWARD_FILM_TYPE.match(raw)
+            work_type = (type_m.group(1).strip() if type_m else "") or None
+            cur_film = {
+                "work_type": work_type,
+                "work_title": title,
+                "work_year": cur_work_year,
+                "lines": [],
+            }
+            works.append(cur_film)
+            continue
+
+        # 一般獎項行
+        if cur_film is None:
+            warnings.append(f"略過孤兒獎項行（出現在任何作品之前）：{line}")
+            continue
+
+        m_ly = _AWARD_LINE_YEAR.match(raw)
+        if m_ly:
+            year = int(m_ly.group(1))
+        elif cur_film.get("work_year"):
+            year = int(cur_film["work_year"])
+        else:
+            year = now_year
+        cur_film["lines"].append({
+            "year": year,
+            "name_zh": line,
+            "level": "獲獎",
+            "sort_order": len(cur_film["lines"]),
+        })
+        total_lines += 1
+
+    # 作品無任何獎項行 → 提醒（不擋）
+    for w in works:
+        if not w["lines"]:
+            warnings.append(f"作品《{w['work_title']}》沒有任何獎項行")
+
+    return {
+        "works": works,
+        "total_works": len(works),
+        "total_lines": total_lines,
+        "warnings": warnings,
+    }
+
+
+async def bulk_import_awards(session, text: str, now_year: int, dry_run: bool = True) -> dict[str, Any]:
+    """解析 → （dry_run=False 時）建立 WebsiteAward rows。
+
+    dry_run=True：回 {dry_run, works, total_works, total_lines, warnings}，不寫 DB。
+    dry_run=False：建 row 後回 {dry_run, created, total_works, warnings}。
+      - sort_order：跨作品全域遞增（作品出現順序 → 同作品內行順序）→ 公開端
+        ORDER BY sort_order 即可保留貼上順序。
+      - 每行一筆 row，共用 work_type / work_title / work_year。
+    """
+    parsed = parse_awards_bulk(text, now_year)
+    if dry_run:
+        return {"dry_run": True, **parsed}
+
+    created = 0
+    global_sort = 0
+    for w in parsed["works"]:
+        for ln in w["lines"]:
+            obj = WebsiteAward(
+                name_zh=ln["name_zh"][:200],
+                year=ln["year"],
+                level=ln.get("level") or "獲獎",
+                work_type=w.get("work_type"),
+                work_title=w.get("work_title"),
+                work_year=w.get("work_year"),
+                sort_order=global_sort,
+                visible=True,
+            )
+            session.add(obj)
+            created += 1
+            global_sort += 1
+    await session.commit()
+    return {
+        "dry_run": False,
+        "created": created,
+        "total_works": parsed["total_works"],
+        "warnings": parsed["warnings"],
+    }
 
 
 # ══════════════════════════════════════════════════════════

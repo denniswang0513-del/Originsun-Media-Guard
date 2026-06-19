@@ -61,7 +61,7 @@ function renderList() {
     }
     body.innerHTML = _sorter.sorted(_staff).map(s => `
         <div class="crm-row${s.id === _selectedId ? ' selected' : ''}" onclick="window._staffSelect('${s.id}')">
-            <div class="crm-row-name">${_esc(s.name)}</div>
+            <div class="crm-row-name">${s.show_on_website ? '<span title="顯示於官網團隊頁" style="margin-right:4px;">🌐</span>' : ''}${_esc(s.name)}</div>
             <div class="crm-row-role">${_esc(s.role)}</div>
             <div class="crm-row-status">${_sBadge(s.status)}</div>
             <div class="crm-row-phone">${_esc(s.phone)}</div>
@@ -111,7 +111,10 @@ function renderDetail(s) {
                 <div class="crm-info-box-sub">請補完聯絡方式、勞報資料以利日後派工</div>
             </div>
         ` : ''}
+        ${_websiteSectionHtml(s)}
     `;
+
+    _wireWebsiteSection(s);
 
     const actions = document.getElementById('staff-bar-actions');
     if (actions) {
@@ -145,6 +148,121 @@ function renderDetail(s) {
     });
 
     _loadStaffProjects(s.id);
+}
+
+// ── 官網呈現（與「官網管理 › 關於我們」團隊卡同步） ─────────────────
+// 寫入同一批 crm_staff 欄位（show_on_website + website_*）。獨立 section-save 按鈕，
+// 只送這 5 個欄位 → 配合後端 model_dump(exclude_unset=True)，絕不動到正本欄位。
+
+function _websiteSectionHtml(s) {
+    const on = !!s.show_on_website;
+    return `
+        <div class="staff-section-title" style="margin-top:18px;display:flex;align-items:center;gap:8px;">
+            🌐 官網呈現
+            <span id="staff-web-badge" class="crm-badge ${on ? 'crm-staff-badge-在職' : ''}" style="${on ? '' : 'background:#3a3a3a;color:#aaa;'}">
+                ${on ? '顯示於官網 ✓' : '未顯示 ✗'}
+            </span>
+        </div>
+        <div class="crm-detail-prop">
+            <div class="crm-prop-label">顯示於官網</div>
+            <div class="crm-prop-value-edit">
+                <label class="crm-checkbox-item" style="display:inline-flex;align-items:center;gap:6px;cursor:pointer;">
+                    <input type="checkbox" id="staff-web-show"${on ? ' checked' : ''}>
+                    <span>出現在官網「關於我們」團隊頁</span>
+                </label>
+            </div>
+        </div>
+        <div class="crm-detail-prop">
+            <div class="crm-prop-label">官網職稱</div>
+            <div class="crm-prop-value-edit">
+                <input type="text" class="crm-input" id="staff-web-title"
+                    value="${_esc(s.website_title || '')}" placeholder="${_esc(s.role || '（沿用職能）')}">
+            </div>
+        </div>
+        <div class="crm-detail-prop">
+            <div class="crm-prop-label">官網頭像 URL</div>
+            <div class="crm-prop-value-edit">
+                <input type="text" class="crm-input" id="staff-web-photo"
+                    value="${_esc(s.website_photo_url || '')}" placeholder="${_esc(s.photo_url || '（沿用簡歷照片）')}">
+            </div>
+        </div>
+        <div class="crm-detail-prop">
+            <div class="crm-prop-label">官網簡介</div>
+            <div class="crm-prop-value-edit">
+                <textarea class="crm-input crm-textarea" id="staff-web-bio" rows="3"
+                    placeholder="${_esc(s.bio || '（沿用自我介紹）')}">${_esc(s.website_bio || '')}</textarea>
+            </div>
+        </div>
+        <div class="crm-detail-prop">
+            <div class="crm-prop-label">官網排序</div>
+            <div class="crm-prop-value-edit">
+                <input type="number" class="crm-input" id="staff-web-sort"
+                    value="${s.website_sort_order ?? 0}" min="0" style="max-width:120px;">
+            </div>
+        </div>
+        <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-top:6px;">
+            <button class="crm-btn crm-btn-primary crm-btn-sm" id="staff-web-save">儲存官網呈現</button>
+            <a href="#" id="staff-web-jump" class="crm-muted" style="font-size:12px;color:#3b82f6;text-decoration:none;">
+                前往「官網管理 › 關於我們」團隊編輯 →
+            </a>
+        </div>
+        <div class="crm-info-box-sub" style="margin-top:6px;color:#888;font-size:11px;">
+            與「官網管理 › 關於我們」團隊卡同步；空欄位＝沿用正本（職能 / 照片 / 自我介紹）。儲存後官網會自動重新發布。
+        </div>
+    `;
+}
+
+function _wireWebsiteSection(s) {
+    const showEl = document.getElementById('staff-web-show');
+    const badge = document.getElementById('staff-web-badge');
+    if (showEl && badge) {
+        showEl.addEventListener('change', () => {
+            const on = showEl.checked;
+            badge.textContent = on ? '顯示於官網 ✓' : '未顯示 ✗';
+            badge.className = 'crm-badge' + (on ? ' crm-staff-badge-在職' : '');
+            badge.style.cssText = on ? '' : 'background:#3a3a3a;color:#aaa;';
+        });
+    }
+
+    const saveBtn = document.getElementById('staff-web-save');
+    if (saveBtn) {
+        saveBtn.addEventListener('click', async () => {
+            const payload = {
+                show_on_website: document.getElementById('staff-web-show').checked,
+                website_title: document.getElementById('staff-web-title').value.trim(),
+                website_photo_url: document.getElementById('staff-web-photo').value.trim(),
+                website_bio: document.getElementById('staff-web-bio').value.trim(),
+                website_sort_order: parseInt(document.getElementById('staff-web-sort').value, 10) || 0,
+            };
+            saveBtn.disabled = true; saveBtn.textContent = '儲存中...';
+            try {
+                // PUT 已回傳更新後的完整 staff（= GET /staff/{id} 同一份），免再 GET 一次。
+                const resp = await _fetch('/staff/' + s.id, { method: 'PUT', body: JSON.stringify(payload) });
+                renderDetail(resp.staff);   // 重繪詳情（badge / placeholder 同步）
+                await loadStaff();          // 重繪列表（🌐 indicator 同步）
+            } catch (e) {
+                alert('儲存失敗: ' + e.message);
+                saveBtn.disabled = false; saveBtn.textContent = '儲存官網呈現';
+            }
+        });
+    }
+
+    const jump = document.getElementById('staff-web-jump');
+    if (jump) {
+        jump.addEventListener('click', (e) => {
+            e.preventDefault();
+            try {
+                if (typeof window.switchTab === 'function') window.switchTab('tab_website');
+                // 切到官網 Tab 後再切「關於我們」子視圖；給 initWebsiteTab 一點時間掛載
+                const go = () => {
+                    if (typeof window.websiteSwitchSubview === 'function') {
+                        window.websiteSwitchSubview('about');
+                    }
+                };
+                setTimeout(go, 150);
+            } catch (_) { /* 跳轉失敗不致命，section 本身已可直接編輯 */ }
+        });
+    }
 }
 
 async function _loadStaffProjects(staffId) {

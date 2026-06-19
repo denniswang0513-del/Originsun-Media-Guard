@@ -18,8 +18,11 @@ const [meta, posts, categories] = await Promise.all([
     fetchCategories(),
 ]);
 
-// Hero 背景圖：用 placeholder 直到 admin 可在 settings 設 news.hero_image
-const heroBgUrl = placeholderImage("news_hero_studio", 2400, 900);
+// admin 可編輯的頁面文案（copy.news.*）；未設則用以下硬寫 fallback。
+const cp = meta.copy?.news ?? {};
+
+// Hero 背景圖：admin 可在「📝 頁面文案」設 copy.news.hero_image（URL/路徑）；空則 placeholder。
+const heroBgUrl = cp.hero_image || placeholderImage("news_hero_studio", 2400, 900);
 
 const seo = buildBasicPageSeo(Astro, {
     title: "影像專欄 Insight",
@@ -37,9 +40,9 @@ const seo = buildBasicPageSeo(Astro, {
              class="absolute inset-0 w-full h-full object-cover opacity-60" />
         <div class="absolute inset-0 bg-gradient-to-b from-black/40 via-black/30 to-black/40"></div>
         <div class="relative z-10 h-full flex flex-col items-center justify-center text-center pt-16 px-4">
-            <p class="text-xs tracking-[0.5em] text-white/80 uppercase mb-5">Insight</p>
+            <p class="text-xs tracking-[0.5em] text-white/80 uppercase mb-5">{cp.hero_eyebrow ?? "Insight"}</p>
             <h1 class="text-4xl sm:text-6xl font-bold tracking-wider text-white">
-                <Tr zh="影像專欄" en="Insight" />
+                <Tr zh={cp.hero_title_zh ?? "影像專欄"} en={cp.hero_title_en ?? "Insight"} />
             </h1>
         </div>
     </section>
@@ -48,8 +51,8 @@ const seo = buildBasicPageSeo(Astro, {
     <section class="bg-white pt-16 pb-10">
         <div class="max-w-3xl mx-auto px-4 sm:px-6 lg:px-8">
             <p class="text-base text-neutral-600 leading-[1.85] tracking-wide text-center">
-                <Tr zh="源日影像專欄內容涵蓋影像製作的常見流程，並深入解析各階段的專業技術。希望透過具體案例分享，將實際經驗轉化為實用建議，幫助讀者面對各種影像挑戰時，擁有更全面的認識與應對策略。"
-                    en="Our Insight column covers every stage of video production with in-depth technical analysis. Through real case studies, we turn hands-on experience into practical advice — helping you tackle video challenges with broader perspective and better strategy." />
+                <Tr zh={cp.intro_zh ?? "源日影像專欄內容涵蓋影像製作的常見流程，並深入解析各階段的專業技術。希望透過具體案例分享，將實際經驗轉化為實用建議，幫助讀者面對各種影像挑戰時，擁有更全面的認識與應對策略。"}
+                    en={cp.intro_en ?? "Our Insight column covers every stage of video production with in-depth technical analysis. Through real case studies, we turn hands-on experience into practical advice — helping you tackle video challenges with broader perspective and better strategy."} />
             </p>
         </div>
     </section>

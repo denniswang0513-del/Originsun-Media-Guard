@@ -17,10 +17,6 @@ import Tr from "../components/ui/Tr.astro";
 import { fetchMeta, fetchAllWorksCached, fetchAwards } from "../lib/crm-client";
 import { buildBasicPageSeo, breadcrumb2 } from "../lib/seo";
 import type { IPublicProject } from "../types/project";
-import type { AwardLevel } from "../types/seo";
-
-const AWARD_WIN: AwardLevel = "獲獎";
-const AWARD_NOMINEE: AwardLevel = "入圍";
 
 const [meta, allWorks, awards] = await Promise.all([
     fetchMeta(),
@@ -48,38 +44,53 @@ function groupByYear(works: IPublicProject[]): Array<{ year: number | null; work
 const years = groupByYear(allWorks);
 const totalCount = allWorks.length;
 
-let winCount = 0, nomCount = 0;
-for (const a of awards) {
-    if (a.level === AWARD_WIN) winCount++;
-    else if (a.level === AWARD_NOMINEE) nomCount++;
-}
 const hasAwards = awards.length > 0;
 
-// 依作品分組：同一個 work_title 的多個獎項合併成一組。
+// 依「作品」分組：同一 work_title + work_type + work_year 的多行獎項合併成一部作品。
 // 無 work_title 的獎項各自成組（key 用唯一 id 避免互相併入）。
-type AwardGroup = { work: string; items: typeof awards };
+type AwardGroup = {
+    workType: string;
+    workTitle: string;
+    workYear: number | null;
+    items: typeof awards;
+};
 const _awardGroups = new Map<string, AwardGroup>();
 for (const a of awards) {
-    const work = (a.work_title || "").trim();
-    const key = work || `__solo_${a.id}`;
-    if (!_awardGroups.has(key)) _awardGroups.set(key, { work, items: [] });
+    const workTitle = (a.work_title || "").trim();
+    const workType = (a.work_type || "").trim();
+    const workYear = a.work_year ?? null;
+    // 同名同類同年才併組；無標題者各自成組
+    const key = workTitle ? `${workTitle}|${workType}|${workYear ?? ""}` : `__solo_${a.id}`;
+    if (!_awardGroups.has(key)) {
+        _awardGroups.set(key, { workType, workTitle, workYear, items: [] });
+    }
     _awardGroups.get(key)!.items.push(a);
 }
-// 組內依年份新→舊；組間依該作品最新得獎年份新→舊
+// 組內依 sort_order（保留貼上順序），再 fallback 年份新→舊。
+// 組間依 work_year 新→舊（無 work_year 時 fallback 該作品最大獎項年份）。
+function groupYearKey(g: AwardGroup): number {
+    if (g.workYear != null) return g.workYear;
+    const ys = g.items.map(i => i.year).filter(y => typeof y === "number");
+    return ys.length ? Math.max(...ys) : 0;
+}
 const awardGroups = Array.from(_awardGroups.values())
     .map(g => ({
         ...g,
-        items: [...g.items].sort((a, b) => b.year - a.year || a.sort_order - b.sort_order),
+        items: [...g.items].sort((a, b) => a.sort_order - b.sort_order || b.year - a.year),
     }))
-    .sort((a, b) => Math.max(...b.items.map(i => i.year)) - Math.max(...a.items.map(i => i.year)));
-const honorsSubtitleZh = hasAwards ? ` · ${winCount} 項獲獎・${nomCount} 項入圍` : "";
-const honorsSubtitleEn = hasAwards ? ` · ${winCount} won / ${nomCount} nominated` : "";
+    .sort((a, b) => groupYearKey(b) - groupYearKey(a));
+
+// 作品標題顯示：類型 +《標題》（類型可空）
+function filmHeading(g: AwardGroup): string {
+    const t = g.workTitle ? `《${g.workTitle}》` : "—";
+    return g.workType ? `${g.workType}${t}` : t;
+}
 
 const pdfUrl = (meta.portfolio_pdf_url || "").trim();
 
 const seo = buildBasicPageSeo(Astro, {
     title: "歷年作品 Portfolio",
-    description: `${meta.company_name_zh}歷年作品列表 — 共 ${totalCount} 件影像製作作品按年份排序${honorsSubtitleZh}，含商業廣告、紀錄片、活動紀錄、動畫設計。`,
+    description: `${meta.company_name_zh}歷年作品列表 — 共 ${totalCount} 件影像製作作品按年份排序，含商業廣告、紀錄片、活動紀錄、動畫設計。`,
     breadcrumbs: breadcrumb2("歷年作品", "/portfolio"),
 });
 ---
@@ -96,8 +107,8 @@ const seo = buildBasicPageSeo(Astro, {
                         <Tr zh="歷年作品" en="Our Portfolio" />
                     </h1>
                     <p class="text-neutral-600 tracking-wide">
-                        <Tr zh={`${meta.company_name_zh} 歷年製作一覽（共 ${totalCount} 件${honorsSubtitleZh}）`}
-                            en={`${meta.company_name_en} — ${totalCount} projects${honorsSubtitleEn}`} />
+                        <Tr zh={`${meta.company_name_zh} 歷年製作一覽（共 ${totalCount} 件）`}
+                            en={`${meta.company_name_en} — ${totalCount} projects`} />
                     </p>
                 </div>
                 {pdfUrl && (
@@ -129,22 +140,14 @@ const seo = buildBasicPageSeo(Astro, {
                         {awardGroups.map(g => (
                             <tr class="align-top">
                                 <td class="py-4 pr-4 sm:pr-6 text-neutral-900 font-medium tracking-wide whitespace-nowrap">
-                                    {g.work || "—"}
+                                    {filmHeading(g)}
                                 </td>
                                 <td class="py-4">
-                                    {g.items.map(a => {
-                                        const isWin = a.level === AWARD_WIN;
-                                        const awardText = [a.name_zh, a.category].filter(Boolean).join(" · ");
-                                        return (
-                                            <div class="flex items-baseline gap-3 sm:gap-5 py-1 first:pt-0 last:pb-0">
-                                                <span class="text-[#c9372c] font-medium tabular-nums whitespace-nowrap">{a.year}</span>
-                                                <span class="flex-1 text-sm sm:text-[15px] text-neutral-600 tracking-wide leading-relaxed">{awardText}</span>
-                                                <span class={`whitespace-nowrap text-sm tracking-wide ${
-                                                    isWin ? "text-[#c8a45c] font-medium" : "text-neutral-400"
-                                                }`}>{a.level}</span>
-                                            </div>
-                                        );
-                                    })}
+                                    {g.items.map(a => (
+                                        <div class="py-1 first:pt-0 last:pb-0">
+                                            <span class="text-sm sm:text-[15px] text-neutral-600 tracking-wide leading-relaxed">{a.name_zh}</span>
+                                        </div>
+                                    ))}
                                 </td>
                             </tr>
                         ))}

@@ -1,5 +1,5 @@
 {
-  "version": "1.10.139",
-  "build_date": "2026-06-18",
-  "notes": "非阻塞 agent 健康輪詢(httpx) + deploy 乾淨重啟(根治 wedge + 修重啟崩潰)"
+  "version": "1.10.160",
+  "build_date": "2026-06-20",
+  "notes": "feat(website): 獎項改以作品為單位(年份→類型片名→獎項行)+批次貼上匯入；/portfolio 顯示類型、移除獲獎/入圍統計"
 }
