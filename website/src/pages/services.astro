@@ -66,7 +66,7 @@ const cp = meta.copy?.services ?? {};
                                     )}
                                 </div>
                                 {cat && (
-                                    <a href={`/works?category=${cat.slug}`}
+                                    <a href={`/works/category/${cat.slug}`}
                                        class="md:self-center group flex flex-col items-start md:items-end whitespace-nowrap"
                                        aria-label={`看 ${cat.count} 支${cat.name_zh}作品`}>
                                         <span class="text-4xl font-light text-neutral-900 leading-none group-hover:text-[#c9372c] transition-colors">{cat.count}</span>

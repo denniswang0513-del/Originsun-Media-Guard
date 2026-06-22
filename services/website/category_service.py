@@ -32,6 +32,7 @@ def _to_public_dict(c: WebsiteCategory, count: int = 0) -> dict:
         "slug": c.slug,
         "name_zh": c.name_zh,
         "name_en": c.name_en,
+        "description": c.description,
         "count": count,
         "kind": c.kind or "category",
     }

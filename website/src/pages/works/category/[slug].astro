@@ -1,0 +1,66 @@
+---
+/**
+ * works/category/[slug].astro — 分類作品著陸頁（/works/category/<slug>）
+ * 每個製作分類一個獨立靜態頁：keyword-rich 分類描述 + 該分類作品 + 專屬 SEO，
+ * 讓長尾搜尋（如「形象影片製作公司」「企業紀錄片」「活動錄影」「Motion Graphics」）
+ * 有可被索引的 URL 落腳。CTA（服務卡 / 首頁）連到這裡。
+ */
+import BaseLayout from "../../../layouts/BaseLayout.astro";
+import WorkCard from "../../../components/works/WorkCard.astro";
+import Tr from "../../../components/ui/Tr.astro";
+import type { ICategory } from "../../../types/category";
+import { fetchMeta, fetchCategories, fetchAllWorksCached } from "../../../lib/crm-client";
+import { buildBasicPageSeo, breadcrumb3 } from "../../../lib/seo";
+
+export async function getStaticPaths() {
+    const categories = await fetchCategories();
+    return categories
+        .filter(c => (c.kind ?? "category") === "category")
+        .map(c => ({ params: { slug: c.slug }, props: { category: c } }));
+}
+
+interface Props { category: ICategory }
+const { category } = Astro.props;
+const [meta, allWorks] = await Promise.all([fetchMeta(), fetchAllWorksCached()]);
+const works = allWorks.filter(w => (w.categories || []).includes(category.slug));
+
+// SEO 描述：優先用 admin 填的分類描述（埋長尾關鍵字）；沒填則動態 fallback（確保 30-200 字）。
+const desc = (category.description && category.description.trim().length >= 30)
+    ? category.description.trim()
+    : `${meta.company_name_zh}${category.name_zh}作品集，共 ${works.length} 件作品。台北中山專業影像製作團隊，提供${category.name_zh}從企劃、拍攝到後期的一條龍服務。`;
+const seo = buildBasicPageSeo(Astro, {
+    title: `${category.name_zh}作品`,
+    description: desc.slice(0, 200),
+    breadcrumbs: breadcrumb3("作品集", "/works", category.name_zh, `/works/category/${category.slug}`),
+});
+---
+
+<BaseLayout {...seo} meta={meta}>
+    <section class="pt-32 pb-20 bg-white">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+            <div class="max-w-3xl mx-auto text-center mb-14">
+                <p class="text-xs tracking-[0.4em] text-neutral-500 uppercase mb-3">Portfolio</p>
+                <h1 class="text-4xl sm:text-5xl font-light tracking-tight text-neutral-900 mb-6">{category.name_zh}</h1>
+                {category.description && (
+                    <p class="text-neutral-600 leading-loose tracking-wide">{category.description}</p>
+                )}
+                <p class="mt-5 text-sm text-neutral-400">{works.length} <Tr zh="件作品" en="works" /></p>
+            </div>
+
+            {works.length > 0 ? (
+                <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-8 sm:gap-10">
+                    {works.map(work => <WorkCard work={work} />)}
+                </div>
+            ) : (
+                <div class="py-20 text-center text-neutral-500"><Tr zh="此分類暫無作品" en="No works yet" /></div>
+            )}
+
+            <div class="mt-16 text-center">
+                <a href="/works"
+                   class="inline-flex items-center gap-2 text-xs tracking-widest uppercase text-neutral-500 hover:text-[#c9372c] transition-colors">
+                    <Tr zh="看全部作品" en="All works" /><span>→</span>
+                </a>
+            </div>
+        </div>
+    </section>
+</BaseLayout>

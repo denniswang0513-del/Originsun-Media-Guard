@@ -60,7 +60,7 @@ const cards = services.slice(0, 4).map(s => {
         <!-- 四個服務卡（每卡一個編號 + 名字 + 專案數 + 簡介） -->
         <div class="grid grid-cols-1 md:grid-cols-2 gap-px bg-neutral-200">
             {cards.map((s, i) => (
-                <a href={`/works?category=${s.slug}`}
+                <a href={`/works/category/${s.slug}`}
                    class="group bg-white p-8 sm:p-10 lg:p-12 hover:bg-white transition-all flex flex-col min-h-[260px]">
 
                     <!-- 編號 + 服務標題同一列 -->

@@ -6,6 +6,7 @@ export interface ICategory {
     slug: string;
     name_zh: string;
     name_en?: string | null;
+    description?: string | null;
     count: number;
     kind?: "category" | "tag";  // 'category' 為製作類型；'tag' 為使用場景（展覽/講座…）
 }
