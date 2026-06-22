@@ -67,9 +67,12 @@ const cp = meta.copy?.services ?? {};
                                 </div>
                                 {cat && (
                                     <a href={`/works?category=${cat.slug}`}
-                                       class="md:self-center inline-flex items-center gap-2 text-xs tracking-widest uppercase border border-neutral-900 px-5 py-2 hover:bg-white hover:text-white hover:border-white transition-colors whitespace-nowrap">
-                                        <Tr zh={`看 ${cat.name_zh} 作品`} en={`View ${cat.name_en || cat.name_zh}`} />
-                                        <span>→</span>
+                                       class="md:self-center group flex flex-col items-start md:items-end whitespace-nowrap"
+                                       aria-label={`看 ${cat.count} 支${cat.name_zh}作品`}>
+                                        <span class="text-4xl font-light text-neutral-900 leading-none group-hover:text-[#c9372c] transition-colors">{cat.count}</span>
+                                        <span class="mt-2 inline-flex items-center gap-2 text-xs tracking-[0.2em] uppercase text-neutral-500 group-hover:text-[#c9372c] transition-colors">
+                                            <Tr zh="支作品" en="Works" /><span>→</span>
+                                        </span>
                                     </a>
                                 )}
                             </article>
