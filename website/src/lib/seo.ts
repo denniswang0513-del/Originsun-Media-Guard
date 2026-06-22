@@ -236,7 +236,7 @@ export const pageSchemas = {
             "@context": SCHEMA_CTX,
             "@type": "Service",
             name: s.title,
-            description: s.short_desc || s.title,
+            description: s.full_desc || s.short_desc || s.title,
             url: `${siteUrl}/services#${s.slug}`,
             image: s.cover_image || undefined,
             provider: {

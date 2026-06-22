@@ -7,6 +7,7 @@ export interface IService {
     title: string;
     icon?: string | null;
     short_desc?: string | null;
+    full_desc?: string | null;
     cover_image?: string | null;
     related_category_slug?: string | null;
 }

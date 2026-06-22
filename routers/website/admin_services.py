@@ -16,7 +16,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from ._common import admin_session
 from core.schemas_website import ServiceCreate, ServiceUpdate
-from services.website import service_service
+from services.website import service_service, rebuild_service
 
 router = APIRouter(prefix="/api/website/admin", tags=["website-admin-services"])
 
@@ -33,9 +33,11 @@ async def create_service(
     session: AsyncSession = Depends(admin_session),
 ):
     try:
-        return await service_service.create_service(session, req.model_dump())
+        item = await service_service.create_service(session, req.model_dump())
     except IntegrityError:
         raise HTTPException(status_code=409, detail=f"Slug '{req.slug}' already exists")
+    await rebuild_service.mark_dirty()
+    return item
 
 
 @router.put("/services/{service_id}")
@@ -49,6 +51,7 @@ async def update_service(
     )
     if not item:
         raise HTTPException(status_code=404, detail="Service not found")
+    await rebuild_service.mark_dirty()
     return item
 
 
@@ -60,4 +63,5 @@ async def delete_service(
     ok = await service_service.delete_service(session, service_id)
     if not ok:
         raise HTTPException(status_code=404, detail="Service not found")
+    await rebuild_service.mark_dirty()
     return {"ok": True}

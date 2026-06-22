@@ -18,6 +18,7 @@ def _to_public_dict(s: WebsiteService, related_slug: Optional[str] = None) -> di
         "title": s.title,
         "icon": s.icon,
         "short_desc": s.short_desc,
+        "full_desc": s.full_desc,
         "cover_image": s.cover_image,
         "related_category_slug": related_slug,
     }
