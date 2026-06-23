@@ -1,1 +1,8 @@
 @import "tailwindcss";
+
+/* heading 預設深色（白底站用）。放進 @layer base，讓 Tailwind 文字色 utility
+   （如 text-white）能蓋過 —— 否則未分層的元素規則會強制所有 h1-h4 變深色，
+   深底區段（ContactCTA / blog hero）的 text-white 標題會看不清。 */
+@layer base {
+    h1, h2, h3, h4 { color: var(--text-strong, #111); }
+}

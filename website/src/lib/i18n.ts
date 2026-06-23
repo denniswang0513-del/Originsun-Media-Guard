@@ -18,7 +18,7 @@ export const STR = {
     nav_works:    { zh: "作品集",   en: "Works" },
     nav_services: { zh: "服務項目", en: "Services" },
     nav_about:    { zh: "關於我們", en: "About" },
-    nav_news:     { zh: "部落格",   en: "Insight" },
+    nav_news:     { zh: "影像專欄", en: "Insight" },
     nav_portfolio: { zh: "歷年作品", en: "Portfolio" },
     nav_contact:  { zh: "聯絡",     en: "Contact" },
 
