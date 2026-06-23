@@ -19,7 +19,7 @@ import { websiteFetch, esc, toastOk, toastErr, renderLoadError, renderCopyCard }
 // 註：影片 ID / 信任數字 / 評分由下方既有欄位編；FAQ / 證言 / 服務內容到各自子視圖編。
 const COPY_BLOCKS = [
     { key: 'whoweare_eyebrow', label: '關於段 · eyebrow', type: 'text', placeholderZh: 'About Us' },
-    { key: 'whoweare_heading', label: '關於段 · 標題', placeholderZh: '我們是源日影像——過去 10 年說了 300 個故事' },
+    { key: 'whoweare_heading', label: '關於段 · 標題（可換行）', long: true, hint: '按 Enter 換行，網站會照你斷的行顯示', placeholderZh: '我們是源日影像——十多年來，說了上百個品牌故事' },
     { key: 'whoweare_intro', label: '關於段 · 介紹', long: true, placeholderZh: '從商業廣告到紀實短片…' },
     { key: 'services_eyebrow', label: '服務段 · eyebrow', type: 'text', placeholderZh: 'Services' },
     { key: 'services_title', label: '服務段 · 標題', placeholderZh: '我們做四件事', placeholderEn: 'We Do Four Things' },
