@@ -20,7 +20,7 @@ export const STR = {
     nav_about:    { zh: "關於我們", en: "About" },
     nav_news:     { zh: "影像專欄", en: "Insight" },
     nav_portfolio: { zh: "歷年作品", en: "Portfolio" },
-    nav_contact:  { zh: "聯絡",     en: "Contact" },
+    nav_contact:  { zh: "聯絡我們", en: "Contact" },
 
     hero_cta:       { zh: "了解我們的作品", en: "Explore Our Work" },
     hero_scroll:    { zh: "向下探索",       en: "Scroll" },
