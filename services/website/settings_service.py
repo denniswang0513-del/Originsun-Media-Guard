@@ -74,6 +74,9 @@ async def get_meta(session: AsyncSession) -> dict[str, Any]:
         "seo_default_title": s.get("seo.default_title", ""),
         "seo_default_description": s.get("seo.default_description", ""),
         "seo_og_image": s.get("seo.og_image", ""),
+        # 品牌 Logo / favicon（admin「⚙️ 網站設定」品牌卡可上傳）；空則前端用預設 SVG。
+        "brand_logo_url": s.get("brand.logo_url", ""),
+        "brand_favicon_url": s.get("brand.favicon_url", ""),
         "social": {
             "youtube": s.get("social.youtube", ""),
             "instagram": s.get("social.instagram", ""),

@@ -21,6 +21,8 @@ export interface IWebsiteMeta {
     seo_default_title: string;
     seo_default_description: string;
     seo_og_image?: string;  // 全站預設 OG image（個別頁未指定時 fallback 用）
+    brand_logo_url?: string;     // 品牌 Logo（header；空則用預設 SVG 標記）
+    brand_favicon_url?: string;  // favicon（空則用 /favicon.svg）
     categories: ICategory[];
     // Admin 可編輯（website_settings.about.* / home.*）
     about_intro_zh?: string;
