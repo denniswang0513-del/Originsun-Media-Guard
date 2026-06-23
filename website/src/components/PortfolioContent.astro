@@ -1,0 +1,101 @@
+---
+/**
+ * PortfolioContent.astro — 歷年作品內容（榮譽牆 AWARDS + 年份時間軸）
+ * 從 portfolio.astro 抽出，供 /portfolio 與 /about「歷年作品」段共用。
+ */
+import Tr from "./ui/Tr.astro";
+import type { IPublicProject } from "../types/project";
+import type { IAward } from "../types/seo";
+
+interface Props {
+    allWorks: IPublicProject[];
+    awards: IAward[];
+}
+const { allWorks, awards } = Astro.props;
+
+// 年份分組（desc，無年份放最後）
+function groupByYear(works: IPublicProject[]): Array<{ year: number | null; works: IPublicProject[] }> {
+    const m = new Map<number | null, IPublicProject[]>();
+    for (const w of works) {
+        const y = w.year ?? null;
+        if (!m.has(y)) m.set(y, []);
+        m.get(y)!.push(w);
+    }
+    return Array.from(m.entries())
+        .sort((a, b) => {
+            if (a[0] === null) return 1;
+            if (b[0] === null) return -1;
+            return b[0] - a[0];
+        })
+        .map(([year, works]) => ({ year, works }));
+}
+const years = groupByYear(allWorks);
+const hasAwards = awards.length > 0;
+
+// 依「作品」分組：同一 work_title + work_type + work_year 的多行獎項合併成一部作品。
+type AwardGroup = { workType: string; workTitle: string; workYear: number | null; items: IAward[]; };
+const _awardGroups = new Map<string, AwardGroup>();
+for (const a of awards) {
+    const workTitle = (a.work_title || "").trim();
+    const workType = (a.work_type || "").trim();
+    const workYear = a.work_year ?? null;
+    const key = workTitle ? `${workTitle}|${workType}|${workYear ?? ""}` : `__solo_${a.id}`;
+    if (!_awardGroups.has(key)) _awardGroups.set(key, { workType, workTitle, workYear, items: [] });
+    _awardGroups.get(key)!.items.push(a);
+}
+function groupYearKey(g: AwardGroup): number {
+    if (g.workYear != null) return g.workYear;
+    const ys = g.items.map(i => i.year).filter(y => typeof y === "number") as number[];
+    return ys.length ? Math.max(...ys) : 0;
+}
+const awardGroups = Array.from(_awardGroups.values())
+    .map(g => ({ ...g, items: [...g.items].sort((a, b) => a.sort_order - b.sort_order || b.year - a.year) }))
+    .sort((a, b) => groupYearKey(b) - groupYearKey(a));
+function filmHeading(g: AwardGroup): string {
+    const t = g.workTitle ? `《${g.workTitle}》` : "—";
+    return g.workType ? `${g.workType}${t}` : t;
+}
+---
+
+{hasAwards && (
+    <div class="max-w-3xl mx-auto px-4 sm:px-6 lg:px-8 pb-16">
+        {/* inline color：BaseLayout 全域 h1-h4 規則會蓋 Tailwind utility，故 inline 強制 */}
+        <h2 class="text-2xl sm:text-3xl font-bold tracking-tight mb-8" style="color:#c9372c;">AWARDS</h2>
+        <table class="w-full border-collapse">
+            <tbody>
+                {awardGroups.map(g => (
+                    <tr class="align-top">
+                        <td class="py-4 pr-4 sm:pr-6 text-neutral-900 font-medium tracking-wide whitespace-nowrap">{filmHeading(g)}</td>
+                        <td class="py-4">
+                            {g.items.map(a => (
+                                <div class="py-1 first:pt-0 last:pb-0">
+                                    <span class="text-sm sm:text-[15px] text-neutral-600 tracking-wide leading-relaxed">{a.name_zh}</span>
+                                </div>
+                            ))}
+                        </td>
+                    </tr>
+                ))}
+            </tbody>
+        </table>
+    </div>
+)}
+
+<div class="max-w-3xl mx-auto px-4 sm:px-6 lg:px-8">
+    {years.map(yg => (
+        <div class="mb-12">
+            <div class="flex items-center gap-4 mb-6">
+                <span class="text-3xl sm:text-4xl font-bold tracking-tight text-[#c9372c]">{yg.year ?? "—"}</span>
+                <span class="flex-1 h-px bg-neutral-200"></span>
+                <span class="text-xs tracking-[0.25em] uppercase text-neutral-400">{yg.works.length} <Tr zh="件" en="works" /></span>
+            </div>
+            <ul class="space-y-2.5">
+                {yg.works.map(w => (
+                    <li class="flex items-baseline gap-x-4 text-[15px] leading-relaxed">
+                        <a href={`/works/${w.slug}`} class="flex-1 text-neutral-900 font-medium tracking-wide hover:text-[#c9372c] transition-colors">{w.title}</a>
+                        <span class="flex-shrink-0 text-neutral-500 text-sm tracking-wide text-right">{w.client || "—"}</span>
+                    </li>
+                ))}
+            </ul>
+        </div>
+    ))}
+</div>
