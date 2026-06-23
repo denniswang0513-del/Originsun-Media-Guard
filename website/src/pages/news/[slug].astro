@@ -149,7 +149,8 @@ const schemaData = [
                         <figure class={`${widthCls} mx-auto px-4 sm:px-6 lg:px-8 my-10 sm:my-14`}>
                             {isValidYouTubeId(block.youtube_id) ? (
                                 <lite-youtube videoid={block.youtube_id}
-                                              class="block aspect-video"
+                                              class="block aspect-video w-full"
+                                              style="max-width: none;"
                                               playlabel={block.caption ?? "Play video"}></lite-youtube>
                             ) : (
                                 <div class="aspect-video bg-neutral-100 flex items-center justify-center text-neutral-400 text-sm">
