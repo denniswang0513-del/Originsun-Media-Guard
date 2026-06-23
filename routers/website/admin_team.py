@@ -18,7 +18,7 @@ Endpoints (prefix `/api/website/admin`):
 """
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, Depends, Request, UploadFile, File, HTTPException
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -94,3 +94,44 @@ async def update_team_admin(
     await session.commit()
     await rebuild_service.mark_dirty()
     return {"ok": True, "updated": updated}
+
+
+@router.post("/team/{staff_id}/upload-photo")
+async def upload_team_photo(
+    staff_id: str,
+    file: UploadFile = File(...),
+    session: AsyncSession = Depends(admin_session),
+):
+    """上傳官網團隊頭像 → /uploads/team/{staff_id}/{uuid}.webp，寫入 website_photo_url + rebuild。
+
+    複用 admin_posts 的 WebP 轉檔 + 上傳路徑（NAS container /app/uploads/，由 NAS Nginx
+    serve /uploads/）。只動官網覆寫欄位 website_photo_url，永不碰 CRM 正本 photo_url。
+    """
+    import os
+    import uuid as _uuid
+    from db.models import CrmStaff
+    from .admin_posts import _save_image_as_webp, _UPLOAD_BASE, _ALLOWED_IMG_EXT
+
+    ext = os.path.splitext(file.filename or "")[1].lower()
+    if ext and ext not in _ALLOWED_IMG_EXT:
+        raise HTTPException(status_code=415, detail=f"不支援的圖片格式：{ext}")
+    content = await file.read()
+    if not content:
+        raise HTTPException(status_code=400, detail="空檔案")
+    if len(content) > 10 * 1024 * 1024:
+        raise HTTPException(status_code=413, detail="圖片過大（上限 10MB）")
+
+    staff = await session.get(CrmStaff, staff_id)
+    if staff is None:
+        raise HTTPException(status_code=404, detail="找不到員工")
+
+    upload_dir = os.path.join(_UPLOAD_BASE, "team", staff_id)
+    os.makedirs(upload_dir, exist_ok=True)
+    saved = _save_image_as_webp(content, upload_dir, _uuid.uuid4().hex)
+    rel = os.path.relpath(saved, _UPLOAD_BASE).replace("\\", "/")
+    url = f"/uploads/{rel}"
+
+    staff.website_photo_url = url
+    await session.commit()
+    await rebuild_service.mark_dirty()
+    return {"url": url}

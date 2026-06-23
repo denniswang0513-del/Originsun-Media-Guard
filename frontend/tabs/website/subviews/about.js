@@ -6,7 +6,13 @@
  *   讀 GET /api/website/admin/team（全部員工），批次 PUT 回去 → mark_dirty → 官網 rebuild。
  *   UX：預設只列「已顯示於官網」的成員當可編卡片；其餘員工（CRM 可能上百人）用搜尋框加入。
  */
-import { websiteFetch, esc, toastOk, toastErr, renderLoadError, renderCopyCard } from '../website-utils.js';
+import { websiteFetch, esc, toastOk, toastErr, renderLoadError, renderCopyCard, getApiBase } from '../website-utils.js';
+
+// 頭像 src：相對 /uploads/ 路徑（檔案在 NAS）要補 API base 才看得到預覽；絕對網址原樣用。
+function _avatarSrc(url) {
+    if (!url) return '';
+    return /^https?:\/\//.test(url) ? url : `${getApiBase()}${url}`;
+}
 
 const _ABOUT_FIELDS = [
     { key: 'about.intro_zh', label: '公司介紹（中文）', long: true, placeholder: '源日影像是一間位於台北的...' },
@@ -104,9 +110,12 @@ function _renderTeamRow(t) {
     return `
         <div data-team-id="${id}" style="display:flex;gap:14px;align-items:flex-start;background:#1a1a1a;border:1px solid #333;padding:12px;border-radius:6px;${t.show_on_website ? '' : 'opacity:0.45;'}">
             <div style="flex:0 0 64px;text-align:center;">
-                ${avatar
-                    ? `<img src="${esc(avatar)}" style="width:64px;height:64px;border-radius:50%;object-fit:cover;background:#000;" onerror="this.style.display='none'" />`
-                    : `<div style="width:64px;height:64px;border-radius:50%;background:#2a2a2a;display:flex;align-items:center;justify-content:center;color:#888;font-size:22px;">${esc((t.name || '?').charAt(0))}</div>`}
+                <div id="team-avatar-${id}">
+                    ${avatar
+                        ? `<img src="${esc(_avatarSrc(avatar))}" style="width:64px;height:64px;border-radius:50%;object-fit:cover;background:#000;" onerror="this.style.display='none'" />`
+                        : `<div style="width:64px;height:64px;border-radius:50%;background:#2a2a2a;display:flex;align-items:center;justify-content:center;color:#888;font-size:22px;">${esc((t.name || '?').charAt(0))}</div>`}
+                </div>
+                <button class="btn btn-sm" style="margin-top:6px;font-size:10px;padding:3px 8px;width:64px;" onclick="window._websiteUploadTeamPhoto('${id}', this)">📤 上傳</button>
             </div>
             <div style="flex:1;min-width:0;">
                 <div style="display:flex;align-items:center;gap:10px;margin-bottom:8px;flex-wrap:wrap;">
@@ -124,8 +133,8 @@ function _renderTeamRow(t) {
                         <input data-team-field="website_title" value="${esc(t.website_title || '')}" placeholder="${esc(canonRole || '沿用 CRM 職稱')}" style="width:100%;" />
                     </div>
                     <div>
-                        <label style="color:#888;font-size:10px;display:block;margin-bottom:2px;">官網頭像 URL</label>
-                        <input data-team-field="website_photo_url" value="${esc(t.website_photo_url || '')}" placeholder="${esc(canonPhoto || '沿用 CRM 頭像')}" style="width:100%;" />
+                        <label style="color:#888;font-size:10px;display:block;margin-bottom:2px;">官網頭像（按左側「上傳」鈕，或貼圖片網址）</label>
+                        <input id="team-photo-url-${id}" data-team-field="website_photo_url" value="${esc(t.website_photo_url || '')}" placeholder="${esc(canonPhoto || '沿用 CRM 頭像')}" style="width:100%;" />
                     </div>
                     <div style="flex:0 0 100px;">
                         <label style="color:#888;font-size:10px;display:block;margin-bottom:2px;">排序</label>
@@ -179,6 +188,34 @@ window._websiteAddTeamMember = (id) => {
     if (si) si.value = '';
     const box = document.getElementById('team-search-results');
     if (box) { box.innerHTML = ''; box.style.display = 'none'; }
+};
+
+// 上傳官網頭像 → 後端即時寫 website_photo_url + rebuild；前端更新預覽與 URL 欄位。
+window._websiteUploadTeamPhoto = (id, btn) => {
+    const fi = document.createElement('input');
+    fi.type = 'file';
+    fi.accept = 'image/*';
+    fi.onchange = async () => {
+        const f = fi.files && fi.files[0];
+        if (!f) return;
+        const orig = btn.textContent;
+        btn.disabled = true; btn.textContent = '⏳';
+        try {
+            const fd = new FormData();
+            fd.append('file', f);
+            const r = await websiteFetch(`/api/website/admin/team/${encodeURIComponent(id)}/upload-photo`, { method: 'POST', body: fd });
+            const urlInput = document.getElementById(`team-photo-url-${id}`);
+            if (urlInput) urlInput.value = r.url;
+            const box = document.getElementById(`team-avatar-${id}`);
+            if (box) box.innerHTML = `<img src="${esc(_avatarSrc(r.url))}?t=${Date.now()}" style="width:64px;height:64px;border-radius:50%;object-fit:cover;background:#000;" />`;
+            toastOk('頭像已上傳並儲存，官網將自動 rebuild');
+        } catch (e) {
+            toastErr('上傳失敗：' + (e.message || e));
+        } finally {
+            btn.disabled = false; btn.textContent = orig;
+        }
+    };
+    fi.click();
 };
 
 window._websiteSaveAbout = async () => {
