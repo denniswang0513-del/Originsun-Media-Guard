@@ -25,25 +25,20 @@ interface Props {
     copy?: Record<string, string>;
 }
 
-/** 預設 4 欄 stats（admin 未設定時沿用原首頁數字） */
+/** 預設 stats（meta.home_stats 取不到時的 fallback；正常走後端自動真實值） */
 const DEFAULT_STATS: StatItem[] = [
-    { value: "10+",  label_zh: "年製作經驗", label_en: "Years" },
-    { value: "300+", label_zh: "完成作品",   label_en: "Projects" },
-    { value: "80+",  label_zh: "合作品牌",   label_en: "Brands" },
-    { value: "4.9",  label_zh: "平均評分",   label_en: "Rating" },
+    { value: "13",   label_zh: "年製作經驗", label_en: "Years" },
+    { value: "150+", label_zh: "完成作品",   label_en: "Projects" },
+    { value: "130+", label_zh: "合作品牌",   label_en: "Brands" },
 ];
+const GRID_COLS: Record<number, string> = { 1: "grid-cols-1", 2: "grid-cols-2", 3: "grid-cols-3", 4: "grid-cols-4" };
 
 const { showreel_id = "DRavYkTojAo", stats = [], copy = {} } = Astro.props;
 
-// 逐欄 fallback：admin 只填了部分欄位時，未填的沿用預設值，版面始終 4 欄完整。
-const shownStats: StatItem[] = DEFAULT_STATS.map((d, i) => {
-    const s = stats[i];
-    return {
-        value: s?.value || d.value,
-        label_zh: s?.label_zh || d.label_zh,
-        label_en: s?.label_en || d.label_en,
-    };
-});
+// 數字來自 meta.home_stats（後端自動算真實值：年資/公開作品數/客戶數，admin 可逐欄覆寫）；空則用預設。
+const provided: StatItem[] = (stats || []).filter(s => s && s.value);
+const shownStats: StatItem[] = provided.length > 0 ? provided : DEFAULT_STATS;
+const gridCols = GRID_COLS[shownStats.length] || "grid-cols-3";
 ---
 
 <section class="bg-white py-24 sm:py-32">
@@ -53,8 +48,8 @@ const shownStats: StatItem[] = DEFAULT_STATS.map((d, i) => {
         <p class="text-xs tracking-[0.4em] text-[#c9372c] uppercase mb-6">{copy.whoweare_eyebrow ?? "About Us"}</p>
 
         <h2 class="text-3xl sm:text-5xl font-bold tracking-tight text-neutral-900 leading-[1.15] mb-8">
-            <Tr zh={copy.whoweare_heading_zh ?? "我們是源日影像——過去 10 年說了 300 個故事"}
-                en={copy.whoweare_heading_en ?? "We're OriginsunStudio — 300 stories told over ten years"} />
+            <Tr zh={copy.whoweare_heading_zh ?? "我們是源日影像——十多年來，說了上百個品牌故事"}
+                en={copy.whoweare_heading_en ?? "We're OriginsunStudio — hundreds of stories over more than a decade"} />
         </h2>
 
         <p class="max-w-xl mx-auto text-base sm:text-lg text-neutral-600 leading-[1.9] tracking-wide">
@@ -76,7 +71,7 @@ const shownStats: StatItem[] = DEFAULT_STATS.map((d, i) => {
     <!-- 3. stats + 了解更多 + 創辦人署名 -->
     <div class="max-w-3xl mx-auto px-4 sm:px-6 lg:px-8 text-center mt-16 sm:mt-20">
         <!-- stats：4 欄不折行 -->
-        <ul class="grid grid-cols-4 divide-x divide-neutral-200 mb-12">
+        <ul class={`grid ${gridCols} divide-x divide-neutral-200 mb-12`}>
             {shownStats.map(s => (
                 <li class="px-2 sm:px-4 text-center">
                     <div class="text-xl sm:text-3xl font-bold tracking-tight text-neutral-900 leading-none whitespace-nowrap">

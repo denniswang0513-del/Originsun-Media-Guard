@@ -28,6 +28,24 @@ async def get_meta(session: AsyncSession) -> dict[str, Any]:
     """
     s = await get_all_settings(session)
 
+    # 首頁信任數字「自動抓真實數據」：完成作品=公開作品數、合作品牌=客戶資料數、
+    # 年資=今年−2013（成立年）。向下取整加「+」（隨資料增長、避免出現難看的精確數）。
+    # admin 在「🏠 首頁設定」仍可逐欄覆寫（home.stat{i}_*，空則用即時真實值）。已移除「平均評分」。
+    from sqlalchemy import text as _text
+    from datetime import datetime as _dt
+    try:
+        _works = (await session.execute(_text("select count(*) from crm_projects where public=true"))).scalar() or 0
+        _clients = (await session.execute(_text("select count(*) from clients"))).scalar() or 0
+    except Exception:
+        _works = _clients = 0
+    def _floor10(n):
+        return (int(n) // 10) * 10
+    _real_stats = [
+        (str(_dt.now().year - 2013), "年製作經驗", "Years"),
+        (f"{_floor10(_works)}+", "完成作品", "Projects"),
+        (f"{_floor10(_clients)}+", "合作品牌", "Brands"),
+    ]
+
     # 頁面文案（marketing copy）：scheme `copy.<page>.<block>_<lang>`。
     # 掃出所有 copy.* key，組成巢狀 dict：copy[page][block_lang] = value。
     # Astro 各頁用 meta.copy?.<page>?.<block>_zh ?? "<硬寫 fallback>" 渲染，
@@ -68,14 +86,14 @@ async def get_meta(session: AsyncSession) -> dict[str, Any]:
         "home_hero_youtube_id": s.get("home.hero_youtube_id", ""),
         # 首頁 WhoWeAre 段 Showreel（admin「🏠 首頁設定」可編；空則沿用 hero_youtube_id）
         "home_showreel_id": s.get("home.showreel_id", ""),
-        # 首頁 WhoWeAre 段 4 欄 stats（admin「🏠 首頁設定」可編；空則前端用預設）
+        # 首頁 WhoWeAre 段 3 欄 stats，自動抓真實數據（admin 可逐欄覆寫；空則用即時真實值）
         "home_stats": [
             {
-                "value": s.get(f"home.stat{i}_value", ""),
-                "label_zh": s.get(f"home.stat{i}_label_zh", ""),
-                "label_en": s.get(f"home.stat{i}_label_en", ""),
+                "value": s.get(f"home.stat{i+1}_value") or _real_stats[i][0],
+                "label_zh": s.get(f"home.stat{i+1}_label_zh") or _real_stats[i][1],
+                "label_en": s.get(f"home.stat{i+1}_label_en") or _real_stats[i][2],
             }
-            for i in range(1, 5)
+            for i in range(3)
         ],
         # 首頁 Testimonials 段整體評分 badge（admin「🏠 首頁設定」可編；空則前端用預設）
         "home_rating_value": s.get("home.rating_value", ""),
