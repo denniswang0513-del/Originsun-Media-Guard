@@ -131,3 +131,16 @@ async def healthz():
 
 from routers.website import router as _website_router
 app.include_router(_website_router)
+
+# 對外 serve 執行期上傳檔（團隊頭像 /uploads/team、文章圖片 /uploads/posts）。
+# serve 目錄 = admin_posts._UPLOAD_BASE（上傳就寫這裡），確保「存」與「serve」同一處；
+# NAS nginx 的 location /uploads/ 反代到這個 app。main.py（master）另有同樣 mount。
+from fastapi.staticfiles import StaticFiles as _StaticFiles
+from routers.website.admin_posts import _UPLOAD_BASE as _UPLOAD_BASE
+import mimetypes as _mt
+# 容器精簡 Python 的 mimetypes 可能不認 .webp → StaticFiles 回 text/plain，配 nginx 的
+# X-Content-Type-Options: nosniff 會讓瀏覽器拒絕當圖片渲染。明確註冊正確型別。
+_mt.add_type("image/webp", ".webp")
+_mt.add_type("image/avif", ".avif")
+os.makedirs(_UPLOAD_BASE, exist_ok=True)
+app.mount("/uploads", _StaticFiles(directory=_UPLOAD_BASE), name="uploads")

@@ -936,6 +936,9 @@ async def serve_index():
     return FileResponse("frontend/index.html")
 
 os.makedirs("uploads", exist_ok=True)
+import mimetypes as _mt  # 精簡 Python mimetypes 可能不認 .webp → StaticFiles 回 text/plain
+_mt.add_type("image/webp", ".webp")
+_mt.add_type("image/avif", ".avif")
 app.mount("/uploads", StaticFiles(directory="uploads"), name="uploads")
 if os.path.exists("frontend"):
     app.mount("/", StaticFiles(directory="frontend", html=True), name="frontend")
