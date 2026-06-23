@@ -96,24 +96,29 @@ const cp = meta.copy?.about ?? {};
                         <Tr zh={cp.team_heading_zh ?? "我們的團隊"} en={cp.team_heading_en ?? "Our Team"} />
                     </h2>
                 </div>
-                <div class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-6">
-                    {team.map(m => (
-                        <article class="text-center">
-                            {m.photo_url ? (
-                                <SmartImage src={m.photo_url}
-                                            alt={m.name}
-                                            width={256} height={256}
-                                            loading="lazy"
-                                            class="w-32 h-32 rounded-full object-cover mx-auto mb-4 bg-neutral-100" />
-                            ) : (
-                                <div class="w-32 h-32 rounded-full bg-neutral-100 mx-auto mb-4 flex items-center justify-center text-3xl text-neutral-600">
-                                    {m.name.charAt(0)}
-                                </div>
-                            )}
-                            <h3 class="text-base font-light tracking-wide text-white">{m.name}</h3>
-                            {m.role && <p class="text-xs text-neutral-500 tracking-widest mt-1">{m.role}</p>}
-                            {m.bio && <p class="text-xs text-neutral-500 mt-3 leading-relaxed px-2">{m.bio}</p>}
-                        </article>
+                <!-- 第一列 3 位、第二列其餘（目前 4 位），各列置中 -->
+                <div class="space-y-12 sm:space-y-16">
+                    {[team.slice(0, 3), team.slice(3)].map(row => (
+                        <div class="flex flex-wrap justify-center items-start gap-x-8 gap-y-10 sm:gap-x-16">
+                            {row.map(m => (
+                                <article class="text-center w-40 sm:w-48">
+                                    {m.photo_url ? (
+                                        <SmartImage src={m.photo_url}
+                                                    alt={m.name}
+                                                    width={256} height={256}
+                                                    loading="lazy"
+                                                    class="w-32 h-32 rounded-full object-cover mx-auto mb-4 bg-neutral-100" />
+                                    ) : (
+                                        <div class="w-32 h-32 rounded-full bg-neutral-100 mx-auto mb-4 flex items-center justify-center text-3xl text-neutral-600">
+                                            {m.name.charAt(0)}
+                                        </div>
+                                    )}
+                                    <h3 class="text-base font-light tracking-wide text-neutral-900">{m.name}</h3>
+                                    {m.role && <p class="text-xs text-neutral-500 tracking-widest mt-1">{m.role}</p>}
+                                    {m.bio && <p class="text-xs text-neutral-500 mt-3 leading-relaxed">{m.bio}</p>}
+                                </article>
+                            ))}
+                        </div>
                     ))}
                 </div>
             </div>
