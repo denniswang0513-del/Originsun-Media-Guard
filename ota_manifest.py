@@ -85,6 +85,7 @@ STDLIB = {
     "venv", "ensurepip", "getpass", "atexit", "selectors", "ssl", "certifi",
     "winreg", "msvcrt", "winsound", "nt", "posixpath", "ntpath", "_thread", "builtins",
     "__future__", "annotations", "sysconfig", "zipimport", "runpy",
+    "faulthandler", "smtplib", "imaplib", "poplib", "email",
 }
 
 # ── Local project modules (excluded from dependency checks) ──

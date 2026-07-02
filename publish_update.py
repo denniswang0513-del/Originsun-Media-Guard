@@ -35,6 +35,17 @@ SSH_KEY_PATH = os.path.join(
 )
 SSH_DOCKER = "/share/CACHEDEV1_DATA/.qpkg/container-station/bin/docker"
 
+# Windows OpenSSH（publish_update 走的是它，非 Git Bash ssh）連這台 NAS 必須帶
+# IdentitiesOnly=yes——否則會先試 ssh-agent / 預設 key，在用到 -i 指定的 key 前就
+# 卡住 → subprocess timeout（2026-07-02 /publish 就是這樣炸的）。BatchMode 讓認證
+# 失敗快速結束而非等互動輸入；ConnectTimeout 上限握手時間。
+_SSH_COMMON_OPTS = [
+    "-o", "StrictHostKeyChecking=no",
+    "-o", "BatchMode=yes",
+    "-o", "IdentitiesOnly=yes",
+    "-o", "ConnectTimeout=10",
+]
+
 # website-api container 需要的 code 路徑（routers/website/ 跨 import 到 api_crm
 # 等模組，所以 routers/ 整個傳；core/db/services/ 同理）
 NAS_SYNC_PATHS = [
@@ -181,14 +192,16 @@ def sync_website_to_nas() -> bool:
     print(f"\n[*] 同步 code 到 NAS ({NAS_HOST})...")
 
     # scp 不認資料夾不存在 — 先 ssh mkdir 確保 NAS 結構存在
-    ssh_cmd = ["ssh", "-i", SSH_KEY_PATH, "-o", "StrictHostKeyChecking=no", NAS_HOST]
+    ssh_cmd = ["ssh", "-i", SSH_KEY_PATH] + _SSH_COMMON_OPTS + [NAS_HOST]
     try:
         subprocess.run(
             ssh_cmd + [f"mkdir -p {NAS_CODE_DIR}"],
-            check=True, capture_output=True, timeout=10,
+            check=True, capture_output=True, timeout=25,
         )
-    except subprocess.CalledProcessError as e:
-        print(f"[NAS sync] mkdir 失敗: {e.stderr.decode(errors='replace')[:200]}")
+    except (subprocess.CalledProcessError, subprocess.TimeoutExpired, OSError) as e:
+        _err = getattr(e, "stderr", b"") or b""
+        _err = _err.decode(errors="replace") if isinstance(_err, (bytes, bytearray)) else str(_err)
+        print(f"[NAS sync] mkdir 失敗/逾時（NAS 不可達？）: {_err[:200] or type(e).__name__}")
         return False
 
     # scp 每個路徑（檔案 + 目錄）
@@ -197,7 +210,7 @@ def sync_website_to_nas() -> bool:
         if not os.path.exists(src):
             print(f"[NAS sync] 跳過 (不存在): {rel}")
             continue
-        scp_args = ["scp", "-i", SSH_KEY_PATH, "-o", "StrictHostKeyChecking=no", "-q"]
+        scp_args = ["scp", "-i", SSH_KEY_PATH] + _SSH_COMMON_OPTS + ["-q"]
         if os.path.isdir(src):
             scp_args += ["-r", src + "/.", f"{NAS_HOST}:{NAS_CODE_DIR}/{rel}/"]
         else:
@@ -205,8 +218,10 @@ def sync_website_to_nas() -> bool:
         try:
             subprocess.run(scp_args, check=True, capture_output=True, timeout=120)
             print(f"[NAS sync] OK: {rel}")
-        except subprocess.CalledProcessError as e:
-            print(f"[NAS sync] FAIL: {rel} — {e.stderr.decode(errors='replace')[:200]}")
+        except (subprocess.CalledProcessError, subprocess.TimeoutExpired, OSError) as e:
+            _err = getattr(e, "stderr", b"") or b""
+            _err = _err.decode(errors="replace") if isinstance(_err, (bytes, bytearray)) else str(_err)
+            print(f"[NAS sync] FAIL: {rel} — {_err[:200] or type(e).__name__}")
             return False
 
     # Restart website-api container 讓新 code 生效
@@ -214,12 +229,14 @@ def sync_website_to_nas() -> bool:
     try:
         subprocess.run(
             ssh_cmd + [f"{SSH_DOCKER} restart website-api"],
-            check=True, capture_output=True, timeout=15,
+            check=True, capture_output=True, timeout=30,
         )
         print(f"[OK] NAS website-api 已重啟")
         return True
-    except subprocess.CalledProcessError as e:
-        print(f"[NAS sync] container restart 失敗: {e.stderr.decode(errors='replace')[:200]}")
+    except (subprocess.CalledProcessError, subprocess.TimeoutExpired, OSError) as e:
+        _err = getattr(e, "stderr", b"") or b""
+        _err = _err.decode(errors="replace") if isinstance(_err, (bytes, bytearray)) else str(_err)
+        print(f"[NAS sync] container restart 失敗/逾時: {_err[:200] or type(e).__name__}")
         return False
 
 
@@ -273,7 +290,11 @@ def sync_redirects_to_nas() -> bool:
     else:
         for from_path, to_path in sorted(items.items()):
             # nginx location 路徑只能含安全字元（後端 _normalize_old_url 已過濾過）
+            # 舊站（Yoast）URL 都帶結尾 /，但 redirect map 存無結尾版 → 兩種變體都出規則，
+            # 否則 exact-match location 對不到 Google 實際索引的帶 / URL（301 不觸發）。
             lines.append(f"location = {from_path} {{ return 301 {to_path}; }}")
+            if from_path != "/" and not from_path.endswith("/"):
+                lines.append(f"location = {from_path}/ {{ return 301 {to_path}; }}")
     snippet = "\n".join(lines) + "\n"
 
     # 3. 寫 local tmp → scp → docker cp → reload
@@ -282,8 +303,8 @@ def sync_redirects_to_nas() -> bool:
         with os.fdopen(tmp_fd, "w", encoding="utf-8") as f:
             f.write(snippet)
 
-        ssh_cmd = ["ssh", "-i", SSH_KEY_PATH, "-o", "StrictHostKeyChecking=no", NAS_HOST]
-        scp_args = ["scp", "-i", SSH_KEY_PATH, "-o", "StrictHostKeyChecking=no", "-q",
+        ssh_cmd = ["ssh", "-i", SSH_KEY_PATH] + _SSH_COMMON_OPTS + [NAS_HOST]
+        scp_args = ["scp", "-i", SSH_KEY_PATH] + _SSH_COMMON_OPTS + ["-q",
                     tmp_path, f"{NAS_HOST}:/tmp/redirects.conf"]
 
         # scp → /tmp
