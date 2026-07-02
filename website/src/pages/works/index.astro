@@ -99,6 +99,14 @@ const seo = buildBasicPageSeo(Astro, {
                 ))}
             </div>
 
+            <div id="works-more-wrap" class="mt-12 text-center hidden">
+                <button id="works-more-btn" type="button"
+                        class="inline-flex items-center gap-2 text-xs tracking-[0.25em] uppercase border border-neutral-900 text-neutral-900 px-8 py-3 hover:bg-neutral-900 hover:text-white transition-colors">
+                    <Tr zh="載入更多" en="Load more" />
+                    <span id="works-more-count" class="text-neutral-400 tracking-normal"></span>
+                </button>
+            </div>
+
             <div id="works-empty" class="py-20 text-center text-neutral-500 hidden">
                 <Tr k="works_no_items" />
             </div>
@@ -150,15 +158,42 @@ const seo = buildBasicPageSeo(Astro, {
     }
     applyChipState();
 
-    // ── Step 3: 過濾作品卡片（AND of cat + tag；空表示「全部」）──
-    let visible = 0;
+    // ── Step 3: 過濾作品卡片（AND of cat + tag）+ 分批顯示（載入更多）──
+    // 全部作品都在 HTML（SEO 友善），初次只顯示前 PAGE_SIZE 件、其餘 display:none
+    // （lazy 圖不會載入 → 手機首屏更快），按「載入更多」逐批揭開。
+    // 切分類/標籤是整頁導航（chip 是 <a>）→ 每次載入自然重置到第一批。
+    const PAGE_SIZE = 24;
+    const matched: HTMLElement[] = [];
     document.querySelectorAll<HTMLElement>(".work-item").forEach(el => {
         const cats = (el.dataset.categories || "").split(",");
         const tagsArr = (el.dataset.tags || "").split(",");
         const show = (!cat || cats.includes(cat)) && (!tag || tagsArr.includes(tag));
-        el.style.display = show ? "" : "none";
-        if (show) visible++;
+        if (show) matched.push(el);
+        else el.style.display = "none";
     });
+
+    const moreWrap = document.getElementById("works-more-wrap");
+    const moreBtn = document.getElementById("works-more-btn");
+    const moreCount = document.getElementById("works-more-count");
+    let shown = 0;
+    function renderLimit(): void {
+        matched.forEach((el, i) => { el.style.display = i < shown ? "" : "none"; });
+        if (!moreWrap) return;
+        if (shown < matched.length) {
+            moreWrap.classList.remove("hidden");
+            if (moreCount) moreCount.textContent = `(${shown}/${matched.length})`;
+        } else {
+            moreWrap.classList.add("hidden");
+        }
+    }
+    shown = Math.min(PAGE_SIZE, matched.length);
+    renderLimit();
+    moreBtn?.addEventListener("click", () => {
+        shown = Math.min(shown + PAGE_SIZE, matched.length);
+        renderLimit();
+    });
+
+    const visible = matched.length;
     const empty = document.getElementById("works-empty");
     const grid = document.getElementById("works-grid");
     if (visible === 0 && empty && grid) {

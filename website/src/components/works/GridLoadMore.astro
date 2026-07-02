@@ -1,0 +1,47 @@
+---
+/**
+ * GridLoadMore.astro — 給「靜態作品格」加「載入更多」分批顯示（分類頁 / 標籤頁用）。
+ *
+ * 用法：同頁把作品格容器設 id="works-grid"（直接子元素即作品卡），
+ * 然後在格子後面放 <GridLoadMore />。初次只顯示 pageSize 件、其餘 display:none
+ * （lazy 圖不會載入 → 手機首屏更快），按鈕逐批揭開。全部作品仍在 HTML（SEO 不受影響）。
+ *
+ * 註：作品集主頁 /works 因含分類/標籤即時過濾，用它自己的過濾版邏輯，不套這個。
+ */
+import Tr from "../ui/Tr.astro";
+interface Props { pageSize?: number }
+const { pageSize = 24 } = Astro.props;
+---
+<div id="works-more-wrap" class="mt-12 text-center hidden">
+    <button id="works-more-btn" type="button"
+            class="inline-flex items-center gap-2 text-xs tracking-[0.25em] uppercase border border-neutral-900 text-neutral-900 px-8 py-3 hover:bg-neutral-900 hover:text-white transition-colors">
+        <Tr zh="載入更多" en="Load more" />
+        <span id="works-more-count" class="text-neutral-400 tracking-normal"></span>
+    </button>
+</div>
+<script define:vars={{ pageSize }}>
+    (() => {
+        const grid = document.getElementById("works-grid");
+        if (!grid) return;
+        const items = Array.prototype.slice.call(grid.children);
+        const wrap = document.getElementById("works-more-wrap");
+        const btn = document.getElementById("works-more-btn");
+        const cnt = document.getElementById("works-more-count");
+        let shown = Math.min(pageSize, items.length);
+        const render = () => {
+            items.forEach((el, i) => { el.style.display = i < shown ? "" : "none"; });
+            if (!wrap) return;
+            if (shown < items.length) {
+                wrap.classList.remove("hidden");
+                if (cnt) cnt.textContent = "(" + shown + "/" + items.length + ")";
+            } else {
+                wrap.classList.add("hidden");
+            }
+        };
+        render();
+        if (btn) btn.addEventListener("click", () => {
+            shown = Math.min(shown + pageSize, items.length);
+            render();
+        });
+    })();
+</script>
