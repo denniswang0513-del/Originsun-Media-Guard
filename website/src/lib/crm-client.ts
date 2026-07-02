@@ -168,15 +168,20 @@ export const fetchAwards = _memoizeList<IAward>(() =>
 export interface IRawPublicPost {
     slug: string;
     title: string;
+    title_en: string | null;
     excerpt: string | null;
+    excerpt_en: string | null;
     cover_url: string | null;
     category_slugs: string[];
     body: any[];
+    body_en: any[] | null;
     published_at: string | null;
     date_modified: string | null;
     read_time_min: number | null;
     seo_title: string | null;
+    seo_title_en: string | null;
     seo_description: string | null;
+    seo_description_en: string | null;
     og_image_url: string | null;
     canonical_url: string | null;
     noindex: boolean;

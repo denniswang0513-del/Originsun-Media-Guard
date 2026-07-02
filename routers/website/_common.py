@@ -158,6 +158,26 @@ async def public_session():
             raise
 
 
+# ── internal relay 端點共用（NAS website-api forward 到 master 跑 claude；SEO/翻譯 runner）──
+
+def _check_internal_key(request: Request) -> None:
+    """internal 端點認證：X-Internal-Key = JWT secret（master/NAS 共用）。"""
+    from core.auth import _get_secret
+    expected = _get_secret()
+    got = request.headers.get("X-Internal-Key", "")
+    if not expected or got != expected:
+        raise HTTPException(status_code=403, detail="forbidden")
+
+
+def _admin_session_for_internal():
+    """避開 admin_session 的 JWT user 守衛 — 只給 internal key 通過的進來用 DB。"""
+    from db.session import get_session_factory
+    factory = get_session_factory()
+    if factory is None:
+        raise HTTPException(status_code=503, detail="db not ready")
+    return factory()
+
+
 # ── CRUD 工廠：admin_seo / admin_posts / admin_post_categories 共用 ──
 
 from typing import Awaitable, Callable, Optional, Type

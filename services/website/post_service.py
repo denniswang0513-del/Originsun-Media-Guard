@@ -114,6 +114,12 @@ def _post_to_dict(p: WebsitePost, category_slugs: list[str]) -> dict[str, Any]:
         "old_urls": list(p.old_urls or []),
         "redirect_count": len(p.old_urls or []),
         "faqs": list(p.faqs or []),
+        # 英文版（transcreation）— 給後台翻譯卡片讀取/編輯
+        "title_en": p.title_en,
+        "excerpt_en": p.excerpt_en,
+        "body_en": list(p.body_en or []),
+        "seo_title_en": p.seo_title_en,
+        "seo_description_en": p.seo_description_en,
     }
 
 
@@ -132,6 +138,8 @@ def _post_to_list_item(p: WebsitePost, category_slugs: list[str]) -> dict[str, A
         "sort_order": p.sort_order,
         "notion_page_id": p.notion_page_id,
         "redirect_count": len(p.old_urls or []),
+        "title_en": p.title_en,
+        "excerpt_en": p.excerpt_en,
     }
 
 
@@ -156,6 +164,12 @@ def _post_to_public_dict(p: WebsitePost, category_slugs: list[str]) -> dict[str,
         "author_url": p.author_url,
         "ai_allow_override": p.ai_allow_override,
         "faqs": list(p.faqs or []),
+        # 英文版（transcreation；空則前端 fallback 中文）
+        "title_en": p.title_en,
+        "excerpt_en": p.excerpt_en,
+        "body_en": list(p.body_en or []),
+        "seo_title_en": p.seo_title_en,
+        "seo_description_en": p.seo_description_en,
     }
 
 

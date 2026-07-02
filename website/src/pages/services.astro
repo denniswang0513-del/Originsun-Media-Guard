@@ -57,12 +57,12 @@ const cp = meta.copy?.services ?? {};
                             <article class="bg-white p-8 md:p-12 grid grid-cols-1 md:grid-cols-[80px_1fr_auto] gap-6 md:gap-10 items-start">
                                 <div class="text-5xl text-neutral-500">{iconChar(s.icon)}</div>
                                 <div>
-                                    <h2 class="text-2xl font-light tracking-wide mb-3">{s.title}</h2>
+                                    <h2 class="text-2xl font-light tracking-wide mb-3"><Tr zh={s.title} en={s.title_en || s.title} /></h2>
                                     {s.short_desc && (
-                                        <p class="text-neutral-800 leading-relaxed tracking-wide mb-3">{s.short_desc}</p>
+                                        <p class="text-neutral-800 leading-relaxed tracking-wide mb-3"><Tr zh={s.short_desc} en={s.short_desc_en || s.short_desc} /></p>
                                     )}
                                     {s.full_desc && (
-                                        <p class="text-sm text-neutral-500 leading-loose tracking-wide">{s.full_desc}</p>
+                                        <p class="text-sm text-neutral-500 leading-loose tracking-wide"><Tr zh={s.full_desc} en={s.full_desc_en || s.full_desc} /></p>
                                     )}
                                 </div>
                                 {cat && (

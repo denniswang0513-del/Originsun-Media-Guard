@@ -214,6 +214,11 @@ class CrmProject(Base):
     public_cover_url = Column(Text, nullable=True)
     # per-work SEO 索引控制（false = 跟著站級 meta.indexable；true = 強制 noindex）
     public_noindex = Column(Boolean, nullable=True, default=False)
+    # ── Phase M 英文版：_en 翻譯欄（transcreation；空則前端 fallback 中文）──
+    # public_client_en 為「手動指定」專用 — AI 翻譯 runner 不翻客戶名（專有名詞）
+    public_title_en = Column(String(300), nullable=True)
+    public_description_en = Column(Text, nullable=True)
+    public_client_en = Column(String(150), nullable=True)
 
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now())

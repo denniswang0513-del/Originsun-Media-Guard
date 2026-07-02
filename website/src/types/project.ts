@@ -6,9 +6,12 @@
 export interface IPublicProject {
     slug: string;
     title: string;
+    title_en?: string | null;       // 英文標題（英文模式顯示，空則 fallback title）
     client?: string | null;
+    client_en?: string | null;      // 英文客戶名（空則 fallback client）
     youtube_id?: string | null;
     description?: string | null;
+    description_en?: string | null; // 英文描述（空則 fallback description）
     year?: number | null;
     categories: string[];          // 製作類型 slug（kind=category）
     tags: string[];                // 使用場景 slug（kind=tag）

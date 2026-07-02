@@ -29,9 +29,9 @@ warnUnknownIcons(services.map(s => s.icon), "ServicesGrid");
                         <div class="text-3xl mb-4 text-neutral-300 group-hover:text-[#c9372c] transition-colors">
                             {iconChar(s.icon)}
                         </div>
-                        <h3 class="text-lg font-medium tracking-wide mb-2 text-neutral-900">{s.title}</h3>
+                        <h3 class="text-lg font-medium tracking-wide mb-2 text-neutral-900"><Tr zh={s.title} en={s.title_en || s.title} /></h3>
                         {s.short_desc && (
-                            <p class="text-sm text-neutral-500 leading-relaxed tracking-wide">{s.short_desc}</p>
+                            <p class="text-sm text-neutral-500 leading-relaxed tracking-wide"><Tr zh={s.short_desc} en={s.short_desc_en || s.short_desc} /></p>
                         )}
                         <div class="mt-4 text-xs tracking-[0.25em] text-neutral-400 group-hover:text-[#c9372c] uppercase">
                             <Tr zh="查看作品 →" en="View works →" />

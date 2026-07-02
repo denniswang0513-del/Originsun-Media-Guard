@@ -60,6 +60,13 @@ class WebsitePost(Base):
     # AI SEO runner 生成的常見問題（FAQPage JSON-LD + 文章底部可見區段）
     faqs = Column(JSONB, nullable=False, default=list)             # [{"q","a"}]
 
+    # ── Phase M 英文版：_en 翻譯欄（transcreation；空則前端 fallback 中文）──
+    title_en = Column(Text)
+    excerpt_en = Column(Text)
+    body_en = Column(JSONB, nullable=False, default=list)          # PostBlock[]（英文）
+    seo_title_en = Column(String(200))
+    seo_description_en = Column(String(300))
+
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 

@@ -217,6 +217,10 @@ def _to_public_dict(
         "old_urls": [u for u in (_old_slug_to_url(s) for s in (p.public_old_slugs or [])) if u],
         # 列表卡片摘要 — 給 WorkCard 一行顯示用
         "credits_summary": _credits_summary(p.public_credits),
+        # 英文版（transcreation；空則前端 fallback 中文。client_en 為手動指定）
+        "title_en": p.public_title_en,
+        "description_en": p.public_description_en,
+        "client_en": p.public_client_en,
     }
 
 

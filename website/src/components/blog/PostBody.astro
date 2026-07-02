@@ -1,0 +1,111 @@
+---
+/**
+ * PostBody.astro — 專欄文章內文 block 渲染器。
+ *
+ * news/[slug].astro 的中英雙容器（data-lang-zh / data-lang-en）共用這一份，避免把 ~85 行
+ * 的 block switch 複製兩次。blocks 空 → 顯示 fallbackText（excerpt）。
+ */
+import { renderInline } from "../../lib/richtext";
+import { isValidYouTubeId } from "../../lib/youtube";
+import type { PostBlock, PostBlockWidth } from "../../types/post";
+
+interface Props {
+    blocks: PostBlock[];
+    fallbackText?: string;
+}
+const { blocks, fallbackText = "" } = Astro.props;
+
+const WIDTH_CLASS: Record<PostBlockWidth, string> = {
+    content: "max-w-4xl",
+    wide:    "max-w-5xl",
+    full:    "max-w-none",
+};
+---
+{blocks.length > 0 ? (
+    blocks.map(block => {
+        if (block.type === "paragraph") {
+            const size = block.lead ? "text-xl sm:text-2xl text-neutral-800 leading-[1.7]" : "text-[17px] sm:text-lg text-neutral-700 leading-[1.95]";
+            return (
+                <div class="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 my-6">
+                    <p class={`${size} tracking-wide`} set:html={renderInline(block.text)} />
+                </div>
+            );
+        }
+        if (block.type === "heading") {
+            const cls = block.level === 2
+                ? "text-2xl sm:text-3xl font-bold text-neutral-900 mt-14 mb-4 tracking-tight"
+                : "text-xl sm:text-2xl font-semibold text-neutral-900 mt-10 mb-3 tracking-tight";
+            return (
+                <div class="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8">
+                    {block.level === 2 ? <h2 class={cls}>{block.text}</h2> : <h3 class={cls}>{block.text}</h3>}
+                </div>
+            );
+        }
+        if (block.type === "image") {
+            const widthCls = WIDTH_CLASS[block.width ?? "content"];
+            return (
+                <figure class={`${widthCls} mx-auto px-4 sm:px-6 lg:px-8 my-10 sm:my-14`}>
+                    <img src={block.src} alt={block.alt ?? ""} loading="lazy" class="w-full h-auto" />
+                    {block.caption && (
+                        <figcaption class="text-xs text-neutral-500 tracking-wide mt-3 text-center">
+                            {block.caption}
+                        </figcaption>
+                    )}
+                </figure>
+            );
+        }
+        if (block.type === "video") {
+            const widthCls = WIDTH_CLASS[block.width ?? "content"];
+            return (
+                <figure class={`${widthCls} mx-auto px-4 sm:px-6 lg:px-8 my-10 sm:my-14`}>
+                    {isValidYouTubeId(block.youtube_id) ? (
+                        <lite-youtube videoid={block.youtube_id}
+                                      class="block aspect-video w-full"
+                                      style="max-width: none;"
+                                      playlabel={block.caption ?? "Play video"}></lite-youtube>
+                    ) : (
+                        <div class="aspect-video bg-neutral-100 flex items-center justify-center text-neutral-400 text-sm">
+                            影片無法載入
+                        </div>
+                    )}
+                    {block.caption && (
+                        <figcaption class="text-xs text-neutral-500 tracking-wide mt-3 text-center">
+                            {block.caption}
+                        </figcaption>
+                    )}
+                </figure>
+            );
+        }
+        if (block.type === "quote") {
+            return (
+                <div class="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 my-10 sm:my-14">
+                    <blockquote class="border-l-2 border-[#c9372c] pl-6 sm:pl-8 py-2">
+                        <p class="text-xl sm:text-2xl font-light text-neutral-800 leading-[1.6] tracking-wide italic"
+                           set:html={`「${renderInline(block.text)}」`} />
+                        {block.author && (
+                            <cite class="block not-italic text-xs tracking-[0.3em] uppercase text-neutral-500 mt-4">
+                                — {block.author}
+                            </cite>
+                        )}
+                    </blockquote>
+                </div>
+            );
+        }
+        if (block.type === "list") {
+            const Tag = block.ordered ? "ol" : "ul";
+            const listCls = block.ordered ? "list-decimal" : "list-disc";
+            return (
+                <div class="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 my-6">
+                    <Tag class={`${listCls} pl-6 space-y-2 text-[17px] sm:text-lg text-neutral-700 leading-[1.85] tracking-wide marker:text-[#c9372c]`}>
+                        {block.items.map(item => <li set:html={renderInline(item)} />)}
+                    </Tag>
+                </div>
+            );
+        }
+        return null;
+    })
+) : (
+    <div class="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8">
+        <p class="text-lg text-neutral-600 leading-[1.85] tracking-wide">{fallbackText}</p>
+    </div>
+)}

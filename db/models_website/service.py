@@ -19,6 +19,10 @@ class WebsiteService(Base):
     icon = Column(String(50))                   # Lucide icon name
     short_desc = Column(String(300))
     full_desc = Column(Text)
+    # Phase M 英文版（transcreation；空則前端 fallback 中文）
+    title_en = Column(String(200))
+    short_desc_en = Column(String(500))
+    full_desc_en = Column(Text)
     cover_image = Column(Text)
     related_category_id = Column(Integer)
     sort_order = Column(Integer, nullable=False, default=0)

@@ -233,23 +233,8 @@ async def seo_runner_run_one(
 # ── Internal forward endpoints（NAS website-api → master）──────────
 # claude.exe 只在 master Windows 上能跑（吃用戶 Max 訂閱）。NAS container
 # 是 python:3.11-slim 沒 claude，也沒登入 Anthropic — 收到 admin 請求後
-# relay 到這裡。X-Internal-Key (= JWT secret，master/NAS 共用) 認證。
-
-def _check_internal_key(request: Request) -> None:
-    from core.auth import _get_secret
-    expected = _get_secret()
-    got = request.headers.get("X-Internal-Key", "")
-    if not expected or got != expected:
-        raise HTTPException(status_code=403, detail="forbidden")
-
-
-def _admin_session_for_internal():
-    """避開 admin_session 的 JWT user 守衛 — 只給 internal key 通過的進來用 DB。"""
-    from db.session import get_session_factory
-    factory = get_session_factory()
-    if factory is None:
-        raise HTTPException(status_code=503, detail="db not ready")
-    return factory()
+# relay 到這裡。X-Internal-Key 認證 + internal DB session 已上移到 _common（多 router 共用）。
+from ._common import _check_internal_key, _admin_session_for_internal  # noqa: F401
 
 
 @router.post("/internal/seo/run")

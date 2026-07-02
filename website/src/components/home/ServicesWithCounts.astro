@@ -39,7 +39,9 @@ const cards = services.slice(0, 4).map(s => {
     return {
         slug: cat?.slug || s.related_category_slug || s.slug,
         title: s.title,
+        title_en: s.title_en || s.title,
         short_desc: s.short_desc || "",
+        short_desc_en: s.short_desc_en || s.short_desc || "",
         count: cat?.count ?? 0,
     };
 });
@@ -89,11 +91,11 @@ const cards = services.slice(0, 4).map(s => {
                     </div>
 
                     <h3 class="text-2xl sm:text-3xl font-bold text-neutral-900 tracking-tight mb-3 group-hover:text-[#c9372c] transition-colors">
-                        {s.title}
+                        <Tr zh={s.title} en={s.title_en} />
                     </h3>
 
                     <p class="text-sm sm:text-base text-neutral-500 leading-[1.85] tracking-wide flex-1 max-w-sm">
-                        {s.short_desc}
+                        <Tr zh={s.short_desc} en={s.short_desc_en} />
                     </p>
 
                     <div class="mt-8 inline-flex items-center gap-3 text-xs tracking-[0.3em] uppercase text-neutral-400 group-hover:text-[#c9372c] transition-colors">

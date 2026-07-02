@@ -33,21 +33,26 @@ export type PostBlock =
 export interface IPost {
     slug: string;
     title: string;
+    title_en?: string | null;         // 英文標題（英文模式顯示，空則 fallback title）
     category: PostCategory;           // 主分類 slug（多選分類取第一個）
     category_slugs?: string[];        // 全部分類 slugs（DB 多對多）
     category_label_zh: string;
     category_label_en: string;
     cover_url: string;
     excerpt: string;
+    excerpt_en?: string | null;       // 英文摘要（空則 fallback excerpt）
     published_at: string;             // ISO date
     body?: PostBlock[];               // 詳情頁內文，列表頁只需 excerpt
+    body_en?: PostBlock[];            // 英文版內文區塊（空/未提供則 fallback body）
     read_time_min?: number;
     // SEO 用欄位（從 DB API 帶過來，可選）
     date_modified?: string;           // admin 最後編輯 ISO timestamp
     author_name?: string;             // per-post 作者；空則 fallback 到公司
     author_url?: string;
     seo_title?: string;
+    seo_title_en?: string | null;     // 英文 SEO 標題（契約欄位；單一 URL 站 SEO meta 維持中文，暫不用於渲染）
     seo_description?: string;
+    seo_description_en?: string | null; // 英文 SEO 描述（同上，契約欄位）
     og_image_url?: string;
     canonical_url?: string;
     noindex?: boolean;

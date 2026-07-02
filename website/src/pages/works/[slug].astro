@@ -6,6 +6,7 @@
  */
 import BaseLayout from "../../layouts/BaseLayout.astro";
 import SmartImage from "../../components/ui/SmartImage.astro";
+import Tr from "../../components/ui/Tr.astro";
 import { fetchMeta, fetchWorkBySlug, fetchAllWorksCached, getWorkSlugPaths } from "../../lib/crm-client";
 import { isValidYouTubeId, resolveThumbnail } from "../../lib/youtube";
 import { pageSchemas, resolveSiteUrl, ensureMinDescription, breadcrumb3 } from "../../lib/seo";
@@ -98,12 +99,12 @@ const nextThumb = nextWork ? resolveThumbnail(nextWork.youtube_id, nextWork.slug
                 {work.client && (
                     <>
                         <span class="text-[#c9372c]/40">·</span>
-                        <span class="tracking-wider">{work.client}</span>
+                        <span class="tracking-wider"><Tr zh={work.client} en={work.client_en || work.client} /></span>
                     </>
                 )}
             </div>
             <h1 class="text-2xl sm:text-3xl lg:text-4xl font-bold tracking-tight text-neutral-900 leading-tight">
-                {work.title}
+                <Tr zh={work.title} en={work.title_en || work.title} />
             </h1>
         </div>
 
@@ -127,8 +128,13 @@ const nextThumb = nextWork ? resolveThumbnail(nextWork.youtube_id, nextWork.slug
         <!-- 3. 文字 + 4. credits（窄欄 3xl 易讀） -->
         <div class="max-w-3xl mx-auto px-4 sm:px-6 lg:px-10">
             {work.description && (
-                <div class="text-[15px] sm:text-base text-neutral-700 leading-[1.85] tracking-wide mb-12 whitespace-pre-line space-y-5">
-                    {work.description.split(/\n\s*\n/).filter(Boolean).map(p => <p>{p}</p>)}
+                <div class="text-[15px] sm:text-base text-neutral-700 leading-[1.85] tracking-wide mb-12 whitespace-pre-line">
+                    <div data-lang-zh class="space-y-5">
+                        {work.description.split(/\n\s*\n/).filter(Boolean).map(p => <p>{p}</p>)}
+                    </div>
+                    <div data-lang-en class="space-y-5">
+                        {(work.description_en || work.description).split(/\n\s*\n/).filter(Boolean).map(p => <p>{p}</p>)}
+                    </div>
                 </div>
             )}
 
@@ -238,7 +244,7 @@ const nextThumb = nextWork ? resolveThumbnail(nextWork.youtube_id, nextWork.slug
                             )}
                         </div>
                         <div class="text-sm text-neutral-700 group-hover:text-[#c9372c] transition-colors tracking-wide">
-                            {rw.title}
+                            <Tr zh={rw.title} en={rw.title_en || rw.title} />
                         </div>
                     </a>
                 ))}
@@ -260,7 +266,7 @@ const nextThumb = nextWork ? resolveThumbnail(nextWork.youtube_id, nextWork.slug
                 <a href={`/works/${nextWork.slug}`} class="group flex items-center gap-4">
                     <div class="text-right">
                         <div class="text-xs tracking-[0.4em] uppercase text-neutral-500 mb-1">Next</div>
-                        <div class="text-sm text-neutral-700 group-hover:text-[#c9372c] transition-colors max-w-[300px] truncate">{nextWork.title}</div>
+                        <div class="text-sm text-neutral-700 group-hover:text-[#c9372c] transition-colors max-w-[300px] truncate"><Tr zh={nextWork.title} en={nextWork.title_en || nextWork.title} /></div>
                     </div>
                     {nextThumb && (
                         <div class="w-24 h-14 overflow-hidden bg-neutral-100">

@@ -4,6 +4,7 @@
  * 白底設計：圖 + 下方標題區（不再文字壓在圖上）
  */
 import SmartImage from "../ui/SmartImage.astro";
+import Tr from "../ui/Tr.astro";
 import type { IPublicProject } from "../../types/project";
 import { resolveThumbnail } from "../../lib/youtube";
 
@@ -40,13 +41,13 @@ const thumb = resolveThumbnail(work.youtube_id, work.slug, "hq");
                 {work.client && (
                     <>
                         {work.categories.length > 0 && <span class="text-[#c9372c]/40">·</span>}
-                        <span class="tracking-wider">{work.client}</span>
+                        <span class="tracking-wider"><Tr zh={work.client} en={work.client_en || work.client} /></span>
                     </>
                 )}
             </div>
         )}
         <h3 class="text-base sm:text-lg font-medium text-neutral-900 tracking-wide leading-snug group-hover:text-[#c9372c] transition-colors">
-            {work.title}
+            <Tr zh={work.title} en={work.title_en || work.title} />
         </h3>
         {work.tags && work.tags.length > 0 && (
             <div class="flex flex-wrap gap-1.5 mt-2">

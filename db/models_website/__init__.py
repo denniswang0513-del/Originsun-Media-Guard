@@ -23,6 +23,7 @@ from .credit_template import WebsiteCreditTemplate
 from .nav_item import WebsiteNavItem
 from .initiative import WebsiteInitiative
 from .redirect import WebsiteRedirect
+from .translation_state import WebsiteTranslationState
 
 __all__ = [
     "WebsiteCategory",
@@ -43,4 +44,5 @@ __all__ = [
     "WebsiteNavItem",
     "WebsiteInitiative",
     "WebsiteRedirect",
+    "WebsiteTranslationState",
 ]

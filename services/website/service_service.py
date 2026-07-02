@@ -21,6 +21,9 @@ def _to_public_dict(s: WebsiteService, related_slug: Optional[str] = None) -> di
         "full_desc": s.full_desc,
         "cover_image": s.cover_image,
         "related_category_slug": related_slug,
+        "title_en": s.title_en,
+        "short_desc_en": s.short_desc_en,
+        "full_desc_en": s.full_desc_en,
     }
 
 
@@ -36,6 +39,9 @@ def _to_admin_dict(s: WebsiteService) -> dict:
         "related_category_id": s.related_category_id,
         "sort_order": s.sort_order,
         "visible": s.visible,
+        "title_en": s.title_en,
+        "short_desc_en": s.short_desc_en,
+        "full_desc_en": s.full_desc_en,
     }
 
 

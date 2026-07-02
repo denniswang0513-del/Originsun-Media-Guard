@@ -5,32 +5,11 @@
 import SmartImage from "../../components/ui/SmartImage.astro";
 import BaseLayout from "../../layouts/BaseLayout.astro";
 import Tr from "../../components/ui/Tr.astro";
+import PostBody from "../../components/blog/PostBody.astro";
+import { renderInline } from "../../lib/richtext";
 import { fetchMeta } from "../../lib/crm-client";
 import { fetchPosts, fetchPostBySlug } from "../../lib/posts";
-import { isValidYouTubeId } from "../../lib/youtube";
 import { pageSchemas, resolveSiteUrl, ensureMinDescription, breadcrumb3 } from "../../lib/seo";
-import type { PostBlockWidth } from "../../types/post";
-
-const WIDTH_CLASS: Record<PostBlockWidth, string> = {
-    content: "max-w-4xl",
-    wide:    "max-w-5xl",
-    full:    "max-w-none",
-};
-
-// notion_service 把 paragraph/quote/list 內的 inline 連結存成 markdown `[text](url)`。
-// 這個 helper 把那段 markdown 還原成 <a>。content 已是 Notion 來的可信來源，但仍
-// HTML-escape 文字部分 + URL attr，避免奇怪字元意外注入 markup。
-const _ESC = (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
-const _MD_LINK = /\[([^\]]+)\]\(([^)\s]+)\)/g;
-function renderInline(text: string): string {
-    if (!text) return "";
-    // 先全文 escape，避免 < & " 等出現在 plain text 時破壞渲染
-    const escaped = _ESC(text);
-    // 再把 markdown link 模式還原（_ESC 不會碰到 [ ] ( ) 等字元，所以模式仍可匹配）
-    return escaped.replace(_MD_LINK, (_, label, href) =>
-        `<a href="${_ESC(href)}" target="_blank" rel="noopener noreferrer" class="text-[#c9372c] underline hover:text-[#a02a23]">${label}</a>`
-    );
-}
 
 export async function getStaticPaths() {
     const posts = await fetchPosts();
@@ -72,6 +51,11 @@ const schemaData = [
         ? [pageSchemas.faqPage(faqs.map(f => ({ question: f.q, answer: f.a })))]
         : []),
 ];
+
+// 內文雙語：body_en 有內容則用之，否則 fallback 中文 body。
+// 兩個 data-lang 容器並存（CSS 依 html[data-lang] 控顯隱，與 Tr 同機制），共用 PostBody。
+const bodyZh = post.body ?? [];
+const bodyEn = (post.body_en && post.body_en.length > 0) ? post.body_en : bodyZh;
 ---
 
 <BaseLayout title={pageTitle}
@@ -102,7 +86,7 @@ const schemaData = [
             </div>
 
             <h1 class="text-3xl sm:text-5xl font-bold tracking-tight text-neutral-900 mb-6 leading-tight">
-                {post.title}
+                <Tr zh={post.title} en={post.title_en || post.title} />
             </h1>
 
             <div class="flex items-center gap-4 text-xs tracking-widest text-neutral-500 mb-4">
@@ -115,97 +99,10 @@ const schemaData = [
         </div>
     </article>
 
-    <!-- 內文 blocks -->
+    <!-- 內文 blocks（中英雙容器並存，CSS 依 data-lang 顯隱其一；共用 PostBody） -->
     <article class="bg-white pb-16 sm:pb-24 post-body">
-        {post.body && post.body.length > 0 ? (
-            post.body.map(block => {
-                if (block.type === "paragraph") {
-                    const size = block.lead ? "text-xl sm:text-2xl text-neutral-800 leading-[1.7]" : "text-[17px] sm:text-lg text-neutral-700 leading-[1.95]";
-                    return (
-                        <div class="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 my-6">
-                            <p class={`${size} tracking-wide`} set:html={renderInline(block.text)} />
-                        </div>
-                    );
-                }
-                if (block.type === "heading") {
-                    const cls = block.level === 2
-                        ? "text-2xl sm:text-3xl font-bold text-neutral-900 mt-14 mb-4 tracking-tight"
-                        : "text-xl sm:text-2xl font-semibold text-neutral-900 mt-10 mb-3 tracking-tight";
-                    return (
-                        <div class="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8">
-                            {block.level === 2 ? <h2 class={cls}>{block.text}</h2> : <h3 class={cls}>{block.text}</h3>}
-                        </div>
-                    );
-                }
-                if (block.type === "image") {
-                    const widthCls = WIDTH_CLASS[block.width ?? "content"];
-                    return (
-                        <figure class={`${widthCls} mx-auto px-4 sm:px-6 lg:px-8 my-10 sm:my-14`}>
-                            <img src={block.src} alt={block.alt ?? ""} loading="lazy"
-                                 class="w-full h-auto" />
-                            {block.caption && (
-                                <figcaption class="text-xs text-neutral-500 tracking-wide mt-3 text-center">
-                                    {block.caption}
-                                </figcaption>
-                            )}
-                        </figure>
-                    );
-                }
-                if (block.type === "video") {
-                    const widthCls = WIDTH_CLASS[block.width ?? "content"];
-                    return (
-                        <figure class={`${widthCls} mx-auto px-4 sm:px-6 lg:px-8 my-10 sm:my-14`}>
-                            {isValidYouTubeId(block.youtube_id) ? (
-                                <lite-youtube videoid={block.youtube_id}
-                                              class="block aspect-video w-full"
-                                              style="max-width: none;"
-                                              playlabel={block.caption ?? "Play video"}></lite-youtube>
-                            ) : (
-                                <div class="aspect-video bg-neutral-100 flex items-center justify-center text-neutral-400 text-sm">
-                                    影片無法載入
-                                </div>
-                            )}
-                            {block.caption && (
-                                <figcaption class="text-xs text-neutral-500 tracking-wide mt-3 text-center">
-                                    {block.caption}
-                                </figcaption>
-                            )}
-                        </figure>
-                    );
-                }
-                if (block.type === "quote") {
-                    return (
-                        <div class="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 my-10 sm:my-14">
-                            <blockquote class="border-l-2 border-[#c9372c] pl-6 sm:pl-8 py-2">
-                                <p class="text-xl sm:text-2xl font-light text-neutral-800 leading-[1.6] tracking-wide italic"
-                                   set:html={`「${renderInline(block.text)}」`} />
-                                {block.author && (
-                                    <cite class="block not-italic text-xs tracking-[0.3em] uppercase text-neutral-500 mt-4">
-                                        — {block.author}
-                                    </cite>
-                                )}
-                            </blockquote>
-                        </div>
-                    );
-                }
-                if (block.type === "list") {
-                    const Tag = block.ordered ? "ol" : "ul";
-                    const listCls = block.ordered ? "list-decimal" : "list-disc";
-                    return (
-                        <div class="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 my-6">
-                            <Tag class={`${listCls} pl-6 space-y-2 text-[17px] sm:text-lg text-neutral-700 leading-[1.85] tracking-wide marker:text-[#c9372c]`}>
-                                {block.items.map(item => <li set:html={renderInline(item)} />)}
-                            </Tag>
-                        </div>
-                    );
-                }
-                return null;
-            })
-        ) : (
-            <div class="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8">
-                <p class="text-lg text-neutral-600 leading-[1.85] tracking-wide">{post.excerpt}</p>
-            </div>
-        )}
+        <div data-lang-zh><PostBody blocks={bodyZh} fallbackText={post.excerpt} /></div>
+        <div data-lang-en><PostBody blocks={bodyEn} fallbackText={post.excerpt_en || post.excerpt} /></div>
     </article>
 
     <!-- 常見問題（AI SEO 生成；同時輸出 FAQPage JSON-LD） -->
@@ -258,7 +155,7 @@ const schemaData = [
                                 {p.category_label_en}
                             </div>
                             <h3 class="text-base font-medium text-neutral-900 leading-snug group-hover:text-[#c9372c] transition-colors">
-                                {p.title}
+                                <Tr zh={p.title} en={p.title_en || p.title} />
                             </h3>
                         </a>
                     ))}

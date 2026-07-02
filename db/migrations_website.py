@@ -46,6 +46,10 @@ _CRM_PROJECTS_COLUMNS: list[tuple[str, str]] = [
     # credits 雙模式：'block' (JSONB blocks) / 'text' (純文字貼上)
     ("public_credits_mode", "VARCHAR(16) NOT NULL DEFAULT 'text'"),
     ("public_credits_text", "TEXT"),
+    # Phase M 英文版 _en（transcreation；public_client_en 手動指定，AI runner 不翻客戶名）
+    ("public_title_en", "VARCHAR(300)"),
+    ("public_description_en", "TEXT"),
+    ("public_client_en", "VARCHAR(150)"),
 ]
 
 # ── ALTER TABLE: website_posts 擴充（既有部署補欄）──
@@ -53,6 +57,19 @@ _CRM_PROJECTS_COLUMNS: list[tuple[str, str]] = [
 # + 文章底部「常見問題」可見區段（Google FAQ rich result 要求內容對使用者可見）
 _WEBPOSTS_COLUMNS: list[tuple[str, str]] = [
     ("faqs", "JSONB NOT NULL DEFAULT '[]'::jsonb"),
+    # Phase M 英文版 _en（transcreation）
+    ("title_en", "TEXT"),
+    ("excerpt_en", "TEXT"),
+    ("body_en", "JSONB NOT NULL DEFAULT '[]'::jsonb"),
+    ("seo_title_en", "VARCHAR(200)"),
+    ("seo_description_en", "VARCHAR(300)"),
+]
+
+# ── ALTER TABLE: website_services 擴充（英文版 _en）──
+_WEBSVC_COLUMNS: list[tuple[str, str]] = [
+    ("title_en", "VARCHAR(200)"),
+    ("short_desc_en", "VARCHAR(500)"),
+    ("full_desc_en", "TEXT"),
 ]
 
 # ── ALTER TABLE: crm_staff 擴充 ──
@@ -369,6 +386,22 @@ _CREATE_TABLES: list[str] = [
         updated_at TIMESTAMPTZ DEFAULT NOW()
     )
     """,
+    # 英文翻譯（transcreation）工作流狀態（每實體一列；英文內容在各實體 _en 欄）。
+    """
+    CREATE TABLE IF NOT EXISTS website_translation_state (
+        entity_type VARCHAR(16) NOT NULL,
+        entity_id VARCHAR(64) NOT NULL,
+        source_hash VARCHAR(64),
+        status VARCHAR(20) NOT NULL DEFAULT 'pending',
+        last_translated_at TIMESTAMPTZ,
+        last_translated_by VARCHAR(64),
+        reviewed_at TIMESTAMPTZ,
+        reviewed_by VARCHAR(64),
+        notes TEXT,
+        updated_at TIMESTAMPTZ DEFAULT NOW(),
+        PRIMARY KEY (entity_type, entity_id)
+    )
+    """,
 ]
 
 _CREATE_INDEXES: list[str] = [
@@ -404,6 +437,7 @@ _CREATE_INDEXES: list[str] = [
     # 頂部導覽：公開端 visible=true ORDER BY sort_order
     "CREATE INDEX IF NOT EXISTS idx_webnav_visible_sort ON website_nav_items (visible, sort_order)",
     "CREATE INDEX IF NOT EXISTS idx_webredir_visible_sort ON website_redirects (visible, sort_order)",
+    "CREATE INDEX IF NOT EXISTS idx_transl_status ON website_translation_state (status)",
 ]
 
 
@@ -626,6 +660,8 @@ async def run_website_migrations(session_factory: Callable) -> None:
           for c, t in _WEBPROJSEO_COLUMNS],
         *[f"ALTER TABLE website_awards ADD COLUMN IF NOT EXISTS {c} {t}"
           for c, t in _WEBAWARD_COLUMNS],
+        *[f"ALTER TABLE website_services ADD COLUMN IF NOT EXISTS {c} {t}"
+          for c, t in _WEBSVC_COLUMNS],
         *_CREATE_INDEXES,
         # v1.10.121 修復 — 既有部署 templates 表無 UNIQUE constraint，先清重複再補
         _CLEANUP_TEMPLATE_DUPLICATES,
