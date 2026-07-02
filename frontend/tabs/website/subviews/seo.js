@@ -50,7 +50,7 @@ const HEALTH_RULES = [
       help: '待 i18n 多語路由完成後自動 pass' },
 ];
 
-let _state = { settings: {}, faqs: [], testimonials: [], quickFacts: [], awards: [], aiRunner: null };
+let _state = { settings: {}, faqs: [], testimonials: [], quickFacts: [], awards: [], aiRunner: null, postAiRunner: null };
 let _container = null;
 
 // 排程「時間選單」預設項 — value 是後端要的 cron 字串（croniter），label 給人看。
@@ -74,13 +74,14 @@ export default async function render(container, ctx = {}) {
     container.innerHTML = '<h2>🔍 SEO / AI SEO 管理</h2><div style="color:#888;padding:20px;">載入中…</div>';
 
     try {
-        const [settings, faqs, testi, qfacts, awards, runner] = await Promise.all([
+        const [settings, faqs, testi, qfacts, awards, runner, postRunner] = await Promise.all([
             websiteFetch('/api/website/admin/settings'),
             websiteFetch('/api/website/admin/faqs'),
             websiteFetch('/api/website/admin/testimonials'),
             websiteFetch('/api/website/admin/quick_facts'),
             websiteFetch('/api/website/admin/awards').catch(() => ({ items: [] })),
             websiteFetch('/api/website/admin/seo/runner/settings').catch(() => null),
+            websiteFetch('/api/website/admin/seo/posts/runner/settings').catch(() => null),
         ]);
         if (!isCurrent()) return;
         _state.settings = settings?.settings || {};
@@ -89,6 +90,7 @@ export default async function render(container, ctx = {}) {
         _state.quickFacts = qfacts?.items || [];
         _state.awards = awards?.items || [];
         _state.aiRunner = runner;
+        _state.postAiRunner = postRunner;
     } catch (e) {
         if (!isCurrent()) return;
         // 404 = 新 admin SEO endpoint 在 NAS website-api 不存在 → 大概率部署落後
@@ -107,6 +109,7 @@ function _renderAll() {
         <h2>🔍 SEO / AI SEO 管理</h2>
         <div style="display:grid;grid-template-columns:1fr;gap:16px;max-width:1100px;">
             ${_cardAiRunner()}
+            ${_cardPostAiRunner()}
             ${_cardMeta()}
             ${_cardQuickFacts()}
             ${_cardFAQ()}
@@ -118,6 +121,142 @@ function _renderAll() {
     `;
     _bindDescCounter();
     _bindAiRunner();
+    _bindPostAiRunner();
+}
+
+// ===== 0b. 文章版 AI SEO Runner 排程（影像專欄）=====
+// 與作品集 _cardAiRunner 同結構，改打 /seo/posts/runner/* 端點、用 post-* 元素 ID。
+function _cardPostAiRunner() {
+    const r = _state.postAiRunner;
+    if (r === null) {
+        return `<div class="card" style="border-left:3px solid #c8a45c;opacity:0.6;">
+            <h3 style="color:#fff;margin:0 0 8px;font-size:15px;">🤖 AI SEO 排程（文章）</h3>
+            <div style="color:#888;font-size:12px;">NAS website-api 尚未支援此 endpoint，請在 master 跑 /publish 同步後端。</div>
+        </div>`;
+    }
+    const enabled = !!r.enabled;
+    const cron = r.cron || '30 3 * * *';
+    const batch = r.batch_size || 10;
+    const presetVals = CRON_PRESETS.map(p => p.v);
+    let cronOptions = CRON_PRESETS.map(p =>
+        `<option value="${p.v}"${p.v === cron ? ' selected' : ''}>${p.label}</option>`
+    ).join('');
+    if (!presetVals.includes(cron)) {
+        cronOptions = `<option value="${esc(cron)}" selected>自訂：${esc(cron)}</option>` + cronOptions;
+    }
+    const lastAt = r.last_run_at ? new Date(r.last_run_at * 1000).toLocaleString('zh-TW') : '從未執行';
+    const summary = r.last_run_summary || {};
+    const sumText = summary && (summary.processed != null)
+        ? `處理 ${summary.processed} 篇 / 失敗 ${summary.errors || 0} 篇` : '';
+    return `<div class="card" style="border-left:3px solid #c8a45c;">
+        <h3 style="color:#fff;margin:0 0 12px;font-size:15px;">🤖 AI SEO 排程（文章）
+            <span style="color:#888;font-size:11px;font-weight:400;margin-left:8px;">
+                自動補影像專欄文章的 SEO 標題/描述/摘要 + FAQ（吃 Max 訂閱額度）
+            </span>
+        </h3>
+        <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:14px;margin-bottom:12px;">
+            <div>
+                <label style="color:#888;font-size:11px;display:block;margin-bottom:6px;">啟用排程</label>
+                <label style="display:flex;align-items:center;gap:8px;cursor:pointer;color:#ddd;">
+                    <input type="checkbox" id="post-ai-runner-enabled" ${enabled ? 'checked' : ''} style="width:16px;height:16px;" />
+                    <span>${enabled ? '✓ 已啟用' : '⚠ 未啟用（手動觸發仍可用）'}</span>
+                </label>
+            </div>
+            <div>
+                <label style="color:#888;font-size:11px;display:block;margin-bottom:6px;">執行時間（主機本地時區）</label>
+                <select id="post-ai-runner-cron" style="width:100%;font-size:12px;padding:4px;background:#1a1a1a;color:#ddd;border:1px solid #3a3a3a;border-radius:4px;">
+                    ${cronOptions}
+                </select>
+                <div style="color:#666;font-size:10px;margin-top:2px;">建議與作品集排程錯開時段</div>
+            </div>
+            <div>
+                <label style="color:#888;font-size:11px;display:block;margin-bottom:6px;">單次最多處理</label>
+                <input id="post-ai-runner-batch" type="number" min="1" max="50" value="${batch}" style="width:100%;" />
+                <div style="color:#666;font-size:10px;margin-top:2px;">只處理已發布且缺 SEO 的文章</div>
+            </div>
+        </div>
+        <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:8px;">
+            <button id="post-ai-runner-save" class="btn btn-sm btn-primary">💾 儲存排程設定</button>
+            <button id="post-ai-runner-preview" class="btn btn-sm">👁 預覽（dry-run）</button>
+            <button id="post-ai-runner-now" class="btn btn-sm">▶ 立即執行</button>
+        </div>
+        <div style="color:#888;font-size:11px;padding-top:8px;border-top:1px solid #2a2a2a;">
+            上次執行：<span style="color:#ddd;">${esc(lastAt)}</span>
+            ${sumText ? `<span style="color:#666;">·</span> <span style="color:#ddd;">${esc(sumText)}</span>` : ''}
+        </div>
+    </div>`;
+}
+
+function _bindPostAiRunner() {
+    const enabledEl = document.getElementById('post-ai-runner-enabled');
+    const cronEl = document.getElementById('post-ai-runner-cron');
+    const batchEl = document.getElementById('post-ai-runner-batch');
+    if (!enabledEl) return;
+
+    document.getElementById('post-ai-runner-save')?.addEventListener('click', async () => {
+        try {
+            await websiteFetch('/api/website/admin/seo/posts/runner/settings', {
+                method: 'PUT',
+                body: {
+                    enabled: enabledEl.checked,
+                    cron: cronEl.value.trim() || '30 3 * * *',
+                    batch_size: Math.max(1, Math.min(50, Number(batchEl.value) || 10)),
+                },
+            });
+            toastOk('文章排程設定已儲存');
+        } catch (e) { toastErr('儲存失敗：' + (e.message || e)); }
+    });
+
+    document.getElementById('post-ai-runner-preview')?.addEventListener('click', async () => {
+        try {
+            const r = await websiteFetch('/api/website/admin/seo/posts/runner/run?dry_run=1', { method: 'POST' });
+            const n = (r.works || []).length;
+            toastOk(`Dry-run：將處理 ${n} 篇文章（不實際送 LLM）`);
+        } catch (e) { toastErr('預覽失敗：' + (e.message || e)); }
+    });
+
+    document.getElementById('post-ai-runner-now')?.addEventListener('click', async () => {
+        const btn = document.getElementById('post-ai-runner-now');
+        const orig = btn.textContent;
+        const startAt = Number(_state.postAiRunner?.last_run_at || 0);
+        let poll = null, safety = null;
+        const finish = (fn, msg) => {
+            if (poll) { clearInterval(poll); poll = null; }
+            if (safety) { clearTimeout(safety); safety = null; }
+            btn.disabled = false; btn.textContent = orig;
+            fn(msg);
+        };
+        btn.disabled = true;
+        btn.textContent = '⏳ 啟動中…';
+        try {
+            const r = await websiteFetch('/api/website/admin/seo/posts/runner/run', { method: 'POST' });
+            if (r.status === 'busy') { finish(toastErr, '已有文章 AI runner 在跑'); return; }
+            if (r.status === 'error' || r.error) { finish(toastErr, '啟動失敗：' + (r.error || '未知')); return; }
+            toastOk('已開始背景執行，進度更新中…');
+            poll = setInterval(async () => {
+                try {
+                    const s = await websiteFetch('/api/website/admin/seo/posts/runner/settings');
+                    _state.postAiRunner = s;
+                    if (Number(s.last_run_at || 0) > startAt) {
+                        const sum = s.last_run_summary || {};
+                        if ((sum.errors || 0) > 0) finish(toastErr, `處理 ${sum.processed || 0} 篇 / 失敗 ${sum.errors} 篇`);
+                        else if (sum.note) finish(toastErr, sum.note);
+                        else finish(toastOk, `完成：處理 ${sum.processed || 0} 篇`);
+                        _renderAll();
+                    } else {
+                        btn.textContent = s.running ? `⏳ 執行中… ${s.progress || ''}` : '⏳ 啟動中…';
+                    }
+                } catch (_) { /* 輪詢失敗下次再試 */ }
+            }, 5000);
+            safety = setTimeout(() => {
+                if (poll) { clearInterval(poll); poll = null; }
+                safety = null;
+                btn.disabled = false; btn.textContent = orig;
+            }, 20 * 60 * 1000);
+        } catch (e) {
+            finish(toastErr, '啟動失敗：' + (e.message || e));
+        }
+    });
 }
 
 // ===== 0. AI SEO Runner 排程 =====

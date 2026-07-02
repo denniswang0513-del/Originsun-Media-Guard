@@ -18,6 +18,7 @@ import type { ICategory } from "../types/category";
 import type { IService } from "../types/service";
 import type { ITeamMember, IWebsiteMeta } from "../types/meta";
 import type { IFAQ, ITestimonial, IQuickFact, IAward } from "../types/seo";
+import type { IInitiativeCard } from "../types/initiative";
 
 
 async function _get<T>(path: string): Promise<T> {
@@ -182,6 +183,7 @@ export interface IRawPublicPost {
     author_name: string | null;
     author_url: string | null;
     ai_allow_override: boolean | null;
+    faqs: { q: string; a: string }[];
 }
 
 export interface IRawPostCategory {
@@ -199,6 +201,15 @@ export const fetchRawPosts = _memoizeList<IRawPublicPost>(() =>
 
 export const fetchRawPostCategories = _memoizeList<IRawPostCategory>(() =>
     _safeGet<{ items: IRawPostCategory[] }>("/api/website/post_categories", { items: [] }, "fetchRawPostCategories"));
+
+
+// ── 公益合作 / 創作計畫 案例（後端已解析作品連動）──
+
+export const fetchImpactInitiatives = _memoizeList<IInitiativeCard>(() =>
+    _safeGet<{ items: IInitiativeCard[] }>("/api/website/initiatives?line=impact", { items: [] }, "fetchImpact"));
+
+export const fetchLabInitiatives = _memoizeList<IInitiativeCard>(() =>
+    _safeGet<{ items: IInitiativeCard[] }>("/api/website/initiatives?line=lab", { items: [] }, "fetchLab"));
 
 
 /**

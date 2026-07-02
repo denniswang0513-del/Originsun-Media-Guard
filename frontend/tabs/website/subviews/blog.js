@@ -49,7 +49,7 @@ const EMPTY_POST = Object.freeze({
     body: [], category_slugs: [], status: 'draft', published_at: null,
     seo_title: '', seo_description: '', og_image_url: '', canonical_url: '',
     noindex: false, author_name: '', author_url: '',
-    ai_allow_override: null, old_urls: [],
+    ai_allow_override: null, old_urls: [], faqs: [],
 });
 
 let _state = {
@@ -392,6 +392,7 @@ function _showPostModal(title) {
             <div id="post-modal-edit" style="flex:1 1 auto;padding:18px;min-width:0;">
                 ${_modalBasicSection(p, isNew, pubLocal)}
                 ${_modalCategorySection(p)}
+                ${_modalAiSeoSection(p)}
                 ${_modalBlockEditor(p)}
                 ${_modalSEOSection(p)}
                 ${_modalRedirectsSection(p)}
@@ -511,6 +512,106 @@ function _modalCategorySection(p) {
         </div>
     `;
 }
+
+function _modalAiSeoSection(p) {
+    const noPostId = !p.id;
+    return `
+        <div class="pm-section" style="border-left:3px solid #c8a45c;">
+            <div class="pm-section-title">🤖 AI SEO</div>
+            <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:4px;">
+                <button class="btn btn-sm" id="m-ai-seo-btn" onclick="window._blog.aiGenerateSeo()" ${noPostId ? 'disabled' : ''}
+                        style="background:#c8a45c;color:#1a1a1a;font-weight:600;${noPostId ? 'opacity:0.5;cursor:not-allowed;' : ''}">
+                    🤖 AI 生成 SEO 內容
+                </button>
+                <span style="color:#888;font-size:11px;">
+                    ${noPostId
+                        ? '新文章請先「💾 儲存」草稿後才能生成'
+                        : '依文章內容生成 SEO 標題/描述、摘要(空才補) + 3 題 FAQ，<strong style="color:#c8a45c;">生成後直接套用並儲存</strong>；可再編輯後按 💾 重存'}
+                </span>
+            </div>
+            <div id="m-faqs-host">${_renderFaqEditor(p.faqs || [])}</div>
+        </div>`;
+}
+
+function _renderFaqEditor(faqs) {
+    faqs = faqs || [];
+    return `
+        <div style="margin-top:8px;">
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">
+                <label style="color:#9aa0a6;font-size:11px;">常見問題 FAQ <span style="color:#666;">(${faqs.length}) · 輸出 FAQPage 結構化資料 + 文章底部可見區段</span></label>
+                <button class="pm-mini-btn" onclick="window._blog.addFaq()">+ 加一題</button>
+            </div>
+            ${faqs.length === 0
+                ? '<div style="color:#666;font-size:11px;padding:8px;border:1px dashed #2a2a2a;border-radius:4px;">尚無 FAQ — 按上方「🤖 AI 生成」或「+ 加一題」</div>'
+                : faqs.map((f, i) => `
+                    <div style="border:1px solid #2a2a2a;border-radius:4px;padding:8px;margin-bottom:6px;background:#1a1a1a;">
+                        <div style="display:flex;gap:6px;align-items:center;margin-bottom:4px;">
+                            <span style="color:#c8a45c;font-size:11px;flex-shrink:0;font-weight:600;">Q${i + 1}</span>
+                            <input type="text" value="${esc(f.q || '')}" placeholder="問題"
+                                   oninput="window._blog.updateFaq(${i}, 'q', this.value)" style="flex:1;font-size:12px;" />
+                            <button class="pm-mini-btn" onclick="window._blog.removeFaq(${i})" title="刪除"
+                                    style="background:#3a1a1a;border-color:#5a2a2a;color:#f87171;flex-shrink:0;">✕</button>
+                        </div>
+                        <textarea rows="2" placeholder="答案（1-2 句，訊息密度高）"
+                                  oninput="window._blog.updateFaq(${i}, 'a', this.value)"
+                                  style="width:100%;font-size:12px;">${esc(f.a || '')}</textarea>
+                    </div>`).join('')}
+        </div>`;
+}
+
+_blog.refreshFaqs = () => {
+    const host = document.getElementById('m-faqs-host');
+    if (host) host.innerHTML = _renderFaqEditor(_editingPost?.faqs || []);
+};
+_blog.addFaq = () => {
+    if (!_editingPost) return;
+    _editingPost.faqs = _editingPost.faqs || [];
+    _editingPost.faqs.push({ q: '', a: '' });
+    _blog.refreshFaqs();
+};
+_blog.removeFaq = (i) => {
+    if (_editingPost?.faqs) { _editingPost.faqs.splice(i, 1); _blog.refreshFaqs(); }
+};
+_blog.updateFaq = (i, field, val) => {
+    if (_editingPost?.faqs?.[i]) _editingPost.faqs[i][field] = val;
+};
+
+_blog.aiGenerateSeo = async () => {
+    if (!_editingPost?.id) { toastErr('新文章請先「💾 儲存」草稿再生成'); return; }
+    const btn = document.getElementById('m-ai-seo-btn');
+    const orig = btn ? btn.textContent : '';
+    if (btn) { btn.disabled = true; btn.textContent = '⏳ AI 生成中…（約 20–40 秒）'; }
+    try {
+        const r = await websiteFetch(`/api/website/admin/seo/posts/${_editingPost.id}/generate`, { method: 'POST' });
+        if (!r.ok) { toastErr('生成失敗：' + (r.error || '未知')); return; }
+        // 1) 填入欄位（讓使用者看到套用了什麼）
+        const setVal = (id, v) => { const el = document.getElementById(id); if (el && v) el.value = v; };
+        setVal('m-seo-title', r.seo_title);
+        setVal('m-seo-desc', r.seo_description);
+        const exEl = document.getElementById('m-excerpt');
+        const fillExcerpt = exEl && !exEl.value.trim() && r.excerpt;
+        if (fillExcerpt) exEl.value = r.excerpt;
+        _editingPost.faqs = Array.isArray(r.faqs) ? r.faqs : [];
+        _blog.refreshFaqs();
+        const det = document.querySelector('#post-modal details');
+        if (det) det.open = true;
+        // 2) 直接套用：targeted PUT 存進文章（不關 Modal，使用者仍可微調後再按 💾）
+        const body = { seo_title: r.seo_title, seo_description: r.seo_description, faqs: _editingPost.faqs };
+        if (fillExcerpt) body.excerpt = r.excerpt;
+        const saved = await websiteFetch(`/api/website/admin/posts/${_editingPost.id}`, { method: 'PUT', body });
+        Object.assign(_editingPost, {
+            seo_title: saved.seo_title, seo_description: saved.seo_description,
+            faqs: saved.faqs, excerpt: saved.excerpt,
+        });
+        const idx = _state.posts.findIndex(p => p.id === _editingPost.id);
+        if (idx >= 0) _state.posts[idx] = saved;
+        toastOk(`已生成並套用 SEO + ${(_editingPost.faqs || []).length} 題 FAQ（對外網站 60 秒後重建）`);
+    } catch (e) {
+        toastErr('生成失敗：' + (e.message || e));
+    } finally {
+        if (btn) { btn.disabled = false; btn.textContent = orig; }
+    }
+};
 
 function _modalSEOSection(p) {
     return `
@@ -876,7 +977,12 @@ function _renderBlockItem(b, idx, total) {
             <div style="display:flex;justify-content:space-between;align-items:center;padding:6px 10px;background:#222;border-bottom:1px solid #2a2a2a;border-radius:6px 6px 0 0;">
                 <span style="color:#aaa;font-size:11px;display:flex;align-items:center;gap:6px;">
                     <span style="display:inline-flex;align-items:center;justify-content:center;width:18px;height:18px;background:#0d0d0d;border-radius:3px;color:#3b82f6;font-weight:600;font-size:10px;">${icon}</span>
-                    #${idx + 1} <span style="color:#666;">· ${esc(b.type)}</span>
+                    #${idx + 1}
+                    <select onchange="window._blog.changeBlockType(${idx}, this.value)" title="更改區塊類型（保留文字內容）"
+                            style="font-size:11px;padding:2px 6px;background:#0d0d0d;border:1px solid #333;color:#ccc;border-radius:3px;cursor:pointer;margin-left:2px;">
+                        ${Object.entries(BLOCK_REGISTRY).map(([key, t]) =>
+                            `<option value="${key}" ${b.type === key ? 'selected' : ''}>${esc(t.label)}</option>`).join('')}
+                    </select>
                 </span>
                 <div style="display:flex;gap:3px;">
                     <button class="pm-mini-btn" onclick="window._blog.moveBlockUp(${idx})" ${idx === 0 ? 'disabled style="opacity:0.3;cursor:not-allowed;"' : ''} title="上移">↑</button>
@@ -1435,6 +1541,48 @@ _blog.moveBlockDown = (idx) => {
     _refreshBlocks();
 };
 
+// ── 更改區塊類型（保留文字內容）──
+// 把任一 block 的文字內容萃出來，再依目標 type 重建。text-type 之間
+// （段落/標題/引言/列表）互轉會完整保留文字；轉成圖片/影片則把文字當 caption。
+function _blockToText(b) {
+    if (!b) return '';
+    if (b.type === 'list') return (b.items || []).join('\n');
+    if (b.type === 'image' || b.type === 'video') return b.caption || '';
+    return b.text || '';
+}
+
+function _convertBlock(b, newType) {
+    const text = _blockToText(b);
+    switch (newType) {
+        case 'paragraph':
+            return b.lead ? { type: 'paragraph', text, lead: true } : { type: 'paragraph', text };
+        case 'heading':
+            return { type: 'heading', level: b.level === 3 ? 3 : 2, text };
+        case 'quote':
+            return b.author ? { type: 'quote', text, author: b.author } : { type: 'quote', text };
+        case 'list': {
+            const items = text.split('\n').map(s => s.trim()).filter(Boolean);
+            return { type: 'list', items: items.length ? items : [''], ordered: !!b.ordered };
+        }
+        case 'image':
+            return { type: 'image', src: b.src || '', alt: b.alt || '',
+                     caption: b.caption || (b.type !== 'image' ? text : ''), width: b.width || 'content' };
+        case 'video':
+            return { type: 'video', youtube_id: b.youtube_id || '',
+                     caption: b.caption || (b.type !== 'video' ? text : ''), width: b.width || 'content' };
+        default:
+            return b;
+    }
+}
+
+_blog.changeBlockType = (idx, newType) => {
+    if (!_editingPost?.body?.[idx]) return;
+    const cur = _editingPost.body[idx];
+    if (cur.type === newType || !BLOCK_REGISTRY[newType]) return;
+    _editingPost.body[idx] = _convertBlock(cur, newType);
+    _refreshBlocks();
+};
+
 _blog.updateListItem = (blockIdx, itemIdx, value) => {
     const block = _editingPost?.body?.[blockIdx];
     if (!block?.items) return;
@@ -1661,6 +1809,8 @@ function _readModalForm() {
         author_name: document.getElementById('m-author-name').value.trim() || null,
         author_url: document.getElementById('m-author-url').value.trim() || null,
         old_urls,
+        // FAQ 不在 DOM 表單，隨 _editingPost.faqs 維護（AI 生成 / 手動編輯）
+        faqs: (_editingPost?.faqs || []).filter(f => (f.q || '').trim() && (f.a || '').trim()),
     };
 }
 
@@ -1817,7 +1967,22 @@ function _viewNotion() {
     const connected = s.connected;
 
     return `
+        <div class="card" style="margin-bottom:12px;border-left:3px solid #06b6d4;">
+            <h3 style="color:#fff;margin:0 0 6px;font-size:13px;">🔗 從公開 Notion 連結匯入單篇 <span style="color:#06b6d4;font-size:11px;font-weight:400;">· 免 token</span></h3>
+            <div style="color:#888;font-size:11.5px;line-height:1.7;margin-bottom:10px;">
+                把任一<strong style="color:#ddd;">公開分享</strong>的 Notion 文章貼進來，自動抓圖文、下載圖片轉 WebP、套用「封面圖／內文與內文配圖」模板（文末撰寫筆記會自動略過），建立成一篇 <strong>草稿</strong>。<br/>
+                <span style="color:#666;">在 Notion 該頁右上「Share → Publish / 發佈到網路」開啟公開後，複製網址貼這裡。</span>
+            </div>
+            <div style="display:flex;gap:8px;flex-wrap:wrap;">
+                <input id="notion-url" type="text" placeholder="https://xxx.notion.site/頁面標題-d904da33...　或直接貼 page id"
+                       style="flex:1;min-width:260px;font-size:12px;" />
+                <button class="btn" onclick="window._blog.importNotionUrl()" style="background:#06b6d4;white-space:nowrap;">📥 匯入</button>
+            </div>
+            <div id="notion-url-result" style="margin-top:10px;"></div>
+        </div>
+
         <div class="card" style="background:#1f1f1f;margin-bottom:12px;">
+            <div style="color:#666;font-size:11px;margin-bottom:8px;">— 或 — 從已連線的 Notion 內容資料庫批次同步：</div>
             <div style="display:flex;align-items:center;gap:10px;margin-bottom:8px;">
                 <span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:${connected ? '#4ade80' : '#888'};"></span>
                 <strong style="color:#fff;font-size:13px;">${connected ? '已連線 Notion' : '未連線 Notion'}</strong>
@@ -1859,6 +2024,50 @@ function _viewNotion() {
         </div>
     `;
 }
+
+_blog.importNotionUrl = async () => {
+    const input = document.getElementById('notion-url');
+    const url = (input?.value || '').trim();
+    const host = document.getElementById('notion-url-result');
+    if (!url) { toastErr('請先貼上 Notion 連結'); input?.focus(); return; }
+
+    if (host) host.innerHTML = '<div style="color:#aaa;font-size:12px;">📥 匯入中…（抓頁面 + 下載圖片轉 WebP，約 10–30 秒）</div>';
+    try {
+        const r = await websiteFetch('/api/website/admin/posts/import-notion-url', {
+            method: 'POST', body: { url },
+        });
+        if (!r.ok) {
+            if (host) host.innerHTML = `<div style="color:#f87171;font-size:12px;">❌ ${esc(r.error || '匯入失敗')}${r.slug ? `（<a href="#" onclick="window._blog.switchTab('posts');return false;" style="color:#3b82f6;">看文章列表</a>）` : ''}</div>`;
+            toastErr(r.error || '匯入失敗');
+            return;
+        }
+        const cats = (r.category_slugs || []).map(slug => {
+            const c = _state.categories.find(x => x.slug === slug);
+            return c ? c.label_zh : slug;
+        });
+        if (host) host.innerHTML = `
+            <div style="border-left:3px solid #4ade80;background:#16241a;padding:10px 12px;border-radius:4px;">
+                <div style="color:#fff;font-size:13px;margin-bottom:6px;">✅ 已建立草稿：${esc(r.title)}</div>
+                <div style="color:#aaa;font-size:11.5px;line-height:1.7;">
+                    slug <code>${esc(r.slug)}</code> · ${r.block_count} 個內文區塊 · ${r.image_count} 張圖已 host
+                    · 分類：${cats.length ? cats.map(esc).join('、') : '<span style="color:#fbbf24;">未對應（請在編輯時選）</span>'}
+                </div>
+                ${r.warnings?.length ? `<div style="color:#fbbf24;font-size:11px;margin-top:6px;">⚠ ${r.warnings.map(esc).join('；')}</div>` : ''}
+                <div style="margin-top:8px;display:flex;gap:6px;flex-wrap:wrap;">
+                    <button class="btn btn-sm" onclick="window._blog.openEditPost(${r.post_id})" style="background:#3b82f6;">✏️ 開啟編輯 / 過目</button>
+                    <span style="color:#666;font-size:11px;align-self:center;">過目後在編輯視窗按「🚀 儲存並發布」即上線</span>
+                </div>
+            </div>`;
+        toastOk(`已匯入草稿：${r.title}`);
+        if (input) input.value = '';
+        // 刷新文章列表（讓新草稿出現在「📰 文章」分頁 + tab 計數）
+        const posts = await websiteFetch('/api/website/admin/posts');
+        _state.posts = posts?.items || [];
+    } catch (e) {
+        toastErr(e.message);
+        if (host) host.innerHTML = `<div style="color:#f87171;font-size:12px;">匯入失敗：${esc(e.message)}</div>`;
+    }
+};
 
 _blog.runNotionImport = async () => {
     const force = document.getElementById('notion-force').checked;

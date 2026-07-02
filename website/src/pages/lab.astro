@@ -1,0 +1,34 @@
+---
+/**
+ * lab.astro — 創作計畫（/lab）
+ * 首頁 ABOUT US 段按鈕入口之一。hero 文案 admin 可編（copy.lab.*），
+ * 案例來自 website_initiatives（line=lab，可連動作品集）。
+ */
+import BaseLayout from "../layouts/BaseLayout.astro";
+import InitiativeGrid from "../components/InitiativeGrid.astro";
+import { fetchMeta, fetchLabInitiatives } from "../lib/crm-client";
+import { buildBasicPageSeo, breadcrumb2, ensureMinDescription } from "../lib/seo";
+
+const [meta, items] = await Promise.all([fetchMeta(), fetchLabInitiatives()]);
+const c = meta.copy?.lab ?? {};
+
+const titleZh = c.hero_title_zh ?? "創作計畫";
+const titleEn = c.hero_title_en ?? "Creative Projects";
+const introZh = c.intro_zh ?? "創作計畫是我們在接案之外的自主實驗——把想說的故事、想嘗試的影像語言，做成完整的作品。";
+const introEn = c.intro_en ?? "Self-initiated work beyond client projects — the stories we want to tell and the visual languages we want to try.";
+
+const seo = buildBasicPageSeo(Astro, {
+    title: titleZh,
+    description: ensureMinDescription(c.seo_desc ?? introZh,
+        `${meta.company_name_zh}創作計畫——接案之外的自主影像實驗與原創作品。`),
+    breadcrumbs: breadcrumb2(titleZh, "/lab"),
+});
+---
+
+<BaseLayout {...seo} meta={meta}>
+    <InitiativeGrid
+        eyebrowZh={c.hero_eyebrow ?? "Lab"} eyebrowEn={c.hero_eyebrow ?? "Lab"}
+        titleZh={titleZh} titleEn={titleEn}
+        introZh={introZh} introEn={introEn}
+        items={items} />
+</BaseLayout>

@@ -57,6 +57,9 @@ class WebsitePost(Base):
     # SEO 301 來源舊路徑（軟 301 from Astro + 硬 301 from nginx）
     old_urls = Column(JSONB, nullable=False, default=list)          # string[]
 
+    # AI SEO runner 生成的常見問題（FAQPage JSON-LD + 文章底部可見區段）
+    faqs = Column(JSONB, nullable=False, default=list)             # [{"q","a"}]
+
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 

@@ -20,6 +20,8 @@ from .admin_seo import router as _admin_seo_router
 from .admin_credits import router as _admin_credits_router
 from .admin_posts import router as _admin_posts_router
 from .admin_team import router as _admin_team_router
+from .admin_initiatives import router as _admin_initiatives_router
+from .admin_redirects import router as _admin_redirects_router
 
 router = APIRouter()
 router.include_router(_public_router)
@@ -33,5 +35,7 @@ router.include_router(_admin_seo_router)
 router.include_router(_admin_credits_router)
 router.include_router(_admin_posts_router)
 router.include_router(_admin_team_router)
+router.include_router(_admin_initiatives_router)
+router.include_router(_admin_redirects_router)
 
 __all__ = ["router"]

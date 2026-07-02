@@ -51,6 +51,7 @@ export interface IPost {
     og_image_url?: string;
     canonical_url?: string;
     noindex?: boolean;
+    faqs?: { q: string; a: string }[];   // AI SEO 生成的常見問題（FAQPage + 文章底部可見區）
 }
 
 /**

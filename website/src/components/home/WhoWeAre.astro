@@ -56,6 +56,22 @@ const gridCols = GRID_COLS[shownStats.length] || "grid-cols-3";
             <Tr zh={copy.whoweare_intro_zh ?? "從商業廣告到紀實短片，從活動紀錄到動態設計。一支影片的起點，是長時間的聆聽，而不是按下 REC。"}
                 en={copy.whoweare_intro_en ?? "Commercials, documentaries, events, motion graphics — every project starts with listening, not recording."} />
         </p>
+
+        <!-- 日常業務外的兩條線：公益合作 / 創作計畫 -->
+        <p class="mt-12 mb-5 text-[11px] tracking-[0.3em] uppercase text-neutral-400">
+            <Tr zh={copy.whoweare_lines_label_zh ?? "日常業務之外，我們也經營兩條線"}
+                en={copy.whoweare_lines_label_en ?? "Beyond our daily work"} />
+        </p>
+        <div class="flex flex-wrap justify-center gap-4">
+            <a href="/impact"
+               class="inline-flex items-center gap-2 px-7 py-3 border border-neutral-300 text-sm tracking-[0.15em] text-neutral-800 hover:border-[#c9372c] hover:text-[#c9372c] hover:bg-neutral-50 transition-colors">
+                <Tr zh="公益合作" en="Impact" /><span>→</span>
+            </a>
+            <a href="/lab"
+               class="inline-flex items-center gap-2 px-7 py-3 border border-neutral-300 text-sm tracking-[0.15em] text-neutral-800 hover:border-[#c9372c] hover:text-[#c9372c] hover:bg-neutral-50 transition-colors">
+                <Tr zh="創作計畫" en="Lab" /><span>→</span>
+            </a>
+        </div>
     </div>
 
     <!-- 2. Showreel 置中 + 比上方文字寬約 1.5 倍

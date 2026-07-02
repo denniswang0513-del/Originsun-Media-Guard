@@ -56,8 +56,9 @@ const finalOgImage = ogImage || meta.seo_og_image || undefined;
     <head>
         <meta charset="UTF-8" />
         <meta name="viewport" content="width=device-width, initial-scale=1" />
-        {meta?.brand_favicon_url
-            ? <link rel="icon" href={meta.brand_favicon_url} />
+        {/* 分頁圖示：專屬 favicon > 品牌 Logo > 預設紅日。上傳 Logo 也會更新分頁圖示。 */}
+        {(meta?.brand_favicon_url || meta?.brand_logo_url)
+            ? <link rel="icon" href={meta.brand_favicon_url || meta.brand_logo_url} />
             : <link rel="icon" type="image/svg+xml" href="/favicon.svg" />}
 
         <title>{fullTitle}</title>

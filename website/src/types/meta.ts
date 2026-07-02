@@ -37,6 +37,9 @@ export interface IWebsiteMeta {
     // 首頁 Testimonials 段整體評分 badge（admin「🏠 首頁設定」可編；空則前端用預設）
     home_rating_value?: string;
     home_rating_count?: string;
+    // 即時真實數據（文案 {years}/{works} 佔位符替換）— 年資 "13"、完成作品 "150+"
+    stats_years?: string;
+    stats_works?: string;
     // SEO 索引控制（admin 在「網站設定」打開後 BaseLayout 移除 noindex meta，
     // robots.txt endpoint 改 Allow:/）
     indexable?: boolean;

@@ -27,6 +27,53 @@ def _template_vars(inq: dict) -> dict:
     }
 
 
+def _parse_recipients(raw: str) -> list[str]:
+    """notify.email_to 支援逗號 / 分號 / 換行分隔多個收件人。"""
+    import re
+    return [e.strip() for e in re.split(r"[,;\n]+", raw or "") if "@" in e]
+
+
+def _smtp_send(settings: dict, to_list: list[str], subject: str, body: str, reply_to: str = "") -> None:
+    """同步 SMTP 寄信（在 thread 跑）。缺設定 / 收件人 → 直接 return。"""
+    import smtplib
+    from email.mime.text import MIMEText
+    from email.utils import formataddr
+    host = settings.get("notify.smtp_host") or "smtp.gmail.com"
+    port = int(settings.get("notify.smtp_port") or 587)
+    user = (settings.get("notify.smtp_user") or "").strip()
+    pw = (settings.get("notify.smtp_password") or "").replace(" ", "")
+    sender = (settings.get("notify.smtp_from") or user).strip()
+    name = settings.get("company.name_zh") or "Originsun"
+    if not (user and pw and to_list):
+        return
+    msg = MIMEText(body, "plain", "utf-8")
+    msg["Subject"] = subject
+    msg["From"] = formataddr((f"{name} 官網", sender))
+    msg["To"] = ", ".join(to_list)
+    if reply_to:
+        msg["Reply-To"] = reply_to
+    with smtplib.SMTP(host, port, timeout=25) as s:
+        s.starttls()
+        s.login(user, pw)
+        s.sendmail(sender, to_list, msg.as_string())
+
+
+def _format_internal(inq: dict, company_name: str) -> str:
+    v = _template_vars(inq)
+    return (
+        f"{company_name} 官網收到一筆新詢問 #{v['id']}\n"
+        f"────────────────────\n"
+        f"姓名：{v['name']}\n"
+        f"Email：{v['email']}\n"
+        f"電話：{v['phone']}\n"
+        f"公司：{v['company']}\n"
+        f"服務類型：{v['service_type']}\n"
+        f"預算範圍：{v['budget_range']}\n"
+        f"────────────────────\n"
+        f"訊息：\n{v['message']}\n"
+    )
+
+
 def _format_autoreply(inq: dict, company_name: str, reply_email: str) -> str:
     return (
         f"您好 {inq.get('name', '')}，\n\n"
@@ -55,22 +102,35 @@ async def notify_new_inquiry(inq: dict, settings: dict) -> dict:
     except Exception as e:
         logger.warning("[notify] notify_tab failed: %s", e)
 
+    import asyncio
     reply_email = settings.get("company.email", "")
     company_name = settings.get("company.name_zh", "Originsun")
-    internal_recipient = settings.get("notify.email_to", reply_email)
 
-    if internal_recipient:
-        logger.info(
-            "[notify] email-internal stub → %s (inquiry #%s)",
-            internal_recipient, inq.get("id"),
-        )
-        result["email_internal"] = True
+    # 內部通知信 → notify.email_to（可填多個，逗號/換行分隔；空則 fallback 公司 email）
+    recipients = _parse_recipients(settings.get("notify.email_to") or reply_email)
+    if recipients:
+        try:
+            await asyncio.to_thread(
+                _smtp_send, settings, recipients,
+                f"【官網新詢問】{inq.get('name', '')} · #{inq.get('id')}",
+                _format_internal(inq, company_name),
+                reply_to=inq.get("email") or "",
+            )
+            result["email_internal"] = True
+        except Exception as e:
+            logger.warning("[notify] internal email failed: %s", e)
+
+    # 自動回覆給填表人（確認已收到）
     if inq.get("email"):
-        logger.info(
-            "[notify] autoreply stub → %s\n%s",
-            inq["email"], _format_autoreply(inq, company_name, reply_email),
-        )
-        result["autoreply"] = True
+        try:
+            await asyncio.to_thread(
+                _smtp_send, settings, [inq["email"]],
+                f"已收到您的訊息 — {company_name}",
+                _format_autoreply(inq, company_name, reply_email),
+            )
+            result["autoreply"] = True
+        except Exception as e:
+            logger.warning("[notify] autoreply failed: %s", e)
 
     return result
 

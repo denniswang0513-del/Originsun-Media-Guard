@@ -48,6 +48,13 @@ _CRM_PROJECTS_COLUMNS: list[tuple[str, str]] = [
     ("public_credits_text", "TEXT"),
 ]
 
+# ── ALTER TABLE: website_posts 擴充（既有部署補欄）──
+# faqs: AI SEO runner 生成的 3 題 Q&A（JSONB [{"q","a"}]），渲染成 FAQPage JSON-LD
+# + 文章底部「常見問題」可見區段（Google FAQ rich result 要求內容對使用者可見）
+_WEBPOSTS_COLUMNS: list[tuple[str, str]] = [
+    ("faqs", "JSONB NOT NULL DEFAULT '[]'::jsonb"),
+]
+
 # ── ALTER TABLE: crm_staff 擴充 ──
 _CRM_STAFF_COLUMNS: list[tuple[str, str]] = [
     ("show_on_website", "BOOLEAN DEFAULT FALSE"),
@@ -250,6 +257,7 @@ _CREATE_TABLES: list[str] = [
         author_url TEXT,
         ai_allow_override BOOLEAN,
         old_urls JSONB NOT NULL DEFAULT '[]'::jsonb,
+        faqs JSONB NOT NULL DEFAULT '[]'::jsonb,
         created_at TIMESTAMPTZ DEFAULT NOW(),
         updated_at TIMESTAMPTZ DEFAULT NOW()
     )
@@ -331,6 +339,36 @@ _CREATE_TABLES: list[str] = [
         updated_at TIMESTAMPTZ DEFAULT NOW()
     )
     """,
+    # 公益合作 / 創作計畫 案例（日常業務外的兩條線）。project_id 連動 crm_projects。
+    """
+    CREATE TABLE IF NOT EXISTS website_initiatives (
+        id SERIAL PRIMARY KEY,
+        line VARCHAR(16) NOT NULL,
+        project_id VARCHAR(32),
+        title VARCHAR(300),
+        summary TEXT,
+        cover_url TEXT,
+        link_url VARCHAR(500),
+        year INTEGER,
+        sort_order INTEGER NOT NULL DEFAULT 0,
+        visible BOOLEAN NOT NULL DEFAULT TRUE,
+        created_at TIMESTAMPTZ DEFAULT NOW(),
+        updated_at TIMESTAMPTZ DEFAULT NOW()
+    )
+    """,
+    # Legacy 舊站→新站 頁面級 301 轉址（不綁作品/文章；from_path 是正規化舊路徑）。
+    """
+    CREATE TABLE IF NOT EXISTS website_redirects (
+        id SERIAL PRIMARY KEY,
+        from_path VARCHAR(500) UNIQUE NOT NULL,
+        to_path VARCHAR(500) NOT NULL,
+        note VARCHAR(300),
+        sort_order INTEGER NOT NULL DEFAULT 0,
+        visible BOOLEAN NOT NULL DEFAULT TRUE,
+        created_at TIMESTAMPTZ DEFAULT NOW(),
+        updated_at TIMESTAMPTZ DEFAULT NOW()
+    )
+    """,
 ]
 
 _CREATE_INDEXES: list[str] = [
@@ -348,6 +386,7 @@ _CREATE_INDEXES: list[str] = [
     "CREATE INDEX IF NOT EXISTS idx_webtst_visible_sort ON website_testimonials (visible, sort_order)",
     "CREATE INDEX IF NOT EXISTS idx_webqf_visible_sort ON website_quick_facts (visible, sort_order)",
     "CREATE INDEX IF NOT EXISTS idx_award_visible_sort ON website_awards (visible, sort_order)",
+    "CREATE INDEX IF NOT EXISTS idx_initiative_line_sort ON website_initiatives (line, visible, sort_order)",
     # 作品級 SEO：audit 端點頻繁查 needs_ai_review=true → 索引加速
     "CREATE INDEX IF NOT EXISTS idx_webprojseo_needs_review ON website_project_seo (needs_ai_review)",
     # Posts 公開查詢：WHERE status='published' AND published_at<=NOW() ORDER BY published_at DESC
@@ -364,6 +403,7 @@ _CREATE_INDEXES: list[str] = [
     "CREATE INDEX IF NOT EXISTS idx_credit_role_visible_sort ON website_credit_roles (visible, sort_order)",
     # 頂部導覽：公開端 visible=true ORDER BY sort_order
     "CREATE INDEX IF NOT EXISTS idx_webnav_visible_sort ON website_nav_items (visible, sort_order)",
+    "CREATE INDEX IF NOT EXISTS idx_webredir_visible_sort ON website_redirects (visible, sort_order)",
 ]
 
 
@@ -578,6 +618,8 @@ async def run_website_migrations(session_factory: Callable) -> None:
           for c, t in _CRM_PROJECT_SHOWCASE_COLUMNS],
         # CREATE TABLE 必須先跑，ALTER 才有對象（fresh DB 沒這張表）
         *_CREATE_TABLES,
+        *[f"ALTER TABLE website_posts ADD COLUMN IF NOT EXISTS {c} {t}"
+          for c, t in _WEBPOSTS_COLUMNS],
         *[f"ALTER TABLE website_categories ADD COLUMN IF NOT EXISTS {c} {t}"
           for c, t in _WEBCAT_COLUMNS],
         *[f"ALTER TABLE website_project_seo ADD COLUMN IF NOT EXISTS {c} {t}"

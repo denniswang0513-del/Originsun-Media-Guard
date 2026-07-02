@@ -275,3 +275,87 @@ async def seo_runner_run_one_internal(project_id: str, request: Request):
         if result.get("processed", 0) > 0:
             await rebuild_service.mark_dirty()
         return result
+
+
+# ══════════════════════════════════════════════════════════
+# 文章版 AI SEO（對齊作品集，走 post_seo_runner）
+# ══════════════════════════════════════════════════════════
+
+from services.website import post_seo_runner
+
+
+@router.get("/seo/posts/audit")
+async def post_seo_audit(session: AsyncSession = Depends(admin_session)):
+    """文章 SEO 一覽 — 每篇 completeness(0-4) + needs_ai flag。"""
+    return {"items": await post_seo_runner.list_post_seo_audit(session)}
+
+
+@router.get("/seo/posts/runner/settings")
+async def post_seo_runner_get_settings(session: AsyncSession = Depends(admin_session)):
+    return await post_seo_runner.get_runner_settings(session)
+
+
+@router.put("/seo/posts/runner/settings")
+async def post_seo_runner_update_settings(
+    payload: dict, request: Request,
+    session: AsyncSession = Depends(admin_session),
+):
+    try:
+        return await post_seo_runner.update_runner_settings(
+            session, payload, by=current_username(request),
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e))
+
+
+@router.post("/seo/posts/runner/run")
+async def post_seo_runner_run_now(
+    request: Request, session: AsyncSession = Depends(admin_session),
+):
+    """整批：dry_run=1 同步回預覽；否則非同步背景跑（立即回 {started}）。"""
+    dry = request.query_params.get("dry_run", "").lower() in {"1", "true"}
+    settings = await post_seo_runner.get_runner_settings(session)
+    if dry:
+        return await post_seo_runner.run_pipeline(
+            session, batch_size=settings["batch_size"], dry_run=True,
+        )
+    return await post_seo_runner.trigger_batch(session, batch_size=settings["batch_size"])
+
+
+@router.post("/seo/posts/{post_id}/generate")
+async def post_seo_generate(
+    post_id: int, session: AsyncSession = Depends(admin_session),
+):
+    """單篇生成 — 編輯器「🤖 AI 生成 SEO」按鈕。回傳給編輯器填，不自動存 DB。"""
+    return await post_seo_runner.generate_for_post(session, post_id)
+
+
+# ── Internal forward（NAS → master，跑 claude）──
+
+@router.post("/internal/seo/posts/run")
+async def post_seo_run_internal(request: Request):
+    _check_internal_key(request)
+    try:
+        batch_size = int(request.query_params.get("batch_size", "10"))
+    except ValueError:
+        batch_size = 10
+    if not post_seo_runner.start_batch_bg(batch_size):
+        return {"status": "busy"}
+    return {"status": "started"}
+
+
+@router.post("/internal/seo/posts/{post_id}/run")
+async def post_seo_run_one_internal(post_id: int, request: Request):
+    _check_internal_key(request)
+    async with _admin_session_for_internal() as session:
+        result = await post_seo_runner.run_pipeline(session, target_post_id=post_id)
+        if result.get("processed", 0) > 0:
+            await rebuild_service.mark_dirty()
+        return result
+
+
+@router.post("/internal/seo/posts/{post_id}/generate")
+async def post_seo_generate_internal(post_id: int, request: Request):
+    _check_internal_key(request)
+    async with _admin_session_for_internal() as session:
+        return await post_seo_runner._generate_local(session, post_id)

@@ -56,17 +56,25 @@ const publishedDate = new Date(post.published_at).toLocaleDateString("zh-TW", {
 });
 
 const siteUrl = resolveSiteUrl(Astro.site);
+// SEO 覆寫優先序（對齊 works/[slug].astro）：AI/admin 寫的 seo_* > 內文 fallback
 const description = ensureMinDescription(
-    post.excerpt,
+    post.seo_description || post.excerpt,
     `${post.title} — ${meta.company_name_zh}影像專欄 Insight，分享影像製作幕後與業界觀察。`,
 );
+const pageTitle = post.seo_title || post.title;
+
+// AI SEO 生成的 FAQ → FAQPage 結構化資料 + 文章底部可見區段
+const faqs = (post.faqs ?? []).filter(f => f && f.q && f.a);
 const schemaData = [
     pageSchemas.newsArticle(post, meta, siteUrl),
     pageSchemas.breadcrumb(breadcrumb3("影像專欄", "/news", post.title, `/news/${post.slug}`), siteUrl),
+    ...(faqs.length > 0
+        ? [pageSchemas.faqPage(faqs.map(f => ({ question: f.q, answer: f.a })))]
+        : []),
 ];
 ---
 
-<BaseLayout title={post.title}
+<BaseLayout title={pageTitle}
             description={description}
             meta={meta}
             schemaData={schemaData}
@@ -199,6 +207,29 @@ const schemaData = [
             </div>
         )}
     </article>
+
+    <!-- 常見問題（AI SEO 生成；同時輸出 FAQPage JSON-LD） -->
+    {faqs.length > 0 && (
+        <section class="bg-white pb-4 sm:pb-8">
+            <div class="max-w-3xl mx-auto px-4 sm:px-6 lg:px-8">
+                <h2 class="text-2xl sm:text-3xl font-bold text-neutral-900 mb-8 tracking-tight">
+                    <Tr zh="常見問題" en="FAQ" />
+                </h2>
+                <div class="divide-y divide-neutral-200 border-t border-neutral-200">
+                    {faqs.map(f => (
+                        <details class="group py-5">
+                            <summary class="flex items-start justify-between gap-4 cursor-pointer list-none">
+                                <h3 class="text-base sm:text-lg font-semibold text-neutral-900 leading-snug">{f.q}</h3>
+                                <span class="mt-1 text-[#c9372c] text-xl leading-none transition-transform group-open:rotate-45">+</span>
+                            </summary>
+                            <p class="mt-3 text-[15px] sm:text-base text-neutral-700 leading-[1.85] tracking-wide"
+                               set:html={renderInline(f.a)} />
+                        </details>
+                    ))}
+                </div>
+            </div>
+        </section>
+    )}
 
     <!-- 底部分隔 -->
     <div class="max-w-3xl mx-auto px-4 sm:px-6 lg:px-8">

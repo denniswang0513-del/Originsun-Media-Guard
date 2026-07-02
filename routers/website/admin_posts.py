@@ -25,9 +25,12 @@ from core.schemas_website import (
     PostCreate, PostUpdate,
     PostCategoryCreate, PostCategoryUpdate,
     NotionImportRequest, PostImportResult, RedirectSyncResult,
+    NotionUrlImportRequest, NotionUrlImportResult,
 )
 from db.models_website import WebsitePost
-from services.website import notion_service, post_service, rebuild_service
+from services.website import (
+    notion_service, notion_url_service, post_service, rebuild_service,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -144,6 +147,22 @@ async def import_from_notion(
         await rebuild_service.mark_dirty()
 
     return result
+
+
+# ── 單篇公開 Notion 連結匯入（免 token）──
+
+@router.post("/posts/import-notion-url", response_model=NotionUrlImportResult)
+async def import_from_notion_url(
+    req: NotionUrlImportRequest,
+    session: AsyncSession = Depends(admin_session),
+):
+    """貼一個公開分享的 Notion 頁面 URL → 建立一篇 draft 文章（圖片自動 host）。
+
+    走 Notion 公開站台的 loadCachedPageChunkV2，不需 token / integration。
+    成功會 mark_dirty（在 service 內），新文章為 draft 等 admin 過目。
+    失敗以 {ok:false, error} 回（HTTP 200，前端讀 ok 判斷）。
+    """
+    return await notion_url_service.import_public_page(session, req.url)
 
 
 # ── 強制重新同步 redirects 到 NAS nginx ──

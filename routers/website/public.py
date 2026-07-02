@@ -23,8 +23,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from ._common import client_ip, public_session, rate_limit
 from core.schemas_website import ContactInquiryCreate
 from services.website import (
-    category_service, credit_service, inquiry_service, nav_service, notify_service,
-    post_service, project_service, seo_service, service_service, settings_service,
+    category_service, credit_service, initiative_service, inquiry_service,
+    nav_service, notify_service, post_service, project_service, seo_service,
+    service_service, settings_service,
 )
 
 logger = logging.getLogger(__name__)
@@ -160,6 +161,21 @@ async def list_public_awards(request: Request, session: AsyncSession = Depends(p
     return {"items": await seo_service.list_awards(session, visible_only=True)}
 
 
+@router.get("/initiatives")
+async def list_public_initiatives(request: Request, session: AsyncSession = Depends(public_session)):
+    """公益合作 / 創作計畫 案例（visible=true，解析作品連動）。
+
+    ?line=impact|lab 過濾；不給則回兩條線都有（前端再分組）。
+    """
+    rate_limit(request, max_per_minute=60)
+    line = (request.query_params.get("line") or "").strip()
+    if line in ("impact", "lab"):
+        return {"items": await initiative_service.list_public(session, line)}
+    impact = await initiative_service.list_public(session, "impact")
+    lab = await initiative_service.list_public(session, "lab")
+    return {"impact": impact, "lab": lab, "items": impact + lab}
+
+
 @router.get("/nav")
 async def list_public_nav(request: Request, session: AsyncSession = Depends(public_session)):
     """頂部導覽選單（visible=true ORDER BY sort_order）— Header.astro fetch。
@@ -221,13 +237,16 @@ async def list_public_redirects(
     /news/* 跟 /works/* 命名空間不重疊，merge 後不會撞 key。
     """
     rate_limit(request, max_per_minute=60)
+    from services.website import redirect_service
+    legacy = await redirect_service.list_redirects(session)   # 頁面級 legacy 轉址
     posts = await post_service.list_redirects(session)
     works = await project_service.list_redirects(session)
     # 衝突偵測：/news/* vs /works/* 不該重疊，重疊代表資料異常 — log 不阻擋
     overlap = posts.keys() & works.keys()
     if overlap:
         logger.warning("[redirects] posts × works key overlap: %s — works override", sorted(overlap))
-    items = {**posts, **works}
+    # 優先序：作品 > 文章 > legacy（真實內容 slug 勝過手動 legacy 對照）
+    items = {**legacy, **posts, **works}
     return {"items": items, "count": len(items)}
 
 

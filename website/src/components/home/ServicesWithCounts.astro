@@ -8,6 +8,7 @@
 import Tr from "../ui/Tr.astro";
 import type { IService } from "../../types/service";
 import type { ICategory } from "../../types/category";
+import type { IWebsiteMeta } from "../../types/meta";
 
 interface Props {
     /** DB 服務項目（admin「服務項目」可編）；空陣列則整段不渲染。 */
@@ -16,8 +17,18 @@ interface Props {
     categories?: ICategory[];
     /** admin 可編輯的首頁文案（copy.home.*）；空欄位則用硬寫 fallback。 */
     copy?: Record<string, string>;
+    /** 全站 meta — 取即時真實數據（stats_years / stats_works）替換文案佔位符。 */
+    meta?: IWebsiteMeta;
 }
-const { services = [], categories = [], copy = {} } = Astro.props;
+const { services = [], categories = [], copy = {}, meta } = Astro.props;
+
+// 副標支援 {years}/{works} 佔位符 → 即時真實數據（年資、完成作品數）。
+// fallback 帶佔位符；admin 在 copy.services_intro_* 也可放佔位符或寫死。
+const _years = meta?.stats_years ?? "10";
+const _works = meta?.stats_works ?? "150+";
+const _fill = (s: string) => s.replace(/\{years\}/g, _years).replace(/\{works\}/g, _works);
+const introZh = _fill(copy.services_intro_zh ?? "並把每一件做到專精。過去 {years} 年累積了 {works} 支作品。");
+const introEn = _fill(copy.services_intro_en ?? "And we do each one well — {works} projects across {years} years.");
 
 // slug → category（取 count 與英文名）
 const catBySlug = new Map(categories.map(c => [c.slug, c]));
@@ -46,8 +57,7 @@ const cards = services.slice(0, 4).map(s => {
                     <Tr zh={copy.services_title_zh ?? "我們做四件事"} en={copy.services_title_en ?? "We Do Four Things"} />
                 </h2>
                 <p class="mt-4 text-sm sm:text-base text-neutral-500 tracking-wide max-w-xl">
-                    <Tr zh={copy.services_intro_zh ?? "並把每一件做到專精。過去 10 年累積了 300 支作品。"}
-                        en={copy.services_intro_en ?? "And we do each one well. 300+ projects across a decade."} />
+                    <Tr zh={introZh} en={introEn} />
                 </p>
             </div>
             <a href="/services"

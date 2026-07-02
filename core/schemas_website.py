@@ -518,6 +518,50 @@ class WebsiteAwardUpdate(BaseModel):
     visible: Optional[bool] = None
 
 
+# ── 公益合作 / 創作計畫 案例 ──
+InitiativeLine = Literal["impact", "lab"]
+
+
+class WebsiteInitiativeCreate(BaseModel):
+    line: InitiativeLine
+    project_id: Optional[str] = Field(None, max_length=32)   # 連動 crm_projects.id；空=獨立案例
+    title: Optional[str] = Field(None, max_length=300)
+    summary: Optional[str] = None
+    cover_url: Optional[str] = None
+    link_url: Optional[str] = Field(None, max_length=500)
+    year: Optional[int] = Field(None, ge=1900, le=2100)
+    sort_order: int = 0
+    visible: bool = True
+
+
+class WebsiteInitiativeUpdate(BaseModel):
+    line: Optional[InitiativeLine] = None
+    project_id: Optional[str] = None
+    title: Optional[str] = None
+    summary: Optional[str] = None
+    cover_url: Optional[str] = None
+    link_url: Optional[str] = None
+    year: Optional[int] = Field(None, ge=1900, le=2100)
+    sort_order: Optional[int] = None
+    visible: Optional[bool] = None
+
+
+class WebsiteRedirectCreate(BaseModel):
+    from_path: str = Field(..., min_length=1, max_length=500)   # 舊站路徑 e.g. /commercial-film
+    to_path: str = Field(..., min_length=1, max_length=500)     # 新站路徑 e.g. /works/category/commercial
+    note: Optional[str] = Field(None, max_length=300)
+    sort_order: int = 0
+    visible: bool = True
+
+
+class WebsiteRedirectUpdate(BaseModel):
+    from_path: Optional[str] = Field(None, max_length=500)
+    to_path: Optional[str] = Field(None, max_length=500)
+    note: Optional[str] = Field(None, max_length=300)
+    sort_order: Optional[int] = None
+    visible: Optional[bool] = None
+
+
 class WebsiteAwardBulkImport(BaseModel):
     """貼上整段「歷年作品（獎項）」純文字 → 解析成 film-centric 結構。
 
@@ -787,6 +831,7 @@ class PostCreate(BaseModel):
     author_url: Optional[str] = None
     ai_allow_override: Optional[bool] = None
     old_urls: list[str] = Field(default_factory=list)
+    faqs: list[Any] = Field(default_factory=list)        # [{"q","a"}]
 
 
 class PostUpdate(BaseModel):
@@ -809,6 +854,7 @@ class PostUpdate(BaseModel):
     author_url: Optional[str] = None
     ai_allow_override: Optional[bool] = None
     old_urls: Optional[list[str]] = None
+    faqs: Optional[list[Any]] = None        # [{"q","a"}]
 
 
 # ── Notion 匯入請求 ──
@@ -827,6 +873,26 @@ class PostImportResult(BaseModel):
     new_categories: list[str] = Field(default_factory=list)  # 自動新建的分類 slug
     warnings: list[str] = Field(default_factory=list)
     duration_ms: int = 0
+
+
+# ── 單篇「公開 Notion 連結」匯入（免 token，走 loadPageChunk 公開端點）──
+
+class NotionUrlImportRequest(BaseModel):
+    """admin 貼一個公開分享的 Notion 頁面 URL（或裸 page id）。"""
+    url: str = Field(..., min_length=8)
+
+
+class NotionUrlImportResult(BaseModel):
+    ok: bool = False
+    post_id: Optional[int] = None
+    slug: Optional[str] = None
+    title: str = ""
+    image_count: int = 0
+    block_count: int = 0
+    category_slugs: list[str] = Field(default_factory=list)
+    published_at: Optional[datetime] = None
+    warnings: list[str] = Field(default_factory=list)
+    error: Optional[str] = None
 
 
 # ── Redirects（軟+硬 301 來源） ──

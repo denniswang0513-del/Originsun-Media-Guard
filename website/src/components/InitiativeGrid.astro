@@ -1,0 +1,73 @@
+---
+/**
+ * InitiativeGrid.astro — 公益合作 / 創作計畫 頁面主體（hero + 案例卡片網格）
+ * /impact 與 /lab 共用；案例可連動作品集（點擊跳作品頁）或獨立外連。
+ */
+import Tr from "./ui/Tr.astro";
+import SmartImage from "./ui/SmartImage.astro";
+import type { IInitiativeCard } from "../types/initiative";
+
+interface Props {
+    eyebrowZh: string; eyebrowEn: string;
+    titleZh: string; titleEn: string;
+    introZh: string; introEn: string;
+    items: IInitiativeCard[];
+}
+const { eyebrowZh, eyebrowEn, titleZh, titleEn, introZh, introEn, items } = Astro.props;
+---
+
+<section class="bg-white pt-28 sm:pt-36 pb-20 sm:pb-28">
+    <!-- hero -->
+    <div class="max-w-3xl mx-auto px-4 sm:px-6 lg:px-8 text-center mb-16 sm:mb-20">
+        <p class="text-xs tracking-[0.4em] text-[#c9372c] uppercase mb-6"><Tr zh={eyebrowZh} en={eyebrowEn} /></p>
+        <h1 class="text-3xl sm:text-5xl font-bold tracking-tight text-neutral-900 leading-[1.15] mb-8 whitespace-pre-line">
+            <Tr zh={titleZh} en={titleEn} />
+        </h1>
+        <p class="text-base sm:text-lg text-neutral-600 leading-[1.9] tracking-wide whitespace-pre-line">
+            <Tr zh={introZh} en={introEn} />
+        </p>
+    </div>
+
+    <!-- 案例卡片 -->
+    {items.length > 0 ? (
+        <div class="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-8 sm:gap-10">
+            {items.map(it => {
+                const Tag = it.link_url ? "a" : "div";
+                const isExternal = !!it.link_url && /^https?:\/\//.test(it.link_url);
+                return (
+                    <Tag
+                        href={it.link_url || undefined}
+                        target={isExternal ? "_blank" : undefined}
+                        rel={isExternal ? "noopener noreferrer" : undefined}
+                        class="group block"
+                    >
+                        <div class="relative overflow-hidden aspect-video bg-neutral-100 mb-4">
+                            {it.cover_url ? (
+                                <SmartImage src={it.cover_url} alt={it.title}
+                                            width={800} height={450} widths={[400, 800]}
+                                            sizes="(max-width: 640px) 100vw, 33vw" loading="lazy"
+                                            class="w-full h-full object-cover transition-transform duration-700 group-hover:scale-[1.04]" />
+                            ) : (
+                                <div class="w-full h-full bg-neutral-100"></div>
+                            )}
+                        </div>
+                        <div class="flex items-center gap-3 text-[10px] tracking-[0.3em] uppercase text-neutral-400 mb-2">
+                            {it.year && <span>{it.year}</span>}
+                            {it.is_work && <span class="text-[#c9372c]"><Tr zh="作品集" en="Portfolio" /></span>}
+                        </div>
+                        <h2 class="text-lg sm:text-xl font-bold text-neutral-900 leading-snug group-hover:text-[#c9372c] transition-colors">
+                            {it.title}
+                        </h2>
+                        {it.summary && (
+                            <p class="mt-2 text-sm text-neutral-600 leading-[1.85] tracking-wide">{it.summary}</p>
+                        )}
+                    </Tag>
+                );
+            })}
+        </div>
+    ) : (
+        <div class="max-w-2xl mx-auto px-4 text-center text-neutral-400 text-sm tracking-wide">
+            <Tr zh="內容陸續更新中。" en="More coming soon." />
+        </div>
+    )}
+</section>

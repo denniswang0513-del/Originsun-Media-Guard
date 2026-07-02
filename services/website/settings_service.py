@@ -101,6 +101,9 @@ async def get_meta(session: AsyncSession) -> dict[str, Any]:
         # 首頁 Testimonials 段整體評分 badge（admin「🏠 首頁設定」可編；空則前端用預設）
         "home_rating_value": s.get("home.rating_value", ""),
         "home_rating_count": s.get("home.rating_count", ""),
+        # 即時真實數據（給文案模板 {years}/{works} 佔位符替換用，永遠用真實值不受 admin 覆寫）
+        "stats_years": _real_stats[0][0],    # 年資（今年−2013），如 "13"
+        "stats_works": _real_stats[1][0],    # 完成作品數（floor10+"+"），如 "150+"
         # SEO 索引控制（影響 BaseLayout noindex meta + robots.txt 動態端點）。
         # `is True` 比 `bool()` 嚴：避免使用者誤把 "false" 字串塞進去後變 truthy。
         "indexable": s.get("seo.indexable") is True,

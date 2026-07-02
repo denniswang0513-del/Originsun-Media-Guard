@@ -113,6 +113,7 @@ def _post_to_dict(p: WebsitePost, category_slugs: list[str]) -> dict[str, Any]:
         "ai_allow_override": p.ai_allow_override,
         "old_urls": list(p.old_urls or []),
         "redirect_count": len(p.old_urls or []),
+        "faqs": list(p.faqs or []),
     }
 
 
@@ -154,6 +155,7 @@ def _post_to_public_dict(p: WebsitePost, category_slugs: list[str]) -> dict[str,
         "author_name": p.author_name,
         "author_url": p.author_url,
         "ai_allow_override": p.ai_allow_override,
+        "faqs": list(p.faqs or []),
     }
 
 

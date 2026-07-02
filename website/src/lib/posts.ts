@@ -41,6 +41,7 @@ export async function fetchPosts(): Promise<IPost[]> {
             og_image_url: p.og_image_url ?? undefined,
             canonical_url: p.canonical_url ?? undefined,
             noindex: p.noindex || undefined,
+            faqs: Array.isArray(p.faqs) ? p.faqs.filter(f => f && f.q && f.a) : [],
         };
     });
 }

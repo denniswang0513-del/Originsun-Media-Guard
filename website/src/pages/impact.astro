@@ -1,0 +1,34 @@
+---
+/**
+ * impact.astro — 公益合作（/impact）
+ * 首頁 ABOUT US 段按鈕入口之一。hero 文案 admin 可編（copy.impact.*），
+ * 案例來自 website_initiatives（line=impact，可連動作品集）。
+ */
+import BaseLayout from "../layouts/BaseLayout.astro";
+import InitiativeGrid from "../components/InitiativeGrid.astro";
+import { fetchMeta, fetchImpactInitiatives } from "../lib/crm-client";
+import { buildBasicPageSeo, breadcrumb2, ensureMinDescription } from "../lib/seo";
+
+const [meta, items] = await Promise.all([fetchMeta(), fetchImpactInitiatives()]);
+const c = meta.copy?.impact ?? {};
+
+const titleZh = c.hero_title_zh ?? "公益合作";
+const titleEn = c.hero_title_en ?? "Public-Good Collaborations";
+const introZh = c.intro_zh ?? "在日常的商業製作之外，我們持續用影像參與公益——記錄值得被看見的人與事，讓好的理念被更多人聽見。";
+const introEn = c.intro_en ?? "Beyond commercial work, we keep using film for good — documenting the people and causes worth seeing.";
+
+const seo = buildBasicPageSeo(Astro, {
+    title: titleZh,
+    description: ensureMinDescription(c.seo_desc ?? introZh,
+        `${meta.company_name_zh}公益合作——在商業製作之外，用影像記錄值得被看見的人與事。`),
+    breadcrumbs: breadcrumb2(titleZh, "/impact"),
+});
+---
+
+<BaseLayout {...seo} meta={meta}>
+    <InitiativeGrid
+        eyebrowZh={c.hero_eyebrow ?? "Impact"} eyebrowEn={c.hero_eyebrow ?? "Impact"}
+        titleZh={titleZh} titleEn={titleEn}
+        introZh={introZh} introEn={introEn}
+        items={items} />
+</BaseLayout>

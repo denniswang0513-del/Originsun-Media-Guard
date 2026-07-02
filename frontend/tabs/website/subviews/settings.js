@@ -27,10 +27,10 @@ function _renderBrandCard() {
     return `
         <div class="card" style="border-left:3px solid #c9372c;margin-bottom:12px;">
             <h3 style="color:#fff;margin:0 0 4px;font-size:14px;">🎨 品牌 Logo</h3>
-            <p style="color:#888;font-size:11px;margin:0 0 12px;">Logo 會套用到網站 header（取代預設紅色標記）；favicon 是瀏覽器分頁的小圖示。建議 Logo 用透明背景 PNG 或 SVG。上傳即套用、官網自動 rebuild。</p>
+            <p style="color:#888;font-size:11px;margin:0 0 12px;">Logo 會套用到網站 header（取代預設紅色標記），<strong style="color:#bbb;">同時也會用作瀏覽器分頁圖示（favicon）</strong>。建議 Logo 用透明背景 PNG 或 SVG。上傳即套用、官網自動 rebuild。<br/><span style="color:#666;">※ 分頁圖示有瀏覽器強快取，改完需硬重新整理才會看到。</span></p>
             <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;">
-                ${_brandSlot('logo', 'Logo（網站 header）', _settings['brand.logo_url'])}
-                ${_brandSlot('favicon', 'Favicon（分頁小圖示）', _settings['brand.favicon_url'])}
+                ${_brandSlot('logo', 'Logo（網站 header + 分頁圖示）', _settings['brand.logo_url'])}
+                ${_brandSlot('favicon', 'Favicon（分頁專用 · 留空＝用 Logo）', _settings['brand.favicon_url'])}
             </div>
         </div>`;
 }
@@ -138,7 +138,7 @@ function _renderField(key, val) {
     const shortKey = key.includes('.') ? key.split('.').slice(1).join('.') : key;
     const isMissing = val === undefined || val === null;
     const inputVal = isMissing ? '' : (typeof val === 'string' ? val : JSON.stringify(val));
-    const isSecret = key.includes('token') || key.includes('secret') || key.includes('key');
+    const isSecret = key.includes('token') || key.includes('secret') || key.includes('key') || key.includes('password');
     const isLong = typeof val === 'string' && (val.length > 80 || val.includes('\n'));
     const placeholder = isMissing ? '（尚未設定，填值後存檔即建立）' : '';
     const control = isLong
