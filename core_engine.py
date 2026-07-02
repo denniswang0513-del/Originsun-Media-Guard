@@ -1218,22 +1218,43 @@ class MediaGuardEngine:
                 on_progress=on_progress,
             )
 
-        # 收集影片
+        # 收集影片（找不到時逐個來源 log 原因，方便定位是「路徑讀不到」還是「格式不支援」）
         files = []
+        diag: List[str] = []
         for token in sources:
             if not token: continue
-            if os.path.isfile(token) and token.lower().endswith(SUPPORTED_EXTS) and not is_junk_file(token):
-                files.append(token)
+            if os.path.isfile(token):
+                if token.lower().endswith(SUPPORTED_EXTS) and not is_junk_file(token):
+                    files.append(token)
+                else:
+                    diag.append(f"  · 檔案非支援格式或為系統檔，略過：{token}")
             elif os.path.isdir(token):
+                n_ok = 0
+                exts = set()
                 for root, _, fnames in os.walk(token):
                     for fname in sorted(fnames):
                         if is_junk_file(fname):
                             continue
+                        ext = os.path.splitext(fname)[1].lower()
+                        if ext:
+                            exts.add(ext)
                         if fname.lower().endswith(SUPPORTED_EXTS):
                             files.append(os.path.join(root, fname))
+                            n_ok += 1
+                diag.append(
+                    f"  · 資料夾「{token}」：掃到 {n_ok} 支可串帶影片"
+                    f"（內含副檔名：{', '.join(sorted(exts)) if exts else '無任何檔案'}）"
+                )
+            else:
+                diag.append(f"  · 路徑不存在或無法存取（網路磁碟未掛載 / 無權限？）：{token}")
 
         if not files:
             self.err("[Engine] 未找到任何支援的影片檔可串帶。")
+            for d in diag:
+                self.err(d)
+            if any("不存在或無法存取" in d for d in diag):
+                self.err("  提示：網路磁碟(T:/S:…) 的磁碟代號背景程序常讀不到 → 請用 \\\\伺服器\\分享 UNC 路徑"
+                         "（前端送出時已自動轉換；若仍失敗請確認 agent 對該分享有存取權）。")
             return
 
         # [v1.0.179] 強制全局預先排序 (Global Array Serialization)

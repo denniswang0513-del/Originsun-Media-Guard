@@ -514,8 +514,26 @@ async def get_drive_map():
         return {"status": "ok", "mappings": result}
 
 
+# 公司通用磁碟對應表（磁碟代號 → UNC）。各台機器把同一 NAS 掛成不同磁碟代號
+# （master 掛 T:/S:，禮瑜電腦掛 G/H/I/J…），磁碟代號「不能跨機器共用」，但 UNC
+# 全公司通用。有了這張中央表，任何機器都能把別台機器的磁碟代號路徑（如 T:\…）
+# 轉成 UNC → 送到任何 host 都讀得到（修「網路磁碟未掛載」串帶/轉檔失敗）。
+# 覆寫優先序：中央表(base) < settings.json 的 drive_unc_map < 當台實際 net use。
+_STUDIO_DRIVE_MAP: dict = {
+    "N:": r"\\192.168.1.132\Originsun",
+    "P:": r"\\192.168.1.132\00_Inbox",
+    "Q:": r"\\192.168.1.132\PreProduction",
+    "R:": r"\\192.168.1.132\Project_ShortTerm",
+    "S:": r"\\192.168.1.132\Project_Midterm",
+    "T:": r"\\192.168.1.132\Project_Longterm",
+    "U:": r"\\192.168.1.132\ProjectYuan",
+    "V:": r"\\192.168.1.130\storage 01",
+}
+
+
 def _scan_drive_mappings() -> dict:
-    """Scan network drive letter → UNC path mappings via `net use`."""
+    """Scan network drive letter → UNC path mappings via `net use`,
+    再與公司通用中央表合併（跨機器可攜；當台實際 net use 最優先）。"""
     sys_enc = locale.getpreferredencoding() or 'utf-8'
     mappings: dict[str, str] = {}
     try:
@@ -542,4 +560,16 @@ def _scan_drive_mappings() -> dict:
                 pass
     except Exception:
         pass
-    return mappings
+
+    # settings.json 可覆寫/擴充中央表（NAS 分享增減時免改碼）
+    override: dict = {}
+    try:
+        from config import load_settings
+        raw = (load_settings() or {}).get("drive_unc_map") or {}
+        if isinstance(raw, dict):
+            override = {str(k).upper(): v for k, v in raw.items() if v}
+    except Exception:
+        pass
+
+    # 合併：中央表(base) < settings 覆寫 < 當台實際 net use（最優先，machine 有掛的才算數）
+    return {**_STUDIO_DRIVE_MAP, **override, **mappings}

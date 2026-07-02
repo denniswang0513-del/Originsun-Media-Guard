@@ -100,12 +100,15 @@ export async function submitConcat() {
     const ccHostName = ccHostObj.name || ccHostObj.ip;
     const ccIp = isLocal ? 'local' : ccHostObj.ip;
 
-    if (!isLocal) {
-        // 載入 UNC 映射並轉換路徑
-        await ensureDriveMap();
-        payload.sources = payload.sources.map(toUncPath);
-        payload.dest_dir = toUncPath(payload.dest_dir);
+    // 不論本機或遠端：把網路對應磁碟（T:/S:…）的磁碟代號轉成 \\伺服器\分享 UNC。
+    // agent 背景 worker 可能跑在 session 0 / 沒掛使用者 session 的對應磁碟，用磁碟代號
+    // 讀不到網路磁碟 → os.path.isdir 失敗 → 「未找到任何支援的影片檔可串帶」。
+    // 本機實體硬碟（無 UNC 映射）toUncPath 原樣回傳、不受影響。
+    await ensureDriveMap();
+    payload.sources = payload.sources.map(toUncPath);
+    payload.dest_dir = toUncPath(payload.dest_dir);
 
+    if (!isLocal) {
         // 驗證遠端主機路徑（用轉換後的路徑）
         const pathsToCheck = [payload.dest_dir, ...payload.sources];
         try {
