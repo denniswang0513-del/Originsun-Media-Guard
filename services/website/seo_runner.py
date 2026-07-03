@@ -219,8 +219,11 @@ def _resolve_claude_exe() -> Optional[str]:
     return None
 
 
-async def _call_claude(prompt: str) -> tuple[Optional[str], str]:
+async def _call_claude(prompt: str, extra_args: Optional[list] = None) -> tuple[Optional[str], str]:
     """subprocess call `claude --print`，回 (stdout, error_detail)。
+
+    extra_args：附加到 claude CLI 的旗標（如公布欄「問 Claude」傳
+    ["--permission-mode", "plan"] 取唯讀模式）。預設 None = 維持既有行為。
 
     成功 → (stdout, "")；失敗 → (None, 中文診斷訊息)。把錯誤理由帶回給呼叫端，
     讓 admin 從 toast 直接看到「不在 PATH / timeout / exit=N stderr=...」而非通用訊息。
@@ -234,7 +237,7 @@ async def _call_claude(prompt: str) -> tuple[Optional[str], str]:
     # (asyncio subprocess is unavailable on Windows SelectorEventLoop).
     from core.subproc import run_capture
     rc, out, err = await run_capture(
-        [claude_exe, "--print"],
+        [claude_exe, "--print"] + (extra_args or []),
         input_bytes=prompt.encode("utf-8"),
         timeout=_CLAUDE_TIMEOUT_SEC,
     )

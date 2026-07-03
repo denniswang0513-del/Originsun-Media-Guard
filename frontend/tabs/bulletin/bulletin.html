@@ -72,4 +72,32 @@
     }
     #bulletin-content .bl-icon-btn:hover { background: #333; color: #fff; }
     #bulletin-content .bl-icon-btn:disabled { opacity: 0.25; cursor: not-allowed; }
+    /* 🤖 Claude 進度（activity）— 卡片內，read-only 顯示 */
+    #bulletin-content .bl-activity {
+        margin-top: 6px; padding: 6px 9px; border-left: 2px solid #7c3aed;
+        background: #1c1524; color: #a98fd6; font-size: 11px; line-height: 1.55;
+        white-space: pre-wrap; word-break: break-word; border-radius: 0 4px 4px 0;
+    }
+    #bulletin-content .bl-activity-hd { color: #c4b5fd; font-size: 10px; margin-bottom: 3px; opacity: .85; }
+
+    /* 🤖 問 Claude 諮詢對話 modal — openModal 掛在 <body>，故「不」加 #bulletin-content
+       scope（與上方 .website-pill 同理，否則 modal 內選不到）。 */
+    .bl-chat-thread {
+        padding: 16px 18px; max-height: 46vh; overflow-y: auto;
+        display: flex; flex-direction: column; gap: 12px; background: #161616;
+    }
+    .bl-chat-empty { color: #777; font-size: 13px; text-align: center; padding: 34px 12px; line-height: 1.6; }
+    .bl-chat-row { display: flex; flex-direction: column; max-width: 82%; }
+    .bl-chat-row.bl-chat-user { align-self: flex-end; align-items: flex-end; }
+    .bl-chat-row.bl-chat-claude { align-self: flex-start; align-items: flex-start; }
+    .bl-chat-label { font-size: 10px; color: #888; margin-bottom: 3px; }
+    .bl-chat-bubble {
+        font-size: 13px; line-height: 1.55; padding: 8px 11px; border-radius: 10px;
+        white-space: pre-wrap; word-break: break-word;
+    }
+    .bl-chat-user .bl-chat-bubble { background: #333; color: #e5e5e5; border-bottom-right-radius: 3px; }
+    .bl-chat-claude .bl-chat-bubble { background: #1e2b3f; color: #cfe0f5; border-bottom-left-radius: 3px; }
+    .bl-chat-bubble.bl-chat-thinking { color: #c4b5fd; font-style: italic; animation: bl-pulse 1.2s ease-in-out infinite; }
+    .bl-chat-err { color: #f87171; font-size: 12px; text-align: center; padding: 6px 8px; }
+    @keyframes bl-pulse { 0%, 100% { opacity: .45; } 50% { opacity: 1; } }
 </style>

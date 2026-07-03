@@ -1,9 +1,13 @@
 """
-api_bulletin.py — 公布欄待辦提醒 CRUD（團隊共用一份，存 mediaguard）。
+api_bulletin.py — 公布欄待辦提醒 CRUD + 「問 Claude」諮詢（團隊共用，存 mediaguard）。
 
 權限：check_admin_or_module(request, 'bulletin') — 管理員或帳號有 bulletin 模組即可讀寫。
 排序：置頂 → 手動 sort_order → 建立時間（DB 端 order_by）；priority 前端當徽章/篩選用。
+
+「問 Claude」= 唯讀諮詢：背景跑 `claude --print --permission-mode plan`（plan 模式只讀不改），
+把回覆寫進該項的 conversation。不執行任何動作 → 安全。
 """
+import asyncio
 import uuid
 from datetime import datetime
 
@@ -11,7 +15,7 @@ from fastapi import APIRouter, HTTPException, Request  # type: ignore
 from sqlalchemy import select, func  # type: ignore
 
 from core.auth import check_admin_or_module
-from core.schemas import BulletinCreate, BulletinUpdate, BulletinReorder
+from core.schemas import BulletinCreate, BulletinUpdate, BulletinReorder, BulletinAsk
 from db.models import BulletinItem
 import core.state as state
 
@@ -20,12 +24,18 @@ router = APIRouter(prefix="/api/v1", tags=["bulletin"])
 # 顯示順序：置頂 → 手動 sort_order → 建立時間。
 _ORDER_BY = (BulletinItem.pinned.desc(), BulletinItem.sort_order, BulletinItem.created_at)
 
+# 「問 Claude」序列化（同時間只跑一個 claude 子程序，避免併發爆量/搶額度）。
+_ask_lock = asyncio.Lock()
+
 
 def _to_dict(o) -> dict:
     return {
         "id": o.id, "title": o.title, "note": o.note or "",
         "status": o.status, "priority": o.priority, "category": o.category or "",
         "pinned": bool(o.pinned), "sort_order": o.sort_order,
+        "assignee": getattr(o, "assignee", None) or "me",
+        "conversation": getattr(o, "conversation", None) or [],
+        "activity": getattr(o, "activity", None) or "",
         "created_by": o.created_by,
         "created_at": o.created_at.isoformat() if o.created_at else None,
         "done_at": o.done_at.isoformat() if o.done_at else None,
@@ -51,6 +61,18 @@ async def list_bulletin(request: Request):
         return {"items": [_to_dict(r) for r in rows]}
 
 
+@router.get("/bulletin/{item_id}")
+async def get_bulletin(item_id: str, request: Request):
+    """單筆（給「問 Claude」對話輪詢用）。"""
+    check_admin_or_module(request, "bulletin")
+    factory = _require_db()
+    async with factory() as session:
+        obj = await session.get(BulletinItem, item_id)
+        if obj is None:
+            raise HTTPException(status_code=404, detail="找不到項目")
+        return _to_dict(obj)
+
+
 @router.post("/bulletin")
 async def create_bulletin(body: BulletinCreate, request: Request):
     payload = check_admin_or_module(request, "bulletin")
@@ -67,6 +89,7 @@ async def create_bulletin(body: BulletinCreate, request: Request):
             priority=body.priority or "med",
             category=(body.category or "").strip() or None,
             pinned=bool(body.pinned),
+            assignee=body.assignee or "me",
             sort_order=int(maxo) + 1,
             created_by=(payload or {}).get("sub"),
         )
@@ -92,7 +115,7 @@ async def update_bulletin(item_id: str, body: BulletinUpdate, request: Request):
         if data.get("title"):
             obj.title = data["title"].strip()
         # 直取欄位
-        for k in ("priority", "pinned", "status"):
+        for k in ("priority", "pinned", "status", "assignee"):
             if data.get(k) is not None:
                 setattr(obj, k, data[k])
         if "status" in data:
@@ -128,6 +151,78 @@ async def reorder_bulletin(body: BulletinReorder, request: Request):
             r.sort_order = order[r.id]
         await session.commit()
     return {"ok": True}
+
+
+# ══════════════════════════════════════════════════════════
+# 問 Claude（唯讀諮詢）
+# ══════════════════════════════════════════════════════════
+
+_ASK_SYSTEM = (
+    "你是「源日影像 Originsun Studio」內部後台「公布欄」的助理。使用者針對一則待辦事項問你。\n"
+    "請用繁體中文、精簡實用地回答／起草／研究／教學。你目前是【唯讀諮詢】模式：只給建議與草稿，\n"
+    "不會也不能真的去改系統、跑指令或部署。若使用者要你「實際去做」，請說明這要在 Claude Code\n"
+    "session 由真人操作，並把該做的步驟條列清楚（可直接複製給工程用）。"
+)
+
+
+def _build_ask_prompt(title: str, note: str, convo: list) -> str:
+    lines = [_ASK_SYSTEM, "", f"【待辦事項】{title}"]
+    if note:
+        lines.append(f"【備註】{note}")
+    lines.append("\n【對話（含使用者最新提問）】")
+    for m in convo[-12:]:
+        who = "使用者" if m.get("role") == "user" else "Claude"
+        lines.append(f"{who}：{m.get('text', '')}")
+    lines.append("\n（請回覆使用者最新一則提問。）")
+    return "\n".join(lines)
+
+
+async def _run_ask(item_id: str) -> None:
+    """背景執行：讀對話 → 唯讀 claude → 回覆寫回 conversation。"""
+    from db.session import get_session_factory
+    factory = get_session_factory()
+    if factory is None:
+        return
+    async with factory() as session:
+        obj = await session.get(BulletinItem, item_id)
+        if obj is None:
+            return
+        title, note, convo = obj.title, obj.note or "", list(obj.conversation or [])
+    from services.website.seo_runner import _call_claude
+    async with _ask_lock:
+        text, err = await _call_claude(_build_ask_prompt(title, note, convo),
+                                       extra_args=["--permission-mode", "plan"])
+    reply = (text or "").strip() or f"（Claude 沒有回應：{err or '未知錯誤'}）"
+    async with factory() as session:
+        obj = await session.get(BulletinItem, item_id)
+        if obj is None:
+            return
+        convo = list(obj.conversation or [])
+        convo.append({"role": "claude", "text": reply,
+                      "at": datetime.now().isoformat(timespec="seconds")})
+        obj.conversation = convo
+        await session.commit()
+
+
+@router.post("/bulletin/{item_id}/ask")
+async def ask_bulletin(item_id: str, body: BulletinAsk, request: Request):
+    """把使用者提問寫進對話 + 背景跑唯讀 claude；前端輪詢 GET /bulletin/{id} 看回覆。"""
+    check_admin_or_module(request, "bulletin")
+    q = (body.message or "").strip()
+    if not q:
+        raise HTTPException(status_code=422, detail="訊息必填")
+    factory = _require_db()
+    async with factory() as session:
+        obj = await session.get(BulletinItem, item_id)
+        if obj is None:
+            raise HTTPException(status_code=404, detail="找不到項目")
+        convo = list(obj.conversation or [])
+        convo.append({"role": "user", "text": q,
+                      "at": datetime.now().isoformat(timespec="seconds")})
+        obj.conversation = convo
+        await session.commit()
+    asyncio.create_task(_run_ask(item_id))
+    return {"status": "asking"}
 
 
 # ── 種子：表空時塞入開場待辦（seed 邏輯與 feature 同住；mirrors db.seed_website）──

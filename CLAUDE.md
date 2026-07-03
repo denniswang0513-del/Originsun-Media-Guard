@@ -33,6 +33,27 @@
 
 ---
 
+## 0.6 公布欄 = Claude 交辦收件匣（協定，每個 session 都要懂）
+
+後台「📌 公布欄」Tab（master API `/api/v1/bulletin`，存 mediaguard）是**團隊 + Claude 共用的任務清單**。
+使用者會把要交辦的事丟進去，欄位：`assignee`(me/claude)、`status`(todo/doing/done)、`priority`、
+`pinned`、`note`、`activity`(Claude 執行進度 log)、`conversation`(「問 Claude」對話)。
+
+**當使用者說「做公布欄」/「處理公布欄的 X」/「清一清公布欄」時：**
+1. `GET /api/v1/bulletin`（需 admin token 或 bulletin 模組；本機同源打 8000/8001）→ 撈項目。
+2. 只挑 **`assignee == "claude"` 且 `status != "done"`** 的（那些才是交給你的；`assignee=="me"` 是
+   使用者自己的待辦，**別動**）。
+3. 逐項執行 —— 正常工具 + 使用者在場審核（**不是自主亂跑**；破壞性/部署照常先確認）。
+4. 做完：`PUT /api/v1/bulletin/{id}` 設 `status="done"`，並把「你做了什麼」append 進 `activity`。
+5. 做不完/需使用者決定：設 `status="doing"` + 在 `activity` 記卡在哪、需要什麼。
+
+> 取 token：`.venv/Scripts/python.exe -c "from core.auth import create_token; print(create_token({'sub':'admin','username':'admin','access_level':3,'modules':['bulletin']}))"`。
+
+**「問 Claude」（`POST /bulletin/{id}/ask`）是另一條路**：後端跑 `claude --print --permission-mode plan`
+（唯讀諮詢、只回建議不執行），由 `routers/api_bulletin._run_ask` 處理，session 內的你不用管它。
+
+---
+
 ## 1. 專案背景與定位
 
 這是一個**內部媒體管理 SaaS 工具**，部署在製作公司的本機伺服器（`192.168.1.107:8000`），提供給同事用網頁瀏覽器存取。核心工作流程是：

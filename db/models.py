@@ -54,6 +54,9 @@ class BulletinItem(Base):
     category = Column(String(64), nullable=True)
     pinned = Column(Boolean, nullable=False, default=False)
     sort_order = Column(Integer, nullable=False, default=0)
+    assignee = Column(String(16), nullable=False, default="me")      # me / claude（交辦收件匣）
+    conversation = Column(JSONB, nullable=True)                       # 「問 Claude」對話 [{role,text,at}]
+    activity = Column(Text, nullable=True)                            # Claude 執行進度/結果 log（tier B）
     created_by = Column(String(64), nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())

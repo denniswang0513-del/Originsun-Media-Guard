@@ -149,6 +149,7 @@ function _card(it) {
     const fullIdx = _items.findIndex(x => x.id === it.id);
     const atTop = fullIdx <= 0;
     const atBottom = fullIdx >= _items.length - 1;
+    const toClaude = it.assignee === 'claude';
 
     const prioPill = `<span class="website-pill" style="background:${p[1]};color:${p[2]};">${p[0]}</span>`;
     // 進行中額外顯示藍 pill（待辦/完成分別以預設樣式/刪除線呈現）
@@ -156,6 +157,9 @@ function _card(it) {
         ? `<span class="website-pill" style="background:${STATUS.doing[1]};color:${STATUS.doing[2]};">${STATUS.doing[0]}</span>` : '';
     const catPill = it.category
         ? `<span class="website-pill">🏷 ${esc(it.category)}</span>` : '';
+    // 交給 Claude 追蹤徽章（tier B）— 紫底
+    const assignPill = toClaude
+        ? `<span class="website-pill" style="background:#3b1d5f;color:#c4b5fd;">🤖 交給 Claude</span>` : '';
     const pinIcon = it.pinned ? '📌' : '📍';
     const pinStyle = it.pinned ? 'opacity:1;' : 'opacity:0.4;';
 
@@ -167,18 +171,26 @@ function _card(it) {
             <option value="done"  ${it.status === 'done' ? 'selected' : ''}>完成</option>
         </select>`;
 
+    // 「交給 Claude」toggle（assignee）：未指派→交出、已指派→收回（label 隨狀態切換）
+    const assignBtn = toClaude
+        ? `<button class="btn btn-sm btn-ghost" style="white-space:nowrap;color:#c4b5fd;" onclick="window._bl.toggleAssignee('${it.id}')" title="改回我處理">↩︎ 收回</button>`
+        : `<button class="btn btn-sm btn-ghost" style="white-space:nowrap;" onclick="window._bl.toggleAssignee('${it.id}')" title="交給 Claude 追蹤">🤖 交給 Claude</button>`;
+
     return `
         <div class="bl-card ${isDone ? 'bl-done' : ''}">
             <div class="bl-check ${isDone ? 'on' : ''}" onclick="window._bl.toggleDone('${it.id}')" title="標記${isDone ? '未完成' : '完成'}">${isDone ? '✓' : ''}</div>
             <div style="flex:1;min-width:0;">
                 <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
                     <span class="bl-title" onclick="window._bl.edit('${it.id}')">${esc(it.title || '(未命名)')}</span>
-                    ${prioPill}${doingPill}${catPill}
+                    ${prioPill}${doingPill}${catPill}${assignPill}
                 </div>
                 ${it.note ? `<div class="bl-note">${esc(it.note)}</div>` : ''}
+                ${it.activity ? `<div class="bl-activity"><div class="bl-activity-hd">🤖 Claude 進度</div>${esc(it.activity)}</div>` : ''}
             </div>
-            <div style="display:flex;align-items:center;gap:4px;flex-shrink:0;">
+            <div style="display:flex;align-items:center;gap:4px;flex-shrink:0;flex-wrap:wrap;justify-content:flex-end;">
                 ${statusSel}
+                ${assignBtn}
+                <button class="bl-icon-btn" onclick="window._bl.chat('${it.id}')" title="🤖 問 Claude（唯讀諮詢）">🤖</button>
                 <button class="bl-icon-btn" style="${pinStyle}" onclick="window._bl.togglePin('${it.id}')" title="${it.pinned ? '取消釘選' : '釘選'}">${pinIcon}</button>
                 <button class="bl-icon-btn" onclick="window._bl.move('${it.id}',-1)" ${atTop ? 'disabled' : ''} title="上移">▲</button>
                 <button class="bl-icon-btn" onclick="window._bl.move('${it.id}',1)" ${atBottom ? 'disabled' : ''} title="下移">▼</button>
@@ -231,6 +243,18 @@ _bl.togglePin = async (id) => {
     } catch (e) { toastErr(e.message); }
 };
 
+// 交給 Claude ↔ 收回（assignee 在 'me'/'claude' 間切換）
+_bl.toggleAssignee = async (id) => {
+    const it = _items.find(x => x.id === id);
+    if (!it) return;
+    const next = it.assignee === 'claude' ? 'me' : 'claude';
+    try {
+        await bfetch(`/api/v1/bulletin/${id}`, { method: 'PUT', body: { assignee: next } });
+        toastOk(next === 'claude' ? '已交給 Claude' : '已收回');
+        await _reload();
+    } catch (e) { toastErr(e.message); }
+};
+
 _bl.move = async (id, dir) => {
     const arr = _items.slice();
     const i = arr.findIndex(x => x.id === id);
@@ -277,6 +301,11 @@ _bl.edit = (id) => {
             <select id="bl-edit-status" style="${_inp()};max-width:160px;">
                 ${statOpt('todo', '待辦')}${statOpt('doing', '進行中')}${statOpt('done', '完成')}
             </select>
+            <label style="color:#9aa0a6;font-size:12px;">指派</label>
+            <select id="bl-edit-assignee" style="${_inp()};max-width:160px;">
+                <option value="me" ${it.assignee !== 'claude' ? 'selected' : ''}>我</option>
+                <option value="claude" ${it.assignee === 'claude' ? 'selected' : ''}>🤖 交給 Claude</option>
+            </select>
             <label style="color:#9aa0a6;font-size:12px;">分類</label>
             <input id="bl-edit-cat" value="${esc(it.category || '')}" placeholder="選填" style="${_inp()};max-width:220px;" />
             <label style="color:#9aa0a6;font-size:12px;">釘選</label>
@@ -302,6 +331,7 @@ _bl.saveEdit = async (id) => {
         note: v('bl-edit-note')?.value || '',
         priority: v('bl-edit-prio')?.value || 'med',
         status: v('bl-edit-status')?.value || 'todo',
+        assignee: v('bl-edit-assignee')?.value || 'me',
         category: (v('bl-edit-cat')?.value || '').trim(),
         pinned: !!v('bl-edit-pinned')?.checked,
     };
@@ -311,4 +341,151 @@ _bl.saveEdit = async (id) => {
         _bl.closeEdit();
         await _reload();
     } catch (e) { toastErr(e.message); }
+};
+
+// ══════════════════════════════════════════════════════════
+// 🤖 問 Claude — 唯讀諮詢對話（per item）
+// ══════════════════════════════════════════════════════════
+//
+// 送出流程：POST /ask 立刻回 {status:'asking'}，Claude 在背景跑 ~20-40s。故
+// 樂觀把使用者訊息 + 「思考中…」placeholder 貼進 thread、停用送出鈕，接著每
+// 2.5s 輪詢 GET /bulletin/{id}，直到 conversation 長出 claude 新訊息才重繪收尾。
+//
+// 過期輪詢防護：用兩個模組級變數把關 —
+//   _chatItemId   目前開著的諮詢 modal 對應的 item id（closeChat 設回 null）
+//   _chatPollToken 單調遞增；開窗 / 關窗 / 每次送出都 ++，使先前那輪輪詢失效
+// 每次 send 開始時擷取 myToken = ++_chatPollToken，之後每個 await 邊界都重驗
+//   (_chatItemId === id && _chatPollToken === myToken)，不符就靜默停止，
+//   絕不碰已關閉 / 已換人 / 已被新一次送出取代的 modal DOM。
+let _chatItemId = null;
+let _chatPollToken = 0;
+
+function _msgBubble(m) {
+    const isUser = m.role === 'user';
+    const label = isUser ? '你' : '🤖 Claude';
+    const side = isUser ? 'bl-chat-user' : 'bl-chat-claude';
+    return `<div class="bl-chat-row ${side}"><div class="bl-chat-label">${label}</div>` +
+           `<div class="bl-chat-bubble">${esc(m.text || '')}</div></div>`;
+}
+
+function _threadHtml(convo) {
+    if (!Array.isArray(convo) || !convo.length) {
+        return `<div class="bl-chat-empty">問 Claude 關於這則待辦的任何事（怎麼做、幫我起草、研究…）</div>`;
+    }
+    return convo.map(_msgBubble).join('');
+}
+
+// 重繪 thread：convo 主體 + 可選「思考中…」placeholder + 可選錯誤行，並捲到底
+function _paintThread(convo, thinking = false, errorLine = '') {
+    const el = document.getElementById('bl-chat-thread');
+    if (!el) return;
+    let html = _threadHtml(convo);
+    if (thinking) {
+        html += `<div class="bl-chat-row bl-chat-claude"><div class="bl-chat-label">🤖 Claude</div>` +
+                `<div class="bl-chat-bubble bl-chat-thinking">思考中…</div></div>`;
+    }
+    if (errorLine) html += `<div class="bl-chat-err">${esc(errorLine)}</div>`;
+    el.innerHTML = html;
+    el.scrollTop = el.scrollHeight;
+}
+
+function _setSendDisabled(disabled) {
+    const btn = document.getElementById('bl-chat-send');
+    if (btn) { btn.disabled = disabled; btn.textContent = disabled ? '送出中…' : '送出'; }
+}
+
+_bl.chat = (id) => {
+    const it = _items.find(x => x.id === id);
+    if (!it) return;
+    _chatItemId = id;
+    _chatPollToken++;   // 新開一輪對話上下文；任何殘留輪詢即刻失效
+    const inner = `
+        <div style="padding:14px 18px;border-bottom:1px solid #2a2a2a;">
+            <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:10px;">
+                <div style="min-width:0;">
+                    <h3 style="margin:0 0 3px;color:#fff;font-size:15px;">🤖 問 Claude</h3>
+                    <div style="color:#c4b5fd;font-size:13px;word-break:break-word;">${esc(it.title || '(未命名)')}</div>
+                </div>
+                <button onclick="window._bl.closeChat()" style="background:#252525;border:1px solid #333;color:#aaa;cursor:pointer;width:30px;height:30px;border-radius:4px;flex-shrink:0;">✕</button>
+            </div>
+            <div style="color:#777;font-size:11px;margin-top:8px;">唯讀諮詢：Claude 只給建議/草稿，不會改系統</div>
+        </div>
+        <div id="bl-chat-thread" class="bl-chat-thread">${_threadHtml(it.conversation)}</div>
+        <div style="padding:12px 18px;border-top:1px solid #2a2a2a;display:flex;gap:8px;align-items:flex-end;">
+            <textarea id="bl-chat-input" rows="2" placeholder="輸入問題…（Enter 送出 · Shift+Enter 換行）" style="${_inp()};resize:vertical;flex:1;"></textarea>
+            <button id="bl-chat-send" class="btn" style="background:#7c3aed;flex-shrink:0;" onclick="window._bl.send('${it.id}')">送出</button>
+        </div>`;
+    openModal('bl-chat-modal', inner, { width: '600px' });
+    const ta = document.getElementById('bl-chat-input');
+    if (ta) {
+        ta.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); _bl.send(id); }
+        });
+        ta.focus();
+    }
+    // 開窗後把既有對話捲到底
+    const thread = document.getElementById('bl-chat-thread');
+    if (thread) thread.scrollTop = thread.scrollHeight;
+};
+
+_bl.closeChat = () => {
+    _chatItemId = null;
+    _chatPollToken++;   // 讓任何進行中的輪詢在下一個守衛點停止
+    closeModal('bl-chat-modal');
+};
+
+_bl.send = async (id) => {
+    if (_chatItemId !== id) return;   // modal 已關 / 已換人
+    const ta = document.getElementById('bl-chat-input');
+    const msg = (ta?.value || '').trim();
+    if (!msg) { ta?.focus(); return; }
+
+    const it = _items.find(x => x.id === id);
+    // baseConvo = 送出前已知對話；baseLen 之後 +1（POST 同步塞入的使用者訊息），
+    // 再 +1（背景 claude 回覆）→ 輪詢偵測「長度 > baseLen+1」即代表回覆到位。
+    const baseConvo = (it && Array.isArray(it.conversation)) ? it.conversation.slice() : [];
+    const baseLen = baseConvo.length;
+    const optimistic = baseConvo.concat([{ role: 'user', text: msg }]);
+
+    _paintThread(optimistic, true);   // 樂觀：使用者訊息 + 思考中…
+    if (ta) ta.value = '';
+    _setSendDisabled(true);
+
+    const myToken = ++_chatPollToken;   // 這次送出專屬 token；關窗 / 再送都會使其失效
+
+    try {
+        await bfetch(`/api/v1/bulletin/${id}/ask`, { method: 'POST', body: { message: msg } });
+    } catch (e) {
+        if (_chatItemId === id && _chatPollToken === myToken) {
+            _paintThread(optimistic, false, `送出失敗：${e.message || e}`);
+            _setSendDisabled(false);
+        }
+        return;
+    }
+
+    const started = Date.now();
+    const CAP_MS = 210000;   // 3.5 分鐘上限
+    const poll = async () => {
+        // 守衛：modal 關了 / 換 item / 又送了新一則 → 靜默停止
+        if (_chatItemId !== id || _chatPollToken !== myToken) return;
+        if (Date.now() - started > CAP_MS) {
+            _paintThread(optimistic, false, 'Claude 回覆逾時（可能仍在背景處理，稍後重開此對話查看）');
+            _setSendDisabled(false);
+            return;
+        }
+        let data = null;
+        try {
+            data = await bfetch(`/api/v1/bulletin/${id}`);
+        } catch { /* 暫時性失敗：忽略，下一輪再試 */ }
+        if (_chatItemId !== id || _chatPollToken !== myToken) return;   // await 後再驗一次
+        const conv = data && Array.isArray(data.conversation) ? data.conversation : null;
+        if (conv && conv.length > baseLen + 1) {
+            if (it) it.conversation = conv;   // 更新快取，供下次送出算 baseLen
+            _paintThread(conv, false);
+            _setSendDisabled(false);
+            return;
+        }
+        setTimeout(poll, 2500);
+    };
+    setTimeout(poll, 2500);
 };

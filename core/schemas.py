@@ -276,6 +276,7 @@ class BulletinCreate(BaseModel):
     priority: str = "med"       # high / med / low
     category: Optional[str] = None
     pinned: bool = False
+    assignee: str = "me"        # me / claude（交辦收件匣）
 
 
 class BulletinUpdate(BaseModel):
@@ -285,10 +286,15 @@ class BulletinUpdate(BaseModel):
     priority: Optional[str] = None
     category: Optional[str] = None
     pinned: Optional[bool] = None
+    assignee: Optional[str] = None
 
 
 class BulletinReorder(BaseModel):
     ordered_ids: List[str]
+
+
+class BulletinAsk(BaseModel):
+    message: str
 
 
 class DownloadModelRequest(BaseModel):

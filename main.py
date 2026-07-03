@@ -348,15 +348,25 @@ async def _on_startup():
                             await session.rollback()
         except Exception:
             pass
-    # ── 公布欄種子（seed 邏輯在 routers/api_bulletin.py，與 seed_website 同慣例）──
+    # ── 公布欄欄位 migration（新欄位 create_all 不補到既有表）+ 種子 ──
     if state.db_online:
         try:
             from db.session import get_session_factory
             _f_bl = get_session_factory()
             if _f_bl:
-                from routers.api_bulletin import seed_if_empty as _seed_bulletin
+                from sqlalchemy import text as _t_bl
                 async with _f_bl() as _s_bl:
-                    await _seed_bulletin(_s_bl)
+                    for _c, _ct in [("assignee", "VARCHAR(16) DEFAULT 'me'"),
+                                    ("conversation", "JSONB"), ("activity", "TEXT")]:
+                        try:
+                            await _s_bl.execute(_t_bl(
+                                f"ALTER TABLE bulletin_items ADD COLUMN IF NOT EXISTS {_c} {_ct}"))
+                            await _s_bl.commit()
+                        except Exception:
+                            await _s_bl.rollback()
+                from routers.api_bulletin import seed_if_empty as _seed_bulletin
+                async with _f_bl() as _s_bl2:
+                    await _seed_bulletin(_s_bl2)
         except Exception:
             pass
     # ── DB Migration: api_keys table ──
