@@ -1,5 +1,5 @@
 {
-  "version": "1.10.188",
-  "build_date": "2026-07-03",
-  "notes": "chore(deploy): nginx 主設定自動同步到 NAS（消除 repo↔NAS drift）+ 官網正式上線 www"
+  "version": "1.10.189",
+  "build_date": "2026-07-04",
+  "notes": "feat(backup): settings.json（含 jwt/db/SMTP 密鑰）Fernet 加密納入備份"
 }
