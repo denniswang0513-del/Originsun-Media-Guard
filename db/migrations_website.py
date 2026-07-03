@@ -41,6 +41,8 @@ _CRM_PROJECTS_COLUMNS: list[tuple[str, str]] = [
     ("public_old_slugs", "JSONB NOT NULL DEFAULT '[]'::jsonb"),
     # OG image — _sync_showcase_to_public 從 sc.cover_url 鏡像
     ("public_cover_url", "TEXT"),
+    # 首頁輪播精選圖（admin 直接設定，不被 showcase 鏡像覆蓋）
+    ("public_featured_image", "TEXT"),
     # per-work SEO 索引控制（true = 強制 noindex；null/false = 跟站級 indexable）
     ("public_noindex", "BOOLEAN DEFAULT FALSE"),
     # credits 雙模式：'block' (JSONB blocks) / 'text' (純文字貼上)

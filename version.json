@@ -1,5 +1,5 @@
 {
-  "version": "1.10.192",
+  "version": "1.10.193",
   "build_date": "2026-07-04",
-  "notes": "feat(bulletin): 問 Claude 唯讀諮詢對話 + 交給 Claude 交辦收件匣（+ CLAUDE.md 協定）"
+  "notes": "feat(website): 作品精選圖 + 首頁輪播取圖鏈（精選圖→成果展示第一張→YouTube）"
 }

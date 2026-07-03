@@ -238,6 +238,9 @@ class CrmProject(Base):
     public_old_slugs = Column(JSONB, nullable=False, default=list)
     # OG image — _sync_showcase_to_public 從 sc.cover_url 鏡像；admin 不直接 PUT
     public_cover_url = Column(Text, nullable=True)
+    # 首頁輪播精選圖（admin 直接上傳/設定；不被 showcase 鏡像覆蓋）。
+    # 首頁取圖：public_featured_image → 成果展示第一張 → YouTube 縮圖。
+    public_featured_image = Column(Text, nullable=True)
     # per-work SEO 索引控制（false = 跟著站級 meta.indexable；true = 強制 noindex）
     public_noindex = Column(Boolean, nullable=True, default=False)
     # ── Phase M 英文版：_en 翻譯欄（transcreation；空則前端 fallback 中文）──

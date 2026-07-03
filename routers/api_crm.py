@@ -4368,7 +4368,7 @@ def _apply_showcase_fields(sc, payload: dict) -> None:
 # 作品基本資料 — showcase-edit token 路徑也允許編，token 是 trusted（內部 PM）
 _PROJECT_PUBLIC_FIELDS = (
     "public_title", "public_client", "public_year",
-    "public_featured", "public_noindex",
+    "public_featured", "public_featured_image", "public_noindex",
 )
 
 
@@ -4641,6 +4641,7 @@ async def get_showcase_edit_data(token: str):
             data["public_client"] = proj.public_client or ""
             data["public_year"] = proj.public_year
             data["public_featured"] = bool(proj.public_featured)
+            data["public_featured_image"] = proj.public_featured_image or ""
             data["public_noindex"] = bool(proj.public_noindex)
             data["public_published"] = bool(proj.public)
             data["public_old_slugs"] = list(proj.public_old_slugs or [])
@@ -4870,6 +4871,42 @@ async def upload_showcase_edit_gallery(token: str, file: UploadFile = File(...),
         await session.commit()
         await session.refresh(sc)
     return {"status": "ok", "gallery": sc.gallery or []}
+
+
+@router.post("/public/showcase-edit/{token}/featured_image")
+async def upload_showcase_edit_featured_image(token: str, file: UploadFile = File(...)):
+    """透過 Token 上傳作品「精選圖 / 首頁輪播圖」（無需認證）。
+
+    與 gallery（append 到 sc.gallery）不同，這裡寫的是 CrmProject.public_featured_image
+    單一欄位 —— 首頁精選輪播會優先用這張，沒設就 fallback 到成果展示第一張。
+    """
+    _require_db()
+    factory = await _get_factory()
+    async with factory() as session:
+        sc = await _verify_showcase_edit_token(session, token, require_editable=True)
+        project_id = sc.id
+    ext = (os.path.splitext(file.filename or "img.jpg")[1] or ".jpg").lower()
+    if ext not in _ALLOWED_IMG_EXT:
+        raise HTTPException(status_code=400, detail=f"不支援的圖片格式：{ext}")
+    sdir = _showcase_dir(project_id)
+    content = await file.read()
+    saved = _save_image_as_webp(content, sdir, f"featured_{uuid.uuid4().hex}")
+    fname = os.path.basename(saved)
+    url = f"/uploads/projects/{project_id}/showcase/{fname}"
+    async with factory() as session:
+        project = await session.get(CrmProject, project_id)
+        if not project:
+            raise HTTPException(status_code=404, detail="找不到專案")
+        project.public_featured_image = url
+        await session.commit()
+    # 對外網站首頁輪播讀 public_featured_image → 標 dirty 觸發 rebuild（debounce 60s）
+    try:
+        from services.website import rebuild_service
+        await rebuild_service.mark_dirty()
+    except Exception as e:
+        import logging
+        logging.getLogger(__name__).warning("[featured_image] mark_dirty 失敗: %s", e)
+    return {"url": url}
 
 
 @router.post("/public/showcase-edit/{token}/process")

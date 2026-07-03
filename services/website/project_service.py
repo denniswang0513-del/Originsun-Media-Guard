@@ -71,6 +71,26 @@ async def _clients_for_projects(
     return out
 
 
+async def _showcase_first_for_projects(
+    session: AsyncSession, project_ids: list[str]
+) -> dict[str, str]:
+    """Batch：project_id → 成果展示第一張圖 URL（gallery[0].url）。首頁輪播精選圖的 fallback。"""
+    if not project_ids:
+        return {}
+    from db.models import CrmProjectShowcase
+    # crm_project_showcase.id == project_id（1:1；無 project_id 欄位）
+    stmt = select(CrmProjectShowcase.id, CrmProjectShowcase.gallery).where(
+        CrmProjectShowcase.id.in_(project_ids)
+    )
+    out: dict[str, str] = {}
+    for pid, gallery in await session.execute(stmt):
+        if isinstance(gallery, list) and gallery and isinstance(gallery[0], dict):
+            url = (gallery[0].get("url") or "").strip()
+            if url:
+                out[pid] = url
+    return out
+
+
 def _slug_or_fallback(p: CrmProject) -> str:
     """slug 優先序：admin 自訂 > public_number（1, 2, 3...）> 'work' 兜底。
 
@@ -185,6 +205,7 @@ def _to_public_dict(
     p: CrmProject,
     cat_data: Optional[dict[str, list[str]]] = None,
     client_name: Optional[str] = None,
+    showcase_first: Optional[str] = None,
 ) -> dict:
     """投影 public 欄位到 dict — caller 必須保證 p 是 public（list/get caller 都在 SQL 層
     `WHERE public.is_(True)` 過濾過）。本函式不檢查 public flag，避免 admin path
@@ -210,6 +231,9 @@ def _to_public_dict(
         "thumbnail_url": _youtube_thumbnail(p.public_youtube_id),
         # OG image fallback chain：work cover > YouTube thumb > BaseLayout meta.seo_og_image
         "cover_url": p.public_cover_url or _youtube_thumbnail(p.public_youtube_id),
+        # 首頁輪播取圖：精選圖 → 成果展示第一張 → YouTube 縮圖（見 HomeSlideshow）
+        "featured_image": p.public_featured_image or None,
+        "first_showcase_image": showcase_first or None,
         "featured": bool(p.public_featured),
         "noindex": bool(p.public_noindex),
         # SEO 301 來源舊 URL — Astro JSON-LD sameAs / markdown 「曾用 URL」用
@@ -344,8 +368,9 @@ async def list_featured_projects(session: AsyncSession, limit: int = 6) -> list[
     pids = [p.id for p in featured]
     cat_map = await _categories_for_projects(session, pids)
     client_map = await _clients_for_projects(session, pids)
+    sc_first_map = await _showcase_first_for_projects(session, pids)
     return [
-        _to_public_dict(p, cat_map.get(p.id), client_map.get(p.id))
+        _to_public_dict(p, cat_map.get(p.id), client_map.get(p.id), sc_first_map.get(p.id))
         for p in featured
     ]
 

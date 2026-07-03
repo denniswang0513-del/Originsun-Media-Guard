@@ -372,6 +372,20 @@ function _render() {
         </div>`;
     }
 
+    // === 精選圖（首頁輪播用）=== 寫 CrmProject.public_featured_image 單一欄位
+    const _featImg = sc.public_featured_image || '';
+    html += `<div class="section" id="sec-featured">
+        <div class="section-label">精選圖（首頁輪播用）</div>
+        <p style="color:var(--text3);font-size:12px;margin:0 0 8px;">首頁精選輪播會優先用這張；沒設就用成果展示第一張（YouTube 縮圖畫質太低）。</p>
+        ${_featImg
+            ? `<div class="gallery-item" style="aspect-ratio:16/9;max-width:420px;">
+                    <img src="${_esc(_featImg)}" alt="featured">
+                    ${EDITABLE ? '<button class="del" data-action="del-featured">✕</button>' : ''}
+               </div>`
+            : '<p style="color:var(--text3);font-size:13px;">尚未設定精選圖</p>'}
+        ${EDITABLE ? '<div style="margin-top:8px;"><input type="file" id="inp-featured" accept="image/*" style="display:none"><button class="btn btn-sm" id="btn-add-featured">+ 上傳精選圖</button></div>' : ''}
+    </div>`;
+
     // Cover (read-only in edit page)
     if (sc.cover_url) {
         html += `<div class="section">
@@ -828,6 +842,19 @@ function _bindEvents() {
             gallery.splice(parseInt(btn.dataset.idx), 1);
             try { await _save({ gallery }); await _reload(); } catch (e) { alert(e.message); }
         });
+    });
+
+    // Featured image upload → 寫 CrmProject.public_featured_image（回 {url}）
+    document.getElementById('btn-add-featured')?.addEventListener('click', () => document.getElementById('inp-featured').click());
+    document.getElementById('inp-featured')?.addEventListener('change', async (e) => {
+        if (e.target.files[0]) {
+            try { await _upload('/featured_image', e.target.files[0]); await _reload(); } catch (err) { alert(err.message); }
+        }
+    });
+
+    // Featured image remove → PUT public_featured_image="" 清空
+    document.querySelector('[data-action="del-featured"]')?.addEventListener('click', async () => {
+        try { await _save({ public_featured_image: '' }); await _reload(); } catch (e) { alert(e.message); }
     });
 
     // Process upload

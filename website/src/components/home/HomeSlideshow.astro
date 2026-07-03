@@ -18,8 +18,13 @@ interface Props { works: IPublicProject[] }
 const { works } = Astro.props;
 
 const slides = works.slice(0, 6);
+// 取圖優先序：精選圖（admin 設定）→ 成果展示第一張 → YouTube maxres 縮圖（畫質最差、墊底）。
 const thumbs = await Promise.all(
-    slides.map(w => resolveThumbnailAsync(w.youtube_id, w.slug, "maxres")),
+    slides.map(async w =>
+        w.featured_image
+        || w.first_showcase_image
+        || await resolveThumbnailAsync(w.youtube_id, w.slug, "maxres"),
+    ),
 );
 ---
 
