@@ -20,7 +20,9 @@ export { esc, fmtNum, renderAvatar };
 // NAS Website_Nginx LAN 入口（同公司網段時 admin Tab 直連、省 cloudflared）
 const NAS_LAN_BASE = 'http://192.168.1.132:8090';
 // 對外 cloudflared tunnel hostname（master 關機 / PM 在家走這條）
-const NAS_PUBLIC_BASE = 'https://test.originsun-studio.com';
+// 2026-07-03 正式上線後 test hostname 已移除 → 改用正式 www（同一個 NAS 8090、
+// nginx 一樣 proxy /api/website/* 給 website-api；admin endpoint 皆 JWT 保護）。
+const NAS_PUBLIC_BASE = 'https://www.originsun-studio.com';
 
 function _isLanOrigin() {
     const h = window.location.hostname;
