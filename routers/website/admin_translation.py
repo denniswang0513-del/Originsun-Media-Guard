@@ -25,8 +25,6 @@ from services.website import translation_service, rebuild_service
 
 router = APIRouter(prefix="/api/website/admin", tags=["website-admin-translation"])
 
-_ENTITY_TYPES = {"work", "post", "service"}
-
 
 @router.get("/translation/audit")
 async def translation_audit(session: AsyncSession = Depends(admin_session)):
@@ -49,14 +47,18 @@ async def translation_update_settings(request: Request, session: AsyncSession = 
 
 
 @router.post("/translation/run")
-async def translation_run_now(session: AsyncSession = Depends(admin_session)):
+async def translation_run_now(dry_run: bool = False,
+                              session: AsyncSession = Depends(admin_session)):
     settings = await translation_service.get_runner_settings(session)
+    if dry_run:   # 預覽：回將處理的實體清單，不實際送 claude
+        return await translation_service.run_pipeline(
+            session, batch_size=settings["batch_size"], dry_run=True)
     return await translation_service.trigger_batch(session, batch_size=settings["batch_size"])
 
 
 @router.post("/translation/{etype}/{eid}/generate")
 async def translation_generate(etype: str, eid: str, session: AsyncSession = Depends(admin_session)):
-    if etype not in _ENTITY_TYPES:
+    if etype not in translation_service.ENTITY_TYPES:
         raise HTTPException(status_code=400, detail="unknown entity type")
     return await translation_service.generate_for_entity(session, etype, eid)
 
@@ -65,16 +67,14 @@ async def translation_generate(etype: str, eid: str, session: AsyncSession = Dep
 async def translation_apply(etype: str, eid: str, request: Request,
                             session: AsyncSession = Depends(admin_session)):
     """存人工確認/編輯後的 _en 並標記 approved（fields = {"<field>_en": ...}）。"""
-    if etype not in _ENTITY_TYPES:
+    if etype not in translation_service.ENTITY_TYPES:
         raise HTTPException(status_code=400, detail="unknown entity type")
     body = await request.json()
-    fields = body.get("fields") or {}
-    obj = await translation_service._get_entity(session, etype, eid)
-    if obj is None:
-        raise HTTPException(status_code=404, detail="實體不存在")
-    src_hash = body.get("source_hash") or translation_service._source_hash(etype, obj)
-    await translation_service._writeback(
-        session, etype, eid, fields, src_hash, approve=True, by=current_username(request))
+    r = await translation_service.apply_entity(
+        session, etype, eid, body.get("fields") or {},
+        body.get("source_hash"), by=current_username(request))
+    if not r.get("ok"):
+        raise HTTPException(status_code=404, detail=r.get("error", "實體不存在"))
     await rebuild_service.mark_dirty()
     return {"ok": True}
 
@@ -96,7 +96,7 @@ async def translation_run_internal(request: Request):
 @router.post("/internal/translation/{etype}/{eid}/generate")
 async def translation_generate_internal(etype: str, eid: str, request: Request):
     _check_internal_key(request)
-    if etype not in _ENTITY_TYPES:
+    if etype not in translation_service.ENTITY_TYPES:
         raise HTTPException(status_code=400, detail="unknown entity type")
     async with _admin_session_for_internal() as session:
         return await translation_service._generate_local(session, etype, eid)

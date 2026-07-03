@@ -22,10 +22,28 @@ const STATUS = {
     approved:   ['已核准',    '#064e3b', '#6ee7b7'],
 };
 const FIELD_LABEL = {
-    public_title_en: '標題', public_description_en: '描述',
-    title_en: '標題', excerpt_en: '摘要', seo_title_en: 'SEO 標題', seo_description_en: 'SEO 描述',
+    public_title_en: '標題', public_description_en: '描述', public_client_en: '客戶名（手動英文）',
+    title_en: '標題', excerpt_en: '摘要',
     short_desc_en: '短描述', full_desc_en: '完整描述',
 };
+
+// 排程時間選單（對齊 AI SEO 卡片）— value 是 cron 字串，主機台灣時區。
+const CRON_PRESETS = [
+    { v: '0 4 * * *',    label: '每日 · 凌晨 04:00（預設 · 離峰）' },
+    { v: '0 9 * * *',    label: '每日 · 上午 09:00' },
+    { v: '0 14 * * *',   label: '每日 · 下午 14:00' },
+    { v: '0 22 * * *',   label: '每日 · 晚上 22:00' },
+    { v: '0 */12 * * *', label: '每 12 小時' },
+    { v: '0 */6 * * *',  label: '每 6 小時' },
+    { v: '0 */3 * * *',  label: '每 3 小時（快速清待翻）' },
+    { v: '0 * * * *',    label: '每小時（最快 · 較吃額度）' },
+];
+function _cronOptions(cur) {
+    const vals = CRON_PRESETS.map(p => p.v);
+    let opts = CRON_PRESETS.map(p => `<option value="${p.v}"${p.v === cur ? ' selected' : ''}>${esc(p.label)}</option>`).join('');
+    if (!vals.includes(cur)) opts = `<option value="${esc(cur)}" selected>自訂：${esc(cur)}</option>` + opts;
+    return opts;
+}
 
 export default async function render(container, ctx = {}) {
     const { isCurrent = () => true } = ctx;
@@ -74,8 +92,8 @@ function _renderShell() {
             <div style="display:grid;grid-template-columns:auto 1fr;gap:10px 14px;align-items:center;font-size:13px;">
                 <label style="color:#ddd;display:inline-flex;gap:6px;align-items:center;grid-column:1/3;">
                     <input id="tr-enabled" type="checkbox" ${s.enabled ? 'checked' : ''} style="width:auto;"/> 啟用排程自動翻譯</label>
-                <span style="color:#9aa0a6;">Cron</span>
-                <input id="tr-cron" value="${esc(s.cron || '0 4 * * *')}" style="${_inp()}" />
+                <span style="color:#9aa0a6;">執行時間</span>
+                <select id="tr-cron" style="${_inp()}">${_cronOptions(s.cron || '0 4 * * *')}</select>
                 <span style="color:#9aa0a6;">每批數量</span>
                 <input id="tr-batch" type="number" value="${s.batch_size || 10}" style="${_inp()};max-width:100px;" />
                 <label style="color:#ddd;display:inline-flex;gap:6px;align-items:center;grid-column:1/3;">
@@ -88,6 +106,7 @@ function _renderShell() {
             </div>
             <div style="display:flex;gap:8px;align-items:center;margin-top:12px;flex-wrap:wrap;">
                 <button class="btn" style="background:#3b82f6;" onclick="window._tr.saveSettings()">💾 儲存設定</button>
+                <button class="btn btn-ghost" onclick="window._tr.preview()">👁 預覽（dry-run）</button>
                 <button class="btn" style="background:#059669;" onclick="window._tr.runNow(this)"
                         ${s.running ? 'disabled' : ''}>${s.running ? '翻譯中…' : '⚡ 立即翻譯整批'}</button>
                 <span style="color:#888;font-size:12px;">${esc(lastSum)}${s.progress ? ` · 進度 ${esc(s.progress)}` : ''}</span>
@@ -161,6 +180,13 @@ _tr.runNow = async (btn) => {
     if (btn) { btn.disabled = false; btn.textContent = '⚡ 立即翻譯整批'; }
 };
 
+_tr.preview = async () => {
+    try {
+        const r = await websiteFetch('/api/website/admin/translation/run?dry_run=1', { method: 'POST' });
+        toastOk(`預覽：本批將翻譯 ${(r.items || []).length} 個實體（不實際送 claude）`);
+    } catch (e) { toastErr(e.message); }
+};
+
 // ── 單項：生成 → 審核 → 套用 ──
 
 _tr.open = async (etype, eid, btn) => {
@@ -191,38 +217,47 @@ function _showReview(etype, eid, r) {
     }).join('');
     const bodyNote = r.body_segments
         ? `<div style="color:#93c5fd;font-size:12px;margin-bottom:12px;">📄 內文 ${r.body_segments} 段已翻譯（套用後生效，此處不逐段編輯）</div>` : '';
-    // 暫存 body_en 供套用帶回
-    _tr._pendingBody = fields.body_en || null;
-    _tr._pendingHash = r.source_hash || '';
+    // 手動欄位（作品客戶名：AI 不翻專有名詞，人工填英文）— 預填目前值
+    const manualRows = (r.manual_fields || []).map(m => `
+            <div style="margin-bottom:14px;">
+                <label style="color:#9aa0a6;font-size:11px;display:block;margin-bottom:3px;">${esc(m.label)} <span style="color:#f59e0b;">手動</span></label>
+                ${m.zh ? `<div style="color:#666;font-size:12px;background:#0d0d0d;border:1px solid #222;border-radius:4px;padding:6px 8px;margin-bottom:5px;">${esc(m.zh)}</div>` : ''}
+                <input data-en-key="${esc(m.en_key)}" value="${esc(m.current || '')}" placeholder="留空 = 英文站沿用原文" style="${_inp()}" />
+            </div>`).join('');
+    // 一次打包本次審核的上下文（避免散落 window 全域 + 套用後清乾淨）
+    _tr._pending = { etype, eid, source_hash: r.source_hash || '', body: fields.body_en || null };
     const inner = `
         <div style="padding:14px 18px;border-bottom:1px solid #2a2a2a;display:flex;justify-content:space-between;align-items:center;">
             <h3 style="margin:0;color:#fff;font-size:15px;">審核英文翻譯 <span style="color:#888;font-size:12px;">· ${ETYPE_LABEL[etype] || etype}</span></h3>
             <button onclick="window._tr.close()" style="background:#252525;border:1px solid #333;color:#aaa;cursor:pointer;width:30px;height:30px;border-radius:4px;">✕</button>
         </div>
         <div style="padding:18px;max-height:60vh;overflow:auto;">
-            ${bodyNote}${rows || '<div style="color:#888;">沒有可編輯欄位</div>'}
+            ${bodyNote}${rows}${manualRows}${(rows || manualRows) ? '' : '<div style="color:#888;">沒有可編輯欄位</div>'}
         </div>
         <div style="padding:12px 18px;border-top:1px solid #2a2a2a;display:flex;justify-content:flex-end;gap:8px;">
             <button class="btn btn-ghost btn-sm" onclick="window._tr.close()">取消</button>
-            <button class="btn" style="background:#059669;" onclick="window._tr.apply('${etype}','${esc(eid)}')">✓ 套用並核准</button>
+            <button class="btn" style="background:#059669;" onclick="window._tr.apply()">✓ 套用並核准</button>
         </div>`;
     openModal('tr-modal', inner, { width: '680px' });
 }
 
 _tr.close = () => closeModal('tr-modal');
 
-_tr.apply = async (etype, eid) => {
+_tr.apply = async () => {
+    const p = _tr._pending;
+    if (!p) return;
     const fields = {};
     document.querySelectorAll('#tr-modal [data-en-key]').forEach(el => {
         const val = el.value.trim();
         if (val) fields[el.dataset.enKey] = val;
     });
-    if (_tr._pendingBody) fields.body_en = _tr._pendingBody;
+    if (p.body) fields.body_en = p.body;
     try {
-        await websiteFetch(`/api/website/admin/translation/${etype}/${eid}/apply`, {
-            method: 'POST', body: { fields, source_hash: _tr._pendingHash },
+        await websiteFetch(`/api/website/admin/translation/${p.etype}/${p.eid}/apply`, {
+            method: 'POST', body: { fields, source_hash: p.source_hash },
         });
         toastOk('已核准並套用（對外站 60 秒後重建）');
+        _tr._pending = null;
         _tr.close();
         const audit = await websiteFetch('/api/website/admin/translation/audit');
         _state.audit = audit?.items || [];

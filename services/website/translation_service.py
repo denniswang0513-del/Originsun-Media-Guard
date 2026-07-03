@@ -47,7 +47,9 @@ _run_lock = asyncio.Lock()
 # ── 每型別的「要翻譯的簡單文字欄位」（key = 中文欄位名，_en 欄一律 = key+"_en"）──
 # public_client / credits 人名不在此 → 不翻（專有名詞）。
 _WORK_FIELDS = ["public_title", "public_description"]
-_POST_FIELDS = ["title", "excerpt", "seo_title", "seo_description"]
+# seo_title/seo_description 不翻：本站單一 URL、SEO meta 維持中文（見 BaseLayout），
+# 英文 SEO 欄位沒有消費者，翻了也不會渲染 → 不浪費 claude 額度去翻。
+_POST_FIELDS = ["title", "excerpt"]
 _SERVICE_FIELDS = ["title", "short_desc", "full_desc"]
 
 
@@ -70,6 +72,7 @@ Source (Traditional Chinese):
 # 每型別的 model / 中文欄位（集中一處，避免散落各 function 重複宣告）。
 _ENTITY_MODEL = {"work": CrmProject, "post": WebsitePost, "service": WebsiteService}
 _ENTITY_FIELDS = {"work": _WORK_FIELDS, "post": _POST_FIELDS, "service": _SERVICE_FIELDS}
+ENTITY_TYPES = frozenset(_ENTITY_MODEL)   # 單一來源，router 驗證共用
 
 
 # ══════════════════════════════════════════════════════════
@@ -95,7 +98,7 @@ def _block_texts(body: list) -> list[tuple[int, str]]:
 
 
 def _list_key(block_i: int, item_j: int) -> int:
-    """把 list item 的 (block, item) 編成單一 int key（block*1000+item）避免衝突。"""
+    """把 list item 的 (block, item) 編成單一 int key（block*1000+100000+item）避免衝突。"""
     return block_i * 1000 + 100000 + item_j
 
 
@@ -143,7 +146,7 @@ async def list_audit(session: AsyncSession) -> list[dict]:
     """所有可翻實體 + 狀態（missing / stale / translated / approved）。"""
     states = await _state_map(session)
     out: list[dict] = []
-    for etype in ("work", "post", "service"):
+    for etype in _ENTITY_MODEL:
         for obj in await _entities(session, etype):
             eid = str(obj.id)
             zh = _collect_zh(etype, obj)
@@ -278,8 +281,14 @@ async def _generate_local(session: AsyncSession, etype: str, eid: str,
     parsed = _parse(raw, zh, bool(body_pairs))
     if not parsed:
         return {"ok": False, "error": f"JSON 解析失敗（前 80：{raw[:80]!r}）"}
-    return {"ok": True, "fields": parsed, "zh": zh,
-            "body_segments": len(body_pairs), "source_hash": _source_hash(etype, obj)}
+    result = {"ok": True, "fields": parsed, "zh": zh,
+              "body_segments": len(body_pairs), "source_hash": _source_hash(etype, obj)}
+    if etype == "work":   # 客戶名不 AI 翻（專有名詞）→ 給後台審核卡片手動填英文
+        result["manual_fields"] = [{
+            "en_key": "public_client_en", "label": "客戶名（手動英文，AI 不翻）",
+            "zh": obj.public_client or "", "current": obj.public_client_en or "",
+        }]
+    return result
 
 
 async def _writeback(session: AsyncSession, etype: str, eid: str, parsed: dict,
@@ -313,6 +322,17 @@ async def generate_for_entity(session: AsyncSession, etype: str, eid: str) -> di
         url = f"{relay.rstrip('/')}/api/website/admin/internal/translation/{etype}/{eid}/generate"
         return await _relay(url, timeout=120.0)
     return await _generate_local(session, etype, eid)
+
+
+async def apply_entity(session: AsyncSession, etype: str, eid: str, fields: dict,
+                       source_hash: Optional[str] = None, *, by: str = "admin") -> dict:
+    """存人工確認/編輯後的 _en 並標 approved（router 用，不再自己碰 private helper）。"""
+    obj = await _get_entity(session, etype, eid)
+    if obj is None:
+        return {"ok": False, "error": "實體不存在"}
+    await _writeback(session, etype, eid, fields,
+                     source_hash or _source_hash(etype, obj), approve=True, by=by)
+    return {"ok": True}
 
 
 # ══════════════════════════════════════════════════════════

@@ -1,5 +1,5 @@
 {
-  "version": "1.10.183",
+  "version": "1.10.184",
   "build_date": "2026-07-03",
-  "notes": "refactor(website): /simplify 清理翻譯功能（PostBody/richtext 抽出、relay helper 上移 _common、runner 去重）"
+  "notes": "feat(website): 翻譯卡片排程UI對齊AI SEO(時間下拉+dry-run預覽) + 客戶名手動英文 + /simplify二輪(apply_entity/去seo_en翻譯)"
 }
