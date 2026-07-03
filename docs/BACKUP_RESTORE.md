@@ -100,8 +100,9 @@ python scripts/setup_gdrive_backup.py
 ```bash
 tar xzf originsun_backup_<ts>.tar.gz
 # 產出：
-#   mediaguard.pgc         ← DB（自訂格式）
+#   mediaguard.pgc         ← DB（自訂格式）— CRM 客戶/專案/報價/帳務 + 官網 + 使用者 全在此
 #   uploads.tar.gz         ← 官網上傳媒體
+#   settings.json.enc      ← 設定檔（jwt_secret/db url/SMTP 密碼）Fernet 加密（見 3.4b）
 #   notion-media.tar.gz    ← 選配（若該次有 notion 圖）
 #   manifest.json          ← 時間戳 / 版本 / 各檔 sha256（可拿來核對完整性）
 ```
@@ -188,6 +189,28 @@ ssh -i ~/.ssh/id_originsun_nas -o IdentitiesOnly=yes admin@192.168.1.132 \
 # 在 master 的 repo root 執行
 tar xzf notion-media.tar.gz -C website/public/
 # → website/public/notion-media/
+```
+
+### 3.4b 還原 settings.json（解密）
+
+bundle 內的 `settings.json.enc` 是 **Fernet 加密**（因為會上 Google Drive）。解密需要
+金鑰 `credentials/backup_key.txt`——**這把金鑰只存在 master 本地、不在 bundle 裡**（所以
+Drive 外洩也解不開）。
+
+> 🔴 **前提**：你手上要有這把金鑰。master 若整台掛掉、`credentials/backup_key.txt` 也沒了，
+> 就**永遠解不開** `settings.json.enc`。所以當初有另存一份金鑰到密碼管理器/安全處 → 拿它來還原。
+> （settings.json 是設定+密鑰，不是核心資料；真沒有金鑰就重設 settings.json 即可，DB 資料不受影響。）
+
+```bash
+# 在有金鑰的機器（master 或你另存金鑰處）跑。KEY 換成你的 backup_key.txt 內容。
+python -c "
+from cryptography.fernet import Fernet
+key = open(r'C:\OriginsunAgent\credentials\backup_key.txt','rb').read().strip()  # 或直接貼字串
+data = Fernet(key).decrypt(open('settings.json.enc','rb').read())
+open('settings.json','wb').write(data)
+print('settings.json 已還原')
+"
+# → 把還原出的 settings.json 放回 master 的 app 根目錄（C:\OriginsunAgent\settings.json）
 ```
 
 ### 3.5 直接用 Layer 1 NAS 散檔還原

@@ -84,6 +84,27 @@ def _app_version(base: str) -> str:
         return "?"
 
 
+def _backup_key_path() -> str:
+    return os.path.join(_app_root(), "credentials", "backup_key.txt")
+
+
+def get_or_create_backup_key() -> bytes:
+    """settings.json 的 Fernet 加密金鑰。存在 master 本地 credentials/backup_key.txt
+    （gitignore、**永不進 bundle**）→ 上 Drive 的備份即使外洩也解不開。首次自動生成。
+    🔴 master 若整台掛掉、金鑰也沒了就解不開 settings.json.enc → 使用者必須另存一份金鑰。"""
+    from cryptography.fernet import Fernet
+    p = _backup_key_path()
+    if os.path.exists(p):
+        with open(p, "rb") as f:
+            return f.read().strip()
+    os.makedirs(os.path.dirname(p), exist_ok=True)
+    key = Fernet.generate_key()
+    with open(p, "wb") as f:
+        f.write(key)
+    logger.info("[backup] 已生成 settings 加密金鑰 → %s（請另存一份到安全處）", p)
+    return key
+
+
 def _ssh_to_file(remote_cmd: str, out_path: str, timeout: float = 180.0) -> tuple[int, str]:
     """ssh 到 NAS 跑 remote_cmd，stdout 直接寫進 out_path。回 (returncode, stderr)。"""
     cmd = ["ssh", "-i", SSH_KEY_PATH] + _SSH_OPTS + [NAS_HOST, remote_cmd]
@@ -163,6 +184,21 @@ def _run_backup_blocking(folder_id: str, keep_daily: int, keep_monthly: int,
         with tarfile.open(nm_path, "w:gz") as tf:
             tf.add(nm_src, arcname="notion-media")
         parts.append(("notion-media.tar.gz", nm_path))
+
+    # 3b) settings.json（含 jwt_secret / database_url / SMTP 密碼等）— Fernet 加密後才進
+    #     bundle。金鑰只存 master credentials/backup_key.txt（不進 bundle）→ Drive 外洩解不開。
+    settings_src = os.path.join(base, "settings.json")
+    if os.path.exists(settings_src):
+        try:
+            from cryptography.fernet import Fernet
+            with open(settings_src, "rb") as f:
+                token = Fernet(get_or_create_backup_key()).encrypt(f.read())
+            enc_path = os.path.join(staging, "settings.json.enc")
+            with open(enc_path, "wb") as f:
+                f.write(token)
+            parts.append(("settings.json.enc", enc_path))
+        except Exception as e:
+            logger.warning("[backup] settings.json 加密略過：%s", e)
 
     # 4) manifest
     manifest = {"ts": ts, "created": datetime.now().isoformat(timespec="seconds"),

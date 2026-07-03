@@ -101,3 +101,6 @@ test_state.png
 .rebuild_meta.json
 *.rebuild_meta.json
 uvicorn_*.log*
+
+# Backup encryption key (NEVER commit — Drive backups are useless-but-safe without it)
+credentials/backup_key.txt
