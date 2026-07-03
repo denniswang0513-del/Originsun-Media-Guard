@@ -237,13 +237,11 @@ _bl.move = async (id, dir) => {
     const j = i + dir;
     if (i < 0 || j < 0 || j >= arr.length) return;
     [arr[i], arr[j]] = [arr[j], arr[i]];
-    // 樂觀更新排序（避免閃動），再送後端；失敗則重抓校正
-    _items = arr;
-    _renderBoard();
+    // 與其他操作一致：送後端後重抓（board 未樂觀變動，失敗維持原樣即可）。
     try {
         await bfetch('/api/v1/bulletin/reorder', { method: 'POST', body: { ordered_ids: arr.map(x => x.id) } });
         await _reload();
-    } catch (e) { toastErr(e.message); await _reload(); }
+    } catch (e) { toastErr(e.message); }
 };
 
 _bl.del = async (id) => {
