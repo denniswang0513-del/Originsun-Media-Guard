@@ -1,5 +1,5 @@
 {
-  "version": "1.10.190",
+  "version": "1.10.191",
   "build_date": "2026-07-04",
-  "notes": "feat(bulletin): 新增「公布欄」頂層 Tab（最左）+ 待辦提醒子頁（團隊共用、結構化）"
+  "notes": "refactor(bulletin): /simplify 清理（種子搬進 feature、reorder 單查詢、死 CSS、update 迴圈）"
 }
