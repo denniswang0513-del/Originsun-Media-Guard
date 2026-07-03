@@ -1,5 +1,5 @@
 {
-  "version": "1.10.187",
+  "version": "1.10.188",
   "build_date": "2026-07-03",
-  "notes": "feat(backup): 雙層資料備份 — NAS 常駐本地快照 + master 排程打包上傳 Google Drive + 後台卡 + OAuth 腳本 + 還原手冊"
+  "notes": "chore(deploy): nginx 主設定自動同步到 NAS（消除 repo↔NAS drift）+ 官網正式上線 www"
 }
