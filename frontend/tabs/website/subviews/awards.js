@@ -56,7 +56,7 @@ function _groupFilms(rows) {
         if (!map.has(key)) {
             map.set(key, { key, work_type: ty, work_title: wt, work_year: wy, lines: [] });
         }
-        map.get(key).lines.push({ id: a.id, year: a.year, name_zh: a.name_zh, cert_url: a.cert_url || '' });
+        map.get(key).lines.push({ id: a.id, year: a.year, name_zh: a.name_zh, name_en: a.name_en || '', cert_url: a.cert_url || '' });
     }
     const films = Array.from(map.values());
     for (const f of films) {
@@ -123,7 +123,10 @@ function _bulkPanelHtml() {
 
 function _filmCardHtml(f, idx) {
     // 獎項行 = 一個 textarea，一行一個獎項（純文字）。年份儲存時自動從行首 YYYY 抓、否則用作品年度。
+    // 英文為第二個 textarea，逐行對齊中文（第 N 行英文 = 第 N 行中文）；獎名是專有名詞，AI 不代翻，人工填。
     const linesText = f.lines.map(l => l.name_zh || '').join('\n');
+    const linesTextEn = f.lines.map(l => l.name_en || '').join('\n');
+    const rows = Math.max(3, f.lines.length + 1);
     return `
         <div class="card" data-film="${idx}" style="border-left:3px solid #c8a45c;margin-bottom:12px;">
             <div style="display:grid;grid-template-columns:160px 1fr 90px auto;gap:8px;align-items:end;margin-bottom:10px;">
@@ -138,8 +141,17 @@ function _filmCardHtml(f, idx) {
                     <button class="btn btn-sm btn-danger" onclick="window._awardsDeleteFilm(${idx})">🗑 刪除</button>
                 </div>
             </div>
-            <label style="color:#888;font-size:11px;display:block;margin-bottom:3px;">獎項 / 影展（一行一個，可直接貼上）</label>
-            <textarea data-film-field="lines_text" rows="${Math.max(3, f.lines.length + 1)}" style="width:100%;resize:vertical;font-size:13px;line-height:1.6;" placeholder="2024 臺南岸內製片所 - 金岸內首獎&#10;2025 青春影展&#10;2025 Eye Catcher Global - The Best student award">${esc(linesText)}</textarea>
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">
+                <div>
+                    <label style="color:#888;font-size:11px;display:block;margin-bottom:3px;">獎項 / 影展 中文（一行一個，可直接貼上）</label>
+                    <textarea data-film-field="lines_text" rows="${rows}" style="width:100%;resize:vertical;font-size:13px;line-height:1.6;" placeholder="2024 臺南岸內製片所 - 金岸內首獎&#10;2025 青春影展&#10;2025 Eye Catcher Global - The Best student award">${esc(linesText)}</textarea>
+                </div>
+                <div>
+                    <label style="color:#888;font-size:11px;display:block;margin-bottom:3px;">獎項英文（可選 · 逐行對齊左欄 · 留空行前台顯示中文）</label>
+                    <textarea data-film-field="lines_text_en" rows="${rows}" style="width:100%;resize:vertical;font-size:13px;line-height:1.6;" placeholder="2024 Tainan An-Nei Film Studio — Grand Prize&#10;2025 Youth Film Festival&#10;2025 Eye Catcher Global — Best Student Award">${esc(linesTextEn)}</textarea>
+                </div>
+            </div>
+            <div style="color:#666;font-size:10.5px;margin-top:3px;">英文行數需與中文一致才能儲存（否則對齊會錯位）。</div>
         </div>
     `;
 }
@@ -154,15 +166,16 @@ function _readFilmCard(idx) {
     const work_title = get('work_title').trim();
     const wyRaw = get('work_year').trim();
     const work_year = wyRaw ? Number(wyRaw) : null;
-    const lines = get('lines_text').split('\n')
-        .map(s => s.trim())
-        .filter(Boolean)
-        .map(name_zh => {
-            const m = name_zh.match(/^(\d{4})\b/);
-            const year = m ? Number(m[1]) : (work_year || new Date().getFullYear());
-            return { name_zh, year };
-        });
-    return { work_type, work_title, work_year, lines };
+    // 中文獎項行是真相；英文逐「第 N 個非空行」對齊（blank line 不計）。
+    const zhLines = get('lines_text').split('\n').map(s => s.trim()).filter(Boolean);
+    const enLines = get('lines_text_en').split('\n').map(s => s.trim()).filter(Boolean);
+    const enMismatch = enLines.length > 0 && enLines.length !== zhLines.length;
+    const lines = zhLines.map((name_zh, i) => {
+        const m = name_zh.match(/^(\d{4})\b/);
+        const year = m ? Number(m[1]) : (work_year || new Date().getFullYear());
+        return { name_zh, year, name_en: enLines[i] || null };
+    });
+    return { work_type, work_title, work_year, lines, enMismatch, zhCount: zhLines.length, enCount: enLines.length };
 }
 
 // ── 作品卡操作 ──
@@ -177,6 +190,10 @@ window._awardsSaveFilm = async (idx) => {
     if (!data) { toastErr('找不到作品卡'); return; }
     if (!data.work_title) { toastErr('作品標題必填'); return; }
     if (!data.lines.length) { toastErr('至少要一行獎項'); return; }
+    if (data.enMismatch) {
+        toastErr(`英文 ${data.enCount} 行與中文 ${data.zhCount} 行不一致 — 請逐行對齊，或清空英文欄`);
+        return;
+    }
 
     // textarea 是該作品獎項的唯一真相 → 整批重建：先 POST 新行、再刪舊行
     //（中途失敗不會掉資料，最多殘留舊行，重存即修正）。
@@ -189,7 +206,7 @@ window._awardsSaveFilm = async (idx) => {
             await websiteFetch('/api/website/admin/awards', {
                 method: 'POST',
                 body: {
-                    year: l.year, name_zh: l.name_zh, level: '獲獎',
+                    year: l.year, name_zh: l.name_zh, name_en: l.name_en || null, level: '獲獎',
                     work_type: data.work_type || null,
                     work_title: data.work_title, work_year: data.work_year,
                     sort_order: baseSort++, visible: true,

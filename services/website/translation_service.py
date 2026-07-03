@@ -291,6 +291,31 @@ async def _generate_local(session: AsyncSession, etype: str, eid: str,
     return result
 
 
+async def read_current(session: AsyncSession, etype: str, eid: str) -> dict:
+    """讀實體『目前已存』的 _en（不呼叫 claude），供後台「檢視」既有翻譯。
+    回傳與 _generate_local 同形狀（fields/zh/manual_fields/source_hash），
+    但 fields 只含 DB 現值、且不含 body_en（檢視不重譯內文）。純 DB 讀 → NAS 本地即可，不 relay。"""
+    obj = await _get_entity(session, etype, eid)
+    if obj is None:
+        return {"ok": False, "error": "實體不存在"}
+    zh = _collect_zh(etype, obj)
+    fields: dict = {}
+    for f in _ENTITY_FIELDS[etype]:
+        v = getattr(obj, f"{f}_en", None)
+        if isinstance(v, str) and v.strip():
+            fields[f"{f}_en"] = v
+    result = {"ok": True, "view": True, "fields": fields, "zh": zh,
+              "body_segments": 0, "source_hash": _source_hash(etype, obj)}
+    if etype == "post" and getattr(obj, "body_en", None):
+        result["body_translated"] = True   # 內文已翻譯：只提示、套用時不動
+    if etype == "work":
+        result["manual_fields"] = [{
+            "en_key": "public_client_en", "label": "客戶名（手動英文，AI 不翻）",
+            "zh": obj.public_client or "", "current": obj.public_client_en or "",
+        }]
+    return result
+
+
 async def _writeback(session: AsyncSession, etype: str, eid: str, parsed: dict,
                      src_hash: str, *, approve: bool, by: str = "ai") -> None:
     obj = await _get_entity(session, etype, eid)

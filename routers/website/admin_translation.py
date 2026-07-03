@@ -63,6 +63,14 @@ async def translation_generate(etype: str, eid: str, session: AsyncSession = Dep
     return await translation_service.generate_for_entity(session, etype, eid)
 
 
+@router.get("/translation/{etype}/{eid}/current")
+async def translation_current(etype: str, eid: str, session: AsyncSession = Depends(admin_session)):
+    """檢視實體目前已存的 _en（純 DB 讀，不呼叫 claude）。"""
+    if etype not in translation_service.ENTITY_TYPES:
+        raise HTTPException(status_code=400, detail="unknown entity type")
+    return await translation_service.read_current(session, etype, eid)
+
+
 @router.post("/translation/{etype}/{eid}/apply")
 async def translation_apply(etype: str, eid: str, request: Request,
                             session: AsyncSession = Depends(admin_session)):

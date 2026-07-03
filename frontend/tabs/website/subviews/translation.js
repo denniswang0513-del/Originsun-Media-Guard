@@ -142,13 +142,21 @@ function _glossaryStr(g) {
 function _row(it) {
     const st = STATUS[it.status] || ['?', '#333', '#aaa'];
     const when = it.last_translated_at ? new Date(it.last_translated_at).toLocaleDateString() : '—';
+    // 檢視只在已有英文可看時出現（過時/待審/已核准）；缺英文/待翻只給「生成」。
+    const canView = ['stale', 'translated', 'approved'].includes(it.status);
+    const args = `'${it.entity_type}','${esc(it.entity_id)}',this`;
+    const viewBtn = canView
+        ? `<button class="btn btn-sm btn-ghost" onclick="window._tr.view(${args})">檢視</button>` : '';
     return `
         <tr>
             <td style="color:#aaa;font-size:12px;">${ETYPE_LABEL[it.entity_type] || it.entity_type}</td>
             <td style="color:#ddd;">${esc(it.title || '(未命名)')}</td>
             <td><span class="website-pill" style="background:${st[1]};color:${st[2]};">${st[0]}</span></td>
             <td style="color:#888;font-size:11px;">${when}${it.reviewed_by ? ` · ${esc(it.reviewed_by)}` : ''}</td>
-            <td><button class="btn btn-sm" onclick="window._tr.open('${it.entity_type}','${esc(it.entity_id)}',this)">生成 / 檢視</button></td>
+            <td style="white-space:nowrap;">
+                <button class="btn btn-sm" style="background:#059669;" onclick="window._tr.open(${args})">✨ 生成</button>
+                ${viewBtn}
+            </td>
         </tr>`;
 }
 
@@ -195,8 +203,20 @@ _tr.open = async (etype, eid, btn) => {
     try {
         r = await websiteFetch(`/api/website/admin/translation/${etype}/${eid}/generate`, { method: 'POST' });
     } catch (e) { toastErr(e.message); r = null; }
-    if (btn) { btn.disabled = false; btn.textContent = '生成 / 檢視'; }
+    if (btn) { btn.disabled = false; btn.textContent = '✨ 生成'; }
     if (!r || !r.ok) { toastErr((r && r.error) || '生成失敗'); return; }
+    _showReview(etype, eid, r);
+};
+
+// 檢視：讀目前已存的英文（純 DB 讀，不送 claude），開同一審核 modal 可微調/重核。
+_tr.view = async (etype, eid, btn) => {
+    if (btn) { btn.disabled = true; btn.textContent = '載入…'; }
+    let r;
+    try {
+        r = await websiteFetch(`/api/website/admin/translation/${etype}/${eid}/current`);
+    } catch (e) { toastErr(e.message); r = null; }
+    if (btn) { btn.disabled = false; btn.textContent = '檢視'; }
+    if (!r || !r.ok) { toastErr((r && r.error) || '讀取失敗'); return; }
     _showReview(etype, eid, r);
 };
 
@@ -216,7 +236,8 @@ function _showReview(etype, eid, r) {
             </div>`;
     }).join('');
     const bodyNote = r.body_segments
-        ? `<div style="color:#93c5fd;font-size:12px;margin-bottom:12px;">📄 內文 ${r.body_segments} 段已翻譯（套用後生效，此處不逐段編輯）</div>` : '';
+        ? `<div style="color:#93c5fd;font-size:12px;margin-bottom:12px;">📄 內文 ${r.body_segments} 段已翻譯（套用後生效，此處不逐段編輯）</div>`
+        : (r.body_translated ? `<div style="color:#6ee7b7;font-size:12px;margin-bottom:12px;">📄 內文已翻譯（此次僅檢視，套用不會重譯內文）</div>` : '');
     // 手動欄位（作品客戶名：AI 不翻專有名詞，人工填英文）— 預填目前值
     const manualRows = (r.manual_fields || []).map(m => `
             <div style="margin-bottom:14px;">

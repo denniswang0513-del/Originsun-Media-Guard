@@ -14,6 +14,7 @@
  */
 import BaseLayout from "../layouts/BaseLayout.astro";
 import Tr from "../components/ui/Tr.astro";
+import { filmHeadingParts } from "../lib/awardLabels";
 import { fetchMeta, fetchAllWorksCached, fetchAwards } from "../lib/crm-client";
 import { buildBasicPageSeo, breadcrumb2 } from "../lib/seo";
 import type { IPublicProject } from "../types/project";
@@ -80,11 +81,6 @@ const awardGroups = Array.from(_awardGroups.values())
     }))
     .sort((a, b) => groupYearKey(b) - groupYearKey(a));
 
-// 作品標題顯示：類型 +《標題》（類型可空）
-function filmHeading(g: AwardGroup): string {
-    const t = g.workTitle ? `《${g.workTitle}》` : "—";
-    return g.workType ? `${g.workType}${t}` : t;
-}
 
 const pdfUrl = (meta.portfolio_pdf_url || "").trim();
 
@@ -140,12 +136,12 @@ const seo = buildBasicPageSeo(Astro, {
                         {awardGroups.map(g => (
                             <tr class="align-top">
                                 <td class="py-4 pr-4 sm:pr-6 text-neutral-900 font-medium tracking-wide whitespace-nowrap">
-                                    {filmHeading(g)}
+                                    <Tr zh={filmHeadingParts(g).zh} en={filmHeadingParts(g).en} />
                                 </td>
                                 <td class="py-4">
                                     {g.items.map(a => (
                                         <div class="py-1 first:pt-0 last:pb-0">
-                                            <span class="text-sm sm:text-[15px] text-neutral-600 tracking-wide leading-relaxed">{a.name_zh}</span>
+                                            <span class="text-sm sm:text-[15px] text-neutral-600 tracking-wide leading-relaxed"><Tr zh={a.name_zh} en={a.name_en || a.name_zh} /></span>
                                         </div>
                                     ))}
                                 </td>

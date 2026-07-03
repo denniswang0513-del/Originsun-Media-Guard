@@ -1,5 +1,5 @@
 {
-  "version": "1.10.185",
+  "version": "1.10.186",
   "build_date": "2026-07-03",
-  "notes": "fix(website): 補後台缺的輸入(service full_desc/category desc/FAQ見證_en) + 首頁第4數字/關於團隊介紹接上前台 + 修 readRowPatch 靜默空存 bug"
+  "notes": "feat(website): 榮譽牆獎項英文(逐行對齊+行數守衛)+作品類型固定英譯 + 翻譯後台生成/檢視拆兩鈕"
 }
