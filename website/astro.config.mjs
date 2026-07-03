@@ -13,8 +13,8 @@ const redirects = await fetchRedirects();
 export default defineConfig({
   redirects,    // {"/old/path": "/news/11", ...} → 軟 301（meta refresh + canonical）
   // 設 site URL → 影響 canonical、OG URL、sitemap.xml 的 base URL。
-  // 7/1 正式切換時改 https://originsun-studio.com 並重 build。
-  site: 'https://test.originsun-studio.com',
+  // 2026-07-03 正式上線：canonical 定為 www（舊站在 www、SEO 權重轉移最乾淨）。
+  site: 'https://www.originsun-studio.com',
 
   integrations: [
     sitemap({

@@ -16,7 +16,7 @@ export const IS_DEV = import.meta.env.DEV === true;
 
 
 /** 正式網域 fallback（未設 Astro.site 時的預設） */
-export const SITE_URL_FALLBACK = "https://originsun-studio.com";
+export const SITE_URL_FALLBACK = "https://www.originsun-studio.com";
 
 
 /** 各頁面/元件共用的數量上限，集中避免散落 magic numbers */
