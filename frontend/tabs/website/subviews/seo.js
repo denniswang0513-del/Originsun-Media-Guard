@@ -490,10 +490,24 @@ function _cardQuickFacts() {
                 <input id="qf-new-sort" type="number" value="0" style="width:100%;" /></div>
             <button class="btn" onclick="window._seo.createQF()">+ 新增</button>
         </div>
-        <table>
+        <table id="seo-qf-table">
             <thead><tr><th style="width:30%;">標籤</th><th>內容</th><th style="width:60px;">排序</th><th style="width:60px;">可見</th><th></th></tr></thead>
             <tbody>${rows || emptyRow(5, '尚無 Quick Fact，新增上方第一條')}</tbody>
         </table>
+    </div>`;
+}
+
+
+// 中文欄下方堆疊的英文（_en）輸入 — label 標「EN」。data-field=<field> 讓
+// readRowPatch 自動把值帶進 PUT payload（FAQ/Testimonial Update schema 已含這些 _en 欄）。
+// 對外前台以 <Tr en={.._en || .._zh}> 渲染：留空 → 英文站 fallback 顯示中文。
+function _enField(id, field, value, { textarea = false, rows = 2 } = {}) {
+    const ctrl = textarea
+        ? `<textarea data-id="${id}" data-field="${field}" rows="${rows}" placeholder="English…" style="width:100%;font-size:12px;">${esc(value || '')}</textarea>`
+        : `<input data-id="${id}" data-field="${field}" value="${esc(value || '')}" placeholder="English…" style="width:100%;font-size:12px;" />`;
+    return `<div style="margin-top:4px;">
+        <span style="display:block;color:#6aa8c8;font-size:10px;font-weight:600;letter-spacing:0.05em;margin-bottom:2px;">EN</span>
+        ${ctrl}
     </div>`;
 }
 
@@ -504,8 +518,14 @@ function _cardFAQ() {
     const rows = _state.faqs.map(f => `
         <tr>
             <td style="color:#666;font-size:11px;">#${f.id}</td>
-            <td><input data-id="${f.id}" data-field="question_zh" value="${esc(f.question_zh)}" style="width:100%;" /></td>
-            <td><textarea data-id="${f.id}" data-field="answer_zh" rows="2" style="width:100%;font-size:12px;">${esc(f.answer_zh)}</textarea></td>
+            <td>
+                <input data-id="${f.id}" data-field="question_zh" value="${esc(f.question_zh)}" style="width:100%;" />
+                ${_enField(f.id, 'question_en', f.question_en)}
+            </td>
+            <td>
+                <textarea data-id="${f.id}" data-field="answer_zh" rows="2" style="width:100%;font-size:12px;">${esc(f.answer_zh)}</textarea>
+                ${_enField(f.id, 'answer_en', f.answer_en, { textarea: true })}
+            </td>
             <td><input type="number" data-id="${f.id}" data-field="sort_order" value="${f.sort_order}" style="width:60px;" /></td>
             <td style="text-align:center;"><input type="checkbox" data-id="${f.id}" data-field="visible" ${f.visible ? 'checked' : ''} /></td>
             <td style="text-align:right;white-space:nowrap;">
@@ -520,12 +540,14 @@ function _cardFAQ() {
         </h3>
         <div style="display:grid;grid-template-columns:1fr 2fr auto;gap:8px;margin-bottom:8px;align-items:end;">
             <div><label style="color:#888;font-size:11px;">問題（中）</label>
-                <input id="faq-new-q" type="text" style="width:100%;" placeholder="一支影片大約多久？" /></div>
+                <input id="faq-new-q" type="text" style="width:100%;" placeholder="一支影片大約多久？" />
+                <input id="faq-new-q-en" type="text" style="width:100%;margin-top:4px;font-size:12px;" placeholder="(EN) How long does a video take?" /></div>
             <div><label style="color:#888;font-size:11px;">答案（中）</label>
-                <textarea id="faq-new-a" rows="1" style="width:100%;" placeholder="商業廣告 4-6 週、紀錄片 8-12 週..."></textarea></div>
+                <textarea id="faq-new-a" rows="1" style="width:100%;" placeholder="商業廣告 4-6 週、紀錄片 8-12 週..."></textarea>
+                <textarea id="faq-new-a-en" rows="1" style="width:100%;margin-top:4px;font-size:12px;" placeholder="(EN) Commercials 4-6 weeks, documentaries 8-12 weeks..."></textarea></div>
             <button class="btn" onclick="window._seo.createFAQ()">+ 新增</button>
         </div>
-        <table>
+        <table id="seo-faq-table">
             <thead><tr><th style="width:50px;">#</th><th style="width:25%;">問題</th><th>答案</th><th style="width:60px;">排序</th><th style="width:60px;">顯示</th><th></th></tr></thead>
             <tbody>${rows || emptyRow(6, '尚無 FAQ')}</tbody>
         </table>
@@ -541,11 +563,20 @@ function _cardTestimonials() {
         : '—';
     const rows = _state.testimonials.map(t => `
         <tr>
-            <td><input data-id="${t.id}" data-field="author_zh" value="${esc(t.author_zh)}" style="width:100%;" placeholder="客戶姓名" /></td>
-            <td><input data-id="${t.id}" data-field="role_zh" value="${esc(t.role_zh || '')}" style="width:100%;" placeholder="職稱" /></td>
+            <td>
+                <input data-id="${t.id}" data-field="author_zh" value="${esc(t.author_zh)}" style="width:100%;" placeholder="客戶姓名" />
+                ${_enField(t.id, 'author_en', t.author_en)}
+            </td>
+            <td>
+                <input data-id="${t.id}" data-field="role_zh" value="${esc(t.role_zh || '')}" style="width:100%;" placeholder="職稱" />
+                ${_enField(t.id, 'role_en', t.role_en)}
+            </td>
             <td><input data-id="${t.id}" data-field="company" value="${esc(t.company || '')}" style="width:100%;" placeholder="公司" /></td>
             <td><input type="number" data-id="${t.id}" data-field="rating" value="${t.rating}" min="1" max="5" style="width:50px;" /></td>
-            <td><textarea data-id="${t.id}" data-field="content_zh" rows="2" style="width:100%;font-size:12px;" placeholder="證言內容...">${esc(t.content_zh || '')}</textarea></td>
+            <td>
+                <textarea data-id="${t.id}" data-field="content_zh" rows="2" style="width:100%;font-size:12px;" placeholder="證言內容...">${esc(t.content_zh || '')}</textarea>
+                ${_enField(t.id, 'content_en', t.content_en, { textarea: true })}
+            </td>
             <td style="text-align:center;"><input type="checkbox" data-id="${t.id}" data-field="visible" ${t.visible ? 'checked' : ''} /></td>
             <td style="text-align:right;white-space:nowrap;">
                 <button class="btn btn-sm" onclick="window._seo.saveT(${t.id})">💾</button>
@@ -558,14 +589,17 @@ function _cardTestimonials() {
             <span style="color:#888;font-size:11px;font-weight:400;">· ${visibleCount}/${_state.testimonials.length} 顯示中 · 平均評分 ★${avg}</span>
         </h3>
         <div style="display:grid;grid-template-columns:1fr 1fr 1fr 70px 2fr auto;gap:8px;margin-bottom:8px;align-items:end;">
-            <input id="t-new-author" type="text" placeholder="客戶姓名" />
-            <input id="t-new-role" type="text" placeholder="職稱" />
+            <div><input id="t-new-author" type="text" placeholder="客戶姓名" style="width:100%;" />
+                <input id="t-new-author-en" type="text" placeholder="(EN) Name" style="width:100%;margin-top:4px;font-size:12px;" /></div>
+            <div><input id="t-new-role" type="text" placeholder="職稱" style="width:100%;" />
+                <input id="t-new-role-en" type="text" placeholder="(EN) Title" style="width:100%;margin-top:4px;font-size:12px;" /></div>
             <input id="t-new-company" type="text" placeholder="公司" />
             <input id="t-new-rating" type="number" value="5" min="1" max="5" placeholder="評分" />
-            <input id="t-new-content" type="text" placeholder="證言內容" />
+            <div><input id="t-new-content" type="text" placeholder="證言內容" style="width:100%;" />
+                <input id="t-new-content-en" type="text" placeholder="(EN) Testimonial" style="width:100%;margin-top:4px;font-size:12px;" /></div>
             <button class="btn" onclick="window._seo.createT()">+ 新增</button>
         </div>
-        <table>
+        <table id="seo-testi-table">
             <thead><tr><th>客戶</th><th>職稱</th><th>公司</th><th>評分</th><th>內容</th><th style="width:50px;">顯示</th><th></th></tr></thead>
             <tbody>${rows || emptyRow(7, '尚無證言')}</tbody>
         </table>
@@ -711,7 +745,7 @@ _seo.createQF = async () => {
 _seo.saveQF = async (id) => {
     try {
         const updated = await websiteFetch(`/api/website/admin/quick_facts/${id}`, {
-            method: 'PUT', body: readRowPatch('.card [data-id]', id),
+            method: 'PUT', body: readRowPatch('#seo-qf-table', id),
         });
         const idx = _state.quickFacts.findIndex(f => f.id === id);
         if (idx >= 0) _state.quickFacts[idx] = updated;
@@ -734,7 +768,9 @@ _seo.deleteQF = async (id) => {
 _seo.createFAQ = async () => {
     const body = {
         question_zh: document.getElementById('faq-new-q').value.trim(),
+        question_en: document.getElementById('faq-new-q-en').value.trim() || null,
         answer_zh: document.getElementById('faq-new-a').value.trim(),
+        answer_en: document.getElementById('faq-new-a-en').value.trim() || null,
         sort_order: _state.faqs.length,
         visible: true,
     };
@@ -750,7 +786,7 @@ _seo.createFAQ = async () => {
 _seo.saveFAQ = async (id) => {
     try {
         const updated = await websiteFetch(`/api/website/admin/faqs/${id}`, {
-            method: 'PUT', body: readRowPatch('.card [data-id]', id),
+            method: 'PUT', body: readRowPatch('#seo-faq-table', id),
         });
         const idx = _state.faqs.findIndex(f => f.id === id);
         if (idx >= 0) _state.faqs[idx] = updated;
@@ -773,10 +809,13 @@ _seo.deleteFAQ = async (id) => {
 _seo.createT = async () => {
     const body = {
         author_zh: document.getElementById('t-new-author').value.trim(),
+        author_en: document.getElementById('t-new-author-en').value.trim() || null,
         role_zh: document.getElementById('t-new-role').value.trim() || null,
+        role_en: document.getElementById('t-new-role-en').value.trim() || null,
         company: document.getElementById('t-new-company').value.trim() || null,
         rating: Number(document.getElementById('t-new-rating').value || 5),
         content_zh: document.getElementById('t-new-content').value.trim() || null,
+        content_en: document.getElementById('t-new-content-en').value.trim() || null,
         sort_order: _state.testimonials.length,
         visible: true,
     };
@@ -792,7 +831,7 @@ _seo.createT = async () => {
 _seo.saveT = async (id) => {
     try {
         const updated = await websiteFetch(`/api/website/admin/testimonials/${id}`, {
-            method: 'PUT', body: readRowPatch('.card [data-id]', id),
+            method: 'PUT', body: readRowPatch('#seo-testi-table', id),
         });
         const idx = _state.testimonials.findIndex(t => t.id === id);
         if (idx >= 0) _state.testimonials[idx] = updated;

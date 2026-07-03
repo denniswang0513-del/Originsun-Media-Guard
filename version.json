@@ -1,5 +1,5 @@
 {
-  "version": "1.10.184",
+  "version": "1.10.185",
   "build_date": "2026-07-03",
-  "notes": "feat(website): 翻譯卡片排程UI對齊AI SEO(時間下拉+dry-run預覽) + 客戶名手動英文 + /simplify二輪(apply_entity/去seo_en翻譯)"
+  "notes": "fix(website): 補後台缺的輸入(service full_desc/category desc/FAQ見證_en) + 首頁第4數字/關於團隊介紹接上前台 + 修 readRowPatch 靜默空存 bug"
 }

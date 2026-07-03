@@ -114,6 +114,11 @@ const cp = meta.copy?.about ?? {};
                     <h2 class="text-3xl font-light tracking-tight">
                         <Tr zh={cp.team_heading_zh ?? "我們的團隊"} en={cp.team_heading_en ?? "Our Team"} />
                     </h2>
+                    {meta.about_team_intro_zh && (
+                        <p class="mt-5 max-w-2xl mx-auto text-base sm:text-lg text-neutral-600 leading-relaxed tracking-wide whitespace-pre-line">
+                            <Tr zh={meta.about_team_intro_zh} en={meta.about_team_intro_en || meta.about_team_intro_zh} />
+                        </p>
+                    )}
                 </div>
                 <!-- 第一列 3 位、第二列其餘（目前 4 位），各列置中 -->
                 <div class="space-y-12 sm:space-y-16">

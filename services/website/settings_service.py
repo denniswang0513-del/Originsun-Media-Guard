@@ -86,17 +86,19 @@ async def get_meta(session: AsyncSession) -> dict[str, Any]:
         "about_intro_en": s.get("about.intro_en", ""),
         "about_founded_year": s.get("about.founded_year", ""),
         "about_team_intro_zh": s.get("about.team_intro_zh", ""),
+        "about_team_intro_en": s.get("about.team_intro_en", ""),
         "home_hero_youtube_id": s.get("home.hero_youtube_id", ""),
         # 首頁 WhoWeAre 段 Showreel（admin「🏠 首頁設定」可編；空則沿用 hero_youtube_id）
         "home_showreel_id": s.get("home.showreel_id", ""),
-        # 首頁 WhoWeAre 段 3 欄 stats，自動抓真實數據（admin 可逐欄覆寫；空則用即時真實值）
+        # 首頁 WhoWeAre 段 stats：前 3 欄自動抓真實數據（admin 可逐欄覆寫；空則用即時真實值），
+        # 第 4 欄純 admin 自填（無自動真實值；空則前端 WhoWeAre 過濾掉不顯示那格，避免空格）。
         "home_stats": [
             {
-                "value": s.get(f"home.stat{i+1}_value") or _real_stats[i][0],
-                "label_zh": s.get(f"home.stat{i+1}_label_zh") or _real_stats[i][1],
-                "label_en": s.get(f"home.stat{i+1}_label_en") or _real_stats[i][2],
+                "value": s.get(f"home.stat{i+1}_value") or (_real_stats[i][0] if i < len(_real_stats) else ""),
+                "label_zh": s.get(f"home.stat{i+1}_label_zh") or (_real_stats[i][1] if i < len(_real_stats) else ""),
+                "label_en": s.get(f"home.stat{i+1}_label_en") or (_real_stats[i][2] if i < len(_real_stats) else ""),
             }
-            for i in range(3)
+            for i in range(4)
         ],
         # 首頁 Testimonials 段整體評分 badge（admin「🏠 首頁設定」可編；空則前端用預設）
         "home_rating_value": s.get("home.rating_value", ""),

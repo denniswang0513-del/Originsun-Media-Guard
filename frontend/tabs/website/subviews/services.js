@@ -56,6 +56,10 @@ export default async function render(container, ctx = {}) {
             <div style="margin-top:8px;">
                 <input id="svc-new-short" style="width:100%;" placeholder="短描述（300 字內）" />
             </div>
+            <div style="margin-top:8px;">
+                <label style="color:#888;font-size:11px;display:block;margin-bottom:3px;">完整描述（full_desc · 服務頁詳細段落，選填）</label>
+                <textarea id="svc-new-full" rows="3" style="width:100%;box-sizing:border-box;resize:vertical;" placeholder="服務頁展開後的詳細說明段落"></textarea>
+            </div>
         </div>
 
         <div class="card" style="padding:0;">
@@ -90,7 +94,14 @@ function _renderTable() {
                     <td><input type="checkbox" data-id="${s.id}" data-field="visible" ${s.visible ? 'checked' : ''} /></td>
                     <td>
                         <button class="btn btn-sm" onclick="window._websiteSaveSvc(${s.id})">💾</button>
+                        <button class="btn btn-sm btn-ghost" title="編輯完整描述" onclick="window._websiteToggleFullDesc(${s.id})">📝</button>
                         <button class="btn btn-sm btn-danger" onclick="window._websiteDeleteSvc(${s.id})">🗑</button>
+                    </td>
+                </tr>
+                <tr class="svc-detail-row" data-detail-for="${s.id}" style="display:none;">
+                    <td colspan="8" style="padding:8px 12px;background:#151515;">
+                        <label style="color:#888;font-size:11px;display:block;margin-bottom:3px;">完整描述（full_desc · 服務頁詳細段落）</label>
+                        <textarea data-id="${s.id}" data-field="full_desc" rows="4" style="width:100%;box-sizing:border-box;resize:vertical;">${esc(s.full_desc || '')}</textarea>
                     </td>
                 </tr>
             `).join('')}
@@ -114,6 +125,11 @@ window._websiteSaveSvc = async (id) => {
     } catch (e) { toastErr(e.message); }
 };
 
+window._websiteToggleFullDesc = (id) => {
+    const row = document.querySelector(`#svc-table [data-detail-for="${id}"]`);
+    if (row) row.style.display = (row.style.display === 'none') ? 'table-row' : 'none';
+};
+
 window._websiteDeleteSvc = async (id) => {
     if (!confirm('確定刪除此服務？')) return;
     try {
@@ -131,6 +147,7 @@ window._websiteCreateService = async () => {
         title: document.getElementById('svc-new-title').value.trim(),
         icon: document.getElementById('svc-new-icon').value.trim() || null,
         short_desc: document.getElementById('svc-new-short').value.trim() || null,
+        full_desc: document.getElementById('svc-new-full').value.trim() || null,
         related_category_id: catVal ? Number(catVal) : null,
         sort_order: Number(document.getElementById('svc-new-sort').value || 0),
         visible: true,
@@ -140,7 +157,7 @@ window._websiteCreateService = async () => {
         const created = await websiteFetch('/api/website/admin/services', { method: 'POST', body });
         _services.push(created);
         toastOk('已新增');
-        ['svc-new-slug','svc-new-title','svc-new-icon','svc-new-short'].forEach(id => document.getElementById(id).value = '');
+        ['svc-new-slug','svc-new-title','svc-new-icon','svc-new-short','svc-new-full'].forEach(id => document.getElementById(id).value = '');
         _renderTable();
     } catch (e) { toastErr(e.message); }
 };

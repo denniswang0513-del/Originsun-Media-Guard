@@ -5,8 +5,9 @@
  * 透過 public /api/website/meta 暴露給 Astro build → 首頁元件即時渲染。
  *
  * 對映關係（這裡編的 = 首頁實際渲染的）：
- *   home.hero_youtube_id  → HomeSlideshow（Hero 背景影片）
- *   home.showreel_id      → WhoWeAre Showreel（空則沿用 hero_youtube_id）
+ *   home.showreel_id      → WhoWeAre Showreel（「關於我們」段中央的影片）
+ *   home.hero_youtube_id  → 上面 showreel_id 留空時的備援值（首頁最上方 Hero 是
+ *                            精選作品輪播 HomeSlideshow，讀作品縮圖，不吃這兩個影片欄）
  *   home.stat{1..4}_*     → WhoWeAre 4 欄信任數字
  *   home.rating_value     → Testimonials 整體評分數字
  *   home.rating_count     → Testimonials 評價則數
@@ -38,10 +39,10 @@ const COPY_BLOCKS = [
     { key: 'cta_button', label: '底部 CTA · 按鈕', placeholderZh: '開始對話', placeholderEn: 'Start a conversation' },
 ];
 
-// Hero / Showreel 影片
+// 關於我們區 Showreel 影片（首頁最上方 Hero 是精選作品輪播，不讀這兩個欄位）
 const _VIDEO_FIELDS = [
-    { key: 'home.hero_youtube_id', label: 'Hero 影片 YouTube ID', placeholder: 'e.g. lQYKHJ7sryM', hint: '首頁最上方 Hero 背景播放的影片（建議 muted + loop）' },
-    { key: 'home.showreel_id', label: 'Showreel YouTube ID', placeholder: '預設 DRavYkTojAo', hint: '「關於我們」段落中央的 Showreel 影片；留空則沿用上方 Hero 影片 ID' },
+    { key: 'home.showreel_id', label: '關於我們區 Showreel YouTube ID', placeholder: '預設 DRavYkTojAo', hint: '「關於我們」段落中央播放的 Showreel 影片。（首頁最上方 Hero 是精選作品輪播，不使用此欄）' },
+    { key: 'home.hero_youtube_id', label: 'Showreel 備援 YouTube ID', placeholder: 'e.g. lQYKHJ7sryM', hint: '僅在上方 Showreel ID 留空時，作為關於我們區 Showreel 的備援來源。首頁最上方是精選作品輪播（HomeSlideshow），不使用此欄。' },
 ];
 
 // WhoWeAre 4 欄信任數字（stat1..stat4，各 value + 中/英 label）

@@ -87,6 +87,10 @@ function _renderSectionHtml(kind) {
                     <input id="${kind}-new-sort" type="number" value="0" style="width:100%;" /></div>
                 <button class="btn" onclick="window._websiteCreateCat('${kind}')">${meta.addBtn}</button>
             </div>
+            <div style="margin-top:8px;">
+                <label style="color:#888;font-size:11px;display:block;margin-bottom:3px;">描述（選填）</label>
+                <textarea id="${kind}-new-desc" rows="2" style="width:100%;box-sizing:border-box;resize:vertical;" placeholder="分類頁上方說明段落，並作為該頁 SEO 描述（建議 30–200 字）"></textarea>
+            </div>
         </div>
 
         <div class="card" style="padding:0;">
@@ -122,16 +126,29 @@ function _renderTable(kind) {
                     <td><input type="number" data-id="${c.id}" data-field="sort_order" value="${c.sort_order}" style="width:60px;" /></td>
                     <td>
                         <button class="btn btn-sm" onclick="window._websiteSaveCat(${c.id}, '${kind}')">💾</button>
+                        <button class="btn btn-sm btn-ghost" title="編輯描述" onclick="window._websiteToggleCatDesc(${c.id}, '${kind}')">📝</button>
                         <button class="btn btn-sm btn-danger" onclick="window._websiteDeleteCat(${c.id}, '${kind}')">🗑</button>
                         ${kind === 'category'
                             ? `<button class="btn btn-sm btn-ghost" title="改為標籤" onclick="window._websiteSwitchKind(${c.id}, 'tag')">→ 標籤</button>`
                             : `<button class="btn btn-sm btn-ghost" title="改為分類" onclick="window._websiteSwitchKind(${c.id}, 'category')">→ 分類</button>`}
                     </td>
                 </tr>
+                <tr class="cat-detail-row" data-detail-for="${c.id}" style="display:none;">
+                    <td colspan="8" style="padding:8px 12px;background:#151515;">
+                        <label style="color:#888;font-size:11px;display:block;margin-bottom:3px;">描述（分類頁說明段落 · 該頁 SEO 描述）</label>
+                        <textarea data-id="${c.id}" data-field="description" rows="3" style="width:100%;box-sizing:border-box;resize:vertical;">${esc(c.description || '')}</textarea>
+                    </td>
+                </tr>
             `).join('')}
         </tbody>
     `;
 }
+
+
+window._websiteToggleCatDesc = (id, kind) => {
+    const row = document.querySelector(`#${kind}-table [data-detail-for="${id}"]`);
+    if (row) row.style.display = (row.style.display === 'none') ? 'table-row' : 'none';
+};
 
 
 window._websiteSaveCat = async (id, kind) => {
@@ -179,6 +196,7 @@ window._websiteCreateCat = async (kind) => {
         slug: document.getElementById(`${kind}-new-slug`).value.trim(),
         name_zh: document.getElementById(`${kind}-new-name-zh`).value.trim(),
         name_en: document.getElementById(`${kind}-new-name-en`).value.trim() || null,
+        description: document.getElementById(`${kind}-new-desc`).value.trim() || null,
         sort_order: Number(document.getElementById(`${kind}-new-sort`).value || 0),
         visible: true,
     };
@@ -188,7 +206,7 @@ window._websiteCreateCat = async (kind) => {
         _cats.push({ ...created, project_count: 0 });
         const label = kind === 'tag' ? '標籤' : '分類';
         toastOk(`已新增${label}`);
-        [`${kind}-new-slug`, `${kind}-new-name-zh`, `${kind}-new-name-en`].forEach(
+        [`${kind}-new-slug`, `${kind}-new-name-zh`, `${kind}-new-name-en`, `${kind}-new-desc`].forEach(
             id => document.getElementById(id).value = ''
         );
         _renderTable(kind);

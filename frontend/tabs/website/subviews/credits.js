@@ -309,7 +309,7 @@ _credits.createRole = async () => {
 };
 
 _credits.saveRole = async (id) => {
-    const patch = readRowPatch('#credits-roles-card [data-id]', id);
+    const patch = readRowPatch('#credits-roles-card', id);
     try {
         const updated = await websiteFetch(`/api/website/admin/credit_roles/${id}`, { method: 'PUT', body: patch });
         const idx = _state.roles.findIndex(r => r.id === id);
