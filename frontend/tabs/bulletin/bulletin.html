@@ -1,0 +1,80 @@
+<!--
+    bulletin.html — 📌 公布欄 Tab 主殼
+    左側子視圖導覽（目前只有「待辦提醒」）+ 右側內容容器。
+    ⚠️ 這是 MASTER 同源功能（打 /api/v1/bulletin），不是 NAS website-api。
+    board 由 bulletin.js 直接 render 進 #bulletin-content。
+-->
+<div id="bulletin-root" style="display:flex;height:calc(100vh - 180px);min-height:500px;background:#1a1a1a;">
+
+    <!-- 左側導覽 -->
+    <nav id="bulletin-nav" style="width:200px;border-right:1px solid #2a2a2a;padding:16px 0;flex-shrink:0;">
+        <div style="padding:0 16px 12px;font-size:11px;color:#666;letter-spacing:0.08em;">公布欄</div>
+        <button class="website-nav-btn active" data-subview="todo">📋 待辦提醒</button>
+    </nav>
+
+    <!-- 右側內容區（board render 進這裡）-->
+    <main id="bulletin-content" style="flex:1;padding:24px;overflow:auto;">
+        <div style="color:#888;padding:40px;text-align:center;">載入中…</div>
+    </main>
+</div>
+
+<style>
+    /* .website-nav-btn base/hover/active 來自全域 style.css，與官網 Tab 共用。
+       以下卡片 / 按鈕 / pill 樣式 scope 到 #bulletin-content，複用官網 Tab 視覺。 */
+    #bulletin-content h2 {
+        color: #fff; font-size: 18px; margin: 0 0 16px 0; font-weight: 600;
+    }
+    #bulletin-content .card {
+        background: #2a2a2a; border: 1px solid #3a3a3a; border-radius: 8px;
+        padding: 16px; margin-bottom: 12px;
+    }
+    #bulletin-content .btn {
+        background: #3b82f6; color: #fff; border: none; padding: 6px 12px;
+        border-radius: 4px; font-size: 12px; cursor: pointer;
+    }
+    #bulletin-content .btn:hover { background: #2563eb; }
+    #bulletin-content .btn.btn-sm { padding: 4px 8px; font-size: 11px; }
+    #bulletin-content .btn.btn-danger { background: #dc2626; }
+    #bulletin-content .btn.btn-danger:hover { background: #b91c1c; }
+    #bulletin-content .btn.btn-ghost { background: transparent; border: 1px solid #444; color: #ccc; }
+    #bulletin-content .btn.btn-ghost:hover { background: #333; }
+    #bulletin-content .btn:disabled { opacity: 0.35; cursor: not-allowed; }
+    #bulletin-content input, #bulletin-content textarea, #bulletin-content select {
+        background: #1a1a1a; border: 1px solid #3a3a3a; color: #fff;
+        padding: 6px 10px; border-radius: 4px; font-size: 13px;
+    }
+    /* website-pill 也在此定義一份，避免使用者從未開過官網 Tab 時全域樣式缺席 */
+    .website-pill {
+        display: inline-block; padding: 2px 8px; border-radius: 10px;
+        font-size: 11px; background: #333; color: #ccc;
+    }
+    /* 待辦卡片 */
+    #bulletin-content .bl-card {
+        display: flex; align-items: flex-start; gap: 12px;
+        background: #232323; border: 1px solid #333; border-radius: 8px;
+        padding: 12px 14px; margin-bottom: 8px;
+    }
+    #bulletin-content .bl-card.bl-done { opacity: 0.55; }
+    #bulletin-content .bl-check {
+        width: 20px; height: 20px; border-radius: 50%; border: 2px solid #555;
+        flex-shrink: 0; margin-top: 2px; cursor: pointer; color: #6ee7b7;
+        display: flex; align-items: center; justify-content: center;
+        font-size: 12px; line-height: 1; user-select: none; transition: all .15s;
+    }
+    #bulletin-content .bl-check:hover { border-color: #6ee7b7; }
+    #bulletin-content .bl-check.on { background: #064e3b; border-color: #064e3b; }
+    #bulletin-content .bl-title {
+        color: #eee; font-size: 14px; font-weight: 500; cursor: pointer;
+    }
+    #bulletin-content .bl-title:hover { color: #fff; text-decoration: underline; }
+    #bulletin-content .bl-card.bl-done .bl-title { text-decoration: line-through; color: #888; }
+    #bulletin-content .bl-note {
+        color: #999; font-size: 12px; margin-top: 4px; white-space: pre-wrap;
+    }
+    #bulletin-content .bl-icon-btn {
+        background: transparent; border: none; color: #aaa; cursor: pointer;
+        font-size: 14px; padding: 2px 5px; border-radius: 4px; line-height: 1;
+    }
+    #bulletin-content .bl-icon-btn:hover { background: #333; color: #fff; }
+    #bulletin-content .bl-icon-btn:disabled { opacity: 0.25; cursor: not-allowed; }
+</style>

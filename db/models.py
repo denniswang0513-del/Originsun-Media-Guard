@@ -42,6 +42,29 @@ class JobHistory(Base):
     )
 
 
+class BulletinItem(Base):
+    """公布欄待辦提醒（團隊共用一份，存 mediaguard）。"""
+    __tablename__ = "bulletin_items"
+
+    id = Column(String(32), primary_key=True)
+    title = Column(Text, nullable=False)
+    note = Column(Text, nullable=True)
+    status = Column(String(16), nullable=False, default="todo")     # todo / doing / done
+    priority = Column(String(8), nullable=False, default="med")      # high / med / low
+    category = Column(String(64), nullable=True)
+    pinned = Column(Boolean, nullable=False, default=False)
+    sort_order = Column(Integer, nullable=False, default=0)
+    created_by = Column(String(64), nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+    done_at = Column(DateTime(timezone=True), nullable=True)
+
+    __table_args__ = (
+        Index("idx_bulletin_status", "status"),
+        Index("idx_bulletin_pinned", "pinned"),
+    )
+
+
 class Agent(Base):
     __tablename__ = "agents"
 

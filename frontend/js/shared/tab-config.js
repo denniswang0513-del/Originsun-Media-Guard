@@ -3,6 +3,7 @@
  */
 
 export const TAB_MAP = {
+    bulletin: 'tab_bulletin',
     projects: 'tab-projects',
     preprod_plan: 'tab_preprod_plan',
     backup: 'tab_main', verify: 'tab_verify',
@@ -21,6 +22,7 @@ export const MEDIA_TABS = ['projects', 'backup', 'verify', 'transcode', 'concat'
 // Section IDs deliberately mirror TAB_MAP so loadTabs and _applyModuleTabs
 // stay in sync without duplication.
 export const TAB_LOADERS = [
+    ['bulletin',      './tabs/bulletin/bulletin.html',       './tabs/bulletin/bulletin.js',       'initBulletinTab'],
     ['projects',      './tabs/projects/projects.html',       './tabs/projects/projects.js',       'initTab'],
     ['preprod_plan',  './tabs/preprod/preprod.html',         './tabs/preprod/preprod.js',         'initPreprodTab'],
     ['backup',        './tabs/backup/backup.html',           './tabs/backup/backup.js',           'initBackupTab'],
@@ -50,6 +52,7 @@ export function shouldShowTab(key, authUser, modules) {
 // `key` values are TAB_MAP keys; sidebar labels live here so nav + RBAC +
 // switchTab all derive from one place.
 export const TAB_GROUPS = [
+    { id: 'bulletin',   label: '📌 公布欄', single: 'bulletin' },
     { id: 'projects',   label: '📊 專案總覽', single: 'projects' },
     { id: 'preprod',    label: '📝 前期製作', items: [
         { key: 'preprod_plan', label: '📋 拍攝企劃' },
@@ -99,6 +102,7 @@ export function isMediaSection(sectionId) {
 // modules so the permission editor never silently hides one. `crm_quotes`
 // (報價) has no top-level tab but is a real business module → folded into 業務管理.
 export const PERMISSION_GROUPS = [
+    { id: 'bulletin',   label: '📌 公布欄', modules: ['bulletin'] },
     { id: 'projects',   label: '📊 專案總覽', modules: ['projects'] },
     { id: 'preprod',    label: '📝 前期製作', modules: ['preprod_plan'] },
     { id: 'production', label: '🎬 後期製作', modules: ['backup', 'verify', 'transcode', 'concat', 'drone_meta', 'report', 'transcribe', 'tts'] },

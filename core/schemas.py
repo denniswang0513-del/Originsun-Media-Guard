@@ -269,6 +269,28 @@ class DroneWatcherConfig(BaseModel):
     snapshot: DroneWatcherSnapshot = DroneWatcherSnapshot()
 
 
+class BulletinCreate(BaseModel):
+    title: str
+    note: Optional[str] = None
+    status: str = "todo"        # todo / doing / done
+    priority: str = "med"       # high / med / low
+    category: Optional[str] = None
+    pinned: bool = False
+
+
+class BulletinUpdate(BaseModel):
+    title: Optional[str] = None
+    note: Optional[str] = None
+    status: Optional[str] = None
+    priority: Optional[str] = None
+    category: Optional[str] = None
+    pinned: Optional[bool] = None
+
+
+class BulletinReorder(BaseModel):
+    ordered_ids: List[str]
+
+
 class DownloadModelRequest(BaseModel):
     model_size: str
 

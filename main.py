@@ -38,6 +38,7 @@ _ROUTER_MODULES = [
     'api_crm',
     'api_drone_meta',
     'api_drone_watcher',
+    'api_bulletin',
 ]
 _routers = {}
 for _mod_name in _ROUTER_MODULES:
@@ -345,6 +346,35 @@ async def _on_startup():
                             await session.commit()
                         except Exception:
                             await session.rollback()
+        except Exception:
+            pass
+    # ── 公布欄種子（表空時塞入目前待辦；admin 經 grant_admin_all_modules 自動有 bulletin）──
+    if state.db_online:
+        try:
+            from db.session import get_session_factory
+            _f_bl = get_session_factory()
+            if _f_bl:
+                from sqlalchemy import select as _sel_bl, func as _fn_bl
+                from db.models import BulletinItem
+                async with _f_bl() as session:
+                    _cnt = (await session.execute(_sel_bl(_fn_bl.count(BulletinItem.id)))).scalar() or 0
+                    if _cnt == 0:
+                        import uuid as _uu_bl
+                        _seed = [
+                            ("存好備份加密金鑰到密碼管理器（settings 解密用；master 掛了才解得開）", "備份", "high", True),
+                            ("提供 46 條舊作品網址對照清單 → 補 301 轉址（保 SEO 權重）", "官網", "med", False),
+                            ("聯絡表單實測一次（www 域 Turnstile 驗證碼 + 收得到信）", "官網", "med", False),
+                            ("Bing Webmaster Tools 提交 sitemap", "官網", "low", False),
+                            ("清 CORS 白名單殘留的 test.originsun-studio.com", "系統", "low", False),
+                            ("新站穩定後停掉舊 WordPress 主機（43.254.17.7）", "系統", "low", False),
+                            ("翻譯 backlog 165 篇（每日自動清，想加速可手動整批）", "官網", "low", False),
+                        ]
+                        for _i, (_ti, _cat, _pri, _pin) in enumerate(_seed):
+                            session.add(BulletinItem(
+                                id=_uu_bl.uuid4().hex[:12], title=_ti, category=_cat,
+                                priority=_pri, pinned=_pin, status="todo",
+                                sort_order=_i, created_by="system"))
+                        await session.commit()
         except Exception:
             pass
     # ── DB Migration: api_keys table ──
