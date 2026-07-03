@@ -160,7 +160,7 @@ function _card(it) {
     const pinStyle = it.pinned ? 'opacity:1;' : 'opacity:0.4;';
 
     const statusSel = `
-        <select onchange="window._bl.setStatus(${it.id}, this.value)"
+        <select onchange="window._bl.setStatus('${it.id}', this.value)"
                 style="background:#0d0d0d;border:1px solid #333;color:#ccc;padding:3px 6px;border-radius:4px;font-size:11px;">
             <option value="todo"  ${it.status === 'todo' ? 'selected' : ''}>待辦</option>
             <option value="doing" ${it.status === 'doing' ? 'selected' : ''}>進行中</option>
@@ -169,21 +169,21 @@ function _card(it) {
 
     return `
         <div class="bl-card ${isDone ? 'bl-done' : ''}">
-            <div class="bl-check ${isDone ? 'on' : ''}" onclick="window._bl.toggleDone(${it.id})" title="標記${isDone ? '未完成' : '完成'}">${isDone ? '✓' : ''}</div>
+            <div class="bl-check ${isDone ? 'on' : ''}" onclick="window._bl.toggleDone('${it.id}')" title="標記${isDone ? '未完成' : '完成'}">${isDone ? '✓' : ''}</div>
             <div style="flex:1;min-width:0;">
                 <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
-                    <span class="bl-title" onclick="window._bl.edit(${it.id})">${esc(it.title || '(未命名)')}</span>
+                    <span class="bl-title" onclick="window._bl.edit('${it.id}')">${esc(it.title || '(未命名)')}</span>
                     ${prioPill}${doingPill}${catPill}
                 </div>
                 ${it.note ? `<div class="bl-note">${esc(it.note)}</div>` : ''}
             </div>
             <div style="display:flex;align-items:center;gap:4px;flex-shrink:0;">
                 ${statusSel}
-                <button class="bl-icon-btn" style="${pinStyle}" onclick="window._bl.togglePin(${it.id})" title="${it.pinned ? '取消釘選' : '釘選'}">${pinIcon}</button>
-                <button class="bl-icon-btn" onclick="window._bl.move(${it.id},-1)" ${atTop ? 'disabled' : ''} title="上移">▲</button>
-                <button class="bl-icon-btn" onclick="window._bl.move(${it.id},1)" ${atBottom ? 'disabled' : ''} title="下移">▼</button>
-                <button class="bl-icon-btn" onclick="window._bl.edit(${it.id})" title="編輯">✏️</button>
-                <button class="bl-icon-btn" onclick="window._bl.del(${it.id})" title="刪除" style="color:#f87171;">🗑</button>
+                <button class="bl-icon-btn" style="${pinStyle}" onclick="window._bl.togglePin('${it.id}')" title="${it.pinned ? '取消釘選' : '釘選'}">${pinIcon}</button>
+                <button class="bl-icon-btn" onclick="window._bl.move('${it.id}',-1)" ${atTop ? 'disabled' : ''} title="上移">▲</button>
+                <button class="bl-icon-btn" onclick="window._bl.move('${it.id}',1)" ${atBottom ? 'disabled' : ''} title="下移">▼</button>
+                <button class="bl-icon-btn" onclick="window._bl.edit('${it.id}')" title="編輯">✏️</button>
+                <button class="bl-icon-btn" onclick="window._bl.del('${it.id}')" title="刪除" style="color:#f87171;">🗑</button>
             </div>
         </div>`;
 }
@@ -286,7 +286,7 @@ _bl.edit = (id) => {
         </div>
         <div style="padding:12px 18px;border-top:1px solid #2a2a2a;display:flex;justify-content:flex-end;gap:8px;">
             <button class="btn btn-ghost btn-sm" onclick="window._bl.closeEdit()">取消</button>
-            <button class="btn" style="background:#059669;" onclick="window._bl.saveEdit(${it.id})">✓ 儲存</button>
+            <button class="btn" style="background:#059669;" onclick="window._bl.saveEdit('${it.id}')">✓ 儲存</button>
         </div>`;
     openModal('bl-edit-modal', inner, { width: '560px' });
 };
