@@ -1,5 +1,5 @@
 {
-  "version": "1.10.186",
+  "version": "1.10.187",
   "build_date": "2026-07-03",
-  "notes": "feat(website): 榮譽牆獎項英文(逐行對齊+行數守衛)+作品類型固定英譯 + 翻譯後台生成/檢視拆兩鈕"
+  "notes": "feat(backup): 雙層資料備份 — NAS 常駐本地快照 + master 排程打包上傳 Google Drive + 後台卡 + OAuth 腳本 + 還原手冊"
 }

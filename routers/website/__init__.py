@@ -23,6 +23,7 @@ from .admin_team import router as _admin_team_router
 from .admin_initiatives import router as _admin_initiatives_router
 from .admin_redirects import router as _admin_redirects_router
 from .admin_translation import router as _admin_translation_router
+from .admin_backup import router as _admin_backup_router
 
 router = APIRouter()
 router.include_router(_public_router)
@@ -39,5 +40,6 @@ router.include_router(_admin_team_router)
 router.include_router(_admin_initiatives_router)
 router.include_router(_admin_redirects_router)
 router.include_router(_admin_translation_router)
+router.include_router(_admin_backup_router)
 
 __all__ = ["router"]

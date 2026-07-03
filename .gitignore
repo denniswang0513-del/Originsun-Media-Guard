@@ -2,6 +2,9 @@
 credentials/token.json
 credentials/credentials.json
 
+# Backup bundles (contain live DB + media — NEVER commit)
+backups/
+
 # Python
 __pycache__/
 *.py[cod]
