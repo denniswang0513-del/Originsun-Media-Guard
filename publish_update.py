@@ -247,6 +247,54 @@ def sync_website_to_nas() -> bool:
 NAS_LAN_API = "http://192.168.1.132:8090"  # Website_Nginx LAN port → website-api
 NGINX_SNIPPET_PATH = "/etc/nginx/snippets/redirects.conf"
 
+# nginx 主設定（server block）同步目標 —— 解決 repo↔NAS drift。
+# 這份 originsun.conf 以前只手動部署過一次 → 改 repo 版不會上 NAS、兩邊早分岔
+# （2026-07-03 上線 polish 時發現 NAS source 竟缺 /uploads/ block）。併進 sync 流程自動化。
+NGINX_MAIN_REPO = os.path.join(os.path.dirname(os.path.abspath(__file__)), "docker", "nginx", "originsun.conf")
+NGINX_MAIN_NAS = f"{NAS_DOCKER_DIR}/nginx/originsun.conf"   # NAS host source 檔
+NGINX_MAIN_DEST = "/etc/nginx/conf.d/default.conf"          # Website_Nginx 容器內
+
+
+def sync_nginx_conf_to_nas() -> bool:
+    """把 repo docker/nginx/originsun.conf 同步到 NAS + docker cp 進 Website_Nginx。
+
+    安全流程（上線 polish 踩過雷後定案）：備份現行 config → docker cp 新版 →
+    `nginx -t` 驗證 → **只在通過時 reload；失敗自動還原備份**（壞設定絕不拖垮站）。
+    best-effort：任一步失敗只記 warning、回 False，不阻斷 caller。
+
+    只在 master 跑（有 SSH key + repo）。NAS website-api 容器沒 SSH key → skip。
+    """
+    if not os.path.exists(SSH_KEY_PATH):
+        print("[nginx conf sync] SSH key 不存在，跳過")
+        return False
+    if not os.path.exists(NGINX_MAIN_REPO):
+        print(f"[nginx conf sync] repo 無 {NGINX_MAIN_REPO}，跳過")
+        return False
+
+    ssh_cmd = ["ssh", "-i", SSH_KEY_PATH] + _SSH_COMMON_OPTS + [NAS_HOST]
+    scp_args = ["scp", "-i", SSH_KEY_PATH] + _SSH_COMMON_OPTS + ["-q",
+                NGINX_MAIN_REPO, f"{NAS_HOST}:{NGINX_MAIN_NAS}"]
+    # 備份→cp 新→驗證→reload / 還原，全部一條 ssh（避免壞 config 落地又沒 reload）
+    remote = (
+        f"{SSH_DOCKER} exec Website_Nginx cp {NGINX_MAIN_DEST} {NGINX_MAIN_DEST}.bak && "
+        f"{SSH_DOCKER} cp {NGINX_MAIN_NAS} Website_Nginx:{NGINX_MAIN_DEST} && "
+        f"if {SSH_DOCKER} exec Website_Nginx nginx -t; then "
+        f"{SSH_DOCKER} exec Website_Nginx nginx -s reload; "
+        f"else {SSH_DOCKER} exec Website_Nginx cp {NGINX_MAIN_DEST}.bak {NGINX_MAIN_DEST}; exit 1; fi"
+    )
+    try:
+        subprocess.run(ssh_cmd + [f"mkdir -p {NAS_DOCKER_DIR}/nginx"],
+                       check=True, capture_output=True, timeout=25)
+        subprocess.run(scp_args, check=True, capture_output=True, timeout=30)
+        subprocess.run(ssh_cmd + [remote], check=True, capture_output=True, timeout=45)
+        print("[nginx conf sync] OK — originsun.conf 已同步 + reload")
+        return True
+    except (subprocess.CalledProcessError, subprocess.TimeoutExpired, OSError) as e:
+        _err = getattr(e, "stderr", b"") or b""
+        _err = _err.decode(errors="replace") if isinstance(_err, (bytes, bytearray)) else str(_err)
+        print(f"[nginx conf sync] FAIL（已還原舊 config、站不受影響）: {_err[:300] or type(e).__name__}")
+        return False
+
 
 def sync_redirects_to_nas() -> bool:
     """從 NAS website-api 拉 redirect map → 生成 nginx snippet → docker cp + reload。
@@ -268,6 +316,10 @@ def sync_redirects_to_nas() -> bool:
     if not os.path.exists(SSH_KEY_PATH):
         print(f"[redirects sync] SSH key 不存在 ({SSH_KEY_PATH})，跳過")
         return False
+
+    # 0. 先確保 nginx 主設定（server block，內含 redirects 的 include）是最新 repo 版
+    #    → 解決 repo↔NAS drift；best-effort，不影響後續 redirects 同步。
+    sync_nginx_conf_to_nas()
 
     # 1. 從 NAS website-api 拉 redirect map
     try:

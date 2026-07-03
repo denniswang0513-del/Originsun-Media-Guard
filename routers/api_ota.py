@@ -863,6 +863,15 @@ async def deploy_website(request: Request):
                                                "version": "website", "message": "website/ 同步失敗"}
                     return
                 ok = await asyncio.to_thread(_trigger_master_rebuild_blocking, log)
+                # 併同步 nginx 主設定（docker/nginx/originsun.conf）到 NAS Website_Nginx
+                # → 讓「發布官網前端」也自動帶上 nginx conf 變更，解決 repo↔NAS drift。
+                # best-effort（內含備份→驗證→reload/還原），不影響 dist 發布結果。
+                try:
+                    from publish_update import sync_nginx_conf_to_nas
+                    if await asyncio.to_thread(sync_nginx_conf_to_nas):
+                        log.append("[OK] nginx 主設定已同步到 NAS")
+                except Exception as _e_nginx:
+                    log.append(f"[WARN] nginx 主設定同步略過：{_e_nginx}")
                 _publish_status[job_id] = {
                     "status": "done" if ok else "error",
                     "log": "\n".join(log), "version": "website",
