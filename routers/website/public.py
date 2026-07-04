@@ -74,7 +74,7 @@ async def list_featured(
 @router.get("/hero")
 async def list_hero(
     request: Request,
-    limit: int = Query(8, ge=1, le=12),
+    limit: int = Query(10, ge=1, le=12),  # 對齊前端 LIMITS.HOME_HERO
     session: AsyncSession = Depends(public_session),
 ):
     # 首頁最上方 Hero 輪播：admin 在「首頁設定」挑選 + 排序（home.hero_work_ids）；

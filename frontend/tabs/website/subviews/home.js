@@ -84,11 +84,11 @@ export default async function render(container, ctx = {}) {
     // 首頁 Hero 輪播挑選：名單＝精選作品（＋已選但已不精選者，讓你能取消）；已選的照儲存順序排前面。
     const heroIds = Array.isArray(settings['home.hero_work_ids'])
         ? settings['home.hero_work_ids'].map(String) : [];
-    const _byId = new Map(works.map(w => [String(w.id), w]));
-    const _heroPool = [];
-    heroIds.forEach(id => { if (_byId.has(id)) _heroPool.push(_byId.get(id)); });
-    works.forEach(w => { if (w.featured && !heroIds.includes(String(w.id))) _heroPool.push(w); });
     const _heroSet = new Set(heroIds);
+    const _byId = new Map(works.map(w => [String(w.id), w]));
+    const _selected = heroIds.map(id => _byId.get(id)).filter(Boolean);          // 已選：照儲存順序
+    const _rest = works.filter(w => w.featured && !_heroSet.has(String(w.id)));   // 其餘精選作品
+    const _heroPool = [..._selected, ..._rest];
     const heroRows = _heroPool.map(w => {
         const id = String(w.id);
         const thumb = w.cover_url || w.carousel_image || '';

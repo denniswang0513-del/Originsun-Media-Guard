@@ -1,5 +1,5 @@
 {
-  "version": "1.10.199",
+  "version": "1.10.200",
   "build_date": "2026-07-04",
-  "notes": "feat(website): 首頁 Hero 輪播作品可在首頁設定勾選+拖曳排序 (home.hero_work_ids；未設 fallback 精選)"
+  "notes": "refactor(website): /simplify hero — cap 收斂到 LIMITS.HOME_HERO + fetchHero 去死碼 + list_hero fallback 合併 + home.js 宣告式 pool"
 }

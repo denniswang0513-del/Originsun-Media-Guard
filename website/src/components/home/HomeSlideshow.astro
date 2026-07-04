@@ -13,11 +13,12 @@
 import SmartImage from "../ui/SmartImage.astro";
 import type { IPublicProject } from "../../types/project";
 import { resolveThumbnailAsync } from "../../lib/youtube";
+import { LIMITS } from "../../lib/config";
 
 interface Props { works: IPublicProject[] }
 const { works } = Astro.props;
 
-const slides = works.slice(0, 10);   // admin 在「首頁設定」挑選 + 排序，最多 10 張
+const slides = works.slice(0, LIMITS.HOME_HERO);   // admin 在「首頁設定」挑選 + 排序
 // 取圖優先序：carousel_image（後端已收斂「精選圖→成果展示第一張」）→ YouTube maxres 縮圖（墊底）。
 const thumbs = await Promise.all(
     slides.map(async w =>

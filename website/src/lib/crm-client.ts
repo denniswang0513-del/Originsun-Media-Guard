@@ -117,16 +117,17 @@ export async function fetchFeatured(limit = 6): Promise<IPublicProject[]> {
 }
 
 
-export async function fetchHero(limit = 8): Promise<IPublicProject[]> {
+export async function fetchHero(limit = LIMITS.HOME_HERO): Promise<IPublicProject[]> {
     // 首頁最上方 Hero 輪播：admin 在「首頁設定」挑選 + 排序（/hero）。
-    // /hero 不可用或回空 → fallback 精選前 6，讓首頁永不空、且舊 build（/hero 尚未部署）也不炸。
+    // server 端已對「未挑選 / 全失效」fallback 精選（見 list_hero_projects），空陣列只代表
+    // 全站無公開作品。client 端只需處理 /hero 端點不存在（舊 build rolling deploy → 404）→ 退回精選。
     try {
         const data = await _get<{ items: IPublicProject[] }>(`/api/website/hero?limit=${limit}`);
-        if (data.items && data.items.length > 0) return data.items;
+        return data.items ?? [];
     } catch (e) {
         console.warn(`[crm-client] fetchHero 取用 featured fallback:`, (e as Error).message);
+        return fetchFeatured(6);
     }
-    return fetchFeatured(6);
 }
 
 

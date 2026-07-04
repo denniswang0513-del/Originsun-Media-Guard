@@ -395,16 +395,14 @@ async def list_hero_projects(session: AsyncSession, limit: int = 8) -> list[dict
     settings = await get_all_settings(session)
     raw = settings.get("home.hero_work_ids")
     ids = [str(x) for x in raw if x] if isinstance(raw, list) else []
-    if not ids:
-        return await list_featured_projects(session, limit=limit)
     rows = (await session.execute(
         select(CrmProject).where(
             and_(CrmProject.public.is_(True), CrmProject.id.in_(ids))
         )
-    )).scalars()
+    )).scalars() if ids else []
     found = {p.id: p for p in rows}
     ordered = [found[i] for i in ids if i in found]  # 保留 admin 拖曳排序、丟掉失效/未公開
-    if not ordered:
+    if not ordered:  # 未挑選 / 全失效 → fallback 精選作品，首頁不空
         return await list_featured_projects(session, limit=limit)
     return await _build_public_dicts(session, ordered[:limit])
 

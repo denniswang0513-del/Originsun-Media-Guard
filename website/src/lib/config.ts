@@ -22,6 +22,7 @@ export const SITE_URL_FALLBACK = "https://www.originsun-studio.com";
 /** 各頁面/元件共用的數量上限，集中避免散落 magic numbers */
 export const LIMITS = {
     HOME_FEATURED: 9,       // 首頁精選作品數（3×3 無縫網格）
+    HOME_HERO: 10,          // 首頁最上方 Hero 輪播張數上限（admin 在首頁設定挑選）
     RELATED_WORKS: 3,       // 作品詳情頁相關作品數
     WORKS_PAGE_SIZE: 12,    // /works 分頁大小（client-side filter 已廢用）
     BUILD_MAX_WORKS: 200,   // 建置時從 API 撈的作品上限（超過需調 API）
