@@ -407,6 +407,18 @@ async def list_hero_projects(session: AsyncSession, limit: int = 8) -> list[dict
     return await _build_public_dicts(session, ordered[:limit])
 
 
+async def list_all_featured_projects(session: AsyncSession) -> list[dict]:
+    """首頁「精選作品」網格：所有 ⭐首頁精選 作品（不限數量、不補非精選作品）。"""
+    stmt = select(CrmProject).where(
+        and_(CrmProject.public.is_(True), CrmProject.public_featured.is_(True))
+    ).order_by(
+        CrmProject.public_sort_order.desc().nullslast(),
+        CrmProject.public_published_at.desc().nullslast(),
+    )
+    projects = list((await session.execute(stmt)).scalars())
+    return await _build_public_dicts(session, projects)
+
+
 async def list_admin_projects(
     session: AsyncSession, include_non_public: bool = True
 ) -> list[dict]:

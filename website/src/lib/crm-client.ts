@@ -131,6 +131,14 @@ export async function fetchHero(limit = LIMITS.HOME_HERO): Promise<IPublicProjec
 }
 
 
+export async function fetchAllFeatured(): Promise<IPublicProject[]> {
+    // 首頁「精選作品」網格：所有精選作品（不限數量）。API 離線 → 空清單（網格顯示空狀態，build 不中斷）。
+    const data = await _safeGet<{ items: IPublicProject[] }>(
+        `/api/website/featured-all`, { items: [] }, "fetchAllFeatured");
+    return data.items;
+}
+
+
 /**
  * 對 SSG build 期間多頁共用的 list endpoint memoize：N 頁需要 = 1 次 HTTP。
  * 空陣列不 cache（API 短暫離線後重試能拿到真資料）。

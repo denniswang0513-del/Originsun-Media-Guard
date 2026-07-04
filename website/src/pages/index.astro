@@ -23,23 +23,18 @@ import Testimonials from "../components/home/Testimonials.astro";
 import HomeInsight from "../components/home/HomeInsight.astro";
 import FAQ from "../components/home/FAQ.astro";
 import ContactCTA from "../components/home/ContactCTA.astro";
-import { fetchMeta, fetchFeatured, fetchHero, fetchFaqs, fetchTestimonials, fetchServices, fetchCategories } from "../lib/crm-client";
+import { fetchMeta, fetchAllFeatured, fetchHero, fetchFaqs, fetchTestimonials, fetchServices, fetchCategories } from "../lib/crm-client";
 import { pageSchemas, resolveSiteUrl, ensureMinDescription } from "../lib/seo";
-import { LIMITS } from "../lib/config";
 
-const [meta, featured, heroWorks, faqs, testimonials, services, categories] = await Promise.all([
+const [meta, featuredWorks, heroWorks, faqs, testimonials, services, categories] = await Promise.all([
     fetchMeta(),
-    fetchFeatured(LIMITS.HOME_FEATURED),
+    fetchAllFeatured(),   // 精選作品網格：不限數量（橫向捲動軌道自動流動）
     fetchHero(),
     fetchFaqs(),
     fetchTestimonials(),
     fetchServices(),
     fetchCategories(),
 ]);
-
-// Show real published works only — no FAKE_FEATURED padding. The grid
-// layout collapses gracefully when fewer than 9 works are returned.
-const featured9 = featured.slice(0, 9);
 
 const siteUrl = resolveSiteUrl(Astro.site);
 const description = ensureMinDescription(
@@ -83,7 +78,7 @@ const homeCopy = meta.copy?.home ?? {};
     <HomeSlideshow works={heroWorks} />
     <WhoWeAre showreel_id={showreelId} stats={homeStats} copy={homeCopy} />
     <ServicesWithCounts services={services} categories={categories} copy={homeCopy} meta={meta} />
-    <FeaturedWorks works={featured9} copy={homeCopy} />
+    <FeaturedWorks works={featuredWorks} copy={homeCopy} />
     <ProcessNumbered />
     <Testimonials testimonials={testimonials} ratingValue={ratingValue} ratingCount={ratingCount} copy={homeCopy} />
     <HomeInsight copy={homeCopy} />

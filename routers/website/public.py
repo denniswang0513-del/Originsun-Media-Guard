@@ -84,6 +84,17 @@ async def list_hero(
     return {"items": items}
 
 
+@router.get("/featured-all")
+async def list_featured_all(
+    request: Request,
+    session: AsyncSession = Depends(public_session),
+):
+    # 首頁「精選作品」網格：所有精選作品（不限數量、不補非精選）。build 期由 index.astro fetchAllFeatured() 呼叫。
+    rate_limit(request, max_per_minute=60)
+    items = await project_service.list_all_featured_projects(session)
+    return {"items": items}
+
+
 @router.get("/categories")
 async def list_categories(
     request: Request,
