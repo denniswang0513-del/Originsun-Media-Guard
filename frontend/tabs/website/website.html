@@ -5,7 +5,7 @@
 <div id="website-root" style="display:flex;height:calc(100vh - 180px);min-height:500px;background:#1a1a1a;">
 
     <!-- 左側導覽 -->
-    <nav id="website-nav" style="width:200px;border-right:1px solid #2a2a2a;padding:16px 0;flex-shrink:0;">
+    <nav id="website-nav" style="width:200px;border-right:1px solid #2a2a2a;padding:16px 0;flex-shrink:0;overflow-y:auto;min-height:0;">
         <div style="padding:0 16px 12px;font-size:11px;color:#666;letter-spacing:0.08em;">官網管理</div>
         <!-- 官網欄目：一一對應官網導覽列（首頁/作品集/歷年作品/服務項目/關於我們/部落格/聯絡）順序 -->
         <div style="padding:4px 16px;font-size:10px;color:#555;letter-spacing:0.1em;">📄 官網欄目</div>
@@ -45,6 +45,12 @@
 <style>
     /* .website-nav-btn base/hover/active styles live in global style.css,
        shared with .group-side-btn (the grouped-nav sidebar). */
+    /* 左側導覽過長時可捲動；細捲軸配深色主題 */
+    #website-nav{scrollbar-width:thin;scrollbar-color:#3a3a3a transparent;}
+    #website-nav::-webkit-scrollbar{width:8px;}
+    #website-nav::-webkit-scrollbar-thumb{background:#3a3a3a;border-radius:4px;}
+    #website-nav::-webkit-scrollbar-thumb:hover{background:#4a4a4a;}
+    #website-nav::-webkit-scrollbar-track{background:transparent;}
     .website-badge {
         display: inline-block; background: #dc2626; color: #fff;
         font-size: 10px; padding: 1px 6px; border-radius: 8px;

@@ -1,5 +1,5 @@
 {
-  "version": "1.10.196",
+  "version": "1.10.197",
   "build_date": "2026-07-04",
-  "notes": "refactor(website): /simplify 首頁輪播取圖鏈收斂為後端 carousel_image 單一欄位 + 精選圖上傳清舊孤兒檔 + featured 查詢略過已設精選圖者"
+  "notes": "fix(admin): 官網管理左側導覽過長可捲動 (overflow-y:auto + 細捲軸)"
 }
