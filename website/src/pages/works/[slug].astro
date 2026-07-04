@@ -185,16 +185,6 @@ const nextThumb = nextWork ? resolveThumbnail(nextWork.youtube_id, nextWork.slug
                 這些內容透過：(1) <head> JSON-LD FAQPage schema、(2) /works/{slug}.md 鏡像、
                 (3) /llms-full.txt 提供給 AI/搜尋爬蟲，視覺端使用者看不到。 */}
 
-            {work.tags && work.tags.length > 0 && (
-                <div class="pt-8 border-t border-neutral-200 flex flex-wrap gap-2">
-                    {work.tags.map(t => (
-                        <a href={`/tags/${t}/`}
-                           class="text-[11px] tracking-wider text-neutral-500 bg-neutral-100 hover:bg-neutral-200 hover:text-[#c9372c] px-2.5 py-1 rounded-sm transition-colors">
-                            #{t.replace(/^tag-/, "")}
-                        </a>
-                    ))}
-                </div>
-            )}
         </div>
     </section>
 
@@ -212,6 +202,18 @@ const nextThumb = nextWork ? resolveThumbnail(nextWork.youtube_id, nextWork.slug
     <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-10">
         <hr class="border-neutral-200" />
     </div>
+
+    <!-- 使用場景標籤（探索小尾巴）— 置於相關作品之上 -->
+    {work.tags && work.tags.length > 0 && (
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-10 pt-10 flex flex-wrap gap-2">
+            {work.tags.map(t => (
+                <a href={`/tags/${t}/`}
+                   class="text-[11px] tracking-wider text-neutral-500 bg-neutral-100 hover:bg-neutral-200 hover:text-[#c9372c] px-2.5 py-1 rounded-sm transition-colors">
+                    #{t.replace(/^tag-/, "")}
+                </a>
+            ))}
+        </div>
+    )}
 
     <!-- 相關作品（同 category 優先；不足時補最新 public） -->
     {relatedWorks.length > 0 && (
