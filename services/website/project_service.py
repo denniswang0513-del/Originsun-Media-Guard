@@ -370,17 +370,43 @@ async def list_featured_projects(session: AsyncSession, limit: int = 6) -> list[
         ).limit(remaining)
         featured.extend((await session.execute(fb_stmt)).scalars())
 
-    pids = [p.id for p in featured]
+    return await _build_public_dicts(session, featured)
+
+
+async def _build_public_dicts(session: AsyncSession, projects: list) -> list[dict]:
+    """一批 CrmProject → 對外 dict（帶 categories / client / carousel_image）。
+    list_featured / list_hero 共用；carousel_image 的 showcase_first 只對缺精選圖者查。"""
+    pids = [p.id for p in projects]
     cat_map = await _categories_for_projects(session, pids)
     client_map = await _clients_for_projects(session, pids)
-    # 成果展示第一張只是「沒設精選圖」時的 fallback → 只對缺精選圖的作品查，其餘免撈
     sc_first_map = await _showcase_first_for_projects(
-        session, [p.id for p in featured if not p.public_featured_image]
+        session, [p.id for p in projects if not p.public_featured_image]
     )
     return [
         _to_public_dict(p, cat_map.get(p.id), client_map.get(p.id), sc_first_map.get(p.id))
-        for p in featured
+        for p in projects
     ]
+
+
+async def list_hero_projects(session: AsyncSession, limit: int = 8) -> list[dict]:
+    """首頁最上方 Hero 輪播：admin 在「首頁設定」挑選 + 排序的作品（home.hero_work_ids）。
+    未設定 / 全部失效（作品被刪或下架）→ fallback list_featured_projects（精選前 N），首頁不空。"""
+    from services.website.settings_service import get_all_settings
+    settings = await get_all_settings(session)
+    raw = settings.get("home.hero_work_ids")
+    ids = [str(x) for x in raw if x] if isinstance(raw, list) else []
+    if not ids:
+        return await list_featured_projects(session, limit=limit)
+    rows = (await session.execute(
+        select(CrmProject).where(
+            and_(CrmProject.public.is_(True), CrmProject.id.in_(ids))
+        )
+    )).scalars()
+    found = {p.id: p for p in rows}
+    ordered = [found[i] for i in ids if i in found]  # 保留 admin 拖曳排序、丟掉失效/未公開
+    if not ordered:
+        return await list_featured_projects(session, limit=limit)
+    return await _build_public_dicts(session, ordered[:limit])
 
 
 async def list_admin_projects(

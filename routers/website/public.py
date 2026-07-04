@@ -71,6 +71,19 @@ async def list_featured(
     return {"items": items}
 
 
+@router.get("/hero")
+async def list_hero(
+    request: Request,
+    limit: int = Query(8, ge=1, le=12),
+    session: AsyncSession = Depends(public_session),
+):
+    # 首頁最上方 Hero 輪播：admin 在「首頁設定」挑選 + 排序（home.hero_work_ids）；
+    # 未設定則 fallback 精選作品。build 期由 index.astro fetchHero() 呼叫。
+    rate_limit(request, max_per_minute=60)
+    items = await project_service.list_hero_projects(session, limit=limit)
+    return {"items": items}
+
+
 @router.get("/categories")
 async def list_categories(
     request: Request,

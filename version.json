@@ -1,5 +1,5 @@
 {
-  "version": "1.10.198",
+  "version": "1.10.199",
   "build_date": "2026-07-04",
-  "notes": "feat(website): 作品集列表排序改為 精選→年份新→發布日新 (+sort_order tiebreaker)"
+  "notes": "feat(website): 首頁 Hero 輪播作品可在首頁設定勾選+拖曳排序 (home.hero_work_ids；未設 fallback 精選)"
 }

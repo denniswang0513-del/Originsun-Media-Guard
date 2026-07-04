@@ -63,10 +63,15 @@ export default async function render(container, ctx = {}) {
     const { isCurrent = () => true } = ctx;
     container.innerHTML = '<h2>🏠 首頁設定</h2><div style="color:#888;padding:20px;">載入中…</div>';
     let settings = {};
+    let works = [];
     try {
-        const data = await websiteFetch('/api/website/admin/settings');
+        const [data, worksRes] = await Promise.all([
+            websiteFetch('/api/website/admin/settings'),
+            websiteFetch('/api/website/admin/works?include_non_public=true'),
+        ]);
         if (!isCurrent()) return;
         settings = data?.settings || {};
+        works = worksRes?.items || [];
     } catch (e) {
         if (!isCurrent()) return;
         renderLoadError(container, '🏠 首頁設定', e);
@@ -75,6 +80,43 @@ export default async function render(container, ctx = {}) {
 
     const heroId = settings['home.hero_youtube_id'] || '';
     const showId = settings['home.showreel_id'] || heroId || '';
+
+    // 首頁 Hero 輪播挑選：名單＝精選作品（＋已選但已不精選者，讓你能取消）；已選的照儲存順序排前面。
+    const heroIds = Array.isArray(settings['home.hero_work_ids'])
+        ? settings['home.hero_work_ids'].map(String) : [];
+    const _byId = new Map(works.map(w => [String(w.id), w]));
+    const _heroPool = [];
+    heroIds.forEach(id => { if (_byId.has(id)) _heroPool.push(_byId.get(id)); });
+    works.forEach(w => { if (w.featured && !heroIds.includes(String(w.id))) _heroPool.push(w); });
+    const _heroSet = new Set(heroIds);
+    const heroRows = _heroPool.map(w => {
+        const id = String(w.id);
+        const thumb = w.cover_url || w.carousel_image || '';
+        return `
+        <li class="hero-item" draggable="true" data-id="${esc(id)}"
+            style="display:flex;align-items:center;gap:10px;padding:7px 8px;border:1px solid #333;border-radius:6px;margin-bottom:6px;background:#222;">
+            <span style="color:#666;font-size:15px;cursor:grab;">⠿</span>
+            <input type="checkbox" ${_heroSet.has(id) ? 'checked' : ''} style="width:16px;height:16px;flex-shrink:0;cursor:pointer;" />
+            ${thumb
+                ? `<img src="${esc(thumb)}" alt="" style="width:56px;height:32px;object-fit:cover;border-radius:3px;flex-shrink:0;" />`
+                : '<div style="width:56px;height:32px;background:#333;border-radius:3px;flex-shrink:0;"></div>'}
+            <div style="flex:1;min-width:0;color:#ddd;font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">
+                ${esc(w.title || w.name || id)}${w.year ? ` <span style="color:#888;">${esc(String(w.year))}</span>` : ''}
+            </div>
+        </li>`;
+    }).join('');
+    const heroCard = `
+        <div class="card" style="margin-bottom:16px;">
+            <h3 style="color:#fff;margin:0 0 4px 0;font-size:14px;">🎞️ 首頁 Hero 輪播作品</h3>
+            <p style="color:#888;font-size:11px;margin:0 0 12px 0;">
+                勾選要放上首頁「最上方大圖輪播」的作品、拖曳 ⠿ 調整先後（最多 10 張）。
+                名單來自「⭐ 首頁精選」作品；沒勾任何一件 → 自動用精選作品前幾件。
+            </p>
+            ${_heroPool.length
+                ? `<ul id="hero-list" style="list-style:none;margin:0;padding:0;">${heroRows}</ul>`
+                : '<div style="color:#666;padding:16px;text-align:center;border:1px dashed #333;border-radius:4px;">尚無精選作品——先到「作品集管理」把作品編輯頁勾選 ⭐ 首頁精選。</div>'}
+            <button class="btn" onclick="window._websiteSaveHero()" style="margin-top:10px;">💾 儲存 Hero 名單與順序</button>
+        </div>`;
 
     // 單一 data-key 設定欄位（label + input + 選填 hint）— video / rating 共用同一份模板。
     const simpleField = f => `
@@ -125,6 +167,8 @@ export default async function render(container, ctx = {}) {
             </div>
         </div>
 
+        ${heroCard}
+
         <div class="card" style="margin-bottom:16px;">
             <h3 style="color:#fff;margin:0 0 4px 0;font-size:14px;">信任數字（關於我們段 4 欄）</h3>
             <p style="color:#888;font-size:11px;margin:0 0 12px 0;">留空則使用預設值（placeholder 顯示的數字）。</p>
@@ -154,6 +198,36 @@ export default async function render(container, ctx = {}) {
             <button class="btn btn-ghost btn-sm" onclick="window.websiteSwitchSubview && window.websiteSwitchSubview('services')">→ 服務項目</button>
         </div>
     `;
+
+    _bindHeroDnD();
+}
+
+// Hero 名單拖曳排序（HTML5 DnD，純 vanilla）
+function _bindHeroDnD() {
+    const list = document.getElementById('hero-list');
+    if (!list) return;
+    let dragEl = null;
+    const getAfter = (y) => {
+        let closest = { offset: -Infinity, el: null };
+        list.querySelectorAll('.hero-item').forEach(child => {
+            if (child === dragEl) return;
+            const box = child.getBoundingClientRect();
+            const offset = y - box.top - box.height / 2;
+            if (offset < 0 && offset > closest.offset) closest = { offset, el: child };
+        });
+        return closest.el;
+    };
+    list.querySelectorAll('.hero-item').forEach(li => {
+        li.addEventListener('dragstart', () => { dragEl = li; setTimeout(() => { li.style.opacity = '0.4'; }, 0); });
+        li.addEventListener('dragend', () => { li.style.opacity = ''; dragEl = null; });
+    });
+    list.addEventListener('dragover', e => {
+        e.preventDefault();
+        if (!dragEl) return;
+        const after = getAfter(e.clientY);
+        if (after == null) list.appendChild(dragEl);
+        else if (after !== dragEl) list.insertBefore(dragEl, after);
+    });
 }
 
 window._websiteSaveHome = async () => {
@@ -164,5 +238,20 @@ window._websiteSaveHome = async () => {
     try {
         const r = await websiteFetch('/api/website/admin/settings', { method: 'PUT', body: { values } });
         toastOk(`已更新 ${r.updated} 項`);
+    } catch (e) { toastErr(e.message); }
+};
+
+window._websiteSaveHero = async () => {
+    const list = document.getElementById('hero-list');
+    const ids = list
+        ? [...list.querySelectorAll('.hero-item')]
+            .filter(li => li.querySelector('input[type=checkbox]').checked)
+            .map(li => li.dataset.id)
+        : [];
+    try {
+        await websiteFetch('/api/website/admin/settings', {
+            method: 'PUT', body: { values: { 'home.hero_work_ids': ids } },
+        });
+        toastOk(`Hero 名單已更新（${ids.length} 件），60 秒內對外網站重 build`);
     } catch (e) { toastErr(e.message); }
 };

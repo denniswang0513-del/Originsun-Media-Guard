@@ -117,6 +117,19 @@ export async function fetchFeatured(limit = 6): Promise<IPublicProject[]> {
 }
 
 
+export async function fetchHero(limit = 8): Promise<IPublicProject[]> {
+    // 首頁最上方 Hero 輪播：admin 在「首頁設定」挑選 + 排序（/hero）。
+    // /hero 不可用或回空 → fallback 精選前 6，讓首頁永不空、且舊 build（/hero 尚未部署）也不炸。
+    try {
+        const data = await _get<{ items: IPublicProject[] }>(`/api/website/hero?limit=${limit}`);
+        if (data.items && data.items.length > 0) return data.items;
+    } catch (e) {
+        console.warn(`[crm-client] fetchHero 取用 featured fallback:`, (e as Error).message);
+    }
+    return fetchFeatured(6);
+}
+
+
 /**
  * 對 SSG build 期間多頁共用的 list endpoint memoize：N 頁需要 = 1 次 HTTP。
  * 空陣列不 cache（API 短暫離線後重試能拿到真資料）。
