@@ -1,5 +1,5 @@
 {
-  "version": "1.10.197",
+  "version": "1.10.198",
   "build_date": "2026-07-04",
-  "notes": "fix(admin): 官網管理左側導覽過長可捲動 (overflow-y:auto + 細捲軸)"
+  "notes": "feat(website): 作品集列表排序改為 精選→年份新→發布日新 (+sort_order tiebreaker)"
 }

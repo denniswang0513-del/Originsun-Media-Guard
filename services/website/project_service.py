@@ -286,9 +286,13 @@ async def list_public_projects(
         select(func.count()).select_from(base.subquery())
     )).scalar() or 0
 
+    # 排序原則（依序）：1 精選作品先 → 2 年份新→舊 → 3 發布日新→舊。
+    # public_sort_order 當最後平手 tiebreaker（保留手動微調、且排序穩定）。
     stmt = base.order_by(
-        CrmProject.public_sort_order.desc().nullslast(),
+        CrmProject.public_featured.desc().nullslast(),
+        CrmProject.public_year.desc().nullslast(),
         CrmProject.public_published_at.desc().nullslast(),
+        CrmProject.public_sort_order.desc().nullslast(),
     ).offset((page - 1) * limit).limit(limit)
 
     projects = list((await session.execute(stmt)).scalars())
