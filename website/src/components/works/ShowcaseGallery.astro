@@ -1,0 +1,140 @@
+---
+/**
+ * ShowcaseGallery.astro — 成果展示：依張數自適應版型 + 燈箱
+ *
+ * 1–6 張：各有一個講究版型（1 滿版 / 2 並排 / 3 一大兩小 / 4 大圖+3縮圖(參考圖) /
+ *         5 一大+2×2 / 6 六宮格）。
+ * 7 張以上：chunk() 切成 1–6 張的基本版型堆疊（每塊 3–6 張、不留落單 1–2 張，
+ *         開頭固定用「4＝大圖+3」帶場）。各塊 4px 無縫接續。
+ * 點任一張 → 開通用 <Lightbox />（整組串成連續相簿）。
+ * 版型全前端算，後端不需改（吃 CrmProjectShowcase.gallery = [{url, caption}]）。
+ */
+import SmartImage from "../ui/SmartImage.astro";
+import Lightbox from "../ui/Lightbox.astro";
+import type { IGalleryItem } from "../../types/project";
+
+interface Props {
+    images: IGalleryItem[];
+    title?: string;
+}
+const { images, title = "" } = Astro.props;
+
+// 7 張以上切塊：每塊 3–6 張，剩餘永遠是 0 或 ≥3（不留落單 1–2 張）。
+function chunk(n: number): number[] {
+    if (n <= 6) return [n];
+    const out: number[] = [];
+    const cyc = [4, 6, 5];
+    let k = 0;
+    while (n > 6) {
+        let b = cyc[k % cyc.length];
+        if (n - b < 3) b = Math.min(n - 3, 6);
+        out.push(b);
+        n -= b;
+        k++;
+    }
+    out.push(n);
+    return out;
+}
+
+const imgs = (images || []).filter(g => g && g.url);
+let cursor = 0;
+const blocks = chunk(imgs.length).map(sz => {
+    const slice = imgs.slice(cursor, cursor + sz);
+    cursor += sz;
+    return slice;
+});
+---
+
+{imgs.length > 0 && (
+    <Fragment>
+        <div class="osun-showcase" data-osun-lightbox>
+            <div class="osun-blocks">
+                {blocks.map(block => (
+                    <div class="osun-mosaic" data-n={block.length}>
+                        {block.map(g => (
+                            <button
+                                type="button"
+                                class="osun-cell"
+                                data-full={g.url}
+                                data-caption={g.caption || ""}
+                                aria-label={`放大檢視${g.caption ? "：" + g.caption : ""}`}
+                            >
+                                <SmartImage
+                                    src={g.url}
+                                    alt={g.caption || title}
+                                    width={900}
+                                    height={600}
+                                    widths={[400, 800, 1200]}
+                                    sizes="(max-width:640px) 50vw, 33vw"
+                                    loading="lazy"
+                                    class="osun-img"
+                                />
+                                {g.caption && <span class="osun-cap">{g.caption}</span>}
+                                <span class="osun-zoom" aria-hidden="true">⤢</span>
+                            </button>
+                        ))}
+                    </div>
+                ))}
+            </div>
+        </div>
+        <Lightbox />
+    </Fragment>
+)}
+
+<style is:global>
+    .osun-blocks{display:flex;flex-direction:column;gap:4px}
+    .osun-mosaic{
+        display:grid;gap:4px;height:clamp(300px,44vw,540px);
+        grid-template-columns:repeat(3,1fr);grid-template-rows:1fr;
+        grid-auto-rows:1fr;grid-auto-flow:row dense;
+    }
+    .osun-mosaic[data-n="1"]{grid-template-columns:1fr;grid-template-rows:1fr;height:clamp(260px,40vw,500px)}
+    .osun-mosaic[data-n="2"]{grid-template-columns:1fr 1fr;grid-template-rows:1fr}
+    .osun-mosaic[data-n="3"]{grid-template-columns:1.62fr 1fr;grid-template-rows:1fr 1fr}
+    .osun-mosaic[data-n="3"] .osun-cell:first-child{grid-row:1 / span 2}
+    .osun-mosaic[data-n="4"]{grid-template-columns:repeat(3,1fr);grid-template-rows:1.7fr 1fr}
+    .osun-mosaic[data-n="4"] .osun-cell:first-child{grid-column:1 / -1}
+    .osun-mosaic[data-n="5"]{grid-template-columns:1.7fr 1fr 1fr;grid-template-rows:1fr 1fr}
+    .osun-mosaic[data-n="5"] .osun-cell:first-child{grid-column:1;grid-row:1 / span 2}
+    .osun-mosaic[data-n="6"]{grid-template-columns:repeat(3,1fr);grid-template-rows:1fr 1fr}
+
+    .osun-cell{
+        position:relative;overflow:hidden;border-radius:2px;cursor:pointer;
+        padding:0;border:0;margin:0;background:#efece8;min-height:0;min-width:0;display:block;
+    }
+    .osun-img{
+        position:absolute;inset:0;width:100%;height:100%;object-fit:cover;display:block;
+        transition:transform .6s cubic-bezier(.2,.7,.2,1);
+    }
+    .osun-cell:hover .osun-img{transform:scale(1.045)}
+    .osun-cell:focus-visible{outline:2.5px solid #c9372c;outline-offset:2px}
+    .osun-cap{
+        position:absolute;left:10px;right:34px;bottom:9px;z-index:2;color:#fff;font-size:12px;
+        letter-spacing:.02em;text-shadow:0 1px 8px rgba(0,0,0,.65);
+        opacity:0;transform:translateY(6px);transition:opacity .25s,transform .25s;
+        pointer-events:none;
+    }
+    .osun-cell:hover .osun-cap,.osun-cell:focus-visible .osun-cap{opacity:1;transform:none}
+    .osun-zoom{
+        position:absolute;right:9px;bottom:9px;z-index:2;width:26px;height:26px;border-radius:50%;
+        display:grid;place-items:center;color:#fff;background:rgba(0,0,0,.35);font-size:13px;
+        opacity:0;transform:scale(.8);transition:opacity .25s,transform .25s;pointer-events:none;
+        -webkit-backdrop-filter:blur(2px);backdrop-filter:blur(2px);
+    }
+    .osun-cell:hover .osun-zoom,.osun-cell:focus-visible .osun-zoom{opacity:1;transform:none}
+
+    @media(max-width:640px){
+        .osun-mosaic{height:auto;grid-auto-rows:44vw;grid-template-rows:none}
+        .osun-mosaic[data-n="1"]{grid-auto-rows:58vw}
+        .osun-mosaic[data-n="2"],
+        .osun-mosaic[data-n="3"],
+        .osun-mosaic[data-n="4"],
+        .osun-mosaic[data-n="5"],
+        .osun-mosaic[data-n="6"]{grid-template-columns:1fr 1fr}
+        .osun-mosaic .osun-cell:first-child{grid-column:1 / -1 !important;grid-row:auto !important}
+    }
+    @media(prefers-reduced-motion:reduce){
+        .osun-img{transition:none}
+        .osun-cell:hover .osun-img{transform:none}
+    }
+</style>
