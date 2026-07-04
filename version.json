@@ -1,5 +1,5 @@
 {
-  "version": "1.10.194",
+  "version": "1.10.196",
   "build_date": "2026-07-04",
-  "notes": "feat(website): 作品精選圖 + 首頁輪播取圖鏈（精選圖→成果展示第一張→YouTube）"
+  "notes": "refactor(website): /simplify 首頁輪播取圖鏈收斂為後端 carousel_image 單一欄位 + 精選圖上傳清舊孤兒檔 + featured 查詢略過已設精選圖者"
 }

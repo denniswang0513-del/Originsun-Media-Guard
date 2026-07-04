@@ -4341,6 +4341,7 @@ async def get_project_showcase(project_id: str, request: Request):
 _SHOWCASE_UPDATABLE_FIELDS = (
     "description", "video_url", "credits", "credits_mode", "credits_text",
     "process_mode", "process_items", "slug",
+    "gallery",  # 成品展示圖 — 刪除/排序/改 caption 走 PUT 送整個 array（上傳有專用 endpoint）
     "published",  # showcase-edit toggle 公開 — _sync 會鏡射到 project.public
 )
 
@@ -4897,6 +4898,15 @@ async def upload_showcase_edit_featured_image(token: str, file: UploadFile = Fil
         project = await session.get(CrmProject, project_id)
         if not project:
             raise HTTPException(status_code=404, detail="找不到專案")
+        # 單值欄位（覆寫語意）— 刪掉舊精選圖檔，免得 showcase 目錄堆孤兒 webp（比照封面上傳）
+        old = project.public_featured_image or ""
+        if old and old != url:
+            old_path = os.path.join(sdir, os.path.basename(old))
+            if os.path.isfile(old_path):
+                try:
+                    os.remove(old_path)
+                except OSError:
+                    pass
         project.public_featured_image = url
         await session.commit()
     # 對外網站首頁輪播讀 public_featured_image → 標 dirty 觸發 rebuild（debounce 60s）

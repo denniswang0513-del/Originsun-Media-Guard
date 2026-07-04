@@ -168,6 +168,9 @@ async def _auto_rebuild_after_delay() -> None:
 # ── NAS 部署目標（hardcode 即可，未來要動的機率低；要改放 settings.json 也行）──
 _NAS_HOST = "admin@192.168.1.132"
 _NAS_DIST_DIR = "/share/CACHEDEV1_DATA/Container/AI_Workspace/Originsun_Web/Website/dist"
+# uploads/ 是 dist/ 的 sibling（docker-compose 掛 ../uploads:/app/uploads），
+# NAS website-api serve /uploads → 對外 nginx `location /uploads/` 反代它。
+_NAS_UPLOADS_DIR = "/share/CACHEDEV1_DATA/Container/AI_Workspace/Originsun_Web/Website/uploads"
 _SSH_KEY_PATH = str(Path(os.environ.get("USERPROFILE", os.path.expanduser("~"))) / ".ssh" / "id_originsun_nas")
 
 
@@ -369,6 +372,33 @@ async def _push_dist_to_nas(dist_dir: Path) -> tuple[int, str]:
     return push_rc, f"=== ssh-clean ===\n{cleanup_tail}\n=== scp ===\n{push_tail}"
 
 
+async def _push_uploads_to_nas(uploads_dir: Path) -> tuple[int, str]:
+    """scp uploads/projects/ 到 NAS uploads/。回傳 (returncode, log_tail)。
+
+    作品 showcase/cover/featured 圖由 master api_crm 寫在 master 本地 uploads/projects/，
+    但對外 nginx `location /uploads/` 反代的是 NAS website-api 容器 volume（NAS uploads/）。
+    不同步的話，公開頁引用的 /uploads/projects/... 圖對外 404（首頁輪播精選圖、作品
+    showcase 都吃這個）。brand/team/posts 走 NAS website-api 上傳，本來就在 NAS，不在此列——
+    只推 projects/，避免用 master（可能較舊/不全）覆蓋 NAS 管理的那些目錄。
+    projects/ 還不存在（尚無作品圖）→ 視為成功 no-op。
+    """
+    projects_dir = uploads_dir / "projects"
+    if not projects_dir.exists():
+        return 0, "(no uploads/projects to sync)"
+    mk_rc, mk_tail = await _run_subprocess(
+        "ssh-mkdir",
+        "ssh", "-i", _SSH_KEY_PATH, "-o", "StrictHostKeyChecking=no",
+        _NAS_HOST, f"mkdir -p {_NAS_UPLOADS_DIR}",
+    )
+    # scp -r projects/ → NAS uploads/（合併，不刪 NAS 既有；uuid 檔名不會撞）
+    push_rc, push_tail = await _run_subprocess(
+        "scp-uploads",
+        "scp", "-i", _SSH_KEY_PATH, "-o", "StrictHostKeyChecking=no",
+        "-r", str(projects_dir), f"{_NAS_HOST}:{_NAS_UPLOADS_DIR}/",
+    )
+    return push_rc, f"=== ssh-mkdir ===\n{mk_tail}\n=== scp-uploads ===\n{push_tail}"
+
+
 async def _run_build(website_dir: Path) -> None:
     """背景執行 npm run build → scp dist/ 到 NAS。結果寫 _REBUILD_STATUS。
 
@@ -416,6 +446,18 @@ async def _run_build(website_dir: Path) -> None:
                 "error": f"build OK but NAS push failed (scp exit={push_rc})",
             })
             return
+
+        # uploads/projects/ 同步（best-effort）：作品圖在 master 本地，需推到 NAS 才對外可見。
+        # 失敗不擋 rebuild（dist 已上、YouTube 縮圖仍是 fallback），但落 warning 方便查。
+        try:
+            up_rc, up_tail = await _push_uploads_to_nas(website_dir.parent / "uploads")
+            logger.info("[rebuild] uploads sync exit=%d, tail=%s", up_rc, up_tail[-200:] if up_tail else "(empty)")
+            merged_tail += f"\n=== uploads sync (rc={up_rc}) ===\n{up_tail}"
+            if up_rc != 0:
+                logger.warning("[rebuild] uploads/projects sync failed (rc=%d) — 作品圖可能對外 404", up_rc)
+        except Exception as _e_up:
+            logger.warning("[rebuild] uploads sync raised: %s", _e_up)
+            merged_tail += f"\n=== uploads sync EXCEPTION ===\n{_e_up}"
 
         # 全程成功 → 持久化（DB 一行 UPDATE atomic）+ 重置 pending counter
         await _save_meta(last_success_at=time.time(), pending_count=0)

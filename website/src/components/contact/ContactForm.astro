@@ -5,7 +5,7 @@
  * 策略：純 static HTML + 一個 inline <script> 處理 submit（不用 React / 框架）。
  * Turnstile widget 用 CF script 載入；若 site_key 空（dev）則用 dummy token。
  */
-import { TURNSTILE_SITE_KEY, WEBSITE_API_BASE } from "../../lib/config";
+import { TURNSTILE_SITE_KEY, WEBSITE_API_BASE, IS_DEV } from "../../lib/config";
 import type { IWebsiteMeta, IFormOption } from "../../types/meta";
 import Tr from "../ui/Tr.astro";
 
@@ -13,6 +13,13 @@ interface Props { meta: IWebsiteMeta }
 const { meta } = Astro.props;
 
 const hasTurnstile = !!TURNSTILE_SITE_KEY;
+
+// client-side runtime fetch base（送出時在使用者瀏覽器跑，不是 build 端）：
+// - dev：用 WEBSITE_API_BASE（localhost:8001，dev 使用者的瀏覽器＝伺服器，可達）。
+// - prod：build-time WEBSITE_API_BASE 是 loopback（localhost:8000＝遠端使用者自己的機器，
+//   不可達 → "Failed to fetch"）。改用正式網域 origin：www 頁面＝同源；
+//   apex 頁面＝跨源但 CORS 已放行 apex origin。空 fallback＝相對路徑（同源）。
+const contactApiBase = IS_DEV ? WEBSITE_API_BASE : (Astro.site ? Astro.site.origin : "");
 
 // ── admin 可編輯的表單欄位標籤（copy.contact.form_*）；未設用硬寫 fallback ──
 const cp = meta.copy?.contact ?? {};
@@ -48,7 +55,7 @@ const budgetRanges: IFormOption[] =
 )}
 
 <form id="contact-form"
-      data-api-base={WEBSITE_API_BASE}
+      data-api-base={contactApiBase}
       data-has-turnstile={hasTurnstile ? "1" : "0"}
       class="space-y-5 max-w-xl mx-auto">
 

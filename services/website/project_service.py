@@ -231,9 +231,10 @@ def _to_public_dict(
         "thumbnail_url": _youtube_thumbnail(p.public_youtube_id),
         # OG image fallback chain：work cover > YouTube thumb > BaseLayout meta.seo_og_image
         "cover_url": p.public_cover_url or _youtube_thumbnail(p.public_youtube_id),
-        # 首頁輪播取圖：精選圖 → 成果展示第一張 → YouTube 縮圖（見 HomeSlideshow）
-        "featured_image": p.public_featured_image or None,
-        "first_showcase_image": showcase_first or None,
+        # 首頁輪播取圖：精選圖 → 成果展示第一張（→ 前端再接 YouTube 縮圖，見 HomeSlideshow）。
+        # 對齊上面 cover_url 的「後端把可解析的都收斂成單一欄位」做法。showcase_first 只有
+        # featured 清單 caller 會帶，其他 caller 為 None（此欄本就是輪播專用）。
+        "carousel_image": p.public_featured_image or showcase_first or None,
         "featured": bool(p.public_featured),
         "noindex": bool(p.public_noindex),
         # SEO 301 來源舊 URL — Astro JSON-LD sameAs / markdown 「曾用 URL」用
@@ -368,7 +369,10 @@ async def list_featured_projects(session: AsyncSession, limit: int = 6) -> list[
     pids = [p.id for p in featured]
     cat_map = await _categories_for_projects(session, pids)
     client_map = await _clients_for_projects(session, pids)
-    sc_first_map = await _showcase_first_for_projects(session, pids)
+    # 成果展示第一張只是「沒設精選圖」時的 fallback → 只對缺精選圖的作品查，其餘免撈
+    sc_first_map = await _showcase_first_for_projects(
+        session, [p.id for p in featured if not p.public_featured_image]
+    )
     return [
         _to_public_dict(p, cat_map.get(p.id), client_map.get(p.id), sc_first_map.get(p.id))
         for p in featured

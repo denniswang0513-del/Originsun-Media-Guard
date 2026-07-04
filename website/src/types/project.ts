@@ -17,8 +17,7 @@ export interface IPublicProject {
     tags: string[];                // 使用場景 slug（kind=tag）
     thumbnail_url?: string | null; // YouTube maxresdefault
     cover_url?: string | null;     // OG image — sc.cover_url 鏡像，作品集卡片用
-    featured_image?: string | null;        // 首頁輪播精選圖（admin 直接設定）
-    first_showcase_image?: string | null;  // 成果展示第一張（輪播 fallback）
+    carousel_image?: string | null;        // 首頁輪播取圖（精選圖→成果展示第一張；空則前端接 YouTube）
     featured: boolean;
     noindex?: boolean;             // per-work 強制 noindex
     // SEO 301 來源舊 URL — JSON-LD sameAs / markdown 鏡像「曾用 URL」用
