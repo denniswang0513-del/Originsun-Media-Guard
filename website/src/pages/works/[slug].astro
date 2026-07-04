@@ -90,8 +90,8 @@ const nextThumb = nextWork ? resolveThumbnail(nextWork.youtube_id, nextWork.slug
             ogImage={work.cover_url || work.thumbnail_url || undefined}
             canonical={work.canonical_url || undefined}>
 
-    <!-- 單欄上下流：標題 → 影片 → 文字 → credits（→ tags 探索小尾巴） -->
-    <section class="bg-white pt-24 sm:pt-28 pb-16 sm:pb-24">
+    <!-- 單欄上下流：標題 → 影片 → 文字 → credits（tags 已移到相關作品之上） -->
+    <section class="bg-white pt-24 sm:pt-28 pb-8">
 
         <!-- 1. 標題區（窄欄置中） -->
         <div class="max-w-3xl mx-auto px-4 sm:px-6 lg:px-10 mb-10 sm:mb-14 text-center">
@@ -190,7 +190,7 @@ const nextThumb = nextWork ? resolveThumbnail(nextWork.youtube_id, nextWork.slug
 
     <!-- Gallery 成果展示：依張數自適應版型 + 燈箱 -->
     {work.gallery && work.gallery.length > 0 && (
-        <section class="bg-white pt-4 pb-12">
+        <section class="bg-white pt-4 pb-16">
             <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-10">
                 <div class="text-xs tracking-[0.4em] uppercase text-neutral-500 mb-6">Gallery</div>
                 <ShowcaseGallery images={work.gallery} title={work.title} />
