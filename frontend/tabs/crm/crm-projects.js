@@ -325,14 +325,14 @@ export async function initCrmProjectsTab() {
 
     setupResizeHandle('proj-resize-handle', 'proj-detail-panel');
 
-    // ── RBAC: 只有管理員或擁有 website_admin 模組者能看到「結案製作」子分頁 ──
+    // ── RBAC: 只有管理員或擁有 website_admin 模組者能看到「結案作業」子分頁 ──
     // 權限旗標由 auth-state.js 掛在 window（_accessLevel / _modules）。後端仍會再閘一次。
     const _canManageWebsite = (window._accessLevel >= 3) ||
         (Array.isArray(window._modules) && window._modules.includes('website_admin'));
     const _closingTabBtn = document.getElementById('proj-sub-tab-closing');
     if (_closingTabBtn && _canManageWebsite) _closingTabBtn.style.display = '';
 
-    // ── Sub-tab switching (專案 / 報價總覽 / 結案製作) ──
+    // ── Sub-tab switching (專案 / 報價總覽 / 結案作業) ──
     document.querySelectorAll('#proj-sub-tabs .crm-sub-tab').forEach(btn => {
         btn.addEventListener('click', () => {
             document.querySelectorAll('#proj-sub-tabs .crm-sub-tab').forEach(b => b.classList.remove('active'));
@@ -382,7 +382,7 @@ async function _initQuotesOverview() {
     }
 }
 
-// ── 結案製作（官網製作收件匣）lazy loader ─────────────────────
+// ── 結案作業（官網製作收件匣）lazy loader ─────────────────────
 // 與 _initQuotesOverview 同模式，但 closing 自繪整個 DOM，故 loader 只負責
 // 動態 import 模組 + 呼叫 init(container)，用 flag 保證只初始化一次。
 let _closingLoaded = false;
@@ -395,7 +395,7 @@ async function _initClosingProduction() {
         await mod.init(container);
         _closingLoaded = true;
     } catch (e) {
-        container.innerHTML = `<div class="crm-empty" style="padding:24px;color:#fca5a5;">結案製作載入失敗: ${e.message}</div>`;
-        console.error('結案製作載入失敗:', e);
+        container.innerHTML = `<div class="crm-empty" style="padding:24px;color:#fca5a5;">結案作業載入失敗: ${e.message}</div>`;
+        console.error('結案作業載入失敗:', e);
     }
 }

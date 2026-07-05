@@ -1,5 +1,5 @@
 {
-  "version": "1.10.203",
+  "version": "1.10.204",
   "build_date": "2026-07-05",
-  "notes": "fix(admin): 網站設定 Turnstile 欄位加提示(site_key/secret 區分)，避免貼錯導致聯絡表單驗證失敗"
+  "notes": "feat(crm): 結案作業狀態流 — 新增「結案作業」狀態；收件匣改收此狀態(非全部已結案，解 215 全列)；→結案作業設待製作"
 }

@@ -35,6 +35,7 @@ function _buildEditFields() {
         {name:'status', label:'狀態', type:'select', options:[
             {value:'洽談中',label:'洽談中'},{value:'報價中',label:'報價中'},
             {value:'進行中',label:'進行中'},{value:'已結案',label:'已結案'},
+            {value:'結案作業',label:'結案作業（送官網製作）'},
         ]},
         {name:'project_type', label:'類型', type:'select', get options() {
             return [{value:'',label:'—'}, ...getProjectTypes().map(t => ({value:t,label:t}))];

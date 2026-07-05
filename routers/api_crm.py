@@ -526,7 +526,8 @@ _WEBSITE_PROD_STAGES = ("待製作", "製作中", "不上官網")
 
 @router.get("/projects/closing")
 async def list_closing_projects(request: Request):
-    """結案製作看板 — 列出所有 status='已結案' 專案 + 官網上線/製作狀態 + 完整度。
+    """結案作業看板 — 列出所有 status='結案作業' 專案 + 官網上線/製作狀態 + 完整度。
+    （AM 把專案從「已結案」推進到「結案作業」才進此收件匣，避免歷史已結案全列。）
 
     stage 推導：public=True → '已上線'；否則看 website_prod_stage（製作中/不上官網），
     其餘（含 None）→ '待製作'。completeness 四項各是 bool（是否已備妥該素材）。
@@ -540,7 +541,7 @@ async def list_closing_projects(request: Request):
             select(CrmProject, Client.short_name.label("client_short_name"),
                    Client.full_name.label("client_full_name"))
             .outerjoin(Client, Client.id == CrmProject.client_id)
-            .where(CrmProject.status == "已結案")
+            .where(CrmProject.status == "結案作業")
             .order_by(CrmProject.completion_date.desc().nullslast())
         )).all()
 
@@ -654,8 +655,8 @@ async def update_project(project_id: str, req: CrmProjectPatchPayload, request: 
                 setattr(project, k, _parse_shoot_date(v))
             else:
                 setattr(project, k, v)
-        # 結案製作：專案轉為「已結案」且尚未指定官網製作階段 → 預設「待製作」
-        if project.status == "已結案" and project.website_prod_stage is None:
+        # 結案作業：專案轉為「結案作業」且尚未指定官網製作階段 → 預設「待製作」（進官網製作收件匣）
+        if project.status == "結案作業" and project.website_prod_stage is None:
             project.website_prod_stage = "待製作"
         project.updated_at = _now()
         await session.commit()
@@ -691,7 +692,7 @@ async def update_project_status(project_id: str, request: Request):
 
     body = await request.json()
     new_status = body.get("status", "")
-    if new_status not in ("洽談中", "報價中", "進行中", "已結案"):
+    if new_status not in ("洽談中", "報價中", "進行中", "已結案", "結案作業"):
         raise HTTPException(status_code=400, detail="無效的狀態值")
 
     contract_amount = body.get("contract_amount")
@@ -702,8 +703,8 @@ async def update_project_status(project_id: str, request: Request):
         if not project:
             raise HTTPException(status_code=404, detail="找不到此專案")
         project.status = new_status
-        # 結案製作：轉為「已結案」且尚未指定官網製作階段 → 預設「待製作」
-        if new_status == "已結案" and project.website_prod_stage is None:
+        # 結案作業：轉為「結案作業」且尚未指定官網製作階段 → 預設「待製作」（進官網製作收件匣）
+        if new_status == "結案作業" and project.website_prod_stage is None:
             project.website_prod_stage = "待製作"
         if contract_amount is not None:
             project.contract_amount = int(contract_amount)

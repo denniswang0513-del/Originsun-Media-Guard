@@ -1,7 +1,8 @@
 /**
- * crm-projects-closing.js — 結案製作（官網製作收件匣）
+ * crm-projects-closing.js — 結案作業（官網製作收件匣）
  *
- * 「專案管理」下的第 3 個子分頁。列出所有已結案專案，讓 PM 依「官網階段」
+ * 「專案管理」下的第 3 個子分頁。列出狀態＝「結案作業」的專案（AM 把已結案專案
+ * 推進到「結案作業」才進來），讓 PM 依「官網階段」
  * 逐一把作品做上官網：編輯官網內容（嵌 showcase-edit iframe overlay）、
  * 發佈/下架、切換階段、預覽對外頁。
  *
@@ -102,7 +103,7 @@ function _render() {
     });
 
     if (rows.length === 0) {
-        body.innerHTML = `<div class="crm-empty">${_items.length === 0 ? '目前沒有已結案專案' : '沒有符合條件的專案'}</div>`;
+        body.innerHTML = `<div class="crm-empty">${_items.length === 0 ? '目前沒有「結案作業」中的專案。把已結案專案的狀態改成「結案作業（送官網製作）」即可進來。' : '沒有符合條件的專案'}</div>`;
         return;
     }
 

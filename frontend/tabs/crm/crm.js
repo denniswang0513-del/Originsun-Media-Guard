@@ -154,7 +154,7 @@ async function _loadClientPerformance(clientId) {
             const s = p.status || '其他';
             statusCount[s] = (statusCount[s] || 0) + 1;
         }
-        const statusColors = { '洽談中': '#3b82f6', '進行中': '#f59e0b', '報價中': '#8b5cf6', '已結案': '#22c55e', '已取消': '#6b7280' };
+        const statusColors = { '洽談中': '#3b82f6', '進行中': '#f59e0b', '報價中': '#8b5cf6', '已結案': '#22c55e', '結案作業': '#14b8a6', '已取消': '#6b7280' };
 
         // Yearly revenue (only active projects)
         const yearRevenue = {};
@@ -227,7 +227,7 @@ async function _loadClientProjects(clientId) {
             container.innerHTML = '<div class="crm-empty">尚無專案紀錄</div>';
             return;
         }
-        const statusColors = { '洽談中': '#3b82f6', '執行中': '#f59e0b', '已完成': '#22c55e', '已取消': '#6b7280', '進行中': '#f59e0b', '報價中': '#8b5cf6', '已結案': '#22c55e' };
+        const statusColors = { '洽談中': '#3b82f6', '執行中': '#f59e0b', '已完成': '#22c55e', '已取消': '#6b7280', '進行中': '#f59e0b', '報價中': '#8b5cf6', '已結案': '#22c55e', '結案作業': '#14b8a6' };
         let lastYear = '';
         container.innerHTML = projects.map(p => {
             const color = statusColors[p.status] || '#9ca3af';
@@ -270,7 +270,7 @@ window._crmShowProjectDetail = async (projectId) => {
         const isEmpty = !value;
         return `<div class="crm-detail-prop"><div class="crm-prop-label">${label}</div><div class="crm-prop-value${isEmpty ? ' empty' : ''}">${isEmpty ? '—' : _esc(String(value))}</div></div>`;
     };
-    const statusColors = { '洽談中': '#3b82f6', '進行中': '#f59e0b', '報價中': '#8b5cf6', '已結案': '#22c55e', '已取消': '#6b7280' };
+    const statusColors = { '洽談中': '#3b82f6', '進行中': '#f59e0b', '報價中': '#8b5cf6', '已結案': '#22c55e', '結案作業': '#14b8a6', '已取消': '#6b7280' };
 
     try {
         const [p, fin, staffData, quoteData] = await Promise.all([
