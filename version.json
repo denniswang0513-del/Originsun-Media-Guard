@@ -1,5 +1,5 @@
 {
-  "version": "1.10.202",
+  "version": "1.10.203",
   "build_date": "2026-07-05",
-  "notes": "feat(crm): 結案製作 tab — 已結案專案官網上架收件匣(派工→credits帶入/階段/發佈+rebuild) + website_admin 分權"
+  "notes": "fix(admin): 網站設定 Turnstile 欄位加提示(site_key/secret 區分)，避免貼錯導致聯絡表單驗證失敗"
 }

@@ -70,7 +70,11 @@ const _GROUPS = [
     { prefix: 'analytics', label: '📊 分析追蹤', color: '#f59e0b' },
     { prefix: 'notify', label: '🔔 通知設定', color: '#dc2626' },
     { prefix: 'turnstile', label: '🛡️ Turnstile 反機器人', color: '#ec4899',
-      knownKeys: ['site_key', 'secret'] },
+      knownKeys: ['site_key', 'secret'],
+      hints: {
+        site_key: '網站金鑰 Site Key（公開，前端 widget 用，約 24 字元）',
+        secret: '密鑰 Secret Key（後端驗證用，約 35 字元、0x4AAAAAAA 開頭；⚠️ 勿貼成 Site Key，否則聯絡表單會「Turnstile 驗證失敗」）',
+      } },
     // knownKeys: 即使 DB 沒這個 key 也渲染空欄讓使用者填（首次設定 Notion 用）
     { prefix: 'notion', label: '📝 Notion 部落格', color: '#06b6d4',
       knownKeys: ['token', 'database_id'] },
@@ -128,13 +132,13 @@ function _renderGroup(g, keys) {
         <div class="card" style="border-left:3px solid ${g.color};">
             <h3 style="color:#fff;margin:0 0 10px 0;font-size:14px;">${g.label}</h3>
             <div style="display:grid;grid-template-columns:1fr;gap:8px;">
-                ${keys.map(k => _renderField(k, _settings[k])).join('')}
+                ${keys.map(k => _renderField(k, _settings[k], (g.hints || {})[k.includes('.') ? k.split('.').slice(1).join('.') : k])).join('')}
             </div>
         </div>
     `;
 }
 
-function _renderField(key, val) {
+function _renderField(key, val, hint) {
     const shortKey = key.includes('.') ? key.split('.').slice(1).join('.') : key;
     const isMissing = val === undefined || val === null;
     const inputVal = isMissing ? '' : (typeof val === 'string' ? val : JSON.stringify(val));
@@ -148,6 +152,7 @@ function _renderField(key, val) {
         <div>
             <label style="color:#888;font-size:11px;display:block;margin-bottom:3px;" title="${esc(key)}">${esc(shortKey)}${isSecret ? ' 🔒' : ''}${isMissing ? ' <span style="color:#666;">（新）</span>' : ''}</label>
             ${control}
+            ${hint ? `<div style="color:#666;font-size:10px;margin-top:3px;line-height:1.4;">${esc(hint)}</div>` : ''}
         </div>
     `;
 }
