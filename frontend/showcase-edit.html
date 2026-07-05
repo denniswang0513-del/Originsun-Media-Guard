@@ -529,6 +529,8 @@ function _render() {
                     <option value="">📦 套用模板 ▾</option>
                     ${tplOptionsHtml}
                 </select>` : ''}
+                <button id="btn-carry-in-credits" type="button" class="btn btn-sm" style="padding:6px 10px;"
+                    title="從此專案的派工人員自動建立 credits 區塊">🔗 從派工帶入</button>
             </div>` : ''}
             <div id="credit-blocks-container">${blocks.map((b, i) => _renderBlock(b, i)).join('')}</div>
             ${blocks.length === 0 ? '<p style="color:var(--text3);font-size:13px;">尚無演職員資料</p>' : ''}
@@ -936,6 +938,28 @@ function _bindEvents() {
         }
         if (!added) { _toast('模板職位皆已存在'); return; }
         await _saveBlocks(blocks);
+    });
+
+    // 從派工帶入：把此專案的派工人員（crm_project_staff）灌成 credits 區塊。
+    // window.confirm：確定＝附加（保留現有 credits）；取消＝取代（清空後重建）。
+    document.getElementById('btn-carry-in-credits')?.addEventListener('click', async () => {
+        const append = confirm('從派工帶入 credits\n\n確定＝附加到現有 credits\n取消＝取代（清空現有後重建）');
+        const mode = append ? 'append' : 'replace';
+        const btn = document.getElementById('btn-carry-in-credits');
+        if (btn) { btn.disabled = true; btn.textContent = '帶入中…'; }
+        try {
+            const res = await fetch(API + '/carry_in', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ mode }),
+            });
+            if (!res.ok) { const e = await res.json().catch(() => ({})); throw new Error(e.detail || '帶入失敗'); }
+            await _reload();
+            _toast('已從派工帶入 credits');
+        } catch (e) {
+            alert(e.message);
+            if (btn) { btn.disabled = false; btn.textContent = '🔗 從派工帶入'; }
+        }
     });
 
     // 刪除整個 block

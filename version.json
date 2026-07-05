@@ -1,5 +1,5 @@
 {
-  "version": "1.10.201",
-  "build_date": "2026-07-04",
-  "notes": "feat(website): 首頁精選作品網格不限數量 (/featured-all + fetchAllFeatured)"
+  "version": "1.10.202",
+  "build_date": "2026-07-05",
+  "notes": "feat(crm): 結案製作 tab — 已結案專案官網上架收件匣(派工→credits帶入/階段/發佈+rebuild) + website_admin 分權"
 }

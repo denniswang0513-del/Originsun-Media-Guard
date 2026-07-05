@@ -507,6 +507,8 @@ async def _on_startup():
                 from sqlalchemy import text as _tex
                 async with _fex() as _sex:
                     for col_sql in [
+                        # 結案製作看板：已結案專案的官網製作階段（待製作/製作中/不上官網）
+                        "ALTER TABLE crm_projects ADD COLUMN IF NOT EXISTS website_prod_stage VARCHAR(16)",
                         "ALTER TABLE crm_project_expenses ADD COLUMN IF NOT EXISTS sub_item VARCHAR(128)",
                         "ALTER TABLE crm_project_expenses ADD COLUMN IF NOT EXISTS payee VARCHAR(64)",
                         "ALTER TABLE crm_project_expenses ADD COLUMN IF NOT EXISTS advance_id VARCHAR(32)",

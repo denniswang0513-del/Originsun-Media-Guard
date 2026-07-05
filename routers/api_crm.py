@@ -60,6 +60,20 @@ def _check_auth(request: Request):
         pass
 
 
+def _check_website_auth(request: Request):
+    """官網製作授權 — 管理員 OR 擁有 website_admin 模組即可（不需全域 admin）。
+
+    給「結案製作」看板 + showcase 編輯端點用：非管理員的官網製作人員只要帳號
+    modules 含 'website_admin' 就能操作，跟官網管理 Tab 寫入守衛（website 路由）
+    一致。full admin（access_level>=3 / legacy role）永遠通過。
+    """
+    try:
+        from core.auth import check_admin_or_module
+        check_admin_or_module(request, 'website_admin')
+    except ImportError:
+        pass
+
+
 def _require_db():
     if not state.db_online:
         raise HTTPException(status_code=503, detail="資料庫目前不可用")
@@ -506,6 +520,97 @@ async def create_project(req: CrmProjectPayload, request: Request):
     return result
 
 
+# NOTE: 必須註冊在 /projects/{project_id} 之前 — 否則 "closing" 會被吃成 project_id。
+_WEBSITE_PROD_STAGES = ("待製作", "製作中", "不上官網")
+
+
+@router.get("/projects/closing")
+async def list_closing_projects(request: Request):
+    """結案製作看板 — 列出所有 status='已結案' 專案 + 官網上線/製作狀態 + 完整度。
+
+    stage 推導：public=True → '已上線'；否則看 website_prod_stage（製作中/不上官網），
+    其餘（含 None）→ '待製作'。completeness 四項各是 bool（是否已備妥該素材）。
+    """
+    _check_website_auth(request)
+    _require_db()
+    factory = await _get_factory()
+
+    async with factory() as session:
+        rows = (await session.execute(
+            select(CrmProject, Client.short_name.label("client_short_name"),
+                   Client.full_name.label("client_full_name"))
+            .outerjoin(Client, Client.id == CrmProject.client_id)
+            .where(CrmProject.status == "已結案")
+            .order_by(CrmProject.completion_date.desc().nullslast())
+        )).all()
+
+        items = []
+        for p, short_name, full_name in rows:
+            sc = await session.get(CrmProjectShowcase, p.id)
+            if p.public:
+                stage = "已上線"
+            elif p.website_prod_stage in ("製作中", "不上官網"):
+                stage = p.website_prod_stage
+            else:
+                stage = "待製作"
+            video = bool((sc and sc.video_url) or p.public_youtube_id)
+            images = bool(
+                (sc and sc.gallery and len(sc.gallery) > 0)
+                or p.public_featured_image
+                or (sc and sc.cover_url)
+            )
+            process = bool(sc and sc.process_items and len(sc.process_items) > 0)
+            credits = bool(
+                (sc and sc.credits and len(sc.credits) > 0)
+                or (p.public_credits and len(p.public_credits) > 0)
+            )
+            slug = (p.public_slug or "").strip() or (
+                str(p.public_number) if p.public_number is not None else None
+            )
+            items.append({
+                "id": p.id,
+                "name": p.name,
+                "client_name": short_name or full_name or "",
+                "completion_date": p.completion_date.isoformat() if p.completion_date else None,
+                "public": bool(p.public),
+                "showcase_published": bool(sc.published) if sc else False,
+                "stage": stage,
+                "public_featured": bool(p.public_featured),
+                "slug": slug,
+                "completeness": {
+                    "video": video,
+                    "images": images,
+                    "process": process,
+                    "credits": credits,
+                },
+            })
+
+    return {"items": items}
+
+
+@router.patch("/projects/{project_id}/website-stage")
+async def update_project_website_stage(project_id: str, request: Request):
+    """設定已結案專案的官網製作階段（待製作/製作中/不上官網）。"""
+    _check_website_auth(request)
+    _require_db()
+    factory = await _get_factory()
+
+    body = await request.json()
+    stage = (body.get("stage") or "").strip()
+    if stage not in _WEBSITE_PROD_STAGES:
+        raise HTTPException(status_code=400, detail="無效的製作階段")
+
+    async with factory() as session:
+        project = await session.get(CrmProject, project_id)
+        if not project:
+            raise HTTPException(status_code=404, detail="找不到此專案")
+        project.website_prod_stage = stage
+        project.updated_at = _now()
+        await session.commit()
+
+    return {"ok": True, "stage": stage}
+
+
 @router.get("/projects/{project_id}")
 async def get_project(project_id: str):
     _require_db()
@@ -549,6 +654,9 @@ async def update_project(project_id: str, req: CrmProjectPatchPayload, request: 
                 setattr(project, k, _parse_shoot_date(v))
             else:
                 setattr(project, k, v)
+        # 結案製作：專案轉為「已結案」且尚未指定官網製作階段 → 預設「待製作」
+        if project.status == "已結案" and project.website_prod_stage is None:
+            project.website_prod_stage = "待製作"
         project.updated_at = _now()
         await session.commit()
         await session.refresh(project)
@@ -594,6 +702,9 @@ async def update_project_status(project_id: str, request: Request):
         if not project:
             raise HTTPException(status_code=404, detail="找不到此專案")
         project.status = new_status
+        # 結案製作：轉為「已結案」且尚未指定官網製作階段 → 預設「待製作」
+        if new_status == "已結案" and project.website_prod_stage is None:
+            project.website_prod_stage = "待製作"
         if contract_amount is not None:
             project.contract_amount = int(contract_amount)
         if amount_receivable is not None:
@@ -4305,7 +4416,7 @@ async def _mint_showcase_edit_token(
 @router.get("/projects/{project_id}/showcase")
 async def get_project_showcase(project_id: str, request: Request):
     """取得或建立專案 Showcase（1:1 關聯）。"""
-    _check_auth(request)
+    _check_website_auth(request)
     _require_db()
     factory = await _get_factory()
     async with factory() as session:
@@ -4395,7 +4506,7 @@ def _apply_project_public_fields(project, payload: dict) -> None:
 @router.put("/projects/{project_id}/showcase")
 async def update_project_showcase(project_id: str, req: ShowcasePayload, request: Request):
     """更新專案 Showcase 欄位。"""
-    _check_auth(request)
+    _check_website_auth(request)
     _require_db()
     factory = await _get_factory()
     async with factory() as session:
@@ -4407,6 +4518,13 @@ async def update_project_showcase(project_id: str, req: ShowcasePayload, request
         await _sync_showcase_to_public(session, sc)
         await session.commit()
         await session.refresh(sc)
+    # 觸發對外網站 rebuild（debounce 60s）— 失敗不擋儲存
+    try:
+        from services.website import rebuild_service
+        await rebuild_service.mark_dirty()
+    except Exception as e:
+        import logging
+        logging.getLogger(__name__).warning("[showcase PUT] mark_dirty 失敗: %s", e)
     return _to_showcase_dict(sc)
 
 
@@ -4561,7 +4679,7 @@ async def delete_showcase_process(project_id: str, index: int, request: Request)
 @router.post("/projects/{project_id}/showcase/publish")
 async def toggle_showcase_publish(project_id: str, request: Request):
     """切換 Showcase 發布狀態。"""
-    _check_auth(request)
+    _check_website_auth(request)
     _require_db()
     factory = await _get_factory()
     async with factory() as session:
@@ -4575,6 +4693,13 @@ async def toggle_showcase_publish(project_id: str, request: Request):
         await _sync_showcase_to_public(session, sc)
         await session.commit()
         await session.refresh(sc)
+    # 觸發對外網站 rebuild（debounce 60s）— 失敗不擋發布
+    try:
+        from services.website import rebuild_service
+        await rebuild_service.mark_dirty()
+    except Exception as e:
+        import logging
+        logging.getLogger(__name__).warning("[showcase publish] mark_dirty 失敗: %s", e)
     return _to_showcase_dict(sc)
 
 
@@ -4608,7 +4733,7 @@ async def auto_showcase_credits(project_id: str, request: Request):
 @router.post("/projects/{project_id}/showcase/generate-edit-token")
 async def generate_showcase_edit_token(project_id: str, request: Request):
     """產生 Showcase 外部編輯永久連結 Token（永遠產新 token，為分享連結「重發」語義）。"""
-    _check_auth(request)
+    _check_website_auth(request)
     _require_db()
     factory = await _get_factory()
     async with factory() as session:
@@ -4622,73 +4747,122 @@ async def generate_showcase_edit_token(project_id: str, request: Request):
 # 編輯入口仍在 /public/showcase-edit/{token}（透過 token 授權給 PM/客戶協作）。
 
 
+async def _build_showcase_edit_data(session, sc) -> dict:
+    """組 showcase-edit「一頁全包」資料 — GET /public/showcase-edit/{token} 與
+    carry_in 共用同一個 serializer，確保回傳 shape 完全一致。呼叫者已完成 token
+    驗證並提供對應 sc（CrmProjectShowcase）。"""
+    from db.models_website import WebsiteCategory, WebsiteProjectCategory
+    proj = await session.get(CrmProject, sc.id)
+    project_name = proj.name if proj else ""
+    data = _to_showcase_dict(sc)
+    # Strip financial / internal fields
+    data.pop("edit_token", None)
+    data["project_name"] = project_name
+    # 作品基本資料 — 給 showcase-edit 編輯器一頁全包
+    if proj:
+        data["public_title"] = proj.public_title or ""
+        data["public_client"] = proj.public_client or ""
+        data["public_year"] = proj.public_year
+        data["public_featured"] = bool(proj.public_featured)
+        data["public_featured_image"] = proj.public_featured_image or ""
+        data["public_noindex"] = bool(proj.public_noindex)
+        data["public_published"] = bool(proj.public)
+        data["public_old_slugs"] = list(proj.public_old_slugs or [])
+        # 對外公開 URL — 給 showcase-edit「網站連結」直接組公開網址用
+        # site_url 從 website_settings 讀，沒設 fallback 到 production 網域
+        try:
+            from services.website import settings_service
+            _all_settings = await settings_service.get_all_settings(session)
+            _site_url = (_all_settings.get("seo.site_url") or "").strip()
+        except Exception:
+            _site_url = ""
+        data["public_site_url"] = _site_url or "https://originsun-studio.com"
+        # URL slug 解析優先序：admin 自訂 slug > public_number（1, 2, 3）> 無法產 URL
+        url_slug = (proj.public_slug or "").strip() or (
+            str(proj.public_number) if proj.public_number is not None else ""
+        )
+        data["public_url_path"] = f"/works/{url_slug}" if url_slug else ""
+
+    # 對外 categories 候選清單（含 kind）+ 此作品已勾選的 ID
+    cat_rows = (await session.execute(
+        select(WebsiteCategory)
+        .where(WebsiteCategory.visible.is_(True))
+        .order_by(WebsiteCategory.sort_order, WebsiteCategory.id)
+    )).scalars().all()
+    data["categories_available"] = [
+        {"id": c.id, "slug": c.slug, "name_zh": c.name_zh,
+         "name_en": c.name_en, "kind": c.kind or "category"}
+        for c in cat_rows
+    ]
+    sel_rows = (await session.execute(
+        select(WebsiteProjectCategory.category_id)
+        .where(WebsiteProjectCategory.project_id == sc.id)
+    )).scalars().all()
+    data["selected_category_ids"] = list(sel_rows)
+
+    # 演職員職位庫 + 模板候選清單（給 showcase-edit 編輯器用）。
+    # 委派 service 層維持單一 hydrate 真相源；list_roles 多回的 sort_order /
+    # visible / usage_count 前端忽略無妨。
+    from services.website import credit_service, seo_service
+    data["credit_roles_available"] = await credit_service.list_roles(
+        session, visible_only=True
+    )
+    data["credit_templates_available"] = await credit_service.list_templates(session)
+    # 作品級 SEO（pipeline 寫入 — PM 可在 showcase-edit 看 + 改覆寫欄位 + 觸發 AI 重生）
+    data["seo"] = await seo_service.get_project_seo(session, sc.id)
+    return data
+
+
+async def _build_credit_blocks_from_staff(session, project_id: str) -> list:
+    """從 crm_project_staff JOIN crm_staff 生 credits BLOCK 結構
+    （與 core/schemas_website.CreditBlock / TS ICreditBlock 對齊）。
+
+    以 role_in_project 分組，每個不同職務 → 一個 block；同職務多人合併進同一
+    block 的 entries。role_id 由 name_zh==role_in_project 對到 website_credit_roles，
+    對不到則 None。保持穩定順序（依派工出現順序，各職務首次出現定序）。
+    """
+    from db.models_website import WebsiteCreditRole
+    rows = (await session.execute(
+        select(CrmProjectStaff).where(CrmProjectStaff.project_id == project_id)
+    )).scalars().all()
+    role_rows = (await session.execute(select(WebsiteCreditRole))).scalars().all()
+    role_map = {r.name_zh: r for r in role_rows}
+
+    blocks: list = []
+    block_index: dict = {}  # role_key → blocks 索引（同職務合併 entries + 穩定順序）
+    for ps in rows:
+        staff = await session.get(CrmStaff, ps.staff_id)
+        if not staff:
+            continue
+        role_key = ps.role_in_project or ""
+        # CrmStaff 目前無 resume_url 欄位 — 沿用既有 auto credits 慣例：
+        # resume_visible 才給 /resume.html?id=；未來若加 resume_url 欄位自動優先。
+        resume_url = ""
+        if getattr(staff, "resume_visible", False):
+            resume_url = getattr(staff, "resume_url", None) or f"/resume.html?id={staff.id}"
+        entry = {"duty": "", "name": staff.name, "resume_url": resume_url}
+        if role_key in block_index:
+            blocks[block_index[role_key]]["entries"].append(entry)
+        else:
+            matched = role_map.get(role_key)
+            blocks.append({
+                "role_id": matched.id if matched else None,
+                "name_zh": role_key or "團隊",
+                "name_en": (matched.name_en if matched else "") or "",
+                "entries": [entry],
+            })
+            block_index[role_key] = len(blocks) - 1
+    return blocks
+
+
 @router.get("/public/showcase-edit/{token}")
 async def get_showcase_edit_data(token: str):
     """透過 Token 取得 Showcase 編輯資料（無需認證）。"""
-    from db.models_website import WebsiteCategory, WebsiteProjectCategory
     _require_db()
     factory = await _get_factory()
     async with factory() as session:
         sc = await _verify_showcase_edit_token(session, token, require_editable=False)
-        proj = await session.get(CrmProject, sc.id)
-        project_name = proj.name if proj else ""
-        data = _to_showcase_dict(sc)
-        # Strip financial / internal fields
-        data.pop("edit_token", None)
-        data["project_name"] = project_name
-        # 作品基本資料 — 給 showcase-edit 編輯器一頁全包
-        if proj:
-            data["public_title"] = proj.public_title or ""
-            data["public_client"] = proj.public_client or ""
-            data["public_year"] = proj.public_year
-            data["public_featured"] = bool(proj.public_featured)
-            data["public_featured_image"] = proj.public_featured_image or ""
-            data["public_noindex"] = bool(proj.public_noindex)
-            data["public_published"] = bool(proj.public)
-            data["public_old_slugs"] = list(proj.public_old_slugs or [])
-            # 對外公開 URL — 給 showcase-edit「網站連結」直接組公開網址用
-            # site_url 從 website_settings 讀，沒設 fallback 到 production 網域
-            try:
-                from services.website import settings_service
-                _all_settings = await settings_service.get_all_settings(session)
-                _site_url = (_all_settings.get("seo.site_url") or "").strip()
-            except Exception:
-                _site_url = ""
-            data["public_site_url"] = _site_url or "https://originsun-studio.com"
-            # URL slug 解析優先序：admin 自訂 slug > public_number（1, 2, 3）> 無法產 URL
-            url_slug = (proj.public_slug or "").strip() or (
-                str(proj.public_number) if proj.public_number is not None else ""
-            )
-            data["public_url_path"] = f"/works/{url_slug}" if url_slug else ""
-
-        # 對外 categories 候選清單（含 kind）+ 此作品已勾選的 ID
-        cat_rows = (await session.execute(
-            select(WebsiteCategory)
-            .where(WebsiteCategory.visible.is_(True))
-            .order_by(WebsiteCategory.sort_order, WebsiteCategory.id)
-        )).scalars().all()
-        data["categories_available"] = [
-            {"id": c.id, "slug": c.slug, "name_zh": c.name_zh,
-             "name_en": c.name_en, "kind": c.kind or "category"}
-            for c in cat_rows
-        ]
-        sel_rows = (await session.execute(
-            select(WebsiteProjectCategory.category_id)
-            .where(WebsiteProjectCategory.project_id == sc.id)
-        )).scalars().all()
-        data["selected_category_ids"] = list(sel_rows)
-
-        # 演職員職位庫 + 模板候選清單（給 showcase-edit 編輯器用）。
-        # 委派 service 層維持單一 hydrate 真相源；list_roles 多回的 sort_order /
-        # visible / usage_count 前端忽略無妨。
-        from services.website import credit_service, seo_service
-        data["credit_roles_available"] = await credit_service.list_roles(
-            session, visible_only=True
-        )
-        data["credit_templates_available"] = await credit_service.list_templates(session)
-        # 作品級 SEO（pipeline 寫入 — PM 可在 showcase-edit 看 + 改覆寫欄位 + 觸發 AI 重生）
-        data["seo"] = await seo_service.get_project_seo(session, sc.id)
-    return data
+        return await _build_showcase_edit_data(session, sc)
 
 
 @router.get("/public/showcase-edit/{token}/staff_search")
@@ -4814,6 +4988,56 @@ async def update_showcase_edit_data(token: str, request: Request):
         import logging
         logging.getLogger(__name__).warning("[showcase token PUT] mark_dirty 失敗: %s", e)
     return {"status": "ok"}
+
+
+@router.post("/public/showcase-edit/{token}/carry_in")
+async def carry_in_showcase_credits(token: str, request: Request):
+    """一鍵帶入 — 從專案派工生 credits BLOCK 結構，並補齊作品 meta（標題/客戶/年份）。
+
+    body: {mode: 'append'|'replace'}（預設 'replace'）。
+      - 'replace'：整份覆寫 sc.credits 為新 blocks。
+      - 'append'：接在既有 sc.credits 後面。
+    另補作品基本資料（僅在原本為空時）：public_title←name、public_client←客戶代稱、
+    public_year←completion_date.year。commit 後鏡射 public_* + 觸發 rebuild。
+
+    回傳 shape 與 GET /public/showcase-edit/{token} 完全相同（前端直接刷新畫面）。
+    """
+    _require_db()
+    factory = await _get_factory()
+    body = await request.json()
+    mode = (body.get("mode") or "replace")
+    if mode not in ("append", "replace"):
+        mode = "replace"
+    async with factory() as session:
+        sc = await _verify_showcase_edit_token(session, token, require_editable=True)
+        blocks = await _build_credit_blocks_from_staff(session, sc.id)
+        if mode == "append":
+            sc.credits = list(sc.credits or []) + blocks
+        else:
+            sc.credits = blocks
+        sc.credits_mode = "block"
+        sc.updated_at = _now()
+        # 補作品 meta（僅在原本為空時）
+        project = await session.get(CrmProject, sc.id)
+        if project:
+            if not project.public_title:
+                project.public_title = project.name
+            if not project.public_client:
+                client = await session.get(Client, project.client_id)
+                if client:
+                    project.public_client = client.short_name or client.full_name or ""
+            if not project.public_year and project.completion_date:
+                project.public_year = project.completion_date.year
+        await _sync_showcase_to_public(session, sc)
+        await session.commit()
+        data = await _build_showcase_edit_data(session, sc)
+    try:
+        from services.website import rebuild_service
+        await rebuild_service.mark_dirty()
+    except Exception as e:
+        import logging
+        logging.getLogger(__name__).warning("[showcase carry_in] mark_dirty 失敗: %s", e)
+    return data
 
 
 @router.post("/public/showcase-edit/{token}/request_ai_review")

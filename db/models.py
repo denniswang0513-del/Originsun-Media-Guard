@@ -249,6 +249,12 @@ class CrmProject(Base):
     public_description_en = Column(Text, nullable=True)
     public_client_en = Column(String(150), nullable=True)
 
+    # ── 結案製作（website production）工作階段 — 後台「結案製作」看板用 ──
+    # 已結案專案的官網製作進度：待製作 / 製作中 / 不上官網。
+    # None 視為「待製作」；專案上線後（public=True）此欄不再參與 stage 推導
+    # （GET /projects/closing 以 public 優先 → '已上線'）。
+    website_prod_stage = Column(String(16), nullable=True)
+
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now())
 
