@@ -1,6 +1,6 @@
-# Ruff lint — 獨立 workflow：所有分支的 push 都跑（test.yml 只跑 master/dev）。
-# 規則集刻意最小（E9/F63/F7/F82 = 語法錯誤 + 未定義名稱類「真 bug」，見 ruff.toml），
-# 保證綠色起步；要擴規則先在本機 `ruff check .` 全過再加。
+# Lint — 獨立 workflow：所有分支的 push 都跑（test.yml 只跑 master/dev）。
+# 規則集刻意最小（只抓「真 bug」類：ruff = E9/F63/F7/F82，eslint 見 eslint.config.mjs），
+# 保證綠色起步；要擴規則先在本機 `ruff check .` / `npm run lint` 全過再加。
 name: Lint
 
 on:
@@ -19,3 +19,15 @@ jobs:
         run: |
           pip install ruff
           ruff check .
+
+  eslint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: ESLint (frontend vanilla JS)
+        run: |
+          npm ci --no-audit --no-fund
+          npm run lint

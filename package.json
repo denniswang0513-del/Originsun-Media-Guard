@@ -1,0 +1,11 @@
+{
+    "name": "originsun-media-guard-lint",
+    "private": true,
+    "description": "根目錄僅供 frontend/ vanilla JS 的 eslint（規則見 eslint.config.mjs）；對外官網另在 website/ 有自己的 package.json",
+    "scripts": {
+        "lint": "eslint frontend"
+    },
+    "devDependencies": {
+        "eslint": "^9.0.0"
+    }
+}

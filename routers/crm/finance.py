@@ -809,35 +809,9 @@ async def payables_summary(month: str = Query(""), status: str = Query("")):
 
         rows = (await session.execute(query)).all()
 
-    payee_groups: dict = {}
-    seen_ids: set = set()
-    for p, staff_id_number, staff_bank_name, staff_bank_account in rows:
-        if p.id in seen_ids:
-            continue
-        seen_ids.add(p.id)
-        name = p.payee_name or "未指定"
-        if name not in payee_groups:
-            payee_groups[name] = {
-                "payee_name": name,
-                "payee_id": p.payee_id or staff_id_number or "",
-                "bank_name": staff_bank_name or "",
-                "bank_account": staff_bank_account or "",
-                "total_amount": 0, "items": [],
-            }
-        payee_groups[name]["total_amount"] += p.amount or 0
-        payee_groups[name]["items"].append({
-            "id": p.id,
-            "date": p.request_date.strftime("%Y/%m/%d") if p.request_date else "",
-            "amount": p.amount or 0,
-            "summary": p.summary or "",
-            "category": p.category or "",
-            "payment_status": p.payment_status or "",
-            "payment_date": p.payment_date.strftime("%Y-%m-%d") if p.payment_date else "",
-            "planned_month": p.planned_month or "",
-        })
-
-    payees = sorted(payee_groups.values(), key=lambda x: x["total_amount"], reverse=True)
-    return {"month": month or "all", "payees": payees, "grand_total": sum(pg["total_amount"] for pg in payees)}
+    # 分組聚合是純邏輯，抽在 core/crm_logic.py（有單元測試）
+    from core.crm_logic import group_payables
+    return {"month": month or "all", **group_payables(rows)}
 
 
 @router.get("/receivables/summary")
@@ -861,39 +835,9 @@ async def receivables_summary(status: str = Query("")):
             query = query.where(CrmInvoice.payment_status.notin_(["已收款", "作廢"]))
         rows = (await session.execute(query)).all()
 
-    client_groups: dict = {}
-    seen_ids: set = set()
-    for inv, proj_name, c_tax_id, c_payment_info, c_payment_note in rows:
-        if inv.id in seen_ids:
-            continue
-        seen_ids.add(inv.id)
-        name = inv.company_name or "未指定"
-        if name not in client_groups:
-            client_groups[name] = {
-                "company_name": name,
-                "tax_id": inv.tax_id or c_tax_id or "",
-                "payment_info": c_payment_info or "",
-                "payment_note": c_payment_note or "",
-                "total_amount": 0, "items": [],
-            }
-        client_groups[name]["total_amount"] += inv.amount_total or 0
-        days = 0
-        if inv.invoice_date:
-            days = (_now() - inv.invoice_date).days
-        client_groups[name]["items"].append({
-            "id": inv.id,
-            "title": inv.title or "",
-            "invoice_number": inv.invoice_number or "",
-            "invoice_date": inv.invoice_date.strftime("%Y/%m/%d") if inv.invoice_date else "",
-            "amount_total": inv.amount_total or 0,
-            "payment_status": inv.payment_status or "",
-            "project_name": proj_name or "",
-            "days_since_issued": days,
-            "category": inv.category or "",
-        })
-
-    clients = sorted(client_groups.values(), key=lambda x: x["total_amount"], reverse=True)
-    return {"clients": clients, "grand_total": sum(c["total_amount"] for c in clients)}
+    # 分組聚合是純邏輯，抽在 core/crm_logic.py（有單元測試）
+    from core.crm_logic import group_receivables
+    return group_receivables(rows, _now())
 
 
 @router.patch("/invoices/batch-receive")

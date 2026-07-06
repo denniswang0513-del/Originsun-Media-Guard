@@ -628,7 +628,10 @@ _COST_LINE_DEFAULTS = [
 
 # ── Quotation → Cost Line mapping helpers ──────────────────────
 _QUOTE_GROUP_TO_PHASE = {
-    "前期": "前期��作", "拍攝": "現場拍攝", "現場": "現場拍攝",
+    # 2026-07-06 修復：「前期製作」原含 U+FFFD 損壞字元（歷史編碼事故），
+    # 導致「前期」關鍵字對到損壞字串、與 _map_group_to_phase fallback 值不一致。
+    # 舊資料若已存入損壞 phase 值，需另跑資料修正。
+    "前期": "前期製作", "拍攝": "現場拍攝", "現場": "現場拍攝",
     "後製": "後期製作", "後期": "後期製作",
 }
 _QUOTE_UNIT_MAP = {"天": "日"}

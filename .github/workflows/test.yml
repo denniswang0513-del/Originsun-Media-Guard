@@ -21,9 +21,11 @@ jobs:
         with:
           python-version: "3.11"
       - name: Install deps
+        # fastapi 釘 prod 實際版本：0.139+ 的 route 內省行為不同會弄壞
+        # test_register_crud_body_param 的 dependant 檢查（2026-07-06 本機 fresh venv 驗證）
         run: |
           pip install -r requirements_agent.txt
-          pip install pytest pytest-asyncio pytest-mock httpx sqlalchemy asyncpg croniter xxhash PyJWT
+          pip install pytest pytest-asyncio pytest-mock httpx sqlalchemy asyncpg croniter xxhash PyJWT "fastapi==0.136.3"
       - name: Unit tests
         run: pytest tests/unit -v --tb=short
       - name: Integration tests
