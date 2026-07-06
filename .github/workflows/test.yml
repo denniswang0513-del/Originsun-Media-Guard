@@ -1,17 +1,20 @@
 name: Tests
 
+# 觸發分支修正（2026-07-06）：原本寫 [main, dev] 但本 repo 主分支是 master、
+# 開發都在 feature/* — 這個 workflow 從建立以來一次都沒跑過。
 on:
   push:
-    branches: [main, dev]
+    branches: [master, dev]
   pull_request:
-    branches: [main, dev]
+    branches: [master, dev]
 
 jobs:
   unit-and-integration:
     runs-on: ubuntu-latest
-    env:
-      MOCK_FFMPEG: "1"
-      MOCK_NAS: "1"
+    # 不設 MOCK_FFMPEG/MOCK_NAS：那是給 smoke/e2e 的「被 spawn 的 server」用的。
+    # 設在 pytest 行程會讓 run_transcode_job 整個 short-circuit，
+    # transcode mock 測試（capture Popen cmd）全紅。unit 套件不需要 ffmpeg 存在
+    # （Popen 已被 monkeypatch），本機無 ffmpeg 驗證過 114 全過。
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -19,8 +22,8 @@ jobs:
           python-version: "3.11"
       - name: Install deps
         run: |
-          pip install pytest pytest-asyncio pytest-mock httpx pytest-cov playwright
-          playwright install chromium
+          pip install -r requirements_agent.txt
+          pip install pytest pytest-asyncio pytest-mock httpx sqlalchemy asyncpg croniter xxhash PyJWT
       - name: Unit tests
         run: pytest tests/unit -v --tb=short
       - name: Integration tests

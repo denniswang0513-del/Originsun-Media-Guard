@@ -1,0 +1,13 @@
+# Ruff — 最小高價值規則集（只抓「真 bug」類，不管風格）
+# 原則：gate 必須從第一天就是綠的。要加規則先在本機跑過全 repo 再加。
+# E9  = 語法錯誤 / IO 錯誤（api_ota 曾因 f-string 三引號 SyntaxError 整個 router 斷線 v1.10.131）
+# F63 = 無效比較（is 比字面值等）
+# F7  = 語法層錯誤（return 在函式外等）
+# F82 = 未定義名稱（漏 import、打錯變數名 — 動態載入的 router 這種錯不炸在啟動、炸在請求時）
+target-version = "py311"
+
+[lint]
+select = ["E9", "F63", "F7", "F82"]
+
+# 排除：vendor/生成物（.gitignore 內的 .venv/python_embed 已自動排除）
+exclude = ["website/node_modules", "website/dist", "_publish_rollback"]
