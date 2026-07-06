@@ -42,6 +42,10 @@ _PROD_RESTART_URL = "http://127.0.0.1:8000/api/v1/internal/restart"
 #   taiwan_dict.json→ hot-edited on prod via the 正音字典 UI
 #   users.json      → prod accounts (not in AGENT_FILES, excluded defensively)
 _DEPLOY_EXCLUDE_FILES = {"settings.json", "taiwan_dict.json", "users.json"}
+# 部署前的 prod 舊碼備份（單份，供 smoke 失敗自動還原 / 手動 rollback）。
+# 底線開頭 → publish 的 OTA 目錄掃描與 build_agent_zip 都會跳過，不會進機隊包。
+_DEPLOY_BACKUP_DIR = os.path.join(_PROD_DIR, "_deploy_backup")
+_DEPLOY_BACKUP_META = "_backup_meta.json"
 
 
 def _append_publish_history(version: str, notes: str, success: bool, user: str = "admin"):
@@ -568,6 +572,110 @@ async def publish_rollback(request: Request):
 
 # ── Dev → Prod deploy ─────────────────────────────────────────────────────
 
+def _http_get_json(url: str, timeout: float = 3.0) -> dict:
+    import urllib.request
+    with urllib.request.urlopen(url, timeout=timeout) as r:
+        return json.loads(r.read().decode("utf-8"))
+
+
+def _prod_alive(timeout: float = 1.5) -> bool:
+    try:
+        _http_get_json("http://127.0.0.1:8000/api/v1/health", timeout)
+        return True
+    except Exception:
+        return False
+
+
+async def _smoke_check_prod(expect_version: str) -> dict:
+    """部署/還原後煙霧測試。回傳 {"ok", "restarted", "detail"}。
+
+    /api/v1/version 讀的是磁碟 version.json — 光比對版本無法證明重啟。
+    所以先等 port「斷掉」（舊行程真的退場），再等新行程健康 + 版本正確。
+    expect_version 為空字串時只驗健康、不比對版本（rollback 後舊版號未知時用）。
+    """
+    # Phase 1: 等 port 斷（0.5s × 60 = 30s）。一開始就是斷的（server 已死）也算。
+    dropped = False
+    for _ in range(60):
+        if not await asyncio.to_thread(_prod_alive):
+            dropped = True
+            break
+        await asyncio.sleep(0.5)
+    if not dropped:
+        return {"ok": False, "restarted": False,
+                "detail": "30 秒內 port 8000 未中斷 — 重啟沒有發生（舊行程仍在跑舊碼）"}
+    # Phase 2: 等服務回來 + 版本正確（2s × 45 = 90s）。
+    for _ in range(45):
+        await asyncio.sleep(2)
+        try:
+            v = await asyncio.to_thread(
+                _http_get_json, "http://127.0.0.1:8000/api/v1/version", 3.0)
+            actual = v.get("version")
+            if not expect_version or actual == expect_version:
+                return {"ok": True, "restarted": True,
+                        "detail": f"v{actual} 上線，health/version 正常"}
+            return {"ok": False, "restarted": True,
+                    "detail": f"重啟後版本不符：期望 v{expect_version}、實際 v{actual}"}
+        except Exception:
+            continue
+    return {"ok": False, "restarted": True,
+            "detail": "重啟後 90 秒內服務未恢復（port 斷了沒回來）"}
+
+
+def _force_restart_prod() -> str:
+    """重啟 prod 8000：server 活著走 internal/restart；死了用 prod checkout 的
+    process_spawn CLI 直接拉起（`-m` 會把 cwd 放進 sys.path，載到的是 prod 的 core/）。"""
+    import urllib.request
+    try:
+        req = urllib.request.Request(
+            _PROD_RESTART_URL + "?ota=0", method="POST", data=b"{}",
+            headers={"Content-Type": "application/json",
+                     "X-Internal-Key": "originsun-internal-restart"},
+        )
+        urllib.request.urlopen(req, timeout=5)
+        return "internal/restart 已觸發"
+    except Exception:
+        subprocess.Popen(
+            [sys.executable, "-m", "core.process_spawn", "--restart", "--wait", "0"],
+            cwd=_PROD_DIR,
+            creationflags=0x00000008 | 0x08000000,  # DETACHED_PROCESS | CREATE_NO_WINDOW
+            stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+        )
+        return "server 無回應，已用 process_spawn 直接拉起"
+
+
+def _rollback_prod_sync() -> dict:
+    """把 _deploy_backup 的舊碼還原回 prod、刪除該次部署新增的檔案。不重啟（caller 做）。"""
+    meta_path = os.path.join(_DEPLOY_BACKUP_DIR, _DEPLOY_BACKUP_META)
+    if not os.path.exists(meta_path):
+        return {"ok": False, "log": f"沒有可用備份（{_DEPLOY_BACKUP_DIR} 無 {_DEPLOY_BACKUP_META}）"}
+    with open(meta_path, "r", encoding="utf-8") as f:
+        meta = json.load(f)
+    restored = 0
+    for root, dirs, files in os.walk(_DEPLOY_BACKUP_DIR):
+        dirs[:] = [x for x in dirs if x != "__pycache__"]
+        for fn in files:
+            if root == _DEPLOY_BACKUP_DIR and fn == _DEPLOY_BACKUP_META:
+                continue
+            sp = os.path.join(root, fn)
+            rel = os.path.relpath(sp, _DEPLOY_BACKUP_DIR)
+            tp = os.path.join(_PROD_DIR, rel)
+            os.makedirs(os.path.dirname(tp), exist_ok=True)
+            shutil.copy2(sp, tp)
+            restored += 1
+    removed = 0
+    for rel in meta.get("new_files", []):
+        tp = os.path.join(_PROD_DIR, rel)
+        try:
+            if os.path.exists(tp):
+                os.remove(tp)
+                removed += 1
+        except Exception:
+            pass
+    prev = meta.get("prod_version", "")
+    return {"ok": True, "prev_version": prev,
+            "log": f"還原 {restored} 檔、移除部署新增檔 {removed} 個（回 v{prev or '?'}）"}
+
+
 def _deploy_to_prod_sync(version: str, notes: str) -> dict:
     """Copy this (dev) checkout's code into the production checkout (_PROD_DIR),
     bumping version.json and skipping runtime-state files. Runs in a thread.
@@ -594,6 +702,28 @@ def _deploy_to_prod_sync(version: str, notes: str) -> dict:
             return {"ok": False, "log": "Preflight 失敗，未動生產：\n" + (pf.stdout or pf.stderr)[:1500]}
         log.append("[OK] Preflight 通過")
 
+    # ── Backup prod code about to be overwritten（smoke 失敗自動還原 / 手動 rollback 用）──
+    prod_version = ""
+    try:
+        with open(os.path.join(dst, "version.json"), "r", encoding="utf-8") as f:
+            prod_version = json.load(f).get("version", "")
+    except Exception:
+        pass
+    if os.path.isdir(_DEPLOY_BACKUP_DIR):
+        shutil.rmtree(_DEPLOY_BACKUP_DIR, ignore_errors=True)
+    os.makedirs(_DEPLOY_BACKUP_DIR, exist_ok=True)
+    new_files: list = []
+
+    def _backup_target(rel: str) -> None:
+        """複製前先把 prod 既有檔備份（保留相對路徑）；prod 沒有的記為新增檔供 rollback 刪除。"""
+        tgt = os.path.join(dst, rel)
+        if os.path.exists(tgt):
+            bp = os.path.join(_DEPLOY_BACKUP_DIR, rel)
+            os.makedirs(os.path.dirname(bp), exist_ok=True)
+            shutil.copy2(tgt, bp)
+        else:
+            new_files.append(rel)
+
     # ── Bump dev version.json (gets copied to prod below) ──
     vpath = os.path.join(src, "version.json")
     vdata = {}
@@ -617,6 +747,7 @@ def _deploy_to_prod_sync(version: str, notes: str) -> dict:
             continue
         sp = os.path.join(src, fn)
         if os.path.exists(sp):
+            _backup_target(fn)
             shutil.copy2(sp, os.path.join(dst, fn))
             copied += 1
 
@@ -633,9 +764,18 @@ def _deploy_to_prod_sync(version: str, notes: str) -> dict:
             for f in files:
                 if f in _DEPLOY_EXCLUDE_FILES:
                     continue
+                _backup_target(os.path.join(rel, f))
                 shutil.copy2(os.path.join(root, f), os.path.join(tgt, f))
                 copied += 1
         log.append(f"[OK] 目錄 {d}/ 已複製")
+
+    # ── 備份 meta（rollback 讀這份決定還原版本與要刪的新增檔）──
+    with open(os.path.join(_DEPLOY_BACKUP_DIR, _DEPLOY_BACKUP_META), "w", encoding="utf-8") as f:
+        json.dump({
+            "prod_version": prod_version, "deployed_version": version,
+            "backup_at": datetime.now().isoformat(), "new_files": new_files,
+        }, f, ensure_ascii=False, indent=2)
+    log.append(f"[OK] 舊碼已備份 _deploy_backup（v{prod_version or '?'}，本次新增檔 {len(new_files)} 個）")
 
     log.append(f"[OK] 共 {copied} 個檔案 → {dst}")
     return {"ok": True, "log": "\n".join(log)}
@@ -665,13 +805,48 @@ async def deploy_to_prod_eligible():
         reason = "目前就在生產 checkout，無需部署"
     elif not prod_ok:
         reason = f"生產目錄不存在: {_PROD_DIR}"
+    backup = None
+    try:
+        meta_path = os.path.join(_DEPLOY_BACKUP_DIR, _DEPLOY_BACKUP_META)
+        if os.path.exists(meta_path):
+            with open(meta_path, "r", encoding="utf-8") as f:
+                m = json.load(f)
+            backup = {"prod_version": m.get("prod_version"),
+                      "deployed_version": m.get("deployed_version"),
+                      "backup_at": m.get("backup_at")}
+    except Exception:
+        pass
     return {
         "eligible": (not same) and prod_ok,
         "reason": reason,
         "prod_dir": _PROD_DIR,
         "prod_version": prod_version,
         "this_dir": src,
+        "backup": backup,  # 上次部署的舊碼備份（可 POST /deploy_to_prod/rollback 還原）
     }
+
+
+@router.post("/api/v1/deploy_to_prod/rollback")
+async def deploy_to_prod_rollback(request: Request):
+    """一鍵還原：把上次 deploy_to_prod 覆蓋前的生產舊碼還原 + 重啟 + smoke check。
+
+    smoke 最長約 2 分鐘，請求會等到結果才返回。
+    """
+    _check_admin(request)
+    if _publish_lock.locked():
+        return JSONResponse({"status": "error", "message": "另一次發布/部署正在進行中，請稍後再試"}, 409)
+    async with _publish_lock:
+        rb = await asyncio.to_thread(_rollback_prod_sync)
+        if not rb.get("ok"):
+            return JSONResponse({"status": "error", "message": rb.get("log", "rollback 失敗")}, 400)
+        restart_msg = await asyncio.to_thread(_force_restart_prod)
+        smoke = await _smoke_check_prod(rb.get("prev_version") or "")
+        ok = smoke["ok"]
+        _append_publish_history(rb.get("prev_version") or "?", "ROLLBACK deploy_to_prod", ok, "admin")
+        return {
+            "status": "done" if ok else "error",
+            "message": f"{rb['log']}；{restart_msg}；smoke: {smoke['detail']}",
+        }
 
 
 @router.post("/api/v1/deploy_to_prod")
@@ -739,12 +914,52 @@ async def deploy_to_prod(request: Request):
                 except Exception as e:
                     restart_msg = f"檔案已部署，但重啟 8000 失敗（請手動重啟）: {e}"
 
-                _append_publish_history(version, f"DEPLOY→8000: {notes}", True, pub_user)
+                # ── Smoke check：等舊行程退場 → 新行程健康 + 版本正確 ──
                 _publish_status[job_id] = {
-                    "status": "done", "log": deploy_log + f"\n[OK] {restart_msg}",
-                    "version": version,
-                    "message": f"v{version} 已部署到生產 8000；{restart_msg}（約 10 秒後生效）",
+                    "status": "running", "version": version,
+                    "log": deploy_log + f"\n[OK] {restart_msg}\n[*] Smoke check 中（最長約 2 分鐘）…",
                 }
+                smoke = await _smoke_check_prod(version)
+
+                if smoke["ok"]:
+                    _append_publish_history(version, f"DEPLOY→8000: {notes}", True, pub_user)
+                    _publish_status[job_id] = {
+                        "status": "done", "version": version,
+                        "log": deploy_log + f"\n[OK] {restart_msg}\n[OK] Smoke: {smoke['detail']}",
+                        "message": f"v{version} 已部署到生產 8000，smoke check 通過（{smoke['detail']}）",
+                    }
+                    return
+
+                if not smoke["restarted"]:
+                    # 舊行程還在跑舊碼 → prod 服務未受影響，不動檔案（新碼下次重啟才生效）
+                    _append_publish_history(version, f"DEPLOY→8000 SMOKE FAIL(未重啟): {notes}", False, pub_user)
+                    msg = f"檔案已部署但{smoke['detail']}；生產仍跑舊版，請手動重啟 8000 或再部署一次"
+                    _publish_status[job_id] = {"status": "error", "version": version,
+                                               "log": deploy_log, "message": msg}
+                    try:
+                        from notifier import notify_tab_async  # type: ignore
+                        await notify_tab_async("deploy_failed", version=version, detail=msg)
+                    except Exception:
+                        pass
+                    return
+
+                # 重啟了但沒健康回來 / 版本不符 → 自動還原舊碼 + 拉起 + 再驗
+                rb = await asyncio.to_thread(_rollback_prod_sync)
+                rb_restart = await asyncio.to_thread(_force_restart_prod)
+                rb_smoke = await _smoke_check_prod(rb.get("prev_version") or "")
+                detail = (f"{smoke['detail']}；已自動還原（{rb.get('log', 'rollback 失敗')}）"
+                          f"→ {rb_restart} → "
+                          f"{'生產已恢復舊版' if rb_smoke['ok'] else '⚠️ 恢復失敗：' + rb_smoke['detail']}")
+                _append_publish_history(version, f"DEPLOY→8000 SMOKE FAIL→ROLLBACK: {notes}", False, pub_user)
+                _publish_status[job_id] = {
+                    "status": "error", "version": version, "log": deploy_log,
+                    "message": f"部署 smoke check 未過 — {detail}",
+                }
+                try:
+                    from notifier import notify_tab_async  # type: ignore
+                    await notify_tab_async("deploy_failed", version=version, detail=detail)
+                except Exception:
+                    pass
             except Exception as e:
                 _append_publish_history(version, f"DEPLOY→8000 ERROR: {notes}", False, "system")
                 _publish_status[job_id] = {"status": "error", "log": "", "version": version, "message": str(e)}

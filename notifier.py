@@ -179,6 +179,7 @@ def notify_tab(template_key: str, **variables) -> None:
         "backup_failed":     "🔴 【每日備份失敗】\n⚠️ {error}\n請檢查 master→NAS SSH 與 Google Drive 憑證",
         "db_offline":        "🔴 【資料庫斷線】PostgreSQL（{db}）連線中斷 — {hostname}\n已切換 JSON fallback，每 60 秒自動重連中",
         "db_recovered":      "🟢 【資料庫恢復】PostgreSQL（{db}）連線已恢復 — {hostname}",
+        "deploy_failed":     "🔴 【部署到生產失敗】v{version}\n⚠️ {detail}",
     }
 
     raw_tpl = tpls.get(template_key) or _defaults.get(template_key, "")
