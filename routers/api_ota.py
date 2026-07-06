@@ -702,6 +702,22 @@ def _deploy_to_prod_sync(version: str, notes: str) -> dict:
             return {"ok": False, "log": "Preflight 失敗，未動生產：\n" + (pf.stdout or pf.stderr)[:1500]}
         log.append("[OK] Preflight 通過")
 
+    # ── Unit test gate（dev 環境有 pytest 才跑；不帶 MOCK_* env — 會誤殺 transcode mock 測試）──
+    try:
+        import pytest as _pytest  # noqa: F401
+        _t_env = os.environ.copy()
+        _t_env.pop("MOCK_FFMPEG", None)
+        _t_env.pop("MOCK_NAS", None)
+        tr = subprocess.run(
+            [sys.executable, "-m", "pytest", "tests/unit", "-q", "--no-header"],
+            capture_output=True, text=True, timeout=300, cwd=src, env=_t_env)
+        if tr.returncode != 0:
+            return {"ok": False,
+                    "log": "單元測試失敗，未動生產：\n" + (tr.stdout or tr.stderr or "")[-1500:]}
+        log.append("[OK] 單元測試通過")
+    except ImportError:
+        log.append("[WARN] pytest 未安裝，跳過單元測試 gate")
+
     # ── Backup prod code about to be overwritten（smoke 失敗自動還原 / 手動 rollback 用）──
     prod_version = ""
     try:

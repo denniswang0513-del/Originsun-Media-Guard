@@ -3670,22 +3670,20 @@ async def list_advance_payments(returned: int = -1, project_id: str = Query(""))
                     project_name = proj.name
 
             amt = p.amount or 0
-            # 發款: 收支明細中關聯此預支的支出合計 = 預支金額 → 已發款
+            # 發款: 收支明細中關聯此預支的支出合計（判定規則在 core/crm_logic.py）
             cash_pay_total = (await session.execute(
                 select(sa_func.coalesce(sa_func.sum(CrmCashEntry.expense), 0))
                 .where(CrmCashEntry.advance_payment_id == p.id)
                 .where(CrmCashEntry.expense > 0)
             )).scalar() or 0
-            is_paid = (cash_pay_total >= amt > 0)
-            # 收款: 收支明細中關聯此預支的收入 > 0 → 已收款
+            # 收款: 收支明細中關聯此預支的收入合計
             cash_return_total = (await session.execute(
                 select(sa_func.coalesce(sa_func.sum(CrmCashEntry.deposit), 0))
                 .where(CrmCashEntry.advance_payment_id == p.id)
                 .where(CrmCashEntry.deposit > 0)
             )).scalar() or 0
-            is_returned = cash_return_total > 0
-            # 餘額 = 預支金額 − 支出 − 已收回
-            balance = amt - expense_total - cash_return_total
+            from core.crm_logic import compute_advance_status
+            adv = compute_advance_status(amt, expense_total, cash_pay_total, cash_return_total)
             # 關聯的收支明細（發款/收款記錄）
             linked_cash = (await session.execute(
                 select(CrmCashEntry)
@@ -3700,8 +3698,6 @@ async def list_advance_payments(returned: int = -1, project_id: str = Query(""))
                 "expense": c.expense or 0,
                 "type": "收款" if (c.deposit or 0) > 0 else "發款",
             } for c in linked_cash]
-            # 完成: 已發款 + 已收款 + 餘額為零
-            is_settled = is_paid and is_returned and balance == 0
             result.append({
                 "id": p.id,
                 "payee_name": p.payee_name or "",
@@ -3711,11 +3707,11 @@ async def list_advance_payments(returned: int = -1, project_id: str = Query(""))
                 "payment_date": p.payment_date.isoformat() if p.payment_date else None,
                 "request_date": p.request_date.isoformat() if p.request_date else None,
                 "payment_status": p.payment_status or "應付款",
-                "is_paid": is_paid,
-                "is_returned": is_returned,
-                "is_settled": is_settled,
+                "is_paid": adv["is_paid"],
+                "is_returned": adv["is_returned"],
+                "is_settled": adv["is_settled"],
                 "expense_total": expense_total,
-                "balance": balance,
+                "balance": adv["balance"],
                 "cash_entries": cash_entries,
             })
     # Post-filter by settled status

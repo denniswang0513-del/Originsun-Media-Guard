@@ -534,6 +534,37 @@ def main():
     else:
         print("[WARN] preflight.py 不存在，跳過健康檢查")
 
+    # ── Unit test gate：有 pytest 才跑（python_embed 生產環境沒裝就明講跳過）──
+    # 注意：不帶 MOCK_FFMPEG/MOCK_NAS — 那兩個 env 會讓 conftest short-circuit
+    # 引擎，transcode mock 測試反而全紅（2026-07-06 驗證）。
+    print("\n[*] 執行單元測試 gate (pytest tests/unit)...")
+    try:
+        import pytest as _pytest  # noqa: F401
+        _has_pytest = True
+    except ImportError:
+        _has_pytest = False
+    if _has_pytest:
+        _t_env = os.environ.copy()
+        _t_env.pop("MOCK_FFMPEG", None)
+        _t_env.pop("MOCK_NAS", None)
+        t_result = subprocess.run(
+            [sys.executable, "-m", "pytest", "tests/unit", "-q", "--no-header"],
+            capture_output=True, text=True, timeout=300, env=_t_env,
+            cwd=os.path.dirname(os.path.abspath(__file__)),
+        )
+        if t_result.returncode != 0:
+            print("\n[ERROR] 單元測試失敗！不允許發布壞版本：")
+            print((t_result.stdout or t_result.stderr or "")[-2000:])
+            v_data["version"] = current_version
+            atomic_json_write(VERSION_FILE, v_data)
+            sync_docs_version(current_version)
+            print(f"[*] 已回滾 {VERSION_FILE} 至 v{current_version}")
+            return 1
+        _t_tail = (t_result.stdout or "").strip().splitlines()
+        print(f"[OK] 單元測試通過（{_t_tail[-1] if _t_tail else 'ok'}）")
+    else:
+        print("[WARN] pytest 未安裝，跳過單元測試 gate（建議在發版機補裝）")
+
     # Build ZIP
     print("\n[*] 開始編譯並打包 ZIP...")
     if not os.path.exists(BUILD_SCRIPT):
