@@ -1,4 +1,7 @@
-# ─── Originsun Media Guard Pro — Python Dependencies ───
+# ─── Originsun Media Guard Pro — Python Dependencies（初裝完整版）───
+# 用途：Install_Originsun_Agent.bat 新機安裝時 pip install 的完整清單（含 torch 等重依賴）。
+# 與 requirements_agent.txt 的分工：那份是 OTA 更新時 update_agent.py 用的輕量版
+# （刻意排除 torch/whisper/TTS/DB）。兩份都活著、各管一條路，別合併也別刪。
 
 # ── Core Server ──
 fastapi

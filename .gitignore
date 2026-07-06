@@ -34,6 +34,7 @@ node_modules/
 
 # Config (runtime only, not committed)
 settings.json
+users.json
 bookmarks.json
 scheduled_jobs.json
 job_history.json
