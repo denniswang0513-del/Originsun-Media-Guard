@@ -690,8 +690,8 @@ tools:
 
 ### 要建置的東西（依風險排序）
 
-- [ ] **master 重建 SOP**：新機 → 裝依賴（requirements_server.txt）→ 還原
-      settings/credentials/SSH key → 接回 NAS 與機隊 的完整照抄式文件
+- [x] **master 重建 SOP**（2026-07-07）：[`docs/MASTER_REBUILD_SOP.md`](docs/MASTER_REBUILD_SOP.md)
+      — 五重身分 / 事前預防（DHCP 保留+金鑰異地）/ 兩條重建路徑 / 驗證清單
 - [ ] **NAS 災難重建程序**：NAS 整台死掉時，postgres / nginx / cloudflared /
       website-api 在他處重建 + 從 Google Drive 備份還原的 runbook
       （現有 BACKUP_RESTORE.md 全部假設 NAS 還活著）
