@@ -11,7 +11,7 @@
 """
 from __future__ import annotations
 
-from typing import Any, Awaitable, Callable, Optional, Type
+from typing import Any, Callable, Optional, Type
 
 from sqlalchemy import asc, delete, select
 from sqlalchemy.ext.asyncio import AsyncSession

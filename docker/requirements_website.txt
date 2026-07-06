@@ -1,25 +1,28 @@
 # website-api container minimal deps
 # 跟 master 主應用 requirements_agent.txt 重疊但只取 web 需要的部分
 # 故意極簡 — agent OTA 包含的 ffmpeg / torch / TTS 等通通不要
+#
+# 版本釘定（2026-07-07）：以 NAS 容器實裝版本為準（docker exec website-api pip freeze）。
+# 浮動版本 = 容器 rebuild 時拉到不相容新版的地雷；升級要先在容器測過再改這裡。
 
 # Web framework
-fastapi
-uvicorn[standard]
-pydantic
+fastapi==0.136.1
+uvicorn[standard]==0.46.0
+pydantic==2.13.3
 
 # DB（asyncpg 是 PG 非同步 driver）
-sqlalchemy[asyncio]
-asyncpg
-greenlet
+sqlalchemy[asyncio]==2.0.49
+asyncpg==0.31.0
+greenlet==3.5.0
 
 # 雜項
-httpx
-python-multipart
-aiofiles
+httpx==0.28.1
+python-multipart==0.0.27
+aiofiles==25.1.0
 
 # Notion sync（routers/website/admin_rebuild.py → notion_service 用到）
 # 若不需要 notion 功能可拿掉，但留著也不貴
-notion-client
+notion-client==3.0.0
 
 # Pillow — 圖片處理（uploads/ resize 等）
-Pillow
+Pillow==12.2.0

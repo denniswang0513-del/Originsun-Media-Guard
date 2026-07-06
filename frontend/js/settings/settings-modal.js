@@ -27,7 +27,6 @@ document.addEventListener('DOMContentLoaded', () => {
                 const data = await res.json();
                 const n = data.notifications || {};
                 const t = data.message_templates || {};
-                document.getElementById('line_token').value = n.line_notify_token || '';
                 document.getElementById('gchat_webhook').value = n.google_chat_webhook || '';
                 document.getElementById('custom_webhook').value = n.custom_webhook_url || '';
                 document.getElementById('tpl_backup_success').value = t.backup_success || '';
@@ -40,7 +39,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 const ch = data.notification_channels || {};
                 const tabs = ['backup', 'report', 'transcode', 'concat', 'verify', 'transcribe'];
                 tabs.forEach(tab => {
-                    const cfg = ch[tab] || { gchat: true, line: false };
+                    const cfg = ch[tab] || { gchat: true };
                     document.querySelectorAll(`.ch-toggle[data-tab="${tab}"]`).forEach(el => {
                         const channel = el.dataset.ch;
                         const isOn = cfg[channel] !== undefined ? cfg[channel] : (channel === 'gchat');
@@ -57,9 +56,9 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // ── Save settings ────────────────────────────────────────
     document.getElementById('btnSaveSettings').addEventListener('click', async () => {
+        // LINE Notify 服務已終止（2025-03-31），通道與 token 欄位已移除
         const settingsData = {
             notifications: {
-                line_notify_token: document.getElementById('line_token').value,
                 google_chat_webhook: document.getElementById('gchat_webhook').value,
                 custom_webhook_url: document.getElementById('custom_webhook').value,
             },
@@ -77,7 +76,6 @@ document.addEventListener('DOMContentLoaded', () => {
                     tab,
                     {
                         gchat: document.querySelector(`.ch-toggle.gchat[data-tab="${tab}"]`)?.classList.contains('on') ?? true,
-                        line: document.querySelector(`.ch-toggle.line[data-tab="${tab}"]`)?.classList.contains('on') ?? false,
                     }
                 ])
             ),

@@ -15,24 +15,17 @@ uploads/templates 路徑整體位移到 routers/ 底下（行為改變）。
 # loading. See bug: agent 192.168.1.5 had this exact failure mode.
 from __future__ import annotations
 
-import asyncio
-import csv
-import io
 import os
-import re
-import shutil
 import uuid
 from datetime import date, datetime, timezone
 from typing import Optional
 
-from fastapi import APIRouter, HTTPException, Request, UploadFile, File, Query
-
-from config import load_settings as _load_settings
+from fastapi import APIRouter, HTTPException, Request
 
 import core.state as state
 
 try:
-    from sqlalchemy import select, or_, delete, update as sa_update
+    from sqlalchemy import select, or_, delete
     from sqlalchemy.exc import IntegrityError
     from db.models import (Client, User, CrmProject, CrmQuotation, CrmQuotationItem,
                            CrmQuotationTemplate, CrmStaff, CrmStaffPortfolio,
@@ -45,6 +38,18 @@ try:
     _HAS_DB = True
 except ImportError:
     _HAS_DB = False
+
+# 本檔自用只有 select / Client / CrmProject / CrmProjectExpense；
+# 其餘 db.models 類與 or_ / delete / IntegrityError 是給領域模組
+# `from ._shared import ...` 的 re-export（列進 __all__，ruff F401 視為已使用）。
+__all__ = [
+    "router", "or_", "delete", "IntegrityError", "User",
+    "CrmQuotation", "CrmQuotationItem", "CrmQuotationTemplate",
+    "CrmStaff", "CrmStaffPortfolio", "CrmProjectStaff",
+    "CrmInvoice", "CrmPaymentRequest", "CrmCashEntry",
+    "CrmProjectCostLine", "CrmCostLineTemplate", "CrmProjectCostGroup",
+    "CrmProjectShowcase", "WEBSITE_TEAM_OVERRIDE_FIELDS",
+]
 
 router = APIRouter(prefix="/api/v1/crm", tags=["CRM"])
 
@@ -118,16 +123,6 @@ def _to_dict(c) -> dict:
         "created_at": c.created_at.isoformat() if c.created_at else None,
         "updated_at": c.updated_at.isoformat() if c.updated_at else None,
     }
-
-
-from core.schemas import (ClientPayload, CrmProjectPayload, CrmProjectPatchPayload,
-                         ProjectExpensePayload,
-                         ProjectExpensePatchPayload,
-                         QuotationPayload, QuotationItemPayload, QuotationTemplatePayload,
-                         StaffPayload, StaffQuickAddPayload, ProjectStaffPayload, InvoicePayload, PaymentRequestPayload,
-                         CashEntryPayload, CostLinePayload, CostLineUpdatePayload,
-                         CostGroupCreate, CostGroupUpdate, CostGroupDuplicate,
-                         ResumePayload, PortfolioPayload, ShowcasePayload)
 
 
 async def _auto_update_client_status(session, client_id: str):

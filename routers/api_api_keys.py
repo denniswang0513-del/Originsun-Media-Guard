@@ -1,7 +1,5 @@
 """API Key management endpoints — CRUD for programmatic access keys."""
 
-import json
-import os
 from datetime import datetime, timezone, timedelta
 from typing import Optional
 
@@ -133,7 +131,7 @@ async def _deactivate_key(key_id: int, username: str, is_admin: bool):
 
 async def _hard_delete_key(key_id: int, username: str, is_admin: bool):
     """Permanently remove a key from DB + JSON."""
-    from core.auth import load_api_keys_json, save_api_keys_json, remove_api_key_from_json
+    from core.auth import load_api_keys_json, remove_api_key_from_json
     keys = load_api_keys_json()
     found = next((k for k in keys if k.get('id') == key_id), None)
     if not found:

@@ -6,7 +6,7 @@ import json as _json
 from datetime import datetime as _dt
 
 from core.socket_mgr import sio  # type: ignore
-from core.logger import _write_log_to_file, _emit_sync_for_job  # type: ignore
+from core.logger import _write_log_to_file  # type: ignore
 import core.state as state  # type: ignore
 from core.schemas import ReportJobRequest  # type: ignore
 from core_engine import MediaGuardEngine, ReportManifest, FileRecord, SUPPORTED_EXTS, is_junk_file  # type: ignore

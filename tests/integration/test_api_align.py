@@ -7,7 +7,6 @@ Coverage:
     - 200 + queued status when payload is valid
     - Job appears in the queue with the expected request type
 """
-import pytest
 
 
 async def test_align_rejects_empty_tasks(async_client):

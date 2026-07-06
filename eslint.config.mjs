@@ -3,6 +3,11 @@
 // 刻意不開 no-undef：vanilla JS 跨檔 window._* 全域是本專案既有慣例，開了全是噪音。
 export default [
     {
+        // 全域排除：沒這段的話，裸跑 `eslint .`（不走 npm run lint）會掃進
+        // .venv 的 vendor JS 炸出 900+ 假錯誤
+        ignores: [".venv/**", "**/site-packages/**", "website/**", "node_modules/**", "python_embed/**"],
+    },
+    {
         files: ["frontend/**/*.js"],
         languageOptions: {
             ecmaVersion: 2022,

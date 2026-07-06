@@ -1030,21 +1030,24 @@ e:\Dev\Originsun-Media-Guard\.venv\Scripts\python.exe -m py_compile <modified_fi
 
 ### 規則 B：大檔案必須分段讀取
 
-每次讀檔有 2,000 行的硬上限，超過的部分會被截斷——AI 不會告訴你它沒看完。本專案的大檔案清單：
+每次讀檔有 2,000 行的硬上限，超過的部分會被截斷——AI 不會告訴你它沒看完。
 
-| 檔案 | 約行數 | 必須分段 |
-|------|--------|----------|
-| `frontend/app.js` | 2100+ | ✓ |
-| `core_engine.py` | 1900+ | ✓ |
-| `frontend/tabs/website/subviews/blog/editor.js` | 1400+ | ✓ |
-| `frontend/tabs/projects/projects.js` | 1400+ | ✓ |
-| `routers/crm/costs.py` | 1300+ | ✓ |
-| `core/worker.py` | 1300+ | ✓ |
-| `routers/crm/showcase.py` | 1200+ | ✓ |
-| `frontend/tabs/crm/crm-projects-cost.js` | 1000+ | ✓ |
-| `frontend/tabs/transcribe/transcribe.js` | 1000+ | ✓ |
+**不要相信任何文件裡寫死的行數**（2026-07-07 盤點：前一天更新的清單隔天就漂了）。
+編輯任何檔案前先量它：
 
-> 行數會漂移；任何檔案編輯前先確認行數，超過 500 行一律分段。
+```powershell
+(Get-Content <path> | Measure-Object -Line).Lines
+```
+
+需要全貌時產生即時清單（破千行檔案，2026-07 約 13 個，app.js / core_engine.py /
+routers/crm/costs.py / blog/editor.js 等都在列）：
+
+```powershell
+Get-ChildItem -Recurse -Include *.py,*.js -Exclude node_modules |
+  Where-Object { $_.FullName -notmatch '\\(\.venv|node_modules|python_embed|__pycache__|dist)\\' } |
+  ForEach-Object { [PSCustomObject]@{ Lines=(Get-Content $_.FullName | Measure-Object -Line).Lines; File=$_.FullName } } |
+  Where-Object Lines -gt 1000 | Sort-Object Lines -Descending
+```
 
 **超過 500 行的檔案，強制使用 `offset` + `limit` 分段讀取。禁止一次讀完後假裝看到了全部內容。**
 

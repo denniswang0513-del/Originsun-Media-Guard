@@ -1,5 +1,4 @@
 """Unit tests for aligner.py pure functions (no audio / no model)."""
-import json
 import pytest
 
 from aligner import (  # type: ignore

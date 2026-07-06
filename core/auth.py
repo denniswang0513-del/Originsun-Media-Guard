@@ -12,7 +12,6 @@ import secrets
 import threading
 from collections import defaultdict
 from datetime import datetime, timezone
-from functools import wraps
 from typing import Optional
 
 from fastapi import Request, HTTPException
@@ -494,7 +493,7 @@ async def _update_last_used(key_id: int):
             from db.session import get_session_factory
             factory = get_session_factory()
             if factory:
-                from sqlalchemy import update, text
+                from sqlalchemy import update
                 from db.models import ApiKey
                 async with factory() as session:
                     await session.execute(

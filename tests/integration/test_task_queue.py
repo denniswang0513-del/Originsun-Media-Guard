@@ -7,7 +7,6 @@ enqueue_job() 是公共 API。
 import asyncio
 import time
 import pytest
-from core.schemas import BackupRequest
 import core.state as state
 
 

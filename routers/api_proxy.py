@@ -1,10 +1,9 @@
 from fastapi import APIRouter  # type: ignore
-from fastapi.responses import JSONResponse  # type: ignore
 import os
 import shutil
 from core.schemas import (  # type: ignore
     TranscodeRequest, MergeHostOutputsRequest, VerifyProxiesRequest,
-    VerifyStandaloneProxiesRequest, CompareSourceRequest, MergeOutputRequest
+    VerifyStandaloneProxiesRequest, CompareSourceRequest
 )
 from core.worker import enqueue_job  # type: ignore
 

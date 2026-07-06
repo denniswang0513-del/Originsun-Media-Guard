@@ -1906,7 +1906,7 @@ if (typeof appendLog === 'undefined') {
                                             do_filmstrip: flags.report_filmstrip ?? true,
                                             do_techspec: flags.report_techspec ?? true,
                                             do_hash: flags.report_hash ?? false,
-                                            do_gdrive: false, do_gchat: false, do_line: false,
+                                            do_gdrive: false, do_gchat: false,
                                             exclude_dirs: flags.proxy_root ? [flags.proxy_root + '/' + flags.project_name] : [],
                                             client_sid: window.socket?.id || ''
                                         };

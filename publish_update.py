@@ -15,7 +15,7 @@ import sys
 from datetime import datetime
 
 from ota_manifest import (
-    EXCLUDE_DIRS, STDLIB, LOCAL_MODULES, IMPORT_TO_PIP,
+    STDLIB, LOCAL_MODULES, IMPORT_TO_PIP,
     SERVER_ONLY_PKGS, IMPLICIT_DEPS, scan_imports,
 )
 

@@ -1,10 +1,9 @@
 """
 Unit tests for the cron scheduler module.
 """
-import json
 import os
 from datetime import datetime, timedelta
-from unittest.mock import patch, MagicMock
+from unittest.mock import patch
 
 import pytest
 

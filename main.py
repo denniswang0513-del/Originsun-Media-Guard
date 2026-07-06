@@ -17,8 +17,6 @@ if _sys.platform == "win32":
     asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
 import socketio  # type: ignore
 import uvicorn  # type: ignore
-import threading
-import webbrowser
 from fastapi import FastAPI  # type: ignore
 from fastapi.staticfiles import StaticFiles  # type: ignore
 from fastapi.responses import FileResponse  # type: ignore
@@ -303,7 +301,8 @@ async def _on_startup():
     if _db_import_ok and not state.db_online:
         # 有 DB 套件（master/dev）但啟動時連不上 → 主動告警。
         # 機隊 agent 沒裝 sqlalchemy，import 失敗不告警（那是常態不是故障）。
-        asyncio.ensure_future(_notify_db_transition(False))
+        from core.maintenance import notify_db_transition
+        asyncio.ensure_future(notify_db_transition(False))
     # ── DB Migration: Google OAuth columns ──
     if state.db_online:
         try:
@@ -777,6 +776,13 @@ async def _on_startup():
 
     asyncio.create_task(_periodic_version_check())
     asyncio.create_task(_periodic_db_health())
+    try:
+        from core.maintenance import run_local_maintenance
+        from core.agent_watch import run_agent_watch
+        asyncio.create_task(run_local_maintenance())  # 每日 retention + log 超大告警
+        asyncio.create_task(run_agent_watch())        # 機隊離線告警（內建 master gate）
+    except Exception as _e:
+        print(f"[WARN] 維運背景工未啟動: {_e}")
     asyncio.create_task(_loop_heartbeat())
     import threading as _wd_threading
     _wd_threading.Thread(target=_wedge_watchdog, daemon=True, name="wedge-watchdog").start()
@@ -850,31 +856,6 @@ def _wedge_watchdog():
             print(f"[WATCHDOG] error: {e}")
 
 
-def _db_display_name() -> str:
-    """從 database_url 取庫名（mediaguard / mediaguard_dev），區分同機的 prod/dev 告警。"""
-    try:
-        from config import load_settings
-        return (load_settings().get("database_url") or "").rsplit("/", 1)[-1] or "?"
-    except Exception:
-        return "?"
-
-
-async def _notify_db_transition(now_online: bool) -> None:
-    """DB 上線/斷線「轉換點」主動推播（best-effort）。
-
-    只有裝了 DB 套件的機器（master / dev）會走到這裡 —— 機隊 agent 沒裝
-    sqlalchemy，_periodic_db_health 在 import 就早退，不會十台齊發。
-    """
-    try:
-        from notifier import notify_tab_async, machine_label  # type: ignore
-        await notify_tab_async(
-            "db_recovered" if now_online else "db_offline",
-            db=_db_display_name(), hostname=machine_label(),
-        )
-    except Exception:
-        pass
-
-
 async def _periodic_db_health():
     """每 60 秒檢查 DB 連線；斷線時「重建連線池」而非只重試。
 
@@ -915,7 +896,8 @@ async def _periodic_db_health():
         except Exception:
             state.db_online = False
         if state.db_online != was_online:
-            await _notify_db_transition(state.db_online)
+            from core.maintenance import notify_db_transition
+            await notify_db_transition(state.db_online)
 
 
 def _read_local_version() -> str:

@@ -22,10 +22,9 @@ import os
 import re
 import time
 import json
-import shutil
 import subprocess
 import tempfile
-from dataclasses import dataclass, field, asdict
+from dataclasses import dataclass
 from typing import List, Optional, Tuple, Dict, Any, Callable
 
 from core.whisper_helpers import (  # type: ignore
@@ -713,7 +712,7 @@ def run_align_job(
         return bool(check_cancel_cb and check_cancel_cb())
 
     try:
-        import stable_whisper  # type: ignore
+        import stable_whisper  # type: ignore  # noqa: F401 — 可用性探測，實際使用在後段
     except ImportError:
         return {"success": False, "error": "stable-ts 套件未安裝（pip install stable-ts）"}
 

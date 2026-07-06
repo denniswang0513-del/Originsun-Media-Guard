@@ -3,18 +3,24 @@ notifier.py
 ───────────
 Sends task completion notifications via:
   - Google Chat (Incoming Webhook)
-  - LINE Notify
 
-Webhook URL / Token and Message Templates are read from settings.json or environment variables.
+（LINE Notify 服務已於 2025-03-31 終止，通道於 2026-07-07 移除；
+ settings.json 裡殘留的 line_notify_token / channel line 鍵會被忽略。）
+
+Webhook URL and Message Templates are read from settings.json or environment variables.
 
 Usage:
-  from notifier import notify_all
-  notify_all(project_name="20260302", drive_url="https://drive.google.com/...", file_count=100, total_size=102400)
+  from notifier import notify_tab            # 同步 context
+  from notifier import notify_tab_async      # async context（to_thread 包好）
+  notify_tab("backup_success", project_name="20260302", file_count=100, total_size=102400)
+
+（舊的 notify_all / send_google_chat / _build_message 於 2026-07-07 移除 —
+ 與 notify_tab 完全重疊的前代路徑，唯一 caller worker.py 已改用 notify_tab_async。）
 """
 
 import os
 import json
-from typing import Optional
+
 from utils.formatting import fmt_size
 
 _SETTINGS_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "settings.json")
@@ -28,109 +34,6 @@ def _load_settings() -> dict:
         except Exception:
             pass
     return {}
-
-
-def _build_message(template: str, project_name: str, drive_url: Optional[str], file_count: int, total_size: float) -> str:
-    msg = template
-    msg = msg.replace("{project_name}", project_name)
-    msg = msg.replace("{file_count}", str(file_count))
-    msg = msg.replace("{total_size}", fmt_size(total_size))
-    msg = msg.replace("{report_url}", drive_url if drive_url else "無報表連結")
-    return msg
-
-
-def send_google_chat(project_name: str, drive_url: Optional[str] = None, file_count: int = 0, total_size: float = 0.0) -> bool:
-    """
-    Send a Google Chat card message via Incoming Webhook.
-    Returns True on success, False on failure.
-    """
-    try:
-        import requests  # type: ignore
-    except ImportError:
-        print("notifier: 'requests' not installed, skipping Google Chat notification.")
-        return False
-
-    settings = _load_settings()
-    notif = settings.get("notifications", {})
-    tpls = settings.get("message_templates", {})
-    
-    webhook_url = os.environ.get("GOOGLE_CHAT_WEBHOOK") or notif.get("google_chat_webhook", "")
-
-    if not webhook_url:
-        print("notifier: Google Chat webhook URL not configured.")
-        return False
-
-    # Default template fallback
-    if drive_url:
-        default_tpl = "📊 【報表生成】{project_name} 視覺報表已出爐！\n🔗 點此查看：{report_url}"
-        tpl = tpls.get("report_success") or default_tpl
-    else:
-        default_tpl = "✅ 【備份成功】專案 {project_name} 已完成！\n📂 檔案數：{file_count} | 💾 容量：{total_size}"
-        tpl = tpls.get("backup_success") or default_tpl
-
-    text = _build_message(tpl, project_name, drive_url, file_count, total_size)
-    payload = {"text": text}
-
-    try:
-        resp = requests.post(webhook_url, json=payload, timeout=10)
-        return resp.status_code == 200
-    except Exception as e:
-        print(f"notifier: Google Chat send failed: {e}")
-        return False
-
-
-def send_line_notify(project_name: str, drive_url: Optional[str] = None, file_count: int = 0, total_size: float = 0.0) -> bool:
-    """
-    Send a LINE Notify message.
-    Returns True on success, False on failure.
-    """
-    try:
-        import requests  # type: ignore
-    except ImportError:
-        print("notifier: 'requests' not installed, skipping LINE Notify.")
-        return False
-
-    settings = _load_settings()
-    notif = settings.get("notifications", {})
-    tpls = settings.get("message_templates", {})
-    
-    token = os.environ.get("LINE_NOTIFY_TOKEN") or notif.get("line_notify_token", "")
-
-    if not token:
-        print("notifier: LINE Notify token not configured.")
-        return False
-
-    # Default template fallback
-    if drive_url:
-        default_tpl = "📊 【報表生成】{project_name} 視覺報表已出爐！\n🔗 點此查看：{report_url}"
-        tpl = tpls.get("report_success") or default_tpl
-    else:
-        default_tpl = "✅ 【備份成功】專案 {project_name} 已完成！\n📂 檔案數：{file_count} | 💾 容量：{total_size}"
-        tpl = tpls.get("backup_success") or default_tpl
-
-    # LINE messaging format: always start with a newline to clearly separate the sender name
-    text = "\n" + _build_message(tpl, project_name, drive_url, file_count, total_size)
-
-    try:
-        resp = requests.post(
-            "https://notify-api.line.me/api/notify",
-            headers={"Authorization": f"Bearer {token}"},
-            data={"message": text},
-            timeout=10
-        )
-        return resp.status_code == 200
-    except Exception as e:
-        print(f"notifier: LINE Notify send failed: {e}")
-        return False
-
-
-def notify_all(project_name: str, drive_url: Optional[str] = None, file_count: int = 0, total_size: float = 0.0) -> None:
-    """
-    Fire-and-forget wrapper: send to all configured notification channels.
-    Silently skips any channel that fails.
-    """
-    send_google_chat(project_name, drive_url, file_count, total_size)
-    send_line_notify(project_name, drive_url, file_count, total_size)
 
 
 def notify_tab(template_key: str, **variables) -> None:
@@ -155,12 +58,11 @@ def notify_tab(template_key: str, **variables) -> None:
 
     # Derive tab key: "backup_success" → "backup"
     tab_key = template_key.replace("_success", "")
-    tab_channels = channels.get(tab_key, {"gchat": True, "line": False})
+    tab_channels = channels.get(tab_key, {"gchat": True})
     send_gchat = tab_channels.get("gchat", True)
-    send_line  = tab_channels.get("line", False)
 
     # Nothing enabled → skip
-    if not send_gchat and not send_line:
+    if not send_gchat:
         return
 
     # Default fallback templates per tab
@@ -180,6 +82,10 @@ def notify_tab(template_key: str, **variables) -> None:
         "db_offline":        "🔴 【資料庫斷線】PostgreSQL（{db}）連線中斷 — {hostname}\n已切換 JSON fallback，每 60 秒自動重連中",
         "db_recovered":      "🟢 【資料庫恢復】PostgreSQL（{db}）連線已恢復 — {hostname}",
         "deploy_failed":     "🔴 【部署到生產失敗】v{version}\n⚠️ {detail}",
+        "log_oversize":      "🟠 【Log 檔超大】{hostname} 的 {filename} 已達 {size_mb}MB\nlog 只在重啟時輪替 — 建議找空檔重啟該機 agent",
+        "agent_offline":     "🔴 【機隊斷線】{name}（{url}）連續 {misses} 次健康檢查無回應\n可能：關機/睡眠/網路/agent 掛掉 — 請檢查該機器",
+        "agent_recovered":   "🟢 【機隊恢復】{name}（{url}）已重新上線",
+        "ai_runner_failed":  "🔴 【AI Runner 失效】{kind} 連續 {fails} 次呼叫 claude 失敗\n⚠️ {error}\n可能：Max 訂閱到期/登出/CLI 更新 — 到 master 跑一次 `claude` 檢查",
     }
 
     raw_tpl = tpls.get(template_key) or _defaults.get(template_key, "")
@@ -202,24 +108,12 @@ def notify_tab(template_key: str, **variables) -> None:
     msg = re.sub(r"\{[a-z_][a-z0-9_]*\}", "-", msg)
 
     gchat_url = os.environ.get("GOOGLE_CHAT_WEBHOOK") or notif.get("google_chat_webhook", "")
-    line_token = os.environ.get("LINE_NOTIFY_TOKEN") or notif.get("line_notify_token", "")
 
     if send_gchat and gchat_url:
         try:
             requests.post(gchat_url, json={"text": msg}, timeout=10)
         except Exception as e:
             print(f"notifier: Google Chat [{template_key}] failed: {e}")
-
-    if send_line and line_token:
-        try:
-            requests.post(
-                "https://notify-api.line.me/api/notify",
-                headers={"Authorization": f"Bearer {line_token}"},
-                data={"message": "\n" + msg},
-                timeout=10
-            )
-        except Exception as e:
-            print(f"notifier: LINE Notify [{template_key}] failed: {e}")
 
 
 def machine_label() -> str:

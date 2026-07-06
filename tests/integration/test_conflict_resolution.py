@@ -7,7 +7,6 @@ worker.py 的 _on_conflict 是 _execute_job 內的 nested function，
 """
 import threading
 import time
-import pytest
 import core.state as state
 
 

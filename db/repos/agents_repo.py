@@ -1,6 +1,6 @@
 """Repository for agents table."""
 
-from typing import List, Optional, Dict
+from typing import List, Optional
 
 from sqlalchemy import select, delete, func
 from sqlalchemy.ext.asyncio import AsyncSession

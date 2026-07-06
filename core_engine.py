@@ -1092,7 +1092,6 @@ class MediaGuardEngine:
             rel_dir = ""
             for token in sources:
                 if os.path.isdir(token) and src_file.startswith(token):
-                    rel = os.path.relpath(src_file, token)
                     parent = os.path.basename(os.path.dirname(src_file))
                     if parent and parent != os.path.basename(token):
                         rel_dir = parent
@@ -1114,7 +1113,6 @@ class MediaGuardEngine:
             cmd = self._build_proxy_transcode_cmd(src_file, proxy_out, n_audio)
 
             proc, stderr_tail, stderr_thread = self._spawn_with_stderr_tail(cmd)
-            t_start = time.time()
 
             # 解析 FFmpeg 進度
             for pline in (proc.stdout or []):

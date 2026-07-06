@@ -1,7 +1,6 @@
 """
 Integration tests for the schedules CRUD API.
 """
-import json
 from datetime import datetime, timedelta
 import pytest
 

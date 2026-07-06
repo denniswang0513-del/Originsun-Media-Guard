@@ -396,7 +396,7 @@ async def _run_backup(job, engine, task: BackupRequest, _on_progress, _on_confli
                 "report_name": rpt_name,
                 "do_filmstrip": rpt_filmstrip, "do_techspec": rpt_techspec,
                 "do_hash": rpt_hash,
-                "do_gdrive": False, "do_gchat": False, "do_line": False,
+                "do_gdrive": False, "do_gchat": False,
                 "exclude_dirs": [os.path.join(task.proxy_root, task.project_name)] if task.proxy_root else [],
             })
             report_job_id = uuid.uuid4().hex[:8]
@@ -416,7 +416,7 @@ async def _run_backup(job, engine, task: BackupRequest, _on_progress, _on_confli
 
     elif isinstance(task, BackupRequest) and not getattr(task, 'do_report', False):
         try:
-            from notifier import notify_all  # type: ignore
+            from notifier import notify_tab_async  # type: ignore
             file_count = 0
             total_size = 0.0
             local_dir = os.path.join(task.local_root, task.project_name)
@@ -427,7 +427,8 @@ async def _run_backup(job, engine, task: BackupRequest, _on_progress, _on_confli
                         if not os.path.islink(p):
                             file_count += 1
                             total_size += os.path.getsize(p)
-            await asyncio.to_thread(notify_all, task.project_name, None, file_count, total_size)
+            await notify_tab_async("backup_success", project_name=task.project_name,
+                                   file_count=file_count, total_size=total_size)
         except Exception:
             pass
 
@@ -1036,9 +1037,6 @@ def _drone_meta_sync(job, engine, task: DroneMetaRequest, _on_progress):
     except Exception as e:
         _emit_sync_for_job(job_id, 'log', {'type': 'error', 'msg': f'日期格式錯誤: {e}'})
         raise ValueError(f"Invalid date_time: {e}")
-
-    exif_dt_str = dt.strftime("%Y:%m:%d %H:%M:%S")
-    iso_dt_str = dt.strftime("%Y-%m-%dT%H:%M:%SZ")
 
     total = len(task.files)
     success_count = 0

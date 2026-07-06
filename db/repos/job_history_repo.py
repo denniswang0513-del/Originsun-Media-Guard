@@ -1,9 +1,9 @@
 """Repository for job_history table."""
 
 from datetime import datetime
-from typing import Optional, List, Dict, Any
+from typing import Optional, Dict, Any
 
-from sqlalchemy import select, delete, func, or_
+from sqlalchemy import select, delete, func
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 
@@ -84,6 +84,34 @@ async def clear(session: AsyncSession, date: Optional[str] = None, machine_id: O
         stmt = stmt.where(JobHistory.machine_id == machine_id)
     result = await session.execute(stmt)
     return result.rowcount
+
+
+async def purge_older_than(session: AsyncSession, cutoff: datetime,
+                           batch_size: int = 10000) -> int:
+    """Retention：刪除 finished_at 早於 cutoff 的紀錄（含 finished_at 為 NULL
+    但 created_at 早於 cutoff 的殭屍列）。回傳總刪除筆數。
+
+    分批刪＋**每批自行 commit**（與本 repo 其他函式「caller commits」不同）：
+    此表長期累積後首次 purge 可能一次數十萬列，單一大交易會長時間持鎖、
+    灌大量 WAL。穩態下每日只刪一天量、一批即結束。
+    保留天數設定見 config._DEFAULT_SETTINGS 的 job_history_retention_days。
+    """
+    from sqlalchemy import text as sa_text
+    stmt = sa_text(
+        "DELETE FROM job_history WHERE ctid IN ("
+        "  SELECT ctid FROM job_history"
+        "  WHERE finished_at < :cutoff"
+        "     OR (finished_at IS NULL AND created_at < :cutoff)"
+        "  LIMIT :lim)"
+    )
+    total = 0
+    while True:
+        result = await session.execute(stmt, {"cutoff": cutoff, "lim": batch_size})
+        await session.commit()
+        n = result.rowcount or 0
+        total += n
+        if n < batch_size:
+            return total
 
 
 # ── Helpers ──

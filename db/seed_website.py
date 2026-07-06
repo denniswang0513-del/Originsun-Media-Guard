@@ -181,7 +181,7 @@ async def seed_website_if_empty(session_factory: Callable) -> None:
     在 settings gate 之外先跑，確保既有部署升級後也會補上 7 筆預設導覽。
     """
     try:
-        from sqlalchemy import text, select
+        from sqlalchemy import text
         from sqlalchemy.dialects.postgresql import insert
         from db.models_website import (
             WebsiteSetting, WebsiteCategory, WebsiteService,

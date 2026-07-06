@@ -499,6 +499,15 @@ async def run_pipeline(
                         detail += f" → 已標 ai_review_notes（連續 {count} 次失敗）"
                     except Exception as e:
                         logger.warning("[seo_runner] mark_persistent_failure 失敗：%s", e)
+                    # 主動推播（best-effort）：claude CLI 掛掉（Max 訂閱到期/登出/
+                    # CLI 壞）時 runner 是「靜默降級」，只寫 DB 註記沒人會看到。
+                    try:
+                        from notifier import notify_tab_async  # type: ignore
+                        await notify_tab_async(
+                            "ai_runner_failed", kind="AI SEO（作品描述）",
+                            fails=count, error=(detail or "")[:200])
+                    except Exception:
+                        pass
             works.append({"project_id": pid, "status": status, "detail": detail})
             if target_project_id is None:  # 整批：每筆更新進度給前端輪詢
                 try:

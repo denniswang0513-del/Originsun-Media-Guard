@@ -3,8 +3,9 @@ import json as _json
 
 _SETTINGS_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "settings.json")
 _DEFAULT_SETTINGS: dict = {
+    # LINE Notify 服務已終止（2025-03-31），line_notify_token / channel line 鍵已移除；
+    # 既有 settings.json 殘留的鍵無害（notifier 已不讀）
     "notifications": {
-        "line_notify_token": "",
         "google_chat_webhook": "",
         "custom_webhook_url": "",
     },
@@ -16,12 +17,14 @@ _DEFAULT_SETTINGS: dict = {
         "verify_success":    "🔍 【比對完成】{project_name}\n✅ 通過：{pass_count} | ❌ 失敗：{fail_count} | 共 {total_count} 個",
     },
     "notification_channels": {
-        "backup":    {"gchat": True, "line": False},
-        "report":    {"gchat": True, "line": False},
-        "transcode": {"gchat": True, "line": False},
-        "concat":    {"gchat": True, "line": False},
-        "verify":    {"gchat": True, "line": False},
+        "backup":    {"gchat": True},
+        "report":    {"gchat": True},
+        "transcode": {"gchat": True},
+        "concat":    {"gchat": True},
+        "verify":    {"gchat": True},
     },
+    # job_history DB 表保留天數（core/maintenance.py 每日 purge；0 = 停用）
+    "job_history_retention_days": 180,
     "nas_paths": {
         "ota_dir": "",
         "web_report_dir": r"\\192.168.1.132\Container\AI_Workspace\Originsun_Web\FileReport",

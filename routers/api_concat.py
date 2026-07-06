@@ -1,6 +1,5 @@
 import os
 from fastapi import APIRouter  # type: ignore
-from fastapi.responses import JSONResponse  # type: ignore
 from core.schemas import ConcatRequest  # type: ignore
 from core.worker import enqueue_job  # type: ignore
 

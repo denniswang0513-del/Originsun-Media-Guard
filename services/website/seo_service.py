@@ -11,7 +11,7 @@ import logging
 from datetime import date as _date, datetime as _dt
 from typing import Any, Optional
 
-from sqlalchemy import and_, select
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from db.models import CrmProject

@@ -32,7 +32,6 @@ export async function submitReportJob() {
         do_hash: document.getElementById('rpt_hash')?.checked ?? false,
         do_gdrive: document.getElementById('rpt_gdrive')?.checked ?? false,
         do_gchat: false,
-        do_line: false,
         client_sid: window.socket?.id || '',
     };
 

@@ -19,7 +19,7 @@ def _ensure_dependencies():
 
     # 1. 確保 torch 存在（faster-whisper 內部需要）
     try:
-        import torch  # type: ignore
+        import torch  # type: ignore  # noqa: F401 — 可用性探測（缺就地安裝）
     except ImportError:
         print("[Transcriber] 正在安裝必要套件 torch (CPU-only) ...")
         subprocess.check_call([
@@ -31,11 +31,10 @@ def _ensure_dependencies():
 
     # 2. 確保 faster-whisper 存在
     try:
-        import faster_whisper  # type: ignore
+        import faster_whisper  # type: ignore  # noqa: F401 — 可用性探測（缺就地安裝）
     except ImportError:
         print("[Transcriber] 正在安裝必要套件 faster-whisper ...")
         subprocess.check_call([sys.executable, "-m", "pip", "install", "faster-whisper"])
-        import faster_whisper  # type: ignore
 
 
 def _get_video_info(file_path: str) -> dict:

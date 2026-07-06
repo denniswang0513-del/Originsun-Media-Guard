@@ -1,19 +1,16 @@
 """Drone Metadata Writer — scan files + submit job endpoints."""
 import os
-import io
 import json
 import base64
 import hashlib
 import subprocess
 import time
 import asyncio
-import tempfile
 from collections import OrderedDict
 from threading import Lock
 from typing import List, Optional
 from fastapi import APIRouter, Query, Request  # type: ignore
 from fastapi.responses import JSONResponse, Response, StreamingResponse  # type: ignore
-from starlette.background import BackgroundTasks  # type: ignore
 from core.schemas import DroneMetaScanRequest, DroneMetaRequest, TimelineExportRequest  # type: ignore
 from core.worker import enqueue_job  # type: ignore
 

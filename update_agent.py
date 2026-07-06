@@ -14,7 +14,6 @@ import tempfile
 import time
 import urllib.request
 import zipfile
-import re
 
 # ── Paths ──
 INSTALL_DIR = os.path.dirname(os.path.abspath(__file__))

@@ -14,9 +14,8 @@ from pydantic import BaseModel
 from typing import Optional, List
 
 from core.auth import (
-    hash_password, verify_password, create_token, verify_token,
-    _extract_token, check_admin,
-    load_users_json, save_users_json, sync_user_to_json, remove_user_from_json,
+    hash_password, verify_password, create_token, _extract_token, check_admin,
+    load_users_json, sync_user_to_json, remove_user_from_json,
     LEGACY_ROLE_LEVELS, ALL_MODULES, grant_admin_all_modules,
 )
 try:

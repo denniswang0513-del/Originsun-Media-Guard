@@ -3,7 +3,6 @@ Layer 2 — 系統 API 整合測試。
 使用 async_client fixture（httpx.AsyncClient + ASGITransport）。
 """
 import re
-import pytest
 
 
 # ── 1. health 回 200 ────────────────────────────────────────

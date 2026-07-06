@@ -342,10 +342,7 @@
                 <!-- 使用者管理已搬到 👤 下拉選單的獨立面板 -->
             </div>
             <div id="tab_api_keys" class="tab-content">
-                <div class="form-group">
-                    <label>LINE Notify Token</label>
-                    <input type="password" id="line_token" placeholder="請填入 LINE Notify 權杖...">
-                </div>
+                <!-- LINE Notify 服務已於 2025-03-31 終止，通道已移除（2026-07-07） -->
                 <div class="form-group">
                     <label>Google Chat Webhook URL</label>
                     <input type="password" id="gchat_webhook" placeholder="https://chat.googleapis.com/v1/spaces/...">
@@ -363,43 +360,37 @@
                 </p>
                 <div class="form-group">
                     <label>✅ 備份成功 (Backup)<span class="ch-toggles"><span class="ch-toggle gchat on" data-tab="backup"
-                                data-ch="gchat">Chat</span><span class="ch-toggle line off" data-tab="backup"
-                                data-ch="line">LINE</span></span></label>
+                                data-ch="gchat">Chat</span></span></label>
                     <textarea id="tpl_backup_success" rows="2">✅ 【備份成功】專案 {project_name} 已完成！
 📂 檔案數：{file_count} | 💾 容量：{total_size}</textarea>
                 </div>
                 <div class="form-group">
                     <label>📊 視覺報表生成 (Report)<span class="ch-toggles"><span class="ch-toggle gchat on" data-tab="report"
-                                data-ch="gchat">Chat</span><span class="ch-toggle line off" data-tab="report"
-                                data-ch="line">LINE</span></span></label>
+                                data-ch="gchat">Chat</span></span></label>
                     <textarea id="tpl_report_success" rows="2">📊 【報表生成】{project_name} 視覺報表已出爐！
 🔗 點此查看：{report_url}</textarea>
                 </div>
                 <div class="form-group">
                     <label>🎬 轉檔完成 (Transcode)<span class="ch-toggles"><span class="ch-toggle gchat on"
-                                data-tab="transcode" data-ch="gchat">Chat</span><span class="ch-toggle line off"
-                                data-tab="transcode" data-ch="line">LINE</span></span></label>
+                                data-tab="transcode" data-ch="gchat">Chat</span></span></label>
                     <textarea id="tpl_transcode_success" rows="2">🎬 【轉檔完成】{project_name} 已轉檔完成！
 📂 輸出至：{dest_dir} | 共 {file_count} 個檔案</textarea>
                 </div>
                 <div class="form-group">
                     <label>🔗 串接完成 (Concat)<span class="ch-toggles"><span class="ch-toggle gchat on" data-tab="concat"
-                                data-ch="gchat">Chat</span><span class="ch-toggle line off" data-tab="concat"
-                                data-ch="line">LINE</span></span></label>
+                                data-ch="gchat">Chat</span></span></label>
                     <textarea id="tpl_concat_success" rows="2">🔗 【串接完成】{output_file} 已輸出！
 📁 儲存位置：{dest_dir}</textarea>
                 </div>
                 <div class="form-group">
                     <label>🔍 比對完成 (Verify)<span class="ch-toggles"><span class="ch-toggle gchat on" data-tab="verify"
-                                data-ch="gchat">Chat</span><span class="ch-toggle line off" data-tab="verify"
-                                data-ch="line">LINE</span></span></label>
+                                data-ch="gchat">Chat</span></span></label>
                     <textarea id="tpl_verify_success" rows="2">🔍 【比對完成】{project_name}
 ✅ 通過：{pass_count} | ❌ 失敗：{fail_count} | 共 {total_count} 個</textarea>
                 </div>
                 <div class="form-group">
                     <label>🎙️ 逐字稿完成 (Transcribe)<span class="ch-toggles"><span class="ch-toggle gchat on" data-tab="transcribe"
-                                data-ch="gchat">Chat</span><span class="ch-toggle line off" data-tab="transcribe"
-                                data-ch="line">LINE</span></span></label>
+                                data-ch="gchat">Chat</span></span></label>
                     <textarea id="tpl_transcribe_success" rows="2">🎙️ 【逐字稿完成】{project_name} 已生成！
 📂 輸出至：{dest_dir} | 共 {file_count} 個檔案</textarea>
                 </div>

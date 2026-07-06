@@ -229,17 +229,8 @@ async def upload_file_to_path(dest_path: str = Form(""), file: UploadFile = File
 async def create_desktop_shortcut():
     import subprocess
     import locale
-    import socket
     try:
         vbs_path = os.path.join(os.getcwd(), "Create_Shortcut.vbs")
-
-        try:
-            s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-            s.connect(("8.8.8.8", 80))
-            my_ip = s.getsockname()[0]
-            s.close()
-        except:
-            my_ip = "127.0.0.1"
 
         ico_path = os.path.join(os.getcwd(), "logo.ico")
 

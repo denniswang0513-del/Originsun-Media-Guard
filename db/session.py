@@ -1,9 +1,8 @@
 """Database connection management — async SQLAlchemy + asyncpg."""
 from __future__ import annotations
 
-import asyncio
 import os
-from typing import Optional, AsyncGenerator
+from typing import AsyncGenerator
 
 _DEFAULT_DB_URL = "postgresql+asyncpg://originsun:originsun2026@192.168.1.132:5432/mediaguard"
 

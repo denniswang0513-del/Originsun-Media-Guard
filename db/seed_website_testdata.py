@@ -266,7 +266,7 @@ _TEST_INQUIRIES: list[dict] = [
 async def seed_test_data(session_factory: Callable) -> None:
     """Insert test data. Idempotent via ON CONFLICT DO NOTHING."""
     try:
-        from sqlalchemy import select, text
+        from sqlalchemy import select
         from sqlalchemy.dialects.postgresql import insert
         from db.models import Client, CrmProject, CrmStaff
         from db.models_website import WebsiteCategory, WebsiteContactInquiry, WebsiteProjectCategory

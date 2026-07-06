@@ -3,7 +3,6 @@ Layer 2 — 專案總覽 API 測試（佇列 + 機器狀態）。
 """
 import asyncio
 import time
-import json
 import pytest
 import core.state as state
 
@@ -177,7 +176,7 @@ async def test_unset_urgent(async_client, mock_engine):
         "/api/v1/jobs",
         json={**MINIMAL_BACKUP, "project_name": "UU_A"},
     )
-    job_id = r.json()["job_id"]
+    assert r.json()["job_id"]
 
     r2 = await async_client.post(
         "/api/v1/jobs",

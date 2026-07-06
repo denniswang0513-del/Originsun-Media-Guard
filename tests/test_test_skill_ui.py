@@ -46,7 +46,7 @@ def _run(coro):
 # ── Playwright 跳過守門（沒裝 chromium 直接 skip） ──
 
 playwright = pytest.importorskip("playwright.sync_api", reason="Playwright not installed")
-from playwright.sync_api import Page, Browser, expect
+from playwright.sync_api import Page
 
 
 # ── /test 專用 server fixture（port 18002 — 跟 HTTP test 共用） ──

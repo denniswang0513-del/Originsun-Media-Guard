@@ -97,7 +97,6 @@ def test_zero_audio_source_no_audio_codec(monkeypatch, tmp_path):
     """Source with no audio (silent action cam etc.) — proxy must not have
     audio args at all (ffmpeg would otherwise fail with 'no such stream')."""
     cmd = _run_transcode_with_audio_streams(monkeypatch, tmp_path, n_audio_streams=0)
-    cmd_str = " ".join(cmd)
     # No audio map should be present
     audio_maps = [cmd[i + 1] for i, a in enumerate(cmd)
                   if a == "-map" and i + 1 < len(cmd) and cmd[i + 1].startswith("0:a")]

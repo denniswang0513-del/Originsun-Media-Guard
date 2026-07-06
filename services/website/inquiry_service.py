@@ -10,7 +10,7 @@ import logging
 import uuid
 from typing import Optional
 
-from sqlalchemy import delete, desc, func, select, update
+from sqlalchemy import delete, desc, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from db.models_website import WebsiteContactInquiry

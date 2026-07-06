@@ -899,6 +899,14 @@ async def deploy_to_prod(request: Request):
     _publish_status[job_id] = {"status": "running", "log": "", "version": version}
 
     async def _run():
+        async def _notify_fail(detail: str) -> None:
+            """部署失敗告警（best-effort）— 四條失敗路徑共用，不能漏任何一條。"""
+            try:
+                from notifier import notify_tab_async  # type: ignore
+                await notify_tab_async("deploy_failed", version=version, detail=detail[:300])
+            except Exception:
+                pass
+
         async with _publish_lock:
             try:
                 result = await asyncio.to_thread(_deploy_to_prod_sync, version, notes)
@@ -909,26 +917,14 @@ async def deploy_to_prod(request: Request):
                         "status": "error", "log": deploy_log, "version": version,
                         "message": "部署失敗（生產未重啟）",
                     }
+                    await _notify_fail(f"部署前置失敗（生產未動）：{deploy_log[-200:]}")
                     return
 
                 # ── Restart 8000 so it loads the freshly-copied code ──
-                # ?ota=0: code is already copied, so do a clean restart (no OTA).
-                # The OTA path made the master download from itself while exiting
-                # → spawned uvicorn from the wrong cwd → 'No module named db' crash.
-                restart_msg = ""
-                def _restart():
-                    import urllib.request
-                    req = urllib.request.Request(
-                        _PROD_RESTART_URL + "?ota=0", method="POST", data=b"{}",
-                        headers={"Content-Type": "application/json",
-                                 "X-Internal-Key": "originsun-internal-restart"},
-                    )
-                    urllib.request.urlopen(req, timeout=5)
-                try:
-                    await asyncio.to_thread(_restart)
-                    restart_msg = "已觸發 8000 重啟"
-                except Exception as e:
-                    restart_msg = f"檔案已部署，但重啟 8000 失敗（請手動重啟）: {e}"
+                # 走 _force_restart_prod：internal/restart（?ota=0 clean restart，
+                # OTA 路徑會從錯 cwd spawn → 'No module named db'）失敗時
+                # fallback 用 process_spawn CLI 拉起 — 與 rollback 端點同一條路。
+                restart_msg = await asyncio.to_thread(_force_restart_prod)
 
                 # ── Smoke check：等舊行程退場 → 新行程健康 + 版本正確 ──
                 _publish_status[job_id] = {
@@ -952,11 +948,7 @@ async def deploy_to_prod(request: Request):
                     msg = f"檔案已部署但{smoke['detail']}；生產仍跑舊版，請手動重啟 8000 或再部署一次"
                     _publish_status[job_id] = {"status": "error", "version": version,
                                                "log": deploy_log, "message": msg}
-                    try:
-                        from notifier import notify_tab_async  # type: ignore
-                        await notify_tab_async("deploy_failed", version=version, detail=msg)
-                    except Exception:
-                        pass
+                    await _notify_fail(msg)
                     return
 
                 # 重啟了但沒健康回來 / 版本不符 → 自動還原舊碼 + 拉起 + 再驗
@@ -971,14 +963,11 @@ async def deploy_to_prod(request: Request):
                     "status": "error", "version": version, "log": deploy_log,
                     "message": f"部署 smoke check 未過 — {detail}",
                 }
-                try:
-                    from notifier import notify_tab_async  # type: ignore
-                    await notify_tab_async("deploy_failed", version=version, detail=detail)
-                except Exception:
-                    pass
+                await _notify_fail(detail)
             except Exception as e:
                 _append_publish_history(version, f"DEPLOY→8000 ERROR: {notes}", False, "system")
                 _publish_status[job_id] = {"status": "error", "log": "", "version": version, "message": str(e)}
+                await _notify_fail(f"部署流程未預期例外：{type(e).__name__}: {e}")
 
     asyncio.create_task(_run())
     return {"status": "started", "job_id": job_id}

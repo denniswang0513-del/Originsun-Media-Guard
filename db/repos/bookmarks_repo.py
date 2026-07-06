@@ -3,7 +3,7 @@
 from typing import List, Optional
 from datetime import datetime
 
-from sqlalchemy import select, delete, update
+from sqlalchemy import select, delete
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from db.models import Bookmark

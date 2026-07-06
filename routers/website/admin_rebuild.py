@@ -13,7 +13,6 @@ Endpoints (prefix `/api/website/admin`):
 """
 from __future__ import annotations
 
-import os
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy.ext.asyncio import AsyncSession

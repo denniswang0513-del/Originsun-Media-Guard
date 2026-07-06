@@ -6,7 +6,7 @@ Two modes:
   python bootstrap.py --update [URL]   → OTA update from server
   python bootstrap.py --update         → Uses master_server from settings.json
 """
-import os, sys, json, zipfile, tempfile, subprocess, shutil, signal, time
+import os, sys, json, zipfile, tempfile, subprocess, shutil, time
 import urllib.request
 
 # ---------------------------------------------------------------------------
