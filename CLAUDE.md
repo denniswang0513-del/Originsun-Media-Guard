@@ -268,7 +268,8 @@ Originsun-Media-Guard/
 │   ├── api_agents.py        # NAS 共享機器管理 API (GET/POST/DELETE /api/v1/agents)（見 7.11）
 │   ├── api_bookmarks.py     # 書籤 CRUD API
 │   ├── api_schedules.py     # 排程管理 API
-│   └── api_crm.py           # CRM 客戶管理 API（見 7.15）— 客戶 CRUD + CSV 匯入 + AM 使用者列表
+│   ├── api_crm.py           # CRM 薄殼 — re-export routers/crm/ 的 router（見 7.15）
+│   └── crm/                 # CRM 領域套件：_shared + clients/projects/quotes/staff/costs/finance/showcase
 │
 │  ── 【認證與權限】
 ├── core/
@@ -708,9 +709,12 @@ def _emit_sync(event: str, data: dict) -> None:
 | POST | `/api/v1/voice_profiles/{id}/cache` | 將 NAS 角色快取到本機 |
 
 
-### 7.15 CRM 模組（`routers/api_crm.py` — 4,800+ 行 / 140+ 端點，必分段讀）
+### 7.15 CRM 模組（`routers/crm/` 套件 — 140+ 端點）
 
-> ⚠️ 端點數會持續漂移，**以程式碼為準**（`grep '@router\.' routers/api_crm.py | wc -l`），不要相信文件裡寫死的數字。
+> 2026-07-06 起由單檔 api_crm.py（~5,100 行）拆分為領域套件：`_shared.py`（router 單例 +
+> 跨領域 helpers）+ `clients` / `projects` / `quotes` / `staff` / `costs` / `finance` / `showcase`。
+> `routers/api_crm.py` 只剩薄殼（re-export router + `_mint_showcase_edit_token`），**URL 全部不變**。
+> ⚠️ 端點數會持續漂移，**以程式碼為準**（`grep -r '@router\.' routers/crm | wc -l`），不要相信文件裡寫死的數字。
 
 CRM 系統包含 6 個獨立 Tab + 帳務管理的 5 個子視圖：
 
@@ -785,7 +789,7 @@ CRM 系統包含 6 個獨立 Tab + 帳務管理的 5 個子視圖：
 **新增 CRM 功能 checklist**：
 1. DB Model → `db/models.py`（新欄位需在 `main.py` startup 加 `ALTER TABLE ADD COLUMN IF NOT EXISTS`）
 2. Schema → `core/schemas.py`
-3. API → `routers/api_crm.py`
+3. API → `routers/crm/<領域>.py`（共用 helper 進 `_shared.py`；純錢流判定進 `core/crm_logic.py` 並加單元測試）
 4. 前端 → `frontend/tabs/crm/` 對應 `.html` + `.js`
 5. 帳務子視圖用 lazy-load，import 路徑必須用 `location.origin` 絕對路徑
 6. 新模組權限 3 處同步（RBAC v2 已無 roles.json/角色 seed）：`core/auth.py` 的 `ALL_MODULES`（source of truth）、`frontend/js/shared/tab-config.js`（TAB_MAP/TAB_LOADERS/TAB_GROUPS）、`frontend/js/admin/user-mgmt.js` 的 `MODULE_LABELS`
@@ -1030,12 +1034,13 @@ e:\Dev\Originsun-Media-Guard\.venv\Scripts\python.exe -m py_compile <modified_fi
 
 | 檔案 | 約行數 | 必須分段 |
 |------|--------|----------|
-| `routers/api_crm.py` | 4800+ | ✓ |
 | `frontend/app.js` | 2100+ | ✓ |
 | `frontend/tabs/website/subviews/blog.js` | 2000+ | ✓ |
 | `core_engine.py` | 1900+ | ✓ |
 | `frontend/tabs/projects/projects.js` | 1400+ | ✓ |
+| `routers/crm/costs.py` | 1300+ | ✓ |
 | `core/worker.py` | 1300+ | ✓ |
+| `routers/crm/showcase.py` | 1200+ | ✓ |
 | `frontend/tabs/crm/crm-projects-cost.js` | 1000+ | ✓ |
 | `frontend/tabs/transcribe/transcribe.js` | 1000+ | ✓ |
 
