@@ -316,9 +316,12 @@ routers/
 | 並行 | 同一時間只有一個任務 | 多專案同時在不同機器上執行 |
 | 容錯 | 機器掛掉任務就停了 | 任務自動轉移到其他機器 |
 
-### 要建置的東西
+### 要建置的東西（2026-07-06 健康檢查後分階段：先做第一步，其餘再評估）
 
-- [ ] 中央任務佇列（DB-backed，取代記憶體 Queue）
+- [ ] **第一步（獨立價值，先做）：佇列 DB 持久化** — QUEUED/WAITING 任務落 DB，
+      master 重啟不再丟排隊任務（現況 `core/state.py` 純記憶體 `_jobs` dict）。
+      這一步不改分派邏輯、與終局架構同向，做完立刻解掉現役穩定性問題。
+- [ ] 中央任務佇列（DB-backed 分派，取代記憶體 Queue）
 - [ ] Agent 自動註冊 + 心跳回報
 - [ ] 負載分派（根據 GPU/CPU 能力分配任務）
 - [ ] 容錯：Agent 斷線 → 任務自動重派
@@ -343,11 +346,13 @@ routers/
 
 - [x] Agent 健康度面板（`publish.html` Connected Agents card：在線/離線/busy + 版本號）
 - [x] 主 UI 機器狀態即時監控（綠燈脈衝/紅燈/橘燈 + CPU 顯示）
+- [x] **失敗主動告警**（v1.10.209）：任務失敗 / 官網 rebuild 失敗 / 每日備份失敗 /
+      DB 斷線恢復 / 部署 smoke 失敗 → Google Chat/LINE 推播（原本通知只在成功時發）
 
 ### 尚需完成
 
+- [ ] Agent 離線告警（heartbeat 斷線 → 推播；目前只有 UI 紅燈，沒開網頁看不到）
 - [ ] 任務失敗率統計（成功率、平均處理時間）
-- [ ] 告警通知整合（已有 `notifier.py`，擴充至 Agent 異常告警）
 - [ ] 獨立監控儀表板頁面（整合到主 UI）
 
 ### 做完後你看到的改變
@@ -677,22 +682,29 @@ tools:
 
 ---
 
-## Phase E：生產環境部署
+## Phase E：master 去單點化 + 生產環境部署
 
-**優先等級**：🟢 低 — CRM 上線後需要穩定存取
+**優先等級**：🟠 中高（2026-07-06 健康檢查重定義）— 系統早已是生產
+（機隊 10 台 + 對外官網 + CRM 管公司正式帳），真正的風險不是缺 HTTPS，
+而是 master 是一台身兼 dev 的 Windows 桌機、掛了沒有重建程序。
 
-### 要建置的東西
+### 要建置的東西（依風險排序）
 
-- [ ] Nginx 反向代理設定
-- [ ] Let's Encrypt SSL 憑證（HTTPS）
-- [ ] Docker Compose 容器化
-- [ ] 自動重啟服務
+- [ ] **master 重建 SOP**：新機 → 裝依賴（requirements_server.txt）→ 還原
+      settings/credentials/SSH key → 接回 NAS 與機隊 的完整照抄式文件
+- [ ] **NAS 災難重建程序**：NAS 整台死掉時，postgres / nginx / cloudflared /
+      website-api 在他處重建 + 從 Google Drive 備份還原的 runbook
+      （現有 BACKUP_RESTORE.md 全部假設 NAS 還活著）
+- [ ] dev / 生產分機評估（或至少把 master 的五重身分
+      —— build/relay/claude runner/OTA 來源/備份調度 —— 文件化）
+- [ ] Nginx 反向代理 + SSL（HTTPS）
+- [ ] 自動重啟服務強化
 
 ### 做完後你看到的改變
 
-- 服務網址從 `http://192.168.1.x:8000` → `https://media.yourcompany.com`
-- 服務掛掉後自動重啟
-- 外網可安全存取
+- master 硬碟掛掉 → 照 SOP 半天內重建，而不是災難
+- NAS 掛掉 → 官網與 DB 有明確的異地重生路徑
+- （後段）服務網址 HTTPS 化、外網可安全存取
 
 ---
 
@@ -747,11 +759,11 @@ tools:
     ▼ Phase L: 行動端適配 (🟡 部分完成)
     │   → ✅ 報表手機版 RWD → 待做：主 UI RWD → 觸控優化
     │
-    ▼ Phase G: 多機多專案
-    │   → DB-backed 佇列 → 負載分派 → 容錯重派
+    ▼ Phase F-lite: 基礎監控 (🟡 失敗告警已完成 v1.10.209)
+    │   → ✅ 失敗推播 → Agent 離線告警 → 失敗率 → 監控頁
     │
-    ▼ Phase F-lite: 基礎監控
-    │   → Agent 健康度 → 失敗率 → 告警
+    ▼ Phase G: 多機多專案
+    │   → 第一步:佇列 DB 持久化 → DB-backed 分派 → 負載分派 → 容錯重派
     │
     ▼ Phase C: Webhook
     │   → 事件訂閱 → Notion/Slack 通知
@@ -759,8 +771,8 @@ tools:
     ▼ Phase D: MCP Server
     │   → 媒體 + CRM 工具 → OpenClaw 整合
     │
-    ▼ Phase E: 生產部署
-    │   → HTTPS + Docker
+    ▼ Phase E: master 去單點化 + 生產部署
+    │   → 重建 SOP → NAS 災備 → HTTPS + Docker
     │
     ▼ Phase F-full: 完整監控 (持續)
         → 集中 Log + 營運儀表板
