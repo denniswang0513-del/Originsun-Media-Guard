@@ -4,7 +4,7 @@
 
 ---
 
-## 現況 (v1.10.136) 基準線
+## 現況 (v1.10.208) 基準線<!-- publish_update.py 自動維護版號，勿手改 -->
 
 - ✅ 7 個完整工作流程（備份、比對、轉 Proxy、串帶、報表、AI 逐字稿、空拍寫入）
 - ✅ 模組化後端：`main.py` + `core/` + `routers/`（router 容錯載入，缺模組跳過不 crash）
@@ -21,7 +21,7 @@
 - ✅ 書籤 + 排程系統 — 儲存常用設定、cron 定時排程
 - ✅ 開機自動啟動 — Windows Startup 捷徑 + `start_hidden.vbs`
 - ✅ PostgreSQL 集中資料庫 — QNAP NAS Docker + SQLAlchemy async + DB 優先 JSON fallback
-- ✅ Auth + RBAC — JWT 登入 + Google OAuth + 六角色權限 + 模組級守衛
+- ✅ Auth + RBAC — JWT 登入 + Google OAuth + 模組級守衛（v2 已移除角色層，權限直接綁帳號 modules+access_level）
 - ✅ 版本發布工具 — `publish.html` Web UI + 並發鎖 + 發布歷史 + 一鍵回滾
 - ✅ CORS Private Network Access — 跨 LAN 機器的 preflight 支援
 - ✅ 版本 badge 本機更新 — 點擊版號即觸發 OTA（移除 JWT 限制 + 步驟動畫 Modal）
@@ -727,15 +727,15 @@ tools:
     │   → 7 階段 OTA + 4 層套件防線 + publish.html + 遠端更新 + 回滾
     │
     ▼ Phase A: Auth + 角色權限 (✅)
-    │   → JWT + Google OAuth + 六角色 RBAC + 使用者/角色管理 UI + API Key 管理
+    │   → JWT + Google OAuth + RBAC v2（權限直接綁帳號）+ 使用者管理 UI + API Key 管理
     │
     ▼ Phase 0: 程式碼重構 (✅)
     │   → app.js 3499→1951+10模組 / projects.js 2180→1687+2模組 / api_system.py 1031→332+2router
     │
     ▼ Phase J: CRM + 專案管理 + 帳務 (✅ 核心完成)
-    │   → 64 API / 11 DB 表 / 6 Tab + 5 子視圖 + 手機版 RWD + Inline 編輯
+    │   → 140+ API（持續增長，以程式碼為準）/ 11+ DB 表 / 6 Tab + 5 子視圖 + 手機版 RWD + Inline 編輯
     │
-現在 (v1.10.136) ← 你在這裡
+現在 (v1.10.208) ← 你在這裡
     │
     ▼ Phase M: 對外官方網站 (✅ 完整版 A 部署完成 2026-04-29)
     │   → NAS Website_Nginx (8090) + website-api 容器 + cloudflared tunnel
@@ -766,7 +766,8 @@ tools:
         → 集中 Log + 營運儀表板
 ```
 
-**下一步**：Phase M（對外官方網站，2026-04-20 ~ 2026-07-01）。
+**下一步**：Phase M 已於 2026-04-29 部署上線、持續迭代中（AI SEO / 翻譯 / 轉址 / 結案上架收件匣等）。
+排定的下一個獨立 Phase 為 **J-3 備份 Tab 整合**（小工程）與 **F-lite 基礎監控**（失敗告警部分已完成：任務失敗/rebuild 失敗/備份失敗/DB 斷線恢復 主動推播）。
 
 ---
 

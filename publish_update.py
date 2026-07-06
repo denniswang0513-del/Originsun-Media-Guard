@@ -391,6 +391,51 @@ def sync_redirects_to_nas() -> bool:
 # Main
 # ────────────────────────────────────────
 
+def sync_docs_version(version: str) -> None:
+    """發版時同步 CLAUDE.md / ROADMAP.md 的版本標記（文件漂移防治）。
+
+    只改「版本標記行」，不碰其他內容；pattern 找不到就跳過，
+    任何失敗只 WARN 不擋發版。回滾 version.json 的兩條路徑也要呼叫，
+    讓文件標記永遠和 version.json 同步。
+    """
+    base = os.path.dirname(os.path.abspath(__file__))
+    today = datetime.now().strftime("%Y-%m-%d")
+    # 檔案 → [(行首 pattern, 替換字串)] — 只替換匹配到的片段，行尾註解保留
+    rules = {
+        "CLAUDE.md": [
+            (re.compile(r"^> \*\*版本\*\*: v[\d.]+（\d{4}-\d{2}-\d{2}）"),
+             f"> **版本**: v{version}（{today}）"),
+        ],
+        "ROADMAP.md": [
+            (re.compile(r"^## 現況 \(v[\d.]+\) 基準線"),
+             f"## 現況 (v{version}) 基準線"),
+            (re.compile(r"^現在 \(v[\d.]+\) ← 你在這裡"),
+             f"現在 (v{version}) ← 你在這裡"),
+        ],
+    }
+    for fname, frules in rules.items():
+        path = os.path.join(base, fname)
+        if not os.path.exists(path):
+            continue
+        try:
+            # newline="" 讀寫都保留原始換行（CRLF/LF），避免整檔換行被改寫
+            with open(path, "r", encoding="utf-8", newline="") as f:
+                lines = f.readlines()
+            changed = False
+            for i, line in enumerate(lines):
+                for pattern, repl in frules:
+                    new_line, n = pattern.subn(repl, line, count=1)
+                    if n:
+                        lines[i] = new_line
+                        changed = True
+            if changed:
+                with open(path, "w", encoding="utf-8", newline="") as f:
+                    f.writelines(lines)
+                print(f"[OK] {fname} 版本標記 → v{version}")
+        except Exception as e:
+            print(f"[WARN] {fname} 版本標記同步失敗（不擋發版）: {e}")
+
+
 def main():
     print("=" * 60)
     print("[*] Originsun SaaS - Auto Publisher (v2)")
@@ -462,6 +507,9 @@ def main():
     atomic_json_write(VERSION_FILE, v_data)
     print(f"\n[OK] 已更新 {VERSION_FILE} (v{new_version})")
 
+    # Sync doc version markers (CLAUDE.md / ROADMAP.md) — 文件漂移防治
+    sync_docs_version(new_version)
+
     # Generate manifest + auto-update requirements
     generate_manifest(new_version)
 
@@ -479,6 +527,7 @@ def main():
             # Rollback version.json
             v_data["version"] = current_version
             atomic_json_write(VERSION_FILE, v_data)
+            sync_docs_version(current_version)
             print(f"[*] 已回滾 {VERSION_FILE} 至 v{current_version}")
             return 1
         print("[OK] Preflight 通過")
@@ -539,6 +588,7 @@ def main():
         # Rollback version.json
         v_data["version"] = current_version
         atomic_json_write(VERSION_FILE, v_data)
+        sync_docs_version(current_version)
         print(f"[*] 已回滾 {VERSION_FILE} 至 v{current_version}")
         return 1
     print(f"[OK] OTA 大小正常 ({ota_mb:.1f} MB)")

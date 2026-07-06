@@ -1,6 +1,6 @@
 # Originsun Media Guard Pro — Claude Code 完整交接文件
 
-> **版本**: v1.10.136（2026-05-21）
+> **版本**: v1.10.208（2026-07-06）<!-- publish_update.py 自動維護，勿手改 -->
 > **目標讀者**: 接手開發的 AI 協作者（Claude Code）
 > **開發環境**: Windows 11、Python 3.11、Vanilla JS (ES Modules)
 > **啟動方式**: `e:\Dev\Originsun-Media-Guard\.venv\Scripts\python.exe main.py`
@@ -117,7 +117,7 @@ dev 服務啟動後在 `http://localhost:8001`；生產 agent 在 `http://localh
 ## 3. 完整目錄結構
 
 ```
-OriginsunTranscode/
+Originsun-Media-Guard/
 │
 │  ── 【進入點與核心邏輯】
 ├── main.py                  # FastAPI 應用程式進入點
@@ -275,8 +275,8 @@ OriginsunTranscode/
 │   ├── auth.py              # JWT 認證 + 權限守衛（check_admin=Lv3 / check_admin_or_module=Lv3 或指定模組；RBAC v2 無角色層）
 │   └── google_auth.py       # Google ID Token 驗證（GIS credential 模式，不需 client_secret）
 ├── db/
-│   ├── models.py            # SQLAlchemy ORM（User + Role + Client 表，User 含 google_id/email/avatar_url）
-│   └── session.py           # DB 連線 + init_db() + 預設角色/使用者 seed
+│   ├── models.py            # SQLAlchemy ORM（User + Client + CRM 表；RBAC v2 已無 Role 表，User 含 modules/access_level/google_id/email/avatar_url）
+│   └── session.py           # DB 連線 + init_db()（RBAC v2：無角色 seed，權限直接綁帳號）
 │
 │  ── 【frontend/ — 靜態前端（SPA）】
 ├── frontend/
@@ -534,7 +534,7 @@ def _emit_sync(event: str, data: dict) -> None:
 
 ### 5.6 RBAC + Google OAuth 認證系統
 
-- **雙寫架構**：使用者資料同時存 `users.json`（JSON 檔）和 SQLite DB（`db/models.py`）。
+- **雙寫架構**：使用者資料同時存 `users.json`（JSON 檔）和 PostgreSQL（`db/models.py`，NAS 上的 mediaguard 庫）。
   每次修改必須呼叫 `_persist_user(user_data)` 統一寫入，不可分開呼叫 `sync_user_to_json` + `_save_user_to_db`。
 - **Google OAuth 使用 GIS Credential 模式**：不需 client_secret，不需 redirect URI。
   前端載入 `accounts.google.com/gsi/client`，Google 返回 ID Token JWT，後端用 `google-auth` 庫驗證。
@@ -708,21 +708,23 @@ def _emit_sync(event: str, data: dict) -> None:
 | POST | `/api/v1/voice_profiles/{id}/cache` | 將 NAS 角色快取到本機 |
 
 
-### 7.15 CRM 模組（`routers/api_crm.py` — 88 端點）
+### 7.15 CRM 模組（`routers/api_crm.py` — 4,800+ 行 / 140+ 端點，必分段讀）
+
+> ⚠️ 端點數會持續漂移，**以程式碼為準**（`grep '@router\.' routers/api_crm.py | wc -l`），不要相信文件裡寫死的數字。
 
 CRM 系統包含 6 個獨立 Tab + 帳務管理的 5 個子視圖：
 
-| Tab | 前端檔案 | 端點數 | DB 表 |
-|-----|---------|--------|-------|
-| 🤝 客戶管理 | `crm/crm.html` + `crm.js` | 7 | `clients` |
-| 📁 專案管理 | `crm/crm-projects.html` + `.js` | 14 | `crm_projects`, `crm_project_staff`, `crm_project_expenses` |
-| 💰 報價管理 | `crm/crm-quotes.html` + `.js` | 13 | `crm_quotations`, `crm_quotation_items`, `crm_quotation_templates` |
-| 👥 人力資源 | `crm/crm-staff.html` + `.js` | 11 | `crm_staff` |
-| 🧾 帳務—發票 | `crm/crm-invoices.html` + `.js` | 6 | `crm_invoices` |
-| 🧾 帳務—請款 | `crm/crm-payments.html` + `.js` | 7 | `crm_payment_requests` |
-| 🧾 帳務—收支明細 | `crm/crm-cashbook.html` + `.js` | 5 | `crm_cash_entries` |
-| 🧾 帳務—應付帳款 | `crm/crm-payables.html` + `.js` | 3 | (視圖，含 batch-month) |
-| 🧾 帳務—應收帳款 | `crm/crm-receivables.html` + `.js` | 2 | (視圖，查詢 `crm_invoices`) |
+| Tab | 前端檔案 | DB 表 |
+|-----|---------|-------|
+| 🤝 客戶管理 | `crm/crm.html` + `crm.js` | `clients` |
+| 📁 專案管理 | `crm/crm-projects.html` + `.js` | `crm_projects`, `crm_project_staff`, `crm_project_expenses` |
+| 💰 報價管理 | `crm/crm-quotes.html` + `.js` | `crm_quotations`, `crm_quotation_items`, `crm_quotation_templates` |
+| 👥 人力資源 | `crm/crm-staff.html` + `.js` | `crm_staff` |
+| 🧾 帳務—發票 | `crm/crm-invoices.html` + `.js` | `crm_invoices` |
+| 🧾 帳務—請款 | `crm/crm-payments.html` + `.js` | `crm_payment_requests` |
+| 🧾 帳務—收支明細 | `crm/crm-cashbook.html` + `.js` | `crm_cash_entries` |
+| 🧾 帳務—應付帳款 | `crm/crm-payables.html` + `.js` | (視圖，含 batch-month) |
+| 🧾 帳務—應收帳款 | `crm/crm-receivables.html` + `.js` | (視圖，查詢 `crm_invoices`) |
 
 **客戶詳情面板**：4 個 Tab — 客戶資訊（inline 編輯）、客戶關係（inline 編輯）、客戶績效（專案統計/狀態分布/年度營收）、專案紀錄（卡片列表+詳情彈窗）
 
@@ -786,7 +788,7 @@ CRM 系統包含 6 個獨立 Tab + 帳務管理的 5 個子視圖：
 3. API → `routers/api_crm.py`
 4. 前端 → `frontend/tabs/crm/` 對應 `.html` + `.js`
 5. 帳務子視圖用 lazy-load，import 路徑必須用 `location.origin` 絕對路徑
-6. RBAC 4 處：`roles.json`, `db/session.py`, `user-mgmt.js`, `auth-state.js`
+6. 新模組權限 3 處同步（RBAC v2 已無 roles.json/角色 seed）：`core/auth.py` 的 `ALL_MODULES`（source of truth）、`frontend/js/shared/tab-config.js`（TAB_MAP/TAB_LOADERS/TAB_GROUPS）、`frontend/js/admin/user-mgmt.js` 的 `MODULE_LABELS`
 7. HTML div 平衡檢查
 8. 發布前確認 `version.json` 版號（用戶可能從瀏覽器端發布過）
 
@@ -1028,10 +1030,16 @@ e:\Dev\Originsun-Media-Guard\.venv\Scripts\python.exe -m py_compile <modified_fi
 
 | 檔案 | 約行數 | 必須分段 |
 |------|--------|----------|
-| `routers/api_crm.py` | 2900+ | ✓ |
-| `frontend/app.js` | 2200+ | ✓ |
-| `core_engine.py` | 1550+ | ✓ |
+| `routers/api_crm.py` | 4800+ | ✓ |
+| `frontend/app.js` | 2100+ | ✓ |
+| `frontend/tabs/website/subviews/blog.js` | 2000+ | ✓ |
+| `core_engine.py` | 1900+ | ✓ |
+| `frontend/tabs/projects/projects.js` | 1400+ | ✓ |
+| `core/worker.py` | 1300+ | ✓ |
 | `frontend/tabs/crm/crm-projects-cost.js` | 1000+ | ✓ |
+| `frontend/tabs/transcribe/transcribe.js` | 1000+ | ✓ |
+
+> 行數會漂移；任何檔案編輯前先確認行數，超過 500 行一律分段。
 
 **超過 500 行的檔案，強制使用 `offset` + `limit` 分段讀取。禁止一次讀完後假裝看到了全部內容。**
 
@@ -1054,7 +1062,7 @@ e:\Dev\Originsun-Media-Guard\.venv\Scripts\python.exe -m py_compile <modified_fi
 本專案常見陷阱：
 - `window._costXxx` 函式在 `.js` 和 `.html`（`onclick`）兩處都有引用
 - CRM 的 category 選項在 `.js`（`_buildEditFields`）和 `.html`（`<select>`）各一份
-- RBAC 權限要改 4 處：`roles.json`、`db/session.py`、`user-mgmt.js`、`auth-state.js`
+- 新增模組權限要改 3 處：`core/auth.py` `ALL_MODULES`、`frontend/js/shared/tab-config.js`、`frontend/js/admin/user-mgmt.js` `MODULE_LABELS`（RBAC v2 已無 roles.json，別把它創回來）
 
 ### 規則 E：重構前先清垃圾
 
@@ -1133,10 +1141,10 @@ llms.txt / indexable / ai_allow 等）8 步流程：
 - [x] **TTS 前端三子頁**：標準 TTS / 聲音複製 / 正音字典編輯器
 - [x] **正音字典 API**：GET/POST `/api/v1/tts/dictionary`，支援熱更新
 - [x] **純 HTTP OTA 更新**：移除 NAS SMB 依賴，Agent 從主控端 HTTP 下載輕量更新 ZIP（~200KB）+ 更新防卡死
-- [x] **RBAC 權限系統**：角色管理（admin/producer/editor/cameraman/assistant/viewer）+ 模組級權限守衛
+- [x] **RBAC 權限系統**：v2 已移除角色層 — 權限直接綁帳號（`modules[]` + `access_level`），模組級權限守衛
 - [x] **Google OAuth 登入**：GIS Credential 模式，自動建立使用者，支援帳號連結
-- [x] **使用者/角色管理 UI**：美化 Modal（取代 prompt()）、角色切換即時更新模組、Google 頭像顯示
-- [ ] **TTS 整合完善**：接入任務佇列、Socket.IO 即時進度、完成通知、SRT 批次合成
+- [x] **使用者管理 UI**：美化 Modal（取代 prompt()）、逐帳號模組勾選 + 管理員開關、Google 頭像顯示
+- [x] **TTS 整合完善**：已接入任務佇列（`enqueue_job`）+ Socket.IO 即時進度 + 完成通知
 - [x] **運算主機合併至機器狀態**：NAS 共享 agents.json，各 TAB host checkbox 即時同步
 - [x] **機器狀態即時監控**：綠燈脈衝 / 紅燈離線 / 橘燈慢 + CPU 顯示 + 版本號
 - [x] **開機自動啟動**：Windows Startup 捷徑 + `start_hidden.vbs`
@@ -1158,4 +1166,4 @@ llms.txt / indexable / ai_allow 等）8 步流程：
 - [ ] **報價 PDF 輸出**：Jinja2 模板 + playwright 轉 PDF
 - [ ] **J-3 備份 Tab 整合**：選專案自動帶入路徑
 - [ ] **行動端適配**：目前 UI 針對大螢幕優化，行動端排版仍需加強
-- [ ] **Phase M：對外官方網站（🚀 進行中）** — `originsun-studio.com` + Cloudflare Tunnel + Astro 4 + 9 子視圖管理 Tab + 從 `crm_projects` 動態撈作品；6/1 Staging 初版 / 7/1 正式切換上線。完整規劃：[`docs/WEBSITE_ARCHITECTURE.md`](docs/WEBSITE_ARCHITECTURE.md)
+- [x] **Phase M：對外官方網站（✅ 已上線，持續迭代）** — `originsun-studio.com`，2026-04-29 完整版 A 部署完成（NAS 容器 24/7 對外）；後續持續加功能（AI SEO、英文翻譯、301 轉址、結案上架收件匣等）。完整規劃：[`docs/WEBSITE_ARCHITECTURE.md`](docs/WEBSITE_ARCHITECTURE.md)
