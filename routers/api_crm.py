@@ -5110,6 +5110,7 @@ async def run_ai_now_via_token(token: str):
 def _parse_questions(text: str) -> list:
     """把 claude 輸出解析成問題清單。優先走「每行一題」純文字（claude 最穩），
     另備 JSON 解析（含雙重編碼/智慧引號/fence）當 fallback。最多回 5 個。"""
+    import json
     import re
 
     def _norm(s: str) -> str:
