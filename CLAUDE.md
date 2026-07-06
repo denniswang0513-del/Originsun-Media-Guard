@@ -1035,8 +1035,8 @@ e:\Dev\Originsun-Media-Guard\.venv\Scripts\python.exe -m py_compile <modified_fi
 | 檔案 | 約行數 | 必須分段 |
 |------|--------|----------|
 | `frontend/app.js` | 2100+ | ✓ |
-| `frontend/tabs/website/subviews/blog.js` | 2000+ | ✓ |
 | `core_engine.py` | 1900+ | ✓ |
+| `frontend/tabs/website/subviews/blog/editor.js` | 1400+ | ✓ |
 | `frontend/tabs/projects/projects.js` | 1400+ | ✓ |
 | `routers/crm/costs.py` | 1300+ | ✓ |
 | `core/worker.py` | 1300+ | ✓ |
