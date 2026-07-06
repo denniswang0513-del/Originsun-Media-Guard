@@ -1,5 +1,5 @@
 {
-  "version": "1.10.208",
-  "build_date": "2026-07-06",
-  "notes": "feat(website): AI 參考資料上傳 — 文件抽文字(txt/md/csv/pdf/docx)餵 AI 描述+batch SEO"
+  "version": "1.10.209",
+  "build_date": "2026-07-07",
+  "notes": "??????:????+deploy???+??/????+api_crm?blog??+ruff/eslint+?????"
 }

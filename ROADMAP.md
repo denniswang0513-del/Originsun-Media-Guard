@@ -4,7 +4,7 @@
 
 ---
 
-## 現況 (v1.10.208) 基準線<!-- publish_update.py 自動維護版號，勿手改 -->
+## 現況 (v1.10.209) 基準線<!-- publish_update.py 自動維護版號，勿手改 -->
 
 - ✅ 7 個完整工作流程（備份、比對、轉 Proxy、串帶、報表、AI 逐字稿、空拍寫入）
 - ✅ 模組化後端：`main.py` + `core/` + `routers/`（router 容錯載入，缺模組跳過不 crash）
@@ -735,7 +735,7 @@ tools:
     ▼ Phase J: CRM + 專案管理 + 帳務 (✅ 核心完成)
     │   → 140+ API（持續增長，以程式碼為準）/ 11+ DB 表 / 6 Tab + 5 子視圖 + 手機版 RWD + Inline 編輯
     │
-現在 (v1.10.208) ← 你在這裡
+現在 (v1.10.209) ← 你在這裡
     │
     ▼ Phase M: 對外官方網站 (✅ 完整版 A 部署完成 2026-04-29)
     │   → NAS Website_Nginx (8090) + website-api 容器 + cloudflared tunnel
