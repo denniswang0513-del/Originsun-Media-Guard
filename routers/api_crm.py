@@ -4268,6 +4268,43 @@ def _showcase_dir(project_id: str) -> str:
     return d
 
 
+# ── AI 參考資料上傳（文件抽文字 → 餵 AI 寫描述 / SEO）──────────
+_ALLOWED_REF_EXT = {".txt", ".md", ".csv", ".pdf", ".docx"}
+_REF_MAX_BYTES = 10 * 1024 * 1024
+_REF_MAX_CHARS_PER_FILE = 8000
+
+
+def _extract_doc_text(content: bytes, filename: str) -> str:
+    import io, os
+    ext = os.path.splitext(filename or "")[1].lower()
+    try:
+        if ext in (".txt", ".md", ".csv"):
+            return content.decode("utf-8", errors="replace")
+        if ext == ".pdf":
+            from pypdf import PdfReader
+            return "\n".join((p.extract_text() or "") for p in PdfReader(io.BytesIO(content)).pages)
+        if ext == ".docx":
+            import docx
+            return "\n".join(p.text for p in docx.Document(io.BytesIO(content)).paragraphs)
+    except Exception:
+        return ""
+    return ""
+
+
+def _ai_refs_dir(project_id: str) -> str:
+    d = os.path.join(_showcase_dir(project_id), "ai_refs")
+    os.makedirs(d, exist_ok=True)
+    return d
+
+
+def _ref_files_minimal(files) -> list:
+    """回傳給前端的精簡清單（只 name + chars，不含 text 大塊 / 磁碟檔名）。"""
+    return [
+        {"name": f.get("name", ""), "chars": f.get("chars", 0)}
+        for f in (files or []) if isinstance(f, dict)
+    ]
+
+
 def _save_image_as_webp(content: bytes, dest_dir: str, base_name: str) -> str:
     """寫圖檔到 dest_dir/<base_name>.webp。原始 JPG/PNG/HEIC 也轉成 WebP。
 
@@ -4759,6 +4796,9 @@ async def _build_showcase_edit_data(session, sc) -> dict:
     # Strip financial / internal fields
     data.pop("edit_token", None)
     data["project_name"] = project_name
+    # AI 參考資料（製作人上傳文件抽文字 + 補充說明）— 前端渲染清單 + notes
+    data["ai_reference_files"] = list(sc.ai_reference_files or [])
+    data["ai_reference_notes"] = sc.ai_reference_notes or ""
     # 作品基本資料 — 給 showcase-edit 編輯器一頁全包
     if proj:
         data["public_title"] = proj.public_title or ""
@@ -5115,7 +5155,7 @@ def _parse_questions(text: str) -> list:
 
 
 async def _ai_description_context(session, sc):
-    """撈這個作品給 AI 用的精簡上下文（名稱 / 客戶 / 現有描述）。"""
+    """撈這個作品給 AI 用的精簡上下文（名稱 / 客戶 / 現有描述 / 參考資料）。"""
     project = await session.get(CrmProject, sc.id)
     client_name = ""
     if project and project.client_id:
@@ -5124,7 +5164,9 @@ async def _ai_description_context(session, sc):
             client_name = (client.short_name or client.full_name or "").strip()
     name = (project.name if project else "") or ""
     existing = (project.public_description if project else "") or (sc.description or "")
-    return name, client_name, existing.strip()
+    from services.website import seo_service
+    ref = seo_service.build_ai_reference_prompt(sc.ai_reference_files, sc.ai_reference_notes)
+    return name, client_name, existing.strip(), ref
 
 
 @router.post("/public/showcase-edit/{token}/ai_description/questions")
@@ -5134,10 +5176,15 @@ async def ai_description_questions(token: str):
     factory = await _get_factory()
     async with factory() as session:
         sc = await _verify_showcase_edit_token(session, token, require_editable=True)
-        name, client_name, existing = await _ai_description_context(session, sc)
+        name, client_name, existing, ref = await _ai_description_context(session, sc)
+    ref_block = (
+        f"製作人提供的參考資料（請據此讓內容更準確、更具體、更貼近實情）：\n{ref}\n\n"
+        if ref else ""
+    )
     prompt = (
         "你是影像製作公司的 SEO 文案助手。針對以下作品，出 3-5 個「簡短、具體」的引導問題，"
         "幫製作人寫出一段能吸引 Google 搜尋流量、讓陌生潛在客戶看到的專案描述。\n"
+        f"{ref_block}"
         f"作品名稱：{name}\n客戶：{client_name or '（未填）'}\n"
         f"現有描述：{existing or '（無）'}\n\n"
         "每行一個問題，純文字繁體中文。不要編號、不要引號、不要 JSON、不要任何開場白或結尾說明。"
@@ -5159,11 +5206,15 @@ async def ai_description_draft(token: str, request: Request):
     factory = await _get_factory()
     async with factory() as session:
         sc = await _verify_showcase_edit_token(session, token, require_editable=True)
-        name, client_name, existing = await _ai_description_context(session, sc)
+        name, client_name, existing, ref = await _ai_description_context(session, sc)
     qa_text = "\n".join(
         f"Q：{a.get('q','')}\nA：{a.get('a','')}"
         for a in answers if isinstance(a, dict) and (a.get("a") or "").strip()
     ) or "（製作人未補充）"
+    ref_block = (
+        f"製作人提供的參考資料（請據此讓內容更準確、更具體、更貼近實情）：\n{ref}\n\n"
+        if ref else ""
+    )
     prompt = (
         "你是影像製作公司的 SEO 文案。根據以下作品資訊與製作人回答，寫一段精簡的繁體中文專案描述。\n"
         "規則：\n"
@@ -5171,6 +5222,7 @@ async def ai_description_draft(token: str, request: Request):
         "- 開頭就講「為誰做的什麼影片」；自然帶入 客戶名、影片類型、主題/產業 等搜尋詞。\n"
         "- 客戶名、人名不翻成英文。\n"
         "- 只回描述本文，不要標題、不要引號、不要任何說明文字。\n\n"
+        f"{ref_block}"
         f"作品名稱：{name}｜客戶：{client_name or '（未填）'}\n"
         f"製作人回答：\n{qa_text}"
     )
@@ -5180,6 +5232,111 @@ async def ai_description_draft(token: str, request: Request):
         raise HTTPException(status_code=502, detail=f"AI 生成描述失敗：{err}")
     desc = out.strip().strip('"“”').strip()
     return {"description": desc}
+
+
+# ── AI 參考資料上傳 / 補充說明 / 刪除（token-authed，寫 draft 狀態不 rebuild）──
+
+@router.post("/public/showcase-edit/{token}/ai_reference/upload")
+async def upload_ai_reference(token: str, file: UploadFile = File(...)):
+    """透過 Token 上傳 AI 參考資料文件（txt/md/csv/pdf/docx），抽出文字供 AI
+    寫描述 / SEO 用（無需認證）。抽不到文字（掃描版 PDF）→ 400。"""
+    _require_db()
+    factory = await _get_factory()
+    original_name = file.filename or "file"
+    ext = os.path.splitext(original_name)[1].lower()
+    if ext not in _ALLOWED_REF_EXT:
+        raise HTTPException(
+            status_code=400,
+            detail=f"不支援的檔案格式：{ext or '（無副檔名）'}（僅支援 txt/md/csv/pdf/docx）",
+        )
+    content = await file.read()
+    if len(content) > _REF_MAX_BYTES:
+        raise HTTPException(status_code=400, detail="檔案過大（上限 10MB）")
+    text = (_extract_doc_text(content, original_name) or "").strip()
+    if not text:
+        raise HTTPException(
+            status_code=400,
+            detail="抽不到文字（可能是掃描版 PDF），請改用有文字層的檔或直接貼文字",
+        )
+    text = text[:_REF_MAX_CHARS_PER_FILE]
+    async with factory() as session:
+        sc = await _verify_showcase_edit_token(session, token, require_editable=True)
+        project_id = sc.id
+        # 存原始檔到 ai_refs 子目錄（uuid 檔名避免碰撞 / 非 ASCII 開檔問題）
+        stored_name = f"{uuid.uuid4().hex}{ext}"
+        try:
+            with open(os.path.join(_ai_refs_dir(project_id), stored_name), "wb") as fh:
+                fh.write(content)
+        except OSError:
+            stored_name = ""
+        entry = {"name": original_name, "text": text, "chars": len(text), "stored": stored_name}
+        files = list(sc.ai_reference_files or [])
+        files.append(entry)
+        sc.ai_reference_files = files
+        sc.updated_at = _now()
+        await session.commit()
+        await session.refresh(sc)
+        result_files = _ref_files_minimal(sc.ai_reference_files)
+        notes = sc.ai_reference_notes or ""
+    return {"ai_reference_files": result_files, "ai_reference_notes": notes}
+
+
+@router.put("/public/showcase-edit/{token}/ai_reference")
+async def update_ai_reference_notes(token: str, request: Request):
+    """透過 Token 更新 AI 參考資料的「補充說明」文字（無需認證）。"""
+    _require_db()
+    factory = await _get_factory()
+    body = await request.json()
+    notes = body.get("notes") or ""
+    async with factory() as session:
+        sc = await _verify_showcase_edit_token(session, token, require_editable=True)
+        sc.ai_reference_notes = notes
+        sc.updated_at = _now()
+        await session.commit()
+        await session.refresh(sc)
+        result_files = _ref_files_minimal(sc.ai_reference_files)
+        n = sc.ai_reference_notes or ""
+    return {"ai_reference_files": result_files, "ai_reference_notes": n}
+
+
+@router.delete("/public/showcase-edit/{token}/ai_reference/file")
+async def delete_ai_reference_file(token: str, request: Request):
+    """透過 Token 刪除一筆 AI 參考資料文件（依 name 比對，移除第一筆）+
+    best-effort 刪磁碟原始檔（無需認證）。"""
+    _require_db()
+    factory = await _get_factory()
+    body = await request.json()
+    target = body.get("name") or ""
+    async with factory() as session:
+        sc = await _verify_showcase_edit_token(session, token, require_editable=True)
+        project_id = sc.id
+        files = list(sc.ai_reference_files or [])
+        kept: list = []
+        removed: list = []
+        matched = False
+        for f in files:
+            if (not matched) and isinstance(f, dict) and f.get("name") == target:
+                matched = True
+                removed.append(f)
+            else:
+                kept.append(f)
+        sc.ai_reference_files = kept
+        sc.updated_at = _now()
+        await session.commit()
+        await session.refresh(sc)
+        result_files = _ref_files_minimal(sc.ai_reference_files)
+        notes = sc.ai_reference_notes or ""
+    # best-effort 刪磁碟檔
+    for f in removed:
+        stored = f.get("stored") if isinstance(f, dict) else ""
+        if stored:
+            p = os.path.join(_ai_refs_dir(project_id), stored)
+            if os.path.isfile(p):
+                try:
+                    os.remove(p)
+                except OSError:
+                    pass
+    return {"ai_reference_files": result_files, "ai_reference_notes": notes}
 
 
 @router.post("/public/showcase-edit/{token}/gallery")

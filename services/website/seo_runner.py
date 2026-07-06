@@ -178,6 +178,8 @@ def _build_prompt(draft: dict) -> str:
         scrubbed_credits = _scrub_credits_block(credits)
         if scrubbed_credits:
             parts.append(f"\nCredits（block JSON）：\n{json.dumps(scrubbed_credits, ensure_ascii=False, indent=2)}")
+    if draft.get("ai_reference"):
+        parts.append(f"\n製作人提供的參考資料（請據此讓內容更準確）：\n{draft['ai_reference']}")
     return _PROMPT_TEMPLATE.format(
         context="\n".join(parts),
         exclusion_clause=_build_exclusion_clause(),
@@ -372,6 +374,18 @@ async def _process_one(session: AsyncSession, project_id: str) -> tuple[str, str
     draft = await seo_service.get_project_seo_draft_context(session, project_id)
     if not draft:
         return ("no_draft", "作品不存在或未公開")
+    # 製作人上傳的 AI 參考資料（文件抽文字 + 補充說明）→ 併入 prompt context
+    try:
+        from db.models import CrmProjectShowcase
+        sc = await session.get(CrmProjectShowcase, project_id)
+        if sc:
+            ref = seo_service.build_ai_reference_prompt(
+                sc.ai_reference_files, sc.ai_reference_notes
+            )
+            if ref:
+                draft["ai_reference"] = ref
+    except Exception:
+        pass
     prompt = _build_prompt(draft)
     logger.info("[seo_runner] %s: prompt %d chars", project_id, len(prompt))
 

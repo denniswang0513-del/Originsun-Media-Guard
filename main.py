@@ -668,6 +668,16 @@ async def _on_startup():
                         await _sres.commit()
                     except Exception:
                         await _sres.rollback()
+                    # AI 參考資料上傳（製作人上傳文件抽文字 + 補充說明 → 餵 AI）
+                    for col_sql in [
+                        "ALTER TABLE crm_project_showcase ADD COLUMN IF NOT EXISTS ai_reference_files JSONB",
+                        "ALTER TABLE crm_project_showcase ADD COLUMN IF NOT EXISTS ai_reference_notes TEXT",
+                    ]:
+                        try:
+                            await _sres.execute(_tres(col_sql))
+                            await _sres.commit()
+                        except Exception:
+                            await _sres.rollback()
         except Exception:
             pass
 

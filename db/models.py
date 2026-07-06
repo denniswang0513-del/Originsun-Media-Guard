@@ -404,6 +404,9 @@ class CrmProjectShowcase(Base):
     published_at = Column(DateTime(timezone=True), nullable=True)
     edit_token = Column(String(512), nullable=True)
     editable = Column(Boolean, nullable=False, default=True)
+    # AI 參考資料：製作人上傳的文件抽取文字 + 補充說明，餵給 AI 寫描述 / SEO。
+    ai_reference_files = Column(JSONB, nullable=True)  # [{name, text, chars}]
+    ai_reference_notes = Column(Text, nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now())
 

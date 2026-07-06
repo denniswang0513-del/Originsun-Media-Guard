@@ -28,3 +28,7 @@ python-multipart==0.0.32
 httpx==0.28.1
 Pillow==12.2.0
 torch==2.12.0              # f5-tts 會帶，明列以固定版本
+
+# ── AI 參考資料抽字（showcase-edit AI 描述/SEO 上傳文件；跑在 master）──
+pypdf==6.14.2
+python-docx==1.2.0

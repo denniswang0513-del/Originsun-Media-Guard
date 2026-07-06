@@ -467,11 +467,37 @@ function _render() {
     }
 
     // Description（無個別儲存按鈕，跟著 master save）＋ AI 協助撰寫 SEO 描述
+    // 📎 AI 參考資料：上傳給 AI 生成描述/SEO 的參考文件 + 補充說明（僅編輯模式）
+    const _aiRefFiles = Array.isArray(sc.ai_reference_files) ? sc.ai_reference_files : [];
+    const _aiRefFilesHtml = _aiRefFiles.length
+        ? _aiRefFiles.map(f => `
+            <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;padding:6px 10px;background:var(--bg3);border:1px solid var(--border);border-radius:4px;margin-bottom:6px;">
+                <span style="color:var(--text2);font-size:12px;word-break:break-all;">📄 ${_esc(f.name || '')}<span style="color:var(--text3);">（${Number(f.chars || 0).toLocaleString()} 字）</span></span>
+                <button class="btn btn-sm btn-danger" type="button" data-action="del-ai-ref" data-name="${_esc(f.name || '')}" style="flex-shrink:0;">✕</button>
+            </div>`).join('')
+        : '<div style="color:var(--text3);font-size:12px;">尚未上傳參考文件</div>';
+    const _aiRefBlock = EDITABLE ? `
+        <div style="margin-top:14px;padding-top:14px;border-top:1px dashed var(--border);">
+            <div style="color:var(--accent);font-size:12px;font-weight:600;margin-bottom:4px;">📎 AI 參考資料（給 AI 生成描述/SEO 參考）</div>
+            <div style="color:var(--text3);font-size:11px;line-height:1.6;margin-bottom:10px;">上傳企劃/腳本/客戶資料等，AI 產生問題與描述時會參考。掃描版 PDF（無文字層）抽不到字，請改貼文字。</div>
+            <div id="ai-ref-list" style="margin-bottom:10px;">${_aiRefFilesHtml}</div>
+            <div style="margin-bottom:14px;">
+                <input type="file" id="inp-ai-ref" accept=".txt,.md,.csv,.pdf,.docx" multiple style="display:none;">
+                <button class="btn btn-sm" id="btn-add-ai-ref" type="button">＋ 上傳參考文件</button>
+                <span id="ai-ref-uploading" style="display:none;color:var(--text3);font-size:12px;margin-left:8px;">上傳中…</span>
+            </div>
+            <div>
+                <label style="display:block;color:var(--text3);font-size:11px;margin-bottom:4px;">補充說明</label>
+                <textarea id="inp-ai-ref-notes" rows="3" placeholder="補充給 AI 的背景說明、語氣要求、重點…" style="width:100%;">${_esc(sc.ai_reference_notes || '')}</textarea>
+                <div style="margin-top:8px;"><button class="btn btn-sm" id="btn-save-ai-ref-notes" type="button">💾 儲存補充說明</button></div>
+            </div>
+        </div>` : '';
     html += `<div class="section" id="sec-desc">
         <div class="section-label">專案描述${EDITABLE ? ' <button class="btn btn-sm" id="btn-ai-desc" type="button" style="margin-left:8px;">🤖 AI 協助撰寫 SEO 描述</button>' : ''}</div>
         ${EDITABLE
             ? `<textarea id="inp-desc" data-field="description">${_esc(sc.description || '')}</textarea>
-               <div id="ai-desc-panel" style="display:none;margin-top:10px;padding:12px;border:1px solid var(--accent);border-radius:6px;background:var(--bg2);"></div>`
+               <div id="ai-desc-panel" style="display:none;margin-top:10px;padding:12px;border:1px solid var(--accent);border-radius:6px;background:var(--bg2);"></div>
+               ${_aiRefBlock}`
             : `<p style="color:var(--text2);">${_esc(sc.description || '尚未填寫')}</p>`}
     </div>`;
 
@@ -934,6 +960,50 @@ function _bindEvents() {
 
     // AI 協助撰寫 SEO 描述
     document.getElementById('btn-ai-desc')?.addEventListener('click', () => _aiDescStart());
+
+    // === 📎 AI 參考資料 ===
+    // 上傳：多檔逐一 POST /ai_reference/upload（multipart field 'file'）→ 全部完成後 _reload
+    document.getElementById('btn-add-ai-ref')?.addEventListener('click', () => document.getElementById('inp-ai-ref').click());
+    document.getElementById('inp-ai-ref')?.addEventListener('change', async (e) => {
+        const files = [...e.target.files];
+        if (!files.length) return;
+        const _u = document.getElementById('ai-ref-uploading');
+        if (_u) _u.style.display = 'inline';
+        for (const file of files) {
+            try { await _upload('/ai_reference/upload', file); }
+            catch (err) { _toast(err.message); }
+        }
+        if (_u) _u.style.display = 'none';
+        await _reload();
+    });
+    // 刪除單一參考檔：DELETE /ai_reference/file body {name}
+    document.querySelectorAll('[data-action="del-ai-ref"]').forEach(btn => {
+        btn.addEventListener('click', async () => {
+            const name = btn.dataset.name;
+            try {
+                const res = await fetch(API + '/ai_reference/file', {
+                    method: 'DELETE',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ name }),
+                });
+                if (!res.ok) { const err = await res.json().catch(() => ({})); throw new Error(err.detail || '刪除失敗'); }
+                await _reload();
+            } catch (e) { _toast(e.message); }
+        });
+    });
+    // 儲存補充說明：PUT /ai_reference body {notes}
+    document.getElementById('btn-save-ai-ref-notes')?.addEventListener('click', async () => {
+        const notes = document.getElementById('inp-ai-ref-notes')?.value || '';
+        try {
+            const res = await fetch(API + '/ai_reference', {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ notes }),
+            });
+            if (!res.ok) { const err = await res.json().catch(() => ({})); throw new Error(err.detail || '儲存失敗'); }
+            _toast('補充說明已儲存');
+        } catch (e) { _toast(e.message); }
+    });
 
     // Process upload
     document.getElementById('btn-add-process')?.addEventListener('click', () => document.getElementById('inp-process').click());

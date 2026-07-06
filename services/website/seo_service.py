@@ -24,6 +24,17 @@ from . import _crud_base as _crud
 logger = logging.getLogger(__name__)
 
 
+def build_ai_reference_prompt(files, notes, max_chars: int = 12000) -> str:
+    """把上傳文件抽出的文字 + 補充說明組成給 AI 的參考資料段（截斷）。"""
+    parts = []
+    for f in (files or []):
+        if isinstance(f, dict) and (f.get("text") or "").strip():
+            parts.append(f"【{f.get('name','檔案')}】\n{f['text'].strip()}")
+    if (notes or "").strip():
+        parts.append(f"【補充說明】\n{notes.strip()}")
+    return "\n\n".join(parts).strip()[:max_chars]
+
+
 def _faq_to_dict(o: WebsiteFAQ) -> dict[str, Any]:
     return {
         "id": o.id,
