@@ -300,6 +300,78 @@ async function _quickAddStaff(name, role) {
     return res.json();
 }
 
+// === AI 協助撰寫 SEO 專案描述（AI 出題 → 答 → 生成 → 套用到 描述 + seo_description）===
+let _aiDescAnswers = [];
+async function _aiDescStart() {
+    const panel = document.getElementById('ai-desc-panel');
+    if (!panel) return;
+    panel.style.display = 'block';
+    panel.innerHTML = '<div style="color:var(--text3);font-size:13px;">🤖 AI 產生引導問題中…（約 30–60 秒）</div>';
+    let questions = [];
+    try {
+        const r = await fetch(API + '/ai_description/questions', { method: 'POST' });
+        if (!r.ok) throw new Error((await r.json().catch(() => ({}))).detail || 'AI 產生問題失敗');
+        questions = (await r.json()).questions || [];
+    } catch (e) {
+        panel.innerHTML = `<div style="color:var(--danger);font-size:13px;">${_esc(e.message)}</div>`;
+        return;
+    }
+    if (!questions.length) {
+        panel.innerHTML = '<div style="color:var(--text3);font-size:13px;">AI 沒有回問題，請直接手動撰寫。</div>';
+        return;
+    }
+    panel.innerHTML =
+        '<div style="font-size:13px;color:var(--text2);margin-bottom:8px;">回答幾個問題（可跳過空題），AI 會幫你寫成精簡的 SEO 描述：</div>' +
+        '<div id="ai-desc-qs">' + questions.map(q =>
+            `<div style="margin-bottom:8px;">
+                <label style="display:block;color:var(--text2);font-size:12px;margin-bottom:3px;">${_esc(q)}</label>
+                <input type="text" class="ai-desc-a" data-q="${_esc(q)}" style="width:100%;" placeholder="（可留空）">
+            </div>`).join('') + '</div>' +
+        '<button class="btn btn-sm" id="btn-ai-desc-gen" type="button">✨ 生成描述</button> ' +
+        '<button class="btn btn-sm" id="btn-ai-desc-cancel" type="button" style="opacity:.7;">取消</button>';
+    document.getElementById('btn-ai-desc-cancel')?.addEventListener('click', () => { panel.style.display = 'none'; });
+    document.getElementById('btn-ai-desc-gen')?.addEventListener('click', () => _aiDescGenerate());
+}
+async function _aiDescGenerate() {
+    const panel = document.getElementById('ai-desc-panel');
+    const inputs = document.querySelectorAll('.ai-desc-a');
+    if (inputs.length) _aiDescAnswers = [...inputs].map(i => ({ q: i.dataset.q, a: i.value.trim() }));
+    const btn = document.getElementById('btn-ai-desc-gen');
+    if (btn) { btn.disabled = true; btn.textContent = '✨ 生成中…（約 30–60 秒）'; }
+    let draft = '';
+    try {
+        const r = await fetch(API + '/ai_description/draft', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ answers: _aiDescAnswers }),
+        });
+        if (!r.ok) throw new Error((await r.json().catch(() => ({}))).detail || 'AI 生成失敗');
+        draft = (await r.json()).description || '';
+    } catch (e) {
+        if (btn) { btn.disabled = false; btn.textContent = '✨ 生成描述'; }
+        _toast(e.message); return;
+    }
+    panel.innerHTML =
+        '<div style="font-size:12px;color:var(--text3);margin-bottom:6px;">AI 草稿（可再手動編輯）：</div>' +
+        `<textarea id="ai-desc-draft" style="width:100%;min-height:90px;">${_esc(draft)}</textarea>` +
+        '<div style="margin-top:8px;">' +
+        '<button class="btn btn-sm" id="btn-ai-desc-apply" type="button">✓ 套用（存進描述 + SEO）</button> ' +
+        '<button class="btn btn-sm" id="btn-ai-desc-regen" type="button" style="opacity:.7;">↻ 重新生成</button> ' +
+        '<button class="btn btn-sm" id="btn-ai-desc-cancel2" type="button" style="opacity:.7;">取消</button>' +
+        '</div>';
+    document.getElementById('btn-ai-desc-regen')?.addEventListener('click', () => _aiDescGenerate());
+    document.getElementById('btn-ai-desc-cancel2')?.addEventListener('click', () => { panel.style.display = 'none'; });
+    document.getElementById('btn-ai-desc-apply')?.addEventListener('click', () => _aiDescApply());
+}
+async function _aiDescApply() {
+    const draft = (document.getElementById('ai-desc-draft')?.value || '').trim();
+    if (!draft) { _toast('草稿是空的'); return; }
+    try {
+        await _save({ description: draft, seo: { seo_description: draft } });
+        _toast('已套用（描述 + SEO meta 已更新）');
+        await _reload();
+    } catch (e) { _toast(e.message); }
+}
+
 function _render() {
     // 後端 GET /public/showcase-edit/{token} 回扁平 dict（_to_showcase_dict 直接展開），
     // 不是 {showcase: {...}}。把 DATA 當 sc 用，所有 sc.xxx 引用就對得上欄位。
@@ -394,11 +466,12 @@ function _render() {
         </div>`;
     }
 
-    // Description（無個別儲存按鈕，跟著 master save）
+    // Description（無個別儲存按鈕，跟著 master save）＋ AI 協助撰寫 SEO 描述
     html += `<div class="section" id="sec-desc">
-        <div class="section-label">專案描述</div>
+        <div class="section-label">專案描述${EDITABLE ? ' <button class="btn btn-sm" id="btn-ai-desc" type="button" style="margin-left:8px;">🤖 AI 協助撰寫 SEO 描述</button>' : ''}</div>
         ${EDITABLE
-            ? `<textarea id="inp-desc" data-field="description">${_esc(sc.description || '')}</textarea>`
+            ? `<textarea id="inp-desc" data-field="description">${_esc(sc.description || '')}</textarea>
+               <div id="ai-desc-panel" style="display:none;margin-top:10px;padding:12px;border:1px solid var(--accent);border-radius:6px;background:var(--bg2);"></div>`
             : `<p style="color:var(--text2);">${_esc(sc.description || '尚未填寫')}</p>`}
     </div>`;
 
@@ -858,6 +931,9 @@ function _bindEvents() {
     document.querySelector('[data-action="del-featured"]')?.addEventListener('click', async () => {
         try { await _save({ public_featured_image: '' }); await _reload(); } catch (e) { alert(e.message); }
     });
+
+    // AI 協助撰寫 SEO 描述
+    document.getElementById('btn-ai-desc')?.addEventListener('click', () => _aiDescStart());
 
     // Process upload
     document.getElementById('btn-add-process')?.addEventListener('click', () => document.getElementById('inp-process').click());

@@ -5071,6 +5071,117 @@ async def run_ai_now_via_token(token: str):
         return result
 
 
+def _parse_questions(text: str) -> list:
+    """把 claude 輸出解析成問題清單。優先走「每行一題」純文字（claude 最穩），
+    另備 JSON 解析（含雙重編碼/智慧引號/fence）當 fallback。最多回 5 個。"""
+    import re
+
+    def _norm(s: str) -> str:
+        return (s or "").replace("“", '"').replace("”", '"') \
+                        .replace("‘", "'").replace("’", "'")
+
+    def _as_list(s: str):
+        try:
+            v = json.loads(s)
+        except Exception:
+            return None
+        return v if isinstance(v, list) else None
+
+    body = re.sub(r"```(?:json)?", "", _norm((text or "").strip())).strip()
+
+    # 1) JSON（若 claude 硬回 JSON）：整段 → 抽 [...] → 解開單元素雙重編碼
+    arr = _as_list(body)
+    if arr is None:
+        m = re.search(r"\[.*\]", body, re.DOTALL)
+        if m:
+            arr = _as_list(m.group(0))
+    if isinstance(arr, list):
+        if len(arr) == 1 and isinstance(arr[0], str) and arr[0].strip().startswith("["):
+            inner = _as_list(arr[0])
+            if inner is not None:
+                arr = inner
+        out = [str(x).strip() for x in arr if str(x).strip()]
+        if len(out) >= 2:
+            return out[:5]
+
+    # 2) 逐行（純文字/編號/項目符號都吃）：去掉行首符號與引號，優先取含問號的行
+    lines = []
+    for ln in body.splitlines():
+        ln = re.sub(r'^\s*[-*•\d.、)）.\s"\']+', "", ln).strip().strip('"[],')
+        if ln and ln not in ("[", "]"):
+            lines.append(ln)
+    q = [ln for ln in lines if "？" in ln or "?" in ln]
+    return (q or lines)[:5]
+
+
+async def _ai_description_context(session, sc):
+    """撈這個作品給 AI 用的精簡上下文（名稱 / 客戶 / 現有描述）。"""
+    project = await session.get(CrmProject, sc.id)
+    client_name = ""
+    if project and project.client_id:
+        client = await session.get(Client, project.client_id)
+        if client:
+            client_name = (client.short_name or client.full_name or "").strip()
+    name = (project.name if project else "") or ""
+    existing = (project.public_description if project else "") or (sc.description or "")
+    return name, client_name, existing.strip()
+
+
+@router.post("/public/showcase-edit/{token}/ai_description/questions")
+async def ai_description_questions(token: str):
+    """AI 互動撰寫描述 step 1：依作品資訊出 3-5 個引導問題（headless claude，~30-60s）。"""
+    _require_db()
+    factory = await _get_factory()
+    async with factory() as session:
+        sc = await _verify_showcase_edit_token(session, token, require_editable=True)
+        name, client_name, existing = await _ai_description_context(session, sc)
+    prompt = (
+        "你是影像製作公司的 SEO 文案助手。針對以下作品，出 3-5 個「簡短、具體」的引導問題，"
+        "幫製作人寫出一段能吸引 Google 搜尋流量、讓陌生潛在客戶看到的專案描述。\n"
+        f"作品名稱：{name}\n客戶：{client_name or '（未填）'}\n"
+        f"現有描述：{existing or '（無）'}\n\n"
+        "每行一個問題，純文字繁體中文。不要編號、不要引號、不要 JSON、不要任何開場白或結尾說明。"
+    )
+    from services.website.seo_runner import _call_claude
+    out, err = await _call_claude(prompt)
+    if not out:
+        raise HTTPException(status_code=502, detail=f"AI 產生問題失敗：{err}")
+    return {"questions": _parse_questions(out)}
+
+
+@router.post("/public/showcase-edit/{token}/ai_description/draft")
+async def ai_description_draft(token: str, request: Request):
+    """AI 互動撰寫描述 step 2：綜合製作人答案 + 作品資訊，生成精簡 SEO 描述。
+    只回草稿（不寫 DB）；由前端審核後再套用（存進 public_description + seo_description）。"""
+    _require_db()
+    body = await request.json()
+    answers = body.get("answers") or []   # [{q, a}, ...]
+    factory = await _get_factory()
+    async with factory() as session:
+        sc = await _verify_showcase_edit_token(session, token, require_editable=True)
+        name, client_name, existing = await _ai_description_context(session, sc)
+    qa_text = "\n".join(
+        f"Q：{a.get('q','')}\nA：{a.get('a','')}"
+        for a in answers if isinstance(a, dict) and (a.get("a") or "").strip()
+    ) or "（製作人未補充）"
+    prompt = (
+        "你是影像製作公司的 SEO 文案。根據以下作品資訊與製作人回答，寫一段精簡的繁體中文專案描述。\n"
+        "規則：\n"
+        "- 80-160 字、2-4 句；精簡不浮誇、不要條列、不要 keyword stuffing。\n"
+        "- 開頭就講「為誰做的什麼影片」；自然帶入 客戶名、影片類型、主題/產業 等搜尋詞。\n"
+        "- 客戶名、人名不翻成英文。\n"
+        "- 只回描述本文，不要標題、不要引號、不要任何說明文字。\n\n"
+        f"作品名稱：{name}｜客戶：{client_name or '（未填）'}\n"
+        f"製作人回答：\n{qa_text}"
+    )
+    from services.website.seo_runner import _call_claude
+    out, err = await _call_claude(prompt)
+    if not out:
+        raise HTTPException(status_code=502, detail=f"AI 生成描述失敗：{err}")
+    desc = out.strip().strip('"“”').strip()
+    return {"description": desc}
+
+
 @router.post("/public/showcase-edit/{token}/gallery")
 async def upload_showcase_edit_gallery(token: str, file: UploadFile = File(...),
                                        caption: str = Query("")):
