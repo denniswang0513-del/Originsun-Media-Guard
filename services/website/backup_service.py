@@ -336,10 +336,21 @@ def is_backup_running() -> bool:
     return _backup_task is not None and not _backup_task.done()
 
 
+async def _notify_backup_failed(error: str) -> None:
+    """備份失敗主動推播（best-effort，只在 master 跑 backup 的路徑觸發）。"""
+    try:
+        from notifier import notify_tab_async  # type: ignore  # NAS 容器可能沒帶 notifier
+        await notify_tab_async("backup_failed", error=error[:300])
+    except Exception:
+        pass
+
+
 async def _do_backup_and_record() -> dict:
     from db.session import get_session_factory
     factory = get_session_factory()
     if factory is None:
+        # DB 不可用 → 整輪備份被跳過，這本身就是要告警的失敗
+        await _notify_backup_failed("DB 不可用，本輪備份未執行（settings 讀不到）")
         return {"ok": False, "error": "no db"}
     async with factory() as s:
         st = await get_runner_settings(s)
@@ -357,6 +368,8 @@ async def _do_backup_and_record() -> dict:
             "backup.runner.last_run_at": time.time(),
             "backup.runner.last_run_summary": summary,
         })
+    if not summary.get("ok"):
+        await _notify_backup_failed(str(summary.get("error") or "unknown"))
     return summary
 
 

@@ -290,14 +290,20 @@ async def _on_startup():
     state.init_concurrency()
     print(f"[LOOP] event loop = {type(_loop).__name__}")  # expect SelectorEventLoop on Windows (asyncpg stability)
     # ── PostgreSQL 連線 ──
+    _db_import_ok = False
     try:
         from db.session import init_db
+        _db_import_ok = True
         ok = await init_db()
         state.db_online = ok
         print(f"[DB] PostgreSQL {'連線成功' if ok else '不可用，使用 JSON fallback'}")
     except Exception as e:
         state.db_online = False
         print(f"[DB] 初始化失敗: {e}")
+    if _db_import_ok and not state.db_online:
+        # 有 DB 套件（master/dev）但啟動時連不上 → 主動告警。
+        # 機隊 agent 沒裝 sqlalchemy，import 失敗不告警（那是常態不是故障）。
+        asyncio.ensure_future(_notify_db_transition(False))
     # ── DB Migration: Google OAuth columns ──
     if state.db_online:
         try:
@@ -844,6 +850,31 @@ def _wedge_watchdog():
             print(f"[WATCHDOG] error: {e}")
 
 
+def _db_display_name() -> str:
+    """從 database_url 取庫名（mediaguard / mediaguard_dev），區分同機的 prod/dev 告警。"""
+    try:
+        from config import load_settings
+        return (load_settings().get("database_url") or "").rsplit("/", 1)[-1] or "?"
+    except Exception:
+        return "?"
+
+
+async def _notify_db_transition(now_online: bool) -> None:
+    """DB 上線/斷線「轉換點」主動推播（best-effort）。
+
+    只有裝了 DB 套件的機器（master / dev）會走到這裡 —— 機隊 agent 沒裝
+    sqlalchemy，_periodic_db_health 在 import 就早退，不會十台齊發。
+    """
+    try:
+        from notifier import notify_tab_async, machine_label  # type: ignore
+        await notify_tab_async(
+            "db_recovered" if now_online else "db_offline",
+            db=_db_display_name(), hostname=machine_label(),
+        )
+    except Exception:
+        pass
+
+
 async def _periodic_db_health():
     """每 60 秒檢查 DB 連線；斷線時「重建連線池」而非只重試。
 
@@ -858,6 +889,7 @@ async def _periodic_db_health():
         return  # 代理端沒有 db 模組，直接退出
     while True:
         await asyncio.sleep(60)
+        was_online = state.db_online
         try:
             if state.db_online:
                 # 還在線：便宜探測。timeout=15 > connect_args.command_timeout(8)+reconnect，
@@ -882,6 +914,8 @@ async def _periodic_db_health():
             state.db_online = False
         except Exception:
             state.db_online = False
+        if state.db_online != was_online:
+            await _notify_db_transition(state.db_online)
 
 
 def _read_local_version() -> str:

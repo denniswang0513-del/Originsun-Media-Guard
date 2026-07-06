@@ -173,6 +173,12 @@ def notify_tab(template_key: str, **variables) -> None:
         "transcribe_success":"🎙️ 【逐字稿完成】{project_name} 已生成！\n📂 輸出至：{dest_dir} | 共 {file_count} 個檔案",
         "drone_watcher_success":"🛸 【空拍排程】已掃描 {folder_count} 個資料夾、{file_count} 個檔案（{trigger}）\n⏱ 耗時：{duration}",
         "inquiry_received":  "📬 【官網新詢問】#{id} 來自 {name}\n📧 Email：{email}\n📱 電話：{phone}\n🏢 公司：{company}\n💼 服務類型：{service_type}\n💰 預算：{budget_range}\n\n訊息：\n{message}",
+        # 失敗告警（channel key 即 template_key 本身，預設 gchat=True → webhook 有設就會發）
+        "task_failed":       "🔴 【任務失敗】{task_type}｜{project_name}\n⚠️ {error}\n🖥️ 機器：{hostname}",
+        "rebuild_failed":    "🔴 【官網重建失敗】\n⚠️ {error}\n請到官網管理 Tab 查看完整 log 並手動「立即重建」",
+        "backup_failed":     "🔴 【每日備份失敗】\n⚠️ {error}\n請檢查 master→NAS SSH 與 Google Drive 憑證",
+        "db_offline":        "🔴 【資料庫斷線】PostgreSQL（{db}）連線中斷 — {hostname}\n已切換 JSON fallback，每 60 秒自動重連中",
+        "db_recovered":      "🟢 【資料庫恢復】PostgreSQL（{db}）連線已恢復 — {hostname}",
     }
 
     raw_tpl = tpls.get(template_key) or _defaults.get(template_key, "")
@@ -213,4 +219,31 @@ def notify_tab(template_key: str, **variables) -> None:
             )
         except Exception as e:
             print(f"notifier: LINE Notify [{template_key}] failed: {e}")
+
+
+def machine_label() -> str:
+    """告警用機器名：settings.machine_id 優先（與 job_history / 排程的機器身分一致），
+    缺才退 hostname。
+
+    刻意不用 db.json_fallback.get_machine_id — 那個模組頂層 import db.session
+    （sqlalchemy），機隊 agent 沒裝 DB 套件會 ImportError，反而滅掉告警。
+    """
+    import socket
+    try:
+        return _load_settings().get("machine_id", "") or socket.gethostname()
+    except Exception:
+        return socket.gethostname()
+
+
+async def notify_tab_async(template_key: str, **variables) -> None:
+    """async best-effort 包裝：to_thread 跑同步 notify_tab，任何失敗靜默。
+
+    async 呼叫端不用各自記得 to_thread；唯一要 caller 自己守的是
+    `from notifier import ...` 這行本身（NAS 容器 / 精簡 agent 可能沒帶本模組）。
+    """
+    try:
+        import asyncio
+        await asyncio.to_thread(notify_tab, template_key, **variables)
+    except Exception:
+        pass
 

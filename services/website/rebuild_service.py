@@ -411,6 +411,24 @@ async def _run_build(website_dir: Path) -> None:
     每階段 logger.info 落 uvicorn_out.log，異常用 logger.exception 拿 traceback。
     """
     logger.info("[rebuild] _run_build entered (cwd=%s)", website_dir)
+
+    async def _fail(error: str, output_tail: str | None = None,
+                    notify_detail: str | None = None) -> None:
+        """狀態轉 error + 主動推播一次做完 — 新增失敗分支不會漏掉告警。
+
+        只在 master 實際執行 build 的路徑會走到（NAS 容器只 relay 不 build）；
+        notifier 不可用或推播失敗都靜默，不能影響狀態機。
+        """
+        st = {"state": "error", "finished_at": time.time(), "error": error}
+        if output_tail is not None:
+            st["output_tail"] = output_tail
+        _REBUILD_STATUS.update(st)
+        try:
+            from notifier import notify_tab_async  # type: ignore  # 容器可能沒帶 notifier
+            await notify_tab_async("rebuild_failed", error=(notify_detail or error)[:300])
+        except Exception:
+            pass
+
     try:
         # Astro build env：
         #   - WEBSITE_API_BASE：build 時 fetch /api/website/*（用 master 自己的）
@@ -428,10 +446,8 @@ async def _run_build(website_dir: Path) -> None:
         )
         logger.info("[rebuild] npm exit=%d, tail=%s", rc, build_tail[-300:] if build_tail else "(empty)")
         if rc != 0:
-            _REBUILD_STATUS.update({
-                "state": "error", "finished_at": time.time(),
-                "output_tail": build_tail, "error": f"build exit={rc}",
-            })
+            await _fail(f"build exit={rc}", build_tail,
+                        f"npm build exit={rc}\n{(build_tail or '')[-200:]}")
             return
 
         # Push 階段
@@ -440,11 +456,8 @@ async def _run_build(website_dir: Path) -> None:
         logger.info("[rebuild] scp exit=%d, tail=%s", push_rc, push_tail[-300:] if push_tail else "(empty)")
         merged_tail = f"=== build OK ===\n{build_tail}\n=== scp ===\n{push_tail}"
         if push_rc != 0:
-            _REBUILD_STATUS.update({
-                "state": "error", "finished_at": time.time(),
-                "output_tail": merged_tail,
-                "error": f"build OK but NAS push failed (scp exit={push_rc})",
-            })
+            await _fail(f"build OK but NAS push failed (scp exit={push_rc})", merged_tail,
+                        f"build OK 但推送 NAS 失敗（scp exit={push_rc}）— 對外網站停在舊版")
             return
 
         # uploads/projects/ 同步（best-effort）：作品圖在 master 本地，需推到 NAS 才對外可見。
@@ -467,11 +480,8 @@ async def _run_build(website_dir: Path) -> None:
         })
         logger.info("[rebuild] success, pending_count reset")
     except Exception as e:
-        _REBUILD_STATUS.update({
-            "state": "error", "finished_at": time.time(),
-            "error": f"{type(e).__name__}: {e}",
-        })
         logger.exception("[rebuild] _run_build raised")
+        await _fail(f"{type(e).__name__}: {e}")
 
 
 async def get_notion_status(settings: dict) -> dict:

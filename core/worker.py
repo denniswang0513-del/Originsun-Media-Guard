@@ -229,6 +229,17 @@ async def _execute_job(job: state.JobState):
         job.finished_at = _dt.now().isoformat()
         _emit_sync_for_job(job_id, 'log', {'type': 'error', 'msg': f'任務執行失敗: {e}'})
         await sio.emit('task_status', {'status': 'error', 'detail': str(e), 'job_id': job_id})
+        # 失敗主動推播（成功通知在各 _run_* 內；失敗只有開著網頁才看得到 → 補一條主動告警）
+        # fire-and-forget：不讓通知的 HTTP round-trip 拖住 finally 的 log 落檔
+        try:
+            from notifier import notify_tab_async, machine_label  # type: ignore
+            asyncio.ensure_future(notify_tab_async(
+                "task_failed",
+                task_type=task_type, project_name=job.project_name or "-",
+                error=str(e)[:300], hostname=machine_label(),
+            ))
+        except Exception:
+            pass
 
     finally:
         if log_dir and job.engine:
