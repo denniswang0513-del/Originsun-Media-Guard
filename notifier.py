@@ -86,6 +86,7 @@ def notify_tab(template_key: str, **variables) -> None:
         "agent_offline":     "🔴 【機隊斷線】{name}（{url}）連續 {misses} 次健康檢查無回應\n可能：關機/睡眠/網路/agent 掛掉 — 請檢查該機器",
         "agent_recovered":   "🟢 【機隊恢復】{name}（{url}）已重新上線",
         "ai_runner_failed":  "🔴 【AI Runner 失效】{kind} 連續 {fails} 次呼叫 claude 失敗\n⚠️ {error}\n可能：Max 訂閱到期/登出/CLI 更新 — 到 master 跑一次 `claude` 檢查",
+        "social_daily":      "📣 【今日社群任務】{count} 篇文稿待審\n{titles}\n→ 後台 官網管理 › 社群工作台",
     }
 
     raw_tpl = tpls.get(template_key) or _defaults.get(template_key, "")

@@ -664,15 +664,18 @@ Windows 192.168.1.107 (員工內網、既有系統)
 AI 每日規劃社群任務、產多平台文稿 → 人審核 → **核准後自動發佈**
 （owner 2026-07-07 拍板）。骨架 = 第三個 AI runner + n8n 發佈中繼。
 
-**階段一：產文稿鏈（先上，發佈器未好前一鍵複製頂著）**
-- [ ] **owner 拍板/準備**（藍圖 §2.5）：平台清單（FB/IG/Threads；LinkedIn 後補）、
-      頻率與發佈時段、客戶授權規則、Meta app + IG 商業帳號 + Threads 授權（實作時帶你走）
-- [ ] `social_posts` 表 + `website_settings` social.* 鍵（平台模板/頻率/水位/autopublish）
-- [ ] `services/website/social_runner.py`：每日掃新內容（作品/文章/公益）→
-      無新內容走常青輪播（去重 N 個月）→ 每選題 × 每平台產文稿
-      （平台語氣模板 + 品牌調性 + 官網文案當素材 + 配圖 URL）→ 入佇列 draft
-- [ ] 每日摘要推播「今日社群任務：N 篇待審」+ 公布欄指派官網編輯
-- [ ] admin「📣 社群工作台」：佇列 + 審核卡（強制預覽/改稿/核准/退回）
+**階段一：產文稿鏈（✅ 2026-07-07 實作完成，發佈器未好前一鍵複製頂著）**
+- [x] owner 拍板：平台 FB/IG/Threads、時段 12:00/19:00、日1週4、public=可宣傳
+- [x] `website_social_posts` 表 + `website_settings` social.* 鍵（模板/頻率/水位/autopublish）
+- [x] `services/website/social_runner.py`（第三個 AI runner）：每日掃新內容 →
+      常青輪播（90 天去重）→ 每選題 × 每平台產文稿 → 入佇列；已實測
+      claude 產文（單作品×3平台，FB敘事/IG hashtag/Threads 口語 各自成型）
+- [x] 每日摘要推播 social_daily（訊息內含後台入口，公布欄指派省略）
+- [x] admin「📣 社群工作台」子視圖：四態佇列 + 審核卡（改稿/核准/退回/複製/
+      標記已發布）+ 設定卡（總開關/平台/上限/時段/語氣/三平台模板）
+- [ ] **owner 平台端準備**（階段二前置）：照 docs/SOCIAL_PLATFORM_SETUP.md
+      辦 Meta app / IG 商業帳號 / Threads 授權 / n8n 憑證（公布欄有排）
+- [ ] 影子運行：部署後讓排程每日產文、編輯實際審用兩週，校準模板
 
 **階段二：自動發佈器**
 - [ ] n8n 發佈流（NAS 既有容器）：核准 → 發佈排程（黃金時段出手，非立即）→

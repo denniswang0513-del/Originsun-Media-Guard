@@ -404,6 +404,25 @@ _CREATE_TABLES: list[str] = [
         PRIMARY KEY (entity_type, entity_id)
     )
     """,
+    # 社群文稿佇列（Phase N-soc 階段一）：social_runner 產出的多平台草稿 + 審核狀態。
+    """
+    CREATE TABLE IF NOT EXISTS website_social_posts (
+        id VARCHAR(32) PRIMARY KEY,
+        source_type VARCHAR(16) NOT NULL,
+        source_id VARCHAR(64) NOT NULL,
+        platform VARCHAR(16) NOT NULL,
+        content TEXT,
+        media_url VARCHAR(512),
+        status VARCHAR(16) NOT NULL DEFAULT 'draft',
+        scheduled_at TIMESTAMPTZ,
+        published_url VARCHAR(512),
+        error_detail TEXT,
+        run_id VARCHAR(32),
+        reviewed_by VARCHAR(64),
+        created_at TIMESTAMPTZ DEFAULT NOW(),
+        updated_at TIMESTAMPTZ DEFAULT NOW()
+    )
+    """,
 ]
 
 _CREATE_INDEXES: list[str] = [
@@ -440,6 +459,10 @@ _CREATE_INDEXES: list[str] = [
     "CREATE INDEX IF NOT EXISTS idx_webnav_visible_sort ON website_nav_items (visible, sort_order)",
     "CREATE INDEX IF NOT EXISTS idx_webredir_visible_sort ON website_redirects (visible, sort_order)",
     "CREATE INDEX IF NOT EXISTS idx_transl_status ON website_translation_state (status)",
+    # 社群文稿佇列：後台佇列篩 status、選題查「此來源是否已推過」、頻率上限數當日/當週
+    "CREATE INDEX IF NOT EXISTS idx_socialpost_status ON website_social_posts (status)",
+    "CREATE INDEX IF NOT EXISTS idx_socialpost_source ON website_social_posts (source_type, source_id)",
+    "CREATE INDEX IF NOT EXISTS idx_socialpost_created ON website_social_posts (created_at)",
 ]
 
 

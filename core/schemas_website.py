@@ -983,3 +983,40 @@ class TeamOverrideItem(BaseModel):
 class TeamOverrideBatch(BaseModel):
     """PUT /api/website/admin/team body — 批次更新。"""
     items: list[TeamOverrideItem] = Field(default_factory=list)
+
+
+# ══════════════════════════════════════════════════════════
+# 社群編輯自動化（Phase N-soc 階段一 — website_social_posts 佇列）
+# ══════════════════════════════════════════════════════════
+# social_runner 產草稿 → 後台「📣 社群工作台」審核。
+# 設定（social.*）走 dict payload（同 seo runner settings），不另建 schema。
+
+
+class SocialPostResponse(BaseModel):
+    """單筆社群文稿（GET /admin/social/posts 列表項）。"""
+    id: str
+    source_type: str                       # work / post / initiative / evergreen
+    source_id: str
+    platform: str                          # facebook / instagram / threads
+    content: Optional[str] = None
+    media_url: Optional[str] = None
+    status: str                            # draft / approved / published / rejected
+    scheduled_at: Optional[datetime] = None
+    published_url: Optional[str] = None
+    error_detail: Optional[str] = None
+    run_id: Optional[str] = None
+    reviewed_by: Optional[str] = None
+    created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
+
+
+class SocialPostUpdate(BaseModel):
+    """編輯改稿：只開放 content / media_url / scheduled_at 三欄。"""
+    content: Optional[str] = None
+    media_url: Optional[str] = Field(None, max_length=512)
+    scheduled_at: Optional[datetime] = None
+
+
+class SocialPostPublishedBody(BaseModel):
+    """POST /admin/social/posts/{id}/published body — 回寫實際貼文連結。"""
+    published_url: str = Field(..., min_length=1, max_length=512)

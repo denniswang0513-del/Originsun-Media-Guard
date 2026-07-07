@@ -697,11 +697,12 @@ async def _on_startup():
                 await run_website_migrations(_f_web)
                 await seed_website_if_empty(_f_web)
                 # AI SEO runner 排程 loop（每 60s 檢查 cron 是否到期）
-                from services.website import seo_runner, post_seo_runner, translation_service, backup_service
+                from services.website import seo_runner, post_seo_runner, translation_service, backup_service, social_runner
                 seo_runner.start_scheduler_task()        # 作品集
                 post_seo_runner.start_scheduler_task()   # 文章（影像專欄）
                 translation_service.start_scheduler_task()  # 英文翻譯（transcreation）
                 backup_service.start_scheduler_task()    # 資料備份 → Google Drive（只在有 NAS key 的 master 跑）
+                social_runner.start_scheduler_task()     # 社群文稿（Phase N-soc；只在有 claude 的 master 跑）
         except Exception as _e_web:
             print(f"[startup] Website migration/seed failed: {_e_web}")
 

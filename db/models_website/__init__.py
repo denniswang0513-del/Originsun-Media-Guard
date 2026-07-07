@@ -24,6 +24,7 @@ from .nav_item import WebsiteNavItem
 from .initiative import WebsiteInitiative
 from .redirect import WebsiteRedirect
 from .translation_state import WebsiteTranslationState
+from .social_post import WebsiteSocialPost
 
 __all__ = [
     "WebsiteCategory",
@@ -45,4 +46,5 @@ __all__ = [
     "WebsiteInitiative",
     "WebsiteRedirect",
     "WebsiteTranslationState",
+    "WebsiteSocialPost",
 ]

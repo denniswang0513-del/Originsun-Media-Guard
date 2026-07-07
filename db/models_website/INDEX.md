@@ -16,6 +16,15 @@ Phase M 官網模組的 SQLAlchemy ORM Model，每表一檔（AI 友善）。
 | `setting.py` | `website_settings` key-value 全站設定 |
 | `service.py` | `website_services` 服務項目 |
 | `inquiry.py` | `website_contact_inquiries` 聯絡表單收件箱 |
+| `seo.py` | `website_faqs` / `website_testimonials` / `website_quick_facts` / `website_project_seo` / `website_awards` SEO 內容 |
+| `post.py` | `website_posts` / `website_post_categories` / `website_post_category_links` 影像專欄 |
+| `credit_role.py` | `website_credit_roles` 演職員職位庫 |
+| `credit_template.py` | `website_credit_templates` 演職員模板 |
+| `nav_item.py` | `website_nav_items` 頂部導覽選單 |
+| `initiative.py` | `website_initiatives` 公益合作 / 創作計畫案例 |
+| `redirect.py` | `website_redirects` Legacy 頁面級 301 轉址 |
+| `translation_state.py` | `website_translation_state` 英文翻譯工作流狀態 |
+| `social_post.py` | `website_social_posts` 社群文稿佇列（Phase N-soc） |
 
 **共用 Base**：所有 Model 從 `db.models` import `Base`，與既有表共享 metadata。
 
