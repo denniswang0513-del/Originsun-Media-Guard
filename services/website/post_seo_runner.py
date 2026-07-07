@@ -223,22 +223,11 @@ async def _generate_local(session: AsyncSession, post_id: int) -> dict:
 
 
 async def _relay_post(url: str, timeout: float) -> dict:
-    """共用：POST 到 master internal endpoint（X-Internal-Key = JWT secret）。"""
-    import httpx
-    from core.auth import _get_secret
-    try:
-        async with httpx.AsyncClient(timeout=timeout) as client:
-            r = await client.post(url, headers={"X-Internal-Key": _get_secret()})
-            if r.status_code == 200:
-                return r.json()
-            return {"ok": False, "error": f"master relay 失敗 (HTTP {r.status_code}): {r.text[:200]}",
-                    "processed": 0, "skipped": 0, "errors": 1, "works": []}
-    except (httpx.TimeoutException, httpx.ConnectError) as e:
-        return {"ok": False, "error": f"master 離線或超時：{e}",
-                "processed": 0, "skipped": 0, "errors": 1, "works": []}
-    except Exception as e:
-        return {"ok": False, "error": f"relay 錯誤：{e}",
-                "processed": 0, "skipped": 0, "errors": 1, "works": []}
+    """POST 到 master internal endpoint（實作收斂至 _runner_util.relay_post）。"""
+    from ._runner_util import relay_post
+    return await relay_post(url, timeout, on_error={
+        "ok": False, "processed": 0, "skipped": 0, "errors": 1, "works": [],
+    })
 
 
 async def generate_for_post(session: AsyncSession, post_id: int) -> dict:
@@ -409,15 +398,8 @@ async def update_runner_settings(session: AsyncSession, payload: dict, *, by: Op
     ALLOWED = {"enabled", "cron", "batch_size"}
     to_write = {f"seo.post_ai_runner.{k}": v for k, v in payload.items() if k in ALLOWED}
     if "cron" in payload and payload["cron"]:
-        cron_str = str(payload["cron"])
-        try:
-            from croniter import croniter
-            croniter(cron_str)
-        except ImportError:
-            if len(cron_str.split()) != 5:
-                raise ValueError(f"cron 需 5 個欄位（分 時 日 月 週）：{cron_str!r}")
-        except Exception as e:
-            raise ValueError(f"cron 字串不合法：{cron_str!r}（{e}）")
+        from ._runner_util import validate_cron
+        validate_cron(str(payload["cron"]))
     if to_write:
         await update_settings(session, to_write, updated_by=by)
     return await get_runner_settings(session)

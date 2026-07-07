@@ -310,15 +310,8 @@ async def update_runner_settings(session: AsyncSession, payload: dict, *,
         "keep_daily": "backup.keep_daily", "keep_monthly": "backup.keep_monthly",
     }
     if payload.get("cron"):
-        cron_str = str(payload["cron"])
-        try:
-            from croniter import croniter
-            croniter(cron_str)
-        except ImportError:
-            if len(cron_str.split()) != 5:
-                raise ValueError(f"cron 需 5 欄位：{cron_str!r}")
-        except Exception as e:
-            raise ValueError(f"cron 不合法：{cron_str!r}（{e}）")
+        from ._runner_util import validate_cron
+        validate_cron(str(payload["cron"]))
     to_write = {KEYMAP[k]: v for k, v in payload.items() if k in KEYMAP}
     if to_write:
         await update_settings(session, to_write, updated_by=by)

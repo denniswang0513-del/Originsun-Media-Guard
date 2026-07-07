@@ -1011,7 +1011,10 @@ class SocialPostResponse(BaseModel):
 
 
 class SocialPostUpdate(BaseModel):
-    """編輯改稿：只開放 content / media_url / scheduled_at 三欄。"""
+    """編輯改稿：只開放 content / media_url / scheduled_at 三欄。
+
+    scheduled_at 為階段二發佈器預留（階段一前端未接、runner 不寫 — 非漏接）。
+    """
     content: Optional[str] = None
     media_url: Optional[str] = Field(None, max_length=512)
     scheduled_at: Optional[datetime] = None

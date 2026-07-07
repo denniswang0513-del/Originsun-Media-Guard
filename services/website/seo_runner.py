@@ -643,19 +643,9 @@ async def update_runner_settings(session: AsyncSession, payload: dict, *, by: Op
     ALLOWED = {"enabled", "cron", "batch_size"}
     to_write = {f"seo.ai_runner.{k}": v for k, v in payload.items() if k in ALLOWED}
     # 驗證 cron — 非法字串排程 loop 會靜默 no-op，admin 拿不到回饋。
-    # ⚠ NAS website-api 容器是 python:3.11-slim、沒裝 croniter：ImportError 時退化成
-    # 基本 5 欄位結構檢查（否則任何排程都被當非法 → admin 存不進、422）。真正排程在
-    # master 跑（有 croniter），執行點會再驗一次。
     if "cron" in payload and payload["cron"]:
-        cron_str = str(payload["cron"])
-        try:
-            from croniter import croniter
-            croniter(cron_str)
-        except ImportError:
-            if len(cron_str.split()) != 5:
-                raise ValueError(f"cron 需 5 個欄位（分 時 日 月 週）：{cron_str!r}")
-        except Exception as e:
-            raise ValueError(f"cron 字串不合法：{cron_str!r}（{e}）")
+        from ._runner_util import validate_cron
+        validate_cron(str(payload["cron"]))
     if to_write:
         await update_settings(session, to_write, updated_by=by)
     return await get_runner_settings(session)

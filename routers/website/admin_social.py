@@ -25,6 +25,12 @@ router = APIRouter(prefix="/api/website/admin", tags=["website-admin-social"])
 _VALID_STATUSES = {"draft", "approved", "published", "rejected"}
 
 
+def _or_404(item):
+    if not item:
+        raise HTTPException(status_code=404, detail="文稿不存在")
+    return item
+
+
 # ══════════════════════════════════════════════════════════
 # 文稿佇列
 # ══════════════════════════════════════════════════════════
@@ -46,12 +52,9 @@ async def social_post_update(
     session: AsyncSession = Depends(admin_session),
 ):
     """編輯改稿：content / media_url / scheduled_at。"""
-    item = await social_runner.update_queue_post(
+    return _or_404(await social_runner.update_queue_post(
         session, post_id, req.model_dump(exclude_unset=True),
-    )
-    if not item:
-        raise HTTPException(status_code=404, detail="文稿不存在")
-    return item
+    ))
 
 
 @router.post("/social/posts/{post_id}/approve")
@@ -60,12 +63,9 @@ async def social_post_approve(
     session: AsyncSession = Depends(admin_session),
 ):
     """核准 → status=approved（階段二發佈器只吃 approved 的）。"""
-    item = await social_runner.set_queue_status(
+    return _or_404(await social_runner.set_queue_status(
         session, post_id, "approved", reviewed_by=current_username(request),
-    )
-    if not item:
-        raise HTTPException(status_code=404, detail="文稿不存在")
-    return item
+    ))
 
 
 @router.post("/social/posts/{post_id}/reject")
@@ -74,12 +74,9 @@ async def social_post_reject(
     session: AsyncSession = Depends(admin_session),
 ):
     """退回 → status=rejected（不佔頻率上限額度、不再進發佈排程）。"""
-    item = await social_runner.set_queue_status(
+    return _or_404(await social_runner.set_queue_status(
         session, post_id, "rejected", reviewed_by=current_username(request),
-    )
-    if not item:
-        raise HTTPException(status_code=404, detail="文稿不存在")
-    return item
+    ))
 
 
 @router.post("/social/posts/{post_id}/published")
@@ -88,12 +85,9 @@ async def social_post_published(
     session: AsyncSession = Depends(admin_session),
 ):
     """發佈完成回寫實際貼文連結 → status=published。"""
-    item = await social_runner.set_queue_status(
+    return _or_404(await social_runner.set_queue_status(
         session, post_id, "published", published_url=req.published_url,
-    )
-    if not item:
-        raise HTTPException(status_code=404, detail="文稿不存在")
-    return item
+    ))
 
 
 # ══════════════════════════════════════════════════════════

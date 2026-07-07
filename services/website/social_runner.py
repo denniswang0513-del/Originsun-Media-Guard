@@ -163,16 +163,8 @@ async def update_social_settings(
     """
     to_write = {_ALLOWED_SETTINGS[k]: v for k, v in payload.items() if k in _ALLOWED_SETTINGS}
     if "cron" in payload and payload["cron"]:
-        cron_str = str(payload["cron"])
-        # ⚠ NAS 容器沒裝 croniter：ImportError 退化成 5 欄位結構檢查（同 seo_runner）
-        try:
-            from croniter import croniter
-            croniter(cron_str)
-        except ImportError:
-            if len(cron_str.split()) != 5:
-                raise ValueError(f"cron 需 5 個欄位（分 時 日 月 週）：{cron_str!r}")
-        except Exception as e:
-            raise ValueError(f"cron 字串不合法：{cron_str!r}（{e}）")
+        from ._runner_util import validate_cron
+        validate_cron(str(payload["cron"]))
     if "platforms" in payload:
         plats = payload["platforms"]
         if not isinstance(plats, list) or any(p not in PLATFORMS for p in plats):
@@ -536,19 +528,9 @@ def _reset_failures() -> None:
 
 async def _relay_run_to_master(relay_url: str) -> dict:
     """NAS website-api → master:8000 的「啟動」relay（master 背景跑、立即回）。"""
-    import httpx
-    from core.auth import _get_secret
+    from ._runner_util import relay_post
     url = f"{relay_url.rstrip('/')}/api/website/admin/internal/social/run"
-    try:
-        async with httpx.AsyncClient(timeout=15.0) as client:
-            r = await client.post(url, headers={"X-Internal-Key": _get_secret()})
-            if r.status_code == 200:
-                return r.json()
-            return {"status": "error", "error": f"master relay 失敗 (HTTP {r.status_code}): {r.text[:200]}"}
-    except (httpx.TimeoutException, httpx.ConnectError) as e:
-        return {"status": "error", "error": f"master 離線或超時：{e}"}
-    except Exception as e:
-        return {"status": "error", "error": f"relay 錯誤：{e}"}
+    return await relay_post(url, 15.0, on_error={"status": "error"})
 
 
 async def run_pipeline(session: AsyncSession, force_topic: Optional[str] = None) -> dict:
@@ -562,7 +544,9 @@ async def run_pipeline(session: AsyncSession, force_topic: Optional[str] = None)
     Returns:
         {generated, errors, items: [{source_type, source_id, platform, status, title, detail}]}
     """
-    # NAS 容器沒 claude → forward 給 master（master 沒設 MASTER_RELAY_URL，走本機路徑）
+    # NAS 容器沒 claude → forward 給 master（master 沒設 MASTER_RELAY_URL，走本機路徑）。
+    # 防禦性重複：正常入口 trigger_run 已 relay 過；這段只護「NAS 直呼 run_pipeline
+    # （force_topic）」的路徑，兩處不是二選一。
     relay = os.environ.get("MASTER_RELAY_URL", "").strip()
     if relay:
         return await _relay_run_to_master(relay)

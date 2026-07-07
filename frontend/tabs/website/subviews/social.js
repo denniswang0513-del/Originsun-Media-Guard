@@ -33,7 +33,11 @@ const GROUPS = [
     { key: 'rejected',  label: '❌ 退回',   color: '#6b7280', hint: '不採用的文稿' },
 ];
 
-const SOURCE_LABEL = { work: '🎬 作品', post: '📝 文章', blog: '📝 文章', service: '🧩 服務', manual: '✍️ 手動' };
+// key 必須對齊 social_runner 實際產出的 source_type（work/post/initiative/evergreen）
+const SOURCE_LABEL = { work: '🎬 作品', post: '📝 文章', initiative: '🤝 公益/創作', evergreen: '♻️ 常青重推' };
+
+// 平台徽章 fallback（未知平台顯示原字串灰底）
+const _pf = (p) => PLATFORMS[p.platform] || { label: p.platform || '?', bg: '#333', fg: '#ccc' };
 
 let _state = { posts: [], settings: {} };
 let _container = null;
@@ -124,7 +128,7 @@ function _renderGroup(g) {
 }
 
 function _postCard(p) {
-    const pf = PLATFORMS[p.platform] || { label: p.platform || '?', bg: '#333', fg: '#ccc' };
+    const pf = _pf(p);
     const src = _sourceHtml(p);
     const content = p.content || '';
     const preview = content.length > 120 ? content.slice(0, 120) + '…' : (content || '（空白文稿）');
@@ -238,7 +242,8 @@ async function _reloadPosts() {
 _social.openReview = (id) => {
     const p = _find(id);
     if (!p) { toastErr('找不到此文稿'); return; }
-    const pf = PLATFORMS[p.platform] || { label: p.platform || '?', bg: '#333', fg: '#ccc' };
+    const pf = _pf(p);
+    const pid = esc(p.id);
     const st = GROUPS.find(g => g.key === p.status);
     const canApprove = p.status === 'draft' || p.status === 'rejected';
     const canReject = p.status === 'draft' || p.status === 'approved';
@@ -256,7 +261,7 @@ _social.openReview = (id) => {
             <div style="margin-bottom:14px;">
                 <label style="${_lbl()}">文稿內容（失焦自動儲存，或按 💾 儲存）</label>
                 <textarea id="social-rv-content" rows="10" style="${_inp()};resize:vertical;line-height:1.6;"
-                          onchange="window._social.saveDraft('${esc(p.id)}', true)">${esc(p.content || '')}</textarea>
+                          onchange="window._social.saveDraft('${pid}', true)">${esc(p.content || '')}</textarea>
             </div>
             <div>
                 <label style="${_lbl()}">配圖</label>
@@ -264,18 +269,18 @@ _social.openReview = (id) => {
                     <div id="social-rv-media-prev" style="width:128px;height:72px;flex-shrink:0;background:#0d0d0d;border:1px solid #2a2a2a;border-radius:4px;overflow:hidden;"></div>
                     <input id="social-rv-media" value="${esc(p.media_url || '')}" placeholder="配圖網址（/uploads/… 或 https://…），留空 = 無配圖"
                            oninput="window._social.refreshMediaPrev(this.value)"
-                           onchange="window._social.saveDraft('${esc(p.id)}', true)" style="${_inp()};flex:1;" />
+                           onchange="window._social.saveDraft('${pid}', true)" style="${_inp()};flex:1;" />
                 </div>
             </div>
             ${p.published_url ? `<div style="font-size:12px;margin-top:10px;color:#888;">已發布連結：<a href="${esc(p.published_url)}" target="_blank" style="color:#3b82f6;word-break:break-all;">${esc(p.published_url)}</a></div>` : ''}
         </div>
         <div style="padding:12px 18px;border-top:1px solid #2a2a2a;display:flex;justify-content:flex-end;gap:8px;flex-wrap:wrap;">
             <button class="btn btn-ghost btn-sm" onclick="window._social.close()">關閉</button>
-            <button class="btn btn-ghost btn-sm" onclick="window._social.saveDraft('${esc(p.id)}')">💾 儲存</button>
-            <button class="btn btn-sm" style="background:#374151;" onclick="window._social.copy('${esc(p.id)}')">📋 複製文稿</button>
-            ${canReject ? `<button class="btn btn-sm btn-danger" onclick="window._social.reject('${esc(p.id)}')">❌ 退回</button>` : ''}
-            ${canApprove ? `<button class="btn btn-sm" style="background:#059669;" onclick="window._social.approve('${esc(p.id)}')">✅ 核准</button>` : ''}
-            ${canPublish ? `<button class="btn btn-sm" style="background:#3b82f6;" onclick="window._social.markPublished('${esc(p.id)}')">🔗 ${p.status === 'published' ? '更新貼文連結' : '標記已發布'}</button>` : ''}
+            <button class="btn btn-ghost btn-sm" onclick="window._social.saveDraft('${pid}')">💾 儲存</button>
+            <button class="btn btn-sm" style="background:#374151;" onclick="window._social.copy('${pid}')">📋 複製文稿</button>
+            ${canReject ? `<button class="btn btn-sm btn-danger" onclick="window._social.reject('${pid}')">❌ 退回</button>` : ''}
+            ${canApprove ? `<button class="btn btn-sm" style="background:#059669;" onclick="window._social.approve('${pid}')">✅ 核准</button>` : ''}
+            ${canPublish ? `<button class="btn btn-sm" style="background:#3b82f6;" onclick="window._social.markPublished('${pid}')">🔗 ${p.status === 'published' ? '更新貼文連結' : '標記已發布'}</button>` : ''}
         </div>`;
     openModal('social-modal', inner, { width: '680px' });
     _social.refreshMediaPrev(p.media_url || '');
