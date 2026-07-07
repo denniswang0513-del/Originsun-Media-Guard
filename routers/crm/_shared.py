@@ -25,7 +25,7 @@ from fastapi import APIRouter, HTTPException, Request
 import core.state as state
 
 try:
-    from sqlalchemy import select, or_, delete
+    from sqlalchemy import select, or_, delete, update as sa_update
     from sqlalchemy.exc import IntegrityError
     from db.models import (Client, User, CrmProject, CrmQuotation, CrmQuotationItem,
                            CrmQuotationTemplate, CrmStaff, CrmStaffPortfolio,
@@ -43,7 +43,7 @@ except ImportError:
 # 其餘 db.models 類與 or_ / delete / IntegrityError 是給領域模組
 # `from ._shared import ...` 的 re-export（列進 __all__，ruff F401 視為已使用）。
 __all__ = [
-    "router", "or_", "delete", "IntegrityError", "User",
+    "router", "or_", "delete", "sa_update", "IntegrityError", "User",
     "CrmQuotation", "CrmQuotationItem", "CrmQuotationTemplate",
     "CrmStaff", "CrmStaffPortfolio", "CrmProjectStaff",
     "CrmInvoice", "CrmPaymentRequest", "CrmCashEntry",
