@@ -4,8 +4,10 @@
  * ⚠️ MASTER 同源功能：打 master 自己的 /api/v1/bulletin（帶 auth token），
  *    不走 NAS website-api。因此 *不用* websiteFetch / getApiBase，改用本檔的 bfetch。
  *
- * 結構複用官網 Tab：左側子視圖導覽 + 右側內容容器。目前只有一個子視圖：
- *    📋 待辦提醒（todo）。board 直接 render 進 #bulletin-content。
+ * 結構複用官網 Tab：左側子視圖導覽 + 右側內容容器。兩個子視圖共用同一個 board：
+ *    📋 待辦提醒（todo）  — 全量主清單
+ *    🌐 官網與社群（webso）— 分類鏡頭（category ∈ 官網/社群），快速新增自動帶分類
+ * board 直接 render 進 #bulletin-content。
  *
  * 視覺（.card/.btn/.btn-sm/.btn-ghost/website-pill/_inp()）與 toast/modal 沿用
  * 官網 Tab 的 website-utils.js（純 DOM 工具，無 NAS 副作用）。
@@ -34,7 +36,15 @@ async function bfetch(path, opts = {}) {
 let _items = [];
 let _showDone = false;     // 預設隱藏已完成
 let _content = null;
+let _view = 'todo';        // 目前子視圖（VIEWS 的 key）
 const _bl = (window._bl = window._bl || {});
+
+// 子視圖設定：cats=null 顯示全部；有 cats 時為分類鏡頭（同一筆待辦兩邊都看得到，
+// 這是刻意的 — 待辦提醒是主清單、官網與社群是過濾視角）。
+const VIEWS = {
+    todo:  { title: '📋 待辦提醒', sub: '內部公布欄 / 團隊待辦', cats: null, addCat: '' },
+    webso: { title: '🌐 官網與社群', sub: '官網 / 社群相關待辦（分類=官網、社群）', cats: ['官網', '社群'], addCat: '官網' },
+};
 
 // priority → [中文, 底色, 文字色]（high=紅 / med=琥珀 / low=灰）
 const PRIORITY = {
@@ -72,17 +82,16 @@ async function _switchSubview(name) {
     const nav = document.getElementById('bulletin-nav');
     if (nav) nav.querySelectorAll('.website-nav-btn').forEach(b =>
         b.classList.toggle('active', b.dataset.subview === name));
-    if (!_content) return;
-    if (name === 'todo') {
-        _content.innerHTML = _LOADING_HTML;
-        try {
-            await _load();
-        } catch (e) {
-            _content.innerHTML = `<div style="color:#f88;padding:24px;">載入失敗：${esc(e.message || e)}</div>`;
-            return;
-        }
-        _renderBoard();
+    if (!_content || !VIEWS[name]) return;
+    _view = name;
+    _content.innerHTML = _LOADING_HTML;
+    try {
+        await _load();
+    } catch (e) {
+        _content.innerHTML = `<div style="color:#f88;padding:24px;">載入失敗：${esc(e.message || e)}</div>`;
+        return;
     }
+    _renderBoard();
 }
 
 async function _load() {
@@ -100,15 +109,19 @@ async function _reload(focusAdd = false) {
 // ── 渲染 board ──
 function _renderBoard() {
     if (!_content) return;
-    const visible = _showDone ? _items : _items.filter(it => it.status !== 'done');
-    const doneCount = _items.filter(it => it.status === 'done').length;
+    const view = VIEWS[_view] || VIEWS.todo;
+    const scoped = view.cats
+        ? _items.filter(it => view.cats.includes((it.category || '').trim()))
+        : _items;
+    const visible = _showDone ? scoped : scoped.filter(it => it.status !== 'done');
+    const doneCount = scoped.filter(it => it.status === 'done').length;
 
     const list = visible.length
         ? visible.map(_card).join('')
         : `<div style="color:#888;padding:48px 24px;text-align:center;font-size:14px;">目前沒有待辦 🎉</div>`;
 
     _content.innerHTML = `
-        <h2 style="margin:0 0 4px;">📋 待辦提醒 <span style="color:#888;font-size:12px;font-weight:400;">· 內部公布欄 / 團隊待辦</span></h2>
+        <h2 style="margin:0 0 4px;">${view.title} <span style="color:#888;font-size:12px;font-weight:400;">· ${view.sub}</span></h2>
         <p style="color:#888;font-size:12px;margin:0 0 14px;">釘選的項目會排在最前面。勾選左側圓圈標記完成。</p>
 
         <!-- 快速新增 -->
@@ -119,7 +132,7 @@ function _renderBoard() {
                 <option value="med" selected>🟠 中</option>
                 <option value="low">⚪ 低</option>
             </select>
-            <input id="bl-add-cat" placeholder="分類（選填）" style="${_inp()};max-width:150px;" />
+            <input id="bl-add-cat" placeholder="分類（選填）" value="${esc(view.addCat)}" style="${_inp()};max-width:150px;" />
             <button class="btn" style="background:#059669;" onclick="window._bl.add()">+ 新增</button>
         </div>
 
@@ -128,7 +141,7 @@ function _renderBoard() {
             <button class="btn btn-sm btn-ghost" onclick="window._bl.toggleFilter()">
                 ${_showDone ? '👁 顯示：全部' : '🙈 顯示：未完成'}
             </button>
-            <span>共 ${_items.length} 則${doneCount ? ` · 已完成 ${doneCount}` : ''}</span>
+            <span>共 ${scoped.length} 則${doneCount ? ` · 已完成 ${doneCount}` : ''}</span>
         </div>
 
         <!-- 清單 -->
@@ -150,6 +163,9 @@ function _card(it) {
     const atTop = fullIdx <= 0;
     const atBottom = fullIdx >= _items.length - 1;
     const toClaude = it.assignee === 'claude';
+    // 分類鏡頭不提供 ▲▼：reorder 動的是全量主清單的順序，在過濾視角下移動
+    // 會跳到看不見的位置，誤導大於價值
+    const canReorder = !(VIEWS[_view] || VIEWS.todo).cats;
 
     const prioPill = `<span class="website-pill" style="background:${p[1]};color:${p[2]};">${p[0]}</span>`;
     // 進行中額外顯示藍 pill（待辦/完成分別以預設樣式/刪除線呈現）
@@ -192,8 +208,8 @@ function _card(it) {
                 ${assignBtn}
                 <button class="bl-icon-btn" onclick="window._bl.chat('${it.id}')" title="🤖 問 Claude（唯讀諮詢）">🤖</button>
                 <button class="bl-icon-btn" style="${pinStyle}" onclick="window._bl.togglePin('${it.id}')" title="${it.pinned ? '取消釘選' : '釘選'}">${pinIcon}</button>
-                <button class="bl-icon-btn" onclick="window._bl.move('${it.id}',-1)" ${atTop ? 'disabled' : ''} title="上移">▲</button>
-                <button class="bl-icon-btn" onclick="window._bl.move('${it.id}',1)" ${atBottom ? 'disabled' : ''} title="下移">▼</button>
+                ${canReorder ? `<button class="bl-icon-btn" onclick="window._bl.move('${it.id}',-1)" ${atTop ? 'disabled' : ''} title="上移">▲</button>
+                <button class="bl-icon-btn" onclick="window._bl.move('${it.id}',1)" ${atBottom ? 'disabled' : ''} title="下移">▼</button>` : ''}
                 <button class="bl-icon-btn" onclick="window._bl.edit('${it.id}')" title="編輯">✏️</button>
                 <button class="bl-icon-btn" onclick="window._bl.del('${it.id}')" title="刪除" style="color:#f87171;">🗑</button>
             </div>
