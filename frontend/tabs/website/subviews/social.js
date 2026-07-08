@@ -158,9 +158,14 @@ function _renderSettingsCard() {
             <label style="${_lbl()}">${PLATFORMS[pfKey].label} 模板</label>
             <textarea id="social-set-tmpl-${pfKey}" rows="3" placeholder="${esc(ph)}" style="${_inp()};resize:vertical;">${esc(tpl[pfKey] || '')}</textarea>
         </div>`;
-    const runnerLine = s.last_run_at
-        ? `上次產生：${esc(fmtDt(s.last_run_at))}${s.running ? '（產生中…）' : ''}`
-        : '尚未跑過（排程 09:00 或按上面的按鈕）';
+    // last_run_at 是 epoch「秒」（time.time()）— fmtDt 吃 ms/ISO，要 ×1000。
+    // 播種（部署時 seed，summary 為空）≠ 真的產生過，措辭分開。
+    const lastMs = typeof s.last_run_at === 'number' ? s.last_run_at * 1000 : s.last_run_at;
+    const runnerLine = s.running
+        ? '產生中…'
+        : (s.last_run_summary
+            ? `上次產生：${esc(fmtDt(lastMs))}`
+            : '尚未產生過（每日 09:00 排程，或按上面的按鈕）');
     return `
         <details class="card" style="border-left:3px solid #8b5cf6;">
             <summary style="cursor:pointer;color:#fff;font-size:14px;font-weight:600;">⚙️ 社群設定

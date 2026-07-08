@@ -1,5 +1,5 @@
 {
-  "version": "1.10.213",
-  "build_date": "2026-07-07",
-  "notes": "?????????????(????)"
+  "version": "1.10.214",
+  "build_date": "2026-07-08",
+  "notes": "fix social last_run_at display"
 }
