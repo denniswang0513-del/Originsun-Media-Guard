@@ -47,6 +47,9 @@ export interface IWebsiteMeta {
     ai_allow?: boolean;
     // admin 自填的 llms.txt 內容；空則 /llms.txt endpoint 走自動生成
     llms_txt_body?: string;
+    // GA4 追蹤 ID（G-XXXXXXXXXX）；admin 在「⚙️ 網站設定 › 📊 分析追蹤」填。
+    // 空 → BaseLayout 不注入 gtag。
+    analytics_ga_id?: string;
     // /portfolio 頁面頂部「下載作品集 PDF」按鈕連結；空則隱藏按鈕
     portfolio_pdf_url?: string;
     // 頁面行銷文案覆寫（admin 在各子視圖「📝 頁面文案」卡編輯 website_settings.copy.*）。

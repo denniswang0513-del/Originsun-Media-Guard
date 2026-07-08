@@ -21,9 +21,10 @@ from services.website import rebuild_service, settings_service
 # - forms.* 聯絡表單選項清單（Phase 3 service_types / budget_ranges）
 # - home.*  首頁 hero / showreel / stats / rating（admin「🏠 首頁設定」）
 # - portfolio.* /portfolio 頁 PDF 連結
+# - analytics.* GA4 追蹤 ID（注入每頁 <head> 的 gtag，改了必須重 build 對外站）
 _PUBLIC_AFFECTING_PREFIXES = (
     "company.", "social.", "seo.", "about.", "turnstile.",
-    "copy.", "forms.", "home.", "portfolio.", "brand.",
+    "copy.", "forms.", "home.", "portfolio.", "brand.", "analytics.",
 )
 
 router = APIRouter(prefix="/api/website/admin", tags=["website-admin-settings"])

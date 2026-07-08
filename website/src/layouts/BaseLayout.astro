@@ -89,6 +89,24 @@ const finalOgImage = ogImage || meta.seo_og_image || undefined;
             <script is:inline type="application/ld+json" set:html={JSON.stringify(d)} />
         ))}
 
+        {/* Google Analytics 4（gtag）— admin 在「網站設定 › 分析追蹤」填 ID 後注入。
+            只在 G- 開頭的合法 GA4 ID 時載入，避免空值 / 誤填打壞頁面。 */}
+        {meta.analytics_ga_id?.startsWith("G-") && (
+            <>
+                <script
+                    is:inline
+                    async
+                    src={`https://www.googletagmanager.com/gtag/js?id=${meta.analytics_ga_id}`}
+                ></script>
+                <script is:inline set:html={`
+                    window.dataLayer = window.dataLayer || [];
+                    function gtag(){dataLayer.push(arguments);}
+                    gtag('js', new Date());
+                    gtag('config', '${meta.analytics_ga_id}');
+                `}></script>
+            </>
+        )}
+
         <!-- lite-youtube-embed（輕量 YouTube 佔位元件，只在點擊時載入 iframe） -->
         <script is:inline src="https://cdn.jsdelivr.net/npm/lite-youtube-embed@0.3.3/src/lite-yt-embed.js" defer></script>
         <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/lite-youtube-embed@0.3.3/src/lite-yt-embed.css" />

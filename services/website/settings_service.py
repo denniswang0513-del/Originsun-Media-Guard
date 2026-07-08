@@ -112,6 +112,9 @@ async def get_meta(session: AsyncSession) -> dict[str, Any]:
         "ai_allow": s.get("seo.ai_allow") is True,
         # admin 在「llms.txt 編輯器」自填的 body；空則 /llms.txt 走自動生成
         "llms_txt_body": s.get("seo.llms_txt_body", ""),
+        # GA4 追蹤 ID（G-XXXXXXXXXX）；admin 在「⚙️ 網站設定 › 📊 分析追蹤」填。
+        # 空 → BaseLayout 不注入 gtag（不追蹤）。Astro 重建網站時把值烤進 <head>。
+        "analytics_ga_id": (s.get("analytics.ga_measurement_id") or "").strip(),
         # /portfolio 頁面頂部「下載作品集 PDF」按鈕；空則隱藏按鈕。
         # admin 在「作品集管理」Tab 頂部設定（works.js）。
         "portfolio_pdf_url": s.get("portfolio.pdf_url", ""),

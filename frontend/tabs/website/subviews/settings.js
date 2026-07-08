@@ -67,7 +67,11 @@ window._websiteUploadBrand = (kind, btn) => {
 const _CONTACT_MOVED = ['company.', 'social.'];
 const _GROUPS = [
     { prefix: 'seo', label: '🔍 SEO 預設', color: '#10b981' },
-    { prefix: 'analytics', label: '📊 分析追蹤', color: '#f59e0b' },
+    { prefix: 'analytics', label: '📊 分析追蹤', color: '#f59e0b',
+      knownKeys: ['ga_measurement_id'],
+      hints: {
+        ga_measurement_id: 'Google Analytics 4 追蹤 ID（G- 開頭，如 G-XXXXXXXXXX）。到 GA 後台 › 管理 › 資料串流 › 你的網站串流 複製「評估 ID」。填好存檔 → 官網自動 rebuild 後開始追蹤（可到 GA「即時」報表驗證）。',
+      } },
     { prefix: 'notify', label: '🔔 通知設定', color: '#dc2626' },
     { prefix: 'turnstile', label: '🛡️ Turnstile 反機器人', color: '#ec4899',
       knownKeys: ['site_key', 'secret'],
