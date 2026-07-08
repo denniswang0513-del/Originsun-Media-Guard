@@ -700,3 +700,29 @@ class MilestonePayload(BaseModel):
 class MonthClosePayload(BaseModel):
     """月結（F1）：鎖定/重開指定月份。"""
     month: str                            # 'YYYY-MM'
+
+
+class LocationPayload(BaseModel):
+    """場景庫（P-a）新增/更新 — 全欄 Optional 配合部分更新（create 時 name 由端點檢查必填）。"""
+    name: Optional[str] = None
+    category: Optional[str] = None        # 咖啡廳/工廠/辦公室/戶外/官署…
+    region: Optional[str] = None          # 縣市
+    address: Optional[str] = None
+    contact_name: Optional[str] = None
+    contact_phone: Optional[str] = None
+    permit_required: Optional[int] = None  # 0/1 需申請拍攝許可
+    permit_note: Optional[str] = None
+    fee_note: Optional[str] = None
+    attributes: Optional[dict] = None     # 電源/收音/自然光/停車/廁所… 自由 dict
+    tags: Optional[list] = None
+    note: Optional[str] = None
+    status: Optional[str] = None          # 可用/黑名單/已消失
+    cover_url: Optional[str] = None
+
+
+class LocationUsagePayload(BaseModel):
+    """場景使用履歷（哪個專案用過＋評分＋踩雷心得）。"""
+    project_id: Optional[str] = None
+    used_date: Optional[str] = None       # 'YYYY-MM-DD'
+    rating: Optional[int] = None          # 1-5
+    lesson: Optional[str] = None

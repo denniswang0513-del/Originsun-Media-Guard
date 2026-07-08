@@ -32,7 +32,7 @@ _ROUTER_MODULES = [
     'api_backup', 'api_verify', 'api_proxy', 'api_concat',
     'api_report', 'api_transcribe', 'api_system', 'api_ota', 'api_utils', 'api_tts',
     'api_job_history', 'api_queue', 'api_schedules', 'api_agents',
-    'api_api_keys', 'api_timesheets', 'api_cashflow',
+    'api_api_keys', 'api_timesheets', 'api_cashflow', 'api_locations',
     'api_crm',
     'api_drone_meta',
     'api_drone_watcher',

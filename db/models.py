@@ -733,3 +733,56 @@ class FinanceMonthClose(Base):
     snapshot = Column(JSONB, nullable=True)                      # {income, expense, by_category, entry_count}
     reopened_by = Column(String(64), nullable=True)              # reopen 留稽核痕跡
     reopened_at = Column(DateTime(timezone=True), nullable=True)
+
+
+class PreprodLocation(Base):
+    """場景庫（P-a）— 場勘成果資產化：勘過一次＝永久資產（docs/PREPROD_PLAN.md A 段）。"""
+    __tablename__ = "preprod_locations"
+
+    id = Column(String(32), primary_key=True)                    # uuid4 hex
+    name = Column(String(128), nullable=False)
+    category = Column(String(32), nullable=True)                 # 咖啡廳/工廠/辦公室/戶外/官署…
+    region = Column(String(16), nullable=True)                   # 縣市
+    address = Column(String(255), nullable=True)
+    contact_name = Column(String(64), nullable=True)
+    contact_phone = Column(String(32), nullable=True)
+    permit_required = Column(Integer, nullable=False, default=0)  # 0/1 需申請拍攝許可
+    permit_note = Column(Text, nullable=True)                    # 申請流程/窗口備註
+    fee_note = Column(String(255), nullable=True)                # 費用註記
+    attributes = Column(JSONB, nullable=True)                    # 自由 dict：電源/收音/自然光/停車/廁所/可用時段…
+    tags = Column(JSONB, nullable=True)                          # list[str]
+    note = Column(Text, nullable=True)
+    status = Column(String(16), nullable=False, default="可用")   # 可用/黑名單/已消失
+    cover_url = Column(String(512), nullable=True)               # 第一張照片自動帶入
+    created_by = Column(String(64), nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    __table_args__ = (Index("idx_ploc_category", "category"),
+                      Index("idx_ploc_region", "region"))
+
+
+class PreprodLocationPhoto(Base):
+    """場景照片索引（檔案存 uploads/locations/{location_id}/）。"""
+    __tablename__ = "preprod_location_photos"
+
+    id = Column(String(32), primary_key=True)                    # uuid4 hex
+    location_id = Column(String(32), nullable=False, index=True)  # soft FK → preprod_locations.id
+    url = Column(String(512), nullable=True)                     # /uploads/locations/{lid}/{fname}
+    caption = Column(String(255), nullable=True)
+    sort_order = Column(Integer, nullable=False, default=0)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+
+class PreprodLocationUsage(Base):
+    """場景使用履歷 — 哪些專案用過＋評分＋踩雷心得（lesson 是資產的靈魂）。"""
+    __tablename__ = "preprod_location_usages"
+
+    id = Column(String(32), primary_key=True)                    # uuid4 hex
+    location_id = Column(String(32), nullable=False, index=True)  # soft FK → preprod_locations.id
+    project_id = Column(String(32), nullable=True)               # soft FK → crm_projects.id
+    used_date = Column(DateTime(timezone=True), nullable=True)
+    rating = Column(Integer, nullable=True)                      # 1-5
+    lesson = Column(Text, nullable=True)                         # 心得/踩雷
+    created_by = Column(String(64), nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())

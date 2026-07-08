@@ -1,0 +1,120 @@
+<!--
+    locations.html — 🗺️ 場景庫 Tab 殼（P-a：場勘成果資產化，docs/PREPROD_PLAN.md A 段）
+    內容全部由 locations.js render 進 #loc-content（同源打 /api/v1/locations/*）。
+    詳情 overlay（#loc-overlay）由 JS 動態掛在 body 下（section 有 transform，
+    fixed 定位會被困住），樣式一樣放這裡（style 標籤注入後是全域生效）。
+-->
+<div id="loc-root">
+    <div id="loc-content" style="color:#888;padding:40px;text-align:center;">載入中…</div>
+</div>
+
+<style>
+    #loc-root h2 { color: #fff; font-size: 18px; margin: 0 0 4px 0; font-weight: 600; }
+    #loc-root .loc-sub { color: #777; font-size: 12px; margin-bottom: 16px; }
+    #loc-root .loc-toolbar {
+        display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-bottom: 16px;
+    }
+    #loc-root .loc-toolbar input, #loc-root .loc-toolbar select,
+    #loc-overlay input, #loc-overlay select, #loc-overlay textarea {
+        background: #1a1a1a; border: 1px solid #333; border-radius: 6px;
+        color: #ddd; font-size: 12.5px; padding: 7px 10px; outline: none;
+    }
+    #loc-root .loc-toolbar input:focus, #loc-overlay input:focus,
+    #loc-overlay select:focus, #loc-overlay textarea:focus { border-color: #3b82f6; }
+    .loc-btn {
+        background: #3b82f6; color: #fff; border: none; padding: 7px 14px;
+        border-radius: 6px; font-size: 12.5px; cursor: pointer;
+    }
+    .loc-btn:hover { background: #2563eb; }
+    .loc-btn.ghost { background: transparent; border: 1px solid #444; color: #ccc; }
+    .loc-btn.ghost:hover { background: #333; }
+    .loc-btn.danger { background: transparent; border: 1px solid #7f1d1d; color: #f87171; }
+    .loc-btn.danger:hover { background: #7f1d1d33; }
+
+    /* ── 卡片牆 ── */
+    #loc-root .loc-grid {
+        display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 14px;
+    }
+    #loc-root .loc-card {
+        background: #232323; border: 1px solid #333; border-radius: 10px;
+        overflow: hidden; cursor: pointer; transition: border-color .15s, transform .15s;
+    }
+    #loc-root .loc-card:hover { border-color: #3b82f6; transform: translateY(-2px); }
+    #loc-root .loc-card.blacklisted { opacity: .45; }
+    #loc-root .loc-cover { width: 100%; height: 130px; object-fit: cover; display: block; background: #1a1a1a; }
+    #loc-root .loc-cover-ph {
+        width: 100%; height: 130px; display: flex; align-items: center; justify-content: center;
+        font-size: 42px; background: linear-gradient(135deg, #1e2a3a, #1a1a2a); color: #556;
+    }
+    #loc-root .loc-card-body { padding: 10px 12px 12px; }
+    #loc-root .loc-card-name { color: #eee; font-size: 14px; font-weight: 600; margin-bottom: 6px; }
+    .loc-pill {
+        display: inline-block; background: #1e3a5f; color: #93c5fd; border-radius: 999px;
+        padding: 1px 9px; font-size: 11px; margin: 0 4px 4px 0;
+    }
+    .loc-pill.region { background: #3a2e1e; color: #fbbf24; }
+    .loc-pill.gray { background: #2c2c2c; color: #999; }
+    .loc-tag {
+        display: inline-block; background: #1a1a1a; border: 1px solid #333; color: #999;
+        border-radius: 4px; padding: 0 6px; font-size: 10.5px; margin: 0 4px 4px 0;
+    }
+    #loc-root .loc-card-fee { color: #999; font-size: 11.5px; margin: 2px 0 4px; }
+    #loc-root .loc-card-meta { color: #666; font-size: 11px; margin-top: 4px; }
+
+    /* ── 詳情 overlay（掛 body） ── */
+    #loc-overlay {
+        position: fixed; inset: 0; z-index: 9000; background: rgba(0,0,0,.65);
+        display: flex; align-items: center; justify-content: center; padding: 24px;
+    }
+    #loc-overlay .loc-panel {
+        background: #222; border: 1px solid #3a3a3a; border-radius: 12px;
+        width: min(1060px, 96vw); max-height: 92vh; display: flex; flex-direction: column;
+        box-shadow: 0 20px 60px rgba(0,0,0,.55);
+    }
+    #loc-overlay .loc-panel-head {
+        display: flex; align-items: center; gap: 10px; padding: 14px 18px;
+        border-bottom: 1px solid #333;
+    }
+    #loc-overlay .loc-panel-head h3 { color: #fff; font-size: 16px; font-weight: 600; margin: 0; flex: 1; }
+    #loc-overlay .loc-close {
+        background: none; border: none; color: #888; font-size: 20px; cursor: pointer; line-height: 1;
+    }
+    #loc-overlay .loc-close:hover { color: #fff; }
+    #loc-overlay .loc-panel-body {
+        display: flex; gap: 18px; padding: 16px 18px; overflow-y: auto; flex-wrap: wrap;
+    }
+    #loc-overlay .loc-photos-col { flex: 1 1 380px; min-width: 300px; }
+    #loc-overlay .loc-info-col { flex: 1 1 420px; min-width: 320px; }
+    #loc-overlay .loc-photo-grid {
+        display: grid; grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); gap: 8px;
+        margin-bottom: 10px;
+    }
+    #loc-overlay .loc-photo { position: relative; }
+    #loc-overlay .loc-photo img {
+        width: 100%; height: 96px; object-fit: cover; border-radius: 6px;
+        border: 1px solid #333; display: block; cursor: zoom-in;
+    }
+    #loc-overlay .loc-photo-del {
+        position: absolute; top: 4px; right: 4px; background: rgba(0,0,0,.65); border: none;
+        color: #f87171; border-radius: 4px; font-size: 11px; cursor: pointer; padding: 2px 5px;
+    }
+    #loc-overlay .loc-card-sec {
+        background: #262626; border: 1px solid #333; border-radius: 8px;
+        padding: 12px 14px; margin-bottom: 12px;
+    }
+    #loc-overlay .loc-card-sec h4 { color: #ddd; font-size: 13px; margin: 0 0 8px; font-weight: 600; }
+    #loc-overlay .loc-kv { display: flex; font-size: 12.5px; padding: 3px 0; }
+    #loc-overlay .loc-kv .k { color: #888; width: 84px; flex-shrink: 0; }
+    #loc-overlay .loc-kv .v { color: #ccc; word-break: break-all; }
+    #loc-overlay .loc-form-row { margin-bottom: 8px; }
+    #loc-overlay .loc-form-row label { display: block; color: #888; font-size: 11.5px; margin-bottom: 3px; }
+    #loc-overlay .loc-form-row input, #loc-overlay .loc-form-row select,
+    #loc-overlay .loc-form-row textarea { width: 100%; box-sizing: border-box; }
+    #loc-overlay .loc-usage {
+        border-bottom: 1px solid #2c2c2c; padding: 8px 0; font-size: 12.5px; color: #ccc;
+    }
+    #loc-overlay .loc-usage:last-child { border-bottom: none; }
+    #loc-overlay .loc-usage .stars { color: #fbbf24; letter-spacing: 1px; }
+    #loc-overlay .loc-usage .lesson { color: #999; margin-top: 3px; white-space: pre-wrap; }
+    #loc-overlay .loc-note { color: #777; font-size: 11.5px; margin-top: 6px; line-height: 1.6; }
+</style>
