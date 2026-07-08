@@ -1,0 +1,104 @@
+<!--
+    intel.html — 📡 產業情報 Tab 殼（P-c：第四個 AI runner，docs/PREPROD_PLAN.md C 段）
+    內容全部由 intel.js render 進 #intel-content（同源打 /api/v1/intel/*）。
+    標案/補助/產業動態每日自動蒐集 + claude 摘要分類評分；高分項可一鍵轉提案。
+-->
+<div id="intel-root">
+    <div id="intel-content" style="color:#888;padding:40px;text-align:center;">載入中…</div>
+</div>
+
+<style>
+    #intel-root h2 { color: #fff; font-size: 18px; margin: 0 0 4px 0; font-weight: 600; }
+    #intel-root .intel-sub { color: #777; font-size: 12px; margin-bottom: 16px; }
+    #intel-root .intel-toolbar {
+        display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-bottom: 14px;
+    }
+    #intel-root input, #intel-root select {
+        background: #1a1a1a; border: 1px solid #333; border-radius: 6px;
+        color: #ddd; font-size: 12.5px; padding: 7px 10px; outline: none;
+    }
+    #intel-root input:focus, #intel-root select:focus { border-color: #3b82f6; }
+    #intel-root .intel-btn {
+        background: #3b82f6; color: #fff; border: none; padding: 7px 14px;
+        border-radius: 6px; font-size: 12.5px; cursor: pointer;
+    }
+    #intel-root .intel-btn:hover { background: #2563eb; }
+    #intel-root .intel-btn.ghost { background: transparent; border: 1px solid #444; color: #ccc; }
+    #intel-root .intel-btn.ghost:hover { background: #333; }
+    #intel-root .intel-btn.danger { background: transparent; border: 1px solid #7f1d1d; color: #f87171; }
+    #intel-root .intel-btn.danger:hover { background: #7f1d1d33; }
+    #intel-root .intel-btn:disabled { opacity: .5; cursor: default; }
+
+    /* ── 狀態列（enabled 開關 / 上次執行 / 立即抓取） ── */
+    #intel-root .intel-status {
+        display: flex; flex-wrap: wrap; gap: 12px; align-items: center;
+        background: #232323; border: 1px solid #333; border-radius: 8px;
+        padding: 10px 14px; margin-bottom: 14px; font-size: 12.5px; color: #aaa;
+    }
+    #intel-root .intel-status label { display: inline-flex; align-items: center; gap: 6px; cursor: pointer; color: #ccc; }
+    #intel-root .intel-status .run-meta { color: #888; }
+    #intel-root .intel-status .run-meta b { color: #ccc; font-weight: 600; }
+
+    /* ── 情報卡片列表 ── */
+    #intel-root .intel-item {
+        display: flex; gap: 14px; align-items: flex-start;
+        background: #232323; border: 1px solid #333; border-radius: 8px;
+        padding: 12px 14px; margin-bottom: 10px;
+    }
+    #intel-root .intel-item.archived { opacity: .55; }
+    #intel-root .intel-score {
+        min-width: 52px; text-align: center; font-size: 24px; font-weight: 700;
+        color: #777; line-height: 1.1; flex-shrink: 0;
+    }
+    #intel-root .intel-score .sl { display: block; font-size: 10px; font-weight: 400; color: #666; }
+    #intel-root .intel-score.hi { color: #4ade80; }
+    #intel-root .intel-score.mid { color: #93c5fd; }
+    #intel-root .intel-body { flex: 1; min-width: 0; }
+    #intel-root .intel-body a.title { color: #eee; font-weight: 600; font-size: 13.5px; text-decoration: none; }
+    #intel-root .intel-body a.title:hover { color: #93c5fd; text-decoration: underline; }
+    #intel-root .intel-summary { color: #aaa; font-size: 12.5px; margin-top: 4px; line-height: 1.6; }
+    #intel-root .intel-meta { color: #666; font-size: 11.5px; margin-top: 6px; }
+    #intel-root .intel-actions { display: flex; gap: 6px; flex-shrink: 0; align-items: center; }
+
+    /* 分類 pill */
+    #intel-root .intel-pill {
+        display: inline-block; border-radius: 999px; padding: 1px 10px; font-size: 11px;
+        background: #2c2c2c; color: #999; margin-right: 6px; vertical-align: 1px;
+    }
+    #intel-root .intel-pill.c-標案 { background: #14351f; color: #4ade80; }
+    #intel-root .intel-pill.c-補助 { background: #1e3a5f; color: #93c5fd; }
+    #intel-root .intel-pill.c-產業 { background: #3a2e1e; color: #fbbf24; }
+    #intel-root .intel-pill.c-技術 { background: #2e1e3a; color: #c4b5fd; }
+    #intel-root .intel-pill.c-競品 { background: #3a1e2e; color: #f9a8d4; }
+    #intel-root .intel-badge {
+        display: inline-block; border-radius: 4px; padding: 1px 8px; font-size: 11px;
+        background: #14351f; color: #4ade80;
+    }
+
+    /* 截止日紅字倒數（<7 天加粗） */
+    #intel-root .intel-deadline { color: #f87171; font-size: 11.5px; margin-left: 10px; }
+    #intel-root .intel-deadline.urgent { font-weight: 700; }
+    #intel-root .intel-deadline.over { color: #777; font-weight: 400; }
+
+    /* ── 來源管理折疊卡 ── */
+    #intel-root .intel-card {
+        background: #232323; border: 1px solid #333; border-radius: 8px;
+        padding: 12px 14px; margin-top: 18px;
+    }
+    #intel-root .intel-card h3 { color: #ddd; font-size: 13.5px; margin: 0; font-weight: 600; cursor: pointer; user-select: none; }
+    #intel-root .intel-card table { width: 100%; border-collapse: collapse; font-size: 12px; margin-top: 10px; }
+    #intel-root .intel-card th {
+        text-align: left; color: #888; font-weight: 500; padding: 6px 8px;
+        border-bottom: 1px solid #333; white-space: nowrap;
+    }
+    #intel-root .intel-card td { padding: 6px 8px; border-bottom: 1px solid #2c2c2c; color: #ccc; }
+    #intel-root .intel-card td.url { color: #888; word-break: break-all; max-width: 320px; }
+    #intel-root .intel-note { color: #777; font-size: 11.5px; margin-top: 8px; line-height: 1.6; }
+
+    /* 空狀態引導 */
+    #intel-root .intel-empty {
+        color: #999; background: #232323; border: 1px dashed #3a3a3a; border-radius: 8px;
+        padding: 28px 24px; font-size: 13px; line-height: 2;
+    }
+    #intel-root .intel-empty b { color: #ddd; }
+</style>

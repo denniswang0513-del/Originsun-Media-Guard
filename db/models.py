@@ -832,3 +832,40 @@ class PreprodProposalRef(Base):
     id = Column(String(32), primary_key=True)                    # uuid4 hex
     proposal_id = Column(String(32), nullable=False, index=True)  # soft FK → preprod_proposals.id
     reference_id = Column(String(32), nullable=False)            # soft FK → preprod_references.id
+
+
+class IntelSource(Base):
+    """產業情報來源白名單（P-c，docs/PREPROD_PLAN.md C 段）— 白名單外不抓。"""
+    __tablename__ = "intel_sources"
+
+    id = Column(String(32), primary_key=True)                    # uuid4 hex
+    name = Column(String(128), nullable=False, default="")
+    type = Column(String(8), nullable=False, default="rss")      # rss / html（html 第一版先跳過）
+    url = Column(String(512), nullable=False)
+    keywords = Column(JSONB, nullable=True)                      # list[str] 關鍵字過濾；空 = 全收
+    enabled = Column(Integer, nullable=False, default=1)         # 0/1 kill switch（逐源）
+    last_fetched_at = Column(DateTime(timezone=True), nullable=True)
+    note = Column(String(255), nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+
+class IntelItem(Base):
+    """產業情報項目 — 只存標題+摘要+原文連結（不轉貼全文，版權）。
+    claude 摘要/分類/評分/抽截止日；claude 不可用時降級存原始 title（category=未分類）。"""
+    __tablename__ = "intel_items"
+
+    id = Column(String(32), primary_key=True)                    # uuid4 hex
+    source_id = Column(String(32), nullable=False, index=True)   # soft FK → intel_sources.id
+    url = Column(String(512), nullable=False)
+    url_hash = Column(String(40), nullable=False, unique=True)   # sha1(url) 去重
+    title = Column(String(512), nullable=False, default="")
+    summary = Column(Text, nullable=True)
+    category = Column(String(16), nullable=False, default="未分類")  # 標案/補助/產業/技術/競品/未分類
+    score = Column(Integer, nullable=False, default=0)           # 0-100 商機相關性
+    deadline = Column(DateTime(timezone=True), nullable=True)    # 標案/補助截止日（claude 抽取）
+    status = Column(String(16), nullable=False, default="new")   # new/starred/archived/converted
+    proposal_id = Column(String(32), nullable=True)              # 轉提案後回填 → preprod_proposals.id
+    fetched_at = Column(DateTime(timezone=True), nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    __table_args__ = (Index("idx_intel_status_score", "status", "score"),)

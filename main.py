@@ -33,6 +33,7 @@ _ROUTER_MODULES = [
     'api_report', 'api_transcribe', 'api_system', 'api_ota', 'api_utils', 'api_tts',
     'api_job_history', 'api_queue', 'api_schedules', 'api_agents',
     'api_api_keys', 'api_timesheets', 'api_cashflow', 'api_locations', 'api_proposals',
+    'api_intel',
     'api_crm',
     'api_drone_meta',
     'api_drone_watcher',
@@ -712,6 +713,8 @@ async def _on_startup():
                 translation_service.start_scheduler_task()  # 英文翻譯（transcreation）
                 backup_service.start_scheduler_task()    # 資料備份 → Google Drive（只在有 NAS key 的 master 跑）
                 social_runner.start_scheduler_task()     # 社群文稿（Phase N-soc；只在有 claude 的 master 跑）
+                from services import intel_runner
+                intel_runner.start_scheduler_task()       # 產業情報（P-c；只在有 claude 的 master 跑）
         except Exception as _e_web:
             print(f"[startup] Website migration/seed failed: {_e_web}")
 

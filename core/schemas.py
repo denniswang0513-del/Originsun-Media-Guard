@@ -750,3 +750,14 @@ class ReferencePayload(BaseModel):
     note: Optional[str] = None
     tags: Optional[list] = None
     thumb_url: Optional[str] = None
+
+
+class IntelSourcePayload(BaseModel):
+    """產業情報來源（P-c）新增/更新 — 全欄 Optional 配合部分更新
+    （create 時 url 開頭 http 由端點檢查）。"""
+    name: Optional[str] = None
+    type: Optional[str] = None            # rss / html（html 第一版先跳過不抓）
+    url: Optional[str] = None
+    keywords: Optional[list] = None       # list[str] 關鍵字；空 = 全收
+    enabled: Optional[bool] = None
+    note: Optional[str] = None

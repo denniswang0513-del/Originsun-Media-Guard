@@ -124,7 +124,7 @@ LEGACY_ROLE_LEVELS = {'admin': 3, 'editor': 1, 'viewer': 0}
 # the "grant everything" set.
 ALL_MODULES = [
     'bulletin',
-    'preprod_plan', 'preprod_locations', 'preprod_proposals',
+    'preprod_plan', 'preprod_locations', 'preprod_proposals', 'intel',
     'backup', 'verify', 'transcode', 'concat', 'report', 'transcribe', 'tts',
     'drone_meta', 'projects', 'crm_clients', 'crm_projects', 'crm_quotes',
     'crm_staff', 'crm_invoices', 'timesheets', 'website_admin',
