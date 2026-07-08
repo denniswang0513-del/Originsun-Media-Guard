@@ -1,5 +1,5 @@
 {
-  "version": "1.10.217",
+  "version": "1.10.218",
   "build_date": "2026-07-08",
-  "notes": "???? Tab API base ??? - ?? www Cloudflare bot ?? admin fetch"
+  "notes": "N2??0: ?? Sheet ??????(ingest/summary/token+Apps Script) + publish NAS sync ? Git Bash ssh"
 }

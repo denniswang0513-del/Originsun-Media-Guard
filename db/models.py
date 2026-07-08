@@ -1,7 +1,7 @@
 """SQLAlchemy ORM models for Originsun Media Guard Pro."""
 
 try:
-    from sqlalchemy import Column, String, Text, Boolean, Integer, DateTime, func, Index
+    from sqlalchemy import Column, String, Text, Boolean, Integer, Float, DateTime, func, Index
     from sqlalchemy.dialects.postgresql import JSONB
     from sqlalchemy.orm import DeclarativeBase
     _HAS_SQLALCHEMY = True
@@ -11,7 +11,7 @@ except ImportError:
     class _Stub:
         def __call__(self, *a, **kw): return self
         def __getattr__(self, _): return self
-    Column = String = Text = Boolean = Integer = DateTime = func = Index = _Stub()
+    Column = String = Text = Boolean = Integer = Float = DateTime = func = Index = _Stub()
     JSONB = _Stub()
     class DeclarativeBase: pass
 
@@ -207,6 +207,7 @@ class CrmProject(Base):
     tax_rate = Column(Integer, nullable=False, default=5)             # 稅率 %
     profit_target_pct = Column(Integer, nullable=False, default=20)   # 目標毛利率 %
     misc_budget_pct = Column(Integer, nullable=False, default=5)      # 雜支預算比例 %
+    budget_hours = Column(Float, nullable=True)                       # 工時預算池（小時，N2 階段0 對齊 Sheet）
     # 帳務
     payment_status = Column(String(32), nullable=True, default="未到帳")  # 未到帳/部分到帳/全額到帳
     amount_receivable = Column(Integer, nullable=True)                # 應收帳款
@@ -648,4 +649,31 @@ class ApiKey(Base):
     __table_args__ = (
         Index("idx_ak_username", "username"),
         Index("idx_ak_active", "is_active"),
+    )
+
+
+class Timesheet(Base):
+    """工時紀錄（N2 工時鏈；階段 0 先收 Google Sheet 同步，藍圖 §3.6）。
+
+    粒度=小時（對齊團隊 Sheet 實務）。status 生命週期供 N2 用：
+    import（Sheet 同步）→ 未來 draft/confirmed/approved/locked（手填/排班預填）。
+    staff 先存名字字串，N0 個人帳號化後補 staff_id 對映。
+    """
+    __tablename__ = "timesheets"
+
+    id = Column(String(32), primary_key=True)                    # uuid4 hex
+    work_date = Column(DateTime(timezone=True), nullable=True)
+    staff_name = Column(String(64), nullable=False, default="")
+    project_id = Column(String(32), nullable=True)               # soft FK → crm_projects.id（名稱對映成功時）
+    project_name = Column(String(255), nullable=False, default="")  # Sheet 原始專案名（含「行政庶務」內部桶）
+    task_note = Column(Text, nullable=True)                      # 工作內容
+    hours = Column(Float, nullable=False, default=0.0)
+    status = Column(String(16), nullable=False, default="import")
+    source = Column(String(16), nullable=False, default="sheet")  # sheet/manual/schedule
+    row_hash = Column(String(40), nullable=False, unique=True)   # 去重：date|staff|project|task|hours
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    __table_args__ = (
+        Index("idx_ts_project", "project_id"),
+        Index("idx_ts_staff_date", "staff_name", "work_date"),
     )

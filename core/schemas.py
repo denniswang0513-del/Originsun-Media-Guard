@@ -663,3 +663,17 @@ class InvoicePayload(BaseModel):
     recipient_phone: str = ""
     recipient_address: str = ""
     notes: str = ""
+
+
+class TimesheetRow(BaseModel):
+    """工時 Sheet 單列（Apps Script 上行；欄位對齊 Sheet：日期/員工/專案/內容/時數）。"""
+    date: str = ""            # "2026/6/30" 等，後端容錯解析
+    staff: str = ""
+    project: str = ""
+    task: str = ""
+    hours: float = 0.0
+    budget: Optional[float] = None   # Sheet 的專案預算時數欄（有帶就鏡射 crm_projects.budget_hours）
+
+
+class TimesheetIngestRequest(BaseModel):
+    rows: List[TimesheetRow]

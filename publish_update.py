@@ -46,6 +46,15 @@ _SSH_COMMON_OPTS = [
     "-o", "ConnectTimeout=10",
 ]
 
+# 2026-07-07 起 Windows OpenSSH 對這台 NAS 連線層直接 hang（同 key 同參數，
+# Git Bash 的 OpenSSH 完全正常）→ 有 Git Bash 就優先用它的 ssh/scp，治本。
+_GIT_USR_BIN = r"C:\Program Files\Git\usr\bin"
+
+
+def _ssh_bin(name: str) -> str:
+    cand = os.path.join(_GIT_USR_BIN, f"{name}.exe")
+    return cand if os.path.exists(cand) else name
+
 # website-api container 需要的 code 路徑（routers/website/ 跨 import 到 api_crm
 # 等模組，所以 routers/ 整個傳；core/db/services/ 同理）
 NAS_SYNC_PATHS = [
@@ -192,7 +201,7 @@ def sync_website_to_nas() -> bool:
     print(f"\n[*] 同步 code 到 NAS ({NAS_HOST})...")
 
     # scp 不認資料夾不存在 — 先 ssh mkdir 確保 NAS 結構存在
-    ssh_cmd = ["ssh", "-i", SSH_KEY_PATH] + _SSH_COMMON_OPTS + [NAS_HOST]
+    ssh_cmd = [_ssh_bin("ssh"), "-i", SSH_KEY_PATH] + _SSH_COMMON_OPTS + [NAS_HOST]
     try:
         subprocess.run(
             ssh_cmd + [f"mkdir -p {NAS_CODE_DIR}"],
@@ -210,7 +219,7 @@ def sync_website_to_nas() -> bool:
         if not os.path.exists(src):
             print(f"[NAS sync] 跳過 (不存在): {rel}")
             continue
-        scp_args = ["scp", "-i", SSH_KEY_PATH] + _SSH_COMMON_OPTS + ["-q"]
+        scp_args = [_ssh_bin("scp"), "-i", SSH_KEY_PATH] + _SSH_COMMON_OPTS + ["-q"]
         if os.path.isdir(src):
             scp_args += ["-r", src + "/.", f"{NAS_HOST}:{NAS_CODE_DIR}/{rel}/"]
         else:
@@ -271,8 +280,8 @@ def sync_nginx_conf_to_nas() -> bool:
         print(f"[nginx conf sync] repo 無 {NGINX_MAIN_REPO}，跳過")
         return False
 
-    ssh_cmd = ["ssh", "-i", SSH_KEY_PATH] + _SSH_COMMON_OPTS + [NAS_HOST]
-    scp_args = ["scp", "-i", SSH_KEY_PATH] + _SSH_COMMON_OPTS + ["-q",
+    ssh_cmd = [_ssh_bin("ssh"), "-i", SSH_KEY_PATH] + _SSH_COMMON_OPTS + [NAS_HOST]
+    scp_args = [_ssh_bin("scp"), "-i", SSH_KEY_PATH] + _SSH_COMMON_OPTS + ["-q",
                 NGINX_MAIN_REPO, f"{NAS_HOST}:{NGINX_MAIN_NAS}"]
     # 備份→cp 新→驗證→reload / 還原，全部一條 ssh（避免壞 config 落地又沒 reload）
     remote = (
@@ -355,8 +364,8 @@ def sync_redirects_to_nas() -> bool:
         with os.fdopen(tmp_fd, "w", encoding="utf-8") as f:
             f.write(snippet)
 
-        ssh_cmd = ["ssh", "-i", SSH_KEY_PATH] + _SSH_COMMON_OPTS + [NAS_HOST]
-        scp_args = ["scp", "-i", SSH_KEY_PATH] + _SSH_COMMON_OPTS + ["-q",
+        ssh_cmd = [_ssh_bin("ssh"), "-i", SSH_KEY_PATH] + _SSH_COMMON_OPTS + [NAS_HOST]
+        scp_args = [_ssh_bin("scp"), "-i", SSH_KEY_PATH] + _SSH_COMMON_OPTS + ["-q",
                     tmp_path, f"{NAS_HOST}:/tmp/redirects.conf"]
 
         # scp → /tmp
