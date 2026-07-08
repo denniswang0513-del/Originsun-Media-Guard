@@ -786,3 +786,49 @@ class PreprodLocationUsage(Base):
     lesson = Column(Text, nullable=True)                         # 心得/踩雷
     created_by = Column(String(64), nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+
+class PreprodProposal(Base):
+    """提案庫（P-b）— 提案智財資產化 + win/loss 學習迴圈（docs/PREPROD_PLAN.md B 段）。"""
+    __tablename__ = "preprod_proposals"
+
+    id = Column(String(32), primary_key=True)                    # uuid4 hex
+    title = Column(String(255), nullable=False)
+    client_id = Column(String(32), nullable=True)                # soft FK → clients.id
+    project_id = Column(String(32), nullable=True)               # soft FK → crm_projects.id（成案後回填）
+    quotation_id = Column(String(32), nullable=True)             # soft FK → crm_quotations.id
+    ptype = Column(String(32), nullable=True)                    # 形象/廣告/紀錄片/政府標案/社群/其他
+    status = Column(String(16), nullable=False, default="草稿")   # 草稿/已提案/入圍/成案/未成案/擱置
+    pitch_date = Column(DateTime(timezone=True), nullable=True)  # 提案日
+    budget_range = Column(String(64), nullable=True)             # 預算範圍（自由文字）
+    deck_url = Column(String(512), nullable=True)                # /uploads/proposals/{pid}/{fname}（簡報原檔）
+    outcome_reason = Column(Text, nullable=True)                 # 成案/未成案必填原因 — 組織學習欄
+    tags = Column(JSONB, nullable=True)                          # list[str]
+    created_by = Column(String(64), nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    __table_args__ = (Index("idx_pprop_client", "client_id"),
+                      Index("idx_pprop_status", "status"))
+
+
+class PreprodReference(Base):
+    """參考片庫 — 獨立於單一提案的共用參考片，跨提案重用。"""
+    __tablename__ = "preprod_references"
+
+    id = Column(String(32), primary_key=True)                    # uuid4 hex
+    url = Column(String(512), nullable=False)                    # 參考片連結（YouTube/Vimeo…）
+    title = Column(String(255), nullable=True)
+    note = Column(Text, nullable=True)
+    tags = Column(JSONB, nullable=True)                          # list[str]
+    thumb_url = Column(String(512), nullable=True)               # 縮圖（可選）
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+
+class PreprodProposalRef(Base):
+    """提案 ↔ 參考片 多對多關聯（刪提案只刪關聯列，reference 是共用資產保留）。"""
+    __tablename__ = "preprod_proposal_refs"
+
+    id = Column(String(32), primary_key=True)                    # uuid4 hex
+    proposal_id = Column(String(32), nullable=False, index=True)  # soft FK → preprod_proposals.id
+    reference_id = Column(String(32), nullable=False)            # soft FK → preprod_references.id

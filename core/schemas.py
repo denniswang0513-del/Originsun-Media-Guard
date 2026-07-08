@@ -726,3 +726,27 @@ class LocationUsagePayload(BaseModel):
     used_date: Optional[str] = None       # 'YYYY-MM-DD'
     rating: Optional[int] = None          # 1-5
     lesson: Optional[str] = None
+
+
+class ProposalPayload(BaseModel):
+    """提案庫（P-b）新增/更新 — 全欄 Optional 配合部分更新（create 時 title 由端點檢查必填）。"""
+    title: Optional[str] = None
+    client_id: Optional[str] = None       # soft FK → clients.id
+    project_id: Optional[str] = None      # soft FK → crm_projects.id（成案後回填）
+    quotation_id: Optional[str] = None    # soft FK → crm_quotations.id
+    ptype: Optional[str] = None           # 形象/廣告/紀錄片/政府標案/社群/其他
+    status: Optional[str] = None          # 草稿/已提案/入圍/成案/未成案/擱置
+    pitch_date: Optional[str] = None      # 'YYYY-MM-DD'
+    budget_range: Optional[str] = None
+    deck_url: Optional[str] = None
+    outcome_reason: Optional[str] = None  # 轉成案/未成案時必填（端點檢查）
+    tags: Optional[list] = None
+
+
+class ReferencePayload(BaseModel):
+    """參考片庫（跨提案共用）新增/更新（create 時 url 由端點檢查必填）。"""
+    url: Optional[str] = None
+    title: Optional[str] = None
+    note: Optional[str] = None
+    tags: Optional[list] = None
+    thumb_url: Optional[str] = None

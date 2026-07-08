@@ -1,0 +1,122 @@
+<!--
+    proposals.html — 📑 提案庫 Tab 殼（P-b：提案智財資產化 + win/loss 學習迴圈，
+    docs/PREPROD_PLAN.md B 段）
+    內容全部由 proposals.js render 進 #prop-content（同源打 /api/v1/proposals/*）。
+    詳情 overlay（#prop-overlay）由 JS 動態掛在 body 下（section 有 transform，
+    fixed 定位會被困住），樣式一樣放這裡（style 標籤注入後是全域生效）。
+-->
+<div id="prop-root">
+    <div id="prop-content" style="color:#888;padding:40px;text-align:center;">載入中…</div>
+</div>
+
+<style>
+    #prop-root h2 { color: #fff; font-size: 18px; margin: 0 0 4px 0; font-weight: 600; }
+    #prop-root .prop-sub { color: #777; font-size: 12px; margin-bottom: 16px; }
+    #prop-root .prop-toolbar {
+        display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-bottom: 16px;
+    }
+    #prop-root .prop-toolbar input, #prop-root .prop-toolbar select,
+    #prop-overlay input, #prop-overlay select, #prop-overlay textarea {
+        background: #1a1a1a; border: 1px solid #333; border-radius: 6px;
+        color: #ddd; font-size: 12.5px; padding: 7px 10px; outline: none;
+    }
+    #prop-root .prop-toolbar input:focus, #prop-overlay input:focus,
+    #prop-overlay select:focus, #prop-overlay textarea:focus { border-color: #3b82f6; }
+    .prop-btn {
+        background: #3b82f6; color: #fff; border: none; padding: 7px 14px;
+        border-radius: 6px; font-size: 12.5px; cursor: pointer;
+    }
+    .prop-btn:hover { background: #2563eb; }
+    .prop-btn.ghost { background: transparent; border: 1px solid #444; color: #ccc; }
+    .prop-btn.ghost:hover { background: #333; }
+    .prop-btn.danger { background: transparent; border: 1px solid #7f1d1d; color: #f87171; }
+    .prop-btn.danger:hover { background: #7f1d1d33; }
+
+    /* ── 統計 chips（總提案 / 成案率） ── */
+    #prop-root .prop-chip {
+        display: inline-flex; align-items: baseline; gap: 6px; cursor: default;
+        background: #232323; border: 1px solid #333; border-radius: 8px; padding: 5px 12px;
+    }
+    #prop-root .prop-chip .n { color: #fff; font-size: 16px; font-weight: 700; }
+    #prop-root .prop-chip .l { color: #888; font-size: 11.5px; }
+    #prop-root .prop-chip.rate .n { color: #4ade80; }
+
+    /* ── 列表（表格式） ── */
+    #prop-root .prop-table-wrap { overflow-x: auto; }
+    #prop-root table.prop-table { width: 100%; border-collapse: collapse; font-size: 12.5px; }
+    #prop-root .prop-table th {
+        text-align: left; color: #888; font-weight: 500; font-size: 11.5px;
+        padding: 8px 10px; border-bottom: 1px solid #333; white-space: nowrap;
+    }
+    #prop-root .prop-table td {
+        color: #ccc; padding: 9px 10px; border-bottom: 1px solid #2c2c2c; white-space: nowrap;
+    }
+    #prop-root .prop-table td.title { color: #eee; font-weight: 600; white-space: normal; min-width: 180px; }
+    #prop-root .prop-table tbody tr { cursor: pointer; transition: background .12s; }
+    #prop-root .prop-table tbody tr:hover { background: #2c2c2c; }
+
+    /* 狀態 pill：草稿灰 / 已提案藍 / 入圍橙 / 成案綠 / 未成案紅 / 擱置暗 */
+    .prop-pill {
+        display: inline-block; border-radius: 999px; padding: 1px 10px; font-size: 11px;
+        background: #2c2c2c; color: #999;
+    }
+    .prop-pill.s-已提案 { background: #1e3a5f; color: #93c5fd; }
+    .prop-pill.s-入圍   { background: #3a2e1e; color: #fbbf24; }
+    .prop-pill.s-成案   { background: #14351f; color: #4ade80; }
+    .prop-pill.s-未成案 { background: #3a1e1e; color: #f87171; }
+    .prop-pill.s-擱置   { background: #222; color: #666; }
+    .prop-tag {
+        display: inline-block; background: #1a1a1a; border: 1px solid #333; color: #999;
+        border-radius: 4px; padding: 0 6px; font-size: 10.5px; margin: 0 4px 4px 0;
+    }
+
+    /* ── 詳情 overlay（掛 body） ── */
+    #prop-overlay {
+        position: fixed; inset: 0; z-index: 9000; background: rgba(0,0,0,.65);
+        display: flex; align-items: center; justify-content: center; padding: 24px;
+    }
+    #prop-overlay .prop-panel {
+        background: #222; border: 1px solid #3a3a3a; border-radius: 12px;
+        width: min(1060px, 96vw); max-height: 92vh; display: flex; flex-direction: column;
+        box-shadow: 0 20px 60px rgba(0,0,0,.55);
+    }
+    #prop-overlay .prop-panel-head {
+        display: flex; align-items: center; gap: 10px; padding: 14px 18px;
+        border-bottom: 1px solid #333;
+    }
+    #prop-overlay .prop-panel-head h3 { color: #fff; font-size: 16px; font-weight: 600; margin: 0; flex: 1; }
+    #prop-overlay .prop-close {
+        background: none; border: none; color: #888; font-size: 20px; cursor: pointer; line-height: 1;
+    }
+    #prop-overlay .prop-close:hover { color: #fff; }
+    #prop-overlay .prop-panel-body {
+        display: flex; gap: 18px; padding: 16px 18px; overflow-y: auto; flex-wrap: wrap;
+    }
+    #prop-overlay .prop-info-col { flex: 1 1 420px; min-width: 320px; }
+    #prop-overlay .prop-refs-col { flex: 1 1 380px; min-width: 300px; }
+    #prop-overlay .prop-card-sec {
+        background: #262626; border: 1px solid #333; border-radius: 8px;
+        padding: 12px 14px; margin-bottom: 12px;
+    }
+    #prop-overlay .prop-card-sec h4 { color: #ddd; font-size: 13px; margin: 0 0 8px; font-weight: 600; }
+    #prop-overlay .prop-kv { display: flex; font-size: 12.5px; padding: 3px 0; }
+    #prop-overlay .prop-kv .k { color: #888; width: 84px; flex-shrink: 0; }
+    #prop-overlay .prop-kv .v { color: #ccc; word-break: break-all; }
+    #prop-overlay .prop-form-row { margin-bottom: 8px; }
+    #prop-overlay .prop-form-row label { display: block; color: #888; font-size: 11.5px; margin-bottom: 3px; }
+    #prop-overlay .prop-form-row input, #prop-overlay .prop-form-row select,
+    #prop-overlay .prop-form-row textarea { width: 100%; box-sizing: border-box; }
+    #prop-overlay .prop-ref {
+        border-bottom: 1px solid #2c2c2c; padding: 8px 0; font-size: 12.5px; color: #ccc;
+    }
+    #prop-overlay .prop-ref:last-child { border-bottom: none; }
+    #prop-overlay .prop-ref a { color: #93c5fd; text-decoration: none; }
+    #prop-overlay .prop-ref a:hover { text-decoration: underline; }
+    #prop-overlay .prop-ref .note { color: #999; margin-top: 3px; white-space: pre-wrap; }
+    #prop-overlay .prop-note { color: #777; font-size: 11.5px; margin-top: 6px; line-height: 1.6; }
+    #prop-overlay .prop-outcome {
+        background: #1e2a1e; border: 1px solid #2d4a2d; border-radius: 6px;
+        color: #a7d7a7; font-size: 12.5px; padding: 8px 10px; white-space: pre-wrap;
+    }
+    #prop-overlay .prop-outcome.lost { background: #2a1e1e; border-color: #4a2d2d; color: #d7a7a7; }
+</style>
