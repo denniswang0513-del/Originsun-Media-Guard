@@ -254,7 +254,7 @@ Originsun-Media-Guard/
 │   │
 │   └── scheduler.py         # 任務排程器（croniter cron + run_at 單次排程，每 60 秒掃描）
 │
-│  ── 【routers/ — FastAPI 路由模組（12 個）】
+│  ── 【routers/ — FastAPI 路由模組；以 main.py `_ROUTER_MODULES` 為準，勿信此數】
 ├── routers/
 │   ├── __init__.py
 │   ├── api_auth.py          # 認證端點（登入/登出/Google OAuth/使用者 CRUD/角色 RBAC，見 7.14）
@@ -271,8 +271,20 @@ Originsun-Media-Guard/
 │   ├── api_agents.py        # NAS 共享機器管理 API (GET/POST/DELETE /api/v1/agents)（見 7.11）
 │   ├── api_bookmarks.py     # 書籤 CRUD API
 │   ├── api_schedules.py     # 排程管理 API
+│   │  ── Work OS Phase N 新增（2026-07-08，v1.10.218-222）──
+│   ├── api_timesheets.py    # 工時 Sheet 同步 + burn 檢核（N2 階段0，見 docs/appsscript/）
+│   ├── api_cashflow.py      # B3 現金流預測+付款節點 + F1 月結鎖帳（守衛 crm_invoices）
+│   ├── api_locations.py     # P-a 場景庫（preprod_locations + 照片 + 使用履歷）
+│   ├── api_proposals.py     # P-b 提案庫（一鍵成案轉專案 + win/loss + 轉換率）
+│   ├── api_intel.py         # P-c 產業情報 runner 端點（sources/items/轉提案）
+│   ├── api_portal.py        # B1 看片審批門戶（內部 CRUD + 公開 token 頁 /review.html）
+│   ├── api_equipment.py     # B4 器材庫（領用歸還/折舊/稼動率）
+│   ├── api_footage.py       # B5 素材庫（掃描建索引 + 逐字稿 pg_trgm 全文檢索）
 │   ├── api_crm.py           # CRM 薄殼 — re-export routers/crm/ 的 router（見 7.15）
 │   └── crm/                 # CRM 領域套件：_shared + clients/projects/quotes/staff/costs/finance/showcase
+│  ── 【services/ 根層 runner（跨 website/ 之外）】
+│  services/intel_runner.py  # P-c 第四個 AI runner（RSS 抓取 stdlib、claude 摘要、預設關）
+│  services/footage_indexer.py # B5 素材掃描（ffprobe + 逐字稿抽取，thread 收集/async upsert）
 │
 │  ── 【認證與權限】
 ├── core/
