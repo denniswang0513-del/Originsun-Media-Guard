@@ -1,0 +1,138 @@
+<!--
+    equipment.html — 🎥 器材庫 Tab 殼（B4 器材管理，docs/BIZ_PLAN.md B4 段）
+    內容全部由 equipment.js render 進 #eq-content（同源打 /api/v1/equipment/*）。
+    詳情 overlay（#eq-overlay）由 JS 動態掛在 body 下（section 有 transform，
+    fixed 定位會被困住），樣式一樣放這裡（style 標籤注入後是全域生效）。
+-->
+<div id="eq-root">
+    <div id="eq-content" style="color:#888;padding:40px;text-align:center;">載入中…</div>
+</div>
+
+<style>
+    #eq-root h2 { color: #fff; font-size: 18px; margin: 0 0 4px 0; font-weight: 600; }
+    #eq-root .eq-sub { color: #777; font-size: 12px; margin-bottom: 12px; }
+    #eq-root .eq-toolbar {
+        display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-bottom: 12px;
+    }
+    #eq-root .eq-toolbar input, #eq-root .eq-toolbar select,
+    #eq-overlay input, #eq-overlay select, #eq-overlay textarea {
+        background: #1a1a1a; border: 1px solid #333; border-radius: 6px;
+        color: #ddd; font-size: 12.5px; padding: 7px 10px; outline: none;
+    }
+    #eq-root .eq-toolbar input:focus, #eq-overlay input:focus,
+    #eq-overlay select:focus, #eq-overlay textarea:focus { border-color: #3b82f6; }
+    .eq-btn {
+        background: #3b82f6; color: #fff; border: none; padding: 7px 14px;
+        border-radius: 6px; font-size: 12.5px; cursor: pointer;
+    }
+    .eq-btn:hover { background: #2563eb; }
+    .eq-btn.ghost { background: transparent; border: 1px solid #444; color: #ccc; }
+    .eq-btn.ghost:hover { background: #333; }
+    .eq-btn.danger { background: transparent; border: 1px solid #7f1d1d; color: #f87171; }
+    .eq-btn.danger:hover { background: #7f1d1d33; }
+    .eq-btn.big { padding: 10px 18px; font-size: 14px; font-weight: 600; }
+    .eq-btn.green { background: #16a34a; }
+    .eq-btn.green:hover { background: #15803d; }
+
+    /* ── 統計 chips ── */
+    #eq-root .eq-stats { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 14px; }
+    #eq-root .eq-chip {
+        background: #232323; border: 1px solid #333; border-radius: 8px;
+        padding: 6px 14px; font-size: 12px; color: #999;
+    }
+    #eq-root .eq-chip b { color: #eee; font-size: 15px; margin-left: 6px; }
+    #eq-root .eq-chip.alert { border-color: #7f1d1d; color: #f87171; }
+    #eq-root .eq-chip.alert b { color: #f87171; }
+
+    /* ── 卡片牆 ── */
+    #eq-root .eq-grid {
+        display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 14px;
+    }
+    #eq-root .eq-card {
+        background: #232323; border: 1px solid #333; border-radius: 10px;
+        overflow: hidden; cursor: pointer; transition: border-color .15s, transform .15s;
+    }
+    #eq-root .eq-card:hover { border-color: #3b82f6; transform: translateY(-2px); }
+    #eq-root .eq-card.retired { opacity: .45; }
+    #eq-root .eq-cover { width: 100%; height: 130px; object-fit: cover; display: block; background: #1a1a1a; }
+    #eq-root .eq-cover-ph {
+        width: 100%; height: 130px; display: flex; align-items: center; justify-content: center;
+        font-size: 42px; background: linear-gradient(135deg, #1e2a3a, #1a1a2a); color: #556;
+    }
+    #eq-root .eq-card-body { padding: 10px 12px 12px; }
+    #eq-root .eq-card-name { color: #eee; font-size: 14px; font-weight: 600; margin-bottom: 6px; }
+    .eq-pill {
+        display: inline-block; background: #1e3a5f; color: #93c5fd; border-radius: 999px;
+        padding: 1px 9px; font-size: 11px; margin: 0 4px 4px 0;
+    }
+    /* 狀態 pill：在庫綠 / 出勤藍 / 維修橙 / 除役灰 */
+    .eq-pill.st-in { background: #14532d; color: #86efac; }
+    .eq-pill.st-out { background: #1e3a8a; color: #93c5fd; }
+    .eq-pill.st-fix { background: #7c2d12; color: #fdba74; }
+    .eq-pill.st-off { background: #2c2c2c; color: #999; }
+    #eq-root .eq-card-holder { color: #93c5fd; font-size: 11.5px; margin: 4px 0 2px; }
+    #eq-root .eq-card-overdue { color: #f87171; font-size: 11.5px; font-weight: 600; margin-top: 2px; }
+    #eq-root .eq-card-meta { color: #666; font-size: 11px; margin-top: 4px; }
+
+    /* ── 詳情 overlay（掛 body） ── */
+    #eq-overlay {
+        position: fixed; inset: 0; z-index: 9000; background: rgba(0,0,0,.65);
+        display: flex; align-items: center; justify-content: center; padding: 24px;
+    }
+    #eq-overlay .eq-panel {
+        background: #222; border: 1px solid #3a3a3a; border-radius: 12px;
+        width: min(1060px, 96vw); max-height: 92vh; display: flex; flex-direction: column;
+        box-shadow: 0 20px 60px rgba(0,0,0,.55);
+    }
+    #eq-overlay .eq-panel-head {
+        display: flex; align-items: center; gap: 10px; padding: 14px 18px;
+        border-bottom: 1px solid #333;
+    }
+    #eq-overlay .eq-panel-head h3 { color: #fff; font-size: 16px; font-weight: 600; margin: 0; flex: 1; }
+    #eq-overlay .eq-close {
+        background: none; border: none; color: #888; font-size: 20px; cursor: pointer; line-height: 1;
+    }
+    #eq-overlay .eq-close:hover { color: #fff; }
+    #eq-overlay .eq-panel-body {
+        display: flex; gap: 18px; padding: 16px 18px; overflow-y: auto; flex-wrap: wrap;
+    }
+    #eq-overlay .eq-left-col { flex: 1 1 340px; min-width: 300px; }
+    #eq-overlay .eq-right-col { flex: 1 1 460px; min-width: 320px; }
+    #eq-overlay .eq-cover-lg {
+        width: 100%; max-height: 220px; object-fit: cover; border-radius: 8px;
+        border: 1px solid #333; display: block; background: #1a1a1a; cursor: zoom-in;
+    }
+    #eq-overlay .eq-cover-lg-ph {
+        width: 100%; height: 160px; display: flex; align-items: center; justify-content: center;
+        font-size: 52px; background: linear-gradient(135deg, #1e2a3a, #1a1a2a); color: #556;
+        border-radius: 8px; border: 1px solid #333;
+    }
+    #eq-overlay .eq-card-sec {
+        background: #262626; border: 1px solid #333; border-radius: 8px;
+        padding: 12px 14px; margin-bottom: 12px;
+    }
+    #eq-overlay .eq-card-sec h4 { color: #ddd; font-size: 13px; margin: 0 0 8px; font-weight: 600; }
+    #eq-overlay .eq-kv { display: flex; font-size: 12.5px; padding: 3px 0; }
+    #eq-overlay .eq-kv .k { color: #888; width: 90px; flex-shrink: 0; }
+    #eq-overlay .eq-kv .v { color: #ccc; word-break: break-all; }
+    #eq-overlay .eq-form-row { margin-bottom: 8px; }
+    #eq-overlay .eq-form-row label { display: block; color: #888; font-size: 11.5px; margin-bottom: 3px; }
+    #eq-overlay .eq-form-row input, #eq-overlay .eq-form-row select,
+    #eq-overlay .eq-form-row textarea { width: 100%; box-sizing: border-box; }
+    #eq-overlay .eq-stat-grid { display: flex; gap: 8px; flex-wrap: wrap; }
+    #eq-overlay .eq-stat {
+        flex: 1 1 100px; background: #1e1e1e; border: 1px solid #333; border-radius: 8px;
+        padding: 8px 10px; text-align: center;
+    }
+    #eq-overlay .eq-stat .n { color: #eee; font-size: 17px; font-weight: 700; }
+    #eq-overlay .eq-stat .l { color: #777; font-size: 11px; margin-top: 2px; }
+    #eq-overlay table.eq-table { width: 100%; border-collapse: collapse; font-size: 12px; }
+    #eq-overlay table.eq-table th {
+        color: #888; text-align: left; font-weight: 500; padding: 4px 6px;
+        border-bottom: 1px solid #333;
+    }
+    #eq-overlay table.eq-table td {
+        color: #ccc; padding: 5px 6px; border-bottom: 1px solid #2c2c2c; vertical-align: top;
+    }
+    #eq-overlay .eq-note { color: #777; font-size: 11.5px; margin-top: 6px; line-height: 1.6; }
+</style>

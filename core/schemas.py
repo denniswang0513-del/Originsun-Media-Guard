@@ -783,3 +783,35 @@ class PortalCommentPayload(BaseModel):
 class PortalApprovePayload(BaseModel):
     """客戶端一鍵核准（公開、token 授權）— author_name 必填由端點檢查。"""
     author_name: Optional[str] = None
+
+
+class EquipmentPayload(BaseModel):
+    """器材庫（B4）新增/更新 — 全欄 Optional 配合部分更新（create 時 name 由端點檢查必填）。"""
+    name: Optional[str] = None
+    category: Optional[str] = None        # 機身/鏡頭/燈光/收音/週邊/其他
+    serial: Optional[str] = None
+    purchase_date: Optional[str] = None   # 'YYYY-MM-DD'；空字串 = 清除
+    purchase_cost: Optional[int] = None
+    depreciation_months: Optional[int] = None  # 直線攤提月數
+    status: Optional[str] = None          # 在庫/出勤/維修/除役
+    note: Optional[str] = None
+    cover_url: Optional[str] = None
+
+
+class EquipmentCheckoutPayload(BaseModel):
+    """器材領用 — person 必填由端點檢查；已有未歸還紀錄回 409。"""
+    person: Optional[str] = None          # 領用人（自由輸入）
+    project_id: Optional[str] = None      # soft FK → crm_projects.id
+    due_at: Optional[str] = None          # 應還日 'YYYY-MM-DD'
+
+
+class EquipmentReturnPayload(BaseModel):
+    """器材歸還 — 只補狀況備註；無未歸還紀錄回 404。"""
+    condition_note: Optional[str] = None
+
+
+class EquipmentMaintenancePayload(BaseModel):
+    """器材保養紀錄（date 必填由端點檢查）。"""
+    date: Optional[str] = None            # 'YYYY-MM-DD'
+    cost: Optional[int] = None
+    note: Optional[str] = None

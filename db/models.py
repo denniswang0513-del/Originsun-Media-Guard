@@ -900,3 +900,53 @@ class PortalComment(Base):
     author_name = Column(String(64), nullable=True)
     resolved = Column(Integer, nullable=False, default=0)        # 0/1 已處理
     created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+
+class Equipment(Base):
+    """器材庫（B4，docs/BIZ_PLAN.md B4 段）— 成本真相的最後一塊：折舊攤提+稼動率。"""
+    __tablename__ = "equipment"
+
+    id = Column(String(32), primary_key=True)                    # uuid4 hex
+    name = Column(String(128), nullable=False)
+    category = Column(String(32), nullable=True)                 # 機身/鏡頭/燈光/收音/週邊/其他
+    serial = Column(String(64), nullable=True)                   # 序號
+    purchase_date = Column(DateTime(timezone=True), nullable=True)
+    purchase_cost = Column(Integer, nullable=True)               # 購入成本
+    depreciation_months = Column(Integer, nullable=False, default=36)  # 直線攤提月數
+    status = Column(String(16), nullable=False, default="在庫")   # 在庫/出勤/維修/除役
+    note = Column(Text, nullable=True)
+    cover_url = Column(String(512), nullable=True)               # /uploads/equipment/{eid}/{fname}
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    __table_args__ = (Index("idx_equip_category", "category"),
+                      Index("idx_equip_status", "status"))
+
+
+class EquipmentCheckout(Base):
+    """器材領用/歸還紀錄 — returned_at 為空＝出勤中；due_at 過期未還＝逾期。"""
+    __tablename__ = "equipment_checkouts"
+
+    id = Column(String(32), primary_key=True)                    # uuid4 hex
+    equipment_id = Column(String(32), nullable=False, index=True)  # soft FK → equipment.id
+    project_id = Column(String(32), nullable=True)               # soft FK → crm_projects.id
+    person = Column(String(64), nullable=True)                   # 領用人（自由輸入）
+    out_at = Column(DateTime(timezone=True), nullable=True)      # 領用時間
+    due_at = Column(DateTime(timezone=True), nullable=True)      # 應還日
+    returned_at = Column(DateTime(timezone=True), nullable=True)  # 歸還時間（空＝未歸還）
+    condition_note = Column(String(255), nullable=True)          # 歸還時狀況備註
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    __table_args__ = (Index("idx_eqco_equipment_returned", "equipment_id", "returned_at"),)
+
+
+class EquipmentMaintenance(Base):
+    """器材保養履歷（日期+費用+內容）— 保養成本納入器材持有成本。"""
+    __tablename__ = "equipment_maintenance"
+
+    id = Column(String(32), primary_key=True)                    # uuid4 hex
+    equipment_id = Column(String(32), nullable=False, index=True)  # soft FK → equipment.id
+    date = Column(DateTime(timezone=True), nullable=True)        # 保養日期
+    cost = Column(Integer, nullable=True)                        # 保養費用
+    note = Column(String(255), nullable=True)                    # 保養內容
+    created_at = Column(DateTime(timezone=True), server_default=func.now())

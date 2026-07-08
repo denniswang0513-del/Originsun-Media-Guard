@@ -35,6 +35,7 @@ _ROUTER_MODULES = [
     'api_api_keys', 'api_timesheets', 'api_cashflow', 'api_locations', 'api_proposals',
     'api_intel',
     'api_portal',
+    'api_equipment',
     'api_crm',
     'api_drone_meta',
     'api_drone_watcher',
