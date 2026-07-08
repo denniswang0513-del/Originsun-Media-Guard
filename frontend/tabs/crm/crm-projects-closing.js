@@ -124,7 +124,11 @@ function _renderRow(it) {
       <div style="flex:1.6;min-width:80px;font-weight:600;color:#e0e0e0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${esc(it.name)}</div>
       <div style="flex:1;min-width:60px;color:#9ca3af;font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${esc(it.client_name) || '—'}</div>
       <div style="flex:0.8;min-width:70px;color:#6b7280;font-size:12px;">${it.completion_date ? esc(String(it.completion_date).substring(0, 10)) : '—'}</div>
-      <div style="flex:0.7;min-width:60px;">${_stageBadge(stage)}</div>
+      <div style="flex:0.7;min-width:60px;">${_stageBadge(stage)}${stage === '已上線'
+        ? (it.verified
+            ? '<span title="rebuild 後對外頁實測 200 通過" style="color:#86efac;font-size:11px;margin-left:3px;">✓</span>'
+            : '<span title="等待下次發布時自動驗證對外頁" style="color:#f59e0b;font-size:11px;margin-left:3px;">驗證中</span>')
+        : ''}</div>
       <div style="flex:1.4;min-width:130px;display:flex;gap:4px;flex-wrap:wrap;">
         ${_chip('影片', c.video)}${_chip('圖', c.images)}${_chip('過程', c.process)}${_chip('credits', c.credits)}
       </div>

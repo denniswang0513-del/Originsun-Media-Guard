@@ -201,6 +201,8 @@ async def list_closing_projects(request: Request):
                 "public": bool(p.public),
                 "showcase_published": bool(sc.published) if sc else False,
                 "stage": stage,
+                # N-now 上架驗收：rebuild 後對外頁實測 200 才 True（已上線 ✓ vs 驗證中）
+                "verified": p.website_verified_at is not None,
                 "public_featured": bool(p.public_featured),
                 "slug": slug,
                 "completeness": {
@@ -252,6 +254,22 @@ async def get_project(project_id: str):
     return _to_project_dict(project, client_name)
 
 
+def _notify_closing_entry(project, old_status: str) -> None:
+    """N-now：專案轉入「結案作業」→ 推播官網編輯（收件匣有新作品）。
+    fire-and-forget thread — 通知失敗/未設 webhook 都不可影響專案更新。"""
+    if old_status == "結案作業" or project.status != "結案作業":
+        return
+    try:
+        import threading
+        from notifier import notify_tab
+        threading.Thread(
+            target=notify_tab, args=("project_closing",),
+            kwargs={"project_name": project.name or ""}, daemon=True,
+        ).start()
+    except Exception:
+        pass
+
+
 @router.put("/projects/{project_id}")
 async def update_project(project_id: str, req: CrmProjectPatchPayload, request: Request):
     """Partial update — only fields the client included in the body are
@@ -275,6 +293,7 @@ async def update_project(project_id: str, req: CrmProjectPatchPayload, request: 
             if not new_client:
                 raise HTTPException(status_code=404, detail="找不到指定的客戶")
 
+        old_status = project.status or ""
         for k, v in update_data.items():
             if k in date_fields:
                 setattr(project, k, _parse_shoot_date(v))
@@ -283,6 +302,7 @@ async def update_project(project_id: str, req: CrmProjectPatchPayload, request: 
         # 結案作業：專案轉為「結案作業」且尚未指定官網製作階段 → 預設「待製作」（進官網製作收件匣）
         if project.status == "結案作業" and project.website_prod_stage is None:
             project.website_prod_stage = "待製作"
+        _notify_closing_entry(project, old_status)
         project.updated_at = _now()
         await session.commit()
         await session.refresh(project)
@@ -327,10 +347,12 @@ async def update_project_status(project_id: str, request: Request):
         project = await session.get(CrmProject, project_id)
         if not project:
             raise HTTPException(status_code=404, detail="找不到此專案")
+        old_status = project.status or ""
         project.status = new_status
         # 結案作業：轉為「結案作業」且尚未指定官網製作階段 → 預設「待製作」（進官網製作收件匣）
         if new_status == "結案作業" and project.website_prod_stage is None:
             project.website_prod_stage = "待製作"
+        _notify_closing_entry(project, old_status)
         if contract_amount is not None:
             project.contract_amount = int(contract_amount)
         if amount_receivable is not None:

@@ -720,13 +720,15 @@ export async function initCrmInvoicesTab() {
     let _cashbookLoaded = false, _cashbookLoading = false;
     let _payablesLoaded = false, _payablesLoading = false;
     let _receivablesLoaded = false, _receivablesLoading = false;
+    let _cashflowLoaded = false, _cashflowLoading = false;
     const invView = document.getElementById('inv-invoices-view');
     const payView = document.getElementById('inv-payments-view');
     const cashView = document.getElementById('inv-cashbook-view');
     const payablesView = document.getElementById('inv-payables-view');
     const receivablesView = document.getElementById('inv-receivables-view');
-    const allViews = [invView, payView, cashView, payablesView, receivablesView];
-    const allBtns = ['inv-view-invoices', 'inv-view-payments', 'inv-view-cashbook', 'inv-view-payables', 'inv-view-receivables'];
+    const cashflowView = document.getElementById('inv-cashflow-view');
+    const allViews = [invView, payView, cashView, payablesView, receivablesView, cashflowView];
+    const allBtns = ['inv-view-invoices', 'inv-view-payments', 'inv-view-cashbook', 'inv-view-payables', 'inv-view-receivables', 'inv-view-cashflow'];
     const baseUrl = location.origin;
 
     function _switchView(showView, activeBtn) {
@@ -816,6 +818,27 @@ export async function initCrmInvoicesTab() {
         finally { _receivablesLoading = false; }
     });
 
+    document.getElementById('inv-view-cashflow').addEventListener('click', async () => {
+        if (_cashflowLoading) return;
+        _switchView(cashflowView, 'inv-view-cashflow');
+        if (_cashflowLoaded) {
+            if (window._cashflowRefresh) window._cashflowRefresh();
+            return;
+        }
+        _cashflowLoading = true;
+        try {
+            const _cb = '?t=' + Date.now();
+            const res = await fetch(baseUrl + '/tabs/crm/crm-cashflow.html' + _cb);
+            if (res.ok) {
+                cashflowView.innerHTML = await res.text();
+                const mod = await import(baseUrl + '/tabs/crm/crm-cashflow.js' + _cb);
+                await mod.initCrmCashflowTab();
+                _cashflowLoaded = true;
+            }
+        } catch (e) { console.warn('[Cashflow] load failed:', e); }
+        finally { _cashflowLoading = false; }
+    });
+
     // Global refresh — reloads current active sub-view
     document.getElementById('inv-global-refresh').addEventListener('click', () => {
         loadInvoices();
@@ -823,6 +846,7 @@ export async function initCrmInvoicesTab() {
         if (window._cashRefresh) window._cashRefresh();
         if (window._payableRefresh) window._payableRefresh();
         if (window._recvRefresh) window._recvRefresh();
+        if (window._cashflowRefresh) window._cashflowRefresh();
     });
 
     await Promise.all([loadInvoices(), loadProjects(), loadClients()]);

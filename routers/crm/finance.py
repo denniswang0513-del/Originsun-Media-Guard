@@ -611,6 +611,23 @@ def _to_cash_dict(e, project_name: str = "", invoice_title: str = "") -> dict:
     }
 
 
+async def _assert_month_open(session, *dates):
+    """F1 月結鎖帳：任一日期落在已鎖（未重開）月份 → 409。
+    更新時要同時傳舊/新 entry_date（把紀錄搬進或搬出鎖定月都算改帳）。"""
+    months = {d.strftime("%Y-%m") for d in dates if d}
+    if not months:
+        return
+    from db.models import FinanceMonthClose
+    locked = (await session.execute(
+        select(FinanceMonthClose.month).where(
+            FinanceMonthClose.month.in_(months),
+            FinanceMonthClose.reopened_at.is_(None)))).scalars().all()
+    if locked:
+        raise HTTPException(
+            status_code=409,
+            detail=f"月份已鎖帳：{', '.join(sorted(locked))}（需修改請先到帳務→現金流重開該月）")
+
+
 @router.get("/cash-entries")
 async def list_cash_entries(
     q: str = Query(""), category: str = Query(""),
@@ -648,6 +665,7 @@ async def create_cash_entry(req: CashEntryPayload, request: Request):
     data = req.model_dump(exclude=date_fields)
     e = CrmCashEntry(id=uuid.uuid4().hex, **dates, created_at=_now(), **data)
     async with factory() as session:
+        await _assert_month_open(session, dates.get("entry_date"))
         session.add(e)
         if req.invoice_id and req.deposit:
             inv = await session.get(CrmInvoice, req.invoice_id)
@@ -668,6 +686,7 @@ async def update_cash_entry(entry_id: str, req: CashEntryPayload, request: Reque
         e = await session.get(CrmCashEntry, entry_id)
         if not e:
             raise HTTPException(status_code=404, detail="找不到此收支紀錄")
+        await _assert_month_open(session, e.entry_date, dates.get("entry_date"))
         old_invoice_id = e.invoice_id
         for k, v in req.model_dump(exclude=date_fields).items():
             setattr(e, k, v)
@@ -695,6 +714,7 @@ async def delete_cash_entry(entry_id: str, request: Request):
         e = await session.get(CrmCashEntry, entry_id)
         if not e:
             raise HTTPException(status_code=404, detail="找不到此收支紀錄")
+        await _assert_month_open(session, e.entry_date)
         if e.invoice_id and e.deposit:
             inv = await session.get(CrmInvoice, e.invoice_id)
             if inv and inv.payment_status == "已收款":

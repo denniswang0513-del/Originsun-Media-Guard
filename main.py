@@ -32,7 +32,7 @@ _ROUTER_MODULES = [
     'api_backup', 'api_verify', 'api_proxy', 'api_concat',
     'api_report', 'api_transcribe', 'api_system', 'api_ota', 'api_utils', 'api_tts',
     'api_job_history', 'api_queue', 'api_schedules', 'api_agents',
-    'api_api_keys', 'api_timesheets',
+    'api_api_keys', 'api_timesheets', 'api_cashflow',
     'api_crm',
     'api_drone_meta',
     'api_drone_watcher',
@@ -516,6 +516,13 @@ async def _on_startup():
                         "ALTER TABLE crm_projects ADD COLUMN IF NOT EXISTS website_prod_stage VARCHAR(16)",
                         # N2 階段0：專案時數預算池（對齊工時 Sheet 的預算欄，藍圖 §3 現況修正）
                         "ALTER TABLE crm_projects ADD COLUMN IF NOT EXISTS budget_hours DOUBLE PRECISION",
+                        # N-now 上架驗收：rebuild 後對外頁 200 驗證通過的時間戳
+                        "ALTER TABLE crm_projects ADD COLUMN IF NOT EXISTS website_verified_at TIMESTAMP WITH TIME ZONE",
+                        # H1 員工檔案完整化（HR_FIN_PLAN）
+                        "ALTER TABLE crm_staff ADD COLUMN IF NOT EXISTS employment_type VARCHAR(16)",
+                        "ALTER TABLE crm_staff ADD COLUMN IF NOT EXISTS hire_date TIMESTAMP WITH TIME ZONE",
+                        "ALTER TABLE crm_staff ADD COLUMN IF NOT EXISTS leave_date TIMESTAMP WITH TIME ZONE",
+                        "ALTER TABLE crm_staff ADD COLUMN IF NOT EXISTS emergency_contact VARCHAR(128)",
                         "ALTER TABLE crm_project_expenses ADD COLUMN IF NOT EXISTS sub_item VARCHAR(128)",
                         "ALTER TABLE crm_project_expenses ADD COLUMN IF NOT EXISTS payee VARCHAR(64)",
                         "ALTER TABLE crm_project_expenses ADD COLUMN IF NOT EXISTS advance_id VARCHAR(32)",

@@ -255,6 +255,8 @@ class CrmProject(Base):
     # None 視為「待製作」；專案上線後（public=True）此欄不再參與 stage 推導
     # （GET /projects/closing 以 public 優先 → '已上線'）。
     website_prod_stage = Column(String(16), nullable=True)
+    # N-now 上架驗收：rebuild 後對外頁實測 200 的時間戳（None=尚未驗證）
+    website_verified_at = Column(DateTime(timezone=True), nullable=True)
 
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now())
@@ -346,6 +348,11 @@ class CrmStaff(Base):
     portfolio_url = Column(String(512), nullable=True)          # 作品集連結
     status = Column(String(32), nullable=False, default="在職")  # 在職/離職/兼職
     notes = Column(Text, nullable=True)
+    # H1 員工檔案完整化（HR_FIN_PLAN）
+    employment_type = Column(String(16), nullable=True)          # 正職/兼職/約聘/freelance
+    hire_date = Column(DateTime(timezone=True), nullable=True)   # 到職日
+    leave_date = Column(DateTime(timezone=True), nullable=True)  # 離職日
+    emergency_contact = Column(String(128), nullable=True)       # 緊急聯絡人（姓名+電話）
     # Resume / portfolio fields
     photo_url = Column(String(512), nullable=True)
     bio = Column(Text, nullable=True)
@@ -677,3 +684,52 @@ class Timesheet(Base):
         Index("idx_ts_project", "project_id"),
         Index("idx_ts_staff_date", "staff_name", "work_date"),
     )
+
+
+class PaymentMilestone(Base):
+    """付款節點（B3 現金流：訂金/期中/尾款；N1 上線後可綁 trigger_phase 自動提醒）。"""
+    __tablename__ = "payment_milestones"
+
+    id = Column(String(32), primary_key=True)                    # uuid4 hex
+    project_id = Column(String(32), nullable=False)              # soft FK → crm_projects.id
+    label = Column(String(64), nullable=False, default="")       # 訂金/期中/尾款…
+    amount = Column(Integer, nullable=True)                      # 金額（含稅）
+    due_date = Column(DateTime(timezone=True), nullable=True)
+    trigger_phase = Column(String(32), nullable=True)            # N1 phase 綁定（預留）
+    status = Column(String(16), nullable=False, default="未到期")  # 未到期/待請款/已請款/已收款
+    invoice_id = Column(String(32), nullable=True)               # 關聯發票（開票後回填）
+    sort_order = Column(Integer, nullable=False, default=0)
+    note = Column(Text, nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    __table_args__ = (Index("idx_pm_project", "project_id"),
+                      Index("idx_pm_status_due", "status", "due_date"))
+
+
+class StaffRateHistory(Base):
+    """人員日費率歷史（H1）— 費率調整不改寫歷史；N2 工時成本與 B2 複盤按
+    work_date 當時費率取值，否則歷史毛利被現在費率污染。"""
+    __tablename__ = "staff_rate_history"
+
+    id = Column(String(32), primary_key=True)
+    staff_id = Column(String(32), nullable=False)                # soft FK → crm_staff.id
+    day_rate = Column(Integer, nullable=False, default=0)
+    effective_from = Column(DateTime(timezone=True), nullable=False)
+    note = Column(String(255), nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    __table_args__ = (Index("idx_srh_staff_from", "staff_id", "effective_from"),)
+
+
+class FinanceMonthClose(Base):
+    """月結鎖帳（F1）— 鎖定月份的收支不可改；snapshot 留當月彙總供報表重現。"""
+    __tablename__ = "finance_month_close"
+
+    id = Column(String(32), primary_key=True)
+    month = Column(String(7), nullable=False, unique=True)       # 'YYYY-MM'
+    closed_by = Column(String(64), nullable=False, default="")
+    closed_at = Column(DateTime(timezone=True), server_default=func.now())
+    snapshot = Column(JSONB, nullable=True)                      # {income, expense, by_category, entry_count}
+    reopened_by = Column(String(64), nullable=True)              # reopen 留稽核痕跡
+    reopened_at = Column(DateTime(timezone=True), nullable=True)

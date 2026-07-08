@@ -1,0 +1,33 @@
+<!--
+    crm-cashflow.html — 帳務管理 › 💧 現金流 子視圖殼（B3 現金流+付款節點、F1 月結）
+    內容由 crm-cashflow.js render 進 #cf-content。
+-->
+<div id="cf-content" style="padding:16px;color:#888;">載入中…</div>
+
+<style>
+    #cf-content .cf-card {
+        background: #232323; border: 1px solid #333; border-radius: 8px;
+        padding: 14px 16px; margin-bottom: 14px;
+    }
+    #cf-content .cf-card h3 { color: #ddd; font-size: 14px; margin: 0 0 10px 0; font-weight: 600; }
+    #cf-content table { width: 100%; border-collapse: collapse; font-size: 12.5px; }
+    #cf-content th { text-align: left; color: #888; font-weight: 500; padding: 5px 8px; border-bottom: 1px solid #333; white-space: nowrap; }
+    #cf-content td { padding: 5px 8px; border-bottom: 1px solid #2c2c2c; color: #ccc; }
+    #cf-content td.num, #cf-content th.num { text-align: right; font-variant-numeric: tabular-nums; }
+    #cf-content .cf-neg { color: #fca5a5; font-weight: 600; }
+    #cf-content .cf-pos { color: #6ee7b7; }
+    #cf-content .cf-btn {
+        background: #3b82f6; color: #fff; border: none; padding: 5px 11px;
+        border-radius: 4px; font-size: 12px; cursor: pointer;
+    }
+    #cf-content .cf-btn:hover { background: #2563eb; }
+    #cf-content .cf-btn.ghost { background: transparent; border: 1px solid #444; color: #ccc; }
+    #cf-content .cf-btn.ghost:hover { background: #333; }
+    #cf-content .cf-btn.danger { background: #7f1d1d; }
+    #cf-content .cf-note { color: #777; font-size: 11.5px; margin-top: 6px; line-height: 1.6; }
+    #cf-content input, #cf-content select {
+        background: #1a1a1a; border: 1px solid #3a3a3a; border-radius: 4px;
+        color: #eee; padding: 4px 8px; font-size: 12.5px;
+    }
+    #cf-content .cf-pill { display: inline-block; padding: 1px 8px; border-radius: 10px; font-size: 11px; }
+</style>

@@ -479,6 +479,12 @@ class StaffPayload(BaseModel):
     portfolio_url: str = ""
     status: str = "在職"
     notes: str = ""
+    # H1 員工檔案完整化 — 全 Optional 配合 exclude_unset 部分更新；
+    # 日期收 'YYYY-MM-DD' 字串，端點層轉 datetime（staff.py _STAFF_DATE_FIELDS）。
+    employment_type: Optional[str] = None     # 正職/兼職/約聘/freelance
+    hire_date: Optional[str] = None
+    leave_date: Optional[str] = None
+    emergency_contact: Optional[str] = None
     # 官網呈現覆寫（與「官網管理 › 關於我們」團隊卡同步寫同一批 crm_staff 欄位）。
     # 全為 Optional/None → 配合 update_staff 的 model_dump(exclude_unset=True)，
     # 未送的欄位不會被寫入，避免任一側部分更新覆蓋另一側的覆寫值。
@@ -677,3 +683,20 @@ class TimesheetRow(BaseModel):
 
 class TimesheetIngestRequest(BaseModel):
     rows: List[TimesheetRow]
+
+
+class MilestonePayload(BaseModel):
+    """付款節點（B3）新增/更新。"""
+    project_id: Optional[str] = None      # create 必填；update 不動
+    label: str = ""
+    amount: Optional[int] = None
+    due_date: Optional[str] = None        # 'YYYY-MM-DD'
+    status: Optional[str] = None          # 未到期/待請款/已請款/已收款
+    invoice_id: Optional[str] = None
+    sort_order: Optional[int] = None
+    note: Optional[str] = None
+
+
+class MonthClosePayload(BaseModel):
+    """月結（F1）：鎖定/重開指定月份。"""
+    month: str                            # 'YYYY-MM'

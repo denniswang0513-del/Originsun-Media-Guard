@@ -479,9 +479,70 @@ async def _run_build(website_dir: Path) -> None:
             "output_tail": merged_tail, "error": None,
         })
         logger.info("[rebuild] success, pending_count reset")
+
+        # N-now 上架驗收：新公開作品的對外頁實測 200 才算閉環（best-effort，不擋 rebuild）
+        try:
+            await _verify_published_works()
+        except Exception as _e_vf:
+            logger.warning("[rebuild] publish verification skipped: %s", _e_vf)
     except Exception as e:
         logger.exception("[rebuild] _run_build raised")
         await _fail(f"{type(e).__name__}: {e}")
+
+
+_PUBLIC_SITE_BASE = "https://www.originsun-studio.com"
+
+
+async def _verify_published_works() -> None:
+    """N-now 上架驗收（藍圖 N-now）：public=True 且尚未驗證的專案，逐一 GET 對外
+    作品頁；200 → 蓋 website_verified_at 章 + 推播。結案看板據此顯示「已上線 ✓」
+    vs「驗證中」。單次上限 20 件防暴走；失敗的下次 rebuild 再試。"""
+    import asyncio
+    import urllib.request
+    from datetime import datetime
+
+    from sqlalchemy import select
+    from db.models import CrmProject
+    from db.session import get_session_factory
+
+    factory = get_session_factory()
+    if not factory:
+        return
+
+    def _http_ok(url: str) -> bool:
+        try:
+            req = urllib.request.Request(url, headers={"User-Agent": "OMG-publish-verify/1.0"})
+            with urllib.request.urlopen(req, timeout=15) as resp:
+                return resp.status == 200
+        except Exception:
+            return False
+
+    async with factory() as session:
+        rows = (await session.execute(
+            select(CrmProject)
+            .where(CrmProject.public.is_(True), CrmProject.website_verified_at.is_(None))
+            .limit(20)
+        )).scalars().all()
+        if not rows:
+            return
+        from services.website.project_service import _slug_or_fallback
+        verified = []
+        for p in rows:
+            url = f"{_PUBLIC_SITE_BASE}/works/{_slug_or_fallback(p)}"
+            if await asyncio.to_thread(_http_ok, url):
+                p.website_verified_at = datetime.now()
+                verified.append(p.public_title or p.name or "")
+            else:
+                logger.warning("[rebuild] 上架驗證未過（%s）— 下次 rebuild 重試", url)
+        if verified:
+            await session.commit()
+            logger.info("[rebuild] 上架驗證 ✓ %d 件: %s", len(verified), "、".join(verified[:5]))
+            try:
+                from notifier import notify_tab_async
+                await notify_tab_async("works_published",
+                                       count=len(verified), titles="、".join(verified[:5]))
+            except Exception:
+                pass
 
 
 async def get_notion_status(settings: dict) -> dict:

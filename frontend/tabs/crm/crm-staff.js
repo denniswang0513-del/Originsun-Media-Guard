@@ -74,6 +74,13 @@ const _STAFF_EDIT_FIELDS = [
     {name:'name', label:'姓名', type:'text'},
     {name:'role', label:'職能', type:'select', get options() { return [{value:'',label:'—'}, ..._roles.map(r => ({value:r,label:r}))]; }},
     {name:'status', label:'狀態', type:'select', options:[{value:'在職',label:'在職'},{value:'兼職',label:'兼職'},{value:'專案',label:'專案'},{value:'單位',label:'單位'}]},
+    // H1 員工檔案完整化
+    {name:'employment_type', label:'僱用型態', type:'select', options:[{value:'',label:'—'},{value:'正職',label:'正職'},{value:'兼職',label:'兼職'},{value:'約聘',label:'約聘'},{value:'freelance',label:'freelance'}]},
+    {name:'daily_rate', label:'日費', type:'number'},
+    {name:'hourly_rate', label:'時薪', type:'number'},
+    {name:'hire_date', label:'到職日', type:'date'},
+    {name:'leave_date', label:'離職日', type:'date'},
+    {name:'emergency_contact', label:'緊急聯絡人', type:'text'},
     {name:'phone', label:'電話', type:'text'},
     {name:'email', label:'Email', type:'text'},
     {name:'id_number', label:'身分證 / 統編', type:'text'},
@@ -97,6 +104,14 @@ function renderDetail(s) {
     document.getElementById('staff-detail-info').innerHTML = `
         ${prop('職能', s.role)}
         <div class="crm-detail-prop"><div class="crm-prop-label">狀態</div><div class="crm-prop-value">${_sBadge(s.status)}</div></div>
+        ${prop('僱用型態', s.employment_type)}
+        <div class="crm-detail-prop"><div class="crm-prop-label">日費 / 時薪</div>
+            <div class="crm-prop-value${(s.daily_rate || s.hourly_rate) ? '' : ' empty'}">${(s.daily_rate || s.hourly_rate)
+                ? `${s.daily_rate ? '日 $' + Number(s.daily_rate).toLocaleString() : ''}${s.daily_rate && s.hourly_rate ? '｜' : ''}${s.hourly_rate ? '時 $' + Number(s.hourly_rate).toLocaleString() : ''} <span id="staff-rate-history-slot" style="font-size:11px;color:#888;"></span>`
+                : '空'}</div></div>
+        ${prop('到職日', s.hire_date)}
+        ${s.leave_date ? prop('離職日', s.leave_date) : ''}
+        ${prop('緊急聯絡人', s.emergency_contact)}
         ${prop('電話', s.phone)}
         ${prop('Email', s.email)}
         ${prop('身分證 / 統編', s.id_number)}
@@ -148,6 +163,20 @@ function renderDetail(s) {
     });
 
     _loadStaffProjects(s.id);
+    _loadRateHistory(s.id);
+}
+
+// H1: 費率歷史（非同步小注入 — 有多筆才顯示，點開看調整軌跡）
+async function _loadRateHistory(staffId) {
+    const slot = document.getElementById('staff-rate-history-slot');
+    if (!slot) return;
+    try {
+        const d = await _fetch('/staff/' + staffId + '/rate-history');
+        const h = d.history || [];
+        if (h.length < 2) return;   // 只有建檔一筆就不佔版面
+        slot.innerHTML = `<a href="javascript:void(0)" style="color:#3b82f6;" title="${h.map(r =>
+            `${r.effective_from} → $${Number(r.day_rate).toLocaleString()}${r.note ? '（' + r.note + '）' : ''}`).join('&#10;')}">📈 歷史 ${h.length} 筆</a>`;
+    } catch { /* 靜默 — 歷史載不到不影響詳情 */ }
 }
 
 // ── 官網呈現（與「官網管理 › 關於我們」團隊卡同步） ─────────────────

@@ -33,6 +33,25 @@ except ImportError:  # DB 套件不存在的 agent 環境 — 行為同原檔 tr
 
 
 
+def _parse_staff_dates(data: dict) -> dict:
+    """StaffPayload 的 hire_date/leave_date 是 'YYYY-MM-DD' 字串 → DateTime 欄位。
+    空字串/None → None（清空）。格式錯誤 422。"""
+    for f in ("hire_date", "leave_date"):
+        if f not in data:
+            continue
+        v = data[f]
+        if isinstance(v, str):
+            v = v.strip()
+        if not v:
+            data[f] = None
+            continue
+        try:
+            data[f] = datetime.strptime(str(v)[:10], "%Y-%m-%d")
+        except ValueError:
+            raise HTTPException(status_code=422, detail=f"{f} 日期格式需 YYYY-MM-DD")
+    return data
+
+
 def _to_staff_dict(s) -> dict:
     return {
         "id": s.id, "name": s.name, "role": s.role or "",
@@ -42,6 +61,11 @@ def _to_staff_dict(s) -> dict:
         "bank_name": s.bank_name or "",
         "bank_account": s.bank_account or "", "portfolio_url": s.portfolio_url or "",
         "status": s.status or "在職", "notes": s.notes or "",
+        # H1 員工檔案完整化
+        "employment_type": s.employment_type or "",
+        "hire_date": s.hire_date.strftime("%Y-%m-%d") if s.hire_date else "",
+        "leave_date": s.leave_date.strftime("%Y-%m-%d") if s.leave_date else "",
+        "emergency_contact": s.emergency_contact or "",
         "photo_url": s.photo_url or "",
         "bio": s.bio or "",
         "skills": s.skills or [],
@@ -97,9 +121,15 @@ async def create_staff(req: StaffPayload, request: Request):
     # exclude_unset：未送的官網覆寫欄位（Optional=None）交給 column default（False/0），
     # 不存 explicit None；正本欄位有自己的 schema 預設值，照常帶入。
     s = CrmStaff(id=uuid.uuid4().hex, created_at=now, updated_at=now,
-                 **req.model_dump(exclude_unset=True))
+                 **_parse_staff_dates(req.model_dump(exclude_unset=True)))
     async with factory() as session:
         session.add(s)
+        # H1: 建檔即種第一筆費率歷史（N2 成本回寫/B2 複盤按 work_date 當時費率取值）
+        if s.daily_rate:
+            from db.models import StaffRateHistory
+            session.add(StaffRateHistory(id=uuid.uuid4().hex, staff_id=s.id,
+                                         day_rate=s.daily_rate, effective_from=now,
+                                         note="建檔"))
         await session.commit()
         await session.refresh(s)
     return {"status": "ok", "staff": _to_staff_dict(s)}
@@ -116,6 +146,26 @@ async def get_staff(staff_id: str):
     return _to_staff_dict(s)
 
 
+@router.get("/staff/{staff_id}/rate-history")
+async def staff_rate_history(staff_id: str, request: Request):
+    """H1 費率歷史（新→舊）。N2 成本回寫與 B2 複盤以此按 work_date 取當時費率。"""
+    _check_auth(request)
+    _require_db()
+    factory = await _get_factory()
+    from db.models import StaffRateHistory
+    async with factory() as session:
+        rows = (await session.execute(
+            select(StaffRateHistory)
+            .where(StaffRateHistory.staff_id == staff_id)
+            .order_by(StaffRateHistory.effective_from.desc())
+        )).scalars().all()
+    return {"history": [{
+        "day_rate": r.day_rate,
+        "effective_from": r.effective_from.strftime("%Y-%m-%d") if r.effective_from else "",
+        "note": r.note or "",
+    } for r in rows]}
+
+
 @router.put("/staff/{staff_id}")
 async def update_staff(staff_id: str, req: StaffPayload, request: Request):
     _check_auth(request)
@@ -128,10 +178,17 @@ async def update_staff(staff_id: str, req: StaffPayload, request: Request):
         # exclude_unset：只寫前端「實際送出」的欄位。前端的 inline 編輯 / 新增 modal /
         # 官網呈現 section 各自只送自己那組欄位 — 部分更新時，沒送到的欄位（含正本
         # name/role/rates 與官網 website_* 覆寫）一律保持原值，不會被 None 蓋掉。
-        patch = req.model_dump(exclude_unset=True)
+        patch = _parse_staff_dates(req.model_dump(exclude_unset=True))
+        old_rate = s.daily_rate or 0
         for k, v in patch.items():
             setattr(s, k, v)
         s.updated_at = _now()
+        # H1: 日費率變動 → 寫費率歷史（不可改寫歷史；工時成本按當時費率取值）
+        if "daily_rate" in patch and (patch["daily_rate"] or 0) != old_rate:
+            from db.models import StaffRateHistory
+            session.add(StaffRateHistory(id=uuid.uuid4().hex, staff_id=s.id,
+                                         day_rate=patch["daily_rate"] or 0,
+                                         effective_from=_now()))
         await session.commit()
         await session.refresh(s)
         result = _to_staff_dict(s)
