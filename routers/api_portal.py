@@ -17,7 +17,6 @@ from datetime import datetime, timezone
 from fastapi import APIRouter, HTTPException, Request  # type: ignore
 from fastapi.responses import FileResponse  # type: ignore
 
-import core.state as state
 from core.auth import check_admin_or_module
 from core.schemas import PortalApprovePayload, PortalCommentPayload, PortalLinkPayload
 
@@ -42,15 +41,7 @@ def _check_auth(request: Request) -> dict:
     return check_admin_or_module(request, "portal", "crm_projects")
 
 
-def _require_factory():
-    """DB 守門：離線一律 503（模式同 api_locations）。"""
-    if not state.db_online:
-        raise HTTPException(status_code=503, detail="資料庫離線")
-    from db.session import get_session_factory
-    factory = get_session_factory()
-    if not factory:
-        raise HTTPException(status_code=503, detail="資料庫離線")
-    return factory
+from core.db_guard import db_factory_or_503 as _require_factory
 
 
 def _parse_expires(raw):
@@ -140,7 +131,7 @@ async def list_links(request: Request):
     _check_auth(request)
     factory = _require_factory()
 
-    from sqlalchemy import select, func as safunc
+    from sqlalchemy import select
     from db.models import CrmProject, PortalComment, PortalReviewLink
 
     async with factory() as session:
@@ -150,21 +141,19 @@ async def list_links(request: Request):
             .order_by(PortalReviewLink.created_at.desc())
         )).all()
 
-        totals = dict((await session.execute(
-            select(PortalComment.link_id, safunc.count(PortalComment.id))
-            .group_by(PortalComment.link_id))).all())
-        unresolved = dict((await session.execute(
-            select(PortalComment.link_id, safunc.count(PortalComment.id))
-            .where(PortalComment.resolved == 0)
-            .group_by(PortalComment.link_id))).all())
-
+        # totals / unresolved 從已載入的 all_comments 推導，不用另外兩次 group_by 全掃
         comments_by_link: dict = {}
+        totals: dict = {}
+        unresolved: dict = {}
         all_comments = (await session.execute(
             select(PortalComment)
             .order_by(PortalComment.timecode_sec, PortalComment.created_at)
         )).scalars().all()
         for c in all_comments:
             comments_by_link.setdefault(c.link_id, []).append(_comment_dict(c))
+            totals[c.link_id] = totals.get(c.link_id, 0) + 1
+            if not c.resolved:
+                unresolved[c.link_id] = unresolved.get(c.link_id, 0) + 1
 
     return {"links": [
         _link_dict(link, pname or "", comments_by_link.get(link.id, []),

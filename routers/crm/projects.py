@@ -254,10 +254,16 @@ async def get_project(project_id: str):
     return _to_project_dict(project, client_name)
 
 
-def _notify_closing_entry(project, old_status: str) -> None:
-    """N-now：專案轉入「結案作業」→ 推播官網編輯（收件匣有新作品）。
-    fire-and-forget thread — 通知失敗/未設 webhook 都不可影響專案更新。"""
-    if old_status == "結案作業" or project.status != "結案作業":
+def _apply_status_side_effects(project, old_status: str) -> None:
+    """狀態寫入的共用副作用（PUT + PATCH 都呼叫 — 避免兩條路徑漂移）：
+    1. 轉入「結案作業」且未指定官網製作階段 → 預設「待製作」（進上架收件匣）。
+    2. 剛轉入「結案作業」→ 推播官網編輯（fire-and-forget thread，通知失敗/未設
+       webhook 都不可影響專案更新）。
+    CSV 批次匯入刻意不呼叫此函式（不想大量匯入時洗版通知）。"""
+    just_entered_closing = old_status != "結案作業" and project.status == "結案作業"
+    if project.status == "結案作業" and project.website_prod_stage is None:
+        project.website_prod_stage = "待製作"
+    if not just_entered_closing:
         return
     try:
         import threading
@@ -299,10 +305,7 @@ async def update_project(project_id: str, req: CrmProjectPatchPayload, request: 
                 setattr(project, k, _parse_shoot_date(v))
             else:
                 setattr(project, k, v)
-        # 結案作業：專案轉為「結案作業」且尚未指定官網製作階段 → 預設「待製作」（進官網製作收件匣）
-        if project.status == "結案作業" and project.website_prod_stage is None:
-            project.website_prod_stage = "待製作"
-        _notify_closing_entry(project, old_status)
+        _apply_status_side_effects(project, old_status)
         project.updated_at = _now()
         await session.commit()
         await session.refresh(project)
@@ -349,10 +352,7 @@ async def update_project_status(project_id: str, request: Request):
             raise HTTPException(status_code=404, detail="找不到此專案")
         old_status = project.status or ""
         project.status = new_status
-        # 結案作業：轉為「結案作業」且尚未指定官網製作階段 → 預設「待製作」（進官網製作收件匣）
-        if new_status == "結案作業" and project.website_prod_stage is None:
-            project.website_prod_stage = "待製作"
-        _notify_closing_entry(project, old_status)
+        _apply_status_side_effects(project, old_status)
         if contract_amount is not None:
             project.contract_amount = int(contract_amount)
         if amount_receivable is not None:

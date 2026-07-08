@@ -30,12 +30,12 @@ let _extFilter = '';
 let _projects = [];
 let _scanPoll = null;
 
+let _items = [];   // 上次搜尋結果快取（tag 編輯直接讀，免重抓整份列表）
+
 export async function initFootageTab() {
     _content = document.getElementById('ft-content');
     if (!_content) return;
-    try {
-        _projects = (await ffetch('/api/v1/crm/projects').catch(() => ({ projects: [] }))).projects || [];
-    } catch { _projects = []; }
+    _projects = (await ffetch('/api/v1/crm/projects').catch(() => ({ projects: [] }))).projects || [];
     await refresh();
 }
 
@@ -63,6 +63,7 @@ async function refresh() {
             ffetch('/api/v1/footage/search?' + params.toString()),
             ffetch('/api/v1/footage/stats'),
         ]);
+        _items = res.items;
         _content.innerHTML = _render(res, st);
         _bind();
     } catch (e) {
@@ -148,25 +149,24 @@ function _bind() {
                 } else if (act === 'open') {
                     await ffetch('/api/v1/footage/' + node.dataset.id + '/open', { method: 'POST' });
                 } else if (act === 'untag') {
-                    const id = node.dataset.id, tag = node.dataset.tag;
-                    const cur = await ffetch('/api/v1/footage/search?' + new URLSearchParams({ q: '', limit: '200' }));
-                    const row = cur.items.find(x => x.id === id);
-                    const tags = (row ? row.tags : []).filter(t => t !== tag);
-                    await ffetch('/api/v1/footage/' + id + '/tags', { method: 'PUT', body: { tags } });
-                    refresh();
+                    const tag = node.dataset.tag;
+                    await _mutateTags(node.dataset.id, tags => tags.filter(t => t !== tag));
                 } else if (act === 'addtag') {
                     const t = prompt('新增標籤：');
                     if (!t || !t.trim()) return;
-                    const id = node.dataset.id;
-                    const cur = await ffetch('/api/v1/footage/search?' + new URLSearchParams({ q: '', limit: '200' }));
-                    const row = cur.items.find(x => x.id === id);
-                    const tags = [...(row ? row.tags : []), t.trim()];
-                    await ffetch('/api/v1/footage/' + id + '/tags', { method: 'PUT', body: { tags } });
-                    refresh();
+                    await _mutateTags(node.dataset.id, tags => [...tags, t.trim()]);
                 }
             } catch (e) { alert('操作失敗: ' + (e.message || e)); }
         });
     });
+}
+
+// tag 增刪共用：從快取讀當前 tags（免重抓列表）→ tagsFn 算新值 → PUT → refresh
+async function _mutateTags(id, tagsFn) {
+    const row = _items.find(x => x.id === id);
+    const tags = tagsFn(row ? (row.tags || []) : []);
+    await ffetch('/api/v1/footage/' + id + '/tags', { method: 'PUT', body: { tags } });
+    refresh();
 }
 
 async function _openScan() {

@@ -526,10 +526,12 @@ async def _verify_published_works() -> None:
         if not rows:
             return
         from services.website.project_service import _slug_or_fallback
+        # 20 件各 15s timeout 的 HTTP GET 彼此獨立 → 平行（原本序列最壞 20×15s≈5 分）
+        urls = [f"{_PUBLIC_SITE_BASE}/works/{_slug_or_fallback(p)}" for p in rows]
+        oks = await asyncio.gather(*[asyncio.to_thread(_http_ok, u) for u in urls])
         verified = []
-        for p in rows:
-            url = f"{_PUBLIC_SITE_BASE}/works/{_slug_or_fallback(p)}"
-            if await asyncio.to_thread(_http_ok, url):
+        for p, url, ok in zip(rows, urls, oks):
+            if ok:
                 p.website_verified_at = datetime.now()
                 verified.append(p.public_title or p.name or "")
             else:

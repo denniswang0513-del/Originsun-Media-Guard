@@ -14,7 +14,6 @@ from datetime import datetime, timedelta
 
 from fastapi import APIRouter, HTTPException, Request  # type: ignore
 
-import core.state as state
 from config import load_settings
 from core.auth import check_admin_or_module, _extract_token
 from core.schemas import MilestonePayload, MonthClosePayload
@@ -29,14 +28,7 @@ def _guard(request: Request):
     check_admin_or_module(request, "crm_invoices", "crm_projects")
 
 
-def _factory_or_503():
-    if not state.db_online:
-        raise HTTPException(status_code=503, detail="資料庫離線")
-    from db.session import get_session_factory
-    factory = get_session_factory()
-    if not factory:
-        raise HTTPException(status_code=503, detail="資料庫離線")
-    return factory
+from core.db_guard import db_factory_or_503 as _factory_or_503
 
 
 def _parse_day(raw):

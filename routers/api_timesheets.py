@@ -19,6 +19,7 @@ from fastapi import APIRouter, HTTPException, Request  # type: ignore
 import core.state as state
 from config import load_settings, save_settings
 from core.auth import check_admin
+from core.db_guard import db_factory_or_503
 from core.schemas import TimesheetIngestRequest
 
 router = APIRouter(prefix="/api/v1/timesheets", tags=["timesheets"])
@@ -69,15 +70,12 @@ async def ingest_rows(req: TimesheetIngestRequest, request: Request):
     if len(req.rows) > _MAX_ROWS_PER_CALL:
         raise HTTPException(status_code=422, detail=f"單次上限 {_MAX_ROWS_PER_CALL} 列，分批送")
     if not state.db_online:
+        # Apps Script 端會重試，給明確訊息（刻意不同於通用 503）
         raise HTTPException(status_code=503, detail="資料庫離線，稍後重送（Apps Script 會重試）")
+    factory = db_factory_or_503()
 
     from sqlalchemy import select
     from db.models import Timesheet, CrmProject
-    from db.session import get_session_factory
-
-    factory = get_session_factory()
-    if not factory:
-        raise HTTPException(status_code=503, detail="資料庫離線")
 
     inserted = 0
     skipped = 0
@@ -141,16 +139,10 @@ async def ingest_rows(req: TimesheetIngestRequest, request: Request):
 async def burn_summary(request: Request):
     """每專案 burn 摘要：已投入時數 / 預算 / 消耗率。未對映專案以名稱聚合列出。"""
     check_admin(request)
-    if not state.db_online:
-        raise HTTPException(status_code=503, detail="資料庫離線")
+    factory = db_factory_or_503()
 
     from sqlalchemy import select, func as safunc
     from db.models import Timesheet, CrmProject
-    from db.session import get_session_factory
-
-    factory = get_session_factory()
-    if not factory:
-        raise HTTPException(status_code=503, detail="資料庫離線")
 
     async with factory() as session:
         matched = (await session.execute(
@@ -209,16 +201,10 @@ async def burn_summary(request: Request):
 async def recent_rows(request: Request, limit: int = 50):
     """最近同步進來的列（抽查用，admin）。"""
     check_admin(request)
-    if not state.db_online:
-        raise HTTPException(status_code=503, detail="資料庫離線")
+    factory = db_factory_or_503()
 
     from sqlalchemy import select
     from db.models import Timesheet
-    from db.session import get_session_factory
-
-    factory = get_session_factory()
-    if not factory:
-        raise HTTPException(status_code=503, detail="資料庫離線")
 
     limit = max(1, min(limit, 200))
     async with factory() as session:

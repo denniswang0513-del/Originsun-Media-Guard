@@ -142,7 +142,10 @@ function _card(it) {
                 </div>
                 ${holder}
                 ${overdue ? `<div class="eq-card-overdue">${overdue}</div>` : ''}
-                <div class="eq-card-meta">${it.serial ? 'SN: ' + esc(it.serial) : ''}${it.monthly_depreciation ? `${it.serial ? '　' : ''}月折舊 $${it.monthly_depreciation.toLocaleString()}` : ''}</div>
+                <div class="eq-card-meta">${[
+                    it.serial ? 'SN: ' + esc(it.serial) : '',
+                    it.monthly_depreciation ? '月折舊 $' + it.monthly_depreciation.toLocaleString() : '',
+                ].filter(Boolean).join('　')}</div>
             </div>
         </div>`;
 }

@@ -12,7 +12,6 @@ from datetime import datetime, timezone
 
 from fastapi import APIRouter, HTTPException, Request  # type: ignore
 
-import core.state as state
 from core.auth import check_admin_or_module
 from core.schemas import FootageScanRequest, FootageTagsPayload
 
@@ -26,14 +25,7 @@ def _guard(request: Request):
     check_admin_or_module(request, "footage", "transcribe")
 
 
-def _factory_or_503():
-    if not state.db_online:
-        raise HTTPException(status_code=503, detail="資料庫離線")
-    from db.session import get_session_factory
-    factory = get_session_factory()
-    if not factory:
-        raise HTTPException(status_code=503, detail="資料庫離線")
-    return factory
+from core.db_guard import db_factory_or_503 as _factory_or_503
 
 
 def _snippet(transcript: str, q: str, width: int = 80) -> str:
@@ -83,10 +75,15 @@ async def _run_scan(root_path: str, project_id: str, project_name: str):
         indexed = updated = 0
         factory = _factory_or_503()
         async with factory() as session:
+            # 一次 IN 撈既有列（避免 per-record SELECT — 掃 2000 檔就是 2000 次往返）
+            paths = [r["file_path"] for r in records]
+            existing_by_path = {}
+            if paths:
+                for row in (await session.execute(
+                        select(FootageIndex).where(FootageIndex.file_path.in_(paths)))).scalars():
+                    existing_by_path[row.file_path] = row
             for rec in records:
-                existing = (await session.execute(
-                    select(FootageIndex).where(FootageIndex.file_path == rec["file_path"]))
-                ).scalar_one_or_none()
+                existing = existing_by_path.get(rec["file_path"])
                 shot_date = None
                 try:
                     shot_date = datetime.fromtimestamp(rec["shot_mtime"], tz=timezone.utc)

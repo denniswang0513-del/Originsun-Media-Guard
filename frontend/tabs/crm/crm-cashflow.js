@@ -39,15 +39,15 @@ export async function initCrmCashflowTab() {
 async function refresh() {
     if (!_el) return;
     try {
-        const [fc, ms, mc, settings, projs] = await Promise.all([
+        const [fc, ms, mc, projs] = await Promise.all([
             cfetch('/api/v1/cashflow/forecast?days=90'),
             cfetch('/api/v1/cashflow/milestones'),
             cfetch('/api/v1/cashflow/month-close'),
-            fetch('/api/settings/load').then(r => r.json()).catch(() => ({})),
             cfetch('/api/v1/crm/projects').catch(() => ({ projects: [] })),
         ]);
         _projects = (projs.projects || []).map(p => ({ id: p.id, name: p.name }));
-        _el.innerHTML = _renderOverdue(fc) + _renderForecast(fc, settings) + _renderMilestones(ms) + _renderMonthClose(mc);
+        // 固定月成本 forecast 已回（fc.fixed_monthly，同一 settings 鍵），不用另抓 settings
+        _el.innerHTML = _renderOverdue(fc) + _renderForecast(fc) + _renderMilestones(ms) + _renderMonthClose(mc);
         _bind();
     } catch (e) {
         _el.innerHTML = `<div style="color:#f87171;padding:24px;">現金流載入失敗：${esc(e.message || e)}</div>`;
@@ -66,8 +66,8 @@ function _renderOverdue(fc) {
         </tbody></table></div>`;
 }
 
-function _renderForecast(fc, settings) {
-    const fixed = (settings.finance || {}).monthly_fixed_costs || fc.fixed_monthly || 0;
+function _renderForecast(fc) {
+    const fixed = fc.fixed_monthly || 0;
     const rows = fc.weeks.map(w => `
         <tr><td>${esc(w.start)} 週</td>
             <td class="num cf-pos">${w.inflow ? '$' + _fmt(w.inflow) : ''}</td>

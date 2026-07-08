@@ -17,7 +17,6 @@ from typing import Optional
 
 from fastapi import APIRouter, Body, File, HTTPException, Request, UploadFile  # type: ignore
 
-import core.state as state
 from core.auth import check_admin_or_module
 from core.schemas import ProposalPayload, ReferencePayload
 
@@ -54,15 +53,7 @@ def _check_auth(request: Request) -> dict:
     return check_admin_or_module(request, "preprod_proposals", "preprod_plan")
 
 
-def _require_factory():
-    """DB 守門：離線一律 503（模式同 api_locations）。"""
-    if not state.db_online:
-        raise HTTPException(status_code=503, detail="資料庫離線")
-    from db.session import get_session_factory
-    factory = get_session_factory()
-    if not factory:
-        raise HTTPException(status_code=503, detail="資料庫離線")
-    return factory
+from core.db_guard import db_factory_or_503 as _require_factory
 
 
 def _parse_date(raw):

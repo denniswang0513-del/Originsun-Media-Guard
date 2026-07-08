@@ -13,7 +13,6 @@ import uuid
 
 from fastapi import APIRouter, HTTPException, Request  # type: ignore
 
-import core.state as state
 from core.auth import check_admin_or_module
 from core.schemas import IntelSourcePayload
 
@@ -29,15 +28,7 @@ def _check_auth(request: Request) -> dict:
     return check_admin_or_module(request, "intel", "preprod_plan")
 
 
-def _require_factory():
-    """DB 守門：離線一律 503（模式同 api_proposals）。"""
-    if not state.db_online:
-        raise HTTPException(status_code=503, detail="資料庫離線")
-    from db.session import get_session_factory
-    factory = get_session_factory()
-    if not factory:
-        raise HTTPException(status_code=503, detail="資料庫離線")
-    return factory
+from core.db_guard import db_factory_or_503 as _require_factory
 
 
 def _check_url(url: str) -> str:
@@ -147,7 +138,7 @@ async def update_source(sid: str, req: IntelSourcePayload, request: Request):
         if not src:
             raise HTTPException(status_code=404, detail="找不到此來源")
         for k, v in data.items():
-            if k in _SRC_FIELDS or k == "url":
+            if k in _SRC_FIELDS:   # url 已在其中
                 setattr(src, k, v)
         if "enabled" in data:
             src.enabled = 1 if data["enabled"] else 0
