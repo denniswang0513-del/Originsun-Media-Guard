@@ -11,7 +11,7 @@ export const TAB_MAP = {
     transcribe: 'tab_transcribe', tts: 'tab_tts', drone_meta: 'tab_drone_meta',
     crm_clients: 'tab_crm_clients', crm_projects: 'tab_crm_projects',
     crm_quotes: 'tab_crm_quotes', crm_staff: 'tab_crm_staff',
-    crm_invoices: 'tab_crm_invoices',
+    crm_invoices: 'tab_crm_invoices', timesheets: 'tab_timesheets',
     website_admin: 'tab_website',
 };
 
@@ -37,6 +37,7 @@ export const TAB_LOADERS = [
     ['crm_projects',  './tabs/crm/crm-projects.html',        './tabs/crm/crm-projects.js',        'initCrmProjectsTab'],
     ['crm_staff',     './tabs/crm/crm-staff.html',           './tabs/crm/crm-staff.js',           'initCrmStaffTab'],
     ['crm_invoices',  './tabs/crm/crm-invoices.html',        './tabs/crm/crm-invoices.js',        'initCrmInvoicesTab'],
+    ['timesheets',    './tabs/timesheets/timesheets.html',   './tabs/timesheets/timesheets.js',   'initTimesheetsTab'],
     ['website_admin', './tabs/website/website.html',         './tabs/website/website.js',         'initWebsiteTab'],
 ];
 
@@ -72,6 +73,7 @@ export const TAB_GROUPS = [
         { key: 'crm_projects', label: '📁 專案管理' },
         { key: 'crm_staff',    label: '👥 人力資源' },
         { key: 'crm_invoices', label: '🧾 帳務管理' },
+        { key: 'timesheets',   label: '⏱️ 工時檢核' },
     ] },
     { id: 'website',    label: '🌐 官網管理', single: 'website_admin' },
 ];
@@ -106,7 +108,7 @@ export const PERMISSION_GROUPS = [
     { id: 'projects',   label: '📊 專案總覽', modules: ['projects'] },
     { id: 'preprod',    label: '📝 前期製作', modules: ['preprod_plan'] },
     { id: 'production', label: '🎬 後期製作', modules: ['backup', 'verify', 'transcode', 'concat', 'drone_meta', 'report', 'transcribe', 'tts'] },
-    { id: 'business',   label: '💼 業務管理', modules: ['crm_clients', 'crm_projects', 'crm_quotes', 'crm_staff', 'crm_invoices'] },
+    { id: 'business',   label: '💼 業務管理', modules: ['crm_clients', 'crm_projects', 'crm_quotes', 'crm_staff', 'crm_invoices', 'timesheets'] },
     { id: 'website',    label: '🌐 官網管理', modules: ['website_admin'] },
 ];
 

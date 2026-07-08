@@ -1,0 +1,46 @@
+<!--
+    timesheets.html — ⏱️ 工時檢核 Tab 殼（N2 階段0：Google Sheet 同步的 burn 檢核）
+    內容全部由 timesheets.js render 進 #ts-content（同源打 master /api/v1/timesheets/*）。
+-->
+<div id="ts-root">
+    <div id="ts-content" style="color:#888;padding:40px;text-align:center;">載入中…</div>
+</div>
+
+<style>
+    #ts-root h2 { color: #fff; font-size: 18px; margin: 0 0 4px 0; font-weight: 600; }
+    #ts-root .ts-sub { color: #777; font-size: 12px; margin-bottom: 16px; }
+    #ts-root .ts-chip {
+        display: inline-block; background: #232323; border: 1px solid #333;
+        border-radius: 8px; padding: 8px 14px; margin: 0 8px 8px 0; font-size: 12px; color: #aaa;
+    }
+    #ts-root .ts-chip b { color: #eee; font-size: 16px; font-weight: 600; margin-right: 4px; }
+    #ts-root .ts-card {
+        background: #232323; border: 1px solid #333; border-radius: 8px;
+        padding: 14px 16px; margin-bottom: 14px;
+    }
+    #ts-root .ts-card h3 { color: #ddd; font-size: 14px; margin: 0 0 10px 0; font-weight: 600; }
+    #ts-root table { width: 100%; border-collapse: collapse; font-size: 12.5px; }
+    #ts-root th {
+        text-align: left; color: #888; font-weight: 500; padding: 6px 8px;
+        border-bottom: 1px solid #333; white-space: nowrap;
+    }
+    #ts-root td { padding: 6px 8px; border-bottom: 1px solid #2c2c2c; color: #ccc; }
+    #ts-root td.num, #ts-root th.num { text-align: right; font-variant-numeric: tabular-nums; }
+    #ts-root .ts-pct {
+        display: inline-block; min-width: 64px; text-align: right; padding: 2px 8px;
+        border-radius: 6px; font-weight: 600;
+    }
+    #ts-root .ts-btn {
+        background: #3b82f6; color: #fff; border: none; padding: 6px 12px;
+        border-radius: 4px; font-size: 12px; cursor: pointer;
+    }
+    #ts-root .ts-btn:hover { background: #2563eb; }
+    #ts-root .ts-btn.ghost { background: transparent; border: 1px solid #444; color: #ccc; }
+    #ts-root .ts-btn.ghost:hover { background: #333; }
+    #ts-root .ts-note { color: #777; font-size: 11.5px; margin-top: 8px; line-height: 1.6; }
+    #ts-root code {
+        background: #1a1a1a; border: 1px solid #333; border-radius: 4px;
+        padding: 1px 6px; font-size: 11.5px; color: #93c5fd; word-break: break-all;
+    }
+    #ts-root ol { color: #bbb; font-size: 13px; line-height: 2; padding-left: 20px; margin: 8px 0; }
+</style>
