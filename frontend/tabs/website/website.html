@@ -7,8 +7,13 @@
     <!-- 左側導覽 -->
     <nav id="website-nav" style="width:200px;border-right:1px solid #2a2a2a;padding:16px 0;flex-shrink:0;overflow-y:auto;min-height:0;">
         <div style="padding:0 16px 12px;font-size:11px;color:#666;letter-spacing:0.08em;">官網管理</div>
+        <!-- 常用（置頂快速入口）：最常看的儀表板 + 社群工作台 -->
+        <div style="padding:4px 16px;font-size:10px;color:#555;letter-spacing:0.1em;">⚡ 常用</div>
+        <button class="website-nav-btn active" data-subview="dashboard">📊 儀表板</button>
+        <button class="website-nav-btn" data-subview="social">📣 社群工作台</button>
+
         <!-- 官網欄目：一一對應官網導覽列（首頁/作品集/歷年作品/服務項目/關於我們/部落格/聯絡）順序 -->
-        <div style="padding:4px 16px;font-size:10px;color:#555;letter-spacing:0.1em;">📄 官網欄目</div>
+        <div style="padding:14px 16px 4px;font-size:10px;color:#555;letter-spacing:0.1em;">📄 官網欄目</div>
         <button class="website-nav-btn" data-subview="home">🏠 首頁</button>
         <button class="website-nav-btn" data-subview="works">🎬 作品集</button>
         <button class="website-nav-btn" data-subview="awards">🏆 歷年作品（獎項）</button>
@@ -18,18 +23,20 @@
         <button class="website-nav-btn" data-subview="blog">📝 部落格</button>
         <button class="website-nav-btn" data-subview="inquiries">📬 聯絡 <span id="website-inq-badge" class="website-badge" style="display:none;"></span></button>
 
-        <!-- 網站工具：非導覽欄目（全站性 / 支援功能） -->
-        <div style="padding:14px 16px 4px;font-size:10px;color:#555;letter-spacing:0.1em;">🛠️ 網站工具</div>
-        <button class="website-nav-btn active" data-subview="dashboard">📊 儀表板</button>
-        <button class="website-nav-btn" data-subview="categories">🏷️ 作品分類</button>
-        <button class="website-nav-btn" data-subview="credits">🎭 演職員</button>
-        <button class="website-nav-btn" data-subview="seo">🔍 SEO / AI SEO</button>
-        <button class="website-nav-btn" data-subview="translation">🌐 英文翻譯</button>
-        <button class="website-nav-btn" data-subview="social">📣 社群工作台</button>
-        <button class="website-nav-btn" data-subview="redirects">🔀 轉址 (301)</button>
-        <button class="website-nav-btn" data-subview="nav">🧭 導覽選單</button>
-        <button class="website-nav-btn" data-subview="settings">⚙️ 網站設定</button>
-        <button class="website-nav-btn" data-subview="backup">🗄 資料備份</button>
+        <!-- 網站工具：非導覽欄目（全站性 / 支援功能）— 可收合，狀態記 localStorage -->
+        <div id="website-tools-toggle" style="padding:14px 16px 4px;font-size:10px;color:#888;letter-spacing:0.1em;cursor:pointer;display:flex;justify-content:space-between;align-items:center;user-select:none;">
+            <span>🛠️ 網站工具</span><span id="website-tools-arrow" style="font-size:11px;">▸</span>
+        </div>
+        <div id="website-tools-group" style="display:none;">
+            <button class="website-nav-btn" data-subview="categories">🏷️ 作品分類</button>
+            <button class="website-nav-btn" data-subview="credits">🎭 演職員</button>
+            <button class="website-nav-btn" data-subview="seo">🔍 SEO / AI SEO</button>
+            <button class="website-nav-btn" data-subview="translation">🌐 英文翻譯</button>
+            <button class="website-nav-btn" data-subview="redirects">🔀 轉址 (301)</button>
+            <button class="website-nav-btn" data-subview="nav">🧭 導覽選單</button>
+            <button class="website-nav-btn" data-subview="settings">⚙️ 網站設定</button>
+            <button class="website-nav-btn" data-subview="backup">🗄 資料備份</button>
+        </div>
 
         <div style="padding:16px;margin-top:20px;font-size:11px;color:#555;border-top:1px solid #2a2a2a;">
             <div style="margin-bottom:6px;">API: <span id="website-api-base-display"></span></div>

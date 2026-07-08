@@ -35,6 +35,9 @@ export async function initWebsiteTab() {
         });
     });
 
+    // 「網站工具」可收合（狀態記 localStorage，預設收合）
+    _initToolsCollapse();
+
     // Rebuild 狀態列（網站 Tab 頂部，跨 subview 共用）
     _initRebuildBarOnce();
 
@@ -44,6 +47,27 @@ export async function initWebsiteTab() {
     // 背景任務
     _startHealthCheck();
     _startBadgeRefresh();
+}
+
+function _initToolsCollapse() {
+    const toggle = document.getElementById('website-tools-toggle');
+    const group = document.getElementById('website-tools-group');
+    const arrow = document.getElementById('website-tools-arrow');
+    if (!toggle || !group || !arrow) return;
+    const KEY = 'website_tools_collapsed';
+    const apply = (collapsed) => {
+        group.style.display = collapsed ? 'none' : 'block';
+        arrow.textContent = collapsed ? '▸' : '▾';
+    };
+    // 預設收合；但若目前所在子視圖屬於工具群組，強制展開才看得到 active 項
+    let collapsed = localStorage.getItem(KEY) !== '0';
+    if (group.querySelector(`[data-subview="${_activeSubview}"]`)) collapsed = false;
+    apply(collapsed);
+    toggle.addEventListener('click', () => {
+        collapsed = group.style.display !== 'none';   // 目前展開 → 要收合
+        apply(collapsed);
+        localStorage.setItem(KEY, collapsed ? '1' : '0');
+    });
 }
 
 function _initRebuildBarOnce() {
