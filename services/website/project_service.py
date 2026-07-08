@@ -429,19 +429,22 @@ async def _completeness_for_projects(session: AsyncSession, projects: list) -> d
     sc_map: dict = {}
     stmt = select(
         CrmProjectShowcase.id, CrmProjectShowcase.video_url, CrmProjectShowcase.gallery,
-        CrmProjectShowcase.cover_url, CrmProjectShowcase.description, CrmProjectShowcase.credits,
+        CrmProjectShowcase.cover_url, CrmProjectShowcase.description,
+        CrmProjectShowcase.credits, CrmProjectShowcase.credits_text,
     ).where(CrmProjectShowcase.id.in_(pids))
-    for sid, video_url, gallery, cover_url, description, credits in await session.execute(stmt):
-        sc_map[sid] = (video_url, gallery, cover_url, description, credits)
+    for sid, video_url, gallery, cover_url, description, credits, credits_text in await session.execute(stmt):
+        sc_map[sid] = (video_url, gallery, cover_url, description, credits, credits_text)
     out: dict = {}
     for p in projects:
-        video_url, gallery, cover_url, description, credits = sc_map.get(
-            p.id, (None, None, None, None, None))
+        video_url, gallery, cover_url, description, credits, credits_text = sc_map.get(
+            p.id, (None, None, None, None, None, None))
         out[p.id] = {
             "video": bool(video_url or p.public_youtube_id),
             "images": bool((gallery and len(gallery) > 0) or p.public_featured_image or cover_url),
             "description": bool((description or "").strip() or (p.public_description or "").strip()),
+            # credits 有填：結構化 blocks 或 文字層 credits_text 或 公開 credits 任一有內容
             "credits": bool((credits and len(credits) > 0)
+                            or (credits_text or "").strip()
                             or (p.public_credits and len(p.public_credits) > 0)),
         }
     return out

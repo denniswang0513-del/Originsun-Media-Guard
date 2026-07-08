@@ -190,8 +190,10 @@ async def list_closing_projects(request: Request):
                 (sc and (sc.description or "").strip())
                 or (p.public_description or "").strip()
             )
+            # credits 有填：結構化 blocks 或 文字層 credits_text 或 公開 credits 任一有內容
             credits = bool(
                 (sc and sc.credits and len(sc.credits) > 0)
+                or (sc and (sc.credits_text or "").strip())
                 or (p.public_credits and len(p.public_credits) > 0)
             )
             slug = (p.public_slug or "").strip() or (
