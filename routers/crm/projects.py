@@ -185,7 +185,11 @@ async def list_closing_projects(request: Request):
                 or p.public_featured_image
                 or (sc and sc.cover_url)
             )
-            process = bool(sc and sc.process_items and len(sc.process_items) > 0)
+            # 「說明」= 專案描述是否已填寫（showcase 描述 或 專案公開描述任一有值）
+            description = bool(
+                (sc and (sc.description or "").strip())
+                or (p.public_description or "").strip()
+            )
             credits = bool(
                 (sc and sc.credits and len(sc.credits) > 0)
                 or (p.public_credits and len(p.public_credits) > 0)
@@ -208,7 +212,7 @@ async def list_closing_projects(request: Request):
                 "completeness": {
                     "video": video,
                     "images": images,
-                    "process": process,
+                    "description": description,
                     "credits": credits,
                 },
             })

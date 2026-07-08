@@ -130,7 +130,7 @@ function _renderRow(it) {
             : '<span title="等待下次發布時自動驗證對外頁" style="color:#f59e0b;font-size:11px;margin-left:3px;">驗證中</span>')
         : ''}</div>
       <div style="flex:1.4;min-width:130px;display:flex;gap:4px;flex-wrap:wrap;">
-        ${_chip('影片', c.video)}${_chip('圖', c.images)}${_chip('過程', c.process)}${_chip('credits', c.credits)}
+        ${_chip('影片', c.video)}${_chip('圖', c.images)}${_chip('說明', c.description)}${_chip('credits', c.credits)}
       </div>
       <div style="flex:0.3;min-width:24px;text-align:center;font-size:14px;">${featured}</div>
       <div style="flex:1.7;min-width:190px;display:flex;gap:4px;justify-content:flex-end;flex-wrap:wrap;">
