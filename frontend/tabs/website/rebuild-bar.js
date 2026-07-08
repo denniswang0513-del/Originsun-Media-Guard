@@ -18,19 +18,37 @@ import { websiteFetch, esc, fmtRelative, toastOk, toastErr } from './website-uti
 
 const POLL_INTERVAL_FAST = 5000;   // running / debounce 倒數中
 const POLL_INTERVAL_SLOW = 30000;  // idle
+const FAIL_THRESHOLD = 3;          // 連續失敗達此數才整塊變紅（單次瞬斷不嚇人）
 
 let _poll = null;
+let _host = null;
+let _failCount = 0;
+let _lastGoodHtml = '';
+let _visListener = null;
 
 export function initRebuildBar(host) {
     if (!host) return;
+    _host = host;
+    _failCount = 0;
+    _lastGoodHtml = '';
     host.id = 'website-rebuild-bar';
     host.style.cssText = 'padding:12px 16px;border-top:1px solid #2a2a2a;font-size:11px;color:#999;line-height:1.6;';
     host.innerHTML = `<div style="color:#666;">對外網站發布狀態：載入中…</div>`;
+    // 背景分頁的 setTimeout 會被 Chrome 節流到 ~10 分鐘一次；切回前景立即刷新，
+    // 否則使用者看到的是最舊可達 10 分鐘前的狀態（含早已恢復的瞬斷錯誤）。
+    if (!_visListener) {
+        _visListener = () => {
+            if (document.visibilityState === 'visible' && _host) _refresh(_host);
+        };
+        document.addEventListener('visibilitychange', _visListener);
+    }
     _refresh(host);
 }
 
 export function destroyRebuildBar() {
     if (_poll) { clearTimeout(_poll); _poll = null; }
+    if (_visListener) { document.removeEventListener('visibilitychange', _visListener); _visListener = null; }
+    _host = null;
 }
 
 function _scheduleNext(host, ms) {
@@ -41,14 +59,24 @@ function _scheduleNext(host, ms) {
 async function _refresh(host) {
     try {
         const s = await websiteFetch('/api/website/admin/rebuild/status');
+        _failCount = 0;
         host.innerHTML = _renderSidebar(s);
+        _lastGoodHtml = host.innerHTML;
         _bindActions(host);
         const fast = (s.state === 'running') || (s.auto_rebuild_fires_at);
         _scheduleNext(host, fast ? POLL_INTERVAL_FAST : POLL_INTERVAL_SLOW);
     } catch (e) {
-        host.innerHTML = `<div style="color:#f87171;font-size:11px;">⚠ 發布狀態查詢失敗</div>
-            <div style="color:#666;font-size:10px;margin-top:2px;">${esc(e.message || e)}</div>`;
-        _scheduleNext(host, POLL_INTERVAL_SLOW);
+        _failCount++;
+        if (_failCount >= FAIL_THRESHOLD || !_lastGoodHtml) {
+            host.innerHTML = `<div style="color:#f87171;font-size:11px;">⚠ 發布狀態查詢失敗（連續 ${_failCount} 次）</div>
+                <div style="color:#666;font-size:10px;margin-top:2px;">${esc(e.message || e)}</div>`;
+        } else {
+            // 單次瞬斷：保留上次成功畫面，只加一行小字，不整塊變紅
+            host.innerHTML = _lastGoodHtml
+                + `<div style="color:#f59e0b;font-size:10px;margin-top:4px;">⚠ 狀態查詢暫時失敗，重試中…</div>`;
+            _bindActions(host);
+        }
+        _scheduleNext(host, POLL_INTERVAL_FAST);
     }
 }
 
