@@ -869,3 +869,34 @@ class IntelItem(Base):
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
     __table_args__ = (Index("idx_intel_status_score", "status", "score"),)
+
+
+class PortalReviewLink(Base):
+    """看片審批客戶門戶（B1，docs/BIZ_PLAN.md B1 段）— 送審連結：
+    一個剪輯版本＝一條 token 連結，客戶免登入用 /review.html?token= 看片留言核准。"""
+    __tablename__ = "portal_review_links"
+
+    id = Column(String(32), primary_key=True)                    # uuid4 hex
+    project_id = Column(String(32), nullable=False, index=True)  # soft FK → crm_projects.id
+    version_label = Column(String(64), nullable=True)            # 初剪/一修/定剪…
+    video_path = Column(String(512), nullable=True)              # master 本機影片路徑（絕不回給客戶端）
+    token = Column(String(64), unique=True, nullable=False)      # secrets.token_urlsafe(32)
+    status = Column(String(16), nullable=False, default="待審")   # 待審/修改中/已核准
+    approved_by = Column(String(64), nullable=True)              # 客戶核准時留名
+    approved_at = Column(DateTime(timezone=True), nullable=True)
+    expires_at = Column(DateTime(timezone=True), nullable=True)  # null = 永不過期
+    created_by = Column(String(64), nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+
+class PortalComment(Base):
+    """看片門戶意見 — 時間軸精準留言（客戶端免登入、留名即可）。"""
+    __tablename__ = "portal_comments"
+
+    id = Column(String(32), primary_key=True)                    # uuid4 hex
+    link_id = Column(String(32), nullable=False, index=True)     # soft FK → portal_review_links.id
+    timecode_sec = Column(Float, nullable=False, default=0)      # 留言時間點（秒）
+    body = Column(Text, nullable=False)
+    author_name = Column(String(64), nullable=True)
+    resolved = Column(Integer, nullable=False, default=0)        # 0/1 已處理
+    created_at = Column(DateTime(timezone=True), server_default=func.now())

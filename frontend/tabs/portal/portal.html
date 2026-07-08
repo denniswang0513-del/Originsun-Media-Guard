@@ -1,0 +1,99 @@
+<!--
+    portal.html — 🎬 審批門戶 Tab 殼（B1 看片審批客戶門戶，docs/BIZ_PLAN.md B1 段）
+    內容全部由 portal.js render 進 #portal-content（同源打 /api/v1/portal/*）。
+    建送審連結（專案+版本+影片路徑）→ 產 token → 客戶 /review.html?token= 看片
+    留言核准；此 Tab 管連結列表 + 意見 resolve + 狀態流轉。
+-->
+<div id="portal-root">
+    <div id="portal-content" style="color:#888;padding:40px;text-align:center;">載入中…</div>
+</div>
+
+<style>
+    #portal-root h2 { color: #fff; font-size: 18px; margin: 0 0 4px 0; font-weight: 600; }
+    #portal-root .portal-sub { color: #777; font-size: 12px; margin-bottom: 16px; }
+    #portal-root input, #portal-root select {
+        background: #1a1a1a; border: 1px solid #333; border-radius: 6px;
+        color: #ddd; font-size: 12.5px; padding: 7px 10px; outline: none;
+    }
+    #portal-root input:focus, #portal-root select:focus { border-color: #3b82f6; }
+    #portal-root .portal-btn {
+        background: #3b82f6; color: #fff; border: none; padding: 7px 14px;
+        border-radius: 6px; font-size: 12.5px; cursor: pointer; white-space: nowrap;
+    }
+    #portal-root .portal-btn:hover { background: #2563eb; }
+    #portal-root .portal-btn.ghost { background: transparent; border: 1px solid #444; color: #ccc; }
+    #portal-root .portal-btn.ghost:hover { background: #333; }
+    #portal-root .portal-btn.danger { background: transparent; border: 1px solid #7f1d1d; color: #f87171; }
+    #portal-root .portal-btn.danger:hover { background: #7f1d1d33; }
+    #portal-root .portal-btn:disabled { opacity: .5; cursor: default; }
+
+    /* ── 新增送審卡 ── */
+    #portal-root .portal-create {
+        display: flex; flex-wrap: wrap; gap: 8px; align-items: center;
+        background: #232323; border: 1px solid #333; border-radius: 8px;
+        padding: 12px 14px; margin-bottom: 8px;
+    }
+    #portal-root .portal-created {
+        display: flex; flex-wrap: wrap; gap: 8px; align-items: center;
+        background: #14351f; border: 1px solid #166534; border-radius: 8px;
+        padding: 10px 14px; margin-bottom: 14px; font-size: 12.5px; color: #86efac;
+    }
+    #portal-root .portal-created code {
+        color: #d1fae5; background: #0f2a18; padding: 3px 8px; border-radius: 5px;
+        word-break: break-all; font-size: 11.5px;
+    }
+
+    /* ── 專案分組 + 連結列 ── */
+    #portal-root .portal-group { margin-top: 16px; }
+    #portal-root .portal-group h3 {
+        color: #ddd; font-size: 13.5px; font-weight: 600; margin: 0 0 8px 0;
+        border-bottom: 1px solid #333; padding-bottom: 6px;
+    }
+    #portal-root .portal-link {
+        background: #232323; border: 1px solid #333; border-radius: 8px;
+        margin-bottom: 8px; overflow: hidden;
+    }
+    #portal-root .portal-link-row {
+        display: flex; flex-wrap: wrap; gap: 10px; align-items: center;
+        padding: 10px 14px; cursor: pointer; font-size: 12.5px; color: #ccc;
+    }
+    #portal-root .portal-link-row:hover { background: #262626; }
+    #portal-root .portal-link-row .ver { font-weight: 600; color: #eee; min-width: 70px; }
+    #portal-root .portal-link-row .meta { color: #777; font-size: 11.5px; }
+    #portal-root .portal-link-row .spacer { flex: 1; }
+    #portal-root .portal-link-row .cnum { font-size: 11.5px; color: #888; }
+    #portal-root .portal-link-row .cnum b.unres { color: #f87171; font-weight: 700; }
+
+    /* 狀態 pill：待審橙 / 修改中藍 / 已核准綠 */
+    #portal-root .portal-pill {
+        display: inline-block; border-radius: 999px; padding: 1px 10px; font-size: 11px;
+        background: #2c2c2c; color: #999;
+    }
+    #portal-root .portal-pill.s-待審 { background: #3a2e1e; color: #fbbf24; }
+    #portal-root .portal-pill.s-修改中 { background: #1e3a5f; color: #93c5fd; }
+    #portal-root .portal-pill.s-已核准 { background: #14351f; color: #4ade80; }
+
+    /* ── 展開的意見列表 ── */
+    #portal-root .portal-comments {
+        border-top: 1px solid #2c2c2c; padding: 10px 14px; background: #1f1f1f;
+    }
+    #portal-root .portal-comment {
+        display: flex; gap: 10px; align-items: flex-start;
+        padding: 7px 0; border-bottom: 1px solid #2a2a2a; font-size: 12.5px;
+    }
+    #portal-root .portal-comment:last-child { border-bottom: none; }
+    #portal-root .portal-comment .tc {
+        color: #93c5fd; font-weight: 600; min-width: 46px; font-variant-numeric: tabular-nums;
+    }
+    #portal-root .portal-comment .body { flex: 1; color: #ccc; white-space: pre-wrap; word-break: break-word; }
+    #portal-root .portal-comment.resolved .body { color: #666; text-decoration: line-through; }
+    #portal-root .portal-comment .who { color: #777; font-size: 11.5px; white-space: nowrap; }
+    #portal-root .portal-comment label { display: inline-flex; align-items: center; gap: 4px; color: #888; font-size: 11.5px; cursor: pointer; white-space: nowrap; }
+
+    /* 空狀態引導 */
+    #portal-root .portal-empty {
+        color: #999; background: #232323; border: 1px dashed #3a3a3a; border-radius: 8px;
+        padding: 28px 24px; font-size: 13px; line-height: 2; margin-top: 14px;
+    }
+    #portal-root .portal-empty b { color: #ddd; }
+</style>

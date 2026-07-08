@@ -1,0 +1,250 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<meta name="robots" content="noindex, nofollow">
+<title>源日影像 — 看片審批</title>
+<style>
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body { background: #1a1a1a; color: #e0e0e0; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; min-height: 100vh; }
+.container { max-width: 640px; margin: 0 auto; padding: 16px 16px 40px; }
+h1 { font-size: 18px; font-weight: 700; text-align: center; padding: 12px 0 4px; color: #fff; }
+h1 span { color: #3b82f6; }
+.head { text-align: center; margin-bottom: 12px; }
+.head .pname { font-size: 15px; font-weight: 600; color: #eee; }
+.head .ver { font-size: 13px; color: #9ca3af; margin-top: 2px; }
+.pill { display: inline-block; border-radius: 999px; padding: 2px 12px; font-size: 12px; margin-left: 6px; vertical-align: 1px; background: #2c2c2c; color: #999; }
+.pill.s-待審 { background: #3a2e1e; color: #fbbf24; }
+.pill.s-修改中 { background: #1e3a5f; color: #93c5fd; }
+.pill.s-已核准 { background: #14351f; color: #4ade80; }
+.card { background: #2a2a2a; border: 1px solid #3a3a3a; border-radius: 12px; padding: 14px; margin-bottom: 12px; }
+video { width: 100%; border-radius: 10px; background: #000; display: block; max-height: 70vh; }
+label { display: block; font-size: 12px; color: #9ca3af; margin-bottom: 4px; font-weight: 600; }
+input[type=text], textarea {
+  width: 100%; background: #1e1e1e; border: 1px solid #3a3a3a; border-radius: 8px;
+  color: #e0e0e0; padding: 10px 12px; font-size: 15px; margin-bottom: 10px; outline: none;
+}
+input:focus, textarea:focus { border-color: #3b82f6; }
+textarea { resize: vertical; min-height: 64px; font-family: inherit; }
+.btn { border: none; border-radius: 10px; cursor: pointer; font-weight: 700; }
+.btn-comment {
+  width: 100%; background: #1e3a5f; color: #93c5fd; border: 1px solid #2b5286;
+  padding: 12px; font-size: 15px;
+}
+.btn-comment:active { background: #234a77; }
+.btn-submit { width: 100%; background: #3b82f6; color: #fff; padding: 12px; font-size: 15px; }
+.btn-submit:disabled { opacity: 0.5; }
+.btn-cancel { width: 100%; background: transparent; color: #9ca3af; border: 1px solid #3a3a3a; padding: 10px; font-size: 13px; margin-top: 8px; }
+.btn-approve { width: 100%; background: #16a34a; color: #fff; padding: 16px; font-size: 17px; }
+.btn-approve:active { background: #15803d; }
+.btn-approve:disabled { opacity: 0.9; cursor: default; }
+.approved-note { text-align: center; font-size: 12.5px; color: #86efac; margin-top: 8px; }
+.tc-badge { display: inline-block; background: #1e3a5f; color: #93c5fd; border-radius: 6px; padding: 2px 10px; font-size: 13px; font-weight: 700; margin-bottom: 10px; }
+.c-title { font-size: 13px; color: #9ca3af; font-weight: 600; margin-bottom: 8px; }
+.c-row { display: flex; gap: 10px; align-items: flex-start; padding: 10px 0; border-bottom: 1px solid #2e2e2e; }
+.c-row:last-child { border-bottom: none; }
+.c-tc { color: #93c5fd; font-weight: 700; font-size: 13px; min-width: 46px; cursor: pointer; font-variant-numeric: tabular-nums; }
+.c-tc:active { color: #bfdbfe; }
+.c-main { flex: 1; min-width: 0; }
+.c-body { font-size: 14px; color: #e0e0e0; line-height: 1.6; white-space: pre-wrap; word-break: break-word; }
+.c-row.resolved .c-body { color: #6b7280; text-decoration: line-through; }
+.c-who { font-size: 11.5px; color: #6b7280; margin-top: 3px; }
+.c-done { color: #4ade80; font-size: 15px; flex-shrink: 0; }
+.empty { color: #6b7280; font-size: 13px; text-align: center; padding: 12px 0; }
+.error-msg { background: #3b1f1f; border: 1px solid #7f1d1d; border-radius: 8px; padding: 12px; color: #fca5a5; text-align: center; margin-bottom: 12px; }
+.success-msg { background: #14532d; border: 1px solid #166534; border-radius: 8px; padding: 12px; color: #86efac; text-align: center; margin-bottom: 12px; }
+.dead { text-align: center; padding: 60px 20px; color: #9ca3af; }
+.dead .ico { font-size: 48px; margin-bottom: 12px; }
+.dead .t { font-size: 17px; font-weight: 700; color: #e0e0e0; margin-bottom: 8px; }
+.dead .d { font-size: 13.5px; line-height: 1.8; }
+</style>
+</head>
+<body>
+<div class="container">
+  <h1><span>源日影像</span> 看片審批</h1>
+  <div id="app"><div class="empty" style="padding:40px 0;">載入中…</div></div>
+</div>
+
+<script>
+const params = new URLSearchParams(location.search);
+const TOKEN = params.get('token') || '';
+const API = location.origin + '/api/v1/portal/public/' + encodeURIComponent(TOKEN);
+const esc = s => String(s == null ? '' : s)
+  .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+  .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+
+let _data = null;
+let _formOpen = false;
+let _formTc = 0;
+
+function fmtTc(sec) {
+  const s = Math.max(0, Math.floor(sec || 0));
+  return String(Math.floor(s / 60)).padStart(2, '0') + ':' + String(s % 60).padStart(2, '0');
+}
+
+function showDead(status) {
+  const expired = status === 410;
+  document.getElementById('app').innerHTML =
+    '<div class="dead">' +
+      '<div class="ico">' + (expired ? '⏰' : '🔒') + '</div>' +
+      '<div class="t">' + (expired ? '連結已過期' : '連結無效') + '</div>' +
+      '<div class="d">' + (expired
+        ? '這個看片連結已超過有效期限。<br>請聯絡您的專案窗口索取新連結。'
+        : '找不到這個看片連結，可能已被移除或網址不完整。<br>請確認連結是否完整，或聯絡您的專案窗口。') + '</div>' +
+    '</div>';
+}
+
+async function load() {
+  if (!TOKEN) { showDead(404); return; }
+  let r;
+  try {
+    r = await fetch(API);
+  } catch (_) {
+    document.getElementById('app').innerHTML = '<div class="error-msg">連線失敗，請稍後再試</div>';
+    return;
+  }
+  if (!r.ok) { showDead(r.status); return; }
+  _data = await r.json();
+  render();
+}
+
+function commentRow(c) {
+  return '<div class="c-row' + (c.resolved ? ' resolved' : '') + '">' +
+    '<span class="c-tc" data-tc="' + (c.timecode_sec || 0) + '">' + fmtTc(c.timecode_sec) + '</span>' +
+    '<div class="c-main">' +
+      '<div class="c-body">' + esc(c.body) + '</div>' +
+      '<div class="c-who">' + esc(c.author_name || '匿名') + '</div>' +
+    '</div>' +
+    (c.resolved ? '<span class="c-done" title="已處理">✔</span>' : '') +
+  '</div>';
+}
+
+function render() {
+  const d = _data;
+  const approved = d.status === '已核准';
+  const savedName = localStorage.getItem('portal_review_name') || '';
+  const comments = d.comments || [];
+  document.getElementById('app').innerHTML =
+    '<div class="head">' +
+      '<div class="pname">' + esc(d.project_name || '未命名專案') + '</div>' +
+      '<div class="ver">' + esc(d.version_label || '未命名版本') +
+        '<span class="pill s-' + esc(d.status) + '">' + esc(d.status) + '</span></div>' +
+    '</div>' +
+    '<div class="card" style="padding:8px;">' +
+      '<video id="player" controls playsinline preload="metadata" src="' + API + '/stream"></video>' +
+    '</div>' +
+    '<div id="msg" style="display:none;"></div>' +
+    '<div class="card">' +
+      '<button class="btn btn-comment" id="btn-add">＋ 在目前時間點留言</button>' +
+      '<div id="comment-form" style="display:none;margin-top:12px;">' +
+        '<div class="tc-badge">📍 時間點 <span id="form-tc">00:00</span></div>' +
+        '<label>您的大名</label>' +
+        '<input type="text" id="in-name" maxlength="64" placeholder="怎麼稱呼您？" value="' + esc(savedName) + '">' +
+        '<label>修改意見</label>' +
+        '<textarea id="in-body" maxlength="2000" placeholder="例：這裡的字卡出現太快，希望多停 1 秒"></textarea>' +
+        '<button class="btn btn-submit" id="btn-send">送出留言</button>' +
+        '<button class="btn btn-cancel" id="btn-cancel">取消</button>' +
+      '</div>' +
+    '</div>' +
+    '<div class="card">' +
+      '<div class="c-title">💬 修改意見（' + comments.length + '）</div>' +
+      (comments.length ? comments.map(commentRow).join('') : '<div class="empty">還沒有意見 — 播放時按上方按鈕，在特定時間點留言</div>') +
+    '</div>' +
+    '<button class="btn btn-approve" id="btn-approve"' + (approved ? ' disabled' : '') + '>' +
+      (approved ? '✅ 已核准此版本' : '✅ 核准此版本') + '</button>' +
+    (approved && d.approved_by
+      ? '<div class="approved-note">由 ' + esc(d.approved_by) + ' 核准' +
+        (d.approved_at ? ' · ' + esc(d.approved_at.slice(0, 16).replace('T', ' ')) : '') + '</div>'
+      : '');
+  bind();
+}
+
+function bind() {
+  const video = document.getElementById('player');
+
+  document.getElementById('btn-add').addEventListener('click', () => {
+    _formOpen = !_formOpen;
+    if (_formOpen) {
+      _formTc = video.currentTime || 0;
+      video.pause();
+      document.getElementById('form-tc').textContent = fmtTc(_formTc);
+    }
+    document.getElementById('comment-form').style.display = _formOpen ? 'block' : 'none';
+    if (_formOpen) document.getElementById('in-body').focus();
+  });
+  document.getElementById('btn-cancel').addEventListener('click', () => {
+    _formOpen = false;
+    document.getElementById('comment-form').style.display = 'none';
+  });
+
+  document.getElementById('btn-send').addEventListener('click', async () => {
+    const name = document.getElementById('in-name').value.trim();
+    const body = document.getElementById('in-body').value.trim();
+    if (!body) { showMsg('請填寫修改意見', true); return; }
+    if (name) localStorage.setItem('portal_review_name', name);
+    const btn = document.getElementById('btn-send');
+    btn.disabled = true; btn.textContent = '送出中…';
+    try {
+      const r = await fetch(API + '/comments', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ timecode_sec: _formTc, body: body, author_name: name }),
+      });
+      if (!r.ok) throw new Error((await r.json().catch(() => ({}))).detail || '送出失敗');
+      _formOpen = false;
+      await load();
+      showMsg('✓ 意見已送出，感謝您的回饋', false);
+    } catch (e) {
+      showMsg(e.message || '送出失敗', true);
+      btn.disabled = false; btn.textContent = '送出留言';
+    }
+  });
+
+  document.querySelectorAll('.c-tc').forEach(el => {
+    el.addEventListener('click', () => {
+      video.currentTime = parseFloat(el.dataset.tc) || 0;
+      video.play();
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    });
+  });
+
+  const approveBtn = document.getElementById('btn-approve');
+  if (approveBtn && !approveBtn.disabled) {
+    approveBtn.addEventListener('click', async () => {
+      let name = (document.getElementById('in-name') && document.getElementById('in-name').value.trim())
+        || localStorage.getItem('portal_review_name') || '';
+      if (!name) name = (prompt('請留下您的大名（核准紀錄用）') || '').trim();
+      if (!name) { showMsg('核准需要留名', true); return; }
+      if (!confirm('確定核准「' + (_data.version_label || '此版本') + '」？\n核准後製作團隊將以此版本定案。')) return;
+      localStorage.setItem('portal_review_name', name);
+      approveBtn.disabled = true;
+      try {
+        const r = await fetch(API + '/approve', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ author_name: name }),
+        });
+        if (r.status === 409) { await load(); return; }
+        if (!r.ok) throw new Error((await r.json().catch(() => ({}))).detail || '核准失敗');
+        await load();
+        showMsg('✅ 已核准，感謝您！團隊會收到通知', false);
+      } catch (e) {
+        showMsg(e.message || '核准失敗', true);
+        approveBtn.disabled = false;
+      }
+    });
+  }
+}
+
+function showMsg(msg, isError) {
+  const el = document.getElementById('msg');
+  if (!el) return;
+  el.className = isError ? 'error-msg' : 'success-msg';
+  el.textContent = msg;
+  el.style.display = '';
+  setTimeout(() => { el.style.display = 'none'; }, 3000);
+}
+
+load();
+</script>
+</body>
+</html>

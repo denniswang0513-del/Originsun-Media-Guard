@@ -761,3 +761,25 @@ class IntelSourcePayload(BaseModel):
     keywords: Optional[list] = None       # list[str] 關鍵字；空 = 全收
     enabled: Optional[bool] = None
     note: Optional[str] = None
+
+
+class PortalLinkPayload(BaseModel):
+    """看片門戶（B1）送審連結建立/更新 — 全欄 Optional 配合部分更新
+    （create 時 project_id/video_path 必填 + 檔案存在性由端點檢查）。"""
+    project_id: Optional[str] = None
+    version_label: Optional[str] = None   # 初剪/一修/定剪…
+    video_path: Optional[str] = None      # master 本機影片路徑
+    status: Optional[str] = None          # 待審/修改中/已核准
+    expires_at: Optional[str] = None      # 'YYYY-MM-DD'；空字串 = 清除到期日
+
+
+class PortalCommentPayload(BaseModel):
+    """客戶端時間軸留言（公開、token 授權）— body 必填由端點檢查（上限 2000 字）。"""
+    timecode_sec: float = 0
+    body: str = ""
+    author_name: Optional[str] = None
+
+
+class PortalApprovePayload(BaseModel):
+    """客戶端一鍵核准（公開、token 授權）— author_name 必填由端點檢查。"""
+    author_name: Optional[str] = None

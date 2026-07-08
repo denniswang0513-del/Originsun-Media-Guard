@@ -127,7 +127,7 @@ ALL_MODULES = [
     'preprod_plan', 'preprod_locations', 'preprod_proposals', 'intel',
     'backup', 'verify', 'transcode', 'concat', 'report', 'transcribe', 'tts',
     'drone_meta', 'projects', 'crm_clients', 'crm_projects', 'crm_quotes',
-    'crm_staff', 'crm_invoices', 'timesheets', 'website_admin',
+    'crm_staff', 'crm_invoices', 'timesheets', 'portal', 'website_admin',
 ]
 
 
