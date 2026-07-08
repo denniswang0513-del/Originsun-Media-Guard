@@ -21,11 +21,13 @@ from services.website import rebuild_service, settings_service
 # - forms.* 聯絡表單選項清單（Phase 3 service_types / budget_ranges）
 # - home.*  首頁 hero / showreel / stats / rating（admin「🏠 首頁設定」）
 # - portfolio.* /portfolio 頁 PDF 連結
-# - analytics.* GA4 追蹤 ID（注入每頁 <head> 的 gtag，改了必須重 build 對外站）
 _PUBLIC_AFFECTING_PREFIXES = (
     "company.", "social.", "seo.", "about.", "turnstile.",
-    "copy.", "forms.", "home.", "portfolio.", "brand.", "analytics.",
+    "copy.", "forms.", "home.", "portfolio.", "brand.",
 )
+# analytics.* 多數只影響後台儀表板（property_id / service_account / dashboard 設定），
+# 不該重建對外站。唯有 GA4 gtag 追蹤 ID 會烤進每頁 <head> → 只有它要 rebuild。
+_PUBLIC_AFFECTING_KEYS = ("analytics.ga_measurement_id",)
 
 router = APIRouter(prefix="/api/website/admin", tags=["website-admin-settings"])
 
@@ -45,7 +47,8 @@ async def update_settings(
         session, req.values, updated_by=current_username(request)
     )
     # 影響對外 HTML / 公開資料的 settings 改了 → 排定 rebuild
-    if any(k.startswith(_PUBLIC_AFFECTING_PREFIXES) for k in req.values):
+    if any(k.startswith(_PUBLIC_AFFECTING_PREFIXES) or k in _PUBLIC_AFFECTING_KEYS
+           for k in req.values):
         await rebuild_service.mark_dirty()
     return {"ok": True, "updated": count}
 

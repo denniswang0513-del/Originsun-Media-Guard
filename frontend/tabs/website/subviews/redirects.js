@@ -14,25 +14,37 @@ import {
     openModal, closeModal,
 } from '../website-utils.js';
 
-let _state = { items: [], mergedCount: null, filter: '' };
+let _state = { items: [], mergedCount: null, filter: '', titles: {} };
 let _container = null;
 let _editing = null;
 const _rd = (window._rd = window._rd || {});
 
 const _isInterim = (it) => !!(it.note && it.note.includes('暫代'));
 
+// 舊站標題：把 from_path 正規化（去 query、去結尾斜線）後查 GA 標題 map。
+// 舊 WordPress 常帶結尾斜線，兩種都試。查不到回空字串。
+function _oldTitle(fromPath) {
+    const t = _state.titles || {};
+    const p = (fromPath || '').split('?')[0];
+    const noSlash = p.length > 1 ? p.replace(/\/+$/, '') : p;
+    return t[noSlash] || t[noSlash + '/'] || t[p] || '';
+}
+
 export default async function render(container, ctx = {}) {
     const { isCurrent = () => true } = ctx;
     _container = container;
     container.innerHTML = '<h2>🔀 轉址管理</h2><div style="color:#888;padding:20px;">載入中…</div>';
     try {
-        const [list, merged] = await Promise.all([
+        const [list, merged, titles] = await Promise.all([
             websiteFetch('/api/website/admin/redirects'),
             websiteFetch('/api/website/redirects').catch(() => null),
+            // 舊站標題來自 GA 歷史（best-effort：未設 GA 或端點缺就空 map，欄位留白）
+            websiteFetch('/api/v1/analytics/page-titles').catch(() => null),
         ]);
         if (!isCurrent()) return;
         _state.items = list?.items || [];
         _state.mergedCount = merged?.count ?? null;
+        _state.titles = titles?.titles || {};
     } catch (e) {
         if (!isCurrent()) return;
         renderLoadError(container, '🔀 轉址管理', e);
@@ -70,7 +82,8 @@ function _renderShell() {
         ${shown.length ? `
             <table>
                 <thead><tr>
-                    <th>舊路徑 (from)</th><th style="width:24px;"></th><th>新路徑 (to)</th>
+                    <th>舊路徑 (from)</th><th style="width:180px;">舊站標題（GA）</th>
+                    <th style="width:24px;"></th><th>新路徑 (to)</th>
                     <th style="width:150px;">備註</th><th style="width:50px;">排序</th>
                     <th style="width:50px;">啟用</th><th style="width:110px;">操作</th>
                 </tr></thead>
@@ -93,6 +106,7 @@ function _row(it) {
     return `
         <tr${it.visible ? '' : ' style="opacity:0.5;"'}>
             <td style="font-family:monospace;font-size:12px;color:#ddd;word-break:break-all;">${esc(it.from_path)}</td>
+            <td style="font-size:11px;color:${_oldTitle(it.from_path) ? '#cbd5e1' : '#555'};word-break:break-all;">${esc(_oldTitle(it.from_path)) || '<span style="color:#555;">—</span>'}</td>
             <td style="color:#666;text-align:center;">→</td>
             <td style="font-family:monospace;font-size:12px;color:#93c5fd;word-break:break-all;">${esc(it.to_path)}</td>
             <td style="font-size:11px;color:#999;">

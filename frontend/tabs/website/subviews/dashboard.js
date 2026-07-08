@@ -61,6 +61,7 @@ async function _loadTraffic(isCurrent) {
         ]);
         if (isCurrent && !isCurrent()) return;
         host.innerHTML = _renderTraffic(sum, rt);
+        host.querySelector('[data-ga="config"]')?.addEventListener('click', _openGaConfig);
     } catch (e) {
         host.innerHTML = `<div class="card" style="border-left:3px solid #f87171;">
             <h3 style="color:#fff;margin:0 0 6px;font-size:14px;">📊 網站流量</h3>
@@ -68,6 +69,70 @@ async function _loadTraffic(isCurrent) {
             <div style="color:#888;font-size:11px;margin-top:6px;">多半是服務帳戶沒被加進 GA 資源的「檢視者」，或資源 ID 填錯。到「網站設定 › 分析追蹤」檢查。</div>
         </div>`;
     }
+}
+
+// ⚙️ 指標設定 modal — 勾選要顯示的指標 / 時間範圍 / 熱門頁面依標題或路徑
+async function _openGaConfig() {
+    let data;
+    try { data = await websiteFetch('/api/v1/analytics/config'); }
+    catch (e) { alert('讀取設定失敗：' + (e.message || e)); return; }
+    const cfg = data.config, catalog = data.catalog, windows = data.windows;
+
+    const ov = document.createElement('div');
+    ov.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:9999;display:flex;align-items:center;justify-content:center;';
+    ov.addEventListener('click', e => { if (e.target === ov) ov.remove(); });
+    const metricBoxes = catalog.map(m => `
+        <label style="display:inline-flex;align-items:center;gap:5px;background:#232323;border:1px solid #3a3a3a;border-radius:6px;padding:5px 10px;font-size:12px;color:#ccc;cursor:pointer;">
+            <input type="checkbox" data-gm="${esc(m.name)}" ${cfg.metrics.includes(m.name) ? 'checked' : ''}> ${esc(m.label)}
+        </label>`).join('');
+    const winRadios = windows.map(w => `
+        <label style="display:inline-flex;align-items:center;gap:4px;font-size:12px;color:#ccc;margin-right:12px;cursor:pointer;">
+            <input type="radio" name="ga-win" value="${w}" ${cfg.window_days === w ? 'checked' : ''}> 近 ${w} 天
+        </label>`).join('');
+    const topByRadios = [['title', '標題'], ['path', '網址路徑']].map(([v, l]) => `
+        <label style="display:inline-flex;align-items:center;gap:4px;font-size:12px;color:#ccc;margin-right:12px;cursor:pointer;">
+            <input type="radio" name="ga-topby" value="${v}" ${cfg.top_by === v ? 'checked' : ''}> ${l}
+        </label>`).join('');
+    const toggle = (k, label) => `
+        <label style="display:inline-flex;align-items:center;gap:4px;font-size:12px;color:#ccc;margin-right:12px;cursor:pointer;">
+            <input type="checkbox" data-gt="${k}" ${cfg[k] ? 'checked' : ''}> ${label}
+        </label>`;
+
+    ov.innerHTML = `
+        <div class="card" style="width:520px;max-width:92%;max-height:88vh;overflow:auto;" onclick="event.stopPropagation()">
+            <h3 style="color:#fff;margin:0 0 14px;font-size:15px;">⚙️ 網站流量顯示設定</h3>
+            <div style="color:#888;font-size:11px;margin-bottom:5px;">顯示指標（今日 + 近 N 天各一格）</div>
+            <div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:16px;">${metricBoxes}</div>
+            <div style="color:#888;font-size:11px;margin-bottom:5px;">時間範圍</div>
+            <div style="margin-bottom:16px;">${winRadios}</div>
+            <div style="color:#888;font-size:11px;margin-bottom:5px;">熱門頁面依</div>
+            <div style="margin-bottom:16px;">${topByRadios}</div>
+            <div style="color:#888;font-size:11px;margin-bottom:5px;">顯示區塊</div>
+            <div style="margin-bottom:18px;">${toggle('show_realtime', '即時在線')}${toggle('show_trend', '趨勢圖')}${toggle('show_top_pages', '熱門頁面')}</div>
+            <div style="display:flex;gap:8px;justify-content:flex-end;">
+                <button class="btn btn-ghost btn-sm" data-x="cancel">取消</button>
+                <button class="btn btn-sm" data-x="save">儲存</button>
+            </div>
+        </div>`;
+    document.body.appendChild(ov);
+    ov.querySelector('[data-x="cancel"]').addEventListener('click', () => ov.remove());
+    ov.querySelector('[data-x="save"]').addEventListener('click', async () => {
+        const metrics = [...ov.querySelectorAll('[data-gm]:checked')].map(el => el.dataset.gm);
+        if (!metrics.length) { alert('至少選一個指標'); return; }
+        const body = {
+            metrics,
+            window_days: parseInt(ov.querySelector('input[name="ga-win"]:checked').value),
+            top_by: ov.querySelector('input[name="ga-topby"]:checked').value,
+            show_realtime: ov.querySelector('[data-gt="show_realtime"]').checked,
+            show_trend: ov.querySelector('[data-gt="show_trend"]').checked,
+            show_top_pages: ov.querySelector('[data-gt="show_top_pages"]').checked,
+        };
+        try {
+            await websiteFetch('/api/v1/analytics/config', { method: 'PUT', body });
+            ov.remove();
+            _loadTraffic(() => true);   // 重新載入流量卡套用新設定
+        } catch (e) { alert('儲存失敗：' + (e.message || e)); }
+    });
 }
 
 function _trafficGuide(reason) {
@@ -86,40 +151,65 @@ function _trafficGuide(reason) {
         </div>`;
 }
 
+function _fmtMetric(v, kind) {
+    if (kind === 'pct') return (v * 100).toFixed(1) + '%';
+    if (kind === 'duration') {
+        const s = Math.round(v); return Math.floor(s / 60) + ':' + String(s % 60).padStart(2, '0');
+    }
+    return Math.round(v).toLocaleString();
+}
+
 function _renderTraffic(sum, rt) {
-    const t = sum.today || {}, w = sum.week || {};
-    const spark = _sparkline(sum.trend || []);
-    const topPages = (sum.top_pages || []).map(p => `
-        <div style="display:flex;justify-content:space-between;padding:4px 0;border-bottom:1px solid #2c2c2c;font-size:12px;">
-            <span style="color:#ccc;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:75%;">${esc(p.path)}</span>
-            <span style="color:#3b82f6;font-weight:600;">${p.views}</span>
-        </div>`).join('') || '<div style="color:#888;font-size:12px;">近 7 天無資料</div>';
-    const rtPages = (rt.top_pages || []).slice(0, 3).map(p =>
-        `<div style="color:#888;font-size:11px;">· ${esc(p.page)} (${p.users})</div>`).join('');
+    const win = sum.window_days || 7;
+    const boxes = [];
+    if (sum._show_realtime !== false) {
+        const rtPages = (rt.top_pages || []).slice(0, 3).map(p =>
+            `<div style="color:#888;font-size:11px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">· ${esc(p.page)} (${p.users})</div>`).join('');
+        boxes.push(`
+            <div style="background:#232323;border-radius:8px;padding:10px 12px;">
+                <div style="color:#4ade80;font-size:11px;">🟢 即時在線</div>
+                <div style="color:#fff;font-size:24px;font-weight:700;">${rt.active_users ?? 0}</div>
+                ${rtPages}
+            </div>`);
+    }
+    (sum.metrics || []).forEach(m => {
+        boxes.push(`
+            <div style="background:#232323;border-radius:8px;padding:10px 12px;">
+                <div style="color:#888;font-size:11px;">${esc(m.label)}<span style="color:#555;"> · 今日 / 近${win}天</span></div>
+                <div style="color:#fff;font-size:22px;font-weight:700;">${_fmtMetric(m.today, m.kind)} <span style="color:#666;font-size:14px;">/ ${_fmtMetric(m.window, m.kind)}</span></div>
+            </div>`);
+    });
+    if (sum._show_trend !== false) {
+        boxes.push(`
+            <div style="background:#232323;border-radius:8px;padding:10px 12px;">
+                <div style="color:#888;font-size:11px;">近 ${win} 天趨勢（訪客）</div>
+                <div style="margin-top:8px;">${_sparkline(sum.trend || [])}</div>
+            </div>`);
+    }
+
+    let topBlock = '';
+    if (sum._show_top_pages !== false) {
+        const byTitle = (sum.top_by || 'title') === 'title';
+        const topPages = (sum.top_pages || []).map(p => {
+            const label = byTitle ? (p.title || p.path) : p.path;
+            return `<div style="display:flex;justify-content:space-between;padding:4px 0;border-bottom:1px solid #2c2c2c;font-size:12px;">
+                <span style="color:#ccc;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:78%;" title="${esc(p.path)}">${esc(label)}</span>
+                <span style="color:#3b82f6;font-weight:600;">${p.views}</span>
+            </div>`;
+        }).join('') || `<div style="color:#888;font-size:12px;">近 ${win} 天無資料</div>`;
+        topBlock = `<div style="color:#aaa;font-size:12px;margin-bottom:6px;">熱門頁面（近 ${win} 天）</div>${topPages}`;
+    }
+
     return `
         <div class="card">
-            <h3 style="color:#fff;margin:0 0 12px;font-size:14px;">📊 網站流量 <span style="color:#666;font-size:11px;font-weight:400;">· GA4</span></h3>
-            <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:10px;margin-bottom:14px;">
-                <div style="background:#232323;border-radius:8px;padding:10px 12px;">
-                    <div style="color:#4ade80;font-size:11px;">🟢 即時在線</div>
-                    <div style="color:#fff;font-size:24px;font-weight:700;">${rt.active_users ?? 0}</div>
-                    ${rtPages}
-                </div>
-                <div style="background:#232323;border-radius:8px;padding:10px 12px;">
-                    <div style="color:#888;font-size:11px;">今日訪客 / 瀏覽</div>
-                    <div style="color:#fff;font-size:24px;font-weight:700;">${t.users ?? 0} <span style="color:#666;font-size:14px;">/ ${t.views ?? 0}</span></div>
-                </div>
-                <div style="background:#232323;border-radius:8px;padding:10px 12px;">
-                    <div style="color:#888;font-size:11px;">近 7 天訪客 / 瀏覽</div>
-                    <div style="color:#fff;font-size:24px;font-weight:700;">${w.users ?? 0} <span style="color:#666;font-size:14px;">/ ${w.views ?? 0}</span></div>
-                </div>
-                <div style="background:#232323;border-radius:8px;padding:10px 12px;">
-                    <div style="color:#888;font-size:11px;">近 7 天趨勢</div>
-                    <div style="margin-top:8px;">${spark}</div>
-                </div>
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
+                <h3 style="color:#fff;margin:0;font-size:14px;">📊 網站流量 <span style="color:#666;font-size:11px;font-weight:400;">· GA4</span></h3>
+                <button class="btn btn-ghost btn-sm" data-ga="config" title="設定顯示指標">⚙️ 指標設定</button>
             </div>
-            <div style="color:#aaa;font-size:12px;margin-bottom:6px;">熱門頁面（近 7 天）</div>
-            ${topPages}
+            <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:10px;margin-bottom:14px;">
+                ${boxes.join('')}
+            </div>
+            ${topBlock}
         </div>`;
 }
 

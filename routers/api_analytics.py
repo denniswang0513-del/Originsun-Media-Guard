@@ -22,12 +22,19 @@ def _guard(request: Request):
     check_admin_or_module(request, "website_admin")
 
 
-async def _load_creds():
-    """回 (property_id_raw, service_account_json_raw) — 從 website_settings。"""
+_CONFIG_KEY = "analytics.dashboard_config"
+
+
+async def _load_settings_dict():
     from services.website import settings_service
     factory = db_factory_or_503()
     async with factory() as session:
-        s = await settings_service.get_all_settings(session)
+        return await settings_service.get_all_settings(session)
+
+
+async def _load_creds():
+    """回 (property_id_raw, service_account_json_raw) — 從 website_settings。"""
+    s = await _load_settings_dict()
     return s.get("analytics.ga_property_id"), s.get("analytics.ga_service_account_json")
 
 
@@ -44,28 +51,84 @@ async def status(request: Request):
         return {"configured": False, "reason": str(e)}
 
 
-async def _report(request: Request, fn_name: str):
-    _guard(request)
+async def _creds_or_400(settings: dict):
     from services import ga_service
-    prop, sa = await _load_creds()
     try:
-        pid, sad = ga_service.parse_credentials(prop, sa)
+        return ga_service.parse_credentials(
+            settings.get("analytics.ga_property_id"),
+            settings.get("analytics.ga_service_account_json"))
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
-    try:
-        return await asyncio.to_thread(getattr(ga_service, fn_name), pid, sad)
-    except Exception as e:
-        # GA API 權限/資源設定錯會走這裡（ga_service 已把 Google 錯誤訊息抽出）
-        raise HTTPException(status_code=502, detail=f"GA 資料讀取失敗：{e}")
 
 
 @router.get("/realtime")
 async def realtime(request: Request):
     """即時在線活躍人數 + 熱門頁面 Top 5。"""
-    return await _report(request, "realtime")
+    _guard(request)
+    from services import ga_service
+    settings = await _load_settings_dict()
+    pid, sad = await _creds_or_400(settings)
+    try:
+        return await asyncio.to_thread(ga_service.realtime, pid, sad)
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"GA 資料讀取失敗：{e}")
 
 
 @router.get("/summary")
 async def summary(request: Request):
-    """今日 + 近 7 天訪客/工作階段/瀏覽 + 7 天趨勢 + 熱門頁面。"""
-    return await _report(request, "summary")
+    """依後台設定回：選定指標的今日/近 N 天 + 趨勢 + 熱門頁面（標題或路徑）。"""
+    _guard(request)
+    from services import ga_service
+    settings = await _load_settings_dict()
+    pid, sad = await _creds_or_400(settings)
+    cfg = settings.get(_CONFIG_KEY)
+    try:
+        return await asyncio.to_thread(ga_service.summary, pid, sad, cfg)
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"GA 資料讀取失敗：{e}")
+
+
+@router.get("/page-titles")
+async def page_titles(request: Request):
+    """{正規化路徑: 舊站頁面標題} — 轉址管理對照用。未設 GA 回空 map（不報錯）。"""
+    _guard(request)
+    from services import ga_service
+    settings = await _load_settings_dict()
+    try:
+        pid, sad = ga_service.parse_credentials(
+            settings.get("analytics.ga_property_id"),
+            settings.get("analytics.ga_service_account_json"))
+    except ValueError:
+        return {"titles": {}, "configured": False}
+    try:
+        titles = await asyncio.to_thread(ga_service.page_titles, pid, sad)
+        return {"titles": titles, "configured": True}
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"GA 資料讀取失敗：{e}")
+
+
+@router.get("/config")
+async def get_config(request: Request):
+    """儀表板顯示設定 + 指標目錄（給「⚙️ 設定」modal 用）。"""
+    _guard(request)
+    from services import ga_service
+    settings = await _load_settings_dict()
+    return {
+        "config": ga_service.normalize_config(settings.get(_CONFIG_KEY)),
+        "catalog": [{"name": k, "label": v["label"]} for k, v in ga_service.METRIC_CATALOG.items()],
+        "windows": list(ga_service._ALLOWED_WINDOWS),
+    }
+
+
+@router.put("/config")
+async def put_config(request: Request):
+    """存儀表板顯示設定（analytics.dashboard_config）— 純後台、不觸發官網 rebuild。"""
+    _guard(request)
+    from services import ga_service
+    from services.website import settings_service
+    body = await request.json()
+    cfg = ga_service.normalize_config(body)   # 正規化防呆後才存
+    factory = db_factory_or_503()
+    async with factory() as session:
+        await settings_service.update_settings(session, {_CONFIG_KEY: cfg}, updated_by="ga-dashboard")
+    return {"ok": True, "config": cfg}
