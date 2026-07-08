@@ -1,62 +1,30 @@
 /**
  * website-utils.js — Phase M 官網管理 Tab 共用工具
  *
- * 預設打 NAS website-api（cloudflared tunnel）— 這樣 admin Tab 不依賴 master
- * 開機。PM 在家用瀏覽器開 admin Tab → 透過 cloudflared 直接戳 NAS API。
+ * API base = 同源（serve 這個頁面的 agent：生產 master 8000 / dev 8001）。
+ * master 跑同一套 routers/website、寫同一顆 NAS Postgres，/uploads 也由
+ * main.py mount — 同源直打不需要 CORS preflight、完全不經 Cloudflare。
  *
- * 規則：
- *   1. localStorage `website_api_base` 覆寫優先（除錯用）
- *   2. 同源 LAN（master 192.168.1.107:8000、localhost:8000） → 走 LAN 直連 NAS:8090
- *      省 cloudflared hop，且不需要 NAS 對外開 admin endpoint
- *   3. 其他來源（cloudflared 進來、PM 在家） → 走 cloudflared origin
+ * 歷史（為什麼不再跨域打 NAS website-api）：
+ *   2026-04-29 ~ 07-03 admin Tab 跨域打 test.originsun-studio.com（NAS 8090）。
+ *   07-03 test hostname 移除、改打正式 www 後，www 的 Cloudflare bot 對抗層
+ *   會間歇擋掉帶 Authorization 的 admin fetch（preflight 放行、GET 消失在
+ *   edge，07-05 全天 0 GET）。而「PM 在家 master 關機也能編輯」本來就不成立 —
+ *   這個 UI 由 master serve，master 關機時頁面根本開不起來 → 同源永遠可用。
  *
+ * localStorage `website_api_base` 覆寫仍保留（除錯 / 臨時直打 NAS 用）。
  * 其他基礎工具（esc、fmtNum、renderAvatar）沿用 CRM 的 crm-utils.js 避免重複。
  */
 
 import { esc, fmtNum, renderAvatar } from '../crm/crm-utils.js';
 export { esc, fmtNum, renderAvatar };
 
-
-// NAS Website_Nginx LAN 入口（同公司網段時 admin Tab 直連、省 cloudflared）
-const NAS_LAN_BASE = 'http://192.168.1.132:8090';
-// 對外 cloudflared tunnel hostname（master 關機 / PM 在家走這條）
-// 2026-07-03 正式上線後 test hostname 已移除 → 改用正式 www（同一個 NAS 8090、
-// nginx 一樣 proxy /api/website/* 給 website-api；admin endpoint 皆 JWT 保護）。
-const NAS_PUBLIC_BASE = 'https://www.originsun-studio.com';
-
-function _isLanOrigin() {
-    const h = window.location.hostname;
-    return h === 'localhost' || h === '127.0.0.1' || h.startsWith('192.168.') || h === '192.168.1.107';
-}
-
-// Dev 模式（8001 = dev checkout）：官網管理 Tab 改走「同源」（相對路徑 → 打到服務
-// 這個頁面的 dev agent 8001 → mediaguard_dev），與正式隔離、無跨域 CORS 問題。
-// 偵測沿用 publish modal 的 /api/v1/deploy_to_prod（eligible=true ⇒ dev checkout），
-// 跨 localhost / LAN / cloudflared tunnel 都準。生產 8000 = eligible false → 維持走 NAS。
-let _devMode = false;
-
-export async function detectDevMode() {
-    try {
-        const token = localStorage.getItem('auth_token');
-        const r = await fetch('/api/v1/deploy_to_prod', {
-            headers: token ? { 'Authorization': `Bearer ${token}` } : {},
-            signal: AbortSignal.timeout(5000),
-        });
-        const d = await r.json();
-        _devMode = !!(d && d.eligible);
-    } catch { _devMode = false; }
-    return _devMode;
-}
-
-export function isDevMode() { return _devMode; }
-
 export function getApiBase() {
     try {
         const override = localStorage.getItem('website_api_base');
         if (override) return override;
     } catch { /* SSR / no localStorage */ }
-    if (_devMode) return '';  // 同源：打本地 8001 的 /api/website/* → mediaguard_dev
-    return _isLanOrigin() ? NAS_LAN_BASE : NAS_PUBLIC_BASE;
+    return '';
 }
 
 /**
@@ -84,7 +52,7 @@ export async function websiteFetch(path, opts = {}) {
     try {
         resp = await fetch(url, { ...opts, headers, body });
     } catch (e) {
-        throw new Error(`無法連線到 website-api (${getApiBase()}): ${e.message}`);
+        throw new Error(`無法連線到 website-api (${getApiBase() || '同源'}): ${e.message}`);
     }
 
     if (resp.status === 204) return null;

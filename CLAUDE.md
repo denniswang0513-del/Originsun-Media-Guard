@@ -11,11 +11,14 @@
 > • **既有 5 容器不動**：cloudflared / FileReport_Nginx / originsun_postgres / MCP / n8n
 > • **cloudflared**：在 CF Zero Trust 儀表板把 `test.originsun-studio.com` 路由到
 >   `192.168.1.132:8090`（不再指 master:4321）
-> • **編輯流程**：admin Tab 跨機 fetch NAS website-api（`getApiBase()` 自動選 LAN/cloudflared）
->   → 寫 NAS Postgres → mark_dirty 入 DB singleton row → 60s debounce → forward 給 master
->   跑 npm build → master scp dist/ 到 NAS → 對外網站立即更新
-> • **PM 在家編輯**：cloudflared tunnel 直連 NAS website-api，master 關著也能改作品
->   （但 master 不在線時無法 trigger rebuild — pending 累積等 master 上線消化）
+> • **編輯流程**（2026-07-08 同源化）：admin Tab 同源打 serve 本頁的 agent
+>   （master 8000 / dev 8001，master 跑同一套 routers/website）→ 寫 NAS Postgres
+>   → mark_dirty 入 DB singleton row → 60s debounce → master 跑 npm build
+>   → master scp dist/ 到 NAS → 對外網站立即更新
+> • **舊跨域路已停用**：07-03 test hostname 換 www 後，www 的 Cloudflare bot 對抗層
+>   會間歇擋帶 Authorization 的 admin fetch（preflight 過、GET 消失）。且 admin UI 由
+>   master serve，master 關機時頁面本來就開不起來——「跨域不依賴 master」假設不成立。
+>   NAS website-api 容器仍在：serve 對外站 runtime API（聯絡表單等）+ rebuild debounce。
 > • **/publish 自動 sync**：master /publish 流程末段 scp `routers/services/core/db/main_website.py/config.py`
 >   到 NAS code/ + `docker restart website-api`，container 拿到最新 endpoint 邏輯
 > • **JWT 共用**：master + NAS website-api 都讀同一個 jwt_secret（NAS 容器透過 env，
