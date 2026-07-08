@@ -23,10 +23,11 @@ interface Props {
     widths?: number[];
     sizes?: string;
     loading?: "eager" | "lazy";
+    fetchpriority?: "high" | "low" | "auto";   // LCP 圖設 high 讓瀏覽器優先下載
     class?: string;
 }
 
-const { src, alt, width, height, widths, sizes, loading, class: className } = Astro.props;
+const { src, alt, width, height, widths, sizes, loading, fetchpriority, class: className } = Astro.props;
 
 // 必須跟 astro.config.mjs `image.domains` 同步。新增遠端來源時兩邊都要加。
 const ALLOWED_REMOTE_HOSTS = new Set([
@@ -44,9 +45,9 @@ const optimizable = !isRemote || isAllowedRemote;
     <Image src={src} alt={alt}
            width={width} height={height}
            widths={widths} sizes={sizes}
-           loading={loading} class={className} />
+           loading={loading} fetchpriority={fetchpriority} class={className} />
 ) : (
     <img src={src} alt={alt}
          width={width} height={height}
-         loading={loading} class={className} />
+         loading={loading} fetchpriority={fetchpriority} class={className} />
 )}

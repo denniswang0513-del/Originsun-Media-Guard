@@ -107,9 +107,13 @@ const finalOgImage = ogImage || meta.seo_og_image || undefined;
             </>
         )}
 
-        <!-- lite-youtube-embed（輕量 YouTube 佔位元件，只在點擊時載入 iframe） -->
+        <!-- lite-youtube-embed（輕量 YouTube 佔位元件，只在點擊時載入 iframe）。
+             CSS 用 media=print + onload 切回 all → 非阻斷算繪（首屏不等它下載）；
+             JS 已 defer。lite-youtube 只在使用者點播放後才需要，延後零副作用。 -->
         <script is:inline src="https://cdn.jsdelivr.net/npm/lite-youtube-embed@0.3.3/src/lite-yt-embed.js" defer></script>
-        <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/lite-youtube-embed@0.3.3/src/lite-yt-embed.css" />
+        <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/lite-youtube-embed@0.3.3/src/lite-yt-embed.css"
+              media="print" onload="this.media='all'" />
+        <noscript><link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/lite-youtube-embed@0.3.3/src/lite-yt-embed.css" /></noscript>
 
         <!-- 早期套用 localStorage 語系避免閃爍 -->
         <script is:inline>

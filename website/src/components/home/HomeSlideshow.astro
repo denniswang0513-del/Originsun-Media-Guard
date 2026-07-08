@@ -54,6 +54,7 @@ const thumbs = await Promise.all(
                                     widths={[800, 1280, 1920]}
                                     sizes="100vw"
                                     loading={i === 0 ? "eager" : "lazy"}
+                                    fetchpriority={i === 0 ? "high" : undefined}
                                     class="absolute inset-0 w-full h-full object-cover" />
                         <!-- 漸層遮罩：底部加深讓資訊文字可讀 -->
                         <div class="absolute inset-0 bg-gradient-to-t from-black/85 via-black/10 to-black/30"></div>
