@@ -419,6 +419,34 @@ async def list_all_featured_projects(session: AsyncSession) -> list[dict]:
     return await _build_public_dicts(session, projects)
 
 
+async def _completeness_for_projects(session: AsyncSession, projects: list) -> dict[str, dict]:
+    """Batch：project_id → {video, images, description, credits} 完成度（與結案看板同邏輯）。
+    一次 IN 撈 showcase 需要的欄位，避免逐件 get（作品上百件 = N+1）。"""
+    from db.models import CrmProjectShowcase
+    pids = [p.id for p in projects]
+    if not pids:
+        return {}
+    sc_map: dict = {}
+    stmt = select(
+        CrmProjectShowcase.id, CrmProjectShowcase.video_url, CrmProjectShowcase.gallery,
+        CrmProjectShowcase.cover_url, CrmProjectShowcase.description, CrmProjectShowcase.credits,
+    ).where(CrmProjectShowcase.id.in_(pids))
+    for sid, video_url, gallery, cover_url, description, credits in await session.execute(stmt):
+        sc_map[sid] = (video_url, gallery, cover_url, description, credits)
+    out: dict = {}
+    for p in projects:
+        video_url, gallery, cover_url, description, credits = sc_map.get(
+            p.id, (None, None, None, None, None))
+        out[p.id] = {
+            "video": bool(video_url or p.public_youtube_id),
+            "images": bool((gallery and len(gallery) > 0) or p.public_featured_image or cover_url),
+            "description": bool((description or "").strip() or (p.public_description or "").strip()),
+            "credits": bool((credits and len(credits) > 0)
+                            or (p.public_credits and len(p.public_credits) > 0)),
+        }
+    return out
+
+
 async def list_admin_projects(
     session: AsyncSession, include_non_public: bool = True
 ) -> list[dict]:
@@ -432,10 +460,13 @@ async def list_admin_projects(
     pids = [p.id for p in projects]
     cat_map = await _categories_for_projects(session, pids)
     client_map = await _clients_for_projects(session, pids)
-    return [
-        _to_admin_dict(p, cat_map.get(p.id), client_map.get(p.id))
-        for p in projects
-    ]
+    comp_map = await _completeness_for_projects(session, projects)
+    result = []
+    for p in projects:
+        d = _to_admin_dict(p, cat_map.get(p.id), client_map.get(p.id))
+        d["completeness"] = comp_map.get(p.id)
+        result.append(d)
+    return result
 
 
 _UPDATABLE_FIELDS = {

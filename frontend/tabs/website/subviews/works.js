@@ -155,6 +155,7 @@ function _renderTable() {
                 <th>精選</th>
                 <th title="個別作品強制 noindex（站級允許索引仍會被擋）">noindex</th>
                 <th title="AI 自動生成的作品 SEO 內容（標題／描述／關鍵字／長文／FAQ）">AI SEO</th>
+                <th title="作品內容填寫狀況：影片／圖／說明（專案描述）／credits">完成度</th>
                 <th>操作</th>
             </tr>
         </thead>
@@ -180,6 +181,7 @@ function _renderTable() {
                     <td title="${w.featured ? '已設精選' : '未設精選'}（僅顯示，請進編輯頁修改）">${_roBadge(w.featured)}</td>
                     <td title="${w.noindex ? '已設 noindex' : '允許索引'}（僅顯示，請進編輯頁修改）">${_roBadge(w.noindex)}</td>
                     <td>${_seoCell(w)}</td>
+                    <td>${_compCell(w.completeness)}</td>
                     <td>
                         <button class="btn btn-sm" onclick="window._websiteEditWork('${esc(w.id)}')">編輯</button>
                     </td>
@@ -191,6 +193,16 @@ function _renderTable() {
 }
 
 
+
+// 完成度欄：影片／圖／說明（專案描述）／credits 填寫狀況（與結案看板同邏輯）
+function _compChip(label, ok) {
+    const on = !!ok;
+    return `<span title="${esc(label)}${on ? '：已完成' : '：未完成'}" style="display:inline-flex;align-items:center;gap:1px;padding:1px 5px;border-radius:4px;font-size:10px;font-weight:600;white-space:nowrap;background:${on ? '#14532d' : '#2a2a2a'};color:${on ? '#86efac' : '#6b7280'};">${on ? '✓' : '✗'}${esc(label)}</span>`;
+}
+function _compCell(c) {
+    if (!c) return '<span style="color:#666;">-</span>';
+    return `<div style="display:flex;gap:3px;flex-wrap:wrap;">${_compChip('影片', c.video)}${_compChip('圖', c.images)}${_compChip('說明', c.description)}${_compChip('credits', c.credits)}</div>`;
+}
 
 // ══════════════════════════════════════════════════════════
 // AI SEO 狀態欄
