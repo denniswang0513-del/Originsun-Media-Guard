@@ -815,3 +815,15 @@ class EquipmentMaintenancePayload(BaseModel):
     date: Optional[str] = None            # 'YYYY-MM-DD'
     cost: Optional[int] = None
     note: Optional[str] = None
+
+
+class FootageScanRequest(BaseModel):
+    """B5 素材庫：掃描資料夾建索引。"""
+    root_path: str
+    project_id: Optional[str] = None
+    project_name: Optional[str] = None
+
+
+class FootageTagsPayload(BaseModel):
+    """B5 素材庫：更新素材 tags。"""
+    tags: List[str] = []

@@ -12,7 +12,7 @@ export const TAB_MAP = {
     equipment: 'tab_equipment',
     backup: 'tab_main', verify: 'tab_verify',
     transcode: 'tab_transcode', concat: 'tab_concat', report: 'tab_report',
-    transcribe: 'tab_transcribe', tts: 'tab_tts', drone_meta: 'tab_drone_meta',
+    transcribe: 'tab_transcribe', tts: 'tab_tts', footage: 'tab_footage', drone_meta: 'tab_drone_meta',
     crm_clients: 'tab_crm_clients', crm_projects: 'tab_crm_projects',
     crm_quotes: 'tab_crm_quotes', crm_staff: 'tab_crm_staff',
     crm_invoices: 'tab_crm_invoices', timesheets: 'tab_timesheets',
@@ -41,6 +41,7 @@ export const TAB_LOADERS = [
     ['report',        './tabs/report/report.html',           './tabs/report/report.js',           'initReportTab'],
     ['transcribe',    './tabs/transcribe/transcribe.html',   './tabs/transcribe/transcribe.js',   'initTranscribeTab'],
     ['tts',           './tabs/tts/tts.html',                 './tabs/tts/tts.js',                 'initTtsTab'],
+    ['footage',       './tabs/footage/footage.html',         './tabs/footage/footage.js',         'initFootageTab'],
     ['drone_meta',    './tabs/drone_meta/drone_meta.html',   './tabs/drone_meta/drone_meta.js',   'initDroneMetaTab'],
     ['crm_clients',   './tabs/crm/crm.html',                 './tabs/crm/crm.js',                 'initCrmTab'],
     ['crm_projects',  './tabs/crm/crm-projects.html',        './tabs/crm/crm-projects.js',        'initCrmProjectsTab'],
@@ -81,6 +82,7 @@ export const TAB_GROUPS = [
         { key: 'report',     label: '📊 檔案視覺報表' },
         { key: 'transcribe', label: '🎙️ AI 逐字稿' },
         { key: 'tts',        label: '🔊 語音生成' },
+        { key: 'footage',    label: '🎞️ 素材庫' },
     ] },
     { id: 'business',   label: '💼 業務管理', items: [
         { key: 'crm_clients',  label: '🤝 客戶管理' },
@@ -122,7 +124,7 @@ export const PERMISSION_GROUPS = [
     { id: 'bulletin',   label: '📌 公布欄', modules: ['bulletin'] },
     { id: 'projects',   label: '📊 專案總覽', modules: ['projects'] },
     { id: 'preprod',    label: '📝 前期製作', modules: ['preprod_plan', 'preprod_locations', 'preprod_proposals', 'intel', 'equipment'] },
-    { id: 'production', label: '🎬 後期製作', modules: ['backup', 'verify', 'transcode', 'concat', 'drone_meta', 'report', 'transcribe', 'tts'] },
+    { id: 'production', label: '🎬 後期製作', modules: ['backup', 'verify', 'transcode', 'concat', 'drone_meta', 'report', 'transcribe', 'tts', 'footage'] },
     { id: 'business',   label: '💼 業務管理', modules: ['crm_clients', 'crm_projects', 'crm_quotes', 'crm_staff', 'crm_invoices', 'timesheets', 'portal'] },
     { id: 'website',    label: '🌐 官網管理', modules: ['website_admin'] },
 ];

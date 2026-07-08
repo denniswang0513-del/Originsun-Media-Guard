@@ -36,6 +36,7 @@ _ROUTER_MODULES = [
     'api_intel',
     'api_portal',
     'api_equipment',
+    'api_footage',
     'api_crm',
     'api_drone_meta',
     'api_drone_watcher',
@@ -556,6 +557,11 @@ async def _on_startup():
                         # freeform sc.tags 廢除，統一走 website_categories（kind=tag）。
                         # 舊資料一併刪除（使用者確認）。
                         "ALTER TABLE crm_project_showcase DROP COLUMN IF EXISTS tags",
+                        # B5 素材庫：pg_trgm 加速 transcript ILIKE（extension 沒權限就
+                        # 降級純 ILIKE，查詢語法相同——這兩句失敗都無妨，有 try/except 容錯）。
+                        "CREATE EXTENSION IF NOT EXISTS pg_trgm",
+                        "CREATE INDEX IF NOT EXISTS idx_footage_transcript_trgm "
+                        "ON footage_index USING gin (transcript gin_trgm_ops)",
                     ]:
                         try:
                             await _sex.execute(_tex(col_sql))

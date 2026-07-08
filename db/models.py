@@ -1,7 +1,7 @@
 """SQLAlchemy ORM models for Originsun Media Guard Pro."""
 
 try:
-    from sqlalchemy import Column, String, Text, Boolean, Integer, Float, DateTime, func, Index
+    from sqlalchemy import Column, String, Text, Boolean, Integer, BigInteger, Float, DateTime, func, Index
     from sqlalchemy.dialects.postgresql import JSONB
     from sqlalchemy.orm import DeclarativeBase
     _HAS_SQLALCHEMY = True
@@ -11,7 +11,7 @@ except ImportError:
     class _Stub:
         def __call__(self, *a, **kw): return self
         def __getattr__(self, _): return self
-    Column = String = Text = Boolean = Integer = Float = DateTime = func = Index = _Stub()
+    Column = String = Text = Boolean = Integer = BigInteger = Float = DateTime = func = Index = _Stub()
     JSONB = _Stub()
     class DeclarativeBase: pass
 
@@ -950,3 +950,28 @@ class EquipmentMaintenance(Base):
     cost = Column(Integer, nullable=True)                        # 保養費用
     note = Column(String(255), nullable=True)                    # 保養內容
     created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+
+class FootageIndex(Base):
+    """內部素材庫（B5，docs/BIZ_PLAN.md B5 段）— 逐字稿 + metadata 全文檢索。
+    掃描既有影片 + 同名 .txt/.srt 逐字稿建索引；重用一段素材 = 省一天拍攝。
+    file_path unique：同檔重掃更新不重複。transcript 用 pg_trgm 加速 ILIKE。"""
+    __tablename__ = "footage_index"
+
+    id = Column(String(32), primary_key=True)                    # uuid4 hex
+    project_id = Column(String(32), nullable=True, index=True)   # soft FK → crm_projects.id
+    project_name = Column(String(255), nullable=False, default="")  # 猜不到就存資料夾名
+    file_path = Column(String(1024), nullable=False, unique=True)   # 絕對路徑（upsert key）
+    file_name = Column(String(255), nullable=True)
+    ext = Column(String(16), nullable=True)
+    duration_sec = Column(Float, nullable=True)
+    resolution = Column(String(32), nullable=True)               # "1920x1080"
+    fps = Column(String(16), nullable=True)
+    shot_date = Column(DateTime(timezone=True), nullable=True)   # 檔案 mtime
+    transcript = Column(Text, nullable=True)                     # 同名 .txt/.srt 純文字
+    tags = Column(JSONB, nullable=True)                          # list[str]
+    thumb_strip_url = Column(String(512), nullable=True)         # 縮圖條（後續 hook 回填）
+    size_bytes = Column(BigInteger, nullable=True)               # BigInteger：大檔超過 Integer 上限
+    indexed_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    __table_args__ = (Index("idx_footage_project", "project_id"),)
