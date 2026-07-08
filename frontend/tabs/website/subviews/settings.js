@@ -68,9 +68,11 @@ const _CONTACT_MOVED = ['company.', 'social.'];
 const _GROUPS = [
     { prefix: 'seo', label: '🔍 SEO 預設', color: '#10b981' },
     { prefix: 'analytics', label: '📊 分析追蹤', color: '#f59e0b',
-      knownKeys: ['ga_measurement_id'],
+      knownKeys: ['ga_measurement_id', 'ga_property_id', 'ga_service_account_json'],
       hints: {
         ga_measurement_id: 'Google Analytics 4 追蹤 ID（G- 開頭，如 G-XXXXXXXXXX）。到 GA 後台 › 管理 › 資料串流 › 你的網站串流 複製「評估 ID」。填好存檔 → 官網自動 rebuild 後開始追蹤（可到 GA「即時」報表驗證）。',
+        ga_property_id: '【後台流量儀表板用】GA4 資源 ID（純數字，如 493xxxxxxx）。到 GA 後台 › 管理 › 資源設定 › 右上「資源 ID」複製。⚠️ 這不是 G- 開頭的評估 ID、也不是串流 ID。',
+        ga_service_account_json: '【後台流量儀表板用】Google Cloud 服務帳戶 JSON 金鑰（整包貼上）。設定步驟見「儀表板 › 網站流量」卡片的引導，或問 Claude。⚠️ 含私鑰，勿外流。',
       } },
     { prefix: 'notify', label: '🔔 通知設定', color: '#dc2626' },
     { prefix: 'turnstile', label: '🛡️ Turnstile 反機器人', color: '#ec4899',

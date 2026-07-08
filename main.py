@@ -37,6 +37,7 @@ _ROUTER_MODULES = [
     'api_portal',
     'api_equipment',
     'api_footage',
+    'api_analytics',
     'api_crm',
     'api_drone_meta',
     'api_drone_watcher',
