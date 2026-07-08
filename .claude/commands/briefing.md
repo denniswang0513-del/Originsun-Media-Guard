@@ -25,8 +25,15 @@ Read the following files from the memory directory `C:\Users\originsun\.claude\p
 ### Step 3: Read ROADMAP timeline (targeted read)
 
 Read `ROADMAP.md` with offset/limit to extract:
-- The "完整時序" section (the ASCII timeline near the bottom, approximately lines 543-596)
-- The "待做 Phase" sections: J-3, J-4, L, G, F-lite, C, D, E, F-full
+- The "完整時序" section (the ASCII timeline near the bottom)
+- The current main-line Phase sections (2026-07 起主線 = **Phase N Work OS**；其餘待做
+  Phase 以 ROADMAP.md 實際內容為準，不要照舊清單背)
+
+### Step 3.5: Read the strategy plan
+
+Read `docs/STRATEGY_2026H2.md` (短中長程戰略計畫，2026-07-08 Fable 交接前定稿)。
+briefing 輸出必須包含它的濃縮版（見下方「戰略方向」段），讓每個新 session 都帶著
+同一份大方向開工。
 
 ### Step 4: Output the briefing
 
@@ -66,20 +73,18 @@ Present the following structured report. Use the EXACT format below, filling in 
 (version from version.json)
 
 #### 待做 Phase（按優先順序）
-| Phase | 名稱 | 優先級 | 狀態 | 關鍵待辦 |
-|-------|------|--------|------|---------|
-| J-3 | 備份整合 | 🔴 高 | (status) | (key items from ROADMAP) |
-| J-4 | CRM 進階 | 🟡 中 | (status) | (key items from ROADMAP) |
-| L | 行動端 RWD | 🟡 中 | (status) | (key items from ROADMAP) |
-| G | 多機多專案 | 🔴 高 | (status) | (key items from ROADMAP) |
-| F-lite | 基礎監控 | 🟠 高 | (status) | (key items from ROADMAP) |
-| C | Webhook | 🟡 中 | (status) | (key items from ROADMAP) |
-| D | MCP Server | 🟡 中 | (status) | (key items from ROADMAP) |
-| E | 生產部署 | 🟢 低 | (status) | (key items from ROADMAP) |
-| F-full | 完整監控 | 🟢 低 | (status) | (key items from ROADMAP) |
+(以 ROADMAP.md 實際內容產表 — 目前主線為 Phase N Work OS 各子階段；
+其餘待做 Phase 照 ROADMAP 現況列出，欄位：Phase / 名稱 / 優先級 / 狀態 / 關鍵待辦)
 
 #### 殘留低優先項目
 (from memory: project_overall_progress.md)
+
+### 戰略方向（from docs/STRATEGY_2026H2.md — 每次 briefing 必附）
+- **短程（~2026-09）**: (從文件第 1 節濃縮 3-4 點，含未完成的營運地雷，
+  🔴 Google Chat webhook 未設定時必須列出)
+- **中程（Q4~2027Q1）**: (從第 2 節濃縮 2-3 點，N0 個人帳號化未拍板時必須點名它是骨牌)
+- **長程/商業**: (從第 3 節濃縮 1-2 點：內部護城河為預設；切片產品化需 2-3 家付費驗證)
+- **自動化下一梯隊**: (從第 4 節列當前最高 ROI 的 1-2 項)
 
 ### 上次 Session 摘要
 (from the most recent project_session_*.md — show the key accomplishments and any pending items)
@@ -90,7 +95,7 @@ Present the following structured report. Use the EXACT format below, filling in 
 3. **編輯前重讀** — 不信任記憶中的程式碼，一律重新讀取目標區段
 4. **搜尋結果要懷疑** — 結果太少就縮小範圍重搜，特別注意 .js + .html 雙引用
 5. **實作後流程** — 自測 + 跑 /simplify
-6. **新 Tab 4 處 RBAC** — user-mgmt.js / auth-state.js / db/session.py / index.html
+6. **新模組 RBAC 3 處同步** — core/auth.py ALL_MODULES / tab-config.js / user-mgmt.js MODULE_LABELS（RBAC v2 無角色層）
 7. **超過 5 檔拆子 Agent** — 後端/前端/測試分開，避免上下文崩潰
 8. **重構前清垃圾** — dead code 先開 commit 清掉，再做正事
 
