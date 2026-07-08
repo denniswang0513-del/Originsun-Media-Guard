@@ -67,16 +67,21 @@ async function _refresh(host) {
         _scheduleNext(host, fast ? POLL_INTERVAL_FAST : POLL_INTERVAL_SLOW);
     } catch (e) {
         _failCount++;
-        if (_failCount >= FAIL_THRESHOLD || !_lastGoodHtml) {
+        if (_failCount >= FAIL_THRESHOLD) {
             host.innerHTML = `<div style="color:#f87171;font-size:11px;">⚠ 發布狀態查詢失敗（連續 ${_failCount} 次）</div>
                 <div style="color:#666;font-size:10px;margin-top:2px;">${esc(e.message || e)}</div>`;
-        } else {
+        } else if (_lastGoodHtml) {
             // 單次瞬斷：保留上次成功畫面，只加一行小字，不整塊變紅
             host.innerHTML = _lastGoodHtml
                 + `<div style="color:#f59e0b;font-size:10px;margin-top:4px;">⚠ 狀態查詢暫時失敗，重試中…</div>`;
             _bindActions(host);
+        } else {
+            // 頁面剛載入的第一發常死在瀏覽器→CF edge 的新連線建立（QUIC 退回 TCP），
+            // 重試幾乎必成 — 沒到閾值前維持中性文案，不用紅字嚇人。
+            host.innerHTML = `<div style="color:#888;">對外網站發布狀態：連線中（重試 ${_failCount}/${FAIL_THRESHOLD}）…</div>`;
         }
-        _scheduleNext(host, POLL_INTERVAL_FAST);
+        // 首次失敗 1.5s 就補打（連線層 flake 退回 TCP 後立即可用），之後 5s
+        _scheduleNext(host, _failCount === 1 ? 1500 : POLL_INTERVAL_FAST);
     }
 }
 
