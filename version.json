@@ -1,5 +1,5 @@
 {
-  "version": "1.10.244",
-  "build_date": "2026-07-10",
-  "notes": "fix(security): DB migration password-only"
+  "version": "1.10.248",
+  "build_date": "2026-07-11",
+  "notes": "1:N 作品實體化（1 專案多官網作品 + 一頁多影片 + 系列互連）+ 結案看板逐作品操作/刪除 + edit_token 輪替自癒"
 }
