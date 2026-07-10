@@ -120,13 +120,16 @@ async def generate_work_edit_token(work_id: str, request: Request):
 
 
 async def _work_edit_token(work_id: str, request: Request, *, reuse_existing: bool):
-    """兩個 token 端點的共用 body。只對既有作品發（404 守門）— 不做
-    get-or-create，避免打錯 id 長出垃圾列。"""
+    """兩個 token 端點的共用 body。守門：id 必須是既有作品、或還沒有 showcase row
+    的專案 id（works 清單以虛擬主作品呈現這種專案 — _mint 會 get-or-create 主作品列，
+    與 admin edit-url 行為一致）。兩者皆非 → 404，避免打錯 id 長出垃圾列。"""
     _check_website_auth(request)
     _require_db()
     factory = await _get_factory()
     async with factory() as session:
-        if not await session.get(CrmProjectShowcase, work_id):
+        exists = (await session.get(CrmProjectShowcase, work_id)
+                  or await session.get(CrmProject, work_id))
+        if not exists:
             raise HTTPException(status_code=404, detail="找不到此作品")
         token, _sc = await _mint_showcase_edit_token(
             session, work_id, reuse_existing=reuse_existing)

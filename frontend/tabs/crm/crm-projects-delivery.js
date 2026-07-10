@@ -46,7 +46,9 @@ export async function loadDeliveryTab(projectId) {
         works = (r && r.items) || [];
     } catch { /* fallback：單作品舊路徑 */ }
 
-    if (works.length > 1) {
+    // 作品列永遠顯示（單作品也一顆 tab + 新增按鈕）— 否則單作品專案在此分頁
+    // 沒有任何「加第二支影片」的入口（雞生蛋）。works 端點失敗才走 legacy 單 iframe。
+    if (works.length >= 1) {
         container.innerHTML = `
         <div id="delivery-works-tabs" style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin-bottom:8px;"></div>
         <iframe id="delivery-showcase-frame" title="作品上架編輯"
@@ -58,7 +60,7 @@ export async function loadDeliveryTab(projectId) {
         return;
     }
 
-    // ── 單作品：行為照舊（既有 token 取得邏輯 + 單 iframe）──
+    // ── Legacy fallback（works 端點打不到時）：既有 token 取得邏輯 + 單 iframe ──
     // 取 showcase → 拿 edit_token；沒有就用現成端點鑄一把
     let token = '';
     try {
