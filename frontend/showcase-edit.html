@@ -40,6 +40,15 @@ body::before{content:'';position:fixed;inset:0;z-index:9999;pointer-events:none;
 .page-title{font-family:var(--font-display);font-size:24px;font-weight:600;margin-bottom:4px}
 .page-sub{font-size:13px;color:var(--text3);margin-bottom:32px}
 
+/* ── Embed 模式（嵌入 CRM「完稿結案」分頁 iframe；?embed=1）──
+   隱藏本頁自己的大頁首/頁尾/材質雜訊，貼合 CRM 容器；accent 對齊 CRM 藍。 */
+html.embed-mode{--accent:#3b82f6;--accent2:#60a5fa}
+html.embed-mode body{min-height:0;background:#0e0e0e}
+html.embed-mode body::before{display:none}
+html.embed-mode .page{max-width:none;padding:14px 6px 48px}
+html.embed-mode #page-title,html.embed-mode .page-sub,html.embed-mode .footer{display:none}
+html.embed-mode .btn-primary,html.embed-mode .tag.tag-on{color:#fff}
+
 .section{margin-bottom:40px}
 .section-label{font-family:var(--font-display);font-size:10px;font-weight:500;letter-spacing:4px;text-transform:uppercase;color:var(--accent);margin-bottom:14px;display:flex;align-items:center;gap:12px}
 .section-label::after{content:'';flex:1;height:1px;background:var(--border)}
@@ -132,11 +141,23 @@ textarea{min-height:80px}
 <script>
 const TOKEN = new URLSearchParams(location.search).get('token') || '';
 const API = '/api/v1/crm/public/showcase-edit/' + TOKEN;
+const EMBED = new URLSearchParams(location.search).get('embed') === '1';
+if (EMBED) document.documentElement.classList.add('embed-mode');
 let DATA = null;
 let EDITABLE = false;
 
 function _esc(s) { const d = document.createElement('div'); d.textContent = s || ''; return d.innerHTML; }
 function _toast(msg) { const t = document.getElementById('toast'); t.textContent = msg; t.classList.add('show'); setTimeout(() => t.classList.remove('show'), 2000); }
+
+// Embed 模式：把內容高度回傳給父視窗（CRM 完稿結案 iframe），讓外框自動長高、免內部捲軸。
+function _postHeight() {
+    if (!EMBED) return;
+    try {
+        const pg = document.getElementById('page');
+        const h = Math.max(pg ? pg.scrollHeight : 0, document.body.scrollHeight || 0);
+        if (window.parent) window.parent.postMessage({ type: 'showcase-embed-height', height: h + 24 }, '*');
+    } catch (_) {}
+}
 
 // 把舊 flat 格式 credits 轉成 block 格式（向下相容讀取，寫入永遠是新格式）
 function _normalizeCredits(raw) {
@@ -706,6 +727,15 @@ function _render() {
     requestAnimationFrame(() => document.getElementById('page').classList.add('visible'));
 
     if (EDITABLE) _bindEvents();
+
+    if (EMBED) {
+        _postHeight();
+        setTimeout(_postHeight, 300);   // 等字型/圖片穩定後再校一次
+        if (!window.__embedRO && window.ResizeObserver) {
+            window.__embedRO = new ResizeObserver(() => _postHeight());
+            window.__embedRO.observe(document.getElementById('page'));
+        }
+    }
 }
 
 function _bindEvents() {
