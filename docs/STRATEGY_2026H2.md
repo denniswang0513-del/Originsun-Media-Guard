@@ -27,12 +27,15 @@
    → **影子運行兩週校準模板** → 才開 autopublish。核准≠立即發、日/週上限、
    kill switch 都已內建，照設計走。
 3. **營運地雷（多為 owner 十分鐘級動作，公布欄已列）**：
-   - 🔴 **Google Chat webhook 未設定 = 所有告警石沉大海**（整套告警系統已建好，
-     只差這一格），最優先。
-   - DHCP 保留 .107、PAT **2026-09-11 到期前輪替**、SSH key + Google 憑證異地副本。
-   - 觀察期滿後把 v1.10.21x 推機隊 + NAS 容器。
-   - publish 的 NAS sync 改用 Git Bash ssh（Windows OpenSSH hang 已知，治本一次）。
-4. **N0 拍板個人帳號化**：Work OS 第一張骨牌，擋住工時/獎金整條線。
+   - ✅ **Google Chat webhook 已設**（2026-07-10）：任務通知 `google_chat_webhook` +
+     系統告警 `alert_webhook`（重大告警另轉 email）兩條都通、實測過，先共用同一聊天室。
+   - ✅ **資安三修（2026-07-10）**：`/api/settings/load` 抹除機密、`jwt_secret` 輪替、
+     DB 密碼 `originsun2026` 輪替（全機隊 OTA 自癒）。殘留：新 DB 密碼仍在 git config.py
+     （LAN-only 可接受）、待改 env 注入。
+   - ✅ **publish NAS sync 已改 Git Bash ssh**（`_ssh_bin`，治本 Windows OpenSSH hang）。
+   - ✅ **v1.10.24x 已推全機隊 + NAS**：現全網 1.10.245，機隊 9 台（含重裝的 .109 + 新機 .11）。
+   - ⏳ 仍待 owner：DHCP 保留 .107、**PAT 2026-09-11 到期前輪替**、SSH key + Google 憑證異地副本。
+4. **N0 拍板個人帳號化**：Work OS 第一張骨牌，擋住工時/獎金整條線。（仍待 owner）
 
 ## 2. 中程（2026-10 ~ 2027-Q1）：Work OS 成形
 
