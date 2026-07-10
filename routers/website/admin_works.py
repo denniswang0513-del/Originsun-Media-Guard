@@ -128,6 +128,8 @@ async def create_work(
     for cid in (req.category_ids or []):
         session.add(WebsiteProjectCategory(project_id=project_id, category_id=cid))
     token, _sc = await _mint_showcase_edit_token(session, project_id, reuse_existing=False)
+    # 1:N：作品身分欄位正本在 showcase — year 同步落到 mint 出來的主作品列
+    _sc.year = req.year
     await session.commit()
     return WorkCreateResponse(
         id=project_id, name=name,
@@ -201,9 +203,17 @@ async def get_work_edit_url(
     project_id: str,
     session: AsyncSession = Depends(admin_session),
 ):
-    """取得既有作品的 showcase-edit.html 編輯 URL。若已有 token 則重用（冪等）。"""
-    if not await session.get(CrmProject, project_id):
-        raise HTTPException(status_code=404, detail="Project not found")
+    """取得既有作品的 showcase-edit.html 編輯 URL。若已有 token 則重用（冪等）。
+
+    id 自 1:N 起語意 = work id：先查 showcase（子作品 id 不在 crm_projects），
+    查無再當舊 project id 檢查（_mint 會 get-or-create 主作品列）。"""
+    from db.models import CrmProjectShowcase
+    exists = (
+        await session.get(CrmProjectShowcase, project_id)
+        or await session.get(CrmProject, project_id)
+    )
+    if not exists:
+        raise HTTPException(status_code=404, detail="Work not found")
     token, _sc = await _mint_showcase_edit_token(session, project_id, reuse_existing=True)
     if session.dirty or session.new:
         await session.commit()

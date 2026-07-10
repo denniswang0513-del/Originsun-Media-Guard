@@ -6,7 +6,7 @@
 寫進各實體的 `_en` 欄，並在 website_translation_state 記錄工作流狀態。
 
 涵蓋 3 型別：
-- work（crm_projects.public_*）：public_title, public_description
+- work（crm_project_showcase，1:N 作品實體）：title, description
 - post（website_posts）：title, excerpt, seo_title, seo_description, body(blocks)
 - service（website_services）：title, short_desc, full_desc
 
@@ -37,7 +37,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from .seo_runner import _call_claude, _resolve_claude_exe, _scrub_sentences
 from .settings_service import get_all_settings, update_settings
-from db.models import CrmProject
+from db.models import CrmProject, CrmProjectShowcase
 from db.models_website import WebsitePost, WebsiteService, WebsiteTranslationState
 
 logger = logging.getLogger(__name__)
@@ -45,8 +45,10 @@ logger = logging.getLogger(__name__)
 _run_lock = asyncio.Lock()
 
 # ── 每型別的「要翻譯的簡單文字欄位」（key = 中文欄位名，_en 欄一律 = key+"_en"）──
-# public_client / credits 人名不在此 → 不翻（專有名詞）。
-_WORK_FIELDS = ["public_title", "public_description"]
+# 客戶名 / credits 人名不在此 → 不翻（專有名詞）。
+# 1:N 起 work 實體 = CrmProjectShowcase（sc.title/description → title_en/description_en）；
+# website_translation_state 的 entity_id 語意 = work id（既有資料 == project id 自動相容）。
+_WORK_FIELDS = ["title", "description"]
 # seo_title/seo_description 不翻：本站單一 URL、SEO meta 維持中文（見 BaseLayout），
 # 英文 SEO 欄位沒有消費者，翻了也不會渲染 → 不浪費 claude 額度去翻。
 _POST_FIELDS = ["title", "excerpt"]
@@ -70,7 +72,7 @@ Source (Traditional Chinese):
 """
 
 # 每型別的 model / 中文欄位（集中一處，避免散落各 function 重複宣告）。
-_ENTITY_MODEL = {"work": CrmProject, "post": WebsitePost, "service": WebsiteService}
+_ENTITY_MODEL = {"work": CrmProjectShowcase, "post": WebsitePost, "service": WebsiteService}
 _ENTITY_FIELDS = {"work": _WORK_FIELDS, "post": _POST_FIELDS, "service": _SERVICE_FIELDS}
 ENTITY_TYPES = frozenset(_ENTITY_MODEL)   # 單一來源，router 驗證共用
 
@@ -103,21 +105,31 @@ def _list_key(block_i: int, item_j: int) -> int:
 
 
 def _collect_zh(entity_type: str, obj) -> dict[str, str]:
-    """回傳非空的中文欄位 {欄位名: 中文}（work 的 title 空則用 name）。"""
+    """回傳非空的中文欄位 {欄位名: 中文}（work 的 title 空則用專案名）。
+
+    work 的專案名 fallback 走 `_fallback_name` transient 屬性 —
+    由 _entities / _get_entity 撈實體時從所屬 CrmProject 掛上。"""
     fields = _ENTITY_FIELDS[entity_type]
     zh: dict[str, str] = {}
     for f in fields:
         v = (getattr(obj, f, None) or "").strip()
-        if not v and entity_type == "work" and f == "public_title":
-            v = (getattr(obj, "name", None) or "").strip()
+        if not v and entity_type == "work" and f == "title":
+            v = (getattr(obj, "_fallback_name", None) or "").strip()
         if v:
             zh[f] = v
     return zh
 
 
 def _source_hash(entity_type: str, obj) -> str:
-    """中文來源雜湊（含 body）→ 中文改過就變 → 偵測過時。"""
-    parts = [f"{k}={v}" for k, v in sorted(_collect_zh(entity_type, obj).items())]
+    """中文來源雜湊（含 body）→ 中文改過就變 → 偵測過時。
+
+    work 的 hash 標籤沿用舊欄位名（public_title/public_description）—
+    1:N 改欄位名不可讓既有 translation state 的 source_hash 全數失配變 stale
+    （會把已翻譯核准的作品整批重翻、燒 claude 額度）。"""
+    zh = _collect_zh(entity_type, obj)
+    if entity_type == "work":
+        zh = {f"public_{k}": v for k, v in zh.items()}
+    parts = [f"{k}={v}" for k, v in sorted(zh.items())]
     if entity_type == "post":
         parts.append("body=" + "|".join(t for _, t in _block_texts(obj.body or [])))
     return hashlib.sha256("".join(parts).encode("utf-8")).hexdigest()[:64]
@@ -125,8 +137,17 @@ def _source_hash(entity_type: str, obj) -> str:
 
 async def _entities(session: AsyncSession, entity_type: str) -> list:
     if entity_type == "work":
-        stmt = select(CrmProject).where(CrmProject.public.is_(True))
-    elif entity_type == "post":
+        rows = await session.execute(
+            select(CrmProjectShowcase, CrmProject.name)
+            .join(CrmProject, CrmProject.id == CrmProjectShowcase.project_id)
+            .where(CrmProjectShowcase.published.is_(True))
+        )
+        out = []
+        for sc, pname in rows:
+            sc._fallback_name = pname or ""   # _collect_zh 的 title fallback
+            out.append(sc)
+        return out
+    if entity_type == "post":
         stmt = select(WebsitePost).where(WebsitePost.status == "published")
     else:
         stmt = select(WebsiteService).where(WebsiteService.visible.is_(True))
@@ -261,7 +282,14 @@ def _apply_body_en(zh_body: list, trans: list[dict]) -> list:
 async def _get_entity(session: AsyncSession, etype: str, eid: str):
     model = _ENTITY_MODEL[etype]
     key = eid if etype == "work" else int(eid)
-    return await session.get(model, key)
+    obj = await session.get(model, key)
+    if obj is not None and etype == "work":
+        # 掛 transient 屬性：title fallback（專案名）+ 客戶名欄（專案層，manual 翻譯用）
+        proj = await session.get(CrmProject, obj.project_id or obj.id)
+        obj._fallback_name = (proj.name if proj else "") or ""
+        obj._client_zh = (proj.public_client if proj else "") or ""
+        obj._client_en = (proj.public_client_en if proj else "") or ""
+    return obj
 
 
 async def _generate_local(session: AsyncSession, etype: str, eid: str,
@@ -286,7 +314,7 @@ async def _generate_local(session: AsyncSession, etype: str, eid: str,
     if etype == "work":   # 客戶名不 AI 翻（專有名詞）→ 給後台審核卡片手動填英文
         result["manual_fields"] = [{
             "en_key": "public_client_en", "label": "客戶名（手動英文，AI 不翻）",
-            "zh": obj.public_client or "", "current": obj.public_client_en or "",
+            "zh": getattr(obj, "_client_zh", ""), "current": getattr(obj, "_client_en", ""),
         }]
     return result
 
@@ -311,7 +339,7 @@ async def read_current(session: AsyncSession, etype: str, eid: str) -> dict:
     if etype == "work":
         result["manual_fields"] = [{
             "en_key": "public_client_en", "label": "客戶名（手動英文，AI 不翻）",
-            "zh": obj.public_client or "", "current": obj.public_client_en or "",
+            "zh": getattr(obj, "_client_zh", ""), "current": getattr(obj, "_client_en", ""),
         }]
     return result
 
@@ -321,11 +349,24 @@ async def _writeback(session: AsyncSession, etype: str, eid: str, parsed: dict,
     obj = await _get_entity(session, etype, eid)
     if obj is None:
         return
+    # 客戶名英文是專案層欄位（manual_fields 送回時混在 parsed 裡）— 寫 project 不寫 sc
+    if etype == "work" and "public_client_en" in parsed:
+        parsed = dict(parsed)
+        client_en = parsed.pop("public_client_en")
+        proj = await session.get(CrmProject, obj.project_id or obj.id)
+        if proj:
+            proj.public_client_en = client_en
     for k, v in parsed.items():
         if k == "body_en":
             obj.body_en = _apply_body_en(obj.body or [], v)
         else:
             setattr(obj, k, v)   # k 已是 {field}_en
+    # 主作品 dual-write：_en 鏡射回 crm_projects（過渡期回退保險，Phase 4 停寫）
+    if etype == "work" and obj.id == obj.project_id:
+        proj = await session.get(CrmProject, obj.project_id)
+        if proj:
+            proj.public_title_en = obj.title_en
+            proj.public_description_en = obj.description_en
     st = await session.get(WebsiteTranslationState, {"entity_type": etype, "entity_id": eid})
     if st is None:
         st = WebsiteTranslationState(entity_type=etype, entity_id=eid)

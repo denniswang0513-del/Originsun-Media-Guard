@@ -391,10 +391,17 @@ WEBSITE_TEAM_OVERRIDE_FIELDS = (
 
 
 class CrmProjectShowcase(Base):
-    """專案完稿結案 / 作品展示。"""
+    """官網「作品」實體（一個對外 /works/{slug} 頁面）。
+
+    1:N 改造（2026-07）：id = work id、project_id = 所屬 CRM 專案。
+    既有資料 id == project_id（歷史 1:1 時代 PK 直接用 project_id），該列即「主作品」；
+    新增子作品 id 用 uuid4().hex。作品身分欄位（title/slug/number/featured/驗收章…）
+    以本表為單一真相；crm_projects.public_* 為過渡期鏡射（僅主作品 dual-write）。
+    """
     __tablename__ = "crm_project_showcase"
 
-    id = Column(String(32), primary_key=True)  # same as project_id (1:1)
+    id = Column(String(32), primary_key=True)  # work id（既有列 == project_id）
+    project_id = Column(String(32), nullable=True, index=True)  # 所屬專案（backfill = id）
     cover_url = Column(String(512), nullable=True)
     description = Column(Text, nullable=True)
     video_url = Column(String(512), nullable=True)
@@ -412,6 +419,21 @@ class CrmProjectShowcase(Base):
     published_at = Column(DateTime(timezone=True), nullable=True)
     edit_token = Column(String(512), nullable=True)
     editable = Column(Boolean, nullable=False, default=True)
+    # ── 作品身分欄位（1:N 改造自 crm_projects.public_* 下放；backfill 見 migrations_website）──
+    title = Column(String(200), nullable=True)
+    title_en = Column(String(300), nullable=True)
+    description_en = Column(Text, nullable=True)
+    youtube_id = Column(String(20), nullable=True)  # video_url parse 後快取
+    extra_videos = Column(JSONB, nullable=True)  # [{url, caption}] 主影片以外的附加影片
+    year = Column(Integer, nullable=True)
+    featured = Column(Boolean, nullable=False, default=False)
+    featured_image = Column(Text, nullable=True)
+    noindex = Column(Boolean, nullable=False, default=False)
+    number = Column(Integer, nullable=True)  # 對外連續編號（partial unique idx）
+    old_slugs = Column(JSONB, nullable=True)  # 舊 slug 清單（301 轉址來源）
+    sort_order = Column(Integer, nullable=False, default=0)
+    verified_at = Column(DateTime(timezone=True), nullable=True)  # rebuild 後對外頁實測 200
+    prod_stage = Column(String(16), nullable=True)  # 待製作|製作中|已上線|不上官網
     # AI 參考資料：製作人上傳的文件抽取文字 + 補充說明，餵給 AI 寫描述 / SEO。
     ai_reference_files = Column(JSONB, nullable=True)  # [{name, text, chars}]
     ai_reference_notes = Column(Text, nullable=True)

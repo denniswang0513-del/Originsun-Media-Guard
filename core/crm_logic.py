@@ -114,3 +114,63 @@ def group_receivables(rows, now) -> dict:
 
     clients = sorted(client_groups.values(), key=lambda x: x["total_amount"], reverse=True)
     return {"clients": clients, "grand_total": sum(c["total_amount"] for c in clients)}
+
+
+# ── 官網作品（1:N 改造，2026-07）──────────────────────────────────────────
+
+WEBSITE_WORK_STAGES = ("待製作", "製作中", "已上線", "不上官網")
+
+
+def work_stage(published: bool, prod_stage) -> str:
+    """單一作品的官網階段推導（結案看板 / 收件匣共用，避免兩處漂移）。
+
+    published=True → '已上線'；否則看 prod_stage（製作中/不上官網）；
+    其餘（含 None / '待製作'）→ '待製作'。
+    """
+    if published:
+        return "已上線"
+    if prod_stage in ("製作中", "不上官網"):
+        return prod_stage
+    return "待製作"
+
+
+def work_completeness(*, video_url=None, youtube_id=None, extra_videos=None,
+                      gallery=None, cover_url=None, featured_image=None,
+                      description=None, credits=None, credits_text=None) -> dict:
+    """單一作品的素材完成度（結案看板 chips / 收件匣完成度欄共用）。
+
+    參數皆為 crm_project_showcase 的欄位值（1:N 後為單一真相 — 舊版
+    「sc 或 project.public_* 任一有值」的 fallback 在 backfill 後恆等，故收斂）。
+    回傳四項 bool：video / images / description / credits。
+    """
+    return {
+        "video": bool((video_url or "").strip() or (youtube_id or "").strip()
+                      or (extra_videos and len(extra_videos) > 0)),
+        "images": bool((gallery and len(gallery) > 0)
+                       or (featured_image or "").strip() or (cover_url or "").strip()),
+        "description": bool((description or "").strip()),
+        "credits": bool((credits and len(credits) > 0) or (credits_text or "").strip()),
+    }
+
+
+def project_works_summary(works) -> dict:
+    """專案層作品聚合 — 結案看板卡片「2/3 已上線」進度 + 全上線判定。
+
+    works: iterable of dict，至少含 stage（work_stage 推導值）+ verified（bool）。
+    分母 = 總數 − 標「不上官網」者；all_live = 分母 > 0 且全部已上線
+    （全部上線專案才算完成 — owner 2026-07-10 拍板）。
+    """
+    ws = list(works)
+    total = len(ws)
+    skipped = sum(1 for w in ws if w.get("stage") == "不上官網")
+    live = sum(1 for w in ws if w.get("stage") == "已上線")
+    verified = sum(1 for w in ws if w.get("stage") == "已上線" and w.get("verified"))
+    denominator = total - skipped
+    return {
+        "total": total,
+        "live": live,
+        "verified": verified,
+        "skipped": skipped,
+        "pending": max(0, denominator - live),
+        "all_live": bool(denominator > 0 and live >= denominator),
+    }

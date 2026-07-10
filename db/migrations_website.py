@@ -89,6 +89,23 @@ _CRM_PROJECT_SHOWCASE_COLUMNS: list[tuple[str, str]] = [
     # credits 雙模式：'block' (JSONB blocks) / 'text' (純文字貼上)
     ("credits_mode", "VARCHAR(16) NOT NULL DEFAULT 'text'"),
     ("credits_text", "TEXT"),
+    # ── 1:N 作品實體化（2026-07）：showcase 升格為「作品」，id=work id、project_id=所屬專案 ──
+    # 身分欄位自 crm_projects.public_* 下放（backfill 見 _SHOWCASE_BACKFILL_*）
+    ("project_id", "VARCHAR(32)"),
+    ("title", "VARCHAR(200)"),
+    ("title_en", "VARCHAR(300)"),
+    ("description_en", "TEXT"),
+    ("youtube_id", "VARCHAR(20)"),
+    ("extra_videos", "JSONB"),        # [{url, caption}] 主影片以外的附加影片
+    ("year", "INTEGER"),
+    ("featured", "BOOLEAN NOT NULL DEFAULT FALSE"),
+    ("featured_image", "TEXT"),
+    ("noindex", "BOOLEAN NOT NULL DEFAULT FALSE"),
+    ("number", "INTEGER"),
+    ("old_slugs", "JSONB"),
+    ("sort_order", "INTEGER NOT NULL DEFAULT 0"),
+    ("verified_at", "TIMESTAMPTZ"),
+    ("prod_stage", "VARCHAR(16)"),
 ]
 
 # ── ALTER TABLE: website_categories 擴充 ──
@@ -480,6 +497,10 @@ _CREATE_INDEXES: list[str] = [
     "CREATE INDEX IF NOT EXISTS idx_crmproj_featured ON crm_projects (public_featured)",
     "CREATE INDEX IF NOT EXISTS idx_crmproj_slug ON crm_projects (public_slug)",
     "CREATE UNIQUE INDEX IF NOT EXISTS idx_crmproj_pubnum ON crm_projects (public_number) WHERE public_number IS NOT NULL",
+    # 1:N 作品實體：對外讀路徑改以 showcase 為主體後的查詢加速 + 唯一性守門
+    "CREATE INDEX IF NOT EXISTS idx_showcase_project ON crm_project_showcase (project_id)",
+    "CREATE INDEX IF NOT EXISTS idx_showcase_published ON crm_project_showcase (published)",
+    "CREATE UNIQUE INDEX IF NOT EXISTS idx_showcase_number ON crm_project_showcase (number) WHERE number IS NOT NULL",
     # 演職員職位查詢：visible+sort
     "CREATE INDEX IF NOT EXISTS idx_credit_role_visible_sort ON website_credit_roles (visible, sort_order)",
     # 頂部導覽：公開端 visible=true ORDER BY sort_order
@@ -684,6 +705,106 @@ UPDATE crm_projects
 """
 
 
+# ── 1:N 作品實體化 backfill（2026-07）──
+# 三段一次性資料遷移，順序固定、全部條件守門（idempotent，重跑 0 rows）：
+#
+# 1. 補孤兒列：public=TRUE 但從未開過 showcase 的專案（update_project_public 可直接設
+#    public 而不建 showcase row）。不補的話讀路徑切到 showcase 後這些作品從官網消失。
+#    刻意不填 project_id / 身分欄位 —— 留給第 2 段統一搬（否則第 2 段的守門會跳過它們）。
+#    slug 加 CASE 防撞：showcase.slug 有 UNIQUE constraint，撞名寧可留 NULL（fallback
+#    number 解析 URL 不變）也不能讓整批 migration rollback。
+# 2. 身分欄位單發 backfill：project_id=id + title/youtube_id/number… 自 crm_projects
+#    的 public_* 搬入。WHERE project_id IS NULL 守門 → 冪等。
+#    ⚠ 必須排在 _BACKFILL_PUBLIC_NUMBER 之後（number 抄的是補號後的 public_number）。
+# 3. 殘列自指：沒有對應 crm_projects 的 showcase 殘列補 project_id=id，
+#    保證 project_id 欄位後續可視為 NOT NULL 使用。
+#
+# DO + to_regclass 守門：比照 _build_flat_credits_migration_sql —— fresh DB 表還沒建好
+# 時直接 return，避免整個 batch rollback 把 CREATE TABLE 一起廢掉。
+_SHOWCASE_INSERT_ORPHAN_WORKS = """
+DO $orphan_works$
+BEGIN
+    IF to_regclass('crm_project_showcase') IS NULL OR to_regclass('crm_projects') IS NULL THEN
+        RETURN;
+    END IF;
+    INSERT INTO crm_project_showcase
+           (id, slug, description, cover_url, credits, credits_mode, credits_text,
+            published, published_at)
+    SELECT p.id,
+           CASE WHEN p.public_slug IS NOT NULL AND EXISTS (
+                    SELECT 1 FROM crm_project_showcase s2 WHERE s2.slug = p.public_slug)
+                THEN NULL ELSE p.public_slug END,
+           p.public_description, p.public_cover_url,
+           COALESCE(p.public_credits, '[]'::jsonb),
+           COALESCE(p.public_credits_mode, 'text'), p.public_credits_text,
+           TRUE, p.public_published_at
+      FROM crm_projects p
+     WHERE p.public IS TRUE
+       AND NOT EXISTS (SELECT 1 FROM crm_project_showcase sc WHERE sc.id = p.id);
+END $orphan_works$
+"""
+
+# 1.5 published 旗標對齊：對外可見性的正本一直是 crm_projects.public（讀路徑切換前），
+# 但 sc.published 只在 showcase 流程被 _sync 同步 —— 歷史上 admin PUT 直改 public
+# 可能與 sc.published 分岔。切讀 showcase 前以 p.public 為準一次性對齊，否則
+# 「public=F 但 sc.published=T」的列會在切換後突然對外冒出來。
+# ⚠ 同樣以 sc.project_id IS NULL 守門（在第 2 段蓋 project_id 之前跑）：
+# Phase 4 停寫 public_* 後 p.public 會過期，這段絕不能再跑。
+_SHOWCASE_ALIGN_PUBLISHED = """
+DO $align_published$
+BEGIN
+    IF to_regclass('crm_project_showcase') IS NULL OR to_regclass('crm_projects') IS NULL THEN
+        RETURN;
+    END IF;
+    UPDATE crm_project_showcase sc
+       SET published    = (p.public IS TRUE),
+           published_at = CASE WHEN p.public IS TRUE
+                               THEN COALESCE(sc.published_at, p.public_published_at)
+                               ELSE sc.published_at END
+      FROM crm_projects p
+     WHERE p.id = sc.id
+       AND sc.project_id IS NULL
+       AND sc.published IS DISTINCT FROM (p.public IS TRUE);
+END $align_published$
+"""
+
+_SHOWCASE_BACKFILL_IDENTITY = """
+DO $backfill_works$
+BEGIN
+    IF to_regclass('crm_project_showcase') IS NULL OR to_regclass('crm_projects') IS NULL THEN
+        RETURN;
+    END IF;
+    UPDATE crm_project_showcase sc
+       SET project_id     = sc.id,
+           -- description/cover 的正本在 showcase，但 update_project_public 白名單含
+           -- public_description → 可能有「sc 空、project 有值」的歷史分岔；切讀 showcase
+           -- 前補齊（sc 有值時以 sc 為準 — showcase-edit 才是正規編輯入口）
+           description    = COALESCE(NULLIF(sc.description, ''), p.public_description),
+           cover_url      = COALESCE(NULLIF(sc.cover_url, ''), p.public_cover_url),
+           title          = p.public_title,
+           title_en       = p.public_title_en,
+           description_en = p.public_description_en,
+           youtube_id     = p.public_youtube_id,
+           year           = p.public_year,
+           featured       = COALESCE(p.public_featured, FALSE),
+           featured_image = p.public_featured_image,
+           noindex        = COALESCE(p.public_noindex, FALSE),
+           number         = p.public_number,
+           old_slugs      = COALESCE(p.public_old_slugs, '[]'::jsonb),
+           sort_order     = COALESCE(p.public_sort_order, 0),
+           verified_at    = p.website_verified_at,
+           prod_stage     = p.website_prod_stage
+      FROM crm_projects p
+     WHERE p.id = sc.id
+       AND sc.project_id IS NULL;
+END $backfill_works$
+"""
+
+_SHOWCASE_SELF_PROJECT_ID = """
+UPDATE crm_project_showcase SET project_id = id WHERE project_id IS NULL
+"""
+
+
 async def run_website_migrations(session_factory: Callable) -> None:
     """Execute Phase M DB migrations.
 
@@ -726,6 +847,11 @@ async def run_website_migrations(session_factory: Callable) -> None:
         _MARK_DEFAULT_TAGS_SEEDED,
         # 既有 public 作品 backfill 編號（idempotent — 已有 public_number 的會跳過）
         _BACKFILL_PUBLIC_NUMBER,
+        # 1:N 作品實體化（順序固定：補孤兒列 → published 對齊 → 身分欄位 backfill → 殘列自指）
+        _SHOWCASE_INSERT_ORPHAN_WORKS,
+        _SHOWCASE_ALIGN_PUBLISHED,
+        _SHOWCASE_BACKFILL_IDENTITY,
+        _SHOWCASE_SELF_PROJECT_ID,
         # 演職員職位庫 seed（roles 必先於 templates，因為 templates 子查詢要查 role.id）
         _SEED_CREDIT_ROLES,
         *_SEED_CREDIT_TEMPLATES,

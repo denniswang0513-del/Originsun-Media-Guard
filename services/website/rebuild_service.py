@@ -494,15 +494,16 @@ _PUBLIC_SITE_BASE = "https://www.originsun-studio.com"
 
 
 async def _verify_published_works() -> None:
-    """N-now 上架驗收（藍圖 N-now）：public=True 且尚未驗證的專案，逐一 GET 對外
-    作品頁；200 → 蓋 website_verified_at 章 + 推播。結案看板據此顯示「已上線 ✓」
-    vs「驗證中」。單次上限 20 件防暴走；失敗的下次 rebuild 再試。"""
+    """N-now 上架驗收（藍圖 N-now）：published=True 且尚未驗證的**作品**（1:N 後以
+    crm_project_showcase 為單位，一作品一 URL 一章），逐一 GET 對外作品頁；
+    200 → 蓋 sc.verified_at 章（主作品 dual-stamp project.website_verified_at）+ 推播。
+    結案看板據此顯示「已上線 ✓」vs「驗證中」。單次上限 20 件防暴走；失敗的下次 rebuild 再試。"""
     import asyncio
     import urllib.request
     from datetime import datetime
 
     from sqlalchemy import select
-    from db.models import CrmProject
+    from db.models import CrmProject, CrmProjectShowcase
     from db.session import get_session_factory
 
     factory = get_session_factory()
@@ -519,23 +520,31 @@ async def _verify_published_works() -> None:
 
     async with factory() as session:
         rows = (await session.execute(
-            select(CrmProject)
-            .where(CrmProject.public.is_(True), CrmProject.website_verified_at.is_(None))
+            select(CrmProjectShowcase)
+            .where(CrmProjectShowcase.published.is_(True),
+                   CrmProjectShowcase.verified_at.is_(None))
             .limit(20)
         )).scalars().all()
         if not rows:
             return
-        from services.website.project_service import _slug_or_fallback
+        from services.website.project_service import _slug_or_fallback, is_main_work
         # 20 件各 15s timeout 的 HTTP GET 彼此獨立 → 平行（原本序列最壞 20×15s≈5 分）
-        urls = [f"{_PUBLIC_SITE_BASE}/works/{_slug_or_fallback(p)}" for p in rows]
+        urls = [f"{_PUBLIC_SITE_BASE}/works/{_slug_or_fallback(sc)}" for sc in rows]
         oks = await asyncio.gather(*[asyncio.to_thread(_http_ok, u) for u in urls])
         verified = []
-        for p, url, ok in zip(rows, urls, oks):
-            if ok:
-                p.website_verified_at = datetime.now()
-                verified.append(p.public_title or p.name or "")
-            else:
+        for sc, url, ok in zip(rows, urls, oks):
+            if not ok:
                 logger.warning("[rebuild] 上架驗證未過（%s）— 下次 rebuild 重試", url)
+                continue
+            now = datetime.now()
+            sc.verified_at = now
+            title = sc.title or ""
+            if is_main_work(sc):
+                project = await session.get(CrmProject, sc.project_id)
+                if project:
+                    project.website_verified_at = now  # dual-stamp（Phase 4 停寫）
+                    title = title or project.public_title or project.name or ""
+            verified.append(title)
         if verified:
             await session.commit()
             logger.info("[rebuild] 上架驗證 ✓ %d 件: %s", len(verified), "、".join(verified[:5]))

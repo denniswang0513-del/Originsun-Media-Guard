@@ -170,53 +170,53 @@ async def list_closing_projects(request: Request):
             .order_by(CrmProject.completion_date.desc().nullslast())
         )).all()
 
+        from core.crm_logic import work_completeness, work_stage
         items = []
         for p, short_name, full_name in rows:
+            # 1:N：主作品 = id == project_id 那列（Phase 1 每專案僅此一列；
+            # sc 不存在 = 還沒進過 showcase 流程 → fallback 專案鏡射欄位）
             sc = await session.get(CrmProjectShowcase, p.id)
-            if p.public:
-                stage = "已上線"
-            elif p.website_prod_stage in ("製作中", "不上官網"):
-                stage = p.website_prod_stage
+            if sc:
+                stage = work_stage(bool(sc.published), sc.prod_stage or p.website_prod_stage)
+                verified = sc.verified_at is not None
+                public = bool(sc.published)
+                featured = bool(sc.featured)
+                slug = (sc.slug or "").strip() or (
+                    str(sc.number) if sc.number is not None else None
+                )
+                completeness = work_completeness(
+                    video_url=sc.video_url, youtube_id=sc.youtube_id,
+                    extra_videos=sc.extra_videos, gallery=sc.gallery,
+                    cover_url=sc.cover_url, featured_image=sc.featured_image,
+                    description=sc.description, credits=sc.credits,
+                    credits_text=sc.credits_text,
+                )
             else:
-                stage = "待製作"
-            video = bool((sc and sc.video_url) or p.public_youtube_id)
-            images = bool(
-                (sc and sc.gallery and len(sc.gallery) > 0)
-                or p.public_featured_image
-                or (sc and sc.cover_url)
-            )
-            # 「說明」= 專案描述是否已填寫（showcase 描述 或 專案公開描述任一有值）
-            description = bool(
-                (sc and (sc.description or "").strip())
-                or (p.public_description or "").strip()
-            )
-            # credits 有填：結構化 blocks 或 文字層 credits_text 或 公開 credits 任一有內容
-            credits = bool(
-                (sc and sc.credits and len(sc.credits) > 0)
-                or (sc and (sc.credits_text or "").strip())
-                or (p.public_credits and len(p.public_credits) > 0)
-            )
-            slug = (p.public_slug or "").strip() or (
-                str(p.public_number) if p.public_number is not None else None
-            )
+                stage = work_stage(bool(p.public), p.website_prod_stage)
+                verified = p.website_verified_at is not None
+                public = bool(p.public)
+                featured = bool(p.public_featured)
+                slug = (p.public_slug or "").strip() or (
+                    str(p.public_number) if p.public_number is not None else None
+                )
+                completeness = work_completeness(
+                    youtube_id=p.public_youtube_id,
+                    featured_image=p.public_featured_image, cover_url=p.public_cover_url,
+                    description=p.public_description, credits=p.public_credits,
+                )
             items.append({
                 "id": p.id,
                 "name": p.name,
                 "client_name": short_name or full_name or "",
                 "completion_date": p.completion_date.isoformat() if p.completion_date else None,
-                "public": bool(p.public),
+                "public": public,
                 "showcase_published": bool(sc.published) if sc else False,
                 "stage": stage,
                 # N-now 上架驗收：rebuild 後對外頁實測 200 才 True（已上線 ✓ vs 驗證中）
-                "verified": p.website_verified_at is not None,
-                "public_featured": bool(p.public_featured),
+                "verified": verified,
+                "public_featured": featured,
                 "slug": slug,
-                "completeness": {
-                    "video": video,
-                    "images": images,
-                    "description": description,
-                    "credits": credits,
-                },
+                "completeness": completeness,
             })
 
     return {"items": items}
@@ -240,6 +240,11 @@ async def update_project_website_stage(project_id: str, request: Request):
             raise HTTPException(status_code=404, detail="找不到此專案")
         project.website_prod_stage = stage
         project.updated_at = _now()
+        # 1:N：階段正本移往作品層 — 主作品存在就同步寫（結案看板讀 sc.prod_stage）
+        sc = await session.get(CrmProjectShowcase, project_id)
+        if sc:
+            sc.prod_stage = stage
+            sc.updated_at = _now()
         await session.commit()
 
     return {"ok": True, "stage": stage}

@@ -435,30 +435,33 @@ async def list_seo_audit(session: AsyncSession) -> list[dict]:
 
     給 admin 一覽哪些缺 SEO；也給 Claude pipeline 知道要先處理誰。
     """
-    # 撈所有 public works 的 id + 基本資訊
-    proj_stmt = (
-        select(CrmProject)
-        .where(CrmProject.public.is_(True))
+    # 撈所有 published 作品（1:N 後以 showcase 為單位；website_project_seo.project_id
+    # 語意 = work id，既有資料 == project id 自動相容）+ 所屬專案（name fallback）
+    from db.models import CrmProjectShowcase
+    work_stmt = (
+        select(CrmProjectShowcase, CrmProject)
+        .join(CrmProject, CrmProject.id == CrmProjectShowcase.project_id)
+        .where(CrmProjectShowcase.published.is_(True))
         .order_by(
-            CrmProject.public_sort_order.desc().nullslast(),
-            CrmProject.public_published_at.desc().nullslast(),
+            CrmProjectShowcase.sort_order.desc().nullslast(),
+            CrmProjectShowcase.published_at.desc().nullslast(),
         )
     )
-    projects = list((await session.execute(proj_stmt)).scalars())
+    rows = list(await session.execute(work_stmt))
 
     # 一次撈全部 SEO row（避免 N+1）
-    if projects:
+    if rows:
         seo_stmt = select(WebsiteProjectSeo).where(
-            WebsiteProjectSeo.project_id.in_([p.id for p in projects])
+            WebsiteProjectSeo.project_id.in_([sc.id for sc, _ in rows])
         )
         seo_map = {r.project_id: r for r in (await session.execute(seo_stmt)).scalars()}
     else:
         seo_map = {}
 
     out: list[dict] = []
-    for p in projects:
-        seo_row = seo_map.get(p.id)
-        seo = project_seo_to_dict(seo_row) if seo_row else _empty_seo_dict(p.id)
+    for sc, p in rows:
+        seo_row = seo_map.get(sc.id)
+        seo = project_seo_to_dict(seo_row) if seo_row else _empty_seo_dict(sc.id)
 
         # Completeness 評分：每填一項 +1，總分 6（seo_title/desc/keywords/narrative/facts/faqs）
         score = sum([
@@ -471,13 +474,13 @@ async def list_seo_audit(session: AsyncSession) -> list[dict]:
         ])
 
         out.append({
-            "project_id": p.id,
-            "title": p.public_title or p.name,
-            "slug": (p.public_slug or "").strip() or (
-                str(p.public_number) if p.public_number is not None else None
+            "project_id": sc.id,   # 1:N 後語意 = work id（主作品 == 舊 project id）
+            "title": sc.title or p.name,
+            "slug": (sc.slug or "").strip() or (
+                str(sc.number) if sc.number is not None else None
             ),
             "client": p.public_client,
-            "year": p.public_year,
+            "year": sc.year,
             "completeness": score,        # 0-6
             "needs_ai_review": seo["needs_ai_review"],
             "last_ai_review_at": seo["last_ai_review_at"],
@@ -495,22 +498,25 @@ async def get_project_seo_draft_context(
     Claude 拿到後可以自己 reasoning 生 seo_title / description / narrative / faqs，
     再 PATCH 回去。
     """
-    proj = await session.get(CrmProject, project_id)
-    if not proj or not proj.public:
+    # project_id 自 1:N 起語意 = work id（主作品 == 舊 project id）
+    from db.models import CrmProjectShowcase
+    sc = await session.get(CrmProjectShowcase, project_id)
+    if not sc or not sc.published:
         return None
+    proj = await session.get(CrmProject, sc.project_id or sc.id)
 
     seo_row = await session.get(WebsiteProjectSeo, project_id)
     seo = project_seo_to_dict(seo_row) if seo_row else _empty_seo_dict(project_id)
 
     return {
-        "project_id": proj.id,
-        "title": proj.public_title or proj.name,
-        "client": proj.public_client,
-        "year": proj.public_year,
-        "youtube_id": proj.public_youtube_id,
-        "description": proj.public_description,
-        "credits": proj.public_credits or [],
-        "credits_text": proj.public_credits_text,
-        "credits_mode": proj.public_credits_mode or "block",
+        "project_id": sc.id,
+        "title": sc.title or (proj.name if proj else ""),
+        "client": proj.public_client if proj else "",
+        "year": sc.year,
+        "youtube_id": sc.youtube_id,
+        "description": sc.description,
+        "credits": sc.credits or [],
+        "credits_text": sc.credits_text,
+        "credits_mode": sc.credits_mode or "block",
         "current_seo": seo,
     }

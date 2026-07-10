@@ -185,10 +185,17 @@ async def _sync_showcase_to_public(session, sc) -> None:
         sc.published_at = _now()
     project.public = bool(sc.published)
     project.public_published_at = sc.published_at if sc.published else None
-    # 第一次 publish → auto-assign 連續編號（unpublish 不收回，避免 republish 改號）
+    # 第一次 publish → auto-assign 連續編號（unpublish 不收回，避免 republish 改號）。
+    # 1:N 後編號正本在 sc.number — 兩邊交叉補齊，主作品永遠同號（避免各叫一次
+    # counter 拿到不同號）。
     if project.public and project.public_number is None:
-        from services.website.project_service import _next_public_number
-        project.public_number = await _next_public_number(session)
+        if sc.number is not None:
+            project.public_number = sc.number
+        else:
+            from services.website.project_service import _next_public_number
+            project.public_number = await _next_public_number(session)
+    if sc.published and sc.number is None:
+        sc.number = project.public_number
 
 
 async def _mint_showcase_edit_token(
@@ -210,9 +217,12 @@ async def _mint_showcase_edit_token(
     token = create_token({"sub": project_id, "scope": SHOWCASE_EDIT_SCOPE},
                          expires_days=SHOWCASE_EDIT_EXPIRES_DAYS)
     if not sc:
-        sc = CrmProjectShowcase(id=project_id, edit_token=token, editable=True)
+        sc = CrmProjectShowcase(id=project_id, project_id=project_id,
+                                edit_token=token, editable=True)
         session.add(sc)
     else:
+        if not sc.project_id:
+            sc.project_id = sc.id
         sc.edit_token = token
         sc.updated_at = _now()
     return token, sc
@@ -227,15 +237,14 @@ async def get_project_showcase(project_id: str, request: Request):
     async with factory() as session:
         sc = await session.get(CrmProjectShowcase, project_id)
         if not sc:
-            sc = CrmProjectShowcase(id=project_id)
+            sc = CrmProjectShowcase(id=project_id, project_id=project_id)
             session.add(sc)
             await session.commit()
             await session.refresh(sc)
         data = _to_showcase_dict(sc)
         # 對外公開連結 — 給 delivery Tab「預覽」按鈕直接連到 originsun-studio.com/works/{slug}
-        proj = await session.get(CrmProject, project_id)
         public_url = ""
-        if proj and proj.public:
+        if sc.published:
             try:
                 from services.website import settings_service
                 _all_settings = await settings_service.get_all_settings(session)
@@ -243,8 +252,8 @@ async def get_project_showcase(project_id: str, request: Request):
             except Exception:
                 _site_url = ""
             site = (_site_url or "https://originsun-studio.com").rstrip("/")
-            url_slug = (proj.public_slug or "").strip() or (
-                str(proj.public_number) if proj.public_number is not None else ""
+            url_slug = (sc.slug or "").strip() or (
+                str(sc.number) if sc.number is not None else ""
             )
             if url_slug:
                 public_url = f"{site}/works/{url_slug}"
@@ -268,44 +277,66 @@ def _apply_showcase_fields(sc, payload: dict) -> None:
     payload 可以是 Pydantic model_dump (admin path) 或 raw body dict (token path)。
     缺欄位的不動（partial update 語意）。
 
-    slug 特殊：空字串 → None。原因是 sc.slug 鏡像到 crm_projects.public_slug
-    （有 unique index），空字串視為「使用 public_number 作 URL」，必須存 NULL
-    避免兩個 project 都用空字串撞 unique。其他欄位（description / video_url）
-    空字串是合法值，不轉 None。
+    slug 特殊：空字串 → None。原因是 sc.slug 有 unique index，空字串視為
+    「使用 number 作 URL」，必須存 NULL 避免兩個作品都用空字串撞 unique。
+    其他欄位（description / video_url）空字串是合法值，不轉 None。
+
+    video_url 變動時同步 parse sc.youtube_id（讀路徑的快取欄；只在 parse 成功時
+    覆寫 — 與 _sync_showcase_to_public 對 public_youtube_id 的行為一致）。
     """
+    # SEO 301（順序沿舊版「replace 再 append」）：先套 payload 的 old_slugs 全量替換
+    # （若有），再偵測 slug 變動把舊 slug append 進 sc.old_slugs — append 不被 replace 洗掉。
+    # Lazy import — services/website/ 不在 OTA AGENT_DIRS（同 _sync 的理由）
+    if "public_old_slugs" in payload and isinstance(payload["public_old_slugs"], list):
+        from services.website.project_service import normalize_old_slugs_input
+        sc.old_slugs = normalize_old_slugs_input(payload["public_old_slugs"])
+    if "slug" in payload:
+        from services.website.project_service import append_old_slug_if_changed_work
+        append_old_slug_if_changed_work(sc, payload["slug"] or None)
     for field in _SHOWCASE_UPDATABLE_FIELDS:
         if field in payload:
             value = payload[field]
             if field == "slug":
                 value = value or None
             setattr(sc, field, value)
+    if "video_url" in payload:
+        from services.website.notion_service import _extract_youtube_id
+        yt_id = _extract_youtube_id(sc.video_url or "")
+        if yt_id:
+            sc.youtube_id = yt_id
     sc.updated_at = _now()
 
 
-# 作品基本資料 — showcase-edit token 路徑也允許編，token 是 trusted（內部 PM）
-_PROJECT_PUBLIC_FIELDS = (
-    "public_title", "public_client", "public_year",
-    "public_featured", "public_featured_image", "public_noindex",
-)
+# 作品身分欄位（1:N 後正本在 sc）— showcase-edit token 路徑也允許編，token 是
+# trusted（內部 PM）。wire key 沿用歷史 public_* 命名（前端不用改）。
+_WORK_IDENTITY_FIELD_MAP = {
+    "public_title": "title",
+    "public_year": "year",
+    "public_featured": "featured",
+    "public_featured_image": "featured_image",
+    "public_noindex": "noindex",
+}
 
 
-def _apply_project_public_fields(project, payload: dict) -> None:
-    """直接寫 project 的 public_* 欄位（標題 / 客戶 / 年份 / featured / noindex）。
+def _apply_work_identity_fields(sc, project, payload: dict) -> None:
+    """寫作品身分欄位（標題 / 年份 / featured / 精選圖 / noindex / old_slugs）。
 
-    payload 可以含 public_published（boolean，True → 公開 + 設 published_at）
-    這個 flow 跟 _sync_showcase_to_public 的 sc.published 鏡射並存：
-      - 若 payload 有 public_published 就直接寫 project.public（不過濾 sc.published）
-      - 後續 _sync_showcase_to_public 仍會以 sc.published 為準覆寫（鏡射優先）
-    所以「立即發布／下架」實務上要從 sc.published 改，這條只當 fallback。
+    正本寫 sc.*；主作品（sc.id == sc.project_id）同時 dual-write 回
+    crm_projects.public_*（過渡期回退保險，Phase 4 停寫）。
+    public_client 例外 — 客戶是專案層資料，只寫 project（所有作品共用顯示）。
     """
-    for field in _PROJECT_PUBLIC_FIELDS:
-        if field in payload:
-            setattr(project, field, payload[field])
-    # public_old_slugs：admin 想刪掉某個舊 slug 重定向時走這條（取代整個 list）
-    # normalize 跟 update_project_public 同步：strip 網域、trim 結尾 /、去重
-    if "public_old_slugs" in payload and isinstance(payload["public_old_slugs"], list):
-        from services.website.project_service import normalize_old_slugs_input
-        project.public_old_slugs = normalize_old_slugs_input(payload["public_old_slugs"])
+    main = bool(sc.id and sc.id == sc.project_id)
+    for wire_key, field in _WORK_IDENTITY_FIELD_MAP.items():
+        if wire_key in payload:
+            setattr(sc, field, payload[wire_key])
+            if main and project is not None:
+                setattr(project, wire_key, payload[wire_key])
+    if "public_client" in payload and project is not None:
+        project.public_client = payload["public_client"]
+    # public_old_slugs 的 sc 側寫入在 _apply_showcase_fields（含 replace→append 順序）；
+    # 這裡只負責主作品把最終值鏡射回 project（Phase 4 停寫）
+    if main and project is not None:
+        project.public_old_slugs = list(sc.old_slugs or [])
 
 
 @router.put("/projects/{project_id}/showcase")
@@ -317,7 +348,7 @@ async def update_project_showcase(project_id: str, req: ShowcasePayload, request
     async with factory() as session:
         sc = await session.get(CrmProjectShowcase, project_id)
         if not sc:
-            sc = CrmProjectShowcase(id=project_id)
+            sc = CrmProjectShowcase(id=project_id, project_id=project_id)
             session.add(sc)
         _apply_showcase_fields(sc, req.model_dump())
         await _sync_showcase_to_public(session, sc)
@@ -443,7 +474,7 @@ async def upload_showcase_process(project_id: str, request: Request,
     async with factory() as session:
         sc = await session.get(CrmProjectShowcase, project_id)
         if not sc:
-            sc = CrmProjectShowcase(id=project_id, process_items=[item])
+            sc = CrmProjectShowcase(id=project_id, project_id=project_id, process_items=[item])
             session.add(sc)
         else:
             items = list(sc.process_items or [])
@@ -495,6 +526,11 @@ async def toggle_showcase_publish(project_id: str, request: Request):
         if sc.published:
             sc.published_at = _now()
         sc.updated_at = _now()
+        # 首次發布配號（正本在 sc.number；子作品沒有對應 project、_sync 是 no-op，
+        # 所以必須在這裡配，不能只靠 _sync 的交叉補齊）
+        if sc.published and sc.number is None:
+            from services.website.project_service import _next_public_number
+            sc.number = await _next_public_number(session)
         await _sync_showcase_to_public(session, sc)
         await session.commit()
         await session.refresh(sc)
@@ -557,39 +593,40 @@ async def _build_showcase_edit_data(session, sc) -> dict:
     carry_in 共用同一個 serializer，確保回傳 shape 完全一致。呼叫者已完成 token
     驗證並提供對應 sc（CrmProjectShowcase）。"""
     from db.models_website import WebsiteCategory, WebsiteProjectCategory
-    proj = await session.get(CrmProject, sc.id)
+    proj = await session.get(CrmProject, sc.project_id or sc.id)
     project_name = proj.name if proj else ""
     data = _to_showcase_dict(sc)
     # Strip financial / internal fields
     data.pop("edit_token", None)
     data["project_name"] = project_name
+    data["project_id"] = sc.project_id or sc.id
     # AI 參考資料（製作人上傳文件抽文字 + 補充說明）— 前端渲染清單 + notes
     data["ai_reference_files"] = list(sc.ai_reference_files or [])
     data["ai_reference_notes"] = sc.ai_reference_notes or ""
-    # 作品基本資料 — 給 showcase-edit 編輯器一頁全包
-    if proj:
-        data["public_title"] = proj.public_title or ""
-        data["public_client"] = proj.public_client or ""
-        data["public_year"] = proj.public_year
-        data["public_featured"] = bool(proj.public_featured)
-        data["public_featured_image"] = proj.public_featured_image or ""
-        data["public_noindex"] = bool(proj.public_noindex)
-        data["public_published"] = bool(proj.public)
-        data["public_old_slugs"] = list(proj.public_old_slugs or [])
-        # 對外公開 URL — 給 showcase-edit「網站連結」直接組公開網址用
-        # site_url 從 website_settings 讀，沒設 fallback 到 production 網域
-        try:
-            from services.website import settings_service
-            _all_settings = await settings_service.get_all_settings(session)
-            _site_url = (_all_settings.get("seo.site_url") or "").strip()
-        except Exception:
-            _site_url = ""
-        data["public_site_url"] = _site_url or "https://originsun-studio.com"
-        # URL slug 解析優先序：admin 自訂 slug > public_number（1, 2, 3）> 無法產 URL
-        url_slug = (proj.public_slug or "").strip() or (
-            str(proj.public_number) if proj.public_number is not None else ""
-        )
-        data["public_url_path"] = f"/works/{url_slug}" if url_slug else ""
+    # 作品基本資料 — 給 showcase-edit 編輯器一頁全包（wire key 沿用 public_* 命名，
+    # 正本已在 sc；client 是專案層資料照舊讀 project）
+    data["public_title"] = sc.title or ""
+    data["public_client"] = (proj.public_client if proj else "") or ""
+    data["public_year"] = sc.year
+    data["public_featured"] = bool(sc.featured)
+    data["public_featured_image"] = sc.featured_image or ""
+    data["public_noindex"] = bool(sc.noindex)
+    data["public_published"] = bool(sc.published)
+    data["public_old_slugs"] = list(sc.old_slugs or [])
+    # 對外公開 URL — 給 showcase-edit「網站連結」直接組公開網址用
+    # site_url 從 website_settings 讀，沒設 fallback 到 production 網域
+    try:
+        from services.website import settings_service
+        _all_settings = await settings_service.get_all_settings(session)
+        _site_url = (_all_settings.get("seo.site_url") or "").strip()
+    except Exception:
+        _site_url = ""
+    data["public_site_url"] = _site_url or "https://originsun-studio.com"
+    # URL slug 解析優先序：admin 自訂 slug > number（1, 2, 3）> 無法產 URL
+    url_slug = (sc.slug or "").strip() or (
+        str(sc.number) if sc.number is not None else ""
+    )
+    data["public_url_path"] = f"/works/{url_slug}" if url_slug else ""
 
     # 對外 categories 候選清單（含 kind）+ 此作品已勾選的 ID
     cat_rows = (await session.execute(
@@ -736,7 +773,7 @@ async def quick_add_staff_via_token(token: str, req: StaffQuickAddPayload):
             status="專案",
             resume_visible=False,
             created_via=STAFF_CREATED_VIA_SHOWCASE_EDIT,
-            created_for_project_id=sc.id,
+            created_for_project_id=sc.project_id or sc.id,
             created_at=now, updated_at=now,
         )
         session.add(s)
@@ -765,13 +802,18 @@ async def update_showcase_edit_data(token: str, request: Request):
             )
             for cid in ids:
                 session.add(WebsiteProjectCategory(project_id=sc.id, category_id=cid))
-        # 作品基本資料（public_title / client / year / featured / noindex / old_slugs）
-        # token 路徑信任 PM 編輯所有作品相關欄位。_sync_showcase_to_public 不會覆蓋這些欄位。
-        project = await session.get(CrmProject, sc.id)
-        if project:
-            _apply_project_public_fields(project, body)
+        # 作品身分欄位（public_title / year / featured / noindex / old_slugs → sc；
+        # client → project）。token 路徑信任 PM 編輯所有作品相關欄位。
+        project = await session.get(CrmProject, sc.project_id or sc.id)
+        _apply_work_identity_fields(sc, project, body)
+        if project and sc.id == sc.project_id:
+            # name/client_id 回寫只限主作品 — 子作品改標題不可改掉 CRM 專案名
             from services.website.project_service import mirror_public_to_crm
             await mirror_public_to_crm(session, project, body)
+        # 首次發布配號（token PUT 可帶 published；子作品 _sync no-op，這裡保底）
+        if sc.published and sc.number is None:
+            from services.website.project_service import _next_public_number
+            sc.number = await _next_public_number(session)
         # SEO 覆寫欄位 — 只接 SHOWCASE_EDIT_PATCHABLE_FIELDS allowlist 內的鍵
         # narrative_long / key_facts / faqs 由 admin Tab + AI pipeline 寫，token 路徑不暴露
         if isinstance(body.get("seo"), dict):
@@ -818,24 +860,29 @@ async def carry_in_showcase_credits(token: str, request: Request):
         mode = "replace"
     async with factory() as session:
         sc = await _verify_showcase_edit_token(session, token, require_editable=True)
-        blocks = await _build_credit_blocks_from_staff(session, sc.id)
+        # 派工在專案層 — 子作品也從「所屬專案」帶入 credits
+        blocks = await _build_credit_blocks_from_staff(session, sc.project_id or sc.id)
         if mode == "append":
             sc.credits = list(sc.credits or []) + blocks
         else:
             sc.credits = blocks
         sc.credits_mode = "block"
         sc.updated_at = _now()
-        # 補作品 meta（僅在原本為空時）
-        project = await session.get(CrmProject, sc.id)
+        # 補作品 meta（僅在原本為空時）— 身分欄位正本在 sc；主作品 dual-write 回 project
+        project = await session.get(CrmProject, sc.project_id or sc.id)
+        main = bool(project and sc.id == sc.project_id)
         if project:
-            if not project.public_title:
-                project.public_title = project.name
+            if not sc.title:
+                sc.title = project.name
             if not project.public_client:
                 client = await session.get(Client, project.client_id)
                 if client:
                     project.public_client = client.short_name or client.full_name or ""
-            if not project.public_year and project.completion_date:
-                project.public_year = project.completion_date.year
+            if not sc.year and project.completion_date:
+                sc.year = project.completion_date.year
+            if main:
+                project.public_title = project.public_title or sc.title
+                project.public_year = project.public_year or sc.year
         await _sync_showcase_to_public(session, sc)
         await session.commit()
         data = await _build_showcase_edit_data(session, sc)
@@ -924,14 +971,15 @@ def _parse_questions(text: str) -> list:
 
 async def _ai_description_context(session, sc):
     """撈這個作品給 AI 用的精簡上下文（名稱 / 客戶 / 現有描述 / 參考資料）。"""
-    project = await session.get(CrmProject, sc.id)
+    project = await session.get(CrmProject, sc.project_id or sc.id)
     client_name = ""
     if project and project.client_id:
         client = await session.get(Client, project.client_id)
         if client:
             client_name = (client.short_name or client.full_name or "").strip()
-    name = (project.name if project else "") or ""
-    existing = (project.public_description if project else "") or (sc.description or "")
+    # 作品標題優先（子作品有自己的名字）、fallback 專案名
+    name = (sc.title or "").strip() or (project.name if project else "") or ""
+    existing = (sc.description or "") or (project.public_description if project else "")
     from services.website import seo_service
     ref = seo_service.build_ai_reference_prompt(sc.ai_reference_files, sc.ai_reference_notes)
     return name, client_name, existing.strip(), ref
@@ -1156,11 +1204,11 @@ async def upload_showcase_edit_featured_image(token: str, file: UploadFile = Fil
     fname = os.path.basename(saved)
     url = f"/uploads/projects/{project_id}/showcase/{fname}"
     async with factory() as session:
-        project = await session.get(CrmProject, project_id)
-        if not project:
-            raise HTTPException(status_code=404, detail="找不到專案")
+        sc = await session.get(CrmProjectShowcase, project_id)
+        if not sc:
+            raise HTTPException(status_code=404, detail="找不到作品")
         # 單值欄位（覆寫語意）— 刪掉舊精選圖檔，免得 showcase 目錄堆孤兒 webp（比照封面上傳）
-        old = project.public_featured_image or ""
+        old = sc.featured_image or ""
         if old and old != url:
             old_path = os.path.join(sdir, os.path.basename(old))
             if os.path.isfile(old_path):
@@ -1168,7 +1216,13 @@ async def upload_showcase_edit_featured_image(token: str, file: UploadFile = Fil
                     os.remove(old_path)
                 except OSError:
                     pass
-        project.public_featured_image = url
+        sc.featured_image = url
+        sc.updated_at = _now()
+        # 主作品 dual-write（Phase 4 停寫）
+        if sc.id == sc.project_id:
+            project = await session.get(CrmProject, sc.project_id)
+            if project:
+                project.public_featured_image = url
         await session.commit()
     # 對外網站首頁輪播讀 public_featured_image → 標 dirty 觸發 rebuild（debounce 60s）
     try:
@@ -1226,7 +1280,7 @@ async def list_published_works():
         )).scalars().all()
         works = []
         for sc in rows:
-            proj = await session.get(CrmProject, sc.id)
+            proj = await session.get(CrmProject, sc.project_id or sc.id)
             client_name = ""
             project_name = ""
             if proj:

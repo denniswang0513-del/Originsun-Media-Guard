@@ -2,9 +2,10 @@
 ---
 公益合作 / 創作計畫 案例 CRUD + 公開列表（解析作品連動）。
 
-連動作品：entry.project_id 指向 crm_projects.id。渲染時：
-- 封面/標題/年份：entry 自填值優先，空則 fallback 到作品的 public_* 欄位
-- 連結：連動作品 → /works/{slug}（slug = public_slug 或 public_number）；
+連動作品：entry.project_id 自 1:N 起語意 = work id（crm_project_showcase.id；
+既有資料 == 舊 project id 自動相容）。渲染時：
+- 封面/標題/年份：entry 自填值優先，空則 fallback 到作品欄位
+- 連結：連動作品 → /works/{slug}（slug = sc.slug 或 sc.number）；
         獨立案例 → entry.link_url
 - 連動的作品若已刪除或未公開 → 公開列表跳過該案例（admin 列表仍顯示並標示）
 """
@@ -16,7 +17,7 @@ from typing import Any, Optional
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from db.models import CrmProject
+from db.models import CrmProject, CrmProjectShowcase
 from db.models_website import WebsiteInitiative
 from . import _crud_base as _crud
 
@@ -38,29 +39,48 @@ def _to_dict(o: WebsiteInitiative) -> dict[str, Any]:
     }
 
 
-def _work_slug(w: CrmProject) -> Optional[str]:
-    return (w.public_slug or (str(w.public_number) if w.public_number else None))
+def _work_slug(w) -> Optional[str]:
+    return (w.slug or (str(w.number) if w.number else None))
 
 
-def _work_cover(w: CrmProject) -> Optional[str]:
+def _work_cover(w) -> Optional[str]:
     """作品封面：自訂封面優先；沒有就用 YouTube 預設縮圖（hqdefault — 永遠存在，
     不像 maxresdefault 偶爾 404 會讓 Astro build 失敗）。"""
-    if w.public_cover_url:
-        return w.public_cover_url
-    if w.public_youtube_id:
-        return f"https://img.youtube.com/vi/{w.public_youtube_id}/hqdefault.jpg"
+    if w.cover_url:
+        return w.cover_url
+    if w.youtube_id:
+        return f"https://img.youtube.com/vi/{w.youtube_id}/hqdefault.jpg"
     return None
 
 
-async def _load_works(session: AsyncSession, project_ids: list[str]) -> dict[str, CrmProject]:
-    """批次撈連動作品（去重、去空）。"""
-    ids = [p for p in {pid for pid in project_ids if pid}]
+async def _load_works(session: AsyncSession, work_ids: list[str]) -> dict[str, Any]:
+    """批次撈連動作品（去重、去空）— 回 work id → sc（掛 `_project_name` transient）。
+
+    id 查無 showcase 時當舊 project id 用虛擬主作品兜（連動到「未進過 showcase
+    流程的專案」時 admin 列表仍能顯示標題，行為與 1:1 時代一致）。"""
+    from .project_service import _virtual_work_from_project
+    ids = [p for p in {pid for pid in work_ids if pid}]
     if not ids:
         return {}
-    rows = (await session.execute(
-        select(CrmProject).where(CrmProject.id.in_(ids))
-    )).scalars()
-    return {w.id: w for w in rows}
+    out: dict[str, Any] = {}
+    rows = await session.execute(
+        select(CrmProjectShowcase, CrmProject.name)
+        .outerjoin(CrmProject, CrmProject.id == CrmProjectShowcase.project_id)
+        .where(CrmProjectShowcase.id.in_(ids))
+    )
+    for sc, pname in rows:
+        sc._project_name = pname or ""
+        out[sc.id] = sc
+    missing = [i for i in ids if i not in out]
+    if missing:
+        projs = (await session.execute(
+            select(CrmProject).where(CrmProject.id.in_(missing))
+        )).scalars()
+        for p in projs:
+            vw = _virtual_work_from_project(p)
+            vw._project_name = p.name or ""
+            out[p.id] = vw
+    return out
 
 
 # ── CRUD（admin）──
@@ -83,9 +103,9 @@ async def list_admin(session: AsyncSession) -> list[dict]:
     works = await _load_works(session, [it.get("project_id") for it in items])
     for it in items:
         w = works.get(it.get("project_id")) if it.get("project_id") else None
-        it["work_title"] = (w.public_title or w.name) if w else None
+        it["work_title"] = (w.title or w._project_name) if w else None
         it["work_cover"] = _work_cover(w) if w else None
-        it["work_public"] = bool(w and w.public)
+        it["work_public"] = bool(w and w.published)
         it["work_missing"] = bool(it.get("project_id") and not w)
     return items
 
@@ -103,11 +123,11 @@ async def list_public(session: AsyncSession, line: str) -> list[dict]:
         w = works.get(pid) if pid else None
         if pid:
             # 連動作品但作品不存在 / 未公開 → 公開站不顯示（避免死連結）
-            if not w or not w.public:
+            if not w or not w.published:
                 continue
             cover = it.get("cover_url") or _work_cover(w)
-            title = it.get("title") or w.public_title or w.name
-            year = it.get("year") or w.public_year
+            title = it.get("title") or w.title or w._project_name
+            year = it.get("year") or w.year
             slug = _work_slug(w)
             link = f"/works/{slug}" if slug else (it.get("link_url") or None)
         else:

@@ -34,7 +34,8 @@ async def get_stats(session: AsyncSession = Depends(admin_session)):
     public_projects = await project_service.list_admin_projects(
         session, include_non_public=False
     )
-    featured_count = sum(1 for p in public_projects if p.get("public_featured"))
+    # admin dict 的 key 是 "featured"（歷史 bug：這裡拿 "public_featured" 永遠 0）
+    featured_count = sum(1 for p in public_projects if p.get("featured"))
     top_cats.sort(key=lambda c: c.get("project_count", 0), reverse=True)
     return {
         **month_stats,
