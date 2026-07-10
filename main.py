@@ -724,6 +724,8 @@ async def _on_startup():
                 social_runner.start_scheduler_task()     # 社群文稿（Phase N-soc；只在有 claude 的 master 跑）
                 from services import intel_runner
                 intel_runner.start_scheduler_task()       # 產業情報（P-c；只在有 claude 的 master 跑）
+                from services.website import watchdog_runner
+                watchdog_runner.start_scheduler_task()   # 站點守衛（多 UA 篡改探測 + GSC 收錄；只在有 website/ 的 master 跑）
         except Exception as _e_web:
             print(f"[startup] Website migration/seed failed: {_e_web}")
 

@@ -423,6 +423,33 @@ _CREATE_TABLES: list[str] = [
         updated_at TIMESTAMPTZ DEFAULT NOW()
     )
     """,
+    # 站點守衛：每個公開 URL 的 Google 索引狀態快照（GSC URL Inspection，upsert 覆蓋）。
+    """
+    CREATE TABLE IF NOT EXISTS website_index_status (
+        url VARCHAR(512) PRIMARY KEY,
+        verdict VARCHAR(32),
+        coverage_state VARCHAR(160),
+        indexing_state VARCHAR(64),
+        robots_txt_state VARCHAR(32),
+        page_fetch_state VARCHAR(64),
+        google_canonical VARCHAR(512),
+        user_canonical VARCHAR(512),
+        last_crawl_at TIMESTAMPTZ,
+        error TEXT,
+        checked_at TIMESTAMPTZ DEFAULT NOW()
+    )
+    """,
+    # 站點守衛事件流水（告警 / 恢復）：runner 比對探測結果 vs 上次狀態時 append。
+    """
+    CREATE TABLE IF NOT EXISTS website_watchdog_events (
+        id VARCHAR(32) PRIMARY KEY,
+        level VARCHAR(16) NOT NULL,
+        kind VARCHAR(48) NOT NULL,
+        title VARCHAR(255) NOT NULL,
+        detail JSONB,
+        created_at TIMESTAMPTZ DEFAULT NOW()
+    )
+    """,
 ]
 
 _CREATE_INDEXES: list[str] = [
@@ -463,6 +490,8 @@ _CREATE_INDEXES: list[str] = [
     "CREATE INDEX IF NOT EXISTS idx_socialpost_status ON website_social_posts (status)",
     "CREATE INDEX IF NOT EXISTS idx_socialpost_source ON website_social_posts (source_type, source_id)",
     "CREATE INDEX IF NOT EXISTS idx_socialpost_created ON website_social_posts (created_at)",
+    # 站點守衛事件牆：最新在上 → created_at DESC
+    "CREATE INDEX IF NOT EXISTS idx_watchdog_events_created ON website_watchdog_events (created_at DESC)",
 ]
 
 

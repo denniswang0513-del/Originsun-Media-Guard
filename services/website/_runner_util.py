@@ -25,6 +25,26 @@ def validate_cron(cron_str: str) -> None:
         raise ValueError(f"cron 字串不合法：{cron_str!r}（{e}）")
 
 
+def cron_due(cron_expr: str, last_at: float) -> bool:
+    """距離 last_at（epoch 秒）的下一個 cron 時點是否已到。
+
+    純機械件、零政策分歧（不決定「首跑要不要立刻跑」——那是各 runner 自己的取捨）。
+    ⚠ 沒裝 croniter（NAS 容器）或 cron 字串壞掉 → 一律回 False，寧可不跑。
+    """
+    from datetime import datetime
+    try:
+        from croniter import croniter
+    except ImportError:
+        return False
+    if not cron_expr:
+        return False
+    try:
+        next_due = croniter(cron_expr, datetime.fromtimestamp(last_at)).get_next(datetime)
+    except (ValueError, KeyError, TypeError):
+        return False
+    return datetime.now() >= next_due
+
+
 async def relay_post(url: str, timeout: float, *, on_error: Optional[dict] = None) -> dict:
     """POST 到 master internal endpoint（X-Internal-Key = JWT secret）。
 

@@ -25,6 +25,7 @@ from .initiative import WebsiteInitiative
 from .redirect import WebsiteRedirect
 from .translation_state import WebsiteTranslationState
 from .social_post import WebsiteSocialPost
+from .watchdog import WebsiteIndexStatus, WebsiteWatchdogEvent
 
 __all__ = [
     "WebsiteCategory",
@@ -47,4 +48,6 @@ __all__ = [
     "WebsiteRedirect",
     "WebsiteTranslationState",
     "WebsiteSocialPost",
+    "WebsiteIndexStatus",
+    "WebsiteWatchdogEvent",
 ]
