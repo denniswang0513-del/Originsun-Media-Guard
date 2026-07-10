@@ -299,10 +299,13 @@ async def _on_startup():
     # guarded（只在含舊密碼時動）+ idempotent + 例外不擋啟動。
     try:
         from config import load_settings, save_settings, _DEFAULT_SETTINGS
+        # 只換「密碼」子字串，保留主機/埠/庫名 —— dev 的 mediaguard_dev 不能被改成
+        # 預設的 mediaguard（否則 dev 連到生產庫，破壞 §2.1 dev/prod 隔離）。
+        _new_pw = _DEFAULT_SETTINGS["database_url"].split("://originsun:", 1)[-1].split("@", 1)[0]
         _cur_url = load_settings().get("database_url", "")
-        if "originsun2026@" in _cur_url:
-            save_settings({"database_url": _DEFAULT_SETTINGS["database_url"]})
-            print("[migrate] settings.json 的外洩 DB 密碼已輪替為新值")
+        if "originsun2026" in _cur_url and _new_pw and _new_pw != "originsun2026":
+            save_settings({"database_url": _cur_url.replace("originsun2026", _new_pw)})
+            print("[migrate] settings.json 的外洩 DB 密碼已輪替為新值（保留庫名）")
     except Exception as _e_mig:
         print(f"[migrate] DB 密碼輪替略過: {_e_mig}")
     # ── PostgreSQL 連線 ──
