@@ -71,9 +71,28 @@ async def health_check():
         "version": ver,
     }
 
+# ⚠️ settings.json 內含機密：`jwt_secret` 能簽出 access_level=3 的 admin token（master 與
+# NAS website-api 共用同一把，internal endpoint 的 X-Internal-Key 也是它），`database_url`
+# 帶 Postgres 密碼。而 `/api/settings/load` 是**未認證**端點（前端 4 處在無 token 狀態下讀
+# 它，不能改成要求認證），且 master 8000 經 Cloudflare tunnel 對外 —— 2026-07-10 實測
+# `https://foundry.originsun-studio.com/api/settings/load` 從公網可讀到這兩個值。
+# 因此輸出前一律抹除。新增機密欄位時務必同步加進這裡。
+_SECRET_KEYS = ("jwt_secret", "database_url")
+_SECRET_SUBKEYS = {"google_oauth": ("client_secret",)}
+
+
+def _redact_settings(s: dict) -> dict:
+    """回傳去機密的淺拷貝（不改動原 dict —— 它是 load_settings 的快取內容）。"""
+    out = {k: v for k, v in s.items() if k not in _SECRET_KEYS}
+    for parent, subs in _SECRET_SUBKEYS.items():
+        if isinstance(out.get(parent), dict):
+            out[parent] = {k: v for k, v in out[parent].items() if k not in subs}
+    return out
+
+
 @router.get("/api/settings/load")
 async def load_settings_api():
-    return load_settings()
+    return _redact_settings(load_settings())
 
 @router.post("/api/settings/save")
 async def save_settings_api(req: Request):
@@ -93,10 +112,56 @@ async def get_settings_compat():
     return {
         "line_token": n.get("line_notify_token", ""),
         "gchat_webhook": n.get("google_chat_webhook", ""),
+        "alert_webhook": n.get("alert_webhook", ""),
         "custom_webhook": n.get("custom_webhook_url", ""),
         "tpl_backup_success": t.get("backup_success", ""),
         "tpl_report_success": t.get("report_success", ""),
     }
+
+
+@router.post("/api/v1/internal/alert_email")
+async def internal_alert_email(request: Request):
+    """把 🔴 級告警寄成 email。呼叫者＝任一節點的 `notifier._relay_alert_email`。
+
+    認證：`X-Internal-Key` = JWT secret（與 /internal/seo/run 同一套）。
+    只有 master 會被打（notifier 送往 settings.master_server）——SMTP 帳密與收件人存在
+    `website_settings`（NAS Postgres），機隊 7 台因此不需要持有寄信憑證。
+    收件人：`notify.alert_email_to` 優先，沒設才退 `notify.email_to`（聯絡表單那個信箱）。
+    """
+    from core.auth import _get_secret
+    expected = _get_secret()
+    if not expected or request.headers.get("X-Internal-Key", "") != expected:
+        return JSONResponse(status_code=403, content={"detail": "forbidden"})
+
+    try:
+        body = await request.json()
+    except Exception:
+        return JSONResponse(status_code=400, content={"detail": "invalid json"})
+    subject = (body.get("subject") or "Originsun 系統告警").strip()
+    text = (body.get("body") or "").strip()
+    if not text:
+        return JSONResponse(status_code=400, content={"detail": "empty body"})
+
+    # lazy import：機隊精簡 agent 沒裝 sqlalchemy，這支端點在它們身上不會被呼叫到
+    from db.session import get_session_factory
+    from services.website.notify_service import _parse_recipients, _smtp_send
+    from services.website.settings_service import get_all_settings
+
+    factory = get_session_factory()
+    if factory is None:
+        return JSONResponse(status_code=503, content={"detail": "db not ready"})
+    async with factory() as session:
+        settings = await get_all_settings(session)
+
+    raw = settings.get("notify.alert_email_to") or settings.get("notify.email_to") or ""
+    to_list = _parse_recipients(raw)
+    if not to_list:
+        return {"sent": 0, "detail": "no recipients"}
+    try:
+        await asyncio.to_thread(_smtp_send, settings, to_list, subject, text)
+    except Exception as e:  # SMTP 失敗不該把呼叫端的告警路徑一起拖垮
+        return JSONResponse(status_code=502, content={"sent": 0, "error": str(e)[:200]})
+    return {"sent": len(to_list)}
 
 
 # ── Directory listing ───────────────────────────────────────────────────

@@ -28,6 +28,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 const n = data.notifications || {};
                 const t = data.message_templates || {};
                 document.getElementById('gchat_webhook').value = n.google_chat_webhook || '';
+                document.getElementById('alert_webhook').value = n.alert_webhook || '';
                 document.getElementById('custom_webhook').value = n.custom_webhook_url || '';
                 document.getElementById('tpl_backup_success').value = t.backup_success || '';
                 document.getElementById('tpl_report_success').value = t.report_success || '';
@@ -60,6 +61,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const settingsData = {
             notifications: {
                 google_chat_webhook: document.getElementById('gchat_webhook').value,
+                alert_webhook: document.getElementById('alert_webhook').value,
                 custom_webhook_url: document.getElementById('custom_webhook').value,
             },
             message_templates: {

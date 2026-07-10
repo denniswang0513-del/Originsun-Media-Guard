@@ -7,6 +7,8 @@ _DEFAULT_SETTINGS: dict = {
     # 既有 settings.json 殘留的鍵無害（notifier 已不讀）
     "notifications": {
         "google_chat_webhook": "",
+        # 🔴 級告警專用；留空 → fallback 回 google_chat_webhook（見 notifier.CRITICAL_ALERTS）
+        "alert_webhook": "",
         "custom_webhook_url": "",
     },
     "message_templates": {

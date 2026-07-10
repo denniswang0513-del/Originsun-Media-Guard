@@ -25,6 +25,16 @@ from utils.formatting import fmt_size
 
 _SETTINGS_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "settings.json")
 
+# 🔴 級告警：除了 Chat 也寄 email。刻意**不含** `*_success` 那些日常完成通知 ——
+# 機隊 7 台同時跑任務時會把信箱淹掉，淹掉的信箱等於沒有告警。
+# `*_recovered` 有進來是為了閉環：收到 offline 的信，就該收到恢復的信。
+CRITICAL_ALERTS = frozenset({
+    "task_failed", "rebuild_failed", "backup_failed", "deploy_failed",
+    "db_offline", "db_recovered",
+    "agent_offline", "agent_recovered",
+    "ai_runner_failed",
+})
+
 
 def _load_settings() -> dict:
     if os.path.exists(_SETTINGS_PATH):
@@ -46,11 +56,6 @@ def notify_tab(template_key: str, **variables) -> None:
     stripping the '_success' suffix. Channel toggles are read from
     notification_channels in settings.json.
     """
-    try:
-        import requests  # type: ignore
-    except ImportError:
-        return
-
     settings = _load_settings()
     notif = settings.get("notifications", {})
     tpls = settings.get("message_templates", {})
@@ -60,9 +65,10 @@ def notify_tab(template_key: str, **variables) -> None:
     tab_key = template_key.replace("_success", "")
     tab_channels = channels.get(tab_key, {"gchat": True})
     send_gchat = tab_channels.get("gchat", True)
+    is_critical = template_key in CRITICAL_ALERTS
 
-    # Nothing enabled → skip
-    if not send_gchat:
+    # 兩條通道都不會發 → 連組訊息都省了
+    if not send_gchat and not is_critical:
         return
 
     # Default fallback templates per tab
@@ -111,12 +117,47 @@ def notify_tab(template_key: str, **variables) -> None:
     msg = re.sub(r"\{[a-z_][a-z0-9_]*\}", "-", msg)
 
     gchat_url = os.environ.get("GOOGLE_CHAT_WEBHOOK") or notif.get("google_chat_webhook", "")
+    # 🔴 級告警優先送「系統告警」聊天室；沒設就回頭用一般聊天室（不能因為沒設而靜音）。
+    if is_critical:
+        gchat_url = (os.environ.get("ALERT_WEBHOOK") or notif.get("alert_webhook", "") or gchat_url)
 
-    if send_gchat and gchat_url:
+    # 重大告警不受各 tab 的 gchat 開關管轄 —— 那個開關是給「任務完成通知」用的
+    if (send_gchat or is_critical) and gchat_url:
         try:
+            import requests  # type: ignore — 精簡 agent 可能沒裝；缺它不該滅掉 email 那條
             requests.post(gchat_url, json={"text": msg}, timeout=10)
         except Exception as e:
             print(f"notifier: Google Chat [{template_key}] failed: {e}")
+
+    if is_critical:
+        _relay_alert_email(template_key, msg, settings)
+
+
+def _relay_alert_email(template_key: str, msg: str, settings: dict) -> None:
+    """重大告警轉寄 email：POST 給 master 的 internal endpoint，由 master 寄出。
+
+    為什麼不在本機直接寄：SMTP 帳密存在 NAS Postgres 的 `website_settings`，
+    機隊 7 台不該持有寄信憑證，master 是唯一同時有 DB 與憑證的節點。
+    只用 stdlib urllib —— 沒裝 requests 的精簡 agent 也要發得出重大告警。
+    Best-effort：任何失敗只印一行，絕不讓告警路徑反過來炸掉呼叫端。
+    """
+    base = (os.environ.get("MASTER_SERVER") or settings.get("master_server") or "").rstrip("/")
+    key = os.environ.get("JWT_SECRET", "").strip() or settings.get("jwt_secret", "")
+    if not (base and key):
+        return
+    import urllib.request
+    payload = json.dumps({
+        "subject": f"[Originsun 告警] {template_key} — {machine_label()}",
+        "body": msg,
+    }).encode("utf-8")
+    req = urllib.request.Request(
+        base + "/api/v1/internal/alert_email", data=payload, method="POST",
+        headers={"Content-Type": "application/json", "X-Internal-Key": key},
+    )
+    try:
+        urllib.request.urlopen(req, timeout=10).close()
+    except Exception as e:
+        print(f"notifier: alert email relay [{template_key}] failed: {e}")
 
 
 def machine_label() -> str:

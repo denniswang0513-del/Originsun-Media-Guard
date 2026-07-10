@@ -388,10 +388,17 @@
                 <div class="form-group">
                     <label>Google Chat Webhook URL</label>
                     <input type="password" id="gchat_webhook" placeholder="https://chat.googleapis.com/v1/spaces/...">
+                    <small style="color:#888;">任務完成通知（備份/轉檔/串接…）走這條。</small>
+                </div>
+                <div class="form-group">
+                    <label>🔴 系統告警 Webhook URL</label>
+                    <input type="password" id="alert_webhook" placeholder="留空 = 與上面共用同一個聊天室">
+                    <small style="color:#888;">失敗/斷線類告警（任務失敗、機隊斷線、DB 斷線、AI Runner 失效、部署失敗）走這條，建議另開一個聊天室，才不會被日常完成通知淹掉。這些告警同時也會寄 email。</small>
                 </div>
                 <div class="form-group">
                     <label>自訂 Webhook URL (進階拓展用)</label>
                     <input type="text" id="custom_webhook" placeholder="https://n8n.yourdomain.com/webhook/...">
+                    <small style="color:#888;">目前沒有任何程式碼會送到這條，保留給未來 n8n 串接。</small>
                 </div>
             </div>
             <div id="tab_templates" class="tab-content" style="display: none;">
