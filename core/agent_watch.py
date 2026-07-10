@@ -11,30 +11,15 @@ Gate 設計（雙重，缺一不跑）：
 """
 import asyncio
 
-from config import load_settings
+from core.topology import is_master_machine
 
 _PROBE_TIMEOUT = 4.0
 _INTERVAL_SEC = 300
 _MISS_THRESHOLD = 3  # 連續 3 輪（~15 分鐘）才告警，容忍單次網路抖動
 
 
-def _is_master_machine() -> bool:
-    try:
-        s = load_settings()
-        if str(s.get("database_url", "")).rstrip("/").endswith("_dev"):
-            return False  # dev checkout 不跑（同機雙發防止）
-        url = s.get("master_server", "") or ""
-        if not url:
-            return False
-        # 本機 IP 判定重用 api_auth 的既有實作（lazy import：core 載入期不依賴 routers）
-        from routers.api_auth import _master_is_self
-        return _master_is_self(url)
-    except Exception:
-        return False
-
-
 async def run_agent_watch() -> None:
-    if not _is_master_machine():
+    if not is_master_machine():
         print("[AgentWatch] 本機非 master（或為 dev checkout），離線告警 watcher 不啟動")
         return
     print(f"[AgentWatch] 啟動：每 {_INTERVAL_SEC}s 巡檢，連續 {_MISS_THRESHOLD} 次無回應告警")
