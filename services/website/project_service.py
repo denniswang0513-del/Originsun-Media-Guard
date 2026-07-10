@@ -246,6 +246,9 @@ def _to_public_dict(
         "title_en": p.public_title_en,
         "description_en": p.public_description_en,
         "client_en": p.public_client_en,
+        # sitemap <lastmod> 用。目前沒有 public_updated_at 欄位，退而用發布時間 —
+        # 它是誠實的下界（永遠不會謊報比實際更新），Google 對不實 lastmod 會整個忽略。
+        "date_modified": p.public_published_at.isoformat() if p.public_published_at else None,
     }
 
 

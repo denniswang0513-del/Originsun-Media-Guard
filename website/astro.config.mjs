@@ -5,9 +5,14 @@ import tailwindcss from '@tailwindcss/vite';
 import sitemap from '@astrojs/sitemap';
 import seoAudit from './integrations/seo-audit.mjs';
 import { fetchRedirects } from './integrations/build-redirects.mjs';
+import { fetchLastmod } from './integrations/build-lastmod.mjs';
 
 // Build init：fetch redirect map from NAS website-api。離線時回 {}，build 不中斷。
 const redirects = await fetchRedirects();
+
+// Build init：每頁最後更新時間 → sitemap <lastmod>。只含作品/文章詳情頁 + 三個索引頁，
+// 其餘靜態頁刻意不給（謊報 lastmod 會讓 Google 整站忽略此訊號）。離線時回 {}。
+const lastmodMap = await fetchLastmod();
 
 // https://astro.build/config
 export default defineConfig({
@@ -24,6 +29,12 @@ export default defineConfig({
         !page.includes('/_astro/') &&
         !page.includes('/showcase') &&
         !/\.(txt|json|xml|md)\/?$/.test(page),
+      // 只在有真實時間可依據時附 <lastmod>（map 由 build-lastmod.mjs 建）。
+      // 查無 → 不設，Astro 就不會輸出該欄位。
+      serialize: (item) => {
+        const lastmod = lastmodMap[new URL(item.url).pathname];
+        return lastmod ? { ...item, lastmod } : item;
+      },
     }),
     // SEO 鐵閘 ③：build 末段掃 dist/ HTML，缺 title/desc/canonical/JSON-LD/h1/img-alt 即 fail
     seoAudit(),
