@@ -1,5 +1,5 @@
 {
-  "version": "1.10.242",
+  "version": "1.10.244",
   "build_date": "2026-07-10",
-  "notes": "fix(security): settings/load 抹除 jwt_secret/database_url + 系統告警獨立 webhook/email relay"
+  "notes": "fix(security): DB migration password-only"
 }
