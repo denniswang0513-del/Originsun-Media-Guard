@@ -26,6 +26,8 @@ AGENT_FILES = [
     "update_monitor.py",
     "preflight.py",
     "ota_manifest.py",
+    "build_agent_zip.py",  # 完整安裝包打包腳本 — 納入 OTA/deploy 才不會在 master 過期
+                           # （2026-07-10 踩過：prod 的舊硬寫版打出缺一半檔案的壞安裝包）
     "bootstrap.py",
     "start_hidden.vbs",
     "logo.ico",
