@@ -238,6 +238,17 @@ class EditUrlResponse(BaseModel):
     edit_url: str
 
 
+class WorkChildCreateRequest(BaseModel):
+    """在既有專案下新增子作品（1:N）— title 可選，空則後端補「{專案名}（N）」。"""
+    title: Optional[str] = Field(None, max_length=200)
+
+
+class WorkChildCreateResponse(BaseModel):
+    id: str
+    title: str
+    edit_url: str
+
+
 class ClientLookupItem(BaseModel):
     id: str
     name: str

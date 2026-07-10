@@ -25,6 +25,7 @@ from ._common import admin_session
 from core.schemas_website import (
     ClientLookupItem, ClientLookupResponse, EditUrlResponse,
     ProjectAdminUpdate, ProjectReorder,
+    WorkChildCreateRequest, WorkChildCreateResponse,
     WorkCreateRequest, WorkCreateResponse,
 )
 from db.models import Client, CrmProject
@@ -137,6 +138,38 @@ async def create_work(
     )
 
 
+@router.post("/projects/{project_id}/works", response_model=WorkChildCreateResponse)
+async def create_work_under_project(
+    project_id: str,
+    req: WorkChildCreateRequest,
+    session: AsyncSession = Depends(admin_session),
+):
+    """收件匣版「同專案加作品」（1:N）— 與 CRM 端 POST /projects/{id}/works 同 service。"""
+    project = await session.get(CrmProject, project_id)
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+    from services.website.project_service import create_child_work
+    sc, token = await create_child_work(session, project, req.title)
+    await session.commit()
+    return WorkChildCreateResponse(
+        id=sc.id, title=sc.title or "",
+        edit_url=f"/showcase-edit.html?token={token}",
+    )
+
+
+def _work_has_content(sc) -> bool:
+    """作品列是否已被填過內容（skeleton 清理的守門判定）。"""
+    return bool(
+        (sc.cover_url or "").strip()
+        or (sc.description or "").strip()
+        or (sc.video_url or "").strip()
+        or (sc.credits_text or "").strip()
+        or (sc.gallery and len(sc.gallery) > 0)
+        or (sc.process_items and len(sc.process_items) > 0)
+        or (sc.credits and len(sc.credits) > 0)
+    )
+
+
 @router.delete("/works/{project_id}/if-skeleton")
 async def delete_work_if_skeleton(
     project_id: str,
@@ -144,24 +177,49 @@ async def delete_work_if_skeleton(
 ):
     """Overlay 關閉時前端呼叫：如果這筆是「沒填內容就被關掉」的 skeleton，刪掉避免留垃圾。
 
-    判定條件（全部成立才刪）：
-      - crm_projects.name 仍是 sentinel（使用者沒按儲存改名）
-      - public_title / public_youtube_id / public_description 全部空
-      - public_credits_text 也空、public_credits 也空
-      - 對應 crm_project_showcase row 也沒填內容（cover/desc/video/gallery/credits）
+    id 自 1:N 起語意 = work id，兩種 skeleton：
+    - **project-skeleton**（id 是 project id，works.js「新增作品」建的）：判定同舊版
+      （name 仍 sentinel + public_* 全空 + showcase 沒內容）→ 連刪 project+sc+categories。
+    - **work-skeleton**（id 是子作品 id）：標題仍是「{專案名}（N）」預設值且沒內容
+      → 只刪 sc + categories + SEO + 翻譯狀態，**絕不動專案**（sc.id != sc.project_id 硬閘）。
 
     任一欄位有值 → 視為使用者已開始填內容，回 {deleted: false} 不動。
-
-    刪除時連帶清除 crm_project_showcase + website_project_categories 兩張關聯表
-    （沒設 cascade，要手動）。
+    （沒設 DB cascade，關聯表要手動清。）
     """
     from db.models import CrmProjectShowcase
-    from db.models_website import WebsiteProjectCategory
+    from db.models_website import WebsiteProjectCategory, WebsiteProjectSeo, WebsiteTranslationState
     from sqlalchemy import delete as sa_delete
 
     p = await session.get(CrmProject, project_id)
     if not p:
-        return {"deleted": False, "reason": "not_found"}
+        # 1:N：不是 project id → 試子作品 skeleton 清理
+        sc = await session.get(CrmProjectShowcase, project_id)
+        if not sc or sc.id == sc.project_id:   # 硬閘：主作品絕不走這條
+            return {"deleted": False, "reason": "not_found"}
+        import re
+        proj = await session.get(CrmProject, sc.project_id)
+        title = (sc.title or "").strip()
+        # 預設標題 = 「{專案名}（N）」；專案名可能在子作品建立後被改（主作品標題會
+        # mirror 回 project.name），所以也接受通用「…（N）」模式，避免誤判 title_changed
+        is_default_title = (
+            not title
+            or (proj and title.startswith(f"{proj.name}（"))
+            or re.fullmatch(r".+（\d+）", title) is not None
+        )
+        if not is_default_title:
+            return {"deleted": False, "reason": "title_changed"}
+        if _work_has_content(sc):
+            return {"deleted": False, "reason": "has_showcase_content"}
+        await session.delete(sc)
+        await session.execute(sa_delete(WebsiteProjectCategory).where(
+            WebsiteProjectCategory.project_id == sc.id))
+        await session.execute(sa_delete(WebsiteProjectSeo).where(
+            WebsiteProjectSeo.project_id == sc.id))
+        await session.execute(sa_delete(WebsiteTranslationState).where(
+            WebsiteTranslationState.entity_type == "work",
+            WebsiteTranslationState.entity_id == sc.id))
+        await session.commit()
+        return {"deleted": True, "kind": "work"}
 
     if (p.name or "").strip() != _SKELETON_NAME:
         return {"deleted": False, "reason": "name_changed"}

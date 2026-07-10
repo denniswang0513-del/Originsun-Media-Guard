@@ -149,6 +149,38 @@ async def create_project(req: CrmProjectPayload, request: Request):
 _WEBSITE_PROD_STAGES = ("待製作", "製作中", "不上官網")
 
 
+async def _work_items_for_project(session, project) -> list[dict]:
+    """一個專案的作品清單（1:N）— 結案看板 works 子列 / GET /projects/{id}/works 共用。
+
+    排序：主作品先、再依 sort_order / created_at。
+    """
+    from core.crm_logic import work_stage
+    from services.website.project_service import is_main_work, work_completeness_dict
+    rows = (await session.execute(
+        select(CrmProjectShowcase)
+        .where(CrmProjectShowcase.project_id == project.id)
+        .order_by((CrmProjectShowcase.id == CrmProjectShowcase.project_id).desc(),
+                  CrmProjectShowcase.sort_order.desc(),
+                  CrmProjectShowcase.created_at.asc().nullslast())
+    )).scalars().all()
+    items = []
+    for sc in rows:
+        items.append({
+            "id": sc.id,
+            "is_primary": is_main_work(sc),
+            "title": sc.title or project.name or "",
+            "slug": (sc.slug or "").strip() or (
+                str(sc.number) if sc.number is not None else None
+            ),
+            "published": bool(sc.published),
+            "stage": work_stage(bool(sc.published), sc.prod_stage),
+            "verified": sc.verified_at is not None,
+            "featured": bool(sc.featured),
+            "completeness": work_completeness_dict(sc),
+        })
+    return items
+
+
 @router.get("/projects/closing")
 async def list_closing_projects(request: Request):
     """結案作業看板 — 列出所有 status='結案作業' 專案 + 官網上線/製作狀態 + 完整度。
@@ -170,7 +202,7 @@ async def list_closing_projects(request: Request):
             .order_by(CrmProject.completion_date.desc().nullslast())
         )).all()
 
-        from core.crm_logic import work_completeness, work_stage
+        from core.crm_logic import project_works_summary, work_completeness, work_stage
         items = []
         for p, short_name, full_name in rows:
             # 1:N：主作品 = id == project_id 那列（Phase 1 每專案僅此一列；
@@ -204,6 +236,8 @@ async def list_closing_projects(request: Request):
                     featured_image=p.public_featured_image, cover_url=p.public_cover_url,
                     description=p.public_description, credits=p.public_credits,
                 )
+            # 1:N：作品子列 + 聚合（卡片「2/3 已上線」進度；舊欄位保留 = 主作品值）
+            works_items = await _work_items_for_project(session, p)
             items.append({
                 "id": p.id,
                 "name": p.name,
@@ -217,6 +251,8 @@ async def list_closing_projects(request: Request):
                 "public_featured": featured,
                 "slug": slug,
                 "completeness": completeness,
+                "works": works_items,
+                "summary": project_works_summary(works_items),
             })
 
     return {"items": items}

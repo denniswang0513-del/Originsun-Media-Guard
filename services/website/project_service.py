@@ -371,6 +371,30 @@ async def get_public_project_by_slug(session: AsyncSession, slug: str) -> Option
     data["gallery"] = sc.gallery or []
     data["process_items"] = sc.process_items or []
 
+    # 附加影片（一頁多影片，Phase 3）— 逐項 parse youtube_id 給 Astro 直接 render
+    from services.website.notion_service import _extract_youtube_id
+    data["extra_videos"] = [
+        {"url": v.get("url") or "", "caption": v.get("caption") or "",
+         "youtube_id": _extract_youtube_id(v.get("url") or "") or None}
+        for v in (sc.extra_videos or [])
+        if isinstance(v, dict) and (v.get("url") or "").strip()
+    ]
+
+    # 系列互連（Phase 3）— 同專案其他 published 作品（read-time 推導，不落地）
+    series_rows = await session.execute(
+        _published_works_base()
+        .where(CrmProjectShowcase.project_id == sc.project_id,
+               CrmProjectShowcase.id != sc.id)
+        .order_by(CrmProjectShowcase.sort_order.desc().nullslast(),
+                  CrmProjectShowcase.published_at.desc().nullslast())
+    )
+    data["series"] = [
+        {"slug": _slug_or_fallback(s2),
+         "title": (s2.title or "").strip() or p2.name,
+         "cover_url": s2.cover_url or _youtube_thumbnail(s2.youtube_id)}
+        for s2, p2 in series_rows
+    ]
+
     # Detail-only：作品級 SEO（faqs/narrative...）— website_project_seo key 自 1:N 起
     # 語意 = work id（既有資料 == project id，自動相容）
     from . import seo_service
@@ -600,6 +624,33 @@ async def mirror_public_to_crm(session: AsyncSession, project: CrmProject, updat
         )).scalar_one_or_none()
         if c:
             project.client_id = c.id
+
+
+async def create_child_work(session: AsyncSession, project: CrmProject,
+                            title: Optional[str] = None):
+    """在既有專案下新增子作品（1:N Phase 2）— 建 sc 列 + mint edit token。
+
+    id 用 uuid4().hex（≠ 任何 project id → 永遠不是主作品）；prod_stage 預設
+    '待製作'（直接進結案看板待辦）。不 commit（caller 統一 commit）。
+    回傳 (sc, token)。
+    """
+    import uuid as _uuid
+    from core.auth import create_token
+    count = (await session.execute(
+        select(func.count()).select_from(CrmProjectShowcase)
+        .where(CrmProjectShowcase.project_id == project.id)
+    )).scalar() or 0
+    wid = _uuid.uuid4().hex
+    token = create_token({"sub": wid, "scope": "showcase_edit"}, expires_days=36500)
+    sc = CrmProjectShowcase(
+        id=wid, project_id=project.id,
+        title=(title or "").strip() or f"{project.name}（{count + 1}）",
+        year=project.public_year,
+        prod_stage="待製作",
+        edit_token=token, editable=True,
+    )
+    session.add(sc)
+    return sc, token
 
 
 async def get_or_create_work(session: AsyncSession, work_id: str):

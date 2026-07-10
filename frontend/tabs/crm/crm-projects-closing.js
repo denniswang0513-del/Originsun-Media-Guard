@@ -72,6 +72,7 @@ export async function init(container) {
     // ── List body 事件委派 ──
     const body = container.querySelector('#closing-list-body');
     if (body) body.addEventListener('click', _onListClick);
+    if (body) body.addEventListener('change', _onListChange);
 
     await _loadList();
 }
@@ -121,7 +122,10 @@ function _renderRow(it) {
 
     return `
     <div class="crm-row" data-id="${esc(it.id)}" style="cursor:default;">
-      <div style="flex:1.6;min-width:80px;font-weight:600;color:#e0e0e0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${esc(it.name)}</div>
+      <div style="flex:1.6;min-width:80px;display:flex;align-items:center;gap:6px;overflow:hidden;">
+        <span style="font-weight:600;color:#e0e0e0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${esc(it.name)}</span>
+        ${_progressBadge(it.summary)}
+      </div>
       <div style="flex:1;min-width:60px;color:#9ca3af;font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${esc(it.client_name) || '—'}</div>
       <div style="flex:0.8;min-width:70px;color:#6b7280;font-size:12px;">${it.completion_date ? esc(String(it.completion_date).substring(0, 10)) : '—'}</div>
       <div style="flex:0.7;min-width:60px;">${_stageBadge(stage)}${stage === '已上線'
@@ -138,8 +142,68 @@ function _renderRow(it) {
         <button class="crm-btn crm-btn-secondary crm-btn-sm" data-action="publish" data-id="${esc(it.id)}">${publishLabel}</button>
         <button class="crm-btn crm-btn-secondary crm-btn-sm" data-action="stage-toggle" data-id="${esc(it.id)}">階段 ▾</button>
         ${canPreview ? `<button class="crm-btn crm-btn-secondary crm-btn-sm" data-action="preview" data-slug="${esc(it.slug)}">預覽</button>` : ''}
+        <button class="crm-btn crm-btn-secondary crm-btn-sm" data-action="add-work" data-id="${esc(it.id)}" title="在此專案下新增一個官網作品">＋ 新增影片作品</button>
       </div>
+    </div>${_renderWorksBlock(it)}`;
+}
+
+// ── 子作品進度徽章（summary.total − skipped > 1 才顯示）──────
+function _progressBadge(summary) {
+    if (!summary) return '';
+    const effTotal = (summary.total || 0) - (summary.skipped || 0);
+    if (effTotal <= 1) return '';
+    const live = summary.live || 0;
+    const allLive = !!summary.all_live || live >= effTotal;
+    const st = allLive ? 'background:#14532d;color:#86efac;' : 'background:#3b2a1f;color:#fb923c;';
+    return `<span title="子作品上線進度（不計「不上官網」）" style="display:inline-block;padding:1px 7px;border-radius:999px;font-size:10px;font-weight:600;white-space:nowrap;${st}">${live}/${effTotal} 已上線</span>`;
+}
+
+// ── works 子列區塊（>1 個作品才顯示，避免單作品時的視覺雜訊）──
+function _renderWorksBlock(it) {
+    const works = it.works || [];
+    if (works.length <= 1) return '';
+    return `
+    <div style="margin:2px 8px 10px 28px;padding:4px 10px;background:#141414;border:1px solid #262626;border-left:2px solid #3b82f6;border-radius:6px;">
+      ${works.map(_renderWorkRow).join('')}
     </div>`;
+}
+
+function _renderWorkRow(w) {
+    const stage = w.stage || '待製作';
+    const publishLabel = w.published ? '下架' : '發佈';
+    const verifiedMark = stage === '已上線'
+        ? (w.verified
+            ? '<span title="rebuild 後對外頁實測 200 通過" style="color:#86efac;font-size:11px;margin-left:3px;">✓</span>'
+            : '<span title="等待下次發布時自動驗證對外頁" style="color:#f59e0b;font-size:11px;margin-left:3px;">驗證中</span>')
+        : '';
+    const primaryTag = w.is_primary
+        ? '<span title="主作品" style="display:inline-block;padding:1px 6px;border-radius:4px;font-size:10px;font-weight:600;background:#1e3a5f;color:#93c5fd;flex-shrink:0;">主</span>'
+        : '';
+    return `
+      <div style="display:flex;align-items:center;gap:8px;padding:4px 2px;border-bottom:1px solid #1f1f1f;flex-wrap:wrap;">
+        <div style="flex:1.6;min-width:120px;display:flex;align-items:center;gap:6px;overflow:hidden;">
+          ${primaryTag}
+          <span style="color:#d1d5db;font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${esc(w.title || '（未命名作品）')}</span>
+        </div>
+        <div style="flex:0.8;min-width:90px;white-space:nowrap;">${_stageBadge(stage)}${verifiedMark}</div>
+        <div style="flex:0.6;min-width:110px;">${_workStageSelect(w)}</div>
+        <div style="flex:1;min-width:150px;display:flex;gap:4px;justify-content:flex-end;flex-wrap:wrap;">
+          <button class="crm-btn crm-btn-primary crm-btn-sm" data-action="work-edit" data-work-id="${esc(w.id)}">編輯</button>
+          <button class="crm-btn crm-btn-secondary crm-btn-sm" data-action="work-publish" data-work-id="${esc(w.id)}">${publishLabel}</button>
+          ${w.slug ? `<button class="crm-btn crm-btn-secondary crm-btn-sm" data-action="preview" data-slug="${esc(w.slug)}">預覽</button>` : ''}
+        </div>
+      </div>`;
+}
+
+// 作品階段 select — PATCH /works/{id}/stage 只收 待製作/製作中/不上官網；
+// 「已上線」由發佈流程控制，若目前是已上線就以 disabled option 呈現現值。
+function _workStageSelect(w) {
+    const opts = ['待製作', '製作中', '不上官網'];
+    const cur = w.stage || '待製作';
+    const extra = opts.includes(cur) ? '' : `<option value="${esc(cur)}" selected disabled>${esc(cur)}</option>`;
+    return `<select class="crm-select" data-action="work-stage" data-work-id="${esc(w.id)}" title="切換此作品的官網階段" style="font-size:11px;padding:2px 4px;">
+        ${extra}${opts.map(s => `<option value="${esc(s)}"${s === cur ? ' selected' : ''}>${esc(s)}</option>`).join('')}
+    </select>`;
 }
 
 function _stageBadge(stage) {
@@ -171,6 +235,16 @@ function _onListClick(e) {
     if (action === 'publish') return _togglePublish(id);
     if (action === 'stage-toggle') return _openStageMenu(btn, id);
     if (action === 'preview') return _preview(btn.dataset.slug);
+    if (action === 'add-work') return _addWork(id);
+    if (action === 'work-edit') return _editWork(btn.dataset.workId);
+    if (action === 'work-publish') return _toggleWorkPublish(btn.dataset.workId);
+}
+
+// works 子列的階段 select（change 事件委派）
+function _onListChange(e) {
+    const sel = e.target.closest('select[data-action="work-stage"]');
+    if (!sel) return;
+    _setWorkStage(sel.dataset.workId, sel.value);
 }
 
 async function _editContent(id) {
@@ -206,6 +280,51 @@ async function _setStage(id, stage) {
 function _preview(slug) {
     if (!slug) return;
     window.open(`${PUBLIC_SITE_BASE}/works/${encodeURIComponent(slug)}`, '_blank', 'noopener');
+}
+
+// ── 逐作品動作（1 專案 : N 作品）─────────────────────────────
+async function _addWork(projectId) {
+    try {
+        const r = await crmFetch(`/projects/${projectId}/works`, { method: 'POST', body: '{}' });
+        if (!r || !r.edit_url) throw new Error('未取得編輯連結');
+        _openEditPanel(r.edit_url, `編輯：${r.title || '新作品'}`);
+    } catch (e) {
+        alert('新增作品失敗：' + e.message);
+    }
+}
+
+async function _editWork(workId) {
+    try {
+        const r = await crmFetch(`/works/${workId}/edit-token`);
+        const url = r.url || (r.token ? `/showcase-edit.html?token=${encodeURIComponent(r.token)}` : '');
+        if (!url) throw new Error('未取得編輯連結');
+        let title = '';
+        for (const it of _items) {
+            const w = (it.works || []).find(x => String(x.id) === String(workId));
+            if (w) { title = w.title || it.name; break; }
+        }
+        _openEditPanel(url, `編輯：${title || workId}`);
+    } catch (e) {
+        alert('無法開啟編輯：' + e.message);
+    }
+}
+
+async function _toggleWorkPublish(workId) {
+    try {
+        await crmFetch(`/works/${workId}/publish`, { method: 'POST' });
+        await _loadList();
+    } catch (e) {
+        alert('發佈/下架失敗：' + e.message);
+    }
+}
+
+async function _setWorkStage(workId, stage) {
+    try {
+        await crmFetch(`/works/${workId}/stage`, { method: 'PATCH', body: JSON.stringify({ stage }) });
+    } catch (e) {
+        alert('階段更新失敗：' + e.message);
+    }
+    await _loadList();  // 成功→帶回新階段；失敗→還原 select 顯示
 }
 
 // ── 「階段」小選單（position:fixed，避免被 list overflow 裁切）─────

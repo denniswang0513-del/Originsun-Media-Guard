@@ -61,6 +61,24 @@ export const GET: APIRoute = async ({ params, site }) => {
     if (work.youtube_id) {
         lines.push(`## 影片`, `https://www.youtube.com/watch?v=${work.youtube_id}`, "");
     }
+    // 附加影片 — 主影片之外的其他支（花絮/系列集數）；有 caption 標在前面
+    const extraVideos = (work.extra_videos || []).filter(v => v.url || v.youtube_id);
+    if (extraVideos.length) {
+        lines.push("## 附加影片");
+        for (const v of extraVideos) {
+            const url = v.youtube_id ? `https://www.youtube.com/watch?v=${v.youtube_id}` : v.url;
+            lines.push(v.caption ? `- ${v.caption}：${url}` : `- ${url}`);
+        }
+        lines.push("");
+    }
+    // 同專案其他作品 — 同 CRM 專案的其他已發布作品（系列互連）
+    if (work.series && work.series.length) {
+        lines.push("## 同專案其他作品");
+        for (const s of work.series) {
+            lines.push(`- ${s.title}：${siteUrl}/works/${s.slug}/`);
+        }
+        lines.push("");
+    }
     // FAQs — SEO pipeline 寫的問答；給 LLM 直接理解常見疑問
     if (work.faqs && work.faqs.length) {
         lines.push("## 常見問題");

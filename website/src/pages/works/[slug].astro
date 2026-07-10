@@ -76,6 +76,18 @@ if (work.faqs && work.faqs.length > 0) {
         work.faqs.map(f => ({ question: f.q, answer: f.a }))
     ));
 }
+// 附加影片 — 只留有有效 youtube_id 的項（無法嵌入的外部連結不 render、不進 schema）
+const extraVideos = (work.extra_videos || []).filter(v => isValidYouTubeId(v.youtube_id));
+// 每支附加影片補一個 VideoObject schema（name 用 caption，空則「標題（附加影片 N）」）
+extraVideos.forEach((v, i) => {
+    schemaData.push(pageSchemas.videoObjectFromParts({
+        youtube_id: v.youtube_id!,
+        name: v.caption || `${work.title}（附加影片 ${i + 1}）`,
+        description: v.caption || work.description || work.title,
+        url: schemaUrl,
+        uploadDate: work.published_at,
+    }));
+});
 
 const blocks: ICreditBlock[] = normalizeCredits(work.credits);
 
@@ -125,6 +137,20 @@ const nextThumb = nextWork ? resolveThumbnail(nextWork.youtube_id, nextWork.slug
                 </div>
             )}
         </div>
+
+        <!-- 2b. 附加影片 — 花絮/系列其他支，沿用主影片容器版型 -->
+        {extraVideos.map(v => (
+            <div class="max-w-5xl mx-auto px-4 sm:px-6 lg:px-10 mb-10 sm:mb-14">
+                <lite-youtube videoid={v.youtube_id}
+                              class="block aspect-video w-full"
+                              style="max-width: 100%;"
+                              playlabel={v.caption || work.title}
+                              params="modestbranding=1&rel=0&iv_load_policy=3&playsinline=1"></lite-youtube>
+                {v.caption && (
+                    <div class="mt-3 text-center text-sm text-neutral-500 tracking-wide">{v.caption}</div>
+                )}
+            </div>
+        ))}
 
         <!-- 3. 文字 + 4. credits（窄欄 3xl 易讀） -->
         <div class="max-w-3xl mx-auto px-4 sm:px-6 lg:px-10">
@@ -213,6 +239,29 @@ const nextThumb = nextWork ? resolveThumbnail(nextWork.youtube_id, nextWork.slug
                 </a>
             ))}
         </div>
+    )}
+
+    <!-- 同專案其他作品（後端 series：同 CRM 專案的其他已發布作品） -->
+    {work.series && work.series.length > 0 && (
+        <section class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-10 pt-14 bg-white">
+            <div class="text-xs tracking-[0.4em] uppercase text-neutral-500 mb-6">同專案其他作品</div>
+            <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-8">
+                {work.series.map(sw => (
+                    <a href={`/works/${sw.slug}/`} class="group block">
+                        <div class="aspect-video overflow-hidden bg-neutral-100 mb-3">
+                            {sw.cover_url && (
+                                <SmartImage src={sw.cover_url}
+                                            alt={sw.title}
+                                            width={640} height={360}
+                                            loading="lazy"
+                                            class="w-full h-full object-cover group-hover:scale-[1.04] transition-transform duration-700" />
+                            )}
+                        </div>
+                        <div class="text-sm text-neutral-700 group-hover:text-[#c9372c] transition-colors tracking-wide">{sw.title}</div>
+                    </a>
+                ))}
+            </div>
+        </section>
     )}
 
     <!-- 相關作品（同 category 優先；不足時補最新 public） -->

@@ -67,6 +67,20 @@ export interface ISeoFAQ {
     a: string;
 }
 
+// 附加影片（一頁多影片）— youtube_id 後端已 parse 好，null = 非 YouTube 連結
+export interface IExtraVideo {
+    url: string;
+    caption: string;
+    youtube_id: string | null;
+}
+
+// 同專案系列作品（同 CRM 專案的其他已發布作品）
+export interface ISeriesItem {
+    slug: string;
+    title: string;
+    cover_url: string | null;
+}
+
 export interface IPublicProjectDetail extends IPublicProject {
     credits: CreditsData;
     published_at?: string | null;
@@ -81,6 +95,9 @@ export interface IPublicProjectDetail extends IPublicProject {
     narrative_long?: string | null;
     key_facts?: ISeoKeyFact[];
     faqs?: ISeoFAQ[];
+    // 一頁多影片 + 同專案系列互連（空陣列 = 無）
+    extra_videos?: IExtraVideo[];
+    series?: ISeriesItem[];
 }
 
 export interface IWorksListResponse {

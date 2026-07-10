@@ -108,6 +108,7 @@ def _to_showcase_dict(s) -> dict:
         "cover_url": s.cover_url or "",
         "description": s.description or "",
         "video_url": s.video_url or "",
+        "extra_videos": s.extra_videos or [],
         "gallery": s.gallery or [],
         "process_mode": s.process_mode or "gallery",
         "process_items": s.process_items or [],
@@ -268,6 +269,8 @@ _SHOWCASE_UPDATABLE_FIELDS = (
     "process_mode", "process_items", "slug",
     "gallery",  # 成品展示圖 — 刪除/排序/改 caption 走 PUT 送整個 array（上傳有專用 endpoint）
     "published",  # showcase-edit toggle 公開 — _sync 會鏡射到 project.public
+    "extra_videos",  # 附加影片 [{url, caption}]（一頁多影片；只從 token 編輯器送，
+                     # 刻意不進 ShowcasePayload — admin PUT 的 model_dump 會帶預設值洗掉它）
 )
 
 
@@ -298,6 +301,14 @@ def _apply_showcase_fields(sc, payload: dict) -> None:
             value = payload[field]
             if field == "slug":
                 value = value or None
+            elif field == "extra_videos":
+                # 正規化：只收 {url, caption}、去空 url 項
+                value = [
+                    {"url": (v.get("url") or "").strip(),
+                     "caption": (v.get("caption") or "").strip()}
+                    for v in (value or [])
+                    if isinstance(v, dict) and (v.get("url") or "").strip()
+                ]
             setattr(sc, field, value)
     if "video_url" in payload:
         from services.website.notion_service import _extract_youtube_id

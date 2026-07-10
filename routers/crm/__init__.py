@@ -11,5 +11,6 @@ from . import staff      # noqa: F401  人力 + 履歷 + 派工
 from . import costs      # noqa: F401  雜支 + 收據 + 成本估算 + 子表
 from . import finance    # noqa: F401  發票 + 請款 + 收支 + 應付/應收
 from . import showcase   # noqa: F401  Showcase + token 編輯 + Site API
+from . import works      # noqa: F401  1:N 作品子端點（依賴 projects/showcase，必須最後）
 
 from ._shared import router  # noqa: F401,E402

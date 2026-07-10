@@ -142,6 +142,11 @@ function _renderTable() {
         ? '<span style="display:inline-flex;width:22px;height:22px;background:#3b82f6;border-radius:4px;cursor:default;"></span>'
         : '<span style="display:inline-flex;width:22px;height:22px;background:transparent;border:1px solid #4b5563;border-radius:4px;cursor:default;"></span>';
 
+    // 1 專案 : N 作品 — w.id !== w.project_id 代表同專案下的子作品
+    const _subBadge = (w) => (w.project_id && w.id !== w.project_id)
+        ? '<span title="同專案下的子作品" style="display:inline-block;margin-left:5px;padding:1px 6px;border-radius:4px;font-size:10px;font-weight:600;background:#1e3a5f;color:#93c5fd;vertical-align:middle;white-space:nowrap;">子作品</span>'
+        : '';
+
     table.innerHTML = `
         <thead>
             <tr>
@@ -168,7 +173,7 @@ function _renderTable() {
                 <tr data-id="${esc(w.id)}">
                     <td>${thumb}</td>
                     <td style="color:#fff;">${esc(w.client || '-')}</td>
-                    <td style="color:#fff;">${esc(w.title || w.name)}</td>
+                    <td style="color:#fff;">${esc(w.title || w.name)}${_subBadge(w)}</td>
                     <td style="color:#888;font-size:12px;">
                         ${esc(w.slug || '(未設)')}
                         ${w.redirect_count > 0
@@ -182,8 +187,9 @@ function _renderTable() {
                     <td title="${w.noindex ? '已設 noindex' : '允許索引'}（僅顯示，請進編輯頁修改）">${_roBadge(w.noindex)}</td>
                     <td>${_seoCell(w)}</td>
                     <td>${_compCell(w.completeness)}</td>
-                    <td>
+                    <td style="white-space:nowrap;">
                         <button class="btn btn-sm" onclick="window._websiteEditWork('${esc(w.id)}')">編輯</button>
+                        <button class="btn btn-sm btn-ghost" title="在同一專案下新增子作品（開啟編輯器，關閉時未填內容會自動清掉空殼）" onclick="window._websiteAddSubWork('${esc(w.project_id || w.id)}')">＋子作品</button>
                     </td>
                 </tr>
                 `;
@@ -377,5 +383,23 @@ window._websiteNewWork = async () => {
         _openEditPanel(r.edit_url, `編輯：${r.name}`, { skeletonProjectId: r.id });
     } catch (e) {
         toastErr(e.message || '建立失敗');
+    }
+};
+
+// ══════════════════════════════════════════════════════════
+// 新增子作品：同一 CRM 專案下再掛一個官網作品（1 專案 : N 作品）
+// ══════════════════════════════════════════════════════════
+// title 留空讓後端補預設；關閉 overlay 時 if-skeleton 已支援子作品 id，
+// 未填內容的空殼會被清掉（不動專案本身）。
+
+window._websiteAddSubWork = async (projectId) => {
+    try {
+        const r = await websiteFetch(`/api/website/admin/projects/${projectId}/works`, {
+            method: 'POST', body: {},
+        });
+        toastOk('已建立子作品 — 在編輯頁填寫內容後按儲存');
+        _openEditPanel(r.edit_url, `編輯：${r.title || '新子作品'}`, { skeletonProjectId: r.id });
+    } catch (e) {
+        toastErr(e.message || '建立子作品失敗');
     }
 };

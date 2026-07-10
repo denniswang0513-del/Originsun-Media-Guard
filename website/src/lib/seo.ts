@@ -328,6 +328,30 @@ export const pageSchemas = {
         };
     },
 
+    /**
+     * VideoObject（泛化版）— 附加影片等「非主影片」場景用，只吃必要欄位。
+     * 不要改 videoObject(work, siteUrl) 的簽名 — 主影片仍走那條。
+     */
+    videoObjectFromParts(parts: {
+        youtube_id: string;
+        name: string;
+        description?: string | null;
+        url: string;
+        uploadDate?: string | null;
+    }): SchemaObject {
+        return {
+            "@context": SCHEMA_CTX,
+            "@type": "VideoObject",
+            name: parts.name,
+            description: parts.description || parts.name,
+            thumbnailUrl: [`https://img.youtube.com/vi/${parts.youtube_id}/maxresdefault.jpg`],
+            uploadDate: parts.uploadDate || undefined,
+            embedUrl: `https://www.youtube-nocookie.com/embed/${parts.youtube_id}`,
+            contentUrl: `https://www.youtube.com/watch?v=${parts.youtube_id}`,
+            url: parts.url,
+        };
+    },
+
     /** NewsArticle — /news/[slug] 部落格文章 */
     newsArticle(post: IPost, meta: IWebsiteMeta, siteUrl: string): SchemaObject {
         // 個人作者 → Person schema（E-E-A-T 加分）；空 → 公司

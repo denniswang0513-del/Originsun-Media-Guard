@@ -182,6 +182,17 @@ function _currentBlocks() {
     return _normalizeCredits((DATA && DATA.credits) || []);
 }
 
+// ── 附加影片列模板（_render 初始渲染 + 「+ 新增影片」動態插入共用）──
+function _extraVideoRowHtml(v) {
+    return `<div class="extra-video-row" style="display:flex;gap:8px;align-items:center;margin-bottom:8px;">
+        <input type="url" class="extra-video-url" value="${_esc(v.url || '')}"
+               placeholder="YouTube 或 Vimeo 連結" style="flex:2;min-width:0;">
+        <input type="text" class="extra-video-caption" value="${_esc(v.caption || '')}"
+               placeholder="影片說明（可空）" style="flex:1;min-width:0;">
+        <button class="btn btn-danger btn-sm" type="button" data-action="del-extra-video" title="移除此列">✕</button>
+    </div>`;
+}
+
 // ── 統一 SEO 區塊：301 轉址 + SEO 覆寫 + AI SEO 規劃 一個 section（位置：「網站連結」之下）
 function _renderSeoSection(sc) {
     const seo = sc.seo || {};
@@ -529,6 +540,19 @@ function _render() {
             ? `<input type="url" id="inp-video" data-field="video_url"
                 value="${_esc(sc.video_url || '')}" placeholder="YouTube 或 Vimeo 連結" style="width:100%;">`
             : sc.video_url ? `<a href="${_esc(sc.video_url)}" target="_blank" style="color:var(--accent);">${_esc(sc.video_url)}</a>` : '<p style="color:var(--text3);">尚未設定</p>'}
+    </div>`;
+
+    // ➕ 附加影片（一頁多影片）— 動態列，跟著 master save（空 url 列不送）
+    const extraVideos = Array.isArray(sc.extra_videos) ? sc.extra_videos : [];
+    html += `<div class="section" id="sec-extra-videos">
+        <div class="section-label">➕ 附加影片</div>
+        ${EDITABLE
+            ? `<p style="color:var(--text3);font-size:12px;margin:0 0 8px;">主影片之外的其他影片（花絮、系列集數等），對外作品頁顯示在主影片下方。點頂部「💾 儲存所有變更」存檔；空網址的列不會儲存。</p>
+               <div id="extra-videos-list">${extraVideos.map(v => _extraVideoRowHtml(v)).join('')}</div>
+               <button class="btn btn-sm" id="btn-add-extra-video" type="button">+ 新增影片</button>`
+            : (extraVideos.length
+                ? extraVideos.map(v => `<div style="margin-bottom:6px;"><a href="${_esc(v.url)}" target="_blank" style="color:var(--accent);">${_esc(v.url)}</a>${v.caption ? `<span style="color:var(--text3);font-size:12px;margin-left:8px;">${_esc(v.caption)}</span>` : ''}</div>`).join('')
+                : '<p style="color:var(--text3);">尚無附加影片</p>')}
     </div>`;
 
     // Gallery
@@ -923,6 +947,12 @@ function _bindEvents() {
         const oldUrlsRaw = document.getElementById('inp-old-slugs')?.value || '';
         payload.public_old_slugs = oldUrlsRaw.split(/\r?\n/).map(s => s.trim()).filter(Boolean);
 
+        // 附加影片 — 動態列收集；空 url 列不送（後端亦會再正規化一次）
+        payload.extra_videos = [...document.querySelectorAll('#extra-videos-list .extra-video-row')].map(row => ({
+            url: (row.querySelector('.extra-video-url')?.value || '').trim(),
+            caption: (row.querySelector('.extra-video-caption')?.value || '').trim(),
+        })).filter(v => v.url);
+
         // 作品分類 / 標籤 — toggle handler 已即時更新 DATA.selected_category_ids
         payload.category_ids = DATA.selected_category_ids || [];
 
@@ -955,6 +985,25 @@ function _bindEvents() {
     // 離頁前未存提示
     window.addEventListener('beforeunload', (e) => {
         if (_dirty) { e.preventDefault(); e.returnValue = ''; }
+    });
+
+    // === ➕ 附加影片：動態列（in-memory 編輯，master save 一次收集）===
+    // 列可動態增刪 → input dirty 與刪除鈕都走事件委派，新插入的列免重綁
+    const _evList = document.getElementById('extra-videos-list');
+    if (_evList) {
+        _evList.addEventListener('input', () => setDirty(true));
+        _evList.addEventListener('click', (e) => {
+            const btn = e.target.closest('[data-action="del-extra-video"]');
+            if (!btn) return;
+            btn.closest('.extra-video-row')?.remove();
+            setDirty(true);
+        });
+    }
+    document.getElementById('btn-add-extra-video')?.addEventListener('click', () => {
+        if (!_evList) return;
+        _evList.insertAdjacentHTML('beforeend', _extraVideoRowHtml({ url: '', caption: '' }));
+        _evList.querySelector('.extra-video-row:last-child .extra-video-url')?.focus();
+        setDirty(true);
     });
 
     // Gallery upload
