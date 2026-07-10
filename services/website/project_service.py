@@ -645,6 +645,24 @@ async def create_child_work(session: AsyncSession, project: CrmProject,
     return sc, token
 
 
+async def delete_work_cascade(session: AsyncSession, sc) -> None:
+    """刪作品列 + 關聯（categories / SEO / 翻譯狀態；無 DB cascade，手動清）。
+
+    不 commit；caller 自行守門（主作品不可刪、已發布先下架）。
+    uploads/projects/{work_id}/ 檔案不動（與 skeleton 清理既有行為一致）。"""
+    from db.models_website import (
+        WebsiteProjectCategory, WebsiteProjectSeo, WebsiteTranslationState,
+    )
+    await session.delete(sc)
+    await session.execute(delete(WebsiteProjectCategory).where(
+        WebsiteProjectCategory.project_id == sc.id))
+    await session.execute(delete(WebsiteProjectSeo).where(
+        WebsiteProjectSeo.project_id == sc.id))
+    await session.execute(delete(WebsiteTranslationState).where(
+        WebsiteTranslationState.entity_type == "work",
+        WebsiteTranslationState.entity_id == sc.id))
+
+
 async def get_or_create_work(session: AsyncSession, work_id: str):
     """以 work id 取作品 + 所屬專案；找不到 sc 時視為舊 1:1 專案 id → get-or-create 主作品列。
 

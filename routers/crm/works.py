@@ -106,6 +106,29 @@ async def update_work_stage(work_id: str, request: Request):
     return {"ok": True, "stage": stage}
 
 
+@router.delete("/works/{work_id}")
+async def delete_work(work_id: str, request: Request):
+    """刪除子作品（連帶 categories / SEO / 翻譯狀態）。
+
+    守門：主作品不可刪（生命週期跟著專案，要下架用發佈切換）；
+    已發布請先下架再刪（避免誤刪對外頁面、斷 URL）。"""
+    _check_website_auth(request)
+    _require_db()
+    factory = await _get_factory()
+    async with factory() as session:
+        sc = await session.get(CrmProjectShowcase, work_id)
+        if not sc:
+            raise HTTPException(status_code=404, detail="找不到此作品")
+        if is_main_work(sc):
+            raise HTTPException(status_code=400, detail="主作品不可刪除（生命週期跟著專案）")
+        if sc.published:
+            raise HTTPException(status_code=409, detail="作品已發布 — 請先下架再刪除")
+        from services.website.project_service import delete_work_cascade
+        await delete_work_cascade(session, sc)
+        await session.commit()
+    return {"ok": True, "deleted": work_id}
+
+
 @router.get("/works/{work_id}/edit-token")
 async def get_work_edit_token(work_id: str, request: Request):
     """取得作品的 edit token（已有就重用、沒有才 mint）— delivery tab 分頁切換用，

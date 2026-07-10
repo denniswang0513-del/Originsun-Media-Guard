@@ -187,7 +187,7 @@ async def delete_work_if_skeleton(
     （沒設 DB cascade，關聯表要手動清。）
     """
     from db.models import CrmProjectShowcase
-    from db.models_website import WebsiteProjectCategory, WebsiteProjectSeo, WebsiteTranslationState
+    from db.models_website import WebsiteProjectCategory
     from sqlalchemy import delete as sa_delete
 
     p = await session.get(CrmProject, project_id)
@@ -205,14 +205,8 @@ async def delete_work_if_skeleton(
             return {"deleted": False, "reason": "title_changed"}
         if _work_has_content(sc):
             return {"deleted": False, "reason": "has_showcase_content"}
-        await session.delete(sc)
-        await session.execute(sa_delete(WebsiteProjectCategory).where(
-            WebsiteProjectCategory.project_id == sc.id))
-        await session.execute(sa_delete(WebsiteProjectSeo).where(
-            WebsiteProjectSeo.project_id == sc.id))
-        await session.execute(sa_delete(WebsiteTranslationState).where(
-            WebsiteTranslationState.entity_type == "work",
-            WebsiteTranslationState.entity_id == sc.id))
+        from services.website.project_service import delete_work_cascade
+        await delete_work_cascade(session, sc)
         await session.commit()
         return {"deleted": True, "kind": "work"}
 

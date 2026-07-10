@@ -191,6 +191,7 @@ function _renderWorkRow(w) {
           <button class="crm-btn crm-btn-primary crm-btn-sm" data-action="work-edit" data-work-id="${esc(w.id)}">編輯</button>
           <button class="crm-btn crm-btn-secondary crm-btn-sm" data-action="work-publish" data-work-id="${esc(w.id)}">${publishLabel}</button>
           ${w.slug ? `<button class="crm-btn crm-btn-secondary crm-btn-sm" data-action="preview" data-slug="${esc(w.slug)}">預覽</button>` : ''}
+          ${(!w.is_primary && !w.published) ? `<button class="crm-btn crm-btn-danger crm-btn-sm" data-action="work-delete" data-work-id="${esc(w.id)}" title="刪除此子作品（主作品不可刪；已發布請先下架）">刪除</button>` : ''}
         </div>
       </div>`;
 }
@@ -238,6 +239,7 @@ function _onListClick(e) {
     if (action === 'add-work') return _addWork(id);
     if (action === 'work-edit') return _editWork(btn.dataset.workId);
     if (action === 'work-publish') return _toggleWorkPublish(btn.dataset.workId);
+    if (action === 'work-delete') return _deleteWork(btn.dataset.workId);
 }
 
 // works 子列的階段 select（change 事件委派）
@@ -315,6 +317,21 @@ async function _toggleWorkPublish(workId) {
         await _loadList();
     } catch (e) {
         alert('發佈/下架失敗：' + e.message);
+    }
+}
+
+async function _deleteWork(workId) {
+    let title = workId;
+    for (const it of _items) {
+        const w = (it.works || []).find(x => String(x.id) === String(workId));
+        if (w) { title = w.title || workId; break; }
+    }
+    if (!confirm(`確定刪除子作品「${title}」？\n（連帶清除其分類 / SEO / 翻譯狀態，無法復原）`)) return;
+    try {
+        await crmFetch(`/works/${workId}`, { method: 'DELETE' });
+        await _loadList();
+    } catch (e) {
+        alert('刪除失敗：' + e.message);
     }
 }
 
