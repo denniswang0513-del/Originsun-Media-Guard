@@ -204,21 +204,36 @@ async def _sync_showcase_to_public(session, sc) -> None:
         sc.number = project.public_number
 
 
+def _is_valid_edit_token(token) -> bool:
+    """存庫的 edit_token 是否仍可用。jwt_secret 輪替後舊 token 驗不過 —
+    2026-07-10 輪替實案：生產 226/230 個庫存 token 失效、編輯器整片 404。
+    重用前必驗，驗不過就重發（自癒，之後再輪替也不會壞）。"""
+    if not token:
+        return False
+    try:
+        from core.auth import verify_token
+        payload = verify_token(token)
+        return bool(payload) and payload.get("scope") == SHOWCASE_EDIT_SCOPE
+    except Exception:
+        return False
+
+
 async def _mint_showcase_edit_token(
     session, project_id: str, *, reuse_existing: bool = False,
 ) -> tuple[str, CrmProjectShowcase]:
     """取得/產生 Showcase edit token，upsert CrmProjectShowcase row。
 
     Args:
-        reuse_existing: True 時如果 sc.edit_token 已存在就重用（冪等），不動 updated_at；
-                        False 時永遠產新 token 覆寫（CRM 完稿 Tab「重新產生分享連結」的語義）。
+        reuse_existing: True 時如果 sc.edit_token 仍有效就重用（冪等），不動 updated_at；
+                        無效（如 secret 輪替）或 False 時產新 token 覆寫
+                        （CRM 完稿 Tab「重新產生分享連結」的語義）。
 
     回傳 (token, showcase_row)。不 commit，caller 統一 commit。
     新建 showcase 時才設 editable=True；既有 row 保留 CRM 管理員手動設的 editable 值。
     """
     from core.auth import create_token
     sc = await session.get(CrmProjectShowcase, project_id)
-    if sc and reuse_existing and sc.edit_token:
+    if sc and reuse_existing and _is_valid_edit_token(sc.edit_token):
         return sc.edit_token, sc
     token = create_token({"sub": project_id, "scope": SHOWCASE_EDIT_SCOPE},
                          expires_days=SHOWCASE_EDIT_EXPIRES_DAYS)
@@ -247,6 +262,10 @@ async def get_project_showcase(project_id: str, request: Request):
             session.add(sc)
             await session.commit()
             await session.refresh(sc)
+        # secret 輪替後的殭屍 token 清掉 — 前端拿到空 token 會走重發流程（自癒）
+        if sc.edit_token and not _is_valid_edit_token(sc.edit_token):
+            sc.edit_token = None
+            await session.commit()
         data = _to_showcase_dict(sc)
         # 對外公開連結 — 給 delivery Tab「預覽」按鈕直接連到 originsun-studio.com/works/{slug}
         public_url = ""
