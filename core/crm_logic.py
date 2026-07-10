@@ -118,7 +118,53 @@ def group_receivables(rows, now) -> dict:
 
 # ── 官網作品（1:N 改造，2026-07）──────────────────────────────────────────
 
-WEBSITE_WORK_STAGES = ("待製作", "製作中", "已上線", "不上官網")
+# showcase-edit token（mint 在 routers/crm/showcase.py、child work 建立在
+# services/website/project_service.py — scope/效期常數共用一份，漂移 = token 驗證失敗）
+SHOWCASE_EDIT_SCOPE = "showcase_edit"
+SHOWCASE_EDIT_EXPIRES_DAYS = 36500  # ~100 年，實務上永久
+
+
+def showcase_edit_url(token: str) -> str:
+    """token → 編輯器 URL（後端各端點回 edit_url/url 的單一組法）。"""
+    return f"/showcase-edit.html?token={token}"
+
+
+def is_main_work(sc) -> bool:
+    """主作品 = id == project_id 那列（歷史 1:1 時代 PK 直接用 project_id）。
+    舊 project-scoped 端點與過渡期 dual-write 都以此判定 — 全庫唯一定義處。"""
+    return bool(sc.id and sc.id == sc.project_id)
+
+
+def work_url_slug(sc) -> "str | None":
+    """作品 URL slug：admin 自訂 slug > number（首發配號）> None（無法組 URL）。
+
+    sc = CrmProjectShowcase 或同形物件。'work' 兜底版見
+    services/website/project_service._slug_or_fallback（委派本函式）。"""
+    custom = (sc.slug or "").strip()
+    if custom:
+        return custom
+    if sc.number is not None:
+        return str(sc.number)
+    return None
+
+
+# wire key（歷史沿用 public_* 命名，前端/token 編輯器不用改）→ 作品欄位 對照的
+# 單一正本。project_service 的寫入映射與 showcase.py 的 token 身分欄位子集都由此派生。
+# 不含 public_client（專案層資料）與 credits/cover（只能從 showcase-edit 直寫）。
+WORK_WIRE_FIELD_MAP = {
+    "public": "published",
+    "public_slug": "slug",
+    "public_title": "title",
+    "public_youtube_id": "youtube_id",
+    "public_description": "description",
+    "public_year": "year",
+    "public_featured": "featured",
+    "public_featured_image": "featured_image",
+    "public_sort_order": "sort_order",
+    "public_published_at": "published_at",
+    "public_old_slugs": "old_slugs",
+    "public_noindex": "noindex",
+}
 
 
 def work_stage(published: bool, prod_stage) -> str:

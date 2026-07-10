@@ -20,6 +20,12 @@ from typing import Optional
 from sqlalchemy import and_, delete, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
+# is_main_work / work_url_slug / WORK_WIRE_FIELD_MAP 正本在 core.crm_logic（純函式、
+# OTA 安全，routers/crm 也用同一份）— 這裡 re-export 供既有 caller 沿用
+from core.crm_logic import (  # noqa: F401
+    SHOWCASE_EDIT_EXPIRES_DAYS, SHOWCASE_EDIT_SCOPE, WORK_WIRE_FIELD_MAP,
+    is_main_work, showcase_edit_url, work_url_slug,
+)
 from db.models import Client, CrmProject, CrmProjectShowcase
 from db.models_website import WebsiteCategory, WebsiteProjectCategory
 
@@ -107,23 +113,17 @@ def _virtual_work_from_project(p: CrmProject) -> SimpleNamespace:
         credits=p.public_credits, credits_mode=p.public_credits_mode,
         credits_text=p.public_credits_text,
         gallery=None, cover_url=p.public_cover_url, video_url=None,
+        prod_stage=p.website_prod_stage, verified_at=p.website_verified_at,
     )
 
 
 def _slug_or_fallback(sc) -> str:
-    """slug 優先序：admin 自訂 > number（1, 2, 3...）> 'work' 兜底。
+    """work_url_slug 的 'work' 兜底版 — URL 不可為空的 caller（redirects/驗收）用。
 
     number 在第一次 publish 時 auto-assign，永久不變避免 republish 改編號破壞
-    SEO 連結。fresh publish 還沒分配 number → 用 'work' 字串避免空 URL；
-    理論上不該發生（publish 路徑都會分配）。
-
-    參數 sc = CrmProjectShowcase（或 _virtual_work_from_project 的同形物件）。"""
-    custom = (sc.slug or "").strip()
-    if custom:
-        return custom
-    if sc.number is not None:
-        return str(sc.number)
-    return "work"
+    SEO 連結。fresh publish 還沒分配 number → 'work' 兜底（理論上不該發生，
+    publish 路徑都會配號）。"""
+    return work_url_slug(sc) or "work"
 
 
 def _old_slug_to_url(s: str) -> str:
@@ -528,32 +528,23 @@ async def list_admin_projects(
     return result
 
 
-# showcase-edit / admin Tab 送來的 wire key（歷史沿用 public_* 命名）→ 作品欄位對照。
+# wire key → 作品欄位對照（正本 = core.crm_logic.WORK_WIRE_FIELD_MAP）。
 # 不含 public_credits / public_cover_url — credits / cover 只能從 showcase-edit
 # 編輯（直接寫 sc.credits / sc.cover_url）。public_client 不在此 — 客戶是專案層
 # 資料，留在 crm_projects（見 update_project_public）。
-_WORK_FIELD_MAP = {
-    "public": "published",
-    "public_slug": "slug",
-    "public_title": "title",
-    "public_youtube_id": "youtube_id",
-    "public_description": "description",
-    "public_year": "year",
-    "public_featured": "featured",
-    "public_sort_order": "sort_order",
-    "public_published_at": "published_at",
-    "public_old_slugs": "old_slugs",
-    "public_noindex": "noindex",
-}
-
-# 主作品 dual-write：sc 欄位 → crm_projects.public_* 鏡射對照（Phase 4 停寫後移除）。
-_MAIN_WORK_MIRROR = {v: k for k, v in _WORK_FIELD_MAP.items()}
+_WORK_FIELD_MAP = WORK_WIRE_FIELD_MAP
 
 
-def is_main_work(sc) -> bool:
-    """主作品 = id == project_id 那列（歷史 1:1 時代 PK 直接用 project_id）。
-    舊 project-scoped 端點與過渡期 dual-write 都以此判定。"""
-    return bool(sc.id and sc.id == sc.project_id)
+def mirror_main_work_to_project(sc, project) -> None:
+    """主作品 dual-write：把最終 sc 值全量鏡射回 crm_projects.public_*（Phase 4 停寫）。
+
+    全量而非只鏡射 touched 欄位 — backfill 後兩邊本就相等，全量寫可自癒歷史分岔。
+    caller 自行判定 is_main_work 後呼叫（update_project_public / token PUT 共用）。
+    """
+    for wire_key, field in _WORK_FIELD_MAP.items():
+        setattr(project, wire_key, getattr(sc, field))
+    if sc.number is not None and project.public_number is None:
+        project.public_number = sc.number
 
 
 def _append_old_slug_core(old: str, new: str, existing_list) -> Optional[list]:
@@ -641,7 +632,8 @@ async def create_child_work(session: AsyncSession, project: CrmProject,
         .where(CrmProjectShowcase.project_id == project.id)
     )).scalar() or 0
     wid = _uuid.uuid4().hex
-    token = create_token({"sub": wid, "scope": "showcase_edit"}, expires_days=36500)
+    token = create_token({"sub": wid, "scope": SHOWCASE_EDIT_SCOPE},
+                         expires_days=SHOWCASE_EDIT_EXPIRES_DAYS)
     sc = CrmProjectShowcase(
         id=wid, project_id=project.id,
         title=(title or "").strip() or f"{project.name}（{count + 1}）",
@@ -663,7 +655,9 @@ async def get_or_create_work(session: AsyncSession, work_id: str):
         project = await session.get(CrmProject, work_id)
         if not project:
             return None, None
-        sc = CrmProjectShowcase(id=project.id, project_id=project.id)
+        # 用投影補水（不建空列）— 草稿專案可能 public_* 有值但沒 sc row（孤兒
+        # backfill 只涵蓋 public=TRUE），空列 + 主作品全量鏡射會把那些值洗成 NULL
+        sc = CrmProjectShowcase(**vars(_virtual_work_from_project(project)))
         session.add(sc)
         return sc, project
     project = await session.get(CrmProject, sc.project_id or sc.id)
@@ -706,18 +700,10 @@ async def update_project_public(
     if "public_client" in updates:
         project.public_client = updates["public_client"]
 
-    # First-publish auto-number
-    if sc.published and sc.number is None:
-        sc.number = await _next_public_number(session)
+    await ensure_work_number(session, sc)
 
-    main = is_main_work(sc)
-    if main:
-        # dual-write：把最終 sc 值全量鏡射回 public_*（含 append 過的 old_slugs）。
-        # 全量而非只鏡射 touched 欄位 — backfill 後兩邊本就相等，全量寫可自癒歷史分岔。
-        for field, wire_key in _MAIN_WORK_MIRROR.items():
-            setattr(project, wire_key, getattr(sc, field))
-        if sc.number is not None and project.public_number is None:
-            project.public_number = sc.number
+    if is_main_work(sc):
+        mirror_main_work_to_project(sc, project)
         await mirror_public_to_crm(session, project, updates)
 
     if category_ids is not None:
@@ -731,6 +717,13 @@ async def update_project_public(
 
     await session.commit()
     return True
+
+
+async def ensure_work_number(session: AsyncSession, sc) -> None:
+    """首發配號：published 且還沒有 number 才配 max+1（unpublish 不收回，
+    避免 republish 改號破壞 SEO 連結）。所有 publish 路徑統一走這裡。"""
+    if sc.published and sc.number is None:
+        sc.number = await _next_public_number(session)
 
 
 async def _next_public_number(session: AsyncSession) -> int:

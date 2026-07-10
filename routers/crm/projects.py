@@ -149,31 +149,41 @@ async def create_project(req: CrmProjectPayload, request: Request):
 _WEBSITE_PROD_STAGES = ("待製作", "製作中", "不上官網")
 
 
-async def _work_items_for_project(session, project) -> list[dict]:
+async def _work_items_for_project(session, project, rows=None) -> list[dict]:
     """一個專案的作品清單（1:N）— 結案看板 works 子列 / GET /projects/{id}/works 共用。
 
     排序：主作品先、再依 sort_order / created_at。
+    rows: 已預取的 CrmProjectShowcase list（結案看板批次查詢用，省 N+1）；
+          None 才自己查。專案沒有任何 sc row（未進過 showcase 流程）→ 以
+          _virtual_work_from_project 合成一筆主作品，看板卡片永遠有東西可畫。
     """
-    from core.crm_logic import work_stage
-    from services.website.project_service import is_main_work, work_completeness_dict
-    rows = (await session.execute(
-        select(CrmProjectShowcase)
-        .where(CrmProjectShowcase.project_id == project.id)
-        .order_by((CrmProjectShowcase.id == CrmProjectShowcase.project_id).desc(),
-                  CrmProjectShowcase.sort_order.desc(),
-                  CrmProjectShowcase.created_at.asc().nullslast())
-    )).scalars().all()
+    from core.crm_logic import is_main_work, work_stage, work_url_slug
+    from services.website.project_service import (
+        _virtual_work_from_project, work_completeness_dict,
+    )
+    if rows is None:
+        rows = (await session.execute(
+            select(CrmProjectShowcase)
+            .where(CrmProjectShowcase.project_id == project.id)
+            .order_by((CrmProjectShowcase.id == CrmProjectShowcase.project_id).desc(),
+                      CrmProjectShowcase.sort_order.desc(),
+                      CrmProjectShowcase.created_at.asc().nullslast())
+        )).scalars().all()
+    if not rows:
+        rows = [_virtual_work_from_project(project)]
     items = []
     for sc in rows:
+        main = is_main_work(sc)
+        # prod_stage 過渡期 fallback（Phase 4 停寫 public_* 時一併移除）：主作品的
+        # sc row 可能由 get-or-create 路徑補水前建立、階段只寫在專案欄
+        prod_stage = sc.prod_stage or (project.website_prod_stage if main else None)
         items.append({
             "id": sc.id,
-            "is_primary": is_main_work(sc),
+            "is_primary": main,
             "title": sc.title or project.name or "",
-            "slug": (sc.slug or "").strip() or (
-                str(sc.number) if sc.number is not None else None
-            ),
+            "slug": work_url_slug(sc),
             "published": bool(sc.published),
-            "stage": work_stage(bool(sc.published), sc.prod_stage),
+            "stage": work_stage(bool(sc.published), prod_stage),
             "verified": sc.verified_at is not None,
             "featured": bool(sc.featured),
             "completeness": work_completeness_dict(sc),
@@ -202,55 +212,41 @@ async def list_closing_projects(request: Request):
             .order_by(CrmProject.completion_date.desc().nullslast())
         )).all()
 
-        from core.crm_logic import project_works_summary, work_completeness, work_stage
+        # 批次撈全部作品（1 查詢取代逐專案 2 次 — 看板每次操作後全量重打，N+1 很有感）
+        works_map: dict[str, list] = {}
+        pids = [p.id for p, _s, _f in rows]
+        if pids:
+            sc_rows = (await session.execute(
+                select(CrmProjectShowcase)
+                .where(CrmProjectShowcase.project_id.in_(pids))
+                .order_by((CrmProjectShowcase.id == CrmProjectShowcase.project_id).desc(),
+                          CrmProjectShowcase.sort_order.desc(),
+                          CrmProjectShowcase.created_at.asc().nullslast())
+            )).scalars().all()
+            for sc in sc_rows:
+                works_map.setdefault(sc.project_id, []).append(sc)
+
+        from core.crm_logic import project_works_summary
         items = []
         for p, short_name, full_name in rows:
-            # 1:N：主作品 = id == project_id 那列（Phase 1 每專案僅此一列；
-            # sc 不存在 = 還沒進過 showcase 流程 → fallback 專案鏡射欄位）
-            sc = await session.get(CrmProjectShowcase, p.id)
-            if sc:
-                stage = work_stage(bool(sc.published), sc.prod_stage or p.website_prod_stage)
-                verified = sc.verified_at is not None
-                public = bool(sc.published)
-                featured = bool(sc.featured)
-                slug = (sc.slug or "").strip() or (
-                    str(sc.number) if sc.number is not None else None
-                )
-                completeness = work_completeness(
-                    video_url=sc.video_url, youtube_id=sc.youtube_id,
-                    extra_videos=sc.extra_videos, gallery=sc.gallery,
-                    cover_url=sc.cover_url, featured_image=sc.featured_image,
-                    description=sc.description, credits=sc.credits,
-                    credits_text=sc.credits_text,
-                )
-            else:
-                stage = work_stage(bool(p.public), p.website_prod_stage)
-                verified = p.website_verified_at is not None
-                public = bool(p.public)
-                featured = bool(p.public_featured)
-                slug = (p.public_slug or "").strip() or (
-                    str(p.public_number) if p.public_number is not None else None
-                )
-                completeness = work_completeness(
-                    youtube_id=p.public_youtube_id,
-                    featured_image=p.public_featured_image, cover_url=p.public_cover_url,
-                    description=p.public_description, credits=p.public_credits,
-                )
-            # 1:N：作品子列 + 聚合（卡片「2/3 已上線」進度；舊欄位保留 = 主作品值）
-            works_items = await _work_items_for_project(session, p)
+            # 卡片欄位 = 主作品值（works 排序保證主作品第一；沒有 sc row 的專案由
+            # helper 以 _virtual_work_from_project 合成，舊 1:1 讀法自動涵蓋）
+            works_items = await _work_items_for_project(
+                session, p, rows=works_map.get(p.id, []))
+            primary = works_items[0]
             items.append({
                 "id": p.id,
                 "name": p.name,
                 "client_name": short_name or full_name or "",
                 "completion_date": p.completion_date.isoformat() if p.completion_date else None,
-                "public": public,
-                "showcase_published": bool(sc.published) if sc else False,
-                "stage": stage,
+                "public": primary["published"],
+                "showcase_published": bool(works_map.get(p.id)) and primary["published"],
+                "stage": primary["stage"],
                 # N-now 上架驗收：rebuild 後對外頁實測 200 才 True（已上線 ✓ vs 驗證中）
-                "verified": verified,
-                "public_featured": featured,
-                "slug": slug,
-                "completeness": completeness,
+                "verified": primary["verified"],
+                "public_featured": primary["featured"],
+                "slug": primary["slug"],
+                "completeness": primary["completeness"],
                 "works": works_items,
                 "summary": project_works_summary(works_items),
             })

@@ -113,9 +113,9 @@ function _renderDeliveryTabs(container, projectId, works, activeId) {
     if (addBtn) addBtn.addEventListener('click', async () => {
         addBtn.disabled = true;
         try {
+            // POST 已回 {id, title}，直接補進清單重繪 — 免再 GET 一次
             const r = await _fetch('/projects/' + projectId + '/works', { method: 'POST', body: '{}' });
-            const listRes = await _fetch('/projects/' + projectId + '/works');
-            const fresh = (listRes && listRes.items) || works;
+            const fresh = works.concat([{ id: r.id, title: r.title, is_primary: false }]);
             _renderDeliveryTabs(container, projectId, fresh, r.id);
             await _selectDeliveryWork(r.id);
         } catch (e) {
@@ -125,15 +125,23 @@ function _renderDeliveryTabs(container, projectId, works, activeId) {
     });
 }
 
+// workId → 編輯器 URL 快取：後端 edit-token 是 reuse 語義（同 token 穩定回傳），
+// 同一顆 tab 反覆點擊不用重打 API
+const _workEditUrlCache = new Map();
+
 async function _selectDeliveryWork(workId) {
     const f = document.getElementById('delivery-showcase-frame');
     if (!f) return;
     try {
-        const t = await _fetch('/works/' + workId + '/edit-token');
-        let url = (t && t.url) || ((t && t.token) ? '/showcase-edit.html?token=' + encodeURIComponent(t.token) : '');
-        if (!url) throw new Error('無法取得編輯權杖');
-        if (url.startsWith('/')) url = location.origin + url;
-        if (!url.includes('embed=1')) url += (url.includes('?') ? '&' : '?') + 'embed=1';
+        let url = _workEditUrlCache.get(workId);
+        if (!url) {
+            const t = await _fetch('/works/' + workId + '/edit-token');
+            url = (t && t.url) || ((t && t.token) ? '/showcase-edit.html?token=' + encodeURIComponent(t.token) : '');
+            if (!url) throw new Error('無法取得編輯權杖');
+            if (url.startsWith('/')) url = location.origin + url;
+            if (!url.includes('embed=1')) url += (url.includes('?') ? '&' : '?') + 'embed=1';
+            _workEditUrlCache.set(workId, url);
+        }
         f.src = url;
     } catch (e) {
         alert('切換作品失敗：' + (e.message || e));

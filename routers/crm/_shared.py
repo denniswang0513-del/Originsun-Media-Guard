@@ -95,6 +95,19 @@ def _now() -> datetime:
     return datetime.now(timezone.utc)
 
 
+async def _mark_dirty_safe(tag: str) -> None:
+    """觸發對外網站 rebuild（debounce 60s）— 失敗不擋主操作（儲存/發布/上傳）。
+
+    Lazy import：services/website/ 不在 OTA AGENT_DIRS，只在 master 存在。
+    showcase / works 各寫入端點共用（tag 進 log 辨識觸發點）。"""
+    try:
+        from services.website import rebuild_service
+        await rebuild_service.mark_dirty()
+    except Exception as e:
+        import logging
+        logging.getLogger(__name__).warning("[%s] mark_dirty 失敗: %s", tag, e)
+
+
 def _parse_shoot_date(date_str: Optional[str]) -> Optional[datetime]:
     if not date_str:
         return None

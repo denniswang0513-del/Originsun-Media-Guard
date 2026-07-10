@@ -14,6 +14,7 @@ from typing import Any, Optional
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from core.crm_logic import work_url_slug
 from db.models import CrmProject
 from db.models_website import (
     WebsiteFAQ, WebsiteTestimonial, WebsiteQuickFact, WebsiteProjectSeo,
@@ -476,9 +477,7 @@ async def list_seo_audit(session: AsyncSession) -> list[dict]:
         out.append({
             "project_id": sc.id,   # 1:N 後語意 = work id（主作品 == 舊 project id）
             "title": sc.title or p.name,
-            "slug": (sc.slug or "").strip() or (
-                str(sc.number) if sc.number is not None else None
-            ),
+            "slug": work_url_slug(sc),
             "client": p.public_client,
             "year": sc.year,
             "completeness": score,        # 0-6

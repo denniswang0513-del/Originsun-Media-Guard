@@ -22,6 +22,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ._common import admin_session
+from core.crm_logic import showcase_edit_url
 from core.schemas_website import (
     ClientLookupItem, ClientLookupResponse, EditUrlResponse,
     ProjectAdminUpdate, ProjectReorder,
@@ -134,7 +135,7 @@ async def create_work(
     await session.commit()
     return WorkCreateResponse(
         id=project_id, name=name,
-        edit_url=f"/showcase-edit.html?token={token}",
+        edit_url=showcase_edit_url(token),
     )
 
 
@@ -153,20 +154,19 @@ async def create_work_under_project(
     await session.commit()
     return WorkChildCreateResponse(
         id=sc.id, title=sc.title or "",
-        edit_url=f"/showcase-edit.html?token={token}",
+        edit_url=showcase_edit_url(token),
     )
 
 
 def _work_has_content(sc) -> bool:
-    """作品列是否已被填過內容（skeleton 清理的守門判定）。"""
-    return bool(
-        (sc.cover_url or "").strip()
-        or (sc.description or "").strip()
-        or (sc.video_url or "").strip()
-        or (sc.credits_text or "").strip()
-        or (sc.gallery and len(sc.gallery) > 0)
-        or (sc.process_items and len(sc.process_items) > 0)
-        or (sc.credits and len(sc.credits) > 0)
+    """作品列是否已被填過內容（skeleton 清理的守門判定）。
+
+    「有無內容」的定義收斂到 completeness 四項（影片/圖/說明/credits，含
+    extra_videos/featured_image — 只填了附加影片的作品不可被當空殼刪）+
+    completeness 沒看的 process_items。"""
+    from services.website.project_service import work_completeness_dict
+    return any(work_completeness_dict(sc).values()) or bool(
+        sc.process_items and len(sc.process_items) > 0
     )
 
 
@@ -197,16 +197,11 @@ async def delete_work_if_skeleton(
         if not sc or sc.id == sc.project_id:   # 硬閘：主作品絕不走這條
             return {"deleted": False, "reason": "not_found"}
         import re
-        proj = await session.get(CrmProject, sc.project_id)
         title = (sc.title or "").strip()
-        # 預設標題 = 「{專案名}（N）」；專案名可能在子作品建立後被改（主作品標題會
-        # mirror 回 project.name），所以也接受通用「…（N）」模式，避免誤判 title_changed
-        is_default_title = (
-            not title
-            or (proj and title.startswith(f"{proj.name}（"))
-            or re.fullmatch(r".+（\d+）", title) is not None
-        )
-        if not is_default_title:
+        # 預設標題恆為「{專案名}（N）」；專案名可能在子作品建立後被改（主作品標題
+        # 會 mirror 回 project.name），所以只認通用「…（N）」模式。
+        # TODO(Phase 4)：改建立時 skeleton 標記（欄位或 title=NULL），淘汰模式判定
+        if title and re.fullmatch(r".+（\d+）", title) is None:
             return {"deleted": False, "reason": "title_changed"}
         if _work_has_content(sc):
             return {"deleted": False, "reason": "has_showcase_content"}
@@ -233,15 +228,7 @@ async def delete_work_if_skeleton(
         return {"deleted": False, "reason": "has_public_content"}
 
     sc = await session.get(CrmProjectShowcase, project_id)
-    if sc and (
-        (sc.cover_url or "").strip()
-        or (sc.description or "").strip()
-        or (sc.video_url or "").strip()
-        or (sc.credits_text or "").strip()
-        or (sc.gallery and len(sc.gallery) > 0)
-        or (sc.process_items and len(sc.process_items) > 0)
-        or (sc.credits and len(sc.credits) > 0)
-    ):
+    if sc and _work_has_content(sc):
         return {"deleted": False, "reason": "has_showcase_content"}
 
     if sc:
@@ -275,7 +262,7 @@ async def get_work_edit_url(
     token, _sc = await _mint_showcase_edit_token(session, project_id, reuse_existing=True)
     if session.dirty or session.new:
         await session.commit()
-    return EditUrlResponse(edit_url=f"/showcase-edit.html?token={token}")
+    return EditUrlResponse(edit_url=showcase_edit_url(token))
 
 
 @router.get("/clients/lookup", response_model=ClientLookupResponse)

@@ -107,14 +107,14 @@ def _list_key(block_i: int, item_j: int) -> int:
 def _collect_zh(entity_type: str, obj) -> dict[str, str]:
     """回傳非空的中文欄位 {欄位名: 中文}（work 的 title 空則用專案名）。
 
-    work 的專案名 fallback 走 `_fallback_name` transient 屬性 —
-    由 _entities / _get_entity 撈實體時從所屬 CrmProject 掛上。"""
+    work 的專案名 fallback 走 `_project_name` transient 屬性（與 initiative_service
+    同名同概念）— 由 _entities / _get_entity 撈實體時從所屬 CrmProject 掛上。"""
     fields = _ENTITY_FIELDS[entity_type]
     zh: dict[str, str] = {}
     for f in fields:
         v = (getattr(obj, f, None) or "").strip()
         if not v and entity_type == "work" and f == "title":
-            v = (getattr(obj, "_fallback_name", None) or "").strip()
+            v = (getattr(obj, "_project_name", None) or "").strip()
         if v:
             zh[f] = v
     return zh
@@ -144,7 +144,7 @@ async def _entities(session: AsyncSession, entity_type: str) -> list:
         )
         out = []
         for sc, pname in rows:
-            sc._fallback_name = pname or ""   # _collect_zh 的 title fallback
+            sc._project_name = pname or ""   # _collect_zh 的 title fallback
             out.append(sc)
         return out
     if entity_type == "post":
@@ -286,7 +286,7 @@ async def _get_entity(session: AsyncSession, etype: str, eid: str):
     if obj is not None and etype == "work":
         # 掛 transient 屬性：title fallback（專案名）+ 客戶名欄（專案層，manual 翻譯用）
         proj = await session.get(CrmProject, obj.project_id or obj.id)
-        obj._fallback_name = (proj.name if proj else "") or ""
+        obj._project_name = (proj.name if proj else "") or ""
         obj._client_zh = (proj.public_client if proj else "") or ""
         obj._client_en = (proj.public_client_en if proj else "") or ""
     return obj
@@ -362,7 +362,8 @@ async def _writeback(session: AsyncSession, etype: str, eid: str, parsed: dict,
         else:
             setattr(obj, k, v)   # k 已是 {field}_en
     # 主作品 dual-write：_en 鏡射回 crm_projects（過渡期回退保險，Phase 4 停寫）
-    if etype == "work" and obj.id == obj.project_id:
+    from core.crm_logic import is_main_work
+    if etype == "work" and is_main_work(obj):
         proj = await session.get(CrmProject, obj.project_id)
         if proj:
             proj.public_title_en = obj.title_en

@@ -1,38 +1,33 @@
 """routers/crm/works.py — 1:N 作品子端點（Phase 2）。
 
 一個 CRM 專案下可有多個官網作品（crm_project_showcase 列，id=work id）。
-主作品（sc.id == sc.project_id）仍可走 showcase.py 的 project-scoped 舊端點
+主作品（is_main_work）仍可走 showcase.py 的 project-scoped 舊端點
 （語意 = 操作主作品）；本模組提供逐作品操作：
 
 - GET   /projects/{project_id}/works          作品清單 + 聚合 summary（看板/收件匣用）
 - POST  /projects/{project_id}/works          在既有專案下新增子作品（回 edit_url）
 - POST  /works/{work_id}/publish              逐作品發布/下架切換
 - PATCH /works/{work_id}/stage                逐作品官網階段（待製作/製作中/不上官網）
+- GET   /works/{work_id}/edit-token           取得 token（重用既有 — delivery 分頁用）
 - POST  /works/{work_id}/generate-edit-token  逐作品 edit token（重發語義）
 """
 from __future__ import annotations
 
 from fastapi import HTTPException, Request
 
+from core.crm_logic import (is_main_work, project_works_summary,
+                            showcase_edit_url, work_url_slug)
 from core.schemas_website import WorkChildCreateRequest, WorkChildCreateResponse
 
-from ._shared import (router, _check_website_auth, _require_db, _get_factory, _now)
+from ._shared import (router, _check_website_auth, _require_db, _get_factory,
+                      _mark_dirty_safe, _now)
 from .projects import _WEBSITE_PROD_STAGES, _work_items_for_project
+from .showcase import _mint_showcase_edit_token, _toggle_publish
 
 try:
     from ._shared import CrmProject, CrmProjectShowcase
 except ImportError:  # DB 套件不存在的 agent 環境 — 行為同其他 crm 模組
     pass
-
-
-async def _mark_dirty_safe(tag: str) -> None:
-    """觸發對外網站 rebuild（debounce 60s）— 失敗不擋操作（比照 showcase.py 各端點）。"""
-    try:
-        from services.website import rebuild_service
-        await rebuild_service.mark_dirty()
-    except Exception as e:
-        import logging
-        logging.getLogger(__name__).warning("[%s] mark_dirty 失敗: %s", tag, e)
 
 
 @router.get("/projects/{project_id}/works")
@@ -46,7 +41,6 @@ async def list_project_works(project_id: str, request: Request):
         if not project:
             raise HTTPException(status_code=404, detail="找不到此專案")
         items = await _work_items_for_project(session, project)
-    from core.crm_logic import project_works_summary
     return {"items": items, "summary": project_works_summary(items)}
 
 
@@ -64,14 +58,13 @@ async def create_project_work(project_id: str, req: WorkChildCreateRequest, requ
         sc, token = await create_child_work(session, project, req.title)
         await session.commit()
     return WorkChildCreateResponse(
-        id=sc.id, title=sc.title or "",
-        edit_url=f"/showcase-edit.html?token={token}",
+        id=sc.id, title=sc.title or "", edit_url=showcase_edit_url(token),
     )
 
 
 @router.post("/works/{work_id}/publish")
 async def toggle_work_publish(work_id: str, request: Request):
-    """逐作品發布/下架切換（= showcase publish 的 work 版；首發配號）。"""
+    """逐作品發布/下架切換 — 與 project-scoped publish 共用 _toggle_publish 核心。"""
     _check_website_auth(request)
     _require_db()
     factory = await _get_factory()
@@ -79,21 +72,10 @@ async def toggle_work_publish(work_id: str, request: Request):
         sc = await session.get(CrmProjectShowcase, work_id)
         if not sc:
             raise HTTPException(status_code=404, detail="找不到此作品")
-        sc.published = not sc.published
-        if sc.published:
-            sc.published_at = sc.published_at or _now()
-        sc.updated_at = _now()
-        if sc.published and sc.number is None:
-            from services.website.project_service import _next_public_number
-            sc.number = await _next_public_number(session)
-        # 主作品鏡射 public_*（子作品查無對應 project → 天然 no-op）
-        from .showcase import _sync_showcase_to_public
-        await _sync_showcase_to_public(session, sc)
+        await _toggle_publish(session, sc)
         await session.commit()
         published = bool(sc.published)
-        slug = (sc.slug or "").strip() or (
-            str(sc.number) if sc.number is not None else None
-        )
+        slug = work_url_slug(sc)
     await _mark_dirty_safe("work publish")
     return {"ok": True, "published": published, "slug": slug}
 
@@ -115,7 +97,7 @@ async def update_work_stage(work_id: str, request: Request):
         sc.prod_stage = stage
         sc.updated_at = _now()
         # 主作品 dual-write 回 project 欄（Phase 4 停寫）
-        if sc.id == sc.project_id:
+        if is_main_work(sc):
             project = await session.get(CrmProject, sc.project_id)
             if project:
                 project.website_prod_stage = stage
@@ -128,31 +110,25 @@ async def update_work_stage(work_id: str, request: Request):
 async def get_work_edit_token(work_id: str, request: Request):
     """取得作品的 edit token（已有就重用、沒有才 mint）— delivery tab 分頁切換用，
     不作廢既有分享連結（重發請走 POST generate-edit-token）。"""
-    _check_website_auth(request)
-    _require_db()
-    factory = await _get_factory()
-    async with factory() as session:
-        if not await session.get(CrmProjectShowcase, work_id):
-            raise HTTPException(status_code=404, detail="找不到此作品")
-        from .showcase import _mint_showcase_edit_token
-        token, _sc = await _mint_showcase_edit_token(session, work_id, reuse_existing=True)
-        await session.commit()
-    return {"status": "ok", "token": token, "url": f"/showcase-edit.html?token={token}"}
+    return await _work_edit_token(work_id, request, reuse_existing=True)
 
 
 @router.post("/works/{work_id}/generate-edit-token")
 async def generate_work_edit_token(work_id: str, request: Request):
-    """逐作品產生 showcase-edit token（永遠產新 = 分享連結重發語義）。
+    """逐作品產生 showcase-edit token（永遠產新 = 分享連結重發語義）。"""
+    return await _work_edit_token(work_id, request, reuse_existing=False)
 
-    只對既有作品發（404 守門）— 不做 get-or-create，避免打錯 id 長出垃圾列。
-    """
+
+async def _work_edit_token(work_id: str, request: Request, *, reuse_existing: bool):
+    """兩個 token 端點的共用 body。只對既有作品發（404 守門）— 不做
+    get-or-create，避免打錯 id 長出垃圾列。"""
     _check_website_auth(request)
     _require_db()
     factory = await _get_factory()
     async with factory() as session:
         if not await session.get(CrmProjectShowcase, work_id):
             raise HTTPException(status_code=404, detail="找不到此作品")
-        from .showcase import _mint_showcase_edit_token
-        token, _sc = await _mint_showcase_edit_token(session, work_id, reuse_existing=False)
+        token, _sc = await _mint_showcase_edit_token(
+            session, work_id, reuse_existing=reuse_existing)
         await session.commit()
-    return {"status": "ok", "token": token, "url": f"/showcase-edit.html?token={token}"}
+    return {"status": "ok", "token": token, "url": showcase_edit_url(token)}

@@ -40,7 +40,8 @@ def _to_dict(o: WebsiteInitiative) -> dict[str, Any]:
 
 
 def _work_slug(w) -> Optional[str]:
-    return (w.slug or (str(w.number) if w.number else None))
+    from core.crm_logic import work_url_slug
+    return work_url_slug(w)
 
 
 def _work_cover(w) -> Optional[str]:
