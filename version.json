@@ -1,5 +1,5 @@
 {
-  "version": "1.10.222",
-  "build_date": "2026-07-08",
-  "notes": "???: B1 ??????/B4 ???/B5 ???(??????)"
+  "version": "1.10.241",
+  "build_date": "2026-07-10",
+  "notes": "simplify: shared master gate + google_oauth extraction + parallel probe + dedup"
 }
