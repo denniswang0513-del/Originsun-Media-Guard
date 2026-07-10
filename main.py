@@ -292,6 +292,19 @@ async def _on_startup():
     state.set_main_loop(_loop)
     state.init_concurrency()
     print(f"[LOOP] event loop = {type(_loop).__name__}")  # expect SelectorEventLoop on Windows (asyncpg stability)
+    # ── 一次性遷移（2026-07）：把外洩的舊 DB 密碼 originsun2026 移出 settings.json ──
+    # 機隊 8 台無法直接觸及（無 SSH / 各自 jwt_secret / master 無推設定機制），這段在
+    # 每台 OTA 重啟時自癒：偵測到 settings.json 仍是舊密碼 → 改成 config 新預設。
+    # 必須在 init_db() 之前（engine 讀 get_database_url() → settings.json）。
+    # guarded（只在含舊密碼時動）+ idempotent + 例外不擋啟動。
+    try:
+        from config import load_settings, save_settings, _DEFAULT_SETTINGS
+        _cur_url = load_settings().get("database_url", "")
+        if "originsun2026@" in _cur_url:
+            save_settings({"database_url": _DEFAULT_SETTINGS["database_url"]})
+            print("[migrate] settings.json 的外洩 DB 密碼已輪替為新值")
+    except Exception as _e_mig:
+        print(f"[migrate] DB 密碼輪替略過: {_e_mig}")
     # ── PostgreSQL 連線 ──
     _db_import_ok = False
     try:

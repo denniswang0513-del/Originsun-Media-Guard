@@ -35,7 +35,7 @@ _DEFAULT_SETTINGS: dict = {
         "logs_dir": r"\\192.168.1.132\Container\AI_Workspace\Originsun_Web\Logs",
     },
     "master_server": "http://192.168.1.107:8000",
-    "database_url": "postgresql+asyncpg://originsun:originsun2026@192.168.1.132:5432/mediaguard",
+    "database_url": "postgresql+asyncpg://originsun:cdeed932212d3e5bbfe86856bc77ac9c@192.168.1.132:5432/mediaguard",
     "machine_id": "",  # 自動填入 hostname（init_settings 時）
     "agents": [],
     "compute_hosts": [],
