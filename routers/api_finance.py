@@ -15,6 +15,10 @@ api_finance.py — 財務管理階段二/三：科目對映 + 銀行帳戶 + 對
   解讀 + meta；已鎖月優先讀快照 v2）、GET /statements/drilldown?kind=&period=
   （報表列 → 底層明細）。聚合在 services/finance_statements.py、規則在
   core/finance_logic.py 純函式（黃金測試 tests/unit/test_finance_statements.py）。
+- 銀行貸款（階段四）：/loans CRUD（建檔即生攤還表；PUT 只重生未繳期別）
+  + pay/unpay（自動建/刪收支明細，月結守衛）+ /loans/upcoming 到期清單。
+  攤還純函式 amortization_schedule 在 core/finance_logic.py
+  （黃金測試 tests/unit/test_finance_loans.py）。
 
 守門：全部端點 check_admin_or_module(request, 'crm_invoices')（沿用帳務模組 key）。
 金額一律 Integer 新台幣。純計算規則在 core/finance_logic.py（有單元測試）。
@@ -28,11 +32,13 @@ from fastapi import APIRouter, HTTPException, Request  # type: ignore
 from config import load_settings, save_settings
 from core.auth import check_admin_or_module
 from core.db_guard import db_factory_or_503 as _factory_or_503
-from core.finance_logic import (bank_running_balance, period_months,
-                                reconciliation_diff)
+from core.finance_logic import (amortization_schedule, bank_running_balance,
+                                local_day, period_months, reconciliation_diff,
+                                today_start)
 from core.schemas import (BankAccountPayload, BulkAssignAccountPayload,
                           FinanceAdjustmentPayload, FinanceCategoryMapPut,
-                          FinanceSetupWizardPayload, ReconciliationPayload)
+                          FinanceSetupWizardPayload, LoanPayload,
+                          LoanPayPayload, ReconciliationPayload)
 from routers.crm._shared import (_assert_month_open, _parse_day, _username,
                                  _validate_month)
 
@@ -41,10 +47,11 @@ router = APIRouter(prefix="/api/v1/finance", tags=["finance"])
 MAP_SOURCES = {"cash", "payment", "invoice"}
 # ⚠ 改 TREATMENTS / ACCT_KINDS 值域要同步 frontend/tabs/finance/fin-utils.js 的 *_OPTIONS
 TREATMENTS = {"direct_expense", "direct_income", "ap_settlement", "ar_settlement",
-              "transfer", "tax_vat", "tax_income", "advance", "passthrough"}
+              "transfer", "tax_vat", "tax_income", "advance", "passthrough", "loan"}
 ADJ_TYPES = {"opening", "correction", "owner_in", "owner_out",
              "accountant", "writeoff", "other"}
 ACCT_KINDS = {"bank", "cash"}
+LOAN_PAY_CATEGORY = "貸款繳款"  # 對映 (cash, 貸款繳款) → 2400/loan（seed_finance）
 
 
 def _guard(request: Request):
@@ -143,6 +150,12 @@ async def upsert_category_map(payload: FinanceCategoryMapPut, request: Request):
             raise HTTPException(status_code=422, detail=f"source 需為 {sorted(MAP_SOURCES)}: {it.source}")
         if it.treatment not in TREATMENTS:
             raise HTTPException(status_code=422, detail=f"treatment 無效: {it.treatment}")
+        # 'loan' 只對 source='cash' 有引擎語意（貸款撥款/繳款走收支）；掛到
+        # payment/invoice 會靜默錯帳（請款流進損益 + 與 BS 貸款餘額重複列負債）。
+        if it.treatment == "loan" and it.source != "cash":
+            raise HTTPException(
+                status_code=422,
+                detail="treatment='loan' 僅適用於收支明細（source='cash'）")
         if not (it.category_text or "").strip():
             raise HTTPException(status_code=422, detail="category_text 不可為空")
     from sqlalchemy import select
@@ -393,9 +406,10 @@ async def create_reconciliation(payload: ReconciliationPayload, request: Request
 # ── 調整表 ──────────────────────────────────────────────────
 
 def _adj_dict(a, code: str = "", name: str = "") -> dict:
+    adj_date = local_day(a.adj_date)
     return {
         "id": a.id,
-        "adj_date": a.adj_date.strftime("%Y-%m-%d") if a.adj_date else None,
+        "adj_date": adj_date.strftime("%Y-%m-%d") if adj_date else None,
         "account_id": a.account_id, "account_code": code, "account_name": name,
         "amount": a.amount, "adj_type": a.adj_type, "description": a.description,
         "created_by": a.created_by or "",
@@ -520,6 +534,409 @@ async def bulk_assign_account(payload: BulkAssignAccountPayload, request: Reques
         result = await session.execute(stmt)
         await session.commit()
     return {"updated": int(result.rowcount or 0)}
+
+
+# ── 銀行貸款（階段四）───────────────────────────────────────
+# 會計處理三分離（規格）：
+# - 利息費用 = 權責按攤還表 due_date 進損益「業外支出」（不管繳沒繳）
+# - 繳款現金流 = pay 自動建收支明細（category=貸款繳款 → 2400/loan →
+#   CF financing），treatment='loan' 不進損益（避免與權責利息重複）
+# - BS 貸款餘額 = 起始本金 − Σ已繳期別 principal_due（單純看繳款事實）
+
+def _loan_dict(l, *, paid_periods=None, total_periods=None) -> dict:
+    """貸款序列化。status（active/paid_off）為推導值 — 無 DB 欄位：
+    給了期數就算，全繳完 → paid_off，否則 active。"""
+    sd, fpd = local_day(l.start_date), local_day(l.first_payment_date)
+    status = "active"
+    if total_periods and paid_periods is not None and paid_periods >= total_periods:
+        status = "paid_off"
+    return {
+        "id": l.id, "name": l.name, "lender": l.lender or "",
+        "principal": l.principal or 0, "annual_rate": l.annual_rate or 0.0,
+        "term_months": l.term_months or 0, "method": l.method or "annuity",
+        "grace_months": l.grace_months or 0,
+        "start_date": sd.strftime("%Y-%m-%d") if sd else None,
+        "first_payment_date": fpd.strftime("%Y-%m-%d") if fpd else None,
+        "bank_account_id": l.bank_account_id, "status": status,
+        "opening_balance": l.opening_balance, "note": l.note or "",
+        "created_at": l.created_at.isoformat() if l.created_at else None,
+        "updated_at": l.updated_at.isoformat() if l.updated_at else None,
+    }
+
+
+def _loan_pay_dict(p, today=None) -> dict:
+    """攤還期別序列化。overdue 即時推導（未繳且過期）— 不落庫，前端一律吃此欄。"""
+    due, paid_at = local_day(p.due_date), local_day(p.paid_at)
+    status = p.status or "scheduled"
+    d = {
+        "id": p.id, "loan_id": p.loan_id, "period_no": p.period_no,
+        "due_date": due.strftime("%Y-%m-%d") if due else None,
+        "principal_due": p.principal_due or 0,
+        "interest_due": p.interest_due or 0,
+        "total": (p.principal_due or 0) + (p.interest_due or 0),
+        "paid_at": paid_at.strftime("%Y-%m-%d") if paid_at else None,
+        "cash_entry_id": p.cash_entry_id, "status": status,
+    }
+    if today is not None:
+        d["overdue"] = bool(due and status != "paid" and due < today)
+    return d
+
+
+def _loan_base(l) -> int:
+    """攤還/餘額基準本金：opening_balance（導入舊貸=當下剩餘本金）優先。"""
+    return int(l.opening_balance or l.principal or 0)
+
+
+async def _get_loan_and_period(session, loan_id: str, period_no: int):
+    """pay/unpay 共用：取貸款 + 指定期別，任一不存在 → 404。"""
+    from sqlalchemy import select
+    from db.models import FinanceLoan, FinanceLoanPayment
+    loan = await session.get(FinanceLoan, loan_id)
+    if not loan:
+        raise HTTPException(status_code=404, detail="貸款不存在")
+    row = (await session.execute(
+        select(FinanceLoanPayment).where(
+            FinanceLoanPayment.loan_id == loan_id,
+            FinanceLoanPayment.period_no == period_no))).scalar_one_or_none()
+    if not row:
+        raise HTTPException(status_code=404, detail="期別不存在")
+    return loan, row
+
+
+async def _query_upcoming_payments(session, horizon):
+    """未繳且 due_date ≤ horizon 的期別 + 貸款名 → [(payment_row, loan_name)]。
+    /loans/upcoming 端點與排程提醒（core.scheduler._loan_due_check）共用 —
+    不掛 guard。逾期（due_date < today）本就 ≤ horizon 故一併涵蓋。"""
+    from sqlalchemy import select
+    from db.models import FinanceLoan, FinanceLoanPayment
+    return (await session.execute(
+        select(FinanceLoanPayment, FinanceLoan.name)
+        .join(FinanceLoan, FinanceLoan.id == FinanceLoanPayment.loan_id)
+        .where(FinanceLoanPayment.status != "paid",
+               FinanceLoanPayment.due_date <= horizon)
+        .order_by(FinanceLoanPayment.due_date,
+                  FinanceLoanPayment.period_no))).all()
+
+
+def _build_schedule_or_422(principal, annual_rate, term_months, method,
+                           start_date, grace_months, first_payment_date) -> list:
+    try:
+        return amortization_schedule(principal, annual_rate, term_months,
+                                     method, start_date, grace_months,
+                                     first_payment_date)
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e))
+
+
+@router.get("/loans")
+async def list_loans(request: Request):
+    """貸款清單 + 即時彙總：outstanding（餘額）/next_due（下一期）/
+    paid_periods/total_periods。"""
+    _guard(request)
+    from sqlalchemy import select
+    from db.models import FinanceLoan, FinanceLoanPayment
+    factory = _factory_or_503()
+    async with factory() as session:
+        loans = (await session.execute(
+            select(FinanceLoan).order_by(FinanceLoan.created_at))).scalars().all()
+        pays = (await session.execute(
+            select(FinanceLoanPayment).order_by(
+                FinanceLoanPayment.loan_id,
+                FinanceLoanPayment.period_no))).scalars().all()
+    by_loan: dict = {}
+    for p in pays:
+        by_loan.setdefault(p.loan_id, []).append(p)  # 查詢已按 period_no 排序
+    today = today_start()
+    items = []
+    for l in loans:
+        rows = by_loan.get(l.id, [])
+        paid = [r for r in rows if (r.status or "") == "paid"]
+        unpaid = [r for r in rows if (r.status or "") != "paid"]
+        next_due = None
+        if unpaid:
+            nd = unpaid[0]  # 已排序 → 第一個未繳即最早到期
+            nd_due = local_day(nd.due_date)
+            next_due = dict(period_no=nd.period_no,
+                            due_date=nd_due.strftime("%Y-%m-%d") if nd_due else None,
+                            total=(nd.principal_due or 0) + (nd.interest_due or 0),
+                            overdue=bool(nd_due and nd_due < today))
+        d = _loan_dict(l, paid_periods=len(paid), total_periods=len(rows))
+        d.update(outstanding=_loan_base(l) - sum(r.principal_due or 0 for r in paid),
+                 next_due=next_due, paid_periods=len(paid), total_periods=len(rows))
+        items.append(d)
+    return {"items": items}
+
+
+@router.post("/loans")
+async def create_loan(payload: LoanPayload, request: Request):
+    """建檔即生攤還表（amortization_schedule 純函式）。
+
+    opening_balance 模式（導入舊貸）：principal 記原始本金供參考，攤還表以
+    opening_balance（當下剩餘本金）+ term_months（剩餘期數）生成剩餘期。"""
+    _guard(request)
+    # 純函式沒守的（值域/日期正負）在此擋；principal/term/method/日期有效性
+    # 交給 _build_schedule_or_422（amortization_schedule 的 ValueError → 422）。
+    if not (payload.name or "").strip():
+        raise HTTPException(status_code=422, detail="name 必填")
+    if payload.annual_rate is not None and payload.annual_rate < 0:
+        raise HTTPException(status_code=422, detail="annual_rate 不可為負")
+    if payload.opening_balance is not None and payload.opening_balance <= 0:
+        raise HTTPException(status_code=422, detail="opening_balance 需為正整數（或不填）")
+    method = payload.method or "annuity"
+    start = _parse_day(payload.start_date)
+    first = _parse_day(payload.first_payment_date)
+    sched = _build_schedule_or_422(
+        payload.opening_balance or payload.principal, payload.annual_rate or 0.0,
+        payload.term_months, method, start, payload.grace_months or 0, first)
+
+    from db.models import BankAccount, FinanceLoan, FinanceLoanPayment
+    factory = _factory_or_503()
+    async with factory() as session:
+        if payload.bank_account_id and \
+                not await session.get(BankAccount, payload.bank_account_id):
+            raise HTTPException(status_code=404, detail="扣款帳戶不存在")
+        loan = FinanceLoan(
+            id=uuid.uuid4().hex, name=payload.name.strip(),
+            lender=payload.lender, principal=payload.principal,
+            annual_rate=payload.annual_rate or 0.0,
+            term_months=payload.term_months, method=method,
+            grace_months=payload.grace_months or 0,
+            start_date=start, first_payment_date=first,
+            bank_account_id=payload.bank_account_id or None,
+            opening_balance=payload.opening_balance,
+            note=payload.note)
+        session.add(loan)
+        for row in sched:
+            session.add(FinanceLoanPayment(
+                id=uuid.uuid4().hex, loan_id=loan.id,
+                period_no=row["period_no"],
+                due_date=datetime.strptime(row["due_date"], "%Y-%m-%d"),
+                principal_due=row["principal_due"],
+                interest_due=row["interest_due"], status="scheduled"))
+        await session.commit()
+        d = _loan_dict(loan, paid_periods=0, total_periods=len(sched))
+        d["total_periods"] = len(sched)
+        return d
+
+
+@router.put("/loans/{loan_id}")
+async def update_loan(loan_id: str, payload: LoanPayload, request: Request):
+    """更新貸款。名稱/銀行/帳戶/備註直接改；結構欄位（利率/期數/方法/寬限/
+    日期/本金）任一有變 → **只重生未繳期別**，已繳列不可變：
+
+    剩餘本金 = 基準本金（opening_balance 或 principal）− Σ已繳 principal_due；
+    剩餘期數 = 新 term_months − 已繳期數（新期數 ≤ 已繳期數 → 422）；
+    首期到期日 = 原第一個未繳期別的 due_date（保持原繳款節奏，全繳過則
+    接在最後已繳期的下月同日）；寬限期扣掉已繳期數。"""
+    _guard(request)
+    data = payload.model_dump(exclude_unset=True)
+    if "name" in data and not (data["name"] or "").strip():
+        raise HTTPException(status_code=422, detail="name 不可為空")
+    # method 值域由 _build_schedule_or_422 統一驗（結構欄變更必觸發重生）。
+    from sqlalchemy import select
+    from db.models import BankAccount, FinanceLoan, FinanceLoanPayment
+    factory = _factory_or_503()
+    structural = {"principal", "annual_rate", "term_months", "method",
+                  "grace_months", "start_date", "first_payment_date",
+                  "opening_balance"}
+    async with factory() as session:
+        loan = await session.get(FinanceLoan, loan_id)
+        if not loan:
+            raise HTTPException(status_code=404, detail="貸款不存在")
+        if "bank_account_id" in data and data["bank_account_id"] and \
+                not await session.get(BankAccount, data["bank_account_id"]):
+            raise HTTPException(status_code=404, detail="扣款帳戶不存在")
+        for k in ("name", "lender", "note"):
+            if k in data:
+                setattr(loan, k, (data[k] or "").strip() if k == "name" else data[k])
+        if "bank_account_id" in data:
+            loan.bank_account_id = data["bank_account_id"] or None
+        if structural & set(data):
+            for k in ("principal", "annual_rate", "term_months", "grace_months",
+                      "method", "opening_balance"):
+                if k in data:
+                    setattr(loan, k, data[k])
+            if "start_date" in data:
+                loan.start_date = _parse_day(data["start_date"])
+            if "first_payment_date" in data:
+                loan.first_payment_date = _parse_day(data["first_payment_date"])
+            if not loan.principal or loan.principal <= 0:
+                raise HTTPException(status_code=422, detail="principal 需為正整數")
+            rows = (await session.execute(
+                select(FinanceLoanPayment)
+                .where(FinanceLoanPayment.loan_id == loan_id)
+                .order_by(FinanceLoanPayment.period_no))).scalars().all()
+            paid = [r for r in rows if (r.status or "") == "paid"]
+            unpaid = [r for r in rows if (r.status or "") != "paid"]
+            k_paid = len(paid)
+            new_term = int(loan.term_months or 0)
+            if new_term <= k_paid:
+                raise HTTPException(
+                    status_code=422,
+                    detail=f"term_months（{new_term}）不可少於或等於已繳期數（{k_paid}）")
+            if any(r.period_no > new_term for r in paid):
+                raise HTTPException(
+                    status_code=422, detail="期數不可縮到已繳期別之下")
+            remaining = _loan_base(loan) - sum(r.principal_due or 0 for r in paid)
+            if remaining <= 0:
+                raise HTTPException(status_code=422, detail="剩餘本金 ≤ 0，無未繳期別可重生")
+            # 首期錨定：原第一個未繳期別 due_date；全繳過則接最後已繳期下月同日
+            # （due_date 為 NOT NULL，min/max 恆有值）
+            if unpaid:
+                anchor_kw = dict(
+                    start_date=None,
+                    first_payment_date=local_day(min(r.due_date for r in unpaid)))
+            elif paid:
+                anchor_kw = dict(
+                    start_date=local_day(max(r.due_date for r in paid)),
+                    first_payment_date=None)
+            else:
+                anchor_kw = dict(start_date=local_day(loan.start_date),
+                                 first_payment_date=local_day(loan.first_payment_date))
+            sched = _build_schedule_or_422(
+                remaining, loan.annual_rate or 0.0, new_term - k_paid,
+                loan.method or "annuity",
+                grace_months=max(0, int(loan.grace_months or 0) - k_paid),
+                **anchor_kw)
+            for r in unpaid:
+                await session.delete(r)
+            paid_nos = {r.period_no for r in paid}
+            free_nos = [n for n in range(1, new_term + 1) if n not in paid_nos]
+            for row, pno in zip(sched, free_nos):
+                session.add(FinanceLoanPayment(
+                    id=uuid.uuid4().hex, loan_id=loan.id, period_no=pno,
+                    due_date=datetime.strptime(row["due_date"], "%Y-%m-%d"),
+                    principal_due=row["principal_due"],
+                    interest_due=row["interest_due"], status="scheduled"))
+        loan.updated_at = datetime.now()
+        await session.commit()
+        return _loan_dict(loan)
+
+
+@router.delete("/loans/{loan_id}")
+async def delete_loan(loan_id: str, request: Request):
+    """有已繳期別的貸款不可刪（收支明細會變孤兒）→ 409 先取消繳款；
+    否則連攤還表一併刪。"""
+    _guard(request)
+    from sqlalchemy import delete as sa_delete, select, func as safunc
+    from db.models import FinanceLoan, FinanceLoanPayment
+    factory = _factory_or_503()
+    async with factory() as session:
+        loan = await session.get(FinanceLoan, loan_id)
+        if not loan:
+            raise HTTPException(status_code=404, detail="貸款不存在")
+        paid = (await session.execute(
+            select(safunc.count(FinanceLoanPayment.id)).where(
+                FinanceLoanPayment.loan_id == loan_id,
+                FinanceLoanPayment.status == "paid"))).scalar() or 0
+        if paid:
+            raise HTTPException(
+                status_code=409,
+                detail=f"此貸款已有 {paid} 期繳款紀錄，請先取消繳款（unpay）再刪除")
+        await session.execute(sa_delete(FinanceLoanPayment).where(
+            FinanceLoanPayment.loan_id == loan_id))
+        await session.delete(loan)
+        await session.commit()
+    return {"ok": True}
+
+
+@router.get("/loans/{loan_id}/schedule")
+async def loan_schedule(loan_id: str, request: Request):
+    """攤還表全期別（含 overdue 即時標記）。"""
+    _guard(request)
+    from sqlalchemy import select
+    from db.models import FinanceLoan, FinanceLoanPayment
+    factory = _factory_or_503()
+    async with factory() as session:
+        loan = await session.get(FinanceLoan, loan_id)
+        if not loan:
+            raise HTTPException(status_code=404, detail="貸款不存在")
+        rows = (await session.execute(
+            select(FinanceLoanPayment)
+            .where(FinanceLoanPayment.loan_id == loan_id)
+            .order_by(FinanceLoanPayment.period_no))).scalars().all()
+    today = today_start()
+    paid_n = sum(1 for r in rows if (r.status or "") == "paid")
+    return {"loan": _loan_dict(loan, paid_periods=paid_n, total_periods=len(rows)),
+            "items": [_loan_pay_dict(r, today) for r in rows]}
+
+
+@router.post("/loans/{loan_id}/payments/{period_no}/pay")
+async def pay_loan_period(loan_id: str, period_no: int,
+                          payload: LoanPayPayload, request: Request):
+    """繳款：驗期別未繳 → 自動建收支明細（entry_date=paid_date、category=貸款繳款、
+    expense=本+息、掛扣款帳戶、**硬連結 loan_payment_id**）→ 期別標 paid + cash_entry_id。
+
+    月結守衛：paid_date 落鎖定月 409。收支靠 loan_payment_id 硬連結 → classify
+    回 'loan' → 不進損益（利息費用權責已按攤還表 due_date 認列，避免重複）+ 走
+    科目 2400 cf_activity=financing。硬連結壓過文字 category，日後改 category/
+    對映都不會誤入損益。"""
+    _guard(request)
+    paid_date = _parse_day(payload.paid_date) or today_start()
+    from db.models import BankAccount, CrmCashEntry
+    factory = _factory_or_503()
+    async with factory() as session:
+        loan, row = await _get_loan_and_period(session, loan_id, period_no)
+        if (row.status or "") == "paid":
+            raise HTTPException(status_code=409, detail=f"第 {period_no} 期已繳款")
+        await _assert_month_open(session, paid_date)
+        acct_id = payload.bank_account_id or loan.bank_account_id
+        if acct_id and not await session.get(BankAccount, acct_id):
+            raise HTTPException(status_code=404, detail="扣款帳戶不存在")
+        total = int(row.principal_due or 0) + int(row.interest_due or 0)
+        entry = CrmCashEntry(
+            id=uuid.uuid4().hex, entry_date=paid_date, expense=total,
+            summary=f"{loan.name} 第{row.period_no}期",
+            category=LOAN_PAY_CATEGORY, bank_account_id=acct_id or None,
+            loan_payment_id=row.id)
+        session.add(entry)
+        row.status = "paid"
+        row.paid_at = paid_date
+        row.cash_entry_id = entry.id
+        await session.commit()
+        return {"ok": True, "cash_entry_id": entry.id}
+
+
+@router.post("/loans/{loan_id}/payments/{period_no}/unpay")
+async def unpay_loan_period(loan_id: str, period_no: int, request: Request):
+    """取消繳款：刪關聯收支明細（月結守衛看其 entry_date 月）→ 期別回 scheduled。
+    （loan status 為推導值 — 未繳期別出現即 active，無需寫回。）"""
+    _guard(request)
+    from db.models import CrmCashEntry
+    factory = _factory_or_503()
+    async with factory() as session:
+        _loan, row = await _get_loan_and_period(session, loan_id, period_no)
+        if (row.status or "") != "paid":
+            raise HTTPException(status_code=409, detail=f"第 {period_no} 期尚未繳款")
+        if row.cash_entry_id:
+            entry = await session.get(CrmCashEntry, row.cash_entry_id)
+            if entry:
+                await _assert_month_open(session, entry.entry_date)
+                await session.delete(entry)
+        row.status = "scheduled"
+        row.paid_at = None
+        row.cash_entry_id = None
+        await session.commit()
+    return {"ok": True}
+
+
+@router.get("/loans/upcoming")
+async def loans_upcoming(request: Request, days: int = 14):
+    """未繳且 due_date ≤ today+days 的期別（含逾期，overdue 標記）—
+    儀表板/提醒共用（查詢見 _query_upcoming_payments）。"""
+    _guard(request)
+    days = max(1, min(days, 365))
+    factory = _factory_or_503()
+    today = today_start()
+    horizon = today + timedelta(days=days)
+    async with factory() as session:
+        rows = await _query_upcoming_payments(session, horizon)
+    items = []
+    for p, name in rows:
+        d = _loan_pay_dict(p, today)
+        d["loan_name"] = name
+        items.append(d)
+    return {"items": items, "days": days}
 
 
 # ── 三表 statements（階段三）────────────────────────────────

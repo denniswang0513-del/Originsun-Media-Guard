@@ -16,19 +16,32 @@ DB 撈出來的值餵進來。單元測試在 tests/unit/test_finance_logic.py
 - vat_position：營業稅位置（銷項/進項/已繳/淨額）
 - ar_open_invoices / ap_open_payments / bank_balances_asof：期末部位
 - statement_warnings / statement_interpretation：檢核警示 + 白話解讀
+
+階段四新增（銀行貸款）：
+- amortization_schedule：攤還表（annuity/straight/interest_only + 寬限期）
+- loan_interest_total：利息費用權責認列（按 due_date，不管繳沒繳）
+- loan_outstanding_rows：BS 非流動負債逐筆貸款餘額（單純看繳款事實）
+- treatment 'loan'（貸款撥款/繳款收支）：不進損益，CF 走科目 cf_activity=financing
 """
 from __future__ import annotations
 
+import calendar
 import re
 from datetime import date, datetime, timezone
 
-# 關聯 id 優先序（高→低）：預支 → 發票(AR) → 請款單(AP) → category 對映。
+# 關聯 id 優先序（高→低）：預支 → 發票(AR) → 請款單(AP) → 貸款繳款 → category 對映。
 # 硬連結（記錄上綁了誰）永遠壓過文字 category — category 是人填的、會漂。
 _LINK_PRIORITY = (
     ("advance_payment_id", "advance"),
     ("invoice_id", "ar_settlement"),
     ("payment_request_id", "ap_settlement"),
+    ("loan_payment_id", "loan"),
 )
+
+# 「不進損益」的 treatment 等價類（結清/內部移動性質，權責已在別處認列）：
+# transfer=帳戶互轉、passthrough=代開發票代收代付、loan=貸款撥款/繳款。
+# 費用側迭代（iter_expense_items）與現金流活動判定共用此單一來源。
+NON_PNL_TREATMENTS = frozenset({"transfer", "passthrough", "loan"})
 
 
 def classify_cash_entry(entry: dict, cat_map: dict) -> str:
@@ -36,12 +49,13 @@ def classify_cash_entry(entry: dict, cat_map: dict) -> str:
 
     參數：
       entry    dict，keys: category / invoice_id / advance_payment_id /
-               payment_request_id（缺 key 視為空）
+               payment_request_id / loan_payment_id（缺 key 視為空）
       cat_map  {(source, category_text): treatment} — 由 finance_category_map
                撈出來的對照（source='cash' 的列才會被查到）
 
     優先序：advance_payment_id → 'advance'；invoice_id → 'ar_settlement'；
-    payment_request_id → 'ap_settlement'；再查 cat_map；查無 → 'unmapped'。
+    payment_request_id → 'ap_settlement'；loan_payment_id → 'loan'；
+    再查 cat_map；查無 → 'unmapped'。
 
     cat_map 值相容兩種形狀：treatment 字串（階段二）或
     {"treatment", "account_id"} dict（階段三 — 三表引擎需要科目解析）。
@@ -105,6 +119,24 @@ def month_of(dt) -> str | None:
         if m and 1 <= int(m.group(2)) <= 12:
             return f"{m.group(1)}-{m.group(2)}"
     return None
+
+
+def local_day(dt):
+    """timestamptz 回讀是 UTC 表示 → 轉回系統本地時區再剝時區資訊（naive）。
+
+    與 month_of 同一套時區處理（月初/日界列直接取值會少一天）。DB 撈出的
+    帶時區 datetime 序列化成本地日、跨月/跨日比較前都該過這一關。None 原樣回。
+    """
+    if dt is None:
+        return None
+    if isinstance(dt, datetime) and dt.tzinfo is not None:
+        return dt.astimezone().replace(tzinfo=None)
+    return dt
+
+
+def today_start():
+    """今天 00:00（本地 naive）— 到期/逾期比較的日界基準。"""
+    return datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
 
 
 # ═════════════════════════════════════════════════════════════════
@@ -267,6 +299,157 @@ def equipment_net_rows(equipment, as_of_month: str) -> dict:
     return {"lines": lines, "net_total": total}
 
 
+# ── 銀行貸款（階段四：攤還表 + 利息權責 + 期末餘額）──────────
+
+_LOAN_INTEREST_LABEL = "利息費用"  # 對齊科目 6410 名稱（業外支出）
+
+
+def _as_date(d):
+    """date/datetime/'YYYY-MM-DD…' → date；None/看不懂 → None。"""
+    if isinstance(d, datetime):
+        return d.date()
+    if isinstance(d, date):
+        return d
+    if isinstance(d, str):
+        m = re.match(r"^(\d{4})-(\d{2})-(\d{2})", d.strip())
+        if m:
+            try:
+                return date(int(m.group(1)), int(m.group(2)), int(m.group(3)))
+            except ValueError:
+                return None
+    return None
+
+
+def _monthly_due_date(anchor: date, offset: int) -> str:
+    """anchor 起第 offset 個月的「同日」（月底溢出 → 該月最後一日），'YYYY-MM-DD'。
+
+    錨定日保留原始 day（1/31 → 2/28 → 3/31 → 4/30，不是被 2 月夾成 28 後永遠 28）。
+    """
+    idx = anchor.year * 12 + anchor.month - 1 + offset
+    y, m = idx // 12, idx % 12 + 1
+    return f"{y:04d}-{m:02d}-{min(anchor.day, calendar.monthrange(y, m)[1]):02d}"
+
+
+def amortization_schedule(principal, annual_rate, term_months, method,
+                          start_date, grace_months=0,
+                          first_payment_date=None) -> list:
+    """貸款攤還表（純函式）→ [{period_no, due_date, principal_due, interest_due}]。
+
+    參數：
+      principal          本金（整數新台幣；導入舊貸時 caller 傳剩餘本金）
+      annual_rate        年利率 %（2.85 = 2.85%）；月利率 r = annual_rate/100/12
+      term_months        總期數（含寬限期）
+      method             'annuity' 等額本息 / 'straight' 等額本金 /
+                         'interest_only' 按月付息到期還本
+      start_date         起貸日（無 first_payment_date 時首期 = 下月同日）
+      grace_months       寬限期 — 前 N 期只付息不還本（三法都適用；
+                         interest_only 本來就只付息，寬限期無感）
+      first_payment_date 首期繳款日（有值時 due_date 以它起算每月同日）
+
+    規則：
+    - due_date 每月同日，月底溢出用該月最後一日（錨定日保留）。
+    - annuity：n = 扣寬限後期數，PMT = P·r/(1−(1+r)^−n)；每期
+      interest = round(餘額·r)、principal = round(PMT) − interest；
+      末期本金吸尾差使 Σprincipal == principal。
+    - straight：principal = round(P/n)（末期吸尾差）、interest = round(餘額·r)。
+    - interest_only：每期只付息，末期加還全額本金。
+    - r = 0 邊界：利息全 0（annuity 退化成等額本金）。
+    格式錯 → ValueError（endpoint 轉 422）。
+    """
+    principal = int(principal or 0)
+    term_months = int(term_months or 0)
+    grace_months = int(grace_months or 0)
+    if method not in ("annuity", "straight", "interest_only"):
+        raise ValueError(f"method 無效: {method}（annuity/straight/interest_only）")
+    if principal <= 0:
+        raise ValueError("principal 需為正整數")
+    if term_months <= 0:
+        raise ValueError("term_months 需為正整數")
+    if grace_months < 0 or (method != "interest_only" and grace_months >= term_months):
+        raise ValueError("grace_months 需 ≥ 0 且小於期數")
+
+    anchor = _as_date(first_payment_date)
+    first_offset = 0
+    if anchor is None:
+        anchor = _as_date(start_date)
+        if anchor is None:
+            raise ValueError("start_date / first_payment_date 需至少一個有效日期（YYYY-MM-DD）")
+        first_offset = 1  # 起貸日下月同日
+
+    r = (annual_rate or 0) / 100 / 12
+    n = term_months - grace_months  # 扣寬限後的還本期數
+    pmt = round(principal * r / (1 - (1 + r) ** (-n))) if (r and method == "annuity") else 0
+    base_principal = round(principal / n) if n else 0  # straight / annuity r=0
+
+    rows, balance, repaid = [], principal, 0
+    for i in range(1, term_months + 1):
+        interest = round(balance * r) if r else 0
+        if i == term_months:
+            p = principal - repaid          # 末期吸尾差（Σprincipal == principal 恆成立）
+        elif method == "interest_only" or i <= grace_months:
+            p = 0
+        elif method == "annuity" and r:
+            p = pmt - interest
+        else:
+            p = base_principal
+        repaid += p
+        balance -= p
+        rows.append({"period_no": i,
+                     "due_date": _monthly_due_date(anchor, first_offset + i - 1),
+                     "principal_due": p, "interest_due": interest})
+    return rows
+
+
+def iter_loan_interest(loan_payments, mset):
+    """期間內每期利息的認列謂詞（單一來源）→ yield (payment_row, interest)。
+
+    權責：按攤還表 due_date 落在期間內的期別認列利息（不管繳沒繳）；金額 0 不吐。
+    loan_interest_total 求和它、drilldown 展開它 —— 兩處不再各抄一份認列規則。
+    """
+    for p in loan_payments:
+        if month_of(p.get("due_date")) not in mset:
+            continue
+        interest = int(p.get("interest_due") or 0)
+        if interest:
+            yield p, interest
+
+
+def loan_interest_total(loan_payments, mset) -> int:
+    """期間利息費用 — 進損益「業外支出／利息費用」。繳款收支（treatment='loan'）
+    不進損益（否則與權責利息重複）。認列謂詞見 iter_loan_interest。"""
+    return sum(interest for _p, interest in iter_loan_interest(loan_payments, mset))
+
+
+def loan_outstanding_rows(loans, loan_payments, as_of_month: str) -> list:
+    """BS 非流動負債：逐筆貸款餘額 [{key, label, amount}]。
+
+    outstanding = 起始本金（opening_balance 或 principal）− Σ「已繳且繳款月
+    ≤ as_of」期別的 principal_due — 單純看繳款事實（權責上未繳到期本金仍是
+    負債，不因逾期而消失）。起貸月晚於 as_of 的貸款不列（尚未成立）；
+    餘額 0（已還清）不出列。
+    """
+    paid_by_loan: dict = {}
+    for p in loan_payments:
+        if (p.get("status") or "") != "paid":
+            continue
+        m = month_of(p.get("paid_at")) or month_of(p.get("due_date"))
+        if as_of_month and m and m > as_of_month:
+            continue
+        lid = p.get("loan_id")
+        paid_by_loan[lid] = paid_by_loan.get(lid, 0) + int(p.get("principal_due") or 0)
+    out = []
+    for ln in loans:
+        sm = month_of(ln.get("start_date"))
+        if sm and as_of_month and sm > as_of_month:
+            continue
+        base = int(ln.get("opening_balance") or ln.get("principal") or 0)
+        amount = base - paid_by_loan.get(ln.get("id"), 0)
+        if amount:
+            out.append({"key": f"loan:{ln.get('id')}",
+                        "label": ln.get("name") or "銀行貸款", "amount": amount})
+    return out
+
+
 # ── 發票/收支小工具 ──────────────────────────────────────────
 
 def invoice_ex_tax(inv: dict) -> int:
@@ -399,7 +582,7 @@ def iter_expense_items(payments, cash_entries, cat_map, accounts, mset):
         if month_of(p.get("request_date")) not in mset:
             continue
         info = map_info(cat_map, "payment", p.get("category"))
-        if info and info.get("treatment") in ("transfer", "passthrough"):
+        if info and info.get("treatment") in NON_PNL_TREATMENTS:
             continue
         amount = int(p.get("amount") or 0)
         if not amount:
@@ -617,7 +800,8 @@ def _dispatch_income(prim: dict, acct: dict | None, amount: int) -> None:
 
 
 def build_pnl(months, *, invoices=(), payments=(), cash_entries=(), equipment=(),
-              advance_expenses=(), cat_map=None, accounts=None) -> dict:
+              advance_expenses=(), loan_payments=(), cat_map=None,
+              accounts=None) -> dict:
     """損益表（權責認列，期間 = 月集合；各來源在函式內按月過濾）。
 
     認列規則（階段三規格落地）：
@@ -632,7 +816,10 @@ def build_pnl(months, *, invoices=(), payments=(), cash_entries=(), equipment=()
       ④預支核銷支出（見下）。
     - 去重鐵則：invoice_id/payment_request_id/advance_payment_id 硬連結的收支
       是 AR/AP/預支的「現金結清動作」不再計損益（權責認列點在發票/請款）；
-      transfer（轉存）/passthrough（代開過水）也不進損益。
+      transfer（轉存）/passthrough（代開過水）/loan（貸款撥款/繳款）也不進損益。
+    - 利息費用（階段四）：權責按攤還表 due_date 認列進業外支出（不管繳沒繳）
+      — loan_payments 由 caller 餵 finance_loan_payments 全表；貸款繳款收支
+      （treatment='loan'）只走現金流量表（科目 2400 cf_activity=financing）。
     - 預支核銷支出（CrmProjectExpense 查證結論，2026-07-11）：
       crm_project_expenses 有 advance_id 軟 FK、無支出日期欄（僅 created_at）。
       「有掛 advance_id」的支出明細：其現金對應（發款收支）treatment='advance'
@@ -700,6 +887,10 @@ def build_pnl(months, *, invoices=(), payments=(), cash_entries=(), equipment=()
               if month_of(x.get("date")) in mset)
     if adv:
         _bump(prim["cost"].setdefault("營業成本-費", {}), _ADVANCE_EXPENSE_LABEL, adv)
+
+    li = loan_interest_total(loan_payments, mset)
+    if li:
+        _bump(prim["nonop_expense"], _LOAN_INTEREST_LABEL, li)
 
     v = vat_position(invoices, cash_entries, cat_map, months)
     prim["vat"] = {"output": v["output"], "input": v["input"], "paid": v["paid"]}
@@ -798,15 +989,16 @@ def merge_pnl(parts, n_months: int) -> dict:
 
 def build_balance_sheet(as_of_month: str, *, bank_lines=(), receivable_total=0,
                         advance_balance=0, equipment=(), adjustments=(),
-                        payable_total=0, vat_payable=0, cumulative_net=0,
-                        note_counts=None) -> dict:
+                        payable_total=0, vat_payable=0, loan_rows=(),
+                        cumulative_net=0, note_counts=None) -> dict:
     """資產負債表（as_of = 期末月月底；推導式，非複式簿記）。
 
     - 資產：各銀行帳戶推導餘額分列 + 應收帳款 + 員工往來-預支（未結清預支
       餘額，caller 以 compute_advance_status 即時算 — 為即時值非期末歷史值）
       + 器材淨值（除役者出表）。
-    - 負債：應付帳款 + 應付營業稅（caller 傳 baseline 起累計 net）。
-      貸款等非流動負債待階段四 — v1 noncurrent 恆為空、流動比率分母全列流動。
+    - 負債：流動 = 應付帳款 + 應付營業稅（caller 傳 baseline 起累計 net）；
+      非流動 = 銀行貸款逐筆分列（loan_rows 由 loan_outstanding_rows 算，
+      階段四）。流動比率分母只算流動負債；負債比率吃負債總計。
     - 權益：期初調整（opening）+ 業主往來（owner_in − owner_out，amount 取
       正值填寫）+ 累積損益（baseline..as_of 累計淨利，caller 算）+ 其他調整
       （correction/accountant/writeoff/other 合計）。調整列按 adj_date ≤ as_of
@@ -837,8 +1029,13 @@ def build_balance_sheet(as_of_month: str, *, bank_lines=(), receivable_total=0,
          "amount": int(payable_total or 0), "drill": "payable"},
         {"key": "vat_payable", "label": "應付營業稅", "amount": int(vat_payable or 0)},
     ]
-    liab_total = sum(x["amount"] for x in liab_current)
-    for x in liab_current:
+    # 非流動負債：銀行貸款逐筆分列（loan_outstanding_rows 已保證 key/label/amount；
+    # BS 行為推導值無明細 drill）
+    liab_noncurrent = [{"key": x["key"], "label": x["label"], "amount": x["amount"]}
+                       for x in loan_rows]
+    liab_current_total = sum(x["amount"] for x in liab_current)
+    liab_total = liab_current_total + sum(x["amount"] for x in liab_noncurrent)
+    for x in liab_current + liab_noncurrent:
         x["pct"] = _pct(x["amount"], assets_total)
 
     opening = owner = other = 0
@@ -880,7 +1077,7 @@ def build_balance_sheet(as_of_month: str, *, bank_lines=(), receivable_total=0,
         notes.append("員工預支餘額為即時推導值，非期末歷史值")
 
     current_assets = sum(x["amount"] for x in current)
-    current_liab = liab_total  # v1 負債全列流動（貸款階段四才分流動/非流動）
+    current_liab = liab_current_total  # 流動比率分母只算流動負債（貸款屬非流動）
     current_ratio = round(current_assets / current_liab, 2) if current_liab else None
     debt_ratio = _pct(liab_total, assets_total)
     labels = {}
@@ -905,7 +1102,8 @@ def build_balance_sheet(as_of_month: str, *, bank_lines=(), receivable_total=0,
     return {
         "as_of": as_of_month,
         "assets": {"current": current, "noncurrent": noncurrent, "total": assets_total},
-        "liabilities": {"current": liab_current, "noncurrent": [], "total": liab_total},
+        "liabilities": {"current": liab_current, "noncurrent": liab_noncurrent,
+                        "total": liab_total},
         "equity": {"lines": equity_lines, "total": equity_total},
         "check": {"diff": diff, "notes": notes},
         "ratios": {"current_ratio": current_ratio, "debt_ratio": debt_ratio,
@@ -918,14 +1116,15 @@ def build_balance_sheet(as_of_month: str, *, bank_lines=(), receivable_total=0,
 def cash_entry_activity(entry: dict, cat_map: dict, accounts: dict):
     """單筆收支 → 現金流量活動。None = 本金不列入（transfer/advance 內部移動）。
 
-    direct_* 走對映科目的 cf_activity（'none'/查無 → operating）；
-    硬連結結清（ar/ap）、稅、passthrough、unmapped → operating（最不錯的預設，
-    unmapped 另由 statement_warnings 計數）。
+    direct_* / loan 走對映科目的 cf_activity（'none'/查無 → operating）—
+    貸款撥款/繳款（treatment='loan'）對映科目 2400 cf_activity=financing，
+    自然落籌資活動且不進損益；硬連結結清（ar/ap）、稅、passthrough、
+    unmapped → operating（最不錯的預設，unmapped 另由 statement_warnings 計數）。
     """
     t = classify_cash_entry(entry, cat_map or {})
     if t in ("advance", "transfer"):
         return None
-    if t in ("direct_expense", "direct_income"):
+    if t in ("direct_expense", "direct_income", "loan"):
         acct = map_account(cat_map or {}, accounts or {}, "cash", entry.get("category"))
         act = (acct or {}).get("cf_activity")
         if act in ("investing", "financing"):

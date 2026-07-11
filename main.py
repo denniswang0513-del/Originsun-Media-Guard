@@ -816,8 +816,9 @@ async def _on_startup():
 
     # ── 財務管理階段二：科目/對映/銀行帳戶/對帳/調整表 ──
     # 新表（finance_accounts / finance_category_map / bank_accounts /
-    # bank_reconciliations / finance_adjustments）由 init_db 的
-    # Base.metadata.create_all 建；這裡補既有表新欄位 + 冪等種子。
+    # bank_reconciliations / finance_adjustments，及階段四的 finance_loans /
+    # finance_loan_payments）由 init_db 的 Base.metadata.create_all 建；
+    # 這裡補既有表新欄位 + 冪等種子（階段四貸款對映也在種子清單內）。
     if state.db_online:
         try:
             from db.session import get_session_factory
@@ -829,6 +830,8 @@ async def _on_startup():
                         # 收支明細掛銀行帳戶 + AP 硬連結（→ crm_payment_requests）
                         "ALTER TABLE crm_cash_entries ADD COLUMN IF NOT EXISTS bank_account_id VARCHAR(32)",
                         "ALTER TABLE crm_cash_entries ADD COLUMN IF NOT EXISTS payment_request_id VARCHAR(32)",
+                        # 貸款繳款硬連結（→ finance_loan_payments；treatment=loan 不進損益，階段四）
+                        "ALTER TABLE crm_cash_entries ADD COLUMN IF NOT EXISTS loan_payment_id VARCHAR(32)",
                         "CREATE INDEX IF NOT EXISTS idx_cash_bank_account ON crm_cash_entries(bank_account_id)",
                         "CREATE INDEX IF NOT EXISTS idx_cash_payment_request ON crm_cash_entries(payment_request_id)",
                         # 發票收款日（AR 收現時間戳，收支關聯收款時自動回填）

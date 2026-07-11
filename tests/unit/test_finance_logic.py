@@ -19,15 +19,16 @@ from db.seed_finance import SEED_CATEGORY_MAP
 # {(source, category_text): treatment} — classify_cash_entry 吃的形狀
 CAT_MAP = {(r["source"], r["category_text"]): r["treatment"] for r in SEED_CATEGORY_MAP}
 
-# 種子裡 source='cash' 的 27 個 category → 預期 treatment
+# 種子裡 source='cash' 的 29 個 category → 預期 treatment
+# （27 原生 + 階段四貸款繳款/撥款）
 _CASH_EXPECTED = {r["category_text"]: r["treatment"]
                   for r in SEED_CATEGORY_MAP if r["source"] == "cash"}
 
 
 class TestClassifyCashEntry:
-    def test_seed_covers_27_cash_categories(self):
-        """種子必須恰好覆蓋收支明細現行 27 個 category 值。"""
-        assert len(_CASH_EXPECTED) == 27
+    def test_seed_covers_29_cash_categories(self):
+        """種子必須恰好覆蓋收支明細現行 27 個 category 值 + 2 個貸款值（階段四）。"""
+        assert len(_CASH_EXPECTED) == 29
 
     @pytest.mark.parametrize("category,expected", sorted(_CASH_EXPECTED.items()))
     def test_all_cash_categories(self, category, expected):
@@ -44,6 +45,8 @@ class TestClassifyCashEntry:
         assert _CASH_EXPECTED["營所稅"] == "tax_income"
         assert _CASH_EXPECTED["發票代開"] == "passthrough"
         assert _CASH_EXPECTED["專案"] == "direct_income"
+        assert _CASH_EXPECTED["貸款繳款"] == "loan"   # 階段四：不進損益、CF financing
+        assert _CASH_EXPECTED["貸款撥款"] == "loan"
 
     # ── 關聯 id 優先序 ──
     def test_advance_id_wins_over_everything(self):

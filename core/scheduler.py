@@ -9,7 +9,7 @@ import json
 import asyncio
 import logging
 import threading
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import List, Optional
 
 try:
@@ -396,6 +396,71 @@ def _check_and_dispatch() -> int:
     return dispatched
 
 
+# ── 貸款繳款提醒（財務階段四）─────────────────────────────────
+
+_loan_check_fired_date: Optional[str] = None  # 'YYYY-MM-DD' in-process 每日一次
+
+
+async def _loan_due_check() -> None:
+    """每日一次貸款繳款提醒（仿 drone_watcher 的每日觸發樣板）。
+
+    🔴 master gate：全機隊 9 台都跑這個排程 loop 且共用 mediaguard —
+    只有 master 該發（core.topology.is_master_machine()），否則同一期別
+    天天各收 N 份。到期 N 天內（settings finance.loan_remind_days 預設 7）
+    與逾期的未繳期別，聚合成單一 Chat 訊息 notify_tab('loan_payment_due')。
+    觸發時刻 finance.loan_remind_hour（預設 9）後第一個 tick。逾期為即時
+    推導（不落庫）。成功送出才設當日 guard（DB/發送失敗 → 下一 tick 重試）；
+    行程重啟同日會再發一次，屬可接受的 best-effort。
+    """
+    global _loan_check_fired_date
+    now = datetime.now()
+    today = now.strftime("%Y-%m-%d")
+    if _loan_check_fired_date == today:
+        return
+    try:
+        from core.topology import is_master_machine
+        if not is_master_machine():
+            _loan_check_fired_date = today  # 非 master 今天不用再看
+            return
+    except Exception:
+        return
+    if not state.db_online:
+        return  # DB 沒上線先不標記，下一 tick 再試
+    from db.session import get_session_factory
+    factory = get_session_factory()
+    if not factory:
+        return
+    try:
+        from config import load_settings
+        fin = load_settings().get("finance") or {}
+        remind_hour = int(fin.get("loan_remind_hour") or 9)
+        remind_days = int(fin.get("loan_remind_days") or 7)
+    except Exception:
+        remind_hour, remind_days = 9, 7
+    if now.hour < remind_hour:  # 上班時間才提醒
+        return
+
+    from core.finance_logic import local_day
+    from routers.api_finance import _query_upcoming_payments
+    today0 = now.replace(hour=0, minute=0, second=0, microsecond=0)
+    horizon = today0 + timedelta(days=remind_days)
+    async with factory() as session:
+        rows = await _query_upcoming_payments(session, horizon)
+    lines = []
+    for p, loan_name in rows:
+        d = local_day(p.due_date)
+        overdue = bool(d and d < today0)
+        amount = (p.principal_due or 0) + (p.interest_due or 0)
+        lines.append(f"• {loan_name} 第{p.period_no}期 {amount:,} 元，"
+                     f"{d.strftime('%Y-%m-%d') if d else '?'} 到期"
+                     f"{'（⚠ 已逾期）' if overdue else ''}")
+    if lines:
+        from notifier import notify_tab_async
+        await notify_tab_async("loan_payment_due",
+                               count=len(lines), lines="\n".join(lines))
+    _loan_check_fired_date = today
+
+
 # ── 背景排程迴圈 ──────────────────────────────────────────────
 
 async def run_scheduler():
@@ -412,4 +477,9 @@ async def run_scheduler():
             await asyncio.to_thread(drone_watcher.check_and_fire)
         except Exception:
             _log.exception("空拍排程監控檢查異常")
+        # 貸款繳款提醒（每日一次；master gate 在函式內）
+        try:
+            await _loan_due_check()
+        except Exception:
+            _log.exception("貸款繳款提醒檢查異常")
         await asyncio.sleep(60)

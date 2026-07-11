@@ -660,6 +660,7 @@ class CrmCashEntry(Base):
     advance_payment_id = Column(String(32), nullable=True)       # 關聯預支款 ID
     bank_account_id = Column(String(32), nullable=True)          # 掛哪個銀行帳戶（財務階段二）
     payment_request_id = Column(String(32), nullable=True)       # AP 硬連結 → crm_payment_requests
+    loan_payment_id = Column(String(32), nullable=True)          # 貸款繳款硬連結 → finance_loan_payments（treatment=loan，不進損益）
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now())
 
@@ -1042,7 +1043,7 @@ class FinanceCategoryMap(Base):
     category_text = Column(String(64), nullable=False)           # 原始 category 中文值
     account_id = Column(String(32), nullable=False)              # soft FK → finance_accounts.id
     # direct_expense/direct_income/ap_settlement/ar_settlement/transfer/
-    # tax_vat/tax_income/advance/passthrough
+    # tax_vat/tax_income/advance/passthrough/loan
     treatment = Column(String(24), nullable=False)
     active = Column(Boolean, default=True)
 
@@ -1107,3 +1108,52 @@ class FinanceAdjustment(Base):
 
     __table_args__ = (Index("idx_finadj_date", "adj_date"),
                       Index("idx_finadj_account", "account_id"))
+
+
+class FinanceLoan(Base):
+    """銀行貸款（財務階段四）— 建檔即由 core.finance_logic.amortization_schedule
+    生成攤還表（finance_loan_payments）。
+
+    利息費用權責按攤還表 due_date 進損益「業外支出」（不管繳沒繳）；
+    繳款現金流由 pay 端點自動建收支明細（category=貸款繳款 → 科目 2400
+    cf_activity=financing、treatment='loan' 不進損益）；BS 貸款餘額
+    = 起始本金 − Σ已繳期別 principal_due（逐筆貸款分列非流動負債）。
+
+    opening_balance：導入舊貸時填「當下剩餘本金」，此時 term_months = 剩餘期數，
+    攤還表只生剩餘期（principal 仍記原始本金供參考）。"""
+    __tablename__ = "finance_loans"
+
+    id = Column(String(32), primary_key=True)
+    name = Column(String(128), nullable=False)                   # 貸款顯示名（XX 銀行週轉金）
+    lender = Column(String(64), nullable=True)                   # 貸款銀行/機構
+    principal = Column(Integer, nullable=False, default=0)       # 原始本金（新台幣整數）
+    annual_rate = Column(Float, nullable=False, default=0.0)     # 年利率 %（2.85 = 2.85%）
+    term_months = Column(Integer, nullable=False, default=0)     # 期數（opening_balance 模式=剩餘期數）
+    method = Column(String(16), nullable=False, default="annuity")  # annuity/straight/interest_only
+    grace_months = Column(Integer, nullable=False, default=0)    # 寬限期（只付息不還本）
+    start_date = Column(DateTime(timezone=True), nullable=True)  # 撥款/起貸日
+    first_payment_date = Column(DateTime(timezone=True), nullable=True)  # 首期繳款日（空=起貸日下月同日）
+    bank_account_id = Column(String(32), nullable=True)          # 預設扣款帳戶（soft FK → bank_accounts.id）
+    opening_balance = Column(Integer, nullable=True)             # 導入舊貸=當下剩餘本金（空=全新貸款）
+    note = Column(Text, nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+
+class FinanceLoanPayment(Base):
+    """貸款攤還期別 — 一期一列，建檔時由攤還純函式生成；已繳列不可變
+    （PUT /loans 只重生未繳期別）。cash_entry_id 連到 pay 自動建的收支明細。"""
+    __tablename__ = "finance_loan_payments"
+
+    id = Column(String(32), primary_key=True)
+    loan_id = Column(String(32), nullable=False, index=True)     # soft FK → finance_loans.id
+    period_no = Column(Integer, nullable=False)                  # 期別（1 起算）
+    due_date = Column(DateTime(timezone=True), nullable=False)   # 到期日（利息權責認列月）
+    principal_due = Column(Integer, nullable=False, default=0)   # 本期應還本金
+    interest_due = Column(Integer, nullable=False, default=0)    # 本期應付利息
+    paid_at = Column(DateTime(timezone=True), nullable=True)     # 實際繳款日
+    cash_entry_id = Column(String(32), nullable=True)            # 關聯收支明細（pay 自動建）
+    status = Column(String(16), nullable=False, default="scheduled")  # scheduled/paid（逾期為即時推導，不落庫）
+
+    __table_args__ = (UniqueConstraint("loan_id", "period_no",
+                                       name="uq_loanpay_loan_period"),)

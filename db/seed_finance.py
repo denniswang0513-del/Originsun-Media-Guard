@@ -76,9 +76,9 @@ SEED_ACCOUNTS: list[tuple] = [
 # ── category → 科目 對映種子（預設值，後台可改）──────────────
 # account_code 於 seed 時轉成 finance_accounts.id。
 # treatment 全集：direct_expense/direct_income/ap_settlement/ar_settlement/
-# transfer/tax_vat/tax_income/advance/passthrough
+# transfer/tax_vat/tax_income/advance/passthrough/loan
 SEED_CATEGORY_MAP: list[dict] = [
-    # ── source='cash'（收支明細 category，27 值全覆蓋）──
+    # ── source='cash'（收支明細 category，29 值 = 27 原生 + 貸款繳款/撥款）──
     {"source": "cash", "category_text": "水電網路", "account_code": "6210", "treatment": "direct_expense"},
     {"source": "cash", "category_text": "交際應酬", "account_code": "6300", "treatment": "direct_expense"},
     {"source": "cash", "category_text": "行政", "account_code": "6330", "treatment": "direct_expense"},
@@ -106,6 +106,10 @@ SEED_CATEGORY_MAP: list[dict] = [
     {"source": "cash", "category_text": "營業稅", "account_code": "2200", "treatment": "tax_vat"},
     {"source": "cash", "category_text": "薪資", "account_code": "6100", "treatment": "direct_expense"},
     {"source": "cash", "category_text": "轉存", "account_code": "1100", "treatment": "transfer"},
+    # 階段四（銀行貸款）：撥款/繳款皆 treatment='loan' — 不進損益（利息費用權責
+    # 按攤還表 due_date 另行認列），CF 走科目 2400 cf_activity=financing
+    {"source": "cash", "category_text": "貸款繳款", "account_code": "2400", "treatment": "loan"},
+    {"source": "cash", "category_text": "貸款撥款", "account_code": "2400", "treatment": "loan"},
     # ── source='payment'（請款單 category，4 值）──
     {"source": "payment", "category_text": "專案外包", "account_code": "5100", "treatment": "direct_expense"},
     {"source": "payment", "category_text": "零用金", "account_code": "1110", "treatment": "transfer"},

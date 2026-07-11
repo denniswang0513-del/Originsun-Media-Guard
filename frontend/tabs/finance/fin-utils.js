@@ -31,6 +31,12 @@ export function fmtNum(n) {
     return (n || 0).toLocaleString('zh-TW');
 }
 
+/** 今天（本地時區）'YYYY-MM-DD' — 不用 toISOString（UTC 會差一天） */
+export function todayStr() {
+    const t = new Date();
+    return `${t.getFullYear()}-${String(t.getMonth() + 1).padStart(2, '0')}-${String(t.getDate()).padStart(2, '0')}`;
+}
+
 // ⚠ 值域對齊 routers/api_finance.py 的 TREATMENTS/ACCT_KINDS — 改任一邊要同步
 export const TREATMENT_OPTIONS = [
     { v: 'direct_expense', label: '一般支出（進損益）' },
@@ -42,6 +48,7 @@ export const TREATMENT_OPTIONS = [
     { v: 'tax_income',     label: '繳營所稅' },
     { v: 'advance',        label: '預支相關' },
     { v: 'passthrough',    label: '代收代付（發票代開）' },
+    { v: 'loan',           label: '貸款往來（撥款/繳款）' },
 ];
 export const ACCT_KIND_OPTIONS = [
     { v: 'bank', label: '銀行帳戶' },

@@ -93,6 +93,7 @@ def notify_tab(template_key: str, **variables) -> None:
         "agent_recovered":   "🟢 【機隊恢復】{name}（{url}）已重新上線",
         "ai_runner_failed":  "🔴 【AI Runner 失效】{kind} 連續 {fails} 次呼叫 claude 失敗\n⚠️ {error}\n可能：Max 訂閱到期/登出/CLI 更新 — 到 master 跑一次 `claude` 檢查",
         "social_daily":      "📣 【今日社群任務】{count} 篇文稿待審\n{titles}\n→ 後台 官網管理 › 社群工作台",
+        "loan_payment_due":  "🏦 【貸款繳款提醒】近期有 {count} 筆貸款款項待繳：\n{lines}\n→ 後台 財務管理 › 銀行貸款",
         "project_closing":   "📥 【結案作業】專案「{project_name}」進入官網上架收件匣\n→ 後台 業務管理 › 專案管理 › 結案看板",
         "works_published":   "🌐 【上架驗證 ✓】{count} 件作品已確認在對外網站上線\n{titles}",
     }

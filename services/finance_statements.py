@@ -39,7 +39,9 @@ from core.finance_logic import (
     invoice_collected,
     invoice_ex_tax,
     iter_expense_items,
+    iter_loan_interest,
     iter_revenue_invoices,
+    loan_outstanding_rows,
     map_account,
     merge_cf,
     merge_pnl,
@@ -68,7 +70,8 @@ async def _load_inputs(session) -> dict:
     from sqlalchemy import select
     from db.models import (BankAccount, CrmCashEntry, CrmInvoice,
                            CrmPaymentRequest, Equipment, FinanceAccount,
-                           FinanceAdjustment, FinanceCategoryMap)
+                           FinanceAdjustment, FinanceCategoryMap, FinanceLoan,
+                           FinanceLoanPayment)
 
     async def _all(model, order_by=None):
         q = select(model)
@@ -102,6 +105,12 @@ async def _load_inputs(session) -> dict:
                           "acct_kind", "active")
     for b in bank_accounts:
         b["active"] = bool(b["active"])
+    loans = _dump(await _all(FinanceLoan),
+                  "id", "name", "principal", "opening_balance", "start_date",
+                  "bank_account_id")
+    loan_payments = _dump(await _all(FinanceLoanPayment),
+                          "id", "loan_id", "period_no", "due_date",
+                          "principal_due", "interest_due", "status", "paid_at")
 
     accounts = {r.id: {"code": r.code, "name": r.name, "pnl_group": r.pnl_group,
                        "cf_activity": r.cf_activity, "acct_type": r.acct_type}
@@ -116,6 +125,7 @@ async def _load_inputs(session) -> dict:
     return {"invoices": invoices, "payments": payments,
             "cash_entries": cash_entries, "equipment": equipment,
             "adjustments": adjustments, "bank_accounts": bank_accounts,
+            "loans": loans, "loan_payments": loan_payments,
             "accounts": accounts, "cat_map": cat_map}
 
 
@@ -210,7 +220,8 @@ async def compute_live(session, months, inputs=None, adv=None) -> dict:
     baseline = _resolve_baseline(inputs) or months[0]
     kw = dict(invoices=inputs["invoices"], payments=inputs["payments"],
               cash_entries=inputs["cash_entries"], equipment=inputs["equipment"],
-              advance_expenses=adv["expenses"], cat_map=inputs["cat_map"],
+              advance_expenses=adv["expenses"],
+              loan_payments=inputs["loan_payments"], cat_map=inputs["cat_map"],
               accounts=inputs["accounts"])
     pnl = build_pnl(months, **kw)
     cum_months = month_range(min(baseline, as_of), as_of)
@@ -231,6 +242,8 @@ async def compute_live(session, months, inputs=None, adv=None) -> dict:
         equipment=inputs["equipment"], adjustments=inputs["adjustments"],
         payable_total=sum(int(p.get("amount") or 0) for p in ap_rows),
         vat_payable=vat_cum["net"],
+        loan_rows=loan_outstanding_rows(inputs["loans"],
+                                        inputs["loan_payments"], as_of),
         cumulative_net=cum_pnl["net"]["amount"], note_counts=warn)
     opening_lines = bank_balances_asof(inputs["bank_accounts"],
                                        inputs["cash_entries"],
@@ -455,6 +468,16 @@ async def drilldown(session, kind: str, months) -> dict:
                 items.append(_row("cash", e["id"], e.get("entry_date"),
                                   e.get("summary"), in_amount(e),
                                   e.get("category"), "未歸類收入"))
+        # 貸款利息（權責按 due_date，derived 虛擬列 — 認列謂詞與 build_pnl 共用
+        # iter_loan_interest；業外支出側金額取負，與本 kind 其他列一致）
+        loan_names = {ln.get("id"): (ln.get("name") or "貸款")
+                      for ln in inputs["loans"]}
+        for p, amt in iter_loan_interest(inputs["loan_payments"], mset):
+            items.append(_row(
+                "derived", f"loanint:{p.get('id')}", p.get("due_date"),
+                f"{loan_names.get(p.get('loan_id'), '貸款')} "
+                f"第{p.get('period_no')}期利息", -amt, "利息費用",
+                "已繳" if (p.get("status") or "") == "paid" else "未繳"))
 
     elif kind == "receivable":
         baseline = _resolve_baseline(inputs)

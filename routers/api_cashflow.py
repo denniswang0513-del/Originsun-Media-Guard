@@ -15,6 +15,7 @@ from fastapi import APIRouter, HTTPException, Request  # type: ignore
 
 from config import load_settings
 from core.auth import check_admin_or_module
+from core.finance_logic import local_day
 from core.schemas import MilestonePayload, MonthClosePayload
 from routers.crm._shared import _parse_day, _username, _validate_month
 
@@ -163,11 +164,13 @@ async def apply_template(project_id: str, request: Request):
 
 @router.get("/forecast")
 async def forecast(request: Request, days: int = 90):
-    """90 天現金流：週分桶（流入=節點、流出=未付請款+固定成本），逾期/未排期另列。"""
+    """90 天現金流：週分桶（流入=節點、流出=未付請款+貸款攤還+固定成本），
+    逾期/未排期另列。"""
     _guard(request)
     days = max(14, min(days, 365))
     from sqlalchemy import select
-    from db.models import PaymentMilestone, CrmPaymentRequest, CrmProject
+    from db.models import (PaymentMilestone, CrmPaymentRequest, CrmProject,
+                           FinanceLoanPayment)
     factory = _factory_or_503()
 
     today = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
@@ -179,6 +182,10 @@ async def forecast(request: Request, days: int = 90):
             select(PaymentMilestone).where(PaymentMilestone.status != "已收款"))).scalars().all()
         prs = (await session.execute(
             select(CrmPaymentRequest).where(CrmPaymentRequest.payment_status != "已付款"))).scalars().all()
+        loan_pays = (await session.execute(
+            select(FinanceLoanPayment).where(
+                FinanceLoanPayment.status != "paid",
+                FinanceLoanPayment.due_date < horizon))).scalars().all()
         pids = {m.project_id for m in ms}
         names = {}
         if pids:
@@ -191,6 +198,10 @@ async def forecast(request: Request, days: int = 90):
     weeks = [{"start": (today + timedelta(days=i * 7)).strftime("%m/%d"),
               "inflow": 0, "outflow": 0} for i in range(n_weeks)]
 
+    def bucket(when, side, amount):
+        """把金額加到 when 所屬的週桶（超出視窗夾在最後一週）。"""
+        weeks[min(int((when - today).days // 7), n_weeks - 1)][side] += amount
+
     overdue, unscheduled = [], 0
     for m in ms:
         item = _ms_dict(m, names.get(m.project_id, ""))
@@ -201,7 +212,7 @@ async def forecast(request: Request, days: int = 90):
         if d < today:
             overdue.append(item)
         elif d < horizon:
-            weeks[min(int((d - today).days // 7), n_weeks - 1)]["inflow"] += (m.amount or 0)
+            bucket(d, "inflow", m.amount or 0)
 
     for p in prs:
         # 流出時點：planned_month 月中；沒填則落最近一週（保守：當作快要付）
@@ -214,13 +225,22 @@ async def forecast(request: Request, days: int = 90):
         if when < today:
             when = today
         if when < horizon:
-            weeks[min(int((when - today).days // 7), n_weeks - 1)]["outflow"] += (p.amount or 0)
+            bucket(when, "outflow", p.amount or 0)
+
+    # 貸款攤還（財務階段四）：未繳期別按 due_date 分桶；逾期未繳保守當作馬上要付
+    for lp in loan_pays:
+        d = local_day(lp.due_date)
+        if not d:
+            continue
+        when = d if d >= today else today
+        if when < horizon:
+            bucket(when, "outflow", (lp.principal_due or 0) + (lp.interest_due or 0))
 
     # 固定月成本：攤在每月第一個落在 horizon 內的週
     cursor = today.replace(day=1)
     while cursor < horizon:
         if cursor >= today and fixed_monthly:
-            weeks[min(int((cursor - today).days // 7), n_weeks - 1)]["outflow"] += fixed_monthly
+            bucket(cursor, "outflow", fixed_monthly)
         cursor = (cursor + timedelta(days=32)).replace(day=1)
 
     cum = 0

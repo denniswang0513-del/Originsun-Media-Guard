@@ -897,3 +897,28 @@ class FinanceSetupWizardPayload(BaseModel):
     default_account_index: int = 0
     assign_history: bool = True
     equity_amount: Optional[int] = None    # 非空 → 建 3100 期初權益 opening 調整列
+
+
+# ── 財務管理階段四：銀行貸款（routers/api_finance.py）──────────
+
+class LoanPayload(BaseModel):
+    """銀行貸款新增/更新 — create 時 name/principal/term_months/start_date
+    必填由端點檢查；改利率/期數等結構欄位時後端只重生未繳期別。"""
+    name: Optional[str] = None
+    lender: Optional[str] = None
+    principal: Optional[int] = None        # 原始本金（新台幣整數）
+    annual_rate: Optional[float] = None    # 年利率 %（2.85 = 2.85%）
+    term_months: Optional[int] = None      # 期數（opening_balance 模式=剩餘期數）
+    method: Optional[str] = None           # annuity/straight/interest_only
+    grace_months: Optional[int] = None     # 寬限期（只付息不還本）
+    start_date: Optional[str] = None       # 'YYYY-MM-DD'
+    first_payment_date: Optional[str] = None  # 'YYYY-MM-DD'（空=起貸日下月同日）
+    bank_account_id: Optional[str] = None  # 預設扣款帳戶
+    opening_balance: Optional[int] = None  # 導入舊貸=當下剩餘本金（攤還表只生剩餘期）
+    note: Optional[str] = None
+
+
+class LoanPayPayload(BaseModel):
+    """貸款繳款：自動建收支明細（expense=本+息、category=貸款繳款）。"""
+    bank_account_id: Optional[str] = None  # 空 → 用貸款預設扣款帳戶
+    paid_date: Optional[str] = None        # 'YYYY-MM-DD'，空 → 今天
