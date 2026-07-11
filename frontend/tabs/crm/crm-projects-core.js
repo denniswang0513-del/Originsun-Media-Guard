@@ -323,12 +323,19 @@ const _FIELDS = ['name', 'client_id', 'status', 'project_type', 'start_date', 's
     'contract_amount', 'tax_rate', 'profit_target_pct', 'misc_budget_pct',
     'payment_status', 'amount_receivable', 'amount_received', 'transfer_fee'];
 
-export function openModal(project = null) {
+export async function openModal(project = null) {
     state.editingId = project ? project.id : null;
     document.getElementById('proj-modal-title').textContent = project ? '編輯專案' : '新增專案';
     const errEl = document.getElementById('proj-modal-error');
     errEl.textContent = '';
     errEl.style.display = 'none';
+
+    // 先開 modal 再補資料 — 按鈕要即時有反應（fetch 慢時不至於像沒按到）
+    document.getElementById('proj-modal').style.display = 'flex';
+
+    // 客戶/人員可能剛在別的分頁新增 — 開 modal 時刷新（客戶管理存檔會
+    // invalidate 共用快取，這裡重抓才看得到；LAN 一趟 <100ms 無感）
+    await Promise.all([loadClients(), loadStaffList()]);
 
     _populateClientDropdown('proj-f-client_id', project ? project.client_id : '');
     _populateSelect('proj-f-am_username', '— 未指派 —', project?.am_username || '');
@@ -348,7 +355,6 @@ export function openModal(project = null) {
         }
     }
 
-    document.getElementById('proj-modal').style.display = 'flex';
     document.getElementById('proj-f-name').focus();
 }
 
