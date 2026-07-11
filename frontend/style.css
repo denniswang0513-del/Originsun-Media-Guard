@@ -18,16 +18,16 @@
     background: #1f1f1f; border: 1px solid #3a3a3a; border-right: none;
     border-bottom-left-radius: 8px; align-self: stretch;
 }
-/* Left-sidebar item — shared by the grouped nav AND the 官網管理 sidebar
-   (.website-nav-btn) so the two look identical from one source of truth. */
-.group-side-btn, .website-nav-btn {
+/* Left-sidebar item — shared by the grouped nav、官網管理與財務管理 sidebar
+   (.website-nav-btn / .finance-nav-btn) so they look identical from one source of truth. */
+.group-side-btn, .website-nav-btn, .finance-nav-btn {
     display: block; width: 100%; text-align: left;
     padding: 10px 16px; background: transparent; color: #ccc;
     border: none; border-left: 3px solid transparent;
     cursor: pointer; font-size: 13px; transition: all .15s;
 }
-.group-side-btn:hover, .website-nav-btn:hover { background: #252525; color: #fff; }
-.group-side-btn.active, .website-nav-btn.active {
+.group-side-btn:hover, .website-nav-btn:hover, .finance-nav-btn:hover { background: #252525; color: #fff; }
+.group-side-btn.active, .website-nav-btn.active, .finance-nav-btn.active {
     background: #2a2a2a; color: #fff;
     border-left-color: #3b82f6; font-weight: 600;
 }

@@ -1,0 +1,39 @@
+<!--
+    finance.html — 💰 財務管理 Tab 主殼（階段一：帳務六視圖搬家）
+    左側導覽 + 右側內容。階段一內容 = 內嵌既有 crm-invoices（六視圖一行不改），
+    左側「帳務」按鈕代理其內部 view bar；之後階段的新子視圖（三表/銀行貸款/儀表板）
+    以 data-subview 模式加入（比照官網管理 website.js）。
+-->
+<div id="finance-root" style="display:flex;min-height:500px;background:#1a1a1a;">
+
+    <!-- 左側導覽 -->
+    <nav id="finance-nav" style="width:200px;border-right:1px solid #2a2a2a;padding:16px 0;flex-shrink:0;overflow-y:auto;min-height:0;">
+        <div style="padding:0 16px 12px;font-size:11px;color:#666;letter-spacing:0.08em;">財務管理</div>
+
+        <div style="padding:4px 16px;font-size:10px;color:#555;letter-spacing:0.1em;">🧾 帳務</div>
+        <button class="finance-nav-btn active" data-inv-view="invoices">🧾 發票</button>
+        <button class="finance-nav-btn" data-inv-view="payments">💳 請款</button>
+        <button class="finance-nav-btn" data-inv-view="cashbook">📒 收支明細</button>
+        <button class="finance-nav-btn" data-inv-view="payables">📤 應付帳款</button>
+        <button class="finance-nav-btn" data-inv-view="receivables">📥 應收帳款</button>
+
+        <div style="padding:14px 16px 4px;font-size:10px;color:#555;letter-spacing:0.1em;">📈 分析</div>
+        <button class="finance-nav-btn" data-inv-view="cashflow">💧 現金流預測</button>
+        <!-- 階段二起：🏦 銀行與貸款 / 📑 財務三表 / 📊 儀表板 / ⚙️ 科目與設定 -->
+
+        <div style="padding:16px;margin-top:20px;border-top:1px solid #2a2a2a;">
+            <button id="finance-refresh" class="crm-btn crm-btn-secondary crm-btn-sm" style="width:100%;">🔄 重新整理</button>
+        </div>
+    </nav>
+
+    <!-- 右側內容區（階段一 = 整份 crm-invoices 殼載入進來）-->
+    <main id="finance-content" style="flex:1;min-width:0;overflow:hidden;padding:0 12px;">
+        <div id="finance-loading" style="color:#888;padding:40px;text-align:center;">載入中…</div>
+    </main>
+</div>
+
+<style>
+    /* 內部橫向 view bar 由左側導覽代理 — 按鈕保留在 DOM（切換邏輯不動，回退安全），只隱藏 */
+    #finance-content .crm-view-switcher { display: none; }
+    #finance-nav { scrollbar-width: thin; scrollbar-color: #3a3a3a transparent; }
+</style>

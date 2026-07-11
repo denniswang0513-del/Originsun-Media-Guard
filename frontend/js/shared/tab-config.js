@@ -46,7 +46,8 @@ export const TAB_LOADERS = [
     ['crm_clients',   './tabs/crm/crm.html',                 './tabs/crm/crm.js',                 'initCrmTab'],
     ['crm_projects',  './tabs/crm/crm-projects.html',        './tabs/crm/crm-projects.js',        'initCrmProjectsTab'],
     ['crm_staff',     './tabs/crm/crm-staff.html',           './tabs/crm/crm-staff.js',           'initCrmStaffTab'],
-    ['crm_invoices',  './tabs/crm/crm-invoices.html',        './tabs/crm/crm-invoices.js',        'initCrmInvoicesTab'],
+    // 財務管理殼（階段一）：內嵌既有 crm-invoices 六視圖 + 左側導覽代理其 view bar
+    ['crm_invoices',  './tabs/finance/finance.html',         './tabs/finance/finance.js',         'initFinanceTab'],
     ['timesheets',    './tabs/timesheets/timesheets.html',   './tabs/timesheets/timesheets.js',   'initTimesheetsTab'],
     ['portal',        './tabs/portal/portal.html',           './tabs/portal/portal.js',           'initPortalTab'],
     ['website_admin', './tabs/website/website.html',         './tabs/website/website.js',         'initWebsiteTab'],
@@ -88,10 +89,12 @@ export const TAB_GROUPS = [
         { key: 'crm_clients',  label: '🤝 客戶管理' },
         { key: 'crm_projects', label: '📁 專案管理' },
         { key: 'crm_staff',    label: '👥 人力資源' },
-        { key: 'crm_invoices', label: '🧾 帳務管理' },
         { key: 'timesheets',   label: '⏱️ 工時檢核' },
         { key: 'portal',       label: '🎬 審批門戶' },
     ] },
+    // 財務管理（2026-07 起）：帳務六視圖自業務管理搬入；沿用 crm_invoices 單一
+    // module key（零 RBAC 遷移，既有授權者自動看得到）。內部子視圖自管左側欄。
+    { id: 'finance',    label: '💰 財務管理', single: 'crm_invoices' },
     { id: 'website',    label: '🌐 官網管理', single: 'website_admin' },
 ];
 
@@ -125,7 +128,8 @@ export const PERMISSION_GROUPS = [
     { id: 'projects',   label: '📊 專案總覽', modules: ['projects'] },
     { id: 'preprod',    label: '📝 前期製作', modules: ['preprod_plan', 'preprod_locations', 'preprod_proposals', 'intel', 'equipment'] },
     { id: 'production', label: '🎬 後期製作', modules: ['backup', 'verify', 'transcode', 'concat', 'drone_meta', 'report', 'transcribe', 'tts', 'footage'] },
-    { id: 'business',   label: '💼 業務管理', modules: ['crm_clients', 'crm_projects', 'crm_quotes', 'crm_staff', 'crm_invoices', 'timesheets', 'portal'] },
+    { id: 'business',   label: '💼 業務管理', modules: ['crm_clients', 'crm_projects', 'crm_quotes', 'crm_staff', 'timesheets', 'portal'] },
+    { id: 'finance',    label: '💰 財務管理', modules: ['crm_invoices'] },
     { id: 'website',    label: '🌐 官網管理', modules: ['website_admin'] },
 ];
 
