@@ -1,7 +1,7 @@
 """SQLAlchemy ORM models for Originsun Media Guard Pro."""
 
 try:
-    from sqlalchemy import Column, String, Text, Boolean, Integer, BigInteger, Float, DateTime, func, Index
+    from sqlalchemy import Column, String, Text, Boolean, Integer, BigInteger, Float, DateTime, func, Index, UniqueConstraint
     from sqlalchemy.dialects.postgresql import JSONB
     from sqlalchemy.orm import DeclarativeBase
     _HAS_SQLALCHEMY = True
@@ -11,7 +11,7 @@ except ImportError:
     class _Stub:
         def __call__(self, *a, **kw): return self
         def __getattr__(self, _): return self
-    Column = String = Text = Boolean = Integer = BigInteger = Float = DateTime = func = Index = _Stub()
+    Column = String = Text = Boolean = Integer = BigInteger = Float = DateTime = func = Index = UniqueConstraint = _Stub()
     JSONB = _Stub()
     class DeclarativeBase: pass
 
@@ -584,6 +584,7 @@ class CrmInvoice(Base):
     recipient = Column(String(128), nullable=True)                       # 紙本發票收件人
     recipient_phone = Column(String(32), nullable=True)                  # 紙本發票收件電話
     recipient_address = Column(String(255), nullable=True)               # 紙本發票收件地址
+    paid_date = Column(DateTime(timezone=True), nullable=True)           # 收款日（AR 收現時間戳，財務階段二）
     notes = Column(Text, nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now())
@@ -657,6 +658,8 @@ class CrmCashEntry(Base):
     invoice_id = Column(String(32), nullable=True)               # 關聯發票 ID
     bank_fee = Column(Integer, nullable=True)                    # 匯費（計入支出）
     advance_payment_id = Column(String(32), nullable=True)       # 關聯預支款 ID
+    bank_account_id = Column(String(32), nullable=True)          # 掛哪個銀行帳戶（財務階段二）
+    payment_request_id = Column(String(32), nullable=True)       # AP 硬連結 → crm_payment_requests
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now())
 
@@ -936,6 +939,7 @@ class Equipment(Base):
     purchase_cost = Column(Integer, nullable=True)               # 購入成本
     depreciation_months = Column(Integer, nullable=False, default=36)  # 直線攤提月數
     status = Column(String(16), nullable=False, default="在庫")   # 在庫/出勤/維修/除役
+    retired_date = Column(DateTime(timezone=True), nullable=True)  # 除役日（折舊自該月停止，財務階段二）
     note = Column(Text, nullable=True)
     cover_url = Column(String(512), nullable=True)               # /uploads/equipment/{eid}/{fname}
     created_at = Column(DateTime(timezone=True), server_default=func.now())
@@ -997,3 +1001,109 @@ class FootageIndex(Base):
     indexed_at = Column(DateTime(timezone=True), server_default=func.now())
 
     __table_args__ = (Index("idx_footage_project", "project_id"),)
+
+
+# ═══════════════════════════════════════════════════════════════════
+# 財務管理階段二（權責制三表地基）— 科目引擎 + 銀行帳戶 + 對帳 + 調整表
+# 設計原則：非會計背景也要容易用 — 科目代碼藏在引擎裡（name_plain 給白話說明），
+# 使用者日常只碰收支明細/請款/發票，報表由 category 對映自動歸科目。
+# ═══════════════════════════════════════════════════════════════════
+
+class FinanceAccount(Base):
+    """會計科目表 — 權責制三表（損益/資產負債/現金流）的分類骨架。
+
+    is_system=True 的種子科目不可刪（引擎依賴）；cf_activity 決定現金流量表
+    的活動分類；pnl_group 決定損益表的呈現分組（NULL = 不進損益表）。"""
+    __tablename__ = "finance_accounts"
+
+    id = Column(String(32), primary_key=True)
+    code = Column(String(16), unique=True, nullable=False)       # 科目代碼（1100/5100…，藏在引擎）
+    name = Column(String(64), nullable=False)                    # 科目名稱（銀行存款/外包成本…）
+    name_plain = Column(String(128), nullable=True)              # 白話說明（給非會計背景看）
+    parent_id = Column(String(32), nullable=True)                # 上層科目（soft FK → finance_accounts.id）
+    acct_type = Column(String(16), nullable=False)               # asset/liability/equity/income/expense
+    cf_activity = Column(String(16), nullable=False, default="operating")  # operating/investing/financing/none
+    pnl_group = Column(String(32), nullable=True)                # 損益表分組（營業收入/外包成本/營業費用/業外/稅）
+    is_system = Column(Boolean, default=False)                   # 種子科目不可刪
+    sort_order = Column(Integer, default=0)
+    active = Column(Boolean, default=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+
+class FinanceCategoryMap(Base):
+    """收支/請款/發票 category → 科目 對映（引擎的翻譯層）。
+
+    使用者照舊填中文 category，報表引擎查這張表決定科目與會計處理方式
+    （treatment）。種子提供預設值，後台可改。"""
+    __tablename__ = "finance_category_map"
+
+    id = Column(String(32), primary_key=True)
+    source = Column(String(16), nullable=False)                  # cash/payment/invoice
+    category_text = Column(String(64), nullable=False)           # 原始 category 中文值
+    account_id = Column(String(32), nullable=False)              # soft FK → finance_accounts.id
+    # direct_expense/direct_income/ap_settlement/ar_settlement/transfer/
+    # tax_vat/tax_income/advance/passthrough
+    treatment = Column(String(24), nullable=False)
+    active = Column(Boolean, default=True)
+
+    __table_args__ = (UniqueConstraint("source", "category_text",
+                                       name="uq_fincatmap_source_text"),)
+
+
+class BankAccount(Base):
+    """銀行帳戶（含零用金）— 收支明細掛帳戶後可算餘額、對帳。"""
+    __tablename__ = "bank_accounts"
+
+    id = Column(String(32), primary_key=True)
+    name = Column(String(64), nullable=False)                    # 帳戶顯示名（XX 銀行活存）
+    bank_name = Column(String(64), nullable=True)                # 銀行名稱
+    account_no = Column(String(32), nullable=True)               # 帳號（後幾碼即可）
+    acct_kind = Column(String(16), nullable=False, default="bank")  # bank / cash=零用金
+    opening_balance = Column(Integer, nullable=False, default=0)  # 期初餘額（基準日）
+    opening_date = Column(DateTime(timezone=True), nullable=True)  # 期初基準日
+    is_default = Column(Boolean, default=False)                  # 預設帳戶（新收支預設掛這）
+    active = Column(Boolean, default=True)                       # 停用後不出現在選單（不刪保歷史）
+    sort_order = Column(Integer, default=0)
+    note = Column(Text, nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+
+class BankReconciliation(Base):
+    """銀行對帳紀錄 — 每帳戶每月一筆：對帳單餘額 vs 系統餘額，差額歸零才算平。"""
+    __tablename__ = "bank_reconciliations"
+
+    id = Column(String(32), primary_key=True)
+    bank_account_id = Column(String(32), nullable=False)         # soft FK → bank_accounts.id
+    month = Column(String(7), nullable=False)                    # 'YYYY-MM'
+    statement_balance = Column(Integer, nullable=False)          # 銀行對帳單月底餘額
+    system_balance = Column(Integer, nullable=False)             # 系統算出的月底餘額
+    diff = Column(Integer, nullable=False)                       # statement − system
+    status = Column(String(16), nullable=False)                  # balanced / diff
+    note = Column(Text, nullable=True)
+    reconciled_by = Column(String(64), nullable=True)
+    reconciled_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    __table_args__ = (UniqueConstraint("bank_account_id", "month",
+                                       name="uq_bankrecon_account_month"),)
+
+
+class FinanceAdjustment(Base):
+    """財務調整表 — 期初建帳/更正/業主往來/會計師調整等非日常分錄。
+
+    🔴 鐵則：不得指向銀行類科目（code 11xx）— 影響現金的修正一律走收支明細
+    （否則銀行餘額與對帳脫鉤）。後端 POST/PUT 驗證擋下。金額有號：正=增、負=減。"""
+    __tablename__ = "finance_adjustments"
+
+    id = Column(String(32), primary_key=True)
+    adj_date = Column(DateTime(timezone=True), nullable=False)   # 調整生效日（月結守衛看這個月）
+    account_id = Column(String(32), nullable=False)              # soft FK → finance_accounts.id
+    amount = Column(Integer, nullable=False)                     # 有號金額（新台幣整數）
+    # opening/correction/owner_in/owner_out/accountant/writeoff/other
+    adj_type = Column(String(24), nullable=False)
+    description = Column(String(255), nullable=False)            # 說明（必填 — 稽核可讀）
+    created_by = Column(String(64), nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    __table_args__ = (Index("idx_finadj_date", "adj_date"),
+                      Index("idx_finadj_account", "account_id"))

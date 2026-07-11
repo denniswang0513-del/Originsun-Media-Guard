@@ -7,6 +7,7 @@ let _entries = [];
 let _invoiceList = [];
 let _projectList = [];
 let _clientList = [];
+let _bankAccounts = null;   // 財務模組銀行帳戶；null = 載入失敗/未啟用（優雅降級：不顯示帳戶欄）
 let _selectedId = null;
 let _editingId = null;
 let _filters = { q: '', category: '', item: '' };
@@ -42,6 +43,19 @@ async function _loadProjectList() {
 
 async function _loadClientList() {
     try { _clientList = (await _fetch('/clients')).clients || []; } catch(_) { _clientList = []; }
+}
+
+async function _loadBankAccounts() {
+    // 財務模組帳戶清單（prefix /api/v1/finance，非 crm）— 失敗優雅降級：隱藏帳戶欄、不擋原功能
+    // with_balances=0：這裡只要 id/name/is_default/active，跳過後端餘額聚合
+    try {
+        const token = localStorage.getItem('auth_token');
+        const res = await fetch('/api/v1/finance/bank-accounts?with_balances=0', {
+            headers: token ? { 'Authorization': 'Bearer ' + token } : {},
+        });
+        if (!res.ok) throw new Error('HTTP ' + res.status);
+        _bankAccounts = (await res.json()).items || [];
+    } catch (_) { _bankAccounts = null; }
 }
 
 // ── List ────────────────────────────────────────────────────
@@ -141,8 +155,9 @@ function renderDetail(e) {
         actions.querySelector('.crm-detail-close').addEventListener('click', closeDetail);
     }
     addEditButton('cash-bar-actions', () => {
-        const editData = { ...e, invoice_id: e.invoice_id || '', project_id: e.project_id || '', bank_fee: e.bank_fee || 0 };
-        enableInlineEdit('cash-detail-content', 'cash-bar-actions', _buildEditFields(), editData,
+        const editData = { ...e, invoice_id: e.invoice_id || '', project_id: e.project_id || '', bank_fee: e.bank_fee || 0,
+            bank_account_id: e.bank_account_id != null ? String(e.bank_account_id) : '' };
+        enableInlineEdit('cash-detail-content', 'cash-bar-actions', _buildEditFields(e.bank_account_id), editData,
             async (payload) => {
                 _cleanPayload(payload);
                 await _fetch('/cash-entries/' + e.id, { method: 'PUT', body: JSON.stringify(payload) });
@@ -172,7 +187,7 @@ function closeDetail() {
 
 // ── Edit Fields (for inline edit) ───────────────────────────
 
-function _buildEditFields() {
+function _buildEditFields(currentBankAccountId) {
     const invoiceOpts = [{value:'',label:'— 不關聯 —'}].concat(
         _invoiceList.filter(inv => inv.issue_status === '已開立').map(inv =>
             ({value:inv.id, label:inv.title + ' $' + (inv.amount_total||0).toLocaleString('zh-TW') + (inv.payment_status === '已收款' ? ' (已收款)' : '')})));
@@ -180,7 +195,7 @@ function _buildEditFields() {
         _projectList.map(p => ({value:p.id, label:p.name + (p.client_short_name ? ' (' + p.client_short_name + ')' : '')})));
     const catOpts = ['','水電網路','交際應酬','行政','其他','其他收入','房租','建構','專案','專案外包','專案雜支','教育訓練','設備耗材','設備維護','軟體網路服務','勞健保','發票代開','會計','業務推廣','製作金','銀行利息','獎金','請款單','辦公室管理費','營所稅','營業稅','薪資','轉存']
         .map(v => ({value:v, label:v || '—'}));
-    return [
+    const fields = [
         {name:'entry_date', label:'日期', type:'date'},
         {name:'deposit', label:'收入', type:'number'},
         {name:'expense', label:'支出', type:'number'},
@@ -191,6 +206,19 @@ function _buildEditFields() {
         {name:'invoice_id', label:'發票', type:'select', options:invoiceOpts},
         {name:'bank_fee', label:'匯費', type:'number'},
     ];
+    // 帳戶（財務模組）— 清單載入成功才提供（降級時不出現，PUT payload 不含此鍵、不洗掉既有值）
+    if (_bankAccounts && _bankAccounts.length) {
+        fields.push({name:'bank_account_id', label:'帳戶', type:'select',
+            options: _bankAcctOpts(String(currentBankAccountId ?? ''))});
+    }
+    return fields;
+}
+
+/** 帳戶下拉選項（含「未指定」）：停用帳戶只在「就是現值」時保留，避免洗掉既有值 */
+function _bankAcctOpts(cur) {
+    return [{ value: '', label: '— 未指定 —' }].concat(
+        _bankAccounts.filter(a => a.active !== false || String(a.id) === cur)
+            .map(a => ({ value: String(a.id), label: a.name })));
 }
 
 // ── Modal ───────────────────────────────────────────────────
@@ -216,6 +244,19 @@ function _populateProjectSelect(selectedId) {
         _projectList.map(p =>
             `<option value="${p.id}"${p.id === selectedId ? ' selected' : ''}>${_esc(p.name)}${p.client_short_name ? ' (' + _esc(p.client_short_name) + ')' : ''}</option>`
         ).join('');
+}
+
+function _populateBankAccountSelect(selectedId) {
+    // selectedId：null = 新增（預設選 is_default 帳戶）；'' / id = 編輯帶入現值
+    const field = document.getElementById('cash-field-bankaccount');
+    const sel = document.getElementById('cash-f-bank_account_id');
+    if (!field || !sel) return;
+    if (!_bankAccounts || _bankAccounts.length === 0) { field.style.display = 'none'; return; }
+    field.style.display = '';
+    const def = _bankAccounts.find(a => a.is_default && a.active !== false);
+    const cur = (selectedId == null) ? (def ? String(def.id) : '') : String(selectedId);
+    sel.innerHTML = _bankAcctOpts(cur)
+        .map(o => `<option value="${o.value}"${o.value === cur ? ' selected' : ''}>${_esc(o.label)}</option>`).join('');
 }
 
 function _updateVerifyRow() {
@@ -265,6 +306,7 @@ function openModal(e = null) {
     err.textContent = ''; err.style.display = 'none';
     _populateInvoiceSelect(e?.invoice_id || '');
     _populateProjectSelect(e?.project_id || '');
+    _populateBankAccountSelect(e ? (e.bank_account_id ?? '') : null);
     for (const f of _FIELDS) {
         const el = document.getElementById('cash-f-' + f);
         if (!el) continue;
@@ -298,6 +340,7 @@ function _cleanPayload(payload) {
     for (const f of _DATE_FIELDS) payload[f] = payload[f] || null;
     payload.invoice_id = payload.invoice_id || null;
     payload.project_id = payload.project_id || null;
+    if ('bank_account_id' in payload) payload.bank_account_id = payload.bank_account_id || null;
     payload.summary = payload.summary || '';
     payload.note = payload.note || '';
     payload.category = payload.category || '';
@@ -310,6 +353,11 @@ async function saveEntry() {
     for (const f of _FIELDS) {
         const el = document.getElementById('cash-f-' + f);
         payload[f] = el ? el.value.trim() : '';
+    }
+    // 帳戶（財務模組）— 清單載入成功才送；降級時不含此鍵，避免把既有值洗掉
+    if (_bankAccounts && _bankAccounts.length) {
+        const bel = document.getElementById('cash-f-bank_account_id');
+        if (bel) payload.bank_account_id = bel.value;
     }
     _cleanPayload(payload);
     // 專案雜支 + 預支關聯 → 自動帶入預支款的專案
@@ -472,5 +520,5 @@ export async function initCrmCashbookTab() {
     }
 
     setupResizeHandle('cash-resize-handle', 'cash-detail-panel');
-    await Promise.all([loadEntries(), _loadInvoiceList(), _loadProjectList(), _loadClientList()]);
+    await Promise.all([loadEntries(), _loadInvoiceList(), _loadProjectList(), _loadClientList(), _loadBankAccounts()]);
 }

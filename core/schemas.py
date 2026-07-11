@@ -573,6 +573,8 @@ class CashEntryPayload(BaseModel):
     invoice_id: Optional[str] = None
     bank_fee: Optional[int] = None
     advance_payment_id: Optional[str] = None
+    bank_account_id: Optional[str] = None       # 掛哪個銀行帳戶（財務階段二）
+    payment_request_id: Optional[str] = None    # AP 硬連結 → crm_payment_requests
 
 
 class CostLinePayload(BaseModel):
@@ -827,3 +829,71 @@ class FootageScanRequest(BaseModel):
 class FootageTagsPayload(BaseModel):
     """B5 素材庫：更新素材 tags。"""
     tags: List[str] = []
+
+
+# ── 財務管理階段二（routers/api_finance.py）────────────────────
+
+class FinanceCategoryMapItem(BaseModel):
+    """category → 科目 對映單列（PUT /finance/category-map 批次 upsert 用）。"""
+    source: str                            # cash/payment/invoice
+    category_text: str
+    account_id: str                        # → finance_accounts.id
+    treatment: str                         # direct_expense/direct_income/ap_settlement/...
+
+
+class FinanceCategoryMapPut(BaseModel):
+    items: List[FinanceCategoryMapItem] = []
+
+
+class BankAccountPayload(BaseModel):
+    """銀行帳戶新增/更新 — create 時 name 必填由端點檢查。"""
+    name: Optional[str] = None
+    bank_name: Optional[str] = None
+    account_no: Optional[str] = None
+    acct_kind: Optional[str] = None        # bank / cash=零用金
+    opening_balance: Optional[int] = None
+    opening_date: Optional[str] = None     # 'YYYY-MM-DD'
+    is_default: Optional[bool] = None
+    active: Optional[bool] = None
+    sort_order: Optional[int] = None
+    note: Optional[str] = None
+
+
+class ReconciliationPayload(BaseModel):
+    """銀行對帳：送對帳單月底餘額，system_balance 由後端算。"""
+    bank_account_id: str
+    month: str                             # 'YYYY-MM'
+    statement_balance: int
+    note: Optional[str] = None
+
+
+class FinanceAdjustmentPayload(BaseModel):
+    """財務調整列 — 不得指向銀行類科目（code 11xx），後端驗證擋下。"""
+    adj_date: Optional[str] = None         # 'YYYY-MM-DD'（create 必填由端點檢查）
+    account_id: Optional[str] = None       # create 必填由端點檢查
+    amount: Optional[int] = None           # 有號金額
+    adj_type: Optional[str] = None         # opening/correction/owner_in/owner_out/accountant/writeoff/other
+    description: Optional[str] = None      # create 必填由端點檢查
+
+
+class BulkAssignAccountPayload(BaseModel):
+    """收支明細整批掛銀行帳戶。"""
+    bank_account_id: str
+    only_unassigned: bool = True
+
+
+class SetupWizardBankAccount(BaseModel):
+    name: str
+    bank_name: Optional[str] = None
+    account_no: Optional[str] = None
+    acct_kind: str = "bank"
+    opening_balance: int = 0
+
+
+class FinanceSetupWizardPayload(BaseModel):
+    """財務設定精靈：一次建帳戶 + 掛歷史收支 + 設基準月 + 期初權益。"""
+    baseline_month: str                    # 'YYYY-MM'
+    bank_accounts: List[SetupWizardBankAccount] = []
+    default_account_index: int = 0
+    assign_history: bool = True
+    equity_amount: Optional[int] = None    # 非空 → 建 3100 期初權益 opening 調整列

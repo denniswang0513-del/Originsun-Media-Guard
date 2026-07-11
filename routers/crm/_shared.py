@@ -16,6 +16,7 @@ uploads/templates 路徑整體位移到 routers/ 底下（行為改變）。
 from __future__ import annotations
 
 import os
+import re
 import uuid
 from datetime import date, datetime, timezone
 from typing import Optional
@@ -23,6 +24,7 @@ from typing import Optional
 from fastapi import APIRouter, HTTPException, Request
 
 import core.state as state
+from core.finance_logic import month_of
 
 try:
     from sqlalchemy import select, or_, delete, update as sa_update
@@ -106,6 +108,87 @@ async def _mark_dirty_safe(tag: str) -> None:
     except Exception as e:
         import logging
         logging.getLogger(__name__).warning("[%s] mark_dirty 失敗: %s", tag, e)
+
+
+def _username(request: Request) -> str:
+    from core.auth import _extract_token
+    payload = _extract_token(request) or {}
+    return payload.get("username") or payload.get("sub") or "?"
+
+
+def _parse_day(raw):
+    """YYYY-MM-DD → datetime；空值 → None；格式錯 → 422（與 _parse_shoot_date
+    的「看不懂回 None」語意不同 — 這支給嚴格驗證的財務端點用）。"""
+    if not raw:
+        return None
+    try:
+        return datetime.strptime(str(raw)[:10], "%Y-%m-%d")
+    except ValueError:
+        raise HTTPException(status_code=422, detail=f"日期格式錯誤: {raw}（要 YYYY-MM-DD）")
+
+
+def _validate_month(month: str) -> str:
+    if not re.match(r"^\d{4}-\d{2}$", month or ""):
+        raise HTTPException(status_code=422, detail="month 格式需 YYYY-MM")
+    return month
+
+
+# ── F1 月結守衛（唯一實作 — routers/crm/finance.py 與 routers/api_finance.py 共用）──
+
+async def _locked_month_set(session) -> set:
+    """已鎖（未重開）月份集合 — batch / CSV 匯入要逐筆檢查、彙整違規清單時用
+    （_assert_month_open 是單筆語意，逐筆呼叫會在第一筆就斷，報不出全貌）。"""
+    from db.models import FinanceMonthClose
+    rows = (await session.execute(
+        select(FinanceMonthClose.month).where(
+            FinanceMonthClose.reopened_at.is_(None)))).scalars().all()
+    return set(rows)
+
+
+def _raise_locked_batch(violations: list):
+    """batch / CSV 的整批拒絕：409 + detail 列出前幾筆違規（行號/摘要 + 日期）。"""
+    shown = "、".join(violations[:5])
+    more = f"…共 {len(violations)} 筆" if len(violations) > 5 else ""
+    raise HTTPException(
+        status_code=409,
+        detail=f"下列項目落在已鎖帳月份，整批拒絕：{shown}{more}"
+               "（需修改請先到帳務→現金流重開該月）")
+
+
+async def _assert_month_open(session, *dates):
+    """F1 月結鎖帳：任一日期落在已鎖（未重開）月份 → 409。
+    dates 收 str / date / datetime（core.finance_logic.month_of 收斂型別）。
+    更新時要同時傳舊/新日期（把紀錄搬進或搬出鎖定月都算改帳）。
+
+    守衛覆蓋範圍（財務階段二擴張）與「看哪個日期」的判準：
+    - 收支明細  create/update/delete → entry_date（現金側）
+    - 發票      create/update/delete → invoice_date（權責收入認列月）
+    - 請款單    create/update/delete → request_date（權責費用認列月）
+    - 請款單    batch-pay/batch-unpay → payment_date（付款動作影響的是現金側，
+      不改費用認列月 request_date；付款日落鎖定月才 409）
+    - 請款單    batch-month（改 planned_month 排程欄）不涉權責日期 → 不掛守衛
+    - 調整表    create/update/delete → adj_date（routers/api_finance.py）
+    - 設定精靈  → 基準月 1 日（routers/api_finance.py setup-wizard）
+    - CSV 匯入三支 → 逐列判月，任一列落鎖定月整批 409（見 _assert_rows_open）
+    """
+    months = {m for m in (month_of(d) for d in dates) if m}
+    if not months:
+        return
+    locked = sorted(months & await _locked_month_set(session))
+    if locked:
+        raise HTTPException(
+            status_code=409,
+            detail=f"月份已鎖帳：{', '.join(locked)}（需修改請先到帳務→現金流重開該月）")
+
+
+async def _assert_rows_open(session, dated_rows):
+    """batch / CSV 的逐筆月結檢查：dated_rows = iterable of (label, date_like)。
+    一次撈鎖定月集合 → 逐筆比對 → 收集違規 label → 任一違規整批 409。
+    label 由呼叫端組好（如「第 N 列（YYYY-MM-DD）」），這裡只負責比對與彙整。"""
+    locked = await _locked_month_set(session)
+    violations = [label for label, d in dated_rows if (month_of(d) or "") in locked]
+    if violations:
+        _raise_locked_batch(violations)
 
 
 def _parse_shoot_date(date_str: Optional[str]) -> Optional[datetime]:

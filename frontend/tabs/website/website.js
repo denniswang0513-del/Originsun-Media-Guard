@@ -11,6 +11,7 @@
 
 import { getApiBase, websiteFetch, esc } from './website-utils.js';
 import { initRebuildBar, destroyRebuildBar } from './rebuild-bar.js';
+import { createSubviewLoader } from '../../js/shared/subview-loader.js';
 
 const SUBVIEWS = [
     'dashboard', 'home', 'works', 'categories',
@@ -101,41 +102,17 @@ async function switchSubview(name) {
 }
 window.websiteSwitchSubview = switchSubview;
 
-/**
- * 動態 import 子視圖並 render 進 content。
- *
- * @param cacheBust  true 時在 module URL 後加 ?t=<timestamp>。ES module loader 會
- *   把「載入失敗的結果」永久快取在 module map — server 短暫 down（發布/重啟）後，
- *   後續 import() 同一 URL 只會回傳同一個 rejected promise，使用者只能整頁重整。
- *   重試時帶不同 query 等於換一個 module map key，強制重新 fetch。
- */
-async function _loadSubviewInto(content, name, isCurrent, cacheBust) {
-    const url = cacheBust
+// 共用 loader（含 retry/cache-bust/isCurrent 護欄與「ES module map 永久快取
+// rejected import」說明，見 js/shared/subview-loader.js）；importer closure
+// 留在本檔，./subviews/ 相對路徑才會以 website/ 為基準。
+const _loadSubviewInto = createSubviewLoader({
+    importer: (name, cacheBust) => import(cacheBust
         ? `./subviews/${name}.js?t=${Date.now()}`
-        : `./subviews/${name}.js`;
-    try {
-        const mod = await import(url);
-        if (!isCurrent()) return;  // 使用者在 import 期間切走了
-        if (typeof mod.default === 'function') {
-            await mod.default(content, { isCurrent });
-        } else {
-            content.innerHTML = `<div style="color:#f88;padding:24px;">子視圖 ${name} 缺少 default export</div>`;
-        }
-    } catch (e) {
-        console.error(`[website] load subview '${name}' failed:`, e);
-        if (!isCurrent()) return;
-        content.innerHTML = `
-            <div style="color:#f88;padding:24px;">
-                <div style="margin-bottom:12px;">子視圖載入失敗：${esc(e.message || e)}</div>
-                <button id="website-subview-retry" class="btn btn-sm">🔄 重試</button>
-            </div>`;
-        content.querySelector('#website-subview-retry')?.addEventListener('click', () => {
-            if (!isCurrent()) return;  // 按鈕還在但已切走 → 不動
-            content.innerHTML = _LOADING_HTML;
-            _loadSubviewInto(content, name, isCurrent, true);
-        });
-    }
-}
+        : `./subviews/${name}.js`),
+    esc,
+    tag: 'website',
+    retryBtnClass: 'btn btn-sm',
+});
 
 function _tabIsVisible() {
     // 瀏覽器分頁不在前景 → 停

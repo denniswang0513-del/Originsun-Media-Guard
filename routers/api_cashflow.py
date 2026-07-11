@@ -8,15 +8,15 @@ api_cashflow.py — B3 現金流：付款節點 CRUD + 90 天現金流預測（B
 - 通知：目前由 UI 紅字呈現；Google Chat webhook 設定後掛每日提醒（TODO）。
 """
 
-import re
 import uuid
 from datetime import datetime, timedelta
 
 from fastapi import APIRouter, HTTPException, Request  # type: ignore
 
 from config import load_settings
-from core.auth import check_admin_or_module, _extract_token
+from core.auth import check_admin_or_module
 from core.schemas import MilestonePayload, MonthClosePayload
+from routers.crm._shared import _parse_day, _username, _validate_month
 
 router = APIRouter(prefix="/api/v1/cashflow", tags=["cashflow"])
 
@@ -29,15 +29,6 @@ def _guard(request: Request):
 
 
 from core.db_guard import db_factory_or_503 as _factory_or_503
-
-
-def _parse_day(raw):
-    if not raw:
-        return None
-    try:
-        return datetime.strptime(str(raw)[:10], "%Y-%m-%d")
-    except ValueError:
-        raise HTTPException(status_code=422, detail=f"日期格式錯誤: {raw}（要 YYYY-MM-DD）")
 
 
 def _ms_dict(m, pname: str = ""):
@@ -248,19 +239,8 @@ async def forecast(request: Request, days: int = 90):
 
 
 # ── F1 月結鎖帳（HR_FIN_PLAN F1）────────────────────────────────
-# 鎖定月的收支不可改（守衛在 routers/crm/finance.py _assert_month_open）；
+# 鎖定月的收支不可改（守衛唯一實作在 routers/crm/_shared.py _assert_month_open）；
 # snapshot 留當月彙總讓報表數字可重現。重開留稽核痕跡，重鎖會刷新 snapshot。
-
-def _validate_month(month: str) -> str:
-    if not re.match(r"^\d{4}-\d{2}$", month or ""):
-        raise HTTPException(status_code=422, detail="month 格式需 YYYY-MM")
-    return month
-
-
-def _username(request: Request) -> str:
-    payload = _extract_token(request) or {}
-    return payload.get("username") or payload.get("sub") or "?"
-
 
 async def _month_snapshot(session, month: str) -> dict:
     from sqlalchemy import select, func as safunc

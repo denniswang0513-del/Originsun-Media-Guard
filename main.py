@@ -32,7 +32,7 @@ _ROUTER_MODULES = [
     'api_backup', 'api_verify', 'api_proxy', 'api_concat',
     'api_report', 'api_transcribe', 'api_system', 'api_ota', 'api_utils', 'api_tts',
     'api_job_history', 'api_queue', 'api_schedules', 'api_agents',
-    'api_api_keys', 'api_timesheets', 'api_cashflow', 'api_locations', 'api_proposals',
+    'api_api_keys', 'api_timesheets', 'api_cashflow', 'api_finance', 'api_locations', 'api_proposals',
     'api_intel',
     'api_portal',
     'api_equipment',
@@ -813,6 +813,39 @@ async def _on_startup():
                             print(f"[startup] cost_groups backfill for project {pid} failed: {_e_pid}")
         except Exception as _e_cg:
             print(f"[startup] cost_groups migration failed: {_e_cg}")
+
+    # ── 財務管理階段二：科目/對映/銀行帳戶/對帳/調整表 ──
+    # 新表（finance_accounts / finance_category_map / bank_accounts /
+    # bank_reconciliations / finance_adjustments）由 init_db 的
+    # Base.metadata.create_all 建；這裡補既有表新欄位 + 冪等種子。
+    if state.db_online:
+        try:
+            from db.session import get_session_factory
+            _ffin = get_session_factory()
+            if _ffin:
+                from sqlalchemy import text as _tfin
+                async with _ffin() as _sfin:
+                    for col_sql in [
+                        # 收支明細掛銀行帳戶 + AP 硬連結（→ crm_payment_requests）
+                        "ALTER TABLE crm_cash_entries ADD COLUMN IF NOT EXISTS bank_account_id VARCHAR(32)",
+                        "ALTER TABLE crm_cash_entries ADD COLUMN IF NOT EXISTS payment_request_id VARCHAR(32)",
+                        "CREATE INDEX IF NOT EXISTS idx_cash_bank_account ON crm_cash_entries(bank_account_id)",
+                        "CREATE INDEX IF NOT EXISTS idx_cash_payment_request ON crm_cash_entries(payment_request_id)",
+                        # 發票收款日（AR 收現時間戳，收支關聯收款時自動回填）
+                        "ALTER TABLE crm_invoices ADD COLUMN IF NOT EXISTS paid_date TIMESTAMPTZ",
+                        # 器材除役日（折舊自該月停止）
+                        "ALTER TABLE equipment ADD COLUMN IF NOT EXISTS retired_date TIMESTAMPTZ",
+                    ]:
+                        try:
+                            await _sfin.execute(_tfin(col_sql))
+                            await _sfin.commit()
+                        except Exception:
+                            await _sfin.rollback()
+                # 種子：科目表 + category 對映（冪等 — 查無才 insert，不覆蓋後台調整）
+                from db.seed_finance import seed_finance_stage2
+                await seed_finance_stage2(_ffin)
+        except Exception as _e_fin:
+            print(f"[startup] finance stage2 migration/seed failed: {_e_fin}")
 
     asyncio.create_task(_periodic_version_check())
     asyncio.create_task(_periodic_db_health())

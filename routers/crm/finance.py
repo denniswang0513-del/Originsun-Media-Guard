@@ -15,7 +15,8 @@ from fastapi import HTTPException, Request, UploadFile, File, Query
 from core.schemas import InvoicePayload, PaymentRequestPayload, CashEntryPayload
 
 from ._shared import (router, _check_auth, _require_db, _get_factory, _now,
-                      _parse_shoot_date)
+                      _parse_shoot_date, _assert_month_open, _assert_rows_open,
+                      _locked_month_set, _raise_locked_batch)
 
 try:
     from ._shared import (select, or_,
@@ -41,9 +42,22 @@ def _to_invoice_dict(inv, project_name: str = "") -> dict:
         "recipient": getattr(inv, 'recipient', '') or "",
         "recipient_phone": getattr(inv, 'recipient_phone', '') or "",
         "recipient_address": getattr(inv, 'recipient_address', '') or "",
+        "paid_date": inv.paid_date.isoformat() if getattr(inv, 'paid_date', None) else None,
         "notes": inv.notes or "",
         "created_at": inv.created_at.isoformat() if inv.created_at else None,
     }
+
+
+def _mark_invoice_received(inv, when) -> None:
+    """收款發票標已收款 + paid_date first-wins（兩欄不變式成對動 — 反向見 _unmark）。"""
+    inv.payment_status = "已收款"
+    if not inv.paid_date:
+        inv.paid_date = when
+
+
+def _unmark_invoice_received(inv) -> None:
+    inv.payment_status = "未收款"
+    inv.paid_date = None
 
 
 # ── Invoice Endpoints ───────────────────────────────────────
@@ -95,6 +109,7 @@ async def create_invoice(req: InvoicePayload, request: Request):
         **req.model_dump(exclude={"invoice_date"}),
     )
     async with factory() as session:
+        await _assert_month_open(session, inv.invoice_date)
         session.add(inv)
         await session.commit()
         await session.refresh(inv)
@@ -125,9 +140,12 @@ async def update_invoice(invoice_id: str, req: InvoicePayload, request: Request)
         inv = await session.get(CrmInvoice, invoice_id)
         if not inv:
             raise HTTPException(status_code=404, detail="找不到此發票")
+        # 舊/新 invoice_date 的月份都要開著（搬進或搬出鎖定月都算改帳）
+        new_date = _parse_shoot_date(req.invoice_date)
+        await _assert_month_open(session, inv.invoice_date, new_date)
         for k, v in req.model_dump(exclude={"invoice_date"}).items():
             setattr(inv, k, v)
-        inv.invoice_date = _parse_shoot_date(req.invoice_date)
+        inv.invoice_date = new_date
         inv.updated_at = _now()
         await session.commit()
     return {"status": "ok"}
@@ -142,6 +160,7 @@ async def delete_invoice(invoice_id: str, request: Request):
         inv = await session.get(CrmInvoice, invoice_id)
         if not inv:
             raise HTTPException(status_code=404, detail="找不到此發票")
+        await _assert_month_open(session, inv.invoice_date)
         await session.delete(inv)
         await session.commit()
     return {"status": "ok"}
@@ -211,13 +230,20 @@ async def import_invoices_csv(request: Request, file: UploadFile = File(...)):
     factory = await _get_factory()
 
     async with factory() as session:
-        for row in reader:
+        # F1 月結守衛：逐列判 invoice_date 的月，任一列落鎖定月 → 整批 409
+        parsed, dated = [], []
+        for line_no, row in enumerate(reader, start=2):  # 第 1 列是表頭
             data = _map_invoice_row(header_map, row)
             if not data.get("title"):
                 skipped += 1
                 continue
-            now = _now()
             inv_date = _parse_shoot_date(data.pop("invoice_date", None))
+            if inv_date:
+                dated.append((f"第 {line_no} 列（{inv_date.strftime('%Y-%m-%d')}）", inv_date))
+            parsed.append((data, inv_date))
+        await _assert_rows_open(session, dated)
+        for data, inv_date in parsed:
+            now = _now()
             inv = CrmInvoice(id=uuid.uuid4().hex, invoice_date=inv_date,
                              created_at=now, updated_at=now, **data)
             session.add(inv)
@@ -298,6 +324,8 @@ async def create_payment(req: PaymentRequestPayload, request: Request):
     data = req.model_dump(exclude=date_fields)
     p = CrmPaymentRequest(id=uuid.uuid4().hex, **dates, created_at=now, updated_at=now, **data)
     async with factory() as session:
+        # F1 月結守衛：請款單的權責費用認列月 = request_date
+        await _assert_month_open(session, dates.get("request_date"))
         session.add(p)
         await session.commit()
     return {"status": "ok", "payment": _to_payment_dict(p)}
@@ -387,7 +415,10 @@ async def list_advance_payments(returned: int = -1, project_id: str = Query(""))
 
 @router.patch("/payments/batch-month")
 async def batch_update_month(request: Request):
-    """更新請款單的 planned_month。"""
+    """更新請款單的 planned_month。
+
+    F1 月結守衛判準：planned_month 是「預計付款月」排程欄，不是權責認列日
+    （request_date）也不是現金發生日（payment_date）— 改排程不改帳，不掛守衛。"""
     _check_auth(request)
     _require_db()
     factory = await _get_factory()
@@ -411,6 +442,11 @@ async def batch_update_month(request: Request):
 
 @router.patch("/payments/batch-pay")
 async def batch_pay(request: Request):
+    """批次標記已付款。
+
+    F1 月結守衛判準：付款動作影響的是現金側（payment_date），不改權責費用
+    認列月（request_date）— 所以這裡守 payment_date：新付款日或原付款日
+    （搬出鎖定月也算改帳）落鎖定月 → 整批 409 並列出違規筆。"""
     _check_auth(request)
     _require_db()
     factory = await _get_factory()
@@ -421,27 +457,44 @@ async def batch_pay(request: Request):
         raise HTTPException(status_code=400, detail="請提供 payment_ids")
 
     async with factory() as session:
-        updated = 0
+        locked = await _locked_month_set(session)
+        if pay_date.strftime("%Y-%m") in locked:
+            raise HTTPException(
+                status_code=409,
+                detail=f"付款日 {pay_date.strftime('%Y-%m-%d')} 落在已鎖帳月份"
+                       "（需修改請先到帳務→現金流重開該月）")
+        # 先整批檢查再改（違規時一筆都不動）
+        targets, violations = [], []
         for pid in ids:
             p = await session.get(CrmPaymentRequest, pid)
             if not p:
                 continue
-            if p.payment_status != "已付款":
-                p.payment_status = "已付款"
-                p.payment_date = pay_date
-                p.updated_at = _now()
-                updated += 1
-            elif p.payment_date != pay_date:
-                p.payment_date = pay_date
-                p.updated_at = _now()
-                updated += 1
+            will_change = (p.payment_status != "已付款") or (p.payment_date != pay_date)
+            if not will_change:
+                continue
+            old_month = p.payment_date.strftime("%Y-%m") if p.payment_date else None
+            if old_month and old_month in locked:
+                violations.append(f"{p.summary or p.id}（{old_month}）")
+                continue
+            targets.append(p)
+        if violations:
+            _raise_locked_batch(violations)
+        updated = 0
+        for p in targets:
+            p.payment_status = "已付款"
+            p.payment_date = pay_date
+            p.updated_at = _now()
+            updated += 1
         await session.commit()
     return {"status": "ok", "updated": updated}
 
 
 @router.patch("/payments/batch-unpay")
 async def batch_unpay(request: Request):
-    """將已付款的請款單改回應付款。"""
+    """將已付款的請款單改回應付款。
+
+    F1 月結守衛判準同 batch-pay：取消付款是把現金事件從原付款月抽走 —
+    原 payment_date 落鎖定月 → 整批 409 並列出違規筆。"""
     _check_auth(request)
     _require_db()
     factory = await _get_factory()
@@ -451,14 +504,25 @@ async def batch_unpay(request: Request):
         raise HTTPException(status_code=400, detail="請提供 payment_ids")
 
     async with factory() as session:
-        updated = 0
+        locked = await _locked_month_set(session)
+        targets, violations = [], []
         for pid in ids:
             p = await session.get(CrmPaymentRequest, pid)
-            if p and p.payment_status == "已付款":
-                p.payment_status = "應付款"
-                p.payment_date = None
-                p.updated_at = _now()
-                updated += 1
+            if not (p and p.payment_status == "已付款"):
+                continue
+            old_month = p.payment_date.strftime("%Y-%m") if p.payment_date else None
+            if old_month and old_month in locked:
+                violations.append(f"{p.summary or p.id}（{old_month}）")
+                continue
+            targets.append(p)
+        if violations:
+            _raise_locked_batch(violations)
+        updated = 0
+        for p in targets:
+            p.payment_status = "應付款"
+            p.payment_date = None
+            p.updated_at = _now()
+            updated += 1
         await session.commit()
     return {"status": "ok", "updated": updated}
 
@@ -489,6 +553,8 @@ async def update_payment(payment_id: str, req: PaymentRequestPayload, request: R
         p = await session.get(CrmPaymentRequest, payment_id)
         if not p:
             raise HTTPException(status_code=404, detail="找不到此請款單")
+        # F1 月結守衛：舊/新 request_date 的月份都要開著
+        await _assert_month_open(session, p.request_date, dates.get("request_date"))
         for k, v in req.model_dump(exclude=date_fields).items():
             setattr(p, k, v)
         for k, v in dates.items():
@@ -507,6 +573,7 @@ async def delete_payment(payment_id: str, request: Request):
         p = await session.get(CrmPaymentRequest, payment_id)
         if not p:
             raise HTTPException(status_code=404, detail="找不到此請款單")
+        await _assert_month_open(session, p.request_date)
         await session.delete(p)
         await session.commit()
     return {"status": "ok"}
@@ -567,16 +634,23 @@ async def import_payments_csv(request: Request, file: UploadFile = File(...)):
     factory = await _get_factory()
 
     async with factory() as session:
-        for row in reader:
+        # F1 月結守衛：逐列判 request_date 的月，任一列落鎖定月 → 整批 409
+        parsed, dated = [], []
+        for line_no, row in enumerate(reader, start=2):  # 第 1 列是表頭
             data = _map_payment_row(header_map, row)
             if not data.get("summary") and not data.get("payee_name"):
                 skipped += 1
                 continue
             if not data.get("summary"):
                 data["summary"] = data.get("payee_name", "")
-            now = _now()
             req_date = _parse_shoot_date(data.pop("request_date", None))
             pay_date = _parse_shoot_date(data.pop("payment_date", None))
+            if req_date:
+                dated.append((f"第 {line_no} 列（{req_date.strftime('%Y-%m-%d')}）", req_date))
+            parsed.append((data, req_date, pay_date))
+        await _assert_rows_open(session, dated)
+        for data, req_date, pay_date in parsed:
+            now = _now()
             p = CrmPaymentRequest(
                 id=uuid.uuid4().hex, request_date=req_date, payment_date=pay_date,
                 created_at=now, updated_at=now, **data,
@@ -606,26 +680,15 @@ def _to_cash_dict(e, project_name: str = "", invoice_title: str = "") -> dict:
         "invoice_id": e.invoice_id or "",
         "bank_fee": e.bank_fee,
         "advance_payment_id": e.advance_payment_id or "",
+        "bank_account_id": getattr(e, 'bank_account_id', '') or "",
+        "payment_request_id": getattr(e, 'payment_request_id', '') or "",
         "invoice_title": invoice_title,
         "created_at": e.created_at.isoformat() if e.created_at else None,
     }
 
 
-async def _assert_month_open(session, *dates):
-    """F1 月結鎖帳：任一日期落在已鎖（未重開）月份 → 409。
-    更新時要同時傳舊/新 entry_date（把紀錄搬進或搬出鎖定月都算改帳）。"""
-    months = {d.strftime("%Y-%m") for d in dates if d}
-    if not months:
-        return
-    from db.models import FinanceMonthClose
-    locked = (await session.execute(
-        select(FinanceMonthClose.month).where(
-            FinanceMonthClose.month.in_(months),
-            FinanceMonthClose.reopened_at.is_(None)))).scalars().all()
-    if locked:
-        raise HTTPException(
-            status_code=409,
-            detail=f"月份已鎖帳：{', '.join(sorted(locked))}（需修改請先到帳務→現金流重開該月）")
+# F1 月結守衛（_assert_month_open / _assert_rows_open / _locked_month_set /
+# _raise_locked_batch）唯一實作在 routers/crm/_shared.py — 含「守哪個日期欄」判準表。
 
 
 @router.get("/cash-entries")
@@ -670,7 +733,8 @@ async def create_cash_entry(req: CashEntryPayload, request: Request):
         if req.invoice_id and req.deposit:
             inv = await session.get(CrmInvoice, req.invoice_id)
             if inv:
-                inv.payment_status = "已收款"
+                # 收款日 = 收支入帳日（已有值不覆蓋 — 第一次收款為準）
+                _mark_invoice_received(inv, dates.get("entry_date") or _now())
         await session.commit()
     return {"status": "ok", "entry_id": e.id, "entry": {"id": e.id}}
 
@@ -696,11 +760,12 @@ async def update_cash_entry(entry_id: str, req: CashEntryPayload, request: Reque
         if req.invoice_id and req.deposit:
             inv = await session.get(CrmInvoice, req.invoice_id)
             if inv:
-                inv.payment_status = "已收款"
+                # 收款日 = 收支入帳日（已有值不覆蓋 — 第一次收款為準）
+                _mark_invoice_received(inv, dates.get("entry_date") or _now())
         if old_invoice_id and old_invoice_id != req.invoice_id:
             old_inv = await session.get(CrmInvoice, old_invoice_id)
             if old_inv and old_inv.payment_status == "已收款":
-                old_inv.payment_status = "未收款"
+                _unmark_invoice_received(old_inv)  # 收款關聯解除 → 收款日一併清掉
         await session.commit()
     return {"status": "ok"}
 
@@ -718,7 +783,7 @@ async def delete_cash_entry(entry_id: str, request: Request):
         if e.invoice_id and e.deposit:
             inv = await session.get(CrmInvoice, e.invoice_id)
             if inv and inv.payment_status == "已收款":
-                inv.payment_status = "未收款"
+                _unmark_invoice_received(inv)  # 收款關聯的收支被刪 → 收款日一併清掉
         await session.delete(e)
         await session.commit()
     return {"status": "ok"}
@@ -768,13 +833,20 @@ async def import_cash_csv(request: Request, file: UploadFile = File(...)):
     factory = await _get_factory()
 
     async with factory() as session:
-        for row in reader:
+        # F1 月結守衛：逐列判 entry_date 的月，任一列落鎖定月 → 整批 409
+        parsed, dated = [], []
+        for line_no, row in enumerate(reader, start=2):  # 第 1 列是表頭
             data = _map_cash_row(header_map, row)
             if not data.get("summary"):
                 skipped += 1
                 continue
             entry_date = _parse_shoot_date(data.pop("entry_date", None))
             pay_date = _parse_shoot_date(data.pop("payment_date", None))
+            if entry_date:
+                dated.append((f"第 {line_no} 列（{entry_date.strftime('%Y-%m-%d')}）", entry_date))
+            parsed.append((data, entry_date, pay_date))
+        await _assert_rows_open(session, dated)
+        for data, entry_date, pay_date in parsed:
             e = CrmCashEntry(id=uuid.uuid4().hex, entry_date=entry_date,
                              payment_date=pay_date, created_at=_now(), **data)
             session.add(e)
@@ -876,7 +948,8 @@ async def batch_receive(request: Request):
         for iid in ids:
             inv = await session.get(CrmInvoice, iid)
             if inv and inv.payment_status != "已收款":
-                inv.payment_status = "已收款"
+                # 批次標記沒有收支入帳日 → 以標記時間為收款日（已有值不覆蓋）
+                _mark_invoice_received(inv, _now())
                 inv.updated_at = _now()
                 updated += 1
         await session.commit()

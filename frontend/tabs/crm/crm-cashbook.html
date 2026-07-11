@@ -129,6 +129,11 @@
           <label>匯費</label>
           <input id="cash-f-bank_fee" type="number" class="crm-input" min="0" value="0">
         </div>
+        <!-- 帳戶（財務模組）— 清單載入成功才顯示（優雅降級） -->
+        <div class="crm-field" id="cash-field-bankaccount" style="display:none;">
+          <label>帳戶</label>
+          <select id="cash-f-bank_account_id" class="crm-input"><option value="">— 未指定 —</option></select>
+        </div>
         <!-- 預支關聯（專案雜支時顯示） -->
         <div id="cash-advance-section" class="crm-field crm-field-full" style="display:none;">
           <label style="display:flex;align-items:center;gap:4px;cursor:pointer;margin:0;">
