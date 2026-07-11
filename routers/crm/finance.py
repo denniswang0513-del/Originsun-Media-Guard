@@ -12,6 +12,7 @@ from datetime import datetime, timezone
 
 from fastapi import HTTPException, Request, UploadFile, File, Query
 
+from core.finance_logic import month_of
 from core.schemas import InvoicePayload, PaymentRequestPayload, CashEntryPayload
 
 from ._shared import (router, _check_auth, _require_db, _get_factory, _now,
@@ -458,7 +459,8 @@ async def batch_pay(request: Request):
 
     async with factory() as session:
         locked = await _locked_month_set(session)
-        if pay_date.strftime("%Y-%m") in locked:
+        # month_of：timestamptz 回讀是 UTC 表示，直取 strftime 會把月初歸前月
+        if month_of(pay_date) in locked:
             raise HTTPException(
                 status_code=409,
                 detail=f"付款日 {pay_date.strftime('%Y-%m-%d')} 落在已鎖帳月份"
@@ -472,7 +474,7 @@ async def batch_pay(request: Request):
             will_change = (p.payment_status != "已付款") or (p.payment_date != pay_date)
             if not will_change:
                 continue
-            old_month = p.payment_date.strftime("%Y-%m") if p.payment_date else None
+            old_month = month_of(p.payment_date)
             if old_month and old_month in locked:
                 violations.append(f"{p.summary or p.id}（{old_month}）")
                 continue
@@ -510,7 +512,7 @@ async def batch_unpay(request: Request):
             p = await session.get(CrmPaymentRequest, pid)
             if not (p and p.payment_status == "已付款"):
                 continue
-            old_month = p.payment_date.strftime("%Y-%m") if p.payment_date else None
+            old_month = month_of(p.payment_date)
             if old_month and old_month in locked:
                 violations.append(f"{p.summary or p.id}（{old_month}）")
                 continue

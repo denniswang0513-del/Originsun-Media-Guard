@@ -241,6 +241,13 @@ async def forecast(request: Request, days: int = 90):
 # ── F1 月結鎖帳（HR_FIN_PLAN F1）────────────────────────────────
 # 鎖定月的收支不可改（守衛唯一實作在 routers/crm/_shared.py _assert_month_open）；
 # snapshot 留當月彙總讓報表數字可重現。重開留稽核痕跡，重鎖會刷新 snapshot。
+#
+# 快照 v2（財務階段三）：{v:2, income/expense/entry_count/expense_by_category
+# （v1 四欄留頂層 — crm-cashflow.js 月結列表直接讀 snapshot.income，別動）,
+# cash:{同 v1 四欄，規格巢狀}, pnl, bs, cf, checks:{bs_diff, cf_diff}}。
+# 三表部分由 services/finance_statements.month_close_extras 算（與 GET
+# /api/v1/finance/statements 同一套聚合）；/statements 讀快照的判準是
+# snapshot.get("v")==2 且含 "pnl" 鍵，v1 舊快照視同未鎖 → live 算（相容）。
 
 async def _month_snapshot(session, month: str) -> dict:
     from sqlalchemy import select, func as safunc
@@ -288,9 +295,13 @@ async def close_month(payload: MonthClosePayload, request: Request):
     month = _validate_month(payload.month)
     from sqlalchemy import select
     from db.models import FinanceMonthClose
+    from services import finance_statements as fs
     factory = _factory_or_503()
     async with factory() as session:
-        snap = await _month_snapshot(session, month)
+        cash = await _month_snapshot(session, month)
+        extras, warnings = await fs.month_close_extras(session, month)
+        # v1 四欄留頂層（前端月結列表讀 snapshot.income）+ 規格巢狀 cash
+        snap = {"v": 2, **cash, "cash": cash, **extras}
         row = (await session.execute(
             select(FinanceMonthClose).where(FinanceMonthClose.month == month))).scalar_one_or_none()
         if row and row.reopened_at is None:
@@ -306,7 +317,8 @@ async def close_month(payload: MonthClosePayload, request: Request):
                 id=uuid.uuid4().hex, month=month,
                 closed_by=_username(request), snapshot=snap))
         await session.commit()
-    return {"ok": True, "month": month, "snapshot": snap}
+    # warnings 不擋鎖帳（未歸類/未掛帳戶/該月對帳缺漏）— 誠實回報給前端顯示
+    return {"ok": True, "month": month, "snapshot": snap, "warnings": warnings}
 
 
 @router.post("/month-close/reopen")

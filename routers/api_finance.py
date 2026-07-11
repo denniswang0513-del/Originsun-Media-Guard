@@ -1,5 +1,6 @@
 """
-api_finance.py — 財務管理階段二：科目對映 + 銀行帳戶 + 對帳 + 調整表 + 設定精靈
+api_finance.py — 財務管理階段二/三：科目對映 + 銀行帳戶 + 對帳 + 調整表
++ 設定精靈 + 三表 statements
 
 權責制三表的地基（風格比照 routers/api_cashflow.py）：
 - 科目表（finance_accounts）：種子唯讀清單（後台目前只讀，代碼藏引擎）
@@ -10,6 +11,10 @@ api_finance.py — 財務管理階段二：科目對映 + 銀行帳戶 + 對帳 
 - 調整表（finance_adjustments）：期初/更正/業主往來 — 🔴 不得指向銀行類科目
   （code 11xx），影響現金的修正一律走收支明細；受月結守衛
 - 設定精靈（setup-wizard）：一次建帳戶 + 掛歷史收支 + 設基準月 + 期初權益
+- 三表（階段三）：GET /statements?period=...（損益/資產負債/現金流量 + 白話
+  解讀 + meta；已鎖月優先讀快照 v2）、GET /statements/drilldown?kind=&period=
+  （報表列 → 底層明細）。聚合在 services/finance_statements.py、規則在
+  core/finance_logic.py 純函式（黃金測試 tests/unit/test_finance_statements.py）。
 
 守門：全部端點 check_admin_or_module(request, 'crm_invoices')（沿用帳務模組 key）。
 金額一律 Integer 新台幣。純計算規則在 core/finance_logic.py（有單元測試）。
@@ -23,7 +28,8 @@ from fastapi import APIRouter, HTTPException, Request  # type: ignore
 from config import load_settings, save_settings
 from core.auth import check_admin_or_module
 from core.db_guard import db_factory_or_503 as _factory_or_503
-from core.finance_logic import bank_running_balance, reconciliation_diff
+from core.finance_logic import (bank_running_balance, period_months,
+                                reconciliation_diff)
 from core.schemas import (BankAccountPayload, BulkAssignAccountPayload,
                           FinanceAdjustmentPayload, FinanceCategoryMapPut,
                           FinanceSetupWizardPayload, ReconciliationPayload)
@@ -514,6 +520,50 @@ async def bulk_assign_account(payload: BulkAssignAccountPayload, request: Reques
         result = await session.execute(stmt)
         await session.commit()
     return {"updated": int(result.rowcount or 0)}
+
+
+# ── 三表 statements（階段三）────────────────────────────────
+
+def _parse_period(period: str) -> list:
+    """period 查詢參數 → 月清單；格式錯 → 422（訊息帶支援格式）。"""
+    try:
+        return period_months(period)
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e))
+
+
+@router.get("/statements")
+async def get_statements(request: Request, period: str = ""):
+    """期間三表（損益/資產負債/現金流量）+ 白話解讀 + meta。
+
+    period：'2026-06' | '2026-Q2' | '2026' | '2025-07..2026-06'。
+    已鎖月（未重開）且快照為 v2 → PnL/CF 讀快照逐月加總、BS 取期末月快照；
+    其餘月份 live 算。meta 含 locked_months/live_months/baseline_month/warnings。
+    """
+    _guard(request)
+    months = _parse_period(period)
+    from services import finance_statements as fs
+    factory = _factory_or_503()
+    async with factory() as session:
+        return await fs.statements_for_period(session, months)
+
+
+@router.get("/statements/drilldown")
+async def statements_drilldown(request: Request, kind: str = "", period: str = ""):
+    """三表列 → 底層明細（上限 500 列 + 合計 + truncated 旗標）。
+
+    kind ∈ revenue / cost.<料|工|費> / opex.<銷售|管理|研發> / non_operating /
+    receivable / payable / cash.<operating|investing|financing>。
+    """
+    _guard(request)
+    months = _parse_period(period)
+    from services import finance_statements as fs
+    factory = _factory_or_503()
+    async with factory() as session:
+        try:
+            return await fs.drilldown(session, kind, months)
+        except ValueError as e:
+            raise HTTPException(status_code=422, detail=str(e))
 
 
 # ── 設定精靈 ────────────────────────────────────────────────
