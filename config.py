@@ -27,6 +27,14 @@ _DEFAULT_SETTINGS: dict = {
     },
     # job_history DB 表保留天數（core/maintenance.py 每日 purge；0 = 停用）
     "job_history_retention_days": 180,
+    # 財務管理排程提醒（core/scheduler._finance_calendar_check / _loan_due_check 讀取）。
+    # report_remind_hour：月報 / 稅務行事曆每日觸發時刻（0-23，含），與貸款提醒共用慣例。
+    # 其餘 finance.* 鍵（baseline_month / monthly_fixed_costs / loan_remind_hour / loan_remind_days）
+    # 由 api_finance / api_cashflow 於執行時寫入 settings.json；此處只補預設 hour，
+    # load/save 的 dict 深度 merge 會保留那些既有鍵、不覆蓋。
+    "finance": {
+        "report_remind_hour": 9,
+    },
     "nas_paths": {
         "ota_dir": "",
         "web_report_dir": r"\\192.168.1.132\Container\AI_Workspace\Originsun_Web\FileReport",

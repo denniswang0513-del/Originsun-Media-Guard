@@ -983,6 +983,38 @@ async def statements_drilldown(request: Request, kind: str = "", period: str = "
             raise HTTPException(status_code=422, detail=str(e))
 
 
+# ── 儀表板 + 稅務包（階段五）─────────────────────────────────
+
+def _period_or_current(period: str) -> tuple:
+    """period 缺省 → 本月；解析同 /statements（格式錯 422）。回 (months, 原字串)。"""
+    eff = (period or "").strip() or datetime.now().strftime("%Y-%m")
+    return _parse_period(eff), eff
+
+
+@router.get("/dashboard")
+async def get_dashboard(request: Request, period: str = ""):
+    """財務儀表板：12 月損益趨勢 + 現金水位/跑道 + AR 帳齡 + 客戶集中度 +
+    專案毛利 Top/Bottom。period 缺省=本月，格式同 /statements。"""
+    _guard(request)
+    months, eff = _period_or_current(period)
+    from services import finance_statements as fs
+    factory = _factory_or_503()
+    async with factory() as session:
+        return await fs.dashboard_summary(session, months, period=eff)
+
+
+@router.get("/tax-package")
+async def get_tax_package(request: Request, period: str = ""):
+    """稅務包：銷項/進項發票明細 + 分類支出 + 勞報彙總 + 營業稅位置。
+    period 缺省=本月，格式同 /statements。"""
+    _guard(request)
+    months, eff = _period_or_current(period)
+    from services import finance_statements as fs
+    factory = _factory_or_503()
+    async with factory() as session:
+        return await fs.tax_package(session, months, period=eff)
+
+
 # ── 設定精靈 ────────────────────────────────────────────────
 
 @router.post("/setup-wizard")

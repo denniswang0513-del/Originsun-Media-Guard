@@ -548,15 +548,18 @@ async def project_financial_summary(project_id: str):
         groups_count = int(g_row[1] or 0) if g_row else 0
         groups_missing_budget_count = int(g_row[2] or 0) if g_row else 0
 
+    from core.crm_logic import project_margin
     contract = project.contract_amount or 0
     tax_rate = project.tax_rate or 5
-    ex_tax = round(contract / (1 + tax_rate / 100))
+    # 毛利公式單一來源（與財務儀表板 Top/Bottom 共用，見 core.crm_logic.project_margin）
+    m = project_margin(contract, tax_rate, expense_actual, staff_actual)
+    ex_tax = m["ex_tax"]
     profit_target = int(ex_tax * (project.profit_target_pct or 20) / 100)
     misc_budget = int(ex_tax * (project.misc_budget_pct or 5) / 100)
     outsource_budget = ex_tax - profit_target - misc_budget
 
-    total_cost = expense_actual + staff_actual
-    actual_profit = ex_tax - total_cost
+    total_cost = m["cost"]
+    actual_profit = m["margin"]
     profit_rate = round(actual_profit / ex_tax * 100) if ex_tax > 0 else 0
 
     return {

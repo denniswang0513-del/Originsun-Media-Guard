@@ -15,7 +15,10 @@
  * ⚠ 數值格式假設（與後端對齊）：rate / pct / debt_ratio 為「百分比數字」
  *   （35.2 = 35.2%）；current_ratio 為倍數（1.85 = 1.85 倍）。
  */
-import { finFetch, esc, fmtNum, finToast } from '../fin-utils.js';
+import {
+    finFetch, esc, fmtNum, finToast,
+    renderPeriodInputs, periodFromInputs, metricCard, fmtPct, downloadCsv,
+} from '../fin-utils.js';
 
 let _c = null;
 let _isCurrent = () => true;
@@ -95,8 +98,8 @@ function _renderShell() {
         </style>
     `;
 
-    _renderPeriodInputs();
-    _c.querySelector('#finstmt-mode').addEventListener('change', _renderPeriodInputs);
+    renderPeriodInputs(_c, 'finstmt');
+    _c.querySelector('#finstmt-mode').addEventListener('change', () => renderPeriodInputs(_c, 'finstmt'));
 
     // 可下鑽行：事件委派（results innerHTML 會整塊換掉，掛在容器上才不會掉）
     _c.querySelector('#finstmt-results').addEventListener('click', (e) => {
@@ -109,62 +112,9 @@ function _renderShell() {
     modal.addEventListener('click', (e) => { if (e.target === modal) _fs.closeDrill(); });
 }
 
-// ── 期間選擇 ────────────────────────────────────────────────
-function _renderPeriodInputs() {
-    const mode = _c.querySelector('#finstmt-mode').value;
-    const span = _c.querySelector('#finstmt-inputs');
-    const now = new Date();
-    const curYear = now.getFullYear();
-    const curYm = `${curYear}-${String(now.getMonth() + 1).padStart(2, '0')}`;
-    const years = [];
-    for (let y = curYear + 1; y >= curYear - 6; y--) years.push(y);
-    const yearOpts = (sel) => years.map(y => `<option value="${y}"${y === sel ? ' selected' : ''}>${y}</option>`).join('');
-
-    if (mode === 'month') {
-        span.innerHTML = `<input id="finstmt-month" type="month" class="crm-input" value="${curYm}">`;
-    } else if (mode === 'quarter') {
-        const q = Math.floor(now.getMonth() / 3) + 1;
-        span.innerHTML = `
-            <select id="finstmt-q-year" class="crm-select">${yearOpts(curYear)}</select>
-            <select id="finstmt-q" class="crm-select">${[1, 2, 3, 4].map(i => `<option value="${i}"${i === q ? ' selected' : ''}>Q${i}</option>`).join('')}</select>`;
-    } else if (mode === 'year') {
-        span.innerHTML = `<select id="finstmt-year" class="crm-select">${yearOpts(curYear)}</select>`;
-    } else {
-        span.innerHTML = `
-            <input id="finstmt-from" type="month" class="crm-input" value="${curYear}-01">
-            <span style="color:#888;">～</span>
-            <input id="finstmt-to" type="month" class="crm-input" value="${curYm}">`;
-    }
-}
-
-/** 讀期間輸入 → {period, end}；不合法回 null（含 toast） */
-function _periodFromInputs() {
-    const mode = _c.querySelector('#finstmt-mode').value;
-    const g = (id) => _c.querySelector('#finstmt-' + id);
-    if (mode === 'month') {
-        const v = g('month')?.value;
-        if (!v) { finToast('請選月份', true); return null; }
-        return { period: v, end: v };
-    }
-    if (mode === 'quarter') {
-        const y = g('q-year')?.value, q = parseInt(g('q')?.value, 10);
-        if (!y || !q) { finToast('請選年與季', true); return null; }
-        return { period: `${y}-Q${q}`, end: `${y}-${String(q * 3).padStart(2, '0')}` };
-    }
-    if (mode === 'year') {
-        const y = g('year')?.value;
-        if (!y) { finToast('請選年份', true); return null; }
-        return { period: y, end: `${y}-12` };
-    }
-    const from = g('from')?.value, to = g('to')?.value;
-    if (!from || !to) { finToast('請選起訖月份', true); return null; }
-    if (from > to) { finToast('起始月不可晚於結束月', true); return null; }
-    return { period: `${from}..${to}`, end: to };
-}
-
 // ── 載入 ────────────────────────────────────────────────────
 _fs.load = async (btn) => {
-    const p = _periodFromInputs();
+    const p = periodFromInputs(_c, 'finstmt');
     if (!p) return;
     _period = p.period;
     _periodEnd = p.end;
@@ -234,15 +184,6 @@ function _metaBarsHtml(meta) {
 }
 
 // ── 指標卡列 ────────────────────────────────────────────────
-function _metricCard(label, valueHtml, subHtml) {
-    return `
-    <div style="background:#222;border:1px solid #333;border-radius:8px;padding:12px 16px;min-width:150px;flex:1 1 160px;">
-        <div style="color:#888;font-size:11px;">${label}</div>
-        <div style="font-size:20px;font-weight:700;margin-top:4px;white-space:nowrap;">${valueHtml}</div>
-        ${subHtml ? `<div style="font-size:11px;margin-top:3px;">${subHtml}</div>` : ''}
-    </div>`;
-}
-
 function _metricsHtml(d) {
     const p = d.pnl;
     const rev = p.revenue || {};
@@ -255,12 +196,12 @@ function _metricsHtml(d) {
     const netColor = net < 0 ? '#fca5a5' : '#86efac';
     return `
     <div style="display:flex;gap:12px;flex-wrap:wrap;margin-bottom:14px;">
-        ${_metricCard('營業收入', `<span style="color:#eee;" title="${esc(TIP.revenue)}">$${fmtNum(rev.total)}</span>`, '<span style="color:#888;">未稅</span>')}
-        ${_metricCard('稅後淨利', `<span style="color:${netColor};">$${fmtNum(net)}</span>`, `<span style="color:#888;">淨利率 ${_fmtPct(p.net && p.net.rate)}</span>`)}
-        ${_metricCard('流動比率', `<span style="color:${_crColor(cr)};" title="${esc(TIP.currentRatio)}">${_fmtRatio(cr)}</span>`, `<span style="color:${_crColor(cr)};">${esc(labels.current_ratio || '')}</span>`)}
-        ${_metricCard('負債比率', `<span style="color:${_drColor(dr)};" title="${esc(TIP.debtRatio)}">${_fmtPct(dr)}</span>`, `<span style="color:${_drColor(dr)};">${esc(labels.debt_ratio || '')}</span>`)}
-        ${_metricCard('月均收入', `<span style="color:#eee;">$${fmtNum(ma.revenue)}</span>`, '<span style="color:#888;">期間平均</span>')}
-        ${_metricCard('月均開銷', `<span style="color:#eee;">$${fmtNum(spend)}</span>`, `<span style="color:#888;">成本 $${fmtNum(ma.cost)}＋費用 $${fmtNum(ma.opex)}</span>`)}
+        ${metricCard('營業收入', `<span style="color:#eee;" title="${esc(TIP.revenue)}">$${fmtNum(rev.total)}</span>`, '<span style="color:#888;">未稅</span>')}
+        ${metricCard('稅後淨利', `<span style="color:${netColor};">$${fmtNum(net)}</span>`, `<span style="color:#888;">淨利率 ${fmtPct(p.net && p.net.rate)}</span>`)}
+        ${metricCard('流動比率', `<span style="color:${_crColor(cr)};" title="${esc(TIP.currentRatio)}">${_fmtRatio(cr)}</span>`, `<span style="color:${_crColor(cr)};">${esc(labels.current_ratio || '')}</span>`)}
+        ${metricCard('負債比率', `<span style="color:${_drColor(dr)};" title="${esc(TIP.debtRatio)}">${fmtPct(dr)}</span>`, `<span style="color:${_drColor(dr)};">${esc(labels.debt_ratio || '')}</span>`)}
+        ${metricCard('月均收入', `<span style="color:#eee;">$${fmtNum(ma.revenue)}</span>`, '<span style="color:#888;">期間平均</span>')}
+        ${metricCard('月均開銷', `<span style="color:#eee;">$${fmtNum(spend)}</span>`, `<span style="color:#888;">成本 $${fmtNum(ma.cost)}＋費用 $${fmtNum(ma.opex)}</span>`)}
     </div>`;
 }
 
@@ -289,12 +230,6 @@ function _stmtCard(id, title, subtitle, bodyHtml) {
 }
 
 // ── 表格小工具 ──────────────────────────────────────────────
-/** rate/pct 為百分比數字（35.2 = 35.2%），見檔頭假設 */
-function _fmtPct(r) {
-    if (r == null || isNaN(r)) return '—';
-    return (Math.round(r * 10) / 10).toLocaleString('zh-TW') + '%';
-}
-
 /** current_ratio 為倍數 */
 function _fmtRatio(v) {
     if (v == null || isNaN(v)) return '—';
@@ -366,7 +301,7 @@ function _pnlRows(p) {
     const gross = p.gross || {};
     rows.push({
         label: '營業毛利', amount: gross.amount, bold: true, tip: TIP.gross,
-        note: `毛利率 ${_fmtPct(gross.rate)}（(營收-成本)/營收，>10% 佳）`,
+        note: `毛利率 ${fmtPct(gross.rate)}（(營收-成本)/營收，>10% 佳）`,
     });
 
     const opex = p.opex || {};
@@ -379,7 +314,7 @@ function _pnlRows(p) {
     const op = p.operating || {};
     rows.push({
         label: '營業淨利', amount: op.amount, bold: true,
-        note: `營利率 ${_fmtPct(op.rate)}｜費用率 ${_fmtPct(op.expense_rate)}`,
+        note: `營利率 ${fmtPct(op.rate)}｜費用率 ${fmtPct(op.expense_rate)}`,
     });
 
     const no = p.non_operating || {};
@@ -398,7 +333,7 @@ function _pnlRows(p) {
     });
 
     const net = p.net || {};
-    rows.push({ label: '稅後淨利', amount: net.amount, bold: true, groupBg: true, note: `淨利率 ${_fmtPct(net.rate)}` });
+    rows.push({ label: '稅後淨利', amount: net.amount, bold: true, groupBg: true, note: `淨利率 ${fmtPct(net.rate)}` });
     return rows;
 }
 
@@ -468,7 +403,7 @@ function _bsRowHtml(r) {
     <tr style="border-top:1px solid #262626;color:#ccc;"${drillAttr}>
         <td style="padding:5px 10px 5px 28px;">${esc(r.label)}${r.tip ? ` <span title="${esc(r.tip)}" style="color:#667;cursor:help;font-size:11px;">ⓘ</span>` : ''}</td>
         <td style="padding:5px 10px;text-align:right;white-space:nowrap;">${_amt(r.amount)}</td>
-        <td style="padding:5px 10px;text-align:right;color:#777;font-size:11px;">${r.pct != null ? _fmtPct(r.pct) : ''}</td>
+        <td style="padding:5px 10px;text-align:right;color:#777;font-size:11px;">${r.pct != null ? fmtPct(r.pct) : ''}</td>
     </tr>`;
 }
 
@@ -494,7 +429,7 @@ function _bsHtml(b) {
         <div style="margin-top:12px;font-size:13px;color:#ccc;display:flex;gap:24px;flex-wrap:wrap;">
             <div>流動比率 <b style="color:${_crColor(cr)};">${_fmtRatio(cr)}</b> — ${esc(labels.current_ratio || '')}
                 <span title="${esc(TIP.currentRatio)}" style="color:#667;cursor:help;font-size:11px;">ⓘ</span></div>
-            <div>負債比率 <b style="color:${_drColor(dr)};">${_fmtPct(dr)}</b> — ${esc(labels.debt_ratio || '')}
+            <div>負債比率 <b style="color:${_drColor(dr)};">${fmtPct(dr)}</b> — ${esc(labels.debt_ratio || '')}
                 <span title="${esc(TIP.debtRatio)}" style="color:#667;cursor:help;font-size:11px;">ⓘ</span></div>
         </div>`;
 
@@ -594,29 +529,13 @@ _fs.closeDrill = () => {
 };
 
 // ── CSV 匯出 ────────────────────────────────────────────────
-function _csvCell(v) {
-    const s = String(v ?? '');
-    return /[",\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
-}
-
-function _downloadCsv(rows, filename) {
-    // 前置 UTF-8 BOM（U+FEFF）：讓 Excel 認出 UTF-8，中文才不會變亂碼
-    const csv = String.fromCharCode(0xFEFF) + rows.map(r => r.map(_csvCell).join(',')).join('\r\n');
-    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' });
-    const a = document.createElement('a');
-    a.href = URL.createObjectURL(blob);
-    a.download = filename;
-    a.click();
-    setTimeout(() => URL.revokeObjectURL(a.href), 5000);
-}
-
 _fs.exportCsv = (which) => {
     if (!_data) { finToast('請先載入報表', true); return; }
     let rows, name;
     if (which === 'pnl') { rows = _pnlCsv(_data.pnl || {}); name = '損益表'; }
     else if (which === 'bs') { rows = _bsCsv(_data.bs || {}); name = '資產負債表'; }
     else { rows = _cfCsv(_data.cf || {}); name = '現金流量表'; }
-    _downloadCsv(rows, `${name}_${_period}.csv`);
+    downloadCsv(rows, `${name}_${_period}.csv`);
     finToast(`已匯出${name}`);
 };
 
@@ -636,11 +555,11 @@ function _bsCsv(b) {
     const rows = [['區塊', '項目', '金額', '占比']];
     _bsRows(b).forEach(r => {
         if (r.header) return;   // 分組資訊由「區塊」欄承接
-        rows.push([r.block, r.label, r.amount || 0, r.pct != null ? _fmtPct(r.pct) : '']);
+        rows.push([r.block, r.label, r.amount || 0, r.pct != null ? fmtPct(r.pct) : '']);
     });
     const r = b.ratios || {}, labels = r.labels || {};
     rows.push(['比率', '流動比率', _fmtRatio(r.current_ratio), labels.current_ratio || '']);
-    rows.push(['比率', '負債比率', _fmtPct(r.debt_ratio), labels.debt_ratio || '']);
+    rows.push(['比率', '負債比率', fmtPct(r.debt_ratio), labels.debt_ratio || '']);
     const chk = b.check || {};
     if ((chk.diff || 0) !== 0) rows.push(['勾稽', '未對平差額', chk.diff, (chk.notes || []).join('；')]);
     return rows;

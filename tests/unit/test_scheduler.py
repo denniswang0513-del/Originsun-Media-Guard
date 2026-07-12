@@ -36,6 +36,59 @@ class TestCronValidation:
         assert is_valid_cron("60 25 * * *") is False  # invalid minute/hour
 
 
+class TestDailyMasterGate:
+    """/simplify C：_run_daily_master_task 共用底座的 gate 副作用（_loan_due_check /
+    _finance_calendar_check 共用，這幾個分支手抄易漂 → 鎖住行為）。"""
+
+    def _run(self, monkeypatch, key, *, master=True, db=True, factory=True,
+             hour_ok=True, body=None):
+        import asyncio
+        import core.state
+        import core.topology
+        import config
+        import db.session as dbsession
+        import core.scheduler as sched
+        sched._daily_fired.clear()
+        monkeypatch.setattr(core.topology, "is_master_machine", lambda: master)
+        monkeypatch.setattr(core.state, "db_online", db)
+        monkeypatch.setattr(dbsession, "get_session_factory",
+                            lambda: (lambda: None) if factory else None)
+        # hour_ok：remind_hour=0 → now.hour<0 永遠 False（過 hour gate）；否則 99 擋掉
+        monkeypatch.setattr(config, "load_settings",
+                            lambda: {"finance": {"loan_remind_hour": 0 if hour_ok else 99}})
+        calls = []
+
+        async def _default_body(f, n):
+            calls.append((f, n))
+        asyncio.run(sched._run_daily_master_task(
+            key, "loan_remind_hour", body or _default_body))
+        return calls, sched._daily_fired
+
+    def test_master_runs_body_and_fires(self, monkeypatch):
+        calls, fired = self._run(monkeypatch, "t_ok")
+        assert len(calls) == 1 and fired.get("t_ok") is not None
+
+    def test_non_master_marks_fired_skips_body(self, monkeypatch):
+        calls, fired = self._run(monkeypatch, "t_nm", master=False)
+        assert calls == [] and fired.get("t_nm") is not None  # 標記當日、不跑 body
+
+    def test_db_offline_no_fire_retry(self, monkeypatch):
+        calls, fired = self._run(monkeypatch, "t_db", db=False)
+        assert calls == [] and "t_db" not in fired            # 不標記 → 下 tick 重試
+
+    def test_before_hour_no_fire_retry(self, monkeypatch):
+        calls, fired = self._run(monkeypatch, "t_hr", hour_ok=False)
+        assert calls == [] and "t_hr" not in fired
+
+    def test_body_exception_no_fire(self, monkeypatch):
+        async def _boom(f, n):
+            raise RuntimeError("boom")
+        with pytest.raises(RuntimeError):
+            self._run(monkeypatch, "t_ex", body=_boom)
+        import core.scheduler as sched
+        assert "t_ex" not in sched._daily_fired                # body 拋錯 → 不標記
+
+
 class TestComputeNextRun:
     def test_next_run_daily(self):
         from core.scheduler import compute_next_run

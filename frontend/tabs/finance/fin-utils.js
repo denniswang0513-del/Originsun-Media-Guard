@@ -94,3 +94,108 @@ export function finToast(msg, isErr = false) {
     document.body.appendChild(el);
     setTimeout(() => el.remove(), isErr ? 5000 : 2500);
 }
+
+// ── 期間選擇器（statements / dashboard 子視圖共用） ─────────────
+// 兩個子視圖的期間列 element-id 前綴不同（finstmt- / findash-），
+// 故 prefix 參數化；container 為子視圖根容器（各自的 _c）。
+/**
+ * 依 mode（月/季/年/自訂）畫期間輸入元件，塞進 container 內 #{prefix}-inputs。
+ * mode 讀 container 內 #{prefix}-mode；所有動態 id 都帶 prefix。
+ */
+export function renderPeriodInputs(container, prefix) {
+    const mode = container.querySelector('#' + prefix + '-mode').value;
+    const span = container.querySelector('#' + prefix + '-inputs');
+    const now = new Date();
+    const curYear = now.getFullYear();
+    const curYm = `${curYear}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+    const years = [];
+    for (let y = curYear + 1; y >= curYear - 6; y--) years.push(y);
+    const yearOpts = (sel) => years.map(y => `<option value="${y}"${y === sel ? ' selected' : ''}>${y}</option>`).join('');
+
+    if (mode === 'month') {
+        span.innerHTML = `<input id="${prefix}-month" type="month" class="crm-input" value="${curYm}">`;
+    } else if (mode === 'quarter') {
+        const q = Math.floor(now.getMonth() / 3) + 1;
+        span.innerHTML = `
+            <select id="${prefix}-q-year" class="crm-select">${yearOpts(curYear)}</select>
+            <select id="${prefix}-q" class="crm-select">${[1, 2, 3, 4].map(i => `<option value="${i}"${i === q ? ' selected' : ''}>Q${i}</option>`).join('')}</select>`;
+    } else if (mode === 'year') {
+        span.innerHTML = `<select id="${prefix}-year" class="crm-select">${yearOpts(curYear)}</select>`;
+    } else {
+        span.innerHTML = `
+            <input id="${prefix}-from" type="month" class="crm-input" value="${curYear}-01">
+            <span style="color:#888;">～</span>
+            <input id="${prefix}-to" type="month" class="crm-input" value="${curYm}">`;
+    }
+}
+
+/** 讀期間輸入 → {period, end}；不合法回 null（含 toast）。id 帶 prefix。 */
+export function periodFromInputs(container, prefix) {
+    const mode = container.querySelector('#' + prefix + '-mode').value;
+    const g = (id) => container.querySelector('#' + prefix + '-' + id);
+    if (mode === 'month') {
+        const v = g('month')?.value;
+        if (!v) { finToast('請選月份', true); return null; }
+        return { period: v, end: v };
+    }
+    if (mode === 'quarter') {
+        const y = g('q-year')?.value, q = parseInt(g('q')?.value, 10);
+        if (!y || !q) { finToast('請選年與季', true); return null; }
+        return { period: `${y}-Q${q}`, end: `${y}-${String(q * 3).padStart(2, '0')}` };
+    }
+    if (mode === 'year') {
+        const y = g('year')?.value;
+        if (!y) { finToast('請選年份', true); return null; }
+        return { period: y, end: `${y}-12` };
+    }
+    const from = g('from')?.value, to = g('to')?.value;
+    if (!from || !to) { finToast('請選起訖月份', true); return null; }
+    if (from > to) { finToast('起始月不可晚於結束月', true); return null; }
+    return { period: `${from}..${to}`, end: to };
+}
+
+/**
+ * 指標卡：label + 大數值（valueHtml）+ 小註（subHtml）。
+ * basis = flex-basis（statements 用 '160px'、dashboard 用 '180px'，故參數化）。
+ */
+export function metricCard(label, valueHtml, subHtml, basis = '160px') {
+    return `
+    <div style="background:#222;border:1px solid #333;border-radius:8px;padding:12px 16px;min-width:150px;flex:1 1 ${basis};">
+        <div style="color:#888;font-size:11px;">${label}</div>
+        <div style="font-size:20px;font-weight:700;margin-top:4px;white-space:nowrap;">${valueHtml}</div>
+        ${subHtml ? `<div style="font-size:11px;margin-top:3px;">${subHtml}</div>` : ''}
+    </div>`;
+}
+
+/** 比率百分比數字 → "38.7%"（35.2 = 35.2%）；null/NaN → '—' */
+export function fmtPct(r) {
+    if (r == null || isNaN(r)) return '—';
+    return (Math.round(r * 10) / 10).toLocaleString('zh-TW') + '%';
+}
+
+// ── CSV 匯出（BOM，比照原 statements/dashboard 本地版一字不差） ──
+/** CSV 儲存格跳脫：含逗號/引號/換行時包雙引號並倍化內部引號 */
+export function csvCell(v) {
+    const s = String(v ?? '');
+    return /[",\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
+}
+
+/** rows（二維陣列）→ 觸發下載一份 CSV */
+export function downloadCsv(rows, filename) {
+    // 前置 UTF-8 BOM（U+FEFF）：讓 Excel 認出 UTF-8，中文才不會變亂碼
+    const csv = String.fromCharCode(0xFEFF) + rows.map(r => r.map(csvCell).join(',')).join('\r\n');
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = filename;
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+}
+
+/** 依序下載多份 CSV（每份間隔 350ms，避免瀏覽器阻擋多重下載） */
+export async function downloadManyCsv(files) {
+    for (let i = 0; i < files.length; i++) {
+        downloadCsv(files[i].rows, files[i].name);
+        if (i < files.length - 1) await new Promise(r => setTimeout(r, 350));
+    }
+}

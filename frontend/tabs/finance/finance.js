@@ -45,6 +45,10 @@ export async function initFinanceTab() {
     }
 
     _bindSideNav();
+
+    // 預設落地 = 📊 儀表板子視圖（帳務殼已初始化但隱藏，點帳務按鈕仍可切回）。
+    // finance.html 已把 nav active 標在儀表板按鈕上，故此處不需再改 active class。
+    _showSubview('dashboard');
 }
 
 // 左側導覽：data-inv-view → 代理內部 view bar；data-subview → lazy-load 子視圖

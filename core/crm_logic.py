@@ -35,6 +35,22 @@ def compute_advance_status(amount: float, expense_total: float,
         "is_settled": bool(is_paid and is_returned and balance == 0),
     }
 
+def project_margin(contract, tax_rate, expense_actual, staff_actual) -> dict:
+    """專案毛利（毛利公式單一來源）— routers/crm/costs.py 專案財務摘要與
+    財務儀表板 Top/Bottom 共用，避免同一「毛利」定義在兩處各算一份而漂移。
+
+    revenue(ex_tax) = 合約金額 ÷ (1 + 稅率%)（稅率缺值視同 5）；
+    cost = 雜支實際 + 派工實際；margin = revenue − cost；
+    margin_pct = margin ÷ revenue × 100（1 位小數；revenue ≤ 0 → None）。
+    （呼叫端若要整數百分比自行 round(m["margin"]/m["ex_tax"]*100)，顯示精度各自決定。）
+    """
+    ex_tax = round(int(contract or 0) / (1 + (tax_rate or 5) / 100))
+    cost = int(expense_actual or 0) + int(staff_actual or 0)
+    margin = ex_tax - cost
+    return {"ex_tax": ex_tax, "cost": cost, "margin": margin,
+            "margin_pct": round(margin * 100 / ex_tax, 1) if ex_tax > 0 else None}
+
+
 def group_payables(rows) -> dict:
     """應付帳款分組（/payables/summary 的純聚合段，SQL 取數後餵進來）。
 

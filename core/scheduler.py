@@ -396,31 +396,33 @@ def _check_and_dispatch() -> int:
     return dispatched
 
 
-# ── 貸款繳款提醒（財務階段四）─────────────────────────────────
+# ── 每日一次、master-only 排程任務底座（財務提醒共用）──────────────
 
-_loan_check_fired_date: Optional[str] = None  # 'YYYY-MM-DD' in-process 每日一次
+_daily_fired: dict = {}  # {task_key: 'YYYY-MM-DD'} in-process 每日一次去重
 
 
-async def _loan_due_check() -> None:
-    """每日一次貸款繳款提醒（仿 drone_watcher 的每日觸發樣板）。
+async def _run_daily_master_task(task_key: str, hour_key: str, body) -> None:
+    """每日一次、只在 master 跑的排程任務底座（_loan_due_check /
+    _finance_calendar_check 共用；drone_watcher 另有自己的樣板）。
 
-    🔴 master gate：全機隊 9 台都跑這個排程 loop 且共用 mediaguard —
-    只有 master 該發（core.topology.is_master_machine()），否則同一期別
-    天天各收 N 份。到期 N 天內（settings finance.loan_remind_days 預設 7）
-    與逾期的未繳期別，聚合成單一 Chat 訊息 notify_tab('loan_payment_due')。
-    觸發時刻 finance.loan_remind_hour（預設 9）後第一個 tick。逾期為即時
-    推導（不落庫）。成功送出才設當日 guard（DB/發送失敗 → 下一 tick 重試）；
-    行程重啟同日會再發一次，屬可接受的 best-effort。
+    gate 次序與各分支的副作用集中於此單一處（手抄易漂的正是這幾個細節）：
+    - 當日已成功跑過（_daily_fired[task_key]==today）→ 跳過
+    - 🔴 非 master → 標記當日完成並跳過（機隊 9 台共用 mediaguard，只有 master 該發，
+      否則同一份提醒天天各機各發 N 份）
+    - topology 例外 / DB 未上線 / factory 缺 → **不**標記，下一 tick 重試
+    - settings finance.<hour_key>（預設 9）之前 → **不**標記，稍後同日重試
+    - 過關 → await body(factory, now)；body 成功回來才標記當日完成
+      （body 拋例外 → 不標記、下一 tick 重試）
+    body 收 (factory, now)，自理 session 與事件。
     """
-    global _loan_check_fired_date
     now = datetime.now()
     today = now.strftime("%Y-%m-%d")
-    if _loan_check_fired_date == today:
+    if _daily_fired.get(task_key) == today:
         return
     try:
         from core.topology import is_master_machine
         if not is_master_machine():
-            _loan_check_fired_date = today  # 非 master 今天不用再看
+            _daily_fired[task_key] = today  # 非 master 今天不用再看
             return
     except Exception:
         return
@@ -432,33 +434,116 @@ async def _loan_due_check() -> None:
         return
     try:
         from config import load_settings
-        fin = load_settings().get("finance") or {}
-        remind_hour = int(fin.get("loan_remind_hour") or 9)
-        remind_days = int(fin.get("loan_remind_days") or 7)
+        remind_hour = int((load_settings().get("finance") or {}).get(hour_key) or 9)
     except Exception:
-        remind_hour, remind_days = 9, 7
+        remind_hour = 9
     if now.hour < remind_hour:  # 上班時間才提醒
         return
+    await body(factory, now)
+    _daily_fired[task_key] = today
 
-    from core.finance_logic import local_day
-    from routers.api_finance import _query_upcoming_payments
-    today0 = now.replace(hour=0, minute=0, second=0, microsecond=0)
-    horizon = today0 + timedelta(days=remind_days)
-    async with factory() as session:
-        rows = await _query_upcoming_payments(session, horizon)
-    lines = []
-    for p, loan_name in rows:
-        d = local_day(p.due_date)
-        overdue = bool(d and d < today0)
-        amount = (p.principal_due or 0) + (p.interest_due or 0)
-        lines.append(f"• {loan_name} 第{p.period_no}期 {amount:,} 元，"
-                     f"{d.strftime('%Y-%m-%d') if d else '?'} 到期"
-                     f"{'（⚠ 已逾期）' if overdue else ''}")
-    if lines:
+
+# ── 貸款繳款提醒（財務階段四）─────────────────────────────────
+
+async def _loan_due_check() -> None:
+    """每日一次貸款繳款提醒（master-only）— 到期 N 天內 + 逾期未繳期別
+    （settings finance.loan_remind_days 預設 7）聚合成單一 Chat 訊息。逾期為即時
+    推導（不落庫）。gate/觸發時刻/去重見 _run_daily_master_task。"""
+    async def _body(factory, now):
+        try:
+            from config import load_settings
+            remind_days = int((load_settings().get("finance") or {})
+                              .get("loan_remind_days") or 7)
+        except Exception:
+            remind_days = 7
+        from core.finance_logic import local_day
+        from routers.api_finance import _query_upcoming_payments
+        today0 = now.replace(hour=0, minute=0, second=0, microsecond=0)
+        horizon = today0 + timedelta(days=remind_days)
+        async with factory() as session:
+            rows = await _query_upcoming_payments(session, horizon)
+        lines = []
+        for p, loan_name in rows:
+            d = local_day(p.due_date)
+            overdue = bool(d and d < today0)
+            amount = (p.principal_due or 0) + (p.interest_due or 0)
+            lines.append(f"• {loan_name} 第{p.period_no}期 {amount:,} 元，"
+                         f"{d.strftime('%Y-%m-%d') if d else '?'} 到期"
+                         f"{'（⚠ 已逾期）' if overdue else ''}")
+        if lines:
+            from notifier import notify_tab_async
+            await notify_tab_async("loan_payment_due",
+                                   count=len(lines), lines="\n".join(lines))
+    await _run_daily_master_task("loan_due", "loan_remind_hour", _body)
+
+
+# ── 財務行事曆提醒（財務階段五）─────────────────────────────────
+
+async def _finance_calendar_check() -> None:
+    """每日一次財務行事曆提醒（master-only）。所有事件在每月 1 號觸發，依當天
+    日期一次把該發的全收進 events 再一併送（事件間不 return，否則月報會消音掉
+    同一天的營業稅提醒）；各事件 try/except 隔離。gate/觸發時刻/去重見
+    _run_daily_master_task。
+      - 每月 1 號 → 上個月三表快報（monthly_finance_report）
+      - 單數月(1/3/5/7/9/11) 1 號 → 前兩個月營業稅預估應繳（vat_filing_due）
+      - 9 月 1 號 → 營所稅暫繳提醒（income_tax_prepay）
+    """
+    async def _body(factory, now):
+        if now.day != 1:  # 只有每月 1 號有事，其餘日 body 空轉 → 底座標記當日完成
+            return
+        from core.finance_logic import period_months, shift_month, vat_position
+        cur_month = f"{now.year:04d}-{now.month:02d}"
+        events: list = []  # [(template_key, kwargs)]，一次收齊當天該發的全部再統一送
+
+        # 月報：每月 1 號 → 上個月三表摘要（statements_for_period 上月）
+        prev_month = shift_month(cur_month, -1)
+        try:
+            from services.finance_statements import statements_for_period
+            async with factory() as session:
+                st = await statements_for_period(session, period_months(prev_month))
+            pnl = st["pnl"]
+            meta = st.get("meta") or {}
+            warn_parts = []
+            if prev_month not in (meta.get("locked_months") or []):
+                warn_parts.append("該月尚未鎖帳")
+            warn_parts += list(meta.get("warnings") or [])
+            warn = ("\n⚠ " + "；".join(warn_parts)) if warn_parts else ""
+            events.append(("monthly_finance_report", {
+                "month": prev_month,
+                "revenue": f"{int(pnl['revenue']['total']):,}",
+                "cost": f"{int(pnl['cost']['total']):,}",
+                "net": f"{int(pnl['net']['amount']):,}",
+                "warn": warn,
+            }))
+        except Exception as e:
+            _log.warning("月報排程計算失敗: %s", e)
+
+        # 營業稅：單數月 1 號 → 前兩個月 vat_position 預估應繳
+        if now.month in (1, 3, 5, 7, 9, 11):
+            try:
+                from services.finance_statements import _load_inputs
+                vm = [shift_month(cur_month, -2), shift_month(cur_month, -1)]
+                async with factory() as session:
+                    inputs = await _load_inputs(session)
+                vat = vat_position(inputs["invoices"], inputs["cash_entries"],
+                                   inputs["cat_map"], vm)
+                net = int(vat["net"])
+                estimate = f"{net:,}" if net > 0 else "0（本期留抵）"
+                events.append(("vat_filing_due", {
+                    "period": f"{vm[0]}~{vm[1]}",
+                    "estimate": estimate,
+                }))
+            except Exception as e:
+                _log.warning("營業稅提醒計算失敗: %s", e)
+
+        # 營所稅暫繳：9 月 1 號（無佔位符）
+        if now.month == 9:
+            events.append(("income_tax_prepay", {}))
+
         from notifier import notify_tab_async
-        await notify_tab_async("loan_payment_due",
-                               count=len(lines), lines="\n".join(lines))
-    _loan_check_fired_date = today
+        for key, kw in events:
+            await notify_tab_async(key, **kw)
+    await _run_daily_master_task("finance_calendar", "report_remind_hour", _body)
 
 
 # ── 背景排程迴圈 ──────────────────────────────────────────────
@@ -482,4 +567,9 @@ async def run_scheduler():
             await _loan_due_check()
         except Exception:
             _log.exception("貸款繳款提醒檢查異常")
+        # 財務行事曆提醒：月報 / 營業稅 / 營所稅暫繳（每日一次；master gate 在函式內）
+        try:
+            await _finance_calendar_check()
+        except Exception:
+            _log.exception("財務行事曆提醒檢查異常")
         await asyncio.sleep(60)

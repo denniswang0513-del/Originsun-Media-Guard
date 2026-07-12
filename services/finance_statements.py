@@ -19,10 +19,12 @@
 """
 from __future__ import annotations
 
+import logging
 import re
 from datetime import datetime
 
 from core.finance_logic import (
+    aging_buckets,
     ap_open_payments,
     ar_open_invoices,
     ar_overdue_amount,
@@ -34,26 +36,35 @@ from core.finance_logic import (
     cash_entry_activity,
     cash_entry_flow,
     classify_cash_entry,
+    client_concentration,
     depreciation_rows,
     in_amount,
     invoice_collected,
     invoice_ex_tax,
+    invoice_tax,
+    invoice_vat_side,
     iter_expense_items,
     iter_loan_interest,
     iter_revenue_invoices,
     loan_outstanding_rows,
+    local_day,
     map_account,
     merge_cf,
     merge_pnl,
     month_of,
     month_range,
     out_amount,
+    resolve_client_name,
+    runway_months,
     shift_month,
     statement_interpretation,
     statement_warnings,
     VALID_DRILL_KINDS,  # re-export：endpoint 與單元測試由本模組取用
     vat_position,
 )
+from core.crm_logic import project_margin
+
+logger = logging.getLogger(__name__)
 
 DRILLDOWN_LIMIT = 500
 
@@ -83,10 +94,11 @@ async def _load_inputs(session) -> dict:
                      "id", "payment_type", "issue_status", "payment_status",
                      "category", "amount_total", "amount_ex_tax", "tax_amount",
                      "commission", "invoice_date", "paid_date", "title",
-                     "invoice_number", "company_name")
+                     "invoice_number", "company_name", "tax_id", "project_id")
     payments = _dump(await _all(CrmPaymentRequest),
                      "id", "is_advance", "request_date", "amount", "category",
-                     "summary", "payee_name", "payment_status", "payment_date")
+                     "summary", "payee_name", "payment_status", "payment_date",
+                     "payee_id", "payee_type", "invoice_amount")
     cash_entries = _dump(await _all(CrmCashEntry),
                          "id", "entry_date", "deposit", "expense", "bank_fee",
                          "claim", "category", "summary", "invoice_id",
@@ -218,11 +230,7 @@ async def compute_live(session, months, inputs=None, adv=None) -> dict:
         adv = await _advance_state(session)
     as_of = months[-1]
     baseline = _resolve_baseline(inputs) or months[0]
-    kw = dict(invoices=inputs["invoices"], payments=inputs["payments"],
-              cash_entries=inputs["cash_entries"], equipment=inputs["equipment"],
-              advance_expenses=adv["expenses"],
-              loan_payments=inputs["loan_payments"], cat_map=inputs["cat_map"],
-              accounts=inputs["accounts"])
+    kw = _pnl_kw(inputs, adv)
     pnl = build_pnl(months, **kw)
     cum_months = month_range(min(baseline, as_of), as_of)
     cum_pnl = pnl if cum_months == months else build_pnl(cum_months, **kw)
@@ -516,3 +524,263 @@ async def drilldown(session, kind: str, months) -> dict:
     return {"kind": kind, "period_months": months,
             "items": items[:DRILLDOWN_LIMIT], "total": total,
             "count": len(items), "truncated": truncated}
+
+
+# ═════════════════════════════════════════════════════════════════
+# 階段五：儀表板 + 稅務包（reuse _load_inputs + core/finance_logic 純函式）
+# ═════════════════════════════════════════════════════════════════
+
+def _period_label(months) -> str:
+    """月清單 → 顯示字串（單月直接回；多月 'first..last'）— period 缺省時 fallback。"""
+    return months[0] if len(months) == 1 else f"{months[0]}..{months[-1]}"
+
+
+def _day_str(dt):
+    """timestamptz/date/str → 'YYYY-MM-DD'（過 local_day 修時區）；None → None。"""
+    d = local_day(dt)
+    return d.strftime("%Y-%m-%d") if hasattr(d, "strftime") else (d or None)
+
+
+def _pnl_kw(inputs, adv) -> dict:
+    """build_pnl 的共用關鍵字組（compute_live 與儀表板路徑同源，改一處全到位）。"""
+    return dict(invoices=inputs["invoices"], payments=inputs["payments"],
+                cash_entries=inputs["cash_entries"], equipment=inputs["equipment"],
+                advance_expenses=adv["expenses"],
+                loan_payments=inputs["loan_payments"], cat_map=inputs["cat_map"],
+                accounts=inputs["accounts"])
+
+
+def _bucket_by_month(rows, date_key, month_set) -> dict:
+    """依 date_key 的認列月把 rows 分桶 {month: [rows]}（只收 month_set 內的月）。
+    儀表板 trend 逐月 build_pnl 用：三大列各分一次，取代每月各全掃一次（O(N) 取代
+    O(12×N)）。每列只屬一個認列月，故切片即完整——build_pnl 對單月切片結果不變。"""
+    out = {m: [] for m in month_set}
+    for r in rows:
+        m = month_of(r.get(date_key))
+        if m in out:
+            out[m].append(r)
+    return out
+
+
+async def _project_client_map(session) -> dict:
+    """{project_id: 客戶代稱}（crm_projects LEFT JOIN clients）— 集中度客戶解析用。"""
+    from sqlalchemy import select
+    from db.models import Client, CrmProject
+    rows = (await session.execute(
+        select(CrmProject.id, Client.short_name)
+        .outerjoin(Client, Client.id == CrmProject.client_id))).all()
+    return {pid: (name or "") for pid, name in rows}
+
+
+async def _project_margins(session, *, top=5) -> dict:
+    """專案毛利 Top/Bottom（best-effort）。批次 SQL 聚合各專案的雜支/派工實際成本，
+    毛利公式走 core.crm_logic.project_margin（與 costs.py 專案財務摘要單一來源）。
+    無合約金額的專案不列；任何例外 → available:false + log（不擋儀表板）。"""
+    try:
+        from sqlalchemy import func as safunc, select
+        from db.models import CrmProject, CrmProjectExpense, CrmProjectStaff
+        projects = (await session.execute(
+            select(CrmProject.id, CrmProject.name, CrmProject.contract_amount,
+                   CrmProject.tax_rate)
+            .where(CrmProject.contract_amount.isnot(None),
+                   CrmProject.contract_amount > 0))).all()
+        if not projects:
+            return {"available": False, "top": [], "bottom": []}
+        exp_by = {pid: int(t or 0) for pid, t in (await session.execute(
+            select(CrmProjectExpense.project_id,
+                   safunc.sum(CrmProjectExpense.actual))
+            .group_by(CrmProjectExpense.project_id))).all()}
+        staff_by = {pid: int(t or 0) for pid, t in (await session.execute(
+            select(CrmProjectStaff.project_id,
+                   safunc.sum(safunc.coalesce(CrmProjectStaff.actual_cost,
+                                              CrmProjectStaff.cost)))
+            .group_by(CrmProjectStaff.project_id))).all()}
+        rows = []
+        for pid, name, contract, tax_rate in projects:
+            m = project_margin(contract, tax_rate, exp_by.get(pid, 0),
+                               staff_by.get(pid, 0))
+            rows.append({
+                "project_id": pid, "name": name or "?", "revenue": m["ex_tax"],
+                "cost": m["cost"], "margin": m["margin"],
+                "margin_pct": m["margin_pct"]})
+        rows.sort(key=lambda x: x["margin"], reverse=True)
+        bottom = sorted(rows, key=lambda x: x["margin"])[:top]
+        return {"available": True, "top": rows[:top], "bottom": bottom}
+    except Exception as e:  # noqa: BLE001 — best-effort，壞了不擋儀表板
+        logger.warning("project_margins 計算失敗，回 available:false: %s", e)
+        return {"available": False, "top": [], "bottom": []}
+
+
+async def dashboard_summary(session, months, period: str = "") -> dict:
+    """財務儀表板彙總（trend / cash / aging / concentration / project_margins / meta）。
+
+    reuse _load_inputs + core/finance_logic 純函式為單一來源。period = 原查詢
+    字串（endpoint 傳入以填 meta；缺省時 caller 已補當月）。"""
+    months = sorted(set(months))
+    mset = set(months)
+    inputs = await _load_inputs(session)
+    adv = await _advance_state(session)
+    as_of = months[-1]
+    baseline = _resolve_baseline(inputs) or months[0]
+
+    # trend：含 as_of 往前 12 個月，逐月 build_pnl。三大列（發票/請款/收支）先按
+    # 認列月分桶一次（避免每月各全掃歷史）；折舊跨月、貸款利息按 due_date 月 →
+    # equipment/loan_payments/advance 整份帶入由 build_pnl 自行按月過濾。
+    trend_months = [shift_month(as_of, d) for d in range(-11, 1)]
+    tset = set(trend_months)
+    inv_by = _bucket_by_month(inputs["invoices"], "invoice_date", tset)
+    pay_by = _bucket_by_month(inputs["payments"], "request_date", tset)
+    cash_by = _bucket_by_month(inputs["cash_entries"], "entry_date", tset)
+    series = []
+    for m in trend_months:
+        p = build_pnl([m], invoices=inv_by[m], payments=pay_by[m],
+                      cash_entries=cash_by[m], equipment=inputs["equipment"],
+                      advance_expenses=adv["expenses"],
+                      loan_payments=inputs["loan_payments"],
+                      cat_map=inputs["cat_map"], accounts=inputs["accounts"])
+        series.append({"month": m, "revenue": p["revenue"]["total"],
+                       "cost": p["cost"]["total"], "opex": p["opex"]["total"],
+                       "net": p["net"]["amount"]})
+    trend = {"months": trend_months, "series": series}
+
+    # cash：期末各帳戶推導餘額 + 近 3 月 net 均 → runway
+    bank_lines = bank_balances_asof(inputs["bank_accounts"],
+                                    inputs["cash_entries"], as_of)
+    cash_total = sum(int(b.get("amount") or 0) for b in bank_lines)
+    recent = series[-3:]  # 近 3 月（不足取現有月）
+    avg_net = round(sum(s["net"] for s in recent) / len(recent)) if recent else 0
+    cash = {"total": cash_total,
+            "by_account": [{"name": b.get("name") or "?",
+                            "amount": int(b.get("amount") or 0)}
+                           for b in bank_lines],
+            "avg_monthly_net": avg_net,
+            "runway_months": runway_months(cash_total, avg_net)}
+
+    # aging：baseline..as_of 的未收發票 → 帳齡桶
+    aging = aging_buckets(
+        ar_open_invoices(inputs["invoices"], baseline, as_of), as_of)
+
+    # concentration：期間營收發票，client 名 = project_id→客戶 → 抬頭 → 未指定
+    proj_client = await _project_client_map(session)
+    rev_by_client: dict = {}
+    for inv in iter_revenue_invoices(inputs["invoices"], mset):
+        name = resolve_client_name(inv, proj_client)
+        rev_by_client[name] = rev_by_client.get(name, 0) + invoice_ex_tax(inv)
+    concentration = client_concentration(rev_by_client)
+
+    return {
+        "trend": trend, "cash": cash, "aging": aging,
+        "concentration": concentration,
+        "project_margins": await _project_margins(session),
+        "meta": {"period": period or _period_label(months), "as_of": as_of,
+                 "baseline_month": baseline, "warnings": []},
+    }
+
+
+def _tax_invoice_row(inv) -> dict:
+    """發票 → 銷項/進項明細列（ex_tax/tax 走既有 invoice_ex_tax/invoice_tax）。"""
+    return {"date": _day_str(inv.get("invoice_date")),
+            "number": inv.get("invoice_number") or "",
+            "buyer": inv.get("company_name") or "",
+            "tax_id": inv.get("tax_id") or "",
+            "ex_tax": invoice_ex_tax(inv), "tax": invoice_tax(inv),
+            "total": int(inv.get("amount_total") or 0),
+            "category": inv.get("category") or ""}
+
+
+def _vat_side(rows) -> dict:
+    return {"rows": rows,
+            "total_ex_tax": sum(r["ex_tax"] for r in rows),
+            "total_tax": sum(r["tax"] for r in rows),
+            "total": sum(r["total"] for r in rows),
+            "count": len(rows)}
+
+
+async def tax_package(session, months, period: str = "") -> dict:
+    """稅務包：銷項/進項發票明細 + 分類支出 + 勞報彙總 + 營業稅位置 + meta。
+
+    直接吃 _load_inputs 的 crm_invoices / crm_payment_requests / cash_entries。"""
+    months = sorted(set(months))
+    mset = set(months)
+    inputs = await _load_inputs(session)
+    invoices = inputs["invoices"]
+    payments = inputs["payments"]
+    cash_entries = inputs["cash_entries"]
+    cat_map = inputs["cat_map"]
+
+    # 銷項/進項 — 方向判定走 invoice_vat_side（與 vat_position 摘要同源，作廢不計、
+    # 第三種 payment_type 值統一歸銷項 → 明細與摘要不會對不上）
+    output_rows, input_rows = [], []
+    for inv in invoices:
+        side = invoice_vat_side(inv)
+        if side is None:
+            continue
+        if month_of(inv.get("invoice_date")) not in mset:
+            continue
+        (output_rows if side == "output" else input_rows).append(_tax_invoice_row(inv))
+    output_rows.sort(key=lambda r: (r["date"] or "", r["number"] or ""))
+    input_rows.sort(key=lambda r: (r["date"] or "", r["number"] or ""))
+
+    # 分類支出：收支 direct_expense（out−in）+ 請款非預支（amount）依 category 分組
+    cat_agg: dict = {}
+
+    def _bucket(category, amount):
+        c = cat_agg.setdefault(category or "未分類", {"amount": 0, "count": 0})
+        c["amount"] += amount
+        c["count"] += 1
+
+    for p in payments:
+        if p.get("is_advance"):
+            continue
+        if month_of(p.get("request_date")) not in mset:
+            continue
+        amt = int(p.get("amount") or 0)
+        if amt:
+            _bucket(p.get("category"), amt)
+    for e in cash_entries:
+        if month_of(e.get("entry_date")) not in mset:
+            continue
+        if classify_cash_entry(e, cat_map) != "direct_expense":
+            continue
+        amt = out_amount(e) - in_amount(e)
+        if amt:
+            _bucket(e.get("category"), amt)
+    exp_rows = sorted(
+        ({"category": k, "amount": v["amount"], "count": v["count"]}
+         for k, v in cat_agg.items()), key=lambda x: -x["amount"])
+    expense_by_category = {"rows": exp_rows,
+                           "total": sum(r["amount"] for r in exp_rows)}
+
+    # 勞報彙總：CrmPaymentRequest payee_type=='勞報'，依 (payee_name, payee_id) 分組
+    labor_agg: dict = {}
+    for p in payments:
+        if (p.get("payee_type") or "") != "勞報":
+            continue
+        if month_of(p.get("request_date")) not in mset:
+            continue
+        key = (p.get("payee_name") or "", p.get("payee_id") or "")
+        row = labor_agg.setdefault(
+            key, {"count": 0, "total": 0, "invoice_total": 0})
+        row["count"] += 1
+        row["total"] += int(p.get("amount") or 0)
+        row["invoice_total"] += int(p.get("invoice_amount") or 0)
+    labor_rows = sorted(
+        ({"payee_name": name, "payee_id": pid, "count": v["count"],
+          "total": v["total"], "invoice_total": v["invoice_total"]}
+         for (name, pid), v in labor_agg.items()), key=lambda x: -x["total"])
+    labor_fees = {"rows": labor_rows,
+                  "total": sum(r["total"] for r in labor_rows),
+                  "count": sum(r["count"] for r in labor_rows)}
+
+    v = vat_position(invoices, cash_entries, cat_map, months)
+    vat = {"output_tax": v["output"], "input_tax": v["input"],
+           "paid": v["paid"], "net": v["net"]}
+
+    return {
+        "output_vat": _vat_side(output_rows),
+        "input_vat": _vat_side(input_rows),
+        "expense_by_category": expense_by_category,
+        "labor_fees": labor_fees, "vat": vat,
+        "meta": {"period": period or _period_label(months), "months": months,
+                 "warnings": []},
+    }

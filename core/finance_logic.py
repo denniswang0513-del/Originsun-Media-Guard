@@ -620,6 +620,29 @@ def bank_fee_total(cash_entries, mset) -> int:
 
 # ── 營業稅位置 ───────────────────────────────────────────────
 
+def invoice_vat_side(inv) -> str | None:
+    """發票的營業稅方向（單一謂詞定義處）— vat_position 摘要與 tax_package 明細共用。
+
+    作廢（issue_status）→ None（不計）；payment_type=='付款' → 'input'（進項）；
+    其餘（收款/缺值/任何第三種值）→ 'output'（銷項）。兩處若各自 elif 判定，
+    第三種 payment_type 值會在摘要算銷項、明細卻兩邊皆漏 → 數字對不上，故收斂於此。
+    """
+    if (inv.get("issue_status") or "") == "作廢":
+        return None
+    return "input" if (inv.get("payment_type") or "收款") == "付款" else "output"
+
+
+def resolve_client_name(inv, project_client_map) -> str:
+    """發票 → 客戶名（歸戶政策單一來源）：project_id→客戶代稱 → 抬頭(company_name)
+    → 「未指定」。集中度/未來按客戶的報表共用，避免各處重寫 fallback 鏈而漂移。"""
+    pid = inv.get("project_id")
+    if pid:
+        name = (project_client_map.get(pid) or "").strip()
+        if name:
+            return name
+    return (inv.get("company_name") or "").strip() or "未指定"
+
+
 def vat_position(invoices, cash_entries, cat_map=None, months=None) -> dict:
     """營業稅位置：銷項（收款發票稅額）− 進項（付款發票稅額）− 已繳（tax_vat 收支）。
 
@@ -630,12 +653,13 @@ def vat_position(invoices, cash_entries, cat_map=None, months=None) -> dict:
     mset = set(months) if months is not None else None
     output = input_ = 0
     for inv in invoices:
-        if (inv.get("issue_status") or "") == "作廢":
+        side = invoice_vat_side(inv)
+        if side is None:
             continue
         if mset is not None and month_of(inv.get("invoice_date")) not in mset:
             continue
         t = invoice_tax(inv)
-        if (inv.get("payment_type") or "收款") == "付款":
+        if side == "input":
             input_ += t
         else:
             output += t
@@ -1285,3 +1309,90 @@ def statement_interpretation(pnl, bs, cf, *, ar_over_60=0) -> list:
             out.append(f"資產負債表檢核差額 {bs['check']['diff']:,} 元，"
                        "帳務尚有未對齊項目，數字解讀請保留餘裕")
     return out[:8]
+
+
+# ═════════════════════════════════════════════════════════════════
+# 階段五：儀表板 / 稅務包純函式（零 DB，配黃金測試）
+# ═════════════════════════════════════════════════════════════════
+
+# AR 帳齡固定五桶（key, 中文 label；順序 = 前端呈現順序）
+_AGING_BUCKETS = (
+    ("current", "未逾期"),
+    ("d1_30", "1-30 天"),
+    ("d31_60", "31-60 天"),
+    ("d61_90", "61-90 天"),
+    ("over90", "90 天以上"),
+)
+
+
+def _month_end_date(month: str) -> date:
+    """'YYYY-MM' → 該月月底 date（帳齡基準日）。"""
+    y, m = int(month[:4]), int(month[5:7])
+    return date(y, m, calendar.monthrange(y, m)[1])
+
+
+def aging_buckets(open_invoices, as_of_month: str) -> dict:
+    """AR 帳齡分桶（未收款發票以 invoice_date 到 as_of 月底的天數分桶）。
+
+    open_invoices = 未收款發票 dict 列（含 invoice_date（datetime/str）、
+    amount_total（含稅）；金額用 amount_total）。天數 =（as_of 月底 − 開票日）：
+    ≤0 天 current（當期未逾期）、1-30 d1_30、31-60 d31_60、61-90 d61_90、
+    >90 over90。日期一律過 local_day（timestamptz 回讀 UTC → 本地）再取日；
+    無法解析日期的列不計（也不進 total）。
+    回 {"buckets":[{key,label,amount,count}...(固定五桶順序)], "total": int}。
+    """
+    ref = _month_end_date(as_of_month)
+    agg = {k: {"amount": 0, "count": 0} for k, _ in _AGING_BUCKETS}
+    for inv in open_invoices:
+        d = _as_date(local_day(inv.get("invoice_date")))
+        if d is None:
+            continue
+        days = (ref - d).days
+        if days <= 0:
+            key = "current"
+        elif days <= 30:
+            key = "d1_30"
+        elif days <= 60:
+            key = "d31_60"
+        elif days <= 90:
+            key = "d61_90"
+        else:
+            key = "over90"
+        agg[key]["amount"] += int(inv.get("amount_total") or 0)
+        agg[key]["count"] += 1
+    buckets = [{"key": k, "label": lb, "amount": agg[k]["amount"],
+                "count": agg[k]["count"]} for k, lb in _AGING_BUCKETS]
+    return {"buckets": buckets, "total": sum(b["amount"] for b in buckets)}
+
+
+def client_concentration(revenue_by_client, *, top=3) -> dict:
+    """客戶集中度（revenue_by_client = {client_name: amount}，services 端已加總）。
+
+    clients 依金額 desc；pct = amount/total*100（百分比數字，1 位小數）。
+    top_n_pct = 前 top 家金額佔比；warn = top_n_pct > 50。
+    total=0 → 各 pct 0.0、top_n_pct=0.0、warn False。
+    回 {"clients":[{name,amount,pct}...], "top_n":top, "top_n_pct":float, "warn":bool}。
+    """
+    total = sum(int(v or 0) for v in revenue_by_client.values())
+    clients = sorted(
+        ({"name": name, "amount": int(amt or 0),
+          "pct": round(int(amt or 0) * 100 / total, 1) if total else 0.0}
+         for name, amt in revenue_by_client.items()),
+        key=lambda x: -x["amount"])
+    top_amount = sum(c["amount"] for c in clients[:top])
+    top_n_pct = round(top_amount * 100 / total, 1) if total else 0.0
+    return {"clients": clients, "top_n": top, "top_n_pct": top_n_pct,
+            "warn": top_n_pct > 50}
+
+
+def runway_months(cash_total, avg_monthly_net) -> float | None:
+    """現金跑道（月）：帳上現金還能支撐幾個月的平均淨消耗。
+
+    avg_monthly_net ≥ 0（不燒錢）→ None（前端顯示「充裕/無限」）；
+    否則 round(cash_total / (-avg_monthly_net), 1)；cash_total ≤ 0 → 0.0。
+    """
+    if (avg_monthly_net or 0) >= 0:
+        return None
+    if (cash_total or 0) <= 0:
+        return 0.0
+    return round(cash_total / (-avg_monthly_net), 1)
