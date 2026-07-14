@@ -12,6 +12,8 @@ import { WEBSITE_API_BASE, LIMITS } from "./config";
 import type {
     IPublicProject,
     IPublicProjectDetail,
+    ISeriesDetail,
+    ISeriesListItem,
     IWorksListResponse,
 } from "../types/project";
 import type { ICategory } from "../types/category";
@@ -103,6 +105,28 @@ export function fetchWorkBySlug(slug: string): Promise<IPublicProjectDetail | nu
 export async function getWorkSlugPaths(): Promise<{ params: { slug: string } }[]> {
     const items = await fetchAllWorksCached();
     return items.filter(w => w.slug).map(w => ({ params: { slug: w.slug } }));
+}
+
+
+// ── 作品系列（跨專案策展集合）：作品牆摺疊卡 + /works/series/{slug} ──
+
+export const fetchSeriesList = _memoizeList<ISeriesListItem>(() =>
+    _safeGet<{ items: ISeriesListItem[] }>(
+        "/api/website/series", { items: [] }, "fetchSeriesList"));
+
+export async function fetchSeriesBySlug(slug: string): Promise<ISeriesDetail | null> {
+    try {
+        return await _get<ISeriesDetail>(`/api/website/series/${slug}`);
+    } catch (e) {
+        console.warn(`[crm-client] fetchSeriesBySlug(${slug}) 失敗:`, (e as Error).message);
+        return null;
+    }
+}
+
+/** works/series/[slug].astro 的 getStaticPaths 來源 */
+export async function getSeriesSlugPaths(): Promise<{ params: { slug: string } }[]> {
+    const items = await fetchSeriesList();
+    return items.map(s => ({ params: { slug: s.slug } }));
 }
 
 

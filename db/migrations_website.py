@@ -106,6 +106,9 @@ _CRM_PROJECT_SHOWCASE_COLUMNS: list[tuple[str, str]] = [
     ("sort_order", "INTEGER NOT NULL DEFAULT 0"),
     ("verified_at", "TIMESTAMPTZ"),
     ("prod_stage", "VARCHAR(16)"),
+    # ── 作品系列（2026-07）：soft FK → website_series.id + 系列內排序 ──
+    ("series_id", "INTEGER"),
+    ("series_order", "INTEGER NOT NULL DEFAULT 0"),
 ]
 
 # ── ALTER TABLE: website_categories 擴充 ──
@@ -467,6 +470,24 @@ _CREATE_TABLES: list[str] = [
         created_at TIMESTAMPTZ DEFAULT NOW()
     )
     """,
+    # 作品系列（跨專案策展集合）：作品牆摺疊卡 + /works/series/{slug} 系列頁。
+    # 成員在 crm_project_showcase.series_id / series_order。slug 發布後勿改（URL 承諾）。
+    """
+    CREATE TABLE IF NOT EXISTS website_series (
+        id SERIAL PRIMARY KEY,
+        slug VARCHAR(80) UNIQUE NOT NULL,
+        title_zh VARCHAR(200) NOT NULL,
+        title_en VARCHAR(300),
+        description_zh TEXT,
+        description_en TEXT,
+        cover_image TEXT,
+        old_slugs JSONB,
+        sort_order INTEGER NOT NULL DEFAULT 0,
+        visible BOOLEAN NOT NULL DEFAULT TRUE,
+        created_at TIMESTAMPTZ DEFAULT NOW(),
+        updated_at TIMESTAMPTZ DEFAULT NOW()
+    )
+    """,
 ]
 
 _CREATE_INDEXES: list[str] = [
@@ -513,6 +534,9 @@ _CREATE_INDEXES: list[str] = [
     "CREATE INDEX IF NOT EXISTS idx_socialpost_created ON website_social_posts (created_at)",
     # 站點守衛事件牆：最新在上 → created_at DESC
     "CREATE INDEX IF NOT EXISTS idx_watchdog_events_created ON website_watchdog_events (created_at DESC)",
+    # 作品系列：成員查詢（series 頁 + 作品牆摺疊）+ 系列清單排序
+    "CREATE INDEX IF NOT EXISTS idx_showcase_series ON crm_project_showcase (series_id)",
+    "CREATE INDEX IF NOT EXISTS idx_webseries_visible_sort ON website_series (visible, sort_order)",
 ]
 
 
@@ -837,6 +861,8 @@ async def run_website_migrations(session_factory: Callable) -> None:
           for c, t in _WEBAWARD_COLUMNS],
         *[f"ALTER TABLE website_services ADD COLUMN IF NOT EXISTS {c} {t}"
           for c, t in _WEBSVC_COLUMNS],
+        # 系列 slug 改名自動轉址（表已存在的環境補欄；fresh DB CREATE TABLE 已含）
+        "ALTER TABLE website_series ADD COLUMN IF NOT EXISTS old_slugs JSONB",
         *_CREATE_INDEXES,
         # v1.10.121 修復 — 既有部署 templates 表無 UNIQUE constraint，先清重複再補
         _CLEANUP_TEMPLATE_DUPLICATES,

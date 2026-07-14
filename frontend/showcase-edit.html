@@ -95,6 +95,10 @@ textarea{min-height:80px}
 .modal-overlay input[type="text"],.modal-overlay select{background:var(--bg3);border:1px solid var(--border);border-radius:4px;padding:8px 12px;color:var(--text);font-family:var(--font-body);font-size:14px}
 .modal-overlay input[type="text"]:focus,.modal-overlay select:focus{outline:none;border-color:var(--accent)}
 
+/* 非 modal 區域的獨立 select（系列下拉等）— 與 .modal-overlay select 同一套樣式 */
+select.sc-select{background:var(--bg3);border:1px solid var(--border);border-radius:4px;padding:8px 12px;color:var(--text);font-family:var(--font-body);font-size:14px}
+select.sc-select:focus{outline:none;border-color:var(--accent)}
+
 /* 分類小測驗 */
 .quiz-opt{display:block;width:100%;text-align:left;background:var(--bg3);border:1px solid var(--border);border-radius:6px;padding:12px 14px;margin-bottom:8px;color:var(--text);font-size:14px;cursor:pointer;font-family:var(--font-body);transition:border-color .15s,background .15s}
 .quiz-opt:hover{border-color:var(--accent)}
@@ -726,6 +730,24 @@ function _render() {
     html += _renderCatSection('作品分類', 'category', 'sec-website-cats',
         EDITABLE ? '<button id="btn-cat-quiz" class="btn" type="button" style="font-size:12px;">🧭 不知道怎麼分？答 4 題</button>' : '');
     html += _renderCatSection('作品標籤', 'tag', 'sec-website-tags');
+
+    // 作品系列（跨專案策展集合）— select/order 掛 data-field 走 master save 一次提交；
+    // 系列本身在官網管理「🎬 作品系列」卡建立/排序，這裡只管歸屬。
+    if (EDITABLE) {
+        const _series = DATA.series_available || [];
+        const serOpts = ['<option value="">— 不屬於任何系列 —</option>']
+            .concat(_series.map(s =>
+                `<option value="${s.id}"${DATA.series_id === s.id ? ' selected' : ''}>${_esc(s.title_zh)}${s.visible === false ? '（隱藏中）' : ''}</option>`))
+            .join('');
+        html += `<div class="section" id="sec-website-series">
+            <div class="section-label">作品系列</div>
+            ${_series.length ? `
+            <div><div style="color:var(--text3);font-size:11px;margin-bottom:4px;">所屬系列（作品牆會把同系列摺疊成一張系列卡）</div>
+                <select data-field="series_id" id="inp-series-id" class="sc-select" style="min-width:220px;">${serOpts}</select></div>
+            <p style="color:var(--text3);font-size:12px;">按頂部「💾 儲存所有變更」存檔；新掛的作品排在系列尾端 — 系列內順序、名稱/介紹/封面在官網管理後台調</p>`
+            : '<p style="color:var(--text3);font-size:13px;">還沒有任何系列 — 到官網管理 → 作品 →「🎬 作品系列」先建立，這裡就能選。</p>'}
+        </div>`;
+    }
 
     // 對外公開連結 — 直接顯示官網網址（未發布或無 slug 時顯示提示）
     const siteUrl = (DATA.public_site_url || '').replace(/\/$/, '');
@@ -1627,11 +1649,20 @@ function _quizRenderResult(body) {
                 ${h.why ? `<span style="color:var(--text3);font-size:12px;">— ${h.why}</span>` : ''}</div>`).join('')}
         </div>`;
     };
+    // Q4 答「是系列作」且已有系列可選 → 順勢問要歸入哪個（可跳過，套用時寫進系列下拉）
+    const seriesAvail = DATA.series_available || [];
+    const askSeries = proposal.some(p => p.slug === 'series') && seriesAvail.length > 0;
     body.innerHTML = `
         <h3 style="margin:0 0 14px;color:var(--text);font-family:var(--font-display);font-weight:500;">🧭 建議結果</h3>
         ${row('category', '作品分類')}
         ${row('tag', '作品標籤')}
         ${missing.length ? `<p style="color:var(--text3);font-size:12px;">（略過已不存在的：${missing.map(p => p.slug).join('、')}）</p>` : ''}
+        ${askSeries ? `<div style="margin:0 0 14px;">
+            <div style="color:var(--text3);font-size:12px;margin-bottom:4px;">順便歸入系列？（決定作品牆上跟誰摺疊在一起，可跳過）</div>
+            <select id="cat-quiz-series" class="sc-select" style="min-width:220px;">
+                <option value="">— 先不歸入 —</option>
+                ${seriesAvail.map(s => `<option value="${s.id}">${_esc(s.title_zh)}</option>`).join('')}
+            </select></div>` : ''}
         <p style="color:var(--text3);font-size:12px;margin:10px 0 16px;">按「套用」會以這個結果<b>覆蓋</b>目前的分類與標籤勾選，之後仍可手動微調；記得按頂部「💾 儲存所有變更」。</p>
         <div style="display:flex;gap:8px;justify-content:flex-end;">
             <button class="btn" type="button" data-q="restart">↺ 重新作答</button>
@@ -1643,12 +1674,17 @@ function _quizRenderResult(body) {
             const act = el.dataset.q;
             if (act === 'close') _quizClose();
             else if (act === 'restart') { _quiz = { step: 0, answers: CAT_QUIZ.map(() => new Set()) }; _quizRender(); }
-            else if (act === 'apply') _quizApply(hits.map(h => h.item.id));
+            else if (act === 'apply') _quizApply(hits.map(h => h.item.id),
+                body.querySelector('#cat-quiz-series')?.value || '');
         };
     });
 }
 
-function _quizApply(ids) {
+function _quizApply(ids, seriesId = '') {
+    if (seriesId) {   // 測驗選了系列 → 寫進系列下拉（data-field，master save 一起送）
+        const sel = document.getElementById('inp-series-id');
+        if (sel) sel.value = String(seriesId);
+    }
     DATA.selected_category_ids = ids;
     const idSet = new Set(ids);
     document.querySelectorAll('[data-action="toggle-cat"]').forEach(el =>

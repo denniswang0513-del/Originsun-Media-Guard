@@ -114,6 +114,7 @@ def _virtual_work_from_project(p: CrmProject) -> SimpleNamespace:
         credits_text=p.public_credits_text,
         gallery=None, cover_url=p.public_cover_url, video_url=None,
         prod_stage=p.website_prod_stage, verified_at=p.website_verified_at,
+        series_id=None, series_order=0,   # 無 showcase row = 不可能屬於系列
     )
 
 
@@ -257,7 +258,7 @@ def _to_public_dict(
         "credits_text": sc.credits_text,
         "thumbnail_url": _youtube_thumbnail(sc.youtube_id),
         # OG image fallback chain：work cover > YouTube thumb > BaseLayout meta.seo_og_image
-        "cover_url": sc.cover_url or _youtube_thumbnail(sc.youtube_id),
+        "cover_url": work_cover(sc),
         # 首頁輪播取圖：精選圖 → 成果展示第一張（→ 前端再接 YouTube 縮圖，見 HomeSlideshow）
         "carousel_image": sc.featured_image
                           or (_gallery_first_url(sc.gallery) if with_carousel_fallback else None),
@@ -272,6 +273,9 @@ def _to_public_dict(
         "title_en": sc.title_en,
         "description_en": sc.description_en,
         "client_en": p.public_client_en,
+        # 作品系列歸屬（→ /api/website/series 的 id）— 作品牆把同 series_id 摺疊成系列卡
+        "series_id": sc.series_id,
+        "series_order": sc.series_order or 0,
         # sitemap <lastmod> 用。目前沒有 updated 欄位入列，退而用發布時間 —
         # 它是誠實的下界（永遠不會謊報比實際更新），Google 對不實 lastmod 會整個忽略。
         "date_modified": sc.published_at.isoformat() if sc.published_at else None,
@@ -308,6 +312,23 @@ def _published_works_base():
         .join(CrmProject, CrmProject.id == CrmProjectShowcase.project_id)
         .where(CrmProjectShowcase.published.is_(True))
     )
+
+
+def work_cover(sc) -> Optional[str]:
+    """作品封面 fallback 鏈（卡片/OG/系列封面共用）：自訂封面 → YouTube 縮圖。"""
+    return sc.cover_url or _youtube_thumbnail(sc.youtube_id)
+
+
+def series_member_order():
+    """系列成員排序（單一來源）：series_order 小→大、再新發布優先。
+
+    ⚠「第一個成員」在不同消費者語意不同，改這裡前先對齊：
+    - 系列頁 works / 作品頁同系列列表 / 系列封面 fallback：用此排序
+    - 作品牆摺疊卡站位：全牆排序（featured/year…）下第一個遇到的成員（index.astro）
+    - admin 成員面板：series_order asc（works.js）
+    """
+    return (CrmProjectShowcase.series_order.asc(),
+            CrmProjectShowcase.published_at.desc().nullslast())
 
 
 async def list_public_projects(
@@ -380,18 +401,34 @@ async def get_public_project_by_slug(session: AsyncSession, slug: str) -> Option
         if isinstance(v, dict) and (v.get("url") or "").strip()
     ]
 
-    # 系列互連（Phase 3）— 同專案其他 published 作品（read-time 推導，不落地）
+    # 相關作品互連：作品屬系列（策展集合）→ series 區塊放同系列其他作品（跨專案）
+    # + collection = 所屬系列資訊（給前端標題/連結）；不屬系列 → 維持同專案其他
+    # published 作品（1:N read-time 推導，Phase 3 原行為）。
+    # ⚠ wire key `series` 沿用（Astro 已消費）；`collection` 是新 key，None = 無系列。
+    data["collection"] = None
+    srow = None
+    if sc.series_id:
+        from db.models_website import WebsiteSeries
+        srow = (await session.execute(
+            select(WebsiteSeries).where(WebsiteSeries.id == sc.series_id,
+                                        WebsiteSeries.visible.is_(True)))).scalar_one_or_none()
+    if srow:
+        data["collection"] = {"slug": srow.slug, "title_zh": srow.title_zh,
+                              "title_en": srow.title_en}
+        cond = CrmProjectShowcase.series_id == sc.series_id
+        order = series_member_order()
+    else:
+        cond = CrmProjectShowcase.project_id == sc.project_id
+        order = (CrmProjectShowcase.sort_order.desc().nullslast(),
+                 CrmProjectShowcase.published_at.desc().nullslast())
     series_rows = await session.execute(
         _published_works_base()
-        .where(CrmProjectShowcase.project_id == sc.project_id,
-               CrmProjectShowcase.id != sc.id)
-        .order_by(CrmProjectShowcase.sort_order.desc().nullslast(),
-                  CrmProjectShowcase.published_at.desc().nullslast())
-    )
+        .where(cond, CrmProjectShowcase.id != sc.id)
+        .order_by(*order))
     data["series"] = [
         {"slug": _slug_or_fallback(s2),
          "title": (s2.title or "").strip() or p2.name,
-         "cover_url": s2.cover_url or _youtube_thumbnail(s2.youtube_id)}
+         "cover_url": work_cover(s2)}
         for s2, p2 in series_rows
     ]
 

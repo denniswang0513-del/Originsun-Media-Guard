@@ -4,6 +4,7 @@
  * 只給「有真實時間可依據」的頁面：
  *   /works/{slug}/  → 作品的 public_published_at（後端 date_modified）
  *   /news/{slug}/   → 文章的 date_modified（無則 published_at）
+ *   /works/series/{slug}/ → 成員作品的最新時間（系列頁內容 = 其成員）
  *   /、/works/、/news/ → 其子項的最新時間（這三頁的內容就是列出那些子項）
  * 其餘靜態頁（/about、/contact…）一律不給 lastmod。
  *
@@ -30,20 +31,29 @@ function _max(dates) {
 export async function fetchLastmod() {
     try {
         // limit=500 → 一次撈全部作品（後端上限 500，目前約 170 筆）
-        const [works, posts] = await Promise.all([
+        const [works, posts, series] = await Promise.all([
             apiGet("/api/website/works?limit=500"),
             apiGet("/api/website/posts"),
+            apiGet("/api/website/series").catch(() => ({ items: [] })),  // 舊後端沒此端點 → 略過
         ]);
 
         const map = {};
         const workDates = [];
         const postDates = [];
+        const seriesDates = {};   // series_id → [成員 date_modified]
 
         for (const w of works?.items || []) {
             const iso = _iso(w.date_modified);
             if (!w.slug || !iso) continue;
             map[`/works/${w.slug}/`] = iso;
             workDates.push(iso);
+            if (w.series_id) (seriesDates[w.series_id] ||= []).push(iso);
+        }
+
+        // 系列頁 = 其成員作品的最新時間（同索引頁邏輯：內容就是那些成員）
+        for (const s of series?.items || []) {
+            const newest = _max(seriesDates[s.id] || []);
+            if (s.slug && newest) map[`/works/series/${s.slug}/`] = newest;
         }
 
         for (const p of posts?.items || []) {

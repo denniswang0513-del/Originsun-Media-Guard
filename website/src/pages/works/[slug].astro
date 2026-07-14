@@ -241,10 +241,19 @@ const nextThumb = nextWork ? resolveThumbnail(nextWork.youtube_id, nextWork.slug
         </div>
     )}
 
-    <!-- 同專案其他作品（後端 series：同 CRM 專案的其他已發布作品） -->
+    <!-- 相關作品互連（後端 series：屬系列 → 同系列其他作品；否則 → 同 CRM 專案其他已發布作品） -->
     {work.series && work.series.length > 0 && (
         <section class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-10 pt-14 bg-white">
-            <div class="text-xs tracking-[0.4em] uppercase text-neutral-500 mb-6">同專案其他作品</div>
+            <div class="text-xs tracking-[0.4em] uppercase text-neutral-500 mb-6">
+                {work.collection ? (
+                    <a href={`/works/series/${work.collection.slug}/`} class="hover:text-neutral-900 transition-colors">
+                        《<Tr zh={work.collection.title_zh} en={work.collection.title_en || work.collection.title_zh} />》
+                        <Tr zh="系列作品" en="Series" /> →
+                    </a>
+                ) : (
+                    <Tr zh="同專案其他作品" en="More from this project" />
+                )}
+            </div>
             <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-8">
                 {work.series.map(sw => (
                     <a href={`/works/${sw.slug}/`} class="group block">

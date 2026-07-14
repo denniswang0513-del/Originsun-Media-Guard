@@ -432,6 +432,9 @@ class CrmProjectShowcase(Base):
     number = Column(Integer, nullable=True)  # 對外連續編號（partial unique idx）
     old_slugs = Column(JSONB, nullable=True)  # 舊 slug 清單（301 轉址來源）
     sort_order = Column(Integer, nullable=False, default=0)
+    # 作品系列（跨專案策展集合，soft FK → website_series.id）；作品牆摺疊 + 系列頁
+    series_id = Column(Integer, nullable=True, index=True)
+    series_order = Column(Integer, nullable=False, default=0)   # 系列內排序（小→大）
     verified_at = Column(DateTime(timezone=True), nullable=True)  # rebuild 後對外頁實測 200
     prod_stage = Column(String(16), nullable=True)  # 待製作|製作中|已上線|不上官網
     # AI 參考資料：製作人上傳的文件抽取文字 + 補充說明，餵給 AI 寫描述 / SEO。

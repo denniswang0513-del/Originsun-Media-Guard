@@ -25,7 +25,7 @@ from core.schemas_website import ContactInquiryCreate
 from services.website import (
     category_service, credit_service, initiative_service, inquiry_service,
     nav_service, notify_service, post_service, project_service, seo_service,
-    service_service, settings_service,
+    series_service, service_service, settings_service,
 )
 
 logger = logging.getLogger(__name__)
@@ -58,6 +58,29 @@ async def get_work(
     if not project:
         raise HTTPException(status_code=404, detail="Not found")
     return project
+
+
+@router.get("/series")
+async def list_series(
+    request: Request,
+    session: AsyncSession = Depends(public_session),
+):
+    """作品系列清單（visible 且 ≥1 已發布成員）— 作品牆摺疊卡 + getStaticPaths 用。"""
+    rate_limit(request, max_per_minute=60)
+    return {"items": await series_service.list_public_series(session)}
+
+
+@router.get("/series/{slug}")
+async def get_series(
+    slug: str, request: Request,
+    session: AsyncSession = Depends(public_session),
+):
+    """系列頁資料：系列欄位 + works（依 series_order）。"""
+    rate_limit(request, max_per_minute=60)
+    data = await series_service.get_public_series_by_slug(session, slug)
+    if not data:
+        raise HTTPException(status_code=404, detail="Not found")
+    return data
 
 
 @router.get("/featured")
@@ -265,12 +288,14 @@ async def list_public_redirects(
     legacy = await redirect_service.list_redirects(session)   # 頁面級 legacy 轉址
     posts = await post_service.list_redirects(session)
     works = await project_service.list_redirects(session)
+    series = await series_service.list_series_redirects(session)  # /works/series/* 改名
     # 衝突偵測：/news/* vs /works/* 不該重疊，重疊代表資料異常 — log 不阻擋
     overlap = posts.keys() & works.keys()
     if overlap:
         logger.warning("[redirects] posts × works key overlap: %s — works override", sorted(overlap))
-    # 優先序：作品 > 文章 > legacy（真實內容 slug 勝過手動 legacy 對照）
-    items = {**legacy, **posts, **works}
+    # 優先序：系列 > 作品 > 文章 > legacy（真實內容 slug 勝過手動 legacy 對照；
+    # /works/series/* 前綴不會撞 /works/{slug} 單段 key）
+    items = {**legacy, **posts, **works, **series}
     return {"items": items, "count": len(items)}
 
 

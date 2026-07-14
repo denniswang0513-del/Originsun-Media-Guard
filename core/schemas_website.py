@@ -158,6 +158,52 @@ class NavItemUpdate(BaseModel):
 
 
 # ══════════════════════════════════════════════════════════
+# Series（作品系列 — 跨專案策展集合；作品牆摺疊 + /works/series/{slug}）
+# ══════════════════════════════════════════════════════════
+
+class WebsiteSeriesResponse(BaseModel):
+    id: int
+    slug: str
+    title_zh: str
+    title_en: Optional[str] = None
+    description_zh: Optional[str] = None
+    description_en: Optional[str] = None
+    cover_image: Optional[str] = None
+    sort_order: int = 0
+    visible: bool = True
+    work_count: int = 0                    # 成員數（admin 列表顯示，service 算）
+
+
+class WebsiteSeriesCreate(BaseModel):
+    slug: str = Field(..., min_length=1, max_length=80,
+                      pattern=r"^[a-z0-9-]+$")   # URL 承諾：改名會自動記 old_slugs 出 301
+    title_zh: str = Field(..., min_length=1, max_length=200)
+    title_en: Optional[str] = Field(None, max_length=300)
+    description_zh: Optional[str] = None
+    description_en: Optional[str] = None
+    cover_image: Optional[str] = None
+    sort_order: int = 0
+    visible: bool = True
+
+
+class WebsiteSeriesUpdate(BaseModel):
+    slug: Optional[str] = Field(None, min_length=1, max_length=80,
+                                pattern=r"^[a-z0-9-]+$")
+    title_zh: Optional[str] = Field(None, min_length=1, max_length=200)
+    title_en: Optional[str] = None
+    description_zh: Optional[str] = None
+    description_en: Optional[str] = None
+    cover_image: Optional[str] = None
+    sort_order: Optional[int] = None
+    visible: Optional[bool] = None
+
+
+class WebsiteSeriesMembersPayload(BaseModel):
+    """系列成員全量替換：work_ids 依序 = series_order；原成員不在清單 → 解除歸屬。"""
+    work_ids: list[str]
+
+
+# ══════════════════════════════════════════════════════════
 # Project (對外作品 — 從 crm_projects 的 public_* 欄位投影)
 # ══════════════════════════════════════════════════════════
 

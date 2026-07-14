@@ -658,6 +658,19 @@ async def _build_showcase_edit_data(session, sc) -> dict:
     )).scalars().all()
     data["selected_category_ids"] = list(sel_rows)
 
+    # 作品系列候選清單（含 hidden — owner 可先建好系列再慢慢掛）+ 此作品目前歸屬
+    from db.models_website import WebsiteSeries
+    ser_rows = (await session.execute(
+        select(WebsiteSeries)
+        .order_by(WebsiteSeries.sort_order, WebsiteSeries.id))).scalars().all()
+    data["series_available"] = [
+        {"id": s.id, "slug": s.slug, "title_zh": s.title_zh,
+         "visible": bool(s.visible)}
+        for s in ser_rows
+    ]
+    data["series_id"] = sc.series_id
+    data["series_order"] = sc.series_order or 0
+
     # 演職員職位庫 + 模板候選清單（給 showcase-edit 編輯器用）。
     # 委派 service 層維持單一 hydrate 真相源；list_roles 多回的 sort_order /
     # visible / usage_count 前端忽略無妨。
@@ -815,6 +828,24 @@ async def update_showcase_edit_data(token: str, request: Request):
             )
             for cid in ids:
                 session.add(WebsiteProjectCategory(project_id=sc.id, category_id=cid))
+        # 作品系列歸屬（series_id 驗證存在；null = 解除）。順序不收前端值 —
+        # 新掛的作品排到系列尾端（max+1），精排在官網管理成員面板做（全量替換端點）。
+        if "series_id" in body:
+            sid = body["series_id"]
+            new_sid = int(sid) if sid not in ("", None) else None
+            if new_sid != sc.series_id:
+                if new_sid is None:
+                    sc.series_id, sc.series_order = None, 0
+                else:
+                    from sqlalchemy import func as sa_func
+                    from db.models_website import WebsiteSeries
+                    if not await session.get(WebsiteSeries, new_sid):
+                        raise HTTPException(status_code=404, detail="指定的作品系列不存在")
+                    max_order = (await session.execute(
+                        select(sa_func.max(CrmProjectShowcase.series_order))
+                        .where(CrmProjectShowcase.series_id == new_sid))).scalar()
+                    sc.series_id = new_sid
+                    sc.series_order = (max_order if max_order is not None else -1) + 1
         # 作品身分欄位（public_title / year / featured / noindex → sc；
         # client → project）。token 路徑信任 PM 編輯所有作品相關欄位。
         project = await session.get(CrmProject, sc.project_id or sc.id)

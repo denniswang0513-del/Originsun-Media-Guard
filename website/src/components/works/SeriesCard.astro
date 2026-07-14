@@ -1,0 +1,42 @@
+---
+/**
+ * SeriesCard.astro — 作品系列摺疊卡（作品牆用）
+ * 視覺對齊 WorkCard：圖 + 下方標題區；差異 = Series 徽章 + 「N 支作品」角標，
+ * 點擊進系列頁 /works/series/{slug}。
+ */
+import SmartImage from "../ui/SmartImage.astro";
+import Tr from "../ui/Tr.astro";
+import type { ISeriesListItem } from "../../types/project";
+
+interface Props {
+    series: ISeriesListItem;
+}
+const { series } = Astro.props;
+---
+
+<a href={`/works/series/${series.slug}`} class="group block">
+    <div class="relative overflow-hidden aspect-video bg-neutral-100 mb-4">
+        {series.cover_url && (
+            <SmartImage src={series.cover_url}
+                        alt={series.title_zh}
+                        width={1280} height={720}
+                        widths={[400, 800, 1280]}
+                        sizes="(max-width: 640px) 100vw, (max-width: 1024px) 50vw, 33vw"
+                        loading="lazy"
+                        class="absolute inset-0 w-full h-full object-cover transition-transform duration-700 group-hover:scale-[1.04]" />
+        )}
+        <div class="absolute top-3 left-3 text-[10px] tracking-[0.25em] uppercase px-2 py-1 bg-neutral-900/90 text-white">
+            Series
+        </div>
+        <div class="absolute bottom-3 right-3 text-[11px] tracking-wider px-2 py-1 bg-white/95 text-neutral-900">
+            <Tr zh={`${series.work_count} 支作品`} en={`${series.work_count} works`} />
+        </div>
+    </div>
+
+    <div>
+        <div class="mb-2 text-[10px] text-[#c9372c] tracking-[0.3em] uppercase">Series</div>
+        <h3 class="text-base sm:text-lg font-medium text-neutral-900 tracking-wide leading-snug group-hover:text-[#c9372c] transition-colors">
+            <Tr zh={series.title_zh} en={series.title_en || series.title_zh} />
+        </h3>
+    </div>
+</a>

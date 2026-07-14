@@ -7,15 +7,42 @@ import BaseLayout from "../../layouts/BaseLayout.astro";
 import CategoryFilter from "../../components/works/CategoryFilter.astro";
 import TagCloud from "../../components/works/TagCloud.astro";
 import WorkCard from "../../components/works/WorkCard.astro";
+import SeriesCard from "../../components/works/SeriesCard.astro";
 import Tr from "../../components/ui/Tr.astro";
-import { fetchMeta, fetchCategories, fetchAllWorksCached } from "../../lib/crm-client";
+import { fetchMeta, fetchCategories, fetchAllWorksCached, fetchSeriesList } from "../../lib/crm-client";
 import { buildBasicPageSeo, breadcrumb2 } from "../../lib/seo";
+import type { IPublicProject, ISeriesListItem } from "../../types/project";
 
-const [meta, allWorks, categories] = await Promise.all([
+const [meta, allWorks, categories, seriesList] = await Promise.all([
     fetchMeta(),
     fetchAllWorksCached(),
     fetchCategories(),
+    fetchSeriesList(),
 ]);
+
+// 系列摺疊：屬於可見系列的作品收進一張系列卡（卡片站在第一個成員在牆上的位置，
+// 承接該成員的排序權重）；系列卡的 data-categories/tags = 成員聯集，兩軸過濾照常。
+// 系列被隱藏（不在 seriesList）→ 成員照常各自一張卡。
+const seriesById = new Map(seriesList.map(s => [s.id, s]));
+// 統一的格子項：cats/tags 給過濾軸（系列卡 = 成員聯集），work/series 二擇一給卡片
+type GridEntry = { cats: string[]; tags: string[]; work?: IPublicProject; series?: ISeriesListItem };
+const gridEntries: GridEntry[] = [];
+const foldedSeries = new Set<number>();
+for (const work of allWorks) {
+    const s = work.series_id ? seriesById.get(work.series_id) : undefined;
+    if (!s) {
+        gridEntries.push({ cats: work.categories || [], tags: work.tags || [], work });
+        continue;
+    }
+    if (foldedSeries.has(s.id)) continue;
+    foldedSeries.add(s.id);
+    const members = allWorks.filter(w => w.series_id === s.id);
+    gridEntries.push({
+        series: s,
+        cats: [...new Set(members.flatMap(w => w.categories || []))],
+        tags: [...new Set(members.flatMap(w => w.tags || []))],
+    });
+}
 
 const activeCategory = Astro.url.searchParams.get("category") || null;
 const activeTag = Astro.url.searchParams.get("tag") || null;
@@ -90,11 +117,11 @@ const seo = buildBasicPageSeo(Astro, {
                  data-active-category={activeCategory || ""}
                  data-active-tag={activeTag || ""}
                  class="mt-16 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-8 sm:gap-10">
-                {allWorks.map(work => (
+                {gridEntries.map(entry => (
                     <div class="work-item"
-                         data-categories={(work.categories || []).join(",")}
-                         data-tags={(work.tags || []).join(",")}>
-                        <WorkCard work={work} />
+                         data-categories={entry.cats.join(",")}
+                         data-tags={entry.tags.join(",")}>
+                        {entry.work ? <WorkCard work={entry.work} /> : <SeriesCard series={entry.series!} />}
                     </div>
                 ))}
             </div>

@@ -1,0 +1,85 @@
+---
+/**
+ * works/series/[slug].astro — 作品系列頁（跨專案策展集合）
+ * 封面 hero + 系列介紹 + 成員作品格（依 series_order）。
+ * 作品牆的系列摺疊卡（SeriesCard）點進來就是這頁。
+ */
+import BaseLayout from "../../../layouts/BaseLayout.astro";
+import WorkCard from "../../../components/works/WorkCard.astro";
+import SmartImage from "../../../components/ui/SmartImage.astro";
+import Tr from "../../../components/ui/Tr.astro";
+import { fetchMeta, fetchSeriesBySlug, getSeriesSlugPaths } from "../../../lib/crm-client";
+import { buildBasicPageSeo, breadcrumb3, ensureMinDescription } from "../../../lib/seo";
+
+export const getStaticPaths = getSeriesSlugPaths;
+
+const { slug } = Astro.params;
+const [meta, series] = await Promise.all([
+    fetchMeta(),
+    fetchSeriesBySlug(slug!),
+]);
+
+if (!series) return Astro.redirect("/works");
+
+const descZh = (series.description_zh || "").trim();
+const description = ensureMinDescription(
+    descZh,
+    `${meta.company_name_zh}「${series.title_zh}」系列作品 — 共 ${series.work_count} 支影片，完整呈現同一系列的影像製作成果。`,
+);
+const seo = buildBasicPageSeo(Astro, {
+    title: `${series.title_zh}｜作品系列`,
+    description,
+    breadcrumbs: breadcrumb3("作品集", "/works", series.title_zh, `/works/series/${series.slug}`),
+});
+---
+
+<BaseLayout {...seo} meta={meta} ogImage={series.cover_url || undefined}>
+    <section class="pt-32 pb-20 bg-white">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+            <div class="text-center mb-12">
+                <p class="text-xs tracking-[0.4em] text-neutral-500 uppercase mb-3">Series</p>
+                <h1 class="text-4xl sm:text-5xl font-light tracking-tight text-neutral-900">
+                    <Tr zh={series.title_zh} en={series.title_en || series.title_zh} />
+                </h1>
+                <p class="mt-4 text-sm text-neutral-500">
+                    <Tr zh={`${series.work_count} 支作品`} en={`${series.work_count} works`} />
+                </p>
+            </div>
+
+            {series.cover_url && (
+                <div class="relative overflow-hidden aspect-[21/9] bg-neutral-100 mb-12">
+                    <SmartImage src={series.cover_url}
+                                alt={series.title_zh}
+                                width={1600} height={686}
+                                widths={[800, 1200, 1600]}
+                                sizes="100vw"
+                                loading="eager"
+                                class="absolute inset-0 w-full h-full object-cover" />
+                </div>
+            )}
+
+            {descZh && (
+                <div class="max-w-3xl mx-auto mb-16 text-neutral-700 leading-relaxed text-center">
+                    <div data-lang-zh>
+                        {descZh.split(/\n+/).filter(Boolean).map(p => <p class="mb-3">{p}</p>)}
+                    </div>
+                    <div data-lang-en>
+                        {((series.description_en || "").trim() || descZh)
+                            .split(/\n+/).filter(Boolean).map(p => <p class="mb-3">{p}</p>)}
+                    </div>
+                </div>
+            )}
+
+            <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-8 sm:gap-10">
+                {series.works.map(work => <WorkCard work={work} />)}
+            </div>
+
+            <div class="mt-16 text-center">
+                <a href="/works"
+                   class="inline-block text-xs tracking-[0.25em] uppercase border border-neutral-900 text-neutral-900 px-8 py-3 hover:bg-neutral-900 hover:text-white transition-colors">
+                    <Tr zh="← 返回作品集" en="← Back to Works" />
+                </a>
+            </div>
+        </div>
+    </section>
+</BaseLayout>

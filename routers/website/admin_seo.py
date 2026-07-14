@@ -20,8 +20,9 @@ from core.schemas_website import (
     WebsiteAwardCreate, WebsiteAwardUpdate, WebsiteAwardBulkImport,
     NavItemCreate, NavItemUpdate,
     ProjectSeoUpdate,
+    WebsiteSeriesCreate, WebsiteSeriesUpdate, WebsiteSeriesMembersPayload,
 )
-from services.website import nav_service, rebuild_service, seo_service
+from services.website import nav_service, rebuild_service, seo_service, series_service
 
 router = APIRouter(prefix="/api/website/admin", tags=["website-admin-seo"])
 
@@ -110,6 +111,32 @@ register_crud(
     update_schema=NavItemUpdate,
     on_change=rebuild_service.mark_dirty,
 )
+
+# 作品系列（跨專案策展集合）— admin 作品子視圖「🎬 作品系列」卡。
+# ⚠ slug 是 URL 永久承諾（/works/series/{slug}），發布後勿改。
+register_crud(
+    router,
+    prefix="series", name="Series",
+    list_fn=series_service.list_series,
+    create_fn=series_service.create_series,
+    update_fn=series_service.update_series,
+    delete_fn=series_service.delete_series,
+    create_schema=WebsiteSeriesCreate,
+    update_schema=WebsiteSeriesUpdate,
+    on_change=rebuild_service.mark_dirty,
+)
+
+
+@router.put("/series/{series_id}/members")
+async def set_series_members(
+    series_id: int,
+    payload: WebsiteSeriesMembersPayload,
+    session: AsyncSession = Depends(admin_session),
+):
+    """系列成員全量替換（排序/移除同一支端點）：work_ids 依序 = series_order。"""
+    result = await series_service.set_series_members(session, series_id, payload.work_ids)
+    await rebuild_service.mark_dirty()
+    return result
 
 
 # ══════════════════════════════════════════════════════════

@@ -5,11 +5,13 @@
  * 公開/精選切換。編輯 UI 透過 iframe 嵌入 /showcase-edit.html?token=XXX —
  * 重用既有 showcase-edit.html 避免重寫 544 行的 CRM 完稿 Tab 編輯器。
  */
-import { websiteFetch, esc, toastOk, toastErr, renderLoadError, debounce } from '../website-utils.js';
+import { websiteFetch, esc, toastOk, toastErr, renderLoadError, debounce, readRowPatch, emptyRow, emptyHint } from '../website-utils.js';
 
 let _works = [];
 let _categories = [];
 let _seoAudit = null;  // Map<project_id, auditItem>；null = audit 端點不可用
+let _series = [];      // 作品系列（跨專案策展集合）
+let _serOpen = null;   // 展開成員管理的系列 id
 
 async function _reloadWorks() {
     try {
@@ -38,17 +40,19 @@ export default async function render(container, ctx = {}) {
     container.innerHTML = '<h2>作品集管理</h2><div style="color:#888;padding:20px;">載入中…</div>';
     let portfolioPdfUrl = '';
     try {
-        const [worksRes, catsRes, settingsRes, auditRes] = await Promise.all([
+        const [worksRes, catsRes, settingsRes, auditRes, seriesRes] = await Promise.all([
             websiteFetch('/api/website/admin/works?include_non_public=true'),
             websiteFetch('/api/website/admin/categories'),
             websiteFetch('/api/website/admin/settings'),
             websiteFetch('/api/website/admin/seo/projects/audit').catch(() => null),
+            websiteFetch('/api/website/admin/series').catch(() => ({ items: [] })),
         ]);
         if (!isCurrent()) return;
         _works = worksRes?.items || [];
         _categories = catsRes?.items || [];
         portfolioPdfUrl = (settingsRes?.settings?.['portfolio.pdf_url'] || '').toString();
         _seoAudit = auditRes ? new Map((auditRes.items || []).map(it => [it.project_id, it])) : null;
+        _series = seriesRes?.items || [];
     } catch (e) {
         if (!isCurrent()) return;
         renderLoadError(container, '作品集管理', e);
@@ -74,6 +78,11 @@ export default async function render(container, ctx = {}) {
             </div>
         </div>
 
+        <details class="card" style="margin-bottom:12px;padding:12px 16px;" ${_serOpen !== null ? 'open' : ''}>
+            <summary style="cursor:pointer;color:#ddd;font-size:13px;font-weight:600;">🎬 作品系列（<span id="series-count">${_series.length}</span>）— 跨專案綁定，作品牆摺疊成一張卡 + 系列頁 /works/series/…</summary>
+            <div id="series-panel" style="padding-top:10px;"></div>
+        </details>
+
         <div style="margin-bottom:12px;display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
             <button class="btn" onclick="window._websiteNewWork()" style="background:#059669;">新增作品</button>
             <input id="works-filter" type="text" placeholder="搜尋標題 / 客戶 / slug…" style="flex:1;min-width:240px;max-width:320px;" />
@@ -95,8 +104,188 @@ export default async function render(container, ctx = {}) {
     document.getElementById('works-cat-filter').addEventListener('change', _renderTable);
     document.getElementById('works-public-only').addEventListener('change', _renderTable);
     _renderTable();
+    _renderSeriesPanel();
     _ensureEditPanel();
 }
+
+// ── 作品系列（跨專案策展集合）────────────────────────────────
+// CRUD 走 /api/website/admin/series；成員排序/加入/移除全走
+// PUT /series/{id}/members 全量替換（work_ids 依序 = series_order）。
+
+async function _reloadSeries() {
+    const res = await websiteFetch('/api/website/admin/series').catch(() => null);
+    if (res) _series = res.items || [];
+    _renderSeriesPanel();
+}
+
+/** 成員變動/刪系列後的統一刷新：works（series_id 變了）+ series（計數/成員）一起抓 */
+async function _refreshSeriesAndWorks() {
+    const [worksRes, seriesRes] = await Promise.all([
+        websiteFetch('/api/website/admin/works?include_non_public=true').catch(() => null),
+        websiteFetch('/api/website/admin/series').catch(() => null),
+    ]);
+    if (worksRes) _works = worksRes.items || [];
+    if (seriesRes) _series = seriesRes.items || [];
+    _renderSeriesPanel();
+    _renderTable();
+}
+
+function _seriesMembers(sid) {
+    return _works.filter(w => w.series_id === sid)
+        .sort((a, b) => (a.series_order || 0) - (b.series_order || 0));
+}
+
+function _renderSeriesPanel() {
+    const el = document.getElementById('series-panel');
+    if (!el) return;
+    const countEl = document.getElementById('series-count');
+    if (countEl) countEl.textContent = String(_series.length);
+    const rows = _series.map(s => {
+        const open = _serOpen === s.id;
+        return `
+        <tr style="border-top:1px solid #333;">
+            <td style="padding:6px 8px;"><input data-id="${s.id}" data-field="title_zh" value="${esc(s.title_zh)}" style="width:180px;"></td>
+            <td style="padding:6px 8px;"><input data-id="${s.id}" data-field="slug" value="${esc(s.slug)}" style="width:130px;font-family:monospace;" title="URL 永久承諾 — 改名會自動加 301 轉址，但別常改"></td>
+            <td style="padding:6px 8px;"><input data-id="${s.id}" data-field="sort_order" type="number" value="${s.sort_order || 0}" style="width:60px;"></td>
+            <td style="padding:6px 8px;text-align:center;"><input data-id="${s.id}" data-field="visible" type="checkbox" ${s.visible ? 'checked' : ''}></td>
+            <td style="padding:6px 8px;color:#888;">${s.work_count || 0} 支</td>
+            <td style="padding:6px 8px;white-space:nowrap;">
+                <button class="btn btn-sm" onclick="window._websiteSerSave(${s.id})">儲存</button>
+                <button class="btn btn-sm btn-ghost" onclick="window._websiteSerMembers(${s.id})">${open ? '收合成員' : '成員'}</button>
+                <button class="btn btn-sm btn-ghost" onclick="window._websiteSerDel(${s.id})" style="color:#f87171;">刪除</button>
+            </td>
+        </tr>
+        ${open ? `<tr><td colspan="6" style="padding:4px 8px 12px;background:#1a1a1a;">${_serMembersHtml(s.id)}</td></tr>` : ''}`;
+    }).join('');
+    el.innerHTML = `
+        <div style="color:#888;font-size:11px;margin-bottom:8px;">
+            作品掛進系列：在該作品的編輯頁（作品系列下拉）選；這裡管系列本身 + 成員排序。
+            介紹/封面等進階欄位：建立後點「儲存」旁欄位直接改（介紹欄在成員面板）。⚠ slug 發布後勿改。
+        </div>
+        <table style="border-collapse:collapse;font-size:12px;color:#ccc;width:100%;">
+            <thead><tr style="color:#888;text-align:left;">
+                <th style="padding:4px 8px;">系列名稱</th><th style="padding:4px 8px;">slug</th>
+                <th style="padding:4px 8px;">排序</th><th style="padding:4px 8px;">顯示</th>
+                <th style="padding:4px 8px;">成員</th><th style="padding:4px 8px;"></th>
+            </tr></thead>
+            <tbody>${rows || emptyRow(6, '還沒有系列 — 用下面的欄位建立第一個')}</tbody>
+        </table>
+        <div style="display:flex;gap:8px;align-items:flex-end;margin-top:10px;flex-wrap:wrap;">
+            <div><div style="color:#888;font-size:11px;">新系列名稱</div><input id="ser-new-title" style="width:180px;"></div>
+            <div><div style="color:#888;font-size:11px;">slug（小寫英數-）</div><input id="ser-new-slug" style="width:130px;font-family:monospace;" placeholder="huashan-annual"></div>
+            <button class="btn btn-sm" onclick="window._websiteSerCreate()">＋ 建立系列</button>
+        </div>`;
+}
+
+function _serMembersHtml(sid) {
+    const s = _series.find(x => x.id === sid) || {};
+    const members = _seriesMembers(sid);
+    const candidates = _works.filter(w => !w.series_id);
+    const mrows = members.map((w, i) => `
+        <div style="display:flex;gap:8px;align-items:center;padding:3px 0;">
+            <span style="color:#666;width:20px;">${i + 1}.</span>
+            <span style="flex:1;">${esc(w.title || w.name || w.slug)}</span>
+            <button class="btn btn-sm btn-ghost" ${i === 0 ? 'disabled' : ''} onclick="window._websiteSerMove(${sid},${i},-1)">↑</button>
+            <button class="btn btn-sm btn-ghost" ${i === members.length - 1 ? 'disabled' : ''} onclick="window._websiteSerMove(${sid},${i},1)">↓</button>
+            <button class="btn btn-sm btn-ghost" style="color:#f87171;" onclick="window._websiteSerRemove(${sid},'${esc(w.id)}')">移除</button>
+        </div>`).join('');
+    return `
+        <div style="display:flex;gap:16px;flex-wrap:wrap;">
+            <div style="flex:1;min-width:280px;">
+                <div style="color:#888;font-size:11px;margin-bottom:4px;">成員（依系列內順序，系列頁照此排）</div>
+                ${mrows || emptyHint('尚無成員 — 用下面下拉加入，或到作品編輯頁掛', { padding: 10 })}
+                <div style="display:flex;gap:6px;margin-top:8px;align-items:center;">
+                    <select id="ser-add-${sid}" style="min-width:200px;">
+                        <option value="">— 選擇要加入的作品 —</option>
+                        ${candidates.map(w => `<option value="${esc(w.id)}">${esc(w.title || w.name || w.slug)}</option>`).join('')}
+                    </select>
+                    <button class="btn btn-sm" onclick="window._websiteSerAdd(${sid})">加入</button>
+                </div>
+            </div>
+            <div style="flex:1;min-width:280px;">
+                <div style="color:#888;font-size:11px;margin-bottom:4px;">系列介紹（系列頁 + SEO description 來源，建議 30 字以上）</div>
+                <textarea id="ser-desc-${sid}" rows="3" style="width:100%;box-sizing:border-box;">${esc(s.description_zh || '')}</textarea>
+                <div style="color:#888;font-size:11px;margin:6px 0 4px;">封面圖 URL（空 = 用第一支作品封面）</div>
+                <input id="ser-cover-${sid}" value="${esc(s.cover_image || '')}" style="width:100%;box-sizing:border-box;">
+                <button class="btn btn-sm" style="margin-top:6px;" onclick="window._websiteSerSaveExtra(${sid})">儲存介紹/封面</button>
+            </div>
+        </div>`;
+}
+
+async function _serPutMembers(sid, workIds) {
+    try {
+        await websiteFetch(`/api/website/admin/series/${sid}/members`, {
+            method: 'PUT', body: { work_ids: workIds },
+        });
+        await _refreshSeriesAndWorks();
+    } catch (e) { toastErr(e.detail || e.message); }
+}
+
+window._websiteSerCreate = async () => {
+    const title = document.getElementById('ser-new-title')?.value?.trim();
+    const slug = document.getElementById('ser-new-slug')?.value?.trim();
+    if (!title || !slug) { toastErr('系列名稱與 slug 都要填'); return; }
+    try {
+        await websiteFetch('/api/website/admin/series', {
+            method: 'POST', body: { title_zh: title, slug },
+        });
+        toastOk('系列已建立'); await _reloadSeries();
+    } catch (e) { toastErr(e.detail || e.message); }
+};
+
+window._websiteSerSave = async (sid) => {
+    const patch = readRowPatch('#series-panel', sid);
+    try {
+        await websiteFetch(`/api/website/admin/series/${sid}`, { method: 'PUT', body: patch });
+        toastOk('已儲存'); await _reloadSeries();
+    } catch (e) { toastErr(e.detail || e.message); }
+};
+
+window._websiteSerSaveExtra = async (sid) => {
+    try {
+        await websiteFetch(`/api/website/admin/series/${sid}`, {
+            method: 'PUT',
+            body: {
+                description_zh: document.getElementById(`ser-desc-${sid}`)?.value || '',
+                cover_image: document.getElementById(`ser-cover-${sid}`)?.value?.trim() || null,
+            },
+        });
+        toastOk('已儲存'); await _reloadSeries();
+    } catch (e) { toastErr(e.detail || e.message); }
+};
+
+window._websiteSerDel = async (sid) => {
+    const s = _series.find(x => x.id === sid);
+    if (!confirm(`刪除系列「${s?.title_zh || sid}」？成員作品會解除歸屬（作品本身不動）。`)) return;
+    try {
+        await websiteFetch(`/api/website/admin/series/${sid}`, { method: 'DELETE' });
+        if (_serOpen === sid) _serOpen = null;
+        toastOk('已刪除'); await _refreshSeriesAndWorks();
+    } catch (e) { toastErr(e.detail || e.message); }
+};
+
+window._websiteSerMembers = (sid) => {
+    _serOpen = _serOpen === sid ? null : sid;
+    _renderSeriesPanel();
+};
+
+window._websiteSerMove = (sid, idx, dir) => {
+    const ids = _seriesMembers(sid).map(w => w.id);
+    const j = idx + dir;
+    if (j < 0 || j >= ids.length) return;
+    [ids[idx], ids[j]] = [ids[j], ids[idx]];
+    _serPutMembers(sid, ids);
+};
+
+window._websiteSerRemove = (sid, workId) => {
+    _serPutMembers(sid, _seriesMembers(sid).map(w => w.id).filter(id => id !== workId));
+};
+
+window._websiteSerAdd = (sid) => {
+    const sel = document.getElementById(`ser-add-${sid}`);
+    if (!sel || !sel.value) return;
+    _serPutMembers(sid, [..._seriesMembers(sid).map(w => w.id), sel.value]);
+};
 
 
 window._websiteSavePortfolioPdf = async () => {

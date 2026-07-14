@@ -27,6 +27,9 @@ export interface IPublicProject {
     // credits 雙模式：'block' (用 credits[]) / 'text' (用 credits_text 純文字)
     credits_mode?: "block" | "text";
     credits_text?: string | null;
+    // 作品系列歸屬（→ ISeriesListItem.id）— 作品牆把同 series_id 摺疊成一張系列卡
+    series_id?: number | null;
+    series_order?: number;
 }
 
 export interface ICreditEntry {
@@ -74,11 +77,27 @@ export interface IExtraVideo {
     youtube_id: string | null;
 }
 
-// 同專案系列作品（同 CRM 專案的其他已發布作品）
+// 相關作品互連項（作品屬系列 → 同系列成員；否則 → 同 CRM 專案其他已發布作品）
 export interface ISeriesItem {
     slug: string;
     title: string;
     cover_url: string | null;
+}
+
+// 作品系列（跨專案策展集合 — website_series）：作品牆摺疊卡 + /works/series/{slug}
+export interface ISeriesListItem {
+    id: number;
+    slug: string;
+    title_zh: string;
+    title_en: string | null;
+    description_zh: string | null;
+    description_en: string | null;
+    cover_url: string | null;
+    work_count: number;
+}
+
+export interface ISeriesDetail extends ISeriesListItem {
+    works: IPublicProject[];
 }
 
 export interface IPublicProjectDetail extends IPublicProject {
@@ -95,9 +114,11 @@ export interface IPublicProjectDetail extends IPublicProject {
     narrative_long?: string | null;
     key_facts?: ISeoKeyFact[];
     faqs?: ISeoFAQ[];
-    // 一頁多影片 + 同專案系列互連（空陣列 = 無）
+    // 一頁多影片 + 相關作品互連（空陣列 = 無；見 series/collection 說明）
     extra_videos?: IExtraVideo[];
     series?: ISeriesItem[];
+    // 所屬系列（null = 不屬任何系列；有值時 series 內容 = 同系列其他作品）
+    collection?: { slug: string; title_zh: string; title_en: string | null } | null;
 }
 
 export interface IWorksListResponse {
