@@ -203,10 +203,20 @@ function _serMembersHtml(sid) {
                 </div>
             </div>
             <div style="flex:1;min-width:280px;">
-                <div style="color:#888;font-size:11px;margin-bottom:4px;">系列介紹（系列頁 + SEO description 來源，建議 30 字以上）</div>
+                <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px;gap:8px;">
+                    <div style="color:#888;font-size:11px;">系列介紹（系列頁 + SEO description 來源，建議 30 字以上）</div>
+                    <button class="btn btn-sm btn-ghost" id="ser-ai-${sid}" onclick="window._websiteSerAiDesc(${sid})"
+                        title="用 AI 從成員作品的標題/介紹整理出系列介紹 — 生成後可再編修，按「儲存介紹/封面」才寫入">✨ AI 生成</button>
+                </div>
                 <textarea id="ser-desc-${sid}" rows="3" style="width:100%;box-sizing:border-box;">${esc(s.description_zh || '')}</textarea>
                 <div style="color:#888;font-size:11px;margin:6px 0 4px;">封面圖 URL（空 = 用第一支作品封面）</div>
-                <input id="ser-cover-${sid}" value="${esc(s.cover_image || '')}" style="width:100%;box-sizing:border-box;">
+                <div style="display:flex;gap:6px;">
+                    <input id="ser-cover-${sid}" value="${esc(s.cover_image || '')}" style="flex:1;box-sizing:border-box;">
+                    <button class="btn btn-sm" onclick="document.getElementById('ser-cover-file-${sid}').click()"
+                        title="上傳圖片 — 自動轉 WebP 並縮到網頁尺寸（長邊 1600px），上傳後直接儲存">上傳</button>
+                    <input type="file" id="ser-cover-file-${sid}" accept="image/*" style="display:none;"
+                        onchange="window._websiteSerCoverUpload(${sid}, this)">
+                </div>
                 <button class="btn btn-sm" style="margin-top:6px;" onclick="window._websiteSerSaveExtra(${sid})">儲存介紹/封面</button>
             </div>
         </div>`;
@@ -285,6 +295,38 @@ window._websiteSerAdd = (sid) => {
     const sel = document.getElementById(`ser-add-${sid}`);
     if (!sel || !sel.value) return;
     _serPutMembers(sid, [..._seriesMembers(sid).map(w => w.id), sel.value]);
+};
+
+// AI 生成系列介紹：後端拿成員作品的標題/介紹組 prompt 丟 claude（最長 3 分鐘）。
+// 只填進 textarea 不落庫 — owner 看過（可編修）按「儲存介紹/封面」才寫入。
+window._websiteSerAiDesc = async (sid) => {
+    const ta = document.getElementById(`ser-desc-${sid}`);
+    const btn = document.getElementById(`ser-ai-${sid}`);
+    if (!ta) return;
+    const orig = btn?.textContent;
+    if (btn) { btn.disabled = true; btn.textContent = '⏳ 生成中…'; }
+    try {
+        const r = await websiteFetch(`/api/website/admin/series/${sid}/generate-description`, { method: 'POST' });
+        ta.value = r.description || '';
+        toastOk('已生成 — 可先編修，按「儲存介紹/封面」才會寫入');
+    } catch (e) { toastErr(e.detail || e.message); }
+    finally { if (btn) { btn.disabled = false; btn.textContent = orig; } }
+};
+
+// 封面上傳：轉 WebP + 長邊縮 1600px → 填 URL 欄並直接儲存（沿用 SaveExtra，
+// 介紹欄現值一併存 — 兩欄本來就共用同一顆儲存鈕）。
+window._websiteSerCoverUpload = async (sid, input) => {
+    const f = input.files && input.files[0];
+    input.value = '';   // 清掉才能重選同一張再觸發 onchange
+    if (!f) return;
+    try {
+        const fd = new FormData();
+        fd.append('file', f);
+        const r = await websiteFetch('/api/website/admin/series/upload-cover', { method: 'POST', body: fd });
+        const el = document.getElementById(`ser-cover-${sid}`);
+        if (el) el.value = r.url;
+        await window._websiteSerSaveExtra(sid);
+    } catch (e) { toastErr('上傳失敗：' + (e.detail || e.message || e)); }
 };
 
 

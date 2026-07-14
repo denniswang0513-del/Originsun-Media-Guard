@@ -44,19 +44,25 @@ _UPLOAD_BASE = os.path.join(
 _ALLOWED_IMG_EXT = {".jpg", ".jpeg", ".png", ".webp", ".gif", ".heic"}
 
 
-def _save_image_as_webp(content: bytes, dest_dir: str, base_name: str) -> str:
+def _save_image_as_webp(content: bytes, dest_dir: str, base_name: str,
+                        max_side: int | None = None) -> str:
     """寫圖檔到 dest_dir/<base_name>.webp，原始格式自動轉 WebP（quality 82）。
 
+    max_side：長邊超過時等比縮到該尺寸（封面類上傳用 — 相機/手機原檔常數千萬
+    畫素，網頁 serve 不需要）。EXIF 方向一律先校正（手機直拍不轉會躺著）。
     Pillow 不可用 / 開檔失敗 → fallback 寫原 bytes 到 .bin（罕見）。
     """
     webp_path = os.path.join(dest_dir, base_name + ".webp")
     try:
-        from PIL import Image
+        from PIL import Image, ImageOps
         img = Image.open(io.BytesIO(content))
+        img = ImageOps.exif_transpose(img)
         if img.mode in ("RGBA", "LA"):
             img = img.convert("RGBA")
         else:
             img = img.convert("RGB")
+        if max_side and max(img.size) > max_side:
+            img.thumbnail((max_side, max_side), Image.LANCZOS)
         img.save(webp_path, "WEBP", quality=82, method=6)
         return webp_path
     except Exception as e:

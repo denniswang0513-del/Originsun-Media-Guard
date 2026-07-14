@@ -132,6 +132,56 @@ async def set_series_members(session: AsyncSession, series_id: int,
     return {"ok": True, "work_count": await _work_count(session, series_id)}
 
 
+# ── AI 生成系列介紹 ─────────────────────────────────────────
+
+_GEN_MEMBER_CAP = 20          # prompt 內最多帶幾支成員（系列實務 ≤10，防極端）
+_GEN_DESC_TRIM = 300          # 每支成員介紹截多少字進 prompt
+
+
+def _build_description_prompt(s: WebsiteSeries, members: list) -> str:
+    lines = []
+    for i, sc in enumerate(members[:_GEN_MEMBER_CAP], 1):
+        year = f"（{sc.year}）" if sc.year else ""
+        desc = " ".join((sc.description or "").split())[:_GEN_DESC_TRIM]
+        lines.append(f"{i}. 《{sc.title or sc.slug or sc.id}》{year}：{desc or '（無介紹）'}")
+    if len(members) > _GEN_MEMBER_CAP:
+        lines.append(f"…（其餘 {len(members) - _GEN_MEMBER_CAP} 支略）")
+    return (
+        "你是台灣影像製作公司的官網文案編輯。以下是官網「作品系列」頁的成員作品資料，"
+        "請為這個系列寫一段「系列介紹」，會放在系列頁開頭、同時作為 SEO description 來源。\n\n"
+        f"系列名稱：{s.title_zh}\n"
+        f"成員作品（共 {len(members)} 支，依系列內順序）：\n" + "\n".join(lines) + "\n\n"
+        "要求：\n"
+        "- 台灣繁體中文，80～160 字，一段寫完（不分段、不列點、不加標題）\n"
+        "- 概括這個系列的主題、內容與價值，語氣專業自然，像官網介紹不像廣告\n"
+        "- 只根據上面提供的資料寫，不得編造未提及的獎項、數據、客戶或人名\n"
+        "- 直接輸出介紹文字本身：不要前言、不要引號、不要 markdown"
+    )
+
+
+async def generate_description(session: AsyncSession, series_id: int) -> dict:
+    """用 claude --print 從成員作品資訊生成系列介紹（只回建議，不落庫 —
+    owner 在 admin 卡看過、按「儲存介紹/封面」走既有 PUT 才寫入）。"""
+    s = await session.get(WebsiteSeries, series_id)
+    if not s:
+        raise HTTPException(status_code=404, detail="系列不存在")
+    members = (await session.execute(
+        select(CrmProjectShowcase)
+        .where(CrmProjectShowcase.series_id == series_id)
+        .order_by(CrmProjectShowcase.series_order, CrmProjectShowcase.id))).scalars().all()
+    if not members:
+        raise HTTPException(status_code=400, detail="系列還沒有成員作品 — 先加入成員再生成介紹")
+    from services.website.seo_runner import _call_claude   # lazy：跟 translation_service 同款
+    raw, err = await _call_claude(_build_description_prompt(s, members))
+    if not raw:
+        raise HTTPException(status_code=502, detail=err or "claude --print 無回應")
+    import re
+    text = re.sub(r"\s+", " ", raw).strip().strip('"「」\'')
+    if not text:
+        raise HTTPException(status_code=502, detail="claude 回傳空內容，請再試一次")
+    return {"ok": True, "description": text}
+
+
 # ── 公開端 ──────────────────────────────────────────────────
 
 async def list_public_series(session: AsyncSession) -> list[dict]:

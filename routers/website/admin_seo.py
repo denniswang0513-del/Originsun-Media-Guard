@@ -7,12 +7,16 @@
 """
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+import os
+import uuid
+
+from fastapi import APIRouter, Depends, File, HTTPException, Request, UploadFile
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from datetime import datetime
 
 from ._common import admin_session, current_username, register_crud
+from routers.website.admin_posts import _ALLOWED_IMG_EXT, _UPLOAD_BASE, _save_image_as_webp
 from core.schemas_website import (
     WebsiteFAQCreate, WebsiteFAQUpdate,
     WebsiteTestimonialCreate, WebsiteTestimonialUpdate,
@@ -137,6 +141,35 @@ async def set_series_members(
     result = await series_service.set_series_members(session, series_id, payload.work_ids)
     await rebuild_service.mark_dirty()
     return result
+
+
+@router.post("/series/{series_id}/generate-description")
+async def generate_series_description(
+    series_id: int,
+    session: AsyncSession = Depends(admin_session),
+):
+    """AI 生成系列介紹（資料來源 = 成員作品標題/介紹；claude --print，最長 3 分鐘）。
+    只回建議不落庫 — 前端填進 textarea，owner 按「儲存介紹/封面」才寫入。"""
+    return await series_service.generate_description(session, series_id)
+
+
+@router.post("/series/upload-cover")
+async def upload_series_cover(
+    file: UploadFile = File(...),
+    _session: AsyncSession = Depends(admin_session),
+):
+    """上傳系列封面 → /uploads/series/{uuid}.webp（自動轉 WebP + 長邊縮到 1600px）。"""
+    ext = (os.path.splitext(file.filename or "image.jpg")[1] or ".jpg").lower()
+    if ext not in _ALLOWED_IMG_EXT:
+        raise HTTPException(status_code=400, detail=f"不支援的圖片格式：{ext}")
+    content = await file.read()
+    if len(content) > 20 * 1024 * 1024:
+        raise HTTPException(status_code=413, detail="圖片大於 20MB")
+    upload_dir = os.path.join(_UPLOAD_BASE, "series")
+    os.makedirs(upload_dir, exist_ok=True)
+    saved = _save_image_as_webp(content, upload_dir, uuid.uuid4().hex[:12], max_side=1600)
+    rel = os.path.relpath(saved, _UPLOAD_BASE).replace("\\", "/")
+    return {"url": f"/uploads/{rel}"}
 
 
 # ══════════════════════════════════════════════════════════
