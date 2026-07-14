@@ -1,4 +1,6 @@
-一鍵發布新版本：bump 版號 → preflight → 打包 OTA ZIP → 驗證大小 → 重啟主控端 → 同步 NAS website-api → 推送全部生產代理 → 驗證更新結果。封裝 `publish_update.py` 的完整發布流程並接手機隊 OTA 推送。
+一鍵發布新版本：bump 版號 → preflight → pytest gate → 打包 OTA ZIP → 驗證大小 → 同步 NAS website-api →（**dev 機必加**：deploy_to_prod 把碼推進生產主控 `C:\OriginsunAgent`）→ 金絲雀驗證 → 推送全部生產代理 → 驗證更新結果。封裝 `publish_update.py` + `deploy_to_prod` 並接手機隊 OTA 推送。
+
+> 🔴 **dev 機發版的碼來源坑（此 skill 的核心）**：機隊 9 台更新時是去主控 8000 的 `/download_update` 抓 ZIP，而那個 ZIP 是**用 `C:\OriginsunAgent` 的碼即時重建**（[api_ota.py](../../routers/api_ota.py) `_PROD_DIR` / `download_update` 的 `base_dir`）。但 `publish_update.py` **從不寫 `C:\OriginsunAgent`**（只 bump `E:\Dev` version.json + 同步 NAS 官網）。所以在 dev 機上，光跑 `publish_update.py` 就推機隊 = 9 台抓到舊碼、只掛新版號（靜默壞掉）。**dev 機必須用 `deploy_to_prod`（Step 2.5）把碼推進 `C:\OriginsunAgent` 後，機隊才會拿到新碼。** 乾淨生產環境沒這坑（跑的就是本地碼）。
 
 ## 🔒 安全鐵則：本機（dev checkout）硬阻擋（違反即停止）
 
@@ -59,24 +61,49 @@ $pubRoot = (Get-Location).Path
    - 沒帶 → 問使用者一句話描述本次變更（可用 `git log --oneline <current_tag>..HEAD` 草擬建議）。
 4. **禁止**自己手改 `version.json` —— 一律交給 `publish_update.py`（它會做依賴掃描、preflight、OTA 驗證、自動重啟、回滾）。
 
-### Step 2：跑 publish_update.py（核心發布）
+### Step 2：跑 publish_update.py（驗證 + 打包 + NAS 官網同步）
 
 ```powershell
 E:\Dev\Originsun-Media-Guard\.venv\Scripts\python.exe publish_update.py --version <版號> --notes "<更新日誌>"
 ```
 （乾淨環境請改成該環境的 venv python 與 repo 路徑。）
 
-此腳本會自動完成：bump version.json → 掃 import 補 `requirements_agent.txt` → 寫 `update_manifest.json` → **preflight**（壞 import 直接 abort + 回滾）→ 打包 ZIP → **驗證 OTA < 50MB**（過大 abort + 回滾）→ POST `127.0.0.1:8000/api/v1/internal/restart` 重啟主控端 → scp code 到 NAS + `docker restart website-api` → 同步 nginx 硬 301 redirects。
+此腳本會自動完成：bump `E:\Dev` version.json → 掃 import 補 `requirements_agent.txt` → 寫 `update_manifest.json` → **preflight**（壞 import 直接 abort + 回滾）→ **pytest tests/unit gate**（測試紅 → abort + 回滾）→ 打包 ZIP → **驗證 OTA < 50MB**（過大 abort + 回滾）→ POST `127.0.0.1:8000/api/v1/internal/restart` 重啟主控端 → scp code 到 NAS website-api + `docker restart website-api` → 同步 nginx 硬 301 redirects。
 
-**逐行讀輸出**：任何 `[ERROR]` / `Preflight 失敗` / `OTA ZIP 過大` → 發布已被腳本回滾，**停止**並把錯誤原文回報，不要往下推機隊。
+**逐行讀輸出**：任何 `[ERROR]` / `Preflight 失敗` / `pytest 失敗` / `OTA ZIP 過大` → 發布已被腳本回滾，**停止**並把錯誤原文回報，不要往下走。
 
-### Step 3：等主控端回來
+> 🔴 **dev 機關鍵**：這步**只**驗證 + bump `E:\Dev` version.json + 同步 NAS 官網 —— 它**不**把碼部署到生產主控 `C:\OriginsunAgent`（機隊 OTA 的碼來源）。它重啟 8000，但 8000 跑的是 `C:\OriginsunAgent` 舊碼 → 重啟後仍是舊碼舊版。所以 dev 機**必須**接著跑 Step 2.5，否則機隊拿到舊碼。乾淨生產環境（跑的就是本地碼）→ **跳過 Step 2.5**，直接 Step 3。
 
-重啟後等主控端恢復（最多 ~30s，每 3s 探一次）：
+### Step 2.5：deploy_to_prod（**僅 dev 機**；跳過＝機隊拿舊碼靜默壞掉）
+
+在 **dev 8001** 上呼叫 —— 它把 `E:\Dev` 碼複製進 `C:\OriginsunAgent`、bump 兩邊 version.json、**自動備份舊碼到 `_deploy_backup`**、重啟 8000、smoke check（版本+健康，最長約 2 分鐘），**失敗自動回滾舊碼**：
+
+```powershell
+$login = Invoke-RestMethod "http://127.0.0.1:8001/api/v1/auth/login" -Method Post -ContentType "application/json" -Body '{"username":"admin","password":"admin"}'
+$tok = $login.token
+$body = @{ version = "<版號>"; notes = "<更新日誌>" } | ConvertTo-Json
+$dep = Invoke-RestMethod "http://127.0.0.1:8001/api/v1/deploy_to_prod" -Method Post -Headers @{Authorization="Bearer $tok"} -ContentType "application/json" -Body $body
+$job = $dep.job_id
+```
+
+輪詢直到結束（smoke 最長約 2 分鐘）：
+
+```powershell
+Invoke-RestMethod "http://127.0.0.1:8001/api/v1/publish/status?job_id=$job" -Headers @{Authorization="Bearer $tok"}
+```
+
+- `status:done` → 生產主控已跑新版 + smoke 通過，繼續 Step 3。
+- `status:error` → 讀 `message`/`log`。deploy_to_prod 有內建 smoke + **自動回滾**（重啟後不健康/版本不符會自動還原舊碼），生產通常已回舊版；**停止**回報，不推機隊。手動還原：`POST http://127.0.0.1:8001/api/v1/deploy_to_prod/rollback`。
+
+> ⚠️ 這步會重啟同事正在用的生產主控 8000，並對**生產 DB** 跑 startup migration（create_all / `ALTER … IF NOT EXISTS` / 種子）。純新增/冪等，但確實動生產 —— dev 機發版務必先確認可短暫中斷。有內建備份+回滾，比手動 robocopy 安全，**不需**另外手動備份。
+
+### Step 3：驗證生產主控金絲雀（8000）
+
 ```powershell
 try { (Invoke-WebRequest "http://127.0.0.1:8000/api/v1/version" -TimeoutSec 3 -UseBasicParsing).Content } catch { "DOWN" }
 ```
-確認回傳的 version 已是新版號才繼續。
+
+確認：(a) version == 新版號；(b) 本次新功能的關鍵端點存在（查 `http://127.0.0.1:8000/openapi.json` 有無新路由）；(c) 啟動無錯。**金絲雀不乾淨 → 停止，別推機隊**（先 `deploy_to_prod/rollback`）。乾淨生產環境只需確認 version 已是新版號。
 
 ### Step 4：推送全部生產代理（OTA + busy check）
 
@@ -99,7 +126,7 @@ try { (Invoke-WebRequest "http://127.0.0.1:8000/api/v1/version" -TimeoutSec 3 -U
 
 ### Step 5：總結回報
 
-一張表回報：版號 `current → new`、OTA 檔數/大小、主控端重啟結果、NAS website-api 同步成功與否、**每台機隊**的更新結果（done / failed / skipped-busy）。失敗或被跳過的明確列出，**不要粉飾**。
+一張表回報：版號 `current → new`、OTA 檔數/大小、NAS website-api 同步成功與否、**deploy_to_prod 金絲雀（8000）結果**（dev 機才有）、主控端版本驗證、**每台機隊**的更新結果（done / failed / skipped-busy）。失敗或被跳過的明確列出，**不要粉飾**。
 
 ## 完成後
 

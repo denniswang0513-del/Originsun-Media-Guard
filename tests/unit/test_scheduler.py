@@ -43,19 +43,30 @@ class TestDailyMasterGate:
     def _run(self, monkeypatch, key, *, master=True, db=True, factory=True,
              hour_ok=True, body=None):
         import asyncio
+        import datetime as _dt
         import core.state
         import core.topology
         import config
         import db.session as dbsession
         import core.scheduler as sched
         sched._daily_fired.clear()
+
+        # 🔴 凍結時間，不要靠 remind_hour 放行：gate 是 `int(設定值 or 9)`，設 0 會被
+        # `or` 吃掉退回 9 → 測試變成「9 點前紅、9 點後綠」的時間相依 flaky
+        # （2026-07-13 發版的 pytest gate 抓到）。10:00 過 hour gate、08:00 被擋。
+        frozen = _dt.datetime(2026, 7, 13, 10 if hour_ok else 8, 0, 0)
+
+        class _FrozenDT:
+            @staticmethod
+            def now():
+                return frozen
+
+        monkeypatch.setattr(sched, "datetime", _FrozenDT)
         monkeypatch.setattr(core.topology, "is_master_machine", lambda: master)
         monkeypatch.setattr(core.state, "db_online", db)
         monkeypatch.setattr(dbsession, "get_session_factory",
                             lambda: (lambda: None) if factory else None)
-        # hour_ok：remind_hour=0 → now.hour<0 永遠 False（過 hour gate）；否則 99 擋掉
-        monkeypatch.setattr(config, "load_settings",
-                            lambda: {"finance": {"loan_remind_hour": 0 if hour_ok else 99}})
+        monkeypatch.setattr(config, "load_settings", lambda: {"finance": {}})
         calls = []
 
         async def _default_body(f, n):
