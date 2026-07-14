@@ -786,6 +786,12 @@ async def delete_cash_entry(entry_id: str, request: Request):
             inv = await session.get(CrmInvoice, e.invoice_id)
             if inv and inv.payment_status == "已收款":
                 _unmark_invoice_received(inv)  # 收款關聯的收支被刪 → 收款日一併清掉
+        # 對帳工作台反向清理：這筆若被對帳單明細認領，解除認領
+        # （否則該列永遠顯示已勾銷、指向不存在的收支）
+        from sqlalchemy import update as _saupdate
+        from db.models import BankStatementLine
+        await session.execute(_saupdate(BankStatementLine).where(
+            BankStatementLine.matched_entry_id == entry_id).values(matched_entry_id=None))
         await session.delete(e)
         await session.commit()
     return {"status": "ok"}

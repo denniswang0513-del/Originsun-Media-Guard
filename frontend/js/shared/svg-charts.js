@@ -63,7 +63,7 @@ function _normSeries(series) {
 /** 友善空狀態佔位 SVG */
 function _empty(W, H, text) {
     const msg = _esc(text || '此期間沒有資料');
-    return `<svg viewBox="0 0 ${W} ${H}" width="100%" height="auto" preserveAspectRatio="xMidYMid meet"
+    return `<svg viewBox="0 0 ${W} ${H}" width="100%" preserveAspectRatio="xMidYMid meet"
         style="max-width:100%;display:block;${_FONT}" role="img" aria-label="${msg}">
         <rect x="0" y="0" width="${W}" height="${H}" fill="#1c1c1c" rx="8"/>
         <text x="${W / 2}" y="${H / 2}" fill="#666" font-size="13" text-anchor="middle" dominant-baseline="middle">${msg}</text>
@@ -165,7 +165,7 @@ export function lineChart(series, opts = {}) {
         xlabels += `<text x="${xAt(i).toFixed(1)}" y="${H - 10}" fill="${_TXT}" font-size="10" text-anchor="middle">${_esc(labels[i] ?? '')}</text>`;
     }
 
-    return `<svg viewBox="0 0 ${W} ${H}" width="100%" height="auto" preserveAspectRatio="xMidYMid meet"
+    return `<svg viewBox="0 0 ${W} ${H}" width="100%" preserveAspectRatio="xMidYMid meet"
         style="max-width:100%;display:block;${_FONT}" role="img">
         ${showLegend ? _legend(s, padL, 14) : ''}
         ${ax.grid}
@@ -227,7 +227,7 @@ export function hbars(items, opts = {}) {
         <text x="${W - 4}" y="${(cy + rowH / 2 + 4).toFixed(1)}" fill="${_TXT2}" font-size="11.5" text-anchor="end">${_esc(fmt(v))}${pctTxt ? `  <tspan fill="${_TXT}">${pctTxt}</tspan>` : ''}</text>`;
     });
 
-    return `<svg viewBox="0 0 ${W} ${H}" width="100%" height="auto" preserveAspectRatio="xMidYMid meet"
+    return `<svg viewBox="0 0 ${W} ${H}" width="100%" preserveAspectRatio="xMidYMid meet"
         style="max-width:100%;display:block;${_FONT}" role="img">
         ${body}
     </svg>`;

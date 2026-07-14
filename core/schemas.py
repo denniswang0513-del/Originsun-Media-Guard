@@ -867,6 +867,43 @@ class ReconciliationPayload(BaseModel):
     note: Optional[str] = None
 
 
+class StatementLineIn(BaseModel):
+    """對帳單明細單列（匯入/手動 key 共用）。amount 有號：正=存入、負=支出。"""
+    line_date: Optional[str] = None        # 'YYYY-MM-DD'
+    description: str = ""
+    amount: int
+
+
+class StatementLinesBulkPayload(BaseModel):
+    """對帳單明細批次新增。replace=true 先清同帳戶同月既有明細（重新匯入）。"""
+    bank_account_id: str
+    month: str                             # 'YYYY-MM'
+    lines: List[StatementLineIn]
+    replace: bool = False
+
+
+class StatementLineUpdatePayload(BaseModel):
+    """對帳單明細列只開放補交易日/註記 — 金額摘要要改就刪列重加。"""
+    line_date: Optional[str] = None        # 'YYYY-MM-DD'（無日期匯入列補記前要先補）
+    note: Optional[str] = None
+
+
+class StatementLineMatchPayload(BaseModel):
+    entry_id: str
+
+
+class StatementLineCreateEntryPayload(BaseModel):
+    """補記入帳：從對帳單明細建收支明細（category → 科目走既有對映）。"""
+    category: str = ""
+    summary: Optional[str] = None          # 預設帶對帳單摘要
+    payee: str = ""
+
+
+class StatementAutoMatchPayload(BaseModel):
+    bank_account_id: str
+    month: str                             # 'YYYY-MM'
+
+
 class FinanceAdjustmentPayload(BaseModel):
     """財務調整列 — 不得指向銀行類科目（code 11xx），後端驗證擋下。"""
     adj_date: Optional[str] = None         # 'YYYY-MM-DD'（create 必填由端點檢查）

@@ -8,6 +8,9 @@ api_finance.py — 財務管理階段二/三：科目對映 + 銀行帳戶 + 對
   + 會計處理方式（treatment），批次 upsert + 未對映掃描
 - 銀行帳戶（bank_accounts）：期初餘額 + 掛帳收支流水 = 即時餘額
 - 對帳（bank_reconciliations）：每帳戶每月一筆，system_balance 後端算
+- 對帳工作台（bank_statement_lines）：對帳單明細匯入/手動 key → 逐筆與收支
+  勾銷（自動配對 + 手動配對 + 補記入帳選類別 + 時間差註記）。明細是工作底稿，
+  唯一寫真帳的是補記入帳（建 CrmCashEntry，受月結守衛）
 - 調整表（finance_adjustments）：期初/更正/業主往來 — 🔴 不得指向銀行類科目
   （code 11xx），影響現金的修正一律走收支明細；受月結守衛
 - 設定精靈（setup-wizard）：一次建帳戶 + 掛歷史收支 + 設基準月 + 期初權益
@@ -32,13 +35,21 @@ from fastapi import APIRouter, HTTPException, Request  # type: ignore
 from config import load_settings, save_settings
 from core.auth import check_admin_or_module
 from core.db_guard import db_factory_or_503 as _factory_or_503
-from core.finance_logic import (amortization_schedule, bank_running_balance,
+from core.finance_logic import (amortization_schedule,
+                                auto_match_statement_lines,
+                                bank_running_balance, cash_entry_flow,
                                 local_day, period_months, reconciliation_diff,
-                                today_start)
+                                statement_line_status, today_start,
+                                workbench_summary)
 from core.schemas import (BankAccountPayload, BulkAssignAccountPayload,
                           FinanceAdjustmentPayload, FinanceCategoryMapPut,
                           FinanceSetupWizardPayload, LoanPayload,
-                          LoanPayPayload, ReconciliationPayload)
+                          LoanPayPayload, ReconciliationPayload,
+                          StatementAutoMatchPayload,
+                          StatementLineCreateEntryPayload,
+                          StatementLineMatchPayload,
+                          StatementLinesBulkPayload,
+                          StatementLineUpdatePayload)
 from routers.crm._shared import (_assert_month_open, _parse_day, _username,
                                  _validate_month)
 
@@ -336,6 +347,26 @@ async def delete_bank_account(account_id: str, request: Request):
 
 # ── 對帳 ────────────────────────────────────────────────────
 
+def _entry_flow(e) -> int:
+    """CrmCashEntry ORM 列 → 有號淨流（cash_entry_flow 的 dict 形狀轉接）。"""
+    return cash_entry_flow({"deposit": e.deposit, "expense": e.expense,
+                            "bank_fee": e.bank_fee, "claim": e.claim})
+
+
+def _month_window(month: str) -> tuple:
+    """'YYYY-MM' → (月初, 次月初) naive datetime（與收支寫入端一致的本地日語意）。"""
+    start = datetime.strptime(month + "-01", "%Y-%m-%d")
+    return start, (start + timedelta(days=32)).replace(day=1)
+
+
+async def _system_balance(session, acct, month: str) -> int:
+    """帳戶月底系統餘額 = 期初 + 月底（含）前掛帳流水。
+    餘額核對（create_reconciliation）與工作台共用 — 對帳的核心數字只算一種。"""
+    _start, end = _month_window(month)
+    sums = await _flow_sums_by_account(session, until=end, account_id=acct.id)
+    return bank_running_balance(acct.opening_balance or 0, [sums.get(acct.id, {})])
+
+
 def _recon_dict(r) -> dict:
     return {
         "id": r.id, "bank_account_id": r.bank_account_id, "month": r.month,
@@ -374,13 +405,7 @@ async def create_reconciliation(payload: ReconciliationPayload, request: Request
         acct = await session.get(BankAccount, payload.bank_account_id)
         if not acct:
             raise HTTPException(status_code=404, detail="帳戶不存在")
-        # 月底（含）前 = entry_date < 次月 1 日
-        next_month = (datetime.strptime(month + "-01", "%Y-%m-%d")
-                      + timedelta(days=32)).replace(day=1)
-        sums = await _flow_sums_by_account(session, until=next_month,
-                                           account_id=acct.id)
-        system_balance = bank_running_balance(acct.opening_balance or 0,
-                                              [sums.get(acct.id, {})])
+        system_balance = await _system_balance(session, acct, month)
         rd = reconciliation_diff(system_balance, payload.statement_balance)
         row = (await session.execute(
             select(BankReconciliation).where(
@@ -401,6 +426,257 @@ async def create_reconciliation(payload: ReconciliationPayload, request: Request
         await session.commit()
         return {"id": row.id, "system_balance": system_balance,
                 "diff": rd["diff"], "status": rd["status"]}
+
+
+# ── 對帳工作台（對帳單明細逐筆勾銷）──────────────────────────
+
+def _stmt_dict(l) -> dict:
+    line_date = local_day(l.line_date)
+    d = {
+        "id": l.id, "bank_account_id": l.bank_account_id, "month": l.month,
+        "line_date": line_date.strftime("%Y-%m-%d") if line_date else None,
+        "description": l.description or "", "amount": l.amount,
+        "matched_entry_id": l.matched_entry_id, "note": l.note or "",
+    }
+    d["status"] = statement_line_status(d)
+    return d
+
+
+def _wb_entry_dict(e, matched_ids: set) -> dict:
+    entry_date = local_day(e.entry_date)
+    return {
+        "id": e.id,
+        "entry_date": entry_date.strftime("%Y-%m-%d") if entry_date else None,
+        "summary": e.summary or "", "category": e.category or "",
+        "payee": e.payee or "", "amount": _entry_flow(e),
+        "matched": e.id in matched_ids,
+    }
+
+
+async def _wb_load(session, bank_account_id: str, month: str) -> tuple:
+    """工作台資料：(該帳戶該月對帳單明細列, 該帳戶該月收支明細, 已配對 entry id 集合)。
+
+    matched 集合查「這批收支被哪列認領」不限列的月份 — 跨月認領也要現形；
+    以 in_ 篩住本月收支的 id，避免掃全表（配對唯一性另有 partial unique index 後盾）。"""
+    from sqlalchemy import select
+    from db.models import BankStatementLine, CrmCashEntry
+    lines = (await session.execute(
+        select(BankStatementLine).where(
+            BankStatementLine.bank_account_id == bank_account_id,
+            BankStatementLine.month == month)
+        .order_by(BankStatementLine.line_date, BankStatementLine.created_at))).scalars().all()
+    start, end = _month_window(month)
+    entries = (await session.execute(
+        select(CrmCashEntry).where(
+            CrmCashEntry.bank_account_id == bank_account_id,
+            CrmCashEntry.entry_date >= start, CrmCashEntry.entry_date < end)
+        .order_by(CrmCashEntry.entry_date))).scalars().all()
+    matched_ids = set()
+    if entries:
+        matched_ids = set((await session.execute(
+            select(BankStatementLine.matched_entry_id).where(
+                BankStatementLine.matched_entry_id.in_([e.id for e in entries])))).scalars().all())
+    return lines, entries, matched_ids
+
+
+@router.get("/reconciliations/workbench")
+async def reconciliation_workbench(request: Request, bank_account_id: str, month: str):
+    """對帳工作台一次拿全：對帳單明細 + 該月收支（含配對旗標）+ 摘要 + 系統餘額
+    + 既有對帳紀錄。前端只打這支就能畫整個工作台。"""
+    _guard(request)
+    month = _validate_month(month)
+    from sqlalchemy import select
+    from db.models import BankAccount, BankReconciliation
+    factory = _factory_or_503()
+    async with factory() as session:
+        acct = await session.get(BankAccount, bank_account_id)
+        if not acct:
+            raise HTTPException(status_code=404, detail="帳戶不存在")
+        lines, entries, matched_ids = await _wb_load(session, bank_account_id, month)
+        system_balance = await _system_balance(session, acct, month)
+        recon = (await session.execute(
+            select(BankReconciliation).where(
+                BankReconciliation.bank_account_id == bank_account_id,
+                BankReconciliation.month == month))).scalar_one_or_none()
+    line_dicts = [_stmt_dict(l) for l in lines]
+    entry_dicts = [_wb_entry_dict(e, matched_ids) for e in entries]
+    return {
+        "lines": line_dicts,
+        "entries": entry_dicts,
+        "summary": workbench_summary(line_dicts, entry_dicts),
+        "system_balance": system_balance,
+        "reconciliation": _recon_dict(recon) if recon else None,
+    }
+
+
+@router.post("/statement-lines")
+async def add_statement_lines(payload: StatementLinesBulkPayload, request: Request):
+    """對帳單明細批次新增（貼上匯入 / 手動 key 都走這支）。
+    工作底稿不掛月結守衛 — 唯一寫真帳的補記入帳才有。replace=true 先清同帳戶
+    同月既有明細（含配對連結；收支明細本身不動）。"""
+    _guard(request)
+    month = _validate_month(payload.month)
+    if not payload.lines:
+        raise HTTPException(status_code=422, detail="lines 不可為空")
+    for i, ln in enumerate(payload.lines):
+        if not ln.amount:
+            raise HTTPException(status_code=422, detail=f"第 {i + 1} 列金額不可為 0")
+    from sqlalchemy import delete as sadelete
+    from db.models import BankAccount, BankStatementLine
+    factory = _factory_or_503()
+    async with factory() as session:
+        if not await session.get(BankAccount, payload.bank_account_id):
+            raise HTTPException(status_code=404, detail="帳戶不存在")
+        if payload.replace:
+            await session.execute(sadelete(BankStatementLine).where(
+                BankStatementLine.bank_account_id == payload.bank_account_id,
+                BankStatementLine.month == month))
+        user = _username(request)
+        for ln in payload.lines:
+            session.add(BankStatementLine(
+                id=uuid.uuid4().hex, bank_account_id=payload.bank_account_id,
+                month=month, line_date=_parse_day(ln.line_date),
+                description=(ln.description or "")[:255], amount=ln.amount,
+                created_by=user))
+        await session.commit()
+    return {"ok": True, "added": len(payload.lines)}
+
+
+async def _stmt_line_or_404(session, line_id: str):
+    from db.models import BankStatementLine
+    row = await session.get(BankStatementLine, line_id)
+    if not row:
+        raise HTTPException(status_code=404, detail="對帳單明細不存在")
+    return row
+
+
+@router.put("/statement-lines/{line_id}")
+async def update_statement_line(line_id: str, payload: StatementLineUpdatePayload,
+                                request: Request):
+    """只開放補交易日與註記 — 金額/摘要要改就刪列重加（工作底稿，改配對過的
+    金額會讓差額數學失真，乾脆不開這扇門）。"""
+    _guard(request)
+    factory = _factory_or_503()
+    async with factory() as session:
+        row = await _stmt_line_or_404(session, line_id)
+        if payload.line_date is not None:
+            row.line_date = _parse_day(payload.line_date)
+        if payload.note is not None:
+            row.note = payload.note
+        await session.commit()
+        return _stmt_dict(row)
+
+
+@router.delete("/statement-lines/{line_id}")
+async def delete_statement_line(line_id: str, request: Request):
+    """刪明細列（工作底稿）— 配對連結一併消失，收支明細本身不動。"""
+    _guard(request)
+    factory = _factory_or_503()
+    async with factory() as session:
+        row = await _stmt_line_or_404(session, line_id)
+        await session.delete(row)
+        await session.commit()
+    return {"ok": True}
+
+
+@router.post("/statement-lines/auto-match")
+async def auto_match_statement(payload: StatementAutoMatchPayload, request: Request):
+    """自動配對：金額相等 + 日期最近（純函式 auto_match_statement_lines）→ 寫回連結。"""
+    _guard(request)
+    month = _validate_month(payload.month)
+    from db.models import BankAccount, BankStatementLine
+    factory = _factory_or_503()
+    async with factory() as session:
+        if not await session.get(BankAccount, payload.bank_account_id):
+            raise HTTPException(status_code=404, detail="帳戶不存在")
+        lines, entries, matched_ids = await _wb_load(session, payload.bank_account_id, month)
+        pairs = auto_match_statement_lines(
+            [{"id": l.id, "amount": l.amount, "line_date": local_day(l.line_date),
+              "matched_entry_id": l.matched_entry_id} for l in lines],
+            [{"id": e.id, "entry_date": local_day(e.entry_date), "deposit": e.deposit,
+              "expense": e.expense, "bank_fee": e.bank_fee, "claim": e.claim}
+             for e in entries if e.id not in matched_ids])
+        by_id = {l.id: l for l in lines}
+        for line_id, entry_id in pairs:
+            by_id[line_id].matched_entry_id = entry_id
+        await session.commit()
+    return {"ok": True, "matched": len(pairs)}
+
+
+@router.post("/statement-lines/{line_id}/match")
+async def match_statement_line(line_id: str, payload: StatementLineMatchPayload,
+                               request: Request):
+    """手動配對：金額必須相等（差額數學才成立）、一筆收支只能被一列認領。"""
+    _guard(request)
+    from sqlalchemy import select
+    from db.models import BankStatementLine, CrmCashEntry
+    factory = _factory_or_503()
+    async with factory() as session:
+        row = await _stmt_line_or_404(session, line_id)
+        if row.matched_entry_id:
+            raise HTTPException(status_code=409, detail="此列已配對，請先取消配對")
+        entry = await session.get(CrmCashEntry, payload.entry_id)
+        if not entry:
+            raise HTTPException(status_code=404, detail="收支明細不存在")
+        if (entry.bank_account_id or "") != row.bank_account_id:
+            raise HTTPException(status_code=422, detail="該筆收支不屬於這個帳戶")
+        flow = _entry_flow(entry)
+        if flow != row.amount:
+            raise HTTPException(
+                status_code=422,
+                detail=f"金額不符：對帳單 {row.amount:+,} vs 收支淨流 {flow:+,} — "
+                       "金額不同不能硬配，漏記請用「補記入帳」")
+        taken = (await session.execute(
+            select(BankStatementLine.id).where(
+                BankStatementLine.matched_entry_id == payload.entry_id))).scalar_one_or_none()
+        if taken:
+            raise HTTPException(status_code=409, detail="該筆收支已被其他對帳單明細認領")
+        row.matched_entry_id = payload.entry_id
+        await session.commit()
+        return _stmt_dict(row)
+
+
+@router.post("/statement-lines/{line_id}/unmatch")
+async def unmatch_statement_line(line_id: str, request: Request):
+    _guard(request)
+    factory = _factory_or_503()
+    async with factory() as session:
+        row = await _stmt_line_or_404(session, line_id)
+        row.matched_entry_id = None
+        await session.commit()
+        return _stmt_dict(row)
+
+
+@router.post("/statement-lines/{line_id}/create-entry")
+async def create_entry_from_statement_line(
+        line_id: str, payload: StatementLineCreateEntryPayload, request: Request):
+    """補記入帳：銀行有、系統漏記 → 從明細列建收支明細並自動配對。
+    寫真帳 → 月結守衛看交易日；category 必填（→ 科目走既有對映，沒對映會
+    出現在未歸類佇列）。正額=存入、負額=支出。"""
+    _guard(request)
+    from db.models import CrmCashEntry
+    factory = _factory_or_503()
+    async with factory() as session:
+        row = await _stmt_line_or_404(session, line_id)
+        if row.matched_entry_id:
+            raise HTTPException(status_code=409, detail="此列已配對，不需補記")
+        if not row.line_date:
+            raise HTTPException(status_code=422, detail="請先填這列的交易日再補記")
+        if not (payload.category or "").strip():
+            raise HTTPException(status_code=422, detail="請選擇類別（報表要靠它歸科目）")
+        await _assert_month_open(session, row.line_date)
+        amt = row.amount
+        entry = CrmCashEntry(
+            id=uuid.uuid4().hex, entry_date=row.line_date,
+            deposit=amt if amt > 0 else None,
+            expense=-amt if amt < 0 else None,
+            summary=(payload.summary or row.description or "銀行對帳補記")[:255],
+            category=payload.category.strip(), payee=payload.payee or None,
+            note="銀行對帳補記", bank_account_id=row.bank_account_id)
+        session.add(entry)
+        row.matched_entry_id = entry.id
+        await session.commit()
+        return {"ok": True, "cash_entry_id": entry.id, "line": _stmt_dict(row)}
 
 
 # ── 調整表 ──────────────────────────────────────────────────

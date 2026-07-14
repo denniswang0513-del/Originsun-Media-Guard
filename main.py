@@ -838,6 +838,10 @@ async def _on_startup():
                         "ALTER TABLE crm_invoices ADD COLUMN IF NOT EXISTS paid_date TIMESTAMPTZ",
                         # 器材除役日（折舊自該月停止）
                         "ALTER TABLE equipment ADD COLUMN IF NOT EXISTS retired_date TIMESTAMPTZ",
+                        # 對帳工作台：一筆收支只能被一列對帳單明細認領（既有表補建；
+                        # 新環境 create_all 隨 model 建）— 也是 matched_entry_id 查詢的索引
+                        "CREATE UNIQUE INDEX IF NOT EXISTS uq_stmtline_matched_entry "
+                        "ON bank_statement_lines(matched_entry_id) WHERE matched_entry_id IS NOT NULL",
                     ]:
                         try:
                             await _sfin.execute(_tfin(col_sql))

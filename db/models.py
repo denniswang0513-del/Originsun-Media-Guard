@@ -1089,6 +1089,34 @@ class BankReconciliation(Base):
                                        name="uq_bankrecon_account_month"),)
 
 
+class BankStatementLine(Base):
+    """銀行對帳單明細列 — 對帳工作台的「銀行說發生了什麼」側，逐筆與收支明細勾銷。
+
+    工作底稿性質（非帳務資料）：新增/編輯/刪除/配對都只動這張表；唯一寫真帳的
+    動作是「補記入帳」（建 CrmCashEntry，受月結守衛）。狀態為推導值不落庫：
+    matched（有 matched_entry_id）> noted（有 note）> unmatched。"""
+    __tablename__ = "bank_statement_lines"
+
+    id = Column(String(32), primary_key=True)
+    bank_account_id = Column(String(32), nullable=False)         # soft FK → bank_accounts.id
+    month = Column(String(7), nullable=False)                    # 'YYYY-MM' 對帳月份
+    line_date = Column(DateTime(timezone=True), nullable=True)   # 對帳單交易日
+    description = Column(String(255), nullable=True)             # 對帳單摘要
+    amount = Column(Integer, nullable=False)                     # 有號：正=存入、負=支出
+    matched_entry_id = Column(String(32), nullable=True)         # soft FK → crm_cash_entries.id
+    note = Column(Text, nullable=True)                           # 未配對說明（時間差等）
+    created_by = Column(String(64), nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    __table_args__ = (
+        Index("ix_stmtline_acct_month", "bank_account_id", "month"),
+        # 一筆收支只能被一列認領 — 不變式下沉到 DB（端點先驗回友善 409，這裡是後盾；
+        # 既有表補建走 main.py startup 的 CREATE UNIQUE INDEX IF NOT EXISTS）
+        Index("uq_stmtline_matched_entry", matched_entry_id, unique=True,
+              postgresql_where=matched_entry_id.isnot(None)),
+    )
+
+
 class FinanceAdjustment(Base):
     """財務調整表 — 期初建帳/更正/業主往來/會計師調整等非日常分錄。
 

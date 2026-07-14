@@ -8,11 +8,14 @@ from datetime import date, datetime, timezone
 import pytest
 
 from core.finance_logic import (
+    auto_match_statement_lines,
     bank_running_balance,
     cash_entry_flow,
     classify_cash_entry,
     month_of,
     reconciliation_diff,
+    statement_line_status,
+    workbench_summary,
 )
 from db.seed_finance import SEED_CATEGORY_MAP
 
@@ -157,3 +160,107 @@ class TestMonthOf:
         assert month_of("not-a-date") is None
         assert month_of("2026/07/11") is None
         assert month_of("2026-13-01") is None  # 不存在的月份
+
+
+# ── 對帳工作台（明細逐筆勾銷）────────────────────────────────
+
+def _line(id, amount, day=None, matched=None, note=None):
+    return {"id": id, "amount": amount,
+            "line_date": date(2026, 7, day) if day else None,
+            "matched_entry_id": matched, "note": note}
+
+
+def _entry(id, flow, day=None):
+    """flow 有號：正=deposit、負=expense（cash_entry_flow 會還原成同值）。"""
+    return {"id": id, "entry_date": date(2026, 7, day) if day else None,
+            "deposit": flow if flow > 0 else None,
+            "expense": -flow if flow < 0 else None,
+            "bank_fee": None, "claim": None}
+
+
+class TestStatementLineStatus:
+    def test_matched_beats_noted(self):
+        assert statement_line_status(_line("a", 100, matched="e1", note="x")) == "matched"
+
+    def test_noted(self):
+        assert statement_line_status(_line("a", 100, note="上月已入帳（時間差）")) == "noted"
+
+    def test_blank_note_is_unmatched(self):
+        assert statement_line_status(_line("a", 100, note="  ")) == "unmatched"
+
+
+class TestAutoMatchStatementLines:
+    def test_exact_amount_and_date(self):
+        pairs = auto_match_statement_lines(
+            [_line("l1", 5000, day=3)], [_entry("e1", 5000, day=3)])
+        assert pairs == [("l1", "e1")]
+
+    def test_signed_amount_no_cross_sign_match(self):
+        """存入 +5000 不可配到支出 −5000（有號比對）。"""
+        assert auto_match_statement_lines(
+            [_line("l1", 5000, day=3)], [_entry("e1", -5000, day=3)]) == []
+
+    def test_nearest_date_wins(self):
+        pairs = auto_match_statement_lines(
+            [_line("l1", 5000, day=10)],
+            [_entry("far", 5000, day=2), _entry("near", 5000, day=9)])
+        assert pairs == [("l1", "near")]
+
+    def test_tolerance_days_blocks_far_match(self):
+        assert auto_match_statement_lines(
+            [_line("l1", 5000, day=1)], [_entry("e1", 5000, day=20)]) == []
+
+    def test_tie_prefers_earlier_entry(self):
+        """|日期差| 同 → entry_date 較早者（確定性）。"""
+        pairs = auto_match_statement_lines(
+            [_line("l1", 5000, day=10)],
+            [_entry("later", 5000, day=12), _entry("earlier", 5000, day=8)])
+        assert pairs == [("l1", "earlier")]
+
+    def test_entry_used_once(self):
+        """兩列同金額搶一筆收支 → 只有日期較早的列配到。"""
+        pairs = auto_match_statement_lines(
+            [_line("l2", 5000, day=6), _line("l1", 5000, day=4)],
+            [_entry("e1", 5000, day=5)])
+        assert pairs == [("l1", "e1")]
+
+    def test_missing_date_only_matches_sole_candidate(self):
+        assert auto_match_statement_lines(
+            [_line("l1", 5000)], [_entry("e1", 5000, day=5)]) == [("l1", "e1")]
+        assert auto_match_statement_lines(
+            [_line("l1", 5000)],
+            [_entry("e1", 5000, day=5), _entry("e2", 5000, day=6)]) == []
+
+    def test_matched_line_and_taken_entry_skipped(self):
+        """已配對的列不重配；被其他列認領的收支不再是候選。"""
+        pairs = auto_match_statement_lines(
+            [_line("l1", 5000, day=3, matched="e1"), _line("l2", 5000, day=3)],
+            [_entry("e1", 5000, day=3), _entry("e2", 5000, day=4)])
+        assert pairs == [("l2", "e2")]
+
+    def test_bank_fee_included_in_flow(self):
+        """收支淨流含匯費：expense 4970 + bank_fee 30 = 對帳單 −5000。"""
+        entry = {"id": "e1", "entry_date": date(2026, 7, 3),
+                 "deposit": None, "expense": 4970, "bank_fee": 30, "claim": None}
+        assert auto_match_statement_lines(
+            [_line("l1", -5000, day=3)], [entry]) == [("l1", "e1")]
+
+
+class TestWorkbenchSummary:
+    def test_counts_and_sums(self):
+        lines = [_line("l1", 5000, matched="e1"),
+                 _line("l2", -2000, note="時間差：上月已記"),
+                 _line("l3", 800)]
+        entries = [{"id": "e1", "amount": 5000, "matched": True},
+                   {"id": "e2", "amount": -300, "matched": False}]
+        s = workbench_summary(lines, entries)
+        assert (s["lines_total"], s["lines_matched"], s["lines_noted"],
+                s["lines_unmatched"]) == (3, 1, 1, 1)
+        assert s["lines_bank_only"] == 2                 # noted+unmatched 同一桶（計數與金額同源）
+        assert s["lines_unmatched_sum"] == -2000 + 800   # noted 也算銀行有系統沒有
+        assert (s["entries_total"], s["entries_matched"], s["entries_unmatched"]) == (2, 1, 1)
+        assert s["entries_unmatched_sum"] == -300
+
+    def test_empty(self):
+        s = workbench_summary([], [])
+        assert s["lines_total"] == 0 and s["entries_unmatched_sum"] == 0

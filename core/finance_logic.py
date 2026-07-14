@@ -22,6 +22,11 @@ DB 撈出來的值餵進來。單元測試在 tests/unit/test_finance_logic.py
 - loan_interest_total：利息費用權責認列（按 due_date，不管繳沒繳）
 - loan_outstanding_rows：BS 非流動負債逐筆貸款餘額（單純看繳款事實）
 - treatment 'loan'（貸款撥款/繳款收支）：不進損益，CF 走科目 cf_activity=financing
+
+對帳工作台（月底對帳升級 — 逐筆勾銷）：
+- statement_line_status：明細列狀態推導（matched/noted/unmatched，不落庫）
+- auto_match_statement_lines：金額相等+日期最近的確定性自動配對
+- workbench_summary：配對計數/未配對金額加總（差額解釋交給人）
 """
 from __future__ import annotations
 
@@ -93,6 +98,89 @@ def reconciliation_diff(system_balance: int, statement_balance: int) -> dict:
     """對帳差額：diff = 對帳單餘額 − 系統餘額；歸零才算平（balanced）。"""
     diff = (statement_balance or 0) - (system_balance or 0)
     return {"diff": diff, "status": "balanced" if diff == 0 else "diff"}
+
+
+def statement_line_status(line: dict) -> str:
+    """對帳單明細列狀態（推導值不落庫）：matched（有配對）> noted（有說明）> unmatched。"""
+    if line.get("matched_entry_id"):
+        return "matched"
+    if (line.get("note") or "").strip():
+        return "noted"
+    return "unmatched"
+
+
+def auto_match_statement_lines(lines: list, entries: list, *,
+                               tolerance_days: int = 5) -> list:
+    """對帳單明細 ↔ 收支明細自動配對 → [(line_id, entry_id), ...]。
+
+    確定性演算法（黃金測試鎖住，改規則要先改測試）：
+    - 只配「未配對的 line」×「未被任何 line 佔用的 entry」，一 entry 只配一次
+    - 金額判定：line['amount']（有號）== cash_entry_flow(entry)（有號淨流，含匯費）
+    - 同金額多候選 → 取 |日期差| 最小者（> tolerance_days 不配）；
+      差距同 → entry_date 較早者；再同 → id 字典序（穩定）
+    - line 或 entry 缺日期 → 只在該金額候選唯一時才配（多候選無從判遠近，寧可留人工）
+
+    lines 需要 keys: id / amount / line_date / matched_entry_id；
+    entries 需要 keys: id / entry_date / deposit / expense / bank_fee / claim。
+    日期收 datetime / date / None（呼叫端先 local_day 處理時區；_as_date 收斂型別）。
+    """
+    used = {ln.get("matched_entry_id") for ln in lines if ln.get("matched_entry_id")}
+    avail = {}  # amount → [entry]（保持穩定序）
+    for e in entries:
+        if e.get("id") in used:
+            continue
+        avail.setdefault(cash_entry_flow(e), []).append(e)
+
+    pairs = []
+    pending = [ln for ln in lines if not ln.get("matched_entry_id")]
+    pending.sort(key=lambda ln: (_as_date(ln.get("line_date")) or date.max, str(ln.get("id"))))
+    for ln in pending:
+        cands = avail.get(ln["amount"], [])
+        if not cands:
+            continue
+        ld = _as_date(ln.get("line_date"))
+        dated = [(abs((_as_date(e.get("entry_date")) - ld).days), _as_date(e.get("entry_date")), str(e.get("id")), e)
+                 for e in cands if ld and _as_date(e.get("entry_date"))]
+        if dated:
+            dated.sort(key=lambda t: t[:3])
+            if dated[0][0] > tolerance_days:
+                continue
+            hit = dated[0][3]
+        elif len(cands) == 1:
+            hit = cands[0]
+        else:
+            continue  # 缺日期且多候選 → 留人工
+        pairs.append((ln["id"], hit["id"]))
+        cands.remove(hit)
+    return pairs
+
+
+def workbench_summary(lines: list, entries: list) -> dict:
+    """對帳工作台摘要 — 純計數/加總，給前端 summary bar；不做差額推論
+    （餘額是累計值、明細是單月，兩者的差額關係交給人看）。
+
+    吃工作台 dict 形狀：lines 需要 matched_entry_id / note / amount；
+    entries 需要 matched / amount（有號淨流，配對旗標由呼叫端用全域認領
+    集合算好 — 跨月認領也算 matched，這裡不重算）。
+    - lines_unmatched/noted 分開列：noted=有說明的未配對（如時間差），
+      金額仍計入 lines_unmatched_sum（銀行有、系統本月沒有）
+    """
+    statuses = [statement_line_status(ln) for ln in lines]
+    un_lines = [ln for ln, s in zip(lines, statuses) if s != "matched"]
+    un_entries = [e for e in entries if not e.get("matched")]
+    return {
+        "lines_total": len(lines),
+        "lines_matched": statuses.count("matched"),
+        "lines_noted": statuses.count("noted"),
+        "lines_unmatched": statuses.count("unmatched"),
+        # 「銀行有・系統沒有」桶的計數與金額同源出（前端只渲染，不重推桶規則）
+        "lines_bank_only": len(un_lines),
+        "lines_unmatched_sum": sum(int(ln.get("amount") or 0) for ln in un_lines),
+        "entries_total": len(entries),
+        "entries_matched": len(entries) - len(un_entries),
+        "entries_unmatched": len(un_entries),
+        "entries_unmatched_sum": sum(int(e.get("amount") or 0) for e in un_entries),
+    }
 
 
 def month_of(dt) -> str | None:
