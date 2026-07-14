@@ -372,31 +372,40 @@ async def _push_dist_to_nas(dist_dir: Path) -> tuple[int, str]:
     return push_rc, f"=== ssh-clean ===\n{cleanup_tail}\n=== scp ===\n{push_tail}"
 
 
-async def _push_uploads_to_nas(uploads_dir: Path) -> tuple[int, str]:
-    """scp uploads/projects/ 到 NAS uploads/。回傳 (returncode, log_tail)。
+# master 端寫入、對外頁面引用的 uploads 子目錄（rebuild 時推 NAS）。
+# 作品圖 api_crm 寫 projects/；系列封面 admin_seo upload-cover 寫 series/。
+# brand/team/posts 走 NAS website-api 上傳，本來就在 NAS，不在此列——
+# 避免用 master（可能較舊/不全）覆蓋 NAS 管理的那些目錄。
+_SYNCED_UPLOAD_DIRS = ("projects", "series")
 
-    作品 showcase/cover/featured 圖由 master api_crm 寫在 master 本地 uploads/projects/，
-    但對外 nginx `location /uploads/` 反代的是 NAS website-api 容器 volume（NAS uploads/）。
-    不同步的話，公開頁引用的 /uploads/projects/... 圖對外 404（首頁輪播精選圖、作品
-    showcase 都吃這個）。brand/team/posts 走 NAS website-api 上傳，本來就在 NAS，不在此列——
-    只推 projects/，避免用 master（可能較舊/不全）覆蓋 NAS 管理的那些目錄。
-    projects/ 還不存在（尚無作品圖）→ 視為成功 no-op。
+
+async def _push_uploads_to_nas(uploads_dir: Path) -> tuple[int, str]:
+    """scp _SYNCED_UPLOAD_DIRS 各目錄到 NAS uploads/。回傳 (returncode, log_tail)。
+
+    對外 nginx `location /uploads/` 反代的是 NAS website-api 容器 volume（NAS uploads/），
+    master 本地寫的圖不同步就對外 404（首頁輪播精選圖、作品 showcase、系列封面都吃這個）。
+    目錄還不存在 → 視為成功 no-op；scp 是合併不刪 NAS 既有（uuid 檔名不會撞）。
     """
-    projects_dir = uploads_dir / "projects"
-    if not projects_dir.exists():
-        return 0, "(no uploads/projects to sync)"
+    dirs = [uploads_dir / d for d in _SYNCED_UPLOAD_DIRS if (uploads_dir / d).exists()]
+    if not dirs:
+        return 0, "(no uploads dirs to sync)"
     mk_rc, mk_tail = await _run_subprocess(
         "ssh-mkdir",
         "ssh", "-i", _SSH_KEY_PATH, "-o", "StrictHostKeyChecking=no",
         _NAS_HOST, f"mkdir -p {_NAS_UPLOADS_DIR}",
     )
-    # scp -r projects/ → NAS uploads/（合併，不刪 NAS 既有；uuid 檔名不會撞）
-    push_rc, push_tail = await _run_subprocess(
-        "scp-uploads",
-        "scp", "-i", _SSH_KEY_PATH, "-o", "StrictHostKeyChecking=no",
-        "-r", str(projects_dir), f"{_NAS_HOST}:{_NAS_UPLOADS_DIR}/",
-    )
-    return push_rc, f"=== ssh-mkdir ===\n{mk_tail}\n=== scp-uploads ===\n{push_tail}"
+    # rc 可能是 -1（timeout），不能用 max 聚合 — 取第一個非零者
+    worst_rc, tails = mk_rc, [f"=== ssh-mkdir ===\n{mk_tail}"]
+    for d in dirs:
+        push_rc, push_tail = await _run_subprocess(
+            f"scp-uploads-{d.name}",
+            "scp", "-i", _SSH_KEY_PATH, "-o", "StrictHostKeyChecking=no",
+            "-r", str(d), f"{_NAS_HOST}:{_NAS_UPLOADS_DIR}/",
+        )
+        if worst_rc == 0 and push_rc != 0:
+            worst_rc = push_rc
+        tails.append(f"=== scp-uploads {d.name} (rc={push_rc}) ===\n{push_tail}")
+    return worst_rc, "\n".join(tails)
 
 
 async def _run_build(website_dir: Path) -> None:
