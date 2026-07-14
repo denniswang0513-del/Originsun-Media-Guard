@@ -1,5 +1,5 @@
 {
-  "version": "2.0.0",
+  "version": "2.0.2",
   "build_date": "2026-07-15",
-  "notes": "對帳工作台 + 分類小測驗 + 作品系列"
+  "notes": "rebuild uploads 同步補 series/（系列封面對外 404 修正）"
 }
