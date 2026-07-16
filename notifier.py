@@ -97,7 +97,7 @@ def notify_tab(template_key: str, **variables) -> None:
         "monthly_finance_report": "🧾 【上月財務快報】{month} 營收 {revenue} / 成本 {cost} / 淨利 {net}{warn}\n→ 後台 財務管理 › 財務三表",
         "vat_filing_due":    "🧾 【營業稅申報提醒】{period} 期預估應繳 {estimate} 元，記得申報\n→ 後台 財務管理 › 稅務包",
         "income_tax_prepay": "🧾 【營所稅暫繳提醒】9 月為暫繳月，請備妥暫繳稅款",
-        "project_closing":   "📥 【結案作業】專案「{project_name}」進入官網上架收件匣\n→ 後台 業務管理 › 專案管理 › 結案看板",
+        "project_closing":   "📥 【結案】專案「{project_name}」進入官網上架收件匣\n→ 後台 業務管理 › 專案管理 › 結案看板",
         "works_published":   "🌐 【上架驗證 ✓】{count} 件作品已確認在對外網站上線\n{titles}",
     }
 

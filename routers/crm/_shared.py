@@ -221,14 +221,25 @@ def _to_dict(c) -> dict:
     }
 
 
+# 分級不計入的專案狀態（尚未拿下的案子＝投標/開發/洽詢/提案/未成案，不算真正案件）
+# ——與 clients.py 列表「案件數」欄同口徑，確保客戶狀態與畫面上看到的案件數字一致。
+# 「已拿下」＝製作/結案/歸檔。
+_CLIENT_TIER_EXCLUDE_STATUSES = ("投標", "開發", "洽詢", "提案", "未成案")
+
+
 async def _auto_update_client_status(session, client_id: str):
-    """根據專案數量自動更新客戶狀態：0=潛在客戶, 1=新客戶, 2+=舊客戶"""
+    """依「有效專案數」自動更新客戶分級：0=潛在客戶, 1=新客戶, 2+=舊客戶。
+    有效專案＝排除 投標/開發/洽詢/提案/未成案（與客戶列表『案件數』欄同口徑）。
+    手動設的『暫停合作』不自動覆蓋。"""
     from sqlalchemy import func as _fn
     count = (await session.execute(
-        select(_fn.count()).where(CrmProject.client_id == client_id)
+        select(_fn.count()).where(
+            CrmProject.client_id == client_id,
+            CrmProject.status.notin_(_CLIENT_TIER_EXCLUDE_STATUSES),
+        )
     )).scalar() or 0
     client = await session.get(Client, client_id)
-    if not client:
+    if not client or client.status == "暫停合作":
         return
     if count == 0:
         client.status = "潛在客戶"

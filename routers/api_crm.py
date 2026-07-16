@@ -3,7 +3,7 @@
 原單檔（~5,500 行、144 端點）依領域拆分為：
   routers/crm/_shared.py   共用 router 單例 + 頂部 imports + 跨領域 helpers
   routers/crm/clients.py   客戶管理 + CSV 匯入 + users
-  routers/crm/projects.py  專案管理 + 結案作業看板 + CSV 匯入
+  routers/crm/projects.py  專案管理 + 結案看板 + CSV 匯入
   routers/crm/quotes.py    報價管理 + 報價範本
   routers/crm/staff.py     人力資源 + 履歷/作品集 + 派工
   routers/crm/costs.py     雜支 + 收據 + 成本估算 + 成本子表

@@ -533,7 +533,7 @@ async def _on_startup():
                 from sqlalchemy import text as _tex
                 async with _fex() as _sex:
                     for col_sql in [
-                        # 結案製作看板：已結案專案的官網製作階段（待製作/製作中/不上官網）
+                        # 結案製作看板：結案專案的官網製作階段（待製作/製作中/不上官網）
                         "ALTER TABLE crm_projects ADD COLUMN IF NOT EXISTS website_prod_stage VARCHAR(16)",
                         # N2 階段0：專案時數預算池（對齊工時 Sheet 的預算欄，藍圖 §3 現況修正）
                         "ALTER TABLE crm_projects ADD COLUMN IF NOT EXISTS budget_hours DOUBLE PRECISION",
@@ -587,6 +587,30 @@ async def _on_startup():
                             await _sex.rollback()
         except Exception:
             pass
+
+    # ── DB Migration: 專案狀態 8 階段化 backfill（一次性冪等）──
+    # 舊 5 值 taxonomy → 新 8 階段。單句 CASE UPDATE + WHERE IN(舊值)：backfill 完成後
+    # 舊值不復存在，重跑 WHERE 命中 0 列（no-op）。一次 round-trip 取代 5 句，每次 boot
+    # （含機隊 OTA 重啟）只掃一次；失敗只記錄不中斷 startup。
+    if state.db_online:
+        try:
+            from db.session import get_session_factory
+            _fst = get_session_factory()
+            if _fst:
+                from sqlalchemy import text as _tst
+                async with _fst() as _sst:
+                    _r_st = await _sst.execute(_tst(
+                        "UPDATE crm_projects SET status = CASE status "
+                        "WHEN '洽談中' THEN '洽詢' WHEN '報價中' THEN '提案' "
+                        "WHEN '進行中' THEN '製作' WHEN '已結案' THEN '歸檔' "
+                        "WHEN '結案作業' THEN '結案' END "
+                        "WHERE status IN ('洽談中','報價中','進行中','已結案','結案作業')"
+                    ))
+                    await _sst.commit()
+                    if _r_st.rowcount:
+                        print(f"[startup] 專案狀態 8 階段化 backfill: {_r_st.rowcount} 筆")
+        except Exception as _e_st_all:
+            print(f"[startup] 專案狀態 backfill migration failed: {_e_st_all}")
 
     # ── DB Migration: crm_cost_line_templates table ──
     if state.db_online:

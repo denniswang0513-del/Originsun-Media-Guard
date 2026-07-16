@@ -1,9 +1,15 @@
 <div class="crm-root">
-<!-- Sub-tabs: 專案 / 報價總覽 -->
+<!-- Sub-tabs: 總表 + 8 階段管線（報價總覽已獨立為左側欄「報價管理」） -->
 <div class="crm-sub-tabs" id="proj-sub-tabs">
-  <button class="crm-sub-tab active" data-view="projects">專案</button>
-  <button class="crm-sub-tab" data-view="quotes">報價總覽</button>
-  <button class="crm-sub-tab" data-view="closing" id="proj-sub-tab-closing" style="display:none;">🎬 結案作業</button>
+  <button class="crm-sub-tab active" data-view="all">總表</button>
+  <button class="crm-sub-tab" data-view="stage" data-status="投標">投標</button>
+  <button class="crm-sub-tab" data-view="stage" data-status="開發">開發</button>
+  <button class="crm-sub-tab" data-view="stage" data-status="洽詢">洽詢</button>
+  <button class="crm-sub-tab" data-view="stage" data-status="提案">提案</button>
+  <button class="crm-sub-tab" data-view="stage" data-status="製作">製作</button>
+  <button class="crm-sub-tab" data-view="closing" data-status="結案" id="proj-sub-tab-closing">結案</button>
+  <button class="crm-sub-tab" data-view="stage" data-status="歸檔">歸檔</button>
+  <button class="crm-sub-tab" data-view="stage" data-status="未成案">未成案</button>
 </div>
 
 <!-- ══ 專案子視圖 ══ -->
@@ -12,13 +18,16 @@
 <!-- Project Toolbar -->
 <div class="crm-toolbar">
   <input id="proj-search" type="search" placeholder="搜尋專案名稱..." class="crm-search-input">
-  <select id="proj-filter-status" class="crm-select">
+  <select id="proj-filter-status" class="crm-select" data-no-search>
     <option value="">全部狀態</option>
-    <option value="洽談中">洽談中</option>
-    <option value="報價中">報價中</option>
-    <option value="進行中">進行中</option>
-    <option value="已結案">已結案</option>
-    <option value="結案作業">結案作業</option>
+    <option value="投標">投標</option>
+    <option value="開發">開發</option>
+    <option value="洽詢">洽詢</option>
+    <option value="提案">提案</option>
+    <option value="製作">製作</option>
+    <option value="結案">結案</option>
+    <option value="歸檔">歸檔</option>
+    <option value="未成案">未成案</option>
   </select>
   <select id="proj-filter-client" class="crm-select">
     <option value="">全部客戶</option>
@@ -75,10 +84,7 @@
 </div>
 </div><!-- /proj-view-projects -->
 
-<!-- ══ 報價總覽子視圖 ══ -->
-<div id="proj-view-quotes" style="display:none;flex-direction:column;flex:1;min-height:0;overflow:hidden;"></div>
-
-<!-- ══ 結案作業（官網製作收件匣）子視圖 ══ -->
+<!-- ══ 結案（官網製作收件匣）子視圖 ══ -->
 <div id="proj-view-closing" style="display:none;flex-direction:column;flex:1;min-height:0;overflow:hidden;"></div>
 
 </div><!-- /crm-root -->
@@ -106,11 +112,14 @@
         <div class="crm-field">
           <label>狀態</label>
           <select id="proj-f-status" class="crm-input">
-            <option value="洽談中">洽談中</option>
-            <option value="報價中">報價中</option>
-            <option value="進行中">進行中</option>
-            <option value="已結案">已結案</option>
-            <option value="結案作業">結案作業</option>
+            <option value="投標">投標</option>
+            <option value="開發">開發</option>
+            <option value="洽詢" selected>洽詢</option>
+            <option value="提案">提案</option>
+            <option value="製作">製作</option>
+            <option value="結案">結案</option>
+            <option value="歸檔">歸檔</option>
+            <option value="未成案">未成案</option>
           </select>
         </div>
         <div class="crm-field">

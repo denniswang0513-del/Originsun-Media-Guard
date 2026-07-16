@@ -137,7 +137,7 @@ async def seed_test_project(name_suffix: str = "") -> dict:
     now = datetime.now(timezone.utc)
     async with factory() as session:
         p = CrmProject(
-            id=pid, name=name, status="進行中",
+            id=pid, name=name, status="製作",
             client_id="__test_dummy",  # soft FK，不檢查；cleanup 也不會碰真客戶
             public=False, public_sort_order=0,
             created_at=now, updated_at=now,

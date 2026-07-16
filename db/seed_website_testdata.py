@@ -296,7 +296,7 @@ async def seed_test_data(session_factory: Callable) -> None:
                 insert(CrmProject).values({
                     **proj_values,
                     "client_id": _TEST_CLIENT_ID,
-                    "status": "已結案",
+                    "status": "歸檔",
                     "public_published_at": datetime.now(timezone.utc),
                 }).on_conflict_do_nothing(index_elements=["id"])
             )

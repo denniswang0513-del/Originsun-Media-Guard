@@ -13,7 +13,8 @@ from fastapi import HTTPException, Request, UploadFile, File, Query
 from core.schemas import ClientPayload
 
 from ._shared import (router, _check_auth, _require_db, _get_factory,
-                      _now, _to_dict)
+                      _now, _to_dict, _auto_update_client_status,
+                      _CLIENT_TIER_EXCLUDE_STATUSES)
 
 try:
     from ._shared import (select, or_, sa_update, IntegrityError,
@@ -34,8 +35,9 @@ async def list_clients(
 
     from sqlalchemy import func as _fn, case as _case
 
-    # Subquery: per-client project stats (exclude 洽談中/報價中)
-    active_filter = CrmProject.status.notin_(["洽談中", "報價中"])
+    # Subquery: per-client project stats (exclude not-yet-won 階段；
+    # 口徑集中在 _shared._CLIENT_TIER_EXCLUDE_STATUSES，與客戶分級同源)
+    active_filter = CrmProject.status.notin_(_CLIENT_TIER_EXCLUDE_STATUSES)
     proj_sub = (
         select(
             CrmProject.client_id,
@@ -126,9 +128,13 @@ async def update_client(client_id: str, req: ClientPayload, request: Request):
         if not client:
             raise HTTPException(status_code=404, detail="找不到此客戶")
         old_am = client.am_username
-        for k, v in req.model_dump().items():
+        # status 由「客戶分級」自動管理（_auto_update_client_status）。客戶編輯表單
+        # 不送 status，若照 ClientPayload 預設值（'潛在客戶'）寫回會把分級洗掉 ——
+        # 這正是「改業務後客戶屬性跳掉」的成因。排除它，再依專案數重算。
+        for k, v in req.model_dump(exclude={"status"}).items():
             setattr(client, k, v)
         client.updated_at = _now()
+        await _auto_update_client_status(session, client_id)  # 重算分級（保留手動『暫停合作』）
         await session.commit()
         await session.refresh(client)
 
@@ -137,7 +143,7 @@ async def update_client(client_id: str, req: ClientPayload, request: Request):
             await session.execute(
                 sa_update(CrmProject)
                 .where(CrmProject.client_id == client_id)
-                .where(CrmProject.status.in_(["進行中", "報價中", "洽談中"]))
+                .where(CrmProject.status.in_(["投標", "開發", "洽詢", "提案", "製作"]))
                 .values(am_username=req.am_username)
             )
             await session.commit()

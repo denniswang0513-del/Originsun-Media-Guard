@@ -3,7 +3,7 @@
  * 報價列表 + 明細展示 + 啟動專案
  */
 import { crmFetch as _fetch, esc as _esc, fmtNum } from './crm-utils.js';
-import { state, callbacks } from './crm-projects-state.js';
+import { state, callbacks, PRESALE_STATUSES } from './crm-projects-state.js';
 import { _badge } from './crm-projects-core.js';
 
 let _selectedQuoteId = null;
@@ -46,7 +46,7 @@ async function loadProjectQuotes(projectId) {
 
         // Activate button
         const proj = state.projects.find(p => p.id === projectId);
-        const canActivate = proj && proj.status !== '進行中' && proj.status !== '已結案' && quotes.length > 0;
+        const canActivate = proj && PRESALE_STATUSES.includes(proj.status) && quotes.length > 0;
         if (canActivate) {
             html += '<div style="padding:8px 0;"><button class="crm-btn crm-btn-secondary crm-btn-sm" onclick="window._projActivate()">啟動專案</button></div>';
         }
@@ -156,16 +156,18 @@ async function _renderQuoteDetail(quoteId) {
 // ── Window handlers ──────────────────────────────────────────
 
 // crm-quotes.js (the one that registers _openQuoteModalForProject /
-// _openQuoteModalForEdit / _openQuoteModalForDuplicate) is lazy-loaded by
-// the OUTER "報價總覽" sub-tab in crm-projects.js. If the user enters a
-// project's "報價管理" sub-tab first, those window functions are still
-// undefined and the buttons silently no-op. Mirror the load steps here.
+// _openQuoteModalForEdit / _openQuoteModalForDuplicate) is normally loaded by
+// the top-level 報價管理 tab (crm_quotes). But a user with crm_projects yet
+// WITHOUT the crm_quotes module never loads that tab — so if they open a
+// project's "報價管理" sub-tab, those window functions would be undefined and
+// the buttons silently no-op. Mirror the load steps here, injecting the HTML
+// into the (hidden, unauthorized) tab_crm_quotes section as a fallback host.
 let _ensurePromise = null;
 async function _ensureQuotesModule() {
     if (window._openQuoteModalForProject) return;
     if (!_ensurePromise) {
         _ensurePromise = (async () => {
-            const container = document.getElementById('proj-view-quotes');
+            const container = document.getElementById('tab_crm_quotes');
             if (container && !container.innerHTML.trim()) {
                 try {
                     const res = await fetch('./tabs/crm/crm-quotes.html');
@@ -246,7 +248,7 @@ function initQuoteHandlers() {
                   <button onclick="document.getElementById('proj-activate-overlay').remove()" class="crm-detail-close">✕</button>
                 </div>
                 <div class="crm-modal-body">
-                  <p style="font-size:13px;color:#9ca3af;margin-bottom:12px;">選擇一版報價作為合約金額，專案狀態將切為「進行中」</p>
+                  <p style="font-size:13px;color:#9ca3af;margin-bottom:12px;">選擇一版報價作為合約金額，專案狀態將切為「製作」</p>
                   <div style="display:flex;flex-direction:column;gap:6px;">
                     ${quotes.map(q => {
                         const price = q.final_price != null ? q.final_price : q.total;
@@ -269,7 +271,7 @@ function initQuoteHandlers() {
         try {
             await _fetch('/projects/' + projectId + '/status', {
                 method: 'PATCH',
-                body: JSON.stringify({ status: '進行中', contract_amount: contractAmount, amount_receivable: contractAmount })
+                body: JSON.stringify({ status: '製作', contract_amount: contractAmount, amount_receivable: contractAmount })
             });
             const overlay = document.getElementById('proj-activate-overlay');
             if (overlay) overlay.remove();

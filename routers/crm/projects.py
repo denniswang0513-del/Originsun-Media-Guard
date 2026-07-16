@@ -1,4 +1,4 @@
-"""routers/crm/projects.py — 專案管理 + 結案作業看板 + CSV 匯入。
+"""routers/crm/projects.py — 專案管理 + 結案看板 + CSV 匯入。
 
 自 routers/api_crm.py 原樣搬移（純搬移，行為不變）。
 """
@@ -24,7 +24,8 @@ from ._shared import (router, _check_auth, _check_website_auth, _require_db,
 try:
     from ._shared import (select, or_,
                           Client, CrmProject, CrmProjectCostGroup,
-                          CrmProjectShowcase)
+                          CrmProjectCostLine, CrmProjectExpense,
+                          CrmProjectStaff, CrmProjectShowcase)
 except ImportError:  # DB 套件不存在的 agent 環境 — 行為同原檔 try/except
     pass
 
@@ -34,7 +35,7 @@ def _to_project_dict(p, client_short_name: str = "") -> dict:
     return {
         "id": p.id, "name": p.name,
         "client_id": p.client_id, "client_short_name": client_short_name,
-        "status": p.status or "洽談中",
+        "status": p.status or "洽詢",
         "am_username": p.am_username or "", "pm_usernames": p.pm_usernames or [],
         "shoot_date": p.shoot_date.isoformat() if p.shoot_date else None,
         "start_date": p.start_date.isoformat() if p.start_date else None,
@@ -145,8 +146,132 @@ async def create_project(req: CrmProjectPayload, request: Request):
     return result
 
 
+@router.post("/projects/{project_id}/duplicate")
+async def duplicate_project(project_id: str, request: Request):
+    """一鍵深拷貝專案 — 連同成本子表 / 估算明細 / 雜支 / 派工一起複製。
+
+    只複製「規劃層」（預算 / 估算 / 派工名單），重置「實際 / 結算層」，
+    讓複製品當成一個全新可執行的專案，不污染應收應付與財務三表：
+      - 專案：amount_received=0、payment_status='未到帳'、transfer_fee 清空；
+              contract_amount / amount_receivable / 各預算% 保留；folder_path 清空
+      - cost_lines：estimated_* 保留、actual_* 全清
+      - expenses：estimated 保留、actual=0、receipt_url/payee/advance_id 清空
+      - staff：days/cost/rate_override 保留、actual_days/actual_cost/payment_* 清空
+    不複製報價 / 發票 / 收支 / 官網作品 / 付款節點等交易與文件資料。
+    """
+    _check_auth(request)
+    _require_db()
+    factory = await _get_factory()
+
+    now = _now()
+    async with factory() as session:
+        src = await session.get(CrmProject, project_id)
+        if not src:
+            raise HTTPException(status_code=404, detail="找不到專案")
+        client = await session.get(Client, src.client_id)
+        client_name = client.short_name if client else ""
+
+        new_id = uuid.uuid4().hex
+        dup = CrmProject(
+            id=new_id, name=f"{src.name}（複製）",
+            client_id=src.client_id, status=src.status,
+            am_username=src.am_username, pm_usernames=src.pm_usernames,
+            shoot_date=src.shoot_date, start_date=src.start_date,
+            completion_date=src.completion_date, project_type=src.project_type,
+            folder_path="",  # 不沿用資料夾，避免兩專案指向同一夾
+            description=src.description, notes=src.notes,
+            contract_amount=src.contract_amount, tax_rate=src.tax_rate,
+            profit_target_pct=src.profit_target_pct, misc_budget_pct=src.misc_budget_pct,
+            amount_receivable=src.amount_receivable,
+            # 重置實際收付款
+            payment_status="未到帳", amount_received=0, transfer_fee=None,
+            created_at=now, updated_at=now,
+        )
+        session.add(dup)
+
+        # 成本子表 → 建立 old→new id 對映
+        groups = (await session.execute(
+            select(CrmProjectCostGroup)
+            .where(CrmProjectCostGroup.project_id == project_id)
+        )).scalars().all()
+        gid_map: dict[str, str] = {}
+        for g in groups:
+            ng = uuid.uuid4().hex
+            gid_map[g.id] = ng
+            session.add(CrmProjectCostGroup(
+                id=ng, project_id=new_id, name=g.name,
+                shoot_date=g.shoot_date, notes=g.notes, sort_order=g.sort_order,
+                budget_amount=g.budget_amount, misc_budget_amount=g.misc_budget_amount,
+                profit_target_pct=g.profit_target_pct, receipt_path=g.receipt_path,
+                created_at=now, updated_at=now,
+            ))
+
+        # 沒有任何子表的舊專案 → 補一張主表 + 預設雜支，保證詳情頁有東西
+        if not groups:
+            main_group_id = uuid.uuid4().hex
+            session.add(CrmProjectCostGroup(
+                id=main_group_id, project_id=new_id, name="主表", sort_order=0,
+            ))
+            await _seed_default_expenses(session, new_id, main_group_id)
+
+        # 成本估算明細 — 保留預估、清結算
+        lines = (await session.execute(
+            select(CrmProjectCostLine)
+            .where(CrmProjectCostLine.project_id == project_id)
+        )).scalars().all()
+        for ln in lines:
+            session.add(CrmProjectCostLine(
+                id=uuid.uuid4().hex, project_id=new_id,
+                cost_group_id=gid_map.get(ln.cost_group_id),
+                phase=ln.phase, item_name=ln.item_name, sort_order=ln.sort_order,
+                estimated_unit_price=ln.estimated_unit_price,
+                estimated_quantity=ln.estimated_quantity,
+                estimated_unit_type=ln.estimated_unit_type,
+                estimated_amount=ln.estimated_amount,
+                estimated_staff_id=ln.estimated_staff_id,
+                estimated_notes=ln.estimated_notes,
+                created_at=now, updated_at=now,
+            ))
+
+        # 雜支 — 保留預估、清實際 + 收據 / 請款人 / 預支關聯
+        expenses = (await session.execute(
+            select(CrmProjectExpense)
+            .where(CrmProjectExpense.project_id == project_id)
+        )).scalars().all()
+        for ex in expenses:
+            session.add(CrmProjectExpense(
+                id=uuid.uuid4().hex, project_id=new_id,
+                cost_group_id=gid_map.get(ex.cost_group_id),
+                category=ex.category, estimated=ex.estimated, actual=0,
+                sub_item=ex.sub_item, notes=ex.notes,
+                receipt_url=None, payee=None, advance_id=None,
+                created_at=now,
+            ))
+
+        # 派工 — 保留預估、清實際 + 財務
+        staff_rows = (await session.execute(
+            select(CrmProjectStaff)
+            .where(CrmProjectStaff.project_id == project_id)
+        )).scalars().all()
+        for s in staff_rows:
+            session.add(CrmProjectStaff(
+                id=uuid.uuid4().hex, project_id=new_id,
+                staff_id=s.staff_id, role_in_project=s.role_in_project,
+                phase=s.phase, days=s.days, rate_override=s.rate_override,
+                cost=s.cost, notes=s.notes,
+            ))
+
+        await _auto_update_client_status(session, src.client_id)
+        await session.commit()
+        await session.refresh(dup)
+
+    return {"status": "ok", "project": _to_project_dict(dup, client_name)}
+
+
 # NOTE: 必須註冊在 /projects/{project_id} 之前 — 否則 "closing" 會被吃成 project_id。
 _WEBSITE_PROD_STAGES = ("待製作", "製作中", "不上官網")
+# 進入官網製作收件匣的專案階段（8 階段化後由「結案作業」改為「結案」）。
+_CLOSING_STATUS = "結案"
 
 
 async def _work_items_for_project(session, project, rows=None) -> list[dict]:
@@ -193,8 +318,8 @@ async def _work_items_for_project(session, project, rows=None) -> list[dict]:
 
 @router.get("/projects/closing")
 async def list_closing_projects(request: Request):
-    """結案作業看板 — 列出所有 status='結案作業' 專案 + 官網上線/製作狀態 + 完整度。
-    （AM 把專案從「已結案」推進到「結案作業」才進此收件匣，避免歷史已結案全列。）
+    """結案看板 — 列出所有 status='結案' 專案 + 官網上線/製作狀態 + 完整度。
+    （AM 把專案從「歸檔」推進到「結案」才進此收件匣，避免歷史歸檔全列。）
 
     stage 推導：public=True → '已上線'；否則看 website_prod_stage（製作中/不上官網），
     其餘（含 None）→ '待製作'。completeness 四項各是 bool（是否已備妥該素材）。
@@ -208,7 +333,7 @@ async def list_closing_projects(request: Request):
             select(CrmProject, Client.short_name.label("client_short_name"),
                    Client.full_name.label("client_full_name"))
             .outerjoin(Client, Client.id == CrmProject.client_id)
-            .where(CrmProject.status == "結案作業")
+            .where(CrmProject.status == _CLOSING_STATUS)
             .order_by(CrmProject.completion_date.desc().nullslast())
         )).all()
 
@@ -256,7 +381,7 @@ async def list_closing_projects(request: Request):
 
 @router.patch("/projects/{project_id}/website-stage")
 async def update_project_website_stage(project_id: str, request: Request):
-    """設定已結案專案的官網製作階段（待製作/製作中/不上官網）。"""
+    """設定結案專案的官網製作階段（待製作/製作中/不上官網）。"""
     _check_website_auth(request)
     _require_db()
     factory = await _get_factory()
@@ -299,12 +424,12 @@ async def get_project(project_id: str):
 
 def _apply_status_side_effects(project, old_status: str) -> None:
     """狀態寫入的共用副作用（PUT + PATCH 都呼叫 — 避免兩條路徑漂移）：
-    1. 轉入「結案作業」且未指定官網製作階段 → 預設「待製作」（進上架收件匣）。
-    2. 剛轉入「結案作業」→ 推播官網編輯（fire-and-forget thread，通知失敗/未設
+    1. 轉入「結案」且未指定官網製作階段 → 預設「待製作」（進上架收件匣）。
+    2. 剛轉入「結案」→ 推播官網編輯（fire-and-forget thread，通知失敗/未設
        webhook 都不可影響專案更新）。
     CSV 批次匯入刻意不呼叫此函式（不想大量匯入時洗版通知）。"""
-    just_entered_closing = old_status != "結案作業" and project.status == "結案作業"
-    if project.status == "結案作業" and project.website_prod_stage is None:
+    just_entered_closing = old_status != _CLOSING_STATUS and project.status == _CLOSING_STATUS
+    if project.status == _CLOSING_STATUS and project.website_prod_stage is None:
         project.website_prod_stage = "待製作"
     if not just_entered_closing:
         return
@@ -343,6 +468,7 @@ async def update_project(project_id: str, req: CrmProjectPatchPayload, request: 
                 raise HTTPException(status_code=404, detail="找不到指定的客戶")
 
         old_status = project.status or ""
+        old_client_id = project.client_id
         for k, v in update_data.items():
             if k in date_fields:
                 setattr(project, k, _parse_shoot_date(v))
@@ -350,6 +476,10 @@ async def update_project(project_id: str, req: CrmProjectPatchPayload, request: 
                 setattr(project, k, v)
         _apply_status_side_effects(project, old_status)
         project.updated_at = _now()
+        # 專案狀態或歸屬客戶變動 → 重算客戶分級（含轉移前的舊客戶）
+        await _auto_update_client_status(session, project.client_id)
+        if old_client_id and old_client_id != project.client_id:
+            await _auto_update_client_status(session, old_client_id)
         await session.commit()
         await session.refresh(project)
         client = await session.get(Client, project.client_id)
@@ -383,7 +513,7 @@ async def update_project_status(project_id: str, request: Request):
 
     body = await request.json()
     new_status = body.get("status", "")
-    if new_status not in ("洽談中", "報價中", "進行中", "已結案", "結案作業"):
+    if new_status not in ("投標", "開發", "洽詢", "提案", "製作", "結案", "歸檔", "未成案"):
         raise HTTPException(status_code=400, detail="無效的狀態值")
 
     contract_amount = body.get("contract_amount")
@@ -401,6 +531,8 @@ async def update_project_status(project_id: str, request: Request):
         if amount_receivable is not None:
             project.amount_receivable = int(amount_receivable)
         project.updated_at = _now()
+        # 狀態變動可能跨越『有效專案』門檻（如 洽詢→製作）→ 重算客戶分級
+        await _auto_update_client_status(session, project.client_id)
         await session.commit()
         await session.refresh(project)
         client = await session.get(Client, project.client_id)
@@ -463,6 +595,7 @@ async def import_projects_csv(request: Request, file: UploadFile = File(...)):
             for p in (await session.execute(select(CrmProject))).scalars().all()
         }
 
+        affected: set = set()
         for row in reader:
             data = _map_project_row(header_map, row)
             if not data.get("name"):
@@ -476,11 +609,14 @@ async def import_projects_csv(request: Request, file: UploadFile = File(...)):
             now = _now()
             existing = existing_map.get(data["name"])
             if existing:
+                if existing.client_id:
+                    affected.add(existing.client_id)   # 轉移前的舊客戶也要重算
                 for k, v in data.items():
                     if k != "name" and v:
                         setattr(existing, k, v)
                 if client_id:
                     existing.client_id = client_id
+                    affected.add(client_id)
                 if shoot_dt:
                     existing.shoot_date = shoot_dt
                 existing.updated_at = now
@@ -497,8 +633,13 @@ async def import_projects_csv(request: Request, file: UploadFile = File(...)):
                 )
                 session.add(new_proj)
                 existing_map[data["name"]] = new_proj
+                affected.add(client_id)
                 imported += 1
 
+        # 匯入後重算受影響客戶分級（過去 CSV 匯入沒觸發 → 是舊資料卡在潛在客戶的主因）
+        for cid in affected:
+            if cid:
+                await _auto_update_client_status(session, cid)
         await session.commit()
 
     return {"status": "ok", "imported": imported, "updated": updated, "skipped": skipped}

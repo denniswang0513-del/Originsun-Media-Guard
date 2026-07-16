@@ -479,11 +479,20 @@
   color: #fca5a5;
 }
 
-/* ── Project badge colors ── */
-.crm-proj-badge-洽談中 { background: #3b2f1f; color: #fbbf24; }
-.crm-proj-badge-報價中 { background: #3b2a1f; color: #fb923c; }
-.crm-proj-badge-進行中 { background: #1e3a5f; color: #93c5fd; }
-.crm-proj-badge-已結案 { background: #374151; color: #9ca3af; }
+/* ── Project badge colors (8 階段管線) ── */
+/* 售前群（投標/開發/洽詢/提案）— 琥珀/橘色調 */
+.crm-proj-badge-投標 { background: #3b2f1f; color: #fbbf24; }
+.crm-proj-badge-開發 { background: #3b2a1f; color: #fb923c; }
+.crm-proj-badge-洽詢 { background: #3a3320; color: #fcd34d; }
+.crm-proj-badge-提案 { background: #3a2617; color: #fdba74; }
+/* 製作 — 藍 */
+.crm-proj-badge-製作 { background: #1e3a5f; color: #93c5fd; }
+/* 結案 — 綠 */
+.crm-proj-badge-結案 { background: #14532d; color: #86efac; }
+/* 歸檔 — 灰 */
+.crm-proj-badge-歸檔 { background: #374151; color: #9ca3af; }
+/* 未成案 — 紅/靜音 */
+.crm-proj-badge-未成案 { background: #3b1f1f; color: #fca5a5; }
 
 /* ── Project list columns ── */
 .crm-col-client { flex: 1.2; }

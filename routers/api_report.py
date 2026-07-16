@@ -9,7 +9,6 @@ import os
 import json as _json
 
 from fastapi import APIRouter, Request  # type: ignore
-from fastapi.responses import JSONResponse  # type: ignore
 
 from core.schemas import ReportJobRequest  # type: ignore
 from core.worker import enqueue_job  # type: ignore
@@ -52,11 +51,15 @@ def _save_reports_json(data: dict) -> None:
 @router.post("/api/v1/report_jobs")
 async def start_report_job(req: ReportJobRequest):
     project_name = req.report_name or "report"
-    try:
-        job_id = await enqueue_job(req, project_name, "report")
-        return {"status": "queued", "job_id": job_id}
-    except ValueError as e:
-        return JSONResponse(status_code=409, content={"status": "duplicate", "detail": str(e)})
+    # enqueue_job 回傳 (job_id, warning) tuple — 必須解包（與 api_backup/api_verify 等
+    # 一致）。舊碼 `job_id = await enqueue_job(...)` 把整個 tuple 當 job_id 回傳，前端
+    # 收到 ["id", null] → _myReportJobIds 比對永遠 miss → 報表跑完卻不會自動開啟、
+    # 也吃不到重複任務警告（backup 內建報表走 asyncio.create_task 不經此路，故正常）。
+    job_id, warning = await enqueue_job(req, project_name, "report")
+    resp = {"status": "queued", "job_id": job_id}
+    if warning:
+        resp["warning"] = warning
+    return resp
 
 
 @router.get("/api/v1/reports/history")

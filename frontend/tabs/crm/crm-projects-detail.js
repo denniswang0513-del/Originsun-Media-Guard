@@ -5,7 +5,7 @@
  * （由 cost.js 的 auto-save 機制統一處理）。沒有「✎ 編輯」模式。
  */
 
-import { state, callbacks } from './crm-projects-state.js';
+import { state, callbacks, STATUS_ORDER, PRESALE_STATUSES, CLOSED_STATUSES } from './crm-projects-state.js';
 import { _badge, _avatar, getProjectTypes } from './crm-projects-core.js';
 import { calcDashboard, remainColor, profitColor, barColor } from './crm-projects-calc.js';
 import { crmFetch as _fetch, esc as _esc, fmtNum, pickFolderPath, searchableSelect } from './crm-utils.js';
@@ -32,11 +32,8 @@ function _buildEditFields() {
     return [
         {name:'client_id', label:'客戶', type:'select', options: clientOpts},
         {name:'name', label:'專案名稱', type:'text'},
-        {name:'status', label:'狀態', type:'select', options:[
-            {value:'洽談中',label:'洽談中'},{value:'報價中',label:'報價中'},
-            {value:'進行中',label:'進行中'},{value:'已結案',label:'已結案'},
-            {value:'結案作業',label:'結案作業（送官網製作）'},
-        ]},
+        {name:'status', label:'狀態', type:'select',
+         options: STATUS_ORDER.map(s => ({value:s, label:s}))},
         {name:'project_type', label:'類型', type:'select', get options() {
             return [{value:'',label:'—'}, ...getProjectTypes().map(t => ({value:t,label:t}))];
         }},
@@ -283,8 +280,8 @@ function renderDetail(project) {
         : `<span class="pi-person"><span class="pi-person-role">PM</span>${_placeholder('+ 指派')}</span>`;
 
     // Determine stage
-    const isPreProject = project.status === '洽談中' || project.status === '報價中';
-    const isClosed = project.status === '已結案';
+    const isPreProject = PRESALE_STATUSES.includes(project.status);
+    const isClosed = CLOSED_STATUSES.includes(project.status);
 
     document.getElementById('proj-detail-info').innerHTML = `
       <div class="pi-wrap">
@@ -336,7 +333,7 @@ function renderDetail(project) {
         <!-- Layer 2: Stage card (conditional) -->
         <div id="pi-stage-card"></div>
 
-        <!-- Layer 3: 預算儀表板（async，進行中/已結案） -->
+        <!-- Layer 3: 預算儀表板（async，製作/結案/歸檔） -->
         <div id="pi-budget-row"></div>
 
         <!-- Layer 5: 補充資訊 (always rendered with placeholders) -->
@@ -437,7 +434,7 @@ async function _loadBudgetOverview(projectId, isClosed) {
         const bc = barColor(d.usagePct);
 
         if (isClosed) {
-            // 已結案: 3 cards (專案結算 + 毛利 + 帳款狀況), no progress bar
+            // 結案/歸檔: 3 cards (專案結算 + 毛利 + 帳款狀況), no progress bar
             const proj = state.projects.find(p => p.id === projectId);
             const payStatus = proj ? (proj.payment_status || '未到帳') : '未到帳';
             const payMap = {'未到帳':'#ef4444','部分到帳':'#fbbf24','全額到帳':'#86efac'};
@@ -461,7 +458,7 @@ async function _loadBudgetOverview(projectId, isClosed) {
               </div>
             `;
         } else {
-            // 進行中: full budget dashboard with progress bar
+            // 製作: full budget dashboard with progress bar
             el.innerHTML = `
               <div class="pi-finance">
                 <div class="pi-fin-card">
@@ -498,7 +495,7 @@ async function _loadBudgetOverview(projectId, isClosed) {
     } catch (_) {}
 }
 
-// ── Quote Summary (洽談中 / 報價中) ──────────────────────
+// ── Quote Summary (投標 / 開發 / 洽詢 / 提案) ──────────────────────
 
 async function _loadQuoteSummary(projectId) {
     const el = document.getElementById('pi-stage-card');
@@ -514,7 +511,7 @@ async function _loadQuoteSummary(projectId) {
         const price = latest.final_price != null ? latest.final_price : latest.total;
         const statusCls = ['草稿','已寄送','已簽核','已拒絕'].includes(latest.status) ? 'crm-badge crm-quote-badge-' + latest.status : 'crm-badge';
         const proj = state.projects.find(p => p.id === projectId);
-        const canActivate = proj && proj.status !== '進行中' && proj.status !== '已結案' && quotes.length > 0;
+        const canActivate = proj && PRESALE_STATUSES.includes(proj.status) && quotes.length > 0;
         el.innerHTML = `
           <div class="pi-finance">
             <div class="pi-fin-card">

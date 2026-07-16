@@ -14,6 +14,7 @@ import './js/update/version-check.js';
 import './js/update/update-modal.js';
 import './js/settings/settings-modal.js';
 import './js/shared/nas-browser.js';
+import { initSelectAutoUpgrade } from './js/shared/select-upgrade.js';
 
 // ─── Fallback for appendLog function ─── //
 // If utils.js hasn't loaded yet or appendLog is not available globally, define a fallback
@@ -110,6 +111,10 @@ if (typeof appendLog === 'undefined') {
         // Post-login hook: inject tabs that became authorized but weren't
         // loaded at boot (no token at boot → filter excluded CRM/admin tabs).
         window._ensureTabsLoaded = () => loadTabs({ autoSwitch: false });
+
+        // 全域下拉統一：即刻啟動（初掃現有 DOM + MutationObserver 監看之後動態
+        // 渲染的下拉）。不綁 loadTabs/登入，確保任何時序都會補升級長清單 select。
+        initSelectAutoUpgrade();
 
         // Initialize tabs immediately (grouped nav is rendered inside loadTabs
         // once auth resolves, so it reflects the user's authorized tabs)

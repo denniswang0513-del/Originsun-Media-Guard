@@ -13,7 +13,7 @@ const _sorter = createSortable({
     panelId: 'proj-list-panel',
     onChange: () => renderList(),
     getters: {
-        status: p => enumIndex(STATUS_ORDER, p.status, '洽談中'),
+        status: p => enumIndex(STATUS_ORDER, p.status, '投標'),
         name:   p => (p.name || '').toLowerCase(),
         client: p => (p.client_short_name || '').toLowerCase(),
         am:     p => (p.am_username || '').toLowerCase(),
@@ -95,9 +95,8 @@ window._projEditTypes = function() {
 // ── Helpers ────────────────────────────────────────────────
 
 export function _badge(status) {
-    const s = status || '洽談中';
-    const known = ['洽談中', '報價中', '進行中', '已結案'];
-    const cls = known.includes(s) ? `crm-badge crm-proj-badge-${s}` : 'crm-badge';
+    const s = status || '投標';
+    const cls = STATUS_ORDER.includes(s) ? `crm-badge crm-proj-badge-${s}` : 'crm-badge';
     return `<span class="${cls}">${_esc(s)}</span>`;
 }
 

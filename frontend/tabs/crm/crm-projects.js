@@ -69,9 +69,17 @@ export async function initCrmProjectsTab() {
         const p = state.projects.find(x => x.id === id);
         if (p) deleteProject(p);
     };
-    window._projDup = (id) => {
+    window._projDup = async (id) => {
         const p = state.projects.find(x => x.id === id);
-        if (p) { openModal(p); state.editingId = null; document.getElementById('proj-modal-title').textContent = '複製專案'; }
+        if (!p) return;
+        if (!confirm(`複製專案「${p.name}」？\n\n會連同預算、成本估算、雜支與派工名單一起複製；\n實際收付款、實際結算等數字會重置為新專案狀態。`)) return;
+        try {
+            const resp = await _fetch(`/projects/${id}/duplicate`, { method: 'POST' });
+            await loadProjects();               // 直抓最新（loadProjects 不走快取）
+            if (resp.project) selectProject(resp.project.id);
+        } catch (e) {
+            alert('複製失敗：' + (e.message || e));
+        }
     };
 
     // ── Expense handlers (cross-module: use cost + state) ──
@@ -325,24 +333,45 @@ export async function initCrmProjectsTab() {
 
     setupResizeHandle('proj-resize-handle', 'proj-detail-panel');
 
-    // ── RBAC: 只有管理員或擁有 website_admin 模組者能看到「結案作業」子分頁 ──
-    // 權限旗標由 auth-state.js 掛在 window（_accessLevel / _modules）。後端仍會再閘一次。
+    // ── RBAC: 管理員或擁有 website_admin 模組者，「結案」分頁顯示官網製作收件匣；
+    //   其他人「結案」分頁＝一般「結案」狀態清單。權限旗標由 auth-state.js 掛在
+    //   window（_accessLevel / _modules）。後端仍會再閘一次。「結案」分頁對所有人可見。
     const _canManageWebsite = (window._accessLevel >= 3) ||
         (Array.isArray(window._modules) && window._modules.includes('website_admin'));
-    const _closingTabBtn = document.getElementById('proj-sub-tab-closing');
-    if (_closingTabBtn && _canManageWebsite) _closingTabBtn.style.display = '';
 
-    // ── Sub-tab switching (專案 / 報價總覽 / 結案作業) ──
-    document.querySelectorAll('#proj-sub-tabs .crm-sub-tab').forEach(btn => {
+    // ── Sub-tab switching (總表 + 8 階段管線；報價總覽已獨立成左側欄 tab） ──
+    //   總表：不篩狀態、顯示工具列狀態下拉。
+    //   單一階段：分頁本身即篩選（server ?status= 精確比對），隱藏工具列狀態下拉。
+    //   結案：website_admin → 官網製作收件匣；其他人 → 一般「結案」狀態清單。
+    const _statusFilterEl = document.getElementById('proj-filter-status');
+    const _projView = document.getElementById('proj-view-projects');
+    const _closingView = document.getElementById('proj-view-closing');
+    const _subTabs = document.querySelectorAll('#proj-sub-tabs .crm-sub-tab');
+    _subTabs.forEach(btn => {
         btn.addEventListener('click', () => {
-            document.querySelectorAll('#proj-sub-tabs .crm-sub-tab').forEach(b => b.classList.remove('active'));
+            _subTabs.forEach(b => b.classList.remove('active'));
             btn.classList.add('active');
             const view = btn.dataset.view;
-            document.getElementById('proj-view-projects').style.display = view === 'projects' ? 'flex' : 'none';
-            document.getElementById('proj-view-quotes').style.display = view === 'quotes' ? 'flex' : 'none';
-            document.getElementById('proj-view-closing').style.display = view === 'closing' ? 'flex' : 'none';
-            if (view === 'quotes') _initQuotesOverview();
-            if (view === 'closing') _initClosingProduction();
+            const st = btn.dataset.status || '';
+
+            if (view === 'closing' && _canManageWebsite) {
+                // 官網製作收件匣（website_admin 專屬）
+                _projView.style.display = 'none';
+                _closingView.style.display = 'flex';
+                _initClosingProduction();
+                return;
+            }
+
+            // 一般清單視圖：總表 / 單一階段 / 非 website_admin 的「結案」。
+            // 總表顯示狀態下拉;單一階段分頁本身即篩選,隱藏下拉。
+            _projView.style.display = 'flex';
+            _closingView.style.display = 'none';
+            state.filters.status = (view === 'all') ? '' : st;
+            if (_statusFilterEl) {
+                _statusFilterEl.style.display = (view === 'all') ? '' : 'none';
+                if (view === 'all') _statusFilterEl.value = '';
+            }
+            loadProjects();
         });
     });
 
@@ -355,36 +384,9 @@ export async function initCrmProjectsTab() {
     await Promise.all([loadClients(), loadUsers(), loadProjects(), loadStaffList(), loadProjectTypes()]);
 }
 
-// ── Quotes overview lazy loader ──────────────────────────────
-let _quotesOverviewLoaded = false;
-async function _initQuotesOverview() {
-    const container = document.getElementById('proj-view-quotes');
-    if (!container) return;
-    if (_quotesOverviewLoaded) return;
-    try {
-        const res = await fetch('./tabs/crm/crm-quotes.html');
-        if (!res.ok) throw new Error('HTTP ' + res.status);
-        const html = await res.text();
-        container.innerHTML = html;
-        // Fix nested crm-root: override fixed height to fill parent
-        const inner = container.querySelector('.crm-root');
-        if (inner) {
-            inner.style.height = '100%';
-            inner.style.minHeight = '0';
-            inner.style.maxHeight = 'none';
-        }
-        const mod = await import('./crm-quotes.js');
-        await mod.initCrmQuotesTab();
-        _quotesOverviewLoaded = true;
-    } catch (e) {
-        container.innerHTML = `<div class="crm-empty" style="padding:24px;color:#fca5a5;">報價總覽載入失敗: ${e.message}</div>`;
-        console.error('報價總覽載入失敗:', e);
-    }
-}
-
-// ── 結案作業（官網製作收件匣）lazy loader ─────────────────────
-// 與 _initQuotesOverview 同模式，但 closing 自繪整個 DOM，故 loader 只負責
-// 動態 import 模組 + 呼叫 init(container)，用 flag 保證只初始化一次。
+// ── 結案（官網製作收件匣）lazy loader ─────────────────────
+// closing 自繪整個 DOM，故 loader 只負責動態 import 模組 + 呼叫
+// init(container)，用 flag 保證只初始化一次。
 let _closingLoaded = false;
 async function _initClosingProduction() {
     const container = document.getElementById('proj-view-closing');
@@ -395,7 +397,7 @@ async function _initClosingProduction() {
         await mod.init(container);
         _closingLoaded = true;
     } catch (e) {
-        container.innerHTML = `<div class="crm-empty" style="padding:24px;color:#fca5a5;">結案作業載入失敗: ${e.message}</div>`;
-        console.error('結案作業載入失敗:', e);
+        container.innerHTML = `<div class="crm-empty" style="padding:24px;color:#fca5a5;">結案收件匣載入失敗: ${e.message}</div>`;
+        console.error('結案收件匣載入失敗:', e);
     }
 }

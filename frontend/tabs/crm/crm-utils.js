@@ -202,9 +202,24 @@ export function searchableSelect(sel, opts = {}) {
         input.value = (o && o.value) ? o.textContent : '';
     };
 
+    // Global auto-upgrade path: most call sites set `sel.value = x` programmatically
+    // (loaded record → field value) WITHOUT calling _syncSsValue. Intercept the
+    // value setter so the visible input repaints on its own. Explicit callers that
+    // still call _syncSsValue keep working (idempotent). Best-effort.
+    try {
+        const _vd = Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value');
+        if (_vd && _vd.get && _vd.set) {
+            Object.defineProperty(sel, 'value', {
+                configurable: true,
+                get() { return _vd.get.call(this); },
+                set(v) { _vd.set.call(this, v); sel._syncSsValue(); },
+            });
+        }
+    } catch (_) { /* non-fatal — _syncSsValue + childList observer still cover most cases */ }
+
     return {
         refresh: () => { _buildItems(); sel._syncSsValue(); },
-        destroy: () => { observer.disconnect(); wrap.replaceWith(sel); sel.style.display = ''; delete sel.dataset.searchable; delete sel._syncSsValue; }
+        destroy: () => { observer.disconnect(); wrap.replaceWith(sel); sel.style.display = ''; delete sel.value; delete sel.dataset.searchable; delete sel._syncSsValue; }
     };
 }
 

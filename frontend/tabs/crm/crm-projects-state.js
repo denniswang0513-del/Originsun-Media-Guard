@@ -5,7 +5,13 @@
 
 // 工作流順序 — 點欄頭以「狀態」排序時走這個 index,而非字串比較。
 // 未列出的狀態(自訂)排在最後。新增狀態時請同步更新 crm-projects.html 的下拉選單。
-export const STATUS_ORDER = ['洽談中', '報價中', '進行中', '已結案', '已取消'];
+export const STATUS_ORDER = ['投標', '開發', '洽詢', '提案', '製作', '結案', '歸檔', '未成案'];
+
+// 階段分群（單一定義,供詳情/報價的條件式 UI 共用,避免各檔各寫一份 literal）：
+//   前期(尚未成案) — 顯示報價摘要 + 可「啟動專案(切為製作)」
+//   結案群 — 顯示結算卡
+export const PRESALE_STATUSES = ['投標', '開發', '洽詢', '提案'];
+export const CLOSED_STATUSES = ['結案', '歸檔'];
 
 // ── Shared State ────────────────────────────────────────────
 export const state = {

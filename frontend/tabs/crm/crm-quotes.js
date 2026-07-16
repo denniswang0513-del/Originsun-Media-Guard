@@ -156,7 +156,7 @@ function renderDetail(q) {
         ${prop('最終報價', q.final_price !== null ? '$' + _fmtNum(q.final_price) : '')}
         ${prop('付款階段', (q.payment_stages || []).map(s => s.label + ' ' + s.pct + '%').join(' / '))}
         ${prop('備註', q.terms)}
-        ${q.status === '已簽核' ? `<div style="padding:12px 0;"><button class="crm-btn crm-btn-primary crm-btn-sm" onclick="window._quoteActivateProject('${q.project_id}')">啟動專案 (切為進行中)</button></div>` : ''}
+        ${q.status === '已簽核' ? `<div style="padding:12px 0;"><button class="crm-btn crm-btn-primary crm-btn-sm" onclick="window._quoteActivateProject('${q.project_id}')">啟動專案 (切為製作)</button></div>` : ''}
     `;
 
     // Items tab
@@ -345,7 +345,7 @@ async function _createInlineProject() {
     const clientId = document.getElementById('quote-np-client').value;
     if (!name || !clientId) { alert('請填寫專案名稱和選擇客戶'); return; }
     try {
-        const r = await _fetch('/projects', { method: 'POST', body: JSON.stringify({ name, client_id: clientId, status: '洽談中' }) });
+        const r = await _fetch('/projects', { method: 'POST', body: JSON.stringify({ name, client_id: clientId, status: '提案' }) });
         _projects.push(r.project);
         _populateProjectSelect(r.project.id);
         document.getElementById('quote-inline-project').style.display = 'none';
@@ -566,12 +566,12 @@ export async function initCrmQuotesTab() {
     window._quoteRemoveItem = removeItemRow;
     window._openQuoteModalForProject = (projectId) => openModal(null, projectId);
     window._quoteActivateProject = async (projectId) => {
-        if (!confirm('確定將此專案狀態切為「進行中」？')) return;
+        if (!confirm('確定將此專案狀態切為「製作」？')) return;
         try {
             await _fetch(`/projects/${projectId}/status`, {
-                method: 'PATCH', body: JSON.stringify({ status: '進行中' })
+                method: 'PATCH', body: JSON.stringify({ status: '製作' })
             });
-            alert('專案已切為進行中');
+            alert('專案已切為製作');
         } catch (e) {
             alert('操作失敗：' + e.message);
         }

@@ -45,6 +45,7 @@ export const TAB_LOADERS = [
     ['drone_meta',    './tabs/drone_meta/drone_meta.html',   './tabs/drone_meta/drone_meta.js',   'initDroneMetaTab'],
     ['crm_clients',   './tabs/crm/crm.html',                 './tabs/crm/crm.js',                 'initCrmTab'],
     ['crm_projects',  './tabs/crm/crm-projects.html',        './tabs/crm/crm-projects.js',        'initCrmProjectsTab'],
+    ['crm_quotes',    './tabs/crm/crm-quotes.html',          './tabs/crm/crm-quotes.js',          'initCrmQuotesTab'],
     ['crm_staff',     './tabs/crm/crm-staff.html',           './tabs/crm/crm-staff.js',           'initCrmStaffTab'],
     // 財務管理殼（階段一）：內嵌既有 crm-invoices 六視圖 + 左側導覽代理其 view bar
     ['crm_invoices',  './tabs/finance/finance.html',         './tabs/finance/finance.js',         'initFinanceTab'],
@@ -88,6 +89,7 @@ export const TAB_GROUPS = [
     { id: 'business',   label: '💼 業務管理', items: [
         { key: 'crm_clients',  label: '🤝 客戶管理' },
         { key: 'crm_projects', label: '📁 專案管理' },
+        { key: 'crm_quotes',   label: '💰 報價管理' },
         { key: 'crm_staff',    label: '👥 人力資源' },
         { key: 'timesheets',   label: '⏱️ 工時檢核' },
         { key: 'portal',       label: '🎬 審批門戶' },
@@ -99,8 +101,8 @@ export const TAB_GROUPS = [
 ];
 
 // Keys belonging to a group — filtered to keys that actually have a section in
-// TAB_MAP so an orphan RBAC key (e.g. crm_quotes, no loader/section) can't
-// create a phantom group member.
+// TAB_MAP so any orphan RBAC key (a module with no loader/section) can't
+// create a phantom sidebar member.
 export function groupKeys(group) {
     const keys = group.single ? [group.single] : group.items.map((i) => i.key);
     return keys.filter((k) => TAB_MAP[k]);
@@ -121,8 +123,8 @@ export function isMediaSection(sectionId) {
 // Single source of truth that maps EVERY assignable RBAC module to one of the
 // 4 top-level groups, mirroring the grouped navigation. Unlike TAB_GROUPS
 // (nav-only — `groupKeys` filters out keys without a section), this covers ALL
-// modules so the permission editor never silently hides one. `crm_quotes`
-// (報價) has no top-level tab but is a real business module → folded into 業務管理.
+// modules so the permission editor never silently hides one — including any
+// module that lacks its own top-level tab.
 export const PERMISSION_GROUPS = [
     { id: 'bulletin',   label: '📌 公布欄', modules: ['bulletin'] },
     { id: 'projects',   label: '📊 專案總覽', modules: ['projects'] },

@@ -376,7 +376,7 @@ class ClientPayload(BaseModel):
 class CrmProjectPayload(BaseModel):
     name: str
     client_id: str
-    status: str = "洽談中"
+    status: str = "洽詢"
     am_username: Optional[str] = None
     pm_usernames: List[str] = []
     shoot_date: Optional[str] = None

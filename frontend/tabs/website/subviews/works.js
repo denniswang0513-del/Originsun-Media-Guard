@@ -6,6 +6,7 @@
  * 重用既有 showcase-edit.html 避免重寫 544 行的 CRM 完稿 Tab 編輯器。
  */
 import { websiteFetch, esc, toastOk, toastErr, renderLoadError, debounce, readRowPatch, emptyRow, emptyHint } from '../website-utils.js';
+import { searchableSelect } from '../../crm/crm-utils.js';   // 打字搜尋下拉 widget（.ss-* 樣式已在 index.html 全域載入）
 
 let _works = [];
 let _categories = [];
@@ -175,12 +176,25 @@ function _renderSeriesPanel() {
             <div><div style="color:#888;font-size:11px;">slug（小寫英數-）</div><input id="ser-new-slug" style="width:130px;font-family:monospace;" placeholder="huashan-annual"></div>
             <button class="btn btn-sm" onclick="window._websiteSerCreate()">＋ 建立系列</button>
         </div>`;
+
+    // 展開中系列的「加入作品」下拉 → 套 searchableSelect（打字搜尋，與專案 AM 下拉同款）。
+    // 每次重繪都是新的 <select>，searchableSelect 內部 idempotent、重複呼叫安全。
+    if (_serOpen != null) {
+        const addSel = document.getElementById(`ser-add-${_serOpen}`);
+        if (addSel) searchableSelect(addSel, { placeholder: '搜尋作品…' });
+    }
+}
+
+/** 候選作品（未掛任何系列）的 <option> 清單 — 打字搜尋/過濾交給 searchableSelect widget */
+function _serCandidateOptions() {
+    const candidates = _works.filter(w => !w.series_id);
+    return `<option value="">— 選擇要加入的作品 —</option>` + candidates.map(w =>
+        `<option value="${esc(w.id)}">${esc(w.title || w.name || w.slug)}</option>`).join('');
 }
 
 function _serMembersHtml(sid) {
     const s = _series.find(x => x.id === sid) || {};
     const members = _seriesMembers(sid);
-    const candidates = _works.filter(w => !w.series_id);
     const mrows = members.map((w, i) => `
         <div style="display:flex;gap:8px;align-items:center;padding:3px 0;">
             <span style="color:#666;width:20px;">${i + 1}.</span>
@@ -194,10 +208,9 @@ function _serMembersHtml(sid) {
             <div style="flex:1;min-width:280px;">
                 <div style="color:#888;font-size:11px;margin-bottom:4px;">成員（依系列內順序，系列頁照此排）</div>
                 ${mrows || emptyHint('尚無成員 — 用下面下拉加入，或到作品編輯頁掛', { padding: 10 })}
-                <div style="display:flex;gap:6px;margin-top:8px;align-items:center;">
-                    <select id="ser-add-${sid}" style="min-width:200px;">
-                        <option value="">— 選擇要加入的作品 —</option>
-                        ${candidates.map(w => `<option value="${esc(w.id)}">${esc(w.title || w.name || w.slug)}</option>`).join('')}
+                <div style="display:flex;gap:6px;margin-top:8px;align-items:center;flex-wrap:wrap;">
+                    <select id="ser-add-${sid}" style="min-width:220px;">
+                        ${_serCandidateOptions()}
                     </select>
                     <button class="btn btn-sm" onclick="window._websiteSerAdd(${sid})">加入</button>
                 </div>

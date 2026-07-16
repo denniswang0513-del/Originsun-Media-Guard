@@ -3,12 +3,22 @@
  * 功能：列表視圖 + 詳情面板 + 新增/編輯 Modal + CSV 匯入
  */
 
-import { crmFetch as _fetch, crmCacheFetch, crmCacheInvalidate, esc as _esc, fmtNum as _fmtNum, renderAvatar, populateUserSelect, setupResizeHandle, enableInlineEdit, addEditButton, kebabMenuHtml, createSortable, enumIndex } from './crm-utils.js';
+import { crmFetch as _fetch, crmCacheFetch, crmCacheInvalidate, esc as _esc, fmtNum as _fmtNum, renderAvatar, setupResizeHandle, enableInlineEdit, addEditButton, kebabMenuHtml, createSortable, enumIndex, searchableSelect } from './crm-utils.js';
+
+// 專案階段 → 圖表/圓點色（客戶績效視圖用；與 crm.css 的 .crm-proj-badge-* 是
+// 不同 render path 故不共用）。未知階段 fallback 灰色。保留 已取消 舊值(無 backfill
+// 對映,仍可能存在)；其餘舊 5 值 backfill 後不復存在,不再列。
+const STATUS_COLORS = {
+    '投標': '#f59e0b', '開發': '#fb923c', '洽詢': '#fcd34d', '提案': '#f97316',
+    '製作': '#3b82f6', '結案': '#22c55e', '歸檔': '#6b7280', '未成案': '#ef4444',
+    '已取消': '#6b7280',
+};
 
 // ── State ────────────────────────────────────────────────────
 
 let _clients = [];
-let _users = [];
+let _users = [];   // 系統登入帳號（頭像顯示用）
+let _staff = [];   // 人力資源名單（AM/業務 下拉來源）
 let _selectedId = null;
 let _editingId = null;  // null = 新增, string = 編輯
 let _filters = { q: '', status: '', am: '' };
@@ -49,10 +59,20 @@ async function loadUsers() {
     try {
         const data = await crmCacheFetch('users', '/users');
         _users = data.users || [];
-        _populateSelect('crm-filter-am', '全部 AM');
     } catch (_) {
         _users = [];
     }
+}
+
+async function loadStaff() {
+    // AM（業務）下拉改抓人力資源，與專案表單一致（不再用登入帳號）。
+    try {
+        const data = await crmCacheFetch('staff', '/staff');
+        _staff = data.staff || [];
+    } catch (_) {
+        _staff = [];
+    }
+    _populateSelect('crm-filter-am', '全部 AM', _filters.am);
 }
 
 // ── Rendering ────────────────────────────────────────────────
@@ -140,7 +160,8 @@ async function _loadClientPerformance(clientId) {
         }
 
         const _n = (n) => (n || 0).toLocaleString('zh-TW');
-        const excludeStatus = new Set(['洽談中', '報價中']);
+        // 顯示用「有效專案」口徑,須與後端 routers/crm/_shared._CLIENT_TIER_EXCLUDE_STATUSES 一致
+        const excludeStatus = new Set(['投標', '開發', '洽詢', '提案', '未成案']);
         const activeProjects = projects.filter(p => !excludeStatus.has(p.status));
         const totalProjects = activeProjects.length;
         const totalRevenue = activeProjects.reduce((s, p) => s + (p.contract_amount || 0), 0);
@@ -154,7 +175,7 @@ async function _loadClientPerformance(clientId) {
             const s = p.status || '其他';
             statusCount[s] = (statusCount[s] || 0) + 1;
         }
-        const statusColors = { '洽談中': '#3b82f6', '進行中': '#f59e0b', '報價中': '#8b5cf6', '已結案': '#22c55e', '結案作業': '#14b8a6', '已取消': '#6b7280' };
+        const statusColors = STATUS_COLORS;
 
         // Yearly revenue (only active projects)
         const yearRevenue = {};
@@ -227,7 +248,7 @@ async function _loadClientProjects(clientId) {
             container.innerHTML = '<div class="crm-empty">尚無專案紀錄</div>';
             return;
         }
-        const statusColors = { '洽談中': '#3b82f6', '執行中': '#f59e0b', '已完成': '#22c55e', '已取消': '#6b7280', '進行中': '#f59e0b', '報價中': '#8b5cf6', '已結案': '#22c55e', '結案作業': '#14b8a6' };
+        const statusColors = STATUS_COLORS;
         let lastYear = '';
         container.innerHTML = projects.map(p => {
             const color = statusColors[p.status] || '#9ca3af';
@@ -270,7 +291,7 @@ window._crmShowProjectDetail = async (projectId) => {
         const isEmpty = !value;
         return `<div class="crm-detail-prop"><div class="crm-prop-label">${label}</div><div class="crm-prop-value${isEmpty ? ' empty' : ''}">${isEmpty ? '—' : _esc(String(value))}</div></div>`;
     };
-    const statusColors = { '洽談中': '#3b82f6', '進行中': '#f59e0b', '報價中': '#8b5cf6', '已結案': '#22c55e', '結案作業': '#14b8a6', '已取消': '#6b7280' };
+    const statusColors = STATUS_COLORS;
 
     try {
         const [p, fin, staffData, quoteData] = await Promise.all([
@@ -451,9 +472,13 @@ function renderDetail(client) {
 
         const containerId = tab === 'info' ? 'crm-detail-info' : 'crm-detail-rel';
         let fields = tab === 'info' ? _INFO_EDIT_FIELDS : _REL_EDIT_FIELDS;
-        // Dynamically inject user options for AM select
+        // AM（業務）下拉抓人力資源名單；保留現值（舊登入帳號）避免存檔清空
         if (tab === 'rel') {
-            const amOptions = [{value:'', label:'— 未指派 —'}, ..._users.map(u => ({value: u.username, label: u.username}))];
+            const cur = client.am_username || '';
+            const names = _staff.map(s => s.name);
+            const amOptions = [{value:'', label:'— 未指派 —'},
+                ..._staff.map(s => ({value: s.name, label: s.role ? `${s.name} (${s.role})` : s.name}))];
+            if (cur && !names.includes(cur)) amOptions.push({value: cur, label: `${cur}（舊值）`});
             fields = fields.map(f => f.name === 'am_username' ? {...f, type:'select', options: amOptions} : f);
         }
 
@@ -474,9 +499,21 @@ function renderDetail(client) {
     });
 }
 
-/** Shared helper: populate a <select> with user options */
-function _populateSelect(elementId, placeholder) {
-    populateUserSelect(elementId, _users, placeholder);
+/** 用人力資源（crm_staff）名單填 AM 下拉；currentValue 不在名單裡（舊登入帳號值）時
+ *  保留為選項，避免編輯存檔把既有 AM 清掉。 */
+function _populateSelect(elementId, placeholder, currentValue = '') {
+    const sel = document.getElementById(elementId);
+    if (!sel) return;
+    const names = _staff.map(s => s.name);
+    const opts = _staff.map(s =>
+        `<option value="${_esc(s.name)}"${s.name === currentValue ? ' selected' : ''}>${_esc(s.name)}${s.role ? ` (${_esc(s.role)})` : ''}</option>`);
+    if (currentValue && !names.includes(currentValue)) {
+        opts.unshift(`<option value="${_esc(currentValue)}" selected>${_esc(currentValue)}（舊值）</option>`);
+    }
+    sel.innerHTML = `<option value="">${placeholder}</option>${opts.join('')}`;
+    // 加上打字搜尋（與專案表單 AM 下拉一致）；idempotent，重開 modal 只 sync 現值
+    searchableSelect(sel, { placeholder: '搜尋人員...' });
+    sel._syncSsValue?.();
 }
 
 function _showListError(msg) {
@@ -524,7 +561,7 @@ function openModal(client = null) {
     errEl.textContent = '';
     errEl.style.display = 'none';
 
-    _populateSelect('crm-f-am_username', '— 未指派 —');
+    _populateSelect('crm-f-am_username', '— 未指派 —', client?.am_username || '');
 
     for (const f of _FIELDS) {
         const el = document.getElementById(`crm-f-${f}`);
@@ -725,5 +762,5 @@ export async function initCrmTab() {
 
     setupResizeHandle('crm-resize-handle', 'crm-detail-panel');
 
-    await Promise.all([loadUsers(), loadClients()]);
+    await Promise.all([loadUsers(), loadStaff(), loadClients()]);
 }

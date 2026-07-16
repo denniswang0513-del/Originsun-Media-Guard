@@ -192,7 +192,7 @@ class CrmProject(Base):
     id = Column(String(32), primary_key=True)
     name = Column(String(255), nullable=False)
     client_id = Column(String(32), nullable=False)              # soft FK → clients.id
-    status = Column(String(32), nullable=False, default="洽談中")
+    status = Column(String(32), nullable=False, default="洽詢")
     am_username = Column(String(64), nullable=True)
     pm_usernames = Column(JSONB, nullable=True)
     shoot_date = Column(DateTime(timezone=True), nullable=True)
@@ -251,7 +251,7 @@ class CrmProject(Base):
     public_client_en = Column(String(150), nullable=True)
 
     # ── 結案製作（website production）工作階段 — 後台「結案製作」看板用 ──
-    # 已結案專案的官網製作進度：待製作 / 製作中 / 不上官網。
+    # 結案專案的官網製作進度：待製作 / 製作中 / 不上官網。
     # None 視為「待製作」；專案上線後（public=True）此欄不再參與 stage 推導
     # （GET /projects/closing 以 public 優先 → '已上線'）。
     website_prod_stage = Column(String(16), nullable=True)
