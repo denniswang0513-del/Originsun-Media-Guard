@@ -297,14 +297,15 @@ export const pageSchemas = {
         };
     },
 
-    /** VideoObject — 作品詳情頁（YouTube 影片） */
+    /** VideoObject — 作品詳情頁（YouTube 影片；Vimeo/FB 用後端解析的 video_embed_url） */
     videoObject(work: IPublicProjectDetail, siteUrl: string): SchemaObject {
+        // 非 YT 的縮圖 = 上傳的封面（thumbnail_url 只會是 YT 縮圖，非 YT 必為 null）
         const thumb = work.youtube_id
             ? `https://img.youtube.com/vi/${work.youtube_id}/maxresdefault.jpg`
-            : work.thumbnail_url;
+            : (work.cover_url || work.thumbnail_url);
         const embedUrl = work.youtube_id
             ? `https://www.youtube-nocookie.com/embed/${work.youtube_id}`
-            : null;
+            : (work.video_embed_url || null);
         // sameAs：列出舊 URL（slug 變動歷史），讓 Google 認知 PageRank 合併
         const sameAs = (work.old_urls || []).map(u => `${siteUrl}${u}`);
         // keywords：tag slug + category slug 一起塞，給搜尋引擎 / AI 抓主題
@@ -320,7 +321,9 @@ export const pageSchemas = {
             thumbnailUrl: thumb ? [thumb] : undefined,
             uploadDate: work.published_at || undefined,
             embedUrl: embedUrl || undefined,
-            contentUrl: work.youtube_id ? `https://www.youtube.com/watch?v=${work.youtube_id}` : undefined,
+            contentUrl: work.youtube_id
+                ? `https://www.youtube.com/watch?v=${work.youtube_id}`
+                : (work.video_url || undefined),
             // canonical 優先（跨站發布時 PM 設定）— 否則本站 /works/{slug}
             url: work.canonical_url || `${siteUrl}/works/${work.slug}`,
             sameAs: sameAs.length ? sameAs : undefined,

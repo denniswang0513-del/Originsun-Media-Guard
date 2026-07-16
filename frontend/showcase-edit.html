@@ -202,11 +202,47 @@ function _currentBlocks() {
 function _extraVideoRowHtml(v) {
     return `<div class="extra-video-row" style="display:flex;gap:8px;align-items:center;margin-bottom:8px;">
         <input type="url" class="extra-video-url" value="${_esc(v.url || '')}"
-               placeholder="YouTube 或 Vimeo 連結" style="flex:2;min-width:0;">
+               placeholder="YouTube / Vimeo / Facebook 影片連結" style="flex:2;min-width:0;">
         <input type="text" class="extra-video-caption" value="${_esc(v.caption || '')}"
                placeholder="影片說明（可空）" style="flex:1;min-width:0;">
         <button class="btn btn-danger btn-sm" type="button" data-action="del-extra-video" title="移除此列">✕</button>
     </div>`;
+}
+
+// ── 主影片 provider 偵測（純提示用；正式解析在後端 services/website/video_utils.py，
+//    pattern 增減平台時要跟它同步，否則提示會講錯話）──
+// youtube watch?v=/youtu.be/embed/shorts → 'youtube'；vimeo.com/<數字> → 'vimeo'；
+// facebook.com/*/videos/ | facebook.com/watch | fb.watch → 'facebook'；
+// 其他 http(s) → 'link'（對外站顯示「到原平台觀看」按鈕）；空/非網址 → null
+function _videoProvider(url) {
+    const u = (url || '').trim();
+    if (!u) return null;
+    if (/(?:youtube\.com\/(?:watch\?v=|embed\/|shorts\/)|youtu\.be\/)/i.test(u)) return 'youtube';
+    if (/vimeo\.com\/\d+/i.test(u)) return 'vimeo';
+    if (/(?:facebook\.com\/(?:[^\/?#]+\/videos\/|watch)|fb\.watch\/)/i.test(u)) return 'facebook';
+    if (/^https?:\/\//i.test(u)) return 'link';
+    return null;
+}
+
+// 依 #inp-video 現值更新 #video-hint 提示（youtube/空值 → 隱藏）
+function _updateVideoHint() {
+    const inp = document.getElementById('inp-video');
+    const hint = document.getElementById('video-hint');
+    if (!inp || !hint) return;
+    const p = _videoProvider(inp.value);
+    if (!p || p === 'youtube') {
+        hint.style.display = 'none';
+        hint.textContent = '';
+        return;
+    }
+    if (p === 'vimeo') {
+        hint.textContent = '✓ 偵測到 Vimeo 影片 — 對外站將內嵌播放。此平台無法自動取縮圖，建議上傳封面圖。';
+    } else if (p === 'facebook') {
+        hint.textContent = '✓ 偵測到 Facebook 影片 — 對外站將內嵌播放。此平台無法自動取縮圖，建議上傳封面圖；FB 影片須為「公開」。';
+    } else {
+        hint.textContent = '此連結非 YouTube/Vimeo/FB — 對外站將顯示「到原平台觀看」按鈕。';
+    }
+    hint.style.display = 'block';
 }
 
 // ── 統一 SEO 區塊：301 轉址 + SEO 覆寫 + AI SEO 規劃 一個 section（位置：「網站連結」之下）
@@ -549,12 +585,13 @@ function _render() {
             : `<p style="color:var(--text2);">${_esc(sc.description || '尚未填寫')}</p>`}
     </div>`;
 
-    // Video URL（無個別儲存按鈕）
+    // Video URL（無個別儲存按鈕）— 支援 YouTube / Vimeo / Facebook 內嵌，其他連結 link-out
     html += `<div class="section" id="sec-video">
         <div class="section-label">主影片連結</div>
         ${EDITABLE
             ? `<input type="url" id="inp-video" data-field="video_url"
-                value="${_esc(sc.video_url || '')}" placeholder="YouTube 或 Vimeo 連結" style="width:100%;">`
+                value="${_esc(sc.video_url || '')}" placeholder="YouTube / Vimeo / Facebook 影片連結" style="width:100%;">
+               <div id="video-hint" style="display:none;margin-top:6px;color:var(--text2);font-size:12px;line-height:1.6;"></div>`
             : sc.video_url ? `<a href="${_esc(sc.video_url)}" target="_blank" style="color:var(--accent);">${_esc(sc.video_url)}</a>` : '<p style="color:var(--text3);">尚未設定</p>'}
     </div>`;
 
@@ -1022,6 +1059,14 @@ function _bindEvents() {
     window.addEventListener('beforeunload', (e) => {
         if (_dirty) { e.preventDefault(); e.returnValue = ''; }
     });
+
+    // === 主影片 provider 偵測提示（Vimeo/FB 將內嵌、其他連結 link-out）===
+    // dirty 追蹤已由 [data-field] 通用 handler 處理，這裡只管提示文字
+    const _videoInp = document.getElementById('inp-video');
+    if (_videoInp) {
+        _videoInp.addEventListener('input', _updateVideoHint);  // input 已涵蓋打字/貼上/autofill
+        _updateVideoHint();   // 初始渲染也跑一次（既有值直接顯示提示）
+    }
 
     // === ➕ 附加影片：動態列（in-memory 編輯，master save 一次收集）===
     // 列可動態增刪 → input dirty 與刪除鈕都走事件委派，新插入的列免重綁

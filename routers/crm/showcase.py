@@ -180,12 +180,14 @@ async def _sync_showcase_to_public(session, sc) -> None:
     # sc.youtube_id 是寫入時已 parse 好的快取（_apply_showcase_fields）— 優先用；
     # 沒有才 parse（lazy import：services/website/ 不在 OTA AGENT_DIRS，頂層 import
     # 會炸 agent 開機。Showcase publish 只在 master 跑，該檔一定在）。
+    # 鏡射一律覆寫（含 None）— 換成 FB/Vimeo 連結時要清掉舊 YT ID，否則對外站
+    # 繼續播舊影片。清成 None 安全：skeleton 守衛（admin_works.py）另有
+    # _work_has_content 兜底、work_completeness 數的是 raw video_url。
     yt_id = sc.youtube_id
     if not yt_id:
         from services.website.notion_service import _extract_youtube_id
         yt_id = _extract_youtube_id(sc.video_url or "")
-    if yt_id:
-        project.public_youtube_id = yt_id
+    project.public_youtube_id = yt_id or None
     # 自動補 published_at — 從未發布變為發布時 set now（避免 admin/PM toggle 公開時忘了帶日期）
     if sc.published and not sc.published_at:
         sc.published_at = _now()
@@ -306,8 +308,9 @@ def _apply_showcase_fields(sc, payload: dict) -> None:
     「使用 number 作 URL」，必須存 NULL 避免兩個作品都用空字串撞 unique。
     其他欄位（description / video_url）空字串是合法值，不轉 None。
 
-    video_url 變動時同步 parse sc.youtube_id（讀路徑的快取欄；只在 parse 成功時
-    覆寫 — 與 _sync_showcase_to_public 對 public_youtube_id 的行為一致）。
+    video_url 變動時一律重算 sc.youtube_id（讀路徑的快取欄）— 非 YouTube
+    連結（FB/Vimeo/空值）要清成 None，與 _sync_showcase_to_public 對
+    public_youtube_id 的鏡射行為一致，避免對外站播到舊影片。
     """
     # SEO 301（順序沿舊版「replace 再 append」）：先套 payload 的 old_slugs 全量替換
     # （若有），再偵測 slug 變動把舊 slug append 進 sc.old_slugs — append 不被 replace 洗掉。
@@ -335,9 +338,10 @@ def _apply_showcase_fields(sc, payload: dict) -> None:
             setattr(sc, field, value)
     if "video_url" in payload:
         from services.website.notion_service import _extract_youtube_id
+        # 一律重算（None 也要寫）— 換成 FB/Vimeo 連結時要清掉舊 YT ID，
+        # 否則對外站繼續播舊影片（stale youtube_id 快取）。
         yt_id = _extract_youtube_id(sc.video_url or "")
-        if yt_id:
-            sc.youtube_id = yt_id
+        sc.youtube_id = yt_id
     sc.updated_at = _now()
 
 

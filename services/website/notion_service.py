@@ -376,20 +376,9 @@ async def list_block_children(
 # Block → PostBlock
 # ══════════════════════════════════════════════════════════
 
-_YT_PATTERNS = [
-    re.compile(r"youtu\.be/([A-Za-z0-9_\-]{6,})"),
-    re.compile(r"youtube\.com/watch\?v=([A-Za-z0-9_\-]{6,})"),
-    re.compile(r"youtube\.com/embed/([A-Za-z0-9_\-]{6,})"),
-    re.compile(r"youtube\.com/shorts/([A-Za-z0-9_\-]{6,})"),
-]
-
-
-def _extract_youtube_id(url: str) -> str | None:
-    for pat in _YT_PATTERNS:
-        m = pat.search(url or "")
-        if m:
-            return m.group(1)
-    return None
+# 正本已搬到 video_utils.py（多平台影片解析共用）— 這裡 re-export，
+# 既有 import 點（routers/crm/showcase.py、notion_url_service.py 等）不動。
+from services.website.video_utils import _extract_youtube_id  # noqa: F401,E402
 
 
 def _image_block_url(image_block: dict) -> tuple[str, bool]:

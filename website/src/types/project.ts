@@ -10,6 +10,12 @@ export interface IPublicProject {
     client?: string | null;
     client_en?: string | null;      // 英文客戶名（空則 fallback client）
     youtube_id?: string | null;
+    // 多平台影片（youtube_id 空時後端解析 video_url 而來）：
+    // video_provider: "youtube"|"vimeo"|"facebook"|"link"|null
+    // video_embed_url: Vimeo/FB 的 iframe embed src（link/無影片 = null）
+    video_url?: string | null;
+    video_provider?: string | null;
+    video_embed_url?: string | null;
     description?: string | null;
     description_en?: string | null; // 英文描述（空則 fallback description）
     year?: number | null;
@@ -71,10 +77,13 @@ export interface ISeoFAQ {
 }
 
 // 附加影片（一頁多影片）— youtube_id 後端已 parse 好，null = 非 YouTube 連結
+// provider / embed_url 與主影片 video_provider / video_embed_url 同語意（多平台支援）
 export interface IExtraVideo {
     url: string;
     caption: string;
     youtube_id: string | null;
+    provider?: string | null;
+    embed_url?: string | null;
 }
 
 // 相關作品互連項（作品屬系列 → 同系列成員；否則 → 同 CRM 專案其他已發布作品）

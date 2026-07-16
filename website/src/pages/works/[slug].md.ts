@@ -60,6 +60,9 @@ export const GET: APIRoute = async ({ params, site }) => {
     }
     if (work.youtube_id) {
         lines.push(`## 影片`, `https://www.youtube.com/watch?v=${work.youtube_id}`, "");
+    } else if (work.video_url) {
+        // 非 YouTube（Vimeo/FB/其他平台）— 直接給原始連結（同附加影片的 fallback 邏輯）
+        lines.push(`## 影片`, work.video_url, "");
     }
     // 附加影片 — 主影片之外的其他支（花絮/系列集數）；有 caption 標在前面
     const extraVideos = (work.extra_videos || []).filter(v => v.url || v.youtube_id);

@@ -1,0 +1,32 @@
+---
+/**
+ * VideoEmbed.astro — 影片內嵌（YouTube → lite-youtube；Vimeo/FB → iframe）
+ *
+ * 作品頁主影片 hero 與附加影片共用，iframe allow 清單 / lite-youtube params
+ * 只維護這一份。link-out fallback（無法內嵌的連結）兩處版型刻意不同
+ * （hero 卡片 vs 精簡列），留在呼叫端。兩個 prop 都空 → 不輸出任何東西。
+ */
+import { isValidYouTubeId } from "../../lib/youtube";
+
+interface Props {
+    youtubeId?: string | null;
+    embedUrl?: string | null;
+    title: string;
+}
+const { youtubeId, embedUrl, title } = Astro.props;
+---
+{isValidYouTubeId(youtubeId) ? (
+    <lite-youtube videoid={youtubeId}
+                  class="block aspect-video w-full"
+                  style="max-width: 100%;"
+                  playlabel={title}
+                  params="modestbranding=1&rel=0&iv_load_policy=3&playsinline=1"></lite-youtube>
+) : embedUrl ? (
+    <iframe src={embedUrl}
+            class="block aspect-video w-full"
+            style="border:0;"
+            loading="lazy"
+            allowfullscreen
+            allow="autoplay; fullscreen; picture-in-picture; encrypted-media"
+            title={title}></iframe>
+) : null}

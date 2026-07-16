@@ -28,6 +28,8 @@ from core.crm_logic import (  # noqa: F401
 )
 from db.models import Client, CrmProject, CrmProjectShowcase
 from db.models_website import WebsiteCategory, WebsiteProjectCategory
+# 同 package（services/website/）內 import — 本檔能 import 就代表 video_utils 也在
+from services.website.video_utils import parse_video_url
 
 logger = logging.getLogger(__name__)
 
@@ -245,11 +247,19 @@ def _to_public_dict(
         「只看精選圖」的舊行為。
     """
     cd = cat_data or _empty_cat_data()
+    # 主影片多平台描述子（youtube/vimeo/facebook/link）— 虛擬主作品 video_url=None
+    # → 三欄皆 None（它只有 public_youtube_id，youtube_id 欄照舊輸出）
+    video = parse_video_url(sc.video_url or "")
     return {
         "slug": _slug_or_fallback(sc),
         "title": (sc.title or "").strip() or p.name,
         "client": (p.public_client or "").strip() or (client_name or ""),
         "youtube_id": sc.youtube_id,
+        # 主影片連結（raw）+ 解析結果 — Astro 實際依 youtube_id / embed_url / url
+        # 分支；provider 目前僅 API 自述與除錯用（「為何這支沒內嵌」一眼可判）
+        "video_url": sc.video_url or None,
+        "video_provider": video["provider"] if video else None,
+        "video_embed_url": video["embed_url"] if video else None,
         "description": sc.description,
         "year": sc.year,
         "categories": cd.get("categories") or [],
@@ -298,6 +308,9 @@ def _to_admin_dict(
         "credits": sc.credits or [],
         "published_at": sc.published_at.isoformat() if sc.published_at else None,
         "redirect_count": len(sc.old_slugs or []),
+        # 「真上傳封面」旗標 — cover_url 是 fallback 鏈（自訂封面→YT 縮圖），後台
+        # 縮圖需要區分兩者（YT 作品別整表抓 maxres 大圖），別讓前端反推鏈內規則
+        "has_custom_cover": bool(sc.cover_url),
     })
     return d
 
@@ -392,13 +405,16 @@ async def get_public_project_by_slug(session: AsyncSession, slug: str) -> Option
     data["gallery"] = sc.gallery or []
     data["process_items"] = sc.process_items or []
 
-    # 附加影片（一頁多影片，Phase 3）— 逐項 parse youtube_id 給 Astro 直接 render
-    from services.website.notion_service import _extract_youtube_id
+    # 附加影片（一頁多影片，Phase 3）— 逐項 parse 成多平台描述子；youtube_id 鍵
+    # 保留（既有前端消費），由描述子導出：非 YouTube 一律 None
     data["extra_videos"] = [
         {"url": v.get("url") or "", "caption": v.get("caption") or "",
-         "youtube_id": _extract_youtube_id(v.get("url") or "") or None}
+         "youtube_id": pv["video_id"] if pv and pv["provider"] == "youtube" else None,
+         "provider": pv["provider"] if pv else None,
+         "embed_url": pv["embed_url"] if pv else None}
         for v in (sc.extra_videos or [])
         if isinstance(v, dict) and (v.get("url") or "").strip()
+        for pv in [parse_video_url(v.get("url") or "")]
     ]
 
     # 相關作品互連：作品屬系列（策展集合）→ series 區塊放同系列其他作品（跨專案）

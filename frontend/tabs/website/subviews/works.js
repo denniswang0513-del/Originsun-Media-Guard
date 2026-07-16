@@ -199,6 +199,8 @@ function _serMembersHtml(sid) {
         <div style="display:flex;gap:8px;align-items:center;padding:3px 0;">
             <span style="color:#666;width:20px;">${i + 1}.</span>
             <span style="flex:1;">${esc(w.title || w.name || w.slug)}</span>
+            <button class="btn btn-sm btn-ghost" onclick="window._websiteEditWork('${esc(w.id)}')"
+                title="開啟作品編輯頁（與作品集的編輯相同）">編輯</button>
             <button class="btn btn-sm btn-ghost" ${i === 0 ? 'disabled' : ''} onclick="window._websiteSerMove(${sid},${i},-1)">↑</button>
             <button class="btn btn-sm btn-ghost" ${i === members.length - 1 ? 'disabled' : ''} onclick="window._websiteSerMove(${sid},${i},1)">↓</button>
             <button class="btn btn-sm btn-ghost" style="color:#f87171;" onclick="window._websiteSerRemove(${sid},'${esc(w.id)}')">移除</button>
@@ -410,8 +412,14 @@ function _renderTable() {
         </thead>
         <tbody>
             ${rows.map(w => {
-                const thumb = w.youtube_id
-                    ? `<img src="https://img.youtube.com/vi/${esc(w.youtube_id)}/default.jpg" style="width:80px;height:45px;object-fit:cover;border-radius:3px;background:#000;" onerror="this.style.visibility='hidden'" />`
+                // 縮圖優先序：真自訂封面（後端 has_custom_cover 旗標；cover_url 本身是
+                // fallback 鏈「自訂封面→YT 縮圖」，不能直接當自訂用 — 否則整表 YT 作品
+                // 都改抓 maxres 大圖）→ YouTube default 小圖 → 灰色佔位
+                //（FB/Vimeo 等非 YouTube 影片作品沒封面時不出破圖）
+                const _thumbSrc = (w.has_custom_cover ? w.cover_url : null)
+                    || (w.youtube_id ? `https://img.youtube.com/vi/${w.youtube_id}/default.jpg` : null);
+                const thumb = _thumbSrc
+                    ? `<img src="${esc(_thumbSrc)}" style="width:80px;height:45px;object-fit:cover;border-radius:3px;background:#000;" onerror="this.style.visibility='hidden'" />`
                     : '<div style="width:80px;height:45px;background:#333;border-radius:3px;"></div>';
                 return `
                 <tr data-id="${esc(w.id)}">
