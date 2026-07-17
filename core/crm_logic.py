@@ -215,6 +215,23 @@ def work_completeness(*, video_url=None, youtube_id=None, extra_videos=None,
     }
 
 
+def rebuild_status_public(st: dict, now: float) -> dict:
+    """rebuild_service.get_rebuild_status() → token 端點可見的白名單子集。
+
+    給 showcase-edit 發布時間線用。**絕不**帶出 output_tail / error 內文 ——
+    build log 不可洩漏給 token 持有者（state 字串本身無害）。
+    auto_fires_in_sec 伺服端算（免 client 時鐘偏差），無排程時為 None。
+    """
+    st = st or {}
+    fires_at = st.get("auto_rebuild_fires_at")
+    return {
+        "state": st.get("state") or "idle",
+        "pending_count": int(st.get("pending_count") or 0),
+        "auto_fires_in_sec": max(0, round(fires_at - now)) if fires_at else None,
+        "last_success_at": st.get("last_success_at"),
+    }
+
+
 def project_works_summary(works) -> dict:
     """專案層作品聚合 — 結案看板卡片「2/3 已上線」進度 + 全上線判定。
 

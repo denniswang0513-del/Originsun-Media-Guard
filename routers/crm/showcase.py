@@ -15,7 +15,7 @@ from fastapi import HTTPException, Request, UploadFile, File, Query
 
 from core.crm_logic import (SHOWCASE_EDIT_EXPIRES_DAYS, SHOWCASE_EDIT_SCOPE,
                             WORK_WIRE_FIELD_MAP, is_main_work,
-                            showcase_edit_url, work_url_slug)
+                            showcase_edit_url, work_completeness, work_url_slug)
 from core.schemas import ShowcasePayload, StaffQuickAddPayload
 
 from ._shared import (router, _check_auth, _check_website_auth, _require_db,
@@ -607,6 +607,23 @@ async def generate_showcase_edit_token(project_id: str, request: Request):
 # 編輯入口仍在 /public/showcase-edit/{token}（透過 token 授權給 PM/客戶協作）。
 
 
+async def _public_work_url(session, sc) -> tuple:
+    """(site_url, url_path) — 對外公開網址組裝（GET 資料與 /status 端點共用）。
+
+    site_url 從 website_settings 讀，沒設 fallback 到 production 網域；
+    URL slug 優先序：admin 自訂 slug > number（1, 2, 3）> 無法產 URL（path 空字串）。
+    """
+    try:
+        from services.website import settings_service
+        _all_settings = await settings_service.get_all_settings(session)
+        site_url = (_all_settings.get("seo.site_url") or "").strip()
+    except Exception:
+        site_url = ""
+    site_url = site_url or "https://originsun-studio.com"
+    url_slug = work_url_slug(sc)
+    return site_url, (f"/works/{url_slug}" if url_slug else "")
+
+
 async def _build_showcase_edit_data(session, sc) -> dict:
     """組 showcase-edit「一頁全包」資料 — GET /public/showcase-edit/{token} 與
     carry_in 共用同一個 serializer，確保回傳 shape 完全一致。呼叫者已完成 token
@@ -633,17 +650,15 @@ async def _build_showcase_edit_data(session, sc) -> dict:
     data["public_published"] = bool(sc.published)
     data["public_old_slugs"] = list(sc.old_slugs or [])
     # 對外公開 URL — 給 showcase-edit「網站連結」直接組公開網址用
-    # site_url 從 website_settings 讀，沒設 fallback 到 production 網域
-    try:
-        from services.website import settings_service
-        _all_settings = await settings_service.get_all_settings(session)
-        _site_url = (_all_settings.get("seo.site_url") or "").strip()
-    except Exception:
-        _site_url = ""
-    data["public_site_url"] = _site_url or "https://originsun-studio.com"
-    # URL slug 解析優先序：admin 自訂 slug > number（1, 2, 3）> 無法產 URL
-    url_slug = work_url_slug(sc)
-    data["public_url_path"] = f"/works/{url_slug}" if url_slug else ""
+    _site_url, _url_path = await _public_work_url(session, sc)
+    data["public_site_url"] = _site_url
+    data["public_url_path"] = _url_path
+    # 完成度 + 上架驗證 — 編輯器檢查清單 / 發布時間線用（正本 core/crm_logic）
+    data["completeness"] = work_completeness(
+        video_url=sc.video_url, youtube_id=sc.youtube_id, extra_videos=sc.extra_videos,
+        gallery=sc.gallery, cover_url=sc.cover_url, featured_image=sc.featured_image,
+        description=sc.description, credits=sc.credits, credits_text=sc.credits_text)
+    data["verified_at"] = sc.verified_at.isoformat() if sc.verified_at else None
 
     # 對外 categories 候選清單（含 kind）+ 此作品已勾選的 ID
     cat_rows = (await session.execute(
@@ -738,6 +753,36 @@ async def get_showcase_edit_data(token: str):
     async with factory() as session:
         sc = await _verify_showcase_edit_token(session, token, require_editable=False)
         return await _build_showcase_edit_data(session, sc)
+
+
+@router.get("/public/showcase-edit/{token}/status")
+async def get_showcase_edit_status(token: str):
+    """透過 token 查發布狀態（編輯器「發布時間線」輪詢用；唯讀 token 也可看）。
+
+    rebuild 資訊經 core.crm_logic.rebuild_status_public 白名單過濾 ——
+    絕不回傳 output_tail / error 內文。
+    """
+    import time as _time
+
+    from core.crm_logic import rebuild_status_public
+    _require_db()
+    factory = await _get_factory()
+    async with factory() as session:
+        sc = await _verify_showcase_edit_token(session, token, require_editable=False)
+        site_url, url_path = await _public_work_url(session, sc)
+        out = {
+            "published": bool(sc.published),
+            "published_at": sc.published_at.isoformat() if sc.published_at else None,
+            "verified_at": sc.verified_at.isoformat() if sc.verified_at else None,
+            "public_url": (site_url + url_path) if url_path else None,
+        }
+    try:
+        from services.website import rebuild_service
+        raw = await rebuild_service.get_rebuild_status()
+    except Exception:
+        raw = None  # 精簡 agent 無 website services → 安全降級 idle
+    out["rebuild"] = rebuild_status_public(raw, _time.time())
+    return out
 
 
 @router.get("/public/showcase-edit/{token}/staff_search")
