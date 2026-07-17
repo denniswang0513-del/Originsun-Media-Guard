@@ -364,6 +364,9 @@ class CrmStaff(Base):
     hire_date = Column(DateTime(timezone=True), nullable=True)   # 到職日
     leave_date = Column(DateTime(timezone=True), nullable=True)  # 離職日
     emergency_contact = Column(String(128), nullable=True)       # 緊急聯絡人（姓名+電話）
+    # N-hr H2：年度特休額度（天）。餘額不另存 ledger — 即時算＝額度 − 當年度
+    # 已核准特休 days 合計（core/hr_logic.leave_balance）。
+    annual_leave_days = Column(Integer, nullable=True)
     # Resume / portfolio fields
     photo_url = Column(String(512), nullable=True)
     bio = Column(Text, nullable=True)
@@ -711,6 +714,7 @@ class Timesheet(Base):
     id = Column(String(32), primary_key=True)                    # uuid4 hex
     work_date = Column(DateTime(timezone=True), nullable=True)
     staff_name = Column(String(64), nullable=False, default="")
+    staff_id = Column(String(32), nullable=True, index=True)     # N0 對映（手填列必帶；sheet 列待 N2 回填）
     project_id = Column(String(32), nullable=True)               # soft FK → crm_projects.id（名稱對映成功時）
     project_name = Column(String(255), nullable=False, default="")  # Sheet 原始專案名（含「行政庶務」內部桶）
     task_note = Column(Text, nullable=True)                      # 工作內容
@@ -723,6 +727,38 @@ class Timesheet(Base):
     __table_args__ = (
         Index("idx_ts_project", "project_id"),
         Index("idx_ts_staff_date", "staff_name", "work_date"),
+    )
+
+
+class HrLeaveRequest(Base):
+    """請假單（N-hr H2 極簡版：申請 + 核可 + 額度；不做打卡鐘）。
+
+    審核採「三欄形」慣例（藍圖 §7-E 的極簡審核；欄位形狀與 api_portal 一致，
+    N2 工時核可 / N3 獎金簽核建表時沿用同三欄，轉換邏輯各自實作）：
+    `status` + `approved_by` + `approved_at`。狀態離開「已核准」時兩欄清空；
+    已核准再核准回 409。特休餘額即時算不另存 ledger
+    （crm_staff.annual_leave_days − 當年度已核准特休合計）。
+    """
+    __tablename__ = "hr_leave_requests"
+
+    id = Column(String(32), primary_key=True)                     # uuid4 hex
+    staff_id = Column(String(32), nullable=False, index=True)     # soft FK → crm_staff.id
+    staff_name = Column(String(64), nullable=False, default="")   # 冗餘顯示用（申請當下快照）
+    leave_type = Column(String(16), nullable=False)               # 特休/病假/事假/公假/婚假/喪假/其他
+    start_date = Column(DateTime(timezone=True), nullable=False)
+    end_date = Column(DateTime(timezone=True), nullable=False)
+    days = Column(Float, nullable=False, default=1.0)             # 0.5 步進（H2 文件以天計）
+    reason = Column(Text, nullable=True)
+    status = Column(String(16), nullable=False, default="待審")    # 待審/已核准/已退回
+    approved_by = Column(String(64), nullable=True)               # 核可人 username
+    approved_at = Column(DateTime(timezone=True), nullable=True)
+    created_by = Column(String(64), nullable=True)                # 申請/代登者 username
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+    __table_args__ = (
+        Index("idx_leave_status", "status"),
+        Index("idx_leave_staff_start", "staff_id", "start_date"),
     )
 
 

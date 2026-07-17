@@ -1,0 +1,52 @@
+<!--
+    hr_leave.html — 人事管理 › 出缺勤 Tab 殼（N-hr H2 極簡請假：申請/核可/額度）
+    內容由 hr_leave.js render 進 #hl-content。設計鐵則：UI 無 emoji（owner 2026-07-17）。
+-->
+<div id="hl-root">
+    <div id="hl-content" style="color:#888;padding:40px;text-align:center;">載入中…</div>
+</div>
+
+<style>
+    #hl-root h2 { color: #fff; font-size: 18px; margin: 0 0 4px 0; font-weight: 600; }
+    #hl-root .hl-sub { color: #777; font-size: 12px; margin-bottom: 16px; }
+    #hl-root .hl-card {
+        background: #232323; border: 1px solid #333; border-radius: 8px;
+        padding: 14px 16px; margin-bottom: 14px;
+    }
+    #hl-root .hl-card h3 { color: #ddd; font-size: 14px; margin: 0 0 10px 0; font-weight: 600; }
+    #hl-root table { width: 100%; border-collapse: collapse; font-size: 12.5px; }
+    #hl-root th {
+        text-align: left; color: #888; font-weight: 500; padding: 6px 8px;
+        border-bottom: 1px solid #333; white-space: nowrap;
+    }
+    #hl-root td { padding: 6px 8px; border-bottom: 1px solid #2c2c2c; color: #ccc; }
+    #hl-root td.num, #hl-root th.num { text-align: right; font-variant-numeric: tabular-nums; }
+    #hl-root .hl-btn {
+        background: #3b82f6; color: #fff; border: none; padding: 6px 12px;
+        border-radius: 4px; font-size: 12px; cursor: pointer;
+    }
+    #hl-root .hl-btn:hover { background: #2563eb; }
+    #hl-root .hl-btn.ok { background: #16a34a; }
+    #hl-root .hl-btn.ok:hover { background: #15803d; }
+    #hl-root .hl-btn.warn { background: transparent; border: 1px solid #a16207; color: #fbbf24; }
+    #hl-root .hl-btn.warn:hover { background: #422f06; }
+    #hl-root .hl-btn.ghost { background: transparent; border: 1px solid #444; color: #ccc; }
+    #hl-root .hl-btn.ghost:hover { background: #333; }
+    #hl-root .hl-btn.danger { background: transparent; border: 1px solid rgba(239,68,68,.4); color: #f87171; }
+    #hl-root .hl-btn.danger:hover { background: rgba(239,68,68,.08); }
+    #hl-root .hl-pill {
+        display: inline-block; font-size: 11px; border-radius: 999px; padding: 2px 10px;
+        border: 1px solid #444; color: #aaa; white-space: nowrap;
+    }
+    #hl-root .hl-pill.pending { border-color: #a16207; color: #fbbf24; }
+    #hl-root .hl-pill.approved { border-color: #166534; color: #4ade80; }
+    #hl-root .hl-pill.rejected { border-color: #7f1d1d; color: #f87171; }
+    #hl-root select, #hl-root input, #hl-root textarea {
+        background: #1a1a1a; border: 1px solid #333; color: #ddd; border-radius: 4px;
+        padding: 6px 8px; font-size: 12.5px;
+    }
+    #hl-root input[type="number"] { width: 72px; }
+    #hl-root .hl-form { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+    #hl-root .hl-note { color: #777; font-size: 11.5px; margin-top: 8px; line-height: 1.6; }
+    #hl-root .hl-empty { color: #666; padding: 14px 0; text-align: center; font-size: 12.5px; }
+</style>

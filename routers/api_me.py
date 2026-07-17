@@ -4,15 +4,17 @@
 core.identity.resolve_current_staff（token → users.staff_id → crm_staff），
 絕不接受 client 傳入的 staff_id / username。
 
-權限 = 細粒度四 key（owner 在「使用者管理」逐帳號勾選控制哪些卡開放）：
+權限 = 細粒度 key（owner 在「使用者管理」逐帳號勾選控制哪些卡開放）：
     me_projects  我的專案（派工）        — 鍵 crm_project_staff.staff_id（乾淨）
     me_profile   我的個人資料/履歷        — 鍵 crm_staff.id（乾淨；PUT 白名單）
     me_todos     我的待辦（公布欄）       — 鍵 username（不需綁定人員檔案）
     me_finance   我的工時+請款（摘要）    — ⚠ name-match（Timesheet.staff_name /
                  CrmPaymentRequest.payee_name 是字串），單人 owner 階段安全；
                  全員推行前必須先回填 staff_id（見 ROADMAP N2）。
+    me_leave     我的請假（N-hr H2）      — 鍵 crm_staff.id；自助送單/撤回 +
+                 特休餘額；管理端簽核在 routers/api_hr.py。
 
-管理員（Lv3）經 grant_admin_all_modules 自動擁有四 key。
+管理員（Lv3）經 grant_admin_all_modules 自動擁有全部 key。
 """
 from datetime import datetime, timezone
 
@@ -21,14 +23,17 @@ from sqlalchemy import func, select  # type: ignore
 
 from core.auth import check_admin_or_module, grant_admin_all_modules
 from core.db_guard import db_factory_or_503
+from core.hr_logic import leave_balance, leave_to_dict
 from core.identity import resolve_current_staff
-from core.schemas import MeProfileUpdate, MeTodoUpdate
+from core.schemas import (MeLeaveCreate, MeProfileUpdate, MeTimesheetCreate,
+                          MeTodoUpdate)
 from db.models import (BulletinItem, Client, CrmPaymentRequest, CrmProject,
-                       CrmProjectStaff, Timesheet)
+                       CrmProjectStaff, HrLeaveRequest, Timesheet)
+from routers.api_hr import approved_annual_used, new_leave_request
 
 router = APIRouter(prefix="/api/v1/me", tags=["me"])
 
-ME_MODULE_KEYS = ("me_projects", "me_profile", "me_todos", "me_finance")
+ME_MODULE_KEYS = ("me_projects", "me_profile", "me_todos", "me_finance", "me_leave")
 
 
 def _allowed_sections(payload: dict) -> list:
@@ -165,6 +170,21 @@ async def my_workspace(request: Request):
                     "project": p.project_label or "",
                 } for p in recent],
             }
+
+        if "me_leave" in allowed and staff is not None:
+            year = datetime.now().year
+            used = await approved_annual_used(session, [ident["staff_id"]], year)
+            rows = (await session.execute(
+                select(HrLeaveRequest)
+                .where(HrLeaveRequest.staff_id == ident["staff_id"])
+                .order_by(HrLeaveRequest.start_date.desc().nulls_last())
+                .limit(10)
+            )).scalars().all()
+            out["leave"] = {
+                "quota": leave_balance(staff.annual_leave_days,
+                                       used.get(ident["staff_id"], 0.0)),
+                "recent": [leave_to_dict(r) for r in rows],
+            }
     return out
 
 
@@ -212,3 +232,84 @@ async def update_my_todo(item_id: str, body: MeTodoUpdate, request: Request):
         obj.done_at = datetime.now() if body.status == "done" else None
         await session.commit()
     return {"status": "ok"}
+
+
+@router.post("/leave")
+async def apply_my_leave(body: MeLeaveCreate, request: Request):
+    """本人送請假單（staff_id 由 token 解析；固定進待審，管理端在人事 tab 簽核）。"""
+    payload = check_admin_or_module(request, "me_leave")
+    ident = await resolve_current_staff(request)
+    if ident["staff"] is None:
+        raise HTTPException(status_code=409, detail="帳號尚未綁定人員檔案，請聯絡管理員")
+    factory = db_factory_or_503()
+    async with factory() as session:
+        obj = new_leave_request(ident["staff_id"], ident["staff"].name, body,
+                                (payload or {}).get("sub"))
+        session.add(obj)
+        await session.commit()
+        await session.refresh(obj)
+        result = leave_to_dict(obj)
+    # 通知管理者（best-effort；精簡 agent 可能沒帶 notifier）
+    try:
+        from notifier import notify_tab_async
+        await notify_tab_async(
+            "leave_request",
+            staff_name=result["staff_name"], leave_type=result["leave_type"],
+            start=result["start_date"], end=result["end_date"],
+            days=result["days"], reason=result["reason"] or "-",
+        )
+    except Exception:
+        pass
+    return result
+
+
+@router.delete("/leave/{leave_id}")
+async def cancel_my_leave(leave_id: str, request: Request):
+    """撤回自己的待審請假單（已核准/已退回不可自行刪除，找管理者）。"""
+    check_admin_or_module(request, "me_leave")
+    ident = await resolve_current_staff(request)
+    if ident["staff_id"] is None:
+        raise HTTPException(status_code=409, detail="帳號尚未綁定人員檔案")
+    factory = db_factory_or_503()
+    async with factory() as session:
+        obj = (await session.execute(
+            select(HrLeaveRequest)
+            .where(HrLeaveRequest.id == leave_id)
+            .where(HrLeaveRequest.staff_id == ident["staff_id"])
+        )).scalar_one_or_none()
+        if obj is None:
+            raise HTTPException(status_code=404, detail="找不到這張請假單（或不是你的）")
+        if obj.status != "待審":
+            raise HTTPException(status_code=409, detail="僅待審單可自行撤回")
+        await session.delete(obj)
+        await session.commit()
+    return {"deleted": leave_id}
+
+
+@router.get("/timesheet_options")
+async def my_timesheet_options(request: Request):
+    """補登工時的專案下拉：進行中（製作/結案）+ 本人最近填過的專案。"""
+    check_admin_or_module(request, "me_finance")
+    ident = await resolve_current_staff(request)
+    factory = db_factory_or_503()
+    from routers.api_timesheets import project_options
+    async with factory() as session:
+        staff_name = ident["staff"].name if ident["staff"] else None
+        return {"projects": await project_options(session, staff_name)}
+
+
+@router.post("/timesheets")
+async def add_my_timesheet(body: MeTimesheetCreate, request: Request):
+    """本人補登一筆工時（source=manual；staff_name 用綁定姓名 → 與 Sheet 同名即整合）。"""
+    check_admin_or_module(request, "me_finance")
+    ident = await resolve_current_staff(request)
+    if ident["staff"] is None:
+        raise HTTPException(status_code=409, detail="帳號尚未綁定人員檔案，請聯絡管理員")
+    from routers.api_timesheets import insert_manual_rows
+    factory = db_factory_or_503()
+    async with factory() as session:
+        result = await insert_manual_rows(
+            session, staff_id=ident["staff_id"], staff_name=ident["staff"].name,
+            rows=[body])
+        await session.commit()
+    return result

@@ -18,9 +18,10 @@ from fastapi import APIRouter, HTTPException, Request  # type: ignore
 
 import core.state as state
 from config import load_settings, save_settings
-from core.auth import check_admin
+from core.auth import check_admin, check_admin_or_module
 from core.db_guard import db_factory_or_503
-from core.schemas import TimesheetIngestRequest
+from core.hr_logic import manual_dup_key
+from core.schemas import TimesheetIngestRequest, TimesheetManualRequest
 
 router = APIRouter(prefix="/api/v1/timesheets", tags=["timesheets"])
 
@@ -92,6 +93,19 @@ async def ingest_rows(req: TimesheetIngestRequest, request: Request):
             (await session.execute(select(Timesheet.row_hash).where(Timesheet.row_hash.in_(hashes)))).scalars()
         )
 
+        # 雙來源去重（藍圖 §3.6 階段3）：同 (人, 日, 專案) 已有手填列 → Sheet 列跳過
+        # （手填優先於 Sheet）。手填量小，逐人載鍵集比對。
+        batch_names = {(r.staff or "").strip() for r in req.rows if (r.staff or "").strip()}
+        manual_keys: set = set()
+        if batch_names:
+            m_rows = (await session.execute(
+                select(Timesheet.staff_name, Timesheet.work_date, Timesheet.project_name)
+                .where(Timesheet.source == "manual")
+                .where(Timesheet.staff_name.in_(batch_names))
+            )).all()
+            manual_keys = {manual_dup_key(n, d, p) for n, d, p in m_rows}
+
+        skipped_manual = 0
         budget_updates: dict[str, float] = {}
         seen_in_batch: set[str] = set()
         for r, h in zip(req.rows, hashes):
@@ -99,13 +113,17 @@ async def ingest_rows(req: TimesheetIngestRequest, request: Request):
                 skipped += 1
                 continue
             seen_in_batch.add(h)
+            wd = _parse_date(r.date)
+            if manual_keys and manual_dup_key(r.staff, wd, r.project) in manual_keys:
+                skipped_manual += 1
+                continue
             pname = (r.project or "").strip()
             pid = name_to_id.get(pname)
             if pid is None and pname:
                 unmatched.add(pname)
             session.add(Timesheet(
                 id=uuid.uuid4().hex,
-                work_date=_parse_date(r.date),
+                work_date=wd,
                 staff_name=(r.staff or "").strip(),
                 project_id=pid,
                 project_name=pname,
@@ -130,9 +148,139 @@ async def ingest_rows(req: TimesheetIngestRequest, request: Request):
     return {
         "inserted": inserted,
         "skipped": skipped,
+        "skipped_manual_priority": skipped_manual,   # 手填優先擋下的 Sheet 列
         "unmatched_projects": sorted(unmatched),
         "budget_mirrored": len(budget_updates),
     }
+
+
+# ── 手填工時（與 Sheet 同步共存；N-hr 人事管理 v1）─────────────────────
+
+async def project_options(session, staff_name: str | None = None) -> list:
+    """補登用專案下拉：進行中（製作/結案）+ 該員最近填過的專案名。"""
+    from sqlalchemy import func, select
+    from db.models import CrmProject, Timesheet
+    rows = (await session.execute(
+        select(CrmProject.id, CrmProject.name)
+        .where(CrmProject.status.in_(("製作", "結案")))
+        .order_by(CrmProject.name)
+    )).all()
+    opts = [{"id": pid, "name": n or ""} for pid, n in rows]
+    if staff_name:
+        have = {o["name"] for o in opts}
+        recent = (await session.execute(
+            select(Timesheet.project_name, func.max(Timesheet.work_date))
+            .where(Timesheet.staff_name == staff_name)
+            .group_by(Timesheet.project_name)
+            .order_by(func.max(Timesheet.work_date).desc())
+            .limit(10)
+        )).all()
+        opts.extend({"id": None, "name": p} for p, _ in recent if p and p not in have)
+    return opts
+
+
+async def insert_manual_rows(session, staff_id: str, staff_name: str, rows) -> dict:
+    """手填列落庫（source='manual'、status='draft'、帶 staff_id）。
+
+    row_hash 用 manual_ 前綴 uuid（不與 Sheet 冪等 hash 相干 — 手填允許同日同案
+    多筆；Sheet 端撞手填由 ingest 的 manual_dup_key 檢查擋）。caller 負責 commit。
+    """
+    from sqlalchemy import select
+    from db.models import CrmProject, Timesheet
+    proj_rows = (await session.execute(select(CrmProject.id, CrmProject.name))).all()
+    name_to_id = {(n or "").strip(): pid for pid, n in proj_rows}
+    id_to_name = {pid: (n or "").strip() for pid, n in proj_rows}
+
+    inserted = 0
+    unmatched: set[str] = set()
+    for r in rows:
+        if (r.hours or 0) <= 0:
+            raise HTTPException(status_code=422, detail="時數需大於 0")
+        wd = _parse_date(r.work_date)
+        if wd is None:
+            raise HTTPException(status_code=422, detail=f"日期格式錯誤：{r.work_date}")
+        pid = r.project_id or name_to_id.get((r.project_name or "").strip())
+        pname = (r.project_name or "").strip() or id_to_name.get(pid or "", "")
+        if pid is None and pname:
+            unmatched.add(pname)
+        session.add(Timesheet(
+            id=uuid.uuid4().hex,
+            work_date=wd,
+            staff_name=staff_name,
+            staff_id=staff_id,
+            project_id=pid,
+            project_name=pname,
+            task_note=(r.task_note or "").strip() or None,
+            hours=float(r.hours),
+            status="draft",
+            source="manual",
+            row_hash="manual_" + uuid.uuid4().hex,
+        ))
+        inserted += 1
+    return {"inserted": inserted, "unmatched_projects": sorted(unmatched)}
+
+
+@router.get("/project_options")
+async def get_project_options(request: Request, staff_name: str = ""):
+    """內部補登 grid 的專案下拉（timesheets 模組可用）。"""
+    check_admin_or_module(request, "timesheets")
+    factory = db_factory_or_503()
+    async with factory() as session:
+        return {"projects": await project_options(session, staff_name or None)}
+
+
+@router.post("/manual")
+async def add_manual_rows(body: TimesheetManualRequest, request: Request):
+    """管理端批次手填（指定人員；員工自助走 POST /api/v1/me/timesheets）。"""
+    check_admin_or_module(request, "timesheets")
+    if not body.rows:
+        raise HTTPException(status_code=422, detail="至少一列")
+    factory = db_factory_or_503()
+    from db.models import CrmStaff
+    async with factory() as session:
+        staff = await session.get(CrmStaff, body.staff_id)
+        if staff is None:
+            raise HTTPException(status_code=404, detail="人員不存在")
+        result = await insert_manual_rows(session, staff_id=staff.id,
+                                          staff_name=staff.name, rows=body.rows)
+        await session.commit()
+    return result
+
+
+@router.get("/by_staff")
+async def hours_by_staff(request: Request, month: str = ""):
+    """人員月視圖：每人 × 每專案 時數彙總（month=YYYY-MM，預設本月）。"""
+    check_admin_or_module(request, "timesheets")
+    try:
+        base = datetime.strptime(month, "%Y-%m") if month else datetime.now().replace(day=1)
+    except ValueError:
+        raise HTTPException(status_code=422, detail="month 格式需 YYYY-MM")
+    m0 = base.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+    m1 = m0.replace(year=m0.year + 1, month=1) if m0.month == 12 else m0.replace(month=m0.month + 1)
+    factory = db_factory_or_503()
+    from sqlalchemy import func, select
+    from db.models import Timesheet
+    async with factory() as session:
+        rows = (await session.execute(
+            select(Timesheet.staff_name, Timesheet.project_name,
+                   func.sum(Timesheet.hours), func.count(Timesheet.id))
+            .where(Timesheet.work_date >= m0)
+            .where(Timesheet.work_date < m1)
+            .group_by(Timesheet.staff_name, Timesheet.project_name)
+            .order_by(Timesheet.staff_name)
+        )).all()
+    by_staff: dict = {}
+    for sname, pname, total, cnt in rows:
+        e = by_staff.setdefault(sname or "(空白)", {"name": sname or "(空白)",
+                                                   "total_hours": 0.0, "projects": []})
+        h = round(float(total or 0), 1)
+        e["total_hours"] = round(e["total_hours"] + h, 1)
+        e["projects"].append({"project_name": pname or "(空白)", "hours": h, "rows": cnt})
+    staff_list = sorted(by_staff.values(), key=lambda x: -x["total_hours"])
+    for e in staff_list:
+        e["projects"].sort(key=lambda p: -p["hours"])
+    return {"month": m0.strftime("%Y-%m"), "staff": staff_list,
+            "total_hours": round(sum(e["total_hours"] for e in staff_list), 1)}
 
 
 @router.get("/summary")

@@ -319,6 +319,59 @@ class MeTodoUpdate(BaseModel):
     status: str  # todo / doing / done
 
 
+# ── N-hr H2 出缺勤（請假）──
+
+class LeaveCreate(BaseModel):
+    """管理端建立/代登請假單。日期格式 YYYY-MM-DD。"""
+    staff_id: str
+    leave_type: str            # 特休/病假/事假/公假/婚假/喪假/其他
+    start_date: str
+    end_date: str
+    days: float = 1.0          # 0.5 步進
+    reason: Optional[str] = None
+
+
+class LeaveUpdate(BaseModel):
+    status: Optional[str] = None       # 待審/已核准/已退回（核准寫核可人+時間戳）
+    leave_type: Optional[str] = None
+    start_date: Optional[str] = None
+    end_date: Optional[str] = None
+    days: Optional[float] = None
+    reason: Optional[str] = None
+
+
+class MeLeaveCreate(BaseModel):
+    """員工自助送單（staff_id 由 token 解析，不收）。"""
+    leave_type: str
+    start_date: str
+    end_date: str
+    days: float = 1.0
+    reason: Optional[str] = None
+
+
+class AnnualLeaveSet(BaseModel):
+    annual_leave_days: Optional[int] = None   # None = 清除額度設定
+
+
+# ── 工時手填（與 Sheet 同步共存；同人+日+專案 手填優先）──
+
+class TimesheetManualRow(BaseModel):
+    work_date: str             # YYYY-MM-DD
+    project_id: Optional[str] = None
+    project_name: str = ""     # 無 id 時以名稱對映（同 ingest 邏輯）
+    task_note: Optional[str] = None
+    hours: float
+
+
+class TimesheetManualRequest(BaseModel):
+    staff_id: str              # 管理端代填指定人員
+    rows: List[TimesheetManualRow]
+
+
+class MeTimesheetCreate(TimesheetManualRow):
+    """員工自助補登一筆工時（staff 由 token 解析）— 欄位同 TimesheetManualRow。"""
+
+
 class BulletinAsk(BaseModel):
     message: str
 

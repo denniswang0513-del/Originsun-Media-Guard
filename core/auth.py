@@ -128,10 +128,12 @@ ALL_MODULES = [
     'backup', 'verify', 'transcode', 'concat', 'report', 'transcribe', 'tts', 'footage',
     'drone_meta', 'projects', 'crm_clients', 'crm_projects', 'crm_quotes',
     'crm_staff', 'crm_invoices', 'timesheets', 'portal', 'website_admin',
-    # N0 個人工作台（獨立頁 /my.html 的四張卡；無 SPA tab）。
+    # N0 個人工作台（獨立頁 /my.html 的卡片；無 SPA tab）。
     # ⚠ 新 key 一律 append 在尾端 — admin 帳號的 modules[0] 決定 SPA 登入
     #   預設落地頁，插前面會改掉所有管理員的首頁。
     'me_projects', 'me_profile', 'me_todos', 'me_finance',
+    # N-hr 人事管理：出缺勤 tab + /my.html 我的請假卡
+    'hr_leave', 'me_leave',
 ]
 
 

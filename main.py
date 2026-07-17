@@ -43,6 +43,7 @@ _ROUTER_MODULES = [
     'api_drone_watcher',
     'api_bulletin',
     'api_me',
+    'api_hr',
 ]
 _routers = {}
 for _mod_name in _ROUTER_MODULES:
@@ -458,6 +459,9 @@ async def _on_startup():
                         ("crm_cash_entries", "updated_at", "TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP"),
                         ("crm_cash_entries", "invoice_id", "VARCHAR(32)"),
                         ("crm_cash_entries", "bank_fee", "INTEGER"),
+                        # N-hr H2 出缺勤 + 工時 staff_id 對映（hr_leave_requests 新表由 create_all 建）
+                        ("crm_staff", "annual_leave_days", "INTEGER"),
+                        ("timesheets", "staff_id", "VARCHAR(32)"),
                     ]
                     for tbl, col, coltype in _crm_cols:
                         try:

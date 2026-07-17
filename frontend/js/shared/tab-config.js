@@ -17,6 +17,7 @@ export const TAB_MAP = {
     crm_quotes: 'tab_crm_quotes', crm_staff: 'tab_crm_staff',
     crm_invoices: 'tab_crm_invoices', timesheets: 'tab_timesheets',
     portal: 'tab_portal',
+    hr_leave: 'tab_hr_leave',
     website_admin: 'tab_website',
 };
 
@@ -50,6 +51,7 @@ export const TAB_LOADERS = [
     // 財務管理殼（階段一）：內嵌既有 crm-invoices 六視圖 + 左側導覽代理其 view bar
     ['crm_invoices',  './tabs/finance/finance.html',         './tabs/finance/finance.js',         'initFinanceTab'],
     ['timesheets',    './tabs/timesheets/timesheets.html',   './tabs/timesheets/timesheets.js',   'initTimesheetsTab'],
+    ['hr_leave',      './tabs/hr_leave/hr_leave.html',       './tabs/hr_leave/hr_leave.js',       'initHrLeaveTab'],
     ['portal',        './tabs/portal/portal.html',           './tabs/portal/portal.js',           'initPortalTab'],
     ['website_admin', './tabs/website/website.html',         './tabs/website/website.js',         'initWebsiteTab'],
 ];
@@ -90,9 +92,14 @@ export const TAB_GROUPS = [
         { key: 'crm_clients',  label: '🤝 客戶管理' },
         { key: 'crm_projects', label: '📁 專案管理' },
         { key: 'crm_quotes',   label: '💰 報價管理' },
-        { key: 'crm_staff',    label: '👥 人力資源' },
-        { key: 'timesheets',   label: '⏱️ 工時檢核' },
         { key: 'portal',       label: '🎬 審批門戶' },
+    ] },
+    // 人事管理（2026-07 N-hr）：員工檔案/工時自業務管理搬入 + 新出缺勤。
+    // 設計鐵則（owner 2026-07-17）：emoji 只在頂層 tab 標籤，items 一律純文字。
+    { id: 'hr',         label: '👔 人事管理', items: [
+        { key: 'crm_staff',    label: '員工檔案' },
+        { key: 'timesheets',   label: '專案工時' },
+        { key: 'hr_leave',     label: '出缺勤' },
     ] },
     // 財務管理（2026-07 起）：帳務六視圖自業務管理搬入；沿用 crm_invoices 單一
     // module key（零 RBAC 遷移，既有授權者自動看得到）。內部子視圖自管左側欄。
@@ -130,12 +137,13 @@ export const PERMISSION_GROUPS = [
     { id: 'projects',   label: '📊 專案總覽', modules: ['projects'] },
     { id: 'preprod',    label: '📝 前期製作', modules: ['preprod_plan', 'preprod_locations', 'preprod_proposals', 'intel', 'equipment'] },
     { id: 'production', label: '🎬 後期製作', modules: ['backup', 'verify', 'transcode', 'concat', 'drone_meta', 'report', 'transcribe', 'tts', 'footage'] },
-    { id: 'business',   label: '💼 業務管理', modules: ['crm_clients', 'crm_projects', 'crm_quotes', 'crm_staff', 'timesheets', 'portal'] },
+    { id: 'business',   label: '💼 業務管理', modules: ['crm_clients', 'crm_projects', 'crm_quotes', 'portal'] },
+    { id: 'hr',         label: '人事管理', modules: ['crm_staff', 'timesheets', 'hr_leave'] },
     { id: 'finance',    label: '💰 財務管理', modules: ['crm_invoices'] },
     { id: 'website',    label: '🌐 官網管理', modules: ['website_admin'] },
-    // N0 個人工作台 — 獨立頁 /my.html 的四張卡（無 SPA tab，僅權限編輯器用；
+    // N0 個人工作台 — 獨立頁 /my.html 的卡片（無 SPA tab，僅權限編輯器用；
     // groupKeys 會因 TAB_MAP 無此 key 而自動不進側欄）。
-    { id: 'me',         label: '🙋 個人工作台', modules: ['me_projects', 'me_profile', 'me_todos', 'me_finance'] },
+    { id: 'me',         label: '🙋 個人工作台', modules: ['me_projects', 'me_profile', 'me_todos', 'me_finance', 'me_leave'] },
 ];
 
 // Flat list of every assignable RBAC module key — derived from PERMISSION_GROUPS

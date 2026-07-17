@@ -102,11 +102,13 @@ main { max-width: 1100px; margin: 0 auto; padding: 104px 20px 80px; }
 .pf-line { display: flex; gap: 10px; padding: 8px 0; font-size: 13px; border-bottom: 1px solid #f5f5f5; }
 .pf-line .k { width: 84px; flex-shrink: 0; font-size: 11px; letter-spacing: 0.15em; color: var(--sub); text-transform: uppercase; padding-top: 2px; }
 .pf-line .v { flex: 1; min-width: 0; line-height: 1.6; overflow-wrap: break-word; }
-.pf-edit input, .pf-edit textarea {
+.pf-edit input, .pf-edit textarea, .pf-edit select {
     width: 100%; border: 1px solid var(--line); border-radius: 2px; padding: 7px 10px;
-    font-size: 13px; font-family: inherit; color: var(--ink); outline: none;
+    font-size: 13px; font-family: inherit; color: var(--ink); background: #fff; outline: none;
 }
-.pf-edit input:focus, .pf-edit textarea:focus { border-color: var(--red); }
+.pf-edit input:focus, .pf-edit textarea:focus, .pf-edit select:focus { border-color: var(--red); }
+.pf-edit .inline-row { display: flex; gap: 8px; flex-wrap: wrap; }
+.pf-edit .inline-row > * { width: auto; flex: 1; min-width: 90px; }
 .pf-edit .field { margin-bottom: 10px; }
 footer { max-width: 1100px; margin: 0 auto; padding: 0 20px 40px; }
 footer .eyebrow { font-size: 10px; }
@@ -279,7 +281,7 @@ function renderWorkspace() {
     $("hdr-user").style.display = "";
     $("btn-logout").style.display = "";
 
-    const staffSections = ["me_profile", "me_projects", "me_finance"];
+    const staffSections = ["me_profile", "me_projects", "me_finance", "me_leave"];
     $("ws-notice").innerHTML = (!ws.bound && ws.allowed.some(k => staffSections.includes(k)))
         ? `<div class="notice">此帳號尚未綁定人員檔案 — 專案／個人資料／工時卡片暫無資料，請管理員在「使用者管理」完成綁定。</div>` : "";
 
@@ -287,6 +289,7 @@ function renderWorkspace() {
     grid.innerHTML = "";
     if (ws.allowed.includes("me_projects")) grid.appendChild(cardProjects(ws.projects || []));
     if (ws.allowed.includes("me_todos"))    grid.appendChild(cardTodos(ws.todos || []));
+    if (ws.allowed.includes("me_leave"))    grid.appendChild(cardLeave(ws.leave));
     if (ws.allowed.includes("me_profile"))  grid.appendChild(cardProfile(ws.profile));
     if (ws.allowed.includes("me_finance"))  grid.appendChild(cardFinance(ws.timesheet, ws.payments));
     if (!ws.allowed.length)
@@ -393,6 +396,68 @@ async function saveProfile(btn) {
     } catch (_) {}
 }
 
+// ── 卡：我的請假（me_leave；N-hr H2 自助送單/撤回 + 特休餘額）──
+const LEAVE_TYPES = ["特休", "病假", "事假", "公假", "婚假", "喪假", "其他"];
+function cardLeave(lv) {
+    const card = makeCard("My Leave", "我的請假", "");
+    const body = card.querySelector(".card-body");
+    if (!lv) { body.innerHTML = `<div class="empty">尚未綁定人員檔案</div>`; return card; }
+    const q = lv.quota || {};
+    const today = new Date().toISOString().slice(0, 10);
+    let html = `<div class="stat-row">
+        <div class="stat"><div class="num ${q.remaining < 0 ? "accent" : ""}">${q.remaining ?? "—"}</div><div class="lbl">特休剩餘(天)</div></div>
+        <div class="stat"><div class="num">${q.used ?? 0}</div><div class="lbl">已休</div></div>
+        <div class="stat"><div class="num">${q.annual ?? "—"}</div><div class="lbl">年度額度</div></div>
+    </div>
+    <div class="pf-edit" style="border-top:1px solid #f5f5f5;padding-top:12px;padding-bottom:4px;">
+        <div class="inline-row" style="margin-bottom:8px;">
+            <select id="lv-type">${LEAVE_TYPES.map(t => `<option>${t}</option>`).join("")}</select>
+            <input type="number" id="lv-days" value="1" min="0.5" step="0.5" title="天數">
+        </div>
+        <div class="inline-row" style="margin-bottom:8px;">
+            <input type="date" id="lv-start" value="${today}">
+            <input type="date" id="lv-end" value="${today}">
+        </div>
+        <div class="field"><input id="lv-reason" placeholder="事由（選填）"></div>
+        <button class="mini-btn" onclick="applyLeave()">送出請假</button>
+        <span class="err" id="lv-err" style="margin-left:8px;"></span>
+    </div>`;
+    html += (lv.recent || []).map(r => `
+        <div class="row">
+            <div class="grow">
+                <div class="title">${esc(r.leave_type)}　${esc(r.start_date)} ~ ${esc(r.end_date)}（${r.days} 天）</div>
+                ${r.reason ? `<div class="meta">${esc(r.reason)}</div>` : ""}
+            </div>
+            <span class="pill${r.status === "待審" ? " hot" : ""}">${esc(r.status)}</span>
+            ${r.status === "待審" ? `<button class="mini-btn" onclick="cancelLeave('${esc(r.id)}')">撤回</button>` : ""}
+        </div>`).join("");
+    body.innerHTML = html;
+    return card;
+}
+async function applyLeave() {
+    const errEl = $("lv-err");
+    try {
+        const r = await mfetch("/api/v1/me/leave", { method: "POST", body: JSON.stringify({
+            leave_type: $("lv-type").value, start_date: $("lv-start").value,
+            end_date: $("lv-end").value, days: parseFloat($("lv-days").value || "0"),
+            reason: $("lv-reason").value,
+        }) });
+        if (!r.ok) {
+            const d = await r.json().catch(() => ({}));
+            errEl.textContent = d.detail || "送出失敗"; errEl.style.display = "inline";
+            return;
+        }
+        loadWorkspace();   // 送單改動額度+清單，整包重抓
+    } catch (_) { errEl.textContent = "連線失敗"; errEl.style.display = "inline"; }
+}
+async function cancelLeave(id) {
+    try {
+        const r = await mfetch("/api/v1/me/leave/" + id, { method: "DELETE" });
+        if (r.ok) loadWorkspace();
+        else { const d = await r.json().catch(() => ({})); alert(d.detail || "撤回失敗"); }
+    } catch (_) {}
+}
+
 // ── 卡 4：我的工時＋請款（摘要）──
 function cardFinance(ts, pay) {
     const card = makeCard("Hours & Payments", "工時與請款", "");
@@ -418,8 +483,59 @@ function cardFinance(ts, pay) {
             <div style="text-align:right;"><div style="font-size:13px;">${money(p.amount)}</div>
             <span class="pill${p.status !== "已付款" ? " hot" : ""}">${esc(p.status || "—")}</span></div></div>`).join("");
     }
+    if (ts) {
+        // 補登一筆工時（source=manual；與 Sheet 同步共存，同人同日同案手填優先）
+        html += `<div style="padding-top:14px;">
+            <button class="mini-btn" onclick="toggleTsForm()">補一筆工時</button>
+            <div class="pf-edit" id="ts-form" style="display:none;margin-top:10px;">
+                <div class="inline-row" style="margin-bottom:8px;">
+                    <input type="date" id="tsf-date" value="${new Date().toISOString().slice(0, 10)}">
+                    <input type="number" id="tsf-hours" min="0.1" step="0.1" placeholder="時數">
+                </div>
+                <div class="field"><select id="tsf-project"><option value="">— 選專案 —</option></select></div>
+                <div class="field"><input id="tsf-note" placeholder="工作內容（選填）"></div>
+                <button class="mini-btn" onclick="submitTs()">送出</button>
+                <span class="err" id="tsf-err" style="margin-left:8px;"></span>
+            </div>
+        </div>`;
+    }
     body.innerHTML = html || `<div class="empty">尚無工時／請款紀錄</div>`;
     return card;
+}
+async function toggleTsForm() {
+    const f = $("ts-form");
+    if (!f) return;
+    const show = f.style.display === "none";
+    f.style.display = show ? "" : "none";
+    const sel = $("tsf-project");
+    if (show && sel && sel.options.length <= 1) {
+        try {
+            const r = await mfetch("/api/v1/me/timesheet_options");
+            if (r.ok) {
+                const d = await r.json();
+                (d.projects || []).forEach(p => {
+                    const o = document.createElement("option");
+                    o.value = p.name; o.textContent = p.name;
+                    sel.appendChild(o);
+                });
+            }
+        } catch (_) {}
+    }
+}
+async function submitTs() {
+    const errEl = $("tsf-err");
+    try {
+        const r = await mfetch("/api/v1/me/timesheets", { method: "POST", body: JSON.stringify({
+            work_date: $("tsf-date").value, project_name: $("tsf-project").value,
+            task_note: $("tsf-note").value, hours: parseFloat($("tsf-hours").value || "0"),
+        }) });
+        if (!r.ok) {
+            const d = await r.json().catch(() => ({}));
+            errEl.textContent = d.detail || "送出失敗"; errEl.style.display = "inline";
+            return;
+        }
+        loadWorkspace();   // 時數統計要重算，整包重抓
+    } catch (_) { errEl.textContent = "連線失敗"; errEl.style.display = "inline"; }
 }
 
 // ── boot ──
