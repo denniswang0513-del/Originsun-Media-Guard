@@ -54,7 +54,8 @@ class BulletinItem(Base):
     category = Column(String(64), nullable=True)
     pinned = Column(Boolean, nullable=False, default=False)
     sort_order = Column(Integer, nullable=False, default=0)
-    assignee = Column(String(16), nullable=False, default="me")      # me / claude（交辦收件匣）
+    assignee = Column(String(16), nullable=False, default="me")      # me / claude（交辦收件匣，全隊共用）
+    assignee_username = Column(String(64), nullable=True, index=True)  # N0：指派給個人（→ users.username），供「我的待辦」
     conversation = Column(JSONB, nullable=True)                       # 「問 Claude」對話 [{role,text,at}]
     activity = Column(Text, nullable=True)                            # Claude 執行進度/結果 log（tier B）
     created_by = Column(String(64), nullable=True)
@@ -66,6 +67,13 @@ class BulletinItem(Base):
         Index("idx_bulletin_status", "status"),
         Index("idx_bulletin_pinned", "pinned"),
     )
+
+    @classmethod
+    def mine_filter(cls, username: str):
+        """「與我有關」的唯一定義：指派給我，或我建立的（排除丟給 Claude 的
+        交辦收件匣）。api_bulletin(mine=1) 與 api_me 個人工作台共用。"""
+        return ((cls.assignee_username == username)
+                | ((cls.created_by == username) & (cls.assignee != "claude")))
 
 
 class Agent(Base):
@@ -157,6 +165,9 @@ class User(Base):
     google_id = Column(String(255), unique=True, nullable=True, index=True)
     email = Column(String(255), nullable=True)
     avatar_url = Column(String(512), nullable=True)
+    # ── N0 個人帳號化：登入帳號 ↔ 人力庫人員（soft FK → crm_staff.id）──
+    #    nullable：既有帳號未綁定不受影響；個人工作台/工時/獎金全靠這條橋。
+    staff_id = Column(String(32), nullable=True, index=True)
 
 
 class Client(Base):

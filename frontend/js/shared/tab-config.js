@@ -133,6 +133,9 @@ export const PERMISSION_GROUPS = [
     { id: 'business',   label: '💼 業務管理', modules: ['crm_clients', 'crm_projects', 'crm_quotes', 'crm_staff', 'timesheets', 'portal'] },
     { id: 'finance',    label: '💰 財務管理', modules: ['crm_invoices'] },
     { id: 'website',    label: '🌐 官網管理', modules: ['website_admin'] },
+    // N0 個人工作台 — 獨立頁 /my.html 的四張卡（無 SPA tab，僅權限編輯器用；
+    // groupKeys 會因 TAB_MAP 無此 key 而自動不進側欄）。
+    { id: 'me',         label: '🙋 個人工作台', modules: ['me_projects', 'me_profile', 'me_todos', 'me_finance'] },
 ];
 
 // Flat list of every assignable RBAC module key — derived from PERMISSION_GROUPS

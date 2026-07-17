@@ -176,6 +176,9 @@ function _card(it) {
     // 交給 Claude 追蹤徽章（tier B）— 紫底
     const assignPill = toClaude
         ? `<span class="website-pill" style="background:#3b1d5f;color:#c4b5fd;">🤖 交給 Claude</span>` : '';
+    // N0：指派到個人徽章（顯示在該員工的個人工作台 /my.html）— 藍底
+    const personPill = it.assignee_username
+        ? `<span class="website-pill" style="background:#1e3a5f;color:#93c5fd;">👤 ${esc(it.assignee_username)}</span>` : '';
     const pinIcon = it.pinned ? '📌' : '📍';
     const pinStyle = it.pinned ? 'opacity:1;' : 'opacity:0.4;';
 
@@ -198,7 +201,7 @@ function _card(it) {
             <div style="flex:1;min-width:0;">
                 <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
                     <span class="bl-title" onclick="window._bl.edit('${it.id}')">${esc(it.title || '(未命名)')}</span>
-                    ${prioPill}${doingPill}${catPill}${assignPill}
+                    ${prioPill}${doingPill}${catPill}${assignPill}${personPill}
                 </div>
                 ${it.note ? `<div class="bl-note">${esc(it.note)}</div>` : ''}
                 ${it.activity ? `<div class="bl-activity"><div class="bl-activity-hd">🤖 Claude 進度</div>${esc(it.activity)}</div>` : ''}
@@ -322,6 +325,9 @@ _bl.edit = (id) => {
                 <option value="me" ${it.assignee !== 'claude' ? 'selected' : ''}>我</option>
                 <option value="claude" ${it.assignee === 'claude' ? 'selected' : ''}>🤖 交給 Claude</option>
             </select>
+            <label style="color:#9aa0a6;font-size:12px;">指派給個人</label>
+            <input id="bl-edit-assignee-user" value="${esc(it.assignee_username || '')}"
+                   placeholder="帳號名（選填 — 會出現在該員工的個人工作台）" style="${_inp()};max-width:280px;" />
             <label style="color:#9aa0a6;font-size:12px;">分類</label>
             <input id="bl-edit-cat" value="${esc(it.category || '')}" placeholder="選填" style="${_inp()};max-width:220px;" />
             <label style="color:#9aa0a6;font-size:12px;">釘選</label>
@@ -348,6 +354,7 @@ _bl.saveEdit = async (id) => {
         priority: v('bl-edit-prio')?.value || 'med',
         status: v('bl-edit-status')?.value || 'todo',
         assignee: v('bl-edit-assignee')?.value || 'me',
+        assignee_username: (v('bl-edit-assignee-user')?.value || '').trim(),  // "" = 取消指派
         category: (v('bl-edit-cat')?.value || '').trim(),
         pinned: !!v('bl-edit-pinned')?.checked,
     };

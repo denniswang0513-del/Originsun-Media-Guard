@@ -34,6 +34,7 @@ def _to_dict(o) -> dict:
         "status": o.status, "priority": o.priority, "category": o.category or "",
         "pinned": bool(o.pinned), "sort_order": o.sort_order,
         "assignee": getattr(o, "assignee", None) or "me",
+        "assignee_username": getattr(o, "assignee_username", None),
         "conversation": getattr(o, "conversation", None) or [],
         "activity": getattr(o, "activity", None) or "",
         "created_by": o.created_by,
@@ -53,11 +54,15 @@ def _require_db():
 
 
 @router.get("/bulletin")
-async def list_bulletin(request: Request):
-    check_admin_or_module(request, "bulletin")
+async def list_bulletin(request: Request, mine: int = 0):
+    """mine=1 → 只看與我有關的：指派給我，或我建立的（排除丟給 Claude 的交辦）。"""
+    payload = check_admin_or_module(request, "bulletin")
     factory = _require_db()
     async with factory() as session:
-        rows = (await session.execute(select(BulletinItem).order_by(*_ORDER_BY))).scalars()
+        stmt = select(BulletinItem)
+        if mine:
+            stmt = stmt.where(BulletinItem.mine_filter((payload or {}).get("sub") or ""))
+        rows = (await session.execute(stmt.order_by(*_ORDER_BY))).scalars()
         return {"items": [_to_dict(r) for r in rows]}
 
 
@@ -90,6 +95,7 @@ async def create_bulletin(body: BulletinCreate, request: Request):
             category=(body.category or "").strip() or None,
             pinned=bool(body.pinned),
             assignee=body.assignee or "me",
+            assignee_username=(body.assignee_username or "").strip() or None,
             sort_order=int(maxo) + 1,
             created_by=(payload or {}).get("sub"),
         )
@@ -108,8 +114,8 @@ async def update_bulletin(item_id: str, body: BulletinUpdate, request: Request):
         if obj is None:
             raise HTTPException(status_code=404, detail="找不到項目")
         data = body.model_dump(exclude_unset=True)
-        # 字串欄位 strip、空→None（title 空則不動）
-        for k in ("note", "category"):
+        # 字串欄位 strip、空→None（title 空則不動；assignee_username 空 = 取消指派）
+        for k in ("note", "category", "assignee_username"):
             if k in data:
                 setattr(obj, k, (data[k] or "").strip() or None)
         if data.get("title"):

@@ -277,6 +277,7 @@ class BulletinCreate(BaseModel):
     category: Optional[str] = None
     pinned: bool = False
     assignee: str = "me"        # me / claude（交辦收件匣）
+    assignee_username: Optional[str] = None  # N0: 指派到個人（users.username）
 
 
 class BulletinUpdate(BaseModel):
@@ -287,10 +288,35 @@ class BulletinUpdate(BaseModel):
     category: Optional[str] = None
     pinned: Optional[bool] = None
     assignee: Optional[str] = None
+    assignee_username: Optional[str] = None  # N0: "" = 取消指派
 
 
 class BulletinReorder(BaseModel):
     ordered_ids: List[str]
+
+
+class MeProfileUpdate(BaseModel):
+    """個人工作台 — 本人可編輯的 crm_staff 白名單欄位（N0）。
+
+    嚴格白名單：費率/狀態/僱用型態/身分證/銀行/website_* 覆寫欄位一律不開放
+    （由管理員在人力資源管；website_* 動了會觸發官網 rebuild）。
+    """
+    phone: Optional[str] = None
+    email: Optional[str] = None
+    address: Optional[str] = None
+    emergency_contact: Optional[str] = None
+    portfolio_url: Optional[str] = None
+    photo_url: Optional[str] = None
+    bio: Optional[str] = None
+    skills: Optional[list] = None
+    education: Optional[list] = None
+    experience: Optional[list] = None
+    awards: Optional[list] = None
+
+
+class MeTodoUpdate(BaseModel):
+    """個人工作台 — 本人待辦僅可改狀態。"""
+    status: str  # todo / doing / done
 
 
 class BulletinAsk(BaseModel):

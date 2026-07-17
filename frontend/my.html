@@ -1,0 +1,432 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex, nofollow">
+<title>個人工作台｜ORIGINSUN</title>
+<!-- N0 個人工作台（獨立頁，仿官網設計語彙：白底/旭日紅/大字距/髮絲邊框）。
+     員工從官網「登入」進來；同源共用 localStorage auth_token（與內部 App 同一登入態）。
+     資料來源 /api/v1/me/*（own-scope，卡片依帳號 me_* 權限渲染 — 後端守衛，非前端裝飾）。 -->
+<script src="https://accounts.google.com/gsi/client" async defer></script>
+<style>
+:root { --red: #c9372c; --ink: #262626; --sub: #737373; --line: #e5e5e5; }
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body {
+    background: #fff; color: var(--ink);
+    font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", "Noto Sans TC", "Microsoft JhengHei", sans-serif;
+    -webkit-font-smoothing: antialiased; min-height: 100vh;
+}
+a { color: inherit; text-decoration: none; }
+.eyebrow { font-size: 11px; letter-spacing: 0.35em; text-transform: uppercase; color: var(--sub); }
+.accent { color: var(--red); }
+
+/* ── Header（仿官網：fixed 白底 blur + 髮絲下框）── */
+header {
+    position: fixed; top: 0; left: 0; right: 0; z-index: 50;
+    background: rgba(255,255,255,0.95); backdrop-filter: blur(12px);
+    border-bottom: 1px solid rgba(229,229,229,0.6);
+}
+.header-inner {
+    max-width: 1100px; margin: 0 auto; padding: 0 20px; height: 64px;
+    display: flex; align-items: center; justify-content: space-between; gap: 16px;
+}
+.brand { display: flex; align-items: center; gap: 12px; }
+.brand-name { font-size: 13px; letter-spacing: 0.25em; font-weight: 300; color: var(--ink); }
+.header-right { display: flex; align-items: center; gap: 14px; font-size: 12px; color: var(--sub); }
+.btn-ghost {
+    background: none; border: 1px solid var(--line); border-radius: 2px;
+    padding: 6px 14px; font-size: 11px; letter-spacing: 0.2em; text-transform: uppercase;
+    color: var(--sub); cursor: pointer; transition: all .15s; font-family: inherit;
+}
+.btn-ghost:hover { color: var(--red); border-color: var(--red); }
+
+main { max-width: 1100px; margin: 0 auto; padding: 104px 20px 80px; }
+
+/* ── 登入卡 ── */
+#login-view { display: none; max-width: 400px; margin: 10vh auto 0; }
+.login-card { border: 1px solid var(--line); padding: 40px 36px; }
+.login-card h1 { font-size: 22px; font-weight: 300; letter-spacing: 0.1em; margin: 18px 0 6px; }
+.login-card .sub { font-size: 13px; color: var(--sub); margin-bottom: 28px; line-height: 1.7; }
+.field { margin-bottom: 14px; }
+.field label { display: block; font-size: 11px; letter-spacing: 0.2em; text-transform: uppercase; color: var(--sub); margin-bottom: 6px; }
+.field input {
+    width: 100%; border: 1px solid var(--line); border-radius: 2px; padding: 10px 12px;
+    font-size: 14px; font-family: inherit; color: var(--ink); background: #fff; outline: none; transition: border-color .15s;
+}
+.field input:focus { border-color: var(--red); }
+.btn-primary {
+    width: 100%; background: var(--ink); color: #fff; border: none; border-radius: 2px;
+    padding: 12px; font-size: 12px; letter-spacing: 0.3em; text-transform: uppercase;
+    cursor: pointer; transition: background .15s; font-family: inherit; margin-top: 6px;
+}
+.btn-primary:hover { background: var(--red); }
+.divider { display: none; align-items: center; gap: 12px; margin: 22px 0; color: #a3a3a3; font-size: 11px; letter-spacing: 0.2em; }
+.divider::before, .divider::after { content: ""; flex: 1; height: 1px; background: var(--line); }
+#g_id_signin_container { display: none; justify-content: center; }
+.err { display: none; color: var(--red); font-size: 12px; margin-top: 14px; line-height: 1.6; }
+
+/* ── 工作台 ── */
+#ws-view { display: none; }
+.greeting { margin-bottom: 40px; }
+.greeting h1 { font-size: 28px; font-weight: 300; letter-spacing: 0.05em; margin-top: 10px; }
+.greeting h1 b { font-weight: 500; }
+.notice {
+    border: 1px solid var(--line); border-left: 2px solid var(--red);
+    padding: 14px 18px; font-size: 13px; color: var(--sub); margin-bottom: 28px; line-height: 1.7;
+}
+.grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 28px; }
+.card { border: 1px solid var(--line); padding: 26px 26px 20px; min-width: 0; }
+.card-head { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; border-bottom: 1px solid var(--line); padding-bottom: 14px; margin-bottom: 4px; }
+.card-head .count { font-size: 12px; color: var(--sub); }
+.row { display: flex; gap: 12px; align-items: flex-start; padding: 13px 0; border-bottom: 1px solid #f5f5f5; font-size: 13px; }
+.row:last-child { border-bottom: none; }
+.row .grow { flex: 1; min-width: 0; }
+.row .title { color: var(--ink); line-height: 1.5; }
+.row .meta { font-size: 11px; color: var(--sub); margin-top: 3px; letter-spacing: 0.05em; }
+.pill {
+    display: inline-block; font-size: 10px; letter-spacing: 0.15em; text-transform: uppercase;
+    border: 1px solid var(--line); border-radius: 999px; padding: 2px 10px; color: var(--sub); white-space: nowrap;
+}
+.pill.hot { border-color: var(--red); color: var(--red); }
+.mini-btn {
+    background: none; border: 1px solid var(--line); border-radius: 2px; padding: 3px 10px;
+    font-size: 11px; color: var(--sub); cursor: pointer; font-family: inherit; transition: all .15s; white-space: nowrap;
+}
+.mini-btn:hover { color: var(--red); border-color: var(--red); }
+.empty { padding: 22px 0; font-size: 13px; color: #a3a3a3; text-align: center; }
+.stat-row { display: flex; gap: 28px; padding: 16px 0 10px; }
+.stat .num { font-size: 26px; font-weight: 300; }
+.stat .lbl { font-size: 10px; letter-spacing: 0.25em; text-transform: uppercase; color: var(--sub); margin-top: 2px; }
+/* profile */
+.pf-line { display: flex; gap: 10px; padding: 8px 0; font-size: 13px; border-bottom: 1px solid #f5f5f5; }
+.pf-line .k { width: 84px; flex-shrink: 0; font-size: 11px; letter-spacing: 0.15em; color: var(--sub); text-transform: uppercase; padding-top: 2px; }
+.pf-line .v { flex: 1; min-width: 0; line-height: 1.6; overflow-wrap: break-word; }
+.pf-edit input, .pf-edit textarea {
+    width: 100%; border: 1px solid var(--line); border-radius: 2px; padding: 7px 10px;
+    font-size: 13px; font-family: inherit; color: var(--ink); outline: none;
+}
+.pf-edit input:focus, .pf-edit textarea:focus { border-color: var(--red); }
+.pf-edit .field { margin-bottom: 10px; }
+footer { max-width: 1100px; margin: 0 auto; padding: 0 20px 40px; }
+footer .eyebrow { font-size: 10px; }
+@media (max-width: 640px) {
+    main { padding-top: 92px; }
+    .grid { grid-template-columns: 1fr; gap: 20px; }
+    .brand-name { display: none; }
+}
+</style>
+</head>
+<body>
+
+<header>
+  <div class="header-inner">
+    <a class="brand" href="https://www.originsun-studio.com/" title="回官網">
+      <svg width="30" height="30" viewBox="0 0 36 36" fill="none" aria-hidden="true">
+        <circle cx="18" cy="15" r="8" fill="#c9372c"/>
+        <line x1="6" y1="24" x2="30" y2="24" stroke="#c9372c" stroke-width="1.5"/>
+        <line x1="8" y1="27" x2="28" y2="27" stroke="#c9372c" stroke-width="1.5" opacity="0.7"/>
+        <line x1="10" y1="30" x2="26" y2="30" stroke="#c9372c" stroke-width="1.5" opacity="0.4"/>
+      </svg>
+      <span class="brand-name">個人工作台 <span class="accent">WORKSPACE</span></span>
+    </a>
+    <div class="header-right">
+      <span id="hdr-user" style="display:none;"></span>
+      <button id="btn-logout" class="btn-ghost" style="display:none;" onclick="doLogout()">登出</button>
+    </div>
+  </div>
+</header>
+
+<main>
+  <!-- 登入 -->
+  <div id="login-view">
+    <div class="login-card">
+      <div class="eyebrow">Originsun · Staff</div>
+      <h1>員工登入</h1>
+      <div class="sub">登入後進入你的個人工作台：專案、待辦、個人資料與工時請款。</div>
+      <div id="g_id_signin_container"></div>
+      <div id="login-divider" class="divider">或</div>
+      <form onsubmit="doPwdLogin(event)">
+        <div class="field"><label>帳號 Account</label><input id="in-user" autocomplete="username"></div>
+        <div class="field"><label>密碼 Password</label><input id="in-pwd" type="password" autocomplete="current-password"></div>
+        <button class="btn-primary" type="submit">登入 Sign in</button>
+      </form>
+      <div id="login-err" class="err"></div>
+    </div>
+  </div>
+
+  <!-- 工作台 -->
+  <div id="ws-view">
+    <div class="greeting">
+      <div class="eyebrow">My <span class="accent">Workspace</span></div>
+      <h1>你好，<b id="ws-name"></b></h1>
+    </div>
+    <div id="ws-notice"></div>
+    <div id="ws-grid" class="grid"></div>
+  </div>
+</main>
+
+<footer><div class="eyebrow">© Originsun Studio · Internal</div></footer>
+
+<script>
+"use strict";
+const TOKEN_KEY = "auth_token";   // 與內部 App 同 key（frontend/js/auth/auth-state.js）
+const $ = (id) => document.getElementById(id);
+const esc = (s) => String(s ?? "").replace(/[&<>"']/g, c => ({ "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;" }[c]));
+const money = (n) => "NT$ " + Number(n || 0).toLocaleString("zh-TW");
+let WS = null;   // 最近一次 workspace bundle
+
+// ⚠ 全域 fetch monkeypatch（login-modal.js）不涵蓋 /api/v1/me/* —— 本頁自帶 Authorization。
+async function mfetch(path, opts = {}) {
+    const headers = Object.assign({ "Content-Type": "application/json" }, opts.headers || {});
+    const tok = localStorage.getItem(TOKEN_KEY);
+    if (tok) headers["Authorization"] = "Bearer " + tok;
+    return fetch(path, Object.assign({}, opts, { headers }));
+}
+
+// ── 視圖切換 ──
+function showLogin(msg) {
+    $("ws-view").style.display = "none";
+    $("login-view").style.display = "block";
+    $("hdr-user").style.display = "none";
+    $("btn-logout").style.display = "none";
+    if (msg) { const e = $("login-err"); e.textContent = msg; e.style.display = "block"; }
+    initGoogle();
+}
+function doLogout() {
+    localStorage.removeItem(TOKEN_KEY);
+    localStorage.removeItem("auth_user");
+    location.reload();
+}
+
+// ── 登入（與內部 App 打同一組端點；成功後 token 同源共用）──
+function onLoginOk(d) {
+    localStorage.setItem(TOKEN_KEY, d.token);
+    $("login-err").style.display = "none";
+    loadWorkspace();
+}
+async function doPwdLogin(ev) {
+    ev.preventDefault();
+    try {
+        const r = await fetch("/api/v1/auth/login", {
+            method: "POST", headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ username: $("in-user").value.trim(), password: $("in-pwd").value }),
+        });
+        const d = await r.json();
+        if (!r.ok) { showLogin(d.detail || "登入失敗"); return; }
+        onLoginOk(d);
+    } catch (_) { showLogin("連線失敗，請稍後再試"); }
+}
+let _gisInited = false;
+async function initGoogle() {
+    if (_gisInited) return;
+    try {
+        const r = await fetch("/api/v1/auth/google/config");
+        if (!r.ok) return;
+        const cfg = await r.json();
+        if (!cfg.enabled || !cfg.client_id) return;
+        for (let i = 0; i < 40 && (typeof google === "undefined" || !google.accounts); i++)
+            await new Promise(res => setTimeout(res, 150));
+        if (typeof google === "undefined" || !google.accounts) return;
+        google.accounts.id.initialize({
+            client_id: cfg.client_id, auto_select: false, cancel_on_tap_outside: true,
+            callback: async (resp) => {
+                try {
+                    const r2 = await fetch("/api/v1/auth/google/login", {
+                        method: "POST", headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({ credential: resp.credential }),
+                    });
+                    const d = await r2.json();
+                    if (!r2.ok) { showLogin(d.detail || "Google 登入失敗"); return; }
+                    onLoginOk(d);
+                } catch (_) { showLogin("連線失敗，請稍後再試"); }
+            },
+        });
+        google.accounts.id.renderButton($("g_id_signin_container"), {
+            theme: "outline", size: "large", width: 320, text: "signin_with",
+            shape: "rectangular", logo_alignment: "left",
+        });
+        $("g_id_signin_container").style.display = "flex";
+        $("login-divider").style.display = "flex";
+        _gisInited = true;
+    } catch (e) { console.warn("[GIS] init failed", e); }
+}
+
+// ── 工作台載入 ──
+async function loadWorkspace() {
+    let r;
+    try { r = await mfetch("/api/v1/me/workspace"); }
+    catch (_) { showLogin("連線失敗，請稍後再試"); return; }
+    if (r.status === 401) { localStorage.removeItem(TOKEN_KEY); showLogin(""); return; }
+    if (r.status === 403) {
+        // 帳號沒有任何 me_* 權限，或權限剛更新而 token 還是舊的
+        showLogin("此帳號尚未開通個人工作台（或權限剛更新）— 請聯絡管理員，或重新登入一次。");
+        localStorage.removeItem(TOKEN_KEY);
+        return;
+    }
+    if (!r.ok) { showLogin("載入失敗（" + r.status + "），請稍後再試"); return; }
+    WS = await r.json();
+    renderWorkspace();
+}
+
+function renderWorkspace() {
+    const ws = WS;
+    $("login-view").style.display = "none";
+    $("ws-view").style.display = "block";
+    const display = (ws.profile && ws.profile.name) || ws.username || "";
+    $("ws-name").textContent = display;
+    $("hdr-user").textContent = display;
+    $("hdr-user").style.display = "";
+    $("btn-logout").style.display = "";
+
+    const staffSections = ["me_profile", "me_projects", "me_finance"];
+    $("ws-notice").innerHTML = (!ws.bound && ws.allowed.some(k => staffSections.includes(k)))
+        ? `<div class="notice">此帳號尚未綁定人員檔案 — 專案／個人資料／工時卡片暫無資料，請管理員在「使用者管理」完成綁定。</div>` : "";
+
+    const grid = $("ws-grid");
+    grid.innerHTML = "";
+    if (ws.allowed.includes("me_projects")) grid.appendChild(cardProjects(ws.projects || []));
+    if (ws.allowed.includes("me_todos"))    grid.appendChild(cardTodos(ws.todos || []));
+    if (ws.allowed.includes("me_profile"))  grid.appendChild(cardProfile(ws.profile));
+    if (ws.allowed.includes("me_finance"))  grid.appendChild(cardFinance(ws.timesheet, ws.payments));
+    if (!ws.allowed.length)
+        grid.innerHTML = `<div class="empty">此帳號尚未開通任何工作台功能，請聯絡管理員。</div>`;
+}
+
+function makeCard(en, zh, countText) {
+    const el = document.createElement("div");
+    el.className = "card";
+    el.innerHTML = `<div class="card-head"><span class="eyebrow">${en} <span class="accent">${zh}</span></span>
+        ${countText ? `<span class="count">${countText}</span>` : ""}</div><div class="card-body"></div>`;
+    return el;
+}
+
+// ── 卡 1：我的專案（派工）──
+function cardProjects(list) {
+    const card = makeCard("My Projects", "我的專案", list.length ? list.length + " 筆" : "");
+    const body = card.querySelector(".card-body");
+    if (!list.length) { body.innerHTML = `<div class="empty">目前沒有派工紀錄</div>`; return card; }
+    body.innerHTML = list.slice(0, 8).map(p => `
+        <div class="row">
+            <div class="grow">
+                <div class="title">${esc(p.project_name || "（未命名專案）")}</div>
+                <div class="meta">${esc(p.client_name)}${p.client_name ? " · " : ""}${esc(p.role_in_project)}${p.phase ? " · " + esc(p.phase) : ""}${p.days ? " · " + p.days + " 天" : ""}</div>
+            </div>
+            <span class="pill${p.project_status === "製作" ? " hot" : ""}">${esc(p.project_status || "—")}</span>
+        </div>`).join("")
+        + (list.length > 8 ? `<div class="empty" style="padding:10px 0;">…另有 ${list.length - 8} 筆</div>` : "");
+    return card;
+}
+
+// ── 卡 2：我的待辦（公布欄，own-scope）──
+function cardTodos(list) {
+    const card = makeCard("My Tasks", "我的待辦", list.length ? list.length + " 項" : "");
+    const body = card.querySelector(".card-body");
+    if (!list.length) { body.innerHTML = `<div class="empty">沒有待辦事項 🎉</div>`; return card; }
+    body.innerHTML = list.map(t => `
+        <div class="row" data-todo="${esc(t.id)}">
+            <div class="grow">
+                <div class="title">${t.pinned ? "📌 " : ""}${esc(t.title)}${t.assigned_to_me ? ' <span class="pill hot" style="margin-left:4px;">指派給我</span>' : ""}</div>
+                ${t.note ? `<div class="meta">${esc(t.note)}</div>` : ""}
+            </div>
+            <button class="mini-btn" onclick="cycleTodo('${esc(t.id)}','${t.status === "todo" ? "doing" : "todo"}')">${t.status === "doing" ? "⏳ 進行中" : "待辦"}</button>
+            <button class="mini-btn" onclick="cycleTodo('${esc(t.id)}','done')">✓ 完成</button>
+        </div>`).join("");
+    return card;
+}
+async function cycleTodo(id, status) {
+    try {
+        const r = await mfetch("/api/v1/me/todos/" + id, { method: "PUT", body: JSON.stringify({ status }) });
+        if (!r.ok || !WS) return;
+        // 本地更新 + 重繪即可，不重抓整包 bundle
+        if (status === "done") WS.todos = (WS.todos || []).filter(t => t.id !== id);
+        else { const t = (WS.todos || []).find(t => t.id === id); if (t) t.status = status; }
+        renderWorkspace();
+    } catch (_) {}
+}
+
+// ── 卡 3：我的個人資料（白名單欄位可編輯）──
+const PF_FIELDS = [
+    ["phone", "電話"], ["email", "Email"], ["address", "地址"],
+    ["emergency_contact", "緊急聯絡"], ["portfolio_url", "作品集"],
+];
+function cardProfile(pf) {
+    const card = makeCard("My Profile", "個人資料", "");
+    const body = card.querySelector(".card-body");
+    if (!pf) { body.innerHTML = `<div class="empty">尚未綁定人員檔案</div>`; return card; }
+    body.innerHTML = `
+        <div class="pf-line"><span class="k">姓名</span><span class="v">${esc(pf.name)}${pf.role ? `　<span class="pill">${esc(pf.role)}</span>` : ""}</span></div>
+        ${PF_FIELDS.map(([k, lbl]) => `<div class="pf-line"><span class="k">${lbl}</span><span class="v">${esc(pf[k]) || "<span style='color:#a3a3a3'>—</span>"}</span></div>`).join("")}
+        <div class="pf-line"><span class="k">簡介</span><span class="v">${esc(pf.bio) || "<span style='color:#a3a3a3'>—</span>"}</span></div>
+        <div style="padding-top:14px;"><button class="mini-btn" onclick="editProfile(this)">✎ 編輯資料</button></div>`;
+    return card;
+}
+function editProfile(btn) {
+    const pf = (WS && WS.profile) || {};
+    const body = btn.closest(".card").querySelector(".card-body");
+    body.innerHTML = `<div class="pf-edit" style="padding-top:10px;">
+        ${PF_FIELDS.map(([k, lbl]) => `<div class="field"><label>${lbl}</label><input data-pf="${k}" value="${esc(pf[k])}"></div>`).join("")}
+        <div class="field"><label>簡介</label><textarea data-pf="bio" rows="3">${esc(pf.bio)}</textarea></div>
+        <div style="display:flex;gap:8px;padding-top:4px;">
+            <button class="mini-btn" onclick="saveProfile(this)">儲存</button>
+            <button class="mini-btn" onclick="renderWorkspace()">取消</button>
+        </div>
+        <div class="err" data-pf-err style="margin-top:10px;"></div>
+    </div>`;
+}
+async function saveProfile(btn) {
+    const body = btn.closest(".card-body");
+    const payload = {};
+    body.querySelectorAll("[data-pf]").forEach(el => { payload[el.getAttribute("data-pf")] = el.value; });
+    try {
+        const r = await mfetch("/api/v1/me/profile", { method: "PUT", body: JSON.stringify(payload) });
+        if (!r.ok) {
+            const d = await r.json().catch(() => ({}));
+            const e = body.querySelector("[data-pf-err]");
+            e.textContent = d.detail || "儲存失敗"; e.style.display = "block";
+            return;
+        }
+        // PUT 已回傳最新 profile — 直接更新本地狀態重繪，不重抓 bundle
+        const d = await r.json();
+        if (WS && d.profile) WS.profile = d.profile;
+        renderWorkspace();
+    } catch (_) {}
+}
+
+// ── 卡 4：我的工時＋請款（摘要）──
+function cardFinance(ts, pay) {
+    const card = makeCard("Hours & Payments", "工時與請款", "");
+    const body = card.querySelector(".card-body");
+    if (!ts && !pay) { body.innerHTML = `<div class="empty">尚未綁定人員檔案</div>`; return card; }
+    let html = "";
+    if (ts) {
+        html += `<div class="stat-row">
+            <div class="stat"><div class="num">${ts.month_hours}<span style="font-size:13px;color:var(--sub)"> h</span></div><div class="lbl">本月工時</div></div>
+            <div class="stat"><div class="num">${ts.total_hours}<span style="font-size:13px;color:var(--sub)"> h</span></div><div class="lbl">累計工時</div></div>
+            ${pay ? `<div class="stat"><div class="num ${pay.unpaid_count ? "accent" : ""}">${pay.unpaid_count}</div><div class="lbl">未付請款</div></div>` : ""}
+        </div>`;
+        html += (ts.by_project || []).slice(0, 5).map(p => `
+            <div class="row"><div class="grow"><div class="title">${esc(p.project_name)}</div>
+            <div class="meta">${p.last_entry ? "最近 " + esc(p.last_entry) : ""}</div></div>
+            <span class="pill">${p.hours} h</span></div>`).join("");
+    }
+    if (pay) {
+        if (pay.unpaid_count) html += `<div class="notice" style="margin:14px 0 4px;">未付請款 ${pay.unpaid_count} 筆，合計 <b class="accent">${money(pay.unpaid_amount)}</b></div>`;
+        html += (pay.recent || []).map(p => `
+            <div class="row"><div class="grow"><div class="title">${esc(p.summary)}</div>
+            <div class="meta">${esc(p.date)}${p.project ? " · " + esc(p.project) : ""}</div></div>
+            <div style="text-align:right;"><div style="font-size:13px;">${money(p.amount)}</div>
+            <span class="pill${p.status !== "已付款" ? " hot" : ""}">${esc(p.status || "—")}</span></div></div>`).join("");
+    }
+    body.innerHTML = html || `<div class="empty">尚無工時／請款紀錄</div>`;
+    return card;
+}
+
+// ── boot ──
+(function () {
+    if (localStorage.getItem(TOKEN_KEY)) loadWorkspace();
+    else showLogin("");
+})();
+</script>
+</body>
+</html>

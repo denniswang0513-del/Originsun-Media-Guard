@@ -42,6 +42,7 @@ _ROUTER_MODULES = [
     'api_drone_meta',
     'api_drone_watcher',
     'api_bulletin',
+    'api_me',
 ]
 _routers = {}
 for _mod_name in _ROUTER_MODULES:
@@ -338,6 +339,7 @@ async def _on_startup():
                         ("avatar_url", "VARCHAR(512)"),
                         ("modules", "JSONB"),          # RBAC v2: 權限直接綁帳號
                         ("access_level", "INTEGER"),   # RBAC v2: 3=管理員, 1=一般
+                        ("staff_id", "VARCHAR(32)"),   # N0: 帳號 ↔ crm_staff（個人工作台）
                     ]:
                         try:
                             await session.execute(text(f"ALTER TABLE users ADD COLUMN IF NOT EXISTS {col} {coltype}"))
@@ -383,7 +385,8 @@ async def _on_startup():
                 from sqlalchemy import text as _t_bl
                 async with _f_bl() as _s_bl:
                     for _c, _ct in [("assignee", "VARCHAR(16) DEFAULT 'me'"),
-                                    ("conversation", "JSONB"), ("activity", "TEXT")]:
+                                    ("conversation", "JSONB"), ("activity", "TEXT"),
+                                    ("assignee_username", "VARCHAR(64)")]:  # N0: 指派到個人
                         try:
                             await _s_bl.execute(_t_bl(
                                 f"ALTER TABLE bulletin_items ADD COLUMN IF NOT EXISTS {_c} {_ct}"))

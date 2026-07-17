@@ -49,6 +49,7 @@ class UpdateUserRequest(BaseModel):
     password: Optional[str] = None
     modules: Optional[List[str]] = None
     access_level: Optional[int] = None
+    staff_id: Optional[str] = None   # N0: 綁定 crm_staff.id；傳 "" = 解綁（None = 不變）
 
 
 class UpdateMeRequest(BaseModel):
@@ -76,6 +77,7 @@ def _user_orm_to_dict(u) -> dict:
         'google_id': getattr(u, 'google_id', None),
         'email': getattr(u, 'email', None),
         'avatar_url': getattr(u, 'avatar_url', None),
+        'staff_id': getattr(u, 'staff_id', None),          # N0: 帳號 ↔ crm_staff
     }
 
 
@@ -204,6 +206,7 @@ async def _save_user_to_db(user_data: dict):
                 google_id=user_data.get('google_id'),
                 email=user_data.get('email'),
                 avatar_url=user_data.get('avatar_url'),
+                staff_id=user_data.get('staff_id'),
             ).on_conflict_do_update(
                 index_elements=['username'],
                 set_={
@@ -217,6 +220,7 @@ async def _save_user_to_db(user_data: dict):
                     'google_id': user_data.get('google_id'),
                     'email': user_data.get('email'),
                     'avatar_url': user_data.get('avatar_url'),
+                    'staff_id': user_data.get('staff_id'),
                 }
             )
             await session.execute(stmt)
@@ -262,6 +266,7 @@ def _build_json_mirror(user_data: dict) -> dict:
         'google_id': user_data.get('google_id'),
         'email': user_data.get('email'),
         'avatar_url': user_data.get('avatar_url'),
+        'staff_id': user_data.get('staff_id'),
     }
 
 
@@ -350,6 +355,7 @@ async def get_me(request: Request):
         'email': user.get('email'),
         'avatar_url': user.get('avatar_url'),
         'auth_method': auth_method,
+        'staff_id': user.get('staff_id'),
     }
 
 
@@ -391,6 +397,7 @@ async def list_users(request: Request):
             'email': u.get('email'),
             'avatar_url': u.get('avatar_url'),
             'auth_method': auth_method,
+            'staff_id': u.get('staff_id'),
         })
     return result
 
@@ -433,6 +440,9 @@ async def update_user(username: str, req: UpdateUserRequest, request: Request):
     if req.access_level is not None:
         user['access_level'] = 3 if req.access_level >= 3 else 1
         user['role_name'] = 'admin' if user['access_level'] >= 3 else 'user'  # 裝飾性
+    if req.staff_id is not None:
+        # N0 綁定人員檔案："" = 解綁（Optional[None] 只能代表「不變」，需哨兵值）
+        user['staff_id'] = req.staff_id or None
 
     await _persist_user(user)
     return {'status': 'ok'}
