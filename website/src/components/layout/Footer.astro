@@ -59,9 +59,14 @@ const copyrightEn = fcp.copyright_en ? sub(fcp.copyright_en) : t("copyright", "e
             </div>
         </div>
 
-        <div class="pt-6 border-t border-neutral-200 text-xs text-neutral-500 tracking-wide">
-            <span data-lang-zh>{copyrightZh}</span>
-            <span data-lang-en>{copyrightEn}</span>
+        <div class="pt-6 border-t border-neutral-200 text-xs text-neutral-500 tracking-wide flex items-center justify-between gap-4">
+            <div>
+                <span data-lang-zh>{copyrightZh}</span>
+                <span data-lang-en>{copyrightEn}</span>
+            </div>
+            {/* 員工入口（刻意低調：極小字 + 近白灰，一般訪客不會注意；另有 /staff 轉址）*/}
+            <a href="https://foundry.originsun-studio.com/my.html" rel="nofollow"
+               class="text-[10px] tracking-[0.3em] uppercase text-neutral-300 hover:text-neutral-500 transition-colors flex-shrink-0">Staff</a>
         </div>
     </div>
 </footer>
