@@ -134,6 +134,8 @@ footer .eyebrow { font-size: 10px; }
     </a>
     <div class="header-right">
       <span id="hdr-user" style="display:none;"></span>
+      <!-- 具 hr_leave 權限（管理者）才顯示：深連結內部系統人事管理（同源，dev/prod 都通） -->
+      <a id="hdr-hr" class="btn-ghost" href="/#tab_hr_leave" style="display:none;text-decoration:none;">人事管理</a>
       <button id="btn-logout" class="btn-ghost" style="display:none;" onclick="doLogout()">登出</button>
     </div>
   </div>
@@ -191,6 +193,7 @@ function showLogin(msg) {
     $("ws-view").style.display = "none";
     $("login-view").style.display = "block";
     $("hdr-user").style.display = "none";
+    $("hdr-hr").style.display = "none";
     $("btn-logout").style.display = "none";
     if (msg) { const e = $("login-err"); e.textContent = msg; e.style.display = "block"; }
     initGoogle();
@@ -280,6 +283,7 @@ function renderWorkspace() {
     $("hdr-user").textContent = display;
     $("hdr-user").style.display = "";
     $("btn-logout").style.display = "";
+    $("hdr-hr").style.display = ws.hr_manager ? "" : "none";
 
     const staffSections = ["me_profile", "me_projects", "me_finance", "me_leave"];
     $("ws-notice").innerHTML = (!ws.bound && ws.allowed.some(k => staffSections.includes(k)))

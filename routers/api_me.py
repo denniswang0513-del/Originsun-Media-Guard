@@ -74,6 +74,10 @@ async def my_workspace(request: Request):
         "staff_id": ident["staff_id"],
         "bound": staff is not None,
         "allowed": allowed,
+        # 具人事管理權限（hr_leave 模組或 admin）→ /my.html 頂欄顯示「人事管理」
+        # 深連結（官網 STAFF 入口一路通到內部簽核頁）
+        "hr_manager": "hr_leave" in grant_admin_all_modules(
+            payload.get("access_level"), payload.get("modules") or []),
     }
     factory = db_factory_or_503()
     async with factory() as session:
