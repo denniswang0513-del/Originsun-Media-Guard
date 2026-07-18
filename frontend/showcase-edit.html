@@ -203,6 +203,10 @@ let EDITABLE = false;
 
 function _esc(s) { const d = document.createElement('div'); d.textContent = s || ''; return d.innerHTML; }
 function _toast(msg) { const t = document.getElementById('toast'); t.textContent = msg; t.classList.add('show'); setTimeout(() => t.classList.remove('show'), 2000); }
+// 「即存」pill — 該區操作立即寫入後端，不用等 master save；唯讀模式一律不顯示
+function _instantPill(title = '此區的變更立即儲存，不需按「儲存所有變更」') {
+    return EDITABLE ? `<span class="sc-instant" title="${title}">即存</span>` : '';
+}
 
 // Embed 模式：把內容高度回傳給父視窗（CRM 完稿結案 iframe），讓外框自動長高、免內部捲軸。
 function _postHeight() {
@@ -354,7 +358,7 @@ function _renderSeoSection(sc) {
         </div>
 
         <div id="sec-seo-ai">
-            ${_h('AI SEO 規劃 <span class="sc-instant" title="此區的操作立即生效，不需按「儲存所有變更」">即存</span>', '（自動生成預覽，不顯示在頁面 HTML，給 AI 爬蟲讀）')}
+            ${_h('AI SEO 規劃 ' + _instantPill('此區的操作立即生效，不需按「儲存所有變更」'), '（自動生成預覽，不顯示在頁面 HTML，給 AI 爬蟲讀）')}
             <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;font-size:11px;color:var(--text3);">
                 <span>上次審閱：${_esc(reviewedAt)} by ${_esc(reviewedBy)}</span>
                 ${statusBadge}
@@ -517,11 +521,6 @@ function _render() {
     const credits = sc.credits || [];
     const projectName = DATA.project_name || '';
 
-    // 「即存」pill — 該區操作立即寫入後端，不用等 master save；只在編輯模式顯示
-    const _instantPill = EDITABLE
-        ? '<span class="sc-instant" title="此區的變更立即儲存，不需按「儲存所有變更」">即存</span>'
-        : '';
-
     let html = '';
 
     if (!EDITABLE) html += '<div class="readonly-banner">此頁面目前為唯讀模式</div>';
@@ -603,7 +602,7 @@ function _render() {
     // 精選圖（首頁輪播用）— 寫 CrmProject.public_featured_image 單一欄位（上傳/刪除即存）
     const _featImg = sc.public_featured_image || '';
     stMedia += `<div class="section" id="sec-featured">
-        <div class="section-label">精選圖（首頁輪播用）${_instantPill}</div>
+        <div class="section-label">精選圖（首頁輪播用）${_instantPill()}</div>
         <div class="sc-sub-hint">用途：首頁精選輪播優先用這張；沒設就用成果展示第一張（YouTube 縮圖畫質太低）</div>
         ${_featImg
             ? `<div class="gallery-item" style="aspect-ratio:16/9;max-width:420px;">
@@ -625,7 +624,7 @@ function _render() {
 
     // Gallery（上傳/刪除即存）
     stMedia += `<div class="section" id="sec-gallery">
-        <div class="section-label">成品展示${_instantPill}</div>
+        <div class="section-label">成品展示${_instantPill()}</div>
         <div class="sc-sub-hint">用途：作品頁的圖集內容</div>
         <div class="gallery-grid">${gallery.map((g, i) => `
             <div class="gallery-item">
@@ -639,7 +638,7 @@ function _render() {
 
     // Process（上傳/刪除即存）
     stMedia += `<div class="section" id="sec-process">
-        <div class="section-label">創作過程${_instantPill}</div>
+        <div class="section-label">創作過程${_instantPill()}</div>
         <div class="sc-sub-hint">用途：作品頁「創作過程」段落的圖片與說明</div>
         ${processItems.length > 0 ? processItems.map((p, i) => `
             <div class="process-item">
@@ -665,7 +664,7 @@ function _render() {
         : '<div style="color:var(--text3);font-size:12px;">尚未上傳參考文件</div>';
     const _aiRefBlock = EDITABLE ? `
         <div style="margin-top:14px;padding-top:14px;border-top:1px dashed var(--border);">
-            <div style="color:var(--accent);font-size:12px;font-weight:600;margin-bottom:4px;">AI 參考資料（給 AI 生成描述/SEO 參考）${_instantPill}</div>
+            <div style="color:var(--accent);font-size:12px;font-weight:600;margin-bottom:4px;">AI 參考資料（給 AI 生成描述/SEO 參考）${_instantPill()}</div>
             <div style="color:var(--text3);font-size:11px;line-height:1.6;margin-bottom:10px;">上傳企劃/腳本/客戶資料等，AI 產生問題與描述時會參考。掃描版 PDF（無文字層）抽不到字，請改貼文字。</div>
             <div id="ai-ref-list" style="margin-bottom:10px;">${_aiRefFilesHtml}</div>
             <div style="margin-bottom:14px;">
@@ -753,7 +752,7 @@ function _render() {
     const _modeBtnCls = (active) => `btn btn-sm${active ? ' btn-primary' : ''}`;
 
     let stCredits = `<div class="section" id="sec-credits">
-        <div class="section-label">演職員表 / Credits <span class="sc-instant" title="結構化模式的操作立即儲存">即存</span></div>
+        <div class="section-label">演職員表 / Credits ${_instantPill('結構化模式的操作立即儲存')}</div>
         ${EDITABLE ? `<div style="display:flex;gap:6px;margin-bottom:12px;font-size:12px;">
             <button id="btn-mode-block" type="button" class="${_modeBtnCls(creditsMode === 'block')}"
                     style="padding:5px 12px;">結構化</button>
@@ -938,15 +937,13 @@ function _bindEvents() {
         _cats: '分類/標籤', _ai_notes: '補充說明', _misc: '變更',
     };
     const _dirtyKeys = new Set();
-    let _dirty = false;
     const _statusEl = document.getElementById('save-status');
     const _btnMaster = document.getElementById('btn-master-save');
     const setDirty = (key) => {
         if (key === false) _dirtyKeys.clear();
         else _dirtyKeys.add(typeof key === 'string' ? key : '_misc');
-        _dirty = _dirtyKeys.size > 0;
         if (_statusEl) {
-            if (!_dirty) {
+            if (!_dirtyKeys.size) {
                 _statusEl.textContent = '✓ 所有變更已儲存';
                 _statusEl.style.color = 'var(--text3)';
             } else {
@@ -965,8 +962,7 @@ function _bindEvents() {
     });
     // 補充說明併入 master save（獨立儲存鈕已廢）
     document.getElementById('inp-ai-ref-notes')?.addEventListener('input', () => setDirty('_ai_notes'));
-    // 公開勾選 ↔ 必備未完成警示
-    document.getElementById('inp-published')?.addEventListener('change', () => _updatePublishWarn());
+    // 公開勾選的必備警示由 setDirty('published') → _updateChecklist → _updatePublishWarn 覆蓋，毋須獨立監聽
     // 對外標題即時連動到頂部 page-title + parent iframe panel 標題 — 三處同步
     const _titleInp = document.getElementById('inp-public-title');
     const _titleEl = document.getElementById('page-title');
@@ -1178,7 +1174,7 @@ function _bindEvents() {
 
     // 離頁前未存提示
     window.addEventListener('beforeunload', (e) => {
-        if (_dirty) { e.preventDefault(); e.returnValue = ''; }
+        if (_dirtyKeys.size) { e.preventDefault(); e.returnValue = ''; }
     });
 
     // === 主影片 provider 偵測提示（Vimeo/FB 將內嵌、其他連結 link-out）===
@@ -1940,6 +1936,7 @@ function _updateChecklist() {
 // ── 發布狀態時間線（解「存了不知道上了沒」）────────────────────
 // 輪詢 token /status（白名單資料）；發布中/待發布/驗證中 5s、平時 30s、分頁隱藏暫停。
 let _statusTimer = null;
+let _pollGen = 0;   // 世代 token — fetch 進行中（timer 空窗）時重啟輪詢不會殘留舊 loop
 async function _statusPollOnce() {
     const box = document.getElementById('sec-publish-status');
     if (!box) return 30000;
@@ -1972,9 +1969,12 @@ async function _statusPollOnce() {
 function _startStatusPolling() {
     if (!EDITABLE) return;
     if (_statusTimer) clearTimeout(_statusTimer);
+    const gen = ++_pollGen;
     const loop = async () => {
-        if (document.hidden) { _statusTimer = setTimeout(loop, 5000); return; }
+        if (gen !== _pollGen) return;               // 已被新一輪取代
+        if (document.hidden) return;                // 分頁隱藏即停，visibilitychange 回來重啟
         const next = await _statusPollOnce();
+        if (gen !== _pollGen) return;
         _statusTimer = setTimeout(loop, next);
     };
     loop();

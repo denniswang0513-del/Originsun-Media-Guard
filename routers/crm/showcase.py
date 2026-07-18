@@ -272,16 +272,9 @@ async def get_project_showcase(project_id: str, request: Request):
         # 對外公開連結 — 給 delivery Tab「預覽」按鈕直接連到 originsun-studio.com/works/{slug}
         public_url = ""
         if sc.published:
-            try:
-                from services.website import settings_service
-                _all_settings = await settings_service.get_all_settings(session)
-                _site_url = (_all_settings.get("seo.site_url") or "").strip()
-            except Exception:
-                _site_url = ""
-            site = (_site_url or "https://originsun-studio.com").rstrip("/")
-            url_slug = work_url_slug(sc)
-            if url_slug:
-                public_url = f"{site}/works/{url_slug}"
+            site, url_path = await _public_work_url(session, sc)
+            if url_path:
+                public_url = f"{site}{url_path}"
         data["public_url"] = public_url
         return data
 
@@ -619,7 +612,7 @@ async def _public_work_url(session, sc) -> tuple:
         site_url = (_all_settings.get("seo.site_url") or "").strip()
     except Exception:
         site_url = ""
-    site_url = site_url or "https://originsun-studio.com"
+    site_url = (site_url or "https://originsun-studio.com").rstrip("/")
     url_slug = work_url_slug(sc)
     return site_url, (f"/works/{url_slug}" if url_slug else "")
 

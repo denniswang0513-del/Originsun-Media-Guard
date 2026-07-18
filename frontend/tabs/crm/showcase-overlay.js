@@ -55,6 +55,6 @@ export async function closeShowcaseOverlay() {
     overlay.style.display = 'none';
     document.getElementById('showcase-overlay-iframe').src = 'about:blank';
     const cb = _cbs.onClose;
-    _cbs.onClose = null;   // onClose 一次性（skeleton 清理不可重複觸發）
+    _cbs = { onSaved: null, onClose: null };   // 兩者皆一次性 — 關閉後遲到的 postMessage 不觸發舊回呼
     if (cb) await cb();
 }
