@@ -319,6 +319,11 @@ class MeTodoUpdate(BaseModel):
     status: str  # todo / doing / done
 
 
+class SeriesQuickAddPayload(BaseModel):
+    """showcase-edit 系列下拉「找不到 → 新增」快速建立（只收名稱，slug 自動生成）。"""
+    title_zh: str
+
+
 # ── N-hr H2 出缺勤（請假）──
 
 class LeaveCreate(BaseModel):

@@ -16,7 +16,8 @@ from fastapi import HTTPException, Request, UploadFile, File, Query
 from core.crm_logic import (SHOWCASE_EDIT_EXPIRES_DAYS, SHOWCASE_EDIT_SCOPE,
                             WORK_WIRE_FIELD_MAP, is_main_work,
                             showcase_edit_url, work_completeness, work_url_slug)
-from core.schemas import ShowcasePayload, StaffQuickAddPayload
+from core.schemas import (SeriesQuickAddPayload, ShowcasePayload,
+                          StaffQuickAddPayload)
 
 from ._shared import (router, _check_auth, _check_website_auth, _require_db,
                       _get_factory, _mark_dirty_safe, _now, _UPLOAD_BASE,
@@ -746,6 +747,27 @@ async def get_showcase_edit_data(token: str):
     async with factory() as session:
         sc = await _verify_showcase_edit_token(session, token, require_editable=False)
         return await _build_showcase_edit_data(session, sc)
+
+
+@router.post("/public/showcase-edit/{token}/series")
+async def quick_create_series(token: str, body: SeriesQuickAddPayload):
+    """快速建立系列（編輯器系列下拉/分類小測驗「找不到 → 新增」用）。
+
+    只收 title_zh；slug 自動生成（series-隨機碼，官網管理改名會自動記 301）；
+    visible 預設 False（隱藏）— owner 在官網管理補介紹/封面/slug 後再開。
+    隱藏系列不上作品牆摺疊、不生成系列頁，先掛作品是安全的。
+    """
+    title = (body.title_zh or "").strip()
+    if not title:
+        raise HTTPException(status_code=422, detail="系列名稱必填")
+    _require_db()
+    factory = await _get_factory()
+    async with factory() as session:
+        await _verify_showcase_edit_token(session, token, require_editable=True)
+        from services.website import series_service
+        slug = "series-" + uuid.uuid4().hex[:6]
+        return await series_service.create_series(session, {
+            "title_zh": title, "slug": slug, "visible": False})
 
 
 @router.get("/public/showcase-edit/{token}/status")
