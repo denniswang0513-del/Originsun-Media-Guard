@@ -15,6 +15,7 @@
  */
 
 import { crmFetch, esc } from './crm-utils.js';
+import { openShowcaseOverlay } from './showcase-overlay.js';
 
 // 對外站基底 — 預覽作品頁用（與 website-utils.js 的 NAS_PUBLIC_BASE 一致）。
 // 假設：closing 收件匣不引入 website-utils（避免跨 tab side-effect），故此處直接常數化。
@@ -382,58 +383,9 @@ document.addEventListener('click', (e) => {
     _closeStageMenu();
 });
 
-// ── 編輯 overlay（嵌 /showcase-edit.html iframe，複用 works.js 協定）────
-let _msgInstalled = false;
-function _installMsgListener() {
-    if (_msgInstalled) return;
-    _msgInstalled = true;
-    window.addEventListener('message', (e) => {
-        const t = e && e.data && e.data.type;
-        if (t === 'showcase-saved') {
-            _loadList();
-        } else if (t === 'showcase-title-change') {
-            const titleEl = document.getElementById('closing-edit-title');
-            if (titleEl && e.data.title) titleEl.textContent = `編輯：${e.data.title}`;
-        }
-    });
-}
-
-function _ensureOverlay() {
-    _installMsgListener();
-    if (document.getElementById('closing-edit-overlay')) return;
-    const overlay = document.createElement('div');
-    overlay.id = 'closing-edit-overlay';
-    overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.5);z-index:9000;display:none;align-items:stretch;justify-content:flex-end;';
-    overlay.innerHTML = `
-        <div style="width:80%;max-width:1000px;height:100%;background:#0e0e0e;border-left:1px solid #2a2a2a;display:flex;flex-direction:column;box-shadow:-8px 0 24px rgba(0,0,0,0.6);">
-            <div style="display:flex;align-items:center;gap:12px;padding:10px 14px;border-bottom:1px solid #2a2a2a;background:#161616;flex-shrink:0;">
-                <strong id="closing-edit-title" style="color:#fff;font-size:14px;flex:1;">編輯官網內容</strong>
-                <button class="crm-btn crm-btn-secondary crm-btn-sm" id="closing-edit-close">關閉並重新整理</button>
-            </div>
-            <iframe id="closing-edit-iframe" style="flex:1;width:100%;border:0;background:#0e0e0e;"></iframe>
-        </div>`;
-    overlay.addEventListener('click', (e) => { if (e.target === overlay) _closeOverlay(); });
-    document.body.appendChild(overlay);
-    document.getElementById('closing-edit-close').addEventListener('click', _closeOverlay);
-}
-
+// ── 編輯 overlay — 共用殼 showcase-overlay.js（與 works.js 同一實作）────
 function _openEditPanel(url, title) {
-    _ensureOverlay();
-    const overlay = document.getElementById('closing-edit-overlay');
-    const iframe = document.getElementById('closing-edit-iframe');
-    const titleEl = document.getElementById('closing-edit-title');
-    if (titleEl) titleEl.textContent = title || '編輯官網內容';
-    if (iframe) iframe.src = url;
-    if (overlay) overlay.style.display = 'flex';
-}
-
-function _closeOverlay() {
-    const overlay = document.getElementById('closing-edit-overlay');
-    if (!overlay) return;
-    overlay.style.display = 'none';
-    const iframe = document.getElementById('closing-edit-iframe');
-    if (iframe) iframe.src = 'about:blank';
-    _loadList();
+    openShowcaseOverlay(url, title || '編輯官網內容', { onSaved: _loadList, onClose: _loadList });
 }
 
 export default { init };

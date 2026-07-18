@@ -7,6 +7,7 @@
  */
 import { websiteFetch, esc, toastOk, toastErr, renderLoadError, debounce, readRowPatch, emptyRow, emptyHint } from '../website-utils.js';
 import { searchableSelect } from '../../crm/crm-utils.js';   // 打字搜尋下拉 widget（.ss-* 樣式已在 index.html 全域載入）
+import { openShowcaseOverlay } from '../../crm/showcase-overlay.js';   // 編輯作品共用殼（與結案收件匣同一實作）
 
 let _works = [];
 let _categories = [];
@@ -60,18 +61,27 @@ export default async function render(container, ctx = {}) {
         return;
     }
 
+    // CRM 化（works-crm scoped）：crm.css 全域已載入，直接用 crm-* class；
+    // 表格保留 <table>（12 欄密表），僅 th/hover 對 CRM tokens。
     container.innerHTML = `
+        <style>
+            .works-crm table th{color:#9ca3af;font-size:12px;font-weight:600;}
+            .works-crm table tbody tr:hover td{background:#252525;}
+            .works-crm .crm-toolbar{border-radius:8px;margin-bottom:12px;}
+            .works-crm .wk-card{background:#252525;border:1px solid #2e2e2e;border-radius:8px;padding:14px 16px;margin-bottom:12px;}
+        </style>
+        <div class="works-crm">
         <h2>作品集管理 <span style="color:#888;font-size:13px;font-weight:400;">· ${_works.length} 件作品</span></h2>
 
-        <div class="card" style="border-left:3px solid #c8a45c;margin-bottom:12px;">
+        <div class="wk-card" style="border-left:3px solid #3b82f6;">
             <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
                 <label style="color:#ddd;font-size:13px;font-weight:600;white-space:nowrap;">歷年作品 PDF</label>
-                <input id="portfolio-pdf-url" type="url" value="${esc(portfolioPdfUrl)}"
+                <input id="portfolio-pdf-url" type="url" class="crm-input" value="${esc(portfolioPdfUrl)}"
                     placeholder="https://drive.google.com/... 或 https://originsun-studio.com/files/portfolio.pdf"
                     style="flex:1;min-width:320px;" />
-                <button class="btn btn-sm" onclick="window._websiteSavePortfolioPdf()">儲存</button>
+                <button class="crm-btn crm-btn-primary crm-btn-sm" onclick="window._websiteSavePortfolioPdf()">儲存</button>
                 ${portfolioPdfUrl
-                    ? `<a class="btn btn-sm btn-ghost" href="${esc(portfolioPdfUrl)}" target="_blank" rel="noopener">預覽</a>`
+                    ? `<a class="crm-btn crm-btn-secondary crm-btn-sm" href="${esc(portfolioPdfUrl)}" target="_blank" rel="noopener" style="text-decoration:none;">預覽</a>`
                     : ''}
             </div>
             <div style="color:#888;font-size:11px;margin-top:6px;">
@@ -79,15 +89,15 @@ export default async function render(container, ctx = {}) {
             </div>
         </div>
 
-        <details class="card" style="margin-bottom:12px;padding:12px 16px;" ${_serOpen !== null ? 'open' : ''}>
-            <summary style="cursor:pointer;color:#ddd;font-size:13px;font-weight:600;">🎬 作品系列（<span id="series-count">${_series.length}</span>）— 跨專案綁定，作品牆摺疊成一張卡 + 系列頁 /works/series/…</summary>
+        <details class="wk-card" style="padding:12px 16px;" ${_serOpen !== null ? 'open' : ''}>
+            <summary style="cursor:pointer;color:#ddd;font-size:13px;font-weight:600;">作品系列（<span id="series-count">${_series.length}</span>）— 跨專案綁定，作品牆摺疊成一張卡 + 系列頁 /works/series/…</summary>
             <div id="series-panel" style="padding-top:10px;"></div>
         </details>
 
-        <div style="margin-bottom:12px;display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
-            <button class="btn" onclick="window._websiteNewWork()" style="background:#059669;">新增作品</button>
-            <input id="works-filter" type="text" placeholder="搜尋標題 / 客戶 / slug…" style="flex:1;min-width:240px;max-width:320px;" />
-            <select id="works-cat-filter" style="min-width:140px;">
+        <div class="crm-toolbar">
+            <button class="crm-btn crm-btn-primary" onclick="window._websiteNewWork()">+ 新增作品</button>
+            <input id="works-filter" type="text" class="crm-search-input" placeholder="搜尋標題 / 客戶 / slug…" style="flex:1;min-width:240px;max-width:320px;" />
+            <select id="works-cat-filter" class="crm-select" style="min-width:140px;">
                 <option value="">所有分類</option>
                 ${_categories.map(c => `<option value="${c.id}">${esc(c.name_zh)}</option>`).join('')}
             </select>
@@ -96,8 +106,9 @@ export default async function render(container, ctx = {}) {
             </label>
         </div>
 
-        <div class="card" style="padding:0;">
+        <div class="wk-card" style="padding:0;">
             <table id="works-table"></table>
+        </div>
         </div>
     `;
 
@@ -106,7 +117,6 @@ export default async function render(container, ctx = {}) {
     document.getElementById('works-public-only').addEventListener('change', _renderTable);
     _renderTable();
     _renderSeriesPanel();
-    _ensureEditPanel();
 }
 
 // ── 作品系列（跨專案策展集合）────────────────────────────────
@@ -151,9 +161,9 @@ function _renderSeriesPanel() {
             <td style="padding:6px 8px;text-align:center;"><input data-id="${s.id}" data-field="visible" type="checkbox" ${s.visible ? 'checked' : ''}></td>
             <td style="padding:6px 8px;color:#888;">${s.work_count || 0} 支</td>
             <td style="padding:6px 8px;white-space:nowrap;">
-                <button class="btn btn-sm" onclick="window._websiteSerSave(${s.id})">儲存</button>
-                <button class="btn btn-sm btn-ghost" onclick="window._websiteSerMembers(${s.id})">${open ? '收合成員' : '成員'}</button>
-                <button class="btn btn-sm btn-ghost" onclick="window._websiteSerDel(${s.id})" style="color:#f87171;">刪除</button>
+                <button class="crm-btn crm-btn-primary crm-btn-sm" onclick="window._websiteSerSave(${s.id})">儲存</button>
+                <button class="crm-btn crm-btn-secondary crm-btn-sm" onclick="window._websiteSerMembers(${s.id})">${open ? '收合成員' : '成員'}</button>
+                <button class="crm-btn crm-btn-secondary crm-btn-sm" onclick="window._websiteSerDel(${s.id})" style="color:#f87171;">刪除</button>
             </td>
         </tr>
         ${open ? `<tr><td colspan="6" style="padding:4px 8px 12px;background:#1a1a1a;">${_serMembersHtml(s.id)}</td></tr>` : ''}`;
@@ -174,7 +184,7 @@ function _renderSeriesPanel() {
         <div style="display:flex;gap:8px;align-items:flex-end;margin-top:10px;flex-wrap:wrap;">
             <div><div style="color:#888;font-size:11px;">新系列名稱</div><input id="ser-new-title" style="width:180px;"></div>
             <div><div style="color:#888;font-size:11px;">slug（小寫英數-）</div><input id="ser-new-slug" style="width:130px;font-family:monospace;" placeholder="huashan-annual"></div>
-            <button class="btn btn-sm" onclick="window._websiteSerCreate()">＋ 建立系列</button>
+            <button class="crm-btn crm-btn-primary crm-btn-sm" onclick="window._websiteSerCreate()">+ 建立系列</button>
         </div>`;
 
     // 展開中系列的「加入作品」下拉 → 套 searchableSelect（打字搜尋，與專案 AM 下拉同款）。
@@ -199,11 +209,11 @@ function _serMembersHtml(sid) {
         <div style="display:flex;gap:8px;align-items:center;padding:3px 0;">
             <span style="color:#666;width:20px;">${i + 1}.</span>
             <span style="flex:1;">${esc(w.title || w.name || w.slug)}</span>
-            <button class="btn btn-sm btn-ghost" onclick="window._websiteEditWork('${esc(w.id)}')"
+            <button class="crm-btn crm-btn-secondary crm-btn-sm" onclick="window._websiteEditWork('${esc(w.id)}')"
                 title="開啟作品編輯頁（與作品集的編輯相同）">編輯</button>
-            <button class="btn btn-sm btn-ghost" ${i === 0 ? 'disabled' : ''} onclick="window._websiteSerMove(${sid},${i},-1)">↑</button>
-            <button class="btn btn-sm btn-ghost" ${i === members.length - 1 ? 'disabled' : ''} onclick="window._websiteSerMove(${sid},${i},1)">↓</button>
-            <button class="btn btn-sm btn-ghost" style="color:#f87171;" onclick="window._websiteSerRemove(${sid},'${esc(w.id)}')">移除</button>
+            <button class="crm-btn crm-btn-secondary crm-btn-sm" ${i === 0 ? 'disabled' : ''} onclick="window._websiteSerMove(${sid},${i},-1)">↑</button>
+            <button class="crm-btn crm-btn-secondary crm-btn-sm" ${i === members.length - 1 ? 'disabled' : ''} onclick="window._websiteSerMove(${sid},${i},1)">↓</button>
+            <button class="crm-btn crm-btn-secondary crm-btn-sm" style="color:#f87171;" onclick="window._websiteSerRemove(${sid},'${esc(w.id)}')">移除</button>
         </div>`).join('');
     return `
         <div style="display:flex;gap:16px;flex-wrap:wrap;">
@@ -214,25 +224,25 @@ function _serMembersHtml(sid) {
                     <select id="ser-add-${sid}" style="min-width:220px;">
                         ${_serCandidateOptions()}
                     </select>
-                    <button class="btn btn-sm" onclick="window._websiteSerAdd(${sid})">加入</button>
+                    <button class="crm-btn crm-btn-primary crm-btn-sm" onclick="window._websiteSerAdd(${sid})">加入</button>
                 </div>
             </div>
             <div style="flex:1;min-width:280px;">
                 <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px;gap:8px;">
                     <div style="color:#888;font-size:11px;">系列介紹（系列頁 + SEO description 來源，建議 30 字以上）</div>
-                    <button class="btn btn-sm btn-ghost" id="ser-ai-${sid}" onclick="window._websiteSerAiDesc(${sid})"
-                        title="用 AI 從成員作品的標題/介紹整理出系列介紹 — 生成後可再編修，按「儲存介紹/封面」才寫入">✨ AI 生成</button>
+                    <button class="crm-btn crm-btn-secondary crm-btn-sm" id="ser-ai-${sid}" onclick="window._websiteSerAiDesc(${sid})"
+                        title="用 AI 從成員作品的標題/介紹整理出系列介紹 — 生成後可再編修，按「儲存介紹/封面」才寫入">AI 生成</button>
                 </div>
                 <textarea id="ser-desc-${sid}" rows="3" style="width:100%;box-sizing:border-box;">${esc(s.description_zh || '')}</textarea>
                 <div style="color:#888;font-size:11px;margin:6px 0 4px;">封面圖 URL（空 = 用第一支作品封面）</div>
                 <div style="display:flex;gap:6px;">
                     <input id="ser-cover-${sid}" value="${esc(s.cover_image || '')}" style="flex:1;box-sizing:border-box;">
-                    <button class="btn btn-sm" onclick="document.getElementById('ser-cover-file-${sid}').click()"
+                    <button class="crm-btn crm-btn-secondary crm-btn-sm" onclick="document.getElementById('ser-cover-file-${sid}').click()"
                         title="上傳圖片 — 自動轉 WebP 並縮到網頁尺寸（長邊 1600px），上傳後直接儲存">上傳</button>
                     <input type="file" id="ser-cover-file-${sid}" accept="image/*" style="display:none;"
                         onchange="window._websiteSerCoverUpload(${sid}, this)">
                 </div>
-                <button class="btn btn-sm" style="margin-top:6px;" onclick="window._websiteSerSaveExtra(${sid})">儲存介紹/封面</button>
+                <button class="crm-btn crm-btn-primary crm-btn-sm" style="margin-top:6px;" onclick="window._websiteSerSaveExtra(${sid})">儲存介紹/封面</button>
             </div>
         </div>`;
 }
@@ -319,7 +329,7 @@ window._websiteSerAiDesc = async (sid) => {
     const btn = document.getElementById(`ser-ai-${sid}`);
     if (!ta) return;
     const orig = btn?.textContent;
-    if (btn) { btn.disabled = true; btn.textContent = '⏳ 生成中…'; }
+    if (btn) { btn.disabled = true; btn.textContent = '生成中…'; }
     try {
         const r = await websiteFetch(`/api/website/admin/series/${sid}/generate-description`, { method: 'POST' });
         ta.value = r.description || '';
@@ -432,7 +442,7 @@ function _renderTable() {
                             ? `<span title="此作品有 ${w.redirect_count} 條舊 slug 被 301 轉址到目前 slug" style="color:#3b82f6;margin-left:6px;">轉址 ${w.redirect_count}</span>`
                             : ''}
                     </td>
-                    <td>${(w.categories || []).map(s => `<span class="website-pill">${esc(s)}</span>`).join(' ') || '<span style="color:#666;">-</span>'}</td>
+                    <td>${(w.categories || []).map(s => `<span class="crm-badge">${esc(s)}</span>`).join(' ') || '<span style="color:#666;">-</span>'}</td>
                     <td>${w.year ?? '-'}</td>
                     <td title="${w.public ? '已公開' : '未公開'}（僅顯示，請進編輯頁修改）">${_roBadge(w.public)}</td>
                     <td title="${w.featured ? '已設精選' : '未設精選'}（僅顯示，請進編輯頁修改）">${_roBadge(w.featured)}</td>
@@ -440,8 +450,8 @@ function _renderTable() {
                     <td>${_seoCell(w)}</td>
                     <td>${_compCell(w.completeness)}</td>
                     <td style="white-space:nowrap;">
-                        <button class="btn btn-sm" onclick="window._websiteEditWork('${esc(w.id)}')">編輯</button>
-                        <button class="btn btn-sm btn-ghost" title="在同一專案下新增子作品（開啟編輯器，關閉時未填內容會自動清掉空殼）" onclick="window._websiteAddSubWork('${esc(w.project_id || w.id)}')">＋子作品</button>
+                        <button class="crm-btn crm-btn-primary crm-btn-sm" onclick="window._websiteEditWork('${esc(w.id)}')">編輯</button>
+                        <button class="crm-btn crm-btn-secondary crm-btn-sm" title="在同一專案下新增子作品（開啟編輯器，關閉時未填內容會自動清掉空殼）" onclick="window._websiteAddSubWork('${esc(w.project_id || w.id)}')">+子作品</button>
                     </td>
                 </tr>
                 `;
@@ -487,7 +497,7 @@ function _seoCell(w) {
     return `
         <div style="display:flex;align-items:center;gap:6px;white-space:nowrap;">
             <span style="color:#f59e0b;font-size:12px;">待生成</span>
-            <button class="btn btn-sm" style="background:#7c3aed;"
+            <button class="crm-btn crm-btn-secondary crm-btn-sm"
                 title="用 AI 自動生成此作品的 SEO 內容（約 30-60 秒）"
                 onclick="window._websiteGenSeo('${esc(w.id)}', this)">生成</button>
         </div>`;
@@ -519,93 +529,27 @@ window._websiteGenSeo = async (pid, btn) => {
 
 
 // ══════════════════════════════════════════════════════════
-// Edit panel（iframe 嵌 /showcase-edit.html?token=XXX）
+// Edit panel — 共用殼 showcase-overlay.js（與結案收件匣同一實作）
 // ══════════════════════════════════════════════════════════
-
-// iframe → parent postMessage 監聽：
-//   showcase-saved   → reload 列表（public_title / 客戶 / 公開狀態都可能變了）
-//   showcase-title-change → live update 上方「編輯：XXX」label，三處紅框同步
-let _msgListenerInstalled = false;
-function _installMessageListener() {
-    if (_msgListenerInstalled) return;
-    _msgListenerInstalled = true;
-    window.addEventListener('message', (e) => {
-        const t = e?.data?.type;
-        if (t === 'showcase-saved') {
-            _reloadWorks();
-        } else if (t === 'showcase-title-change') {
-            const titleEl = document.getElementById('website-edit-panel-title');
-            if (titleEl && e.data.title) titleEl.textContent = `編輯：${e.data.title}`;
-        }
-    });
-}
-
-function _ensureEditPanel() {
-    _installMessageListener();
-    if (document.getElementById('website-edit-panel-overlay')) return;
-    const overlay = document.createElement('div');
-    overlay.id = 'website-edit-panel-overlay';
-    overlay.style.cssText = `
-        position:fixed;inset:0;background:rgba(0,0,0,0.5);z-index:9000;
-        display:none;align-items:stretch;justify-content:flex-end;
-    `;
-    overlay.innerHTML = `
-        <div id="website-edit-panel" style="
-            width:75%;max-width:960px;height:100%;background:#0e0e0e;
-            border-left:1px solid #2a2a2a;display:flex;flex-direction:column;
-            box-shadow:-8px 0 24px rgba(0,0,0,0.6);
-        ">
-            <div style="display:flex;align-items:center;gap:12px;padding:10px 14px;border-bottom:1px solid #2a2a2a;background:#161616;flex-shrink:0;">
-                <strong id="website-edit-panel-title" style="color:#fff;font-size:14px;flex:1;">編輯作品</strong>
-                <button class="btn btn-sm btn-ghost" onclick="window._websiteCloseEditPanel()">關閉並重新整理</button>
-            </div>
-            <iframe id="website-edit-panel-iframe" style="flex:1;width:100%;border:0;background:#0e0e0e;"></iframe>
-        </div>
-    `;
-    overlay.addEventListener('click', (e) => {
-        if (e.target === overlay) window._websiteCloseEditPanel();
-    });
-    document.body.appendChild(overlay);
-}
-
-// 從「跳過小表單」流程建出來的 skeleton project_id；overlay 關閉時呼叫
-// if-skeleton 清掉沒被填內容的孤兒紀錄。從「編輯」既有作品開的 overlay 不會
-// 設這個值，關閉時不會誤刪。
-let _pendingSkeletonId = null;
-
+// skeleton 語意保留：跳過小表單流程建出來的 skeleton project_id 走 onClose
+// 閉包 → 關閉時呼叫 if-skeleton 讓後端決定刪不刪（sanity check name +
+// 各 public_* 是否仍空）。編輯既有作品不帶 skeletonProjectId，不會誤刪。
 function _openEditPanel(url, title, { skeletonProjectId = null } = {}) {
-    _ensureEditPanel();
-    const overlay = document.getElementById('website-edit-panel-overlay');
-    const iframe = document.getElementById('website-edit-panel-iframe');
-    const titleEl = document.getElementById('website-edit-panel-title');
-    if (titleEl) titleEl.textContent = title || '編輯作品';
-    iframe.src = url;
-    overlay.style.display = 'flex';
-    _pendingSkeletonId = skeletonProjectId;
+    openShowcaseOverlay(url, title || '編輯作品', {
+        onSaved: _reloadWorks,
+        onClose: async () => {
+            if (skeletonProjectId) {
+                try {
+                    await websiteFetch(`/api/website/admin/works/${skeletonProjectId}/if-skeleton`, { method: 'DELETE' });
+                } catch (e) {
+                    // 失敗就留著（DB 中保留 skeleton，下次列表會看到，使用者可手動處理）
+                    console.warn('[website/works] if-skeleton 清理失敗:', e.message || e);
+                }
+            }
+            _reloadWorks();
+        },
+    });
 }
-
-window._websiteCloseEditPanel = async () => {
-    const overlay = document.getElementById('website-edit-panel-overlay');
-    if (!overlay) return;
-    overlay.style.display = 'none';
-    const iframe = document.getElementById('website-edit-panel-iframe');
-    if (iframe) iframe.src = 'about:blank';
-
-    // 跳過小表單流程下的 skeleton：使用者開了 overlay 但什麼都沒填就關掉
-    // → 呼叫 if-skeleton 讓後端決定刪不刪（後端 sanity check name + 各 public_*
-    // 是否仍空）。await 完才 reload，避免列表還秀著待刪的 skeleton。
-    const skId = _pendingSkeletonId;
-    _pendingSkeletonId = null;
-    if (skId) {
-        try {
-            await websiteFetch(`/api/website/admin/works/${skId}/if-skeleton`, { method: 'DELETE' });
-        } catch (e) {
-            // 失敗就留著（DB 中保留 skeleton，下次列表會看到，使用者可手動處理）
-            console.warn('[website/works] if-skeleton 清理失敗:', e.message || e);
-        }
-    }
-    _reloadWorks();
-};
 
 window._websiteEditWork = async (pid) => {
     try {
@@ -621,8 +565,8 @@ window._websiteEditWork = async (pid) => {
 // ══════════════════════════════════════════════════════════
 // 新增作品：直接建 skeleton 後跳編輯 overlay（跳過小表單）
 // ══════════════════════════════════════════════════════════
-// 客戶/年份/分類都改在編輯頁裡填。Overlay 關閉時 _websiteCloseEditPanel
-// 會呼叫 /works/{id}/if-skeleton；後端確認 name 仍是 sentinel 且各 public_*
+// 客戶/年份/分類都改在編輯頁裡填。Overlay 關閉時 onClose 閉包會呼叫
+// /works/{id}/if-skeleton；後端確認 name 仍是 sentinel 且各 public_*
 // 都沒填內容才刪掉，避免使用者開了又馬上關留下空殼紀錄。
 
 window._websiteNewWork = async () => {
