@@ -15,6 +15,70 @@ let _seoAudit = null;  // Map<project_id, auditItem>；null = audit 端點不可
 let _series = [];      // 作品系列（跨專案策展集合）
 let _serOpen = null;   // 展開成員管理的系列 id
 
+// ── 欄位自訂：勾選要顯示的欄，localStorage 記憶（存「隱藏」清單 → 未來新欄預設顯示）──
+// 標題/操作鎖定不可關；隱藏走 head 裡的 style 規則（re-render 不用重套）。
+const _COL_STORE = 'works-cols-hidden';
+const _COLS = [
+    { key: 'thumb', label: '縮圖' },
+    { key: 'client', label: '客戶' },
+    { key: 'title', label: '標題', locked: true },
+    { key: 'slug', label: 'slug' },
+    { key: 'cat', label: '分類' },
+    { key: 'year', label: '年份' },
+    { key: 'public', label: '公開' },
+    { key: 'featured', label: '精選' },
+    { key: 'noindex', label: 'noindex' },
+    { key: 'seo', label: 'AI SEO' },
+    { key: 'comp', label: '完成度' },
+    { key: 'actions', label: '操作', locked: true },
+];
+let _hiddenCols = (() => {
+    try {
+        const keys = new Set(_COLS.map(c => c.key));
+        return new Set((JSON.parse(localStorage.getItem(_COL_STORE) || '[]')).filter(k => keys.has(k)));
+    } catch { return new Set(); }
+})();
+
+function _applyColVis() {
+    let st = document.getElementById('works-colvis-style');
+    if (!st) {
+        st = document.createElement('style');
+        st.id = 'works-colvis-style';
+        document.head.appendChild(st);
+    }
+    st.textContent = [..._hiddenCols]
+        .map(k => `.works-crm #works-table [data-col="${k}"]{display:none;}`).join('\n');
+}
+
+function _renderColsMenu() {
+    const menu = document.getElementById('works-cols-menu');
+    if (!menu) return;
+    menu.innerHTML = _COLS.filter(c => !c.locked).map(c => `
+        <label style="display:flex;align-items:center;gap:8px;color:#ddd;font-size:12px;padding:4px 2px;cursor:pointer;white-space:nowrap;">
+            <input type="checkbox" ${_hiddenCols.has(c.key) ? '' : 'checked'}
+                onchange="window._websiteToggleCol('${c.key}', this.checked)" />${esc(c.label)}
+        </label>`).join('')
+        + `<div style="border-top:1px solid #3a3a3a;margin:6px 0;"></div>
+           <button class="crm-btn crm-btn-secondary crm-btn-sm" style="width:100%;" onclick="window._websiteShowAllCols()">全部顯示</button>`;
+}
+
+window._websiteToggleCol = (key, show) => {
+    if (show) _hiddenCols.delete(key); else _hiddenCols.add(key);
+    localStorage.setItem(_COL_STORE, JSON.stringify([..._hiddenCols]));
+    _applyColVis();
+    _renderTable();   // 空結果列的 colspan 要跟著可見欄數變
+};
+
+window._websiteShowAllCols = () => {
+    _hiddenCols.clear();
+    localStorage.setItem(_COL_STORE, '[]');
+    _applyColVis();
+    // 就地勾回、不重繪 innerHTML —— 重繪會讓冒泡中的 e.target 變成脫離節點，
+    // 外側點擊判定 menu.contains() 失敗而誤關選單
+    document.querySelectorAll('#works-cols-menu input[type=checkbox]').forEach(cb => { cb.checked = true; });
+    _renderTable();
+};
+
 async function _reloadWorks() {
     try {
         const [res] = await Promise.all([
@@ -104,6 +168,10 @@ export default async function render(container, ctx = {}) {
             <label style="color:#ccc;font-size:12px;display:flex;align-items:center;gap:6px;">
                 <input type="checkbox" id="works-public-only" /> 只顯示已公開
             </label>
+            <div style="position:relative;margin-left:auto;">
+                <button id="works-cols-btn" class="crm-btn crm-btn-secondary" title="自訂列表要顯示哪些欄位（會記住偏好）">欄位</button>
+                <div id="works-cols-menu" style="display:none;position:absolute;right:0;top:calc(100% + 6px);z-index:60;background:#252525;border:1px solid #3a3a3a;border-radius:8px;padding:10px 12px;min-width:150px;box-shadow:0 8px 24px rgba(0,0,0,.5);"></div>
+            </div>
         </div>
 
         <div class="wk-card" style="padding:0;">
@@ -115,6 +183,21 @@ export default async function render(container, ctx = {}) {
     document.getElementById('works-filter').addEventListener('input', debounce(_renderTable, 150));
     document.getElementById('works-cat-filter').addEventListener('change', _renderTable);
     document.getElementById('works-public-only').addEventListener('change', _renderTable);
+    document.getElementById('works-cols-btn').addEventListener('click', (e) => {
+        e.stopPropagation();
+        const menu = document.getElementById('works-cols-menu');
+        menu.style.display = menu.style.display === 'none' ? 'block' : 'none';
+    });
+    // 點選單外側收合（點選單內不收，讓使用者連勾多項）；document 級只綁一次（子視圖會重進）
+    if (!window._websiteColsDocBound) {
+        window._websiteColsDocBound = true;
+        document.addEventListener('click', (e) => {
+            const menu = document.getElementById('works-cols-menu');
+            if (menu && menu.style.display !== 'none' && !menu.contains(e.target)) menu.style.display = 'none';
+        });
+    }
+    _renderColsMenu();
+    _applyColVis();
     _renderTable();
     _renderSeriesPanel();
 }
@@ -388,7 +471,7 @@ function _renderTable() {
     });
 
     if (!rows.length) {
-        table.innerHTML = '<tr><td colspan="11" style="color:#888;text-align:center;padding:30px;">沒有符合條件的作品</td></tr>';
+        table.innerHTML = `<tr><td colspan="${_COLS.length - _hiddenCols.size}" style="color:#888;text-align:center;padding:30px;">沒有符合條件的作品</td></tr>`;
         return;
     }
 
@@ -406,18 +489,18 @@ function _renderTable() {
     table.innerHTML = `
         <thead>
             <tr>
-                <th>縮圖</th>
-                <th>客戶</th>
-                <th>標題</th>
-                <th>slug</th>
-                <th>分類</th>
-                <th>年份</th>
-                <th>公開</th>
-                <th>精選</th>
-                <th title="個別作品強制 noindex（站級允許索引仍會被擋）">noindex</th>
-                <th title="AI 自動生成的作品 SEO 內容（標題／描述／關鍵字／長文／FAQ）">AI SEO</th>
-                <th title="作品內容填寫狀況：影片／圖／說明（專案描述）／credits">完成度</th>
-                <th>操作</th>
+                <th data-col="thumb">縮圖</th>
+                <th data-col="client">客戶</th>
+                <th data-col="title">標題</th>
+                <th data-col="slug">slug</th>
+                <th data-col="cat">分類</th>
+                <th data-col="year">年份</th>
+                <th data-col="public">公開</th>
+                <th data-col="featured">精選</th>
+                <th data-col="noindex" title="個別作品強制 noindex（站級允許索引仍會被擋）">noindex</th>
+                <th data-col="seo" title="AI 自動生成的作品 SEO 內容（標題／描述／關鍵字／長文／FAQ）">AI SEO</th>
+                <th data-col="comp" title="作品內容填寫狀況：影片／圖／說明（專案描述）／credits">完成度</th>
+                <th data-col="actions">操作</th>
             </tr>
         </thead>
         <tbody>
@@ -433,23 +516,23 @@ function _renderTable() {
                     : '<div style="width:80px;height:45px;background:#333;border-radius:3px;"></div>';
                 return `
                 <tr data-id="${esc(w.id)}">
-                    <td>${thumb}</td>
-                    <td style="color:#fff;">${esc(w.client || '-')}</td>
-                    <td style="color:#fff;">${esc(w.title || w.name)}${_subBadge(w)}</td>
-                    <td style="color:#888;font-size:12px;">
+                    <td data-col="thumb">${thumb}</td>
+                    <td data-col="client" style="color:#fff;">${esc(w.client || '-')}</td>
+                    <td data-col="title" style="color:#fff;">${esc(w.title || w.name)}${_subBadge(w)}</td>
+                    <td data-col="slug" style="color:#888;font-size:12px;">
                         ${esc(w.slug || '(未設)')}
                         ${w.redirect_count > 0
                             ? `<span title="此作品有 ${w.redirect_count} 條舊 slug 被 301 轉址到目前 slug" style="color:#3b82f6;margin-left:6px;">轉址 ${w.redirect_count}</span>`
                             : ''}
                     </td>
-                    <td>${(w.categories || []).map(s => `<span class="crm-badge">${esc(s)}</span>`).join(' ') || '<span style="color:#666;">-</span>'}</td>
-                    <td>${w.year ?? '-'}</td>
-                    <td title="${w.public ? '已公開' : '未公開'}（僅顯示，請進編輯頁修改）">${_roBadge(w.public)}</td>
-                    <td title="${w.featured ? '已設精選' : '未設精選'}（僅顯示，請進編輯頁修改）">${_roBadge(w.featured)}</td>
-                    <td title="${w.noindex ? '已設 noindex' : '允許索引'}（僅顯示，請進編輯頁修改）">${_roBadge(w.noindex)}</td>
-                    <td>${_seoCell(w)}</td>
-                    <td>${_compCell(w.completeness)}</td>
-                    <td style="white-space:nowrap;">
+                    <td data-col="cat">${(w.categories || []).map(s => `<span class="crm-badge">${esc(s)}</span>`).join(' ') || '<span style="color:#666;">-</span>'}</td>
+                    <td data-col="year">${w.year ?? '-'}</td>
+                    <td data-col="public" title="${w.public ? '已公開' : '未公開'}（僅顯示，請進編輯頁修改）">${_roBadge(w.public)}</td>
+                    <td data-col="featured" title="${w.featured ? '已設精選' : '未設精選'}（僅顯示，請進編輯頁修改）">${_roBadge(w.featured)}</td>
+                    <td data-col="noindex" title="${w.noindex ? '已設 noindex' : '允許索引'}（僅顯示，請進編輯頁修改）">${_roBadge(w.noindex)}</td>
+                    <td data-col="seo">${_seoCell(w)}</td>
+                    <td data-col="comp">${_compCell(w.completeness)}</td>
+                    <td data-col="actions" style="white-space:nowrap;">
                         <button class="crm-btn crm-btn-primary crm-btn-sm" onclick="window._websiteEditWork('${esc(w.id)}')">編輯</button>
                         <button class="crm-btn crm-btn-secondary crm-btn-sm" title="在同一專案下新增子作品（開啟編輯器，關閉時未填內容會自動清掉空殼）" onclick="window._websiteAddSubWork('${esc(w.project_id || w.id)}')">+子作品</button>
                     </td>
