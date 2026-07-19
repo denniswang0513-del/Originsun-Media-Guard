@@ -1,5 +1,5 @@
 {
-  "version": "2.4.2",
+  "version": "2.4.3",
   "build_date": "2026-07-19",
-  "notes": "每日備份修復 — ssh 改用 Git Bash（OpenSSH hang 根因）"
+  "notes": "AI 描述 500 修復 + 作品列表欄位自訂"
 }
