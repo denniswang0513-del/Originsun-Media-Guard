@@ -4,7 +4,7 @@
 
 ---
 
-## 現況 (v2.4.3) 基準線<!-- publish_update.py 自動維護版號，勿手改 -->
+## 現況 (v2.4.4) 基準線<!-- publish_update.py 自動維護版號，勿手改 -->
 
 - ✅ 7 個完整工作流程（備份、比對、轉 Proxy、串帶、報表、AI 逐字稿、空拍寫入）
 - ✅ 模組化後端：`main.py` + `core/` + `routers/`（router 容錯載入，缺模組跳過不 crash）
@@ -935,7 +935,7 @@ tools:
     ▼ Phase M: 對外官方網站 (✅ 完整版 A 部署完成 2026-04-29，持續迭代)
     │   → NAS 容器 24/7 + admin Tab 跨機 + AI SEO/翻譯/轉址/上架收件匣
     │
-現在 (v2.4.3) ← 你在這裡
+現在 (v2.4.4) ← 你在這裡
     │
     ▼ ━━━ Work OS 主線（docs/WORK_OS_BLUEPRINT.md）━━━
     │
