@@ -105,9 +105,18 @@ def get_or_create_backup_key() -> bytes:
     return key
 
 
+def _ssh_bin() -> str:
+    """Windows OpenSSH 對這台 NAS 連線層會 hang（2026-07-07 publish 同病已治本）——
+    優先用 Git Bash 的 ssh（實測 0.3s vs OpenSSH 無限 hang）；無 Git 環境
+    （NAS 容器/Linux）fallback 系統 ssh。與 publish_update._ssh_bin 同邏輯
+    （不能 import 它 — NAS 容器沒帶 publish_update.py）。"""
+    cand = r"C:\Program Files\Git\usr\bin\ssh.exe"
+    return cand if os.path.exists(cand) else "ssh"
+
+
 def _ssh_to_file(remote_cmd: str, out_path: str, timeout: float = 180.0) -> tuple[int, str]:
     """ssh 到 NAS 跑 remote_cmd，stdout 直接寫進 out_path。回 (returncode, stderr)。"""
-    cmd = ["ssh", "-i", SSH_KEY_PATH] + _SSH_OPTS + [NAS_HOST, remote_cmd]
+    cmd = [_ssh_bin(), "-i", SSH_KEY_PATH] + _SSH_OPTS + [NAS_HOST, remote_cmd]
     try:
         with open(out_path, "wb") as f:
             p = subprocess.run(cmd, stdout=f, stderr=subprocess.PIPE, timeout=timeout)
