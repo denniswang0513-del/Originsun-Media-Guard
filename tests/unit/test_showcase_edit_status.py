@@ -39,3 +39,33 @@ class TestRebuildStatusPublic:
 
     def test_pending_count_coerced_int(self):
         assert rebuild_status_public({"pending_count": None}, NOW)["pending_count"] == 0
+
+
+class TestAiDescriptionContext:
+    """_ai_description_context 的 NULL 防呆 — 2026-07-19 歐姆龍案例：
+    作品 description 與專案 public_description 皆 NULL → existing=None →
+    .strip() 炸 500，前端只看到通用「AI 產生問題失敗」。"""
+
+    async def test_both_descriptions_null_returns_empty_string(self):
+        from routers.crm.showcase import _ai_description_context
+
+        class _Project:
+            client_id = None
+            name = "測試專案"
+            public_description = None   # DB NULL
+
+        class _Showcase:
+            project_id = "p1"
+            id = "p1"
+            title = "測試作品"
+            description = None          # DB NULL
+            ai_reference_files = None
+            ai_reference_notes = None
+
+        class _FakeSession:
+            async def get(self, model, pk):
+                return _Project()
+
+        name, client, existing, ref = await _ai_description_context(_FakeSession(), _Showcase())
+        assert existing == ""
+        assert name == "測試作品"

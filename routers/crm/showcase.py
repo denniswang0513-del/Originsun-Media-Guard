@@ -1078,7 +1078,9 @@ async def _ai_description_context(session, sc):
             client_name = (client.short_name or client.full_name or "").strip()
     # 作品標題優先（子作品有自己的名字）、fallback 專案名
     name = (sc.title or "").strip() or (project.name if project else "") or ""
-    existing = (sc.description or "") or (project.public_description if project else "")
+    # 兩層 fallback 都可能是 NULL（作品無描述 + 專案 public_description 未填）→ 結尾 or ""
+    # 否則 existing=None，.strip() 炸 500（2026-07-19 歐姆龍案例：AI 產生問題失敗）
+    existing = (sc.description or "") or (project.public_description if project else "") or ""
     from services.website import seo_service
     ref = seo_service.build_ai_reference_prompt(sc.ai_reference_files, sc.ai_reference_notes)
     return name, client_name, existing.strip(), ref
