@@ -24,6 +24,8 @@ const _COLS = [
     { key: 'title', label: '標題', locked: true },
     { key: 'slug', label: 'slug' },
     { key: 'cat', label: '分類' },
+    { key: 'tags', label: '標籤' },
+    { key: 'series', label: '系列' },
     { key: 'year', label: '年份' },
     { key: 'public', label: '公開' },
     { key: 'featured', label: '精選' },
@@ -494,6 +496,8 @@ function _renderTable() {
                 <th data-col="title">標題</th>
                 <th data-col="slug">slug</th>
                 <th data-col="cat">分類</th>
+                <th data-col="tags">標籤</th>
+                <th data-col="series">系列</th>
                 <th data-col="year">年份</th>
                 <th data-col="public">公開</th>
                 <th data-col="featured">精選</th>
@@ -526,6 +530,11 @@ function _renderTable() {
                             : ''}
                     </td>
                     <td data-col="cat">${(w.categories || []).map(s => `<span class="crm-badge">${esc(s)}</span>`).join(' ') || '<span style="color:#666;">-</span>'}</td>
+                    <td data-col="tags">${(w.tags || []).map(s => `<span class="crm-badge" style="opacity:.65;">${esc(s)}</span>`).join(' ') || '<span style="color:#666;">-</span>'}</td>
+                    <td data-col="series">${(() => {
+                        const ser = w.series_id ? _series.find(s => s.id === w.series_id) : null;
+                        return ser ? `<span style="color:#93c5fd;font-size:12px;">${esc(ser.title_zh || ser.slug || w.series_id)}</span>` : '<span style="color:#666;">-</span>';
+                    })()}</td>
                     <td data-col="year">${w.year ?? '-'}</td>
                     <td data-col="public" title="${w.public ? '已公開' : '未公開'}（僅顯示，請進編輯頁修改）">${_roBadge(w.public)}</td>
                     <td data-col="featured" title="${w.featured ? '已設精選' : '未設精選'}（僅顯示，請進編輯頁修改）">${_roBadge(w.featured)}</td>
