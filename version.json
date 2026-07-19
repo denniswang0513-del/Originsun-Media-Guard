@@ -1,5 +1,5 @@
 {
-  "version": "2.4.1",
-  "build_date": "2026-07-18",
-  "notes": "系列下拉快速新增（編輯器/分類小測驗當場建系列）"
+  "version": "2.4.2",
+  "build_date": "2026-07-19",
+  "notes": "每日備份修復 — ssh 改用 Git Bash（OpenSSH hang 根因）"
 }
