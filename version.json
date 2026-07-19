@@ -1,5 +1,5 @@
 {
-  "version": "2.4.4",
-  "build_date": "2026-07-19",
-  "notes": "官網 build 修復 — YT 縮圖 fallback 改 hqdefault"
+  "version": "2.4.5",
+  "build_date": "2026-07-20",
+  "notes": "作品列表標籤/系列欄 + 欄位自訂"
 }
