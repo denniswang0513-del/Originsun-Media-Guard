@@ -35,7 +35,11 @@ logger = logging.getLogger(__name__)
 
 
 def _youtube_thumbnail(video_id: Optional[str]) -> Optional[str]:
-    return f"https://img.youtube.com/vi/{video_id}/maxresdefault.jpg" if video_id else None
+    # hqdefault 永遠存在；maxresdefault 對沒上 HD 的影片直接 404，會讓 Astro build
+    # 抓 cover_url/thumbnail_url 時整站 build 失敗（2026-07-19 OMRON 案例；
+    # initiative_service._work_cover 同款教訓）。要 maxres 畫質的點（首頁 hero）
+    # 由前端 resolveThumbnailAsync 帶 HEAD 檢查自行升級。
+    return f"https://img.youtube.com/vi/{video_id}/hqdefault.jpg" if video_id else None
 
 
 async def _categories_for_projects(

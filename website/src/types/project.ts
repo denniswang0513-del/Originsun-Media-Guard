@@ -21,7 +21,7 @@ export interface IPublicProject {
     year?: number | null;
     categories: string[];          // 製作類型 slug（kind=category）
     tags: string[];                // 使用場景 slug（kind=tag）
-    thumbnail_url?: string | null; // YouTube maxresdefault
+    thumbnail_url?: string | null; // YouTube hqdefault（maxres 對非 HD 片 404 會炸 build）
     cover_url?: string | null;     // OG image — sc.cover_url 鏡像，作品集卡片用
     carousel_image?: string | null;        // 首頁輪播取圖（精選圖→成果展示第一張；空則前端接 YouTube）
     featured: boolean;

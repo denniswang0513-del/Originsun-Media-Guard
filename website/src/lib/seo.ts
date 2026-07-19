@@ -300,8 +300,9 @@ export const pageSchemas = {
     /** VideoObject — 作品詳情頁（YouTube 影片；Vimeo/FB 用後端解析的 video_embed_url） */
     videoObject(work: IPublicProjectDetail, siteUrl: string): SchemaObject {
         // 非 YT 的縮圖 = 上傳的封面（thumbnail_url 只會是 YT 縮圖，非 YT 必為 null）
+        // hqdefault 不用 maxres：沒上 HD 的影片 maxres 404，schema 掛死圖傷 rich result
         const thumb = work.youtube_id
-            ? `https://img.youtube.com/vi/${work.youtube_id}/maxresdefault.jpg`
+            ? `https://img.youtube.com/vi/${work.youtube_id}/hqdefault.jpg`
             : (work.cover_url || work.thumbnail_url);
         const embedUrl = work.youtube_id
             ? `https://www.youtube-nocookie.com/embed/${work.youtube_id}`
@@ -347,7 +348,7 @@ export const pageSchemas = {
             "@type": "VideoObject",
             name: parts.name,
             description: parts.description || parts.name,
-            thumbnailUrl: [`https://img.youtube.com/vi/${parts.youtube_id}/maxresdefault.jpg`],
+            thumbnailUrl: [`https://img.youtube.com/vi/${parts.youtube_id}/hqdefault.jpg`],
             uploadDate: parts.uploadDate || undefined,
             embedUrl: `https://www.youtube-nocookie.com/embed/${parts.youtube_id}`,
             contentUrl: `https://www.youtube.com/watch?v=${parts.youtube_id}`,
