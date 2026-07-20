@@ -64,7 +64,11 @@ def _probe(video_path: str) -> dict:
         out = subprocess.run(
             [_FFPROBE, "-v", "quiet", "-print_format", "json",
              "-show_format", "-show_streams", video_path],
-            capture_output=True, text=True, timeout=30,
+            # ffprobe JSON 輸出是 UTF-8（filename 欄含中文路徑）——text=True 預設
+            # 用系統 cp950 解碼會 UnicodeDecodeError → 被 except 吞成 {}，中文
+            # 檔名/資料夾的影片 metadata 全空（2026-07-20 media_log 復用時揪出）
+            capture_output=True, text=True, encoding="utf-8", errors="replace",
+            timeout=30,
         )
         if out.returncode != 0 or not out.stdout:
             return {}

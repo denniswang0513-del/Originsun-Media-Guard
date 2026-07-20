@@ -36,6 +36,7 @@ try:
                            CrmProjectCostLine, CrmCostLineTemplate,
                            CrmProjectCostGroup,
                            CrmProjectShowcase,
+                           ProjectMediaLog, ProjectMediaFile,
                            WEBSITE_TEAM_OVERRIDE_FIELDS)
     _HAS_DB = True
 except ImportError:
@@ -50,7 +51,8 @@ __all__ = [
     "CrmStaff", "CrmStaffPortfolio", "CrmProjectStaff",
     "CrmInvoice", "CrmPaymentRequest", "CrmCashEntry",
     "CrmProjectCostLine", "CrmCostLineTemplate", "CrmProjectCostGroup",
-    "CrmProjectShowcase", "WEBSITE_TEAM_OVERRIDE_FIELDS",
+    "CrmProjectShowcase", "ProjectMediaLog", "ProjectMediaFile",
+    "WEBSITE_TEAM_OVERRIDE_FIELDS",
 ]
 
 router = APIRouter(prefix="/api/v1/crm", tags=["CRM"])
@@ -272,6 +274,11 @@ _UPLOAD_BASE = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.p
 _ALLOWED_IMG_EXT = {".jpg", ".jpeg", ".png", ".webp", ".heic"}
 
 
+# 單一正本在 core/image_utils.py（2026-07-20 與 routers/website/admin_posts.py
+# 的雙胞合併；showcase 因此順帶獲得 EXIF 方向校正 — 手機直拍不再躺著）。
+from core.image_utils import save_image_as_webp as _save_image_as_webp  # noqa: F401,E402
+
+
 
 # ── 以下自原檔「Staff Self-Edit via Token」section 搬入（staff + showcase 共用）──
 async def _verify_token_generic(session, token: str, scope: str, model_cls, editable_attr: str, require_editable: bool = False):
@@ -286,6 +293,51 @@ async def _verify_token_generic(session, token: str, scope: str, model_cls, edit
     if require_editable and not getattr(obj, editable_attr, True):
         raise HTTPException(status_code=403, detail="管理員已關閉編輯權限")
     return obj
+
+
+def _is_valid_scoped_token(token, scope: str) -> bool:
+    """存庫 token 是否仍可驗。jwt_secret 輪替後舊 token 驗不過 — 2026-07-10
+    輪替實案：生產 226/230 個庫存 token 失效、編輯器整片 404。重用前必驗，
+    驗不過就重發（自癒；_mint_token_generic 的 reuse_existing 依此判斷）。"""
+    if not token:
+        return False
+    try:
+        from core.auth import verify_token
+        payload = verify_token(token)
+        return bool(payload) and payload.get("scope") == scope
+    except Exception:
+        return False
+
+
+async def _mint_token_generic(session, model_cls, obj_id: str, scope: str, *,
+                              reuse_existing: bool = False,
+                              expires_days: int | None = None,
+                              row_defaults: dict | None = None,
+                              on_rotate=None):
+    """取得/產生 scope token，upsert 對應 row（verify 半邊的 _verify_token_generic
+    孿生；showcase / media_log 的 mint 是本函式的薄包裝）。
+
+    reuse_existing=True：既有 token 仍有效就重用（冪等，不動 updated_at）；
+    無效或 False → 產新 token 覆寫（「重置連結」語意）。
+    row_defaults：建新 row 時附帶的欄位；on_rotate(row)：覆寫既有 row 前的
+    領域鉤子（如 showcase 補 project_id）。回傳 (token, row)，不 commit。
+    """
+    from core.auth import create_token
+    from core.crm_logic import PERMANENT_TOKEN_EXPIRES_DAYS
+    row = await session.get(model_cls, obj_id)
+    if row and reuse_existing and _is_valid_scoped_token(row.edit_token, scope):
+        return row.edit_token, row
+    token = create_token({"sub": obj_id, "scope": scope},
+                         expires_days=expires_days or PERMANENT_TOKEN_EXPIRES_DAYS)
+    if not row:
+        row = model_cls(id=obj_id, edit_token=token, **(row_defaults or {}))
+        session.add(row)
+    else:
+        if on_rotate:
+            on_rotate(row)
+        row.edit_token = token
+        row.updated_at = _now()
+    return token, row
 
 
 

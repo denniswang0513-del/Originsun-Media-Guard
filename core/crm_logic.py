@@ -137,7 +137,8 @@ def group_receivables(rows, now) -> dict:
 # showcase-edit token（mint 在 routers/crm/showcase.py、child work 建立在
 # services/website/project_service.py — scope/效期常數共用一份，漂移 = token 驗證失敗）
 SHOWCASE_EDIT_SCOPE = "showcase_edit"
-SHOWCASE_EDIT_EXPIRES_DAYS = 36500  # ~100 年，實務上永久
+PERMANENT_TOKEN_EXPIRES_DAYS = 36500  # ~100 年，實務上永久（各 scope token 共用政策）
+SHOWCASE_EDIT_EXPIRES_DAYS = PERMANENT_TOKEN_EXPIRES_DAYS
 
 
 def showcase_edit_url(token: str) -> str:

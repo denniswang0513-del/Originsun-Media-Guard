@@ -8,7 +8,7 @@
  *   3. 新增 / 編輯 / 刪除 / 複製 4 個 Modal
  *   4. 切換子表時通知 cost.js 重載範圍
  */
-import { crmFetch as _fetch, esc as _esc, fmtNum, pickFolderPath } from './crm-utils.js';
+import { crmFetch as _fetch, esc as _esc, fmtNum, pickFolderPath, crmToast as _toast } from './crm-utils.js';
 import { state, callbacks } from './crm-projects-state.js';
 import { barColor } from './crm-projects-calc.js';
 
@@ -446,21 +446,7 @@ async function _shareLink(gid, ev) {
     }
 }
 
-function _toast(msg) {
-    let el = document.getElementById('cg-toast');
-    if (el) el.remove();
-    el = document.createElement('div');
-    el.id = 'cg-toast';
-    el.className = 'cg-toast';
-    el.textContent = msg;
-    document.body.appendChild(el);
-    // force reflow to trigger transition
-    requestAnimationFrame(() => el.classList.add('show'));
-    setTimeout(() => {
-        el.classList.remove('show');
-        setTimeout(() => el.remove(), 250);
-    }, 2000);
-}
+// _toast → crm-utils.crmToast（2026-07-20 收編共用；import 時 alias 回 _toast）
 
 // ── Menu (⋯) — edit / duplicate / delete ──────────────────────
 

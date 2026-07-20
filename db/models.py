@@ -1235,3 +1235,39 @@ class FinanceLoanPayment(Base):
 
     __table_args__ = (UniqueConstraint("loan_id", "period_no",
                                        name="uq_loanpay_loan_period"),)
+
+
+# ═══════════════════════════════════════════════════════════════════
+# CRM 影像紀錄（工作過程劇照/花絮收集）— routers/crm/media_log.py
+# 每專案一條 token 公開連結（/media-log.html?token=…）供免登入上傳/瀏覽；
+# 原始檔存管理員設定的資料夾（settings.json media_log.root），縮圖走 WebP。
+# ═══════════════════════════════════════════════════════════════════
+
+class ProjectMediaLog(Base):
+    """影像紀錄分享連結（1:1 專案）— token 模式照 CrmProjectShowcase.edit_token
+    （scope="media_log"，reuse/重發語意見 media_log._mint_media_log_token）。"""
+    __tablename__ = "project_media_log"
+
+    id = Column(String(64), primary_key=True)                    # = project_id
+    edit_token = Column(String(512), nullable=True)
+    enabled = Column(Boolean, default=True)                      # False = 公開連結整條停用（403）
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+
+class ProjectMediaFile(Base):
+    """影像紀錄單一檔案 — 原檔在 stored_path（管理員資料夾），縮圖在
+    /uploads/projects/{project_id}/media_log/{id}.webp（無縮圖 = 空字串）。"""
+    __tablename__ = "project_media_files"
+
+    id = Column(String(32), primary_key=True)                    # uuid4 hex
+    project_id = Column(String(64), index=True, nullable=False)  # soft FK → crm_projects.id
+    filename = Column(String(400), default="")                   # 原檔名（顯示/下載名）
+    stored_path = Column(Text, default="")                       # 原檔絕對路徑
+    thumb_url = Column(String(400), default="")                  # /uploads/...webp，無縮圖=空字串
+    media_type = Column(String(10), default="image")             # image|video
+    duration_sec = Column(Float, nullable=True)                  # video 才有
+    category = Column(String(50), default="")                    # 空=未分類
+    uploader_name = Column(String(100), default="")
+    size_bytes = Column(BigInteger, default=0)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())

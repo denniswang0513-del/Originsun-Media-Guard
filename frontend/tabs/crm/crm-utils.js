@@ -521,3 +521,20 @@ export function createSortable({ storageKey, defaultSort, panelId, getters, getV
     return { sorted, attach, setSort: _setSort };
 }
 
+
+/** 輕量 toast — 沿用 crm.css 既有 .cg-toast 樣式（cost-groups / media-log 等子視圖共用）。 */
+export function crmToast(msg) {
+    let el = document.getElementById('cg-toast');
+    if (el) el.remove();
+    el = document.createElement('div');
+    el.id = 'cg-toast';
+    el.className = 'cg-toast';
+    el.textContent = msg;
+    document.body.appendChild(el);
+    // force reflow to trigger transition
+    requestAnimationFrame(() => el.classList.add('show'));
+    setTimeout(() => {
+        el.classList.remove('show');
+        setTimeout(() => el.remove(), 250);
+    }, 2000);
+}

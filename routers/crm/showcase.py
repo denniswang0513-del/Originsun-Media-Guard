@@ -21,7 +21,9 @@ from core.schemas import (SeriesQuickAddPayload, ShowcasePayload,
 
 from ._shared import (router, _check_auth, _check_website_auth, _require_db,
                       _get_factory, _mark_dirty_safe, _now, _UPLOAD_BASE,
-                      _ALLOWED_IMG_EXT, _verify_token_generic,
+                      _ALLOWED_IMG_EXT, _save_image_as_webp,
+                      _verify_token_generic, _is_valid_scoped_token,
+                      _mint_token_generic,
                       _to_staff_public_dict, STAFF_CREATED_VIA_SHOWCASE_EDIT)
 
 try:
@@ -76,34 +78,7 @@ def _ref_files_minimal(files) -> list:
     ]
 
 
-def _save_image_as_webp(content: bytes, dest_dir: str, base_name: str) -> str:
-    """寫圖檔到 dest_dir/<base_name>.webp。原始 JPG/PNG/HEIC 也轉成 WebP。
-
-    回傳寫好的檔案路徑（含副檔名）。Pillow 的 WebP encoder 預設 quality=80，
-    對作品集封面 / 圖庫足夠。WebP 通常比 JPG 小 30%，比 PNG 小 50-70%。
-
-    fallback：Pillow 不可用 / 開檔失敗 → 直接寫原始 bytes 到原副檔名。
-    """
-    webp_path = os.path.join(dest_dir, base_name + ".webp")
-    try:
-        from PIL import Image
-        import io
-        img = Image.open(io.BytesIO(content))
-        # GIF / animated WebP 邏輯先不處理；第一格即可
-        if img.mode in ("RGBA", "LA"):
-            img = img.convert("RGBA")
-        else:
-            img = img.convert("RGB")
-        img.save(webp_path, "WEBP", quality=82, method=6)
-        return webp_path
-    except Exception as e:
-        import logging
-        logging.getLogger(__name__).warning("[upload] WebP convert failed (%s) — fallback raw", e)
-        # fallback to raw bytes (won't have .webp extension to be honest about format)
-        raw_path = webp_path.replace(".webp", ".bin")
-        with open(raw_path, "wb") as f:
-            f.write(content)
-        return raw_path
+# _save_image_as_webp 已搬到 _shared.py（media_log.py 共用，行為零改）
 
 
 def _to_showcase_dict(s) -> dict:
@@ -208,48 +183,28 @@ async def _sync_showcase_to_public(session, sc) -> None:
 
 
 def _is_valid_edit_token(token) -> bool:
-    """存庫的 edit_token 是否仍可用。jwt_secret 輪替後舊 token 驗不過 —
-    2026-07-10 輪替實案：生產 226/230 個庫存 token 失效、編輯器整片 404。
-    重用前必驗，驗不過就重發（自癒，之後再輪替也不會壞）。"""
-    if not token:
-        return False
-    try:
-        from core.auth import verify_token
-        payload = verify_token(token)
-        return bool(payload) and payload.get("scope") == SHOWCASE_EDIT_SCOPE
-    except Exception:
-        return False
+    """存庫 edit_token 是否仍可用（jwt_secret 輪替自癒 — 正本與事故紀錄見
+    _shared._is_valid_scoped_token）。"""
+    return _is_valid_scoped_token(token, SHOWCASE_EDIT_SCOPE)
 
 
 async def _mint_showcase_edit_token(
     session, project_id: str, *, reuse_existing: bool = False,
 ) -> tuple[str, CrmProjectShowcase]:
-    """取得/產生 Showcase edit token，upsert CrmProjectShowcase row。
+    """取得/產生 Showcase edit token（_shared._mint_token_generic 薄包裝）。
 
-    Args:
-        reuse_existing: True 時如果 sc.edit_token 仍有效就重用（冪等），不動 updated_at；
-                        無效（如 secret 輪替）或 False 時產新 token 覆寫
-                        （CRM 完稿 Tab「重新產生分享連結」的語義）。
-
-    回傳 (token, showcase_row)。不 commit，caller 統一 commit。
-    新建 showcase 時才設 editable=True；既有 row 保留 CRM 管理員手動設的 editable 值。
+    reuse_existing=True：既有 token 仍有效就重用（冪等）；無效或 False 產新
+    token 覆寫（CRM 完稿 Tab「重新產生分享連結」語義）。回傳 (token, row)，
+    不 commit。新建才設 editable=True；既有 row 保留管理員手動設的 editable。
     """
-    from core.auth import create_token
-    sc = await session.get(CrmProjectShowcase, project_id)
-    if sc and reuse_existing and _is_valid_edit_token(sc.edit_token):
-        return sc.edit_token, sc
-    token = create_token({"sub": project_id, "scope": SHOWCASE_EDIT_SCOPE},
-                         expires_days=SHOWCASE_EDIT_EXPIRES_DAYS)
-    if not sc:
-        sc = CrmProjectShowcase(id=project_id, project_id=project_id,
-                                edit_token=token, editable=True)
-        session.add(sc)
-    else:
+    def _backfill_project_id(sc):
         if not sc.project_id:
             sc.project_id = sc.id
-        sc.edit_token = token
-        sc.updated_at = _now()
-    return token, sc
+    return await _mint_token_generic(
+        session, CrmProjectShowcase, project_id, SHOWCASE_EDIT_SCOPE,
+        reuse_existing=reuse_existing, expires_days=SHOWCASE_EDIT_EXPIRES_DAYS,
+        row_defaults={"project_id": project_id, "editable": True},
+        on_rotate=_backfill_project_id)
 
 
 @router.get("/projects/{project_id}/showcase")

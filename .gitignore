@@ -105,3 +105,6 @@ uvicorn_*.log*
 
 # Backup encryption key (NEVER commit — Drive backups are useless-but-safe without it)
 credentials/backup_key.txt
+
+# 執行時上傳資料（縮圖/封面等 — 不進版控）
+uploads/

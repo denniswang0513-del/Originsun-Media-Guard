@@ -322,6 +322,8 @@ export async function initCrmProjectsTab() {
             document.getElementById('proj-detail-finance').classList.toggle('hidden', tab !== 'finance');
             document.getElementById('proj-detail-delivery').classList.toggle('hidden', tab !== 'delivery');
             if (tab === 'delivery' && state.selectedId) { loadDeliveryTab(state.selectedId); }
+            document.getElementById('proj-detail-media').classList.toggle('hidden', tab !== 'media');
+            if (tab === 'media' && state.selectedId) { _loadMediaTab(state.selectedId); }
         });
     });
 
@@ -399,5 +401,20 @@ async function _initClosingProduction() {
     } catch (e) {
         container.innerHTML = `<div class="crm-empty" style="padding:24px;color:#fca5a5;">結案收件匣載入失敗: ${e.message}</div>`;
         console.error('結案收件匣載入失敗:', e);
+    }
+}
+
+// ── 影像紀錄 lazy loader ─────────────────────────────────────
+// 照 closing 的動態 import 模式；模組只 import 一次（瀏覽器快取），
+// 但每次點擊都重跑 loadMediaTab —— 內容依當前選中的專案重新抓取。
+async function _loadMediaTab(projectId) {
+    const container = document.getElementById('proj-detail-media');
+    if (!container) return;
+    try {
+        const mod = await import('./crm-projects-media.js');
+        await mod.loadMediaTab(projectId, container);
+    } catch (e) {
+        container.innerHTML = `<div class="crm-empty" style="padding:24px;color:#fca5a5;">影像紀錄載入失敗: ${e.message}</div>`;
+        console.error('影像紀錄載入失敗:', e);
     }
 }

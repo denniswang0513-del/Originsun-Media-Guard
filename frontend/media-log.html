@@ -1,0 +1,632 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex, nofollow">
+<title>影像紀錄｜ORIGINSUN</title>
+<!-- CRM「影像紀錄」公開頁（token 免登入）：劇組成員手機上傳工作過程劇照/花絮 + 瀏覽牆。
+     仿官網設計語彙（同 my.html）：白底/旭日紅/大字距/髮絲邊框/細字重。單檔自足，無外部依賴。
+     後端契約：GET  /api/v1/crm/public/media-log/{token}
+              POST /api/v1/crm/public/media-log/{token}/upload  (multipart: file, category, uploader_name)
+              GET  /api/v1/crm/public/media-log/{token}/file/{file_id} -->
+<style>
+:root { --red: #c9372c; --ink: #262626; --sub: #737373; --line: #e5e5e5; }
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body {
+    background: #fff; color: var(--ink);
+    font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", "Noto Sans TC", "Microsoft JhengHei", sans-serif;
+    -webkit-font-smoothing: antialiased; min-height: 100vh;
+}
+a { color: inherit; text-decoration: none; }
+button { font-family: inherit; }
+.eyebrow { font-size: 11px; letter-spacing: 0.35em; text-transform: uppercase; color: var(--sub); }
+.accent { color: var(--red); }
+
+/* ── Header（仿官網：fixed 白底 blur + 髮絲下框）── */
+header {
+    position: fixed; top: 0; left: 0; right: 0; z-index: 50;
+    background: rgba(255,255,255,0.95); backdrop-filter: blur(12px);
+    border-bottom: 1px solid rgba(229,229,229,0.6);
+}
+.header-inner {
+    max-width: 1100px; margin: 0 auto; padding: 0 20px; height: 64px;
+    display: flex; align-items: center; justify-content: space-between; gap: 16px;
+}
+.brand { display: flex; align-items: center; gap: 12px; }
+.brand-name { font-size: 13px; letter-spacing: 0.25em; font-weight: 300; color: var(--ink); }
+.hdr-eyebrow { font-size: 10px; letter-spacing: 0.3em; text-transform: uppercase; color: var(--sub); white-space: nowrap; }
+
+main { max-width: 1100px; margin: 0 auto; padding: 100px 20px 72px; }
+
+/* ── 頁首區 ── */
+.hero { margin-bottom: 34px; }
+.hero h1 { font-size: 30px; font-weight: 300; letter-spacing: 0.05em; margin-top: 10px; line-height: 1.35; overflow-wrap: break-word; }
+.hero .count { font-size: 12px; color: var(--sub); margin-top: 8px; letter-spacing: 0.05em; }
+
+/* ── 載入 / 失效狀態 ── */
+.state-block { padding: 12vh 0; text-align: center; }
+.state-block .msg { font-size: 15px; color: var(--sub); margin-top: 16px; line-height: 1.8; }
+
+/* ── 上傳卡 ── */
+.upload-card { border: 1px solid var(--line); padding: 24px 22px; margin-bottom: 36px; transition: border-color .15s, background .15s; }
+.upload-card.drag { border-color: var(--red); background: #fdf7f6; }
+.upload-card .card-title { font-size: 11px; letter-spacing: 0.3em; text-transform: uppercase; color: var(--sub); border-bottom: 1px solid var(--line); padding-bottom: 12px; margin-bottom: 18px; }
+.upload-off { padding: 24px 22px; font-size: 13px; color: #a3a3a3; text-align: center; line-height: 1.7; }
+.field { margin-bottom: 16px; }
+.field label { display: block; font-size: 11px; letter-spacing: 0.2em; text-transform: uppercase; color: var(--sub); margin-bottom: 6px; }
+.field input {
+    width: 100%; max-width: 340px; border: 1px solid var(--line); border-radius: 2px; padding: 10px 12px;
+    font-size: 14px; font-family: inherit; color: var(--ink); background: #fff; outline: none; transition: border-color .15s;
+}
+.field input:focus { border-color: var(--red); }
+.field input.err { border-color: var(--red); }
+.field .field-err { display: none; font-size: 12px; color: var(--red); margin-top: 6px; }
+.pill-row { display: flex; flex-wrap: wrap; gap: 8px; }
+.pill-btn {
+    background: none; border: 1px solid var(--line); border-radius: 999px; padding: 6px 16px;
+    font-size: 12px; color: var(--sub); cursor: pointer; transition: all .15s; letter-spacing: 0.05em;
+}
+.pill-btn:hover { border-color: var(--ink); color: var(--ink); }
+.pill-btn.on { background: var(--ink); border-color: var(--ink); color: #fff; }
+.pill-btn .cnt { font-size: 10px; opacity: 0.65; margin-left: 5px; letter-spacing: 0; }
+.pick-row { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; margin-top: 4px; }
+.btn-pick {
+    background: var(--ink); color: #fff; border: none; border-radius: 2px;
+    padding: 12px 26px; font-size: 12px; letter-spacing: 0.3em; text-transform: uppercase;
+    cursor: pointer; transition: background .15s;
+}
+.btn-pick:hover { background: var(--red); }
+.pick-hint { font-size: 12px; color: #a3a3a3; line-height: 1.7; }
+.upload-note { font-size: 11px; color: #a3a3a3; margin-top: 14px; letter-spacing: 0.05em; line-height: 1.7; }
+
+/* ── 上傳佇列 ── */
+#queue { margin-top: 16px; }
+.q-row { padding: 10px 0; border-top: 1px solid #f5f5f5; font-size: 12px; }
+.q-top { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
+.q-name { color: var(--ink); min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; }
+.q-size { color: #a3a3a3; font-size: 11px; white-space: nowrap; }
+.q-state { white-space: nowrap; color: var(--sub); font-size: 11px; letter-spacing: 0.05em; }
+.q-state.ok { color: var(--ink); }
+.q-state.fail { color: var(--red); }
+.q-bar { height: 2px; background: #f0f0f0; margin-top: 8px; border-radius: 1px; overflow: hidden; }
+.q-fill { height: 100%; width: 0%; background: var(--red); transition: width .2s; }
+.q-row.done .q-fill { background: var(--ink); }
+.q-row.fail .q-fill { background: #e8c2be; }
+
+/* ── 分類篩選列 ── */
+.filter-row { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 18px; }
+
+/* ── 縮圖牆 ── */
+.wall { display: grid; grid-template-columns: repeat(2, 1fr); gap: 9px; }
+@media (min-width: 680px)  { .wall { grid-template-columns: repeat(3, 1fr); } }
+@media (min-width: 1000px) { .wall { grid-template-columns: repeat(4, 1fr); } }
+.tile {
+    position: relative; aspect-ratio: 1 / 1; overflow: hidden; background: #f5f5f5;
+    cursor: pointer; border-radius: 2px;
+}
+.tile img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.tile .ph {
+    width: 100%; height: 100%; display: flex; align-items: center; justify-content: center;
+    color: #a3a3a3; font-size: 13px; letter-spacing: 0.2em; background: #f5f5f5;
+}
+.tile .dur {
+    position: absolute; right: 6px; bottom: 6px; background: rgba(0,0,0,0.72); color: #fff;
+    font-size: 11px; padding: 2px 6px; border-radius: 2px; font-variant-numeric: tabular-nums; line-height: 1.4;
+}
+.wall-empty { padding: 60px 0; text-align: center; font-size: 13px; color: #a3a3a3; }
+
+/* ── Lightbox ── */
+#lb {
+    display: none; position: fixed; inset: 0; z-index: 100; background: rgba(0,0,0,0.94);
+    flex-direction: column;
+}
+#lb.open { display: flex; }
+#lb-stage { flex: 1; display: flex; align-items: center; justify-content: center; min-height: 0; position: relative; }
+#lb-stage img { max-width: 90vw; max-height: 85vh; object-fit: contain; display: block; }
+#lb-stage video { max-width: 90vw; max-height: 85vh; display: block; outline: none; background: #000; }
+.lb-ph {
+    width: min(60vw, 320px); aspect-ratio: 1 / 1; display: flex; align-items: center; justify-content: center;
+    background: rgba(255,255,255,0.06); color: rgba(255,255,255,0.55); font-size: 16px; letter-spacing: 0.25em; border-radius: 2px;
+}
+.lb-btn {
+    position: absolute; top: 50%; transform: translateY(-50%);
+    background: none; border: none; color: rgba(255,255,255,0.65); font-size: 34px; line-height: 1;
+    width: 52px; height: 72px; cursor: pointer; transition: color .15s; z-index: 2; padding: 0;
+}
+.lb-btn:hover { color: #fff; }
+#lb-prev { left: 4px; }
+#lb-next { right: 4px; }
+#lb-close {
+    position: absolute; top: 12px; right: 14px; z-index: 3;
+    background: none; border: none; color: rgba(255,255,255,0.65); font-size: 30px; line-height: 1;
+    width: 44px; height: 44px; cursor: pointer; transition: color .15s; padding: 0;
+}
+#lb-close:hover { color: #fff; }
+#lb-info {
+    flex-shrink: 0; padding: 14px 20px calc(18px + env(safe-area-inset-bottom, 0px));
+    display: flex; align-items: center; justify-content: space-between; gap: 14px; flex-wrap: wrap;
+}
+#lb-meta { font-size: 12px; color: rgba(255,255,255,0.75); line-height: 1.7; min-width: 0; overflow-wrap: break-word; letter-spacing: 0.03em; }
+#lb-dl {
+    display: inline-block; border: 1px solid rgba(255,255,255,0.35); border-radius: 2px;
+    padding: 7px 16px; font-size: 11px; letter-spacing: 0.25em; text-transform: uppercase;
+    color: rgba(255,255,255,0.85); transition: all .15s; white-space: nowrap;
+}
+#lb-dl:hover { border-color: #fff; color: #fff; }
+
+footer { max-width: 1100px; margin: 0 auto; padding: 0 20px 40px; }
+footer .eyebrow { font-size: 10px; }
+
+@media (max-width: 640px) {
+    main { padding-top: 88px; }
+    .hero h1 { font-size: 24px; }
+    .upload-card { padding: 20px 16px; }
+    .lb-btn { width: 40px; font-size: 28px; }
+}
+</style>
+</head>
+<body>
+
+<header>
+  <div class="header-inner">
+    <span class="brand">
+      <svg width="30" height="30" viewBox="0 0 36 36" fill="none" aria-hidden="true">
+        <circle cx="18" cy="15" r="8" fill="#c9372c"/>
+        <line x1="6" y1="24" x2="30" y2="24" stroke="#c9372c" stroke-width="1.5"/>
+        <line x1="8" y1="27" x2="28" y2="27" stroke="#c9372c" stroke-width="1.5" opacity="0.7"/>
+        <line x1="10" y1="30" x2="26" y2="30" stroke="#c9372c" stroke-width="1.5" opacity="0.4"/>
+      </svg>
+      <span class="brand-name">ORIGINSUN</span>
+    </span>
+    <span class="hdr-eyebrow">Behind <span class="accent">the Scenes</span></span>
+  </div>
+</header>
+
+<main>
+  <!-- 載入中 -->
+  <div id="loading-view" class="state-block">
+    <div class="eyebrow">Loading</div>
+    <div class="msg">載入中…</div>
+  </div>
+
+  <!-- 連結失效 -->
+  <div id="expired-view" class="state-block" style="display:none;">
+    <div class="eyebrow">Link <span class="accent">Expired</span></div>
+    <div class="msg">連結已失效，請向專案負責人索取新連結。</div>
+  </div>
+
+  <!-- 主內容 -->
+  <div id="app-view" style="display:none;">
+    <div class="hero">
+      <div class="eyebrow">影像紀錄 <span class="accent">Media Log</span></div>
+      <h1 id="proj-name"></h1>
+      <div class="count" id="file-count"></div>
+    </div>
+
+    <!-- 上傳卡 -->
+    <div id="upload-card" class="upload-card">
+      <div class="card-title">上傳劇照 / 花絮</div>
+      <div class="field">
+        <label for="in-name">你的名字（必填）</label>
+        <input id="in-name" type="text" maxlength="40" autocomplete="name" placeholder="例：小明">
+        <div class="field-err" id="name-err">請先填寫名字才能上傳</div>
+      </div>
+      <div class="field" id="cat-field">
+        <label>分類</label>
+        <div class="pill-row" id="upload-cats"></div>
+      </div>
+      <div class="pick-row">
+        <button class="btn-pick" id="btn-pick" type="button">選擇檔案</button>
+        <span class="pick-hint">可多選，或直接把檔案拖進本卡片</span>
+        <input id="in-files" type="file" multiple style="display:none;"
+               accept="image/*,video/*,.cr2,.cr3,.nef,.arw,.dng,.heic,.mts">
+      </div>
+      <div id="queue"></div>
+      <div class="upload-note" id="upload-note">單檔上限 500MB；行動網路單檔約 100MB 內較穩定。</div>
+    </div>
+
+    <!-- 分類篩選列 -->
+    <div class="filter-row" id="filter-row"></div>
+
+    <!-- 縮圖牆 -->
+    <div class="wall" id="wall"></div>
+    <div class="wall-empty" id="wall-empty" style="display:none;">尚無檔案，歡迎成為第一個上傳的人。</div>
+  </div>
+</main>
+
+<footer><div class="eyebrow">ORIGINSUN STUDIO</div></footer>
+
+<!-- Lightbox -->
+<div id="lb">
+  <button id="lb-close" type="button" aria-label="關閉">&times;</button>
+  <div id="lb-stage">
+    <button id="lb-prev" class="lb-btn" type="button" aria-label="上一個">&lsaquo;</button>
+    <div id="lb-media"></div>
+    <button id="lb-next" class="lb-btn" type="button" aria-label="下一個">&rsaquo;</button>
+  </div>
+  <div id="lb-info">
+    <div id="lb-meta"></div>
+    <a id="lb-dl" href="#" download>下載原檔</a>
+  </div>
+</div>
+
+<script>
+"use strict";
+const $ = (id) => document.getElementById(id);
+const p2 = (n) => String(n).padStart(2, "0");
+
+const TOKEN = new URLSearchParams(location.search).get("token") || "";
+const API = "/api/v1/crm/public/media-log/" + encodeURIComponent(TOKEN);
+const UPLOADER_KEY = "media_log_uploader";
+let MAX_BYTES = 500 * 1024 * 1024;   // 以後端 GET 回應的 max_upload_bytes 為準（載入時覆寫）
+const maxMB = () => Math.round(MAX_BYTES / 1048576);
+
+let DATA = null;        // 最近一次 GET payload
+let FILES = [];         // FILE 陣列（後端已新→舊）
+let FILTER = "all";     // 瀏覽篩選
+let UPLOAD_CAT = "";    // 上傳分類（pill 單選）
+let LB_LIST = [];       // lightbox 導覽清單（= 目前篩選後）
+let LB_INDEX = -1;
+let lbVideo = null;     // 目前 lightbox 內的 video（切換時 pause）
+let queueBusy = false;
+const uploadQueue = [];
+
+/* ── 格式化 ── */
+function fmtDur(sec) {
+    if (sec == null || isNaN(sec)) return "";
+    const s = Math.max(0, Math.floor(sec));
+    return Math.floor(s / 60) + ":" + p2(s % 60);
+}
+function fmtTime(iso) {
+    const d = new Date(iso);
+    if (isNaN(d.getTime())) return "";
+    return d.getFullYear() + "/" + p2(d.getMonth() + 1) + "/" + p2(d.getDate())
+         + " " + p2(d.getHours()) + ":" + p2(d.getMinutes());
+}
+function fmtSize(bytes) {
+    return (Number(bytes || 0) / 1048576).toFixed(1) + " MB";
+}
+function extOf(filename) {
+    const s = String(filename || "");
+    const i = s.lastIndexOf(".");
+    return (i > 0 && i < s.length - 1) ? s.slice(i + 1).toUpperCase() : "FILE";
+}
+function fileUrl(f) { return API + "/file/" + encodeURIComponent(f.id); }
+
+/* ── 初始載入 / 重新整理 ── */
+async function loadData(refreshOnly) {
+    let r;
+    try {
+        r = await fetch(API, { headers: { "Accept": "application/json" } });
+    } catch (e) {
+        if (!refreshOnly) showExpired();
+        return;
+    }
+    if (r.status === 401 || r.status === 403) { showExpired(); return; }
+    if (!r.ok) { if (!refreshOnly) showExpired(); return; }
+    DATA = await r.json();
+    FILES = Array.isArray(DATA.files) ? DATA.files : [];
+    if (DATA.max_upload_bytes) MAX_BYTES = DATA.max_upload_bytes;
+    $("upload-note").textContent = "單檔上限 " + maxMB() + "MB；行動網路單檔約 100MB 內較穩定。";
+    renderAll(refreshOnly);
+}
+function showExpired() {
+    $("loading-view").style.display = "none";
+    $("app-view").style.display = "none";
+    $("expired-view").style.display = "block";
+}
+
+/* ── 渲染 ── */
+function renderAll(refreshOnly) {
+    $("loading-view").style.display = "none";
+    $("expired-view").style.display = "none";
+    $("app-view").style.display = "block";
+
+    document.title = (DATA.project_name ? DATA.project_name + "｜" : "") + "影像紀錄｜ORIGINSUN";
+    $("proj-name").textContent = DATA.project_name || "影像紀錄";
+    $("file-count").textContent = "共 " + FILES.length + " 個檔案";
+
+    if (!refreshOnly) renderUploadCard();
+    renderFilters();
+    renderWall();
+}
+
+function renderUploadCard() {
+    if (!DATA.upload_enabled) {
+        $("upload-card").className = "upload-off";
+        $("upload-card").textContent = "管理員尚未設定收檔資料夾";
+        return;
+    }
+    $("in-name").value = localStorage.getItem(UPLOADER_KEY) || "";
+    const cats = Array.isArray(DATA.categories) ? DATA.categories : [];
+    const box = $("upload-cats");
+    box.textContent = "";
+    if (!cats.length) { $("cat-field").style.display = "none"; UPLOAD_CAT = ""; return; }
+    UPLOAD_CAT = cats[0];
+    cats.forEach((c) => {
+        const b = document.createElement("button");
+        b.type = "button";
+        b.className = "pill-btn" + (c === UPLOAD_CAT ? " on" : "");
+        b.textContent = c;
+        b.onclick = () => {
+            UPLOAD_CAT = c;
+            box.querySelectorAll(".pill-btn").forEach(x => x.classList.toggle("on", x === b));
+        };
+        box.appendChild(b);
+    });
+}
+
+function filterCats() {
+    const cats = Array.isArray(DATA.categories) ? DATA.categories.slice() : [];
+    FILES.forEach(f => { if (f.category && !cats.includes(f.category)) cats.push(f.category); });
+    return cats;
+}
+function filteredFiles() {
+    return FILTER === "all" ? FILES.slice() : FILES.filter(f => f.category === FILTER);
+}
+
+function renderFilters() {
+    const cats = filterCats();
+    if (FILTER !== "all" && !cats.includes(FILTER)) FILTER = "all";
+    const row = $("filter-row");
+    row.textContent = "";
+    const mk = (label, key, count) => {
+        const b = document.createElement("button");
+        b.type = "button";
+        b.className = "pill-btn" + (FILTER === key ? " on" : "");
+        b.textContent = label;
+        const c = document.createElement("span");
+        c.className = "cnt";
+        c.textContent = String(count);
+        b.appendChild(c);
+        b.onclick = () => { FILTER = key; renderFilters(); renderWall(); };
+        row.appendChild(b);
+    };
+    mk("全部", "all", FILES.length);
+    cats.forEach(c => mk(c, c, FILES.filter(f => f.category === c).length));
+}
+
+function renderWall() {
+    const list = filteredFiles();
+    const wall = $("wall");
+    wall.textContent = "";
+    $("wall-empty").style.display = list.length ? "none" : "block";
+    list.forEach((f, i) => {
+        const tile = document.createElement("figure");
+        tile.className = "tile";
+        if (f.thumb_url) {
+            const img = document.createElement("img");
+            img.loading = "lazy";
+            img.src = f.thumb_url;
+            img.alt = f.filename || "";
+            img.onerror = () => {
+                if (img.parentNode) img.parentNode.replaceChild(mkPh(f, "ph"), img);
+            };
+            tile.appendChild(img);
+        } else {
+            tile.appendChild(mkPh(f, "ph"));
+        }
+        if (f.media_type === "video" && f.duration_sec != null) {
+            const d = document.createElement("span");
+            d.className = "dur";
+            d.textContent = fmtDur(f.duration_sec);
+            tile.appendChild(d);
+        }
+        tile.onclick = () => openLightbox(i);
+        wall.appendChild(tile);
+    });
+}
+
+/* ── Lightbox ── */
+function openLightbox(idx) {
+    LB_LIST = filteredFiles();     // 導覽以目前篩選後清單為準
+    LB_INDEX = idx;
+    $("lb").classList.add("open");
+    document.body.style.overflow = "hidden";
+    renderLightbox();
+}
+function closeLightbox() {
+    if (lbVideo) { try { lbVideo.pause(); } catch (e) {} lbVideo = null; }
+    $("lb").classList.remove("open");
+    $("lb-media").textContent = "";
+    document.body.style.overflow = "";
+    LB_INDEX = -1;
+}
+function lbNav(delta) {
+    if (LB_INDEX < 0 || !LB_LIST.length) return;
+    LB_INDEX = (LB_INDEX + delta + LB_LIST.length) % LB_LIST.length;
+    renderLightbox();
+}
+/* 「讀不動就顯示副檔名卡」— 牆（.ph）與 lightbox（.lb-ph）共用工廠 */
+function mkPh(f, cls) {
+    const ph = document.createElement("div");
+    ph.className = cls;
+    ph.textContent = extOf(f.filename);
+    return ph;
+}
+function renderLightbox() {
+    const f = LB_LIST[LB_INDEX];
+    if (!f) return;
+    if (lbVideo) { try { lbVideo.pause(); } catch (e) {} lbVideo = null; }
+    const box = $("lb-media");
+    box.textContent = "";
+    if (f.media_type === "video") {
+        const v = document.createElement("video");
+        v.controls = true;
+        v.autoplay = true;
+        v.playsInline = true;
+        v.setAttribute("playsinline", "");
+        v.src = fileUrl(f);
+        box.appendChild(v);
+        lbVideo = v;
+    } else {
+        const img = document.createElement("img");
+        img.alt = f.filename || "";
+        if (f.thumb_url) {
+            // 先秀縮圖（秒開），原檔背景載完再換 — 手機在片場點一張不用等 20-100MB
+            img.src = f.thumb_url;
+            const full = new Image();
+            full.onload = () => { img.src = full.src; };   // 已切到別張時 img 已脫離 DOM，換 src 無害
+            full.src = fileUrl(f);
+            img.onerror = () => {
+                if (img.parentNode) img.parentNode.replaceChild(mkPh(f, "lb-ph"), img);
+            };
+        } else {
+            img.src = fileUrl(f);   // 無縮圖（RAW 等）— 試原檔，讀不動退檔案卡
+            img.onerror = () => {
+                if (img.parentNode) img.parentNode.replaceChild(mkPh(f, "lb-ph"), img);
+            };
+        }
+        box.appendChild(img);
+    }
+    const parts = [f.filename, f.uploader_name, fmtTime(f.created_at), f.category]
+        .filter(x => x != null && String(x) !== "");
+    $("lb-meta").textContent = parts.join(" · ");
+    const dl = $("lb-dl");
+    dl.href = fileUrl(f);
+    dl.setAttribute("download", f.filename || "");
+    const prevNext = LB_LIST.length > 1 ? "" : "none";
+    $("lb-prev").style.display = prevNext;
+    $("lb-next").style.display = prevNext;
+}
+$("lb-close").onclick = closeLightbox;
+$("lb-prev").onclick = (e) => { e.stopPropagation(); lbNav(-1); };
+$("lb-next").onclick = (e) => { e.stopPropagation(); lbNav(1); };
+$("lb").addEventListener("click", (e) => {
+    if (e.target === $("lb") || e.target === $("lb-stage") || e.target === $("lb-media")) closeLightbox();
+});
+document.addEventListener("keydown", (e) => {
+    if (!$("lb").classList.contains("open")) return;
+    if (e.key === "Escape") closeLightbox();
+    else if (e.key === "ArrowLeft") lbNav(-1);
+    else if (e.key === "ArrowRight") lbNav(1);
+});
+let touchX = null;
+$("lb").addEventListener("touchstart", (e) => {
+    if (e.target.tagName === "VIDEO") { touchX = null; return; }  // 不跟播放器手勢打架
+    touchX = e.changedTouches[0].clientX;
+}, { passive: true });
+$("lb").addEventListener("touchend", (e) => {
+    if (touchX == null) return;
+    const dx = e.changedTouches[0].clientX - touchX;
+    touchX = null;
+    if (Math.abs(dx) > 40) lbNav(dx < 0 ? 1 : -1);
+}, { passive: true });
+
+/* ── 上傳 ── */
+function errText(status) {
+    if (status === 413) return "超過 " + maxMB() + "MB 上限";
+    if (status === 400) return "不支援的檔案格式";
+    if (status === 503) return "管理員尚未設定收檔資料夾";
+    return "上傳失敗（HTTP " + status + "）";
+}
+function makeQueueRow(item) {
+    const row = document.createElement("div");
+    row.className = "q-row";
+    const top = document.createElement("div");
+    top.className = "q-top";
+    const name = document.createElement("span");
+    name.className = "q-name";
+    name.textContent = item.file.name;
+    const size = document.createElement("span");
+    size.className = "q-size";
+    size.textContent = fmtSize(item.file.size);
+    const state = document.createElement("span");
+    state.className = "q-state";
+    state.textContent = "等待中";
+    top.appendChild(name); top.appendChild(size); top.appendChild(state);
+    const bar = document.createElement("div");
+    bar.className = "q-bar";
+    const fill = document.createElement("div");
+    fill.className = "q-fill";
+    bar.appendChild(fill);
+    row.appendChild(top); row.appendChild(bar);
+    item.row = row; item.fill = fill; item.state = state;
+    $("queue").appendChild(row);
+}
+function setItemState(item, cls, text, pct) {
+    if (pct != null) item.fill.style.width = pct + "%";
+    if (cls) { item.row.classList.add(cls); item.state.classList.add(cls === "done" ? "ok" : "fail"); }
+    if (text != null) item.state.textContent = text;
+}
+function uploadOne(item) {
+    return new Promise((resolve) => {
+        const fd = new FormData();
+        fd.append("file", item.file);
+        fd.append("category", item.category);
+        fd.append("uploader_name", item.uploader);
+        const xhr = new XMLHttpRequest();
+        xhr.open("POST", API + "/upload");
+        xhr.upload.onprogress = (e) => {
+            if (e.lengthComputable) {
+                const pct = Math.round(e.loaded / e.total * 100);
+                item.fill.style.width = pct + "%";
+                item.state.textContent = "上傳中 " + pct + "%";
+            }
+        };
+        xhr.onload = () => {
+            if (xhr.status >= 200 && xhr.status < 300) setItemState(item, "done", "完成", 100);
+            else setItemState(item, "fail", errText(xhr.status), 100);
+            resolve();
+        };
+        xhr.onerror = () => { setItemState(item, "fail", "網路錯誤，請重試", 100); resolve(); };
+        xhr.send(fd);
+    });
+}
+async function processQueue() {
+    if (queueBusy) return;
+    queueBusy = true;
+    while (uploadQueue.length) {
+        const item = uploadQueue.shift();
+        if (item.file.size > MAX_BYTES) { setItemState(item, "fail", "超過 " + maxMB() + "MB 上限", 100); continue; }
+        await uploadOne(item);
+    }
+    queueBusy = false;
+    await loadData(true);   // 全部完成後重抓列表刷新牆
+}
+function enqueueFiles(fileList) {
+    if (!DATA || !DATA.upload_enabled) return;
+    const name = $("in-name").value.trim();
+    if (!name) {
+        $("in-name").classList.add("err");
+        $("name-err").style.display = "block";
+        $("in-name").focus();
+        return;
+    }
+    $("in-name").classList.remove("err");
+    $("name-err").style.display = "none";
+    localStorage.setItem(UPLOADER_KEY, name);
+    Array.from(fileList).forEach((file) => {
+        const item = { file: file, category: UPLOAD_CAT, uploader: name };  // 送出當下鎖定分類/名字
+        makeQueueRow(item);
+        uploadQueue.push(item);
+    });
+    processQueue();
+}
+$("btn-pick").onclick = () => $("in-files").click();
+$("in-files").onchange = (e) => { enqueueFiles(e.target.files); e.target.value = ""; };
+$("in-name").oninput = () => { $("in-name").classList.remove("err"); $("name-err").style.display = "none"; };
+
+/* drag & drop（整卡） */
+const card = $("upload-card");
+["dragenter", "dragover"].forEach(ev => card.addEventListener(ev, (e) => {
+    if (!DATA || !DATA.upload_enabled) return;
+    e.preventDefault();
+    card.classList.add("drag");
+}));
+["dragleave", "drop"].forEach(ev => card.addEventListener(ev, (e) => {
+    e.preventDefault();
+    card.classList.remove("drag");
+}));
+card.addEventListener("drop", (e) => {
+    if (!DATA || !DATA.upload_enabled) return;
+    if (e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files.length) enqueueFiles(e.dataTransfer.files);
+});
+
+/* ── 啟動 ── */
+if (!TOKEN) showExpired();
+else loadData(false);
+</script>
+</body>
+</html>
