@@ -17,6 +17,7 @@ _DEFAULT_SETTINGS: dict = {
         "transcode_success": "🎬 【轉檔完成】{project_name} 已轉檔完成！\n📂 輸出至：{dest_dir} | 共 {file_count} 個檔案",
         "concat_success":    "🔗 【串接完成】{output_file} 已輸出！\n📁 儲存位置：{dest_dir}",
         "verify_success":    "🔍 【比對完成】{project_name}\n✅ 通過：{pass_count} | ❌ 失敗：{fail_count} | 共 {total_count} 個",
+        "media_log_upload":  "【影像紀錄】{project_name} 新收 {file_count} 個檔案（{uploaders}）",
     },
     "notification_channels": {
         "backup":    {"gchat": True},

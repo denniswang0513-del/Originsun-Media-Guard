@@ -11,6 +11,14 @@ import os
 
 logger = logging.getLogger(__name__)
 
+# iPhone HEIC：PIL 需要 pillow-heif 註冊 opener 才開得動（劇組手機大宗是 iPhone —
+# 影像紀錄上傳的主力格式）。沒裝的環境（舊 agent/NAS 容器）安靜跳過，HEIC 只是無縮圖。
+try:
+    import pillow_heif
+    pillow_heif.register_heif_opener()
+except ImportError:
+    pass
+
 
 def save_image_as_webp(content: bytes, dest_dir: str, base_name: str,
                        max_side: int = 0) -> str:

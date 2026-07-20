@@ -6,8 +6,10 @@
  * 縮圖牆（分類篩選 + 下載/刪除 + lightbox）。
  *
  * 後端契約（另組 agent 實作）：
- *   GET    /api/v1/crm/projects/{id}/media-log            → token/share_url/root/root_set/project_folder/categories/files
+ *   GET    /api/v1/crm/projects/{id}/media-log            → token/share_url/root/root_set/project_folder/categories/files/enabled
  *   POST   /api/v1/crm/projects/{id}/media-log/token      → 重置連結
+ *   POST   /api/v1/crm/projects/{id}/media-log/enabled    → {"enabled": bool} → {"ok","enabled"} 啟用/停用公開連結
+ *   GET    /api/v1/crm/public/media-log/{token}/qr?base=… → QR code PNG（免認證，token 即授權，直接當 <img src>）
  *   POST   /api/v1/crm/projects/{id}/media-log/settings   → {root?, categories?}
  *   DELETE /api/v1/crm/media-log/files/{fileId}
  *   POST   /api/v1/crm/public/media-log/{token}/upload    → multipart file/category/uploader_name（後台也走此端點）
@@ -76,10 +78,18 @@ function _render() {
 
     <div class="pm-card">
       <div class="pm-card-title">公開上傳連結</div>
-      <div class="pm-row">
-        <input id="pm-share" type="text" class="crm-input" style="flex:1;" readonly value="${_esc(shareUrl)}">
-        <button id="pm-copy" class="crm-btn crm-btn-primary crm-btn-sm">複製連結</button>
-        <button id="pm-reset" class="crm-btn crm-btn-danger crm-btn-sm">重置連結</button>
+      <label class="pm-toggle"><input id="pm-enabled" type="checkbox"${d.enabled !== false ? ' checked' : ''}> 啟用公開連結</label>
+      <div id="pm-off-hint" class="pm-off-hint" style="display:none;">已停用 — 公開頁顯示連結失效</div>
+      <div id="pm-share-blk">
+        <div class="pm-row">
+          <input id="pm-share" type="text" class="crm-input" style="flex:1;" readonly value="${_esc(shareUrl)}">
+          <button id="pm-copy" class="crm-btn crm-btn-primary crm-btn-sm">複製連結</button>
+          <button id="pm-reset" class="crm-btn crm-btn-danger crm-btn-sm">重置連結</button>
+        </div>
+        ${d.token ? `<div class="pm-qr-row">
+          <img id="pm-qr" class="pm-qr" src="${_esc(_qrUrl())}" alt="公開上傳連結 QR code" width="160" height="160">
+          <span class="pm-hint" style="margin:0;">現場立牌或投影掃碼即傳</span>
+        </div>` : ''}
       </div>
       <div class="pm-hint">丟到劇組群組即可收集現場照片與影片，開頁就能上傳、無需登入</div>
     </div>
@@ -117,6 +127,8 @@ function _render() {
     // ── 公開連結卡 ──
     document.getElementById('pm-copy').addEventListener('click', _copyLink);
     document.getElementById('pm-reset').addEventListener('click', _resetToken);
+    document.getElementById('pm-enabled').addEventListener('change', _toggleEnabled);
+    _applyEnabledUI();
 
     // ── 上傳卡 ──
     document.getElementById('pm-pick').addEventListener('click', () => document.getElementById('pm-file').click());
@@ -234,6 +246,38 @@ function _renderChips() {
 
 // ── 公開連結 ─────────────────────────────────────────────────
 
+/** QR 端點：免認證、token 即授權，直接當 <img src>；base 帶前端 origin 讓 QR 內容是完整網址 */
+function _qrUrl() {
+    return `${PUBLIC_API}/${_data.token}/qr?base=${encodeURIComponent(location.origin)}`;
+}
+
+async function _toggleEnabled(e) {
+    const want = e.target.checked;
+    try {
+        const r = await _fetch(`/projects/${_projectId}/media-log/enabled`, {
+            method: 'POST', body: JSON.stringify({ enabled: want }),
+        });
+        _data.enabled = !!r.enabled;
+        _toast(_data.enabled ? '已啟用公開連結' : '已停用公開連結');
+    } catch (err) {
+        e.target.checked = !want;   // 失敗回滾 checkbox，不動 _data
+        alert('切換失敗：' + (err.message || err));
+        return;
+    }
+    _applyEnabledUI();
+}
+
+/** 依 _data.enabled 套用停用視覺（QR + 連結區塊淡化 + 琥珀提示） */
+function _applyEnabledUI() {
+    const on = _data.enabled !== false;
+    const blk = document.getElementById('pm-share-blk');
+    if (blk) blk.classList.toggle('pm-share-off', !on);
+    const hint = document.getElementById('pm-off-hint');
+    if (hint) hint.style.display = on ? 'none' : '';
+    const cb = document.getElementById('pm-enabled');
+    if (cb) cb.checked = on;
+}
+
 async function _copyLink() {
     const url = _absShareUrl(_data.share_url);
     try {
@@ -252,6 +296,8 @@ async function _resetToken() {
         _data.share_url = r.share_url;
         const inp = document.getElementById('pm-share');
         if (inp) inp.value = _absShareUrl(r.share_url);
+        const qr = document.getElementById('pm-qr');
+        if (qr) qr.src = _qrUrl();   // token 變了 → QR 同步刷新
         _toast('已重置連結');
     } catch (e) {
         alert('重置失敗：' + (e.message || e));
@@ -331,6 +377,7 @@ async function _reloadFiles() {
         _data = { ..._data, ...d };
         _renderPills();
         _renderGrid();
+        _applyEnabledUI();   // GET 也回 enabled → 同步停用視覺
     } catch { /* 靜默：下次切 tab 會重抓 */ }
 }
 
@@ -407,25 +454,20 @@ function _renderGrid() {
         grid.innerHTML = '<div class="pm-empty">此分類目前沒有檔案</div>';
         return;
     }
-    grid.innerHTML = files.map((f, i) => {
-        let ext = String(f.filename || '').split('.').pop().toUpperCase();
-        if (!ext || ext.length > 5 || ext === String(f.filename || '').toUpperCase()) ext = 'FILE';
-        const thumb = f.thumb_url
-            ? `<img class="pm-thumb" src="${_esc(f.thumb_url)}" loading="lazy" alt="" data-ext="${_esc(ext)}">`
-            : `<div class="pm-thumb pm-thumb-fallback">${_esc(ext)}</div>`;
-        const dur = f.media_type === 'video'
-            ? `<span class="pm-dur">${f.duration_sec != null ? _esc(_fmtDur(f.duration_sec)) : '影片'}</span>`
-            : '';
-        return `<div class="pm-item" data-id="${_esc(String(f.id))}" data-idx="${i}" title="${_esc(f.filename || '')}">
-          <div class="pm-thumbwrap">
-            ${thumb}${dur}
-            <div class="pm-acts">
-              <button data-act="dl" title="下載原檔">下載</button>
-              <button data-act="del" class="pm-act-del" title="刪除">刪除</button>
-            </div>
-          </div>
-          <div class="pm-meta">${_esc(f.uploader_name || '—')} · ${_fmtTime(f.created_at)}</div>
-        </div>`;
+    // 依拍攝日（created_at 本地日期）分組。header 只是視覺插入（.pm-group-hd，非 .pm-item），
+    // data-idx 仍= 篩選後扁平清單索引 → lightbox 導覽邏輯（_filtered()）完全不受影響。
+    const groups = [];
+    const byKey = new Map();
+    files.forEach((f, idx) => {
+        const key = _dateKey(f.created_at) || '未知日期';
+        let g = byKey.get(key);
+        if (!g) { g = { key, items: [] }; byKey.set(key, g); groups.push(g); }
+        g.items.push({ f, idx });
+    });
+    grid.innerHTML = groups.map(g => {
+        const label = g.key === '未知日期' ? g.key : g.key.slice(5);   // YYYY/MM/DD → MM/DD
+        return `<div class="pm-group-hd">${_esc(label)} · ${g.items.length} 個檔</div>`
+            + g.items.map(it => _itemHtml(it.f, it.idx)).join('');
     }).join('');
     // 縮圖載入失敗（thumb_url 404 等）→ 換成灰卡顯示副檔名
     grid.querySelectorAll('img.pm-thumb').forEach(img => {
@@ -436,6 +478,37 @@ function _renderGrid() {
             img.replaceWith(div);
         }, { once: true });
     });
+}
+
+/** 單一縮圖卡 HTML；i = 篩選後扁平索引（data-idx，lightbox 用） */
+function _itemHtml(f, i) {
+    let ext = String(f.filename || '').split('.').pop().toUpperCase();
+    if (!ext || ext.length > 5 || ext === String(f.filename || '').toUpperCase()) ext = 'FILE';
+    const thumb = f.thumb_url
+        ? `<img class="pm-thumb" src="${_esc(f.thumb_url)}" loading="lazy" alt="" data-ext="${_esc(ext)}">`
+        : `<div class="pm-thumb pm-thumb-fallback">${_esc(ext)}</div>`;
+    const dur = f.media_type === 'video'
+        ? `<span class="pm-dur">${f.duration_sec != null ? _esc(_fmtDur(f.duration_sec)) : '影片'}</span>`
+        : '';
+    return `<div class="pm-item" data-id="${_esc(String(f.id))}" data-idx="${i}" title="${_esc(f.filename || '')}">
+      <div class="pm-thumbwrap">
+        ${thumb}${dur}
+        <div class="pm-acts">
+          <button data-act="dl" title="下載原檔">下載</button>
+          <button data-act="del" class="pm-act-del" title="刪除">刪除</button>
+        </div>
+      </div>
+      <div class="pm-meta">${_esc(f.uploader_name || '—')} · ${_fmtTime(f.created_at)}</div>
+    </div>`;
+}
+
+/** created_at → 本地日期組鍵 YYYY/MM/DD（無效日期回 ''） */
+function _dateKey(iso) {
+    if (!iso) return '';
+    const d = new Date(iso);
+    if (isNaN(d.getTime())) return '';
+    const p = n => String(n).padStart(2, '0');
+    return `${d.getFullYear()}/${p(d.getMonth() + 1)}/${p(d.getDate())}`;
 }
 
 function _download(f) {
@@ -558,6 +631,14 @@ function _injectStyle() {
 .pm-row { display:flex; gap:8px; align-items:center; }
 .pm-hint { font-size:12px; color:#8a8a8a; margin-top:6px; }
 .pm-warn { background:#3a2c14; border:1px solid #b45309; color:#fbbf24; border-radius:6px; padding:8px 12px; font-size:12px; margin-bottom:10px; }
+.pm-toggle { display:inline-flex; align-items:center; gap:6px; font-size:12px; color:#c0c0c0; cursor:pointer; margin-bottom:8px; user-select:none; }
+.pm-toggle input { accent-color:#3b82f6; cursor:pointer; margin:0; }
+.pm-off-hint { background:#3a2c14; border:1px solid #b45309; color:#fbbf24; border-radius:6px; padding:6px 10px; font-size:12px; margin-bottom:8px; }
+#pm-share-blk.pm-share-off { opacity:.4; }
+.pm-qr-row { display:flex; align-items:center; gap:12px; margin-top:10px; }
+.pm-qr { width:160px; height:160px; background:#fff; padding:8px; border-radius:8px; display:block; }
+.pm-group-hd { grid-column:1 / -1; font-size:12px; color:#8a8a8a; margin-top:10px; letter-spacing:.05em; }
+.pm-group-hd:first-child { margin-top:0; }
 .pm-chips { display:flex; flex-wrap:wrap; gap:6px; min-height:26px; align-items:center; }
 .pm-chip { display:inline-flex; align-items:center; gap:6px; background:#333; border:1px solid #4a4a4a; color:#d0d0d0; border-radius:999px; padding:3px 6px 3px 10px; font-size:12px; }
 .pm-chip button { background:none; border:0; color:#9ca3af; cursor:pointer; font-size:11px; line-height:1; padding:2px 4px; border-radius:50%; }

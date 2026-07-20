@@ -42,6 +42,13 @@ MEDIA_LOG_SCOPE = "media_log"  # 效期用 _mint_token_generic 預設（core.crm
 # settings.json 無 media_log.categories 時的預設分類（單一常數 — 前後端契約）
 DEFAULT_MEDIA_LOG_CATEGORIES = ["場勘照", "現場花絮", "劇照", "幕後", "其他"]
 
+# settings.json 無 media_log.root 時的預設原檔資料夾（owner 指定 NAS 路徑，2026-07-20）。
+# 搆不到（權限/斷線）時 root_set=False，前後台照常提示、不擋其他功能。
+DEFAULT_MEDIA_LOG_ROOT = r"\\192.168.1.132\Archive\10_工作側拍"
+
+# 上傳通知 digest：最後一次上傳後安靜 N 秒才發（拍攝中連傳不轟炸群組）
+_NOTIFY_QUIET_SEC = 600
+
 _IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".webp", ".heic", ".gif",
                ".cr2", ".cr3", ".nef", ".arw", ".dng"}
 _VIDEO_EXTS = {".mp4", ".mov", ".m4v", ".avi", ".mts"}
@@ -109,9 +116,9 @@ def _dedup_filename(filename: str, exists: Callable[[str], bool],
 
 def _media_log_conf() -> tuple:
     """settings.json 的 media_log 區 → (root, categories)。
-    categories 空/未設 → DEFAULT_MEDIA_LOG_CATEGORIES。"""
+    root 空/未設 → DEFAULT_MEDIA_LOG_ROOT；categories 空/未設 → 預設分類。"""
     conf = load_settings().get("media_log") or {}
-    root = str(conf.get("root") or "").strip()
+    root = str(conf.get("root") or "").strip() or DEFAULT_MEDIA_LOG_ROOT
     cats = _norm_categories(conf.get("categories")) or list(DEFAULT_MEDIA_LOG_CATEGORIES)
     return root, cats
 
@@ -120,9 +127,33 @@ def _root_set(root: str) -> bool:
     return bool(root and os.path.isdir(root))
 
 
-def _project_folder(root: str, project_name: str, project_id: str) -> str:
-    """該專案的原檔子資料夾：{root}/{sanitize(專案名)}_{project_id[:8]}"""
-    return os.path.join(root, f"{_sanitize_folder_name(project_name)}_{project_id[:8]}")
+def _make_folder_name(project_name: str, created: datetime,
+                      taken: Optional[set] = None) -> str:
+    """子資料夾名：{建立日期 YYYYMMDD}_{sanitize(專案名)}（owner 指定命名）。
+    同日同名專案撞名 → 尾綴 -2、-3…（taken = 既有 folder_name 集合）。純函式可測。"""
+    base = f"{created.strftime('%Y%m%d')}_{_sanitize_folder_name(project_name)}"
+    name, i = base, 2
+    while name in (taken or set()):
+        name = f"{base}-{i}"
+        i += 1
+    return name
+
+
+async def _ensure_folder_name(session, row, project_name: str) -> str:
+    """取得/首次生成該專案的子資料夾名並固定存 DB（之後上傳都進同一夾，
+    不會因日期變動而分家）。不 commit，caller 統一 commit。"""
+    if row.folder_name:
+        return row.folder_name
+    taken = set((await session.execute(
+        select(ProjectMediaLog.folder_name)
+        .where(ProjectMediaLog.folder_name.isnot(None))
+    )).scalars())
+    row.folder_name = _make_folder_name(project_name, datetime.now(), taken)
+    return row.folder_name
+
+
+def _project_folder(root: str, folder_name: str) -> str:
+    return os.path.join(root, folder_name)
 
 
 def _thumb_dir_path(project_id: str) -> str:
@@ -179,6 +210,43 @@ async def _verify_media_log_token(session, token: str):
     return await _verify_token_generic(session, token, MEDIA_LOG_SCOPE,
                                        ProjectMediaLog, "enabled",
                                        require_editable=True)
+
+
+# ── 上傳通知 digest（最後一傳後安靜 10 分鐘才發一則彙總）─────
+
+_notify_state: dict = {}   # project_id -> {"count", "uploaders", "name", "task"}
+
+
+def _schedule_upload_notify(project_id: str, project_name: str, uploader: str) -> None:
+    """記一筆＋重置安靜計時器。單機記憶體即可（master 單行程；掉了頂多少一則通知）。"""
+    st = _notify_state.setdefault(
+        project_id, {"count": 0, "uploaders": set(), "name": project_name, "task": None})
+    st["count"] += 1
+    st["name"] = project_name
+    if uploader:
+        st["uploaders"].add(uploader)
+    if st["task"] and not st["task"].done():
+        st["task"].cancel()
+    st["task"] = asyncio.create_task(_notify_after_quiet(project_id))
+
+
+async def _notify_after_quiet(project_id: str) -> None:
+    try:
+        await asyncio.sleep(_NOTIFY_QUIET_SEC)
+    except asyncio.CancelledError:
+        return
+    st = _notify_state.pop(project_id, None)
+    if not st or not st["count"]:
+        return
+    try:
+        from notifier import notify_tab_async
+        await notify_tab_async(
+            "media_log_upload",
+            project_name=st["name"],
+            file_count=st["count"],
+            uploaders="、".join(sorted(st["uploaders"])) or "未具名")
+    except Exception:
+        pass  # 通知失敗不影響收檔
 
 
 # ── serializers / 查詢 ───────────────────────────────────────
@@ -322,8 +390,10 @@ async def get_project_media_log(project_id: str, request: Request):
         if not proj:
             raise HTTPException(status_code=404, detail="找不到專案")
         proj_name = proj.name or ""
-        token, _row = await _mint_media_log_token(
+        token, row = await _mint_media_log_token(
             session, project_id, reuse_existing=True)
+        folder_name = await _ensure_folder_name(session, row, proj_name)
+        enabled = bool(row.enabled)
         await session.commit()
         files = await _list_files(session, project_id)
     # root 可能是 NAS UNC 路徑 — isdir 在斷線時會卡秒級，不佔 event loop
@@ -331,9 +401,10 @@ async def get_project_media_log(project_id: str, request: Request):
     return {
         "token": token,
         "share_url": _share_url(token),
+        "enabled": enabled,
         "root": root,
         "root_set": rs,
-        "project_folder": _project_folder(root, proj_name, project_id) if rs else None,
+        "project_folder": _project_folder(root, folder_name),
         "categories": cats,
         "files": files,
     }
@@ -353,6 +424,52 @@ async def reset_media_log_token(project_id: str, request: Request):
             session, project_id, reuse_existing=False)
         await session.commit()
     return {"token": token, "share_url": _share_url(token)}
+
+
+@router.post("/projects/{project_id}/media-log/enabled")
+async def set_media_log_enabled(project_id: str, request: Request):
+    """公開連結總開關 — enabled=False 時三個 public 端點一律 403
+    （殺青收檔期結束的「關閘」語意；重開即恢復，token 不變）。"""
+    _check_auth(request)
+    _require_db()
+    body = await request.json()
+    enabled = bool(body.get("enabled"))
+    factory = await _get_factory()
+    async with factory() as session:
+        row = await session.get(ProjectMediaLog, project_id)
+        if not row:
+            raise HTTPException(status_code=404, detail="尚未建立影像紀錄（先開一次 tab）")
+        row.enabled = enabled
+        row.updated_at = _now()
+        await session.commit()
+    return {"ok": True, "enabled": enabled}
+
+
+@router.get("/public/media-log/{token}/qr")
+async def media_log_qr(token: str, base: str = ""):
+    """分享連結 QR PNG — 現場立牌/投影掃了就傳。URL 由 token 伺服端組
+    （base 只決定網域），不能拿來產任意內容的 QR。"""
+    _require_db()
+    factory = await _get_factory()
+    async with factory() as session:
+        await _verify_media_log_token(session, token)
+    base = (base or "").strip().rstrip("/")
+    if base and not (base.startswith("http://") or base.startswith("https://")):
+        raise HTTPException(status_code=400, detail="base 需為 http(s) 網址")
+    url = f"{base}{_share_url(token)}"
+
+    def _png() -> bytes:
+        import io as _io
+
+        import qrcode
+        img = qrcode.make(url, box_size=8, border=2)
+        buf = _io.BytesIO()
+        img.save(buf, format="PNG")
+        return buf.getvalue()
+
+    from starlette.responses import Response
+    return Response(await asyncio.to_thread(_png), media_type="image/png",
+                    headers={"Cache-Control": "private, max-age=3600"})
 
 
 @router.post("/projects/{project_id}/media-log/settings")
@@ -378,7 +495,7 @@ async def update_media_log_settings(project_id: str, request: Request):
         settings["media_log"] = conf
         save_settings(settings)
     return {"ok": True,
-            "root": str(conf.get("root") or "").strip(),
+            "root": str(conf.get("root") or "").strip() or DEFAULT_MEDIA_LOG_ROOT,
             "categories": _norm_categories(conf.get("categories"))
                           or list(DEFAULT_MEDIA_LOG_CATEGORIES)}
 
@@ -466,9 +583,11 @@ async def public_media_log_upload(token: str, file: UploadFile = File(...),
         if not proj:
             raise HTTPException(status_code=404, detail="找不到專案")
         proj_name = proj.name or ""
+        folder_name = await _ensure_folder_name(session, row, proj_name)
+        await session.commit()   # folder_name 首次生成要落庫（之後上傳同夾）
     # 原檔寫入（session 已關 — 大檔串流期間不佔 DB 連線）；
     # 目的夾 makedirs + 撞名探測都打 NAS/UNC — 集中一個執行緒跑
-    folder = _project_folder(root, proj_name, project_id)
+    folder = _project_folder(root, folder_name)
 
     def _prepare_dest() -> str:
         os.makedirs(folder, exist_ok=True)
@@ -500,6 +619,8 @@ async def public_media_log_upload(token: str, file: UploadFile = File(...),
         )
         session.add(rec)
         await session.commit()
+        _schedule_upload_notify(project_id, proj_name,
+                                str(uploader_name or "").strip())
         return _to_file_dict(rec)
 
 

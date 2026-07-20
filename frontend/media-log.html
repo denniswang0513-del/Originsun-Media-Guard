@@ -97,7 +97,10 @@ main { max-width: 1100px; margin: 0 auto; padding: 100px 20px 72px; }
 /* ── 分類篩選列 ── */
 .filter-row { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 18px; }
 
-/* ── 縮圖牆 ── */
+/* ── 縮圖牆（依拍攝日分組） ── */
+.wall-day { margin-top: 22px; }
+.wall-day:first-child { margin-top: 0; }
+.wall-day-hd { font-size: 11px; letter-spacing: 0.2em; color: var(--sub); margin-bottom: 10px; }
 .wall { display: grid; grid-template-columns: repeat(2, 1fr); gap: 9px; }
 @media (min-width: 680px)  { .wall { grid-template-columns: repeat(3, 1fr); } }
 @media (min-width: 1000px) { .wall { grid-template-columns: repeat(4, 1fr); } }
@@ -229,8 +232,8 @@ footer .eyebrow { font-size: 10px; }
     <!-- 分類篩選列 -->
     <div class="filter-row" id="filter-row"></div>
 
-    <!-- 縮圖牆 -->
-    <div class="wall" id="wall"></div>
+    <!-- 縮圖牆（依拍攝日分組：#wall 內每日一個 section.wall-day，內含 .wall grid） -->
+    <div id="wall"></div>
     <div class="wall-empty" id="wall-empty" style="display:none;">尚無檔案，歡迎成為第一個上傳的人。</div>
   </div>
 </main>
@@ -387,34 +390,61 @@ function renderFilters() {
     cats.forEach(c => mk(c, c, FILES.filter(f => f.category === c).length));
 }
 
+function dateKey(iso) {   // created_at → 本地日期組鍵 YYYY/MM/DD（無效回 ""）
+    const d = new Date(iso);
+    if (iso == null || isNaN(d.getTime())) return "";
+    return d.getFullYear() + "/" + p2(d.getMonth() + 1) + "/" + p2(d.getDate());
+}
+function mkTile(f, idx) {   // idx = filteredFiles() 扁平索引（lightbox 導覽對回 LB_LIST 用）
+    const tile = document.createElement("figure");
+    tile.className = "tile";
+    if (f.thumb_url) {
+        const img = document.createElement("img");
+        img.loading = "lazy";
+        img.src = f.thumb_url;
+        img.alt = f.filename || "";
+        img.onerror = () => {
+            if (img.parentNode) img.parentNode.replaceChild(mkPh(f, "ph"), img);
+        };
+        tile.appendChild(img);
+    } else {
+        tile.appendChild(mkPh(f, "ph"));
+    }
+    if (f.media_type === "video" && f.duration_sec != null) {
+        const d = document.createElement("span");
+        d.className = "dur";
+        d.textContent = fmtDur(f.duration_sec);
+        tile.appendChild(d);
+    }
+    tile.onclick = () => openLightbox(idx);
+    return tile;
+}
 function renderWall() {
     const list = filteredFiles();
-    const wall = $("wall");
-    wall.textContent = "";
+    const box = $("wall");
+    box.textContent = "";
     $("wall-empty").style.display = list.length ? "none" : "block";
-    list.forEach((f, i) => {
-        const tile = document.createElement("figure");
-        tile.className = "tile";
-        if (f.thumb_url) {
-            const img = document.createElement("img");
-            img.loading = "lazy";
-            img.src = f.thumb_url;
-            img.alt = f.filename || "";
-            img.onerror = () => {
-                if (img.parentNode) img.parentNode.replaceChild(mkPh(f, "ph"), img);
-            };
-            tile.appendChild(img);
-        } else {
-            tile.appendChild(mkPh(f, "ph"));
-        }
-        if (f.media_type === "video" && f.duration_sec != null) {
-            const d = document.createElement("span");
-            d.className = "dur";
-            d.textContent = fmtDur(f.duration_sec);
-            tile.appendChild(d);
-        }
-        tile.onclick = () => openLightbox(i);
-        wall.appendChild(tile);
+    // 依拍攝日分組（清單本身仍是扁平順序；tile onclick 帶全域 idx，LB_LIST 邏輯不變）
+    const groups = [];
+    const byKey = new Map();
+    list.forEach((f, idx) => {
+        const key = dateKey(f.created_at) || "未知日期";
+        let g = byKey.get(key);
+        if (!g) { g = { key: key, items: [] }; byKey.set(key, g); groups.push(g); }
+        g.items.push({ f: f, idx: idx });
+    });
+    groups.forEach((g) => {
+        const sec = document.createElement("section");
+        sec.className = "wall-day";
+        const hd = document.createElement("div");
+        hd.className = "wall-day-hd";
+        hd.textContent = (g.key === "未知日期" ? g.key : g.key.slice(5)) + " · " + g.items.length + " 個檔";
+        sec.appendChild(hd);
+        const grid = document.createElement("div");
+        grid.className = "wall";
+        g.items.forEach((it) => grid.appendChild(mkTile(it.f, it.idx)));
+        sec.appendChild(grid);
+        box.appendChild(sec);
     });
 }
 

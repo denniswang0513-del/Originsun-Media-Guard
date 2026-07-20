@@ -94,3 +94,32 @@ class TestDefaultCategories:
         # 去重去空後不變 — 常數本身必須已是正規形
         assert _norm_categories(DEFAULT_MEDIA_LOG_CATEGORIES) == \
             DEFAULT_MEDIA_LOG_CATEGORIES
+
+
+class TestMakeFolderName:
+    """子資料夾命名：{建立日期}_{專案名}（owner 指定）+ 同日撞名尾綴。"""
+
+    def test_date_prefix_and_name(self):
+        from datetime import datetime
+        from routers.crm.media_log import _make_folder_name
+        n = _make_folder_name("泓電樓梯升降椅 廣告", datetime(2026, 7, 20), set())
+        assert n == "20260720_泓電樓梯升降椅 廣告"
+
+    def test_illegal_chars_cleaned(self):
+        from datetime import datetime
+        from routers.crm.media_log import _make_folder_name
+        n = _make_folder_name('A/B:C*D?', datetime(2026, 1, 2), set())
+        assert n == "20260102_ABCD"
+
+    def test_collision_suffix(self):
+        from datetime import datetime
+        from routers.crm.media_log import _make_folder_name
+        taken = {"20260720_同名專案", "20260720_同名專案-2"}
+        n = _make_folder_name("同名專案", datetime(2026, 7, 20), taken)
+        assert n == "20260720_同名專案-3"
+
+    def test_empty_name_falls_back(self):
+        from datetime import datetime
+        from routers.crm.media_log import _make_folder_name
+        n = _make_folder_name("", datetime(2026, 7, 20), set())
+        assert n == "20260720_project"

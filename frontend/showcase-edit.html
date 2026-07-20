@@ -147,6 +147,17 @@ select.sc-select:focus{outline:none;border-color:var(--accent)}
 .process-item img{width:120px;height:68px;object-fit:cover;border-radius:6px;flex-shrink:0}
 .process-text{flex:1;font-size:13px;color:var(--text2)}
 
+/* ── 從影像紀錄挑選 modal（創作過程用；劇組收檔照片直接挑進官網） ── */
+.sc-mlp-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(120px,1fr));gap:10px;overflow-y:auto;min-height:120px;padding:2px}
+.sc-mlp-item{position:relative;cursor:pointer;border:2px solid transparent;border-radius:6px;overflow:hidden;background:var(--bg3);transition:border-color .15s}
+.sc-mlp-item:hover{border-color:var(--border2)}
+.sc-mlp-item.on{border-color:var(--accent)}
+.sc-mlp-item img{width:100%;aspect-ratio:16/10;object-fit:cover;display:block}
+.sc-mlp-meta{font-size:10px;color:var(--text3);padding:3px 6px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.sc-mlp-check{display:none;position:absolute;top:4px;right:4px;width:18px;height:18px;border-radius:50%;background:var(--accent);color:#fff;font-size:11px;font-weight:700;align-items:center;justify-content:center;line-height:1}
+.sc-mlp-item.on .sc-mlp-check{display:flex}
+@media(max-width:600px){.sc-mlp-grid{grid-template-columns:repeat(auto-fill,minmax(96px,1fr))}}
+
 .footer{text-align:center;padding-top:40px;margin-top:40px;border-top:1px solid var(--border);font-size:11px;letter-spacing:2px;color:var(--text3)}
 
 .toast{position:fixed;bottom:24px;left:50%;transform:translateX(-50%);background:var(--success-bg);color:var(--success);border:1px solid rgba(134,239,172,.4);padding:8px 20px;border-radius:999px;font-size:13px;opacity:0;transition:opacity .3s;pointer-events:none;z-index:100}
@@ -187,6 +198,21 @@ select.sc-select:focus{outline:none;border-color:var(--accent)}
 <!-- 分類小測驗（心理測驗式：答 4 題 → 建議分類/標籤 → 確認套用） -->
 <div id="cat-quiz-modal" class="modal-overlay">
     <div id="cat-quiz-body" style="background:var(--bg2);padding:24px;border-radius:12px;width:520px;max-width:calc(100vw - 32px);border:1px solid var(--border);"></div>
+</div>
+
+<!-- 從影像紀錄挑選（創作過程）— 劇組已收檔的工作照直接挑進官網創作過程，免重新上傳 -->
+<div id="media-log-pick-modal" class="modal-overlay">
+    <div style="background:var(--bg2);padding:24px;border-radius:12px;width:720px;max-width:calc(100vw - 32px);border:1px solid var(--border);display:flex;flex-direction:column;max-height:min(80vh, 640px);">
+        <h3 style="margin:0 0 4px;color:var(--text);font-weight:600;">從影像紀錄挑選</h3>
+        <p style="color:var(--text3);font-size:11px;margin:0 0 14px;">劇組在影像紀錄上傳的照片（僅圖片）</p>
+        <div id="mlp-grid" class="sc-mlp-grid"></div>
+        <div style="display:flex;align-items:center;gap:8px;margin-top:14px;padding-top:14px;border-top:1px solid var(--border);">
+            <span id="mlp-count" style="color:var(--text2);font-size:12px;">已選 0 張</span>
+            <div style="flex:1;"></div>
+            <button id="mlp-cancel" class="btn btn-sm" type="button">取消</button>
+            <button id="mlp-submit" class="btn btn-primary btn-sm" type="button" disabled>加入創作過程</button>
+        </div>
+    </div>
 </div>
 
 <div class="toast" id="toast"></div>
@@ -682,7 +708,7 @@ function _render() {
                 </div>
                 ${EDITABLE ? `<button class="btn btn-danger btn-sm" data-action="del-process" data-idx="${i}">✕</button>` : ''}
             </div>`).join('') : '<p style="color:var(--text3);font-size:13px;">尚無創作過程紀錄</p>'}
-        ${EDITABLE ? '<div style="margin-top:8px;"><input type="file" id="inp-process" accept="image/*" style="display:none"><button class="btn btn-sm" id="btn-add-process">+ 上傳過程圖</button></div>' : ''}
+        ${EDITABLE ? '<div style="margin-top:8px;display:flex;gap:8px;flex-wrap:wrap;"><input type="file" id="inp-process" accept="image/*" style="display:none"><button class="btn btn-sm" id="btn-add-process">+ 上傳過程圖</button><button class="btn btn-sm" id="btn-pick-media-log" type="button">從影像紀錄挑選</button></div>' : ''}
     </div>`;
 
     // ══ Stage 3：作品描述（描述 + AI 協助撰寫 + AI 參考資料 = 一張 sc-ai-card）══
@@ -1321,6 +1347,9 @@ function _bindEvents() {
             try { await _upload('/process', e.target.files[0]); await _reload(); } catch (err) { alert(err.message); }
         }
     });
+
+    // Process：從影像紀錄挑選（劇組已收檔的照片直接轉進創作過程，免重新上傳）
+    document.getElementById('btn-pick-media-log')?.addEventListener('click', () => _mlpOpen());
 
     // Process delete
     document.querySelectorAll('[data-action="del-process"]').forEach(btn => {
@@ -2047,6 +2076,111 @@ async function _reload() {
         if (res.ok) { DATA = await res.json(); _render(); }
     } catch (_) {}
 }
+
+// === 從影像紀錄挑選（創作過程）===
+// 劇組已上傳到「影像紀錄」的工作照 → 結案上架直接挑進官網創作過程，免重新上傳。
+// GET  {API}/media-log-files        → {files:[{id,thumb_url,filename,category,created_at}]}（僅有縮圖的圖片，新→舊）
+// POST {API}/process/from-media-log body {file_ids:[...]}（≤50）
+//      → {status,imported,process_items(全量新清單，直接取代本地清單重繪)}；404=沒有可轉檔案、502=原檔讀取失敗
+const _MLP_MAX = 50;
+let _mlpSelected = new Set();   // 選取中的 file id（字串型；送出時數字字串轉回 number）
+
+function _mlpFmtDate(iso) {
+    const d = new Date(iso || '');
+    if (isNaN(d.getTime())) return '';
+    return String(d.getMonth() + 1).padStart(2, '0') + '/' + String(d.getDate()).padStart(2, '0');
+}
+
+function _mlpUpdateFooter() {
+    const cnt = document.getElementById('mlp-count');
+    const btn = document.getElementById('mlp-submit');
+    if (cnt) cnt.textContent = `已選 ${_mlpSelected.size} 張`;
+    if (btn) btn.disabled = _mlpSelected.size === 0;
+}
+
+async function _mlpOpen() {
+    const m = document.getElementById('media-log-pick-modal');
+    const grid = document.getElementById('mlp-grid');
+    _mlpSelected = new Set();
+    const sb = document.getElementById('mlp-submit');
+    if (sb) sb.textContent = '加入創作過程';
+    _mlpUpdateFooter();
+    grid.innerHTML = '<div style="grid-column:1/-1;text-align:center;color:var(--text3);font-size:13px;padding:40px 0;">載入中…</div>';
+    if (EMBED) {
+        // embed 的 iframe 高度=內容高度，置中會跑到父視窗看不到的地方 → 貼著按鈕出現（同分類小測驗）
+        const r = document.getElementById('btn-pick-media-log')?.getBoundingClientRect();
+        m.style.alignItems = 'flex-start';
+        m.style.paddingTop = Math.max(16, (r ? r.top : 120) - 60) + 'px';
+    }
+    m.classList.add('show');
+    // 每次開啟都重新 fetch — 收檔是進行式，清單要拿最新的
+    try {
+        const res = await fetch(API + '/media-log-files');
+        if (!res.ok) { const e = await res.json().catch(() => ({})); throw new Error(e.detail || '載入失敗'); }
+        const files = (await res.json()).files || [];
+        if (!files.length) {
+            grid.innerHTML = '<div style="grid-column:1/-1;text-align:center;color:var(--text3);font-size:13px;padding:40px 0;">影像紀錄還沒有圖片 — 到專案的影像紀錄 tab 或公開連結先收檔</div>';
+            return;
+        }
+        grid.innerHTML = files.map(f => `
+            <div class="sc-mlp-item" data-id="${_esc(String(f.id))}" title="${_esc(f.filename || '')}">
+                <span class="sc-mlp-check">✓</span>
+                <img src="${_esc(f.thumb_url)}" alt="" loading="lazy">
+                <div class="sc-mlp-meta">${_esc(f.category || '未分類')} · ${_mlpFmtDate(f.created_at)}</div>
+            </div>`).join('');
+        grid.querySelectorAll('.sc-mlp-item').forEach(el => {
+            el.addEventListener('click', () => {
+                const id = el.dataset.id;
+                if (_mlpSelected.has(id)) { _mlpSelected.delete(id); el.classList.remove('on'); }
+                else {
+                    if (_mlpSelected.size >= _MLP_MAX) { _toast(`一次最多 ${_MLP_MAX} 張`); return; }
+                    _mlpSelected.add(id); el.classList.add('on');
+                }
+                _mlpUpdateFooter();
+            });
+        });
+    } catch (e) {
+        grid.innerHTML = `<div style="grid-column:1/-1;text-align:center;color:var(--danger);font-size:13px;padding:40px 0;">${_esc(e.message)}</div>`;
+    }
+}
+
+function _mlpClose() { document.getElementById('media-log-pick-modal').classList.remove('show'); }
+
+async function _mlpSubmit() {
+    if (!_mlpSelected.size) return;
+    const btn = document.getElementById('mlp-submit');
+    const n = _mlpSelected.size;
+    btn.disabled = true;
+    btn.textContent = '加入中…';
+    try {
+        const res = await fetch(API + '/process/from-media-log', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ file_ids: [..._mlpSelected].map(x => (/^\d+$/.test(x) ? Number(x) : x)) }),
+        });
+        if (!res.ok) { const e = await res.json().catch(() => ({})); throw new Error(e.detail || '加入失敗'); }
+        const data = await res.json();
+        _mlpClose();
+        // 契約：回應帶全量新 process_items → 直接取代本地清單重繪（同既有上傳後刷新效果）
+        if (DATA && Array.isArray(data.process_items)) { DATA.process_items = data.process_items; _render(); }
+        else await _reload();
+        _toast(`已加入 ${data.imported != null ? data.imported : n} 張`);
+    } catch (e) {
+        alert(e.message);
+        btn.disabled = false;
+    } finally {
+        btn.textContent = '加入創作過程';
+    }
+}
+
+// 靜態 modal 只綁一次（modal 節點在 body、不隨 _render 重建）：取消/送出/點背景/Esc
+document.getElementById('mlp-cancel').addEventListener('click', _mlpClose);
+document.getElementById('mlp-submit').addEventListener('click', _mlpSubmit);
+document.getElementById('media-log-pick-modal').addEventListener('click', (e) => {
+    if (e.target === e.currentTarget) _mlpClose();
+});
+document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && document.getElementById('media-log-pick-modal').classList.contains('show')) _mlpClose();
+});
 
 _load();
 </script>

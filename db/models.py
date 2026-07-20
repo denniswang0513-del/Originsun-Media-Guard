@@ -1251,6 +1251,7 @@ class ProjectMediaLog(Base):
     id = Column(String(64), primary_key=True)                    # = project_id
     edit_token = Column(String(512), nullable=True)
     enabled = Column(Boolean, default=True)                      # False = 公開連結整條停用（403）
+    folder_name = Column(String(255), nullable=True)             # 原檔子資料夾名（首次生成後固定：{建立日期}_{專案名}）
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 

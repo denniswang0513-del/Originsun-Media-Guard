@@ -462,6 +462,8 @@ async def _on_startup():
                         # N-hr H2 出缺勤 + 工時 staff_id 對映（hr_leave_requests 新表由 create_all 建）
                         ("crm_staff", "annual_leave_days", "INTEGER"),
                         ("timesheets", "staff_id", "VARCHAR(32)"),
+                        # 影像紀錄：子資料夾名（首次生成後固定，見 media_log._ensure_folder_name）
+                        ("project_media_log", "folder_name", "VARCHAR(255)"),
                     ]
                     for tbl, col, coltype in _crm_cols:
                         try:

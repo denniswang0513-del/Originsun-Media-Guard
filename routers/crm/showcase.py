@@ -29,7 +29,7 @@ from ._shared import (router, _check_auth, _check_website_auth, _require_db,
 try:
     from ._shared import (select, or_, delete,
                           Client, CrmProject, CrmStaff, CrmProjectStaff,
-                          CrmProjectShowcase)
+                          CrmProjectShowcase, ProjectMediaFile)
 except ImportError:  # DB 套件不存在的 agent 環境 — 行為同原檔 try/except
     pass
 
@@ -1314,6 +1314,86 @@ async def upload_showcase_edit_process(token: str, file: UploadFile = File(...),
         await session.commit()
         await session.refresh(sc)
     return {"status": "ok", "process_items": sc.process_items or []}
+
+
+# ── 創作過程 ←→ 影像紀錄（結案挑圖：素材已在系統，免重新上傳）──
+
+@router.get("/public/showcase-edit/{token}/media-log-files")
+async def showcase_edit_media_log_files(token: str):
+    """該作品所屬專案的影像紀錄圖片清單（挑圖 picker 資料源）。
+    只回 PIL 開得動的（thumb_url 非空）— RAW 無縮圖者轉不進創作過程。"""
+    _require_db()
+    factory = await _get_factory()
+    async with factory() as session:
+        sc = await _verify_showcase_edit_token(session, token, require_editable=True)
+        pid = sc.project_id or sc.id
+        rows = (await session.execute(
+            select(ProjectMediaFile)
+            .where(ProjectMediaFile.project_id == pid,
+                   ProjectMediaFile.media_type == "image",
+                   ProjectMediaFile.thumb_url != "")
+            .order_by(ProjectMediaFile.created_at.desc())
+        )).scalars().all()
+    return {"files": [{
+        "id": f.id, "thumb_url": f.thumb_url, "filename": f.filename or "",
+        "category": f.category or "",
+        "created_at": f.created_at.isoformat() if f.created_at else None,
+    } for f in rows]}
+
+
+@router.post("/public/showcase-edit/{token}/process/from-media-log")
+async def showcase_edit_process_from_media_log(token: str, request: Request):
+    """把選取的影像紀錄檔轉進創作過程（原檔重轉 WebP 進 showcase 資料夾 —
+    與 upload_showcase_edit_process 同管線，之後刪影像紀錄檔也不影響官網）。"""
+    _require_db()
+    body = await request.json()
+    file_ids = [str(x) for x in (body.get("file_ids") or []) if x][:50]
+    if not file_ids:
+        raise HTTPException(status_code=400, detail="沒有選取檔案")
+    factory = await _get_factory()
+    async with factory() as session:
+        sc = await _verify_showcase_edit_token(session, token, require_editable=True)
+        project_id = sc.id
+        pid = sc.project_id or sc.id
+        rows = (await session.execute(
+            select(ProjectMediaFile)
+            .where(ProjectMediaFile.id.in_(file_ids),
+                   ProjectMediaFile.project_id == pid,
+                   ProjectMediaFile.media_type == "image")
+        )).scalars().all()
+    if not rows:
+        raise HTTPException(status_code=404, detail="找不到選取的檔案")
+    sdir = _showcase_dir(project_id)
+
+    import asyncio as _asyncio
+    new_items = []
+    for f in rows:
+        try:
+            def _read(p=f.stored_path):
+                with open(p, "rb") as fh:
+                    return fh.read()
+            content = await _asyncio.to_thread(_read)
+            saved = await _asyncio.to_thread(
+                _save_image_as_webp, content, sdir, f"process_{uuid.uuid4().hex}")
+            if not saved.endswith(".webp"):
+                continue
+            url = f"/uploads/projects/{project_id}/showcase/{os.path.basename(saved)}"
+            new_items.append({"type": "image", "url": url, "caption": "",
+                              "phase": "", "video_url": ""})
+        except OSError:
+            continue  # 原檔已被搬走/NAS 斷線 — 跳過該張不擋整批
+    if not new_items:
+        raise HTTPException(status_code=502, detail="原檔讀取失敗（可能已移除或 NAS 離線）")
+    async with factory() as session:
+        sc = await session.get(CrmProjectShowcase, project_id)
+        items = list(sc.process_items or [])
+        items.extend(new_items)
+        sc.process_items = items
+        sc.updated_at = _now()
+        await session.commit()
+        await session.refresh(sc)
+    return {"status": "ok", "imported": len(new_items),
+            "process_items": sc.process_items or []}
 
 
 # ── Site API (for future website) ──────────────────────────
