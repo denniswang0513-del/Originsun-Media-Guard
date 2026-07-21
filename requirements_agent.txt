@@ -35,3 +35,6 @@ httpx==0.28.1
 # 缺套件時 QR 端點回 503、HEIC 僅無縮圖，皆不擋主流程
 qrcode==8.2
 pillow-heif==1.4.0
+
+# ── Auto-detected by publish ──
+pillow_heif
