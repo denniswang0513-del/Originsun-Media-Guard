@@ -104,6 +104,50 @@ async def save_settings_api(req: Request):
     except Exception as e:
         return JSONResponse(status_code=500, content={"status": "error", "message": str(e)})
 
+
+# ── 磁碟代號 ↔ UNC 對應（core/drive_map；備份進件翻譯用）──────
+
+@router.get("/api/v1/drive_map")
+async def get_drive_map():
+    """有效對應（程式預設 + settings 覆寫）+ 預設表（前端標示哪些被改過）。"""
+    from core.drive_map import DEFAULT_DRIVE_MAP, effective_map
+    return {"map": effective_map(), "defaults": DEFAULT_DRIVE_MAP}
+
+
+@router.post("/api/v1/drive_map")
+async def save_drive_map(req: Request):
+    """存完整期望表 {字母: UNC}。與程式預設的差異存進 settings.json 的
+    drive_map（預設有但期望表沒有的字母 → 存空字串墓碑 = 停用），
+    使有效對應恆等於期望表。"""
+    from core.drive_map import DEFAULT_DRIVE_MAP
+    body = await req.json()
+    desired = body.get("drive_map")
+    if not isinstance(desired, dict):
+        return JSONResponse(status_code=400, content={"detail": "drive_map 需為 {字母: UNC} 物件"})
+    clean: dict = {}
+    for k, v in desired.items():
+        letter = str(k).strip().rstrip(":").upper()
+        unc = str(v or "").strip().rstrip("\\/")
+        if not (len(letter) == 1 and letter.isalpha()):
+            return JSONResponse(status_code=400, content={"detail": f"磁碟代號需為單一英文字母：{k!r}"})
+        if not unc.startswith("\\\\"):
+            return JSONResponse(status_code=400, content={"detail": f"{letter}: 的對應需為 \\\\ 開頭的 UNC 路徑"})
+        clean[letter] = unc
+    # save_settings 是深度合併（merge-on-save）— 單純寫新表清不掉舊 override 的字母。
+    # 墓碑要涵蓋「程式預設 ∪ 既有 override」中所有不在期望表的字母，有效表才恆等於期望表。
+    current = load_settings().get("drive_map") or {}
+    known = set(DEFAULT_DRIVE_MAP)
+    for k in current:
+        letter = str(k).strip().rstrip(":").upper()
+        if len(letter) == 1 and letter.isalpha():
+            known.add(letter)
+    override = dict(clean)
+    for letter in known:
+        if letter not in clean:
+            override[letter] = ""   # 墓碑：停用該字母
+    save_settings({"drive_map": override})
+    return {"status": "success", "map": clean}
+
 @router.get("/api/v1/settings")
 async def get_settings_compat():
     s = load_settings()
