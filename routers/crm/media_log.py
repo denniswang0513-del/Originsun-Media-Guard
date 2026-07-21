@@ -457,6 +457,11 @@ async def media_log_qr(token: str, base: str = ""):
     if base and not (base.startswith("http://") or base.startswith("https://")):
         raise HTTPException(status_code=400, detail="base 需為 http(s) 網址")
     url = f"{base}{_share_url(token)}"
+    try:
+        import qrcode  # noqa: F401  僅探測 — 缺套件的 agent 給明確 503 而非 500
+    except ImportError:
+        raise HTTPException(status_code=503,
+                            detail="此主機未安裝 qrcode 套件（連結仍可複製使用）")
 
     def _png() -> bytes:
         import io as _io
