@@ -123,3 +123,34 @@ class TestMakeFolderName:
         from routers.crm.media_log import _make_folder_name
         n = _make_folder_name("", datetime(2026, 7, 20), set())
         assert n == "20260720_project"
+
+
+class TestFindMissing:
+    """資料夾→DB 同步的安全判定：只有「資料夾在、檔案不在」才算真被刪。"""
+
+    def test_file_deleted_detected(self):
+        from routers.crm.media_log import _find_missing
+        out = _find_missing([("a", r"X:\f\1.jpg"), ("b", r"X:\f\2.jpg")],
+                            isdir=lambda d: True,
+                            isfile=lambda p: p.endswith("2.jpg"))
+        assert out == ["a"]
+
+    def test_folder_unreachable_skips_all(self):
+        # NAS 斷線 → isdir False → 整批跳過，絕不誤刪
+        from routers.crm.media_log import _find_missing
+        out = _find_missing([("a", r"X:\f\1.jpg"), ("b", r"X:\f\2.jpg")],
+                            isdir=lambda d: False,
+                            isfile=lambda p: False)
+        assert out == []
+
+    def test_mixed_folders_independent(self):
+        from routers.crm.media_log import _find_missing
+        out = _find_missing(
+            [("a", r"X:\ok\1.jpg"), ("b", r"X:\dead\2.jpg")],
+            isdir=lambda d: d.endswith("ok"),
+            isfile=lambda p: False)
+        assert out == ["a"]   # dead 資料夾搆不到 → b 不動
+
+    def test_empty_path_ignored(self):
+        from routers.crm.media_log import _find_missing
+        assert _find_missing([("a", "")], isdir=lambda d: True, isfile=lambda p: False) == []

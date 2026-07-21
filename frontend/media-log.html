@@ -151,12 +151,17 @@ main { max-width: 1100px; margin: 0 auto; padding: 100px 20px 72px; }
     display: flex; align-items: center; justify-content: space-between; gap: 14px; flex-wrap: wrap;
 }
 #lb-meta { font-size: 12px; color: rgba(255,255,255,0.75); line-height: 1.7; min-width: 0; overflow-wrap: break-word; letter-spacing: 0.03em; }
-#lb-dl {
+#lb-dl, #lb-del {
     display: inline-block; border: 1px solid rgba(255,255,255,0.35); border-radius: 2px;
     padding: 7px 16px; font-size: 11px; letter-spacing: 0.25em; text-transform: uppercase;
     color: rgba(255,255,255,0.85); transition: all .15s; white-space: nowrap;
+    background: none; cursor: pointer; font-family: inherit;
 }
 #lb-dl:hover { border-color: #fff; color: #fff; }
+#lb-del { border-color: rgba(255,120,110,0.45); color: rgba(255,150,140,0.9); }
+#lb-del:hover { border-color: #ff9a8f; color: #ffb3aa; }
+#lb-del:disabled { opacity: 0.4; cursor: default; }
+.lb-actions { display: flex; gap: 8px; }
 
 footer { max-width: 1100px; margin: 0 auto; padding: 0 20px 40px; }
 footer .eyebrow { font-size: 10px; }
@@ -250,7 +255,10 @@ footer .eyebrow { font-size: 10px; }
   </div>
   <div id="lb-info">
     <div id="lb-meta"></div>
-    <a id="lb-dl" href="#" download>下載原檔</a>
+    <div class="lb-actions">
+      <a id="lb-dl" href="#" download>下載原檔</a>
+      <button id="lb-del" type="button">刪除</button>
+    </div>
   </div>
 </div>
 
@@ -523,6 +531,24 @@ function renderLightbox() {
 $("lb-close").onclick = closeLightbox;
 $("lb-prev").onclick = (e) => { e.stopPropagation(); lbNav(-1); };
 $("lb-next").onclick = (e) => { e.stopPropagation(); lbNav(1); };
+$("lb-del").onclick = async (e) => {
+    e.stopPropagation();
+    const f = LB_LIST[LB_INDEX];
+    if (!f) return;
+    if (!confirm("刪除「" + (f.filename || "") + "」？\n原檔會移到資料夾內的 _trash 備份夾（可救回）。")) return;
+    const btn = $("lb-del");
+    btn.disabled = true;
+    try {
+        const r = await fetch(fileUrl(f), { method: "DELETE" });
+        if (!r.ok) { alert("刪除失敗（HTTP " + r.status + "）"); return; }
+        closeLightbox();
+        await loadData(true);   // 重抓清單 → 牆與計數同步
+    } catch (err) {
+        alert("刪除失敗：" + err.message);
+    } finally {
+        btn.disabled = false;
+    }
+};
 $("lb").addEventListener("click", (e) => {
     if (e.target === $("lb") || e.target === $("lb-stage") || e.target === $("lb-media")) closeLightbox();
 });

@@ -274,6 +274,74 @@ async def _list_files(session, project_id: str) -> list:
     return [_to_file_dict(f) for f in rows]
 
 
+# ── 資料夾 → DB 同步（owner 直接在資料夾刪原檔 → 牆上同步消失）──
+
+def _find_missing(entries: list, isdir: Callable[[str], bool],
+                  isfile: Callable[[str], bool]) -> list:
+    """entries=[(file_id, stored_path)] → 原檔已不存在的 file_id 清單。
+
+    🔴 安全鐵則：所屬資料夾本身搆不到（NAS 斷線/未掛）→ 該資料夾整批跳過，
+    絕不因連線問題誤刪記錄；只有「資料夾在、檔案不在」才視為真被刪。
+    純函式（isdir/isfile 注入），單元測試對象。"""
+    folder_ok: dict = {}
+    missing = []
+    for file_id, sp in entries:
+        if not sp:
+            continue
+        folder = os.path.dirname(sp)
+        if folder not in folder_ok:
+            folder_ok[folder] = isdir(folder)
+        if folder_ok[folder] and not isfile(sp):
+            missing.append(file_id)
+    return missing
+
+
+_reconcile_last: dict = {}          # project_id -> monotonic 時間戳（public 端限流）
+_RECONCILE_COOLDOWN_SEC = 30
+
+
+async def _reconcile_files(factory, project_id: str, *, throttled: bool = False) -> int:
+    """比對 DB 記錄與磁碟原檔，移除已被刪的（含縮圖）。回傳移除數。
+    throttled=True（public 端每次 GET 都打）→ 每專案最多 30 秒一次，
+    admin 端不限流（開 tab 就看到最新真相）。"""
+    import time
+    if throttled:
+        now = time.monotonic()
+        if now - _reconcile_last.get(project_id, 0.0) < _RECONCILE_COOLDOWN_SEC:
+            return 0
+        _reconcile_last[project_id] = now
+    async with factory() as session:
+        rows = (await session.execute(
+            select(ProjectMediaFile.id, ProjectMediaFile.stored_path)
+            .where(ProjectMediaFile.project_id == project_id)
+        )).all()
+    entries = [(r[0], r[1] or "") for r in rows]
+    if not entries:
+        return 0
+    missing = await asyncio.to_thread(
+        _find_missing, entries, os.path.isdir, os.path.isfile)
+    if not missing:
+        return 0
+    async with factory() as session:
+        for fid in missing:
+            rec = await session.get(ProjectMediaFile, fid)
+            if rec:
+                await session.delete(rec)
+        await session.commit()
+
+    def _rm_thumbs():
+        for fid in missing:
+            t = _thumb_path(project_id, fid)
+            try:
+                if os.path.isfile(t):
+                    os.remove(t)
+            except OSError:
+                pass
+
+    await asyncio.to_thread(_rm_thumbs)
+    return len(missing)
+
+
 # ── 上傳管線（串流寫檔 + 縮圖）───────────────────────────────
 
 async def _stream_to_disk(file: UploadFile, dest_path: str) -> int:
@@ -395,6 +463,9 @@ async def get_project_media_log(project_id: str, request: Request):
         folder_name = await _ensure_folder_name(session, row, proj_name)
         enabled = bool(row.enabled)
         await session.commit()
+    # 資料夾→DB 同步（admin 端不限流 — 開 tab 就看到最新真相）
+    await _reconcile_files(factory, project_id)
+    async with factory() as session:
         files = await _list_files(session, project_id)
     # root 可能是 NAS UNC 路徑 — isdir 在斷線時會卡秒級，不佔 event loop
     rs = await asyncio.to_thread(_root_set, root)
@@ -505,21 +576,14 @@ async def update_media_log_settings(project_id: str, request: Request):
                           or list(DEFAULT_MEDIA_LOG_CATEGORIES)}
 
 
-@router.delete("/media-log/files/{file_id}")
-async def delete_media_log_file(file_id: str, request: Request):
-    """刪除影像紀錄檔案 — 原檔搬進同專案資料夾 _trash/ 子夾（不硬刪，
-    誤刪可救；原檔已不在磁碟不報錯）、縮圖檔刪除、DB row 刪。"""
-    _check_auth(request)
-    _require_db()
-    factory = await _get_factory()
-    async with factory() as session:
-        rec = await session.get(ProjectMediaFile, file_id)
-        if not rec:
-            raise HTTPException(status_code=404, detail="找不到檔案")
-        stored_path = rec.stored_path or ""
-        project_id = rec.project_id
-        await session.delete(rec)
-        await session.commit()
+async def _delete_file_record(session, rec) -> None:
+    """刪一筆檔案：row 刪 + 原檔搬 _trash/（軟刪可救）+ 縮圖刪。
+    admin 端點與 public 端點共用；caller 已驗過權限/歸屬。"""
+    stored_path = rec.stored_path or ""
+    project_id = rec.project_id
+    file_id = rec.id
+    await session.delete(rec)
+    await session.commit()
 
     def _dispose():
         # 原檔在 NAS/UNC 上 — 所有 stat/搬移集中一個執行緒跑，不佔 event loop
@@ -541,6 +605,19 @@ async def delete_media_log_file(file_id: str, request: Request):
                 pass
 
     await asyncio.to_thread(_dispose)
+
+
+@router.delete("/media-log/files/{file_id}")
+async def delete_media_log_file(file_id: str, request: Request):
+    """刪除影像紀錄檔案（admin）— 軟刪語意見 _delete_file_record。"""
+    _check_auth(request)
+    _require_db()
+    factory = await _get_factory()
+    async with factory() as session:
+        rec = await session.get(ProjectMediaFile, file_id)
+        if not rec:
+            raise HTTPException(status_code=404, detail="找不到檔案")
+        await _delete_file_record(session, rec)
     return {"ok": True}
 
 
@@ -554,9 +631,13 @@ async def public_media_log_view(token: str):
     factory = await _get_factory()
     async with factory() as session:
         row = await _verify_media_log_token(session, token)
-        proj = await session.get(CrmProject, row.id)
+        pid = row.id
+        proj = await session.get(CrmProject, pid)
         project_name = (proj.name or "") if proj else ""
-        files = await _list_files(session, row.id)
+    # 資料夾→DB 同步（public 端每次 GET 都打 → 每專案 30 秒限流一次）
+    await _reconcile_files(factory, pid, throttled=True)
+    async with factory() as session:
+        files = await _list_files(session, pid)
     return {
         "project_name": project_name,
         "categories": cats,
@@ -645,3 +726,18 @@ async def public_media_log_file(token: str, file_id: str):
         raise HTTPException(status_code=404, detail="檔案已不存在")
     from starlette.responses import FileResponse
     return FileResponse(stored_path, filename=filename)
+
+
+@router.delete("/public/media-log/{token}/file/{file_id}")
+async def public_media_log_delete(token: str, file_id: str):
+    """公開頁刪除（token 授權；file_id 不屬於該專案 → 404）。
+    軟刪：原檔搬 _trash/ 可救回 — 免登入連結誤刪的保險。"""
+    _require_db()
+    factory = await _get_factory()
+    async with factory() as session:
+        row = await _verify_media_log_token(session, token)
+        rec = await session.get(ProjectMediaFile, file_id)
+        if not rec or rec.project_id != row.id:
+            raise HTTPException(status_code=404, detail="找不到檔案")
+        await _delete_file_record(session, rec)
+    return {"ok": True}
