@@ -80,7 +80,10 @@ async def list_bookmarks():
             if factory:
                 from db.repos import bookmarks_repo
                 async with factory() as session:
-                    return await bookmarks_repo.list_all(session, machine_id=_get_machine_id())
+                    # 2026-07-21 起不按機器過濾：書籤以 UNC 路徑為主（磁碟代號在
+                    # 各機不一致正是它要解的問題），DB 又是全機隊共用 → 全域可見。
+                    # machine_id 仍照存（create 時），僅供來源追溯。
+                    return await bookmarks_repo.list_all(session, machine_id=None)
         except Exception:
             pass
 

@@ -27,6 +27,20 @@
             </div>
         </div>
         <div>
+            <label class="block text-sm font-medium text-gray-400 mb-1">路徑書籤 (Path Bookmarks)</label>
+            <div class="flex gap-2 items-center">
+                <select id="bk_bookmark_sel"
+                    class="flex-1 bg-[#1e1e1e] border border-[#444] rounded px-2 py-2 text-sm focus:outline-none focus:border-blue-500" data-no-search>
+                    <option value="">選擇書籤帶入路徑與設定...</option>
+                </select>
+                <button onclick="bkSaveBookmark()" title="把目前的三個路徑區與執行設定存成書籤（建議填 UNC 路徑，全部機器通用）"
+                    class="bg-[#333] hover:bg-[#444] text-gray-300 border border-[#555] rounded px-3 py-2 text-xs transition whitespace-nowrap">儲存目前設定</button>
+                <button onclick="bkDeleteBookmark()" title="刪除選中的書籤"
+                    class="bg-[#333] hover:bg-[#3a2222] text-gray-400 hover:text-red-300 border border-[#555] rounded px-2 py-2 text-xs transition">刪除</button>
+            </div>
+            <div class="text-[11px] text-gray-500 mt-1">書籤存於中央資料庫，全部機器共用 — 建議用 <span class="text-gray-400">\\192.168.1.132\...</span> UNC 路徑，不受各機磁碟代號影響</div>
+        </div>
+        <div>
             <label class="block text-sm font-medium text-gray-400 mb-1">專案素材區 (Local Root)</label>
             <div class="flex gap-2">
                 <input type="text" id="local_root"

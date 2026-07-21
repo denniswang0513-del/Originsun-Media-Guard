@@ -219,6 +219,121 @@ export async function submitJob() {
     }
 }
 
+// ── 路徑書籤（2026-07-21 復活）───────────────────────────────
+// 動機：磁碟代號（T:/S:/V:）在各機器不一定有對映，任務在哪台跑就用哪台的
+// 磁碟 → 換機器就炸（煥民新村備份 6 連敗實案）。書籤存 UNC 路徑組 +
+// 執行設定，進中央 DB 全機隊共用，選了就帶入。
+// 不含：來源卡匣（每日不同）、專案名稱（setTodayName 管）。
+
+let _bookmarks = [];
+
+async function loadBookmarks() {
+    try {
+        const res = await fetch(getComputeBaseUrl() + '/api/v1/bookmarks');
+        if (!res.ok) return;
+        const data = await res.json();
+        _bookmarks = (Array.isArray(data) ? data : []).filter(b => b.task_type === 'backup');
+        const sel = document.getElementById('bk_bookmark_sel');
+        if (!sel) return;
+        const prev = sel.value;
+        sel.innerHTML = '<option value="">選擇書籤帶入路徑與設定...</option>'
+            + _bookmarks.map(b => `<option value="${b.id}">${(b.name || b.id).replace(/</g, '&lt;')}</option>`).join('');
+        if (prev && _bookmarks.some(b => b.id === prev)) sel.value = prev;
+    } catch { /* 離線/舊 agent 無此端點 — 書籤列靜默留空 */ }
+}
+
+function bkApplyBookmark(id) {
+    const bm = _bookmarks.find(b => b.id === id);
+    if (!bm || !bm.request) return;
+    const r = bm.request;
+    const setVal = (elId, v) => { const el = document.getElementById(elId); if (el && v != null) el.value = v; };
+    const setChk = (elId, v) => { const el = document.getElementById(elId); if (el && v != null) el.checked = !!v; };
+    setVal('local_root', r.local_root);
+    setVal('nas_root', r.nas_root);
+    setVal('proxy_root', r.proxy_root);
+    setChk('chk_hash', r.do_hash);
+    setChk('chk_transcode', r.do_transcode);
+    setChk('chk_concat', r.do_concat);
+    setChk('chk_report', r.do_report);
+    setVal('bk_cc_res', r.concat_resolution);
+    setVal('bk_cc_codec', r.concat_codec);
+    setChk('bk_cc_burn_tc', r.concat_burn_tc);
+    setChk('bk_cc_burn_fn', r.concat_burn_fn);
+    setVal('bk_rpt_name', r.report_name);
+    setVal('bk_rpt_output', r.report_output);
+    setChk('bk_rpt_filmstrip', r.report_filmstrip);
+    setChk('bk_rpt_techspec', r.report_techspec);
+    setChk('bk_rpt_hash', r.report_hash);
+    // 勾選狀態變了 → 同步面板顯示與主機選擇器
+    toggleConcatOptions();
+    toggleReportOptions();
+    window.renderHostSelector?.();
+    appendLog(`已套用路徑書籤「${bm.name}」`, 'system');
+}
+
+async function bkSaveBookmark() {
+    const name = prompt('書籤名稱（例：煥民新村、標準專案路徑）：',
+        document.getElementById('proj_name')?.value.trim() || '');
+    if (!name || !name.trim()) return;
+    // 不經 collectBackupPayload（它要求至少一張卡）— 書籤只存路徑與設定
+    const request = {
+        project_name: '',
+        cards: [],
+        local_root: document.getElementById('local_root').value.trim(),
+        nas_root: document.getElementById('nas_root').value.trim(),
+        proxy_root: document.getElementById('proxy_root').value.trim(),
+        do_hash: document.getElementById('chk_hash').checked,
+        do_transcode: document.getElementById('chk_transcode').checked,
+        do_concat: document.getElementById('chk_concat').checked,
+        do_report: document.getElementById('chk_report')?.checked ?? false,
+        concat_resolution: document.getElementById('bk_cc_res')?.value || '720P',
+        concat_codec: document.getElementById('bk_cc_codec')?.value || 'H.264 (NVENC)',
+        concat_burn_tc: document.getElementById('bk_cc_burn_tc')?.checked ?? true,
+        concat_burn_fn: document.getElementById('bk_cc_burn_fn')?.checked ?? false,
+        report_name: document.getElementById('bk_rpt_name')?.value.trim() || '',
+        report_output: document.getElementById('bk_rpt_output')?.value.trim() || '',
+        report_filmstrip: document.getElementById('bk_rpt_filmstrip')?.checked ?? true,
+        report_techspec: document.getElementById('bk_rpt_techspec')?.checked ?? true,
+        report_hash: document.getElementById('bk_rpt_hash')?.checked ?? false,
+    };
+    try {
+        const res = await fetch(getComputeBaseUrl() + '/api/v1/bookmarks', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ name: name.trim(), task_type: 'backup', request }),
+        });
+        if (!res.ok) {
+            const e = await res.json().catch(() => ({}));
+            alert('儲存失敗：' + (e.detail || res.status));
+            return;
+        }
+        const saved = await res.json();
+        await loadBookmarks();
+        const sel = document.getElementById('bk_bookmark_sel');
+        if (sel && saved.id) sel.value = saved.id;
+        appendLog(`路徑書籤「${name.trim()}」已儲存（全機隊共用）`, 'system');
+    } catch (err) {
+        alert('儲存失敗：' + err.message);
+    }
+}
+
+async function bkDeleteBookmark() {
+    const sel = document.getElementById('bk_bookmark_sel');
+    const id = sel?.value;
+    if (!id) { alert('請先在下拉選單選擇要刪除的書籤'); return; }
+    const bm = _bookmarks.find(b => b.id === id);
+    if (!confirm(`刪除書籤「${bm?.name || id}」？（全部機器都會看不到）`)) return;
+    try {
+        const res = await fetch(getComputeBaseUrl() + `/api/v1/bookmarks/${id}`, { method: 'DELETE' });
+        if (!res.ok) { alert('刪除失敗：' + res.status); return; }
+        await loadBookmarks();
+        sel.value = '';
+        appendLog('書籤已刪除', 'system');
+    } catch (err) {
+        alert('刪除失敗：' + err.message);
+    }
+}
+
 function toggleConcatOptions() {
     const panel = document.getElementById('concat_options_panel');
     const checked = document.getElementById('chk_concat')?.checked;
@@ -247,6 +362,12 @@ export function initBackupTab() {
     // Sync initial visibility of concat/report options panels
     toggleConcatOptions();
     toggleReportOptions();
+
+    // 路徑書籤：載入清單 + 選了即套用
+    loadBookmarks();
+    document.getElementById('bk_bookmark_sel')?.addEventListener('change', e => {
+        if (e.target.value) bkApplyBookmark(e.target.value);
+    });
 }
 
 
@@ -256,3 +377,5 @@ window.setTodayName = setTodayName;
 window.submitJob = submitJob;
 window.toggleConcatOptions = toggleConcatOptions;
 window.toggleReportOptions = toggleReportOptions;
+window.bkSaveBookmark = bkSaveBookmark;
+window.bkDeleteBookmark = bkDeleteBookmark;

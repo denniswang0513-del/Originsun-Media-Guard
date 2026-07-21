@@ -1043,3 +1043,16 @@ class LoanPayPayload(BaseModel):
     """貸款繳款：自動建收支明細（expense=本+息、category=貸款繳款）。"""
     bank_account_id: Optional[str] = None  # 空 → 用貸款預設扣款帳戶
     paid_date: Optional[str] = None        # 'YYYY-MM-DD'，空 → 今天
+
+
+# ── 書籤（任務路徑預設；2026-07-21 復活 — 前端存 UNC 路徑組，全機隊共用）──
+
+class BookmarkCreateRequest(BaseModel):
+    name: str
+    task_type: str = "backup"
+    request: dict = {}
+
+
+class BookmarkUpdateRequest(BaseModel):
+    name: Optional[str] = None
+    request: Optional[dict] = None
