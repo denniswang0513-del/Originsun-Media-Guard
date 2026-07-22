@@ -334,73 +334,8 @@ async function bkDeleteBookmark() {
     }
 }
 
-// ── 磁碟對應設定（磁碟代號 ↔ UNC；送出任務時後端自動翻譯）────
+// 磁碟對應設定已移至右上角使用者選單（js/shared/drive-map-modal.js，全軟體層級）
 
-function _dmRowHtml(letter = '', unc = '') {
-    const esc = s => String(s ?? '').replace(/</g, '&lt;').replace(/"/g, '&quot;');
-    return `
-        <div class="flex gap-2 items-center dm-row">
-            <input type="text" maxlength="1" value="${esc(letter)}" placeholder="T"
-                class="dm-letter w-12 text-center bg-[#1e1e1e] border border-[#555] rounded px-2 py-1.5 text-sm uppercase focus:border-blue-500">
-            <span class="text-gray-500 text-sm">:\\</span>
-            <span class="text-gray-500">=</span>
-            <input type="text" value="${esc(unc)}" placeholder="\\\\192.168.1.132\\ShareName"
-                class="dm-unc flex-1 bg-[#1e1e1e] border border-[#555] rounded px-2 py-1.5 text-sm focus:border-blue-500">
-            <button type="button" class="dm-del text-red-400 hover:text-red-300 font-bold px-2">X</button>
-        </div>`;
-}
-
-async function bkOpenDriveMap() {
-    const modal = document.getElementById('bk_drivemap_modal');
-    const rows = document.getElementById('bk_drivemap_rows');
-    rows.innerHTML = '<div class="text-xs text-gray-500">載入中...</div>';
-    modal.classList.remove('hidden');
-    try {
-        const res = await fetch(getComputeBaseUrl() + '/api/v1/drive_map');
-        const data = await res.json();
-        const map = data.map || {};
-        const letters = Object.keys(map).sort();
-        rows.innerHTML = letters.map(l => _dmRowHtml(l, map[l])).join('')
-            || '<div class="dm-empty text-xs text-gray-500">尚無對應 — 按「+ 新增對應」</div>';
-    } catch (err) {
-        rows.innerHTML = `<div class="text-xs text-red-400">載入失敗：${err.message}</div>`;
-    }
-}
-
-function bkCloseDriveMap() {
-    document.getElementById('bk_drivemap_modal').classList.add('hidden');
-}
-
-function bkDriveMapAddRow() {
-    const rows = document.getElementById('bk_drivemap_rows');
-    rows.querySelector('.dm-empty')?.remove();   // 只清空狀態提示，不動既有列
-    rows.insertAdjacentHTML('beforeend', _dmRowHtml());
-}
-
-async function bkSaveDriveMap() {
-    const map = {};
-    for (const row of document.querySelectorAll('#bk_drivemap_rows .dm-row')) {
-        const letter = row.querySelector('.dm-letter').value.trim().toUpperCase();
-        const unc = row.querySelector('.dm-unc').value.trim();
-        if (!letter && !unc) continue;   // 空列忽略
-        if (!/^[A-Z]$/.test(letter)) { alert(`磁碟代號需為單一英文字母：「${letter}」`); return; }
-        if (!unc.startsWith('\\\\')) { alert(`${letter}: 的對應需為 \\\\ 開頭的 UNC 路徑`); return; }
-        map[letter] = unc;
-    }
-    try {
-        const res = await fetch(getComputeBaseUrl() + '/api/v1/drive_map', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ drive_map: map }),
-        });
-        const data = await res.json().catch(() => ({}));
-        if (!res.ok) { alert('儲存失敗：' + (data.detail || res.status)); return; }
-        bkCloseDriveMap();
-        appendLog(`磁碟對應已更新（${Object.keys(map).length} 組）`, 'system');
-    } catch (err) {
-        alert('儲存失敗：' + err.message);
-    }
-}
 
 function toggleConcatOptions() {
     const panel = document.getElementById('concat_options_panel');
@@ -437,13 +372,6 @@ export function initBackupTab() {
         if (e.target.value) bkApplyBookmark(e.target.value);
     });
 
-    // 磁碟對應 modal：刪列（事件委派）+ 點背景關閉
-    document.getElementById('bk_drivemap_rows')?.addEventListener('click', e => {
-        if (e.target.classList.contains('dm-del')) e.target.closest('.dm-row')?.remove();
-    });
-    document.getElementById('bk_drivemap_modal')?.addEventListener('click', e => {
-        if (e.target === e.currentTarget) bkCloseDriveMap();
-    });
 }
 
 
@@ -455,7 +383,3 @@ window.toggleConcatOptions = toggleConcatOptions;
 window.toggleReportOptions = toggleReportOptions;
 window.bkSaveBookmark = bkSaveBookmark;
 window.bkDeleteBookmark = bkDeleteBookmark;
-window.bkOpenDriveMap = bkOpenDriveMap;
-window.bkCloseDriveMap = bkCloseDriveMap;
-window.bkDriveMapAddRow = bkDriveMapAddRow;
-window.bkSaveDriveMap = bkSaveDriveMap;

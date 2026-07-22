@@ -152,6 +152,7 @@ window._authToggle = function() {
         if (window._accessLevel >= 3) {
             html += _sep;
             html += _item('👥', '使用者管理', "window._openUserMgmt();document.getElementById('auth-dropdown')?.remove()");
+            html += _item('⇄', '磁碟對應', "window._openDriveMap();document.getElementById('auth-dropdown')?.remove()");
             html += _item('🚀', '版本發布', "window._openPublishMgmt();document.getElementById('auth-dropdown')?.remove()");
         }
 

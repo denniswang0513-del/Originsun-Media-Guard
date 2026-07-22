@@ -116,9 +116,10 @@ async def get_drive_map():
 
 @router.post("/api/v1/drive_map")
 async def save_drive_map(req: Request):
-    """存完整期望表 {字母: UNC}。與程式預設的差異存進 settings.json 的
-    drive_map（預設有但期望表沒有的字母 → 存空字串墓碑 = 停用），
-    使有效對應恆等於期望表。"""
+    """存完整期望表 {字母: UNC}（admin — 全軟體層級設定，入口在右上角選單）。
+    與程式預設的差異存進 settings.json 的 drive_map（預設有但期望表沒有的
+    字母 → 存空字串墓碑 = 停用），使有效對應恆等於期望表。"""
+    _check_admin(req)
     from core.drive_map import DEFAULT_DRIVE_MAP
     body = await req.json()
     desired = body.get("drive_map")

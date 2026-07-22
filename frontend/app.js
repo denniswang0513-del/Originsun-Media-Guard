@@ -14,6 +14,7 @@ import './js/update/version-check.js';
 import './js/update/update-modal.js';
 import './js/settings/settings-modal.js';
 import './js/shared/nas-browser.js';
+import './js/shared/drive-map-modal.js';
 import { initSelectAutoUpgrade } from './js/shared/select-upgrade.js';
 
 // ─── Fallback for appendLog function ─── //

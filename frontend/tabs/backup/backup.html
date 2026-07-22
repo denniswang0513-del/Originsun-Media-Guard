@@ -37,10 +37,8 @@
                     class="bg-[#333] hover:bg-[#444] text-gray-300 border border-[#555] rounded px-3 py-2 text-xs transition whitespace-nowrap">儲存目前設定</button>
                 <button onclick="bkDeleteBookmark()" title="刪除選中的書籤"
                     class="bg-[#333] hover:bg-[#3a2222] text-gray-400 hover:text-red-300 border border-[#555] rounded px-2 py-2 text-xs transition">刪除</button>
-                <button onclick="bkOpenDriveMap()" title="設定磁碟代號與 UNC 的對應（送出任務時自動把 T:\ 等翻成 UNC）"
-                    class="bg-[#333] hover:bg-[#444] text-gray-300 border border-[#555] rounded px-3 py-2 text-xs transition whitespace-nowrap">磁碟對應</button>
             </div>
-            <div class="text-[11px] text-gray-500 mt-1">書籤全機器共用；路徑照常打 <span class="text-gray-400">T:\</span> 也可以 — 送出時系統會依「磁碟對應」自動翻成 UNC，不受各機磁碟代號影響</div>
+            <div class="text-[11px] text-gray-500 mt-1">書籤全機器共用；路徑照常打 <span class="text-gray-400">T:\</span> 也可以 — 送出時系統會自動翻成 UNC，不受各機磁碟代號影響（對應表在右上角選單「磁碟對應」）</div>
         </div>
         <div>
             <label class="block text-sm font-medium text-gray-400 mb-1">專案素材區 (Local Root)</label>
@@ -243,28 +241,5 @@
         <div id="bk-remote-host-rows" class="flex flex-col gap-2"></div>
     </div>
 
-    <!-- 磁碟代號 ↔ UNC 對應設定 modal -->
-    <div id="bk_drivemap_modal" class="hidden fixed inset-0 z-[90]" style="background:rgba(0,0,0,.65);">
-        <div class="max-w-2xl mx-auto mt-[8vh] bg-[#222] border border-[#444] rounded-lg p-5 shadow-2xl">
-            <div class="flex justify-between items-center mb-1">
-                <h3 class="text-sm font-semibold text-gray-200">磁碟對應設定</h3>
-                <button onclick="bkCloseDriveMap()" class="text-gray-500 hover:text-gray-200 px-2">✕</button>
-            </div>
-            <div class="text-[11px] text-gray-500 mb-3 leading-relaxed">
-                送出備份任務時，路徑開頭的磁碟代號會依此表自動翻成 UNC（例：T:\ → \\192.168.1.132\Project_Longterm\）。
-                不在表內的字母（本機碟、讀卡槽）不受影響。預設對應隨版本統一下發；此處修改儲存於本機。
-            </div>
-            <div id="bk_drivemap_rows" class="flex flex-col gap-2 max-h-[46vh] overflow-y-auto pr-1"></div>
-            <div class="flex justify-between items-center mt-4">
-                <button onclick="bkDriveMapAddRow()"
-                    class="bg-[#333] hover:bg-[#444] text-gray-300 border border-[#555] rounded px-3 py-1.5 text-xs transition">+ 新增對應</button>
-                <div class="flex gap-2">
-                    <button onclick="bkCloseDriveMap()"
-                        class="bg-transparent text-gray-400 border border-[#555] rounded px-4 py-1.5 text-xs transition hover:text-gray-200">取消</button>
-                    <button onclick="bkSaveDriveMap()"
-                        class="bg-blue-600 hover:bg-blue-500 text-white rounded px-4 py-1.5 text-xs transition">儲存</button>
-                </div>
-            </div>
-        </div>
-    </div>
+    <!-- 磁碟對應設定已移至右上角使用者選單（js/shared/drive-map-modal.js，全軟體層級） -->
 </div>
