@@ -63,6 +63,7 @@ class GoogleLoginRequest(BaseModel):
 class RegisterRequest(BaseModel):
     username: str
     password: str
+    email: str           # 確認信收件信箱（必填）
     tax_id: str          # 驗證題 1：公司統編
     company_name: str    # 驗證題 2：公司名稱（前端四選一）
 
@@ -76,9 +77,10 @@ _REGISTER_TAX_ID = "90371657"
 _REGISTER_COMPANY = "源日影像"
 # 選擇題選項（正解 + 干擾項）— 回給前端渲染，順序由前端洗牌
 _REGISTER_COMPANY_CHOICES = ["源日影像", "日源映畫", "源源製作", "日日有限公司"]
-# 新帳號預設權限：個人工作台五鍵（僅個人範疇，不含任何公司資料 tab）；
-# 之後由管理員在「使用者管理」視需要加開
-_REGISTER_DEFAULT_MODULES = ['me_projects', 'me_profile', 'me_todos', 'me_finance', 'me_leave']
+# 新帳號預設權限：只開「編修個人基本資料」（owner 2026-07-22 修正 — 其餘功能
+# 由管理員在「使用者管理」開通）。⚠ 不能給空 modules：shouldShowTab 對
+# 「已登入 + 空 modules」= 顯示全部 tab（tab-config.js 的向下相容行為）。
+_REGISTER_DEFAULT_MODULES = ['me_profile']
 # 防暴力：同 IP 連錯 N 次驗證題 → 鎖 M 秒（單機記憶體即可）
 _REGISTER_MAX_FAILS = 5
 _REGISTER_LOCK_SEC = 600
@@ -384,6 +386,9 @@ async def register(req: RegisterRequest, request: Request):
         raise HTTPException(status_code=400, detail="帳號需 2-32 字元且不含空白")
     if len(req.password or "") < 6:
         raise HTTPException(status_code=400, detail="密碼至少 6 個字元")
+    email = (req.email or "").strip()
+    if not re.match(r"^[^@\s]+@[^@\s]+\.[^@\s]+$", email) or len(email) > 128:
+        raise HTTPException(status_code=400, detail="請填寫有效的電子信箱")
     if await _find_user(username):
         raise HTTPException(status_code=409, detail=f"帳號「{username}」已存在，請改用其他名稱或直接登入")
 
@@ -391,12 +396,21 @@ async def register(req: RegisterRequest, request: Request):
     user_data = {
         'username': username,
         'password_hash': hash_password(req.password),
+        'email': email,
         'role_name': 'user',
         'access_level': 1,
         'modules': modules,
         'first_login': False,
     }
     await _persist_user(user_data)
+
+    email_sent = await _send_register_email(email, username)
+    try:
+        from notifier import notify_tab_async
+        await notify_tab_async("user_registered", username=username, email=email)
+    except Exception:
+        pass  # 團隊通知失敗不影響註冊
+
     token = create_token({
         'sub': username, 'role_name': 'user',
         'access_level': 1, 'modules': modules,
@@ -404,7 +418,39 @@ async def register(req: RegisterRequest, request: Request):
     return {
         'token': token, 'username': username, 'role_name': 'user',
         'access_level': 1, 'modules': modules, 'first_login': False,
+        'email_sent': email_sent,
     }
+
+
+async def _send_register_email(to_email: str, username: str) -> bool:
+    """註冊確認信（best-effort — SMTP 設定在 website_settings，只有 master 有；
+    設定不全或寄失敗回 False，不影響註冊本身）。"""
+    try:
+        from db.session import get_session_factory
+        from services.website.notify_service import _smtp_send
+        from services.website.settings_service import get_all_settings
+        factory = get_session_factory()
+        if factory is None:
+            return False
+        async with factory() as session:
+            settings = await get_all_settings(session)
+        if not ((settings.get("notify.smtp_user") or "").strip()
+                and (settings.get("notify.smtp_password") or "").strip()):
+            return False   # SMTP 未設定 — 誠實回報未寄出
+        body = (
+            f"{username} 您好：\n\n"
+            f"您的源日影像員工帳號已完成公司驗證並建立成功。\n\n"
+            f"目前帳號已開通「個人基本資料」編修功能；其他功能（專案、工時、請假等）\n"
+            f"將由管理員依您的職務開通，開通後重新登入即可使用。\n\n"
+            f"個人工作台：https://www.originsun-studio.com/my.html\n\n"
+            f"— 源日影像 Originsun Studio（此信由系統自動寄出，請勿直接回覆）"
+        )
+        import asyncio
+        await asyncio.to_thread(_smtp_send, settings, [to_email],
+                                "源日影像 — 員工帳號註冊確認", body)
+        return True
+    except Exception:
+        return False
 
 
 @router.get("/me")

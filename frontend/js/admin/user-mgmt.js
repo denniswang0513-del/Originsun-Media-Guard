@@ -5,7 +5,7 @@ import { groupModules, ALL_MODULES } from '../shared/tab-config.js';
 
 // key 集合必須 == core/auth.py ALL_MODULES == tab-config.js PERMISSION_GROUPS
 // （tests/unit/test_rbac_module_sync.py 三方同步測試把關，漏 key 會 fail）
-const MODULE_LABELS = {bulletin:'公布欄',preprod_plan:'拍攝企劃',preprod_locations:'場景庫',preprod_proposals:'提案庫',intel:'產業情報',equipment:'器材庫',backup:'備份',verify:'比對',transcode:'轉檔',concat:'串帶',report:'報表',transcribe:'逐字稿',tts:'語音',footage:'素材庫',drone_meta:'空拍寫入',projects:'專案',crm_clients:'客戶',crm_projects:'專案管理',crm_quotes:'報價',crm_staff:'人力',crm_invoices:'財務管理',timesheets:'工時檢核',portal:'審批門戶',website_admin:'官網',me_projects:'我的專案',me_profile:'我的資料',me_todos:'我的待辦',me_finance:'我的工時請款',hr_leave:'出缺勤',me_leave:'我的請假'};
+const MODULE_LABELS = {bulletin:'公布欄',preprod_plan:'拍攝企劃',preprod_locations:'場景庫',preprod_proposals:'提案庫',intel:'產業情報',equipment:'器材庫',backup:'備份',verify:'比對',transcode:'轉檔',concat:'串帶',report:'報表',transcribe:'逐字稿',tts:'語音',footage:'素材庫',drone_meta:'空拍寫入',projects:'專案',crm_clients:'客戶',crm_projects:'專案管理',crm_quotes:'報價',crm_staff:'人力',crm_invoices:'財務管理',timesheets:'工時檢核',portal:'審批門戶',website_admin:'官網',me_projects:'我的專案',me_profile:'我的資料',me_todos:'我的待辦',me_finance:'我的工時請款',hr_leave:'請補修',me_leave:'我的請假'};
 
 // The 4-group structure is identical for every user (it's all modules grouped),
 // so compute it once rather than per user row / per modal open.

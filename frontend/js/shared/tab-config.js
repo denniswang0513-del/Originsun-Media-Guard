@@ -94,12 +94,12 @@ export const TAB_GROUPS = [
         { key: 'crm_quotes',   label: '💰 報價管理' },
         { key: 'portal',       label: '🎬 審批門戶' },
     ] },
-    // 人事管理（2026-07 N-hr）：員工檔案/工時自業務管理搬入 + 新出缺勤。
+    // 人事管理（2026-07 N-hr）：員工檔案/工時自業務管理搬入 + 請補修（原名出缺勤）。
     // 設計鐵則（owner 2026-07-17）：emoji 只在頂層 tab 標籤，items 一律純文字。
     { id: 'hr',         label: '👔 人事管理', items: [
         { key: 'crm_staff',    label: '員工檔案' },
         { key: 'timesheets',   label: '專案工時' },
-        { key: 'hr_leave',     label: '出缺勤' },
+        { key: 'hr_leave',     label: '請補修' },
     ] },
     // 財務管理（2026-07 起）：帳務六視圖自業務管理搬入；沿用 crm_invoices 單一
     // module key（零 RBAC 遷移，既有授權者自動看得到）。內部子視圖自管左側欄。

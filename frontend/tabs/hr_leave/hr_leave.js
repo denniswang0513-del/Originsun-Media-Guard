@@ -1,4 +1,4 @@
-// hr_leave.js — 人事管理 › 出缺勤（N-hr H2 極簡請假）
+// hr_leave.js — 人事管理 › 請補修（N-hr H2 極簡請假；2026-07-22 自「出缺勤」改名）
 // 三塊：待核佇列 / 請假紀錄（篩選+代登） / 特休額度。UI 無 emoji（owner 鐵則）。
 // API: /api/v1/hr/leave*（管理端）；員工自助在 /my.html 走 /api/v1/me/leave。
 
@@ -30,7 +30,7 @@ async function _load() {
         hfetch('/api/v1/hr/leave/quota?year=' + _filters.year),
     ]);
     if (!lr.ok || !qr.ok) {
-        el('hl-content').innerHTML = `<div class="hl-empty">載入失敗（${lr.status}/${qr.status}）— 需要「出缺勤」權限</div>`;
+        el('hl-content').innerHTML = `<div class="hl-empty">載入失敗（${lr.status}/${qr.status}）— 需要「請補修」權限</div>`;
         return;
     }
     _items = (await lr.json()).items || [];
@@ -72,7 +72,7 @@ function _render() {
     const pending = _items.filter(i => i.status === '待審');
     const years = [0, -1].map(d => new Date().getFullYear() + d);
     el('hl-content').innerHTML = `
-        <h2>出缺勤</h2>
+        <h2>請補修</h2>
         <div class="hl-sub">極簡請假：員工從個人工作台送單、這裡簽核。額度即時計算（特休），不做打卡。</div>
 
         <div class="hl-card">

@@ -142,12 +142,7 @@ footer .eyebrow { font-size: 10px; }
 <header>
   <div class="header-inner">
     <a class="brand" href="https://www.originsun-studio.com/" title="回官網">
-      <svg width="30" height="30" viewBox="0 0 36 36" fill="none" aria-hidden="true">
-        <circle cx="18" cy="15" r="8" fill="#c9372c"/>
-        <line x1="6" y1="24" x2="30" y2="24" stroke="#c9372c" stroke-width="1.5"/>
-        <line x1="8" y1="27" x2="28" y2="27" stroke="#c9372c" stroke-width="1.5" opacity="0.7"/>
-        <line x1="10" y1="30" x2="26" y2="30" stroke="#c9372c" stroke-width="1.5" opacity="0.4"/>
-      </svg>
+      <img src="/img/originsun-logo.webp" alt="源日影像" style="height:34px;width:auto;display:block;">
       <span class="brand-name">個人工作台 <span class="accent">WORKSPACE</span></span>
     </a>
     <div class="header-right">
@@ -183,9 +178,10 @@ footer .eyebrow { font-size: 10px; }
     <div class="login-card">
       <div class="eyebrow">Originsun · Register</div>
       <h1>註冊帳號</h1>
-      <div class="sub">回答兩個公司驗證問題即可建立帳號；帳號預設開通個人工作台功能。</div>
+      <div class="sub">回答兩個公司驗證問題即可建立帳號；確認信會寄到你的信箱。帳號先開通個人基本資料編修，其他功能由管理員開通。</div>
       <form onsubmit="doRegister(event)">
         <div class="field"><label>帳號 Account</label><input id="rg-user" autocomplete="username"></div>
+        <div class="field"><label>電子信箱 Email</label><input id="rg-email" type="email" autocomplete="email" placeholder="name@example.com"></div>
         <div class="field"><label>密碼 Password</label><input id="rg-pwd" type="password" autocomplete="new-password"></div>
         <div class="field"><label>確認密碼 Confirm</label><input id="rg-pwd2" type="password" autocomplete="new-password"></div>
         <div class="field"><label>驗證一：公司統編</label><input id="rg-taxid" inputmode="numeric" placeholder="8 位數字"></div>
@@ -316,6 +312,7 @@ async function doRegister(ev) {
             body: JSON.stringify({
                 username: $("rg-user").value.trim(),
                 password: pwd,
+                email: $("rg-email").value.trim(),
                 tax_id: $("rg-taxid").value.trim(),
                 company_name: picked.value,
             }),
@@ -324,6 +321,13 @@ async function doRegister(ev) {
         if (!r.ok) { _rgErr(d.detail || "註冊失敗"); return; }
         $("register-view").style.display = "none";
         onLoginOk(d);   // 註冊即登入，直接進工作台
+        // 確認信狀態提示（工作台頂部通知列）
+        setTimeout(() => {
+            const n = $("ws-notice");
+            if (n) n.innerHTML = '<div style="border:1px solid var(--line);padding:12px 16px;font-size:13px;color:var(--sub);margin-bottom:18px;">'
+                + (d.email_sent ? "確認信已寄至你的信箱。" : "帳號已建立（確認信寄送未完成，不影響使用）。")
+                + "其他功能將由管理員開通後生效。</div>";
+        }, 800);
     } catch (_) { _rgErr("連線失敗，請稍後再試"); }
 }
 
