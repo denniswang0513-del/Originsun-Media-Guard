@@ -1582,12 +1582,23 @@ if (typeof appendLog === 'undefined') {
                 return;
             }
 
+            // ── 磁碟代號 → UNC 映射表（提前載入：主機驗證與來源掃描都要用）──
+            // 2026-07-21 煥民新村教訓：掃描來源用 T:\ 原樣丟給本機 agent，
+            // 該機沒掛 T: → 0 個檔 → 分派整包取消。所有派發相關路徑一律先轉 UNC。
+            await window.ensureDriveMap();
+            const _toUnc = window.toUncPath || (x => x);
+            window._toUnc = _toUnc; // 保留給補轉邏輯的向後相容
+            const mapCount = Object.keys(window._driveMap || {}).length;
+            if (mapCount > 0 && typeof appendLog === 'function') {
+                appendLog('[UNC] 已載入 ' + mapCount + ' 個磁碟映射，來源與遠端路徑將自動轉換', 'system');
+            }
+
             // Path-access pre-flight: skip hosts that can't see the source
             // paths (e.g. user pointed at G:\ which only exists on one
             // machine). Keep the rest running — transcode normally uses a
             // NAS-shared path accessible to all, so a partial miss usually
             // means user also ticked a host that doesn't have the mount.
-            const sourceDirsForCheck = (ctx.cards || []).map(c => c[2]).filter(Boolean);
+            const sourceDirsForCheck = (ctx.cards || []).map(c => c[2]).filter(Boolean).map(p => _toUnc(p));
             if (sourceDirsForCheck.length) {
                 const accessible = [];
                 await Promise.all(reachable.map(async h => {
@@ -1632,15 +1643,6 @@ if (typeof appendLog === 'undefined') {
             window._originalDispatchHosts = reachable.map(h => ({ ...h }));
             window._originalSourceDirs = sourceDirsForCheck.slice();
 
-            // ── 取得磁碟代號 → UNC 映射表，讓遠端主機不受磁碟掛載差異影響 ──
-            await window.ensureDriveMap();
-            const _toUnc = window.toUncPath || (x => x);
-            window._toUnc = _toUnc; // 保留給補轉邏輯的向後相容
-            const mapCount = Object.keys(window._driveMap || {}).length;
-            if (mapCount > 0 && typeof appendLog === 'function') {
-                appendLog('[UNC] 已載入 ' + mapCount + ' 個磁碟映射，遠端路徑將自動轉換', 'system');
-            }
-
             // ── 掃描來源：按卡分別掃描，保留卡名 ──────────────────────────────
             // cards: [[cardName, srcPath], ...] 或 scanDir fallback
             const cardEntries = []; // [{ cardName, files: [] }]
@@ -1651,7 +1653,7 @@ if (typeof appendLog === 'undefined') {
                     // Bypass localRoot fallback — sources are already absolute
                     for (const card of cards) {
                         const cardName = card[0];
-                        const absoluteSrcPath = card[2];
+                        const absoluteSrcPath = _toUnc(card[2]);   // 磁碟代號→UNC（本機碟原樣通過）
                         if (!absoluteSrcPath) continue;
                         try {
                             const r = await fetch(getComputeBaseUrl() + '/api/v1/list_dir', {
@@ -1673,7 +1675,8 @@ if (typeof appendLog === 'undefined') {
                     }
                 } else {
                     // 有記憶卡資訊：按卡掃 (Main Flow - requires backup structure mapping)
-                    const localRoot = ctx.local_root || (document.getElementById('local_root') || {}).value || '';
+                    // localRoot 先轉 UNC — 表單常填 T:\ 等網路磁碟代號，本機 agent 不一定有掛
+                    const localRoot = _toUnc(ctx.local_root || (document.getElementById('local_root') || {}).value || '');
                     for (const [cardName] of cards) {
                         const cardDir = localRoot ? localRoot + '/' + ctx.project_name + '/' + cardName : '';
                         if (!cardDir) continue;
@@ -1697,8 +1700,8 @@ if (typeof appendLog === 'undefined') {
                     }
                 }
             } else {
-                // Fallback：掃 project 目錄，card 名稱設為空
-                const localRoot = ctx.local_root || (document.getElementById('local_root') || {}).value || '';
+                // Fallback：掃 project 目錄，card 名稱設為空（localRoot 同樣先轉 UNC）
+                const localRoot = _toUnc(ctx.local_root || (document.getElementById('local_root') || {}).value || '');
                 const projDir = localRoot ? localRoot + '/' + ctx.project_name : '';
                 if (projDir) {
                     try {
