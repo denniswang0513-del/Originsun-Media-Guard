@@ -1585,6 +1585,9 @@ if (typeof appendLog === 'undefined') {
             // ── 磁碟代號 → UNC 映射表（提前載入：主機驗證與來源掃描都要用）──
             // 2026-07-21 煥民新村教訓：掃描來源用 T:\ 原樣丟給本機 agent，
             // 該機沒掛 T: → 0 個檔 → 分派整包取消。所有派發相關路徑一律先轉 UNC。
+            // ⚠ 後端 enqueue/list_dir/validate_paths 現已同樣翻譯（core/drive_map）—
+            // 前端這層是機隊 rollout 過渡的 belt-and-braces，機隊全數 ≥ 2.4.10 後
+            // 可整批退場改以後端為唯一權威（勿只刪一半）。
             await window.ensureDriveMap();
             const _toUnc = window.toUncPath || (x => x);
             window._toUnc = _toUnc; // 保留給補轉邏輯的向後相容
@@ -1647,6 +1650,8 @@ if (typeof appendLog === 'undefined') {
             // cards: [[cardName, srcPath], ...] 或 scanDir fallback
             const cardEntries = []; // [{ cardName, files: [] }]
             const cards = ctx.cards || [];
+            // localRoot 先轉 UNC — 表單常填 T:\ 等網路磁碟代號，本機 agent 不一定有掛
+            const localRoot = _toUnc(ctx.local_root || (document.getElementById('local_root') || {}).value || '');
 
             if (cards.length > 0) {
                 if (ctx.use_absolute_paths) {
@@ -1675,8 +1680,6 @@ if (typeof appendLog === 'undefined') {
                     }
                 } else {
                     // 有記憶卡資訊：按卡掃 (Main Flow - requires backup structure mapping)
-                    // localRoot 先轉 UNC — 表單常填 T:\ 等網路磁碟代號，本機 agent 不一定有掛
-                    const localRoot = _toUnc(ctx.local_root || (document.getElementById('local_root') || {}).value || '');
                     for (const [cardName] of cards) {
                         const cardDir = localRoot ? localRoot + '/' + ctx.project_name + '/' + cardName : '';
                         if (!cardDir) continue;
@@ -1700,8 +1703,7 @@ if (typeof appendLog === 'undefined') {
                     }
                 }
             } else {
-                // Fallback：掃 project 目錄，card 名稱設為空（localRoot 同樣先轉 UNC）
-                const localRoot = _toUnc(ctx.local_root || (document.getElementById('local_root') || {}).value || '');
+                // Fallback：掃 project 目錄，card 名稱設為空
                 const projDir = localRoot ? localRoot + '/' + ctx.project_name : '';
                 if (projDir) {
                     try {

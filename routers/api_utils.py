@@ -284,12 +284,19 @@ MsgBox "桌面捷徑已成功建立！請查看桌面上的「Originsun Media Gu
 
 @router.post("/api/v1/validate_paths")
 async def validate_paths(req: ValidatePathsRequest):
-    """檢查每個路徑的磁碟機是否存在、路徑本身是否存在（供遠端主機派發前驗證）"""
+    """檢查每個路徑的磁碟機是否存在、路徑本身是否存在（供遠端主機派發前驗證）。
+
+    磁碟代號先過 UNC 翻譯再檢查 — 任務進件（enqueue/同步端點）都會翻譯，
+    pre-flight 不翻的話「驗證」與「執行」判定的是不同路徑（T:\\ 驗 false 但
+    任務實跑 UNC 會成功，反向亦然）。results 鍵保留呼叫端原始路徑。"""
+    from core.drive_map import make_translator
+    tr = make_translator()
     results = {}
     for p in req.paths:
-        drive = os.path.splitdrive(p)[0]  # e.g. "S:"
+        real = tr(p)
+        drive = os.path.splitdrive(real)[0]  # e.g. "S:" 或 UNC 的 \\host\share
         drive_exists = os.path.exists(drive + os.sep) if drive else True
-        path_exists = os.path.exists(p)
+        path_exists = os.path.exists(real)
         results[p] = {
             "drive": drive,
             "drive_exists": drive_exists,
@@ -509,17 +516,11 @@ async def get_drive_map():
 # （master 掛 T:/S:，禮瑜電腦掛 G/H/I/J…），磁碟代號「不能跨機器共用」，但 UNC
 # 全公司通用。有了這張中央表，任何機器都能把別台機器的磁碟代號路徑（如 T:\…）
 # 轉成 UNC → 送到任何 host 都讀得到（修「網路磁碟未掛載」串帶/轉檔失敗）。
-# 覆寫優先序：中央表(base) < settings.json 的 drive_unc_map < 當台實際 net use。
-_STUDIO_DRIVE_MAP: dict = {
-    "N:": r"\\192.168.1.132\Originsun",
-    "P:": r"\\192.168.1.132\00_Inbox",
-    "Q:": r"\\192.168.1.132\PreProduction",
-    "R:": r"\\192.168.1.132\Project_ShortTerm",
-    "S:": r"\\192.168.1.132\Project_Midterm",
-    "T:": r"\\192.168.1.132\Project_Longterm",
-    "U:": r"\\192.168.1.132\ProjectYuan",
-    "V:": r"\\192.168.1.130\storage 01",
-}
+# 覆寫優先序：中央表(base) < settings 覆寫（drive_unc_map 舊鍵 + drive_map 新鍵，
+# 後者=備份 tab「磁碟對應」modal 寫入）< 當台實際 net use。
+# 2026-07-21 起單一正本在 core/drive_map.DEFAULT_DRIVE_MAP（此處鍵帶冒號=前端 toUncPath 格式）。
+from core.drive_map import DEFAULT_DRIVE_MAP as _CORE_DRIVE_MAP  # noqa: E402
+_STUDIO_DRIVE_MAP: dict = {f"{k}:": v for k, v in _CORE_DRIVE_MAP.items()}
 
 
 def _scan_drive_mappings() -> dict:
@@ -556,11 +557,17 @@ def _scan_drive_mappings() -> dict:
     override: dict = {}
     try:
         from config import load_settings
-        raw = (load_settings() or {}).get("drive_unc_map") or {}
-        if isinstance(raw, dict):
-            override = {str(k).upper(): v for k, v in raw.items() if v}
+        from core.drive_map import parse_override_items
+        settings = load_settings() or {}
+        # 舊鍵 drive_unc_map + 新鍵 drive_map（備份 tab modal 寫入）都吃 —— modal 的
+        # 修改前端派發翻譯才看得到。正規化/清洗與後端 effective_map 共用同一份規則
+        # （core.drive_map.parse_override_items），空字串=墓碑、尾端統一過濾。
+        for key in ("drive_unc_map", "drive_map"):
+            for letter, v in parse_override_items(settings.get(key)):
+                override[f"{letter}:"] = v
     except Exception:
         pass
 
     # 合併：中央表(base) < settings 覆寫 < 當台實際 net use（最優先，machine 有掛的才算數）
-    return {**_STUDIO_DRIVE_MAP, **override, **mappings}
+    merged = {**_STUDIO_DRIVE_MAP, **override, **mappings}
+    return {k: v for k, v in merged.items() if v}   # 空字串墓碑=移除該字母

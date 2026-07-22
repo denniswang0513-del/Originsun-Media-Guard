@@ -212,6 +212,9 @@ async def internal_alert_email(request: Request):
 
 @router.post("/api/v1/list_dir")
 async def list_dir_api(req: ListDirRequest):
+    # 磁碟代號→UNC：掃描來源常填 T:\ 等網路磁碟代號，本機不一定有掛
+    from core.drive_map import make_translator
+    req.path = make_translator()(req.path)
     exts = {e.lower() for e in req.exts}
     if os.path.isfile(req.path):
         if os.path.splitext(req.path)[1].lower() in exts:

@@ -35,6 +35,11 @@ async def enqueue_job(request: Any, project_name: str, task_type: str) -> tuple:
     if dup:
         warning = f"專案 '{project_name}' 已有進行中的 {task_type} 任務 (job_id={dup.job_id})，新任務已加入排隊"
 
+    # 磁碟代號 → UNC（core/drive_map）：中央咽喉統一翻譯 — HTTP 端點、排程、
+    # 書籤重放三條進件路都經過這裡，任務在哪台機器執行都不再依賴磁碟掛載。
+    from core.drive_map import translate_job_request
+    _path_changes = translate_job_request(request, task_type)
+
     job_id = getattr(request, 'job_id', '') or uuid.uuid4().hex[:8]
     request.job_id = job_id
 
@@ -53,6 +58,11 @@ async def enqueue_job(request: Any, project_name: str, task_type: str) -> tuple:
         'type': 'system',
         'msg': f'任務已加入佇列: {project_name} ({task_type})'
     })
+    for _c in _path_changes:
+        _emit_sync_for_job(job_id, 'log', {
+            'type': 'system',
+            'msg': f'[UNC] 路徑已依磁碟對應轉換: {_c}'
+        })
 
     # emit queued 狀態 + 觸發 dispatch（fire-and-forget，不阻塞 HTTP response）
     await sio.emit('task_status', {

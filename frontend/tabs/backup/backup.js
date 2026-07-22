@@ -202,7 +202,6 @@ export async function submitJob() {
         const btnRetry = document.getElementById('btn_retry');
         if (btnRetry) btnRetry.style.display = 'none';
         appendLog(`請求已送出，伺服器排序狀態: ${result.status}, 任務 ID: ${result.job_id || '?'}`, 'system');
-        (result.path_translations || []).forEach(t => appendLog(`路徑已依磁碟對應自動轉 UNC：${t}`, 'system'));
         if (result.warning) {
             appendLog(`⚠️ ${result.warning}`, 'system');
         }

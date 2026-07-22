@@ -1,6 +1,7 @@
 from fastapi import APIRouter  # type: ignore
 import os
 import shutil
+from core.drive_map import make_translator  # type: ignore
 from core.schemas import (  # type: ignore
     TranscodeRequest, MergeHostOutputsRequest, VerifyProxiesRequest,
     VerifyStandaloneProxiesRequest, CompareSourceRequest
@@ -18,8 +19,13 @@ async def create_transcode_job(req: TranscodeRequest):
         resp["warning"] = warning
     return resp
 
+# 同步端點（不經 enqueue_job）各自過磁碟代號→UNC 翻譯 — 呼叫端可能在
+# 沒掛 T:/S:/V: 的機器（2026-07-21 煥民新村派發鏈教訓）。
+
 @router.post("/api/v1/merge_host_outputs")
 async def merge_host_outputs(req: MergeHostOutputsRequest):
+    tr = make_translator()
+    req.proxy_root = tr(req.proxy_root)
     base = os.path.join(req.proxy_root, req.project_name)
     if not os.path.isdir(base):
         return {"status": "error", "message": f"目錄不存在: {base}"}
@@ -58,6 +64,8 @@ async def merge_host_outputs(req: MergeHostOutputsRequest):
 
 @router.post("/api/v1/verify_proxies")
 async def verify_proxies(req: VerifyProxiesRequest):
+    tr = make_translator()
+    req.proxy_root = tr(req.proxy_root)
     missing = []
     base_dir = os.path.join(req.proxy_root, req.project_name)
     
@@ -77,6 +85,9 @@ async def verify_proxies(req: VerifyProxiesRequest):
 
 @router.post("/api/v1/verify_standalone_proxies")
 async def verify_standalone_proxies(req: VerifyStandaloneProxiesRequest):
+    tr = make_translator()
+    req.sources = [tr(s) for s in req.sources]
+    req.dest_dir = tr(req.dest_dir)
     missing_sources = []
     video_exts = {".mov", ".mp4", ".mkv", ".mxf", ".avi", ".mts", ".m2ts", ".r3d", ".braw"}
     proxy_exts = {".mov", ".mp4"}
@@ -113,6 +124,9 @@ async def verify_standalone_proxies(req: VerifyStandaloneProxiesRequest):
 
 @router.post("/api/v1/compare_source")
 async def compare_source(req: CompareSourceRequest):
+    tr = make_translator()
+    req.source_dir = tr(req.source_dir)
+    req.output_dir = tr(req.output_dir)
     if not os.path.isdir(req.source_dir):
         return {"status": "error", "message": f"來源目錄不存在: {req.source_dir}"}
 
