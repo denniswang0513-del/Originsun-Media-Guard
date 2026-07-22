@@ -66,6 +66,24 @@ main { max-width: 1100px; margin: 0 auto; padding: 104px 20px 80px; }
 #g_id_signin_container { display: none; justify-content: center; }
 .err { display: none; color: var(--red); font-size: 12px; margin-top: 14px; line-height: 1.6; }
 
+/* ── 註冊（兩步驟公司驗證）── */
+.btn-ghost-wide {
+    width: 100%; margin-top: 14px; background: none; border: 1px solid var(--line);
+    border-radius: 2px; padding: 10px; font-size: 11px; letter-spacing: 0.3em;
+    text-transform: uppercase; color: var(--sub); cursor: pointer;
+    transition: all .15s; font-family: inherit;
+}
+.btn-ghost-wide:hover { color: var(--red); border-color: var(--red); }
+.rg-choices { display: flex; flex-direction: column; gap: 8px; }
+.rg-choice {
+    display: flex; align-items: center; gap: 10px; border: 1px solid var(--line);
+    border-radius: 2px; padding: 10px 12px; font-size: 14px; cursor: pointer;
+    transition: border-color .15s, background .15s;
+}
+.rg-choice:hover { border-color: var(--ink); }
+.rg-choice.on { border-color: var(--red); background: #fdf7f6; }
+.rg-choice input { accent-color: var(--red); }
+
 /* ── 工作台 ── */
 #ws-view { display: none; }
 .greeting { margin-bottom: 40px; }
@@ -156,6 +174,29 @@ footer .eyebrow { font-size: 10px; }
         <button class="btn-primary" type="submit">登入 Sign in</button>
       </form>
       <div id="login-err" class="err"></div>
+      <button class="btn-ghost-wide" type="button" onclick="showRegister()">註冊帳號 Register</button>
+    </div>
+  </div>
+
+  <!-- 註冊（兩步驟公司驗證）-->
+  <div id="register-view" style="display:none;max-width:400px;margin:10vh auto 0;">
+    <div class="login-card">
+      <div class="eyebrow">Originsun · Register</div>
+      <h1>註冊帳號</h1>
+      <div class="sub">回答兩個公司驗證問題即可建立帳號；帳號預設開通個人工作台功能。</div>
+      <form onsubmit="doRegister(event)">
+        <div class="field"><label>帳號 Account</label><input id="rg-user" autocomplete="username"></div>
+        <div class="field"><label>密碼 Password</label><input id="rg-pwd" type="password" autocomplete="new-password"></div>
+        <div class="field"><label>確認密碼 Confirm</label><input id="rg-pwd2" type="password" autocomplete="new-password"></div>
+        <div class="field"><label>驗證一：公司統編</label><input id="rg-taxid" inputmode="numeric" placeholder="8 位數字"></div>
+        <div class="field">
+          <label>驗證二：公司名稱</label>
+          <div id="rg-choices" class="rg-choices"></div>
+        </div>
+        <button class="btn-primary" type="submit">建立帳號 Create</button>
+      </form>
+      <div id="rg-err" class="err"></div>
+      <button class="btn-ghost-wide" type="button" onclick="showLoginFromRegister()">返回登入 Back</button>
     </div>
   </div>
 
@@ -191,6 +232,7 @@ async function mfetch(path, opts = {}) {
 // ── 視圖切換 ──
 function showLogin(msg) {
     $("ws-view").style.display = "none";
+    $("register-view").style.display = "none";
     $("login-view").style.display = "block";
     $("hdr-user").style.display = "none";
     $("hdr-hr").style.display = "none";
@@ -222,6 +264,69 @@ async function doPwdLogin(ev) {
         onLoginOk(d);
     } catch (_) { showLogin("連線失敗，請稍後再試"); }
 }
+// ── 註冊（兩步驟公司驗證；答案只在伺服端比對）──
+async function showRegister() {
+    $("login-view").style.display = "none";
+    $("register-view").style.display = "block";
+    const box = $("rg-choices");
+    if (!box.childElementCount) {
+        let choices = [];
+        try {
+            const r = await fetch("/api/v1/auth/register/config");
+            choices = (await r.json()).company_choices || [];
+        } catch (_) { /* 載入失敗下方送出時會報錯 */ }
+        // 洗牌 — 正解不固定在第一位
+        for (let i = choices.length - 1; i > 0; i--) {
+            const j = Math.floor(Math.random() * (i + 1));
+            [choices[i], choices[j]] = [choices[j], choices[i]];
+        }
+        box.innerHTML = "";
+        choices.forEach(name => {
+            const label = document.createElement("label");
+            label.className = "rg-choice";
+            const radio = document.createElement("input");
+            radio.type = "radio"; radio.name = "rg-company"; radio.value = name;
+            radio.addEventListener("change", () => {
+                box.querySelectorAll(".rg-choice").forEach(el => el.classList.remove("on"));
+                label.classList.add("on");
+            });
+            const span = document.createElement("span");
+            span.textContent = name;
+            label.appendChild(radio); label.appendChild(span);
+            box.appendChild(label);
+        });
+    }
+}
+function showLoginFromRegister() {
+    $("register-view").style.display = "none";
+    $("rg-err").style.display = "none";
+    showLogin("");
+}
+function _rgErr(msg) { const e = $("rg-err"); e.textContent = msg; e.style.display = "block"; }
+async function doRegister(ev) {
+    ev.preventDefault();
+    $("rg-err").style.display = "none";
+    const pwd = $("rg-pwd").value;
+    if (pwd !== $("rg-pwd2").value) { _rgErr("兩次密碼不一致"); return; }
+    const picked = document.querySelector('input[name="rg-company"]:checked');
+    if (!picked) { _rgErr("請選擇公司名稱"); return; }
+    try {
+        const r = await fetch("/api/v1/auth/register", {
+            method: "POST", headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+                username: $("rg-user").value.trim(),
+                password: pwd,
+                tax_id: $("rg-taxid").value.trim(),
+                company_name: picked.value,
+            }),
+        });
+        const d = await r.json();
+        if (!r.ok) { _rgErr(d.detail || "註冊失敗"); return; }
+        $("register-view").style.display = "none";
+        onLoginOk(d);   // 註冊即登入，直接進工作台
+    } catch (_) { _rgErr("連線失敗，請稍後再試"); }
+}
+
 let _gisInited = false;
 async function initGoogle() {
     if (_gisInited) return;

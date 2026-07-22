@@ -60,8 +60,29 @@ class GoogleLoginRequest(BaseModel):
     credential: str
 
 
+class RegisterRequest(BaseModel):
+    username: str
+    password: str
+    tax_id: str          # 驗證題 1：公司統編
+    company_name: str    # 驗證題 2：公司名稱（前端四選一）
+
+
 # ── Constants ──
 DEFAULT_ROLE = 'editor'
+
+# ── 自助註冊（/my.html 員工登入頁）──
+# 兩步驟公司知識驗證（owner 指定，2026-07-22）；答案只在伺服端比對。
+_REGISTER_TAX_ID = "90371657"
+_REGISTER_COMPANY = "源日影像"
+# 選擇題選項（正解 + 干擾項）— 回給前端渲染，順序由前端洗牌
+_REGISTER_COMPANY_CHOICES = ["源日影像", "日源映畫", "源源製作", "日日有限公司"]
+# 新帳號預設權限：個人工作台五鍵（僅個人範疇，不含任何公司資料 tab）；
+# 之後由管理員在「使用者管理」視需要加開
+_REGISTER_DEFAULT_MODULES = ['me_projects', 'me_profile', 'me_todos', 'me_finance', 'me_leave']
+# 防暴力：同 IP 連錯 N 次驗證題 → 鎖 M 秒（單機記憶體即可）
+_REGISTER_MAX_FAILS = 5
+_REGISTER_LOCK_SEC = 600
+_register_fails: dict = {}   # ip -> [fail_count, lock_until_monotonic]
 
 
 # ── Helpers ──
@@ -328,6 +349,61 @@ async def login(req: LoginRequest):
         'access_level': access_level,
         'modules': modules,
         'first_login': user.get('first_login', False),
+    }
+
+
+@router.get("/register/config")
+async def register_config():
+    """註冊頁題目設定（公開）— 只回選項不回答案，正解比對在 /register 伺服端。"""
+    return {"company_choices": list(_REGISTER_COMPANY_CHOICES)}
+
+
+@router.post("/register")
+async def register(req: RegisterRequest, request: Request):
+    """員工自助註冊（/my.html）— 兩步驟公司知識驗證通過才建帳號。
+
+    新帳號 access_level=1 + 個人工作台 me_* 五鍵（不含公司資料 tab），
+    管理員之後在使用者管理視需要加開。成功直接回 login 同形狀（自動登入）。"""
+    import time as _time
+    ip = (request.client.host if request.client else "") or "?"
+    rec = _register_fails.get(ip)
+    if rec and rec[1] > _time.monotonic():
+        raise HTTPException(status_code=429, detail="嘗試次數過多，請 10 分鐘後再試")
+
+    # 伺服端比對驗證題（答案不下發前端）
+    if (req.tax_id or "").strip() != _REGISTER_TAX_ID or \
+       (req.company_name or "").strip() != _REGISTER_COMPANY:
+        cnt = (rec[0] if rec else 0) + 1
+        lock = _time.monotonic() + _REGISTER_LOCK_SEC if cnt >= _REGISTER_MAX_FAILS else 0.0
+        _register_fails[ip] = [0 if lock else cnt, lock]
+        raise HTTPException(status_code=400, detail="公司驗證未通過，請確認答案")
+    _register_fails.pop(ip, None)
+
+    username = (req.username or "").strip()
+    if not (2 <= len(username) <= 32) or any(c.isspace() for c in username):
+        raise HTTPException(status_code=400, detail="帳號需 2-32 字元且不含空白")
+    if len(req.password or "") < 6:
+        raise HTTPException(status_code=400, detail="密碼至少 6 個字元")
+    if await _find_user(username):
+        raise HTTPException(status_code=409, detail=f"帳號「{username}」已存在，請改用其他名稱或直接登入")
+
+    modules = list(_REGISTER_DEFAULT_MODULES)
+    user_data = {
+        'username': username,
+        'password_hash': hash_password(req.password),
+        'role_name': 'user',
+        'access_level': 1,
+        'modules': modules,
+        'first_login': False,
+    }
+    await _persist_user(user_data)
+    token = create_token({
+        'sub': username, 'role_name': 'user',
+        'access_level': 1, 'modules': modules,
+    })
+    return {
+        'token': token, 'username': username, 'role_name': 'user',
+        'access_level': 1, 'modules': modules, 'first_login': False,
     }
 
 
