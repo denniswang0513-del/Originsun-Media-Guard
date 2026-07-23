@@ -193,10 +193,10 @@ footer .eyebrow { font-size: 10px; }
     <div class="msg">載入中…</div>
   </div>
 
-  <!-- 連結失效 -->
+  <!-- 連結失效 / 暫時無法連線（showExpired(temporary) 動態切換文案） -->
   <div id="expired-view" class="state-block" style="display:none;">
-    <div class="eyebrow">Link <span class="accent">Expired</span></div>
-    <div class="msg">連結已失效，請向專案負責人索取新連結。</div>
+    <div class="eyebrow" id="expired-title">Link <span class="accent">Expired</span></div>
+    <div class="msg" id="expired-msg">連結已失效，請向專案負責人索取新連結。</div>
   </div>
 
   <!-- 主內容 -->
@@ -306,18 +306,27 @@ async function loadData(refreshOnly) {
     try {
         r = await fetch(API, { headers: { "Accept": "application/json" } });
     } catch (e) {
-        if (!refreshOnly) showExpired();
+        if (!refreshOnly) showExpired(true);   // 網路錯 ≠ 連結失效
         return;
     }
     if (r.status === 401 || r.status === 403) { showExpired(); return; }
-    if (!r.ok) { if (!refreshOnly) showExpired(); return; }
+    // 5xx/503（伺服器暫時故障）不是連結問題 — 顯示成「已失效」會誤導使用者去重發連結
+    // （2026-07-23 實案：8000 DB wedge 12 小時，owner 以為 token 壞了）
+    if (!r.ok) { if (!refreshOnly) showExpired(true); return; }
     DATA = await r.json();
     FILES = Array.isArray(DATA.files) ? DATA.files : [];
     if (DATA.max_upload_bytes) MAX_BYTES = DATA.max_upload_bytes;
     $("upload-note").textContent = "單檔上限 " + maxMB() + "MB；行動網路單檔約 100MB 內較穩定。";
     renderAll(refreshOnly);
 }
-function showExpired() {
+function showExpired(temporary) {
+    if (temporary) {
+        $("expired-title").innerHTML = 'Connection <span class="accent">Error</span>';
+        $("expired-msg").textContent = "伺服器暫時無法連線，請稍後再試（連結不需重發）。";
+    } else {
+        $("expired-title").innerHTML = 'Link <span class="accent">Expired</span>';
+        $("expired-msg").textContent = "連結已失效，請向專案負責人索取新連結。";
+    }
     $("loading-view").style.display = "none";
     $("app-view").style.display = "none";
     $("expired-view").style.display = "block";
