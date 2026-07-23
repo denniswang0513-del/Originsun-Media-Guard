@@ -1,7 +1,7 @@
 // journal-core.js — 週工作日誌共用核心（內部分頁 tabs/journal/journal.js 與
 // 官網風獨立頁 /journal.html 共同 import；殺掉三問標籤/週期運算/序列化/渲染/API 的鏡像複製）。
-// my.html 週誌小卡仍是 inline 鏡像（非 module 頁，符號名 jrWeekRange/JR_SECTIONS）——
-// 改三問文案或週區間格式，記得同步該處。
+// my.html 已改為 iframe 內嵌 /journal.html?embed=1（2026-07-24）——**已無鏡像**，
+// 三問文案／週區間格式改這裡即可，不要再為它另建一份。
 // 第三個 module 消費者出現時，再考慮把各頁的 fetch 流程/分頁控制器也提上來。
 import { authFetch } from './utils.js';
 

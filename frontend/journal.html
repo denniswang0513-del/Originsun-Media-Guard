@@ -43,6 +43,22 @@ header {
 
 main { max-width: 880px; margin: 0 auto; padding: 104px 20px 80px; }
 
+/* ── Embed 模式（內嵌 /my.html 工作台 iframe；iframe 自動偵測、?embed=0 可逃）
+   照 showcase-edit.html 同一套：隱藏自身 chrome + postMessage 回傳高度 ── */
+/* min-height:0 是必要的 — body 若保留 min-height:100vh，父層放大 iframe →
+   子頁視窗變高 → body 更高 → 回報更大高度，會無限長高（實測衝到 11890px） */
+html.embed-mode body { background: transparent; min-height: 0; }
+html.embed-mode header,
+html.embed-mode footer,
+html.embed-mode .hero { display: none; }
+html.embed-mode main { max-width: none; padding: 0; }
+/* embed 內一律用 px：vh 是以「iframe 自身視窗高」解析，而那個高度由父層依回報值設定
+   → 又一條父子互相放大的回饋路徑（收斂但會多繞好幾圈） */
+html.embed-mode .state-block { padding: 36px 0; }
+html.embed-mode .gate-wrap { margin: 0 auto; }
+html.embed-mode .card { border: none; padding: 0 0 6px; margin-bottom: 18px; }
+html.embed-mode .card + .card { border-top: 1px solid var(--line); padding-top: 18px; }
+
 /* ── 載入 / 連線失敗狀態 ── */
 .state-block { padding: 12vh 0; text-align: center; }
 .state-block .msg { font-size: 15px; color: var(--sub); margin-top: 16px; line-height: 1.8; }
@@ -217,6 +233,34 @@ import { BLOCKS, HINT_EDIT_WINDOW, MSG_EDIT_WINDOW, api, blockList, debounce,
 
 const $ = (id) => document.getElementById(id);
 const NET_ERR = '伺服器暫時無法連線，請稍後再試';
+
+// embed 偵測：?embed 參數優先（?embed=0 = 逃生口），沒帶參數時 iframe 自動視為 embed
+// （與 showcase-edit.html 同一套慣例）
+const _embedParam = new URLSearchParams(location.search).get('embed');
+const EMBED = _embedParam != null ? _embedParam === '1' : (window.self !== window.top);
+
+// 把內容高度回傳給父視窗（/my.html 工作台），讓外框自動長高、免內部捲軸。
+// ⚠ 另一份同樣的 embed 協定在 showcase-edit.html（宿主 crm-projects-delivery.js）——
+//    鐵則：量「內容元素」不要量 body/documentElement（會被 iframe 視窗高度撐著→無限長高），
+//    且 embed 內不可用 vh。改任一份記得看另一份。
+let _lastH = -1;
+function postHeight() {
+    if (!EMBED) return;
+    try {
+        const m = document.querySelector('main');
+        const h = m ? Math.ceil(m.getBoundingClientRect().height) + 8 : 0;
+        if (h <= 0 || h === _lastH) return;      // 去重：RO 每次觸發都發訊會造成跨框訊息風暴
+        _lastH = h;
+        window.parent?.postMessage({ type: 'journal-embed-height', height: h }, '*');
+    } catch (_) {}
+}
+
+if (EMBED) {
+    document.documentElement.classList.add('embed-mode');
+    // 在偵測當下就掛（不是等 boot 成功）— 載入中/未登入/連線錯誤三種畫面也要能回報高度
+    const _m = document.querySelector('main');
+    if (window.ResizeObserver && _m) new ResizeObserver(postHeight).observe(_m);
+}
 // 官網風白底語彙的 class 組（SPA 分頁傳 jr-* 的一組）
 const CARD_CLS = { name: 'p-name', empty: 'empty pad-sm', block: 'blk' };
 

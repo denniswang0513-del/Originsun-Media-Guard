@@ -95,8 +95,15 @@ main { max-width: 1100px; margin: 0 auto; padding: 104px 20px 80px; }
 }
 .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 28px; }
 .card { border: 1px solid var(--line); padding: 26px 26px 20px; min-width: 0; }
-.card-head { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; border-bottom: 1px solid var(--line); padding-bottom: 14px; margin-bottom: 4px; }
+.card-head { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; border-bottom: 1px solid var(--line); padding-bottom: 14px; margin-bottom: 4px; cursor: pointer; user-select: none; }
 .card-head .count { font-size: 12px; color: var(--sub); }
+/* 收合：點卡片標題列切換，狀態記在 localStorage */
+.card-head .fold { font-size: 11px; color: var(--sub); transition: transform .15s, color .15s; flex: 0 0 auto; }
+.card-head:hover .fold { color: var(--red); }
+.card.folded .card-head { border-bottom-color: transparent; padding-bottom: 4px; margin-bottom: 0; }
+.card.folded .card-head .fold { transform: rotate(-90deg); }
+.card.folded .card-body { display: none; }
+.card-body.flush { padding: 6px 0 0; }   /* 內嵌 iframe 用：內容自帶留白 */
 .row { display: flex; gap: 12px; align-items: flex-start; padding: 13px 0; border-bottom: 1px solid #f5f5f5; font-size: 13px; }
 .row:last-child { border-bottom: none; }
 .row .grow { flex: 1; min-width: 0; }
@@ -204,6 +211,9 @@ footer .eyebrow { font-size: 10px; }
     </div>
     <div id="ws-notice"></div>
     <div id="ws-grid" class="grid"></div>
+    <!-- 工作日誌獨立容器：renderWorkspace 會清空 #ws-grid，iframe 一旦被重新插入
+         就會整個重載（未存文字/目前檢視/週次全丟）→ 這區塊只建一次、之後只切顯示 -->
+    <div id="ws-journal" style="display:none;margin-top:22px;"></div>
   </div>
 </main>
 
@@ -405,113 +415,66 @@ function renderWorkspace() {
     if (ws.allowed.includes("me_leave"))    grid.appendChild(cardLeave(ws.leave));
     if (ws.allowed.includes("me_profile"))  grid.appendChild(cardProfile(ws.profile));
     if (ws.allowed.includes("me_finance"))  grid.appendChild(cardFinance(ws.timesheet, ws.payments));
+    // 週誌在 grid 之外自成一區（見 #ws-journal 註解）：只建一次，之後只切顯示
+    const jr = $("ws-journal");
     if (ws.allowed.includes("journal")) {
-        // 首次抓一次進 WS.journal 快取；之後 re-render（切待辦/存個資）走快取免重複 GET
-        if (WS.journal) grid.appendChild(cardJournal(WS.journal));
-        else loadJournalCard(grid);
+        if (!jr.childElementCount) jr.appendChild(cardJournal());
+        jr.style.display = "";
+    } else {
+        jr.style.display = "none";
     }
     if (!ws.allowed.length)
         grid.innerHTML = `<div class="empty">此帳號尚未開通任何工作台功能，請聯絡管理員。</div>`;
 }
 
-// ── 卡：每週工作日誌（journal 模組；新註冊預設開通）──
-async function loadJournalCard(grid) {
-    let r;
-    try { r = await mfetch("/api/v1/journal/mine"); } catch (_) { return; }
-    if (!r.ok) return;
-    WS.journal = await r.json();
-    grid.appendChild(cardJournal(WS.journal));
-}
-// ⚠ jrWeekRange/JR_SECTIONS/jrThisWeek/jrShiftWeek 是 js/shared/journal-core.js
-//   （weekRange/BLOCKS/thisWeekStart/shiftWeek）的鏡像（本頁 inline script 非 module
-//   不能 import）— 改格式、三問文案或週期算法，兩邊同步
-const jrP2 = n => String(n).padStart(2, "0");
-const jrISO = d => `${d.getFullYear()}-${jrP2(d.getMonth() + 1)}-${jrP2(d.getDate())}`;
-const jrParse = s => { const [y, m, d] = String(s).split("-").map(Number); return new Date(y, m - 1, d); };
-function jrThisWeek() {
-    const n = new Date(), d = new Date(n.getFullYear(), n.getMonth(), n.getDate());
-    d.setDate(d.getDate() - ((d.getDay() + 6) % 7));   // 週一起算
-    return jrISO(d);
-}
-function jrShiftWeek(iso, weeks) { const d = jrParse(iso); d.setDate(d.getDate() + weeks * 7); return jrISO(d); }
-function jrWeekRange(ws) {
-    const s = jrParse(ws);
-    const e = new Date(s); e.setDate(s.getDate() + 6);
-    const l = `${s.getFullYear()}/${jrP2(s.getMonth() + 1)}/${jrP2(s.getDate())}`;
-    const rr = (s.getFullYear() === e.getFullYear() ? "" : e.getFullYear() + "/")
-        + `${jrP2(e.getMonth() + 1)}/${jrP2(e.getDate())}`;
-    return `${l} – ${rr}`;
-}
-const JR_SECTIONS = [["wins", "順利的事與想感謝的人"], ["challenges", "遇到哪些挑戰"], ["learnings", "學到了什麼"]];
-
-// 可切換前後週；能否編輯一律看後端 editable 旗標（規則=當週可編至下一週）
-function cardJournal(j) {
-    const card = makeCard("Weekly Journal", "工作日誌", "");
-    renderJournalBody(card, j);
+// ── 卡：每週工作日誌 —— 直接內嵌完整的 /journal.html（embed 模式）──
+// owner 2026-07-24：登入後就要看到完整日誌（含團隊牆／學習庫／依人回溯），
+// 不要小卡再點一次。內嵌＝零重複實作，週誌只有 journal.html 一份正本。
+// 高度由子頁 postMessage('journal-embed-height') 回報（同 showcase-edit 慣例）。
+const JR_MIN_H = 320;                       // iframe 初始高＝內容回報前的佔位
+function cardJournal() {
+    const card = makeCard("Weekly Journal", "工作日誌", "", "journal");
+    const body = card.querySelector(".card-body");
+    body.classList.add("flush");            // 內嵌頁自帶留白，卡片不再補 padding
+    // 收合狀態下不載入（省一次完整頁面 + 2 支 API）；首次展開才給 src
+    const folded = card.classList.contains("folded");
+    body.innerHTML = `<iframe id="jr-frame" ${folded ? "data-src" : "src"}="/journal.html?embed=1"
+        title="工作日誌" loading="lazy" scrolling="no"
+        style="width:100%;height:${JR_MIN_H}px;border:0;display:block;overflow:hidden;"></iframe>`;
+    card.addEventListener("card-unfold", () => {
+        const f = card.querySelector("#jr-frame");
+        if (f && !f.src && f.dataset.src) { f.src = f.dataset.src; delete f.dataset.src; }
+    });
     return card;
 }
-function renderJournalBody(card, j) {
-    const body = card.querySelector(".card-body");
-    const isThis = j.week_start === jrThisWeek();
-    const ta = (k) => `<textarea data-jr="${k}" rows="3" ${j.editable ? "" : "disabled"} style="width:100%;border:1px solid var(--line);border-radius:2px;padding:8px 10px;font-size:13px;font-family:inherit;color:var(--ink);background:${j.editable ? "#fff" : "#fafafa"};resize:vertical;outline:none;">${esc((j[k] || []).join("\n"))}</textarea>`;
-    body.innerHTML = `
-        <div class="pf-line" style="align-items:center;gap:8px;">
-            <button class="mini-btn jr-nav" data-jr-week="${jrShiftWeek(j.week_start, -1)}" title="上一週" style="padding:2px 9px;">‹</button>
-            <span class="k" style="flex:0 0 auto;">${isThis ? "本週" : "週次"}</span>
-            <span class="v" style="flex:1;text-align:center;">${jrWeekRange(j.week_start)}</span>
-            <button class="mini-btn jr-nav" data-jr-week="${jrShiftWeek(j.week_start, 1)}" title="下一週" style="padding:2px 9px;">›</button>
-        </div>
-        ${JR_SECTIONS.map(([k, lbl]) => `
-            <div class="field" style="margin-top:10px;"><label>${lbl}（一行一條）</label>${ta(k)}</div>`).join("")}
-        <div style="padding-top:12px;display:flex;gap:10px;align-items:center;flex-wrap:wrap;">
-            ${j.editable
-                ? `<button class="mini-btn" onclick="saveJournal(this)">儲存${isThis ? "本週" : "這一週"}日誌</button>`
-                : `<span style="font-size:12px;color:var(--sub);">僅能編輯至下一週</span>`}
-            ${isThis ? "" : `<button class="mini-btn jr-nav" data-jr-week="${jrThisWeek()}">回到本週</button>`}
-            <a class="mini-btn" href="/journal.html" style="text-decoration:none;">查看團隊週誌</a>
-            <span class="jr-status" style="font-size:12px;color:var(--sub);"></span>
-        </div>`;
-    body.querySelectorAll(".jr-nav").forEach(b => {
-        b.onclick = () => loadJournalWeek(card, b.dataset.jrWeek);
-    });
-}
-async function loadJournalWeek(card, weekStart) {
-    const st = card.querySelector(".jr-status");
-    if (st) st.textContent = "載入中…";
-    let r;
-    try { r = await mfetch("/api/v1/journal/mine?start=" + encodeURIComponent(weekStart)); }
-    catch (_) { if (st) st.textContent = "連線失敗"; return; }
-    if (!r.ok) { if (st) st.textContent = "載入失敗（" + r.status + "）"; return; }
-    const d = await r.json();
-    if (WS) WS.journal = d;          // 快取＝目前檢視的那一週（re-render 保持同一週）
-    renderJournalBody(card, d);
-}
-async function saveJournal(btn) {
-    const card = btn.closest(".card");
-    const get = k => (card.querySelector(`textarea[data-jr="${k}"]`).value || "")
-        .split("\n").map(s => s.trim()).filter(Boolean);
-    const st = card.querySelector(".jr-status");
-    const week = (WS && WS.journal && WS.journal.week_start) || jrThisWeek();
-    btn.disabled = true;
-    try {
-        const r = await mfetch("/api/v1/journal/mine?start=" + encodeURIComponent(week), {
-            method: "PUT",
-            body: JSON.stringify({ wins: get("wins"), challenges: get("challenges"), learnings: get("learnings") }),
-        });
-        if (r.ok && WS) WS.journal = await r.json();   // 同步快取，re-render 顯示最新
-        st.textContent = r.ok ? "已儲存"
-            : r.status === 403 ? "已超出可編輯期間（僅能編輯至下一週）"
-            : "儲存失敗（" + r.status + "）";
-    } catch (_) { st.textContent = "連線失敗"; }
-    btn.disabled = false;
-    setTimeout(() => { st.textContent = ""; }, 3000);
-}
+window.addEventListener("message", (e) => {
+    const d = e.data;
+    if (!d || d.type !== "journal-embed-height") return;
+    const f = $("jr-frame");
+    if (f && d.height > 0) f.style.height = Math.max(JR_MIN_H, d.height) + "px";
+});
 
-function makeCard(en, zh, countText) {
+// 每張卡都可收合：點標題列切換，狀態記在 localStorage（跨登入保留）。
+// key 用穩定代號而非顯示字串 —— 改標題文案不該把大家的收合狀態洗掉。
+const FOLD_KEY = "my_folded_cards";
+const FOLDED = new Set(JSON.parse(localStorage.getItem(FOLD_KEY) || "[]"));
+function makeCard(en, zh, countText, key) {
+    const foldKey = key || en;
     const el = document.createElement("div");
     el.className = "card";
+    el.dataset.card = foldKey;                  // 供測試/除錯定位用
     el.innerHTML = `<div class="card-head"><span class="eyebrow">${en} <span class="accent">${zh}</span></span>
-        ${countText ? `<span class="count">${countText}</span>` : ""}</div><div class="card-body"></div>`;
+        <span style="display:flex;align-items:baseline;gap:10px;">
+            ${countText ? `<span class="count">${countText}</span>` : ""}
+            <span class="fold">▾</span>
+        </span></div><div class="card-body"></div>`;
+    if (FOLDED.has(foldKey)) el.classList.add("folded");
+    el.querySelector(".card-head").onclick = () => {
+        const folded = el.classList.toggle("folded");
+        folded ? FOLDED.add(foldKey) : FOLDED.delete(foldKey);
+        localStorage.setItem(FOLD_KEY, JSON.stringify([...FOLDED]));
+        if (!folded) el.dispatchEvent(new CustomEvent("card-unfold"));   // 供懶載入用
+    };
     return el;
 }
 
