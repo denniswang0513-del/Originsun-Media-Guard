@@ -422,8 +422,8 @@ async function loadJournalCard(grid) {
     WS.journal = await r.json();
     grid.appendChild(cardJournal(WS.journal));
 }
-// ⚠ jrWeekRange/JR_SECTIONS 是 tabs/journal/journal.js（weekRange/BLOCKS）的鏡像
-//   （本頁 standalone 不載 SPA 模組）— 改格式或三問文案，兩邊同步
+// ⚠ jrWeekRange/JR_SECTIONS 是 js/shared/journal-core.js（weekRange/BLOCKS）的鏡像
+//   （本頁 inline script 非 module 不能 import）— 改格式或三問文案，兩邊同步
 const jrP2 = n => String(n).padStart(2, "0");
 function jrWeekRange(ws) {
     const s = new Date(ws + "T00:00:00");
@@ -445,7 +445,7 @@ function cardJournal(j) {
             <textarea data-jr="${k}" rows="3" style="width:100%;border:1px solid var(--line);border-radius:2px;padding:8px 10px;font-size:13px;font-family:inherit;color:var(--ink);resize:vertical;outline:none;">${esc((j[k] || []).join("\n"))}</textarea></div>`).join("")}
         <div style="padding-top:12px;display:flex;gap:10px;align-items:center;flex-wrap:wrap;">
             <button class="mini-btn" onclick="saveJournal(this)">儲存本週日誌</button>
-            <a class="mini-btn" href="/#tab_journal" style="text-decoration:none;">查看團隊週誌</a>
+            <a class="mini-btn" href="/journal.html" style="text-decoration:none;">查看團隊週誌</a>
             <span class="jr-status" style="font-size:12px;color:var(--sub);"></span>
         </div>`;
     return card;
