@@ -214,7 +214,9 @@ footer .eyebrow { font-size: 10px; }
       <div class="sub">每週三問：順利的事與想感謝的人、遇到哪些挑戰、學到了什麼。一行一條，週一起算。</div>
     </div>
 
-    <div class="pill-row">
+    <!-- owner 2026-07-24：三檢視切換先隱藏（只留週誌）。學習庫/依人回溯的程式碼
+         保留，要恢復把 style="display:none" 拿掉即可 -->
+    <div class="pill-row" style="display:none;">
       <button class="pill-btn on" type="button" data-view="week">週誌</button>
       <button class="pill-btn" type="button" data-view="learn">學習庫</button>
       <button class="pill-btn" type="button" data-view="person">依人回溯</button>
