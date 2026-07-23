@@ -1,4 +1,8 @@
-"""core/drive_map.py — 磁碟代號 ↔ UNC 對應（公司網路磁碟慣例的單一正本）。
+"""core/drive_map.py — 任務進件路徑層：磁碟對應翻譯 + 路徑語法快篩。
+
+enqueue 咽喉（core/worker.enqueue_job）共用 `_JOB_PATH_FIELDS` registry：
+先 translate_job_request 把磁碟代號翻成 UNC，再 first_invalid_job_path
+擋語法垃圾（黏路徑等）— 找「路徑驗證在哪」就是這裡。
 
 動機（2026-07-21 煥民新村備份 6 連敗）：Windows 對映磁碟綁定登入 session、
 且各機不一定都有掛——任務在哪台跑就用哪台的磁碟視角，T:\\ 一缺整包炸，
@@ -83,6 +87,29 @@ def translate_path(path: str, mapping: dict | None = None) -> str:
     return f"{root}\\{rest}" if rest else root
 
 
+_PATH_BAD_CHARS = set('<>"|?*')
+
+
+def invalid_path_reason(path: str) -> str | None:
+    """Windows 路徑語法快篩 — 回中文原因字串，合法回 None。
+
+    2026-07-23 實案：書籤帶入 C:/A_TEST_PROXY 後使用者在尾端貼上 S:/... 沒清空
+    → 黏成 C:/A_TEST_PROXYS:/...，派發後全機隊 WinError 123。這類垃圾要在
+    進件當下擋（400 + 明確訊息），不是到執行機才炸。"""
+    p = str(path or "")
+    if not p:
+        return None
+    # 冒號只允許出現在磁碟代號位（index 1）；UNC 開頭 \\ 無冒號
+    for i, ch in enumerate(p):
+        if ch == ":" and i != 1:
+            return f"第 {i + 1} 字元含非法冒號（像是兩段路徑黏在一起）"
+        if ch in _PATH_BAD_CHARS:
+            return f"含非法字元「{ch}」"
+        if ord(ch) < 32:
+            return "含控制字元"
+    return None
+
+
 def make_translator() -> Callable[[str], str]:
     """回 tr(path)：以當下 effective_map 翻譯 — 同步端點進件用。
     需要變動明細（[UNC] log）的走 translate_job_request。"""
@@ -106,10 +133,42 @@ _JOB_PATH_FIELDS: dict = {
 }
 
 
+def _iter_job_paths(req, task_type: str):
+    """依 _JOB_PATH_FIELDS 展開 request 的所有路徑值 → (欄位名, 路徑)。
+    ⚠ kind 分派與 translate_job_request（下方）鏡像 — 加新 kind 兩處同步。"""
+    for name, kind in _JOB_PATH_FIELDS.get(task_type, []):
+        val = getattr(req, name, None)
+        if not val:
+            continue
+        if kind == "str":
+            yield name, val
+        elif kind == "pairs":
+            for a, b in val:
+                yield name, a
+                yield name, b
+        elif kind == "cards":
+            for _n, p in val:
+                yield name, p
+        elif kind == "list":
+            for p in val:
+                yield name, p
+
+
+def first_invalid_job_path(req, task_type: str) -> str | None:
+    """回第一個語法不合法路徑的中文錯誤（欄位點名），全合法回 None。
+    2026-07-23 實案（C:/A_TEST_PROXYS: 黏路徑）的進件防線。"""
+    for name, p in _iter_job_paths(req, task_type):
+        why = invalid_path_reason(p)
+        if why:
+            return f"{name} 路徑格式不正確：{why} — {str(p)[:80]}"
+    return None
+
+
 def translate_job_request(req, task_type: str) -> list:
     """就地把任務 request 的路徑欄位翻成 UNC，回傳變動明細 ["原 → 新", ...]
     （無對應型別 → []，如 drone_meta/timeline_export 刻意不翻——路徑綁定
-    設定它的那台機器）。欄位不存在則跳過（如 TtsRequest 沒有 reference_audio）。"""
+    設定它的那台機器）。欄位不存在則跳過（如 TtsRequest 沒有 reference_audio）。
+    ⚠ kind 分派與 _iter_job_paths（上方）鏡像 — 加新 kind 兩處同步。"""
     fields = _JOB_PATH_FIELDS.get(task_type)
     if not fields:
         return []

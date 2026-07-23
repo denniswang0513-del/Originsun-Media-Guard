@@ -37,8 +37,14 @@ async def enqueue_job(request: Any, project_name: str, task_type: str) -> tuple:
 
     # 磁碟代號 → UNC（core/drive_map）：中央咽喉統一翻譯 — HTTP 端點、排程、
     # 書籤重放三條進件路都經過這裡，任務在哪台機器執行都不再依賴磁碟掛載。
-    from core.drive_map import translate_job_request
+    # 翻譯後做路徑語法快篩（欄位點名的 400）— 垃圾路徑在進件當下擋，
+    # 不是到執行機才全機隊 WinError 123。
+    from core.drive_map import translate_job_request, first_invalid_job_path
     _path_changes = translate_job_request(request, task_type)
+    _bad = first_invalid_job_path(request, task_type)
+    if _bad:
+        from fastapi import HTTPException
+        raise HTTPException(status_code=400, detail=_bad)
 
     job_id = getattr(request, 'job_id', '') or uuid.uuid4().hex[:8]
     request.job_id = job_id

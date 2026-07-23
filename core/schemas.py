@@ -1056,3 +1056,12 @@ class BookmarkCreateRequest(BaseModel):
 class BookmarkUpdateRequest(BaseModel):
     name: Optional[str] = None
     request: Optional[dict] = None
+
+
+# ── 每週工作日誌（journal）──
+
+class JournalPut(BaseModel):
+    """PUT /api/v1/journal/mine — 三區塊全量替換（strip/去空/上限在 core.journal_logic）。"""
+    wins: List[str] = []
+    challenges: List[str] = []
+    learnings: List[str] = []

@@ -134,6 +134,8 @@ ALL_MODULES = [
     'me_projects', 'me_profile', 'me_todos', 'me_finance',
     # N-hr 人事管理：出缺勤 tab + /my.html 我的請假卡
     'hr_leave', 'me_leave',
+    # 每週工作日誌（全員可讀、本人可寫；新註冊預設就有 — api_auth._REGISTER_DEFAULT_MODULES）
+    'journal',
 ]
 
 

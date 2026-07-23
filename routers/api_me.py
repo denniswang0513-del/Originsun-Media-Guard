@@ -36,13 +36,6 @@ router = APIRouter(prefix="/api/v1/me", tags=["me"])
 ME_MODULE_KEYS = ("me_projects", "me_profile", "me_todos", "me_finance", "me_leave")
 
 
-def _allowed_sections(payload: dict) -> list:
-    """依 token 算出此帳號開放的卡片 key。
-    「admin 全開」交給 grant_admin_all_modules（RBAC 單一來源，勿在此重寫）。"""
-    mods = grant_admin_all_modules(payload.get("access_level"), payload.get("modules") or [])
-    return [k for k in ME_MODULE_KEYS if k in mods]
-
-
 def _profile_dict(s) -> dict:
     """crm_staff 安全子集 — 不含費率/身分證/銀行/website_* 欄位。"""
     return {
@@ -65,8 +58,13 @@ def _profile_dict(s) -> dict:
 async def my_workspace(request: Request):
     """個人工作台 bundle — 只回帳號有權限的區塊；未綁定人員檔案時
     人員鍵區塊（profile/projects/finance）回空並帶 bound=False。"""
-    payload = check_admin_or_module(request, *ME_MODULE_KEYS)
-    allowed = _allowed_sections(payload)
+    payload = check_admin_or_module(request, *ME_MODULE_KEYS, "journal")
+    mods = grant_admin_all_modules(payload.get("access_level"), payload.get("modules") or [])
+    allowed = [k for k in ME_MODULE_KEYS if k in mods]
+    # 週誌卡宣告式閘門 — my.html 依 allowed 決定要不要抓 /api/v1/journal/mine
+    # （資料不進 bundle；避免前端用「打端點看 403」探測權限的偏差模式）
+    if "journal" in mods:
+        allowed.append("journal")
     ident = await resolve_current_staff(request)
     staff = ident["staff"]
     out = {
@@ -76,8 +74,7 @@ async def my_workspace(request: Request):
         "allowed": allowed,
         # 具人事管理權限（hr_leave 模組或 admin）→ /my.html 頂欄顯示「人事管理」
         # 深連結（官網 STAFF 入口一路通到內部簽核頁）
-        "hr_manager": "hr_leave" in grant_admin_all_modules(
-            payload.get("access_level"), payload.get("modules") or []),
+        "hr_manager": "hr_leave" in mods,
     }
     factory = db_factory_or_503()
     async with factory() as session:

@@ -139,3 +139,40 @@ class TestTranslateJobRequest:
             for name, _kind in fields:
                 assert any(name in c.model_fields for c in classes), \
                     f"{task_type}.{name} 不存在於 {[c.__name__ for c in classes]}"
+
+
+class TestInvalidPathReason:
+    """路徑語法快篩 — 2026-07-23 C:/A_TEST_PROXYS: 黏路徑實案的進件防線。"""
+
+    def test_glued_paths_caught(self):
+        from core.drive_map import invalid_path_reason
+        assert invalid_path_reason("C:/A_TEST_PROXYS:/20260706_x/99_Transcode") is not None
+
+    def test_normal_paths_ok(self):
+        from core.drive_map import invalid_path_reason
+        for p in (r"T:\專案\00_Edit", r"\192.168.1.132\Project_Longterm\a",
+                  "C:/A_TEST_PROXY", "", r"E:\卡匣"):
+            assert invalid_path_reason(p) is None, p
+
+    def test_bad_chars(self):
+        from core.drive_map import invalid_path_reason
+        assert invalid_path_reason(r"C:\a<b") is not None
+        assert invalid_path_reason(r"C:\a|b") is not None
+
+    def test_first_invalid_job_path_names_field(self, monkeypatch):
+        monkeypatch.setattr(config, "load_settings", lambda: {})
+        import core.drive_map as dm
+        monkeypatch.setattr(dm, "_map_cache", (None, None))
+        from core.drive_map import first_invalid_job_path
+        r = SimpleNamespace(sources=[r"E:\ok"], dest_dir="C:/A_TEST_PROXYS:/x")
+        msg = first_invalid_job_path(r, "concat")
+        assert msg and "dest_dir" in msg and "冒號" in msg
+
+    def test_cards_and_pairs_expanded(self, monkeypatch):
+        monkeypatch.setattr(config, "load_settings", lambda: {})
+        from core.drive_map import first_invalid_job_path
+        r = SimpleNamespace(local_root="", nas_root="", proxy_root="", report_output="",
+                            cards=[("A", "C:/bad:/path")])
+        assert "cards" in (first_invalid_job_path(r, "backup") or "")
+        r2 = SimpleNamespace(pairs=[(r"T:\ok", "C:/bad:/x")])
+        assert "pairs" in (first_invalid_job_path(r2, "verify") or "")

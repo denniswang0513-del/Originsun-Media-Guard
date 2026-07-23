@@ -18,6 +18,7 @@ export const TAB_MAP = {
     crm_invoices: 'tab_crm_invoices', timesheets: 'tab_timesheets',
     portal: 'tab_portal',
     hr_leave: 'tab_hr_leave',
+    journal: 'tab_journal',
     website_admin: 'tab_website',
 };
 
@@ -52,6 +53,7 @@ export const TAB_LOADERS = [
     ['crm_invoices',  './tabs/finance/finance.html',         './tabs/finance/finance.js',         'initFinanceTab'],
     ['timesheets',    './tabs/timesheets/timesheets.html',   './tabs/timesheets/timesheets.js',   'initTimesheetsTab'],
     ['hr_leave',      './tabs/hr_leave/hr_leave.html',       './tabs/hr_leave/hr_leave.js',       'initHrLeaveTab'],
+    ['journal',       './tabs/journal/journal.html',         './tabs/journal/journal.js',         'initJournalTab'],
     ['portal',        './tabs/portal/portal.html',           './tabs/portal/portal.js',           'initPortalTab'],
     ['website_admin', './tabs/website/website.html',         './tabs/website/website.js',         'initWebsiteTab'],
 ];
@@ -100,6 +102,7 @@ export const TAB_GROUPS = [
         { key: 'crm_staff',    label: '員工檔案' },
         { key: 'timesheets',   label: '專案工時' },
         { key: 'hr_leave',     label: '請補修' },
+        { key: 'journal',      label: '工作日誌' },
     ] },
     // 財務管理（2026-07 起）：帳務六視圖自業務管理搬入；沿用 crm_invoices 單一
     // module key（零 RBAC 遷移，既有授權者自動看得到）。內部子視圖自管左側欄。
@@ -138,7 +141,7 @@ export const PERMISSION_GROUPS = [
     { id: 'preprod',    label: '📝 前期製作', modules: ['preprod_plan', 'preprod_locations', 'preprod_proposals', 'intel', 'equipment'] },
     { id: 'production', label: '🎬 後期製作', modules: ['backup', 'verify', 'transcode', 'concat', 'drone_meta', 'report', 'transcribe', 'tts', 'footage'] },
     { id: 'business',   label: '💼 業務管理', modules: ['crm_clients', 'crm_projects', 'crm_quotes', 'portal'] },
-    { id: 'hr',         label: '人事管理', modules: ['crm_staff', 'timesheets', 'hr_leave'] },
+    { id: 'hr',         label: '人事管理', modules: ['crm_staff', 'timesheets', 'hr_leave', 'journal'] },
     { id: 'finance',    label: '💰 財務管理', modules: ['crm_invoices'] },
     { id: 'website',    label: '🌐 官網管理', modules: ['website_admin'] },
     // N0 個人工作台 — 獨立頁 /my.html 的卡片（無 SPA tab，僅權限編輯器用；

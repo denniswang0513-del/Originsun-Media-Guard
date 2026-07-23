@@ -1,7 +1,7 @@
 """SQLAlchemy ORM models for Originsun Media Guard Pro."""
 
 try:
-    from sqlalchemy import Column, String, Text, Boolean, Integer, BigInteger, Float, DateTime, func, Index, UniqueConstraint
+    from sqlalchemy import Column, String, Text, Boolean, Integer, BigInteger, Float, Date, DateTime, func, Index, UniqueConstraint
     from sqlalchemy.dialects.postgresql import JSONB
     from sqlalchemy.orm import DeclarativeBase
     _HAS_SQLALCHEMY = True
@@ -11,7 +11,7 @@ except ImportError:
     class _Stub:
         def __call__(self, *a, **kw): return self
         def __getattr__(self, _): return self
-    Column = String = Text = Boolean = Integer = BigInteger = Float = DateTime = func = Index = UniqueConstraint = _Stub()
+    Column = String = Text = Boolean = Integer = BigInteger = Float = Date = DateTime = func = Index = UniqueConstraint = _Stub()
     JSONB = _Stub()
     class DeclarativeBase: pass
 
@@ -1271,4 +1271,57 @@ class ProjectMediaFile(Base):
     category = Column(String(50), default="")                    # 空=未分類
     uploader_name = Column(String(100), default="")
     size_bytes = Column(BigInteger, default=0)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+
+# ═══════════════════════════════════════════════════════════════════
+# 每週工作日誌（journal）— routers/api_journal.py
+# 每人每週一份（username + week_start 唯一）；三區塊分開建表（owner 明確要求：
+# 「學到了什麼」要能獨立跨週彙整成學習庫）。全員可讀、本人可寫。
+# ═══════════════════════════════════════════════════════════════════
+
+class WorkJournal(Base):
+    """週誌殼 — 一人一週一份；week_start = 該週週一（伺服端正規化，core.journal_logic）。"""
+    __tablename__ = "work_journals"
+
+    id = Column(String(32), primary_key=True)                    # uuid4 hex
+    username = Column(String(64), index=True, nullable=False)    # token sub（users.username）
+    week_start = Column(Date, index=True, nullable=False)        # 該週週一
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+    __table_args__ = (UniqueConstraint("username", "week_start",
+                                       name="uq_journal_user_week"),)
+
+
+class JournalWin(Base):
+    """順利的事與想感謝的人 — 週誌條目（PUT 全量替換，sort_order=列表順序）。"""
+    __tablename__ = "journal_wins"
+
+    id = Column(String(32), primary_key=True)                    # uuid4 hex
+    journal_id = Column(String(32), index=True, nullable=False)  # soft FK → work_journals.id
+    content = Column(Text)
+    sort_order = Column(Integer, default=0)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+
+class JournalChallenge(Base):
+    """遇到哪些挑戰 — 同構 JournalWin。"""
+    __tablename__ = "journal_challenges"
+
+    id = Column(String(32), primary_key=True)                    # uuid4 hex
+    journal_id = Column(String(32), index=True, nullable=False)  # soft FK → work_journals.id
+    content = Column(Text)
+    sort_order = Column(Integer, default=0)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+
+class JournalLearning(Base):
+    """學到了什麼 — 同構 JournalWin；獨立成表供跨週彙整（GET /journal/learnings 學習庫）。"""
+    __tablename__ = "journal_learnings"
+
+    id = Column(String(32), primary_key=True)                    # uuid4 hex
+    journal_id = Column(String(32), index=True, nullable=False)  # soft FK → work_journals.id
+    content = Column(Text)
+    sort_order = Column(Integer, default=0)
     created_at = Column(DateTime(timezone=True), server_default=func.now())

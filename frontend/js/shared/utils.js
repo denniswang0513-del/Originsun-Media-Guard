@@ -11,6 +11,17 @@ export function getAgentBaseUrl() {
     return window.location.origin;
 }
 
+// 帶 Bearer token 的 JSON fetch（body 傳物件自動 stringify）。
+// hr_leave（hfetch）/timesheets（tfetch）/my.html（mfetch）各有同形本地版——
+// 新分頁一律 import 這份；舊檔待翻修時收斂，勿再複製第 N 份。
+export function authFetch(path, opts = {}) {
+    const headers = Object.assign({ 'Content-Type': 'application/json' }, opts.headers || {});
+    const tok = localStorage.getItem('auth_token');
+    if (tok) headers['Authorization'] = 'Bearer ' + tok;
+    return fetch(path, Object.assign({}, opts, { headers,
+        body: opts.body !== undefined ? JSON.stringify(opts.body) : undefined }));
+}
+
 export async function resolveDropPath(e, file, index = 0) {
     // 方法1：text/uri-list（RFC 2483，CRLF 分隔）
     const uriList = e.dataTransfer.getData('text/uri-list');
@@ -446,6 +457,7 @@ window.collectSelectedHost = collectSelectedHost;
 
 // Make accessible to global scope if needed during transition
 window.resolveDropPath = resolveDropPath;
+window.authFetch = authFetch;
 window.appendLog = appendLog;
 window.pickPath = pickPath;
 window.getComputeBaseUrl = getComputeBaseUrl;

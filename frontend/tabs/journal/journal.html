@@ -1,0 +1,71 @@
+<!--
+    journal.html — 人事管理 › 工作日誌 Tab 殼（每週三問：順利與感謝 / 挑戰 / 學習）
+    內容由 journal.js render 進 #jr-content。設計鐵則：UI 無 emoji（owner 2026-07-17）。
+-->
+<div id="jr-root">
+    <div id="jr-content" style="color:#888;padding:40px;text-align:center;">載入中…</div>
+</div>
+
+<style>
+    #jr-root h2 { color: #fff; font-size: 18px; margin: 0 0 4px 0; font-weight: 600; }
+    #jr-root .jr-sub { color: #777; font-size: 12px; margin-bottom: 16px; }
+    #jr-root .jr-card {
+        background: #232323; border: 1px solid #333; border-radius: 8px;
+        padding: 14px 16px; margin-bottom: 14px;
+    }
+    #jr-root .jr-card h3 { color: #ddd; font-size: 14px; margin: 0 0 10px 0; font-weight: 600; }
+    #jr-root .jr-btn {
+        background: #3b82f6; color: #fff; border: none; padding: 6px 12px;
+        border-radius: 4px; font-size: 12px; cursor: pointer;
+    }
+    #jr-root .jr-btn:hover { background: #2563eb; }
+    #jr-root .jr-btn.ghost { background: transparent; border: 1px solid #444; color: #ccc; }
+    #jr-root .jr-btn.ghost:hover { background: #333; }
+    #jr-root .jr-btn.small { padding: 3px 10px; font-size: 11.5px; }
+    #jr-root .jr-pills { display: flex; gap: 8px; margin-bottom: 14px; }
+    #jr-root .jr-pill {
+        background: transparent; border: 1px solid #444; color: #aaa;
+        border-radius: 999px; padding: 5px 16px; font-size: 12.5px; cursor: pointer;
+    }
+    #jr-root .jr-pill:hover { border-color: #666; color: #ddd; }
+    #jr-root .jr-pill.active { background: #3b82f6; border-color: #3b82f6; color: #fff; }
+    #jr-root select, #jr-root input, #jr-root textarea {
+        background: #1a1a1a; border: 1px solid #333; color: #ddd; border-radius: 4px;
+        padding: 6px 8px; font-size: 12.5px;
+    }
+    #jr-root textarea {
+        width: 100%; min-height: 88px; resize: vertical; line-height: 1.7;
+        box-sizing: border-box; font-family: inherit;
+    }
+    #jr-root textarea:disabled { color: #777; background: #161616; cursor: not-allowed; }
+    #jr-root .jr-form { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+    #jr-root .jr-weeknav {
+        display: flex; align-items: center; justify-content: space-between;
+        gap: 10px; margin-bottom: 14px;
+    }
+    #jr-root .jr-weektitle {
+        color: #fff; font-size: 15px; font-weight: 600; display: flex;
+        align-items: center; gap: 10px; font-variant-numeric: tabular-nums;
+    }
+    #jr-root .jr-block { margin-bottom: 12px; }
+    #jr-root .jr-block h4 { color: #aaa; font-size: 12.5px; margin: 0 0 6px 0; font-weight: 600; }
+    #jr-root .jr-block ul { margin: 0; padding-left: 18px; }
+    #jr-root .jr-block li { color: #ccc; font-size: 12.5px; line-height: 1.7; }
+    #jr-root .jr-wall {
+        display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 12px;
+    }
+    #jr-root .jr-person-card { background: #1e1e1e; border: 1px solid #333; border-radius: 8px; padding: 12px 14px; }
+    #jr-root .jr-person-name {
+        color: #fff; font-size: 13.5px; font-weight: 600; margin-bottom: 8px;
+        padding-bottom: 6px; border-bottom: 1px solid #2c2c2c;
+    }
+    #jr-root .jr-timeline-card { background: #1e1e1e; border: 1px solid #333; border-radius: 8px; padding: 12px 14px; margin-bottom: 12px; }
+    #jr-root .jr-learn-item { padding: 10px 2px; border-bottom: 1px solid #2c2c2c; }
+    #jr-root .jr-learn-item:last-of-type { border-bottom: none; }
+    #jr-root .jr-learn-content { color: #ccc; font-size: 13px; line-height: 1.7; white-space: pre-wrap; }
+    #jr-root .jr-learn-meta { color: #777; font-size: 11.5px; margin-top: 4px; }
+    #jr-root .jr-hint { color: #777; font-size: 11.5px; }
+    #jr-root .jr-msg-ok { color: #4ade80; font-size: 12px; }
+    #jr-root .jr-msg-err { color: #f87171; font-size: 12px; }
+    #jr-root .jr-empty { color: #666; padding: 14px 0; text-align: center; font-size: 12.5px; }
+</style>

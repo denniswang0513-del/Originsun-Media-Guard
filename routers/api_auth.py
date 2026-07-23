@@ -77,10 +77,11 @@ _REGISTER_TAX_ID = "90371657"
 _REGISTER_COMPANY = "源日影像"
 # 選擇題選項（正解 + 干擾項）— 回給前端渲染，順序由前端洗牌
 _REGISTER_COMPANY_CHOICES = ["源日影像", "日源映畫", "源源製作", "日日有限公司"]
-# 新帳號預設權限：只開「編修個人基本資料」（owner 2026-07-22 修正 — 其餘功能
-# 由管理員在「使用者管理」開通）。⚠ 不能給空 modules：shouldShowTab 對
-# 「已登入 + 空 modules」= 顯示全部 tab（tab-config.js 的向下相容行為）。
-_REGISTER_DEFAULT_MODULES = ['me_profile']
+# 新帳號預設權限：「編修個人基本資料」+「工作日誌」（owner 2026-07-22：新註冊
+# 直接看得到工作日誌；其餘功能由管理員在「使用者管理」開通）。⚠ 不能給空
+# modules：shouldShowTab 對「已登入 + 空 modules」= 顯示全部 tab
+# （tab-config.js 的向下相容行為）。
+_REGISTER_DEFAULT_MODULES = ['me_profile', 'journal']
 # 防暴力：同 IP 連錯 N 次驗證題 → 鎖 M 秒（單機記憶體即可）
 _REGISTER_MAX_FAILS = 5
 _REGISTER_LOCK_SEC = 600
