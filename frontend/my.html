@@ -422,11 +422,20 @@ async function loadJournalCard(grid) {
     WS.journal = await r.json();
     grid.appendChild(cardJournal(WS.journal));
 }
-// ⚠ jrWeekRange/JR_SECTIONS 是 js/shared/journal-core.js（weekRange/BLOCKS）的鏡像
-//   （本頁 inline script 非 module 不能 import）— 改格式或三問文案，兩邊同步
+// ⚠ jrWeekRange/JR_SECTIONS/jrThisWeek/jrShiftWeek 是 js/shared/journal-core.js
+//   （weekRange/BLOCKS/thisWeekStart/shiftWeek）的鏡像（本頁 inline script 非 module
+//   不能 import）— 改格式、三問文案或週期算法，兩邊同步
 const jrP2 = n => String(n).padStart(2, "0");
+const jrISO = d => `${d.getFullYear()}-${jrP2(d.getMonth() + 1)}-${jrP2(d.getDate())}`;
+const jrParse = s => { const [y, m, d] = String(s).split("-").map(Number); return new Date(y, m - 1, d); };
+function jrThisWeek() {
+    const n = new Date(), d = new Date(n.getFullYear(), n.getMonth(), n.getDate());
+    d.setDate(d.getDate() - ((d.getDay() + 6) % 7));   // 週一起算
+    return jrISO(d);
+}
+function jrShiftWeek(iso, weeks) { const d = jrParse(iso); d.setDate(d.getDate() + weeks * 7); return jrISO(d); }
 function jrWeekRange(ws) {
-    const s = new Date(ws + "T00:00:00");
+    const s = jrParse(ws);
     const e = new Date(s); e.setDate(s.getDate() + 6);
     const l = `${s.getFullYear()}/${jrP2(s.getMonth() + 1)}/${jrP2(s.getDate())}`;
     const rr = (s.getFullYear() === e.getFullYear() ? "" : e.getFullYear() + "/")
@@ -434,35 +443,65 @@ function jrWeekRange(ws) {
     return `${l} – ${rr}`;
 }
 const JR_SECTIONS = [["wins", "順利的事與想感謝的人"], ["challenges", "遇到哪些挑戰"], ["learnings", "學到了什麼"]];
-// 卡片只操作「當週」（PUT 不帶 start）＝恆在可編輯窗；若未來加週切換，必須改為消費後端 editable 旗標
+
+// 可切換前後週；能否編輯一律看後端 editable 旗標（規則=當週可編至下一週）
 function cardJournal(j) {
     const card = makeCard("Weekly Journal", "工作日誌", "");
+    renderJournalBody(card, j);
+    return card;
+}
+function renderJournalBody(card, j) {
     const body = card.querySelector(".card-body");
+    const isThis = j.week_start === jrThisWeek();
+    const ta = (k) => `<textarea data-jr="${k}" rows="3" ${j.editable ? "" : "disabled"} style="width:100%;border:1px solid var(--line);border-radius:2px;padding:8px 10px;font-size:13px;font-family:inherit;color:var(--ink);background:${j.editable ? "#fff" : "#fafafa"};resize:vertical;outline:none;">${esc((j[k] || []).join("\n"))}</textarea>`;
     body.innerHTML = `
-        <div class="pf-line"><span class="k">本週</span><span class="v">${jrWeekRange(j.week_start)}</span></div>
+        <div class="pf-line" style="align-items:center;gap:8px;">
+            <button class="mini-btn jr-nav" data-jr-week="${jrShiftWeek(j.week_start, -1)}" title="上一週" style="padding:2px 9px;">‹</button>
+            <span class="k" style="flex:0 0 auto;">${isThis ? "本週" : "週次"}</span>
+            <span class="v" style="flex:1;text-align:center;">${jrWeekRange(j.week_start)}</span>
+            <button class="mini-btn jr-nav" data-jr-week="${jrShiftWeek(j.week_start, 1)}" title="下一週" style="padding:2px 9px;">›</button>
+        </div>
         ${JR_SECTIONS.map(([k, lbl]) => `
-            <div class="field" style="margin-top:10px;"><label>${lbl}（一行一條）</label>
-            <textarea data-jr="${k}" rows="3" style="width:100%;border:1px solid var(--line);border-radius:2px;padding:8px 10px;font-size:13px;font-family:inherit;color:var(--ink);resize:vertical;outline:none;">${esc((j[k] || []).join("\n"))}</textarea></div>`).join("")}
+            <div class="field" style="margin-top:10px;"><label>${lbl}（一行一條）</label>${ta(k)}</div>`).join("")}
         <div style="padding-top:12px;display:flex;gap:10px;align-items:center;flex-wrap:wrap;">
-            <button class="mini-btn" onclick="saveJournal(this)">儲存本週日誌</button>
+            ${j.editable
+                ? `<button class="mini-btn" onclick="saveJournal(this)">儲存${isThis ? "本週" : "這一週"}日誌</button>`
+                : `<span style="font-size:12px;color:var(--sub);">僅能編輯至下一週</span>`}
+            ${isThis ? "" : `<button class="mini-btn jr-nav" data-jr-week="${jrThisWeek()}">回到本週</button>`}
             <a class="mini-btn" href="/journal.html" style="text-decoration:none;">查看團隊週誌</a>
             <span class="jr-status" style="font-size:12px;color:var(--sub);"></span>
         </div>`;
-    return card;
+    body.querySelectorAll(".jr-nav").forEach(b => {
+        b.onclick = () => loadJournalWeek(card, b.dataset.jrWeek);
+    });
+}
+async function loadJournalWeek(card, weekStart) {
+    const st = card.querySelector(".jr-status");
+    if (st) st.textContent = "載入中…";
+    let r;
+    try { r = await mfetch("/api/v1/journal/mine?start=" + encodeURIComponent(weekStart)); }
+    catch (_) { if (st) st.textContent = "連線失敗"; return; }
+    if (!r.ok) { if (st) st.textContent = "載入失敗（" + r.status + "）"; return; }
+    const d = await r.json();
+    if (WS) WS.journal = d;          // 快取＝目前檢視的那一週（re-render 保持同一週）
+    renderJournalBody(card, d);
 }
 async function saveJournal(btn) {
     const card = btn.closest(".card");
     const get = k => (card.querySelector(`textarea[data-jr="${k}"]`).value || "")
         .split("\n").map(s => s.trim()).filter(Boolean);
     const st = card.querySelector(".jr-status");
+    const week = (WS && WS.journal && WS.journal.week_start) || jrThisWeek();
     btn.disabled = true;
     try {
-        const r = await mfetch("/api/v1/journal/mine", {
+        const r = await mfetch("/api/v1/journal/mine?start=" + encodeURIComponent(week), {
             method: "PUT",
             body: JSON.stringify({ wins: get("wins"), challenges: get("challenges"), learnings: get("learnings") }),
         });
         if (r.ok && WS) WS.journal = await r.json();   // 同步快取，re-render 顯示最新
-        st.textContent = r.ok ? "已儲存" : "儲存失敗（" + r.status + "）";
+        st.textContent = r.ok ? "已儲存"
+            : r.status === 403 ? "已超出可編輯期間（僅能編輯至下一週）"
+            : "儲存失敗（" + r.status + "）";
     } catch (_) { st.textContent = "連線失敗"; }
     btn.disabled = false;
     setTimeout(() => { st.textContent = ""; }, 3000);
