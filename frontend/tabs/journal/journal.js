@@ -4,8 +4,8 @@
 
 // 單一正本在 journal-core（/journal.html 官網風頁共用）：四問標籤/週期運算/
 // 序列化契約/渲染 helpers/API；esc/debounce 也經由它 re-export（正本在 CRM utils）
-import { BLOCKS, HINT_EDIT_WINDOW, MSG_EDIT_WINDOW, api, blockList, debounce,
-         esc, isAuthFail, itemsToLines, linesToItems, personCard,
+import { BLOCKS, HINT_EDIT_WINDOW, MSG_EDIT_WINDOW, SUBTITLE, api, blockList,
+         debounce, esc, isAuthFail, itemsToLines, linesToItems, personCard,
          shiftWeek as _shiftWeek, thisWeekStart as _thisWeekStart,
          weekRange } from '../../js/shared/journal-core.js';
 
@@ -33,7 +33,7 @@ function _authFail(...rs) {
 function _renderShell() {
     el('jr-content').innerHTML = `
         <h2>工作日誌</h2>
-        <div class="jr-sub">每週四問：順利的事與想感謝的人、遇到哪些挑戰、學到了什麼、其他主題。一行一條，週一起算。</div>
+        <div class="jr-sub">${SUBTITLE}</div>
         <div class="jr-pills">
             ${[['week', '週誌'], ['learn', '學習庫'], ['person', '依人回溯']].map(([k, l]) =>
                 `<button class="jr-pill ${_view === k ? 'active' : ''}" data-view="${k}">${l}</button>`).join('')}

@@ -1,8 +1,8 @@
 """api_journal.py — 每週工作日誌 API。
 
-每人每週一份（username=token sub、week_start=該週週一，伺服端正規化），三個
+每人每週一份（username=token sub、week_start=該週週一，伺服端正規化），四個
 區塊分開存表（wins 順利的事與想感謝的人 / challenges 遇到哪些挑戰 /
-learnings 學到了什麼 — owner 明確要求分表，「學到了什麼」要能獨立跨週彙整
+learnings 學到了什麼 / others 其他主題 — owner 明確要求分表，「學到了什麼」要能獨立跨週彙整
 成學習庫，見 GET /learnings）。全員可讀、本人可寫（/mine 一律以 token sub
 為對象，不收 client 傳入的 username）。⚠「全員」現況只對新註冊帳號成立
 （api_auth 預設 modules 含 journal）；既有帳號需管理員在使用者管理補開通，
@@ -29,7 +29,9 @@ from db.models import (JournalChallenge, JournalLearning, JournalOther,
 
 router = APIRouter(prefix="/api/v1/journal", tags=["journal"])
 
-# 四區塊 ↔ 表 對映（key 順序 = API 回應欄位順序）
+# 四區塊 ↔ 表 對映。key 集合必須與 JournalPut 欄位、前端 journal-core.js 的
+# BLOCKS 一致（守衛：tests/unit/test_journal.py TestSectionRegistryConsistency）
+# —— 前端漏 key 的後果是 PUT 全量替換把該區已存資料靜默清空，不是顯示問題。
 _SECTION_MODELS = (("wins", JournalWin),
                    ("challenges", JournalChallenge),
                    ("learnings", JournalLearning),
@@ -47,7 +49,7 @@ def _week_from_param(start: str) -> date:
 
 
 async def _entries_by_journal(session, journal_ids: list) -> dict:
-    """{journal_id: {"wins":[str], "challenges":[str], "learnings":[str]}}（依 sort_order）。"""
+    """{journal_id: {各區 key: [str]}}（key 集合=_SECTION_MODELS，依 sort_order）。"""
     out = {jid: {key: [] for key, _ in _SECTION_MODELS} for jid in journal_ids}
     if not journal_ids:
         return out
@@ -70,7 +72,7 @@ async def _get_shell(session, username: str, week: date):
 
 @router.get("/mine")
 async def my_journal(request: Request, start: str = ""):
-    """本人某週日誌（無記錄回三空陣列）。"""
+    """本人某週日誌（無記錄回各區空陣列）。"""
     payload = check_admin_or_module(request, "journal")
     username = (payload or {}).get("sub") or ""
     week = _week_from_param(start)

@@ -6,7 +6,9 @@
 <meta name="robots" content="noindex, nofollow">
 <title>工作日誌｜ORIGINSUN</title>
 <!-- 每週工作日誌（員工自助頁家族：my.html / media-log.html 同語彙）：
-     白底/旭日紅/大字距/髮絲邊框。三檢視：週誌（我的編輯卡+團隊牆）/學習庫/依人回溯。
+     白底/旭日紅/大字距/髮絲邊框。三檢視：週誌（我的編輯卡+團隊牆）/學習庫/依人回溯
+     —— 2026-07-24 起 pill 暫隱藏只顯示週誌（見 .pill-row 註解）；內部分頁 tabs/journal
+     （管理/HR 用）仍顯示三檢視，刻意不同步。
      共用核心 /js/shared/journal-core.js（四問標籤、週期運算、API）；本頁只做渲染。
      後端契約：/api/v1/journal/*（Bearer token；週=週一起算；可編輯窗由後端 editable 旗標決定）。 -->
 <style>
@@ -211,7 +213,8 @@ footer .eyebrow { font-size: 10px; }
     <div class="hero">
       <div class="eyebrow">Weekly Journal <span class="accent">工作日誌</span></div>
       <h1>每週工作日誌</h1>
-      <div class="sub">每週四問：順利的事與想感謝的人、遇到哪些挑戰、學到了什麼、其他主題。一行一條，週一起算。</div>
+      <!-- 文字由 journal-core SUBTITLE 覆寫（BLOCKS 導出）— 這裡只是 JS 前的佔位 -->
+      <div class="sub" id="hero-sub">每週四問。一行一條，週一起算。</div>
     </div>
 
     <!-- owner 2026-07-24：三檢視切換先隱藏（只留週誌）。學習庫/依人回溯的程式碼
@@ -229,12 +232,13 @@ footer .eyebrow { font-size: 10px; }
 <footer><div class="eyebrow">© Originsun Studio · Internal</div></footer>
 
 <script type="module">
-import { BLOCKS, HINT_EDIT_WINDOW, MSG_EDIT_WINDOW, api, blockList, debounce,
-         esc, isAuthFail, itemsToLines, linesToItems, personCard,
+import { BLOCKS, HINT_EDIT_WINDOW, MSG_EDIT_WINDOW, SUBTITLE, api, blockList,
+         debounce, esc, isAuthFail, itemsToLines, linesToItems, personCard,
          shiftWeek, thisWeekStart, weekRange } from '/js/shared/journal-core.js';
 
 const $ = (id) => document.getElementById(id);
 const NET_ERR = '伺服器暫時無法連線，請稍後再試';
+$('hero-sub').textContent = SUBTITLE;   // 副標單一來源在 journal-core（BLOCKS 導出）
 
 // embed 偵測：?embed 參數優先（?embed=0 = 逃生口），沒帶參數時 iframe 自動視為 embed
 // （與 showcase-edit.html 同一套慣例）

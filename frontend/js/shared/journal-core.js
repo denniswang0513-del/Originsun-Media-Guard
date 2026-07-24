@@ -10,13 +10,18 @@ import { authFetch } from './utils.js';
 export { esc, debounce } from '../../tabs/website/website-utils.js';
 import { esc as _esc } from '../../tabs/website/website-utils.js';
 
-// 四問標籤（key 順序 = API 回應欄位順序；後端對應 api_journal._SECTION_MODELS）
+// 四問標籤。key 集合必須與後端 api_journal._SECTION_MODELS 一致（有 pytest 守衛）
+// —— 這裡漏一個後端 key，儲存時 PUT 少該欄 → 後端當空陣列 → 該區被靜默清空。
 export const BLOCKS = [
     ['wins', '順利的事與想感謝的人'],
     ['challenges', '遇到哪些挑戰'],
     ['learnings', '學到了什麼'],
     ['others', '其他主題'],
 ];
+
+// 副標（兩個頁面共用；問數與標籤由 BLOCKS 導出 — 加第五問自動跟上）
+export const SUBTITLE = `每週${'一二三四五六七八九'[BLOCKS.length - 1]}問：`
+    + `${BLOCKS.map(([, l]) => l).join('、')}。一行一條，週一起算。`;
 
 // 可編輯窗文案（後端規則：當週可編輯至下一週；PUT 超窗回 403）
 export const HINT_EDIT_WINDOW = '僅能編輯至下一週';

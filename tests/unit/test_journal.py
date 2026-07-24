@@ -94,22 +94,40 @@ class TestCleanEntries:
         assert cleaned == ["y" * MAX_ENTRY_LEN]
 
 
-class TestEntryTablesIsomorphic:
-    """四張 entry 表（wins/challenges/learnings/others）owner 要求分表，但 router 的
-    _SECTION_MODELS 假設同構 — 未來加欄位漏改某一張，在這裡先紅。"""
+class TestSectionRegistryConsistency:
+    """entry 表 owner 要求分表、router 假設同構，且三方（registry / JournalPut /
+    前端 BLOCKS）必須同一組 key —— 任何一方漏改都是靜默壞法，這裡先紅。"""
 
     def test_columns_identical(self):
-        from db.models import (JournalChallenge, JournalLearning, JournalOther,
-                               JournalWin)
+        # model 清單從 registry 導出 — 加第五表只改 registry，本測試自動涵蓋
+        from routers.api_journal import _SECTION_MODELS
 
         def cols(model):
             return {(c.name, type(c.type).__name__) for c in model.__table__.columns}
 
-        assert cols(JournalWin) == cols(JournalChallenge) \
-            == cols(JournalLearning) == cols(JournalOther)
+        models = [m for _, m in _SECTION_MODELS]
+        base = cols(models[0])
+        for m in models[1:]:
+            assert cols(m) == base, f"{m.__tablename__} 與 {models[0].__tablename__} 欄位不同構"
 
-    def test_section_models_cover_all_entry_tables(self):
-        # registry 漏列新表 → API 靜默不讀不寫該區，這裡先紅
+    def test_registry_matches_put_schema(self):
+        # registry key 缺 JournalPut 欄位 → PUT getattr 直接 500；反向漏加欄
+        # → 該區永遠收不到資料。兩邊互為鏡像，這裡釘死。
+        from core.schemas import JournalPut
         from routers.api_journal import _SECTION_MODELS
-        assert [k for k, _ in _SECTION_MODELS] == \
-            ["wins", "challenges", "learnings", "others"]
+        assert [k for k, _ in _SECTION_MODELS] == list(JournalPut.model_fields)
+
+    def test_frontend_blocks_match_registry(self):
+        # 前端 BLOCKS 漏一個後端 key → saveMine 的 PUT body 少該欄 → 預設 []
+        # → 全量替換把該區已存資料「靜默清空」。失敗模式=資料流失，值得跨語言守。
+        import re
+        from pathlib import Path
+
+        from routers.api_journal import _SECTION_MODELS
+        root = Path(__file__).resolve().parents[2]   # tests/unit/ → repo root
+        js = (root / "frontend/js/shared/journal-core.js").read_text(encoding="utf-8")
+        m = re.search(r"export const BLOCKS = \[(.*?)\];", js, re.S)
+        assert m, "journal-core.js 找不到 BLOCKS 陣列（改名了？測試要跟上）"
+        keys = re.findall(r"\['(\w+)',", m.group(1))
+        assert keys == [k for k, _ in _SECTION_MODELS], \
+            f"前端 BLOCKS {keys} != 後端 registry {[k for k, _ in _SECTION_MODELS]}"
