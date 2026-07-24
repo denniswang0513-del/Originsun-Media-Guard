@@ -5,9 +5,9 @@
 // 單一正本在 journal-core（/journal.html 官網風頁共用）：四問標籤/週期運算/
 // 序列化契約/渲染 helpers/API；esc/debounce 也經由它 re-export（正本在 CRM utils）
 import { BLOCKS, HINT_EDIT_WINDOW, MSG_EDIT_WINDOW, SUBTITLE, api, blockList,
-         debounce, esc, isAuthFail, itemsToLines, linesToItems, personCard,
-         shiftWeek as _shiftWeek, thisWeekStart as _thisWeekStart,
-         weekRange } from '../../js/shared/journal-core.js';
+         debounce, ensurePasteBase, esc, isAuthFail, itemsToLines, linesToItems,
+         personCard, renderRich, shiftWeek as _shiftWeek,
+         thisWeekStart as _thisWeekStart, weekRange } from '../../js/shared/journal-core.js';
 
 const el = (id) => document.getElementById(id);
 // SPA 深色語彙的 class 組（官網風 /journal.html 傳自己的一組）
@@ -59,6 +59,7 @@ async function _loadWeek() {
     const [mr, wr] = await Promise.all([
         api.mine(_weekStart),
         api.week(_weekStart),
+        ensurePasteBase(),      // 貼圖 <img> 基底與資料並行預取（快取後零成本）
     ]);
     if (_authFail(mr, wr)) return;
     if (!mr.ok || !wr.ok) { v.innerHTML = `<div class="jr-empty">載入失敗（${mr.status} / ${wr.status}）</div>`; return; }
@@ -95,7 +96,7 @@ function _renderWeek(mine, week) {
         <div class="jr-card">
             <h3>團隊週誌（${journals.length}）</h3>
             ${journals.length
-                ? `<div class="jr-wall">${journals.map(j => personCard(j, esc(j.username), { ...(_CARD_CLS), card: 'jr-person-card' })).join('')}</div>`
+                ? `<div class="jr-wall">${journals.map(j => personCard(j, esc(j.display_name || j.username), { ...(_CARD_CLS), card: 'jr-person-card' })).join('')}</div>`
                 : '<div class="jr-empty">這一週還沒有人寫日誌</div>'}
         </div>`;
     el('jr-prev').onclick = () => { _weekStart = _shiftWeek(_weekStart, -1); _loadWeek(); };
@@ -155,7 +156,7 @@ async function _loadLearn() {
                 <input type="text" id="jr-l-q" placeholder="搜尋學習內容" value="${esc(_learn.q)}" style="width:220px;">
                 <select id="jr-l-user">
                     <option value="">全部人員</option>
-                    ${(_people || []).map(p => `<option value="${esc(p.username)}" ${p.username === _learn.username ? 'selected' : ''}>${esc(p.username)}</option>`).join('')}
+                    ${(_people || []).map(p => `<option value="${esc(p.username)}" ${p.username === _learn.username ? 'selected' : ''}>${esc(p.display_name || p.username)}</option>`).join('')}
                 </select>
             </div>
             <div id="jr-learn-list"><div class="jr-empty">載入中…</div></div>
@@ -182,8 +183,8 @@ async function _refreshLearn(append) {
     list.innerHTML = `
         ${_learn.items.map(it => `
             <div class="jr-learn-item">
-                <div class="jr-learn-content">${esc(it.content)}</div>
-                <div class="jr-learn-meta">${esc(it.username)} · ${weekRange(it.week_start)}</div>
+                <div class="jr-learn-content">${renderRich(it.content)}</div>
+                <div class="jr-learn-meta">${esc(it.display_name || it.username)} · ${weekRange(it.week_start)}</div>
             </div>`).join('')}
         ${_learn.items.length < _learn.total
             ? '<div style="text-align:center;margin-top:10px;"><button class="jr-btn ghost" id="jr-l-more">載入更多</button></div>'
@@ -202,7 +203,7 @@ async function _loadPerson() {
             <div class="jr-form" style="margin-bottom:10px;">
                 <select id="jr-p-user">
                     <option value="">請選擇人員</option>
-                    ${(_people || []).map(p => `<option value="${esc(p.username)}" ${p.username === _personSel ? 'selected' : ''}>${esc(p.username)}（${p.weeks} 週）</option>`).join('')}
+                    ${(_people || []).map(p => `<option value="${esc(p.username)}" ${p.username === _personSel ? 'selected' : ''}>${esc(p.display_name || p.username)}（${p.weeks} 週）</option>`).join('')}
                 </select>
             </div>
             <div id="jr-person-list"><div class="jr-empty">請先選擇人員</div></div>
@@ -227,5 +228,5 @@ async function _refreshPerson() {
 
 export async function initJournalTab() {
     _renderShell();
-    await _showView(_view);
+    await _showView(_view);   // 貼圖基底在 _loadWeek 的 Promise.all 併行預取
 }

@@ -45,6 +45,7 @@ _ROUTER_MODULES = [
     'api_me',
     'api_hr',
     'api_journal',
+    'api_paste',
 ]
 _routers = {}
 for _mod_name in _ROUTER_MODULES:

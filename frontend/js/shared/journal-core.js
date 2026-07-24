@@ -62,9 +62,14 @@ export const itemsToLines = (arr) => (arr || []).join('\n');
 export const isAuthFail = (...rs) =>
     rs.some(r => r && (r.status === 401 || r.status === 403));
 
+// ── 貼圖 token → <img>：正本在 paste-image.js（上傳與渲染同一契約的兩半）——
+// 這裡 re-export 讓週誌兩個消費端維持單一 import 來源（同 esc/debounce 慣例）。
+export { ensurePasteBase, renderRich } from './paste-image.js';
+import { renderRich as _renderRich } from './paste-image.js';
+
 export function blockList(label, arr, blockCls) {
     if (!arr || !arr.length) return '';
-    return `<div class="${blockCls}"><h4>${_esc(label)}</h4><ul>${arr.map(x => `<li>${_esc(x)}</li>`).join('')}</ul></div>`;
+    return `<div class="${blockCls}"><h4>${_esc(label)}</h4><ul>${arr.map(x => `<li>${_renderRich(x)}</li>`).join('')}</ul></div>`;
 }
 
 // c = {card, name, empty, block} class 名；title 由呼叫端決定（人名或週區間）並自行 esc

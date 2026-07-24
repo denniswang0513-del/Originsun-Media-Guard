@@ -24,8 +24,8 @@ from core.db_guard import db_factory_or_503
 from core.hr_logic import parse_ymd
 from core.journal_logic import clean_entries, editable_window_ok, week_start_of
 from core.schemas import JournalPut
-from db.models import (JournalChallenge, JournalLearning, JournalOther,
-                       JournalWin, WorkJournal)
+from db.models import (CrmStaff, JournalChallenge, JournalLearning,
+                       JournalOther, JournalWin, User, WorkJournal)
 
 router = APIRouter(prefix="/api/v1/journal", tags=["journal"])
 
@@ -61,6 +61,24 @@ async def _entries_by_journal(session, journal_ids: list) -> dict:
         for r in rows:
             out[r.journal_id][key].append(r.content or "")
     return out
+
+
+async def _display_names(session, usernames) -> dict:
+    """{username: 顯示名}。帳號有綁人員檔案（User.staff_id → crm_staff，N0 橋接）
+    時顯示本名（owner 2026-07-24：牆上要顯示人力資料庫本名），沒綁 fallback 帳號名。
+    列表端點（week/people/learnings）都走這裡 — 一次查全批，不逐人打 DB。"""
+    names = {u: u for u in usernames}
+    if not names:
+        return names
+    rows = (await session.execute(
+        select(User.username, CrmStaff.name)
+        .join(CrmStaff, CrmStaff.id == User.staff_id)
+        .where(User.username.in_(list(names)))
+    )).all()
+    for u, n in rows:
+        if (n or "").strip():
+            names[u] = n.strip()
+    return names
 
 
 async def _get_shell(session, username: str, week: date):
@@ -144,8 +162,10 @@ async def week_journals(request: Request, start: str = ""):
             .order_by(WorkJournal.username)
         )).scalars().all()
         entries = await _entries_by_journal(session, [s.id for s in shells])
+        names = await _display_names(session, {s.username for s in shells})
         return {"week_start": week.isoformat(), "journals": [{
             "username": s.username,
+            "display_name": names[s.username],
             **entries[s.id],
             "updated_at": s.updated_at.isoformat() if s.updated_at else None,
         } for s in shells]}
@@ -175,8 +195,10 @@ async def learning_library(request: Request, q: str = "", username: str = "",
                           JournalLearning.sort_order)
             .offset(offset).limit(limit)
         )).all()
+        names = await _display_names(session, {r[1] for r in rows})
         return {"items": [{
-            "username": r[1], "week_start": r[2].isoformat(),
+            "username": r[1], "display_name": names[r[1]],
+            "week_start": r[2].isoformat(),
             "content": r[0].content or "",
         } for r in rows], "total": int(total)}
 
@@ -193,8 +215,9 @@ async def journal_people(request: Request):
             .group_by(WorkJournal.username)
             .order_by(WorkJournal.username)
         )).all()
+        names = await _display_names(session, {u for u, _, _ in rows})
         return {"people": [{
-            "username": u, "weeks": int(n or 0),
+            "username": u, "display_name": names[u], "weeks": int(n or 0),
             "last_week": lw.isoformat() if lw else None,
         } for u, n, lw in rows]}
 

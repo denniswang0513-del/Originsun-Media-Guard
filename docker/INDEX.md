@@ -8,9 +8,23 @@ NAS 端對外網站部署設定（Phase M 完整版 A）。
 |---|---|---|
 | `Website_Nginx` 容器 | NAS port 8090 → 80 | ✅ Running，serve dist/ + proxy /api/website/* |
 | `website-api` 容器 | NAS port 8001 → 8001 | ✅ Running，跑 main_website.py |
+| `Assets_Nginx` 容器 | NAS port 8082 → 80 | ✅ Running（2026-07-24），內部貼圖圖床（詳下節） |
 | Astro `dist/` | `/share/.../Website/dist/` | ✅ Master scp 推來 |
 | Code mount | `/share/.../Website/code/` | ✅ Master /publish 自動同步 |
 | Cloudflared | `test.originsun-studio.com` → `192.168.1.132:8090` | ✅ |
+
+## Assets_Nginx（內部貼圖圖床，2026-07-24）
+
+全站 textarea「貼上圖片」的落點（`routers/api_paste.py` 寫入、`js/shared/paste-image.js` 攔截貼上）。
+
+- **資料夾**：`/share/CACHEDEV1_DATA/Container/AI_Workspace/Originsun_Web/PasteAssets/paste/`
+  （SMB 777，與 FileReport 同權限模式——九台 agent 直接 UNC 寫入，不經 master）
+- **容器**：`nginx:alpine`，port **8082→80**，唯讀掛載 PasteAssets + `AssetsNginx/default.conf`
+  （autoindex off 防枚舉、hex 檔名 immutable cache 一年）；`restart=unless-stopped`
+- **對外**：CF Zero Trust 加 hostname `assets.originsun-studio.com` → `192.168.1.132:8082`
+- **URL 契約**：DB 只存 token `paste:<32hex>.webp`（不含網域）；基底由 master settings
+  `paste_assets.base_url` 經 `GET /api/v1/paste_config` 下發 → 圖床搬家改 settings 即可
+- 重建指令：`docker run -d --name Assets_Nginx --restart unless-stopped -p 8082:80 -v .../PasteAssets:/usr/share/nginx/html:ro -v .../AssetsNginx/default.conf:/etc/nginx/conf.d/default.conf:ro nginx:alpine`
 
 ## 檔案
 

@@ -443,7 +443,10 @@ async def _send_register_email(to_email: str, username: str) -> bool:
             f"您的源日影像員工帳號已完成公司驗證並建立成功。\n\n"
             f"目前帳號已開通「個人基本資料」編修功能；其他功能（專案、工時、請假等）\n"
             f"將由管理員依您的職務開通，開通後重新登入即可使用。\n\n"
-            f"個人工作台：https://www.originsun-studio.com/my.html\n\n"
+            # 官網（www）不 serve /my.html（曾寄錯 404，2026-07-24 劉禮瑜回報）——
+            # 員工工作台正確入口是 foundry 隧道（→ master 8000，my.html + API 同源）。
+            # 與 website/src/components/layout/Footer.astro 的登入按鈕同一網址，改一起改。
+            f"個人工作台：https://foundry.originsun-studio.com/my.html\n\n"
             f"— 源日影像 Originsun Studio（此信由系統自動寄出，請勿直接回覆）"
         )
         import asyncio

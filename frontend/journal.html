@@ -123,6 +123,11 @@ html.embed-mode .card + .card { border-top: 1px solid var(--line); padding-top: 
 .blk ul { list-style: none; }
 .blk li { position: relative; padding: 2px 0 2px 14px; font-size: 13px; line-height: 1.7; overflow-wrap: break-word; }
 .blk li::before { content: "\2022"; position: absolute; left: 1px; color: #c9c9c9; }
+/* 貼圖縮圖（journal-core renderRich 產出；點開新分頁看原圖） */
+.paste-img {
+    display: block; max-width: 100%; max-height: 180px; margin: 4px 0;
+    border: 1px solid var(--line); border-radius: 2px; cursor: zoom-in;
+}
 .save-row { display: flex; align-items: center; gap: 12px; margin-top: 18px; flex-wrap: wrap; }
 .btn-save {
     background: var(--ink); color: #fff; border: none; border-radius: 2px;
@@ -233,8 +238,11 @@ footer .eyebrow { font-size: 10px; }
 
 <script type="module">
 import { BLOCKS, HINT_EDIT_WINDOW, MSG_EDIT_WINDOW, SUBTITLE, api, blockList,
-         debounce, esc, isAuthFail, itemsToLines, linesToItems, personCard,
-         shiftWeek, thisWeekStart, weekRange } from '/js/shared/journal-core.js';
+         debounce, ensurePasteBase, esc, isAuthFail, itemsToLines, linesToItems,
+         personCard, renderRich, shiftWeek, thisWeekStart, weekRange } from '/js/shared/journal-core.js';
+import { initPasteImage } from '/js/shared/paste-image.js';
+
+initPasteImage();   // 四問 textarea 可直接貼圖（截圖 → 上傳圖床 → 插 token）
 
 const $ = (id) => document.getElementById(id);
 const NET_ERR = '伺服器暫時無法連線，請稍後再試';
@@ -346,7 +354,7 @@ function renderWeek(mine, week) {
                 ${journals.length ? `<span class="count">${journals.length} 人</span>` : ''}
             </div>
             ${journals.length
-                ? `<div class="wall">${journals.map(j => personCard(j, esc(j.username), { ...CARD_CLS, card: 'p-card' })).join('')}</div>`
+                ? `<div class="wall">${journals.map(j => personCard(j, esc(j.display_name || j.username), { ...CARD_CLS, card: 'p-card' })).join('')}</div>`
                 : '<div class="empty">這一週還沒有人寫日誌</div>'}
         </div>`;
     $('wk-prev').onclick = () => { weekStart = shiftWeek(weekStart, -1); loadWeek(); };
@@ -413,7 +421,7 @@ async function loadLearn() {
                 <input type="text" id="l-q" placeholder="搜尋學習內容" value="${esc(learn.q)}">
                 <select id="l-user">
                     <option value="">全部人員</option>
-                    ${people.map(p => `<option value="${esc(p.username)}"${p.username === learn.username ? ' selected' : ''}>${esc(p.username)}</option>`).join('')}
+                    ${people.map(p => `<option value="${esc(p.username)}"${p.username === learn.username ? ' selected' : ''}>${esc(p.display_name || p.username)}</option>`).join('')}
                 </select>
             </div>
             <div id="learn-list"><div class="empty">載入中…</div></div>
@@ -427,8 +435,8 @@ async function loadLearn() {
 
 const learnItemHtml = (it) => `
         <div class="learn-item">
-            <div class="lc">${esc(it.content)}</div>
-            <div class="lm">${esc(it.username)} · ${weekRange(it.week_start)}</div>
+            <div class="lc">${renderRich(it.content)}</div>
+            <div class="lm">${esc(it.display_name || it.username)} · ${weekRange(it.week_start)}</div>
         </div>`;
 
 async function refreshLearn(append) {
@@ -468,7 +476,7 @@ async function loadPerson() {
             <div class="filter-bar">
                 <select id="p-user">
                     <option value="">請選擇人員</option>
-                    ${people.map(p => `<option value="${esc(p.username)}"${p.username === personSel ? ' selected' : ''}>${esc(p.username)}（${p.weeks} 週）</option>`).join('')}
+                    ${people.map(p => `<option value="${esc(p.username)}"${p.username === personSel ? ' selected' : ''}>${esc(p.display_name || p.username)}（${p.weeks} 週）</option>`).join('')}
                 </select>
             </div>
             <div id="person-list"><div class="empty">請先選擇人員</div></div>
@@ -495,7 +503,8 @@ async function refreshPerson() {
 // ── boot：mine+week 並行首載（mine 兼權限判定：401/403 → 登入提示卡；
 //    status 0 = 網路錯 → 連線錯誤卡）──
 (async function boot() {
-    const [mr, wr] = await Promise.all([api.mine(weekStart), api.week(weekStart)]);
+    const [mr, wr] = await Promise.all(
+        [api.mine(weekStart), api.week(weekStart), ensurePasteBase()]);   // 圖床基底一併預取
     if (mr.status === 401 || mr.status === 403) { showTop('auth-view'); return; }
     if (mr.status === 0) { showError(); return; }
     if (!mr.ok || !wr.ok) { showError(failMsg(mr.ok ? wr : mr)); return; }

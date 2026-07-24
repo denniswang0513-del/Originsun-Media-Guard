@@ -16,6 +16,7 @@ import './js/settings/settings-modal.js';
 import './js/shared/nas-browser.js';
 import './js/shared/drive-map-modal.js';
 import { initSelectAutoUpgrade } from './js/shared/select-upgrade.js';
+import { initPasteImage } from './js/shared/paste-image.js';
 
 // ─── Fallback for appendLog function ─── //
 // If utils.js hasn't loaded yet or appendLog is not available globally, define a fallback
@@ -116,6 +117,10 @@ if (typeof appendLog === 'undefined') {
         // 全域下拉統一：即刻啟動（初掃現有 DOM + MutationObserver 監看之後動態
         // 渲染的下拉）。不綁 loadTabs/登入，確保任何時序都會補升級長清單 select。
         initSelectAutoUpgrade();
+
+        // 全站 textarea 貼上圖片（document 層 paste 攔截 → 上傳圖床 → 插 token）。
+        // 顯示面逐個接 journal-core renderRich；未接的面 token 以純文字顯示。
+        initPasteImage();
 
         // Initialize tabs immediately (grouped nav is rendered inside loadTabs
         // once auth resolves, so it reflects the user's authorized tabs)
