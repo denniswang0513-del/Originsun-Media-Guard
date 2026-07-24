@@ -1325,3 +1325,14 @@ class JournalLearning(Base):
     content = Column(Text)
     sort_order = Column(Integer, default=0)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+
+class JournalOther(Base):
+    """其他主題 — 同構 JournalWin（owner 2026-07-24 加的第四問，自由主題）。"""
+    __tablename__ = "journal_others"
+
+    id = Column(String(32), primary_key=True)                    # uuid4 hex
+    journal_id = Column(String(32), index=True, nullable=False)  # soft FK → work_journals.id
+    content = Column(Text)
+    sort_order = Column(Integer, default=0)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())

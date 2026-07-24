@@ -1,7 +1,7 @@
 // journal-core.js — 週工作日誌共用核心（內部分頁 tabs/journal/journal.js 與
-// 官網風獨立頁 /journal.html 共同 import；殺掉三問標籤/週期運算/序列化/渲染/API 的鏡像複製）。
+// 官網風獨立頁 /journal.html 共同 import；殺掉四問標籤/週期運算/序列化/渲染/API 的鏡像複製）。
 // my.html 已改為 iframe 內嵌 /journal.html?embed=1（2026-07-24）——**已無鏡像**，
-// 三問文案／週區間格式改這裡即可，不要再為它另建一份。
+// 四問文案／週區間格式改這裡即可，不要再為它另建一份。
 // 第三個 module 消費者出現時，再考慮把各頁的 fetch 流程/分頁控制器也提上來。
 import { authFetch } from './utils.js';
 
@@ -10,11 +10,12 @@ import { authFetch } from './utils.js';
 export { esc, debounce } from '../../tabs/website/website-utils.js';
 import { esc as _esc } from '../../tabs/website/website-utils.js';
 
-// 三問標籤（key 順序 = API 回應欄位順序）
+// 四問標籤（key 順序 = API 回應欄位順序；後端對應 api_journal._SECTION_MODELS）
 export const BLOCKS = [
     ['wins', '順利的事與想感謝的人'],
     ['challenges', '遇到哪些挑戰'],
     ['learnings', '學到了什麼'],
+    ['others', '其他主題'],
 ];
 
 // 可編輯窗文案（後端規則：當週可編輯至下一週；PUT 超窗回 403）

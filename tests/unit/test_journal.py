@@ -95,13 +95,21 @@ class TestCleanEntries:
 
 
 class TestEntryTablesIsomorphic:
-    """三張 entry 表（wins/challenges/learnings）owner 要求分表，但 router 的
-    _SECTION_MODELS 假設三表同構 — 未來加欄位漏改某一張，在這裡先紅。"""
+    """四張 entry 表（wins/challenges/learnings/others）owner 要求分表，但 router 的
+    _SECTION_MODELS 假設同構 — 未來加欄位漏改某一張，在這裡先紅。"""
 
     def test_columns_identical(self):
-        from db.models import JournalChallenge, JournalLearning, JournalWin
+        from db.models import (JournalChallenge, JournalLearning, JournalOther,
+                               JournalWin)
 
         def cols(model):
             return {(c.name, type(c.type).__name__) for c in model.__table__.columns}
 
-        assert cols(JournalWin) == cols(JournalChallenge) == cols(JournalLearning)
+        assert cols(JournalWin) == cols(JournalChallenge) \
+            == cols(JournalLearning) == cols(JournalOther)
+
+    def test_section_models_cover_all_entry_tables(self):
+        # registry 漏列新表 → API 靜默不讀不寫該區，這裡先紅
+        from routers.api_journal import _SECTION_MODELS
+        assert [k for k, _ in _SECTION_MODELS] == \
+            ["wins", "challenges", "learnings", "others"]

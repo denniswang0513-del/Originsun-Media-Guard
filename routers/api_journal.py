@@ -24,14 +24,16 @@ from core.db_guard import db_factory_or_503
 from core.hr_logic import parse_ymd
 from core.journal_logic import clean_entries, editable_window_ok, week_start_of
 from core.schemas import JournalPut
-from db.models import JournalChallenge, JournalLearning, JournalWin, WorkJournal
+from db.models import (JournalChallenge, JournalLearning, JournalOther,
+                       JournalWin, WorkJournal)
 
 router = APIRouter(prefix="/api/v1/journal", tags=["journal"])
 
-# 三區塊 ↔ 表 對映（key 順序 = API 回應欄位順序）
+# 四區塊 ↔ 表 對映（key 順序 = API 回應欄位順序）
 _SECTION_MODELS = (("wins", JournalWin),
                    ("challenges", JournalChallenge),
-                   ("learnings", JournalLearning))
+                   ("learnings", JournalLearning),
+                   ("others", JournalOther))
 
 
 def _week_from_param(start: str) -> date:
@@ -84,7 +86,7 @@ async def my_journal(request: Request, start: str = ""):
 
 @router.put("/mine")
 async def put_my_journal(body: JournalPut, request: Request, start: str = ""):
-    """全量替換三區 entries（刪舊插新，sort_order=列表順序）；三區皆空＝刪掉
+    """全量替換四區 entries（刪舊插新，sort_order=列表順序）；四區皆空＝刪掉
     整份週誌（殼+entries，語意=清空）。回應同 GET 形狀。"""
     payload = check_admin_or_module(request, "journal")
     username = (payload or {}).get("sub") or ""
@@ -101,7 +103,7 @@ async def put_my_journal(body: JournalPut, request: Request, start: str = ""):
     async with factory() as session:
         shell = await _get_shell(session, username, week)
         if not any(cleaned.values()):
-            # 三區皆空 → 刪殼 + entries（清空語意）
+            # 四區皆空 → 刪殼 + entries（清空語意）
             if shell is not None:
                 for _, model in _SECTION_MODELS:
                     await session.execute(

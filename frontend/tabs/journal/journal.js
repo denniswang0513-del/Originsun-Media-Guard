@@ -1,8 +1,8 @@
-// journal.js — 人事管理 › 工作日誌（每週三問：順利與感謝 / 挑戰 / 學習）
+// journal.js — 人事管理 › 工作日誌（每週四問：順利與感謝 / 挑戰 / 學習 / 其他）
 // 三檢視：週誌（我的編輯卡 + 團隊卡片牆）/ 學習庫（搜尋 + 分頁）/ 依人回溯（個人時間軸）。
 // UI 無 emoji（owner 鐵則）。API: /api/v1/journal/*（Bearer token；週=週一起算）。
 
-// 單一正本在 journal-core（/journal.html 官網風頁共用）：三問標籤/週期運算/
+// 單一正本在 journal-core（/journal.html 官網風頁共用）：四問標籤/週期運算/
 // 序列化契約/渲染 helpers/API；esc/debounce 也經由它 re-export（正本在 CRM utils）
 import { BLOCKS, HINT_EDIT_WINDOW, MSG_EDIT_WINDOW, api, blockList, debounce,
          esc, isAuthFail, itemsToLines, linesToItems, personCard,
@@ -33,7 +33,7 @@ function _authFail(...rs) {
 function _renderShell() {
     el('jr-content').innerHTML = `
         <h2>工作日誌</h2>
-        <div class="jr-sub">每週三問：順利的事與想感謝的人、遇到哪些挑戰、學到了什麼。一行一條，週一起算。</div>
+        <div class="jr-sub">每週四問：順利的事與想感謝的人、遇到哪些挑戰、學到了什麼、其他主題。一行一條，週一起算。</div>
         <div class="jr-pills">
             ${[['week', '週誌'], ['learn', '學習庫'], ['person', '依人回溯']].map(([k, l]) =>
                 `<button class="jr-pill ${_view === k ? 'active' : ''}" data-view="${k}">${l}</button>`).join('')}

@@ -1061,7 +1061,8 @@ class BookmarkUpdateRequest(BaseModel):
 # ── 每週工作日誌（journal）──
 
 class JournalPut(BaseModel):
-    """PUT /api/v1/journal/mine — 三區塊全量替換（strip/去空/上限在 core.journal_logic）。"""
+    """PUT /api/v1/journal/mine — 四區塊全量替換（strip/去空/上限在 core.journal_logic）。"""
     wins: List[str] = []
     challenges: List[str] = []
     learnings: List[str] = []
+    others: List[str] = []       # 其他主題（2026-07-24 第四問）

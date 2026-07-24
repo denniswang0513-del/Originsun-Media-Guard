@@ -7,7 +7,7 @@
 <title>工作日誌｜ORIGINSUN</title>
 <!-- 每週工作日誌（員工自助頁家族：my.html / media-log.html 同語彙）：
      白底/旭日紅/大字距/髮絲邊框。三檢視：週誌（我的編輯卡+團隊牆）/學習庫/依人回溯。
-     共用核心 /js/shared/journal-core.js（三問標籤、週期運算、API）；本頁只做渲染。
+     共用核心 /js/shared/journal-core.js（四問標籤、週期運算、API）；本頁只做渲染。
      後端契約：/api/v1/journal/*（Bearer token；週=週一起算；可編輯窗由後端 editable 旗標決定）。 -->
 <style>
 :root { --red: #c9372c; --ink: #262626; --sub: #737373; --line: #e5e5e5; }
@@ -109,7 +109,7 @@ html.embed-mode .card + .card { border-top: 1px solid var(--line); padding-top: 
 .empty { padding: 22px 0; font-size: 13px; color: #a3a3a3; text-align: center; }
 .empty.pad-sm { padding: 12px 0; }   /* 人卡內的（空白）用較小留白 */
 
-/* ── 我的週誌（三問 textarea）── */
+/* ── 我的週誌（四問 textarea）── */
 .blk h4 { font-size: 12px; letter-spacing: 0.12em; color: var(--sub); font-weight: 500; margin: 16px 0 6px; }
 .blk textarea {
     width: 100%; min-height: 74px; border: 1px solid var(--line); border-radius: 2px;
@@ -211,7 +211,7 @@ footer .eyebrow { font-size: 10px; }
     <div class="hero">
       <div class="eyebrow">Weekly Journal <span class="accent">工作日誌</span></div>
       <h1>每週工作日誌</h1>
-      <div class="sub">每週三問：順利的事與想感謝的人、遇到哪些挑戰、學到了什麼。一行一條，週一起算。</div>
+      <div class="sub">每週四問：順利的事與想感謝的人、遇到哪些挑戰、學到了什麼、其他主題。一行一條，週一起算。</div>
     </div>
 
     <!-- owner 2026-07-24：三檢視切換先隱藏（只留週誌）。學習庫/依人回溯的程式碼
