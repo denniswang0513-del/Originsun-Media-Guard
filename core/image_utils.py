@@ -20,6 +20,26 @@ except ImportError:
     pass
 
 
+def save_webp_or_none(content: bytes, dest_dir: str, base_name: str,
+                      max_side: int = 0):
+    """轉 WebP 寫入 dest_dir/base_name.webp（makedirs 自理），回完整路徑；
+    PIL 開不了 → save_image_as_webp 會 fallback 寫 .bin，那對「要縮圖/貼圖」
+    的情境沒意義（原檔已另存）→ 刪掉回 None。
+
+    貼圖（api_paste）與影像紀錄縮圖（crm.media_log）共用：兩邊都是「寫一張
+    webp，非圖就當失敗刪掉」，helper 收掉這段 + 省去呼叫端自己判斷 .bin。
+    """
+    os.makedirs(dest_dir, exist_ok=True)
+    saved = save_image_as_webp(content, dest_dir, base_name, max_side)
+    if saved.endswith(".webp"):
+        return saved
+    try:
+        os.remove(saved)
+    except OSError:
+        pass
+    return None
+
+
 def save_image_as_webp(content: bytes, dest_dir: str, base_name: str,
                        max_side: int = 0) -> str:
     """寫圖檔到 dest_dir/<base_name>.webp，原始格式自動轉 WebP（quality 82）。

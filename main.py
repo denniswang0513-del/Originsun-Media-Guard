@@ -120,20 +120,22 @@ for _mod_name, _mod in _routers.items():
     if hasattr(_mod, 'router'):
         app.include_router(_mod.router)
 
-# [DEV BRIDGE — Phase M] 讓 Windows main.py 同時服務 /api/website/*，使官網管理
-# Tab 在透過 Cloudflare Tunnel (foundry.originsun-studio.com) 存取時也能走同源
-# fetch。瀏覽器從外部 origin 連不到 main_website.py:8001（localhost 指向用戶端
-# 機器；HTTPS 頁面也無法 fetch HTTP 資源）。M-F NAS 部署完成後移除此區塊，
-# website routers 應只跑在 NAS website-api container。
+# [永久架構，非暫時] master 同時服務 /api/website/*，讓官網管理 Tab 透過
+# Cloudflare Tunnel (foundry.originsun-studio.com) 存取時走同源 fetch。
+# ⚠ 2026-07-08 同源化後這已是**正式設計**，不是待移除的過渡：www 的 CF bot 對抗層
+#   會間歇擋帶 Authorization 的跨域 admin fetch，且 admin UI 由 master serve、
+#   master 關機時頁面本來就開不起來 →「跨域不依賴 master」的假設不成立。
+#   拿掉這段 = 官網後台管理整個掛掉。website routers 在 master 與 NAS 對外容器
+#   雙掛（同一份碼，見 CLAUDE.md「官網後台同源化」）。
 try:
     from routers.website import router as _website_router
     app.include_router(_website_router)
 
     @app.get("/healthz")
     async def _website_healthz():
-        return {"ok": True, "service": "main.py [dev bridge]"}
+        return {"ok": True, "service": "main.py [website admin same-origin]"}
 
-    print("[DEV BRIDGE] routers/website mounted on main.py (remove after M-F)")
+    print("[website] routers/website mounted on main.py (same-origin admin)")
 except Exception as _e:
     print(f"[WARN] website router load failed: {_e}")
 
@@ -896,6 +898,10 @@ async def _on_startup():
         from core.agent_watch import run_agent_watch
         asyncio.create_task(run_local_maintenance())  # 每日 retention + log 超大告警
         asyncio.create_task(run_agent_watch())        # 機隊離線告警（內建 master gate）
+        # 影像紀錄縮圖補算：上傳由 NAS 對外容器收（那裡沒 ffmpeg），影片縮圖/時長
+        # 與遷移中的舊縮圖由 master 醒著時補（內建 master gate）
+        from services.media_log_catchup import run_media_log_catchup
+        asyncio.create_task(run_media_log_catchup())
     except Exception as _e:
         print(f"[WARN] 維運背景工未啟動: {_e}")
     asyncio.create_task(_loop_heartbeat())
@@ -1016,14 +1022,9 @@ async def _periodic_db_health():
 
 
 def _read_local_version() -> str:
-    """讀取本機 version.json 中的版號。"""
-    import json as _json
-    v_file = os.path.join(os.path.dirname(os.path.abspath(__file__)), "version.json")
-    try:
-        with open(v_file, "r", encoding="utf-8") as f:
-            return _json.load(f).get("version", "0.0.0")
-    except Exception:
-        return "0.0.0"
+    """讀取本機 version.json 中的版號（正本在 core.version）。"""
+    from core.version import read_local_version
+    return read_local_version()
 
 
 def _is_newer(remote: str, local: str) -> bool:

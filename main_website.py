@@ -22,6 +22,8 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+from core.version import read_local_version
+
 logger = logging.getLogger("website-api")
 
 
@@ -124,13 +126,35 @@ app.add_middleware(
 )
 
 
+# 版號在**模組載入時**取一次，不是每次 healthz 重讀 —— 這個欄位存在的目的就是
+# 抓「檔案同步了但容器沒重啟」，每 request 重讀會回報新版號卻跑著舊碼，剛好把
+# 比對的意義抵銷掉。改版必然重啟容器，所以凍結在載入時就是正確語意。
+_VERSION = read_local_version(default="")
+
+
 @app.get("/healthz")
 async def healthz():
-    return {"ok": True, "service": "website-api"}
+    """健康 + 自我描述。version 讓發版流程比對 master 與本容器是否同碼；
+    media_log 讓後台看得見本容器實際在用的歸檔資料夾與可寫狀態
+    —— 兩台機器指到不同資料夾會讓照片安靜散落，只能靠回報才發現。"""
+    from routers.crm.media_log import media_log_health
+    return {"ok": True, "service": "website-api", "version": _VERSION,
+            "media_log": await media_log_health()}
 
 
 from routers.website import router as _website_router
 app.include_router(_website_router)
+
+# 影像紀錄的免登入端點（token 授權）—— master 關機時同仁照樣開得了連結、傳得了照片。
+# ⚠ 只掛 public_router（4 條），**絕不可**改成 routers.crm 的主 router：
+#    那會把 160+ 個 CRM 端點（客戶/報價/成本/財務）曝在對外服務上。
+#    守衛：tests/unit/test_media_log_public_router.py。
+try:
+    from routers.crm import CRM_PREFIX as _CRM_PREFIX
+    from routers.crm import public_router as _crm_public
+    app.include_router(_crm_public, prefix=_CRM_PREFIX)
+except Exception as _e:  # noqa: BLE001 — 缺 DB 套件的環境照常起，只是少這條路
+    logging.getLogger(__name__).warning("[website-api] media_log public router 未掛載: %s", _e)
 
 # 對外 serve 執行期上傳檔（團隊頭像 /uploads/team、文章圖片 /uploads/posts）。
 # serve 目錄 = admin_posts._UPLOAD_BASE（上傳就寫這裡），確保「存」與「serve」同一處；
@@ -144,3 +168,23 @@ _mt.add_type("image/webp", ".webp")
 _mt.add_type("image/avif", ".avif")
 os.makedirs(_UPLOAD_BASE, exist_ok=True)
 app.mount("/uploads", _StaticFiles(directory=_UPLOAD_BASE), name="uploads")
+
+# ── 影像紀錄公開頁（master 關機也開得起來）──
+# 頁面與其 logo 隨 publish 的 NAS_SYNC_PATHS 同步進 code/frontend/，
+# 不走 Astro dist（那是 build 產物，沒有這些檔）。nginx 把 /media-log.html
+# 與 /img/ 反代到本 app。
+_FRONTEND_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "frontend")
+_MEDIA_LOG_PAGE = os.path.join(_FRONTEND_DIR, "media-log.html")
+
+
+@app.get("/media-log.html", include_in_schema=False)
+async def _media_log_page():
+    from starlette.responses import FileResponse, PlainTextResponse
+    if not os.path.isfile(_MEDIA_LOG_PAGE):
+        return PlainTextResponse("media-log.html 未同步到本機", status_code=503)
+    return FileResponse(_MEDIA_LOG_PAGE, media_type="text/html")
+
+
+if os.path.isdir(os.path.join(_FRONTEND_DIR, "img")):
+    app.mount("/img", _StaticFiles(directory=os.path.join(_FRONTEND_DIR, "img")),
+              name="img")

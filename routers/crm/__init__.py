@@ -14,4 +14,8 @@ from . import showcase   # noqa: F401  Showcase + token 編輯 + Site API
 from . import works      # noqa: F401  1:N 作品子端點（依賴 projects/showcase，須在其後）
 from . import media_log  # noqa: F401  影像紀錄（路徑獨立 /media-log，順序無關）
 
-from ._shared import router  # noqa: F401,E402
+from ._shared import CRM_PREFIX, router, public_router  # noqa: F401,E402
+
+# composition root：對外白名單在這裡收編回主 router —— master 掛一個 router 就
+# 有全部端點，URL 與拆分前完全相同；NAS 對外容器則只掛 public_router。
+router.include_router(public_router)

@@ -55,7 +55,18 @@ __all__ = [
     "WEBSITE_TEAM_OVERRIDE_FIELDS",
 ]
 
-router = APIRouter(prefix="/api/v1/crm", tags=["CRM"])
+CRM_PREFIX = "/api/v1/crm"   # 單一真相：router、NAS 掛載、守衛測試三處共用
+
+router = APIRouter(prefix=CRM_PREFIX, tags=["CRM"])
+
+# 對外白名單 —— NAS 對外容器只掛這一個 router（master 在 crm/__init__ 收編回
+# 主 router，URL 完全不變）。「這條端點可以對外」是整個 CRM 套件的橫切分類
+# （costs/showcase/staff 也有 token 端點），所以 seam 放在這裡而非某個領域模組：
+# 對外曝露面永遠只有**一個**物件、**一份**守衛測試
+# （tests/unit/test_media_log_public_router.py）。
+# 刻意不帶 prefix —— master 由上面 router 的 CRM_PREFIX 提供，NAS 掛載時自己指定。
+# ⚠ 往這裡加端點前先問：它真的該在對外服務上被匿名打到嗎？
+public_router = APIRouter(tags=["CRM 公開（token 授權）"])
 
 
 # ── Helpers ──────────────────────────────────────────────────
@@ -277,6 +288,7 @@ _ALLOWED_IMG_EXT = {".jpg", ".jpeg", ".png", ".webp", ".heic"}
 # 單一正本在 core/image_utils.py（2026-07-20 與 routers/website/admin_posts.py
 # 的雙胞合併；showcase 因此順帶獲得 EXIF 方向校正 — 手機直拍不再躺著）。
 from core.image_utils import save_image_as_webp as _save_image_as_webp  # noqa: F401,E402
+from core.image_utils import save_webp_or_none  # noqa: F401,E402
 
 
 

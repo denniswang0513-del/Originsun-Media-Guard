@@ -22,10 +22,24 @@ services:
       - ../code:/app
       # uploads 目錄需可寫（圖片上傳走容器，不走 master）
       - ../uploads:/app/uploads
+      # 影像紀錄原檔歸檔區（現場劇照/花絮）。master 是走 SMB 寫這個資料夾，
+      # 容器在 NAS 本機直接掛 → 少一層網路檔案系統。
+      # ⚠ 掛載寫在這裡（版控）而非手動 docker run：容器重建時才不會靜默消失，
+      #    掉了的症狀是上傳全失敗且訊息指向「管理員尚未設定資料夾」（誤導）。
+      - /share/Archive:/share/Archive
+      # 共用圖床 PasteAssets（貼圖 + 影像紀錄縮圖）。容器收圖時要寫 medialog
+      # 縮圖到這裡；設定裡的 UNC \\192.168.1.132\Container\...\PasteAssets 由
+      # core.drive_map.to_local_path 翻成 /share/Container/...（NAS_LOCAL_SHARE_ROOT）。
+      - /share/Container/AI_Workspace/Originsun_Web/PasteAssets:/share/Container/AI_Workspace/Originsun_Web/PasteAssets
     environment:
       DATABASE_URL: ${DATABASE_URL}
       JWT_SECRET: ${JWT_SECRET}
       WEBSITE_CORS_ORIGINS: ${WEBSITE_CORS_ORIGINS}
+      # 設定存的是 master 視角的 UNC（單一真相）；本容器把 \\192.168.1.132\X
+      # 翻成 /share/X（core.drive_map.nas_local_path）。master 不設此變數 = no-op。
+      # UNC 主機用程式預設（DEFAULT_NAS_UNC_HOST）—— 不在這裡設 NAS_UNC_HOST，
+      # 因為 compose 會把 YAML 的 \\ 吃成單一 \，翻譯就永遠對不上（實測踩過）。
+      NAS_LOCAL_SHARE_ROOT: /share
       # 收到 rebuild trigger 後 forward 給 master（npm 在 master 跑）
       # master 離線 → relay 失敗回友善錯誤，pending_count 維持等下次
       MASTER_RELAY_URL: ${MASTER_RELAY_URL}

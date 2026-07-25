@@ -407,7 +407,10 @@ function _renderProgress() {
 
 /** XHR progress tick 專用：只更新該列的 bar 寬與百分比字（公開頁同款模式） */
 function _absShareUrl(rel) {
-    return location.origin + (rel || '');
+    // 後端設了 media_log.public_base（NAS 對外站）就直接回絕對網址 —— 這樣
+    // 新發出的連結 master 關機也開得起來。沒設 → 相對路徑補自己的 origin（舊行為）。
+    const s = rel || '';
+    return /^https?:\/\//i.test(s) ? s : location.origin + s;
 }
 
 function _tickProgressRow(u) {

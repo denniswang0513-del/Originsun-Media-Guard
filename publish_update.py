@@ -57,10 +57,18 @@ def _ssh_bin(name: str) -> str:
 
 # website-api container 需要的 code 路徑（routers/website/ 跨 import 到 api_crm
 # 等模組，所以 routers/ 整個傳；core/db/services/ 同理）
-NAS_SYNC_PATHS = [
-    "main_website.py", "config.py",
-    "routers", "services", "core", "db",
-]
+# 三類語意分開命名 —— 它們的生命週期不同（code 隨發版、manifest 綁版號握手、
+# 資產是 Astro dist 之外的例外品），未來若要分岔傳輸策略才有接縫可切。
+NAS_SYNC_CODE = ["main_website.py", "config.py",
+                 "routers", "services", "core", "db"]
+# 容器 /healthz 回報自己的版號，發版末段跟 master 比對 —— 官網那條路最常見的
+# 故障是「碼同步了但容器沒重啟」，靜默且難查。
+NAS_SYNC_MANIFEST = ["version.json"]
+# 影像紀錄公開頁 + 它引用的 logo：master 關機時同仁仍要開得了這頁
+# （對外站 dist/ 是 Astro build 產物，沒有這兩個檔）。
+NAS_SYNC_ASSETS = ["frontend/media-log.html", "frontend/img"]
+
+NAS_SYNC_PATHS = NAS_SYNC_CODE + NAS_SYNC_MANIFEST + NAS_SYNC_ASSETS
 
 
 # ────────────────────────────────────────
@@ -185,6 +193,22 @@ def generate_manifest(version: str) -> list:
 # NAS website-api code sync
 # ────────────────────────────────────────
 
+def remote_dirs_for(base: str, paths: list, dest_root: str) -> list:
+    """同步清單 → 遠端需先建的目錄清單。
+
+    scp 兩種形式的前置需求不同：目錄項用 `src/. → dest/`，要求 **dest 本身**
+    已存在；檔案項只要**父層**存在。少建任一種，新加的同步路徑第一次就 scp 失敗
+    （2026-07-25 加 frontend/img 時實際踩到）。純函式，單元測試在
+    tests/unit/test_publish_sync_dirs.py。
+    """
+    dirs = {dest_root}
+    for rel in paths:
+        sub = rel if os.path.isdir(os.path.join(base, rel)) else os.path.dirname(rel)
+        if sub:
+            dirs.add(f"{dest_root}/{sub}")
+    return sorted(dirs)
+
+
 def sync_website_to_nas() -> bool:
     """scp code paths to NAS + restart website-api container.
 
@@ -200,11 +224,12 @@ def sync_website_to_nas() -> bool:
     base = os.path.dirname(os.path.abspath(__file__))
     print(f"\n[*] 同步 code 到 NAS ({NAS_HOST})...")
 
-    # scp 不認資料夾不存在 — 先 ssh mkdir 確保 NAS 結構存在
+    # scp 不自建遠端目錄 — 先一次 ssh mkdir 把需要的全部建好（見 remote_dirs_for）
     ssh_cmd = [_ssh_bin("ssh"), "-i", SSH_KEY_PATH] + _SSH_COMMON_OPTS + [NAS_HOST]
     try:
         subprocess.run(
-            ssh_cmd + [f"mkdir -p {NAS_CODE_DIR}"],
+            ssh_cmd + ["mkdir -p " + " ".join(
+                remote_dirs_for(base, NAS_SYNC_PATHS, NAS_CODE_DIR))],
             check=True, capture_output=True, timeout=25,
         )
     except (subprocess.CalledProcessError, subprocess.TimeoutExpired, OSError) as e:

@@ -23,7 +23,9 @@ NAS 端對外網站部署設定（Phase M 完整版 A）。
   （autoindex off 防枚舉、hex 檔名 immutable cache 一年）；`restart=unless-stopped`
 - **對外**：CF Zero Trust 加 hostname `assets.originsun-studio.com` → `192.168.1.132:8082`
 - **URL 契約**：DB 只存 token `paste:<32hex>.webp`（不含網域）；基底由 master settings
-  `paste_assets.base_url` 經 `GET /api/v1/paste_config` 下發 → 圖床搬家改 settings 即可
+  `assets_host.base_url` 經 `GET /api/v1/paste_config` 下發 → 圖床搬家改 settings 即可
+- **命名空間**：同一台圖床（`assets_host`）底下 `paste/`（貼圖）+ `medialog/`（影像紀錄縮圖），
+  由 `core/assets_host.py` 的 `assets_target(ns)` 定址
 - 重建指令：`docker run -d --name Assets_Nginx --restart unless-stopped -p 8082:80 -v .../PasteAssets:/usr/share/nginx/html:ro -v .../AssetsNginx/default.conf:/etc/nginx/conf.d/default.conf:ro nginx:alpine`
 
 ## 檔案

@@ -47,13 +47,8 @@ async def health_check():
     except Exception:
         pass
 
-    ver = ""
-    try:
-        import json as _j
-        with open("version.json", "r", encoding="utf-8") as f:
-            ver = _j.load(f).get("version", "")
-    except Exception:
-        pass
+    from core.version import read_local_version
+    ver = read_local_version(default="")
 
     current_tasks = [
         {"job_id": j.job_id, "project_name": j.project_name, "task_type": j.task_type}
@@ -428,14 +423,9 @@ async def get_job_logs(job_id: str, offset: int = 0):
 
 @router.get("/api/v1/version")
 async def get_version():
-    try:
-        import json
-        base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-        v_file = os.path.join(base_dir, "version.json")
-        if os.path.exists(v_file):
-            with open(v_file, "r", encoding="utf-8") as f: return json.load(f)
-        return {"version": "0.0.0", "build_date": "Unknown", "error": "version.json not found"}
-    except Exception as e: return {"version": "0.0.0", "build_date": "Error", "error": str(e)}
+    from core.version import read_version_json
+    return read_version_json() or {"version": "0.0.0", "build_date": "Unknown",
+                                   "error": "version.json not found"}
 
 @router.get("/api/v1/nas_version")
 async def get_nas_version():

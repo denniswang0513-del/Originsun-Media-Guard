@@ -20,6 +20,19 @@ async def get_all_settings(session: AsyncSession) -> dict[str, Any]:
     return {row[0]: row[1] for row in await session.execute(stmt)}
 
 
+async def get_prefixed(session: AsyncSession, prefix: str) -> dict[str, Any]:
+    """撈某個命名空間的 key-value（例 "media_log."）。
+
+    這張表雖然叫 website_settings，但欄位是中性的 key/value，已是本系統唯一的
+    「設定存 DB」機制 —— 需要跨機器共讀設定的功能（如 CRM 影像紀錄：master 與
+    NAS 對外容器都在跑）借用它，比各自新建一張表合理。用 prefix 分命名空間，
+    讀取邏輯只留這一份，消費端不必自己 import model 拼 SQL。
+    """
+    stmt = (select(WebsiteSetting.key, WebsiteSetting.value)
+            .where(WebsiteSetting.key.like(prefix + "%")))
+    return {row[0]: row[1] for row in await session.execute(stmt)}
+
+
 async def get_meta(session: AsyncSession) -> dict[str, Any]:
     """公開端 /meta：對外需要的欄位（company / seo / social / about / home.hero）。
 

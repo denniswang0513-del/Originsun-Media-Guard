@@ -2,8 +2,12 @@
 
 每專案一條 token 公開連結（/media-log.html?token=…）：現場同仁/合作夥伴
 免登入上傳劇照、花絮影片；原始檔案存進管理員設定的影像紀錄資料夾
-（settings.json 的 media_log.root）底下的專案子資料夾，縮圖轉 WebP 存
+（單一真相在 DB，見 _media_log_conf）底下的專案子資料夾，縮圖轉 WebP 存
 uploads/projects/{project_id}/media_log/ 供列表快速瀏覽。
+
+⚠ 這個模組**兩台機器都在跑**：master（後台管理 + QR + 影片縮圖補算）與 NAS
+   對外容器（public_router 那 4 個免登入端點，master 關機也不受影響）。
+   改動時記得兩邊都會吃到；只有 master 有 ffmpeg 與 qrcode 套件。
 
 token 模式照 showcase 編輯連結（_mint_showcase_edit_token / _verify_token_generic
 同款）；影片縮圖/時長走專案根目錄的 ffmpeg.exe / ffprobe.exe
@@ -17,18 +21,25 @@ from __future__ import annotations
 import asyncio
 import os
 import shutil
+import tempfile
 import uuid
 from datetime import datetime
 from typing import Callable, Optional
 
 from fastapi import File, Form, HTTPException, Request, UploadFile
 
-from config import load_settings, save_settings
+from config import load_settings
+from core.assets_host import assets_target
+from core.drive_map import to_canonical_path, to_local_path
 from core.subproc import run_capture
 
-from ._shared import (router, _check_auth, _require_db, _get_factory, _now,
-                      _UPLOAD_BASE, _save_image_as_webp, _verify_token_generic,
-                      _mint_token_generic)
+# public_router = 對外白名單（正本在 _shared，全套件共用一個）。本模組的 4 個
+# 免登入端點掛它 → NAS 對外容器只掛這組，其餘 160+ 個 CRM 端點不會對外。
+# ⚠ QR 端點雖然也免登入，但**只有後台在用**（公開頁一次都沒呼叫）且需要 qrcode
+#   套件（對外容器沒裝）→ 留在 router，刻意不進 public_router。
+from ._shared import (router, public_router, _check_auth, _require_db,
+                      _get_factory, _now, _UPLOAD_BASE, save_webp_or_none,
+                      _verify_token_generic, _mint_token_generic)
 
 try:
     from ._shared import select, CrmProject, ProjectMediaLog, ProjectMediaFile
@@ -46,8 +57,9 @@ DEFAULT_MEDIA_LOG_CATEGORIES = ["場勘照", "現場花絮", "劇照", "幕後",
 # 搆不到（權限/斷線）時 root_set=False，前後台照常提示、不擋其他功能。
 DEFAULT_MEDIA_LOG_ROOT = r"\\192.168.1.132\Archive\10_工作側拍"
 
-# 上傳通知 digest：最後一次上傳後安靜 N 秒才發（拍攝中連傳不轟炸群組）
-_NOTIFY_QUIET_SEC = 600
+# 上傳通知 digest：最後一次上傳後安靜 N 秒才發（拍攝中連傳不轟炸群組）。
+# 實際發送在 services/media_log_catchup.py（master 掃 DB），常數留這裡當契約。
+NOTIFY_QUIET_SEC = 600
 
 _IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".webp", ".heic", ".gif",
                ".cr2", ".cr3", ".nef", ".arw", ".dng"}
@@ -114,13 +126,74 @@ def _dedup_filename(filename: str, exists: Callable[[str], bool],
 
 # ── settings / 路徑 helpers ──────────────────────────────────
 
-def _media_log_conf() -> tuple:
-    """settings.json 的 media_log 區 → (root, categories)。
-    root 空/未設 → DEFAULT_MEDIA_LOG_ROOT；categories 空/未設 → 預設分類。"""
-    conf = load_settings().get("media_log") or {}
-    root = str(conf.get("root") or "").strip() or DEFAULT_MEDIA_LOG_ROOT
-    cats = _norm_categories(conf.get("categories")) or list(DEFAULT_MEDIA_LOG_CATEGORIES)
-    return root, cats
+# 設定的單一真相 = DB（website_settings key-value 表；master 與 NAS 對外容器
+# 連的是同一個庫）。這個功能兩台機器都在跑，設定各存各的 = 照片安靜地散在兩個
+# 資料夾且不會報錯 —— 比整個功能壞掉更難發現。沿用既有 key-value 表而不另建一張，
+# 因為它已經是本系統唯一的「設定存 DB」機制（表名帶 website 是歷史，非領域限定）。
+_SETTING_PREFIX = "media_log."
+_SETTING_KEY_ROOT = "media_log.root"
+_SETTING_KEY_CATS = "media_log.categories"
+# 分享連結的公開網域 = 官網既有的 seo.site_url（同一個對外站，不另開第二份真相）。
+# ⚠ 一定要是 canonical 的 www：apex 在 nginx 會 301，而 301 打在 POST 上傳會壞。
+_SETTING_KEY_SITE_URL = "seo.site_url"
+_FALLBACK_SITE_URL = "https://www.originsun-studio.com"
+
+
+async def _db_settings() -> dict:
+    """DB 裡與影像紀錄有關的設定（media_log.* + seo.site_url）。
+    DB 不可用 → {}（呼叫端退 settings.json / 常數）。
+
+    ⚠ 一個 request 只該呼叫一次，把結果往下傳 —— 公開頁每個訪客、每張上傳的
+      照片都會走到這裡，重複查同一批 key 是白花的 round-trip。
+    """
+    try:
+        from services.website import settings_service
+        factory = await _get_factory()
+        async with factory() as session:
+            out = await settings_service.get_prefixed(session, _SETTING_PREFIX)
+            out[_SETTING_KEY_SITE_URL] = (
+                await settings_service.get_all_settings(session)
+            ).get(_SETTING_KEY_SITE_URL)
+        return out
+    except Exception:
+        return {}
+
+
+def _conf_from(db: dict) -> tuple:
+    """(root, categories) — root 已翻成「執行本機的視角」，可直接拿去開檔。
+
+    存的一律是 master 視角的 UNC（單一真相），本機視角由 core.drive_map.to_local_path
+    翻譯 —— 同一個實體資料夾在 Windows 與 NAS 上路徑語法不同，只存一份字串
+    而不翻譯，必然有一台指到不存在的路徑。
+    DB 缺值才退 settings.json 的舊 media_log 區（既有安裝無痛升級用；後台存檔
+    會寫進 DB，之後這條路就不再走 —— 故意懶算，穩態下不碰檔案系統）。
+    """
+    raw_root = str(db.get(_SETTING_KEY_ROOT) or "").strip()
+    raw_cats = db.get(_SETTING_KEY_CATS)
+    if not raw_root or raw_cats is None:
+        conf = load_settings().get("media_log") or {}
+        raw_root = raw_root or str(conf.get("root") or "").strip()
+        raw_cats = raw_cats if raw_cats is not None else conf.get("categories")
+    cats = _norm_categories(raw_cats) or list(DEFAULT_MEDIA_LOG_CATEGORIES)
+    return to_local_path(raw_root or DEFAULT_MEDIA_LOG_ROOT), cats
+
+
+async def _media_log_conf() -> tuple:
+    """(root, categories) — 只需要設定、不需要整份 db dict 的呼叫端用這個。"""
+    return _conf_from(await _db_settings())
+
+
+async def media_log_health() -> dict:
+    """{root, writable} 或 {error} — 歸檔區可達性自我回報。
+
+    NAS 對外容器的 /healthz 與後台狀態面板共用：兩台機器指到不同資料夾時，
+    照片會安靜散落且不報錯，只能靠「各自回報實際在用的路徑」才看得見。
+    """
+    try:
+        root, _cats = await _media_log_conf()
+        return {"root": root, "writable": await asyncio.to_thread(_root_set, root)}
+    except Exception as e:
+        return {"error": f"{type(e).__name__}: {e}"}
 
 
 def _root_set(root: str) -> bool:
@@ -156,22 +229,50 @@ def _project_folder(root: str, folder_name: str) -> str:
     return os.path.join(root, folder_name)
 
 
-def _thumb_dir_path(project_id: str) -> str:
-    return os.path.join(_UPLOAD_BASE, "projects", project_id, "media_log")
+# ── 縮圖：共用圖床的 medialog 命名空間（core/assets_host.py）──
+# 為什麼不留在各機的 uploads/：這個功能兩台機器都在跑（NAS 收檔、master 補算
+# 影片縮圖），縮圖各寫各的會變成「後台看得到、公開頁看不到」。放圖床 = 兩邊寫
+# 同一份、兩邊用同一個絕對網址讀，master 關機也還在。
+# 順帶斷開一條意外耦合：舊落點 uploads/projects/ 會被官網 rebuild 的 uploads
+# 同步順手複製到 NAS（rebuild_service._SYNCED_UPLOAD_DIRS），影像紀錄的縮圖
+# 等於寄生在官網發布流程上。
+_THUMB_NAMESPACE = "medialog"
 
 
-def _thumb_dir(project_id: str) -> str:
-    d = _thumb_dir_path(project_id)
-    os.makedirs(d, exist_ok=True)
-    return d
+def _thumb_base(project_id: str, file_id: str) -> str:
+    """圖床內的檔名（不含副檔名 — save_webp_or_none 自己加 .webp）。
+    扁平命名空間 → 帶專案前綴才看得出歸屬、也不會撞。"""
+    return f"{project_id}_{file_id}"
 
 
-def _thumb_path(project_id: str, file_id: str) -> str:
-    return os.path.join(_thumb_dir_path(project_id), f"{file_id}.webp")
+def _thumb_target(project_id: str, file_id: str) -> tuple:
+    """(圖床本機目錄, base_name, 對外絕對網址)；圖床未設定 → ("", "", "")。"""
+    d, base = assets_target(_THUMB_NAMESPACE)
+    if not d or not base:
+        return "", "", ""
+    name = _thumb_base(project_id, file_id)
+    return d, name, f"{base}/{name}.webp"
 
 
-def _thumb_url_of(project_id: str, file_id: str) -> str:
-    return f"/uploads/projects/{project_id}/media_log/{file_id}.webp"
+def _legacy_thumb_path(project_id: str, file_id: str) -> str:
+    """舊落點（各機本地 uploads/）—— 只用於刪除時一併清掉殘留。"""
+    return os.path.join(_UPLOAD_BASE, "projects", project_id, "media_log",
+                        f"{file_id}.webp")
+
+
+def _remove_thumbs(project_id: str, file_id: str) -> None:
+    """刪縮圖 — 圖床與舊落點都清（同步；呼叫端在 to_thread 內）。
+    搬家期間兩處可能各有一份，只清一邊會留孤兒。"""
+    d, name, _url = _thumb_target(project_id, file_id)
+    host = os.path.join(d, name + ".webp") if d else ""
+    for p in (host, _legacy_thumb_path(project_id, file_id)):
+        if not p:
+            continue
+        try:
+            if os.path.isfile(p):
+                os.remove(p)
+        except OSError:
+            pass
 
 
 # 專案根：照全 codebase 慣例從 __file__ 推（routers/crm/ 的上上層）
@@ -192,8 +293,16 @@ def _read_file_bytes(path: str) -> bytes:
 
 # ── token helpers（照 showcase._mint_showcase_edit_token 模式）──
 
-def _share_url(token: str) -> str:
-    return f"/media-log.html?token={token}"
+def _share_url(token: str, base: str) -> str:
+    """分享連結。base = 對外站網域（NAS 那份，master 關機也開得起來）。
+    **已發出的舊連結一律不受影響** —— 它們指向 master，而 master 的公開端點
+    完整保留；只有新發出的連結會指向對外站。"""
+    return f"{str(base or '').rstrip('/')}/media-log.html?token={token}"
+
+
+def _site_url_from(db: dict) -> str:
+    """對外站網域：官網既有的 seo.site_url，沒設退 canonical www 常數。"""
+    return str(db.get(_SETTING_KEY_SITE_URL) or _FALLBACK_SITE_URL).rstrip("/")
 
 
 async def _mint_media_log_token(session, project_id: str, *,
@@ -214,39 +323,9 @@ async def _verify_media_log_token(session, token: str):
 
 # ── 上傳通知 digest（最後一傳後安靜 10 分鐘才發一則彙總）─────
 
-_notify_state: dict = {}   # project_id -> {"count", "uploaders", "name", "task"}
-
-
-def _schedule_upload_notify(project_id: str, project_name: str, uploader: str) -> None:
-    """記一筆＋重置安靜計時器。單機記憶體即可（master 單行程；掉了頂多少一則通知）。"""
-    st = _notify_state.setdefault(
-        project_id, {"count": 0, "uploaders": set(), "name": project_name, "task": None})
-    st["count"] += 1
-    st["name"] = project_name
-    if uploader:
-        st["uploaders"].add(uploader)
-    if st["task"] and not st["task"].done():
-        st["task"].cancel()
-    st["task"] = asyncio.create_task(_notify_after_quiet(project_id))
-
-
-async def _notify_after_quiet(project_id: str) -> None:
-    try:
-        await asyncio.sleep(_NOTIFY_QUIET_SEC)
-    except asyncio.CancelledError:
-        return
-    st = _notify_state.pop(project_id, None)
-    if not st or not st["count"]:
-        return
-    try:
-        from notifier import notify_tab_async
-        await notify_tab_async(
-            "media_log_upload",
-            project_name=st["name"],
-            file_count=st["count"],
-            uploaders="、".join(sorted(st["uploaders"])) or "未具名")
-    except Exception:
-        pass  # 通知失敗不影響收檔
+# 上傳通知不在收檔端發 —— 收檔現在多半發生在 NAS 對外容器，那裡沒有 notifier
+# 模組、也沒有 settings.json 裡的 webhook（原本的行程內計時器在那邊是靜默失效）。
+# 改由 master 定期掃 DB 補發（services/media_log_catchup.py），單一路徑不會重複發。
 
 
 # ── serializers / 查詢 ───────────────────────────────────────
@@ -315,7 +394,8 @@ async def _reconcile_files(factory, project_id: str, *, throttled: bool = False)
             select(ProjectMediaFile.id, ProjectMediaFile.stored_path)
             .where(ProjectMediaFile.project_id == project_id)
         )).all()
-    entries = [(r[0], r[1] or "") for r in rows]
+    # stored_path 存 canonical UNC → 翻成本機視角再檢查存在性（NAS/master 各自）
+    entries = [(r[0], to_local_path(r[1] or "")) for r in rows]
     if not entries:
         return 0
     missing = await asyncio.to_thread(
@@ -331,12 +411,7 @@ async def _reconcile_files(factory, project_id: str, *, throttled: bool = False)
 
     def _rm_thumbs():
         for fid in missing:
-            t = _thumb_path(project_id, fid)
-            try:
-                if os.path.isfile(t):
-                    os.remove(t)
-            except OSError:
-                pass
+            _remove_thumbs(project_id, fid)
 
     await asyncio.to_thread(_rm_thumbs)
     return len(missing)
@@ -373,18 +448,13 @@ async def _stream_to_disk(file: UploadFile, dest_path: str) -> int:
 
 async def _webp_thumb_from_bytes(content: bytes, project_id: str, file_id: str,
                                  max_side: int = 0) -> str:
-    """圖 bytes → uploads/.../{file_id}.webp，回縮圖 URL。PIL 失敗（.bin
-    fallback）對縮圖沒意義（原檔已另存）→ 清掉、回空字串（image/video 共用尾段）。"""
-    tdir = await asyncio.to_thread(_thumb_dir, project_id)
-    saved = await asyncio.to_thread(
-        _save_image_as_webp, content, tdir, file_id, max_side)
-    if saved.endswith(".webp"):
-        return _thumb_url_of(project_id, file_id)
-    try:
-        await asyncio.to_thread(os.remove, saved)
-    except OSError:
-        pass
-    return ""
+    """圖 bytes → 圖床的 medialog 命名空間，回縮圖的對外絕對網址。PIL 失敗
+    （非圖）對縮圖沒意義（原檔已另存）→ 回空字串（image/video 共用尾段）。"""
+    d, name, url = _thumb_target(project_id, file_id)
+    if not d:
+        return ""                       # 圖床未設定 → 無縮圖，不擋上傳
+    saved = await asyncio.to_thread(save_webp_or_none, content, d, name, max_side)
+    return url if saved else ""
 
 
 # PIL 必開不了的 RAW 格式 — 整檔（30-100MB+）讀進記憶體只為餵必敗的 PIL 太虧，
@@ -420,9 +490,10 @@ async def _make_video_thumb(stored_path: str, project_id: str, file_id: str) -> 
     ffmpeg 不在 / 全失敗 → 空字串（不擋上傳）。"""
     ffmpeg = _tool_path("ffmpeg.exe")
     if not ffmpeg:
-        return ""
-    tdir = await asyncio.to_thread(_thumb_dir, project_id)
-    tmp_jpg = os.path.join(tdir, f"{file_id}_frame.jpg")
+        return ""      # 對外容器沒帶 ffmpeg — 交給 master 的補算工作事後補上
+    # 中繼影格寫本機暫存，不寫圖床（那裡只該有成品）
+    tmp_jpg = os.path.join(tempfile.gettempdir(),
+                           f"medialog_{project_id}_{file_id}.jpg")
     try:
         for ss in ("1", "0"):
             rc, _out, _err = await run_capture(
@@ -451,7 +522,8 @@ async def get_project_media_log(project_id: str, request: Request):
     + 檔案清單（created_at DESC）。"""
     _check_auth(request)
     _require_db()
-    root, cats = _media_log_conf()
+    db = await _db_settings()          # 一個 request 只查一次（root/cats 與分享網域共用）
+    root, cats = _conf_from(db)
     factory = await _get_factory()
     async with factory() as session:
         proj = await session.get(CrmProject, project_id)
@@ -471,7 +543,7 @@ async def get_project_media_log(project_id: str, request: Request):
     rs = await asyncio.to_thread(_root_set, root)
     return {
         "token": token,
-        "share_url": _share_url(token),
+        "share_url": _share_url(token, _site_url_from(db)),
         "enabled": enabled,
         "root": root,
         "root_set": rs,
@@ -494,7 +566,8 @@ async def reset_media_log_token(project_id: str, request: Request):
         token, _row = await _mint_media_log_token(
             session, project_id, reuse_existing=False)
         await session.commit()
-    return {"token": token, "share_url": _share_url(token)}
+    return {"token": token,
+            "share_url": _share_url(token, _site_url_from(await _db_settings()))}
 
 
 @router.post("/projects/{project_id}/media-log/enabled")
@@ -527,7 +600,9 @@ async def media_log_qr(token: str, base: str = ""):
     base = (base or "").strip().rstrip("/")
     if base and not (base.startswith("http://") or base.startswith("https://")):
         raise HTTPException(status_code=400, detail="base 需為 http(s) 網址")
-    url = f"{base}{_share_url(token)}"
+    # QR 印出來要能被現場手機掃 → 一律用對外站網域，不用後台自己的 origin
+    # （?base 只在對外站尚未設定時當備援）
+    url = _share_url(token, _site_url_from(await _db_settings()) or base)
     try:
         import qrcode  # noqa: F401  僅探測 — 缺套件的 agent 給明確 503 而非 500
     except ImportError:
@@ -548,38 +623,48 @@ async def media_log_qr(token: str, base: str = ""):
                     headers={"Cache-Control": "private, max-age=3600"})
 
 
+@router.post("/media-log/catchup_now")
+async def media_log_catchup_now(request: Request):
+    """管理員手動觸發一輪縮圖補算（影片縮圖/時長 + 舊縮圖遷移）。
+    平時由 master 背景每 10 分鐘自動跑；剛上傳一批影片想立刻看到縮圖時可手動戳。
+    只在 master 有意義（有 ffmpeg + NAS 憑證）；回 {scanned, fixed}。"""
+    _check_auth(request)
+    from services.media_log_catchup import run_media_log_catchup_once
+    return await run_media_log_catchup_once()
+
+
 @router.post("/projects/{project_id}/media-log/settings")
 async def update_media_log_settings(project_id: str, request: Request):
-    """影像紀錄全域設定（root 資料夾 / 分類清單）— 寫 settings.json 的
-    media_log 區。root / categories 是全站共用（不分專案），path 帶
-    project_id 只是讓前端從專案面板順手改。缺的欄位不動（partial 語意）。"""
+    """影像紀錄全域設定（root 資料夾 / 分類清單）— 寫 DB（單一真相，master 與
+    NAS 對外容器共讀，見 _media_log_conf）。root / categories 是全站共用
+    （不分專案），path 帶 project_id 只是讓前端從專案面板順手改。
+    缺的欄位不動（partial 語意）。root 存的是 master 視角的 UNC。"""
     _check_auth(request)
+    _require_db()
     body = await request.json()
     patch: dict = {}
     if "root" in body:
         root = str(body.get("root") or "").strip()
-        if root and not await asyncio.to_thread(os.path.isdir, root):
+        # 存在性用「本機視角」驗（master 驗 UNC、NAS 驗掛載點），存的仍是原字串
+        if root and not await asyncio.to_thread(os.path.isdir, to_local_path(root)):
             raise HTTPException(status_code=400,
                                 detail=f"資料夾不存在或無法存取：{root}")
-        patch["root"] = root
+        patch[_SETTING_KEY_ROOT] = root
     if "categories" in body:
-        patch["categories"] = _norm_categories(body.get("categories"))
-    settings = load_settings()
-    conf = dict(settings.get("media_log") or {})
+        patch[_SETTING_KEY_CATS] = _norm_categories(body.get("categories"))
     if patch:
-        conf.update(patch)
-        settings["media_log"] = conf
-        save_settings(settings)
-    return {"ok": True,
-            "root": str(conf.get("root") or "").strip() or DEFAULT_MEDIA_LOG_ROOT,
-            "categories": _norm_categories(conf.get("categories"))
-                          or list(DEFAULT_MEDIA_LOG_CATEGORIES)}
+        from services.website import settings_service
+        factory = await _get_factory()
+        async with factory() as session:
+            await settings_service.update_settings(session, patch)
+    root, cats = await _media_log_conf()
+    return {"ok": True, "root": root, "categories": cats}
 
 
 async def _delete_file_record(session, rec) -> None:
     """刪一筆檔案：row 刪 + 原檔搬 _trash/（軟刪可救）+ 縮圖刪。
     admin 端點與 public 端點共用；caller 已驗過權限/歸屬。"""
-    stored_path = rec.stored_path or ""
+    stored_path = to_local_path(rec.stored_path or "")   # DB 存 canonical → 本機視角
     project_id = rec.project_id
     file_id = rec.id
     await session.delete(rec)
@@ -597,12 +682,7 @@ async def _delete_file_record(session, rec) -> None:
                 shutil.move(stored_path, os.path.join(trash_dir, dest))
             except OSError:
                 pass  # 搬失敗（鎖檔等）不擋刪除 — row 已刪，原檔留原位可人工清
-        thumb = _thumb_path(project_id, file_id)
-        if os.path.isfile(thumb):
-            try:
-                os.remove(thumb)
-            except OSError:
-                pass
+        _remove_thumbs(project_id, file_id)
 
     await asyncio.to_thread(_dispose)
 
@@ -623,11 +703,11 @@ async def delete_media_log_file(file_id: str, request: Request):
 
 # ── Public Endpoints（免登入，token 授權）────────────────────
 
-@router.get("/public/media-log/{token}")
+@public_router.get("/public/media-log/{token}")
 async def public_media_log_view(token: str):
     """分享連結頁資料 — 專案名 + 分類 + 檔案清單（enabled=False → 403）。"""
     _require_db()
-    root, cats = _media_log_conf()
+    root, cats = await _media_log_conf()
     factory = await _get_factory()
     async with factory() as session:
         row = await _verify_media_log_token(session, token)
@@ -647,7 +727,7 @@ async def public_media_log_view(token: str):
     }
 
 
-@router.post("/public/media-log/{token}/upload")
+@public_router.post("/public/media-log/{token}/upload")
 async def public_media_log_upload(token: str, file: UploadFile = File(...),
                                   category: str = Form(""),
                                   uploader_name: str = Form("")):
@@ -658,7 +738,7 @@ async def public_media_log_upload(token: str, file: UploadFile = File(...),
     if not media_type:
         ext = os.path.splitext(orig_name)[1] or "（無副檔名）"
         raise HTTPException(status_code=400, detail=f"不支援的檔案格式：{ext}")
-    root, _cats = _media_log_conf()
+    root, _cats = await _media_log_conf()
     if not await asyncio.to_thread(_root_set, root):
         raise HTTPException(status_code=503, detail="管理員尚未設定影像紀錄資料夾")
     factory = await _get_factory()
@@ -696,7 +776,8 @@ async def public_media_log_upload(token: str, file: UploadFile = File(...),
     async with factory() as session:
         rec = ProjectMediaFile(
             id=file_id, project_id=project_id,
-            filename=final_name, stored_path=stored_path,
+            # 本機寫檔用 local，但 DB 存 canonical UNC → 別台（master 補算）讀得到
+            filename=final_name, stored_path=to_canonical_path(stored_path),
             thumb_url=thumb, media_type=media_type,
             duration_sec=duration,
             category=str(category or "").strip()[:50],
@@ -705,12 +786,10 @@ async def public_media_log_upload(token: str, file: UploadFile = File(...),
         )
         session.add(rec)
         await session.commit()
-        _schedule_upload_notify(project_id, proj_name,
-                                str(uploader_name or "").strip())
-        return _to_file_dict(rec)
+        return _to_file_dict(rec)   # 通知由 master 掃 DB 補發，見上方註解
 
 
-@router.get("/public/media-log/{token}/file/{file_id}")
+@public_router.get("/public/media-log/{token}/file/{file_id}")
 async def public_media_log_file(token: str, file_id: str):
     """免登入下載/檢視原始檔 — file_id 不屬於該 token 專案 → 404。"""
     _require_db()
@@ -720,7 +799,7 @@ async def public_media_log_file(token: str, file_id: str):
         rec = await session.get(ProjectMediaFile, file_id)
         if not rec or rec.project_id != row.id:
             raise HTTPException(status_code=404, detail="找不到檔案")
-        stored_path = rec.stored_path or ""
+        stored_path = to_local_path(rec.stored_path or "")   # canonical → 本機視角
         filename = rec.filename or os.path.basename(stored_path) or "file"
     if not stored_path or not await asyncio.to_thread(os.path.isfile, stored_path):
         raise HTTPException(status_code=404, detail="檔案已不存在")
@@ -728,7 +807,7 @@ async def public_media_log_file(token: str, file_id: str):
     return FileResponse(stored_path, filename=filename)
 
 
-@router.delete("/public/media-log/{token}/file/{file_id}")
+@public_router.delete("/public/media-log/{token}/file/{file_id}")
 async def public_media_log_delete(token: str, file_id: str):
     """公開頁刪除（token 授權；file_id 不屬於該專案 → 404）。
     軟刪：原檔搬 _trash/ 可救回 — 免登入連結誤刪的保險。"""

@@ -41,12 +41,13 @@ def user_headers(tmp_settings):
 
 @pytest.fixture
 def paste_dir(tmp_settings, tmp_path):
-    """把 paste_assets 指到 tmp（預設值是 NAS UNC，測試環境碰不得）。"""
-    d = tmp_path / "paste_assets"
+    """把圖床指到 tmp（預設值是 NAS UNC，測試環境碰不得）。
+    回傳的是 paste 命名空間的實際落點（assets_host.dir/paste）。"""
+    root = tmp_path / "assets_host"
     s = load_settings()
-    s["paste_assets"] = {"dir": str(d), "base_url": "/uploads/paste/"}
+    s["assets_host"] = {"dir": str(root), "base_url": "/uploads"}
     save_settings(s)
-    return d
+    return root / "paste"
 
 
 async def test_upload_requires_auth(async_client, paste_dir):
@@ -95,7 +96,7 @@ async def test_upload_rejects_oversize(async_client, paste_dir, user_headers):
 
 async def test_upload_503_when_unconfigured(async_client, user_headers, tmp_settings):
     s = load_settings()
-    s["paste_assets"] = {"dir": "", "base_url": ""}
+    s["assets_host"] = {"dir": "", "base_url": ""}
     save_settings(s)
     r = await async_client.post(
         "/api/v1/paste_upload", headers=user_headers,

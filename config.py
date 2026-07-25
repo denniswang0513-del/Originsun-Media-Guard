@@ -44,13 +44,13 @@ _DEFAULT_SETTINGS: dict = {
         "agents_dir": r"\\192.168.1.132\Container\AI_Workspace\Originsun_Web\Agents",
         "logs_dir": r"\\192.168.1.132\Container\AI_Workspace\Originsun_Web\Logs",
     },
-    # 全站「貼上圖片」圖床（routers/api_paste.py）。dir=寫入落點（NAS PasteAssets，
-    # Assets_Nginx 24/7 對外 serve、不依賴 master）；base_url=渲染 <img> 的公開基底。
-    # DB 內容欄只存 token（paste:<hex>.webp）不含網域 → 搬家只改這裡，資料不用動。
-    # dev 機（行程無 NAS SMB 憑證）覆寫成本機 uploads/paste + 同源 "/uploads/paste"。
-    "paste_assets": {
-        "dir": r"\\192.168.1.132\Container\AI_Workspace\Originsun_Web\PasteAssets\paste",
-        "base_url": "https://assets.originsun-studio.com/paste",
+    # 共用圖床（NAS PasteAssets + Assets_Nginx，24/7 對外 serve、不依賴 master）。
+    # 底下用命名空間分區：paste=全站貼上圖片、medialog=影像紀錄縮圖。
+    # 消費端一律走 core.assets_host.assets_target(namespace)，不要各自拼路徑。
+    # dev 機（行程無 NAS SMB 憑證）覆寫成本機 uploads + 同源 "/uploads"。
+    "assets_host": {
+        "dir": r"\\192.168.1.132\Container\AI_Workspace\Originsun_Web\PasteAssets",
+        "base_url": "https://assets.originsun-studio.com",
     },
     "master_server": "http://192.168.1.107:8000",
     "database_url": "postgresql+asyncpg://originsun:cdeed932212d3e5bbfe86856bc77ac9c@192.168.1.132:5432/mediaguard",
