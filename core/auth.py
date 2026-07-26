@@ -192,6 +192,20 @@ def check_admin(request: Request):
     raise HTTPException(status_code=403, detail="權限不足")
 
 
+def payload_grants(payload: Optional[dict], *module_keys: str) -> bool:
+    """Verdict for an already-verified token payload: full admin (access_level>=3
+    or legacy role=='admin') OR grants any of module_keys. Single source of the
+    admin-or-module rule — reused by check_admin_or_module (header path) and by
+    callers that verified the token some other way (e.g. a ?token= query param on
+    <img>/<video> endpoints that can't send an Authorization header)."""
+    if not payload:
+        return False
+    if payload.get('access_level', -1) >= 3 or payload.get('role') == 'admin':
+        return True
+    user_modules = payload.get('modules') or []
+    return any(k in user_modules for k in module_keys)
+
+
 def check_admin_or_module(request: Request, *module_keys: str):
     """Like check_admin, but ALSO passes if the token grants any of module_keys.
 
@@ -205,10 +219,7 @@ def check_admin_or_module(request: Request, *module_keys: str):
     payload = _extract_token(request)
     if payload is None:
         raise HTTPException(status_code=401, detail="未登入或 token 已過期")
-    if payload.get('access_level', -1) >= 3 or payload.get('role') == 'admin':
-        return payload
-    user_modules = payload.get('modules') or []
-    if any(k in user_modules for k in module_keys):
+    if payload_grants(payload, *module_keys):
         return payload
     raise HTTPException(status_code=403, detail="權限不足")
 

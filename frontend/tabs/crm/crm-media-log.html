@@ -9,58 +9,73 @@
 </div>
 
 <style>
+    /* 主題變數 — 深色為預設（內部 SPA）；/my.html 內嵌頁用 html.ml-theme-light 覆寫成
+       官網白底（見 media-log-embed.html）。改任何色一律動變數，別再寫死。
+       圖片 lightbox 刻意留深色（看片本就該暗底），不進主題系統。 */
+    :root {
+        --mlc-field-bg: #1a1a1a; --mlc-panel: #1e1e1e; --mlc-subtle: #232323;
+        --mlc-inset: #1c1c1c; --mlc-thumb-bg: #2a2a2a; --mlc-hover: #333;
+        --mlc-border: #333; --mlc-border-soft: #262626; --mlc-border-strong: #3a3a3a;
+        --mlc-border-2: #444; --mlc-border-hover: #4a4a4a;
+        --mlc-heading: #fff; --mlc-strong: #eee; --mlc-text: #ccc; --mlc-text-soft: #ddd;
+        --mlc-sub: #888; --mlc-faint: #999; --mlc-faint-2: #666; --mlc-caption: #777;
+        --mlc-folder: #bbb;
+        --mlc-accent: #3b82f6; --mlc-accent-hover: #2563eb; --mlc-on-accent: #fff;
+        --mlc-on-bg: #14351f; --mlc-on-fg: #4ade80; --mlc-off-bg: #3a2020; --mlc-off-fg: #f87171;
+        --mlc-neutral-bg: #2c2c2c;
+    }
     #cml-root { padding: 18px 20px; }
-    #cml-root h2 { color: #fff; font-size: 18px; margin: 0 0 4px 0; font-weight: 600; }
-    #cml-root .cml-sub { color: #777; font-size: 12px; margin-bottom: 16px; }
+    #cml-root h2 { color: var(--mlc-heading); font-size: 18px; margin: 0 0 4px 0; font-weight: 600; }
+    #cml-root .cml-sub { color: var(--mlc-caption); font-size: 12px; margin-bottom: 16px; }
     #cml-root .cml-bar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-bottom: 14px; }
     #cml-root input, #cml-root select {
-        background: #1a1a1a; border: 1px solid #333; border-radius: 6px;
-        color: #ddd; font-size: 12.5px; padding: 7px 10px; outline: none;
+        background: var(--mlc-field-bg); border: 1px solid var(--mlc-border); border-radius: 6px;
+        color: var(--mlc-text-soft); font-size: 12.5px; padding: 7px 10px; outline: none;
     }
-    #cml-root input:focus, #cml-root select:focus { border-color: #3b82f6; }
+    #cml-root input:focus, #cml-root select:focus { border-color: var(--mlc-accent); }
     #cml-root .cml-search { flex: 1; min-width: 200px; }
     #cml-root .cml-btn {
-        background: #3b82f6; color: #fff; border: none; padding: 7px 14px;
+        background: var(--mlc-accent); color: var(--mlc-on-accent); border: none; padding: 7px 14px;
         border-radius: 6px; font-size: 12.5px; cursor: pointer; white-space: nowrap;
     }
-    #cml-root .cml-btn:hover { background: #2563eb; }
-    #cml-root .cml-btn.ghost { background: transparent; border: 1px solid #444; color: #ccc; }
-    #cml-root .cml-btn.ghost:hover { background: #333; }
+    #cml-root .cml-btn:hover { background: var(--mlc-accent-hover); }
+    #cml-root .cml-btn.ghost { background: transparent; border: 1px solid var(--mlc-border-2); color: var(--mlc-text); }
+    #cml-root .cml-btn.ghost:hover { background: var(--mlc-hover); }
     #cml-root .cml-btn.sm { padding: 4px 10px; font-size: 11.5px; }
 
     /* ── 表格 ── */
     #cml-root table { width: 100%; border-collapse: collapse; font-size: 12.5px; }
     #cml-root th {
-        text-align: left; color: #888; font-weight: 600; font-size: 11.5px;
-        padding: 8px 12px; border-bottom: 1px solid #333; white-space: nowrap;
+        text-align: left; color: var(--mlc-sub); font-weight: 600; font-size: 11.5px;
+        padding: 8px 12px; border-bottom: 1px solid var(--mlc-border); white-space: nowrap;
     }
     #cml-root th.num, #cml-root td.num { text-align: right; font-variant-numeric: tabular-nums; }
-    #cml-root td { padding: 10px 12px; border-bottom: 1px solid #262626; color: #ccc; vertical-align: middle; }
-    #cml-root tr:hover td { background: #232323; }
-    #cml-root .cml-proj { color: #eee; font-weight: 600; }
-    #cml-root .cml-client { color: #888; }
-    #cml-root .cml-count b { color: #eee; }
-    #cml-root .cml-count.zero { color: #666; }
-    #cml-root .cml-date { color: #999; font-variant-numeric: tabular-nums; }
+    #cml-root td { padding: 10px 12px; border-bottom: 1px solid var(--mlc-border-soft); color: var(--mlc-text); vertical-align: middle; }
+    #cml-root tr:hover td { background: var(--mlc-subtle); }
+    #cml-root .cml-proj { color: var(--mlc-strong); font-weight: 600; }
+    #cml-root .cml-client { color: var(--mlc-sub); }
+    #cml-root .cml-count b { color: var(--mlc-strong); }
+    #cml-root .cml-count.zero { color: var(--mlc-faint-2); }
+    #cml-root .cml-date { color: var(--mlc-faint); font-variant-numeric: tabular-nums; }
 
     /* 連結狀態 pill */
     #cml-root .cml-pill { display: inline-block; border-radius: 999px; padding: 1px 10px; font-size: 11px; }
-    #cml-root .cml-pill.on { background: #14351f; color: #4ade80; }
-    #cml-root .cml-pill.off { background: #3a2020; color: #f87171; }
-    #cml-root .cml-pill.orphan { background: #2c2c2c; color: #999; }
+    #cml-root .cml-pill.on { background: var(--mlc-on-bg); color: var(--mlc-on-fg); }
+    #cml-root .cml-pill.off { background: var(--mlc-off-bg); color: var(--mlc-off-fg); }
+    #cml-root .cml-pill.orphan { background: var(--mlc-neutral-bg); color: var(--mlc-faint); }
     /* 孤兒資料夾名（未連結）— 灰、等寬感 */
-    #cml-root .cml-folder { color: #bbb; font-family: ui-monospace, "Cascadia Mono", monospace; font-size: 12px; }
+    #cml-root .cml-folder { color: var(--mlc-folder); font-family: ui-monospace, "Cascadia Mono", monospace; font-size: 12px; }
 
     /* ── 連結專案 picker（overlay body 內）── */
-    #cml-root .cml-link-info { color: #bbb; font-size: 12.5px; line-height: 1.7; }
-    #cml-root .cml-link-info b { color: #eee; }
+    #cml-root .cml-link-info { color: var(--mlc-folder); font-size: 12.5px; line-height: 1.7; }
+    #cml-root .cml-link-info b { color: var(--mlc-strong); }
     #cml-root .cml-link-actions { display: flex; gap: 8px; justify-content: flex-end; }
     #cml-root .cml-link-msg { margin-top: 10px; font-size: 12px; min-height: 16px; }
-    #cml-root .cml-link-msg.ok { color: #4ade80; }
-    #cml-root .cml-link-msg.err { color: #f87171; }
+    #cml-root .cml-link-msg.ok { color: var(--mlc-on-fg); }
+    #cml-root .cml-link-msg.err { color: var(--mlc-off-fg); }
 
     #cml-root .cml-empty {
-        color: #999; background: #232323; border: 1px dashed #3a3a3a; border-radius: 8px;
+        color: var(--mlc-faint); background: var(--mlc-subtle); border: 1px dashed var(--mlc-border-strong); border-radius: 8px;
         padding: 28px 24px; font-size: 13px; line-height: 2; margin-top: 6px; text-align: center;
     }
 
@@ -71,31 +86,31 @@
     }
     #cml-overlay.on { display: flex; }
     #cml-overlay .cml-panel {
-        background: #1e1e1e; border: 1px solid #3a3a3a; border-radius: 10px;
+        background: var(--mlc-panel); border: 1px solid var(--mlc-border-strong); border-radius: 10px;
         width: 100%; max-width: 1000px; box-shadow: 0 20px 60px -20px rgba(0,0,0,.7);
     }
     #cml-overlay .cml-panel-head {
         display: flex; align-items: center; justify-content: space-between; gap: 10px;
-        padding: 14px 18px; border-bottom: 1px solid #333;
+        padding: 14px 18px; border-bottom: 1px solid var(--mlc-border);
     }
-    #cml-overlay .cml-panel-head .t { color: #fff; font-size: 15px; font-weight: 600; }
-    #cml-overlay .cml-panel-head .t small { color: #888; font-weight: 400; margin-left: 8px; font-size: 12px; }
+    #cml-overlay .cml-panel-head .t { color: var(--mlc-heading); font-size: 15px; font-weight: 600; }
+    #cml-overlay .cml-panel-head .t small { color: var(--mlc-sub); font-weight: 400; margin-left: 8px; font-size: 12px; }
     #cml-overlay .cml-close {
-        background: transparent; border: 1px solid #444; color: #ccc; border-radius: 6px;
+        background: transparent; border: 1px solid var(--mlc-border-2); color: var(--mlc-text); border-radius: 6px;
         width: 30px; height: 30px; cursor: pointer; font-size: 16px; line-height: 1;
     }
-    #cml-overlay .cml-close:hover { background: #333; color: #fff; }
+    #cml-overlay .cml-close:hover { background: var(--mlc-hover); color: var(--mlc-heading); }
     #cml-overlay .cml-panel-body { padding: 16px 18px; }
 
     /* ── 孤兒資料夾唯讀檢視（縮圖牆）── */
-    .cml-view-info { color: #999; font-size: 12px; line-height: 1.7; margin-bottom: 12px; }
+    .cml-view-info { color: var(--mlc-faint); font-size: 12px; line-height: 1.7; margin-bottom: 12px; }
     .cml-view-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 10px; }
-    .cml-vitem { position: relative; border-radius: 6px; overflow: hidden; background: #1c1c1c; border: 1px solid #333; cursor: pointer; }
-    .cml-vitem:hover { border-color: #4a4a4a; }
-    .cml-vthumb { width: 100%; aspect-ratio: 16/10; object-fit: cover; display: block; background: #2a2a2a; }
-    .cml-vthumb-fallback { display: flex; align-items: center; justify-content: center; aspect-ratio: 16/10; background: #2a2a2a; color: #6b7280; font-size: 13px; font-weight: 600; letter-spacing: 1px; }
+    .cml-vitem { position: relative; border-radius: 6px; overflow: hidden; background: var(--mlc-inset); border: 1px solid var(--mlc-border); cursor: pointer; }
+    .cml-vitem:hover { border-color: var(--mlc-border-hover); }
+    .cml-vthumb { width: 100%; aspect-ratio: 16/10; object-fit: cover; display: block; background: var(--mlc-thumb-bg); }
+    .cml-vthumb-fallback { display: flex; align-items: center; justify-content: center; aspect-ratio: 16/10; background: var(--mlc-thumb-bg); color: var(--mlc-faint); font-size: 13px; font-weight: 600; letter-spacing: 1px; }
     .cml-vbadge { position: absolute; right: 4px; top: 4px; background: rgba(0,0,0,.75); color: #fff; font-size: 10px; padding: 1px 5px; border-radius: 3px; }
-    .cml-vname { font-size: 11px; color: #8a8a8a; padding: 4px 6px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .cml-vname { font-size: 11px; color: var(--mlc-sub); padding: 4px 6px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
     /* ── 檢視器 lightbox（body 層，蓋過 overlay）── */
     .cml-lb { position: fixed; inset: 0; z-index: 1000; background: rgba(0,0,0,.9); display: flex; align-items: center; justify-content: center; }

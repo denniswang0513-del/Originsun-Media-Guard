@@ -142,6 +142,13 @@ footer .eyebrow { font-size: 10px; }
     .grid { grid-template-columns: 1fr; gap: 20px; }
     .brand-name { display: none; }
 }
+/* ── 影像紀錄：全螢幕內嵌完整 Tab（官網白底，與內嵌頁一致）── */
+.ml-full { position: fixed; inset: 0; z-index: 2000; background: #fff; display: flex; flex-direction: column; }
+.ml-full-bar { flex: 0 0 auto; display: flex; align-items: center; justify-content: space-between; padding: 12px 20px; background: #fff; border-bottom: 1px solid var(--line); }
+.ml-full-title { color: var(--ink); font-size: 13px; letter-spacing: 0.25em; text-transform: uppercase; }
+.ml-full-x { background: none; border: 1px solid var(--line); color: var(--sub); border-radius: 2px; width: 30px; height: 30px; font-size: 16px; line-height: 1; cursor: pointer; transition: all .15s; }
+.ml-full-x:hover { border-color: var(--red); color: var(--red); }
+.ml-full-frame { flex: 1 1 auto; width: 100%; border: 0; display: block; }
 </style>
 </head>
 <body>
@@ -415,6 +422,7 @@ function renderWorkspace() {
     if (ws.allowed.includes("me_leave"))    grid.appendChild(cardLeave(ws.leave));
     if (ws.allowed.includes("me_profile"))  grid.appendChild(cardProfile(ws.profile));
     if (ws.allowed.includes("me_finance"))  grid.appendChild(cardFinance(ws.timesheet, ws.payments));
+    if (ws.allowed.includes("media_log"))   grid.appendChild(cardMediaLog());
     // 週誌在 grid 之外自成一區（見 #ws-journal 註解）：只建一次，之後只切顯示
     const jr = $("ws-journal");
     if (ws.allowed.includes("journal")) {
@@ -453,6 +461,40 @@ window.addEventListener("message", (e) => {
     const f = $("jr-frame");
     if (f && d.height > 0) f.style.height = Math.max(JR_MIN_H, d.height) + "px";
 });
+
+// ── 卡：影像紀錄 —— 全螢幕內嵌完整的內部「影像紀錄」Tab（media-log-embed.html）──
+// owner 2026-07-26：官網頁面會開放給部分帳號代管影像紀錄，功能不能有閹割 → 直接內嵌
+// 主控台那一份 Tab（總覽/連結/檢視/上傳/分享/設定/刪除全含），單一正本零重複。權限：
+// 後端 media_log 模組＝子系統全權（見 _check_media_log_auth），帳號有該模組即可全用。
+// 用全螢幕 overlay（非 inline iframe）→ Tab 內的 fixed 面板/燈箱定位正常。
+let mlFullKey = null;
+function cardMediaLog() {
+    const card = makeCard("Media Log", "影像紀錄", "", "media_log");
+    card.querySelector(".card-body").innerHTML = `
+        <div class="meta" style="margin-bottom:12px;">劇組劇照 / 花絮的收集與管理：瀏覽資料夾、連結專案、上傳、分享連結 QR、縮圖與設定。</div>
+        <button class="mini-btn" onclick="mlOpenFull()">開啟影像紀錄</button>`;
+    return card;
+}
+function mlOpenFull() {
+    if ($("ml-full")) return;
+    const ov = document.createElement("div");
+    ov.id = "ml-full";
+    ov.className = "ml-full";
+    ov.innerHTML = `<div class="ml-full-bar">
+            <span class="ml-full-title">影像紀錄</span>
+            <button class="ml-full-x" onclick="mlCloseFull()" title="關閉">✕</button>
+        </div>
+        <iframe class="ml-full-frame" src="/media-log-embed.html" title="影像紀錄"></iframe>`;
+    document.body.appendChild(ov);
+    document.body.style.overflow = "hidden";
+    mlFullKey = (e) => { if (e.key === "Escape") mlCloseFull(); };
+    document.addEventListener("keydown", mlFullKey);
+}
+function mlCloseFull() {
+    const ov = $("ml-full"); if (ov) ov.remove();
+    document.body.style.overflow = "";
+    if (mlFullKey) { document.removeEventListener("keydown", mlFullKey); mlFullKey = null; }
+}
 
 // 每張卡都可收合：點標題列切換，狀態記在 localStorage（跨登入保留）。
 // key 用穩定代號而非顯示字串 —— 改標題文案不該把大家的收合狀態洗掉。

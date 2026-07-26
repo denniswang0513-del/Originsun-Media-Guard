@@ -365,3 +365,38 @@ class TestListFolderForView:
             (tmp_path / f"{i}.jpg").write_bytes(b"x")
         files, truncated = _list_folder_for_view(str(tmp_path), cap=4)
         assert truncated is True and len(files) == 4
+
+
+class TestCheckMediaLogAuthToken:
+    """子系統授權的 ?token= 路徑（_check_media_log_auth）：<img> src 無法帶 header 用它。
+    admin 或 media_log 模組放行；其他/無效 token → 403。"""
+
+    def test_admin_token_passes(self):
+        from core.auth import create_token
+        from routers.crm.media_log import _check_media_log_auth
+        t = create_token({"sub": "a", "username": "a", "access_level": 3, "modules": []})
+        _check_media_log_auth(None, t)   # 不 raise 即通過
+
+    def test_media_log_module_passes(self):
+        from core.auth import create_token
+        from routers.crm.media_log import _check_media_log_auth
+        t = create_token({"sub": "u", "username": "u", "access_level": 1,
+                          "modules": ["media_log"]})
+        _check_media_log_auth(None, t)
+
+    def test_without_module_rejected(self):
+        import pytest
+        from fastapi import HTTPException
+        from core.auth import create_token
+        from routers.crm.media_log import _check_media_log_auth
+        t = create_token({"sub": "u", "username": "u", "access_level": 1,
+                          "modules": ["crm_clients"]})
+        with pytest.raises(HTTPException):
+            _check_media_log_auth(None, t)
+
+    def test_invalid_token_rejected(self):
+        import pytest
+        from fastapi import HTTPException
+        from routers.crm.media_log import _check_media_log_auth
+        with pytest.raises(HTTPException):
+            _check_media_log_auth(None, "garbage.not.a.jwt")

@@ -202,11 +202,15 @@ async function _doLink(folderName) {
 }
 
 // ── 孤兒資料夾唯讀檢視（不連結專案也能看照片）──────────────────────────
+// ⚠ 個人工作台 frontend/my.html 有一份平行實作（官網白底 + 傳統 script）；主題與
+//   模組系統不同故各自維護，改這裡的檢視/燈箱行為時記得同步那邊（mlRenderGrid 等）。
+// <img>/<video> src 無法帶 Authorization header → 端點也吃 ?token= query（同 JWT）。
+function _authTok() { return encodeURIComponent(localStorage.getItem('auth_token') || ''); }
 function _thumbUrl(rel) {
-    return `${ADMIN_API}/media-log/folder/thumb?folder=${encodeURIComponent(_viewFolder)}&rel=${encodeURIComponent(rel)}`;
+    return `${ADMIN_API}/media-log/folder/thumb?folder=${encodeURIComponent(_viewFolder)}&rel=${encodeURIComponent(rel)}&token=${_authTok()}`;
 }
 function _fileUrl(rel) {
-    return `${ADMIN_API}/media-log/folder/file?folder=${encodeURIComponent(_viewFolder)}&rel=${encodeURIComponent(rel)}`;
+    return `${ADMIN_API}/media-log/folder/file?folder=${encodeURIComponent(_viewFolder)}&rel=${encodeURIComponent(rel)}&token=${_authTok()}`;
 }
 
 async function _openFolderViewer(folderName) {

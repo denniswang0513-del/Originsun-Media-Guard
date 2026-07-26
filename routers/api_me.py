@@ -58,13 +58,16 @@ def _profile_dict(s) -> dict:
 async def my_workspace(request: Request):
     """個人工作台 bundle — 只回帳號有權限的區塊；未綁定人員檔案時
     人員鍵區塊（profile/projects/finance）回空並帶 bound=False。"""
-    payload = check_admin_or_module(request, *ME_MODULE_KEYS, "journal")
+    payload = check_admin_or_module(request, *ME_MODULE_KEYS, "journal", "media_log")
     mods = grant_admin_all_modules(payload.get("access_level"), payload.get("modules") or [])
     allowed = [k for k in ME_MODULE_KEYS if k in mods]
     # 週誌卡宣告式閘門 — my.html 依 allowed 決定要不要抓 /api/v1/journal/mine
     # （資料不進 bundle；避免前端用「打端點看 403」探測權限的偏差模式）
     if "journal" in mods:
         allowed.append("journal")
+    # 影像紀錄卡同款宣告式閘門 — my.html 自行打 /crm/media-log/overview（唯讀瀏覽）
+    if "media_log" in mods:
+        allowed.append("media_log")
     ident = await resolve_current_staff(request)
     staff = ident["staff"]
     out = {

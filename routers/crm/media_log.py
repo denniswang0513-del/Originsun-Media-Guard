@@ -37,7 +37,7 @@ from core.subproc import run_capture
 # 免登入端點掛它 → NAS 對外容器只掛這組，其餘 160+ 個 CRM 端點不會對外。
 # ⚠ QR 端點雖然也免登入，但**只有後台在用**（公開頁一次都沒呼叫）且需要 qrcode
 #   套件（對外容器沒裝）→ 留在 router，刻意不進 public_router。
-from ._shared import (router, public_router, _check_auth, _require_db,
+from ._shared import (router, public_router, _require_db,
                       _get_factory, _now, _UPLOAD_BASE, save_webp_or_none,
                       _verify_token_generic, _mint_token_generic)
 
@@ -647,6 +647,27 @@ def _folder_thumb_key(canon_path: str) -> str:
     return hashlib.sha1(canon_path.encode("utf-8")).hexdigest()[:16]
 
 
+def _check_media_log_auth(request, token: str = "") -> None:
+    """影像紀錄子系統授權 — 管理員 OR 擁有 media_log 模組（比全域 admin 寬）。
+    **media_log 模組＝這個子系統的完整管理權**（同 website_admin 之於官網管理）：
+    owner 會把官網頁面（/my.html）開放給部分帳號代管影像紀錄，那些帳號只要有
+    media_log 模組就能做全部操作 —— 瀏覽、連結專案、上傳、分享連結、設定、刪除。
+    全域 admin 永遠通過。公開頁（token 授權）不受此影響。
+
+    token：縮圖/原檔端點給 <img>/<video> src 用 —— 那些無法帶 Authorization header，
+    故也接受 ?token=<JWT> query（同一組 JWT，驗法相同）。是內部工具、同源請求，
+    JWT 進 URL 的曝險（log/history）可接受；公開頁本就把 token 放 URL。"""
+    try:
+        from core.auth import check_admin_or_module, payload_grants, verify_token
+    except ImportError:
+        return
+    if token:   # <img>/<video> src 帶不了 header → 走 query JWT，同一組授權規則
+        if not payload_grants(verify_token(token), 'media_log'):
+            raise HTTPException(status_code=403, detail="權限不足")
+        return
+    check_admin_or_module(request, 'media_log')
+
+
 # ── 上傳管線（串流寫檔 + 縮圖）───────────────────────────────
 
 async def _stream_to_disk(file: UploadFile, dest_path: str) -> int:
@@ -750,7 +771,7 @@ async def _make_video_thumb(stored_path: str, project_id: str, file_id: str) -> 
 async def get_project_media_log(project_id: str, request: Request):
     """影像紀錄管理面板 — 分享連結（自動 mint / 失效自癒重發）+ 資料夾設定
     + 檔案清單（created_at DESC）。"""
-    _check_auth(request)
+    _check_media_log_auth(request)
     _require_db()
     db = await _db_settings()          # 一個 request 只查一次（root/cats 與分享網域共用）
     root, cats = _conf_from(db)
@@ -786,7 +807,7 @@ async def get_project_media_log(project_id: str, request: Request):
 @router.post("/projects/{project_id}/media-log/token")
 async def reset_media_log_token(project_id: str, request: Request):
     """重置分享連結 — 強制產新 token（舊連結立即失效）。"""
-    _check_auth(request)
+    _check_media_log_auth(request)
     _require_db()
     factory = await _get_factory()
     async with factory() as session:
@@ -804,7 +825,7 @@ async def reset_media_log_token(project_id: str, request: Request):
 async def set_media_log_enabled(project_id: str, request: Request):
     """公開連結總開關 — enabled=False 時三個 public 端點一律 403
     （殺青收檔期結束的「關閘」語意；重開即恢復，token 不變）。"""
-    _check_auth(request)
+    _check_media_log_auth(request)
     _require_db()
     body = await request.json()
     enabled = bool(body.get("enabled"))
@@ -864,7 +885,7 @@ async def media_log_overview(request: Request, q: str = "", scope: str = "conten
     scope：content=有檔案（預設）/ all=全部 / orphan=只列未連結的孤兒資料夾。
     q=專案名或資料夾名模糊搜尋。
     """
-    _check_auth(request)
+    _check_media_log_auth(request)
     _require_db()
     from sqlalchemy import case, func
     factory = await _get_factory()
@@ -937,7 +958,7 @@ async def media_log_link_folder(request: Request):
 
     守衛：目標專案若已有影像紀錄且指向**別的**資料夾、且那邊已有檔案 → 400
     （避免把既有收集牆改指到別處造成混亂）。空的 / 未建的 / 指向同一夾 → 放行。"""
-    _check_auth(request)
+    _check_media_log_auth(request)
     _require_db()
     from sqlalchemy import func
     body = await request.json()
@@ -990,7 +1011,7 @@ async def media_log_folder_files(request: Request, folder: str = ""):
     """孤兒（未連結專案）資料夾唯讀瀏覽 — 列出資料夾內（含子夾）媒體檔清單。
     不建 DB 記錄、純掃磁碟；縮圖/原檔各走下面兩個端點（懶產）。
     讓「不管有沒有連結專案都能看照片」—— 連結是把它收進某專案，這裡只是先看。"""
-    _check_auth(request)
+    _check_media_log_auth(request)
     root, _cats = await _media_log_conf()
     folder_abs = await asyncio.to_thread(_safe_subfolder, root, folder)
     if not folder_abs:
@@ -1004,10 +1025,11 @@ async def media_log_folder_files(request: Request, folder: str = ""):
 
 
 @router.get("/media-log/folder/thumb")
-async def media_log_folder_thumb(request: Request, folder: str = "", rel: str = ""):
+async def media_log_folder_thumb(request: Request, folder: str = "", rel: str = "",
+                                 token: str = ""):
     """孤兒資料夾單檔縮圖（懶產 + 圖床快取）。RAW / 無圖床 / 產不出 → 415
-    （前端 img error 退灰卡）。"""
-    _check_auth(request)
+    （前端 img error 退灰卡）。token= 給 <img> src 帶授權（無法帶 header）。"""
+    _check_media_log_auth(request, token)
     from starlette.responses import FileResponse
     root, _cats = await _media_log_conf()
     folder_abs = await asyncio.to_thread(_safe_subfolder, root, folder)
@@ -1032,9 +1054,11 @@ async def media_log_folder_thumb(request: Request, folder: str = "", rel: str = 
 
 
 @router.get("/media-log/folder/file")
-async def media_log_folder_file(request: Request, folder: str = "", rel: str = ""):
-    """孤兒資料夾單檔原檔（lightbox 檢視 / 下載）。admin 唯讀、不建 DB 記錄。"""
-    _check_auth(request)
+async def media_log_folder_file(request: Request, folder: str = "", rel: str = "",
+                                token: str = ""):
+    """孤兒資料夾單檔原檔（lightbox 檢視 / 下載）。檢視授權、不建 DB 記錄。
+    token= 給 <img>/<video> src 帶授權（無法帶 header）。"""
+    _check_media_log_auth(request, token)
     from starlette.responses import FileResponse
     root, _cats = await _media_log_conf()
     folder_abs = await asyncio.to_thread(_safe_subfolder, root, folder)
@@ -1051,7 +1075,7 @@ async def media_log_catchup_now(request: Request):
     """管理員手動觸發一輪縮圖補算（影片縮圖/時長 + 舊縮圖遷移）。
     平時由 master 背景每 10 分鐘自動跑；剛上傳一批影片想立刻看到縮圖時可手動戳。
     只在 master 有意義（有 ffmpeg + NAS 憑證）；回 {scanned, fixed}。"""
-    _check_auth(request)
+    _check_media_log_auth(request)
     from services.media_log_catchup import run_media_log_catchup_once
     return await run_media_log_catchup_once()
 
@@ -1062,7 +1086,7 @@ async def update_media_log_settings(project_id: str, request: Request):
     NAS 對外容器共讀，見 _media_log_conf）。root / categories 是全站共用
     （不分專案），path 帶 project_id 只是讓前端從專案面板順手改。
     缺的欄位不動（partial 語意）。root 存的是 master 視角的 UNC。"""
-    _check_auth(request)
+    _check_media_log_auth(request)
     _require_db()
     body = await request.json()
     patch: dict = {}
@@ -1113,7 +1137,7 @@ async def _delete_file_record(session, rec) -> None:
 @router.delete("/media-log/files/{file_id}")
 async def delete_media_log_file(file_id: str, request: Request):
     """刪除影像紀錄檔案（admin）— 軟刪語意見 _delete_file_record。"""
-    _check_auth(request)
+    _check_media_log_auth(request)
     _require_db()
     factory = await _get_factory()
     async with factory() as session:

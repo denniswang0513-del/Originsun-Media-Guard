@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="zh-Hant" class="ml-theme-light">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>影像紀錄</title>
+<!-- 個人工作台 /my.html 全螢幕內嵌用：直接載入內部 SPA 的「影像紀錄」Tab
+     （frontend/tabs/crm/crm-media-log.*），功能與主控台完全相同（總覽 / 連結專案 /
+     檢視 / 開啟面板上傳 / 分享連結 QR / 設定 / 刪除）—— 單一正本，零重複實作。
+     授權：同源，crmFetch 帶 localStorage 的 auth_token；後端 media_log 模組即全權。
+     視覺：html.ml-theme-light 把元件的 --mlc-* 主題變數覆寫成官網白底/旭日紅
+     （深色預設定義在 crm-media-log.html 與 crm-projects-media.js；圖片 lightbox 留深色）。 -->
+<style>
+  html, body { margin: 0; background: #fff; color: #262626;
+    font-family: "Noto Sans TC", "Microsoft JhengHei", "Segoe UI", sans-serif; }
+  #ml-embed-err { padding: 48px 24px; text-align: center; color: #c0392b; font-size: 14px; }
+
+  /* 官網白底主題：覆寫元件的 --mlc-* 變數（深色為預設，這裡整組翻成官網色）。
+     specificity html.ml-theme-light (0,1,1) > 元件內的 :root (0,1,0) → 一定贏、與載入順序無關。 */
+  html.ml-theme-light {
+    --mlc-surface:#fff; --mlc-field-bg:#fff; --mlc-panel:#fff; --mlc-subtle:#fafafa; --mlc-inset:#f5f5f5;
+    --mlc-thumb-bg:#eee; --mlc-hover:#f0f0f0;
+    --mlc-border:#e5e5e5; --mlc-border-soft:#f0f0f0; --mlc-border-strong:#e0e0e0;
+    --mlc-border-2:#d4d4d4; --mlc-border-hover:#c8c8c8;
+    --mlc-heading:#1a1a1a; --mlc-strong:#262626; --mlc-text:#333; --mlc-text-soft:#404040;
+    --mlc-sub:#737373; --mlc-faint:#a3a3a3; --mlc-faint-2:#b0b0b0; --mlc-caption:#8a8a8a;
+    --mlc-folder:#525252;
+    --mlc-accent:#c9372c; --mlc-accent-hover:#a82c22; --mlc-on-accent:#fff;
+    --mlc-on-bg:#e6f4ea; --mlc-on-fg:#147a3d; --mlc-off-bg:#fbeaea; --mlc-off-fg:#c0392b;
+    --mlc-neutral-bg:#f0f0f0;
+    --mlc-warn-bg:#fdf3e3; --mlc-warn-border:#e0a94f; --mlc-warn-fg:#92600a;
+    --mlc-chip-bg:#f0f0f0; --mlc-track:#e5e5e5; --mlc-pill-bg:#f0f0f0;
+    --mlc-accent-soft-bg:#fbe9e7; --mlc-accent-soft-fg:#c9372c; --mlc-qr-bg:#fff;
+  }
+</style>
+</head>
+<body>
+<div id="ml-embed-host"><div style="padding:40px;text-align:center;color:#a3a3a3;">載入中…</div></div>
+<script type="module">
+  const host = document.getElementById("ml-embed-host");
+  try {
+    host.innerHTML = await (await fetch("/tabs/crm/crm-media-log.html")).text();
+    const mod = await import("/tabs/crm/crm-media-log.js");
+    await mod.initCrmMediaLogTab();
+  } catch (e) {
+    host.innerHTML = '<div id="ml-embed-err">影像紀錄載入失敗：' + ((e && e.message) || e) + "</div>";
+  }
+</script>
+</body>
+</html>
