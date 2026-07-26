@@ -16,7 +16,7 @@ export const TAB_MAP = {
     crm_clients: 'tab_crm_clients', crm_projects: 'tab_crm_projects',
     crm_quotes: 'tab_crm_quotes', crm_staff: 'tab_crm_staff',
     crm_invoices: 'tab_crm_invoices', timesheets: 'tab_timesheets',
-    portal: 'tab_portal',
+    portal: 'tab_portal', media_log: 'tab_media_log',
     hr_leave: 'tab_hr_leave',
     journal: 'tab_journal',
     website_admin: 'tab_website',
@@ -55,6 +55,7 @@ export const TAB_LOADERS = [
     ['hr_leave',      './tabs/hr_leave/hr_leave.html',       './tabs/hr_leave/hr_leave.js',       'initHrLeaveTab'],
     ['journal',       './tabs/journal/journal.html',         './tabs/journal/journal.js',         'initJournalTab'],
     ['portal',        './tabs/portal/portal.html',           './tabs/portal/portal.js',           'initPortalTab'],
+    ['media_log',     './tabs/crm/crm-media-log.html',       './tabs/crm/crm-media-log.js',       'initCrmMediaLogTab'],
     ['website_admin', './tabs/website/website.html',         './tabs/website/website.js',         'initWebsiteTab'],
 ];
 
@@ -95,6 +96,7 @@ export const TAB_GROUPS = [
         { key: 'crm_projects', label: '📁 專案管理' },
         { key: 'crm_quotes',   label: '💰 報價管理' },
         { key: 'portal',       label: '🎬 審批門戶' },
+        { key: 'media_log',    label: '📷 影像紀錄' },
     ] },
     // 人事管理（2026-07 N-hr）：員工檔案/工時自業務管理搬入 + 請補修（原名出缺勤）。
     // 設計鐵則（owner 2026-07-17）：emoji 只在頂層 tab 標籤，items 一律純文字。
@@ -140,7 +142,7 @@ export const PERMISSION_GROUPS = [
     { id: 'projects',   label: '📊 專案總覽', modules: ['projects'] },
     { id: 'preprod',    label: '📝 前期製作', modules: ['preprod_plan', 'preprod_locations', 'preprod_proposals', 'intel', 'equipment'] },
     { id: 'production', label: '🎬 後期製作', modules: ['backup', 'verify', 'transcode', 'concat', 'drone_meta', 'report', 'transcribe', 'tts', 'footage'] },
-    { id: 'business',   label: '💼 業務管理', modules: ['crm_clients', 'crm_projects', 'crm_quotes', 'portal'] },
+    { id: 'business',   label: '💼 業務管理', modules: ['crm_clients', 'crm_projects', 'crm_quotes', 'portal', 'media_log'] },
     { id: 'hr',         label: '人事管理', modules: ['crm_staff', 'timesheets', 'hr_leave', 'journal'] },
     { id: 'finance',    label: '💰 財務管理', modules: ['crm_invoices'] },
     { id: 'website',    label: '🌐 官網管理', modules: ['website_admin'] },

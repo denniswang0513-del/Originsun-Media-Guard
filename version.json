@@ -1,5 +1,5 @@
 {
-  "version": "2.4.16",
-  "build_date": "2026-07-25",
-  "notes": "影像紀錄公開頁不再依賴 master（NAS 雙入口）+ 共用圖床命名空間化"
+  "version": "2.4.18",
+  "build_date": "2026-07-26",
+  "notes": "media-log folder viewer"
 }

@@ -1,0 +1,113 @@
+<!--
+    crm-media-log.html — 業務管理 › 影像紀錄（跨專案總覽）Tab 殼
+    內容由 crm-media-log.js render 進 #cml-content。列出各專案的收集牆（圖/影片數、
+    最近上傳、連結狀態），點「開啟」在 overlay 複用專案詳情的影像紀錄面板
+    （loadMediaTab）。單專案的上傳/QR/設定仍是那個面板，這裡只多一個總覽入口。
+-->
+<div id="cml-root">
+    <div id="cml-content" style="color:#888;padding:40px;text-align:center;">載入中…</div>
+</div>
+
+<style>
+    #cml-root { padding: 18px 20px; }
+    #cml-root h2 { color: #fff; font-size: 18px; margin: 0 0 4px 0; font-weight: 600; }
+    #cml-root .cml-sub { color: #777; font-size: 12px; margin-bottom: 16px; }
+    #cml-root .cml-bar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-bottom: 14px; }
+    #cml-root input, #cml-root select {
+        background: #1a1a1a; border: 1px solid #333; border-radius: 6px;
+        color: #ddd; font-size: 12.5px; padding: 7px 10px; outline: none;
+    }
+    #cml-root input:focus, #cml-root select:focus { border-color: #3b82f6; }
+    #cml-root .cml-search { flex: 1; min-width: 200px; }
+    #cml-root .cml-btn {
+        background: #3b82f6; color: #fff; border: none; padding: 7px 14px;
+        border-radius: 6px; font-size: 12.5px; cursor: pointer; white-space: nowrap;
+    }
+    #cml-root .cml-btn:hover { background: #2563eb; }
+    #cml-root .cml-btn.ghost { background: transparent; border: 1px solid #444; color: #ccc; }
+    #cml-root .cml-btn.ghost:hover { background: #333; }
+    #cml-root .cml-btn.sm { padding: 4px 10px; font-size: 11.5px; }
+
+    /* ── 表格 ── */
+    #cml-root table { width: 100%; border-collapse: collapse; font-size: 12.5px; }
+    #cml-root th {
+        text-align: left; color: #888; font-weight: 600; font-size: 11.5px;
+        padding: 8px 12px; border-bottom: 1px solid #333; white-space: nowrap;
+    }
+    #cml-root th.num, #cml-root td.num { text-align: right; font-variant-numeric: tabular-nums; }
+    #cml-root td { padding: 10px 12px; border-bottom: 1px solid #262626; color: #ccc; vertical-align: middle; }
+    #cml-root tr:hover td { background: #232323; }
+    #cml-root .cml-proj { color: #eee; font-weight: 600; }
+    #cml-root .cml-client { color: #888; }
+    #cml-root .cml-count b { color: #eee; }
+    #cml-root .cml-count.zero { color: #666; }
+    #cml-root .cml-date { color: #999; font-variant-numeric: tabular-nums; }
+
+    /* 連結狀態 pill */
+    #cml-root .cml-pill { display: inline-block; border-radius: 999px; padding: 1px 10px; font-size: 11px; }
+    #cml-root .cml-pill.on { background: #14351f; color: #4ade80; }
+    #cml-root .cml-pill.off { background: #3a2020; color: #f87171; }
+    #cml-root .cml-pill.orphan { background: #2c2c2c; color: #999; }
+    /* 孤兒資料夾名（未連結）— 灰、等寬感 */
+    #cml-root .cml-folder { color: #bbb; font-family: ui-monospace, "Cascadia Mono", monospace; font-size: 12px; }
+
+    /* ── 連結專案 picker（overlay body 內）── */
+    #cml-root .cml-link-info { color: #bbb; font-size: 12.5px; line-height: 1.7; }
+    #cml-root .cml-link-info b { color: #eee; }
+    #cml-root .cml-link-actions { display: flex; gap: 8px; justify-content: flex-end; }
+    #cml-root .cml-link-msg { margin-top: 10px; font-size: 12px; min-height: 16px; }
+    #cml-root .cml-link-msg.ok { color: #4ade80; }
+    #cml-root .cml-link-msg.err { color: #f87171; }
+
+    #cml-root .cml-empty {
+        color: #999; background: #232323; border: 1px dashed #3a3a3a; border-radius: 8px;
+        padding: 28px 24px; font-size: 13px; line-height: 2; margin-top: 6px; text-align: center;
+    }
+
+    /* ── overlay（複用專案詳情的影像紀錄面板）── */
+    #cml-overlay {
+        position: fixed; inset: 0; z-index: 900; background: rgba(0,0,0,.6);
+        display: none; align-items: flex-start; justify-content: center; padding: 40px 20px; overflow: auto;
+    }
+    #cml-overlay.on { display: flex; }
+    #cml-overlay .cml-panel {
+        background: #1e1e1e; border: 1px solid #3a3a3a; border-radius: 10px;
+        width: 100%; max-width: 1000px; box-shadow: 0 20px 60px -20px rgba(0,0,0,.7);
+    }
+    #cml-overlay .cml-panel-head {
+        display: flex; align-items: center; justify-content: space-between; gap: 10px;
+        padding: 14px 18px; border-bottom: 1px solid #333;
+    }
+    #cml-overlay .cml-panel-head .t { color: #fff; font-size: 15px; font-weight: 600; }
+    #cml-overlay .cml-panel-head .t small { color: #888; font-weight: 400; margin-left: 8px; font-size: 12px; }
+    #cml-overlay .cml-close {
+        background: transparent; border: 1px solid #444; color: #ccc; border-radius: 6px;
+        width: 30px; height: 30px; cursor: pointer; font-size: 16px; line-height: 1;
+    }
+    #cml-overlay .cml-close:hover { background: #333; color: #fff; }
+    #cml-overlay .cml-panel-body { padding: 16px 18px; }
+
+    /* ── 孤兒資料夾唯讀檢視（縮圖牆）── */
+    .cml-view-info { color: #999; font-size: 12px; line-height: 1.7; margin-bottom: 12px; }
+    .cml-view-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 10px; }
+    .cml-vitem { position: relative; border-radius: 6px; overflow: hidden; background: #1c1c1c; border: 1px solid #333; cursor: pointer; }
+    .cml-vitem:hover { border-color: #4a4a4a; }
+    .cml-vthumb { width: 100%; aspect-ratio: 16/10; object-fit: cover; display: block; background: #2a2a2a; }
+    .cml-vthumb-fallback { display: flex; align-items: center; justify-content: center; aspect-ratio: 16/10; background: #2a2a2a; color: #6b7280; font-size: 13px; font-weight: 600; letter-spacing: 1px; }
+    .cml-vbadge { position: absolute; right: 4px; top: 4px; background: rgba(0,0,0,.75); color: #fff; font-size: 10px; padding: 1px 5px; border-radius: 3px; }
+    .cml-vname { font-size: 11px; color: #8a8a8a; padding: 4px 6px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+    /* ── 檢視器 lightbox（body 層，蓋過 overlay）── */
+    .cml-lb { position: fixed; inset: 0; z-index: 1000; background: rgba(0,0,0,.9); display: flex; align-items: center; justify-content: center; }
+    .cml-lb-body { display: flex; flex-direction: column; align-items: center; gap: 8px; max-width: 92vw; }
+    .cml-lb-media { max-width: 90vw; max-height: 82vh; border-radius: 6px; background: #000; }
+    .cml-lb-cap { color: #c0c0c0; font-size: 12px; text-align: center; }
+    .cml-lb-cap a { color: #93c5fd; text-decoration: none; }
+    .cml-lb-cap a:hover { text-decoration: underline; }
+    .cml-lb-close { position: absolute; top: 14px; right: 18px; background: none; border: 0; color: #c0c0c0; font-size: 24px; cursor: pointer; line-height: 1; }
+    .cml-lb-close:hover { color: #fff; }
+    .cml-lb-nav { position: absolute; top: 50%; transform: translateY(-50%); background: rgba(0,0,0,.5); border: 1px solid #4a4a4a; color: #e0e0e0; font-size: 26px; line-height: 1; padding: 6px 12px 10px; border-radius: 8px; cursor: pointer; }
+    .cml-lb-nav:hover { background: rgba(59,130,246,.6); }
+    .cml-lb-prev { left: 18px; }
+    .cml-lb-next { right: 18px; }
+</style>

@@ -107,6 +107,13 @@ export function populateClientSelect(elementId, clients, placeholder = '全部�
         clients.map(c => `<option value="${c.id}"${c.id === current ? ' selected' : ''}>${esc(c.short_name)}</option>`).join('');
 }
 
+/** 專案下拉的 <option> 字串（含佔位）。GET /crm/projects 的 {id,name,client_short_name}
+ *  標準格式 —— 需把 select 組進更大的 HTML 字串時用（picker/modal）；portal 與影像紀錄共用。 */
+export function projectOptionsHtml(projects, placeholder = '— 選擇專案 —') {
+    return `<option value="">${esc(placeholder)}</option>` +
+        (projects || []).map(p => `<option value="${esc(p.id)}">${esc(p.name)}${p.client_short_name ? '（' + esc(p.client_short_name) + '）' : ''}</option>`).join('');
+}
+
 /**
  * Upgrade a native <select> to a searchable dropdown.
  * Hides the original select, inserts an input + dropdown panel.

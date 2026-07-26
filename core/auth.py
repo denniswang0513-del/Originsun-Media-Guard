@@ -136,6 +136,8 @@ ALL_MODULES = [
     'hr_leave', 'me_leave',
     # 每週工作日誌（全員可讀、本人可寫；新註冊預設就有 — api_auth._REGISTER_DEFAULT_MODULES）
     'journal',
+    # 影像紀錄總覽（業務管理 › 跨專案管理各專案收集牆；單專案面板仍在專案詳情內）
+    'media_log',
 ]
 
 

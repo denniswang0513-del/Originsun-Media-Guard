@@ -23,7 +23,7 @@ import os
 import shutil
 import tempfile
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Callable, Optional
 
 from fastapi import File, Form, HTTPException, Request, UploadFile
@@ -42,7 +42,8 @@ from ._shared import (router, public_router, _check_auth, _require_db,
                       _verify_token_generic, _mint_token_generic)
 
 try:
-    from ._shared import select, CrmProject, ProjectMediaLog, ProjectMediaFile
+    from ._shared import (select, Client, CrmProject, ProjectMediaLog,
+                          ProjectMediaFile)
 except ImportError:  # DB 套件不存在的 agent 環境 — 行為同其他領域模組
     pass
 
@@ -353,7 +354,10 @@ async def _list_files(session, project_id: str) -> list:
     return [_to_file_dict(f) for f in rows]
 
 
-# ── 資料夾 → DB 同步（owner 直接在資料夾刪原檔 → 牆上同步消失）──
+# ── 資料夾 ↔ DB 雙向同步 ──────────────────────────────────────
+# 刪除向：資料夾裡刪掉的原檔 → DB 記錄跟著消失（_find_missing）。
+# 匯入向：直接丟進資料夾（非經上傳連結）的照片 → 自動建 DB 記錄顯示出來
+#         （_new_media_names）。縮圖交給 master 補算（記錄先建、之後長出來）。
 
 def _find_missing(entries: list, isdir: Callable[[str], bool],
                   isfile: Callable[[str], bool]) -> list:
@@ -375,46 +379,272 @@ def _find_missing(entries: list, isdir: Callable[[str], bool],
     return missing
 
 
+# 舊側拍常把照片分裝進日期/part 子資料夾（小飛俠劇照/2014-07-12/…），故掃描與匯入
+# 都遞迴進去（owner 2026-07-25 拍板）。跳過 . / _ 開頭子夾（隱藏 / _trash）。
+def _iter_media_rel(folder: str):
+    """os.walk 產出資料夾內所有媒體檔的相對路徑（相對 folder）。剪掉 ./_ 子夾。"""
+    for dirpath, dirnames, filenames in os.walk(folder):
+        dirnames[:] = [d for d in dirnames if d[:1] not in (".", "_")]
+        for fn in filenames:
+            if _classify_ext(fn) is not None:
+                yield os.path.relpath(os.path.join(dirpath, fn), folder)
+
+
+def _list_media_rel(folder: str):
+    """資料夾內（含子夾）所有媒體檔的相對路徑清單（**不 stat**）；搆不到 → None
+    （別誤判成空 → 誤刪/誤匯）。size/mtime 只有新檔要，穩態下不逐檔 stat。"""
+    if not os.path.isdir(folder):
+        return None
+    return list(_iter_media_rel(folder))
+
+
+def _new_media_rel(disk_rels, known_canon, folder: str) -> list:
+    """disk 相對路徑中，canonical stored_path 尚未在 DB 的 → 回相對路徑清單（保序）。
+    以 canonical stored_path 為身分（跨子夾同名檔不會誤判成已存在）。純函式可測。"""
+    known = set(known_canon or [])
+    return [rel for rel in (disk_rels or [])
+            if to_canonical_path(os.path.join(folder, rel)) not in known]
+
+
+def _stat_new_files(folder: str, rels: list) -> dict:
+    """只對「要匯入的新檔」取 (size, mtime)；非一般檔（子資料夾）→ 剔除。
+    一次 st_mode 判 S_ISREG，不再多打一次 os.path.isfile。呼叫端在 to_thread 內跑。"""
+    import stat as _stat
+    out: dict = {}
+    for rel in rels:
+        try:
+            st = os.stat(os.path.join(folder, rel))
+        except OSError:
+            continue
+        if _stat.S_ISREG(st.st_mode):
+            out[rel] = (int(st.st_size), st.st_mtime)
+    return out
+
+
+_FOLDER_COUNT_CAP = 999   # 總覽計數上限：超過顯示「999+」，避免遞迴走完 33GB 大夾
+
+
+def _folder_media_stats(folder: str, cap: int = _FOLDER_COUNT_CAP) -> tuple:
+    """遞迴數資料夾內媒體檔 → (圖片數, 影片數, capped)。到 cap 就停（大夾防慢）。"""
+    img = vid = 0
+    for rel in _iter_media_rel(folder):
+        if _classify_ext(rel) == "video":
+            vid += 1
+        else:
+            img += 1
+        if img + vid >= cap:
+            return img, vid, True
+    return img, vid, False
+
+
+def _scan_root_folders(root: str):
+    """掃預設根目錄（10_工作側拍）底下每個子資料夾（遞迴）的媒體檔數 →
+    {子資料夾名: (圖片數, 影片數, capped)}；根搆不到 → None。
+
+    給總覽用：舊專案側拍直接丟在根目錄底下、沒經上傳連結、沒 CRM 專案，
+    也要能在影像紀錄裡看到（可再「連結專案」）。每夾計數有 cap（大夾顯示 999+），
+    配 60s 快取 + 單飛，避免每次載入走完 773GB。只 listdir 判副檔名、不逐檔 stat。"""
+    try:
+        subs = os.listdir(root)
+    except OSError:
+        return None
+    out: dict = {}
+    for sub in subs:
+        if sub[:1] in (".", "_"):
+            continue
+        folder = os.path.join(root, sub)
+        if not os.path.isdir(folder):
+            continue
+        out[sub] = _folder_media_stats(folder)
+    return out
+
+
+_root_scan_cache: dict = {"at": 0.0, "root": None, "data": {}}
+_ROOT_SCAN_TTL_SEC = 60
+
+
+_root_scan_lock = asyncio.Lock()
+
+
+def _root_cache_fresh(local_root: str):
+    """快取仍新鮮 → 回 data；否則 None。"""
+    import time
+    c = _root_scan_cache
+    if c["root"] == local_root and time.monotonic() - c["at"] < _ROOT_SCAN_TTL_SEC:
+        return c["data"]
+    return None
+
+
+async def _root_folders_cached(local_root: str) -> dict:
+    """根目錄子資料夾掃描（60s TTL + 單飛）—— 總覽每次載入都打，35 個 listdir
+    打 NAS 不該每次重跑。單飛鎖：TTL 過期時多個併發請求只讓一個真的掃、其餘等它
+    （否則 M 個併發各自 35-listdir 打爆 SMB，正是快取要防的 stampede）。
+    root 變或過期才重掃；搆不到回上次快取（或空）。"""
+    import time
+    if not local_root:
+        return {}
+    fresh = _root_cache_fresh(local_root)
+    if fresh is not None:
+        return fresh
+    async with _root_scan_lock:
+        fresh = _root_cache_fresh(local_root)   # 等鎖期間別人可能已重填
+        if fresh is not None:
+            return fresh
+        data = await asyncio.to_thread(_scan_root_folders, local_root)
+        c = _root_scan_cache
+        if data is not None:
+            c.update(at=time.monotonic(), root=local_root, data=data)
+            return data
+        return c["data"] if c["root"] == local_root else {}
+
+
 _reconcile_last: dict = {}          # project_id -> monotonic 時間戳（public 端限流）
 _RECONCILE_COOLDOWN_SEC = 30
 
 
-async def _reconcile_files(factory, project_id: str, *, throttled: bool = False) -> int:
-    """比對 DB 記錄與磁碟原檔，移除已被刪的（含縮圖）。回傳移除數。
-    throttled=True（public 端每次 GET 都打）→ 每專案最多 30 秒一次，
+async def _reconcile_files(factory, project_id: str, root: str, folder_name: str,
+                           *, throttled: bool = False) -> dict:
+    """資料夾 ↔ DB 雙向同步。回 {removed, imported}。
+    - 刪除向：資料夾裡刪掉的原檔 → 移除 DB 記錄（含縮圖）。
+    - 匯入向：直接丟進專案子資料夾（非經上傳連結）的照片 → 建 DB 記錄，
+      縮圖交給 master 補算（thumb_url 先空，之後長出來）。
+    folder_name 由呼叫端傳入（GET 端點都已載過該 row，不在這裡重查 DB）。
+    throttled=True（public 端每次 GET 都打）→ 每專案最多 30 秒一次；
     admin 端不限流（開 tab 就看到最新真相）。"""
     import time
     if throttled:
         now = time.monotonic()
         if now - _reconcile_last.get(project_id, 0.0) < _RECONCILE_COOLDOWN_SEC:
-            return 0
+            return {"removed": 0, "imported": 0}
         _reconcile_last[project_id] = now
+
     async with factory() as session:
         rows = (await session.execute(
-            select(ProjectMediaFile.id, ProjectMediaFile.stored_path)
+            select(ProjectMediaFile.id, ProjectMediaFile.stored_path,
+                   ProjectMediaFile.filename)
             .where(ProjectMediaFile.project_id == project_id)
         )).all()
+
+    # ── 刪除向 ──
     # stored_path 存 canonical UNC → 翻成本機視角再檢查存在性（NAS/master 各自）
     entries = [(r[0], to_local_path(r[1] or "")) for r in rows]
-    if not entries:
-        return 0
     missing = await asyncio.to_thread(
-        _find_missing, entries, os.path.isdir, os.path.isfile)
-    if not missing:
-        return 0
-    async with factory() as session:
-        for fid in missing:
-            rec = await session.get(ProjectMediaFile, fid)
-            if rec:
-                await session.delete(rec)
-        await session.commit()
+        _find_missing, entries, os.path.isdir, os.path.isfile) if entries else []
+    if missing:
+        async with factory() as session:
+            for fid in missing:
+                rec = await session.get(ProjectMediaFile, fid)
+                if rec:
+                    await session.delete(rec)
+            await session.commit()
+        await asyncio.to_thread(lambda: [_remove_thumbs(project_id, f) for f in missing])
 
-    def _rm_thumbs():
-        for fid in missing:
-            _remove_thumbs(project_id, fid)
+    # ── 匯入向 ──（資料夾裡有、DB 沒記錄的媒體檔；含子資料夾）
+    imported = 0
+    folder = to_local_path(_project_folder(root, folder_name)) if (root and folder_name) else ""
+    rels = await asyncio.to_thread(_list_media_rel, folder) if folder else None
+    if rels:
+        known_canon = {r[1] for r in rows if r[1]}   # 身分＝canonical stored_path
+        new_rels = _new_media_rel(rels, known_canon, folder)
+        if new_rels:
+            # 只對「新檔」stat（size/mtime）—— 舊檔不重複 stat（SMB 熱路徑省 round-trip）
+            stats = await asyncio.to_thread(_stat_new_files, folder, new_rels)
+            async with factory() as session:
+                for rel, (size, mtime) in stats.items():
+                    # created_at 用檔案 mtime（自然排序 + 舊檔不會誤觸上傳通知）
+                    when = datetime.fromtimestamp(mtime, tz=timezone.utc)
+                    session.add(ProjectMediaFile(
+                        id=uuid.uuid4().hex, project_id=project_id,
+                        filename=os.path.basename(rel),   # 顯示名（子夾檔仍顯示檔名）
+                        stored_path=to_canonical_path(os.path.join(folder, rel)),
+                        thumb_url="", media_type=_classify_ext(rel),
+                        category="", uploader_name="",
+                        size_bytes=size, created_at=when))
+                    imported += 1
+                await session.commit()
 
-    await asyncio.to_thread(_rm_thumbs)
-    return len(missing)
+    return {"removed": len(missing), "imported": imported}
+
+
+# ── 孤兒資料夾唯讀瀏覽（不連結專案也能看照片）─────────────────
+# 未連結 CRM 專案的舊側拍資料夾：不建 DB 記錄、純掃磁碟即時瀏覽。只在 master
+# 有意義（有 NAS 憑證 + ffmpeg），故掛 @router（admin）而非 public_router。
+# folder/rel 來自前端 query → 一律經路徑防護（擋 .. 逃逸）再開檔。
+
+def _within_dir(base: str, target: str) -> bool:
+    """target 是否落在 base 目錄內（或即為 base）。realpath 解 symlink/junction
+    後 normcase+前綴比對，擋 .. 逃逸；Windows 大小寫/斜線不敏感。"""
+    try:
+        b = os.path.normcase(os.path.realpath(base))
+        t = os.path.normcase(os.path.realpath(target))
+    except OSError:
+        return False
+    return t == b or t.startswith(b + os.sep)
+
+
+def _safe_subfolder(root: str, folder: str) -> Optional[str]:
+    """root 底下的**直接**子資料夾絕對路徑；名稱含路徑分隔/.. 或不在 root 內
+    或非目錄 → None（擋任意路徑遍歷）。"""
+    name = str(folder or "").strip()
+    if not root or not name or name in (".", ".."):
+        return None
+    if "/" in name or "\\" in name:      # 只允許單層資料夾名
+        return None
+    p = os.path.join(root, name)
+    if not _within_dir(root, p) or not os.path.isdir(p):
+        return None
+    return p
+
+
+def _safe_rel_path(folder_abs: str, rel: str) -> Optional[str]:
+    """folder 內相對路徑 → 絕對檔案路徑；逃出 folder（.. / 絕對路徑）或非檔案 → None。"""
+    r = str(rel or "").replace("\\", "/").strip().lstrip("/")
+    if not r:
+        return None
+    p = os.path.normpath(os.path.join(folder_abs, r))
+    if not _within_dir(folder_abs, p) or not os.path.isfile(p):
+        return None
+    return p
+
+
+_FOLDER_VIEW_CAP = 1000   # 唯讀瀏覽單夾列檔上限（超過標 truncated，避免超大夾逐檔 stat 卡死）
+
+
+def _list_folder_for_view(folder_abs: str, cap: int = _FOLDER_VIEW_CAP) -> tuple:
+    """孤兒資料夾唯讀瀏覽：列出媒體檔（含子夾）→
+    ([{rel,filename,media_type,size_bytes,mtime}], truncated)，依 mtime 新→舊。
+    到 cap 就停（大夾防慢）。呼叫端在 to_thread 內跑。"""
+    import stat as _stat
+    out: list = []
+    truncated = False
+    for rel in _iter_media_rel(folder_abs):
+        if len(out) >= cap:
+            truncated = True
+            break
+        try:
+            st = os.stat(os.path.join(folder_abs, rel))
+        except OSError:
+            continue
+        if not _stat.S_ISREG(st.st_mode):
+            continue
+        out.append({
+            "rel": rel.replace("\\", "/"),
+            "filename": os.path.basename(rel),
+            "media_type": _classify_ext(rel),
+            "size_bytes": int(st.st_size),
+            "mtime": st.st_mtime,
+        })
+    out.sort(key=lambda x: x["mtime"], reverse=True)
+    return out, truncated
+
+
+_FOLDER_THUMB_PID = "_folder"   # 圖床 medialog 命名空間內、孤兒資料夾縮圖的假前綴
+
+
+def _folder_thumb_key(canon_path: str) -> str:
+    """孤兒縮圖快取鍵 = canonical 路徑的短雜湊（同一實體檔跨機同鍵、可重用補算縮圖）。"""
+    import hashlib
+    return hashlib.sha1(canon_path.encode("utf-8")).hexdigest()[:16]
 
 
 # ── 上傳管線（串流寫檔 + 縮圖）───────────────────────────────
@@ -535,8 +765,8 @@ async def get_project_media_log(project_id: str, request: Request):
         folder_name = await _ensure_folder_name(session, row, proj_name)
         enabled = bool(row.enabled)
         await session.commit()
-    # 資料夾→DB 同步（admin 端不限流 — 開 tab 就看到最新真相）
-    await _reconcile_files(factory, project_id)
+    # 資料夾↔DB 同步（admin 端不限流 — 開 tab 就看到最新真相；含匯入手動丟入的照片）
+    await _reconcile_files(factory, project_id, root, folder_name)
     async with factory() as session:
         files = await _list_files(session, project_id)
     # root 可能是 NAS UNC 路徑 — isdir 在斷線時會卡秒級，不佔 event loop
@@ -621,6 +851,199 @@ async def media_log_qr(token: str, base: str = ""):
     from starlette.responses import Response
     return Response(await asyncio.to_thread(_png), media_type="image/png",
                     headers={"Cache-Control": "private, max-age=3600"})
+
+
+@router.get("/media-log/overview")
+async def media_log_overview(request: Request, q: str = "", scope: str = "content"):
+    """影像紀錄總覽（業務管理 › 影像紀錄 tab）—— 資料夾導向。
+
+    兩個來源合併：
+    - **已連結**：有 CRM 專案的影像紀錄（DB 聚合圖/影片數，穩，NAS 斷也在）。
+    - **孤兒資料夾**：預設根目錄底下直接有照片、但還沒連 CRM 專案的舊側拍
+      （disk 掃描，可「連結專案」）。
+    scope：content=有檔案（預設）/ all=全部 / orphan=只列未連結的孤兒資料夾。
+    q=專案名或資料夾名模糊搜尋。
+    """
+    _check_auth(request)
+    _require_db()
+    from sqlalchemy import case, func
+    factory = await _get_factory()
+    root, _cats = await _media_log_conf()   # 已翻成本機視角
+
+    # ── Part A：已連結（DB 聚合）──
+    async with factory() as session:
+        # count(case(...)) 而非 sum(...else_)：LEFT JOIN 對 0 檔的 NULL 幻影列
+        # count 會忽略（case 無 else → NULL → 不計），sum+else 卻會誤加 1。
+        img = func.count(case((ProjectMediaFile.media_type != "video", ProjectMediaFile.id)))
+        vid = func.count(case((ProjectMediaFile.media_type == "video", ProjectMediaFile.id)))
+        rows = (await session.execute(
+            select(ProjectMediaLog.id, ProjectMediaLog.enabled, ProjectMediaLog.folder_name,
+                   CrmProject.name, Client.short_name,
+                   func.count(ProjectMediaFile.id), img, vid,
+                   func.max(ProjectMediaFile.created_at))
+            .select_from(ProjectMediaLog)
+            .join(CrmProject, CrmProject.id == ProjectMediaLog.id)
+            .join(Client, Client.id == CrmProject.client_id, isouter=True)
+            .join(ProjectMediaFile, ProjectMediaFile.project_id == ProjectMediaLog.id, isouter=True)
+            .group_by(ProjectMediaLog.id, ProjectMediaLog.enabled, ProjectMediaLog.folder_name,
+                      CrmProject.name, Client.short_name)
+        )).all()
+
+    linked_folders = set()
+    linked = []
+    for r in rows:
+        if r[2]:
+            linked_folders.add(r[2])
+        linked.append({
+            "linked": True, "project_id": r[0], "enabled": bool(r[1]),
+            "folder_name": r[2] or "", "project_name": r[3] or "", "client_name": r[4] or "",
+            "total": int(r[5] or 0), "images": int(r[6] or 0), "videos": int(r[7] or 0),
+            "last_upload": r[8].isoformat() if r[8] else None,
+        })
+
+    # ── Part B：孤兒資料夾（disk 掃根目錄，扣掉已連結的）──
+    orphans = []
+    for fname, (i, v, capped) in (await _root_folders_cached(root)).items():
+        if fname in linked_folders or (i + v) == 0:
+            continue
+        orphans.append({
+            "linked": False, "project_id": None, "enabled": None,
+            "folder_name": fname, "project_name": "", "client_name": "",
+            "total": i + v, "images": i, "videos": v, "capped": capped,
+            "last_upload": None,
+        })
+
+    # ── 合併 + scope/q 過濾 ──
+    items = linked + orphans
+    if scope == "orphan":
+        items = [x for x in items if not x["linked"]]
+    elif scope == "content":
+        items = [x for x in items if x["total"] > 0]
+    if (q or "").strip():
+        ql = q.strip().lower()
+        items = [x for x in items
+                 if ql in x["project_name"].lower() or ql in x["folder_name"].lower()]
+    # 有上傳時間的排前（近→遠）、無上傳（孤兒/空）排後依名稱（兩次穩定排序）
+    items.sort(key=lambda x: x["project_name"] or x["folder_name"])
+    items.sort(key=lambda x: x["last_upload"] or "", reverse=True)
+    return {"items": items}
+
+
+@router.post("/media-log/link")
+async def media_log_link_folder(request: Request):
+    """把一個孤兒資料夾（根目錄底下、還沒連 CRM 專案的舊側拍）連結到某專案。
+    body: {folder_name, project_id}。做法＝設該專案影像紀錄的 folder_name=此資料夾，
+    然後立刻 reconcile 把資料夾裡的照片匯入（縮圖由 master 補算）。
+
+    守衛：目標專案若已有影像紀錄且指向**別的**資料夾、且那邊已有檔案 → 400
+    （避免把既有收集牆改指到別處造成混亂）。空的 / 未建的 / 指向同一夾 → 放行。"""
+    _check_auth(request)
+    _require_db()
+    from sqlalchemy import func
+    body = await request.json()
+    folder_name = str(body.get("folder_name") or "").strip()
+    project_id = str(body.get("project_id") or "").strip()
+    if not folder_name or not project_id:
+        raise HTTPException(status_code=400, detail="缺 folder_name 或 project_id")
+
+    root, _cats = await _media_log_conf()
+    factory = await _get_factory()
+    async with factory() as session:
+        proj = await session.get(CrmProject, project_id)
+        if not proj:
+            raise HTTPException(status_code=404, detail="找不到專案")
+        # 守衛 1：此資料夾是否已被**別的**專案認領（folder_name 無 DB 唯一約束，
+        # 兩專案指同一夾會各自匯出一份重複記錄 → 應用層擋）。
+        other = (await session.execute(
+            select(ProjectMediaLog.id).where(ProjectMediaLog.folder_name == folder_name)
+            .where(ProjectMediaLog.id != project_id))).scalars().first()
+        if other:
+            op = await session.get(CrmProject, other)
+            raise HTTPException(
+                status_code=400,
+                detail=f"資料夾「{folder_name}」已連結到專案「{op.name if op else other}」")
+        row = await session.get(ProjectMediaLog, project_id)
+        # 守衛 2：目標專案已有影像紀錄且指向**別的**非空資料夾 → 不可改指
+        if row and row.folder_name and row.folder_name != folder_name:
+            n = (await session.execute(
+                select(func.count(ProjectMediaFile.id))
+                .where(ProjectMediaFile.project_id == project_id))).scalar() or 0
+            if n > 0:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"「{proj.name}」已有影像紀錄（{n} 個檔），不可改連結到別的資料夾")
+        if row is None:
+            row = ProjectMediaLog(id=project_id, folder_name=folder_name, enabled=True)
+            session.add(row)
+        else:
+            row.folder_name = folder_name
+            row.updated_at = _now()
+        await session.commit()
+
+    # 立刻匯入該資料夾的照片（admin 不限流）
+    res = await _reconcile_files(factory, project_id, root, folder_name)
+    return {"ok": True, "project_id": project_id, "imported": res.get("imported", 0)}
+
+
+@router.get("/media-log/folder/files")
+async def media_log_folder_files(request: Request, folder: str = ""):
+    """孤兒（未連結專案）資料夾唯讀瀏覽 — 列出資料夾內（含子夾）媒體檔清單。
+    不建 DB 記錄、純掃磁碟；縮圖/原檔各走下面兩個端點（懶產）。
+    讓「不管有沒有連結專案都能看照片」—— 連結是把它收進某專案，這裡只是先看。"""
+    _check_auth(request)
+    root, _cats = await _media_log_conf()
+    folder_abs = await asyncio.to_thread(_safe_subfolder, root, folder)
+    if not folder_abs:
+        raise HTTPException(status_code=404, detail="找不到資料夾（或無法存取）")
+    files, truncated = await asyncio.to_thread(_list_folder_for_view, folder_abs)
+    for x in files:
+        x["created_at"] = datetime.fromtimestamp(
+            x.pop("mtime"), tz=timezone.utc).isoformat()
+    return {"folder": folder, "count": len(files),
+            "truncated": truncated, "files": files}
+
+
+@router.get("/media-log/folder/thumb")
+async def media_log_folder_thumb(request: Request, folder: str = "", rel: str = ""):
+    """孤兒資料夾單檔縮圖（懶產 + 圖床快取）。RAW / 無圖床 / 產不出 → 415
+    （前端 img error 退灰卡）。"""
+    _check_auth(request)
+    from starlette.responses import FileResponse
+    root, _cats = await _media_log_conf()
+    folder_abs = await asyncio.to_thread(_safe_subfolder, root, folder)
+    if not folder_abs:
+        raise HTTPException(status_code=404, detail="找不到資料夾")
+    path = await asyncio.to_thread(_safe_rel_path, folder_abs, rel)
+    if not path:
+        raise HTTPException(status_code=404, detail="找不到檔案")
+    key = _folder_thumb_key(to_canonical_path(path))
+    d, name, _url = _thumb_target(_FOLDER_THUMB_PID, key)
+    cache = os.path.join(d, name + ".webp") if d else ""
+    hdr = {"Cache-Control": "private, max-age=86400"}
+    if cache and await asyncio.to_thread(os.path.isfile, cache):
+        return FileResponse(cache, media_type="image/webp", headers=hdr)
+    if _classify_ext(rel) == "video":
+        await _make_video_thumb(path, _FOLDER_THUMB_PID, key)
+    else:
+        await _make_image_thumb(path, _FOLDER_THUMB_PID, key)
+    if cache and await asyncio.to_thread(os.path.isfile, cache):
+        return FileResponse(cache, media_type="image/webp", headers=hdr)
+    raise HTTPException(status_code=415, detail="無縮圖")
+
+
+@router.get("/media-log/folder/file")
+async def media_log_folder_file(request: Request, folder: str = "", rel: str = ""):
+    """孤兒資料夾單檔原檔（lightbox 檢視 / 下載）。admin 唯讀、不建 DB 記錄。"""
+    _check_auth(request)
+    from starlette.responses import FileResponse
+    root, _cats = await _media_log_conf()
+    folder_abs = await asyncio.to_thread(_safe_subfolder, root, folder)
+    if not folder_abs:
+        raise HTTPException(status_code=404, detail="找不到資料夾")
+    path = await asyncio.to_thread(_safe_rel_path, folder_abs, rel)
+    if not path:
+        raise HTTPException(status_code=404, detail="找不到檔案")
+    return FileResponse(path, filename=os.path.basename(path))
 
 
 @router.post("/media-log/catchup_now")
@@ -712,10 +1135,11 @@ async def public_media_log_view(token: str):
     async with factory() as session:
         row = await _verify_media_log_token(session, token)
         pid = row.id
+        folder_name = row.folder_name
         proj = await session.get(CrmProject, pid)
         project_name = (proj.name or "") if proj else ""
-    # 資料夾→DB 同步（public 端每次 GET 都打 → 每專案 30 秒限流一次）
-    await _reconcile_files(factory, pid, throttled=True)
+    # 資料夾↔DB 同步（public 端每次 GET 都打 → 每專案 30 秒限流一次；含匯入手動丟入的照片）
+    await _reconcile_files(factory, pid, root, folder_name, throttled=True)
     async with factory() as session:
         files = await _list_files(session, pid)
     return {
