@@ -7,7 +7,7 @@
  * 只多一個總覽入口。後端：GET /api/v1/crm/media-log/overview?q=&scope=。
  */
 
-import { crmFetch as _fetch, esc as _esc, projectOptionsHtml } from './crm-utils.js';
+import { crmFetch as _fetch, esc as _esc, projectOptionsHtml, searchableSelect } from './crm-utils.js';
 import { loadMediaTab } from './crm-projects-media.js';
 
 const ADMIN_API = '/api/v1/crm';   // 孤兒資料夾 thumb/file 直接當 <img>/<a> src（非 crmFetch JSON）
@@ -18,6 +18,7 @@ let _scope = 'content';        // content(預設) / all / orphan
 let _q = '';
 let _debounce = null;
 let _projects = null;          // 連結 picker 用（懶載快取）
+let _clients = null;           // 開新專案 picker 用（懶載快取）
 let _viewFiles = [];           // 目前檢視的孤兒資料夾檔案清單（lightbox 導覽用）
 let _viewFolder = '';          // 目前檢視的資料夾名
 let _lbIdx = -1;               // lightbox 索引
@@ -116,6 +117,7 @@ function _renderList() {
                 const action = it.linked
                     ? `<button class="cml-btn sm" data-open="${_esc(it.project_id)}" data-name="${_esc(it.project_name)}">開啟</button>`
                     : `<button class="cml-btn sm" data-view="${_esc(it.folder_name)}">檢視照片</button>
+                       <button class="cml-btn sm ghost" data-qr="${_esc(it.folder_name)}">${it.has_token ? '收集連結' : '產生 QR'}</button>
                        <button class="cml-btn sm ghost" data-link="${_esc(it.folder_name)}">連結專案</button>`;
                 const plus = it.capped ? '+' : '';   // 大夾計數到上限 → 顯示 999+
                 return `<tr>
@@ -139,43 +141,135 @@ function _renderList() {
     list.querySelectorAll('button[data-view]').forEach((b) => {
         b.onclick = () => _openFolderViewer(b.dataset.view);
     });
+    list.querySelectorAll('button[data-qr]').forEach((b) => {
+        b.onclick = () => _openQr(b.dataset.qr);
+    });
 }
 
-// ── 連結專案：孤兒資料夾 → 選一個 CRM 專案 ────────────────────────────────
+// ── 連結專案：孤兒資料夾 → 選現有專案 或 開新專案 ─────────────────────────
 async function _loadProjects() {
     if (_projects) return _projects;
     const d = await _fetch('/projects');
     _projects = d.projects || [];
     return _projects;
 }
+async function _loadClients() {
+    if (_clients) return _clients;
+    const d = await _fetch('/clients');
+    _clients = d.clients || [];
+    return _clients;
+}
+function _clientOptionsHtml(clients) {
+    return '<option value="">— 選擇客戶 —</option>' +
+        (clients || []).map(c => `<option value="${_esc(c.id)}">${_esc(c.short_name || c.name || c.id)}</option>`).join('');
+}
 
 async function _openLinkPicker(folderName) {
     const ov = document.getElementById('cml-overlay');
     document.getElementById('cml-panel-title').textContent = '連結專案';
     const body = document.getElementById('cml-panel-body');
-    body.innerHTML = '<div class="cml-empty">載入專案清單…</div>';
+    body.innerHTML = '<div class="cml-empty">載入清單…</div>';
     ov.classList.add('on');
-    let projects;
+    let projects, clients;
     try {
-        projects = await _loadProjects();
+        [projects, clients] = await Promise.all([_loadProjects(), _loadClients()]);
     } catch (e) {
-        body.innerHTML = `<div class="cml-empty" style="color:#fca5a5;">專案載入失敗：${_esc(e.message || e)}</div>`;
+        body.innerHTML = `<div class="cml-empty" style="color:#fca5a5;">載入失敗：${_esc(e.message || e)}</div>`;
         return;
     }
+    const defName = folderName.replace(/^\d{8}_/, '') || folderName;   // 去掉日期前綴當預設專案名
     body.innerHTML = `
         <div class="cml-link">
-            <div class="cml-link-info">把資料夾 <b>${_esc(folderName)}</b> 的照片連結到專案 —— 連結後該資料夾裡的照片會匯入這個專案的影像紀錄（縮圖稍後自動產生）。</div>
-            <select id="cml-link-proj" class="cml-search" style="width:100%;margin:12px 0;">
-                ${projectOptionsHtml(projects)}
-            </select>
-            <div class="cml-link-actions">
-                <button id="cml-link-cancel" class="cml-btn ghost">取消</button>
-                <button id="cml-link-go" class="cml-btn">連結並匯入</button>
-            </div>
+            <div class="cml-link-info">把資料夾 <b>${_esc(folderName)}</b> 的照片收進某個專案 —— 連結後資料夾裡的照片（含用 QR 收到的）會匯入該專案的影像紀錄。</div>
+            <div class="cml-link-sec">連結到現有專案</div>
+            <select id="cml-link-proj" style="width:100%;">${projectOptionsHtml(projects)}</select>
+            <div class="cml-link-actions"><button id="cml-link-go" class="cml-btn">連結並匯入</button></div>
+
+            <div class="cml-link-or">或</div>
+            <div class="cml-link-sec">建立新專案並連結</div>
+            <input id="cml-newproj-name" class="cml-search" style="width:100%;margin-bottom:8px;" placeholder="專案名稱" value="${_esc(defName)}">
+            <select id="cml-newproj-client" style="width:100%;">${_clientOptionsHtml(clients)}</select>
+            <div class="cml-link-actions"><button id="cml-linknew-go" class="cml-btn">開新專案並連結</button></div>
+
+            <div class="cml-link-actions" style="margin-top:6px;"><button id="cml-link-cancel" class="cml-btn ghost">取消</button></div>
             <div id="cml-link-msg" class="cml-link-msg"></div>
         </div>`;
     document.getElementById('cml-link-cancel').onclick = _closeOverlay;
     document.getElementById('cml-link-go').onclick = () => _doLink(folderName);
+    document.getElementById('cml-linknew-go').onclick = () => _doLinkNew(folderName);
+    // 兩個下拉都可打字搜尋（明確呼叫 → SPA 與內嵌頁都適用；樣式在 crm-media-log.html scoped）
+    searchableSelect(document.getElementById('cml-link-proj'), { placeholder: '搜尋專案…' });
+    searchableSelect(document.getElementById('cml-newproj-client'), { placeholder: '搜尋客戶…' });
+}
+
+async function _doLinkNew(folderName) {
+    const name = document.getElementById('cml-newproj-name').value.trim();
+    const clientId = document.getElementById('cml-newproj-client').value;
+    const msg = document.getElementById('cml-link-msg');
+    if (!name) { msg.textContent = '請輸入專案名稱'; msg.className = 'cml-link-msg err'; return; }
+    if (!clientId) { msg.textContent = '請選擇客戶'; msg.className = 'cml-link-msg err'; return; }
+    const btn = document.getElementById('cml-linknew-go');
+    btn.disabled = true;
+    msg.textContent = '建立中…'; msg.className = 'cml-link-msg';
+    try {
+        const r = await _fetch('/media-log/link-new', {
+            method: 'POST',
+            body: JSON.stringify({ folder_name: folderName, name, client_id: clientId }),
+        });
+        msg.textContent = `已建立專案並匯入 ${r.imported || 0} 個檔案`;
+        msg.className = 'cml-link-msg ok';
+        _projects = null;   // 專案清單快取失效（新增了一個）
+        setTimeout(_closeOverlay, 1000);
+    } catch (e) {
+        msg.textContent = e.message || String(e);
+        msg.className = 'cml-link-msg err';
+        btn.disabled = false;
+    }
+}
+
+// ── 孤兒資料夾：產生/開啟免專案收集連結（QR）────────────────────────────
+async function _openQr(folderName) {
+    const ov = document.getElementById('cml-overlay');
+    document.getElementById('cml-panel-title').textContent = '收集連結 / QR';
+    const body = document.getElementById('cml-panel-body');
+    body.innerHTML = '<div class="cml-empty">產生連結…</div>';
+    ov.classList.add('on');
+    let d;
+    try {
+        d = await _fetch('/media-log/folder/token', {
+            method: 'POST', body: JSON.stringify({ folder_name: folderName }),
+        });
+    } catch (e) {
+        body.innerHTML = `<div class="cml-empty" style="color:#fca5a5;">產生失敗：${_esc(e.message || e)}</div>`;
+        return;
+    }
+    const share = /^https?:\/\//i.test(d.share_url || '') ? d.share_url : location.origin + (d.share_url || '');
+    const qrSrc = `${ADMIN_API}/public/media-log/${encodeURIComponent(d.token)}/qr?base=${encodeURIComponent(location.origin)}`;
+    const note = d.linked
+        ? '（此資料夾已連結專案，用的是專案的收集連結）'
+        : '之後可「連結專案」或「開新專案」把整夾（含這些照片）收進去。';
+    body.innerHTML = `
+        <div class="cml-link">
+            <div class="cml-link-info">資料夾 <b>${_esc(folderName)}</b> 的現場收集連結：把 QR 或連結給劇組，<b>免登入</b>就能上傳劇照 / 花絮。${note}</div>
+            <div class="cml-qr-box"><img class="cml-qr" src="${_esc(qrSrc)}" alt="收集連結 QR" width="180" height="180"></div>
+            <input id="cml-qr-url" class="cml-search" readonly value="${_esc(share)}" style="width:100%;">
+            <div class="cml-link-actions">
+                <button id="cml-qr-copy" class="cml-btn">複製連結</button>
+                <button id="cml-qr-close" class="cml-btn ghost">關閉</button>
+            </div>
+            <div id="cml-qr-msg" class="cml-link-msg"></div>
+        </div>`;
+    document.getElementById('cml-qr-close').onclick = _closeOverlay;
+    document.getElementById('cml-qr-copy').onclick = async () => {
+        const m = document.getElementById('cml-qr-msg');
+        try {
+            await navigator.clipboard.writeText(share);
+            m.textContent = '已複製連結'; m.className = 'cml-link-msg ok';
+        } catch {
+            const i = document.getElementById('cml-qr-url'); i.select();
+            m.textContent = '請手動複製（Ctrl+C）'; m.className = 'cml-link-msg';
+        }
+    };
 }
 
 async function _doLink(folderName) {

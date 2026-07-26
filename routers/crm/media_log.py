@@ -668,6 +668,26 @@ def _check_media_log_auth(request, token: str = "") -> None:
     check_admin_or_module(request, 'media_log')
 
 
+# ── 資料夾綁 token（未連專案也能產 QR 收照片，之後再連結）─────────────
+# owner 2026-07-26：官網頁面開放給部分帳號代管；孤兒資料夾要能直接產 QR 現場收照，
+# 之後再「連結專案」或「開新專案」把整夾收進去。做法＝建一條 folder-only 的
+# ProjectMediaLog（id 帶 folder:: 前綴、無對應 CrmProject），token 綁它、上傳照樣寫進
+# 該資料夾磁碟。連結真專案時 link 會把這條轉走、真專案 reconcile 從磁碟重新匯入。
+_FOLDER_LOG_PREFIX = "folder::"
+
+
+def _folder_log_id(folder_name: str) -> str:
+    """folder-only ProjectMediaLog 的合成主鍵（id 欄 String(64)，故用短雜湊；
+    同一資料夾同鍵→冪等，重按「產生 QR」重用同一條 row/token）。"""
+    import hashlib
+    return _FOLDER_LOG_PREFIX + hashlib.sha1(folder_name.encode("utf-8")).hexdigest()[:16]
+
+
+def _is_folder_log(row_id: str) -> bool:
+    """是否為 folder-only（未連專案）的 media log row。"""
+    return bool(row_id) and str(row_id).startswith(_FOLDER_LOG_PREFIX)
+
+
 # ── 上傳管線（串流寫檔 + 縮圖）───────────────────────────────
 
 async def _stream_to_disk(file: UploadFile, dest_path: str) -> int:
@@ -922,6 +942,13 @@ async def media_log_overview(request: Request, q: str = "", scope: str = "conten
             "last_upload": r[8].isoformat() if r[8] else None,
         })
 
+    # 已產生「免專案 QR」的孤兒資料夾集合（folder-only ProjectMediaLog）→ 標記給前端
+    async with factory() as session:
+        tokened = set((await session.execute(
+            select(ProjectMediaLog.folder_name)
+            .where(ProjectMediaLog.id.like(_FOLDER_LOG_PREFIX + "%"))
+            .where(ProjectMediaLog.folder_name.isnot(None)))).scalars())
+
     # ── Part B：孤兒資料夾（disk 掃根目錄，扣掉已連結的）──
     orphans = []
     for fname, (i, v, capped) in (await _root_folders_cached(root)).items():
@@ -931,7 +958,7 @@ async def media_log_overview(request: Request, q: str = "", scope: str = "conten
             "linked": False, "project_id": None, "enabled": None,
             "folder_name": fname, "project_name": "", "client_name": "",
             "total": i + v, "images": i, "videos": v, "capped": capped,
-            "last_upload": None,
+            "last_upload": None, "has_token": fname in tokened,
         })
 
     # ── 合併 + scope/q 過濾 ──
@@ -960,7 +987,7 @@ async def media_log_link_folder(request: Request):
     （避免把既有收集牆改指到別處造成混亂）。空的 / 未建的 / 指向同一夾 → 放行。"""
     _check_media_log_auth(request)
     _require_db()
-    from sqlalchemy import func
+    from sqlalchemy import delete, func
     body = await request.json()
     folder_name = str(body.get("folder_name") or "").strip()
     project_id = str(body.get("project_id") or "").strip()
@@ -973,16 +1000,25 @@ async def media_log_link_folder(request: Request):
         proj = await session.get(CrmProject, project_id)
         if not proj:
             raise HTTPException(status_code=404, detail="找不到專案")
-        # 守衛 1：此資料夾是否已被**別的**專案認領（folder_name 無 DB 唯一約束，
-        # 兩專案指同一夾會各自匯出一份重複記錄 → 應用層擋）。
-        other = (await session.execute(
+        # 守衛 1：此資料夾是否已被**別的** row 認領（folder_name 無 DB 唯一約束）。
+        # — 若認領者是「免專案 QR」的 folder-only row → 轉走（刪它 + 其合成 project_id
+        #   的檔案索引；實體檔在磁碟，稍後 reconcile 用真專案 id 重新匯入）。
+        # — 若是別的**真專案** → 400（避免兩專案指同一夾各匯一份）。
+        others = (await session.execute(
             select(ProjectMediaLog.id).where(ProjectMediaLog.folder_name == folder_name)
-            .where(ProjectMediaLog.id != project_id))).scalars().first()
-        if other:
-            op = await session.get(CrmProject, other)
-            raise HTTPException(
-                status_code=400,
-                detail=f"資料夾「{folder_name}」已連結到專案「{op.name if op else other}」")
+            .where(ProjectMediaLog.id != project_id))).scalars().all()
+        for oid in others:
+            if _is_folder_log(oid):
+                await session.execute(
+                    delete(ProjectMediaFile).where(ProjectMediaFile.project_id == oid))
+                frow = await session.get(ProjectMediaLog, oid)
+                if frow:
+                    await session.delete(frow)
+            else:
+                op = await session.get(CrmProject, oid)
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"資料夾「{folder_name}」已連結到專案「{op.name if op else oid}」")
         row = await session.get(ProjectMediaLog, project_id)
         # 守衛 2：目標專案已有影像紀錄且指向**別的**非空資料夾 → 不可改指
         if row and row.folder_name and row.folder_name != folder_name:
@@ -1004,6 +1040,97 @@ async def media_log_link_folder(request: Request):
     # 立刻匯入該資料夾的照片（admin 不限流）
     res = await _reconcile_files(factory, project_id, root, folder_name)
     return {"ok": True, "project_id": project_id, "imported": res.get("imported", 0)}
+
+
+@router.post("/media-log/link-new")
+async def media_log_link_new(request: Request):
+    """從影像紀錄直接開新專案並連結此資料夾（一鍵）。
+    body: {folder_name, name, client_id, status?}。建最小專案（主表 + 預設雜支）→
+    連結資料夾（走 link 的轉走/reconcile 邏輯）。回 {project_id, imported}。"""
+    _check_media_log_auth(request)
+    _require_db()
+    from ._shared import _auto_update_client_status, _seed_default_expenses
+    try:
+        from ._shared import CrmProjectCostGroup
+    except ImportError:
+        from db.models import CrmProjectCostGroup
+    body = await request.json()
+    folder_name = str(body.get("folder_name") or "").strip()
+    name = str(body.get("name") or "").strip()
+    client_id = str(body.get("client_id") or "").strip()
+    status = str(body.get("status") or "製作").strip() or "製作"
+    if not folder_name or not name or not client_id:
+        raise HTTPException(status_code=400, detail="缺 folder_name / name / client_id")
+    factory = await _get_factory()
+    async with factory() as session:
+        client = await session.get(Client, client_id)
+        if not client:
+            raise HTTPException(status_code=404, detail="找不到指定的客戶")
+        now = _now()
+        pid = uuid.uuid4().hex
+        proj = CrmProject(id=pid, name=name, client_id=client_id, status=status,
+                          am_username=client.am_username or None,
+                          created_at=now, updated_at=now)
+        session.add(proj)
+        await _auto_update_client_status(session, client_id)
+        gid = uuid.uuid4().hex
+        session.add(CrmProjectCostGroup(id=gid, project_id=pid, name="主表", sort_order=0))
+        await _seed_default_expenses(session, pid, gid)
+        await session.commit()
+    # 連結：處理 folder-only token 轉走（若之前先產了免專案 QR）+ 建本專案的 media log row
+    from sqlalchemy import delete as _delete
+    root, _cats = await _media_log_conf()
+    async with factory() as session:
+        others = (await session.execute(
+            select(ProjectMediaLog.id).where(ProjectMediaLog.folder_name == folder_name)
+            .where(ProjectMediaLog.id != pid))).scalars().all()
+        for oid in others:
+            if _is_folder_log(oid):
+                await session.execute(
+                    _delete(ProjectMediaFile).where(ProjectMediaFile.project_id == oid))
+                frow = await session.get(ProjectMediaLog, oid)
+                if frow:
+                    await session.delete(frow)
+        session.add(ProjectMediaLog(id=pid, folder_name=folder_name, enabled=True))
+        await session.commit()
+    # 匯入資料夾內既有 + 免專案 QR 期間已上傳的照片（reconcile 從磁碟掃）
+    res = await _reconcile_files(factory, pid, root, folder_name)
+    return {"ok": True, "project_id": pid, "imported": res.get("imported", 0)}
+
+
+@router.post("/media-log/folder/token")
+async def media_log_folder_token(request: Request):
+    """孤兒資料夾（未連專案）取得/產生免登入上傳分享 token（QR）。
+    body: {folder_name, reset?}。若該資料夾已被某真專案連結 → 回那個專案的 token
+    （不另開重複）；否則建 folder-only ProjectMediaLog + mint token。之後「連結專案」/
+    「開新專案」時 link 會把 folder-only row 轉走、真專案 reconcile 匯入已上傳的檔。"""
+    _check_media_log_auth(request)
+    _require_db()
+    body = await request.json()
+    folder_name = str(body.get("folder_name") or "").strip()
+    reset = bool(body.get("reset"))
+    if not folder_name:
+        raise HTTPException(status_code=400, detail="缺 folder_name")
+    root, _cats = await _media_log_conf()
+    if not await asyncio.to_thread(_safe_subfolder, root, folder_name):
+        raise HTTPException(status_code=404, detail="找不到資料夾（或無法存取）")
+    db = await _db_settings()
+    factory = await _get_factory()
+    async with factory() as session:
+        claimed = (await session.execute(
+            select(ProjectMediaLog.id).where(ProjectMediaLog.folder_name == folder_name)
+            .where(ProjectMediaLog.id.notlike(_FOLDER_LOG_PREFIX + "%")))).scalars().first()
+        if claimed:
+            token, _row = await _mint_media_log_token(
+                session, claimed, reuse_existing=not reset)
+        else:
+            token, _row = await _mint_token_generic(
+                session, ProjectMediaLog, _folder_log_id(folder_name), MEDIA_LOG_SCOPE,
+                reuse_existing=not reset,
+                row_defaults={"enabled": True, "folder_name": folder_name})
+        await session.commit()
+    return {"token": token, "share_url": _share_url(token, _site_url_from(db)),
+            "folder_name": folder_name, "linked": bool(claimed)}
 
 
 @router.get("/media-log/folder/files")
@@ -1160,8 +1287,9 @@ async def public_media_log_view(token: str):
         row = await _verify_media_log_token(session, token)
         pid = row.id
         folder_name = row.folder_name
-        proj = await session.get(CrmProject, pid)
-        project_name = (proj.name or "") if proj else ""
+        # folder-only（未連專案）token 沒有 CrmProject → 用資料夾名當標題
+        proj = None if _is_folder_log(pid) else await session.get(CrmProject, pid)
+        project_name = (proj.name or "") if proj else (folder_name or "")
     # 資料夾↔DB 同步（public 端每次 GET 都打 → 每專案 30 秒限流一次；含匯入手動丟入的照片）
     await _reconcile_files(factory, pid, root, folder_name, throttled=True)
     async with factory() as session:
@@ -1193,11 +1321,12 @@ async def public_media_log_upload(token: str, file: UploadFile = File(...),
     async with factory() as session:
         row = await _verify_media_log_token(session, token)
         project_id = row.id
-        proj = await session.get(CrmProject, project_id)
-        if not proj:
+        # folder-only（未連專案）token：row 已有 folder_name，不需 CrmProject。
+        # 只有「連專案的 token 但專案已刪且無 folder_name」才算失效。
+        proj = None if _is_folder_log(project_id) else await session.get(CrmProject, project_id)
+        if not proj and not row.folder_name:
             raise HTTPException(status_code=404, detail="找不到專案")
-        proj_name = proj.name or ""
-        folder_name = await _ensure_folder_name(session, row, proj_name)
+        folder_name = await _ensure_folder_name(session, row, proj.name if proj else "")
         await session.commit()   # folder_name 首次生成要落庫（之後上傳同夾）
     # 原檔寫入（session 已關 — 大檔串流期間不佔 DB 連線）；
     # 目的夾 makedirs + 撞名探測都打 NAS/UNC — 集中一個執行緒跑

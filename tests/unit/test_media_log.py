@@ -400,3 +400,25 @@ class TestCheckMediaLogAuthToken:
         from routers.crm.media_log import _check_media_log_auth
         with pytest.raises(HTTPException):
             _check_media_log_auth(None, "garbage.not.a.jwt")
+
+
+class TestFolderLogId:
+    """免專案 QR 的 folder-only media log 合成主鍵（_folder_log_id / _is_folder_log）。"""
+
+    def test_prefix_and_length(self):
+        from routers.crm.media_log import _folder_log_id, _FOLDER_LOG_PREFIX
+        fid = _folder_log_id("20140815_小飛俠劇照")
+        assert fid.startswith(_FOLDER_LOG_PREFIX)
+        assert len(fid) <= 64   # ProjectMediaLog.id 是 String(64)
+
+    def test_deterministic_idempotent(self):
+        from routers.crm.media_log import _folder_log_id
+        assert _folder_log_id("A夾") == _folder_log_id("A夾")
+        assert _folder_log_id("A夾") != _folder_log_id("B夾")
+
+    def test_is_folder_log(self):
+        from routers.crm.media_log import _folder_log_id, _is_folder_log
+        assert _is_folder_log(_folder_log_id("x")) is True
+        assert _is_folder_log("abc123realprojectid") is False
+        assert _is_folder_log("") is False
+        assert _is_folder_log(None) is False

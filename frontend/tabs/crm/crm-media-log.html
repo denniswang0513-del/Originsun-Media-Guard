@@ -66,13 +66,40 @@
     /* 孤兒資料夾名（未連結）— 灰、等寬感 */
     #cml-root .cml-folder { color: var(--mlc-folder); font-family: ui-monospace, "Cascadia Mono", monospace; font-size: 12px; }
 
+    /* ── 連結專案 picker 的搜尋下拉（searchableSelect；scoped 只影響本 tab、
+          自帶樣式故 embed 頁沒載 crm.css 也正常，變數化跟著主題）── */
+    #cml-root .cml-link .ss-wrap { position: relative; margin: 12px 0; }
+    #cml-root .ss-input {
+        width: 100%; box-sizing: border-box; background: var(--mlc-field-bg);
+        border: 1px solid var(--mlc-border); color: var(--mlc-text-soft);
+        border-radius: 6px; padding: 7px 10px; font-size: 12.5px; outline: none;
+    }
+    #cml-root .ss-input:focus { border-color: var(--mlc-accent); }
+    #cml-root .ss-panel {
+        display: none; position: absolute; left: 0; right: 0; top: 100%; z-index: 10;
+        max-height: 240px; overflow-y: auto; margin-top: 4px; border-radius: 6px;
+        background: var(--mlc-panel); border: 1px solid var(--mlc-border-strong);
+        box-shadow: 0 10px 30px -10px rgba(0,0,0,.5);
+    }
+    #cml-root .ss-item {
+        padding: 7px 12px; font-size: 12.5px; cursor: pointer; color: var(--mlc-text);
+        white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    }
+    #cml-root .ss-item:hover, #cml-root .ss-item.ss-active { background: var(--mlc-accent); color: var(--mlc-on-accent); }
+    #cml-root .ss-item.ss-selected { color: var(--mlc-accent); }
+    #cml-root .ss-empty { padding: 8px 12px; color: var(--mlc-faint); font-size: 12px; }
+
     /* ── 連結專案 picker（overlay body 內）── */
     #cml-root .cml-link-info { color: var(--mlc-folder); font-size: 12.5px; line-height: 1.7; }
     #cml-root .cml-link-info b { color: var(--mlc-strong); }
-    #cml-root .cml-link-actions { display: flex; gap: 8px; justify-content: flex-end; }
+    #cml-root .cml-link-actions { display: flex; gap: 8px; justify-content: flex-end; margin-top: 8px; }
     #cml-root .cml-link-msg { margin-top: 10px; font-size: 12px; min-height: 16px; }
     #cml-root .cml-link-msg.ok { color: var(--mlc-on-fg); }
     #cml-root .cml-link-msg.err { color: var(--mlc-off-fg); }
+    #cml-root .cml-link-sec { color: var(--mlc-strong); font-size: 12.5px; font-weight: 600; margin: 14px 0 8px; }
+    #cml-root .cml-link-or { text-align: center; color: var(--mlc-faint); font-size: 12px; margin: 14px 0 2px; position: relative; }
+    #cml-root .cml-qr-box { text-align: center; margin: 14px 0; }
+    #cml-root .cml-qr { width: 180px; height: 180px; background: #fff; padding: 8px; border-radius: 8px; display: inline-block; box-sizing: border-box; }
 
     #cml-root .cml-empty {
         color: var(--mlc-faint); background: var(--mlc-subtle); border: 1px dashed var(--mlc-border-strong); border-radius: 8px;
