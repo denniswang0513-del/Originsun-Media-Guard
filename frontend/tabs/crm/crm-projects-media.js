@@ -628,7 +628,7 @@ function _injectStyle() {
     if (document.getElementById('pm-media-style')) return;
     const st = document.createElement('style');
     st.id = 'pm-media-style';
-    // 主題變數：深色為預設（內部 SPA 專案詳情 tab）；官網白底覆寫在 media-log-embed.html
+    // 主題變數：深色為預設（內部 SPA 專案詳情 tab）；官網白底覆寫在 media-log-workspace.html
     // 的 html.ml-theme-light（與 crm-media-log.html 同一組 --mlc-* 變數）。lightbox 與
     // 縮圖上的操作列/時長角標刻意留深色（覆在圖上 + 看片暗底），不進主題系統。
     st.textContent = `

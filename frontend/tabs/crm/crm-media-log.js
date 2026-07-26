@@ -43,6 +43,7 @@ function _renderShell() {
                 <option value="orphan"${_scope === 'orphan' ? ' selected' : ''}>未連結</option>
             </select>
             <button id="cml-refresh" class="cml-btn ghost">重新整理</button>
+            <button id="cml-newfolder" class="cml-btn">新增資料夾</button>
         </div>
         <div id="cml-list"></div>
         <div id="cml-overlay"><div class="cml-panel">
@@ -60,6 +61,7 @@ function _renderShell() {
     };
     document.getElementById('cml-scope').onchange = (e) => { _scope = e.target.value; _refresh(); };
     document.getElementById('cml-refresh').onclick = _refresh;
+    document.getElementById('cml-newfolder').onclick = _openNewFolder;
     document.getElementById('cml-close').onclick = _closeOverlay;
     document.getElementById('cml-overlay').onclick = (e) => {
         if (e.target.id === 'cml-overlay') _closeOverlay();   // 點背景關閉
@@ -227,6 +229,51 @@ async function _doLinkNew(folderName) {
     }
 }
 
+// ── 新增資料夾（工具列）：在根目錄開一個空夾現場收照（產 QR）；專案你之後另外建再連結 ──
+async function _openNewFolder() {
+    const ov = document.getElementById('cml-overlay');
+    document.getElementById('cml-panel-title').textContent = '新增資料夾';
+    const body = document.getElementById('cml-panel-body');
+    ov.classList.add('on');
+    body.innerHTML = `
+        <div class="cml-link">
+            <div class="cml-link-info">在影像紀錄根目錄底下開一個新資料夾，馬上就能產 QR 給劇組現場收照。<b>專案之後你再另外建、用「連結專案」把整夾收進去即可。</b></div>
+            <div class="cml-link-sec">資料夾名稱</div>
+            <input id="cml-nf-name" class="cml-search" style="width:100%;" placeholder="例：20260726_新案側拍">
+            <div class="cml-link-actions">
+                <button id="cml-nf-cancel" class="cml-btn ghost">取消</button>
+                <button id="cml-nf-go" class="cml-btn">建立並產生 QR</button>
+            </div>
+            <div id="cml-nf-msg" class="cml-link-msg"></div>
+        </div>`;
+    document.getElementById('cml-nf-cancel').onclick = _closeOverlay;
+    document.getElementById('cml-nf-go').onclick = _doCreateFolder;
+    const inp = document.getElementById('cml-nf-name');
+    inp.focus();
+    inp.onkeydown = (e) => { if (e.key === 'Enter') _doCreateFolder(); };
+}
+
+async function _doCreateFolder() {
+    const name = document.getElementById('cml-nf-name').value.trim();
+    const msg = document.getElementById('cml-nf-msg');
+    if (!name) { msg.textContent = '請輸入資料夾名稱'; msg.className = 'cml-link-msg err'; return; }
+    const go = document.getElementById('cml-nf-go');
+    go.disabled = true;
+    msg.textContent = '建立中…'; msg.className = 'cml-link-msg';
+    try {
+        const r = await _fetch('/media-log/folder', {
+            method: 'POST', body: JSON.stringify({ name }),
+        });
+        // 建立端點已一併 mint token（空夾也會在「未連結」列表出現、之後連結得到）→
+        // 直接用回應渲染 QR，不用再多打一次 folder/token。
+        _renderQr(r.folder_name || name, r);
+    } catch (e) {
+        msg.textContent = e.message || String(e);
+        msg.className = 'cml-link-msg err';
+        go.disabled = false;
+    }
+}
+
 // ── 孤兒資料夾：產生/開啟免專案收集連結（QR）────────────────────────────
 async function _openQr(folderName) {
     const ov = document.getElementById('cml-overlay');
@@ -234,15 +281,20 @@ async function _openQr(folderName) {
     const body = document.getElementById('cml-panel-body');
     body.innerHTML = '<div class="cml-empty">產生連結…</div>';
     ov.classList.add('on');
-    let d;
     try {
-        d = await _fetch('/media-log/folder/token', {
+        _renderQr(folderName, await _fetch('/media-log/folder/token', {
             method: 'POST', body: JSON.stringify({ folder_name: folderName }),
-        });
+        }));
     } catch (e) {
         body.innerHTML = `<div class="cml-empty" style="color:#fca5a5;">產生失敗：${_esc(e.message || e)}</div>`;
-        return;
     }
+}
+
+// 把 {token, share_url, linked} 渲染成 QR 面板。_openQr（既有孤兒）與新增資料夾共用，
+// 後者用建立回應直接渲染、不再多打一次 folder/token。
+function _renderQr(folderName, d) {
+    document.getElementById('cml-panel-title').textContent = '收集連結 / QR';
+    const body = document.getElementById('cml-panel-body');
     const share = /^https?:\/\//i.test(d.share_url || '') ? d.share_url : location.origin + (d.share_url || '');
     const qrSrc = `${ADMIN_API}/public/media-log/${encodeURIComponent(d.token)}/qr?base=${encodeURIComponent(location.origin)}`;
     const note = d.linked

@@ -582,18 +582,21 @@ def _within_dir(base: str, target: str) -> bool:
     return t == b or t.startswith(b + os.sep)
 
 
-def _safe_subfolder(root: str, folder: str) -> Optional[str]:
-    """root 底下的**直接**子資料夾絕對路徑；名稱含路徑分隔/.. 或不在 root 內
-    或非目錄 → None（擋任意路徑遍歷）。"""
-    name = str(folder or "").strip()
-    if not root or not name or name in (".", ".."):
-        return None
-    if "/" in name or "\\" in name:      # 只允許單層資料夾名
+def _subfolder_path(root: str, name: str) -> Optional[str]:
+    """root 底下**單層**子資料夾的絕對路徑（純驗證、不檢查是否存在）；名稱含路徑
+    分隔 / . / .. 或逃出 root → None。路徑遍歷防護的單一真相 —— 瀏覽（需已存在）與
+    新增資料夾（需尚不存在）共用，各自再加存在性判斷。"""
+    name = str(name or "").strip()
+    if not root or not name or name in (".", "..") or "/" in name or "\\" in name:
         return None
     p = os.path.join(root, name)
-    if not _within_dir(root, p) or not os.path.isdir(p):
-        return None
-    return p
+    return p if _within_dir(root, p) else None
+
+
+def _safe_subfolder(root: str, folder: str) -> Optional[str]:
+    """root 底下**已存在**的直接子資料夾絕對路徑；不合法或非目錄 → None。"""
+    p = _subfolder_path(root, folder)
+    return p if (p and os.path.isdir(p)) else None
 
 
 def _safe_rel_path(folder_abs: str, rel: str) -> Optional[str]:
@@ -950,9 +953,13 @@ async def media_log_overview(request: Request, q: str = "", scope: str = "conten
             .where(ProjectMediaLog.folder_name.isnot(None)))).scalars())
 
     # ── Part B：孤兒資料夾（disk 掃根目錄，扣掉已連結的）──
+    # 空資料夾平常不列（避免根目錄雜夾洗版）；但「已產 QR / 剛新增」的空夾（有 token）
+    # 要列出來，才管理得到、之後連結得了。
     orphans = []
     for fname, (i, v, capped) in (await _root_folders_cached(root)).items():
-        if fname in linked_folders or (i + v) == 0:
+        if fname in linked_folders:
+            continue
+        if (i + v) == 0 and fname not in tokened:
             continue
         orphans.append({
             "linked": False, "project_id": None, "enabled": None,
@@ -1042,18 +1049,75 @@ async def media_log_link_folder(request: Request):
     return {"ok": True, "project_id": project_id, "imported": res.get("imported", 0)}
 
 
-@router.post("/media-log/link-new")
-async def media_log_link_new(request: Request):
-    """從影像紀錄直接開新專案並連結此資料夾（一鍵）。
-    body: {folder_name, name, client_id, status?}。建最小專案（主表 + 預設雜支）→
-    連結資料夾（走 link 的轉走/reconcile 邏輯）。回 {project_id, imported}。"""
-    _check_media_log_auth(request)
-    _require_db()
+async def _create_min_project(session, name: str, client_id: str, status: str) -> str:
+    """建最小 CRM 專案（主表 cost group + 預設雜支 + 客戶分級重算），回 project_id。
+    不 commit（呼叫端統一 commit）。目前由 link-new（開新專案並連結）使用。"""
     from ._shared import _auto_update_client_status, _seed_default_expenses
     try:
         from ._shared import CrmProjectCostGroup
     except ImportError:
         from db.models import CrmProjectCostGroup
+    client = await session.get(Client, client_id)
+    if not client:
+        raise HTTPException(status_code=404, detail="找不到指定的客戶")
+    now = _now()
+    pid = uuid.uuid4().hex
+    session.add(CrmProject(id=pid, name=name, client_id=client_id, status=status,
+                           am_username=client.am_username or None,
+                           created_at=now, updated_at=now))
+    await _auto_update_client_status(session, client_id)
+    gid = uuid.uuid4().hex
+    session.add(CrmProjectCostGroup(id=gid, project_id=pid, name="主表", sort_order=0))
+    await _seed_default_expenses(session, pid, gid)
+    return pid
+
+
+@router.post("/media-log/folder")
+async def media_log_create_folder(request: Request):
+    """在根目錄底下新增一個空資料夾並一併產生免專案收集 token（QR）—— 現場先開夾收照，
+    之後你另外建專案再「連結專案」把整夾收進去。body: {name}。含 / \\ 或清完為空/./.. → 400；
+    已存在 → 400。建夾 + mint token 在同一步（原子），前端拿回應直接顯示 QR。media_log 模組即可。"""
+    _check_media_log_auth(request)
+    _require_db()
+    raw = str((await request.json()).get("name") or "")
+    if "/" in raw or "\\" in raw:   # 只收單層資料夾名，含分隔＝可疑，直接擋
+        raise HTTPException(status_code=400, detail="資料夾名稱不可含 / 或 \\")
+    name = _clean_name(raw)
+    root, _cats = await _media_log_conf()
+    if not await asyncio.to_thread(_root_set, root):
+        raise HTTPException(status_code=503, detail="管理員尚未設定影像紀錄資料夾")
+    folder = _subfolder_path(root, name)   # 名稱驗證 + 路徑遍歷防護（單一真相）
+    if not folder:
+        raise HTTPException(status_code=400, detail="資料夾名稱無效")
+
+    def _mk() -> bool:
+        try:
+            os.makedirs(folder)   # exist_ok 預設 False → 已存在則 FileExistsError
+            return True
+        except FileExistsError:
+            return False
+
+    if not await asyncio.to_thread(_mk):
+        raise HTTPException(status_code=400, detail=f"資料夾「{name}」已存在")
+    # 一併 mint folder-only token → 空夾也在總覽「未連結」出現、且立即有 QR 可收照
+    db = await _db_settings()
+    factory = await _get_factory()
+    async with factory() as session:
+        token, _row = await _mint_token_generic(
+            session, ProjectMediaLog, _folder_log_id(name), MEDIA_LOG_SCOPE,
+            reuse_existing=True, row_defaults={"enabled": True, "folder_name": name})
+        await session.commit()
+    return {"ok": True, "folder_name": name, "token": token,
+            "share_url": _share_url(token, _site_url_from(db)), "linked": False}
+
+
+@router.post("/media-log/link-new")
+async def media_log_link_new(request: Request):
+    """從影像紀錄直接開新專案並連結此資料夾（一鍵）。
+    body: {folder_name, name, client_id, status?}。建最小專案 → 連結資料夾（走 link 的
+    轉走/reconcile 邏輯）。回 {project_id, imported}。"""
+    _check_media_log_auth(request)
+    _require_db()
     body = await request.json()
     folder_name = str(body.get("folder_name") or "").strip()
     name = str(body.get("name") or "").strip()
@@ -1063,19 +1127,7 @@ async def media_log_link_new(request: Request):
         raise HTTPException(status_code=400, detail="缺 folder_name / name / client_id")
     factory = await _get_factory()
     async with factory() as session:
-        client = await session.get(Client, client_id)
-        if not client:
-            raise HTTPException(status_code=404, detail="找不到指定的客戶")
-        now = _now()
-        pid = uuid.uuid4().hex
-        proj = CrmProject(id=pid, name=name, client_id=client_id, status=status,
-                          am_username=client.am_username or None,
-                          created_at=now, updated_at=now)
-        session.add(proj)
-        await _auto_update_client_status(session, client_id)
-        gid = uuid.uuid4().hex
-        session.add(CrmProjectCostGroup(id=gid, project_id=pid, name="主表", sort_order=0))
-        await _seed_default_expenses(session, pid, gid)
+        pid = await _create_min_project(session, name, client_id, status)
         await session.commit()
     # 連結：處理 folder-only token 轉走（若之前先產了免專案 QR）+ 建本專案的 media log row
     from sqlalchemy import delete as _delete
