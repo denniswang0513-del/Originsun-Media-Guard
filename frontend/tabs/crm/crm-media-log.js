@@ -18,7 +18,6 @@ let _scope = 'content';        // content(預設) / all / orphan
 let _q = '';
 let _debounce = null;
 let _projects = null;          // 連結 picker 用（懶載快取）
-let _clients = null;           // 開新專案 picker 用（懶載快取）
 let _viewFiles = [];           // 目前檢視的孤兒資料夾檔案清單（lightbox 導覽用）
 let _viewFolder = '';          // 目前檢視的資料夾名
 let _lbIdx = -1;               // lightbox 索引
@@ -148,85 +147,41 @@ function _renderList() {
     });
 }
 
-// ── 連結專案：孤兒資料夾 → 選現有專案 或 開新專案 ─────────────────────────
+// ── 連結專案：孤兒資料夾 → 選一個現有 CRM 專案（專案在 CRM 建，這裡只連結）──────
 async function _loadProjects() {
     if (_projects) return _projects;
     const d = await _fetch('/projects');
     _projects = d.projects || [];
     return _projects;
 }
-async function _loadClients() {
-    if (_clients) return _clients;
-    const d = await _fetch('/clients');
-    _clients = d.clients || [];
-    return _clients;
-}
-function _clientOptionsHtml(clients) {
-    return '<option value="">— 選擇客戶 —</option>' +
-        (clients || []).map(c => `<option value="${_esc(c.id)}">${_esc(c.short_name || c.name || c.id)}</option>`).join('');
-}
 
 async function _openLinkPicker(folderName) {
     const ov = document.getElementById('cml-overlay');
     document.getElementById('cml-panel-title').textContent = '連結專案';
     const body = document.getElementById('cml-panel-body');
-    body.innerHTML = '<div class="cml-empty">載入清單…</div>';
+    body.innerHTML = '<div class="cml-empty">載入專案清單…</div>';
     ov.classList.add('on');
-    let projects, clients;
+    let projects;
     try {
-        [projects, clients] = await Promise.all([_loadProjects(), _loadClients()]);
+        projects = await _loadProjects();
     } catch (e) {
         body.innerHTML = `<div class="cml-empty" style="color:#fca5a5;">載入失敗：${_esc(e.message || e)}</div>`;
         return;
     }
-    const defName = folderName.replace(/^\d{8}_/, '') || folderName;   // 去掉日期前綴當預設專案名
     body.innerHTML = `
         <div class="cml-link">
-            <div class="cml-link-info">把資料夾 <b>${_esc(folderName)}</b> 的照片收進某個專案 —— 連結後資料夾裡的照片（含用 QR 收到的）會匯入該專案的影像紀錄。</div>
-            <div class="cml-link-sec">連結到現有專案</div>
-            <select id="cml-link-proj" style="width:100%;">${projectOptionsHtml(projects)}</select>
-            <div class="cml-link-actions"><button id="cml-link-go" class="cml-btn">連結並匯入</button></div>
-
-            <div class="cml-link-or">或</div>
-            <div class="cml-link-sec">建立新專案並連結</div>
-            <input id="cml-newproj-name" class="cml-search" style="width:100%;margin-bottom:8px;" placeholder="專案名稱" value="${_esc(defName)}">
-            <select id="cml-newproj-client" style="width:100%;">${_clientOptionsHtml(clients)}</select>
-            <div class="cml-link-actions"><button id="cml-linknew-go" class="cml-btn">開新專案並連結</button></div>
-
-            <div class="cml-link-actions" style="margin-top:6px;"><button id="cml-link-cancel" class="cml-btn ghost">取消</button></div>
+            <div class="cml-link-info">把資料夾 <b>${_esc(folderName)}</b> 的照片收進一個現有專案 —— 連結後資料夾裡的照片（含用 QR 收到的）會匯入該專案的影像紀錄。<br>（新專案請在 CRM「專案管理」建立，建好後回這裡連結。）</div>
+            <select id="cml-link-proj" style="width:100%;margin:12px 0;">${projectOptionsHtml(projects)}</select>
+            <div class="cml-link-actions">
+                <button id="cml-link-cancel" class="cml-btn ghost">取消</button>
+                <button id="cml-link-go" class="cml-btn">連結並匯入</button>
+            </div>
             <div id="cml-link-msg" class="cml-link-msg"></div>
         </div>`;
     document.getElementById('cml-link-cancel').onclick = _closeOverlay;
     document.getElementById('cml-link-go').onclick = () => _doLink(folderName);
-    document.getElementById('cml-linknew-go').onclick = () => _doLinkNew(folderName);
-    // 兩個下拉都可打字搜尋（明確呼叫 → SPA 與內嵌頁都適用；樣式在 crm-media-log.html scoped）
+    // 專案下拉可打字搜尋（明確呼叫 → SPA 與內嵌頁都適用；樣式在 crm-media-log.html scoped）
     searchableSelect(document.getElementById('cml-link-proj'), { placeholder: '搜尋專案…' });
-    searchableSelect(document.getElementById('cml-newproj-client'), { placeholder: '搜尋客戶…' });
-}
-
-async function _doLinkNew(folderName) {
-    const name = document.getElementById('cml-newproj-name').value.trim();
-    const clientId = document.getElementById('cml-newproj-client').value;
-    const msg = document.getElementById('cml-link-msg');
-    if (!name) { msg.textContent = '請輸入專案名稱'; msg.className = 'cml-link-msg err'; return; }
-    if (!clientId) { msg.textContent = '請選擇客戶'; msg.className = 'cml-link-msg err'; return; }
-    const btn = document.getElementById('cml-linknew-go');
-    btn.disabled = true;
-    msg.textContent = '建立中…'; msg.className = 'cml-link-msg';
-    try {
-        const r = await _fetch('/media-log/link-new', {
-            method: 'POST',
-            body: JSON.stringify({ folder_name: folderName, name, client_id: clientId }),
-        });
-        msg.textContent = `已建立專案並匯入 ${r.imported || 0} 個檔案`;
-        msg.className = 'cml-link-msg ok';
-        _projects = null;   // 專案清單快取失效（新增了一個）
-        setTimeout(_closeOverlay, 1000);
-    } catch (e) {
-        msg.textContent = e.message || String(e);
-        msg.className = 'cml-link-msg err';
-        btn.disabled = false;
-    }
 }
 
 // ── 新增資料夾（工具列）：在根目錄開一個空夾現場收照（產 QR）；專案你之後另外建再連結 ──

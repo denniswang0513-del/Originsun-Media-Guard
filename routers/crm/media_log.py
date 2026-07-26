@@ -1049,29 +1049,6 @@ async def media_log_link_folder(request: Request):
     return {"ok": True, "project_id": project_id, "imported": res.get("imported", 0)}
 
 
-async def _create_min_project(session, name: str, client_id: str, status: str) -> str:
-    """建最小 CRM 專案（主表 cost group + 預設雜支 + 客戶分級重算），回 project_id。
-    不 commit（呼叫端統一 commit）。目前由 link-new（開新專案並連結）使用。"""
-    from ._shared import _auto_update_client_status, _seed_default_expenses
-    try:
-        from ._shared import CrmProjectCostGroup
-    except ImportError:
-        from db.models import CrmProjectCostGroup
-    client = await session.get(Client, client_id)
-    if not client:
-        raise HTTPException(status_code=404, detail="找不到指定的客戶")
-    now = _now()
-    pid = uuid.uuid4().hex
-    session.add(CrmProject(id=pid, name=name, client_id=client_id, status=status,
-                           am_username=client.am_username or None,
-                           created_at=now, updated_at=now))
-    await _auto_update_client_status(session, client_id)
-    gid = uuid.uuid4().hex
-    session.add(CrmProjectCostGroup(id=gid, project_id=pid, name="主表", sort_order=0))
-    await _seed_default_expenses(session, pid, gid)
-    return pid
-
-
 @router.post("/media-log/folder")
 async def media_log_create_folder(request: Request):
     """在根目錄底下新增一個空資料夾並一併產生免專案收集 token（QR）—— 現場先開夾收照，
@@ -1109,45 +1086,6 @@ async def media_log_create_folder(request: Request):
         await session.commit()
     return {"ok": True, "folder_name": name, "token": token,
             "share_url": _share_url(token, _site_url_from(db)), "linked": False}
-
-
-@router.post("/media-log/link-new")
-async def media_log_link_new(request: Request):
-    """從影像紀錄直接開新專案並連結此資料夾（一鍵）。
-    body: {folder_name, name, client_id, status?}。建最小專案 → 連結資料夾（走 link 的
-    轉走/reconcile 邏輯）。回 {project_id, imported}。"""
-    _check_media_log_auth(request)
-    _require_db()
-    body = await request.json()
-    folder_name = str(body.get("folder_name") or "").strip()
-    name = str(body.get("name") or "").strip()
-    client_id = str(body.get("client_id") or "").strip()
-    status = str(body.get("status") or "製作").strip() or "製作"
-    if not folder_name or not name or not client_id:
-        raise HTTPException(status_code=400, detail="缺 folder_name / name / client_id")
-    factory = await _get_factory()
-    async with factory() as session:
-        pid = await _create_min_project(session, name, client_id, status)
-        await session.commit()
-    # 連結：處理 folder-only token 轉走（若之前先產了免專案 QR）+ 建本專案的 media log row
-    from sqlalchemy import delete as _delete
-    root, _cats = await _media_log_conf()
-    async with factory() as session:
-        others = (await session.execute(
-            select(ProjectMediaLog.id).where(ProjectMediaLog.folder_name == folder_name)
-            .where(ProjectMediaLog.id != pid))).scalars().all()
-        for oid in others:
-            if _is_folder_log(oid):
-                await session.execute(
-                    _delete(ProjectMediaFile).where(ProjectMediaFile.project_id == oid))
-                frow = await session.get(ProjectMediaLog, oid)
-                if frow:
-                    await session.delete(frow)
-        session.add(ProjectMediaLog(id=pid, folder_name=folder_name, enabled=True))
-        await session.commit()
-    # 匯入資料夾內既有 + 免專案 QR 期間已上傳的照片（reconcile 從磁碟掃）
-    res = await _reconcile_files(factory, pid, root, folder_name)
-    return {"ok": True, "project_id": pid, "imported": res.get("imported", 0)}
 
 
 @router.post("/media-log/folder/token")
