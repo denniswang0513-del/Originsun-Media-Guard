@@ -472,7 +472,11 @@ function cardMediaLog() {
     const card = makeCard("Media Log", "影像紀錄", "", "media_log");
     card.querySelector(".card-body").innerHTML = `
         <div class="meta" style="margin-bottom:12px;">劇組劇照 / 花絮的收集與管理：瀏覽資料夾、連結專案、上傳、分享連結 QR、縮圖與設定。</div>
-        <button class="mini-btn" onclick="mlOpenFull()">開啟影像紀錄</button>`;
+        <div style="display:flex;gap:8px;flex-wrap:wrap;">
+            <button class="mini-btn" onclick="mlOpenFull()">開啟影像紀錄</button>
+            <a class="mini-btn" href="/media-log-workspace.html" target="_blank" rel="noopener"
+               style="display:inline-block;text-decoration:none;line-height:1.5;">獨立網址開啟 ↗</a>
+        </div>`;
     return card;
 }
 function mlOpenFull() {
