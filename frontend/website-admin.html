@@ -1,0 +1,203 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex,nofollow">
+<title>官網管理｜ORIGINSUN</title>
+<!-- 官網管理「獨立登入網址」：帳號登入後直接載入既有的官網管理 Tab（含作品上架）。
+     刻意「直接掛既有 Tab、維持原生深色、不重繪」→ 新增的只有這個登入頁一個檔案，
+     works.js / showcase 編輯器 / 各子視圖零改動，未來上架功能調整不受此頁影響、風險最低。
+     權限：admin 或 website_admin 模組（後端 _check_website_auth）。托管：需 master 完整後端
+     （auth + website router + 同源寫入；NAS 對外容器無 auth）→ 走 master/foundry，同 /my.html。 -->
+<script src="https://accounts.google.com/gsi/client" async defer></script>
+<style>
+  :root { --red: #c9372c; --ink: #262626; --sub: #737373; --line: #e5e5e5; }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; background: #fff; color: var(--ink);
+    font-family: "Noto Sans TC", "Microsoft JhengHei", "Segoe UI", sans-serif; }
+  a { color: inherit; text-decoration: none; }
+  .eyebrow { font-size: 11px; letter-spacing: 0.35em; text-transform: uppercase; color: var(--sub); }
+  .accent { color: var(--red); }
+
+  header {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 12px 24px; background: #fff; border-bottom: 1px solid var(--line);
+  }
+  header .brand { display: flex; align-items: center; gap: 12px; }
+  header .brand img { height: 28px; width: auto; display: block; }
+  header .brand-name { font-size: 13px; letter-spacing: 0.25em; font-weight: 300; }
+  header .hdr-right { display: flex; align-items: center; gap: 14px; }
+  header .hdr-user { font-size: 12px; color: var(--sub); }
+  .btn-ghost { background: none; border: 1px solid var(--line); border-radius: 2px;
+    padding: 6px 14px; font-size: 12px; color: var(--sub); cursor: pointer; transition: all .15s; }
+  .btn-ghost:hover { color: var(--red); border-color: var(--red); }
+
+  #login-view, #noperm-view { max-width: 380px; margin: 8vh auto 0; padding: 0 20px; }
+  .login-card { border: 1px solid var(--line); padding: 40px 36px; }
+  .login-card h1 { font-size: 22px; font-weight: 300; letter-spacing: 0.1em; margin: 18px 0 6px; }
+  .login-card .sub { font-size: 13px; color: var(--sub); margin-bottom: 28px; line-height: 1.7; }
+  .field { margin-bottom: 14px; }
+  .field label { display: block; font-size: 11px; letter-spacing: 0.15em; color: var(--sub);
+    text-transform: uppercase; margin-bottom: 6px; }
+  .field input { width: 100%; border: 1px solid var(--line); border-radius: 2px; padding: 10px 12px;
+    font-size: 14px; color: var(--ink); outline: none; }
+  .field input:focus { border-color: var(--red); }
+  .btn-primary { display: block; width: 100%; text-align: center; background: var(--ink); color: #fff;
+    border: 0; padding: 12px; font-size: 12px; letter-spacing: 0.3em; text-transform: uppercase;
+    cursor: pointer; transition: background .15s; }
+  .btn-primary:hover { background: var(--red); }
+  .err { color: var(--red); font-size: 12px; margin-top: 12px; display: none; }
+  .login-divider { display: none; align-items: center; gap: 10px; margin: 20px 0; color: var(--sub); font-size: 11px; }
+  .login-divider::before, .login-divider::after { content: ""; flex: 1; height: 1px; background: var(--line); }
+  #g_id_signin_container { display: none; justify-content: center; }
+  .state-msg { text-align: center; color: var(--sub); font-size: 14px; line-height: 1.9; padding: 40px 12px; }
+  /* app-view 掛既有官網管理 Tab（原生深色，不改） */
+  #app-view { padding: 0; }
+  #app-view #wa-host { background: #1a1a1a; }
+</style>
+</head>
+<body>
+<header>
+  <div class="brand">
+    <img src="/img/originsun-logo.webp" alt="源日影像" onerror="this.style.display='none'">
+    <span class="brand-name">官網管理 <span class="accent">WEBSITE</span></span>
+  </div>
+  <div class="hdr-right">
+    <span class="hdr-user" id="hdr-user" style="display:none;"></span>
+    <button class="btn-ghost" id="btn-logout" style="display:none;" onclick="doLogout()">登出</button>
+  </div>
+</header>
+
+<div id="login-view" style="display:none;">
+  <div class="login-card">
+    <div class="eyebrow">Website</div>
+    <h1>官網管理登入</h1>
+    <div class="sub">登入後管理對外官網：首頁、作品集（上架）、服務、部落格、SEO、聯絡與發布。</div>
+    <form onsubmit="doPwdLogin(event)">
+      <div class="field"><label>帳號 Account</label><input id="in-user" autocomplete="username"></div>
+      <div class="field"><label>密碼 Password</label><input id="in-pwd" type="password" autocomplete="current-password"></div>
+      <button class="btn-primary" type="submit">登入 Sign in</button>
+    </form>
+    <div class="login-divider" id="login-divider">或</div>
+    <div id="g_id_signin_container"></div>
+    <div id="login-err" class="err"></div>
+  </div>
+</div>
+
+<div id="noperm-view" style="display:none;">
+  <div class="state-msg">此帳號沒有官網管理權限。<br>請管理員在「使用者管理」開通 <b>website_admin</b> 模組，或用有權限的帳號登入。
+    <div style="margin-top:18px;"><button class="btn-ghost" onclick="doLogout()">換帳號登入</button></div>
+  </div>
+</div>
+
+<div id="app-view" style="display:none;">
+  <div id="wa-host"><div class="state-msg">載入中…</div></div>
+</div>
+
+<script>
+"use strict";
+const TOKEN_KEY = "auth_token";
+const $ = (id) => document.getElementById(id);
+
+async function mfetch(path, opts = {}) {
+    const headers = Object.assign({ "Content-Type": "application/json" }, opts.headers || {});
+    const tok = localStorage.getItem(TOKEN_KEY);
+    if (tok) headers["Authorization"] = "Bearer " + tok;
+    return fetch(path, Object.assign({}, opts, { headers }));
+}
+
+function _show(view) {
+    for (const v of ["login-view", "noperm-view", "app-view"]) $(v).style.display = (v === view ? "block" : "none");
+    $("btn-logout").style.display = (view === "app-view" || view === "noperm-view") ? "" : "none";
+}
+function showLogin(msg) {
+    _show("login-view"); $("hdr-user").style.display = "none";
+    if (msg) { const e = $("login-err"); e.textContent = msg; e.style.display = "block"; }
+    initGoogle();
+}
+function doLogout() { localStorage.removeItem(TOKEN_KEY); localStorage.removeItem("auth_user"); location.reload(); }
+
+function onLoginOk(d) { localStorage.setItem(TOKEN_KEY, d.token); $("login-err").style.display = "none"; boot(); }
+async function doPwdLogin(ev) {
+    ev.preventDefault();
+    try {
+        const r = await fetch("/api/v1/auth/login", { method: "POST", headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ username: $("in-user").value.trim(), password: $("in-pwd").value }) });
+        const d = await r.json();
+        if (!r.ok) { showLogin(d.detail || "登入失敗"); return; }
+        onLoginOk(d);
+    } catch (_) { showLogin("連線失敗，請稍後再試"); }
+}
+
+let _gisInited = false;
+async function initGoogle() {
+    if (_gisInited) return;
+    try {
+        const r = await fetch("/api/v1/auth/google/config");
+        if (!r.ok) return;
+        const cfg = await r.json();
+        if (!cfg.enabled || !cfg.client_id) return;
+        for (let i = 0; i < 40 && (typeof google === "undefined" || !google.accounts); i++)
+            await new Promise(res => setTimeout(res, 150));
+        if (typeof google === "undefined" || !google.accounts) return;
+        google.accounts.id.initialize({
+            client_id: cfg.client_id, auto_select: false, cancel_on_tap_outside: true,
+            callback: async (resp) => {
+                try {
+                    const r2 = await fetch("/api/v1/auth/google/login", { method: "POST",
+                        headers: { "Content-Type": "application/json" }, body: JSON.stringify({ credential: resp.credential }) });
+                    const d = await r2.json();
+                    if (!r2.ok) { showLogin(d.detail || "Google 登入失敗"); return; }
+                    onLoginOk(d);
+                } catch (_) { showLogin("連線失敗，請稍後再試"); }
+            },
+        });
+        google.accounts.id.renderButton($("g_id_signin_container"),
+            { theme: "outline", size: "large", width: 320, text: "signin_with", shape: "rectangular", logo_alignment: "left" });
+        $("g_id_signin_container").style.display = "flex";
+        $("login-divider").style.display = "flex";
+        _gisInited = true;
+    } catch (e) { console.warn("[GIS] init failed", e); }
+}
+
+let _tabLoaded = false;
+async function _loadTab() {
+    if (_tabLoaded) return;
+    _tabLoaded = true;
+    const host = $("wa-host");
+    try {
+        host.innerHTML = await (await fetch("/tabs/website/website.html")).text();
+        const mod = await import("/tabs/website/website.js");
+        await mod.initWebsiteTab();
+        // #website-root 原本 height:calc(100vh-180px) 是為 SPA chrome 設；獨立頁頁首較矮 → 填滿
+        const root = document.getElementById("website-root");
+        if (root) root.style.height = "calc(100vh - 54px)";
+    } catch (e) {
+        _tabLoaded = false;
+        host.innerHTML = '<div class="state-msg" style="color:var(--red);">官網管理載入失敗：' + ((e && e.message) || e) + "</div>";
+    }
+}
+
+async function boot() {
+    if (!localStorage.getItem(TOKEN_KEY)) { showLogin(""); return; }
+    let me;
+    try {
+        const r = await mfetch("/api/v1/auth/me");
+        if (r.status === 401) { localStorage.removeItem(TOKEN_KEY); showLogin(""); return; }
+        if (!r.ok) { showLogin("載入失敗（" + r.status + "）"); return; }
+        me = await r.json();
+    } catch (_) { showLogin("連線失敗，請稍後再試"); return; }
+    const mods = me.modules || [];
+    const isAdmin = (me.access_level || 0) >= 3 || me.role_name === "admin";
+    $("hdr-user").textContent = me.username || "";
+    $("hdr-user").style.display = "";
+    if (!isAdmin && !mods.includes("website_admin")) { _show("noperm-view"); return; }
+    _show("app-view");
+    _loadTab();
+}
+
+boot();
+</script>
+</body>
+</html>
