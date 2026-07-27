@@ -50,6 +50,19 @@ export function renderRich(text) {
     });
 }
 
+// 只抽出貼圖 token → 縮圖 HTML（不含文字），供「編輯中即時預覽」：token 在 textarea
+// 裡是純文字看不到圖，把同一批 token 渲染成縮圖列放在欄位下方。基底未取到 → 回 ''
+// （呼叫端的預覽容器空著、不佔位）。與 renderRich 共用 PASTE_RE + _pasteBase 同一契約。
+export function pasteThumbs(text) {
+    if (!_pasteBase || !text) return '';
+    const out = [];
+    for (const m of text.matchAll(PASTE_RE)) {
+        const src = `${_pasteBase}/${m[2]}`;
+        out.push(`<a href="${src}" target="_blank" rel="noopener"><img class="paste-thumb" src="${src}" alt="${_esc(m[1] || '圖片')}" loading="lazy"></a>`);
+    }
+    return out.join('');
+}
+
 // ── 貼上 → 上傳 ────────────────────────────────────────────────────────
 let _seq = 0;
 

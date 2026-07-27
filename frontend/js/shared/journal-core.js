@@ -64,7 +64,7 @@ export const isAuthFail = (...rs) =>
 
 // ── 貼圖 token → <img>：正本在 paste-image.js（上傳與渲染同一契約的兩半）——
 // 這裡 re-export 讓週誌兩個消費端維持單一 import 來源（同 esc/debounce 慣例）。
-export { ensurePasteBase, renderRich } from './paste-image.js';
+export { ensurePasteBase, renderRich, pasteThumbs } from './paste-image.js';
 import { renderRich as _renderRich } from './paste-image.js';
 
 export function blockList(label, arr, blockCls) {

@@ -128,6 +128,13 @@ html.embed-mode .card + .card { border-top: 1px solid var(--line); padding-top: 
     display: block; max-width: 100%; max-height: 180px; margin: 4px 0;
     border: 1px solid var(--line); border-radius: 2px; cursor: zoom-in;
 }
+/* 編輯中即時預覽：textarea 下方的貼圖縮圖列（pasteThumbs 產出） */
+.paste-preview { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
+.paste-preview:empty { display: none; }
+.paste-preview .paste-thumb {
+    display: block; height: 84px; width: auto; max-width: 100%;
+    border: 1px solid var(--line); border-radius: 2px; cursor: zoom-in;
+}
 .save-row { display: flex; align-items: center; gap: 12px; margin-top: 18px; flex-wrap: wrap; }
 .btn-save {
     background: var(--ink); color: #fff; border: none; border-radius: 2px;
@@ -239,7 +246,7 @@ footer .eyebrow { font-size: 10px; }
 <script type="module">
 import { BLOCKS, HINT_EDIT_WINDOW, MSG_EDIT_WINDOW, SUBTITLE, api, blockList,
          debounce, ensurePasteBase, esc, isAuthFail, itemsToLines, linesToItems,
-         personCard, renderRich, shiftWeek, thisWeekStart, weekRange } from '/js/shared/journal-core.js';
+         pasteThumbs, personCard, renderRich, shiftWeek, thisWeekStart, weekRange } from '/js/shared/journal-core.js';
 import { initPasteImage } from '/js/shared/paste-image.js';
 
 initPasteImage();   // 四問 textarea 可直接貼圖（截圖 → 上傳圖床 → 插 token）
@@ -280,7 +287,9 @@ const CARD_CLS = { name: 'p-name', empty: 'empty pad-sm', block: 'blk' };
 
 // ── 狀態 ────────────────────────────────────────────────────────────────
 let view = 'week';
-let weekStart = thisWeekStart();
+// 預設落在「上一週」：團隊慣例是當週寫上一週的日誌（上一週仍在可編輯窗內——
+// 後端 editable_window_ok 只擋未來，過去週恆可編）。使用者可用「回到本週／下一週」前進。
+let weekStart = shiftWeek(thisWeekStart(), -1);
 let people = null;                  // people 快取（學習庫 / 依人回溯共用）
 let learn = { q: '', username: '', limit: 20, offset: 0, items: [], total: 0 };
 let personSel = '';
@@ -340,6 +349,7 @@ function renderWeek(mine, week) {
                 <div class="blk">
                     <h4>${label}</h4>
                     <textarea id="ta-${k}" placeholder="一行一條" ${mine.editable ? '' : 'disabled'}>${esc(itemsToLines(mine[k]))}</textarea>
+                    <div class="paste-preview" id="pv-${k}"></div>
                 </div>`).join('')}
             <div class="save-row">
                 ${mine.editable
@@ -363,6 +373,15 @@ function renderWeek(mine, week) {
     if (today) today.onclick = () => { weekStart = thisWeekStart(); loadWeek(); };
     const save = $('btn-save');
     if (save) save.onclick = saveMine;
+    // 貼圖即時預覽：每個欄位下方縮圖列，載入時渲染既有貼圖、編輯／貼上時即時更新
+    // （paste-image.js 上傳完成會 dispatch 'input'，縮圖隨 token 落定即現）。
+    for (const [k] of BLOCKS) {
+        const ta = $('ta-' + k), pv = $('pv-' + k);
+        if (!ta || !pv) continue;
+        const upd = () => { pv.innerHTML = pasteThumbs(ta.value); };
+        ta.addEventListener('input', upd);
+        upd();
+    }
     if (flashMsg) { flash(flashMsg); flashMsg = ''; }
 }
 
