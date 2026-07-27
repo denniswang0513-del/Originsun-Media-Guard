@@ -161,10 +161,22 @@ async function initGoogle() {
     } catch (e) { console.warn("[GIS] init failed", e); }
 }
 
+function _ensureCss(href) {
+    if (document.querySelector('link[data-wa-css="' + href + '"]')) return;
+    const l = document.createElement("link");
+    l.rel = "stylesheet"; l.href = href; l.dataset.waCss = href;
+    document.head.appendChild(l);
+}
+
 let _tabLoaded = false;
 async function _loadTab() {
     if (_tabLoaded) return;
     _tabLoaded = true;
+    // 官網管理 Tab + 子視圖依賴全域樣式表（.website-nav-btn 在 style.css、子視圖用 crm.css）。
+    // 登入卡不需要它們（且 style.css 的 body 深色會蓋掉登入卡）→ 登入通過、載入 Tab 前才注入，
+    // 保持登入頁乾淨；index.html 平常就是靠這兩支撐起官網管理 Tab 的版面。
+    _ensureCss("/style.css");
+    _ensureCss("/tabs/crm/crm.css");
     const host = $("wa-host");
     try {
         host.innerHTML = await (await fetch("/tabs/website/website.html")).text();
