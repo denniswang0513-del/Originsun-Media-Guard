@@ -7,7 +7,8 @@
  *
  * 結構鐵則（違反=推翻已定決策，見 doc）：
  *  - hows 標籤全域統一，不隨視角改（alt_label 只是投影片版說法，預設不顯示）
- *  - 拍什麼欄沒有 prompts 是常態，placeholder 留空不編造
+ *  - 「四個方向」的提問＝拍什麼欄四格的提示問句（owner 2026-07-28 確認），
+ *    不是矩陣之外的獨立區塊 — 擬腳本的思考就發生在拍什麼欄裡
  *  - premises 有 kind（psychology/decision）且張數不固定
  *  - 沒有 include/exclude、沒有完成度檢核 — 空白格是合法狀態
  */
@@ -21,8 +22,6 @@ export const PLAN_TEMPLATES = {
         theme_label: 'THEME',
         theme_placeholder: '例：六歲小孩去溪裡玩紙船／登山總動員（10歲）— 建議帶上年齡',
         hows_label: '四個提問',
-        directions_label: '擬腳本｜四個方向',
-        directions_lead: '每一個都不是取捨，是這個方向需要想清楚的問題 —— 這些答案，會形成這個節目的樣貌。做法回到節目的特性。',
         hows: [
             { key: 'fit',       label: '找到合適的兒童', alt_label: '介紹合適的兒童', hint: '選角 — 這件事需要誰' },
             { key: 'goal',      label: '建立共同目標',   alt_label: '說明共同目標',   hint: '動機 — 讓他覺得這是「他的」目標' },
@@ -71,6 +70,7 @@ export const PLAN_TEMPLATES = {
                 label: '拍什麼',
                 alt_label: '腳本 × 拍攝',
                 lead: '拍攝內容要怎麼設計？',
+                motto: '每一題都不是取捨，是要想清楚的問題 — 答案匯集，形成這個節目的樣貌',
                 premises: [
                     { kind: 'decision', title: '主角在意什麼？觀眾在意什麼？', body: '兩者不一定一致。當它們衝突時，你站哪一邊？這個選擇會決定整集的語氣。' },
                     { kind: 'decision', title: '百分百真實重要嗎？底限是什麼？', body: '重來、引導、設計，哪些可以做、哪些不能做？先把底限講清楚，現場才不會臨時鬆動。' },
@@ -79,16 +79,15 @@ export const PLAN_TEMPLATES = {
                     { key: 'minutes', label: '影片長度', placeholder: '例：6 mins（選填）' },
                     { key: 'tone', label: '基調', placeholder: '整集的語氣（選填）' },
                 ],
-                // 拍什麼欄本來就沒有提示問句（兩實例證實）— 留空，不編造
-                prompts: {},
+                // 拍什麼欄的提示問句＝擬腳本「四個方向」的提問（owner 確認）。
+                // 每題都不是取捨，是要想清楚的問題 — 答案匯集形成節目的樣貌。
+                prompts: {
+                    fit: '你需要建立這個角色嗎？',
+                    goal: '你需要讓觀眾清晰了解你的目標嗎？',
+                    process: '需要清晰的講解說明流程嗎？',
+                    highlight: '這一集經營的亮點，是觀眾想看、現場小朋友也做得很開心？',
+                },
             },
-        ],
-        // 擬腳本｜四個方向：不是取捨、沒有開關 — 答案匯集形成節目的樣貌
-        directions: [
-            { key: 'fit',       label: '方向一・合適', question: '你需要建立這個角色嗎？' },
-            { key: 'goal',      label: '方向二・目標', question: '你需要讓觀眾清晰了解你的目標嗎？' },
-            { key: 'process',   label: '方向三・流程', question: '需要清晰的講解說明流程嗎？' },
-            { key: 'highlight', label: '方向四・亮點', question: '這一集經營的亮點，是觀眾想看、現場小朋友也做得很開心？' },
         ],
     },
 };

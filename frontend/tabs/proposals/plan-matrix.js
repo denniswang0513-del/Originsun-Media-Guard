@@ -220,9 +220,10 @@ function _renderMatrix(container, { proposalId, plan, tpl, readonly, fetcher, ex
                     </div>`;
                 }).join('')}`).join('')}
         </div>
+        ${(tpl.directions || []).length ? `
         <div class="plc-dirs">
-            <h4>${esc(tpl.directions_label)}</h4>
-            <div class="plc-dirs-sub">${esc(tpl.directions_lead)}</div>
+            <h4>${esc(tpl.directions_label || '')}</h4>
+            <div class="plc-dirs-sub">${esc(tpl.directions_lead || '')}</div>
             ${tpl.directions.map(d => {
                 const e = dirOf(d.key);
                 return `<div class="plc-dir">
@@ -230,7 +231,7 @@ function _renderMatrix(container, { proposalId, plan, tpl, readonly, fetcher, ex
                     <textarea data-kind="direction" data-how="${esc(d.key)}" ${ro}${whoTitle(e)}></textarea>
                 </div>`;
             }).join('')}
-        </div>
+        </div>` : ''}
         ${readonly ? '' : '<div class="plc-save" id="plc-save"></div>'}`;
 
     // textarea 內容用 DOM property 賦值（不走模板內插 — XSS 防線之一）
