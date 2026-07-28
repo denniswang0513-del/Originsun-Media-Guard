@@ -10,25 +10,13 @@
  */
 
 import { esc } from '../website/website-utils.js';
+import { tfetch } from './prop-fetch.js';
 
 const API = '/api/v1/proposals';
 const STATUSES = ['草稿', '已提案', '入圍', '成案', '未成案', '擱置'];
 const PTYPES = ['形象', '廣告', '紀錄片', '政府標案', '社群', '其他'];
 const DECK_EXTS = '.pdf,.ppt,.pptx,.key,.zip';
 const DECK_MAX_BYTES = 50 * 1024 * 1024;
-
-async function tfetch(path, opts = {}) {
-    const token = localStorage.getItem('auth_token');
-    const headers = { 'Accept': 'application/json', ...(token ? { 'Authorization': 'Bearer ' + token } : {}) };
-    if (opts.json !== undefined) {
-        headers['Content-Type'] = 'application/json';
-        opts.body = JSON.stringify(opts.json);
-        delete opts.json;
-    }
-    const r = await fetch(path, { ...opts, headers });
-    if (!r.ok) throw new Error((await r.json().catch(() => ({}))).detail || ('HTTP ' + r.status));
-    return r.json();
-}
 
 let _content = null;
 let _all = [];           // 最近一次「無篩選」清單（供年份下拉選項）
@@ -231,7 +219,11 @@ async function openDetail(pid) {
                 <button id="pd-del" class="prop-btn danger">🗑 刪除</button>
                 <button class="prop-close" title="關閉">✕</button>
             </div>
-            <div class="prop-panel-body">
+            <div class="prop-tabs">
+                <button class="prop-tab active" data-tab="info">📋 基本資料</button>
+                <button class="prop-tab" data-tab="plan">🗂 企劃${prop.has_plan ? '' : '<span class="dot">·未開始</span>'}</button>
+            </div>
+            <div class="prop-panel-body" id="pd-tab-info">
                 <div class="prop-info-col">
                     <div class="prop-card-sec">
                         <h4>📋 基本資訊　${_pill(prop.status)}</h4>
@@ -279,7 +271,36 @@ async function openDetail(pid) {
                     </div>
                 </div>
             </div>
+            <div class="prop-panel-body" id="pd-tab-plan" style="display:none;"></div>
         </div>`);
+
+    // 分頁切換：企劃分頁 lazy import 元件（載入失敗不影響基本資料分頁）。
+    // 重試必須帶 cache-bust query — ES module map 會永久快取 rejected import，
+    // 原路徑重 import 只會拿回同一個 rejected promise（subview-loader.js 同款教訓）。
+    let _planRendered = false;
+    let _planTries = 0;
+    ov.querySelectorAll('.prop-tab').forEach(btn => btn.addEventListener('click', async () => {
+        ov.querySelectorAll('.prop-tab').forEach(b => b.classList.toggle('active', b === btn));
+        const showPlan = btn.dataset.tab === 'plan';
+        ov.querySelector('#pd-tab-info').style.display = showPlan ? 'none' : '';
+        ov.querySelector('#pd-tab-plan').style.display = showPlan ? '' : 'none';
+        if (showPlan && !_planRendered) {
+            _planRendered = true;
+            const host = ov.querySelector('#pd-tab-plan');
+            try {
+                const mod = _planTries++ === 0 ? './plan-matrix.js' : `./plan-matrix.js?t=${Date.now()}`;
+                const { renderPlan } = await import(mod);
+                if (!host.isConnected) return;   // await 期間 overlay 已被關掉
+                renderPlan(host, {
+                    proposalId: prop.id, plan: prop.plan || null, fetcher: tfetch,
+                    onPlanStarted: (p) => { prop.plan = p; btn.querySelector('.dot')?.remove(); },
+                });
+            } catch (e) {
+                _planRendered = false;
+                if (host.isConnected) host.innerHTML = `<div style="color:#888;padding:20px;">企劃元件載入失敗：${esc(e.message || e)}（再點一次分頁重試）</div>`;
+            }
+        }
+    }));
 
     // 狀態下拉：成案→confirm+/convert；未成案→強制填原因；其餘直接 PUT
     ov.querySelector('#pd-status').addEventListener('change', async (e) => {

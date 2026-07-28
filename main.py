@@ -468,6 +468,8 @@ async def _on_startup():
                         ("timesheets", "staff_id", "VARCHAR(32)"),
                         # 影像紀錄：子資料夾名（首次生成後固定，見 media_log._ensure_folder_name）
                         ("project_media_log", "folder_name", "VARCHAR(255)"),
+                        # 提案企劃矩陣（docs/PROPOSAL_PLANNER.md）
+                        ("preprod_proposals", "plan", "JSONB"),
                     ]
                     for tbl, col, coltype in _crm_cols:
                         try:

@@ -89,6 +89,16 @@
         background: none; border: none; color: #888; font-size: 20px; cursor: pointer; line-height: 1;
     }
     #prop-overlay .prop-close:hover { color: #fff; }
+    #prop-overlay .prop-tabs {
+        display: flex; gap: 4px; padding: 8px 18px 0; border-bottom: 1px solid #333;
+    }
+    #prop-overlay .prop-tab {
+        background: none; border: none; border-bottom: 2px solid transparent;
+        color: #888; font-size: 13px; padding: 6px 12px 8px; cursor: pointer;
+    }
+    #prop-overlay .prop-tab:hover { color: #ccc; }
+    #prop-overlay .prop-tab.active { color: #fff; border-bottom-color: #3b82f6; }
+    #prop-overlay .prop-tab .dot { color: #666; font-size: 11px; margin-left: 4px; }
     #prop-overlay .prop-panel-body {
         display: flex; gap: 18px; padding: 16px 18px; overflow-y: auto; flex-wrap: wrap;
     }

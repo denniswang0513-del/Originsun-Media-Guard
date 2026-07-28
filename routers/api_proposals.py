@@ -8,6 +8,7 @@ preprod_plan 模組。DB 三表：preprod_proposals / _references / _proposal_re
 （create_all 自建）。狀態轉「成案 / 未成案」強制 outcome_reason（組織學習欄）。
 """
 
+import json
 import os
 import re
 import shutil
@@ -18,7 +19,7 @@ from typing import Optional
 from fastapi import APIRouter, Body, File, HTTPException, Request, UploadFile  # type: ignore
 
 from core.auth import check_admin_or_module
-from core.schemas import ProposalPayload, ReferencePayload
+from core.schemas import ProposalPayload, ProposalPlanCellPatch, ProposalPlanPayload, ReferencePayload
 
 router = APIRouter(prefix="/api/v1/proposals", tags=["proposals"])
 
@@ -73,7 +74,8 @@ def _check_outcome_reason(new_status: str, reason: str):
         raise HTTPException(status_code=422, detail=f"狀態轉「{new_status}」時 outcome_reason 必填（組織學習欄）")
 
 
-def _prop_dict(p, client_name: str = "", refs_count: int = 0) -> dict:
+def _prop_dict(p, client_name: str = "", refs_count: int = 0, has_plan=None) -> dict:
+    # has_plan 可由呼叫端傳入（清單走 SQL 布林 + defer(plan)，避免整包 JSONB 出庫）
     return {
         "id": p.id,
         "title": p.title,
@@ -92,6 +94,7 @@ def _prop_dict(p, client_name: str = "", refs_count: int = 0) -> dict:
         "created_at": p.created_at.isoformat() if p.created_at else None,
         "updated_at": p.updated_at.isoformat() if p.updated_at else None,
         "refs_count": refs_count,
+        "has_plan": bool(p.plan) if has_plan is None else bool(has_plan),
     }
 
 
@@ -107,9 +110,18 @@ def _ref_dict(r) -> dict:
     }
 
 
-async def _get_proposal_or_404(session, pid: str):
+async def _get_proposal_or_404(session, pid: str, for_update: bool = False):
+    """取提案或 404。for_update=True 時 FOR UPDATE 持列鎖 —
+    逐格 PATCH 是 read-modify-write 整包 JSONB，不持鎖時兩個併發
+    PATCH 後 commit 的會把前者的格子蓋掉。"""
     from db.models import PreprodProposal
-    prop = await session.get(PreprodProposal, pid)
+    if for_update:
+        from sqlalchemy import select
+        prop = (await session.execute(
+            select(PreprodProposal).where(PreprodProposal.id == pid).with_for_update()
+        )).scalar_one_or_none()
+    else:
+        prop = await session.get(PreprodProposal, pid)
     if not prop:
         raise HTTPException(status_code=404, detail="找不到此提案")
     return prop
@@ -260,10 +272,14 @@ async def list_proposals(request: Request, q: str = "", status: str = "",
     factory = _require_factory()
 
     from sqlalchemy import extract, select, func as safunc
+    from sqlalchemy.orm import defer
     from db.models import Client, PreprodProposal, PreprodProposalRef
 
     async with factory() as session:
-        query = (select(PreprodProposal, Client.short_name)
+        # has_plan 用 SQL 布林算、plan 欄 defer — 清單不把整包 JSONB 拖出庫
+        query = (select(PreprodProposal, Client.short_name,
+                        PreprodProposal.plan.isnot(None).label("has_plan"))
+                 .options(defer(PreprodProposal.plan))
                  .outerjoin(Client, Client.id == PreprodProposal.client_id)
                  .order_by(PreprodProposal.updated_at.desc()))
         if status:
@@ -287,7 +303,8 @@ async def list_proposals(request: Request, q: str = "", status: str = "",
             .group_by(PreprodProposalRef.proposal_id))).all())
 
     return {"proposals": [
-        _prop_dict(p, cname or "", ref_counts.get(p.id, 0)) for p, cname in rows
+        _prop_dict(p, cname or "", ref_counts.get(p.id, 0), has_plan=hp)
+        for p, cname, hp in rows
     ]}
 
 
@@ -350,6 +367,7 @@ async def get_proposal(pid: str, request: Request):
     d = _prop_dict(prop, client_name, refs_count=len(refs))
     d["project_name"] = project_name
     d["references"] = [_ref_dict(r) for r in refs]
+    d["plan"] = prop.plan   # 企劃矩陣全文（None = 尚未開始）
     return {"proposal": d}
 
 
@@ -378,8 +396,173 @@ async def update_proposal(pid: str, req: ProposalPayload, request: Request):
             prop.pitch_date = pitch_date
         prop.updated_at = datetime.now(timezone.utc)
         await session.commit()
-        await session.refresh(prop)
+        # 不 refresh：expire_on_commit=False，屬性仍有效 — 省一次整列（含 plan JSONB）重讀
     return {"status": "ok", "proposal": _prop_dict(prop)}
+
+
+# ── 企劃矩陣（docs/PROPOSAL_PLANNER.md §6.3 / §7.4） ──────────
+# 共編正確性：日常輸入=逐格 PATCH（FOR UPDATE 持鎖 + 樂觀鎖 409）；
+# PUT 整份只用於 開始/載入範例/清空；updated_at 一律伺服器蓋章。
+
+_PLAN_KEY_RE = re.compile(r"^[a-z][a-z0-9_]{0,31}$")
+_PLAN_MAX_BYTES = 200 * 1024        # 整份上限（PUT）
+_PLAN_CELL_MAX_BYTES = 20 * 1024    # 單格上限（PATCH）— 一格貼整篇腳本就該擋
+
+
+def _plan_normalize_leaf(v) -> dict:
+    """把 {answer,...} 或裸字串統一成完整葉節點格式。"""
+    if isinstance(v, dict):
+        return {"answer": str(v.get("answer") or ""),
+                "updated_at": v.get("updated_at"), "updated_by": v.get("updated_by") or ""}
+    return {"answer": str(v or ""), "updated_at": None, "updated_by": ""}
+
+
+def _raise_plan_conflict(answer: str, updated_at, updated_by: str):
+    """樂觀鎖撞牆 → 409 + 伺服器現值（前端並列兩版本讓人決定，不自動合併）。"""
+    raise HTTPException(status_code=409, detail={
+        "reason": "conflict", "server_answer": answer,
+        "updated_at": updated_at, "updated_by": updated_by})
+
+
+@router.put("/{pid}/plan")
+async def put_plan(pid: str, req: ProposalPlanPayload, request: Request):
+    """整份寫入 — 僅供「開始企劃 / 載入範例 / 清空(clear=true)」。
+    只動 plan 欄，不碰提案其他欄位（避開整包 model_dump 洗欄地雷）。"""
+    payload = _check_auth(request)
+    factory = _require_factory()
+    user = payload.get("username") or ""
+    now_iso = datetime.now(timezone.utc).isoformat()
+
+    def _stamp(v) -> dict:
+        """收 {answer,...} 或裸字串，一律以伺服器時間戳重新蓋章。"""
+        answer = v.get("answer") if isinstance(v, dict) else v
+        return {"answer": str(answer or ""), "updated_at": now_iso, "updated_by": user}
+
+    async with factory() as session:
+        prop = await _get_proposal_or_404(session, pid, for_update=True)
+        if req.clear:
+            prop.plan = None
+        else:
+            if not (req.template_id and req.template_version):
+                raise HTTPException(status_code=422, detail="template_id / template_version 必填")
+            new_plan = {
+                "template_id": req.template_id,
+                "template_version": req.template_version,
+                "theme": str(req.theme or ""),
+                "theme_updated_at": now_iso, "theme_updated_by": user,
+                "cells": {l: {h: _stamp(v) for h, v in (hows or {}).items()}
+                          for l, hows in (req.cells or {}).items()},
+                "directions": {h: _stamp(v) for h, v in (req.directions or {}).items()},
+                "field_values": req.field_values or {},
+            }
+            # encode 量位元組（len(str) 量的是字元 — CJK 下實際 payload 會是 3 倍）
+            if len(json.dumps(new_plan, ensure_ascii=False).encode("utf-8")) > _PLAN_MAX_BYTES:
+                raise HTTPException(status_code=413, detail="企劃內容超過 200KB 上限")
+            prop.plan = new_plan
+        prop.updated_at = datetime.now(timezone.utc)
+        await session.commit()
+        plan = prop.plan
+    return {"status": "ok", "plan": plan}
+
+
+@router.patch("/{pid}/plan/cell")
+async def patch_plan_cell(pid: str, req: ProposalPlanCellPatch, request: Request):
+    """逐格寫入（共編的日常輸入單位）。
+    kind: cell(lens+how) / direction(how) / theme / field(lens+field)。
+    cell/direction/theme 帶 base_updated_at 做樂觀鎖 — 伺服器較新 → 409 + 現值，
+    前端並列兩版本讓人決定，不自動合併。field（分鐘數/基調）last-write-wins。"""
+    payload = _check_auth(request)
+    factory = _require_factory()
+    user = payload.get("username") or ""
+    now_iso = datetime.now(timezone.utc).isoformat()
+
+    if len((req.answer or "").encode("utf-8")) > _PLAN_CELL_MAX_BYTES:
+        raise HTTPException(status_code=413, detail="單格內容超過 20KB 上限")
+
+    async with factory() as session:
+        prop = await _get_proposal_or_404(session, pid, for_update=True)
+        if not prop.plan:
+            raise HTTPException(status_code=409, detail="此提案尚未開始企劃（先 PUT /plan）")
+        # 只淺拷路徑上的容器（O(路徑) 而非 O(全文深拷）；頂層換新物件即觸發
+        # JSONB 變更偵測，未動的兄弟節點共享參照無妨 — 本函式不 mutate 它們
+        plan = dict(prop.plan)
+
+        def _conflict_or_write(container: dict, key: str):
+            cur = _plan_normalize_leaf(container.get(key) or "")
+            if (req.base_updated_at is not None and cur["updated_at"]
+                    and cur["updated_at"] > req.base_updated_at):
+                _raise_plan_conflict(cur["answer"], cur["updated_at"], cur["updated_by"])
+            container[key] = {"answer": req.answer, "updated_at": now_iso, "updated_by": user}
+
+        if req.kind == "cell":
+            if not (req.lens and req.how and _PLAN_KEY_RE.match(req.lens) and _PLAN_KEY_RE.match(req.how)):
+                raise HTTPException(status_code=422, detail="kind=cell 需合法 lens + how")
+            cells = plan["cells"] = dict(plan.get("cells") or {})
+            cells[req.lens] = dict(cells.get(req.lens) or {})
+            _conflict_or_write(cells[req.lens], req.how)
+        elif req.kind == "direction":
+            if not (req.how and _PLAN_KEY_RE.match(req.how)):
+                raise HTTPException(status_code=422, detail="kind=direction 需合法 how")
+            dirs = plan["directions"] = dict(plan.get("directions") or {})
+            _conflict_or_write(dirs, req.how)
+        elif req.kind == "theme":
+            cur_at = plan.get("theme_updated_at")
+            if req.base_updated_at is not None and cur_at and cur_at > req.base_updated_at:
+                _raise_plan_conflict(plan.get("theme") or "", cur_at, plan.get("theme_updated_by") or "")
+            plan["theme"] = req.answer
+            plan["theme_updated_at"], plan["theme_updated_by"] = now_iso, user
+        elif req.kind == "field":
+            if not (req.lens and req.field and _PLAN_KEY_RE.match(req.lens) and _PLAN_KEY_RE.match(req.field)):
+                raise HTTPException(status_code=422, detail="kind=field 需合法 lens + field")
+            fv = plan["field_values"] = dict(plan.get("field_values") or {})
+            fv[req.lens] = dict(fv.get(req.lens) or {})
+            fv[req.lens][req.field] = req.answer
+        else:
+            raise HTTPException(status_code=422, detail="kind 須為 cell/direction/theme/field")
+
+        prop.plan = plan
+        prop.updated_at = datetime.now(timezone.utc)
+        await session.commit()
+    return {"status": "ok", "updated_at": now_iso}
+
+
+@router.get("/{pid}/plan/meta")
+async def get_plan_meta(pid: str, request: Request, since: str = ""):
+    """輕量輪詢端點：只回各格 updated_at/by，不帶全文（§7.4 的 30s 輪詢打這支）。
+    帶 ?since=<上次看到的提案 updated_at> 可短路 — 沒動過就只花一次純量查詢，
+    不 detoast 整包 JSONB。"""
+    _check_auth(request)
+    factory = _require_factory()
+    from sqlalchemy import select
+    from db.models import PreprodProposal
+    async with factory() as session:
+        if since:
+            cur = (await session.execute(
+                select(PreprodProposal.updated_at).where(PreprodProposal.id == pid)
+            )).scalar_one_or_none()
+            if cur is None:
+                raise HTTPException(status_code=404, detail="找不到此提案")
+            if cur.isoformat() == since:
+                return {"unchanged": True, "updated_at": since}
+        prop = await _get_proposal_or_404(session, pid)
+        prop_updated_at = prop.updated_at.isoformat() if prop.updated_at else None
+        plan = prop.plan or {}
+
+    def _meta(section):
+        out = {}
+        for k, v in (section or {}).items():
+            if isinstance(v, dict) and "answer" not in v:
+                out[k] = _meta(v)
+            else:
+                leaf = _plan_normalize_leaf(v)
+                out[k] = {"updated_at": leaf["updated_at"], "updated_by": leaf["updated_by"]}
+        return out
+
+    return {"has_plan": bool(plan),
+            "updated_at": prop_updated_at,   # 下次輪詢帶回 ?since= 用
+            "theme_updated_at": plan.get("theme_updated_at"),
+            "cells": _meta(plan.get("cells")),
+            "directions": _meta(plan.get("directions"))}
 
 
 @router.delete("/{pid}")

@@ -880,6 +880,7 @@ class PreprodProposal(Base):
     deck_url = Column(String(512), nullable=True)                # /uploads/proposals/{pid}/{fname}（簡報原檔）
     outcome_reason = Column(Text, nullable=True)                 # 成案/未成案必填原因 — 組織學習欄
     tags = Column(JSONB, nullable=True)                          # list[str]
+    plan = Column(JSONB, nullable=True)                          # 企劃矩陣（docs/PROPOSAL_PLANNER.md §3；逐格帶 updated_at/by）
     created_by = Column(String(64), nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now())

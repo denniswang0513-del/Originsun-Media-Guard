@@ -838,6 +838,28 @@ class ReferencePayload(BaseModel):
     thumb_url: Optional[str] = None
 
 
+class ProposalPlanPayload(BaseModel):
+    """企劃矩陣整份寫入（docs/PROPOSAL_PLANNER.md §6.3）— 僅用於
+    「開始企劃 / 載入範例 / 清空」；日常輸入走逐格 PATCH。"""
+    clear: bool = False                   # true = 清空整份 plan（其餘欄位忽略）
+    template_id: Optional[str] = None
+    template_version: Optional[str] = None
+    theme: Optional[str] = ""
+    cells: Optional[dict] = None          # {lens: {how: {answer, ...}}}
+    directions: Optional[dict] = None     # {how: {answer, ...}}
+    field_values: Optional[dict] = None   # {lens: {field: str}}
+
+
+class ProposalPlanCellPatch(BaseModel):
+    """企劃矩陣逐格寫入 — 共編下的日常輸入單位（樂觀鎖見端點）。"""
+    kind: str                             # cell / direction / theme / field
+    lens: Optional[str] = None            # kind=cell/field 必填
+    how: Optional[str] = None             # kind=cell/direction 必填
+    field: Optional[str] = None           # kind=field 必填
+    answer: str = ""
+    base_updated_at: Optional[str] = None  # 該格載入時的時間戳；伺服器較新→409
+
+
 class IntelSourcePayload(BaseModel):
     """產業情報來源（P-c）新增/更新 — 全欄 Optional 配合部分更新
     （create 時 url 開頭 http 由端點檢查）。"""
