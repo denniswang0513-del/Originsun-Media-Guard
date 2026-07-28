@@ -858,6 +858,7 @@ class ProposalPlanCellPatch(BaseModel):
     field: Optional[str] = None           # kind=field 必填
     answer: str = ""
     base_updated_at: Optional[str] = None  # 該格載入時的時間戳；伺服器較新→409
+    guest_name: Optional[str] = None       # 公開共編（token 路徑）的署名；authed 路徑忽略
 
 
 class IntelSourcePayload(BaseModel):

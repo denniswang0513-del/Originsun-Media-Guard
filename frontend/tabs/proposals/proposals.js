@@ -292,7 +292,7 @@ async function openDetail(pid) {
                 const { renderPlan } = await import(mod);
                 if (!host.isConnected) return;   // await 期間 overlay 已被關掉
                 renderPlan(host, {
-                    proposalId: prop.id, plan: prop.plan || null, fetcher: tfetch,
+                    proposalId: prop.id, plan: prop.plan || null, fetcher: tfetch, canShare: true,
                     onPlanStarted: (p) => { prop.plan = p; btn.querySelector('.dot')?.remove(); },
                 });
             } catch (e) {

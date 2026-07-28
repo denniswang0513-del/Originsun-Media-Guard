@@ -100,6 +100,19 @@ html.plan-theme-light .plc { /* 官網白底（獨立網址） */
   margin-bottom: 14px; font-size: 12px; display: flex; justify-content: space-between; align-items: center; }
 .plc .plc-banner button { cursor: pointer; background: none; border: 1px solid var(--plc-line);
   border-radius: 2px; color: var(--plc-ink); padding: 3px 10px; font-size: 11px; }
+.plc .plc-toolbar { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; margin-bottom: 12px; }
+.plc .plc-tb-label { font-size: 11px; color: var(--plc-sub); }
+.plc .plc-tb-btn { cursor: pointer; background: var(--plc-card); border: 1px solid var(--plc-line);
+  border-radius: 2px; color: var(--plc-ink); padding: 4px 10px; font-size: 11px; max-width: 220px;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.plc .plc-tb-btn:hover { border-color: var(--plc-accent); color: var(--plc-accent); }
+.plc .plc-tb-btn.danger:hover { border-color: #e05252; color: #e05252; }
+.plc .plc-share { border: 1px solid var(--plc-line); border-radius: 2px; padding: 10px 12px;
+  margin-bottom: 12px; background: var(--plc-card); }
+.plc .plc-share .sh-hint { font-size: 11.5px; color: var(--plc-sub); margin-bottom: 8px; line-height: 1.7; }
+.plc .plc-share .sh-row { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
+.plc .plc-share .sh-link { flex: 1; min-width: 220px; background: var(--plc-cell); color: var(--plc-ink);
+  border: 1px solid var(--plc-line); border-radius: 2px; padding: 5px 8px; font-size: 11.5px; }
 @media (max-width: 900px) { /* 窄螢幕：縱向堆疊（排版退化，非流程限制） */
   .plc .plc-grid { grid-template-columns: 1fr; }
   .plc .plc-rowhead { flex-direction: row; gap: 10px; align-items: baseline; }
@@ -116,21 +129,42 @@ function _injectStyle() {
 }
 
 // ── 主入口 ───────────────────────────────────────────────
+// opts: { proposalId, plan, fetcher?, onPlanStarted?, canShare?, getGuestName?,
+//         endpoints?: {cell, meta, share}, refetch?: async()=>plan }
+// 公開共編頁傳自己的 endpoints（/shared/{token}/...）+ refetch；登入路徑用預設。
 export function renderPlan(container, opts) {
     _injectStyle();
-    const { proposalId, plan, readonly = false, fetcher = tfetch, onPlanStarted = null } = opts;
+    opts = { fetcher: tfetch, ...opts };
+    if (!opts.endpoints) {
+        opts.endpoints = {
+            cell: `${API}/${opts.proposalId}/plan/cell`,
+            meta: `${API}/${opts.proposalId}/plan/meta`,
+            share: `${API}/${opts.proposalId}/plan/share`,
+        };
+    }
+    if (!opts.refetch) {
+        opts.refetch = async () => (await opts.fetcher(`${API}/${opts.proposalId}`)).proposal.plan;
+    }
     container.classList.add('plc');
-    if (!plan) { _renderStart(container, { proposalId, fetcher, onPlanStarted }); return; }
-    const tpl = PLAN_TEMPLATES[plan.template_id];
+    if (!opts.plan) { _renderStart(container, opts); return; }
+    const tpl = PLAN_TEMPLATES[opts.plan.template_id];
     if (!tpl) {
-        container.innerHTML = `<div class="plc-start"><div class="ss">未知的方法論模板：${esc(plan.template_id)}（可能是新版程式才有的模板）</div></div>`;
+        container.innerHTML = `<div class="plc-start"><div class="ss">未知的方法論模板：${esc(opts.plan.template_id)}（可能是新版程式才有的模板）</div></div>`;
         return;
     }
-    _renderMatrix(container, { proposalId, plan, tpl, readonly, fetcher });
+    _renderMatrix(container, opts, tpl, {});
+}
+
+// ── 範例唯讀檢視（起始畫面與編輯工具列共用） ──────────────
+function _openExample(container, opts, exIdx, backFn) {
+    const ex = PLAN_EXAMPLES[exIdx];
+    _renderMatrix(container, { ...opts, plan: _exampleToPlan(ex) },
+                  PLAN_TEMPLATES[ex.template_id], { readonly: true, exampleBack: backFn });
 }
 
 // ── 未開始：方法論按鈕列 + 範例 ──────────────────────────
-function _renderStart(container, { proposalId, fetcher, onPlanStarted }) {
+function _renderStart(container, opts) {
+    const { proposalId, fetcher, onPlanStarted } = opts;
     container.innerHTML = `
         <div class="plc-start">
             <div class="st">用一套方法論開始企劃</div>
@@ -150,17 +184,11 @@ function _renderStart(container, { proposalId, fetcher, onPlanStarted }) {
                 theme: '', cells: {}, directions: {}, field_values: {},
             } });
             if (onPlanStarted) onPlanStarted(d.plan);
-            renderPlan(container, { proposalId, plan: d.plan, fetcher, onPlanStarted });
+            renderPlan(container, { ...opts, plan: d.plan });
         } catch (e) { alert('開始企劃失敗：' + (e.message || e)); btn.disabled = false; }
     }));
     container.querySelectorAll('button[data-ex]').forEach(btn => btn.addEventListener('click', () => {
-        const ex = PLAN_EXAMPLES[+btn.dataset.ex];
-        _renderMatrix(container, {
-            proposalId, fetcher,
-            plan: _exampleToPlan(ex), tpl: PLAN_TEMPLATES[ex.template_id],
-            readonly: true,
-            exampleBack: () => _renderStart(container, { proposalId, fetcher, onPlanStarted }),
-        });
+        _openExample(container, opts, +btn.dataset.ex, () => _renderStart(container, opts));
     }));
 }
 
@@ -176,7 +204,8 @@ function _exampleToPlan(ex) {
 }
 
 // ── 矩陣本體 ─────────────────────────────────────────────
-function _renderMatrix(container, { proposalId, plan, tpl, readonly, fetcher, exampleBack = null }) {
+function _renderMatrix(container, opts, tpl, { readonly = false, exampleBack = null }) {
+    const { plan } = opts;
     const cellOf = (lens, how) => (plan.cells?.[lens]?.[how]) || { answer: '', updated_at: null, updated_by: '' };
     const dirOf = (how) => (plan.directions?.[how]) || { answer: '', updated_at: null, updated_by: '' };
     const fieldOf = (lens, f) => (plan.field_values?.[lens]?.[f]) || '';
@@ -184,7 +213,15 @@ function _renderMatrix(container, { proposalId, plan, tpl, readonly, fetcher, ex
     const whoTitle = (e) => e.updated_by ? ` title="最後編輯：${esc(e.updated_by)}"` : '';
 
     container.innerHTML = `
-        ${readonly ? `<div class="plc-banner"><span>📖 範例（唯讀，不會存檔）</span>${exampleBack ? '<button id="plc-ex-back">← 返回</button>' : ''}</div>` : ''}
+        ${readonly ? `<div class="plc-banner"><span>📖 範例（唯讀，不會存檔）</span>${exampleBack ? '<button id="plc-ex-back">← 返回</button>' : ''}</div>` : `
+        <div class="plc-toolbar">
+            <span class="plc-tb-label">📖 參考範例：</span>
+            ${PLAN_EXAMPLES.map((ex, i) =>
+                `<button class="plc-tb-btn" data-ex="${i}" title="${esc(ex.label)}">${esc(ex.theme)}</button>`).join('')}
+            <span style="flex:1"></span>
+            ${opts.canShare ? `<button class="plc-tb-btn" id="plc-share-btn">${plan.share_token ? '🔗 公開共編中' : '🔒 未公開'}</button>` : ''}
+        </div>
+        ${opts.canShare ? '<div id="plc-share-panel" style="display:none;"></div>' : ''}`}
         <div class="plc-theme">
             <label>${esc(tpl.theme_label)}</label>
             <input id="plc-theme" value="${esc(plan.theme || '')}" placeholder="${esc(tpl.theme_placeholder)}" ${ro}>
@@ -242,11 +279,73 @@ function _renderMatrix(container, { proposalId, plan, tpl, readonly, fetcher, ex
         container.querySelector('#plc-ex-back')?.addEventListener('click', exampleBack);
         return;
     }
-    _wireEditing(container, { proposalId, plan, fetcher });
+    // 工具列：範例（唯讀檢視，返回時 refetch 保住共編期間別人的更新）+ 公開共編開關
+    container.querySelectorAll('.plc-toolbar [data-ex]').forEach(btn => btn.addEventListener('click', () => {
+        _openExample(container, opts, +btn.dataset.ex, async () => {
+            let fresh = plan;
+            try { fresh = await opts.refetch(); } catch { /* 離線時退回記憶中的 plan */ }
+            renderPlan(container, { ...opts, plan: fresh });
+        });
+    }));
+    if (opts.canShare) _wireSharePanel(container, opts);
+    _wireEditing(container, opts);
+}
+
+// ── 公開共編開關（開放=鑄 token 連結；關閉=撤銷、連結立即失效） ──
+function _wireSharePanel(container, opts) {
+    const btn = container.querySelector('#plc-share-btn');
+    const panel = container.querySelector('#plc-share-panel');
+    if (!btn || !panel) return;
+    const shareUrl = (tok) => `${location.origin}/proposal-plan.html?t=${encodeURIComponent(tok)}`;
+
+    function paint() {
+        const tok = opts.plan.share_token || '';
+        btn.textContent = tok ? '🔗 公開共編中' : '🔒 未公開';
+        if (panel.style.display === 'none') return;
+        panel.innerHTML = tok ? `
+            <div class="plc-share">
+                <div class="sh-hint">已開放：拿到連結的人<b>不用登入</b>即可共同編輯這份企劃。停用後連結立即失效。</div>
+                <div class="sh-row">
+                    <input class="sh-link" readonly>
+                    <button class="plc-tb-btn" data-act="copy">複製連結</button>
+                    <button class="plc-tb-btn danger" data-act="off">停用共編</button>
+                </div>
+            </div>` : `
+            <div class="plc-share">
+                <div class="sh-hint">目前僅限登入帳號編輯。開放後會產生一條公開連結，拿到的人<b>不用登入</b>即可共同編輯。</div>
+                <div class="sh-row"><button class="plc-tb-btn" data-act="on">開放公開共編</button></div>
+            </div>`;
+        if (tok) panel.querySelector('.sh-link').value = shareUrl(tok);   // DOM property — 不進模板字串
+        panel.querySelector('[data-act="copy"]')?.addEventListener('click', async (e) => {
+            try { await navigator.clipboard.writeText(shareUrl(opts.plan.share_token)); e.target.textContent = '已複製 ✓'; }
+            catch { panel.querySelector('.sh-link').select(); document.execCommand('copy'); e.target.textContent = '已複製 ✓'; }
+        });
+        panel.querySelector('[data-act="on"]')?.addEventListener('click', async () => {
+            try {
+                const d = await opts.fetcher(opts.endpoints.share, { method: 'POST' });
+                opts.plan.share_token = d.token;
+                paint();
+            } catch (e) { alert('開放失敗：' + (e.message || e)); }
+        });
+        panel.querySelector('[data-act="off"]')?.addEventListener('click', async () => {
+            if (!confirm('停用後，先前分享出去的連結會立即失效。確定停用？')) return;
+            try {
+                await opts.fetcher(opts.endpoints.share, { method: 'DELETE' });
+                delete opts.plan.share_token;
+                paint();
+            } catch (e) { alert('停用失敗：' + (e.message || e)); }
+        });
+    }
+    btn.addEventListener('click', () => {
+        panel.style.display = panel.style.display === 'none' ? '' : 'none';
+        paint();
+    });
+    paint();
 }
 
 // ── 編輯 + 儲存（debounce 800ms + blur flush + dirty-check + 409 並列） ──
-function _wireEditing(container, { proposalId, plan, fetcher }) {
+function _wireEditing(container, opts) {
+    const { plan, fetcher, endpoints, getGuestName } = opts;
     const saveEl = container.querySelector('#plc-save');   // 非 readonly 必存在
     const timers = new Map();       // el → debounce timer
     const base = new Map();         // el → 該格載入時的 updated_at（樂觀鎖基準）
@@ -267,9 +366,10 @@ function _wireEditing(container, { proposalId, plan, fetcher }) {
         if (el.value === el._plcSaved) return;   // 內容沒變：不發請求、不重蓋時間戳
         const body = { kind: el.dataset.kind, answer: el.value,
                        lens: el.dataset.lens || null, how: el.dataset.how || null,
-                       field: el.dataset.field || null, base_updated_at: base.get(el) };
+                       field: el.dataset.field || null, base_updated_at: base.get(el),
+                       guest_name: getGuestName ? (getGuestName() || null) : null };
         try {
-            const d = await fetcher(`${API}/${proposalId}/plan/cell`, { method: 'PATCH', json: body });
+            const d = await fetcher(endpoints.cell, { method: 'PATCH', json: body });
             base.set(el, d.updated_at);
             el._plcSaved = body.answer;
             el.parentElement.querySelector('.plc-conflict')?.remove();
@@ -293,7 +393,7 @@ function _wireEditing(container, { proposalId, plan, fetcher }) {
         if (!container.isConnected) { clearInterval(poll); return; }   // overlay 已關 → 自停
         try {
             const q = since ? `?since=${encodeURIComponent(since)}` : '';
-            const m = await fetcher(`${API}/${proposalId}/plan/meta${q}`);
+            const m = await fetcher(endpoints.meta + q);
             if (m.unchanged) return;
             since = m.updated_at;
             const foreign = [...base.keys()].some(el => {
@@ -303,12 +403,12 @@ function _wireEditing(container, { proposalId, plan, fetcher }) {
                     : { updated_at: m.theme_updated_at };
                 return leaf?.updated_at && leaf.updated_at !== base.get(el);
             });
-            if (foreign) _showRefreshBanner(container, { proposalId, fetcher });
+            if (foreign) _showRefreshBanner(container, opts);
         } catch { /* 輪詢失敗靜默，下一輪再試 */ }
     }, 30000);
 }
 
-function _showRefreshBanner(container, { proposalId, fetcher }) {
+function _showRefreshBanner(container, opts) {
     if (container.querySelector('.plc-refresh')) return;
     const bar = document.createElement('div');
     bar.className = 'plc-banner plc-refresh';
@@ -316,9 +416,9 @@ function _showRefreshBanner(container, { proposalId, fetcher }) {
     bar.querySelector('button').addEventListener('click', async () => {
         const dirty = [...container.querySelectorAll('[data-kind]')].some(el => el.value !== el._plcSaved);
         if (dirty && !confirm('你有未儲存的修改，重新載入會丟失，繼續？')) return;
-        const d = await fetcher(`${API}/${proposalId}`);
+        const fresh = await opts.refetch();
         container.innerHTML = '';
-        renderPlan(container, { proposalId, plan: d.proposal.plan, fetcher });
+        renderPlan(container, { ...opts, plan: fresh });
     });
     container.prepend(bar);
 }

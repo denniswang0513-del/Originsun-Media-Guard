@@ -130,8 +130,12 @@
   <!-- 企劃 -->
   <div id="plan-view" style="display:none;">
     <div class="plan-head">
-      <button class="back" onclick="location.href = location.pathname">← 清單</button>
+      <button class="back" id="plan-back" onclick="location.href = location.pathname">← 清單</button>
       <h1 id="plan-title"></h1>
+      <span id="guest-bar" style="display:none;align-items:center;gap:8px;">
+        <label style="font-size:11px;letter-spacing:.1em;color:var(--sub);white-space:nowrap;">你的名字</label>
+        <input id="guest-name" placeholder="共編署名（選填）" style="width:140px;border:1px solid var(--line);border-radius:2px;padding:5px 8px;font-size:12px;color:var(--ink);outline:none;">
+      </span>
     </div>
     <div id="plan-host"><div class="state-msg">載入中…</div></div>
   </div>
@@ -228,7 +232,7 @@ async function _loadList() {
     }
 }
 
-// ── 企劃 ─────────────────────────────────────────────────
+// ── 企劃（登入模式） ─────────────────────────────────────
 async function _loadPlan(pid) {
     _show("plan-view");
     const host = $("plan-host");
@@ -240,13 +244,47 @@ async function _loadPlan(pid) {
         document.title = prop.title + "｜提案企劃｜ORIGINSUN";
         host.innerHTML = "";
         const { renderPlan } = await import("/tabs/proposals/plan-matrix.js");
-        renderPlan(host, { proposalId: prop.id, plan: prop.plan || null });
+        renderPlan(host, { proposalId: prop.id, plan: prop.plan || null, canShare: true });
     } catch (e) {
         host.innerHTML = '<div class="state-msg" style="color:var(--red);">企劃載入失敗：' + escText((e && e.message) || e) + "</div>";
     }
 }
 
+// ── 企劃（公開共編模式，?t=<token>，免登入） ─────────────
+async function _loadSharedPlan(shareTok) {
+    _show("plan-view");
+    $("btn-logout").style.display = "none";
+    $("plan-back").style.display = "none";           // 公開訪客沒有清單可回
+    const bar = $("guest-bar");
+    bar.style.display = "inline-flex";
+    const nameInput = $("guest-name");
+    nameInput.value = localStorage.getItem("plan_guest_name") || "";
+    nameInput.addEventListener("change", () => localStorage.setItem("plan_guest_name", nameInput.value.trim()));
+    const host = $("plan-host");
+    const base = "/api/v1/proposals/shared/" + encodeURIComponent(shareTok);
+    try {
+        const r = await fetch(base);
+        if (r.status === 401) { host.innerHTML = '<div class="state-msg">這條共編連結已停用或失效。<br>請向企劃負責人索取新連結。</div>'; return; }
+        if (!r.ok) throw new Error("HTTP " + r.status);
+        const d = await r.json();
+        $("plan-title").textContent = d.title;
+        document.title = d.title + "｜提案企劃（共編）｜ORIGINSUN";
+        host.innerHTML = "";
+        const { renderPlan } = await import("/tabs/proposals/plan-matrix.js");
+        renderPlan(host, {
+            proposalId: "shared", plan: d.plan, canShare: false,
+            getGuestName: () => nameInput.value.trim(),
+            endpoints: { cell: base + "/cell", meta: base + "/meta" },
+            refetch: async () => (await (await fetch(base)).json()).plan,
+        });
+    } catch (e) {
+        host.innerHTML = '<div class="state-msg" style="color:var(--red);">載入失敗：' + escText((e && e.message) || e) + "</div>";
+    }
+}
+
 async function boot() {
+    const shareTok = new URLSearchParams(location.search).get("t");
+    if (shareTok) { _loadSharedPlan(shareTok); return; }   // 公開模式：完全不走登入
     if (!localStorage.getItem(TOKEN_KEY)) { showLogin(""); return; }
     let me;
     try {

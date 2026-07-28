@@ -458,6 +458,8 @@ async def put_plan(pid: str, req: ProposalPlanPayload, request: Request):
             # encode 量位元組（len(str) 量的是字元 — CJK 下實際 payload 會是 3 倍）
             if len(json.dumps(new_plan, ensure_ascii=False).encode("utf-8")) > _PLAN_MAX_BYTES:
                 raise HTTPException(status_code=413, detail="企劃內容超過 200KB 上限")
+            if (prop.plan or {}).get("share_token"):
+                new_plan["share_token"] = prop.plan["share_token"]   # 整份覆寫不吊銷分享連結
             prop.plan = new_plan
         prop.updated_at = datetime.now(timezone.utc)
         await session.commit()
@@ -465,61 +467,84 @@ async def put_plan(pid: str, req: ProposalPlanPayload, request: Request):
     return {"status": "ok", "plan": plan}
 
 
-@router.patch("/{pid}/plan/cell")
-async def patch_plan_cell(pid: str, req: ProposalPlanCellPatch, request: Request):
-    """逐格寫入（共編的日常輸入單位）。
-    kind: cell(lens+how) / direction(how) / theme / field(lens+field)。
+def _apply_plan_patch(plan: dict, req: ProposalPlanCellPatch, now_iso: str, user: str):
+    """逐格寫入的共用核心（authed 與公開 token 兩條路同用）。
+    plan 須為頂層已淺拷的 dict；本函式只再淺拷路徑上的容器（O(路徑)）。
     cell/direction/theme 帶 base_updated_at 做樂觀鎖 — 伺服器較新 → 409 + 現值，
     前端並列兩版本讓人決定，不自動合併。field（分鐘數/基調）last-write-wins。"""
+
+    def _conflict_or_write(container: dict, key: str):
+        cur = _plan_normalize_leaf(container.get(key) or "")
+        if (req.base_updated_at is not None and cur["updated_at"]
+                and cur["updated_at"] > req.base_updated_at):
+            _raise_plan_conflict(cur["answer"], cur["updated_at"], cur["updated_by"])
+        container[key] = {"answer": req.answer, "updated_at": now_iso, "updated_by": user}
+
+    if req.kind == "cell":
+        if not (req.lens and req.how and _PLAN_KEY_RE.match(req.lens) and _PLAN_KEY_RE.match(req.how)):
+            raise HTTPException(status_code=422, detail="kind=cell 需合法 lens + how")
+        cells = plan["cells"] = dict(plan.get("cells") or {})
+        cells[req.lens] = dict(cells.get(req.lens) or {})
+        _conflict_or_write(cells[req.lens], req.how)
+    elif req.kind == "direction":
+        if not (req.how and _PLAN_KEY_RE.match(req.how)):
+            raise HTTPException(status_code=422, detail="kind=direction 需合法 how")
+        dirs = plan["directions"] = dict(plan.get("directions") or {})
+        _conflict_or_write(dirs, req.how)
+    elif req.kind == "theme":
+        cur_at = plan.get("theme_updated_at")
+        if req.base_updated_at is not None and cur_at and cur_at > req.base_updated_at:
+            _raise_plan_conflict(plan.get("theme") or "", cur_at, plan.get("theme_updated_by") or "")
+        plan["theme"] = req.answer
+        plan["theme_updated_at"], plan["theme_updated_by"] = now_iso, user
+    elif req.kind == "field":
+        if not (req.lens and req.field and _PLAN_KEY_RE.match(req.lens) and _PLAN_KEY_RE.match(req.field)):
+            raise HTTPException(status_code=422, detail="kind=field 需合法 lens + field")
+        fv = plan["field_values"] = dict(plan.get("field_values") or {})
+        fv[req.lens] = dict(fv.get(req.lens) or {})
+        fv[req.lens][req.field] = req.answer
+    else:
+        raise HTTPException(status_code=422, detail="kind 須為 cell/direction/theme/field")
+
+
+def _check_cell_size(req: ProposalPlanCellPatch):
+    if len((req.answer or "").encode("utf-8")) > _PLAN_CELL_MAX_BYTES:
+        raise HTTPException(status_code=413, detail="單格內容超過 20KB 上限")
+
+
+def _plan_meta_payload(plan: dict, prop_updated_at) -> dict:
+    """meta 輪詢回應（authed 與公開兩條路同用）— 只帶各格時間戳，不帶全文。"""
+    def _meta(section):
+        out = {}
+        for k, v in (section or {}).items():
+            if isinstance(v, dict) and "answer" not in v:
+                out[k] = _meta(v)
+            else:
+                leaf = _plan_normalize_leaf(v)
+                out[k] = {"updated_at": leaf["updated_at"], "updated_by": leaf["updated_by"]}
+        return out
+    return {"has_plan": bool(plan),
+            "updated_at": prop_updated_at,   # 下次輪詢帶回 ?since= 用
+            "theme_updated_at": plan.get("theme_updated_at"),
+            "cells": _meta(plan.get("cells")),
+            "directions": _meta(plan.get("directions"))}
+
+
+@router.patch("/{pid}/plan/cell")
+async def patch_plan_cell(pid: str, req: ProposalPlanCellPatch, request: Request):
+    """逐格寫入（登入路徑）。核心邏輯見 _apply_plan_patch。"""
     payload = _check_auth(request)
     factory = _require_factory()
     user = payload.get("username") or ""
     now_iso = datetime.now(timezone.utc).isoformat()
-
-    if len((req.answer or "").encode("utf-8")) > _PLAN_CELL_MAX_BYTES:
-        raise HTTPException(status_code=413, detail="單格內容超過 20KB 上限")
+    _check_cell_size(req)
 
     async with factory() as session:
         prop = await _get_proposal_or_404(session, pid, for_update=True)
         if not prop.plan:
             raise HTTPException(status_code=409, detail="此提案尚未開始企劃（先 PUT /plan）")
-        # 只淺拷路徑上的容器（O(路徑) 而非 O(全文深拷）；頂層換新物件即觸發
-        # JSONB 變更偵測，未動的兄弟節點共享參照無妨 — 本函式不 mutate 它們
-        plan = dict(prop.plan)
-
-        def _conflict_or_write(container: dict, key: str):
-            cur = _plan_normalize_leaf(container.get(key) or "")
-            if (req.base_updated_at is not None and cur["updated_at"]
-                    and cur["updated_at"] > req.base_updated_at):
-                _raise_plan_conflict(cur["answer"], cur["updated_at"], cur["updated_by"])
-            container[key] = {"answer": req.answer, "updated_at": now_iso, "updated_by": user}
-
-        if req.kind == "cell":
-            if not (req.lens and req.how and _PLAN_KEY_RE.match(req.lens) and _PLAN_KEY_RE.match(req.how)):
-                raise HTTPException(status_code=422, detail="kind=cell 需合法 lens + how")
-            cells = plan["cells"] = dict(plan.get("cells") or {})
-            cells[req.lens] = dict(cells.get(req.lens) or {})
-            _conflict_or_write(cells[req.lens], req.how)
-        elif req.kind == "direction":
-            if not (req.how and _PLAN_KEY_RE.match(req.how)):
-                raise HTTPException(status_code=422, detail="kind=direction 需合法 how")
-            dirs = plan["directions"] = dict(plan.get("directions") or {})
-            _conflict_or_write(dirs, req.how)
-        elif req.kind == "theme":
-            cur_at = plan.get("theme_updated_at")
-            if req.base_updated_at is not None and cur_at and cur_at > req.base_updated_at:
-                _raise_plan_conflict(plan.get("theme") or "", cur_at, plan.get("theme_updated_by") or "")
-            plan["theme"] = req.answer
-            plan["theme_updated_at"], plan["theme_updated_by"] = now_iso, user
-        elif req.kind == "field":
-            if not (req.lens and req.field and _PLAN_KEY_RE.match(req.lens) and _PLAN_KEY_RE.match(req.field)):
-                raise HTTPException(status_code=422, detail="kind=field 需合法 lens + field")
-            fv = plan["field_values"] = dict(plan.get("field_values") or {})
-            fv[req.lens] = dict(fv.get(req.lens) or {})
-            fv[req.lens][req.field] = req.answer
-        else:
-            raise HTTPException(status_code=422, detail="kind 須為 cell/direction/theme/field")
-
+        plan = dict(prop.plan)   # 頂層換新物件 → 觸發 JSONB 變更偵測
+        _apply_plan_patch(plan, req, now_iso, user)
         prop.plan = plan
         prop.updated_at = datetime.now(timezone.utc)
         await session.commit()
@@ -528,9 +553,7 @@ async def patch_plan_cell(pid: str, req: ProposalPlanCellPatch, request: Request
 
 @router.get("/{pid}/plan/meta")
 async def get_plan_meta(pid: str, request: Request, since: str = ""):
-    """輕量輪詢端點：只回各格 updated_at/by，不帶全文（§7.4 的 30s 輪詢打這支）。
-    帶 ?since=<上次看到的提案 updated_at> 可短路 — 沒動過就只花一次純量查詢，
-    不 detoast 整包 JSONB。"""
+    """輕量輪詢端點（登入路徑）。?since= 沒動過就只花一次純量查詢。"""
     _check_auth(request)
     factory = _require_factory()
     from sqlalchemy import select
@@ -545,24 +568,120 @@ async def get_plan_meta(pid: str, request: Request, since: str = ""):
             if cur.isoformat() == since:
                 return {"unchanged": True, "updated_at": since}
         prop = await _get_proposal_or_404(session, pid)
-        prop_updated_at = prop.updated_at.isoformat() if prop.updated_at else None
-        plan = prop.plan or {}
+        return _plan_meta_payload(prop.plan or {},
+                                  prop.updated_at.isoformat() if prop.updated_at else None)
 
-    def _meta(section):
-        out = {}
-        for k, v in (section or {}).items():
-            if isinstance(v, dict) and "answer" not in v:
-                out[k] = _meta(v)
-            else:
-                leaf = _plan_normalize_leaf(v)
-                out[k] = {"updated_at": leaf["updated_at"], "updated_by": leaf["updated_by"]}
-        return out
 
-    return {"has_plan": bool(plan),
-            "updated_at": prop_updated_at,   # 下次輪詢帶回 ?since= 用
-            "theme_updated_at": plan.get("theme_updated_at"),
-            "cells": _meta(plan.get("cells")),
-            "directions": _meta(plan.get("directions"))}
+# ── 公開共編（token 路徑，docs/PROPOSAL_PLANNER.md §7 追加） ──────
+# 開放＝plan.share_token 存在（拿到連結免登入即可共編）；
+# 關閉＝token 從 plan 移除 → 該連結立即 401，只剩登入路徑。
+# 重新開放會鑄新 token（舊連結永久失效）。
+
+_PLAN_SHARE_SCOPE = "plan_share"
+
+
+def _plan_share_valid(token: str, pid: str) -> bool:
+    from core.auth import verify_token
+    try:
+        p = verify_token(token)
+        return bool(p) and p.get("scope") == _PLAN_SHARE_SCOPE and p.get("sub") == pid
+    except Exception:
+        return False
+
+
+async def _get_prop_by_plan_token(session, token: str, for_update: bool = False):
+    """公開路徑守門：JWT 驗簽 + scope + 與 plan.share_token 比對（撤銷即失效）。"""
+    from core.auth import verify_token
+    payload = verify_token(token)
+    if not payload or payload.get("scope") != _PLAN_SHARE_SCOPE:
+        raise HTTPException(status_code=401, detail="無效的連結")
+    prop = await _get_proposal_or_404(session, payload.get("sub") or "", for_update=for_update)
+    if not prop.plan or prop.plan.get("share_token") != token:
+        raise HTTPException(status_code=401, detail="連結已停用")
+    return prop
+
+
+def _guest_identity(req: ProposalPlanCellPatch) -> str:
+    name = (req.guest_name or "").strip()[:24]
+    return f"{name}(外部)" if name else "訪客"
+
+
+@router.post("/{pid}/plan/share")
+async def enable_plan_share(pid: str, request: Request):
+    """開放公開共編：鑄 token 存進 plan（既有且仍有效則重用，冪等）。"""
+    _check_auth(request)
+    factory = _require_factory()
+    from core.auth import create_token
+    from core.crm_logic import PERMANENT_TOKEN_EXPIRES_DAYS
+    async with factory() as session:
+        prop = await _get_proposal_or_404(session, pid, for_update=True)
+        if not prop.plan:
+            raise HTTPException(status_code=409, detail="此提案尚未開始企劃，無法開放共編")
+        token = prop.plan.get("share_token") or ""
+        if not _plan_share_valid(token, pid):   # 含 jwt_secret 輪替後的自癒重鑄
+            token = create_token({"sub": pid, "scope": _PLAN_SHARE_SCOPE},
+                                 expires_days=PERMANENT_TOKEN_EXPIRES_DAYS)
+            plan = dict(prop.plan)
+            plan["share_token"] = token
+            prop.plan = plan
+            prop.updated_at = datetime.now(timezone.utc)
+        await session.commit()
+    return {"status": "ok", "token": token}
+
+
+@router.delete("/{pid}/plan/share")
+async def disable_plan_share(pid: str, request: Request):
+    """關閉公開共編：移除 token → 既有連結立即 401。冪等。"""
+    _check_auth(request)
+    factory = _require_factory()
+    async with factory() as session:
+        prop = await _get_proposal_or_404(session, pid, for_update=True)
+        if prop.plan and prop.plan.get("share_token"):
+            plan = dict(prop.plan)
+            plan.pop("share_token", None)
+            prop.plan = plan
+            prop.updated_at = datetime.now(timezone.utc)
+        await session.commit()
+    return {"status": "ok"}
+
+
+@router.get("/shared/{token}")
+async def get_shared_plan(token: str):
+    """公開讀取（免登入）：只回 title + plan（share_token 一律剝除）。"""
+    factory = _require_factory()
+    async with factory() as session:
+        prop = await _get_prop_by_plan_token(session, token)
+        plan = {k: v for k, v in (prop.plan or {}).items() if k != "share_token"}
+    return {"title": prop.title, "plan": plan}
+
+
+@router.patch("/shared/{token}/cell")
+async def patch_shared_plan_cell(token: str, req: ProposalPlanCellPatch):
+    """公開逐格寫入（免登入）：署名=guest_name(外部)／訪客，其餘同登入路徑。"""
+    factory = _require_factory()
+    now_iso = datetime.now(timezone.utc).isoformat()
+    _check_cell_size(req)
+    async with factory() as session:
+        prop = await _get_prop_by_plan_token(session, token, for_update=True)
+        plan = dict(prop.plan)
+        _apply_plan_patch(plan, req, now_iso, _guest_identity(req))
+        prop.plan = plan
+        prop.updated_at = datetime.now(timezone.utc)
+        await session.commit()
+    return {"status": "ok", "updated_at": now_iso}
+
+
+@router.get("/shared/{token}/meta")
+async def get_shared_plan_meta(token: str, since: str = ""):
+    """公開輪詢（免登入）：同 ?since= 短路。"""
+    factory = _require_factory()
+    async with factory() as session:
+        prop = await _get_prop_by_plan_token(session, token)
+        cur = prop.updated_at.isoformat() if prop.updated_at else None
+        if since and cur == since:
+            return {"unchanged": True, "updated_at": since}
+        plan = {k: v for k, v in (prop.plan or {}).items() if k != "share_token"}
+    return _plan_meta_payload(plan, cur)
 
 
 @router.delete("/{pid}")
