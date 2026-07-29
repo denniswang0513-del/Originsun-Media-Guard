@@ -497,6 +497,12 @@ def _apply_plan_patch(plan: dict, req: ProposalPlanCellPatch, now_iso: str, user
             _raise_plan_conflict(plan.get("theme") or "", cur_at, plan.get("theme_updated_by") or "")
         plan["theme"] = req.answer
         plan["theme_updated_at"], plan["theme_updated_by"] = now_iso, user
+    elif req.kind == "memo":
+        cur_at = plan.get("memo_updated_at")
+        if req.base_updated_at is not None and cur_at and cur_at > req.base_updated_at:
+            _raise_plan_conflict(plan.get("memo") or "", cur_at, plan.get("memo_updated_by") or "")
+        plan["memo"] = req.answer
+        plan["memo_updated_at"], plan["memo_updated_by"] = now_iso, user
     elif req.kind == "field":
         if not (req.lens and req.field and _PLAN_KEY_RE.match(req.lens) and _PLAN_KEY_RE.match(req.field)):
             raise HTTPException(status_code=422, detail="kind=field 需合法 lens + field")
@@ -504,7 +510,7 @@ def _apply_plan_patch(plan: dict, req: ProposalPlanCellPatch, now_iso: str, user
         fv[req.lens] = dict(fv.get(req.lens) or {})
         fv[req.lens][req.field] = req.answer
     else:
-        raise HTTPException(status_code=422, detail="kind 須為 cell/direction/theme/field")
+        raise HTTPException(status_code=422, detail="kind 須為 cell/direction/theme/memo/field")
 
 
 def _check_cell_size(req: ProposalPlanCellPatch):
@@ -526,6 +532,7 @@ def _plan_meta_payload(plan: dict, prop_updated_at) -> dict:
     return {"has_plan": bool(plan),
             "updated_at": prop_updated_at,   # 下次輪詢帶回 ?since= 用
             "theme_updated_at": plan.get("theme_updated_at"),
+            "memo_updated_at": plan.get("memo_updated_at"),
             "cells": _meta(plan.get("cells")),
             "directions": _meta(plan.get("directions"))}
 

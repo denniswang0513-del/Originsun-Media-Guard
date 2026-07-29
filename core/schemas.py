@@ -852,7 +852,7 @@ class ProposalPlanPayload(BaseModel):
 
 class ProposalPlanCellPatch(BaseModel):
     """企劃矩陣逐格寫入 — 共編下的日常輸入單位（樂觀鎖見端點）。"""
-    kind: str                             # cell / direction / theme / field
+    kind: str                             # cell / direction / theme / memo / field
     lens: Optional[str] = None            # kind=cell/field 必填
     how: Optional[str] = None             # kind=cell/direction 必填
     field: Optional[str] = None           # kind=field 必填

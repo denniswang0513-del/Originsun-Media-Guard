@@ -76,6 +76,14 @@ html.plan-theme-light .plc { /* 官網白底（獨立網址） */
   margin-bottom: 10px; background: var(--plc-card); }
 .plc .plc-dir .q { font-size: 12px; margin-bottom: 6px; }
 .plc .plc-dir .q b { font-size: 12px; margin-right: 8px; }
+.plc .plc-memo { border: 1px solid var(--plc-line); border-radius: 2px; padding: 10px 12px;
+  margin-top: 14px; background: var(--plc-card); }
+.plc .plc-memo .mt { font-size: 13px; font-weight: 600; margin-bottom: 6px; }
+.plc .plc-memo textarea { width: 100%; min-height: 90px; resize: vertical; background: transparent;
+  color: var(--plc-ink); border: 1px solid transparent; border-radius: 2px; padding: 6px;
+  font-size: 12.5px; line-height: 1.7; font-family: inherit; }
+.plc .plc-memo textarea:focus { border-color: var(--plc-accent); outline: none; }
+.plc .plc-memo textarea::placeholder { color: var(--plc-sub); opacity: .6; }
 .plc .plc-save { position: sticky; bottom: 0; text-align: right; font-size: 11px;
   color: var(--plc-sub); padding: 4px 0; pointer-events: none; }
 .plc .plc-save.err { color: #e05252; }
@@ -257,6 +265,11 @@ function _renderMatrix(container, opts, tpl, { readonly = false, exampleBack = n
                     </div>`;
                 }).join('')}`).join('')}
         </div>
+        ${(readonly && !(plan.memo || '')) ? '' : `
+        <div class="plc-memo">
+            <div class="mt">📝 備忘</div>
+            <textarea data-kind="memo" placeholder="拍攝備註、待查事項、開會結論…想到什麼放什麼（整份企劃共用一格，會自動儲存）" ${ro}${plan.memo_updated_by ? ` title="最後編輯：${esc(plan.memo_updated_by)}"` : ''}></textarea>
+        </div>`}
         ${(tpl.directions || []).length ? `
         <div class="plc-dirs">
             <h4>${esc(tpl.directions_label || '')}</h4>
@@ -273,7 +286,9 @@ function _renderMatrix(container, opts, tpl, { readonly = false, exampleBack = n
 
     // textarea 內容用 DOM property 賦值（不走模板內插 — XSS 防線之一）
     container.querySelectorAll('textarea[data-kind]').forEach(ta => {
-        ta.value = (ta.dataset.lens ? cellOf(ta.dataset.lens, ta.dataset.how) : dirOf(ta.dataset.how)).answer;
+        const k = ta.dataset.kind;
+        ta.value = k === 'memo' ? (plan.memo || '')
+            : (ta.dataset.lens ? cellOf(ta.dataset.lens, ta.dataset.how) : dirOf(ta.dataset.how)).answer;
     });
     if (readonly) {
         container.querySelector('#plc-ex-back')?.addEventListener('click', exampleBack);
@@ -357,6 +372,7 @@ function _wireEditing(container, opts) {
         if (k === 'cell') base.set(el, plan.cells?.[el.dataset.lens]?.[el.dataset.how]?.updated_at || null);
         else if (k === 'direction') base.set(el, plan.directions?.[el.dataset.how]?.updated_at || null);
         else if (k === 'theme') base.set(el, plan.theme_updated_at || null);
+        else if (k === 'memo') base.set(el, plan.memo_updated_at || null);
         el._plcSaved = el.value;    // dirty-check 基準 — 沒改過就不打 PATCH（也避免亂蓋 updated_by）
         el.addEventListener('input', () => queue(el));
         el.addEventListener('blur', () => { clearTimeout(timers.get(el)); save(el); });
@@ -400,6 +416,7 @@ function _wireEditing(container, opts) {
                 const k = el.dataset.kind;
                 const leaf = k === 'cell' ? m.cells?.[el.dataset.lens]?.[el.dataset.how]
                     : k === 'direction' ? m.directions?.[el.dataset.how]
+                    : k === 'memo' ? { updated_at: m.memo_updated_at }
                     : { updated_at: m.theme_updated_at };
                 return leaf?.updated_at && leaf.updated_at !== base.get(el);
             });
