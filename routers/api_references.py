@@ -499,6 +499,62 @@ def _guest_identity(name: Optional[str]) -> str:
 # ── 清單（v2：facets 篩選 + 關鍵字 + 建檔狀態）──────────────────
 
 
+@router.post("")
+async def create_reference_v2(request: Request, body: dict = Body(...)):
+    """建一支參考片（v2 入口）。body {url, title?, note?, link?: {target_type, target_id, note?}}。
+
+    - **以 url 去重**：同一條網址已在片庫 → 不重建，回既有那支（idempotent —— 片庫是
+      共用資產，同一支片兩個實體會讓研究/截圖散在兩處）。
+    - `link` 一併帶時，順手掛到該提案/專案（權限依對象把關，同 add_link）——
+      CRM 分頁「貼網址→建檔→引用」是一個動作，不用打兩趟。
+    """
+    url = str(body.get("url") or "").strip()
+    if not url.lower().startswith(("http://", "https://")):
+        raise HTTPException(status_code=422, detail="網址須以 http:// 或 https:// 開頭")
+    if len(url) > 512:
+        raise HTTPException(status_code=422, detail="網址過長")
+    link = body.get("link") if isinstance(body.get("link"), dict) else None
+    if link:
+        target_type = str(link.get("target_type") or "")
+        payload = _check_target_auth(request, target_type)   # 有 link → 依對象把關
+    else:
+        payload = _check_auth(request)
+    factory = _require_factory()
+
+    from sqlalchemy import select
+    from db.models import PreprodReference, PreprodReferenceLink
+
+    async with factory() as session:
+        ref = (await session.execute(
+            select(PreprodReference).where(PreprodReference.url == url))).scalars().first()
+        created = ref is None
+        if created:
+            ref = PreprodReference(
+                id=uuid.uuid4().hex, url=url,
+                title=str(body.get("title") or "").strip()[:255],
+                note=str(body.get("note") or "")[:2000])
+            _sync_video_meta(ref)
+            session.add(ref)
+        if link:
+            target_id = str(link.get("target_id") or "").strip()
+            if await _target_title(session, target_type, target_id) is None:
+                raise HTTPException(status_code=404, detail="找不到要引用的提案／專案")
+            exists = (await session.execute(
+                select(PreprodReferenceLink)
+                .where(PreprodReferenceLink.reference_id == ref.id,
+                       PreprodReferenceLink.target_type == target_type,
+                       PreprodReferenceLink.target_id == target_id))).scalars().first()
+            if not exists:
+                session.add(PreprodReferenceLink(
+                    id=uuid.uuid4().hex, reference_id=ref.id,
+                    target_type=target_type, target_id=target_id,
+                    note=str(link.get("note") or "")[:255],
+                    created_by=payload.get("username") or ""))
+        await session.commit()
+        await session.refresh(ref)
+        return {"status": "ok", "created": created, "reference": ref_dict(ref, research=False)}
+
+
 @router.get("")
 async def list_references_v2(request: Request, q: str = "", curated: str = "",
                              facet: str = "", value: str = "", unused: str = "",

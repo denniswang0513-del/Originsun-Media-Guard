@@ -43,10 +43,11 @@ export async function loadRefsTab(projectId, container, libCache) {
     const pickable = lib.filter(r => !linkedIds.has(r.id));
 
     const rows = linked.map(r => `
-        <div class="pjref-row" data-link="${esc(r.link_id)}" data-rid="${esc(r.id)}">
-            <div class="pjref-thumb">${r.thumb_url
+        <div class="pjref-row" data-link="${esc(r.link_id)}" data-rid="${esc(r.id)}"
+             data-embed="${esc(r.embed_url || '')}">
+            <div class="pjref-thumb${r.embed_url ? ' playable' : ''}" ${r.embed_url ? 'title="點擊播放"' : ''}>${r.thumb_url
                 ? `<img src="${esc(r.thumb_url)}" alt="" loading="lazy">`
-                : '<span>無封面</span>'}</div>
+                : '<span>無封面</span>'}${r.embed_url ? '<span class="playbtn">▶</span>' : ''}</div>
             <div class="pjref-main">
                 <div class="pjref-title">${esc(r.title || r.url)}</div>
                 ${r.note ? `<div class="pjref-note">${esc(r.note)}</div>` : ''}
@@ -70,6 +71,14 @@ export async function loadRefsTab(projectId, container, libCache) {
           flex: none; display: flex; align-items: center; justify-content: center;
           color: #666; font-size: 10.5px; overflow: hidden; }
         .pjref-thumb img { width: 100%; height: 100%; object-fit: cover; }
+        .pjref-thumb.playable { cursor: pointer; position: relative; }
+        .pjref-thumb .playbtn { position: absolute; inset: 0; display: flex; align-items: center;
+          justify-content: center; font-size: 22px; color: #fff;
+          background: rgba(0,0,0,.35); opacity: .85; transition: opacity .15s; }
+        .pjref-thumb.playable:hover .playbtn { opacity: 1; background: rgba(0,0,0,.5); }
+        .pjref-player { width: 100%; aspect-ratio: 16/9; background: #000;
+          border: 1px solid #333; margin: 8px 0 2px; position: relative; }
+        .pjref-player iframe { position: absolute; inset: 0; width: 100%; height: 100%; border: 0; }
         .pjref-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 5px; }
         .pjref-title { font-size: 13.5px; }
         .pjref-note { font-size: 11.5px; color: #8b8b8b; line-height: 1.6; }
@@ -105,6 +114,11 @@ export async function loadRefsTab(projectId, container, libCache) {
                 <a href="/reference.html" target="_blank" rel="noopener"
                    style="font-size:11.5px;color:#93c5fd;">開片庫 ↗</a>
             </div>
+            <div class="pjref-add" style="border-top:none;margin-top:6px;padding-top:0;">
+                <input id="pjref-new-url" placeholder="https://…（貼新片網址，YouTube / Vimeo / FB）" style="flex:1;min-width:220px;">
+                <input id="pjref-new-title" placeholder="標題（可空）" style="min-width:140px;">
+                <button id="pjref-create">＋ 入庫並引用</button>
+            </div>
             <div class="pjref-msg" id="pjref-msg">片庫跨提案／專案共用：解除只拿掉本專案的引用，片子仍留在庫裡。</div>
         </div>`;
 
@@ -123,6 +137,42 @@ export async function loadRefsTab(projectId, container, libCache) {
             await loadRefsTab(projectId, container, lib);
         } catch (e) { say('引用失敗：' + (e.message || e), true); }
     });
+
+    // 貼網址 → 入庫 + 掛上本專案（一個動作；同網址已在庫就直接引用既有那支）
+    container.querySelector('#pjref-create').addEventListener('click', async () => {
+        const url = container.querySelector('#pjref-new-url').value.trim();
+        if (!/^https?:\/\//i.test(url)) { say('網址要以 http:// 或 https:// 開頭', true); return; }
+        try {
+            const d = await rfetch(API, { method: 'POST', body: {
+                url, title: container.querySelector('#pjref-new-title').value.trim(),
+                link: { target_type: 'crm_project', target_id: projectId,
+                        note: container.querySelector('#pjref-why').value.trim() },
+            } });
+            if (!d.created) say('這支片已在片庫，直接引用既有那支');
+            await loadRefsTab(projectId, container);   // 片庫多了一支 → 不能沿用快取
+        } catch (e) { say('新增失敗：' + (e.message || e), true); }
+    });
+    container.querySelector('#pjref-new-url').addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') container.querySelector('#pjref-create').click();
+    });
+
+    // 點縮圖就地播放（再點一次收起；同時只開一支 —— 兩支同時響會打架）
+    container.querySelectorAll('.pjref-thumb.playable').forEach(th => th.addEventListener('click', () => {
+        const row = th.closest('.pjref-row');
+        const open = row.querySelector('.pjref-player');
+        if (open) { open.remove(); return; }
+        container.querySelectorAll('.pjref-player').forEach(x => x.remove());
+        const embed = row.dataset.embed;
+        if (!embed) return;
+        const box = document.createElement('div');
+        box.className = 'pjref-player';
+        const iframe = document.createElement('iframe');
+        iframe.src = embed + (embed.includes('?') ? '&' : '?') + 'autoplay=1';
+        iframe.allow = 'accelerometer; autoplay; clipboard-write; encrypted-media; fullscreen; picture-in-picture';
+        iframe.allowFullscreen = true;
+        box.appendChild(iframe);
+        row.querySelector('.pjref-main').prepend(box);
+    }));
 
     container.querySelectorAll('.pjref-del').forEach(btn => btn.addEventListener('click', async () => {
         const row = btn.closest('.pjref-row');

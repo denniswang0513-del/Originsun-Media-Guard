@@ -338,3 +338,14 @@ owner：「希望這裡可以新增片庫的 tab」（前期製作群組，器�
 `tab-config.js`（TAB_MAP / TAB_LOADERS / TAB_GROUPS / PERMISSION_GROUPS）、
 `user-mgmt.js` MODULE_LABELS，外加 `index.html` 的 section 容器。
 **後端閘門同步放寬**收 `references` —— 否則只給片庫權限的人看得到 tab 卻拿不到資料。
+
+### 追加：CRM 專案分頁可直接新增與就地播放（2026-07-30）
+
+owner：「這裡要可以新增 然後可以直接播」。
+
+- **`POST /api/v1/references`（v2 建檔入口）**：body 可帶 `link {target_type, target_id, note}`
+  一次完成「入庫＋掛上本案」。**以 url 去重（idempotent）**：同網址已在庫回既有那支 ——
+  片庫是共用資產，兩個實體會讓研究/截圖散在兩處。有 link 時權限依對象把關。
+- CRM 分頁多一列「貼新片網址 → ＋入庫並引用」（Enter 也可送）；挑既有片的下拉照舊。
+- **就地播放**：縮圖有 ▶ 遮罩，點了在列內展開 16:9 播放器（`embed_url` + autoplay，
+  未公開 Vimeo 的 ?h= 雜湊自然帶著）；再點收起；同時只開一支。
