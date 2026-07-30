@@ -1,0 +1,36 @@
+<!-- 片庫 tab（參考影片庫 v2）— 總覽卡片牆 + 單片研究頁（共用 reference-page.js 元件） -->
+<div class="ref-tab">
+    <div class="reft-head">
+        <h2>🎬 片庫</h2>
+        <span class="reft-hint">跨提案／專案共用的參考影片。點一張卡進該片的研究頁面。</span>
+        <span style="flex:1;"></span>
+        <a href="/reference.html" target="_blank" rel="noopener" class="reft-link">獨立網址開啟 ↗</a>
+    </div>
+
+    <div class="reft-bar" id="reft-bar">
+        <input type="search" id="reft-q" placeholder="搜尋標題／連結／心得…">
+        <select id="reft-facet-key" data-no-search=""><option value="">（全部分類族）</option></select>
+        <select id="reft-facet-val" style="display:none;"></select>
+        <select id="reft-curated" data-no-search="">
+            <option value="">建檔狀態：全部</option>
+            <option value="1">已建檔</option>
+            <option value="0">待建檔</option>
+        </select>
+        <label class="reft-check"><input type="checkbox" id="reft-unused"> 只看沒被引用的</label>
+        <span class="reft-hint" id="reft-count"></span>
+        <span style="flex:1;"></span>
+        <button id="reft-import" class="reft-btn">匯入 CSV</button>
+        <input type="file" id="reft-import-file" accept=".csv,text/csv" style="display:none;">
+    </div>
+
+    <div id="reft-grid" class="reft-grid"><div class="reft-empty">載入中…</div></div>
+
+    <div id="reft-detail" class="reft-detail" style="display:none;">
+        <div class="reft-detail-head">
+            <button id="reft-back" class="reft-btn">← 片庫</button>
+            <h3 id="reft-title"></h3>
+            <a id="reft-standalone" href="#" target="_blank" rel="noopener" class="reft-link">獨立網址 ↗</a>
+        </div>
+        <div id="reft-host"></div>
+    </div>
+</div>

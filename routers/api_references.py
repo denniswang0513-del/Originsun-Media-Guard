@@ -68,7 +68,8 @@ _PUBLIC_ALLOW = {"field": ("title", "note", "description"), "research": True, "f
 
 
 def _check_auth(request: Request) -> dict:
-    return check_admin_or_module(request, "preprod_proposals", "preprod_plan")
+    """片庫本身的閘門：片庫 tab（references）或提案庫兩系模組任一即可。"""
+    return check_admin_or_module(request, "references", "preprod_proposals", "preprod_plan")
 
 
 def _now_iso() -> str:
@@ -505,7 +506,7 @@ async def list_references_v2(request: Request, q: str = "", curated: str = "",
     # 讀片庫：提案庫或 CRM 專案的人都要能挑片（寫入才依對象分別把關，見 _check_target_auth）
     """片庫清單。facet+value 成對使用（如 facet=technique&value=平行剪接）。
     回列表刻意不帶 research 全文（清單頁不需要）—— 只帶計數與封面。"""
-    check_admin_or_module(request, "preprod_proposals", "preprod_plan", "crm_projects")
+    check_admin_or_module(request, "references", "preprod_proposals", "preprod_plan", "crm_projects")
     factory = _require_factory()
 
     from sqlalchemy import func as safunc, or_, select
@@ -647,7 +648,7 @@ def _target_models():
     from db.models import CrmProject, PreprodProposal
     return {
         "proposal": (PreprodProposal, PreprodProposal.title,
-                     ("preprod_proposals", "preprod_plan")),
+                     ("preprod_proposals", "preprod_plan")),   # 提案的引用歸提案庫管
         "crm_project": (CrmProject, CrmProject.name, ("crm_projects",)),
     }
 

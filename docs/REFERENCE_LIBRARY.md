@@ -323,3 +323,18 @@ owner 回報研究頁的 Vimeo 影片顯示「抱歉，我們遇到了一點麻�
   `reference-page.js` 改用它嵌入 —— **前端不要自己拿 video_id 拼**，那正是漏掉雜湊的原因。
 - 這條修正同時修好**對外官網**：`website/src` 的作品頁本來就吃 `video_embed_url`，
   之前未公開的 Vimeo 作品同樣播不了。
+
+### 追加：SPA 側欄「🎬 片庫」tab（2026-07-30）
+
+owner：「希望這裡可以新增片庫的 tab」（前期製作群組，器材庫下面）。
+
+`frontend/tabs/references/`（html + js）：卡片牆（搜尋／分類篩選／建檔狀態／
+只看沒被引用的／匯入 CSV）→ 點卡在同一個 tab 內開研究頁，內容直接掛
+`reference-page.js` 元件（**元件深色是預設值**，SPA 不用覆寫；官網白底頁才掛
+`html.ref-theme-light`）。右上角保留「獨立網址開啟 ↗」給要分享的情境。
+
+**新增了模組 key `references`**（tab 與模組 key 是一對一，不能共用既有 key），
+所以照慣例三處同步：`core/auth.py` ALL_MODULES（append 尾端）、
+`tab-config.js`（TAB_MAP / TAB_LOADERS / TAB_GROUPS / PERMISSION_GROUPS）、
+`user-mgmt.js` MODULE_LABELS，外加 `index.html` 的 section 容器。
+**後端閘門同步放寬**收 `references` —— 否則只給片庫權限的人看得到 tab 卻拿不到資料。

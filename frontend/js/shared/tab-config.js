@@ -10,6 +10,7 @@ export const TAB_MAP = {
     preprod_proposals: 'tab_preprod_proposals',
     intel: 'tab_intel',
     equipment: 'tab_equipment',
+    references: 'tab_references',
     backup: 'tab_main', verify: 'tab_verify',
     transcode: 'tab_transcode', concat: 'tab_concat', report: 'tab_report',
     transcribe: 'tab_transcribe', tts: 'tab_tts', footage: 'tab_footage', drone_meta: 'tab_drone_meta',
@@ -36,6 +37,7 @@ export const TAB_LOADERS = [
     ['preprod_proposals', './tabs/proposals/proposals.html', './tabs/proposals/proposals.js',     'initProposalsTab'],
     ['intel',         './tabs/intel/intel.html',             './tabs/intel/intel.js',             'initIntelTab'],
     ['equipment',     './tabs/equipment/equipment.html',     './tabs/equipment/equipment.js',     'initEquipmentTab'],
+    ['references',    './tabs/references/references.html',   './tabs/references/references.js',   'initReferencesTab'],
     ['backup',        './tabs/backup/backup.html',           './tabs/backup/backup.js',           'initBackupTab'],
     ['verify',        './tabs/verify/verify.html',           './tabs/verify/verify.js',           'initVerifyTab'],
     ['transcode',     './tabs/transcode/transcode.html',     './tabs/transcode/transcode.js',     'initTranscodeTab'],
@@ -79,6 +81,7 @@ export const TAB_GROUPS = [
         { key: 'preprod_proposals', label: '📑 提案庫' },
         { key: 'intel', label: '📡 產業情報' },
         { key: 'equipment', label: '🎥 器材庫' },
+        { key: 'references', label: '🎬 片庫' },
     ] },
     { id: 'production', label: '🎬 後期製作', items: [
         { key: 'backup',     label: '📦 備份並轉檔' },
@@ -140,7 +143,7 @@ export function isMediaSection(sectionId) {
 export const PERMISSION_GROUPS = [
     { id: 'bulletin',   label: '📌 公布欄', modules: ['bulletin'] },
     { id: 'projects',   label: '📊 專案總覽', modules: ['projects'] },
-    { id: 'preprod',    label: '📝 前期製作', modules: ['preprod_plan', 'preprod_locations', 'preprod_proposals', 'intel', 'equipment'] },
+    { id: 'preprod',    label: '📝 前期製作', modules: ['preprod_plan', 'preprod_locations', 'preprod_proposals', 'intel', 'equipment', 'references'] },
     { id: 'production', label: '🎬 後期製作', modules: ['backup', 'verify', 'transcode', 'concat', 'drone_meta', 'report', 'transcribe', 'tts', 'footage'] },
     { id: 'business',   label: '💼 業務管理', modules: ['crm_clients', 'crm_projects', 'crm_quotes', 'portal', 'media_log'] },
     { id: 'hr',         label: '人事管理', modules: ['crm_staff', 'timesheets', 'hr_leave', 'journal'] },

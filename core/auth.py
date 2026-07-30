@@ -138,6 +138,8 @@ ALL_MODULES = [
     'journal',
     # 影像紀錄總覽（業務管理 › 跨專案管理各專案收集牆；單專案面板仍在專案詳情內）
     'media_log',
+    # 參考影片庫 v2（前期製作 › 片庫；docs/REFERENCE_LIBRARY.md）
+    'references',
 ]
 
 
