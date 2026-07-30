@@ -76,6 +76,18 @@ html.plan-theme-light .plc { /* 官網白底（獨立網址） */
   margin-bottom: 10px; background: var(--plc-card); }
 .plc .plc-dir .q { font-size: 12px; margin-bottom: 6px; }
 .plc .plc-dir .q b { font-size: 12px; margin-right: 8px; }
+.plc .plc-tip { margin: 2px 6px 4px; }
+.plc .plc-tip summary { cursor: pointer; font-size: 10.5px; color: var(--plc-sub); user-select: none; opacity: .75; }
+.plc .plc-tip summary:hover { opacity: 1; }
+.plc .plc-tip div { font-size: 11px; color: var(--plc-sub); line-height: 1.7; padding: 6px 8px;
+  border: 1px solid var(--plc-line); border-radius: 2px; background: var(--plc-card); margin-top: 4px; }
+.plc .plc-summary { border: 1px solid var(--plc-line); border-radius: 2px; padding: 10px 12px;
+  margin-top: 14px; background: var(--plc-card); }
+.plc .plc-summary .mt { font-size: 13px; font-weight: 600; margin-bottom: 8px; }
+.plc .plc-summary .plc-field { margin-top: 6px; }
+.plc .plc-summary .plc-field label { min-width: 110px; }
+.plc .plc-summary .sh { font-size: 11px; color: var(--plc-sub); margin-top: 8px; line-height: 1.7; }
+.plc a.plc-tb-btn { text-decoration: none; display: inline-block; }
 .plc .plc-memo { border: 1px solid var(--plc-line); border-radius: 2px; padding: 10px 12px;
   margin-top: 14px; background: var(--plc-card); }
 .plc .plc-memo .mt { font-size: 13px; font-weight: 600; margin-bottom: 6px; }
@@ -226,6 +238,7 @@ function _renderMatrix(container, opts, tpl, { readonly = false, exampleBack = n
             <span class="plc-tb-label">📖 參考範例：</span>
             ${PLAN_EXAMPLES.map((ex, i) =>
                 `<button class="plc-tb-btn" data-ex="${i}" title="${esc(ex.label)}">${esc(ex.theme)}</button>`).join('')}
+            ${tpl.notes_url ? `<a class="plc-tb-btn" href="${esc(tpl.notes_url)}" target="_blank" rel="noopener">📚 方法論筆記</a>` : ''}
             <span style="flex:1"></span>
             ${opts.canShare ? `<button class="plc-tb-btn" id="plc-share-btn">${plan.share_token ? '🔗 公開共編中' : '🔒 未公開'}</button>` : ''}
         </div>
@@ -259,12 +272,29 @@ function _renderMatrix(container, opts, tpl, { readonly = false, exampleBack = n
                 <div class="plc-rowhead"><div class="t">${esc(how.label)}</div><div class="hint">${esc(how.hint)}</div></div>
                 ${tpl.lenses.map(lens => {
                     const e = cellOf(lens.key, how.key);
+                    const tip = lens.tips?.[how.key] || '';
                     return `<div class="plc-cell">
                         <textarea data-kind="cell" data-lens="${esc(lens.key)}" data-how="${esc(how.key)}"
                             placeholder="${esc(lens.prompts[how.key] || '')}" ${ro}${whoTitle(e)}></textarea>
+                        ${tip && !readonly ? `<details class="plc-tip"><summary>💡 方法提示</summary><div>${esc(tip)}</div></details>` : ''}
                     </div>`;
                 }).join('')}`).join('')}
         </div>
+        ${(() => {
+            const sf = tpl.summary_fields || [];
+            if (!sf.length) return '';
+            const anyVal = sf.some(f => (plan.field_values?.plan?.[f.key] || ''));
+            if (readonly && !anyVal) return '';
+            return `
+        <div class="plc-summary">
+            <div class="mt">${esc(tpl.summary_label || '取捨')}</div>
+            ${sf.map(f => `
+                <div class="plc-field"><label>${esc(f.label)}</label>
+                <input data-kind="field" data-lens="plan" data-field="${esc(f.key)}"
+                       value="${esc(fieldOf('plan', f.key))}" placeholder="${esc(f.placeholder)}" ${ro}></div>`).join('')}
+            ${tpl.summary_hint ? `<div class="sh">${esc(tpl.summary_hint)}</div>` : ''}
+        </div>`;
+        })()}
         ${(readonly && !(plan.memo || '')) ? '' : `
         <div class="plc-memo">
             <div class="mt">📝 備忘</div>
