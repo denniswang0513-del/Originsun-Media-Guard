@@ -20,6 +20,7 @@
  */
 
 import { tfetch } from './prop-fetch.js';
+import { renderShapes } from './annotate.js';
 
 const STYLE_ID = 'rfc-style';
 const API = '/api/v1/references';
@@ -118,6 +119,25 @@ html.ref-theme-light .rfc { --rfc-ink: #262626; --rfc-sub: #737373; --rfc-line: 
   background: var(--rfc-cell); border: 1px solid var(--rfc-line);
   font-family: inherit; font-size: 11.5px; }
 .rfc .rfc-cb { display: flex; gap: 6px; align-items: center; font-size: 12px; cursor: pointer; }
+.rfc .rfc-shots { display: grid; grid-template-columns: repeat(2, 1fr); gap: 12px; }
+.rfc .rfc-shot { border: 1px solid var(--rfc-line); border-radius: 2px; background: var(--rfc-cell); }
+.rfc .rfc-shot .pic { position: relative; line-height: 0; cursor: zoom-in; background: #000; }
+.rfc .rfc-shot .pic img { width: 100%; display: block; }
+.rfc .rfc-shot .pic svg { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
+.rfc .rfc-shot .pic .tc { position: absolute; left: 6px; bottom: 6px; font-size: 11px;
+  background: rgba(0,0,0,.72); color: #fff; padding: 1px 6px; border-radius: 2px; }
+.rfc .rfc-shot .pic .mk { position: absolute; right: 6px; top: 6px; font-size: 10.5px;
+  background: rgba(0,0,0,.6); color: #fff; padding: 1px 6px; border-radius: 2px; }
+.rfc .rfc-shot .sb { display: flex; gap: 4px; align-items: center; padding: 5px 6px; }
+.rfc .rfc-shot .sb input.tcin { width: 62px; flex: none; }
+.rfc .rfc-shot .sb .sp { flex: 1; min-width: 0; }
+.rfc .rfc-shot .rfc-btn { padding: 2px 6px; font-size: 11px; white-space: nowrap; }
+.rfc .rfc-shot .who { font-size: 10.5px; color: var(--rfc-sub); padding: 0 8px 6px; }
+.rfc .rfc-shotbar { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-top: 10px; }
+.rfc .rfc-drop { border: 1px dashed var(--rfc-line); border-radius: 2px; padding: 14px;
+  text-align: center; font-size: 11.5px; color: var(--rfc-sub); line-height: 1.7; }
+.rfc .rfc-drop.hot { border-color: var(--rfc-accent); color: var(--rfc-accent); }
+@media (max-width: 620px) { .rfc .rfc-shots { grid-template-columns: 1fr; } }
 @media (max-width: 860px) { .rfc .rfc-grid { grid-template-columns: 1fr; } }
 `;
 
@@ -167,10 +187,19 @@ export function renderReference(container, opts) {
     const base = shared
         ? `${API}/shared/${encodeURIComponent(opts.shareToken)}/${encodeURIComponent(ref.id)}`
         : `${API}/${encodeURIComponent(ref.id)}`;
+    const ac = new AbortController();
     const ctx = {
-        ...opts, can,
+        ...opts, can, signal: ac.signal, abort: () => ac.abort(),
         fetcher: opts.fetcher || tfetch,
-        endpoints: { patch: base, rows: `${base}/research/rows`, row: (id) => `${base}/research/rows/${encodeURIComponent(id)}` },
+        endpoints: {
+            patch: base,
+            rows: `${base}/research/rows`,
+            row: (id) => `${base}/research/rows/${encodeURIComponent(id)}`,
+            // guest 參數收進產生函式：公開路徑要帶署名與不可見識別，call site 不碰 query string
+            shots: (guest) => `${base}/shots${_guestQS(shared, guest)}`,
+            shot: (id, guest) => `${base}/shots/${encodeURIComponent(id)}${_guestQS(shared, guest)}`,
+            shotsReorder: `${base}/shots/reorder`,
+        },
         reload: opts.reload || (async () => (await (opts.fetcher || tfetch)(base)).reference),
     };
     container.classList.add('rfc');
@@ -245,6 +274,16 @@ export function renderReference(container, opts) {
                 <span class="rfc-hint">四欄同時看：這支片為誰解決什麼、用什麼概念、拿什麼素材、哪個橋段最有效。</span>
             </div>
         </div>
+        <div class="rfc-card">
+            <h4 id="rfc-shots-h">截圖（${(ref.shots || []).length}）</h4>
+            <div class="rfc-shots" id="rfc-shots"></div>
+            <div class="rfc-shotbar">
+                <button class="rfc-btn" id="rfc-shot-pick">＋ 上傳截圖</button>
+                <input type="file" id="rfc-shot-file" accept="image/*" multiple style="display:none;">
+                <span class="rfc-hint">或直接 Ctrl+V 貼上剪貼簿的截圖；點圖可加框／箭頭／文字標示。</span>
+            </div>
+            <div class="rfc-drop" id="rfc-drop">把圖片拖進來也可以</div>
+        </div>
         ${ref.links ? `
         <div class="rfc-card rfc-links">
             <h4>被引用（${ref.links.length}）</h4>
@@ -274,7 +313,25 @@ export function renderReference(container, opts) {
         ta.addEventListener('input', () => _grow(ta));
     });
     _paintChips(container, ref, can);
+    _paintShots(container, ctx);
     _wire(container, ctx);
+}
+
+// 公開共編的身分：署名（顯示用）+ 瀏覽器產生的不可見 key（「只刪自己貼的」憑證）
+function _guestKey() {
+    let k = localStorage.getItem('plan_guest_key');
+    if (!k) {
+        k = (crypto.randomUUID ? crypto.randomUUID() : String(Math.random())).replace(/-/g, '');
+        localStorage.setItem('plan_guest_key', k);
+    }
+    return k;
+}
+
+function _guestQS(shared, guest) {
+    if (!shared) return '';
+    const p = new URLSearchParams({ guest_key: _guestKey() });
+    if (guest) p.set('guest_name', guest);
+    return '?' + p.toString();
 }
 
 function _grow(ta) { ta.style.height = 'auto'; ta.style.height = ta.scrollHeight + 'px'; }
@@ -319,6 +376,7 @@ function _wire(container, ctx) {
     const redraw = async () => {
         timers.forEach(clearTimeout);
         timers.clear();
+        ctx.abort?.();                 // 收掉掛在 document 上的 paste 監聽（連同它抓的舊 ctx）
         const fresh = await ctx.reload();
         container.innerHTML = '';
         renderReference(container, { ...ctx, ref: fresh });
@@ -334,12 +392,11 @@ function _wire(container, ctx) {
         const save = async () => {
             if (el.value === el._saved) return;
             const want = el.value;
-            const body = isRes
-                ? { kind: 'research', row_id: el.dataset.row, col: el.dataset.col,
-                    value: want, base_updated_at: base.get(el) }
-                : { kind: 'field', key: el.dataset.key, value: want };
             try {
-                const d = await patch(body);
+                const d = await patch(isRes
+                    ? { kind: 'research', row_id: el.dataset.row, col: el.dataset.col,
+                        value: want, base_updated_at: base.get(el) }
+                    : { kind: 'field', key: el.dataset.key, value: want });
                 el._saved = want;
                 if (isRes) base.set(el, d.updated_at);
                 el.parentElement.querySelector('.rfc-conflict')?.remove();
@@ -362,6 +419,8 @@ function _wire(container, ctx) {
     });
 
     _wireFacets(container, ctx, { patch, say });
+    _wireShotUploads(container, ctx, say);
+    _wireShotItems(container, ctx, say);
 
     // 研究加列 / 刪列（刪列的「至少留一列」規則守在後端）
     container.querySelector('#rfc-add-row')?.addEventListener('click', async () => {
@@ -373,6 +432,171 @@ function _wire(container, ctx) {
         try { await fetcher(endpoints.row(btn.dataset.row), { method: 'DELETE' }); await redraw(); }
         catch (e) { say('刪列失敗：' + (e.message || e), true); }
     }));
+}
+
+// ── 截圖牆（兩欄，對齊 Notion 的 Pic 01 / Pic 02）────────────
+function _paintShots(container, ctx) {
+    const host = container.querySelector('#rfc-shots');
+    if (!host) return;
+    const shots = ctx.ref.shots || [];
+    const head = container.querySelector('#rfc-shots-h');
+    if (head) head.textContent = `截圖（${shots.length}）`;
+    host.innerHTML = shots.length ? shots.map((sh, i) => `
+        <div class="rfc-shot" data-sid="${attr(sh.id)}">
+            <div class="pic" data-open="${attr(sh.id)}">
+                <img src="${attr(sh.image_url)}" alt="截圖" loading="lazy">
+                <svg></svg>
+                ${sh.timecode ? `<span class="tc">${esc(sh.timecode)}</span>` : ''}
+                ${(sh.annotations?.shapes || []).length ? `<span class="mk">✎ ${sh.annotations.shapes.length}</span>` : ''}
+            </div>
+            <div class="sb">
+                <input class="rfc-in tcin" data-shot="${attr(sh.id)}" data-sfield="timecode" placeholder="0:42">
+                <input class="rfc-in sp" data-shot="${attr(sh.id)}" data-sfield="caption" placeholder="這張要看什麼？">
+                <button class="rfc-btn" data-shot-up="${attr(sh.id)}" title="往前排"${i === 0 ? ' disabled' : ''}>←</button>
+                <button class="rfc-btn" data-shot-down="${attr(sh.id)}" title="往後排"${i === shots.length - 1 ? ' disabled' : ''}>→</button>
+                <button class="rfc-btn danger" data-shot-del="${attr(sh.id)}" title="刪掉這張">刪</button>
+            </div>
+            ${sh.created_by ? `<div class="who">${esc(sh.created_by)}</div>` : ''}
+        </div>`).join('')
+        : '<div class="rfc-hint">還沒有截圖。看片時遇到好畫面就截圖貼上來，再框出重點。</div>';
+
+    // 值走 property；標示疊圖用同一份 renderShapes（與編輯器共用繪圖規則）。
+    // 卡片順序就是 shots 順序 → 用 children 對位，不用逐張 querySelector 掃 DOM。
+    [...host.children].forEach((card, i) => {
+        const sh = shots[i];
+        if (!sh) return;
+        card.querySelectorAll('[data-sfield]').forEach(inp => {
+            inp.value = sh[inp.dataset.sfield] || '';
+            inp._saved = inp.value;                 // dirty-check 基準
+        });
+        const svg = card.querySelector('svg');
+        if (svg) renderShapes(svg, sh.annotations);
+    });
+}
+
+// 上傳入口（工具列 / 拖放 / 貼上）—— **只在整頁 render 時綁一次**。
+// 這些節點不會被 _paintShots 換掉，若隨重畫重綁，第 k 次重畫後選一次檔會送 k+1 份
+// （同一張圖產生 k+1 列截圖）。實測踩過，所以一次性與每次重畫的綁定分成兩個函式。
+function _wireShotUploads(container, ctx, say) {
+    const { ref, fetcher, endpoints, getGuestName } = ctx;
+    if (!container.querySelector('#rfc-shots')) return;
+    const guest = () => (getGuestName ? (getGuestName() || '') : '');
+
+    async function upload(files) {
+        const list = [...files].filter(f => f.type.startsWith('image/'));
+        if (!list.length) return;
+        say(`上傳 ${list.length} 張…`);
+        const fd = new FormData();
+        list.forEach(f => fd.append('files', f));        // 端點吃多檔：一次 request
+        try {
+            const d = await fetcher(endpoints.shots(guest()), { method: 'POST', body: fd });
+            ref.shots = [...(ref.shots || []), ...(d.shots || [])];
+            _paintShots(container, ctx);                  // 用回傳值，不重抓整份 reference
+            say('已儲存 ✓');
+        } catch (e) { say('上傳失敗：' + (e.message || e), true); }
+    }
+
+    container.querySelector('#rfc-shot-pick').addEventListener('click',
+        () => container.querySelector('#rfc-shot-file').click());
+    container.querySelector('#rfc-shot-file').addEventListener('change', (e) => {
+        upload(e.target.files);
+        e.target.value = '';
+    });
+    // 貼上：整頁監聽（焦點在輸入框時不搶）。ctx.signal 讓重畫時一起收掉舊 closure。
+    document.addEventListener('paste', (e) => {
+        if (!container.isConnected) return;
+        const t = e.target;
+        if (t && (t.tagName === 'TEXTAREA' || (t.tagName === 'INPUT' && t.type !== 'file'))) return;
+        const files = [...(e.clipboardData?.files || [])];
+        if (files.length) { e.preventDefault(); upload(files); }
+    }, ctx.signal ? { signal: ctx.signal } : false);
+
+    const drop = container.querySelector('#rfc-drop');
+    ['dragenter', 'dragover'].forEach(ev => drop.addEventListener(ev, (e) => {
+        e.preventDefault(); drop.classList.add('hot');
+    }));
+    ['dragleave', 'drop'].forEach(ev => drop.addEventListener(ev, () => drop.classList.remove('hot')));
+    drop.addEventListener('drop', (e) => { e.preventDefault(); upload(e.dataTransfer?.files || []); });
+}
+
+// 牆內每張卡的操作（標示 / 排序 / 刪除）—— 節點每次重畫都換新，所以走事件委派綁一次。
+function _wireShotItems(container, ctx, say) {
+    const { ref, fetcher, endpoints, getGuestName } = ctx;
+    const host = container.querySelector('#rfc-shots');
+    if (!host) return;
+    const guest = () => (getGuestName ? (getGuestName() || '') : '');
+    const shotOf = (id) => (ref.shots || []).find(x => x.id === id);
+
+    // 說明 / 時間碼：委派 input + focusout —— 牆每次重畫都換新節點，逐顆綁會漏（實測踩過）
+    const timers = new Map();
+    const saveField = async (inp) => {
+        clearTimeout(timers.get(inp));
+        if (inp.value === inp._saved) return;
+        const want = inp.value;
+        try {
+            await fetcher(endpoints.shot(inp.dataset.shot), { method: 'PATCH',
+                json: { [inp.dataset.sfield]: want } });
+            inp._saved = want;
+            const sh = shotOf(inp.dataset.shot);
+            if (sh) sh[inp.dataset.sfield] = want;
+            say('已儲存 ✓');
+        } catch (e) { say('儲存失敗：' + (e.message || e), true); }
+    };
+    host.addEventListener('input', (e) => {
+        const inp = e.target.closest('[data-sfield]');
+        if (!inp) return;
+        if (inp._saved === undefined) inp._saved = '';
+        clearTimeout(timers.get(inp));
+        timers.set(inp, setTimeout(() => saveField(inp), 800));
+    });
+    host.addEventListener('focusout', (e) => {
+        const inp = e.target.closest('[data-sfield]');
+        if (inp) saveField(inp);
+    });
+
+    host.addEventListener('click', async (e) => {
+        const pic = e.target.closest('[data-open]');
+        if (pic) {
+            const sh = shotOf(pic.dataset.open);
+            if (!sh) return;
+            const { openAnnotator } = await import('./annotate.js');
+            const saved = await openAnnotator({
+                imageUrl: sh.image_url, annotations: sh.annotations, title: sh.caption || '',
+                onSave: async (ann) => {
+                    const d = await fetcher(endpoints.shot(sh.id), { method: 'PATCH', json: { annotations: ann } });
+                    Object.assign(sh, d.shot || { annotations: ann });
+                },
+            });
+            if (saved) _paintShots(container, ctx);
+            return;
+        }
+        const mv = e.target.closest('[data-shot-up], [data-shot-down]');
+        if (mv) {
+            const sid = mv.dataset.shotUp || mv.dataset.shotDown;
+            const delta = mv.dataset.shotUp ? -1 : 1;
+            const ids = (ref.shots || []).map(x => x.id);
+            const i = ids.indexOf(sid), j = i + delta;
+            if (i < 0 || j < 0 || j >= ids.length) return;
+            [ids[i], ids[j]] = [ids[j], ids[i]];
+            try {
+                await fetcher(endpoints.shotsReorder, { method: 'POST', json: { ids } });
+                ref.shots = ids.map(shotOf).filter(Boolean);   // 順序在本地就算得出來
+                _paintShots(container, ctx);
+                say('已儲存 ✓');
+            } catch (err) { say('排序失敗：' + (err.message || err), true); }
+            return;
+        }
+        const del = e.target.closest('[data-shot-del]');
+        if (del) {
+            if (!confirm('刪掉這張截圖？（連同標示）')) return;
+            try {
+                await fetcher(endpoints.shot(del.dataset.shotDel, guest()), { method: 'DELETE' });
+                ref.shots = (ref.shots || []).filter(x => x.id !== del.dataset.shotDel);
+                _paintShots(container, ctx);
+                say('已儲存 ✓');
+            } catch (err) { say('刪除失敗：' + (err.message || err), true); }
+        }
+    });
 }
 
 // ── 分類 chips 的加/刪（chips 由 innerHTML 重畫 → 刪鈕用事件委派，不逐顆綁）──

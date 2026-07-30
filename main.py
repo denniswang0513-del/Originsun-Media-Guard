@@ -480,6 +480,7 @@ async def _on_startup():
                         ("preprod_references", "provider", "VARCHAR(16)"),
                         ("preprod_references", "video_id", "VARCHAR(64)"),
                         ("preprod_references", "updated_at", "TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP"),
+                        ("preprod_reference_shots", "created_key", "VARCHAR(64)"),
                     ]
                     for tbl, col, coltype in _crm_cols:
                         try:

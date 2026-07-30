@@ -210,3 +210,41 @@ UNIQUE(reference_id, target_type, target_id)
 - **圖床依賴 NAS**：`Assets_Nginx` 離線時上傳失敗 → 沿用既有 503「圖床目錄不可達」明確提示，不要靜默吞掉
 - **標示編輯器是唯一「新東西」**：其餘全是既有模式複用。若時間緊，階段 2 可先只做「截圖 + 說明 + 時間碼」，標示延後 —— 純截圖牆已經解掉大半價值
 - **facets JSONB 篩選效能**：資料量到千列以上要記得建 GIN index，別用 LIKE 掃 JSON 字串
+
+---
+
+## 實作紀錄
+
+### 階段 1 已完成（2026-07-30，commit `cd66d3f`）
+
+`routers/api_references.py`（新 router，`/api/v1/references`）+ `frontend/reference.html`
+（片庫總覽 + 詳情，登入/公開共用一條路徑）+ `reference-page.js` 可換膚元件（`--rfc-*`）。
+提案側欄與 SPA 卡片加「研究頁 ↗」入口。
+
+與規劃的差異（刻意）：
+- `provider/video_id` 改「**讀時推導 + 寫時同步**」—— 建片的三條路都在 api_proposals，
+  只在新 router 填等於所有既有與新建的片都播不了；讀時推導讓全部既有列免遷移即可播。
+- 公開放行範圍集中成一張 `_PUBLIC_ALLOW`（kind × 欄位），並與 api_proposals 共用
+  `assert_public_ref_writable()`（被別的提案共用的片，免登入連結不給改）。
+- 清單走 `defer(research)`；facet 篩選在 Python 但**不下 SQL limit**（否則只在最新 N 筆裡找）。
+
+### 階段 2 已完成（2026-07-30）
+
+`preprod_reference_shots` 表 + 截圖端點（登入 4 / 公開 3）+ `annotate.js` 標示編輯器
+（框／箭頭／文字／手繪、顏色線寬、復原、Esc/Ctrl+Z）+ 兩欄截圖牆（時間碼角標、
+說明自動儲存、← → 排序、刪除）。
+
+與規劃的差異（刻意）：
+- 圖**不走 NAS paste 圖床**，落地 `uploads/references/{rid}/`（照 deck 上傳慣例）：
+  這頁只由 master serve，放 NAS 換不到可用性，只多一個離線失敗點。
+- 上傳端點收**多檔**（`List[UploadFile]`，比照 api_locations 照片牆）—— 一次 auth／
+  一次上限檢查／一次 commit，前端不用寫進度與中斷樣板。
+- 公開刪圖的憑證是瀏覽器產的不可見 `guest_key`（localStorage），**不是** created_by 署名 ——
+  署名會印在截圖卡上（就在刪除鈕旁），拿它當憑證等於把鑰匙貼在門上。舊列無 key 時退回比署名。
+- 標示有總量上限（單張 64KB / 200 shapes，超過回 413 不靜默截斷）；手繪點位移 < 0.004 不記點。
+
+踩過並留下守衛的坑：
+- **重畫後重綁監聽 → 同一張圖上傳 N 份**：`_paintShots` 只換牆內節點，但工具列/拖放/貼上
+  在牆外。現在拆成 `_wireShotUploads`（整頁 render 才綁一次，paste 用 AbortController 收）
+  與 `_wireShotItems`（牆內走事件委派）。
+- 截圖說明/時間碼**必須**走委派：牆每次重畫都換新節點，逐顆綁會漏（實測整段沒存到）。

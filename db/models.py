@@ -913,6 +913,23 @@ class PreprodReference(Base):
     updated_at = Column(DateTime(timezone=True), server_default=func.now())
 
 
+class PreprodReferenceShot(Base):
+    """參考影片截圖（v2 階段 2）—— 圖存 uploads/references/{reference_id}/{id}.webp，
+    標示存 annotations JSONB（相對座標的圖形清單，不燒進圖 → 可再編輯、原圖不失真）。"""
+    __tablename__ = "preprod_reference_shots"
+
+    id = Column(String(32), primary_key=True)                    # uuid4 hex
+    reference_id = Column(String(32), nullable=False, index=True)  # soft FK → preprod_references.id
+    image_url = Column(String(512), nullable=False)              # /uploads/references/{rid}/{id}.webp
+    timecode = Column(String(16), nullable=True)                 # 影片時間碼，如 "0:42"
+    caption = Column(String(255), nullable=True)                 # 這張要看什麼
+    annotations = Column(JSONB, nullable=True)                   # {v:1, shapes:[{type,x,y,...}]}
+    sort_order = Column(Integer, nullable=True)
+    created_by = Column(String(64), nullable=True)               # 內部帳號 or 「名字(外部)」（顯示用）
+    created_key = Column(String(64), nullable=True)              # 公開路徑的瀏覽器不可見識別（「只刪自己的」憑證）
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+
 class PreprodProposalRef(Base):
     """提案 ↔ 參考片 多對多關聯（刪提案只刪關聯列，reference 是共用資產保留）。"""
     __tablename__ = "preprod_proposal_refs"

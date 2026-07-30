@@ -16,12 +16,14 @@
 寫入前另過 `assert_public_ref_writable()`：被別的提案共用的片不給免登入連結改
 （與 api_proposals 的公開改片規則同一份，見該函式 docstring）。
 """
+import asyncio
 import json
+import os
 import uuid
 from datetime import datetime, timezone
-from typing import Optional
+from typing import List, Optional
 
-from fastapi import APIRouter, HTTPException, Request  # type: ignore
+from fastapi import APIRouter, Body, File, HTTPException, Request, UploadFile  # type: ignore
 
 from core.auth import check_admin_or_module
 from core.db_guard import db_factory_or_503 as _require_factory
@@ -45,6 +47,20 @@ _TEXT_MAX_BYTES = 16 * 1024
 _RESEARCH_MAX_BYTES = 200 * 1024
 
 _EDITABLE_FIELDS = ("title", "url", "note", "description", "curated", "thumb_url")
+
+# ── 截圖（v2 階段 2）──
+# 圖落地在 uploads/references/{rid}/（照 deck 上傳的既有慣例，main.py 已 mount /uploads）：
+# 這頁只由 master serve（NAS 官網容器沒有 CRM 後端），放 NAS 圖床換不到可用性，
+# 反而多一個離線失敗點。規劃 §4.1 原寫「走 paste 圖床」，這裡刻意改成與 deck 同路。
+_SHOT_MAX_BYTES = 12 * 1024 * 1024     # 單張上限（截圖/手機照綽綽有餘）
+_SHOT_MAX_SIDE = 1800                  # 長邊縮到 1800 後轉 WebP
+_SHOTS_MAX = 40                        # 每支片截圖上限
+_SHOT_CAPTION_MAX = 255
+_SHOT_TIMECODE_MAX = 16
+_SHOT_SHAPES_MAX = 200                 # 單張標示圖形數上限
+_SHOT_ANNO_MAX_BYTES = 64 * 1024       # 單張標示總量（手繪點數會長，要有天花板）
+_UPLOAD_BASE = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "uploads")
+_SHOT_EDITABLE = ("caption", "timecode", "annotations")
 # 公開連結（免登入）的放行表：kind → True 全放 / tuple 白名單 / False 全禁。
 # 這是「共編連結能改什麼」的唯一正本 —— 別在端點裡另外寫 if。
 _PUBLIC_ALLOW = {"field": ("title", "note", "description"), "research": True, "facet": False}
@@ -293,6 +309,148 @@ def apply_ref_patch(ref, req: ReferencePatch, user: str, *, public: bool = False
     return {"updated_at": now}
 
 
+def shot_dict(s) -> dict:
+    """截圖序列化（改欄位名要同步 reference-page.js / annotate.js）。"""
+    return {"id": s.id, "image_url": s.image_url or "", "timecode": s.timecode or "",
+            "caption": s.caption or "", "annotations": _norm_annotations(s.annotations),
+            "sort_order": s.sort_order or 0, "created_by": s.created_by or "",
+            "created_at": s.created_at.isoformat() if s.created_at else None}
+
+
+def _clamp(v, default: float = 0.0) -> float:
+    """座標夾擠到 -1~2（容許少量出界的拖曳，但不給離譜值）；不可解析 → default。"""
+    try:
+        return max(-1.0, min(2.0, float(v)))
+    except (TypeError, ValueError):
+        return default
+
+
+def _norm_annotations(raw) -> dict:
+    """標示圖形正規化：座標一律 0~1 相對值（圖片縮放不跑位），未知型別丟掉。
+
+    形狀契約（前後端共同，改這裡要同步 annotate.js）：
+      {v:1, shapes:[{type:'rect'|'arrow'|'text'|'pen', x,y,w,h, x2,y2,
+                     points:[[x,y]…], text, color, width}]}
+    """
+    src = raw if isinstance(raw, dict) else {}
+    shapes = src.get("shapes") if isinstance(src.get("shapes"), list) else []
+    if len(shapes) > _SHOT_SHAPES_MAX:            # 靜默截斷會讓人以為存好了 → 明講
+        raise HTTPException(status_code=413, detail=f"單張標示超過 {_SHOT_SHAPES_MAX} 個上限")
+    out = []
+    for sh in shapes:
+        if not isinstance(sh, dict) or sh.get("type") not in ("rect", "arrow", "text", "pen"):
+            continue
+        try:
+            width = max(1, min(12, int(sh.get("width") or 3)))
+        except (TypeError, ValueError):
+            width = 3
+        item = {"type": sh["type"], "x": _clamp(sh.get("x")), "y": _clamp(sh.get("y")),
+                "color": str(sh.get("color") or "#e05252")[:24], "width": width}
+        if sh["type"] == "rect":
+            item.update(w=_clamp(sh.get("w")), h=_clamp(sh.get("h")))
+        elif sh["type"] == "arrow":
+            item.update(x2=_clamp(sh.get("x2")), y2=_clamp(sh.get("y2")))
+        elif sh["type"] == "text":
+            item["text"] = str(sh.get("text") or "")[:200]
+        else:                                     # pen
+            pts = sh.get("points") if isinstance(sh.get("points"), list) else []
+            item["points"] = [[_clamp(p[0]), _clamp(p[1])] for p in pts[:400]
+                              if isinstance(p, (list, tuple)) and len(p) >= 2]
+        out.append(item)
+    result = {"v": 1, "shapes": out}
+    _check_text_size(json.dumps(result, ensure_ascii=False), _SHOT_ANNO_MAX_BYTES, "標示")
+    return result
+
+
+async def _shots_of(session, rid: str) -> list:
+    from sqlalchemy import select
+    from db.models import PreprodReferenceShot
+    rows = (await session.execute(
+        select(PreprodReferenceShot)
+        .where(PreprodReferenceShot.reference_id == rid)
+        .order_by(PreprodReferenceShot.sort_order, PreprodReferenceShot.created_at)
+    )).scalars().all()
+    return [shot_dict(s) for s in rows]
+
+
+async def _add_shots(session, rid: str, files, user: str, key: str = "") -> list:
+    """存多張圖（轉 WebP）+ 建列（呼叫端 commit）。
+
+    收 list[UploadFile] 而非單檔：貼一整批截圖是常態，逐張一個 request 會讓
+    上限檢查與 sort_order 都只能逐張近似，前端還得自己寫進度/中斷樣板。
+    """
+    from sqlalchemy import func as safunc, select
+    from db.models import PreprodReferenceShot
+    from core.image_utils import save_webp_or_none
+
+    n = (await session.execute(
+        select(safunc.count(PreprodReferenceShot.id))
+        .where(PreprodReferenceShot.reference_id == rid))).scalar() or 0
+    if n + len(files) > _SHOTS_MAX:
+        raise HTTPException(status_code=409,
+                            detail=f"截圖上限 {_SHOTS_MAX} 張（目前 {n} 張、這批 {len(files)} 張）")
+
+    dest_dir = os.path.join(_UPLOAD_BASE, "references", rid)
+    out = []
+    for f in files:
+        content = await f.read()
+        if not content:
+            raise HTTPException(status_code=400, detail="空檔案")
+        if len(content) > _SHOT_MAX_BYTES:
+            raise HTTPException(status_code=413, detail="圖片超過 12MB 上限")
+        sid = uuid.uuid4().hex
+        saved = await asyncio.to_thread(save_webp_or_none, content, dest_dir, sid, _SHOT_MAX_SIDE)
+        if saved is None:
+            raise HTTPException(status_code=400, detail="無法辨識的圖片格式")
+        n += 1
+        shot = PreprodReferenceShot(
+            id=sid, reference_id=rid,
+            image_url=f"/uploads/references/{rid}/{os.path.basename(saved)}",
+            sort_order=n, created_by=user, created_key=key or None)
+        session.add(shot)
+        out.append(shot)
+    return out
+
+
+async def _get_shot_or_404(session, rid: str, sid: str):
+    from db.models import PreprodReferenceShot
+    shot = await session.get(PreprodReferenceShot, sid)
+    if not shot or shot.reference_id != rid:
+        raise HTTPException(status_code=404, detail="找不到這張截圖")
+    return shot
+
+
+def _apply_shot_patch(shot, body: dict):
+    """截圖欄位寫入（caption/timecode/annotations）—— 登入與公開兩路共用。"""
+    touched = False
+    for key in _SHOT_EDITABLE:
+        if key not in body:
+            continue
+        touched = True
+        if key == "annotations":
+            shot.annotations = _norm_annotations(body.get(key))
+        elif key == "timecode":
+            shot.timecode = str(body.get(key) or "").strip()[:_SHOT_TIMECODE_MAX]
+        else:
+            shot.caption = str(body.get(key) or "").strip()[:_SHOT_CAPTION_MAX]
+    if not touched:
+        raise HTTPException(status_code=422, detail="沒有可寫入的欄位（caption/timecode/annotations）")
+
+
+def _delete_shot_file(image_url: str):
+    """best-effort 刪檔（只刪本模組自產的 /uploads/references/… 路徑）。"""
+    if not image_url.startswith("/uploads/references/"):
+        return
+    root = os.path.realpath(os.path.join(_UPLOAD_BASE, "references"))
+    target = os.path.realpath(os.path.join(_UPLOAD_BASE, *image_url.split("/")[2:]))
+    if os.path.commonpath([root, target]) != root:      # 前綴過關但含 ../ 的字串
+        return
+    try:
+        os.remove(target)
+    except OSError:
+        pass
+
+
 def _append_research_row(ref) -> dict:
     """研究表加一列（登入與公開兩路同用；上限守在這裡，不在端點各寫一次）。"""
     research = _norm_research(ref.research)
@@ -399,6 +557,7 @@ async def get_reference(rid: str, request: Request):
         ref = await _get_ref_or_404(session, rid)
         d = ref_dict(ref)
         d["links"] = await _linked_targets(session, rid)   # 反向連結：這支片被誰引用
+        d["shots"] = await _shots_of(session, rid)
         return {"reference": d}
 
 
@@ -446,6 +605,69 @@ async def delete_research_row(rid: str, row_id: str, request: Request):
     return {"status": "ok"}
 
 
+# ── 截圖（登入路徑）────────────────────────────────────────
+
+
+@router.post("/{rid}/shots")
+async def add_shots(rid: str, request: Request, files: List[UploadFile] = File(...)):
+    """上傳/貼上截圖（可多張，自動轉 WebP、長邊 1800）。"""
+    payload = _check_auth(request)
+    factory = _require_factory()
+    async with factory() as session:
+        await _get_ref_or_404(session, rid)
+        shots = await _add_shots(session, rid, files, payload.get("username") or "")
+        await session.commit()
+        return {"status": "ok", "shots": [shot_dict(x) for x in shots]}
+
+
+@router.patch("/{rid}/shots/{sid}")
+async def patch_shot(rid: str, sid: str, request: Request, body: dict = Body(...)):
+    """改截圖的說明 / 時間碼 / 標示圖形。"""
+    _check_auth(request)
+    factory = _require_factory()
+    async with factory() as session:
+        shot = await _get_shot_or_404(session, rid, sid)
+        _apply_shot_patch(shot, body)
+        await session.commit()
+        return {"status": "ok", "shot": shot_dict(shot)}
+
+
+@router.delete("/{rid}/shots/{sid}")
+async def delete_shot(rid: str, sid: str, request: Request):
+    _check_auth(request)
+    factory = _require_factory()
+    async with factory() as session:
+        shot = await _get_shot_or_404(session, rid, sid)
+        image_url = shot.image_url or ""
+        await session.delete(shot)
+        await session.commit()
+    _delete_shot_file(image_url)
+    return {"status": "ok"}
+
+
+@router.post("/{rid}/shots/reorder")
+async def reorder_shots(rid: str, request: Request, body: dict = Body(...)):
+    """重排截圖：body {ids: [...]}（沒帶到的維持原順序排在後面）。"""
+    _check_auth(request)
+    ids = body.get("ids")
+    if not isinstance(ids, list):
+        raise HTTPException(status_code=422, detail="ids 須為陣列")
+    factory = _require_factory()
+    from sqlalchemy import select
+    from db.models import PreprodReferenceShot
+    async with factory() as session:
+        rows = (await session.execute(
+            select(PreprodReferenceShot)
+            .where(PreprodReferenceShot.reference_id == rid))).scalars().all()
+        order = {str(i): n for n, i in enumerate(ids, start=1)}
+        for s_ in rows:
+            want = order.get(s_.id)
+            if want is not None and s_.sort_order != want:   # 沒列到的維持原順序，別壓平
+                s_.sort_order = want
+        await session.commit()
+        return {"status": "ok", "order": order}
+
+
 # ── 公開路徑（借提案的 plan_share token）──────────────────────
 
 
@@ -466,8 +688,10 @@ async def assert_public_ref_writable(session, rid: str):
         raise HTTPException(status_code=409, detail="這支參考影片被其他提案共用，請由後台編輯")
 
 
-async def _public_ref(session, token: str, rid: str, for_update: bool = False):
-    """token 驗簽 + 該片必須掛在該提案上（否則等於用一條連結讀整個片庫）。"""
+async def _public_ref(session, token: str, rid: str, for_update: bool = False,
+                      write: bool = False):
+    """token 驗簽 + 該片必須掛在該提案上（否則等於用一條連結讀整個片庫）。
+    write=True 一併過共用資產護欄 —— 權限配對綁在這裡，不靠每個端點記得抄兩行。"""
     from sqlalchemy import select
     from db.models import PreprodProposalRef
     from routers.api_proposals import _get_prop_by_plan_token
@@ -479,6 +703,8 @@ async def _public_ref(session, token: str, rid: str, for_update: bool = False):
     )).scalars().first()
     if not link:
         raise HTTPException(status_code=404, detail="這支參考影片沒掛在本提案")
+    if write:
+        await assert_public_ref_writable(session, rid)
     return prop, await _get_ref_or_404(session, rid, for_update=for_update)
 
 
@@ -488,7 +714,9 @@ async def get_shared_reference(token: str, rid: str):
     factory = _require_factory()
     async with factory() as session:
         _, ref = await _public_ref(session, token, rid)
-        return {"reference": ref_dict(ref)}   # 公開路徑不帶 links（別案引用是內部資訊）
+        d = ref_dict(ref)                    # 公開路徑不帶 links（別案引用是內部資訊）
+        d["shots"] = await _shots_of(session, rid)
+        return {"reference": d}
 
 
 @router.patch("/shared/{token}/{rid}")
@@ -496,8 +724,7 @@ async def patch_shared_reference(token: str, rid: str, req: ReferencePatch):
     """公開寫入（免登入）：只放行 title/note/description + 研究格。"""
     factory = _require_factory()
     async with factory() as session:
-        _, ref = await _public_ref(session, token, rid, for_update=True)
-        await assert_public_ref_writable(session, rid)
+        _, ref = await _public_ref(session, token, rid, for_update=True, write=True)
         out = apply_ref_patch(ref, req, _guest_identity(req.guest_name), public=True)
         await session.commit()
     return {"status": "ok", **out}
@@ -507,8 +734,56 @@ async def patch_shared_reference(token: str, rid: str, req: ReferencePatch):
 async def add_shared_research_row(token: str, rid: str):
     factory = _require_factory()
     async with factory() as session:
-        _, ref = await _public_ref(session, token, rid, for_update=True)
-        await assert_public_ref_writable(session, rid)
+        _, ref = await _public_ref(session, token, rid, for_update=True, write=True)
         row = _append_research_row(ref)
         await session.commit()
     return {"status": "ok", "row": row}
+
+
+@router.post("/shared/{token}/{rid}/shots")
+async def add_shared_shots(token: str, rid: str, guest_name: str = "", guest_key: str = "",
+                           files: List[UploadFile] = File(...)):
+    """公開貼截圖（免登入，可多張）—— 署名加「(外部)」，另存 guest_key 供「只刪自己的」。"""
+    factory = _require_factory()
+    async with factory() as session:
+        await _public_ref(session, token, rid, write=True)
+        shots = await _add_shots(session, rid, files, _guest_identity(guest_name),
+                                 key=(guest_key or "")[:64])
+        await session.commit()
+        return {"status": "ok", "shots": [shot_dict(x) for x in shots]}
+
+
+@router.patch("/shared/{token}/{rid}/shots/{sid}")
+async def patch_shared_shot(token: str, rid: str, sid: str, body: dict = Body(...)):
+    """公開改截圖說明/時間碼/標示（任何一張都可以標 —— 標示是共同看片的產物）。"""
+    factory = _require_factory()
+    async with factory() as session:
+        await _public_ref(session, token, rid, write=True)
+        shot = await _get_shot_or_404(session, rid, sid)
+        _apply_shot_patch(shot, body)
+        await session.commit()
+        return {"status": "ok", "shot": shot_dict(shot)}
+
+
+@router.delete("/shared/{token}/{rid}/shots/{sid}")
+async def delete_shared_shot(token: str, rid: str, sid: str, guest_name: str = "",
+                             guest_key: str = ""):
+    """公開刪截圖：**只能刪自己貼的**。
+
+    憑證是瀏覽器自己產的不可見 guest_key（localStorage），不是 created_by 署名 ——
+    署名會直接印在截圖卡上（就在刪除鈕旁邊），拿它當憑證等於把鑰匙貼在門上。
+    舊列沒有 key → 退回比對署名（至少擋得住訪客刪內部帳號貼的圖）。"""
+    factory = _require_factory()
+    async with factory() as session:
+        await _public_ref(session, token, rid, write=True)
+        shot = await _get_shot_or_404(session, rid, sid)
+        mine = ((shot.created_key and guest_key and shot.created_key == guest_key)
+                or (not shot.created_key and guest_name.strip()
+                    and (shot.created_by or "") == _guest_identity(guest_name)))
+        if not mine:
+            raise HTTPException(status_code=403, detail="只能移除自己貼的截圖")
+        image_url = shot.image_url or ""
+        await session.delete(shot)
+        await session.commit()
+    _delete_shot_file(image_url)
+    return {"status": "ok"}
