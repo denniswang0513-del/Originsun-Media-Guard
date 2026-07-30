@@ -51,7 +51,8 @@ html.plan-theme-light .plc { /* 官網白底（獨立網址） */
 .plc .plc-rowhead .t { font-weight: 600; font-size: 12px; }
 .plc .plc-rowhead .hint { color: var(--plc-sub); font-size: 10px; margin-top: 4px; line-height: 1.5; }
 .plc .plc-cell { background: var(--plc-cell); padding: 6px; }
-.plc .plc-cell textarea, .plc .plc-dir textarea { width: 100%; min-height: 110px; resize: vertical;
+.plc .plc-cell textarea, .plc .plc-dir textarea { width: 100%; min-height: 110px; resize: none;
+  box-sizing: border-box; overflow-y: hidden;
   background: transparent; color: var(--plc-ink); border: 1px solid transparent;
   border-radius: 2px; padding: 6px; font-size: 12.5px; line-height: 1.7; font-family: inherit; }
 .plc .plc-dir textarea { min-height: 60px; }
@@ -91,7 +92,8 @@ html.plan-theme-light .plc { /* 官網白底（獨立網址） */
 .plc .plc-memo { border: 1px solid var(--plc-line); border-radius: 2px; padding: 10px 12px;
   margin-top: 14px; background: var(--plc-card); }
 .plc .plc-memo .mt { font-size: 13px; font-weight: 600; margin-bottom: 6px; }
-.plc .plc-memo textarea { width: 100%; min-height: 90px; resize: vertical; background: transparent;
+.plc .plc-memo textarea { width: 100%; min-height: 90px; resize: none; background: transparent;
+  box-sizing: border-box; overflow-y: hidden;
   color: var(--plc-ink); border: 1px solid transparent; border-radius: 2px; padding: 6px;
   font-size: 12.5px; line-height: 1.7; font-family: inherit; }
 .plc .plc-memo textarea:focus { border-color: var(--plc-accent); outline: none; }
@@ -319,6 +321,8 @@ function _renderMatrix(container, opts, tpl, { readonly = false, exampleBack = n
         const k = ta.dataset.kind;
         ta.value = k === 'memo' ? (plan.memo || '')
             : (ta.dataset.lens ? cellOf(ta.dataset.lens, ta.dataset.how) : dirOf(ta.dataset.how)).answer;
+        _autoGrow(ta);
+        ta.addEventListener('input', () => _autoGrow(ta));   // 內容多長格子就多長
     });
     if (readonly) {
         container.querySelector('#plc-ex-back')?.addEventListener('click', exampleBack);
@@ -470,6 +474,12 @@ function _showRefreshBanner(container, opts) {
     container.prepend(bar);
 }
 
+// 內容多長格子就多長：清掉舊高度再量 scrollHeight（min-height 由 CSS 保底）
+function _autoGrow(ta) {
+    ta.style.height = 'auto';
+    ta.style.height = ta.scrollHeight + 'px';
+}
+
 function _showConflict(el, detail, save, base) {
     el.parentElement.querySelector('.plc-conflict')?.remove();
     const box = document.createElement('div');
@@ -490,5 +500,6 @@ function _showConflict(el, detail, save, base) {
         el._plcSaved = el.value;
         base.set(el, detail.updated_at);
         box.remove();
+        _autoGrow(el);
     });
 }
