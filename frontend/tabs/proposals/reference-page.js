@@ -243,6 +243,8 @@ export function renderReference(container, opts) {
                 <div class="rfc-embed">${_embedHtml(ref)}</div>
                 <div class="rfc-row"><label>連結</label><div class="v">
                     <input class="rfc-in" data-kind="field" data-key="url" placeholder="https://…">
+                    ${(can.facets === false || ref.thumb_url || ref.provider === 'youtube') ? '' :
+                      '<button class="rfc-btn" id="rfc-cover" style="margin:4px 0 0 6px;">抓封面</button>'}
                     <div class="rfc-url">${safeUrl(ref.url)
                         ? `<a href="${attr(ref.url)}" target="_blank" rel="noopener" style="color:var(--rfc-accent);">原始連結 ↗</a>`
                         : ''}</div>
@@ -262,6 +264,11 @@ export function renderReference(container, opts) {
                 <div class="rfc-card">
                     <h4>分類</h4>
                     ${facetBlock}
+                    ${can.facets === false ? '' : `
+                    <div class="rfc-rowbar">
+                        <button class="rfc-btn" id="rfc-ai">✨ AI 建議分類</button>
+                        <span class="rfc-hint" id="rfc-ai-msg"></span>
+                    </div>`}
                     ${can.facets === false ? '<div class="rfc-hint">分類由內部維護，共編連結不可修改。</div>' : ''}
                 </div>
             </div>
@@ -274,6 +281,7 @@ export function renderReference(container, opts) {
             </div>
             <div class="rfc-rowbar">
                 <button class="rfc-btn" id="rfc-add-row">＋ 加一列</button>
+                <button class="rfc-btn" id="rfc-md" title="把這支片的研究複製成 Markdown">複製 Markdown</button>
                 <span class="rfc-hint">四欄同時看：這支片為誰解決什麼、用什麼概念、拿什麼素材、哪個橋段最有效。</span>
             </div>
         </div>
@@ -406,7 +414,14 @@ function _wire(container, ctx) {
                         value: want, base_updated_at: base.get(el) }
                     : { kind: 'field', key: el.dataset.key, value: want });
                 el._saved = want;
-                if (isRes) base.set(el, d.updated_at);
+                // 本地 ref 一起更新 —— 匯出 Markdown / 重畫都讀它，只寫後端會拿到舊值
+                if (isRes) {
+                    base.set(el, d.updated_at);
+                    const row = (ref.research?.rows || []).find(r => r.id === el.dataset.row);
+                    if (row) row.cells[el.dataset.col] = { answer: want, updated_at: d.updated_at, updated_by: '' };
+                } else {
+                    ref[el.dataset.key] = want;
+                }
                 el.parentElement.querySelector('.rfc-conflict')?.remove();
                 say('已儲存 ✓');
                 if (el.dataset.key === 'url') await redraw();   // provider 變了，播放器要換
@@ -426,7 +441,10 @@ function _wire(container, ctx) {
         catch (err) { e.target.checked = !e.target.checked; say('儲存失敗：' + (err.message || err), true); }
     });
 
-    _wireFacets(container, ctx, { patch, say });
+    const saveFacet = _wireFacets(container, ctx, { patch, say });
+    _wireAiFacets(container, ctx, { say, saveFacet });
+    _wireCover(container, ctx, { say });
+    _wireMarkdown(container, ctx, { say });
     container.querySelectorAll('.rfc-link-del').forEach(btn => btn.addEventListener('click', async () => {
         if (!confirm('解除這筆引用？（片子仍留在片庫）')) return;
         try {
@@ -614,6 +632,88 @@ function _wireShotItems(container, ctx, say) {
     });
 }
 
+// ── 階段 4：AI 建議分類 / 抓封面 / 匯出 Markdown ──────────────
+function _wireAiFacets(container, ctx, { say, saveFacet }) {
+    const { ref, fetcher } = ctx;
+    container.querySelector('#rfc-ai')?.addEventListener('click', async (e) => {
+        const msg = container.querySelector('#rfc-ai-msg');
+        e.target.disabled = true;
+        msg.textContent = 'AI 讀這支片的資訊中…（十幾秒）';
+        try {
+            const d = await fetcher(`${API}/${encodeURIComponent(ref.id)}/ai_facets`, { method: 'POST' });
+            const sug = d.suggestions || {};
+            const picks = Object.entries(sug).filter(([, v]) => (v || []).length);
+            if (!picks.length) { msg.textContent = 'AI 沒有給出有把握的建議'; return; }
+            // 只回建議不自動寫入：分類是人的判斷，AI 只負責先想到
+            const preview = picks.map(([k, v]) =>
+                `${(FACETS.find(f => f.key === k) || {}).label || k}：${v.join('、')}`).join('\n');
+            if (!confirm(`AI 建議加上這些分類：\n\n${preview}\n\n要套用嗎？（現有分類會保留）`)) {
+                msg.textContent = '未套用';
+                return;
+            }
+            for (const [k, v] of picks) {
+                const f = FACETS.find(x => x.key === k);
+                if (!f || f.single) continue;
+                // 走 _wireFacets 的同一條寫入路徑，別開第二條分類寫入
+                await saveFacet(k, [...new Set([..._facetValues(ref, k), ...v])]);
+            }
+            msg.textContent = '已套用（可再手動增刪）';
+        } catch (err) {
+            msg.textContent = 'AI 建議失敗：' + (err.message || err);
+        } finally { e.target.disabled = false; }
+    });
+}
+
+function _wireCover(container, ctx, { say }) {
+    const { ref, fetcher } = ctx;
+    container.querySelector('#rfc-cover')?.addEventListener('click', async (e) => {
+        e.target.textContent = '抓取中…';
+        try {
+            const d = await fetcher(`${API}/${encodeURIComponent(ref.id)}/cover_fetch`, { method: 'POST' });
+            ref.thumb_url = d.thumb_url;
+            say('已儲存 ✓');
+            e.target.remove();
+        } catch (err) {
+            say('抓封面失敗：' + (err.message || err), true);
+            e.target.textContent = '抓封面';
+        }
+    });
+}
+
+function _wireMarkdown(container, ctx, { say }) {
+    const { ref } = ctx;
+    container.querySelector('#rfc-md')?.addEventListener('click', async () => {
+        const md = _toMarkdown(ref);
+        try { await navigator.clipboard.writeText(md); say('已複製 Markdown ✓'); }
+        catch { window.prompt('複製這段 Markdown：', md); }
+    });
+}
+
+// 研究內容匯出 Markdown（貼進提案簡報/會議記錄用）
+function _toMarkdown(ref) {
+    const L = [`# ${ref.title || ref.url}`, '', ref.url, ''];
+    if (ref.note) L.push(`> ${ref.note}`, '');
+    if (ref.description) L.push(ref.description, '');
+    const facets = FACETS
+        .map(f => [f.label, _facetValues(ref, f.key).join('、')])
+        .filter(([, v]) => v);
+    if (facets.length) {
+        L.push(...facets.map(([k, v]) => `- **${k}**：${v}`), '');
+    }
+    L.push('## 研究', '', '| ' + RESEARCH_COLS.map(c => c.label).join(' | ') + ' |',
+           '|' + RESEARCH_COLS.map(() => '---').join('|') + '|');
+    (ref.research?.rows || []).forEach(row => {
+        L.push('| ' + RESEARCH_COLS.map(c =>
+            (row.cells?.[c.key]?.answer || '').replace(/\n/g, '<br>').replace(/\|/g, '\\|')).join(' | ') + ' |');
+    });
+    const shots = ref.shots || [];
+    if (shots.length) {
+        L.push('', '## 截圖', '');
+        shots.forEach(s => L.push(`- ${s.timecode ? `\`${s.timecode}\` ` : ''}${s.caption || '(無說明)'} — ${location.origin}${s.image_url}`));
+    }
+    return L.join('\n');
+}
+
 // ── 分類 chips 的加/刪（chips 由 innerHTML 重畫 → 刪鈕用事件委派，不逐顆綁）──
 function _wireFacets(container, ctx, { patch, say }) {
     const { ref, can } = ctx;
@@ -649,6 +749,7 @@ function _wireFacets(container, ctx, { patch, say }) {
         const key = btn.dataset.delFacet;
         saveFacet(key, _facetValues(ref, key).filter(v => v !== btn.dataset.val));
     });
+    return saveFacet;      // AI 建議套用共用這條，不要第二條寫入路徑
 }
 
 function _conflict(el, detail, save, base) {

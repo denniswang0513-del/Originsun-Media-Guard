@@ -17,6 +17,7 @@
 （與 api_proposals 的公開改片規則同一份，見該函式 docstring）。
 """
 import asyncio
+import io
 import json
 import os
 import uuid
@@ -107,6 +108,21 @@ def _leaf(v) -> dict:
         return {"answer": str(v.get("answer") or ""),
                 "updated_at": v.get("updated_at"), "updated_by": v.get("updated_by") or ""}
     return {"answer": str(v or ""), "updated_at": None, "updated_by": ""}
+
+
+def _clean_facet_values(key: str, items):
+    """分類值清洗（去空白 → 截長 → 去重 → 上限）—— PATCH / CSV 匯入 / AI 建議共用。
+    單選族回字串，多選族回 list。原本三處各寫一份，且已經分岔（只有 PATCH 會去重）。"""
+    if key in _SINGLE_FACETS:
+        first = items if isinstance(items, str) else (items[0] if items else "")
+        return str(first or "").strip()[:_FACET_ITEM_MAX]
+    seen, out = set(), []
+    for x in (items if isinstance(items, (list, tuple)) else []):
+        v = str(x).strip()[:_FACET_ITEM_MAX]
+        if v and v not in seen:
+            seen.add(v)
+            out.append(v)
+    return out[:_FACET_MAX_ITEMS]
 
 
 def _norm_facets(raw) -> dict:
@@ -286,23 +302,10 @@ def apply_ref_patch(ref, req: ReferencePatch, user: str, *, public: bool = False
         key = req.key or ""
         if key not in FACET_KEYS:
             raise HTTPException(status_code=422, detail="未知的分類族")
+        if key not in _SINGLE_FACETS and req.value is not None and not isinstance(req.value, list):
+            raise HTTPException(status_code=422, detail="此分類須為字串陣列")
         facets = _norm_facets(ref.facets)
-        if key in _SINGLE_FACETS:
-            facets[key] = str(req.value or "").strip()[:_FACET_ITEM_MAX]
-        else:
-            if req.value is None:
-                items = []
-            elif isinstance(req.value, list):
-                items = req.value
-            else:
-                raise HTTPException(status_code=422, detail="此分類須為字串陣列")
-            seen, clean = set(), []
-            for x in items:                      # 去重 + 去空白，保持輸入順序
-                s = str(x).strip()[:_FACET_ITEM_MAX]
-                if s and s not in seen:
-                    seen.add(s)
-                    clean.append(s)
-            facets[key] = clean[:_FACET_MAX_ITEMS]
+        facets[key] = _clean_facet_values(key, req.value if req.value is not None else [])
         ref.facets = facets
     elif req.kind == "research":
         col = req.col or ""
@@ -805,6 +808,222 @@ async def reorder_shots(rid: str, request: Request, body: dict = Body(...)):
                 s_.sort_order = want
         await session.commit()
         return {"status": "ok", "order": order}
+
+
+# ── 階段 4：匯入 / 封面 / AI 建議 ─────────────────────────────
+
+# Notion「參考影片資料庫」匯出 CSV 的欄名 → 本系統欄位。Notion 匯出的標題列
+# 可能帶型別後綴（如「連結」或「連結 (URL)」），所以比對用「開頭相符」。
+_CSV_MAP = {   # 內部欄位 → 可接受的 CSV 欄名（要吃新匯出格式就往 tuple 加）
+    "title": ("項目", "名稱", "Name"), "url": ("連結", "連結 (URL)", "網址", "URL"),
+    "description": ("說明",), "note": ("備註",), "curated": ("建檔完成",),
+    "category": ("類別",), "brand": ("品牌",), "studio": ("製作單位",),
+    "paragon": ("典範",), "technique": ("技巧",), "emotion": ("情感取向",),
+    "keyword": ("關鍵字",), "study": ("內部專案",),
+}
+_CSV_TRUE = ("yes", "true", "1", "是", "v", "x")
+_CSV_MAX_BYTES = 4 * 1024 * 1024
+_CSV_MAX_ROWS = 2000
+
+
+def _csv_field(header: str) -> str:
+    """CSV 欄名 → 內部欄位（別名精確比對；找不到回空字串）。
+
+    刻意不用「開頭相符」：Notion 若出現「項目說明」這種欄名會誤中「項目」。
+    """
+    h = (header or "").strip().lstrip("\ufeff")
+    for field, aliases in _CSV_MAP.items():
+        if h in aliases:
+            return field
+    return ""
+
+
+def _row_to_ref_fields(header: list, line: list):
+    """CSV 一列 → (一般欄位 dict, facets dict)。純函式 —— Notion 匯出格式的解析規則
+    （逗號分隔的 multi_select、建檔完成的真值集合）集中在這裡，可單獨驗。"""
+    rec, facets = {}, {k: _clean_facet_values(k, []) for k in FACET_KEYS}
+    for i, cell in enumerate(line):
+        key = header[i] if i < len(header) else ""
+        val = (cell or "").strip()
+        if not key or not val:
+            continue
+        if key in FACET_KEYS:
+            facets[key] = _clean_facet_values(
+                key, val if key in _SINGLE_FACETS else val.split(","))
+        elif key == "curated":
+            rec["curated"] = val.lower() in _CSV_TRUE
+        else:
+            rec[key] = val
+    return rec, facets
+
+
+@router.post("/import_csv")
+async def import_csv(request: Request, file: UploadFile = File(...)):
+    """匯入 Notion 匯出的參考影片 CSV（以 url 去重，已存在的跳過不覆蓋）。
+
+    只做「新增」不做更新：匯入是一次性搬家，之後正本在這裡；
+    若允許覆蓋，第二次匯入會把大家在系統裡寫的研究/分類洗回 Notion 的舊值。
+    """
+    payload = _check_auth(request)
+    raw = await file.read()
+    if len(raw) > _CSV_MAX_BYTES:
+        raise HTTPException(status_code=413, detail="CSV 超過 4MB 上限")
+    try:
+        text = raw.decode("utf-8-sig")
+    except UnicodeDecodeError:
+        try:
+            text = raw.decode("big5")          # 有人會用 Excel 另存
+        except UnicodeDecodeError:
+            raise HTTPException(status_code=400, detail="無法辨識的檔案編碼（請存成 UTF-8 CSV）")
+
+    import csv as _csv
+    rows = list(_csv.reader(io.StringIO(text)))
+    if not rows:
+        raise HTTPException(status_code=400, detail="空的 CSV")
+    header = [_csv_field(h) for h in rows[0]]
+    if "url" not in header:
+        raise HTTPException(status_code=422,
+                            detail="找不到「連結」欄 —— 這看起來不是參考影片資料庫的匯出檔")
+    if len(rows) - 1 > _CSV_MAX_ROWS:
+        raise HTTPException(status_code=413, detail=f"超過 {_CSV_MAX_ROWS} 列上限")
+
+    factory = _require_factory()
+    from sqlalchemy import select
+    from db.models import PreprodReference
+
+    user = payload.get("username") or ""
+    created, skipped, bad = 0, 0, 0
+    async with factory() as session:
+        known = set((await session.execute(select(PreprodReference.url))).scalars().all())
+        for line in rows[1:]:
+            rec, facets = _row_to_ref_fields(header, line)
+            url = (rec.get("url") or "").strip()
+            if not url.lower().startswith(("http://", "https://")):
+                bad += 1
+                continue
+            if url in known:
+                skipped += 1
+                continue
+            ref = PreprodReference(
+                id=uuid.uuid4().hex, url=url[:512],
+                title=(rec.get("title") or "")[:255],
+                note=rec.get("note") or "", description=rec.get("description") or "",
+                curated=bool(rec.get("curated")), facets=facets)
+            _sync_video_meta(ref)
+            session.add(ref)
+            known.add(url)
+            created += 1
+        await session.commit()
+    return {"status": "ok", "imported": created, "skipped": skipped, "invalid": bad, "by": user}
+
+
+def _fetch_oembed_thumb(url: str) -> str:
+    """Vimeo / Facebook 的封面（oEmbed，3 秒逾時，失敗回空字串）。
+
+    只在使用者按「抓封面」時才打 —— 不放進寫入路徑：那會讓每次改連結都做一次
+    對外網路 I/O，NAS/對外斷線時整個存檔跟著卡住。
+    """
+    import json as _json
+    import urllib.parse
+    import urllib.request
+    host = (urllib.parse.urlparse(url).hostname or "").lower()
+    if host == "vimeo.com" or host.endswith(".vimeo.com"):
+        api = "https://vimeo.com/api/oembed.json?url=" + urllib.parse.quote(url, safe="")
+    elif host.endswith("facebook.com") or host.endswith("fb.watch"):
+        api = ("https://graph.facebook.com/v12.0/oembed_video?url="
+               + urllib.parse.quote(url, safe=""))
+    else:
+        return ""
+    try:
+        with urllib.request.urlopen(api, timeout=3) as resp:
+            data = _json.loads(resp.read(1_000_000).decode("utf-8", errors="replace"))
+        thumb = str(data.get("thumbnail_url") or "")
+        return thumb if thumb.startswith("https://") else ""
+    except Exception:
+        return ""                      # 對外抓不到封面不是錯誤，使用者可自己上傳
+
+
+@router.post("/{rid}/cover_fetch")
+async def cover_fetch(rid: str, request: Request):
+    """抓外站封面（Vimeo/FB oEmbed）—— YouTube 不需要（網址可直接組）。"""
+    _check_auth(request)
+    factory = _require_factory()
+    async with factory() as session:        # 先短查拿 url —— 別把列鎖與連線抱著出去打網路
+        ref = await _get_ref_or_404(session, rid)
+        url = ref.url or ""
+    thumb = await asyncio.to_thread(_fetch_oembed_thumb, url)
+    if not thumb:
+        raise HTTPException(status_code=404, detail="這個連結抓不到封面（可改用截圖當封面）")
+    async with factory() as session:
+        ref = await _get_ref_or_404(session, rid, for_update=True)
+        ref.thumb_url = thumb[:512]
+        ref.updated_at = datetime.now(timezone.utc)
+        await session.commit()
+        return {"status": "ok", "thumb_url": ref.thumb_url}
+
+
+_AI_MAX_PER_FACET = 4
+
+
+def _build_facet_prompt(ref, research: str) -> str:
+    """組 AI 建議分類的 prompt（f-string 直組，比 .replace 串接安全：
+    使用者資料裡若含 `{url}` 這種字樣不會被當成佔位符再展開一次）。"""
+    return f"""你是影像製作公司的資料整理助理。根據下面這支參考影片的資訊，建議分類標籤。
+只回 JSON，不要任何其他文字。
+
+格式：{{"category": [], "technique": [], "emotion": [], "keyword": [], "brand": [], "paragon": []}}
+
+規則：
+- category 從這些挑（可多選，沒把握就留空）：商業廣告 影視服務 活動紀錄 動態設計 企業形象 劇情短片 劇情長片 紀實短片 紀錄長片 宣傳影片 音樂MV 短影音 節目
+- technique 是剪輯/敘事手法（如：平行剪接、分割畫面、匹配剪輯、反轉、多事件剪輯）
+- emotion 是情感取向（如：溫暖、幽默、衝擊、療癒）
+- keyword 是題材關鍵字（如：孩童、公益、汽車、旅遊）
+- brand 是出現的品牌或委託單位；paragon 是導演或製作單位
+- 每族最多 {_AI_MAX_PER_FACET} 個；不確定的一律留空陣列，不要猜
+
+影片資訊：
+標題：{ref.title or ""}
+連結：{ref.url or ""}
+心得：{(ref.note or "")[:500]}
+說明：{(ref.description or "")[:800]}
+研究筆記：{research}
+"""
+
+
+@router.post("/{rid}/ai_facets")
+async def ai_facets(rid: str, request: Request):
+    """用 claude CLI 讀這支片已填的資訊，建議分類（**只回建議不寫入**，由人按下才套用）。
+
+    只有 master 有 claude CLI（見 reference_ai_seo_runner 的機隊陷阱），
+    其他機器直接回 503 講清楚，而不是讓使用者對著沒反應的按鈕猜。
+    """
+    _check_auth(request)
+    # 閘門問的是「這台有沒有 claude CLI」—— 不是 is_master_machine()（那是排程用的
+    # 「機隊只跑一次」閘，會把裝了 CLI 的 dev 機也擋掉）。其他互動式 AI 端點同此慣例。
+    from services.website.seo_runner import _call_claude, _resolve_claude_exe
+    if not _resolve_claude_exe():
+        raise HTTPException(status_code=503, detail="這台機器沒有 claude CLI（AI 建議只在主控端可用）")
+    factory = _require_factory()
+    async with factory() as session:
+        ref = await _get_ref_or_404(session, rid)
+        research = " / ".join(
+            leaf["answer"] for row in _norm_research(ref.research)["rows"]
+            for leaf in row["cells"].values() if leaf["answer"])[:1500]
+        prompt = _build_facet_prompt(ref, research)
+    text, err = await _call_claude(prompt)
+    if not text:
+        raise HTTPException(status_code=502, detail=f"AI 建議失敗：{err}")
+    try:
+        start, end = text.index("{"), text.rindex("}") + 1
+        data = json.loads(text[start:end])
+    except (ValueError, json.JSONDecodeError):
+        raise HTTPException(status_code=502, detail="AI 回應不是預期的 JSON")
+    out = {}
+    for k in FACET_KEYS:
+        v = data.get(k)
+        if isinstance(v, list):
+            out[k] = _clean_facet_values(k, v)[:_AI_MAX_PER_FACET]
+    return {"status": "ok", "suggestions": out}
 
 
 # ── 公開路徑（借提案的 plan_share token）──────────────────────

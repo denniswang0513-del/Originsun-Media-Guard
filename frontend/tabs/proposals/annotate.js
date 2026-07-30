@@ -9,6 +9,7 @@
  * 匯出：
  *   renderShapes(svg, annotations)              // 唯讀渲染（縮圖牆/lightbox 共用）
  *   openAnnotator({imageUrl, annotations, readonly, onSave})   // 全螢幕編輯器
+ *   flattenToBlob(imageUrl, annotations)        // 圖+標示壓平成 WebP（工具列「下載」用）
  */
 
 const NS = 'http://www.w3.org/2000/svg';
@@ -134,6 +135,7 @@ export function openAnnotator({ imageUrl, annotations, readonly = false, onSave,
                 <button data-act="clear">清空</button>`}
                 <span class="grow"></span>
                 <span style="color:#8b8b8b;">${(title || '').slice(0, 40)}</span>
+                <button data-act="download" title="把標示壓進圖片下載（交付客戶用）">下載</button>
                 ${readonly ? '' : '<button data-act="save" class="primary">儲存標示</button>'}
                 <button data-act="close">關閉</button>
             </div>
@@ -255,6 +257,20 @@ export function openAnnotator({ imageUrl, annotations, readonly = false, onSave,
             });
         }
 
+        ov.querySelector('[data-act="download"]').addEventListener('click', async (e) => {
+            const btn = e.target;
+            btn.textContent = '產生中…';
+            try {
+                const blob = await flattenToBlob(imageUrl, { v: 1, shapes });
+                const a = document.createElement('a');
+                a.href = URL.createObjectURL(blob);
+                a.download = ((title || 'shot').replace(/[\\/:*?"<>|]/g, '_').slice(0, 40)) + '_標示.webp';
+                a.click();
+                setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+            } catch (err) { alert('下載失敗：' + ((err && err.message) || err)); }
+            btn.textContent = '下載';
+        });
+
         function close(saved) {
             if (!saved && dirty && !confirm('標示還沒儲存，確定關閉？')) return;
             document.removeEventListener('keydown', onKey);
@@ -271,4 +287,31 @@ export function openAnnotator({ imageUrl, annotations, readonly = false, onSave,
         ov.querySelector('[data-act="close"]').addEventListener('click', () => close(false));
         ov.addEventListener('click', (e) => { if (e.target === ov) close(false); });
     });
+}
+
+
+/** 圖 + 標示壓平成 WebP Blob（工具列「下載」用；純前端 canvas，不動原圖）。 */
+export async function flattenToBlob(imageUrl, annotations) {
+    const img = new Image();
+    img.crossOrigin = 'anonymous';
+    await new Promise((res, rej) => { img.onload = res; img.onerror = rej; img.src = imageUrl; });
+    const cv = document.createElement('canvas');
+    cv.width = img.naturalWidth;
+    cv.height = img.naturalHeight;
+    const ctx = cv.getContext('2d');
+    ctx.drawImage(img, 0, 0);
+    // 標示層走同一份 renderShapes → 序列化成 SVG → 當圖畫上去（繪圖規則不分岔）
+    const svg = document.createElementNS(NS, 'svg');
+    svg.setAttribute('xmlns', NS);
+    svg.setAttribute('width', cv.width);
+    svg.setAttribute('height', cv.height);
+    renderShapes(svg, annotations);
+    const url = URL.createObjectURL(new Blob([new XMLSerializer().serializeToString(svg)],
+        { type: 'image/svg+xml' }));
+    try {
+        const overlay = new Image();
+        await new Promise((res, rej) => { overlay.onload = res; overlay.onerror = rej; overlay.src = url; });
+        ctx.drawImage(overlay, 0, 0, cv.width, cv.height);
+    } finally { URL.revokeObjectURL(url); }
+    return new Promise(res => cv.toBlob(res, 'image/webp', 0.9));
 }

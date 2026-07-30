@@ -145,6 +145,9 @@
         <input type="checkbox" id="unused"> 只看沒被引用的
       </label>
       <span class="hint" id="lib-count"></span>
+      <span style="flex:1;"></span>
+      <button class="btn-ghost" id="btn-import" title="匯入 Notion 參考影片資料庫的 CSV 匯出檔">匯入 CSV</button>
+      <input type="file" id="import-file" accept=".csv,text/csv" style="display:none;">
     </div>
     <div id="lib-grid" class="lib-grid"><div class="state-msg">載入中…</div></div>
   </div>
@@ -289,6 +292,26 @@ function _wireLibBar() {
     $("q").addEventListener("input", () => { clearTimeout(t); t = setTimeout(_loadLib, 400); });
     $("curated").addEventListener("change", _loadLib);
     $("unused").addEventListener("change", _loadLib);
+    // CSV 匯入（Notion 匯出檔）：只新增不覆蓋 —— 第二次匯入不會洗掉系統裡寫的研究
+    $("btn-import").addEventListener("click", () => $("import-file").click());
+    $("import-file").addEventListener("change", async (e) => {
+        const f = e.target.files[0];
+        e.target.value = "";
+        if (!f) return;
+        $("lib-count").textContent = "匯入中…";
+        try {
+            const fd = new FormData();
+            fd.append("file", f);
+            const d = await tfetch(`${API}/import_csv`, { method: "POST", body: fd });
+            alert(`匯入完成\n\n新增 ${d.imported} 支\n已存在跳過 ${d.skipped} 支` +
+                  (d.invalid ? `\n網址不合法略過 ${d.invalid} 列` : "") +
+                  "\n\n（跳過的不會被覆蓋：系統裡寫的研究與分類優先，Notion 後來的改動不會同步進來）");
+            _loadLib();
+        } catch (err) {
+            alert("匯入失敗：" + ((err && err.message) || err));
+            _loadLib();
+        }
+    });
     fk.addEventListener("change", () => {
         const vals = FACET_OPTS[fk.value] || [];
         const fv = $("facet-val");
