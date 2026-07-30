@@ -488,6 +488,26 @@ async def _on_startup():
                             await _s.commit()
                         except Exception:
                             await _s.rollback()
+                    # 參考影片引用：舊 preprod_proposal_refs → preprod_reference_links
+                    # （階段 3 一次性、冪等；舊表保留不再寫入，見 models.py 該類 docstring）
+                    try:
+                        await _s.execute(_t("""
+                            INSERT INTO preprod_reference_links
+                                   (id, reference_id, target_type, target_id, created_at)
+                            SELECT r.id, r.reference_id, 'proposal', r.proposal_id, CURRENT_TIMESTAMP
+                              FROM preprod_proposal_refs r
+                             WHERE NOT EXISTS (
+                                   SELECT 1 FROM preprod_reference_links l
+                                    WHERE l.reference_id = r.reference_id
+                                      AND l.target_type = 'proposal'
+                                      AND l.target_id = r.proposal_id)
+                        """))
+                        await _s.commit()
+                    except Exception as _mig_err:
+                        # 不能靜默：所有讀取都已改查 links，搬遷失敗 = 每個提案的參考片
+                        # 清單憑空變空，而且與「使用者自己移除」無法區分
+                        print(f"[WARN] reference link backfill failed: {_mig_err}")
+                        await _s.rollback()
         except Exception:
             pass
     # ── DB Migration: CRM performance indexes ──

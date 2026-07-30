@@ -141,6 +141,9 @@
         <option value="1">已建檔</option>
         <option value="0">待建檔</option>
       </select>
+      <label style="font-size:12px;color:var(--sub);display:flex;gap:5px;align-items:center;">
+        <input type="checkbox" id="unused"> 只看沒被引用的
+      </label>
       <span class="hint" id="lib-count"></span>
     </div>
     <div id="lib-grid" class="lib-grid"><div class="state-msg">載入中…</div></div>
@@ -259,6 +262,7 @@ async function _loadLib() {
     const p = new URLSearchParams();
     if ($("q").value.trim()) p.set("q", $("q").value.trim());
     if ($("curated").value) p.set("curated", $("curated").value);
+    if ($("unused").checked) p.set("unused", "1");
     if ($("facet-key").value && $("facet-val").value) {
         p.set("facet", $("facet-key").value);
         p.set("value", $("facet-val").value);
@@ -284,6 +288,7 @@ function _wireLibBar() {
     let t = null;
     $("q").addEventListener("input", () => { clearTimeout(t); t = setTimeout(_loadLib, 400); });
     $("curated").addEventListener("change", _loadLib);
+    $("unused").addEventListener("change", _loadLib);
     fk.addEventListener("change", () => {
         const vals = FACET_OPTS[fk.value] || [];
         const fv = $("facet-val");

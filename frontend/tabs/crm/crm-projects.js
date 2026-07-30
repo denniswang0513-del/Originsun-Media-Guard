@@ -324,6 +324,8 @@ export async function initCrmProjectsTab() {
             if (tab === 'delivery' && state.selectedId) { loadDeliveryTab(state.selectedId); }
             document.getElementById('proj-detail-media').classList.toggle('hidden', tab !== 'media');
             if (tab === 'media' && state.selectedId) { _loadMediaTab(state.selectedId); }
+            document.getElementById('proj-detail-refs').classList.toggle('hidden', tab !== 'refs');
+            if (tab === 'refs' && state.selectedId) { _loadRefsTab(state.selectedId); }
         });
     });
 
@@ -401,6 +403,19 @@ async function _initClosingProduction() {
     } catch (e) {
         container.innerHTML = `<div class="crm-empty" style="padding:24px;color:#fca5a5;">結案收件匣載入失敗: ${e.message}</div>`;
         console.error('結案收件匣載入失敗:', e);
+    }
+}
+
+// ── 參考影片 lazy loader（同影像紀錄的模式）───────────────────
+async function _loadRefsTab(projectId) {
+    const container = document.getElementById('proj-detail-refs');
+    if (!container) return;
+    try {
+        const mod = await import('./crm-projects-refs.js');
+        await mod.loadRefsTab(projectId, container);
+    } catch (e) {
+        container.innerHTML = `<div class="crm-empty" style="padding:24px;color:#fca5a5;">參考影片載入失敗: ${e.message}</div>`;
+        console.error('參考影片載入失敗:', e);
     }
 }
 

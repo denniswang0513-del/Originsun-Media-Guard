@@ -930,8 +930,33 @@ class PreprodReferenceShot(Base):
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
 
+class PreprodReferenceLink(Base):
+    """參考影片 ↔ 引用對象（v2 階段 3 的多型引用；取代只綁提案的 PreprodProposalRef）。
+
+    target_type: 'proposal' | 'crm_project'（未來可加 'work'）。同一支片可以同時被
+    提案與專案引用，note 記「本案為什麼引用它」—— 同一支片在不同案子的用途不同。
+    刪引用只斷連結，片庫本體保留（共用資產語意）。
+    """
+    __tablename__ = "preprod_reference_links"
+
+    id = Column(String(32), primary_key=True)                    # uuid4 hex
+    reference_id = Column(String(32), nullable=False, index=True)  # soft FK → preprod_references.id
+    target_type = Column(String(16), nullable=False)
+    target_id = Column(String(32), nullable=False, index=True)
+    note = Column(Text, nullable=True)
+    created_by = Column(String(64), nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    __table_args__ = (UniqueConstraint("reference_id", "target_type", "target_id",
+                                       name="uq_ref_link"),)
+
+
 class PreprodProposalRef(Base):
-    """提案 ↔ 參考片 多對多關聯（刪提案只刪關聯列，reference 是共用資產保留）。"""
+    """[LEGACY，階段 3 起停寫] 提案 ↔ 參考片舊關聯表。
+
+    資料已由 main.py startup 一次性搬進 preprod_reference_links（冪等 INSERT）。
+    保留一版當回滾餘裕，確認無誤後可刪表。**不要再往這裡寫**。
+    """
     __tablename__ = "preprod_proposal_refs"
 
     id = Column(String(32), primary_key=True)                    # uuid4 hex

@@ -108,6 +108,9 @@ html.ref-theme-light .rfc { --rfc-ink: #262626; --rfc-sub: #737373; --rfc-line: 
   border-bottom: 1px dashed var(--rfc-line); font-size: 12.5px; }
 .rfc .rfc-link-row:last-child { border-bottom: none; }
 .rfc .rfc-link-row .st { font-size: 11px; color: var(--rfc-sub); }
+.rfc .rfc-link-row .tt { font-size: 10.5px; color: var(--rfc-sub); border: 1px solid var(--rfc-line);
+  border-radius: 2px; padding: 1px 5px; flex: none; }
+.rfc .rfc-link-row .rfc-btn { margin-left: auto; padding: 2px 8px; font-size: 11px; }
 .rfc .rfc-hint { font-size: 11px; color: var(--rfc-sub); line-height: 1.7; }
 .rfc .rfc-save { position: sticky; bottom: 0; text-align: right; font-size: 11px;
   color: var(--rfc-sub); min-height: 16px; padding: 3px 0; }
@@ -288,11 +291,16 @@ export function renderReference(container, opts) {
         <div class="rfc-card rfc-links">
             <h4>被引用（${ref.links.length}）</h4>
             ${ref.links.length ? ref.links.map(l => `
-                <div class="rfc-link-row">
-                    <a href="/proposal-plan.html?pid=${encodeURIComponent(l.target_id)}" target="_blank" rel="noopener">${esc(l.title || l.target_id)}</a>
+                <div class="rfc-link-row" data-link="${attr(l.link_id)}">
+                    <span class="tt">${l.target_type === 'crm_project' ? '專案' : '提案'}</span>
+                    <a href="${l.target_type === 'crm_project' ? '/#crm-projects' : '/proposal-plan.html?pid=' + encodeURIComponent(l.target_id)}"
+                       target="_blank" rel="noopener">${esc(l.title || l.target_id)}</a>
                     <span class="st">${esc(l.status || '')}</span>
+                    ${l.note ? `<span class="st">— ${esc(l.note)}</span>` : ''}
+                    <button class="rfc-btn danger rfc-link-del" data-link="${attr(l.link_id)}">解除</button>
                 </div>`).join('')
-            : '<div class="rfc-hint">還沒有任何提案引用這支片。</div>'}
+            : '<div class="rfc-hint">還沒有任何提案或專案引用這支片。</div>'}
+            <div class="rfc-hint">片庫共用：解除只拿掉那一邊的引用，片子仍留在庫裡。</div>
         </div>` : ''}
         <div class="rfc-save" id="rfc-save"></div>`;
 
@@ -419,6 +427,13 @@ function _wire(container, ctx) {
     });
 
     _wireFacets(container, ctx, { patch, say });
+    container.querySelectorAll('.rfc-link-del').forEach(btn => btn.addEventListener('click', async () => {
+        if (!confirm('解除這筆引用？（片子仍留在片庫）')) return;
+        try {
+            await fetcher(`${API}/links/${encodeURIComponent(btn.dataset.link)}`, { method: 'DELETE' });
+            await redraw();
+        } catch (e) { say('解除失敗：' + (e.message || e), true); }
+    }));
     _wireShotUploads(container, ctx, say);
     _wireShotItems(container, ctx, say);
 

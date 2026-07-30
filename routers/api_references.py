@@ -198,16 +198,35 @@ async def _get_ref_or_404(session, rid: str, for_update: bool = False):
 
 
 async def _linked_targets(session, rid: str) -> list:
-    """這支片被誰引用（反向連結）。階段 1 只有提案（階段 3 換成 links 表）。"""
+    """這支片被誰引用（反向連結）—— 提案與 CRM 專案都算，標題一次 JOIN 帶回。"""
     from sqlalchemy import select
-    from db.models import PreprodProposal, PreprodProposalRef
-    rows = (await session.execute(
-        select(PreprodProposal.id, PreprodProposal.title, PreprodProposal.status)
-        .join(PreprodProposalRef, PreprodProposalRef.proposal_id == PreprodProposal.id)
-        .where(PreprodProposalRef.reference_id == rid)
-    )).all()
-    return [{"target_type": "proposal", "target_id": i, "title": t or "", "status": s or ""}
-            for i, t, s in rows]
+    from db.models import CrmProject, PreprodProposal, PreprodReferenceLink
+
+    links = (await session.execute(
+        select(PreprodReferenceLink)
+        .where(PreprodReferenceLink.reference_id == rid)
+        .order_by(PreprodReferenceLink.created_at))).scalars().all()
+    if not links:
+        return []
+    p_ids = [x.target_id for x in links if x.target_type == "proposal"]
+    j_ids = [x.target_id for x in links if x.target_type == "crm_project"]
+    titles = {}
+    if p_ids:
+        for i, t, st in (await session.execute(
+                select(PreprodProposal.id, PreprodProposal.title, PreprodProposal.status)
+                .where(PreprodProposal.id.in_(p_ids)))).all():
+            titles[("proposal", i)] = (t or "", st or "")
+    if j_ids:
+        for i, t, st in (await session.execute(
+                select(CrmProject.id, CrmProject.name, CrmProject.status)
+                .where(CrmProject.id.in_(j_ids)))).all():
+            titles[("crm_project", i)] = (t or "", st or "")
+    out = []
+    for x in links:
+        title, status = titles.get((x.target_type, x.target_id), ("", ""))
+        out.append({"link_id": x.id, "target_type": x.target_type, "target_id": x.target_id,
+                    "title": title, "status": status, "note": x.note or ""})
+    return out
 
 
 # ── 寫入核心（authed 與公開 token 兩路共用）────────────────────
@@ -474,15 +493,17 @@ def _guest_identity(name: Optional[str]) -> str:
 
 @router.get("")
 async def list_references_v2(request: Request, q: str = "", curated: str = "",
-                             facet: str = "", value: str = "", limit: int = 200):
+                             facet: str = "", value: str = "", unused: str = "",
+                             limit: int = 200):
+    # 讀片庫：提案庫或 CRM 專案的人都要能挑片（寫入才依對象分別把關，見 _check_target_auth）
     """片庫清單。facet+value 成對使用（如 facet=technique&value=平行剪接）。
     回列表刻意不帶 research 全文（清單頁不需要）—— 只帶計數與封面。"""
-    _check_auth(request)
+    check_admin_or_module(request, "preprod_proposals", "preprod_plan", "crm_projects")
     factory = _require_factory()
 
     from sqlalchemy import func as safunc, or_, select
     from sqlalchemy.orm import defer
-    from db.models import PreprodProposalRef, PreprodReference
+    from db.models import PreprodReference, PreprodReferenceLink
 
     take = max(1, min(limit, 500))
     facet_on = bool(facet and facet in FACET_KEYS and value)
@@ -500,6 +521,11 @@ async def list_references_v2(request: Request, q: str = "", curated: str = "",
             query = (query.where(PreprodReference.curated.is_(True)) if curated == "1"
                      else query.where(or_(PreprodReference.curated.is_(False),
                                           PreprodReference.curated.is_(None))))
+        if unused == "1":     # 只看沒被任何案子引用的（清理用）—— 要在 SQL 就濾掉，
+            query = query.where(   # 否則「最新 200 筆之外的孤兒」永遠看不到
+                ~select(PreprodReferenceLink.id)
+                .where(PreprodReferenceLink.reference_id == PreprodReference.id)
+                .exists())
         query = query.order_by(PreprodReference.created_at.desc())
         # facets 篩選在 Python 端做（JSONB 跨欄族的 SQL 很醜，片庫是幾百列量級）——
         # 但那就不能先在 SQL 截斷，否則「技巧=X」只會在最新 N 筆裡找。
@@ -517,9 +543,9 @@ async def list_references_v2(request: Request, q: str = "", curated: str = "",
         out = out[:take]
         if out:
             counts = dict((await session.execute(
-                select(PreprodProposalRef.reference_id, safunc.count(PreprodProposalRef.id))
-                .where(PreprodProposalRef.reference_id.in_([d["id"] for d in out]))
-                .group_by(PreprodProposalRef.reference_id))).all())
+                select(PreprodReferenceLink.reference_id, safunc.count(PreprodReferenceLink.id))
+                .where(PreprodReferenceLink.reference_id.in_([d["id"] for d in out]))
+                .group_by(PreprodReferenceLink.reference_id))).all())
             for d in out:
                 d["links_count"] = counts.get(d["id"], 0)
     return {"references": out, "total": total}
@@ -605,6 +631,119 @@ async def delete_research_row(rid: str, row_id: str, request: Request):
     return {"status": "ok"}
 
 
+# ── 引用（跨提案／專案，docs/REFERENCE_LIBRARY.md §6）──────────
+# 片庫是共用資產：同一支片可以同時被多個提案與 CRM 專案引用，note 記「本案為什麼引用它」。
+# 解除只斷連結，片庫本體保留。
+
+# 引用對象 → (model, 標題欄, 需要的模組)。加新型別（如 'work'）只改這一張表。
+def _target_models():
+    from db.models import CrmProject, PreprodProposal
+    return {
+        "proposal": (PreprodProposal, PreprodProposal.title,
+                     ("preprod_proposals", "preprod_plan")),
+        "crm_project": (CrmProject, CrmProject.name, ("crm_projects",)),
+    }
+
+
+_TARGET_TYPES = ("proposal", "crm_project")
+
+
+def _check_target_auth(request: Request, target_type: str) -> dict:
+    """依**引用對象**把關，不是給一張通行證：CRM 專案分頁的使用者可能只有
+    crm_projects 模組，他該能在自己的專案上掛片 —— 但不該因此能動提案的引用。"""
+    spec = _target_models().get(target_type)
+    if not spec:
+        raise HTTPException(status_code=422, detail="未知的引用對象型別")
+    return check_admin_or_module(request, *spec[2])
+
+
+async def _target_title(session, target_type: str, target_id: str) -> str:
+    """回標題；找不到該對象回 None（空標題的提案不該被當成不存在）。"""
+    from sqlalchemy import select
+    model, title_col, _ = _target_models()[target_type]
+    row = (await session.execute(
+        select(model.id, title_col).where(model.id == target_id))).first()
+    return None if row is None else (row[1] or "")
+
+
+@router.get("/for/{target_type}/{target_id}")
+async def list_refs_for_target(target_type: str, target_id: str, request: Request):
+    """某個提案／專案引用了哪些片（CRM 專案「參考影片」分頁用）。"""
+    _check_target_auth(request, target_type)
+    factory = _require_factory()
+
+    from sqlalchemy import select
+    from db.models import PreprodReference, PreprodReferenceLink
+
+    async with factory() as session:
+        rows = (await session.execute(
+            select(PreprodReferenceLink, PreprodReference)
+            .join(PreprodReference, PreprodReference.id == PreprodReferenceLink.reference_id)
+            .where(PreprodReferenceLink.target_type == target_type,
+                   PreprodReferenceLink.target_id == target_id)
+            .order_by(PreprodReferenceLink.created_at))).all()
+        out = []
+        for link, ref in rows:
+            d = ref_dict(ref, research=False)
+            d.update(link_id=link.id, link_note=link.note or "")
+            out.append(d)
+    return {"references": out}
+
+
+@router.post("/{rid}/links")
+async def add_link(rid: str, request: Request, body: dict = Body(...)):
+    """把片掛到提案／專案（重複掛載冪等）。body {target_type, target_id, note?}"""
+    target_type = str(body.get("target_type") or "")
+    target_id = str(body.get("target_id") or "").strip()
+    if target_type not in _TARGET_TYPES or not target_id:
+        raise HTTPException(status_code=422, detail="target_type / target_id 不合法")
+    payload = _check_target_auth(request, target_type)
+    factory = _require_factory()
+
+    from sqlalchemy import select
+    from db.models import PreprodReferenceLink
+
+    async with factory() as session:
+        await _get_ref_or_404(session, rid)
+        if await _target_title(session, target_type, target_id) is None:
+            raise HTTPException(status_code=404, detail="找不到要引用的提案／專案")
+        link = (await session.execute(
+            select(PreprodReferenceLink)
+            .where(PreprodReferenceLink.reference_id == rid,
+                   PreprodReferenceLink.target_type == target_type,
+                   PreprodReferenceLink.target_id == target_id))).scalars().first()
+        if not link:
+            link = PreprodReferenceLink(
+                id=uuid.uuid4().hex, reference_id=rid, target_type=target_type,
+                target_id=target_id, note=str(body.get("note") or "")[:255],
+                created_by=payload.get("username") or "")
+            session.add(link)
+        elif "note" in body:
+            link.note = str(body.get("note") or "")[:255]
+        await session.commit()
+        return {"status": "ok", "link_id": link.id}
+
+
+@router.delete("/links/{link_id}")
+async def delete_link(link_id: str, request: Request):
+    """解除引用（只斷連結，片庫本體與其他引用不動）。
+
+    先讀出這筆掛在什麼對象上，再依**那個對象**把關 —— 否則只有 CRM 權限的人
+    能拿一個 link id 解掉提案的引用。"""
+    factory = _require_factory()
+
+    from db.models import PreprodReferenceLink
+
+    async with factory() as session:
+        link = await session.get(PreprodReferenceLink, link_id)
+        if not link:
+            raise HTTPException(status_code=404, detail="找不到這筆引用")
+        _check_target_auth(request, link.target_type)
+        await session.delete(link)
+        await session.commit()
+    return {"status": "ok"}
+
+
 # ── 截圖（登入路徑）────────────────────────────────────────
 
 
@@ -680,10 +819,10 @@ async def assert_public_ref_writable(session, rid: str):
     免得同一條組織規則在兩個 router 有兩個答案。
     """
     from sqlalchemy import func as safunc, select
-    from db.models import PreprodProposalRef
+    from db.models import PreprodReferenceLink
     n = (await session.execute(
-        select(safunc.count(PreprodProposalRef.id))
-        .where(PreprodProposalRef.reference_id == rid))).scalar() or 0
+        select(safunc.count(PreprodReferenceLink.id))
+        .where(PreprodReferenceLink.reference_id == rid))).scalar() or 0
     if n > 1:
         raise HTTPException(status_code=409, detail="這支參考影片被其他提案共用，請由後台編輯")
 
@@ -693,14 +832,15 @@ async def _public_ref(session, token: str, rid: str, for_update: bool = False,
     """token 驗簽 + 該片必須掛在該提案上（否則等於用一條連結讀整個片庫）。
     write=True 一併過共用資產護欄 —— 權限配對綁在這裡，不靠每個端點記得抄兩行。"""
     from sqlalchemy import select
-    from db.models import PreprodProposalRef
+    from db.models import PreprodReferenceLink
     from routers.api_proposals import _get_prop_by_plan_token
 
     prop = await _get_prop_by_plan_token(session, token)
     link = (await session.execute(
-        select(PreprodProposalRef).where(PreprodProposalRef.proposal_id == prop.id,
-                                         PreprodProposalRef.reference_id == rid)
-    )).scalars().first()
+        select(PreprodReferenceLink)
+        .where(PreprodReferenceLink.target_type == "proposal",
+               PreprodReferenceLink.target_id == prop.id,
+               PreprodReferenceLink.reference_id == rid))).scalars().first()
     if not link:
         raise HTTPException(status_code=404, detail="這支參考影片沒掛在本提案")
     if write:

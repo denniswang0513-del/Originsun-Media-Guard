@@ -113,6 +113,14 @@ def _prop_dict(p, client_name: str = "", refs_count: int = 0, has_plan=None) -> 
     }
 
 
+def _prop_link(pid: str):
+    """提案引用的查詢條件（PreprodReferenceLink 的 target_type/target_id 對）——
+    這組條件在本檔出現近十次，抄漏一次就是讀/刪到別種對象的引用列。"""
+    from db.models import PreprodReferenceLink
+    return (PreprodReferenceLink.target_type == "proposal",
+            PreprodReferenceLink.target_id == pid)
+
+
 def _sync_ref_video(ref) -> None:
     """參考片 url 寫入後同步影片描述子 —— 正本在 routers/api_references.py，
     這裡薄殼呼叫（同一條規則不分岔；函式內 import 避免 router 載入順序問題）。"""
@@ -278,14 +286,14 @@ async def delete_reference(rid: str, request: Request):
     factory = _require_factory()
 
     from sqlalchemy import delete as sa_delete
-    from db.models import PreprodProposalRef, PreprodReference
+    from db.models import PreprodReference, PreprodReferenceLink
 
     async with factory() as session:
         ref = await session.get(PreprodReference, rid)
         if not ref:
             raise HTTPException(status_code=404, detail="找不到此參考片")
-        await session.execute(sa_delete(PreprodProposalRef)
-                              .where(PreprodProposalRef.reference_id == rid))
+        await session.execute(sa_delete(PreprodReferenceLink)
+                              .where(PreprodReferenceLink.reference_id == rid))
         await session.delete(ref)
         await session.commit()
     return {"status": "ok"}
@@ -304,7 +312,7 @@ async def list_proposals(request: Request, q: str = "", status: str = "",
 
     from sqlalchemy import extract, select, func as safunc
     from sqlalchemy.orm import defer
-    from db.models import Client, PreprodProposal, PreprodProposalRef
+    from db.models import Client, PreprodProposal, PreprodReferenceLink
 
     async with factory() as session:
         # has_plan 用 SQL 布林算、plan 欄 defer — 清單不把整包 JSONB 拖出庫
@@ -330,8 +338,9 @@ async def list_proposals(request: Request, q: str = "", status: str = "",
         rows = (await session.execute(query)).all()
 
         ref_counts = dict((await session.execute(
-            select(PreprodProposalRef.proposal_id, safunc.count(PreprodProposalRef.id))
-            .group_by(PreprodProposalRef.proposal_id))).all())
+            select(PreprodReferenceLink.target_id, safunc.count(PreprodReferenceLink.id))
+            .where(PreprodReferenceLink.target_type == "proposal")
+            .group_by(PreprodReferenceLink.target_id))).all())
 
     return {"proposals": [
         _prop_dict(p, cname or "", ref_counts.get(p.id, 0), has_plan=hp)
@@ -374,7 +383,7 @@ async def get_proposal(pid: str, request: Request):
     factory = _require_factory()
 
     from sqlalchemy import select
-    from db.models import Client, CrmProject, PreprodProposalRef, PreprodReference
+    from db.models import Client, CrmProject, PreprodReference, PreprodReferenceLink
 
     async with factory() as session:
         prop = await _get_proposal_or_404(session, pid)
@@ -390,8 +399,8 @@ async def get_proposal(pid: str, request: Request):
             )).scalar() or ""
         refs = (await session.execute(
             select(PreprodReference)
-            .join(PreprodProposalRef, PreprodProposalRef.reference_id == PreprodReference.id)
-            .where(PreprodProposalRef.proposal_id == pid)
+            .join(PreprodReferenceLink, PreprodReferenceLink.reference_id == PreprodReference.id)
+            .where(*_prop_link(pid))
             .order_by(PreprodReference.created_at.desc())
         )).scalars().all()
 
@@ -691,7 +700,7 @@ async def get_shared_plan(token: str):
     factory = _require_factory()
 
     from sqlalchemy import select
-    from db.models import Client, PreprodProposalRef, PreprodReference
+    from db.models import Client, PreprodReference, PreprodReferenceLink
 
     async with factory() as session:
         prop = await _get_prop_by_plan_token(session, token)
@@ -703,8 +712,8 @@ async def get_shared_plan(token: str):
             )).scalar() or ""
         refs = (await session.execute(
             select(PreprodReference)
-            .join(PreprodProposalRef, PreprodProposalRef.reference_id == PreprodReference.id)
-            .where(PreprodProposalRef.proposal_id == prop.id)
+            .join(PreprodReferenceLink, PreprodReferenceLink.reference_id == PreprodReference.id)
+            .where(*_prop_link(prop.id))
             .order_by(PreprodReference.created_at.desc())
         )).scalars().all()
         info = {
@@ -766,21 +775,22 @@ async def add_shared_reference(token: str, body: dict = Body(...)):
     factory = _require_factory()
 
     from sqlalchemy import func as safunc, select
-    from db.models import PreprodProposalRef, PreprodReference
+    from db.models import PreprodReference, PreprodReferenceLink
 
     async with factory() as session:
         prop = await _get_prop_by_plan_token(session, token)
         n = (await session.execute(
-            select(safunc.count(PreprodProposalRef.id))
-            .where(PreprodProposalRef.proposal_id == prop.id))).scalar() or 0
+            select(safunc.count(PreprodReferenceLink.id))
+            .where(*_prop_link(prop.id)))).scalar() or 0
         if n >= _PUBLIC_REFS_MAX:
             raise HTTPException(status_code=409,
                                 detail=f"參考片已達 {_PUBLIC_REFS_MAX} 支上限，請先移除幾支")
         ref = PreprodReference(id=uuid.uuid4().hex, url=url, title=title, note=note)
         _sync_ref_video(ref)
         session.add(ref)
-        session.add(PreprodProposalRef(
-            id=uuid.uuid4().hex, proposal_id=prop.id, reference_id=ref.id))
+        session.add(PreprodReferenceLink(
+            id=uuid.uuid4().hex, reference_id=ref.id,
+            target_type="proposal", target_id=prop.id))
         await session.commit()
         await session.refresh(ref)
     return {"status": "ok", "reference": _ref_dict(ref)}
@@ -794,14 +804,13 @@ async def patch_shared_reference(token: str, rid: str, body: dict = Body(...)):
     factory = _require_factory()
 
     from sqlalchemy import func as safunc, select
-    from db.models import PreprodProposalRef, PreprodReference
+    from db.models import PreprodReference, PreprodReferenceLink
 
     async with factory() as session:
         prop = await _get_prop_by_plan_token(session, token)
         link = (await session.execute(
-            select(PreprodProposalRef).where(PreprodProposalRef.proposal_id == prop.id,
-                                             PreprodProposalRef.reference_id == rid)
-        )).scalars().first()
+            select(PreprodReferenceLink)
+            .where(*_prop_link(prop.id), PreprodReferenceLink.reference_id == rid))).scalars().first()
         if not link:
             raise HTTPException(status_code=404, detail="這支參考片沒掛在本提案")
         await assert_public_ref_writable(session, rid)   # 共用資產護欄（正本在 api_references）
@@ -825,13 +834,12 @@ async def unlink_shared_reference(token: str, rid: str):
     factory = _require_factory()
 
     from sqlalchemy import delete as sa_delete
-    from db.models import PreprodProposalRef
+    from db.models import PreprodReferenceLink
 
     async with factory() as session:
         prop = await _get_prop_by_plan_token(session, token)
-        await session.execute(sa_delete(PreprodProposalRef)
-                              .where(PreprodProposalRef.proposal_id == prop.id,
-                                     PreprodProposalRef.reference_id == rid))
+        await session.execute(sa_delete(PreprodReferenceLink)
+                              .where(*_prop_link(prop.id), PreprodReferenceLink.reference_id == rid))
         await session.commit()
     return {"status": "ok"}
 
@@ -890,12 +898,12 @@ async def delete_proposal(pid: str, request: Request):
     factory = _require_factory()
 
     from sqlalchemy import delete as sa_delete
-    from db.models import PreprodProposalRef
+    from db.models import PreprodReferenceLink
 
     async with factory() as session:
         prop = await _get_proposal_or_404(session, pid)
-        await session.execute(sa_delete(PreprodProposalRef)
-                              .where(PreprodProposalRef.proposal_id == pid))
+        await session.execute(sa_delete(PreprodReferenceLink)
+                              .where(*_prop_link(pid)))
         await session.delete(prop)
         await session.commit()
 
@@ -1006,7 +1014,7 @@ async def link_reference(pid: str, request: Request, body: dict = Body(...)):
     factory = _require_factory()
 
     from sqlalchemy import select
-    from db.models import PreprodProposalRef, PreprodReference
+    from db.models import PreprodReference, PreprodReferenceLink
 
     async with factory() as session:
         await _get_proposal_or_404(session, pid)
@@ -1014,13 +1022,12 @@ async def link_reference(pid: str, request: Request, body: dict = Body(...)):
         if not ref:
             raise HTTPException(status_code=404, detail="找不到此參考片")
         existing = (await session.execute(
-            select(PreprodProposalRef)
-            .where(PreprodProposalRef.proposal_id == pid,
-                   PreprodProposalRef.reference_id == reference_id)
-        )).scalars().first()
+            select(PreprodReferenceLink)
+            .where(*_prop_link(pid), PreprodReferenceLink.reference_id == reference_id))).scalars().first()
         if not existing:
-            session.add(PreprodProposalRef(
-                id=uuid.uuid4().hex, proposal_id=pid, reference_id=reference_id))
+            session.add(PreprodReferenceLink(
+                id=uuid.uuid4().hex, reference_id=reference_id,
+                target_type="proposal", target_id=pid))
             await session.commit()
     return {"status": "ok", "reference": _ref_dict(ref)}
 
@@ -1032,12 +1039,11 @@ async def unlink_reference(pid: str, rid: str, request: Request):
     factory = _require_factory()
 
     from sqlalchemy import delete as sa_delete
-    from db.models import PreprodProposalRef
+    from db.models import PreprodReferenceLink
 
     async with factory() as session:
         await _get_proposal_or_404(session, pid)
-        await session.execute(sa_delete(PreprodProposalRef)
-                              .where(PreprodProposalRef.proposal_id == pid,
-                                     PreprodProposalRef.reference_id == rid))
+        await session.execute(sa_delete(PreprodReferenceLink)
+                              .where(*_prop_link(pid), PreprodReferenceLink.reference_id == rid))
         await session.commit()
     return {"status": "ok"}

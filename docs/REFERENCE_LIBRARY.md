@@ -248,3 +248,21 @@ UNIQUE(reference_id, target_type, target_id)
   在牆外。現在拆成 `_wireShotUploads`（整頁 render 才綁一次，paste 用 AbortController 收）
   與 `_wireShotItems`（牆內走事件委派）。
 - 截圖說明/時間碼**必須**走委派：牆每次重畫都換新節點，逐顆綁會漏（實測整段沒存到）。
+
+### 階段 3 已完成（2026-07-30）
+
+`preprod_reference_links` 多型引用表（proposal / crm_project）+ startup 一次性冪等搬遷
+（舊 `preprod_proposal_refs` 標記 LEGACY 停寫，保留一版當回滾餘裕）。
+**所有讀寫都改走 links**，舊 URL 一律不變。CRM 專案詳情新增「參考影片」分頁
+（掛片／本案用途備註自動儲存／解除／跳研究頁），研究頁的「被引用」卡同時列提案與專案並可解除，
+片庫總覽加「只看沒被引用的」。
+
+與規劃的差異（刻意）：
+- **權限依「引用對象」分別把關**，不是給一張通行證：`_check_target_auth(request, target_type)`
+  —— proposal 要 preprod 模組、crm_project 要 crm_projects 模組。片庫本身的**讀取**放寬到
+  三者任一（CRM 分頁要挑片）。`DELETE /links/{id}` 先讀出那筆掛在什麼上再把關，
+  否則只有 CRM 權限的人拿一個 link id 就能解掉提案的引用。
+- `unused=1` 用 SQL `NOT EXISTS` 下推 —— 在 Python 端過濾會變成「只看最新 N 筆裡的孤兒」，
+  而清理要找的正是舊的那些。
+- 搬遷失敗**印警告不靜默**：讀取端已全改 links，搬遷失敗＝每個提案的參考片清單憑空變空，
+  而且與「使用者自己移除」無法區分。
