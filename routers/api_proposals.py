@@ -654,12 +654,39 @@ async def disable_plan_share(pid: str, request: Request):
 
 @router.get("/shared/{token}")
 async def get_shared_plan(token: str):
-    """公開讀取（免登入）：只回 title + plan（share_token 一律剝除）。"""
+    """公開讀取（免登入）：title + plan + 基本資料安全子集 info（share_token 一律剝除）。
+    info 是白名單：客戶/類型/提案日/狀態/標籤/簡報/參考片單 —— 金額（budget_range）、
+    組織學習（outcome_reason）、內部 id（project/quotation/created_by）一律不出公開端點。"""
     factory = _require_factory()
+
+    from sqlalchemy import select
+    from db.models import Client, PreprodProposalRef, PreprodReference
+
     async with factory() as session:
         prop = await _get_prop_by_plan_token(session, token)
         plan = {k: v for k, v in (prop.plan or {}).items() if k != "share_token"}
-    return {"title": prop.title, "plan": plan}
+        client_name = ""
+        if prop.client_id:
+            client_name = (await session.execute(
+                select(Client.short_name).where(Client.id == prop.client_id)
+            )).scalar() or ""
+        refs = (await session.execute(
+            select(PreprodReference)
+            .join(PreprodProposalRef, PreprodProposalRef.reference_id == PreprodReference.id)
+            .where(PreprodProposalRef.proposal_id == prop.id)
+            .order_by(PreprodReference.created_at.desc())
+        )).scalars().all()
+        info = {
+            "client_name": client_name,
+            "ptype": prop.ptype or "",
+            "status": prop.status or "",
+            "pitch_date": prop.pitch_date.strftime("%Y-%m-%d") if prop.pitch_date else None,
+            "tags": prop.tags or [],
+            "deck_url": prop.deck_url or "",
+            "references": [{"title": r.title or "", "url": r.url or "", "note": r.note or ""}
+                           for r in refs],
+        }
+    return {"title": prop.title, "plan": plan, "info": info}
 
 
 @router.patch("/shared/{token}/cell")

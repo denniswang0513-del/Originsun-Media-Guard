@@ -77,6 +77,41 @@
   .plan-head .back { font-size: 12px; color: var(--sub); cursor: pointer; border: 1px solid var(--line);
     border-radius: 2px; padding: 5px 12px; background: none; }
   .plan-head .back:hover { color: var(--red); border-color: var(--red); }
+
+  /* 側邊欄分頁（基本資料／企劃）— 側欄純文字，不放 emoji */
+  .plan-body { display: flex; gap: 20px; align-items: flex-start; }
+  .plan-side { display: flex; flex-direction: column; gap: 2px; min-width: 112px;
+    position: sticky; top: 72px; }
+  .side-tab { text-align: left; background: none; cursor: pointer; color: var(--sub);
+    border: none; border-left: 2px solid transparent; padding: 9px 14px; font-size: 13px;
+    letter-spacing: 0.05em; transition: all .12s; }
+  .side-tab:hover { color: var(--ink); }
+  .side-tab.active { color: var(--red); border-left-color: var(--red); background: #fafafa; }
+  .plan-main { flex: 1; min-width: 0; }
+  @media (max-width: 720px) {
+    .plan-body { flex-direction: column; }
+    .plan-side { position: static; flex-direction: row; min-width: 0; width: 100%;
+      border-bottom: 1px solid var(--line); }
+    .side-tab { border-left: none; border-bottom: 2px solid transparent; }
+    .side-tab.active { border-bottom-color: var(--red); background: none; }
+  }
+
+  /* 基本資料（唯讀）卡片 */
+  .info-card { border: 1px solid var(--line); padding: 16px 18px; margin-bottom: 14px; }
+  .info-card h4 { margin: 0 0 8px; font-size: 13px; font-weight: 600; letter-spacing: 0.08em; }
+  .info-kv { display: flex; gap: 12px; font-size: 13px; padding: 6px 0;
+    border-bottom: 1px dashed var(--line); }
+  .info-kv:last-child { border-bottom: none; }
+  .info-kv .k { min-width: 84px; color: var(--sub); font-size: 12px; }
+  .info-kv .v { flex: 1; min-width: 0; word-break: break-word; }
+  .info-kv .v a { color: var(--red); text-decoration: underline; }
+  .info-tag { display: inline-block; font-size: 11px; padding: 2px 8px; margin: 0 4px 4px 0;
+    background: #f0f0f0; border-radius: 2px; color: var(--sub); }
+  .info-ref { padding: 8px 0; border-bottom: 1px dashed var(--line); font-size: 13px; }
+  .info-ref:last-child { border-bottom: none; }
+  .info-ref a { color: var(--red); text-decoration: underline; }
+  .info-ref .note { font-size: 12px; color: var(--sub); margin-top: 3px; line-height: 1.6; }
+  .info-hint { font-size: 11.5px; color: var(--sub); line-height: 1.7; }
 </style>
 </head>
 <body>
@@ -137,7 +172,16 @@
         <input id="guest-name" placeholder="共編署名（選填）" style="width:140px;border:1px solid var(--line);border-radius:2px;padding:5px 8px;font-size:12px;color:var(--ink);outline:none;">
       </span>
     </div>
-    <div id="plan-host"><div class="state-msg">載入中…</div></div>
+    <div class="plan-body">
+      <nav class="plan-side" id="plan-side" style="display:none;">
+        <button class="side-tab" data-ptab="info">基本資料</button>
+        <button class="side-tab active" data-ptab="plan">企劃</button>
+      </nav>
+      <div class="plan-main">
+        <div id="info-host" style="display:none;"></div>
+        <div id="plan-host"><div class="state-msg">載入中…</div></div>
+      </div>
+    </div>
   </div>
 </main>
 
@@ -153,6 +197,49 @@ async function mfetch(path, opts = {}) {
     return fetch(path, Object.assign({}, opts, { headers }));
 }
 function escText(s) { const d = document.createElement("div"); d.textContent = String(s ?? ""); return d.innerHTML; }
+// 屬性上下文要另外逃逸引號（escText 走 textContent 不處理 "）；連結只放行 http(s)
+function escAttr(s) { return String(s ?? "").replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;").replace(/>/g, "&gt;"); }
+function safeUrl(u) { return /^https?:\/\//i.test(String(u ?? "")) ? u : ""; }
+
+// ── 基本資料（唯讀側欄分頁；登入=完整欄位、公開=後端白名單子集） ──
+function _renderInfo(host, info) {
+    const kv = (k, v) => v ? `<div class="info-kv"><span class="k">${escText(k)}</span><span class="v">${escText(v)}</span></div>` : "";
+    const link = (url, label) => safeUrl(url) ? `<a href="${escAttr(url)}" target="_blank" rel="noopener">${escText(label)}</a>` : "";
+    const tags = (info.tags || []).map(t => `<span class="info-tag">${escText(t)}</span>`).join("");
+    const refs = (info.references || []).map(r => `
+        <div class="info-ref">${link(r.url, r.title || r.url) || escText(r.title || r.url)}
+            ${r.note ? `<div class="note">${escText(r.note)}</div>` : ""}
+        </div>`).join("");
+    host.innerHTML = `
+        <div class="info-card">
+            <h4>基本資訊</h4>
+            ${kv("狀態", info.status)}
+            ${kv("客戶", info.client_name)}
+            ${kv("類型", info.ptype)}
+            ${kv("提案日", info.pitch_date)}
+            ${kv("預算範圍", info.budget_range)}
+            ${tags ? `<div class="info-kv"><span class="k">標籤</span><span class="v">${tags}</span></div>` : ""}
+            ${safeUrl(info.deck_url) ? `<div class="info-kv"><span class="k">提案簡報</span><span class="v">${link(info.deck_url, "下載簡報")}</span></div>` : ""}
+        </div>
+        ${info.outcome_reason ? `<div class="info-card"><h4>成案／未成案原因</h4><div class="info-hint">${escText(info.outcome_reason)}</div></div>` : ""}
+        <div class="info-card">
+            <h4>參考片單（${(info.references || []).length}）</h4>
+            ${refs || '<div class="info-hint">尚未掛參考片</div>'}
+        </div>
+        <div class="info-hint">基本資料在此為唯讀${info._editable ? "，編輯請到後台「提案庫」" : ""}。</div>`;
+}
+
+function _showSideTabs() {
+    const side = $("plan-side");
+    side.style.display = "";
+    side.querySelectorAll(".side-tab").forEach(btn => btn.addEventListener("click", () => {
+        side.querySelectorAll(".side-tab").forEach(b => b.classList.toggle("active", b === btn));
+        const showInfo = btn.dataset.ptab === "info";
+        $("info-host").style.display = showInfo ? "" : "none";
+        // 企劃 host 只藏不拆 — plan-matrix 的共編輪詢靠 isConnected 自停，display:none 不中斷
+        $("plan-host").style.display = showInfo ? "none" : "";
+    }));
+}
 
 function _show(view) {
     for (const v of ["login-view", "noperm-view", "list-view", "plan-view"]) $(v).style.display = (v === view ? "block" : "none");
@@ -242,6 +329,8 @@ async function _loadPlan(pid) {
         const prop = (await r.json()).proposal;
         $("plan-title").textContent = prop.title;
         document.title = prop.title + "｜提案企劃｜ORIGINSUN";
+        _renderInfo($("info-host"), { ...prop, _editable: true });   // 登入模式：完整欄位（含預算範圍）
+        _showSideTabs();
         host.innerHTML = "";
         const { renderPlan } = await import("/tabs/proposals/plan-matrix.js");
         renderPlan(host, { proposalId: prop.id, plan: prop.plan || null, canShare: true });
@@ -269,6 +358,10 @@ async function _loadSharedPlan(shareTok) {
         const d = await r.json();
         $("plan-title").textContent = d.title;
         document.title = d.title + "｜提案企劃（共編）｜ORIGINSUN";
+        if (d.info) {   // 舊後端沒有 info → 不顯示側欄（純企劃，行為同從前）
+            _renderInfo($("info-host"), d.info);
+            _showSideTabs();
+        }
         host.innerHTML = "";
         const { renderPlan } = await import("/tabs/proposals/plan-matrix.js");
         renderPlan(host, {
