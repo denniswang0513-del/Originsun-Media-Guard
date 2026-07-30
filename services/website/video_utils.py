@@ -10,6 +10,9 @@
   {"provider": "youtube"|"vimeo"|"facebook"|"link",
    "video_id": str | None,      # youtube/vimeo 才有
    "embed_url": str | None}     # link 無 embed（前端渲染成外連）
+
+⚠ **一律用 `embed_url` 嵌入，不要自己用 video_id 拼**：Vimeo 未公開影片少了 `?h=`
+會被播放器拒播（只顯示「抱歉，我們遇到了一點麻煩」）。
 空字串 / 非 URL 文字 → None（沒填主影片）。
 
 ⚠ 編輯器有一份 JS 鏡像（frontend/showcase-edit.html `_videoProvider()`，純提示用）—
@@ -30,8 +33,11 @@ _YT_PATTERNS = [
     re.compile(r"youtube\.com/shorts/([A-Za-z0-9_\-]{6,})"),
 ]
 
-# ── Vimeo：標準分享連結 vimeo.com/<純數字 id> ──
-_VIMEO_PATTERN = re.compile(r"vimeo\.com/(\d+)")
+# ── Vimeo：vimeo.com/<id>、vimeo.com/<id>/<私密雜湊>、player.vimeo.com/video/<id>?h=<雜湊> ──
+# 「未公開（unlisted）」影片的網址帶一段私密雜湊，**嵌入時一定要帶著**（?h=），
+# 少了它 Vimeo 播放器只會顯示「抱歉，我們遇到了一點麻煩」。
+_VIMEO_PATTERN = re.compile(r"vimeo\.com/(?:video/)?(\d+)(?:/([A-Za-z0-9]+))?")
+_VIMEO_HASH_QS = re.compile(r"[?&]h=([A-Za-z0-9]+)")
 
 # ── Facebook：三種常見影片 URL 形態（粉專影片 / watch 頁 / fb.watch 短網址）。
 # FB 不給穩定的 video id 抽取（URL 形態太多），一律走 plugins/video.php
@@ -72,8 +78,12 @@ def parse_video_url(url: str) -> dict | None:
     m = _VIMEO_PATTERN.search(u)
     if m:
         vid = m.group(1)
+        qs = _VIMEO_HASH_QS.search(u)
+        vhash = m.group(2) or (qs.group(1) if qs else "")
+        # 雜湊不另外開欄位 —— 它只在 embed_url 裡有意義（呼叫端一律用 embed_url）
         return {"provider": "vimeo", "video_id": vid,
-                "embed_url": f"https://player.vimeo.com/video/{vid}"}
+                "embed_url": (f"https://player.vimeo.com/video/{vid}"
+                              + (f"?h={vhash}" if vhash else ""))}
 
     if any(p.search(u) for p in _FB_PATTERNS):
         # FB embed 是把整條原始 URL encode 進 href 參數（safe="" 連 / 也 encode）

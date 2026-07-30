@@ -88,7 +88,10 @@ def _parse_video(url: str) -> dict:
     provider = d.get("provider") or ("link" if (url or "").startswith("http") else "")
     vid = d.get("video_id") or ""
     thumb = f"https://img.youtube.com/vi/{vid}/hqdefault.jpg" if provider == "youtube" and vid else ""
-    return {"provider": provider, "video_id": vid, "thumb": thumb}
+    # embed_url 由 parse_video_url 產（Vimeo 未公開影片的 ?h= 私密雜湊在裡面）——
+    # 前端一律用它嵌入，不要自己拿 video_id 拼
+    return {"provider": provider, "video_id": vid, "thumb": thumb,
+            "embed_url": d.get("embed_url") or ""}
 
 
 def _sync_video_meta(ref) -> None:
@@ -171,10 +174,10 @@ def ref_dict(r, *, research: bool = True) -> dict:
     provider/video_id 缺值時「讀時推導」—— 片子可能是舊端點或 v2 之前建的，
     這樣所有既有列都能直接播，不需要資料遷移或手動 refresh。
     """
+    meta = _parse_video(r.url or "")          # embed_url 一律即時推導（欄位沒存它）
     provider, vid = r.provider or "", r.video_id or ""
     thumb = r.thumb_url or ""
     if not provider:
-        meta = _parse_video(r.url or "")
         provider, vid = meta["provider"], meta["video_id"]
         thumb = thumb or meta["thumb"]
     d = {
@@ -187,6 +190,7 @@ def ref_dict(r, *, research: bool = True) -> dict:
         "curated": bool(r.curated),
         "provider": provider,
         "video_id": vid,
+        "embed_url": meta["embed_url"],
         "facets": _norm_facets(r.facets),
         "created_at": r.created_at.isoformat() if r.created_at else None,
         "updated_at": r.updated_at.isoformat() if r.updated_at else None,

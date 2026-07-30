@@ -163,18 +163,13 @@ function _injectStyle() {
 // ── 影片嵌入（provider 由後端 parse_video_url 快取；link 無 embed → 外連）──
 function _embedHtml(ref) {
     const u = safeUrl(ref.url);
-    if (ref.provider === 'youtube' && ref.video_id) {
-        return `<iframe src="https://www.youtube.com/embed/${attr(ref.video_id)}"
-            title="影片" allow="accelerometer; clipboard-write; encrypted-media; picture-in-picture"
+    // 一律用後端 parse_video_url 產的 embed_url —— 自己拿 video_id 拼會漏掉
+    // Vimeo 未公開影片的 ?h= 私密雜湊，播放器會直接拒播
+    const embed = safeUrl(ref.embed_url);
+    if (embed) {
+        return `<iframe src="${attr(embed)}" title="影片"
+            allow="accelerometer; autoplay; clipboard-write; encrypted-media; fullscreen; picture-in-picture"
             referrerpolicy="strict-origin-when-cross-origin" allowfullscreen></iframe>`;
-    }
-    if (ref.provider === 'vimeo' && ref.video_id) {
-        return `<iframe src="https://player.vimeo.com/video/${attr(ref.video_id)}"
-            title="影片" allow="autoplay; fullscreen; picture-in-picture" allowfullscreen></iframe>`;
-    }
-    if (ref.provider === 'facebook' && u) {
-        return `<iframe src="https://www.facebook.com/plugins/video.php?href=${encodeURIComponent(u)}&show_text=false"
-            title="影片" allow="encrypted-media" allowfullscreen></iframe>`;
     }
     return `<div class="ph">${u
         ? `這個連結沒有內嵌播放器<br><a href="${attr(u)}" target="_blank" rel="noopener">在新視窗開啟 ↗</a>`

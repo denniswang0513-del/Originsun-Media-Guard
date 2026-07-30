@@ -309,3 +309,17 @@ UNIQUE(reference_id, target_type, target_id)
 - 上生產前檢查搬遷完整性（dev 實測）：舊表列數＝新表 proposal 列數、沒有漏搬、沒有重複、
   沒有指向不存在片子/提案的孤兒 link。⚠ dev 樣本只有 1 列，生產列數較多但走同一條
   冪等 `NOT EXISTS` SQL。
+
+### 修正：Vimeo 未公開影片播不了（2026-07-30，v2.4.34 後）
+
+owner 回報研究頁的 Vimeo 影片顯示「抱歉，我們遇到了一點麻煩」。根因在
+`services/website/video_utils.py`：**未公開（unlisted）影片的網址帶一段私密雜湊**
+（`vimeo.com/960087402/71d3a3c405`），舊 pattern 只抓數字 id 把雜湊丟掉，
+嵌入時少了 `?h=` → Vimeo 播放器拒播。
+
+- pattern 改成同時吃 `vimeo.com/<id>/<雜湊>`、`player.vimeo.com/video/<id>?h=<雜湊>`，
+  雜湊只放進 `embed_url`（**不另開欄位** —— 呼叫端一律用 embed_url）。
+- `ref_dict` 開始回 `embed_url`（即時從 url 推導，不需要新欄位或資料遷移），
+  `reference-page.js` 改用它嵌入 —— **前端不要自己拿 video_id 拼**，那正是漏掉雜湊的原因。
+- 這條修正同時修好**對外官網**：`website/src` 的作品頁本來就吃 `video_embed_url`，
+  之前未公開的 Vimeo 作品同樣播不了。
