@@ -891,16 +891,26 @@ class PreprodProposal(Base):
 
 
 class PreprodReference(Base):
-    """參考片庫 — 獨立於單一提案的共用參考片，跨提案重用。"""
+    """參考片庫 — 獨立於單一提案的共用參考片，跨提案重用。
+    v2（docs/REFERENCE_LIBRARY.md）：每支片一個小頁面 —— facets 分類族、
+    research 研究四欄、截圖（preprod_reference_shots）、引用（preprod_reference_links）。"""
     __tablename__ = "preprod_references"
 
     id = Column(String(32), primary_key=True)                    # uuid4 hex
     url = Column(String(512), nullable=False)                    # 參考片連結（YouTube/Vimeo…）
     title = Column(String(255), nullable=True)
-    note = Column(Text, nullable=True)
-    tags = Column(JSONB, nullable=True)                          # list[str]
+    note = Column(Text, nullable=True)                           # 一句話心得（Notion「備註」）
+    tags = Column(JSONB, nullable=True)                          # list[str] — v2 起正本在 facets.keyword
     thumb_url = Column(String(512), nullable=True)               # 縮圖（可選）
     created_at = Column(DateTime(timezone=True), server_default=func.now())
+    # ── v2 ──
+    description = Column(Text, nullable=True)                    # 長文說明（Notion「說明」）
+    facets = Column(JSONB, nullable=True)                        # 分類族：category/brand/studio/paragon/technique/emotion/keyword/study
+    research = Column(JSONB, nullable=True)                      # 研究四欄（逐格 {answer,updated_at,updated_by}）
+    curated = Column(Boolean, nullable=True)                     # 建檔完成
+    provider = Column(String(16), nullable=True)                 # youtube/vimeo/facebook/link（parse_video_url 快取）
+    video_id = Column(String(64), nullable=True)
+    updated_at = Column(DateTime(timezone=True), server_default=func.now())
 
 
 class PreprodProposalRef(Base):

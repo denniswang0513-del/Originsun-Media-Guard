@@ -203,6 +203,8 @@ async function openDetail(pid) {
         <div class="prop-ref" data-rid="${esc(r.id)}">
             <div style="display:flex;gap:8px;align-items:center;">
                 <a href="${esc(r.url)}" target="_blank" rel="noopener" style="flex:1;">${esc(r.title || r.url)}</a>
+                <a href="/reference.html?id=${encodeURIComponent(r.id)}" target="_blank" rel="noopener"
+                   style="font-size:11px;color:#93c5fd;white-space:nowrap;" title="研究頁：分類 + 研究四欄">研究頁 ↗</a>
                 <button class="prop-btn danger prop-ref-unlink" style="padding:2px 8px;font-size:11px;">解除</button>
             </div>
             ${r.note ? `<div class="note">${esc(r.note)}</div>` : ''}

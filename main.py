@@ -33,6 +33,7 @@ _ROUTER_MODULES = [
     'api_report', 'api_transcribe', 'api_system', 'api_ota', 'api_utils', 'api_tts',
     'api_job_history', 'api_queue', 'api_schedules', 'api_agents', 'api_bookmarks',
     'api_api_keys', 'api_timesheets', 'api_cashflow', 'api_finance', 'api_locations', 'api_proposals',
+    'api_references',
     'api_intel',
     'api_portal',
     'api_equipment',
@@ -471,6 +472,14 @@ async def _on_startup():
                         # 提案企劃矩陣（docs/PROPOSAL_PLANNER.md）
                         ("preprod_proposals", "plan", "JSONB"),
                         ("preprod_proposals", "notes", "TEXT"),   # 基本資料備註（§9.7）
+                        # 參考影片庫 v2（docs/REFERENCE_LIBRARY.md）
+                        ("preprod_references", "description", "TEXT"),
+                        ("preprod_references", "facets", "JSONB"),
+                        ("preprod_references", "research", "JSONB"),
+                        ("preprod_references", "curated", "BOOLEAN"),
+                        ("preprod_references", "provider", "VARCHAR(16)"),
+                        ("preprod_references", "video_id", "VARCHAR(64)"),
+                        ("preprod_references", "updated_at", "TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP"),
                     ]
                     for tbl, col, coltype in _crm_cols:
                         try:

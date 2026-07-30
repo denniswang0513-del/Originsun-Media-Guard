@@ -271,7 +271,9 @@ function _renderInfo(host, info, opts) {
             <div class="ref-head">
                 <input class="info-in ref-in" data-rfield="title" data-rid="${escAttr(r.id)}"
                        placeholder="標題（例：參考打光）">
-                ${link(r.url, "開啟 ↗")}
+                <a href="${escAttr(opts.refPageUrl ? opts.refPageUrl(r.id) : "#")}" target="_blank"
+                   rel="noopener" title="打開這支片的研究頁面">研究頁 ↗</a>
+                ${link(r.url, "影片 ↗")}
                 <button class="ref-del" data-rid="${escAttr(r.id)}" title="從本提案移除">移除</button>
             </div>
             <input class="info-in ref-in" data-rfield="note" data-rid="${escAttr(r.id)}"
@@ -512,6 +514,7 @@ async function _loadPlan(pid) {
             editable: ["ptype", "pitch_date", "budget_range", "tags", "notes", "outcome_reason"],
             save: async (field, value) => ok(await mfetch(P, { method: "PUT", body: JSON.stringify({ [field]: value }) })),
             reload: async () => (await ok(await mfetch(P))).proposal,
+            refPageUrl: (rid) => "/reference.html?id=" + encodeURIComponent(rid),
             refs: {
                 add: async (url, title) => {
                     const d = await ok(await mfetch("/api/v1/proposals/references",
@@ -565,6 +568,9 @@ async function _loadSharedPlan(shareTok) {
                 save: async (field, value) => ok(await fetch(base + "/info",
                     { method: "PATCH", headers: J, body: JSON.stringify({ field, value }) })),
                 reload: async () => (await ok(await fetch(base))).info,
+                // 公開共編：研究頁也走 token（?t=&id=），對方不用登入
+                refPageUrl: (rid) => "/reference.html?t=" + encodeURIComponent(shareTok) +
+                                     "&id=" + encodeURIComponent(rid),
                 refs: {
                     add: async (url, title) => ok(await fetch(base + "/refs",
                         { method: "POST", headers: J, body: JSON.stringify({ url, title }) })),

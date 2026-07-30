@@ -113,6 +113,19 @@ def _prop_dict(p, client_name: str = "", refs_count: int = 0, has_plan=None) -> 
     }
 
 
+def _sync_ref_video(ref) -> None:
+    """參考片 url 寫入後同步影片描述子 —— 正本在 routers/api_references.py，
+    這裡薄殼呼叫（同一條規則不分岔；函式內 import 避免 router 載入順序問題）。"""
+    from routers.api_references import _sync_video_meta
+    _sync_video_meta(ref)
+
+
+async def assert_public_ref_writable(session, rid: str):
+    """公開改參考片的共用護欄（re-export，正本與 docstring 在 api_references）。"""
+    from routers.api_references import assert_public_ref_writable as _impl
+    await _impl(session, rid)
+
+
 def _ref_dict(r) -> dict:
     return {
         "id": r.id,
@@ -224,6 +237,7 @@ async def create_reference(req: ReferencePayload, request: Request):
         id=uuid.uuid4().hex,
         **{k: v for k, v in data.items() if k in _REF_FIELDS},
     )
+    _sync_ref_video(ref)          # provider/video_id/YouTube 封面（正本在 api_references）
     async with factory() as session:
         session.add(ref)
         await session.commit()
@@ -250,6 +264,8 @@ async def update_reference(rid: str, req: ReferencePayload, request: Request):
         for k, v in data.items():
             if k in _REF_FIELDS:
                 setattr(ref, k, v)
+        if "url" in data:
+            _sync_ref_video(ref)
         await session.commit()
         await session.refresh(ref)
     return {"status": "ok", "reference": _ref_dict(ref)}
@@ -761,6 +777,7 @@ async def add_shared_reference(token: str, body: dict = Body(...)):
             raise HTTPException(status_code=409,
                                 detail=f"參考片已達 {_PUBLIC_REFS_MAX} 支上限，請先移除幾支")
         ref = PreprodReference(id=uuid.uuid4().hex, url=url, title=title, note=note)
+        _sync_ref_video(ref)
         session.add(ref)
         session.add(PreprodProposalRef(
             id=uuid.uuid4().hex, proposal_id=prop.id, reference_id=ref.id))
@@ -787,11 +804,7 @@ async def patch_shared_reference(token: str, rid: str, body: dict = Body(...)):
         )).scalars().first()
         if not link:
             raise HTTPException(status_code=404, detail="這支參考片沒掛在本提案")
-        shared_n = (await session.execute(
-            select(safunc.count(PreprodProposalRef.id))
-            .where(PreprodProposalRef.reference_id == rid))).scalar() or 0
-        if shared_n > 1:
-            raise HTTPException(status_code=409, detail="這支參考片被其他提案共用，請由後台編輯")
+        await assert_public_ref_writable(session, rid)   # 共用資產護欄（正本在 api_references）
         ref = await session.get(PreprodReference, rid)
         if not ref:
             raise HTTPException(status_code=404, detail="找不到此參考片")

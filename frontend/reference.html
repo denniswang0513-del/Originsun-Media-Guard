@@ -1,0 +1,364 @@
+<!doctype html>
+<html lang="zh-Hant" class="ref-theme-light">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex,nofollow">
+<title>參考影片庫｜ORIGINSUN</title>
+<!-- 參考影片庫 v2（docs/REFERENCE_LIBRARY.md）：帳號登入 → 片庫總覽（搜尋/分類篩選）
+     → 單片詳情（reference-page.js 元件，html.ref-theme-light 白底覆寫）。
+     公開模式 ?t=<提案共編token>&rid=<片id>：免登入，可填研究與標題備註，不可改分類。
+     只掛 master / foundry（NAS 官網容器沒有 CRM 後端）。比照 proposal-plan.html 家族。 -->
+<script src="https://accounts.google.com/gsi/client" async defer></script>
+<style>
+  :root { --red: #c9372c; --ink: #262626; --sub: #737373; --line: #e5e5e5; }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; background: #fff; color: var(--ink);
+    font-family: "Noto Sans TC", "Microsoft JhengHei", "Segoe UI", sans-serif; }
+  a { color: inherit; text-decoration: none; }
+  .eyebrow { font-size: 11px; letter-spacing: 0.35em; text-transform: uppercase; color: var(--sub); }
+  .accent { color: var(--red); }
+  header { position: sticky; top: 0; z-index: 50; display: flex; align-items: center;
+    justify-content: space-between; padding: 14px 24px; background: rgba(255,255,255,0.96);
+    backdrop-filter: blur(12px); border-bottom: 1px solid var(--line); }
+  header .brand { display: flex; align-items: center; gap: 12px; }
+  header .brand img { height: 30px; width: auto; display: block; }
+  header .brand-name { font-size: 13px; letter-spacing: 0.25em; font-weight: 300; }
+  header .hdr-right { display: flex; align-items: center; gap: 14px; }
+  header .hdr-user { font-size: 12px; color: var(--sub); }
+  .btn-ghost { background: none; border: 1px solid var(--line); border-radius: 2px;
+    padding: 6px 14px; font-size: 12px; color: var(--sub); cursor: pointer; transition: all .15s; }
+  .btn-ghost:hover { color: var(--red); border-color: var(--red); }
+  main { max-width: 1240px; margin: 0 auto; padding: 22px 20px 60px; }
+
+  /* 登入卡（同 proposal-plan.html） */
+  .center-wrap { max-width: 380px; margin: 8vh auto 0; }
+  .login-card { border: 1px solid var(--line); padding: 40px 36px; }
+  .login-card h1 { font-size: 22px; font-weight: 300; letter-spacing: 0.1em; margin: 18px 0 6px; }
+  .login-card .sub { font-size: 13px; color: var(--sub); margin-bottom: 28px; line-height: 1.7; }
+  .field { margin-bottom: 14px; }
+  .field label { display: block; font-size: 11px; letter-spacing: 0.15em; color: var(--sub);
+    text-transform: uppercase; margin-bottom: 6px; }
+  .field input { width: 100%; border: 1px solid var(--line); border-radius: 2px; padding: 10px 12px;
+    font-size: 14px; color: var(--ink); outline: none; }
+  .field input:focus { border-color: var(--red); }
+  .btn-primary { display: block; width: 100%; text-align: center; background: var(--ink); color: #fff;
+    border: 0; padding: 12px; font-size: 12px; letter-spacing: 0.3em; text-transform: uppercase;
+    cursor: pointer; }
+  .btn-primary:hover { background: var(--red); }
+  .err { color: var(--red); font-size: 12px; margin-top: 12px; display: none; }
+  .login-divider { display: none; align-items: center; gap: 10px; margin: 20px 0; color: var(--sub); font-size: 11px; }
+  .login-divider::before, .login-divider::after { content: ""; flex: 1; height: 1px; background: var(--line); }
+  #g_id_signin_container { display: none; justify-content: center; }
+  .state-msg { text-align: center; color: var(--sub); font-size: 14px; line-height: 1.9; padding: 40px 12px; }
+
+  /* 總覽 */
+  .lib-head { display: flex; align-items: baseline; gap: 14px; flex-wrap: wrap; margin: 4px 0 14px; }
+  .lib-head h1 { font-size: 20px; font-weight: 300; letter-spacing: 0.1em; margin: 0; }
+  .lib-head .hint { font-size: 12px; color: var(--sub); }
+  .lib-bar { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin-bottom: 16px; }
+  .lib-bar input, .lib-bar select { border: 1px solid var(--line); border-radius: 2px; padding: 7px 9px;
+    font-size: 13px; color: var(--ink); outline: none; background: #fff; }
+  .lib-bar input:focus, .lib-bar select:focus { border-color: var(--red); }
+  .lib-bar input[type="search"] { min-width: 200px; }
+  .lib-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 14px; }
+  .ref-card { border: 1px solid var(--line); cursor: pointer; transition: box-shadow .15s, transform .1s;
+    display: flex; flex-direction: column; }
+  .ref-card:hover { box-shadow: 0 4px 18px rgba(0,0,0,.08); transform: translateY(-1px); }
+  .ref-card .thumb { aspect-ratio: 16/9; background: #f0f0f0 center/cover no-repeat; }
+  .ref-card .thumb.none { display: flex; align-items: center; justify-content: center;
+    color: var(--sub); font-size: 11px; }
+  .ref-card .body { padding: 10px 12px 12px; flex: 1; display: flex; flex-direction: column; gap: 6px; }
+  .ref-card .t { font-size: 13.5px; line-height: 1.5; }
+  .ref-card .n { font-size: 11.5px; color: var(--sub); line-height: 1.6;
+    display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+  .ref-card .foot { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; margin-top: auto; }
+  .pill { font-size: 10.5px; padding: 2px 7px; border-radius: 2px; background: #f0f0f0; color: var(--sub); }
+  .pill.ok { background: #e6f4ea; color: #147a3d; }
+  .pill.used { background: #eef2ff; color: #4338ca; }
+
+  /* 詳情 */
+  .det-head { display: flex; align-items: center; gap: 12px; margin: 4px 0 16px; flex-wrap: wrap; }
+  .det-head h1 { font-size: 18px; font-weight: 400; letter-spacing: 0.04em; margin: 0; flex: 1;
+    min-width: 200px; }
+  .det-head .back { font-size: 12px; color: var(--sub); cursor: pointer; border: 1px solid var(--line);
+    border-radius: 2px; padding: 5px 12px; background: none; }
+  .det-head .back:hover { color: var(--red); border-color: var(--red); }
+  .guest-bar { display: none; align-items: center; gap: 8px; }
+  .guest-bar label { font-size: 11px; letter-spacing: .1em; color: var(--sub); white-space: nowrap; }
+  .guest-bar input { width: 140px; border: 1px solid var(--line); border-radius: 2px;
+    padding: 5px 8px; font-size: 12px; color: var(--ink); outline: none; }
+</style>
+</head>
+<body>
+<header>
+  <div class="brand">
+    <img src="/img/originsun-logo.webp" alt="源日影像" onerror="this.style.display='none'">
+    <span class="brand-name">參考影片庫 <span class="accent">REFERENCE</span></span>
+  </div>
+  <div class="hdr-right">
+    <span class="hdr-user" id="hdr-user" style="display:none;"></span>
+    <button class="btn-ghost" id="btn-logout" style="display:none;" onclick="doLogout()">登出</button>
+  </div>
+</header>
+
+<main>
+  <div id="login-view" style="display:none;">
+    <div class="center-wrap">
+      <div class="login-card">
+        <div class="eyebrow">Reference Library</div>
+        <h1>參考影片庫登入</h1>
+        <div class="sub">每支參考片一個頁面：影片、分類、研究四欄（核心目的／創意 idea＆手法／創意素材／關鍵橋段）。</div>
+        <form onsubmit="doPwdLogin(event)">
+          <div class="field"><label>帳號 Account</label><input id="in-user" autocomplete="username"></div>
+          <div class="field"><label>密碼 Password</label><input id="in-pwd" type="password" autocomplete="current-password"></div>
+          <button class="btn-primary" type="submit">登入 Sign in</button>
+        </form>
+        <div class="login-divider" id="login-divider">或</div>
+        <div id="g_id_signin_container"></div>
+        <div id="login-err" class="err"></div>
+      </div>
+    </div>
+  </div>
+
+  <div id="noperm-view" style="display:none;">
+    <div class="state-msg">此帳號沒有參考影片庫權限。<br>請管理員開通 <b>preprod_proposals</b> 或 <b>preprod_plan</b> 模組。
+      <div style="margin-top:18px;"><button class="btn-ghost" onclick="doLogout()">換帳號登入</button></div>
+    </div>
+  </div>
+
+  <div id="lib-view" style="display:none;">
+    <div class="lib-head">
+      <h1>參考影片庫</h1>
+      <span class="hint">點一張卡進入該片的研究頁面。片庫跨提案共用。</span>
+    </div>
+    <div class="lib-bar">
+      <input type="search" id="q" placeholder="搜尋標題／連結／心得…">
+      <select id="facet-key"><option value="">（全部分類族）</option></select>
+      <select id="facet-val" style="display:none;"></select>
+      <select id="curated">
+        <option value="">建檔狀態：全部</option>
+        <option value="1">已建檔</option>
+        <option value="0">待建檔</option>
+      </select>
+      <span class="hint" id="lib-count"></span>
+    </div>
+    <div id="lib-grid" class="lib-grid"><div class="state-msg">載入中…</div></div>
+  </div>
+
+  <div id="det-view" style="display:none;">
+    <div class="det-head">
+      <button class="back" id="det-back">← 片庫</button>
+      <h1 id="det-title"></h1>
+      <span class="guest-bar" id="guest-bar">
+        <label>你的名字</label>
+        <input id="guest-name" placeholder="共編署名（選填）">
+      </span>
+    </div>
+    <div id="det-host"><div class="state-msg">載入中…</div></div>
+  </div>
+</main>
+
+<script>
+"use strict";
+const TOKEN_KEY = "auth_token";
+const API = "/api/v1/references";
+const $ = (id) => document.getElementById(id);
+let FACET_OPTS = {};
+
+const FACET_LABELS = { category: "類別", brand: "品牌", studio: "製作單位", paragon: "典範",
+    technique: "技巧", emotion: "情感取向", keyword: "關鍵字", study: "研究用途" };
+
+// fetcher 用提案模組的共用正本（prop-fetch.js）：它掛 err.status / err.detail，
+// 409 衝突 UI 與 401 分流都靠這兩個欄位。歷史教訓：兩份 fetcher 分岔過一次，
+// 害 SPA 路徑的衝突 UI 整條死路 —— 所以這裡不再自己寫一份。
+let tfetch = null;
+const _fetcherReady = import("/tabs/proposals/prop-fetch.js").then(m => { tfetch = m.tfetch; });
+const _componentReady = import("/tabs/proposals/reference-page.js");   // 先暖起來，別等 GET 回來才下載
+
+function escText(s) { const d = document.createElement("div"); d.textContent = String(s ?? ""); return d.innerHTML; }
+function escAttr(s) { return String(s ?? "").replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;").replace(/>/g, "&gt;"); }
+
+function _show(view) {
+    for (const v of ["login-view", "noperm-view", "lib-view", "det-view"]) $(v).style.display = (v === view ? "block" : "none");
+    $("btn-logout").style.display = (view === "login-view") ? "none" : "";
+}
+function showLogin(msg) {
+    _show("login-view"); $("hdr-user").style.display = "none";
+    if (msg) { const e = $("login-err"); e.textContent = msg; e.style.display = "block"; }
+    initGoogle();
+}
+function doLogout() { localStorage.removeItem(TOKEN_KEY); localStorage.removeItem("auth_user"); location.href = location.pathname; }
+function onLoginOk(d) { localStorage.setItem(TOKEN_KEY, d.token); $("login-err").style.display = "none"; boot(); }
+
+async function doPwdLogin(ev) {
+    ev.preventDefault();
+    try {
+        const r = await fetch("/api/v1/auth/login", { method: "POST", headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ username: $("in-user").value.trim(), password: $("in-pwd").value }) });
+        const d = await r.json();
+        if (!r.ok) { showLogin(d.detail || "登入失敗"); return; }
+        onLoginOk(d);
+    } catch (_) { showLogin("連線失敗，請稍後再試"); }
+}
+
+let _gisInited = false;
+async function initGoogle() {
+    if (_gisInited) return;
+    try {
+        const r = await fetch("/api/v1/auth/google/config");
+        if (!r.ok) return;
+        const cfg = await r.json();
+        if (!cfg.enabled || !cfg.client_id) return;
+        for (let i = 0; i < 40 && (typeof google === "undefined" || !google.accounts); i++)
+            await new Promise(res => setTimeout(res, 150));
+        if (typeof google === "undefined" || !google.accounts) return;
+        google.accounts.id.initialize({
+            client_id: cfg.client_id, auto_select: false, cancel_on_tap_outside: true,
+            callback: async (resp) => {
+                try {
+                    const r2 = await fetch("/api/v1/auth/google/login", { method: "POST",
+                        headers: { "Content-Type": "application/json" }, body: JSON.stringify({ credential: resp.credential }) });
+                    const d = await r2.json();
+                    if (!r2.ok) { showLogin(d.detail || "Google 登入失敗"); return; }
+                    onLoginOk(d);
+                } catch (_) { showLogin("連線失敗，請稍後再試"); }
+            },
+        });
+        google.accounts.id.renderButton($("g_id_signin_container"),
+            { theme: "outline", size: "large", width: 320, text: "signin_with", shape: "rectangular", logo_alignment: "left" });
+        $("g_id_signin_container").style.display = "flex";
+        $("login-divider").style.display = "flex";
+        _gisInited = true;
+    } catch (e) { console.warn("[GIS] init failed", e); }
+}
+
+// ── 總覽 ─────────────────────────────────────────────────
+function _card(r) {
+    const thumb = /^https?:\/\/|^\//.test(r.thumb_url || "")
+        ? `<div class="thumb" style="background-image:url('${escAttr(r.thumb_url)}')"></div>`
+        : '<div class="thumb none">無封面</div>';
+    const facets = [].concat(r.facets?.category || [], r.facets?.technique || []).slice(0, 3);
+    return `<div class="ref-card" data-rid="${escAttr(r.id)}">
+        ${thumb}
+        <div class="body">
+            <div class="t">${escText(r.title || r.url)}</div>
+            ${r.note ? `<div class="n">${escText(r.note)}</div>` : ""}
+            <div class="foot">
+                ${r.curated ? '<span class="pill ok">已建檔</span>' : '<span class="pill">待建檔</span>'}
+                ${r.links_count ? `<span class="pill used">被引用 ${r.links_count}</span>` : ""}
+                ${facets.map(f => `<span class="pill">${escText(f)}</span>`).join("")}
+            </div>
+        </div>
+    </div>`;
+}
+
+async function _loadLib() {
+    _show("lib-view");
+    const host = $("lib-grid");
+    const p = new URLSearchParams();
+    if ($("q").value.trim()) p.set("q", $("q").value.trim());
+    if ($("curated").value) p.set("curated", $("curated").value);
+    if ($("facet-key").value && $("facet-val").value) {
+        p.set("facet", $("facet-key").value);
+        p.set("value", $("facet-val").value);
+    }
+    try {
+        const d = await tfetch(API + (p.toString() ? "?" + p.toString() : ""));
+        const refs = d.references || [];
+        $("lib-count").textContent = `${refs.length} 支`;
+        host.innerHTML = refs.length ? refs.map(_card).join("")
+            : '<div class="state-msg">沒有符合的參考影片。片子從提案頁的「參考影片」加入。</div>';
+        host.querySelectorAll(".ref-card").forEach(c => c.addEventListener("click", () => {
+            location.href = location.pathname + "?id=" + encodeURIComponent(c.dataset.rid);
+        }));
+    } catch (e) {
+        host.innerHTML = '<div class="state-msg" style="color:var(--red);">載入失敗：' + escText(e.message || e) + "</div>";
+    }
+}
+
+function _wireLibBar() {
+    const fk = $("facet-key");
+    fk.innerHTML = '<option value="">（全部分類族）</option>' +
+        Object.keys(FACET_LABELS).map(k => `<option value="${k}">${FACET_LABELS[k]}</option>`).join("");
+    let t = null;
+    $("q").addEventListener("input", () => { clearTimeout(t); t = setTimeout(_loadLib, 400); });
+    $("curated").addEventListener("change", _loadLib);
+    fk.addEventListener("change", () => {
+        const vals = FACET_OPTS[fk.value] || [];
+        const fv = $("facet-val");
+        if (!fk.value || !vals.length) { fv.style.display = "none"; fv.innerHTML = ""; _loadLib(); return; }
+        fv.innerHTML = vals.map(v => `<option value="${escAttr(v)}">${escText(v)}</option>`).join("");
+        fv.style.display = "";
+        _loadLib();
+    });
+    $("facet-val").addEventListener("change", _loadLib);
+}
+
+// ── 詳情（登入與公開共用一條；差別只有 shareToken）────────────
+async function _openDetail(rid, shareToken) {
+    _show("det-view");
+    const host = $("det-host");
+    const base = shareToken
+        ? `${API}/shared/${encodeURIComponent(shareToken)}/${encodeURIComponent(rid)}`
+        : `${API}/${encodeURIComponent(rid)}`;
+    try {
+        const [{ reference: ref }, { renderReference }] = await Promise.all([tfetch(base), _componentReady]);
+        $("det-title").textContent = ref.title || ref.url || "參考影片";
+        document.title = (ref.title || "參考影片") + (shareToken ? "｜參考影片（共編）" : "｜參考影片庫") + "｜ORIGINSUN";
+        host.innerHTML = "";
+        renderReference(host, {
+            ref, shareToken, fetcher: tfetch, facetOptions: FACET_OPTS,
+            getGuestName: shareToken ? (() => $("guest-name").value.trim()) : undefined,
+        });
+    } catch (e) {
+        const msg = e.status === 401 ? "這條共編連結已停用或失效。<br>請向企劃負責人索取新連結。"
+            : e.status === 404 ? "找不到這支參考影片（或它沒有掛在該提案上）。"
+            : "載入失敗：" + escText(e.message || e);
+        host.innerHTML = `<div class="state-msg">${msg}</div>`;
+    }
+}
+
+function _prepGuestBar() {
+    $("btn-logout").style.display = "none";
+    $("det-back").style.display = "none";
+    const bar = $("guest-bar");
+    bar.style.display = "inline-flex";
+    const nameInput = $("guest-name");
+    nameInput.value = localStorage.getItem("plan_guest_name") || "";   // 與企劃共編頁共用署名
+    nameInput.addEventListener("change", () => localStorage.setItem("plan_guest_name", nameInput.value.trim()));
+}
+
+async function boot() {
+    await _fetcherReady;
+    const qs = new URLSearchParams(location.search);
+    const shareTok = qs.get("t");
+    const rid = qs.get("id") || qs.get("rid");
+    if (shareTok && rid) { _prepGuestBar(); _openDetail(rid, shareTok); return; }   // 公開模式：不走登入
+    if (!localStorage.getItem(TOKEN_KEY)) { showLogin(""); return; }
+    let me;
+    try {
+        me = await tfetch("/api/v1/auth/me");
+    } catch (e) {
+        if (e.status === 401) { localStorage.removeItem(TOKEN_KEY); showLogin(""); return; }
+        showLogin(e.status ? ("載入失敗（" + e.status + "）") : "連線失敗，請稍後再試");
+        return;
+    }
+    const mods = me.modules || [];
+    const isAdmin = (me.access_level || 0) >= 3 || me.role_name === "admin";
+    $("hdr-user").textContent = me.username || "";
+    $("hdr-user").style.display = "";
+    if (!isAdmin && !mods.includes("preprod_proposals") && !mods.includes("preprod_plan")) { _show("noperm-view"); return; }
+    $("det-back").addEventListener("click", () => { location.href = location.pathname; });
+    // facet 選項與主內容互不相依 → 並行（選項只用在 datalist / 篩選下拉）
+    const opts = tfetch(`${API}/facet_options`).then(d => { FACET_OPTS = d.options || {}; }).catch(() => {});
+    if (rid) { await Promise.all([opts, _openDetail(rid, null)]); return; }
+    await opts;
+    _wireLibBar();
+    _loadLib();
+}
+
+boot();
+</script>
+</body>
+</html>

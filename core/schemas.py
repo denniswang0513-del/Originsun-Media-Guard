@@ -862,6 +862,24 @@ class ProposalPlanCellPatch(BaseModel):
     guest_name: Optional[str] = None       # 公開共編（token 路徑）的署名；authed 路徑忽略
 
 
+class ReferencePatch(BaseModel):
+    """參考影片庫 v2 逐欄/逐格寫入（docs/REFERENCE_LIBRARY.md）。
+    kind=field → key+value；kind=facet → key(分類族)+value(list 或 studio 字串)；
+    kind=research → row_id+col+value（帶 base_updated_at 做樂觀鎖）。"""
+    kind: str
+    key: Optional[str] = None
+    col: Optional[str] = None             # kind=research：purpose/idea/material/moment
+    row_id: Optional[str] = None          # kind=research 必填
+    value: Optional[object] = None
+    base_updated_at: Optional[str] = None
+    guest_name: Optional[str] = None      # 公開共編署名；authed 路徑忽略
+
+
+class ReferenceResearchRow(BaseModel):
+    """公開路徑加研究列 —— 只需要署名（列 id 由伺服器產）。"""
+    guest_name: Optional[str] = None
+
+
 class ProposalPublicInfoPatch(BaseModel):
     """公開共編路徑（?t= 連結）改基本資料 — 逐欄寫入，欄名由端點白名單擋。
     刻意設計成「一次一欄」而非整包 payload：免登入路徑不給批次覆寫的能力。"""
