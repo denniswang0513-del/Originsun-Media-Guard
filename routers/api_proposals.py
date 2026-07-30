@@ -693,14 +693,15 @@ async def get_shared_plan(token: str):
         )).scalars().all()
         info = {
             "client_name": client_name,
+            # id 一併回：公開頁要能解除/改備註（只能對本提案動，仍需持有 token）
             "ptype": prop.ptype or "",
             "status": prop.status or "",
             "pitch_date": _fmt_date(prop.pitch_date),
             "tags": prop.tags or [],
             "notes": prop.notes or "",
             "deck_url": prop.deck_url or "",
-            "references": [{"title": r.title or "", "url": r.url or "", "note": r.note or ""}
-                           for r in refs],
+            "references": [{"id": r.id, "title": r.title or "", "url": r.url or "",
+                            "note": r.note or ""} for r in refs],
         }
     return {"title": prop.title, "plan": plan, "info": info}
 
@@ -723,6 +724,101 @@ async def patch_shared_info(token: str, req: ProposalPublicInfoPatch):
         prop = await _get_prop_by_plan_token(session, token, for_update=True)
         _write_info_field(prop, req.field, req.value)
         prop.updated_at = datetime.now(timezone.utc)
+        await session.commit()
+    return {"status": "ok"}
+
+
+# 公開路徑掛參考片的護欄：只收 http(s)、每提案上限、長度上限
+_PUBLIC_REFS_MAX = 30
+_REF_URL_MAX = 512
+_REF_TITLE_MAX = 255
+_REF_NOTE_MAX = 4 * 1024
+
+
+@router.post("/shared/{token}/refs")
+async def add_shared_reference(token: str, body: dict = Body(...)):
+    """公開共編加參考片（免登入）：入共用片庫 + 掛到本提案。"""
+    url = (body.get("url") or "").strip()
+    title = (body.get("title") or "").strip()[:_REF_TITLE_MAX]
+    note = (body.get("note") or "").strip()
+    if not url.lower().startswith(("http://", "https://")):
+        raise HTTPException(status_code=422, detail="網址須以 http:// 或 https:// 開頭")
+    if len(url) > _REF_URL_MAX:
+        raise HTTPException(status_code=422, detail="網址過長")
+    if len(note.encode("utf-8")) > _REF_NOTE_MAX:
+        raise HTTPException(status_code=413, detail="備註超過 4KB 上限")
+    factory = _require_factory()
+
+    from sqlalchemy import func as safunc, select
+    from db.models import PreprodProposalRef, PreprodReference
+
+    async with factory() as session:
+        prop = await _get_prop_by_plan_token(session, token)
+        n = (await session.execute(
+            select(safunc.count(PreprodProposalRef.id))
+            .where(PreprodProposalRef.proposal_id == prop.id))).scalar() or 0
+        if n >= _PUBLIC_REFS_MAX:
+            raise HTTPException(status_code=409,
+                                detail=f"參考片已達 {_PUBLIC_REFS_MAX} 支上限，請先移除幾支")
+        ref = PreprodReference(id=uuid.uuid4().hex, url=url, title=title, note=note)
+        session.add(ref)
+        session.add(PreprodProposalRef(
+            id=uuid.uuid4().hex, proposal_id=prop.id, reference_id=ref.id))
+        await session.commit()
+        await session.refresh(ref)
+    return {"status": "ok", "reference": _ref_dict(ref)}
+
+
+@router.patch("/shared/{token}/refs/{rid}")
+async def patch_shared_reference(token: str, rid: str, body: dict = Body(...)):
+    """公開共編改參考片標題/備註（免登入）。
+    片庫是跨提案共用資產 —— 只放行「只掛在本提案」的片，被別的提案共用時 409
+    （避免免登入連結改到其他提案看到的資料）。網址不給改：換片＝移除後重加。"""
+    factory = _require_factory()
+
+    from sqlalchemy import func as safunc, select
+    from db.models import PreprodProposalRef, PreprodReference
+
+    async with factory() as session:
+        prop = await _get_prop_by_plan_token(session, token)
+        link = (await session.execute(
+            select(PreprodProposalRef).where(PreprodProposalRef.proposal_id == prop.id,
+                                             PreprodProposalRef.reference_id == rid)
+        )).scalars().first()
+        if not link:
+            raise HTTPException(status_code=404, detail="這支參考片沒掛在本提案")
+        shared_n = (await session.execute(
+            select(safunc.count(PreprodProposalRef.id))
+            .where(PreprodProposalRef.reference_id == rid))).scalar() or 0
+        if shared_n > 1:
+            raise HTTPException(status_code=409, detail="這支參考片被其他提案共用，請由後台編輯")
+        ref = await session.get(PreprodReference, rid)
+        if not ref:
+            raise HTTPException(status_code=404, detail="找不到此參考片")
+        if "title" in body:
+            ref.title = (str(body.get("title") or "").strip())[:_REF_TITLE_MAX]
+        if "note" in body:
+            note = str(body.get("note") or "")
+            if len(note.encode("utf-8")) > _REF_NOTE_MAX:
+                raise HTTPException(status_code=413, detail="備註超過 4KB 上限")
+            ref.note = note
+        await session.commit()
+    return {"status": "ok"}
+
+
+@router.delete("/shared/{token}/refs/{rid}")
+async def unlink_shared_reference(token: str, rid: str):
+    """公開共編移除參考片（免登入）：只解除本提案掛載，片庫本體保留。"""
+    factory = _require_factory()
+
+    from sqlalchemy import delete as sa_delete
+    from db.models import PreprodProposalRef
+
+    async with factory() as session:
+        prop = await _get_prop_by_plan_token(session, token)
+        await session.execute(sa_delete(PreprodProposalRef)
+                              .where(PreprodProposalRef.proposal_id == prop.id,
+                                     PreprodProposalRef.reference_id == rid))
         await session.commit()
     return {"status": "ok"}
 

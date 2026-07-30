@@ -125,6 +125,24 @@
   .info-save { text-align: right; font-size: 11px; color: var(--sub); min-height: 16px;
     padding: 2px 0; position: sticky; bottom: 0; }
   .info-save.err { color: var(--red); }
+  /* 參考影片：每支一列（標題 + 開啟 + 移除 / 備註 / 網址） */
+  .info-ref .ref-head { display: flex; gap: 8px; align-items: center; }
+  .info-ref .ref-head a { font-size: 12px; color: var(--red); white-space: nowrap; text-decoration: none; }
+  .info-ref .ref-head a:hover { text-decoration: underline; }
+  .ref-del { background: none; border: 1px solid var(--line); border-radius: 2px; cursor: pointer;
+    color: var(--sub); font-size: 11px; padding: 3px 8px; white-space: nowrap; }
+  .ref-del:hover { color: var(--red); border-color: var(--red); }
+  .ref-url { font-size: 11px; color: var(--sub); padding: 0 6px; word-break: break-all; }
+  .ref-add { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 10px; padding-top: 10px;
+    border-top: 1px solid var(--line); }
+  .ref-add input { flex: 1; min-width: 150px; border: 1px solid var(--line); border-radius: 2px;
+    padding: 6px 8px; font-size: 12.5px; color: var(--ink); outline: none; }
+  .ref-add input:focus { border-color: var(--red); }
+  .ref-addbtn { background: var(--ink); color: #fff; border: 0; border-radius: 2px; cursor: pointer;
+    padding: 6px 14px; font-size: 12px; white-space: nowrap; }
+  .ref-addbtn:hover { background: var(--red); }
+  .ref-msg { font-size: 11.5px; color: var(--sub); margin-top: 6px; min-height: 14px; }
+  .ref-msg.err { color: var(--red); }
 </style>
 </head>
 <body>
@@ -247,10 +265,29 @@ function _renderInfo(host, info, opts) {
              <textarea class="info-in info-ta" data-field="outcome_reason" placeholder="轉成案或未成案時必填"></textarea></div>`
         : (info.outcome_reason ? `<div class="info-card"><h4>成案／未成案原因</h4><div class="info-hint">${escText(info.outcome_reason)}</div></div>` : "");
 
-    const refs = (info.references || []).map(r => `
+    const canRefs = !!opts.refs;
+    const refs = (info.references || []).map(r => canRefs ? `
+        <div class="info-ref" data-rid="${escAttr(r.id)}">
+            <div class="ref-head">
+                <input class="info-in ref-in" data-rfield="title" data-rid="${escAttr(r.id)}"
+                       placeholder="標題（例：參考打光）">
+                ${link(r.url, "開啟 ↗")}
+                <button class="ref-del" data-rid="${escAttr(r.id)}" title="從本提案移除">移除</button>
+            </div>
+            <input class="info-in ref-in" data-rfield="note" data-rid="${escAttr(r.id)}"
+                   placeholder="備註：這支要參考什麼？">
+            <div class="ref-url">${escText(r.url)}</div>
+        </div>` : `
         <div class="info-ref">${link(r.url, r.title || r.url) || escText(r.title || r.url)}
             ${r.note ? `<div class="note">${escText(r.note)}</div>` : ""}
         </div>`).join("");
+    const refAdd = canRefs ? `
+        <div class="ref-add">
+            <input id="ref-new-url" placeholder="https://…（YouTube / Vimeo / 雲端連結）">
+            <input id="ref-new-title" placeholder="標題（可空）">
+            <button id="ref-add-btn" class="ref-addbtn">＋ 加入</button>
+        </div>
+        <div class="ref-msg" id="ref-msg"></div>` : "";
 
     host.innerHTML = `
         <div class="info-card">
@@ -270,16 +307,25 @@ function _renderInfo(host, info, opts) {
                 placeholder="這份提案的補充說明、客戶偏好、內部提醒…（會自動儲存）"${canEdit("notes") ? "" : " readonly"}></textarea>
         </div>
         <div class="info-card">
-            <h4>參考片單（${(info.references || []).length}）</h4>
-            ${refs || '<div class="info-hint">尚未掛參考片</div>'}
+            <h4>參考影片（${(info.references || []).length}）</h4>
+            ${refs || '<div class="info-hint">尚未加參考影片</div>'}
+            ${refAdd}
         </div>
         <div class="info-hint">欄位改完會自動儲存。狀態、客戶、標題與簡報請到後台「提案庫」調整（狀態涉及成案自動建專案）。</div>
         <div class="info-save" id="info-save"></div>`;
 
-    // textarea 值走 DOM property（不進模板字串 — XSS 防線）
+    // textarea / 參考片欄位值走 DOM property（不進模板字串 — XSS 防線）
     host.querySelector('[data-field="notes"]').value = info.notes || "";
     const rt = host.querySelector('[data-field="outcome_reason"]');
     if (rt) rt.value = info.outcome_reason || "";
+    if (canRefs) {
+        const byId = {};
+        (info.references || []).forEach(r => { byId[r.id] = r; });
+        host.querySelectorAll(".ref-in[data-rfield]").forEach(el => {
+            el.value = (byId[el.dataset.rid] || {})[el.dataset.rfield] || "";
+        });
+        _wireRefs(host, info, opts);
+    }
     host.querySelectorAll("textarea.info-ta").forEach(ta => {
         _infoGrow(ta);
         ta.addEventListener("input", () => _infoGrow(ta));   // 內容多長格子就多長
@@ -288,6 +334,33 @@ function _renderInfo(host, info, opts) {
 }
 
 function _infoGrow(ta) { ta.style.height = "auto"; ta.style.height = ta.scrollHeight + "px"; }
+
+// 參考影片：加入 / 移除（動列表→重畫整塊）＋標題備註自動儲存（不重畫，免搶焦點）
+function _wireRefs(host, info, opts) {
+    const msg = $("ref-msg");
+    const say = (t, err) => { msg.textContent = t; msg.classList.toggle("err", !!err); };
+    const redraw = async () => {
+        const fresh = await opts.reload();
+        _renderInfo(host, fresh, opts);
+    };
+
+    host.querySelector("#ref-add-btn").addEventListener("click", async () => {
+        const url = $("ref-new-url").value.trim();
+        const title = $("ref-new-title").value.trim();
+        if (!/^https?:\/\//i.test(url)) { say("網址要以 http:// 或 https:// 開頭", true); return; }
+        say("加入中…");
+        try { await opts.refs.add(url, title); await redraw(); }
+        catch (e) { say("加入失敗：" + ((e && e.message) || e), true); }
+    });
+    $("ref-new-url").addEventListener("keydown", (e) => {
+        if (e.key === "Enter") host.querySelector("#ref-add-btn").click();
+    });
+    host.querySelectorAll(".ref-del").forEach(btn => btn.addEventListener("click", async () => {
+        if (!confirm("從這份提案移除這支參考影片？（片庫本體保留，其他提案不受影響）")) return;
+        try { await opts.refs.remove(btn.dataset.rid); await redraw(); }
+        catch (e) { say("移除失敗：" + ((e && e.message) || e), true); }
+    }));
+}
 
 // 自動儲存：停手 800ms 或離開欄位就送（dirty-check 擋沒改過的），同企劃矩陣手感
 function _wireInfoEditing(host, opts) {
@@ -298,14 +371,15 @@ function _wireInfoEditing(host, opts) {
         ? el.value.split(/[,，]/).map(s => s.trim()).filter(Boolean)
         : el.value;
 
-    host.querySelectorAll(".info-in[data-field]").forEach(el => {
+    // sender(value) 真正打 API；其餘（debounce / dirty-check / 訊息）兩種欄位共用
+    const wire = (el, sender) => {
         if (el.readOnly || el.disabled) return;
         el._saved = el.value;
         const save = async () => {
             if (el.value === el._saved) return;
             const want = el.value;
             try {
-                await opts.save(el.dataset.field, parse(el));
+                await sender(el);
                 el._saved = want;
                 saveEl.textContent = "已儲存 ✓"; saveEl.classList.remove("err");
                 clearTimeout(msgTimer);
@@ -318,7 +392,14 @@ function _wireInfoEditing(host, opts) {
         el.addEventListener("input", queue);
         el.addEventListener("change", () => { clearTimeout(timers.get(el)); save(); });   // date/select
         el.addEventListener("blur", () => { clearTimeout(timers.get(el)); save(); });
-    });
+    };
+
+    host.querySelectorAll(".info-in[data-field]").forEach(el =>
+        wire(el, (e) => opts.save(e.dataset.field, parse(e))));
+    if (opts.refs) {
+        host.querySelectorAll(".ref-in[data-rfield]").forEach(el =>
+            wire(el, (e) => opts.refs.patch(e.dataset.rid, e.dataset.rfield, e.value)));
+    }
 }
 
 function _showSideTabs() {
@@ -422,12 +503,26 @@ async function _loadPlan(pid) {
         $("plan-title").textContent = prop.title;
         document.title = prop.title + "｜提案企劃｜ORIGINSUN";
         // 登入模式：完整欄位可編（狀態/客戶除外 — 見畫面提示），走既有部分更新 PUT
+        const P = "/api/v1/proposals/" + encodeURIComponent(pid);
+        const ok = async (r) => {
+            if (!r.ok) throw new Error(((await r.json().catch(() => ({}))).detail) || ("HTTP " + r.status));
+            return r.json().catch(() => ({}));
+        };
         _renderInfo($("info-host"), prop, {
             editable: ["ptype", "pitch_date", "budget_range", "tags", "notes", "outcome_reason"],
-            save: async (field, value) => {
-                const r = await mfetch("/api/v1/proposals/" + encodeURIComponent(pid),
-                    { method: "PUT", body: JSON.stringify({ [field]: value }) });
-                if (!r.ok) throw new Error(((await r.json().catch(() => ({}))).detail) || ("HTTP " + r.status));
+            save: async (field, value) => ok(await mfetch(P, { method: "PUT", body: JSON.stringify({ [field]: value }) })),
+            reload: async () => (await ok(await mfetch(P))).proposal,
+            refs: {
+                add: async (url, title) => {
+                    const d = await ok(await mfetch("/api/v1/proposals/references",
+                        { method: "POST", body: JSON.stringify({ url, title }) }));
+                    return ok(await mfetch(P + "/refs",
+                        { method: "POST", body: JSON.stringify({ reference_id: d.reference.id }) }));
+                },
+                patch: async (rid, field, value) => ok(await mfetch(
+                    "/api/v1/proposals/references/" + encodeURIComponent(rid),
+                    { method: "PUT", body: JSON.stringify({ [field]: value }) })),
+                remove: async (rid) => ok(await mfetch(P + "/refs/" + encodeURIComponent(rid), { method: "DELETE" })),
             },
         });
         _showSideTabs();
@@ -460,13 +555,24 @@ async function _loadSharedPlan(shareTok) {
         document.title = d.title + "｜提案企劃（共編）｜ORIGINSUN";
         if (d.info) {   // 舊後端沒有 info → 不顯示側欄（純企劃，行為同從前）
             // 公開共編：只放行描述性欄位（後端 _PUBLIC_INFO_FIELDS 才是真守門）
+            const J = { "Content-Type": "application/json" };
+            const ok = async (r) => {
+                if (!r.ok) throw new Error(((await r.json().catch(() => ({}))).detail) || ("HTTP " + r.status));
+                return r.json().catch(() => ({}));
+            };
             _renderInfo($("info-host"), d.info, {
                 editable: ["ptype", "pitch_date", "tags", "notes"],
-                save: async (field, value) => {
-                    const r = await fetch(base + "/info", { method: "PATCH",
-                        headers: { "Content-Type": "application/json" },
-                        body: JSON.stringify({ field, value }) });
-                    if (!r.ok) throw new Error(((await r.json().catch(() => ({}))).detail) || ("HTTP " + r.status));
+                save: async (field, value) => ok(await fetch(base + "/info",
+                    { method: "PATCH", headers: J, body: JSON.stringify({ field, value }) })),
+                reload: async () => (await ok(await fetch(base))).info,
+                refs: {
+                    add: async (url, title) => ok(await fetch(base + "/refs",
+                        { method: "POST", headers: J, body: JSON.stringify({ url, title }) })),
+                    patch: async (rid, field, value) => ok(await fetch(
+                        base + "/refs/" + encodeURIComponent(rid),
+                        { method: "PATCH", headers: J, body: JSON.stringify({ [field]: value }) })),
+                    remove: async (rid) => ok(await fetch(base + "/refs/" + encodeURIComponent(rid),
+                        { method: "DELETE" })),
                 },
             });
             _showSideTabs();
