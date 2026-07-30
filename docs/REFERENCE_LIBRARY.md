@@ -295,3 +295,17 @@ UNIQUE(reference_id, target_type, target_id)
 | 提案內掛片／改備註／開研究頁 | 提案庫 overlay、`/proposal-plan.html` 基本資料側欄 |
 | CRM 專案引用片單（本案用途備註）| 專案詳情「參考影片」分頁 |
 | 免登入共編（填研究・貼截圖・標示・改標題備註）| 提案共編連結 `?t=` → 研究頁 |
+
+### 收尾（2026-07-30）
+
+- **抽 `frontend/js/shared/autosave.js`**：「停手 800ms 或離開欄位就送、沒改過不送」的機制
+  原本被抄了好幾份且開始分岔（有的有 change flush、有的沒 dirty-check）。共用模組提供
+  `autosave(el, send)`（單一欄位）、`autosaveDelegated(host, selector, send)`（會重畫的清單 ——
+  逐顆綁會漏、重畫時重綁會疊加，兩個坑都踩過）、`syncBaseline()`。
+  本次改用它的是截圖說明/時間碼與 CRM 引用備註；**企劃矩陣與提案基本資料頁沿用舊寫法**
+  （那是已上生產的功能，不在這條線的 diff 裡，之後有動到再一起收）。
+- CRM 專案分頁掛上/解除後**不再重抓整個片庫**（最多 500 支、每支帶 note/description/facets），
+  只重抓「已引用」那份，片庫清單沿用第一次的結果。
+- 上生產前檢查搬遷完整性（dev 實測）：舊表列數＝新表 proposal 列數、沒有漏搬、沒有重複、
+  沒有指向不存在片子/提案的孤兒 link。⚠ dev 樣本只有 1 列，生產列數較多但走同一條
+  冪等 `NOT EXISTS` SQL。

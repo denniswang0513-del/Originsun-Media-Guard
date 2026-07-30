@@ -11,6 +11,7 @@
 import { esc } from './crm-utils.js';
 // 用 authFetch（不是 crmFetch）—— 後者會自動加 /api/v1/crm 前綴，參考片端點不在那底下
 import { authFetch } from '../../js/shared/utils.js';
+import { autosave } from '../../js/shared/autosave.js';
 
 const API = '/api/v1/references';
 
@@ -21,14 +22,17 @@ async function rfetch(path, opts = {}) {
     return d;
 }
 
-export async function loadRefsTab(projectId, container) {
+export async function loadRefsTab(projectId, container, libCache) {
     container.innerHTML = '<div class="crm-empty" style="padding:24px;">載入中…</div>';
     let linked = [];
     let lib = [];
     try {
+        // 片庫清單（最多 500 支、每支帶 note/description/facets）只在第一次抓：
+        // 掛上/解除只改「已引用」那份，沒必要把整個片庫再拖一次
         [linked, lib] = await Promise.all([
             rfetch(`${API}/for/crm_project/${encodeURIComponent(projectId)}`).then(d => d.references || []),
-            rfetch(`${API}?limit=500`).then(d => d.references || []),
+            libCache ? Promise.resolve(libCache)
+                     : rfetch(`${API}?limit=500`).then(d => d.references || []),
         ]);
     } catch (e) {
         container.innerHTML = `<div class="crm-empty" style="padding:24px;color:#fca5a5;">參考影片載入失敗：${esc(e.message || e)}</div>`;
@@ -116,7 +120,7 @@ export async function loadRefsTab(projectId, container) {
                 body: { target_type: 'crm_project', target_id: projectId,
                         note: container.querySelector('#pjref-why').value.trim() },
             });
-            await loadRefsTab(projectId, container);
+            await loadRefsTab(projectId, container, lib);
         } catch (e) { say('引用失敗：' + (e.message || e), true); }
     });
 
@@ -125,28 +129,16 @@ export async function loadRefsTab(projectId, container) {
         if (!confirm('解除這個專案對這支片的引用？（片子仍留在片庫）')) return;
         try {
             await rfetch(`${API}/links/${encodeURIComponent(row.dataset.link)}`, { method: 'DELETE' });
-            await loadRefsTab(projectId, container);
+            await loadRefsTab(projectId, container, lib);
         } catch (e) { say('解除失敗：' + (e.message || e), true); }
     }));
 
-    // 本案用途備註：自動儲存（同片庫其他欄位的手感）
-    container.querySelectorAll('.pjref-usenote').forEach(inp => {
-        let t = null;
-        let saved = inp.value;
-        const save = async () => {
-            if (inp.value === saved) return;
-            const want = inp.value;
-            const rid = inp.closest('.pjref-row').dataset.rid;
-            try {
-                await rfetch(`${API}/${encodeURIComponent(rid)}/links`, {
-                    method: 'POST',
-                    body: { target_type: 'crm_project', target_id: projectId, note: want },
-                });
-                saved = want;
-                say('已儲存 ✓');
-            } catch (e) { say('儲存失敗：' + (e.message || e), true); }
-        };
-        inp.addEventListener('input', () => { clearTimeout(t); t = setTimeout(save, 800); });
-        inp.addEventListener('blur', () => { clearTimeout(t); save(); });
-    });
+    // 本案用途備註：走共用 autosave（機制與片庫其他欄位同一份）
+    container.querySelectorAll('.pjref-usenote').forEach(inp => autosave(inp, async (value, el) => {
+        const rid = el.closest('.pjref-row').dataset.rid;
+        await rfetch(`${API}/${encodeURIComponent(rid)}/links`, {
+            method: 'POST',
+            body: { target_type: 'crm_project', target_id: projectId, note: value },
+        });
+    }, { onOk: () => say('已儲存 ✓'), onError: (e) => say('儲存失敗：' + (e.message || e), true) }));
 }

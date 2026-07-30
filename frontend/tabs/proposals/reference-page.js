@@ -21,6 +21,7 @@
 
 import { tfetch } from './prop-fetch.js';
 import { renderShapes } from './annotate.js';
+import { autosaveDelegated, syncBaseline } from '../../js/shared/autosave.js';
 
 const STYLE_ID = 'rfc-style';
 const API = '/api/v1/references';
@@ -500,11 +501,11 @@ function _paintShots(container, ctx) {
         if (!sh) return;
         card.querySelectorAll('[data-sfield]').forEach(inp => {
             inp.value = sh[inp.dataset.sfield] || '';
-            inp._saved = inp.value;                 // dirty-check 基準
         });
         const svg = card.querySelector('svg');
         if (svg) renderShapes(svg, sh.annotations);
     });
+    syncBaseline(host, '[data-sfield]');       // 新節點的 dirty-check 基準＝當下值
 }
 
 // 上傳入口（工具列 / 拖放 / 貼上）—— **只在整頁 render 時綁一次**。
@@ -560,32 +561,14 @@ function _wireShotItems(container, ctx, say) {
     const guest = () => (getGuestName ? (getGuestName() || '') : '');
     const shotOf = (id) => (ref.shots || []).find(x => x.id === id);
 
-    // 說明 / 時間碼：委派 input + focusout —— 牆每次重畫都換新節點，逐顆綁會漏（實測踩過）
-    const timers = new Map();
-    const saveField = async (inp) => {
-        clearTimeout(timers.get(inp));
-        if (inp.value === inp._saved) return;
-        const want = inp.value;
-        try {
-            await fetcher(endpoints.shot(inp.dataset.shot), { method: 'PATCH',
-                json: { [inp.dataset.sfield]: want } });
-            inp._saved = want;
-            const sh = shotOf(inp.dataset.shot);
-            if (sh) sh[inp.dataset.sfield] = want;
-            say('已儲存 ✓');
-        } catch (e) { say('儲存失敗：' + (e.message || e), true); }
-    };
-    host.addEventListener('input', (e) => {
-        const inp = e.target.closest('[data-sfield]');
-        if (!inp) return;
-        if (inp._saved === undefined) inp._saved = '';
-        clearTimeout(timers.get(inp));
-        timers.set(inp, setTimeout(() => saveField(inp), 800));
-    });
-    host.addEventListener('focusout', (e) => {
-        const inp = e.target.closest('[data-sfield]');
-        if (inp) saveField(inp);
-    });
+    // 說明 / 時間碼走共用 autosave 的委派版（牆每次重畫都換新節點：逐顆綁會漏、
+    // 重畫時重綁又會疊加 —— 兩個坑都踩過，機制收在 shared/autosave.js）
+    autosaveDelegated(host, '[data-sfield]', async (value, inp) => {
+        await fetcher(endpoints.shot(inp.dataset.shot), { method: 'PATCH',
+            json: { [inp.dataset.sfield]: value } });
+        const sh = shotOf(inp.dataset.shot);
+        if (sh) sh[inp.dataset.sfield] = value;
+    }, { onOk: () => say('已儲存 ✓'), onError: (e) => say('儲存失敗：' + (e.message || e), true) });
 
     host.addEventListener('click', async (e) => {
         const pic = e.target.closest('[data-open]');
