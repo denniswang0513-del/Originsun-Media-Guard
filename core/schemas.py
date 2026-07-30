@@ -827,6 +827,7 @@ class ProposalPayload(BaseModel):
     deck_url: Optional[str] = None
     outcome_reason: Optional[str] = None  # 轉成案/未成案時必填（端點檢查）
     tags: Optional[list] = None
+    notes: Optional[str] = None           # 基本資料備註（自由文字）
 
 
 class ReferencePayload(BaseModel):
@@ -859,6 +860,13 @@ class ProposalPlanCellPatch(BaseModel):
     answer: str = ""
     base_updated_at: Optional[str] = None  # 該格載入時的時間戳；伺服器較新→409
     guest_name: Optional[str] = None       # 公開共編（token 路徑）的署名；authed 路徑忽略
+
+
+class ProposalPublicInfoPatch(BaseModel):
+    """公開共編路徑（?t= 連結）改基本資料 — 逐欄寫入，欄名由端點白名單擋。
+    刻意設計成「一次一欄」而非整包 payload：免登入路徑不給批次覆寫的能力。"""
+    field: str                            # 僅放行 ptype / pitch_date / tags / notes
+    value: Optional[object] = None        # str（ptype/notes/pitch_date）或 list[str]（tags）
 
 
 class IntelSourcePayload(BaseModel):

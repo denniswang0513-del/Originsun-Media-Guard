@@ -250,6 +250,11 @@ async function openDetail(pid) {
                         <h4>${prop.status === '未成案' ? '📉 未成案原因' : '📈 成案/結果原因'}（組織學習）</h4>
                         <div class="prop-outcome${prop.status === '未成案' ? ' lost' : ''}">${esc(prop.outcome_reason)}</div>
                     </div>` : ''}
+                    ${prop.notes ? `
+                    <div class="prop-card-sec">
+                        <h4>📝 備註</h4>
+                        <div style="white-space:pre-wrap;font-size:12.5px;line-height:1.8;">${esc(prop.notes)}</div>
+                    </div>` : ''}
                 </div>
                 <div class="prop-refs-col">
                     <div class="prop-card-sec">
@@ -423,6 +428,7 @@ async function _openEditor(prop) {
                 ${row('報價單 ID（可空，連 CRM 報價）', `<input id="pe-quotation" value="${v('quotation_id')}">`)}
                 ${row('標籤（逗號分隔）', `<input id="pe-tags" value="${esc(((prop && prop.tags) || []).join(', '))}" placeholder="政府案, 高雄, 雙語">`)}
                 ${row('成案/未成案原因（組織學習欄）', `<textarea id="pe-outcome" rows="3" placeholder="轉成案或未成案時必填">${v('outcome_reason')}</textarea>`)}
+                ${row('備註', `<textarea id="pe-notes" rows="3" placeholder="補充說明、客戶偏好、內部提醒（企劃頁側欄也看得到）">${v('notes')}</textarea>`)}
                 <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:12px;">
                     <button id="pe-cancel" class="prop-btn ghost">取消</button>
                     <button id="pe-save" class="prop-btn">${isNew ? '建立提案' : '儲存變更'}</button>
@@ -445,6 +451,7 @@ async function _openEditor(prop) {
             quotation_id: ov.querySelector('#pe-quotation').value.trim(),
             tags: ov.querySelector('#pe-tags').value.split(/[,，]/).map(t => t.trim()).filter(Boolean),
             outcome_reason: ov.querySelector('#pe-outcome').value.trim(),
+            notes: ov.querySelector('#pe-notes').value,
         };
         try {
             const d = isNew

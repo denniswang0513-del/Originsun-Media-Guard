@@ -470,6 +470,7 @@ async def _on_startup():
                         ("project_media_log", "folder_name", "VARCHAR(255)"),
                         # 提案企劃矩陣（docs/PROPOSAL_PLANNER.md）
                         ("preprod_proposals", "plan", "JSONB"),
+                        ("preprod_proposals", "notes", "TEXT"),   # 基本資料備註（§9.7）
                     ]
                     for tbl, col, coltype in _crm_cols:
                         try:

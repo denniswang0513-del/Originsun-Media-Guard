@@ -112,6 +112,19 @@
   .info-ref a { color: var(--red); text-decoration: underline; }
   .info-ref .note { font-size: 12px; color: var(--sub); margin-top: 3px; line-height: 1.6; }
   .info-hint { font-size: 11.5px; color: var(--sub); line-height: 1.7; }
+  /* 可編控件：平時像文字，focus 才顯出邊框（唯讀感→可編感的漸進揭露） */
+  .info-in { width: 100%; font-family: inherit; font-size: 13px; color: var(--ink);
+    background: transparent; border: 1px solid transparent; border-radius: 2px;
+    padding: 4px 6px; outline: none; }
+  .info-in:hover { border-color: var(--line); }
+  .info-in:focus { border-color: var(--red); background: #fff; }
+  .info-in[readonly] { color: var(--sub); }
+  .info-in[readonly]:hover { border-color: transparent; }
+  select.info-in { cursor: pointer; }
+  .info-ta { min-height: 92px; resize: none; overflow-y: hidden; line-height: 1.8; box-sizing: border-box; }
+  .info-save { text-align: right; font-size: 11px; color: var(--sub); min-height: 16px;
+    padding: 2px 0; position: sticky; bottom: 0; }
+  .info-save.err { color: var(--red); }
 </style>
 </head>
 <body>
@@ -201,32 +214,111 @@ function escText(s) { const d = document.createElement("div"); d.textContent = S
 function escAttr(s) { return String(s ?? "").replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;").replace(/>/g, "&gt;"); }
 function safeUrl(u) { return /^https?:\/\//i.test(String(u ?? "")) ? u : ""; }
 
-// ── 基本資料（唯讀側欄分頁；登入=完整欄位、公開=後端白名單子集） ──
-function _renderInfo(host, info) {
-    const kv = (k, v) => v ? `<div class="info-kv"><span class="k">${escText(k)}</span><span class="v">${escText(v)}</span></div>` : "";
+// ── 基本資料側欄分頁（可編輯，自動儲存；登入=完整欄位、公開=後端白名單子集） ──
+const PTYPES = ["形象", "廣告", "紀錄片", "政府標案", "社群", "其他"];
+
+// opts: { save: async(field, value)=>void, editable: string[] }
+function _renderInfo(host, info, opts) {
+    const canEdit = (f) => (opts.editable || []).includes(f);
     const link = (url, label) => safeUrl(url) ? `<a href="${escAttr(url)}" target="_blank" rel="noopener">${escText(label)}</a>` : "";
-    const tags = (info.tags || []).map(t => `<span class="info-tag">${escText(t)}</span>`).join("");
+    // 唯讀列：沒值就整列不畫（畫面不留空殼）
+    const ro = (k, v) => v ? `<div class="info-kv"><span class="k">${escText(k)}</span><span class="v">${escText(v)}</span></div>` : "";
+    // 可編列：有 data-field 的控件由 _wireInfoEditing 接自動儲存
+    const row = (k, ctrl) => `<div class="info-kv"><span class="k">${escText(k)}</span><span class="v">${ctrl}</span></div>`;
+    const txt = (f, val, ph) => `<input class="info-in" data-field="${f}" value="${escAttr(val || "")}" placeholder="${escAttr(ph || "")}">`;
+
+    // 清單外的既有值（舊資料/CSV 匯入的自由文字）補成選項，否則 select 會靜默吃掉它
+    const ptypeOpts = PTYPES.includes(info.ptype) || !info.ptype ? PTYPES : [info.ptype, ...PTYPES];
+    const ptypeCtrl = canEdit("ptype")
+        ? row("類型", `<select class="info-in" data-field="ptype"><option value="">（未分類）</option>
+            ${ptypeOpts.map(t => `<option value="${escAttr(t)}"${info.ptype === t ? " selected" : ""}>${escText(t)}</option>`).join("")}</select>`)
+        : ro("類型", info.ptype);
+    const dateCtrl = canEdit("pitch_date")
+        ? row("提案日", `<input class="info-in" type="date" data-field="pitch_date" value="${escAttr(info.pitch_date || "")}">`)
+        : ro("提案日", info.pitch_date);
+    const tagsCtrl = canEdit("tags")
+        ? row("標籤", txt("tags", (info.tags || []).join(", "), "逗號分隔，例：政府案, 高雄"))
+        : ((info.tags || []).length ? row("標籤", (info.tags || []).map(t => `<span class="info-tag">${escText(t)}</span>`).join("")) : "");
+    const budgetCtrl = canEdit("budget_range")
+        ? row("預算範圍", txt("budget_range", info.budget_range, "例：80-120 萬"))
+        : ro("預算範圍", info.budget_range);
+    const reasonCard = canEdit("outcome_reason")
+        ? `<div class="info-card"><h4>成案／未成案原因（組織學習）</h4>
+             <textarea class="info-in info-ta" data-field="outcome_reason" placeholder="轉成案或未成案時必填"></textarea></div>`
+        : (info.outcome_reason ? `<div class="info-card"><h4>成案／未成案原因</h4><div class="info-hint">${escText(info.outcome_reason)}</div></div>` : "");
+
     const refs = (info.references || []).map(r => `
         <div class="info-ref">${link(r.url, r.title || r.url) || escText(r.title || r.url)}
             ${r.note ? `<div class="note">${escText(r.note)}</div>` : ""}
         </div>`).join("");
+
     host.innerHTML = `
         <div class="info-card">
             <h4>基本資訊</h4>
-            ${kv("狀態", info.status)}
-            ${kv("客戶", info.client_name)}
-            ${kv("類型", info.ptype)}
-            ${kv("提案日", info.pitch_date)}
-            ${kv("預算範圍", info.budget_range)}
-            ${tags ? `<div class="info-kv"><span class="k">標籤</span><span class="v">${tags}</span></div>` : ""}
-            ${safeUrl(info.deck_url) ? `<div class="info-kv"><span class="k">提案簡報</span><span class="v">${link(info.deck_url, "下載簡報")}</span></div>` : ""}
+            ${ro("狀態", info.status)}
+            ${ro("客戶", info.client_name)}
+            ${ptypeCtrl}
+            ${dateCtrl}
+            ${budgetCtrl}
+            ${tagsCtrl}
+            ${safeUrl(info.deck_url) ? row("提案簡報", link(info.deck_url, "下載簡報")) : ""}
         </div>
-        ${info.outcome_reason ? `<div class="info-card"><h4>成案／未成案原因</h4><div class="info-hint">${escText(info.outcome_reason)}</div></div>` : ""}
+        ${reasonCard}
+        <div class="info-card">
+            <h4>備註</h4>
+            <textarea class="info-in info-ta" data-field="notes"
+                placeholder="這份提案的補充說明、客戶偏好、內部提醒…（會自動儲存）"${canEdit("notes") ? "" : " readonly"}></textarea>
+        </div>
         <div class="info-card">
             <h4>參考片單（${(info.references || []).length}）</h4>
             ${refs || '<div class="info-hint">尚未掛參考片</div>'}
         </div>
-        <div class="info-hint">基本資料在此為唯讀${info._editable ? "，編輯請到後台「提案庫」" : ""}。</div>`;
+        <div class="info-hint">欄位改完會自動儲存。狀態、客戶、標題與簡報請到後台「提案庫」調整（狀態涉及成案自動建專案）。</div>
+        <div class="info-save" id="info-save"></div>`;
+
+    // textarea 值走 DOM property（不進模板字串 — XSS 防線）
+    host.querySelector('[data-field="notes"]').value = info.notes || "";
+    const rt = host.querySelector('[data-field="outcome_reason"]');
+    if (rt) rt.value = info.outcome_reason || "";
+    host.querySelectorAll("textarea.info-ta").forEach(ta => {
+        _infoGrow(ta);
+        ta.addEventListener("input", () => _infoGrow(ta));   // 內容多長格子就多長
+    });
+    _wireInfoEditing(host, opts);
+}
+
+function _infoGrow(ta) { ta.style.height = "auto"; ta.style.height = ta.scrollHeight + "px"; }
+
+// 自動儲存：停手 800ms 或離開欄位就送（dirty-check 擋沒改過的），同企劃矩陣手感
+function _wireInfoEditing(host, opts) {
+    const saveEl = $("info-save");
+    const timers = new Map();
+    let msgTimer = null;
+    const parse = (el) => el.dataset.field === "tags"
+        ? el.value.split(/[,，]/).map(s => s.trim()).filter(Boolean)
+        : el.value;
+
+    host.querySelectorAll(".info-in[data-field]").forEach(el => {
+        if (el.readOnly || el.disabled) return;
+        el._saved = el.value;
+        const save = async () => {
+            if (el.value === el._saved) return;
+            const want = el.value;
+            try {
+                await opts.save(el.dataset.field, parse(el));
+                el._saved = want;
+                saveEl.textContent = "已儲存 ✓"; saveEl.classList.remove("err");
+                clearTimeout(msgTimer);
+                msgTimer = setTimeout(() => { saveEl.textContent = ""; }, 1500);
+            } catch (e) {
+                saveEl.textContent = "儲存失敗：" + ((e && e.message) || e); saveEl.classList.add("err");
+            }
+        };
+        const queue = () => { clearTimeout(timers.get(el)); timers.set(el, setTimeout(save, 800)); };
+        el.addEventListener("input", queue);
+        el.addEventListener("change", () => { clearTimeout(timers.get(el)); save(); });   // date/select
+        el.addEventListener("blur", () => { clearTimeout(timers.get(el)); save(); });
+    });
 }
 
 function _showSideTabs() {
@@ -329,7 +421,15 @@ async function _loadPlan(pid) {
         const prop = (await r.json()).proposal;
         $("plan-title").textContent = prop.title;
         document.title = prop.title + "｜提案企劃｜ORIGINSUN";
-        _renderInfo($("info-host"), { ...prop, _editable: true });   // 登入模式：完整欄位（含預算範圍）
+        // 登入模式：完整欄位可編（狀態/客戶除外 — 見畫面提示），走既有部分更新 PUT
+        _renderInfo($("info-host"), prop, {
+            editable: ["ptype", "pitch_date", "budget_range", "tags", "notes", "outcome_reason"],
+            save: async (field, value) => {
+                const r = await mfetch("/api/v1/proposals/" + encodeURIComponent(pid),
+                    { method: "PUT", body: JSON.stringify({ [field]: value }) });
+                if (!r.ok) throw new Error(((await r.json().catch(() => ({}))).detail) || ("HTTP " + r.status));
+            },
+        });
         _showSideTabs();
         host.innerHTML = "";
         const { renderPlan } = await import("/tabs/proposals/plan-matrix.js");
@@ -359,7 +459,16 @@ async function _loadSharedPlan(shareTok) {
         $("plan-title").textContent = d.title;
         document.title = d.title + "｜提案企劃（共編）｜ORIGINSUN";
         if (d.info) {   // 舊後端沒有 info → 不顯示側欄（純企劃，行為同從前）
-            _renderInfo($("info-host"), d.info);
+            // 公開共編：只放行描述性欄位（後端 _PUBLIC_INFO_FIELDS 才是真守門）
+            _renderInfo($("info-host"), d.info, {
+                editable: ["ptype", "pitch_date", "tags", "notes"],
+                save: async (field, value) => {
+                    const r = await fetch(base + "/info", { method: "PATCH",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({ field, value }) });
+                    if (!r.ok) throw new Error(((await r.json().catch(() => ({}))).detail) || ("HTTP " + r.status));
+                },
+            });
             _showSideTabs();
         }
         host.innerHTML = "";

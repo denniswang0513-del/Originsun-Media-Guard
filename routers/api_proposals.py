@@ -13,13 +13,14 @@ import os
 import re
 import shutil
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Optional
 
 from fastapi import APIRouter, Body, File, HTTPException, Request, UploadFile  # type: ignore
 
 from core.auth import check_admin_or_module
-from core.schemas import ProposalPayload, ProposalPlanCellPatch, ProposalPlanPayload, ReferencePayload
+from core.schemas import (ProposalPayload, ProposalPlanCellPatch, ProposalPlanPayload,
+                          ProposalPublicInfoPatch, ReferencePayload)
 
 router = APIRouter(prefix="/api/v1/proposals", tags=["proposals"])
 
@@ -45,8 +46,12 @@ _PTYPE_TO_PROJECT_TYPE = {
 # pitch_date 是日期字串要先 parse、project_id 由 /convert 回填，都不走這裡）
 _PROP_FIELDS = (
     "title", "client_id", "quotation_id", "ptype", "status",
-    "budget_range", "deck_url", "outcome_reason", "tags",
+    "budget_range", "deck_url", "outcome_reason", "tags", "notes",
 )
+# 提案日是「日曆日」不是時刻 —— 但欄位型別是 timestamptz。寫入以台灣午夜下錨、
+# 讀出固定換算 +08:00 再取日期，兩邊都不依賴 DB session timezone
+# （修正舊行為：送 2026-08-01 讀回 07-31。既有列也一併讀正確）。
+_TW_TZ = timezone(timedelta(hours=8))
 _REF_FIELDS = ("url", "title", "note", "tags", "thumb_url")
 
 
@@ -58,14 +63,23 @@ from core.db_guard import db_factory_or_503 as _require_factory
 
 
 def _parse_date(raw):
-    """'YYYY-MM-DD' → datetime；空值回 None，格式錯 422。"""
+    """'YYYY-MM-DD' → 台灣午夜的 aware datetime；空值回 None，格式錯 422。"""
     raw = (raw or "").strip()
     if not raw:
         return None
     try:
-        return datetime.strptime(raw, "%Y-%m-%d")
+        return datetime.strptime(raw, "%Y-%m-%d").replace(tzinfo=_TW_TZ)
     except ValueError:
         raise HTTPException(status_code=422, detail="pitch_date 格式須為 YYYY-MM-DD")
+
+
+def _fmt_date(dt):
+    """timestamptz → 'YYYY-MM-DD'（固定換算台灣時區再取日期）。"""
+    if not dt:
+        return None
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return dt.astimezone(_TW_TZ).strftime("%Y-%m-%d")
 
 
 def _check_outcome_reason(new_status: str, reason: str):
@@ -85,11 +99,12 @@ def _prop_dict(p, client_name: str = "", refs_count: int = 0, has_plan=None) -> 
         "quotation_id": p.quotation_id or "",
         "ptype": p.ptype or "",
         "status": p.status or "草稿",
-        "pitch_date": p.pitch_date.strftime("%Y-%m-%d") if p.pitch_date else None,
+        "pitch_date": _fmt_date(p.pitch_date),
         "budget_range": p.budget_range or "",
         "deck_url": p.deck_url or "",
         "outcome_reason": p.outcome_reason or "",
         "tags": p.tags or [],
+        "notes": p.notes or "",
         "created_by": p.created_by or "",
         "created_at": p.created_at.isoformat() if p.created_at else None,
         "updated_at": p.updated_at.isoformat() if p.updated_at else None,
@@ -680,13 +695,53 @@ async def get_shared_plan(token: str):
             "client_name": client_name,
             "ptype": prop.ptype or "",
             "status": prop.status or "",
-            "pitch_date": prop.pitch_date.strftime("%Y-%m-%d") if prop.pitch_date else None,
+            "pitch_date": _fmt_date(prop.pitch_date),
             "tags": prop.tags or [],
+            "notes": prop.notes or "",
             "deck_url": prop.deck_url or "",
             "references": [{"title": r.title or "", "url": r.url or "", "note": r.note or ""}
                            for r in refs],
         }
     return {"title": prop.title, "plan": plan, "info": info}
+
+
+# 公開連結可改的基本資料欄 —— 只有「描述性」欄位。刻意不含：
+# status（業務狀態，成案要走 /convert 建專案）、client_id（FK，要 CRM 權限）、
+# budget_range / outcome_reason（金額與組織學習，連讀都不出公開端點）、
+# title / deck_url / quotation_id / project_id。
+_PUBLIC_INFO_FIELDS = {"ptype", "pitch_date", "tags", "notes"}
+_INFO_TEXT_MAX = 8 * 1024
+
+
+@router.patch("/shared/{token}/info")
+async def patch_shared_info(token: str, req: ProposalPublicInfoPatch):
+    """公開共編改基本資料（免登入）：逐欄 + 白名單，last-write-wins。"""
+    if req.field not in _PUBLIC_INFO_FIELDS:
+        raise HTTPException(status_code=422, detail="此欄位不可由共編連結修改")
+    factory = _require_factory()
+    async with factory() as session:
+        prop = await _get_prop_by_plan_token(session, token, for_update=True)
+        _write_info_field(prop, req.field, req.value)
+        prop.updated_at = datetime.now(timezone.utc)
+        await session.commit()
+    return {"status": "ok"}
+
+
+def _write_info_field(prop, field: str, value):
+    """把單一基本資料欄寫進 ORM 物件（型別/長度守衛集中在這）。"""
+    if field == "tags":
+        if value is None:
+            value = []
+        if not isinstance(value, list):
+            raise HTTPException(status_code=422, detail="tags 須為字串陣列")
+        prop.tags = [str(t)[:64] for t in value][:20]
+    elif field == "pitch_date":
+        prop.pitch_date = _parse_date(value if isinstance(value, str) else "")
+    else:
+        text = "" if value is None else str(value)
+        if len(text.encode("utf-8")) > _INFO_TEXT_MAX:
+            raise HTTPException(status_code=413, detail="內容超過 8KB 上限")
+        setattr(prop, field, text)
 
 
 @router.patch("/shared/{token}/cell")
