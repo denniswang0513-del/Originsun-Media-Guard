@@ -465,3 +465,22 @@ DB 5 欄（archive_status/path/error/at/tries）+ settings `reference_archive`
 - ffprobe 一次共用（codec+duration）；抽圖補 `-nostdin -noaccurate_seek`
   （core_engine 抽圖既有調校：long-GOP 長片差很多）。
 - `status()` 給 phase 3：busy/current_rid/paused_reason/used_gb（只讀快取不觸發掃描）。
+
+### 封存階段 2 已完成（2026-08-01）— 自救與告警
+
+- **三路失敗分類**（`_classify_failure`，真實 stderr 樣本測過）：
+  已死（private/removed/地區限制）→ unavailable、30 天復查；
+  抽取器壞（`Unable to extract`/`Signature`/`nsig` 等**明確**症狀）→ `yt-dlp -U`
+  自我更新 → **當下立刻重試一次**；其餘 → transient 退避。
+  ⚠ 刻意不把 403/404/format-not-available 當抽取器或已死 —— 403 多是地區/年齡限制
+  （-U 救不了）、404 可能只是 fragment 暫時錯、format 多半是 max_height 太嚴。
+- **退避階梯唯一正本 `_BACKOFF_H`**（1h/4h/24h）→ 生成 `_pick_next` 的 SQL CASE
+  （Python 版函式是死碼已刪）。時間比較全走 DB 端 `func.now()` +「欄位+interval < now」
+  —— Python aware datetime 進 SQL 運算式會被降成 naive，asyncpg 拒收（踩過）。
+- **dead 不 bump tries**：復查循環會讓 tries 永久累積 → 真的抽取器失效時
+  等值門檻永遠對不上，該告警的反而不告警（改 `>=` + 全域節流雙保險）。
+- **告警全域節流 6h**：YouTube 改版是「全庫同時壞」，per-row 門檻會每支片各發一則；
+  同一波故障只吵一次（intel/social runner 同哲學）。`archive_failed` 進 CRITICAL_ALERTS
+  （alert_webhook + email relay）。
+- **週日固定 -U**：marker 記「今天已嘗試」而非「已成功」—— 否則 -U 失敗時整個週日
+  每輪歸零守衛狂打 GitHub。平日自救有 6h 最小間隔（失敗風暴不重複更新）。

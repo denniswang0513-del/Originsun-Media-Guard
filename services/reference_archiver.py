@@ -16,9 +16,14 @@ yt-dlp 用**獨立執行檔**不用 pip 套件：生產 8000 跑 python_embed（
 的既有坑）；單檔 exe 完全繞開，且內建自我更新（phase 2 接 `-U` 自救）。
 首次使用自動從 GitHub 下載到 tools/（不進 git、不進 OTA —— 二進制不得進 OTA ZIP）。
 
-失敗處理（phase 1 先兩路，phase 2 補「抽取器壞了 → -U 自救」的完整三路）：
-- 影片已死（private/removed/unavailable）→ `unavailable`，不重試
-- 其他 → `retry`（下一 tick 冷卻後再試），錯誤原文存 archive_error
+失敗處理（三路，owner 要求「下載失效自動更新解決」的核心）：
+- **影片已死**（private/removed/unavailable）→ `unavailable`，不重試；每 30 天復查一次
+  （平台誤判/重新公開的機會窗）
+- **抽取器壞了**（Unable to extract / signature / 403 —— YouTube 改版的典型症狀）
+  → 跑 `yt-dlp.exe -U` 自我更新 → **當下立刻重試一次**；仍敗 → retry 退避
+- **暫時性**（網路/timeout）→ retry 退避階梯 1h → 4h → 24h（archive_tries 決定）
+連續 3 次失敗（已含自救重試）→ `archive_failed` 告警（alert_webhook + email relay）。
+每週日固定 `-U` 一次 —— 不等壞掉才更新。
 """
 from __future__ import annotations
 
@@ -43,18 +48,43 @@ _FFPROBE = os.path.join(_REPO, "ffprobe.exe")
 _DL_TIMEOUT = 30 * 60          # 單支下載上限（秒）
 _STILLS = 5                    # 等距截圖張數
 _AUTO_KEY = "auto-archive"     # 系統截圖的 created_key（冪等替換的依據）
-_RETRY_COOLDOWN = 3600         # retry 狀態最少隔多久再試（phase 2 換成退避階梯）
 
-# 影片已死的 stderr 樣式（→ unavailable，不重試）
+# 失敗分類的 stderr 樣式（順序重要：先判「已死」再判「抽取器」）。
+# 刻意不收的：HTTP 403（地區/年齡限制居多，-U 救不了 → transient 退避即可）、
+# HTTP 404（可能只是單一 fragment 暫時錯，標死要等 30 天復查，代價太高）、
+# Requested format is not available（多半是 max_height 太嚴，不是版本問題）。
 _DEAD_PATTERNS = re.compile(
     r"Private video|Video unavailable|has been removed|no longer available|"
-    r"This video is not available|account.*terminated", re.I)
+    r"This video is not available|account.*terminated|"
+    r"not made this video available in your country", re.I)
+# YouTube 改版害 yt-dlp 舊版失效的**明確**症狀 → 自我更新後立刻重試
+_EXTRACTOR_PATTERNS = re.compile(
+    r"Unable to extract|Signature extraction|nsig extraction|"
+    r"Precondition check failed", re.I)
+
+_ALERT_TRIES = 3               # 連敗幾次告警（恰好跨過門檻那次發，不重複轟炸）
+_RECHECK_DEAD_DAYS = 30        # unavailable 的復查週期
+_SELFUPDATE_MIN_GAP = 6 * 3600 # 兩次 -U 之間至少隔多久（失敗風暴不重複更新）
 
 _busy = False                  # 同時只跑一個封存工作（tick 與 archive_one 共用）
 _task = None                   # 背景 task 的引用（fire-and-forget 會被 GC 收走 — asyncio 明文）
 _last_start = 0.0              # 節流基準（上一支開始/上一次空轉時間）
 _paused_reason = ""            # 磁碟滿等暫停原因（管理卡顯示；phase 3 讀）
 _current_rid = ""              # 正在建檔的片（管理卡顯示）
+
+
+# retry 退避階梯（唯一正本 —— _pick_next 的 SQL CASE 由它生成，別再寫第二份）
+_BACKOFF_H = ((1, 1), (2, 4))          # (tries 上限, 冷卻小時)
+_BACKOFF_MAX_H = 24
+
+
+def _classify_failure(stderr: str) -> str:
+    """yt-dlp stderr → 'dead' | 'extractor' | 'transient'（三路處置不同，見檔頭）。"""
+    if _DEAD_PATTERNS.search(stderr or ""):
+        return "dead"
+    if _EXTRACTOR_PATTERNS.search(stderr or ""):
+        return "extractor"
+    return "transient"
 
 
 def _conf() -> dict:
@@ -121,7 +151,8 @@ async def _run_one() -> None:
     if not dest_root:
         return
 
-    # 挑片在最前：佇列空的時候別去付 NAS 掃描與工具自舉的錢
+    await _weekly_selfupdate()          # 便宜（marker stat）；週日首輪才真的跑 -U
+    # 挑片在前：佇列空的時候別去付 NAS 掃描與工具自舉的錢
     await _mark_unsupported(factory)
     ref = await _pick_next(factory)
     if not ref:
@@ -181,14 +212,26 @@ async def _archive_ref(factory, rid: str, url: str, conf: dict) -> bool:
     await _set_status(factory, rid, "downloading")
 
     dest_dir = os.path.join(dest_root, rid)
-    ok, err, video_path = await _download(url, dest_dir, int(conf.get("max_height") or 720))
+    max_h = int(conf.get("max_height") or 720)
+    ok, err, video_path = await _download(url, dest_dir, max_h)
+    if not ok and _classify_failure(err) == "extractor":
+        # YouTube 改版的典型症狀 → 自我更新 → 當下立刻重試一次（owner 要求的自救核心）
+        if await _selfupdate():
+            logger.info("[ref_archiver] 抽取器失效 → yt-dlp 已自我更新，立刻重試 %s", rid)
+            ok, err, video_path = await _download(url, dest_dir, max_h)
     if not ok:
-        dead = bool(_DEAD_PATTERNS.search(err or ""))
-        await _set_status(factory, rid, "unavailable" if dead else "retry",
-                          error=(err or "")[:1500], bump_tries=True)
+        kind = _classify_failure(err)
+        # dead 不算「連敗」：復查循環（30 天一次）會讓 tries 永久累積，
+        # 之後真的抽取器失效時門檻永遠對不上 → 該告警的反而不告警
+        tries = await _set_status(factory, rid,
+                                  "unavailable" if kind == "dead" else "retry",
+                                  error=(err or "")[:1500],
+                                  bump_tries=(kind != "dead"))
         _current_rid = ""
-        logger.warning("[ref_archiver] %s 失敗（%s）：%s",
-                       rid, "來源已死" if dead else "待重試", (err or "")[:200])
+        logger.warning("[ref_archiver] %s 失敗（%s，第 %d 次）：%s",
+                       rid, kind, tries, (err or "")[:200])
+        if kind != "dead" and tries >= _ALERT_TRIES:
+            await _alert_failure(factory, rid, err or "", tries)
         return False
 
     probe = await _probe(video_path)
@@ -225,9 +268,15 @@ async def _pick_next(factory):
     冷卻過的 retry / **卡超過 2 小時的 downloading**（行程重啟或斷電的殘留 ——
     不撿回來就永久消失於隊列；殘檔由下載端 --force-overwrites 蓋掉）。"""
     from datetime import timedelta
-    from sqlalchemy import and_, or_, select
+    from sqlalchemy import and_, case, func as safunc, or_, select
     from db.models import PreprodReference
-    now = datetime.now(timezone.utc)
+    # 時間比較全部用 DB 端 func.now()（timestamptz）—— Python 端 aware datetime
+    # 進到「now - interval」運算式會被降成 naive timestamp，asyncpg 直接拒收（實測踩過）
+    now_sql = safunc.now()
+    # retry 退避階梯（_BACKOFF_H 唯一正本）—— SQL CASE，挑片仍是一句 limit 1
+    cooldown = case(
+        *[(PreprodReference.archive_tries <= t, timedelta(hours=h)) for t, h in _BACKOFF_H],
+        else_=timedelta(hours=_BACKOFF_MAX_H))
     async with factory() as s:
         row = (await s.execute(
             select(PreprodReference.id, PreprodReference.url)
@@ -238,10 +287,14 @@ async def _pick_next(factory):
                 or_(PreprodReference.archive_status.is_(None),
                     PreprodReference.archive_status == "pending",
                     and_(PreprodReference.archive_status == "retry",
+                         PreprodReference.updated_at + cooldown < now_sql),
+                    # 已死的每 30 天復查（平台誤判/重新公開的機會窗）
+                    and_(PreprodReference.archive_status == "unavailable",
                          PreprodReference.updated_at
-                         < now - timedelta(seconds=_RETRY_COOLDOWN)),
+                         + timedelta(days=_RECHECK_DEAD_DAYS) < now_sql),
+                    # 行程重啟/斷電殘留的 downloading（不撿回=永久消失於隊列）
                     and_(PreprodReference.archive_status == "downloading",
-                         PreprodReference.updated_at < now - timedelta(hours=2))))
+                         PreprodReference.updated_at + timedelta(hours=2) < now_sql)))
             .order_by(PreprodReference.created_at)
             .limit(1)
         )).first()
@@ -249,21 +302,90 @@ async def _pick_next(factory):
 
 
 async def _set_status(factory, rid: str, status_: str, *, error: str = "",
-                      path: str = "", bump_tries: bool = False) -> None:
+                      path: str = "", bump_tries: bool = False) -> int:
+    """寫狀態；回 **bump 之後**的累計失敗次數（告警門檻用）。done 歸零 tries。"""
     from db.models import PreprodReference
     async with factory() as s:
         ref = await s.get(PreprodReference, rid)
         if not ref:
-            return
+            return 0
         ref.archive_status = status_
         ref.archive_error = error or None
         if path:
             ref.archive_path = path
             ref.archived_at = datetime.now(timezone.utc)
-        if bump_tries:
+        if status_ == "done":
+            ref.archive_tries = 0
+        elif bump_tries:
             ref.archive_tries = (ref.archive_tries or 0) + 1
         ref.updated_at = datetime.now(timezone.utc)
+        tries = ref.archive_tries or 0
         await s.commit()
+        return tries
+
+
+_last_alert_at = 0.0
+
+
+async def _alert_failure(factory, rid: str, err: str, tries: int) -> None:
+    """連敗告警（走既有 alert_webhook + email relay；best-effort 不炸 runner）。
+
+    **全域節流 6 小時**：YouTube 改版是「全庫同時壞」的故障型態，per-row 門檻
+    會變成每支片各發一則 —— 同一波故障只該吵一次（intel/social runner 同哲學）。"""
+    global _last_alert_at
+    if time.time() - _last_alert_at < _SELFUPDATE_MIN_GAP:
+        return
+    _last_alert_at = time.time()
+    from db.models import PreprodReference
+    try:
+        async with factory() as s:
+            ref = await s.get(PreprodReference, rid)
+            title = (ref.title or ref.url or rid) if ref else rid
+        from notifier import notify_tab_async
+        await notify_tab_async("archive_failed", title=title,
+                               error=(err or "")[:300], tries=tries)
+    except Exception:
+        logger.exception("[ref_archiver] 告警發送失敗（不影響 runner）")
+
+
+async def _weekly_selfupdate() -> None:
+    """每週日固定 -U 一次（不等壞掉才更新）。marker 檔記上次日期，跨重啟仍準。"""
+    now = datetime.now()
+    if now.weekday() != 6 or not os.path.isfile(_YTDLP):
+        return
+    marker = os.path.join(_TOOLS_DIR, "ytdlp_weekly.txt")
+    today = now.strftime("%Y-%m-%d")
+    try:
+        if os.path.isfile(marker) and open(marker, encoding="ascii").read().strip() == today:
+            return
+    except OSError:
+        pass
+    # marker 記「今天已嘗試」不是「今天已成功」—— 失敗若不寫，接下來整個週日
+    # 每輪都會歸零守衛再打一次 GitHub（-U 失敗常見：網路/檔案被鎖/防毒），沒人會發現
+    try:
+        with open(marker, "w", encoding="ascii") as f:
+            f.write(today)
+    except OSError:
+        pass
+    global _last_selfupdate
+    _last_selfupdate = 0            # 週更不受 6 小時間隔限制
+    await _selfupdate()
+
+
+_last_selfupdate = 0.0
+
+
+async def _selfupdate() -> bool:
+    """yt-dlp.exe -U 自我更新（6 小時內不重複 —— 失敗風暴時別狂打 GitHub）。"""
+    global _last_selfupdate
+    if time.time() - _last_selfupdate < _SELFUPDATE_MIN_GAP:
+        return False
+    _last_selfupdate = time.time()
+    from core.subproc import run_capture
+    rc, out, err_ = await run_capture([_YTDLP, "-U"], timeout=300)
+    text = (out or b"").decode("utf-8", errors="replace")[:200]
+    logger.info("[ref_archiver] yt-dlp -U（rc=%d）：%s", rc, text)
+    return rc == 0
 
 
 # ── yt-dlp 自舉與下載 ───────────────────────────────────────

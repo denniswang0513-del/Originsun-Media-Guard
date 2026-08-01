@@ -33,6 +33,7 @@ CRITICAL_ALERTS = frozenset({
     "db_offline", "db_recovered",
     "agent_offline", "agent_recovered",
     "ai_runner_failed",
+    "archive_failed",
 })
 
 
@@ -93,6 +94,7 @@ def notify_tab(template_key: str, **variables) -> None:
         "log_oversize":      "🟠 【Log 檔超大】{hostname} 的 {filename} 已達 {size_mb}MB\nlog 只在重啟時輪替 — 建議找空檔重啟該機 agent",
         "agent_offline":     "🔴 【機隊斷線】{name}（{url}）連續 {misses} 次健康檢查無回應\n可能：關機/睡眠/網路/agent 掛掉 — 請檢查該機器",
         "agent_recovered":   "🟢 【機隊恢復】{name}（{url}）已重新上線",
+        "archive_failed":    "🔴 【參考影片封存】{title}\n⚠️ {error}\n連續 {tries} 次失敗（含 yt-dlp 自我更新後重試）— 到片庫檢視或手動重試",
         "ai_runner_failed":  "🔴 【AI Runner 失效】{kind} 連續 {fails} 次呼叫 claude 失敗\n⚠️ {error}\n可能：Max 訂閱到期/登出/CLI 更新 — 到 master 跑一次 `claude` 檢查",
         "social_daily":      "📣 【今日社群任務】{count} 篇文稿待審\n{titles}\n→ 後台 官網管理 › 社群工作台",
         "loan_payment_due":  "🏦 【貸款繳款提醒】近期有 {count} 筆貸款款項待繳：\n{lines}\n→ 後台 財務管理 › 銀行貸款",
