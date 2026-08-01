@@ -67,9 +67,13 @@ _SHOT_EDITABLE = ("caption", "timecode", "annotations")
 _PUBLIC_ALLOW = {"field": ("title", "note", "description"), "research": True, "facet": False}
 
 
+# 片庫的存取模組（唯一正本 —— header 閘門與 video 端點的 ?token= 判定共用）
+_ACCESS_MODULES = ("references", "preprod_proposals", "preprod_plan")
+
+
 def _check_auth(request: Request) -> dict:
     """片庫本身的閘門：片庫 tab（references）或提案庫兩系模組任一即可。"""
-    return check_admin_or_module(request, "references", "preprod_proposals", "preprod_plan")
+    return check_admin_or_module(request, *_ACCESS_MODULES)
 
 
 def _now_iso() -> str:
@@ -618,6 +622,77 @@ async def list_references_v2(request: Request, q: str = "", curated: str = "",
     return {"references": out, "total": total}
 
 
+# ── 影片封存（「已建檔」，docs/REFERENCE_LIBRARY.md §12.4）────────
+# 固定路徑（/archive/*）必須排在 /{rid} 之前註冊。
+
+
+@router.get("/archive/status")
+async def archive_status(request: Request):
+    """管理卡狀態總覽：各狀態筆數 + runner 即時狀態 + 目前設定。"""
+    _check_auth(request)
+    factory = _require_factory()
+
+    from sqlalchemy import func as safunc, select
+    from db.models import PreprodReference
+
+    async with factory() as session:
+        rows = (await session.execute(
+            select(PreprodReference.archive_status, safunc.count(PreprodReference.id))
+            .group_by(PreprodReference.archive_status))).all()
+    counts = {(st or "pending"): n for st, n in rows}
+
+    from config import load_settings
+    from services import reference_archiver
+    conf = load_settings().get("reference_archive") or {}
+    return {"counts": counts, "runner": reference_archiver.status(),
+            "settings": {k: conf.get(k) for k in
+                         ("enabled", "dir", "max_height", "per_hour", "max_gb")}}
+
+
+@router.post("/archive/settings")
+async def archive_settings(request: Request, body: dict = Body(...)):
+    """封存設定（admin 限定）。dir 有帶就**實際驗證可寫**（master 上建目錄 + 寫探針），
+    不可寫回明確錯誤 —— 不要存一個之後 runner 才靜默失敗的路徑。"""
+    from core.auth import check_admin
+    check_admin(request)
+
+    from config import load_settings, save_settings
+    settings = load_settings()
+    conf = dict(settings.get("reference_archive") or {})
+
+    if "dir" in body:
+        new_dir = str(body.get("dir") or "").strip()
+        if not new_dir:
+            raise HTTPException(status_code=422, detail="資料夾路徑不可為空")
+
+        def _probe():
+            os.makedirs(new_dir, exist_ok=True)
+            probe = os.path.join(new_dir, ".write_probe")
+            with open(probe, "w", encoding="ascii") as f:
+                f.write("ok")
+            os.remove(probe)
+
+        try:
+            await asyncio.to_thread(_probe)
+        except OSError as e:
+            raise HTTPException(status_code=422,
+                                detail=f"資料夾不可寫（{type(e).__name__}）：請確認路徑與 NAS 權限")
+        conf["dir"] = new_dir
+    if "enabled" in body:
+        conf["enabled"] = bool(body.get("enabled"))
+    for key, lo, hi in (("max_height", 240, 2160), ("per_hour", 1, 60), ("max_gb", 1, 5000)):
+        if key in body:
+            try:
+                conf[key] = max(lo, min(hi, int(body.get(key))))
+            except (TypeError, ValueError):
+                raise HTTPException(status_code=422, detail=f"{key} 須為整數")
+
+    settings["reference_archive"] = conf
+    save_settings(settings)
+    return {"status": "ok", "settings": {k: conf.get(k) for k in
+                                         ("enabled", "dir", "max_height", "per_hour", "max_gb")}}
+
+
 @router.get("/facet_options")
 async def facet_options(request: Request):
     """各分類族的既有值（前端 datalist 建議 — 使用者仍可自由新增）。"""
@@ -809,6 +884,67 @@ async def delete_link(link_id: str, request: Request):
         await session.delete(link)
         await session.commit()
     return {"status": "ok"}
+
+
+@router.post("/{rid}/archive_retry")
+async def archive_retry(rid: str, request: Request):
+    """立即重排建檔：標 pending 讓 runner 撿；runner 閒著就馬上開跑（fire-and-forget —
+    下載可能要幾十分鐘，HTTP request 不等它）。"""
+    _check_auth(request)
+    factory = _require_factory()
+    async with factory() as session:
+        ref = await _get_ref_or_404(session, rid)
+        ref.archive_status = "pending"
+        ref.archive_error = None
+        ref.archive_tries = 0
+        ref.updated_at = datetime.now(timezone.utc)
+        await session.commit()
+    from services import reference_archiver
+    started = False
+    if not reference_archiver.status()["busy"]:
+        # 這裡與 create_task 之間有理論競態，但 archive_one 自己也守 _busy（撞到只是
+        # 這次不跑、留在 pending 給 runner 撿）—— 不會發生兩隻 yt-dlp 同時下載
+        asyncio.create_task(reference_archiver.archive_one(rid))
+        started = True
+    return {"status": "ok", "started": started}
+
+
+@router.post("/{rid}/archive_exclude")
+async def archive_exclude(rid: str, request: Request, body: dict = Body(...)):
+    """排除／恢復封存。body {excluded: bool}。恢復＝標 pending 重新排隊。"""
+    _check_auth(request)
+    factory = _require_factory()
+    async with factory() as session:
+        ref = await _get_ref_or_404(session, rid)
+        ref.archive_status = "excluded" if body.get("excluded") else "pending"
+        ref.updated_at = datetime.now(timezone.utc)
+        await session.commit()
+        return {"status": "ok", "archive_status": ref.archive_status}
+
+
+@router.get("/{rid}/archive_video")
+async def archive_video(rid: str, request: Request, token: str = ""):
+    """播放封存檔（Starlette FileResponse 原生支援 Range —— 影片拖進度條要用）。
+
+    **登入限定、公開共編 token 刻意不開**：封存檔是下載回來的平台影片，
+    只給內部成員當連結失效的備援，不透過免登入連結流出（版權，§12.2 決策）。
+    `<video>` 標籤帶不了 Authorization header → 僅此端點額外收 ?token=
+    （同一套登入 JWT + 同一組模組檢查；showcase/media-log 的 token 頁同慣例）。"""
+    from core.auth import verify_token
+    payload = verify_token(token) if token else None
+    allowed = bool(payload) and (
+        (payload.get("access_level") or 0) >= 3
+        or any(m in (payload.get("modules") or []) for m in _ACCESS_MODULES))
+    if not allowed:
+        _check_auth(request)          # 沒帶 ?token= 或無效 → 走一般 header 驗證
+    factory = _require_factory()
+    async with factory() as session:
+        ref = await _get_ref_or_404(session, rid)
+        path = ref.archive_path or ""
+    if not path or not await asyncio.to_thread(os.path.isfile, path):
+        raise HTTPException(status_code=404, detail="這支片還沒有封存檔")
+    from fastapi.responses import FileResponse
+    return FileResponse(path, media_type="video/mp4")
 
 
 # ── 截圖（登入路徑）────────────────────────────────────────

@@ -484,3 +484,22 @@ DB 5 欄（archive_status/path/error/at/tries）+ settings `reference_archive`
   （alert_webhook + email relay）。
 - **週日固定 -U**：marker 記「今天已嘗試」而非「已成功」—— 否則 -U 失敗時整個週日
   每輪歸零守衛狂打 GitHub。平日自救有 6h 最小間隔（失敗風暴不重複更新）。
+
+### 封存階段 3 已完成（2026-08-01）— 管理介面與呈現
+
+- **管理卡 `archive-admin.js`**（admin 限定，總覽獨立頁與 SPA 片庫 tab 共用一份）：
+  NAS 資料夾輸入（**存檔前後端實際驗證可寫**：建目錄+寫探針，不可寫回明確 422）、
+  啟用開關、畫質/每小時/空間上限、狀態總覽（各狀態筆數+used_gb+建檔中）。
+  刻意用「儲存」按鈕不用自動儲存 —— 資料夾驗證要同步回饋，enabled 是會啟動
+  整條下載線的決定。卡片收合時不打 API，展開才抓。
+- **研究頁封存列**：「已建檔 NAS」徽章、排除建檔開關、立即建檔、
+  「改用封存檔播放」切換（`<video>` + 播放來源說明；link 類無 embed 且已建檔 → 自動用封存檔）。
+  公開共編（?t=）整列不露（版權：內部備援）。
+- **播放端點** `GET /{rid}/archive_video`：FileResponse 原生 Range（拖進度條）；
+  `<video>` 帶不了 Authorization header → **僅此端點**額外收 `?token=`（同一套 JWT、
+  同一組模組常數 `_ACCESS_MODULES` —— 別手抄第二份授權判定）。
+- **卡片 pill 共用 `ref-pills.js`**：「已建檔/建檔中…/建檔重試中/原連結已失效/不建檔」
+  + curated 改名「研究完成/研究中」（詳情徽章以同一張 ARCHIVE_LABEL 為基底，只覆寫兩個文案）。
+- **時間碼 overlay 移除**（owner 指定不壓圖）：只留圖下方的文字欄；標示編輯器標題列帶時間碼。
+- **excluded 不覆寫守衛**（`_set_status`）：下載途中按「排除」，runner 結束時不得把
+  狀態改回來 —— 排除是使用者意志（實測踩過的競態）。

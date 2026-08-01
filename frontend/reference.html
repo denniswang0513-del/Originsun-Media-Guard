@@ -76,6 +76,8 @@
   .pill { font-size: 10.5px; padding: 2px 7px; border-radius: 2px; background: #f0f0f0; color: var(--sub); }
   .pill.ok { background: #e6f4ea; color: #147a3d; }
   .pill.used { background: #eef2ff; color: #4338ca; }
+  .pill.warn { background: #fdf1dc; color: #a16207; }
+  .pill.err { background: #fdecec; color: #c9372c; }
 
   /* 詳情 */
   .det-head { display: flex; align-items: center; gap: 12px; margin: 4px 0 16px; flex-wrap: wrap; }
@@ -137,9 +139,9 @@
       <select id="facet-key"><option value="">（全部分類族）</option></select>
       <select id="facet-val" style="display:none;"></select>
       <select id="curated">
-        <option value="">建檔狀態：全部</option>
-        <option value="1">已建檔</option>
-        <option value="0">待建檔</option>
+        <option value="">研究狀態：全部</option>
+        <option value="1">研究完成</option>
+        <option value="0">研究中</option>
       </select>
       <label style="font-size:12px;color:var(--sub);display:flex;gap:5px;align-items:center;">
         <input type="checkbox" id="unused"> 只看沒被引用的
@@ -149,6 +151,7 @@
       <button class="btn-ghost" id="btn-import" title="匯入 Notion 參考影片資料庫的 CSV 匯出檔">匯入 CSV</button>
       <input type="file" id="import-file" accept=".csv,text/csv" style="display:none;">
     </div>
+    <div id="arch-admin"></div>
     <div id="lib-grid" class="lib-grid"><div class="state-msg">載入中…</div></div>
   </div>
 
@@ -181,6 +184,8 @@ const FACET_LABELS = { category: "類別", brand: "品牌", studio: "製作單�
 let tfetch = null;
 const _fetcherReady = import("/tabs/proposals/prop-fetch.js").then(m => { tfetch = m.tfetch; });
 const _componentReady = import("/tabs/proposals/reference-page.js");   // 先暖起來，別等 GET 回來才下載
+let refPills = null;
+const _pillsReady = import("/tabs/proposals/ref-pills.js").then(m => { refPills = m.refPills; });
 
 function escText(s) { const d = document.createElement("div"); d.textContent = String(s ?? ""); return d.innerHTML; }
 function escAttr(s) { return String(s ?? "").replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;").replace(/>/g, "&gt;"); }
@@ -244,17 +249,12 @@ function _card(r) {
     const thumb = /^https?:\/\/|^\//.test(r.thumb_url || "")
         ? `<div class="thumb" style="background-image:url('${escAttr(r.thumb_url)}')"></div>`
         : '<div class="thumb none">無封面</div>';
-    const facets = [].concat(r.facets?.category || [], r.facets?.technique || []).slice(0, 3);
     return `<div class="ref-card" data-rid="${escAttr(r.id)}">
         ${thumb}
         <div class="body">
             <div class="t">${escText(r.title || r.url)}</div>
             ${r.note ? `<div class="n">${escText(r.note)}</div>` : ""}
-            <div class="foot">
-                ${r.curated ? '<span class="pill ok">已建檔</span>' : '<span class="pill">待建檔</span>'}
-                ${r.links_count ? `<span class="pill used">被引用 ${r.links_count}</span>` : ""}
-                ${facets.map(f => `<span class="pill">${escText(f)}</span>`).join("")}
-            </div>
+            <div class="foot">${refPills ? refPills(r) : ""}</div>
         </div>
     </div>`;
 }
@@ -378,6 +378,13 @@ async function boot() {
     $("hdr-user").style.display = "";
     if (!isAdmin && !mods.includes("preprod_proposals") && !mods.includes("preprod_plan")) { _show("noperm-view"); return; }
     $("det-back").addEventListener("click", () => { location.href = location.pathname; });
+    await _pillsReady.catch(() => {});
+    if (isAdmin) {   // 封存管理卡（owner：管理頁面要能填 NAS 資料夾）
+        try {
+            const { mountArchiveAdmin } = await import("/tabs/proposals/archive-admin.js");
+            mountArchiveAdmin($("arch-admin"));
+        } catch (_) { /* 管理卡掛不上不擋片庫 */ }
+    }
     // facet 選項與主內容互不相依 → 並行（選項只用在 datalist / 篩選下拉）
     const opts = tfetch(`${API}/facet_options`).then(d => { FACET_OPTS = d.options || {}; }).catch(() => {});
     if (rid) { await Promise.all([opts, _openDetail(rid, null)]); return; }

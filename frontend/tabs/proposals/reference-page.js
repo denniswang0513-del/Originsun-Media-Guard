@@ -22,6 +22,7 @@
 import { tfetch } from './prop-fetch.js';
 import { renderShapes } from './annotate.js';
 import { autosaveDelegated, syncBaseline } from '../../js/shared/autosave.js';
+import { ARCHIVE_LABEL } from './ref-pills.js';
 
 const STYLE_ID = 'rfc-style';
 const API = '/api/v1/references';
@@ -79,6 +80,13 @@ html.ref-theme-light .rfc { --rfc-ink: #262626; --rfc-sub: #737373; --rfc-line: 
 .rfc .rfc-in[readonly] { color: var(--rfc-sub); }
 .rfc .rfc-in[readonly]:hover { border-color: transparent; }
 .rfc .rfc-url { font-size: 11px; color: var(--rfc-sub); word-break: break-all; padding: 0 6px; }
+.rfc .rfc-arch { display: flex; gap: 8px; align-items: center; flex-wrap: wrap;
+  font-size: 11.5px; color: var(--rfc-sub); padding: 6px 6px 0; }
+.rfc .rfc-arch .badge { border: 1px solid var(--rfc-line); border-radius: 2px; padding: 1px 7px; }
+.rfc .rfc-arch .badge.ok { color: #7ee2a8; border-color: #2c5a3c; }
+.rfc .rfc-arch .badge.err { color: #f5a2a2; border-color: #6b2f2f; }
+.rfc .rfc-arch label { display: flex; gap: 4px; align-items: center; cursor: pointer; }
+.rfc .rfc-localnote { font-size: 11px; color: var(--rfc-sub); padding: 4px 6px 0; }
 .rfc .rfc-chips { display: flex; gap: 5px; flex-wrap: wrap; align-items: center; }
 .rfc .rfc-chip { display: inline-flex; align-items: center; gap: 4px; font-size: 11.5px;
   background: var(--rfc-head); border: 1px solid var(--rfc-line); border-radius: 2px;
@@ -128,8 +136,6 @@ html.ref-theme-light .rfc { --rfc-ink: #262626; --rfc-sub: #737373; --rfc-line: 
 .rfc .rfc-shot .pic { position: relative; line-height: 0; cursor: zoom-in; background: #000; }
 .rfc .rfc-shot .pic img { width: 100%; display: block; }
 .rfc .rfc-shot .pic svg { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
-.rfc .rfc-shot .pic .tc { position: absolute; left: 6px; bottom: 6px; font-size: 11px;
-  background: rgba(0,0,0,.72); color: #fff; padding: 1px 6px; border-radius: 2px; }
 .rfc .rfc-shot .pic .mk { position: absolute; right: 6px; top: 6px; font-size: 10.5px;
   background: rgba(0,0,0,.6); color: #fff; padding: 1px 6px; border-radius: 2px; }
 .rfc .rfc-shot .sb { display: flex; gap: 4px; align-items: center; padding: 5px 6px; }
@@ -237,6 +243,7 @@ export function renderReference(container, opts) {
         <div class="rfc-top">
             <div class="rfc-video">
                 <div class="rfc-embed">${_embedHtml(ref)}</div>
+                <div class="rfc-arch" data-arch-bar></div>
                 <div class="rfc-row"><label>連結</label><div class="v">
                     <input class="rfc-in" data-kind="field" data-key="url" placeholder="https://…">
                     ${(can.facets === false || ref.thumb_url || ref.provider === 'youtube') ? '' :
@@ -254,7 +261,7 @@ export function renderReference(container, opts) {
                     ${field('description', '說明', '背景、客戶、脈絡…', true)}
                     ${can.curated === false ? '' : `
                     <div class="rfc-row"><label>建檔</label><div class="v">
-                        <label class="rfc-cb"><input type="checkbox" data-kind="curated"> 建檔完成（研究已寫完）</label>
+                        <label class="rfc-cb"><input type="checkbox" data-kind="curated"> 研究完成（研究四欄已寫完）</label>
                     </div></div>`}
                 </div>
                 <div class="rfc-card">
@@ -449,6 +456,7 @@ function _wire(container, ctx) {
         } catch (e) { say('解除失敗：' + (e.message || e), true); }
     }));
     _wireShotUploads(container, ctx, say);
+    _wireArchive(container, ctx, say);
     _wireShotItems(container, ctx, say);
 
     // 研究加列 / 刪列（刪列的「至少留一列」規則守在後端）
@@ -475,7 +483,6 @@ function _paintShots(container, ctx) {
             <div class="pic" data-open="${attr(sh.id)}">
                 <img src="${attr(sh.image_url)}" alt="截圖" loading="lazy">
                 <svg></svg>
-                ${sh.timecode ? `<span class="tc">${esc(sh.timecode)}</span>` : ''}
                 ${(sh.annotations?.shapes || []).length ? `<span class="mk">✎ ${sh.annotations.shapes.length}</span>` : ''}
             </div>
             <div class="sb">
@@ -572,7 +579,8 @@ function _wireShotItems(container, ctx, say) {
             if (!sh) return;
             const { openAnnotator } = await import('./annotate.js');
             const saved = await openAnnotator({
-                imageUrl: sh.image_url, annotations: sh.annotations, title: sh.caption || '',
+                imageUrl: sh.image_url, annotations: sh.annotations,
+                title: [sh.timecode, sh.caption].filter(Boolean).join('　') || '',
                 onSave: async (ann) => {
                     const d = await fetcher(endpoints.shot(sh.id), { method: 'PATCH', json: { annotations: ann } });
                     Object.assign(sh, d.shot || { annotations: ann });
@@ -690,6 +698,98 @@ function _toMarkdown(ref) {
         shots.forEach(s => L.push(`- ${s.timecode ? `\`${s.timecode}\` ` : ''}${s.caption || '(無說明)'} — ${location.origin}${s.image_url}`));
     }
     return L.join('\n');
+}
+
+// ── 影片封存（「已建檔」）：徽章 + 排除/重試 + 封存檔播放切換 ──────
+// 狀態表基底在 ref-pills.js（卡片 pill 與詳情徽章同一正本）；詳情語境較寬，
+// 只覆寫兩個要講更清楚的文案。
+
+
+const ARCH_BADGE = Object.fromEntries(Object.entries(ARCHIVE_LABEL)
+    .map(([k, v]) => [k, [v.text, v.cls === 'ok' ? 'ok' : (v.cls === 'err' ? 'err' : '')]]));
+ARCH_BADGE.done = ['已建檔 NAS', 'ok'];                       // 詳情頁講清楚存在哪
+ARCH_BADGE.unavailable = ['原連結已失效（無封存檔）', 'err'];  // 與「已建檔但連結死」區分
+
+
+function _wireArchive(container, ctx, say) {
+    const { ref, fetcher, can } = ctx;
+    const bar = container.querySelector('[data-arch-bar]');
+    if (!bar) return;
+    if (can.curated === false) { bar.remove(); return; }   // 公開共編不露封存（版權：內部備援）
+
+    const paint = () => {
+        const st = ref.archive_status || '';
+        const [text, cls] = ARCH_BADGE[st] || ['尚未排入建檔', ''];
+        bar.innerHTML = `
+            <span class="badge ${cls}">${esc(text)}</span>
+            ${ref.archived_at ? `<span>${esc(ref.archived_at.slice(0, 10))} 建檔</span>` : ''}
+            ${st === 'done' ? '<button class="rfc-btn" data-arch-play>改用封存檔播放</button>' : ''}
+            ${(st === 'retry' || st === 'unavailable' || st === 'excluded' || !st)
+                ? '<button class="rfc-btn" data-arch-retry>立即建檔</button>' : ''}
+            <label><input type="checkbox" data-arch-excl${st === 'excluded' ? ' checked' : ''}> 排除建檔</label>`;
+    };
+    paint();
+
+    let showingLocal = false;
+    bar.addEventListener('click', async (e) => {
+        const play = e.target.closest('[data-arch-play]');
+        if (play) {
+            const embedBox = container.querySelector('.rfc-embed');
+            if (!showingLocal) {
+                // <video> 帶不了 Authorization header → 端點收 ?token=（僅此端點，見後端註解）
+                const src = `${API}/${encodeURIComponent(ref.id)}/archive_video?token=` +
+                            encodeURIComponent(localStorage.getItem('auth_token') || '');
+                embedBox.innerHTML = '';
+                const v = document.createElement('video');
+                v.controls = true;
+                v.style.cssText = 'position:absolute;inset:0;width:100%;height:100%;';
+                v.src = src;
+                embedBox.appendChild(v);
+                play.textContent = '改回線上播放';
+                let note = container.querySelector('.rfc-localnote');
+                if (!note) {
+                    note = document.createElement('div');
+                    note.className = 'rfc-localnote';
+                    embedBox.after(note);
+                }
+                note.textContent = '播放來源：NAS 封存檔（內部備援；原連結正常時建議用線上版）';
+                showingLocal = true;
+            } else {
+                container.querySelector('.rfc-localnote')?.remove();
+                container.querySelector('.rfc-embed').innerHTML = _embedHtml(ref);
+                play.textContent = '改用封存檔播放';
+                showingLocal = false;
+            }
+            return;
+        }
+        const retry = e.target.closest('[data-arch-retry]');
+        if (retry) {
+            retry.disabled = true;
+            try {
+                const d = await fetcher(`${API}/${encodeURIComponent(ref.id)}/archive_retry`, { method: 'POST' });
+                ref.archive_status = 'pending';
+                paint();
+                say(d.started ? '已開始建檔（下載需要幾分鐘）' : '已排入建檔佇列 ✓');
+            } catch (err) { say('排入失敗：' + (err.message || err), true); retry.disabled = false; }
+        }
+    });
+    bar.addEventListener('change', async (e) => {
+        const excl = e.target.closest('[data-arch-excl]');
+        if (!excl) return;
+        try {
+            const d = await fetcher(`${API}/${encodeURIComponent(ref.id)}/archive_exclude`,
+                                    { method: 'POST', json: { excluded: excl.checked } });
+            ref.archive_status = d.archive_status;
+            paint();
+            say('已儲存 ✓');
+        } catch (err) { say('儲存失敗：' + (err.message || err), true); }
+    });
+
+    // 原連結已失效且有封存檔的情境：unavailable 是「下載失敗」不會有檔；
+    // 但 link 類（無 embed）而已建檔 → 直接預設用封存檔播
+    if (!ref.embed_url && ref.archive_status === 'done') {
+        bar.querySelector('[data-arch-play]')?.click();
+    }
 }
 
 // ── 分類 chips 的加/刪（chips 由 innerHTML 重畫 → 刪鈕用事件委派，不逐顆綁）──

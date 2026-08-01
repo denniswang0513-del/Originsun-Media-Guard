@@ -303,12 +303,17 @@ async def _pick_next(factory):
 
 async def _set_status(factory, rid: str, status_: str, *, error: str = "",
                       path: str = "", bump_tries: bool = False) -> int:
-    """寫狀態；回 **bump 之後**的累計失敗次數（告警門檻用）。done 歸零 tries。"""
+    """寫狀態；回 **bump 之後**的累計失敗次數（告警門檻用）。done 歸零 tries。
+
+    「排除建檔」是使用者意志：下載途中被標 excluded，runner 結束時**不得覆寫**
+    （否則使用者按了排除、幾分鐘後狀態又自己變回來 —— 實測踩過的競態）。"""
     from db.models import PreprodReference
     async with factory() as s:
         ref = await s.get(PreprodReference, rid)
         if not ref:
             return 0
+        if ref.archive_status == "excluded":
+            return ref.archive_tries or 0
         ref.archive_status = status_
         ref.archive_error = error or None
         if path:

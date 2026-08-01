@@ -9,6 +9,7 @@
  */
 
 import { tfetch } from '../proposals/prop-fetch.js';
+import { refPills } from '../proposals/ref-pills.js';
 
 const API = '/api/v1/references';
 const FACET_LABELS = {
@@ -55,6 +56,8 @@ const CSS = `
 .ref-tab .pill { font-size: 10.5px; padding: 2px 7px; border-radius: 2px; background: #2f2f2f; color: #9b9b9b; }
 .ref-tab .pill.ok { background: #14371f; color: #7ee2a8; }
 .ref-tab .pill.used { background: #1e2a4d; color: #93c5fd; }
+.ref-tab .pill.warn { background: #3d2f14; color: #f5c064; }
+.ref-tab .pill.err { background: #401f1f; color: #f5a2a2; }
 .ref-tab .reft-empty { color: #8b8b8b; font-size: 13px; padding: 30px 6px; text-align: center; line-height: 1.9; }
 .ref-tab .reft-detail-head { display: flex; align-items: center; gap: 12px; margin-bottom: 14px; flex-wrap: wrap; }
 .ref-tab .reft-detail-head h3 { margin: 0; font-size: 15px; font-weight: 500; flex: 1; min-width: 180px; }
@@ -72,17 +75,12 @@ function _card(r) {
     const thumb = /^https?:\/\/|^\//.test(r.thumb_url || '')
         ? `<div class="thumb" style="background-image:url('${attr(r.thumb_url)}')"></div>`
         : '<div class="thumb">無封面</div>';
-    const tags = [].concat(r.facets?.category || [], r.facets?.technique || []).slice(0, 3);
     return `<div class="reft-card" data-rid="${attr(r.id)}">
         ${thumb}
         <div class="body">
             <div class="t">${esc(r.title || r.url)}</div>
             ${r.note ? `<div class="n">${esc(r.note)}</div>` : ''}
-            <div class="foot">
-                ${r.curated ? '<span class="pill ok">已建檔</span>' : '<span class="pill">待建檔</span>'}
-                ${r.links_count ? `<span class="pill used">被引用 ${r.links_count}</span>` : ''}
-                ${tags.map(t => `<span class="pill">${esc(t)}</span>`).join('')}
-            </div>
+            <div class="foot">${refPills(r)}</div>
         </div>
     </div>`;
 }
@@ -184,6 +182,15 @@ export async function initReferencesTab() {
         _inited = true;
         _wireBar();
         try { _facetOptions = (await tfetch(`${API}/facet_options`)).options || {}; } catch (_) { _facetOptions = {}; }
+        // 封存管理卡（admin；window._accessLevel 由 auth-state 掛，後端仍會再閘）
+        if ((window._accessLevel || 0) >= 3) {
+            try {
+                const { mountArchiveAdmin } = await import('../proposals/archive-admin.js');
+                const host = document.createElement('div');
+                document.querySelector('#reft-bar').after(host);
+                mountArchiveAdmin(host);
+            } catch (_) { /* 不擋片庫 */ }
+        }
     }
     // 每次切回這個 tab 都重抓清單（別人可能剛加了片）
     if ($('reft-detail').style.display === 'none') _loadList();
