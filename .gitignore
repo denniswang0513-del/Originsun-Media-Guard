@@ -108,3 +108,6 @@ credentials/backup_key.txt
 
 # 執行時上傳資料（縮圖/封面等 — 不進版控）
 uploads/
+
+# yt-dlp 自舉的獨立執行檔（reference_archiver 首次使用時下載；不進 git/OTA）
+tools/

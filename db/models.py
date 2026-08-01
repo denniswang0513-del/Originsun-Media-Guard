@@ -911,6 +911,12 @@ class PreprodReference(Base):
     provider = Column(String(16), nullable=True)                 # youtube/vimeo/facebook/link（parse_video_url 快取）
     video_id = Column(String(64), nullable=True)
     updated_at = Column(DateTime(timezone=True), server_default=func.now())
+    # ── 影片封存（docs/REFERENCE_LIBRARY.md §12）——「已建檔」＝影片已存進 NAS ──
+    archive_status = Column(String(16), nullable=True)           # NULL=待處理/pending/downloading/done/retry/unavailable/excluded
+    archive_path = Column(String(512), nullable=True)            # NAS 上的影片檔 UNC 路徑
+    archive_error = Column(Text, nullable=True)                  # 最後一次失敗原因（人可讀）
+    archived_at = Column(DateTime(timezone=True), nullable=True)
+    archive_tries = Column(Integer, nullable=True)
 
 
 class PreprodReferenceShot(Base):

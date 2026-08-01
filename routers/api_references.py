@@ -195,6 +195,9 @@ def ref_dict(r, *, research: bool = True) -> dict:
         "facets": _norm_facets(r.facets),
         "created_at": r.created_at.isoformat() if r.created_at else None,
         "updated_at": r.updated_at.isoformat() if r.updated_at else None,
+        # 影片封存（「已建檔」）：狀態 + 時間；播放路徑 phase 3 才開 serving 端點
+        "archive_status": r.archive_status or "",
+        "archived_at": r.archived_at.isoformat() if r.archived_at else None,
     }
     if research:
         d["research"] = _norm_research(r.research)

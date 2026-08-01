@@ -572,4 +572,11 @@ async def run_scheduler():
             await _finance_calendar_check()
         except Exception:
             _log.exception("財務行事曆提醒檢查異常")
+        # 參考影片封存 runner（master gate + enabled 開關都在 service 內；
+        # tick 只負責「該跑就丟背景任務」，長時下載絕不阻塞這個迴圈）
+        try:
+            from services import reference_archiver
+            reference_archiver.tick()
+        except Exception:
+            _log.exception("參考影片封存 tick 異常")
         await asyncio.sleep(60)

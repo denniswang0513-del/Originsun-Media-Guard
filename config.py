@@ -53,6 +53,15 @@ _DEFAULT_SETTINGS: dict = {
         "base_url": "https://assets.originsun-studio.com",
     },
     "master_server": "http://192.168.1.107:8000",
+    # 參考影片封存（docs/REFERENCE_LIBRARY.md §12）：master-only runner。
+    # enabled 預設 False —— dev 與新環境不會自己開始下載；正式啟用由管理卡打開。
+    "reference_archive": {
+        "enabled": False,
+        "dir": r"\\192.168.1.132\Container\AI_Workspace\Originsun_Web\ReferenceArchive",
+        "max_height": 720,
+        "per_hour": 6,
+        "max_gb": 200,
+    },
     "database_url": "postgresql+asyncpg://originsun:cdeed932212d3e5bbfe86856bc77ac9c@192.168.1.132:5432/mediaguard",
     "machine_id": "",  # 自動填入 hostname（init_settings 時）
     "agents": [],

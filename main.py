@@ -481,6 +481,12 @@ async def _on_startup():
                         ("preprod_references", "video_id", "VARCHAR(64)"),
                         ("preprod_references", "updated_at", "TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP"),
                         ("preprod_reference_shots", "created_key", "VARCHAR(64)"),
+                        # 影片封存（docs/REFERENCE_LIBRARY.md §12）
+                        ("preprod_references", "archive_status", "VARCHAR(16)"),
+                        ("preprod_references", "archive_path", "VARCHAR(512)"),
+                        ("preprod_references", "archive_error", "TEXT"),
+                        ("preprod_references", "archived_at", "TIMESTAMPTZ"),
+                        ("preprod_references", "archive_tries", "INTEGER"),
                     ]
                     for tbl, col, coltype in _crm_cols:
                         try:

@@ -444,3 +444,24 @@ settings `reference_archive`：`enabled`（**預設 False**，dev 防呆同 soci
   的標題列也帶。此規則同時適用五張自動截圖與手動貼的截圖（既有 UI 一併調整）。
 - 公開共編（?t=）不提供封存檔播放（版權，只給登入內部成員）。
 - 五張自動截圖：時間碼等距（片長/6 取 1~5 段點）、排在手動截圖之後、標「系統封存」。
+
+### 封存階段 1 已完成（2026-07-31）
+
+`services/reference_archiver.py`：scheduler 每 60s tick 派工（master gate + enabled +
+per_hour 節流都在 service 內）、`archive_one(rid)` 供管理卡/測試指定單支。
+管線：yt-dlp 下載 ≤max_height → 非 h264 才轉檔（h264 原檔保留不重壓）→ 五張等距
+截圖進截圖牆（`created_key='auto-archive'` 冪等替換、排手動截圖之後）→ `info.json`。
+DB 5 欄（archive_status/path/error/at/tries）+ settings `reference_archive`
+（enabled 預設 False）+ `.gitignore tools/`（yt-dlp.exe 自舉，不進 git/OTA）。
+
+/simplify 修掉的重點：
+- **卡死救援**：`downloading` 超過 2 小時的列會被 `_pick_next` 撿回（行程重啟/斷電
+  的殘留，否則永久消失於隊列且無任何日誌再提到它）。
+- **NAS 掃描與 yt-dlp 自舉都進 `asyncio.to_thread`**（SMB 慢時會凍整個行程）；
+  磁碟用量快取 1 小時；空轉也吃節流（佇列空時不再每 60s 全表 SELECT + NAS 掃描）。
+- `_pick_next` 全 SQL 化 limit 1；facebook 標記抽成一句 UPDATE 的 `_mark_unsupported`。
+- tick 用 `asyncio.create_task` + 持引用 + 失敗還原 `_busy`；`archive_one` 與排程
+  共用 `_busy`（避免兩隻 yt-dlp 同時打對外）。
+- ffprobe 一次共用（codec+duration）；抽圖補 `-nostdin -noaccurate_seek`
+  （core_engine 抽圖既有調校：long-GOP 長片差很多）。
+- `status()` 給 phase 3：busy/current_rid/paused_reason/used_gb（只讀快取不觸發掃描）。
