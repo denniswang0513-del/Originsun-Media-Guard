@@ -349,3 +349,85 @@ owner：「這裡要可以新增 然後可以直接播」。
 - CRM 分頁多一列「貼新片網址 → ＋入庫並引用」（Enter 也可送）；挑既有片的下拉照舊。
 - **就地播放**：縮圖有 ▶ 遮罩，點了在列內展開 16:9 播放器（`embed_url` + autoplay，
   未公開 Vimeo 的 ?h= 雜湊自然帶著）；再點收起；同時只開一支。
+
+---
+
+## 12. 影片封存規劃（NAS 建檔 + 自動下載 + 五張示意圖）— 2026-07-31，尚未實作
+
+> owner 決策：**要自動化執行**（非手動逐支按）、**yt-dlp 失效要自動更新自救**、
+> **管理頁面要能填 NAS 資料夾**。下載平台影片的條款風險 owner 已知情
+>（自動化＝接受）；工具面仍保留每支片可「排除封存」的開關。
+
+### 12.1 目標
+
+1. 片庫每支片在 NAS 指定資料夾建檔：`{資料夾}/{片id}/` 內含影片檔、五張示意圖、
+   `info.json`（標題/網址/分類/研究快照）——**資料夾本身人類可讀**，脫離系統也是完整檔案庫。
+2. 影片自動下載（yt-dlp）：連結失效時仍可播（研究頁 fallback `<video>`）。
+3. 每支自動抽 **5 張等距截圖**進既有截圖牆（繼承標示/時間碼/說明）。
+
+### 12.2 架構
+
+**封存 runner**（`services/reference_archiver.py`，第五個 runner）：
+- 掛進 `core/scheduler.py` 既有 tick（比照 intel/social runner），
+  **gate = `is_master_machine()`**（排程性質，正確用法；NAS SMB 與 yt-dlp 只在 master）。
+- 每 tick 撈 `archive_status IN ('pending','retry')` 的片，**一次一支、支間 sleep**
+  （節流：預設每小時上限 6 支，YouTube 反爬敏感，寧慢勿封 IP）。
+- 新片建檔（POST /references / CSV 匯入 / 提案端入庫）一律自動標 `pending`；
+  啟用當下把既有片全部 backfill 成 pending（會花數天慢慢消化，正常）。
+- 流程：yt-dlp 下載最佳 ≤720p → ffmpeg 轉 H.264 mp4（統一容器，瀏覽器直播）
+  → ffmpeg 抽 5 張等距 JPEG → `save_webp_or_none` 進 `preprod_reference_shots`
+  （`created_by='系統封存'`、`created_key='auto-archive'` — 重跑時先刪同 key 舊圖，冪等）
+  → 寫 `info.json` → 更新 DB。
+
+**yt-dlp 用獨立執行檔不用 pip 套件**（關鍵決策）：
+- 生產 8000 跑 `python_embed`，pip 依賴要手動裝＋記 requirements_server.txt（既有坑）；
+  單檔 `yt-dlp.exe` 完全繞開，且**內建自我更新**（`yt-dlp.exe -U`）。
+- 首次使用自動從 GitHub releases 下載到 `tools/yt-dlp.exe`（不進 git、不進 OTA —
+  比照 ffmpeg.exe 是 INSTALL_EXTRA，二進制不得進 OTA ZIP 的鐵則）。
+
+**失效自動自救（owner 要求的核心）— 失敗分類三路**：
+
+| 失敗型 | 判定（yt-dlp stderr） | 處置 |
+|---|---|---|
+| 影片已死 | `Private video` / `removed` / `unavailable` | 標 `unavailable`，不重試（每月復查一次） |
+| 抽取器壞了 | `Unable to extract` / `signature` / HTTP 403 樣式 | **跑 `yt-dlp.exe -U` 自我更新 → 立即重試一次**；仍敗 → `retry`（隔日再試），連敗 3 天 → 告警 |
+| 暫時性 | timeout / 網路 | `retry` 退避（1h→4h→隔日） |
+
+另每週日固定跑一次 `-U`（不等壞掉才更新）。連續 3 天有片卡在 retry → 走既有
+`alert_webhook` 告警（Google Chat），不靜默。
+
+**播放 fallback**：`ref_dict` 帶 `archive_url`；前端 embed `onerror`（或手動切換鈕）
+→ `<video>` 播本地封存檔。**由 master serve（內網限定），刻意不放 Assets_Nginx 公網**
+—— 下載回來的平台影片放公開網址是自找的版權風險；代價是 master 關機時無 fallback，可接受。
+serving 需支援 HTTP Range（影片拖進度條），Starlette StaticFiles 原生支援。
+
+### 12.3 DB 與設定
+
+`preprod_references` 加欄（nullable，照 _crm_cols 慣例）：
+`archive_status`（NULL/pending/downloading/done/unavailable/retry/excluded）、
+`archive_path`、`archive_error`、`archived_at`、`archive_tries`。
+
+settings `reference_archive`：`enabled`（**預設 False**，dev 防呆同 social runner）、
+`dir`（NAS UNC，建議預設 `\192.168.1.132\Container\AI_Workspace\Originsun_Web\ReferenceArchive`）、
+`max_height`（720）、`per_hour`（6）。
+
+### 12.4 管理介面（owner 要求）
+
+片庫 tab（SPA + `/reference.html` 總覽）加一張 **「封存設定」卡（admin 限定）**：
+- **NAS 資料夾路徑輸入欄**（寫 settings，存前 master 端驗證資料夾可寫，不可寫回明確錯誤）
+- 啟用開關、畫質/每小時上限
+- 狀態總覽：已封存 N / 待處理 N / 重試中 N / 已失效 N / 告警中
+- 每支片的研究頁顯示封存狀態徽章 + 「排除封存」開關（excluded）+「立即重試」
+
+### 12.5 分階段（各自 /simplify + commit）
+
+1. **封存管線**：DB 欄位 + tools/yt-dlp 自舉 + runner（下載/轉檔/五圖/info.json）+ 節流
+2. **自救與告警**：失敗分類、`-U` 自救、退避重試、週更、Chat 告警
+3. **介面**：封存設定卡（含資料夾輸入）、狀態徽章、fallback 播放、排除/重試
+
+### 12.6 風險備忘
+
+- yt-dlp 與 YouTube 是軍備競賽：**自我更新大幅降低但不能歸零**維護成本；告警是底線。
+- FB 影片成功率低 → 誠實標 `unavailable(來源不支援)`，不無限重試。
+- 磁碟：720p 每支約 50–300MB；狀態卡顯示總用量，超過 settings 上限（預設 200GB）暫停並告警。
+- runner 絕不進轉檔佇列（不能卡同事備份）；與報表 job 同款獨立 asyncio。
