@@ -124,7 +124,8 @@
   </div>
 
   <div id="noperm-view" style="display:none;">
-    <div class="state-msg">此帳號沒有參考影片庫權限。<br>請管理員開通 <b>preprod_proposals</b> 或 <b>preprod_plan</b> 模組。
+<!-- 模組清單要與 boot() 的閘門陣列一起改（同一份三個模組） -->
+    <div class="state-msg">此帳號沒有參考影片庫權限。<br>請管理員開通 <b>references</b>（片庫）、<b>preprod_proposals</b> 或 <b>preprod_plan</b> 模組。
       <div style="margin-top:18px;"><button class="btn-ghost" onclick="doLogout()">換帳號登入</button></div>
     </div>
   </div>
@@ -376,7 +377,8 @@ async function boot() {
     const isAdmin = (me.access_level || 0) >= 3 || me.role_name === "admin";
     $("hdr-user").textContent = me.username || "";
     $("hdr-user").style.display = "";
-    if (!isAdmin && !mods.includes("preprod_proposals") && !mods.includes("preprod_plan")) { _show("noperm-view"); return; }
+    // 與後端 _ACCESS_MODULES 同步：references（片庫 tab 模組）也放行 —— 2.4.36 加模組時這裡漏了
+    if (!isAdmin && !["references", "preprod_proposals", "preprod_plan"].some(m => mods.includes(m))) { _show("noperm-view"); return; }
     $("det-back").addEventListener("click", () => { location.href = location.pathname; });
     await _pillsReady.catch(() => {});
     if (isAdmin) {   // 封存管理卡（owner：管理頁面要能填 NAS 資料夾）

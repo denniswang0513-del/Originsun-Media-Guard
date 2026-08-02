@@ -503,3 +503,34 @@ DB 5 欄（archive_status/path/error/at/tries）+ settings `reference_archive`
 - **時間碼 overlay 移除**（owner 指定不壓圖）：只留圖下方的文字欄；標示編輯器標題列帶時間碼。
 - **excluded 不覆寫守衛**（`_set_status`）：下載途中按「排除」，runner 結束時不得把
   狀態改回來 —— 排除是使用者意志（實測踩過的競態）。
+
+## 13. 片庫端主動連結提案／專案（2026-08-03 已完成）
+
+owner：「我希望參考的片庫頁面可以連結引用專案」。原本引用只能從對象端建
+（CRM 專案分頁／提案頁），研究頁的「被引用」卡只能看與解除 —— 這次補上片端入口。
+
+- **後端 `GET /references/link_targets?q=`**（fixed route，在 `/{rid}` 之前註冊）：
+  一次回 `{proposal: [...], crm_project: [...]}` 各前 20 筆（`_LINK_TARGET_LIMIT`），
+  `q` ilike 下推、`updated_at` 新的排前。**權限在端點就過濾**：逐型別用
+  `payload_grants`（與 add_link 的 `_check_target_auth` 同一份 registry 模組表），
+  **無權的型別回 `null`（≠ 空結果 `[]`）**——前端據此隱藏該群；兩群都 null 顯示無權提示。
+  建連結本體零改動（沿用 `POST /{rid}/links`）。
+- **registry 契約收斂（/simplify 產物）**：`_target_models()` 改回 `_TargetSpec`
+  NamedTuple（model/title_col/**status_col/order_col**/modules）——端點消費的欄位
+  必須在 registry 宣告，加新型別（'work'）少一欄會在 registry 就看見，不是 request 時
+  AttributeError。`_TARGET_TYPES` 常數已刪：型別合法性唯一檢查點 = `_check_target_auth`
+  （未知型別 422），add_link 不再自持第二份型別清單（否則 picker 挑得到、儲存 422）。
+- **前端「＋ 連結提案／專案」**（`reference-page.js` `_wireLinkAdd`）：被引用卡尾端
+  展開面板 = 搜尋框（300ms debounce 打 link_targets）+ 備註欄 + 分群結果清單；
+  點選即掛載 → 整頁 redraw。已連結的對象在清單中 disabled + 標「已連結」。
+  公開共編（?t=）天然不出現（links 本來就不回）。SPA 片庫 tab 與獨立頁同一元件自動同享。
+- **順手修掉的 2.4.36 遺漏**：`reference.html` 頁面閘門原本只認 preprod 兩模組，
+  `references` 模組的使用者會被打到 noperm-view —— 已補（與後端 `_ACCESS_MODULES` 同步）。
+- **CSS 坑（測試抓到的真 bug）**：`.rfc-la-panel { display:flex }` 會蓋掉 UA 的
+  `[hidden]{display:none}` → 面板「預設收合」失效。修法 = 元件樣式表帶一條 blanket
+  `.rfc [hidden] { display: none !important; }` —— 之後元件內任何容器用 hidden 屬性都安全。
+- **刻意不做**：專案深連（`/#crm-projects?pid=`）—— SPA hash router 是精確比對 tab id，
+  要動 app.js + crm-projects.js 兩處，另案處理；被引用列的專案連結維持連到專案 tab。
+  總覽卡片不加快速連結鈕（連結要挑對象+寫備註，點進研究頁做）。
+- 測試：`test_link_targets.py`（10 項：閘門/逐型別 null/q 下推/上限）+
+  `test_link_ui.py`（12 項：面板收合/搜尋掛載/備註/去重停用/解除/無權提示/零 JS 錯誤）。

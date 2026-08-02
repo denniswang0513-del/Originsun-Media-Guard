@@ -27,6 +27,9 @@ import { ARCHIVE_LABEL, archiveLabelFor } from './ref-pills.js';
 const STYLE_ID = 'rfc-style';
 const API = '/api/v1/references';
 
+// 引用對象型別 → 顯示名（後端 _target_models registry 的前端對照；被引用列與連結面板共用）
+const TARGET_LABEL = { proposal: '提案', crm_project: '專案' };
+
 // 研究四欄 —— 欄 key 與後端 RESEARCH_COLS 對齊（改這裡要同步 api_references.py）
 const RESEARCH_COLS = [
     { key: 'purpose', label: '核心目的', hint: '客戶想要什麼？' },
@@ -116,10 +119,23 @@ html.ref-theme-light .rfc { --rfc-ink: #262626; --rfc-sub: #737373; --rfc-line: 
 .rfc .rfc-link-row { display: flex; gap: 8px; align-items: baseline; padding: 5px 0;
   border-bottom: 1px dashed var(--rfc-line); font-size: 12.5px; }
 .rfc .rfc-link-row:last-child { border-bottom: none; }
-.rfc .rfc-link-row .st { font-size: 11px; color: var(--rfc-sub); }
+.rfc .rfc-link-row .st, .rfc .rfc-la-it .st { font-size: 11px; color: var(--rfc-sub); }
+.rfc .rfc-la-it .st { margin-left: auto; flex: none; }
 .rfc .rfc-link-row .tt { font-size: 10.5px; color: var(--rfc-sub); border: 1px solid var(--rfc-line);
   border-radius: 2px; padding: 1px 5px; flex: none; }
 .rfc .rfc-link-row .rfc-btn { margin-left: auto; padding: 2px 8px; font-size: 11px; }
+.rfc [hidden] { display: none !important; }   /* flex/grid 容器的 display 會蓋掉 UA 的 [hidden] 規則 */
+.rfc .rfc-la { margin-top: 8px; }
+.rfc .rfc-la-panel { margin-top: 8px; display: flex; flex-direction: column; gap: 6px; }
+.rfc .rfc-la-list { max-height: 220px; overflow-y: auto; border: 1px solid var(--rfc-line);
+  border-radius: 2px; background: var(--rfc-cell); }
+.rfc .rfc-la-g { font-size: 10.5px; color: var(--rfc-sub); padding: 6px 8px 2px; }
+.rfc .rfc-la-it { display: flex; gap: 8px; align-items: baseline; width: 100%; text-align: left;
+  background: none; border: 0; border-bottom: 1px dashed var(--rfc-line); color: var(--rfc-ink);
+  font-size: 12.5px; padding: 6px 8px; cursor: pointer; }
+.rfc .rfc-la-it:hover { background: var(--rfc-head); color: var(--rfc-accent); }
+.rfc .rfc-la-it:disabled { opacity: .45; cursor: default; }
+.rfc .rfc-la-empty { font-size: 11.5px; color: var(--rfc-sub); padding: 8px; }
 .rfc .rfc-hint { font-size: 11px; color: var(--rfc-sub); line-height: 1.7; }
 .rfc .rfc-save { position: sticky; bottom: 0; text-align: right; font-size: 11px;
   color: var(--rfc-sub); min-height: 16px; padding: 3px 0; }
@@ -303,7 +319,7 @@ export function renderReference(container, opts) {
             <h4>被引用（${ref.links.length}）</h4>
             ${ref.links.length ? ref.links.map(l => `
                 <div class="rfc-link-row" data-link="${attr(l.link_id)}">
-                    <span class="tt">${l.target_type === 'crm_project' ? '專案' : '提案'}</span>
+                    <span class="tt">${esc(TARGET_LABEL[l.target_type] || l.target_type)}</span>
                     <a href="${l.target_type === 'crm_project' ? '/#crm-projects' : '/proposal-plan.html?pid=' + encodeURIComponent(l.target_id)}"
                        target="_blank" rel="noopener">${esc(l.title || l.target_id)}</a>
                     <span class="st">${esc(l.status || '')}</span>
@@ -311,6 +327,14 @@ export function renderReference(container, opts) {
                     <button class="rfc-btn danger rfc-link-del" data-link="${attr(l.link_id)}">解除</button>
                 </div>`).join('')
             : '<div class="rfc-hint">還沒有任何提案或專案引用這支片。</div>'}
+            <div class="rfc-la">
+                <button class="rfc-btn" id="rfc-la-open">＋ 連結提案／專案</button>
+                <div class="rfc-la-panel" id="rfc-la-panel" hidden>
+                    <input class="rfc-in" id="rfc-la-q" placeholder="輸入名稱搜尋…（點選結果即完成連結）">
+                    <input class="rfc-in" id="rfc-la-note" placeholder="本案為什麼引用它（選填，會存進引用備註）">
+                    <div class="rfc-la-list" id="rfc-la-list"></div>
+                </div>
+            </div>
             <div class="rfc-hint">片庫共用：解除只拿掉那一邊的引用，片子仍留在庫裡。</div>
         </div>` : ''}
         <div class="rfc-save" id="rfc-save"></div>`;
@@ -455,6 +479,7 @@ function _wire(container, ctx) {
             await redraw();
         } catch (e) { say('解除失敗：' + (e.message || e), true); }
     }));
+    _wireLinkAdd(container, ctx, { say, redraw, timers });
     _wireShotUploads(container, ctx, say);
     _wireArchive(container, ctx, say);
     _wireShotItems(container, ctx, say);
@@ -469,6 +494,76 @@ function _wire(container, ctx) {
         try { await fetcher(endpoints.row(btn.dataset.row), { method: 'DELETE' }); await redraw(); }
         catch (e) { say('刪列失敗：' + (e.message || e), true); }
     }));
+}
+
+// ── 「＋ 連結提案／專案」（登入路徑限定：公開共編不回 links，整塊不渲染）────
+// 對象清單來自 GET /link_targets —— 權限在後端過濾（無權的型別回 null），
+// 這裡只呈現：逐群畫伺服器回的 key（新型別自動出現）、全 null 顯示無權提示。
+// debounce 走 _wire 的 timers Map（redraw 會清），fetch 掛 ctx.signal（abort 會收）。
+function _wireLinkAdd(container, ctx, { say, redraw, timers }) {
+    const { ref, fetcher } = ctx;
+    const open = container.querySelector('#rfc-la-open');
+    if (!open) return;                              // 公開共編：卡片本身就沒渲染
+    const panel = container.querySelector('#rfc-la-panel');
+    const qIn = container.querySelector('#rfc-la-q');
+    const noteIn = container.querySelector('#rfc-la-note');
+    const list = container.querySelector('#rfc-la-list');
+    const linked = new Set((ref.links || []).map(l => `${l.target_type}:${l.target_id}`));
+    let seq = 0;                                    // 舊回應不准蓋新回應（打開+馬上打字會雙發）
+
+    async function search() {
+        const my = ++seq;
+        list.innerHTML = '<div class="rfc-la-empty">搜尋中…</div>';
+        try {
+            const d = await fetcher(`${API}/link_targets?q=${encodeURIComponent(qIn.value.trim())}`,
+                                    { signal: ctx.signal });
+            if (my !== seq) return;
+            const groups = Object.entries(d.targets || {}).filter(([, v]) => Array.isArray(v));
+            if (!groups.length) {
+                list.innerHTML = '<div class="rfc-la-empty">你的帳號沒有可掛載引用的提案／專案權限。</div>';
+                return;
+            }
+            list.innerHTML = groups.map(([type, items]) =>
+                `<div class="rfc-la-g">${esc(TARGET_LABEL[type] || type)}</div>` + (items.length
+                    ? items.map(x => {
+                        const dup = linked.has(`${type}:${x.id}`);
+                        return `
+                        <button class="rfc-la-it" data-tt="${attr(type)}" data-id="${attr(x.id)}"
+                                ${dup ? 'disabled' : ''}>
+                            <span>${esc(x.title || x.id)}</span>
+                            <span class="st">${esc(x.status || '')}${dup ? '・已連結' : ''}</span>
+                        </button>`;
+                    }).join('')
+                    : '<div class="rfc-la-empty">沒有符合的結果</div>')).join('');
+        } catch (e) {
+            if (my !== seq) return;
+            list.innerHTML = `<div class="rfc-la-empty">搜尋失敗：${esc(e.message || e)}</div>`;
+        }
+    }
+
+    open.addEventListener('click', () => {
+        panel.hidden = !panel.hidden;
+        if (!panel.hidden) {
+            qIn.focus();
+            if (!list.children.length) search();    // 重開沿用上次結果，不白打一次
+        }
+    });
+    qIn.addEventListener('input', () => {
+        clearTimeout(timers.get(qIn));
+        timers.set(qIn, setTimeout(search, 300));
+    });
+    list.addEventListener('click', async (e) => {
+        const btn = e.target.closest('.rfc-la-it');
+        if (!btn) return;                           // disabled 的按鈕不會發 click
+        try {
+            await fetcher(`${API}/${encodeURIComponent(ref.id)}/links`, { method: 'POST', json: {
+                target_type: btn.dataset.tt, target_id: btn.dataset.id,
+                note: noteIn.value.trim(),
+            } });
+            say('已連結 ✓');
+            await redraw();
+        } catch (err) { say('連結失敗：' + (err.message || err), true); }
+    });
 }
 
 // ── 截圖牆（兩欄，對齊 Notion 的 Pic 01 / Pic 02）────────────
