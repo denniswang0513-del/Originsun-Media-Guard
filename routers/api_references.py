@@ -7,8 +7,8 @@
 既有的 `/api/v1/proposals/references*` 舊端點原地保留（SPA 與獨立頁都在用），
 本檔一律掛 `/api/v1/references`，URL 不打架。
 
-權限：沿用提案庫的閘門（admin 或 preprod_proposals / preprod_plan 模組）—— 刻意不新增
-模組 key，免掉 RBAC 三處同步（docs/REFERENCE_LIBRARY.md §9 決策 5 預設值）。
+權限：`_ACCESS_MODULES`（references 片庫模組 + 提案庫兩系模組）任一即可，見該常數註解。
+（v2.4.36 起有獨立 `references` 模組 key；原「刻意不新增模組 key」的決策已被 SPA 片庫 tab 取代。）
 
 公開路徑（`/shared/{token}/…`）：借用提案的 plan_share token —— 拿到提案共編連結的人
 可以讀該提案掛的參考片、填研究、改標題備註；**不可**改分類/建檔旗標、不可刪片。
@@ -22,7 +22,7 @@ import json
 import os
 import uuid
 from datetime import datetime, timezone
-from typing import List, Optional
+from typing import List, NamedTuple, Optional
 
 from fastapi import APIRouter, Body, File, HTTPException, Request, UploadFile  # type: ignore
 
@@ -65,6 +65,9 @@ _SHOT_EDITABLE = ("caption", "timecode", "annotations")
 # 公開連結（免登入）的放行表：kind → True 全放 / tuple 白名單 / False 全禁。
 # 這是「共編連結能改什麼」的唯一正本 —— 別在端點裡另外寫 if。
 _PUBLIC_ALLOW = {"field": ("title", "note", "description"), "research": True, "facet": False}
+
+# ── 引用（跨提案／專案）──
+_LINK_TARGET_LIMIT = 20                # link_targets 每型別回傳數（typeahead 下拉，不分頁）
 
 
 # 片庫的存取模組（唯一正本 —— header 閘門與 video 端點的 ?token= 判定共用）
@@ -716,6 +719,37 @@ async def facet_options(request: Request):
             "research_cols": list(RESEARCH_COLS)}
 
 
+@router.get("/link_targets")
+async def link_targets(request: Request, q: str = ""):
+    """可連結的引用對象（研究頁「＋ 連結提案／專案」的搜尋來源）。
+
+    權限在這裡就過濾：只回使用者**有權掛載**的型別（依 _target_models 的模組表，
+    與 add_link 的 _check_target_auth 同一份）——「挑得到但掛不上（403）」的體驗
+    不該存在。無權的型別回 null（≠ 空結果 []），前端據此隱藏該群／整個入口。
+    """
+    payload = _check_auth(request)          # 至少要能讀片庫（研究頁本身的閘門）
+    factory = _require_factory()
+
+    from sqlalchemy import select
+    from core.auth import payload_grants
+
+    q = q.strip()
+    out = {}
+    async with factory() as session:
+        for ttype, spec in _target_models().items():
+            if not payload_grants(payload, *spec.modules):
+                out[ttype] = None
+                continue
+            stmt = (select(spec.model.id, spec.title_col, spec.status_col)
+                    .order_by(spec.order_col.desc()).limit(_LINK_TARGET_LIMIT))
+            if q:
+                stmt = stmt.where(spec.title_col.ilike(f"%{q}%"))
+            rows = (await session.execute(stmt)).all()
+            out[ttype] = [{"id": r[0], "title": r[1] or "", "status": r[2] or ""}
+                          for r in rows]
+    return {"targets": out}
+
+
 # ── 詳情 / 寫入（登入路徑）────────────────────────────────────
 
 
@@ -781,34 +815,45 @@ async def delete_research_row(rid: str, row_id: str, request: Request):
 # 片庫是共用資產：同一支片可以同時被多個提案與 CRM 專案引用，note 記「本案為什麼引用它」。
 # 解除只斷連結，片庫本體保留。
 
-# 引用對象 → (model, 標題欄, 需要的模組)。加新型別（如 'work'）只改這一張表。
-def _target_models():
+# 引用對象 registry。加新型別（如 'work'）只改這一張表 —— 所有引用端點
+# （掛載/解除/清單/link_targets 搜尋）消費的欄位都必須在這裡宣告，別在端點裡
+# getattr 模型（新型別少一欄會在這裡就看見，而不是 request 時 AttributeError）。
+class _TargetSpec(NamedTuple):
+    model: object          # ORM class
+    title_col: object      # 顯示用標題欄（提案=title、專案=name）
+    status_col: object     # 狀態欄（picker 顯示）
+    order_col: object      # picker 排序欄（最近動過的排前面）
+    modules: tuple         # 掛載/解除這型別引用需要的模組（admin 恆通過）
+
+
+def _target_models() -> dict:
     from db.models import CrmProject, PreprodProposal
     return {
-        "proposal": (PreprodProposal, PreprodProposal.title,
-                     ("preprod_proposals", "preprod_plan")),   # 提案的引用歸提案庫管
-        "crm_project": (CrmProject, CrmProject.name, ("crm_projects",)),
+        "proposal": _TargetSpec(PreprodProposal, PreprodProposal.title,
+                                PreprodProposal.status, PreprodProposal.updated_at,
+                                ("preprod_proposals", "preprod_plan")),  # 提案的引用歸提案庫管
+        "crm_project": _TargetSpec(CrmProject, CrmProject.name,
+                                   CrmProject.status, CrmProject.updated_at,
+                                   ("crm_projects",)),
     }
-
-
-_TARGET_TYPES = ("proposal", "crm_project")
 
 
 def _check_target_auth(request: Request, target_type: str) -> dict:
     """依**引用對象**把關，不是給一張通行證：CRM 專案分頁的使用者可能只有
-    crm_projects 模組，他該能在自己的專案上掛片 —— 但不該因此能動提案的引用。"""
+    crm_projects 模組，他該能在自己的專案上掛片 —— 但不該因此能動提案的引用。
+    未知型別在這裡 422 —— 這是型別合法性的唯一檢查點（別另外維護型別清單）。"""
     spec = _target_models().get(target_type)
     if not spec:
         raise HTTPException(status_code=422, detail="未知的引用對象型別")
-    return check_admin_or_module(request, *spec[2])
+    return check_admin_or_module(request, *spec.modules)
 
 
 async def _target_title(session, target_type: str, target_id: str) -> str:
     """回標題；找不到該對象回 None（空標題的提案不該被當成不存在）。"""
     from sqlalchemy import select
-    model, title_col, _ = _target_models()[target_type]
+    spec = _target_models()[target_type]
     row = (await session.execute(
-        select(model.id, title_col).where(model.id == target_id))).first()
+        select(spec.model.id, spec.title_col).where(spec.model.id == target_id))).first()
     return None if row is None else (row[1] or "")
 
 
@@ -841,9 +886,9 @@ async def add_link(rid: str, request: Request, body: dict = Body(...)):
     """把片掛到提案／專案（重複掛載冪等）。body {target_type, target_id, note?}"""
     target_type = str(body.get("target_type") or "")
     target_id = str(body.get("target_id") or "").strip()
-    if target_type not in _TARGET_TYPES or not target_id:
-        raise HTTPException(status_code=422, detail="target_type / target_id 不合法")
-    payload = _check_target_auth(request, target_type)
+    if not target_id:
+        raise HTTPException(status_code=422, detail="target_id 不可為空")
+    payload = _check_target_auth(request, target_type)   # 未知型別在這裡 422
     factory = _require_factory()
 
     from sqlalchemy import select
