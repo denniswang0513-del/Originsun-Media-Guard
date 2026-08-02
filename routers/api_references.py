@@ -200,7 +200,9 @@ def ref_dict(r, *, research: bool = True) -> dict:
         "created_at": r.created_at.isoformat() if r.created_at else None,
         "updated_at": r.updated_at.isoformat() if r.updated_at else None,
         # 影片封存（「已建檔」）：狀態 + 時間；播放路徑 phase 3 才開 serving 端點
+        # tries 給前端判「下載失敗」pill（連敗 ≥ _ALERT_TRIES 才轉紅，見 ref-pills.js）
         "archive_status": r.archive_status or "",
+        "archive_tries": r.archive_tries or 0,
         "archived_at": r.archived_at.isoformat() if r.archived_at else None,
     }
     if research:
@@ -724,6 +726,8 @@ async def get_reference(rid: str, request: Request):
     async with factory() as session:
         ref = await _get_ref_or_404(session, rid)
         d = ref_dict(ref)
+        # 下載失敗原因只給登入詳情頁（公開共編共用 ref_dict，別讓 stderr 外流）
+        d["archive_error"] = (ref.archive_error or "")[:300]
         d["links"] = await _linked_targets(session, rid)   # 反向連結：這支片被誰引用
         d["shots"] = await _shots_of(session, rid)
         return {"reference": d}

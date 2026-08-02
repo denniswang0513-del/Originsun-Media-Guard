@@ -22,7 +22,7 @@
 import { tfetch } from './prop-fetch.js';
 import { renderShapes } from './annotate.js';
 import { autosaveDelegated, syncBaseline } from '../../js/shared/autosave.js';
-import { ARCHIVE_LABEL } from './ref-pills.js';
+import { ARCHIVE_LABEL, archiveLabelFor } from './ref-pills.js';
 
 const STYLE_ID = 'rfc-style';
 const API = '/api/v1/references';
@@ -719,9 +719,14 @@ function _wireArchive(container, ctx, say) {
 
     const paint = () => {
         const st = ref.archive_status || '';
-        const [text, cls] = ARCH_BADGE[st] || ['尚未排入建檔', ''];
+        let [text, cls] = ARCH_BADGE[st] || ['尚未排入建檔', ''];
+        if (archiveLabelFor(ref) === ARCHIVE_LABEL.failed) {
+            [text, cls] = [`下載失敗（已試 ${ref.archive_tries} 次）`, 'err'];
+        }
+        // 失敗原因掛 tooltip（archive_error 只有登入詳情端點才回）
+        const tip = (cls === 'err' && ref.archive_error) ? ` title="${esc(ref.archive_error)}"` : '';
         bar.innerHTML = `
-            <span class="badge ${cls}">${esc(text)}</span>
+            <span class="badge ${cls}"${tip}>${esc(text)}</span>
             ${ref.archived_at ? `<span>${esc(ref.archived_at.slice(0, 10))} 建檔</span>` : ''}
             ${st === 'done' ? '<button class="rfc-btn" data-arch-play>改用封存檔播放</button>' : ''}
             ${(st === 'retry' || st === 'unavailable' || st === 'excluded' || !st)
@@ -768,6 +773,8 @@ function _wireArchive(container, ctx, say) {
             try {
                 const d = await fetcher(`${API}/${encodeURIComponent(ref.id)}/archive_retry`, { method: 'POST' });
                 ref.archive_status = 'pending';
+                ref.archive_tries = 0;          // 後端 archive_retry 也歸零 —— 別讓紅標籤殘留
+                ref.archive_error = '';
                 paint();
                 say(d.started ? '已開始建檔（下載需要幾分鐘）' : '已排入建檔佇列 ✓');
             } catch (err) { say('排入失敗：' + (err.message || err), true); retry.disabled = false; }
