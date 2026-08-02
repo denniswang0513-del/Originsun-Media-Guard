@@ -57,10 +57,11 @@ _DEAD_PATTERNS = re.compile(
     r"Private video|Video unavailable|has been removed|no longer available|"
     r"This video is not available|account.*terminated|"
     r"not made this video available in your country", re.I)
-# YouTube 改版害 yt-dlp 舊版失效的**明確**症狀 → 自我更新後立刻重試
+# 平台改版害 yt-dlp 舊版失效的**明確**症狀 → 自我更新後立刻重試
+# （OAuth token 401 = Vimeo 撤銷 yt-dlp 內建 client 憑證，2026-08 實例）
 _EXTRACTOR_PATTERNS = re.compile(
     r"Unable to extract|Signature extraction|nsig extraction|"
-    r"Precondition check failed", re.I)
+    r"Precondition check failed|Failed to fetch \w+ OAuth token", re.I)
 
 _ALERT_TRIES = 3               # 連敗幾次告警（恰好跨過門檻那次發，不重複轟炸）
 _RECHECK_DEAD_DAYS = 30        # unavailable 的復查週期
@@ -418,13 +419,27 @@ def _ensure_ytdlp() -> bool:
         return False
 
 
+def _vimeo_player_url(url: str):
+    """vimeo.com/<id>[/<hash>] → player.vimeo.com 端點（沒中回 None）。
+
+    Vimeo 主站抽取器要先打 OAuth token API —— Vimeo 已撤銷 yt-dlp 內建的
+    client 憑證（401，最新 stable 也救不了）；player 端點走 config JSON，
+    不經 OAuth，公開片與帶私密雜湊的未公開片實測都通。"""
+    m = re.match(r"https?://(?:www\.)?vimeo\.com/(\d+)(?:/([0-9a-fA-F]+))?/?(?:[?#]|$)", url)
+    if not m:
+        return None
+    vid, h = m.groups()
+    return f"https://player.vimeo.com/video/{vid}" + (f"?h={h}" if h else "")
+
+
 async def _download(url: str, dest_dir: str, max_height: int):
     """yt-dlp 下載 → (ok, stderr, 影片檔路徑)。輸出固定叫 video.<ext>。"""
     from core.subproc import run_capture
     os.makedirs(dest_dir, exist_ok=True)
     out_tmpl = os.path.join(dest_dir, "video.%(ext)s")
+    player = _vimeo_player_url(url)
     args = [
-        _YTDLP, url,
+        _YTDLP, player or url,
         "-f", f"bv*[height<={max_height}]+ba/b[height<={max_height}]/b",
         "--merge-output-format", "mp4",
         "--ffmpeg-location", _FFMPEG,
@@ -432,6 +447,8 @@ async def _download(url: str, dest_dir: str, max_height: int):
         "--no-playlist", "--no-progress", "--force-overwrites",
         "--socket-timeout", "30", "--retries", "3",
     ]
+    if player:
+        args += ["--referer", "https://vimeo.com/"]   # player 端點驗 Referer
     rc, _out, err = await run_capture(args, timeout=_DL_TIMEOUT)
     err_text = (err or b"").decode("utf-8", errors="replace")
     if rc != 0:
