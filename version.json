@@ -1,5 +1,5 @@
 {
-  "version": "2.4.38",
+  "version": "2.4.39",
   "build_date": "2026-08-02",
-  "notes": "Vimeo 封存修復 — 改走 player 端點繞過 OAuth 401 + 失敗分類補洞"
+  "notes": "封存下載失敗標籤 — 連敗轉紅 + 錯誤原因 tooltip"
 }
