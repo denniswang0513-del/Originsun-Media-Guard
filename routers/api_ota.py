@@ -146,7 +146,10 @@ async def internal_restart(request: Request):
 async def admin_restart(request: Request):
     _check_admin(request)
     from core.process_spawn import trigger_detached_restart
-    trigger_detached_restart(run_ota=False)
+    # port 取自己實際綁的 socket（request.scope['server']）：沒傳的話 CLI 預設 8000，
+    # dev 8001 呼叫這端點會誤殺生產 8000 再佔走它（2026-08-03 事故根因）。
+    server = request.scope.get("server") or ("", 8000)
+    trigger_detached_restart(run_ota=False, port=int(server[1] or 8000))
     asyncio.get_running_loop().call_later(1.5, os._exit, 0)
     return {"status": "restarting", "message": "Agent 正在重新啟動，請稍後重新整理頁面..."}
 

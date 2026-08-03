@@ -113,6 +113,25 @@ def rotate_log(path: str) -> None:
         pass
 
 
+def _own_port(default: int = 8000) -> int:
+    """這個行程自己綁的 port：uvicorn CLI 啟動時 argv 會帶 `--port N`
+    （dev 8001、process_spawn 再生的實例都是這條路）；`python main.py` 直啟
+    的 argv 沒有 --port，回 default 8000（生產/機隊皆綁 8000，正確）。"""
+    argv = sys.argv
+    for i, a in enumerate(argv):
+        if a == "--port" and i + 1 < len(argv):
+            try:
+                return int(argv[i + 1])
+            except ValueError:
+                pass
+        if a.startswith("--port="):
+            try:
+                return int(a.split("=", 1)[1])
+            except ValueError:
+                pass
+    return default
+
+
 def spawn_uvicorn_detached(base_dir: Optional[str] = None, port: int = 8000) -> int:
     """Spawn uvicorn fully detached from caller's console. Returns child PID.
 
@@ -158,22 +177,29 @@ def spawn_uvicorn_detached(base_dir: Optional[str] = None, port: int = 8000) -> 
     return proc.pid
 
 
-def trigger_detached_restart(base_dir: Optional[str] = None, run_ota: bool = False) -> None:
+def trigger_detached_restart(base_dir: Optional[str] = None, run_ota: bool = False,
+                             port: Optional[int] = None) -> None:
     """Spawn this module as a detached CLI helper that will restart uvicorn.
 
     Endpoint usage:
-        trigger_detached_restart(run_ota=True)
+        trigger_detached_restart(run_ota=True, port=<自己綁的 port>)
         asyncio.get_running_loop().call_later(1.0, os._exit, 0)
         return {"status": "updating"}
 
     The helper waits ~2s for the parent endpoint to os._exit, kills any
     leftover port-binder, optionally runs update_agent.py, rotates logs,
     spawns a new uvicorn (detached), then exits.
+
+    ⚠️ port 不傳時預設 `_own_port()`（自己行程 argv 的 --port，抓不到才 8000）——
+    **絕不能落到裸 8000**：dev 8001 實例若以 8000 重啟 = 殺掉生產 8000、再用
+    dev 碼＋dev 庫佔走它（2026-08-03 真實事故 — 冒牌 8000 連 mediaguard_dev 一整天）。
     """
     if base_dir is None:
         base_dir = _base_dir()
+    if port is None:
+        port = _own_port()
     py = find_python()
-    args = [py, "-m", "core.process_spawn", "--restart"]
+    args = [py, "-m", "core.process_spawn", "--restart", "--port", str(int(port))]
     if run_ota:
         args.append("--ota")
     subprocess.Popen(
