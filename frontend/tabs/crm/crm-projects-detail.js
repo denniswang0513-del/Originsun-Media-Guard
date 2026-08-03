@@ -333,6 +333,9 @@ function renderDetail(project) {
         <!-- Layer 2: Stage card (conditional) -->
         <div id="pi-stage-card"></div>
 
+        <!-- Layer 2.5: 提案來源（async；有成案回填的提案才出現） -->
+        <div id="pi-proposal-src"></div>
+
         <!-- Layer 3: 預算儀表板（async，製作/結案/歸檔） -->
         <div id="pi-budget-row"></div>
 
@@ -348,6 +351,11 @@ function renderDetail(project) {
 
       </div>
     `;
+
+    // 提案來源（async best-effort；沒有就整塊不出現）
+    import('./crm-projects-proposals.js')
+        .then(m => m.renderProposalSource(project.id, document.getElementById('pi-proposal-src')))
+        .catch(() => {});
 
     // Bind open folder buttons
     document.querySelectorAll('#proj-detail-info ._open-folder-btn').forEach(btn => {

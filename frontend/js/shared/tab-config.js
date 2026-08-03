@@ -61,10 +61,20 @@ export const TAB_LOADERS = [
     ['website_admin', './tabs/website/website.html',         './tabs/website/website.js',         'initWebsiteTab'],
 ];
 
+// tab key → 本身模組之外也放行的模組（與各 router 的後端閘門對齊，改閘門要同步這裡）：
+// - 提案庫：api_proposals._check_auth 也收 crm_projects（提案進程與專案管理整合）
+// - 片庫：api_references._ACCESS_MODULES = references + 提案庫兩系 + crm_projects
+const TAB_EXTRA_ACCESS = {
+    preprod_proposals: ['crm_projects'],
+    references: ['preprod_proposals', 'preprod_plan', 'crm_projects'],
+};
+
 export function shouldShowTab(key, authUser, modules) {
     const loggedIn = !!authUser;
     const hasModules = loggedIn && modules && modules.length > 0;
-    return hasModules ? modules.includes(key) : loggedIn ? true : MEDIA_TABS.includes(key);
+    if (!hasModules) return loggedIn ? true : MEDIA_TABS.includes(key);
+    return modules.includes(key)
+        || (TAB_EXTRA_ACCESS[key] || []).some(m => modules.includes(m));
 }
 
 // ── Top-level grouping (官網-style left-sidebar groups) ──────────────────

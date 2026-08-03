@@ -359,9 +359,11 @@ export async function initCrmProjectsTab() {
             const st = btn.dataset.status || '';
 
             if (view === 'closing' && _canManageWebsite) {
-                // 官網製作收件匣（website_admin 專屬）
+                // 官網製作收件匣（website_admin 專屬）；提案帶要明確清掉 ——
+                // 這條路不走 loadProjects（strip 的咽喉），上一分頁的卡會殘留。
                 _projView.style.display = 'none';
                 _closingView.style.display = 'flex';
+                _updateProposalStrip('結案');
                 _initClosingProduction();
                 return;
             }
@@ -375,7 +377,7 @@ export async function initCrmProjectsTab() {
                 _statusFilterEl.style.display = (view === 'all') ? '' : 'none';
                 if (view === 'all') _statusFilterEl.value = '';
             }
-            loadProjects();
+            loadProjects();   // 提案帶由 loadProjects 尾端的 syncProposalStrip 一併更新
         });
     });
 
@@ -384,8 +386,18 @@ export async function initCrmProjectsTab() {
     // used to see "找不到專案" briefly and assume nothing was there.
     _hydrateProjectsFromCache();
 
-    // ── Load initial data ──
+    // ── Load initial data ──（提案帶由 loadProjects 尾端自動同步）
     await Promise.all([loadClients(), loadUsers(), loadProjects(), loadStaffList(), loadProjectTypes()]);
+}
+
+// ── 提案庫進程帶（提案×專案整合）────────────────────────────
+// 常態同步在 loadProjects 尾端（咽喉）；這個 helper 只給不走 loadProjects 的
+// 結案收件匣分支用（帶明確 override 清空）。載入失敗不擋主內容。
+async function _updateProposalStrip(statusOverride) {
+    try {
+        const mod = await import('./crm-projects-proposals.js');
+        await mod.syncProposalStrip(statusOverride);
+    } catch (e) { console.error('提案帶載入失敗:', e); }
 }
 
 // ── 結案（官網製作收件匣）lazy loader ─────────────────────

@@ -7,7 +7,7 @@
 <title>提案企劃｜ORIGINSUN</title>
 <!-- 提案企劃「獨立網址」（docs/PROPOSAL_PLANNER.md §7）：帳號登入 → 提案清單 →
      企劃矩陣（plan-matrix.js 元件，html.plan-theme-light 白底覆寫）。內部工具，
-     網址可直接分享給同事共編；閘門 = admin 或 preprod_proposals / preprod_plan 模組。
+     網址可直接分享給同事共編；閘門模組清單見 boot() 的閘門陣列（與 api_proposals._check_auth 同步）。
      只掛 master / foundry（NAS 官網容器沒有 CRM 後端）。比照 media-log-workspace 家族。 -->
 <script src="https://accounts.google.com/gsi/client" async defer></script>
 <style>
@@ -179,7 +179,7 @@
 
   <!-- 無權限 -->
   <div id="noperm-view" style="display:none;">
-    <div class="state-msg">此帳號沒有提案企劃權限。<br>請管理員在「使用者管理」開通 <b>preprod_plan</b> 模組，或用有權限的帳號登入。
+    <div class="state-msg">此帳號沒有提案企劃權限。<br>請管理員在「使用者管理」開通 <b>preprod_plan</b>、<b>preprod_proposals</b> 或 <b>crm_projects</b>（專案管理）模組，或用有權限的帳號登入。
       <div style="margin-top:18px;"><button class="btn-ghost" onclick="doLogout()">換帳號登入</button></div>
     </div>
   </div>
@@ -611,7 +611,8 @@ async function boot() {
     const isAdmin = (me.access_level || 0) >= 3 || me.role_name === "admin";
     $("hdr-user").textContent = me.username || "";
     $("hdr-user").style.display = "";
-    if (!isAdmin && !mods.includes("preprod_proposals") && !mods.includes("preprod_plan")) { _show("noperm-view"); return; }
+    // 模組清單要與 noperm-view 文案一起改（crm_projects 於 2026-08-03 放行 — 提案×專案整合）
+    if (!isAdmin && !["preprod_proposals", "preprod_plan", "crm_projects"].some(m => mods.includes(m))) { _show("noperm-view"); return; }
     const pid = new URLSearchParams(location.search).get("pid");
     if (pid) { _loadPlan(pid); } else { _loadList(); }
 }

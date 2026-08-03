@@ -3,8 +3,8 @@ api_proposals.py — 提案資料庫 API（P-b，docs/PREPROD_PLAN.md B 段）
 
 提案智財資產化 + win/loss 學習迴圈：提案 CRUD + deck 上傳（uploads/proposals/{id}/）
 + 共用參考片庫（跨提案掛連結）+ 一鍵成案（自動建 CRM 專案、project_id 回填）
-+ 轉換率統計（by 類型 / by 年度）。守衛 = 管理員 OR preprod_proposals /
-preprod_plan 模組。DB 三表：preprod_proposals / _references / _proposal_refs
++ 轉換率統計（by 類型 / by 年度）。守衛見 `_check_auth`（唯一正本；2026-08-03
+起含 crm_projects — 提案×專案整合）。DB 三表：preprod_proposals / _references / _proposal_refs
 （create_all 自建）。狀態轉「成案 / 未成案」強制 outcome_reason（組織學習欄）。
 """
 
@@ -56,7 +56,9 @@ _REF_FIELDS = ("url", "title", "note", "tags", "thumb_url")
 
 
 def _check_auth(request: Request) -> dict:
-    return check_admin_or_module(request, "preprod_proposals", "preprod_plan")
+    # crm_projects 也放行（2026-08-03 owner 定調：提案進程與專案管理整合 —— 專案端
+    # 的人要能看提案、推提案進度；讀寫不拆兩層閘，內部工具要收緊再說）。
+    return check_admin_or_module(request, "preprod_proposals", "preprod_plan", "crm_projects")
 
 
 from core.db_guard import db_factory_or_503 as _require_factory
@@ -304,8 +306,10 @@ async def delete_reference(rid: str, request: Request):
 
 @router.get("")
 async def list_proposals(request: Request, q: str = "", status: str = "",
-                         ptype: str = "", client_id: str = "", year: str = ""):
-    """提案列表 + 篩選（q=標題、狀態、類型、客戶、年度=pitch_date 年），
+                         ptype: str = "", client_id: str = "", year: str = "",
+                         project_id: str = ""):
+    """提案列表 + 篩選（q=標題、狀態、類型、客戶、年度=pitch_date 年、
+    project_id=成案回填的專案 — 專案詳情「提案來源」區塊用），
     join clients 取 client_name，附 refs_count。"""
     _check_auth(request)
     factory = _require_factory()
@@ -327,6 +331,8 @@ async def list_proposals(request: Request, q: str = "", status: str = "",
             query = query.where(PreprodProposal.ptype == ptype)
         if client_id:
             query = query.where(PreprodProposal.client_id == client_id)
+        if project_id:
+            query = query.where(PreprodProposal.project_id == project_id)
         if q:
             query = query.where(PreprodProposal.title.ilike(f"%{q}%"))
         if year:
@@ -337,9 +343,12 @@ async def list_proposals(request: Request, q: str = "", status: str = "",
             query = query.where(extract("year", PreprodProposal.pitch_date) == yr)
         rows = (await session.execute(query)).all()
 
-        ref_counts = dict((await session.execute(
+        # 只聚合這次回傳的提案（project_id= 反查常只回 0-1 筆，卻掛在詳情重畫熱路徑）
+        ids = [p.id for p, _c, _hp in rows]
+        ref_counts = {} if not ids else dict((await session.execute(
             select(PreprodReferenceLink.target_id, safunc.count(PreprodReferenceLink.id))
-            .where(PreprodReferenceLink.target_type == "proposal")
+            .where(PreprodReferenceLink.target_type == "proposal",
+                   PreprodReferenceLink.target_id.in_(ids))
             .group_by(PreprodReferenceLink.target_id))).all())
 
     return {"proposals": [
@@ -960,35 +969,46 @@ async def upload_deck(pid: str, request: Request, file: UploadFile = File(...)):
 @router.post("/{pid}/convert")
 async def convert_proposal(pid: str, request: Request,
                            req: Optional[ProposalPayload] = None):
-    """一鍵成案：自動建 CRM 專案（帶客戶 + 類型對映）→ 回填 proposal.project_id
-    + status=成案。body 帶 outcome_reason 一併存。提案沒選客戶回 422
-    （CrmProject.client_id 是 nullable=False）。"""
+    """一鍵成案：回填 proposal.project_id + status=成案。兩條路：
+
+    - body 帶 `project_id` → **連結既有 CRM 專案**（團隊先在專案管理建了同案時
+      不重複建案 — 2026-08-03 提案×專案整合）。專案自帶客戶，不檢查提案客戶。
+    - 不帶 → 自動建 CRM 專案（帶客戶 + 類型對映）。提案沒選客戶回 422
+      （CrmProject.client_id 是 nullable=False）。
+
+    body 帶 outcome_reason 一併存。"""
     _check_auth(request)
     factory = _require_factory()
 
     from db.models import Client, CrmProject
 
     now = datetime.now(timezone.utc)
+    link_pid = (req.project_id or "").strip() if req else ""
     async with factory() as session:
         prop = await _get_proposal_or_404(session, pid)
         if prop.project_id or prop.status == "成案":
             raise HTTPException(status_code=409, detail="此提案已成案（project_id 已回填）")
-        if not (prop.client_id or "").strip():
-            raise HTTPException(status_code=422, detail="提案尚未關聯客戶 — 請先選擇客戶再成案")
-        client = await session.get(Client, prop.client_id)
-        if not client:
-            raise HTTPException(status_code=422, detail="提案關聯的客戶不存在 — 請先選擇有效客戶")
 
-        project = CrmProject(
-            id=uuid.uuid4().hex,
-            name=prop.title,
-            client_id=prop.client_id,
-            status="製作",
-            project_type=_PTYPE_TO_PROJECT_TYPE.get(prop.ptype or "", prop.ptype or ""),
-            created_at=now,
-            updated_at=now,
-        )
-        session.add(project)
+        if link_pid:
+            project = await session.get(CrmProject, link_pid)
+            if not project:
+                raise HTTPException(status_code=404, detail="找不到要連結的專案")
+        else:
+            if not (prop.client_id or "").strip():
+                raise HTTPException(status_code=422, detail="提案尚未關聯客戶 — 請先選擇客戶再成案")
+            client = await session.get(Client, prop.client_id)
+            if not client:
+                raise HTTPException(status_code=422, detail="提案關聯的客戶不存在 — 請先選擇有效客戶")
+            project = CrmProject(
+                id=uuid.uuid4().hex,
+                name=prop.title,
+                client_id=prop.client_id,
+                status="製作",
+                project_type=_PTYPE_TO_PROJECT_TYPE.get(prop.ptype or "", prop.ptype or ""),
+                created_at=now,
+                updated_at=now,
+            )
+            session.add(project)
 
         prop.project_id = project.id
         prop.status = "成案"
@@ -998,7 +1018,8 @@ async def convert_proposal(pid: str, request: Request,
         await session.commit()
         project_id = project.id
 
-    return {"status": "ok", "project_id": project_id}
+    return {"status": "ok", "project_id": project_id,
+            "linked_existing": bool(link_pid)}
 
 
 # ── 提案 ↔ 參考片 掛載 ───────────────────────────────────

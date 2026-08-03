@@ -607,9 +607,9 @@ export const PLAN_EXAMPLES = { /* 紙船 + 登山總動員，見 §2.5 / §2.6 *
 
 **其他約束**：
 
-- 守衛沿用 `_check_auth`（`preprod_proposals` OR `preprod_plan`）——
-  **`preprod_plan` 已在 `core/auth.py` `ALL_MODULES`（L127），
-  RBAC 三處同步免了。**
+- 守衛沿用 `_check_auth`（模組清單以該函式為唯一正本；2026-08-03 起含
+  `crm_projects` — 提案×專案整合）——
+  **`preprod_plan` 已在 `core/auth.py` `ALL_MODULES`，RBAC 三處同步免了。**
 - 只寫 `plan` 一欄，不碰 proposal 其他欄位
   （避開 §5 記過的地雷：整包 `model_dump()` 洗掉未送欄位）
 - 每格寫入記 `updated_by`（登入者 username）—— 共編下要知道是誰改的
@@ -714,7 +714,7 @@ export const PLAN_EXAMPLES = { /* 紙船 + 登山總動員，見 §2.5 / §2.6 *
 | 項目 | 規格 |
 |------|------|
 | 網址 | `/proposal-plan.html`（清單）／`/proposal-plan.html?pid=<id>`（直達某份企劃） |
-| 閘門 | 未登入 → 登入卡（帳密 + Google GSI）；登入後檢查 admin **OR** `preprod_proposals` **OR** `preprod_plan` |
+| 閘門 | 未登入 → 登入卡（帳密 + Google GSI）；登入後檢查 admin 或 `api_proposals._check_auth` 的模組清單（2026-08-03 起含 `crm_projects`） |
 | robots | `<meta name="robots" content="noindex,nofollow">` |
 | 主機 | master／foundry（需 CRM 後端；NAS 官網容器沒有這些端點） |
 | 分享方式 | 直接把網址貼給同事，對方登入後即進到同一份企劃 |
@@ -968,3 +968,24 @@ owner 2026-07-30：「參考影片他自己可以是一個小頁面，裡頭可�
 完整規劃 → [`REFERENCE_LIBRARY.md`](REFERENCE_LIBRARY.md)（含 Notion 欄位對照表、
 資料模型、截圖標示技術方案、跨專案引用、四階段拆解、五個待拍板決策）。
 **尚未實作。**
+
+## 提案×專案管理整合（2026-08-03，owner 定調「提案的進程要跟專案管理整合」）
+
+**權限**：`api_proposals._check_auth` / 片庫 `_ACCESS_MODULES` / 引用 registry 的
+proposal 模組表，三處都加了 `crm_projects` —— 有專案管理的人可讀寫提案庫與片庫。
+前端同步四入口：`tab-config.js` 的 `TAB_EXTRA_ACCESS`（tab key → 額外可見模組，
+與後端閘門對齊的唯一前端映射）、`proposal-plan.html`、`reference.html` 閘門與 noperm 文案。
+
+**管線整合**（`frontend/tabs/crm/crm-projects-proposals.js`，lazy-load）：
+- 專案管理「提案」分頁頂端 = 提案庫未成案提案卡列（草稿/已提案/入圍 且 project_id 空）；
+  「未成案」分頁 = status=未成案 的提案卡；總表 = 一條數字帶（點跳提案分頁）。
+- **不複製狀態**：資料源永遠是 `/api/v1/proposals`（30s 快取），提案編輯走提案庫。
+  擱置刻意不進管線。
+- 卡上「成案 →」開 chooser：**建立新專案**（原路）或**連結既有專案**
+  （`POST /convert` body 帶 `project_id` → 不重複建案；後端驗專案存在、回
+  `linked_existing`）。連結路不檢查提案客戶（專案自帶客戶）。
+- 專案詳情 Layer 2.5「提案來源」：`GET /proposals?project_id=` 反查，顯示
+  標題/狀態/提案日/預算/參考數/deck/成案原因，點標題開 `/proposal-plan.html?pid=`。
+
+**刻意不做**：提案↔專案狀態雙向同步（語意不同：win/loss 漏斗 vs 製作進程），
+只在成案點連動；8 階段管線定義不動。

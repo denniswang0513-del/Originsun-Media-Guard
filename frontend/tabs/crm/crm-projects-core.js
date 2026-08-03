@@ -218,6 +218,10 @@ export async function loadProjects() {
         _showListError(e.message);
     }
     renderList();
+    // 提案庫進程帶跟著同一份 filters 走 —— 這裡是咽喉（init/分頁/下拉/成案後
+    // 重載全都經過 loadProjects），別在個別事件 handler 再各掛一次。
+    // dynamic import 避免與 proposals 模組（它 import 本檔的 loadProjects）成環。
+    import('./crm-projects-proposals.js').then(m => m.syncProposalStrip()).catch(() => {});
 }
 
 export async function loadClients() {

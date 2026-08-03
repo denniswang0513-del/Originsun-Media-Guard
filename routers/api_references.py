@@ -71,7 +71,7 @@ _LINK_TARGET_LIMIT = 20                # link_targets 每型別回傳數（typea
 
 
 # 片庫的存取模組（唯一正本 —— header 閘門與 video 端點的 ?token= 判定共用）
-_ACCESS_MODULES = ("references", "preprod_proposals", "preprod_plan")
+_ACCESS_MODULES = ("references", "preprod_proposals", "preprod_plan", "crm_projects")
 
 
 def _check_auth(request: Request) -> dict:
@@ -571,10 +571,9 @@ async def create_reference_v2(request: Request, body: dict = Body(...)):
 async def list_references_v2(request: Request, q: str = "", curated: str = "",
                              facet: str = "", value: str = "", unused: str = "",
                              limit: int = 200):
-    # 讀片庫：提案庫或 CRM 專案的人都要能挑片（寫入才依對象分別把關，見 _check_target_auth）
     """片庫清單。facet+value 成對使用（如 facet=technique&value=平行剪接）。
     回列表刻意不帶 research 全文（清單頁不需要）—— 只帶計數與封面。"""
-    check_admin_or_module(request, "references", "preprod_proposals", "preprod_plan", "crm_projects")
+    _check_auth(request)   # crm_projects 已在 _ACCESS_MODULES（2026-08-03 起全庫放行）
     factory = _require_factory()
 
     from sqlalchemy import func as safunc, or_, select
@@ -831,7 +830,8 @@ def _target_models() -> dict:
     return {
         "proposal": _TargetSpec(PreprodProposal, PreprodProposal.title,
                                 PreprodProposal.status, PreprodProposal.updated_at,
-                                ("preprod_proposals", "preprod_plan")),  # 提案的引用歸提案庫管
+                                # 與 api_proposals._check_auth 同一份（2026-08-03 起含 crm_projects）
+                                ("preprod_proposals", "preprod_plan", "crm_projects")),
         "crm_project": _TargetSpec(CrmProject, CrmProject.name,
                                    CrmProject.status, CrmProject.updated_at,
                                    ("crm_projects",)),
