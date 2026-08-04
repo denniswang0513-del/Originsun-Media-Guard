@@ -1,7 +1,36 @@
 // blog/notion-seo.js — 拆自 blog.js：Sub-tab 3 📥 從 Notion 匯入 + Sub-tab 4 🌐 SEO 移轉中心（純搬移，行為不變）
 import { websiteFetch, esc, toastOk, toastErr } from '../../website-utils.js';
+import { createSortable, sortableTh } from '../../../crm/crm-utils.js';
 import { _state, _blog } from './shared.js';
 import { _renderShell } from './shell.js';
+
+// ── 全部轉址 modal 的欄頭排序（純檢視）：預設 key '' = 維持原順序（from 字典序） ──
+let _redirEntries = [];              // [from, to] pairs（開 modal 時填入）
+let _redirLookup = new Map();        // to → 文章標題
+const _redirSorter = createSortable({
+    storageKey: 'website_blog_redirects_sort',
+    defaultSort: { key: '', dir: 'asc' },
+    panelId: 'redirect-modal',
+    onChange: () => _renderRedirectRows(),
+    getters: {
+        from: e => e[0] || '',
+        to: e => e[1] || '',
+        post: e => _redirLookup.get(e[1]) || '',
+    },
+});
+
+function _renderRedirectRows() {
+    const tbody = document.getElementById('redirect-modal-rows');
+    if (!tbody) return;
+    tbody.innerHTML = _redirSorter.sorted(_redirEntries).map(([from, to]) => `
+        <tr>
+            <td style="padding:5px;color:#ddd;font-family:monospace;">${esc(from)}</td>
+            <td style="padding:5px;color:#3b82f6;font-family:monospace;">${esc(to)}</td>
+            <td style="padding:5px;color:#aaa;">${esc(_redirLookup.get(to) || '-')}</td>
+        </tr>
+    `).join('');
+    _redirSorter.attach();
+}
 
 // ══════════════════════════════════════════════════════════
 // Sub-tab 3: 📥 從 Notion 匯入
@@ -224,7 +253,8 @@ _blog.viewAllRedirects = async () => {
         const r = await websiteFetch('/api/website/redirects');
         const items = r.items || {};
         // 文章 + 作品 標題 lookup（顯示 redirect 目標時帶上人類可讀名稱）
-        const slugLookup = new Map(_state.posts.map(p => [`/news/${p.slug}`, p.title]));
+        _redirLookup = new Map(_state.posts.map(p => [`/news/${p.slug}`, p.title]));
+        _redirEntries = Object.entries(items).sort();
 
         const modal = document.createElement('div');
         modal.id = 'redirect-modal';
@@ -240,22 +270,17 @@ _blog.viewAllRedirects = async () => {
                         ? '<div style="color:#888;text-align:center;padding:30px;">尚無轉址。在「📰 文章 → 編輯 → 🔗 SEO 301 轉址」可以新增。</div>'
                         : `<table style="width:100%;font-size:12px;">
                             <thead><tr>
-                                <th style="text-align:left;padding:6px;color:#888;">舊路徑</th>
-                                <th style="text-align:left;padding:6px;color:#888;">新位</th>
-                                <th style="text-align:left;padding:6px;color:#888;">文章</th>
+                                ${sortableTh('from', '舊路徑', 'style="text-align:left;padding:6px;color:#888;"')}
+                                ${sortableTh('to', '新位', 'style="text-align:left;padding:6px;color:#888;"')}
+                                ${sortableTh('post', '文章', 'style="text-align:left;padding:6px;color:#888;"')}
                             </tr></thead>
-                            <tbody>${Object.entries(items).sort().map(([from, to]) => `
-                                <tr>
-                                    <td style="padding:5px;color:#ddd;font-family:monospace;">${esc(from)}</td>
-                                    <td style="padding:5px;color:#3b82f6;font-family:monospace;">${esc(to)}</td>
-                                    <td style="padding:5px;color:#aaa;">${esc(slugLookup.get(to) || '-')}</td>
-                                </tr>
-                            `).join('')}</tbody>
+                            <tbody id="redirect-modal-rows"></tbody>
                         </table>`}
                 </div>
             </div>
         `;
         document.body.appendChild(modal);
+        _renderRedirectRows();
     } catch (e) { toastErr(e.message); }
 };
 

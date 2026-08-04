@@ -6,7 +6,7 @@
  * API：/api/v1/cashflow/*（master 同源，帶 auth token）；專案清單走既有 /api/v1/crm/projects。
  */
 
-import { esc } from '../crm/crm-utils.js';
+import { esc, createSortable, sortableTh, enumIndex } from '../crm/crm-utils.js';
 
 const MS_STATUSES = ['未到期', '待請款', '已請款', '已收款'];
 const MS_COLORS = { '未到期': '#3f3f46', '待請款': '#78350f', '已請款': '#1e3a5f', '已收款': '#064e3b' };
@@ -29,6 +29,37 @@ async function cfetch(path, opts = {}) {
 const _fmt = (n) => (n == null ? '—' : Number(n).toLocaleString());
 let _el = null;
 let _projects = [];   // [{id, name}]
+let _last = null;     // 最近一次 API 結果 {fc, ms, mc} — 排序重繪不用重打 API
+
+// ── Sortable list headers（共用 createSortable，預設不排序維持後端順序）──
+const _numOrEmpty = (v) => (v == null ? '' : Number(v));
+const _ovSorter = createSortable({
+    storageKey: 'crm_cf_overdue_sort',
+    defaultSort: { key: '', dir: 'asc' },
+    panelId: 'cf-overdue-card',
+    onChange: () => _renderAll(),
+    getters: {
+        project: m => m.project_name || '',
+        label:   m => m.label || '',
+        amount:  m => _numOrEmpty(m.amount),
+        due:     m => m.due_date || '',
+        status:  m => enumIndex(MS_STATUSES, m.status || '未到期'),
+    },
+});
+const _mcSorter = createSortable({
+    storageKey: 'crm_cf_monthclose_sort',
+    defaultSort: { key: '', dir: 'asc' },
+    panelId: 'cf-monthclose-card',
+    onChange: () => _renderAll(),
+    getters: {
+        month:   m => m.month || '',
+        locked:  m => (m.locked ? 1 : 0),
+        income:  m => _numOrEmpty((m.snapshot || {}).income),
+        expense: m => _numOrEmpty((m.snapshot || {}).expense),
+        count:   m => _numOrEmpty((m.snapshot || {}).entry_count),
+        closed:  m => m.closed_at || '',
+    },
+});
 
 export async function initCrmCashflowTab() {
     _el = document.getElementById('cf-content');
@@ -47,19 +78,27 @@ async function refresh() {
         ]);
         _projects = (projs.projects || []).map(p => ({ id: p.id, name: p.name }));
         // 固定月成本 forecast 已回（fc.fixed_monthly，同一 settings 鍵），不用另抓 settings
-        _el.innerHTML = _renderOverdue(fc) + _renderForecast(fc) + _renderMilestones(ms) + _renderMonthClose(mc);
-        _bind();
+        _last = { fc, ms, mc };
+        _renderAll();
     } catch (e) {
         _el.innerHTML = `<div style="color:#f87171;padding:24px;">現金流載入失敗：${esc(e.message || e)}</div>`;
     }
 }
 
+function _renderAll() {
+    if (!_el || !_last) return;
+    _el.innerHTML = _renderOverdue(_last.fc) + _renderForecast(_last.fc) + _renderMilestones(_last.ms) + _renderMonthClose(_last.mc);
+    _bind();
+    _ovSorter.attach();
+    _mcSorter.attach();
+}
+
 function _renderOverdue(fc) {
     if (!fc.overdue.length) return '';
-    return `<div class="cf-card" style="border-color:#7f1d1d;">
+    return `<div class="cf-card" id="cf-overdue-card" style="border-color:#7f1d1d;">
         <h3 style="color:#fca5a5;">⚠️ 逾期應收（${fc.overdue.length} 筆 — 該催了）</h3>
-        <table><thead><tr><th>專案</th><th>節點</th><th class="num">金額</th><th>應收日</th><th>狀態</th></tr></thead>
-        <tbody>${fc.overdue.map(m => `
+        <table><thead><tr>${sortableTh('project', '專案')}${sortableTh('label', '節點')}${sortableTh('amount', '金額', 'class="num"')}${sortableTh('due', '應收日')}${sortableTh('status', '狀態')}</tr></thead>
+        <tbody>${_ovSorter.sorted(fc.overdue).map(m => `
             <tr><td>${esc(m.project_name)}</td><td>${esc(m.label)}</td>
                 <td class="num cf-neg">$${_fmt(m.amount)}</td>
                 <td class="cf-neg">${esc(m.due_date || '')}</td><td>${esc(m.status)}</td></tr>`).join('')}
@@ -122,7 +161,7 @@ function _renderMilestones(ms) {
 }
 
 function _renderMonthClose(mc) {
-    const rows = mc.months.map(m => `
+    const rows = _mcSorter.sorted(mc.months).map(m => `
         <tr><td>${esc(m.month)}</td>
             <td>${m.locked ? '🔒 已鎖' : `↩︎ 已重開（${esc(m.reopened_by || '')}）`}</td>
             <td class="num cf-pos">$${_fmt((m.snapshot || {}).income)}</td>
@@ -136,14 +175,14 @@ function _renderMonthClose(mc) {
         const d = new Date(); d.setDate(1); d.setDate(0);
         return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
     })();
-    return `<div class="cf-card">
+    return `<div class="cf-card" id="cf-monthclose-card">
         <h3>🔒 月結鎖帳（鎖定月的收支不可增改刪 — 報表數字可重現的地基）</h3>
         <div style="display:flex;gap:8px;align-items:center;margin-bottom:10px;">
             <input id="cf-close-month" type="month" value="${prevMonth}">
             <button class="cf-btn" data-cf="close" data-month="">鎖定該月</button>
         </div>
-        ${rows ? `<table><thead><tr><th>月份</th><th>狀態</th><th class="num">收入</th><th class="num">支出</th>
-            <th class="num">筆數</th><th>鎖帳人/時間</th><th></th></tr></thead><tbody>${rows}</tbody></table>`
+        ${rows ? `<table><thead><tr>${sortableTh('month', '月份')}${sortableTh('locked', '狀態')}${sortableTh('income', '收入', 'class="num"')}${sortableTh('expense', '支出', 'class="num"')}
+            ${sortableTh('count', '筆數', 'class="num"')}${sortableTh('closed', '鎖帳人/時間')}<th></th></tr></thead><tbody>${rows}</tbody></table>`
             : '<div class="cf-note">尚未鎖過任何月份。建議每月初鎖上個月。</div>'}
     </div>`;
 }

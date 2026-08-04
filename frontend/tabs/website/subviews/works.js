@@ -6,13 +6,15 @@
  * 重用既有 showcase-edit.html 避免重寫 544 行的 CRM 完稿 Tab 編輯器。
  */
 import { websiteFetch, esc, toastOk, toastErr, renderLoadError, debounce, readRowPatch, emptyRow, emptyHint } from '../website-utils.js';
-import { searchableSelect, createSortable, sortableTh } from '../../crm/crm-utils.js';   // 打字搜尋下拉 widget（.ss-* 樣式已在 index.html 全域載入）+ 點欄頭排序
+import { searchableSelect, createSortable, sortableTh, completenessScore } from '../../crm/crm-utils.js';   // 打字搜尋下拉 widget（.ss-* 樣式已在 index.html 全域載入）+ 點欄頭排序
 import { openShowcaseOverlay } from '../../crm/showcase-overlay.js';   // 編輯作品共用殼（與結案收件匣同一實作）
 
 let _works = [];
 let _categories = [];
 let _seoAudit = null;  // Map<project_id, auditItem>；null = audit 端點不可用
 let _series = [];      // 作品系列（跨專案策展集合）
+let _seriesById = new Map();   // id → series；排序 getter O(1) 查（每次 _series 賦值後重建）
+const _rebuildSeriesById = () => { _seriesById = new Map(_series.map(s => [s.id, s])); };
 let _serOpen = null;   // 展開成員管理的系列 id
 
 // ── 欄位自訂：勾選要顯示的欄，localStorage 記憶（存「隱藏」清單 → 未來新欄預設顯示）──
@@ -47,7 +49,7 @@ const _sorter = createSortable({
         cat: w => (w.categories || []).join(','),
         tags: w => (w.tags || []).join(','),
         series: w => {
-            const s = w.series_id ? _series.find(x => x.id === w.series_id) : null;
+            const s = w.series_id ? _seriesById.get(w.series_id) : null;
             return s ? (s.title_zh || s.slug || '') : '';
         },
         year: w => w.year ?? '',
@@ -55,10 +57,7 @@ const _sorter = createSortable({
         featured: w => (w.featured ? 1 : 0),
         noindex: w => (w.noindex ? 1 : 0),
         seo: w => _seoAudit?.get(w.id)?.completeness ?? '',
-        comp: w => {
-            const c = w.completeness;
-            return c ? ['video', 'images', 'description', 'credits'].filter(k => c[k]).length : '';
-        },
+        comp: w => completenessScore(w.completeness),
     },
 });
 
@@ -164,6 +163,7 @@ export default async function render(container, ctx = {}) {
         portfolioPdfUrl = (settingsRes?.settings?.['portfolio.pdf_url'] || '').toString();
         _seoAudit = auditRes ? new Map((auditRes.items || []).map(it => [it.project_id, it])) : null;
         _series = seriesRes?.items || [];
+        _rebuildSeriesById();
     } catch (e) {
         if (!isCurrent()) return;
         renderLoadError(container, '作品集管理', e);
@@ -253,7 +253,7 @@ export default async function render(container, ctx = {}) {
 
 async function _reloadSeries() {
     const res = await websiteFetch('/api/website/admin/series').catch(() => null);
-    if (res) _series = res.items || [];
+    if (res) { _series = res.items || []; _rebuildSeriesById(); }
     _renderSeriesPanel();
 }
 
@@ -264,7 +264,7 @@ async function _refreshSeriesAndWorks() {
         websiteFetch('/api/website/admin/series').catch(() => null),
     ]);
     if (worksRes) _works = worksRes.items || [];
-    if (seriesRes) _series = seriesRes.items || [];
+    if (seriesRes) { _series = seriesRes.items || []; _rebuildSeriesById(); }
     _renderSeriesPanel();
     _renderTable();
 }

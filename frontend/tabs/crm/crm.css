@@ -498,20 +498,20 @@
 .crm-col-client { flex: 1.2; }
 .crm-col-date   { flex: 1; text-align: right; }
 
-/* 點欄頭排序 — 通用樣式：.crm-list-header 的 span 欄頭與 <thead> 的 <th>（全後台表格）都吃這套 */
-.crm-list-header [data-sort-key], thead [data-sort-key] {
+/* 點欄頭排序 — 通用樣式：data-sort-key 全 repo 只用在欄頭（th / span / grid div 都吃這套） */
+[data-sort-key] {
   cursor: pointer;
   user-select: none;
   transition: color 0.15s;
 }
-.crm-list-header [data-sort-key]:hover, thead [data-sort-key]:hover { color: #c9d1d9; }
-.crm-list-header .crm-sort-active, thead .crm-sort-active { color: #58a6ff; }
-.crm-list-header .crm-sort-ind, thead .crm-sort-ind {
+[data-sort-key]:hover { color: #c9d1d9; }
+.crm-sort-active { color: #58a6ff; }
+.crm-sort-ind {
   font-size: 9px;
   opacity: 0.5;
   margin-left: 2px;
 }
-.crm-list-header .crm-sort-active .crm-sort-ind, thead .crm-sort-active .crm-sort-ind { opacity: 1; }
+.crm-sort-active .crm-sort-ind { opacity: 1; }
 .crm-row-client { flex: 1.2; color: #9ca3af; font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .crm-row-date   { flex: 1; text-align: right; color: #6b7280; font-size: 12px; }
 

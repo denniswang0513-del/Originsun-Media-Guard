@@ -466,12 +466,12 @@ export const enumIndex = (arr, val, fallback) => {
  *
  * 容器:`panelId`(元素 id)或 `panelSelector`(CSS selector,給沒有固定 id 的
  *   subview 容器;attach 時才 querySelector,重繪後照樣找得到)。
- * 表頭:預設認 `.crm-list-header [data-sort-key]` 與 `thead [data-sort-key]`
- *   (div 欄頭與 <table> 表頭都吃);特殊結構可傳 `headerSelector` 覆寫。
+ * 表頭:panel 內任何帶 `data-sort-key` 的元素(th / span / div 都行 —
+ *   全 repo 這個屬性只用在欄頭,不需要更窄的選擇器)。
  * defaultSort 可用 { key: '', dir: 'asc' } = 預設不排序:全部視為空值、
  *   stable sort 維持輸入順序,點了欄頭才生效。
  */
-export function createSortable({ storageKey, defaultSort, panelId, panelSelector, headerSelector, getters, getValue, onChange }) {
+export function createSortable({ storageKey, defaultSort, panelId, panelSelector, getters, getValue, onChange }) {
     const _getValue = getValue || ((item, k) => getters?.[k]?.(item) ?? '');
     let _sort = (() => {
         try {
@@ -505,7 +505,8 @@ export function createSortable({ storageKey, defaultSort, panelId, panelSelector
             if (ae !== be) return ae ? 1 : -1;
             if (ae) return 0;
             if (typeof va === 'number' && typeof vb === 'number') return (va - vb) * sign;
-            return String(va).localeCompare(String(vb), 'zh-Hant') * sign;
+            // 大小寫正規化收在這裡 — getter 不用各自背 .toLowerCase()（中文為 no-op、英文混排欄一致）
+            return String(va).toLowerCase().localeCompare(String(vb).toLowerCase(), 'zh-Hant') * sign;
         });
     };
 
@@ -513,7 +514,7 @@ export function createSortable({ storageKey, defaultSort, panelId, panelSelector
         const panel = panelId ? document.getElementById(panelId)
             : (panelSelector ? document.querySelector(panelSelector) : null);
         if (!panel) return;
-        panel.querySelectorAll(headerSelector || '.crm-list-header [data-sort-key], thead [data-sort-key]').forEach(el => {
+        panel.querySelectorAll('[data-sort-key]').forEach(el => {
             const k = el.dataset.sortKey;
             // 用 dataset flag 避免重複 bind(每次 render 後 caller 都呼叫 attach,header 元素不變但 onclick 不能重疊)
             if (!el.dataset.sortBound) {
@@ -537,10 +538,39 @@ export function createSortable({ storageKey, defaultSort, panelId, panelSelector
 }
 
 
-/** 可排序 <th> 標記 — 43 個表格接排序都用它,不各自手寫指示器。
+/** 可排序 <th> 標記 — 表格接排序都用它,不各自手寫指示器。
  *  sortableTh('year', '年份') / sortableTh('seo', 'AI SEO', 'data-col="seo" title="…"') */
 export const sortableTh = (key, label, attrs = '') =>
     `<th data-sort-key="${key}"${attrs ? ' ' + attrs : ''}>${label} <span class="crm-sort-ind">↕</span></th>`;
+
+
+/** span 版 — div/grid 欄頭用（如 .crm-list-header、user-mgmt 的 grid 表頭）。 */
+export const sortableSpan = (key, label, attrs = '') =>
+    `<span data-sort-key="${key}"${attrs ? ' ' + attrs : ''}>${label} <span class="crm-sort-ind">↕</span></span>`;
+
+
+/** work_completeness 四項計分（影片/圖/說明/credits — 鏡射後端契約；
+ *  works 列表與結案清單共用,欄位增減只改這裡）。無資料回 '' 排尾。 */
+export const completenessScore = (c) =>
+    c ? ['video', 'images', 'description', 'credits'].filter(k => c[k]).length : '';
+
+
+/** 可編輯表格重繪前保住未儲存的 inline 編輯（帶 data-id + data-field 的
+ *  input/select/textarea）,重繪後按同 key 還原值/勾選 — 點欄頭排序不再
+ *  無聲洗掉還沒按儲存的修改。container 必須是重繪後仍存活的穩定祖先節點。 */
+export function withInputsPreserved(container, rerender) {
+    const saved = container ? [...container.querySelectorAll(
+        'input[data-id][data-field], select[data-id][data-field], textarea[data-id][data-field]')]
+        .map(el => ({ id: el.dataset.id, field: el.dataset.field, value: el.value, checked: el.checked })) : [];
+    rerender();
+    for (const s of saved) {
+        const el = container.querySelector(
+            `[data-id="${CSS.escape(s.id)}"][data-field="${CSS.escape(s.field)}"]`);
+        if (!el) continue;
+        if (el.type === 'checkbox' || el.type === 'radio') el.checked = s.checked;
+        else el.value = s.value;
+    }
+}
 
 
 /** 輕量 toast — 沿用 crm.css 既有 .cg-toast 樣式（cost-groups / media-log 等子視圖共用）。 */

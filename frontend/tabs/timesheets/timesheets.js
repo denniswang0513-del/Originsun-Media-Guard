@@ -9,6 +9,7 @@
  */
 
 import { esc } from '../website/website-utils.js';
+import { createSortable, sortableTh } from '../crm/crm-utils.js';
 
 async function tfetch(path, opts = {}) {
     const token = localStorage.getItem('auth_token');
@@ -27,6 +28,72 @@ async function tfetch(path, opts = {}) {
 let _content = null;
 let _view = 'board';                                   // board（專案分析）| staff（人員月視圖）
 let _month = new Date().toISOString().slice(0, 7);     // YYYY-MM
+let _summaryCache = null;   // 最近一次 summary（供點欄頭排序重繪）
+let _staffCache = null;     // 最近一次 by_staff
+let _recentCache = null;    // 最近一次 recent rows
+
+// ── 點欄頭排序：預設 key '' = 不排序、維持後端順序（burn 表本身已按消耗率排好），點了才生效 ──
+function _redrawTbody(tableId, tbodyHtmlFn, sorter) {
+    const tb = document.querySelector('#' + tableId + ' tbody');
+    if (!tb) return;
+    tb.innerHTML = tbodyHtmlFn();
+    sorter.attach();
+}
+
+const _burnSorter = createSortable({
+    storageKey: 'timesheets_burn_sort',
+    defaultSort: { key: '', dir: 'asc' },
+    panelId: 'ts-burn-table',
+    onChange: () => _redrawTbody('ts-burn-table', _burnTbodyHtml, _burnSorter),
+    getters: {
+        project: p => p.project_name || p.project_id || '',
+        status: p => p.status || '',
+        used: p => p.hours_used ?? '',
+        budget: p => p.budget_hours ?? '',
+        remaining: p => p.remaining ?? '',
+        pct: p => p.pct ?? '',
+        rows: p => p.rows ?? '',
+        last: p => p.last_entry || '',
+    },
+});
+
+const _unmatchedSorter = createSortable({
+    storageKey: 'timesheets_unmatched_sort',
+    defaultSort: { key: '', dir: 'asc' },
+    panelId: 'ts-unmatched-table',
+    onChange: () => _redrawTbody('ts-unmatched-table', _unmatchedTbodyHtml, _unmatchedSorter),
+    getters: {
+        name: u => u.project_name || '',
+        hours: u => u.hours_used ?? '',
+        rows: u => u.rows ?? '',
+    },
+});
+
+const _staffSorter = createSortable({
+    storageKey: 'timesheets_staff_sort',
+    defaultSort: { key: '', dir: 'asc' },
+    panelId: 'ts-staff-table',
+    onChange: () => _redrawTbody('ts-staff-table', _staffTbodyHtml, _staffSorter),
+    getters: {
+        name: s => s.name || '',
+        hours: s => s.total_hours ?? '',
+    },
+});
+
+const _recentSorter = createSortable({
+    storageKey: 'timesheets_recent_sort',
+    defaultSort: { key: '', dir: 'asc' },
+    panelId: 'ts-recent-table',
+    onChange: () => _redrawTbody('ts-recent-table', _recentTbodyHtml, _recentSorter),
+    getters: {
+        date: r => r.date || '',
+        staff: r => r.staff || '',
+        project: r => r.project || '',
+        matched: r => (r.matched ? 1 : 0),
+        task: r => r.task || '',
+        hours: r => r.hours ?? '',
+    },
+});
 
 export async function initTimesheetsTab() {
     _content = document.getElementById('ts-content');
@@ -38,12 +105,18 @@ async function refresh() {
     try {
         if (_view === 'staff') {
             const d = await tfetch('/api/v1/timesheets/by_staff?month=' + _month);
+            _staffCache = d;
             _content.innerHTML = _renderStaffView(d);
         } else {
             const s = await tfetch('/api/v1/timesheets/summary');
+            _summaryCache = s;
             _content.innerHTML = (s.total_rows === 0) ? _renderEmpty() : _renderBoard(s);
         }
         _bind();
+        // 各表點欄頭排序（attach 對不存在的表是 no-op）
+        _burnSorter.attach();
+        _unmatchedSorter.attach();
+        _staffSorter.attach();
     } catch (e) {
         _content.innerHTML = `<div style="color:#f87171;padding:30px;text-align:center;">
             工時資料載入失敗：${esc(e.message || e)}</div>`;
@@ -70,8 +143,8 @@ function _pctStyle(pct) {
     return 'background:#064e3b;color:#6ee7b7;';
 }
 
-function _renderBoard(s) {
-    const projRows = s.projects.map(p => `
+function _burnTbodyHtml() {
+    const rows = _burnSorter.sorted((_summaryCache && _summaryCache.projects) || []).map(p => `
         <tr>
             <td>${esc(p.project_name || p.project_id)}</td>
             <td style="color:#888;">${esc(p.status || '')}</td>
@@ -82,17 +155,23 @@ function _renderBoard(s) {
             <td class="num" style="color:#777;">${p.rows}</td>
             <td style="color:#777;">${esc(p.last_entry || '')}</td>
         </tr>`).join('');
+    return rows || '<tr><td colspan="8" style="color:#666;text-align:center;">尚無已對映專案</td></tr>';
+}
 
+function _unmatchedTbodyHtml() {
+    return _unmatchedSorter.sorted((_summaryCache && _summaryCache.unmatched) || []).map(u => `
+                    <tr><td>${esc(u.project_name)}</td>
+                        <td class="num">${u.hours_used}</td>
+                        <td class="num">${u.rows}</td></tr>`).join('');
+}
+
+function _renderBoard(s) {
     const unmatchedCard = s.unmatched.length ? `
         <div class="ts-card">
             <h3>🔗 未對映專案（${s.unmatched.length}）</h3>
-            <table>
-                <thead><tr><th>Sheet 專案名</th><th class="num">時數</th><th class="num">列數</th></tr></thead>
-                <tbody>${s.unmatched.map(u => `
-                    <tr><td>${esc(u.project_name)}</td>
-                        <td class="num">${u.hours_used}</td>
-                        <td class="num">${u.rows}</td></tr>`).join('')}
-                </tbody>
+            <table id="ts-unmatched-table">
+                <thead><tr>${sortableTh('name', 'Sheet 專案名')}${sortableTh('hours', '時數', 'class="num"')}${sortableTh('rows', '列數', 'class="num"')}</tr></thead>
+                <tbody>${_unmatchedTbodyHtml()}</tbody>
             </table>
             <div class="ts-note">名稱與 CRM 專案完全一致即自動對映（下次同步生效）。
                 「行政庶務」等內部桶留在這裡是正常的。</div>
@@ -115,12 +194,12 @@ function _renderBoard(s) {
         </div>
         <div class="ts-card">
             <h3>📊 專案 Burn（消耗率高在前）</h3>
-            <table>
+            <table id="ts-burn-table">
                 <thead><tr>
-                    <th>專案</th><th>狀態</th><th class="num">已投入(h)</th><th class="num">預算(h)</th>
-                    <th class="num">剩餘(h)</th><th class="num">消耗率</th><th class="num">列數</th><th>最後填報</th>
+                    ${sortableTh('project', '專案')}${sortableTh('status', '狀態')}${sortableTh('used', '已投入(h)', 'class="num"')}${sortableTh('budget', '預算(h)', 'class="num"')}
+                    ${sortableTh('remaining', '剩餘(h)', 'class="num"')}${sortableTh('pct', '消耗率', 'class="num"')}${sortableTh('rows', '列數', 'class="num"')}${sortableTh('last', '最後填報')}
                 </tr></thead>
-                <tbody>${projRows || '<tr><td colspan="8" style="color:#666;text-align:center;">尚無已對映專案</td></tr>'}</tbody>
+                <tbody>${_burnTbodyHtml()}</tbody>
             </table>
         </div>
         ${unmatchedCard}
@@ -128,8 +207,9 @@ function _renderBoard(s) {
 }
 
 // 人員月視圖：每人 × 每專案 時數（人事管理視角）
-function _renderStaffView(d) {
-    const staffBlocks = d.staff.map(s => `
+// 排序作用在「人員區塊」層級（人列 + 其專案子列一起移動，子列維持原順序）
+function _staffTbodyHtml() {
+    const staffBlocks = _staffSorter.sorted((_staffCache && _staffCache.staff) || []).map(s => `
         <tr style="background:#262626;">
             <td style="color:#eee;font-weight:600;">${esc(s.name)}</td>
             <td class="num" style="color:#eee;font-weight:600;">${s.total_hours}</td>
@@ -141,6 +221,10 @@ function _renderStaffView(d) {
             <td class="num">${p.hours}</td>
             <td class="num" style="color:#777;">${p.rows} 列</td>
         </tr>`).join('')}`).join('');
+    return staffBlocks || '<tr><td colspan="3" style="color:#666;text-align:center;">本月尚無工時資料</td></tr>';
+}
+
+function _renderStaffView(d) {
     return `
         <h2>專案工時</h2>
         <div class="ts-sub">人員月視圖：每人投入的專案時數（含 Sheet 同步與手填）</div>
@@ -152,11 +236,20 @@ function _renderStaffView(d) {
                 <span class="ts-chip"><b>${d.total_hours}</b>本月總時數</span>
                 <span class="ts-chip"><b>${d.staff.length}</b>有填報人數</span>
             </div>
-            <table>
-                <thead><tr><th>人員 / 專案</th><th class="num">時數(h)</th><th class="num"></th></tr></thead>
-                <tbody>${staffBlocks || '<tr><td colspan="3" style="color:#666;text-align:center;">本月尚無工時資料</td></tr>'}</tbody>
+            <table id="ts-staff-table">
+                <thead><tr>${sortableTh('name', '人員 / 專案')}${sortableTh('hours', '時數(h)', 'class="num"')}<th class="num"></th></tr></thead>
+                <tbody>${_staffTbodyHtml()}</tbody>
             </table>
         </div>`;
+}
+
+function _recentTbodyHtml() {
+    return _recentSorter.sorted(_recentCache || []).map(r => `
+                                    <tr><td>${esc(r.date || '')}</td><td>${esc(r.staff)}</td>
+                                        <td>${esc(r.project)}</td>
+                                        <td>${r.matched ? '✅' : '<span style="color:#f59e0b;">—</span>'}</td>
+                                        <td style="color:#999;">${esc(r.task || '')}</td>
+                                        <td class="num">${r.hours}</td></tr>`).join('');
 }
 
 // 快速補登：一位人員 + 多列（日期/專案/內容/時數）→ POST /manual
@@ -289,20 +382,16 @@ function _bind() {
                 slot.innerHTML = '<div style="color:#777;padding:8px;">載入中…</div>';
                 try {
                     const d = await tfetch('/api/v1/timesheets/recent?limit=50');
+                    _recentCache = d.rows || [];
                     slot.innerHTML = `
                         <div class="ts-card">
                             <h3>🔍 最近同步 50 列</h3>
-                            <table>
-                                <thead><tr><th>日期</th><th>員工</th><th>專案</th><th>對映</th><th>內容</th><th class="num">時數</th></tr></thead>
-                                <tbody>${d.rows.map(r => `
-                                    <tr><td>${esc(r.date || '')}</td><td>${esc(r.staff)}</td>
-                                        <td>${esc(r.project)}</td>
-                                        <td>${r.matched ? '✅' : '<span style="color:#f59e0b;">—</span>'}</td>
-                                        <td style="color:#999;">${esc(r.task || '')}</td>
-                                        <td class="num">${r.hours}</td></tr>`).join('')}
-                                </tbody>
+                            <table id="ts-recent-table">
+                                <thead><tr>${sortableTh('date', '日期')}${sortableTh('staff', '員工')}${sortableTh('project', '專案')}${sortableTh('matched', '對映')}${sortableTh('task', '內容')}${sortableTh('hours', '時數', 'class="num"')}</tr></thead>
+                                <tbody>${_recentTbodyHtml()}</tbody>
                             </table>
                         </div>`;
+                    _recentSorter.attach();
                 } catch (e) {
                     slot.innerHTML = `<div style="color:#f87171;padding:8px;">載入失敗：${esc(e.message || e)}</div>`;
                 }

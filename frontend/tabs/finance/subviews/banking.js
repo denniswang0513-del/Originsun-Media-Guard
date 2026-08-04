@@ -7,6 +7,7 @@
  * 後端 API prefix /api/v1/finance（fin-utils.finFetch）。
  */
 import { finFetch, esc, fmtNum, finToast, finSubviewBoot, todayStr, ACCT_KIND_OPTIONS } from '../fin-utils.js';
+import { createSortable, sortableTh, enumIndex } from '../../crm/crm-utils.js';   // 點欄頭排序（通用排序器）
 
 const KIND_LABEL = Object.fromEntries(ACCT_KIND_OPTIONS.map(k => [k.v, k.label]));
 const ADJ_TYPES = [
@@ -39,7 +40,91 @@ let _wb = null;          // 對帳工作台：{acct, month, data}；null=未開
 let _wbCats = null;      // 補記入帳的類別 datalist（cash 對映 category，lazy 載一次）
 let _wbImportRows = null; // 匯入流程暫存：貼上解析後的儲存格陣列
 
+let _schedItems = null;  // 最近一次攤還表 items（排序重繪用）
+let _reconItems = null;  // 最近一次月結對帳歷史 items（排序重繪用）
+
 const _fb = (window._finBank = window._finBank || {});
+
+// ── 點欄頭排序（createSortable；預設 key '' = 不排序、維持後端順序，點了才生效）──
+const _schedSorter = createSortable({
+    storageKey: 'finance_loan_schedule_sort',
+    defaultSort: { key: '', dir: 'asc' },
+    panelId: 'finbank-sched-main',
+    onChange: () => { if (_schedItems) _renderSchedMain(_schedItems); },
+    getters: {
+        period: r => r.period_no ?? '',
+        due: r => r.due_date ? String(r.due_date).substring(0, 10) : '',
+        principal: r => r.principal_due ?? '',
+        interest: r => r.interest_due ?? '',
+        total: r => r.total ?? '',
+        status: r => (r.status === 'paid' ? 2 : (r.overdue ? 0 : 1)),   // 逾期→未到期→已繳
+    },
+});
+
+const _reconSorter = createSortable({
+    storageKey: 'finance_recon_history_sort',
+    defaultSort: { key: '', dir: 'asc' },
+    panelId: 'finbank-recon-history',
+    onChange: () => _renderReconHistory(),
+    getters: {
+        month: r => r.month || '',
+        stmt: r => r.statement_balance ?? '',
+        sys: r => r.system_balance ?? '',
+        diff: r => r.diff ?? 0,
+        status: r => (((r.diff || 0) === 0 || r.status === 'balanced') ? 1 : 0),
+    },
+});
+
+const _wbLinesSorter = createSortable({
+    storageKey: 'finance_wb_lines_sort',
+    defaultSort: { key: '', dir: 'asc' },
+    panelId: 'finbank-wb-lines',
+    onChange: () => _wbRender(),
+    getters: {
+        date: l => l.line_date || '',
+        desc: l => l.description || '',
+        amount: l => l.amount ?? '',
+        status: l => enumIndex(['unmatched', 'noted', 'matched'], l.status),
+    },
+});
+
+const _wbEntriesSorter = createSortable({
+    storageKey: 'finance_wb_entries_sort',
+    defaultSort: { key: '', dir: 'asc' },
+    panelId: 'finbank-wb-entries',
+    onChange: () => _wbRender(),
+    getters: {
+        date: e => e.entry_date || '',
+        summary: e => e.summary || '',
+        category: e => e.category || '',
+        amount: e => e.amount ?? '',
+        matched: e => (e.matched ? 1 : 0),
+    },
+});
+
+const _adjSorter = createSortable({
+    storageKey: 'finance_adjustments_sort',
+    defaultSort: { key: '', dir: 'asc' },
+    panelId: 'finbank-adj-list',
+    onChange: () => _renderAdjList(),
+    getters: {
+        date: a => a.adj_date ? String(a.adj_date).substring(0, 10) : '',
+        acct: a => {
+            const x = _coa.find(c => String(c.id) === String(a.account_id));
+            return x ? x.name : (a.account_id != null ? '#' + a.account_id : '');
+        },
+        amount: a => a.amount ?? '',
+        type: a => (ADJ_TYPES.find(t => t.v === a.adj_type)?.label) || a.adj_type || '',
+        desc: a => a.description || '',
+    },
+});
+
+function _renderAdjList() {
+    const el = _c && _c.querySelector('#finbank-adj-list');
+    if (!el) return;
+    el.innerHTML = _adjListHtml();
+    _adjSorter.attach();
+}
 
 export default async function render(container, ctx = {}) {
     _c = container;
@@ -308,6 +393,7 @@ function _renderShell() {
         const m = _c.querySelector('#' + mid);
         if (m) m.addEventListener('click', (e) => { if (e.target === m) m.style.display = 'none'; });
     }
+    _adjSorter.attach();   // 調整分錄表隨 shell 一起畫 → 這裡綁欄頭
 }
 
 // ── 帳戶 CRUD ───────────────────────────────────────────────
@@ -588,6 +674,7 @@ _fb.loanSchedule = async (id) => {
 function _renderSchedMain(items) {
     const main = _c.querySelector('#finbank-sched-main');
     if (!main) return;
+    _schedItems = items;
     const loan = _loanById(_schedLoanId);
     const totalInterest = items.reduce((s, r) => s + (r.interest_due || 0), 0);
     const paidPrincipal = items.filter(r => r.status === 'paid')
@@ -620,17 +707,18 @@ function _renderSchedMain(items) {
         <div style="max-height:420px;overflow-y:auto;border:1px solid #2a2a2a;border-radius:6px;">
             <table style="border-collapse:collapse;font-size:12px;color:#ccc;width:100%;">
                 <thead><tr style="color:#888;text-align:left;position:sticky;top:0;background:#202020;">
-                    <th style="padding:6px 8px;">期別</th>
-                    <th style="padding:6px 8px;">繳款日</th>
-                    <th style="padding:6px 8px;text-align:right;">本金</th>
-                    <th style="padding:6px 8px;text-align:right;">利息</th>
-                    <th style="padding:6px 8px;text-align:right;">合計</th>
-                    <th style="padding:6px 8px;">狀態</th>
+                    ${sortableTh('period', '期別', 'style="padding:6px 8px;"')}
+                    ${sortableTh('due', '繳款日', 'style="padding:6px 8px;"')}
+                    ${sortableTh('principal', '本金', 'style="padding:6px 8px;text-align:right;"')}
+                    ${sortableTh('interest', '利息', 'style="padding:6px 8px;text-align:right;"')}
+                    ${sortableTh('total', '合計', 'style="padding:6px 8px;text-align:right;"')}
+                    ${sortableTh('status', '狀態', 'style="padding:6px 8px;"')}
                     <th style="padding:6px 8px;"></th>
                 </tr></thead>
-                <tbody>${items.map(row).join('')}</tbody>
+                <tbody>${_schedSorter.sorted(items).map(row).join('')}</tbody>
             </table>
         </div>`;
+    _schedSorter.attach();
 }
 
 /** 記繳款/取消後：貸款卡片 + 攤還表一起刷新（modal 開著、繳款設定列不重畫） */
@@ -705,13 +793,19 @@ async function _loadReconHistory(acctId) {
     const el = _c.querySelector('#finbank-recon-history');
     if (!el) return;
     el.innerHTML = '<div style="color:#666;font-size:12px;">載入對帳紀錄…</div>';
-    let items = [];
     try {
-        items = (await finFetch('/reconciliations?bank_account_id=' + encodeURIComponent(acctId))).items || [];
+        _reconItems = (await finFetch('/reconciliations?bank_account_id=' + encodeURIComponent(acctId))).items || [];
     } catch (e) {
         el.innerHTML = `<div style="color:#fca5a5;font-size:12px;">對帳紀錄載入失敗：${esc(e.message)}</div>`;
         return;
     }
+    _renderReconHistory();
+}
+
+function _renderReconHistory() {
+    const el = _c && _c.querySelector('#finbank-recon-history');
+    if (!el) return;
+    const items = _reconItems || [];
     if (!items.length) { el.innerHTML = '<div style="color:#666;font-size:12px;">此帳戶尚無對帳紀錄</div>'; return; }
     const row = (r) => {
         const diff = r.diff || 0;
@@ -727,14 +821,15 @@ async function _loadReconHistory(acctId) {
     el.innerHTML = `
         <table style="border-collapse:collapse;font-size:12px;color:#ccc;min-width:420px;">
             <thead><tr style="color:#888;text-align:left;">
-                <th style="padding:5px 10px;">月份</th>
-                <th style="padding:5px 10px;text-align:right;">對帳單餘額</th>
-                <th style="padding:5px 10px;text-align:right;">系統餘額</th>
-                <th style="padding:5px 10px;text-align:right;">差額</th>
-                <th style="padding:5px 10px;">狀態</th>
+                ${sortableTh('month', '月份', 'style="padding:5px 10px;"')}
+                ${sortableTh('stmt', '對帳單餘額', 'style="padding:5px 10px;text-align:right;"')}
+                ${sortableTh('sys', '系統餘額', 'style="padding:5px 10px;text-align:right;"')}
+                ${sortableTh('diff', '差額', 'style="padding:5px 10px;text-align:right;"')}
+                ${sortableTh('status', '狀態', 'style="padding:5px 10px;"')}
             </tr></thead>
-            <tbody>${items.map(row).join('')}</tbody>
+            <tbody>${_reconSorter.sorted(items).map(row).join('')}</tbody>
         </table>`;
+    _reconSorter.attach();
 }
 
 // ── 對帳工作台（對帳單明細逐筆勾銷）──────────────────────────
@@ -859,11 +954,11 @@ function _wbRender() {
     const entries = data.entries || [];
     const bankMiss = s.lines_bank_only || 0;   // 桶規則由後端 workbench_summary 單一定義
     const lineHead = `<thead><tr style="color:#888;text-align:left;">
-        <th style="padding:4px 8px;">日期</th><th style="padding:4px 8px;">摘要</th>
-        <th style="padding:4px 8px;text-align:right;">金額</th><th style="padding:4px 8px;">狀態</th><th style="padding:4px 8px;"></th></tr></thead>`;
+        ${sortableTh('date', '日期', 'style="padding:4px 8px;"')}${sortableTh('desc', '摘要', 'style="padding:4px 8px;"')}
+        ${sortableTh('amount', '金額', 'style="padding:4px 8px;text-align:right;"')}${sortableTh('status', '狀態', 'style="padding:4px 8px;"')}<th style="padding:4px 8px;"></th></tr></thead>`;
     const entryHead = `<thead><tr style="color:#888;text-align:left;">
-        <th style="padding:4px 8px;">日期</th><th style="padding:4px 8px;">摘要</th><th style="padding:4px 8px;">類別</th>
-        <th style="padding:4px 8px;text-align:right;">金額</th><th style="padding:4px 8px;">勾銷</th></tr></thead>`;
+        ${sortableTh('date', '日期', 'style="padding:4px 8px;"')}${sortableTh('summary', '摘要', 'style="padding:4px 8px;"')}${sortableTh('category', '類別', 'style="padding:4px 8px;"')}
+        ${sortableTh('amount', '金額', 'style="padding:4px 8px;text-align:right;"')}${sortableTh('matched', '勾銷', 'style="padding:4px 8px;"')}</tr></thead>`;
     el.innerHTML = `
         <div style="border:1px solid #2e2e2e;border-radius:8px;padding:12px;background:#1c1c1c;">
             <div style="display:flex;gap:14px;flex-wrap:wrap;align-items:center;font-size:12px;color:#ccc;margin-bottom:10px;">
@@ -880,18 +975,20 @@ function _wbRender() {
                 <button class="crm-btn crm-btn-secondary crm-btn-sm" onclick="window._finBank.wbReload()">🔄 重新整理</button>
             </div>
             <div style="display:flex;gap:14px;flex-wrap:wrap;align-items:flex-start;">
-                <div style="flex:1 1 460px;min-width:380px;">
+                <div id="finbank-wb-lines" style="flex:1 1 460px;min-width:380px;">
                     <div style="color:#9ca3af;font-size:12px;margin-bottom:4px;">🏦 銀行對帳單明細（${esc(month)}）</div>
-                    ${lines.length ? _wbTable(`${lineHead}<tbody>${lines.map(_wbLineRow).join('')}</tbody>`)
+                    ${lines.length ? _wbTable(`${lineHead}<tbody>${_wbLinesSorter.sorted(lines).map(_wbLineRow).join('')}</tbody>`)
                     : '<div style="color:#666;font-size:12px;border:1px dashed #333;border-radius:6px;padding:14px;">還沒有明細 — 從網銀/存摺把這個月的交易「📥 匯入」進來，或「＋ 手動新增」。</div>'}
                 </div>
-                <div style="flex:1 1 400px;min-width:360px;">
+                <div id="finbank-wb-entries" style="flex:1 1 400px;min-width:360px;">
                     <div style="color:#9ca3af;font-size:12px;margin-bottom:4px;">📒 系統收支明細（${esc(month)}，掛此帳戶）</div>
-                    ${entries.length ? _wbTable(`${entryHead}<tbody>${entries.map(_wbEntryRow).join('')}</tbody>`)
+                    ${entries.length ? _wbTable(`${entryHead}<tbody>${_wbEntriesSorter.sorted(entries).map(_wbEntryRow).join('')}</tbody>`)
                     : '<div style="color:#666;font-size:12px;border:1px dashed #333;border-radius:6px;padding:14px;">這個月此帳戶沒有掛帳的收支明細。</div>'}
                 </div>
             </div>
         </div>`;
+    _wbLinesSorter.attach();
+    _wbEntriesSorter.attach();
 }
 
 _fb.wbAutoMatch = (btn) => _wbApi('/statement-lines/auto-match', {
@@ -1200,14 +1297,14 @@ function _adjListHtml() {
     return `
         <table style="border-collapse:collapse;font-size:12px;color:#ccc;width:100%;">
             <thead><tr style="color:#888;text-align:left;">
-                <th style="padding:5px 8px;">日期</th>
-                <th style="padding:5px 8px;">科目</th>
-                <th style="padding:5px 8px;text-align:right;">金額</th>
-                <th style="padding:5px 8px;">類型</th>
-                <th style="padding:5px 8px;">說明</th>
+                ${sortableTh('date', '日期', 'style="padding:5px 8px;"')}
+                ${sortableTh('acct', '科目', 'style="padding:5px 8px;"')}
+                ${sortableTh('amount', '金額', 'style="padding:5px 8px;text-align:right;"')}
+                ${sortableTh('type', '類型', 'style="padding:5px 8px;"')}
+                ${sortableTh('desc', '說明', 'style="padding:5px 8px;"')}
                 <th style="padding:5px 8px;"></th>
             </tr></thead>
-            <tbody>${_adjustments.map(a => `
+            <tbody>${_adjSorter.sorted(_adjustments).map(a => `
                 <tr style="border-top:1px solid #2a2a2a;">
                     <td style="padding:5px 8px;">${esc(a.adj_date ? String(a.adj_date).substring(0, 10) : '')}</td>
                     <td style="padding:5px 8px;">${esc(acctName(a.account_id))}</td>

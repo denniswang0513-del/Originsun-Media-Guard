@@ -19,6 +19,7 @@ import {
     finFetch, esc, fmtNum, finToast,
     renderPeriodInputs, periodFromInputs, metricCard, fmtPct, downloadCsv,
 } from '../fin-utils.js';
+import { createSortable, sortableTh } from '../../crm/crm-utils.js';   // 點欄頭排序（通用排序器）
 
 let _c = null;
 let _isCurrent = () => true;
@@ -26,6 +27,20 @@ let _data = null;        // 最近一次 /statements 回應
 let _period = '';        // 最近一次成功送出的 period 字串
 let _periodEnd = '';     // 期間最後一個月（'YYYY-MM'，baseline 比對用）
 let _drillSeq = 0;       // drilldown 競態護欄
+let _drill = null;       // 最近一次 drilldown { items, total }（排序重繪用；items/total 永遠成對設讀）
+
+// 點欄頭排序：預設 key '' = 不排序、維持後端順序，點了才生效
+const _drillSorter = createSortable({
+    storageKey: 'finance_drilldown_sort',
+    defaultSort: { key: '', dir: 'asc' },
+    panelId: 'finstmt-drill-body',
+    onChange: () => _renderDrillTable(),
+    getters: {
+        date: it => it.date ? String(it.date).substring(0, 10) : '',
+        label: it => it.label || '',
+        amount: it => it.amount ?? '',
+    },
+});
 
 const _fs = (window._finStmt = window._finStmt || {});
 
@@ -481,6 +496,7 @@ async function _openDrill(kind, label) {
     const title = _c.querySelector('#finstmt-drill-title');
     if (!modal || !body) return;
     const seq = ++_drillSeq;
+    _drill = null;
     title.textContent = `🔍 ${label || kind} 明細（${_period}）`;
     body.innerHTML = '<div style="color:#888;padding:20px;">載入明細…</div>';
     modal.style.display = 'flex';
@@ -498,16 +514,23 @@ async function _openDrill(kind, label) {
         body.innerHTML = '<div style="color:#666;padding:20px;">此期間沒有明細</div>';
         return;
     }
+    _drill = { items, total: r.total };
+    _renderDrillTable();
+}
+
+function _renderDrillTable() {
+    const body = _c && _c.querySelector('#finstmt-drill-body');
+    if (!body || !_drill) return;
     body.innerHTML = `
     <table style="border-collapse:collapse;font-size:12px;color:#ccc;width:100%;">
         <thead>
             <tr style="color:#888;text-align:left;">
-                <th style="padding:5px 10px;">日期</th>
-                <th style="padding:5px 10px;">摘要</th>
-                <th style="padding:5px 10px;text-align:right;">金額</th>
+                ${sortableTh('date', '日期', 'style="padding:5px 10px;"')}
+                ${sortableTh('label', '摘要', 'style="padding:5px 10px;"')}
+                ${sortableTh('amount', '金額', 'style="padding:5px 10px;text-align:right;"')}
             </tr>
         </thead>
-        <tbody>${items.map(it => `
+        <tbody>${_drillSorter.sorted(_drill.items).map(it => `
             <tr style="border-top:1px solid #2a2a2a;">
                 <td style="padding:5px 10px;white-space:nowrap;">${esc(it.date ? String(it.date).substring(0, 10) : '')}</td>
                 <td style="padding:5px 10px;">${esc(it.label || '')}</td>
@@ -516,11 +539,12 @@ async function _openDrill(kind, label) {
         </tbody>
         <tfoot>
             <tr style="border-top:2px solid #444;font-weight:700;color:#eee;">
-                <td colspan="2" style="padding:6px 10px;">合計（${fmtNum(items.length)} 筆）</td>
-                <td style="padding:6px 10px;text-align:right;">$${fmtNum(r.total)}</td>
+                <td colspan="2" style="padding:6px 10px;">合計（${fmtNum(_drill.items.length)} 筆）</td>
+                <td style="padding:6px 10px;text-align:right;">$${fmtNum(_drill.total)}</td>
             </tr>
         </tfoot>
     </table>`;
+    _drillSorter.attach();
 }
 
 _fs.closeDrill = () => {

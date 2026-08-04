@@ -1,8 +1,8 @@
 // blog/shell.js — 拆自 blog.js：render 進入點（default export）+ Shell / tab nav（純搬移，行為不變）
 import { websiteFetch, renderLoadError, renderCopyCard } from '../../website-utils.js';
 import { SUB_TABS, NEWS_COPY_BLOCKS, _state, _blog } from './shared.js';
-import { _viewPosts } from './posts-list.js';
-import { _viewCategories } from './categories.js';
+import { renderPostsView } from './posts-list.js';
+import { renderCategoriesView } from './categories.js';
 import { _viewNotion, _viewSEOMigration } from './notion-seo.js';
 
 let _container = null;
@@ -84,17 +84,18 @@ _blog.switchTab = (id) => {
     _renderShell();
 };
 
-const VIEW_RENDERERS = {
-    'posts':          _viewPosts,
-    'categories':     _viewCategories,
-    'notion':         _viewNotion,
-    'seo-migration':  _viewSEOMigration,
+// posts / categories 有自己的完整 render（innerHTML + sorter attach 合一，
+// sorter onChange 也走同一入口）；其餘 view 為純 HTML 產生器。
+const VIEW_RENDER = {
+    'posts':          renderPostsView,
+    'categories':     renderCategoriesView,
+    'notion':         () => { document.getElementById('blog-tab-body').innerHTML = _viewNotion(); },
+    'seo-migration':  () => { document.getElementById('blog-tab-body').innerHTML = _viewSEOMigration(); },
 };
 
 function _renderActive() {
-    const body = document.getElementById('blog-tab-body');
-    if (!body) return;
-    body.innerHTML = VIEW_RENDERERS[_state.activeTab]?.() ?? '';
+    if (!document.getElementById('blog-tab-body')) return;
+    VIEW_RENDER[_state.activeTab]?.();
 }
 
 export { _renderShell };

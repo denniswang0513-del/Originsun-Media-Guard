@@ -8,6 +8,7 @@
  */
 
 import { esc } from '../website/website-utils.js';
+import { createSortable, sortableTh } from '../crm/crm-utils.js';
 
 const API = '/api/v1/equipment';
 const STATUSES = ['在庫', '出勤', '維修', '除役'];
@@ -33,6 +34,90 @@ let _filters = { q: '', category: '', status: '' };
 let _projectsCache = null;
 let _qTimer = null;
 let _escHandler = null;
+let _detailEq = null;    // 目前開啟詳情的器材（供詳情表點欄頭排序重繪）
+
+// ── 詳情表點欄頭排序：預設 key '' = 不排序、維持後端順序，點了才生效 ──
+const _rowMoney = (n) => (n || n === 0) ? '$' + Number(n).toLocaleString() : '';
+
+function _coRowHtml(c) {
+    return `
+        <tr>
+            <td>${esc(c.person)}</td>
+            <td>${esc(c.project_name || '—')}</td>
+            <td>${_fmtDay(c.out_at)}</td>
+            <td${c.overdue ? ' style="color:#f87171;font-weight:600;"' : ''}>${c.due_at ? esc(c.due_at) : '—'}${c.overdue ? '<br>' + _overdueLabel(c) : ''}</td>
+            <td>${c.returned_at ? _fmtDay(c.returned_at) : '<span style="color:#93c5fd;">出勤中</span>'}</td>
+            <td>${c.days}</td>
+            <td>${esc(c.condition_note || '')}</td>
+        </tr>`;
+}
+
+function _maintRowHtml(m) {
+    return `
+        <tr data-mid="${esc(m.id)}">
+            <td>${m.date ? esc(m.date) : ''}</td>
+            <td>${_rowMoney(m.cost)}</td>
+            <td>${esc(m.note || '')}</td>
+            <td style="text-align:right;"><button class="eq-btn danger eq-maint-del" style="padding:1px 8px;font-size:11px;">刪</button></td>
+        </tr>`;
+}
+
+const _coSorter = createSortable({
+    storageKey: 'equipment_checkouts_sort',
+    defaultSort: { key: '', dir: 'asc' },
+    panelId: 'eq-checkout-table',
+    onChange: () => _redrawCheckouts(),
+    getters: {
+        person: c => c.person || '',
+        project: c => c.project_name || '',
+        out: c => c.out_at || '',
+        due: c => c.due_at || '',
+        ret: c => c.returned_at || '',
+        days: c => c.days ?? '',
+        note: c => c.condition_note || '',
+    },
+});
+
+const _maintSorter = createSortable({
+    storageKey: 'equipment_maintenance_sort',
+    defaultSort: { key: '', dir: 'asc' },
+    panelId: 'eq-maint-table',
+    onChange: () => _redrawMaint(),
+    getters: {
+        date: m => m.date || '',
+        cost: m => m.cost ?? '',
+        note: m => m.note || '',
+    },
+});
+
+function _redrawCheckouts() {
+    const tb = document.querySelector('#eq-checkout-table tbody');
+    if (!tb || !_detailEq) return;
+    tb.innerHTML = _coSorter.sorted(_detailEq.checkouts || []).map(_coRowHtml).join('');
+    _coSorter.attach();
+}
+
+function _redrawMaint() {
+    const tb = document.querySelector('#eq-maint-table tbody');
+    if (!tb || !_detailEq) return;
+    tb.innerHTML = _maintSorter.sorted(_detailEq.maintenance || []).map(_maintRowHtml).join('');
+    _bindMaintDel(tb);   // 重繪後刪除按鈕要重綁
+    _maintSorter.attach();
+}
+
+function _bindMaintDel(scope) {
+    scope.querySelectorAll('.eq-maint-del').forEach(btn => {
+        btn.addEventListener('click', async () => {
+            const mid = btn.closest('tr').dataset.mid;
+            if (!confirm('確定刪除這筆保養紀錄？')) return;
+            try {
+                await tfetch(`${API}/maintenance/${mid}`, { method: 'DELETE' });
+                refreshGrid();
+                openDetail(_detailEq.id);
+            } catch (err) { alert('刪除失敗：' + (err.message || err)); }
+        });
+    });
+}
 
 export async function initEquipmentTab() {
     _content = document.getElementById('eq-content');
@@ -194,30 +279,14 @@ async function openDetail(eid) {
         return;
     }
     const projects = await _loadProjects();
+    _detailEq = eq;
     const co = eq.current_checkout;
     const stats = eq.stats || {};
 
     const kv = (k, v) => v ? `<div class="eq-kv"><span class="k">${k}</span><span class="v">${esc(String(v))}</span></div>` : '';
-    const money = (n) => (n || n === 0) ? '$' + Number(n).toLocaleString() : '';
 
-    const checkoutRows = (eq.checkouts || []).map(c => `
-        <tr>
-            <td>${esc(c.person)}</td>
-            <td>${esc(c.project_name || '—')}</td>
-            <td>${_fmtDay(c.out_at)}</td>
-            <td${c.overdue ? ' style="color:#f87171;font-weight:600;"' : ''}>${c.due_at ? esc(c.due_at) : '—'}${c.overdue ? '<br>' + _overdueLabel(c) : ''}</td>
-            <td>${c.returned_at ? _fmtDay(c.returned_at) : '<span style="color:#93c5fd;">出勤中</span>'}</td>
-            <td>${c.days}</td>
-            <td>${esc(c.condition_note || '')}</td>
-        </tr>`).join('');
-
-    const maintRows = (eq.maintenance || []).map(m => `
-        <tr data-mid="${esc(m.id)}">
-            <td>${m.date ? esc(m.date) : ''}</td>
-            <td>${money(m.cost)}</td>
-            <td>${esc(m.note || '')}</td>
-            <td style="text-align:right;"><button class="eq-btn danger eq-maint-del" style="padding:1px 8px;font-size:11px;">刪</button></td>
-        </tr>`).join('');
+    const checkoutRows = _coSorter.sorted(eq.checkouts || []).map(_coRowHtml).join('');
+    const maintRows = _maintSorter.sorted(eq.maintenance || []).map(_maintRowHtml).join('');
 
     const actionSec = co ? `
         <div class="eq-kv"><span class="k">領用人</span><span class="v">👤 ${esc(co.person)}${co.project_name ? ' → ' + esc(co.project_name) : ''}</span></div>
@@ -264,16 +333,16 @@ async function openDetail(eid) {
                         <div class="eq-stat-grid">
                             <div class="eq-stat"><div class="n">${stats.usage_days_365 ?? 0}</div><div class="l">年度使用天數</div></div>
                             <div class="eq-stat"><div class="n">${stats.utilization_pct ?? 0}%</div><div class="l">稼動率</div></div>
-                            <div class="eq-stat"><div class="n">${money(stats.monthly_depreciation) || '$0'}</div><div class="l">月折舊額</div></div>
+                            <div class="eq-stat"><div class="n">${_rowMoney(stats.monthly_depreciation) || '$0'}</div><div class="l">月折舊額</div></div>
                         </div>
-                        ${stats.maintenance_total ? `<div class="eq-note">保養費累計 ${money(stats.maintenance_total)}</div>` : ''}
+                        ${stats.maintenance_total ? `<div class="eq-note">保養費累計 ${_rowMoney(stats.maintenance_total)}</div>` : ''}
                     </div>
                     <div class="eq-card-sec">
                         <h4>📋 基本資訊</h4>
                         ${kv('分類', eq.category)}
                         ${kv('序號', eq.serial)}
                         ${kv('購入日', eq.purchase_date)}
-                        ${kv('購入成本', money(eq.purchase_cost))}
+                        ${kv('購入成本', _rowMoney(eq.purchase_cost))}
                         ${kv('攤提月數', eq.depreciation_months)}
                         ${kv('備註', eq.note)}
                     </div>
@@ -286,8 +355,8 @@ async function openDetail(eid) {
                     <div class="eq-card-sec">
                         <h4>🕘 領用歷史（${(eq.checkouts || []).length}）</h4>
                         <div style="overflow-x:auto;">
-                            ${checkoutRows ? `<table class="eq-table">
-                                <thead><tr><th>領用人</th><th>專案</th><th>領用日</th><th>應還</th><th>歸還</th><th>天數</th><th>備註</th></tr></thead>
+                            ${checkoutRows ? `<table class="eq-table" id="eq-checkout-table">
+                                <thead><tr>${sortableTh('person', '領用人')}${sortableTh('project', '專案')}${sortableTh('out', '領用日')}${sortableTh('due', '應還')}${sortableTh('ret', '歸還')}${sortableTh('days', '天數')}${sortableTh('note', '備註')}</tr></thead>
                                 <tbody>${checkoutRows}</tbody>
                             </table>` : '<div style="color:#666;font-size:12px;">尚無紀錄</div>'}
                         </div>
@@ -295,8 +364,8 @@ async function openDetail(eid) {
                     <div class="eq-card-sec">
                         <h4>🔧 保養紀錄（${(eq.maintenance || []).length}）</h4>
                         <div style="overflow-x:auto;">
-                            ${maintRows ? `<table class="eq-table">
-                                <thead><tr><th>日期</th><th>費用</th><th>內容</th><th></th></tr></thead>
+                            ${maintRows ? `<table class="eq-table" id="eq-maint-table">
+                                <thead><tr>${sortableTh('date', '日期')}${sortableTh('cost', '費用')}${sortableTh('note', '內容')}<th></th></tr></thead>
                                 <tbody>${maintRows}</tbody>
                             </table>` : '<div style="color:#666;font-size:12px;">尚無保養紀錄</div>'}
                         </div>
@@ -386,17 +455,11 @@ async function openDetail(eid) {
             openDetail(eq.id);
         } catch (err) { alert('新增保養紀錄失敗：' + (err.message || err)); }
     });
-    ov.querySelectorAll('.eq-maint-del').forEach(btn => {
-        btn.addEventListener('click', async () => {
-            const mid = btn.closest('tr').dataset.mid;
-            if (!confirm('確定刪除這筆保養紀錄？')) return;
-            try {
-                await tfetch(`${API}/maintenance/${mid}`, { method: 'DELETE' });
-                refreshGrid();
-                openDetail(eq.id);
-            } catch (err) { alert('刪除失敗：' + (err.message || err)); }
-        });
-    });
+    _bindMaintDel(ov);
+
+    // 詳情兩張表的點欄頭排序（表不存在時 attach 是 no-op）
+    _coSorter.attach();
+    _maintSorter.attach();
 }
 
 // ── 新增 / 編輯表單（eq=null 為新增） ─────────────────

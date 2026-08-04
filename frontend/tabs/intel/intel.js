@@ -8,6 +8,7 @@
  */
 
 import { esc } from '../website/website-utils.js';
+import { createSortable, sortableTh } from '../crm/crm-utils.js';
 
 const API = '/api/v1/intel';
 const CATEGORIES = ['標案', '補助', '產業', '技術', '競品', '未分類'];
@@ -35,6 +36,21 @@ let _sources = [];
 let _filters = { status: '', category: '', q: '' };
 let _qTimer = null;
 let _srcOpen = false;
+
+// ── 來源管理表點欄頭排序：預設 key '' = 不排序、維持後端順序，點了才生效 ──
+const _srcSorter = createSortable({
+    storageKey: 'intel_sources_sort',
+    defaultSort: { key: '', dir: 'asc' },
+    panelId: 'intel-src-table',
+    onChange: () => _renderSrcRows(),
+    getters: {
+        name: s => s.name || '',
+        url: s => s.url || '',
+        kw: s => (s.keywords || []).join(', '),
+        last: s => s.last_fetched_at || '',
+        enabled: s => (s.enabled ? 1 : 0),
+    },
+});
 
 export async function initIntelTab() {
     _content = document.getElementById('intel-content');
@@ -257,10 +273,9 @@ async function refreshSources() {
     }
     document.getElementById('intel-src-toggle').firstChild.textContent = `⚙ 來源管理（${_sources.length}） `;
     body.innerHTML = `
-        <table>
-            <thead><tr><th>名稱</th><th>URL（RSS）</th><th>關鍵字</th><th>上次抓取</th><th>啟用</th><th></th></tr></thead>
-            <tbody>${_sources.map(_srcRow).join('')
-                || '<tr><td colspan="6" style="color:#666;text-align:center;padding:16px;">尚無來源 — 在下方新增第一個 RSS 來源</td></tr>'}</tbody>
+        <table id="intel-src-table">
+            <thead><tr>${sortableTh('name', '名稱')}${sortableTh('url', 'URL（RSS）')}${sortableTh('kw', '關鍵字')}${sortableTh('last', '上次抓取')}${sortableTh('enabled', '啟用')}<th></th></tr></thead>
+            <tbody></tbody>
         </table>
         <div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:10px;">
             <input id="intel-src-name" type="text" placeholder="名稱（例：政府電子採購網）" style="width:180px;">
@@ -277,25 +292,7 @@ async function refreshSources() {
         <div class="intel-note">白名單制：只抓這裡列的來源；每源單次上限 50 項、整輪上限 200 項。
             關鍵字建議：影片、影像、宣傳、紀錄片、多媒體。只存標題+摘要+原文連結（不轉貼全文）。</div>`;
 
-    body.querySelectorAll('tr[data-sid]').forEach(tr => {
-        const sid = tr.dataset.sid;
-        tr.querySelector('[data-src-enabled]').addEventListener('change', async (e) => {
-            try {
-                await tfetch(`${API}/sources/${sid}`, { method: 'PUT', json: { enabled: e.target.checked } });
-            } catch (err) {
-                alert('更新失敗：' + (err.message || err));
-                e.target.checked = !e.target.checked;
-            }
-        });
-        tr.querySelector('[data-src-del]').addEventListener('click', async () => {
-            const src = _sources.find(s => s.id === sid);
-            if (!confirm(`確定刪除來源「${(src && src.name) || sid}」？已入庫的情報會保留。`)) return;
-            try {
-                await tfetch(`${API}/sources/${sid}`, { method: 'DELETE' });
-                refreshSources();
-            } catch (err) { alert('刪除失敗：' + (err.message || err)); }
-        });
-    });
+    _renderSrcRows();
     body.querySelector('#intel-src-add').addEventListener('click', async () => {
         const name = body.querySelector('#intel-src-name').value.trim();
         const url = body.querySelector('#intel-src-url').value.trim();
@@ -315,4 +312,32 @@ async function refreshSources() {
             refreshStatus();
         } catch (err) { alert('cron 更新失敗：' + (err.message || err)); }
     });
+}
+
+// tbody 重繪（初次載入與點欄頭排序共用）— 只換列，不動新增/cron 表單的輸入值
+function _renderSrcRows() {
+    const tbody = document.querySelector('#intel-src-table tbody');
+    if (!tbody) return;
+    tbody.innerHTML = _srcSorter.sorted(_sources).map(_srcRow).join('')
+        || '<tr><td colspan="6" style="color:#666;text-align:center;padding:16px;">尚無來源 — 在下方新增第一個 RSS 來源</td></tr>';
+    tbody.querySelectorAll('tr[data-sid]').forEach(tr => {
+        const sid = tr.dataset.sid;
+        tr.querySelector('[data-src-enabled]').addEventListener('change', async (e) => {
+            try {
+                await tfetch(`${API}/sources/${sid}`, { method: 'PUT', json: { enabled: e.target.checked } });
+            } catch (err) {
+                alert('更新失敗：' + (err.message || err));
+                e.target.checked = !e.target.checked;
+            }
+        });
+        tr.querySelector('[data-src-del]').addEventListener('click', async () => {
+            const src = _sources.find(s => s.id === sid);
+            if (!confirm(`確定刪除來源「${(src && src.name) || sid}」？已入庫的情報會保留。`)) return;
+            try {
+                await tfetch(`${API}/sources/${sid}`, { method: 'DELETE' });
+                refreshSources();
+            } catch (err) { alert('刪除失敗：' + (err.message || err)); }
+        });
+    });
+    _srcSorter.attach();
 }

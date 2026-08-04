@@ -2,9 +2,29 @@
  * services.js — 服務項目 CRUD（首頁「服務」區塊用）
  */
 import { websiteFetch, esc, toastOk, toastErr, renderLoadError, emptyRow, renderCopyCard } from '../website-utils.js';
+import { createSortable, sortableTh, withInputsPreserved } from '../../crm/crm-utils.js';
 
 let _services = [];
 let _cats = [];
+
+// ── 點欄頭排序（純檢視，不動 sort_order 資料）：預設 key '' = 不排序 ──
+//    重繪包 withInputsPreserved：inline 編輯列未儲存值不被排序洗掉
+const _sorter = createSortable({
+    storageKey: 'website_services_sort',
+    defaultSort: { key: '', dir: 'asc' },
+    panelId: 'svc-table',
+    onChange: () => withInputsPreserved(
+        document.getElementById('svc-table'), () => _renderTable()),
+    getters: {
+        slug: s => s.slug || '',
+        title: s => s.title || '',
+        icon: s => s.icon || '',
+        short: s => s.short_desc || '',
+        cat: s => _cats.find(c => c.id === s.related_category_id)?.name_zh || '',
+        sort: s => s.sort_order ?? 0,
+        visible: s => s.visible ? 1 : 0,
+    },
+});
 
 // /services 頁面行銷文案（對應 services.astro 的 copy.services.* fallback）
 const COPY_BLOCKS = [
@@ -80,10 +100,10 @@ function _renderTable() {
     }
     t.innerHTML = `
         <thead><tr>
-            <th>slug</th><th>標題</th><th>圖示</th><th>短描述</th><th>關聯分類</th><th>排序</th><th>可見</th><th>操作</th>
+            ${sortableTh('slug', 'slug')}${sortableTh('title', '標題')}${sortableTh('icon', '圖示')}${sortableTh('short', '短描述')}${sortableTh('cat', '關聯分類')}${sortableTh('sort', '排序')}${sortableTh('visible', '可見')}<th>操作</th>
         </tr></thead>
         <tbody>
-            ${_services.map(s => `
+            ${_sorter.sorted(_services).map(s => `
                 <tr>
                     <td><input data-id="${s.id}" data-field="slug" value="${esc(s.slug)}" style="width:90px;" /></td>
                     <td><input data-id="${s.id}" data-field="title" value="${esc(s.title)}" style="width:140px;" /></td>
@@ -107,6 +127,7 @@ function _renderTable() {
             `).join('')}
         </tbody>
     `;
+    _sorter.attach();   // thead 每次重建 → 重綁 onclick + 指示器
 }
 
 window._websiteSaveSvc = async (id) => {

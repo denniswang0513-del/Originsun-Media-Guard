@@ -6,8 +6,39 @@
  * 兩者共用同一張 website_categories 表，差別只在 kind 欄。
  */
 import { websiteFetch, esc, toastOk, toastErr, renderLoadError, readRowPatch, emptyRow } from '../website-utils.js';
+import { createSortable, sortableTh, withInputsPreserved } from '../../crm/crm-utils.js';
 
 let _cats = [];
+
+// ── 點欄頭排序（純檢視，不動 sort_order 資料）：預設 key '' = 不排序 ──
+//    重繪包 withInputsPreserved：inline 編輯列未儲存值不被排序洗掉（容器 = 各自的 <table>）
+const _catGetters = {
+    id: c => c.id,
+    slug: c => c.slug || '',
+    zh: c => c.name_zh || '',
+    en: c => c.name_en || '',
+    works: c => c.project_count ?? 0,
+    visible: c => c.visible ? 1 : 0,
+    sort: c => c.sort_order ?? 0,
+};
+const _sorters = {
+    category: createSortable({
+        storageKey: 'website_workcat_category_sort',
+        defaultSort: { key: '', dir: 'asc' },
+        panelId: 'category-table',
+        onChange: () => withInputsPreserved(
+            document.getElementById('category-table'), () => _renderTable('category')),
+        getters: _catGetters,
+    }),
+    tag: createSortable({
+        storageKey: 'website_workcat_tag_sort',
+        defaultSort: { key: '', dir: 'asc' },
+        panelId: 'tag-table',
+        onChange: () => withInputsPreserved(
+            document.getElementById('tag-table'), () => _renderTable('tag')),
+        getters: _catGetters,
+    }),
+};
 
 const KIND_META = {
     category: {
@@ -102,7 +133,7 @@ function _renderSectionHtml(kind) {
 
 function _renderTable(kind) {
     const meta = KIND_META[kind];
-    const rows = _cats.filter(c => (c.kind || 'category') === kind);
+    const rows = _sorters[kind].sorted(_cats.filter(c => (c.kind || 'category') === kind));
     const t = document.getElementById(`${kind}-table`);
     if (!t) return;
     if (!rows.length) {
@@ -111,8 +142,8 @@ function _renderTable(kind) {
     }
     t.innerHTML = `
         <thead><tr>
-            <th>ID</th><th>Slug</th><th>中文名</th><th>英文名</th>
-            <th>作品數</th><th>可見</th><th>排序</th><th>操作</th>
+            ${sortableTh('id', 'ID')}${sortableTh('slug', 'Slug')}${sortableTh('zh', '中文名')}${sortableTh('en', '英文名')}
+            ${sortableTh('works', '作品數')}${sortableTh('visible', '可見')}${sortableTh('sort', '排序')}<th>操作</th>
         </tr></thead>
         <tbody>
             ${rows.map(c => `
@@ -142,6 +173,7 @@ function _renderTable(kind) {
             `).join('')}
         </tbody>
     `;
+    _sorters[kind].attach();   // thead 每次重建 → 重綁 onclick + 指示器
 }
 
 

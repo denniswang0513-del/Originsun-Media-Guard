@@ -7,7 +7,7 @@
  * 只多一個總覽入口。後端：GET /api/v1/crm/media-log/overview?q=&scope=。
  */
 
-import { crmFetch as _fetch, esc as _esc, projectOptionsHtml, searchableSelect } from './crm-utils.js';
+import { crmFetch as _fetch, esc as _esc, projectOptionsHtml, searchableSelect, createSortable, sortableTh } from './crm-utils.js';
 import { loadMediaTab } from './crm-projects-media.js';
 
 const ADMIN_API = '/api/v1/crm';   // 孤兒資料夾 thumb/file 直接當 <img>/<a> src（非 crmFetch JSON）
@@ -22,6 +22,22 @@ let _viewFiles = [];           // 目前檢視的孤兒資料夾檔案清單（l
 let _viewFolder = '';          // 目前檢視的資料夾名
 let _lbIdx = -1;               // lightbox 索引
 let _lbKey = null;             // lightbox 鍵盤 handler
+
+// ── Sortable list header（共用 createSortable，預設不排序維持後端順序）──
+const _sorter = createSortable({
+    storageKey: 'crm_medialog_sort',
+    defaultSort: { key: '', dir: 'asc' },
+    panelId: 'cml-list',
+    onChange: () => _renderList(),
+    getters: {
+        name:   it => (it.linked ? it.project_name : it.folder_name) || '',
+        client: it => it.client_name || '',
+        images: it => Number(it.images) || 0,
+        videos: it => Number(it.videos) || 0,
+        last:   it => it.last_upload || '',
+        status: it => (it.linked ? (it.enabled ? '啟用' : '已停用') : '未連結'),
+    },
+});
 
 export async function initCrmMediaLogTab() {
     _root = document.getElementById('cml-root');
@@ -101,12 +117,12 @@ function _renderList() {
     list.innerHTML = `
         <table>
             <thead><tr>
-                <th>專案 / 資料夾</th><th>客戶</th>
-                <th class="num">圖片</th><th class="num">影片</th>
-                <th>最近上傳</th><th>狀態</th><th style="text-align:right;">動作</th>
+                ${sortableTh('name', '專案 / 資料夾')}${sortableTh('client', '客戶')}
+                ${sortableTh('images', '圖片', 'class="num"')}${sortableTh('videos', '影片', 'class="num"')}
+                ${sortableTh('last', '最近上傳')}${sortableTh('status', '狀態')}<th style="text-align:right;">動作</th>
             </tr></thead>
             <tbody>
-            ${_items.map((it) => {
+            ${_sorter.sorted(_items).map((it) => {
                 const zero = it.total === 0 ? ' zero' : '';
                 // 已連結：顯示專案名 + 開啟；孤兒：顯示資料夾名 + 連結專案
                 const nameCell = it.linked
@@ -145,6 +161,7 @@ function _renderList() {
     list.querySelectorAll('button[data-qr]').forEach((b) => {
         b.onclick = () => _openQr(b.dataset.qr);
     });
+    _sorter.attach();
 }
 
 // ── 連結專案：孤兒資料夾 → 選一個現有 CRM 專案（專案在 CRM 建，這裡只連結）──────

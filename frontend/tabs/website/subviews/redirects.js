@@ -13,8 +13,25 @@ import {
     websiteFetch, esc, toastOk, toastErr, renderLoadError,
     openModal, closeModal,
 } from '../website-utils.js';
+import { createSortable, sortableTh } from '../../crm/crm-utils.js';
 
 let _state = { items: [], mergedCount: null, filter: '', titles: {} };
+
+// ── 點欄頭排序（純檢視，不動 sort_order 資料）：預設 key '' = 維持 _sorted() 順序 ──
+const _sorter = createSortable({
+    storageKey: 'website_redirects_sort',
+    defaultSort: { key: '', dir: 'asc' },
+    panelId: 'redirects-table',
+    onChange: () => _renderShell(),
+    getters: {
+        from: it => it.from_path || '',
+        oldtitle: it => _oldTitle(it.from_path),
+        to: it => it.to_path || '',
+        note: it => it.note || '',
+        sort: it => it.sort_order ?? 0,
+        visible: it => it.visible ? 1 : 0,
+    },
+});
 let _container = null;
 let _editing = null;
 const _rd = (window._rd = window._rd || {});
@@ -80,19 +97,20 @@ function _renderShell() {
                    style="margin-left:auto;background:#0d0d0d;border:1px solid #333;color:#f0f0f0;padding:6px 9px;border-radius:4px;font-size:12px;min-width:220px;" />
         </div>
         ${shown.length ? `
-            <table>
+            <table id="redirects-table">
                 <thead><tr>
-                    <th>舊路徑 (from)</th><th style="width:180px;">舊站標題（GA）</th>
-                    <th style="width:24px;"></th><th>新路徑 (to)</th>
-                    <th style="width:150px;">備註</th><th style="width:50px;">排序</th>
-                    <th style="width:50px;">啟用</th><th style="width:110px;">操作</th>
+                    ${sortableTh('from', '舊路徑 (from)')}${sortableTh('oldtitle', '舊站標題（GA）', 'style="width:180px;"')}
+                    <th style="width:24px;"></th>${sortableTh('to', '新路徑 (to)')}
+                    ${sortableTh('note', '備註', 'style="width:150px;"')}${sortableTh('sort', '排序', 'style="width:50px;"')}
+                    ${sortableTh('visible', '啟用', 'style="width:50px;"')}<th style="width:110px;">操作</th>
                 </tr></thead>
-                <tbody>${shown.map(_row).join('')}</tbody>
+                <tbody>${_sorter.sorted(shown).map(_row).join('')}</tbody>
             </table>` : `
             <div style="color:#666;font-size:12px;padding:24px;text-align:center;border:1px dashed #2a2a2a;border-radius:4px;">
                 ${f ? '沒有符合篩選的轉址' : '尚無 legacy 轉址 — 按「+ 新增轉址」'}
             </div>`}
     `;
+    _sorter.attach();   // thead 每次重建 → 重綁 onclick + 指示器（空清單時無 table，attach 安全跳過）
     const fi = document.getElementById('redir-filter');
     if (fi) { fi.focus(); fi.setSelectionRange(fi.value.length, fi.value.length); }
 }

@@ -12,8 +12,26 @@ import {
     renderLoadError, readRowPatch, openModal, closeModal,
     emptyRow, emptyHint,
 } from '../website-utils.js';
+import { createSortable, sortableTh, withInputsPreserved } from '../../crm/crm-utils.js';
 
 let _state = { roles: [], templates: [] };
+
+// ── 職位庫點欄頭排序（純檢視，不動 sort_order 資料）：預設照 sort_order 升冪（欄頭有指示器）──
+//    重繪包 withInputsPreserved：inline 編輯列未儲存值不被排序洗掉（container 用 _container，
+//    _renderAll 會整塊換掉 #credits-roles-card，不能拿它當容器）
+const _rolesSorter = createSortable({
+    storageKey: 'website_credit_roles_sort',
+    defaultSort: { key: 'sort', dir: 'asc' },
+    panelId: 'credits-roles-card',
+    onChange: () => withInputsPreserved(_container, () => _renderAll()),
+    getters: {
+        sort: r => r.sort_order ?? 0,
+        zh: r => r.name_zh || '',
+        en: r => r.name_en || '',
+        visible: r => r.visible ? 1 : 0,
+        usage: r => r.usage_count || 0,
+    },
+});
 let _container = null;
 
 // 模板 Modal 暫存（編輯時把選中的 role_ids 拉出來操作；存檔才送 PUT）
@@ -66,12 +84,13 @@ function _renderAll() {
             ${_cardTemplates()}
         </div>
     `;
+    _rolesSorter.attach();   // thead 每次重建 → 重綁 onclick + 指示器
 }
 
 
 // ===== Card 1：職位庫 =====
 function _cardRoles() {
-    const sorted = [..._state.roles].sort(_sortByOrder);
+    const sorted = _rolesSorter.sorted(_state.roles);
     const rows = sorted.map(r => `
         <tr>
             <td><input type="number" data-id="${r.id}" data-field="sort_order" value="${r.sort_order ?? 0}" style="width:60px;" /></td>
@@ -103,11 +122,11 @@ function _cardRoles() {
         </div>
         <table>
             <thead><tr>
-                <th style="width:60px;">排序</th>
-                <th>中文名稱</th>
-                <th>英文名稱</th>
-                <th style="width:60px;text-align:center;">顯示</th>
-                <th style="width:80px;text-align:center;">使用數</th>
+                ${sortableTh('sort', '排序', 'style="width:60px;"')}
+                ${sortableTh('zh', '中文名稱')}
+                ${sortableTh('en', '英文名稱')}
+                ${sortableTh('visible', '顯示', 'style="width:60px;text-align:center;"')}
+                ${sortableTh('usage', '使用數', 'style="width:80px;text-align:center;"')}
                 <th style="width:120px;"></th>
             </tr></thead>
             <tbody>${rows || emptyRow(6, '尚無職位，新增上方第一條')}</tbody>

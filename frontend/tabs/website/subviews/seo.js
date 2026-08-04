@@ -13,6 +13,7 @@
  * 任一寫入後端會 mark_dirty → 60s debounce 觸發 Astro rebuild → 對外網站更新。
  */
 import { websiteFetch, esc, toastOk, toastErr, renderLoadError, readRowPatch, emptyRow } from '../website-utils.js';
+import { createSortable, sortableTh, withInputsPreserved } from '../../crm/crm-utils.js';
 
 const HEALTH_RULES = [
     { id: 'noindex',     label: '允許 Google/Bing 索引（seo.indexable=true）',
@@ -52,6 +53,58 @@ const HEALTH_RULES = [
 
 let _state = { settings: {}, faqs: [], testimonials: [], quickFacts: [], awards: [], aiRunner: null, postAiRunner: null };
 let _container = null;
+
+// ── 三張表各自的點欄頭排序（純檢視，不動 sort_order 資料）：預設 key '' = 不排序 ──
+// onChange 只重繪自己的 tbody 並包 withInputsPreserved（容器 = <table> 本身，重繪後存活）：
+// (1) 未儲存的 inline 編輯不被排序洗掉；(2) 不能拿整個 _container 當容器 —
+// 三張表的 data-id 是各自獨立的 DB 序號，跨表同 id + 同名欄位（sort_order/visible）會互相蓋值。
+const _resortTable = (tableId, rowsFn, sorter) => {
+    const t = document.getElementById(tableId);
+    if (!t) return;
+    withInputsPreserved(t, () => {
+        t.querySelector('tbody').innerHTML = rowsFn();
+        sorter.attach();   // 欄頭元素還在，只需更新指示器
+    });
+};
+const _qfSorter = createSortable({
+    storageKey: 'website_seo_qf_sort',
+    defaultSort: { key: '', dir: 'asc' },
+    panelId: 'seo-qf-table',
+    onChange: () => _resortTable('seo-qf-table', _qfRows, _qfSorter),
+    getters: {
+        label: f => f.label_zh || '',
+        value: f => f.value || '',
+        sort: f => f.sort_order ?? 0,
+        visible: f => f.visible ? 1 : 0,
+    },
+});
+const _faqSorter = createSortable({
+    storageKey: 'website_seo_faq_sort',
+    defaultSort: { key: '', dir: 'asc' },
+    panelId: 'seo-faq-table',
+    onChange: () => _resortTable('seo-faq-table', _faqRows, _faqSorter),
+    getters: {
+        id: f => f.id,
+        q: f => f.question_zh || '',
+        a: f => f.answer_zh || '',
+        sort: f => f.sort_order ?? 0,
+        visible: f => f.visible ? 1 : 0,
+    },
+});
+const _testiSorter = createSortable({
+    storageKey: 'website_seo_testi_sort',
+    defaultSort: { key: '', dir: 'asc' },
+    panelId: 'seo-testi-table',
+    onChange: () => _resortTable('seo-testi-table', _testiRows, _testiSorter),
+    getters: {
+        author: t => t.author_zh || '',
+        role: t => t.role_zh || '',
+        company: t => t.company || '',
+        rating: t => t.rating ?? '',
+        content: t => t.content_zh || '',
+        visible: t => t.visible ? 1 : 0,
+    },
+});
 
 // 排程「時間選單」預設項 — value 是後端要的 cron 字串（croniter），label 給人看。
 // 主機在台灣 → cron 以本地時區解讀。待處理作品多時可選「每 N 小時」加速清 backlog。
@@ -122,6 +175,9 @@ function _renderAll() {
     _bindDescCounter();
     _bindAiRunner();
     _bindPostAiRunner();
+    _qfSorter.attach();      // thead 每次重建 → 重綁 onclick + 指示器
+    _faqSorter.attach();
+    _testiSorter.attach();
 }
 
 // ===== 0b. 文章版 AI SEO Runner 排程（影像專欄）=====
@@ -464,8 +520,8 @@ function _cardMeta() {
 
 
 // ===== 2. Quick Facts =====
-function _cardQuickFacts() {
-    const rows = _state.quickFacts.map(f => `
+function _qfRows() {
+    return _qfSorter.sorted(_state.quickFacts).map(f => `
         <tr>
             <td><input data-id="${f.id}" data-field="label_zh" value="${esc(f.label_zh)}" style="width:100%;" /></td>
             <td><input data-id="${f.id}" data-field="value" value="${esc(f.value)}" style="width:100%;" /></td>
@@ -476,7 +532,10 @@ function _cardQuickFacts() {
                 <button class="btn btn-sm btn-danger" onclick="window._seo.deleteQF(${f.id})">🗑</button>
             </td>
         </tr>
-    `).join('');
+    `).join('') || emptyRow(5, '尚無 Quick Fact，新增上方第一條');
+}
+
+function _cardQuickFacts() {
     return `<div class="card" style="border-left:3px solid #8b5cf6;">
         <h3 style="color:#fff;margin:0 0 8px;font-size:15px;">2️⃣ Quick Facts
             <span style="color:#888;font-size:11px;font-weight:400;">· ${_state.quickFacts.length} 條 · AI 搜尋最愛撿的條列事實</span>
@@ -491,8 +550,8 @@ function _cardQuickFacts() {
             <button class="btn" onclick="window._seo.createQF()">+ 新增</button>
         </div>
         <table id="seo-qf-table">
-            <thead><tr><th style="width:30%;">標籤</th><th>內容</th><th style="width:60px;">排序</th><th style="width:60px;">可見</th><th></th></tr></thead>
-            <tbody>${rows || emptyRow(5, '尚無 Quick Fact，新增上方第一條')}</tbody>
+            <thead><tr>${sortableTh('label', '標籤', 'style="width:30%;"')}${sortableTh('value', '內容')}${sortableTh('sort', '排序', 'style="width:60px;"')}${sortableTh('visible', '可見', 'style="width:60px;"')}<th></th></tr></thead>
+            <tbody>${_qfRows()}</tbody>
         </table>
     </div>`;
 }
@@ -513,9 +572,8 @@ function _enField(id, field, value, { textarea = false, rows = 2 } = {}) {
 
 
 // ===== 3. FAQ =====
-function _cardFAQ() {
-    const visibleCount = _state.faqs.filter(f => f.visible).length;
-    const rows = _state.faqs.map(f => `
+function _faqRows() {
+    return _faqSorter.sorted(_state.faqs).map(f => `
         <tr>
             <td style="color:#666;font-size:11px;">#${f.id}</td>
             <td>
@@ -533,7 +591,11 @@ function _cardFAQ() {
                 <button class="btn btn-sm btn-danger" onclick="window._seo.deleteFAQ(${f.id})">🗑</button>
             </td>
         </tr>
-    `).join('');
+    `).join('') || emptyRow(6, '尚無 FAQ');
+}
+
+function _cardFAQ() {
+    const visibleCount = _state.faqs.filter(f => f.visible).length;
     return `<div class="card" style="border-left:3px solid #3b82f6;">
         <h3 style="color:#fff;margin:0 0 8px;font-size:15px;">3️⃣ FAQ 管理
             <span style="color:#888;font-size:11px;font-weight:400;">· ${visibleCount}/${_state.faqs.length} 顯示中 · 將輸出 FAQPage JSON-LD</span>
@@ -548,20 +610,16 @@ function _cardFAQ() {
             <button class="btn" onclick="window._seo.createFAQ()">+ 新增</button>
         </div>
         <table id="seo-faq-table">
-            <thead><tr><th style="width:50px;">#</th><th style="width:25%;">問題</th><th>答案</th><th style="width:60px;">排序</th><th style="width:60px;">顯示</th><th></th></tr></thead>
-            <tbody>${rows || emptyRow(6, '尚無 FAQ')}</tbody>
+            <thead><tr>${sortableTh('id', '#', 'style="width:50px;"')}${sortableTh('q', '問題', 'style="width:25%;"')}${sortableTh('a', '答案')}${sortableTh('sort', '排序', 'style="width:60px;"')}${sortableTh('visible', '顯示', 'style="width:60px;"')}<th></th></tr></thead>
+            <tbody>${_faqRows()}</tbody>
         </table>
     </div>`;
 }
 
 
 // ===== 4. Testimonials =====
-function _cardTestimonials() {
-    const visibleCount = _state.testimonials.filter(t => t.visible).length;
-    const avg = _state.testimonials.length
-        ? (_state.testimonials.reduce((sum, t) => sum + t.rating, 0) / _state.testimonials.length).toFixed(1)
-        : '—';
-    const rows = _state.testimonials.map(t => `
+function _testiRows() {
+    return _testiSorter.sorted(_state.testimonials).map(t => `
         <tr>
             <td>
                 <input data-id="${t.id}" data-field="author_zh" value="${esc(t.author_zh)}" style="width:100%;" placeholder="客戶姓名" />
@@ -583,7 +641,14 @@ function _cardTestimonials() {
                 <button class="btn btn-sm btn-danger" onclick="window._seo.deleteT(${t.id})">🗑</button>
             </td>
         </tr>
-    `).join('');
+    `).join('') || emptyRow(7, '尚無證言');
+}
+
+function _cardTestimonials() {
+    const visibleCount = _state.testimonials.filter(t => t.visible).length;
+    const avg = _state.testimonials.length
+        ? (_state.testimonials.reduce((sum, t) => sum + t.rating, 0) / _state.testimonials.length).toFixed(1)
+        : '—';
     return `<div class="card" style="border-left:3px solid #f59e0b;">
         <h3 style="color:#fff;margin:0 0 8px;font-size:15px;">4️⃣ Testimonials 管理
             <span style="color:#888;font-size:11px;font-weight:400;">· ${visibleCount}/${_state.testimonials.length} 顯示中 · 平均評分 ★${avg}</span>
@@ -600,8 +665,8 @@ function _cardTestimonials() {
             <button class="btn" onclick="window._seo.createT()">+ 新增</button>
         </div>
         <table id="seo-testi-table">
-            <thead><tr><th>客戶</th><th>職稱</th><th>公司</th><th>評分</th><th>內容</th><th style="width:50px;">顯示</th><th></th></tr></thead>
-            <tbody>${rows || emptyRow(7, '尚無證言')}</tbody>
+            <thead><tr>${sortableTh('author', '客戶')}${sortableTh('role', '職稱')}${sortableTh('company', '公司')}${sortableTh('rating', '評分')}${sortableTh('content', '內容')}${sortableTh('visible', '顯示', 'style="width:50px;"')}<th></th></tr></thead>
+            <tbody>${_testiRows()}</tbody>
         </table>
     </div>`;
 }

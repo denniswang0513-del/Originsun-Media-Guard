@@ -9,11 +9,33 @@ import {
     websiteFetch, esc, toastOk, toastErr, renderLoadError,
     openModal, closeModal, getApiBase, renderCopyCard,
 } from '../website-utils.js';
+import { createSortable, sortableTh } from '../../crm/crm-utils.js';
 
 const LINES = [
     { key: 'impact', label: '🤝 公益合作', color: '#10b981', path: '/impact' },
     { key: 'lab', label: '✦ 創作計畫', color: '#8b5cf6', path: '/lab' },
 ];
+
+// ── 點欄頭排序（純檢視，不動 sort_order 資料）：兩條線各自獨立記憶 ──
+const _iniGetters = {
+    title: it => it.title || it.work_title || '',
+    link: it => {
+        if (!it.project_id) return '獨立';
+        if (it.work_missing) return '作品已刪';
+        if (!it.work_public) return '作品未公開';
+        return '作品集';
+    },
+    year: it => it.year || '',
+    sort: it => it.sort_order ?? 0,
+    visible: it => it.visible ? 1 : 0,
+};
+const _sorters = Object.fromEntries(LINES.map(l => [l.key, createSortable({
+    storageKey: `website_initiatives_${l.key}_sort`,
+    defaultSort: { key: '', dir: 'asc' },
+    panelId: `ini-table-${l.key}`,
+    onChange: () => _renderShell(),
+    getters: _iniGetters,
+})]));
 
 const COPY_BLOCKS = [
     { key: 'hero_eyebrow', label: 'Eyebrow 小字', type: 'text', placeholderZh: 'Impact / Lab' },
@@ -69,6 +91,7 @@ function _renderShell() {
         ${renderCopyCard('copy.impact', _state.settings, COPY_BLOCKS, { title: '📝 公益合作 頁面文案（/impact）', note: '留空則用預設文案。' })}
         ${renderCopyCard('copy.lab', _state.settings, COPY_BLOCKS, { title: '📝 創作計畫 頁面文案（/lab）', note: '留空則用預設文案。' })}
     `;
+    LINES.forEach(l => _sorters[l.key].attach());   // thead 每次重建 → 重綁 onclick + 指示器
 }
 
 function _renderLineSection(line) {
@@ -82,10 +105,10 @@ function _renderLineSection(line) {
                 <button class="btn btn-sm" style="background:#059669;" onclick="window._ini.openCreate('${line.key}')">+ 新增案例</button>
             </div>
             ${entries.length
-                ? `<table><thead><tr>
-                        <th style="width:70px;">封面</th><th>標題</th><th style="width:90px;">連動</th>
-                        <th style="width:60px;">年份</th><th style="width:55px;">排序</th><th style="width:55px;">顯示</th><th style="width:110px;">操作</th>
-                   </tr></thead><tbody>${entries.map(_entryRow).join('')}</tbody></table>`
+                ? `<table id="ini-table-${line.key}"><thead><tr>
+                        <th style="width:70px;">封面</th>${sortableTh('title', '標題')}${sortableTh('link', '連動', 'style="width:90px;"')}
+                        ${sortableTh('year', '年份', 'style="width:60px;"')}${sortableTh('sort', '排序', 'style="width:55px;"')}${sortableTh('visible', '顯示', 'style="width:55px;"')}<th style="width:110px;">操作</th>
+                   </tr></thead><tbody>${_sorters[line.key].sorted(entries).map(_entryRow).join('')}</tbody></table>`
                 : '<div style="color:#666;font-size:12px;padding:14px;text-align:center;border:1px dashed #2a2a2a;border-radius:4px;">尚無案例 — 按「+ 新增案例」</div>'}
         </div>`;
 }

@@ -8,6 +8,7 @@
 import {
     websiteFetch, esc, toastOk, toastErr, renderLoadError, openModal, closeModal,
 } from '../website-utils.js';
+import { createSortable, sortableTh, enumIndex } from '../../crm/crm-utils.js';
 
 let _state = { audit: [], settings: {} };
 let _container = null;
@@ -21,6 +22,20 @@ const STATUS = {
     translated: ['待審核',    '#1e3a5f', '#93c5fd'],
     approved:   ['已核准',    '#064e3b', '#6ee7b7'],
 };
+
+// ── 點欄頭排序（純檢視）：預設 key '' = 不排序；狀態依 STATUS 工作流順序 ──
+const _sorter = createSortable({
+    storageKey: 'website_translation_sort',
+    defaultSort: { key: '', dir: 'asc' },
+    panelId: 'tr-audit-table',
+    onChange: () => _renderShell(),
+    getters: {
+        type: it => ETYPE_LABEL[it.entity_type] || it.entity_type || '',
+        title: it => it.title || '',
+        status: it => enumIndex(Object.keys(STATUS), it.status),
+        when: it => it.last_translated_at || '',
+    },
+});
 const FIELD_LABEL = {
     public_title_en: '標題', public_description_en: '描述', public_client_en: '客戶名（手動英文）',
     title_en: '標題', excerpt_en: '摘要',
@@ -122,12 +137,13 @@ function _renderShell() {
 
         <!-- 清單 -->
         ${_state.audit.length ? `
-            <table>
-                <thead><tr><th style="width:70px;">型別</th><th>標題</th><th style="width:90px;">狀態</th>
-                    <th style="width:130px;">最後翻譯</th><th style="width:150px;">操作</th></tr></thead>
-                <tbody>${_state.audit.map(_row).join('')}</tbody>
+            <table id="tr-audit-table">
+                <thead><tr>${sortableTh('type', '型別', 'style="width:70px;"')}${sortableTh('title', '標題')}${sortableTh('status', '狀態', 'style="width:90px;"')}
+                    ${sortableTh('when', '最後翻譯', 'style="width:130px;"')}<th style="width:150px;">操作</th></tr></thead>
+                <tbody>${_sorter.sorted(_state.audit).map(_row).join('')}</tbody>
             </table>` : '<div style="color:#666;padding:24px;text-align:center;">沒有可翻譯的內容</div>'}
     `;
+    _sorter.attach();   // thead 每次重建 → 重綁 onclick + 指示器（空清單無 table，attach 安全跳過）
 }
 
 function _inp() {

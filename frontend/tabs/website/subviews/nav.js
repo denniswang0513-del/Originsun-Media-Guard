@@ -9,8 +9,26 @@
  * 空則 fallback 到硬寫 7 筆；任一寫入 mark_dirty → 60s debounce → rebuild。
  */
 import { websiteFetch, esc, toastOk, toastErr, renderLoadError, emptyRow, renderCopyCard } from '../website-utils.js';
+import { createSortable, sortableTh, withInputsPreserved } from '../../crm/crm-utils.js';
 
 let _items = [];
+
+// ── 點欄頭排序（純檢視，不動 sort_order 資料）：預設 key '' = 不排序 ──
+//    重繪包 withInputsPreserved：inline 編輯列未儲存值不被排序洗掉
+const _sorter = createSortable({
+    storageKey: 'website_nav_sort',
+    defaultSort: { key: '', dir: 'asc' },
+    panelId: 'nav-table',
+    onChange: () => withInputsPreserved(
+        document.getElementById('nav-table'), () => _renderTable()),
+    getters: {
+        sort: n => n.sort_order ?? 0,
+        zh: n => n.label_zh || '',
+        en: n => n.label_en || '',
+        href: n => n.href || '',
+        visible: n => n.visible ? 1 : 0,
+    },
+});
 
 // 頁尾文案（對應 Footer.astro 的 copy.footer.* fallback）
 const FOOTER_COPY_BLOCKS = [
@@ -81,10 +99,10 @@ function _renderTable() {
     }
     t.innerHTML = `
         <thead><tr>
-            <th>排序</th><th>中文</th><th>English</th><th>連結</th><th>可見</th><th>操作</th>
+            ${sortableTh('sort', '排序')}${sortableTh('zh', '中文')}${sortableTh('en', 'English')}${sortableTh('href', '連結')}${sortableTh('visible', '可見')}<th>操作</th>
         </tr></thead>
         <tbody>
-            ${_items.map(n => `
+            ${_sorter.sorted(_items).map(n => `
                 <tr>
                     <td><input type="number" data-id="${n.id}" data-field="sort_order" value="${n.sort_order}" style="width:55px;" /></td>
                     <td><input data-id="${n.id}" data-field="label_zh" value="${esc(n.label_zh)}" style="width:130px;" /></td>
@@ -99,6 +117,7 @@ function _renderTable() {
             `).join('')}
         </tbody>
     `;
+    _sorter.attach();   // thead 每次重建 → 重綁 onclick + 指示器
 }
 
 window._websiteSaveNav = async (id) => {

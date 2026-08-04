@@ -2,6 +2,7 @@
 // RBAC v2: 權限直接綁帳號（角色層已移除）。每個帳號 = 一組可勾選模組 + 「管理員」開關。
 import { _ensureModalStyles, _createFormModal } from '../shared/modal-styles.js';
 import { groupModules, ALL_MODULES } from '../shared/tab-config.js';
+import { createSortable, sortableSpan } from '../../tabs/crm/crm-utils.js';
 
 // key 集合必須 == core/auth.py ALL_MODULES == tab-config.js PERMISSION_GROUPS
 // （tests/unit/test_rbac_module_sync.py 三方同步測試把關，漏 key 會 fail）
@@ -10,6 +11,22 @@ const MODULE_LABELS = {bulletin:'公布欄',preprod_plan:'拍攝企劃',preprod_
 // The 4-group structure is identical for every user (it's all modules grouped),
 // so compute it once rather than per user row / per modal open.
 const _PERM_GROUPS = groupModules(ALL_MODULES);
+
+// ── 點欄頭排序（CSS grid 欄頭；操作欄不排）──
+// 預設 key '' = 不排序、維持後端順序，點了才生效。
+let _usersCache = [];
+let _staffListCache = [];
+const _userSorter = createSortable({
+    storageKey: 'usermgmt_users_sort',
+    defaultSort: { key: '', dir: 'asc' },
+    panelId: 'umgmt-list',
+    onChange: () => _renderUserList(),
+    getters: {
+        username: u => u.username || '',
+        // 權限欄：管理員視為最大（ALL_MODULES 數 +1），一般帳號按模組數
+        perms: u => ((u.access_level || 0) >= 3 ? ALL_MODULES.length + 1 : (u.modules || []).length),
+    },
+});
 
 // Render the editable, 4-group permission cell for one user. `locked` disables
 // everything (built-in admin: prevent self-lockout). When 管理員 is on, modules
@@ -129,69 +146,77 @@ async function _loadUserList() {
     try {
         const r = await fetch('/api/v1/auth/users', { headers: { 'Authorization': 'Bearer ' + (localStorage.getItem('auth_token') || '') } });
         if (!r.ok) { container.innerHTML = '<div style="text-align:center;color:#f87171;padding:20px;">載入失敗（需要管理員權限）</div>'; return; }
-        const users = await r.json();
+        _usersCache = await r.json();
 
         // N0: 人員清單（綁定下拉的資料來源）。載入失敗不擋使用者列表。
-        let staffList = [];
+        _staffListCache = [];
         try {
             const rs = await fetch('/api/v1/crm/staff', { headers: { 'Authorization': 'Bearer ' + (localStorage.getItem('auth_token') || '') } });
-            if (rs.ok) staffList = (await rs.json()).staff || [];
+            if (rs.ok) _staffListCache = (await rs.json()).staff || [];
         } catch (_) {}
 
-        // Table header
-        let html = `<div style="display:grid;grid-template-columns:170px 1fr auto;gap:0;font-size:11px;color:#666;padding:0 16px 8px;font-weight:600;letter-spacing:0.5px;text-transform:uppercase;">
-            <span>帳號</span><span>權限</span><span>操作</span>
-        </div>`;
-        html += users.map(u => {
-            const modules = u.modules || [];
-            const isAdminUser = (u.access_level || 0) >= 3;
-            const locked = (u.username === 'admin');   // 內建超級帳號鎖定，避免把自己鎖在外
-            const am = u.auth_method || 'password';
-            const authBadge = am === 'google'
-                ? '<span style="display:inline-block;background:#4285f422;color:#8ab4f8;font-size:9px;padding:1px 5px;border-radius:3px;margin-left:4px;vertical-align:middle;">G</span>'
-                : am === 'both'
-                ? '<span style="display:inline-block;background:#4285f422;color:#8ab4f8;font-size:9px;padding:1px 5px;border-radius:3px;margin-left:4px;vertical-align:middle;">G+</span>'
-                : '';
-            const avatarImg = u.avatar_url
-                ? `<img src="${u.avatar_url}" style="width:20px;height:20px;border-radius:50%;object-fit:cover;vertical-align:middle;margin-right:4px;">`
-                : '';
-            const emailLine = u.email
-                ? `<div style="font-size:10px;color:#666;margin-top:1px;">${u.email}</div>`
-                : '';
-            // N0: 綁定人員檔案（帳號 ↔ crm_staff，個人工作台 /my.html 的資料鍵）
-            const staffOpts = ['<option value="">— 未綁定人員 —</option>']
-                .concat(staffList.map(s => `<option value="${s.id}" ${s.id === u.staff_id ? 'selected' : ''}>${s.name}${s.role ? '（' + s.role + '）' : ''}</option>`))
-                .join('');
-            const staffSelect = `<select data-ustaff-user="${u.username}" ${locked ? 'disabled' : ''} title="綁定人員檔案 — 個人工作台（/my.html）的資料來源"
-                style="margin-top:6px;width:100%;max-width:150px;background:#252525;color:#ccc;border:1px solid #333;border-radius:6px;padding:2px 4px;font-size:11px;">${staffOpts}</select>`;
-            return `
-            <div style="display:grid;grid-template-columns:170px 1fr auto;gap:12px;align-items:start;padding:12px 16px;margin-bottom:1px;background:#1e1e1e;border:1px solid #2e2e2e;border-radius:8px;transition:border-color .15s;" onmouseenter="this.style.borderColor='#444'" onmouseleave="this.style.borderColor='#2e2e2e'">
-                <div style="padding-top:4px;">
-                    <div>${avatarImg}<span style="color:#f0f0f0;font-weight:600;font-size:13px;">${u.username}</span>${u.username === 'admin' ? '<span style="display:inline-block;background:#7c3aed22;color:#a78bfa;font-size:9px;padding:1px 5px;border-radius:3px;margin-left:4px;vertical-align:middle;">SUPER</span>' : ''}${authBadge}</div>
-                    ${emailLine}
-                    ${staffSelect}
-                </div>
-                <div style="min-width:0;">${_renderUserPermCell(u.username, modules, isAdminUser, locked)}</div>
-                <div style="display:flex;gap:6px;align-items:center;padding-top:4px;">
-                    <button onclick="window._changeUserPwd('${u.username}')" class="_fm-btn-cancel" style="padding:3px 10px;font-size:11px;">改密碼</button>
-                    ${locked ? '' : `<button onclick="window._saveUserSettings('${u.username}')" class="_fm-btn-submit" style="padding:3px 12px;font-size:11px;font-weight:500;">儲存</button>`}
-                    ${u.username !== 'admin' ? `<button onclick="window._deleteUser('${u.username}')" style="background:transparent;border:1px solid rgba(239,68,68,0.3);color:#f87171;border-radius:6px;padding:3px 10px;cursor:pointer;font-size:11px;transition:all .15s;" onmouseenter="this.style.borderColor='#ef4444';this.style.background='rgba(239,68,68,0.08)'" onmouseleave="this.style.borderColor='rgba(239,68,68,0.3)';this.style.background='transparent'">刪除</button>` : ''}
-                </div>
-            </div>`;
-        }).join('');
-        container.innerHTML = html;
-
-        // Reflect partial-group state (indeterminate can't be set via HTML attr).
-        container.querySelectorAll('input[data-umaster-user]').forEach(master => {
-            const u = master.getAttribute('data-umaster-user');
-            const g = master.getAttribute('data-group');
-            const boxes = [...container.querySelectorAll(`input[data-umod-user="${u}"][data-group="${g}"]`)];
-            const checked = boxes.filter(b => b.checked).length;
-            master.indeterminate = checked > 0 && checked < boxes.length;
-        });
+        _renderUserList();
     } catch (_) {
         container.innerHTML = '<div style="text-align:center;color:#f87171;padding:20px;">載入失敗</div>';
     }
+}
+
+// 渲染使用者列表（初次載入與點欄頭排序共用，讀 _usersCache / _staffListCache）
+function _renderUserList() {
+    const container = document.getElementById('umgmt-list');
+    if (!container) return;
+    // Table header（grid 欄頭非 table：sortableSpan 標記；操作欄不排）
+    let html = `<div style="display:grid;grid-template-columns:170px 1fr auto;gap:0;font-size:11px;color:#666;padding:0 16px 8px;font-weight:600;letter-spacing:0.5px;text-transform:uppercase;">
+        ${sortableSpan('username', '帳號')}${sortableSpan('perms', '權限')}<span>操作</span>
+    </div>`;
+    html += _userSorter.sorted(_usersCache).map(u => {
+        const modules = u.modules || [];
+        const isAdminUser = (u.access_level || 0) >= 3;
+        const locked = (u.username === 'admin');   // 內建超級帳號鎖定，避免把自己鎖在外
+        const am = u.auth_method || 'password';
+        const authBadge = am === 'google'
+            ? '<span style="display:inline-block;background:#4285f422;color:#8ab4f8;font-size:9px;padding:1px 5px;border-radius:3px;margin-left:4px;vertical-align:middle;">G</span>'
+            : am === 'both'
+            ? '<span style="display:inline-block;background:#4285f422;color:#8ab4f8;font-size:9px;padding:1px 5px;border-radius:3px;margin-left:4px;vertical-align:middle;">G+</span>'
+            : '';
+        const avatarImg = u.avatar_url
+            ? `<img src="${u.avatar_url}" style="width:20px;height:20px;border-radius:50%;object-fit:cover;vertical-align:middle;margin-right:4px;">`
+            : '';
+        const emailLine = u.email
+            ? `<div style="font-size:10px;color:#666;margin-top:1px;">${u.email}</div>`
+            : '';
+        // N0: 綁定人員檔案（帳號 ↔ crm_staff，個人工作台 /my.html 的資料鍵）
+        const staffOpts = ['<option value="">— 未綁定人員 —</option>']
+            .concat(_staffListCache.map(s => `<option value="${s.id}" ${s.id === u.staff_id ? 'selected' : ''}>${s.name}${s.role ? '（' + s.role + '）' : ''}</option>`))
+            .join('');
+        const staffSelect = `<select data-ustaff-user="${u.username}" ${locked ? 'disabled' : ''} title="綁定人員檔案 — 個人工作台（/my.html）的資料來源"
+            style="margin-top:6px;width:100%;max-width:150px;background:#252525;color:#ccc;border:1px solid #333;border-radius:6px;padding:2px 4px;font-size:11px;">${staffOpts}</select>`;
+        return `
+        <div style="display:grid;grid-template-columns:170px 1fr auto;gap:12px;align-items:start;padding:12px 16px;margin-bottom:1px;background:#1e1e1e;border:1px solid #2e2e2e;border-radius:8px;transition:border-color .15s;" onmouseenter="this.style.borderColor='#444'" onmouseleave="this.style.borderColor='#2e2e2e'">
+            <div style="padding-top:4px;">
+                <div>${avatarImg}<span style="color:#f0f0f0;font-weight:600;font-size:13px;">${u.username}</span>${u.username === 'admin' ? '<span style="display:inline-block;background:#7c3aed22;color:#a78bfa;font-size:9px;padding:1px 5px;border-radius:3px;margin-left:4px;vertical-align:middle;">SUPER</span>' : ''}${authBadge}</div>
+                ${emailLine}
+                ${staffSelect}
+            </div>
+            <div style="min-width:0;">${_renderUserPermCell(u.username, modules, isAdminUser, locked)}</div>
+            <div style="display:flex;gap:6px;align-items:center;padding-top:4px;">
+                <button onclick="window._changeUserPwd('${u.username}')" class="_fm-btn-cancel" style="padding:3px 10px;font-size:11px;">改密碼</button>
+                ${locked ? '' : `<button onclick="window._saveUserSettings('${u.username}')" class="_fm-btn-submit" style="padding:3px 12px;font-size:11px;font-weight:500;">儲存</button>`}
+                ${u.username !== 'admin' ? `<button onclick="window._deleteUser('${u.username}')" style="background:transparent;border:1px solid rgba(239,68,68,0.3);color:#f87171;border-radius:6px;padding:3px 10px;cursor:pointer;font-size:11px;transition:all .15s;" onmouseenter="this.style.borderColor='#ef4444';this.style.background='rgba(239,68,68,0.08)'" onmouseleave="this.style.borderColor='rgba(239,68,68,0.3)';this.style.background='transparent'">刪除</button>` : ''}
+            </div>
+        </div>`;
+    }).join('');
+    container.innerHTML = html;
+
+    // Reflect partial-group state (indeterminate can't be set via HTML attr).
+    container.querySelectorAll('input[data-umaster-user]').forEach(master => {
+        const u = master.getAttribute('data-umaster-user');
+        const g = master.getAttribute('data-group');
+        const boxes = [...container.querySelectorAll(`input[data-umod-user="${u}"][data-group="${g}"]`)];
+        const checked = boxes.filter(b => b.checked).length;
+        master.indeterminate = checked > 0 && checked < boxes.length;
+    });
+    _userSorter.attach();
 }
 
 // ─── Add User (styled modal) ─── //

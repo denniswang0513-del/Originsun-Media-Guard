@@ -14,7 +14,7 @@
  * 協定（showcase-saved / showcase-title-change）。
  */
 
-import { crmFetch, esc } from './crm-utils.js';
+import { crmFetch, esc, createSortable, enumIndex, sortableSpan, completenessScore } from './crm-utils.js';
 import { openShowcaseOverlay } from './showcase-overlay.js';
 
 // 對外站基底 — 預覽作品頁用（與 website-utils.js 的 NAS_PUBLIC_BASE 一致）。
@@ -25,6 +25,23 @@ let _container = null;
 let _items = [];
 let _filterStage = '';
 let _search = '';
+
+// ── Sortable list header（共用 createSortable，預設不排序維持後端順序）──
+const STAGE_ORDER = ['待製作', '製作中', '已上線', '不上官網'];
+const _sorter = createSortable({
+    storageKey: 'crm_closing_sort',
+    defaultSort: { key: '', dir: 'asc' },
+    panelId: 'closing-list-panel',
+    onChange: () => _render(),
+    getters: {
+        name:         it => it.name || '',
+        client:       it => it.client_name || '',
+        date:         it => it.completion_date ? String(it.completion_date).substring(0, 10) : '',
+        stage:        it => enumIndex(STAGE_ORDER, it.stage || '待製作'),
+        completeness: it => completenessScore(it.completeness || {}),
+        featured:     it => (it.public_featured ? 1 : 0),
+    },
+});
 
 // ── 入口 ─────────────────────────────────────────────────────
 export async function init(container) {
@@ -45,14 +62,14 @@ export async function init(container) {
         </div>
       </div>
       <div class="crm-body">
-        <div class="crm-list-panel" style="flex:1;">
+        <div class="crm-list-panel" id="closing-list-panel" style="flex:1;">
           <div class="crm-list-header">
-            <span style="flex:1.6;min-width:80px;">專案名稱</span>
-            <span style="flex:1;min-width:60px;">客戶</span>
-            <span style="flex:0.8;min-width:70px;">完成日</span>
-            <span style="flex:0.7;min-width:60px;">官網階段</span>
-            <span style="flex:1.4;min-width:130px;">完成度</span>
-            <span style="flex:0.3;min-width:24px;text-align:center;">⭐</span>
+            ${sortableSpan('name', '專案名稱', 'style="flex:1.6;min-width:80px;"')}
+            ${sortableSpan('client', '客戶', 'style="flex:1;min-width:60px;"')}
+            ${sortableSpan('date', '完成日', 'style="flex:0.8;min-width:70px;"')}
+            ${sortableSpan('stage', '官網階段', 'style="flex:0.7;min-width:60px;"')}
+            ${sortableSpan('completeness', '完成度', 'style="flex:1.4;min-width:130px;"')}
+            ${sortableSpan('featured', '⭐', 'style="flex:0.3;min-width:24px;text-align:center;"')}
             <span style="flex:1.7;min-width:190px;text-align:right;">動作</span>
           </div>
           <div id="closing-list-body">
@@ -106,10 +123,12 @@ function _render() {
 
     if (rows.length === 0) {
         body.innerHTML = `<div class="crm-empty">${_items.length === 0 ? '目前沒有「結案」中的專案。把專案的狀態改成「結案」即可進來。' : '沒有符合條件的專案'}</div>`;
+        _sorter.attach();
         return;
     }
 
-    body.innerHTML = rows.map(_renderRow).join('');
+    body.innerHTML = _sorter.sorted(rows).map(_renderRow).join('');
+    _sorter.attach();
 }
 
 function _renderRow(it) {

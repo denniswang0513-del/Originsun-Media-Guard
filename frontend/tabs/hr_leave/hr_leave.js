@@ -2,6 +2,8 @@
 // 三塊：待核佇列 / 請假紀錄（篩選+代登） / 特休額度。UI 無 emoji（owner 鐵則）。
 // API: /api/v1/hr/leave*（管理端）；員工自助在 /my.html 走 /api/v1/me/leave。
 
+import { createSortable, sortableTh, enumIndex } from '../crm/crm-utils.js';
+
 const LEAVE_TYPES = ['特休', '病假', '事假', '公假', '婚假', '喪假', '其他'];
 const STATUS_PILL = { '待審': 'pending', '已核准': 'approved', '已退回': 'rejected' };
 
@@ -48,7 +50,49 @@ function _staffOptions(selected) {
         .join('');
 }
 
-const LEAVE_TH = '<tr><th>人員</th><th>假別</th><th>期間</th><th class="num">天數</th><th>事由</th><th>狀態</th><th>操作</th></tr>';
+// 兩張表（待核佇列 / 請假紀錄）共用同一份表頭模板；data-sort-key 相同沒關係，靠 panel 區隔
+const LEAVE_TH = '<tr>'
+    + sortableTh('staff', '人員') + sortableTh('type', '假別') + sortableTh('period', '期間')
+    + sortableTh('days', '天數', 'class="num"') + sortableTh('reason', '事由') + sortableTh('status', '狀態')
+    + '<th>操作</th></tr>';
+
+// ── 點欄頭排序：預設 key '' = 不排序、維持後端順序，點了才生效 ──
+const _leaveGetters = {
+    staff: i => i.staff_name || '',
+    type: i => i.leave_type || '',
+    period: i => i.start_date || '',
+    days: i => i.days ?? '',
+    reason: i => i.reason || '',
+    // 狀態照工作流順序排（待審→已核准→已退回），不是字串序
+    status: i => enumIndex(Object.keys(STATUS_PILL), i.status),
+};
+const _pendingSorter = createSortable({
+    storageKey: 'hr_leave_pending_sort',
+    defaultSort: { key: '', dir: 'asc' },
+    panelId: 'hl-pending-table',
+    onChange: () => _render(),
+    getters: _leaveGetters,
+});
+const _recordsSorter = createSortable({
+    storageKey: 'hr_leave_records_sort',
+    defaultSort: { key: '', dir: 'asc' },
+    panelId: 'hl-records-table',
+    onChange: () => _render(),
+    getters: _leaveGetters,
+});
+const _quotaSorter = createSortable({
+    storageKey: 'hr_leave_quota_sort',
+    defaultSort: { key: '', dir: 'asc' },
+    panelId: 'hl-quota-table',
+    onChange: () => _render(),
+    getters: {
+        name: s => s.name || '',
+        role: s => s.role || '',
+        annual: s => s.annual ?? '',
+        used: s => s.used ?? '',
+        remaining: s => s.remaining ?? '',
+    },
+});
 
 function _leaveRow(it) {
     const acts = [];
@@ -77,9 +121,9 @@ function _render() {
 
         <div class="hl-card">
             <h3>待核佇列（${pending.length}）</h3>
-            ${pending.length ? `<table>
+            ${pending.length ? `<table id="hl-pending-table">
                 ${LEAVE_TH}
-                ${pending.map(_leaveRow).join('')}
+                ${_pendingSorter.sorted(pending).map(_leaveRow).join('')}
             </table>` : `<div class="hl-empty">沒有待核的請假單</div>`}
         </div>
 
@@ -96,9 +140,9 @@ function _render() {
                 </select>
                 <button class="hl-btn ghost" id="hl-reload">重新整理</button>
             </div>
-            ${_items.length ? `<table>
+            ${_items.length ? `<table id="hl-records-table">
                 ${LEAVE_TH}
-                ${_items.map(_leaveRow).join('')}
+                ${_recordsSorter.sorted(_items).map(_leaveRow).join('')}
             </table>` : `<div class="hl-empty">此篩選下沒有請假紀錄</div>`}
             <div class="hl-form" style="margin-top:12px;padding-top:12px;border-top:1px solid #333;">
                 <span style="color:#888;font-size:12px;">代登：</span>
@@ -114,9 +158,9 @@ function _render() {
 
         <div class="hl-card">
             <h3>特休額度（${_filters.year} 年）</h3>
-            ${_quota.length ? `<table>
-                <tr><th>人員</th><th>職能</th><th class="num">年度額度（天）</th><th class="num">已休</th><th class="num">剩餘</th><th></th></tr>
-                ${_quota.map(s => `<tr>
+            ${_quota.length ? `<table id="hl-quota-table">
+                <tr>${sortableTh('name', '人員')}${sortableTh('role', '職能')}${sortableTh('annual', '年度額度（天）', 'class="num"')}${sortableTh('used', '已休', 'class="num"')}${sortableTh('remaining', '剩餘', 'class="num"')}<th></th></tr>
+                ${_quotaSorter.sorted(_quota).map(s => `<tr>
                     <td>${esc(s.name)}</td><td>${esc(s.role) || '—'}</td>
                     <td class="num"><input type="number" min="0" step="1" value="${s.annual ?? ''}" placeholder="未設定" data-quota-input="${esc(s.staff_id)}"></td>
                     <td class="num">${s.used}</td>
@@ -127,6 +171,10 @@ function _render() {
             <div class="hl-note">已休 = 該年度「已核准」特休合計；剩餘 = 額度 − 已休（負數表示超休）。</div>
         </div>`;
     _bind();
+    // 點欄頭排序（attach 對不存在的表是 no-op）
+    _pendingSorter.attach();
+    _recordsSorter.attach();
+    _quotaSorter.attach();
 }
 
 async function _setStatus(id, status) {

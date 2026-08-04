@@ -1,10 +1,40 @@
 // blog/posts-list.js — 拆自 blog.js：Sub-tab 1 📰 文章列表（純搬移，行為不變）
 import { esc } from '../../website-utils.js';
+import { createSortable, sortableTh } from '../../../crm/crm-utils.js';
 import { STATUS, STATUS_FALLBACK, _state, _blog } from './shared.js';
+
+// ── 點欄頭排序（純檢視）：預設 key '' = 不排序，點了才生效 ──
+const _sorter = createSortable({
+    storageKey: 'website_blog_posts_sort',
+    defaultSort: { key: '', dir: 'asc' },
+    panelId: 'blog-tab-body',
+    onChange: () => renderPostsView(),
+    getters: {
+        slug: p => p.slug || '',
+        title: p => p.title || '',
+        cat: p => {
+            const s = (p.category_slugs || [])[0];
+            if (!s) return '';
+            const c = _state.categories.find(x => x.slug === s);
+            return c ? c.label_zh : s;
+        },
+        status: p => p.status || '',
+        pub: p => p.published_at || '',
+        redirects: p => p.redirect_count || 0,
+    },
+});
 
 // ══════════════════════════════════════════════════════════
 // Sub-tab 1: 📰 文章列表
 // ══════════════════════════════════════════════════════════
+
+/** 完整重繪（innerHTML + sorter attach 合一）— sorter onChange / setFilter / shell 共用單一入口 */
+export function renderPostsView() {
+    const body = document.getElementById('blog-tab-body');
+    if (!body) return;
+    body.innerHTML = _viewPosts();
+    _sorter.attach();
+}
 
 function _viewPosts() {
     const filtered = _state.posts.filter(p => {
@@ -46,17 +76,17 @@ function _viewPosts() {
 
         <table>
             <thead><tr>
-                <th style="width:50px;">#</th>
-                <th>標題</th>
-                <th style="width:140px;">分類</th>
-                <th style="width:90px;">狀態</th>
-                <th style="width:100px;">發布日</th>
-                <th style="width:60px;">轉址</th>
+                ${sortableTh('slug', '#', 'style="width:50px;"')}
+                ${sortableTh('title', '標題')}
+                ${sortableTh('cat', '分類', 'style="width:140px;"')}
+                ${sortableTh('status', '狀態', 'style="width:90px;"')}
+                ${sortableTh('pub', '發布日', 'style="width:100px;"')}
+                ${sortableTh('redirects', '轉址', 'style="width:60px;"')}
                 <th style="width:90px;">操作</th>
             </tr></thead>
             <tbody>${
                 filtered.length
-                    ? filtered.map(_postRow).join('')
+                    ? _sorter.sorted(filtered).map(_postRow).join('')
                     : '<tr><td colspan="7" style="padding:30px;text-align:center;color:#888;">沒有符合條件的文章</td></tr>'
             }</tbody>
         </table>
@@ -93,12 +123,10 @@ function _postRow(p) {
 
 _blog.setFilter = (field, value) => {
     _state.filters[field] = value;
-    document.getElementById('blog-tab-body').innerHTML = _viewPosts();
+    renderPostsView();
     // 保留搜尋框 focus + cursor
     if (field === 'q') {
         const el = document.getElementById('filter-q');
         if (el) { el.focus(); el.setSelectionRange(value.length, value.length); }
     }
 };
-
-export { _viewPosts };

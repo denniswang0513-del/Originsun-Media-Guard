@@ -10,6 +10,7 @@
  * { isCurrent })）。
  */
 import { websiteFetch, esc, fmtDt, fmtRelative, toastOk, toastErr, renderLoadError, INQUIRY_STATUSES, inquiryStatusLabel, renderCopyCard } from '../website-utils.js';
+import { createSortable, sortableTh, withInputsPreserved } from '../../crm/crm-utils.js';
 
 let _inquiries = [];
 let _selectedId = null;
@@ -56,6 +57,26 @@ const FORM_OPTION_LISTS = [
         ],
     },
 ];
+
+// ── 選項清單點欄頭排序（純檢視）：每張卡獨立 sorter；重排會從 settings 重繪
+//    （未儲存的 label 編輯已由 withInputsPreserved 保留 — 以 listKey:value 為
+//    data-id 對回；「+ 新增」尚未儲存的列不在 settings 內，重排仍會消失）──
+let _formsSettings = {};
+const _optGetters = {
+    value: o => o.value || '',
+    zh: o => o.label_zh || '',
+    en: o => o.label_en || '',
+};
+const _optSorters = Object.fromEntries(FORM_OPTION_LISTS.map(l => [l.key, createSortable({
+    storageKey: `website_inquiry_opts_${l.key.split('.').pop()}_sort`,
+    defaultSort: { key: '', dir: 'asc' },
+    panelSelector: `[data-forms-key="${l.key}"]`,
+    onChange: () => {
+        const host = document.getElementById('contact-forms-host');
+        if (host) withInputsPreserved(host, () => _renderFormOptionCards(host, _formsSettings));
+    },
+    getters: _optGetters,
+})]));
 
 export default async function render(container) {
     const statusOpts = INQUIRY_STATUSES.map(s => `<option value="${s.value}">${esc(s.labelZh)}</option>`).join('');
@@ -172,18 +193,19 @@ function _coerceOptionList(raw, defaults) {
 }
 
 function _renderFormOptionCards(host, settings) {
+    _formsSettings = settings;   // 供欄頭排序 onChange 重繪用
     host.innerHTML = FORM_OPTION_LISTS.map(list => {
-        const items = _coerceOptionList(settings[list.key], list.defaults);
+        const items = _optSorters[list.key].sorted(_coerceOptionList(settings[list.key], list.defaults));
         return `
         <div class="card" data-forms-key="${esc(list.key)}" style="margin-bottom:16px;border-left:3px solid #f59e0b;">
             <h3 style="color:#fff;margin:0 0 4px 0;font-size:14px;">⬇️ ${esc(list.label)}</h3>
             <p style="color:#888;font-size:11px;margin:0 0 10px 0;">對應聯絡表單的下拉選單。<strong>value 是後端 / CRM 儲存的穩定代碼，唯讀不可改</strong>；只 label 可編。全部刪光則對外網站沿用預設選項。</p>
             <table style="width:100%;">
                 <thead><tr>
-                    <th style="text-align:left;">代碼 (value)</th><th style="text-align:left;">中文標籤</th><th style="text-align:left;">English</th><th></th>
+                    ${sortableTh('value', '代碼 (value)', 'style="text-align:left;"')}${sortableTh('zh', '中文標籤', 'style="text-align:left;"')}${sortableTh('en', 'English', 'style="text-align:left;"')}<th></th>
                 </tr></thead>
                 <tbody class="forms-rows">
-                    ${items.map(it => _formOptionRow(it)).join('')}
+                    ${items.map(it => _formOptionRow(it, false, list.key)).join('')}
                 </tbody>
             </table>
             <div style="margin-top:10px;display:flex;gap:8px;align-items:center;">
@@ -192,18 +214,21 @@ function _renderFormOptionCards(host, settings) {
             </div>
         </div>`;
     }).join('');
+    FORM_OPTION_LISTS.forEach(l => _optSorters[l.key].attach());   // thead 每次重建 → 重綁
 }
 
-function _formOptionRow(it = { value: '', label_zh: '', label_en: '' }, isNew = false) {
+function _formOptionRow(it = { value: '', label_zh: '', label_en: '' }, isNew = false, listKey = '') {
     // 既有項目 value 唯讀（穩定 token）；新增列的 value 可填一次（建立後也視為穩定）。
+    // data-id = listKey:value → withInputsPreserved 重排時把未儲存 label 對回同一列。
+    const rowId = esc(`${listKey}:${it.value}`);
     const valCell = isNew
-        ? `<input data-field="value" value="${esc(it.value)}" placeholder="代碼（英數，如 other）" style="width:100%;font-family:monospace;" />`
-        : `<input data-field="value" value="${esc(it.value)}" readonly title="穩定代碼，不可變更" style="width:100%;font-family:monospace;background:#222;color:#888;cursor:not-allowed;" />`;
+        ? `<input data-id="${rowId}" data-field="value" value="${esc(it.value)}" placeholder="代碼（英數，如 other）" style="width:100%;font-family:monospace;" />`
+        : `<input data-id="${rowId}" data-field="value" value="${esc(it.value)}" readonly title="穩定代碼，不可變更" style="width:100%;font-family:monospace;background:#222;color:#888;cursor:not-allowed;" />`;
     return `
         <tr class="forms-row">
             <td style="padding:3px 6px 3px 0;">${valCell}</td>
-            <td style="padding:3px 6px 3px 0;"><input data-field="label_zh" value="${esc(it.label_zh)}" style="width:100%;" /></td>
-            <td style="padding:3px 6px 3px 0;"><input data-field="label_en" value="${esc(it.label_en)}" style="width:100%;" /></td>
+            <td style="padding:3px 6px 3px 0;"><input data-id="${rowId}" data-field="label_zh" value="${esc(it.label_zh)}" style="width:100%;" /></td>
+            <td style="padding:3px 6px 3px 0;"><input data-id="${rowId}" data-field="label_en" value="${esc(it.label_en)}" style="width:100%;" /></td>
             <td style="padding:3px 0;"><button class="btn btn-sm btn-danger" title="刪除此選項" onclick="this.closest('tr').remove()">🗑</button></td>
         </tr>`;
 }
@@ -212,7 +237,7 @@ window._websiteAddFormOption = (key) => {
     const card = document.querySelector(`[data-forms-key="${key}"]`);
     if (!card) return;
     const tbody = card.querySelector('.forms-rows');
-    if (tbody) tbody.insertAdjacentHTML('beforeend', _formOptionRow(undefined, true));
+    if (tbody) tbody.insertAdjacentHTML('beforeend', _formOptionRow(undefined, true, key));
 };
 
 window._websiteSaveFormOptions = async (key) => {

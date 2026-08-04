@@ -10,6 +10,7 @@
  */
 
 import { esc } from '../website/website-utils.js';
+import { createSortable, sortableTh, enumIndex } from '../crm/crm-utils.js';
 import { tfetch } from './prop-fetch.js';
 
 const API = '/api/v1/proposals';
@@ -20,10 +21,29 @@ const DECK_MAX_BYTES = 50 * 1024 * 1024;
 
 let _content = null;
 let _all = [];           // 最近一次「無篩選」清單（供年份下拉選項）
+let _lastProps = [];     // 目前篩選下的清單（供點欄頭排序重繪）
 let _filters = { q: '', status: '', ptype: '', year: '' };
 let _clientsCache = null;
 let _qTimer = null;
 let _escHandler = null;
+
+// ── 點欄頭排序：預設 key '' = 不排序、維持後端順序，點了才生效 ──
+const _sorter = createSortable({
+    storageKey: 'proposals_list_sort',
+    defaultSort: { key: '', dir: 'asc' },
+    panelId: 'prop-table',
+    onChange: () => _renderRows(),
+    getters: {
+        title: p => p.title || '',
+        client: p => p.client_name || '',
+        ptype: p => p.ptype || '',
+        // 狀態照流程順序排（草稿→已提案→…→擱置），不是字串序
+        status: p => enumIndex(STATUSES, p.status),
+        pitch: p => p.pitch_date || '',
+        budget: p => p.budget_range || '',
+        refs: p => p.refs_count ?? 0,
+    },
+});
 
 export async function initProposalsTab() {
     _content = document.getElementById('prop-content');
@@ -52,10 +72,10 @@ function _renderShell() {
                 <button id="prop-add" class="prop-btn">＋ 新提案</button>
             </div>
             <div class="prop-table-wrap">
-                <table class="prop-table">
+                <table class="prop-table" id="prop-table">
                     <thead><tr>
-                        <th>標題</th><th>客戶</th><th>類型</th><th>狀態</th>
-                        <th>提案日</th><th>預算範圍</th><th>參考</th>
+                        ${sortableTh('title', '標題')}${sortableTh('client', '客戶')}${sortableTh('ptype', '類型')}${sortableTh('status', '狀態')}
+                        ${sortableTh('pitch', '提案日')}${sortableTh('budget', '預算範圍')}${sortableTh('refs', '參考')}
                     </tr></thead>
                     <tbody id="prop-rows"></tbody>
                 </table>
@@ -92,14 +112,23 @@ async function refreshList() {
         ]);
         const props = d.proposals || [];
         if (!_hasFilters()) { _all = props; _syncYearOptions(); }
-        tbody.innerHTML = props.length ? props.map(_row).join('')
-            : '<tr><td colspan="7" style="color:#666;padding:40px;text-align:center;">尚無提案 — 按「＋ 新提案」建立第一筆</td></tr>';
-        tbody.querySelectorAll('tr[data-id]').forEach(el => {
-            el.addEventListener('click', () => openDetail(el.dataset.id));
-        });
+        _lastProps = props;
+        _renderRows();
     } catch (e) {
         tbody.innerHTML = `<tr><td colspan="7" style="color:#f87171;padding:30px;text-align:center;">提案載入失敗：${esc(e.message || e)}</td></tr>`;
     }
+}
+
+// tbody 重繪（初次載入與點欄頭排序共用）
+function _renderRows() {
+    const tbody = document.getElementById('prop-rows');
+    if (!tbody) return;
+    tbody.innerHTML = _lastProps.length ? _sorter.sorted(_lastProps).map(_row).join('')
+        : '<tr><td colspan="7" style="color:#666;padding:40px;text-align:center;">尚無提案 — 按「＋ 新提案」建立第一筆</td></tr>';
+    tbody.querySelectorAll('tr[data-id]').forEach(el => {
+        el.addEventListener('click', () => openDetail(el.dataset.id));
+    });
+    _sorter.attach();
 }
 
 // 統計 chips：總提案 + 整體成案率；hover（title）看 by 類型 / by 年度細目

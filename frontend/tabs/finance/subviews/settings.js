@@ -7,6 +7,7 @@
  * treatment 全用白話標籤。後端 API prefix /api/v1/finance（fin-utils.finFetch）。
  */
 import { finFetch, esc, fmtNum, finToast, finSubviewBoot, TREATMENT_OPTIONS, ACCT_KIND_OPTIONS } from '../fin-utils.js';
+import { createSortable, sortableTh } from '../../crm/crm-utils.js';   // 點欄頭排序（通用排序器）
 
 let _c = null;
 let _isCurrent = () => true;
@@ -20,6 +21,49 @@ let _wizRows = [];
 let _wizDefaultIdx = 0;
 
 const _fs = (window._finSet = window._finSet || {});
+
+// ── 類別對映表點欄頭排序（預設 key '' = 不排序、維持後端順序，點了才生效）──
+const _mapSorter = createSortable({
+    storageKey: 'finance_category_map_sort',
+    defaultSort: { key: '', dir: 'asc' },
+    panelId: 'finset-map-card',
+    onChange: () => _rerenderMapTable(),
+    getters: {
+        source: m => m.source || '',
+        cat: m => m.category_text || '',
+        acct: m => {
+            const a = _coa.find(x => String(x.id) === String(m.account_id));
+            return a ? a.name : (m.account_id != null && m.account_id !== '' ? '#' + m.account_id : '');
+        },
+        treat: m => (TREATMENT_OPTIONS.find(t => t.v === m.treatment)?.label) || m.treatment || '',
+    },
+});
+
+/** 排序後重畫對映表 — 先把未儲存的下拉修改（value + dirty flag）保下來再重繪，
+ *  排序只是重排顯示順序，不能洗掉使用者還沒按儲存的編輯。 */
+function _rerenderMapTable() {
+    const card = _c && _c.querySelector('#finset-map-card');
+    if (!card) return;
+    const saved = {};
+    card.querySelectorAll('.finset-map-row').forEach(row => {
+        saved[row.dataset.source + '\u0000' + row.dataset.cat] = {
+            acct: row.querySelector('.finset-map-acct')?.value,
+            treat: row.querySelector('.finset-map-treat')?.value,
+            dirty: row.dataset.dirty,
+        };
+    });
+    card.outerHTML = _mapHtml();
+    _c.querySelectorAll('.finset-map-row').forEach(row => {
+        const s = saved[row.dataset.source + '\u0000' + row.dataset.cat];
+        if (!s) return;
+        const a = row.querySelector('.finset-map-acct');
+        const t = row.querySelector('.finset-map-treat');
+        if (a && s.acct != null) a.value = s.acct;
+        if (t && s.treat != null) t.value = s.treat;
+        if (s.dirty) row.dataset.dirty = s.dirty;
+    });
+    _mapSorter.attach();
+}
 
 export default async function render(container, ctx = {}) {
     _c = container;
@@ -88,6 +132,7 @@ function _renderShell() {
         ${_mapHtml()}
     `;
     if (_bankAccounts.length === 0) _renderWizRows();
+    _mapSorter.attach();
 }
 
 // ── 期初設定精靈 ────────────────────────────────────────────
@@ -268,7 +313,7 @@ _fs.addMap = async (btn) => {
 // ── 類別對映表 ──────────────────────────────────────────────
 
 function _mapHtml() {
-    const body = _map.length ? _map.map(m => `
+    const body = _map.length ? _mapSorter.sorted(_map).map(m => `
         <tr class="finset-map-row" data-source="${esc(m.source)}" data-cat="${esc(m.category_text)}"
             style="border-top:1px solid #2a2a2a;${m.active === false ? 'opacity:.5;' : ''}">
             <td style="padding:6px 10px;">${_srcBadge(m.source)}</td>
@@ -281,16 +326,16 @@ function _mapHtml() {
         : '<tr><td colspan="4" style="padding:16px;color:#666;text-align:center;">尚無對映（新的收支類別出現後會進上方待歸類）</td></tr>';
 
     return `
-    <div style="background:#202020;border:1px solid #2e2e2e;border-radius:8px;padding:16px;">
+    <div id="finset-map-card" style="background:#202020;border:1px solid #2e2e2e;border-radius:8px;padding:16px;">
         <h3 style="color:#eee;margin:0 0 4px;font-size:14px;">🧭 類別對映表</h3>
         <p style="color:#888;font-size:12px;margin:0 0 12px;">收支明細的「類別」透過這張表對到財務科目 — 改了下拉記得按儲存。</p>
         <div style="overflow-x:auto;">
             <table style="border-collapse:collapse;font-size:13px;width:100%;min-width:560px;">
                 <thead><tr style="color:#888;font-size:12px;text-align:left;">
-                    <th style="padding:6px 10px;">來源</th>
-                    <th style="padding:6px 10px;">類別文字</th>
-                    <th style="padding:6px 10px;">對到的科目</th>
-                    <th style="padding:6px 10px;">這算什麼錢</th>
+                    ${sortableTh('source', '來源', 'style="padding:6px 10px;"')}
+                    ${sortableTh('cat', '類別文字', 'style="padding:6px 10px;"')}
+                    ${sortableTh('acct', '對到的科目', 'style="padding:6px 10px;"')}
+                    ${sortableTh('treat', '這算什麼錢', 'style="padding:6px 10px;"')}
                 </tr></thead>
                 <tbody>${body}</tbody>
             </table>

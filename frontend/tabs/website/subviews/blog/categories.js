@@ -1,11 +1,39 @@
 // blog/categories.js — 拆自 blog.js：Sub-tab 2 📚 分類 CRUD（純搬移，行為不變）
 import { websiteFetch, esc, toastOk, toastErr, readRowPatch } from '../../website-utils.js';
+import { createSortable, sortableTh, withInputsPreserved } from '../../../crm/crm-utils.js';
 import { _state, _blog } from './shared.js';
 import { _renderShell } from './shell.js';
+
+// ── 點欄頭排序（純檢視）：預設 key '' = 不排序，點了才生效 ──
+//    重繪包 withInputsPreserved：inline 編輯列（data-id+data-field）未儲存值不被排序洗掉
+const _sorter = createSortable({
+    storageKey: 'website_blog_cats_sort',
+    defaultSort: { key: '', dir: 'asc' },
+    panelId: 'blog-tab-body',
+    onChange: () => withInputsPreserved(
+        document.getElementById('blog-tab-body'), () => renderCategoriesView()),
+    getters: {
+        id: c => c.id,
+        slug: c => c.slug || '',
+        zh: c => c.label_zh || '',
+        en: c => c.label_en || '',
+        posts: c => c.post_count ?? 0,
+        sort: c => c.sort_order ?? 0,
+        visible: c => c.visible ? 1 : 0,
+    },
+});
 
 // ══════════════════════════════════════════════════════════
 // Sub-tab 2: 📚 分類 CRUD
 // ══════════════════════════════════════════════════════════
+
+/** 完整重繪（innerHTML + sorter attach 合一）— sorter onChange / shell 共用單一入口 */
+export function renderCategoriesView() {
+    const body = document.getElementById('blog-tab-body');
+    if (!body) return;
+    body.innerHTML = _viewCategories();
+    _sorter.attach();
+}
 
 function _viewCategories() {
     return `
@@ -26,18 +54,18 @@ function _viewCategories() {
 
         <table>
             <thead><tr>
-                <th style="width:40px;">ID</th>
-                <th style="width:120px;">slug</th>
-                <th>中文</th>
-                <th>英文</th>
-                <th style="width:60px;">文章</th>
-                <th style="width:60px;">排序</th>
-                <th style="width:50px;">可見</th>
+                ${sortableTh('id', 'ID', 'style="width:40px;"')}
+                ${sortableTh('slug', 'slug', 'style="width:120px;"')}
+                ${sortableTh('zh', '中文')}
+                ${sortableTh('en', '英文')}
+                ${sortableTh('posts', '文章', 'style="width:60px;"')}
+                ${sortableTh('sort', '排序', 'style="width:60px;"')}
+                ${sortableTh('visible', '可見', 'style="width:50px;"')}
                 <th style="width:90px;">操作</th>
             </tr></thead>
             <tbody>${
                 _state.categories.length
-                    ? _state.categories.map(_categoryRow).join('')
+                    ? _sorter.sorted(_state.categories).map(_categoryRow).join('')
                     : '<tr><td colspan="8" style="padding:30px;text-align:center;color:#888;">尚無分類</td></tr>'
             }</tbody>
         </table>
@@ -102,5 +130,3 @@ _blog.deleteCategory = async (id) => {
         _renderShell();
     } catch (e) { toastErr(e.message); }
 };
-
-export { _viewCategories };
