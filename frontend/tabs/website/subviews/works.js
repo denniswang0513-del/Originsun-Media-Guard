@@ -6,7 +6,7 @@
  * 重用既有 showcase-edit.html 避免重寫 544 行的 CRM 完稿 Tab 編輯器。
  */
 import { websiteFetch, esc, toastOk, toastErr, renderLoadError, debounce, readRowPatch, emptyRow, emptyHint } from '../website-utils.js';
-import { searchableSelect } from '../../crm/crm-utils.js';   // 打字搜尋下拉 widget（.ss-* 樣式已在 index.html 全域載入）
+import { searchableSelect, createSortable, sortableTh } from '../../crm/crm-utils.js';   // 打字搜尋下拉 widget（.ss-* 樣式已在 index.html 全域載入）+ 點欄頭排序
 import { openShowcaseOverlay } from '../../crm/showcase-overlay.js';   // 編輯作品共用殼（與結案收件匣同一實作）
 
 let _works = [];
@@ -34,6 +34,49 @@ const _COLS = [
     { key: 'comp', label: '完成度' },
     { key: 'actions', label: '操作', locked: true },
 ];
+// ── 點欄頭排序（同專案管理）：預設 key '' = 不排序、維持後端順序，點了才生效 ──
+const _sorter = createSortable({
+    storageKey: 'works_sort',
+    defaultSort: { key: '', dir: 'asc' },
+    panelId: 'works-table',
+    onChange: () => _renderTable(),
+    getters: {
+        client: w => w.client || '',
+        title: w => w.title || w.name || '',
+        slug: w => w.slug || '',
+        cat: w => (w.categories || []).join(','),
+        tags: w => (w.tags || []).join(','),
+        series: w => {
+            const s = w.series_id ? _series.find(x => x.id === w.series_id) : null;
+            return s ? (s.title_zh || s.slug || '') : '';
+        },
+        year: w => w.year ?? '',
+        public: w => (w.public ? 1 : 0),
+        featured: w => (w.featured ? 1 : 0),
+        noindex: w => (w.noindex ? 1 : 0),
+        seo: w => _seoAudit?.get(w.id)?.completeness ?? '',
+        comp: w => {
+            const c = w.completeness;
+            return c ? ['video', 'images', 'description', 'credits'].filter(k => c[k]).length : '';
+        },
+    },
+});
+
+// 系列小表的排序器（欄位少、獨立記憶）
+const _serSorter = createSortable({
+    storageKey: 'works_series_sort',
+    defaultSort: { key: '', dir: 'asc' },
+    panelId: 'series-panel',
+    onChange: () => _renderSeriesPanel(),
+    getters: {
+        title: s => s.title_zh || '',
+        slug: s => s.slug || '',
+        order: s => s.sort_order ?? '',
+        visible: s => (s.visible ? 1 : 0),
+        count: s => s.work_count ?? 0,
+    },
+});
+
 let _hiddenCols = (() => {
     try {
         const keys = new Set(_COLS.map(c => c.key));
@@ -236,7 +279,7 @@ function _renderSeriesPanel() {
     if (!el) return;
     const countEl = document.getElementById('series-count');
     if (countEl) countEl.textContent = String(_series.length);
-    const rows = _series.map(s => {
+    const rows = _serSorter.sorted(_series).map(s => {
         const open = _serOpen === s.id;
         return `
         <tr style="border-top:1px solid #333;">
@@ -260,9 +303,9 @@ function _renderSeriesPanel() {
         </div>
         <table style="border-collapse:collapse;font-size:12px;color:#ccc;width:100%;">
             <thead><tr style="color:#888;text-align:left;">
-                <th style="padding:4px 8px;">系列名稱</th><th style="padding:4px 8px;">slug</th>
-                <th style="padding:4px 8px;">排序</th><th style="padding:4px 8px;">顯示</th>
-                <th style="padding:4px 8px;">成員</th><th style="padding:4px 8px;"></th>
+                ${sortableTh('title', '系列名稱', 'style="padding:4px 8px;"')}${sortableTh('slug', 'slug', 'style="padding:4px 8px;"')}
+                ${sortableTh('order', '排序', 'style="padding:4px 8px;"')}${sortableTh('visible', '顯示', 'style="padding:4px 8px;"')}
+                ${sortableTh('count', '成員', 'style="padding:4px 8px;"')}<th style="padding:4px 8px;"></th>
             </tr></thead>
             <tbody>${rows || emptyRow(6, '還沒有系列 — 用下面的欄位建立第一個')}</tbody>
         </table>
@@ -278,6 +321,7 @@ function _renderSeriesPanel() {
         const addSel = document.getElementById(`ser-add-${_serOpen}`);
         if (addSel) searchableSelect(addSel, { placeholder: '搜尋作品…' });
     }
+    _serSorter.attach();
 }
 
 /** 候選作品（未掛任何系列）的 <option> 清單 — 打字搜尋/過濾交給 searchableSelect widget */
@@ -462,7 +506,7 @@ function _renderTable() {
     const catId = document.getElementById('works-cat-filter')?.value || '';
     const publicOnly = document.getElementById('works-public-only')?.checked;
 
-    const rows = _works.filter(w => {
+    const rows = _sorter.sorted(_works.filter(w => {
         if (publicOnly && !w.public) return false;
         if (q && !`${w.public_title || ''}${w.name || ''}${w.client || ''}${w.slug || ''}`.toLowerCase().includes(q)) return false;
         if (catId) {
@@ -470,7 +514,7 @@ function _renderTable() {
             if (!catSlug || !w.categories?.includes(catSlug)) return false;
         }
         return true;
-    });
+    }));
 
     if (!rows.length) {
         table.innerHTML = `<tr><td colspan="${_COLS.length - _hiddenCols.size}" style="color:#888;text-align:center;padding:30px;">沒有符合條件的作品</td></tr>`;
@@ -492,18 +536,18 @@ function _renderTable() {
         <thead>
             <tr>
                 <th data-col="thumb">縮圖</th>
-                <th data-col="client">客戶</th>
-                <th data-col="title">標題</th>
-                <th data-col="slug">slug</th>
-                <th data-col="cat">分類</th>
-                <th data-col="tags">標籤</th>
-                <th data-col="series">系列</th>
-                <th data-col="year">年份</th>
-                <th data-col="public">公開</th>
-                <th data-col="featured">精選</th>
-                <th data-col="noindex" title="個別作品強制 noindex（站級允許索引仍會被擋）">noindex</th>
-                <th data-col="seo" title="AI 自動生成的作品 SEO 內容（標題／描述／關鍵字／長文／FAQ）">AI SEO</th>
-                <th data-col="comp" title="作品內容填寫狀況：影片／圖／說明（專案描述）／credits">完成度</th>
+                ${sortableTh('client', '客戶', 'data-col="client"')}
+                ${sortableTh('title', '標題', 'data-col="title"')}
+                ${sortableTh('slug', 'slug', 'data-col="slug"')}
+                ${sortableTh('cat', '分類', 'data-col="cat"')}
+                ${sortableTh('tags', '標籤', 'data-col="tags"')}
+                ${sortableTh('series', '系列', 'data-col="series"')}
+                ${sortableTh('year', '年份', 'data-col="year"')}
+                ${sortableTh('public', '公開', 'data-col="public"')}
+                ${sortableTh('featured', '精選', 'data-col="featured"')}
+                ${sortableTh('noindex', 'noindex', 'data-col="noindex" title="個別作品強制 noindex（站級允許索引仍會被擋）"')}
+                ${sortableTh('seo', 'AI SEO', 'data-col="seo" title="AI 自動生成的作品 SEO 內容（標題／描述／關鍵字／長文／FAQ）"')}
+                ${sortableTh('comp', '完成度', 'data-col="comp" title="作品內容填寫狀況：影片／圖／說明（專案描述）／credits"')}
                 <th data-col="actions">操作</th>
             </tr>
         </thead>
@@ -550,6 +594,7 @@ function _renderTable() {
             }).join('')}
         </tbody>
     `;
+    _sorter.attach();   // thead 每次重建 → 重綁 onclick + 指示器
 }
 
 

@@ -463,8 +463,15 @@ export const enumIndex = (arr, val, fallback) => {
  *   未匹配 sort key 的 getter 自動回空字串(同空值處理)。
  *
  * 進階:傳 `getValue: (item, key) => ...` 取代 `getters`,給需要 dynamic key 行為的場景。
+ *
+ * 容器:`panelId`(元素 id)或 `panelSelector`(CSS selector,給沒有固定 id 的
+ *   subview 容器;attach 時才 querySelector,重繪後照樣找得到)。
+ * 表頭:預設認 `.crm-list-header [data-sort-key]` 與 `thead [data-sort-key]`
+ *   (div 欄頭與 <table> 表頭都吃);特殊結構可傳 `headerSelector` 覆寫。
+ * defaultSort 可用 { key: '', dir: 'asc' } = 預設不排序:全部視為空值、
+ *   stable sort 維持輸入順序,點了欄頭才生效。
  */
-export function createSortable({ storageKey, defaultSort, panelId, getters, getValue, onChange }) {
+export function createSortable({ storageKey, defaultSort, panelId, panelSelector, headerSelector, getters, getValue, onChange }) {
     const _getValue = getValue || ((item, k) => getters?.[k]?.(item) ?? '');
     let _sort = (() => {
         try {
@@ -503,9 +510,10 @@ export function createSortable({ storageKey, defaultSort, panelId, getters, getV
     };
 
     const attach = () => {
-        const panel = document.getElementById(panelId);
+        const panel = panelId ? document.getElementById(panelId)
+            : (panelSelector ? document.querySelector(panelSelector) : null);
         if (!panel) return;
-        panel.querySelectorAll('.crm-list-header [data-sort-key]').forEach(el => {
+        panel.querySelectorAll(headerSelector || '.crm-list-header [data-sort-key], thead [data-sort-key]').forEach(el => {
             const k = el.dataset.sortKey;
             // 用 dataset flag 避免重複 bind(每次 render 後 caller 都呼叫 attach,header 元素不變但 onclick 不能重疊)
             if (!el.dataset.sortBound) {
@@ -527,6 +535,12 @@ export function createSortable({ storageKey, defaultSort, panelId, getters, getV
 
     return { sorted, attach, setSort: _setSort };
 }
+
+
+/** 可排序 <th> 標記 — 43 個表格接排序都用它,不各自手寫指示器。
+ *  sortableTh('year', '年份') / sortableTh('seo', 'AI SEO', 'data-col="seo" title="…"') */
+export const sortableTh = (key, label, attrs = '') =>
+    `<th data-sort-key="${key}"${attrs ? ' ' + attrs : ''}>${label} <span class="crm-sort-ind">↕</span></th>`;
 
 
 /** 輕量 toast — 沿用 crm.css 既有 .cg-toast 樣式（cost-groups / media-log 等子視圖共用）。 */
