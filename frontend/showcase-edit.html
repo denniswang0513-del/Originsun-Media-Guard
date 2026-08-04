@@ -148,7 +148,8 @@ select.sc-select:focus{outline:none;border-color:var(--accent)}
 .process-text{flex:1;font-size:13px;color:var(--text2)}
 
 /* ── 從影像紀錄挑選 modal（創作過程用；劇組收檔照片直接挑進官網） ── */
-.sc-mlp-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(120px,1fr));gap:10px;overflow-y:auto;min-height:120px;padding:2px}
+/* grid-auto-rows:max-content 必留 — 定高捲動容器裡 auto 列會被 Chromium 攤成 ~4px（cell 塌成細條、縮圖全被 overflow:hidden 裁掉） */
+.sc-mlp-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(120px,1fr));grid-auto-rows:max-content;gap:10px;overflow-y:auto;min-height:120px;padding:2px}
 .sc-mlp-item{position:relative;cursor:pointer;border:2px solid transparent;border-radius:6px;overflow:hidden;background:var(--bg3);transition:border-color .15s}
 .sc-mlp-item:hover{border-color:var(--border2)}
 .sc-mlp-item.on{border-color:var(--accent)}
