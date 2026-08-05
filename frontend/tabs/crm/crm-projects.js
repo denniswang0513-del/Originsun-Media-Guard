@@ -30,8 +30,25 @@ import { loadCostGroups, renderGroupSwitcher, initCostGroupsHandlers } from './c
 
 // ── 回呼串接（解耦跨模組依賴） ──────────────────────────────
 
+// 換專案時，當前開著的 lazy 分頁要跟著換內容 —— renderDetail 只畫資訊層＋財務摘要，
+// 影像紀錄/參考影片/完稿結案/人員配置的內容是分頁點擊才載，直接切專案會殘留上一案。
+// 只在專案 id 真的變了才重載（同專案的 renderDetail 重繪不動分頁，免清掉上傳佇列等現場）。
+let _lastDetailId = null;
+function _reloadActiveDetailTab(projectId) {
+    const tab = document.querySelector('#proj-detail-tabs .crm-tab.active')?.dataset.tab;
+    if (tab === 'media') _loadMediaTab(projectId);
+    else if (tab === 'refs') _loadRefsTab(projectId);
+    else if (tab === 'delivery') loadDeliveryTab(projectId);
+    else if (tab === 'team') { _loadCostStaff(projectId); _loadAdvances(projectId); }
+    // info/finance 由 renderDetail 涵蓋、quotes 由 selectProject 的 loadQuotations 涵蓋
+}
+
 callbacks.renderDetail = (project) => {
     renderDetail(project);
+    if (project.id !== _lastDetailId) {
+        _lastDetailId = project.id;
+        _reloadActiveDetailTab(project.id);
+    }
 };
 callbacks.renderList = renderList;
 callbacks.loadProjects = loadProjects;
