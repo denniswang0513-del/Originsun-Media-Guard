@@ -33,21 +33,42 @@ let _lbKeyHandler = null;
 
 // ── 入口 ─────────────────────────────────────────────────────
 
-export async function loadMediaTab(projectId, host) {
+export async function loadMediaTab(projectId, host, opts = {}) {
     _host = host;
     _projectId = projectId;
     _filter = '';
     _closeLightbox();
     host.innerHTML = '<div class="crm-empty">載入中...</div>';
+    // fast＝切專案自動重載：先拿 DB 現況立即渲染（後端跳過 NAS 資料夾同步，
+    // 那一步是秒級 SMB 掃描），完整同步移到背景補跑。手動點分頁仍走全同步。
+    const qs = opts.fast ? '?fast=1' : '';
     try {
-        _data = await _fetch(`/projects/${projectId}/media-log`);
+        _data = await _fetch(`/projects/${projectId}/media-log${qs}`);
     } catch (e) {
+        if (_projectId !== projectId) return;
         host.innerHTML = `<div class="crm-empty" style="color:#fca5a5;">影像紀錄載入失敗: ${_esc(e.message || String(e))}</div>`;
         return;
     }
+    if (_projectId !== projectId) return;   // 已切到別的專案 — 過期回應不上畫
     _cats = Array.isArray(_data.categories) ? [..._data.categories] : [];
     _uploads = [];
     _render();
+    if (opts.fast) _bgSync(projectId);
+}
+
+// 快路徑渲染後的背景補同步：停在同一專案 800ms 才發（連點瀏覽不疊 NAS 掃描），
+// 回來時若使用者已在互動（切走/上傳中/看 lightbox）就靜默放棄。
+function _bgSync(projectId) {
+    setTimeout(async () => {
+        if (_projectId !== projectId) return;
+        try {
+            const d = await _fetch(`/projects/${projectId}/media-log`);
+            if (_projectId !== projectId || _uploading || _lbIdx !== -1) return;
+            _data = d;
+            _cats = Array.isArray(d.categories) ? [...d.categories] : [];
+            _render();
+        } catch (_) { /* 背景補跑失敗不打擾 — 畫面上已是 DB 現況 */ }
+    }, 800);
 }
 
 // ── 主渲染 ───────────────────────────────────────────────────

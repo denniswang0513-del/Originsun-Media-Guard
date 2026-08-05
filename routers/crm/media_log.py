@@ -791,9 +791,11 @@ async def _make_video_thumb(stored_path: str, project_id: str, file_id: str) -> 
 # ── Admin Endpoints ─────────────────────────────────────────
 
 @router.get("/projects/{project_id}/media-log")
-async def get_project_media_log(project_id: str, request: Request):
+async def get_project_media_log(project_id: str, request: Request, fast: int = 0):
     """影像紀錄管理面板 — 分享連結（自動 mint / 失效自癒重發）+ 資料夾設定
-    + 檔案清單（created_at DESC）。"""
+    + 檔案清單（created_at DESC）。
+    fast=1（切專案自動重載用）：跳過資料夾↔DB 同步（秒級 NAS SMB 掃描），
+    只回 DB 現況 — 前端拿到後會在背景再打一次全同步補真相。"""
     _check_media_log_auth(request)
     _require_db()
     db = await _db_settings()          # 一個 request 只查一次（root/cats 與分享網域共用）
@@ -810,7 +812,8 @@ async def get_project_media_log(project_id: str, request: Request):
         enabled = bool(row.enabled)
         await session.commit()
     # 資料夾↔DB 同步（admin 端不限流 — 開 tab 就看到最新真相；含匯入手動丟入的照片）
-    await _reconcile_files(factory, project_id, root, folder_name)
+    if not fast:
+        await _reconcile_files(factory, project_id, root, folder_name)
     async with factory() as session:
         files = await _list_files(session, project_id)
     # root 可能是 NAS UNC 路徑 — isdir 在斷線時會卡秒級，不佔 event loop

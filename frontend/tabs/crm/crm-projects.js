@@ -36,7 +36,7 @@ import { loadCostGroups, renderGroupSwitcher, initCostGroupsHandlers } from './c
 let _lastDetailId = null;
 function _reloadActiveDetailTab(projectId) {
     const tab = document.querySelector('#proj-detail-tabs .crm-tab.active')?.dataset.tab;
-    if (tab === 'media') _loadMediaTab(projectId);
+    if (tab === 'media') _loadMediaTab(projectId, { fast: true });
     else if (tab === 'refs') _loadRefsTab(projectId);
     else if (tab === 'delivery') loadDeliveryTab(projectId);
     else if (tab === 'team') { _loadCostStaff(projectId); _loadAdvances(projectId); }
@@ -451,12 +451,12 @@ async function _loadRefsTab(projectId) {
 // ── 影像紀錄 lazy loader ─────────────────────────────────────
 // 照 closing 的動態 import 模式；模組只 import 一次（瀏覽器快取），
 // 但每次點擊都重跑 loadMediaTab —— 內容依當前選中的專案重新抓取。
-async function _loadMediaTab(projectId) {
+async function _loadMediaTab(projectId, opts) {
     const container = document.getElementById('proj-detail-media');
     if (!container) return;
     try {
         const mod = await import('./crm-projects-media.js');
-        await mod.loadMediaTab(projectId, container);
+        await mod.loadMediaTab(projectId, container, opts);
     } catch (e) {
         container.innerHTML = `<div class="crm-empty" style="padding:24px;color:#fca5a5;">影像紀錄載入失敗: ${e.message}</div>`;
         console.error('影像紀錄載入失敗:', e);
