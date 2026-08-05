@@ -28,6 +28,12 @@ if (!work) return Astro.redirect("/works");
 
 // 相關作品：同製作類型（categories）排除自己，最多 3 件；不足時 fallback 用 published_at 鄰近
 // 用 categories 而非 tags — 製作類型才是品牌定位（兩件商業廣告比兩件「都帶展覽 tag」更近）
+// 創作過程（editor 的 process_items）→ 幕後工作照；只取圖片項，phase 併進 caption。
+// 版型/燈箱複用 ShowcaseGallery（Lightbox script 綁定頁上所有相簿容器，同頁兩組安全）。
+const processImages = (work.process_items || [])
+    .filter(p => p && p.url && (p.type || "image") === "image")
+    .map(p => ({ url: p.url, caption: [p.phase, p.caption].filter(Boolean).join(" — ") }));
+
 const workCategories = new Set(work.categories || []);
 const sameCategoryWorks = allWorks
     .filter(w => w.slug !== work.slug && (w.categories || []).some(c => workCategories.has(c)))
@@ -243,6 +249,16 @@ const blocks: ICreditBlock[] = normalizeCredits(work.credits);
             <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-10">
                 <div class="text-xs tracking-[0.4em] uppercase text-neutral-500 mb-6">Gallery</div>
                 <ShowcaseGallery images={work.gallery} title={work.title} />
+            </div>
+        </section>
+    )}
+
+    <!-- 創作過程 幕後工作照（editor process_items）：同 Gallery 版型 + 共用燈箱 -->
+    {processImages.length > 0 && (
+        <section class="bg-white pt-4 pb-16">
+            <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-10">
+                <div class="text-xs tracking-[0.4em] uppercase text-neutral-500 mb-6">Behind the Scenes</div>
+                <ShowcaseGallery images={processImages} title={work.title} />
             </div>
         </section>
     )}

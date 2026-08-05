@@ -1313,6 +1313,7 @@ async def upload_showcase_edit_process(token: str, file: UploadFile = File(...),
         sc.updated_at = _now()
         await session.commit()
         await session.refresh(sc)
+    await _mark_dirty_safe("showcase process upload")
     return {"status": "ok", "process_items": sc.process_items or []}
 
 
@@ -1392,6 +1393,7 @@ async def showcase_edit_process_from_media_log(token: str, request: Request):
         sc.updated_at = _now()
         await session.commit()
         await session.refresh(sc)
+    await _mark_dirty_safe("showcase process from-media-log")
     return {"status": "ok", "imported": len(new_items),
             "process_items": sc.process_items or []}
 
