@@ -2112,27 +2112,16 @@ async function _mlpOpen() {
     _mlpUpdateFooter();
     grid.innerHTML = '<div style="grid-column:1/-1;text-align:center;color:var(--text3);font-size:13px;padding:40px 0;">載入中…</div>';
     if (EMBED) {
-        // embed 的 iframe 高度=內容高度：fixed/vh 都是以整個超長 iframe 算，置中會
-        // 跑到父視窗看不到的地方、底部按鈕按不到。iframe 與 admin 同源 → 直接讀
-        // 父視窗可視區，把 overlay 釘在「父視窗目前看得到的那一片」並置中，
-        // modal 高度限制在可視高內（格線內部有捲軸、footer 恆在）。
-        let top = 0;
-        let vh = window.innerHeight;
-        try {
-            const fr = window.frameElement?.getBoundingClientRect();
-            if (fr && window.parent) {
-                top = Math.max(0, -fr.top);
-                vh = Math.min(window.parent.innerHeight - Math.max(fr.top, 0),
-                              document.documentElement.scrollHeight - top);
-            }
-        } catch (_) { /* cross-origin 父頁（理論上不會）→ 退回 iframe 視角 */ }
-        m.style.position = 'absolute';
-        m.style.top = top + 'px';
-        m.style.height = Math.max(vh, 280) + 'px';
-        m.style.alignItems = 'center';
-        m.style.paddingTop = '0';
-        const box = m.firstElementChild;
-        if (box) box.style.maxHeight = Math.max(vh - 40, 240) + 'px';
+        _mlpPlace();
+        // 跟著父視窗捲動走：開著時父頁捲動/縮放 → 重新定位（capture 才吃得到
+        // overlay 內層容器的 scroll）。同源才掛得上；關閉時 _mlpClose 拆。
+        if (!_mlpPlaceBound) {
+            _mlpPlaceBound = () => requestAnimationFrame(_mlpPlace);
+            try {
+                window.parent.addEventListener('scroll', _mlpPlaceBound, true);
+                window.parent.addEventListener('resize', _mlpPlaceBound);
+            } catch (_) {}
+        }
     }
     m.classList.add('show');
     // 每次開啟都重新 fetch — 收檔是進行式，清單要拿最新的
@@ -2166,7 +2155,41 @@ async function _mlpOpen() {
     }
 }
 
-function _mlpClose() { document.getElementById('media-log-pick-modal').classList.remove('show'); }
+// embed 定位：iframe 高=內容高，fixed/vh 以整個超長 iframe 計 — 同源直接讀
+// 父視窗可視區，overlay 釘在「父視窗目前看得到的那一片」置中；modal 高限
+// 可視高內（格線內捲、footer 按鈕恆在）。捲動時由 listener 重呼叫 = 跟著視窗走。
+let _mlpPlaceBound = null;
+function _mlpPlace() {
+    const m = document.getElementById('media-log-pick-modal');
+    let top = 0;
+    let vh = window.innerHeight;
+    try {
+        const fr = window.frameElement?.getBoundingClientRect();
+        if (fr && window.parent) {
+            top = Math.max(0, -fr.top);
+            vh = Math.min(window.parent.innerHeight - Math.max(fr.top, 0),
+                          document.documentElement.scrollHeight - top);
+        }
+    } catch (_) { /* cross-origin 父頁（理論上不會）→ 退回 iframe 視角 */ }
+    m.style.position = 'absolute';
+    m.style.top = top + 'px';
+    m.style.height = Math.max(vh, 280) + 'px';
+    m.style.alignItems = 'center';
+    m.style.paddingTop = '0';
+    const box = m.firstElementChild;
+    if (box) box.style.maxHeight = Math.max(vh - 40, 240) + 'px';
+}
+
+function _mlpClose() {
+    document.getElementById('media-log-pick-modal').classList.remove('show');
+    if (_mlpPlaceBound) {
+        try {
+            window.parent.removeEventListener('scroll', _mlpPlaceBound, true);
+            window.parent.removeEventListener('resize', _mlpPlaceBound);
+        } catch (_) {}
+        _mlpPlaceBound = null;
+    }
+}
 
 async function _mlpSubmit() {
     if (!_mlpSelected.size) return;
