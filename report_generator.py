@@ -168,105 +168,126 @@ def save_report(manifest, output_dir: str, custom_name: str = "",
     return out_path
 
 
-async def generate_pdf_from_html(local_html_path: str, output_pdf_path: str) -> bool:
-    """
-    Render a local HTML file to a PDF document using headless Chromium (Playwright).
+async def generate_pdf_from_html(local_html_path: str, output_pdf_path: str) -> tuple:
+    """HTML → PDF（headless Chromium / Playwright）。→ (ok, err_msg)。
+
+    err_msg 會被 report_job 寫進任務日誌 — 以前只回 bool，機器上真正的錯
+    （最常見：套件在但 Chromium 瀏覽器本體不在，launch 直接炸）全被吞在
+    stdout，任務日誌只剩籠統的「PDF 轉換失敗」。瀏覽器本體缺失現在會
+    現場補裝一次再重試（頂部的自癒只救 import 失敗，救不了這種）。
     """
     if not _PLAYWRIGHT_AVAILABLE:
-        print("[warn] Playwright is not available, skipping PDF generation.")
-        return False
-        
+        return False, "playwright 套件不可用（連自動安裝都失敗，需人工檢查 pip）"
     try:
-        file_url = f"file:///{local_html_path.replace(os.sep, '/')}"
-        async with async_playwright() as p:
-            browser = await p.chromium.launch(headless=True)
-            page = await browser.new_page()
-            # Wait for all resources (e.g. Base64 images) to fully load
-            await page.goto(file_url, wait_until="networkidle")
-            # Chromium PDF treats <table> as monolithic — convert to divs for proper pagination
-            await page.evaluate("""() => {
-                const wrapper = document.querySelector('.files-table-wrapper');
-                if (!wrapper) return;
-                const table = wrapper.querySelector('table');
-                if (!table) return;
-                wrapper.style.overflow = 'visible';
-                wrapper.style.border = 'none';
-
-                const thead = table.querySelector('thead tr');
-                const rows = Array.from(table.querySelectorAll('tbody tr'));
-                const widths = ['3%','35%','8%','10%','8%','8%','10%','18%'];
-                const container = document.createElement('div');
-
-                function makeFlex(cells, tag) {
-                    const row = document.createElement('div');
-                    const isHeader = tag === 'th';
-                    row.style.cssText = 'display:flex; align-items:center; padding:6px 0;' +
-                        (isHeader ? ' background:#f8f8f8; border-bottom:2px solid #e0e0e0; font-size:11px; font-weight:600; color:#555;' : ' border-bottom:1px solid #eee;');
-                    cells.forEach((cell, i) => {
-                        const d = document.createElement('div');
-                        d.style.cssText = 'padding:0 12px; width:' + (widths[i]||'10%') + '; flex-shrink:0; overflow:hidden;';
-                        d.innerHTML = cell.innerHTML;
-                        row.appendChild(d);
-                    });
-                    return row;
-                }
-
-                // Group: header + first data row in one unbreakable div
-                const firstGroup = document.createElement('div');
-                firstGroup.style.cssText = 'break-inside:avoid; page-break-inside:avoid;';
-                if (thead) firstGroup.appendChild(makeFlex(thead.querySelectorAll('th'), 'th'));
-
-                // Find first non-mobile data row
-                let firstDataIdx = 0;
-                for (let i = 0; i < rows.length; i++) {
-                    if (!rows[i].classList.contains('mobile-detail-row') && !rows[i].classList.contains('filmstrip-row')) {
-                        firstGroup.appendChild(makeFlex(rows[i].querySelectorAll('td'), 'td'));
-                        // Also grab its filmstrip if next row is filmstrip
-                        if (rows[i+1] && rows[i+1].classList.contains('filmstrip-row')) {
-                            const fs = document.createElement('div');
-                            fs.style.cssText = 'padding:0 12px 4px;';
-                            fs.innerHTML = rows[i+1].querySelector('td')?.innerHTML || '';
-                            firstGroup.appendChild(fs);
-                            firstDataIdx = i + 2;
-                        } else {
-                            firstDataIdx = i + 1;
-                        }
-                        break;
-                    }
-                }
-                container.appendChild(firstGroup);
-
-                // Remaining rows
-                for (let i = firstDataIdx; i < rows.length; i++) {
-                    const tr = rows[i];
-                    if (tr.classList.contains('mobile-detail-row')) continue;
-                    if (tr.classList.contains('filmstrip-row')) {
-                        const fs = document.createElement('div');
-                        fs.style.cssText = 'padding:0 12px 4px;';
-                        fs.innerHTML = tr.querySelector('td')?.innerHTML || '';
-                        container.appendChild(fs);
-                    } else {
-                        const row = makeFlex(tr.querySelectorAll('td'), 'td');
-                        row.style.cssText += ' break-inside:avoid; page-break-inside:avoid;';
-                        container.appendChild(row);
-                    }
-                }
-
-                table.replaceWith(container);
-                const toggle = wrapper.querySelector('.mobile-detail-toggle');
-                if (toggle) toggle.style.display = 'none';
-            }""")
-            await page.pdf(
-                path=output_pdf_path,
-                print_background=True,
-                format="A4",
-                landscape=True,
-                margin={"top": "10mm", "bottom": "10mm", "left": "10mm", "right": "10mm"}
-            )
-            await browser.close()
-        return True
+        await _render_pdf(local_html_path, output_pdf_path)
+        return True, ""
     except Exception as e:
-        print(f"[error] PDF Generation Failed: {e}")
+        msg = str(e)
+        if "Executable doesn't exist" in msg or "playwright install" in msg:
+            print("[warn] Chromium 瀏覽器本體缺失/版本不符，現場補裝後重試…")
+            try:
+                import asyncio as _aio
+                import subprocess as _sp2
+                import sys as _sys2
+                await _aio.to_thread(
+                    _sp2.run,
+                    [_sys2.executable, "-m", "playwright", "install", "chromium", "--with-deps"],
+                    capture_output=True, timeout=600)
+                await _render_pdf(local_html_path, output_pdf_path)
+                return True, ""
+            except Exception as e2:
+                msg = f"補裝 Chromium 後仍失敗: {e2}"
+        print(f"[error] PDF Generation Failed: {msg}")
         import traceback
         traceback.print_exc()
-        return False
+        return False, (msg.splitlines()[0] if msg else "unknown")[:200]
+
+
+async def _render_pdf(local_html_path: str, output_pdf_path: str) -> None:
+    file_url = f"file:///{local_html_path.replace(os.sep, '/')}"
+    async with async_playwright() as p:
+        browser = await p.chromium.launch(headless=True)
+        page = await browser.new_page()
+        # Wait for all resources (e.g. Base64 images) to fully load
+        await page.goto(file_url, wait_until="networkidle")
+        # Chromium PDF treats <table> as monolithic — convert to divs for proper pagination
+        await page.evaluate("""() => {
+            const wrapper = document.querySelector('.files-table-wrapper');
+            if (!wrapper) return;
+            const table = wrapper.querySelector('table');
+            if (!table) return;
+            wrapper.style.overflow = 'visible';
+            wrapper.style.border = 'none';
+
+            const thead = table.querySelector('thead tr');
+            const rows = Array.from(table.querySelectorAll('tbody tr'));
+            const widths = ['3%','35%','8%','10%','8%','8%','10%','18%'];
+            const container = document.createElement('div');
+
+            function makeFlex(cells, tag) {
+                const row = document.createElement('div');
+                const isHeader = tag === 'th';
+                row.style.cssText = 'display:flex; align-items:center; padding:6px 0;' +
+                    (isHeader ? ' background:#f8f8f8; border-bottom:2px solid #e0e0e0; font-size:11px; font-weight:600; color:#555;' : ' border-bottom:1px solid #eee;');
+                cells.forEach((cell, i) => {
+                    const d = document.createElement('div');
+                    d.style.cssText = 'padding:0 12px; width:' + (widths[i]||'10%') + '; flex-shrink:0; overflow:hidden;';
+                    d.innerHTML = cell.innerHTML;
+                    row.appendChild(d);
+                });
+                return row;
+            }
+
+            // Group: header + first data row in one unbreakable div
+            const firstGroup = document.createElement('div');
+            firstGroup.style.cssText = 'break-inside:avoid; page-break-inside:avoid;';
+            if (thead) firstGroup.appendChild(makeFlex(thead.querySelectorAll('th'), 'th'));
+
+            // Find first non-mobile data row
+            let firstDataIdx = 0;
+            for (let i = 0; i < rows.length; i++) {
+                if (!rows[i].classList.contains('mobile-detail-row') && !rows[i].classList.contains('filmstrip-row')) {
+                    firstGroup.appendChild(makeFlex(rows[i].querySelectorAll('td'), 'td'));
+                    // Also grab its filmstrip if next row is filmstrip
+                    if (rows[i+1] && rows[i+1].classList.contains('filmstrip-row')) {
+                        const fs = document.createElement('div');
+                        fs.style.cssText = 'padding:0 12px 4px;';
+                        fs.innerHTML = rows[i+1].querySelector('td')?.innerHTML || '';
+                        firstGroup.appendChild(fs);
+                        firstDataIdx = i + 2;
+                    } else {
+                        firstDataIdx = i + 1;
+                    }
+                    break;
+                }
+            }
+            container.appendChild(firstGroup);
+
+            // Remaining rows
+            for (let i = firstDataIdx; i < rows.length; i++) {
+                const tr = rows[i];
+                if (tr.classList.contains('mobile-detail-row')) continue;
+                if (tr.classList.contains('filmstrip-row')) {
+                    const fs = document.createElement('div');
+                    fs.style.cssText = 'padding:0 12px 4px;';
+                    fs.innerHTML = tr.querySelector('td')?.innerHTML || '';
+                    container.appendChild(fs);
+                } else {
+                    const row = makeFlex(tr.querySelectorAll('td'), 'td');
+                    row.style.cssText += ' break-inside:avoid; page-break-inside:avoid;';
+                    container.appendChild(row);
+                }
+            }
+
+            table.replaceWith(container);
+            const toggle = wrapper.querySelector('.mobile-detail-toggle');
+            if (toggle) toggle.style.display = 'none';
+        }""")
+        await page.pdf(
+            path=output_pdf_path,
+            print_background=True,
+            format="A4",
+            landscape=True,
+            margin={"top": "10mm", "bottom": "10mm", "left": "10mm", "right": "10mm"}
+        )
+        await browser.close()

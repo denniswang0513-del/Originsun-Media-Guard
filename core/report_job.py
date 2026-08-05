@@ -137,11 +137,12 @@ async def _run_report_job(req: ReportJobRequest, job_id: str = ""):
 
         await _emit_rpt(job_id, "render", 50, "📄 正在轉換 PDF 文件...")
         local_pdf = local_html.replace(".html", ".pdf")
-        pdf_success = await generate_pdf_from_html(local_html, local_pdf)
+        pdf_success, pdf_err = await generate_pdf_from_html(local_html, local_pdf)
         if pdf_success:
             await _emit_log(job_id, "system", f"📄 PDF 建立成功: {local_pdf}")
         else:
-            await _emit_log(job_id, "error", "⚠️ PDF 轉換失敗，僅產出 HTML 報表")
+            await _emit_log(job_id, "error",
+                            f"⚠️ PDF 轉換失敗，僅產出 HTML 報表（{pdf_err or '原因不明'}）")
             local_pdf = ""
 
         # Phase 5: Publish Public URL
