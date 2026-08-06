@@ -36,10 +36,8 @@ except ImportError:  # DB 套件不存在的 agent 環境
 def proposals_root() -> str:
     """提案資產根目錄（已翻成本機視角，可直接開檔）。未設 → ""。
 
-    走 settings.json 而不是 DB settings（影像紀錄走 DB）—— 判準是「幾台機器
-    在跑」：影像紀錄的收檔端在 master 與 NAS 對外容器都有，設定各存各的會讓
-    照片安靜散落兩處；提案資產夾只有 master 會寫，與片庫 reference_archive.dir
-    同一條路。詳見 core/project_folders 檔頭表格。
+    走 settings.json 而不是 DB settings —— 判準（幾台機器會寫這個資料夾）
+    寫在 core/project_folders 檔頭表格；提案資產夾只有 master 會寫。
     """
     conf = load_settings().get("proposals") or {}
     return to_local_path(str(conf.get("root") or "").strip())
@@ -89,18 +87,23 @@ async def rename_project_folder(session, project_id: str, project_name: str,
         return False, ""
 
     async def _remap(old_dir: str, new_dir: str) -> None:
+        # 只撈 id/deck_url 兩欄 + 批次 update（整列 select 會把 plan 企劃矩陣
+        # 的 JSONB 一起拖出來，單筆可數十 KB）—— 與 media_log 的 _remap 同形狀
+        from sqlalchemy import update as sa_update
         from db.models import PreprodProposal
         old_canon, new_canon = to_canonical_path(old_dir), to_canonical_path(new_dir)
-        props = (await session.execute(
-            select(PreprodProposal).where(
-                PreprodProposal.project_id == project_id))).scalars().all()
-        for prop in props:
-            remapped = remap_prefix(prop.deck_url or "", old_canon, new_canon)
-            if remapped != (prop.deck_url or ""):
-                prop.deck_url = remapped
+        rows = (await session.execute(
+            select(PreprodProposal.id, PreprodProposal.deck_url)
+            .where(PreprodProposal.project_id == project_id,
+                   PreprodProposal.deck_url.isnot(None)))).all()
+        updates = [{"id": pid, "deck_url": new}
+                   for pid, url in rows
+                   if (new := remap_prefix(url or "", old_canon, new_canon)) != (url or "")]
+        if updates:
+            await session.execute(sa_update(PreprodProposal), updates)
 
     changed, err = await rename_and_remap(
-        os.path.join(root, project.proposal_folder_name),
+        session, os.path.join(root, project.proposal_folder_name),
         os.path.join(root, new_name), remap=_remap)
     if not changed:
         return False, err

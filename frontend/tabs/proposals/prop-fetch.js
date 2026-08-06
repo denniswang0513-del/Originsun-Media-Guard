@@ -27,7 +27,17 @@ export async function tfetch(path, opts = {}) {
         err.detail = detail;
         throw err;
     }
-    return r.json();
+    const data = await r.json();
+    // 後端的 warning（如「封存資料夾改名失敗」）在這條咽喉也要浮出來 ——
+    // 片庫/提案頁走的是 tfetch 不是 crmFetch，只收 crmFetch 等於漏了 1/3。
+    // 動態 import：公開 token 頁（guest）也走這份 fetcher，不該為了 toast
+    // 在載入時就把 CRM 模組拖進來。
+    if (data && data.warning) {
+        import('../crm/crm-utils.js')
+            .then(m => m.surfaceWarning(data))
+            .catch(() => console.warn(data.warning));
+    }
+    return data;
 }
 
 /**

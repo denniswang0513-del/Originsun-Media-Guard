@@ -31,7 +31,7 @@ from fastapi import File, Form, HTTPException, Request, UploadFile
 from config import load_settings
 from core.assets_host import assets_target
 from core.drive_map import to_canonical_path, to_local_path
-from core.project_folders import (clean_name as _clean_name,
+from core.project_folders import (clean_filename, clean_name as _clean_name,
                                   make_dated_folder_name, remap_prefix,
                                   rename_and_remap, taken_names)
 from core.subproc import run_capture
@@ -77,11 +77,7 @@ _READ_CHUNK = 1024 * 1024  # 1MB — 分塊讀寫，大檔不整包進記憶體
 
 # ── 純函式（單元測試對象 — 不碰磁碟/DB，存在性用 callable 注入）──
 
-def _sanitize_filename(name: str) -> str:
-    """上傳原檔名 → 合法檔名：先去路徑成分；清完全空 → "upload"
-    （副檔名保留 — "." 不在非法清單）。"""
-    base = os.path.basename(str(name or "").replace("\\", "/"))
-    return _clean_name(base) or "upload"
+_sanitize_filename = clean_filename   # 正本在 core.project_folders（跨模組共用）
 
 
 def _norm_categories(cats) -> list:
@@ -244,7 +240,7 @@ async def rename_project_folder(session, project_id: str, project_name: str,
             await session.execute(sa_update(ProjectMediaFile), updates)
 
     changed, err = await rename_and_remap(
-        _project_folder(root, row.folder_name),
+        session, _project_folder(root, row.folder_name),
         _project_folder(root, new_name), remap=_remap)
     if not changed:
         return False, err

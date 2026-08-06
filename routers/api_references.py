@@ -787,7 +787,7 @@ async def patch_reference(rid: str, req: ReferencePatch, request: Request):
             except Exception as e:
                 err = f"{type(e).__name__}: {e}"
             if err:
-                warning = f"封存資料夾改名失敗（{err}）— 資料夾維持舊名"
+                warning = f"封存資料夾改名失敗：{err}"
         await session.commit()
     return {"status": "ok", **out, **({"warning": warning} if warning else {})}
 

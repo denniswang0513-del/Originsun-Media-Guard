@@ -2,25 +2,27 @@
 
 三個子系統共用同一套規則（2026-08-06 owner 指定）：
 
-| 子系統   | 根目錄                  | 每夾命名              | 改名觸發     |
-|----------|------------------------|----------------------|-------------|
-| 影像紀錄 | `media_log.root`       | `{專案建立日}_{專案名}` | 專案改名     |
-| 提案庫   | `proposals.root`       | `{專案建立日}_{專案名}` | 專案改名     |
-| 片庫     | `reference_archive.dir`| `{片名}_{品牌}`        | 片名/品牌改動 |
+| 子系統   | 根目錄設定              | 設定存哪／為什麼            | 每夾命名              | 改名觸發     |
+|----------|------------------------|----------------------------|----------------------|-------------|
+| 影像紀錄 | `media_log.root`       | **DB**（收檔端在 master 與 NAS 對外容器都有，各存各的會讓照片安靜散落兩處） | `{專案建立日}_{專案名}` | 專案改名     |
+| 提案庫   | `proposals.root`       | settings.json（只有 master 會寫） | `{專案建立日}_{專案名}` | 專案改名     |
+| 片庫     | `reference_archive.dir`| settings.json（封存 runner 是 master-only） | `{片名}_{品牌}`        | 片名/品牌改動 |
 
+判準＝**幾台機器會寫這個資料夾**：兩台以上 → DB（單一真相），只有 master → settings.json。
 日期一律取**專案建立日**（不是當天）—— 改名時資料夾不會跳到今天。
 
 🔴 **改名的鐵則：實體 rename 與 DB 內絕對路徑的更新必須同進退。**
 影像紀錄的 `ProjectMediaFile.stored_path`、片庫的 `PreprodReference.archive_path`
 存的都是絕對路徑；只 rename 不更新 DB → 舊記錄指向不存在的路徑，而新路徑的
 檔案會被資料夾↔DB 同步當成「新檔」再匯入一遍（同一張照片兩筆記錄）。
-所以呼叫端一律：rename_dir 成功後、同一個 session 內做 remap_prefix 批次更新。
+**呼叫端一律走 `rename_and_remap`**（順序、savepoint、補償都在裡面）——
+不要自己組 `rename_dir` + `remap_prefix`，那樣會少掉補償這一步。
 
 改名失敗（檔案被開著 → PermissionError）不可以讓來源改名整個失敗：
-呼叫端拿到 (False, err) 就保留舊資料夾名 + 把 err 當 warning 回前端，
-**名稱本身照樣改成功**。資料夾名與顯示名暫時不同步，下次改名會再試一次。
+呼叫端拿到 err 就保留舊資料夾名 + 當 warning 回前端，**名稱本身照樣改成功**。
+資料夾名與顯示名暫時不同步，下次改名會再試一次。
 
-純函式（clean_name / make_* / remap_prefix）不碰磁碟，單元測試對象見
+純函式（clean_name / make_* / remap_prefix / dedupe）不碰磁碟，單元測試對象見
 tests/unit/test_project_folders.py。
 """
 from __future__ import annotations
@@ -44,26 +46,31 @@ def clean_name(s: str) -> str:
     ).strip()
 
 
+def clean_filename(name: str) -> str:
+    """上傳原檔名 → 合法檔名：先去路徑成分；清完全空 → "upload"
+    （副檔名保留 —— "." 不在非法清單）。"""
+    base = os.path.basename(str(name or "").replace("\\", "/"))
+    return clean_name(base) or "upload"
+
+
 def _segment(s: str, limit: int = _MAX_SEGMENT_LEN) -> str:
     """清洗 + 截斷單一名稱片段（片名/專案名可能很長，路徑有 260 上限）。"""
     return clean_name(s)[:limit].strip()
 
 
-def dedupe(base: str, taken: Optional[set] = None, ext: str = "") -> str:
+def dedupe(base: str, taken: Optional[set] = None, keep_ext: bool = False) -> str:
     """撞名補 -2、-3…（taken = 同一層已被佔用的名字集合）。
 
-    `ext` 給檔名用（補號要插在副檔名**前面**：`稿.pdf` → `稿-2.pdf`）；
-    資料夾名不傳，直接接在尾端。
+    `keep_ext=True` 給**檔名**用 —— 補號插在副檔名前面（`稿.pdf` → `稿-2.pdf`）。
+    副檔名在函式內自己拆，呼叫端不必傳（傳進來就得跟 base 保持大小寫一致，
+    `稿.PDF` 配 `.pdf` 會拆不出來、補成 `稿.PDF-2.pdf`）。
     """
-    stem = base[:-len(ext)] if ext and base.endswith(ext) else base
+    stem, ext = os.path.splitext(base) if keep_ext else (base, "")
     name, i = base, 2
     while name in (taken or set()):
         name = f"{stem}-{i}{ext}"
         i += 1
     return name
-
-
-_dedupe = dedupe          # 模組內既有呼叫沿用
 
 
 _DATE_PREFIX_RE = re.compile(r"^(\d{8})_")
@@ -80,7 +87,7 @@ def make_dated_folder_name(project_name: str, created: datetime,
     """
     m = _DATE_PREFIX_RE.match(str(existing or ""))
     prefix = m.group(1) if m else created.strftime("%Y%m%d")
-    return _dedupe(f"{prefix}_{_segment(project_name) or 'project'}", taken)
+    return dedupe(f"{prefix}_{_segment(project_name) or 'project'}", taken)
 
 
 def make_reference_folder_name(title: str, brand: str = "",
@@ -93,18 +100,19 @@ def make_reference_folder_name(title: str, brand: str = "",
     """
     head = _segment(title) or _segment(fallback) or "reference"
     tail = _segment(brand, 40)
-    return _dedupe(f"{head}_{tail}" if tail else head, taken)
+    return dedupe(f"{head}_{tail}" if tail else head, taken)
 
 
-async def taken_names(session, name_col, id_col=None, exclude_id: str = "") -> set:
+async def taken_names(session, name_col, id_col, exclude_id: str = "") -> set:
     """同一個 root 底下已被佔用的資料夾名（撞名補 -2 用）。
 
-    三個子系統的 taken 查詢形狀完全相同，只差 model/欄位 → 收成這一支。
+    給**把資料夾名存成欄位**的子系統（影像紀錄、提案庫）；片庫的資料夾名是
+    從 `archive_path` 的 dirname 反推、沒有欄位，自己有一份反推版。
     改名時傳 `exclude_id` 排除自己（否則會跟自己撞名、平白補號）。
     """
     from sqlalchemy import select
     q = select(name_col).where(name_col.isnot(None))
-    if exclude_id and id_col is not None:
+    if exclude_id:
         q = q.where(id_col != exclude_id)
     return {n for n in (await session.execute(q)).scalars() if n}
 
@@ -158,28 +166,36 @@ def rename_dir(old_abs: str, new_abs: str, *,
     return True, ""
 
 
-async def rename_and_remap(old_dir: str, new_dir: str, *, remap=None) -> tuple:
+async def rename_and_remap(session, old_dir: str, new_dir: str, *, remap) -> tuple:
     """改名的**單一程序**（三個資產子系統共用）→ `(changed, err)`。
 
     `old_dir` / `new_dir` 用呼叫端的視角（canonical UNC 或本機皆可）—— 開檔前
-    自己翻成本機視角，`remap` 收到的仍是原視角路徑。
-    `remap(old_dir, new_dir)` 是 async callable，負責更新 DB 內的絕對路徑。
+    自己翻成本機視角。**`remap` 收到的是同一組原視角路徑**，要寫進 DB 前自己
+    決定要不要 `to_canonical_path`（影像紀錄/提案庫傳本機視角所以要轉，片庫
+    傳的本來就是 canonical 所以不轉）。
 
-    🔴 不變式「磁碟與 DB 同進退」在這裡靠**執行順序 + 補償**保證，不是靠呼叫端
-    的 try/except：rename 失敗 → 什麼都不動；rename 成功但 remap 拋例外 →
-    **把資料夾改回舊名**再回報失敗。少了補償這步，呼叫端一個 except 就會留下
-    「磁碟已改名、DB 還指舊路徑」，而那正是照片被當新檔重複匯入的成因。
+    🔴 不變式「磁碟與 DB 同進退」靠**順序 + savepoint + 補償**三層保證：
+    1. rename 失敗 → 什麼都不動，回原因。
+    2. remap 包在 `begin_nested()` savepoint 裡 —— DB 例外會只回滾這一段，
+       呼叫端的 session 仍可用（沒有 savepoint 的話，一個 remap 例外會讓外層
+       交易進入 failed 狀態，後面的子系統與最終 commit 全部連鎖失敗）。
+    3. remap 失敗 → **把資料夾改回舊名**。補償**本身**也失敗才是真的不一致，
+       那種情況回一個講實話、可辨識的訊息（呼叫端會當 warning 呈現）。
     """
     from core.drive_map import to_local_path
     ok, err = await asyncio.to_thread(
         rename_dir, to_local_path(old_dir), to_local_path(new_dir))
     if not ok:
-        return False, err
-    if remap is not None:
-        try:
+        return False, f"{err}；資料夾維持舊名，檔案未受影響"
+    try:
+        async with session.begin_nested():
             await remap(old_dir, new_dir)
-        except Exception as e:
-            await asyncio.to_thread(
-                rename_dir, to_local_path(new_dir), to_local_path(old_dir))
-            return False, f"路徑同步失敗，資料夾已還原（{type(e).__name__}: {e}）"
+    except Exception as e:
+        undone, undo_err = await asyncio.to_thread(
+            rename_dir, to_local_path(new_dir), to_local_path(old_dir))
+        if not undone:
+            return False, (f"路徑同步失敗（{type(e).__name__}: {e}）"
+                           f"且資料夾無法改回舊名（{undo_err}）—— "
+                           f"資料夾現在叫「{os.path.basename(new_dir)}」但紀錄仍指舊路徑，需人工處理")
+        return False, f"路徑同步失敗（{type(e).__name__}: {e}）；資料夾已改回舊名"
     return True, ""

@@ -228,7 +228,8 @@ def archive_folder_name(ref, taken=None) -> str:
 
 async def _taken_folder_names(session, exclude_rid: str = "") -> set:
     """同 root 底下已被佔用的資料夾名（撞名補 -2 用）—— 從既有 archive_path
-    反推（片庫的資料夾名不另存欄位，dirname 就是它）。"""
+    反推。片庫的資料夾名不另存欄位（dirname 就是它），所以走不了
+    core.project_folders.taken_names 那支欄位版。"""
     from sqlalchemy import select
     from db.models import PreprodReference
     rows = (await session.execute(
@@ -248,12 +249,13 @@ async def _folder_name_for(factory, rid: str) -> str:
         return archive_folder_name(ref, await _taken_folder_names(s, rid))
 
 
-async def rename_archive_folder(session, ref) -> tuple:
+async def rename_archive_folder(session, ref, taken: set = None) -> tuple:
     """片名／品牌改動 → 封存資料夾跟著改名 + `archive_path` 同步。
     回 `(changed, err)`，**不 commit**（與呼叫端的欄位更新同一交易）。
 
     還沒建檔（archive_path 空）→ no-op，之後建檔自然用新名。改名/同步失敗
     → 回錯誤原因，資料夾與 archive_path 都維持原狀（rename_and_remap 保證）。
+    `taken` 由遷移迴圈傳入（自己維護、改一支加一個），省掉逐支全表掃描。
     """
     from core.project_folders import remap_prefix, rename_and_remap
 
@@ -262,10 +264,12 @@ async def rename_archive_folder(session, ref) -> tuple:
         return False, ""
     old_dir = os.path.dirname(old_path)
     # 先算不補號的候選名：與現名相同就直接收工，不必為了 taken 掃全表
-    # （遷移迴圈與「改的字清洗後同名」都會走到這條，是最常見的路徑）
+    # （改片名但清洗後同名 → PATCH 端點最常走這條）
     if archive_folder_name(ref) == os.path.basename(old_dir):
         return False, ""
-    new_name = archive_folder_name(ref, await _taken_folder_names(session, ref.id))
+    if taken is None:                 # 遷移迴圈自己維護一份，不逐支重掃全表
+        taken = await _taken_folder_names(session, ref.id)
+    new_name = archive_folder_name(ref, taken)
     if new_name == os.path.basename(old_dir):
         return False, ""
 
@@ -273,7 +277,8 @@ async def rename_archive_folder(session, ref) -> tuple:
         ref.archive_path = remap_prefix(old_path, od, nd)
 
     return await rename_and_remap(
-        old_dir, os.path.join(os.path.dirname(old_dir), new_name), remap=_remap)
+        session, old_dir, os.path.join(os.path.dirname(old_dir), new_name),
+        remap=_remap)
 
 
 async def migrate_folder_names() -> int:
@@ -295,13 +300,18 @@ async def migrate_folder_names() -> int:
 
     # 先一次撈完、在記憶體裡挑出「名字真的不一樣」的 —— 穩態（都遷完了）就是
     # 一個查詢結束，不會每次開機對每支片各掃一次全表。
+    # 只取算名字要用的欄位：整列 select 會把 research/description 的 JSONB
+    # 一起拖出來，而這些在遷移裡一個字都用不到。
     async with factory() as s:
-        refs = (await s.execute(
-            select(PreprodReference)
-            .where(PreprodReference.archive_path.isnot(None)))).scalars().all()
-        stale = [r.id for r in refs
-                 if archive_folder_name(r)
-                 != os.path.basename(os.path.dirname(r.archive_path or ""))]
+        rows = (await s.execute(
+            select(PreprodReference.id, PreprodReference.title,
+                   PreprodReference.video_id, PreprodReference.facets,
+                   PreprodReference.archive_path)
+            .where(PreprodReference.archive_path.isnot(None)))).all()
+    taken = {os.path.basename(os.path.dirname(r.archive_path)) for r in rows}
+    stale = [r.id for r in rows
+             if archive_folder_name(r)
+             != os.path.basename(os.path.dirname(r.archive_path or ""))]
     if not stale:
         return 0
     migrated = 0
@@ -311,9 +321,15 @@ async def migrate_folder_names() -> int:
                 ref = await s.get(PreprodReference, rid)
                 if not ref or not ref.archive_path:
                     continue
-                changed, _err = await rename_archive_folder(s, ref)
+                # taken 在迴圈內自己維護（逐支重掃全表在首次遷移是 O(N²)）：
+                # 排除自己的舊名 → 改名成功後舊名釋放、新名佔用
+                old_name = os.path.basename(os.path.dirname(ref.archive_path))
+                changed, _err = await rename_archive_folder(
+                    s, ref, taken - {old_name})
                 if changed:
                     await s.commit()
+                    taken.discard(old_name)
+                    taken.add(os.path.basename(os.path.dirname(ref.archive_path)))
                     migrated += 1
         except Exception as e:
             logger.warning("[ref_archiver] 資料夾改名遷移跳過 %s：%s", rid, e)

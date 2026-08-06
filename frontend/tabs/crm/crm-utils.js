@@ -56,10 +56,18 @@ async function _doFetch(url, opts) {
             : (err.detail || '請求失敗');
         throw new Error(detail);
     }
-    const data = await res.json();
-    // 「成功但有話要說」的統一出口：後端回 warning = 主要動作成功、附帶副作用
-    // 沒做成（例：專案改名成功，但資產資料夾正被開著改不動）。收在這個咽喉，
-    // 每個呼叫端就不必各自記得檢查 —— 沒接住的話那些提示等於不存在。
+    return surfaceWarning(await res.json());
+}
+
+/**
+ * 「成功但有話要說」的統一出口：後端回 warning = 主要動作成功、附帶副作用沒
+ * 做成（例：專案改名成功，但資產資料夾正被開著改不動）。收在 fetch 咽喉，
+ * 呼叫端就不必各自記得檢查 —— 沒接住的話那些提示等於不存在。
+ *
+ * 給所有帶 UI 的 fetch 咽喉共用（crmFetch 與提案/片庫的 tfetch）；回傳原
+ * data 以便 `return surfaceWarning(await res.json())` 直接串接。
+ */
+export function surfaceWarning(data) {
     if (data && data.warning) crmToast(String(data.warning), 6000);
     return data;
 }

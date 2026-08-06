@@ -1066,10 +1066,9 @@ async def upload_deck(pid: str, request: Request, file: UploadFile = File(...)):
     factory = _require_factory()
 
     from core.drive_map import to_canonical_path
-    from core.project_folders import dedupe
+    from core.project_folders import clean_filename, dedupe
     from db.models import CrmProject
     from routers.crm import proposal_assets
-    from routers.crm.media_log import _sanitize_filename
 
     async with factory() as session:
         prop = await _get_proposal_or_404(session, pid)
@@ -1083,9 +1082,9 @@ async def upload_deck(pid: str, request: Request, file: UploadFile = File(...)):
 
         if asset_dir:
             # 撞名探測一次列目錄（每個候選名各打一次 SMB exists 會多好幾趟）
-            base = _sanitize_filename(file.filename or "") or f"deck{ext}"
+            base = clean_filename(file.filename or "")
             taken = set(await asyncio.to_thread(os.listdir, asset_dir))
-            dest = os.path.join(asset_dir, dedupe(base, taken, ext=ext))
+            dest = os.path.join(asset_dir, dedupe(base, taken, keep_ext=True))
             await asyncio.to_thread(_write_bytes, dest, content)
             prop.deck_url = to_canonical_path(dest)
         else:

@@ -450,7 +450,9 @@ async def _rename_asset_folders(session, project) -> list:
         except Exception as e:      # 單一子系統壞掉不擋改名，也不擋其他子系統
             err = f"{type(e).__name__}: {e}"
         if err:
-            warnings.append(f"{label}資料夾改名失敗（{err}）— 資料夾維持舊名，檔案未受影響")
+            # 狀態尾句（維持舊名／已改回／需人工處理）由 rename_and_remap 給 ——
+            # 只有它知道補償結果，呼叫端不該自己斷言
+            warnings.append(f"{label}資料夾改名失敗：{err}")
     return warnings
 
 
