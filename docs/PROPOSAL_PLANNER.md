@@ -1001,10 +1001,16 @@ proposal 模組表，三處都加了 `crm_projects` —— 有專案管理的人
 
 **行為**（正本 `routers/api_proposals.py` 頂部「提案=專案合體」區 +
 `routers/crm/projects.py _sync_linked_proposals`）：
-- `POST /proposals`：**client_id 必填**（422；工作區表單有「＋ 新客戶」快速建
-  潛在客戶）→ 走 `create_project_in_session`（建案單一正本：AM 繼承/主表+雜支
-  種子/客戶分級）自動建殼專案。body 帶 `project_id` → 改為掛載既有專案
-  （專案詳情「提案企劃」分頁的建立路徑），client_id 繼承專案。
+- `POST /proposals`：走 `create_project_in_session`（建案單一正本：AM 繼承/
+  主表+雜支種子/客戶分級）自動建殼專案。body 帶 `project_id` → 改為掛載既有
+  專案（專案詳情「提案企劃」分頁的建立路徑），client_id 繼承專案。
+- **客戶可空**（2026-08-06 當日修正，owner：「這兩個直接就可以整並在提案的
+  頁面上了」）：`crm_projects.client_id` 從 NOT NULL 放寬為 nullable
+  （main.py startup `ALTER … DROP NOT NULL`）。原本「建提案客戶必填」是遷就
+  舊 schema 的折衷，代價是沒客戶的草稿提案卡在提案帶進不了管線 —— 而前期
+  草稿還沒定客戶是常態。現在一律入列，客戶欄顯示「待補客戶」，之後在專案
+  詳情 inline 補（可清空、可改）。**手建專案仍要求選客戶**
+  （`CrmProjectPayload.client_id: str` 必填 + 前端擋），只有提案建殼路徑允許空。
 - **win/loss 觸發點 = 專案階段轉換**：專案進 製作/結案/歸檔 → 衛星提案記
   「成案」；轉「未成案」→ 提案記 loss，`outcome_reason` 必填（422 擋，
   detail.code=`OUTCOME_REASON_REQUIRED`；前端 inline 編輯先 prompt）。
@@ -1014,9 +1020,10 @@ proposal 模組表，三處都加了 `crm_projects` —— 有專案管理的人
 - `GET /crm/projects` 附掛 `proposal_status`（最近更新的衛星列）→ 管線列
   子狀態 badge。
 - **存量遷移**：`migrate_unlinked_proposals_to_projects()`（main.py startup，
-  冪等、逐列 FOR UPDATE 防機隊並發）：有客戶沒專案的提案自動補殼；
-  無客戶的留 legacy（提案帶只剩這種卡，補上客戶即自動入列 —— PUT 也會自癒建殼）。
-  「擱置」刻意不遷。
+  冪等、逐列 FOR UPDATE 防機隊並發）：沒專案的提案全部補殼（含無客戶的）。
+  只有「擱置」刻意不遷；擱置改回其他狀態時 PUT 會自癒建殼。
+- **提案帶已退役**：正常情況永遠空（`:empty{display:none}` → 完全不佔版面），
+  只在遷移失敗產生孤兒時當防呆顯示；總表不再打提案 API。
 - **提案庫 Tab 保留 = 企劃工作區**（owner 拍板）；`/proposal-plan.html` 獨立
   登入頁與公開共編不受影響。專案詳情新增「提案企劃」分頁
   （`crm-projects-plan.js` 嵌 plan-matrix，同工作區 overlay 的登入模式）。

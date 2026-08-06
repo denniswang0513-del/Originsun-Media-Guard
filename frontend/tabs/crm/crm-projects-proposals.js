@@ -107,12 +107,19 @@ function _wireHost(host) {
     });
 }
 
-/** 依 filters 狀態（或明確傳入的 override，如結案收件匣要清空）更新提案帶。 */
+/** 依 filters 狀態（或明確傳入的 override，如結案收件匣要清空）更新提案帶。
+ *
+ * 提案=專案合體（2026-08-06）後**正常情況這條帶永遠是空的** —— 提案誕生即
+ * 建殼專案、存量也由 startup 遷移補完，全部就長在下面的專案列裡。留著純為
+ * 防呆：萬一遷移失敗（DB 故障）產生孤兒提案，它們不會人間蒸發。
+ * 空字串 innerHTML + `#proj-proposal-strip:empty{display:none}` = 完全不佔版面。
+ */
 export async function syncProposalStrip(statusOverride) {
     const host = document.getElementById(HOST_ID);
     if (!host) return;
     const stage = statusOverride !== undefined ? statusOverride : (state.filters.status || '');
-    if (stage !== '' && !(stage in STAGE_STATUSES)) { host.innerHTML = ''; return; }
+    // 總表不再顯示提案數字帶（提案已在專案列內）→ 連提案 API 都不用打
+    if (!(stage in STAGE_STATUSES)) { host.innerHTML = ''; return; }
     _injectStyle();
     _wireHost(host);
 
@@ -121,29 +128,12 @@ export async function syncProposalStrip(statusOverride) {
         all = await _proposals();
     } catch (_) { host.innerHTML = ''; return; }   // 拿不到（罕見）就安靜隱藏，不擋專案列表
 
-    // 提案=專案合體（2026-08-06）：提案誕生即建殼專案入管線，帶客戶的存量
-    // 提案也已由 startup 遷移補殼。帶上只剩 **legacy 無客戶提案**（沒客戶建
-    // 不了專案）—— 補上客戶（工作區編輯 / 成案 chooser）就會自動入列消失。
-    if (stage === '') {
-        const n = all.filter(p => !p.project_id && STAGE_STATUSES['提案'].includes(p.status)).length;
-        host.innerHTML = n ? `
-            <div class="projprop-bar">
-                <span class="projprop-badge">提案庫</span>
-                <span>待補客戶的提案 <b>${n}</b> 筆（補上客戶即自動入列專案管線）</span>
-                <a data-goto>看「提案」分頁 →</a>
-            </div>` : '';
-        host.querySelector('[data-goto]')?.addEventListener('click', () => {
-            document.querySelector('#proj-sub-tabs [data-status="提案"]')?.click();
-        });
-        return;
-    }
-
     const rows = all.filter(p => STAGE_STATUSES[stage].includes(p.status)
                              && !p.project_id);
     host.innerHTML = rows.length
         ? `<div class="projprop-cards">${rows.map(p => _propCard(p, {
-            badge: '待補客戶',
-            action: stage === '提案' ? '<button data-convert>成案 →</button>' : '',
+            badge: '尚未入管線',
+            action: stage === '提案' ? '<button data-convert>建立專案 →</button>' : '',
         })).join('')}</div>`
         : '';
 }

@@ -61,11 +61,12 @@ PROPOSAL_WIN_STATUSES = {"製作", "結案", "歸檔"}
 async def _create_shell_project(session, prop, status: str = ""):
     """從提案衛星列建殼專案 — 走 routers/crm/projects.py 的建案單一正本
     （客戶檢核/AM 繼承/主表+雜支種子/客戶分級），不 commit。
-    status 不給就依提案狀態對映（/convert 明確給「製作」覆寫）。"""
+    status 不給就依提案狀態對映（/convert 明確給「製作」覆寫）。
+    客戶未定（client_id 空）也照建 —— 空字串正規化成 None 存 DB。"""
     from routers.crm.projects import create_project_in_session
     project, _cname = await create_project_in_session(session, {
         "name": prop.title,
-        "client_id": prop.client_id,
+        "client_id": (prop.client_id or "").strip() or None,
         "status": status or _PROP_STATUS_TO_PROJECT_STATUS.get(
             prop.status or "草稿", "提案"),
         "project_type": _PTYPE_TO_PROJECT_TYPE.get(prop.ptype or "",
@@ -420,7 +421,8 @@ async def create_proposal(req: ProposalPayload, request: Request):
     提案=專案合體（2026-08-06）：提案誕生即入專案管線 ——
     - body 帶 `project_id` → 掛到**既有專案**當它的企劃衛星列（專案詳情
       「提案企劃」分頁的建立路徑）；client_id 沒帶就繼承專案的。
-    - 不帶 → **client_id 必填**（422），自動建殼專案（管線「提案」階段）。"""
+    - 不帶 → 自動建殼專案（管線「提案」階段）。**客戶可空** —— 前期草稿
+      常常還沒定客戶，之後在專案詳情補上即可（crm_projects.client_id 已放寬）。"""
     payload = _check_auth(request)
     title = (req.title or "").strip()
     if not title:
@@ -448,10 +450,6 @@ async def create_proposal(req: ProposalPayload, request: Request):
             if not (prop.client_id or "").strip():
                 prop.client_id = project.client_id
         else:
-            if not (prop.client_id or "").strip():
-                raise HTTPException(
-                    status_code=422,
-                    detail="client_id 必填 — 提案即專案，需先選客戶（可先建潛在客戶）")
             project = await _create_shell_project(session, prop)
         prop.project_id = project.id
         session.add(prop)
@@ -527,9 +525,8 @@ async def update_proposal(pid: str, req: ProposalPayload, request: Request):
             from db.models import CrmProject
             await _sync_project_from_proposal(
                 session, prop, await session.get(CrmProject, prop.project_id))
-        # legacy 無專案的提案（缺客戶沒被遷移）補上客戶 → 自動建殼入管線
-        if (not prop.project_id and (prop.client_id or "").strip()
-                and (prop.status or "") != "擱置"):
+        # 還沒入管線的提案（擱置中挪回來、或遷移前建的）→ 自動建殼補上
+        if not prop.project_id and (prop.status or "") != "擱置":
             project = await _create_shell_project(session, prop)
             prop.project_id = project.id
         await session.commit()
@@ -1061,10 +1058,10 @@ async def convert_proposal(pid: str, request: Request,
 
     - body 帶 `project_id` → **連結既有 CRM 專案**（團隊先在專案管理建了同案時
       不重複建案 — 2026-08-03 提案×專案整合）。專案自帶客戶，不檢查提案客戶。
-    - 不帶 → 自動建 CRM 專案（帶客戶 + 類型對映）。提案沒選客戶回 422
-      （CrmProject.client_id 是 nullable=False）。
+    - 不帶 → 自動建 CRM 專案（帶客戶 + 類型對映；客戶未定也照建）。
 
-    body 帶 outcome_reason 一併存。"""
+    提案=專案合體後（2026-08-06）提案誕生即有專案，這條路只剩合體前建的
+    存量提案會走到。body 帶 outcome_reason 一併存。"""
     _check_auth(request)
     factory = _require_factory()
 
@@ -1082,8 +1079,6 @@ async def convert_proposal(pid: str, request: Request,
             if not project:
                 raise HTTPException(status_code=404, detail="找不到要連結的專案")
         else:
-            if not (prop.client_id or "").strip():
-                raise HTTPException(status_code=422, detail="提案尚未關聯客戶 — 請先選擇客戶再成案")
             # 走建案單一正本（AM 繼承/主表+雜支種子/客戶分級）；客戶不存在
             # 這裡收到的是 404，轉成語意較準的 422
             try:
@@ -1158,10 +1153,10 @@ async def unlink_reference(pid: str, rid: str, request: Request):
 
 
 async def migrate_unlinked_proposals_to_projects() -> None:
-    """提案=專案合體的存量遷移（冪等）：有客戶、沒 project_id 的既有提案
-    → 建殼專案回填（階段照 _PROP_STATUS_TO_PROJECT_STATUS）。
-    無客戶的留在企劃工作區當 legacy（前端提示補客戶）；「擱置」刻意不遷
-    （已停擺的提案不進管線洗版）。
+    """提案=專案合體的存量遷移（冪等）：沒 project_id 的既有提案 → 建殼專案
+    回填（階段照 _PROP_STATUS_TO_PROJECT_STATUS）。**客戶未定也遷** ——
+    crm_projects.client_id 已放寬可空，前期草稿本來就常常還沒定客戶。
+    只有「擱置」刻意不遷（已停擺的提案不進管線洗版）。穩態下這份清單為空。
     機隊每台 startup 都會對共用 DB 跑 — 逐列 FOR UPDATE 後重驗 project_id，
     重複跑 / 兩台同時跑都不會重複建殼。"""
     from db.session import get_session_factory
@@ -1172,14 +1167,10 @@ async def migrate_unlinked_proposals_to_projects() -> None:
     from db.models import PreprodProposal
 
     async with factory() as session:
-        # 濾掉無客戶的 legacy — 它們永遠遷不走，別每次 startup 白開
-        # FOR UPDATE session（穩態下這份清單應為空，整個遷移只剩這一查）
         ids = (await session.execute(
             select(PreprodProposal.id).where(
                 PreprodProposal.project_id.is_(None),
                 PreprodProposal.status != "擱置",
-                PreprodProposal.client_id.isnot(None),
-                PreprodProposal.client_id != "",
             ))).scalars().all()
     migrated = 0
     for pid in ids:
@@ -1188,13 +1179,12 @@ async def migrate_unlinked_proposals_to_projects() -> None:
                 select(PreprodProposal).where(PreprodProposal.id == pid)
                 .with_for_update()
             )).scalar_one_or_none()
-            if (not prop or prop.project_id
-                    or not (prop.client_id or "").strip()):
+            if not prop or prop.project_id:
                 continue
             try:
                 project = await _create_shell_project(session, prop)
             except HTTPException:
-                continue    # 客戶不存在等 → 留 legacy，不擋啟動
+                continue    # 客戶指到不存在的 id 等 → 跳過，不擋啟動
             prop.project_id = project.id
             prop.updated_at = datetime.now(timezone.utc)
             await session.commit()

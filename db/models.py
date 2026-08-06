@@ -202,7 +202,10 @@ class CrmProject(Base):
 
     id = Column(String(32), primary_key=True)
     name = Column(String(255), nullable=False)
-    client_id = Column(String(32), nullable=False)              # soft FK → clients.id
+    # soft FK → clients.id。提案=專案合體（2026-08-06）後可空 —— 前期草稿提案
+    # 常常還沒定客戶，卻已經是管線「提案」階段的專案。手建專案仍要求選客戶
+    # （CrmProjectPayload.client_id 必填 + 前端擋），只有提案建殼路徑允許空。
+    client_id = Column(String(32), nullable=True)
     status = Column(String(32), nullable=False, default="洽詢")
     am_username = Column(String(64), nullable=True)
     pm_usernames = Column(JSONB, nullable=True)

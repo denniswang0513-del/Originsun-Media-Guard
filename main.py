@@ -516,7 +516,7 @@ async def _on_startup():
                         await _s.rollback()
         except Exception:
             pass
-    # ── DB Migration: CRM performance indexes ──
+    # ── DB Migration: CRM 索引 + 冪等 DDL（逐條跑，失敗 rollback 不擋啟動）──
     if state.db_online:
         try:
             from db.session import get_session_factory
@@ -532,6 +532,9 @@ async def _on_startup():
                         "CREATE INDEX IF NOT EXISTS idx_payreq_payee ON crm_payment_requests(payee_name)",
                         # 提案=專案合體：專案列表附掛提案子狀態的 scalar subquery 用
                         "CREATE INDEX IF NOT EXISTS idx_pprop_project ON preprod_proposals(project_id, updated_at)",
+                        # 提案=專案合體：前期草稿提案還沒定客戶也要能是專案
+                        # （ALTER 冪等 — 已 DROP 過再跑一次不會錯）
+                        "ALTER TABLE crm_projects ALTER COLUMN client_id DROP NOT NULL",
                     ]:
                         try:
                             await _si.execute(_ti(idx_sql))

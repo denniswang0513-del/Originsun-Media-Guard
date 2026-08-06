@@ -114,16 +114,19 @@ async def create_project_in_session(session, data: dict):
     第一張成本「主表」+ 預設雜支種子。POST /projects、提案建殼/成案
     （routers/api_proposals.py）都走這裡 —— 繞過它直接 insert 會做出
     結構不完整的專案。data = CrmProject 欄位 dict（日期欄需已 parse）。
+    client_id 空 = 尚未定客戶的提案殼專案（合法，跳過客戶檢核與 AM 繼承）；
+    手建路徑由 CrmProjectPayload.client_id 必填擋住，到不了這個分支。
     不 commit，caller 統一。回傳 (project, client_short_name)。"""
     now = _now()
     project = CrmProject(id=uuid.uuid4().hex,
                          created_at=now, updated_at=now, **data)
-    client = await session.get(Client, project.client_id)
-    if not client:
+    client = (await session.get(Client, project.client_id)
+              if project.client_id else None)
+    if project.client_id and not client:
         raise HTTPException(status_code=404, detail="找不到指定的客戶")
 
     # Inherit AM from client if not explicitly set
-    if not project.am_username and client.am_username:
+    if client and not project.am_username and client.am_username:
         project.am_username = client.am_username
 
     session.add(project)
@@ -134,7 +137,7 @@ async def create_project_in_session(session, data: dict):
         id=main_group_id, project_id=project.id, name="主表", sort_order=0,
     ))
     await _seed_default_expenses(session, project.id, main_group_id)
-    return project, client.short_name
+    return project, (client.short_name if client else "")
 
 
 @router.post("/projects")
@@ -541,10 +544,13 @@ async def update_project(project_id: str, req: CrmProjectPatchPayload, request: 
             raise HTTPException(status_code=404, detail="找不到此專案")
 
         # If client_id is changing, validate the new client exists.
+        # 空值 = 清空客戶（合體後合法：提案殼專案還沒定客戶）→ 正規化成 None。
         if "client_id" in update_data:
-            new_client = await session.get(Client, update_data["client_id"])
-            if not new_client:
-                raise HTTPException(status_code=404, detail="找不到指定的客戶")
+            update_data["client_id"] = (update_data["client_id"] or "").strip() or None
+            if update_data["client_id"]:
+                new_client = await session.get(Client, update_data["client_id"])
+                if not new_client:
+                    raise HTTPException(status_code=404, detail="找不到指定的客戶")
 
         old_status = project.status or ""
         old_client_id = project.client_id

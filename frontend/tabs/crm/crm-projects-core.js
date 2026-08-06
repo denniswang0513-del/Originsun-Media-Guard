@@ -276,7 +276,9 @@ export function renderList() {
     body.innerHTML = _sorter.sorted(state.projects).map(p => `
         <div class="crm-row${p.id === state.selectedId ? ' selected' : ''}" data-id="${p.id}" onclick="window._projSelect('${p.id}')">
             <div class="crm-row-name">${_esc(p.name)}</div>
-            <div class="crm-row-client">${_esc(p.client_short_name)}</div>
+            <div class="crm-row-client">${p.client_short_name
+                ? _esc(p.client_short_name)
+                : '<span class="crm-muted">待補客戶</span>'}</div>
             <div class="crm-row-status">${_badge(p.status)}${_propSubBadge(p)}</div>
             <div class="crm-row-am">
                 ${p.am_username ? _avatar(p.am_username) + _esc(p.am_username) : '<span class="crm-muted">—</span>'}

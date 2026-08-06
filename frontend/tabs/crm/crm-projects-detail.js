@@ -176,6 +176,12 @@ window._projEdit = function(cell) {
         if (changed) {
             window._projDirtyMap[field] = stored;
             project[field] = stored;
+            // 客戶是 id 欄、畫面顯示的是 client_short_name — 不同步的話補完
+            // 客戶詳情仍顯示「—」，看起來像沒存到（合體後補客戶是常見動線）
+            if (field === 'client_id') {
+                project.client_short_name =
+                    state.clients.find(c => c.id === val)?.short_name || '';
+            }
             window._costScheduleAutoSave?.();
         }
         // Only re-render when the field affects badge / stage card / budget /

@@ -243,7 +243,10 @@ _CLIENT_TIER_EXCLUDE_STATUSES = ("投標", "開發", "洽詢", "提案", "未成
 async def _auto_update_client_status(session, client_id: str):
     """依「有效專案數」自動更新客戶分級：0=潛在客戶, 1=新客戶, 2+=舊客戶。
     有效專案＝排除 投標/開發/洽詢/提案/未成案（與客戶列表『案件數』欄同口徑）。
-    手動設的『暫停合作』不自動覆蓋。"""
+    手動設的『暫停合作』不自動覆蓋。
+    client_id 可為空（提案建殼專案還沒定客戶）→ 無客戶可算，直接返回。"""
+    if not client_id:
+        return
     from sqlalchemy import func as _fn
     count = (await session.execute(
         select(_fn.count()).where(

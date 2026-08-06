@@ -453,7 +453,7 @@ async function _openEditor(prop) {
             <div class="prop-panel-body" style="display:block;">
                 ${row('標題 *', `<input id="pe-title" value="${v('title')}" placeholder="例：某公司 2026 品牌形象片提案">`)}
                 <div style="display:flex;gap:8px;">
-                    <div style="flex:1;">${row('客戶 *（提案即專案，需先選客戶）', `<div style="display:flex;gap:6px;">
+                    <div style="flex:1;">${row('客戶（可留空，之後在專案補）', `<div style="display:flex;gap:6px;">
                         <select id="pe-client" style="flex:1;min-width:0;">
                         <option value="">（未選客戶）</option>
                         ${clients.map(c => `<option value="${esc(c.id)}"${prop && prop.client_id === c.id ? ' selected' : ''}>${esc(c.name)}</option>`).join('')}
@@ -501,10 +501,6 @@ async function _openEditor(prop) {
     ov.querySelector('#pe-save').addEventListener('click', async () => {
         const title = ov.querySelector('#pe-title').value.trim();
         if (!title) { alert('標題必填'); return; }
-        if (isNew && !ov.querySelector('#pe-client').value) {
-            alert('客戶必選 — 提案即專案（可用「＋ 新客戶」先建潛在客戶）');
-            return;
-        }
         const body = {
             title,
             client_id: ov.querySelector('#pe-client').value,
