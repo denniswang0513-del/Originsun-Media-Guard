@@ -102,11 +102,21 @@ async def _deck_target(session, project_id: str):
         .limit(1))).scalars().first()
 
 
-async def _project_folder_abs(session, project_id: str) -> str:
-    """專案資產夾的絕對路徑（唯讀用；還沒建夾 → ""，不是錯誤）。"""
+# 提案資產夾的單檔上限（子系統的業務判斷，不是共用預設 —— 企劃檔可能含
+# 影片參考所以放寬到 300MB；core.save_uploads 刻意不給預設值）
+_MAX_UPLOAD_BYTES = 300 * 1024 * 1024
+
+
+async def _project_or_404(session, project_id: str):
     project = await session.get(CrmProject, project_id)
     if not project:
         raise HTTPException(status_code=404, detail="找不到此專案")
+    return project
+
+
+async def _project_folder_abs(session, project_id: str) -> str:
+    """專案資產夾的絕對路徑（唯讀用；還沒建夾 → ""，不是錯誤）。"""
+    project = await _project_or_404(session, project_id)
     root = proposals_root()
     if not root or not project.proposal_folder_name:
         return ""
@@ -123,12 +133,21 @@ async def _resolve_asset_file(session, project_id: str, rel: str) -> str:
     return path
 
 
+async def _upload_result(folder_abs: str, files) -> dict:
+    """兩個上傳端點的共同回應：落地 + 回新的檔案清單（前端不必再打一次列檔）。
+    一個都沒存成（全被擋/全超限）→ 不重掃，前端手上那份還是對的。"""
+    saved, skipped = await save_uploads(folder_abs, files,
+                                        max_bytes=_MAX_UPLOAD_BYTES)
+    out = {"status": "ok", "saved": saved, "skipped": skipped}
+    if saved:
+        out["files"], out["truncated"] = await asyncio.to_thread(
+            list_folder_files, folder_abs)
+    return out
+
+
 async def _ensure_project_folder(session, project_id: str) -> str:
     """專案資產夾（上傳用，會實際建出來）；建不出來 → 400。"""
-    project = await session.get(CrmProject, project_id)
-    if not project:
-        raise HTTPException(status_code=404, detail="找不到此專案")
-    path = await ensure_folder(session, project)
+    path = await ensure_folder(session, await _project_or_404(session, project_id))
     if not path:
         raise HTTPException(status_code=400,
                             detail="提案資產資料夾無法建立（根目錄未設定或搆不到）")
@@ -173,11 +192,16 @@ async def get_proposal_assets(project_id: str, request: Request):
 
 def _probe_folder(root: str, folder_abs: str, deck_url: str) -> tuple:
     """一次跑完所有磁碟探測 → (root_set, files, truncated, deck_rel)。
-    在 to_thread 內執行 —— 全部是可能卡住的 UNC 操作。"""
-    root_set = bool(root) and os.path.isdir(root)
-    files, truncated = (list_folder_files(folder_abs)
-                        if folder_abs and os.path.isdir(folder_abs) else ([], False))
-    return root_set, files, truncated, _deck_rel(deck_url, folder_abs)
+    在 to_thread 內執行 —— 全部是可能卡住的 UNC 操作。
+
+    root 搆不到就**直接收工**：folder_abs 是 root 的子路徑，root 卡住時它
+    必然也卡，繼續探等於讓使用者多等好幾個 UNC timeout。
+    （list_folder_files 對不存在的路徑本來就回空，不必另外 isdir 一次。）
+    """
+    if not root or not os.path.isdir(root):
+        return False, [], False, ""
+    files, truncated = list_folder_files(folder_abs) if folder_abs else ([], False)
+    return True, files, truncated, _deck_rel(deck_url, folder_abs)
 
 
 @router.post("/projects/{project_id}/proposal-assets/settings")
@@ -210,11 +234,7 @@ async def upload_proposal_assets(project_id: str, request: Request,
     async with factory() as session:
         folder = await _ensure_project_folder(session, project_id)
         await session.commit()          # 資料夾名可能剛生成，先落地
-    saved, skipped = await save_uploads(folder, files)
-    files_now, truncated = await asyncio.to_thread(list_folder_files, folder)
-    # 回傳新的檔案清單 → 前端不必為了刷新再全掃一次 NAS
-    return {"status": "ok", "saved": saved, "skipped": skipped,
-            "files": files_now, "truncated": truncated}
+    return await _upload_result(folder, files)
 
 
 @router.get("/projects/{project_id}/proposal-assets/file")
@@ -320,13 +340,15 @@ async def _root_folders_cached(root: str) -> tuple:
 
 
 @router.get("/proposal-assets/overview")
-async def proposal_assets_overview(request: Request, q: str = ""):
+async def proposal_assets_overview(request: Request):
     """資產資料夾總覽：root 底下每個資料夾，標示有沒有對應到專案。
 
     - **已連結**：`crm_projects.proposal_folder_name` 指到它 → 帶專案名/客戶。
     - **未連結**：磁碟上有、系統沒登記（過去手工整理的）→ 一樣可展開看檔案、
       下載、上傳。
-    q = 資料夾名或專案名模糊搜尋（前端也會就地過濾，這裡是給直接打 API 的人）。"""
+
+    一次回全部（資料夾數是專案數量級）—— 搜尋由前端就地過濾，不做 server-side
+    `q`：每個按鍵都重跑一次 CrmProject×Client join 換不到任何東西。"""
     _assets_auth(request)
     _require_db()
     factory = await _get_factory()
@@ -343,18 +365,12 @@ async def proposal_assets_overview(request: Request, q: str = ""):
                         "client_name": r[3] or ""} for r in rows if r[2]}
 
     names, reachable = await _root_folders_cached(root) if root else ([], False)
-    ql = q.strip().lower()
-    out = []
-    for name in names:
-        info = by_folder.get(name)
-        if ql and ql not in name.lower() and ql not in (
-                (info or {}).get("project_name", "").lower()):
-            continue
-        out.append({"folder_name": name, "linked": bool(info), **(info or {})})
+    out = [{"folder_name": n, "linked": n in by_folder, **(by_folder.get(n) or {})}
+           for n in names]
     # 已登記但磁碟上還沒建出來的（剛改名/root 搆不到）也列出來，才不會人間蒸發
     on_disk = set(names)
     for fname, info in by_folder.items():
-        if fname not in on_disk and (not ql or ql in fname.lower()):
+        if fname not in on_disk:
             out.append({"folder_name": fname, "linked": True,
                         "missing_on_disk": True, **info})
     out.sort(key=lambda x: x["folder_name"], reverse=True)
@@ -398,11 +414,7 @@ async def proposal_folder_upload(request: Request, folder: str = "",
                                  files: List[UploadFile] = File(...)):
     """上傳檔案進任一資產資料夾（未連結專案的也可以 —— owner 指定）。"""
     _assets_auth(request)
-    folder_abs = await _folder_or_404(folder)
-    saved, skipped = await save_uploads(folder_abs, files)
-    files_now, truncated = await asyncio.to_thread(list_folder_files, folder_abs)
-    return {"status": "ok", "saved": saved, "skipped": skipped,
-            "files": files_now, "truncated": truncated}
+    return await _upload_result(await _folder_or_404(folder), files)
 
 
 async def ensure_folder(session, project) -> str:
@@ -416,13 +428,15 @@ async def ensure_folder(session, project) -> str:
             project.name or "", project.created_at or _now(),
             await _taken_names(session, exclude_project_id=project.id))
     path = os.path.join(root, project.proposal_folder_name)
-    existed = await asyncio.to_thread(os.path.isdir, path)
     try:
-        await asyncio.to_thread(os.makedirs, path, exist_ok=True)
+        # 不帶 exist_ok —— FileExistsError 就是「本來就在」，比多打一趟
+        # UNC isdir 去問便宜；只有真的新建才需要讓總覽快取失效
+        await asyncio.to_thread(os.makedirs, path)
+        invalidate_folder_cache()
+    except FileExistsError:
+        pass
     except OSError:
         return ""                     # NAS 斷線/權限 — 呼叫端自己決定怎麼退
-    if not existed:
-        invalidate_folder_cache()     # 剛建的夾要立刻出現在總覽
     return path
 
 

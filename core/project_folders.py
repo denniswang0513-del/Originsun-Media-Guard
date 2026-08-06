@@ -214,7 +214,7 @@ FOLDER_VIEW_CAP = 1000   # 單夾列檔上限（超過標 truncated，避免超�
 
 
 def iter_files_rel(folder: str, accept: Optional[Callable[[str], bool]] = None):
-    """os.walk 產出資料夾內檔案的相對路徑（相對 folder）。剪掉 ./_ 開頭的子夾。
+    """產出資料夾內檔案的相對路徑（相對 folder；走訪細節見 `_iter_entries`）。
     `accept(filename)` 給定時只產出它認可的（影像紀錄用它篩媒體副檔名）。"""
     for rel, _entry in _iter_entries(folder, accept):
         yield rel
@@ -223,25 +223,34 @@ def iter_files_rel(folder: str, accept: Optional[Callable[[str], bool]] = None):
 def _iter_entries(folder: str, accept: Optional[Callable[[str], bool]] = None):
     """`(相對路徑, DirEntry)` —— DirEntry 的 stat 是目錄列舉時**順便帶回來的**，
     再自己 os.stat 一次等於每個檔案多一趟 SMB round trip（滿 cap 的資料夾就是
-    多 1000 趟，而這是三個子系統共用的熱路徑）。"""
-    stack = [folder]
+    多 1000 趟，而這是三個子系統共用的熱路徑）。
+
+    真正的惰性產出（不先把整個目錄物化）—— 呼叫端到 cap 就 break 時，5 萬檔的
+    資料夾只會列舉到第 1000 筆，cap 才擋得住它該擋的東西。相對路徑在堆疊上帶
+    著走，省掉每檔一次 relpath。
+
+    🔴 相對路徑用 **os.sep** 組，與 `os.path.relpath` 同形 —— 消費端會拿它去
+    `os.path.join(folder, rel)` 再存進 DB（影像紀錄的 stored_path），分隔符
+    混用會讓既有記錄比對不上、同一張照片被當新檔重複匯入。要給前端的 `/`
+    形式由 `list_folder_files` 自己轉。
+    """
+    stack = [(folder, "")]
     while stack:
-        cur = stack.pop()
+        cur, prefix = stack.pop()
         try:
             with os.scandir(cur) as it:
-                entries = list(it)
+                for e in it:
+                    try:
+                        if e.is_dir():
+                            if e.name[:1] not in (".", "_"):
+                                stack.append((e.path, prefix + e.name + os.sep))
+                            continue
+                    except OSError:
+                        continue
+                    if accept is None or accept(e.name):
+                        yield prefix + e.name, e
         except OSError:
             continue
-        for e in entries:
-            try:
-                if e.is_dir():
-                    if e.name[:1] not in (".", "_"):
-                        stack.append(e.path)
-                    continue
-            except OSError:
-                continue
-            if accept is None or accept(e.name):
-                yield os.path.relpath(e.path, folder), e
 
 
 def list_folder_files(folder_abs: str, *, cap: int = FOLDER_VIEW_CAP,
@@ -260,7 +269,7 @@ def list_folder_files(folder_abs: str, *, cap: int = FOLDER_VIEW_CAP,
         except OSError:
             continue
         out.append({
-            "rel": rel.replace("\\", "/"),
+            "rel": rel.replace("\\", "/"),   # 給前端的一律用 /
             "filename": entry.name,
             "size_bytes": int(st.st_size),
             "mtime": st.st_mtime,
@@ -274,7 +283,9 @@ def list_folder_files(folder_abs: str, *, cap: int = FOLDER_VIEW_CAP,
 # 所以跟 clean_filename / dedupe 住在一起 —— 下一個 any-file 落地點不必
 # 重新決定一次。
 
-UPLOAD_MAX_BYTES = 300 * 1024 * 1024      # 單檔上限（企劃檔可能含影片參考）
+# ⚠️ 沒有預設上限 —— `save_uploads` 的 max_bytes 是必填。有預設值的話，下一個
+# 接進來的子系統忘了覆寫就沉默繼承別人的業務判斷（memory 記過這族陷阱：
+# 共用函式有預設值 + 呼叫端不送 = 該值被預設洗掉）。
 UPLOAD_CHUNK = 1024 * 1024                # 分塊寫入，大檔不整包進記憶體
 # 擋掉可執行檔（NAS 是共用磁碟，別讓它變成散播點）；其餘一律放行 ——
 # 企劃檔格式太雜（.key/.indd/.aep/.srt…），白名單只會擋到自己人。
@@ -306,27 +317,35 @@ def _stream_to_disk(src, dest: str, max_bytes: int) -> int:
     return total
 
 
-async def save_uploads(folder_abs: str, files, *,
-                       max_bytes: int = UPLOAD_MAX_BYTES) -> tuple:
+async def save_uploads(folder_abs: str, files, *, max_bytes: int) -> tuple:
     """把上傳檔案落地到 folder_abs → `(saved, skipped)`。
 
     檔名保留原樣（清洗非法字元）、撞名補 -2、可執行檔與超大檔進 skipped
-    並附人看得懂的理由。**兩個上傳入口共用** —— 規則各寫一份的話，同一個
-    NAS 根目錄會有兩種防護，等於沒有防護。
+    並附人看得懂的理由。
+
+    範圍：目前的消費端是提案資產夾的兩個上傳入口（專案的與任一資料夾的）。
+    影像紀錄**刻意沒接** —— 它走的是媒體副檔名白名單 + 時間戳前綴去重，
+    是另一套政策，硬合併只會讓兩邊都變難懂。要接第三個 any-file 落地點時
+    再把差異參數化。
     """
     taken = set(await asyncio.to_thread(os.listdir, folder_abs))
+    over = f"超過 {max_bytes // (1024 * 1024)}MB 上限"
     saved, skipped = [], []
     for f in files:
         ext = os.path.splitext(f.filename or "")[1].lower()
         if ext in BLOCKED_UPLOAD_EXTS:
             skipped.append({"filename": f.filename, "reason": f"不允許的檔案類型（{ext}）"})
             continue
+        # 大小事前就知道（multipart 解析時已算好）→ 超限的一個位元組都別寫進
+        # NAS，不然是先傳 max_bytes 上去再刪掉
+        if (getattr(f, "size", None) or 0) > max_bytes:
+            skipped.append({"filename": f.filename, "reason": over})
+            continue
         name = dedupe(clean_filename(f.filename or ""), taken, keep_ext=True)
         written = await asyncio.to_thread(
             _stream_to_disk, f.file, os.path.join(folder_abs, name), max_bytes)
-        if written < 0:
-            skipped.append({"filename": f.filename,
-                            "reason": f"超過 {max_bytes // (1024 * 1024)}MB 上限"})
+        if written < 0:                 # size 拿不到時的第二道防線
+            skipped.append({"filename": f.filename, "reason": over})
             continue
         taken.add(name)
         saved.append(name)

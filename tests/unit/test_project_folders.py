@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 """core/project_folders.py 單元測試（命名 / 路徑前綴替換 / 改名決策 /
 改名程序的 savepoint 與補償）。"""
+import io
 import os
 from datetime import datetime
 
@@ -10,7 +11,7 @@ from core.project_folders import (clean_filename, clean_name, dedupe,
                                   list_folder_files, make_dated_folder_name,
                                   make_reference_folder_name, remap_prefix,
                                   rename_and_remap, rename_dir, safe_rel_path,
-                                  safe_subfolder)
+                                  safe_subfolder, save_uploads)
 
 CREATED = datetime(2026, 8, 6, 15, 30)
 
@@ -265,6 +266,72 @@ class TestListFolderFiles:
 
     def test_missing_folder_is_empty_not_error(self, tmp_path):
         assert list_folder_files(str(tmp_path / "nope")) == ([], False)
+
+
+# ── 上傳落地：黑名單 / 大小上限 / 撞名（寫進共用磁碟的安全規則）──
+
+class _FakeUpload:
+    """UploadFile 的最小替身（save_uploads 只讀 filename / size / file）。"""
+    def __init__(self, filename, data, declare_size=True):
+        self.filename = filename
+        self.file = io.BytesIO(data)
+        if declare_size:
+            self.size = len(data)
+
+
+@pytest.mark.asyncio
+async def test_save_uploads_writes_files_with_original_names(tmp_path):
+    saved, skipped = await save_uploads(
+        str(tmp_path), [_FakeUpload("企劃書 v1.pdf", b"%PDF")], max_bytes=1000)
+    assert (saved, skipped) == (["企劃書 v1.pdf"], [])
+    assert (tmp_path / "企劃書 v1.pdf").read_bytes() == b"%PDF"
+
+
+@pytest.mark.asyncio
+async def test_save_uploads_blocks_executables(tmp_path):
+    """NAS 是共用磁碟 —— 可執行檔一個位元組都不能落地。"""
+    saved, skipped = await save_uploads(
+        str(tmp_path), [_FakeUpload("壞東西.exe", b"MZ")], max_bytes=1000)
+    assert saved == [] and ".exe" in skipped[0]["reason"]
+    assert list(tmp_path.iterdir()) == []
+
+
+@pytest.mark.asyncio
+async def test_save_uploads_rejects_oversize_without_writing(tmp_path):
+    """大小事前就知道 → 超限的不該先寫上去再刪。"""
+    saved, skipped = await save_uploads(
+        str(tmp_path), [_FakeUpload("big.mov", b"x" * 500)], max_bytes=100)
+    assert saved == [] and "上限" in skipped[0]["reason"]
+    assert list(tmp_path.iterdir()) == []
+
+
+@pytest.mark.asyncio
+async def test_save_uploads_oversize_without_declared_size_leaves_no_debris(tmp_path):
+    """拿不到 size 時走串流那道防線 —— 半成品要刪乾淨，不留垃圾在 NAS。"""
+    saved, skipped = await save_uploads(
+        str(tmp_path), [_FakeUpload("big.mov", b"x" * 500, declare_size=False)],
+        max_bytes=100)
+    assert saved == [] and "上限" in skipped[0]["reason"]
+    assert list(tmp_path.iterdir()) == []
+
+
+@pytest.mark.asyncio
+async def test_save_uploads_dedupes_against_existing_and_within_batch(tmp_path):
+    (tmp_path / "稿.pdf").write_bytes(b"old")
+    saved, _ = await save_uploads(
+        str(tmp_path), [_FakeUpload("稿.pdf", b"a"), _FakeUpload("稿.pdf", b"b")],
+        max_bytes=1000)
+    assert saved == ["稿-2.pdf", "稿-3.pdf"]        # 補號插在副檔名前
+    assert (tmp_path / "稿.pdf").read_bytes() == b"old"   # 既有檔沒被蓋掉
+
+
+@pytest.mark.asyncio
+async def test_save_uploads_mixed_batch_reports_both(tmp_path):
+    saved, skipped = await save_uploads(str(tmp_path), [
+        _FakeUpload("ok.pdf", b"x"),
+        _FakeUpload("bad.bat", b"x"),
+    ], max_bytes=1000)
+    assert saved == ["ok.pdf"] and len(skipped) == 1
 
 
 # ── 改名程序：savepoint + 補償 ──────────────────────────────

@@ -1,4 +1,4 @@
-﻿"""routers/crm/media_log.py — 影像紀錄（工作過程劇照/花絮收集）。
+"""routers/crm/media_log.py — 影像紀錄（工作過程劇照/花絮收集）。
 
 每專案一條 token 公開連結（/media-log.html?token=…）：現場同仁/合作夥伴
 免登入上傳劇照、花絮影片；原始檔案存進管理員設定的影像紀錄資料夾
@@ -35,8 +35,7 @@ from core.project_folders import (FOLDER_VIEW_CAP, clean_filename,
                                   clean_name as _clean_name, iter_files_rel,
                                   list_folder_files, make_dated_folder_name,
                                   remap_prefix, rename_and_remap, safe_rel_path,
-                                  safe_subfolder, subfolder_path, taken_names,
-                                  within_dir)
+                                  safe_subfolder, subfolder_path, taken_names)
 from core.subproc import run_capture
 
 # public_router = 對外白名單（正本在 _shared，全套件共用一個）。本模組的 4 個

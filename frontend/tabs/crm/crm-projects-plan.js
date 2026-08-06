@@ -8,7 +8,9 @@
  */
 
 import { crmFetch, crmToast, esc } from './crm-utils.js';
-import { authDownload, fmtBytes, tfetch, wireFileDrop } from '../proposals/prop-fetch.js';
+import { fmtSize } from '../../js/shared/clip_utils.js';
+import { authDownload, wireFileDrop } from '../../js/shared/utils.js';
+import { tfetch } from '../proposals/prop-fetch.js';
 import { state } from './crm-projects-state.js';
 
 const API = '/api/v1/proposals';
@@ -120,7 +122,7 @@ function _renderFiles(box, d) {
             <span title="${isDeck ? '目前的提案簡報' : '設為提案簡報'}" data-deck
                   style="cursor:pointer;color:${isDeck ? '#fbbf24' : '#3a3a3a'};">★</span>
             <span data-dl style="flex:1;cursor:pointer;" title="下載">${esc(f.rel)}</span>
-            <span style="color:#6b6b6b;">${fmtBytes(f.size_bytes)}</span>
+            <span style="color:#6b6b6b;">${fmtSize(f.size_bytes)}</span>
             <span style="color:#6b6b6b;">${esc((f.mtime ? new Date(f.mtime * 1000).toISOString() : '').slice(0, 10))}</span>
             <button data-del class="crm-btn crm-btn-secondary crm-btn-sm" title="刪除">✕</button>
         </div>`;
@@ -131,12 +133,18 @@ function _renderFiles(box, d) {
 function _wireUpload(projectId, box, host, d) {
     const input = box.querySelector('#pp-file-input');
     const drop = box.querySelector('#pp-drop');
-    // 只重畫檔案區，不重跑 loadPlanTab —— 那會連 plan-matrix 一起重繪，
-    // 使用者正在編的格子與捲動位置都沒了，還多一次 NAS 全掃。
-    const repaint = (files, truncated) => {
-        d.files = files ?? d.files;
-        if (truncated !== undefined) d.truncated = truncated;
-        _renderFiles(box, d);
+    // 先改 d、再無參重畫 —— 只重繪檔案區，不重跑 loadPlanTab（那會連
+    // plan-matrix 一起重畫，使用者正在編的格子與捲動位置都沒了）
+    const repaint = () => _renderFiles(box, d);
+    // 標星號：只動兩顆 span，不為了換一個顏色重建整張列表（可能上千列）
+    const markDeck = (rel) => {
+        d.deck_rel = rel;
+        box.querySelectorAll('.pp-file').forEach(row => {
+            const star = row.querySelector('[data-deck]');
+            const on = row.dataset.rel === rel;
+            star.style.color = on ? '#fbbf24' : '#3a3a3a';
+            star.title = on ? '目前的提案簡報' : '設為提案簡報';
+        });
     };
 
     const send = async (fileList) => {
@@ -150,7 +158,10 @@ function _wireUpload(projectId, box, host, d) {
             crmToast(`已上傳 ${(r.saved || []).length} 個檔案`
                 + (bad.length ? `；略過 ${bad.length} 個` : ''), bad.length ? 6000 : 2000);
             if (bad.length) console.warn('略過：', bad.join('、'));
-            repaint(r.files, r.truncated);      // 端點順手回了新清單，不必再掃一次
+            if (r.files) {                      // 端點順手回了新清單，不必再掃一次
+                Object.assign(d, { files: r.files, truncated: r.truncated });
+                repaint();
+            }
         } catch (e) { alert('上傳失敗：' + (e.message || e)); }
     };
 
@@ -171,15 +182,16 @@ function _wireUpload(projectId, box, host, d) {
                     { method: 'DELETE' });
                 crmToast(r.deck_cleared ? '已刪除（原本是提案簡報，已取消指定）' : '已刪除');
                 if (r.deck_cleared) d.deck_rel = '';
-                repaint((d.files || []).filter(f => f.rel !== rel));
+                d.files = (d.files || []).filter(f => f.rel !== rel);
+                row.remove();               // 移一列就好，不必重建整張
+                if (!d.files.length) repaint();     // 空了要顯示空狀態
             } catch (err) { alert('刪除失敗：' + (err.message || err)); }
         } else if (e.target.closest('[data-deck]')) {
             try {
                 await crmFetch(`/projects/${projectId}/proposal-assets/deck`,
                     { method: 'POST', body: JSON.stringify({ rel }) });
                 crmToast('已設為提案簡報');
-                d.deck_rel = rel;
-                repaint();
+                markDeck(rel);
             } catch (err) { alert('設定失敗：' + (err.message || err)); }
         } else if (e.target.closest('[data-dl]')) {
             authDownload(`/api/v1/crm/projects/${projectId}/proposal-assets/file${q}`, rel);

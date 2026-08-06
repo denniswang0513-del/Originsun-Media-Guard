@@ -22,6 +22,54 @@ export function authFetch(path, opts = {}) {
         body: opts.body !== undefined ? JSON.stringify(opts.body) : undefined }));
 }
 
+/**
+ * 帶權限下載（**單一正本**）—— `<a href>` 送不了 Authorization header，
+ * 所以 fetch 成 blob 再觸發。失敗自己 alert，呼叫端一行就夠。
+ * 檔名取路徑尾段，正反斜線都吃（NAS 路徑是反斜線）。
+ */
+export async function authDownload(url, filename, label = '下載') {
+    try {
+        const tok = localStorage.getItem('auth_token');
+        const r = await fetch(url, { headers: tok ? { Authorization: 'Bearer ' + tok } : {} });
+        if (!r.ok) {
+            const d = await r.json().catch(() => ({}));
+            throw new Error(typeof d.detail === 'string' ? d.detail : 'HTTP ' + r.status);
+        }
+        const href = URL.createObjectURL(await r.blob());
+        const a = document.createElement('a');
+        a.href = href;
+        a.download = String(filename || '').split(/[\\/]/).pop() || 'file';
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        setTimeout(() => URL.revokeObjectURL(href), 10_000);
+    } catch (e) {
+        alert(`${label}失敗：` + (e.message || e));
+    }
+}
+
+/**
+ * 拖放上傳區：進入時高亮、放開送檔。`onFiles(FileList)` 決定怎麼送。
+ *
+ * 高亮走 class + 自帶樣式，不動 inline style —— 直接寫 `zone.style.borderColor`
+ * 會猜錯對方用邊框還是底色，還會把人家原本的 border-top 一起清掉。
+ */
+const _DROP_HOT = 'osun-drop-hot';
+export function wireFileDrop(zone, onFiles) {
+    if (!document.getElementById('osun-drop-style')) {
+        const st = document.createElement('style');
+        st.id = 'osun-drop-style';
+        st.textContent = `.${_DROP_HOT}{outline:2px dashed #3b82f6;outline-offset:-2px;`
+            + 'background:rgba(59,130,246,.06);}';
+        document.head.appendChild(st);
+    }
+    const on = (e) => { e.preventDefault(); zone.classList.add(_DROP_HOT); };
+    const off = (e) => { e.preventDefault(); zone.classList.remove(_DROP_HOT); };
+    ['dragenter', 'dragover'].forEach(ev => zone.addEventListener(ev, on));
+    ['dragleave', 'drop'].forEach(ev => zone.addEventListener(ev, off));
+    zone.addEventListener('drop', e => onFiles(e.dataTransfer.files));
+}
+
 export async function resolveDropPath(e, file, index = 0) {
     // 方法1：text/uri-list（RFC 2483，CRLF 分隔）
     const uriList = e.dataTransfer.getData('text/uri-list');

@@ -11,15 +11,19 @@
  */
 
 import { esc } from '../website/website-utils.js';
-import { authDownload, fmtBytes, tfetch, wireFileDrop } from './prop-fetch.js';
+import { fmtSize } from '../../js/shared/clip_utils.js';
+import { authDownload, wireFileDrop } from '../../js/shared/utils.js';
+import { tfetch } from './prop-fetch.js';
 
 const API = '/api/v1/crm/proposal-assets';
 
 let _folders = [];       // 整份清單（overview 不分頁，搜尋就地過濾）
 let _open = '';          // 目前展開的資料夾名
+let _filesOf = {};       // folder → 已載入的檔案清單（搜尋重畫時不必再打 NAS）
 
 export async function openFolderBrowser(mountOverlay) {
     _folders = [];
+    _filesOf = {};
     _open = '';          // 模組層狀態 —— 不重設的話重開會停在「載入檔案中…」
     const ov = mountOverlay(`
         <div class="prop-panel" style="width:min(900px,96vw);">
@@ -59,8 +63,7 @@ function _bind(ov) {
         if (!head) return;
         const name = head.dataset.folder;
         _open = _open === name ? '' : name;      // 再點一次收合
-        _render(ov);
-        if (_open) await _loadFiles(ov, _open);
+        _render(ov);                              // 展開後由 _render 負責載/填
     });
 }
 
@@ -117,7 +120,13 @@ function _render(ov) {
             </div>` : ''}
         </div>`;
     }).join('');
-    if (_open) _wireDrop(ov, _open);
+    if (!_open) return;
+    _wireDrop(ov, _open);
+    // 重畫（例如打字搜尋）後把已載入的檔案填回去 —— 不然展開中的資料夾會被
+    // 洗成「載入檔案中…」並卡在那，使用者得收合再展開、多打一次 NAS 全掃
+    const cached = _filesOf[_open];
+    if (cached) _paintFiles(ov, _open, cached.files, cached.truncated);
+    else _loadFiles(ov, _open);
 }
 
 // 上傳（按鈕 + 拖放）—— 未連結專案的「過去資料夾」也能丟檔（owner 指定）
@@ -135,7 +144,8 @@ function _wireDrop(ov, folder) {
                 { method: 'POST', body: fd });
             const bad = (d.skipped || []).map(s => `${s.filename}（${s.reason}）`);
             if (bad.length) alert('部分檔案未上傳：\n' + bad.join('\n'));
-            _paintFiles(ov, folder, d.files || [], d.truncated);
+            // 一個都沒存成時端點不回 files（省一次全掃）→ 畫面維持原樣
+            if (d.files) _paintFiles(ov, folder, d.files, d.truncated);
         } catch (e) { alert('上傳失敗：' + (e.message || e)); }
     };
     zone.querySelector('[data-upload]')?.addEventListener('click', () => {
@@ -162,13 +172,14 @@ async function _loadFiles(ov, folder) {
 }
 
 function _paintFiles(ov, folder, files, truncated) {
+    _filesOf[folder] = { files, truncated };
     const box = ov.querySelector('#pf-files');
     if (!box || !box.isConnected) return;
     box.innerHTML = files.length ? files.map(f => `
         <div data-folder="${esc(folder)}" data-rel="${esc(f.rel)}"
              style="display:flex;gap:8px;align-items:center;padding:5px 12px 5px 30px;font-size:12.5px;">
             <span data-dl style="flex:1;cursor:pointer;" title="下載">${esc(f.rel)}</span>
-            <span style="color:#6b6b6b;">${fmtBytes(f.size_bytes)}</span>
+            <span style="color:#6b6b6b;">${fmtSize(f.size_bytes)}</span>
             <span style="color:#6b6b6b;">${esc(new Date(f.mtime * 1000).toISOString().slice(0, 10))}</span>
         </div>`).join('')
         + (truncated ? '<div class="prop-note" style="padding:6px 12px;color:#fbbf24;">檔案過多，只顯示前 1000 筆</div>' : '')
