@@ -204,6 +204,124 @@ async def archive_one(rid: str) -> bool:
         _busy = False
 
 
+# ── 封存資料夾命名 `{片名}_{品牌}`（2026-08-06 owner 指定）───────
+# 規則正本在 core.project_folders（與影像紀錄/提案庫共用）。片庫是跨專案共用
+# 資產（一支片可被多個專案引用），所以按**片**命名而不是按專案。
+# 資料夾名不另存欄位 —— archive_path 的 dirname 就是它。
+
+
+def _brand_of(ref) -> str:
+    """facets.brand 是多選 → 取第一個當資料夾名的一部分（名字不宜過長）。"""
+    v = (ref.facets or {}).get("brand")
+    if isinstance(v, list):
+        return str(v[0]) if v else ""
+    return str(v or "")
+
+
+def archive_folder_name(ref, taken=None) -> str:
+    """這支片該用的封存資料夾名。片名空 → 退回影片 ID → "reference"。"""
+    from core.project_folders import make_reference_folder_name
+    return make_reference_folder_name(
+        ref.title or "", _brand_of(ref),
+        fallback=ref.video_id or "", taken=taken)
+
+
+async def _taken_folder_names(factory, exclude_rid: str = "") -> set:
+    """同 root 底下已被佔用的資料夾名（撞名補 -2 用）—— 從既有 archive_path 反推。"""
+    from sqlalchemy import select
+    from db.models import PreprodReference
+    async with factory() as s:
+        rows = (await s.execute(
+            select(PreprodReference.id, PreprodReference.archive_path)
+            .where(PreprodReference.archive_path.isnot(None)))).all()
+    return {os.path.basename(os.path.dirname(p)) for rid_, p in rows
+            if p and rid_ != exclude_rid}
+
+
+async def _folder_name_for(factory, rid: str) -> str:
+    """建檔時算資料夾名；ref 讀不到（極罕見）→ 退回 rid，不擋建檔。"""
+    from db.models import PreprodReference
+    async with factory() as s:
+        ref = await s.get(PreprodReference, rid)
+        if not ref:
+            return rid
+        return archive_folder_name(
+            ref, await _taken_folder_names(factory, exclude_rid=rid))
+
+
+async def rename_archive_folder(session, ref) -> tuple:
+    """片名／品牌改動 → 封存資料夾跟著改名 + `archive_path` 同步。
+    回 `(changed, warning)`，**不 commit**（與呼叫端的欄位更新同一交易）。
+
+    還沒建檔（archive_path 空）→ no-op，之後建檔自然用新名。改名失敗
+    （檔案被開著）→ 回 warning，資料夾與 archive_path 都維持原狀。
+    """
+    from sqlalchemy import select
+    from core.drive_map import to_local_path
+    from core.project_folders import remap_prefix, rename_dir
+    from db.models import PreprodReference
+
+    old_path = ref.archive_path or ""
+    if not old_path:
+        return False, ""
+    old_dir = os.path.dirname(old_path)
+    rows = (await session.execute(
+        select(PreprodReference.id, PreprodReference.archive_path)
+        .where(PreprodReference.archive_path.isnot(None)))).all()
+    taken = {os.path.basename(os.path.dirname(p)) for rid_, p in rows
+             if p and rid_ != ref.id}
+    new_name = archive_folder_name(ref, taken)
+    if new_name == os.path.basename(old_dir):
+        return False, ""
+    new_dir = os.path.join(os.path.dirname(old_dir), new_name)
+
+    ok, err = await asyncio.to_thread(
+        rename_dir, to_local_path(old_dir), to_local_path(new_dir))
+    if not ok:
+        return False, f"封存資料夾改名失敗（{err}）— 資料夾維持舊名"
+    ref.archive_path = remap_prefix(old_path, old_dir, new_dir)
+    return True, ""
+
+
+async def migrate_folder_names() -> int:
+    """既有封存資料夾（舊命名＝uuid）→ `{片名}_{品牌}`。冪等，回改名筆數。
+
+    master-only（NAS 憑證只在 master）+ 逐筆容錯：單支改不動（檔案被開著、
+    片名空）就跳過，下次啟動再試，絕不擋 startup。改名與 archive_path 更新
+    同一個 session commit —— 中途掛掉不會留下「資料夾已改、DB 還指舊路徑」。
+    """
+    from core.topology import is_master_machine
+    if not is_master_machine():
+        return 0
+    from db.session import get_session_factory
+    factory = get_session_factory()
+    if not factory:
+        return 0
+    from sqlalchemy import select
+    from db.models import PreprodReference
+
+    async with factory() as s:
+        ids = (await s.execute(
+            select(PreprodReference.id)
+            .where(PreprodReference.archive_path.isnot(None)))).scalars().all()
+    migrated = 0
+    for rid in ids:
+        try:
+            async with factory() as s:
+                ref = await s.get(PreprodReference, rid)
+                if not ref or not ref.archive_path:
+                    continue
+                changed, _warn = await rename_archive_folder(s, ref)
+                if changed:
+                    await s.commit()
+                    migrated += 1
+        except Exception as e:
+            logger.warning("[ref_archiver] 資料夾改名遷移跳過 %s：%s", rid, e)
+    if migrated:
+        logger.info("[ref_archiver] 封存資料夾改名遷移：%d 支片改成 片名_品牌", migrated)
+    return migrated
+
+
 async def _archive_ref(factory, rid: str, url: str, conf: dict) -> bool:
     """單支建檔核心（挑片路徑與指定路徑共用）。"""
     global _current_rid
@@ -212,7 +330,7 @@ async def _archive_ref(factory, rid: str, url: str, conf: dict) -> bool:
     logger.info("[ref_archiver] 開始建檔 %s（%s）", rid, url[:80])
     await _set_status(factory, rid, "downloading")
 
-    dest_dir = os.path.join(dest_root, rid)
+    dest_dir = os.path.join(dest_root, await _folder_name_for(factory, rid))
     max_h = int(conf.get("max_height") or 720)
     ok, err, video_path = await _download(url, dest_dir, max_h)
     if not ok and _classify_failure(err) == "extractor":

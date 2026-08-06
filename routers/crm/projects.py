@@ -433,6 +433,27 @@ async def update_project_website_stage(project_id: str, request: Request):
     return {"ok": True, "stage": stage}
 
 
+async def _rename_asset_folders(session, project) -> list:
+    """專案改名 → 各資產子系統的資料夾跟著改名（2026-08-06 owner 要求）。
+
+    回 warning 清單（改名失敗的原因）。**專案名本身照樣改成功** —— 資料夾
+    改不動（被開著、NAS 斷線）不該連帶讓改名失敗，下次改名會再試一次。
+    子系統各自負責自己的實體 rename + DB 路徑同步（同一個 session/交易）。
+    新增資產子系統時在這裡加一行。"""
+    from routers.crm import media_log, proposal_assets
+    warnings = []
+    created = project.created_at or _now()
+    for label, fn in (("影像紀錄", media_log.rename_project_folder),
+                      ("提案", proposal_assets.rename_project_folder)):
+        try:
+            _changed, warn = await fn(session, project.id, project.name or "", created)
+            if warn:
+                warnings.append(warn)
+        except Exception as e:      # 單一子系統壞掉不擋改名，也不擋其他子系統
+            warnings.append(f"{label}資料夾改名失敗（{type(e).__name__}: {e}）")
+    return warnings
+
+
 async def _latest_proposal_status(session, project_id: str) -> str:
     """專案的衛星提案子狀態（N:1 取最近更新的一筆；無衛星回 ''）。
     單筆端點與列表回應形狀對齊 —— 前端「未成案要問原因」的守門讀這個欄，
@@ -554,6 +575,7 @@ async def update_project(project_id: str, req: CrmProjectPatchPayload, request: 
 
         old_status = project.status or ""
         old_client_id = project.client_id
+        old_name = project.name or ""
         # outcome_reason 不是專案欄位 — 是轉「未成案/成案」時給提案衛星列的
         outcome_reason = update_data.pop("outcome_reason", None)
         for k, v in update_data.items():
@@ -568,15 +590,21 @@ async def update_project(project_id: str, req: CrmProjectPatchPayload, request: 
         await _auto_update_client_status(session, project.client_id)
         if old_client_id and old_client_id != project.client_id:
             await _auto_update_client_status(session, old_client_id)
+        # 專案改名 → 資產資料夾跟著改名（同一交易，路徑同步更新）
+        warnings = ([] if (project.name or "") == old_name
+                    else await _rename_asset_folders(session, project))
         await session.commit()
         await session.refresh(project)
         client = await session.get(Client, project.client_id)
         client_name = client.short_name if client else ""
         prop_status = await _latest_proposal_status(session, project_id)
 
-    return {"status": "ok",
-            "project": {**_to_project_dict(project, client_name),
-                        "proposal_status": prop_status}}
+    result = {"status": "ok",
+              "project": {**_to_project_dict(project, client_name),
+                          "proposal_status": prop_status}}
+    if warnings:
+        result["warning"] = "；".join(warnings)
+    return result
 
 
 @router.delete("/projects/{project_id}")

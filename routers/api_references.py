@@ -766,16 +766,28 @@ async def get_reference(rid: str, request: Request):
         return {"reference": d}
 
 
+# 改動這些欄位會讓封存資料夾名（`{片名}_{品牌}`）失準 → 資料夾跟著改名
+_FOLDER_NAME_KEYS = {("field", "title"), ("facet", "brand")}
+
+
 @router.patch("/{rid}")
 async def patch_reference(rid: str, req: ReferencePatch, request: Request):
     payload = _check_auth(request)
     factory = _require_factory()
     user = payload.get("username") or ""
+    warning = ""
     async with factory() as session:
         ref = await _get_ref_or_404(session, rid, for_update=True)
         out = apply_ref_patch(ref, req, user)
+        if (req.kind, req.key or "") in _FOLDER_NAME_KEYS:
+            # 封存資料夾跟著改名（同一交易；失敗只回 warning，欄位照樣存好）
+            try:
+                from services.reference_archiver import rename_archive_folder
+                _changed, warning = await rename_archive_folder(session, ref)
+            except Exception as e:
+                warning = f"封存資料夾改名失敗（{type(e).__name__}: {e}）"
         await session.commit()
-    return {"status": "ok", **out}
+    return {"status": "ok", **out, **({"warning": warning} if warning else {})}
 
 
 @router.post("/{rid}/research/rows")

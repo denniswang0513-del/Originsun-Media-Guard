@@ -10,7 +10,7 @@
  */
 
 import { crmCacheFetch, esc } from './crm-utils.js';
-import { tfetch } from '../proposals/prop-fetch.js';
+import { openDeck, tfetch } from '../proposals/prop-fetch.js';
 import { _createFormModal } from '../../js/shared/modal-styles.js';
 import { loadProjects } from './crm-projects-core.js';
 import { state } from './crm-projects-state.js';
@@ -86,7 +86,7 @@ function _propCard(p, { badge, action = '', style = '' }) {
             ${_chip(p.pitch_date && '提案日 ' + p.pitch_date)}
             ${_chip(p.budget_range)}
             ${_chip(p.refs_count && '參考 ' + p.refs_count)}
-            ${p.deck_url ? `<a class="m" href="${esc(p.deck_url)}" target="_blank" rel="noopener">deck ↗</a>` : ''}
+            ${p.deck_url ? '<a class="m" href="#" data-deck>deck ↗</a>' : ''}
             ${_chip(p.outcome_reason && '成案原因…', p.outcome_reason)}
             <span class="sp"></span>${action}
         </div>`;
@@ -96,11 +96,17 @@ function _propCard(p, { badge, action = '', style = '' }) {
 function _wireHost(host) {
     if (host.dataset.wired) return;
     host.dataset.wired = '1';
-    host.addEventListener('click', (e) => {
+    host.addEventListener('click', async (e) => {
         const pid = e.target.closest('[data-pid]')?.dataset.pid;
         if (!pid) return;
         if (e.target.closest('[data-convert]')) {
             _openConvertChooser((_cache || []).find(x => x.id === pid));
+        } else if (e.target.closest('[data-deck]')) {
+            // deck 可能在 NAS 資產夾（非 web root）→ 走帶權限下載
+            e.preventDefault();
+            const p = (_cache || []).find(x => x.id === pid);
+            try { await openDeck(pid, p && p.deck_url); }
+            catch (err) { alert('簡報下載失敗：' + (err.message || err)); }
         } else if (e.target.closest('[data-open]')) {
             window.open(`/proposal-plan.html?pid=${encodeURIComponent(pid)}`, '_blank', 'noopener');
         }

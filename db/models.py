@@ -206,6 +206,9 @@ class CrmProject(Base):
     # 常常還沒定客戶，卻已經是管線「提案」階段的專案。手建專案仍要求選客戶
     # （CrmProjectPayload.client_id 必填 + 前端擋），只有提案建殼路徑允許空。
     client_id = Column(String(32), nullable=True)
+    # 提案庫資產夾名（settings proposals.root 底下的子夾 `{建立日}_{專案名}`）。
+    # 首次用到才生成、之後固定存這裡；專案改名時由 core.project_folders 跟著改。
+    proposal_folder_name = Column(String(255), nullable=True)
     status = Column(String(32), nullable=False, default="洽詢")
     am_username = Column(String(64), nullable=True)
     pm_usernames = Column(JSONB, nullable=True)

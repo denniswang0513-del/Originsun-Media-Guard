@@ -230,7 +230,13 @@ async function mfetch(path, opts = {}) {
 function escText(s) { const d = document.createElement("div"); d.textContent = String(s ?? ""); return d.innerHTML; }
 // 屬性上下文要另外逃逸引號（escText 走 textContent 不處理 "）；連結只放行 http(s)
 function escAttr(s) { return String(s ?? "").replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;").replace(/>/g, "&gt;"); }
-function safeUrl(u) { return /^https?:\/\//i.test(String(u ?? "")) ? u : ""; }
+// http(s) 或**站內**相對路徑放行；`//evil.com`（protocol-relative）擋掉。
+// 站內路徑要放行的原因：提案簡報的連結是 /uploads/… 或 /api/…/deck，
+// 只認 http(s) 的話公開頁的「下載簡報」永遠不顯示。
+function safeUrl(u) {
+    const s = String(u ?? "");
+    return (/^https?:\/\//i.test(s) || /^\/[^/]/.test(s)) ? s : "";
+}
 
 // ── 基本資料側欄分頁（可編輯，自動儲存；登入=完整欄位、公開=後端白名單子集） ──
 const PTYPES = ["形象", "廣告", "紀錄片", "政府標案", "社群", "其他"];
@@ -300,7 +306,10 @@ function _renderInfo(host, info, opts) {
             ${dateCtrl}
             ${budgetCtrl}
             ${tagsCtrl}
-            ${safeUrl(info.deck_url) ? row("提案簡報", link(info.deck_url, "下載簡報")) : ""}
+            ${safeUrl(info.deck_url)
+                ? row("提案簡報", link(info.deck_url, "下載簡報"))
+                : (info.deck_url && opts.onDeck
+                    ? row("提案簡報", '<a href="#" id="deck-dl">下載簡報</a>') : "")}
         </div>
         ${reasonCard}
         <div class="info-card">
@@ -331,6 +340,12 @@ function _renderInfo(host, info, opts) {
     host.querySelectorAll("textarea.info-ta").forEach(ta => {
         _infoGrow(ta);
         ta.addEventListener("input", () => _infoGrow(ta));   // 內容多長格子就多長
+    });
+    // 簡報落在 NAS 資產夾（非 web root）→ 由呼叫端提供帶權限的下載動作
+    host.querySelector("#deck-dl")?.addEventListener("click", async (e) => {
+        e.preventDefault();
+        try { await opts.onDeck(); }
+        catch (err) { alert("簡報下載失敗：" + ((err && err.message) || err)); }
     });
     _wireInfoEditing(host, opts);
 }
@@ -512,6 +527,10 @@ async function _loadPlan(pid) {
         };
         _renderInfo($("info-host"), prop, {
             editable: ["ptype", "pitch_date", "budget_range", "tags", "notes", "outcome_reason"],
+            onDeck: async () => {
+                const { openDeck } = await import("/tabs/proposals/prop-fetch.js");
+                return openDeck(prop.id, prop.deck_url);
+            },
             save: async (field, value) => ok(await mfetch(P, { method: "PUT", body: JSON.stringify({ [field]: value }) })),
             reload: async () => (await ok(await mfetch(P))).proposal,
             refPageUrl: (rid) => "/reference.html?id=" + encodeURIComponent(rid),

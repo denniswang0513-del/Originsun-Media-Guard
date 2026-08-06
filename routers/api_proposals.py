@@ -8,6 +8,7 @@ api_proposals.py — 提案資料庫 API（P-b，docs/PREPROD_PLAN.md B 段）
 （create_all 自建）。狀態轉「成案 / 未成案」強制 outcome_reason（組織學習欄）。
 """
 
+import asyncio
 import json
 import os
 import re
@@ -786,6 +787,34 @@ async def disable_plan_share(pid: str, request: Request):
     return {"status": "ok"}
 
 
+def _public_deck_url(deck_url: str, token: str) -> str:
+    """公開頁可直接當連結用的簡報 URL。舊 deck 在 web root（`/uploads/…`）→ 原樣；
+    2026-08-06 起落在 NAS 提案資產夾的（絕對路徑）→ 換成 token 下載端點，
+    **不把 NAS 路徑外洩到公開頁**。沒有 deck → ""。"""
+    u = str(deck_url or "")
+    if not u or u.startswith("/"):
+        return u
+    return f"/api/v1/proposals/shared/{token}/deck"
+
+
+@router.get("/shared/{token}/deck")
+async def download_shared_deck(token: str):
+    """公開共編頁下載簡報（token 即授權）。deck 在 NAS 資產夾、不在 web root。"""
+    factory = _require_factory()
+    async with factory() as session:
+        prop = await _get_prop_by_plan_token(session, token)
+        url = prop.deck_url or ""
+    if not url or url.startswith("/"):
+        raise HTTPException(status_code=404, detail="沒有可下載的簡報檔")
+    from fastapi.responses import FileResponse
+
+    from core.drive_map import to_local_path
+    path = to_local_path(url)
+    if not await asyncio.to_thread(os.path.isfile, path):
+        raise HTTPException(status_code=404, detail="簡報檔已不在資料夾裡")
+    return FileResponse(path, filename=os.path.basename(path))
+
+
 @router.get("/shared/{token}")
 async def get_shared_plan(token: str):
     """公開讀取（免登入）：title + plan + 基本資料安全子集 info（share_token 一律剝除）。
@@ -818,7 +847,7 @@ async def get_shared_plan(token: str):
             "pitch_date": _fmt_date(prop.pitch_date),
             "tags": prop.tags or [],
             "notes": prop.notes or "",
-            "deck_url": prop.deck_url or "",
+            "deck_url": _public_deck_url(prop.deck_url, token),
             "references": [{"id": r.id, "title": r.title or "", "url": r.url or "",
                             "note": r.note or ""} for r in refs],
         }
@@ -1012,7 +1041,12 @@ async def delete_proposal(pid: str, request: Request):
 @router.post("/{pid}/deck")
 async def upload_deck(pid: str, request: Request, file: UploadFile = File(...)):
     """上傳提案簡報（.pdf/.ppt/.pptx/.key/.zip，上限 50MB→413）。
-    存 uploads/proposals/{pid}/{uuid}{ext}，寫 deck_url（舊檔 best-effort 刪除）。"""
+
+    落點（2026-08-06 起）：專案的**提案資產夾**（settings `proposals.root` 底下
+    `{建立日}_{專案名}`），`deck_url` 存 canonical 絕對路徑 → 前端走
+    `GET /{pid}/deck/download` 下載。root 未設或 NAS 搆不到 → 退回舊的
+    `uploads/proposals/{pid}/`（web root 靜態直出），行為與從前相同。
+    檔名保留原始檔名（人要能在資料夾裡認出它），撞名補 `-2`。"""
     _check_auth(request)
     if not _ID_RE.match(pid):
         raise HTTPException(status_code=422, detail="無效的提案 ID")
@@ -1024,28 +1058,77 @@ async def upload_deck(pid: str, request: Request, file: UploadFile = File(...)):
         raise HTTPException(status_code=413, detail="簡報檔超過 50MB 上限")
     factory = _require_factory()
 
+    from core.drive_map import to_canonical_path
+    from core.project_folders import clean_name
+    from db.models import CrmProject
+    from routers.crm import proposal_assets
+
     async with factory() as session:
         prop = await _get_proposal_or_404(session, pid)
         old_url = prop.deck_url or ""
 
-        dest_dir = os.path.join(_UPLOAD_BASE, "proposals", pid)
-        os.makedirs(dest_dir, exist_ok=True)
-        fname = f"{uuid.uuid4().hex}{ext}"
-        with open(os.path.join(dest_dir, fname), "wb") as fp:
-            fp.write(content)
+        asset_dir = ""
+        if prop.project_id:
+            project = await session.get(CrmProject, prop.project_id)
+            if project:
+                asset_dir = await proposal_assets.ensure_folder(session, project)
 
-        prop.deck_url = f"/uploads/proposals/{pid}/{fname}"
+        if asset_dir:
+            base = clean_name(os.path.basename(file.filename or "")) or f"deck{ext}"
+            stem, _e = os.path.splitext(base)
+            fname, i = base, 2
+            while await asyncio.to_thread(os.path.exists, os.path.join(asset_dir, fname)):
+                fname = f"{stem}-{i}{ext}"
+                i += 1
+            dest = os.path.join(asset_dir, fname)
+            await asyncio.to_thread(_write_bytes, dest, content)
+            prop.deck_url = to_canonical_path(dest)
+        else:
+            # 退路：root 未設 / NAS 搆不到 → 舊的 web root 落點（HTTP 直出）
+            dest_dir = os.path.join(_UPLOAD_BASE, "proposals", pid)
+            os.makedirs(dest_dir, exist_ok=True)
+            fname = f"{uuid.uuid4().hex}{ext}"
+            with open(os.path.join(dest_dir, fname), "wb") as fp:
+                fp.write(content)
+            prop.deck_url = f"/uploads/proposals/{pid}/{fname}"
+
         prop.updated_at = datetime.now(timezone.utc)
         await session.commit()
         deck_url = prop.deck_url
 
-    # 舊 deck 由本模組自產（/uploads/proposals/...），照相對路徑 best-effort 刪檔
+    # 舊 deck 由本模組自產（/uploads/proposals/...），照相對路徑 best-effort 刪檔。
+    # 資產夾裡的舊檔**不刪** —— 那是人看得到、可能自己整理過的資料夾。
     if old_url.startswith("/uploads/proposals/"):
         try:
             os.remove(os.path.join(_UPLOAD_BASE, *old_url.split("/")[2:]))
         except OSError:
             pass
     return {"status": "ok", "deck_url": deck_url}
+
+
+def _write_bytes(path: str, data: bytes) -> None:
+    with open(path, "wb") as fp:
+        fp.write(data)
+
+
+@router.get("/{pid}/deck/download")
+async def download_deck(pid: str, request: Request):
+    """下載提案簡報 —— deck 存進 NAS 資產夾後不在 web root，靠這個端點帶權限出檔。
+    `deck_url` 以 `/uploads/` 開頭的舊 deck 由靜態路由直出，不會走到這裡。"""
+    _check_auth(request)
+    factory = _require_factory()
+    async with factory() as session:
+        prop = await _get_proposal_or_404(session, pid)
+        url = prop.deck_url or ""
+    if not url or url.startswith("/"):
+        raise HTTPException(status_code=404, detail="此提案沒有存在資產夾的簡報檔")
+    from fastapi.responses import FileResponse
+
+    from core.drive_map import to_local_path
+    path = to_local_path(url)
+    if not await asyncio.to_thread(os.path.isfile, path):
+        raise HTTPException(status_code=404, detail="簡報檔已不在資料夾裡（可能被移動或刪除）")
+    return FileResponse(path, filename=os.path.basename(path))
 
 
 # ── 一鍵成案 ─────────────────────────────────────────────

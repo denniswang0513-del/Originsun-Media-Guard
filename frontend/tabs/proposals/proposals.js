@@ -11,7 +11,7 @@
 
 import { esc } from '../website/website-utils.js';
 import { createSortable, sortableTh, enumIndex } from '../crm/crm-utils.js';
-import { tfetch } from './prop-fetch.js';
+import { openDeck, tfetch } from './prop-fetch.js';
 
 const API = '/api/v1/proposals';
 const STATUSES = ['草稿', '已提案', '入圍', '成案', '未成案', '擱置'];
@@ -270,7 +270,8 @@ async function openDetail(pid) {
                     <div class="prop-card-sec">
                         <h4>📄 提案簡報（deck）</h4>
                         ${prop.deck_url
-                            ? `<div style="margin-bottom:8px;"><a href="${esc(prop.deck_url)}" target="_blank" rel="noopener" style="color:#93c5fd;">⬇️ 下載簡報（${esc(prop.deck_url.split('.').pop())}）</a></div>`
+                            ? `<div style="margin-bottom:8px;"><a id="pd-deck-dl" href="#" style="color:#93c5fd;">⬇️ 下載簡報（${esc(String(prop.deck_url).split('.').pop())}）</a>
+                               <div style="color:#666;font-size:11px;margin-top:3px;">${esc(String(prop.deck_url).split(/[\\/]/).pop())}</div></div>`
                             : '<div style="color:#666;font-size:12px;margin-bottom:8px;">尚未上傳</div>'}
                         <button id="pd-deck-upload" class="prop-btn ghost">⬆️ ${prop.deck_url ? '更換簡報' : '上傳簡報'}</button>
                         <input id="pd-deck-file" type="file" accept="${DECK_EXTS}" style="display:none;">
@@ -385,6 +386,13 @@ async function openDetail(pid) {
             _closeOverlay();
             refreshList();
         } catch (err) { alert('刪除失敗：' + (err.message || err)); }
+    });
+
+    // deck 下載（新落點在 NAS 資產夾 → 走帶權限端點，不是靜態連結）
+    ov.querySelector('#pd-deck-dl')?.addEventListener('click', async (e) => {
+        e.preventDefault();
+        try { await openDeck(prop.id, prop.deck_url); }
+        catch (err) { alert('簡報下載失敗：' + (err.message || err)); }
     });
 
     // deck 上傳（前端先擋 50MB，後端同樣把關 413）

@@ -469,6 +469,8 @@ async def _on_startup():
                         ("timesheets", "staff_id", "VARCHAR(32)"),
                         # 影像紀錄：子資料夾名（首次生成後固定，見 media_log._ensure_folder_name）
                         ("project_media_log", "folder_name", "VARCHAR(255)"),
+                        # 提案庫資產夾名（core.project_folders，2026-08-06）
+                        ("crm_projects", "proposal_folder_name", "VARCHAR(255)"),
                         # 提案企劃矩陣（docs/PROPOSAL_PLANNER.md）
                         ("preprod_proposals", "plan", "JSONB"),
                         ("preprod_proposals", "notes", "TEXT"),   # 基本資料備註（§9.7）
@@ -552,6 +554,15 @@ async def _on_startup():
         except Exception as _e_pp:
             # 不能靜默死：沒遷移的提案不會出現在管線專案列（前端提案帶只剩 legacy 提示）
             print(f"[WARN] 提案殼專案遷移失敗: {_e_pp}")
+
+    # ── 片庫封存資料夾改名 uuid → {片名}_{品牌}（master-only、冪等，2026-08-06）──
+    # 背景跑：逐支 rename 打 NAS，不擋 startup（自身 master gate + 逐筆容錯）
+    if state.db_online:
+        try:
+            from services.reference_archiver import migrate_folder_names
+            asyncio.create_task(migrate_folder_names())
+        except Exception as _e_rf:
+            print(f"[WARN] 片庫資料夾改名遷移啟動失敗: {_e_rf}")
 
     # ── DB Migration: crm_project_cost_lines table ──
     if state.db_online:
