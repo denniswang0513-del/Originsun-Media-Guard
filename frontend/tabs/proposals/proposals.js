@@ -86,7 +86,7 @@ function _renderShell() {
     document.getElementById('prop-folders').addEventListener('click', async () => {
         try {
             const mod = await import('./proposal-folders.js');
-            mod.openFolderBrowser(_mountOverlay, _closeOverlay);
+            mod.openFolderBrowser(_mountOverlay);
         } catch (e) { alert('資產資料夾載入失敗：' + (e.message || e)); }
     });
 

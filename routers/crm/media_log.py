@@ -1,4 +1,4 @@
-"""routers/crm/media_log.py — 影像紀錄（工作過程劇照/花絮收集）。
+﻿"""routers/crm/media_log.py — 影像紀錄（工作過程劇照/花絮收集）。
 
 每專案一條 token 公開連結（/media-log.html?token=…）：現場同仁/合作夥伴
 免登入上傳劇照、花絮影片；原始檔案存進管理員設定的影像紀錄資料夾
@@ -594,12 +594,8 @@ async def _reconcile_files(factory, project_id: str, root: str, folder_name: str
 # 有意義（有 NAS 憑證 + ffmpeg），故掛 @router（admin）而非 public_router。
 # folder/rel 來自前端 query → 一律經路徑防護（擋 .. 逃逸）再開檔。
 
-# 路徑防護的正本已搬到 core.project_folders（提案資產夾是第三個使用者）
-_within_dir = within_dir
-_subfolder_path = subfolder_path
-_safe_subfolder = safe_subfolder
-_safe_rel_path = safe_rel_path
-_FOLDER_VIEW_CAP = FOLDER_VIEW_CAP
+# 路徑防護（within_dir / subfolder_path / safe_subfolder / safe_rel_path）的
+# 正本在 core.project_folders —— 直接用公開名，不留同義別名。
 
 
 def _list_folder_for_view(folder_abs: str, cap: int = FOLDER_VIEW_CAP) -> tuple:
@@ -1038,7 +1034,7 @@ async def media_log_create_folder(request: Request):
     root, _cats = await _media_log_conf()
     if not await asyncio.to_thread(_root_set, root):
         raise HTTPException(status_code=503, detail="管理員尚未設定影像紀錄資料夾")
-    folder = _subfolder_path(root, name)   # 名稱驗證 + 路徑遍歷防護（單一真相）
+    folder = subfolder_path(root, name)   # 名稱驗證 + 路徑遍歷防護（單一真相）
     if not folder:
         raise HTTPException(status_code=400, detail="資料夾名稱無效")
 
@@ -1077,7 +1073,7 @@ async def media_log_folder_token(request: Request):
     if not folder_name:
         raise HTTPException(status_code=400, detail="缺 folder_name")
     root, _cats = await _media_log_conf()
-    if not await asyncio.to_thread(_safe_subfolder, root, folder_name):
+    if not await asyncio.to_thread(safe_subfolder, root, folder_name):
         raise HTTPException(status_code=404, detail="找不到資料夾（或無法存取）")
     db = await _db_settings()
     factory = await _get_factory()
@@ -1105,7 +1101,7 @@ async def media_log_folder_files(request: Request, folder: str = ""):
     讓「不管有沒有連結專案都能看照片」—— 連結是把它收進某專案，這裡只是先看。"""
     _check_media_log_auth(request)
     root, _cats = await _media_log_conf()
-    folder_abs = await asyncio.to_thread(_safe_subfolder, root, folder)
+    folder_abs = await asyncio.to_thread(safe_subfolder, root, folder)
     if not folder_abs:
         raise HTTPException(status_code=404, detail="找不到資料夾（或無法存取）")
     files, truncated = await asyncio.to_thread(_list_folder_for_view, folder_abs)
@@ -1124,10 +1120,10 @@ async def media_log_folder_thumb(request: Request, folder: str = "", rel: str = 
     _check_media_log_auth(request, token)
     from starlette.responses import FileResponse
     root, _cats = await _media_log_conf()
-    folder_abs = await asyncio.to_thread(_safe_subfolder, root, folder)
+    folder_abs = await asyncio.to_thread(safe_subfolder, root, folder)
     if not folder_abs:
         raise HTTPException(status_code=404, detail="找不到資料夾")
-    path = await asyncio.to_thread(_safe_rel_path, folder_abs, rel)
+    path = await asyncio.to_thread(safe_rel_path, folder_abs, rel)
     if not path:
         raise HTTPException(status_code=404, detail="找不到檔案")
     key = _folder_thumb_key(to_canonical_path(path))
@@ -1153,10 +1149,10 @@ async def media_log_folder_file(request: Request, folder: str = "", rel: str = "
     _check_media_log_auth(request, token)
     from starlette.responses import FileResponse
     root, _cats = await _media_log_conf()
-    folder_abs = await asyncio.to_thread(_safe_subfolder, root, folder)
+    folder_abs = await asyncio.to_thread(safe_subfolder, root, folder)
     if not folder_abs:
         raise HTTPException(status_code=404, detail="找不到資料夾")
-    path = await asyncio.to_thread(_safe_rel_path, folder_abs, rel)
+    path = await asyncio.to_thread(safe_rel_path, folder_abs, rel)
     if not path:
         raise HTTPException(status_code=404, detail="找不到檔案")
     return FileResponse(path, filename=os.path.basename(path))

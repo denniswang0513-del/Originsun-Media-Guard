@@ -240,67 +240,9 @@ class TestStatNewFiles:
         assert _stat_new_files(str(tmp_path), ["gone.jpg"]) == {}
 
 
-class TestSafeSubfolder:
-    """孤兒資料夾唯讀瀏覽的路徑防護（_safe_subfolder）：只放行 root 下的直接子夾。"""
-
-    def test_valid_direct_subfolder(self, tmp_path):
-        from routers.crm.media_log import _safe_subfolder
-        import os
-        (tmp_path / "shoot").mkdir()
-        assert _safe_subfolder(str(tmp_path), "shoot") == os.path.join(str(tmp_path), "shoot")
-
-    def test_rejects_path_separators(self, tmp_path):
-        from routers.crm.media_log import _safe_subfolder
-        (tmp_path / "a").mkdir()
-        assert _safe_subfolder(str(tmp_path), "a/b") is None
-        assert _safe_subfolder(str(tmp_path), "a\\b") is None
-
-    def test_rejects_dotdot_traversal(self, tmp_path):
-        from routers.crm.media_log import _safe_subfolder
-        assert _safe_subfolder(str(tmp_path), "..") is None
-        assert _safe_subfolder(str(tmp_path), ".") is None
-
-    def test_rejects_nonexistent_and_file(self, tmp_path):
-        from routers.crm.media_log import _safe_subfolder
-        (tmp_path / "f.jpg").write_bytes(b"x")
-        assert _safe_subfolder(str(tmp_path), "nope") is None
-        assert _safe_subfolder(str(tmp_path), "f.jpg") is None   # 檔案不是資料夾
-
-    def test_empty_inputs(self, tmp_path):
-        from routers.crm.media_log import _safe_subfolder
-        assert _safe_subfolder("", "x") is None
-        assert _safe_subfolder(str(tmp_path), "") is None
-
-
-class TestSafeRelPath:
-    """孤兒資料夾內單檔路徑防護（_safe_rel_path）：擋 .. / 絕對路徑逃出資料夾。"""
-
-    def test_valid_file_incl_subdir(self, tmp_path):
-        from routers.crm.media_log import _safe_rel_path
-        import os
-        (tmp_path / "sub").mkdir()
-        (tmp_path / "sub" / "a.jpg").write_bytes(b"x")
-        got = _safe_rel_path(str(tmp_path), "sub/a.jpg")
-        assert got == os.path.normpath(os.path.join(str(tmp_path), "sub", "a.jpg"))
-
-    def test_backslash_relpath_accepted(self, tmp_path):
-        from routers.crm.media_log import _safe_rel_path
-        (tmp_path / "a.jpg").write_bytes(b"x")
-        assert _safe_rel_path(str(tmp_path), "a.jpg") is not None
-
-    def test_rejects_traversal_out_of_folder(self, tmp_path):
-        from routers.crm.media_log import _safe_rel_path
-        secret = tmp_path / "secret.txt"
-        secret.write_bytes(b"x")
-        folder = tmp_path / "folder"
-        folder.mkdir()
-        assert _safe_rel_path(str(folder), "../secret.txt") is None
-
-    def test_rejects_absolute_and_missing(self, tmp_path):
-        from routers.crm.media_log import _safe_rel_path
-        assert _safe_rel_path(str(tmp_path), "/etc/passwd") is None
-        assert _safe_rel_path(str(tmp_path), "gone.jpg") is None
-        assert _safe_rel_path(str(tmp_path), "") is None
+# 路徑防護（safe_subfolder / safe_rel_path）的測試已隨規則搬到
+# tests/unit/test_project_folders.py —— 正本在 core.project_folders，
+# 三個資產子系統共用。這裡只留 media_log 自己的媒體判定薄殼。
 
 
 class TestListFolderForView:

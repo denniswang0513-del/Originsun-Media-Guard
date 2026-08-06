@@ -41,22 +41,13 @@ export async function tfetch(path, opts = {}) {
 }
 
 /**
- * 開啟提案簡報。deck 有兩種落點（2026-08-06 資產夾化）：
- * - `/uploads/...` 開頭（舊）→ 在 web root 裡，直接開新分頁。
- * - 其他（NAS 資產夾的絕對路徑）→ 走帶權限的下載端點。`<a href>` 送不了
- *   Authorization header，所以 fetch 成 blob 再觸發下載。
- *
- * 失敗自己 alert（三個呼叫端都只會做這件事）→ 呼叫端一行就夠。
+ * 帶權限下載（**單一正本**）—— `<a href>` 送不了 Authorization header，
+ * 所以 fetch 成 blob 再觸發。失敗自己 alert（呼叫端一行就夠）。
+ * 檔名從路徑尾段取，正反斜線都吃（NAS 路徑是反斜線）。
  */
-export async function openDeck(pid, deckUrl) {
-    if (!deckUrl) return;
-    if (deckUrl.startsWith('/')) {
-        window.open(deckUrl, '_blank', 'noopener');
-        return;
-    }
+export async function authDownload(url, filename, label = '下載') {
     try {
-        const r = await fetch(`/api/v1/proposals/${encodeURIComponent(pid)}/deck/download`,
-            { headers: _authHeaders() });
+        const r = await fetch(url, { headers: _authHeaders() });
         if (!r.ok) {
             const d = await r.json().catch(() => ({}));
             throw new Error(typeof d.detail === 'string' ? d.detail : 'HTTP ' + r.status);
@@ -64,12 +55,55 @@ export async function openDeck(pid, deckUrl) {
         const href = URL.createObjectURL(await r.blob());
         const a = document.createElement('a');
         a.href = href;
-        a.download = deckUrl.split(/[\\/]/).pop() || 'deck';
+        a.download = String(filename || '').split(/[\\/]/).pop() || 'file';
         document.body.appendChild(a);
         a.click();
         a.remove();
         setTimeout(() => URL.revokeObjectURL(href), 10_000);
     } catch (e) {
-        alert('簡報下載失敗：' + (e.message || e));
+        alert(`${label}失敗：` + (e.message || e));
     }
+}
+
+/**
+ * 開啟提案簡報。deck 有兩種落點（2026-08-06 資產夾化）：
+ * - `/uploads/...` 開頭（舊）→ 在 web root 裡，直接開新分頁。
+ * - 其他（NAS 資產夾的絕對路徑）→ 走帶權限的下載端點。
+ */
+export async function openDeck(pid, deckUrl) {
+    if (!deckUrl) return;
+    if (deckUrl.startsWith('/')) {
+        window.open(deckUrl, '_blank', 'noopener');
+        return;
+    }
+    await authDownload(`/api/v1/proposals/${encodeURIComponent(pid)}/deck/download`,
+                       deckUrl, '簡報下載');
+}
+
+/** 檔案大小 → 人看的字串（GB 級也顧到 —— 企劃夾可能放參考影片）。 */
+export function fmtBytes(n) {
+    const v = Number(n) || 0;
+    if (v >= 1073741824) return (v / 1073741824).toFixed(1) + ' GB';
+    if (v >= 1048576) return (v / 1048576).toFixed(1) + ' MB';
+    if (v >= 1024) return Math.round(v / 1024) + ' KB';
+    return v + ' B';
+}
+
+/**
+ * 拖放上傳區：進入高亮、放開送檔。`onFiles(FileList)` 由呼叫端決定怎麼送。
+ * 回傳解除綁定的函式（overlay 關掉時用）。
+ */
+export function wireFileDrop(zone, onFiles, hot = '#3b82f6') {
+    const base = zone.style.borderColor;
+    const on = (e) => { e.preventDefault(); zone.style.borderColor = hot; };
+    const off = (e) => { e.preventDefault(); zone.style.borderColor = base; };
+    ['dragenter', 'dragover'].forEach(ev => zone.addEventListener(ev, on));
+    ['dragleave', 'drop'].forEach(ev => zone.addEventListener(ev, off));
+    const drop = (e) => onFiles(e.dataTransfer.files);
+    zone.addEventListener('drop', drop);
+    return () => {
+        ['dragenter', 'dragover'].forEach(ev => zone.removeEventListener(ev, on));
+        ['dragleave', 'drop'].forEach(ev => zone.removeEventListener(ev, off));
+        zone.removeEventListener('drop', drop);
+    };
 }

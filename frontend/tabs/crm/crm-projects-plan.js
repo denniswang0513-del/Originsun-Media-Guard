@@ -8,7 +8,7 @@
  */
 
 import { crmFetch, crmToast, esc } from './crm-utils.js';
-import { tfetch } from '../proposals/prop-fetch.js';
+import { authDownload, fmtBytes, tfetch, wireFileDrop } from '../proposals/prop-fetch.js';
 import { state } from './crm-projects-state.js';
 
 const API = '/api/v1/proposals';
@@ -76,8 +76,8 @@ function _mountAssetsCard(projectId, host, d) {
             </div>
         </div>`;
     host.appendChild(box);
-    _renderFiles(projectId, box, d);
-    _wireUpload(projectId, box, host);
+    _renderFiles(box, d);
+    _wireUpload(projectId, box, host, d);
 
     box.querySelector('#pp-cfg').addEventListener('click', () => {
         const row = box.querySelector('#pp-cfg-row');
@@ -103,11 +103,8 @@ function _mountAssetsCard(projectId, host, d) {
     });
 }
 
-const _fmtSize = (n) => n >= 1048576 ? (n / 1048576).toFixed(1) + ' MB'
-    : n >= 1024 ? Math.round(n / 1024) + ' KB' : n + ' B';
-
 // 檔案列表：標星號的是「提案簡報」（提案詳情與公開共編頁顯示的那一份）
-function _renderFiles(projectId, box, d) {
+function _renderFiles(box, d) {
     const files = d.files || [];
     const list = box.querySelector('#pp-files');
     if (!files.length) {
@@ -123,7 +120,7 @@ function _renderFiles(projectId, box, d) {
             <span title="${isDeck ? '目前的提案簡報' : '設為提案簡報'}" data-deck
                   style="cursor:pointer;color:${isDeck ? '#fbbf24' : '#3a3a3a'};">★</span>
             <span data-dl style="flex:1;cursor:pointer;" title="下載">${esc(f.rel)}</span>
-            <span style="color:#6b6b6b;">${_fmtSize(f.size_bytes)}</span>
+            <span style="color:#6b6b6b;">${fmtBytes(f.size_bytes)}</span>
             <span style="color:#6b6b6b;">${esc((f.mtime ? new Date(f.mtime * 1000).toISOString() : '').slice(0, 10))}</span>
             <button data-del class="crm-btn crm-btn-secondary crm-btn-sm" title="刪除">✕</button>
         </div>`;
@@ -131,10 +128,16 @@ function _renderFiles(projectId, box, d) {
         ? '<div style="padding:6px 10px;color:#fbbf24;font-size:11.5px;">檔案過多，只顯示前 1000 筆</div>' : '');
 }
 
-function _wireUpload(projectId, box, host) {
+function _wireUpload(projectId, box, host, d) {
     const input = box.querySelector('#pp-file-input');
     const drop = box.querySelector('#pp-drop');
-    const reload = () => loadPlanTab(projectId, host);
+    // 只重畫檔案區，不重跑 loadPlanTab —— 那會連 plan-matrix 一起重繪，
+    // 使用者正在編的格子與捲動位置都沒了，還多一次 NAS 全掃。
+    const repaint = (files, truncated) => {
+        d.files = files ?? d.files;
+        if (truncated !== undefined) d.truncated = truncated;
+        _renderFiles(box, d);
+    };
 
     const send = async (fileList) => {
         if (!fileList || !fileList.length) return;
@@ -147,22 +150,13 @@ function _wireUpload(projectId, box, host) {
             crmToast(`已上傳 ${(r.saved || []).length} 個檔案`
                 + (bad.length ? `；略過 ${bad.length} 個` : ''), bad.length ? 6000 : 2000);
             if (bad.length) console.warn('略過：', bad.join('、'));
-            reload();
+            repaint(r.files, r.truncated);      // 端點順手回了新清單，不必再掃一次
         } catch (e) { alert('上傳失敗：' + (e.message || e)); }
     };
 
     box.querySelector('#pp-add').addEventListener('click', () => input.click());
     input.addEventListener('change', () => { send(input.files); input.value = ''; });
-
-    ['dragenter', 'dragover'].forEach(ev => drop.addEventListener(ev, e => {
-        e.preventDefault();
-        drop.style.borderColor = '#3b82f6';
-    }));
-    ['dragleave', 'drop'].forEach(ev => drop.addEventListener(ev, e => {
-        e.preventDefault();
-        drop.style.borderColor = '#3a3a3a';
-    }));
-    drop.addEventListener('drop', e => send(e.dataTransfer.files));
+    wireFileDrop(drop, send);
 
     // 列表操作（事件委派 —— 列表每次重畫）
     box.querySelector('#pp-files').addEventListener('click', async (e) => {
@@ -176,39 +170,22 @@ function _wireUpload(projectId, box, host) {
                 const r = await crmFetch(`/projects/${projectId}/proposal-assets/file${q}`,
                     { method: 'DELETE' });
                 crmToast(r.deck_cleared ? '已刪除（原本是提案簡報，已取消指定）' : '已刪除');
-                reload();
+                if (r.deck_cleared) d.deck_rel = '';
+                repaint((d.files || []).filter(f => f.rel !== rel));
             } catch (err) { alert('刪除失敗：' + (err.message || err)); }
         } else if (e.target.closest('[data-deck]')) {
             try {
                 await crmFetch(`/projects/${projectId}/proposal-assets/deck`,
                     { method: 'POST', body: JSON.stringify({ rel }) });
                 crmToast('已設為提案簡報');
-                reload();
+                d.deck_rel = rel;
+                repaint();
             } catch (err) { alert('設定失敗：' + (err.message || err)); }
         } else if (e.target.closest('[data-dl]')) {
-            _download(`/api/v1/crm/projects/${projectId}/proposal-assets/file${q}`, rel);
+            authDownload(`/api/v1/crm/projects/${projectId}/proposal-assets/file${q}`, rel);
         }
     });
 }
-
-/** 帶權限下載（<a href> 送不了 Authorization → fetch 成 blob 再觸發）。 */
-async function _download(url, filename) {
-    try {
-        const token = localStorage.getItem('auth_token');
-        const r = await fetch(url, { headers: token ? { Authorization: 'Bearer ' + token } : {} });
-        if (!r.ok) throw new Error('HTTP ' + r.status);
-        const href = URL.createObjectURL(await r.blob());
-        const a = document.createElement('a');
-        a.href = href;
-        a.download = (filename || '').split('/').pop() || 'file';
-        document.body.appendChild(a);
-        a.click();
-        a.remove();
-        setTimeout(() => URL.revokeObjectURL(href), 10_000);
-    } catch (e) { alert('下載失敗：' + (e.message || e)); }
-}
-
-export { _download as downloadAsset };
 
 function _renderEmpty(projectId, host) {
     host.innerHTML = `

@@ -216,11 +216,32 @@ FOLDER_VIEW_CAP = 1000   # 單夾列檔上限（超過標 truncated，避免超�
 def iter_files_rel(folder: str, accept: Optional[Callable[[str], bool]] = None):
     """os.walk 產出資料夾內檔案的相對路徑（相對 folder）。剪掉 ./_ 開頭的子夾。
     `accept(filename)` 給定時只產出它認可的（影像紀錄用它篩媒體副檔名）。"""
-    for dirpath, dirnames, filenames in os.walk(folder):
-        dirnames[:] = [d for d in dirnames if d[:1] not in (".", "_")]
-        for fn in filenames:
-            if accept is None or accept(fn):
-                yield os.path.relpath(os.path.join(dirpath, fn), folder)
+    for rel, _entry in _iter_entries(folder, accept):
+        yield rel
+
+
+def _iter_entries(folder: str, accept: Optional[Callable[[str], bool]] = None):
+    """`(相對路徑, DirEntry)` —— DirEntry 的 stat 是目錄列舉時**順便帶回來的**，
+    再自己 os.stat 一次等於每個檔案多一趟 SMB round trip（滿 cap 的資料夾就是
+    多 1000 趟，而這是三個子系統共用的熱路徑）。"""
+    stack = [folder]
+    while stack:
+        cur = stack.pop()
+        try:
+            with os.scandir(cur) as it:
+                entries = list(it)
+        except OSError:
+            continue
+        for e in entries:
+            try:
+                if e.is_dir():
+                    if e.name[:1] not in (".", "_"):
+                        stack.append(e.path)
+                    continue
+            except OSError:
+                continue
+            if accept is None or accept(e.name):
+                yield os.path.relpath(e.path, folder), e
 
 
 def list_folder_files(folder_abs: str, *, cap: int = FOLDER_VIEW_CAP,
@@ -228,27 +249,88 @@ def list_folder_files(folder_abs: str, *, cap: int = FOLDER_VIEW_CAP,
     """列出資料夾內（含子夾）的檔案 →
     `([{rel, filename, size_bytes, mtime}], truncated)`，依 mtime 新→舊。
     到 cap 就停（大夾防慢）。呼叫端在 to_thread 內跑。"""
-    import stat as _stat
     out: list = []
     truncated = False
-    for rel in iter_files_rel(folder_abs, accept):
+    for rel, entry in _iter_entries(folder_abs, accept):
         if len(out) >= cap:
             truncated = True
             break
         try:
-            st = os.stat(os.path.join(folder_abs, rel))
+            st = entry.stat()          # 目錄列舉已帶回，不再打一次 SMB
         except OSError:
-            continue
-        if not _stat.S_ISREG(st.st_mode):
             continue
         out.append({
             "rel": rel.replace("\\", "/"),
-            "filename": os.path.basename(rel),
+            "filename": entry.name,
             "size_bytes": int(st.st_size),
             "mtime": st.st_mtime,
         })
     out.sort(key=lambda x: x["mtime"], reverse=True)
     return out, truncated
+
+
+# ── 往共用資料夾寫檔：安全規則 + 落地（任何 any-file 上傳端點共用）──
+# 這幾條的理由是「寫進**共用磁碟**」這件事的性質，不是哪個子系統的性質，
+# 所以跟 clean_filename / dedupe 住在一起 —— 下一個 any-file 落地點不必
+# 重新決定一次。
+
+UPLOAD_MAX_BYTES = 300 * 1024 * 1024      # 單檔上限（企劃檔可能含影片參考）
+UPLOAD_CHUNK = 1024 * 1024                # 分塊寫入，大檔不整包進記憶體
+# 擋掉可執行檔（NAS 是共用磁碟，別讓它變成散播點）；其餘一律放行 ——
+# 企劃檔格式太雜（.key/.indd/.aep/.srt…），白名單只會擋到自己人。
+BLOCKED_UPLOAD_EXTS = {
+    ".exe", ".bat", ".cmd", ".com", ".scr", ".msi", ".ps1", ".vbs", ".js",
+    ".jar", ".dll", ".lnk", ".reg", ".hta", ".cpl",
+}
+
+
+def _stream_to_disk(src, dest: str, max_bytes: int) -> int:
+    """分塊寫入 → 位元組數；超過上限刪半成品回 -1（呼叫端在 to_thread 內跑）。
+    整包 `await f.read()` 會讓一次多檔上傳把數百 MB 壓在行程記憶體裡，而且
+    超限也是**讀完才發現**。"""
+    total = 0
+    with open(dest, "wb") as fp:
+        while True:
+            chunk = src.read(UPLOAD_CHUNK)
+            if not chunk:
+                break
+            total += len(chunk)
+            if total > max_bytes:
+                fp.close()
+                try:
+                    os.remove(dest)
+                except OSError:
+                    pass
+                return -1
+            fp.write(chunk)
+    return total
+
+
+async def save_uploads(folder_abs: str, files, *,
+                       max_bytes: int = UPLOAD_MAX_BYTES) -> tuple:
+    """把上傳檔案落地到 folder_abs → `(saved, skipped)`。
+
+    檔名保留原樣（清洗非法字元）、撞名補 -2、可執行檔與超大檔進 skipped
+    並附人看得懂的理由。**兩個上傳入口共用** —— 規則各寫一份的話，同一個
+    NAS 根目錄會有兩種防護，等於沒有防護。
+    """
+    taken = set(await asyncio.to_thread(os.listdir, folder_abs))
+    saved, skipped = [], []
+    for f in files:
+        ext = os.path.splitext(f.filename or "")[1].lower()
+        if ext in BLOCKED_UPLOAD_EXTS:
+            skipped.append({"filename": f.filename, "reason": f"不允許的檔案類型（{ext}）"})
+            continue
+        name = dedupe(clean_filename(f.filename or ""), taken, keep_ext=True)
+        written = await asyncio.to_thread(
+            _stream_to_disk, f.file, os.path.join(folder_abs, name), max_bytes)
+        if written < 0:
+            skipped.append({"filename": f.filename,
+                            "reason": f"超過 {max_bytes // (1024 * 1024)}MB 上限"})
+            continue
+        taken.add(name)
+        saved.append(name)
+    return saved, skipped
 
 
 async def rename_and_remap(session, old_dir: str, new_dir: str, *, remap) -> tuple:

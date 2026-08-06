@@ -7,9 +7,10 @@ from datetime import datetime
 import pytest
 
 from core.project_folders import (clean_filename, clean_name, dedupe,
-                                  make_dated_folder_name,
+                                  list_folder_files, make_dated_folder_name,
                                   make_reference_folder_name, remap_prefix,
-                                  rename_and_remap, rename_dir)
+                                  rename_and_remap, rename_dir, safe_rel_path,
+                                  safe_subfolder)
 
 CREATED = datetime(2026, 8, 6, 15, 30)
 
@@ -175,6 +176,95 @@ def test_dedupe_filename_no_collision_returns_original():
 def test_clean_filename_strips_path_and_falls_back():
     assert clean_filename(r"C:\Users\me\企劃書.pdf") == "企劃書.pdf"
     assert clean_filename("") == "upload"
+
+
+# ── 路徑防護（三個資產子系統共用；規則從 media_log 搬來時測試一起搬）──
+
+class TestSafeSubfolder:
+    """只放行 root 下的直接子資料夾。"""
+
+    def test_valid_direct_subfolder(self, tmp_path):
+        (tmp_path / "shoot").mkdir()
+        assert safe_subfolder(str(tmp_path), "shoot") == os.path.join(str(tmp_path), "shoot")
+
+    def test_rejects_path_separators(self, tmp_path):
+        (tmp_path / "a").mkdir()
+        assert safe_subfolder(str(tmp_path), "a/b") is None
+        assert safe_subfolder(str(tmp_path), "a\\b") is None
+
+    def test_rejects_dotdot_traversal(self, tmp_path):
+        assert safe_subfolder(str(tmp_path), "..") is None
+        assert safe_subfolder(str(tmp_path), ".") is None
+
+    def test_rejects_nonexistent_and_file(self, tmp_path):
+        (tmp_path / "f.jpg").write_bytes(b"x")
+        assert safe_subfolder(str(tmp_path), "nope") is None
+        assert safe_subfolder(str(tmp_path), "f.jpg") is None   # 檔案不是資料夾
+
+    def test_empty_inputs(self, tmp_path):
+        assert safe_subfolder("", "x") is None
+        assert safe_subfolder(str(tmp_path), "") is None
+
+
+class TestSafeRelPath:
+    """擋 .. / 絕對路徑逃出資料夾。"""
+
+    def test_valid_file_incl_subdir(self, tmp_path):
+        (tmp_path / "sub").mkdir()
+        (tmp_path / "sub" / "a.jpg").write_bytes(b"x")
+        got = safe_rel_path(str(tmp_path), "sub/a.jpg")
+        assert got == os.path.normpath(os.path.join(str(tmp_path), "sub", "a.jpg"))
+
+    def test_backslash_relpath_accepted(self, tmp_path):
+        (tmp_path / "a.jpg").write_bytes(b"x")
+        assert safe_rel_path(str(tmp_path), "a.jpg") is not None
+
+    def test_rejects_traversal_out_of_folder(self, tmp_path):
+        (tmp_path / "secret.txt").write_bytes(b"x")
+        folder = tmp_path / "folder"
+        folder.mkdir()
+        assert safe_rel_path(str(folder), "../secret.txt") is None
+
+    def test_rejects_absolute_and_missing(self, tmp_path):
+        assert safe_rel_path(str(tmp_path), "/etc/passwd") is None
+        assert safe_rel_path(str(tmp_path), "gone.jpg") is None
+        assert safe_rel_path(str(tmp_path), "") is None
+
+
+class TestListFolderFiles:
+    """列檔（含子夾、依 mtime 新→舊、cap 標 truncated、accept 過濾）。"""
+
+    def test_lists_all_files_recursively(self, tmp_path):
+        (tmp_path / "sub").mkdir()
+        (tmp_path / "sub" / "a.pdf").write_bytes(b"12345")
+        (tmp_path / "b.docx").write_bytes(b"xx")
+        files, truncated = list_folder_files(str(tmp_path))
+        assert truncated is False
+        assert sorted(f["rel"] for f in files) == ["b.docx", "sub/a.pdf"]
+        assert {f["filename"]: f["size_bytes"] for f in files}["a.pdf"] == 5
+
+    def test_accept_filters(self, tmp_path):
+        (tmp_path / "a.pdf").write_bytes(b"x")
+        (tmp_path / "b.exe").write_bytes(b"x")
+        files, _ = list_folder_files(str(tmp_path), accept=lambda n: n.endswith(".pdf"))
+        assert [f["filename"] for f in files] == ["a.pdf"]
+
+    def test_skips_dot_and_underscore_dirs(self, tmp_path):
+        for d in (".git", "_tmp"):
+            (tmp_path / d).mkdir()
+            (tmp_path / d / "x.pdf").write_bytes(b"x")
+        (tmp_path / "ok.pdf").write_bytes(b"x")
+        files, _ = list_folder_files(str(tmp_path))
+        assert [f["filename"] for f in files] == ["ok.pdf"]
+
+    def test_cap_marks_truncated(self, tmp_path):
+        for i in range(6):
+            (tmp_path / f"{i}.pdf").write_bytes(b"x")
+        files, truncated = list_folder_files(str(tmp_path), cap=4)
+        assert len(files) == 4 and truncated is True
+
+    def test_missing_folder_is_empty_not_error(self, tmp_path):
+        assert list_folder_files(str(tmp_path / "nope")) == ([], False)
 
 
 # ── 改名程序：savepoint + 補償 ──────────────────────────────
