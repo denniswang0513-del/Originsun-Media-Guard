@@ -44,40 +44,59 @@ _PTYPE_TO_PROJECT_TYPE = {
 
 # ── 提案=專案合體（2026-08-06 owner 拍板方案 A）──────────────
 # 提案誕生即是一個管線「提案」階段的專案；提案獨有資料（plan/pitch_date/
-# win-loss…）留在 preprod_proposals 當 1:1 衛星列。提案 status → 專案階段：
+# win-loss…）留在 preprod_proposals 當 1:1 衛星列。
+# 三個集合是同一條 8 階段管線以「未成案」為界的切分 —— 動任何一個都要對照
+# 另外兩個（正本集中在這裡；routers/crm/projects.py 的 hook 也 import 這份）。
+# 提案 status → 專案階段：
 _PROP_STATUS_TO_PROJECT_STATUS = {
     "草稿": "提案", "已提案": "提案", "入圍": "提案", "擱置": "提案",
     "成案": "製作", "未成案": "未成案",
 }
 # 專案還在前期（可被提案側 win/loss 拉動階段）；已進製作後不回頭拉
 _PRESALE_PROJECT_STATUSES = {"投標", "開發", "洽詢", "提案"}
+# 專案進到這些階段 = 衛星提案記「成案」（projects.py _sync_linked_proposals 用）
+PROPOSAL_WIN_STATUSES = {"製作", "結案", "歸檔"}
 
 
-async def _create_shell_project(session, *, title: str, client_id: str,
-                                status: str, ptype: str):
-    """替提案建殼專案 — 走 routers/crm/projects.py 的建案單一正本
-    （客戶檢核/AM 繼承/主表+雜支種子/客戶分級），不 commit。"""
+async def _create_shell_project(session, prop, status: str = ""):
+    """從提案衛星列建殼專案 — 走 routers/crm/projects.py 的建案單一正本
+    （客戶檢核/AM 繼承/主表+雜支種子/客戶分級），不 commit。
+    status 不給就依提案狀態對映（/convert 明確給「製作」覆寫）。"""
     from routers.crm.projects import create_project_in_session
     project, _cname = await create_project_in_session(session, {
-        "name": title,
-        "client_id": client_id,
-        "status": status,
-        "project_type": _PTYPE_TO_PROJECT_TYPE.get(ptype or "", ptype or ""),
+        "name": prop.title,
+        "client_id": prop.client_id,
+        "status": status or _PROP_STATUS_TO_PROJECT_STATUS.get(
+            prop.status or "草稿", "提案"),
+        "project_type": _PTYPE_TO_PROJECT_TYPE.get(prop.ptype or "",
+                                                   prop.ptype or ""),
     })
     return project
 
 
-def _sync_project_from_proposal(prop, project) -> None:
+async def _sync_project_from_proposal(session, prop, project) -> None:
     """提案側 status 轉成案/未成案 → 前期專案跟著換階段（已進製作的不動；
-    草稿↔已提案↔入圍等前期挪動不拉專案 — 免把手動推進的階段拽回來）。"""
+    草稿↔已提案↔入圍等前期挪動不拉專案 — 免把手動推進的階段拽回來）。
+    換階段走與專案端 PUT/PATCH 相同的副作用組（side effects + 兄弟提案
+    同步 + 客戶分級重算）—— 不能只 setattr，否則第三道門靜默漂移。"""
     if not project or (project.status or "") not in _PRESALE_PROJECT_STATUSES:
         return
     if (prop.status or "") not in _OUTCOME_STATUSES:
         return
     target = _PROP_STATUS_TO_PROJECT_STATUS[prop.status]
-    if target != project.status:
-        project.status = target
-        project.updated_at = datetime.now(timezone.utc)
+    if target == project.status:
+        return
+    from routers.crm.projects import (_apply_status_side_effects,
+                                      _sync_linked_proposals)
+    from routers.crm._shared import _auto_update_client_status
+    old_status = project.status or ""
+    project.status = target
+    project.updated_at = datetime.now(timezone.utc)
+    _apply_status_side_effects(project, old_status)
+    # 兄弟提案（N:1 掛同專案）跟著記 win/loss；prop 自己已是新狀態會被跳過
+    await _sync_linked_proposals(session, project, old_status,
+                                 prop.outcome_reason)
+    await _auto_update_client_status(session, project.client_id)
 
 # ProposalPayload 中可直接 setattr 到 model 的欄位（部分更新白名單；
 # pitch_date 是日期字串要先 parse、project_id 由 /convert 回填，都不走這裡）
@@ -433,10 +452,7 @@ async def create_proposal(req: ProposalPayload, request: Request):
                 raise HTTPException(
                     status_code=422,
                     detail="client_id 必填 — 提案即專案，需先選客戶（可先建潛在客戶）")
-            project = await _create_shell_project(
-                session, title=title, client_id=prop.client_id,
-                status=_PROP_STATUS_TO_PROJECT_STATUS.get(prop.status or "草稿", "提案"),
-                ptype=prop.ptype or "")
+            project = await _create_shell_project(session, prop)
         prop.project_id = project.id
         session.add(prop)
         await session.commit()
@@ -505,18 +521,16 @@ async def update_proposal(pid: str, req: ProposalPayload, request: Request):
             prop.pitch_date = pitch_date
         prop.updated_at = datetime.now(timezone.utc)
         # 提案=專案合體：提案側轉成案/未成案 → 前期專案跟著換階段
-        if (prop.status or "") != old_status and prop.project_id:
+        # （非終態的前期互換不查專案 — 工作區高頻操作省一趟 DB）
+        if ((prop.status or "") != old_status and prop.project_id
+                and (prop.status or "") in _OUTCOME_STATUSES):
             from db.models import CrmProject
-            _sync_project_from_proposal(
-                prop, await session.get(CrmProject, prop.project_id))
+            await _sync_project_from_proposal(
+                session, prop, await session.get(CrmProject, prop.project_id))
         # legacy 無專案的提案（缺客戶沒被遷移）補上客戶 → 自動建殼入管線
         if (not prop.project_id and (prop.client_id or "").strip()
                 and (prop.status or "") != "擱置"):
-            project = await _create_shell_project(
-                session, title=prop.title, client_id=prop.client_id,
-                status=_PROP_STATUS_TO_PROJECT_STATUS.get(
-                    prop.status or "草稿", "提案"),
-                ptype=prop.ptype or "")
+            project = await _create_shell_project(session, prop)
             prop.project_id = project.id
         await session.commit()
         # 不 refresh：expire_on_commit=False，屬性仍有效 — 省一次整列（含 plan JSONB）重讀
@@ -1073,9 +1087,7 @@ async def convert_proposal(pid: str, request: Request,
             # 走建案單一正本（AM 繼承/主表+雜支種子/客戶分級）；客戶不存在
             # 這裡收到的是 404，轉成語意較準的 422
             try:
-                project = await _create_shell_project(
-                    session, title=prop.title, client_id=prop.client_id,
-                    status="製作", ptype=prop.ptype or "")
+                project = await _create_shell_project(session, prop, status="製作")
             except HTTPException as e:
                 if e.status_code == 404:
                     raise HTTPException(status_code=422,
@@ -1160,10 +1172,14 @@ async def migrate_unlinked_proposals_to_projects() -> None:
     from db.models import PreprodProposal
 
     async with factory() as session:
+        # 濾掉無客戶的 legacy — 它們永遠遷不走，別每次 startup 白開
+        # FOR UPDATE session（穩態下這份清單應為空，整個遷移只剩這一查）
         ids = (await session.execute(
             select(PreprodProposal.id).where(
                 PreprodProposal.project_id.is_(None),
                 PreprodProposal.status != "擱置",
+                PreprodProposal.client_id.isnot(None),
+                PreprodProposal.client_id != "",
             ))).scalars().all()
     migrated = 0
     for pid in ids:
@@ -1176,11 +1192,7 @@ async def migrate_unlinked_proposals_to_projects() -> None:
                     or not (prop.client_id or "").strip()):
                 continue
             try:
-                project = await _create_shell_project(
-                    session, title=prop.title, client_id=prop.client_id,
-                    status=_PROP_STATUS_TO_PROJECT_STATUS.get(
-                        prop.status or "草稿", "提案"),
-                    ptype=prop.ptype or "")
+                project = await _create_shell_project(session, prop)
             except HTTPException:
                 continue    # 客戶不存在等 → 留 legacy，不擋啟動
             prop.project_id = project.id

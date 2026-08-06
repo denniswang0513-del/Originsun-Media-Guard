@@ -69,25 +69,20 @@ async def list_projects(
 
     # 提案=專案合體：列表附掛提案子狀態（草稿/已提案/入圍…），管線「提案」
     # 分頁列上顯示 badge 用。多提案連同一專案（N:1）取最近更新的一筆。
-    try:
-        from db.models import PreprodProposal
-        prop_status_sq = (
-            select(PreprodProposal.status)
-            .where(PreprodProposal.project_id == CrmProject.id)
-            .order_by(PreprodProposal.updated_at.desc())
-            .limit(1)
-            .correlate(CrmProject)
-            .scalar_subquery()
-        )
-    except ImportError:
-        prop_status_sq = None
+    from db.models import PreprodProposal
+    prop_status_sq = (
+        select(PreprodProposal.status)
+        .where(PreprodProposal.project_id == CrmProject.id)
+        .order_by(PreprodProposal.updated_at.desc())
+        .limit(1)
+        .correlate(CrmProject)
+        .scalar_subquery()
+    )
 
     async with factory() as session:
-        cols = [CrmProject, Client.short_name.label("client_short_name")]
-        if prop_status_sq is not None:
-            cols.append(prop_status_sq.label("proposal_status"))
         query = (
-            select(*cols)
+            select(CrmProject, Client.short_name.label("client_short_name"),
+                   prop_status_sq.label("proposal_status"))
             .outerjoin(Client, Client.id == CrmProject.client_id)
             .order_by(CrmProject.updated_at.desc())
         )
@@ -105,13 +100,11 @@ async def list_projects(
             ))
         rows = (await session.execute(query)).all()
 
-    def _with_prop(row):
-        d = _to_project_dict(row[0], row[1] or "")
-        d["proposal_status"] = (row[2] or "") if len(row) > 2 else ""
-        return d
-
     return {
-        "projects": [_with_prop(row) for row in rows],
+        "projects": [
+            {**_to_project_dict(p, cname or ""), "proposal_status": ps or ""}
+            for p, cname, ps in rows
+        ],
         "total": len(rows),
     }
 
@@ -437,6 +430,19 @@ async def update_project_website_stage(project_id: str, request: Request):
     return {"ok": True, "stage": stage}
 
 
+async def _latest_proposal_status(session, project_id: str) -> str:
+    """專案的衛星提案子狀態（N:1 取最近更新的一筆；無衛星回 ''）。
+    單筆端點與列表回應形狀對齊 —— 前端「未成案要問原因」的守門讀這個欄，
+    只在列表附掛的話，任何用單筆回應覆寫 state 的路徑都會讓守門靜默失效。"""
+    from db.models import PreprodProposal
+    return (await session.execute(
+        select(PreprodProposal.status)
+        .where(PreprodProposal.project_id == project_id)
+        .order_by(PreprodProposal.updated_at.desc())
+        .limit(1)
+    )).scalar() or ""
+
+
 @router.get("/projects/{project_id}")
 async def get_project(project_id: str):
     _require_db()
@@ -448,8 +454,10 @@ async def get_project(project_id: str):
             raise HTTPException(status_code=404, detail="找不到此專案")
         client = await session.get(Client, project.client_id)
         client_name = client.short_name if client else ""
+        prop_status = await _latest_proposal_status(session, project_id)
 
-    return _to_project_dict(project, client_name)
+    return {**_to_project_dict(project, client_name),
+            "proposal_status": prop_status}
 
 
 def _apply_status_side_effects(project, old_status: str) -> None:
@@ -475,24 +483,22 @@ def _apply_status_side_effects(project, old_status: str) -> None:
 
 
 # 提案=專案合體（2026-08-06）：專案階段轉換是 win/loss 的**單一觸發點**。
-# 進到這三個階段 = 成案；轉「未成案」= 未成案（強制附 outcome_reason，組織
-# 學習欄）。單向、只在轉換點同步 —— docs/PROPOSAL_PLANNER.md 決策紀錄。
-_PROPOSAL_WIN_STATUSES = {"製作", "結案", "歸檔"}
+# 進 win 階段 = 成案；轉「未成案」= 未成案（強制附 outcome_reason，組織
+# 學習欄）。狀態集合正本在 routers/api_proposals.py「提案=專案合體」區。
 
 
 async def _sync_linked_proposals(session, project, old_status: str,
                                  reason: str | None) -> None:
     """專案狀態變動 → 連結的提案衛星列記 win/loss。PUT 與 PATCH /status
-    共用（比照 _apply_status_side_effects，避免兩條路徑漂移）。
+    共用（比照 _apply_status_side_effects，避免兩條路徑漂移）；提案側的
+    _sync_project_from_proposal 換完階段也回頭呼叫這裡同步兄弟提案。
     轉「未成案」且提案沒有原因、本次也沒帶 → 422（session 尚未 commit，
     整筆狀態變更一起擋下）。"""
     new_status = project.status or ""
     if new_status == old_status:
         return
-    try:
-        from db.models import PreprodProposal
-    except ImportError:      # agent 環境沒有 DB 套件
-        return
+    from db.models import PreprodProposal
+    from routers.api_proposals import PROPOSAL_WIN_STATUSES
     props = (await session.execute(
         select(PreprodProposal).where(PreprodProposal.project_id == project.id)
     )).scalars().all()
@@ -501,7 +507,7 @@ async def _sync_linked_proposals(session, project, old_status: str,
     now = _now()
     reason = (reason or "").strip()
     for prop in props:
-        if new_status in _PROPOSAL_WIN_STATUSES and prop.status != "成案":
+        if new_status in PROPOSAL_WIN_STATUSES and prop.status != "成案":
             prop.status = "成案"
             if reason:
                 prop.outcome_reason = reason
@@ -560,8 +566,11 @@ async def update_project(project_id: str, req: CrmProjectPatchPayload, request: 
         await session.refresh(project)
         client = await session.get(Client, project.client_id)
         client_name = client.short_name if client else ""
+        prop_status = await _latest_proposal_status(session, project_id)
 
-    return {"status": "ok", "project": _to_project_dict(project, client_name)}
+    return {"status": "ok",
+            "project": {**_to_project_dict(project, client_name),
+                        "proposal_status": prop_status}}
 
 
 @router.delete("/projects/{project_id}")
@@ -615,8 +624,11 @@ async def update_project_status(project_id: str, request: Request):
         await session.refresh(project)
         client = await session.get(Client, project.client_id)
         client_name = client.short_name if client else ""
+        prop_status = await _latest_proposal_status(session, project_id)
 
-    return {"status": "ok", "project": _to_project_dict(project, client_name)}
+    return {"status": "ok",
+            "project": {**_to_project_dict(project, client_name),
+                        "proposal_status": prop_status}}
 
 
 # ── Project CSV Import ──────────────────────────────────────

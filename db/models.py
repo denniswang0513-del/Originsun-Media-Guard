@@ -887,7 +887,10 @@ class PreprodProposal(Base):
     updated_at = Column(DateTime(timezone=True), server_default=func.now())
 
     __table_args__ = (Index("idx_pprop_client", "client_id"),
-                      Index("idx_pprop_status", "status"))
+                      Index("idx_pprop_status", "status"),
+                      # 提案=專案合體：GET /crm/projects 每列 scalar subquery
+                      # 以 project_id 過濾 + updated_at DESC LIMIT 1 — 走這顆
+                      Index("idx_pprop_project", "project_id", "updated_at"))
 
 
 class PreprodReference(Base):

@@ -7,15 +7,21 @@
  * （POST /proposals {title: 專案名, project_id} — 後端掛載、不另建殼專案）。
  */
 
-import { esc } from '../website/website-utils.js';
+import { esc } from './crm-utils.js';
 import { tfetch } from '../proposals/prop-fetch.js';
 import { state } from './crm-projects-state.js';
 
 const API = '/api/v1/proposals';
 
-// ES module map 會永久快取 rejected import — 重試要帶 cache-bust query
-// （proposals.js / subview-loader.js 同款教訓）
-let _matrixTries = 0;
+// ES module map 會永久快取 rejected import — **失敗後的重試**才帶 cache-bust
+// query（proposals.js / subview-loader.js 同款教訓）；成功路徑永遠走裸路徑
+// 吃 module cache，不然每次開分頁都重載一份新模組實例。
+let _matrixFailed = false;
+
+function _fail(host, prefix, e) {
+    if (!host.isConnected) return;
+    host.innerHTML = `<div class="crm-empty" style="padding:24px;color:#fca5a5;">${prefix}: ${esc(e.message || String(e))}</div>`;
+}
 
 export async function loadPlanTab(projectId, host) {
     host.innerHTML = '<div class="crm-empty">載入中...</div>';
@@ -23,8 +29,7 @@ export async function loadPlanTab(projectId, host) {
     try {
         props = (await tfetch(`${API}?project_id=${encodeURIComponent(projectId)}`)).proposals || [];
     } catch (e) {
-        if (!host.isConnected) return;
-        host.innerHTML = `<div class="crm-empty" style="padding:24px;color:#fca5a5;">提案企劃載入失敗: ${esc(e.message || String(e))}</div>`;
+        _fail(host, '提案企劃載入失敗', e);
         return;
     }
     if (state.selectedId !== projectId || !host.isConnected) return;   // await 期間已切走
@@ -59,8 +64,7 @@ async function _renderPlan(listItem, projectId, host) {
     try {
         prop = (await tfetch(`${API}/${listItem.id}`)).proposal;
     } catch (e) {
-        if (!host.isConnected) return;
-        host.innerHTML = `<div class="crm-empty" style="padding:24px;color:#fca5a5;">提案載入失敗: ${esc(e.message || String(e))}</div>`;
+        _fail(host, '提案載入失敗', e);
         return;
     }
     if (state.selectedId !== projectId || !host.isConnected) return;
@@ -76,16 +80,18 @@ async function _renderPlan(listItem, projectId, host) {
         <div id="pp-matrix" style="padding:4px 12px 16px;"></div>`;
     const matrixHost = host.querySelector('#pp-matrix');
     try {
-        const path = _matrixTries++ === 0
-            ? '../proposals/plan-matrix.js'
-            : `../proposals/plan-matrix.js?t=${Date.now()}`;
+        const path = _matrixFailed
+            ? `../proposals/plan-matrix.js?t=${Date.now()}`
+            : '../proposals/plan-matrix.js';
         const { renderPlan } = await import(path);
+        _matrixFailed = false;
         if (!matrixHost.isConnected) return;
         renderPlan(matrixHost, {
             proposalId: prop.id, plan: prop.plan || null,
             fetcher: tfetch, canShare: true,
         });
     } catch (e) {
+        _matrixFailed = true;
         if (matrixHost.isConnected) {
             matrixHost.innerHTML = `<div class="crm-empty" style="color:#fca5a5;">企劃元件載入失敗：${esc(e.message || e)}（切回再開重試）</div>`;
         }

@@ -530,6 +530,8 @@ async def _on_startup():
                         "CREATE INDEX IF NOT EXISTS idx_invoice_pay_status ON crm_invoices(payment_status)",
                         "CREATE INDEX IF NOT EXISTS idx_payreq_planned_month ON crm_payment_requests(planned_month)",
                         "CREATE INDEX IF NOT EXISTS idx_payreq_payee ON crm_payment_requests(payee_name)",
+                        # 提案=專案合體：專案列表附掛提案子狀態的 scalar subquery 用
+                        "CREATE INDEX IF NOT EXISTS idx_pprop_project ON preprod_proposals(project_id, updated_at)",
                     ]:
                         try:
                             await _si.execute(_ti(idx_sql))
