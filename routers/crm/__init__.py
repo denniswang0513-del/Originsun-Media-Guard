@@ -13,6 +13,7 @@ from . import finance    # noqa: F401  發票 + 請款 + 收支 + 應付/應收
 from . import showcase   # noqa: F401  Showcase + token 編輯 + Site API
 from . import works      # noqa: F401  1:N 作品子端點（依賴 projects/showcase，須在其後）
 from . import media_log  # noqa: F401  影像紀錄（路徑獨立 /media-log，順序無關）
+from . import proposal_assets  # noqa: F401  提案資產夾（路徑獨立 /proposal-assets）
 
 from ._shared import CRM_PREFIX, router, public_router  # noqa: F401,E402
 

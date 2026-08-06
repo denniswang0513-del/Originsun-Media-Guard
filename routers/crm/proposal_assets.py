@@ -20,12 +20,14 @@ import asyncio
 import os
 from datetime import datetime
 
-from config import load_settings
+from fastapi import HTTPException, Request
+
+from config import load_settings, save_settings
 from core.drive_map import to_canonical_path, to_local_path
 from core.project_folders import (make_dated_folder_name, remap_prefix,
                                   rename_and_remap, taken_names)
 
-from ._shared import _now
+from ._shared import router, _check_auth, _get_factory, _now, _require_db
 
 try:
     from ._shared import select, CrmProject
@@ -43,9 +45,63 @@ def proposals_root() -> str:
     return to_local_path(str(conf.get("root") or "").strip())
 
 
+def _raw_root() -> str:
+    """設定裡存的原字串（master 視角，未翻譯）—— 給設定 UI 顯示/回填用。"""
+    return str((load_settings().get("proposals") or {}).get("root") or "").strip()
+
+
 async def _taken_names(session, exclude_project_id: str = "") -> set:
     return await taken_names(session, CrmProject.proposal_folder_name,
                              CrmProject.id, exclude_project_id)
+
+
+# ── 設定端點（比照影像紀錄：路徑帶 project_id 只是讓前端從專案面板順手改，
+#    root 本身是全站共用的一份設定）──────────────────────────────
+
+@router.get("/projects/{project_id}/proposal-assets")
+async def get_proposal_assets(project_id: str, request: Request):
+    """提案資產夾現況：根目錄、是否搆得到、這個專案的資料夾（還沒建就先算給看）。
+
+    讀取放寬到專案管理模組 —— 一般同事要看得到「檔案在哪」才能按開啟資料夾；
+    改路徑（POST）仍限管理員，那是全站共用的設定。"""
+    from core.auth import check_admin_or_module
+    check_admin_or_module(request, "crm_projects")
+    _require_db()
+    factory = await _get_factory()
+    root = proposals_root()
+    async with factory() as session:
+        project = await session.get(CrmProject, project_id)
+        if not project:
+            raise HTTPException(status_code=404, detail="找不到此專案")
+        name = project.proposal_folder_name or make_dated_folder_name(
+            project.name or "", project.created_at or _now(),
+            await _taken_names(session, exclude_project_id=project_id))
+    # UNC 根目錄斷線時 isdir 會卡秒級 → 不佔 event loop
+    root_set = bool(root) and await asyncio.to_thread(os.path.isdir, root)
+    return {
+        "root": _raw_root(),
+        "root_set": root_set,
+        "folder_name": name,
+        "project_folder": os.path.join(root, name) if root else "",
+        "created": bool(project.proposal_folder_name),
+    }
+
+
+@router.post("/projects/{project_id}/proposal-assets/settings")
+async def set_proposal_assets_root(project_id: str, request: Request):
+    """設定提案資產根目錄（全站共用）。存在性用本機視角驗 —— 打錯字要當場
+    知道，不要留一個之後上傳才靜默退回舊落點的路徑。"""
+    _check_auth(request)
+    body = await request.json()
+    root = str(body.get("root") or "").strip()
+    if root and not await asyncio.to_thread(os.path.isdir, to_local_path(root)):
+        raise HTTPException(status_code=400,
+                            detail=f"資料夾不存在或無法存取：{root}")
+    # save_settings 本身是 merge-on-save（頂層 dict 會淺 merge）→ 只傳這一段。
+    # 整包 load_settings() 寫回會把 config.py 的預設值（含 database_url）固化
+    # 進 settings.json，之後改預設值就再也不會生效。
+    save_settings({"proposals": {"root": root}})
+    return {"status": "ok", "root": root}
 
 
 async def ensure_folder(session, project) -> str:

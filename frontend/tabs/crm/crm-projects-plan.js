@@ -7,7 +7,7 @@
  * （POST /proposals {title: 專案名, project_id} — 後端掛載、不另建殼專案）。
  */
 
-import { esc } from './crm-utils.js';
+import { crmFetch, crmToast, esc } from './crm-utils.js';
 import { tfetch } from '../proposals/prop-fetch.js';
 import { state } from './crm-projects-state.js';
 
@@ -25,9 +25,14 @@ function _fail(host, prefix, e) {
 
 export async function loadPlanTab(projectId, host) {
     host.innerHTML = '<div class="crm-empty">載入中...</div>';
-    let props;
+    let props, assets;
     try {
-        props = (await tfetch(`${API}?project_id=${encodeURIComponent(projectId)}`)).proposals || [];
+        [props, assets] = await Promise.all([
+            tfetch(`${API}?project_id=${encodeURIComponent(projectId)}`)
+                .then(d => d.proposals || []),
+            // 資產夾設定：拿不到（權限/DB）不擋企劃本體
+            crmFetch(`/projects/${projectId}/proposal-assets`).catch(() => null),
+        ]);
     } catch (e) {
         _fail(host, '提案企劃載入失敗', e);
         return;
@@ -35,9 +40,52 @@ export async function loadPlanTab(projectId, host) {
     if (state.selectedId !== projectId || !host.isConnected) return;   // await 期間已切走
     if (!props.length) {
         _renderEmpty(projectId, host);
-        return;
+    } else {
+        await _renderPlan(props[0], projectId, host);
     }
-    await _renderPlan(props[0], projectId, host);
+    if (assets && host.isConnected) _mountAssetsCard(projectId, host, assets);
+}
+
+// ── 資產資料夾設定（比照影像紀錄：root 是全站共用的一份，路徑帶 project_id
+//    只是讓人從專案面板順手改；顯示的資料夾是這個專案的）────────────
+function _mountAssetsCard(projectId, host, d) {
+    const box = document.createElement('div');
+    box.style.cssText = 'padding:10px 12px 16px;';
+    box.innerHTML = `
+        <div style="border:1px solid #2a2a2a;border-radius:6px;padding:10px 12px;background:#181818;">
+            <div style="font-size:12px;color:#8b8b8b;margin-bottom:6px;">
+                提案資產資料夾${d.root_set ? '' : '<span style="color:#fbbf24;"> — 目前搆不到這個路徑</span>'}
+            </div>
+            <div style="display:flex;gap:6px;align-items:center;">
+                <input id="pp-root" type="text" class="crm-input" style="flex:1;"
+                       value="${esc(d.root || '')}" placeholder="例：\\\\192.168.1.132\\Archive\\20_提案企劃">
+                <button id="pp-root-save" class="crm-btn crm-btn-primary crm-btn-sm">儲存</button>
+                <button id="pp-open" class="crm-btn crm-btn-secondary crm-btn-sm">開啟資料夾</button>
+            </div>
+            <div style="font-size:11.5px;color:#6b6b6b;margin-top:6px;">
+                所有專案共用根資料夾，各專案自動建子夾${d.folder_name ? `：<code>${esc(d.folder_name)}</code>` : ''}
+                ${d.created ? '' : '（尚未建立，第一次上傳簡報時才會建）'}
+            </div>
+        </div>`;
+    host.appendChild(box);
+
+    box.querySelector('#pp-root-save').addEventListener('click', async () => {
+        const root = box.querySelector('#pp-root').value.trim();
+        try {
+            await crmFetch(`/projects/${projectId}/proposal-assets/settings`,
+                { method: 'POST', body: JSON.stringify({ root }) });
+            crmToast('已儲存資產資料夾設定');
+            loadPlanTab(projectId, host);   // root_set / 資料夾路徑會跟著變
+        } catch (e) { alert('儲存失敗：' + (e.message || e)); }
+    });
+    box.querySelector('#pp-open').addEventListener('click', () => {
+        const path = d.project_folder || d.root || '';
+        if (!path) { alert('尚未設定提案資產資料夾'); return; }
+        fetch('/api/v1/utils/open_folder', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ path }),
+        }).catch(() => {});
+    });
 }
 
 function _renderEmpty(projectId, host) {
