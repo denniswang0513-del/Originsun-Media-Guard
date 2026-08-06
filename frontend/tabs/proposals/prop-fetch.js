@@ -6,9 +6,13 @@
  * 無 SPA 依賴：未來 /proposal-plan.html 獨立頁也 import 這份。
  */
 
-export async function tfetch(path, opts = {}) {
+function _authHeaders(extra = {}) {
     const token = localStorage.getItem('auth_token');
-    const headers = { 'Accept': 'application/json', ...(token ? { 'Authorization': 'Bearer ' + token } : {}) };
+    return { ...extra, ...(token ? { 'Authorization': 'Bearer ' + token } : {}) };
+}
+
+export async function tfetch(path, opts = {}) {
+    const headers = _authHeaders({ 'Accept': 'application/json' });
     if (opts.json !== undefined) {
         headers['Content-Type'] = 'application/json';
         opts.body = JSON.stringify(opts.json);
@@ -31,6 +35,8 @@ export async function tfetch(path, opts = {}) {
  * - `/uploads/...` 開頭（舊）→ 在 web root 裡，直接開新分頁。
  * - 其他（NAS 資產夾的絕對路徑）→ 走帶權限的下載端點。`<a href>` 送不了
  *   Authorization header，所以 fetch 成 blob 再觸發下載。
+ *
+ * 失敗自己 alert（三個呼叫端都只會做這件事）→ 呼叫端一行就夠。
  */
 export async function openDeck(pid, deckUrl) {
     if (!deckUrl) return;
@@ -38,21 +44,22 @@ export async function openDeck(pid, deckUrl) {
         window.open(deckUrl, '_blank', 'noopener');
         return;
     }
-    const token = localStorage.getItem('auth_token');
-    const r = await fetch(`/api/v1/proposals/${encodeURIComponent(pid)}/deck/download`, {
-        headers: token ? { 'Authorization': 'Bearer ' + token } : {},
-    });
-    if (!r.ok) {
-        const d = await r.json().catch(() => ({}));
-        throw new Error(typeof d.detail === 'string' ? d.detail : 'HTTP ' + r.status);
+    try {
+        const r = await fetch(`/api/v1/proposals/${encodeURIComponent(pid)}/deck/download`,
+            { headers: _authHeaders() });
+        if (!r.ok) {
+            const d = await r.json().catch(() => ({}));
+            throw new Error(typeof d.detail === 'string' ? d.detail : 'HTTP ' + r.status);
+        }
+        const href = URL.createObjectURL(await r.blob());
+        const a = document.createElement('a');
+        a.href = href;
+        a.download = deckUrl.split(/[\\/]/).pop() || 'deck';
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        setTimeout(() => URL.revokeObjectURL(href), 10_000);
+    } catch (e) {
+        alert('簡報下載失敗：' + (e.message || e));
     }
-    const blob = await r.blob();
-    const href = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = href;
-    a.download = deckUrl.split(/[\\/]/).pop() || 'deck';
-    document.body.appendChild(a);
-    a.click();
-    a.remove();
-    setTimeout(() => URL.revokeObjectURL(href), 10_000);
 }

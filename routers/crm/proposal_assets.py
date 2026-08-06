@@ -22,7 +22,8 @@ from datetime import datetime
 
 from config import load_settings
 from core.drive_map import to_canonical_path, to_local_path
-from core.project_folders import make_dated_folder_name, rename_dir
+from core.project_folders import (make_dated_folder_name, remap_prefix,
+                                  rename_and_remap, taken_names)
 
 from ._shared import _now
 
@@ -33,17 +34,20 @@ except ImportError:  # DB 套件不存在的 agent 環境
 
 
 def proposals_root() -> str:
-    """提案資產根目錄（已翻成本機視角，可直接開檔）。未設 → ""。"""
+    """提案資產根目錄（已翻成本機視角，可直接開檔）。未設 → ""。
+
+    走 settings.json 而不是 DB settings（影像紀錄走 DB）—— 判準是「幾台機器
+    在跑」：影像紀錄的收檔端在 master 與 NAS 對外容器都有，設定各存各的會讓
+    照片安靜散落兩處；提案資產夾只有 master 會寫，與片庫 reference_archive.dir
+    同一條路。詳見 core/project_folders 檔頭表格。
+    """
     conf = load_settings().get("proposals") or {}
     return to_local_path(str(conf.get("root") or "").strip())
 
 
 async def _taken_names(session, exclude_project_id: str = "") -> set:
-    q = select(CrmProject.proposal_folder_name).where(
-        CrmProject.proposal_folder_name.isnot(None))
-    if exclude_project_id:
-        q = q.where(CrmProject.id != exclude_project_id)
-    return set((await session.execute(q)).scalars())
+    return await taken_names(session, CrmProject.proposal_folder_name,
+                             CrmProject.id, exclude_project_id)
 
 
 async def ensure_folder(session, project) -> str:
@@ -66,10 +70,10 @@ async def ensure_folder(session, project) -> str:
 
 async def rename_project_folder(session, project_id: str, project_name: str,
                                 created: datetime) -> tuple:
-    """專案改名 → 提案資產夾跟著改名。回 `(changed, warning)`，不 commit。
+    """專案改名 → 提案資產夾跟著改名。回 `(changed, err)`，不 commit。
 
-    deck_url 存的絕對路徑同步更新（同一交易）—— 只改資料夾不改 URL 的話，
-    後台的 deck 連結會指向不存在的檔案。改名失敗回 warning，資料夾維持舊名。
+    deck_url 存的絕對路徑同步更新 —— 只改資料夾不改 URL 的話，後台的 deck
+    連結會指向不存在的檔案。同進退由 rename_and_remap 保證。
     """
     project = await session.get(CrmProject, project_id)
     if not project or not project.proposal_folder_name:
@@ -84,21 +88,21 @@ async def rename_project_folder(session, project_id: str, project_name: str,
     if new_name == project.proposal_folder_name:
         return False, ""
 
-    old_dir = os.path.join(root, project.proposal_folder_name)
-    new_dir = os.path.join(root, new_name)
-    ok, err = await asyncio.to_thread(rename_dir, old_dir, new_dir)
-    if not ok:
-        return False, f"提案資料夾改名失敗（{err}）— 資料夾維持舊名，檔案未受影響"
+    async def _remap(old_dir: str, new_dir: str) -> None:
+        from db.models import PreprodProposal
+        old_canon, new_canon = to_canonical_path(old_dir), to_canonical_path(new_dir)
+        props = (await session.execute(
+            select(PreprodProposal).where(
+                PreprodProposal.project_id == project_id))).scalars().all()
+        for prop in props:
+            remapped = remap_prefix(prop.deck_url or "", old_canon, new_canon)
+            if remapped != (prop.deck_url or ""):
+                prop.deck_url = remapped
 
-    from core.project_folders import remap_prefix
-    from db.models import PreprodProposal
-    old_canon, new_canon = to_canonical_path(old_dir), to_canonical_path(new_dir)
-    props = (await session.execute(
-        select(PreprodProposal).where(
-            PreprodProposal.project_id == project_id))).scalars().all()
-    for prop in props:
-        remapped = remap_prefix(prop.deck_url or "", old_canon, new_canon)
-        if remapped != (prop.deck_url or ""):
-            prop.deck_url = remapped
+    changed, err = await rename_and_remap(
+        os.path.join(root, project.proposal_folder_name),
+        os.path.join(root, new_name), remap=_remap)
+    if not changed:
+        return False, err
     project.proposal_folder_name = new_name
     return True, ""

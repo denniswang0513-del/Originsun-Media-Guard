@@ -1,5 +1,8 @@
-"""routers/crm/media_log.py 純函式 — 資料夾名 sanitize / 分類正規化 /
-副檔名白名單 / 撞名前綴（exists 用 callable 注入，不碰磁碟/DB/網路）。"""
+"""routers/crm/media_log.py 純函式 — 上傳檔名 sanitize / 分類正規化 /
+副檔名白名單 / 撞名前綴（exists 用 callable 注入，不碰磁碟/DB/網路）。
+
+資料夾命名規則的測試在 tests/unit/test_project_folders.py（正本已抽到
+core.project_folders，三個資產子系統共用）。"""
 from datetime import datetime
 
 from routers.crm.media_log import (
@@ -8,24 +11,7 @@ from routers.crm.media_log import (
     _dedup_filename,
     _norm_categories,
     _sanitize_filename,
-    _sanitize_folder_name,
 )
-
-
-class TestSanitizeFolderName:
-    def test_removes_windows_illegal_chars(self):
-        assert _sanitize_folder_name('A<B>C:D"E/F\\G|H?I*J') == "ABCDEFGHIJ"
-
-    def test_removes_control_chars_and_strips(self):
-        assert _sanitize_folder_name("  形象影片\t2026\n  ") == "形象影片2026"
-
-    def test_empty_and_all_illegal_fall_back_to_project(self):
-        assert _sanitize_folder_name("") == "project"
-        assert _sanitize_folder_name(None) == "project"
-        assert _sanitize_folder_name('<>:"?*') == "project"
-
-    def test_normal_chinese_name_untouched(self):
-        assert _sanitize_folder_name("技術展示影片") == "技術展示影片"
 
 
 class TestSanitizeFilename:
@@ -96,33 +82,9 @@ class TestDefaultCategories:
             DEFAULT_MEDIA_LOG_CATEGORIES
 
 
-class TestMakeFolderName:
-    """子資料夾命名：{建立日期}_{專案名}（owner 指定）+ 同日撞名尾綴。"""
-
-    def test_date_prefix_and_name(self):
-        from datetime import datetime
-        from routers.crm.media_log import _make_folder_name
-        n = _make_folder_name("泓電樓梯升降椅 廣告", datetime(2026, 7, 20), set())
-        assert n == "20260720_泓電樓梯升降椅 廣告"
-
-    def test_illegal_chars_cleaned(self):
-        from datetime import datetime
-        from routers.crm.media_log import _make_folder_name
-        n = _make_folder_name('A/B:C*D?', datetime(2026, 1, 2), set())
-        assert n == "20260102_ABCD"
-
-    def test_collision_suffix(self):
-        from datetime import datetime
-        from routers.crm.media_log import _make_folder_name
-        taken = {"20260720_同名專案", "20260720_同名專案-2"}
-        n = _make_folder_name("同名專案", datetime(2026, 7, 20), taken)
-        assert n == "20260720_同名專案-3"
-
-    def test_empty_name_falls_back(self):
-        from datetime import datetime
-        from routers.crm.media_log import _make_folder_name
-        n = _make_folder_name("", datetime(2026, 7, 20), set())
-        assert n == "20260720_project"
+# 子資料夾命名（{建立日期}_{專案名}、非法字元、撞名補號、空名 fallback）的
+# 測試已隨規則搬到 tests/unit/test_project_folders.py —— 正本在
+# core.project_folders.make_dated_folder_name，三個資產子系統共用。
 
 
 class TestFindMissing:

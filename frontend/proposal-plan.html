@@ -306,10 +306,10 @@ function _renderInfo(host, info, opts) {
             ${dateCtrl}
             ${budgetCtrl}
             ${tagsCtrl}
-            ${safeUrl(info.deck_url)
-                ? row("提案簡報", link(info.deck_url, "下載簡報"))
-                : (info.deck_url && opts.onDeck
-                    ? row("提案簡報", '<a href="#" id="deck-dl">下載簡報</a>') : "")}
+            ${/* 登入頁走 onDeck 帶權限下載；公開頁的 deck_url 後端已給成可直連 URL */
+              info.deck_url ? row("提案簡報", opts.onDeck
+                ? '<a href="#" id="deck-dl">下載簡報</a>'
+                : link(info.deck_url, "下載簡報")) : ""}
         </div>
         ${reasonCard}
         <div class="info-card">
@@ -342,10 +342,9 @@ function _renderInfo(host, info, opts) {
         ta.addEventListener("input", () => _infoGrow(ta));   // 內容多長格子就多長
     });
     // 簡報落在 NAS 資產夾（非 web root）→ 由呼叫端提供帶權限的下載動作
-    host.querySelector("#deck-dl")?.addEventListener("click", async (e) => {
+    host.querySelector("#deck-dl")?.addEventListener("click", (e) => {
         e.preventDefault();
-        try { await opts.onDeck(); }
-        catch (err) { alert("簡報下載失敗：" + ((err && err.message) || err)); }
+        opts.onDeck();          // openDeck 自己 alert 失敗原因
     });
     _wireInfoEditing(host, opts);
 }

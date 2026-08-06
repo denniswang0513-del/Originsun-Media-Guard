@@ -31,8 +31,9 @@ from fastapi import File, Form, HTTPException, Request, UploadFile
 from config import load_settings
 from core.assets_host import assets_target
 from core.drive_map import to_canonical_path, to_local_path
-from core.project_folders import (make_dated_folder_name, remap_prefix,
-                                  rename_dir)
+from core.project_folders import (clean_name as _clean_name,
+                                  make_dated_folder_name, remap_prefix,
+                                  rename_and_remap, taken_names)
 from core.subproc import run_capture
 
 # public_router = 對外白名單（正本在 _shared，全套件共用一個）。本模組的 4 個
@@ -71,19 +72,10 @@ _IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".webp", ".heic", ".gif",
 _VIDEO_EXTS = {".mp4", ".mov", ".m4v", ".avi", ".mts"}
 _MAX_UPLOAD_BYTES = 500 * 1024 * 1024  # 500MB
 _READ_CHUNK = 1024 * 1024  # 1MB — 分塊讀寫，大檔不整包進記憶體
-_ILLEGAL_NAME_CHARS = '<>:"/\\|?*'  # Windows 檔名/資料夾名非法字元
+# 非法字元清洗規則的正本在 core.project_folders.clean_name（三個資產子系統共用）
 
 
 # ── 純函式（單元測試對象 — 不碰磁碟/DB，存在性用 callable 注入）──
-
-from core.project_folders import clean_name as _clean_name
-
-
-def _sanitize_folder_name(name: str) -> str:
-    """專案名 → 合法 Windows 資料夾名；清完全空 → "project"
-    （清洗規則正本在 core.project_folders，三個子系統共用）。"""
-    return _clean_name(name) or "project"
-
 
 def _sanitize_filename(name: str) -> str:
     """上傳原檔名 → 合法檔名：先去路徑成分；清完全空 → "upload"
@@ -201,19 +193,10 @@ def _root_set(root: str) -> bool:
     return bool(root and os.path.isdir(root))
 
 
-# 子資料夾名 `{建立日期}_{專案名}`（owner 指定命名）—— 正本在 core.project_folders，
-# 三個資產子系統（影像紀錄/提案庫/片庫）共用同一套規則。
-_make_folder_name = make_dated_folder_name
-
-
 async def _taken_folder_names(session, exclude_project_id: str = "") -> set:
-    """同 root 底下已被佔用的資料夾名（撞名補 -2 用）；改名時排除自己。
-    （ProjectMediaLog 的主鍵 id 就是 project_id — 沒有另一個 project_id 欄。）"""
-    q = select(ProjectMediaLog.folder_name).where(
-        ProjectMediaLog.folder_name.isnot(None))
-    if exclude_project_id:
-        q = q.where(ProjectMediaLog.id != exclude_project_id)
-    return set((await session.execute(q)).scalars())
+    """同 root 底下已被佔用的資料夾名（ProjectMediaLog 的主鍵 id 就是 project_id）。"""
+    return await taken_names(session, ProjectMediaLog.folder_name,
+                             ProjectMediaLog.id, exclude_project_id)
 
 
 async def _ensure_folder_name(session, row, project_name: str) -> str:
@@ -221,7 +204,7 @@ async def _ensure_folder_name(session, row, project_name: str) -> str:
     不會因日期變動而分家）。不 commit，caller 統一 commit。"""
     if row.folder_name:
         return row.folder_name
-    row.folder_name = _make_folder_name(
+    row.folder_name = make_dated_folder_name(
         project_name, datetime.now(), await _taken_folder_names(session))
     return row.folder_name
 
@@ -229,13 +212,11 @@ async def _ensure_folder_name(session, row, project_name: str) -> str:
 async def rename_project_folder(session, project_id: str, project_name: str,
                                 created: datetime) -> tuple:
     """專案改名 → 影像紀錄資料夾跟著改名（2026-08-06 owner 要求）。
+    回 `(changed, err)`，**不 commit**（與呼叫端的專案更新同一個交易）。
 
-    回 `(changed, warning)`，**不 commit**（與呼叫端的專案更新同一個交易）。
-
-    🔴 實體 rename 與 `stored_path` 批次更新綁在一起：只做前者的話，舊記錄
-    會指向不存在的路徑，而新路徑的檔案會被 `_reconcile_files` 當成新檔再匯
-    入一遍（同一張照片兩筆）。rename 失敗（資料夾被開著）→ 兩邊都不動，
-    回 warning 讓呼叫端顯示；專案名本身照樣改成功，下次改名會再試。
+    rename 與 `stored_path` 更新的同進退由 `rename_and_remap` 保證 —— 只改
+    資料夾不改 DB 的話，新路徑的檔案會被 `_reconcile_files` 當成新檔再匯入
+    一遍（同一張照片兩筆）。
     """
     row = await session.get(ProjectMediaLog, project_id)
     if not row or not row.folder_name:
@@ -243,29 +224,30 @@ async def rename_project_folder(session, project_id: str, project_name: str,
     root, _cats = await _media_log_conf()
     if not root:
         return False, ""
-    new_name = _make_folder_name(
+    new_name = make_dated_folder_name(
         project_name, created,
         await _taken_folder_names(session, exclude_project_id=project_id),
         existing=row.folder_name)
     if new_name == row.folder_name:
         return False, ""
 
-    old_dir = _project_folder(root, row.folder_name)
-    new_dir = _project_folder(root, new_name)
-    ok, err = await asyncio.to_thread(rename_dir, old_dir, new_dir)
-    if not ok:
-        return False, f"影像紀錄資料夾改名失敗（{err}）— 資料夾維持舊名，檔案未受影響"
+    async def _remap(old_dir: str, new_dir: str) -> None:
+        # stored_path 存 canonical UNC，資料夾路徑是本機視角 → 各自換算
+        old_canon, new_canon = to_canonical_path(old_dir), to_canonical_path(new_dir)
+        rows = (await session.execute(
+            select(ProjectMediaFile.id, ProjectMediaFile.stored_path)
+            .where(ProjectMediaFile.project_id == project_id))).all()
+        updates = [{"id": fid, "stored_path": new}
+                   for fid, sp in rows
+                   if (new := remap_prefix(sp or "", old_canon, new_canon)) != (sp or "")]
+        if updates:
+            await session.execute(sa_update(ProjectMediaFile), updates)
 
-    # DB 內的絕對路徑同步（canonical UNC ↔ 本機視角要各自換算）
-    old_canon, new_canon = to_canonical_path(old_dir), to_canonical_path(new_dir)
-    rows = (await session.execute(
-        select(ProjectMediaFile.id, ProjectMediaFile.stored_path)
-        .where(ProjectMediaFile.project_id == project_id))).all()
-    updates = [{"id": fid, "stored_path": remap_prefix(sp or "", old_canon, new_canon)}
-               for fid, sp in rows
-               if remap_prefix(sp or "", old_canon, new_canon) != (sp or "")]
-    if updates:
-        await session.execute(sa_update(ProjectMediaFile), updates)
+    changed, err = await rename_and_remap(
+        _project_folder(root, row.folder_name),
+        _project_folder(root, new_name), remap=_remap)
+    if not changed:
+        return False, err
     row.folder_name = new_name
     row.updated_at = _now()
     _root_scan_cache["at"] = 0.0      # 根目錄夾清單快取失效（名字剛換）

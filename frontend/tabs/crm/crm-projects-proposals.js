@@ -104,9 +104,7 @@ function _wireHost(host) {
         } else if (e.target.closest('[data-deck]')) {
             // deck 可能在 NAS 資產夾（非 web root）→ 走帶權限下載
             e.preventDefault();
-            const p = (_cache || []).find(x => x.id === pid);
-            try { await openDeck(pid, p && p.deck_url); }
-            catch (err) { alert('簡報下載失敗：' + (err.message || err)); }
+            openDeck(pid, (_cache || []).find(x => x.id === pid)?.deck_url);
         } else if (e.target.closest('[data-open]')) {
             window.open(`/proposal-plan.html?pid=${encodeURIComponent(pid)}`, '_blank', 'noopener');
         }

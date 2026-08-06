@@ -555,14 +555,12 @@ async def _on_startup():
             # 不能靜默死：沒遷移的提案不會出現在管線專案列（前端提案帶只剩 legacy 提示）
             print(f"[WARN] 提案殼專案遷移失敗: {_e_pp}")
 
-    # ── 片庫封存資料夾改名 uuid → {片名}_{品牌}（master-only、冪等，2026-08-06）──
-    # 背景跑：逐支 rename 打 NAS，不擋 startup（自身 master gate + 逐筆容錯）
+    # ── 片庫封存資料夾改名 uuid → {片名}_{品牌}（2026-08-06）──
+    # 背景跑：逐支 rename 打 NAS，不擋 startup。閘門全在協程自己身上
+    # （master gate、factory 為 None 早退、逐筆容錯），這裡不重複判斷。
     if state.db_online:
-        try:
-            from services.reference_archiver import migrate_folder_names
-            asyncio.create_task(migrate_folder_names())
-        except Exception as _e_rf:
-            print(f"[WARN] 片庫資料夾改名遷移啟動失敗: {_e_rf}")
+        from services.reference_archiver import migrate_folder_names
+        asyncio.create_task(migrate_folder_names())
 
     # ── DB Migration: crm_project_cost_lines table ──
     if state.db_online:

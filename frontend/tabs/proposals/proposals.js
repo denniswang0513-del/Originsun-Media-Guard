@@ -389,10 +389,9 @@ async function openDetail(pid) {
     });
 
     // deck 下載（新落點在 NAS 資產夾 → 走帶權限端點，不是靜態連結）
-    ov.querySelector('#pd-deck-dl')?.addEventListener('click', async (e) => {
+    ov.querySelector('#pd-deck-dl')?.addEventListener('click', (e) => {
         e.preventDefault();
-        try { await openDeck(prop.id, prop.deck_url); }
-        catch (err) { alert('簡報下載失敗：' + (err.message || err)); }
+        openDeck(prop.id, prop.deck_url);
     });
 
     // deck 上傳（前端先擋 50MB，後端同樣把關 413）

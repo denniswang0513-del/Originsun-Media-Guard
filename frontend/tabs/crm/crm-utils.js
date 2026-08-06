@@ -56,7 +56,12 @@ async function _doFetch(url, opts) {
             : (err.detail || '請求失敗');
         throw new Error(detail);
     }
-    return res.json();
+    const data = await res.json();
+    // 「成功但有話要說」的統一出口：後端回 warning = 主要動作成功、附帶副作用
+    // 沒做成（例：專案改名成功，但資產資料夾正被開著改不動）。收在這個咽喉，
+    // 每個呼叫端就不必各自記得檢查 —— 沒接住的話那些提示等於不存在。
+    if (data && data.warning) crmToast(String(data.warning), 6000);
+    return data;
 }
 
 /** Save partial settings (merge-on-save). Used by staff_roles, project_types, etc. */
@@ -574,7 +579,7 @@ export function withInputsPreserved(container, rerender) {
 
 
 /** 輕量 toast — 沿用 crm.css 既有 .cg-toast 樣式（cost-groups / media-log 等子視圖共用）。 */
-export function crmToast(msg) {
+export function crmToast(msg, ms = 2000) {
     let el = document.getElementById('cg-toast');
     if (el) el.remove();
     el = document.createElement('div');
@@ -587,5 +592,5 @@ export function crmToast(msg) {
     setTimeout(() => {
         el.classList.remove('show');
         setTimeout(() => el.remove(), 250);
-    }, 2000);
+    }, ms);
 }

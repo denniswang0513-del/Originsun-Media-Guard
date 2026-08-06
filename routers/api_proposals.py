@@ -797,6 +797,21 @@ def _public_deck_url(deck_url: str, token: str) -> str:
     return f"/api/v1/proposals/shared/{token}/deck"
 
 
+async def _deck_file_response(deck_url: str, missing_detail: str):
+    """資產夾裡的 deck → FileResponse（授權由呼叫端各自完成）。
+    `/uploads/…` 開頭的舊 deck 由靜態路由直出，不會走到這裡。"""
+    from fastapi.responses import FileResponse
+
+    from core.drive_map import to_local_path
+    if not deck_url or deck_url.startswith("/"):
+        raise HTTPException(status_code=404, detail=missing_detail)
+    path = to_local_path(deck_url)
+    if not await asyncio.to_thread(os.path.isfile, path):
+        raise HTTPException(status_code=404,
+                            detail="簡報檔已不在資料夾裡（可能被移動或刪除）")
+    return FileResponse(path, filename=os.path.basename(path))
+
+
 @router.get("/shared/{token}/deck")
 async def download_shared_deck(token: str):
     """公開共編頁下載簡報（token 即授權）。deck 在 NAS 資產夾、不在 web root。"""
@@ -804,15 +819,7 @@ async def download_shared_deck(token: str):
     async with factory() as session:
         prop = await _get_prop_by_plan_token(session, token)
         url = prop.deck_url or ""
-    if not url or url.startswith("/"):
-        raise HTTPException(status_code=404, detail="沒有可下載的簡報檔")
-    from fastapi.responses import FileResponse
-
-    from core.drive_map import to_local_path
-    path = to_local_path(url)
-    if not await asyncio.to_thread(os.path.isfile, path):
-        raise HTTPException(status_code=404, detail="簡報檔已不在資料夾裡")
-    return FileResponse(path, filename=os.path.basename(path))
+    return await _deck_file_response(url, "沒有可下載的簡報檔")
 
 
 @router.get("/shared/{token}")
@@ -1059,9 +1066,10 @@ async def upload_deck(pid: str, request: Request, file: UploadFile = File(...)):
     factory = _require_factory()
 
     from core.drive_map import to_canonical_path
-    from core.project_folders import clean_name
+    from core.project_folders import dedupe
     from db.models import CrmProject
     from routers.crm import proposal_assets
+    from routers.crm.media_log import _sanitize_filename
 
     async with factory() as session:
         prop = await _get_proposal_or_404(session, pid)
@@ -1074,13 +1082,10 @@ async def upload_deck(pid: str, request: Request, file: UploadFile = File(...)):
                 asset_dir = await proposal_assets.ensure_folder(session, project)
 
         if asset_dir:
-            base = clean_name(os.path.basename(file.filename or "")) or f"deck{ext}"
-            stem, _e = os.path.splitext(base)
-            fname, i = base, 2
-            while await asyncio.to_thread(os.path.exists, os.path.join(asset_dir, fname)):
-                fname = f"{stem}-{i}{ext}"
-                i += 1
-            dest = os.path.join(asset_dir, fname)
+            # 撞名探測一次列目錄（每個候選名各打一次 SMB exists 會多好幾趟）
+            base = _sanitize_filename(file.filename or "") or f"deck{ext}"
+            taken = set(await asyncio.to_thread(os.listdir, asset_dir))
+            dest = os.path.join(asset_dir, dedupe(base, taken, ext=ext))
             await asyncio.to_thread(_write_bytes, dest, content)
             prop.deck_url = to_canonical_path(dest)
         else:
@@ -1113,22 +1118,13 @@ def _write_bytes(path: str, data: bytes) -> None:
 
 @router.get("/{pid}/deck/download")
 async def download_deck(pid: str, request: Request):
-    """下載提案簡報 —— deck 存進 NAS 資產夾後不在 web root，靠這個端點帶權限出檔。
-    `deck_url` 以 `/uploads/` 開頭的舊 deck 由靜態路由直出，不會走到這裡。"""
+    """下載提案簡報 —— deck 存進 NAS 資產夾後不在 web root，靠這個端點帶權限出檔。"""
     _check_auth(request)
     factory = _require_factory()
     async with factory() as session:
         prop = await _get_proposal_or_404(session, pid)
         url = prop.deck_url or ""
-    if not url or url.startswith("/"):
-        raise HTTPException(status_code=404, detail="此提案沒有存在資產夾的簡報檔")
-    from fastapi.responses import FileResponse
-
-    from core.drive_map import to_local_path
-    path = to_local_path(url)
-    if not await asyncio.to_thread(os.path.isfile, path):
-        raise HTTPException(status_code=404, detail="簡報檔已不在資料夾裡（可能被移動或刪除）")
-    return FileResponse(path, filename=os.path.basename(path))
+    return await _deck_file_response(url, "此提案沒有存在資產夾的簡報檔")
 
 
 # ── 一鍵成案 ─────────────────────────────────────────────

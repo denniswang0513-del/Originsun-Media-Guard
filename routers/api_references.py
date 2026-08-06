@@ -783,9 +783,11 @@ async def patch_reference(rid: str, req: ReferencePatch, request: Request):
             # 封存資料夾跟著改名（同一交易；失敗只回 warning，欄位照樣存好）
             try:
                 from services.reference_archiver import rename_archive_folder
-                _changed, warning = await rename_archive_folder(session, ref)
+                _changed, err = await rename_archive_folder(session, ref)
             except Exception as e:
-                warning = f"封存資料夾改名失敗（{type(e).__name__}: {e}）"
+                err = f"{type(e).__name__}: {e}"
+            if err:
+                warning = f"封存資料夾改名失敗（{err}）— 資料夾維持舊名"
         await session.commit()
     return {"status": "ok", **out, **({"warning": warning} if warning else {})}
 

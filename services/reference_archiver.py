@@ -226,14 +226,14 @@ def archive_folder_name(ref, taken=None) -> str:
         fallback=ref.video_id or "", taken=taken)
 
 
-async def _taken_folder_names(factory, exclude_rid: str = "") -> set:
-    """同 root 底下已被佔用的資料夾名（撞名補 -2 用）—— 從既有 archive_path 反推。"""
+async def _taken_folder_names(session, exclude_rid: str = "") -> set:
+    """同 root 底下已被佔用的資料夾名（撞名補 -2 用）—— 從既有 archive_path
+    反推（片庫的資料夾名不另存欄位，dirname 就是它）。"""
     from sqlalchemy import select
     from db.models import PreprodReference
-    async with factory() as s:
-        rows = (await s.execute(
-            select(PreprodReference.id, PreprodReference.archive_path)
-            .where(PreprodReference.archive_path.isnot(None)))).all()
+    rows = (await session.execute(
+        select(PreprodReference.id, PreprodReference.archive_path)
+        .where(PreprodReference.archive_path.isnot(None)))).all()
     return {os.path.basename(os.path.dirname(p)) for rid_, p in rows
             if p and rid_ != exclude_rid}
 
@@ -245,42 +245,35 @@ async def _folder_name_for(factory, rid: str) -> str:
         ref = await s.get(PreprodReference, rid)
         if not ref:
             return rid
-        return archive_folder_name(
-            ref, await _taken_folder_names(factory, exclude_rid=rid))
+        return archive_folder_name(ref, await _taken_folder_names(s, rid))
 
 
 async def rename_archive_folder(session, ref) -> tuple:
     """片名／品牌改動 → 封存資料夾跟著改名 + `archive_path` 同步。
-    回 `(changed, warning)`，**不 commit**（與呼叫端的欄位更新同一交易）。
+    回 `(changed, err)`，**不 commit**（與呼叫端的欄位更新同一交易）。
 
-    還沒建檔（archive_path 空）→ no-op，之後建檔自然用新名。改名失敗
-    （檔案被開著）→ 回 warning，資料夾與 archive_path 都維持原狀。
+    還沒建檔（archive_path 空）→ no-op，之後建檔自然用新名。改名/同步失敗
+    → 回錯誤原因，資料夾與 archive_path 都維持原狀（rename_and_remap 保證）。
     """
-    from sqlalchemy import select
-    from core.drive_map import to_local_path
-    from core.project_folders import remap_prefix, rename_dir
-    from db.models import PreprodReference
+    from core.project_folders import remap_prefix, rename_and_remap
 
     old_path = ref.archive_path or ""
     if not old_path:
         return False, ""
     old_dir = os.path.dirname(old_path)
-    rows = (await session.execute(
-        select(PreprodReference.id, PreprodReference.archive_path)
-        .where(PreprodReference.archive_path.isnot(None)))).all()
-    taken = {os.path.basename(os.path.dirname(p)) for rid_, p in rows
-             if p and rid_ != ref.id}
-    new_name = archive_folder_name(ref, taken)
+    # 先算不補號的候選名：與現名相同就直接收工，不必為了 taken 掃全表
+    # （遷移迴圈與「改的字清洗後同名」都會走到這條，是最常見的路徑）
+    if archive_folder_name(ref) == os.path.basename(old_dir):
+        return False, ""
+    new_name = archive_folder_name(ref, await _taken_folder_names(session, ref.id))
     if new_name == os.path.basename(old_dir):
         return False, ""
-    new_dir = os.path.join(os.path.dirname(old_dir), new_name)
 
-    ok, err = await asyncio.to_thread(
-        rename_dir, to_local_path(old_dir), to_local_path(new_dir))
-    if not ok:
-        return False, f"封存資料夾改名失敗（{err}）— 資料夾維持舊名"
-    ref.archive_path = remap_prefix(old_path, old_dir, new_dir)
-    return True, ""
+    async def _remap(od: str, nd: str) -> None:
+        ref.archive_path = remap_prefix(old_path, od, nd)
+
+    return await rename_and_remap(
+        old_dir, os.path.join(os.path.dirname(old_dir), new_name), remap=_remap)
 
 
 async def migrate_folder_names() -> int:
@@ -300,18 +293,25 @@ async def migrate_folder_names() -> int:
     from sqlalchemy import select
     from db.models import PreprodReference
 
+    # 先一次撈完、在記憶體裡挑出「名字真的不一樣」的 —— 穩態（都遷完了）就是
+    # 一個查詢結束，不會每次開機對每支片各掃一次全表。
     async with factory() as s:
-        ids = (await s.execute(
-            select(PreprodReference.id)
+        refs = (await s.execute(
+            select(PreprodReference)
             .where(PreprodReference.archive_path.isnot(None)))).scalars().all()
+        stale = [r.id for r in refs
+                 if archive_folder_name(r)
+                 != os.path.basename(os.path.dirname(r.archive_path or ""))]
+    if not stale:
+        return 0
     migrated = 0
-    for rid in ids:
+    for rid in stale:
         try:
             async with factory() as s:
                 ref = await s.get(PreprodReference, rid)
                 if not ref or not ref.archive_path:
                     continue
-                changed, _warn = await rename_archive_folder(s, ref)
+                changed, _err = await rename_archive_folder(s, ref)
                 if changed:
                     await s.commit()
                     migrated += 1

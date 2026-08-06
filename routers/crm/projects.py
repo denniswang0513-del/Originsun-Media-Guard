@@ -446,11 +446,11 @@ async def _rename_asset_folders(session, project) -> list:
     for label, fn in (("影像紀錄", media_log.rename_project_folder),
                       ("提案", proposal_assets.rename_project_folder)):
         try:
-            _changed, warn = await fn(session, project.id, project.name or "", created)
-            if warn:
-                warnings.append(warn)
+            _changed, err = await fn(session, project.id, project.name or "", created)
         except Exception as e:      # 單一子系統壞掉不擋改名，也不擋其他子系統
-            warnings.append(f"{label}資料夾改名失敗（{type(e).__name__}: {e}）")
+            err = f"{type(e).__name__}: {e}"
+        if err:
+            warnings.append(f"{label}資料夾改名失敗（{err}）— 資料夾維持舊名，檔案未受影響")
     return warnings
 
 

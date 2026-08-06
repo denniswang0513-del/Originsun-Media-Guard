@@ -25,6 +25,7 @@ tests/unit/test_project_folders.py。
 """
 from __future__ import annotations
 
+import asyncio
 import os
 import re
 from datetime import datetime
@@ -48,13 +49,21 @@ def _segment(s: str, limit: int = _MAX_SEGMENT_LEN) -> str:
     return clean_name(s)[:limit].strip()
 
 
-def _dedupe(base: str, taken: Optional[set]) -> str:
-    """撞名補 -2、-3…（taken = 同 root 底下已被佔用的名字集合）。"""
+def dedupe(base: str, taken: Optional[set] = None, ext: str = "") -> str:
+    """撞名補 -2、-3…（taken = 同一層已被佔用的名字集合）。
+
+    `ext` 給檔名用（補號要插在副檔名**前面**：`稿.pdf` → `稿-2.pdf`）；
+    資料夾名不傳，直接接在尾端。
+    """
+    stem = base[:-len(ext)] if ext and base.endswith(ext) else base
     name, i = base, 2
     while name in (taken or set()):
-        name = f"{base}-{i}"
+        name = f"{stem}-{i}{ext}"
         i += 1
     return name
+
+
+_dedupe = dedupe          # 模組內既有呼叫沿用
 
 
 _DATE_PREFIX_RE = re.compile(r"^(\d{8})_")
@@ -87,6 +96,19 @@ def make_reference_folder_name(title: str, brand: str = "",
     return _dedupe(f"{head}_{tail}" if tail else head, taken)
 
 
+async def taken_names(session, name_col, id_col=None, exclude_id: str = "") -> set:
+    """同一個 root 底下已被佔用的資料夾名（撞名補 -2 用）。
+
+    三個子系統的 taken 查詢形狀完全相同，只差 model/欄位 → 收成這一支。
+    改名時傳 `exclude_id` 排除自己（否則會跟自己撞名、平白補號）。
+    """
+    from sqlalchemy import select
+    q = select(name_col).where(name_col.isnot(None))
+    if exclude_id and id_col is not None:
+        q = q.where(id_col != exclude_id)
+    return {n for n in (await session.execute(q)).scalars() if n}
+
+
 def _norm(p: str) -> str:
     """比對用正規化：斜線統一 + 去尾斜線 + Windows 大小寫折疊。長度不變
     （normcase 只做 lower 與 / → \\），故切片位移在原字串上仍成立。"""
@@ -103,11 +125,10 @@ def remap_prefix(path: str, old_prefix: str, new_prefix: str) -> str:
     if not p or not old_prefix or not new_prefix:
         return p
     np, no = _norm(p), _norm(old_prefix)
-    if np == no:
-        return new_prefix.rstrip("\\")
-    if not np.startswith(no + "\\"):
+    # `no + "\\"` 的邊界檢查不可省 —— 否則 `..._案` 會吃到 `..._案外案`
+    if np != no and not np.startswith(no + "\\"):
         return p
-    return new_prefix.rstrip("\\") + p[len(str(old_prefix).rstrip("\\/")):]
+    return new_prefix.rstrip("\\") + p.rstrip("\\/")[len(old_prefix.rstrip("\\/")):]
 
 
 def rename_dir(old_abs: str, new_abs: str, *,
@@ -134,4 +155,31 @@ def rename_dir(old_abs: str, new_abs: str, *,
         rename(old_abs, new_abs)
     except OSError as e:
         return False, f"{type(e).__name__}: {e}"
+    return True, ""
+
+
+async def rename_and_remap(old_dir: str, new_dir: str, *, remap=None) -> tuple:
+    """改名的**單一程序**（三個資產子系統共用）→ `(changed, err)`。
+
+    `old_dir` / `new_dir` 用呼叫端的視角（canonical UNC 或本機皆可）—— 開檔前
+    自己翻成本機視角，`remap` 收到的仍是原視角路徑。
+    `remap(old_dir, new_dir)` 是 async callable，負責更新 DB 內的絕對路徑。
+
+    🔴 不變式「磁碟與 DB 同進退」在這裡靠**執行順序 + 補償**保證，不是靠呼叫端
+    的 try/except：rename 失敗 → 什麼都不動；rename 成功但 remap 拋例外 →
+    **把資料夾改回舊名**再回報失敗。少了補償這步，呼叫端一個 except 就會留下
+    「磁碟已改名、DB 還指舊路徑」，而那正是照片被當新檔重複匯入的成因。
+    """
+    from core.drive_map import to_local_path
+    ok, err = await asyncio.to_thread(
+        rename_dir, to_local_path(old_dir), to_local_path(new_dir))
+    if not ok:
+        return False, err
+    if remap is not None:
+        try:
+            await remap(old_dir, new_dir)
+        except Exception as e:
+            await asyncio.to_thread(
+                rename_dir, to_local_path(new_dir), to_local_path(old_dir))
+            return False, f"路徑同步失敗，資料夾已還原（{type(e).__name__}: {e}）"
     return True, ""
