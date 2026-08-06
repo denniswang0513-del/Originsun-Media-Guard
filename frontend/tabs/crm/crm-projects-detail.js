@@ -163,6 +163,16 @@ window._projEdit = function(cell) {
         const changed = fieldDef.listWrap
             ? JSON.stringify(stored) !== JSON.stringify(rawOrig || [])
             : (val ?? null) !== (orig ?? null);
+        // 提案=專案合體：來自提案的專案轉「未成案」必附原因（組織學習欄），
+        // 後端 hook 會 422 擋；這裡先問，取消就還原不送
+        if (changed && field === 'status' && val === '未成案' && project.proposal_status) {
+            const reason = prompt('此專案來自提案 — 未成案原因（必填，組織學習欄）', '');
+            if (reason === null || !reason.trim()) {
+                cell.innerHTML = _projDisplayValue(field, orig, fieldDef);
+                return;
+            }
+            window._projDirtyMap['outcome_reason'] = reason.trim();
+        }
         if (changed) {
             window._projDirtyMap[field] = stored;
             project[field] = stored;

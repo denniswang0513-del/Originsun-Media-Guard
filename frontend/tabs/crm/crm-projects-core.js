@@ -250,6 +250,14 @@ export async function loadStaffList() {
 
 // ── List Rendering ──────────────────────────────────────────
 
+// 提案=專案合體：列上顯示衛星提案的前期子狀態（成案/未成案已反映在專案
+// 階段本身，不重複掛）。proposal_status 由 GET /projects 附掛。
+const _PROP_SUB_STATUSES = ['草稿', '已提案', '入圍', '擱置'];
+function _propSubBadge(p) {
+    if (!_PROP_SUB_STATUSES.includes(p.proposal_status || '')) return '';
+    return `<span class="crm-badge" style="margin-left:4px;opacity:.7;">${p.proposal_status}</span>`;
+}
+
 export function renderList() {
     const body = document.getElementById('proj-list-body');
     if (!body) return;
@@ -269,7 +277,7 @@ export function renderList() {
         <div class="crm-row${p.id === state.selectedId ? ' selected' : ''}" data-id="${p.id}" onclick="window._projSelect('${p.id}')">
             <div class="crm-row-name">${_esc(p.name)}</div>
             <div class="crm-row-client">${_esc(p.client_short_name)}</div>
-            <div class="crm-row-status">${_badge(p.status)}</div>
+            <div class="crm-row-status">${_badge(p.status)}${_propSubBadge(p)}</div>
             <div class="crm-row-am">
                 ${p.am_username ? _avatar(p.am_username) + _esc(p.am_username) : '<span class="crm-muted">—</span>'}
             </div>

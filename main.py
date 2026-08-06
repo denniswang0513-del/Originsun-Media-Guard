@@ -539,6 +539,15 @@ async def _on_startup():
         except Exception:
             pass
 
+    # ── DB Migration: 提案=專案合體 — 既有提案補殼專案（冪等，2026-08-06） ──
+    if state.db_online:
+        try:
+            from routers.api_proposals import migrate_unlinked_proposals_to_projects
+            await migrate_unlinked_proposals_to_projects()
+        except Exception as _e_pp:
+            # 不能靜默死：沒遷移的提案不會出現在管線專案列（前端提案帶只剩 legacy 提示）
+            print(f"[WARN] 提案殼專案遷移失敗: {_e_pp}")
+
     # ── DB Migration: crm_project_cost_lines table ──
     if state.db_online:
         try:

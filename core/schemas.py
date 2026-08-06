@@ -491,6 +491,9 @@ class CrmProjectPatchPayload(CrmProjectPayload):
     """
     name: Optional[str] = None
     client_id: Optional[str] = None
+    # 非專案欄位：狀態轉「未成案/成案」時給提案衛星列的原因（組織學習欄），
+    # update_project 會 pop 掉不 setattr（提案=專案合體，2026-08-06）
+    outcome_reason: Optional[str] = None
 
 
 class ProjectExpensePayload(BaseModel):

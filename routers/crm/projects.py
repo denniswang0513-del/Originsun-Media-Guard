@@ -67,9 +67,27 @@ async def list_projects(
     _require_db()
     factory = await _get_factory()
 
+    # 提案=專案合體：列表附掛提案子狀態（草稿/已提案/入圍…），管線「提案」
+    # 分頁列上顯示 badge 用。多提案連同一專案（N:1）取最近更新的一筆。
+    try:
+        from db.models import PreprodProposal
+        prop_status_sq = (
+            select(PreprodProposal.status)
+            .where(PreprodProposal.project_id == CrmProject.id)
+            .order_by(PreprodProposal.updated_at.desc())
+            .limit(1)
+            .correlate(CrmProject)
+            .scalar_subquery()
+        )
+    except ImportError:
+        prop_status_sq = None
+
     async with factory() as session:
+        cols = [CrmProject, Client.short_name.label("client_short_name")]
+        if prop_status_sq is not None:
+            cols.append(prop_status_sq.label("proposal_status"))
         query = (
-            select(CrmProject, Client.short_name.label("client_short_name"))
+            select(*cols)
             .outerjoin(Client, Client.id == CrmProject.client_id)
             .order_by(CrmProject.updated_at.desc())
         )
@@ -87,10 +105,43 @@ async def list_projects(
             ))
         rows = (await session.execute(query)).all()
 
+    def _with_prop(row):
+        d = _to_project_dict(row[0], row[1] or "")
+        d["proposal_status"] = (row[2] or "") if len(row) > 2 else ""
+        return d
+
     return {
-        "projects": [_to_project_dict(row[0], row[1] or "") for row in rows],
+        "projects": [_with_prop(row) for row in rows],
         "total": len(rows),
     }
+
+
+async def create_project_in_session(session, data: dict):
+    """建專案的**單一正本**：客戶檢核（404）、AM 繼承、客戶分級重算、
+    第一張成本「主表」+ 預設雜支種子。POST /projects、提案建殼/成案
+    （routers/api_proposals.py）都走這裡 —— 繞過它直接 insert 會做出
+    結構不完整的專案。data = CrmProject 欄位 dict（日期欄需已 parse）。
+    不 commit，caller 統一。回傳 (project, client_short_name)。"""
+    now = _now()
+    project = CrmProject(id=uuid.uuid4().hex,
+                         created_at=now, updated_at=now, **data)
+    client = await session.get(Client, project.client_id)
+    if not client:
+        raise HTTPException(status_code=404, detail="找不到指定的客戶")
+
+    # Inherit AM from client if not explicitly set
+    if not project.am_username and client.am_username:
+        project.am_username = client.am_username
+
+    session.add(project)
+    await _auto_update_client_status(session, project.client_id)
+    # 同時建立第一張子表「主表」+ 預設 10 個行政雜支類別 row。
+    main_group_id = uuid.uuid4().hex
+    session.add(CrmProjectCostGroup(
+        id=main_group_id, project_id=project.id, name="主表", sort_order=0,
+    ))
+    await _seed_default_expenses(session, project.id, main_group_id)
+    return project, client.short_name
 
 
 @router.post("/projects")
@@ -99,33 +150,12 @@ async def create_project(req: CrmProjectPayload, request: Request):
     _require_db()
     factory = await _get_factory()
 
-    now = _now()
     date_fields = {"shoot_date", "start_date", "completion_date"}
     dates = {f: _parse_shoot_date(getattr(req, f)) for f in date_fields}
-
-    data = req.model_dump(exclude=date_fields)
-    project = CrmProject(id=uuid.uuid4().hex, **dates,
-                         created_at=now, updated_at=now, **data)
+    data = {**req.model_dump(exclude=date_fields), **dates}
 
     async with factory() as session:
-        client = await session.get(Client, req.client_id)
-        if not client:
-            raise HTTPException(status_code=404, detail="找不到指定的客戶")
-        client_name = client.short_name
-
-        # Inherit AM from client if not explicitly set
-        if not project.am_username and client.am_username:
-            project.am_username = client.am_username
-
-        session.add(project)
-        await _auto_update_client_status(session, req.client_id)
-        # 同時建立第一張子表「主表」+ 預設 10 個行政雜支類別 row。
-        # 共用同一次 commit。
-        main_group_id = uuid.uuid4().hex
-        session.add(CrmProjectCostGroup(
-            id=main_group_id, project_id=project.id, name="主表", sort_order=0,
-        ))
-        await _seed_default_expenses(session, project.id, main_group_id)
+        project, client_name = await create_project_in_session(session, data)
         await session.commit()
         await session.refresh(project)
 
@@ -444,6 +474,49 @@ def _apply_status_side_effects(project, old_status: str) -> None:
         pass
 
 
+# 提案=專案合體（2026-08-06）：專案階段轉換是 win/loss 的**單一觸發點**。
+# 進到這三個階段 = 成案；轉「未成案」= 未成案（強制附 outcome_reason，組織
+# 學習欄）。單向、只在轉換點同步 —— docs/PROPOSAL_PLANNER.md 決策紀錄。
+_PROPOSAL_WIN_STATUSES = {"製作", "結案", "歸檔"}
+
+
+async def _sync_linked_proposals(session, project, old_status: str,
+                                 reason: str | None) -> None:
+    """專案狀態變動 → 連結的提案衛星列記 win/loss。PUT 與 PATCH /status
+    共用（比照 _apply_status_side_effects，避免兩條路徑漂移）。
+    轉「未成案」且提案沒有原因、本次也沒帶 → 422（session 尚未 commit，
+    整筆狀態變更一起擋下）。"""
+    new_status = project.status or ""
+    if new_status == old_status:
+        return
+    try:
+        from db.models import PreprodProposal
+    except ImportError:      # agent 環境沒有 DB 套件
+        return
+    props = (await session.execute(
+        select(PreprodProposal).where(PreprodProposal.project_id == project.id)
+    )).scalars().all()
+    if not props:
+        return
+    now = _now()
+    reason = (reason or "").strip()
+    for prop in props:
+        if new_status in _PROPOSAL_WIN_STATUSES and prop.status != "成案":
+            prop.status = "成案"
+            if reason:
+                prop.outcome_reason = reason
+            prop.updated_at = now
+        elif new_status == "未成案" and prop.status != "未成案":
+            effective = reason or (prop.outcome_reason or "").strip()
+            if not effective:
+                raise HTTPException(status_code=422, detail={
+                    "code": "OUTCOME_REASON_REQUIRED",
+                    "message": "此專案來自提案 — 轉「未成案」需附原因（組織學習欄）"})
+            prop.status = "未成案"
+            prop.outcome_reason = effective
+            prop.updated_at = now
+
+
 @router.put("/projects/{project_id}")
 async def update_project(project_id: str, req: CrmProjectPatchPayload, request: Request):
     """Partial update — only fields the client included in the body are
@@ -469,12 +542,15 @@ async def update_project(project_id: str, req: CrmProjectPatchPayload, request: 
 
         old_status = project.status or ""
         old_client_id = project.client_id
+        # outcome_reason 不是專案欄位 — 是轉「未成案/成案」時給提案衛星列的
+        outcome_reason = update_data.pop("outcome_reason", None)
         for k, v in update_data.items():
             if k in date_fields:
                 setattr(project, k, _parse_shoot_date(v))
             else:
                 setattr(project, k, v)
         _apply_status_side_effects(project, old_status)
+        await _sync_linked_proposals(session, project, old_status, outcome_reason)
         project.updated_at = _now()
         # 專案狀態或歸屬客戶變動 → 重算客戶分級（含轉移前的舊客戶）
         await _auto_update_client_status(session, project.client_id)
@@ -526,6 +602,8 @@ async def update_project_status(project_id: str, request: Request):
         old_status = project.status or ""
         project.status = new_status
         _apply_status_side_effects(project, old_status)
+        await _sync_linked_proposals(session, project, old_status,
+                                     body.get("outcome_reason"))
         if contract_amount is not None:
             project.contract_amount = int(contract_amount)
         if amount_receivable is not None:

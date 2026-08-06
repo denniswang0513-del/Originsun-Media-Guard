@@ -344,12 +344,22 @@ async function openDetail(pid) {
         const revert = () => { e.target.value = prop.status; };
         try {
             if (val === '成案') {
-                if (prop.project_id) { alert('此提案已建過專案'); revert(); return; }
-                if (!confirm(`確定成案？將自動建立 CRM 專案「${prop.title}」`)) { revert(); return; }
-                const reason = prompt('成案原因（組織學習欄，建議填寫；可留空）', prop.outcome_reason || '');
-                if (reason === null) { revert(); return; }
-                const d = await tfetch(`${API}/${prop.id}/convert`, { method: 'POST', json: { outcome_reason: reason.trim() } });
-                alert('已成案 ✅ 已自動建立 CRM 專案（project_id: ' + d.project_id + '）');
+                if (prop.project_id) {
+                    // 提案=專案合體：提案本來就有連結專案 → 走 PUT，
+                    // 後端把還在前期的專案推進「製作」階段
+                    const reason = prompt('成案原因（必填 — 組織學習欄）', prop.outcome_reason || '');
+                    if (reason === null) { revert(); return; }
+                    if (!reason.trim()) { alert('成案原因必填'); revert(); return; }
+                    await tfetch(`${API}/${prop.id}`, { method: 'PUT', json: { status: val, outcome_reason: reason.trim() } });
+                    alert('已成案 ✅ 連結的專案已推進「製作」階段');
+                } else {
+                    // legacy 無專案提案（缺客戶未遷移）→ 原 convert 路
+                    if (!confirm(`確定成案？將自動建立 CRM 專案「${prop.title}」`)) { revert(); return; }
+                    const reason = prompt('成案原因（組織學習欄，建議填寫；可留空）', prop.outcome_reason || '');
+                    if (reason === null) { revert(); return; }
+                    const d = await tfetch(`${API}/${prop.id}/convert`, { method: 'POST', json: { outcome_reason: reason.trim() } });
+                    alert('已成案 ✅ 已自動建立 CRM 專案（project_id: ' + d.project_id + '）');
+                }
             } else if (val === '未成案') {
                 const reason = prompt('未成案原因（必填 — 組織學習欄）', prop.outcome_reason || '');
                 if (reason === null) { revert(); return; }
@@ -443,10 +453,13 @@ async function _openEditor(prop) {
             <div class="prop-panel-body" style="display:block;">
                 ${row('標題 *', `<input id="pe-title" value="${v('title')}" placeholder="例：某公司 2026 品牌形象片提案">`)}
                 <div style="display:flex;gap:8px;">
-                    <div style="flex:1;">${row('客戶', `<select id="pe-client">
+                    <div style="flex:1;">${row('客戶 *（提案即專案，需先選客戶）', `<div style="display:flex;gap:6px;">
+                        <select id="pe-client" style="flex:1;min-width:0;">
                         <option value="">（未選客戶）</option>
                         ${clients.map(c => `<option value="${esc(c.id)}"${prop && prop.client_id === c.id ? ' selected' : ''}>${esc(c.name)}</option>`).join('')}
-                    </select>`)}</div>
+                        </select>
+                        <button id="pe-client-new" class="prop-btn ghost" title="快速建立潛在客戶" style="white-space:nowrap;">＋ 新客戶</button>
+                    </div>`)}</div>
                     <div style="flex:1;">${row('類型', `<select id="pe-ptype">
                         <option value="">（未分類）</option>
                         ${PTYPES.map(t => `<option value="${t}"${prop && prop.ptype === t ? ' selected' : ''}>${t}</option>`).join('')}
@@ -470,9 +483,28 @@ async function _openEditor(prop) {
     ov.querySelector('#pe-cancel').addEventListener('click', () => {
         if (isNew) _closeOverlay(); else openDetail(prop.id);
     });
+    // 快速建立潛在客戶（ClientPayload 預設 status=潛在客戶）→ 選單即時補上並選中
+    ov.querySelector('#pe-client-new').addEventListener('click', async () => {
+        const name = prompt('新客戶名稱（將以「潛在客戶」建檔）');
+        if (!name || !name.trim()) return;
+        try {
+            const d = await tfetch('/api/v1/crm/clients', { method: 'POST', json: { short_name: name.trim() } });
+            _clientsCache = null;   // 下次開表單重抓
+            const sel = ov.querySelector('#pe-client');
+            const opt = document.createElement('option');
+            opt.value = d.client.id;
+            opt.textContent = d.client.short_name;
+            sel.appendChild(opt);
+            sel.value = d.client.id;
+        } catch (err) { alert('建立客戶失敗：' + (err.message || err)); }
+    });
     ov.querySelector('#pe-save').addEventListener('click', async () => {
         const title = ov.querySelector('#pe-title').value.trim();
         if (!title) { alert('標題必填'); return; }
+        if (isNew && !ov.querySelector('#pe-client').value) {
+            alert('客戶必選 — 提案即專案（可用「＋ 新客戶」先建潛在客戶）');
+            return;
+        }
         const body = {
             title,
             client_id: ov.querySelector('#pe-client').value,

@@ -121,12 +121,15 @@ export async function syncProposalStrip(statusOverride) {
         all = await _proposals();
     } catch (_) { host.innerHTML = ''; return; }   // 拿不到（罕見）就安靜隱藏，不擋專案列表
 
+    // 提案=專案合體（2026-08-06）：提案誕生即建殼專案入管線，帶客戶的存量
+    // 提案也已由 startup 遷移補殼。帶上只剩 **legacy 無客戶提案**（沒客戶建
+    // 不了專案）—— 補上客戶（工作區編輯 / 成案 chooser）就會自動入列消失。
     if (stage === '') {
         const n = all.filter(p => !p.project_id && STAGE_STATUSES['提案'].includes(p.status)).length;
         host.innerHTML = n ? `
             <div class="projprop-bar">
                 <span class="projprop-badge">提案庫</span>
-                <span>進行中提案 <b>${n}</b> 筆（未成案前不在專案列表裡）</span>
+                <span>待補客戶的提案 <b>${n}</b> 筆（補上客戶即自動入列專案管線）</span>
                 <a data-goto>看「提案」分頁 →</a>
             </div>` : '';
         host.querySelector('[data-goto]')?.addEventListener('click', () => {
@@ -136,10 +139,10 @@ export async function syncProposalStrip(statusOverride) {
     }
 
     const rows = all.filter(p => STAGE_STATUSES[stage].includes(p.status)
-                             && !(stage === '提案' && p.project_id));
+                             && !p.project_id);
     host.innerHTML = rows.length
         ? `<div class="projprop-cards">${rows.map(p => _propCard(p, {
-            badge: '提案庫',
+            badge: '待補客戶',
             action: stage === '提案' ? '<button data-convert>成案 →</button>' : '',
         })).join('')}</div>`
         : '';

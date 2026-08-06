@@ -37,6 +37,7 @@ let _lastDetailId = null;
 function _reloadActiveDetailTab(projectId) {
     const tab = document.querySelector('#proj-detail-tabs .crm-tab.active')?.dataset.tab;
     if (tab === 'media') _loadMediaTab(projectId, { fast: true });
+    else if (tab === 'plan') _loadPlanTab(projectId);
     else if (tab === 'refs') _loadRefsTab(projectId);
     else if (tab === 'delivery') loadDeliveryTab(projectId);
     else if (tab === 'team') { _loadCostStaff(projectId); _loadAdvances(projectId); }
@@ -339,6 +340,8 @@ export async function initCrmProjectsTab() {
             document.getElementById('proj-detail-finance').classList.toggle('hidden', tab !== 'finance');
             document.getElementById('proj-detail-delivery').classList.toggle('hidden', tab !== 'delivery');
             if (tab === 'delivery' && state.selectedId) { loadDeliveryTab(state.selectedId); }
+            document.getElementById('proj-detail-plan').classList.toggle('hidden', tab !== 'plan');
+            if (tab === 'plan' && state.selectedId) { _loadPlanTab(state.selectedId); }
             document.getElementById('proj-detail-media').classList.toggle('hidden', tab !== 'media');
             if (tab === 'media' && state.selectedId) { _loadMediaTab(state.selectedId); }
             document.getElementById('proj-detail-refs').classList.toggle('hidden', tab !== 'refs');
@@ -445,6 +448,19 @@ async function _loadRefsTab(projectId) {
     } catch (e) {
         container.innerHTML = `<div class="crm-empty" style="padding:24px;color:#fca5a5;">參考影片載入失敗: ${e.message}</div>`;
         console.error('參考影片載入失敗:', e);
+    }
+}
+
+// ── 提案企劃 lazy loader（提案=專案合體）──────────────────────
+async function _loadPlanTab(projectId) {
+    const container = document.getElementById('proj-detail-plan');
+    if (!container) return;
+    try {
+        const mod = await import('./crm-projects-plan.js');
+        await mod.loadPlanTab(projectId, container);
+    } catch (e) {
+        container.innerHTML = `<div class="crm-empty" style="padding:24px;color:#fca5a5;">提案企劃載入失敗: ${e.message}</div>`;
+        console.error('提案企劃載入失敗:', e);
     }
 }
 
