@@ -57,7 +57,7 @@ _DEFAULT_SETTINGS: dict = {
     # 專案改名時資料夾跟著改（core.project_folders）。deck 上傳落在這裡，
     # 也是人可以直接丟企劃檔（腳本/分鏡/簡報原檔）的地方。
     "proposals": {
-        "root": r"\\192.168.1.132\Archive\20_提案企劃",
+        "root": r"\\192.168.1.132\Archive\00_提案企劃",
     },
     # 參考影片封存（docs/REFERENCE_LIBRARY.md §12）：master-only runner。
     # enabled 預設 False —— dev 與新環境不會自己開始下載；正式啟用由管理卡打開。

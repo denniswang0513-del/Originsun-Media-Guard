@@ -58,7 +58,7 @@ function _mountAssetsCard(projectId, host, d) {
             </div>
             <div style="display:flex;gap:6px;align-items:center;">
                 <input id="pp-root" type="text" class="crm-input" style="flex:1;"
-                       value="${esc(d.root || '')}" placeholder="例：\\\\192.168.1.132\\Archive\\20_提案企劃">
+                       value="${esc(d.root || '')}" placeholder="例：\\\\192.168.1.132\\Archive\\00_提案企劃">
                 <button id="pp-root-save" class="crm-btn crm-btn-primary crm-btn-sm">儲存</button>
                 <button id="pp-open" class="crm-btn crm-btn-secondary crm-btn-sm">開啟資料夾</button>
             </div>
