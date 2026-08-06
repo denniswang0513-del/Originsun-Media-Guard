@@ -166,6 +166,91 @@ def rename_dir(old_abs: str, new_abs: str, *,
     return True, ""
 
 
+# ── 資料夾內容瀏覽：路徑防護 + 列檔（三個子系統共用）────────────
+# folder / rel 都來自前端 query → 一律經這裡的防護再開檔，擋 `..` 逃逸與
+# 絕對路徑注入。正本原本在 routers/crm/media_log.py，提案資產夾是第三個
+# 使用者時搬來這裡（規則只留一份，測試見 tests/unit/test_project_folders.py）。
+
+def within_dir(base: str, target: str) -> bool:
+    """target 是否落在 base 目錄內（或即為 base）。realpath 解 symlink/junction
+    後 normcase+前綴比對，擋 .. 逃逸；Windows 大小寫/斜線不敏感。"""
+    try:
+        b = os.path.normcase(os.path.realpath(base))
+        t = os.path.normcase(os.path.realpath(target))
+    except OSError:
+        return False
+    return t == b or t.startswith(b + os.sep)
+
+
+def subfolder_path(root: str, name: str) -> Optional[str]:
+    """root 底下**單層**子資料夾的絕對路徑（純驗證、不檢查是否存在）；名稱含路徑
+    分隔 / . / .. 或逃出 root → None。瀏覽（需已存在）與新增資料夾（需尚不存在）
+    共用，各自再加存在性判斷。"""
+    name = str(name or "").strip()
+    if not root or not name or name in (".", "..") or "/" in name or "\\" in name:
+        return None
+    p = os.path.join(root, name)
+    return p if within_dir(root, p) else None
+
+
+def safe_subfolder(root: str, folder: str) -> Optional[str]:
+    """root 底下**已存在**的直接子資料夾絕對路徑；不合法或非目錄 → None。"""
+    p = subfolder_path(root, folder)
+    return p if (p and os.path.isdir(p)) else None
+
+
+def safe_rel_path(folder_abs: str, rel: str) -> Optional[str]:
+    """folder 內相對路徑 → 絕對檔案路徑；逃出 folder（.. / 絕對路徑）或非檔案 → None。"""
+    r = str(rel or "").replace("\\", "/").strip().lstrip("/")
+    if not r:
+        return None
+    p = os.path.normpath(os.path.join(folder_abs, r))
+    if not within_dir(folder_abs, p) or not os.path.isfile(p):
+        return None
+    return p
+
+
+FOLDER_VIEW_CAP = 1000   # 單夾列檔上限（超過標 truncated，避免超大夾逐檔 stat 卡死）
+
+
+def iter_files_rel(folder: str, accept: Optional[Callable[[str], bool]] = None):
+    """os.walk 產出資料夾內檔案的相對路徑（相對 folder）。剪掉 ./_ 開頭的子夾。
+    `accept(filename)` 給定時只產出它認可的（影像紀錄用它篩媒體副檔名）。"""
+    for dirpath, dirnames, filenames in os.walk(folder):
+        dirnames[:] = [d for d in dirnames if d[:1] not in (".", "_")]
+        for fn in filenames:
+            if accept is None or accept(fn):
+                yield os.path.relpath(os.path.join(dirpath, fn), folder)
+
+
+def list_folder_files(folder_abs: str, *, cap: int = FOLDER_VIEW_CAP,
+                      accept: Optional[Callable[[str], bool]] = None) -> tuple:
+    """列出資料夾內（含子夾）的檔案 →
+    `([{rel, filename, size_bytes, mtime}], truncated)`，依 mtime 新→舊。
+    到 cap 就停（大夾防慢）。呼叫端在 to_thread 內跑。"""
+    import stat as _stat
+    out: list = []
+    truncated = False
+    for rel in iter_files_rel(folder_abs, accept):
+        if len(out) >= cap:
+            truncated = True
+            break
+        try:
+            st = os.stat(os.path.join(folder_abs, rel))
+        except OSError:
+            continue
+        if not _stat.S_ISREG(st.st_mode):
+            continue
+        out.append({
+            "rel": rel.replace("\\", "/"),
+            "filename": os.path.basename(rel),
+            "size_bytes": int(st.st_size),
+            "mtime": st.st_mtime,
+        })
+    out.sort(key=lambda x: x["mtime"], reverse=True)
+    return out, truncated
+
+
 async def rename_and_remap(session, old_dir: str, new_dir: str, *, remap) -> tuple:
     """改名的**單一程序**（三個資產子系統共用）→ `(changed, err)`。
 

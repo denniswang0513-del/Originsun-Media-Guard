@@ -10,7 +10,13 @@ const _inflight = new Map();
 
 export async function crmFetch(path, opts = {}) {
     const token = localStorage.getItem('auth_token');
-    const headers = { 'Content-Type': 'application/json', ...(opts.headers || {}) };
+    // FormData 不可以自己設 Content-Type —— 那會蓋掉瀏覽器要帶的 multipart
+    // boundary，後端收到的是一包解不開的 body（檔案上傳全滅）。
+    const isForm = typeof FormData !== 'undefined' && opts.body instanceof FormData;
+    const headers = {
+        ...(isForm ? {} : { 'Content-Type': 'application/json' }),
+        ...(opts.headers || {}),
+    };
     if (token) headers['Authorization'] = `Bearer ${token}`;
     const method = (opts.method || 'GET').toUpperCase();
     const url = API + path;

@@ -53,21 +53,36 @@ function _mountAssetsCard(projectId, host, d) {
     box.style.cssText = 'padding:10px 12px 16px;';
     box.innerHTML = `
         <div style="border:1px solid #2a2a2a;border-radius:6px;padding:10px 12px;background:#181818;">
-            <div style="font-size:12px;color:#8b8b8b;margin-bottom:6px;">
-                提案資產資料夾${d.root_set ? '' : '<span style="color:#fbbf24;"> — 目前搆不到這個路徑</span>'}
+            <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;">
+                <span style="font-size:12px;color:#8b8b8b;">提案資產資料夾${
+                    d.root_set ? '' : '<span style="color:#fbbf24;"> — 目前搆不到這個路徑</span>'}</span>
+                ${d.folder_name ? `<code style="font-size:11.5px;color:#8b8b8b;">${esc(d.folder_name)}</code>` : ''}
+                <span style="flex:1;"></span>
+                <button id="pp-add" class="crm-btn crm-btn-primary crm-btn-sm">＋ 上傳檔案</button>
+                <button id="pp-open" class="crm-btn crm-btn-secondary crm-btn-sm">開啟資料夾</button>
+                <button id="pp-cfg" class="crm-btn crm-btn-secondary crm-btn-sm" title="設定根目錄">⚙</button>
             </div>
-            <div style="display:flex;gap:6px;align-items:center;">
+            <div id="pp-drop" style="border:1px dashed #3a3a3a;border-radius:4px;">
+                <div id="pp-files"></div>
+            </div>
+            <input id="pp-file-input" type="file" multiple style="display:none;">
+            <div id="pp-cfg-row" style="display:none;gap:6px;align-items:center;margin-top:8px;">
                 <input id="pp-root" type="text" class="crm-input" style="flex:1;"
                        value="${esc(d.root || '')}" placeholder="例：\\\\192.168.1.132\\Archive\\00_提案企劃">
                 <button id="pp-root-save" class="crm-btn crm-btn-primary crm-btn-sm">儲存</button>
-                <button id="pp-open" class="crm-btn crm-btn-secondary crm-btn-sm">開啟資料夾</button>
             </div>
             <div style="font-size:11.5px;color:#6b6b6b;margin-top:6px;">
-                所有專案共用根資料夾，各專案自動建子夾${d.folder_name ? `：<code>${esc(d.folder_name)}</code>` : ''}
-                ${d.created ? '' : '（尚未建立，第一次上傳簡報時才會建）'}
+                所有專案共用根資料夾，各專案自動建子夾。單檔上限 300MB，可執行檔會被擋下。
             </div>
         </div>`;
     host.appendChild(box);
+    _renderFiles(projectId, box, d);
+    _wireUpload(projectId, box, host);
+
+    box.querySelector('#pp-cfg').addEventListener('click', () => {
+        const row = box.querySelector('#pp-cfg-row');
+        row.style.display = row.style.display === 'none' ? 'flex' : 'none';
+    });
 
     box.querySelector('#pp-root-save').addEventListener('click', async () => {
         const root = box.querySelector('#pp-root').value.trim();
@@ -87,6 +102,113 @@ function _mountAssetsCard(projectId, host, d) {
         }).catch(() => {});
     });
 }
+
+const _fmtSize = (n) => n >= 1048576 ? (n / 1048576).toFixed(1) + ' MB'
+    : n >= 1024 ? Math.round(n / 1024) + ' KB' : n + ' B';
+
+// 檔案列表：標星號的是「提案簡報」（提案詳情與公開共編頁顯示的那一份）
+function _renderFiles(projectId, box, d) {
+    const files = d.files || [];
+    const list = box.querySelector('#pp-files');
+    if (!files.length) {
+        list.innerHTML = `<div style="padding:18px;text-align:center;color:#6b6b6b;font-size:12px;">
+            資料夾是空的 — 把檔案拖進來，或按「＋ 上傳檔案」</div>`;
+        return;
+    }
+    list.innerHTML = files.map(f => {
+        const isDeck = f.rel === d.deck_rel;
+        return `
+        <div class="pp-file" data-rel="${esc(f.rel)}"
+             style="display:flex;align-items:center;gap:8px;padding:6px 10px;border-bottom:1px solid #242424;font-size:12.5px;">
+            <span title="${isDeck ? '目前的提案簡報' : '設為提案簡報'}" data-deck
+                  style="cursor:pointer;color:${isDeck ? '#fbbf24' : '#3a3a3a'};">★</span>
+            <span data-dl style="flex:1;cursor:pointer;" title="下載">${esc(f.rel)}</span>
+            <span style="color:#6b6b6b;">${_fmtSize(f.size_bytes)}</span>
+            <span style="color:#6b6b6b;">${esc((f.mtime ? new Date(f.mtime * 1000).toISOString() : '').slice(0, 10))}</span>
+            <button data-del class="crm-btn crm-btn-secondary crm-btn-sm" title="刪除">✕</button>
+        </div>`;
+    }).join('') + (d.truncated
+        ? '<div style="padding:6px 10px;color:#fbbf24;font-size:11.5px;">檔案過多，只顯示前 1000 筆</div>' : '');
+}
+
+function _wireUpload(projectId, box, host) {
+    const input = box.querySelector('#pp-file-input');
+    const drop = box.querySelector('#pp-drop');
+    const reload = () => loadPlanTab(projectId, host);
+
+    const send = async (fileList) => {
+        if (!fileList || !fileList.length) return;
+        const fd = new FormData();
+        for (const f of fileList) fd.append('files', f);
+        try {
+            const r = await crmFetch(`/projects/${projectId}/proposal-assets/upload`,
+                { method: 'POST', body: fd });   // crmFetch 認得 FormData，不設 Content-Type
+            const bad = (r.skipped || []).map(s => `${s.filename}（${s.reason}）`);
+            crmToast(`已上傳 ${(r.saved || []).length} 個檔案`
+                + (bad.length ? `；略過 ${bad.length} 個` : ''), bad.length ? 6000 : 2000);
+            if (bad.length) console.warn('略過：', bad.join('、'));
+            reload();
+        } catch (e) { alert('上傳失敗：' + (e.message || e)); }
+    };
+
+    box.querySelector('#pp-add').addEventListener('click', () => input.click());
+    input.addEventListener('change', () => { send(input.files); input.value = ''; });
+
+    ['dragenter', 'dragover'].forEach(ev => drop.addEventListener(ev, e => {
+        e.preventDefault();
+        drop.style.borderColor = '#3b82f6';
+    }));
+    ['dragleave', 'drop'].forEach(ev => drop.addEventListener(ev, e => {
+        e.preventDefault();
+        drop.style.borderColor = '#3a3a3a';
+    }));
+    drop.addEventListener('drop', e => send(e.dataTransfer.files));
+
+    // 列表操作（事件委派 —— 列表每次重畫）
+    box.querySelector('#pp-files').addEventListener('click', async (e) => {
+        const row = e.target.closest('.pp-file');
+        if (!row) return;
+        const rel = row.dataset.rel;
+        const q = `?rel=${encodeURIComponent(rel)}`;
+        if (e.target.closest('[data-del]')) {
+            if (!confirm(`確定刪除「${rel}」？檔案會從資料夾移除。`)) return;
+            try {
+                const r = await crmFetch(`/projects/${projectId}/proposal-assets/file${q}`,
+                    { method: 'DELETE' });
+                crmToast(r.deck_cleared ? '已刪除（原本是提案簡報，已取消指定）' : '已刪除');
+                reload();
+            } catch (err) { alert('刪除失敗：' + (err.message || err)); }
+        } else if (e.target.closest('[data-deck]')) {
+            try {
+                await crmFetch(`/projects/${projectId}/proposal-assets/deck`,
+                    { method: 'POST', body: JSON.stringify({ rel }) });
+                crmToast('已設為提案簡報');
+                reload();
+            } catch (err) { alert('設定失敗：' + (err.message || err)); }
+        } else if (e.target.closest('[data-dl]')) {
+            _download(`/api/v1/crm/projects/${projectId}/proposal-assets/file${q}`, rel);
+        }
+    });
+}
+
+/** 帶權限下載（<a href> 送不了 Authorization → fetch 成 blob 再觸發）。 */
+async function _download(url, filename) {
+    try {
+        const token = localStorage.getItem('auth_token');
+        const r = await fetch(url, { headers: token ? { Authorization: 'Bearer ' + token } : {} });
+        if (!r.ok) throw new Error('HTTP ' + r.status);
+        const href = URL.createObjectURL(await r.blob());
+        const a = document.createElement('a');
+        a.href = href;
+        a.download = (filename || '').split('/').pop() || 'file';
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        setTimeout(() => URL.revokeObjectURL(href), 10_000);
+    } catch (e) { alert('下載失敗：' + (e.message || e)); }
+}
+
+export { _download as downloadAsset };
 
 function _renderEmpty(projectId, host) {
     host.innerHTML = `

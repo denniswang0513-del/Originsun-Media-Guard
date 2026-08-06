@@ -1,0 +1,195 @@
+/**
+ * proposal-folders.js — 提案資產資料夾瀏覽器（提案庫 Tab 的「📁 資產資料夾」）
+ *
+ * owner 2026-08-06：NAS 上手工整理的**舊提案資料夾**也要在系統裡看得到、
+ * 載得到、還能繼續往裡面丟檔案。所以這裡列的是 root 底下的**所有**資料夾：
+ * - 已連結：`crm_projects.proposal_folder_name` 指到它（帶專案名/客戶）
+ * - 未連結：磁碟上有、系統沒登記（過去的那些）
+ *
+ * 刻意**不做**「連結到專案」—— owner 選擇讓舊資料夾獨立存在。
+ * 檔案清單純掃磁碟即時列（後端不建索引表）。
+ */
+
+import { esc } from '../website/website-utils.js';
+import { tfetch } from './prop-fetch.js';
+
+const API = '/api/v1/crm/proposal-assets';
+
+let _folders = [];
+let _open = '';          // 目前展開的資料夾名
+
+export async function openFolderBrowser(mountOverlay, closeOverlay) {
+    const ov = mountOverlay(`
+        <div class="prop-panel" style="width:min(900px,96vw);">
+            <div class="prop-panel-head">
+                <h3>📁 提案資產資料夾</h3>
+                <button class="prop-close" title="關閉">✕</button>
+            </div>
+            <div class="prop-panel-body" style="display:block;">
+                <div class="prop-toolbar" style="margin:0 0 10px;">
+                    <input id="pf-q" type="text" placeholder="🔍 搜尋資料夾或專案名…" style="width:220px;">
+                    <span id="pf-root" class="prop-note" style="margin-left:auto;"></span>
+                </div>
+                <div id="pf-list"><div class="prop-note">載入中…</div></div>
+            </div>
+        </div>`);
+    _bind(ov);
+    await _load(ov, '');
+}
+
+function _bind(ov) {
+    let t = null;
+    ov.querySelector('#pf-q').addEventListener('input', (e) => {
+        clearTimeout(t);
+        t = setTimeout(() => _load(ov, e.target.value.trim()), 300);
+    });
+    // 事件委派：列表每次重畫
+    ov.querySelector('#pf-list').addEventListener('click', async (e) => {
+        const head = e.target.closest('[data-folder]');
+        const fileRow = e.target.closest('[data-rel]');
+        if (fileRow) {
+            const folder = fileRow.dataset.folder;
+            const rel = fileRow.dataset.rel;
+            if (e.target.closest('[data-dl]')) _download(folder, rel);
+            return;
+        }
+        if (!head) return;
+        const name = head.dataset.folder;
+        _open = _open === name ? '' : name;      // 再點一次收合
+        _render(ov);
+        if (_open) await _loadFiles(ov, _open);
+    });
+}
+
+async function _load(ov, q) {
+    const list = ov.querySelector('#pf-list');
+    try {
+        const d = await tfetch(`${API}/overview${q ? '?q=' + encodeURIComponent(q) : ''}`);
+        _folders = d.folders || [];
+        ov.querySelector('#pf-root').textContent =
+            (d.root || '（未設定根目錄）') + (d.root_set ? '' : ' — 目前搆不到');
+    } catch (e) {
+        list.innerHTML = `<div class="prop-note" style="color:#f87171;">載入失敗：${esc(e.message || e)}</div>`;
+        return;
+    }
+    _render(ov);
+}
+
+function _render(ov) {
+    const list = ov.querySelector('#pf-list');
+    if (!_folders.length) {
+        list.innerHTML = '<div class="prop-note">這個根目錄底下還沒有資料夾</div>';
+        return;
+    }
+    list.innerHTML = _folders.map(f => {
+        const open = f.folder_name === _open;
+        const tag = f.missing_on_disk
+            ? '<span class="prop-pill" style="color:#fbbf24;border-color:#fbbf24;">磁碟上找不到</span>'
+            : f.linked
+                ? `<span class="prop-pill">已連結</span><span class="m">${esc(f.project_name || '')}${
+                    f.client_name ? ' · ' + esc(f.client_name) : ''}</span>`
+                : '<span class="prop-pill" style="opacity:.6;">未連結</span>';
+        return `
+        <div style="border:1px solid #2a2a2a;border-radius:4px;margin-bottom:6px;">
+            <div data-folder="${esc(f.folder_name)}"
+                 style="display:flex;gap:8px;align-items:center;padding:8px 10px;cursor:pointer;">
+                <span style="color:#8b8b8b;">${open ? '▾' : '▸'}</span>
+                <span style="font-weight:600;">${esc(f.folder_name)}</span>
+                ${tag}
+            </div>
+            ${open ? `<div style="border-top:1px solid #242424;">
+                <div style="padding:6px 12px;">
+                    <button data-upload class="prop-btn ghost">＋ 上傳檔案到這個資料夾</button>
+                    <span class="prop-note" style="margin-left:8px;">也可以把檔案拖進來</span>
+                </div>
+                <div id="pf-files" style="padding:0 0 4px;">
+                    <div class="prop-note" style="padding:8px 12px;">載入檔案中…</div>
+                </div>
+            </div>` : ''}
+        </div>`;
+    }).join('');
+    if (_open) _wireDrop(ov);
+}
+
+// 上傳（按鈕 + 拖放）—— 未連結專案的「過去資料夾」也能丟檔（owner 指定）
+function _wireDrop(ov) {
+    const zone = ov.querySelector('#pf-files')?.parentElement;
+    if (!zone) return;
+    const send = async (fileList) => {
+        if (!fileList || !fileList.length) return;
+        const fd = new FormData();
+        for (const f of fileList) fd.append('files', f);
+        const token = localStorage.getItem('auth_token');
+        try {
+            const r = await fetch(`${API}/folder/upload?folder=${encodeURIComponent(_open)}`, {
+                method: 'POST', body: fd,
+                headers: token ? { Authorization: 'Bearer ' + token } : {},
+            });
+            const d = await r.json().catch(() => ({}));
+            if (!r.ok) throw new Error(d.detail || 'HTTP ' + r.status);
+            const bad = (d.skipped || []).map(s => `${s.filename}（${s.reason}）`);
+            if (bad.length) alert('部分檔案未上傳：\n' + bad.join('\n'));
+            await _loadFiles(ov, _open);
+        } catch (e) { alert('上傳失敗：' + (e.message || e)); }
+    };
+    zone.querySelector('[data-upload]')?.addEventListener('click', () => {
+        const inp = document.createElement('input');
+        inp.type = 'file';
+        inp.multiple = true;
+        inp.addEventListener('change', () => send(inp.files));
+        inp.click();
+    });
+    ['dragenter', 'dragover'].forEach(ev => zone.addEventListener(ev, e => {
+        e.preventDefault();
+        zone.style.background = '#1d2733';
+    }));
+    ['dragleave', 'drop'].forEach(ev => zone.addEventListener(ev, e => {
+        e.preventDefault();
+        zone.style.background = '';
+    }));
+    zone.addEventListener('drop', e => send(e.dataTransfer.files));
+}
+
+async function _loadFiles(ov, folder) {
+    const box = ov.querySelector('#pf-files');
+    if (!box) return;
+    try {
+        const d = await tfetch(`${API}/folder/files?folder=${encodeURIComponent(folder)}`);
+        if (!box.isConnected) return;
+        const files = d.files || [];
+        box.innerHTML = files.length ? files.map(f => `
+            <div data-folder="${esc(folder)}" data-rel="${esc(f.rel)}"
+                 style="display:flex;gap:8px;align-items:center;padding:5px 12px 5px 30px;font-size:12.5px;">
+                <span data-dl style="flex:1;cursor:pointer;" title="下載">${esc(f.rel)}</span>
+                <span style="color:#6b6b6b;">${_fmtSize(f.size_bytes)}</span>
+                <span style="color:#6b6b6b;">${esc(new Date(f.mtime * 1000).toISOString().slice(0, 10))}</span>
+            </div>`).join('')
+            + (d.truncated ? '<div class="prop-note" style="padding:6px 12px;color:#fbbf24;">檔案過多，只顯示前 1000 筆</div>' : '')
+            : '<div class="prop-note" style="padding:8px 12px;">這個資料夾是空的</div>';
+    } catch (e) {
+        if (box.isConnected) {
+            box.innerHTML = `<div class="prop-note" style="padding:8px 12px;color:#f87171;">載入失敗：${esc(e.message || e)}</div>`;
+        }
+    }
+}
+
+const _fmtSize = (n) => n >= 1048576 ? (n / 1048576).toFixed(1) + ' MB'
+    : n >= 1024 ? Math.round(n / 1024) + ' KB' : n + ' B';
+
+/** 帶權限下載（<a href> 送不了 Authorization → fetch 成 blob 再觸發）。 */
+async function _download(folder, rel) {
+    const url = `${API}/folder/file?folder=${encodeURIComponent(folder)}&rel=${encodeURIComponent(rel)}`;
+    try {
+        const token = localStorage.getItem('auth_token');
+        const r = await fetch(url, { headers: token ? { Authorization: 'Bearer ' + token } : {} });
+        if (!r.ok) throw new Error('HTTP ' + r.status);
+        const href = URL.createObjectURL(await r.blob());
+        const a = document.createElement('a');
+        a.href = href;
+        a.download = rel.split('/').pop() || 'file';
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        setTimeout(() => URL.revokeObjectURL(href), 10_000);
+    } catch (e) { alert('下載失敗：' + (e.message || e)); }
+}

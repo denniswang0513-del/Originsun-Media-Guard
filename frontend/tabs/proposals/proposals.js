@@ -70,6 +70,7 @@ function _renderShell() {
                     ${PTYPES.map(t => `<option value="${t}">${t}</option>`).join('')}</select>
                 <select id="prop-f-year"><option value="">全部年份</option></select>
                 <button id="prop-add" class="prop-btn">＋ 新提案</button>
+                <button id="prop-folders" class="prop-btn ghost" title="NAS 上的提案資產資料夾（含過去手工整理的）">📁 資產資料夾</button>
             </div>
             <div class="prop-table-wrap">
                 <table class="prop-table" id="prop-table">
@@ -81,6 +82,13 @@ function _renderShell() {
                 </table>
             </div>
         </div>`;
+
+    document.getElementById('prop-folders').addEventListener('click', async () => {
+        try {
+            const mod = await import('./proposal-folders.js');
+            mod.openFolderBrowser(_mountOverlay, _closeOverlay);
+        } catch (e) { alert('資產資料夾載入失敗：' + (e.message || e)); }
+    });
 
     document.getElementById('prop-q').addEventListener('input', (e) => {
         clearTimeout(_qTimer);

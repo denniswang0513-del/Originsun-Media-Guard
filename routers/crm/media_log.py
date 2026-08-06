@@ -31,9 +31,12 @@ from fastapi import File, Form, HTTPException, Request, UploadFile
 from config import load_settings
 from core.assets_host import assets_target
 from core.drive_map import to_canonical_path, to_local_path
-from core.project_folders import (clean_filename, clean_name as _clean_name,
-                                  make_dated_folder_name, remap_prefix,
-                                  rename_and_remap, taken_names)
+from core.project_folders import (FOLDER_VIEW_CAP, clean_filename,
+                                  clean_name as _clean_name, iter_files_rel,
+                                  list_folder_files, make_dated_folder_name,
+                                  remap_prefix, rename_and_remap, safe_rel_path,
+                                  safe_subfolder, subfolder_path, taken_names,
+                                  within_dir)
 from core.subproc import run_capture
 
 # public_router = 對外白名單（正本在 _shared，全套件共用一個）。本模組的 4 個
@@ -406,12 +409,8 @@ def _find_missing(entries: list, isdir: Callable[[str], bool],
 # 舊側拍常把照片分裝進日期/part 子資料夾（小飛俠劇照/2014-07-12/…），故掃描與匯入
 # 都遞迴進去（owner 2026-07-25 拍板）。跳過 . / _ 開頭子夾（隱藏 / _trash）。
 def _iter_media_rel(folder: str):
-    """os.walk 產出資料夾內所有媒體檔的相對路徑（相對 folder）。剪掉 ./_ 子夾。"""
-    for dirpath, dirnames, filenames in os.walk(folder):
-        dirnames[:] = [d for d in dirnames if d[:1] not in (".", "_")]
-        for fn in filenames:
-            if _classify_ext(fn) is not None:
-                yield os.path.relpath(os.path.join(dirpath, fn), folder)
+    """資料夾內所有**媒體檔**的相對路徑（走訪本體共用 core.iter_files_rel）。"""
+    return iter_files_rel(folder, accept=lambda fn: _classify_ext(fn) is not None)
 
 
 def _list_media_rel(folder: str):
@@ -595,74 +594,23 @@ async def _reconcile_files(factory, project_id: str, root: str, folder_name: str
 # 有意義（有 NAS 憑證 + ffmpeg），故掛 @router（admin）而非 public_router。
 # folder/rel 來自前端 query → 一律經路徑防護（擋 .. 逃逸）再開檔。
 
-def _within_dir(base: str, target: str) -> bool:
-    """target 是否落在 base 目錄內（或即為 base）。realpath 解 symlink/junction
-    後 normcase+前綴比對，擋 .. 逃逸；Windows 大小寫/斜線不敏感。"""
-    try:
-        b = os.path.normcase(os.path.realpath(base))
-        t = os.path.normcase(os.path.realpath(target))
-    except OSError:
-        return False
-    return t == b or t.startswith(b + os.sep)
+# 路徑防護的正本已搬到 core.project_folders（提案資產夾是第三個使用者）
+_within_dir = within_dir
+_subfolder_path = subfolder_path
+_safe_subfolder = safe_subfolder
+_safe_rel_path = safe_rel_path
+_FOLDER_VIEW_CAP = FOLDER_VIEW_CAP
 
 
-def _subfolder_path(root: str, name: str) -> Optional[str]:
-    """root 底下**單層**子資料夾的絕對路徑（純驗證、不檢查是否存在）；名稱含路徑
-    分隔 / . / .. 或逃出 root → None。路徑遍歷防護的單一真相 —— 瀏覽（需已存在）與
-    新增資料夾（需尚不存在）共用，各自再加存在性判斷。"""
-    name = str(name or "").strip()
-    if not root or not name or name in (".", "..") or "/" in name or "\\" in name:
-        return None
-    p = os.path.join(root, name)
-    return p if _within_dir(root, p) else None
-
-
-def _safe_subfolder(root: str, folder: str) -> Optional[str]:
-    """root 底下**已存在**的直接子資料夾絕對路徑；不合法或非目錄 → None。"""
-    p = _subfolder_path(root, folder)
-    return p if (p and os.path.isdir(p)) else None
-
-
-def _safe_rel_path(folder_abs: str, rel: str) -> Optional[str]:
-    """folder 內相對路徑 → 絕對檔案路徑；逃出 folder（.. / 絕對路徑）或非檔案 → None。"""
-    r = str(rel or "").replace("\\", "/").strip().lstrip("/")
-    if not r:
-        return None
-    p = os.path.normpath(os.path.join(folder_abs, r))
-    if not _within_dir(folder_abs, p) or not os.path.isfile(p):
-        return None
-    return p
-
-
-_FOLDER_VIEW_CAP = 1000   # 唯讀瀏覽單夾列檔上限（超過標 truncated，避免超大夾逐檔 stat 卡死）
-
-
-def _list_folder_for_view(folder_abs: str, cap: int = _FOLDER_VIEW_CAP) -> tuple:
-    """孤兒資料夾唯讀瀏覽：列出媒體檔（含子夾）→
+def _list_folder_for_view(folder_abs: str, cap: int = FOLDER_VIEW_CAP) -> tuple:
+    """孤兒資料夾唯讀瀏覽：列出**媒體檔**（含子夾）→
     ([{rel,filename,media_type,size_bytes,mtime}], truncated)，依 mtime 新→舊。
-    到 cap 就停（大夾防慢）。呼叫端在 to_thread 內跑。"""
-    import stat as _stat
-    out: list = []
-    truncated = False
-    for rel in _iter_media_rel(folder_abs):
-        if len(out) >= cap:
-            truncated = True
-            break
-        try:
-            st = os.stat(os.path.join(folder_abs, rel))
-        except OSError:
-            continue
-        if not _stat.S_ISREG(st.st_mode):
-            continue
-        out.append({
-            "rel": rel.replace("\\", "/"),
-            "filename": os.path.basename(rel),
-            "media_type": _classify_ext(rel),
-            "size_bytes": int(st.st_size),
-            "mtime": st.st_mtime,
-        })
-    out.sort(key=lambda x: x["mtime"], reverse=True)
-    return out, truncated
+    列檔本體共用 core.list_folder_files，這裡只補影像紀錄專屬的媒體判定。"""
+    files, truncated = list_folder_files(
+        folder_abs, cap=cap, accept=lambda fn: _classify_ext(fn) is not None)
+    for f in files:
+        f["media_type"] = _classify_ext(f["rel"])
+    return files, truncated
 
 
 _FOLDER_THUMB_PID = "_folder"   # 圖床 medialog 命名空間內、孤兒資料夾縮圖的假前綴
