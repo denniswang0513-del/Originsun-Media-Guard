@@ -17,7 +17,8 @@
 
 import { esc } from '../website/website-utils.js';
 import { fmtSize } from '../../js/shared/clip_utils.js';
-import { authDownload, folderCrumbsHtml, inputUploadItems, uploadFormData,
+import { authDownload, bearerHeader, folderCrumbsHtml, inputUploadItems,
+         uploadFormData, uploadProgress, uploadWithProgress,
          wireFileDrop } from '../../js/shared/utils.js';
 import { projectOptionsHtml } from '../crm/crm-utils.js';
 import { tfetch } from './prop-fetch.js';
@@ -259,19 +260,27 @@ function _wireDrop(ov) {
     const folder = _open;
     const rel = _rel;
     // items = [{file, path}]；path 帶目錄結構時後端照著重建（拖／選整個資料夾）
+    // 這裡不走 tfetch —— fetch 沒有上傳進度事件，大檔要有進度條
     const send = async (items) => {
         if (!items || !items.length) return;
+        const ctrl = new AbortController();
+        const bar = uploadProgress(zone, () => ctrl.abort());
         try {
-            // 走 tfetch（不是手刻 fetch）—— 錯誤形狀與 warning 浮出都掛在它身上；
-            // 它只帶 Accept + Authorization，FormData 的 boundary 不會被蓋掉
-            const d = await tfetch(`${API}/folder/upload?folder=${encodeURIComponent(folder)}`
+            const d = await uploadWithProgress(
+                `${API}/folder/upload?folder=${encodeURIComponent(folder)}`
                 + `&rel=${encodeURIComponent(rel)}`,
-                { method: 'POST', body: uploadFormData(items) });
+                uploadFormData(items),
+                { headers: bearerHeader(), signal: ctrl.signal,
+                  onProgress: (l, t) => bar.update(l, t),
+                  onUploaded: () => bar.finishing() });
+            bar.remove();
             const bad = (d.skipped || []).map(s => `${s.filename}（${s.reason}）`);
             if (bad.length) alert('部分項目未上傳：\n' + bad.join('\n'));
             // 一個都沒存成時端點不回這一層的內容（省一次掃描）→ 畫面維持原樣
             if (d.files) _paint(ov, d, folder, rel);
-        } catch (e) { alert('上傳失敗：' + (e.message || e)); }
+        } catch (e) {
+            bar.fail(e.aborted ? '已取消上傳' : '上傳失敗：' + (e.message || e));
+        }
     };
     const pick = (asDir) => {
         const inp = document.createElement('input');

@@ -9,8 +9,9 @@
 
 import { crmFetch, crmToast, esc } from './crm-utils.js';
 import { fmtSize } from '../../js/shared/clip_utils.js';
-import { authDownload, copyText, folderCrumbsHtml, inputUploadItems,
-         uploadFormData, wireFileDrop } from '../../js/shared/utils.js';
+import { authDownload, bearerHeader, copyText, folderCrumbsHtml, inputUploadItems,
+         uploadFormData, uploadProgress, uploadWithProgress,
+         wireFileDrop } from '../../js/shared/utils.js';
 import { tfetch } from '../proposals/prop-fetch.js';
 import { state } from './crm-projects-state.js';
 
@@ -219,19 +220,29 @@ function _wireUpload(projectId, box, host, d) {
     };
 
     // items = [{file, path}]；path 帶目錄結構時後端會照著重建（拖資料夾／選資料夾）
+    // 走 uploadWithProgress 不走 crmFetch —— fetch 拿不到上傳進度，而這裡的檔
+    // 動輒上百 MB，沒有進度就是盯著畫面猜（owner 2026-08-08）
     const send = async (items) => {
         if (!items || !items.length) return;
+        const ctrl = new AbortController();
+        const bar = uploadProgress(box.querySelector('#pp-drop'), () => ctrl.abort());
         try {
-            // 落在使用者目前看的那一層
-            const r = await crmFetch(`/projects/${projectId}/proposal-assets/upload`
-                + `?rel=${encodeURIComponent(d.rel || '')}`,
-                { method: 'POST', body: uploadFormData(items) });   // crmFetch 認得 FormData
+            const r = await uploadWithProgress(
+                `/api/v1/crm/projects/${projectId}/proposal-assets/upload`
+                + `?rel=${encodeURIComponent(d.rel || '')}`,      // 落在目前這一層
+                uploadFormData(items),
+                { headers: bearerHeader(), signal: ctrl.signal,
+                  onProgress: (l, t) => bar.update(l, t),
+                  onUploaded: () => bar.finishing() });
+            bar.remove();
             const bad = (r.skipped || []).map(s => `${s.filename}（${s.reason}）`);
             crmToast(`已上傳 ${(r.saved || []).length} 個項目`
                 + (bad.length ? `；略過 ${bad.length} 個` : ''), bad.length ? 6000 : 2000);
             if (bad.length) console.warn('略過：', bad.join('、'));
             if (r.files) applyLevel(r);         // 端點順手回了這一層，不必再掃一次
-        } catch (e) { alert('上傳失敗：' + (e.message || e)); }
+        } catch (e) {
+            bar.fail(e.aborted ? '已取消上傳' : '上傳失敗：' + (e.message || e));
+        }
     };
 
     const dirInput = box.querySelector('#pp-dir-input');

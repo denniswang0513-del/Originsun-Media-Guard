@@ -17,7 +17,7 @@
  * 與深色 SPA 都不用改。
  */
 
-import { esc, folderCrumbsHtml, inputUploadItems,
+import { esc, folderCrumbsHtml, inputUploadItems, uploadProgress,
          wireFileDrop } from '../../js/shared/utils.js';
 import { fmtSize } from '../../js/shared/clip_utils.js';
 
@@ -114,6 +114,24 @@ export function renderFolderView(host, opts) {
         }
     }
 
+    /** 上傳專用：進度條 + 取消。`write.upload` 收 {onProgress, signal} 自己去打。 */
+    async function runUpload(items, rel) {
+        const ctrl = new AbortController();
+        const bar = uploadProgress(host, () => ctrl.abort());
+        try {
+            apply(await write.upload(items, rel, {
+                signal: ctrl.signal,
+                onProgress: (l, t) => bar.update(l, t),
+                // 傳完之後伺服器還在寫 NAS —— 進度條卡在 100% 不動會像當掉；
+                // 而且從這一刻起取消已經沒有意義（finishing 會把取消鈕收掉）
+                onUploaded: () => bar.finishing(),
+            }));
+            bar.remove();
+        } catch (e) {
+            bar.fail(e && e.aborted ? '已取消上傳' : ((e && e.message) || String(e)));
+        }
+    }
+
     function _wireToolbar(d) {
         const rel = d.rel || '';
         const pick = (asDir) => {
@@ -123,7 +141,7 @@ export function renderFolderView(host, opts) {
             if (asDir) inp.webkitdirectory = true;   // 選整個資料夾（含夾名）
             inp.addEventListener('change', () => {
                 const items = inputUploadItems(inp.files);
-                if (items.length) run(() => write.upload(items, rel));
+                if (items.length) runUpload(items, rel);
             });
             inp.click();
         };
@@ -152,7 +170,7 @@ export function renderFolderView(host, opts) {
     // 拖放**只綁一次**在 host 上：paint() 換的是 host 的 children，host 本身
     // 不變 —— 每次重畫都綁一遍的話，導覽 5 層之後拖一次會送出 5 份。
     // 落點層在放開的當下才讀 cur，所以永遠是「使用者現在看的這一層」。
-    if (write) wireFileDrop(host, (items) => run(() => write.upload(items, cur)));
+    if (write) wireFileDrop(host, (items) => runUpload(items, cur));
 
     go('');
     return { rel: () => cur, go, apply };

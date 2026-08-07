@@ -606,13 +606,13 @@ async function _loadPlan(pid) {
                     shareDir: "對外分享",
                     mkdir: async (name, rel) => ok(await mfetch(AP + "/mkdir" + q(rel),
                         { method: "POST", body: JSON.stringify({ name }) })),
-                    upload: async (items, rel) => {
-                        const { uploadFormData } = await import("/js/shared/utils.js");
-                        const r = await fetch(AP + "/upload" + q(rel), {
-                            method: "POST", headers: _authHeader(),
-                            body: uploadFormData(items),   // 不設 Content-Type，boundary 才不會被蓋掉
-                        });
-                        const d2 = await ok(r);
+                    // opts = {onProgress, signal}（folder-view 給的，它負責畫進度條）
+                    // 走 uploadWithProgress 不走 fetch —— fetch 沒有上傳進度事件
+                    upload: async (items, rel, opts) => {
+                        const u = await import("/js/shared/utils.js");
+                        const d2 = await u.uploadWithProgress(
+                            AP + "/upload" + q(rel), u.uploadFormData(items),
+                            Object.assign({ headers: _authHeader() }, opts));
                         const bad = (d2.skipped || []).map(s => `${s.filename}（${s.reason}）`);
                         if (bad.length) alert("部分項目未上傳：\n" + bad.join("\n"));
                         return d2.files ? d2 : null;   // 一個都沒存成 → 不用重畫

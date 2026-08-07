@@ -1,6 +1,10 @@
 // utils.js
 // Shared utilities across all tabs
 
+// clip_utils 是 leaf（自己 0 個 import）→ 這條相依不會造成循環。
+// fmtSize 其實是通用格式化，只是當年落在那支檔案裡；不為了它再寫第二份。
+import { fmtSize } from './clip_utils.js';
+
 export function getComputeBaseUrl() {
     const mode = document.getElementById('compute_mode')?.value;
     return (mode === 'local' && window.localAgentActive) ? 'http://127.0.0.1:8000' : '';
@@ -134,6 +138,114 @@ export function uploadFormData(items) {
         fd.append('paths', it.path || it.file.name);
     }
     return fd;
+}
+
+/** 只有授權標頭（送 FormData 時不能有 Content-Type，boundary 會被蓋掉）。 */
+export function bearerHeader() {
+    const tok = localStorage.getItem('auth_token');
+    return tok ? { Authorization: 'Bearer ' + tok } : {};
+}
+
+/**
+ * 帶進度的上傳 → Promise<回應 JSON>。
+ *
+ * 🔴 這裡**只能**用 XMLHttpRequest：`fetch()` 沒有上傳進度事件（它的
+ * ReadableStream 上傳在瀏覽器支援度上還不能靠）。整份專案其他地方都走 fetch，
+ * 這是唯一的例外，理由就是進度條 —— 提案檔動輒上百 MB，沒有進度就是盯著
+ * 畫面猜還要多久。
+ *
+ * `signal`（AbortSignal）可中止；中止時 reject 的錯誤帶 `aborted: true`，
+ * 呼叫端據此不要跳錯誤視窗。
+ *
+ * 🔴 **取消只在位元組送完之前有意義**。送完之後伺服器就會把檔案寫進去，
+ * 這時候中斷連線只是自己不聽回應而已 —— 檔案還是在的。所以 `onUploaded`
+ * （body 送完那一刻）一觸發，呼叫端就該把取消鈕收掉，不要讓 UI 說謊。
+ * 真正在傳輸途中中斷 → multipart 解析失敗 → 處理函式根本不會執行，不留殘檔。
+ *
+ * onProgress 與 onUploaded 分開兩個訊號，是因為快速連線上第一個 progress
+ * 事件就已經 loaded===total —— 用「loaded>=total 就當成傳完」會讓進度條
+ * 一次都沒顯示過百分比。
+ */
+export function uploadWithProgress(url, formData,
+                                   { headers = {}, onProgress, onUploaded, signal } = {}) {
+    return new Promise((resolve, reject) => {
+        const xhr = new XMLHttpRequest();
+        xhr.open('POST', url);
+        // 不設 Content-Type —— multipart boundary 要讓瀏覽器自己產生
+        for (const [k, v] of Object.entries(headers)) xhr.setRequestHeader(k, v);
+        xhr.upload.addEventListener('progress', (e) => {
+            if (onProgress) onProgress(e.loaded, e.lengthComputable ? e.total : 0);
+        });
+        xhr.upload.addEventListener('load', () => { if (onUploaded) onUploaded(); });
+        xhr.addEventListener('load', () => {
+            let data = {};
+            try { data = JSON.parse(xhr.responseText || '{}'); } catch (_) { /* 非 JSON */ }
+            if (xhr.status >= 200 && xhr.status < 300) return resolve(data);
+            const detail = data && data.detail;
+            reject(new Error(typeof detail === 'string' ? detail
+                : (detail && detail.reason) || ('HTTP ' + xhr.status)));
+        });
+        xhr.addEventListener('error', () => reject(new Error('連線中斷')));
+        xhr.addEventListener('abort', () =>
+            reject(Object.assign(new Error('已取消上傳'), { aborted: true })));
+        if (signal) signal.addEventListener('abort', () => xhr.abort(), { once: true });
+        xhr.send(formData);
+    });
+}
+
+/**
+ * 上傳進度條（自帶樣式，吃呼叫端的 CSS 變數 → 深色 SPA 與白底公開頁都能用）。
+ * 插在 `host` 最前面，回傳操作把手。給 `onCancel` 才長出取消鈕。
+ *
+ * `finishing()` 是必要的一段：檔案傳完 100% 之後伺服器還在寫 NAS，
+ * 進度條卡在 100% 不動會被當成當掉 —— 明講「伺服器處理中」。
+ */
+export function uploadProgress(host, onCancel) {
+    if (!document.getElementById('osun-prog-style')) {
+        const st = document.createElement('style');
+        st.id = 'osun-prog-style';
+        st.textContent = `
+.osun-prog{display:flex;align-items:center;gap:10px;padding:8px 10px;font-size:12px;
+  border:1px solid var(--line,#3a3a3a);border-radius:3px;margin-bottom:8px;}
+.osun-prog-bar{flex:1;height:6px;border-radius:3px;background:rgba(127,127,127,.25);overflow:hidden;}
+.osun-prog-bar>i{display:block;height:100%;width:0;background:#3b82f6;transition:width .15s;}
+.osun-prog.err .osun-prog-bar>i{background:#f87171;}
+.osun-prog-txt{white-space:nowrap;color:var(--sub,#8b8b8b);}
+.osun-prog-x{background:none;border:1px solid var(--line,#3a3a3a);color:var(--sub,#8b8b8b);
+  cursor:pointer;font:inherit;font-size:11px;padding:2px 8px;border-radius:2px;}
+.osun-prog-x:hover{color:#f87171;border-color:#f87171;}`;
+        document.head.appendChild(st);
+    }
+    const wrap = document.createElement('div');
+    wrap.className = 'osun-prog';
+    wrap.innerHTML = '<div class="osun-prog-bar"><i></i></div>'
+        + '<span class="osun-prog-txt">準備上傳…</span>'
+        + (onCancel ? '<button class="osun-prog-x" type="button">取消</button>' : '');
+    host.prepend(wrap);
+    const fill = wrap.querySelector('i');
+    const txt = wrap.querySelector('.osun-prog-txt');
+    if (onCancel) wrap.querySelector('.osun-prog-x').addEventListener('click', onCancel);
+    return {
+        update(loaded, total) {
+            if (!total) { txt.textContent = `上傳中… ${fmtSize(loaded)}`; return; }
+            const pct = Math.min(100, Math.round(loaded / total * 100));
+            fill.style.width = pct + '%';
+            txt.textContent = `${pct}%（${fmtSize(loaded)} / ${fmtSize(total)}）`;
+        },
+        finishing(note) {
+            fill.style.width = '100%';
+            txt.textContent = note || '伺服器處理中…';
+            const x = wrap.querySelector('.osun-prog-x');
+            if (x) x.remove();          // 已經傳完，取消沒有意義了
+        },
+        fail(msg) {
+            wrap.classList.add('err');
+            fill.style.width = '100%';
+            txt.textContent = msg;
+            setTimeout(() => wrap.remove(), 6000);
+        },
+        remove() { wrap.remove(); },
+    };
 }
 
 /**
