@@ -610,8 +610,9 @@ async function _loadPlan(pid) {
                     // 走 uploadWithProgress 不走 fetch —— fetch 沒有上傳進度事件
                     upload: async (items, rel, opts) => {
                         const u = await import("/js/shared/utils.js");
-                        const d2 = await u.uploadWithProgress(
-                            AP + "/upload" + q(rel), u.uploadFormData(items),
+                        // uploadItems 會照連線的 body 上限自動分批（走隧道時 100MB）
+                        const d2 = await u.uploadItems(
+                            AP + "/upload" + q(rel), items,
                             Object.assign({ headers: _authHeader() }, opts));
                         const bad = (d2.skipped || []).map(s => `${s.filename}（${s.reason}）`);
                         if (bad.length) alert("部分項目未上傳：\n" + bad.join("\n"));

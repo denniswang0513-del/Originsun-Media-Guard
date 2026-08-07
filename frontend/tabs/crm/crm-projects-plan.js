@@ -10,7 +10,7 @@
 import { crmFetch, crmToast, esc } from './crm-utils.js';
 import { fmtSize } from '../../js/shared/clip_utils.js';
 import { authDownload, bearerHeader, copyText, folderCrumbsHtml, inputUploadItems,
-         uploadFormData, uploadProgress, uploadWithProgress,
+         proxyBodyLimit, uploadItems, uploadProgress,
          wireFileDrop } from '../../js/shared/utils.js';
 import { tfetch } from '../proposals/prop-fetch.js';
 import { state } from './crm-projects-state.js';
@@ -85,7 +85,12 @@ function _mountAssetsCard(projectId, host, d) {
                 <button id="pp-root-save" class="crm-btn crm-btn-primary crm-btn-sm">儲存</button>
             </div>
             <div style="font-size:11.5px;color:#6b6b6b;margin-top:6px;">
-                所有專案共用根資料夾，各專案自動建子夾。單檔上限 300MB，可執行檔會被擋下。
+                所有專案共用根資料夾，各專案自動建子夾。單檔上限 300MB，可執行檔會被擋下。${
+                    // 走隧道時真正的天花板是 CDN 的 100MB/請求，不是後端的 300MB ——
+                    // 卡片寫 300MB 而使用者拿到 413，那個落差要在這裡講清楚
+                    proxyBodyLimit()
+                        ? `<br><span style="color:#fbbf24;">你目前從公司外連線：單一檔案上限 100MB
+                           （多檔會自動分批送）。更大的檔請到公司區網上傳。</span>` : ''}
             </div>
         </div>`;
     host.appendChild(box);
@@ -227,10 +232,10 @@ function _wireUpload(projectId, box, host, d) {
         const ctrl = new AbortController();
         const bar = uploadProgress(box.querySelector('#pp-drop'), () => ctrl.abort());
         try {
-            const r = await uploadWithProgress(
+            const r = await uploadItems(
                 `/api/v1/crm/projects/${projectId}/proposal-assets/upload`
                 + `?rel=${encodeURIComponent(d.rel || '')}`,      // 落在目前這一層
-                uploadFormData(items),
+                items,
                 { headers: bearerHeader(), signal: ctrl.signal,
                   onProgress: (l, t) => bar.update(l, t),
                   onUploaded: () => bar.finishing() });

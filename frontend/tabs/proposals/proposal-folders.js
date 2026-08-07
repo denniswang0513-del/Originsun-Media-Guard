@@ -18,8 +18,7 @@
 import { esc } from '../website/website-utils.js';
 import { fmtSize } from '../../js/shared/clip_utils.js';
 import { authDownload, bearerHeader, folderCrumbsHtml, inputUploadItems,
-         uploadFormData, uploadProgress, uploadWithProgress,
-         wireFileDrop } from '../../js/shared/utils.js';
+         uploadItems, uploadProgress, wireFileDrop } from '../../js/shared/utils.js';
 import { projectOptionsHtml } from '../crm/crm-utils.js';
 import { tfetch } from './prop-fetch.js';
 
@@ -266,10 +265,10 @@ function _wireDrop(ov) {
         const ctrl = new AbortController();
         const bar = uploadProgress(zone, () => ctrl.abort());
         try {
-            const d = await uploadWithProgress(
+            const d = await uploadItems(
                 `${API}/folder/upload?folder=${encodeURIComponent(folder)}`
                 + `&rel=${encodeURIComponent(rel)}`,
-                uploadFormData(items),
+                items,
                 { headers: bearerHeader(), signal: ctrl.signal,
                   onProgress: (l, t) => bar.update(l, t),
                   onUploaded: () => bar.finishing() });

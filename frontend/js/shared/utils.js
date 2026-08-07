@@ -194,6 +194,81 @@ export function uploadWithProgress(url, formData,
 }
 
 /**
+ * 這條連線的**單一請求** body 上限（0 = 沒有代理層限制）。
+ *
+ * 🔴 實測（2026-08-08）：走 foundry 隧道時 **Cloudflare 在 100MB 就回 413**，
+ * 而且是 text/html 不是我們的 JSON —— 請求根本沒到伺服器。區網直連 8000
+ * 傳 110MB 完全沒事。這不是我們能在後端調的，是 CDN 方案的硬限制。
+ * 判準用 hostname：私有網段 = 直連，其餘一律當成走隧道。
+ */
+export function proxyBodyLimit() {
+    const h = location.hostname;
+    const lan = h === 'localhost' || h === '127.0.0.1'
+        || /^192\.168\./.test(h) || /^10\./.test(h)
+        || /^172\.(1[6-9]|2\d|3[01])\./.test(h);
+    return lan ? 0 : 100 * 1024 * 1024;
+}
+
+/**
+ * 上傳一批項目 → `{saved, skipped, …最後一批的回應}`。
+ *
+ * **自動分批**：拖一整個資料夾是**一個**請求，20 個 6MB 的檔加起來就會撞到
+ * 上面那道 100MB 的牆 —— 所以照累計大小切成多個請求依序送，進度條把它們
+ * 當成一件事回報。單一檔案本身就超過上限的沒救（分批切不開一個檔），
+ * 進 skipped 並講清楚該怎麼辦。
+ */
+export async function uploadItems(url, items, opts = {}) {
+    const { headers, onProgress, onUploaded, signal, limit } = opts;
+    const cap = limit ?? proxyBodyLimit();
+    // 留餘裕給 multipart 的邊界字串與標頭（實際 body 會比檔案總和大一點）
+    const budget = cap ? cap - 4 * 1024 * 1024 : 0;
+    const sizeOf = (it) => (it.file && it.file.size) || 0;
+
+    const batches = [];
+    const skipped = [];
+    let cur = [];
+    let curSize = 0;
+    for (const it of items) {
+        const sz = sizeOf(it);
+        if (budget && sz > budget) {
+            skipped.push({
+                filename: it.path || it.file.name,
+                reason: `單檔 ${fmtSize(sz)}，超過這條連線的 ${fmtSize(cap)} 上限`
+                    + `（分批切不開單一檔案 — 請改從公司區網上傳）`,
+            });
+            continue;
+        }
+        if (budget && cur.length && curSize + sz > budget) {
+            batches.push(cur); cur = []; curSize = 0;
+        }
+        cur.push(it); curSize += sz;
+    }
+    if (cur.length) batches.push(cur);
+
+    const batchBytes = batches.map(b => b.reduce((s, it) => s + sizeOf(it), 0));
+    const total = batchBytes.reduce((a, b) => a + b, 0);
+    const saved = [];
+    let done = 0;
+    let last = null;
+    for (let i = 0; i < batches.length; i++) {
+        const d = await uploadWithProgress(url, uploadFormData(batches[i]), {
+            headers,
+            signal,
+            // 每批各自 0→100%，對外換算成整體進度（總量用檔案大小估，夠準）
+            onProgress: (l, t) => onProgress && onProgress(
+                Math.min(total, done + (t ? (l / t) * batchBytes[i] : 0)), total),
+            // 只有最後一批傳完才算「等伺服器」—— 中間批之後還要繼續傳
+            onUploaded: () => { if (i === batches.length - 1 && onUploaded) onUploaded(); },
+        });
+        done += batchBytes[i];
+        saved.push(...(d.saved || []));
+        skipped.push(...(d.skipped || []));
+        last = d;
+    }
+    return { ...(last || {}), saved, skipped, batches: batches.length };
+}
+
+/**
  * 上傳進度條（自帶樣式，吃呼叫端的 CSS 變數 → 深色 SPA 與白底公開頁都能用）。
  * 插在 `host` 最前面，回傳操作把手。給 `onCancel` 才長出取消鈕。
  *
