@@ -202,15 +202,18 @@ for _sub in _PUBLIC_MODULE_DIRS:
     if os.path.isdir(_d):
         app.mount("/" + _sub, _StaticFiles(directory=_d), name=_sub.replace("/", "_"))
 
-# 提案的 token 端點（10 條，全部吃 {token}）。⚠️ **絕不可**改成掛
-# api_proposals.router：那會把提案庫的 20+ 條內部端點（清單/統計/成案/刪除）
-# 曝在對外服務上。守衛：tests/unit/test_public_surface.py。
-try:
-    from routers.api_proposals import PROPOSALS_PREFIX as _PROP_PREFIX
-    from routers.api_proposals import public_router as _prop_public
-    app.include_router(_prop_public, prefix=_PROP_PREFIX)
-except Exception as _e:  # noqa: BLE001 — 缺 DB 套件的環境照常起，只是少這條路
-    logging.getLogger(__name__).warning("[website-api] proposals public router 未掛載: %s", _e)
+# 提案（10 條）與參考片（6 條）的 token 端點，全部吃 {token}。
+# ⚠️ **絕不可**改成掛各模組的主 router：那會把提案庫/片庫的內部端點
+# （清單/統計/成案/刪除）曝在對外服務上。
+# 守衛：tests/unit/test_public_surface.py 對整個 app 列舉斷言。
+for _mod_name, _prefix_attr in (("routers.api_proposals", "PROPOSALS_PREFIX"),
+                                ("routers.api_references", "REFERENCES_PREFIX")):
+    try:
+        _mod = __import__(_mod_name, fromlist=["public_router"])
+        app.include_router(_mod.public_router, prefix=getattr(_mod, _prefix_attr))
+    except Exception as _e:  # noqa: BLE001 — 缺 DB 套件的環境照常起，只是少這條路
+        logging.getLogger(__name__).warning(
+            "[website-api] %s public router 未掛載: %s", _mod_name, _e)
 
 if os.path.isdir(os.path.join(_FRONTEND_DIR, "img")):
     app.mount("/img", _StaticFiles(directory=os.path.join(_FRONTEND_DIR, "img")),

@@ -30,7 +30,16 @@ from core.auth import check_admin_or_module
 from core.db_guard import db_factory_or_503 as _require_factory
 from core.schemas import ReferencePatch
 
-router = APIRouter(prefix="/api/v1/references", tags=["references"])
+REFERENCES_PREFIX = "/api/v1/references"
+router = APIRouter(prefix=REFERENCES_PREFIX, tags=["references"])
+
+# 對外白名單 —— NAS 24/7 容器只掛這一個（master 在檔尾收編回主 router，
+# URL 完全不變）。提案公開頁的「研究頁 ↗」連到 /reference.html?t=，那頁要在
+# master 關機時也開得了，所以那組 `/shared/{token}/…` 必須住在容器裡。
+#
+# ⚠️ 往這裡加端點前先問：它真的該被**匿名**打到嗎？授權只有 token 一層。
+# 守衛：tests/unit/test_public_surface.py（對整個對外 app 列舉斷言）。
+public_router = APIRouter(tags=["references 公開（token 授權）"])
 
 # ── 分類族（Notion「類別/品牌/製作單位/典範/技巧/情感取向/關鍵字/內部專案」對映）──
 FACET_KEYS = ("category", "brand", "studio", "paragon", "technique",
@@ -1330,7 +1339,7 @@ async def _public_ref(session, token: str, rid: str, for_update: bool = False,
     return prop, await _get_ref_or_404(session, rid, for_update=for_update)
 
 
-@router.get("/shared/{token}/{rid}")
+@public_router.get("/shared/{token}/{rid}")
 async def get_shared_reference(token: str, rid: str):
     """公開讀取（免登入）：不回 links（別的案子引用了什麼是內部資訊）。"""
     factory = _require_factory()
@@ -1341,7 +1350,7 @@ async def get_shared_reference(token: str, rid: str):
         return {"reference": d}
 
 
-@router.patch("/shared/{token}/{rid}")
+@public_router.patch("/shared/{token}/{rid}")
 async def patch_shared_reference(token: str, rid: str, req: ReferencePatch):
     """公開寫入（免登入）：只放行 title/note/description + 研究格。"""
     factory = _require_factory()
@@ -1352,7 +1361,7 @@ async def patch_shared_reference(token: str, rid: str, req: ReferencePatch):
     return {"status": "ok", **out}
 
 
-@router.post("/shared/{token}/{rid}/research/rows")
+@public_router.post("/shared/{token}/{rid}/research/rows")
 async def add_shared_research_row(token: str, rid: str):
     factory = _require_factory()
     async with factory() as session:
@@ -1362,7 +1371,7 @@ async def add_shared_research_row(token: str, rid: str):
     return {"status": "ok", "row": row}
 
 
-@router.post("/shared/{token}/{rid}/shots")
+@public_router.post("/shared/{token}/{rid}/shots")
 async def add_shared_shots(token: str, rid: str, guest_name: str = "", guest_key: str = "",
                            files: List[UploadFile] = File(...)):
     """公開貼截圖（免登入，可多張）—— 署名加「(外部)」，另存 guest_key 供「只刪自己的」。"""
@@ -1375,7 +1384,7 @@ async def add_shared_shots(token: str, rid: str, guest_name: str = "", guest_key
         return {"status": "ok", "shots": [shot_dict(x) for x in shots]}
 
 
-@router.patch("/shared/{token}/{rid}/shots/{sid}")
+@public_router.patch("/shared/{token}/{rid}/shots/{sid}")
 async def patch_shared_shot(token: str, rid: str, sid: str, body: dict = Body(...)):
     """公開改截圖說明/時間碼/標示（任何一張都可以標 —— 標示是共同看片的產物）。"""
     factory = _require_factory()
@@ -1387,7 +1396,7 @@ async def patch_shared_shot(token: str, rid: str, sid: str, body: dict = Body(..
         return {"status": "ok", "shot": shot_dict(shot)}
 
 
-@router.delete("/shared/{token}/{rid}/shots/{sid}")
+@public_router.delete("/shared/{token}/{rid}/shots/{sid}")
 async def delete_shared_shot(token: str, rid: str, sid: str, guest_name: str = "",
                              guest_key: str = ""):
     """公開刪截圖：**只能刪自己貼的**。
@@ -1409,3 +1418,9 @@ async def delete_shared_shot(token: str, rid: str, sid: str, guest_name: str = "
         await session.commit()
     _delete_shot_file(image_url)
     return {"status": "ok"}
+
+
+# ── master 收編：public_router 的 6 條端點掛回主 router，URL 完全不變 ──
+# 必須在檔尾（所有 @public_router 裝飾器都跑過之後）。NAS 對外容器則只掛
+# public_router 本身，見 main_website.py。
+router.include_router(public_router)

@@ -45,16 +45,26 @@ EXPECTED_API = {
     ("/api/v1/proposals/shared/{token}/refs/{rid}", "DELETE"),
     ("/api/v1/proposals/shared/{token}/folder", "GET"),
     ("/api/v1/proposals/shared/{token}/folder/file", "GET"),
+    # 參考片研究頁（token 授權；提案公開頁的「研究頁 ↗」連過去）
+    ("/api/v1/references/shared/{token}/{rid}", "GET"),
+    ("/api/v1/references/shared/{token}/{rid}", "PATCH"),
+    ("/api/v1/references/shared/{token}/{rid}/research/rows", "POST"),
+    ("/api/v1/references/shared/{token}/{rid}/shots", "POST"),
+    ("/api/v1/references/shared/{token}/{rid}/shots/{sid}", "PATCH"),
+    ("/api/v1/references/shared/{token}/{rid}/shots/{sid}", "DELETE"),
 }
+
+# 對外容器可能出現的 API 命名空間（前綴之外的都不是我們在守的東西）
+_WATCHED = ("/api/v1/crm", "/api/v1/proposals", "/api/v1/references")
 
 
 def _app_api_routes():
-    """對外 app 上所有 /api/v1/** 路由（不含 website 自己的公開 API）。"""
+    """對外 app 上所有受監視命名空間的路由。"""
     import main_website
     out = set()
     for r in main_website.app.routes:
         path = getattr(r, "path", "") or ""
-        if not path.startswith(("/api/v1/crm", "/api/v1/proposals")):
+        if not path.startswith(_WATCHED):
             continue
         for m in (getattr(r, "methods", None) or set()):
             if m not in ("HEAD", "OPTIONS"):
@@ -78,7 +88,8 @@ def test_internal_domains_never_reachable():
     """點名幾個絕不可外洩的領域（讀起來就知道守的是什麼）。"""
     joined = " ".join(p for p, _ in _app_api_routes())
     for leaked in ("/clients", "/quotations", "/invoices", "/cash", "/staff",
-                   "/payments", "/cost", "/convert", "/stats", "/plan/share"):
+                   "/payments", "/cost", "/convert", "/stats", "/plan/share",
+                   "/archive", "/suggest"):
         assert leaked not in joined, f"對外 app 出現內部路徑：{leaked}"
 
 

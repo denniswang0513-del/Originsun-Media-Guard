@@ -21,7 +21,9 @@ import os
 import re
 
 # 對外 serve 的 HTML 頁（相對 frontend/）。網址就是 "/" + 檔名。
-PAGES = ("media-log.html", "proposal-plan.html")
+# reference.html：提案公開頁的「研究頁 ↗」連過去的那頁（同一組 ?t= token），
+# 不放進來的話 master 關機時客戶點那個連結會 404。
+PAGES = ("media-log.html", "proposal-plan.html", "reference.html")
 
 # 上面那些頁 import 得到的模組目錄（相對 frontend/）。網址就是 "/" + 目錄名。
 # ⚠️ 只開這幾個子目錄，不是整個 frontend/ —— 那底下是內部 SPA 的全部原始碼。
