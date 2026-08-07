@@ -27,11 +27,11 @@ from fastapi import File, HTTPException, Request, UploadFile
 from config import load_settings, save_settings
 from core.auth import check_admin_or_module
 from core.drive_map import to_canonical_path, to_local_path
-from core.project_folders import (clean_name, list_folder_level,
-                                  make_dated_folder_name, remap_prefix,
-                                  rename_and_remap, safe_rel_dir, safe_rel_path,
-                                  safe_subfolder, save_uploads, subfolder_path,
-                                  taken_names, within_dir)
+from core.project_folders import (list_folder_level, make_dated_folder_name,
+                                  remap_prefix, rename_and_remap, safe_rel_dir,
+                                  safe_rel_path, safe_subfolder, save_uploads,
+                                  subfolder_path, taken_names,
+                                  validate_folder_name, within_dir)
 
 from ._shared import router, _check_auth, _get_factory, _now, _require_db
 
@@ -134,28 +134,38 @@ async def _resolve_asset_file(session, project_id: str, rel: str) -> str:
     return path
 
 
-async def _level(dir_abs: str, rel: str) -> dict:
+async def _level(folder_abs: str, rel: str) -> dict:
     """某一層的內容（子資料夾 + 檔案）—— 所有列檔/上傳回應的共同形狀。
-    rel 是相對**資料夾根**的路徑，下載/刪除端點吃的就是這個形式。"""
-    dirs, files, truncated = await asyncio.to_thread(list_folder_level, dir_abs, rel)
+    rel 是相對**資料夾根**的路徑，下載/刪除端點吃的就是這個形式；
+    逃逸/不存在 → 404（路徑防護在 core.list_folder_level 裡）。"""
+    got = await asyncio.to_thread(list_folder_level, folder_abs, rel)
+    if got is None:
+        raise HTTPException(status_code=404, detail="找不到子資料夾（或無法存取）")
+    dirs, files, truncated = got
     return {"rel": rel, "dirs": dirs, "files": files, "truncated": truncated}
 
 
 async def _subdir_or_404(folder_abs: str, rel: str) -> str:
-    """資料夾內的子層絕對路徑（rel 空 = 資料夾本身）；逃逸/不存在 → 404。"""
+    """資料夾內的子層絕對路徑（上傳落點用）；逃逸/不存在 → 404。
+    rel 空 = 資料夾本身，不再驗一次 —— 呼叫端拿到 folder_abs 的路徑本來就
+    經過防護，重驗是白付兩趟 realpath 的 UNC 往返。"""
+    if not str(rel or "").strip("/"):
+        return folder_abs
     dir_abs = await asyncio.to_thread(safe_rel_dir, folder_abs, rel)
     if not dir_abs:
         raise HTTPException(status_code=404, detail="找不到子資料夾（或無法存取）")
     return dir_abs
 
 
-async def _upload_result(dir_abs: str, files, rel: str = "") -> dict:
-    """兩個上傳端點的共同回應：落地 + 回這一層的新內容（前端不必再打一次列檔）。
-    一個都沒存成（全被擋/全超限）→ 不重掃，前端手上那份還是對的。"""
+async def _upload_result(folder_abs: str, files, rel: str = "") -> dict:
+    """兩個上傳端點的共同回應：落地到 rel 這一層 + 回這一層的新內容
+    （前端不必再打一次列檔）。一個都沒存成（全被擋/全超限）→ 不重掃，
+    前端手上那份還是對的。"""
+    dir_abs = await _subdir_or_404(folder_abs, rel)
     saved, skipped = await save_uploads(dir_abs, files, max_bytes=_MAX_UPLOAD_BYTES)
     out = {"status": "ok", "saved": saved, "skipped": skipped}
     if saved:
-        out.update(await _level(dir_abs, rel))
+        out.update(await _level(folder_abs, rel))
     return out
 
 
@@ -219,8 +229,9 @@ def _probe_folder(root: str, folder_abs: str, deck_url: str, rel: str = "") -> t
     """
     if not root or not os.path.isdir(root):
         return False, [], [], False, ""
-    dir_abs = safe_rel_dir(folder_abs, rel) if folder_abs else None
-    dirs, files, truncated = list_folder_level(dir_abs, rel) if dir_abs else ([], [], False)
+    # None（還沒建夾／rel 指向不存在的層）在這裡是空清單，不是錯誤
+    dirs, files, truncated = (
+        (list_folder_level(folder_abs, rel) if folder_abs else None) or ([], [], False))
     return True, dirs, files, truncated, _deck_rel(deck_url, folder_abs)
 
 
@@ -255,7 +266,7 @@ async def upload_proposal_assets(project_id: str, request: Request, rel: str = "
     async with factory() as session:
         folder = await _ensure_project_folder(session, project_id)
         await session.commit()          # 資料夾名可能剛生成，先落地
-    return await _upload_result(await _subdir_or_404(folder, rel), files, rel)
+    return await _upload_result(folder, files, rel)
 
 
 @router.get("/projects/{project_id}/proposal-assets/file")
@@ -315,7 +326,8 @@ async def set_proposal_deck(project_id: str, request: Request):
 
 # ── 資產資料夾總覽（含「過去的」未連結資料夾）─────────────────
 # owner 2026-08-06：NAS 上手工整理的舊提案資料夾也要在系統裡看得到、載得到、
-# 還能繼續往裡面丟檔案。刻意**不做**「連結到專案」—— 它們就獨立存在。
+# 還能繼續往裡面丟檔案。2026-08-07 追加：也能改名、也能連結到專案
+# （見底下的 folder/rename 與 folder/link）。
 
 _OVERVIEW_SCAN_TTL = 60      # root 子夾清單快取（總覽每次載入都打，別每次掃 NAS）
 _overview_cache: dict = {"at": 0.0, "root": None, "names": [], "ok": False}
@@ -413,9 +425,7 @@ async def proposal_folder_files(request: Request, folder: str = "", rel: str = "
     """任一資產資料夾裡**某一層**的內容（未連結專案的「過去資料夾」也能看）。
     `rel` 空 = 最外層；子資料夾走 dirs 回傳的 rel 再打一次。"""
     _assets_auth(request)
-    folder_abs = await _folder_or_404(folder)
-    out = await _level(await _subdir_or_404(folder_abs, rel), rel)
-    return {"folder": folder, "count": len(out["files"]), **out}
+    return {"folder": folder, **await _level(await _folder_or_404(folder), rel)}
 
 
 @router.get("/proposal-assets/folder/file")
@@ -436,8 +446,7 @@ async def proposal_folder_upload(request: Request, folder: str = "", rel: str = 
     """上傳檔案進任一資產資料夾（未連結專案的也可以 —— owner 指定）。
     `rel` = 落在哪一層（空 = 最外層；就是使用者目前看的那一層）。"""
     _assets_auth(request)
-    folder_abs = await _folder_or_404(folder)
-    return await _upload_result(await _subdir_or_404(folder_abs, rel), files, rel)
+    return await _upload_result(await _folder_or_404(folder), files, rel)
 
 
 @router.post("/proposal-assets/folder/rename")
@@ -452,26 +461,22 @@ async def proposal_folder_rename(request: Request):
     _require_db()
     body = await request.json()
     folder = str(body.get("folder") or "").strip()
-    raw = str(body.get("new_name") or "")
     await _folder_or_404(folder)                   # 舊夾必須真的在
-    # 含路徑分隔＝可疑，直接擋（不要默默清成別的名字 —— 使用者會以為改成了他
-    # 打的那個。其餘非法字元照清，那些人本來就打不出有意義的東西）
-    if "/" in raw or "\\" in raw:
-        raise HTTPException(status_code=400, detail="資料夾名稱不可含 / 或 \\")
-    new_name = clean_name(raw)
-    if not new_name or not subfolder_path(proposals_root(), new_name):
-        raise HTTPException(status_code=400, detail="資料夾名稱無效")
-    if new_name == folder:
-        return {"status": "ok", "folder_name": folder, "changed": False}
-
     factory = await _get_factory()
     async with factory() as session:
         project = await _project_of_folder(session, folder)
+        # taken：別撞上其他專案登記的名字（那些夾可能只是暫時 missing_on_disk，
+        # rename_dir 的磁碟檢查看不到它們）
+        taken = await _taken_names(session, exclude_project_id=project.id if project else "")
+        new_name, err = validate_folder_name(proposals_root(),
+                                             body.get("new_name"), taken)
+        if err:
+            raise HTTPException(status_code=400, detail=err)
+        if new_name == folder:
+            return {"status": "ok", "folder_name": folder, "changed": False}
         changed, err = await _rename_folder(session, folder, new_name, project)
         if not changed:
             raise HTTPException(status_code=400, detail=err or "改名失敗")
-        if project:
-            project.proposal_folder_name = new_name
         await session.commit()
     return {"status": "ok", "folder_name": new_name, "changed": True}
 
@@ -486,6 +491,11 @@ async def proposal_folder_link(request: Request):
     守衛：資料夾已被別的專案認領 → 400；目標專案已有**非空**的別夾 → 400
     （不把既有資料默默改指到別處）。舊夾是空的就順手清掉，免得留一個
     看起來像「過去的提案」的空殼在總覽上。
+
+    ⚠️ 影像紀錄有一條同名不同義的 `/media-log/link`，守衛規則**刻意不同**：
+    它有 DB 檔案索引與免專案 QR token，所以會轉走 folder-only row、用索引筆數
+    判斷空不空、也不支援解除連結。提案資產夾是純掃磁碟、沒有索引表，兩邊
+    合併只會逼出一個誰都不像的抽象。
     """
     _assets_auth(request)
     _require_db()
@@ -508,15 +518,12 @@ async def proposal_folder_link(request: Request):
                 detail=f"資料夾「{folder}」已連結到專案「{holder.name or holder.id}」")
         project = await _project_or_404(session, project_id)
         old = project.proposal_folder_name
-        if old and old != folder:
-            old_abs = await asyncio.to_thread(safe_subfolder, proposals_root(), old)
-            if old_abs and await asyncio.to_thread(os.listdir, old_abs):
-                raise HTTPException(
-                    status_code=400,
-                    detail=f"「{project.name}」已有資產資料夾「{old}」且裡面有檔案，"
-                           f"請先把檔案整理好（或改用改名）再連結")
-            if old_abs:
-                await asyncio.to_thread(_rmdir_quiet, old_abs)
+        if old and old != folder and not await asyncio.to_thread(
+                _vacate_if_empty, proposals_root(), old):
+            raise HTTPException(
+                status_code=400,
+                detail=f"「{project.name}」原本的資產資料夾「{old}」還有東西"
+                       f"（或無法移除），請先處理再連結")
         project.proposal_folder_name = folder
         await session.commit()
         name = project.name or ""
@@ -525,12 +532,22 @@ async def proposal_folder_link(request: Request):
             "project_id": project_id, "project_name": name}
 
 
-def _rmdir_quiet(path: str) -> None:
-    """刪一個**空**資料夾；刪不掉就算了（連結流程不該為了收拾殘留而失敗）。"""
+def _vacate_if_empty(root: str, name: str) -> bool:
+    """騰出舊資料夾：空的就刪掉 → True；裡面還有東西/刪不掉 → False。
+
+    直接 rmdir 不先問 —— `ENOTEMPTY` 本身就是「裡面有檔案」的答案，比
+    isdir + listdir + rmdir 少兩趟 UNC 往返，而且 listdir 會為了一個真假值
+    把上千筆檔名整包拉回來（ensure_folder 用的是同一招）。"""
+    p = subfolder_path(root, name)
+    if not p:
+        return True                # 名稱本身不合法 → 沒有東西要騰
     try:
-        os.rmdir(path)
+        os.rmdir(p)
+    except FileNotFoundError:
+        pass                       # 登記了但磁碟上沒有 → 本來就沒佔位
     except OSError:
-        pass
+        return False
+    return True
 
 
 async def _project_of_folder(session, folder: str):
@@ -566,8 +583,8 @@ async def ensure_folder(session, project) -> str:
 
 async def _rename_folder(session, old_name: str, new_name: str, project) -> tuple:
     """資產資料夾改名的**單一程序**（專案改名跟隨、使用者手動改名共用）
-    → `(changed, err)`。不 commit、也**不寫** `proposal_folder_name` ——
-    成功後由呼叫端寫，免得 savepoint 回滾時 ORM 屬性與磁碟不同步。
+    → `(changed, err)`。成功才寫 `proposal_folder_name`（失敗時
+    rename_and_remap 已把磁碟還原成舊名，欄位當然也要留舊的）。不 commit。
     `project=None` = 未連結專案的資料夾（純磁碟改名）。
     """
     root = proposals_root()
@@ -595,6 +612,8 @@ async def _rename_folder(session, old_name: str, new_name: str, project) -> tupl
         session, os.path.join(root, old_name), os.path.join(root, new_name),
         remap=_remap)
     if changed:
+        if project is not None:
+            project.proposal_folder_name = new_name
         invalidate_folder_cache()      # 總覽別再列舊名（點下去會 404）
     return changed, err
 
@@ -617,9 +636,5 @@ async def rename_project_folder(session, project_id: str, project_name: str,
         existing=project.proposal_folder_name)
     if new_name == project.proposal_folder_name:
         return False, ""
-    changed, err = await _rename_folder(
+    return await _rename_folder(
         session, project.proposal_folder_name, new_name, project)
-    if not changed:
-        return False, err
-    project.proposal_folder_name = new_name
-    return True, ""

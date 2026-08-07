@@ -9,7 +9,7 @@
 
 import { crmFetch, crmToast, esc } from './crm-utils.js';
 import { fmtSize } from '../../js/shared/clip_utils.js';
-import { authDownload, folderCrumbs, wireFileDrop } from '../../js/shared/utils.js';
+import { authDownload, folderCrumbsHtml, wireFileDrop } from '../../js/shared/utils.js';
 import { tfetch } from '../proposals/prop-fetch.js';
 import { state } from './crm-projects-state.js';
 
@@ -142,15 +142,9 @@ function _renderFiles(box, d) {
 
 // 麵包屑（最外層不顯示 —— 沒得往回走時它只是噪音）
 function _crumbsHtml(d) {
-    const crumbs = folderCrumbs(d.rel);
-    if (!crumbs.length) return '';
-    return `<div style="padding:6px 10px;font-size:12px;border-bottom:1px solid #242424;">
-        <span data-crumb="" style="cursor:pointer;color:#60a5fa;">${esc(d.folder_name || '根目錄')}</span>`
-        + crumbs.map((c, i) => {
-            const last = i === crumbs.length - 1;
-            return ` <span style="color:#4b4b4b;">/</span> <span data-crumb="${esc(c.rel)}"
-                style="cursor:pointer;color:${last ? '#8b8b8b' : '#60a5fa'};">${esc(c.label)}</span>`;
-        }).join('') + '</div>';
+    if (!d.rel) return '';
+    return `<div style="padding:6px 10px;font-size:12px;border-bottom:1px solid #242424;">${
+        folderCrumbsHtml(d.folder_name || '根目錄', d.rel)}</div>`;
 }
 
 function _wireUpload(projectId, box, host, d) {
@@ -170,11 +164,19 @@ function _wireUpload(projectId, box, host, d) {
         });
     };
 
-    // 走進子資料夾 / 麵包屑往回 —— 換 d 的這一層再重畫（企劃矩陣不受影響）
+    // 走進子資料夾 / 麵包屑往回 —— 換 d 的這一層再重畫（企劃矩陣不受影響）。
+    // 走過的層記在 levels：往回走是最常見的動作，重打一次是整趟 NAS 掃描
+    // 存快照不是 d 本身 —— d 會被後續導覽 Object.assign 覆寫，存參照等於
+    // 「回最外層」拿回來的是當前那一層
+    const levels = new Map([[d.rel || '', { ...d }]]);
     const goto = async (rel) => {
+        const hit = levels.get(rel);
+        if (hit) { Object.assign(d, hit); repaint(); return; }
         try {
             const r = await crmFetch(
                 `/projects/${projectId}/proposal-assets?rel=${encodeURIComponent(rel)}`);
+            levels.set(rel, r);
+            if (!box.isConnected || state.selectedId !== projectId) return;  // 已切走
             Object.assign(d, r);
             repaint();
         } catch (e) { alert('開啟資料夾失敗：' + (e.message || e)); }
@@ -195,6 +197,7 @@ function _wireUpload(projectId, box, host, d) {
             if (bad.length) console.warn('略過：', bad.join('、'));
             if (r.files) {                      // 端點順手回了這一層，不必再掃一次
                 Object.assign(d, { dirs: r.dirs, files: r.files, truncated: r.truncated });
+                levels.delete(d.rel || '');     // 這一層變了，別讓走回來的人看到舊的
                 repaint();
             }
         } catch (e) { alert('上傳失敗：' + (e.message || e)); }
@@ -220,6 +223,7 @@ function _wireUpload(projectId, box, host, d) {
                 crmToast(r.deck_cleared ? '已刪除（原本是提案簡報，已取消指定）' : '已刪除');
                 if (r.deck_cleared) d.deck_rel = '';
                 d.files = (d.files || []).filter(f => f.rel !== rel);
+                levels.delete(d.rel || '');
                 row.remove();               // 移一列就好，不必重建整張
                 if (!d.files.length) repaint();     // 空了要顯示空狀態
             } catch (err) { alert('刪除失敗：' + (err.message || err)); }

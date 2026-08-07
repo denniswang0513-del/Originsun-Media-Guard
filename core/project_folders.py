@@ -193,6 +193,28 @@ def subfolder_path(root: str, name: str) -> Optional[str]:
     return p if within_dir(root, p) else None
 
 
+def validate_folder_name(root: str, raw: str,
+                         taken: Optional[set] = None) -> tuple:
+    """使用者自己打的資料夾名 → `(名稱, 錯誤訊息)`；不合格時名稱為 ""。
+
+    命名規則的正本住在這裡（「新增資料夾」與「改名」兩種入口、三個子系統
+    共用）—— 散在各 router 的話，下次加一條規則（保留字、長度上限）就得去
+    每個入口找一遍，錯誤訊息也會各自漂。
+
+    含 `/` `\\` 直接擋，**不默默清成別的名字** —— 使用者會以為改成了他打的
+    那個。其餘非法字元照清（那些字他本來也打不出有意義的東西）。
+    """
+    raw = str(raw or "")
+    if "/" in raw or "\\" in raw:
+        return "", "資料夾名稱不可含 / 或 \\"
+    name = clean_name(raw)
+    if not name or not subfolder_path(root, name):
+        return "", "資料夾名稱無效"
+    if taken and name in taken:
+        return "", f"已經有一個叫「{name}」的資料夾了"
+    return name, ""
+
+
 def safe_subfolder(root: str, folder: str) -> Optional[str]:
     """root 底下**已存在**的直接子資料夾絕對路徑；不合法或非目錄 → None。"""
     p = subfolder_path(root, folder)
@@ -221,6 +243,23 @@ def safe_rel_dir(folder_abs: str, rel: str) -> Optional[str]:
 
 
 FOLDER_VIEW_CAP = 1000   # 單夾列檔上限（超過標 truncated，避免超大夾逐檔 stat 卡死）
+
+
+def _visible_dir(name: str) -> bool:
+    """列舉時要不要走進這個子資料夾（`.git` / `_tmp` 那類略過）。
+    攤平版與逐層版共用同一條規則 —— 分兩份寫，總有一天只有一邊被改到。"""
+    return name[:1] not in (".", "_")
+
+
+def _file_record(rel: str, entry) -> Optional[dict]:
+    """檔案的對外形狀（列檔端點共用一份；rel 一律轉成 `/` 給前端）。
+    stat 失敗（權限/剛被刪）→ None，呼叫端跳過。"""
+    try:
+        st = entry.stat()          # 目錄列舉已帶回，不再打一次 SMB
+    except OSError:
+        return None
+    return {"rel": rel.replace("\\", "/"), "filename": entry.name,
+            "size_bytes": int(st.st_size), "mtime": st.st_mtime}
 
 
 def iter_files_rel(folder: str, accept: Optional[Callable[[str], bool]] = None):
@@ -252,7 +291,7 @@ def _iter_entries(folder: str, accept: Optional[Callable[[str], bool]] = None):
                 for e in it:
                     try:
                         if e.is_dir():
-                            if e.name[:1] not in (".", "_"):
+                            if _visible_dir(e.name):
                                 stack.append((e.path, prefix + e.name + os.sep))
                             continue
                     except OSError:
@@ -274,33 +313,33 @@ def list_folder_files(folder_abs: str, *, cap: int = FOLDER_VIEW_CAP,
         if len(out) >= cap:
             truncated = True
             break
-        try:
-            st = entry.stat()          # 目錄列舉已帶回，不再打一次 SMB
-        except OSError:
-            continue
-        out.append({
-            "rel": rel.replace("\\", "/"),   # 給前端的一律用 /
-            "filename": entry.name,
-            "size_bytes": int(st.st_size),
-            "mtime": st.st_mtime,
-        })
+        rec = _file_record(rel, entry)
+        if rec:
+            out.append(rec)
     out.sort(key=lambda x: x["mtime"], reverse=True)
     return out, truncated
 
 
-def list_folder_level(dir_abs: str, rel: str = "", *, cap: int = FOLDER_VIEW_CAP,
-                      accept: Optional[Callable[[str], bool]] = None) -> tuple:
-    """**單層**列舉 → `(dirs, files, truncated)`，子資料夾依名稱、檔案依 mtime 新→舊。
+def list_folder_level(folder_abs: str, rel: str = "",
+                      *, cap: int = FOLDER_VIEW_CAP) -> Optional[tuple]:
+    """資料夾內**某一層**的內容 → `(dirs, files, truncated)`；
+    rel 逃出資料夾 / 不是目錄 / 資料夾根本不存在 → **None**（呼叫端自己決定
+    是 404 還是「還沒建，空的」）。子夾依名稱、檔案依 mtime 新→舊。
 
     給「可以走進子資料夾」的瀏覽 UI 用（`list_folder_files` 是整棵樹攤平，
     深的資料夾等於一次把整個 NAS 子樹掃完 —— 使用者只想看第一層時很不划算，
     而且攤平後看不出原本的目錄結構）。
 
-    `dir_abs` 是**已驗證**的絕對目錄（呼叫端先過 `safe_rel_dir`）；`rel` 只用來
-    組回傳的相對路徑（相對**資料夾根**，下載/刪除端點吃的就是這個形式），
-    不參與開檔 —— 路徑一律以 dir_abs 為準，避免兩個來源各走各的。
+    路徑防護**包在裡面**：`rel` 來自前端，忘了先過 `safe_rel_dir` 就是靜默的
+    目錄遍歷（不會壞掉、只會多給），所以不留這個給呼叫端自己記得做。
+    `rel` 為空時直接用 `folder_abs` —— 呼叫端給的資料夾本來就已經過防護，
+    再驗一次是兩趟 realpath，在 UNC 上是實打實的往返。
     """
-    prefix = (str(rel or "").strip("/") + "/") if str(rel or "").strip("/") else ""
+    r = str(rel or "").replace("\\", "/").strip("/")
+    dir_abs = safe_rel_dir(folder_abs, r) if r else folder_abs
+    if not dir_abs:
+        return None
+    prefix = r + "/" if r else ""
     dirs: list = []
     files: list = []
     truncated = False
@@ -312,18 +351,16 @@ def list_folder_level(dir_abs: str, rel: str = "", *, cap: int = FOLDER_VIEW_CAP
                     break
                 try:
                     if e.is_dir():
-                        if e.name[:1] not in (".", "_"):
+                        if _visible_dir(e.name):
                             dirs.append({"name": e.name, "rel": prefix + e.name})
                         continue
-                    if accept is not None and not accept(e.name):
-                        continue
-                    st = e.stat()      # 目錄列舉已帶回，不再打一次 SMB
                 except OSError:
                     continue
-                files.append({"rel": prefix + e.name, "filename": e.name,
-                              "size_bytes": int(st.st_size), "mtime": st.st_mtime})
+                rec = _file_record(prefix + e.name, e)
+                if rec:
+                    files.append(rec)
     except OSError:
-        return [], [], False
+        return None
     dirs.sort(key=lambda d: d["name"])
     files.sort(key=lambda f: f["mtime"], reverse=True)
     return dirs, files, truncated

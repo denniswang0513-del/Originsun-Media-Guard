@@ -32,10 +32,11 @@ from config import load_settings
 from core.assets_host import assets_target
 from core.drive_map import to_canonical_path, to_local_path
 from core.project_folders import (FOLDER_VIEW_CAP, clean_filename,
-                                  clean_name as _clean_name, iter_files_rel,
-                                  list_folder_files, make_dated_folder_name,
-                                  remap_prefix, rename_and_remap, safe_rel_path,
-                                  safe_subfolder, subfolder_path, taken_names)
+                                  iter_files_rel, list_folder_files,
+                                  make_dated_folder_name, remap_prefix,
+                                  rename_and_remap, safe_rel_path,
+                                  safe_subfolder, subfolder_path, taken_names,
+                                  validate_folder_name)
 from core.subproc import run_capture
 
 # public_router = 對外白名單（正本在 _shared，全套件共用一個）。本模組的 4 個
@@ -1026,16 +1027,15 @@ async def media_log_create_folder(request: Request):
     已存在 → 400。建夾 + mint token 在同一步（原子），前端拿回應直接顯示 QR。media_log 模組即可。"""
     _check_media_log_auth(request)
     _require_db()
-    raw = str((await request.json()).get("name") or "")
-    if "/" in raw or "\\" in raw:   # 只收單層資料夾名，含分隔＝可疑，直接擋
-        raise HTTPException(status_code=400, detail="資料夾名稱不可含 / 或 \\")
-    name = _clean_name(raw)
+    raw = (await request.json()).get("name")
     root, _cats = await _media_log_conf()
     if not await asyncio.to_thread(_root_set, root):
         raise HTTPException(status_code=503, detail="管理員尚未設定影像紀錄資料夾")
-    folder = subfolder_path(root, name)   # 名稱驗證 + 路徑遍歷防護（單一真相）
-    if not folder:
-        raise HTTPException(status_code=400, detail="資料夾名稱無效")
+    # 名稱規則 + 路徑遍歷防護的單一真相（提案資產夾的改名走同一支）
+    name, err = validate_folder_name(root, raw)
+    if err:
+        raise HTTPException(status_code=400, detail=err)
+    folder = subfolder_path(root, name)
 
     def _mk() -> bool:
         try:

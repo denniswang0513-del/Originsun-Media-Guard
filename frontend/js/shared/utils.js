@@ -72,12 +72,28 @@ export function wireFileDrop(zone, onFiles) {
 
 /**
  * 資料夾麵包屑：`"a/b/c"` → `[{label:'a',rel:'a'},{label:'b',rel:'a/b'},…]`。
- * 逐層瀏覽資產資料夾的兩個消費端（提案庫的資料夾瀏覽器、專案的提案企劃分頁）
- * 共用 —— 後端回的 rel 一律是 `/` 分隔、相對資料夾根。
+ * 後端回的 rel 一律是 `/` 分隔、相對資料夾根。（消費端要的都是 HTML，
+ * 走底下的 folderCrumbsHtml；這支是它的內部拆解。）
  */
-export function folderCrumbs(rel) {
+function folderCrumbs(rel) {
     const parts = String(rel || '').split('/').filter(Boolean);
     return parts.map((label, i) => ({ label, rel: parts.slice(0, i + 1).join('/') }));
+}
+
+/**
+ * 麵包屑的 HTML（**單一正本**）—— 兩個消費端的點擊都委派在 `[data-crumb]` 上，
+ * 屬性契約與配色分兩份寫必定會漂。外層容器與「最外層要不要顯示」由呼叫端決定。
+ * `rootLabel` = 資料夾根的顯示名（點它回最外層）。
+ */
+export function folderCrumbsHtml(rootLabel, rel) {
+    const e = (s) => String(s ?? '').replace(/[&<>"']/g,
+        c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+    const crumbs = folderCrumbs(rel);
+    const span = (r, label, link) => `<span data-crumb="${e(r)}" style="cursor:pointer;color:${
+        link ? '#60a5fa' : '#8b8b8b'};">${e(label)}</span>`;
+    return span('', rootLabel, crumbs.length)
+        + crumbs.map((c, i) => ' <span style="color:#4b4b4b;">/</span> '
+            + span(c.rel, c.label, i < crumbs.length - 1)).join('');
 }
 
 export async function resolveDropPath(e, file, index = 0) {

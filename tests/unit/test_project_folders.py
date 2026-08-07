@@ -12,7 +12,8 @@ from core.project_folders import (clean_filename, clean_name, dedupe,
                                   make_dated_folder_name,
                                   make_reference_folder_name, remap_prefix,
                                   rename_and_remap, rename_dir, safe_rel_dir,
-                                  safe_rel_path, safe_subfolder, save_uploads)
+                                  safe_rel_path, safe_subfolder, save_uploads,
+                                  validate_folder_name)
 
 CREATED = datetime(2026, 8, 6, 15, 30)
 
@@ -291,7 +292,8 @@ class TestSafeRelDir:
 
 
 class TestListFolderLevel:
-    """單層列舉：子夾與檔案分開、rel 相對資料夾根、cap 涵蓋兩者。"""
+    """單層列舉：子夾與檔案分開、rel 相對資料夾根、cap 涵蓋兩者、
+    路徑防護包在裡面（逃逸/不存在回 None）。"""
 
     def test_splits_dirs_and_files_at_this_level(self, tmp_path):
         (tmp_path / "sub").mkdir()
@@ -309,7 +311,7 @@ class TestListFolderLevel:
         deep.mkdir(parents=True)
         (deep / "c.pdf").write_bytes(b"x")
         (deep / "d").mkdir()
-        dirs, files, _ = list_folder_level(str(deep), "a/b")
+        dirs, files, _ = list_folder_level(str(tmp_path), "a/b")
         assert files[0]["rel"] == "a/b/c.pdf"      # 相對根，可直接餵下載端點
         assert dirs[0]["rel"] == "a/b/d"
 
@@ -326,8 +328,38 @@ class TestListFolderLevel:
         dirs, files, truncated = list_folder_level(str(tmp_path), cap=4)
         assert len(dirs) + len(files) == 4 and truncated is True
 
-    def test_missing_dir_is_empty_not_error(self, tmp_path):
-        assert list_folder_level(str(tmp_path / "nope")) == ([], [], False)
+    def test_missing_or_escaping_returns_none(self, tmp_path):
+        (tmp_path / "secret").mkdir()
+        folder = tmp_path / "folder"
+        folder.mkdir()
+        (folder / "f.pdf").write_bytes(b"x")
+        assert list_folder_level(str(tmp_path / "nope")) is None   # 資料夾不存在
+        assert list_folder_level(str(folder), "gone") is None      # 這一層不存在
+        assert list_folder_level(str(folder), "../secret") is None  # 逃逸
+        assert list_folder_level(str(folder), "f.pdf") is None     # 檔案不是目錄
+
+
+class TestValidateFolderName:
+    """使用者自己打的資料夾名（新增/改名共用的規則正本）。"""
+
+    def test_accepts_and_cleans(self, tmp_path):
+        assert validate_folder_name(str(tmp_path), "  20220615_台新專案 ") == \
+            ("20220615_台新專案", "")
+        assert validate_folder_name(str(tmp_path), "有:非法*字元")[0] == "有非法字元"
+
+    def test_rejects_separators_instead_of_silently_stripping(self, tmp_path):
+        # 清成「壞名字」會讓使用者以為改成了他打的那個 —— 一定要擋
+        name, err = validate_folder_name(str(tmp_path), "壞/名字")
+        assert name == "" and "不可含" in err
+        assert validate_folder_name(str(tmp_path), "壞\\名字")[0] == ""
+
+    def test_rejects_empty_and_dots(self, tmp_path):
+        for bad in ("", "   ", "*", ".", ".."):
+            assert validate_folder_name(str(tmp_path), bad)[0] == "", bad
+
+    def test_rejects_taken(self, tmp_path):
+        name, err = validate_folder_name(str(tmp_path), "已有的", {"已有的"})
+        assert name == "" and "已經有" in err
 
 
 # ── 上傳落地：黑名單 / 大小上限 / 撞名（寫進共用磁碟的安全規則）──

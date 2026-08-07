@@ -17,7 +17,8 @@
 
 import { esc } from '../website/website-utils.js';
 import { fmtSize } from '../../js/shared/clip_utils.js';
-import { authDownload, folderCrumbs, wireFileDrop } from '../../js/shared/utils.js';
+import { authDownload, folderCrumbsHtml, wireFileDrop } from '../../js/shared/utils.js';
+import { projectOptionsHtml } from '../crm/crm-utils.js';
 import { tfetch } from './prop-fetch.js';
 
 const API = '/api/v1/crm/proposal-assets';
@@ -146,7 +147,8 @@ function _render(ov) {
             </div>
             ${open ? `<div style="border-top:1px solid #242424;">
                 <div id="pf-action">${_actionHtml(f)}</div>
-                <div id="pf-crumbs" style="padding:6px 12px 0;font-size:12px;">${_crumbsHtml()}</div>
+                <div id="pf-crumbs" style="padding:6px 12px 0;font-size:12px;">${
+                    folderCrumbsHtml(_open, _rel)}</div>
                 <div style="padding:6px 12px;">
                     <button data-upload class="prop-btn ghost">＋ 上傳檔案到這一層</button>
                     <span class="prop-note" style="margin-left:8px;">也可以把檔案拖進來</span>
@@ -163,20 +165,8 @@ function _render(ov) {
     // 重畫（例如打字搜尋）後把已載入的這一層填回去 —— 不然展開中的資料夾會被
     // 洗成「載入中…」並卡在那，使用者得收合再展開、多打一次 NAS 掃描
     const cached = _level[_key(_open, _rel)];
-    if (cached) _paint(ov, cached);
+    if (cached) _paint(ov, cached, _open, _rel);
     else _loadLevel(ov, _open, _rel);
-}
-
-// ── 麵包屑：根 / 子夾 / 子夾… ───────────────────────────────
-function _crumbsHtml() {
-    const crumbs = folderCrumbs(_rel);
-    const root = `<span data-crumb="" style="cursor:pointer;color:${
-        _rel ? '#60a5fa' : '#8b8b8b'};">${esc(_open)}</span>`;
-    return root + crumbs.map((c, i) => {
-        const last = i === crumbs.length - 1;
-        return ` <span style="color:#4b4b4b;">/</span> <span data-crumb="${esc(c.rel)}"
-            style="cursor:pointer;color:${last ? '#8b8b8b' : '#60a5fa'};">${esc(c.label)}</span>`;
-    }).join('');
 }
 
 // ── 改名 / 連結專案的操作列（就地展開，不另開視窗）──────────────
@@ -226,10 +216,8 @@ function _wireAction(ov) {
         _loadProjects()
             .then(list => {
                 if (!sel.isConnected) return;
-                sel.innerHTML = '<option value="">— 選擇專案 —</option>'
-                    + list.map(p => `<option value="${esc(p.id)}">${esc(p.name)}${
-                        p.client_short_name ? '（' + esc(p.client_short_name) + '）' : ''}</option>`).join('');
                 // 選項灌進去後由全域 select-upgrade 自動升級成可搜尋下拉（≥8 項）
+                sel.innerHTML = projectOptionsHtml(list);
             })
             .catch(e => { sel.innerHTML = `<option value="">載入失敗：${esc(e.message || e)}</option>`; });
     }
@@ -254,8 +242,10 @@ async function _link(ov, folder, projectId) {
     } catch (e) { alert('連結失敗：' + (e.message || e)); }
 }
 
-async function _loadProjects() {
-    if (!_projects) _projects = (await tfetch('/api/v1/crm/projects')).projects || [];
+function _loadProjects() {
+    // 快取 **promise** 不是結果 —— 搜尋框每個按鍵都會 _render()，操作列開著時
+    // 就等於在第一趟還沒回來前又發一次同樣的 join 查詢
+    if (!_projects) _projects = tfetch('/api/v1/crm/projects').then(d => d.projects || []);
     return _projects;
 }
 
@@ -304,7 +294,7 @@ async function _loadLevel(ov, folder, rel) {
     }
 }
 
-function _paint(ov, d, folder = _open, rel = _rel) {
+function _paint(ov, d, folder, rel) {
     _level[_key(folder, rel)] = d;
     const box = ov.querySelector('#pf-files');
     // 載入期間使用者可能已經走到別層 —— 舊回應不覆蓋新畫面
