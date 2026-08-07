@@ -159,6 +159,8 @@ except Exception as _e:  # noqa: BLE001 — 缺 DB 套件的環境照常起，�
 # 對外 serve 執行期上傳檔（團隊頭像 /uploads/team、文章圖片 /uploads/posts）。
 # serve 目錄 = admin_posts._UPLOAD_BASE（上傳就寫這裡），確保「存」與「serve」同一處；
 # NAS nginx 的 location /uploads/ 反代到這個 app。main.py（master）另有同樣 mount。
+from core.public_assets import MODULE_DIRS as _PUBLIC_MODULE_DIRS
+from core.public_assets import PAGES as _PUBLIC_PAGES
 from fastapi.staticfiles import StaticFiles as _StaticFiles
 from routers.website.admin_posts import _UPLOAD_BASE as _UPLOAD_BASE
 import mimetypes as _mt
@@ -174,48 +176,41 @@ app.mount("/uploads", _StaticFiles(directory=_UPLOAD_BASE), name="uploads")
 # 不走 Astro dist（那是 build 產物，沒有這些檔）。nginx 把 /media-log.html
 # 與 /img/ 反代到本 app。
 _FRONTEND_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "frontend")
-_MEDIA_LOG_PAGE = os.path.join(_FRONTEND_DIR, "media-log.html")
 
 
-@app.get("/media-log.html", include_in_schema=False)
-async def _media_log_page():
-    from starlette.responses import FileResponse, PlainTextResponse
-    if not os.path.isfile(_MEDIA_LOG_PAGE):
-        return PlainTextResponse("media-log.html 未同步到本機", status_code=503)
-    return FileResponse(_MEDIA_LOG_PAGE, media_type="text/html")
+def _serve_public_page(filename: str):
+    """對外公開頁的路由工廠。未同步到本機 → 503 而不是 404 ——「檔案沒推過來」
+    與「網址打錯」是完全不同的故障，混在一起查起來很痛苦。"""
+    path = os.path.join(_FRONTEND_DIR, filename)
+
+    async def _page():
+        from starlette.responses import FileResponse, PlainTextResponse
+        if not os.path.isfile(path):
+            return PlainTextResponse(f"{filename} 未同步到本機", status_code=503)
+        return FileResponse(path, media_type="text/html")
+
+    app.get("/" + filename, include_in_schema=False, name=f"page_{filename}")(_page)
 
 
-# ── 提案公開共編頁（master 關機也開得起來，2026-08-07）──
-# 客戶手上的 /proposal-plan.html?t=<token> 原本只有 master serve —— master 一關
-# 客戶就開不了。頁面 + 它 import 的 ES module 隨 NAS_SYNC_ASSETS 同步進
-# code/frontend/，API 走底下掛的 proposals public_router。
-_PROPOSAL_PAGE = os.path.join(_FRONTEND_DIR, "proposal-plan.html")
+# 頁面與它們 import 的模組目錄，清單正本在 core.public_assets
+# （publish 的同步清單、nginx 的 location 都對齊那一份，並有測試釘住相依閉包）。
+for _page_file in _PUBLIC_PAGES:
+    _serve_public_page(_page_file)
 
-
-@app.get("/proposal-plan.html", include_in_schema=False)
-async def _proposal_plan_page():
-    from starlette.responses import FileResponse, PlainTextResponse
-    if not os.path.isfile(_PROPOSAL_PAGE):
-        return PlainTextResponse("proposal-plan.html 未同步到本機", status_code=503)
-    return FileResponse(_PROPOSAL_PAGE, media_type="text/html")
-
+for _sub in _PUBLIC_MODULE_DIRS:
+    _d = os.path.join(_FRONTEND_DIR, *_sub.split("/"))
+    if os.path.isdir(_d):
+        app.mount("/" + _sub, _StaticFiles(directory=_d), name=_sub.replace("/", "_"))
 
 # 提案的 token 端點（10 條，全部吃 {token}）。⚠️ **絕不可**改成掛
 # api_proposals.router：那會把提案庫的 20+ 條內部端點（清單/統計/成案/刪除）
-# 曝在對外服務上。守衛：tests/unit/test_proposals_public_router.py。
+# 曝在對外服務上。守衛：tests/unit/test_public_surface.py。
 try:
     from routers.api_proposals import PROPOSALS_PREFIX as _PROP_PREFIX
     from routers.api_proposals import public_router as _prop_public
     app.include_router(_prop_public, prefix=_PROP_PREFIX)
 except Exception as _e:  # noqa: BLE001 — 缺 DB 套件的環境照常起，只是少這條路
     logging.getLogger(__name__).warning("[website-api] proposals public router 未掛載: %s", _e)
-
-# 公開頁需要的前端模組（只 serve 這兩個子目錄，不是整個 frontend/ ——
-# 那底下是內部 SPA 的全部原始碼，沒有理由送上對外服務）。
-for _sub in ("tabs/proposals", "js/shared"):
-    _d = os.path.join(_FRONTEND_DIR, *_sub.split("/"))
-    if os.path.isdir(_d):
-        app.mount("/" + _sub, _StaticFiles(directory=_d), name=_sub.replace("/", "_"))
 
 if os.path.isdir(os.path.join(_FRONTEND_DIR, "img")):
     app.mount("/img", _StaticFiles(directory=os.path.join(_FRONTEND_DIR, "img")),

@@ -35,7 +35,7 @@ NAS 端對外網站部署設定（Phase M 完整版 A）。
 | `Dockerfile.website` | 建立 `originsun/website-api:latest` image — python:3.11-slim + curl + pip 裝 requirements_website.txt |
 | `requirements_website.txt` | website-api 容器最小依賴（fastapi/uvicorn/sqlalchemy/asyncpg/httpx 等，**不含** ffmpeg/torch/whisper） |
 | `docker-compose.yml` | 定義 website-api service：mount `../code` → `/app`、env `DATABASE_URL`/`JWT_SECRET`/`MASTER_RELAY_URL`、接 `postgres_default` bridge |
-| `nginx/originsun.conf` | Website_Nginx 設定 — `^~ /_astro/` 長期 cache、`location /` try_files、`location /api/website/` proxy_pass website-api:8001 |
+| `nginx/originsun.conf` | Website_Nginx 設定 — `^~ /_astro/` 長期 cache、`location /` try_files、`location /api/website/` proxy_pass website-api:8001，外加**公開頁**那組（`/media-log.html`、`/proposal-plan.html`、`/img/`、`/tabs/proposals/`、`/js/shared/`、兩組 token API）—— 那組的清單正本在 `core/public_assets.py`，別只改這裡 |
 | `.env`（**不進 git**）| `DATABASE_URL` / `JWT_SECRET` / `WEBSITE_CORS_ORIGINS` / `MASTER_RELAY_URL` |
 
 ## NAS 路徑佈局
@@ -45,6 +45,8 @@ NAS 端對外網站部署設定（Phase M 完整版 A）。
 ├── code/             ← master /publish 自動 scp 同步
 │   ├── main_website.py
 │   ├── routers/, services/, core/, db/, config.py
+│   └── frontend/     ← 只有公開頁與它們 import 的模組目錄（**不是**整個
+│                        前端；清單在 core/public_assets.py，有測試釘住相依閉包）
 ├── dist/             ← master npm build 完 scp 同步
 ├── uploads/          ← 容器寫，圖片上傳放這
 └── docker/           ← 本目錄上 NAS 的副本（compose / nginx / .env）

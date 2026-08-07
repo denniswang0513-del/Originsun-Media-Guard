@@ -56,6 +56,38 @@ def _assets_auth(request: Request):
 
 
 _ROOT_SETTING_KEY = "proposals.root"
+_ROOT_PREFIX = "proposals."
+# 根目錄快取。這個值幾乎不變，但 _raw_root 在熱路徑上（每次列檔、每次上傳、
+# 客戶每下載一個檔都會問一次），而它現在要打 DB —— 不快取的話每個動作都多
+# 兩趟 LAN 往返。TTL 對齊本檔的 _OVERVIEW_SCAN_TTL；master 改設定時另外
+# 明確失效（見 set_proposal_assets_root），TTL 只是給 NAS 容器那側的保險：
+# 它不會收到 master 的寫入事件，靠 60 秒自己追上。
+_ROOT_TTL = 60
+_root_cache: dict = {"at": 0.0, "val": None}
+
+
+def invalidate_root_cache() -> None:
+    _root_cache["at"] = 0.0
+
+
+async def _db_root() -> str:
+    """DB settings 裡的 proposals.root；DB 不可用/未設 → ""。
+
+    用 get_prefixed 不是 get_all_settings —— 後者是整張 website_settings
+    無 WHERE 全撈（生產 100+ 列）只為了讀一個 key。"""
+    try:
+        from services.website import settings_service
+        factory = await _get_factory()
+        async with factory() as session:
+            vals = await settings_service.get_prefixed(session, _ROOT_PREFIX)
+        return str(vals.get(_ROOT_SETTING_KEY) or "").strip()
+    except Exception:
+        return ""                 # DB 不可用 → 呼叫端退 settings.json，不是錯誤
+
+
+def _json_root() -> str:
+    """settings.json 的那份（fallback）。"""
+    return str((load_settings().get("proposals") or {}).get("root") or "").strip()
 
 
 async def _raw_root() -> str:
@@ -69,18 +101,13 @@ async def _raw_root() -> str:
     settings.json 留作 fallback：DB 掛掉、或還沒跑過遷移的機器，行為與從前
     完全相同。遷移在 master 啟動時做一次（migrate_root_to_db）。
     """
-    try:
-        from db.session import get_session_factory
-        from services.website import settings_service
-        factory = get_session_factory()
-        if factory is not None:
-            async with factory() as session:
-                val = (await settings_service.get_all_settings(session)).get(_ROOT_SETTING_KEY)
-            if str(val or "").strip():
-                return str(val).strip()
-    except Exception:
-        pass                      # DB 不可用 → 退 settings.json，不是錯誤
-    return str((load_settings().get("proposals") or {}).get("root") or "").strip()
+    import time
+    c = _root_cache
+    if c["val"] is not None and time.monotonic() - c["at"] < _ROOT_TTL:
+        return c["val"]
+    val = await _db_root() or _json_root()
+    c.update(at=time.monotonic(), val=val)
+    return val
 
 
 async def proposals_root() -> str:
@@ -93,18 +120,15 @@ async def migrate_root_to_db() -> None:
     """settings.json 的 proposals.root → DB settings（一次性，冪等）。
     DB 已有值就不動；沒有 settings.json 值就沒事做。master 啟動時呼叫。"""
     try:
-        from db.session import get_session_factory
+        json_val = _json_root()
+        if not json_val or await _db_root():
+            return                     # DB 已是真相，別用舊的 json 蓋回去
         from services.website import settings_service
-        json_val = str((load_settings().get("proposals") or {}).get("root") or "").strip()
-        factory = get_session_factory()
-        if not json_val or factory is None:
-            return
+        factory = await _get_factory()
         async with factory() as session:
-            if str((await settings_service.get_all_settings(session)
-                    ).get(_ROOT_SETTING_KEY) or "").strip():
-                return                     # DB 已是真相，別用舊的 json 蓋回去
             await settings_service.update_settings(
                 session, {_ROOT_SETTING_KEY: json_val}, updated_by="migrate")
+        invalidate_root_cache()
         print(f"[migrate] proposals.root 已搬進 DB settings：{json_val}")
     except Exception as e:             # noqa: BLE001 — 遷移失敗只是繼續用 json
         print(f"[migrate] proposals.root 搬 DB 略過：{e}")
@@ -295,7 +319,8 @@ async def get_proposal_assets(project_id: str, request: Request, rel: str = ""):
     _assets_auth(request)
     _require_db()
     factory = await _get_factory()
-    root = await proposals_root()
+    raw = await _raw_root()            # 一次解析，root 與回應裡的 root 共用
+    root = to_local_path(raw)
     async with factory() as session:
         project = await session.get(CrmProject, project_id)
         if not project:
@@ -310,7 +335,7 @@ async def get_proposal_assets(project_id: str, request: Request, rel: str = ""):
     root_set, dirs, files, truncated, deck_rel = await asyncio.to_thread(
         _probe_folder, root, folder_abs, (target.deck_url if target else ""), rel)
     return {
-        "root": await _raw_root(),
+        "root": raw,
         "root_set": root_set,
         "folder_name": name,
         "project_folder": folder_abs,
@@ -363,6 +388,7 @@ async def set_proposal_assets_root(project_id: str, request: Request):
     # 整包 load_settings() 寫回會把 config.py 的預設值（含 database_url）固化
     # 進 settings.json，之後改預設值就再也不會生效。
     save_settings({"proposals": {"root": root}})
+    invalidate_root_cache()        # 下一次讀就拿到新值，不必等 TTL
     invalidate_folder_cache()      # root 換了，舊的子夾清單當然作廢
     return {"status": "ok", "root": root}
 
@@ -504,7 +530,8 @@ async def proposal_assets_overview(request: Request):
     _assets_auth(request)
     _require_db()
     factory = await _get_factory()
-    root = await proposals_root()
+    raw = await _raw_root()            # 一次解析（下面回應裡的 root 是同一份）
+    root = to_local_path(raw)
 
     from ._shared import Client
     async with factory() as session:
@@ -528,7 +555,7 @@ async def proposal_assets_overview(request: Request):
     out.sort(key=lambda x: x["folder_name"], reverse=True)
     # root_set 直接用「這次掃得到嗎」—— 用 `bool(names) or isdir()` 的話，
     # NAS 斷線時沿用的舊快取會讓它回 True，而這個欄位的用途正是告訴前端搆不到
-    return {"root": await _raw_root(), "root_set": reachable, "folders": out}
+    return {"root": raw, "root_set": reachable, "folders": out}
 
 
 async def _folder_or_404(folder: str) -> str:

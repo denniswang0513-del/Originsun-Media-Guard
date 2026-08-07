@@ -62,8 +62,12 @@ router = APIRouter(prefix=CRM_PREFIX, tags=["CRM"])
 # 對外白名單 —— NAS 對外容器只掛這一個 router（master 在 crm/__init__ 收編回
 # 主 router，URL 完全不變）。「這條端點可以對外」是整個 CRM 套件的橫切分類
 # （costs/showcase/staff 也有 token 端點），所以 seam 放在這裡而非某個領域模組：
-# 對外曝露面永遠只有**一個**物件、**一份**守衛測試
-# （tests/unit/test_media_log_public_router.py）。
+# **本套件**的對外曝露面只有這一個物件。
+#
+# 2026-08-07 起對外容器不只掛這一個 —— routers/api_proposals.py 有它自己的
+# public_router（前綴不同，一個 APIRouter 載不了兩種）。整個 app 的曝露面由
+# tests/unit/test_public_surface.py 一次列舉斷言；per-module 的
+# tests/unit/test_media_log_public_router.py 仍在，守的是「有人往這個物件加端點」。
 # 刻意不帶 prefix —— master 由上面 router 的 CRM_PREFIX 提供，NAS 掛載時自己指定。
 # ⚠ 往這裡加端點前先問：它真的該在對外服務上被匿名打到嗎？
 public_router = APIRouter(tags=["CRM 公開（token 授權）"])

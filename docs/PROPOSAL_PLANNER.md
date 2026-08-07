@@ -716,7 +716,7 @@ export const PLAN_EXAMPLES = { /* 紙船 + 登山總動員，見 §2.5 / §2.6 *
 | 網址 | `/proposal-plan.html`（清單）／`/proposal-plan.html?pid=<id>`（直達某份企劃） |
 | 閘門 | 未登入 → 登入卡（帳密 + Google GSI）；登入後檢查 admin 或 `api_proposals._check_auth` 的模組清單（2026-08-03 起含 `crm_projects`） |
 | robots | `<meta name="robots" content="noindex,nofollow">` |
-| 主機 | master／foundry（需 CRM 後端；NAS 官網容器沒有這些端點） |
+| 主機 | **兩邊都有**（2026-08-07）：登入模式在 master／foundry（需 CRM 後端）；公開 `?t=` 連結由 NAS 對外容器 serve，master 關機也開得了 —— 見 `core/public_assets.py` 與 `routers/api_proposals.public_router` |
 | 分享方式 | 直接把網址貼給同事，對方登入後即進到同一份企劃 |
 
 **登入後的兩層畫面**
@@ -808,7 +808,7 @@ overlay 與獨立網址**都呼叫它**，差別只在外層 class。
 | debounce 存檔 + 共編 → 延遲期間別人先寫入 | 縮短 debounce 到 800ms；409 後不覆蓋、跳提示 |
 | 兩個色系其一沒測到 | 驗收清單強制**兩邊都截圖**（比照 media-log 元件主題化當時的做法） |
 | 獨立網址被當成對外連結傳出去 | `noindex` + 登入閘門；頁面明示「內部工具」 |
-| NAS 官網容器沒有 CRM 端點 | 頁面只掛 master／foundry；文件註明，別誤推到 NAS |
+| ~~NAS 官網容器沒有 CRM 端點~~（2026-08-07 已解）| 提案的 10 條 token 端點搬進 `api_proposals.public_router`，對外容器只掛那一個（**不是**整個 router）；前端相依閉包由 `tests/unit/test_public_surface.py` 釘住 |
 
 ---
 
