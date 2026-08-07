@@ -70,6 +70,16 @@ export function wireFileDrop(zone, onFiles) {
     zone.addEventListener('drop', e => onFiles(e.dataTransfer.files));
 }
 
+/**
+ * 資料夾麵包屑：`"a/b/c"` → `[{label:'a',rel:'a'},{label:'b',rel:'a/b'},…]`。
+ * 逐層瀏覽資產資料夾的兩個消費端（提案庫的資料夾瀏覽器、專案的提案企劃分頁）
+ * 共用 —— 後端回的 rel 一律是 `/` 分隔、相對資料夾根。
+ */
+export function folderCrumbs(rel) {
+    const parts = String(rel || '').split('/').filter(Boolean);
+    return parts.map((label, i) => ({ label, rel: parts.slice(0, i + 1).join('/') }));
+}
+
 export async function resolveDropPath(e, file, index = 0) {
     // 方法1：text/uri-list（RFC 2483，CRLF 分隔）
     const uriList = e.dataTransfer.getData('text/uri-list');

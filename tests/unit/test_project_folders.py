@@ -8,10 +8,11 @@ from datetime import datetime
 import pytest
 
 from core.project_folders import (clean_filename, clean_name, dedupe,
-                                  list_folder_files, make_dated_folder_name,
+                                  list_folder_files, list_folder_level,
+                                  make_dated_folder_name,
                                   make_reference_folder_name, remap_prefix,
-                                  rename_and_remap, rename_dir, safe_rel_path,
-                                  safe_subfolder, save_uploads)
+                                  rename_and_remap, rename_dir, safe_rel_dir,
+                                  safe_rel_path, safe_subfolder, save_uploads)
 
 CREATED = datetime(2026, 8, 6, 15, 30)
 
@@ -266,6 +267,67 @@ class TestListFolderFiles:
 
     def test_missing_folder_is_empty_not_error(self, tmp_path):
         assert list_folder_files(str(tmp_path / "nope")) == ([], False)
+
+
+class TestSafeRelDir:
+    """逐層瀏覽的目錄版守衛（safe_rel_path 的孿生）。"""
+
+    def test_empty_rel_is_the_folder_itself(self, tmp_path):
+        assert safe_rel_dir(str(tmp_path), "") == str(tmp_path)
+
+    def test_nested_dir(self, tmp_path):
+        (tmp_path / "a" / "b").mkdir(parents=True)
+        got = safe_rel_dir(str(tmp_path), "a/b")
+        assert got == os.path.normpath(os.path.join(str(tmp_path), "a", "b"))
+
+    def test_rejects_traversal_file_and_missing(self, tmp_path):
+        (tmp_path / "secret").mkdir()
+        folder = tmp_path / "folder"
+        folder.mkdir()
+        (folder / "f.pdf").write_bytes(b"x")
+        assert safe_rel_dir(str(folder), "../secret") is None
+        assert safe_rel_dir(str(folder), "f.pdf") is None      # 檔案不是目錄
+        assert safe_rel_dir(str(folder), "gone") is None
+
+
+class TestListFolderLevel:
+    """單層列舉：子夾與檔案分開、rel 相對資料夾根、cap 涵蓋兩者。"""
+
+    def test_splits_dirs_and_files_at_this_level(self, tmp_path):
+        (tmp_path / "sub").mkdir()
+        (tmp_path / "sub" / "deep.pdf").write_bytes(b"x")
+        (tmp_path / "top.docx").write_bytes(b"xx")
+        dirs, files, truncated = list_folder_level(str(tmp_path))
+        assert truncated is False
+        assert [d["name"] for d in dirs] == ["sub"]
+        assert [d["rel"] for d in dirs] == ["sub"]
+        # 深層的檔案這一層看不到（那正是逐層的重點）
+        assert [f["filename"] for f in files] == ["top.docx"]
+
+    def test_rel_prefixes_children_for_download_endpoints(self, tmp_path):
+        deep = tmp_path / "a" / "b"
+        deep.mkdir(parents=True)
+        (deep / "c.pdf").write_bytes(b"x")
+        (deep / "d").mkdir()
+        dirs, files, _ = list_folder_level(str(deep), "a/b")
+        assert files[0]["rel"] == "a/b/c.pdf"      # 相對根，可直接餵下載端點
+        assert dirs[0]["rel"] == "a/b/d"
+
+    def test_skips_dot_and_underscore_dirs(self, tmp_path):
+        for d in (".git", "_tmp", "ok"):
+            (tmp_path / d).mkdir()
+        dirs, _files, _ = list_folder_level(str(tmp_path))
+        assert [d["name"] for d in dirs] == ["ok"]
+
+    def test_cap_counts_dirs_and_files_together(self, tmp_path):
+        for i in range(3):
+            (tmp_path / f"d{i}").mkdir()
+            (tmp_path / f"f{i}.pdf").write_bytes(b"x")
+        dirs, files, truncated = list_folder_level(str(tmp_path), cap=4)
+        assert len(dirs) + len(files) == 4 and truncated is True
+
+    def test_missing_dir_is_empty_not_error(self, tmp_path):
+        assert list_folder_level(str(tmp_path / "nope")) == ([], [], False)
 
 
 # ── 上傳落地：黑名單 / 大小上限 / 撞名（寫進共用磁碟的安全規則）──

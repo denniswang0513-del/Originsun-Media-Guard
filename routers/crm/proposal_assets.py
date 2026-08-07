@@ -27,10 +27,11 @@ from fastapi import File, HTTPException, Request, UploadFile
 from config import load_settings, save_settings
 from core.auth import check_admin_or_module
 from core.drive_map import to_canonical_path, to_local_path
-from core.project_folders import (list_folder_files, make_dated_folder_name,
-                                  remap_prefix, rename_and_remap, safe_rel_path,
-                                  safe_subfolder, save_uploads, taken_names,
-                                  within_dir)
+from core.project_folders import (clean_name, list_folder_level,
+                                  make_dated_folder_name, remap_prefix,
+                                  rename_and_remap, safe_rel_dir, safe_rel_path,
+                                  safe_subfolder, save_uploads, subfolder_path,
+                                  taken_names, within_dir)
 
 from ._shared import router, _check_auth, _get_factory, _now, _require_db
 
@@ -133,15 +134,28 @@ async def _resolve_asset_file(session, project_id: str, rel: str) -> str:
     return path
 
 
-async def _upload_result(folder_abs: str, files) -> dict:
-    """兩個上傳端點的共同回應：落地 + 回新的檔案清單（前端不必再打一次列檔）。
+async def _level(dir_abs: str, rel: str) -> dict:
+    """某一層的內容（子資料夾 + 檔案）—— 所有列檔/上傳回應的共同形狀。
+    rel 是相對**資料夾根**的路徑，下載/刪除端點吃的就是這個形式。"""
+    dirs, files, truncated = await asyncio.to_thread(list_folder_level, dir_abs, rel)
+    return {"rel": rel, "dirs": dirs, "files": files, "truncated": truncated}
+
+
+async def _subdir_or_404(folder_abs: str, rel: str) -> str:
+    """資料夾內的子層絕對路徑（rel 空 = 資料夾本身）；逃逸/不存在 → 404。"""
+    dir_abs = await asyncio.to_thread(safe_rel_dir, folder_abs, rel)
+    if not dir_abs:
+        raise HTTPException(status_code=404, detail="找不到子資料夾（或無法存取）")
+    return dir_abs
+
+
+async def _upload_result(dir_abs: str, files, rel: str = "") -> dict:
+    """兩個上傳端點的共同回應：落地 + 回這一層的新內容（前端不必再打一次列檔）。
     一個都沒存成（全被擋/全超限）→ 不重掃，前端手上那份還是對的。"""
-    saved, skipped = await save_uploads(folder_abs, files,
-                                        max_bytes=_MAX_UPLOAD_BYTES)
+    saved, skipped = await save_uploads(dir_abs, files, max_bytes=_MAX_UPLOAD_BYTES)
     out = {"status": "ok", "saved": saved, "skipped": skipped}
     if saved:
-        out["files"], out["truncated"] = await asyncio.to_thread(
-            list_folder_files, folder_abs)
+        out.update(await _level(dir_abs, rel))
     return out
 
 
@@ -158,8 +172,11 @@ async def _ensure_project_folder(session, project_id: str) -> str:
 #    root 本身是全站共用的一份設定）──────────────────────────────
 
 @router.get("/projects/{project_id}/proposal-assets")
-async def get_proposal_assets(project_id: str, request: Request):
+async def get_proposal_assets(project_id: str, request: Request, rel: str = ""):
     """提案資產夾現況：根目錄、是否搆得到、這個專案的資料夾（還沒建就先算給看）。
+
+    `rel` = 要看資料夾裡的哪一層（空 = 最外層）。逐層走而不是攤平整棵樹 ——
+    連結進來的舊資料夾常有 `@Data/03_製片檔案PPM/…` 好幾層。
 
     讀寫都放行專案/提案模組（見 _assets_auth）；改**根目錄**才要 admin。"""
     _assets_auth(request)
@@ -175,33 +192,36 @@ async def get_proposal_assets(project_id: str, request: Request):
             await _taken_names(session, exclude_project_id=project_id))
         target = await _deck_target(session, project_id)
     folder_abs = os.path.join(root, name) if root else ""
-    # 三個 NAS 探測（root isdir / 列檔 / deck 的 realpath）併成一次 to_thread：
+    # 所有 NAS 探測（root isdir / 列這一層 / deck 的 realpath）併成一次 to_thread：
     # UNC 斷線時每個都卡秒級且不重疊，分開跑等於使用者要等 3× timeout
-    root_set, files, truncated, deck_rel = await asyncio.to_thread(
-        _probe_folder, root, folder_abs, (target.deck_url if target else ""))
+    root_set, dirs, files, truncated, deck_rel = await asyncio.to_thread(
+        _probe_folder, root, folder_abs, (target.deck_url if target else ""), rel)
     return {
         "root": _raw_root(),
         "root_set": root_set,
         "folder_name": name,
         "project_folder": folder_abs,
         "deck_rel": deck_rel,
+        "rel": rel,
+        "dirs": dirs,
         "files": files,
         "truncated": truncated,
     }
 
 
-def _probe_folder(root: str, folder_abs: str, deck_url: str) -> tuple:
-    """一次跑完所有磁碟探測 → (root_set, files, truncated, deck_rel)。
+def _probe_folder(root: str, folder_abs: str, deck_url: str, rel: str = "") -> tuple:
+    """一次跑完所有磁碟探測 → (root_set, dirs, files, truncated, deck_rel)。
     在 to_thread 內執行 —— 全部是可能卡住的 UNC 操作。
 
     root 搆不到就**直接收工**：folder_abs 是 root 的子路徑，root 卡住時它
     必然也卡，繼續探等於讓使用者多等好幾個 UNC timeout。
-    （list_folder_files 對不存在的路徑本來就回空，不必另外 isdir 一次。）
+    資料夾還沒建（或 rel 指向不存在的層）→ 空清單，不是錯誤。
     """
     if not root or not os.path.isdir(root):
-        return False, [], False, ""
-    files, truncated = list_folder_files(folder_abs) if folder_abs else ([], False)
-    return True, files, truncated, _deck_rel(deck_url, folder_abs)
+        return False, [], [], False, ""
+    dir_abs = safe_rel_dir(folder_abs, rel) if folder_abs else None
+    dirs, files, truncated = list_folder_level(dir_abs, rel) if dir_abs else ([], [], False)
+    return True, dirs, files, truncated, _deck_rel(deck_url, folder_abs)
 
 
 @router.post("/projects/{project_id}/proposal-assets/settings")
@@ -224,17 +244,18 @@ async def set_proposal_assets_root(project_id: str, request: Request):
 # ── 資料夾內容操作（上傳 / 下載 / 刪除 / 指定簡報）──────────────
 
 @router.post("/projects/{project_id}/proposal-assets/upload")
-async def upload_proposal_assets(project_id: str, request: Request,
+async def upload_proposal_assets(project_id: str, request: Request, rel: str = "",
                                  files: List[UploadFile] = File(...)):
     """上傳檔案進專案的提案資產夾（可多檔）。資料夾不存在會先建出來 ——
-    這是「現有提案補檔案」的主要入口。落地規則見 core.save_uploads。"""
+    這是「現有提案補檔案」的主要入口。`rel` = 落在哪一層（空 = 最外層，
+    子層必須已存在）。落地規則見 core.save_uploads。"""
     _assets_auth(request)
     _require_db()
     factory = await _get_factory()
     async with factory() as session:
         folder = await _ensure_project_folder(session, project_id)
         await session.commit()          # 資料夾名可能剛生成，先落地
-    return await _upload_result(folder, files)
+    return await _upload_result(await _subdir_or_404(folder, rel), files, rel)
 
 
 @router.get("/projects/{project_id}/proposal-assets/file")
@@ -388,13 +409,13 @@ async def _folder_or_404(folder: str) -> str:
 
 
 @router.get("/proposal-assets/folder/files")
-async def proposal_folder_files(request: Request, folder: str = ""):
-    """任一資產資料夾的檔案清單（未連結專案的「過去資料夾」也能看）。"""
+async def proposal_folder_files(request: Request, folder: str = "", rel: str = ""):
+    """任一資產資料夾裡**某一層**的內容（未連結專案的「過去資料夾」也能看）。
+    `rel` 空 = 最外層；子資料夾走 dirs 回傳的 rel 再打一次。"""
     _assets_auth(request)
     folder_abs = await _folder_or_404(folder)
-    files, truncated = await asyncio.to_thread(list_folder_files, folder_abs)
-    return {"folder": folder, "count": len(files),
-            "truncated": truncated, "files": files}
+    out = await _level(await _subdir_or_404(folder_abs, rel), rel)
+    return {"folder": folder, "count": len(out["files"]), **out}
 
 
 @router.get("/proposal-assets/folder/file")
@@ -410,11 +431,114 @@ async def proposal_folder_file(request: Request, folder: str = "", rel: str = ""
 
 
 @router.post("/proposal-assets/folder/upload")
-async def proposal_folder_upload(request: Request, folder: str = "",
+async def proposal_folder_upload(request: Request, folder: str = "", rel: str = "",
                                  files: List[UploadFile] = File(...)):
-    """上傳檔案進任一資產資料夾（未連結專案的也可以 —— owner 指定）。"""
+    """上傳檔案進任一資產資料夾（未連結專案的也可以 —— owner 指定）。
+    `rel` = 落在哪一層（空 = 最外層；就是使用者目前看的那一層）。"""
     _assets_auth(request)
-    return await _upload_result(await _folder_or_404(folder), files)
+    folder_abs = await _folder_or_404(folder)
+    return await _upload_result(await _subdir_or_404(folder_abs, rel), files, rel)
+
+
+@router.post("/proposal-assets/folder/rename")
+async def proposal_folder_rename(request: Request):
+    """把資產根目錄底下的資料夾改名（body `{folder, new_name}`）。
+
+    已連結專案的資料夾也能從這裡改 —— deck_url 的絕對路徑同步更新，
+    `proposal_folder_name` 跟著改（同進退由 core.rename_and_remap 保證）。
+    只改**最外層**的資料夾名：它才是專案↔資料夾的對應鍵，子夾結構原封不動。
+    """
+    _assets_auth(request)
+    _require_db()
+    body = await request.json()
+    folder = str(body.get("folder") or "").strip()
+    raw = str(body.get("new_name") or "")
+    await _folder_or_404(folder)                   # 舊夾必須真的在
+    # 含路徑分隔＝可疑，直接擋（不要默默清成別的名字 —— 使用者會以為改成了他
+    # 打的那個。其餘非法字元照清，那些人本來就打不出有意義的東西）
+    if "/" in raw or "\\" in raw:
+        raise HTTPException(status_code=400, detail="資料夾名稱不可含 / 或 \\")
+    new_name = clean_name(raw)
+    if not new_name or not subfolder_path(proposals_root(), new_name):
+        raise HTTPException(status_code=400, detail="資料夾名稱無效")
+    if new_name == folder:
+        return {"status": "ok", "folder_name": folder, "changed": False}
+
+    factory = await _get_factory()
+    async with factory() as session:
+        project = await _project_of_folder(session, folder)
+        changed, err = await _rename_folder(session, folder, new_name, project)
+        if not changed:
+            raise HTTPException(status_code=400, detail=err or "改名失敗")
+        if project:
+            project.proposal_folder_name = new_name
+        await session.commit()
+    return {"status": "ok", "folder_name": new_name, "changed": True}
+
+
+@router.post("/proposal-assets/folder/link")
+async def proposal_folder_link(request: Request):
+    """把資產資料夾連結到某專案（body `{folder, project_id}`；project_id 空 = 解除連結）。
+
+    連結後這個資料夾**就是**該專案的提案資產夾：之後上傳的簡報落在這裡、
+    專案改名時資料夾跟著改名（舊名帶得動日期前綴就沿用，不會跳到今天）。
+
+    守衛：資料夾已被別的專案認領 → 400；目標專案已有**非空**的別夾 → 400
+    （不把既有資料默默改指到別處）。舊夾是空的就順手清掉，免得留一個
+    看起來像「過去的提案」的空殼在總覽上。
+    """
+    _assets_auth(request)
+    _require_db()
+    body = await request.json()
+    folder = str(body.get("folder") or "").strip()
+    project_id = str(body.get("project_id") or "").strip()
+    await _folder_or_404(folder)
+
+    factory = await _get_factory()
+    async with factory() as session:
+        holder = await _project_of_folder(session, folder)
+        if not project_id:                          # 解除連結
+            if holder:
+                holder.proposal_folder_name = None
+                await session.commit()
+            return {"status": "ok", "linked": False}
+        if holder and holder.id != project_id:
+            raise HTTPException(
+                status_code=400,
+                detail=f"資料夾「{folder}」已連結到專案「{holder.name or holder.id}」")
+        project = await _project_or_404(session, project_id)
+        old = project.proposal_folder_name
+        if old and old != folder:
+            old_abs = await asyncio.to_thread(safe_subfolder, proposals_root(), old)
+            if old_abs and await asyncio.to_thread(os.listdir, old_abs):
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"「{project.name}」已有資產資料夾「{old}」且裡面有檔案，"
+                           f"請先把檔案整理好（或改用改名）再連結")
+            if old_abs:
+                await asyncio.to_thread(_rmdir_quiet, old_abs)
+        project.proposal_folder_name = folder
+        await session.commit()
+        name = project.name or ""
+    invalidate_folder_cache()      # 剛清掉的空殼別再列
+    return {"status": "ok", "linked": True,
+            "project_id": project_id, "project_name": name}
+
+
+def _rmdir_quiet(path: str) -> None:
+    """刪一個**空**資料夾；刪不掉就算了（連結流程不該為了收拾殘留而失敗）。"""
+    try:
+        os.rmdir(path)
+    except OSError:
+        pass
+
+
+async def _project_of_folder(session, folder: str):
+    """認領這個資料夾的專案（沒有 → None）。`proposal_folder_name` 沒有 DB 唯一
+    約束，取第一筆即可 —— 連結端點會擋掉第二個認領者。"""
+    return (await session.execute(
+        select(CrmProject)
+        .where(CrmProject.proposal_folder_name == folder))).scalars().first()
 
 
 async def ensure_folder(session, project) -> str:
@@ -440,6 +564,41 @@ async def ensure_folder(session, project) -> str:
     return path
 
 
+async def _rename_folder(session, old_name: str, new_name: str, project) -> tuple:
+    """資產資料夾改名的**單一程序**（專案改名跟隨、使用者手動改名共用）
+    → `(changed, err)`。不 commit、也**不寫** `proposal_folder_name` ——
+    成功後由呼叫端寫，免得 savepoint 回滾時 ORM 屬性與磁碟不同步。
+    `project=None` = 未連結專案的資料夾（純磁碟改名）。
+    """
+    root = proposals_root()
+    if not root:
+        return False, "尚未設定提案資產根目錄"
+
+    async def _remap(old_dir: str, new_dir: str) -> None:
+        if project is None:
+            return
+        # 只撈 id/deck_url 兩欄 + 批次 update（整列 select 會把 plan 企劃矩陣
+        # 的 JSONB 一起拖出來，單筆可數十 KB）—— 與 media_log 的 _remap 同形狀
+        from sqlalchemy import update as sa_update
+        old_canon, new_canon = to_canonical_path(old_dir), to_canonical_path(new_dir)
+        rows = (await session.execute(
+            select(PreprodProposal.id, PreprodProposal.deck_url)
+            .where(PreprodProposal.project_id == project.id,
+                   PreprodProposal.deck_url.isnot(None)))).all()
+        updates = [{"id": pid, "deck_url": new}
+                   for pid, url in rows
+                   if (new := remap_prefix(url or "", old_canon, new_canon)) != (url or "")]
+        if updates:
+            await session.execute(sa_update(PreprodProposal), updates)
+
+    changed, err = await rename_and_remap(
+        session, os.path.join(root, old_name), os.path.join(root, new_name),
+        remap=_remap)
+    if changed:
+        invalidate_folder_cache()      # 總覽別再列舊名（點下去會 404）
+    return changed, err
+
+
 async def rename_project_folder(session, project_id: str, project_name: str,
                                 created: datetime) -> tuple:
     """專案改名 → 提案資產夾跟著改名。回 `(changed, err)`，不 commit。
@@ -450,8 +609,7 @@ async def rename_project_folder(session, project_id: str, project_name: str,
     project = await session.get(CrmProject, project_id)
     if not project or not project.proposal_folder_name:
         return False, ""              # 還沒建過夾 — 之後建夾自然用新名
-    root = proposals_root()
-    if not root:
+    if not proposals_root():
         return False, ""
     new_name = make_dated_folder_name(
         project_name, created,
@@ -459,27 +617,9 @@ async def rename_project_folder(session, project_id: str, project_name: str,
         existing=project.proposal_folder_name)
     if new_name == project.proposal_folder_name:
         return False, ""
-
-    async def _remap(old_dir: str, new_dir: str) -> None:
-        # 只撈 id/deck_url 兩欄 + 批次 update（整列 select 會把 plan 企劃矩陣
-        # 的 JSONB 一起拖出來，單筆可數十 KB）—— 與 media_log 的 _remap 同形狀
-        from sqlalchemy import update as sa_update
-        old_canon, new_canon = to_canonical_path(old_dir), to_canonical_path(new_dir)
-        rows = (await session.execute(
-            select(PreprodProposal.id, PreprodProposal.deck_url)
-            .where(PreprodProposal.project_id == project_id,
-                   PreprodProposal.deck_url.isnot(None)))).all()
-        updates = [{"id": pid, "deck_url": new}
-                   for pid, url in rows
-                   if (new := remap_prefix(url or "", old_canon, new_canon)) != (url or "")]
-        if updates:
-            await session.execute(sa_update(PreprodProposal), updates)
-
-    changed, err = await rename_and_remap(
-        session, os.path.join(root, project.proposal_folder_name),
-        os.path.join(root, new_name), remap=_remap)
+    changed, err = await _rename_folder(
+        session, project.proposal_folder_name, new_name, project)
     if not changed:
         return False, err
     project.proposal_folder_name = new_name
-    invalidate_folder_cache()      # 總覽別再列舊名（點下去會 404）
     return True, ""

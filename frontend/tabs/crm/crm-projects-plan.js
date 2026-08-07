@@ -9,7 +9,7 @@
 
 import { crmFetch, crmToast, esc } from './crm-utils.js';
 import { fmtSize } from '../../js/shared/clip_utils.js';
-import { authDownload, wireFileDrop } from '../../js/shared/utils.js';
+import { authDownload, folderCrumbs, wireFileDrop } from '../../js/shared/utils.js';
 import { tfetch } from '../proposals/prop-fetch.js';
 import { state } from './crm-projects-state.js';
 
@@ -105,29 +105,52 @@ function _mountAssetsCard(projectId, host, d) {
     });
 }
 
-// 檔案列表：標星號的是「提案簡報」（提案詳情與公開共編頁顯示的那一份）
+// 檔案列表：一次列一層（子資料夾可以走進去；連結進來的舊資料夾常有好幾層），
+// 標星號的是「提案簡報」（提案詳情與公開共編頁顯示的那一份）
 function _renderFiles(box, d) {
+    const dirs = d.dirs || [];
     const files = d.files || [];
     const list = box.querySelector('#pp-files');
-    if (!files.length) {
-        list.innerHTML = `<div style="padding:18px;text-align:center;color:#6b6b6b;font-size:12px;">
-            資料夾是空的 — 把檔案拖進來，或按「＋ 上傳檔案」</div>`;
+    const crumbs = _crumbsHtml(d);
+    if (!dirs.length && !files.length) {
+        list.innerHTML = crumbs + `<div style="padding:18px;text-align:center;color:#6b6b6b;font-size:12px;">
+            這一層是空的 — 把檔案拖進來，或按「＋ 上傳檔案」</div>`;
         return;
     }
-    list.innerHTML = files.map(f => {
-        const isDeck = f.rel === d.deck_rel;
-        return `
+    list.innerHTML = crumbs + dirs.map(x => `
+        <div data-dir="${esc(x.rel)}"
+             style="display:flex;align-items:center;gap:8px;padding:6px 10px;cursor:pointer;
+                    border-bottom:1px solid #242424;font-size:12.5px;">
+            <span style="color:#8b8b8b;">▸</span>
+            <span style="font-weight:600;">${esc(x.name)}</span>
+        </div>`).join('')
+        + files.map(f => {
+            const isDeck = f.rel === d.deck_rel;
+            return `
         <div class="pp-file" data-rel="${esc(f.rel)}"
              style="display:flex;align-items:center;gap:8px;padding:6px 10px;border-bottom:1px solid #242424;font-size:12.5px;">
             <span title="${isDeck ? '目前的提案簡報' : '設為提案簡報'}" data-deck
                   style="cursor:pointer;color:${isDeck ? '#fbbf24' : '#3a3a3a'};">★</span>
-            <span data-dl style="flex:1;cursor:pointer;" title="下載">${esc(f.rel)}</span>
+            <span data-dl style="flex:1;cursor:pointer;" title="下載">${esc(f.filename || f.rel)}</span>
             <span style="color:#6b6b6b;">${fmtSize(f.size_bytes)}</span>
             <span style="color:#6b6b6b;">${esc((f.mtime ? new Date(f.mtime * 1000).toISOString() : '').slice(0, 10))}</span>
             <button data-del class="crm-btn crm-btn-secondary crm-btn-sm" title="刪除">✕</button>
         </div>`;
-    }).join('') + (d.truncated
-        ? '<div style="padding:6px 10px;color:#fbbf24;font-size:11.5px;">檔案過多，只顯示前 1000 筆</div>' : '');
+        }).join('') + (d.truncated
+        ? '<div style="padding:6px 10px;color:#fbbf24;font-size:11.5px;">項目過多，只顯示前 1000 筆</div>' : '');
+}
+
+// 麵包屑（最外層不顯示 —— 沒得往回走時它只是噪音）
+function _crumbsHtml(d) {
+    const crumbs = folderCrumbs(d.rel);
+    if (!crumbs.length) return '';
+    return `<div style="padding:6px 10px;font-size:12px;border-bottom:1px solid #242424;">
+        <span data-crumb="" style="cursor:pointer;color:#60a5fa;">${esc(d.folder_name || '根目錄')}</span>`
+        + crumbs.map((c, i) => {
+            const last = i === crumbs.length - 1;
+            return ` <span style="color:#4b4b4b;">/</span> <span data-crumb="${esc(c.rel)}"
+                style="cursor:pointer;color:${last ? '#8b8b8b' : '#60a5fa'};">${esc(c.label)}</span>`;
+        }).join('') + '</div>';
 }
 
 function _wireUpload(projectId, box, host, d) {
@@ -147,19 +170,31 @@ function _wireUpload(projectId, box, host, d) {
         });
     };
 
+    // 走進子資料夾 / 麵包屑往回 —— 換 d 的這一層再重畫（企劃矩陣不受影響）
+    const goto = async (rel) => {
+        try {
+            const r = await crmFetch(
+                `/projects/${projectId}/proposal-assets?rel=${encodeURIComponent(rel)}`);
+            Object.assign(d, r);
+            repaint();
+        } catch (e) { alert('開啟資料夾失敗：' + (e.message || e)); }
+    };
+
     const send = async (fileList) => {
         if (!fileList || !fileList.length) return;
         const fd = new FormData();
         for (const f of fileList) fd.append('files', f);
         try {
-            const r = await crmFetch(`/projects/${projectId}/proposal-assets/upload`,
+            // 落在使用者目前看的那一層
+            const r = await crmFetch(`/projects/${projectId}/proposal-assets/upload`
+                + `?rel=${encodeURIComponent(d.rel || '')}`,
                 { method: 'POST', body: fd });   // crmFetch 認得 FormData，不設 Content-Type
             const bad = (r.skipped || []).map(s => `${s.filename}（${s.reason}）`);
             crmToast(`已上傳 ${(r.saved || []).length} 個檔案`
                 + (bad.length ? `；略過 ${bad.length} 個` : ''), bad.length ? 6000 : 2000);
             if (bad.length) console.warn('略過：', bad.join('、'));
-            if (r.files) {                      // 端點順手回了新清單，不必再掃一次
-                Object.assign(d, { files: r.files, truncated: r.truncated });
+            if (r.files) {                      // 端點順手回了這一層，不必再掃一次
+                Object.assign(d, { dirs: r.dirs, files: r.files, truncated: r.truncated });
                 repaint();
             }
         } catch (e) { alert('上傳失敗：' + (e.message || e)); }
@@ -171,6 +206,8 @@ function _wireUpload(projectId, box, host, d) {
 
     // 列表操作（事件委派 —— 列表每次重畫）
     box.querySelector('#pp-files').addEventListener('click', async (e) => {
+        const nav = e.target.closest('[data-dir],[data-crumb]');
+        if (nav) { goto(nav.dataset.dir ?? nav.dataset.crumb); return; }
         const row = e.target.closest('.pp-file');
         if (!row) return;
         const rel = row.dataset.rel;

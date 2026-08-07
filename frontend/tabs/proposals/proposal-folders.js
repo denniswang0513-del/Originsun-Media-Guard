@@ -6,25 +6,38 @@
  * - 已連結：`crm_projects.proposal_folder_name` 指到它（帶專案名/客戶）
  * - 未連結：磁碟上有、系統沒登記（過去的那些）
  *
- * 刻意**不做**「連結到專案」—— owner 選擇讓舊資料夾獨立存在。
+ * owner 2026-08-07 追加三件事：
+ * - **逐層瀏覽**：舊資料夾常有 `@Data/03_製片檔案PPM/…` 好幾層，攤平成一長串
+ *   路徑既看不出結構、又要整棵樹掃 NAS。改成一次列一層 + 麵包屑。
+ * - **改名**：連結專案的一起改（deck_url 同步，後端 rename_and_remap 保證同進退）。
+ * - **連結專案**：連上之後它就是該專案的提案資產夾（簡報落這裡、專案改名跟著改）。
+ *
  * 檔案清單純掃磁碟即時列（後端不建索引表）。
  */
 
 import { esc } from '../website/website-utils.js';
 import { fmtSize } from '../../js/shared/clip_utils.js';
-import { authDownload, wireFileDrop } from '../../js/shared/utils.js';
+import { authDownload, folderCrumbs, wireFileDrop } from '../../js/shared/utils.js';
 import { tfetch } from './prop-fetch.js';
 
 const API = '/api/v1/crm/proposal-assets';
 
 let _folders = [];       // 整份清單（overview 不分頁，搜尋就地過濾）
 let _open = '';          // 目前展開的資料夾名
-let _filesOf = {};       // folder → 已載入的檔案清單（搜尋重畫時不必再打 NAS）
+let _rel = '';           // 展開的資料夾內目前在看哪一層（'' = 最外層）
+let _level = {};         // `folder|rel` → 已載入的該層內容（搜尋重畫時不必再打 NAS）
+let _action = '';        // 展開的資料夾上開著哪個操作列：'' / 'rename' / 'link'
+let _projects = null;    // 連結專案的下拉清單（懶載快取）
+
+const _key = (folder, rel) => `${folder}|${rel}`;
 
 export async function openFolderBrowser(mountOverlay) {
+    // 模組層狀態 —— 不重設的話重開會停在上次的資料夾/層級（或「載入中…」）
     _folders = [];
-    _filesOf = {};
-    _open = '';          // 模組層狀態 —— 不重設的話重開會停在「載入檔案中…」
+    _level = {};
+    _open = '';
+    _rel = '';
+    _action = '';
     const ov = mountOverlay(`
         <div class="prop-panel" style="width:min(900px,96vw);">
             <div class="prop-panel-head">
@@ -48,23 +61,41 @@ function _bind(ov) {
     // （後端那趟還會重跑一次 CrmProject×Client 的 join）
     ov.querySelector('#pf-q').addEventListener('input', () => _render(ov));
     // 事件委派：列表每次重畫
-    ov.querySelector('#pf-list').addEventListener('click', async (e) => {
-        const head = e.target.closest('[data-folder]');
-        const fileRow = e.target.closest('[data-rel]');
-        if (fileRow) {
-            const { folder, rel } = fileRow.dataset;
-            if (e.target.closest('[data-dl]')) {
-                authDownload(
-                    `${API}/folder/file?folder=${encodeURIComponent(folder)}&rel=${encodeURIComponent(rel)}`,
-                    rel);
-            }
-            return;
-        }
-        if (!head) return;
-        const name = head.dataset.folder;
-        _open = _open === name ? '' : name;      // 再點一次收合
-        _render(ov);                              // 展開後由 _render 負責載/填
-    });
+    ov.querySelector('#pf-list').addEventListener('click', (e) => _onClick(ov, e));
+}
+
+function _onClick(ov, e) {
+    // 操作鈕在資料夾標題列裡（標題列本身是展開/收合），所以先攔它們
+    const act = e.target.closest('[data-act]');
+    if (act) {
+        const want = act.dataset.act;
+        const name = act.closest('[data-folder]').dataset.folder;
+        if (_open !== name) { _open = name; _rel = ''; }
+        _action = _action === want ? '' : want;
+        _render(ov);
+        return;
+    }
+    const nav = e.target.closest('[data-dir],[data-crumb]');
+    if (nav) {
+        _rel = nav.dataset.dir ?? nav.dataset.crumb;
+        _render(ov);
+        return;
+    }
+    const file = e.target.closest('[data-file]');
+    if (file) {
+        const rel = file.dataset.file;
+        authDownload(
+            `${API}/folder/file?folder=${encodeURIComponent(_open)}&rel=${encodeURIComponent(rel)}`,
+            rel);
+        return;
+    }
+    const head = e.target.closest('[data-folder]');
+    if (!head) return;
+    const name = head.dataset.folder;
+    _open = _open === name ? '' : name;      // 再點一次收合
+    _rel = '';
+    _action = '';
+    _render(ov);                              // 展開後由 _render 負責載/填
 }
 
 async function _load(ov) {
@@ -108,31 +139,132 @@ function _render(ov) {
                 <span style="color:#8b8b8b;">${open ? '▾' : '▸'}</span>
                 <span style="font-weight:600;">${esc(f.folder_name)}</span>
                 ${tag}
+                <span style="flex:1;"></span>
+                ${f.missing_on_disk ? '' : `
+                    <button data-act="rename" class="prop-btn ghost">改名</button>
+                    <button data-act="link" class="prop-btn ghost">${f.linked ? '改連結' : '連結專案'}</button>`}
             </div>
             ${open ? `<div style="border-top:1px solid #242424;">
+                <div id="pf-action">${_actionHtml(f)}</div>
+                <div id="pf-crumbs" style="padding:6px 12px 0;font-size:12px;">${_crumbsHtml()}</div>
                 <div style="padding:6px 12px;">
-                    <button data-upload class="prop-btn ghost">＋ 上傳檔案到這個資料夾</button>
+                    <button data-upload class="prop-btn ghost">＋ 上傳檔案到這一層</button>
                     <span class="prop-note" style="margin-left:8px;">也可以把檔案拖進來</span>
                 </div>
                 <div id="pf-files" style="padding:0 0 4px;">
-                    <div class="prop-note" style="padding:8px 12px;">載入檔案中…</div>
+                    <div class="prop-note" style="padding:8px 12px;">載入中…</div>
                 </div>
             </div>` : ''}
         </div>`;
     }).join('');
     if (!_open) return;
-    _wireDrop(ov, _open);
-    // 重畫（例如打字搜尋）後把已載入的檔案填回去 —— 不然展開中的資料夾會被
-    // 洗成「載入檔案中…」並卡在那，使用者得收合再展開、多打一次 NAS 全掃
-    const cached = _filesOf[_open];
-    if (cached) _paintFiles(ov, _open, cached.files, cached.truncated);
-    else _loadFiles(ov, _open);
+    _wireAction(ov);
+    _wireDrop(ov);
+    // 重畫（例如打字搜尋）後把已載入的這一層填回去 —— 不然展開中的資料夾會被
+    // 洗成「載入中…」並卡在那，使用者得收合再展開、多打一次 NAS 掃描
+    const cached = _level[_key(_open, _rel)];
+    if (cached) _paint(ov, cached);
+    else _loadLevel(ov, _open, _rel);
+}
+
+// ── 麵包屑：根 / 子夾 / 子夾… ───────────────────────────────
+function _crumbsHtml() {
+    const crumbs = folderCrumbs(_rel);
+    const root = `<span data-crumb="" style="cursor:pointer;color:${
+        _rel ? '#60a5fa' : '#8b8b8b'};">${esc(_open)}</span>`;
+    return root + crumbs.map((c, i) => {
+        const last = i === crumbs.length - 1;
+        return ` <span style="color:#4b4b4b;">/</span> <span data-crumb="${esc(c.rel)}"
+            style="cursor:pointer;color:${last ? '#8b8b8b' : '#60a5fa'};">${esc(c.label)}</span>`;
+    }).join('');
+}
+
+// ── 改名 / 連結專案的操作列（就地展開，不另開視窗）──────────────
+function _actionHtml(f) {
+    if (_action === 'rename') {
+        return `<div style="display:flex;gap:6px;align-items:center;padding:8px 12px;background:#161616;">
+            <span class="prop-note">新資料夾名稱</span>
+            <input id="pf-newname" type="text" value="${esc(f.folder_name)}" style="flex:1;">
+            <button id="pf-rename-go" class="prop-btn">改名</button>
+        </div>`;
+    }
+    if (_action === 'link') {
+        return `<div style="padding:8px 12px;background:#161616;">
+            <div class="prop-note" style="margin-bottom:6px;">
+                連結後這個資料夾就是該專案的提案資產夾 —— 之後上傳的簡報會落在這裡，
+                專案改名時資料夾也會跟著改名。${f.linked
+                    ? `目前連結：<b>${esc(f.project_name || '')}</b>` : ''}
+            </div>
+            <div style="display:flex;gap:6px;align-items:center;">
+                <select id="pf-proj" style="flex:1;"><option value="">載入專案清單…</option></select>
+                <button id="pf-link-go" class="prop-btn">連結</button>
+                ${f.linked ? '<button id="pf-unlink" class="prop-btn ghost">解除連結</button>' : ''}
+            </div>
+        </div>`;
+    }
+    return '';
+}
+
+function _wireAction(ov) {
+    const folder = _open;
+    ov.querySelector('#pf-rename-go')?.addEventListener('click', async () => {
+        const name = ov.querySelector('#pf-newname').value.trim();
+        if (!name || name === folder) { _action = ''; _render(ov); return; }
+        try {
+            const d = await tfetch(`${API}/folder/rename`,
+                { method: 'POST', json: { folder, new_name: name } });
+            _level = {};                 // 快取的 key 帶舊資料夾名，整份作廢
+            _open = d.folder_name || name;
+            _rel = '';
+            _action = '';
+            await _load(ov);
+        } catch (e) { alert('改名失敗：' + (e.message || e)); }
+    });
+
+    const sel = ov.querySelector('#pf-proj');
+    if (sel) {
+        _loadProjects()
+            .then(list => {
+                if (!sel.isConnected) return;
+                sel.innerHTML = '<option value="">— 選擇專案 —</option>'
+                    + list.map(p => `<option value="${esc(p.id)}">${esc(p.name)}${
+                        p.client_short_name ? '（' + esc(p.client_short_name) + '）' : ''}</option>`).join('');
+                // 選項灌進去後由全域 select-upgrade 自動升級成可搜尋下拉（≥8 項）
+            })
+            .catch(e => { sel.innerHTML = `<option value="">載入失敗：${esc(e.message || e)}</option>`; });
+    }
+    ov.querySelector('#pf-link-go')?.addEventListener('click', () => {
+        const pid = ov.querySelector('#pf-proj').value;
+        if (!pid) { alert('請先選一個專案'); return; }
+        _link(ov, folder, pid);
+    });
+    ov.querySelector('#pf-unlink')?.addEventListener('click', () => {
+        if (confirm('解除連結？資料夾與裡面的檔案都會留著，只是不再屬於這個專案。')) {
+            _link(ov, folder, '');
+        }
+    });
+}
+
+async function _link(ov, folder, projectId) {
+    try {
+        await tfetch(`${API}/folder/link`,
+            { method: 'POST', json: { folder, project_id: projectId } });
+        _action = '';
+        await _load(ov);         // 連結狀態來自 DB，重撈一次總覽最準
+    } catch (e) { alert('連結失敗：' + (e.message || e)); }
+}
+
+async function _loadProjects() {
+    if (!_projects) _projects = (await tfetch('/api/v1/crm/projects')).projects || [];
+    return _projects;
 }
 
 // 上傳（按鈕 + 拖放）—— 未連結專案的「過去資料夾」也能丟檔（owner 指定）
-function _wireDrop(ov, folder) {
+function _wireDrop(ov) {
     const zone = ov.querySelector('#pf-files')?.parentElement;
     if (!zone) return;
+    const folder = _open;
+    const rel = _rel;
     const send = async (fileList) => {
         if (!fileList || !fileList.length) return;
         const fd = new FormData();
@@ -140,12 +272,12 @@ function _wireDrop(ov, folder) {
         try {
             // 走 tfetch（不是手刻 fetch）—— 錯誤形狀與 warning 浮出都掛在它身上；
             // 它只帶 Accept + Authorization，FormData 的 boundary 不會被蓋掉
-            const d = await tfetch(`${API}/folder/upload?folder=${encodeURIComponent(folder)}`,
-                { method: 'POST', body: fd });
+            const d = await tfetch(`${API}/folder/upload?folder=${encodeURIComponent(folder)}`
+                + `&rel=${encodeURIComponent(rel)}`, { method: 'POST', body: fd });
             const bad = (d.skipped || []).map(s => `${s.filename}（${s.reason}）`);
             if (bad.length) alert('部分檔案未上傳：\n' + bad.join('\n'));
-            // 一個都沒存成時端點不回 files（省一次全掃）→ 畫面維持原樣
-            if (d.files) _paintFiles(ov, folder, d.files, d.truncated);
+            // 一個都沒存成時端點不回這一層的內容（省一次掃描）→ 畫面維持原樣
+            if (d.files) _paint(ov, d, folder, rel);
         } catch (e) { alert('上傳失敗：' + (e.message || e)); }
     };
     zone.querySelector('[data-upload]')?.addEventListener('click', () => {
@@ -158,12 +290,13 @@ function _wireDrop(ov, folder) {
     wireFileDrop(zone, send);
 }
 
-async function _loadFiles(ov, folder) {
+async function _loadLevel(ov, folder, rel) {
     const box = ov.querySelector('#pf-files');
     if (!box) return;
     try {
-        const d = await tfetch(`${API}/folder/files?folder=${encodeURIComponent(folder)}`);
-        _paintFiles(ov, folder, d.files || [], d.truncated);
+        const d = await tfetch(`${API}/folder/files?folder=${encodeURIComponent(folder)}`
+            + `&rel=${encodeURIComponent(rel)}`);
+        _paint(ov, d, folder, rel);
     } catch (e) {
         if (box.isConnected) {
             box.innerHTML = `<div class="prop-note" style="padding:8px 12px;color:#f87171;">載入失敗：${esc(e.message || e)}</div>`;
@@ -171,17 +304,30 @@ async function _loadFiles(ov, folder) {
     }
 }
 
-function _paintFiles(ov, folder, files, truncated) {
-    _filesOf[folder] = { files, truncated };
+function _paint(ov, d, folder = _open, rel = _rel) {
+    _level[_key(folder, rel)] = d;
     const box = ov.querySelector('#pf-files');
-    if (!box || !box.isConnected) return;
-    box.innerHTML = files.length ? files.map(f => `
-        <div data-folder="${esc(folder)}" data-rel="${esc(f.rel)}"
+    // 載入期間使用者可能已經走到別層 —— 舊回應不覆蓋新畫面
+    if (!box || !box.isConnected || folder !== _open || rel !== _rel) return;
+    const dirs = d.dirs || [];
+    const files = d.files || [];
+    if (!dirs.length && !files.length) {
+        box.innerHTML = '<div class="prop-note" style="padding:8px 12px;">這個資料夾是空的</div>';
+        return;
+    }
+    box.innerHTML = dirs.map(x => `
+        <div data-dir="${esc(x.rel)}"
+             style="display:flex;gap:8px;align-items:center;padding:5px 12px 5px 24px;
+                    font-size:12.5px;cursor:pointer;">
+            <span style="color:#8b8b8b;">▸</span>
+            <span style="font-weight:600;">${esc(x.name)}</span>
+        </div>`).join('')
+        + files.map(f => `
+        <div data-file="${esc(f.rel)}"
              style="display:flex;gap:8px;align-items:center;padding:5px 12px 5px 30px;font-size:12.5px;">
-            <span data-dl style="flex:1;cursor:pointer;" title="下載">${esc(f.rel)}</span>
+            <span style="flex:1;cursor:pointer;" title="下載">${esc(f.filename)}</span>
             <span style="color:#6b6b6b;">${fmtSize(f.size_bytes)}</span>
             <span style="color:#6b6b6b;">${esc(new Date(f.mtime * 1000).toISOString().slice(0, 10))}</span>
         </div>`).join('')
-        + (truncated ? '<div class="prop-note" style="padding:6px 12px;color:#fbbf24;">檔案過多，只顯示前 1000 筆</div>' : '')
-        : '<div class="prop-note" style="padding:8px 12px;">這個資料夾是空的</div>';
+        + (d.truncated ? '<div class="prop-note" style="padding:6px 12px;color:#fbbf24;">項目過多，只顯示前 1000 筆</div>' : '');
 }

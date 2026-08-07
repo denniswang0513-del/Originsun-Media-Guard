@@ -210,6 +210,16 @@ def safe_rel_path(folder_abs: str, rel: str) -> Optional[str]:
     return p
 
 
+def safe_rel_dir(folder_abs: str, rel: str) -> Optional[str]:
+    """folder 內相對路徑 → 絕對**目錄**路徑（rel 空 = folder 本身）；逃出或非目錄 → None。
+    `safe_rel_path` 的目錄版 —— 逐層瀏覽時每一層都要重驗，不能只驗最外層。"""
+    r = str(rel or "").replace("\\", "/").strip().strip("/")
+    p = os.path.normpath(os.path.join(folder_abs, r)) if r else folder_abs
+    if not within_dir(folder_abs, p) or not os.path.isdir(p):
+        return None
+    return p
+
+
 FOLDER_VIEW_CAP = 1000   # 單夾列檔上限（超過標 truncated，避免超大夾逐檔 stat 卡死）
 
 
@@ -276,6 +286,47 @@ def list_folder_files(folder_abs: str, *, cap: int = FOLDER_VIEW_CAP,
         })
     out.sort(key=lambda x: x["mtime"], reverse=True)
     return out, truncated
+
+
+def list_folder_level(dir_abs: str, rel: str = "", *, cap: int = FOLDER_VIEW_CAP,
+                      accept: Optional[Callable[[str], bool]] = None) -> tuple:
+    """**單層**列舉 → `(dirs, files, truncated)`，子資料夾依名稱、檔案依 mtime 新→舊。
+
+    給「可以走進子資料夾」的瀏覽 UI 用（`list_folder_files` 是整棵樹攤平，
+    深的資料夾等於一次把整個 NAS 子樹掃完 —— 使用者只想看第一層時很不划算，
+    而且攤平後看不出原本的目錄結構）。
+
+    `dir_abs` 是**已驗證**的絕對目錄（呼叫端先過 `safe_rel_dir`）；`rel` 只用來
+    組回傳的相對路徑（相對**資料夾根**，下載/刪除端點吃的就是這個形式），
+    不參與開檔 —— 路徑一律以 dir_abs 為準，避免兩個來源各走各的。
+    """
+    prefix = (str(rel or "").strip("/") + "/") if str(rel or "").strip("/") else ""
+    dirs: list = []
+    files: list = []
+    truncated = False
+    try:
+        with os.scandir(dir_abs) as it:
+            for e in it:
+                if len(dirs) + len(files) >= cap:
+                    truncated = True
+                    break
+                try:
+                    if e.is_dir():
+                        if e.name[:1] not in (".", "_"):
+                            dirs.append({"name": e.name, "rel": prefix + e.name})
+                        continue
+                    if accept is not None and not accept(e.name):
+                        continue
+                    st = e.stat()      # 目錄列舉已帶回，不再打一次 SMB
+                except OSError:
+                    continue
+                files.append({"rel": prefix + e.name, "filename": e.name,
+                              "size_bytes": int(st.st_size), "mtime": st.st_mtime})
+    except OSError:
+        return [], [], False
+    dirs.sort(key=lambda d: d["name"])
+    files.sort(key=lambda f: f["mtime"], reverse=True)
+    return dirs, files, truncated
 
 
 # ── 往共用資料夾寫檔：安全規則 + 落地（任何 any-file 上傳端點共用）──
