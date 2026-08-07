@@ -878,6 +878,11 @@ _INFO_TEXT_MAX = 8 * 1024
 # 訪客這條在物理上構不到對外分享以外的東西，不必靠呼叫端記得傳對旗標。
 
 
+# 未登入的大檔出口 —— 一個客戶正常瀏覽一次抓幾份檔案，20/分鐘綽綽有餘；
+# 連結外流被人拿去掃就會撞到牆。（loopback 由 rate_limit 自己 bypass。）
+_SHARED_DOWNLOAD_PER_MIN = 20
+
+
 async def _shared_folder_root(token: str) -> str:
     """token → 該提案的對外分享夾（沒開放 → ""）。授權與 root 解析綁在一起，
     呼叫端拿不到「未經授權的路徑」這種中間狀態。"""
@@ -892,29 +897,32 @@ async def _shared_folder_root(token: str) -> str:
 
 @router.get("/shared/{token}/folder")
 async def list_shared_folder(token: str, rel: str = ""):
-    """公開連結的資料夾內容（唯讀，逐層）。沒開放分享夾 → 空清單而不是 404：
-    公開頁據此把分頁藏起來，不必為了「有沒有」多打一支端點。"""
-    from core.project_folders import list_folder_level
+    """公開連結的資料夾內容（唯讀，逐層）。回應形狀共用 proposal_assets._level。
+
+    最外層不存在（還沒建對外分享夾）→ 空清單 + `enabled:false`，不是 404：
+    公開頁據此決定要不要顯示分頁。進到子層才把「找不到」當錯誤。"""
+    from routers.crm.proposal_assets import _level
     root = await _shared_folder_root(token)
-    got = await asyncio.to_thread(list_folder_level, root, rel) if root else None
-    if got is None and rel:
-        raise HTTPException(status_code=404, detail="找不到這個資料夾")
-    dirs, files, truncated = got or ([], [], False)
-    return {"rel": rel, "dirs": dirs, "files": files, "truncated": truncated,
-            "enabled": bool(root)}
+    out = await _level(root, rel, missing_ok=not rel)
+    out.pop("public_subfolder", None)      # 內部命名慣例，不外送
+    # 最外層有東西 or 資料夾真的在 → 分頁值得顯示
+    return {**out, "enabled": bool(out["dirs"] or out["files"])}
 
 
 @router.get("/shared/{token}/folder/file")
-async def download_shared_folder_file(token: str, rel: str = ""):
-    """公開連結下載單檔。路徑防護走 core.safe_rel_path，root 同樣只由
-    public_share_dir 決定 —— 對外分享夾以外的檔案在這裡構不到。"""
+async def download_shared_folder_file(token: str, rel: str = "", request: Request = None):
+    """公開連結下載單檔。root 只由 public_share_dir 決定 —— 對外分享夾以外的
+    檔案在這裡構不到（防護走 proposal_assets.file_or_404）。
+
+    有限流：這是**未登入**的大檔出口（提案影片動輒數百 MB），連結一旦外流，
+    沒有上限就等於把 NAS 頻寬送出去。"""
     from fastapi.responses import FileResponse
 
-    from core.project_folders import safe_rel_path
-    root = await _shared_folder_root(token)
-    path = await asyncio.to_thread(safe_rel_path, root, rel) if root else None
-    if not path:
-        raise HTTPException(status_code=404, detail="找不到檔案")
+    from routers.crm.proposal_assets import file_or_404
+    from routers.website._common import rate_limit
+    if request is not None:
+        rate_limit(request, max_per_minute=_SHARED_DOWNLOAD_PER_MIN)
+    path = await file_or_404(await _shared_folder_root(token), rel)
     return FileResponse(path, filename=os.path.basename(path))
 
 

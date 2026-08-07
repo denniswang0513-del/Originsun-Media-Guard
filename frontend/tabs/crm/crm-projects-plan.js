@@ -62,6 +62,8 @@ function _mountAssetsCard(projectId, host, d) {
                     style="font-size:11.5px;color:#8b8b8b;cursor:pointer;text-decoration:underline;text-underline-offset:3px;"
                     >${esc(d.folder_name)}</code>` : ''}
                 <span style="flex:1;"></span>
+                <button id="pp-share-dir" class="crm-btn crm-btn-secondary crm-btn-sm"
+                        style="display:none;" title="建立客戶看得到的資料夾">＋ 對外分享夾</button>
                 <button id="pp-mkdir" class="crm-btn crm-btn-secondary crm-btn-sm">＋ 新增資料夾</button>
                 <button id="pp-add" class="crm-btn crm-btn-primary crm-btn-sm">＋ 上傳檔案</button>
                 <button id="pp-open" class="crm-btn crm-btn-secondary crm-btn-sm"
@@ -166,7 +168,8 @@ function _wireUpload(projectId, box, host, d) {
     const drop = box.querySelector('#pp-drop');
     // 先改 d、再無參重畫 —— 只重繪檔案區，不重跑 loadPlanTab（那會連
     // plan-matrix 一起重畫，使用者正在編的格子與捲動位置都沒了）
-    const repaint = () => _renderFiles(box, d);
+    // 每次重畫都跟著決定「建立對外分享夾」要不要出現（走進子層就該收起來）
+    const repaint = () => { _renderFiles(box, d); syncShareBtn(); };
     // 走過的層記在 levels：往回走是最常見的動作，重打一次是整趟 NAS 掃描。
     // 存**快照**不是 d 本身 —— d 會被後續導覽 Object.assign 覆寫，存參照等於
     // 「回最外層」拿回來的是當前那一層。
@@ -177,6 +180,14 @@ function _wireUpload(projectId, box, host, d) {
         if (r) Object.assign(d, { dirs: r.dirs, files: r.files, truncated: r.truncated });
         levels.set(d.rel || '', { ...d });
         repaint();
+    };
+    // 「建立對外分享夾」只在最外層、且還沒有那個夾時出現。
+    // 🔴 名字由這裡帶常數送出去，不讓人手打 —— 打成「對外分享用」那種一字之差，
+    // 分享會靜靜失效（客戶端分頁不出現、這裡 badge 不見，兩邊都沒有錯誤訊息）。
+    const syncShareBtn = () => {
+        const has = (d.dirs || []).some(x => x.name === d.public_subfolder);
+        box.querySelector('#pp-share-dir').style.display =
+            (!d.rel && d.public_subfolder && !has) ? '' : 'none';
     };
     // 標星號：只動兩顆 span，不為了換一個顏色重建整張列表（可能上千列）
     const markDeck = (rel) => {
@@ -224,17 +235,25 @@ function _wireUpload(projectId, box, host, d) {
     input.addEventListener('change', () => { send(input.files); input.value = ''; });
     wireFileDrop(drop, send);
 
+    const mkdir = async (name, rel) => {
+        const r = await crmFetch(`/projects/${projectId}/proposal-assets/mkdir`
+            + `?rel=${encodeURIComponent(rel)}`,
+            { method: 'POST', body: JSON.stringify({ name }) });
+        crmToast(`已建立「${r.created}」`);
+        applyLevel(r);
+    };
+
     box.querySelector('#pp-mkdir').addEventListener('click', async () => {
-        const name = prompt('新資料夾名稱（會建在你目前看的這一層）：');
-        if (!name || !name.trim()) return;
-        try {
-            const r = await crmFetch(`/projects/${projectId}/proposal-assets/mkdir`
-                + `?rel=${encodeURIComponent(d.rel || '')}`,
-                { method: 'POST', body: JSON.stringify({ name: name.trim() }) });
-            crmToast(`已建立「${r.created}」`);
-            applyLevel(r);
-        } catch (e) { alert('建立失敗：' + (e.message || e)); }
+        const name = (prompt('新資料夾名稱（會建在你目前看的這一層）：') || '').trim();
+        if (!name) return;
+        try { await mkdir(name, d.rel || ''); }
+        catch (e) { alert('建立失敗：' + (e.message || e)); }
     });
+    box.querySelector('#pp-share-dir').addEventListener('click', async () => {
+        try { await mkdir(d.public_subfolder, ''); }
+        catch (e) { alert('建立失敗：' + (e.message || e)); }
+    });
+    syncShareBtn();
 
     // 列表操作（事件委派 —— 列表每次重畫）
     box.querySelector('#pp-files').addEventListener('click', async (e) => {

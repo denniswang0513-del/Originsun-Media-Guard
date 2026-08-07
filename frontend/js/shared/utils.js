@@ -71,6 +71,31 @@ export function wireFileDrop(zone, onFiles) {
 }
 
 /**
+ * HTML escape。這裡是**不依賴任何模組**的那一份 —— 公開頁（訪客、未登入）
+ * 也 import 得起，不會像 tabs/crm/crm-utils.js 那樣把 CRM state 一起拖進來。
+ */
+export function esc(s) {
+    return String(s ?? '').replace(/[&<>"']/g,
+        c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+}
+
+/**
+ * 直接用 `<a download>` 觸發下載（**不經 blob**）。
+ *
+ * 與 authDownload 的分工：這支給**免授權**的網址（token 端點、靜態檔）——
+ * 瀏覽器邊下載邊寫檔，幾百 MB 的提案影片也不會把分頁記憶體吃爆；
+ * authDownload 是給要帶 Authorization header 的，代價是整包進記憶體。
+ */
+export function plainDownload(url, filename) {
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = String(filename || '').split(/[\\/]/).pop() || '';
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+}
+
+/**
  * 複製文字到剪貼簿 → 真的複製成功才 true。傳 btn 會順手做「已複製」的回饋。
  *
  * 🔴 本系統多半是從 http://192.168.1.x 連進來的 —— **非安全內容**，
@@ -129,8 +154,7 @@ function folderCrumbs(rel) {
  * `rootLabel` = 資料夾根的顯示名（點它回最外層）。
  */
 export function folderCrumbsHtml(rootLabel, rel) {
-    const e = (s) => String(s ?? '').replace(/[&<>"']/g,
-        c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+    const e = esc;
     const crumbs = folderCrumbs(rel);
     const span = (r, label, link) => `<span data-crumb="${e(r)}" style="cursor:pointer;color:${
         link ? '#60a5fa' : '#8b8b8b'};">${e(label)}</span>`;

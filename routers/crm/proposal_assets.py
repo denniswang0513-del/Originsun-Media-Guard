@@ -119,6 +119,10 @@ async def _project_or_404(session, project_id: str):
 # 所以公開連結**只**看得到這個子夾。拖進去＝公開，拖出來＝收回，零額外狀態
 # （不用 DB 記哪個檔公開，改名搬檔都不會跑掉）。
 #
+# 🔴 這個名字必須由**程式**寫出來，不能靠人打對。前端的「建立對外分享夾」
+# 按鈕走 mkdir 帶這個常數（見 crm-projects-plan.js）—— 打成「對外分享用」
+# 那種一字之差，分享會靜靜失效：客戶那邊分頁不出現、你這邊 badge 不見，
+# 兩邊都沒有錯誤訊息。
 # 🔴 不可以用 "_" 或 "." 開頭 —— core._visible_dir 會把那種資料夾從列表濾掉，
 # 你自己在後台也會看不到它、拖不了檔進去。
 PUBLIC_SUBFOLDER = "對外分享"
@@ -144,25 +148,38 @@ async def _project_folder_abs(session, project_id: str) -> str:
     return os.path.join(root, project.proposal_folder_name)
 
 
-async def _resolve_asset_file(session, project_id: str, rel: str) -> str:
-    """專案資產夾內的單一檔案絕對路徑；找不到一律 404
-    （三個讀端點共用 —— 各自寫 `if folder else None` 很容易漏一個）。"""
-    folder = await _project_folder_abs(session, project_id)
-    path = await asyncio.to_thread(safe_rel_path, folder, rel) if folder else None
+async def file_or_404(folder_abs: str, rel: str) -> str:
+    """root 底下的單一檔案絕對路徑；逃逸/不存在/不是檔案 → 404。
+
+    「檔案怎麼離開共用磁碟」的單一判斷（專案夾、任一資產夾、公開分享夾共用）
+    —— 各端點自己寫 `safe_rel_path` + `if not path` 就會各自重新決定一次
+    「None 要回 404 還是 500」。"""
+    path = await asyncio.to_thread(safe_rel_path, folder_abs, rel) if folder_abs else None
     if not path:
         raise HTTPException(status_code=404, detail="找不到檔案")
     return path
 
 
-async def _level(folder_abs: str, rel: str) -> dict:
-    """某一層的內容（子資料夾 + 檔案）—— 所有列檔/上傳回應的共同形狀。
-    rel 是相對**資料夾根**的路徑，下載/刪除端點吃的就是這個形式；
-    逃逸/不存在 → 404（路徑防護在 core.list_folder_level 裡）。"""
-    got = await asyncio.to_thread(list_folder_level, folder_abs, rel)
-    if got is None:
+async def _resolve_asset_file(session, project_id: str, rel: str) -> str:
+    """專案資產夾內的單一檔案絕對路徑（下載/刪除/指定簡報共用）。"""
+    return await file_or_404(await _project_folder_abs(session, project_id), rel)
+
+
+async def _level(folder_abs: str, rel: str, *, missing_ok: bool = False) -> dict:
+    """某一層的內容（子資料夾 + 檔案）—— **所有**列檔/上傳回應的共同形狀
+    （公開分享端點也吃這一份；各自手組就會在加欄位時漏掉一邊）。
+    rel 是相對**資料夾根**的路徑，下載/刪除端點吃的就是這個形式。
+
+    逃逸/不存在 → 404；`missing_ok=True` 改回空清單（給「資料夾還沒建，
+    這不是錯誤」的呼叫端）。路徑防護在 core.list_folder_level 裡。"""
+    got = await asyncio.to_thread(list_folder_level, folder_abs, rel) if folder_abs else None
+    if got is None and not missing_ok:
         raise HTTPException(status_code=404, detail="找不到子資料夾（或無法存取）")
-    dirs, files, truncated = got
-    return {"rel": rel, "dirs": dirs, "files": files, "truncated": truncated}
+    dirs, files, truncated = got or ([], [], False)
+    return {"rel": rel, "dirs": dirs, "files": files, "truncated": truncated,
+            # 「這一層裡哪個夾是公開的」跟著清單走，而不是跟著呼叫端走 ——
+            # 不然每個新的資料夾瀏覽器都得自己記得再標一次 badge
+            "public_subfolder": PUBLIC_SUBFOLDER}
 
 
 async def _subdir_or_404(folder_abs: str, rel: str) -> str:
@@ -485,11 +502,8 @@ async def proposal_folder_files(request: Request, folder: str = "", rel: str = "
 async def proposal_folder_file(request: Request, folder: str = "", rel: str = ""):
     """任一資產資料夾內的單檔下載。"""
     _assets_auth(request)
-    folder_abs = await _folder_or_404(folder)
-    path = await asyncio.to_thread(safe_rel_path, folder_abs, rel)
-    if not path:
-        raise HTTPException(status_code=404, detail="找不到檔案")
     from fastapi.responses import FileResponse
+    path = await file_or_404(await _folder_or_404(folder), rel)
     return FileResponse(path, filename=os.path.basename(path))
 
 

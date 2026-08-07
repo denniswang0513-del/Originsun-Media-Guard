@@ -420,18 +420,17 @@ function _wireInfoEditing(host, opts) {
     }
 }
 
-// 分頁 → 它的容器。都是「只藏不拆」（display:none）——
-// plan-matrix 的共編輪詢靠 isConnected 自停，拆掉 DOM 會中斷它
-const PTAB_HOSTS = { info: "info-host", plan: "plan-host", folder: "folder-host" };
-
 function _showSideTabs() {
     const side = $("plan-side");
     side.style.display = "";
     side.querySelectorAll(".side-tab").forEach(btn => btn.addEventListener("click", () => {
-        side.querySelectorAll(".side-tab").forEach(b => b.classList.toggle("active", b === btn));
-        for (const [ptab, hostId] of Object.entries(PTAB_HOSTS)) {
-            $(hostId).style.display = (ptab === btn.dataset.ptab) ? "" : "none";
-        }
+        // 容器 id 就是 `{data-ptab}-host` —— 慣例寫在 markup 裡，不另外維護一張表。
+        // 都是「只藏不拆」：plan-matrix 的共編輪詢靠 isConnected 自停，拆 DOM 會中斷它
+        side.querySelectorAll(".side-tab").forEach(b => {
+            const on = (b === btn);
+            b.classList.toggle("active", on);
+            $(b.dataset.ptab + "-host").style.display = on ? "" : "none";
+        });
         if (btn.dataset.ptab === "folder") _mountFolder();
     }));
 }
@@ -440,45 +439,31 @@ function _showSideTabs() {
 // 範圍由**端點**決定，不是前端旗標：
 //   登入 → 整個資產夾（CRM 端點）／訪客 → 只有「對外分享」子夾（token 端點）
 // 兩者共用 folder-view.js 的渲染。
-let _folderLoader = null;    // (rel) => Promise<level>
-let _folderOnFile = null;    // (file) => void
-let _folderMounted = false;
+// 「還沒掛上」與「掛什麼」是同一件事 → 一個可為 null 的設定，不用另一顆布林
+// 去跟它同步。
+let _folderOpts = null;      // {load, onFile}；掛好後設回 null
 
-function _setupFolderTab(loader, onFile) {
-    _folderLoader = loader;
-    _folderOnFile = onFile;
-    _folderMounted = false;
+function _setupFolderTab(load, onFile) {
+    _folderOpts = { load, onFile };
     $("tab-folder").style.display = "";
 }
 
 async function _mountFolder() {
-    if (_folderMounted || !_folderLoader) return;
-    _folderMounted = true;                     // 只掛一次；之後切回來保留瀏覽位置
+    const opts = _folderOpts;
+    if (!opts) return;
+    _folderOpts = null;                        // 只掛一次；之後切回來保留瀏覽位置
     try {
         const { renderFolderView } = await import("/tabs/proposals/folder-view.js");
-        renderFolderView($("folder-host"), {
-            load: _folderLoader,
-            onFile: _folderOnFile,
+        renderFolderView($("folder-host"), Object.assign({
             rootLabel: "資料夾",
             emptyHint: "這個提案還沒有分享任何檔案。",
-        });
+        }, opts));
     } catch (e) {
-        _folderMounted = false;                // 讓使用者切回來能重試
+        _folderOpts = opts;                    // 讓使用者切回來能重試
         $("folder-host").innerHTML =
             '<div class="state-msg" style="color:var(--red);">資料夾元件載入失敗：'
             + escText((e && e.message) || e) + "</div>";
     }
-}
-
-// 直接用 <a download> 觸發，不走 blob —— 提案影片動輒幾百 MB，
-// 整包讀進記憶體再存檔會讓瀏覽器分頁直接爆掉
-function _downloadVia(url, filename) {
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = filename || "";
-    document.body.appendChild(a);
-    a.click();
-    a.remove();
 }
 
 function _show(view) {
@@ -665,17 +650,18 @@ async function _loadSharedPlan(shareTok) {
             _showSideTabs();
             // 訪客模式：只看得到「對外分享」子夾（範圍由 token 端點的 root 決定，
             // 前端拿不到、也改不了）。沒開這個夾 → enabled:false → 不顯示分頁。
+            //
+            // 探測**不 await** —— 它會打到 NAS，SMB 慢的時候等於讓客戶盯著
+            // 「載入中…」，而企劃內容其實早就到了。有東西再把分頁亮出來。
             const fbase = base + "/folder";
-            try {
-                const first = await (await fetch(fbase)).json();
-                if (first && first.enabled) {
-                    _setupFolderTab(
-                        async (rel) => (rel ? (await ok(await fetch(
-                            fbase + "?rel=" + encodeURIComponent(rel)))) : first),
-                        (f) => _downloadVia(fbase + "/file?rel=" + encodeURIComponent(f.rel),
+            const dl = await import("/js/shared/utils.js");
+            fetch(fbase).then(r => r.json()).then(first => {
+                if (!first || !first.enabled) return;
+                _setupFolderTab(
+                    async (rel) => ok(await fetch(fbase + "?rel=" + encodeURIComponent(rel))),
+                    (f) => dl.plainDownload(fbase + "/file?rel=" + encodeURIComponent(f.rel),
                                             f.filename));
-                }
-            } catch (_) { /* 探測失敗 → 就不顯示分頁，不影響企劃本體 */ }
+            }).catch(() => { /* 探測失敗 → 不顯示分頁，不影響企劃本體 */ });
         }
         host.innerHTML = "";
         const { renderPlan } = await import("/tabs/proposals/plan-matrix.js");

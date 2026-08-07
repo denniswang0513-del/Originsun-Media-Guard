@@ -14,11 +14,8 @@
  * 與深色 SPA 都不用改。
  */
 
-import { folderCrumbsHtml } from '../../js/shared/utils.js';
+import { esc, folderCrumbsHtml } from '../../js/shared/utils.js';
 import { fmtSize } from '../../js/shared/clip_utils.js';
-
-const esc = (s) => String(s ?? '').replace(/[&<>"']/g,
-    c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 
 const _day = (mtime) => (mtime ? new Date(mtime * 1000).toISOString().slice(0, 10) : '');
 
@@ -34,8 +31,6 @@ export function renderFolderView(host, opts) {
     // 走過的層留著：往回走是最常見的動作，重打一次是整趟 NAS 掃描
     const cache = new Map();
     let cur = '';
-
-    host.innerHTML = '<div class="fv-body">載入中…</div>';
     _ensureStyle();
 
     async function go(rel) {
@@ -75,14 +70,11 @@ export function renderFolderView(host, opts) {
             el.addEventListener('click', () => go(el.dataset.dir ?? el.dataset.crumb));
         });
         host.querySelectorAll('[data-file]').forEach(el => {
-            el.addEventListener('click', () => {
-                onFile((d.files || []).find(f => f.rel === el.dataset.file));
-            });
+            el.addEventListener('click', () => onFile(files.find(f => f.rel === el.dataset.file)));
         });
     }
 
     go('');
-    return { reload: () => { cache.delete(cur); go(cur); } };
 }
 
 // 自帶樣式（只注一次）—— 呼叫端不必為了掛這個元件去改自己的 CSS 檔
