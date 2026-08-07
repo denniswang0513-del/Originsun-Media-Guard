@@ -71,13 +71,15 @@ export function wireFileDrop(zone, onFiles) {
 }
 
 /**
- * 複製文字到剪貼簿（**單一正本**）→ 成功 true。
+ * 複製文字到剪貼簿 → 真的複製成功才 true。傳 btn 會順手做「已複製」的回饋。
  *
- * 🔴 本系統多半是 http://192.168.1.x 連進來的 —— **非安全內容**，
- * `navigator.clipboard` 根本不存在。所以一律先探 isSecureContext，
- * 沒有就退回 prompt（使用者自己 Ctrl+C，永遠可用）。少了這層 fallback，
- * 「複製」在同事的電腦上就是一顆沒反應的按鈕。
- * 傳 btn 進來會順手做「已複製」的短暫回饋。
+ * 🔴 本系統多半是從 http://192.168.1.x 連進來的 —— **非安全內容**，
+ * `navigator.clipboard` 根本不存在。少了 fallback，「複製」在同事的電腦上
+ * 就是一顆按了沒反應的按鈕。三層：clipboard API → textarea + execCommand
+ * （老招，非安全內容下**真的複製得到**）→ prompt 讓使用者自己 Ctrl+C。
+ *
+ * 新程式一律 import 這份。舊檔還有 5 份同形碼（api-keys / portal / social /
+ * report / showcase-edit），待各自翻修時收斂 —— **勿再複製第 N 份**。
  */
 export async function copyText(text, btn) {
     const flash = () => {
@@ -91,7 +93,21 @@ export async function copyText(text, btn) {
             await navigator.clipboard.writeText(text);
             flash();
             return true;
-        } catch (_) { /* 權限被擋 → 照樣走 prompt */ }
+        } catch (_) { /* 權限被擋 → 往下退 */ }
+    }
+    const ta = document.createElement('textarea');
+    ta.value = text;
+    ta.setAttribute('readonly', '');
+    ta.style.cssText = 'position:fixed;top:-1000px;opacity:0;';
+    document.body.appendChild(ta);
+    try {
+        ta.select();
+        if (document.execCommand('copy')) {
+            flash();
+            return true;
+        }
+    } catch (_) { /* 也不行就讓使用者自己來 */ } finally {
+        ta.remove();
     }
     prompt('Ctrl+C 複製：', text);
     return false;

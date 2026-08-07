@@ -32,11 +32,10 @@ from config import load_settings
 from core.assets_host import assets_target
 from core.drive_map import to_canonical_path, to_local_path
 from core.project_folders import (FOLDER_VIEW_CAP, clean_filename,
-                                  iter_files_rel, list_folder_files,
-                                  make_dated_folder_name, remap_prefix,
-                                  rename_and_remap, safe_rel_path,
-                                  safe_subfolder, subfolder_path, taken_names,
-                                  validate_folder_name)
+                                  create_subfolder, iter_files_rel,
+                                  list_folder_files, make_dated_folder_name,
+                                  remap_prefix, rename_and_remap, safe_rel_path,
+                                  safe_subfolder, subfolder_path, taken_names)
 from core.subproc import run_capture
 
 # public_router = 對外白名單（正本在 _shared，全套件共用一個）。本模組的 4 個
@@ -1031,21 +1030,10 @@ async def media_log_create_folder(request: Request):
     root, _cats = await _media_log_conf()
     if not await asyncio.to_thread(_root_set, root):
         raise HTTPException(status_code=503, detail="管理員尚未設定影像紀錄資料夾")
-    # 名稱規則 + 路徑遍歷防護的單一真相（提案資產夾的改名走同一支）
-    name, err = validate_folder_name(root, raw)
+    # 名稱規則 + 路徑遍歷防護 + 建夾的單一真相（提案資產夾的開夾/改名走同一支）
+    name, err = await asyncio.to_thread(create_subfolder, root, raw)
     if err:
         raise HTTPException(status_code=400, detail=err)
-    folder = subfolder_path(root, name)
-
-    def _mk() -> bool:
-        try:
-            os.makedirs(folder)   # exist_ok 預設 False → 已存在則 FileExistsError
-            return True
-        except FileExistsError:
-            return False
-
-    if not await asyncio.to_thread(_mk):
-        raise HTTPException(status_code=400, detail=f"資料夾「{name}」已存在")
     # 一併 mint folder-only token → 空夾也在總覽「未連結」出現、且立即有 QR 可收照
     db = await _db_settings()
     factory = await _get_factory()

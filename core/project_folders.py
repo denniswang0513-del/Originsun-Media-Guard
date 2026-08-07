@@ -215,6 +215,36 @@ def validate_folder_name(root: str, raw: str,
     return name, ""
 
 
+def create_subfolder(parent_abs: str, raw_name, taken: Optional[set] = None) -> tuple:
+    """在 parent_abs 底下開一個新子資料夾 → `(名稱, 錯誤訊息)`，失敗時名稱為 ""。
+
+    「往共用磁碟開夾」的規則正本（影像紀錄的新增資料夾、提案資產夾的就地開夾
+    都走這支）——理由跟 save_uploads 那組一樣：這是**寫進共用磁碟**這件事的
+    性質，不是哪個子系統的性質。散在各 router 就會像先前那樣，同一個「已存在」
+    長出兩種錯誤訊息。
+
+    **同步函式，呼叫端請在 `to_thread` 內跑** —— 驗證本身就會 realpath，
+    在 UNC 上是網路往返；留在 event loop 上會卡住整個行程的每一個請求。
+    路徑用 `os.path.join` 直接組：`validate_folder_name` 已經擋掉分隔字元與
+    逃逸，再過一次 `subfolder_path` 是白付兩趟 realpath。
+    """
+    name, err = validate_folder_name(parent_abs, raw_name, taken)
+    if err:
+        return "", err
+    try:
+        # os.mkdir 不是 makedirs —— 只開這一層。makedirs 會把不存在的上層一起
+        # 造出來，root 打錯字時會靜靜長出一整條假路徑（人還以為存進去了）。
+        # 不先 isdir 問「在不在」：FileExistsError 本身就是答案，少一趟 UNC。
+        os.mkdir(os.path.join(parent_abs, name))
+    except FileExistsError:
+        return "", f"這一層已經有「{name}」了"
+    except FileNotFoundError:
+        return "", "上層資料夾不存在（路徑設定有誤或 NAS 搆不到）"
+    except OSError as e:
+        return "", f"建立資料夾失敗：{e}"
+    return name, ""
+
+
 def safe_subfolder(root: str, folder: str) -> Optional[str]:
     """root 底下**已存在**的直接子資料夾絕對路徑；不合法或非目錄 → None。"""
     p = subfolder_path(root, folder)

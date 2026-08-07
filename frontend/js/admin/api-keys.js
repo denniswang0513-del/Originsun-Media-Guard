@@ -1,5 +1,6 @@
 // ─── API Key Management (extracted from app.js) ─── //
 import { _ensureModalStyles, _createFormModal } from '../shared/modal-styles.js';
+import { copyText } from '../shared/utils.js';
 
 async function _loadApiKeyList() {
     const container = document.getElementById('apikey-list');
@@ -144,17 +145,9 @@ window._deleteApiKey = async function(keyId) {
     } catch (_) { alert('刪除失敗'); }
 };
 
-window._copyApiKey = function(key, btn) {
-    // Try clipboard API (works on HTTPS / localhost)
-    if (navigator.clipboard && window.isSecureContext) {
-        navigator.clipboard.writeText(key).then(() => {
-            btn.textContent = 'OK'; setTimeout(() => btn.textContent = '複製', 1500);
-        }).catch(() => prompt('Ctrl+C 複製此 Key：', key));
-        return;
-    }
-    // Fallback: prompt dialog (always works, user can Ctrl+C)
-    prompt('Ctrl+C 複製此 Key：', key);
-};
+// 共用 copyText（shared/utils.js）—— 它比這裡原本的版本多一層 textarea
+// fallback，在 http 的 LAN 上是真的複製得到，不是只叫使用者自己 Ctrl+C。
+window._copyApiKey = (key, btn) => copyText(key, btn);
 
 window._enableApiKey = async function(keyId) {
     try {

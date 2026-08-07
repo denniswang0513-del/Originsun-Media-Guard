@@ -7,8 +7,8 @@ from datetime import datetime
 
 import pytest
 
-from core.project_folders import (clean_filename, clean_name, dedupe,
-                                  list_folder_files, list_folder_level,
+from core.project_folders import (clean_filename, clean_name, create_subfolder,
+                                  dedupe, list_folder_files, list_folder_level,
                                   make_dated_folder_name,
                                   make_reference_folder_name, remap_prefix,
                                   rename_and_remap, rename_dir, safe_rel_dir,
@@ -337,6 +337,39 @@ class TestListFolderLevel:
         assert list_folder_level(str(folder), "gone") is None      # 這一層不存在
         assert list_folder_level(str(folder), "../secret") is None  # 逃逸
         assert list_folder_level(str(folder), "f.pdf") is None     # 檔案不是目錄
+
+
+class TestCreateSubfolder:
+    """建夾的正本（影像紀錄的新增資料夾、提案資產夾的就地開夾共用）。"""
+
+    def test_creates_and_returns_cleaned_name(self, tmp_path):
+        name, err = create_subfolder(str(tmp_path), " 對外分享 ")
+        assert (name, err) == ("對外分享", "")
+        assert (tmp_path / "對外分享").is_dir()
+
+    def test_existing_is_an_error_not_a_silent_pass(self, tmp_path):
+        (tmp_path / "已有").mkdir()
+        name, err = create_subfolder(str(tmp_path), "已有")
+        assert name == "" and "已經有" in err
+
+    def test_invalid_names_never_touch_disk(self, tmp_path):
+        for bad in ("壞/名字", "..", "", "   ", "*"):
+            name, err = create_subfolder(str(tmp_path), bad)
+            assert name == "" and err, bad
+        assert list(tmp_path.iterdir()) == []
+
+    def test_taken_set_is_honoured(self, tmp_path):
+        name, err = create_subfolder(str(tmp_path), "重複", {"重複"})
+        assert name == "" and err
+        assert not (tmp_path / "重複").exists()
+
+    def test_missing_parent_reports_and_creates_nothing(self, tmp_path):
+        """只開這一層 —— makedirs 會把打錯字的 root 整條造出來，人還以為存進去了。
+        而且要回錯誤不是拋例外（拋了呼叫端就是 500 不是 400）。"""
+        missing = tmp_path / "根本不存在"
+        name, err = create_subfolder(str(missing), "x")
+        assert name == "" and "上層" in err
+        assert not missing.exists()
 
 
 class TestValidateFolderName:

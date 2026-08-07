@@ -27,11 +27,11 @@ from fastapi import File, HTTPException, Request, UploadFile
 from config import load_settings, save_settings
 from core.auth import check_admin_or_module
 from core.drive_map import to_canonical_path, to_local_path
-from core.project_folders import (list_folder_level, make_dated_folder_name,
-                                  remap_prefix, rename_and_remap, safe_rel_dir,
-                                  safe_rel_path, safe_subfolder, save_uploads,
-                                  subfolder_path, taken_names,
-                                  validate_folder_name, within_dir)
+from core.project_folders import (create_subfolder, list_folder_level,
+                                  make_dated_folder_name, remap_prefix,
+                                  rename_and_remap, safe_rel_dir, safe_rel_path,
+                                  safe_subfolder, save_uploads, subfolder_path,
+                                  taken_names, validate_folder_name, within_dir)
 
 from ._shared import router, _check_auth, _get_factory, _now, _require_db
 
@@ -165,16 +165,9 @@ async def _mkdir_result(folder_abs: str, rel: str, raw_name) -> dict:
     沒變 —— 順手 invalidate 會讓每次開子夾都白掃一次 NAS。
     """
     dir_abs = await _subdir_or_404(folder_abs, rel)
-    name, err = validate_folder_name(dir_abs, raw_name)
+    name, err = await asyncio.to_thread(create_subfolder, dir_abs, raw_name)
     if err:
         raise HTTPException(status_code=400, detail=err)
-    try:
-        # 不帶 exist_ok —— FileExistsError 就是「已經有了」，比先 isdir 問一趟便宜
-        await asyncio.to_thread(os.makedirs, subfolder_path(dir_abs, name))
-    except FileExistsError:
-        raise HTTPException(status_code=400, detail=f"這一層已經有「{name}」了")
-    except OSError as e:
-        raise HTTPException(status_code=400, detail=f"建立資料夾失敗：{e}")
     return {"status": "ok", "created": name, **await _level(folder_abs, rel)}
 
 
@@ -191,12 +184,24 @@ async def _upload_result(folder_abs: str, files, rel: str = "") -> dict:
 
 
 async def _ensure_project_folder(session, project_id: str) -> str:
-    """專案資產夾（上傳用，會實際建出來）；建不出來 → 400。"""
+    """專案資產夾（會實際建出來）；建不出來 → 400。"""
     path = await ensure_folder(session, await _project_or_404(session, project_id))
     if not path:
         raise HTTPException(status_code=400,
                             detail="提案資產資料夾無法建立（根目錄未設定或搆不到）")
     return path
+
+
+async def _project_folder_ready(project_id: str) -> str:
+    """兩個寫入端點（上傳、開夾）的共同前置：確保資產夾存在並落地它的名字。
+    commit 不能省 —— 資料夾名可能是這一刻才生成的，磁碟上已經有夾、DB 卻沒記
+    的話，下次就會用新名再建一個。"""
+    _require_db()
+    factory = await _get_factory()
+    async with factory() as session:
+        folder = await _ensure_project_folder(session, project_id)
+        await session.commit()
+    return folder
 
 
 # ── 設定端點（比照影像紀錄：路徑帶 project_id 只是讓前端從專案面板順手改，
@@ -282,12 +287,7 @@ async def upload_proposal_assets(project_id: str, request: Request, rel: str = "
     這是「現有提案補檔案」的主要入口。`rel` = 落在哪一層（空 = 最外層，
     子層必須已存在）。落地規則見 core.save_uploads。"""
     _assets_auth(request)
-    _require_db()
-    factory = await _get_factory()
-    async with factory() as session:
-        folder = await _ensure_project_folder(session, project_id)
-        await session.commit()          # 資料夾名可能剛生成，先落地
-    return await _upload_result(folder, files, rel)
+    return await _upload_result(await _project_folder_ready(project_id), files, rel)
 
 
 @router.post("/projects/{project_id}/proposal-assets/mkdir")
@@ -295,13 +295,8 @@ async def mkdir_proposal_assets(project_id: str, request: Request, rel: str = ""
     """在專案資產夾的 rel 這一層底下開新子資料夾（body `{name}`）。
     資產夾本身不存在會先建出來 —— 空專案第一個動作就是開結構夾很常見。"""
     _assets_auth(request)
-    _require_db()
     name = (await request.json()).get("name")
-    factory = await _get_factory()
-    async with factory() as session:
-        folder = await _ensure_project_folder(session, project_id)
-        await session.commit()          # 資料夾名可能剛生成，先落地
-    return await _mkdir_result(folder, rel, name)
+    return await _mkdir_result(await _project_folder_ready(project_id), rel, name)
 
 
 @router.get("/projects/{project_id}/proposal-assets/file")

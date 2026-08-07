@@ -164,6 +164,17 @@ function _wireUpload(projectId, box, host, d) {
     // 先改 d、再無參重畫 —— 只重繪檔案區，不重跑 loadPlanTab（那會連
     // plan-matrix 一起重畫，使用者正在編的格子與捲動位置都沒了）
     const repaint = () => _renderFiles(box, d);
+    // 走過的層記在 levels：往回走是最常見的動作，重打一次是整趟 NAS 掃描。
+    // 存**快照**不是 d 本身 —— d 會被後續導覽 Object.assign 覆寫，存參照等於
+    // 「回最外層」拿回來的是當前那一層。
+    const levels = new Map([[d.rel || '', { ...d }]]);
+    // 內容變了（上傳/開夾/刪檔）就換上這一層的新版本：寫進 d + 更新快取 + 重畫。
+    // 三步分開手寫的話，忘記的永遠是中間那步 —— 走回這一層看到過期內容。
+    const applyLevel = (r) => {
+        if (r) Object.assign(d, { dirs: r.dirs, files: r.files, truncated: r.truncated });
+        levels.set(d.rel || '', { ...d });
+        repaint();
+    };
     // 標星號：只動兩顆 span，不為了換一個顏色重建整張列表（可能上千列）
     const markDeck = (rel) => {
         d.deck_rel = rel;
@@ -175,11 +186,7 @@ function _wireUpload(projectId, box, host, d) {
         });
     };
 
-    // 走進子資料夾 / 麵包屑往回 —— 換 d 的這一層再重畫（企劃矩陣不受影響）。
-    // 走過的層記在 levels：往回走是最常見的動作，重打一次是整趟 NAS 掃描
-    // 存快照不是 d 本身 —— d 會被後續導覽 Object.assign 覆寫，存參照等於
-    // 「回最外層」拿回來的是當前那一層
-    const levels = new Map([[d.rel || '', { ...d }]]);
+    // 走進子資料夾 / 麵包屑往回 —— 換 d 的這一層再重畫（企劃矩陣不受影響）
     const goto = async (rel) => {
         const hit = levels.get(rel);
         if (hit) { Object.assign(d, hit); repaint(); return; }
@@ -206,11 +213,7 @@ function _wireUpload(projectId, box, host, d) {
             crmToast(`已上傳 ${(r.saved || []).length} 個檔案`
                 + (bad.length ? `；略過 ${bad.length} 個` : ''), bad.length ? 6000 : 2000);
             if (bad.length) console.warn('略過：', bad.join('、'));
-            if (r.files) {                      // 端點順手回了這一層，不必再掃一次
-                Object.assign(d, { dirs: r.dirs, files: r.files, truncated: r.truncated });
-                levels.delete(d.rel || '');     // 這一層變了，別讓走回來的人看到舊的
-                repaint();
-            }
+            if (r.files) applyLevel(r);         // 端點順手回了這一層，不必再掃一次
         } catch (e) { alert('上傳失敗：' + (e.message || e)); }
     };
 
@@ -226,9 +229,7 @@ function _wireUpload(projectId, box, host, d) {
                 + `?rel=${encodeURIComponent(d.rel || '')}`,
                 { method: 'POST', body: JSON.stringify({ name: name.trim() }) });
             crmToast(`已建立「${r.created}」`);
-            Object.assign(d, { dirs: r.dirs, files: r.files, truncated: r.truncated });
-            levels.delete(d.rel || '');
-            repaint();
+            applyLevel(r);
         } catch (e) { alert('建立失敗：' + (e.message || e)); }
     });
 
@@ -248,9 +249,12 @@ function _wireUpload(projectId, box, host, d) {
                 crmToast(r.deck_cleared ? '已刪除（原本是提案簡報，已取消指定）' : '已刪除');
                 if (r.deck_cleared) d.deck_rel = '';
                 d.files = (d.files || []).filter(f => f.rel !== rel);
-                levels.delete(d.rel || '');
-                row.remove();               // 移一列就好，不必重建整張
-                if (!d.files.length) repaint();     // 空了要顯示空狀態
+                if (d.files.length) {
+                    row.remove();           // 移一列就好，不必重建整張
+                    levels.set(d.rel || '', { ...d });    // 快照跟著少一筆
+                } else {
+                    applyLevel(null);       // 空了要顯示空狀態（d 已是最新）
+                }
             } catch (err) { alert('刪除失敗：' + (err.message || err)); }
         } else if (e.target.closest('[data-deck]')) {
             try {
