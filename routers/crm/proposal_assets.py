@@ -115,6 +115,26 @@ async def _project_or_404(session, project_id: str):
     return project
 
 
+# 對外分享子夾（owner 2026-08-07 定案）——資產夾裡混著報價/成本/內部版腳本，
+# 所以公開連結**只**看得到這個子夾。拖進去＝公開，拖出來＝收回，零額外狀態
+# （不用 DB 記哪個檔公開，改名搬檔都不會跑掉）。
+#
+# 🔴 不可以用 "_" 或 "." 開頭 —— core._visible_dir 會把那種資料夾從列表濾掉，
+# 你自己在後台也會看不到它、拖不了檔進去。
+PUBLIC_SUBFOLDER = "對外分享"
+
+
+async def public_share_dir(session, project_id: str) -> str:
+    """專案的「對外分享」子夾絕對路徑；沒建過/root 未設 → ""（不是錯誤，
+    代表這個提案還沒開放任何檔案）。
+
+    公開端點的 root **只**能從這裡拿 —— 讓「客戶看得到什麼」只有一個定義處，
+    而不是每個端點自己 join 一次路徑（少 join 一段就是整個資產夾對外）。
+    """
+    folder = await _project_folder_abs(session, project_id)
+    return os.path.join(folder, PUBLIC_SUBFOLDER) if folder else ""
+
+
 async def _project_folder_abs(session, project_id: str) -> str:
     """專案資產夾的絕對路徑（唯讀用；還沒建夾 → ""，不是錯誤）。"""
     project = await _project_or_404(session, project_id)
@@ -238,6 +258,9 @@ async def get_proposal_assets(project_id: str, request: Request, rel: str = ""):
         "folder_name": name,
         "project_folder": folder_abs,
         "deck_rel": deck_rel,
+        # 對外分享夾的名字由後端下發 —— 前端拿它標「客戶看得到」的 badge。
+        # 寫死在 JS 就是第二份真相，改名時一定有一邊忘了改。
+        "public_subfolder": PUBLIC_SUBFOLDER,
         "rel": rel,
         "dirs": dirs,
         "files": files,

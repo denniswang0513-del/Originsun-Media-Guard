@@ -134,6 +134,9 @@ function _renderFiles(box, d) {
                     border-bottom:1px solid #242424;font-size:12.5px;">
             <span style="color:#8b8b8b;">▸</span>
             <span style="font-weight:600;">${esc(x.name)}</span>
+            ${x.rel === d.public_subfolder ? `<span title="這個夾裡的東西，拿到分享連結的客戶看得到"
+                style="font-size:11px;color:#fbbf24;border:1px solid #fbbf24;border-radius:2px;padding:0 5px;"
+                >客戶看得到</span>` : ''}
         </div>`).join('')
         + files.map(f => {
             const isDeck = f.rel === d.deck_rel;

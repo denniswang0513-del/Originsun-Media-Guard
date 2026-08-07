@@ -869,6 +869,55 @@ _PUBLIC_INFO_FIELDS = {"ptype", "pitch_date", "tags", "notes"}
 _INFO_TEXT_MAX = 8 * 1024
 
 
+# ── 公開連結的「資料夾」分頁（唯讀）────────────────────────
+# 客戶看得到的**只有** {專案資產夾}/對外分享 這個子夾。整個資產夾裡混著報價、
+# 成本、內部版腳本 —— root 由 proposal_assets.public_share_dir 單一決定，
+# 這裡不自己組路徑（少 join 一段就是把報價一起送出去）。
+#
+# ⚠️ 這兩條**刻意與登入路徑走不同端點**，而不是同一支帶 scope 參數：
+# 訪客這條在物理上構不到對外分享以外的東西，不必靠呼叫端記得傳對旗標。
+
+
+async def _shared_folder_root(token: str) -> str:
+    """token → 該提案的對外分享夾（沒開放 → ""）。授權與 root 解析綁在一起，
+    呼叫端拿不到「未經授權的路徑」這種中間狀態。"""
+    factory = _require_factory()
+    from routers.crm.proposal_assets import public_share_dir
+    async with factory() as session:
+        prop = await _get_prop_by_plan_token(session, token)
+        if not prop.project_id:
+            return ""
+        return await public_share_dir(session, prop.project_id)
+
+
+@router.get("/shared/{token}/folder")
+async def list_shared_folder(token: str, rel: str = ""):
+    """公開連結的資料夾內容（唯讀，逐層）。沒開放分享夾 → 空清單而不是 404：
+    公開頁據此把分頁藏起來，不必為了「有沒有」多打一支端點。"""
+    from core.project_folders import list_folder_level
+    root = await _shared_folder_root(token)
+    got = await asyncio.to_thread(list_folder_level, root, rel) if root else None
+    if got is None and rel:
+        raise HTTPException(status_code=404, detail="找不到這個資料夾")
+    dirs, files, truncated = got or ([], [], False)
+    return {"rel": rel, "dirs": dirs, "files": files, "truncated": truncated,
+            "enabled": bool(root)}
+
+
+@router.get("/shared/{token}/folder/file")
+async def download_shared_folder_file(token: str, rel: str = ""):
+    """公開連結下載單檔。路徑防護走 core.safe_rel_path，root 同樣只由
+    public_share_dir 決定 —— 對外分享夾以外的檔案在這裡構不到。"""
+    from fastapi.responses import FileResponse
+
+    from core.project_folders import safe_rel_path
+    root = await _shared_folder_root(token)
+    path = await asyncio.to_thread(safe_rel_path, root, rel) if root else None
+    if not path:
+        raise HTTPException(status_code=404, detail="找不到檔案")
+    return FileResponse(path, filename=os.path.basename(path))
+
+
 @router.patch("/shared/{token}/info")
 async def patch_shared_info(token: str, req: ProposalPublicInfoPatch):
     """公開共編改基本資料（免登入）：逐欄 + 白名單，last-write-wins。"""
