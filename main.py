@@ -555,6 +555,16 @@ async def _on_startup():
             # 不能靜默死：沒遷移的提案不會出現在管線專案列（前端提案帶只剩 legacy 提示）
             print(f"[WARN] 提案殼專案遷移失敗: {_e_pp}")
 
+    # ── settings.json 的 proposals.root → DB settings（一次性，2026-08-07）──
+    # NAS 對外容器要讀得到它（客戶的提案分享頁由它 serve）。冪等；DB 已有值
+    # 就不動，失敗只是繼續用 settings.json（fallback 仍在）。
+    if state.db_online:
+        try:
+            from routers.crm.proposal_assets import migrate_root_to_db
+            await migrate_root_to_db()
+        except Exception as _e_pr:
+            print(f"[WARN] proposals.root 遷移失敗: {_e_pr}")
+
     # ── 片庫封存資料夾改名 uuid → {片名}_{品牌}（2026-08-06）──
     # 背景跑：逐支 rename 打 NAS，不擋 startup。閘門全在協程自己身上
     # （master gate、factory 為 None 早退、逐筆容錯），這裡不重複判斷。

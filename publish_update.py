@@ -64,9 +64,17 @@ NAS_SYNC_CODE = ["main_website.py", "config.py",
 # 容器 /healthz 回報自己的版號，發版末段跟 master 比對 —— 官網那條路最常見的
 # 故障是「碼同步了但容器沒重啟」，靜默且難查。
 NAS_SYNC_MANIFEST = ["version.json"]
-# 影像紀錄公開頁 + 它引用的 logo：master 關機時同仁仍要開得了這頁
-# （對外站 dist/ 是 Astro build 產物，沒有這兩個檔）。
-NAS_SYNC_ASSETS = ["frontend/media-log.html", "frontend/img"]
+# 對外容器要自己 serve 的前端檔：master 關機時這些頁仍要開得了
+# （對外站 dist/ 是 Astro build 產物，沒有這些檔）。
+#   media-log.html + img   影像紀錄公開頁與它的 logo
+#   proposal-plan.html     提案公開共編頁（客戶手上的 ?t= 連結）
+#   tabs/proposals + js/shared  上面那頁 import 的 ES module
+# ⚠️ 只送這兩個子目錄，不是整個 frontend/ —— 那底下是內部 SPA 的全部原始碼。
+#    往 tabs/proposals 或 js/shared 加 import 時，確認新相依也在這個範圍內，
+#    否則客戶那頁在 NAS 上會靜默載入失敗（master 上卻正常）。
+NAS_SYNC_ASSETS = ["frontend/media-log.html", "frontend/img",
+                   "frontend/proposal-plan.html",
+                   "frontend/tabs/proposals", "frontend/js/shared"]
 
 NAS_SYNC_PATHS = NAS_SYNC_CODE + NAS_SYNC_MANIFEST + NAS_SYNC_ASSETS
 

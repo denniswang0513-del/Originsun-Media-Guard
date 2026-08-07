@@ -17,7 +17,10 @@
 
 import { PLAN_TEMPLATES, PLAN_EXAMPLES } from './plan-templates.js';
 import { tfetch } from './prop-fetch.js';          // 共用 fetcher（帶 err.status/detail — 409 UI 依賴）
-import { esc } from '../crm/crm-utils.js';         // 無副作用模組，standalone 頁也可 import（crm-media-log 先例）
+// esc 走 js/shared/utils.js 而不是 crm-utils —— 公開共編頁要在 NAS 對外容器
+// serve（master 關機也開得了），那台只 serve tabs/proposals 與 js/shared 兩個
+// 子目錄；從 ../crm/ 拉東西會讓客戶那頁在 NAS 上直接載入失敗。
+import { esc } from '../../js/shared/utils.js';
 
 const API = '/api/v1/proposals';
 

@@ -55,19 +55,59 @@ def _assets_auth(request: Request):
     return check_admin_or_module(request, "crm_projects", "preprod_proposals")
 
 
-def proposals_root() -> str:
-    """提案資產根目錄（已翻成本機視角，可直接開檔）。未設 → ""。
+_ROOT_SETTING_KEY = "proposals.root"
 
-    走 settings.json 而不是 DB settings —— 判準（幾台機器會寫這個資料夾）
-    寫在 core/project_folders 檔頭表格；提案資產夾只有 master 會寫。
+
+async def _raw_root() -> str:
+    """設定裡存的原字串（master 視角，未翻譯）—— 給設定 UI 顯示/回填用。
+
+    2026-08-07 起存 **DB settings**。判準見 core/project_folders 檔頭表格：
+    「幾台機器會碰這個資料夾」。原本只有 master 會寫 → settings.json 夠用；
+    現在 NAS 對外容器也要**讀**它（客戶的分享頁由它 serve，master 關機時
+    仍要開得了）→ 兩台以上就該有單一真相。
+
+    settings.json 留作 fallback：DB 掛掉、或還沒跑過遷移的機器，行為與從前
+    完全相同。遷移在 master 啟動時做一次（migrate_root_to_db）。
     """
-    conf = load_settings().get("proposals") or {}
-    return to_local_path(str(conf.get("root") or "").strip())
-
-
-def _raw_root() -> str:
-    """設定裡存的原字串（master 視角，未翻譯）—— 給設定 UI 顯示/回填用。"""
+    try:
+        from db.session import get_session_factory
+        from services.website import settings_service
+        factory = get_session_factory()
+        if factory is not None:
+            async with factory() as session:
+                val = (await settings_service.get_all_settings(session)).get(_ROOT_SETTING_KEY)
+            if str(val or "").strip():
+                return str(val).strip()
+    except Exception:
+        pass                      # DB 不可用 → 退 settings.json，不是錯誤
     return str((load_settings().get("proposals") or {}).get("root") or "").strip()
+
+
+async def proposals_root() -> str:
+    """提案資產根目錄（已翻成本機視角，可直接開檔）。未設 → ""。
+    NAS 容器拿到的是掛載點（/share/Archive/…），翻譯由 core.drive_map 負責。"""
+    return to_local_path(await _raw_root())
+
+
+async def migrate_root_to_db() -> None:
+    """settings.json 的 proposals.root → DB settings（一次性，冪等）。
+    DB 已有值就不動；沒有 settings.json 值就沒事做。master 啟動時呼叫。"""
+    try:
+        from db.session import get_session_factory
+        from services.website import settings_service
+        json_val = str((load_settings().get("proposals") or {}).get("root") or "").strip()
+        factory = get_session_factory()
+        if not json_val or factory is None:
+            return
+        async with factory() as session:
+            if str((await settings_service.get_all_settings(session)
+                    ).get(_ROOT_SETTING_KEY) or "").strip():
+                return                     # DB 已是真相，別用舊的 json 蓋回去
+            await settings_service.update_settings(
+                session, {_ROOT_SETTING_KEY: json_val}, updated_by="migrate")
+        print(f"[migrate] proposals.root 已搬進 DB settings：{json_val}")
+    except Exception as e:             # noqa: BLE001 — 遷移失敗只是繼續用 json
+        print(f"[migrate] proposals.root 搬 DB 略過：{e}")
 
 
 async def _taken_names(session, exclude_project_id: str = "") -> set:
@@ -142,7 +182,7 @@ async def public_share_dir(session, project_id: str) -> str:
 async def _project_folder_abs(session, project_id: str) -> str:
     """專案資產夾的絕對路徑（唯讀用；還沒建夾 → ""，不是錯誤）。"""
     project = await _project_or_404(session, project_id)
-    root = proposals_root()
+    root = await proposals_root()
     if not root or not project.proposal_folder_name:
         return ""
     return os.path.join(root, project.proposal_folder_name)
@@ -255,7 +295,7 @@ async def get_proposal_assets(project_id: str, request: Request, rel: str = ""):
     _assets_auth(request)
     _require_db()
     factory = await _get_factory()
-    root = proposals_root()
+    root = await proposals_root()
     async with factory() as session:
         project = await session.get(CrmProject, project_id)
         if not project:
@@ -270,7 +310,7 @@ async def get_proposal_assets(project_id: str, request: Request, rel: str = ""):
     root_set, dirs, files, truncated, deck_rel = await asyncio.to_thread(
         _probe_folder, root, folder_abs, (target.deck_url if target else ""), rel)
     return {
-        "root": _raw_root(),
+        "root": await _raw_root(),
         "root_set": root_set,
         "folder_name": name,
         "project_folder": folder_abs,
@@ -304,17 +344,26 @@ def _probe_folder(root: str, folder_abs: str, deck_url: str, rel: str = "") -> t
 @router.post("/projects/{project_id}/proposal-assets/settings")
 async def set_proposal_assets_root(project_id: str, request: Request):
     """設定提案資產根目錄（全站共用）。存在性用本機視角驗 —— 打錯字要當場
-    知道，不要留一個之後上傳才靜默退回舊落點的路徑。"""
+    知道，不要留一個之後上傳才靜默退回舊落點的路徑。
+
+    寫 **DB settings**（NAS 對外容器也要讀得到），同時把 settings.json 那份
+    一起更新 —— 留著它當 DB 不可用時的 fallback，兩邊不同步比沒有更糟。"""
     _check_auth(request)
+    _require_db()
     body = await request.json()
     root = str(body.get("root") or "").strip()
     if root and not await asyncio.to_thread(os.path.isdir, to_local_path(root)):
         raise HTTPException(status_code=400,
                             detail=f"資料夾不存在或無法存取：{root}")
+    from services.website import settings_service
+    factory = await _get_factory()
+    async with factory() as session:
+        await settings_service.update_settings(session, {_ROOT_SETTING_KEY: root})
     # save_settings 本身是 merge-on-save（頂層 dict 會淺 merge）→ 只傳這一段。
     # 整包 load_settings() 寫回會把 config.py 的預設值（含 database_url）固化
     # 進 settings.json，之後改預設值就再也不會生效。
     save_settings({"proposals": {"root": root}})
+    invalidate_folder_cache()      # root 換了，舊的子夾清單當然作廢
     return {"status": "ok", "root": root}
 
 
@@ -455,7 +504,7 @@ async def proposal_assets_overview(request: Request):
     _assets_auth(request)
     _require_db()
     factory = await _get_factory()
-    root = proposals_root()
+    root = await proposals_root()
 
     from ._shared import Client
     async with factory() as session:
@@ -479,12 +528,12 @@ async def proposal_assets_overview(request: Request):
     out.sort(key=lambda x: x["folder_name"], reverse=True)
     # root_set 直接用「這次掃得到嗎」—— 用 `bool(names) or isdir()` 的話，
     # NAS 斷線時沿用的舊快取會讓它回 True，而這個欄位的用途正是告訴前端搆不到
-    return {"root": _raw_root(), "root_set": reachable, "folders": out}
+    return {"root": await _raw_root(), "root_set": reachable, "folders": out}
 
 
 async def _folder_or_404(folder: str) -> str:
     """root 底下的資料夾絕對路徑（三個 folder 端點共用；含路徑逃逸防護）。"""
-    folder_abs = await asyncio.to_thread(safe_subfolder, proposals_root(), folder)
+    folder_abs = await asyncio.to_thread(safe_subfolder, await proposals_root(), folder)
     if not folder_abs:
         raise HTTPException(status_code=404, detail="找不到資料夾（或無法存取）")
     return folder_abs
@@ -543,7 +592,7 @@ async def proposal_folder_rename(request: Request):
         # taken：別撞上其他專案登記的名字（那些夾可能只是暫時 missing_on_disk，
         # rename_dir 的磁碟檢查看不到它們）
         taken = await _taken_names(session, exclude_project_id=project.id if project else "")
-        new_name, err = validate_folder_name(proposals_root(),
+        new_name, err = validate_folder_name(await proposals_root(),
                                              body.get("new_name"), taken)
         if err:
             raise HTTPException(status_code=400, detail=err)
@@ -594,7 +643,7 @@ async def proposal_folder_link(request: Request):
         project = await _project_or_404(session, project_id)
         old = project.proposal_folder_name
         if old and old != folder and not await asyncio.to_thread(
-                _vacate_if_empty, proposals_root(), old):
+                _vacate_if_empty, await proposals_root(), old):
             raise HTTPException(
                 status_code=400,
                 detail=f"「{project.name}」原本的資產資料夾「{old}」還有東西"
@@ -636,7 +685,7 @@ async def _project_of_folder(session, folder: str):
 async def ensure_folder(session, project) -> str:
     """取得/首次生成該專案的提案資產夾**絕對路徑**（本機視角），並在磁碟建出來。
     root 未設或建不出來 → ""（呼叫端退回舊的 uploads 落點）。不 commit。"""
-    root = proposals_root()
+    root = await proposals_root()
     if not root:
         return ""
     if not project.proposal_folder_name:
@@ -662,7 +711,7 @@ async def _rename_folder(session, old_name: str, new_name: str, project) -> tupl
     rename_and_remap 已把磁碟還原成舊名，欄位當然也要留舊的）。不 commit。
     `project=None` = 未連結專案的資料夾（純磁碟改名）。
     """
-    root = proposals_root()
+    root = await proposals_root()
     if not root:
         return False, "尚未設定提案資產根目錄"
 
@@ -703,7 +752,7 @@ async def rename_project_folder(session, project_id: str, project_name: str,
     project = await session.get(CrmProject, project_id)
     if not project or not project.proposal_folder_name:
         return False, ""              # 還沒建過夾 — 之後建夾自然用新名
-    if not proposals_root():
+    if not await proposals_root():
         return False, ""
     new_name = make_dated_folder_name(
         project_name, created,

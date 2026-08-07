@@ -23,7 +23,18 @@ from core.auth import check_admin_or_module
 from core.schemas import (ProposalPayload, ProposalPlanCellPatch, ProposalPlanPayload,
                           ProposalPublicInfoPatch, ReferencePayload)
 
-router = APIRouter(prefix="/api/v1/proposals", tags=["proposals"])
+PROPOSALS_PREFIX = "/api/v1/proposals"
+router = APIRouter(prefix=PROPOSALS_PREFIX, tags=["proposals"])
+
+# 對外白名單 —— NAS 24/7 容器只掛這一個（master 在檔尾收編回主 router，
+# URL 完全不變）。提案的公開共編頁（/proposal-plan.html?t=）要在 master 關機
+# 時仍然開得了，所以那些 `/shared/{token}/…` 端點必須住在容器裡。
+#
+# ⚠️ 往這裡加端點前先問：它真的該被**匿名**打到嗎？授權只有 token 一層。
+# 守衛：tests/unit/test_proposals_public_router.py（多一條少一條都會紅）。
+# 刻意不帶 prefix —— master 由上面 router 的 PROPOSALS_PREFIX 提供，
+# NAS 掛載時自己指定（與 routers/crm/_shared.py 的 public_router 同慣例）。
+public_router = APIRouter(tags=["proposals 公開（token 授權）"])
 
 # deck 檔案落地：<repo>/uploads/proposals/{proposal_id}/（main.py 已 mount /uploads）
 _UPLOAD_BASE = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "uploads")
@@ -812,7 +823,7 @@ async def _deck_file_response(deck_url: str, missing_detail: str):
     return FileResponse(path, filename=os.path.basename(path))
 
 
-@router.get("/shared/{token}/deck")
+@public_router.get("/shared/{token}/deck")
 async def download_shared_deck(token: str):
     """公開共編頁下載簡報（token 即授權）。deck 在 NAS 資產夾、不在 web root。"""
     factory = _require_factory()
@@ -822,7 +833,7 @@ async def download_shared_deck(token: str):
     return await _deck_file_response(url, "沒有可下載的簡報檔")
 
 
-@router.get("/shared/{token}")
+@public_router.get("/shared/{token}")
 async def get_shared_plan(token: str):
     """公開讀取（免登入）：title + plan + 基本資料安全子集 info（share_token 一律剝除）。
     info 是白名單：客戶/類型/提案日/狀態/標籤/簡報/參考片單 —— 金額（budget_range）、
@@ -895,7 +906,7 @@ async def _shared_folder_root(token: str) -> str:
         return await public_share_dir(session, prop.project_id)
 
 
-@router.get("/shared/{token}/folder")
+@public_router.get("/shared/{token}/folder")
 async def list_shared_folder(token: str, rel: str = ""):
     """公開連結的資料夾內容（唯讀，逐層）。回應形狀共用 proposal_assets._level。
 
@@ -909,7 +920,7 @@ async def list_shared_folder(token: str, rel: str = ""):
     return {**out, "enabled": bool(out["dirs"] or out["files"])}
 
 
-@router.get("/shared/{token}/folder/file")
+@public_router.get("/shared/{token}/folder/file")
 async def download_shared_folder_file(token: str, rel: str = "", request: Request = None):
     """公開連結下載單檔。root 只由 public_share_dir 決定 —— 對外分享夾以外的
     檔案在這裡構不到（防護走 proposal_assets.file_or_404）。
@@ -926,7 +937,7 @@ async def download_shared_folder_file(token: str, rel: str = "", request: Reques
     return FileResponse(path, filename=os.path.basename(path))
 
 
-@router.patch("/shared/{token}/info")
+@public_router.patch("/shared/{token}/info")
 async def patch_shared_info(token: str, req: ProposalPublicInfoPatch):
     """公開共編改基本資料（免登入）：逐欄 + 白名單，last-write-wins。"""
     if req.field not in _PUBLIC_INFO_FIELDS:
@@ -947,7 +958,7 @@ _REF_TITLE_MAX = 255
 _REF_NOTE_MAX = 4 * 1024
 
 
-@router.post("/shared/{token}/refs")
+@public_router.post("/shared/{token}/refs")
 async def add_shared_reference(token: str, body: dict = Body(...)):
     """公開共編加參考片（免登入）：入共用片庫 + 掛到本提案。"""
     url = (body.get("url") or "").strip()
@@ -983,7 +994,7 @@ async def add_shared_reference(token: str, body: dict = Body(...)):
     return {"status": "ok", "reference": _ref_dict(ref)}
 
 
-@router.patch("/shared/{token}/refs/{rid}")
+@public_router.patch("/shared/{token}/refs/{rid}")
 async def patch_shared_reference(token: str, rid: str, body: dict = Body(...)):
     """公開共編改參考片標題/備註（免登入）。
     片庫是跨提案共用資產 —— 只放行「只掛在本提案」的片，被別的提案共用時 409
@@ -1015,7 +1026,7 @@ async def patch_shared_reference(token: str, rid: str, body: dict = Body(...)):
     return {"status": "ok"}
 
 
-@router.delete("/shared/{token}/refs/{rid}")
+@public_router.delete("/shared/{token}/refs/{rid}")
 async def unlink_shared_reference(token: str, rid: str):
     """公開共編移除參考片（免登入）：只解除本提案掛載，片庫本體保留。"""
     factory = _require_factory()
@@ -1048,7 +1059,7 @@ def _write_info_field(prop, field: str, value):
         setattr(prop, field, text)
 
 
-@router.patch("/shared/{token}/cell")
+@public_router.patch("/shared/{token}/cell")
 async def patch_shared_plan_cell(token: str, req: ProposalPlanCellPatch):
     """公開逐格寫入（免登入）：署名=guest_name(外部)／訪客，其餘同登入路徑。"""
     factory = _require_factory()
@@ -1064,7 +1075,7 @@ async def patch_shared_plan_cell(token: str, req: ProposalPlanCellPatch):
     return {"status": "ok", "updated_at": now_iso}
 
 
-@router.get("/shared/{token}/meta")
+@public_router.get("/shared/{token}/meta")
 async def get_shared_plan_meta(token: str, since: str = ""):
     """公開輪詢（免登入）：同 ?since= 短路。"""
     factory = _require_factory()
@@ -1326,3 +1337,9 @@ async def migrate_unlinked_proposals_to_projects() -> None:
             migrated += 1
     if migrated:
         print(f"[migrate] 提案=專案合體：{migrated} 筆既有提案已建殼專案入管線")
+
+
+# ── master 收編：public_router 的 10 條端點掛回主 router，URL 完全不變 ──
+# 必須在檔尾（所有 @public_router 裝飾器都跑過之後）。NAS 對外容器則只掛
+# public_router 本身，見 main_website.py —— 那台不會有這 28 條內部端點。
+router.include_router(public_router)

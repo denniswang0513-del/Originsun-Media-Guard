@@ -185,6 +185,38 @@ async def _media_log_page():
     return FileResponse(_MEDIA_LOG_PAGE, media_type="text/html")
 
 
+# ── 提案公開共編頁（master 關機也開得起來，2026-08-07）──
+# 客戶手上的 /proposal-plan.html?t=<token> 原本只有 master serve —— master 一關
+# 客戶就開不了。頁面 + 它 import 的 ES module 隨 NAS_SYNC_ASSETS 同步進
+# code/frontend/，API 走底下掛的 proposals public_router。
+_PROPOSAL_PAGE = os.path.join(_FRONTEND_DIR, "proposal-plan.html")
+
+
+@app.get("/proposal-plan.html", include_in_schema=False)
+async def _proposal_plan_page():
+    from starlette.responses import FileResponse, PlainTextResponse
+    if not os.path.isfile(_PROPOSAL_PAGE):
+        return PlainTextResponse("proposal-plan.html 未同步到本機", status_code=503)
+    return FileResponse(_PROPOSAL_PAGE, media_type="text/html")
+
+
+# 提案的 token 端點（10 條，全部吃 {token}）。⚠️ **絕不可**改成掛
+# api_proposals.router：那會把提案庫的 20+ 條內部端點（清單/統計/成案/刪除）
+# 曝在對外服務上。守衛：tests/unit/test_proposals_public_router.py。
+try:
+    from routers.api_proposals import PROPOSALS_PREFIX as _PROP_PREFIX
+    from routers.api_proposals import public_router as _prop_public
+    app.include_router(_prop_public, prefix=_PROP_PREFIX)
+except Exception as _e:  # noqa: BLE001 — 缺 DB 套件的環境照常起，只是少這條路
+    logging.getLogger(__name__).warning("[website-api] proposals public router 未掛載: %s", _e)
+
+# 公開頁需要的前端模組（只 serve 這兩個子目錄，不是整個 frontend/ ——
+# 那底下是內部 SPA 的全部原始碼，沒有理由送上對外服務）。
+for _sub in ("tabs/proposals", "js/shared"):
+    _d = os.path.join(_FRONTEND_DIR, *_sub.split("/"))
+    if os.path.isdir(_d):
+        app.mount("/" + _sub, _StaticFiles(directory=_d), name=_sub.replace("/", "_"))
+
 if os.path.isdir(os.path.join(_FRONTEND_DIR, "img")):
     app.mount("/img", _StaticFiles(directory=os.path.join(_FRONTEND_DIR, "img")),
               name="img")
