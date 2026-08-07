@@ -223,10 +223,15 @@
 const TOKEN_KEY = "auth_token";
 const $ = (id) => document.getElementById(id);
 
-async function mfetch(path, opts = {}) {
-    const headers = Object.assign({ "Content-Type": "application/json" }, opts.headers || {});
+// 只有授權標頭 —— 送 FormData 時**不能**設 Content-Type，
+// 一設就把 multipart 的 boundary 蓋掉，後端解不出檔案
+function _authHeader() {
     const tok = localStorage.getItem(TOKEN_KEY);
-    if (tok) headers["Authorization"] = "Bearer " + tok;
+    return tok ? { "Authorization": "Bearer " + tok } : {};
+}
+async function mfetch(path, opts = {}) {
+    const headers = Object.assign({ "Content-Type": "application/json" },
+                                  _authHeader(), opts.headers || {});
     return fetch(path, Object.assign({}, opts, { headers }));
 }
 function escText(s) { const d = document.createElement("div"); d.textContent = String(s ?? ""); return d.innerHTML; }
@@ -441,10 +446,10 @@ function _showSideTabs() {
 // 兩者共用 folder-view.js 的渲染。
 // 「還沒掛上」與「掛什麼」是同一件事 → 一個可為 null 的設定，不用另一顆布林
 // 去跟它同步。
-let _folderOpts = null;      // {load, onFile}；掛好後設回 null
+let _folderOpts = null;      // {load, onFile, write?}；掛好後設回 null
 
-function _setupFolderTab(load, onFile) {
-    _folderOpts = { load, onFile };
+function _setupFolderTab(load, onFile, write) {
+    _folderOpts = { load, onFile, write };
     $("tab-folder").style.display = "";
 }
 
@@ -587,12 +592,31 @@ async function _loadPlan(pid) {
         if (prop.project_id) {
             const AP = "/api/v1/crm/projects/" + encodeURIComponent(prop.project_id)
                 + "/proposal-assets";
+            const q = (rel) => "?rel=" + encodeURIComponent(rel || "");
+            // 登入模式：看得到**整份**資產夾，而且就地建得了夾、傳得了檔
+            // （owner 2026-08-08 選 B —— 企劃頁不該是「看得到卻做不了」的死路）
             _setupFolderTab(
-                async (rel) => ok(await mfetch(AP + "?rel=" + encodeURIComponent(rel))),
+                async (rel) => ok(await mfetch(AP + q(rel))),
                 async (f) => {
                     // CRM 端點要帶 Bearer，<a href> 送不了 → 走共用的授權下載
                     const { authDownload } = await import("/js/shared/utils.js");
                     authDownload(AP + "/file?rel=" + encodeURIComponent(f.rel), f.filename);
+                },
+                {
+                    shareDir: "對外分享",
+                    mkdir: async (name, rel) => ok(await mfetch(AP + "/mkdir" + q(rel),
+                        { method: "POST", body: JSON.stringify({ name }) })),
+                    upload: async (items, rel) => {
+                        const { uploadFormData } = await import("/js/shared/utils.js");
+                        const r = await fetch(AP + "/upload" + q(rel), {
+                            method: "POST", headers: _authHeader(),
+                            body: uploadFormData(items),   // 不設 Content-Type，boundary 才不會被蓋掉
+                        });
+                        const d2 = await ok(r);
+                        const bad = (d2.skipped || []).map(s => `${s.filename}（${s.reason}）`);
+                        if (bad.length) alert("部分項目未上傳：\n" + bad.join("\n"));
+                        return d2.files ? d2 : null;   // 一個都沒存成 → 不用重畫
+                    },
                 });
         }
         host.innerHTML = "";

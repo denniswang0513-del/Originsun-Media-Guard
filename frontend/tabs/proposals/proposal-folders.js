@@ -17,7 +17,8 @@
 
 import { esc } from '../website/website-utils.js';
 import { fmtSize } from '../../js/shared/clip_utils.js';
-import { authDownload, folderCrumbsHtml, wireFileDrop } from '../../js/shared/utils.js';
+import { authDownload, folderCrumbsHtml, inputUploadItems, uploadFormData,
+         wireFileDrop } from '../../js/shared/utils.js';
 import { projectOptionsHtml } from '../crm/crm-utils.js';
 import { tfetch } from './prop-fetch.js';
 
@@ -150,9 +151,10 @@ function _render(ov) {
                 <div id="pf-crumbs" style="padding:6px 12px 0;font-size:12px;">${
                     folderCrumbsHtml(_open, _rel)}</div>
                 <div style="padding:6px 12px;">
-                    <button data-upload class="prop-btn ghost">＋ 上傳檔案到這一層</button>
+                    <button data-upload class="prop-btn ghost">＋ 上傳檔案</button>
+                    <button data-upload-dir class="prop-btn ghost">＋ 上傳資料夾</button>
                     <button data-mkdir class="prop-btn ghost">＋ 新增資料夾</button>
-                    <span class="prop-note" style="margin-left:8px;">也可以把檔案拖進來</span>
+                    <span class="prop-note" style="margin-left:8px;">也可以把檔案或整個資料夾拖進來</span>
                 </div>
                 <div id="pf-files" style="padding:0 0 4px;">
                     <div class="prop-note" style="padding:8px 12px;">載入中…</div>
@@ -256,29 +258,32 @@ function _wireDrop(ov) {
     if (!zone) return;
     const folder = _open;
     const rel = _rel;
-    const send = async (fileList) => {
-        if (!fileList || !fileList.length) return;
-        const fd = new FormData();
-        for (const f of fileList) fd.append('files', f);
+    // items = [{file, path}]；path 帶目錄結構時後端照著重建（拖／選整個資料夾）
+    const send = async (items) => {
+        if (!items || !items.length) return;
         try {
             // 走 tfetch（不是手刻 fetch）—— 錯誤形狀與 warning 浮出都掛在它身上；
             // 它只帶 Accept + Authorization，FormData 的 boundary 不會被蓋掉
             const d = await tfetch(`${API}/folder/upload?folder=${encodeURIComponent(folder)}`
-                + `&rel=${encodeURIComponent(rel)}`, { method: 'POST', body: fd });
+                + `&rel=${encodeURIComponent(rel)}`,
+                { method: 'POST', body: uploadFormData(items) });
             const bad = (d.skipped || []).map(s => `${s.filename}（${s.reason}）`);
-            if (bad.length) alert('部分檔案未上傳：\n' + bad.join('\n'));
+            if (bad.length) alert('部分項目未上傳：\n' + bad.join('\n'));
             // 一個都沒存成時端點不回這一層的內容（省一次掃描）→ 畫面維持原樣
             if (d.files) _paint(ov, d, folder, rel);
         } catch (e) { alert('上傳失敗：' + (e.message || e)); }
     };
-    zone.querySelector('[data-upload]')?.addEventListener('click', () => {
+    const pick = (asDir) => {
         const inp = document.createElement('input');
         inp.type = 'file';
         inp.multiple = true;
-        inp.addEventListener('change', () => send(inp.files));
+        if (asDir) inp.webkitdirectory = true;   // webkitRelativePath 會帶夾名
+        inp.addEventListener('change', () => send(inputUploadItems(inp.files)));
         inp.click();
-    });
-    wireFileDrop(zone, send);
+    };
+    zone.querySelector('[data-upload]')?.addEventListener('click', () => pick(false));
+    zone.querySelector('[data-upload-dir]')?.addEventListener('click', () => pick(true));
+    wireFileDrop(zone, send);      // 拖資料夾進來會遞迴展開（含資料夾本身）
 
     zone.querySelector('[data-mkdir]')?.addEventListener('click', async () => {
         const name = prompt('新資料夾名稱（會建在你目前看的這一層）：');

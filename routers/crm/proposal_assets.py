@@ -22,7 +22,7 @@ from datetime import datetime
 
 from typing import List
 
-from fastapi import File, HTTPException, Request, UploadFile
+from fastapi import File, Form, HTTPException, Request, UploadFile
 
 from config import load_settings, save_settings
 from core.auth import check_admin_or_module
@@ -272,12 +272,17 @@ async def _mkdir_result(folder_abs: str, rel: str, raw_name) -> dict:
     return {"status": "ok", "created": name, **await _level(folder_abs, rel)}
 
 
-async def _upload_result(folder_abs: str, files, rel: str = "") -> dict:
+async def _upload_result(folder_abs: str, files, rel: str = "", paths=None) -> dict:
     """兩個上傳端點的共同回應：落地到 rel 這一層 + 回這一層的新內容
     （前端不必再打一次列檔）。一個都沒存成（全被擋/全超限）→ 不重掃，
-    前端手上那份還是對的。"""
+    前端手上那份還是對的。
+
+    `paths` 與 `files` 等長且同序（拖整個資料夾時前端一組一組 append）——
+    每個元素是該檔在來源資料夾裡的相對路徑，落地時照著重建目錄。
+    不送就全部平放，行為與從前相同。"""
     dir_abs = await _subdir_or_404(folder_abs, rel)
-    saved, skipped = await save_uploads(dir_abs, files, max_bytes=_MAX_UPLOAD_BYTES)
+    saved, skipped = await save_uploads(dir_abs, files, max_bytes=_MAX_UPLOAD_BYTES,
+                                        rel_paths=paths)
     out = {"status": "ok", "saved": saved, "skipped": skipped}
     if saved:
         out.update(await _level(folder_abs, rel))
@@ -397,12 +402,14 @@ async def set_proposal_assets_root(project_id: str, request: Request):
 
 @router.post("/projects/{project_id}/proposal-assets/upload")
 async def upload_proposal_assets(project_id: str, request: Request, rel: str = "",
-                                 files: List[UploadFile] = File(...)):
+                                 files: List[UploadFile] = File(...),
+                                 paths: List[str] = Form(default=[])):
     """上傳檔案進專案的提案資產夾（可多檔）。資料夾不存在會先建出來 ——
     這是「現有提案補檔案」的主要入口。`rel` = 落在哪一層（空 = 最外層，
     子層必須已存在）。落地規則見 core.save_uploads。"""
     _assets_auth(request)
-    return await _upload_result(await _project_folder_ready(project_id), files, rel)
+    return await _upload_result(await _project_folder_ready(project_id), files,
+                                rel, paths)
 
 
 @router.post("/projects/{project_id}/proposal-assets/mkdir")
@@ -585,11 +592,12 @@ async def proposal_folder_file(request: Request, folder: str = "", rel: str = ""
 
 @router.post("/proposal-assets/folder/upload")
 async def proposal_folder_upload(request: Request, folder: str = "", rel: str = "",
-                                 files: List[UploadFile] = File(...)):
+                                 files: List[UploadFile] = File(...),
+                                 paths: List[str] = Form(default=[])):
     """上傳檔案進任一資產資料夾（未連結專案的也可以 —— owner 指定）。
     `rel` = 落在哪一層（空 = 最外層；就是使用者目前看的那一層）。"""
     _assets_auth(request)
-    return await _upload_result(await _folder_or_404(folder), files, rel)
+    return await _upload_result(await _folder_or_404(folder), files, rel, paths)
 
 
 @router.post("/proposal-assets/folder/mkdir")

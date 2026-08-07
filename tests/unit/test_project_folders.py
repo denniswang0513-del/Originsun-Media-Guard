@@ -12,7 +12,8 @@ from core.project_folders import (clean_filename, clean_name, create_subfolder,
                                   make_dated_folder_name,
                                   make_reference_folder_name, remap_prefix,
                                   rename_and_remap, rename_dir, safe_rel_dir,
-                                  safe_rel_path, safe_subfolder, save_uploads,
+                                  safe_rel_path, safe_sub_dirs, safe_subfolder,
+                                  save_uploads,
                                   validate_folder_name)
 
 CREATED = datetime(2026, 8, 6, 15, 30)
@@ -372,6 +373,36 @@ class TestCreateSubfolder:
         assert not missing.exists()
 
 
+class TestSafeSubDirs:
+    """拖進來的相對路徑 → 目錄段。**這是敵意輸入**，逐段清洗、可疑就整筆拒收。"""
+
+    def test_strips_filename_and_cleans_each_segment(self):
+        assert safe_sub_dirs("我的夾/子層/檔案.pdf") == ["我的夾", "子層"]
+        assert safe_sub_dirs("有:非法*字元/x.txt") == ["有非法字元"]
+        assert safe_sub_dirs("只有檔名.pdf") == []
+
+    def test_rejects_traversal_anywhere_in_the_path(self):
+        for bad in ("../x.pdf", "a/../../x.pdf", "a/b/../x.pdf", "./x.pdf"):
+            assert safe_sub_dirs(bad) is None, bad
+
+    def test_backslashes_are_separators_not_content(self):
+        """Windows 拖放給的是反斜線 —— 當成分隔而不是檔名的一部分，
+        否則 `..\\..\\x` 會整串變成一個「檔名」躲過 .. 檢查。"""
+        assert safe_sub_dirs(r"我的夾\子層\x.pdf") == ["我的夾", "子層"]
+        assert safe_sub_dirs(r"..\..\x.pdf") is None
+
+    def test_rejects_segment_that_cleans_to_nothing(self):
+        assert safe_sub_dirs("*/x.pdf") is None      # 清完為空 → 整筆不要
+        assert safe_sub_dirs('<>:"|?/x.pdf') is None
+
+    def test_empty_segments_are_ignored_not_fatal(self):
+        assert safe_sub_dirs("/a//b/x.pdf") == ["a", "b"]
+
+    def test_long_segment_is_truncated(self):
+        got = safe_sub_dirs("長" * 200 + "/x.pdf")
+        assert got and len(got[0]) <= 80
+
+
 class TestValidateFolderName:
     """使用者自己打的資料夾名（新增/改名共用的規則正本）。"""
 
@@ -558,3 +589,60 @@ async def test_rename_and_remap_skips_remap_when_rename_fails(tmp_path):
     changed, err = await rename_and_remap(_FakeSession(), str(old), str(new),
                                           remap=_remap)
     assert changed is False and "已存在" in err and not seen
+
+
+# ── 拖整個資料夾上傳：結構重建 + 路徑安全（save_uploads 的 rel_paths）──
+
+async def test_save_uploads_rebuilds_folder_structure(tmp_path):
+    """拖一個夾進來 = 檔案帶著「夾名/子層/檔名」→ 照著建出來（含夾本身）。"""
+    saved, skipped = await save_uploads(
+        str(tmp_path),
+        [_FakeUpload("a.pdf", b"1"), _FakeUpload("b.pdf", b"2"), _FakeUpload("c.pdf", b"3")],
+        max_bytes=1024,
+        rel_paths=["我的夾/a.pdf", "我的夾/子層/b.pdf", "c.pdf"])
+    assert skipped == []
+    assert (tmp_path / "我的夾" / "a.pdf").read_bytes() == b"1"
+    assert (tmp_path / "我的夾" / "子層" / "b.pdf").read_bytes() == b"2"
+    assert (tmp_path / "c.pdf").read_bytes() == b"3"          # 沒帶路徑的照樣平放
+    assert set(saved) == {"我的夾/a.pdf", "我的夾/子層/b.pdf", "c.pdf"}
+
+
+async def test_save_uploads_dedupes_per_directory_not_globally(tmp_path):
+    """`a/圖.jpg` 與 `b/圖.jpg` 是兩個不同的檔 —— 全域一份 taken 會讓其中
+    一個平白變成 圖-2.jpg。"""
+    saved, _ = await save_uploads(
+        str(tmp_path), [_FakeUpload("圖.jpg", b"1"), _FakeUpload("圖.jpg", b"2")],
+        max_bytes=1024, rel_paths=["a/圖.jpg", "b/圖.jpg"])
+    assert set(saved) == {"a/圖.jpg", "b/圖.jpg"}
+    assert (tmp_path / "a" / "圖.jpg").exists() and (tmp_path / "b" / "圖.jpg").exists()
+
+
+async def test_save_uploads_still_dedupes_within_the_same_directory(tmp_path):
+    saved, _ = await save_uploads(
+        str(tmp_path), [_FakeUpload("圖.jpg", b"1"), _FakeUpload("圖.jpg", b"2")],
+        max_bytes=1024, rel_paths=["a/圖.jpg", "a/圖.jpg"])
+    assert set(saved) == {"a/圖.jpg", "a/圖-2.jpg"}
+
+
+async def test_save_uploads_refuses_traversal_and_writes_nothing_outside(tmp_path):
+    """🔴 相對路徑來自瀏覽器的拖放事件 = 敵意輸入。逃出去一個位元組都不行。"""
+    root = tmp_path / "root"
+    root.mkdir()
+    saved, skipped = await save_uploads(
+        str(root),
+        [_FakeUpload("evil.pdf", b"x"), _FakeUpload("evil2.pdf", b"x"),
+         _FakeUpload("evil3.pdf", b"x")],
+        max_bytes=1024,
+        rel_paths=["../evil.pdf", "a/../../evil2.pdf", r"..\..\evil3.pdf"])
+    assert saved == []
+    assert all(s["reason"] == "路徑不合法" for s in skipped), skipped
+    assert list(tmp_path.iterdir()) == [root]      # root 之外什麼都沒長出來
+    assert list(root.iterdir()) == []
+
+
+async def test_save_uploads_blocked_ext_inside_subfolder_still_blocked(tmp_path):
+    saved, skipped = await save_uploads(
+        str(tmp_path), [_FakeUpload("壞.exe", b"x")], max_bytes=1024,
+        rel_paths=["我的夾/壞.exe"])
+    assert saved == [] and len(skipped) == 1
+    assert not (tmp_path / "我的夾" / "壞.exe").exists()

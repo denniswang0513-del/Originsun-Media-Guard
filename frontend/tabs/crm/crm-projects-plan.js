@@ -9,7 +9,8 @@
 
 import { crmFetch, crmToast, esc } from './crm-utils.js';
 import { fmtSize } from '../../js/shared/clip_utils.js';
-import { authDownload, copyText, folderCrumbsHtml, wireFileDrop } from '../../js/shared/utils.js';
+import { authDownload, copyText, folderCrumbsHtml, inputUploadItems,
+         uploadFormData, wireFileDrop } from '../../js/shared/utils.js';
 import { tfetch } from '../proposals/prop-fetch.js';
 import { state } from './crm-projects-state.js';
 
@@ -66,6 +67,8 @@ function _mountAssetsCard(projectId, host, d) {
                         style="display:none;" title="建立客戶看得到的資料夾">＋ 對外分享夾</button>
                 <button id="pp-mkdir" class="crm-btn crm-btn-secondary crm-btn-sm">＋ 新增資料夾</button>
                 <button id="pp-add" class="crm-btn crm-btn-primary crm-btn-sm">＋ 上傳檔案</button>
+                <button id="pp-add-dir" class="crm-btn crm-btn-secondary crm-btn-sm"
+                        title="連同資料夾本身與底下的子層一起上傳">＋ 上傳資料夾</button>
                 <button id="pp-open" class="crm-btn crm-btn-secondary crm-btn-sm"
                         title="在這台伺服器上開啟檔案總管 — 你人不在伺服器前的話請改用「點路徑複製」">開啟資料夾</button>
                 <button id="pp-cfg" class="crm-btn crm-btn-secondary crm-btn-sm" title="設定根目錄">⚙</button>
@@ -74,6 +77,7 @@ function _mountAssetsCard(projectId, host, d) {
                 <div id="pp-files"></div>
             </div>
             <input id="pp-file-input" type="file" multiple style="display:none;">
+            <input id="pp-dir-input" type="file" multiple webkitdirectory style="display:none;">
             <div id="pp-cfg-row" style="display:none;gap:6px;align-items:center;margin-top:8px;">
                 <input id="pp-root" type="text" class="crm-input" style="flex:1;"
                        value="${esc(d.root || '')}" placeholder="例：\\\\192.168.1.132\\Archive\\00_提案企劃">
@@ -214,26 +218,31 @@ function _wireUpload(projectId, box, host, d) {
         } catch (e) { alert('開啟資料夾失敗：' + (e.message || e)); }
     };
 
-    const send = async (fileList) => {
-        if (!fileList || !fileList.length) return;
-        const fd = new FormData();
-        for (const f of fileList) fd.append('files', f);
+    // items = [{file, path}]；path 帶目錄結構時後端會照著重建（拖資料夾／選資料夾）
+    const send = async (items) => {
+        if (!items || !items.length) return;
         try {
             // 落在使用者目前看的那一層
             const r = await crmFetch(`/projects/${projectId}/proposal-assets/upload`
                 + `?rel=${encodeURIComponent(d.rel || '')}`,
-                { method: 'POST', body: fd });   // crmFetch 認得 FormData，不設 Content-Type
+                { method: 'POST', body: uploadFormData(items) });   // crmFetch 認得 FormData
             const bad = (r.skipped || []).map(s => `${s.filename}（${s.reason}）`);
-            crmToast(`已上傳 ${(r.saved || []).length} 個檔案`
+            crmToast(`已上傳 ${(r.saved || []).length} 個項目`
                 + (bad.length ? `；略過 ${bad.length} 個` : ''), bad.length ? 6000 : 2000);
             if (bad.length) console.warn('略過：', bad.join('、'));
             if (r.files) applyLevel(r);         // 端點順手回了這一層，不必再掃一次
         } catch (e) { alert('上傳失敗：' + (e.message || e)); }
     };
 
+    const dirInput = box.querySelector('#pp-dir-input');
     box.querySelector('#pp-add').addEventListener('click', () => input.click());
-    input.addEventListener('change', () => { send(input.files); input.value = ''; });
-    wireFileDrop(drop, send);
+    box.querySelector('#pp-add-dir').addEventListener('click', () => dirInput.click());
+    for (const el of [input, dirInput]) {
+        // 選資料夾時 webkitRelativePath 會帶「資料夾名/子層/檔名」，
+        // 與拖放取得的 path 同形 —— 兩條路進 send 之前就統一了
+        el.addEventListener('change', () => { send(inputUploadItems(el.files)); el.value = ''; });
+    }
+    wireFileDrop(drop, send);      // 拖資料夾進來會遞迴展開（含資料夾本身）
 
     const mkdir = async (name, rel) => {
         const r = await crmFetch(`/projects/${projectId}/proposal-assets/mkdir`

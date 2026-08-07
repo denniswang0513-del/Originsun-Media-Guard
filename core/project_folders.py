@@ -437,21 +437,73 @@ def _stream_to_disk(src, dest: str, max_bytes: int) -> int:
     return total
 
 
-async def save_uploads(folder_abs: str, files, *, max_bytes: int) -> tuple:
+def safe_sub_dirs(rel_path: str) -> Optional[list]:
+    """使用者拖進來的相對路徑 → 乾淨的**目錄段**清單（不含最後的檔名）。
+    任何一段是 `.` / `..` / 清完為空 → None（整筆拒收，不「盡量修好」）。
+
+    🔴 這條路徑來自瀏覽器的拖放事件，**是敵意輸入**。清洗必須逐段做：
+    只檢查整串有沒有 `..` 擋不住 `a/..%2f..`、也擋不住 Windows 的 `C:` 這種
+    磁碟機前綴。逐段 clean_name + 明確拒收特殊段，才是可以講清楚的規則。
+    """
+    parts = str(rel_path or "").replace("\\", "/").split("/")[:-1]   # 去掉檔名那段
+    out = []
+    for seg in parts:
+        seg = seg.strip()
+        if not seg:
+            continue                       # 連續斜線 / 開頭斜線 → 忽略空段
+        if seg in (".", ".."):
+            return None
+        cleaned = clean_name(seg)[:_MAX_SEGMENT_LEN].strip()
+        if not cleaned or cleaned in (".", ".."):
+            return None                    # 清完只剩非法字元 → 這筆不要
+        out.append(cleaned)
+    return out
+
+
+async def save_uploads(folder_abs: str, files, *, max_bytes: int,
+                       rel_paths=None) -> tuple:
     """把上傳檔案落地到 folder_abs → `(saved, skipped)`。
 
     檔名保留原樣（清洗非法字元）、撞名補 -2、可執行檔與超大檔進 skipped
     並附人看得懂的理由。
 
+    `rel_paths[i]`（拖整個資料夾進來時前端會送）= 該檔在來源資料夾裡的相對
+    路徑，含被拖進來的那層資料夾名 → 這裡照著重建目錄結構。每一段都過
+    `safe_sub_dirs`，且最終路徑會再驗一次落在 folder_abs 內（雙保險：一層是
+    規則、一層是實際 realpath 比對）。不給就全部平放，行為與從前相同。
+
+    撞名是**逐目錄**判斷的 —— 全域一份 taken 會讓 `a/圖.jpg` 與 `b/圖.jpg`
+    其中一個平白變成 `圖-2.jpg`。
+
     範圍：目前的消費端是提案資產夾的兩個上傳入口（專案的與任一資料夾的）。
     影像紀錄**刻意沒接** —— 它走的是媒體副檔名白名單 + 時間戳前綴去重，
-    是另一套政策，硬合併只會讓兩邊都變難懂。要接第三個 any-file 落地點時
-    再把差異參數化。
+    是另一套政策，硬合併只會讓兩邊都變難懂。
     """
-    taken = set(await asyncio.to_thread(os.listdir, folder_abs))
     over = f"超過 {max_bytes // (1024 * 1024)}MB 上限"
     saved, skipped = [], []
-    for f in files:
+    taken_by_dir: dict = {}                # 目錄 → 已佔用檔名（逐目錄去重）
+    made_dirs = set()
+
+    async def _dest_dir(rel_path: str):
+        """→ (絕對目錄, 顯示用前綴)；不合法或建不出來 → (None, reason)。"""
+        segs = safe_sub_dirs(rel_path) if rel_path else []
+        if segs is None:
+            return None, "路徑不合法"
+        if not segs:
+            return folder_abs, ""
+        target = os.path.join(folder_abs, *segs)
+        if not within_dir(folder_abs, target):     # 第二道：實際路徑比對
+            return None, "路徑逃出資料夾"
+        if target not in made_dirs:
+            try:
+                await asyncio.to_thread(os.makedirs, target, exist_ok=True)
+            except OSError as e:
+                return None, f"無法建立子資料夾（{type(e).__name__}）"
+            made_dirs.add(target)
+        return target, "/".join(segs) + "/"
+
+    for i, f in enumerate(files):
+        rel_path = (rel_paths[i] if rel_paths and i < len(rel_paths) else "") or ""
         ext = os.path.splitext(f.filename or "")[1].lower()
         if ext in BLOCKED_UPLOAD_EXTS:
             skipped.append({"filename": f.filename, "reason": f"不允許的檔案類型（{ext}）"})
@@ -461,14 +513,24 @@ async def save_uploads(folder_abs: str, files, *, max_bytes: int) -> tuple:
         if (getattr(f, "size", None) or 0) > max_bytes:
             skipped.append({"filename": f.filename, "reason": over})
             continue
+        dest, prefix = await _dest_dir(rel_path)
+        if dest is None:
+            skipped.append({"filename": f.filename, "reason": prefix})
+            continue
+        if dest not in taken_by_dir:
+            try:
+                taken_by_dir[dest] = set(await asyncio.to_thread(os.listdir, dest))
+            except OSError:
+                taken_by_dir[dest] = set()
+        taken = taken_by_dir[dest]
         name = dedupe(clean_filename(f.filename or ""), taken, keep_ext=True)
         written = await asyncio.to_thread(
-            _stream_to_disk, f.file, os.path.join(folder_abs, name), max_bytes)
+            _stream_to_disk, f.file, os.path.join(dest, name), max_bytes)
         if written < 0:                 # size 拿不到時的第二道防線
             skipped.append({"filename": f.filename, "reason": over})
             continue
         taken.add(name)
-        saved.append(name)
+        saved.append(prefix + name)
     return saved, skipped
 
 

@@ -49,13 +49,63 @@ export async function authDownload(url, filename, label = '下載') {
 }
 
 /**
- * 拖放上傳區：進入時高亮、放開送檔。`onFiles(FileList)` 決定怎麼送。
+ * `<input type=file>` 選到的檔 → 上傳項目 `[{file, path}]`。
+ * `path` 是相對路徑：選資料夾時（input 帶 webkitdirectory）瀏覽器會給
+ * `webkitRelativePath`＝「資料夾名/子層/檔名」，正好就是我們要送的形式。
+ */
+export function inputUploadItems(fileList) {
+    return [...(fileList || [])].map(f => ({ file: f, path: f.webkitRelativePath || f.name }));
+}
+
+/**
+ * 拖放的 DataTransfer → 上傳項目 `[{file, path}]`，**資料夾會遞迴展開**
+ * 且路徑含被拖進來的那層資料夾名（owner 2026-08-08：拖一個夾進去要連夾一起）。
+ *
+ * 🔴 `webkitGetAsEntry()` 必須在**事件當下同步**取完 —— DataTransfer 在
+ * handler 回傳後就被清空，先 await 再讀會拿到一堆 null。所以先同步蒐集
+ * entries，之後才慢慢遞迴。
+ * 舊瀏覽器沒有這個 API → 退回 `dt.files`（平放），不會壞掉只是沒有結構。
+ */
+export async function dropUploadItems(dt) {
+    const entries = [...(dt.items || [])]
+        .map(it => (it.webkitGetAsEntry ? it.webkitGetAsEntry() : null))
+        .filter(Boolean);
+    if (!entries.length) return inputUploadItems(dt.files);
+
+    const out = [];
+    const readDir = (reader) => new Promise((res, rej) => {
+        // readEntries 一次最多回 100 筆，要一直讀到回空陣列為止 ——
+        // 只讀一次的話大資料夾會安靜地只上傳前 100 個檔
+        const all = [];
+        const step = () => reader.readEntries(
+            (batch) => (batch.length ? (all.push(...batch), step()) : res(all)), rej);
+        step();
+    });
+    const walk = async (entry, prefix) => {
+        if (entry.isFile) {
+            const file = await new Promise((res, rej) => entry.file(res, rej));
+            out.push({ file, path: prefix + entry.name });
+            return;
+        }
+        for (const child of await readDir(entry.createReader())) {
+            await walk(child, prefix + entry.name + '/');
+        }
+    };
+    for (const e of entries) {
+        try { await walk(e, ''); } catch (_) { /* 單一項失敗不拖垮整批 */ }
+    }
+    return out;
+}
+
+/**
+ * 拖放上傳區：進入時高亮、放開送檔。`onItems([{file, path}])` 決定怎麼送
+ * （拖資料夾進來時 path 帶著目錄結構，見 dropUploadItems）。
  *
  * 高亮走 class + 自帶樣式，不動 inline style —— 直接寫 `zone.style.borderColor`
  * 會猜錯對方用邊框還是底色，還會把人家原本的 border-top 一起清掉。
  */
 const _DROP_HOT = 'osun-drop-hot';
-export function wireFileDrop(zone, onFiles) {
+export function wireFileDrop(zone, onItems) {
     if (!document.getElementById('osun-drop-style')) {
         const st = document.createElement('style');
         st.id = 'osun-drop-style';
@@ -67,7 +117,23 @@ export function wireFileDrop(zone, onFiles) {
     const off = (e) => { e.preventDefault(); zone.classList.remove(_DROP_HOT); };
     ['dragenter', 'dragover'].forEach(ev => zone.addEventListener(ev, on));
     ['dragleave', 'drop'].forEach(ev => zone.addEventListener(ev, off));
-    zone.addEventListener('drop', e => onFiles(e.dataTransfer.files));
+    zone.addEventListener('drop', async (e) => {
+        const items = await dropUploadItems(e.dataTransfer);   // 內部先同步取 entries
+        if (items.length) onItems(items);
+    });
+}
+
+/**
+ * 上傳項目 → FormData（`files` 與 `paths` 一組一組成對 append，同序）。
+ * 後端 save_uploads 靠 index 對應，所以**兩個欄位必須在同一個迴圈裡加**。
+ */
+export function uploadFormData(items) {
+    const fd = new FormData();
+    for (const it of items) {
+        fd.append('files', it.file);
+        fd.append('paths', it.path || it.file.name);
+    }
+    return fd;
 }
 
 /**
