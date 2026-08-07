@@ -71,6 +71,33 @@ export function wireFileDrop(zone, onFiles) {
 }
 
 /**
+ * 複製文字到剪貼簿（**單一正本**）→ 成功 true。
+ *
+ * 🔴 本系統多半是 http://192.168.1.x 連進來的 —— **非安全內容**，
+ * `navigator.clipboard` 根本不存在。所以一律先探 isSecureContext，
+ * 沒有就退回 prompt（使用者自己 Ctrl+C，永遠可用）。少了這層 fallback，
+ * 「複製」在同事的電腦上就是一顆沒反應的按鈕。
+ * 傳 btn 進來會順手做「已複製」的短暫回饋。
+ */
+export async function copyText(text, btn) {
+    const flash = () => {
+        if (!btn) return;
+        const t = btn.textContent;
+        btn.textContent = '已複製';
+        setTimeout(() => { btn.textContent = t; }, 1500);
+    };
+    if (navigator.clipboard && window.isSecureContext) {
+        try {
+            await navigator.clipboard.writeText(text);
+            flash();
+            return true;
+        } catch (_) { /* 權限被擋 → 照樣走 prompt */ }
+    }
+    prompt('Ctrl+C 複製：', text);
+    return false;
+}
+
+/**
  * 資料夾麵包屑：`"a/b/c"` → `[{label:'a',rel:'a'},{label:'b',rel:'a/b'},…]`。
  * 後端回的 rel 一律是 `/` 分隔、相對資料夾根。（消費端要的都是 HTML，
  * 走底下的 folderCrumbsHtml；這支是它的內部拆解。）

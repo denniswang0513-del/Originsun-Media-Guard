@@ -151,6 +151,7 @@ function _render(ov) {
                     folderCrumbsHtml(_open, _rel)}</div>
                 <div style="padding:6px 12px;">
                     <button data-upload class="prop-btn ghost">＋ 上傳檔案到這一層</button>
+                    <button data-mkdir class="prop-btn ghost">＋ 新增資料夾</button>
                     <span class="prop-note" style="margin-left:8px;">也可以把檔案拖進來</span>
                 </div>
                 <div id="pf-files" style="padding:0 0 4px;">
@@ -278,6 +279,17 @@ function _wireDrop(ov) {
         inp.click();
     });
     wireFileDrop(zone, send);
+
+    zone.querySelector('[data-mkdir]')?.addEventListener('click', async () => {
+        const name = prompt('新資料夾名稱（會建在你目前看的這一層）：');
+        if (!name || !name.trim()) return;
+        try {
+            const d = await tfetch(`${API}/folder/mkdir?folder=${encodeURIComponent(folder)}`
+                + `&rel=${encodeURIComponent(rel)}`,
+                { method: 'POST', json: { name: name.trim() } });
+            _paint(ov, d, folder, rel);
+        } catch (e) { alert('建立失敗：' + (e.message || e)); }
+    });
 }
 
 async function _loadLevel(ov, folder, rel) {

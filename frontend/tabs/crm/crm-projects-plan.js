@@ -9,7 +9,7 @@
 
 import { crmFetch, crmToast, esc } from './crm-utils.js';
 import { fmtSize } from '../../js/shared/clip_utils.js';
-import { authDownload, folderCrumbsHtml, wireFileDrop } from '../../js/shared/utils.js';
+import { authDownload, copyText, folderCrumbsHtml, wireFileDrop } from '../../js/shared/utils.js';
 import { tfetch } from '../proposals/prop-fetch.js';
 import { state } from './crm-projects-state.js';
 
@@ -58,10 +58,14 @@ function _mountAssetsCard(projectId, host, d) {
             <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;">
                 <span style="font-size:12px;color:#8b8b8b;">提案資產資料夾${
                     d.root_set ? '' : '<span style="color:#fbbf24;"> — 目前搆不到這個路徑</span>'}</span>
-                ${d.folder_name ? `<code style="font-size:11.5px;color:#8b8b8b;">${esc(d.folder_name)}</code>` : ''}
+                ${d.folder_name ? `<code id="pp-path" title="點一下複製完整路徑（貼進檔案總管就能開）"
+                    style="font-size:11.5px;color:#8b8b8b;cursor:pointer;text-decoration:underline;text-underline-offset:3px;"
+                    >${esc(d.folder_name)}</code>` : ''}
                 <span style="flex:1;"></span>
+                <button id="pp-mkdir" class="crm-btn crm-btn-secondary crm-btn-sm">＋ 新增資料夾</button>
                 <button id="pp-add" class="crm-btn crm-btn-primary crm-btn-sm">＋ 上傳檔案</button>
-                <button id="pp-open" class="crm-btn crm-btn-secondary crm-btn-sm">開啟資料夾</button>
+                <button id="pp-open" class="crm-btn crm-btn-secondary crm-btn-sm"
+                        title="在這台伺服器上開啟檔案總管 — 你人不在伺服器前的話請改用「點路徑複製」">開啟資料夾</button>
                 <button id="pp-cfg" class="crm-btn crm-btn-secondary crm-btn-sm" title="設定根目錄">⚙</button>
             </div>
             <div id="pp-drop" style="border:1px dashed #3a3a3a;border-radius:4px;">
@@ -95,6 +99,9 @@ function _mountAssetsCard(projectId, host, d) {
             loadPlanTab(projectId, host);   // root_set / 資料夾路徑會跟著變
         } catch (e) { alert('儲存失敗：' + (e.message || e)); }
     });
+    // 「開啟資料夾」在**伺服器上**跑 explorer（api_utils.open_folder）—— 你人坐在
+    // master 前才看得到視窗跳出來。從別台電腦的瀏覽器點是靜靜什麼都不發生，
+    // 所以路徑本身要點得到、複製得走（貼進檔案總管是那條路真正可用的版本）。
     box.querySelector('#pp-open').addEventListener('click', () => {
         const path = d.project_folder || d.root || '';
         if (!path) { alert('尚未設定提案資產資料夾'); return; }
@@ -102,6 +109,10 @@ function _mountAssetsCard(projectId, host, d) {
             method: 'POST', headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ path }),
         }).catch(() => {});
+    });
+    box.querySelector('#pp-path')?.addEventListener('click', (e) => {
+        const path = d.project_folder || d.root || '';
+        if (path) copyText(path, e.currentTarget);   // 回饋走按鈕本身，不再疊 toast
     });
 }
 
@@ -114,7 +125,7 @@ function _renderFiles(box, d) {
     const crumbs = _crumbsHtml(d);
     if (!dirs.length && !files.length) {
         list.innerHTML = crumbs + `<div style="padding:18px;text-align:center;color:#6b6b6b;font-size:12px;">
-            這一層是空的 — 把檔案拖進來，或按「＋ 上傳檔案」</div>`;
+            這一層是空的 — 把檔案拖進來，或按「＋ 上傳檔案」／「＋ 新增資料夾」</div>`;
         return;
     }
     list.innerHTML = crumbs + dirs.map(x => `
@@ -206,6 +217,20 @@ function _wireUpload(projectId, box, host, d) {
     box.querySelector('#pp-add').addEventListener('click', () => input.click());
     input.addEventListener('change', () => { send(input.files); input.value = ''; });
     wireFileDrop(drop, send);
+
+    box.querySelector('#pp-mkdir').addEventListener('click', async () => {
+        const name = prompt('新資料夾名稱（會建在你目前看的這一層）：');
+        if (!name || !name.trim()) return;
+        try {
+            const r = await crmFetch(`/projects/${projectId}/proposal-assets/mkdir`
+                + `?rel=${encodeURIComponent(d.rel || '')}`,
+                { method: 'POST', body: JSON.stringify({ name: name.trim() }) });
+            crmToast(`已建立「${r.created}」`);
+            Object.assign(d, { dirs: r.dirs, files: r.files, truncated: r.truncated });
+            levels.delete(d.rel || '');
+            repaint();
+        } catch (e) { alert('建立失敗：' + (e.message || e)); }
+    });
 
     // 列表操作（事件委派 —— 列表每次重畫）
     box.querySelector('#pp-files').addEventListener('click', async (e) => {

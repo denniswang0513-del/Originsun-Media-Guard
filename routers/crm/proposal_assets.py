@@ -157,6 +157,27 @@ async def _subdir_or_404(folder_abs: str, rel: str) -> str:
     return dir_abs
 
 
+async def _mkdir_result(folder_abs: str, rel: str, raw_name) -> dict:
+    """在 rel 這一層底下開一個新子資料夾 → 回這一層的新內容（同上傳的回應形狀，
+    前端不必再打一次列檔）。名稱規則走 core.validate_folder_name（與改名同一份）。
+
+    刻意**不動**總覽快取：這裡只會在某個資產夾**裡面**開夾，root 的子夾清單
+    沒變 —— 順手 invalidate 會讓每次開子夾都白掃一次 NAS。
+    """
+    dir_abs = await _subdir_or_404(folder_abs, rel)
+    name, err = validate_folder_name(dir_abs, raw_name)
+    if err:
+        raise HTTPException(status_code=400, detail=err)
+    try:
+        # 不帶 exist_ok —— FileExistsError 就是「已經有了」，比先 isdir 問一趟便宜
+        await asyncio.to_thread(os.makedirs, subfolder_path(dir_abs, name))
+    except FileExistsError:
+        raise HTTPException(status_code=400, detail=f"這一層已經有「{name}」了")
+    except OSError as e:
+        raise HTTPException(status_code=400, detail=f"建立資料夾失敗：{e}")
+    return {"status": "ok", "created": name, **await _level(folder_abs, rel)}
+
+
 async def _upload_result(folder_abs: str, files, rel: str = "") -> dict:
     """兩個上傳端點的共同回應：落地到 rel 這一層 + 回這一層的新內容
     （前端不必再打一次列檔）。一個都沒存成（全被擋/全超限）→ 不重掃，
@@ -267,6 +288,20 @@ async def upload_proposal_assets(project_id: str, request: Request, rel: str = "
         folder = await _ensure_project_folder(session, project_id)
         await session.commit()          # 資料夾名可能剛生成，先落地
     return await _upload_result(folder, files, rel)
+
+
+@router.post("/projects/{project_id}/proposal-assets/mkdir")
+async def mkdir_proposal_assets(project_id: str, request: Request, rel: str = ""):
+    """在專案資產夾的 rel 這一層底下開新子資料夾（body `{name}`）。
+    資產夾本身不存在會先建出來 —— 空專案第一個動作就是開結構夾很常見。"""
+    _assets_auth(request)
+    _require_db()
+    name = (await request.json()).get("name")
+    factory = await _get_factory()
+    async with factory() as session:
+        folder = await _ensure_project_folder(session, project_id)
+        await session.commit()          # 資料夾名可能剛生成，先落地
+    return await _mkdir_result(folder, rel, name)
 
 
 @router.get("/projects/{project_id}/proposal-assets/file")
@@ -447,6 +482,14 @@ async def proposal_folder_upload(request: Request, folder: str = "", rel: str = 
     `rel` = 落在哪一層（空 = 最外層；就是使用者目前看的那一層）。"""
     _assets_auth(request)
     return await _upload_result(await _folder_or_404(folder), files, rel)
+
+
+@router.post("/proposal-assets/folder/mkdir")
+async def proposal_folder_mkdir(request: Request, folder: str = "", rel: str = ""):
+    """在任一資產資料夾的 rel 這一層底下開新子資料夾（body `{name}`）。"""
+    _assets_auth(request)
+    name = (await request.json()).get("name")
+    return await _mkdir_result(await _folder_or_404(folder), rel, name)
 
 
 @router.post("/proposal-assets/folder/rename")
