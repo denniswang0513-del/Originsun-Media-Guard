@@ -176,7 +176,41 @@ footer .eyebrow { font-size: 10px; }
         <button class="btn-primary" type="submit">登入 Sign in</button>
       </form>
       <div id="login-err" class="err"></div>
+      <div style="text-align:right;margin:6px 0 2px;">
+        <a href="#" onclick="showForgot(event)" style="font-size:12px;color:var(--sub);text-decoration:underline;text-underline-offset:3px;">忘記密碼 Forgot password</a>
+      </div>
       <button class="btn-ghost-wide" type="button" onclick="showRegister()">註冊帳號 Register</button>
+    </div>
+  </div>
+
+  <!-- 忘記密碼：寄重設連結到註冊信箱 -->
+  <div id="forgot-view" style="display:none;max-width:400px;margin:10vh auto 0;">
+    <div class="login-card">
+      <div class="eyebrow">Originsun · Reset</div>
+      <h1>忘記密碼</h1>
+      <div class="sub">輸入帳號或註冊時留的 Email，我們會寄一封重設連結（30 分鐘內有效）；信裡也會提醒你的帳號名稱。</div>
+      <form onsubmit="doForgot(event)">
+        <div class="field"><label>帳號或 Email</label><input id="fg-acc" autocomplete="username"></div>
+        <button id="fg-go" class="btn-primary" type="submit">寄送重設信 Send</button>
+      </form>
+      <div id="fg-msg" class="err"></div>
+      <button class="btn-ghost-wide" type="button" onclick="showLoginFromForgot()">返回登入 Back</button>
+    </div>
+  </div>
+
+  <!-- 設定新密碼（從重設信的連結進來：/my.html?reset=token）-->
+  <div id="reset-view" style="display:none;max-width:400px;margin:10vh auto 0;">
+    <div class="login-card">
+      <div class="eyebrow">Originsun · Reset</div>
+      <h1>設定新密碼</h1>
+      <div class="sub">為你的帳號設定一組新密碼（至少 6 個字元），完成後會直接登入。</div>
+      <form onsubmit="doReset(event)">
+        <div class="field"><label>新密碼 New password</label><input id="rs-pwd" type="password" autocomplete="new-password"></div>
+        <div class="field"><label>確認密碼 Confirm</label><input id="rs-pwd2" type="password" autocomplete="new-password"></div>
+        <button class="btn-primary" type="submit">設定並登入 Save</button>
+      </form>
+      <div id="rs-err" class="err"></div>
+      <button class="btn-ghost-wide" type="button" onclick="cancelReset()">返回登入 Back</button>
     </div>
   </div>
 
@@ -239,6 +273,8 @@ async function mfetch(path, opts = {}) {
 function showLogin(msg) {
     $("ws-view").style.display = "none";
     $("register-view").style.display = "none";
+    $("forgot-view").style.display = "none";
+    $("reset-view").style.display = "none";
     $("login-view").style.display = "block";
     $("hdr-user").style.display = "none";
     $("hdr-hr").style.display = "none";
@@ -307,6 +343,70 @@ function showLoginFromRegister() {
     $("register-view").style.display = "none";
     $("rg-err").style.display = "none";
     showLogin("");
+}
+
+// ── 忘記密碼（寄重設連結）──
+function showForgot(ev) {
+    if (ev) ev.preventDefault();
+    $("login-view").style.display = "none";
+    $("forgot-view").style.display = "block";
+    $("fg-msg").style.display = "none";
+    $("fg-acc").value = $("in-user").value;   // 登入卡打過的帳號帶過來
+    $("fg-acc").focus();
+}
+function showLoginFromForgot() {
+    $("fg-msg").style.display = "none";
+    showLogin("");
+}
+function _fgMsg(msg, ok) {
+    const e = $("fg-msg");
+    e.textContent = msg;
+    e.style.display = "block";
+    e.style.color = ok ? "var(--sub)" : "";   // 成功訊息不用紅字
+}
+async function doForgot(ev) {
+    ev.preventDefault();
+    const acc = $("fg-acc").value.trim();
+    if (!acc) { _fgMsg("請輸入帳號或 Email", false); return; }
+    const btn = $("fg-go");
+    btn.disabled = true;
+    try {
+        const r = await fetch("/api/v1/auth/forgot", {
+            method: "POST", headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ account: acc }),
+        });
+        const d = await r.json();
+        if (!r.ok) { _fgMsg(d.detail || "送出失敗，請稍後再試", false); return; }
+        _fgMsg(d.message || "已送出", !!d.sent);
+    } catch (_) { _fgMsg("連線失敗，請稍後再試", false); }
+    finally { btn.disabled = false; }
+}
+
+// ── 設定新密碼（重設信連結 ?reset=token 進來）──
+function _resetToken() {
+    return new URLSearchParams(location.search).get("reset") || "";
+}
+function cancelReset() {
+    history.replaceState(null, "", location.pathname);   // 把 token 從網址拿掉
+    showLogin("");
+}
+function _rsErr(msg) { const e = $("rs-err"); e.textContent = msg; e.style.display = "block"; }
+async function doReset(ev) {
+    ev.preventDefault();
+    $("rs-err").style.display = "none";
+    const pwd = $("rs-pwd").value;
+    if (pwd !== $("rs-pwd2").value) { _rsErr("兩次密碼不一致"); return; }
+    try {
+        const r = await fetch("/api/v1/auth/reset", {
+            method: "POST", headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ token: _resetToken(), new_password: pwd }),
+        });
+        const d = await r.json();
+        if (!r.ok) { _rsErr(d.detail || "設定失敗，請重新申請重設"); return; }
+        history.replaceState(null, "", location.pathname);
+        $("reset-view").style.display = "none";
+        onLoginOk(d);   // 設定即登入，直接進工作台
+    } catch (_) { _rsErr("連線失敗，請稍後再試"); }
 }
 function _rgErr(msg) { const e = $("rg-err"); e.textContent = msg; e.style.display = "block"; }
 async function doRegister(ev) {
@@ -727,6 +827,11 @@ async function submitTs() {
 
 // ── boot ──
 (function () {
+    if (_resetToken()) {                 // 重設信連結進來：先設新密碼
+        $("reset-view").style.display = "block";
+        $("rs-pwd").focus();
+        return;
+    }
     if (localStorage.getItem(TOKEN_KEY)) loadWorkspace();
     else showLogin("");
 })();

@@ -167,7 +167,11 @@ def _extract_token(request: Request) -> Optional[dict]:
     auth = request.headers.get('Authorization', '')
     if auth.startswith('Bearer '):
         payload = verify_token(auth[7:])
-        if payload is not None:
+        # 帶 purpose 的是特殊用途 token（如密碼重設信裡的 pwd_reset）——
+        # 同一把 secret 簽的，簽章驗得過，但**不是**登入憑證，一律拒收。
+        # 擋在這個咽喉而不是逐端點檢查：任何「有 token 就放行」的端點
+        # （如 /auth/me 的 payload fallback）都自動涵蓋。
+        if payload is not None and not payload.get('purpose'):
             return payload
 
     # 2. Try X-API-Key header
