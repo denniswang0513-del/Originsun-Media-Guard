@@ -8,46 +8,43 @@ label 就等於每個提案各自凍結一份範本，新欄目永遠不會出�
 於是 `rows()` 每次讀都拿 TEMPLATE 重新對齊 —— 加一列 = 改這裡一行，
 全部提案立刻長出來（值還在的照樣顯示）。
 
-自訂列（owner 臨時想加的）用 `x-` 開頭的 key 存在同一份清單裡、排在範本列
-之後，label 由使用者給、程式不動。
+🔴 **加一列就是一次對外揭露**：提案公開頁會分享給客戶，所以 TEMPLATE 每一列
+自帶 `public` 旗標，加新欄目時**必須當場決定**客戶看不看得到 —— 少填那一格
+是語法錯誤，不是靜默把內部資訊送到客戶眼前（黑名單式的「除了預算都公開」
+才會有那種事）。公開路徑一律走 `rows(..., public=True)` 與
+`apply_patch(..., public=True)`，不是靠呼叫端記得過濾。
+`tests/unit/test_proposal_survey.py` 有一條把公開欄目集合釘死的斷言。
 
-🔴 `PRIVATE_KEYS` 是「連讀都不給公開連結看」的欄目 —— 提案公開頁會分享給客戶，
-預算不能出現在那裡（同 api_proposals 對 budget_range / outcome_reason 的既有政策）。
-公開路徑一律走 `rows(..., public=True)` 與 `apply_patch(..., public=True)`，
-不是靠呼叫端記得過濾。
+自訂列（owner 臨時想加的）一律**不公開**，共用 core/row_table 的 `x-` key 契約。
 """
 from __future__ import annotations
 
-import re
+from core.row_table import (MAX_LABEL, add_custom_row, is_extra,  # noqa: F401
+                            remove_custom_row)
 
-# (key, label) —— 順序就是表格順序。key 是 DB 存值的鍵，**不要改**（改了值會孤兒）。
-TEMPLATE: tuple[tuple[str, str], ...] = (
-    ("client", "客戶"),
-    ("brand_tone", "品牌調性"),
-    ("product", "產品"),
-    ("product_tone", "產品調性"),
-    ("ta", "TA"),
-    ("goal", "期望目標"),
-    ("style", "期望風格（1-3 個形容詞）"),
-    ("special", "特殊需求"),
-    ("count_length", "支數及片長規劃"),
-    ("media", "播放媒介"),
-    ("budget", "預算"),
-    ("deliver_date", "預計交片時間"),
-    ("client_refs", "客戶參考影片"),
+# (key, label, public) —— 順序就是表格順序。key 是 DB 存值的鍵，**不要改**
+# （改了值會孤兒）。public=False = 連讀都不出公開端點。
+TEMPLATE: tuple[tuple[str, str, bool], ...] = (
+    ("client", "客戶", True),
+    ("brand_tone", "品牌調性", True),
+    ("product", "產品", True),
+    ("product_tone", "產品調性", True),
+    ("ta", "TA", True),
+    ("goal", "期望目標", True),
+    ("style", "期望風格（1-3 個形容詞）", True),
+    ("special", "特殊需求", True),
+    ("count_length", "支數及片長規劃", True),
+    ("media", "播放媒介", True),
+    ("budget", "預算", False),            # 金額 — 同 budget_range 的既有政策
+    ("deliver_date", "預計交片時間", True),
+    ("client_refs", "客戶參考影片", True),
 )
 
-TEMPLATE_KEYS = tuple(k for k, _ in TEMPLATE)
-_LABELS = dict(TEMPLATE)
-
-# 公開連結看不到的欄目（金額）。organisational learning 那類欄位不在這張表上。
-PRIVATE_KEYS = frozenset({"budget"})
+TEMPLATE_KEYS = tuple(k for k, _l, _p in TEMPLATE)
+PUBLIC_KEYS = frozenset(k for k, _l, public in TEMPLATE if public)
 
 FIELDS = ("content", "note")
 MAX_TEXT = 4000          # 單格上限（現況盤點是摘要，不是腳本）
-MAX_EXTRA_ROWS = 20      # 自訂列上限
-MAX_LABEL = 40
-_EXTRA_KEY_RE = re.compile(r"^x-[0-9a-f]{6}$")
 
 
 def _cell(raw) -> tuple[str, str]:
@@ -59,8 +56,8 @@ def _cell(raw) -> tuple[str, str]:
 def rows(stored, *, public: bool = False) -> list[dict]:
     """DB 值 → 完整表格（範本列在前、自訂列在後）。stored 可以是 None / 壞資料。
 
-    public=True 時抽掉 PRIVATE_KEYS —— 公開頁拿到的 payload 裡根本沒有那一列，
-    不是前端隱藏。
+    public=True 只留 PUBLIC_KEYS —— 公開頁拿到的 payload 裡根本沒有那些列，
+    不是前端隱藏。自訂列一律不公開（沒人替它決定過可見性）。
     """
     by_key: dict[str, dict] = {}
     for r in (stored or []):
@@ -68,14 +65,16 @@ def rows(stored, *, public: bool = False) -> list[dict]:
             by_key.setdefault(r["key"], r)
 
     out: list[dict] = []
-    for key, label in TEMPLATE:
-        if public and key in PRIVATE_KEYS:
+    for key, label, _public in TEMPLATE:
+        if public and key not in PUBLIC_KEYS:
             continue
         content, note = _cell(by_key.pop(key, None))
         out.append({"key": key, "label": label, "content": content, "note": note})
+    if public:
+        return out
     # 自訂列：保留使用者給的 label 與 stored 的先後順序
     for key, r in by_key.items():
-        if not _EXTRA_KEY_RE.match(key):
+        if not is_extra(key):
             continue                      # 認不得的 key = 舊版/髒資料，不往外送
         content, note = _cell(r)
         out.append({"key": key, "label": str(r.get("label") or key)[:MAX_LABEL],
@@ -90,12 +89,9 @@ def apply_patch(stored, key: str, field: str, value, *, public: bool = False):
     那條有上限）。"""
     if field not in FIELDS:
         return stored, f"field 只能是 {' / '.join(FIELDS)}"
-    if not isinstance(key, str) or not key:
-        return stored, "key 必填"
-    known = key in _LABELS or _EXTRA_KEY_RE.match(key)
-    if not known:
+    if not isinstance(key, str) or not (key in TEMPLATE_KEYS or is_extra(key)):
         return stored, "未知的欄目"
-    if public and key in PRIVATE_KEYS:
+    if public and key not in PUBLIC_KEYS:
         return stored, "這個欄目不開放公開連結編輯"
     text = "" if value is None else str(value)
     if len(text) > MAX_TEXT:
@@ -113,31 +109,12 @@ def apply_patch(stored, key: str, field: str, value, *, public: bool = False):
 def add_row(stored, label: str, *, key_seed: str):
     """新增一列自訂欄目 → (新的 stored, 錯誤訊息)。key_seed 由呼叫端給
     （uuid hex），讓這個函式維持純函式、可測。"""
-    name = str(label or "").strip()[:MAX_LABEL]
-    if not name:
-        return stored, "欄目名稱必填"
-    cur = rows(stored)
-    extras = [r for r in cur if _EXTRA_KEY_RE.match(r["key"])]
-    if len(extras) >= MAX_EXTRA_ROWS:
-        return stored, f"自訂欄目最多 {MAX_EXTRA_ROWS} 列"
-    key = f"x-{str(key_seed)[:6].lower()}"
-    if not _EXTRA_KEY_RE.match(key) or any(r["key"] == key for r in cur):
-        return stored, "欄目 key 產生失敗，請再試一次"
-    cur.append({"key": key, "label": name, "content": "", "note": ""})
-    return cur, ""
+    new, err = add_custom_row(rows(stored), label, key_seed=key_seed,
+                              blank={"content": "", "note": ""}, noun="欄目")
+    return (stored, err) if err else (new, "")
 
 
 def remove_row(stored, key: str):
     """刪一列自訂欄目 → (新的 stored, 錯誤訊息)。範本列不給刪（清空即可）。"""
-    if not _EXTRA_KEY_RE.match(str(key or "")):
-        return stored, "只能刪自訂欄目"
-    cur = rows(stored)
-    left = [r for r in cur if r["key"] != key]
-    if len(left) == len(cur):
-        return stored, "找不到這個欄目"
-    return left, ""
-
-
-def filled_count(stored) -> int:
-    """填了幾格（只看內容欄）—— 提案列表/卡片顯示完成度用。"""
-    return sum(1 for r in rows(stored) if r["content"].strip())
+    new, err = remove_custom_row(rows(stored), key, noun="欄目")
+    return (stored, err) if err else (new, "")

@@ -22,7 +22,7 @@ import uuid
 from fastapi import HTTPException, Request
 
 from core import project_archive as pa
-from core.project_folders import create_subfolder, list_folder_level
+from core.project_folders import create_subfolder
 
 from ._shared import router, _check_auth, _get_factory, _now, _require_db
 
@@ -45,22 +45,26 @@ def _payload(project) -> dict:
     return {
         "checklist": checklist,
         "statuses": list(pa.STATUSES),
-        "progress": pa.progress(project.archive_checklist),
+        "progress": pa.progress_of(checklist),
         "kpta": pa.kpta(project.review_kpta),
         "kpta_fields": [{"key": k, "label": lb} for k, lb in pa.KPTA_FIELDS],
         "root_folder": pa.ROOT_FOLDER,
     }
 
 
-async def _write(project_id: str, mutate):
-    """讀 → mutate(project) → commit → 回完整狀態。mutate 回錯誤字串就 422。"""
+async def _write(project_id: str, attr: str, call):
+    """讀某個 JSONB 欄 → `call(舊值) -> (新值, 錯誤)` → commit → 回完整狀態。
+
+    `call` 的簽名刻意對齊 core.project_archive 那批純函式，端點就只剩一行 lambda。
+    錯誤字串非空 → 422。"""
     _require_db()
     factory = await _get_factory()
     async with factory() as session:
         project = await _project_or_404(session, project_id)
-        err = mutate(project)
+        new, err = call(getattr(project, attr))
         if err:
             raise HTTPException(status_code=422, detail=err)
+        setattr(project, attr, new)
         project.updated_at = _now()
         await session.commit()
         return _payload(project)
@@ -81,15 +85,9 @@ async def patch_project_archive(project_id: str, request: Request):
     """單格寫入：{key, field(status|note), value}。last-write-wins。"""
     _check_auth(request)
     body = await request.json()
-
-    def mutate(project):
-        new, err = pa.apply_patch(project.archive_checklist,
-                                  body.get("key"), body.get("field"), body.get("value"))
-        if err:
-            return err
-        project.archive_checklist = new
-        return ""
-    return await _write(project_id, mutate)
+    return await _write(project_id, "archive_checklist",
+                        lambda cur: pa.apply_patch(cur, body.get("key"),
+                                                   body.get("field"), body.get("value")))
 
 
 @router.post("/projects/{project_id}/archive/rows")
@@ -97,29 +95,17 @@ async def add_archive_row(project_id: str, request: Request):
     """加一列自訂歸檔項目：{label}。"""
     _check_auth(request)
     body = await request.json()
-
-    def mutate(project):
-        new, err = pa.add_row(project.archive_checklist, body.get("label"),
-                              key_seed=uuid.uuid4().hex)
-        if err:
-            return err
-        project.archive_checklist = new
-        return ""
-    return await _write(project_id, mutate)
+    return await _write(project_id, "archive_checklist",
+                        lambda cur: pa.add_row(cur, body.get("label"),
+                                               key_seed=uuid.uuid4().hex))
 
 
 @router.delete("/projects/{project_id}/archive/rows/{key}")
 async def delete_archive_row(project_id: str, key: str, request: Request):
     """刪一列自訂歸檔項目（範本列不給刪，標「不適用」即可）。"""
     _check_auth(request)
-
-    def mutate(project):
-        new, err = pa.remove_row(project.archive_checklist, key)
-        if err:
-            return err
-        project.archive_checklist = new
-        return ""
-    return await _write(project_id, mutate)
+    return await _write(project_id, "archive_checklist",
+                        lambda cur: pa.remove_row(cur, key))
 
 
 @router.patch("/projects/{project_id}/review")
@@ -127,30 +113,42 @@ async def patch_project_review(project_id: str, request: Request):
     """專案回顧（KPTA）單欄寫入：{key, value}。"""
     _check_auth(request)
     body = await request.json()
-
-    def mutate(project):
-        new, err = pa.apply_kpta(project.review_kpta, body.get("key"), body.get("value"))
-        if err:
-            return err
-        project.review_kpta = new
-        return ""
-    return await _write(project_id, mutate)
+    return await _write(project_id, "review_kpta",
+                        lambda cur: pa.apply_kpta(cur, body.get("key"), body.get("value")))
 
 
 # ── 資料夾整合（建結構 / 掃描自動勾）──────────────────────
 
 def _scan_non_empty(archive_abs: str) -> list:
-    """歸檔夾底下哪些子夾「有東西」（檔案或再下一層資料夾都算）。
-    夾不存在 → 空清單（不是錯誤：還沒建過而已）。"""
-    got = list_folder_level(archive_abs, "")
-    if not got:
-        return []
+    """歸檔夾底下哪些**範本**子夾「有東西」（檔案或再下一層資料夾都算）。
+    夾不存在 → 空清單（不是錯誤：還沒建過而已）。
+
+    🔴 這裡刻意**不用** core.list_folder_level：那支每一層都會做兩次 realpath
+    （UNC 上各是一趟 SMB open）+ 完整 scandir + 建 dict + 排序，而我們只要一個
+    bool。走裸 scandir、只看範本認得的夾、第一筆就停 —— 5 個夾從 21 趟 SMB
+    降到 ≤6 趟。路徑安全無虞：子夾名是 TEMPLATE 的字面常數，沒有使用者輸入。
+    """
     out = []
-    for d in got[0]:
-        sub = list_folder_level(archive_abs, d["rel"])
-        if sub and (sub[0] or sub[1]):
-            out.append(d["name"])
+    try:
+        with os.scandir(archive_abs) as it:
+            names = [e.name for e in it if e.is_dir() and e.name in pa.KNOWN_FOLDERS]
+    except OSError:
+        return []
+    for name in names:
+        try:
+            with os.scandir(os.path.join(archive_abs, name)) as sub:
+                if next(sub, None) is not None:
+                    out.append(name)
+        except OSError:
+            continue
     return out
+
+
+def _build_dirs(archive_abs: str) -> None:
+    """把範本的五個子夾一次建完（同一個 thread hop，名字都是程式給的常數）。"""
+    for _k, _l, _h, folder in pa.TEMPLATE:
+        if folder:
+            os.makedirs(os.path.join(archive_abs, folder), exist_ok=True)
 
 
 async def _archive_dir(project_id: str, *, create: bool) -> str:
@@ -167,8 +165,9 @@ async def _archive_dir(project_id: str, *, create: bool) -> str:
         return ""
     archive = os.path.join(folder, pa.ROOT_FOLDER)
     if create:
-        name, err = await asyncio.to_thread(create_subfolder, folder, pa.ROOT_FOLDER)
-        if err and not os.path.isdir(archive):
+        # 資產夾這一層用 create_subfolder（名稱規則與後台開夾同一份）
+        _name, err = await asyncio.to_thread(create_subfolder, folder, pa.ROOT_FOLDER)
+        if err and not await asyncio.to_thread(os.path.isdir, archive):
             raise HTTPException(status_code=400, detail=f"建立歸檔資料夾失敗：{err}")
     return archive
 
@@ -176,14 +175,13 @@ async def _archive_dir(project_id: str, *, create: bool) -> str:
 @router.post("/projects/{project_id}/archive/folders")
 async def build_archive_folders(project_id: str, request: Request):
     """一鍵建歸檔資料夾結構（`{資產夾}/歸檔/01_PPM資料…`）並立刻掃一次。
-    已存在的夾照舊（create_subfolder 會回錯，這裡當成「本來就有」）。"""
+    已存在的夾照舊（makedirs exist_ok）。"""
     _check_auth(request)
     archive = await _archive_dir(project_id, create=True)
     if not archive:
         raise HTTPException(status_code=400,
                             detail="專案資產資料夾無法建立（根目錄未設定或搆不到）")
-    for _k, _l, _h, folder in pa.TEMPLATE:
-        await asyncio.to_thread(create_subfolder, archive, folder)
+    await asyncio.to_thread(_build_dirs, archive)
     return await _scan_and_mark(project_id, archive)
 
 
@@ -192,7 +190,8 @@ async def scan_archive_folders(project_id: str, request: Request):
     """掃描歸檔夾 → 有檔案的項目自動標「已收」（只往前推進，不倒退人工標記）。"""
     _check_auth(request)
     archive = await _archive_dir(project_id, create=False)
-    if not archive or not os.path.isdir(archive):
+    # SMB stat 一律進 thread —— 留在 event loop 上，NAS 一慢就凍住整個 agent
+    if not archive or not await asyncio.to_thread(os.path.isdir, archive):
         raise HTTPException(status_code=404,
                             detail=f"還沒有「{pa.ROOT_FOLDER}」資料夾 — 先按「建立歸檔資料夾」")
     return await _scan_and_mark(project_id, archive)
@@ -202,12 +201,11 @@ async def _scan_and_mark(project_id: str, archive_abs: str) -> dict:
     non_empty = await asyncio.to_thread(_scan_non_empty, archive_abs)
     marked: list = []
 
-    def mutate(project):
-        new, hit = pa.apply_scan(project.archive_checklist, non_empty)
-        project.archive_checklist = new
+    def call(cur):
+        new, hit = pa.apply_scan(cur, non_empty)
         marked.extend(hit)
-        return ""
-    out = await _write(project_id, mutate)
+        return new, ""
+    out = await _write(project_id, "archive_checklist", call)
     out["scanned"] = non_empty
     out["marked"] = marked
     return out

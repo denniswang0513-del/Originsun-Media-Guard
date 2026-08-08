@@ -7,6 +7,7 @@
 import pytest
 
 from core import proposal_survey as ps
+from core import row_table
 
 
 def test_empty_gives_full_template():
@@ -87,7 +88,7 @@ def test_add_row_needs_label_and_has_cap():
     _, err = ps.add_row(None, "   ", key_seed="abcdef")
     assert err
     stored = None
-    for i in range(ps.MAX_EXTRA_ROWS):
+    for i in range(row_table.MAX_EXTRA_ROWS):
         stored, err = ps.add_row(stored, f"欄{i}", key_seed=f"{i:06x}")
         assert err == ""
     _, err = ps.add_row(stored, "滿了", key_seed="ffffff")
@@ -105,8 +106,20 @@ def test_unknown_extra_keys_are_dropped():
     assert not any(r["key"] == "weird" for r in ps.rows([{"key": "weird", "content": "x"}]))
 
 
-def test_filled_count_counts_content_only():
-    stored, _ = ps.apply_patch(None, "ta", "note", "只有備註")
-    assert ps.filled_count(stored) == 0
-    stored, _ = ps.apply_patch(stored, "ta", "content", "有內容")
-    assert ps.filled_count(stored) == 1
+def test_public_key_set_is_pinned():
+    """🔴 加一列 TEMPLATE 就是一次對外揭露 —— 客戶看得到什麼要在這裡明著改，
+    不能靠 review 時有人記得。改這條之前先想清楚那一列會不會出現在客戶眼前。"""
+    assert ps.PUBLIC_KEYS == {
+        "client", "brand_tone", "product", "product_tone", "ta", "goal",
+        "style", "special", "count_length", "media", "deliver_date", "client_refs",
+    }
+    assert "budget" not in ps.PUBLIC_KEYS
+
+
+def test_custom_rows_never_public():
+    stored, err = ps.add_row(None, "內部毛利估算", key_seed="abc123")
+    assert err == ""
+    stored, err = ps.apply_patch(stored, [r["key"] for r in ps.rows(stored)][-1],
+                                 "content", "內部數字")
+    assert err == ""
+    assert "內部數字" not in str(ps.rows(stored, public=True))

@@ -7,6 +7,7 @@
 import pytest
 
 from core import project_archive as pa
+from core import row_table
 
 
 def test_empty_gives_full_template_with_todo():
@@ -91,7 +92,7 @@ def test_cannot_remove_template_row():
 
 def test_add_row_cap():
     stored = None
-    for i in range(pa.MAX_EXTRA_ROWS):
+    for i in range(row_table.MAX_EXTRA_ROWS):
         stored, err = pa.add_row(stored, f"項目{i}", key_seed=f"{i:06x}")
         assert err == ""
     _, err = pa.add_row(stored, "滿了", key_seed="ffffff")

@@ -367,17 +367,14 @@ function _infoGrow(ta) { ta.style.height = "auto"; ta.style.height = ta.scrollHe
 // 客戶看不到哪些欄目由後端決定（public 路徑直接不回預算那列），這裡照畫。
 async function _mountSurvey(host, info, opts) {
     const mount = host.querySelector("#survey-host");
-    if (!mount || !opts.survey) return;
+    if (!mount) return;                    // 沒給 opts.survey 時模板就不會畫這一塊
     try {
-        const { renderSurveyTable } = await import("/tabs/proposals/survey-table.js");
+        const { importRetry } = await import("/js/shared/utils.js");
+        // opts.survey 本身就是 {save, addRow?, removeRow?, hint?} —— 直接攤開，
+        // 不要在這裡重述一次 renderSurveyTable 的預設值（會各自漂移）
+        const { renderSurveyTable } = await importRetry("/tabs/proposals/survey-table.js");
         if (!mount.isConnected) return;
-        renderSurveyTable(mount, {
-            rows: info.survey || [],
-            save: opts.survey.save,
-            addRow: opts.survey.addRow || null,
-            removeRow: opts.survey.removeRow || null,
-            hint: opts.survey.hint || "欄位改完會自動儲存。",
-        });
+        renderSurveyTable(mount, { rows: info.survey || [], ...opts.survey });
     } catch (e) {
         mount.innerHTML = '<div class="info-hint">盤點表載入失敗：' + escText((e && e.message) || e) + "</div>";
     }

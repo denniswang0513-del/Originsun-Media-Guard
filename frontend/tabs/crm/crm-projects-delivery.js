@@ -23,7 +23,8 @@ async function _mountArchive(projectId) {
     const host = document.getElementById('delivery-archive');
     if (!host) return;
     try {
-        const { renderArchiveCard } = await import('./crm-projects-archive.js');
+        const { importRetry } = await import('../../js/shared/utils.js');
+        const { renderArchiveCard } = await importRetry('/tabs/crm/crm-projects-archive.js');
         if (host.isConnected) await renderArchiveCard(host, projectId);
     } catch (e) {
         host.innerHTML = `<div class="crm-empty" style="padding:12px;">歸檔清單載入失敗：${_esc(e.message || e)}</div>`;
@@ -49,7 +50,14 @@ export async function loadDeliveryTab(projectId) {
     const container = document.getElementById('proj-detail-delivery');
     if (!container) return;
 
-    container.innerHTML = '<div class="crm-empty">載入中...</div>';
+    // 歸檔清單先立殼並開始載入 —— 它是**專案層級**資料，跟「這支片要不要上官網」
+    // 無關。放在下面的 works/token 邏輯之後的話，取不到編輯權杖的專案（還沒建
+    // showcase、或不打算上官網）就永遠看不到自己的歸檔清單與專案回顧。
+    container.innerHTML = `
+        <div id="delivery-archive"></div>
+        <div id="delivery-showcase" class="crm-empty">載入中...</div>`;
+    _mountArchive(projectId);          // 不 await：歸檔要打 DB，別讓編輯器等它
+    const showcase = container.querySelector('#delivery-showcase');
 
     // 先撈作品清單決定單/多作品 UI（端點失敗 → 走舊單作品路徑）
     let works = [];
@@ -61,15 +69,14 @@ export async function loadDeliveryTab(projectId) {
     // 作品列永遠顯示（單作品也一顆 tab + 新增按鈕）— 否則單作品專案在此分頁
     // 沒有任何「加第二支影片」的入口（雞生蛋）。works 端點失敗才走 legacy 單 iframe。
     if (works.length >= 1) {
-        container.innerHTML = `
-        <div id="delivery-archive"></div>
+        showcase.className = '';
+        showcase.innerHTML = `
         <div id="delivery-works-tabs" style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin-bottom:8px;"></div>
         <iframe id="delivery-showcase-frame" title="作品上架編輯"
                 style="width:100%;border:0;min-height:640px;display:block;background:#0e0e0e;border-radius:8px;"></iframe>`;
         _bindEmbedHeightListener();
-        _mountArchive(projectId);      // 不 await：歸檔清單要打 DB，別讓編輯器等它
         const primary = works.find(w => w.is_primary) || works[0];  // items 主作品先，保險再 find 一次
-        _renderDeliveryTabs(container, projectId, works, primary.id);
+        _renderDeliveryTabs(showcase, projectId, works, primary.id);
         await _selectDeliveryWork(primary.id);
         return;
     }
@@ -87,22 +94,21 @@ export async function loadDeliveryTab(projectId) {
             token = (t && t.token) || '';
         }
     } catch (e) {
-        container.innerHTML = '<div class="crm-empty">載入失敗：' + _esc(e.message || String(e)) + '</div>';
+        // 只換掉上架編輯器那塊 —— 歸檔清單照常留在上面
+        showcase.innerHTML = '載入失敗：' + _esc(e.message || String(e));
         return;
     }
     if (!token) {
-        container.innerHTML = '<div class="crm-empty">無法取得編輯權杖</div>';
+        showcase.innerHTML = '無法取得編輯權杖';
         return;
     }
 
     const src = location.origin + '/showcase-edit.html?token=' + encodeURIComponent(token) + '&embed=1';
-    container.innerHTML = `
-        <div id="delivery-archive"></div>
+    showcase.className = '';
+    showcase.innerHTML = `
         <iframe id="delivery-showcase-frame" src="${_esc(src)}" title="作品上架編輯"
                 style="width:100%;border:0;min-height:640px;display:block;background:#0e0e0e;border-radius:8px;"></iframe>`;
-
     _bindEmbedHeightListener();
-    _mountArchive(projectId);
 }
 
 // ── 多作品 tab 條 ──────────────────────────────────────────

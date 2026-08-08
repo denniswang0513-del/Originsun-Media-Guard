@@ -403,6 +403,37 @@ export function esc(s) {
         c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 }
 
+/** textarea 隨內容長高（專案裡已有四份手抄，新程式一律用這支）。 */
+export function autoGrow(el) {
+    if (!el) return;
+    el.style.height = 'auto';
+    el.style.height = el.scrollHeight + 'px';
+}
+
+/**
+ * 動態 import + 失敗重試。
+ *
+ * 🔴 ES module map 會**永久快取 rejected import** —— 一次網路抖動之後，用原路徑
+ * 重 import 只會拿回同一個 rejected promise，那個分頁到重整為止都修不好。
+ * 重試必須帶 cache-bust query（crm-projects-plan.js / subview-loader.js 同款教訓，
+ * 那裡各自手寫了一份旗標；新程式一律用這支）。
+ *
+ * ⚠️ **path 必須是絕對路徑**（`/tabs/...`）：`import()` 以「呼叫它的那支模組」
+ * 為基準解析，而這裡的呼叫者是 utils.js —— 傳 `./foo.js` 會去找
+ * `/js/shared/foo.js`。
+ */
+const _importFailed = new Set();
+export async function importRetry(path) {
+    try {
+        const mod = await import(_importFailed.has(path) ? `${path}?t=${Date.now()}` : path);
+        _importFailed.delete(path);
+        return mod;
+    } catch (e) {
+        _importFailed.add(path);
+        throw e;
+    }
+}
+
 /**
  * 直接用 `<a download>` 觸發下載（**不經 blob**）。
  *

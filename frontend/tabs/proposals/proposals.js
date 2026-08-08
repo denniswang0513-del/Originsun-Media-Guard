@@ -10,7 +10,7 @@
  */
 
 import { esc } from '../website/website-utils.js';
-import { copyText } from '../../js/shared/utils.js';
+import { copyText, importRetry } from '../../js/shared/utils.js';
 import { createSortable, sortableTh, enumIndex } from '../crm/crm-utils.js';
 import { openDeck, tfetch } from './prop-fetch.js';
 
@@ -493,7 +493,7 @@ async function _mountSurvey(ov, prop) {
     if (!host) return;
     const base = `${API}/${prop.id}/survey`;
     try {
-        const { renderSurveyTable } = await import('./survey-table.js');
+        const { renderSurveyTable } = await importRetry('/tabs/proposals/survey-table.js');
         if (!host.isConnected) return;          // await 期間 overlay 已被關掉
         renderSurveyTable(host, {
             rows: prop.survey || [],

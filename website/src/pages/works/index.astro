@@ -31,22 +31,31 @@ const [meta, allWorks, categories, seriesList] = await Promise.all([
 //   2. 系列被隱藏（不在 seriesList）
 //   3. 該系列只有 1 支掛標籤的成員 —— 收成「1 支作品」的卡沒有意義
 const seriesById = new Map(seriesList.map(s => [s.id, s]));
-const isFoldable = (w: IPublicProject) => (w.tags || []).includes(SERIES_FOLD_TAG);
+const isFoldable = (w: IPublicProject) =>
+    !!w.series_id && seriesById.has(w.series_id) && (w.tags || []).includes(SERIES_FOLD_TAG);
+
+// 先把「可收攏的成員」分組一次（作品牆按 allWorks 的順序走，所以每組的第一個
+// 就是那張系列卡該站的位置）
+const foldMembers = new Map<number, IPublicProject[]>();
+for (const w of allWorks) {
+    if (!isFoldable(w)) continue;
+    const list = foldMembers.get(w.series_id!) ?? [];
+    list.push(w);
+    foldMembers.set(w.series_id!, list);
+}
+
 // 統一的格子項：cats/tags 給過濾軸（系列卡 = 成員聯集），work/series 二擇一給卡片
 type GridEntry = { cats: string[]; tags: string[]; work?: IPublicProject; series?: ISeriesListItem };
 const gridEntries: GridEntry[] = [];
-const foldedSeries = new Set<number>();
 for (const work of allWorks) {
-    const s = work.series_id && isFoldable(work) ? seriesById.get(work.series_id) : undefined;
-    const members = s ? allWorks.filter(w => w.series_id === s.id && isFoldable(w)) : [];
-    if (!s || members.length < 2) {
+    const members = isFoldable(work) ? foldMembers.get(work.series_id!)! : [];
+    if (members.length < 2) {
         gridEntries.push({ cats: work.categories || [], tags: work.tags || [], work });
         continue;
     }
-    if (foldedSeries.has(s.id)) continue;
-    foldedSeries.add(s.id);
+    if (work !== members[0]) continue;        // 系列卡只畫一次，站在第一個成員的位置
     gridEntries.push({
-        series: s,
+        series: seriesById.get(work.series_id!)!,
         cats: [...new Set(members.flatMap(w => w.categories || []))],
         tags: [...new Set(members.flatMap(w => w.tags || []))],
     });

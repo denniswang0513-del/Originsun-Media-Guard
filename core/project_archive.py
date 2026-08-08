@@ -10,7 +10,8 @@
 """
 from __future__ import annotations
 
-import re
+from core.row_table import (MAX_LABEL, add_custom_row, is_extra,  # noqa: F401
+                            remove_custom_row)
 
 # (key, label, hint, folder) —— 順序就是清單順序。key 是存值的鍵，**不要改**。
 TEMPLATE: tuple[tuple[str, str, str, str], ...] = (
@@ -22,7 +23,6 @@ TEMPLATE: tuple[tuple[str, str, str, str], ...] = (
 )
 
 TEMPLATE_KEYS = tuple(k for k, _l, _h, _f in TEMPLATE)
-_META = {k: (label, hint, folder) for k, label, hint, folder in TEMPLATE}
 
 # 歸檔子夾都建在專案資產夾的這個夾底下（與提案期的檔案分開）
 ROOT_FOLDER = "歸檔"
@@ -32,9 +32,6 @@ STATUSES = (TODO, DONE, NA)
 
 FIELDS = ("status", "note")
 MAX_TEXT = 2000
-MAX_EXTRA_ROWS = 20
-MAX_LABEL = 40
-_EXTRA_KEY_RE = re.compile(r"^x-[0-9a-f]{6}$")
 
 # KPTA（專案回顧）—— 固定四欄，沒有自訂
 KPTA_FIELDS: tuple[tuple[str, str], ...] = (
@@ -65,7 +62,7 @@ def rows(stored) -> list[dict]:
                     "status": _norm_status(r.get("status")),
                     "note": str(r.get("note") or "")[:MAX_TEXT]})
     for key, r in by_key.items():
-        if not _EXTRA_KEY_RE.match(key):
+        if not is_extra(key):
             continue                      # 認不得的 key = 舊版/髒資料
         out.append({"key": key, "label": str(r.get("label") or key)[:MAX_LABEL],
                     "hint": str(r.get("hint") or "")[:MAX_TEXT], "folder": "",
@@ -76,16 +73,25 @@ def rows(stored) -> list[dict]:
 
 def progress(stored) -> dict:
     """齊備度。**「不適用」算數** —— 沒有童工的案子不該永遠卡在 4/5。"""
-    cur = rows(stored)
+    return progress_of(rows(stored))
+
+
+def progress_of(cur: list) -> dict:
+    """已經正規化過的清單直接算（呼叫端手上有 rows() 結果時用，免算第二次）。"""
     done = sum(1 for r in cur if r["status"] in (DONE, NA))
     return {"done": done, "total": len(cur), "ready": bool(cur) and done == len(cur)}
+
+
+# 掃描時只認得的資料夾名（TEMPLATE 的 folder 欄）—— 掃描端據此跳過使用者
+# 自己在歸檔夾裡開的其他夾，不必為了掃了也丟掉的東西付 SMB 往返。
+KNOWN_FOLDERS = frozenset(f for _k, _l, _h, f in TEMPLATE if f)
 
 
 def apply_patch(stored, key: str, field: str, value):
     """單格寫入 → (新的 stored, 錯誤訊息)。錯誤時 stored 原樣退回。"""
     if field not in FIELDS:
         return stored, f"field 只能是 {' / '.join(FIELDS)}"
-    if not isinstance(key, str) or not (key in _META or _EXTRA_KEY_RE.match(key)):
+    if not isinstance(key, str) or not (key in TEMPLATE_KEYS or is_extra(key)):
         return stored, "未知的項目"
     if field == "status":
         if value not in STATUSES:
@@ -106,29 +112,16 @@ def apply_patch(stored, key: str, field: str, value):
 
 def add_row(stored, label: str, *, key_seed: str):
     """新增一列自訂歸檔項目 → (新的 stored, 錯誤訊息)。"""
-    name = str(label or "").strip()[:MAX_LABEL]
-    if not name:
-        return stored, "項目名稱必填"
-    cur = rows(stored)
-    if sum(1 for r in cur if _EXTRA_KEY_RE.match(r["key"])) >= MAX_EXTRA_ROWS:
-        return stored, f"自訂項目最多 {MAX_EXTRA_ROWS} 列"
-    key = f"x-{str(key_seed)[:6].lower()}"
-    if not _EXTRA_KEY_RE.match(key) or any(r["key"] == key for r in cur):
-        return stored, "項目 key 產生失敗，請再試一次"
-    cur.append({"key": key, "label": name, "hint": "", "folder": "",
-                "status": TODO, "note": ""})
-    return cur, ""
+    new, err = add_custom_row(rows(stored), label, key_seed=key_seed,
+                              blank={"hint": "", "folder": "", "status": TODO, "note": ""},
+                              noun="項目")
+    return (stored, err) if err else (new, "")
 
 
 def remove_row(stored, key: str):
     """刪一列自訂歸檔項目 → (新的 stored, 錯誤訊息)。範本列不給刪（標不適用即可）。"""
-    if not _EXTRA_KEY_RE.match(str(key or "")):
-        return stored, "只能刪自訂項目"
-    cur = rows(stored)
-    left = [r for r in cur if r["key"] != key]
-    if len(left) == len(cur):
-        return stored, "找不到這個項目"
-    return left, ""
+    new, err = remove_custom_row(rows(stored), key, noun="項目")
+    return (stored, err) if err else (new, "")
 
 
 def apply_scan(stored, non_empty_folders):
