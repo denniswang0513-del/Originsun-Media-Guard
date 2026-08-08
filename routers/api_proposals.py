@@ -19,9 +19,11 @@ from typing import Optional
 
 from fastapi import APIRouter, Body, File, HTTPException, Request, UploadFile  # type: ignore
 
+from core import proposal_survey
 from core.auth import check_admin_or_module
 from core.schemas import (ProposalPayload, ProposalPlanCellPatch, ProposalPlanPayload,
-                          ProposalPublicInfoPatch, ReferencePayload)
+                          ProposalPublicInfoPatch, ProposalSurveyPatch,
+                          ProposalSurveyRowPayload, ReferencePayload)
 
 PROPOSALS_PREFIX = "/api/v1/proposals"
 router = APIRouter(prefix=PROPOSALS_PREFIX, tags=["proposals"])
@@ -510,6 +512,7 @@ async def get_proposal(pid: str, request: Request):
     d["project_name"] = project_name
     d["references"] = [_ref_dict(r) for r in refs]
     d["plan"] = prop.plan   # 企劃矩陣全文（None = 尚未開始）
+    d["survey"] = proposal_survey.rows(prop.survey)   # 現況盤點（範本每次讀時對齊）
     return {"proposal": d}
 
 
@@ -876,6 +879,8 @@ async def get_shared_plan(token: str):
             "tags": prop.tags or [],
             "notes": prop.notes or "",
             "deck_url": _public_deck_url(prop.deck_url, token),
+            # 現況盤點：public=True 直接抽掉預算那類欄目（payload 裡根本沒有那一列）
+            "survey": proposal_survey.rows(prop.survey, public=True),
             "references": [{"id": r.id, "title": r.title or "", "url": r.url or "",
                             "note": r.note or ""} for r in refs],
         }
@@ -959,6 +964,73 @@ async def patch_shared_info(token: str, req: ProposalPublicInfoPatch):
         prop.updated_at = datetime.now(timezone.utc)
         await session.commit()
     return {"status": "ok"}
+
+
+# ── 現況盤點（提案基本資料的固定表；欄目正本在 core.proposal_survey）────
+# 登入與公開共編走**同一個** helper，差別只在 public 旗標 —— 公開路徑吃得到的
+# 欄目由 core 那層擋（PRIVATE_KEYS），不是靠這裡記得過濾。
+
+
+async def _survey_patch(get_prop, req: ProposalSurveyPatch, *, public: bool):
+    factory = _require_factory()
+    async with factory() as session:
+        prop = await get_prop(session)
+        new, err = proposal_survey.apply_patch(prop.survey, req.key, req.field,
+                                               req.value, public=public)
+        if err:
+            raise HTTPException(status_code=422, detail=err)
+        prop.survey = new
+        prop.updated_at = datetime.now(timezone.utc)
+        await session.commit()
+    return {"status": "ok"}
+
+
+@router.patch("/{pid}/survey")
+async def patch_survey(pid: str, req: ProposalSurveyPatch, request: Request):
+    """現況盤點單格寫入（登入路徑）。last-write-wins — 這張表是摘要不是共筆矩陣。"""
+    _check_auth(request)
+    return await _survey_patch(
+        lambda s: _get_proposal_or_404(s, pid, for_update=True), req, public=False)
+
+
+@public_router.patch("/shared/{token}/survey")
+async def patch_shared_survey(token: str, req: ProposalSurveyPatch):
+    """現況盤點單格寫入（公開共編，免登入）。預算那類欄目連讀都不出公開端點。"""
+    return await _survey_patch(
+        lambda s: _get_prop_by_plan_token(s, token, for_update=True), req, public=True)
+
+
+@router.post("/{pid}/survey/rows")
+async def add_survey_row(pid: str, req: ProposalSurveyRowPayload, request: Request):
+    """加一列自訂盤點欄目（只有登入路徑能加 —— 公開連結不給長結構）。"""
+    _check_auth(request)
+    factory = _require_factory()
+    async with factory() as session:
+        prop = await _get_proposal_or_404(session, pid, for_update=True)
+        new, err = proposal_survey.add_row(prop.survey, req.label,
+                                           key_seed=uuid.uuid4().hex)
+        if err:
+            raise HTTPException(status_code=422, detail=err)
+        prop.survey = new
+        prop.updated_at = datetime.now(timezone.utc)
+        await session.commit()
+    return {"status": "ok", "survey": proposal_survey.rows(new)}
+
+
+@router.delete("/{pid}/survey/rows/{key}")
+async def delete_survey_row(pid: str, key: str, request: Request):
+    """刪一列自訂盤點欄目（範本列不給刪，清空即可）。"""
+    _check_auth(request)
+    factory = _require_factory()
+    async with factory() as session:
+        prop = await _get_proposal_or_404(session, pid, for_update=True)
+        new, err = proposal_survey.remove_row(prop.survey, key)
+        if err:
+            raise HTTPException(status_code=422, detail=err)
+        prop.survey = new
+        prop.updated_at = datetime.now(timezone.utc)
+        await session.commit()
+    return {"status": "ok", "survey": proposal_survey.rows(new)}
 
 
 # 公開路徑掛參考片的護欄：只收 http(s)、每提案上限、長度上限

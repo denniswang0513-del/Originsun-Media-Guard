@@ -471,9 +471,14 @@ async def _on_startup():
                         ("project_media_log", "folder_name", "VARCHAR(255)"),
                         # 提案庫資產夾名（core.project_folders，2026-08-06）
                         ("crm_projects", "proposal_folder_name", "VARCHAR(255)"),
+                        # 結案歸檔清單 + 專案回顧 KPTA（core/project_archive.py）
+                        ("crm_projects", "archive_checklist", "JSONB"),
+                        ("crm_projects", "review_kpta", "JSONB"),
                         # 提案企劃矩陣（docs/PROPOSAL_PLANNER.md）
                         ("preprod_proposals", "plan", "JSONB"),
                         ("preprod_proposals", "notes", "TEXT"),   # 基本資料備註（§9.7）
+                        # 現況盤點表（core/proposal_survey.py — 對齊 owner 的 Notion 專案啟動面版）
+                        ("preprod_proposals", "survey", "JSONB"),
                         # 參考影片庫 v2（docs/REFERENCE_LIBRARY.md）
                         ("preprod_references", "description", "TEXT"),
                         ("preprod_references", "facets", "JSONB"),

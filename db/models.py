@@ -209,6 +209,8 @@ class CrmProject(Base):
     # 提案庫資產夾名（settings proposals.root 底下的子夾 `{建立日}_{專案名}`）。
     # 首次用到才生成、之後固定存這裡；專案改名時由 core.project_folders 跟著改。
     proposal_folder_name = Column(String(255), nullable=True)
+    archive_checklist = Column(JSONB, nullable=True)             # 結案歸檔清單（範本正本在 core/project_archive.py）
+    review_kpta = Column(JSONB, nullable=True)                   # 專案回顧 Keep/Problem/Try/Action
     status = Column(String(32), nullable=False, default="洽詢")
     am_username = Column(String(64), nullable=True)
     pm_usernames = Column(JSONB, nullable=True)
@@ -888,6 +890,7 @@ class PreprodProposal(Base):
     tags = Column(JSONB, nullable=True)                          # list[str]
     notes = Column(Text, nullable=True)                          # 基本資料備註（自由文字，共編可編；§9.7）
     plan = Column(JSONB, nullable=True)                          # 企劃矩陣（docs/PROPOSAL_PLANNER.md §3；逐格帶 updated_at/by）
+    survey = Column(JSONB, nullable=True)                        # 現況盤點表（欄目正本在 core/proposal_survey.py，這裡只存值）
     created_by = Column(String(64), nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now())

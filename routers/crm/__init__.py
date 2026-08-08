@@ -14,6 +14,7 @@ from . import showcase   # noqa: F401  Showcase + token 編輯 + Site API
 from . import works      # noqa: F401  1:N 作品子端點（依賴 projects/showcase，須在其後）
 from . import media_log  # noqa: F401  影像紀錄（路徑獨立 /media-log，順序無關）
 from . import proposal_assets  # noqa: F401  提案資產夾（路徑獨立 /proposal-assets）
+from . import archive       # noqa: F401  結案歸檔清單 + 專案回顧（依賴 proposal_assets 的資產夾）
 
 from ._shared import CRM_PREFIX, router, public_router  # noqa: F401,E402
 

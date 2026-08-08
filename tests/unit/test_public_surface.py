@@ -38,6 +38,7 @@ EXPECTED_API = {
     ("/api/v1/proposals/shared/{token}", "GET"),
     ("/api/v1/proposals/shared/{token}/deck", "GET"),
     ("/api/v1/proposals/shared/{token}/info", "PATCH"),
+    ("/api/v1/proposals/shared/{token}/survey", "PATCH"),
     ("/api/v1/proposals/shared/{token}/cell", "PATCH"),
     ("/api/v1/proposals/shared/{token}/meta", "GET"),
     ("/api/v1/proposals/shared/{token}/refs", "POST"),

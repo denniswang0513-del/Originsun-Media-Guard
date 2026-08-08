@@ -18,6 +18,18 @@ import { crmFetch as _fetch, esc as _esc } from './crm-utils.js';
 
 let _embedMsgBound = false;
 
+// 歸檔清單 + 專案回顧掛在最上方（動態 import：載入失敗不能擋掉上架編輯器）
+async function _mountArchive(projectId) {
+    const host = document.getElementById('delivery-archive');
+    if (!host) return;
+    try {
+        const { renderArchiveCard } = await import('./crm-projects-archive.js');
+        if (host.isConnected) await renderArchiveCard(host, projectId);
+    } catch (e) {
+        host.innerHTML = `<div class="crm-empty" style="padding:12px;">歸檔清單載入失敗：${_esc(e.message || e)}</div>`;
+    }
+}
+
 // showcase-edit（embed 模式）會 postMessage 內容高度 → 外框自動長高、避免雙捲軸。
 // listener 每次都 getElementById，換 src / 重建 iframe 都沿用同一個監聽。
 function _bindEmbedHeightListener() {
@@ -50,10 +62,12 @@ export async function loadDeliveryTab(projectId) {
     // 沒有任何「加第二支影片」的入口（雞生蛋）。works 端點失敗才走 legacy 單 iframe。
     if (works.length >= 1) {
         container.innerHTML = `
+        <div id="delivery-archive"></div>
         <div id="delivery-works-tabs" style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin-bottom:8px;"></div>
         <iframe id="delivery-showcase-frame" title="作品上架編輯"
                 style="width:100%;border:0;min-height:640px;display:block;background:#0e0e0e;border-radius:8px;"></iframe>`;
         _bindEmbedHeightListener();
+        _mountArchive(projectId);      // 不 await：歸檔清單要打 DB，別讓編輯器等它
         const primary = works.find(w => w.is_primary) || works[0];  // items 主作品先，保險再 find 一次
         _renderDeliveryTabs(container, projectId, works, primary.id);
         await _selectDeliveryWork(primary.id);
@@ -83,10 +97,12 @@ export async function loadDeliveryTab(projectId) {
 
     const src = location.origin + '/showcase-edit.html?token=' + encodeURIComponent(token) + '&embed=1';
     container.innerHTML = `
+        <div id="delivery-archive"></div>
         <iframe id="delivery-showcase-frame" src="${_esc(src)}" title="作品上架編輯"
                 style="width:100%;border:0;min-height:640px;display:block;background:#0e0e0e;border-radius:8px;"></iframe>`;
 
     _bindEmbedHeightListener();
+    _mountArchive(projectId);
 }
 
 // ── 多作品 tab 條 ──────────────────────────────────────────

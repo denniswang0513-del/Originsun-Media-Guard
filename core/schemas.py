@@ -890,6 +890,19 @@ class ProposalPublicInfoPatch(BaseModel):
     value: Optional[object] = None        # str（ptype/notes/pitch_date）或 list[str]（tags）
 
 
+class ProposalSurveyPatch(BaseModel):
+    """現況盤點單格寫入（登入與公開共編同一形狀）。欄目合法性、公開可否編輯、
+    長度上限全在 core.proposal_survey —— 這裡只收形狀。"""
+    key: str
+    field: str                            # content / note
+    value: Optional[str] = None
+
+
+class ProposalSurveyRowPayload(BaseModel):
+    """新增自訂盤點欄目（只有登入路徑能加列）。"""
+    label: str
+
+
 class IntelSourcePayload(BaseModel):
     """產業情報來源（P-c）新增/更新 — 全欄 Optional 配合部分更新
     （create 時 url 開頭 http 由端點檢查）。"""

@@ -319,6 +319,10 @@ function _renderInfo(host, info, opts) {
                 : link(info.deck_url, "下載簡報")) : ""}
         </div>
         ${reasonCard}
+        ${opts.survey ? `<div class="info-card">
+            <h4>現況盤點</h4>
+            <div id="survey-host"></div>
+        </div>` : ""}
         <div class="info-card">
             <h4>備註</h4>
             <textarea class="info-in info-ta" data-field="notes"
@@ -353,10 +357,31 @@ function _renderInfo(host, info, opts) {
         e.preventDefault();
         opts.onDeck();          // openDeck 自己 alert 失敗原因
     });
+    _mountSurvey(host, info, opts);
     _wireInfoEditing(host, opts);
 }
 
 function _infoGrow(ta) { ta.style.height = "auto"; ta.style.height = ta.scrollHeight + "px"; }
+
+// 現況盤點表 — 與後台提案詳情共用元件；opts.survey 給端點。
+// 客戶看不到哪些欄目由後端決定（public 路徑直接不回預算那列），這裡照畫。
+async function _mountSurvey(host, info, opts) {
+    const mount = host.querySelector("#survey-host");
+    if (!mount || !opts.survey) return;
+    try {
+        const { renderSurveyTable } = await import("/tabs/proposals/survey-table.js");
+        if (!mount.isConnected) return;
+        renderSurveyTable(mount, {
+            rows: info.survey || [],
+            save: opts.survey.save,
+            addRow: opts.survey.addRow || null,
+            removeRow: opts.survey.removeRow || null,
+            hint: opts.survey.hint || "欄位改完會自動儲存。",
+        });
+    } catch (e) {
+        mount.innerHTML = '<div class="info-hint">盤點表載入失敗：' + escText((e && e.message) || e) + "</div>";
+    }
+}
 
 // 參考影片：加入 / 移除（動列表→重畫整塊）＋標題備註自動儲存（不重畫，免搶焦點）
 function _wireRefs(host, info, opts) {
@@ -573,6 +598,15 @@ async function _loadPlan(pid) {
             },
             save: async (field, value) => ok(await mfetch(P, { method: "PUT", body: JSON.stringify({ [field]: value }) })),
             reload: async () => (await ok(await mfetch(P))).proposal,
+            survey: {
+                save: async (key, field, value) => ok(await mfetch(P + "/survey",
+                    { method: "PATCH", body: JSON.stringify({ key, field, value }) })),
+                addRow: async (label) => (await ok(await mfetch(P + "/survey/rows",
+                    { method: "POST", body: JSON.stringify({ label }) }))).survey,
+                removeRow: async (key) => (await ok(await mfetch(
+                    P + "/survey/rows/" + encodeURIComponent(key), { method: "DELETE" }))).survey,
+                hint: "欄位改完會自動儲存。客戶那邊看不到「預算」這一列。",
+            },
             refPageUrl: (rid) => "/reference.html?id=" + encodeURIComponent(rid),
             refs: {
                 add: async (url, title) => {
@@ -659,6 +693,12 @@ async function _loadSharedPlan(shareTok) {
                 save: async (field, value) => ok(await fetch(base + "/info",
                     { method: "PATCH", headers: J, body: JSON.stringify({ field, value }) })),
                 reload: async () => (await ok(await fetch(base))).info,
+                // 訪客也能一起填盤點表（加/刪欄目只有員工能做 —— 不給公開連結長結構）
+                survey: {
+                    save: async (key, field, value) => ok(await fetch(base + "/survey",
+                        { method: "PATCH", headers: J, body: JSON.stringify({ key, field, value }) })),
+                    hint: "填完會自動儲存，製作團隊那邊即時看得到。",
+                },
                 // 公開共編：研究頁也走 token（?t=&id=），對方不用登入
                 refPageUrl: (rid) => "/reference.html?t=" + encodeURIComponent(shareTok) +
                                      "&id=" + encodeURIComponent(rid),

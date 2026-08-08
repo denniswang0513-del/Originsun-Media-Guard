@@ -312,6 +312,10 @@ async function openDetail(pid) {
                         <h4>🌐 公開頁面</h4>
                         <div id="pd-share-host"></div>
                     </div>
+                    <div class="prop-card-sec">
+                        <h4>📊 現況盤點</h4>
+                        <div id="pd-survey-host"></div>
+                    </div>
                     ${prop.outcome_reason ? `
                     <div class="prop-card-sec">
                         <h4>${prop.status === '未成案' ? '📉 未成案原因' : '📈 成案/結果原因'}（組織學習）</h4>
@@ -375,6 +379,7 @@ async function openDetail(pid) {
     }));
 
     _wireShareCard(ov, prop);
+    _mountSurvey(ov, prop);
 
     // 狀態下拉：成案→confirm+/convert；未成案→強制填原因；其餘直接 PUT
     ov.querySelector('#pd-status').addEventListener('change', async (e) => {
@@ -478,6 +483,31 @@ async function openDetail(pid) {
             openDetail(prop.id);
         } catch (err) { alert('新增失敗：' + (err.message || err)); }
     });
+}
+
+// ── 現況盤點表（基本資料分頁）─────────────────────────────
+// 元件與客戶公開頁共用（tabs/proposals/survey-table.js）；這裡只接端點。
+// 動態 import：載入失敗不能拖垮整個詳情面板。
+async function _mountSurvey(ov, prop) {
+    const host = ov.querySelector('#pd-survey-host');
+    if (!host) return;
+    const base = `${API}/${prop.id}/survey`;
+    try {
+        const { renderSurveyTable } = await import('./survey-table.js');
+        if (!host.isConnected) return;          // await 期間 overlay 已被關掉
+        renderSurveyTable(host, {
+            rows: prop.survey || [],
+            save: (key, field, value) =>
+                tfetch(base, { method: 'PATCH', json: { key, field, value } }),
+            addRow: async (label) =>
+                (await tfetch(`${base}/rows`, { method: 'POST', json: { label } })).survey,
+            removeRow: async (key) =>
+                (await tfetch(`${base}/rows/${encodeURIComponent(key)}`, { method: 'DELETE' })).survey,
+            hint: '欄位改完會自動儲存。開放公開頁後，客戶在他那邊也能一起填（預算那列不會出現在客戶端）。',
+        });
+    } catch (e) {
+        host.innerHTML = `<div style="color:#888;font-size:12px;">盤點表載入失敗：${esc(e.message || e)}</div>`;
+    }
 }
 
 // ── 公開頁面卡（基本資料分頁）─────────────────────────────
