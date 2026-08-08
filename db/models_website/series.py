@@ -30,6 +30,9 @@ class WebsiteSeries(Base):
     old_slugs = Column(JSONB)                                   # slug 改名自動記舊值 → 301 轉址來源
     sort_order = Column(Integer, nullable=False, default=0)
     visible = Column(Boolean, nullable=False, default=True)     # 隱藏 → 作品牆不摺疊、系列頁不生成
+    # 作品牆是否收攏成一張系列卡。關掉＝成員一隻一隻各自一張卡（系列頁照常存在）
+    # —— 給「同客戶合集」型系列用：那種收攏會讓十幾支作品從牆上消失（2026-08-08）
+    wall_folded = Column(Boolean, nullable=False, default=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 

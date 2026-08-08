@@ -484,6 +484,7 @@ _CREATE_TABLES: list[str] = [
         old_slugs JSONB,
         sort_order INTEGER NOT NULL DEFAULT 0,
         visible BOOLEAN NOT NULL DEFAULT TRUE,
+        wall_folded BOOLEAN NOT NULL DEFAULT TRUE,
         created_at TIMESTAMPTZ DEFAULT NOW(),
         updated_at TIMESTAMPTZ DEFAULT NOW()
     )
@@ -863,6 +864,8 @@ async def run_website_migrations(session_factory: Callable) -> None:
           for c, t in _WEBSVC_COLUMNS],
         # 系列 slug 改名自動轉址（表已存在的環境補欄；fresh DB CREATE TABLE 已含）
         "ALTER TABLE website_series ADD COLUMN IF NOT EXISTS old_slugs JSONB",
+        # 作品牆收攏開關（2026-08-08：只有真系列才摺卡，同客戶合集一隻一隻呈現）
+        "ALTER TABLE website_series ADD COLUMN IF NOT EXISTS wall_folded BOOLEAN NOT NULL DEFAULT TRUE",
         *_CREATE_INDEXES,
         # v1.10.121 修復 — 既有部署 templates 表無 UNIQUE constraint，先清重複再補
         _CLEANUP_TEMPLATE_DUPLICATES,

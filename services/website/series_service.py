@@ -28,6 +28,7 @@ def _to_dict(s: WebsiteSeries, work_count: int = 0) -> dict:
         "description_zh": s.description_zh, "description_en": s.description_en,
         "cover_image": s.cover_image,
         "sort_order": s.sort_order or 0, "visible": bool(s.visible),
+        "wall_folded": s.wall_folded is not False,   # NULL（尚未跑 migration）當 True
         "work_count": work_count,
     }
 
@@ -40,6 +41,7 @@ def _to_public_item(s: WebsiteSeries, first_sc, work_count: int) -> dict:
         "title_zh": s.title_zh, "title_en": s.title_en,
         "description_zh": s.description_zh, "description_en": s.description_en,
         "cover_url": s.cover_image or (first_sc is not None and work_cover(first_sc)) or None,
+        "wall_folded": s.wall_folded is not False,   # 作品牆據此決定摺卡或一隻一隻
         "work_count": work_count,
     }
 

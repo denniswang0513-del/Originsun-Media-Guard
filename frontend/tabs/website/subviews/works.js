@@ -199,7 +199,7 @@ export default async function render(container, ctx = {}) {
         </div>
 
         <details class="wk-card" style="padding:12px 16px;" ${_serOpen !== null ? 'open' : ''}>
-            <summary style="cursor:pointer;color:#ddd;font-size:13px;font-weight:600;">作品系列（<span id="series-count">${_series.length}</span>）— 跨專案綁定，作品牆摺疊成一張卡 + 系列頁 /works/series/…</summary>
+            <summary style="cursor:pointer;color:#ddd;font-size:13px;font-weight:600;">作品系列（<span id="series-count">${_series.length}</span>）— 跨專案綁定，可選擇作品牆收攏成一張卡 + 系列頁 /works/series/…</summary>
             <div id="series-panel" style="padding-top:10px;"></div>
         </details>
 
@@ -287,6 +287,8 @@ function _renderSeriesPanel() {
             <td style="padding:6px 8px;"><input data-id="${s.id}" data-field="slug" value="${esc(s.slug)}" style="width:130px;font-family:monospace;" title="URL 永久承諾 — 改名會自動加 301 轉址，但別常改"></td>
             <td style="padding:6px 8px;"><input data-id="${s.id}" data-field="sort_order" type="number" value="${s.sort_order || 0}" style="width:60px;"></td>
             <td style="padding:6px 8px;text-align:center;"><input data-id="${s.id}" data-field="visible" type="checkbox" ${s.visible ? 'checked' : ''}></td>
+            <td style="padding:6px 8px;text-align:center;"><input data-id="${s.id}" data-field="wall_folded" type="checkbox" ${s.wall_folded === false ? '' : 'checked'}
+                title="勾＝作品牆收攏成一張系列卡；不勾＝成員一隻一隻各自呈現（系列頁照常存在）。單一成員的系列一律不收攏。"></td>
             <td style="padding:6px 8px;color:#888;">${s.work_count || 0} 支</td>
             <td style="padding:6px 8px;white-space:nowrap;">
                 <button class="crm-btn crm-btn-primary crm-btn-sm" onclick="window._websiteSerSave(${s.id})">儲存</button>
@@ -294,7 +296,7 @@ function _renderSeriesPanel() {
                 <button class="crm-btn crm-btn-secondary crm-btn-sm" onclick="window._websiteSerDel(${s.id})" style="color:#f87171;">刪除</button>
             </td>
         </tr>
-        ${open ? `<tr><td colspan="6" style="padding:4px 8px 12px;background:#1a1a1a;">${_serMembersHtml(s.id)}</td></tr>` : ''}`;
+        ${open ? `<tr><td colspan="7" style="padding:4px 8px 12px;background:#1a1a1a;">${_serMembersHtml(s.id)}</td></tr>` : ''}`;
     }).join('');
     el.innerHTML = `
         <div style="color:#888;font-size:11px;margin-bottom:8px;">
@@ -305,9 +307,10 @@ function _renderSeriesPanel() {
             <thead><tr style="color:#888;text-align:left;">
                 ${sortableTh('title', '系列名稱', 'style="padding:4px 8px;"')}${sortableTh('slug', 'slug', 'style="padding:4px 8px;"')}
                 ${sortableTh('order', '排序', 'style="padding:4px 8px;"')}${sortableTh('visible', '顯示', 'style="padding:4px 8px;"')}
+                <th style="padding:4px 8px;" title="作品牆是否收攏成一張系列卡">牆上收攏</th>
                 ${sortableTh('count', '成員', 'style="padding:4px 8px;"')}<th style="padding:4px 8px;"></th>
             </tr></thead>
-            <tbody>${rows || emptyRow(6, '還沒有系列 — 用下面的欄位建立第一個')}</tbody>
+            <tbody>${rows || emptyRow(7, '還沒有系列 — 用下面的欄位建立第一個')}</tbody>
         </table>
         <div style="display:flex;gap:8px;align-items:flex-end;margin-top:10px;flex-wrap:wrap;">
             <div><div style="color:#888;font-size:11px;">新系列名稱</div><input id="ser-new-title" style="width:180px;"></div>
