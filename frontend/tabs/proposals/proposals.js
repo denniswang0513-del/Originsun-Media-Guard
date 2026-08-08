@@ -45,12 +45,34 @@ const _sorter = createSortable({
     },
 });
 
+// 這個分頁的 section id（app.js 的 switchTab 會派 tab-changed 帶它）
+const SECTION_ID = 'tab_preprod_proposals';
+let _tabHookBound = false;
+
 export async function initProposalsTab() {
     _content = document.getElementById('prop-content');
     if (!_content) return;
     _content.style.cssText = '';   // 移除「載入中…」的置中/padding inline 樣式
     _renderShell();
+    _bindTabHook();
     await refreshList();
+}
+
+/**
+ * 🔴 切回這個分頁時重抓清單。
+ *
+ * initProposalsTab 只在 app 啟動時跑**一次**（tab-config 的 TAB_LOADERS），
+ * 之後切分頁只是 show/hide —— 清單會停在開頁那一刻。而提案可以從**別的地方**
+ * 長出來：專案詳情的「提案企劃」分頁一鍵建立、同事在另一台機器新增、
+ * 提案庫的資料夾連結專案。那些都不會通知這裡。
+ * （2026-08-08 實例：從專案側建了一筆，切回提案庫看不到，資料其實一直都在。）
+ */
+function _bindTabHook() {
+    if (_tabHookBound) return;
+    _tabHookBound = true;
+    document.addEventListener('tab-changed', (e) => {
+        if (e.detail && e.detail.tab === SECTION_ID) refreshList();
+    });
 }
 
 // ── 列表 ─────────────────────────────────────────────────
