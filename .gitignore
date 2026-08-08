@@ -111,3 +111,6 @@ uploads/
 
 # yt-dlp 自舉的獨立執行檔（reference_archiver 首次使用時下載；不進 git/OTA）
 tools/
+
+# settings.json 的輪替備份（含舊 jwt_secret，絕不進 git）
+settings.json.bak_*
