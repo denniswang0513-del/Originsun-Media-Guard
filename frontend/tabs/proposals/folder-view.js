@@ -31,13 +31,16 @@ const _day = (mtime) => (mtime ? new Date(mtime * 1000).toISOString().slice(0, 1
  * @param opts.emptyHint 整個資料夾空的時候要說什麼
  * @param opts.write     可選；有給才有工具列與拖放：
  *        { upload(items, rel) -> level, mkdir(name, rel) -> level,
- *          shareDir?: '對外分享' }  給 shareDir 時，最外層還沒有那個夾就多一顆
- *        「建立對外分享夾」（名字由程式帶，不讓人手打）
+ *          } 
+ * @param opts.pin       可選；有給才長出「重點」勾選欄：
+ *        { isPinned(rel) -> bool, toggle(rel, isDir, want) -> Promise }
+ *        勾選是**策展**（這份是此刻的重點），不搬檔案、不等於授權 ——
+ *        客戶看不看得到由另一個開關決定。
  * @returns { rel(), go(rel), apply(level) }
  */
 export function renderFolderView(host, opts) {
     const { load, onFile, rootLabel = '資料夾', emptyHint = '這裡還沒有檔案。',
-            write = null } = opts;
+            write = null, pin = null } = opts;
     // 走過的層留著：往回走是最常見的動作，重打一次是整趟 NAS 掃描
     const cache = new Map();
     let cur = '';
@@ -62,17 +65,25 @@ export function renderFolderView(host, opts) {
         const files = d.files || [];
         const crumbs = d.rel
             ? `<div class="fv-crumbs">${folderCrumbsHtml(rootLabel, d.rel)}</div>` : '';
+        // 勾選框放在列**最前面**且自己吞掉點擊 —— 跟「點列＝進資料夾/下載」
+        // 這個既有行為共存，不會勾一下就把人帶進資料夾。
+        const pinBox = (rel, isDir) => pin
+            ? `<input type="checkbox" class="fv-pin" data-pin="${esc(rel)}"
+                      data-pindir="${isDir ? '1' : ''}"${pin.isPinned(rel) ? ' checked' : ''}
+                      title="設為重點提案">` : '';
         const rows = dirs.map(x => `
             <div class="fv-row fv-dir" data-dir="${esc(x.rel)}">
+                ${pinBox(x.rel, true)}
                 <span class="fv-caret">▸</span><span class="fv-name">${esc(x.name)}</span>
             </div>`).join('')
             + files.map(f => `
             <div class="fv-row fv-file" data-file="${esc(f.rel)}" title="下載">
+                ${pinBox(f.rel, false)}
                 <span class="fv-name">${esc(f.filename)}</span>
                 <span class="fv-meta">${fmtSize(f.size_bytes)}</span>
                 <span class="fv-meta">${esc(_day(f.mtime))}</span>
             </div>`).join('');
-        host.innerHTML = _toolbarHtml(d, dirs) + crumbs + (rows
+        host.innerHTML = _toolbarHtml() + crumbs + (rows
             ? `<div class="fv-list">${rows}</div>`
             : `<div class="fv-body">${esc(d.rel ? '這一層是空的。'
                 : (write ? '把檔案或整個資料夾拖進來，或用上面的按鈕。' : emptyHint))}</div>`)
@@ -83,17 +94,26 @@ export function renderFolderView(host, opts) {
         host.querySelectorAll('[data-file]').forEach(el => {
             el.addEventListener('click', () => onFile(files.find(f => f.rel === el.dataset.file)));
         });
+        host.querySelectorAll('[data-pin]').forEach(el => {
+            el.addEventListener('click', (e) => e.stopPropagation());   // 別觸發整列
+            el.addEventListener('change', async () => {
+                el.disabled = true;
+                try {
+                    await pin.toggle(el.dataset.pin, !!el.dataset.pindir, el.checked);
+                } catch (err) {
+                    el.checked = !el.checked;      // 失敗就還原，畫面不說謊
+                    alert('設定重點提案失敗：' + (err.message || err));
+                }
+                el.disabled = false;
+            });
+        });
         if (write) _wireToolbar(d);
     }
 
     // ── 寫入工具列（只有傳 write 才存在）──────────────────────
-    function _toolbarHtml(d, dirs) {
+    function _toolbarHtml() {
         if (!write) return '';
-        const needShare = write.shareDir && !d.rel
-            && !dirs.some(x => x.name === write.shareDir);
         return `<div class="fv-tools">
-            ${needShare ? `<button class="fv-btn primary" data-act="share"
-                title="建立客戶看得到的資料夾">＋ ${esc(write.shareDir)}夾</button>` : ''}
             <button class="fv-btn" data-act="mkdir">＋ 新增資料夾</button>
             <button class="fv-btn" data-act="files">＋ 上傳檔案</button>
             <button class="fv-btn" data-act="dir">＋ 上傳資料夾</button>
@@ -146,7 +166,6 @@ export function renderFolderView(host, opts) {
             inp.click();
         };
         const act = {
-            share: () => run(() => write.mkdir(write.shareDir, '')),
             mkdir: () => {
                 const name = (prompt('新資料夾名稱（會建在你目前看的這一層）：') || '').trim();
                 if (name) run(() => write.mkdir(name, rel));
@@ -190,6 +209,8 @@ function _ensureStyle() {
 .fv-row { display: flex; align-items: center; gap: 10px; padding: 9px 4px;
           border-bottom: 1px solid var(--line, #e5e5e5); cursor: pointer; font-size: 13.5px; }
 .fv-row:hover { background: rgba(127,127,127,.07); }
+.fv-pin { flex: none; margin: 0; cursor: pointer; accent-color: var(--red, #c9372c); }
+.fv-pin:disabled { opacity: .45; }
 .fv-caret { color: var(--sub, #8b8b8b); }
 .fv-dir .fv-name { font-weight: 600; }
 .fv-name { flex: 1; word-break: break-all; }

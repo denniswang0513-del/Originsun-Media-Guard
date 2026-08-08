@@ -64,8 +64,6 @@ function _mountAssetsCard(projectId, host, d) {
                     style="font-size:11.5px;color:#8b8b8b;cursor:pointer;text-decoration:underline;text-underline-offset:3px;"
                     >${esc(d.folder_name)}</code>` : ''}
                 <span style="flex:1;"></span>
-                <button id="pp-share-dir" class="crm-btn crm-btn-secondary crm-btn-sm"
-                        style="display:none;" title="建立客戶看得到的資料夾">＋ 對外分享夾</button>
                 <button id="pp-mkdir" class="crm-btn crm-btn-secondary crm-btn-sm">＋ 新增資料夾</button>
                 <button id="pp-add" class="crm-btn crm-btn-primary crm-btn-sm">＋ 上傳檔案</button>
                 <button id="pp-add-dir" class="crm-btn crm-btn-secondary crm-btn-sm"
@@ -74,6 +72,7 @@ function _mountAssetsCard(projectId, host, d) {
                         title="在這台伺服器上開啟檔案總管 — 你人不在伺服器前的話請改用「點路徑複製」">開啟資料夾</button>
                 <button id="pp-cfg" class="crm-btn crm-btn-secondary crm-btn-sm" title="設定根目錄">⚙</button>
             </div>
+            <div id="pp-pins"></div>
             <div id="pp-drop" style="border:1px dashed #3a3a3a;border-radius:4px;">
                 <div id="pp-files"></div>
             </div>
@@ -95,6 +94,7 @@ function _mountAssetsCard(projectId, host, d) {
         </div>`;
     host.appendChild(box);
     _renderFiles(box, d);
+    _renderPins(box, projectId, d);
     _wireUpload(projectId, box, host, d);
 
     box.querySelector('#pp-cfg').addEventListener('click', () => {
@@ -130,6 +130,81 @@ function _mountAssetsCard(projectId, host, d) {
 
 // 檔案列表：一次列一層（子資料夾可以走進去；連結進來的舊資料夾常有好幾層），
 // 標星號的是「提案簡報」（提案詳情與公開共編頁顯示的那一份）
+// 「重點提案」區塊 —— 勾起來的資產在這裡以卡片呈現。
+// 不一定是最終版，是**此刻**要人看的那一版；同事一眼知道現在以哪一份為準。
+function _renderPins(box, projectId, d) {
+    const host = box.querySelector('#pp-pins');
+    if (!host) return;
+    const pins = d.pinned || [];
+    if (!pins.length) {
+        host.innerHTML = `<div style="font-size:11.5px;color:#6b6b6b;margin-bottom:8px;">
+            重點提案：在下面的檔案列勾選，就會出現在這裡。</div>`;
+        return;
+    }
+    const cards = pins.map(p => {
+        const name = (p.rel || '').split('/').pop();
+        const cover = p.thumb_url
+            ? `<img src="${esc(p.thumb_url)}" alt="" loading="lazy"
+                    style="width:100%;height:96px;object-fit:cover;display:block;background:#111;">`
+            : `<div style="height:96px;display:flex;align-items:center;justify-content:center;
+                           background:#111;color:#5b5b5b;font-size:26px;">${p.is_dir ? '📁' : '📄'}</div>`;
+        return `<div data-pincard="${esc(p.rel)}" title="${esc(p.rel)}"
+                     style="width:150px;border:1px solid #2a2a2a;border-radius:5px;overflow:hidden;
+                            background:#141414;cursor:pointer;">
+            ${cover}
+            <div style="padding:5px 7px;font-size:11.5px;line-height:1.45;color:#ddd;
+                        white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${esc(name)}</div>
+        </div>`;
+    }).join('');
+    host.innerHTML = `
+        <div style="display:flex;align-items:center;gap:10px;margin-bottom:6px;">
+            <span style="font-size:12px;color:#ddd;font-weight:600;">重點提案</span>
+            <span style="font-size:11px;color:#6b6b6b;">${pins.length} 項</span>
+            <span style="flex:1;"></span>
+            <label style="font-size:11.5px;color:#8b8b8b;display:flex;align-items:center;gap:5px;cursor:pointer;"
+                   title="打開後，拿到提案分享連結的客戶會在頁面上看到這些檔案">
+                <input type="checkbox" id="pp-pins-public"${d.pins_public ? ' checked' : ''}
+                       style="margin:0;cursor:pointer;accent-color:#c9372c;">
+                客戶看得到
+            </label>
+        </div>
+        ${d.pins_public ? `<div style="font-size:11px;color:#fbbf24;margin-bottom:6px;">
+            客戶目前看得到上面這 ${pins.length} 項。取消勾選會立刻失效。</div>` : ''}
+        <div style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:10px;">${cards}</div>`;
+    host.querySelector('#pp-pins-public').addEventListener('change', async (e) => {
+        const want = e.target.checked;
+        e.target.disabled = true;
+        try {
+            const r = await crmFetch(`/projects/${projectId}/proposal-assets/pins/public`,
+                { method: 'POST', body: JSON.stringify({ public: want }) });
+            d.pins_public = r.pins_public;
+            _renderPins(box, projectId, d);
+            crmToast(want ? '客戶現在看得到重點提案' : '已收回：客戶看不到了');
+        } catch (err) {
+            e.target.checked = !want;
+            alert('設定失敗：' + (err.message || err));
+        }
+    });
+    host.querySelectorAll('[data-pincard]').forEach(el => {
+        el.addEventListener('click', () => {
+            const rel = el.dataset.pincard;
+            const q = `?rel=${encodeURIComponent(rel)}`;
+            authDownload(`/api/v1/crm/projects/${projectId}/proposal-assets/file${q}`, rel);
+        });
+    });
+}
+
+
+// 重點提案的勾選框。勾選＝策展（這份是此刻的重點），不搬檔案；
+// 客戶看不看得到是另一個開關（見「重點提案」卡）。
+function _pinBox(d, rel, isDir) {
+    const on = (d.pinned || []).some(p => p.rel === rel);
+    return `<input type="checkbox" data-pin="${esc(rel)}" data-pindir="${isDir ? '1' : ''}"
+                   ${on ? 'checked' : ''} title="設為重點提案"
+                   style="flex:none;margin:0;cursor:pointer;accent-color:#3b82f6;">`;
+}
+
+
 function _renderFiles(box, d) {
     const dirs = d.dirs || [];
     const files = d.files || [];
@@ -144,17 +219,16 @@ function _renderFiles(box, d) {
         <div data-dir="${esc(x.rel)}"
              style="display:flex;align-items:center;gap:8px;padding:6px 10px;cursor:pointer;
                     border-bottom:1px solid #242424;font-size:12.5px;">
+            ${_pinBox(d, x.rel, true)}
             <span style="color:#8b8b8b;">▸</span>
             <span style="font-weight:600;">${esc(x.name)}</span>
-            ${x.rel === d.public_subfolder ? `<span title="這個夾裡的東西，拿到分享連結的客戶看得到"
-                style="font-size:11px;color:#fbbf24;border:1px solid #fbbf24;border-radius:2px;padding:0 5px;"
-                >客戶看得到</span>` : ''}
         </div>`).join('')
         + files.map(f => {
             const isDeck = f.rel === d.deck_rel;
             return `
         <div class="pp-file" data-rel="${esc(f.rel)}"
              style="display:flex;align-items:center;gap:8px;padding:6px 10px;border-bottom:1px solid #242424;font-size:12.5px;">
+            ${_pinBox(d, f.rel, false)}
             <span title="${isDeck ? '目前的提案簡報' : '設為提案簡報'}" data-deck
                   style="cursor:pointer;color:${isDeck ? '#fbbf24' : '#3a3a3a'};">★</span>
             <span data-dl style="flex:1;cursor:pointer;" title="下載">${esc(f.filename || f.rel)}</span>
@@ -178,8 +252,7 @@ function _wireUpload(projectId, box, host, d) {
     const drop = box.querySelector('#pp-drop');
     // 先改 d、再無參重畫 —— 只重繪檔案區，不重跑 loadPlanTab（那會連
     // plan-matrix 一起重畫，使用者正在編的格子與捲動位置都沒了）
-    // 每次重畫都跟著決定「建立對外分享夾」要不要出現（走進子層就該收起來）
-    const repaint = () => { _renderFiles(box, d); syncShareBtn(); };
+    const repaint = () => { _renderFiles(box, d); _renderPins(box, projectId, d); };
     // 走過的層記在 levels：往回走是最常見的動作，重打一次是整趟 NAS 掃描。
     // 存**快照**不是 d 本身 —— d 會被後續導覽 Object.assign 覆寫，存參照等於
     // 「回最外層」拿回來的是當前那一層。
@@ -190,14 +263,6 @@ function _wireUpload(projectId, box, host, d) {
         if (r) Object.assign(d, { dirs: r.dirs, files: r.files, truncated: r.truncated });
         levels.set(d.rel || '', { ...d });
         repaint();
-    };
-    // 「建立對外分享夾」只在最外層、且還沒有那個夾時出現。
-    // 🔴 名字由這裡帶常數送出去，不讓人手打 —— 打成「對外分享用」那種一字之差，
-    // 分享會靜靜失效（客戶端分頁不出現、這裡 badge 不見，兩邊都沒有錯誤訊息）。
-    const syncShareBtn = () => {
-        const has = (d.dirs || []).some(x => x.name === d.public_subfolder);
-        box.querySelector('#pp-share-dir').style.display =
-            (!d.rel && d.public_subfolder && !has) ? '' : 'none';
     };
     // 標星號：只動兩顆 span，不為了換一個顏色重建整張列表（可能上千列）
     const markDeck = (rel) => {
@@ -274,14 +339,32 @@ function _wireUpload(projectId, box, host, d) {
         try { await mkdir(name, d.rel || ''); }
         catch (e) { alert('建立失敗：' + (e.message || e)); }
     });
-    box.querySelector('#pp-share-dir').addEventListener('click', async () => {
-        try { await mkdir(d.public_subfolder, ''); }
-        catch (e) { alert('建立失敗：' + (e.message || e)); }
-    });
-    syncShareBtn();
 
     // 列表操作（事件委派 —— 列表每次重畫）
     box.querySelector('#pp-files').addEventListener('click', async (e) => {
+        const box2 = e.target.closest('[data-pin]');
+        if (box2) {
+            e.stopPropagation();                    // 勾選不要順便進資料夾
+            box2.disabled = true;
+            const relPin = box2.dataset.pin;
+            const q2 = `?rel=${encodeURIComponent(relPin)}`;
+            try {
+                const r = box2.checked
+                    ? await crmFetch(`/projects/${projectId}/proposal-assets/pin`, {
+                        method: 'POST',
+                        body: JSON.stringify({ rel: relPin, is_dir: !!box2.dataset.pindir }) })
+                    : await crmFetch(`/projects/${projectId}/proposal-assets/pin${q2}`,
+                        { method: 'DELETE' });
+                d.pinned = r.pinned;
+                d.pins_public = r.pins_public;
+                _renderPins(box, projectId, d);
+            } catch (err) {
+                box2.checked = !box2.checked;       // 失敗就還原，畫面不說謊
+                alert('設定重點提案失敗：' + (err.message || err));
+            }
+            box2.disabled = false;
+            return;
+        }
         const nav = e.target.closest('[data-dir],[data-crumb]');
         if (nav) { goto(nav.dataset.dir ?? nav.dataset.crumb); return; }
         const row = e.target.closest('.pp-file');

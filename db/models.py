@@ -891,6 +891,10 @@ class PreprodProposal(Base):
     notes = Column(Text, nullable=True)                          # 基本資料備註（自由文字，共編可編；§9.7）
     plan = Column(JSONB, nullable=True)                          # 企劃矩陣（docs/PROPOSAL_PLANNER.md §3；逐格帶 updated_at/by）
     survey = Column(JSONB, nullable=True)                        # 現況盤點表（欄目正本在 core/proposal_survey.py，這裡只存值）
+    # 重點提案：勾起來的資產（core/pinned_assets.py）。取代舊的「對外分享」子夾——
+    # 勾選是策展、不搬檔案；pins_public 才是「客戶看不看得到」那道授權開關。
+    pinned_assets = Column(JSONB, nullable=True)                  # list[{rel,is_dir,thumb_url,...}]
+    pins_public = Column(Boolean, nullable=False, default=False)  # 預設關：勾選 ≠ 給客戶看
     created_by = Column(String(64), nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now())

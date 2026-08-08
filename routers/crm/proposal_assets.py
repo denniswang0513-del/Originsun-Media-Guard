@@ -25,6 +25,7 @@ from typing import List
 from fastapi import File, Form, HTTPException, Request, UploadFile
 
 from config import load_settings, save_settings
+from core import pinned_assets as pa
 from core.auth import check_admin_or_module
 from core.drive_map import to_canonical_path, to_local_path
 from core.project_folders import (create_subfolder, list_folder_level,
@@ -179,28 +180,56 @@ async def _project_or_404(session, project_id: str):
     return project
 
 
-# 對外分享子夾（owner 2026-08-07 定案）——資產夾裡混著報價/成本/內部版腳本，
-# 所以公開連結**只**看得到這個子夾。拖進去＝公開，拖出來＝收回，零額外狀態
-# （不用 DB 記哪個檔公開，改名搬檔都不會跑掉）。
+# ── 重點提案（勾選）──────────────────────────────────────────
 #
-# 🔴 這個名字必須由**程式**寫出來，不能靠人打對。前端的「建立對外分享夾」
-# 按鈕走 mkdir 帶這個常數（見 crm-projects-plan.js）—— 打成「對外分享用」
-# 那種一字之差，分享會靜靜失效：客戶那邊分頁不出現、你這邊 badge 不見，
-# 兩邊都沒有錯誤訊息。
-# 🔴 不可以用 "_" 或 "." 開頭 —— core.project_folders.is_hidden_name 會把那種資料夾濾掉，
-# 你自己在後台也會看不到它、拖不了檔進去。
-PUBLIC_SUBFOLDER = "對外分享"
+# 取代了 2026-08-07~08 存在兩天的「對外分享」子夾。舊做法要求檔案**實際位在**
+# 一個特定名字的資料夾裡，於是只能二選一：把簡報從 PPM 結構裡搬出來（破壞原本
+# 的整理），或複製一份（改了 v3 客戶還在看 v2）。勾選是策展：不搬檔、隨時可改、
+# 取消即失效。判定規則的正本在 core/pinned_assets（純函式，有單元測試）。
 
 
-async def public_share_dir(session, project_id: str) -> str:
-    """專案的「對外分享」子夾絕對路徑；沒建過/root 未設 → ""（不是錯誤，
-    代表這個提案還沒開放任何檔案）。
+async def _pins_row(session, project_id: str):
+    """這個專案的勾選掛在哪一筆提案上 —— 沿用 deck 的同一條規則（最近更新的
+    那筆），否則 N:1 時「勾在 B、讀回 A」。"""
+    return await _deck_target(session, project_id)
 
-    公開端點的 root **只**能從這裡拿 —— 讓「客戶看得到什麼」只有一個定義處，
-    而不是每個端點自己 join 一次路徑（少 join 一段就是整個資產夾對外）。
+
+def _legacy_share_dir_has_files(folder_abs: str) -> bool:
+    """舊的「對外分享」夾還在而且有東西嗎（一層就夠，不遞迴數）。"""
+    if not folder_abs:
+        return False
+    d = os.path.join(folder_abs, pa.LEGACY_SHARE_DIR)
+    try:
+        with os.scandir(d) as it:
+            return next(it, None) is not None
+    except OSError:
+        return False
+
+
+async def pinned_of(session, project_id: str) -> tuple:
+    """→ `(勾選清單, 是否開放給客戶)`。沒有提案列 → `([], False)`。
+
+    **一次性接管舊分享夾**：還沒勾過任何東西、而舊的「對外分享」夾裡有檔案時，
+    把整個夾轉成一個勾選項並開啟對客戶可見。客戶手上可能已經有指向那個夾的
+    連結，直接砍掉舊機制會讓他們看到的東西憑空消失。
+
+    放在這裡而不是後台的 GET —— 這支是**兩條路的共同咽喉**（後台讀、客戶讀
+    都會經過）。只掛在後台的話，沒人去開那個分頁的案子，客戶就先斷了。
+    磁碟探測只在「還沒勾過任何東西」時做，接管完就不再碰（自我了結，不是
+    每次讀都多一趟 SMB）。
     """
-    folder = await _project_folder_abs(session, project_id)
-    return os.path.join(folder, PUBLIC_SUBFOLDER) if folder else ""
+    prop = await _pins_row(session, project_id)
+    if not prop:
+        return [], False
+    cur = pa.rows(prop.pinned_assets)
+    if not cur:
+        folder_abs = await _project_folder_abs(session, project_id)
+        if await asyncio.to_thread(_legacy_share_dir_has_files, folder_abs):
+            cur = pa.adopt_legacy_share_dir(cur, exists=True)
+            prop.pinned_assets = cur
+            prop.pins_public = True        # 舊機制本來就是對客戶開的，維持現狀
+            await session.commit()
+    return cur, bool(getattr(prop, "pins_public", False))
 
 
 async def _project_folder_abs(session, project_id: str) -> str:
@@ -240,10 +269,7 @@ async def _level(folder_abs: str, rel: str, *, missing_ok: bool = False) -> dict
     if got is None and not missing_ok:
         raise HTTPException(status_code=404, detail="找不到子資料夾（或無法存取）")
     dirs, files, truncated = got or ([], [], False)
-    return {"rel": rel, "dirs": dirs, "files": files, "truncated": truncated,
-            # 「這一層裡哪個夾是公開的」跟著清單走，而不是跟著呼叫端走 ——
-            # 不然每個新的資料夾瀏覽器都得自己記得再標一次 badge
-            "public_subfolder": PUBLIC_SUBFOLDER}
+    return {"rel": rel, "dirs": dirs, "files": files, "truncated": truncated}
 
 
 async def _subdir_or_404(folder_abs: str, rel: str) -> str:
@@ -334,6 +360,8 @@ async def get_proposal_assets(project_id: str, request: Request, rel: str = ""):
             project.name or "", project.created_at or _now(),
             await _taken_names(session, exclude_project_id=project_id))
         target = await _deck_target(session, project_id)
+        # 走 pinned_of 而不是直接讀欄位 —— 舊分享夾的一次性接管在那裡
+        pinned, pins_public = await pinned_of(session, project_id)
     folder_abs = os.path.join(root, name) if root else ""
     # 所有 NAS 探測（root isdir / 列這一層 / deck 的 realpath）併成一次 to_thread：
     # UNC 斷線時每個都卡秒級且不重疊，分開跑等於使用者要等 3× timeout
@@ -345,9 +373,8 @@ async def get_proposal_assets(project_id: str, request: Request, rel: str = ""):
         "folder_name": name,
         "project_folder": folder_abs,
         "deck_rel": deck_rel,
-        # 對外分享夾的名字由後端下發 —— 前端拿它標「客戶看得到」的 badge。
-        # 寫死在 JS 就是第二份真相，改名時一定有一邊忘了改。
-        "public_subfolder": PUBLIC_SUBFOLDER,
+        "pinned": pinned,
+        "pins_public": pins_public,
         "rel": rel,
         "dirs": dirs,
         "files": files,
@@ -419,6 +446,121 @@ async def mkdir_proposal_assets(project_id: str, request: Request, rel: str = ""
     _assets_auth(request)
     name = (await request.json()).get("name")
     return await _mkdir_result(await _project_folder_ready(project_id), rel, name)
+
+
+# ── 重點提案：勾選 / 取消 / 開放給客戶 ──────────────────────
+
+_PIN_THUMB_NAMESPACE = "proposalpin"
+_PIN_THUMB_MAX_SIDE = 1000
+# 能算首頁/縮圖的格式。其餘（.pptx/.key/.docx…）顯示檔案圖示 —— 要算 PPT 首頁
+# 得裝 LibreOffice（400MB+），不划算；要給客戶看的簡報本來就會轉成 PDF。
+_PIN_THUMB_EXTS = {".pdf", ".jpg", ".jpeg", ".png", ".webp", ".gif", ".heic", ".bmp", ".tif", ".tiff"}
+
+
+def _pin_thumb_target(project_id: str, rel: str) -> tuple:
+    """(圖床本機目錄, base_name, 對外網址)；圖床未設定 → ("", "", "")。
+
+    base_name 用 rel 的雜湊 —— rel 含中文、斜線與空白，直接當檔名會壞。
+    """
+    import hashlib
+    from core.assets_host import assets_target
+    d, base = assets_target(_PIN_THUMB_NAMESPACE)
+    if not d or not base:
+        return "", "", ""
+    key = hashlib.sha1(f"{project_id}\x00{rel}".encode("utf-8")).hexdigest()[:20]
+    return d, key, f"{base}/{key}.webp"
+
+
+async def _make_pin_thumb(folder_abs: str, project_id: str, rel: str) -> str:
+    """勾選項 → 縮圖網址（算不出來 → ""，前端顯示檔案圖示，不擋勾選）。"""
+    if os.path.splitext(rel)[1].lower() not in _PIN_THUMB_EXTS:
+        return ""
+    d, name, url = _pin_thumb_target(project_id, rel)
+    if not d:
+        return ""
+    src = await asyncio.to_thread(safe_rel_path, folder_abs, rel)
+    if not src:
+        return ""
+    from core.image_utils import webp_thumb_from_path
+    saved = await asyncio.to_thread(webp_thumb_from_path, src, d, name,
+                                    _PIN_THUMB_MAX_SIDE)
+    return url if saved else ""
+
+
+async def _save_pins(project_id: str, mutate) -> dict:
+    """讀 → mutate(現值) → 寫回 → 回目前狀態。`mutate` 回 `(新值, 錯誤訊息)`。"""
+    _require_db()
+    factory = await _get_factory()
+    async with factory() as session:
+        prop = await _pins_row(session, project_id)
+        if not prop:
+            raise HTTPException(status_code=404,
+                                detail="這個專案還沒有提案，無法設定重點提案")
+        new, err = mutate(prop.pinned_assets)
+        if err:
+            raise HTTPException(status_code=422, detail=err)
+        prop.pinned_assets = new
+        prop.updated_at = _now()
+        await session.commit()
+        return {"pinned": pa.rows(new),
+                "pins_public": bool(getattr(prop, "pins_public", False))}
+
+
+@router.post("/projects/{project_id}/proposal-assets/pin")
+async def pin_proposal_asset(project_id: str, request: Request):
+    """勾一個資產成為「重點提案」。body: `{rel, is_dir}`。
+
+    縮圖在勾選當下算（勾的量很少，且使用者正等著看卡片長出來）；算不出來
+    不影響勾選本身。
+    """
+    _assets_auth(request)
+    body = await request.json()
+    rel, is_dir = str(body.get("rel") or ""), bool(body.get("is_dir"))
+    who = ""
+    try:
+        who = str((_assets_auth(request) or {}).get("username") or "")
+    except Exception:
+        pass
+    out = await _save_pins(project_id,
+                           lambda cur: pa.pin(cur, rel, is_dir=is_dir, by=who))
+    if not is_dir:
+        _require_db()
+        factory = await _get_factory()
+        async with factory() as session:
+            folder_abs = await _project_folder_abs(session, project_id)
+        thumb = await _make_pin_thumb(folder_abs, project_id, rel)
+        if thumb:
+            out = await _save_pins(project_id,
+                                   lambda cur: (pa.set_thumb(cur, rel, thumb), ""))
+    return out
+
+
+@router.delete("/projects/{project_id}/proposal-assets/pin")
+async def unpin_proposal_asset(project_id: str, request: Request, rel: str = ""):
+    """取消勾選 —— 客戶那條路**立刻**失效（下一次 allows 就回 False）。"""
+    _assets_auth(request)
+    return await _save_pins(project_id, lambda cur: (pa.unpin(cur, rel), ""))
+
+
+@router.post("/projects/{project_id}/proposal-assets/pins/public")
+async def set_pins_public(project_id: str, request: Request):
+    """開/關「客戶看得到重點提案」。body: `{public: bool}`。
+
+    🔴 勾選是策展、這個開關才是授權。分開的理由：勾選當下多半只是想讓團隊
+    知道現在以哪一版為準，不該順手就把檔案送到客戶眼前。
+    """
+    _assets_auth(request)
+    want = bool((await request.json()).get("public"))
+    _require_db()
+    factory = await _get_factory()
+    async with factory() as session:
+        prop = await _pins_row(session, project_id)
+        if not prop:
+            raise HTTPException(status_code=404, detail="這個專案還沒有提案")
+        prop.pins_public = want
+        prop.updated_at = _now()
+        await session.commit()
+        return {"pinned": pa.rows(prop.pinned_assets), "pins_public": want}
 
 
 @router.get("/projects/{project_id}/proposal-assets/file")

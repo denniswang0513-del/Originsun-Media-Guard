@@ -479,6 +479,9 @@ async def _on_startup():
                         ("preprod_proposals", "notes", "TEXT"),   # 基本資料備註（§9.7）
                         # 現況盤點表（core/proposal_survey.py — 對齊 owner 的 Notion 專案啟動面版）
                         ("preprod_proposals", "survey", "JSONB"),
+                        # 重點提案勾選（core/pinned_assets.py — 取代舊的「對外分享」子夾）
+                        ("preprod_proposals", "pinned_assets", "JSONB"),
+                        ("preprod_proposals", "pins_public", "BOOLEAN DEFAULT FALSE"),
                         # 參考影片庫 v2（docs/REFERENCE_LIBRARY.md）
                         ("preprod_references", "description", "TEXT"),
                         ("preprod_references", "facets", "JSONB"),

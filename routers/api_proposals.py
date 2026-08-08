@@ -19,6 +19,7 @@ from typing import Optional
 
 from fastapi import APIRouter, Body, File, HTTPException, Request, UploadFile  # type: ignore
 
+from core import pinned_assets as pa
 from core import proposal_survey
 from core.auth import check_admin_or_module
 from core.schemas import (ProposalPayload, ProposalPlanCellPatch, ProposalPlanPayload,
@@ -895,13 +896,13 @@ _PUBLIC_INFO_FIELDS = {"ptype", "pitch_date", "tags", "notes"}
 _INFO_TEXT_MAX = 8 * 1024
 
 
-# ── 公開連結的「資料夾」分頁（唯讀）────────────────────────
-# 客戶看得到的**只有** {專案資產夾}/對外分享 這個子夾。整個資產夾裡混著報價、
-# 成本、內部版腳本 —— root 由 proposal_assets.public_share_dir 單一決定，
-# 這裡不自己組路徑（少 join 一段就是把報價一起送出去）。
+# ── 公開連結的「重點提案」（唯讀）──────────────────────────
+# 客戶看得到的**只有勾起來的東西**，而且要 `pins_public` 有開。整個資產夾裡混著
+# 報價、成本、內部版腳本 —— 放行判定只有 core.pinned_assets.allows 一處
+# （純函式、有單元測試），這裡不自己組條件。
 #
 # ⚠️ 這兩條**刻意與登入路徑走不同端點**，而不是同一支帶 scope 參數：
-# 訪客這條在物理上構不到對外分享以外的東西，不必靠呼叫端記得傳對旗標。
+# 訪客這條每一次取用都要再問一次 allows，不必靠呼叫端記得傳對旗標。
 
 
 # 未登入的大檔出口 —— 一個客戶正常瀏覽一次抓幾份檔案，20/分鐘綽綽有餘；
@@ -909,36 +910,60 @@ _INFO_TEXT_MAX = 8 * 1024
 _SHARED_DOWNLOAD_PER_MIN = 20
 
 
-async def _shared_folder_root(token: str) -> str:
-    """token → 該提案的對外分享夾（沒開放 → ""）。授權與 root 解析綁在一起，
-    呼叫端拿不到「未經授權的路徑」這種中間狀態。"""
+async def _shared_pins(token: str) -> tuple:
+    """token → `(專案資產夾絕對路徑, 勾選清單)`；沒開放給客戶 → `("", [])`。
+
+    授權與路徑解析綁在一起，呼叫端拿不到「未經授權的資料夾路徑」這種中間狀態。
+    """
     factory = _require_factory()
-    from routers.crm.proposal_assets import public_share_dir
+    from routers.crm.proposal_assets import _project_folder_abs, pinned_of
     async with factory() as session:
         prop = await _get_prop_by_plan_token(session, token)
         if not prop.project_id:
-            return ""
-        return await public_share_dir(session, prop.project_id)
+            return "", []
+        pins, is_public = await pinned_of(session, prop.project_id)
+        if not is_public or not pins:
+            return "", []
+        return await _project_folder_abs(session, prop.project_id), pins
 
 
 @public_router.get("/shared/{token}/folder")
 async def list_shared_folder(token: str, rel: str = ""):
-    """公開連結的資料夾內容（唯讀，逐層）。回應形狀共用 proposal_assets._level。
+    """公開連結看得到的內容（唯讀）。
 
-    最外層不存在（還沒建對外分享夾）→ 空清單 + `enabled:false`，不是 404：
-    公開頁據此決定要不要顯示分頁。進到子層才把「找不到」當錯誤。"""
+    最外層回的**不是某個資料夾的內容**，而是勾選清單本身：勾了檔案就是一個
+    檔案項、勾了資料夾就是一個資料夾項（可以再點進去）。進到子層才真的去列
+    磁碟，而且必須通過 `allows`。
+
+    沒開放/沒勾 → 空清單 + `enabled:false`，不是 404：公開頁據此決定要不要
+    顯示這個區塊。
+    """
     from routers.crm.proposal_assets import _level
-    root = await _shared_folder_root(token)
-    out = await _level(root, rel, missing_ok=not rel)
-    out.pop("public_subfolder", None)      # 內部命名慣例，不外送
-    # 最外層有東西 or 資料夾真的在 → 分頁值得顯示
-    return {**out, "enabled": bool(out["dirs"] or out["files"])}
+    folder_abs, pins = await _shared_pins(token)
+    if not folder_abs:
+        return {"rel": rel, "dirs": [], "files": [], "truncated": False,
+                "enabled": False}
+    if not rel:
+        # 勾選清單即最外層。檔案項補上縮圖網址（卡片要用），資料夾項可再進入。
+        dirs = [{"name": os.path.basename(p["rel"]) or p["rel"], "rel": p["rel"]}
+                for p in pins if p["is_dir"]]
+        files = [{"rel": p["rel"], "filename": os.path.basename(p["rel"]),
+                  "thumb_url": p.get("thumb_url") or "",
+                  "size_bytes": 0, "mtime": 0}
+                 for p in pins if not p["is_dir"]]
+        return {"rel": "", "dirs": dirs, "files": files, "truncated": False,
+                "enabled": bool(dirs or files)}
+    if not pa.allows(pins, rel):
+        raise HTTPException(status_code=404, detail="找不到子資料夾（或無法存取）")
+    out = await _level(folder_abs, rel)
+    return {**out, "enabled": True}
 
 
 @public_router.get("/shared/{token}/folder/file")
 async def download_shared_folder_file(token: str, rel: str = "", request: Request = None):
-    """公開連結下載單檔。root 只由 public_share_dir 決定 —— 對外分享夾以外的
-    檔案在這裡構不到（防護走 proposal_assets.file_or_404）。
+    """公開連結下載單檔 —— **一定**先過 `allows`。
+
+    取消勾選之後這裡立刻回 404，不需要等任何快取過期，也不必去搬檔案。
 
     有限流：這是**未登入**的大檔出口（提案影片動輒數百 MB），連結一旦外流，
     沒有上限就等於把 NAS 頻寬送出去。"""
@@ -948,7 +973,10 @@ async def download_shared_folder_file(token: str, rel: str = "", request: Reques
     from routers.website._common import rate_limit
     if request is not None:
         rate_limit(request, max_per_minute=_SHARED_DOWNLOAD_PER_MIN)
-    path = await file_or_404(await _shared_folder_root(token), rel)
+    folder_abs, pins = await _shared_pins(token)
+    if not folder_abs or not pa.allows(pins, rel):
+        raise HTTPException(status_code=404, detail="找不到檔案")
+    path = await file_or_404(folder_abs, rel)
     return FileResponse(path, filename=os.path.basename(path))
 
 

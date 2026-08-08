@@ -207,7 +207,7 @@
       <nav class="plan-side" id="plan-side" style="display:none;">
         <button class="side-tab" data-ptab="info">基本資料</button>
         <button class="side-tab active" data-ptab="plan">企劃</button>
-        <button class="side-tab" data-ptab="folder" id="tab-folder" style="display:none;">資料夾</button>
+        <button class="side-tab" data-ptab="folder" id="tab-folder" style="display:none;">重點提案</button>
       </nav>
       <div class="plan-main">
         <div id="info-host" style="display:none;"></div>
@@ -634,7 +634,6 @@ async function _loadPlan(pid) {
                     authDownload(AP + "/file?rel=" + encodeURIComponent(f.rel), f.filename);
                 },
                 {
-                    shareDir: "對外分享",
                     mkdir: async (name, rel) => ok(await mfetch(AP + "/mkdir" + q(rel),
                         { method: "POST", body: JSON.stringify({ name }) })),
                     // opts = {onProgress, signal}（folder-view 給的，它負責畫進度條）

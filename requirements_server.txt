@@ -37,3 +37,9 @@ python-docx==1.2.0
 # 函式層 import，publish 的相依掃描抓不到，需手動維護
 qrcode==8.2
 pillow-heif==1.4.0
+
+# ── 重點提案（pinned_assets）：PDF 首頁縮圖（跑在 master）──
+# 函式層 import（core/image_utils._pdf_first_page_png），掃描抓不到，需手動維護。
+# 與上面的 pypdf 不重複：pypdf 只抽文字、不能算頁面成圖；這支才做 rasterize。
+# 沒裝的環境自動退成檔案圖示，不會壞掉。
+pymupdf==1.28.2

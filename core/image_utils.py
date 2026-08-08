@@ -8,6 +8,7 @@ router 樹都 import 得到，改進只落一處。
 import io
 import logging
 import os
+from typing import Optional
 
 logger = logging.getLogger(__name__)
 
@@ -40,6 +41,31 @@ def save_webp_or_none(content: bytes, dest_dir: str, base_name: str,
     return None
 
 
+# PDF 首頁 → 縮圖。提案的主體多半是 PDF，只給檔案圖示等於整面卡片都長一樣。
+# PyMuPDF 是純 wheel（不像 poppler 要外部執行檔），且**惰性**讀 —— 30 頁的簡報
+# 算首頁實測 26ms、heap 尖峰 19KB，不是整份進記憶體。
+# 沒裝就回 None 退成檔案圖示（同下方 pillow_heif 的處理），不讓環境差異變成故障。
+# ⚠️ 生產跑的是 python_embed 不是 .venv，新依賴要手動裝進去並記進
+#    requirements_server.txt（見 memory: prod python_embed 依賴）。
+def _pdf_first_page_png(src_path: str, max_side: int) -> Optional[bytes]:
+    try:
+        import pymupdf
+    except ImportError:
+        return None
+    try:
+        with pymupdf.open(src_path) as doc:
+            if not doc.page_count:
+                return None
+            page = doc.load_page(0)
+            longest = max(page.rect.width, page.rect.height) or 1
+            zoom = (max_side / longest) if max_side else 1.0
+            pix = page.get_pixmap(matrix=pymupdf.Matrix(zoom, zoom))
+            return pix.tobytes("png")
+    except Exception as e:
+        logger.warning("[thumb] PDF first page failed (%s)", e)
+        return None
+
+
 def webp_thumb_from_path(src_path: str, dest_dir: str, base_name: str,
                          max_side: int = 0):
     """同 `save_webp_or_none`，但**不把原檔整份讀進記憶體** → 路徑或 None。
@@ -58,6 +84,14 @@ def webp_thumb_from_path(src_path: str, dest_dir: str, base_name: str,
         return None
     os.makedirs(dest_dir, exist_ok=True)
     webp_path = os.path.join(dest_dir, base_name + ".webp")
+
+    # PDF 走另一條解碼路徑，之後的縮放/存檔完全共用（不另開一支近雙胞函式）
+    if os.path.splitext(src_path)[1].lower() == ".pdf":
+        png = _pdf_first_page_png(src_path, max_side)
+        if not png:
+            return None
+        return save_webp_or_none(png, dest_dir, base_name, max_side)
+
     try:
         # 1MB 緩衝：預設 8KB 對 SMB 上的大圖是上百次小讀取
         with open(src_path, "rb", buffering=1 << 20) as fp:
