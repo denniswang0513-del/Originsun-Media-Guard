@@ -246,6 +246,35 @@ export function uploadWithProgress(url, formData,
 }
 
 /**
+ * 這台瀏覽器的固定隨機識別字串（localStorage），沒有就產一個。
+ *
+ * 用途是「認得同一台裝置」而不是認人：公開共編頁拿它當「只刪自己貼的」憑證，
+ * 分塊上傳拿它區分「同一個人重傳同一個檔」（→ 續傳）與「兩個人剛好傳同名同
+ * 大小的檔」（→ 不可以共用半成品）。
+ *
+ * `storageKey` 要傳 —— 各用途分開存，換一個用途不會影響到另一個既有的身分。
+ * 無痕模式/停用儲存 → 回一個固定字串，功能降級成「不跨分頁記得」而不是壞掉。
+ */
+export function browserKey(storageKey) {
+    try {
+        let k = localStorage.getItem(storageKey);
+        if (!k) {
+            k = (crypto.randomUUID ? crypto.randomUUID()
+                                   : Math.random().toString(36).slice(2) + Date.now().toString(36))
+                .replace(/-/g, '');
+            localStorage.setItem(storageKey, k);
+        }
+        return k;
+    } catch {
+        return 'no-storage';
+    }
+}
+
+// 單一請求 body 的預留餘裕：multipart 的邊界字串與標頭讓實際 body 比檔案本身大
+// 一點，貼著上限送會被擋。uploadItems（分批）與 chunked-upload（分塊）共用。
+export const BODY_MARGIN = 4 * 1024 * 1024;
+
+/**
  * 這條連線的**單一請求** body 上限（0 = 沒有代理層限制）。
  *
  * 🔴 實測（2026-08-08）：走 foundry 隧道時 **Cloudflare 在 100MB 就回 413**，
@@ -272,8 +301,7 @@ export function proxyBodyLimit() {
 export async function uploadItems(url, items, opts = {}) {
     const { headers, onProgress, onUploaded, signal, limit } = opts;
     const cap = limit ?? proxyBodyLimit();
-    // 留餘裕給 multipart 的邊界字串與標頭（實際 body 會比檔案總和大一點）
-    const budget = cap ? cap - 4 * 1024 * 1024 : 0;
+    const budget = cap ? cap - BODY_MARGIN : 0;
     const sizeOf = (it) => (it.file && it.file.size) || 0;
 
     const batches = [];

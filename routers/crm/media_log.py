@@ -33,6 +33,7 @@ from fastapi import File, Form, HTTPException, Request, UploadFile
 from config import load_settings
 from core import chunked_upload as cu
 from core.assets_host import assets_target
+from core.image_utils import webp_thumb_from_path
 from core.schemas import ChunkBeginRequest, ChunkFinishRequest
 from core.drive_map import to_canonical_path, to_local_path
 from core.project_folders import (FOLDER_VIEW_CAP, clean_filename,
@@ -174,9 +175,36 @@ def _conf_from(db: dict) -> tuple:
     return to_local_path(raw_root or DEFAULT_MEDIA_LOG_ROOT), cats
 
 
+# 設定快取。`_db_settings` 是一個 session 兩條查詢，而這支被每個公開頁訪客、
+# 每次列檔、每收一塊都問一次（一個 500MB 的檔是 63 塊）。
+#
+# 🔴 快取一定要放在**這裡**，不是放在某一條呼叫路徑上：本模組有十幾處讀同一份
+#    設定，只快取其中一處就會出現「資料夾列表顯示新 root、同時進行中的上傳寫進
+#    舊 root」而且兩邊都不報錯。要嘛全部一起舊、要嘛全部一起新。
+#
+# master 存檔時明確失效；TTL 是給 NAS 對外容器的保險 —— 它收不到 master 的寫入
+# 事件，靠 60 秒自己追上。同樣的形狀在 routers/crm/proposal_assets 也有一份
+# （`_root_cache`）；第三份出現時就該把它收進 services/website/settings_service，
+# 讓所有設定消費端一致，而不是每個 router 各養一個。
+_CONF_TTL = 60
+_conf_cache: dict = {"at": 0.0, "val": None}
+
+
+def invalidate_media_log_conf_cache() -> None:
+    """設定存檔後呼叫 —— 本行程立刻拿到新值。
+
+    ⚠ 繞過設定端點直接改 DB（腳本、手動 SQL）的話，這個行程最多還會用舊值
+      60 秒（測試腳本踩過一次：直接寫 DB 後 begin 一直回 503）。
+    """
+    _conf_cache["at"] = 0.0
+
+
 async def _media_log_conf() -> tuple:
     """(root, categories) — 只需要設定、不需要整份 db dict 的呼叫端用這個。"""
-    return _conf_from(await _db_settings())
+    c = _conf_cache
+    if c["val"] is None or time.monotonic() - c["at"] >= _CONF_TTL:
+        c.update(at=time.monotonic(), val=_conf_from(await _db_settings()))
+    return c["val"]
 
 
 async def media_log_health() -> dict:
@@ -708,14 +736,18 @@ _RAW_EXTS = {".cr2", ".cr3", ".nef", ".arw", ".dng"}
 
 async def _make_image_thumb(stored_path: str, project_id: str, file_id: str) -> str:
     """原檔 → 長邊 1000px 內 WebP 縮圖。PIL 開不了（RAW/HEIC）→ 空字串
-    （不擋上傳，僅無縮圖）。"""
+    （不擋上傳，僅無縮圖）。
+
+    走 path 版而非 bytes 版：原檔已經在磁碟上，整份讀進來只是為了餵 PIL，而
+    分塊上傳開放之後，100MB 以上的大圖從外網也進得來了（以前被 CF 擋在門外）。
+    """
     if os.path.splitext(stored_path)[1].lower() in _RAW_EXTS:
         return ""
-    try:
-        content = await asyncio.to_thread(_read_file_bytes, stored_path)
-        return await _webp_thumb_from_bytes(content, project_id, file_id, 1000)
-    except Exception:
-        return ""
+    d, name, url = _thumb_target(project_id, file_id)
+    if not d:
+        return ""                       # 圖床未設定 → 無縮圖，不擋上傳
+    saved = await asyncio.to_thread(webp_thumb_from_path, stored_path, d, name, 1000)
+    return url if saved else ""
 
 
 async def _probe_duration(stored_path: str) -> Optional[float]:
@@ -797,6 +829,7 @@ async def get_project_media_log(project_id: str, request: Request, fast: int = 0
         "project_folder": _project_folder(root, folder_name),
         "categories": cats,
         "max_upload_bytes": _MAX_UPLOAD_BYTES,
+        "request_body_limit": _request_body_limit(request),
         "files": files,
     }
 
@@ -1183,7 +1216,7 @@ async def update_media_log_settings(project_id: str, request: Request):
         factory = await _get_factory()
         async with factory() as session:
             await settings_service.update_settings(session, patch)
-        invalidate_media_log_root_cache()   # 下一次上傳就拿到新值，不必等 TTL
+        invalidate_media_log_conf_cache()   # 下一次讀就拿到新值，不必等 TTL
     root, cats = await _media_log_conf()
     return {"ok": True, "root": root, "categories": cats}
 
@@ -1231,7 +1264,7 @@ async def delete_media_log_file(file_id: str, request: Request):
 # ── Public Endpoints（免登入，token 授權）────────────────────
 
 @public_router.get("/public/media-log/{token}")
-async def public_media_log_view(token: str):
+async def public_media_log_view(token: str, request: Request):
     """分享連結頁資料 — 專案名 + 分類 + 檔案清單（enabled=False → 403）。"""
     _require_db()
     root, cats = await _media_log_conf()
@@ -1252,12 +1285,30 @@ async def public_media_log_view(token: str):
         "categories": cats,
         "upload_enabled": await asyncio.to_thread(_root_set, root),
         "max_upload_bytes": _MAX_UPLOAD_BYTES,  # 前端預檢/文案由此推導，免兩邊硬寫
+        # 這條連線的單一請求上限 —— 前端據此決定要不要分塊（見 _request_body_limit）
+        "request_body_limit": _request_body_limit(request),
         "files": files,
     }
 
 
+def _request_body_limit(request: Request) -> int:
+    """這條連線的單一請求 body 上限（0 = 中間沒有會擋的東西）。
+
+    前端據此決定要不要分塊。判準用 `cf-connecting-ip` —— 只有真的穿過
+    Cloudflare 才會帶這個 header（`routers/website/_common.client_ip` 與限流
+    已經拿它當權威判準）。比前端自己看 hostname 猜可靠：這個回應與後續的上傳
+    走的是**同一條連線**，所以它是量到的、不是推論的。
+
+    猜錯的代價不對稱：多分塊只是多幾十次來回，少分塊是整個檔傳不上去 ——
+    所以前端仍保留 hostname 判斷當後備，且真的吃到 413 會自動改走分塊重試。
+    """
+    return cu.CF_BODY_LIMIT if request.headers.get("cf-connecting-ip") else 0
+
+
 def _too_large() -> HTTPException:
-    """單一正本的 413 —— 三個入口（單一請求 / begin 預檢 / 分塊累計）同一句話。"""
+    """單一正本的 413 —— 三個入口（單一請求串流 / begin 預檢 / 分塊累計超限）
+    同一句話。第三個入口在 core.chunked_upload 裡拋 ChunkError（core 不認識
+    HTTPException），由 `_chunk_http` 換成這一句，所以文字仍只有這一份。"""
     return HTTPException(
         status_code=413,
         detail=f"檔案超過 {_MAX_UPLOAD_BYTES // (1024 * 1024)}MB 上限")
@@ -1273,40 +1324,18 @@ def _check_upload_name(filename: str) -> tuple:
     return orig_name, media_type
 
 
-# 收檔根目錄快取。root 幾乎不變，但收一塊就要問一次 —— 一個 500MB 的檔是 63 塊，
-# 不快取的話光是「根目錄在哪」就要 63 次 DB 往返 + 63 次 SMB stat。做法與 TTL
-# 對齊 routers/crm/proposal_assets 的 _root_cache（master 存檔時明確失效，
-# TTL 是給 NAS 容器的保險 —— 它收不到 master 的寫入事件，靠 60 秒自己追上）。
-_ROOT_TTL = 60
-_upload_root_cache: dict = {"at": 0.0, "val": None}
-
-
-def invalidate_media_log_root_cache() -> None:
-    """設定端點存檔後呼叫 —— 本行程立刻拿到新值。
-
-    ⚠ 繞過設定端點直接改 DB（腳本、手動 SQL）的話，這個行程最多還會用舊 root
-      60 秒。另一台機器本來就要等 TTL（它收不到這裡的呼叫）。
-    """
-    _upload_root_cache["at"] = 0.0
-
-
-async def _cached_root() -> str:
-    c = _upload_root_cache
-    if c["val"] is None or time.monotonic() - c["at"] >= _ROOT_TTL:
-        root, _cats = await _media_log_conf()
-        c.update(at=time.monotonic(), val=root)
-    return c["val"]
-
-
 async def _upload_root(token: str) -> str:
     """驗 token → 回收檔根目錄。**收一塊只需要這些。**
 
     半成品寫進 `{root}/.chunk-uploads/`，跟專案子夾無關 —— 所以這裡刻意不做
     `_ensure_folder_name`（要開 session + commit）也不重驗 root 存在性
-    （begin 已經驗過；真的不見了下一行 open 就會說話）。token 仍每塊都驗：
-    這個端點匿名可打，寫進 NAS 的權限不能只靠「知道 upload_id」。
+    （begin 已經驗過；真的不見了下一行 open 就會說話）。設定本身由
+    `_media_log_conf` 快取，所以每塊只剩一次唯讀的 token 查詢。
+
+    token 仍每塊都驗：這個端點匿名可打，寫進 NAS 的權限不能只靠「知道
+    upload_id」——那個值會出現在網址與記錄裡。
     """
-    root = await _cached_root()
+    root, _cats = await _media_log_conf()
     factory = await _get_factory()
     async with factory() as session:
         await _verify_media_log_token(session, token)
@@ -1319,10 +1348,11 @@ async def _upload_target(token: str) -> tuple:
     單一請求上傳與分塊上傳都要走這一段（驗 token、確定專案子夾名、落庫），
     兩邊各寫一次的話 folder-only token 那條分支遲早只有一邊被改到。
 
-    ⚠ 這支很貴（SMB stat + session + commit）。**只有真的要把檔案寫進專案夾的
-      那一刻**才呼叫它 —— 收單一塊的端點用 `_upload_root`。
+    ⚠ 這支很貴（SMB stat + session + commit）。規則是**一個檔一次，不是一塊
+      一次** —— begin/finish/單一請求上傳走這支（begin 是為了及早回 404/503），
+      收單一塊的 chunk 端點走便宜的 `_upload_root`。
     """
-    root = await _cached_root()
+    root, _cats = await _media_log_conf()
     if not await asyncio.to_thread(_root_set, root):
         raise HTTPException(status_code=503, detail="管理員尚未設定影像紀錄資料夾")
     factory = await _get_factory()
@@ -1388,8 +1418,8 @@ async def public_media_log_upload(token: str, file: UploadFile = File(...),
                                   uploader_name: str = Form("")):
     """免登入上傳 — 原檔進 {root}/{專案子夾}/、縮圖轉 WebP。回單筆 FILE dict。
 
-    大檔（>CHUNK_THRESHOLD_BYTES）走下面的分塊端點 —— 這條會被 Cloudflare 的
-    100MB body 上限擋在伺服器之外。
+    大檔改走下面的分塊端點（由前端依 `request_body_limit` 判定）—— 這條會被
+    Cloudflare 的 100MB body 上限擋在伺服器之外，錯誤根本回不到我們手上。
     """
     _require_db()
     orig_name, media_type = _check_upload_name(file.filename or "")
@@ -1417,8 +1447,9 @@ _chunk_locks: defaultdict = defaultdict(asyncio.Lock)
 
 
 def _prune_chunk_locks() -> None:
-    """清掉沒人持有的鎖 —— 放棄的上傳永遠走不到 finish，只在 finish 移除的話
-    這個 dict 會慢慢長大。`locked()` 為真代表有人持有或在等，那種不能動。"""
+    """清掉沒人持有的鎖。**這是這個 dict 唯一的回收路徑** —— 放棄的上傳永遠
+    走不到 finish，所以不能只靠收尾時移除。`locked()` 為真代表有人持有或在等，
+    那種不能動。"""
     for key in [k for k, lock in _chunk_locks.items() if not lock.locked()]:
         _chunk_locks.pop(key, None)
 
@@ -1436,18 +1467,22 @@ async def _gc_throttled(root: str) -> None:
     if now - _last_gc < _GC_INTERVAL_SEC:
         return
     _last_gc = now
-    try:
-        await asyncio.to_thread(cu.gc, root)
-    except OSError:
-        pass
+    await asyncio.to_thread(cu.gc, root)      # gc 自己吞 OSError，回 0
 
 
 def _chunk_http(e: cu.ChunkError) -> HTTPException:
-    """ChunkError → HTTP。offset 用 409 並把真實進度帶回去，客戶端據此續傳。"""
-    code = {"offset": 409, "too-large": 413, "missing": 404,
-            "bad-id": 400}[e.kind]
+    """ChunkError → HTTP。offset 用 409 並把真實進度帶回去，客戶端據此續傳。
+
+    🔴 `reason` 這個 key 不能改名：前端顯示錯誤走的是 `js/shared/utils.js` 的
+    `httpError`，它讀字串 detail 或 `detail.reason`。叫別的名字（例如 message）
+    的話，core 裡那幾句寫給人看的中文會被丟掉，使用者只會看到通用的罐頭訊息。
+    未知 kind 給 400 而不是 KeyError → 500：core 新增一種錯誤時不該是伺服器爆掉。
+    """
+    if e.kind == "too-large":
+        return _too_large()               # 與另外兩個入口同一句話
+    code = {"offset": 409, "missing": 404, "bad-id": 400}.get(e.kind, 400)
     return HTTPException(status_code=code,
-                         detail={"error": e.kind, "message": e.detail,
+                         detail={"error": e.kind, "reason": e.detail,
                                  "received": e.received})
 
 
@@ -1483,9 +1518,9 @@ async def public_media_log_upload_chunk(token: str, upload_id: str,
     body 邊收邊累積並在超過 2 倍塊大小時中止 —— 這個端點是匿名可打的，
     沒有上限就等於讓任何拿到連結的人把記憶體吃光。
 
-    收到的片段先收在 list 再 `b"".join` —— `bytearray +=` 只以 1.125 倍成長，
-    湊到 8MB 要重配十幾次、總共搬約 9 倍的量（實測 14.6ms vs 1.5ms）。這段跑在
-    事件迴圈上，省下來的是整個 agent 的反應時間。
+    收到的片段**原封不動**交給 `append_bytes`（它用 writelines）—— 這裡不做
+    `b"".join`。那一份 8MB 複本只是為了餵 `write`，而合併是唯一跑在事件迴圈上
+    的工作（其餘都在執行緒裡），省掉它等於把整個 agent 的反應時間還回去。
     """
     _require_db()
     root = await _upload_root(token)
@@ -1497,9 +1532,12 @@ async def public_media_log_upload_chunk(token: str, upload_id: str,
             raise HTTPException(status_code=413, detail="單塊過大")
         parts.append(part)
     try:
+        # id 先驗格式再碰 _chunk_locks —— defaultdict 會為任何字串生一把鎖，
+        # 讓「格式不合的 id」在被 400 掉之前先在 dict 裡佔一格
+        cu.part_path(root, upload_id)
         async with _chunk_locks[upload_id]:
             received = await asyncio.to_thread(
-                cu.append_bytes, root, upload_id, b"".join(parts),
+                cu.append_bytes, root, upload_id, parts, total,
                 offset=int(offset), max_bytes=_MAX_UPLOAD_BYTES)
     except cu.ChunkError as e:
         raise _chunk_http(e)

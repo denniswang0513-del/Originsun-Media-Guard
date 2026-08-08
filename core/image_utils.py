@@ -40,6 +40,45 @@ def save_webp_or_none(content: bytes, dest_dir: str, base_name: str,
     return None
 
 
+def webp_thumb_from_path(src_path: str, dest_dir: str, base_name: str,
+                         max_side: int = 0):
+    """同 `save_webp_or_none`，但**不把原檔整份讀進記憶體** → 路徑或 None。
+
+    🔴 給「原檔已經在磁碟上」的情境（影像紀錄的縮圖）。走 bytes 版的話，一張
+    300MB 的 TIFF 就是 300MB 常駐在 Python heap，而那台 NAS 容器同時還壓著幾個
+    進行中的分塊緩衝。PIL 直接吃 file object 是惰性解碼，實測 68MB 的 TIFF 從
+    71MB 常駐降到 0.2MB。
+
+    `draft()` 讓 JPEG 在**解碼階段**就降到接近目標尺寸（DCT scaling），不是解完
+    整張再縮 —— 縮圖情境純賺（實測 12MB JPEG 363ms → 226ms）。
+    """
+    try:
+        from PIL import Image, ImageOps
+    except ImportError:
+        return None
+    os.makedirs(dest_dir, exist_ok=True)
+    webp_path = os.path.join(dest_dir, base_name + ".webp")
+    try:
+        # 1MB 緩衝：預設 8KB 對 SMB 上的大圖是上百次小讀取
+        with open(src_path, "rb", buffering=1 << 20) as fp:
+            img = Image.open(fp)
+            if max_side:
+                img.draft("RGB", (max_side, max_side))   # JPEG 才有效，其餘無視
+            img = ImageOps.exif_transpose(img)
+            img = img.convert("RGBA" if img.mode in ("RGBA", "LA") else "RGB")
+            if max_side and max(img.size) > max_side:
+                img.thumbnail((max_side, max_side), Image.LANCZOS)
+            img.save(webp_path, "WEBP", quality=82, method=6)
+        return webp_path
+    except Exception as e:
+        logger.warning("[thumb] WebP from path failed (%s)", e)
+        try:
+            os.remove(webp_path)          # 半成品不要留在圖床
+        except OSError:
+            pass
+        return None
+
+
 def save_image_as_webp(content: bytes, dest_dir: str, base_name: str,
                        max_side: int = 0) -> str:
     """寫圖檔到 dest_dir/<base_name>.webp，原始格式自動轉 WebP（quality 82）。

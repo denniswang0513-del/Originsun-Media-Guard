@@ -605,24 +605,30 @@ function setItemState(item, cls, text, pct) {
     if (text != null) item.state.textContent = text;
 }
 /* 上傳實作（含大檔分塊）共用 /js/shared/chunked-upload.js —— 後台影像紀錄分頁
-   打的是同一組端點。這頁是傳統 script 不是 module，故動態 import（走 importRetry：
-   ES module map 會永久快取失敗的 import，不帶 cache-bust 重試就修不回來）。 */
-let _shared = null;
-async function shared() {
-    if (!_shared) {
-        const utils = await import("/js/shared/utils.js");
-        _shared = {
-            uploadFile: (await utils.importRetry("/js/shared/chunked-upload.js")).uploadFile,
-            uploadFailText: utils.uploadFailText,
-        };
+   打的是同一組端點。這頁是傳統 script 不是 module，故動態 import。
+
+   快取的是 **promise** 不是結果：同時有兩個檔在傳時才不會各自啟動一次載入。
+   失敗就把它清掉，下一個檔會重試（importRetry 會帶 cache-bust —— ES module map
+   會永久快取失敗的 import，不繞過的話那個分頁到重整為止都修不好）。 */
+let _sharedP = null;
+function shared() {
+    if (!_sharedP) {
+        _sharedP = (async () => {
+            const utils = await import("/js/shared/utils.js");
+            const { uploadFile } = await utils.importRetry("/js/shared/chunked-upload.js");
+            return { uploadFile, uploadFailText: utils.uploadFailText };
+        })().catch((e) => { _sharedP = null; throw e; });
     }
-    return _shared;
+    return _sharedP;
 }
 async function uploadOne(item) {
+    let failText = (e) => "上傳失敗 —— " + (e.message || e);   // 模組載不進來時的退路
     try {
         const s = await shared();
+        failText = s.uploadFailText;
         await s.uploadFile(API, item.file, {
             fields: { category: item.category, uploader_name: item.uploader },
+            bodyLimit: DATA && DATA.request_body_limit,
             onProgress: (pct) => {
                 item.fill.style.width = pct + "%";
                 item.state.textContent = "上傳中 " + pct + "%";
@@ -630,8 +636,7 @@ async function uploadOne(item) {
         });
         setItemState(item, "done", "完成", 100);
     } catch (e) {
-        setItemState(item, "fail", (_shared ? _shared.uploadFailText(e)
-                                            : "上傳失敗 —— " + (e.message || e)), 100);
+        setItemState(item, "fail", failText(e), 100);
     }
 }
 async function processQueue() {

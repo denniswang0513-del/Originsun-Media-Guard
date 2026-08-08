@@ -187,7 +187,7 @@ async def _project_or_404(session, project_id: str):
 # 按鈕走 mkdir 帶這個常數（見 crm-projects-plan.js）—— 打成「對外分享用」
 # 那種一字之差，分享會靜靜失效：客戶那邊分頁不出現、你這邊 badge 不見，
 # 兩邊都沒有錯誤訊息。
-# 🔴 不可以用 "_" 或 "." 開頭 —— core._visible_dir 會把那種資料夾從列表濾掉，
+# 🔴 不可以用 "_" 或 "." 開頭 —— core.project_folders.is_hidden_name 會把那種資料夾濾掉，
 # 你自己在後台也會看不到它、拖不了檔進去。
 PUBLIC_SUBFOLDER = "對外分享"
 

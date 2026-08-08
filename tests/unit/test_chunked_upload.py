@@ -79,7 +79,7 @@ def test_append_and_finish_reassembles_exactly(root, tmp_path):
     sent = 0
     for i in range(0, len(data), 1000):
         block = data[i:i + 1000]
-        sent = cu.append_bytes(root, uid, block, offset=sent, max_bytes=10 ** 7)
+        sent = cu.append_bytes(root, uid, [block], len(block), offset=sent, max_bytes=10 ** 7)
     assert sent == len(data)
 
     dest = str(tmp_path / "out.bin")
@@ -93,7 +93,7 @@ def test_begin_reports_existing_progress(root):
     """重開分頁重選同一個檔 → begin 要說出已經傳到哪（否則從 0 重來）。"""
     uid = _uid()
     cu.begin(root, uid)
-    cu.append_bytes(root, uid, b"x" * 300, offset=0, max_bytes=10 ** 7)
+    cu.append_bytes(root, uid, [b"x" * 300], 300, offset=0, max_bytes=10 ** 7)
     assert cu.begin(root, uid) == 300
 
 
@@ -107,9 +107,9 @@ def test_duplicate_chunk_is_rejected_not_appended(root):
     """逾時重試時第一次其實寫進去了 —— 再寫一次就是壞檔。"""
     uid = _uid()
     cu.begin(root, uid)
-    cu.append_bytes(root, uid, b"a" * 100, offset=0, max_bytes=10 ** 7)
+    cu.append_bytes(root, uid, [b"a" * 100], 100, offset=0, max_bytes=10 ** 7)
     with pytest.raises(cu.ChunkError) as ei:
-        cu.append_bytes(root, uid, b"a" * 100, offset=0, max_bytes=10 ** 7)
+        cu.append_bytes(root, uid, [b"a" * 100], 100, offset=0, max_bytes=10 ** 7)
     assert ei.value.kind == "offset"
     assert ei.value.received == 100          # 客戶端據此重新對齊
     assert cu.received_bytes(root, uid) == 100
@@ -120,7 +120,7 @@ def test_gap_is_rejected(root):
     uid = _uid()
     cu.begin(root, uid)
     with pytest.raises(cu.ChunkError) as ei:
-        cu.append_bytes(root, uid, b"z" * 10, offset=999, max_bytes=10 ** 7)
+        cu.append_bytes(root, uid, [b"z" * 10], 10, offset=999, max_bytes=10 ** 7)
     assert ei.value.kind == "offset"
 
 
@@ -128,9 +128,9 @@ def test_over_limit_discards_partial(root):
     """超限的檔不可能被接受，半成品留著只是佔 NAS 空間。"""
     uid = _uid()
     cu.begin(root, uid)
-    cu.append_bytes(root, uid, b"x" * 600, offset=0, max_bytes=1000)
+    cu.append_bytes(root, uid, [b"x" * 600], 600, offset=0, max_bytes=1000)
     with pytest.raises(cu.ChunkError) as ei:
-        cu.append_bytes(root, uid, b"x" * 600, offset=600, max_bytes=1000)
+        cu.append_bytes(root, uid, [b"x" * 600], 600, offset=600, max_bytes=1000)
     assert ei.value.kind == "too-large"
     assert cu.received_bytes(root, uid) == 0
 
@@ -139,7 +139,7 @@ def test_finish_rejects_incomplete(root, tmp_path):
     """長度不足還照樣改名 → 使用者拿到一個「成功」的壞檔。"""
     uid = _uid()
     cu.begin(root, uid)
-    cu.append_bytes(root, uid, b"x" * 50, offset=0, max_bytes=10 ** 7)
+    cu.append_bytes(root, uid, [b"x" * 50], 50, offset=0, max_bytes=10 ** 7)
     dest = str(tmp_path / "out.bin")
     with pytest.raises(cu.ChunkError) as ei:
         cu.finish(root, uid, dest, expect_bytes=100)
@@ -151,7 +151,7 @@ def test_finish_rejects_incomplete(root, tmp_path):
 
 def test_finish_without_session(root, tmp_path):
     with pytest.raises(cu.ChunkError) as ei:
-        cu.finish(root, _uid(), str(tmp_path / "out.bin"))
+        cu.finish(root, _uid(), str(tmp_path / "out.bin"), expect_bytes=-1)
     assert ei.value.kind == "missing"
 
 
@@ -159,10 +159,10 @@ def test_finish_overwrites_dest_atomically(root, tmp_path):
     """os.replace 語義：目的地已存在也要成功（撞名改名是呼叫端的事）。"""
     uid = _uid()
     cu.begin(root, uid)
-    cu.append_bytes(root, uid, b"new", offset=0, max_bytes=10 ** 7)
+    cu.append_bytes(root, uid, [b"new"], 3, offset=0, max_bytes=10 ** 7)
     dest = tmp_path / "out.bin"
     dest.write_bytes(b"old-and-longer")
-    cu.finish(root, uid, str(dest))
+    cu.finish(root, uid, str(dest), expect_bytes=-1)
     assert dest.read_bytes() == b"new"
 
 
@@ -172,8 +172,8 @@ def test_gc_removes_only_stale(root):
     """使用者關掉分頁就沒人收尾 —— 沒有 GC，NAS 上會積滿無主的大檔。"""
     fresh, stale = cu.upload_id("fresh"), cu.upload_id("stale")
     cu.begin(root, fresh)
-    cu.append_bytes(root, fresh, b"a", offset=0, max_bytes=10 ** 7)
-    cu.append_bytes(root, stale, b"b", offset=0, max_bytes=10 ** 7)
+    cu.append_bytes(root, fresh, [b"a"], 1, offset=0, max_bytes=10 ** 7)
+    cu.append_bytes(root, stale, [b"b"], 1, offset=0, max_bytes=10 ** 7)
     old = cu.part_path(root, stale)
     os.utime(old, (0, 0))                       # 1970 → 一定過期
 
@@ -190,3 +190,29 @@ def test_gc_on_missing_root_is_quiet(tmp_path):
 def test_discard_is_idempotent(root):
     cu.discard(root, _uid())            # 不存在
     cu.discard(root, "bad-id")          # 格式不合也不該炸
+
+
+# ── HTTP 線上格式（前端續傳靠這個形狀）────────────────────────
+
+def test_chunk_http_409_carries_received():
+    """🔴 這是續傳的**線上契約**，兩端各自有測試但中間沒有。
+
+    `putChunk` 讀的是 `detail.received`；`_chunk_http` 若被「順手統一成字串
+    detail」（本模組其餘 HTTPException 都是字串），重試就不再是重新對齊而是
+    致命 4xx —— 每一次逾時重試都變成整個檔上傳失敗，而且沒有任何測試會紅。
+    `reason` 這個 key 名同理：utils.js 的 httpError 只認 `detail.reason`。
+    """
+    pytest.importorskip("fastapi")
+    from routers.crm.media_log import _chunk_http
+
+    exc = _chunk_http(cu.ChunkError("offset", "位移不符", received=7))
+    assert exc.status_code == 409
+    assert exc.detail["received"] == 7
+    assert exc.detail["reason"] == "位移不符"
+
+    assert _chunk_http(cu.ChunkError("missing", "x")).status_code == 404
+    assert _chunk_http(cu.ChunkError("bad-id", "x")).status_code == 400
+    # too-large 借用 _too_large()：與另外兩個入口同一句話（字串 detail）
+    assert _chunk_http(cu.ChunkError("too-large", "x")).status_code == 413
+    # core 之後新增 kind 不該讓伺服器 500
+    assert _chunk_http(cu.ChunkError("brand-new", "x")).status_code == 400

@@ -297,12 +297,6 @@ def is_hidden_name(name: str) -> bool:
     return str(name or "")[:1] in HIDDEN_PREFIXES
 
 
-def _visible_dir(name: str) -> bool:
-    """列舉時要不要走進這個子資料夾。
-    攤平版與逐層版共用同一條規則 —— 分兩份寫，總有一天只有一邊被改到。"""
-    return not is_hidden_name(name)
-
-
 def _file_record(rel: str, entry) -> Optional[dict]:
     """檔案的對外形狀（列檔端點共用一份；rel 一律轉成 `/` 給前端）。
     stat 失敗（權限/剛被刪）→ None，呼叫端跳過。"""
@@ -343,7 +337,7 @@ def _iter_entries(folder: str, accept: Optional[Callable[[str], bool]] = None):
                 for e in it:
                     try:
                         if e.is_dir():
-                            if _visible_dir(e.name):
+                            if not is_hidden_name(e.name):
                                 stack.append((e.path, prefix + e.name + os.sep))
                             continue
                     except OSError:
@@ -403,7 +397,7 @@ def list_folder_level(folder_abs: str, rel: str = "",
                     break
                 try:
                     if e.is_dir():
-                        if _visible_dir(e.name):
+                        if not is_hidden_name(e.name):
                             dirs.append({"name": e.name, "rel": prefix + e.name})
                         continue
                 except OSError:

@@ -140,14 +140,19 @@ def test_nginx_has_a_location_for_everything_served():
 def test_nginx_media_log_body_cap_covers_backend_limit():
     """nginx 擋在後端前面 —— 它比 `_MAX_UPLOAD_BYTES` 小的話，區網直傳大檔會拿到
     一個 nginx 自己產的 413（不是我們的 JSON），錯誤訊息看不出是大小問題。
-    那個 conf 的註解寫著「對齊後端」，但在這條測試出現前沒有任何東西在對齊它。"""
+
+    ⚠ 這條釘的是**repo 裡的 conf**，不是 NAS 上正在跑的那份 —— 手改容器仍然
+      可能讓生產與這裡不一致。它擋的是「有人改了後端常數卻忘了改 conf」。"""
     import re as _re
 
     from routers.crm.media_log import _MAX_UPLOAD_BYTES
 
     conf = open(NGINX_CONF, encoding="utf-8").read()
-    block = conf.split("location ^~ /api/v1/crm/public/media-log/")[1].split("}")[0]
-    m = _re.search(r"client_max_body_size\s+(\d+)([kmgKMG]?)", block)
+    block = _re.search(
+        r"location\s+\^~\s+/api/v1/crm/public/media-log/?\s*\{(.*?)\n\s*\}",
+        conf, _re.S)
+    assert block, "nginx conf 裡找不到 media-log 的 location 區塊（改了寫法？）"
+    m = _re.search(r"client_max_body_size\s+(\d+)([kmgKMG]?)", block.group(1))
     assert m, "media-log 的 location 沒有設 client_max_body_size"
     unit = {"": 1, "k": 1024, "m": 1024 ** 2, "g": 1024 ** 3}[m.group(2).lower()]
     assert int(m.group(1)) * unit >= _MAX_UPLOAD_BYTES, (

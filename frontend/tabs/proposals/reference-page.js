@@ -22,6 +22,7 @@
 import { tfetch } from './prop-fetch.js';
 import { renderShapes } from './annotate.js';
 import { autosaveDelegated, syncBaseline } from '../../js/shared/autosave.js';
+import { browserKey } from '../../js/shared/utils.js';
 import { ARCHIVE_LABEL, archiveLabelFor } from './ref-pills.js';
 
 const STYLE_ID = 'rfc-style';
@@ -361,14 +362,7 @@ export function renderReference(container, opts) {
 }
 
 // 公開共編的身分：署名（顯示用）+ 瀏覽器產生的不可見 key（「只刪自己貼的」憑證）
-function _guestKey() {
-    let k = localStorage.getItem('plan_guest_key');
-    if (!k) {
-        k = (crypto.randomUUID ? crypto.randomUUID() : String(Math.random())).replace(/-/g, '');
-        localStorage.setItem('plan_guest_key', k);
-    }
-    return k;
-}
+const _guestKey = () => browserKey('plan_guest_key');
 
 function _guestQS(shared, guest) {
     if (!shared) return '';

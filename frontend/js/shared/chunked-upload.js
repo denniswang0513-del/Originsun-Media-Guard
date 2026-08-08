@@ -19,27 +19,12 @@
  * 紀錄的欄位名 —— 下一個要用分塊的上傳面（提案資產夾）才不必再抄一份。
  */
 
-import { authFetch, httpError, proxyBodyLimit, uploadWithProgress } from './utils.js';
+import {
+    authFetch, BODY_MARGIN, browserKey, httpError, proxyBodyLimit, uploadWithProgress,
+} from './utils.js';
 
 const CLIENT_KEY = 'media_log_client_key';
 const RETRY_DELAYS = [1000, 2000, 4000];   // 每塊最多重試 3 次（弱網常態）
-// 留餘裕給 multipart 的邊界字串與標頭（實際 body 會比檔案本身大一點）——
-// 與 utils.js 的 uploadItems 分批預算同一個理由、同一個數字。
-const BODY_MARGIN = 4 * 1024 * 1024;
-
-/** 這台瀏覽器的固定隨機鍵 —— 讓「同一個人的同一個檔」才共用半成品。 */
-function clientKey() {
-    try {
-        let k = localStorage.getItem(CLIENT_KEY);
-        if (!k) {
-            k = Math.random().toString(36).slice(2) + Date.now().toString(36);
-            localStorage.setItem(CLIENT_KEY, k);
-        }
-        return k;
-    } catch {
-        return 'no-storage';    // 無痕模式 → 退化成「不跨分頁續傳」，仍可上傳
-    }
-}
 
 async function jsonOrThrow(res) {
     let payload = null;
@@ -75,12 +60,12 @@ async function putChunk(base, uploadId, offset, blob, signal) {
         body: blob,
         signal,
     });
-    if (res.status === 409) {
-        const payload = await res.json().catch(() => null);
-        const received = payload && payload.detail && payload.detail.received;
-        if (typeof received === 'number') return received;
-    }
-    return (await jsonOrThrow(res)).received;
+    // body 只讀一次 —— 讀第二次會拿到已消耗的串流，錯誤訊息就這樣掉了
+    const payload = await res.json().catch(() => null);
+    const realigned = res.status === 409 && payload?.detail?.received;
+    if (typeof realigned === 'number') return realigned;
+    if (!res.ok) throw httpError(res.status, payload);
+    return payload.received;
 }
 
 const sleep = (ms) => new Promise(r => setTimeout(r, ms));
@@ -92,7 +77,7 @@ async function uploadChunked(base, file, opts) {
             filename: file.name,
             size: file.size,
             mtime: file.lastModified || 0,
-            client_key: clientKey(),
+            client_key: browserKey(CLIENT_KEY),
         },
     }));
     const { upload_id: uploadId, chunk_bytes: chunkBytes } = begun;
@@ -135,16 +120,28 @@ async function uploadChunked(base, file, opts) {
  *
  * @param {string} base   端點前綴，例 `/api/v1/crm/public/media-log/{token}`
  * @param {File}   file
- * @param {object} opts   { fields, onProgress(pct), signal, thresholdBytes }
+ * @param {object} opts   { fields, onProgress(pct), signal, bodyLimit }
  *
  * `fields` 會同時進 multipart 表單（單一請求路徑）與 finish 的 JSON body
  * （分塊路徑），所以兩條路徑對後端長得一樣。
- * `thresholdBytes` 只在需要覆寫連線判定時才給（測試用）。
+ *
+ * `bodyLimit` 是伺服器量到的單一請求上限（GET 回應的 `request_body_limit`：
+ * 它看 `cf-connecting-ip`，而那個回應與上傳走同一條連線）。沒給就退回
+ * `proxyBodyLimit()` 用網域猜。0 = 中間沒東西擋 → 完全不分塊。
+ *
+ * 猜錯的代價不對稱：多分塊只是多幾十次來回，少分塊是根本傳不上去 —— 所以
+ * 單一請求真的撞到**不是我們發出的** 413 時，自動改走分塊再試一次。
  */
-export function uploadFile(base, file, opts = {}) {
-    const cap = opts.thresholdBytes ?? proxyBodyLimit();
-    const threshold = cap ? cap - BODY_MARGIN : Infinity;   // 0 = 區網，不必分塊
-    return file.size > threshold
-        ? uploadChunked(base, file, opts)
-        : uploadWhole(base, file, opts);
+export async function uploadFile(base, file, opts = {}) {
+    const cap = opts.bodyLimit ?? proxyBodyLimit();
+    if (cap && file.size > cap - BODY_MARGIN) return uploadChunked(base, file, opts);
+    try {
+        return await uploadWhole(base, file, opts);
+    } catch (e) {
+        // fromServer=false → 這個 413 是中間某層產生的（HTML 頁面，不是我們的
+        // JSON），代表判斷失準、這條連線其實有上限。我們自己回的 413（超過
+        // 500MB）帶 detail，重試幾次都一樣，不要浪費使用者的時間。
+        if (e.status === 413 && !e.fromServer) return uploadChunked(base, file, opts);
+        throw e;
+    }
 }

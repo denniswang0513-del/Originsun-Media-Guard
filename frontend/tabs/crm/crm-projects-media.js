@@ -369,6 +369,7 @@ async function _pumpUploads() {
 function _upload(u) {
     return uploadFile(`${PUBLIC_API}/${_data.token}`, u.file, {
         fields: { category: u.cat || '', uploader_name: '後台' },
+        bodyLimit: _data.request_body_limit,
         onProgress: (pct) => {
             u.pct = pct;
             _tickProgressRow(u);   // 進度 tick 只改該列 bar/百分比 — 不整列表重繪
