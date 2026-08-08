@@ -284,10 +284,23 @@ def safe_rel_dir(folder_abs: str, rel: str) -> Optional[str]:
 FOLDER_VIEW_CAP = 1000   # 單夾列檔上限（超過標 truncated，避免超大夾逐檔 stat 卡死）
 
 
+# 「這個名字是內部用的，別列給使用者看」的**單一規則**。
+# 🔴 這不只是列舉時的美觀問題 —— 它是一份 on-disk 契約：
+#    core/chunked_upload.py 的 `.chunk-uploads`（半成品）與影像紀錄的 `_trash`
+#    （軟刪）都是**靠這條規則**才不會出現在資料夾總覽、也不會被 reconcile 當成
+#    照片匯進資料庫。改這個前綴集合＝那些半成品變成使用者看得到、點得到的東西。
+HIDDEN_PREFIXES = (".", "_")
+
+
+def is_hidden_name(name: str) -> bool:
+    """名字是不是內部用的（`.chunk-uploads` / `_trash` / `.git` 那類）。"""
+    return str(name or "")[:1] in HIDDEN_PREFIXES
+
+
 def _visible_dir(name: str) -> bool:
-    """列舉時要不要走進這個子資料夾（`.git` / `_tmp` 那類略過）。
+    """列舉時要不要走進這個子資料夾。
     攤平版與逐層版共用同一條規則 —— 分兩份寫，總有一天只有一邊被改到。"""
-    return name[:1] not in (".", "_")
+    return not is_hidden_name(name)
 
 
 def _file_record(rel: str, entry) -> Optional[dict]:

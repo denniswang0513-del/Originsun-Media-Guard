@@ -1131,3 +1131,27 @@ class JournalPut(BaseModel):
     challenges: List[str] = []
     learnings: List[str] = []
     others: List[str] = []       # 其他主題（2026-07-24 第四問）
+
+
+# ── 影像紀錄分塊上傳（繞開 Cloudflare 的 100MB 單請求上限）──
+
+class ChunkBeginRequest(BaseModel):
+    """POST /public/media-log/{token}/upload/begin
+
+    filename/size/mtime 三個一組是**檔案的身分**：upload_id 由它們推導，
+    所以同一個檔重傳一定落回同一個半成品（續傳）。client_key 是瀏覽器自己
+    存在 localStorage 的隨機字串 —— 沒有它，兩個人同時傳同名同大小的檔會
+    共用同一個 .part。
+    """
+    filename: str
+    size: int = Field(gt=0, description="檔案總位元組數")
+    mtime: int = 0               # File.lastModified（毫秒）；拿不到就 0
+    client_key: str = ""
+
+
+class ChunkFinishRequest(BaseModel):
+    """POST /public/media-log/{token}/upload/{upload_id}/finish"""
+    filename: str
+    size: int = Field(gt=0, description="期望的總長度；與實收不符 → 409")
+    category: str = ""
+    uploader_name: str = ""

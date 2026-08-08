@@ -368,9 +368,7 @@ async function _pumpUploads() {
 // 後台也會從家裡/外景用（走 Cloudflare）→ 大檔同樣要分塊，實作與公開收照頁共用。
 function _upload(u) {
     return uploadFile(`${PUBLIC_API}/${_data.token}`, u.file, {
-        category: u.cat || '',
-        uploaderName: '後台',
-        thresholdBytes: _data.chunk_threshold_bytes,
+        fields: { category: u.cat || '', uploader_name: '後台' },
         onProgress: (pct) => {
             u.pct = pct;
             _tickProgressRow(u);   // 進度 tick 只改該列 bar/百分比 — 不整列表重繪

@@ -24,9 +24,11 @@
 
 **staging 放哪**：由呼叫端指定，慣例是收檔根目錄底下的 `.chunk-uploads`。
 必須與目的地**同一個 volume**，收尾才能用 `os.replace` 原子改名（跨 volume 會
-退化成複製整份，那就白省了）。目錄名以 `.` 開頭 →
-`core.project_folders._visible_dir` 會跳過它，資料夾總覽與 reconcile 都掃不到
-半成品，不會有人在 NAS 上看到一堆殘檔、也不會被誤匯進資料庫。
+退化成複製整份，那就白省了）。目錄名以 `.` 開頭 → 過得了
+`core.project_folders.is_hidden_name`，所以資料夾總覽與 reconcile 都掃不到半
+成品，不會有人在 NAS 上看到殘檔、也不會被誤匯進資料庫。**那條規則是這個模組
+的正確性依賴，不是慣例**：`tests/unit/test_chunked_upload.py` 有一條測試把
+`STAGING_DIRNAME` 釘在它上面。
 """
 from __future__ import annotations
 
@@ -42,10 +44,10 @@ STAGING_DIRNAME = ".chunk-uploads"
 # 8MB」——不是為了貼近上限。塊小一點，弱網下的實際完成率比較高。
 CHUNK_BYTES = 8 * 1024 * 1024
 
-# 超過這個大小才走分塊。小檔走單一請求少一次來回、也少一個失敗面；
-# 64MB 離 CF 的 100MB 有夠的餘裕（multipart 的欄位/邊界也佔 body）。
-CHUNK_THRESHOLD_BYTES = 64 * 1024 * 1024
-
+# 「多大才需要分塊」**不在這裡定**。那取決於這條連線中間有沒有 CDN，只有瀏覽器
+# 知道自己連的是哪個網域 —— 前端用 utils.js 的 proxyBodyLimit() 判（區網直連就
+# 完全不必分塊）。後端訂一個全域門檻只會在區網上做白工。
+#
 # 沒動靜超過這麼久的半成品視為棄置，GC 掉。設一天是因為現場拍攝常見的情境是
 # 「收工前傳一半、隔天早上回到訊號好的地方接著傳」。
 STALE_SEC = 24 * 3600
@@ -62,6 +64,10 @@ class ChunkError(Exception):
                     客戶端據此重新對齊；這是續傳與重試的正常路徑，不是意外）
       - "too-large" 累計超過上限
       - "missing"   `.part` 不存在（過期被 GC / 沒先 begin）
+      - "bad-id"    upload_id 格式不合法（路徑參數，見 part_path）
+
+    一個模組只出一種例外 —— 呼叫端就只有一個 except 要寫，也不會有第二套
+    對應表要維護（HTTP 狀態碼的對應在 routers/crm/media_log._chunk_http）。
     """
 
     def __init__(self, kind: str, detail: str, received: int = 0):
@@ -89,10 +95,10 @@ def part_path(root: str, uid: str) -> str:
     """`.part` 的絕對路徑。
 
     🔴 id 會被拿來組路徑，而它來自 HTTP 路徑參數 —— 白名單比對格式（不是清洗
-    非法字元）才擋得住目錄遍歷。格式不合直接 ValueError，呼叫端當 400。
+    非法字元）才擋得住目錄遍歷。
     """
     if not _ID_RE.match(str(uid or "")):
-        raise ValueError("upload_id 格式不合法")
+        raise ChunkError("bad-id", "upload_id 格式不合法")
     return os.path.join(staging_dir(root), uid + _PART_EXT)
 
 
@@ -105,12 +111,18 @@ def received_bytes(root: str, uid: str) -> int:
 
 
 def begin(root: str, uid: str) -> int:
-    """建 staging 夾、回報目前進度（冪等 —— 重開分頁重按上傳走的就是這裡）。"""
+    """建 staging 夾、回報目前進度（冪等 —— 重開分頁重按上傳走的就是這裡）。
+
+    staging 夾**只在這裡建**。`append_bytes` 不重複建：在 UNC 上
+    `makedirs(exist_ok=True)` 不是一個 syscall 而是 exists→mkdir→isdir 三趟，
+    每塊都做等於一個 300MB 的檔白花 114 趟往返。id 是推導的 → begin 必然先於
+    chunk，真的不見了（被手動刪掉）由 `append_bytes` 補建一次。
+    """
     os.makedirs(staging_dir(root), exist_ok=True)
     return received_bytes(root, uid)
 
 
-def append_bytes(root: str, uid: str, data: bytes, *, offset: int,
+def append_bytes(root: str, uid: str, data, *, offset: int,
                  max_bytes: int) -> int:
     """把一塊接到 `.part` 尾端 → 回接完後的總長度。
 
@@ -119,19 +131,35 @@ def append_bytes(root: str, uid: str, data: bytes, *, offset: int,
     的處理方式：客戶端拿到真實進度後跳過已收的部分，不會寫進重複的資料。
 
     超過 `max_bytes` → 直接把半成品刪掉（這個檔不可能被接受，留著只是佔空間）。
+
+    長度是**在開起來的檔案 handle 上**問的（`seek` 到尾端），不是先 getsize 再
+    open —— 後者是同一個檔在 SMB 上開兩次，每塊白花一趟往返。
     """
     path = part_path(root, uid)
-    have = received_bytes(root, uid)
-    if offset != have:
-        raise ChunkError("offset", f"位移不符（伺服器已收到 {have}）", received=have)
-    if have + len(data) > max_bytes:
-        discard(root, uid)
-        raise ChunkError("too-large",
-                         f"檔案超過 {max_bytes // (1024 * 1024)}MB 上限")
-    os.makedirs(staging_dir(root), exist_ok=True)
-    with open(path, "ab") as fp:
+    try:
+        fp = open(path, "a+b")
+    except FileNotFoundError:          # staging 夾被清掉了 → 補建一次再試
+        os.makedirs(staging_dir(root), exist_ok=True)
+        fp = open(path, "a+b")
+    try:
+        fp.seek(0, os.SEEK_END)
+        have = fp.tell()
+        if offset != have:
+            raise ChunkError("offset", f"位移不符（伺服器已收到 {have}）",
+                             received=have)
+        if have + len(data) > max_bytes:
+            raise ChunkError("too-large",
+                             f"檔案超過 {max_bytes // (1024 * 1024)}MB 上限")
         fp.write(data)
-    return have + len(data)
+        return have + len(data)
+    except ChunkError as e:
+        if e.kind == "too-large":      # 這個檔不可能被接受 → 別留著佔空間
+            fp.close()
+            discard(root, uid)
+        raise
+    finally:
+        if not fp.closed:
+            fp.close()
 
 
 def finish(root: str, uid: str, dest_path: str, *, expect_bytes: int = -1) -> int:
@@ -155,7 +183,7 @@ def discard(root: str, uid: str) -> None:
     """丟掉半成品（放棄上傳 / 超限）。不存在也算成功。"""
     try:
         os.remove(part_path(root, uid))
-    except (OSError, ValueError):
+    except (OSError, ChunkError):
         pass
 
 

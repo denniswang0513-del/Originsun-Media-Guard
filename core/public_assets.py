@@ -34,8 +34,11 @@ SYNC_PATHS = (["frontend/img"]
               + [f"frontend/{p}" for p in PAGES]
               + [f"frontend/{d}" for d in MODULE_DIRS])
 
-# `from "x"` 與 `import("x")` 兩種形式都要抓 —— 公開頁的元件是動態載入的
-_IMPORT_RE = re.compile(r"""from\s+["']([^"']+)["']|import\(\s*["']([^"']+)["']""")
+# `from "x"` / `import("x")` / `importRetry("x")` 三種形式都要抓 —— 公開頁的元件
+# 是動態載入的，而 importRetry（utils.js 的動態 import 包裝，新程式一律用它）
+# 從語法上看只是個函式呼叫。漏掉它 = 那條相依對這份守衛完全隱形。
+_IMPORT_RE = re.compile(
+    r"""from\s+["']([^"']+)["']|\bimport(?:Retry)?\(\s*["']([^"']+)["']""")
 
 # 豁免名單：**(誰 import 的, import 什麼)** 一組一組寫。
 # 只放「動態 import + .catch()，載不到只是功能降級」的個案 ——

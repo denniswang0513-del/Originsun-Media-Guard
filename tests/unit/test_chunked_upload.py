@@ -52,14 +52,22 @@ def test_upload_id_varies_by_every_input():
 ])
 def test_part_path_rejects_non_id(root, bad):
     """🔴 id 來自 HTTP 路徑參數 → 白名單比對格式，不合就不要碰檔案系統。"""
-    with pytest.raises(ValueError):
+    with pytest.raises(cu.ChunkError) as ei:
         cu.part_path(root, bad)
+    assert ei.value.kind == "bad-id"
 
 
 def test_part_path_lands_in_staging(root):
     p = cu.part_path(root, _uid())
     assert os.path.dirname(p) == cu.staging_dir(root)
-    assert os.path.basename(cu.staging_dir(root)).startswith(".")   # 列舉時會被跳過
+
+
+def test_staging_dir_is_hidden_from_folder_listings():
+    """🔴 這不是美觀問題：半成品**靠這條規則**才不會出現在資料夾總覽、也不會被
+    reconcile 當成照片匯進資料庫。改了 STAGING_DIRNAME 或那份前綴集合都要在這裡炸。"""
+    from core.project_folders import is_hidden_name
+    assert is_hidden_name(cu.STAGING_DIRNAME)
+    assert not is_hidden_name("小飛俠劇照")      # 一般資料夾不受影響
 
 
 # ── 續傳主流程 ───────────────────────────────────────────────
