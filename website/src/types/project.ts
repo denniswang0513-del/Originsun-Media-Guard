@@ -102,9 +102,6 @@ export interface ISeriesListItem {
     description_zh: string | null;
     description_en: string | null;
     cover_url: string | null;
-    // 作品牆是否收攏成一張系列卡（false = 成員一隻一隻各自呈現；系列頁照常存在）
-    // 舊後端沒這欄 → undefined 視同 true（維持原行為）
-    wall_folded?: boolean;
     work_count: number;
 }
 

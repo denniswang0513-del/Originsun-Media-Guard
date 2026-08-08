@@ -171,7 +171,6 @@ class WebsiteSeriesResponse(BaseModel):
     cover_image: Optional[str] = None
     sort_order: int = 0
     visible: bool = True
-    wall_folded: bool = True               # 作品牆收攏成一張系列卡（關=成員各自一張）
     work_count: int = 0                    # 成員數（admin 列表顯示，service 算）
 
 
@@ -185,7 +184,6 @@ class WebsiteSeriesCreate(BaseModel):
     cover_image: Optional[str] = None
     sort_order: int = 0
     visible: bool = True
-    wall_folded: bool = True
 
 
 class WebsiteSeriesUpdate(BaseModel):
@@ -198,7 +196,6 @@ class WebsiteSeriesUpdate(BaseModel):
     cover_image: Optional[str] = None
     sort_order: Optional[int] = None
     visible: Optional[bool] = None
-    wall_folded: Optional[bool] = None
 
 
 class WebsiteSeriesMembersPayload(BaseModel):

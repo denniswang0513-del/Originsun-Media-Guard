@@ -19,6 +19,15 @@ export const IS_DEV = import.meta.env.DEV === true;
 export const SITE_URL_FALLBACK = "https://www.originsun-studio.com";
 
 
+/**
+ * 作品牆「收攏成一張系列卡」的判準 —— 官網標籤（website_categories kind='tag'）
+ * 的 slug。owner 2026-08-08 定：**只有掛這個標籤的作品才收攏**，沒掛的一隻一隻
+ * 各自呈現（就算它掛在同一個系列底下）。想讓某支脫離收攏 → 在後台拿掉這個標籤。
+ * 標籤是 admin 可改的資料列，改 slug 要同步改這裡（同 /works?tag= 的 URL 承諾）。
+ */
+export const SERIES_FOLD_TAG = "series";
+
+
 /** 各頁面/元件共用的數量上限，集中避免散落 magic numbers */
 export const LIMITS = {
     HOME_FEATURED: 9,       // 首頁精選作品數（3×3 無縫網格）

@@ -10,6 +10,7 @@ import WorkCard from "../../components/works/WorkCard.astro";
 import SeriesCard from "../../components/works/SeriesCard.astro";
 import Tr from "../../components/ui/Tr.astro";
 import { fetchMeta, fetchCategories, fetchAllWorksCached, fetchSeriesList } from "../../lib/crm-client";
+import { SERIES_FOLD_TAG } from "../../lib/config";
 import { buildBasicPageSeo, breadcrumb2 } from "../../lib/seo";
 import type { IPublicProject, ISeriesListItem } from "../../types/project";
 
@@ -20,22 +21,25 @@ const [meta, allWorks, categories, seriesList] = await Promise.all([
     fetchSeriesList(),
 ]);
 
-// 系列摺疊：屬於可見系列的作品收進一張系列卡（卡片站在第一個成員在牆上的位置，
-// 承接該成員的排序權重）；系列卡的 data-categories/tags = 成員聯集，兩軸過濾照常。
-// 不摺的三種情況（成員照常各自一張卡）：
-//   1. 系列被隱藏（不在 seriesList）
-//   2. 系列關掉「牆上收攏」（wall_folded=false — 同客戶合集型，收攏會讓十幾支
-//      作品從牆上消失；owner 2026-08-08：只有真系列才收攏）
-//   3. 只有一個已發布成員 — 「1 支作品」的系列卡沒東西可收，第二支上了自然摺回
+// 系列摺疊：**只有掛「系列」標籤的作品**才收進一張系列卡（owner 2026-08-08：
+// 「只有標籤為系列的折成一張卡，不是這個標籤的不用」）。系列卡站在第一個被收攏
+// 成員在牆上的位置、承接該成員的排序權重；data-categories/tags = 被收攏成員的
+// 聯集，兩軸過濾照常。
+// 不收攏（各自一張作品卡）的情況：
+//   1. 沒掛系列標籤 —— 就算它掛在同一個系列底下（同系列可以混：掛標籤的收攏、
+//      沒掛的照樣在牆上單獨出現）
+//   2. 系列被隱藏（不在 seriesList）
+//   3. 該系列只有 1 支掛標籤的成員 —— 收成「1 支作品」的卡沒有意義
 const seriesById = new Map(seriesList.map(s => [s.id, s]));
+const isFoldable = (w: IPublicProject) => (w.tags || []).includes(SERIES_FOLD_TAG);
 // 統一的格子項：cats/tags 給過濾軸（系列卡 = 成員聯集），work/series 二擇一給卡片
 type GridEntry = { cats: string[]; tags: string[]; work?: IPublicProject; series?: ISeriesListItem };
 const gridEntries: GridEntry[] = [];
 const foldedSeries = new Set<number>();
 for (const work of allWorks) {
-    const s = work.series_id ? seriesById.get(work.series_id) : undefined;
-    const members = s ? allWorks.filter(w => w.series_id === s.id) : [];
-    if (!s || s.wall_folded === false || members.length < 2) {
+    const s = work.series_id && isFoldable(work) ? seriesById.get(work.series_id) : undefined;
+    const members = s ? allWorks.filter(w => w.series_id === s.id && isFoldable(w)) : [];
+    if (!s || members.length < 2) {
         gridEntries.push({ cats: work.categories || [], tags: work.tags || [], work });
         continue;
     }
