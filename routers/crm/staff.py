@@ -713,8 +713,8 @@ async def generate_staff_edit_token(staff_id: str, request: Request):
     """產生人員自編履歷的永久連結 Token。"""
     _check_auth(request)
     _require_db()
-    from core.auth import create_token
-    token = create_token({"sub": staff_id, "scope": "resume_edit"}, expires_days=36500)
+    from core.auth import new_share_token
+    token = new_share_token(staff_id, "resume_edit", 36500)
     factory = await _get_factory()
     async with factory() as session:
         s = await session.get(CrmStaff, staff_id)

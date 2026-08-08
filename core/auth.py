@@ -198,6 +198,62 @@ def check_admin(request: Request):
     raise HTTPException(status_code=403, detail="權限不足")
 
 
+def new_share_token(sub: str, scope: str, expires_days: int) -> str:
+    """鑄一張**存進 DB 的分享 token**（提案共編頁、影像紀錄 QR、上架編輯連結…）。
+
+    🔴 與 `create_token` 的差別只有一個 `n`（亂數），但那個差別是必要的：
+    payload 其餘欄位（sub / scope / exp / iat）**完全由時間決定**，所以任何拿到
+    jwt_secret 的人，只要知道 row id 又猜中發放的那一秒，就能重現出一模一樣的
+    字串 —— 逐字比對就擋不住了。（實務上還要先猜中 uuid4 的 row id，難度極高；
+    但這是白花力氣就能關掉的缺口。）
+
+    加了 `n` 之後，就算 secret 外流也產不出對得上 DB 的字串，
+    「分享連結不靠簽章保護」這句話才真的成立。
+
+    ⚠️ 既有的舊 token 沒有 `n`，照樣有效 —— 驗證只比對字串，不看有沒有這個欄位。
+    """
+    import secrets
+    return create_token({"sub": sub, "scope": scope,
+                         "n": secrets.token_urlsafe(9)},
+                        expires_days=expires_days)
+
+
+def decode_unverified(token: str) -> Optional[dict]:
+    """解出 JWT 的 payload，**不驗簽章**（過期仍然擋）。
+
+    🔴 這不是認證，別拿它當認證用。只給一種流程：**token 本身已經存在資料庫、
+    而且呼叫端會逐字比對**。那種情況真正的憑證是「這串字與我們發出去並存起來
+    的那串完全相同」——簽章是重複的第二道鎖。用它取 `sub`（決定去找哪一列）
+    是安全的：取錯列的話後面的逐字比對就會失敗。
+
+    **為什麼需要它**：jwt_secret 輪替時，簽章檢查會把所有**已經離開系統**的
+    分享連結一起殺掉（印出來貼在現場的 QR、寄給客戶的提案網址）——而那些連結
+    本來就偽造不了（光有 secret 產不出對得上 DB 的字串）。輪替真正要殺的是
+    登入 token：純 JWT、沒有 DB 當後盾，有 secret 就能自簽一個管理員。
+    兩者混在同一道檢查裡，就只能連坐。
+
+    `exp` 讀自未驗簽的 payload，但它同樣被逐字比對釘住 —— 改了 exp 就等於改了
+    整串字，那串就對不上 DB 了。
+    """
+    try:
+        parts = str(token or "").split('.')
+        if len(parts) != 3:
+            return None
+        payload = json.loads(_b64url_decode(parts[1]))
+        if payload.get('exp', 0) < time.time():
+            return None
+        return payload
+    except Exception:
+        return None
+
+
+def stored_token_matches(stored: str, presented: str) -> bool:
+    """已存 DB 的 token 與來訪者出示的是否完全相同（定時安全比較）。"""
+    if not stored or not presented:
+        return False
+    return hmac.compare_digest(str(stored), str(presented))
+
+
 def check_logged_in(request: Request):
     """只要是有效登入就放行（不分等級、不分模組）。
 

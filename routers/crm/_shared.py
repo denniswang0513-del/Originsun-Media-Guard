@@ -301,13 +301,19 @@ from core.image_utils import save_webp_or_none  # noqa: F401,E402
 
 # ── 以下自原檔「Staff Self-Edit via Token」section 搬入（staff + showcase 共用）──
 async def _verify_token_generic(session, token: str, scope: str, model_cls, editable_attr: str, require_editable: bool = False):
-    """Generic token verification for staff resume / showcase edit tokens."""
-    from core.auth import verify_token
-    payload = verify_token(token)
+    """Generic token verification for staff resume / showcase edit tokens.
+
+    🔴 **不驗簽章，靠逐字比對 DB**（見 core.auth.decode_unverified）。這類 token
+    是我們發出去、同時存進 DB 的；真正的憑證是「這串字與存起來的那串完全相同」，
+    光有 jwt_secret 產不出對得上的字串。把簽章也一起要求的話，jwt_secret 輪替
+    會連坐殺掉所有已經印出來/寄出去的連結 —— 而那正是輪替**不需要**殺的東西。
+    """
+    from core.auth import decode_unverified, stored_token_matches
+    payload = decode_unverified(token)
     if not payload or payload.get('scope') != scope:
         raise HTTPException(status_code=401, detail="無效的連結")
     obj = await session.get(model_cls, payload.get('sub', ''))
-    if not obj or obj.edit_token != token:
+    if not obj or not stored_token_matches(getattr(obj, 'edit_token', ''), token):
         raise HTTPException(status_code=401, detail="連結已失效")
     if require_editable and not getattr(obj, editable_attr, True):
         raise HTTPException(status_code=403, detail="管理員已關閉編輯權限")
@@ -315,14 +321,18 @@ async def _verify_token_generic(session, token: str, scope: str, model_cls, edit
 
 
 def _is_valid_scoped_token(token, scope: str) -> bool:
-    """存庫 token 是否仍可驗。jwt_secret 輪替後舊 token 驗不過 — 2026-07-10
-    輪替實案：生產 226/230 個庫存 token 失效、編輯器整片 404。重用前必驗，
-    驗不過就重發（自癒；_mint_token_generic 的 reuse_existing 依此判斷）。"""
+    """存庫 token 是否仍可用（`_mint_token_generic` 的 reuse_existing 依此判斷）。
+
+    🔴 這支**必須**與 `_verify_token_generic` 用同一套判準。只改驗證那半邊的話，
+    輪替後管理員下一次開後台，這裡會判定「舊的不能用」而重發一張新 token —— 
+    連結字串照樣變掉，等於白改。2026-07-10 輪替實案就是這樣讓 226/230 個庫存
+    token 換新、編輯器整片 404。
+    """
     if not token:
         return False
     try:
-        from core.auth import verify_token
-        payload = verify_token(token)
+        from core.auth import decode_unverified
+        payload = decode_unverified(token)
         return bool(payload) and payload.get("scope") == scope
     except Exception:
         return False
@@ -341,13 +351,13 @@ async def _mint_token_generic(session, model_cls, obj_id: str, scope: str, *,
     row_defaults：建新 row 時附帶的欄位；on_rotate(row)：覆寫既有 row 前的
     領域鉤子（如 showcase 補 project_id）。回傳 (token, row)，不 commit。
     """
-    from core.auth import create_token
+    from core.auth import new_share_token
     from core.crm_logic import PERMANENT_TOKEN_EXPIRES_DAYS
     row = await session.get(model_cls, obj_id)
     if row and reuse_existing and _is_valid_scoped_token(row.edit_token, scope):
         return row.edit_token, row
-    token = create_token({"sub": obj_id, "scope": scope},
-                         expires_days=expires_days or PERMANENT_TOKEN_EXPIRES_DAYS)
+    token = new_share_token(obj_id, scope,
+                            expires_days or PERMANENT_TOKEN_EXPIRES_DAYS)
     if not row:
         row = model_cls(id=obj_id, edit_token=token, **(row_defaults or {}))
         session.add(row)

@@ -748,22 +748,27 @@ _PLAN_SHARE_SCOPE = "plan_share"
 
 
 def _plan_share_valid(token: str, pid: str) -> bool:
-    from core.auth import verify_token
+    """存庫的共編 token 還能不能用（重用/重發的判斷）。不驗簽章 —— 理由同
+    routers/crm/_shared._is_valid_scoped_token（輪替不該換掉客戶手上的網址）。"""
+    from core.auth import decode_unverified
     try:
-        p = verify_token(token)
+        p = decode_unverified(token)
         return bool(p) and p.get("scope") == _PLAN_SHARE_SCOPE and p.get("sub") == pid
     except Exception:
         return False
 
 
 async def _get_prop_by_plan_token(session, token: str, for_update: bool = False):
-    """公開路徑守門：JWT 驗簽 + scope + 與 plan.share_token 比對（撤銷即失效）。"""
-    from core.auth import verify_token
-    payload = verify_token(token)
+    """公開路徑守門：scope + 與 plan.share_token **逐字比對**（撤銷即失效）。
+
+    不驗簽章 —— 憑證是「這串字等於我們存起來的那串」，見
+    core.auth.decode_unverified。撤銷仍然即時生效（DB 的值一改就對不上）。"""
+    from core.auth import decode_unverified, stored_token_matches
+    payload = decode_unverified(token)
     if not payload or payload.get("scope") != _PLAN_SHARE_SCOPE:
         raise HTTPException(status_code=401, detail="無效的連結")
     prop = await _get_proposal_or_404(session, payload.get("sub") or "", for_update=for_update)
-    if not prop.plan or prop.plan.get("share_token") != token:
+    if not prop.plan or not stored_token_matches(prop.plan.get("share_token"), token):
         raise HTTPException(status_code=401, detail="連結已停用")
     return prop
 
@@ -780,14 +785,14 @@ async def enable_plan_share(pid: str, request: Request):
     分頁，owner 要能先給客戶連結、企劃之後補；沒企劃時存 {share_token} 殼。"""
     _check_auth(request)
     factory = _require_factory()
-    from core.auth import create_token
+    from core.auth import new_share_token
     from core.crm_logic import PERMANENT_TOKEN_EXPIRES_DAYS
     async with factory() as session:
         prop = await _get_proposal_or_404(session, pid, for_update=True)
         token = (prop.plan or {}).get("share_token") or ""
         if not _plan_share_valid(token, pid):   # 含 jwt_secret 輪替後的自癒重鑄
-            token = create_token({"sub": pid, "scope": _PLAN_SHARE_SCOPE},
-                                 expires_days=PERMANENT_TOKEN_EXPIRES_DAYS)
+            token = new_share_token(pid, _PLAN_SHARE_SCOPE,
+                                    PERMANENT_TOKEN_EXPIRES_DAYS)
             plan = dict(prop.plan or {})
             plan["share_token"] = token
             prop.plan = plan
