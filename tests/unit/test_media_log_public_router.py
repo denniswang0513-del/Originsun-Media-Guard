@@ -22,6 +22,10 @@ from routers.crm import router as crm_router  # noqa: E402
 EXPECTED = {
     ("/api/v1/crm/public/media-log/{token}", "GET"),
     ("/api/v1/crm/public/media-log/{token}/upload", "POST"),
+    # 分塊上傳（>100MB 的檔過不了 Cloudflare 的單請求 body 上限）
+    ("/api/v1/crm/public/media-log/{token}/upload/begin", "POST"),
+    ("/api/v1/crm/public/media-log/{token}/upload/{upload_id}/chunk", "PUT"),
+    ("/api/v1/crm/public/media-log/{token}/upload/{upload_id}/finish", "POST"),
     ("/api/v1/crm/public/media-log/{token}/file/{file_id}", "GET"),
     ("/api/v1/crm/public/media-log/{token}/file/{file_id}", "DELETE"),
 }

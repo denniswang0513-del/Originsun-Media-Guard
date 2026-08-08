@@ -17,6 +17,7 @@
  */
 
 import { crmFetch as _fetch, esc as _esc, crmToast as _toast } from './crm-utils.js';
+import { uploadFile } from '../../js/shared/chunked-upload.js';
 
 const PUBLIC_API = '/api/v1/crm/public/media-log';
 
@@ -348,7 +349,7 @@ async function _pumpUploads() {
         u.status = 'up';
         _renderProgress();
         try {
-            await _xhrUpload(u);
+            await _upload(u);
             u.status = 'done';
             u.pct = 100;
             okCount++;
@@ -364,31 +365,16 @@ async function _pumpUploads() {
     if (_uploads.some(u => u.status === 'wait')) _pumpUploads();
 }
 
-function _xhrUpload(u) {
-    return new Promise((resolve, reject) => {
-        const fd = new FormData();
-        fd.append('file', u.file);
-        fd.append('category', u.cat || '');
-        fd.append('uploader_name', '後台');
-        const xhr = new XMLHttpRequest();
-        xhr.open('POST', `${PUBLIC_API}/${_data.token}/upload`);
-        xhr.upload.addEventListener('progress', e => {
-            if (e.lengthComputable) {
-                u.pct = Math.round(e.loaded / e.total * 100);
-                _tickProgressRow(u);   // 進度 tick 只改該列 bar/百分比 — 不整列表重繪
-            }
-        });
-        xhr.addEventListener('load', () => {
-            if (xhr.status >= 200 && xhr.status < 300) { resolve(); return; }
-            let msg = `HTTP ${xhr.status}`;
-            try {
-                const j = JSON.parse(xhr.responseText);
-                if (j.detail) msg = typeof j.detail === 'string' ? j.detail : JSON.stringify(j.detail);
-            } catch { /* 保留 HTTP 狀態碼訊息 */ }
-            reject(new Error(msg));
-        });
-        xhr.addEventListener('error', () => reject(new Error('網路錯誤')));
-        xhr.send(fd);
+// 後台也會從家裡/外景用（走 Cloudflare）→ 大檔同樣要分塊，實作與公開收照頁共用。
+function _upload(u) {
+    return uploadFile(`${PUBLIC_API}/${_data.token}`, u.file, {
+        category: u.cat || '',
+        uploaderName: '後台',
+        thresholdBytes: _data.chunk_threshold_bytes,
+        onProgress: (pct) => {
+            u.pct = pct;
+            _tickProgressRow(u);   // 進度 tick 只改該列 bar/百分比 — 不整列表重繪
+        },
     });
 }
 

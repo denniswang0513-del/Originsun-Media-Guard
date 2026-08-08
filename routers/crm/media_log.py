@@ -22,6 +22,7 @@ import asyncio
 import os
 import shutil
 import tempfile
+import time
 import uuid
 from datetime import datetime, timezone
 from typing import Callable, Optional
@@ -29,6 +30,7 @@ from typing import Callable, Optional
 from fastapi import File, Form, HTTPException, Request, UploadFile
 
 from config import load_settings
+from core import chunked_upload as cu
 from core.assets_host import assets_target
 from core.drive_map import to_canonical_path, to_local_path
 from core.project_folders import (FOLDER_VIEW_CAP, clean_filename,
@@ -793,6 +795,10 @@ async def get_project_media_log(project_id: str, request: Request, fast: int = 0
         "root_set": rs,
         "project_folder": _project_folder(root, folder_name),
         "categories": cats,
+        # 後台上傳走的是同一組 public 端點 → 分塊參數也用同一份下發（見公開頁 GET）
+        "max_upload_bytes": _MAX_UPLOAD_BYTES,
+        "chunk_bytes": cu.CHUNK_BYTES,
+        "chunk_threshold_bytes": cu.CHUNK_THRESHOLD_BYTES,
         "files": files,
     }
 
@@ -1247,21 +1253,30 @@ async def public_media_log_view(token: str):
         "categories": cats,
         "upload_enabled": await asyncio.to_thread(_root_set, root),
         "max_upload_bytes": _MAX_UPLOAD_BYTES,  # 前端預檢/文案由此推導，免兩邊硬寫
+        # 分塊上傳的參數也由後端下發 —— 兩個前端（公開頁 + 後台）都吃這份，
+        # 未來要調塊大小/門檻不必改前端再等它被快取過期。
+        "chunk_bytes": cu.CHUNK_BYTES,
+        "chunk_threshold_bytes": cu.CHUNK_THRESHOLD_BYTES,
         "files": files,
     }
 
 
-@public_router.post("/public/media-log/{token}/upload")
-async def public_media_log_upload(token: str, file: UploadFile = File(...),
-                                  category: str = Form(""),
-                                  uploader_name: str = Form("")):
-    """免登入上傳 — 原檔進 {root}/{專案子夾}/、縮圖轉 WebP。回單筆 FILE dict。"""
-    _require_db()
-    orig_name = _sanitize_filename(file.filename or "")
+def _check_upload_name(filename: str) -> tuple:
+    """上傳檔名 → `(清洗後檔名, media_type)`；副檔名不在白名單 → 400。"""
+    orig_name = _sanitize_filename(filename or "")
     media_type = _classify_ext(orig_name)
     if not media_type:
         ext = os.path.splitext(orig_name)[1] or "（無副檔名）"
         raise HTTPException(status_code=400, detail=f"不支援的檔案格式：{ext}")
+    return orig_name, media_type
+
+
+async def _upload_target(token: str) -> tuple:
+    """token → `(root, project_id, 目的資料夾絕對路徑)`；收檔根目錄沒設 → 503。
+
+    單一請求上傳與分塊上傳都要走這一段（驗 token、確定專案子夾名、落庫），
+    兩邊各寫一次的話 folder-only token 那條分支遲早只有一邊被改到。
+    """
     root, _cats = await _media_log_conf()
     if not await asyncio.to_thread(_root_set, root):
         raise HTTPException(status_code=503, detail="管理員尚未設定影像紀錄資料夾")
@@ -1276,21 +1291,27 @@ async def public_media_log_upload(token: str, file: UploadFile = File(...),
             raise HTTPException(status_code=404, detail="找不到專案")
         folder_name = await _ensure_folder_name(session, row, proj.name if proj else "")
         await session.commit()   # folder_name 首次生成要落庫（之後上傳同夾）
-    # 原檔寫入（session 已關 — 大檔串流期間不佔 DB 連線）；
-    # 目的夾 makedirs + 撞名探測都打 NAS/UNC — 集中一個執行緒跑
-    folder = _project_folder(root, folder_name)
+    return root, project_id, _project_folder(root, folder_name)
 
-    def _prepare_dest() -> str:
-        os.makedirs(folder, exist_ok=True)
-        name = _dedup_filename(
-            orig_name, lambda n: os.path.exists(os.path.join(folder, n)))
-        return os.path.join(folder, name)
 
-    stored_path = await asyncio.to_thread(_prepare_dest)
-    final_name = os.path.basename(stored_path)
-    size = await _stream_to_disk(file, stored_path)
-    # 縮圖 / 時長（失敗不擋上傳）；影片的 ffprobe 與 ffmpeg 抽格彼此獨立 → 並行
+def _prepare_dest(folder: str, orig_name: str) -> str:
+    """目的夾 makedirs + 撞名改名 → 最終絕對路徑。呼叫端在 to_thread 內跑
+    （這兩件事都打 NAS/UNC，集中一個執行緒少幾趟往返）。"""
+    os.makedirs(folder, exist_ok=True)
+    name = _dedup_filename(
+        orig_name, lambda n: os.path.exists(os.path.join(folder, n)))
+    return os.path.join(folder, name)
+
+
+async def _ingest_stored_file(project_id: str, stored_path: str, *, size: int,
+                              media_type: str, category: str,
+                              uploader_name: str) -> dict:
+    """原檔已經在磁碟上 → 補縮圖/時長 + 落庫 → 回單筆 FILE dict。
+
+    兩種上傳路徑（單一請求 / 分塊）到這裡完全一樣 —— 差別只在原檔是怎麼寫上去的。
+    """
     file_id = uuid.uuid4().hex
+    # 縮圖 / 時長（失敗不擋上傳）；影片的 ffprobe 與 ffmpeg 抽格彼此獨立 → 並行
     duration = None
     if media_type == "video":
         duration, thumb = await asyncio.gather(
@@ -1298,11 +1319,13 @@ async def public_media_log_upload(token: str, file: UploadFile = File(...),
             _make_video_thumb(stored_path, project_id, file_id))
     else:
         thumb = await _make_image_thumb(stored_path, project_id, file_id)
+    factory = await _get_factory()
     async with factory() as session:
         rec = ProjectMediaFile(
             id=file_id, project_id=project_id,
             # 本機寫檔用 local，但 DB 存 canonical UNC → 別台（master 補算）讀得到
-            filename=final_name, stored_path=to_canonical_path(stored_path),
+            filename=os.path.basename(stored_path),
+            stored_path=to_canonical_path(stored_path),
             thumb_url=thumb, media_type=media_type,
             duration_sec=duration,
             category=str(category or "").strip()[:50],
@@ -1312,6 +1335,157 @@ async def public_media_log_upload(token: str, file: UploadFile = File(...),
         session.add(rec)
         await session.commit()
         return _to_file_dict(rec)   # 通知由 master 掃 DB 補發，見上方註解
+
+
+@public_router.post("/public/media-log/{token}/upload")
+async def public_media_log_upload(token: str, file: UploadFile = File(...),
+                                  category: str = Form(""),
+                                  uploader_name: str = Form("")):
+    """免登入上傳 — 原檔進 {root}/{專案子夾}/、縮圖轉 WebP。回單筆 FILE dict。
+
+    大檔（>CHUNK_THRESHOLD_BYTES）走下面的分塊端點 —— 這條會被 Cloudflare 的
+    100MB body 上限擋在伺服器之外。
+    """
+    _require_db()
+    orig_name, media_type = _check_upload_name(file.filename or "")
+    _root, project_id, folder = await _upload_target(token)
+    # 原檔寫入（session 已關 — 大檔串流期間不佔 DB 連線）
+    stored_path = await asyncio.to_thread(_prepare_dest, folder, orig_name)
+    size = await _stream_to_disk(file, stored_path)
+    return await _ingest_stored_file(project_id, stored_path, size=size,
+                                     media_type=media_type, category=category,
+                                     uploader_name=uploader_name)
+
+
+# ── 分塊上傳（繞開 Cloudflare 的 100MB body 上限，見 core.chunked_upload）──
+#
+# 三個端點：begin（拿 upload_id + 已收進度）→ chunk（PUT 一塊）× N → finish
+# （改名進目的夾 + 落庫）。中途放棄不用通知我們，`cu.gc` 會清掉。
+
+# 同一個 upload_id 的併發保護：客戶端逾時重試時，第一個請求可能其實還在寫。
+# `append_bytes` 的位移檢查擋得住「重複寫入」，但兩個同位移的請求**同時**通過
+# 檢查就會各寫一次 → 檔案壞掉。單行程內用鎖把它序列化。
+_chunk_locks: dict = {}
+
+
+def _chunk_lock(uid: str) -> asyncio.Lock:
+    lock = _chunk_locks.get(uid)
+    if lock is None:
+        lock = _chunk_locks[uid] = asyncio.Lock()
+    return lock
+
+
+# gc 節流：每個行程最多每小時掃一次 staging 夾（scandir 打 NAS，不值得每次
+# begin 都做）。時間戳放模組層即可 —— 兩台機器各自清是冪等的。
+_last_gc = [0.0]
+_GC_INTERVAL_SEC = 3600
+
+
+async def _gc_throttled(root: str) -> None:
+    now = time.time()
+    if now - _last_gc[0] < _GC_INTERVAL_SEC:
+        return
+    _last_gc[0] = now
+    # 沒人持有的鎖一起清掉 —— 放棄的上傳永遠不會走到 finish，只在 finish 移除
+    # 的話這個 dict 會慢慢長大。`locked()` 為真代表有人持有或在等，那種不能動。
+    for key, lock in list(_chunk_locks.items()):
+        if not lock.locked():
+            _chunk_locks.pop(key, None)
+    try:
+        await asyncio.to_thread(cu.gc, root)
+    except OSError:
+        pass
+
+
+def _chunk_http(e: cu.ChunkError) -> HTTPException:
+    """ChunkError → HTTP。offset 用 409 並把真實進度帶回去，客戶端據此續傳。"""
+    code = {"offset": 409, "too-large": 413, "missing": 404}.get(e.kind, 400)
+    return HTTPException(status_code=code,
+                         detail={"error": e.kind, "message": e.detail,
+                                 "received": e.received})
+
+
+@public_router.post("/public/media-log/{token}/upload/begin")
+async def public_media_log_upload_begin(token: str, body: dict):
+    """開始（或接續）一個分塊上傳 → `{upload_id, received}`。
+
+    冪等：同一個瀏覽器、同一個檔（檔名+大小+修改時間）永遠得到同一個
+    upload_id，`received` 就是上次傳到哪 —— 換頁重開也接得回去。
+    """
+    _require_db()
+    _check_upload_name(str(body.get("filename") or ""))
+    size = int(body.get("size") or 0)
+    if size <= 0:
+        raise HTTPException(status_code=400, detail="缺少檔案大小")
+    if size > _MAX_UPLOAD_BYTES:
+        raise HTTPException(
+            status_code=413,
+            detail=f"檔案超過 {_MAX_UPLOAD_BYTES // (1024 * 1024)}MB 上限")
+    root, _project_id, _folder = await _upload_target(token)
+    # client_key 是瀏覽器自己產的隨機字串（localStorage）。放進 id 是為了讓
+    # 「同一台裝置的同一個檔」才共用 .part —— 否則兩個人同時傳同名同大小的檔
+    # 會寫進同一個半成品。
+    uid = cu.upload_id(token, str(body.get("client_key") or ""),
+                       str(body.get("filename") or ""), size,
+                       str(body.get("mtime") or ""))
+    await _gc_throttled(root)
+    received = await asyncio.to_thread(cu.begin, root, uid)
+    return {"upload_id": uid, "received": received,
+            "chunk_bytes": cu.CHUNK_BYTES}
+
+
+@public_router.put("/public/media-log/{token}/upload/{upload_id}/chunk")
+async def public_media_log_upload_chunk(token: str, upload_id: str,
+                                        offset: int, request: Request):
+    """收一塊（raw body，非 multipart）→ `{received}`。
+
+    body 邊收邊累積並在超過 2 倍塊大小時中止 —— 這個端點是匿名可打的，
+    沒有上限就等於讓任何拿到連結的人把記憶體吃光。
+    """
+    _require_db()
+    root, _project_id, _folder = await _upload_target(token)
+    cap = cu.CHUNK_BYTES * 2
+    buf = bytearray()
+    async for part in request.stream():
+        buf += part
+        if len(buf) > cap:
+            raise HTTPException(status_code=413, detail="單塊過大")
+    try:
+        async with _chunk_lock(upload_id):
+            received = await asyncio.to_thread(
+                cu.append_bytes, root, upload_id, bytes(buf),
+                offset=int(offset), max_bytes=_MAX_UPLOAD_BYTES)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="upload_id 格式不合法")
+    except cu.ChunkError as e:
+        raise _chunk_http(e)
+    return {"received": received}
+
+
+@public_router.post("/public/media-log/{token}/upload/{upload_id}/finish")
+async def public_media_log_upload_finish(token: str, upload_id: str, body: dict):
+    """收尾 — 半成品改名進目的夾 + 補縮圖 + 落庫。回單筆 FILE dict（同單一請求上傳）。"""
+    _require_db()
+    orig_name, media_type = _check_upload_name(str(body.get("filename") or ""))
+    root, project_id, folder = await _upload_target(token)
+
+    def _move() -> tuple:
+        dest = _prepare_dest(folder, orig_name)
+        return dest, cu.finish(root, upload_id, dest,
+                               expect_bytes=int(body.get("size") or -1))
+
+    try:
+        async with _chunk_lock(upload_id):
+            stored_path, size = await asyncio.to_thread(_move)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="upload_id 格式不合法")
+    except cu.ChunkError as e:
+        raise _chunk_http(e)
+    _chunk_locks.pop(upload_id, None)      # 收尾成功 → 這個 id 不會再有請求
+    return await _ingest_stored_file(project_id, stored_path, size=size,
+                                     media_type=media_type,
+                                     category=str(body.get("category") or ""),
+                                     uploader_name=str(body.get("uploader_name") or ""))
 
 
 @public_router.get("/public/media-log/{token}/file/{file_id}")

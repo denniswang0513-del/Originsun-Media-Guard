@@ -32,6 +32,10 @@ EXPECTED_API = {
     # 影像紀錄（token 授權；同仁現場收照）
     ("/api/v1/crm/public/media-log/{token}", "GET"),
     ("/api/v1/crm/public/media-log/{token}/upload", "POST"),
+    # 分塊上傳（>100MB 的檔會被 Cloudflare 擋在單一請求的 body 上限外）
+    ("/api/v1/crm/public/media-log/{token}/upload/begin", "POST"),
+    ("/api/v1/crm/public/media-log/{token}/upload/{upload_id}/chunk", "PUT"),
+    ("/api/v1/crm/public/media-log/{token}/upload/{upload_id}/finish", "POST"),
     ("/api/v1/crm/public/media-log/{token}/file/{file_id}", "GET"),
     ("/api/v1/crm/public/media-log/{token}/file/{file_id}", "DELETE"),
     # 提案公開共編頁（token 授權；客戶手上的 ?t= 連結）

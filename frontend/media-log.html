@@ -266,6 +266,7 @@ const TOKEN = new URLSearchParams(location.search).get("token") || "";
 const API = "/api/v1/crm/public/media-log/" + encodeURIComponent(TOKEN);
 const UPLOADER_KEY = "media_log_uploader";
 let MAX_BYTES = 500 * 1024 * 1024;   // 以後端 GET 回應的 max_upload_bytes 為準（載入時覆寫）
+let CHUNK_THRESHOLD = 64 * 1024 * 1024;   // 超過就自動分塊（同樣以後端下發為準）
 const maxMB = () => Math.round(MAX_BYTES / 1048576);
 
 let DATA = null;        // 最近一次 GET payload
@@ -316,7 +317,8 @@ async function loadData(refreshOnly) {
     DATA = await r.json();
     FILES = Array.isArray(DATA.files) ? DATA.files : [];
     if (DATA.max_upload_bytes) MAX_BYTES = DATA.max_upload_bytes;
-    $("upload-note").textContent = "單檔上限 " + maxMB() + "MB；行動網路單檔約 100MB 內較穩定。";
+    if (DATA.chunk_threshold_bytes) CHUNK_THRESHOLD = DATA.chunk_threshold_bytes;
+    $("upload-note").textContent = "單檔上限 " + maxMB() + "MB；大檔會自動分段傳送，中斷後重選同一個檔可接著傳。";
     renderAll(refreshOnly);
 }
 function showExpired(temporary) {
@@ -575,10 +577,12 @@ $("lb").addEventListener("touchend", (e) => {
 }, { passive: true });
 
 /* ── 上傳 ── */
-function errText(status) {
+function errText(e) {
+    const status = e && e.status;
     if (status === 413) return "超過 " + maxMB() + "MB 上限";
     if (status === 400) return "不支援的檔案格式";
     if (status === 503) return "管理員尚未設定收檔資料夾";
+    if (!status) return (e && e.message) || "網路錯誤，請重試";
     return "上傳失敗（HTTP " + status + "）";
 }
 function makeQueueRow(item) {
@@ -610,29 +614,26 @@ function setItemState(item, cls, text, pct) {
     if (cls) { item.row.classList.add(cls); item.state.classList.add(cls === "done" ? "ok" : "fail"); }
     if (text != null) item.state.textContent = text;
 }
-function uploadOne(item) {
-    return new Promise((resolve) => {
-        const fd = new FormData();
-        fd.append("file", item.file);
-        fd.append("category", item.category);
-        fd.append("uploader_name", item.uploader);
-        const xhr = new XMLHttpRequest();
-        xhr.open("POST", API + "/upload");
-        xhr.upload.onprogress = (e) => {
-            if (e.lengthComputable) {
-                const pct = Math.round(e.loaded / e.total * 100);
+/* 上傳實作（含大檔分塊）共用 /js/shared/chunked-upload.js —— 後台影像紀錄分頁
+   打的是同一組端點。這頁是傳統 script 不是 module，故動態 import；模組只在
+   第一次上傳時載入，開頁不多一個請求。 */
+let _uploader = null;
+async function uploadOne(item) {
+    try {
+        if (!_uploader) _uploader = await import("/js/shared/chunked-upload.js");
+        await _uploader.uploadFile(API, item.file, {
+            category: item.category,
+            uploaderName: item.uploader,
+            thresholdBytes: CHUNK_THRESHOLD,
+            onProgress: (pct) => {
                 item.fill.style.width = pct + "%";
                 item.state.textContent = "上傳中 " + pct + "%";
-            }
-        };
-        xhr.onload = () => {
-            if (xhr.status >= 200 && xhr.status < 300) setItemState(item, "done", "完成", 100);
-            else setItemState(item, "fail", errText(xhr.status), 100);
-            resolve();
-        };
-        xhr.onerror = () => { setItemState(item, "fail", "網路錯誤，請重試", 100); resolve(); };
-        xhr.send(fd);
-    });
+            },
+        });
+        setItemState(item, "done", "完成", 100);
+    } catch (e) {
+        setItemState(item, "fail", errText(e), 100);
+    }
 }
 async function processQueue() {
     if (queueBusy) return;
