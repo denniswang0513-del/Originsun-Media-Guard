@@ -14,6 +14,7 @@ from typing import Optional
 
 from fastapi import HTTPException, Request, UploadFile, File, Query
 
+from core.project_folders import BLOCKED_UPLOAD_EXTS, stream_to_disk
 from core.schemas import (ProjectExpensePayload, ProjectExpensePatchPayload,
                           CostLinePayload, CostLineUpdatePayload,
                           CostGroupCreate, CostGroupUpdate, CostGroupDuplicate)
@@ -361,6 +362,10 @@ async def upload_project_receipt_public(project_id: str, expense_id: str, file: 
     return await _save_receipt(project_id, expense_id, file)
 
 
+# 收據就是照片或 PDF —— 比提案資產夾小一個量級就夠
+_MAX_RECEIPT_BYTES = 30 * 1024 * 1024
+
+
 async def _save_receipt(project_id: str, expense_id: str, file: UploadFile):
     import re as _re
     _require_db()
@@ -399,9 +404,20 @@ async def _save_receipt(project_id: str, expense_id: str, file: UploadFile):
         filename = "_".join(parts) + ext
 
         filepath = os.path.join(base, filename)
-        content = await file.read()
-        with open(filepath, "wb") as f:
-            f.write(content)
+        # 🔴 這條路徑有兩個**免登入**入口（手機版 /expense.html 讓外部人員登記
+        # 雜支，那是產品設計）。免登入就更不能少了這兩道：
+        #   1. 串流 + 上限 —— 原本是 `await file.read()`，整個檔進記憶體：
+        #      拿到合法連結的人傳一個 2GB 的檔，生產 agent 就吃 2GB RAM。
+        #   2. 副檔名黑名單 —— 副檔名直接沿用上傳者給的檔名，沒擋的話可以寫進
+        #      .exe/.bat 之類的東西（收據只會是圖或 PDF）。
+        if ext.lower() in BLOCKED_UPLOAD_EXTS:
+            raise HTTPException(status_code=400, detail=f"不接受的檔案格式：{ext}")
+        written = await asyncio.to_thread(stream_to_disk, file.file, filepath,
+                                          _MAX_RECEIPT_BYTES)
+        if written < 0:
+            raise HTTPException(
+                status_code=413,
+                detail=f"收據檔超過 {_MAX_RECEIPT_BYTES // (1024 * 1024)}MB 上限")
 
         # Save receipt_url to expense
         exp.receipt_url = filepath

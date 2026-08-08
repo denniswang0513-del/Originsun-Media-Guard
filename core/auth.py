@@ -198,6 +198,22 @@ def check_admin(request: Request):
     raise HTTPException(status_code=403, detail="權限不足")
 
 
+def check_logged_in(request: Request):
+    """只要是有效登入就放行（不分等級、不分模組）。
+
+    給「一般同事日常都要用、但**絕不能對匿名開放**」的端點 —— 主要是 agent 上
+    那批直接操作本機檔案系統的工具（讀檔、列目錄、上傳、開檔案總管）。它們對
+    登入的同事是正常功能，對沒登入的人是任意讀寫這台機器。
+
+    🔴 用 check_admin 會擋掉正常工作（剪輯師也要挑路徑），用模組守衛則要為此
+    發明一個沒人看得懂的模組 key —— 這裡真正要表達的就是「你得先是我們的人」。
+    """
+    payload = _extract_token(request)
+    if payload is None:
+        raise HTTPException(status_code=401, detail="未登入或 token 已過期")
+    return payload
+
+
 def payload_grants(payload: Optional[dict], *module_keys: str) -> bool:
     """Verdict for an already-verified token payload: full admin (access_level>=3
     or legacy role=='admin') OR grants any of module_keys. Single source of the

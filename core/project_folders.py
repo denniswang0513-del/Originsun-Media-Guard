@@ -429,7 +429,7 @@ BLOCKED_UPLOAD_EXTS = {
 }
 
 
-def _stream_to_disk(src, dest: str, max_bytes: int) -> int:
+def stream_to_disk(src, dest: str, max_bytes: int) -> int:
     """分塊寫入 → 位元組數；超過上限刪半成品回 -1（呼叫端在 to_thread 內跑）。
     整包 `await f.read()` 會讓一次多檔上傳把數百 MB 壓在行程記憶體裡，而且
     超限也是**讀完才發現**。"""
@@ -539,7 +539,7 @@ async def save_uploads(folder_abs: str, files, *, max_bytes: int,
         taken = taken_by_dir[dest]
         name = dedupe(clean_filename(f.filename or ""), taken, keep_ext=True)
         written = await asyncio.to_thread(
-            _stream_to_disk, f.file, os.path.join(dest, name), max_bytes)
+            stream_to_disk, f.file, os.path.join(dest, name), max_bytes)
         if written < 0:                 # size 拿不到時的第二道防線
             skipped.append({"filename": f.filename, "reason": over})
             continue

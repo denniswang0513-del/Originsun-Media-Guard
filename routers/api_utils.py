@@ -9,10 +9,30 @@ import sys
 import asyncio
 import locale
 import time
-from fastapi import APIRouter, UploadFile, File, Form  # type: ignore
+from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form  # type: ignore
+from core.auth import check_logged_in  # type: ignore
+from core.project_folders import stream_to_disk  # type: ignore
 from core.schemas import OpenFileRequest, ValidatePathsRequest  # type: ignore
 
 router = APIRouter()
+
+# 🔴 這個檔的端點直接操作**主控端這台機器的檔案系統**（讀任意檔、列任意目錄、
+# 寫檔、開檔案總管、跑 PowerShell）。而 8000 是經 cloudflared 對外的
+# （foundry.originsun-studio.com）—— 沒有守衛就等於把這台機器的檔案系統開給
+# 網際網路。2026-08-08 實測：read_text 可無認證讀出 settings.json 裡的
+# jwt_secret 與 database_url（拿到前者即可自簽 admin token 打整個機隊）。
+#
+# 這是 memory 裡「settings/load 機密外洩」那次的**同一個洩漏、另一扇門**：
+# 那次的修法是在 settings/load 抹除機密，但 read_text 直接讀磁碟上的原始檔，
+# 完全繞過那層抹除 —— 所以守衛要掛在「能不能碰檔案系統」這一層。
+#
+# 例外（刻意不掛，見檔案末段各自的註解）：validate_paths / drive_map ——
+# 它們是**瀏覽器直接打其他 agent 的 IP**（跨機、不帶 Authorization），掛上去
+# 會讓遠端派發前的路徑驗證整組失效；兩者也只回「路徑存不存在」與磁碟對映表。
+_LOGIN = Depends(check_logged_in)
+
+# 這支寫進 browse_roots／uploads，與提案資產夾同級 → 沿用同一個數字
+_MAX_UPLOAD_BYTES = 300 * 1024 * 1024
 
 
 def _is_session_0() -> bool:
@@ -45,7 +65,7 @@ _SESSION_0_HINT = (
 
 
 @router.post("/api/v1/utils/open_file")
-async def open_local_file(req: OpenFileRequest):
+async def open_local_file(req: OpenFileRequest, _auth=_LOGIN):
     try:
         import webbrowser as _wb
         safe_path = req.path.replace("\\", "/")
@@ -55,7 +75,7 @@ async def open_local_file(req: OpenFileRequest):
     except Exception as e: return {"status": "error", "message": str(e)}
 
 @router.post("/api/v1/utils/open_folder")
-async def open_local_folder(req: OpenFileRequest):
+async def open_local_folder(req: OpenFileRequest, _auth=_LOGIN):
     try:
         folder_path = os.path.dirname(req.path)
         if os.path.exists(folder_path):
@@ -130,23 +150,23 @@ def _unwrap_picker_result(result, list_mode: bool):
 
 
 @router.get("/api/v1/utils/pick_folder")
-async def api_pick_folder(title: str = "選擇資料夾"):
+async def api_pick_folder(title: str = "選擇資料夾", _auth=_LOGIN):
     result = await asyncio.to_thread(_run_picker_subprocess, "folder", title)
     return _unwrap_picker_result(result, list_mode=False)
 
 @router.get("/api/v1/utils/pick_file")
-async def api_pick_file(title: str = "選擇檔案"):
+async def api_pick_file(title: str = "選擇檔案", _auth=_LOGIN):
     result = await asyncio.to_thread(_run_picker_subprocess, "file", title)
     return _unwrap_picker_result(result, list_mode=False)
 
 @router.get("/api/v1/utils/pick_files")
-async def api_pick_files(title: str = "選擇影片（可多選）"):
+async def api_pick_files(title: str = "選擇影片（可多選）", _auth=_LOGIN):
     result = await asyncio.to_thread(_run_picker_subprocess, "files", title)
     return _unwrap_picker_result(result, list_mode=True)
 
 
 @router.get("/api/v1/utils/read_text")
-async def read_text_file(path: str, max_bytes: int = 4 * 1024 * 1024):
+async def read_text_file(path: str, max_bytes: int = 4 * 1024 * 1024, _auth=_LOGIN):
     """Read a small text file (default cap 4 MB). Used by align mode to
     auto-load matched .txt/.srt files when batch-importing a video folder."""
     try:
@@ -169,7 +189,7 @@ async def read_text_file(path: str, max_bytes: int = 4 * 1024 * 1024):
         return {"ok": False, "error": str(e)}
 
 @router.get("/api/v1/utils/browse_dir")
-async def browse_dir(path: str = ""):
+async def browse_dir(path: str = "", _auth=_LOGIN):
     """列出指定路徑下的子資料夾（供網頁版目錄瀏覽器使用）。"""
     import string
     if not path:
@@ -196,7 +216,8 @@ async def browse_dir(path: str = ""):
     return {"items": items, "current": abs_path}
 
 @router.post("/api/v1/utils/upload_file")
-async def upload_file_to_path(dest_path: str = Form(""), file: UploadFile = File(...)):
+async def upload_file_to_path(dest_path: str = Form(""), file: UploadFile = File(...),
+                              _auth=_LOGIN):
     """上傳檔案到指定伺服器路徑（限定 browse_roots 內）。"""
     from fastapi import HTTPException
     if not dest_path:
@@ -218,15 +239,19 @@ async def upload_file_to_path(dest_path: str = Form(""), file: UploadFile = File
     # 防止路徑穿越：只取檔名
     safe_name = os.path.basename(file.filename or "upload")
     filepath = os.path.join(abs_dest, safe_name)
-    # 串流寫入避免大檔案佔滿記憶體
-    import shutil
-    with open(filepath, "wb") as f:
-        shutil.copyfileobj(file.file, f)
-    return {"status": "ok", "path": filepath}
+    # 串流寫入 + 上限：原本是 copyfileobj，給多少寫多少 —— 一個請求就能把主控端
+    # 的磁碟塞爆，而 uploads/ 又是被 StaticFiles 掛出去 serve 的。
+    written = await asyncio.to_thread(stream_to_disk, file.file, filepath,
+                                      _MAX_UPLOAD_BYTES)
+    if written < 0:
+        raise HTTPException(
+            status_code=413,
+            detail=f"檔案超過 {_MAX_UPLOAD_BYTES // (1024 * 1024)}MB 上限")
+    return {"status": "ok", "path": filepath, "size_bytes": written}
 
 
 @router.post("/api/v1/utils/create_shortcut")
-async def create_desktop_shortcut():
+async def create_desktop_shortcut(_auth=_LOGIN):
     import subprocess
     import locale
     try:
@@ -305,7 +330,7 @@ async def validate_paths(req: ValidatePathsRequest):
     return {"status": "ok", "results": results}
 
 @router.get("/api/v1/utils/resolve_drop")
-async def api_resolve_drop(name: str):
+async def api_resolve_drop(name: str, _auth=_LOGIN):
     def _find():
         import re
         import subprocess
@@ -405,7 +430,7 @@ async def api_resolve_drop(name: str):
 VIDEO_EXTS = {".mov", ".mp4", ".mkv", ".mxf", ".avi", ".mts", ".m2ts", ".r3d", ".braw"}
 
 @router.get("/api/v1/browse")
-async def browse_directory(path: str = "", show_files: bool = False):
+async def browse_directory(path: str = "", show_files: bool = False, _auth=_LOGIN):
     """List subdirectories (and optionally video files) under a given path.
     Restricted to browse_roots whitelist in settings.json."""
     from config import load_settings  # type: ignore
