@@ -97,10 +97,14 @@ async def _lifespan(app: FastAPI):
             pass
 
 
+# 對外容器更沒有理由公開 API 地圖（core/ 在容器的同步清單裡，main.py 不在）
+from core.api_docs import docs_urls  # noqa: E402
+
 app = FastAPI(
     title="Originsun Website API",
     version="1.0",
     lifespan=_lifespan,
+    **docs_urls(),
 )
 
 _allowed_origins = [

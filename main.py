@@ -56,7 +56,9 @@ for _mod_name in _ROUTER_MODULES:
     except Exception as _e:
         print(f'[WARN] Router {_mod_name} 載入失敗，已跳過: {_e}')
 
-app = FastAPI(title="Originsun Media Guard Web API")
+from core.api_docs import docs_urls  # noqa: E402
+
+app = FastAPI(title="Originsun Media Guard Web API", **docs_urls())
 
 class NoCacheMiddleware:
     """Pure ASGI middleware — does NOT buffer streaming responses (unlike BaseHTTPMiddleware).
