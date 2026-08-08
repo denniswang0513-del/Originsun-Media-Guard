@@ -10,7 +10,7 @@
 import { crmFetch, crmToast, esc } from './crm-utils.js';
 import { fmtSize } from '../../js/shared/clip_utils.js';
 import { authDownload, bearerHeader, copyText, folderCrumbsHtml, inputUploadItems,
-         proxyBodyLimit, uploadItems, uploadProgress,
+         proxyBodyLimit, uploadFailText, uploadItems, uploadProgress,
          wireFileDrop } from '../../js/shared/utils.js';
 import { tfetch } from '../proposals/prop-fetch.js';
 import { state } from './crm-projects-state.js';
@@ -246,7 +246,7 @@ function _wireUpload(projectId, box, host, d) {
             if (bad.length) console.warn('略過：', bad.join('、'));
             if (r.files) applyLevel(r);         // 端點順手回了這一層，不必再掃一次
         } catch (e) {
-            bar.fail(e.aborted ? '已取消上傳' : '上傳失敗：' + (e.message || e));
+            bar.fail(uploadFailText(e));
         }
     };
 

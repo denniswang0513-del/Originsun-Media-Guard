@@ -17,8 +17,8 @@
  * 與深色 SPA 都不用改。
  */
 
-import { esc, folderCrumbsHtml, inputUploadItems, uploadProgress,
-         wireFileDrop } from '../../js/shared/utils.js';
+import { esc, folderCrumbsHtml, inputUploadItems, uploadFailText,
+         uploadProgress, wireFileDrop } from '../../js/shared/utils.js';
 import { fmtSize } from '../../js/shared/clip_utils.js';
 
 const _day = (mtime) => (mtime ? new Date(mtime * 1000).toISOString().slice(0, 10) : '');
@@ -128,7 +128,7 @@ export function renderFolderView(host, opts) {
             }));
             bar.remove();
         } catch (e) {
-            bar.fail(e && e.aborted ? '已取消上傳' : ((e && e.message) || String(e)));
+            bar.fail(uploadFailText(e));
         }
     }
 

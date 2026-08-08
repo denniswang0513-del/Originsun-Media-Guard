@@ -18,7 +18,8 @@
 import { esc } from '../website/website-utils.js';
 import { fmtSize } from '../../js/shared/clip_utils.js';
 import { authDownload, bearerHeader, folderCrumbsHtml, inputUploadItems,
-         uploadItems, uploadProgress, wireFileDrop } from '../../js/shared/utils.js';
+         uploadFailText, uploadItems, uploadProgress,
+         wireFileDrop } from '../../js/shared/utils.js';
 import { projectOptionsHtml } from '../crm/crm-utils.js';
 import { tfetch } from './prop-fetch.js';
 
@@ -278,7 +279,7 @@ function _wireDrop(ov) {
             // 一個都沒存成時端點不回這一層的內容（省一次掃描）→ 畫面維持原樣
             if (d.files) _paint(ov, d, folder, rel);
         } catch (e) {
-            bar.fail(e.aborted ? '已取消上傳' : '上傳失敗：' + (e.message || e));
+            bar.fail(uploadFailText(e));
         }
     };
     const pick = (asDir) => {

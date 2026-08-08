@@ -146,6 +146,57 @@ export function bearerHeader() {
     return tok ? { Authorization: 'Bearer ' + tok } : {};
 }
 
+// HTTP 狀態 → 「為什麼會這樣 + 你現在該做什麼」。
+// 🔴 錯誤訊息不是給工程師看的。「HTTP 413」對使用者等於沒說話 —— 他不知道
+// 是自己做錯什麼、還是系統壞了、還是該換個方式再試一次。每一條都要能回答
+// 這兩個問題，答不出來就別假裝知道（見最後的 fallback）。
+const _HTTP_WHY = {
+    401: () => '登入已經過期了。請重新整理這個頁面、登入之後再傳一次 —— '
+             + '檔案沒有上傳，重來即可。',
+    403: () => '你的帳號沒有這個資料夾的上傳權限。請找管理員把「專案管理」或'
+             + '「提案庫」模組開給你。',
+    404: () => '找不到要上傳的資料夾 —— 它可能剛被改名或刪除了。'
+             + '請重新整理頁面，確認資料夾還在再傳一次。',
+    413: () => {
+        const cap = proxyBodyLimit();
+        return cap
+            ? `檔案太大，被連線中途的 CDN 擋掉了（單一請求上限 ${fmtSize(cap)}），`
+            + '請求根本沒送到伺服器。\n\n你可以這樣做：\n'
+            + '① 多個檔案 → 系統已經會自動分批，直接重試即可；\n'
+            + '② 單一檔案就超過這個大小 → 分批切不開一個檔，'
+            + '請到公司區網用 http://192.168.1.107:8000 上傳；\n'
+            + '③ 影片類的大檔 → 先壓縮或改傳 Proxy 檔。'
+            : '檔案太大，被伺服器前的連線層擋下了。請改用較小的檔案，'
+            + '或分次上傳。';
+    },
+    500: () => '伺服器處理的時候出錯了（不是你的問題）。請重試一次；'
+             + '再失敗的話把這個畫面截圖給管理員。',
+    502: () => '伺服器沒有回應 —— 通常是正在重新啟動。等 1 分鐘後再傳一次。',
+    503: () => '伺服器暫時無法服務 —— 通常是正在重新啟動或更新。'
+             + '等 1 分鐘後再傳一次。',
+    504: () => '伺服器回應逾時。大檔案走外網容易這樣 —— '
+             + '請到公司區網上傳，或把檔案拆小。',
+    507: () => '伺服器空間不足，寫不進去。請通知管理員清理 NAS 空間。',
+};
+
+/**
+ * HTTP 錯誤 → 帶得動「原因 + 怎麼辦」的 Error（`.status` 保留原始狀態碼）。
+ *
+ * 優先用伺服器回的 `detail` —— 那是**最準**的，因為它知道當下的實際情況
+ * （哪個檔、超過多少）。沒有 detail 就表示回應不是我們送的（多半是中途的
+ * 代理層），這時才查表。
+ */
+export function httpError(status, data) {
+    const d = data && data.detail;
+    const detail = typeof d === 'string' ? d : (d && d.reason) || '';
+    const why = _HTTP_WHY[status];
+    const msg = detail || (why && why())
+        || `伺服器回應 HTTP ${status}，而且這不是本系統送出的訊息 —— `
+         + '通常是中途的連線層（VPN／防火牆／CDN）擋下的。'
+         + '請改用公司區網再試一次，或把這個代碼告訴管理員。';
+    return Object.assign(new Error(msg), { status, fromServer: !!detail });
+}
+
 /**
  * 帶進度的上傳 → Promise<回應 JSON>。
  *
@@ -178,14 +229,15 @@ export function uploadWithProgress(url, formData,
         });
         xhr.upload.addEventListener('load', () => { if (onUploaded) onUploaded(); });
         xhr.addEventListener('load', () => {
-            let data = {};
-            try { data = JSON.parse(xhr.responseText || '{}'); } catch (_) { /* 非 JSON */ }
-            if (xhr.status >= 200 && xhr.status < 300) return resolve(data);
-            const detail = data && data.detail;
-            reject(new Error(typeof detail === 'string' ? detail
-                : (detail && detail.reason) || ('HTTP ' + xhr.status)));
+            let data = null;
+            try { data = JSON.parse(xhr.responseText || ''); } catch (_) { /* 非 JSON */ }
+            if (xhr.status >= 200 && xhr.status < 300) return resolve(data || {});
+            reject(httpError(xhr.status, data));
         });
-        xhr.addEventListener('error', () => reject(new Error('連線中斷')));
+        xhr.addEventListener('error', () => reject(Object.assign(
+            new Error('連線中斷了 —— 網路斷線或伺服器沒回應，這批檔案沒有上傳。'
+                      + '確認網路後可以直接重試。'),
+            { status: 0 })));
         xhr.addEventListener('abort', () =>
             reject(Object.assign(new Error('已取消上傳'), { aborted: true })));
         if (signal) signal.addEventListener('abort', () => xhr.abort(), { once: true });
@@ -268,6 +320,12 @@ export async function uploadItems(url, items, opts = {}) {
     return { ...(last || {}), saved, skipped, batches: batches.length };
 }
 
+/** 上傳失敗要顯示的整段文字（三個入口共用，措辭不會各自漂）。 */
+export function uploadFailText(e) {
+    if (e && e.aborted) return '已取消上傳 —— 沒有東西被寫進資料夾。';
+    return '上傳失敗 —— ' + ((e && e.message) || String(e));
+}
+
 /**
  * 上傳進度條（自帶樣式，吃呼叫端的 CSS 變數 → 深色 SPA 與白底公開頁都能用）。
  * 插在 `host` 最前面，回傳操作把手。給 `onCancel` 才長出取消鈕。
@@ -284,8 +342,13 @@ export function uploadProgress(host, onCancel) {
   border:1px solid var(--line,#3a3a3a);border-radius:3px;margin-bottom:8px;}
 .osun-prog-bar{flex:1;height:6px;border-radius:3px;background:rgba(127,127,127,.25);overflow:hidden;}
 .osun-prog-bar>i{display:block;height:100%;width:0;background:#3b82f6;transition:width .15s;}
-.osun-prog.err .osun-prog-bar>i{background:#f87171;}
 .osun-prog-txt{white-space:nowrap;color:var(--sub,#8b8b8b);}
+/* 失敗：訊息有好幾行（原因＋怎麼辦）→ 攤成區塊、保留換行、進度條退居細線 */
+.osun-prog.err{display:block;border-color:#f87171;}
+.osun-prog.err .osun-prog-bar{height:3px;margin-bottom:8px;}
+.osun-prog.err .osun-prog-bar>i{background:#f87171;}
+.osun-prog.err .osun-prog-txt{display:block;white-space:pre-line;line-height:1.75;
+  color:#f87171;margin-bottom:8px;}
 .osun-prog-x{background:none;border:1px solid var(--line,#3a3a3a);color:var(--sub,#8b8b8b);
   cursor:pointer;font:inherit;font-size:11px;padding:2px 8px;border-radius:2px;}
 .osun-prog-x:hover{color:#f87171;border-color:#f87171;}`;
@@ -313,11 +376,19 @@ export function uploadProgress(host, onCancel) {
             const x = wrap.querySelector('.osun-prog-x');
             if (x) x.remove();          // 已經傳完，取消沒有意義了
         },
+        // 失敗訊息會有好幾行（原因 + 該怎麼做）→ 換成可讀的區塊，
+        // 而且**不自動消失**：看不完就沒了等於沒說。要使用者自己關掉。
         fail(msg) {
             wrap.classList.add('err');
             fill.style.width = '100%';
             txt.textContent = msg;
-            setTimeout(() => wrap.remove(), 6000);
+            const x = wrap.querySelector('.osun-prog-x');
+            if (x) {
+                x.textContent = '知道了';
+                x.replaceWith(x.cloneNode(true));            // 清掉原本的取消 handler
+                wrap.querySelector('.osun-prog-x')
+                    .addEventListener('click', () => wrap.remove());
+            }
         },
         remove() { wrap.remove(); },
     };
