@@ -171,7 +171,9 @@ export function renderPlan(container, opts) {
         opts.refetch = async () => (await opts.fetcher(`${API}/${opts.proposalId}`)).proposal.plan;
     }
     container.classList.add('plc');
-    if (!opts.plan) { _renderStart(container, opts); return; }
+    // 沒 template_id = 企劃未開始（可能是 null，也可能是「先開了公開頁」的
+    // share_token 殼 — 後端 PUT /plan 會保留殼裡的 token，這裡照常給開始畫面）
+    if (!opts.plan || !opts.plan.template_id) { _renderStart(container, opts); return; }
     const tpl = PLAN_TEMPLATES[opts.plan.template_id];
     if (!tpl) {
         container.innerHTML = `<div class="plc-start"><div class="ss">未知的方法論模板：${esc(opts.plan.template_id)}（可能是新版程式才有的模板）</div></div>`;

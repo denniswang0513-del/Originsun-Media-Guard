@@ -689,6 +689,12 @@ async function _loadSharedPlan(shareTok) {
             }).catch(() => { /* 探測失敗 → 不顯示分頁，不影響企劃本體 */ });
         }
         host.innerHTML = "";
+        // 企劃還沒開始（公開頁可以先開放、企劃後補）→ 訪客看提示，
+        // 不能給 renderPlan 的「開始企劃」按鈕 — 那些會打登入端點
+        if (!d.plan || !d.plan.template_id) {
+            host.innerHTML = '<div class="state-msg">企劃尚未開始 — 可先看「基本資料」與「資料夾」分頁。</div>';
+            return;
+        }
         const { renderPlan } = await import("/tabs/proposals/plan-matrix.js");
         renderPlan(host, {
             proposalId: "shared", plan: d.plan, canShare: false,

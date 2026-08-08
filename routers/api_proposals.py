@@ -159,6 +159,12 @@ def _check_outcome_reason(new_status: str, reason: str):
         raise HTTPException(status_code=422, detail=f"狀態轉「{new_status}」時 outcome_reason 必填（組織學習欄）")
 
 
+def _plan_started(plan) -> bool:
+    """企劃是否已開始。plan JSONB 有兩種「有值但沒開始」形態：None，以及只有
+    share_token 的殼（公開頁可先開放、企劃之後補）—— 一律看 template_id。"""
+    return bool(plan and plan.get("template_id"))
+
+
 def _prop_dict(p, client_name: str = "", refs_count: int = 0, has_plan=None) -> dict:
     # has_plan 可由呼叫端傳入（清單走 SQL 布林 + defer(plan)，避免整包 JSONB 出庫）
     return {
@@ -180,7 +186,7 @@ def _prop_dict(p, client_name: str = "", refs_count: int = 0, has_plan=None) -> 
         "created_at": p.created_at.isoformat() if p.created_at else None,
         "updated_at": p.updated_at.isoformat() if p.updated_at else None,
         "refs_count": refs_count,
-        "has_plan": bool(p.plan) if has_plan is None else bool(has_plan),
+        "has_plan": _plan_started(p.plan) if has_plan is None else bool(has_plan),
     }
 
 
@@ -389,8 +395,10 @@ async def list_proposals(request: Request, q: str = "", status: str = "",
 
     async with factory() as session:
         # has_plan 用 SQL 布林算、plan 欄 defer — 清單不把整包 JSONB 拖出庫
+        # （看 template_id 而非 IS NOT NULL：只有 share_token 的殼不算已開始）
         query = (select(PreprodProposal, Client.short_name,
-                        PreprodProposal.plan.isnot(None).label("has_plan"))
+                        PreprodProposal.plan.op("->>")("template_id")
+                        .isnot(None).label("has_plan"))
                  .options(defer(PreprodProposal.plan))
                  .outerjoin(Client, Client.id == PreprodProposal.client_id)
                  .order_by(PreprodProposal.updated_at.desc()))
@@ -587,7 +595,9 @@ async def put_plan(pid: str, req: ProposalPlanPayload, request: Request):
     async with factory() as session:
         prop = await _get_proposal_or_404(session, pid, for_update=True)
         if req.clear:
-            prop.plan = None
+            # 清空企劃不吊銷公開連結（與整份覆寫同一條政策）— 留 token 殼
+            _tok = (prop.plan or {}).get("share_token")
+            prop.plan = {"share_token": _tok} if _tok else None
         else:
             if not (req.template_id and req.template_version):
                 raise HTTPException(status_code=422, detail="template_id / template_version 必填")
@@ -675,7 +685,7 @@ def _plan_meta_payload(plan: dict, prop_updated_at) -> dict:
                 leaf = _plan_normalize_leaf(v)
                 out[k] = {"updated_at": leaf["updated_at"], "updated_by": leaf["updated_by"]}
         return out
-    return {"has_plan": bool(plan),
+    return {"has_plan": _plan_started(plan),
             "updated_at": prop_updated_at,   # 下次輪詢帶回 ?since= 用
             "theme_updated_at": plan.get("theme_updated_at"),
             "memo_updated_at": plan.get("memo_updated_at"),
@@ -694,7 +704,7 @@ async def patch_plan_cell(pid: str, req: ProposalPlanCellPatch, request: Request
 
     async with factory() as session:
         prop = await _get_proposal_or_404(session, pid, for_update=True)
-        if not prop.plan:
+        if not _plan_started(prop.plan):
             raise HTTPException(status_code=409, detail="此提案尚未開始企劃（先 PUT /plan）")
         plan = dict(prop.plan)   # 頂層換新物件 → 觸發 JSONB 變更偵測
         _apply_plan_patch(plan, req, now_iso, user)
@@ -761,20 +771,20 @@ def _guest_identity(req: ProposalPlanCellPatch) -> str:
 
 @router.post("/{pid}/plan/share")
 async def enable_plan_share(pid: str, request: Request):
-    """開放公開共編：鑄 token 存進 plan（既有且仍有效則重用，冪等）。"""
+    """開放公開頁面：鑄 token 存進 plan（既有且仍有效則重用，冪等）。
+    2026-08-08 起**不再要求企劃已開始** —— 公開頁除了企劃還有基本資料與資料夾
+    分頁，owner 要能先給客戶連結、企劃之後補；沒企劃時存 {share_token} 殼。"""
     _check_auth(request)
     factory = _require_factory()
     from core.auth import create_token
     from core.crm_logic import PERMANENT_TOKEN_EXPIRES_DAYS
     async with factory() as session:
         prop = await _get_proposal_or_404(session, pid, for_update=True)
-        if not prop.plan:
-            raise HTTPException(status_code=409, detail="此提案尚未開始企劃，無法開放共編")
-        token = prop.plan.get("share_token") or ""
+        token = (prop.plan or {}).get("share_token") or ""
         if not _plan_share_valid(token, pid):   # 含 jwt_secret 輪替後的自癒重鑄
             token = create_token({"sub": pid, "scope": _PLAN_SHARE_SCOPE},
                                  expires_days=PERMANENT_TOKEN_EXPIRES_DAYS)
-            plan = dict(prop.plan)
+            plan = dict(prop.plan or {})
             plan["share_token"] = token
             prop.plan = plan
             prop.updated_at = datetime.now(timezone.utc)
@@ -792,7 +802,7 @@ async def disable_plan_share(pid: str, request: Request):
         if prop.plan and prop.plan.get("share_token"):
             plan = dict(prop.plan)
             plan.pop("share_token", None)
-            prop.plan = plan
+            prop.plan = plan or None   # 只剩殼 → 回到「從未開放」的乾淨狀態
             prop.updated_at = datetime.now(timezone.utc)
         await session.commit()
     return {"status": "ok"}
@@ -1067,6 +1077,8 @@ async def patch_shared_plan_cell(token: str, req: ProposalPlanCellPatch):
     _check_cell_size(req)
     async with factory() as session:
         prop = await _get_prop_by_plan_token(session, token, for_update=True)
+        if not _plan_started(prop.plan):   # 只有 token 殼 → 沒有矩陣可寫
+            raise HTTPException(status_code=409, detail="此提案尚未開始企劃")
         plan = dict(prop.plan)
         _apply_plan_patch(plan, req, now_iso, _guest_identity(req))
         prop.plan = plan

@@ -10,6 +10,7 @@
  */
 
 import { esc } from '../website/website-utils.js';
+import { copyText } from '../../js/shared/utils.js';
 import { createSortable, sortableTh, enumIndex } from '../crm/crm-utils.js';
 import { openDeck, tfetch } from './prop-fetch.js';
 
@@ -307,6 +308,10 @@ async function openDetail(pid) {
                         <input id="pd-deck-file" type="file" accept="${DECK_EXTS}" style="display:none;">
                         <div class="prop-note">支援 pdf / ppt / pptx / key / zip，上限 50MB；更換會覆蓋 deck 連結。</div>
                     </div>
+                    <div class="prop-card-sec">
+                        <h4>🌐 公開頁面</h4>
+                        <div id="pd-share-host"></div>
+                    </div>
                     ${prop.outcome_reason ? `
                     <div class="prop-card-sec">
                         <h4>${prop.status === '未成案' ? '📉 未成案原因' : '📈 成案/結果原因'}（組織學習）</h4>
@@ -368,6 +373,8 @@ async function openDetail(pid) {
             }
         }
     }));
+
+    _wireShareCard(ov, prop);
 
     // 狀態下拉：成案→confirm+/convert；未成案→強制填原因；其餘直接 PUT
     ov.querySelector('#pd-status').addEventListener('change', async (e) => {
@@ -471,6 +478,55 @@ async function openDetail(pid) {
             openDetail(prop.id);
         } catch (err) { alert('新增失敗：' + (err.message || err)); }
     });
+}
+
+// ── 公開頁面卡（基本資料分頁）─────────────────────────────
+// 開放＝鑄 token 連結；拿到的人**不用登入**能看企劃/基本資料/資料夾（資料夾
+// 只看得到「對外分享」子夾）並共編企劃。不需要先開始企劃 —— 後端存 token 殼。
+// token 存在 prop.plan.share_token（與企劃分頁的開關同一份狀態，改哪邊都同步）。
+function _wireShareCard(ov, prop) {
+    const host = ov.querySelector('#pd-share-host');
+    if (!host) return;
+    const shareUrl = () => `${location.origin}/proposal-plan.html?t=${encodeURIComponent((prop.plan || {}).share_token || '')}`;
+
+    function paint() {
+        const on = !!(prop.plan && prop.plan.share_token);
+        host.innerHTML = on ? `
+            <div class="prop-note" style="margin:0 0 8px;">已開放：拿到連結的人<b>不用登入</b>，可以看企劃、基本資料與「對外分享」資料夾，並共同編輯企劃。</div>
+            <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;">
+                <input id="ps-link" readonly style="flex:1;min-width:200px;font-size:12px;">
+                <button id="ps-copy" class="prop-btn ghost">複製連結</button>
+                <a href="#" id="ps-open" style="font-size:12px;color:#93c5fd;white-space:nowrap;">開啟 ↗</a>
+                <button id="ps-off" class="prop-btn danger">停用</button>
+            </div>` : `
+            <div class="prop-note" style="margin:0 0 8px;">尚未開放。開放後會產生一條公開連結，可傳給客戶（不用登入）。</div>
+            <button id="ps-on" class="prop-btn">🔗 開放公開頁面</button>`;
+        if (on) {
+            host.querySelector('#ps-link').value = shareUrl();       // DOM property，不進模板字串
+            host.querySelector('#ps-open').href = shareUrl();
+            host.querySelector('#ps-open').target = '_blank';
+            host.querySelector('#ps-copy').addEventListener('click',
+                (e) => copyText(shareUrl(), e.target));
+            host.querySelector('#ps-off').addEventListener('click', async () => {
+                if (!confirm('停用後，先前分享出去的連結會立即失效。確定停用？')) return;
+                try {
+                    await tfetch(`${API}/${prop.id}/plan/share`, { method: 'DELETE' });
+                    if (prop.plan) delete prop.plan.share_token;
+                    paint();
+                } catch (e) { alert('停用失敗：' + (e.message || e)); }
+            });
+        } else {
+            host.querySelector('#ps-on').addEventListener('click', async () => {
+                try {
+                    const d = await tfetch(`${API}/${prop.id}/plan/share`, { method: 'POST' });
+                    prop.plan = prop.plan || {};
+                    prop.plan.share_token = d.token;   // 企劃分頁的開關讀同一份
+                    paint();
+                } catch (e) { alert('開放失敗：' + (e.message || e)); }
+            });
+        }
+    }
+    paint();
 }
 
 // ── 新增 / 編輯表單（prop=null 為新增；狀態不在表單內 —
