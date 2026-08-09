@@ -910,6 +910,32 @@ class PreprodProposal(Base):
                       Index("idx_pprop_project", "project_id", "updated_at"))
 
 
+class PreprodBrief(Base):
+    """提案的**企劃書**（Markdown）—— 企劃矩陣是思考過程，這個是輸出物。
+
+    多版並存（owner 2026-08-10）：「重新生成」是**新增一版**不是覆蓋。矩陣天天
+    在改，不留版本的話「這份企劃書是根據哪一版矩陣寫的」永遠說不清 —— 所以
+    每一版都存**生成當下的矩陣快照**。
+
+    🔴 生成物**不寫回 plan JSONB**：那是人的共編工作區，有逐格 updated_by 與
+    樂觀鎖，AI 一次寫 12 格會把共編紀錄整片洗掉、也會蓋掉同事正在打的字。
+    """
+    __tablename__ = "preprod_briefs"
+
+    id = Column(String(32), primary_key=True)                    # uuid4 hex
+    proposal_id = Column(String(32), nullable=False, index=True)
+    content = Column(Text, nullable=True)                        # Markdown 正文
+    # 生成當下的輸入：用了哪幾份範本、勾了哪些資料、篇幅語氣
+    template_ids = Column(JSONB, nullable=True)                  # list[str]
+    options = Column(JSONB, nullable=True)                       # {length, tone, include:[...]}
+    plan_snapshot = Column(JSONB, nullable=True)                 # 那一刻的矩陣
+    status = Column(String(16), nullable=True)                   # pending/ok/failed
+    error = Column(Text, nullable=True)
+    created_by = Column(String(64), nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), server_default=func.now())
+
+
 class PreprodBriefTemplate(Base):
     """企劃範本庫 —— 生成企劃書時給 Claude 參考的「好範本」。
 
