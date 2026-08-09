@@ -8,8 +8,10 @@
  */
 
 import { crmFetch, crmToast, esc } from './crm-utils.js';
-import { authDownload, bearerHeader, copyText, proxyBodyLimit, uploadItems }
+import { authDownload, bearerHeader, copyText, ensureStyle, proxyBodyLimit, uploadItems }
     from '../../js/shared/utils.js';
+import { changeStatus } from '../proposals/prop-actions.js';
+import { STATUSES, withCurrent } from '../proposals/prop-const.js';
 import { tfetch } from '../proposals/prop-fetch.js';
 import { renderFolderView } from '../proposals/folder-view.js';
 import { renderPins } from '../proposals/pins-panel.js';
@@ -46,7 +48,10 @@ export async function loadPlanTab(projectId, host) {
     if (!props.length) {
         _renderEmpty(projectId, host);
     } else {
-        await _renderPlan(props[0], projectId, host);
+        // 一個專案可以並行多筆提案（同一案提了三個 concept）。預設看成案的
+        // 那一筆，沒有的話看最新的 —— 「第一筆」不是有意義的預設。
+        const pick = props.find(p => p.status === '成案') || props[0];
+        await _renderPlan(pick, props, projectId, host);
     }
     if (assets && host.isConnected) {
         // store 建在這裡（緊鄰 assets 那次 fetch）而不是卡片渲染函式裡 ——
@@ -228,6 +233,16 @@ function _mountFiles(host, projectId, d, pins) {
     });
 }
 
+/** 同一個案子再提一個方向。標題不能沿用專案名 —— 那是要拿來區分的東西。 */
+async function _addProposal(projectId, host) {
+    const title = (prompt('新提案的標題（用來區分方向，例：A 版 / 第二次提案）') || '').trim();
+    if (!title) return;
+    try {
+        await tfetch(API, { method: 'POST', json: { title, project_id: projectId } });
+        loadPlanTab(projectId, host);
+    } catch (e) { alert('建立失敗：' + (e.message || e)); }
+}
+
 function _renderEmpty(projectId, host) {
     host.innerHTML = `
         <div class="crm-empty" style="padding:36px 24px;text-align:center;">
@@ -247,7 +262,30 @@ function _renderEmpty(projectId, host) {
     });
 }
 
-async function _renderPlan(listItem, projectId, host) {
+/**
+ * 提案切換列：只有一筆時不畫（現況零改變）。
+ * 多筆＝同一案並行的幾個 concept，切一個看一個。
+ */
+function _switcherHtml(props, currentId) {
+    if (props.length < 2) return '';
+    return `<div class="pp-switch">
+        ${props.map(p => `
+            <button class="pp-chip${p.id === currentId ? ' on' : ''}" data-prop="${esc(p.id)}"
+                    title="${esc(p.title)}">
+                <span class="pp-chip-t">${esc(p.title)}</span>
+                <span class="pp-chip-s">${esc(p.status || '草稿')}</span>
+            </button>`).join('')}
+    </div>`;
+}
+
+/** 多筆並行卻還沒有人贏 → 提醒負責人去標（成案不再自動標，見 projects.py）。 */
+function _winHintHtml(props) {
+    if (props.length < 2 || props.some(p => p.status === '成案')) return '';
+    return `<div class="pp-hint">這個專案有 ${props.length} 筆提案並行 —— 哪一筆成案請切到它、
+        把上面的狀態改成「成案」。系統不會替你猜（猜錯會把成案率和 win/loss 原因一起弄髒）。</div>`;
+}
+
+async function _renderPlan(listItem, props, projectId, host) {
     let prop;
     try {
         prop = (await tfetch(`${API}/${listItem.id}`)).proposal;
@@ -256,16 +294,47 @@ async function _renderPlan(listItem, projectId, host) {
         return;
     }
     if (state.selectedId !== projectId || !host.isConnected) return;
+    _ensureStyle();
     host.innerHTML = `
-        <div style="display:flex;align-items:center;gap:10px;padding:10px 12px 0;">
-            <span class="crm-badge" style="opacity:.8;">${esc(prop.status || '草稿')}</span>
+        ${_switcherHtml(props, prop.id)}
+        <div style="display:flex;align-items:center;gap:10px;padding:10px 12px 0;flex-wrap:wrap;">
+            <select id="pp-status" class="crm-input" style="width:auto;padding:3px 6px;font-size:12px;"
+                    title="提案狀態（成案會推進這個專案的階段）">
+                ${withCurrent(STATUSES, prop.status || '草稿').map(x =>
+                    `<option${x === (prop.status || '草稿') ? ' selected' : ''}>${esc(x)}</option>`).join('')}
+            </select>
             <span style="font-weight:600;">${esc(prop.title)}</span>
             ${prop.pitch_date ? `<span style="color:#8b8b8b;font-size:12px;">提案日 ${esc(prop.pitch_date)}</span>` : ''}
             <span style="flex:1;"></span>
+            <button id="pp-add" class="crm-btn crm-btn-secondary crm-btn-sm"
+                    title="同一個案子再提一個方向（各自有企劃、各自有資產子夾）">＋ 再加一筆提案</button>
             <a href="/proposal-plan.html?pid=${encodeURIComponent(prop.id)}" target="_blank" rel="noopener"
                style="color:#60a5fa;font-size:12px;">獨立視窗開啟 ↗</a>
         </div>
+        ${_winHintHtml(props)}
         <div id="pp-matrix" style="padding:4px 12px 16px;"></div>`;
+
+    host.querySelectorAll('[data-prop]').forEach(el => {
+        el.addEventListener('click', () => {
+            const next = props.find(p => p.id === el.dataset.prop);
+            if (next && next.id !== prop.id) _renderPlan(next, props, projectId, host);
+        });
+    });
+    host.querySelector('#pp-add').addEventListener('click', () => _addProposal(projectId, host));
+    // 狀態規則（成案要原因、會推專案階段）走共用的動作層 —— 提案庫與企劃頁
+    // 用的是同一支，不會一邊必填一邊選填
+    host.querySelector('#pp-status').addEventListener('change', async (e) => {
+        const next = e.target.value;
+        try {
+            const r = await changeStatus(prop, next);
+            if (!r.ok) { e.target.value = prop.status || '草稿'; return; }
+            if (r.message) crmToast(r.message);
+            loadPlanTab(projectId, host);      // 專案階段可能跟著變 → 整塊重畫
+        } catch (err) {
+            e.target.value = prop.status || '草稿';
+            alert('狀態變更失敗：' + (err.message || err));
+        }
+    });
     const matrixHost = host.querySelector('#pp-matrix');
     try {
         const path = _matrixFailed
@@ -284,4 +353,21 @@ async function _renderPlan(listItem, projectId, host) {
             matrixHost.innerHTML = `<div class="crm-empty" style="color:#fca5a5;">企劃元件載入失敗：${esc(e.message || e)}（切回再開重試）</div>`;
         }
     }
+}
+
+
+// 切換列與提示的樣式（只注一次）。深色 SPA 專用 —— 這支不進 NAS 對外容器。
+function _ensureStyle() {
+    ensureStyle('pp-plan-style', `
+.pp-switch { display: flex; flex-wrap: wrap; gap: 6px; padding: 10px 12px 0; }
+.pp-chip { display: inline-flex; align-items: baseline; gap: 8px; max-width: 260px;
+    background: none; border: 1px solid #2f2f2f; border-radius: 999px; cursor: pointer;
+    color: #b4b4b4; font: inherit; font-size: 12px; padding: 4px 12px; }
+.pp-chip:hover { border-color: #3b82f6; color: #ddd; }
+.pp-chip.on { border-color: #3b82f6; background: #16283f; color: #eee; }
+.pp-chip-t { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pp-chip-s { flex: none; font-size: 11px; opacity: .7; }
+.pp-hint { margin: 8px 12px 0; padding: 7px 10px; border: 1px solid #3a3320;
+    border-radius: 4px; background: #221e12; color: #d8c48a; font-size: 11.5px; line-height: 1.7; }
+`);
 }
