@@ -484,6 +484,8 @@ async def _on_startup():
                         # 重點提案勾選（core/pinned_assets.py — 取代舊的「對外分享」子夾）
                         ("preprod_proposals", "pinned_assets", "JSONB"),
                         ("preprod_proposals", "pins_public", "BOOLEAN DEFAULT FALSE"),
+                        # 提案在專案資產夾底下的子夾（一專案多提案時各自分開）
+                        ("preprod_proposals", "folder_subpath", "VARCHAR(255)"),
                         # 參考影片庫 v2（docs/REFERENCE_LIBRARY.md）
                         ("preprod_references", "description", "TEXT"),
                         ("preprod_references", "facets", "JSONB"),

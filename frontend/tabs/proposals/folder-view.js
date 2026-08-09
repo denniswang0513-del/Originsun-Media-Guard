@@ -36,6 +36,9 @@ const _day = (mtime) => (mtime ? new Date(mtime * 1000).toISOString().slice(0, 1
  *        探測有沒有開放）已經打過一次同一支端點時傳進來 —— 不傳的話這裡的
  *        `go('')` 會把那趟**整份 NAS 掃描**再做一次。
  * @param opts.onFile    (file) => void   點檔案要做什麼（各自決定怎麼下載）
+ * @param opts.startRel  可選；一開始停在哪一層（預設最外層）。提案的「家」
+ *        是專案資產夾底下的子夾時用它 —— 往上一層照樣走得過去（同一個案子的
+ *        素材本來就該互通），只是預設不從別人的東西裡開始翻。
  * @param opts.rootLabel 麵包屑最左邊顯示的名字
  * @param opts.emptyHint **唯讀**時整個資料夾空的話要說什麼（有 write 的話
  *        空狀態說的是「拖進來」—— 那才是使用者當下該做的事）
@@ -71,7 +74,7 @@ const _day = (mtime) => (mtime ? new Date(mtime * 1000).toISOString().slice(0, 1
  */
 export function renderFolderView(host, opts) {
     const { load, onFile, rootLabel = '資料夾', emptyHint = '這裡還沒有檔案。',
-            initial = null, write = null, pin = null, rowActions = [] } = opts;
+            initial = null, startRel = '', write = null, pin = null, rowActions = [] } = opts;
     // 兩個插槽分一次就好（原本每列跑兩次 filter），index 帶著走 —— DOM 上放
     // 原始索引，點擊時直接 rowActions[i]，不必再把 'lead:0' 拆回來
     const byAt = { lead: [], trail: [] };
@@ -287,7 +290,7 @@ export function renderFolderView(host, opts) {
     if (write) wireFileDrop(host, (items) => runUpload(items, cur));
     host.addEventListener('click', _delegate);
 
-    go('');
+    go(startRel || '');
     return { go };
 }
 

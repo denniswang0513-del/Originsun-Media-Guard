@@ -895,6 +895,10 @@ class PreprodProposal(Base):
     # 勾選是策展、不搬檔案；pins_public 才是「客戶看不看得到」那道授權開關。
     pinned_assets = Column(JSONB, nullable=True)                  # list[{rel,is_dir,thumb_url,...}]
     pins_public = Column(Boolean, nullable=False, default=False)  # 預設關：勾選 ≠ 給客戶看
+    # 這筆提案在專案資產夾底下的子夾（相對專案夾）。空 = 家就是專案夾根
+    # （合體前建的既有提案都是這樣，零遷移）。一個專案多筆提案時，各自
+    # 一個子夾才不會把幾個 concept 的檔案混在一起。
+    folder_subpath = Column(String(255), nullable=True)
     created_by = Column(String(64), nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now())

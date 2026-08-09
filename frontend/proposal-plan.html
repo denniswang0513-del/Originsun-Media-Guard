@@ -1119,7 +1119,7 @@ async function _loadPlan(pid) {
         // 真正在等的矩陣往後推一個 RTT（走隧道時很有感）。
         // 用 .catch 而不是 try —— 它跑在矩陣畫好之後，掉進外層 catch 會把已經
         // 畫好的矩陣換成「企劃載入失敗」。訪客那條的資料夾探測也是這個形狀。
-        if (prop.project_id) _wireFolderTab(prop.project_id)
+        if (prop.project_id) _wireFolderTab(prop)
             .catch(e => console.warn("[folder] 資料夾分頁接線失敗", e));
     } catch (e) {
         host.innerHTML = '<div class="state-msg" style="color:var(--red);">企劃載入失敗：' + escText(emsg(e)) + "</div>";
@@ -1131,9 +1131,24 @@ async function _loadPlan(pid) {
  * 而且就地建得了夾、傳得了檔（owner 2026-08-08 選 B —— 企劃頁不該是「看得到
  * 卻做不了」的死路）。訪客那條走 token 端點，範圍小得多，接線在 _loadSharedPlan。
  */
-async function _wireFolderTab(projectId) {
+async function _wireFolderTab(prop) {
+    const projectId = prop.project_id;
     const AP = "/api/v1/crm/projects/" + encodeURIComponent(projectId) + "/proposal-assets";
     const q = (rel) => "?rel=" + encodeURIComponent(rel || "");
+    // 這筆提案的「家」：專案資產夾底下自己的子夾。一個專案可以並行多筆提案，
+    // 共用一個夾的話幾個 concept 的腳本與簡報會混在一起（NAS 上本來就是手工
+    // 開子夾在分的）。空 = 合體前建的既有提案，家就是專案夾根 —— 不動它。
+    // 有值就先確保磁碟上那個夾真的在（建立提案時只取名、沒碰 NAS）。冪等。
+    let sub = prop.folder_subpath || "";
+    if (sub) {
+        try {
+            sub = (await ok(await mfetch("/api/v1/proposals/" + encodeURIComponent(prop.id)
+                                         + "/folder", { method: "POST" }))).folder_subpath || sub;
+        } catch (e) {
+            console.warn("[folder] 子夾建立失敗，退回專案夾根", e);
+            sub = "";
+        }
+    }
     // 重點提案的狀態與三支端點都在 store 裡（CRM 專案分頁用的是同一顆），
     // 生命週期＝這一個提案，所以建在這裡而不是模組層。
     const [{ makePinsStore }, u] = await Promise.all([
@@ -1145,6 +1160,10 @@ async function _wireFolderTab(projectId) {
         request: async (url, init) => ok(await mfetch(url, init)),
     });
     _setupFolderTab({
+        // 從自己的家開始。rootLabel 刻意**不**改成子夾名 —— 麵包屑的最左邊
+        // 代表「專案夾」，改掉的話會變成「子夾名 / 子夾名」，而且就沒有東西
+        // 可以點回上一層了（同一個案子的素材要走得過去）。
+        startRel: sub,
         load: async (rel) => ok(await mfetch(AP + q(rel))),
         // CRM 端點要帶 Bearer，<a href> 送不了 → 走共用的授權下載
         onFile: (f) => u.authDownload(AP + "/file?rel=" + encodeURIComponent(f.rel), f.filename),

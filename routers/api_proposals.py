@@ -185,6 +185,8 @@ def _prop_dict(p, client_name: str = "", refs_count: int = 0, has_plan=None,
         "project_id": p.project_id or "",
         # 清單也要（換綁專案的入口要說得出「目前接在哪」）；詳情路徑另外覆寫
         "project_name": project_name or "",
+        # 這筆提案在專案資產夾底下的家（空 = 專案夾根）
+        "folder_subpath": p.folder_subpath or "",
         "quotation_id": p.quotation_id or "",
         "ptype": p.ptype or "",
         "status": p.status or "草稿",
@@ -468,6 +470,8 @@ async def create_proposal(req: ProposalPayload, request: Request):
     pitch_date = _parse_date(req.pitch_date)
     factory = _require_factory()
 
+    from sqlalchemy import select
+    from core.project_folders import make_dated_folder_name
     from db.models import CrmProject, PreprodProposal
 
     data = req.model_dump(exclude_unset=True)
@@ -489,6 +493,15 @@ async def create_proposal(req: ProposalPayload, request: Request):
         else:
             project = await _create_shell_project(session, prop)
         prop.project_id = project.id
+        # 這一刻只**取名**、不碰 NAS —— 新增提案不該因為 NAS 搆不到而失敗。
+        # 夾真正被建出來是第一次開資料夾分頁時（POST /{pid}/folder，冪等）。
+        # 撞名讓給同專案的兄弟提案；磁碟上已有的同名夾由那支端點的 exist_ok 承接。
+        prop.folder_subpath = make_dated_folder_name(
+            prop.title, datetime.now(timezone.utc),
+            set((await session.execute(
+                select(PreprodProposal.folder_subpath)
+                .where(PreprodProposal.project_id == project.id)
+            )).scalars().all()) - {None})
         session.add(prop)
         await session.commit()
         await session.refresh(prop)
@@ -1385,6 +1398,94 @@ async def convert_proposal(pid: str, request: Request,
 
     return {"status": "ok", "project_id": project_id,
             "linked_existing": bool(link_pid)}
+
+
+def _dir_names(base: str) -> set:
+    """base 底下已存在的子資料夾名（撞名避讓用）。搆不到就當空的 —— 這只是
+    取名的參考，不是安全判斷。"""
+    try:
+        return {n for n in os.listdir(base) if os.path.isdir(os.path.join(base, n))}
+    except OSError:
+        return set()
+
+
+def _mkdirs(path: str) -> None:
+    """exist_ok 一定要用關鍵字 —— os.makedirs 的第二個位置參數是 mode。"""
+    os.makedirs(path, exist_ok=True)
+
+
+@router.post("/{pid}/folder")
+async def ensure_proposal_folder(pid: str, request: Request):
+    """確保這筆提案在專案資產夾底下有自己的子夾，並回傳它（相對專案夾）。
+
+    為什麼要有「家」：一個專案可以並行多筆提案，共用一個資產夾的話幾個
+    concept 的腳本與簡報會混在一起（NAS 上你們本來就是手工開子夾在分的）。
+
+    冪等：已經有 `folder_subpath` 就只確保磁碟上那個夾存在。名字沿用專案夾
+    的慣例（`make_dated_folder_name`：日期前綴 + 名稱、撞名自動編號）。
+
+    **不在建立提案時做** —— NAS 可能搆不到，新增提案不該因此失敗。這支是
+    「第一次要用資料夾」時才呼叫（前端掛資料夾分頁時打一次）。
+    """
+    _check_auth(request)
+    factory = _require_factory()
+
+    from core.project_folders import make_dated_folder_name
+    from db.models import CrmProject
+    from routers.crm.proposal_assets import ensure_folder
+
+    async with factory() as session:
+        prop = await _get_proposal_or_404(session, pid)
+        if not prop.project_id:
+            raise HTTPException(status_code=409, detail="這個提案還沒有連結專案")
+        project = await session.get(CrmProject, prop.project_id)
+        if not project:
+            raise HTTPException(status_code=404, detail="找不到提案連結的專案")
+        base = await ensure_folder(session, project)
+        if not base:
+            raise HTTPException(status_code=400,
+                                detail="提案資產資料夾無法建立（根目錄未設定或搆不到）")
+        sub = (prop.folder_subpath or "").strip()
+        if not sub:
+            # 撞名要讓給磁碟上**已經在**的夾（你們手工開的那些也算）
+            sub = make_dated_folder_name(
+                prop.title or "提案",
+                prop.created_at or datetime.now(timezone.utc),
+                await asyncio.to_thread(_dir_names, base))
+            prop.folder_subpath = sub
+        try:
+            await asyncio.to_thread(_mkdirs, os.path.join(base, sub))
+        except OSError as e:
+            raise HTTPException(status_code=400, detail=f"子資料夾建立失敗：{e}")
+        await session.commit()
+    return {"status": "ok", "folder_subpath": sub}
+
+
+@router.patch("/{pid}/folder")
+async def set_proposal_folder(pid: str, request: Request, body: dict = Body(...)):
+    """認領一個**既有**子夾當這筆提案的家（body {subpath}，空字串＝退回專案夾根）。
+
+    給的是「NAS 上早就手工分好的那些夾」——例如專案夾底下已經有
+    `20260721_TSMC 第二次提案`，把那筆提案指過去就好，**檔案一個都不用動**。
+    """
+    _check_auth(request)
+    factory = _require_factory()
+
+    from core.project_folders import safe_rel_dir
+    from routers.crm.proposal_assets import _project_folder_abs
+
+    sub = (body.get("subpath") or "").strip().replace("\\", "/").strip("/")
+    async with factory() as session:
+        prop = await _get_proposal_or_404(session, pid)
+        if sub:
+            base = await _project_folder_abs(session, prop.project_id or "")
+            # safe_rel_dir 同時擋 `..` 與符號連結逃逸，並確認它真的是個資料夾
+            if not base or not await asyncio.to_thread(safe_rel_dir, base, sub):
+                raise HTTPException(status_code=404, detail="專案資產夾底下找不到這個子資料夾")
+        prop.folder_subpath = sub or None
+        prop.updated_at = datetime.now(timezone.utc)
+        await session.commit()
+    return {"status": "ok", "folder_subpath": sub}
 
 
 @router.patch("/{pid}/project")
