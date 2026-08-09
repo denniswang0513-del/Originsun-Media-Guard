@@ -240,6 +240,7 @@
       <select id="f-sort" title="排序依據"><option value="">預設順序</option></select>
       <button id="f-dir" title="切換遞增／遞減">↑</button>
       <span class="grow"></span>
+      <button id="btn-folders" title="NAS 上的提案資產資料夾（含過去手工整理的）">資產資料夾</button>
       <button id="btn-new">＋ 新提案</button>
     </div>
     <div id="list-host"><div class="state-msg">載入中…</div></div>
@@ -676,10 +677,8 @@ async function _mountFolder() {
     if (folder) {
         try {
             const { renderFolderView } = await fvMod;
-            nav = renderFolderView($("folder-fv"), Object.assign({
-                rootLabel: "資料夾",
-                emptyHint: "這個提案還沒有分享任何檔案。",
-            }, folder));
+            nav = renderFolderView($("folder-fv"),
+                                   Object.assign({ rootLabel: "資料夾" }, folder));
             _pendingFolder = null;             // 掛好了；之後切回來保留瀏覽位置
         } catch (e) {
             $("folder-fv").innerHTML =         // 設定留著，切回來能重試
@@ -808,6 +807,20 @@ function _wireListTools(pc, PL) {
         $("f-dir").dataset.dir = asc ? "desc" : "asc";
         $("f-dir").textContent = asc ? "↓" : "↑";
         _paintList();
+    });
+    $("btn-folders").addEventListener("click", async () => {
+        try {
+            // 平行下載：序列的話 prop-dialog 要等 proposal-folders 連同它整棵
+            // 靜態相依解析完才開始抓，而這是按下按鈕之後才發生的等待
+            const [{ openFolderBrowser }, { openDialog }] = await Promise.all([
+                import("/tabs/proposals/proposal-folders.js"),
+                import("/tabs/proposals/prop-dialog.js"),
+            ]);
+            // 元件只畫內容、外殼由這裡給 —— 後台給的是深色 overlay，這裡給官網風對話框
+            openFolderBrowser((inner) => openDialog({
+                title: "提案資產資料夾", width: 900, body: inner,
+            }).el);
+        } catch (e) { alert("資產資料夾載入失敗：" + emsg(e)); }
     });
     $("btn-new").addEventListener("click", async () => {
         const { openProposalEditor } = await import("/tabs/proposals/prop-editor.js");
@@ -1002,37 +1015,31 @@ async function _wireFolderTab(projectId) {
     const q = (rel) => "?rel=" + encodeURIComponent(rel || "");
     // 重點提案的狀態與三支端點都在 store 裡（CRM 專案分頁用的是同一顆），
     // 生命週期＝這一個提案，所以建在這裡而不是模組層。
-    const { makePinsStore } = await import("/tabs/proposals/pins-store.js");
+    const [{ makePinsStore }, u] = await Promise.all([
+        import("/tabs/proposals/pins-store.js"),
+        import("/js/shared/utils.js"),      // 點一次檔案就 import 一次是熱路徑
+    ]);
     const pins = makePinsStore({
         base: AP,
         request: async (url, init) => ok(await mfetch(url, init)),
     });
     _setupFolderTab({
-        // 每一層的回應都帶 pinned/pins_public → 順手餵給 store
-        load: async (rel) => pins.sync(await ok(await mfetch(AP + q(rel)))),
-        onFile: async (f) => {
-            // CRM 端點要帶 Bearer，<a href> 送不了 → 走共用的授權下載
-            const { authDownload } = await import("/js/shared/utils.js");
-            authDownload(AP + "/file?rel=" + encodeURIComponent(f.rel), f.filename);
-        },
+        load: async (rel) => ok(await mfetch(AP + q(rel))),
+        // CRM 端點要帶 Bearer，<a href> 送不了 → 走共用的授權下載
+        onFile: (f) => u.authDownload(AP + "/file?rel=" + encodeURIComponent(f.rel), f.filename),
         write: {
             mkdir: async (name, rel) => ok(await mfetch(AP + "/mkdir" + q(rel),
                 { method: "POST", body: JSON.stringify({ name }) })),
             // opts = {onProgress, signal}（folder-view 給的，它負責畫進度條）
             // 走 uploadWithProgress 不走 fetch —— fetch 沒有上傳進度事件
-            upload: async (items, rel, opts) => {
-                const u = await import("/js/shared/utils.js");
-                // uploadItems 會照連線的 body 上限自動分批（走隧道時 100MB）
-                const d2 = await u.uploadItems(
-                    AP + "/upload" + q(rel), items,
-                    Object.assign({ headers: _authHeader() }, opts));
-                const bad = (d2.skipped || []).map(s => `${s.filename}（${s.reason}）`);
-                if (bad.length) alert("部分項目未上傳：\n" + bad.join("\n"));
-                return d2.files ? d2 : null;   // 一個都沒存成 → 不用重畫
-            },
+            // uploadItems 會照連線的 body 上限自動分批（走隧道時 100MB）；
+            // 「沒存成就不重畫」與「哪些被略過」都在 folder-view 裡
+            upload: (items, rel, opts) => u.uploadItems(
+                AP + "/upload" + q(rel), items,
+                Object.assign({ headers: _authHeader() }, opts)),
         },
         // 勾選＝策展（此刻以這份為準），不搬檔案、不等於給客戶看。
-        // store 本身就滿足 folder-view 要的 {isPinned, toggle}，不需要轉接層。
+        // store 本身就滿足 folder-view 要的 {isPinned, toggle, sync}，不需要轉接層。
         pin: pins,
     }, pins);
 }
@@ -1099,6 +1106,8 @@ async function _loadSharedPlan(shareTok) {
                 // 不傳 pin/pins —— 策展與授權都只有員工能做，客戶那頁連按鈕都
                 // 不該建出來（唯讀不是靠隱藏元素，是靠沒建出來）
                 _setupFolderTab({
+                    emptyHint: "這個提案還沒有分享任何檔案。",   // 客戶唯讀，沒有「拖進來」可講
+                    initial: first,   // 探測回來的就是最外層 —— 別再掃一次
                     load: async (rel) => ok(await fetch(fbase + "?rel=" + encodeURIComponent(rel))),
                     onFile: (f) => dl.plainDownload(
                         fbase + "/file?rel=" + encodeURIComponent(f.rel), f.filename),

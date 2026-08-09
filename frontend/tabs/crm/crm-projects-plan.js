@@ -8,11 +8,10 @@
  */
 
 import { crmFetch, crmToast, esc } from './crm-utils.js';
-import { fmtSize } from '../../js/shared/clip_utils.js';
-import { authDownload, bearerHeader, copyText, folderCrumbsHtml, inputUploadItems,
-         proxyBodyLimit, runToggle, uploadFailText, uploadItems, uploadProgress,
-         wireFileDrop } from '../../js/shared/utils.js';
+import { authDownload, bearerHeader, copyText, proxyBodyLimit, uploadItems }
+    from '../../js/shared/utils.js';
 import { tfetch } from '../proposals/prop-fetch.js';
+import { renderFolderView } from '../proposals/folder-view.js';
 import { renderPins } from '../proposals/pins-panel.js';
 import { makePinsStore } from '../proposals/pins-store.js';
 import { state } from './crm-projects-state.js';
@@ -79,20 +78,12 @@ function _mountAssetsCard(projectId, host, d, pins) {
                     style="font-size:11.5px;color:#8b8b8b;cursor:pointer;text-decoration:underline;text-underline-offset:3px;"
                     >${esc(d.folder_name)}</code>` : ''}
                 <span style="flex:1;"></span>
-                <button id="pp-mkdir" class="crm-btn crm-btn-secondary crm-btn-sm">＋ 新增資料夾</button>
-                <button id="pp-add" class="crm-btn crm-btn-primary crm-btn-sm">＋ 上傳檔案</button>
-                <button id="pp-add-dir" class="crm-btn crm-btn-secondary crm-btn-sm"
-                        title="連同資料夾本身與底下的子層一起上傳">＋ 上傳資料夾</button>
                 <button id="pp-open" class="crm-btn crm-btn-secondary crm-btn-sm"
                         title="在這台伺服器上開啟檔案總管 — 你人不在伺服器前的話請改用「點路徑複製」">開啟資料夾</button>
                 <button id="pp-cfg" class="crm-btn crm-btn-secondary crm-btn-sm" title="設定根目錄">⚙</button>
             </div>
             <div id="pp-pins"></div>
-            <div id="pp-drop" style="border:1px dashed #3a3a3a;border-radius:4px;">
-                <div id="pp-files"></div>
-            </div>
-            <input id="pp-file-input" type="file" multiple style="display:none;">
-            <input id="pp-dir-input" type="file" multiple webkitdirectory style="display:none;">
+            <div id="pp-files"></div>
             <div id="pp-cfg-row" style="display:none;gap:6px;align-items:center;margin-top:8px;">
                 <input id="pp-root" type="text" class="crm-input" style="flex:1;"
                        value="${esc(d.root || '')}" placeholder="例：\\\\192.168.1.132\\Archive\\00_提案企劃">
@@ -108,11 +99,9 @@ function _mountAssetsCard(projectId, host, d, pins) {
             </div>
         </div>`;
     host.appendChild(box);
-    // 重點提案的狀態不寄生在 d（那是「這一層資料夾」的 payload）—— 它是整個
-    // 提案的狀態，混在一起的話走回上一層會被舊的層快照蓋回去。
-    _renderFiles(box, d, pins);
-    // 先接檔案列（它才有導覽），再把把手交給卡片列
-    const nav = _wireUpload(projectId, box, host, d, pins);
+    // 檔案列走共用的 folder-view（企劃頁與提案庫總覽用的是同一支）——
+    // 這裡只提供「怎麼拿資料、每列多兩個動作」。
+    const nav = _mountFiles(box.querySelector('#pp-files'), projectId, d, pins);
     _mountPins(box.querySelector('#pp-pins'), projectId, pins, nav);
 
     box.querySelector('#pp-cfg').addEventListener('click', () => {
@@ -148,8 +137,7 @@ function _mountAssetsCard(projectId, host, d, pins) {
 
 // 「重點提案」卡片列。渲染本體在 proposals/pins-panel.js、狀態與端點在
 // proposals/pins-store.js —— 公開企劃頁（白底）用的是同兩份。這裡只接線。
-// nav = 檔案列的把手（{go}）：勾起來的**資料夾**點下去要走進去，不是下載。
-// 企劃頁那邊拿的是 folder-view 回傳的同名把手，兩個呼叫端因此逐字同形。
+// nav = folder-view 的把手：勾起來的**資料夾**點下去要走進去，不是下載。
 function _mountPins(host, projectId, pins, nav) {
     // watch = 訂閱 + 立刻畫一次；store 只在內容真的變了才通知
     pins.watch(() => {
@@ -170,208 +158,74 @@ function _mountPins(host, projectId, pins, nav) {
 }
 
 
-// 重點提案的勾選框。勾選＝策展（這份是此刻的重點），不搬檔案；
-// 客戶看不看得到是另一個開關（見「重點提案」卡）。
-// 顏色跟 folder-view 的 .fv-pin 對齊 —— 同一顆勾選框在兩個介面不該長不一樣。
-function _pinBox(pins, rel, isDir) {
-    return `<input type="checkbox" data-pin="${esc(rel)}" data-pindir="${isDir ? '1' : ''}"
-                   ${pins.isPinned(rel) ? 'checked' : ''} title="設為重點提案"
-                   style="flex:none;margin:0;cursor:pointer;accent-color:#c9372c;">`;
-}
+/**
+ * 檔案列：共用的 folder-view + 這個分頁自己的兩個列動作。
+ *
+ * ★＝設為提案簡報（提案詳情與公開共編頁顯示的那一份）、✕＝刪除。
+ * 它們是 folder-view 的 `rowActions` 擴充點 —— 元件不知道★是什麼意思，
+ * 只負責放位置與轉發點擊。
+ *
+ * @returns folder-view 的把手（{go}）；卡片列點「重點資料夾」要用
+ */
+function _mountFiles(host, projectId, d, pins) {
+    const q = (rel) => `?rel=${encodeURIComponent(rel || '')}`;
+    let deckRel = d.deck_rel || '';
 
-
-// 檔案列表：一次列一層（子資料夾可以走進去；連結進來的舊資料夾常有好幾層），
-// 標星號的是「提案簡報」（提案詳情與公開共編頁顯示的那一份）
-function _renderFiles(box, d, pins) {
-    const dirs = d.dirs || [];
-    const files = d.files || [];
-    const list = box.querySelector('#pp-files');
-    const crumbs = _crumbsHtml(d);
-    if (!dirs.length && !files.length) {
-        list.innerHTML = crumbs + `<div style="padding:18px;text-align:center;color:#6b6b6b;font-size:12px;">
-            這一層是空的 — 把檔案拖進來，或按「＋ 上傳檔案」／「＋ 新增資料夾」</div>`;
-        return;
-    }
-    list.innerHTML = crumbs + dirs.map(x => `
-        <div data-dir="${esc(x.rel)}"
-             style="display:flex;align-items:center;gap:8px;padding:6px 10px;cursor:pointer;
-                    border-bottom:1px solid #242424;font-size:12.5px;">
-            ${_pinBox(pins, x.rel, true)}
-            <span style="color:#8b8b8b;">▸</span>
-            <span style="font-weight:600;">${esc(x.name)}</span>
-        </div>`).join('')
-        + files.map(f => {
-            const isDeck = f.rel === d.deck_rel;
-            return `
-        <div class="pp-file" data-rel="${esc(f.rel)}"
-             style="display:flex;align-items:center;gap:8px;padding:6px 10px;border-bottom:1px solid #242424;font-size:12.5px;">
-            ${_pinBox(pins, f.rel, false)}
-            <span title="${isDeck ? '目前的提案簡報' : '設為提案簡報'}" data-deck
-                  style="cursor:pointer;color:${isDeck ? '#fbbf24' : '#3a3a3a'};">★</span>
-            <span data-dl style="flex:1;cursor:pointer;" title="下載">${esc(f.filename || f.rel)}</span>
-            <span style="color:#6b6b6b;">${fmtSize(f.size_bytes)}</span>
-            <span style="color:#6b6b6b;">${esc((f.mtime ? new Date(f.mtime * 1000).toISOString() : '').slice(0, 10))}</span>
-            <button data-del class="crm-btn crm-btn-secondary crm-btn-sm" title="刪除">✕</button>
-        </div>`;
-        }).join('') + (d.truncated
-        ? '<div style="padding:6px 10px;color:#fbbf24;font-size:11.5px;">項目過多，只顯示前 1000 筆</div>' : '');
-}
-
-// 麵包屑（最外層不顯示 —— 沒得往回走時它只是噪音）
-function _crumbsHtml(d) {
-    if (!d.rel) return '';
-    return `<div style="padding:6px 10px;font-size:12px;border-bottom:1px solid #242424;">${
-        folderCrumbsHtml(d.folder_name || '根目錄', d.rel)}</div>`;
-}
-
-function _wireUpload(projectId, box, host, d, pins) {
-    const input = box.querySelector('#pp-file-input');
-    const drop = box.querySelector('#pp-drop');
-    // 先改 d、再無參重畫 —— 只重繪檔案區，不重跑 loadPlanTab（那會連
-    // plan-matrix 一起重畫，使用者正在編的格子與捲動位置都沒了）。
-    // 卡片列不在這裡重畫：它訂閱了 store，只有重點清單真的變了才動。
-    const repaint = () => { _renderFiles(box, d, pins); };
-    // 走過的層記在 levels：往回走是最常見的動作，重打一次是整趟 NAS 掃描。
-    // 存**快照**不是 d 本身 —— d 會被後續導覽 Object.assign 覆寫，存參照等於
-    // 「回最外層」拿回來的是當前那一層。
-    const levels = new Map([[d.rel || '', { ...d }]]);
-    // 內容變了（上傳/開夾/刪檔）就換上這一層的新版本：寫進 d + 更新快取 + 重畫。
-    // 三步分開手寫的話，忘記的永遠是中間那步 —— 走回這一層看到過期內容。
-    const applyLevel = (r) => {
-        if (r) Object.assign(d, { dirs: r.dirs, files: r.files, truncated: r.truncated });
-        levels.set(d.rel || '', { ...d });
-        repaint();
-    };
-    // 標星號：只動兩顆 span，不為了換一個顏色重建整張列表（可能上千列）
-    const markDeck = (rel) => {
-        d.deck_rel = rel;
-        box.querySelectorAll('.pp-file').forEach(row => {
-            const star = row.querySelector('[data-deck]');
-            const on = row.dataset.rel === rel;
-            star.style.color = on ? '#fbbf24' : '#3a3a3a';
-            star.title = on ? '目前的提案簡報' : '設為提案簡報';
-        });
-    };
-
-    // 走進子資料夾 / 麵包屑往回 —— 換 d 的這一層再重畫（企劃矩陣不受影響）
-    const goto = async (rel) => {
-        const hit = levels.get(rel);
-        // 🔴 快取命中**刻意不** pins.sync：快照裡的 pinned 是當初那次的，餵回去
-        // 會把 store 倒退（你在別層勾的東西被打回原狀）。store 才是真相來源。
-        if (hit) { Object.assign(d, hit); repaint(); return; }
-        try {
-            const r = await crmFetch(
-                `/projects/${projectId}/proposal-assets?rel=${encodeURIComponent(rel)}`);
-            levels.set(rel, r);
-            if (!box.isConnected || state.selectedId !== projectId) return;  // 已切走
-            // 每層回應都帶最新的 pinned/pins_public → 餵給 store（企劃頁的 load
-            // 也是這樣做）。同一顆 store 兩種餵法，就是下一次漂移的起點。
-            pins.sync(r);
-            Object.assign(d, r);
-            repaint();
-        } catch (e) { alert('開啟資料夾失敗：' + (e.message || e)); }
-    };
-
-    // items = [{file, path}]；path 帶目錄結構時後端會照著重建（拖資料夾／選資料夾）
-    // 走 uploadWithProgress 不走 crmFetch —— fetch 拿不到上傳進度，而這裡的檔
-    // 動輒上百 MB，沒有進度就是盯著畫面猜（owner 2026-08-08）
-    const send = async (items) => {
-        if (!items || !items.length) return;
-        const ctrl = new AbortController();
-        const bar = uploadProgress(box.querySelector('#pp-drop'), () => ctrl.abort());
-        try {
-            const r = await uploadItems(
-                `/api/v1/crm/projects/${projectId}/proposal-assets/upload`
-                + `?rel=${encodeURIComponent(d.rel || '')}`,      // 落在目前這一層
-                items,
-                { headers: bearerHeader(), signal: ctrl.signal,
-                  onProgress: (l, t) => bar.update(l, t),
-                  onUploaded: () => bar.finishing() });
-            bar.remove();
-            const bad = (r.skipped || []).map(s => `${s.filename}（${s.reason}）`);
-            crmToast(`已上傳 ${(r.saved || []).length} 個項目`
-                + (bad.length ? `；略過 ${bad.length} 個` : ''), bad.length ? 6000 : 2000);
-            if (bad.length) console.warn('略過：', bad.join('、'));
-            if (r.files) applyLevel(r);         // 端點順手回了這一層，不必再掃一次
-        } catch (e) {
-            bar.fail(uploadFailText(e));
-        }
-    };
-
-    const dirInput = box.querySelector('#pp-dir-input');
-    box.querySelector('#pp-add').addEventListener('click', () => input.click());
-    box.querySelector('#pp-add-dir').addEventListener('click', () => dirInput.click());
-    for (const el of [input, dirInput]) {
-        // 選資料夾時 webkitRelativePath 會帶「資料夾名/子層/檔名」，
-        // 與拖放取得的 path 同形 —— 兩條路進 send 之前就統一了
-        el.addEventListener('change', () => { send(inputUploadItems(el.files)); el.value = ''; });
-    }
-    wireFileDrop(drop, send);      // 拖資料夾進來會遞迴展開（含資料夾本身）
-
-    const mkdir = async (name, rel) => {
-        const r = await crmFetch(`/projects/${projectId}/proposal-assets/mkdir`
-            + `?rel=${encodeURIComponent(rel)}`,
-            { method: 'POST', body: JSON.stringify({ name }) });
-        crmToast(`已建立「${r.created}」`);
-        applyLevel(r);
-    };
-
-    box.querySelector('#pp-mkdir').addEventListener('click', async () => {
-        const name = (prompt('新資料夾名稱（會建在你目前看的這一層）：') || '').trim();
-        if (!name) return;
-        try { await mkdir(name, d.rel || ''); }
-        catch (e) { alert('建立失敗：' + (e.message || e)); }
+    return renderFolderView(host, {
+        rootLabel: d.folder_name || '根目錄',
+        initial: d,                // 最外層剛剛才撈過（loadPlanTab）—— 別再掃一次
+        load: async (rel) => {
+            const r = await crmFetch(`/projects/${projectId}/proposal-assets${q(rel)}`);
+            deckRel = r.deck_rel ?? deckRel;   // pinned 那半 folder-view 自己餵回 store
+            return r;
+        },
+        onFile: (f) => authDownload(_fileUrl(projectId, f.rel), f.filename || f.rel),
+        write: {
+            mkdir: async (name, rel) => {
+                const r = await crmFetch(
+                    `/projects/${projectId}/proposal-assets/mkdir${q(rel)}`,
+                    { method: 'POST', body: JSON.stringify({ name }) });
+                crmToast(`已建立「${r.created}」`);
+                return r;
+            },
+            // opts = {onProgress, signal, onUploaded}（folder-view 給的，它畫進度條）
+            // 走 uploadItems 不走 crmFetch —— fetch 拿不到上傳進度，而這裡的檔
+            // 動輒上百 MB，沒有進度就是盯著畫面猜（owner 2026-08-08）
+            upload: async (items, rel, opts) => {
+                const r = await uploadItems(
+                    `/api/v1/crm/projects/${projectId}/proposal-assets/upload${q(rel)}`,
+                    items, { headers: bearerHeader(), ...opts });
+                // 被略過的項目由 folder-view 統一說明（三個呼叫端同一套說法）——
+                // 全部被擋下時這裡不該再報一次「已上傳 0 個」
+                if ((r.saved || []).length) crmToast(`已上傳 ${r.saved.length} 個項目`);
+                return r;
+            },
+        },
+        // 勾選＝策展（此刻以這份為準），不搬檔案、不等於給客戶看
+        pin: pins,
+        rowActions: [
+            { at: 'lead', html: () => '★',
+              cls: (f) => (f.rel === deckRel ? 'on' : ''),
+              title: (f) => (f.rel === deckRel ? '目前的提案簡報' : '設為提案簡報'),
+              errPrefix: '設定提案簡報失敗',
+              run: async (f) => {
+                  await crmFetch(`/projects/${projectId}/proposal-assets/deck`,
+                      { method: 'POST', body: JSON.stringify({ rel: f.rel }) });
+                  crmToast('已設為提案簡報');
+                  deckRel = f.rel;      // 沒回傳新的一層 → folder-view 只重刷★
+              } },
+            { at: 'trail', title: '刪除', html: () => '✕', errPrefix: '刪除失敗',
+              run: async (f, ctx) => {
+                  if (!confirm(`確定刪除「${f.rel}」？檔案會從資料夾移除。`)) return;
+                  const r = await crmFetch(
+                      `/projects/${projectId}/proposal-assets/file${q(f.rel)}`,
+                      { method: 'DELETE' });
+                  crmToast(r.deck_cleared ? '已刪除（原本是提案簡報，已取消指定）' : '已刪除');
+                  if (r.deck_cleared) deckRel = '';
+                  ctx.drop();           // 少一列而已，不必為此重掃一趟 NAS
+              } },
+        ],
     });
-
-    // 列表操作（事件委派 —— 列表每次重畫）
-    box.querySelector('#pp-files').addEventListener('click', async (e) => {
-        const box2 = e.target.closest('[data-pin]');
-        if (box2) {
-            e.stopPropagation();                    // 勾選不要順便進資料夾
-            // 鎖住／失敗還原的語意走共用的 runToggle（列數可能上千 → 必須委派，
-            // 所以綁不了 wireAsyncToggle，但語意不該再抄一份）。
-            // 端點在 store 裡（企劃頁用同一顆）；卡片列靠訂閱自己重畫。
-            const rel2 = box2.dataset.pin;
-            await runToggle(box2, (want) => pins.toggle(rel2, !!box2.dataset.pindir, want),
-                            '設定重點提案失敗');
-            return;
-        }
-        const nav = e.target.closest('[data-dir],[data-crumb]');
-        if (nav) { goto(nav.dataset.dir ?? nav.dataset.crumb); return; }
-        const row = e.target.closest('.pp-file');
-        if (!row) return;
-        const rel = row.dataset.rel;
-        const q = `?rel=${encodeURIComponent(rel)}`;
-        if (e.target.closest('[data-del]')) {
-            if (!confirm(`確定刪除「${rel}」？檔案會從資料夾移除。`)) return;
-            try {
-                const r = await crmFetch(`/projects/${projectId}/proposal-assets/file${q}`,
-                    { method: 'DELETE' });
-                crmToast(r.deck_cleared ? '已刪除（原本是提案簡報，已取消指定）' : '已刪除');
-                if (r.deck_cleared) d.deck_rel = '';
-                d.files = (d.files || []).filter(f => f.rel !== rel);
-                if (d.files.length) {
-                    row.remove();           // 移一列就好，不必重建整張
-                    levels.set(d.rel || '', { ...d });    // 快照跟著少一筆
-                } else {
-                    applyLevel(null);       // 空了要顯示空狀態（d 已是最新）
-                }
-            } catch (err) { alert('刪除失敗：' + (err.message || err)); }
-        } else if (e.target.closest('[data-deck]')) {
-            try {
-                await crmFetch(`/projects/${projectId}/proposal-assets/deck`,
-                    { method: 'POST', body: JSON.stringify({ rel }) });
-                crmToast('已設為提案簡報');
-                markDeck(rel);
-            } catch (err) { alert('設定失敗：' + (err.message || err)); }
-        } else if (e.target.closest('[data-dl]')) {
-            authDownload(_fileUrl(projectId, rel), rel);
-        }
-    });
-
-    // 導覽的把手交出去（卡片列點到「重點資料夾」時要用）。形狀對齊 folder-view
-    // 回傳的 handle —— 之後兩份資料夾瀏覽器要合併時，公開面已經一樣了。
-    return { go: goto };
 }
 
 function _renderEmpty(projectId, host) {

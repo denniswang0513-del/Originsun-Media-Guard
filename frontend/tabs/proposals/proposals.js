@@ -105,7 +105,15 @@ function _renderShell() {
     document.getElementById('prop-folders').addEventListener('click', async () => {
         try {
             const mod = await import('./proposal-folders.js');
-            mod.openFolderBrowser(_mountOverlay);
+            // 外殼由這裡給（元件自己只畫內容）—— 企劃頁給的是官網風的對話框
+            mod.openFolderBrowser((inner) => _mountOverlay(`
+                <div class="prop-panel" style="width:min(900px,96vw);">
+                    <div class="prop-panel-head">
+                        <h3>📁 提案資產資料夾</h3>
+                        <button class="prop-close" title="關閉">✕</button>
+                    </div>
+                    <div class="prop-panel-body" style="display:block;">${inner}</div>
+                </div>`));
         } catch (e) { alert('資產資料夾載入失敗：' + (e.message || e)); }
     });
 

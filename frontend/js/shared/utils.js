@@ -120,29 +120,21 @@ export function ensureStyle(id, css) {
     document.head.appendChild(st);
 }
 
-/**
- * 非同步 checkbox 的一次切換：鎖住 → 等 → 失敗還原並說明 —— 畫面不說謊。
- *
- * 單獨開出來是因為列表很長時要走**事件委派**（不可能每列綁監聽），那條路
- * 用不到 wireAsyncToggle，只需要這段語意。
- */
-export async function runToggle(input, fn, errPrefix) {
-    const want = input.checked;
-    input.disabled = true;
-    try {
-        await fn(want);
-    } catch (err) {
-        input.checked = !want;
-        alert(errPrefix + '：' + ((err && err.message) || err));
-    }
-    // 成功時呼叫端通常已把整塊重畫，這個節點已不在畫面上 —— isConnected
-    // 擋掉對已卸下節點的無謂寫入
-    if (input.isConnected) input.disabled = false;
-}
-
-/** runToggle 綁在單一 checkbox 上（列數少、直接綁得起的場合）。 */
+/** 非同步 checkbox：按下去先鎖住，失敗就把勾勾還原並說明 —— 畫面不說謊。 */
 export function wireAsyncToggle(input, fn, errPrefix) {
-    input.addEventListener('change', () => runToggle(input, fn, errPrefix));
+    input.addEventListener('change', async () => {
+        const want = input.checked;
+        input.disabled = true;
+        try {
+            await fn(want);
+        } catch (err) {
+            input.checked = !want;
+            alert(errPrefix + '：' + ((err && err.message) || err));
+        }
+        // 成功時呼叫端通常已把整塊重畫，這個節點已不在畫面上 —— isConnected
+        // 擋掉對已卸下節點的無謂寫入
+        if (input.isConnected) input.disabled = false;
+    });
 }
 
 /**
@@ -490,6 +482,20 @@ export function uploadProgress(host, onCancel) {
 export function esc(s) {
     return String(s ?? '').replace(/[&<>"']/g,
         c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+}
+
+/**
+ * 專案下拉的 <option> 字串（含佔位）。GET /crm/projects 的
+ * {id, name, client_short_name} 標準格式 —— 需要把 select 組進更大的 HTML
+ * 字串時用（picker / modal）。
+ *
+ * 住在這裡而不是 crm-utils：提案資產夾瀏覽器也要用它，而那支要能在 NAS 對外
+ * 容器載入（只 serve js/shared 與 tabs/proposals）。crm-utils 仍 re-export。
+ */
+export function projectOptionsHtml(projects, placeholder = '— 選擇專案 —') {
+    return `<option value="">${esc(placeholder)}</option>`
+        + (projects || []).map(p => `<option value="${esc(p.id)}">${esc(p.name)}${
+            p.client_short_name ? '（' + esc(p.client_short_name) + '）' : ''}</option>`).join('');
 }
 
 /** textarea 隨內容長高（專案裡已有四份手抄，新程式一律用這支）。 */
