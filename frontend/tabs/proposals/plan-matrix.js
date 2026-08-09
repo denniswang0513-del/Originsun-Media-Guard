@@ -150,6 +150,22 @@ html.plan-theme-light .plc { /* 官網白底（獨立網址） */
   /* 空格不要各佔 110px：12 格全空等於要捲過 1300px 才看得到下一段。
      有內容的格子照樣由 _autoGrow 撐開。 */
   .plc .plc-cell textarea { min-height: 46px; }
+  /* 還沒填的格子收成一行 —— 但**顯示的是提問本身的第一行**，不是「（空）」：
+     那句提問就是方法論，新開一份企劃時 12 格全是空的，正是最需要看到它的
+     時候。點下去（focus）就展開回完整高度，看得到整段提問也填得下去。
+
+     :placeholder-shown 就是「這格是空的」，所以不需要任何 JS 去追狀態
+     （這整段 CSS 住在 template literal 裡，註解也不能出現反引號）。
+     height 要 !important 是因為 _autoGrow 把量到的 scrollHeight 寫在
+     inline style 上（而 placeholder 也會被算進 scrollHeight）—— 那是它
+     唯一能寫的地方，不是可以繞過的實作細節。 */
+  .plc .plc-cell textarea:placeholder-shown:not(:focus) {
+    /* nowrap 才是關鍵：靠高度去切會露出第二行的頭（textarea 的可見區含
+       padding-bottom，切不乾淨），看起來像壞掉而不像「還有下文」。
+       不換行 → 提問只佔一行，右邊被裁掉的斷口本身就是「還有」的訊號。 */
+    height: 44px !important; min-height: 44px;
+    white-space: nowrap; overflow: hidden;
+  }
 }
 /* 手機：工具列裡的「方法論筆記」是**長得像按鈕的 <a>**，頁面層那條
    「button 至少 44px」抓不到它 —— 元件自己把它做成合格的觸控目標。 */

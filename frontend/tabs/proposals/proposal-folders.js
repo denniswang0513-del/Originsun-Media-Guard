@@ -292,7 +292,9 @@ html.plan-theme-light .pf { --pf-ink: #262626; --pf-sub: #737373; --pf-line: #e5
       border-radius: 3px; padding: 6px 9px; font: inherit; font-size: 12.5px; outline: none; }
 .pf input:focus, .pf select:focus { border-color: var(--pf-accent); }
 .pf-head input { width: 220px; }
-.pf-note { font-size: 11.5px; color: var(--pf-sub); }
+/* min-width:0 + anywhere：根目錄那行是完整的 UNC 路徑，不給斷點的話
+   它會把 flex 容器整個撐開（窄螢幕上直接溢出對話框） */
+.pf-note { font-size: 11.5px; color: var(--pf-sub); min-width: 0; overflow-wrap: anywhere; }
 .pf-err { color: var(--pf-err); }
 .pf-item { border: 1px solid var(--pf-line); border-radius: 4px; margin-bottom: 6px; }
 .pf-item[hidden] { display: none; }
@@ -314,4 +316,16 @@ html.plan-theme-light .pf { --pf-ink: #262626; --pf-sub: #737373; --pf-line: #e5
 .pf-bar.col { flex-direction: column; align-items: stretch; }
 .pf-bar input, .pf-bar select { flex: 1; min-width: 0; }
 .pf-action:not(:empty) { padding: 8px 12px; background: var(--pf-card); }
-.pf-files { padding: 4px 12px 8px; }`;
+.pf-files { padding: 4px 12px 8px; }
+/* 手機：一列塞不下「夾名＋狀態＋專案名＋改名＋改連結」，兩顆鈕會被壓成
+   直書。改成夾名獨佔一行、其餘換行排；列本身要有手指按得到的高度。 */
+@media (max-width: 720px) {
+  .pf-head { flex-wrap: wrap; }
+  .pf-head input { width: 100%; }
+  .pf-row { flex-wrap: wrap; min-height: 44px; padding: 10px; }
+  /* 基準是「整列扣掉三角形和它的間距」→ 第一行剛好是 ▸ + 夾名，
+     其餘（狀態、專案名、兩顆鈕）落到第二行。給 100% 的話三角形會自己
+     孤零零佔掉一行。 */
+  .pf-name { flex: 1 1 calc(100% - 22px); }
+  .pf-gap { display: none; }   /* 換行之後這個彈性空白只會多推出一行 */
+}`;
