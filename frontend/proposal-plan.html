@@ -181,6 +181,36 @@
   .ref-addbtn:hover { background: var(--red); }
   .ref-msg { font-size: 11.5px; color: var(--sub); margin-top: 6px; min-height: 14px; }
   .ref-msg.err { color: var(--red); }
+
+  /* ── 手機（≤720px）─────────────────────────────────────
+     🔴 這一段最重要的一條是清單列。桌機版的 .c/.st/.meta/.refs 各有固定
+     min-width，加總 > 390 螢幕扣掉 padding 後的內容寬 → 整頁被撐出橫向捲動
+     （實測 scrollWidth 649）。而版面視窗一被撐大，`position:fixed` 的對話框
+     就以 649 置中 → 「資產資料夾」與「新提案」兩個對話框整個偏出畫面右側。
+     **同一個根因的兩個症狀**，所以修的是列不是對話框。
+     不要改用 overflow-x:hidden 遮起來 —— 那只會讓下次再溢出時沒人發現。 */
+  @media (max-width: 720px) {
+    header { padding: 12px 14px; }
+    main { padding: 18px 14px 48px; }
+
+    /* 標題與說明各佔一行（原本並排會把「提案清單」擠成兩行） */
+    .list-head { flex-direction: column; align-items: flex-start; gap: 4px; }
+
+    /* 標題一行、其餘資訊在下面自動換行 */
+    .prop-row { flex-wrap: wrap; gap: 6px 10px; padding: 12px 14px; }
+    .prop-row .t { flex: 1 0 100%; }
+    .prop-row .c, .prop-row .meta, .prop-row .refs, .prop-row .st {
+      min-width: 0; text-align: left; }
+    /* 空欄位在換行版面裡只會製造莫名的空隙。桌機靠固定欄寬對齊，
+       那邊**不能**跟著藏（藏了整排欄位就對不齊了）。 */
+    .prop-row span:empty { display: none; }
+
+    /* 「← 清單 + 標題」一行、管理動作另起一行（原本五件事擠一列，
+       標題會被壓成三段） */
+    .plan-head { flex-wrap: wrap; gap: 8px 10px; }
+    .plan-head h1 { flex: 1 1 auto; min-width: 0; font-size: 17px; }
+    .plan-acts, #guest-bar { flex: 1 0 100%; }
+  }
 </style>
 </head>
 <body>
