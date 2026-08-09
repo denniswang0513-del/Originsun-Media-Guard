@@ -736,7 +736,8 @@ async function _mountBrief() {
     if (!_pendingBrief) return;
     const opts = _pendingBrief;
     try {
-        const { renderBriefs } = await importRetryish("/tabs/proposals/brief-view.js");
+        const { importRetry } = await import("/js/shared/utils.js");
+        const { renderBriefs } = await importRetry("/tabs/proposals/brief-view.js");
         await renderBriefs($("brief-host"), opts);
         _pendingBrief = null;              // 掛好了；之後切回來保留編輯中的內容
     } catch (e) {

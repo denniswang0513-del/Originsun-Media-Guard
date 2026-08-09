@@ -8,10 +8,9 @@
 兩個入口：直接上傳、或在提案的檔案列上按「設為範本」（走 folder-view 的
 rowActions 擴充點）。
 
-🔴 `_範本` **不是提案資產夾**：底線開頭的夾本來就不會進「資產資料夾總覽」
-（`_scan_root_folders` 濾掉了），但 `folder/*` 端點吃的是**使用者傳來的資料夾
-名** —— 所以這支在 import 時把它註冊進 `proposal_assets.RESERVED_FOLDERS`，
-由那邊的 `_folder_or_404` 擋掉直接打 URL 的。
+🔴 `_範本` **不是提案資產夾** —— 靠的是底線開頭：`proposal_assets` 的
+`_scan_root_folders` 與 `_folder_or_404` 都用「`.`/`_` 開頭就不是」這條述詞，
+所以這裡不必登記什麼，改名字時保持底線開頭就好。
 
 範本的**消化**（抽文字 → 骨架）在 services/brief_template_digest.py，這裡只管
 檔案與索引。
@@ -38,23 +37,21 @@ from services.brief_template_digest import parse_questions as _parse_questions
 
 from ._shared import router, _get_factory, _now, _require_db
 from .proposal_assets import (_resolve_asset_file, invalidate_folder_cache,
-                              proposals_root, reserve_folder)
+                              proposals_root)
 
 try:
-    from sqlalchemy.orm import defer
     from ._shared import select
     from db.models import PreprodBriefTemplate
 except ImportError:  # DB 套件不存在的 agent 環境
     pass
 
-# 範本夾名。底線開頭 = 「這不是提案夾」的視覺約定，同時讓它在排序時沉底。
+# 範本夾名。🔴 底線開頭是**功能性的**不是裝飾：`proposal_assets` 用
+# 「`.`/`_` 開頭＝不是提案資產夾」這條述詞把它擋在總覽與 folder/* 端點外。
 TEMPLATE_DIR = "_範本"
 
-# 收哪些格式＝抽得出文字的那些（正本在 core.doc_text）。.key 沒有可靠的
-# Python 解法 —— 擋在門口比讓它進來然後永遠消化失敗好。
+# 收哪些格式（ALLOWED_EXTS）正本在 core.doc_text —— 抽得出文字的那些。
+# .key 沒有可靠的 Python 解法，擋在門口比讓它進來然後永遠消化失敗好。
 MAX_BYTES = 60 * 1024 * 1024
-
-reserve_folder(TEMPLATE_DIR)   # 見檔頭：共用層只知道「這個名字保留了」
 
 
 async def _templates_dir(create: bool = False) -> str:
@@ -105,11 +102,8 @@ async def list_brief_templates(request: Request):
     _require_db()
     factory = await _get_factory()
     async with factory() as session:
-        # defer 原文：那是消化失敗時給人看的除錯資料，清單一列都不需要它，
-        # 而這支正是前端每 5 秒輪詢的目標（每份範本最多 40k 字）
         rows = (await session.execute(
             select(PreprodBriefTemplate)
-            .options(defer(PreprodBriefTemplate.extracted_text))
             .order_by(PreprodBriefTemplate.created_at.desc()))).scalars().all()
     return {"templates": [_dict(t) for t in rows], "dir": TEMPLATE_DIR}
 

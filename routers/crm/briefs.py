@@ -32,11 +32,11 @@ except ImportError:  # DB 套件不存在的 agent 環境
     pass
 
 
-def _dict(b, *, full: bool = False, chars: int = None) -> dict:
+def _dict(b, *, full: bool = False, chars: int = 0) -> dict:
     """清單只回 meta —— 一份企劃書上萬字，列十版就是幾十萬字進網路。
 
-    `chars` 由呼叫端從 SQL 帶進來：清單那支 defer 掉 content，這裡不能再去
-    `len(b.content)`（那會把整份正文從 DB 拉回來，正好抵銷 defer）。
+    `chars` 一律由呼叫端帶進來（清單那支從 SQL 算）：這裡不能去 `len(b.content)`
+    —— content 是 defer 掉的，一碰就把整份正文拉回來，正好抵銷 defer。
     """
     # 卡太久的 pending 在讀取端改判 failed（伺服器重啟過 → task 沒了）
     status, error = settle(b.status or "ok", b.updated_at, b.error or "")
@@ -44,7 +44,7 @@ def _dict(b, *, full: bool = False, chars: int = None) -> dict:
         "id": b.id, "proposal_id": b.proposal_id,
         "status": status, "error": error,
         "template_ids": b.template_ids or [], "options": b.options or {},
-        "chars": chars if chars is not None else len(b.content or ""),
+        "chars": chars,
         "created_by": b.created_by or "",
         "created_at": b.created_at.isoformat() if b.created_at else None,
         "updated_at": b.updated_at.isoformat() if b.updated_at else None,
@@ -104,7 +104,8 @@ async def create_brief(pid: str, request: Request, body: dict = None):
             created_at=_now(), updated_at=_now())
         session.add(b)
         await session.commit()
-        return {"status": "ok", "brief": _dict(b, full=True)}
+        return {"status": "ok",
+                "brief": _dict(b, full=True, chars=len(b.content or ""))}
 
 
 @router.post("/proposals/{pid}/briefs/generate")
@@ -162,20 +163,28 @@ async def generate_brief(pid: str, request: Request, body: dict):
 @router.patch("/briefs/{bid}")
 async def update_brief(bid: str, request: Request, body: dict):
     """就地編輯正文。**每一版都可以改** —— 生成物是草稿不是聖旨，人改完直接存；
-    要留下改之前的樣子就再生成一版（版本本來就是為此存在的）。"""
+    要留下改之前的樣子就再生成一版（版本本來就是為此存在的）。
+
+    這是自動儲存打的那一支（每次停手 800ms），所以刻意不搬正文：載入時 defer
+    掉舊的 content 與矩陣快照，回覆也只回字數。整份來回三趟只為了覆寫一個欄位
+    是這條路上最貴的浪費。
+    """
     _auth(request)
     _require_db()
+    if "content" not in body:
+        raise HTTPException(status_code=422, detail="content 必填")
+    content = body.get("content") or ""
     factory = await _get_factory()
     async with factory() as session:
-        b = await session.get(PreprodBrief, bid)
+        b = await session.get(PreprodBrief, bid,
+                              options=[defer(PreprodBrief.content),
+                                       defer(PreprodBrief.plan_snapshot)])
         if not b:
             raise HTTPException(status_code=404, detail="找不到這一版企劃書")
-        if "content" not in body:
-            raise HTTPException(status_code=422, detail="content 必填")
-        b.content = body.get("content") or ""
+        b.content = content
         b.updated_at = _now()
         await session.commit()
-        return {"status": "ok", "brief": _dict(b, full=True)}
+    return {"status": "ok", "chars": len(content)}
 
 
 # 反白一段叫 Claude 改寫的預設指令。key 是 UI 上那幾顆鈕。

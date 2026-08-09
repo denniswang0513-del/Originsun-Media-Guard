@@ -41,39 +41,6 @@ export async function tfetch(path, opts = {}) {
 }
 
 /**
- * 追一件**背景工作**到底（範本消化、企劃書生成 —— 兩支端點都是「起了就回」）。
- * 不追的話畫面會一直停在「生成中…」，看起來像按了沒反應。
- *
- * 收斂條件刻意寬：`status !== 'pending'`（含那一列整個消失）或跑滿 `max` 次。
- * 一次抓取失敗**不中止** —— NAS/網路抖一下不代表工作失敗。
- *
- * @param id         要追的那筆
- * @param seen       Set：同一顆按兩次不開兩條輪詢（呼叫端持有，跨重畫存活）
- * @param alive      () => bool，畫面還在不在（拆掉了就別再打 API）
- * @param list       () => Promise<[{id, status}]>，重抓整份清單
- * @param onSettled  (list) => void，收斂時拿最新清單重畫
- */
-export function pollUntilSettled(id, seen, { alive, list, onSettled, ms = 5000, max = 60 }) {
-    if (seen.has(id)) return;
-    seen.add(id);
-    let left = max;
-    const tick = async () => {
-        if (!alive()) { seen.delete(id); return; }
-        try {
-            const items = await list();
-            const cur = items.find(x => x.id === id);
-            if (!cur || cur.status !== 'pending' || --left <= 0) {
-                seen.delete(id);
-                await onSettled(items);
-                return;
-            }
-        } catch { /* 抖一下不代表失敗 */ }
-        setTimeout(tick, ms);
-    };
-    setTimeout(tick, ms);
-}
-
-/**
  * 開啟提案簡報。deck 有兩種落點（2026-08-06 資產夾化）：
  * - `/uploads/...` 開頭（舊）→ 在 web root 裡，直接開新分頁。
  * - 其他（NAS 資產夾的絕對路徑）→ 走帶權限的下載端點。

@@ -150,7 +150,8 @@ async def write_brief(brief_id: str, *, prop: dict, templates: list,
         tone=TONES.get(options.get("tone") or "pitch", TONES["pitch"]),
     )
     from services.website.seo_runner import _call_claude, strip_fence
-    out, err = await _call_claude(prompt)
+    out, err = await _call_claude(
+        prompt, on_start=lambda: _save(brief_id))   # 見 core.bg_status
     if not out or not out.strip():
         return await _save(brief_id, status="failed",
                            error=err or "claude 沒有回應")
@@ -161,6 +162,7 @@ async def write_brief(brief_id: str, *, prop: dict, templates: list,
 
 
 async def _save(brief_id: str, *, content=None, status=None, error=...) -> tuple:
+    """部分更新。**一個參數都不給＝只蓋 updated_at**（開工的時間戳）。"""
     from core.db_guard import db_factory_or_503
     from db.models import PreprodBrief
     from routers.crm._shared import _now

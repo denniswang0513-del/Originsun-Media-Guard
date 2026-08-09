@@ -21,8 +21,6 @@ import logging
 import os
 import re
 
-from services.website.seo_runner import _call_claude, strip_fence
-
 logger = logging.getLogger(__name__)
 
 # 餵進 prompt 的原文上限。21 頁的 PDF 約 6 千字，40k 給了很寬的餘裕；
@@ -104,25 +102,28 @@ async def digest_template(tid: str) -> tuple[bool, str]:
 
     d = await _templates_dir()
     path = os.path.join(d, filename) if d else ""
-    if not path or not os.path.isfile(path):
+    if not path or not await asyncio.to_thread(os.path.isfile, path):
         return await _fail(tid, "範本檔案不見了（NAS 搆不到，或已被手動刪除）")
 
     text, err = await asyncio.to_thread(extract_text, path)
     if err:
         return await _fail(tid, f"抽文字失敗：{err}")
 
+    # 函式層 import：模組層會把 seo_runner → sqlalchemy 拖進 routers/crm 的
+    # import 鏈，而機隊沒有 sqlalchemy（brief_templates/briefs 的 try/except
+    # ImportError 就是為此），整包 CRM router 會靜默載入失敗
+    from services.website.seo_runner import _call_claude, strip_fence
     out, call_err = await _call_claude(
-        _PROMPT.format(text=text[:MAX_TEXT_CHARS]))
+        _PROMPT.format(text=text[:MAX_TEXT_CHARS]),
+        on_start=lambda: _save(tid))          # 見 core.bg_status：拿到閘才算開工
     if not out:
-        # 原文一起存 —— 消化失敗時人可以打開來看「到底抽到了什麼」，
-        # 那是「這份 PDF 是掃描檔」與「prompt 不好」最快的鑑別法
-        return await _fail(tid, call_err or "claude 沒有回應", text=text)
+        return await _fail(tid, call_err or "claude 沒有回應")
 
     skeleton = strip_fence(out).strip()
     if not skeleton:
-        return await _fail(tid, "claude 回了空白", text=text)
+        return await _fail(tid, "claude 回了空白")
 
-    await _save(tid, text=text, skeleton=skeleton, status="ok", error=None)
+    await _save(tid, skeleton=skeleton, status="ok", error=None)
     logger.info("[brief_digest] %s 消化完成（骨架 %d 字）", tid, len(skeleton))
     return True, skeleton
 
@@ -156,7 +157,8 @@ def parse_questions(skeleton: str) -> list:
     return out[:8]
 
 
-async def _save(tid: str, *, text=None, skeleton=None, status=None, error=...) -> None:
+async def _save(tid: str, *, skeleton=None, status=None, error=...) -> None:
+    """部分更新。**一個參數都不給＝只蓋 updated_at**（開工的時間戳）。"""
     from core.db_guard import db_factory_or_503
     from db.models import PreprodBriefTemplate
     from routers.crm._shared import _now
@@ -165,8 +167,6 @@ async def _save(tid: str, *, text=None, skeleton=None, status=None, error=...) -
         t = await session.get(PreprodBriefTemplate, tid)
         if not t:
             return
-        if text is not None:
-            t.extracted_text = text
         if skeleton is not None:
             t.skeleton = skeleton
         if status is not None:
@@ -177,7 +177,7 @@ async def _save(tid: str, *, text=None, skeleton=None, status=None, error=...) -
         await session.commit()
 
 
-async def _fail(tid: str, msg: str, *, text=None) -> tuple[bool, str]:
-    await _save(tid, status="failed", error=msg, text=text)
+async def _fail(tid: str, msg: str) -> tuple[bool, str]:
+    await _save(tid, status="failed", error=msg)
     logger.warning("[brief_digest] %s 消化失敗：%s", tid, msg)
     return False, msg

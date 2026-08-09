@@ -957,7 +957,6 @@ class PreprodBriefTemplate(Base):
     # 從某個專案的資產檔案「設為範本」時記來源（純為了回溯，斷了也不影響使用）
     source_project_id = Column(String(32), nullable=True)
     source_rel = Column(String(512), nullable=True)
-    extracted_text = Column(Text, nullable=True)                 # 抽出的原文（重跑消化用）
     skeleton = Column(Text, nullable=True)                       # 消化後的骨架（餵 prompt 的就是它）
     status = Column(String(16), nullable=True)                   # pending/ok/failed
     error = Column(Text, nullable=True)                          # 消化失敗的理由（給人看）

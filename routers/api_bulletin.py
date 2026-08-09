@@ -14,6 +14,7 @@ from datetime import datetime
 from fastapi import APIRouter, HTTPException, Request  # type: ignore
 from sqlalchemy import select, func  # type: ignore
 
+from core.bg_task import fire
 from core.auth import check_admin_or_module
 from core.schemas import BulletinCreate, BulletinUpdate, BulletinReorder, BulletinAsk
 from db.models import BulletinItem
@@ -195,9 +196,10 @@ async def _run_ask(item_id: str) -> None:
             return
         title, note, convo = obj.title, obj.note or "", list(obj.conversation or [])
     from services.website.seo_runner import _call_claude
-    async with _ask_lock:
-        text, err = await _call_claude(_build_ask_prompt(title, note, convo),
-                                       extra_args=["--permission-mode", "plan"])
+    # 併發上限在 _call_claude 裡（`_CLAUDE_GATE`）—— 每個 claude 呼叫者都走那條，
+    # 這裡不再自己鎖一次（兩層各有一個數字，調了外面那個等於白調）
+    text, err = await _call_claude(_build_ask_prompt(title, note, convo),
+                                   extra_args=["--permission-mode", "plan"])
     reply = (text or "").strip() or f"（Claude 沒有回應：{err or '未知錯誤'}）"
     async with factory() as session:
         obj = await session.get(BulletinItem, item_id)
@@ -227,7 +229,9 @@ async def ask_bulletin(item_id: str, body: BulletinAsk, request: Request):
                       "at": datetime.now().isoformat(timespec="seconds")})
         obj.conversation = convo
         await session.commit()
-    asyncio.create_task(_run_ask(item_id))
+    # 裸 create_task 只被 loop 弱參考，而且 _run_ask 沒有自己的 try/except ——
+    # 例外一裸奔，那則提問就永遠停在「思考中…」直到前端輪詢放棄
+    fire(_run_ask(item_id), label=f"bulletin ask {item_id}")
     return {"status": "asking"}
 
 

@@ -13,10 +13,11 @@
  */
 
 import { autosave } from '../../js/shared/autosave.js';
+import { pollJob } from '../../js/shared/poll-job.js';
 import { ensureStyle, esc } from '../../js/shared/utils.js';
 import { PLAN_TEMPLATES } from './plan-templates.js';
 import { field, openDialog } from './prop-dialog.js';
-import { pollUntilSettled, tfetch } from './prop-fetch.js';
+import { tfetch } from './prop-fetch.js';
 
 const API = '/api/v1/crm';
 
@@ -78,7 +79,7 @@ const S = (h) => h.__bv;
 const _list = async (pid) =>
     (await tfetch(`${API}/proposals/${encodeURIComponent(pid)}/briefs`)).briefs || [];
 
-async function _load(host, keepOpen = true) {
+async function _load(host) {
     const s = S(host);
     try {
         s.items = await _list(s.proposalId);
@@ -86,7 +87,8 @@ async function _load(host, keepOpen = true) {
         host.innerHTML = `<div class="bv-note bv-err">載入失敗：${esc(e.message || e)}</div>`;
         return;
     }
-    if (!keepOpen || !s.items.some(x => x.id === s.open)) {
+    // 開著的那版不在了（剛被刪掉）→ 改看成案/最新的那版
+    if (!s.items.some(x => x.id === s.open)) {
         s.open = (s.items.find(x => x.status === 'ok') || s.items[0] || {}).id || '';
     }
     await _render(host);
@@ -139,7 +141,7 @@ async function _paintOne(host) {
     const meta = s.items.find(x => x.id === s.open);
     if (meta && meta.status === 'pending') {
         main.innerHTML = '<div class="bv-note">生成中…（跑 Claude，約一到三分鐘）</div>';
-        pollUntilSettled(s.open, s.polling, {
+        pollJob(s.open, s.polling, {
             alive: () => host.isConnected,       // 切走分頁就停
             list: _list.bind(null, s.proposalId),
             onSettled: async (items) => { s.items = items; await _render(host); },
@@ -206,9 +208,8 @@ async function _rewrite(host, bid, ta, mode, main) {
                                { method: 'POST', json: { selection, mode } });
         ta.value = ta.value.slice(0, a) + d.text + ta.value.slice(z);
         ta.setSelectionRange(a, a + d.text.length);
-        await tfetch(`${API}/briefs/${encodeURIComponent(bid)}`,
-                     { method: 'PATCH', json: { content: ta.value } });
-        save.textContent = '已改寫並儲存';
+        await S(host).saver.flush();      // 同一個寫入者 —— 自己再 PATCH 一次的話
+        save.textContent = '已改寫並儲存';  // dirty 基準不會前進，下次 blur 又送一次全文
     } catch (e) {
         save.textContent = '';
         alert('改寫失敗：' + (e.message || e));
@@ -231,7 +232,7 @@ async function _del(host, bid) {
     if (!confirm('刪除這一版企劃書？其他版本不受影響。')) return;
     try {
         await tfetch(`${API}/briefs/${encodeURIComponent(bid)}`, { method: 'DELETE' });
-        await _load(host, false);
+        await _load(host);
     } catch (e) { alert('刪除失敗：' + (e.message || e)); }
 }
 

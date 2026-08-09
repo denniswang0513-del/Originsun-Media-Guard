@@ -8,7 +8,6 @@
 """
 from __future__ import annotations
 
-import asyncio
 import logging
 from datetime import datetime, timezone
 
@@ -16,6 +15,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from sqlalchemy import desc, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from core.bg_task import fire
 from db.session import get_session_factory
 from services.website import watchdog_runner
 
@@ -95,14 +95,9 @@ async def _bg(coro_fn) -> None:
         logger.error("[watchdog] 背景任務失敗：%s", e)
 
 
-# event loop 只持有 task 的弱參考 —— 沒人拿著強參考的話，探測/掃描可能在跑完前被 GC。
-_pending: set = set()
-
-
 def _fire(coro_fn) -> dict:
-    task = asyncio.create_task(_bg(coro_fn))
-    _pending.add(task)
-    task.add_done_callback(_pending.discard)
+    """背景跑，不等它。強參考與例外守衛在 core.bg_task（這裡是它的原型）。"""
+    fire(_bg(coro_fn), label="watchdog")
     return {"queued": True}
 
 

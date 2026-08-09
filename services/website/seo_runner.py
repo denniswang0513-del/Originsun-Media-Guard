@@ -245,7 +245,8 @@ def strip_fence(s: str) -> str:
     return "\n".join(lines)
 
 
-async def _call_claude(prompt: str, extra_args: Optional[list] = None) -> tuple[Optional[str], str]:
+async def _call_claude(prompt: str, extra_args: Optional[list] = None,
+                       on_start=None) -> tuple[Optional[str], str]:
     """subprocess call `claude --print`，回 (stdout, error_detail)。
 
     extra_args：附加到 claude CLI 的旗標（如公布欄「問 Claude」傳
@@ -263,6 +264,10 @@ async def _call_claude(prompt: str, extra_args: Optional[list] = None) -> tuple[
     # (asyncio subprocess is unavailable on Windows SelectorEventLoop).
     from core.subproc import run_capture
     async with _CLAUDE_GATE:
+        # 排隊時間不算在 timeout 裡 —— 背景工作靠 updated_at 判斷自己是不是死了
+        # （core.bg_status），時間戳要蓋在**拿到閘之後**，不然塞車＝被誤判
+        if on_start:
+            await on_start()
         rc, out, err = await run_capture(
             [claude_exe, "--print"] + (extra_args or []),
             input_bytes=prompt.encode("utf-8"),

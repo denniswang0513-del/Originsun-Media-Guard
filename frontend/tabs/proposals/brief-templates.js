@@ -18,10 +18,11 @@
  * 直觀得多 —— 所以這個畫面的重點不是「管理檔案」，是「看得到並改得動骨架」。
  */
 
+import { pollJob } from '../../js/shared/poll-job.js';
 import {
     bearerHeader, ensureStyle, esc, inputUploadItems, uploadItems,
 } from '../../js/shared/utils.js';
-import { pollUntilSettled, tfetch } from './prop-fetch.js';
+import { tfetch } from './prop-fetch.js';
 
 const API = '/api/v1/crm/brief-templates';
 
@@ -145,7 +146,7 @@ async function _digest(ov, id) {
         await tfetch(`${API}/${encodeURIComponent(id)}/digest`, { method: 'POST' });
     } catch (e) { alert('消化啟動失敗：' + (e.message || e)); return; }
     await _load(ov);
-    pollUntilSettled(id, S(ov).polling, {
+    pollJob(id, S(ov).polling, {
         alive: () => ov.isConnected,             // 對話框關掉就別再打了
         list: async () => (await tfetch(API)).templates || [],
         onSettled: (items) => { S(ov).items = items; _render(ov); },

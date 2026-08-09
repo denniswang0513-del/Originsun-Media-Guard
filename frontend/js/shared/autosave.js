@@ -14,7 +14,7 @@
  *   save.flush();     // 需要時手動催（例如關閉前）
  *   save.dispose();   // 取消待送的 timer（重畫前呼叫，避免對已卸下的節點送舊值）
  *
- * send 拋錯 → onError；元素的 dirty 基準不會前進（下次還會再試）。
+ * send 拋錯 → onError；dirty 基準退回去（下次還會再試，除非期間又改過）。
  * 委派版（節點會被重畫的清單）用 autosaveDelegated(host, selector, send, opts)。
  */
 
@@ -29,12 +29,13 @@ export function autosave(el, send, opts = {}) {
     const save = async () => {
         clearTimeout(timer);
         if (el.value === el._asSaved) return;      // dirty-check：沒改過不打 API
-        const want = el.value;
-        try {
-            await send(want, el);
-            el._asSaved = want;
+        const want = el.value, prev = el._asSaved;
+        el._asSaved = want;                        // 基準**先**進：blur 與手動 flush
+        try {                                      // 會前後腳來（點鈕＝blur 再 click），
+            await send(want, el);                  // 晚進的話同一份內容會送兩次
             opts.onOk?.(el);
         } catch (err) {
+            if (el._asSaved === want) el._asSaved = prev;   // 期間沒再改過才退回去重試
             opts.onError?.(err, el);
         }
     };
@@ -58,12 +59,13 @@ export function autosaveDelegated(host, selector, send, opts = {}) {
     const save = async (el) => {
         clearTimeout(timers.get(el));
         if (el.value === el._asSaved) return;
-        const want = el.value;
+        const want = el.value, prev = el._asSaved;
+        el._asSaved = want;                        // 同上：基準先進，避免重複送
         try {
             await send(want, el);
-            el._asSaved = want;
             opts.onOk?.(el);
         } catch (err) {
+            if (el._asSaved === want) el._asSaved = prev;
             opts.onError?.(err, el);
         }
     };

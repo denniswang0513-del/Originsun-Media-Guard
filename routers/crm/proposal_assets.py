@@ -633,17 +633,6 @@ _overview_cache: dict = {"at": 0.0, "root": None, "names": [], "ok": False}
 _overview_lock = asyncio.Lock()
 
 
-# root 底下**不是提案資產夾**的保留名。上層功能自己註冊進來（例如
-# brief_templates 的 `_範本`）—— 共用層只知道「有些名字是保留的」，不知道
-# 保留給誰。反過來寫（這裡 import 上層）會製造循環，也讓資產夾層被迫認識
-# 一個它不該知道的功能。
-RESERVED_FOLDERS: set = set()
-
-
-def reserve_folder(name: str) -> None:
-    RESERVED_FOLDERS.add(name)
-
-
 def invalidate_folder_cache() -> None:
     """建夾/改名後叫一聲 —— 否則總覽最多 60 秒還在列舊名，點下去 404。"""
     _overview_cache["at"] = 0.0
@@ -897,11 +886,12 @@ async def proposal_assets_overview(request: Request):
 async def _folder_or_404(folder: str) -> str:
     """root 底下的資料夾絕對路徑（三個 folder 端點共用；含路徑逃逸防護）。
 
-    root 底下有些夾不是提案資產夾（例如企劃範本庫的 `_範本`）。底線開頭的
-    本來就不會進總覽（`_scan_root_folders` 濾掉了），但**這條吃的是使用者
-    傳來的資料夾名** —— 不擋的話它會變成一個可以被「連結專案」「改名」的夾，
-    而改名走 rename_and_remap（專案夾的程序），連下去就壞了。"""
-    if (folder or "").strip() in RESERVED_FOLDERS:
+    🔴 `.`/`_` 開頭的夾**不是**提案資產夾（企劃範本庫的 `_範本`、分塊上傳的
+    `.chunk-uploads`…）。`_scan_root_folders` 早就用這條述詞把它們擋在總覽外，
+    但**這條吃的是使用者傳來的資料夾名** —— 不擋的話它們會變成可以被「連結
+    專案」「改名」的夾，而改名走 rename_and_remap（專案夾的程序），連下去就壞了。
+    用同一條述詞而不是保留名清單：清單只擋得住有人記得登記的那些。"""
+    if (folder or "").strip()[:1] in (".", "_"):
         raise HTTPException(status_code=404, detail="找不到資料夾（或無法存取）")
     folder_abs = await asyncio.to_thread(safe_subfolder, await proposals_root(), folder)
     if not folder_abs:
