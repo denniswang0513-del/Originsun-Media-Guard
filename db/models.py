@@ -910,6 +910,36 @@ class PreprodProposal(Base):
                       Index("idx_pprop_project", "project_id", "updated_at"))
 
 
+class PreprodPlanTemplate(Base):
+    """企劃範本庫 —— 生成企劃書時給 Claude 參考的「好範本」。
+
+    實體檔案放在 `{提案資產根目錄}/_範本/` 底下（owner 指定的落點）；這張表存
+    索引 + **消化出來的骨架**。骨架才是生成時真正餵進 prompt 的東西：一份完整
+    企劃可能上萬字，塞兩三份就把 prompt 撐爆，而且每次生成都重讀同樣的內容。
+
+    🔴 骨架刻意存純文字而不是 JSONB：它是**人要看、人會改**的東西（不滿意就
+    直接改那段，比調 prompt 直觀）。結構化只會逼使用者透過表單改字。
+
+    「設為範本」是**複製**一份到 _範本，不是記指標 —— 提案會繼續改版（v2/v3），
+    範本應該是凍結的參考；原檔被刪或改名時範本也不該跟著斷。
+    """
+    __tablename__ = "preprod_plan_templates"
+
+    id = Column(String(32), primary_key=True)                    # uuid4 hex
+    name = Column(String(255), nullable=False)                   # 顯示名（可改）
+    filename = Column(String(255), nullable=False)               # _範本 底下的檔名
+    # 從某個專案的資產檔案「設為範本」時記來源（純為了回溯，斷了也不影響使用）
+    source_project_id = Column(String(32), nullable=True)
+    source_rel = Column(String(512), nullable=True)
+    extracted_text = Column(Text, nullable=True)                 # 抽出的原文（重跑消化用）
+    skeleton = Column(Text, nullable=True)                       # 消化後的骨架（餵 prompt 的就是它）
+    status = Column(String(16), nullable=True)                   # pending/ok/failed
+    error = Column(Text, nullable=True)                          # 消化失敗的理由（給人看）
+    created_by = Column(String(64), nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), server_default=func.now())
+
+
 class PreprodReference(Base):
     """參考片庫 — 獨立於單一提案的共用參考片，跨提案重用。
     v2（docs/REFERENCE_LIBRARY.md）：每支片一個小頁面 —— facets 分類族、

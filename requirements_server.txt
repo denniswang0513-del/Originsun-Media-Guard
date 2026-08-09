@@ -32,6 +32,10 @@ torch==2.12.0              # f5-tts 會帶，明列以固定版本
 # ── AI 參考資料抽字（showcase-edit AI 描述/SEO 上傳文件；跑在 master）──
 pypdf==6.14.2
 python-docx==1.2.0
+# 企劃範本消化：簡報抽文字（core/doc_text）。純 Python、無二進位相依。
+# 🔴 生產跑的是 C:\OriginsunAgent\python_embed 不是 .venv —— deploy_to_prod
+#    只複製碼不裝套件，這一條要手動 pip 進 python_embed。
+python-pptx==1.0.2
 
 # ── 影像紀錄（media_log）：分享 QR + iPhone HEIC 縮圖 ──
 # 函式層 import，publish 的相依掃描抓不到，需手動維護
