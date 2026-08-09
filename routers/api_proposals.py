@@ -174,7 +174,8 @@ def _plan_started(plan) -> bool:
     return bool(plan and plan.get("template_id"))
 
 
-def _prop_dict(p, client_name: str = "", refs_count: int = 0, has_plan=None) -> dict:
+def _prop_dict(p, client_name: str = "", refs_count: int = 0, has_plan=None,
+               project_name: str = "") -> dict:
     # has_plan 可由呼叫端傳入（清單走 SQL 布林 + defer(plan)，避免整包 JSONB 出庫）
     return {
         "id": p.id,
@@ -182,6 +183,8 @@ def _prop_dict(p, client_name: str = "", refs_count: int = 0, has_plan=None) -> 
         "client_id": p.client_id or "",
         "client_name": client_name or "",
         "project_id": p.project_id or "",
+        # 清單也要（換綁專案的入口要說得出「目前接在哪」）；詳情路徑另外覆寫
+        "project_name": project_name or "",
         "quotation_id": p.quotation_id or "",
         "ptype": p.ptype or "",
         "status": p.status or "草稿",
@@ -400,16 +403,20 @@ async def list_proposals(request: Request, q: str = "", status: str = "",
 
     from sqlalchemy import extract, select, func as safunc
     from sqlalchemy.orm import defer
-    from db.models import Client, PreprodProposal, PreprodReferenceLink
+    from db.models import Client, CrmProject, PreprodProposal, PreprodReferenceLink
 
     async with factory() as session:
         # has_plan 用 SQL 布林算、plan 欄 defer — 清單不把整包 JSONB 拖出庫
         # （看 template_id 而非 IS NOT NULL：只有 share_token 的殼不算已開始）
         query = (select(PreprodProposal, Client.short_name,
                         PreprodProposal.plan.op("->>")("template_id")
-                        .isnot(None).label("has_plan"))
+                        .isnot(None).label("has_plan"),
+                        CrmProject.name)
                  .options(defer(PreprodProposal.plan))
                  .outerjoin(Client, Client.id == PreprodProposal.client_id)
+                 # 專案名同一趟 join 帶回來 —— 清單上的「換綁專案」入口要說得出
+                 # 目前接在哪，逐列去問就是 N+1
+                 .outerjoin(CrmProject, CrmProject.id == PreprodProposal.project_id)
                  .order_by(PreprodProposal.updated_at.desc()))
         if status:
             query = query.where(PreprodProposal.status == status)
@@ -430,7 +437,7 @@ async def list_proposals(request: Request, q: str = "", status: str = "",
         rows = (await session.execute(query)).all()
 
         # 只聚合這次回傳的提案（project_id= 反查常只回 0-1 筆，卻掛在詳情重畫熱路徑）
-        ids = [p.id for p, _c, _hp in rows]
+        ids = [p.id for p, _c, _hp, _pn in rows]
         ref_counts = {} if not ids else dict((await session.execute(
             select(PreprodReferenceLink.target_id, safunc.count(PreprodReferenceLink.id))
             .where(PreprodReferenceLink.target_type == "proposal",
@@ -438,8 +445,9 @@ async def list_proposals(request: Request, q: str = "", status: str = "",
             .group_by(PreprodReferenceLink.target_id))).all())
 
     return {"proposals": [
-        _prop_dict(p, cname or "", ref_counts.get(p.id, 0), has_plan=hp)
-        for p, cname, hp in rows
+        _prop_dict(p, cname or "", ref_counts.get(p.id, 0), has_plan=hp,
+                   project_name=pname or "")
+        for p, cname, hp, pname in rows
     ]}
 
 
@@ -1377,6 +1385,57 @@ async def convert_proposal(pid: str, request: Request,
 
     return {"status": "ok", "project_id": project_id,
             "linked_existing": bool(link_pid)}
+
+
+@router.patch("/{pid}/project")
+async def set_proposal_project(pid: str, request: Request, body: dict = Body(...)):
+    """換綁／解除提案所屬的 CRM 專案：body {project_id}（空字串＝解除）。
+
+    為什麼不走 `PUT /{pid}`：那條是欄位部分更新，而這件事有副作用要交代 ——
+    **提案資產資料夾與重點提案是掛在「專案」上的**（`proposal_folder_name`
+    在 crm_projects），換綁之後企劃頁的「資料夾」分頁看到的就是新專案的夾，
+    舊夾裡的檔案**留在舊專案**、不會跟著搬。所以回傳 previous_* 讓呼叫端
+    講得出後果，而不是靜靜換掉。
+
+    `/convert`（一鍵成案）也會回填 project_id，但它只走「還沒有專案」那條
+    （已有就 409）—— 綁錯了要能改，是這條存在的理由。
+
+    ⚠️ 原本自動建的殼專案換綁後會變成孤兒留在專案管線裡。這裡**不自動刪**
+    （刪專案是破壞性的，而且它可能已經有報價/成本），由使用者自己決定。
+    """
+    _check_auth(request)
+    factory = _require_factory()
+
+    from sqlalchemy import select
+    from db.models import CrmProject
+
+    new_pid = (body.get("project_id") or "").strip()
+    now = datetime.now(timezone.utc)
+    async with factory() as session:
+        prop = await _get_proposal_or_404(session, pid)
+        old_pid = prop.project_id or ""
+        if not new_pid and (prop.status or "") == "成案":
+            raise HTTPException(
+                status_code=409,
+                detail="成案的提案不能解除專案連結 —— 成案的定義就是有專案。"
+                       "要解除請先把狀態改回未成案或草稿。")
+        old_name = ""
+        if old_pid:
+            old_name = (await session.execute(
+                select(CrmProject.name).where(CrmProject.id == old_pid))).scalar() or ""
+        new_name = ""
+        if new_pid:
+            project = await session.get(CrmProject, new_pid)
+            if not project:
+                raise HTTPException(status_code=404, detail="找不到要連結的專案")
+            new_name = project.name or ""
+        if new_pid != old_pid:
+            prop.project_id = new_pid or None
+            prop.updated_at = now
+            await session.commit()
+
+    return {"status": "ok", "project_id": new_pid, "project_name": new_name,
+            "previous_project_id": old_pid, "previous_project_name": old_name}
 
 
 # ── 提案 ↔ 參考片 掛載 ───────────────────────────────────

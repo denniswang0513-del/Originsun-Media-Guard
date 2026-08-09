@@ -25,8 +25,10 @@
  * 換的話兩個介面的確認流程會在同一次改動裡同時變動，出事很難分辨是哪一半。
  */
 
+import { esc, projectOptionsHtml } from '../../js/shared/utils.js';
 import { tfetch } from './prop-fetch.js';
 import { API } from './prop-const.js';
+import { field, openDialog } from './prop-dialog.js';
 
 // 這裡**不** re-export 常數：分界是「常數一律 prop-const、動作一律
 // prop-actions」。轉出來的話就等於把兩者的依賴差異又抹掉，讀者每次
@@ -81,10 +83,108 @@ export async function changeStatus(prop, next) {
  * 成案選擇器），它們的**問法**不同（一個只問原因、一個要先選專案），但送出去
  * 的東西必須一樣。
  */
-export function convertToProject(prop, { projectId = '', reason = '' } = {}) {
+export async function convertToProject(prop, { projectId = '', reason = '' } = {}) {
     const json = { outcome_reason: (reason || '').trim() };
     if (projectId) json.project_id = projectId;
-    return tfetch(`${API}/${prop.id}/convert`, { method: 'POST', json });
+    const d = await tfetch(`${API}/${prop.id}/convert`, { method: 'POST', json });
+    if (!projectId) _projectsCache = null;   // 剛建了一個新專案，挑選器不能還是舊的
+    return d;
+}
+
+// ── 所屬專案：換綁 / 解除 ─────────────────────────────────
+// `/convert` 只走「還沒有專案」那條（已有就 409）。綁錯了要能改，是這一組
+// 存在的理由 —— 端點是 PATCH /{pid}/project，規則（成案不准解除、專案要
+// 存在）在後端。
+
+// 快取 **promise** 不是結果：清單上連按兩列的「專案」鈕時，第一趟還沒回來
+// 就又發一次同樣的查詢（同 proposal-folders 的教訓）。
+let _projectsCache = null;
+
+/** CRM 專案清單（挑選器用）。proposal-folders 的資料夾連結也吃這一份。 */
+export function crmProjects() {
+    if (!_projectsCache) {
+        _projectsCache = tfetch('/api/v1/crm/projects').then(d => d.projects || []);
+    }
+    return _projectsCache;
+}
+
+/** 換綁／解除（projectId 空字串＝解除）。回傳含 previous_* 讓呼叫端交代後果。 */
+export const setProposalProject = (pid, projectId) =>
+    tfetch(`${API}/${encodeURIComponent(pid)}/project`,
+           { method: 'PATCH', json: { project_id: projectId || '' } });
+
+/**
+ * 「這個提案屬於哪個專案」的挑選對話框。兩個清單（後台提案庫、獨立企劃頁）
+ * 共用同一顆 —— 版面各自畫，但**問法與後果說明**只有一份。
+ *
+ * 🔴 後果一定要寫在畫面上：提案資產資料夾與重點提案是掛在**專案**上的
+ * （proposal_folder_name 在 crm_projects），換綁之後企劃頁的「資料夾」分頁
+ * 看到的就是新專案的夾，舊夾裡的檔案留在舊專案、不會跟著搬。
+ *
+ * @param prop {id, title, project_id, project_name, status}
+ * @param onSaved async (result) => void   儲存成功後呼叫（呼叫端自己重畫）
+ */
+export function openProjectLinker(prop, { onSaved = null } = {}) {
+    const linked = !!prop.project_id;
+    const isWon = (prop.status || '') === '成案';
+    const dlg = openDialog({
+        title: '連結專案',
+        width: 520,
+        body: `
+            <div class="pdlg-row" style="font-size:12.5px;">
+                目前：<b>${linked ? esc(prop.project_name || prop.project_id) : '未連結任何專案'}</b>
+            </div>
+            ${field('改接到', `<select class="pl-sel"><option value="">載入專案清單…</option></select>`)}
+            <div style="font-size:11.5px;line-height:1.75;opacity:.75;">
+                提案的<b>資產資料夾</b>與<b>重點提案</b>是掛在專案上的。換綁之後
+                「資料夾」分頁看到的會是新專案的夾，舊夾裡的檔案<b>留在舊專案</b>，
+                不會跟著搬。原本自動建的殼專案也會留在專案管線裡，要不要清掉由你決定。
+                ${isWon ? '<br>這筆已成案，所以不能解除連結（成案的定義就是有專案）。' : ''}
+            </div>
+            <div class="pdlg-err pl-err"></div>
+            <div class="pdlg-acts">
+                ${linked && !isWon
+                    ? '<button class="pdlg-btn ghost pl-unlink">解除連結</button>' : ''}
+                <button class="pdlg-btn ghost pl-cancel">取消</button>
+                <button class="pdlg-btn pl-save">儲存</button>
+            </div>`,
+    });
+    const el = dlg.el;
+    const sel = el.querySelector('.pl-sel');
+    const err = el.querySelector('.pl-err');
+
+    crmProjects()
+        .then(list => {
+            if (!sel.isConnected) return;
+            // 灌完選項後由全域 select-upgrade 自動升級成可搜尋下拉（≥8 項）——
+            // 那支只在 SPA 有掛，企劃頁就是原生下拉，兩邊都可用
+            sel.innerHTML = projectOptionsHtml(list);
+            if (prop.project_id) sel.value = prop.project_id;
+        })
+        .catch(e => { sel.innerHTML = `<option value="">載入失敗：${esc(e.message || e)}</option>`; });
+
+    const run = async (projectId) => {
+        err.textContent = '';
+        el.querySelectorAll('button').forEach(b => (b.disabled = true));
+        try {
+            const d = await setProposalProject(prop.id, projectId);
+            dlg.close();
+            if (onSaved) await onSaved(d);
+        } catch (e) {
+            err.textContent = (e && e.message) || String(e);
+            el.querySelectorAll('button').forEach(b => (b.disabled = false));
+        }
+    };
+    el.querySelector('.pl-save').addEventListener('click', () => {
+        const v = sel.value;
+        if (!v) { err.textContent = '請先選一個專案（要解除請按「解除連結」）'; return; }
+        run(v);
+    });
+    el.querySelector('.pl-unlink')?.addEventListener('click', () => {
+        if (confirm('解除連結？提案會變成沒有專案，資產資料夾也就跟著看不到了。')) run('');
+    });
+    el.querySelector('.pl-cancel').addEventListener('click', dlg.close);
+    return dlg;
 }
 
 /** 刪除提案（含確認）。@returns 真的刪了才 true。 */

@@ -24,11 +24,10 @@
 import { authDownload, bearerHeader, ensureStyle, esc, projectOptionsHtml,
          uploadItems } from '../../js/shared/utils.js';
 import { renderFolderView } from './folder-view.js';
+import { crmProjects } from './prop-actions.js';
 import { tfetch } from './prop-fetch.js';
 
 const API = '/api/v1/crm/proposal-assets';
-
-let _projects = null;    // 連結專案的下拉清單（懶載，快取 promise；跨實例共用）
 
 // 🔴 狀態掛在**這一個實例的根節點**上，不是模組層：企劃頁的「資產資料夾」
 // 是對話框，連按兩下就會疊出兩個 —— 模組層的話兩個實例共用同一組
@@ -243,7 +242,7 @@ function _wireAction(box, folder) {
 
     const sel = box.querySelector('.pf-proj');
     if (sel) {
-        _loadProjects()
+        crmProjects()
             .then(list => {
                 if (!sel.isConnected) return;
                 // 灌完選項後由全域 select-upgrade 自動升級成可搜尋下拉（≥8 項）——
@@ -271,13 +270,6 @@ async function _link(ov, folder, projectId) {
         S(ov).action = '';
         await _load(ov);         // 連結狀態來自 DB，重撈一次總覽最準
     } catch (e) { alert('連結失敗：' + (e.message || e)); }
-}
-
-function _loadProjects() {
-    // 快取 **promise** 不是結果 —— 兩個資料夾先後開「連結專案」時，第一趟還沒
-    // 回來就又發一次同樣的 join 查詢
-    if (!_projects) _projects = tfetch('/api/v1/crm/projects').then(d => d.projects || []);
-    return _projects;
 }
 
 const STYLE = `

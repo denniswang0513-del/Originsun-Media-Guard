@@ -60,13 +60,24 @@
   .list-head { display: flex; align-items: baseline; gap: 14px; margin: 8px 0 18px; }
   .list-head h1 { font-size: 20px; font-weight: 300; letter-spacing: 0.1em; margin: 0; }
   .list-head .hint { font-size: 12px; color: var(--sub); }
+  /* 外框在 .prop-item 上：列本身是 <a>，而「專案」鈕是它的兄弟（button 放進
+     a 裡是無效 HTML）。兩者並排，框住的是整組。 */
+  .prop-item { display: flex; align-items: stretch;
+    border: 1px solid var(--line); border-top: none; }
+  .prop-item:first-of-type { border-top: 1px solid var(--line); }
   /* 列是 <a>（點一列＝導航），所以要把連結的預設樣式收掉 */
-  .prop-row { display: flex; align-items: center; gap: 14px; padding: 14px 16px;
-    border: 1px solid var(--line); border-top: none; cursor: pointer; transition: background .12s;
-    color: inherit; text-decoration: none; }
+  .prop-row { flex: 1; min-width: 0;
+    display: flex; align-items: center; gap: 14px; padding: 14px 16px;
+    cursor: pointer; transition: background .12s; color: inherit; text-decoration: none; }
   .prop-row:focus-visible { outline: 2px solid var(--red); outline-offset: -2px; }
-  .prop-row:first-of-type { border-top: 1px solid var(--line); }
   .prop-row:hover { background: #fafafa; }
+  /* 平時像文字，hover 才顯出可按 —— 它同時是「目前接在哪」的顯示 */
+  .prop-proj { flex: none; max-width: 150px; background: none; cursor: pointer;
+    border: 1px solid transparent; border-radius: 3px; color: var(--sub);
+    font: inherit; font-size: 12px; padding: 4px 8px; margin: 8px 8px 8px 0;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .prop-proj:hover { border-color: var(--red); color: var(--red); }
+  .prop-proj.none { opacity: .55; }
   .prop-row .t { flex: 1; font-size: 14px; }
   .prop-row .c { font-size: 12px; color: var(--sub); min-width: 90px; }
   .prop-row .badge { font-size: 11px; padding: 2px 10px; border-radius: 2px; white-space: nowrap; }
@@ -198,6 +209,7 @@
 
     /* 標題一行、其餘資訊在下面自動換行 */
     .prop-row { flex-wrap: wrap; gap: 6px 10px; padding: 12px 14px; }
+    .prop-proj { max-width: 96px; margin: 6px 6px 6px 0; }
     .prop-row .t { flex: 1 0 100%; }
     .prop-row .c, .prop-row .meta, .prop-row .refs, .prop-row .st {
       min-width: 0; text-align: left; }
@@ -907,8 +919,11 @@ function _paintList() {
     }
     // 列是 `<a href>` 不是 div+click：點一列的語意就是導航。中鍵/Ctrl 開新分頁、
     // 右鍵複製連結、Tab 可達、螢幕閱讀器讀得出是連結 —— 而且不用綁 N 個監聽。
+    // 「專案」鈕是 <a> 的**兄弟**不是子孫：button 放進 a 裡是無效 HTML，
+    // 鍵盤與朗讀器的行為也會壞掉。外面包一層 .prop-item 讓兩者並排。
     const dir = $("f-dir").dataset.dir === "desc" ? "desc" : "asc";
     host.innerHTML = PL.sortProposals(_rows, $("f-sort").value, dir).map(p => `
+        <div class="prop-item">
         <a class="prop-row" href="?pid=${encodeURIComponent(p.id)}">
             <span class="t">${escText(p.title)}</span>
             <span class="c">${escText(p.client_name || "")}</span>
@@ -918,7 +933,19 @@ function _paintList() {
             <span class="refs">${p.refs_count ? "🎞 " + p.refs_count : ""}</span>
             <span class="badge ${p.has_plan ? "on" : "off"}">${p.has_plan ? "企劃中" : "未開始"}</span>
             <span class="st">${escText(p.status || "")}</span>
-        </a>`).join("");
+        </a>
+        <button class="prop-proj${p.project_id ? "" : " none"}" data-proj="${escAttr(p.id)}"
+                title="${p.project_id ? "換綁或解除所屬專案" : "把這個提案掛到某個既有專案"}"
+        >${escText(PC.projectLabel(p))}</button>
+        </div>`).join("");
+    host.querySelectorAll("[data-proj]").forEach(el => {
+        el.addEventListener("click", async () => {
+            const p = _rows.find(x => x.id === el.dataset.proj);
+            if (!p) return;
+            const { openProjectLinker } = await import("/tabs/proposals/prop-actions.js");
+            openProjectLinker(p, { onSaved: () => _refreshList() });
+        });
+    });
 }
 
 /**

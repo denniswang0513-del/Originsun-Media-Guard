@@ -25,6 +25,14 @@ export function withCurrent(list, cur) {
     return !cur || list.includes(cur) ? list : [cur, ...list];
 }
 
+/**
+ * 清單「專案」欄要顯示什麼。未連結時給的是**行動呼籲**不是空白 —— 那一格
+ * 同時是換綁入口，空著的話沒人知道可以按。
+ * 回的是原始字串，兩個介面各自用自己的 esc 逸出。
+ */
+export const projectLabel = (p) =>
+    (p.project_id ? (p.project_name || p.project_id) : '＋ 連結');
+
 /** 片庫裡還沒掛到這個提案的（掛載挑選器用）。id 型別不保證一致 → 一律轉字串比。 */
 export function pickableRefs(linkedRefs, library) {
     const linked = new Set((linkedRefs || []).map(r => String(r.id)));

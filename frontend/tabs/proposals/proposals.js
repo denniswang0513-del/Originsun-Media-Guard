@@ -14,7 +14,7 @@ import { copyText, esc, importRetry } from '../../js/shared/utils.js';
 import { createSortable, sortableTh } from '../crm/crm-utils.js';
 import { openDeck, tfetch } from './prop-fetch.js';
 // 動作層與欄位定義跟獨立企劃頁共用同一份（見 prop-actions.js 檔頭）
-import { API, DECK_EXTS, PTYPES, STATUSES, pickableRefs, withCurrent }
+import { API, DECK_EXTS, PTYPES, STATUSES, pickableRefs, projectLabel, withCurrent }
     from './prop-const.js';
 // 清單的查詢/排序/統計與獨立企劃頁共用（版面各自畫，邏輯只有一份）
 import {
@@ -22,8 +22,8 @@ import {
     SORT_COLUMNS, SORT_GETTERS, wireFilters,
 } from './prop-list.js';
 import {
-    addRefByUrl, changeStatus, libraryRefs, linkRef, removeProposal,
-    unlinkRef, uploadDeck,
+    addRefByUrl, changeStatus, libraryRefs, linkRef, openProjectLinker,
+    removeProposal, unlinkRef, uploadDeck,
 } from './prop-actions.js';
 import { openProposalEditor } from './prop-editor.js';
 
@@ -165,7 +165,22 @@ function _renderRows() {
     tbody.querySelectorAll('tr[data-id]').forEach(el => {
         el.addEventListener('click', () => openDetail(el.dataset.id));
     });
+    // 「專案」欄的格子本身就是換綁入口。自己吞掉點擊 —— 不然會順便開詳情。
+    tbody.querySelectorAll('[data-proj]').forEach(el => {
+        el.addEventListener('click', (e) => {
+            e.stopPropagation();
+            const p = _lastProps.find(x => x.id === el.dataset.proj);
+            if (p) openProjectLinker(p, { onSaved: () => refreshList() });
+        });
+    });
     _sorter.attach();
+}
+
+/** 「專案」欄：已連結顯示專案名、未連結顯示「＋ 連結」，點下去都是換綁對話框。 */
+function _projCell(p) {
+    return `<button class="prop-linkproj${p.project_id ? '' : ' none'}" data-proj="${esc(p.id)}"
+                    title="${p.project_id ? '換綁或解除所屬專案' : '把這個提案掛到某個既有專案'}"
+            >${esc(projectLabel(p))}</button>`;
 }
 
 function _pill(status) {
@@ -177,6 +192,7 @@ function _row(p) {
         <tr data-id="${esc(p.id)}">
             <td class="title">${esc(p.title)}</td>
             <td>${esc(p.client_name || '—')}</td>
+            <td>${_projCell(p)}</td>
             <td>${esc(p.ptype || '—')}</td>
             <td>${_pill(p.status)}</td>
             <td>${esc(p.pitch_date || '—')}</td>

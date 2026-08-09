@@ -49,6 +49,8 @@ export async function fetchProposals(filters) {
 export const SORT_COLUMNS = [
     { key: 'title', label: '標題', get: p => p.title || '' },
     { key: 'client', label: '客戶', get: p => p.client_name || '' },
+    // 這一欄同時是「換綁專案」的入口（格子裡放的是按鈕，見各介面的列渲染）
+    { key: 'project', label: '專案', get: p => p.project_name || '' },
     { key: 'ptype', label: '類型', get: p => p.ptype || '' },
     { key: 'status', label: '狀態', get: p => enumIndex(STATUSES, p.status) },
     { key: 'pitch', label: '提案日', get: p => p.pitch_date || '' },

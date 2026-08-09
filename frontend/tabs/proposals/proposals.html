@@ -52,6 +52,14 @@
         color: #ccc; padding: 9px 10px; border-bottom: 1px solid #2c2c2c; white-space: nowrap;
     }
     #prop-root .prop-table td.title { color: #eee; font-weight: 600; white-space: normal; min-width: 180px; }
+    /* 「專案」欄的格子就是換綁入口 —— 平時像文字，hover 才顯出可按 */
+    #prop-root .prop-linkproj {
+        background: none; border: 1px solid transparent; border-radius: 4px;
+        color: #ccc; font: inherit; font-size: 12.5px; padding: 3px 8px; cursor: pointer;
+        max-width: 200px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    }
+    #prop-root .prop-linkproj:hover { border-color: #3b82f6; color: #93c5fd; }
+    #prop-root .prop-linkproj.none { color: #777; }
     #prop-root .prop-table tbody tr { cursor: pointer; transition: background .12s; }
     #prop-root .prop-table tbody tr:hover { background: #2c2c2c; }
 
