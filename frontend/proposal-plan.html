@@ -210,6 +210,28 @@
     .plan-head { flex-wrap: wrap; gap: 8px 10px; }
     .plan-head h1 { flex: 1 1 auto; min-width: 0; font-size: 17px; }
     .plan-acts, #guest-bar { flex: 1 0 100%; }
+    .list-tools #f-q { flex: 1 1 200px; }
+
+    /* ── 手機的通用覆蓋層（只講一般規則，不出現任何元件的 class）──
+       1. 表單控件 16px：iOS Safari 對 font-size <16px 的欄位一 focus 就把
+          整頁放大 —— 企劃矩陣每點一格畫面就跳一次，那是這頁最傷手感的一項。
+       2. 點擊高度 44px（Apple HIG / WCAG 2.5.5）。勾選框另外給尺寸，
+          對它套 min-height 只會變成一顆長方形巨無霸。
+
+       🔴 為什麼 font-size 要 !important：元件樣式是 ensureStyle 動態注入的
+       （後插進 head），而且選擇器長得像 `.plc .plc-cell textarea`（0-2-1）——
+       頁面層的 `textarea` 永遠贏不了。這一塊是**刻意的覆蓋層**，只在
+       ≤720px 生效，桌機與後台 SPA 完全碰不到。min-height 則沒有人跟它搶，
+       不必 !important。
+
+       斷點刻意用 max-width 而不是 pointer:coarse —— 觸控筆電在桌機寬度下
+       應該維持桌機的密度。 */
+    input, select, textarea { font-size: 16px !important; }
+    button, select, textarea,
+    input:not([type="checkbox"]):not([type="radio"]) { min-height: 44px; }
+    /* 勾選框給 24×24（WCAG 2.5.8 的最低目標尺寸）。手指要按的空間由**列**
+       提供 —— 列的最小高度是元件自己的事，各元件在自己的 ≤720px 區塊裡給。 */
+    input[type="checkbox"], input[type="radio"] { width: 24px; height: 24px; }
   }
 </style>
 </head>

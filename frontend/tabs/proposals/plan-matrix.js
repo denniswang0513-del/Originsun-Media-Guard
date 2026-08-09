@@ -142,6 +142,11 @@ html.plan-theme-light .plc { /* 官網白底（獨立網址） */
   .plc .plc-grid { grid-template-columns: 1fr; }
   .plc .plc-rowhead { flex-direction: row; gap: 10px; align-items: baseline; }
 }
+/* 手機：工具列裡的「方法論筆記」是**長得像按鈕的 <a>**，頁面層那條
+   「button 至少 44px」抓不到它 —— 元件自己把它做成合格的觸控目標。 */
+@media (max-width: 720px) {
+  .plc a.plc-tb-btn { min-height: 44px; display: inline-flex; align-items: center; }
+}
 `;
 
 

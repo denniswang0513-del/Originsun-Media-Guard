@@ -322,4 +322,9 @@ html.plan-theme-light .fv { --fv-ink: #262626; --fv-sub: #737373; --fv-line: #e5
 .fv-btn:hover { background: rgba(127,127,127,.08); }
 .fv-btn.primary { border-color: var(--fv-accent); color: var(--fv-accent); }
 .fv-hint, .fv-busy { font-size: 12px; color: var(--fv-sub); }
-.fv-busy[hidden] { display: none; }`;
+.fv-busy[hidden] { display: none; }
+/* 手機：整列（含資料夾列）都是可點目標，要有手指按得到的高度。
+   勾選框本身的尺寸由頁面層的通用規則給 —— 這裡只負責「列有多高」。 */
+@media (max-width: 720px) {
+  .fv-row { min-height: 44px; }
+}`;
