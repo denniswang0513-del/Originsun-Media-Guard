@@ -11,6 +11,7 @@ import { crmFetch, crmToast, esc } from './crm-utils.js';
 import { authDownload, bearerHeader, copyText, ensureStyle, proxyBodyLimit, uploadItems }
     from '../../js/shared/utils.js';
 import { changeStatus } from '../proposals/prop-actions.js';
+import { isTemplateFile, templateFromAsset } from '../proposals/brief-templates.js';
 import { STATUSES, withCurrent } from '../proposals/prop-const.js';
 import { tfetch } from '../proposals/prop-fetch.js';
 import { renderFolderView } from '../proposals/folder-view.js';
@@ -218,6 +219,14 @@ function _mountFiles(host, projectId, d, pins) {
                       { method: 'POST', body: JSON.stringify({ rel: f.rel }) });
                   crmToast('已設為提案簡報');
                   deckRel = f.rel;      // 沒回傳新的一層 → folder-view 只重刷★
+              } },
+            // 抽不出文字的格式不長這顆 —— 讓人按下去才知道不行是浪費一次往返
+            { at: 'trail', html: (f) => (isTemplateFile(f.filename) ? '📚' : ''),
+              title: '設為企劃範本（複製一份到 _範本，原檔不動）',
+              errPrefix: '設為範本失敗',
+              run: async (f) => {
+                  if (!isTemplateFile(f.filename)) return;
+                  if (await templateFromAsset(projectId, f)) crmToast('已加入企劃範本庫');
               } },
             { at: 'trail', title: '刪除', html: () => '✕', errPrefix: '刪除失敗',
               run: async (f, ctx) => {

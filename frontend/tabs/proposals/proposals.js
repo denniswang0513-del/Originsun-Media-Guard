@@ -93,6 +93,7 @@ function _renderShell() {
                 <select id="prop-f-year"><option value="">全部年份</option></select>
                 <button id="prop-add" class="prop-btn">＋ 新提案</button>
                 <button id="prop-folders" class="prop-btn ghost" title="NAS 上的提案資產資料夾（含過去手工整理的）">📁 資產資料夾</button>
+                <button id="prop-templates" class="prop-btn ghost" title="生成企劃書時給 Claude 參考的範本">📚 企劃範本</button>
             </div>
             <div class="prop-table-wrap">
                 <table class="prop-table" id="prop-table">
@@ -119,6 +120,20 @@ function _renderShell() {
                     <div class="prop-panel-body" style="display:block;">${inner}</div>
                 </div>`));
         } catch (e) { alert('資產資料夾載入失敗：' + (e.message || e)); }
+    });
+
+    document.getElementById('prop-templates').addEventListener('click', async () => {
+        try {
+            const mod = await import('./brief-templates.js');
+            mod.openTemplateLibrary((inner) => _mountOverlay(`
+                <div class="prop-panel" style="width:min(820px,96vw);">
+                    <div class="prop-panel-head">
+                        <h3>📚 企劃範本</h3>
+                        <button class="prop-close" title="關閉">✕</button>
+                    </div>
+                    <div class="prop-panel-body" style="display:block;">${inner}</div>
+                </div>`));
+        } catch (e) { alert('範本庫載入失敗：' + (e.message || e)); }
     });
 
     // 篩選接線（debounce、要讀哪幾個 key）與獨立企劃頁共用

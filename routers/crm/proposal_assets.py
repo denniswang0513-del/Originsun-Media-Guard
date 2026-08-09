@@ -871,8 +871,8 @@ async def proposal_assets_overview(request: Request):
     names, reachable = await _root_folders_cached(root) if root else ([], False)
     # 🔴 `_範本` 是企劃範本庫的家，不是提案資產夾。不排除的話它會出現在總覽、
     # 被「連結專案」或「改名」—— 改名走 rename_and_remap（那是專案夾的程序），
-    # 連下去就壞了。正本在 plan_templates.TEMPLATE_DIR。
-    from .plan_templates import TEMPLATE_DIR as _TPL_DIR
+    # 連下去就壞了。正本在 brief_templates.TEMPLATE_DIR。
+    from .brief_templates import TEMPLATE_DIR as _TPL_DIR
     names = [n for n in names if n != _TPL_DIR]
     out = [{"folder_name": n, "linked": n in by_folder, **(by_folder.get(n) or {})}
            for n in names]
@@ -892,8 +892,8 @@ async def _folder_or_404(folder: str) -> str:
     """root 底下的資料夾絕對路徑（三個 folder 端點共用；含路徑逃逸防護）。
 
     `_範本` 走這條會被當成提案資產夾（可改名、可連結專案）—— 它有自己的
-    端點組（plan_templates），這裡明確擋掉。"""
-    from .plan_templates import TEMPLATE_DIR as _TPL_DIR
+    端點組（brief_templates），這裡明確擋掉。"""
+    from .brief_templates import TEMPLATE_DIR as _TPL_DIR
     if (folder or "").strip() == _TPL_DIR:
         raise HTTPException(status_code=404, detail="找不到資料夾（或無法存取）")
     folder_abs = await asyncio.to_thread(safe_subfolder, await proposals_root(), folder)

@@ -1,4 +1,9 @@
-"""routers/crm/plan_templates.py — 企劃範本庫（`{提案根目錄}/_範本/`）。
+"""routers/crm/brief_templates.py — 企劃**範本庫**（`{提案根目錄}/_範本/`）。
+
+⚠️ 別跟前端的 `tabs/proposals/brief-templates.js` 搞混：那支是**方法論模板**
+（三視角 × 四提問的矩陣定義）。這裡的 template 是「以前寫得好的企劃書」，
+拿來給 Claude 參考文風與章節結構 —— 兩者都叫 template，一個是矩陣的骨、
+一個是成品的樣板。
 
 生成企劃書時給 Claude 參考的「好範本」。兩個入口：直接上傳、或在提案的檔案列
 上按「設為範本」（走 folder-view 的 rowActions 擴充點）。
@@ -31,7 +36,7 @@ from .proposal_assets import (_project_folder_abs, invalidate_folder_cache,
 
 try:
     from ._shared import select
-    from db.models import PreprodPlanTemplate
+    from db.models import PreprodBriefTemplate
 except ImportError:  # DB 套件不存在的 agent 環境
     pass
 
@@ -88,21 +93,21 @@ def _check_ext(filename: str) -> str:
 
 # ── 清單 / 單筆 ─────────────────────────────────────────────
 
-@router.get("/plan-templates")
-async def list_plan_templates(request: Request):
+@router.get("/brief-templates")
+async def list_brief_templates(request: Request):
     """範本清單。生成企劃書的挑選器與範本庫畫面共用這一支。"""
     _auth(request)
     _require_db()
     factory = await _get_factory()
     async with factory() as session:
         rows = (await session.execute(
-            select(PreprodPlanTemplate)
-            .order_by(PreprodPlanTemplate.created_at.desc()))).scalars().all()
+            select(PreprodBriefTemplate)
+            .order_by(PreprodBriefTemplate.created_at.desc()))).scalars().all()
     return {"templates": [_dict(t) for t in rows], "dir": TEMPLATE_DIR}
 
 
-@router.post("/plan-templates/upload")
-async def upload_plan_template(request: Request, files: List[UploadFile] = File(...)):
+@router.post("/brief-templates/upload")
+async def upload_brief_template(request: Request, files: List[UploadFile] = File(...)):
     """直接上傳範本（可多檔）。落地後狀態是 pending —— 消化另外觸發，
     因為那要跑 claude，可能要好幾分鐘，不該擋住上傳這個動作。"""
     payload = _auth(request)
@@ -118,7 +123,7 @@ async def upload_plan_template(request: Request, files: List[UploadFile] = File(
     made = []
     async with factory() as session:
         for name in saved:
-            t = PreprodPlanTemplate(
+            t = PreprodBriefTemplate(
                 id=uuid.uuid4().hex, name=os.path.splitext(name)[0], filename=name,
                 status="pending", created_by=payload.get("username") or "",
                 created_at=_now(), updated_at=_now())
@@ -130,8 +135,8 @@ async def upload_plan_template(request: Request, files: List[UploadFile] = File(
     return {"status": "ok", "templates": [_dict(t) for t in made], "skipped": skipped}
 
 
-@router.post("/plan-templates/from-asset")
-async def plan_template_from_asset(request: Request, body: dict):
+@router.post("/brief-templates/from-asset")
+async def brief_template_from_asset(request: Request, body: dict):
     """把某個專案資產夾裡的檔案**複製**成範本（body {project_id, rel, name?}）。
 
     複製而不是記指標：提案會繼續改版，範本應該是凍結的那一份；而且原檔被刪或
@@ -164,7 +169,7 @@ async def plan_template_from_asset(request: Request, body: dict):
         raise HTTPException(status_code=400, detail=f"複製失敗：{e}")
 
     async with factory() as session:
-        t = PreprodPlanTemplate(
+        t = PreprodBriefTemplate(
             id=uuid.uuid4().hex,
             name=(body.get("name") or os.path.splitext(filename)[0]).strip(),
             filename=filename, source_project_id=project_id, source_rel=rel,
@@ -176,15 +181,15 @@ async def plan_template_from_asset(request: Request, body: dict):
     return {"status": "ok", "template": _dict(t)}
 
 
-@router.patch("/plan-templates/{tid}")
-async def update_plan_template(tid: str, request: Request, body: dict):
+@router.patch("/brief-templates/{tid}")
+async def update_brief_template(tid: str, request: Request, body: dict):
     """改顯示名或**直接改骨架**。骨架是給人改的 —— 生成出來不對味時改這段，
     比回頭調 prompt 直觀得多。"""
     _auth(request)
     _require_db()
     factory = await _get_factory()
     async with factory() as session:
-        t = await session.get(PreprodPlanTemplate, tid)
+        t = await session.get(PreprodBriefTemplate, tid)
         if not t:
             raise HTTPException(status_code=404, detail="找不到這個範本")
         if "name" in body:
@@ -203,14 +208,14 @@ async def update_plan_template(tid: str, request: Request, body: dict):
         return {"status": "ok", "template": _dict(t)}
 
 
-@router.delete("/plan-templates/{tid}")
-async def delete_plan_template(tid: str, request: Request):
+@router.delete("/brief-templates/{tid}")
+async def delete_brief_template(tid: str, request: Request):
     """刪範本：DB 那列 + `_範本` 裡那份檔案。原提案的檔案不動。"""
     _auth(request)
     _require_db()
     factory = await _get_factory()
     async with factory() as session:
-        t = await session.get(PreprodPlanTemplate, tid)
+        t = await session.get(PreprodBriefTemplate, tid)
         if not t:
             raise HTTPException(status_code=404, detail="找不到這個範本")
         filename = t.filename

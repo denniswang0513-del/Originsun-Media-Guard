@@ -910,7 +910,7 @@ class PreprodProposal(Base):
                       Index("idx_pprop_project", "project_id", "updated_at"))
 
 
-class PreprodPlanTemplate(Base):
+class PreprodBriefTemplate(Base):
     """企劃範本庫 —— 生成企劃書時給 Claude 參考的「好範本」。
 
     實體檔案放在 `{提案資產根目錄}/_範本/` 底下（owner 指定的落點）；這張表存
@@ -923,7 +923,7 @@ class PreprodPlanTemplate(Base):
     「設為範本」是**複製**一份到 _範本，不是記指標 —— 提案會繼續改版（v2/v3），
     範本應該是凍結的參考；原檔被刪或改名時範本也不該跟著斷。
     """
-    __tablename__ = "preprod_plan_templates"
+    __tablename__ = "preprod_brief_templates"
 
     id = Column(String(32), primary_key=True)                    # uuid4 hex
     name = Column(String(255), nullable=False)                   # 顯示名（可改）
