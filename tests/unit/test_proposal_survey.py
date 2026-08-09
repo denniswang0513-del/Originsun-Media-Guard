@@ -111,7 +111,7 @@ def test_public_key_set_is_pinned():
     不能靠 review 時有人記得。改這條之前先想清楚那一列會不會出現在客戶眼前。"""
     assert ps.PUBLIC_KEYS == {
         "client", "brand_tone", "product", "product_tone", "ta", "goal",
-        "style", "special", "count_length", "media", "deliver_date", "client_refs",
+        "style", "special", "count_length", "media", "deliver_date",
     }
     assert "budget" not in ps.PUBLIC_KEYS
 

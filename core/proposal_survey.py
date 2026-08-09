@@ -43,7 +43,10 @@ TEMPLATE: tuple[tuple[str, str, str, bool], ...] = (
     # 金額 — 同 budget_range 的既有政策，客戶端連讀都不給
     ("budget", "預算", "含稅或未稅請一併註明", False),
     ("deliver_date", "預計交片時間", "有沒有非趕不可的日子，例：10/15 記者會前", True),
-    ("client_refs", "客戶參考影片", "貼幾支你覺得對的片，並說說喜歡哪裡", True),
+    # ⚠️ 2026-08-10 移除 `client_refs`（客戶參考影片）—— 參考影片有自己的一套
+    # （片庫 + 每支片的研究頁 + 提案引用），盤點表再放一格純文字是第二份真相。
+    # 移除範本列不會動到已存的值：`rows()` 只認 TEMPLATE 與 `x-` 自訂列，孤兒
+    # key 就地被忽略。移除前確認過 dev 與生產都是 0 筆有內容。
 )
 
 TEMPLATE_KEYS = tuple(k for k, _l, _h, _p in TEMPLATE)
