@@ -57,9 +57,37 @@ def _cell(v) -> str:
     return s or "（未填）"
 
 
+def build_subject(options: dict) -> str:
+    """主題與受眾 —— **範本骨架是通用的**（刻意不綁題材/年齡），這兩個值才是
+    讓它長出這一次樣貌的東西。owner 2026-08-10：「只有在我設定好主題與年紀
+    之後，才會長出不同的樣貌」。"""
+    rows = []
+    if (options.get("theme") or "").strip():
+        rows.append("- 主題：" + options["theme"].strip())
+    if (options.get("audience") or "").strip():
+        rows.append("- 目標受眾／年齡層：" + options["audience"].strip())
+    return ("## 這一份的主題與受眾" + chr(10) + chr(10).join(rows)) if rows else ""
+
+
+def build_answers(answers: dict) -> str:
+    """生成前必問的答案。
+
+    範本的結構常常需要矩陣不會涵蓋的東西（場地細節、路線與時程、參與者年齡、
+    拍攝許可…）—— 那些問題由範本骨架的「## 生成前必問」帶出來，在生成對話框
+    上問過人，答案從這裡進 prompt。沒問到的就不會出現，AI 也不該自己編。
+    """
+    rows = [(q, (a or "").strip()) for q, a in (answers or {}).items() if (a or "").strip()]
+    if not rows:
+        return ""
+    return "## 補充資料（生成前的提問與回答）\n" + "\n".join(
+        f"- {q}\n  → {a}" for q, a in rows)
+
+
 def build_facts(prop: dict, *, matrix_text: str, include: set) -> str:
     """把提案資料組成給 Claude 讀的段落。`include` 決定哪幾塊要進去。"""
     out = [f"## 提案標題\n{prop.get('title') or '（未填）'}"]
+    if prop.get("_subject"):
+        out.append(prop["_subject"])
     meta = []
     if prop.get("client_name"):
         meta.append(f"客戶：{prop['client_name']}")
@@ -88,6 +116,8 @@ def build_facts(prop: dict, *, matrix_text: str, include: set) -> str:
                 for r in refs))
     if "notes" in include and (prop.get("notes") or "").strip():
         out.append("## 內部備註\n" + prop["notes"].strip())
+    if prop.get("_answers"):
+        out.append(prop["_answers"])
     return "\n\n".join(out)
 
 
@@ -97,8 +127,10 @@ def build_skeletons(templates: list) -> str:
     if not good:
         return ("這次沒有指定參考範本 —— 請照一般提案企劃書的章節寫，"
                 "重點放在把下面的資料組織成連貫的敘事。\n")
-    parts = ["以下是**過去寫得好的企劃書骨架**。請照它的章節結構與語氣寫這一份"
-             "（內容當然要換成這個案子的）：\n"]
+    parts = ["以下是**過去寫得好的企劃書骨架**。它是**通用的**（刻意不綁題材與"
+             "年齡）—— 請照它的章節結構與語氣寫，並用這個案子的主題與受眾把"
+             "每一節具體化。節名可以隨題材調整（通用的「場域介紹」在室內案子"
+             "就寫成「拍攝場地」），但**結構與順序要跟著骨架**：" + chr(10)]
     for i, t in enumerate(good, 1):
         parts.append(f"────── 參考範本 {i}：{t.get('name') or ''} ──────\n"
                      f"{t['skeleton'].strip()}\n")
@@ -109,6 +141,9 @@ async def write_brief(brief_id: str, *, prop: dict, templates: list,
                       matrix_text: str, options: dict) -> tuple[bool, str]:
     """跑生成並把結果寫回那一版。回 `(成功, 訊息)`。"""
     include = set(options.get("include") or ["survey", "refs"])
+    prop = {**prop,
+            "_subject": build_subject(options),
+            "_answers": build_answers(options.get("answers") or {})}
     prompt = _PROMPT.format(
         skeletons=build_skeletons(templates),
         facts=build_facts(prop, matrix_text=matrix_text, include=include),

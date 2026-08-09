@@ -30,6 +30,8 @@ from fastapi import File, HTTPException, Request, UploadFile  # type: ignore
 from core.auth import check_admin_or_module
 from core.project_folders import clean_filename, dedupe, safe_rel_path, save_uploads
 
+from services.brief_template_digest import parse_questions as _parse_questions
+
 from ._shared import router, _get_factory, _now, _require_db
 from .proposal_assets import (_project_folder_abs, invalidate_folder_cache,
                               proposals_root)
@@ -75,6 +77,8 @@ def _dict(t) -> dict:
         "id": t.id, "name": t.name, "filename": t.filename,
         "status": t.status or "pending", "error": t.error or "",
         "skeleton": t.skeleton or "",
+        # 從骨架推導，不另存欄位 —— 人改骨架時問題清單跟著變
+        "questions": _parse_questions(t.skeleton or ""),
         "has_text": bool(t.extracted_text),
         "source_project_id": t.source_project_id or "",
         "created_by": t.created_by or "",

@@ -356,10 +356,12 @@
         <button class="side-tab" data-ptab="info">基本資料</button>
         <button class="side-tab active" data-ptab="plan">企劃</button>
         <button class="side-tab" data-ptab="folder" id="tab-folder" style="display:none;">重點提案</button>
+        <button class="side-tab" data-ptab="brief" id="tab-brief" style="display:none;">企劃書</button>
       </nav>
       <div class="plan-main">
         <div id="info-host" style="display:none;"></div>
         <div id="plan-host"><div class="state-msg">載入中…</div></div>
+        <div id="brief-host" style="display:none;"></div>
         <div id="folder-host" style="display:none;">
           <!-- 重點提案卡片列與檔案瀏覽分開兩個容器：folder-view 會清空它的
                host，共用一個的話卡片列每次導覽都被洗掉。
@@ -717,7 +719,31 @@ function _showSideTabs() {
             $(b.dataset.ptab + "-host").style.display = on ? "" : "none";
         });
         if (btn.dataset.ptab === "folder") _mountFolder();
+        if (btn.dataset.ptab === "brief") _mountBrief();
     }));
+}
+
+// ── 企劃書分頁（只有員工登入才有：客戶那條連分頁鈕都不建出來）────
+// 一次性槽，同 _pendingFolder 的形狀：掛好了設回 null，沒掛成留著讓人切回來重試。
+let _pendingBrief = null;
+
+function _setupBriefTab(opts) {
+    _pendingBrief = opts;
+    $("tab-brief").style.display = "";
+}
+
+async function _mountBrief() {
+    if (!_pendingBrief) return;
+    const opts = _pendingBrief;
+    try {
+        const { renderBriefs } = await import("/tabs/proposals/brief-view.js");
+        await renderBriefs($("brief-host"), opts);
+        _pendingBrief = null;              // 掛好了；之後切回來保留編輯中的內容
+    } catch (e) {
+        $("brief-host").innerHTML =        // 設定留著，切回來能重試
+            '<div class="state-msg" style="color:var(--red);">企劃書分頁載入失敗：'
+            + escText(emsg(e)) + "</div>";
+    }
 }
 
 // ── 資料夾分頁 ────────────────────────────────────────────
@@ -1121,6 +1147,9 @@ async function _loadPlan(pid) {
         // 畫好的矩陣換成「企劃載入失敗」。訪客那條的資料夾探測也是這個形狀。
         if (prop.project_id) _wireFolderTab(prop)
             .catch(e => console.warn("[folder] 資料夾分頁接線失敗", e));
+        // 企劃書：矩陣要當生成的輸入，所以 plan 一起帶進去
+        _setupBriefTab({ proposalId: prop.id, plan: prop.plan || null,
+                         toast: (m) => alert(m) });
     } catch (e) {
         host.innerHTML = '<div class="state-msg" style="color:var(--red);">企劃載入失敗：' + escText(emsg(e)) + "</div>";
     }
