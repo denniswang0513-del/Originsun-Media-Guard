@@ -157,7 +157,13 @@ def _fmt_date(dt):
 
 
 def _check_outcome_reason(new_status: str, reason: str):
-    """轉「成案/未成案」必附原因 — create/update 共用的守門。"""
+    """轉「成案/未成案」必附原因 — create/update 共用的守門。
+
+    ⚠️ **`POST /{pid}/convert` 目前沒有套這道門**（見該端點）—— 同樣是轉成案，
+    走 PUT 必填、走 convert 選填。前端兩個入口忠實鏡像各自打的端點，所以
+    UI 上也是一鬆一緊。這是規格不對稱，不是刻意設計；要收的話收在這裡，
+    別在前端補假守門（UI 說必填、後端仍收空值）。
+    """
     if new_status in _OUTCOME_STATUSES and not (reason or "").strip():
         raise HTTPException(status_code=422, detail=f"狀態轉「{new_status}」時 outcome_reason 必填（組織學習欄）")
 
@@ -1329,7 +1335,11 @@ async def convert_proposal(pid: str, request: Request,
     - 不帶 → 自動建 CRM 專案（帶客戶 + 類型對映；客戶未定也照建）。
 
     提案=專案合體後（2026-08-06）提案誕生即有專案，這條路只剩合體前建的
-    存量提案會走到。body 帶 outcome_reason 一併存。"""
+    存量提案會走到。body 帶 outcome_reason 一併存。
+
+    ⚠️ 這裡**沒有**呼叫 `_check_outcome_reason` —— 同樣轉成案，走 `PUT /{pid}`
+    原因必填、走這裡選填。不對稱是既有的（不是誰刻意豁免），要統一就在這裡補
+    一行；在前端補會做出「UI 說必填、後端仍收空值」的假守門。"""
     _check_auth(request)
     factory = _require_factory()
 

@@ -77,6 +77,14 @@
   .plan-head .back { font-size: 12px; color: var(--sub); cursor: pointer; border: 1px solid var(--line);
     border-radius: 2px; padding: 5px 12px; background: none; }
   .plan-head .back:hover { color: var(--red); border-color: var(--red); }
+  /* 標頭的管理動作（只有員工看得到；訪客那條不建出來） */
+  .plan-acts { display: none; align-items: center; gap: 8px; }
+  .plan-acts select, .plan-acts button { font: inherit; font-size: 12px; color: var(--ink);
+      background: none; border: 1px solid var(--line); border-radius: 2px;
+      padding: 5px 9px; cursor: pointer; outline: none; }
+  .plan-acts select:focus { border-color: var(--red); }
+  .plan-acts button:hover { color: var(--red); border-color: var(--red); }
+  .plan-acts button.danger:hover { color: #fff; background: var(--red); border-color: var(--red); }
 
   /* 側邊欄分頁（基本資料／企劃）— 側欄純文字，不放 emoji */
   .plan-body { display: flex; gap: 20px; align-items: flex-start; }
@@ -210,6 +218,11 @@
     <div class="plan-head">
       <button class="back" id="plan-back" onclick="location.href = location.pathname">← 清單</button>
       <h1 id="plan-title"></h1>
+      <span class="plan-acts" id="plan-acts">
+        <select id="plan-status" title="提案狀態（成案會建立或推進 CRM 專案）"></select>
+        <button id="plan-edit" title="編輯標題、客戶等基本資料">編輯</button>
+        <button id="plan-del" class="danger" title="刪除這個提案">刪除</button>
+      </span>
       <span id="guest-bar" style="display:none;align-items:center;gap:8px;">
         <label style="font-size:11px;letter-spacing:.1em;color:var(--sub);white-space:nowrap;">你的名字</label>
         <input id="guest-name" placeholder="共編署名（選填）" style="width:140px;border:1px solid var(--line);border-radius:2px;padding:5px 8px;font-size:12px;color:var(--ink);outline:none;">
@@ -239,10 +252,36 @@
 <script>
 "use strict";
 const TOKEN_KEY = "auth_token";
+// 提案的列舉（類型/狀態）與小工具。零依賴的常數模組 —— 客戶那條路只為了畫
+// 一個「類型」下拉，不該把整條 fetcher 鏈拉下來。動作層（會打端點的那些）
+// 只有登入模式才載，見 _loadPlan。
+// 存整個 namespace（不是挑幾個常數出來）：使用點散在四個函式裡，一個 `PC.`
+// 比四個模組層變數省事，前綴也提醒讀者它是晚一步來的。
+// 由需要的入口自己起跑，不是頂層 —— 清單頁與登入畫面都用不到。
+let PC = null;
+const _propConst = async () => (PC ||= await import("/tabs/proposals/prop-const.js"));
+
+/** 提早起跑的動態 import：失敗先接住，避免沒人 await 時變成 unhandled rejection。
+ *  真正的錯誤在呼叫端 await 它的時候才丟。 */
+function importRetryish(path) {
+    const p = import(path);
+    p.catch(() => {});
+    return p;
+}
+
+/** 錯誤訊息（Error 或裸值都吃）。 */
+const emsg = (e) => (e && e.message) || e;
+
+/** Response → JSON，非 2xx 就丟。這頁自己的端點有 204（沒 body），所以不能
+ *  直接用 prop-fetch 的 tfetch（它無條件 r.json()），而且訪客那條刻意不帶 token。 */
+const ok = async (r) => {
+    if (!r.ok) throw new Error(((await r.json().catch(() => ({}))).detail) || ("HTTP " + r.status));
+    return r.json().catch(() => ({}));
+};
 const $ = (id) => document.getElementById(id);
 
-// 只有授權標頭 —— 送 FormData 時**不能**設 Content-Type，
-// 一設就把 multipart 的 boundary 蓋掉，後端解不出檔案
+// 只有授權標頭。（檔案上傳已全部搬去共用層：簡報走 prop-actions、資產夾走
+// uploadItems —— 這支現在只送 JSON。）
 function _authHeader() {
     const tok = localStorage.getItem(TOKEN_KEY);
     return tok ? { "Authorization": "Bearer " + tok } : {};
@@ -264,7 +303,6 @@ function safeUrl(u) {
 }
 
 // ── 基本資料側欄分頁（可編輯，自動儲存；登入=完整欄位、公開=後端白名單子集） ──
-const PTYPES = ["形象", "廣告", "紀錄片", "政府標案", "社群", "其他"];
 
 // opts: { save: async(field, value)=>void, editable: string[] }
 /** 參考片的小縮圖。`thumb_url` 由後端在片庫收片時就抓好存著（YouTube 直接組
@@ -293,7 +331,7 @@ function _renderInfo(host, info, opts) {
     const txt = (f, val, ph) => `<input class="info-in" data-field="${f}" value="${escAttr(val || "")}" placeholder="${escAttr(ph || "")}">`;
 
     // 清單外的既有值（舊資料/CSV 匯入的自由文字）補成選項，否則 select 會靜默吃掉它
-    const ptypeOpts = PTYPES.includes(info.ptype) || !info.ptype ? PTYPES : [info.ptype, ...PTYPES];
+    const ptypeOpts = PC.withCurrent(PC.PTYPES, info.ptype);
     const ptypeCtrl = canEdit("ptype")
         ? row("類型", `<select class="info-in" data-field="ptype"><option value="">（未分類）</option>
             ${ptypeOpts.map(t => `<option value="${escAttr(t)}"${info.ptype === t ? " selected" : ""}>${escText(t)}</option>`).join("")}</select>`)
@@ -307,6 +345,16 @@ function _renderInfo(host, info, opts) {
     const budgetCtrl = canEdit("budget_range")
         ? row("預算範圍", txt("budget_range", info.budget_range, "例：80-120 萬"))
         : ro("預算範圍", info.budget_range);
+    // 登入頁走 deck.download 帶權限下載；公開頁的 deck_url 後端已給成可直連 URL
+    const deck = opts.deck || {};
+    const deckCtrl = (info.deck_url || deck.upload) ? row("提案簡報", `
+        ${info.deck_url
+            ? (deck.download ? '<a href="#" id="deck-dl">下載簡報</a>' : link(info.deck_url, "下載簡報"))
+            : '<span class="info-hint">尚未上傳</span>'}
+        ${deck.upload ? `<button id="deck-up" class="ref-addbtn" style="margin-left:8px;"
+            >${info.deck_url ? "更換" : "上傳"}</button>
+            <input id="deck-file" type="file" accept="${escAttr(deck.exts || "")}" hidden>` : ""}`) : "";
+
     const reasonCard = canEdit("outcome_reason")
         ? `<div class="info-card"><h4>成案／未成案原因（組織學習）</h4>
              <textarea class="info-in info-ta" data-field="outcome_reason" placeholder="轉成案或未成案時必填"></textarea></div>`
@@ -342,6 +390,11 @@ function _renderInfo(host, info, opts) {
             <input id="ref-new-title" placeholder="標題（可空）">
             <button id="ref-add-btn" class="ref-addbtn">＋ 加入</button>
         </div>
+        ${/* 從共用片庫挑一支已經研究過的（跟後台提案庫同一個名錄） */
+          opts.refs.library ? `<div class="ref-add">
+            <select id="ref-pick"><option value="">從片庫挑一支已收錄的…</option></select>
+            <button id="ref-link-btn" class="ref-addbtn">掛上</button>
+        </div>` : ""}
         <div class="ref-msg" id="ref-msg"></div>` : "";
 
     host.innerHTML = `
@@ -353,10 +406,7 @@ function _renderInfo(host, info, opts) {
             ${dateCtrl}
             ${budgetCtrl}
             ${tagsCtrl}
-            ${/* 登入頁走 onDeck 帶權限下載；公開頁的 deck_url 後端已給成可直連 URL */
-              info.deck_url ? row("提案簡報", opts.onDeck
-                ? '<a href="#" id="deck-dl">下載簡報</a>'
-                : link(info.deck_url, "下載簡報")) : ""}
+            ${deckCtrl}
         </div>
         ${reasonCard}
         ${opts.survey ? `<div class="info-card">
@@ -373,7 +423,7 @@ function _renderInfo(host, info, opts) {
             ${refs || '<div class="info-hint">尚未加參考影片</div>'}
             ${refAdd}
         </div>
-        <div class="info-hint">欄位改完會自動儲存。狀態、客戶、標題與簡報請到後台「提案庫」調整（狀態涉及成案自動建專案）。</div>
+        <div class="info-hint">${escText(opts.hint || "欄位改完會自動儲存。")}</div>
         <div class="info-save" id="info-save"></div>`;
 
     // textarea / 參考片欄位值走 DOM property（不進模板字串 — XSS 防線）
@@ -395,10 +445,45 @@ function _renderInfo(host, info, opts) {
     // 簡報落在 NAS 資產夾（非 web root）→ 由呼叫端提供帶權限的下載動作
     host.querySelector("#deck-dl")?.addEventListener("click", (e) => {
         e.preventDefault();
-        opts.onDeck();          // openDeck 自己 alert 失敗原因
+        deck.download();        // openDeck 自己 alert 失敗原因
     });
+    const deckFile = host.querySelector("#deck-file");
+    host.querySelector("#deck-up")?.addEventListener("click", () => deckFile.click());
+    deckFile?.addEventListener("change", () => deck.upload(deckFile.files[0]));
     _mountSurvey(host, info, opts);
     _wireInfoEditing(host, opts);
+}
+
+/** 片庫挑選：選項晚一步填（要打一次 API），拿不到（或全都掛過了）就把整列
+ *  收掉 —— 不留一個選不出東西的死控件。 */
+function _wireRefPicker(host, info, opts, redraw, say) {
+    const sel = host.querySelector("#ref-pick");
+    if (!sel) return;
+    // 選項**點開才抓**：整個片庫是一支不小的請求，而「從片庫挑一支」是低頻動作
+    // ——渲染時就抓會跟企劃矩陣搶連線槽。順帶讓看到的片庫是點開當下的，不是
+    // 開頁當下的（別人剛入庫的片，開著不動也挑得到）。
+    let filled = false;
+    const fill = async () => {
+        if (filled) return;
+        filled = true;
+        const lib = PC.pickableRefs(info.references, await opts.refs.library());
+        if (!sel.isConnected) return;
+        if (!lib.length) { sel.closest(".ref-add")?.remove(); return; }
+        for (const r of lib) {
+            const o = document.createElement("option");
+            o.value = r.id;
+            o.textContent = r.title || r.url;   // 片名不進模板字串
+            sel.appendChild(o);
+        }
+    };
+    sel.addEventListener("mousedown", () => fill().catch(e => say("片庫載入失敗：" + emsg(e), true)));
+    sel.addEventListener("focus", () => fill().catch(() => {}));
+    host.querySelector("#ref-link-btn").addEventListener("click", async () => {
+        if (!sel.value) return;
+        say("掛上中…");
+        try { await opts.refs.link(sel.value); await redraw(); }
+        catch (e) { say("掛上失敗：" + emsg(e), true); }
+    });
 }
 
 function _infoGrow(ta) { ta.style.height = "auto"; ta.style.height = ta.scrollHeight + "px"; }
@@ -416,7 +501,7 @@ async function _mountSurvey(host, info, opts) {
         if (!mount.isConnected) return;
         renderSurveyTable(mount, { rows: info.survey || [], ...opts.survey });
     } catch (e) {
-        mount.innerHTML = '<div class="info-hint">盤點表載入失敗：' + escText((e && e.message) || e) + "</div>";
+        mount.innerHTML = '<div class="info-hint">盤點表載入失敗：' + escText(emsg(e)) + "</div>";
     }
 }
 
@@ -424,9 +509,12 @@ async function _mountSurvey(host, info, opts) {
 function _wireRefs(host, info, opts) {
     const msg = $("ref-msg");
     const say = (t, err) => { msg.textContent = t; msg.classList.toggle("err", !!err); };
+    // 寫回 info 本身而不是拿 fresh 另外畫 —— 這頁只該有一份「目前的提案」。
+    // 兩份的話：加一支參考片（畫面出現）→ 按編輯存檔 → 用的是舊的 references，
+    // 剛加的那支從畫面消失。
     const redraw = async () => {
-        const fresh = await opts.reload();
-        _renderInfo(host, fresh, opts);
+        Object.assign(info, await opts.reload());
+        _renderInfo(host, info, opts);
     };
 
     host.querySelector("#ref-add-btn").addEventListener("click", async () => {
@@ -435,7 +523,7 @@ function _wireRefs(host, info, opts) {
         if (!/^https?:\/\//i.test(url)) { say("網址要以 http:// 或 https:// 開頭", true); return; }
         say("加入中…");
         try { await opts.refs.add(url, title); await redraw(); }
-        catch (e) { say("加入失敗：" + ((e && e.message) || e), true); }
+        catch (e) { say("加入失敗：" + emsg(e), true); }
     });
     $("ref-new-url").addEventListener("keydown", (e) => {
         if (e.key === "Enter") host.querySelector("#ref-add-btn").click();
@@ -443,8 +531,10 @@ function _wireRefs(host, info, opts) {
     host.querySelectorAll(".ref-del").forEach(btn => btn.addEventListener("click", async () => {
         if (!confirm("從這份提案移除這支參考影片？（片庫本體保留，其他提案不受影響）")) return;
         try { await opts.refs.remove(btn.dataset.rid); await redraw(); }
-        catch (e) { say("移除失敗：" + ((e && e.message) || e), true); }
+        catch (e) { say("移除失敗：" + emsg(e), true); }
     }));
+    // 從共用片庫挑一支（有給 library 才長出來）—— 與加/移除共用同一套重畫與訊息
+    _wireRefPicker(host, info, opts, redraw, say);   // 同步：選項點開才抓
 }
 
 // 自動儲存：停手 800ms 或離開欄位就送（dirty-check 擋沒改過的），同企劃矩陣手感
@@ -470,7 +560,7 @@ function _wireInfoEditing(host, opts) {
                 clearTimeout(msgTimer);
                 msgTimer = setTimeout(() => { saveEl.textContent = ""; }, 1500);
             } catch (e) {
-                saveEl.textContent = "儲存失敗：" + ((e && e.message) || e); saveEl.classList.add("err");
+                saveEl.textContent = "儲存失敗：" + emsg(e); saveEl.classList.add("err");
             }
         };
         const queue = () => { clearTimeout(timers.get(el)); timers.set(el, setTimeout(save, 800)); };
@@ -557,7 +647,7 @@ async function _mountFolder() {
         } catch (e) {
             $("folder-fv").innerHTML =         // 設定留著，切回來能重試
                 '<div class="state-msg" style="color:var(--red);">資料夾元件載入失敗：'
-                + escText((e && e.message) || e) + "</div>";
+                + escText(emsg(e)) + "</div>";
         }
     }
     // 卡片列是附屬品（它壞掉不該讓人連檔案都瀏覽不了），而且要用 folder-view
@@ -644,8 +734,48 @@ async function _loadList() {
             location.href = location.pathname + "?pid=" + encodeURIComponent(row.dataset.pid);
         }));
     } catch (e) {
-        host.innerHTML = '<div class="state-msg" style="color:var(--red);">清單載入失敗：' + escText((e && e.message) || e) + "</div>";
+        host.innerHTML = '<div class="state-msg" style="color:var(--red);">清單載入失敗：' + escText(emsg(e)) + "</div>";
     }
+}
+
+/**
+ * 標頭的管理動作（登入模式限定）：狀態管線 / 編輯 / 刪除。
+ *
+ * 規則本體在 prop-actions.js —— 後台提案庫用的是同一支，所以「成案要不要建
+ * 專案」「未成案原因必填」不會兩邊分岔。
+ *
+ * **狀態變更**整頁重載：成案會建立或推進 CRM 專案（project_id 可能從無到有），
+ * 側欄與資料夾分頁的掛載都要重跑，那才是會出錯的地方。
+ * **編輯與簡報上傳**走 refresh 局部重畫（重抓一次提案再畫側欄）。
+ */
+function _wireHeaderActions(prop, PA, refresh) {
+    $("plan-acts").style.display = "flex";
+    const sel = $("plan-status");
+    sel.innerHTML = PC.withCurrent(PC.STATUSES, prop.status).map(x =>
+        `<option value="${escAttr(x)}"${x === prop.status ? " selected" : ""}>${escText(x)}</option>`).join("");
+    sel.addEventListener("change", async () => {
+        try {
+            const r = await PA.changeStatus(prop, sel.value);
+            if (!r.ok) { sel.value = prop.status; return; }   // 取消或沒過守門
+            if (r.message) alert(r.message);
+            location.reload();
+        } catch (e) {
+            alert("狀態更新失敗：" + emsg(e));
+            sel.value = prop.status;
+        }
+    });
+    $("plan-edit").addEventListener("click", async () => {
+        const { openProposalEditor } = await import("/tabs/proposals/prop-editor.js");
+        // 🔴 開表單前先重抓：側欄那六個欄位是自動儲存的，本地的 prop 可能已經
+        // 過期。拿過期的值填進表單，按儲存就是把伺服器上的新值蓋回舊的。
+        try { await refresh(); } catch (_) { /* 抓不到就用手上這份 */ }
+        openProposalEditor({ proposal: prop, onSaved: refresh });
+    });
+    $("plan-del").addEventListener("click", async () => {
+        try {
+            if (await PA.removeProposal(prop)) location.href = location.pathname;
+        } catch (e) { alert("刪除失敗：" + emsg(e)); }
+    });
 }
 
 // ── 企劃（登入模式） ─────────────────────────────────────
@@ -653,22 +783,51 @@ async function _loadPlan(pid) {
     _show("plan-view");
     const host = $("plan-host");
     try {
+        // 三件事同時起跑：提案本體（API）、常數、動作層（後兩者是模組下載）。
+        // 串起來 await 的話首屏要多等兩個 RTT，而使用者在等的是標題與企劃矩陣。
+        // 動作層只有登入模式需要（會打端點）—— 訪客那條不載。
+        const constP = _propConst();
+        const paP = import("/tabs/proposals/prop-actions.js");
+        // 企劃矩陣是使用者真正在等的東西，而且它自己還要再拉 plan-templates
+        // 與 js/shared/utils.js（第二跳）。排在側欄渲染之後才起跑的話，
+        // 那兩跳完全序列化 —— 走隧道時這是最大的一段等待。
+        const matrixP = importRetryish("/tabs/proposals/plan-matrix.js");
         const r = await mfetch("/api/v1/proposals/" + encodeURIComponent(pid));
         if (!r.ok) throw new Error(r.status === 404 ? "找不到此提案" : "HTTP " + r.status);
         const prop = (await r.json()).proposal;
+        await constP;
+        const PA = await paP;
         $("plan-title").textContent = prop.title;
         document.title = prop.title + "｜提案企劃｜ORIGINSUN";
-        // 登入模式：完整欄位可編（狀態/客戶除外 — 見畫面提示），走既有部分更新 PUT
-        const P = "/api/v1/proposals/" + encodeURIComponent(pid);
-        const ok = async (r) => {
-            if (!r.ok) throw new Error(((await r.json().catch(() => ({}))).detail) || ("HTTP " + r.status));
-            return r.json().catch(() => ({}));
+        // 🔴 一律重抓，不要拿 PUT 的回應直接 Object.assign：
+        //   PUT 回的 _prop_dict 少 client_name/references/plan/survey（client_name
+        //   還固定是空字串），蓋上去會讓側欄的「客戶」整列消失；
+        //   而且側欄的自動儲存欄位沒寫回 prop，拿舊 prop 去開編輯表單再整包 PUT，
+        //   會把使用者剛打的備註/標籤蓋回開頁時的值（真的會刪掉字）。
+        // 編輯是低頻動作，一支 GET 換掉「前端猜伺服器改了什麼」的整套推理。
+        const refresh = async () => {
+            Object.assign(prop, await infoOpts.reload());
+            $("plan-title").textContent = prop.title;
+            document.title = prop.title + "｜提案企劃｜ORIGINSUN";
+            _renderInfo($("info-host"), prop, infoOpts);
         };
-        _renderInfo($("info-host"), prop, {
+        // 登入模式：完整欄位可編，走既有部分更新 PUT
+        const P = "/api/v1/proposals/" + encodeURIComponent(pid);
+        const infoOpts = {
             editable: ["ptype", "pitch_date", "budget_range", "tags", "notes", "outcome_reason"],
-            onDeck: async () => {
-                const { openDeck } = await import("/tabs/proposals/prop-fetch.js");
-                return openDeck(prop.id, prop.deck_url);
+            hint: "欄位改完會自動儲存。標題、客戶與狀態在上方標頭調整"
+                + "（成案會建立或推進 CRM 專案）。",
+            deck: {
+                exts: PC.DECK_EXTS,
+                download: async () => {
+                    const { openDeck } = await import("/tabs/proposals/prop-fetch.js");
+                    return openDeck(prop.id, prop.deck_url);
+                },
+                upload: async (f) => {
+                    try { if (await PA.uploadDeck(prop, f)) await refresh(); }
+                    catch (e) { alert("上傳失敗：" + emsg(e)); }
+                    finally { const el = $("deck-file"); if (el) el.value = ""; }
+                },
             },
             save: async (field, value) => ok(await mfetch(P, { method: "PUT", body: JSON.stringify({ [field]: value }) })),
             reload: async () => (await ok(await mfetch(P))).proposal,
@@ -683,21 +842,22 @@ async function _loadPlan(pid) {
             },
             refPageUrl: (rid) => "/reference.html?id=" + encodeURIComponent(rid),
             refs: {
-                add: async (url, title) => {
-                    const d = await ok(await mfetch("/api/v1/proposals/references",
-                        { method: "POST", body: JSON.stringify({ url, title }) }));
-                    return ok(await mfetch(P + "/refs",
-                        { method: "POST", body: JSON.stringify({ reference_id: d.reference.id }) }));
-                },
+                // 貼網址 / 從片庫挑，兩條都走共用動作層（跟後台同一支端點組合）
+                // 三個動作同形：只動這張卡 → 交給 _wireRefs 的局部重畫，不整頁重載
+                add: (url, title) => PA.addRefByUrl(prop.id, url, title),
+                library: PA.libraryRefs,
+                link: (rid) => PA.linkRef(prop.id, rid),
                 patch: async (rid, field, value) => ok(await mfetch(
                     "/api/v1/proposals/references/" + encodeURIComponent(rid),
                     { method: "PUT", body: JSON.stringify({ [field]: value }) })),
-                remove: async (rid) => ok(await mfetch(P + "/refs/" + encodeURIComponent(rid), { method: "DELETE" })),
+                remove: (rid) => PA.unlinkRef(prop.id, rid),
             },
-        });
+        };
+        _renderInfo($("info-host"), prop, infoOpts);
+        _wireHeaderActions(prop, PA, refresh);
         _showSideTabs();
         host.innerHTML = "";
-        const { renderPlan } = await import("/tabs/proposals/plan-matrix.js");
+        const { renderPlan } = await matrixP;
         renderPlan(host, { proposalId: prop.id, plan: prop.plan || null, canShare: true });
 
         // 資料夾分頁的接線放在企劃矩陣**之後**，而且不 await：它只是註冊設定與
@@ -705,10 +865,10 @@ async function _loadPlan(pid) {
         // 真正在等的矩陣往後推一個 RTT（走隧道時很有感）。
         // 用 .catch 而不是 try —— 它跑在矩陣畫好之後，掉進外層 catch 會把已經
         // 畫好的矩陣換成「企劃載入失敗」。訪客那條的資料夾探測也是這個形狀。
-        if (prop.project_id) _wireFolderTab(prop.project_id, ok)
+        if (prop.project_id) _wireFolderTab(prop.project_id)
             .catch(e => console.warn("[folder] 資料夾分頁接線失敗", e));
     } catch (e) {
-        host.innerHTML = '<div class="state-msg" style="color:var(--red);">企劃載入失敗：' + escText((e && e.message) || e) + "</div>";
+        host.innerHTML = '<div class="state-msg" style="color:var(--red);">企劃載入失敗：' + escText(emsg(e)) + "</div>";
     }
 }
 
@@ -717,7 +877,7 @@ async function _loadPlan(pid) {
  * 而且就地建得了夾、傳得了檔（owner 2026-08-08 選 B —— 企劃頁不該是「看得到
  * 卻做不了」的死路）。訪客那條走 token 端點，範圍小得多，接線在 _loadSharedPlan。
  */
-async function _wireFolderTab(projectId, ok) {
+async function _wireFolderTab(projectId) {
     const AP = "/api/v1/crm/projects/" + encodeURIComponent(projectId) + "/proposal-assets";
     const q = (rel) => "?rel=" + encodeURIComponent(rel || "");
     // 重點提案的狀態與三支端點都在 store 裡（CRM 專案分頁用的是同一顆），
@@ -759,6 +919,8 @@ async function _wireFolderTab(projectId, ok) {
 
 // ── 企劃（公開共編模式，?t=<token>，免登入） ─────────────
 async function _loadSharedPlan(shareTok) {
+    // 常數在 fetch 之前起跑 —— 客戶走的是免登入的慢隧道，序列化最不划算
+    const constP = _propConst();
     _show("plan-view");
     $("btn-logout").style.display = "none";
     $("plan-back").style.display = "none";           // 公開訪客沒有清單可回
@@ -779,10 +941,7 @@ async function _loadSharedPlan(shareTok) {
         if (d.info) {   // 舊後端沒有 info → 不顯示側欄（純企劃，行為同從前）
             // 公開共編：只放行描述性欄位（後端 _PUBLIC_INFO_FIELDS 才是真守門）
             const J = { "Content-Type": "application/json" };
-            const ok = async (r) => {
-                if (!r.ok) throw new Error(((await r.json().catch(() => ({}))).detail) || ("HTTP " + r.status));
-                return r.json().catch(() => ({}));
-            };
+            await constP;                      // PTYPES（畫類型下拉要用）
             _renderInfo($("info-host"), d.info, {
                 editable: ["ptype", "pitch_date", "tags", "notes"],
                 save: async (field, value) => ok(await fetch(base + "/info",
@@ -841,7 +1000,7 @@ async function _loadSharedPlan(shareTok) {
             refetch: async () => (await (await fetch(base)).json()).plan,
         });
     } catch (e) {
-        host.innerHTML = '<div class="state-msg" style="color:var(--red);">載入失敗：' + escText((e && e.message) || e) + "</div>";
+        host.innerHTML = '<div class="state-msg" style="color:var(--red);">載入失敗：' + escText(emsg(e)) + "</div>";
     }
 }
 

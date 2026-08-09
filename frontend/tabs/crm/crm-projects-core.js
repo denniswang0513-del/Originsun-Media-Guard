@@ -4,6 +4,10 @@
 import { crmFetch as _fetch, crmCacheFetch, crmCacheInvalidate, esc as _esc, renderAvatar, populateClientSelect, searchableSelect, saveSettings, kebabMenuHtml, createSortable, enumIndex } from './crm-utils.js';
 import { state, callbacks, STATUS_ORDER } from './crm-projects-state.js';
 
+// 「還在談」的狀態子集 —— 從提案模組的常數正本拿，不要在這裡再列一份
+// （加第七個狀態時，列在這裡的那份會靜默漏掉）
+import { PRESALE_STATUSES as _PROP_SUB_STATUSES } from '../proposals/prop-const.js';
+
 // ── Sortable list ──────────────────────────────────────────
 // 狀態走 STATUS_ORDER index(工作流順序);其他欄轉小寫做中文 localeCompare;
 // 空值由 createSortable 內部統一排尾。
@@ -252,7 +256,6 @@ export async function loadStaffList() {
 
 // 提案=專案合體：列上顯示衛星提案的前期子狀態（成案/未成案已反映在專案
 // 階段本身，不重複掛）。proposal_status 由 GET /projects 附掛。
-const _PROP_SUB_STATUSES = ['草稿', '已提案', '入圍', '擱置'];
 function _propSubBadge(p) {
     if (!_PROP_SUB_STATUSES.includes(p.proposal_status || '')) return '';
     return `<span class="crm-badge" style="margin-left:4px;opacity:.7;">${p.proposal_status}</span>`;

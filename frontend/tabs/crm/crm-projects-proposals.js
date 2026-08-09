@@ -11,17 +11,20 @@
 
 import { crmCacheFetch, esc } from './crm-utils.js';
 import { openDeck, tfetch } from '../proposals/prop-fetch.js';
+// NAS 的部署限制是單向的：proposals 底下的檔不能拉 crm，反過來沒事
+import { API } from '../proposals/prop-const.js';
+import { convertToProject } from '../proposals/prop-actions.js';
 import { _createFormModal } from '../../js/shared/modal-styles.js';
 import { loadProjects } from './crm-projects-core.js';
 import { state } from './crm-projects-state.js';
 
-const API = '/api/v1/proposals';
 const HOST_ID = 'proj-proposal-strip';
 const STYLE_ID = 'projprop-style';
 
-// 提案狀態 → 落在哪個管線分頁。這是**分頁歸類**，不是狀態字典 —— 全清單正本在
-// db/models.py PreprodProposal.status（前端 proposals.js STATUSES）；成案的變真專案列、
-// 擱置的刻意不進管線。上游加新狀態時要決定它歸哪一頁（不歸＝不出現在管線）。
+// 提案狀態 → 落在哪個管線分頁。這是**分頁歸類**，不是狀態字典 —— 權威在後端
+// routers/api_proposals.py，前端鏡像在 tabs/proposals/prop-const.js STATUSES；
+// 成案的變真專案列、擱置的刻意不進管線。
+// 上游加新狀態時要決定它歸哪一頁（不歸＝不出現在管線）。
 const STAGE_STATUSES = {
     '提案': ['草稿', '已提案', '入圍'],
     '未成案': ['未成案'],
@@ -186,10 +189,9 @@ async function _openConvertChooser(p) {
         ],
         onSubmit: async (vals, setError, close) => {
             try {
-                const d = await tfetch(`${API}/${encodeURIComponent(p.id)}/convert`, {
-                    method: 'POST',
-                    json: { project_id: vals.project_id, outcome_reason: vals.outcome_reason },
-                });
+                // 端點與 payload 走共用動作層（提案庫的狀態下拉是另一個呼叫端）
+                const d = await convertToProject(p, { projectId: vals.project_id,
+                                                      reason: vals.outcome_reason });
                 close();
                 _cache = null;                      // 提案狀態變了，快取作廢
                 await loadProjects();               // 咽喉會順帶 syncProposalStrip

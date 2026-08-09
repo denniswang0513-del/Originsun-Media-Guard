@@ -9,22 +9,23 @@
  * class，fixed 定位會被困住）。
  */
 
-import { esc } from '../website/website-utils.js';
-import { copyText, importRetry } from '../../js/shared/utils.js';
+// esc 走 js/shared —— 同目錄的共用元件都用那支，而且它零依賴
+import { copyText, esc, importRetry } from '../../js/shared/utils.js';
 import { createSortable, sortableTh, enumIndex } from '../crm/crm-utils.js';
 import { openDeck, tfetch } from './prop-fetch.js';
-
-const API = '/api/v1/proposals';
-const STATUSES = ['草稿', '已提案', '入圍', '成案', '未成案', '擱置'];
-const PTYPES = ['形象', '廣告', '紀錄片', '政府標案', '社群', '其他'];
-const DECK_EXTS = '.pdf,.ppt,.pptx,.key,.zip';
-const DECK_MAX_BYTES = 50 * 1024 * 1024;
+// 動作層與欄位定義跟獨立企劃頁共用同一份（見 prop-actions.js 檔頭）
+import { API, DECK_EXTS, PTYPES, STATUSES, pickableRefs, withCurrent }
+    from './prop-const.js';
+import {
+    addRefByUrl, changeStatus, libraryRefs, linkRef, removeProposal,
+    unlinkRef, uploadDeck,
+} from './prop-actions.js';
+import { openProposalEditor } from './prop-editor.js';
 
 let _content = null;
 let _all = [];           // 最近一次「無篩選」清單（供年份下拉選項）
 let _lastProps = [];     // 目前篩選下的清單（供點欄頭排序重繪）
 let _filters = { q: '', status: '', ptype: '', year: '' };
-let _clientsCache = null;
 let _qTimer = null;
 let _escHandler = null;
 
@@ -228,17 +229,6 @@ function _mountOverlay(innerHTML) {
     return ov;
 }
 
-async function _loadClients() {
-    if (_clientsCache) return _clientsCache;
-    try {
-        const d = await tfetch('/api/v1/crm/clients');
-        _clientsCache = (d.clients || []).map(c => ({ id: c.id, name: c.short_name }));
-    } catch {
-        _clientsCache = [];
-    }
-    return _clientsCache;
-}
-
 async function openDetail(pid) {
     let prop;
     try {
@@ -247,14 +237,10 @@ async function openDetail(pid) {
         alert('提案載入失敗：' + (e.message || e));
         return;
     }
-    let refLib = [];
-    try {
-        refLib = (await tfetch(`${API}/references`)).references || [];
-    } catch { /* 片庫載入失敗不擋詳情 */ }
+    const refLib = await libraryRefs();     // 拿不到就空陣列，不擋詳情
 
     const linked = prop.references || [];
-    const linkedIds = new Set(linked.map(r => r.id));
-    const pickable = refLib.filter(r => !linkedIds.has(r.id));
+    const pickable = pickableRefs(linked, refLib);
 
     const kv = (k, v) => v ? `<div class="prop-kv"><span class="k">${k}</span><span class="v">${esc(v)}</span></div>` : '';
     const tagChips = (prop.tags || []).map(t => `<span class="prop-tag">${esc(t)}</span>`).join('');
@@ -275,7 +261,10 @@ async function openDetail(pid) {
             <div class="prop-panel-head">
                 <h3>${esc(prop.title)}</h3>
                 <select id="pd-status" title="狀態（成案會自動建 CRM 專案；未成案必填原因）">
-                    ${STATUSES.map(s => `<option value="${s}"${s === prop.status ? ' selected' : ''}>${s}</option>`).join('')}
+                    ${/* 清單外的舊值也要留 —— 不補的話 select 會靜默把它換成第一個，
+                          使用者只是點開看一眼，值就沒了（企劃頁那顆早就這樣做） */
+                      withCurrent(STATUSES, prop.status).map(s =>
+                        `<option value="${esc(s)}"${s === prop.status ? ' selected' : ''}>${esc(s)}</option>`).join('')}
                 </select>
                 <button id="pd-edit" class="prop-btn ghost">✏️ 編輯</button>
                 <button id="pd-del" class="prop-btn danger">🗑 刪除</button>
@@ -381,52 +370,25 @@ async function openDetail(pid) {
     _wireShareCard(ov, prop);
     _mountSurvey(ov, prop);
 
-    // 狀態下拉：成案→confirm+/convert；未成案→強制填原因；其餘直接 PUT
+    // 狀態下拉：成案→建/推進專案；未成案→強制填原因；其餘直接 PUT（共用管線）
     ov.querySelector('#pd-status').addEventListener('change', async (e) => {
-        const val = e.target.value;
-        const revert = () => { e.target.value = prop.status; };
         try {
-            if (val === '成案') {
-                if (prop.project_id) {
-                    // 提案=專案合體：提案本來就有連結專案 → 走 PUT，
-                    // 後端把還在前期的專案推進「製作」階段
-                    const reason = prompt('成案原因（必填 — 組織學習欄）', prop.outcome_reason || '');
-                    if (reason === null) { revert(); return; }
-                    if (!reason.trim()) { alert('成案原因必填'); revert(); return; }
-                    await tfetch(`${API}/${prop.id}`, { method: 'PUT', json: { status: val, outcome_reason: reason.trim() } });
-                    alert('已成案 ✅ 連結的專案已推進「製作」階段');
-                } else {
-                    // legacy 無專案提案（缺客戶未遷移）→ 原 convert 路
-                    if (!confirm(`確定成案？將自動建立 CRM 專案「${prop.title}」`)) { revert(); return; }
-                    const reason = prompt('成案原因（組織學習欄，建議填寫；可留空）', prop.outcome_reason || '');
-                    if (reason === null) { revert(); return; }
-                    const d = await tfetch(`${API}/${prop.id}/convert`, { method: 'POST', json: { outcome_reason: reason.trim() } });
-                    alert('已成案 ✅ 已自動建立 CRM 專案（project_id: ' + d.project_id + '）');
-                }
-            } else if (val === '未成案') {
-                const reason = prompt('未成案原因（必填 — 組織學習欄）', prop.outcome_reason || '');
-                if (reason === null) { revert(); return; }
-                if (!reason.trim()) { alert('未成案原因必填'); revert(); return; }
-                await tfetch(`${API}/${prop.id}`, { method: 'PUT', json: { status: val, outcome_reason: reason.trim() } });
-            } else {
-                await tfetch(`${API}/${prop.id}`, { method: 'PUT', json: { status: val } });
-            }
+            const r = await changeStatus(prop, e.target.value);
+            if (!r.ok) { e.target.value = prop.status; return; }   // 取消或沒過守門
+            if (r.message) alert(r.message);
             refreshList();
             openDetail(prop.id);
         } catch (err) {
             alert('狀態更新失敗：' + (err.message || err));
-            revert();
+            e.target.value = prop.status;
         }
     });
 
     ov.querySelector('#pd-edit').addEventListener('click', () => _openEditor(prop));
 
     ov.querySelector('#pd-del').addEventListener('click', async () => {
-        if (!confirm(`確定刪除提案「${prop.title}」？參考片掛載會解除（片庫保留）。`)) return;
         try {
-            await tfetch(`${API}/${prop.id}`, { method: 'DELETE' });
-            _closeOverlay();
-            refreshList();
+            if (await removeProposal(prop)) { _closeOverlay(); refreshList(); }
         } catch (err) { alert('刪除失敗：' + (err.message || err)); }
     });
 
@@ -440,24 +402,17 @@ async function openDetail(pid) {
     const deckInput = ov.querySelector('#pd-deck-file');
     ov.querySelector('#pd-deck-upload').addEventListener('click', () => deckInput.click());
     deckInput.addEventListener('change', async () => {
-        const f = deckInput.files[0];
-        if (!f) return;
-        if (f.size > DECK_MAX_BYTES) { alert('簡報檔超過 50MB 上限'); deckInput.value = ''; return; }
-        const fd = new FormData();
-        fd.append('file', f);
         try {
-            await tfetch(`${API}/${prop.id}/deck`, { method: 'POST', body: fd });
-            refreshList();
-            openDetail(prop.id);
+            if (await uploadDeck(prop, deckInput.files[0])) { refreshList(); openDetail(prop.id); }
+            else deckInput.value = '';
         } catch (err) { alert('上傳失敗：' + (err.message || err)); }
     });
 
     // 參考片：解除 / 從片庫掛上 / 快速入庫並掛上
     ov.querySelectorAll('.prop-ref-unlink').forEach(btn => {
         btn.addEventListener('click', async () => {
-            const rid = btn.closest('.prop-ref').dataset.rid;
             try {
-                await tfetch(`${API}/${prop.id}/refs/${rid}`, { method: 'DELETE' });
+                await unlinkRef(prop.id, btn.closest('.prop-ref').dataset.rid);
                 refreshList();
                 openDetail(prop.id);
             } catch (err) { alert('解除失敗：' + (err.message || err)); }
@@ -467,7 +422,7 @@ async function openDetail(pid) {
         const rid = ov.querySelector('#pr-pick').value;
         if (!rid) { alert('請先從片庫挑一支參考片'); return; }
         try {
-            await tfetch(`${API}/${prop.id}/refs`, { method: 'POST', json: { reference_id: rid } });
+            await linkRef(prop.id, rid);
             refreshList();
             openDetail(prop.id);
         } catch (err) { alert('掛載失敗：' + (err.message || err)); }
@@ -477,8 +432,7 @@ async function openDetail(pid) {
         const title = ov.querySelector('#pr-new-title').value.trim();
         if (!url) { alert('參考片網址必填'); return; }
         try {
-            const d = await tfetch(`${API}/references`, { method: 'POST', json: { url, title } });
-            await tfetch(`${API}/${prop.id}/refs`, { method: 'POST', json: { reference_id: d.reference.id } });
+            await addRefByUrl(prop.id, url, title);
             refreshList();
             openDetail(prop.id);
         } catch (err) { alert('新增失敗：' + (err.message || err)); }
@@ -559,90 +513,12 @@ function _wireShareCard(ov, prop) {
     paint();
 }
 
-// ── 新增 / 編輯表單（prop=null 為新增；狀態不在表單內 —
-//    成案/未成案要走詳情的狀態下拉，才吃得到 convert/原因守門） ──
-
+// ── 新增 / 編輯表單 ──────────────────────────────────────
+// 表單本體與獨立企劃頁共用（prop-editor.js）—— 「一筆提案有哪些欄位」只定義
+// 一次。狀態刻意不在表單裡：它是有副作用的管線動作，走詳情的狀態下拉。
 async function _openEditor(prop) {
-    const isNew = !prop;
-    const clients = await _loadClients();
-    const v = (k) => esc((prop && prop[k]) || '');
-    const row = (label, html) => `<div class="prop-form-row"><label>${label}</label>${html}</div>`;
-    const ov = _mountOverlay(`
-        <div class="prop-panel" style="width:min(560px,96vw);">
-            <div class="prop-panel-head">
-                <h3>${isNew ? '＋ 新提案' : '✏️ 編輯：' + esc(prop.title)}</h3>
-                <button class="prop-close" title="關閉">✕</button>
-            </div>
-            <div class="prop-panel-body" style="display:block;">
-                ${row('標題 *', `<input id="pe-title" value="${v('title')}" placeholder="例：某公司 2026 品牌形象片提案">`)}
-                <div style="display:flex;gap:8px;">
-                    <div style="flex:1;">${row('客戶（可留空，之後在專案補）', `<div style="display:flex;gap:6px;">
-                        <select id="pe-client" style="flex:1;min-width:0;">
-                        <option value="">（未選客戶）</option>
-                        ${clients.map(c => `<option value="${esc(c.id)}"${prop && prop.client_id === c.id ? ' selected' : ''}>${esc(c.name)}</option>`).join('')}
-                        </select>
-                        <button id="pe-client-new" class="prop-btn ghost" title="快速建立潛在客戶" style="white-space:nowrap;">＋ 新客戶</button>
-                    </div>`)}</div>
-                    <div style="flex:1;">${row('類型', `<select id="pe-ptype">
-                        <option value="">（未分類）</option>
-                        ${PTYPES.map(t => `<option value="${t}"${prop && prop.ptype === t ? ' selected' : ''}>${t}</option>`).join('')}
-                    </select>`)}</div>
-                </div>
-                <div style="display:flex;gap:8px;">
-                    <div style="flex:1;">${row('提案日', `<input id="pe-pitch-date" type="date" value="${v('pitch_date')}">`)}</div>
-                    <div style="flex:1;">${row('預算範圍', `<input id="pe-budget" value="${v('budget_range')}" placeholder="例：80-120 萬">`)}</div>
-                </div>
-                ${row('報價單 ID（可空，連 CRM 報價）', `<input id="pe-quotation" value="${v('quotation_id')}">`)}
-                ${row('標籤（逗號分隔）', `<input id="pe-tags" value="${esc(((prop && prop.tags) || []).join(', '))}" placeholder="政府案, 高雄, 雙語">`)}
-                ${row('成案/未成案原因（組織學習欄）', `<textarea id="pe-outcome" rows="3" placeholder="轉成案或未成案時必填">${v('outcome_reason')}</textarea>`)}
-                ${row('備註', `<textarea id="pe-notes" rows="3" placeholder="補充說明、客戶偏好、內部提醒（企劃頁側欄也看得到）">${v('notes')}</textarea>`)}
-                <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:12px;">
-                    <button id="pe-cancel" class="prop-btn ghost">取消</button>
-                    <button id="pe-save" class="prop-btn">${isNew ? '建立提案' : '儲存變更'}</button>
-                </div>
-            </div>
-        </div>`);
-
-    ov.querySelector('#pe-cancel').addEventListener('click', () => {
-        if (isNew) _closeOverlay(); else openDetail(prop.id);
-    });
-    // 快速建立潛在客戶（ClientPayload 預設 status=潛在客戶）→ 選單即時補上並選中
-    ov.querySelector('#pe-client-new').addEventListener('click', async () => {
-        const name = prompt('新客戶名稱（將以「潛在客戶」建檔）');
-        if (!name || !name.trim()) return;
-        try {
-            const d = await tfetch('/api/v1/crm/clients', { method: 'POST', json: { short_name: name.trim() } });
-            _clientsCache = null;   // 下次開表單重抓
-            const sel = ov.querySelector('#pe-client');
-            const opt = document.createElement('option');
-            opt.value = d.client.id;
-            opt.textContent = d.client.short_name;
-            sel.appendChild(opt);
-            sel.value = d.client.id;
-        } catch (err) { alert('建立客戶失敗：' + (err.message || err)); }
-    });
-    ov.querySelector('#pe-save').addEventListener('click', async () => {
-        const title = ov.querySelector('#pe-title').value.trim();
-        if (!title) { alert('標題必填'); return; }
-        const body = {
-            title,
-            client_id: ov.querySelector('#pe-client').value,
-            ptype: ov.querySelector('#pe-ptype').value,
-            pitch_date: ov.querySelector('#pe-pitch-date').value || null,
-            budget_range: ov.querySelector('#pe-budget').value.trim(),
-            quotation_id: ov.querySelector('#pe-quotation').value.trim(),
-            tags: ov.querySelector('#pe-tags').value.split(/[,，]/).map(t => t.trim()).filter(Boolean),
-            outcome_reason: ov.querySelector('#pe-outcome').value.trim(),
-            notes: ov.querySelector('#pe-notes').value,
-        };
-        try {
-            const d = isNew
-                ? await tfetch(API, { method: 'POST', json: body })
-                : await tfetch(`${API}/${prop.id}`, { method: 'PUT', json: body });
-            refreshList();
-            openDetail(d.proposal.id);
-        } catch (err) {
-            alert((isNew ? '建立' : '儲存') + '失敗：' + (err.message || err));
-        }
+    await openProposalEditor({
+        proposal: prop,
+        onSaved: (saved) => { refreshList(); openDetail(saved.id); },
     });
 }

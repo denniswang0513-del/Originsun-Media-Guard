@@ -10,7 +10,7 @@ master 關機時，這些頁仍要開得了：影像紀錄的收照連結、客�
   3. `docker/nginx/originsun.conf`       nginx 反代哪些路徑
 少改一處就是「master 上正常、NAS 上靜默壞掉」，而那條路只有客戶會走到 ——
 最不容易被自己人發現。所以三邊都從這裡取值，並由
-`tests/unit/test_public_assets.py` 釘住：
+`tests/unit/test_public_surface.py` 釘住：
   - 每個頁面的 ES module **相依閉包**都落在 MODULE_DIRS 裡
     （這條會擋掉「順手加一個 ../crm/… 的 import」那類改動）
   - nginx 對每個項目都有對應的 location
