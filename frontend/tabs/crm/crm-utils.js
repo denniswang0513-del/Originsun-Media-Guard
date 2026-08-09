@@ -449,14 +449,12 @@ export function setupResizeHandle(handleId, panelId) {
 }
 
 
-/* enumIndex — 工作流順序排序的小工具:`['草稿','已送','已簽']` 找出 val 的 index,
- * 找不到回 arr.length(排尾)。給 createSortable 的 getters 用,避免每個 list 各自寫
- * 「const i = arr.indexOf(val||default); return i === -1 ? arr.length : i;」三行。
+/* enumIndex / 比較規則的正本搬到 js/shared/sortable.js —— tabs/proposals 底下的
+ * 檔案不能靜態 import 這個檔（NAS 對外容器不 serve tabs/crm），而提案清單要用
+ * 同一套規則。這裡 re-export，既有呼叫端一行都不用改。
  */
-export const enumIndex = (arr, val, fallback) => {
-    const i = arr.indexOf(val ?? fallback);
-    return i === -1 ? arr.length : i;
-};
+import { enumIndex, sortRows } from '../../js/shared/sortable.js';
+export { enumIndex };
 
 
 /* ── Sortable list headers ──────────────────────────────────
@@ -512,22 +510,9 @@ export function createSortable({ storageKey, defaultSort, panelId, panelSelector
         onChange?.();
     };
 
-    const _isEmpty = (v) => v === '' || v == null;
-    const sorted = (items) => {
-        const sign = _sort.dir === 'desc' ? -1 : 1;
-        // copy first — caller 的原陣列保留輸入順序(下游可能也要用)
-        return [...items].sort((a, b) => {
-            const va = _getValue(a, _sort.key);
-            const vb = _getValue(b, _sort.key);
-            const ae = _isEmpty(va), be = _isEmpty(vb);
-            // 空值永遠排尾(populated 先,跟方向無關 — 避免 desc 時空值跑到頂遮資料)
-            if (ae !== be) return ae ? 1 : -1;
-            if (ae) return 0;
-            if (typeof va === 'number' && typeof vb === 'number') return (va - vb) * sign;
-            // 大小寫正規化收在這裡 — getter 不用各自背 .toLowerCase()（中文為 no-op、英文混排欄一致）
-            return String(va).toLowerCase().localeCompare(String(vb).toLowerCase(), 'zh-Hant') * sign;
-        });
-    };
+    // 比較規則在 js/shared/sortable.js（空值排尾、大小寫正規化）——
+    // 提案清單也走同一份，不然兩邊的空值會排到相反的方向
+    const sorted = (items) => sortRows(items, _getValue, _sort);
 
     const attach = () => {
         const panel = panelId ? document.getElementById(panelId)

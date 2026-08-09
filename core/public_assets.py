@@ -34,11 +34,26 @@ SYNC_PATHS = (["frontend/img"]
               + [f"frontend/{p}" for p in PAGES]
               + [f"frontend/{d}" for d in MODULE_DIRS])
 
-# `from "x"` / `import("x")` / `importRetry("x")` 三種形式都要抓 —— 公開頁的元件
-# 是動態載入的，而 importRetry（utils.js 的動態 import 包裝，新程式一律用它）
-# 從語法上看只是個函式呼叫。漏掉它 = 那條相依對這份守衛完全隱形。
+# 三種寫法都要抓 —— 漏掉一種 = 那條相依連同它整棵子樹對守衛完全隱形：
+#   1. `from "x"`                       靜態 import / re-export
+#   2. `import("x")` / `importXxx("x")` 動態 import 與它的包裝（utils.js 的
+#      importRetry、proposal-plan.html 的 importRetryish…）——從語法上看只是
+#      個函式呼叫
+#   3. `import "x";`                    bare side-effect import（app.js 就這樣寫）
+#
+# 🔴 第 2 條刻意用 pattern 而不是列舉已知的名字：列舉法漏過一次 ——
+# `importRetryish` 不匹配 `import(?:Retry)?\(`，prop-list.js 整棵相依因此脫離
+# 檢查（2026-08-09）。要求大寫開頭是為了不誤抓 `importantThing("…")` 那種
+# 剛好以 import 開頭的識別字。
+# 第 3 條目前 served 檔一個都沒用到（加它對現況是 no-op），但不加就是留一個
+# 同型的破口等人踩。
+#
+# ⚠️ 路徑必須是**字面量**：`import(\`/x/${y}.js\`)` 或 `import(VAR)` 任何靜態
+# 守衛都看不見 —— 公開頁不要那樣寫。
 _IMPORT_RE = re.compile(
-    r"""from\s+["']([^"']+)["']|\bimport(?:Retry)?\(\s*["']([^"']+)["']""")
+    r"""from\s+["']([^"']+)["']"""
+    r"""|\bimport(?:[A-Z]\w*)?\(\s*["']([^"']+)["']"""
+    r"""|^\s*import\s+["']([^"']+)["']""", re.M)
 
 # 豁免名單：**(誰 import 的, import 什麼)** 一組一組寫。
 # 只放「動態 import + .catch()，載不到只是功能降級」的個案 ——
@@ -70,7 +85,7 @@ def iter_imports(frontend_dir: str, rel: str):
     except OSError:
         return
     for m in _IMPORT_RE.finditer(src):
-        got = _resolve(rel, m.group(1) or m.group(2) or "")
+        got = _resolve(rel, m.group(1) or m.group(2) or m.group(3) or "")
         if got:
             yield got
 

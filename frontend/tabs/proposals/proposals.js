@@ -11,11 +11,16 @@
 
 // esc 走 js/shared —— 同目錄的共用元件都用那支，而且它零依賴
 import { copyText, esc, importRetry } from '../../js/shared/utils.js';
-import { createSortable, sortableTh, enumIndex } from '../crm/crm-utils.js';
+import { createSortable, sortableTh } from '../crm/crm-utils.js';
 import { openDeck, tfetch } from './prop-fetch.js';
 // 動作層與欄位定義跟獨立企劃頁共用同一份（見 prop-actions.js 檔頭）
 import { API, DECK_EXTS, PTYPES, STATUSES, pickableRefs, withCurrent }
     from './prop-const.js';
+// 清單的查詢/排序/統計與獨立企劃頁共用（版面各自畫，邏輯只有一份）
+import {
+    fetchProposals, fillYearSelect, hasFilters, paintStats,
+    SORT_COLUMNS, SORT_GETTERS, wireFilters,
+} from './prop-list.js';
 import {
     addRefByUrl, changeStatus, libraryRefs, linkRef, removeProposal,
     unlinkRef, uploadDeck,
@@ -23,10 +28,9 @@ import {
 import { openProposalEditor } from './prop-editor.js';
 
 let _content = null;
-let _all = [];           // 最近一次「無篩選」清單（供年份下拉選項）
 let _lastProps = [];     // 目前篩選下的清單（供點欄頭排序重繪）
-let _filters = { q: '', status: '', ptype: '', year: '' };
-let _qTimer = null;
+let _readFilters = null;
+let _rowsFiltered = false;   // 目前這批是不是篩過的（決定空狀態要說什麼）
 let _escHandler = null;
 
 // ── 點欄頭排序：預設 key '' = 不排序、維持後端順序，點了才生效 ──
@@ -35,16 +39,7 @@ const _sorter = createSortable({
     defaultSort: { key: '', dir: 'asc' },
     panelId: 'prop-table',
     onChange: () => _renderRows(),
-    getters: {
-        title: p => p.title || '',
-        client: p => p.client_name || '',
-        ptype: p => p.ptype || '',
-        // 狀態照流程順序排（草稿→已提案→…→擱置），不是字串序
-        status: p => enumIndex(STATUSES, p.status),
-        pitch: p => p.pitch_date || '',
-        budget: p => p.budget_range || '',
-        refs: p => p.refs_count ?? 0,
-    },
+    getters: SORT_GETTERS,      // 與獨立企劃頁同一份（含「狀態照流程序」那條）
 });
 
 // 這個分頁的 section id（app.js 的 switchTab 會派 tab-changed 帶它）
@@ -57,7 +52,7 @@ export async function initProposalsTab() {
     _content.style.cssText = '';   // 移除「載入中…」的置中/padding inline 樣式
     _renderShell();
     _bindTabHook();
-    await refreshList();
+    await refreshList({ stats: true });
 }
 
 /**
@@ -73,7 +68,7 @@ function _bindTabHook() {
     if (_tabHookBound) return;
     _tabHookBound = true;
     document.addEventListener('tab-changed', (e) => {
-        if (e.detail && e.detail.tab === SECTION_ID) refreshList();
+        if (e.detail && e.detail.tab === SECTION_ID) refreshList({ stats: true });
     });
 }
 
@@ -99,8 +94,8 @@ function _renderShell() {
             <div class="prop-table-wrap">
                 <table class="prop-table" id="prop-table">
                     <thead><tr>
-                        ${sortableTh('title', '標題')}${sortableTh('client', '客戶')}${sortableTh('ptype', '類型')}${sortableTh('status', '狀態')}
-                        ${sortableTh('pitch', '提案日')}${sortableTh('budget', '預算範圍')}${sortableTh('refs', '參考')}
+                        ${/* 欄位清單只有一份（prop-list.SORT_COLUMNS）—— 加一欄不必記得改三處 */
+                          SORT_COLUMNS.map(c => sortableTh(c.key, c.label)).join('')}
                     </tr></thead>
                     <tbody id="prop-rows"></tbody>
                 </table>
@@ -114,40 +109,41 @@ function _renderShell() {
         } catch (e) { alert('資產資料夾載入失敗：' + (e.message || e)); }
     });
 
-    document.getElementById('prop-q').addEventListener('input', (e) => {
-        clearTimeout(_qTimer);
-        _qTimer = setTimeout(() => { _filters.q = e.target.value.trim(); refreshList(); }, 300);
-    });
-    for (const [id, key] of [['prop-f-status', 'status'], ['prop-f-ptype', 'ptype'], ['prop-f-year', 'year']]) {
-        document.getElementById(id).addEventListener('change', (e) => {
-            _filters[key] = e.target.value;
-            refreshList();
-        });
-    }
+    // 篩選接線（debounce、要讀哪幾個 key）與獨立企劃頁共用
+    _readFilters = wireFilters({
+        q: document.getElementById('prop-q'),
+        status: document.getElementById('prop-f-status'),
+        ptype: document.getElementById('prop-f-ptype'),
+        year: document.getElementById('prop-f-year'),
+    }, () => refreshList());
     document.getElementById('prop-add').addEventListener('click', () => _openEditor(null));
 }
 
-function _hasFilters() {
-    return Object.values(_filters).some(v => v);
-}
-
-async function refreshList() {
+/**
+ * @param opts.stats 連統計 chips 一起更新。
+ *
+ * 判準不是「資料有沒有變」，是「**統計端點的輸入**有沒有變」—— 那支只讀
+ * `count(*)` 與 funnel 列的 `(ptype, status, pitch_date)`（api_proposals.py
+ * proposal_stats）。所以：新增/刪除提案、改狀態、改類型或提案日 → 要；
+ * 掛/解參考片、上傳 deck → 不要（那些欄位它根本不看）。
+ * 純篩選/搜尋當然也不要：/stats 不吃 filters，每打一個字重打一次就是拿一模
+ * 一樣的數字做一次全表掃描。
+ */
+async function refreshList({ stats = false } = {}) {
     const tbody = document.getElementById('prop-rows');
     if (!tbody) return;
+    const filters = _readFilters();
     try {
-        const params = new URLSearchParams();
-        for (const [k, v] of Object.entries(_filters)) if (v) params.set(k, v);
-        const qs = params.toString();
-        const [d] = await Promise.all([
-            tfetch(API + (qs ? '?' + qs : '')),
-            _refreshStats(),   // 統計 chips 與列表並行更新
-        ]);
-        const props = d.proposals || [];
-        if (!_hasFilters()) { _all = props; _syncYearOptions(); }
+        // paintStats 自己吞錯、不回值 —— 起跑就好，不必進 Promise.all
+        if (stats) paintStats(document.getElementById('prop-chip-total'),
+                              document.getElementById('prop-chip-rate'));
+        const props = await fetchProposals(filters);
+        _rowsFiltered = hasFilters(filters);
+        if (!_rowsFiltered) fillYearSelect(document.getElementById('prop-f-year'), props);
         _lastProps = props;
         _renderRows();
     } catch (e) {
-        tbody.innerHTML = `<tr><td colspan="7" style="color:#f87171;padding:30px;text-align:center;">提案載入失敗：${esc(e.message || e)}</td></tr>`;
+        tbody.innerHTML = `<tr><td colspan="${SORT_COLUMNS.length}" style="color:#f87171;padding:30px;text-align:center;">提案載入失敗：${esc(e.message || e)}</td></tr>`;
     }
 }
 
@@ -156,40 +152,12 @@ function _renderRows() {
     const tbody = document.getElementById('prop-rows');
     if (!tbody) return;
     tbody.innerHTML = _lastProps.length ? _sorter.sorted(_lastProps).map(_row).join('')
-        : '<tr><td colspan="7" style="color:#666;padding:40px;text-align:center;">尚無提案 — 按「＋ 新提案」建立第一筆</td></tr>';
+        : `<tr><td colspan="${SORT_COLUMNS.length}" style="color:#666;padding:40px;text-align:center;">${
+            _rowsFiltered ? '沒有符合條件的提案' : '尚無提案 — 按「＋ 新提案」建立第一筆'}</td></tr>`;
     tbody.querySelectorAll('tr[data-id]').forEach(el => {
         el.addEventListener('click', () => openDetail(el.dataset.id));
     });
     _sorter.attach();
-}
-
-// 統計 chips：總提案 + 整體成案率；hover（title）看 by 類型 / by 年度細目
-async function _refreshStats() {
-    try {
-        const s = await tfetch(`${API}/stats`);
-        const total = document.getElementById('prop-chip-total');
-        const rate = document.getElementById('prop-chip-rate');
-        if (!total || !rate) return;
-        total.querySelector('.n').textContent = s.total_all ?? 0;
-        const ov = s.overall || { total: 0, won: 0, rate: 0 };
-        rate.querySelector('.n').textContent = `${ov.rate}%`;
-        rate.querySelector('.l').textContent = `成案率（${ov.won}/${ov.total}）`;
-        const lines = (items, head) => [head, ...(items || []).map(b => `　${b.key}：${b.won}/${b.total}（${b.rate}%）`)];
-        rate.title = [...lines(s.by_type, '── by 類型 ──'), ...lines(s.by_year, '── by 年度 ──')].join('\n');
-        total.title = '含草稿/擱置的全部提案數；成案率分母只算已提案/入圍/成案/未成案';
-    } catch { /* 統計失敗不擋列表 */ }
-}
-
-// 年份下拉選項 = 既有資料 pitch_date 的 distinct 年（保留目前選取）
-function _syncYearOptions() {
-    const sel = document.getElementById('prop-f-year');
-    if (!sel) return;
-    const cur = sel.value;
-    const years = [...new Set(_all.map(p => (p.pitch_date || '').slice(0, 4)).filter(Boolean))]
-        .sort().reverse();
-    sel.innerHTML = '<option value="">全部年份</option>'
-        + years.map(y => `<option value="${y}">${y}</option>`).join('');
-    if (years.includes(cur)) sel.value = cur;
 }
 
 function _pill(status) {
@@ -376,7 +344,7 @@ async function openDetail(pid) {
             const r = await changeStatus(prop, e.target.value);
             if (!r.ok) { e.target.value = prop.status; return; }   // 取消或沒過守門
             if (r.message) alert(r.message);
-            refreshList();
+            refreshList({ stats: true });
             openDetail(prop.id);
         } catch (err) {
             alert('狀態更新失敗：' + (err.message || err));
@@ -388,7 +356,7 @@ async function openDetail(pid) {
 
     ov.querySelector('#pd-del').addEventListener('click', async () => {
         try {
-            if (await removeProposal(prop)) { _closeOverlay(); refreshList(); }
+            if (await removeProposal(prop)) { _closeOverlay(); refreshList({ stats: true }); }
         } catch (err) { alert('刪除失敗：' + (err.message || err)); }
     });
 
@@ -413,7 +381,7 @@ async function openDetail(pid) {
         btn.addEventListener('click', async () => {
             try {
                 await unlinkRef(prop.id, btn.closest('.prop-ref').dataset.rid);
-                refreshList();
+                refreshList();          // 參考片不在 /stats 的輸入裡
                 openDetail(prop.id);
             } catch (err) { alert('解除失敗：' + (err.message || err)); }
         });
@@ -423,7 +391,7 @@ async function openDetail(pid) {
         if (!rid) { alert('請先從片庫挑一支參考片'); return; }
         try {
             await linkRef(prop.id, rid);
-            refreshList();
+            refreshList();              // 同上
             openDetail(prop.id);
         } catch (err) { alert('掛載失敗：' + (err.message || err)); }
     });
@@ -433,7 +401,7 @@ async function openDetail(pid) {
         if (!url) { alert('參考片網址必填'); return; }
         try {
             await addRefByUrl(prop.id, url, title);
-            refreshList();
+            refreshList();              // 同上
             openDetail(prop.id);
         } catch (err) { alert('新增失敗：' + (err.message || err)); }
     });
@@ -519,6 +487,6 @@ function _wireShareCard(ov, prop) {
 async function _openEditor(prop) {
     await openProposalEditor({
         proposal: prop,
-        onSaved: (saved) => { refreshList(); openDetail(saved.id); },
+        onSaved: (saved) => { refreshList({ stats: true }); openDetail(saved.id); },
     });
 }

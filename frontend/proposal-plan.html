@@ -60,8 +60,11 @@
   .list-head { display: flex; align-items: baseline; gap: 14px; margin: 8px 0 18px; }
   .list-head h1 { font-size: 20px; font-weight: 300; letter-spacing: 0.1em; margin: 0; }
   .list-head .hint { font-size: 12px; color: var(--sub); }
+  /* 列是 <a>（點一列＝導航），所以要把連結的預設樣式收掉 */
   .prop-row { display: flex; align-items: center; gap: 14px; padding: 14px 16px;
-    border: 1px solid var(--line); border-top: none; cursor: pointer; transition: background .12s; }
+    border: 1px solid var(--line); border-top: none; cursor: pointer; transition: background .12s;
+    color: inherit; text-decoration: none; }
+  .prop-row:focus-visible { outline: 2px solid var(--red); outline-offset: -2px; }
   .prop-row:first-of-type { border-top: 1px solid var(--line); }
   .prop-row:hover { background: #fafafa; }
   .prop-row .t { flex: 1; font-size: 14px; }
@@ -70,6 +73,23 @@
   .prop-row .badge.on { background: #e6f4ea; color: #147a3d; }
   .prop-row .badge.off { background: #f0f0f0; color: var(--sub); }
   .prop-row .st { font-size: 11px; color: var(--sub); min-width: 48px; text-align: right; }
+  .prop-row .meta { font-size: 11.5px; color: var(--sub); min-width: 74px; }
+  .prop-row .refs { font-size: 11.5px; color: var(--sub); min-width: 40px; text-align: right; }
+
+  /* 清單工具列（與後台提案庫同一組篩選，版面各自畫） */
+  .list-tools { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 0 0 14px; }
+  .list-tools input, .list-tools select, .list-tools button {
+      font: inherit; font-size: 12.5px; color: var(--ink); background: none;
+      border: 1px solid var(--line); border-radius: 2px; padding: 6px 9px; outline: none; }
+  .list-tools input:focus, .list-tools select:focus { border-color: var(--red); }
+  .list-tools button { cursor: pointer; }
+  .list-tools button:hover { color: var(--red); border-color: var(--red); }
+  .list-tools .grow { flex: 1; }
+  .chip { display: inline-flex; align-items: baseline; gap: 6px; padding: 5px 12px;
+          border: 1px solid var(--line); border-radius: 2px; cursor: default; }
+  .chip .n { font-size: 15px; font-weight: 300; }
+  .chip .l { font-size: 11px; color: var(--sub); letter-spacing: .05em; }
+  .chip.rate .n { color: var(--red); }
 
   /* 企劃視圖 */
   .plan-head { display: flex; align-items: center; gap: 12px; margin: 4px 0 16px; }
@@ -208,7 +228,19 @@
   <div id="list-view" style="display:none;">
     <div class="list-head">
       <h1>提案清單</h1>
-      <span class="hint">點一筆進企劃矩陣；標「企劃中」的已有內容。提案的新增與基本資料在後台「提案庫」管理。</span>
+      <span class="hint">點一筆進企劃矩陣；標「企劃中」的已有內容。</span>
+    </div>
+    <div class="list-tools" id="list-tools" style="display:none;">
+      <span class="chip" id="chip-total"><span class="n">–</span><span class="l">總提案</span></span>
+      <span class="chip rate" id="chip-rate"><span class="n">–</span><span class="l">成案率</span></span>
+      <input id="f-q" type="text" placeholder="搜尋標題…" style="width:170px;">
+      <select id="f-status"><option value="">全部狀態</option></select>
+      <select id="f-ptype"><option value="">全部類型</option></select>
+      <select id="f-year"></select>
+      <select id="f-sort" title="排序依據"><option value="">預設順序</option></select>
+      <button id="f-dir" title="切換遞增／遞減">↑</button>
+      <span class="grow"></span>
+      <button id="btn-new">＋ 新提案</button>
     </div>
     <div id="list-host"><div class="state-msg">載入中…</div></div>
   </div>
@@ -260,6 +292,11 @@ const TOKEN_KEY = "auth_token";
 // 由需要的入口自己起跑，不是頂層 —— 清單頁與登入畫面都用不到。
 let PC = null;
 const _propConst = async () => (PC ||= await import("/tabs/proposals/prop-const.js"));
+// 清單模組：由 boot() 在確定要進清單時才起跑（見那裡）。
+// 🔴 不要放在頂層 —— 頂層語句每次載入都跑，客戶的 ?t= 頁、登入畫面、
+// 以及 ?pid= 直接進企劃的路徑都會白下載它整棵相依。
+let _listMod = null;
+let _planMods = null;   // [prop-actions, plan-matrix]；boot() 走 ?pid= 時預載
 
 /** 提早起跑的動態 import：失敗先接住，避免沒人 await 時變成 unhandled rejection。
  *  真正的錯誤在呼叫端 await 它的時候才丟。 */
@@ -715,27 +752,108 @@ async function initGoogle() {
 }
 
 // ── 清單 ─────────────────────────────────────────────────
+// 查詢/排序/統計走 prop-list.js（與後台提案庫同一份）—— 版面各自畫，但
+// 「篩什麼、怎麼排、成案率怎麼算」不會兩邊漂。
+// 模組層只留「DOM 裡看不到的東西」：模組 handle、伺服器資料，以及那批資料
+// 的出處（_rowsFiltered）。篩選與排序的當前值就是控件的 value，再存一份
+// 只會有兩個真相。
+let PL = null;                         // prop-list 模組
+let _readFilters = null;               // wireFilters 回的讀取器
+let _rows = [];                        // 目前這批（排序重畫不重打 API）
+let _rowsFiltered = false;             // 這批是不是篩過的（決定空狀態要說什麼）
+
+/** 清單載入/查詢失敗的訊息（兩個 catch 共用一份字串）。 */
+const _listErr = (e) => '<div class="state-msg" style="color:var(--red);">清單載入失敗：'
+    + escText(emsg(e)) + "</div>";
+
 async function _loadList() {
     _show("list-view");
-    const host = $("list-host");
     try {
-        const r = await mfetch("/api/v1/proposals");
-        if (!r.ok) throw new Error("HTTP " + r.status);
-        const props = (await r.json()).proposals || [];
-        if (!props.length) { host.innerHTML = '<div class="state-msg">還沒有提案。先到後台「📑 提案庫」建一筆。</div>'; return; }
-        host.innerHTML = props.map(p => `
-            <div class="prop-row" data-pid="${escText(p.id)}">
-                <span class="t">${escText(p.title)}</span>
-                <span class="c">${escText(p.client_name || "")}</span>
-                <span class="badge ${p.has_plan ? "on" : "off"}">${p.has_plan ? "企劃中" : "未開始"}</span>
-                <span class="st">${escText(p.status || "")}</span>
-            </div>`).join("");
-        host.querySelectorAll(".prop-row").forEach(row => row.addEventListener("click", () => {
-            location.href = location.pathname + "?pid=" + encodeURIComponent(row.dataset.pid);
-        }));
+        // 常數與清單邏輯同時起跑（工具列的下拉要 STATUSES / PTYPES / SORT_COLUMNS）
+        // 自足：不倚賴 boot() 有沒有先起跑（那是兩個地方讀同一個 query 的隱形耦合）
+        _listMod ||= importRetryish("/tabs/proposals/prop-list.js");
+        const [pc, pl] = await Promise.all([_propConst(), _listMod]);
+        // 接線成功了才認 PL —— 中途丟例外的話，重試要能從頭再來一次
+        _wireListTools(pc, pl);
+        PL = pl;
+        $("list-tools").style.display = "flex";
+        // 統計只在進清單時抓一次 —— 後端 /stats 不吃 filters，每次篩選重打
+        // 是拿一模一樣的數字做一次全表掃描
+        PL.paintStats($("chip-total"), $("chip-rate"));
+        await _refreshList();
     } catch (e) {
-        host.innerHTML = '<div class="state-msg" style="color:var(--red);">清單載入失敗：' + escText(emsg(e)) + "</div>";
+        $("list-host").innerHTML = _listErr(e);
     }
+}
+
+function _wireListTools(pc, PL) {
+    const opt = (v, label) => `<option value="${escAttr(v)}">${escText(label ?? v)}</option>`;
+    $("f-status").insertAdjacentHTML("beforeend", pc.STATUSES.map(v => opt(v)).join(""));
+    $("f-ptype").insertAdjacentHTML("beforeend", pc.PTYPES.map(v => opt(v)).join(""));
+    // 可排序的欄位跟後台的表頭同一份清單
+    $("f-sort").insertAdjacentHTML("beforeend",
+        PL.SORT_COLUMNS.map(c => opt(c.key, c.label)).join(""));
+    _readFilters = PL.wireFilters(
+        { q: $("f-q"), status: $("f-status"), ptype: $("f-ptype"), year: $("f-year") },
+        () => _refreshList());
+    // 排序是純前端（後端不排）→ 只重畫，不重打 API。方向存在按鈕的 dataset 上，
+    // 不另外存一份 —— 箭頭與方向是同一件事。
+    // 沒選排序欄時方向鈕按了不會有反應（sortRows 直接 early-return）→ 停用它，
+    // 不要讓人以為壞了
+    const syncDirBtn = () => { $("f-dir").disabled = !$("f-sort").value; };
+    syncDirBtn();
+    $("f-sort").addEventListener("change", () => { syncDirBtn(); _paintList(); });
+    $("f-dir").addEventListener("click", () => {
+        const asc = $("f-dir").dataset.dir !== "desc";
+        $("f-dir").dataset.dir = asc ? "desc" : "asc";
+        $("f-dir").textContent = asc ? "↓" : "↑";
+        _paintList();
+    });
+    $("btn-new").addEventListener("click", async () => {
+        const { openProposalEditor } = await import("/tabs/proposals/prop-editor.js");
+        // 建好直接進那筆的企劃 —— 新增提案的下一步一定是開始企劃
+        openProposalEditor({ onSaved: (p) => {
+            location.href = location.pathname + "?pid=" + encodeURIComponent(p.id);
+        } });
+    });
+}
+
+async function _refreshList() {
+    try {
+        const filters = _readFilters();
+        _rows = await PL.fetchProposals(filters);
+        // 記「這批的出處」而不是重讀控件 —— 打字到 debounce 觸發之間，控件已經
+        // 有值但 _rows 還是舊的那批，重讀會說出不符實情的空狀態
+        _rowsFiltered = PL.hasFilters(filters);
+        if (!_rowsFiltered) PL.fillYearSelect($("f-year"), _rows);
+        _paintList();
+    } catch (e) {
+        $("list-host").innerHTML = _listErr(e);
+    }
+}
+
+function _paintList() {
+    const host = $("list-host");
+    if (!_rows.length) {
+        host.innerHTML = _rowsFiltered
+            ? '<div class="state-msg">沒有符合條件的提案。</div>'
+            : '<div class="state-msg">還沒有提案 — 按「＋ 新提案」建立第一筆。</div>';
+        return;
+    }
+    // 列是 `<a href>` 不是 div+click：點一列的語意就是導航。中鍵/Ctrl 開新分頁、
+    // 右鍵複製連結、Tab 可達、螢幕閱讀器讀得出是連結 —— 而且不用綁 N 個監聽。
+    const dir = $("f-dir").dataset.dir === "desc" ? "desc" : "asc";
+    host.innerHTML = PL.sortProposals(_rows, $("f-sort").value, dir).map(p => `
+        <a class="prop-row" href="?pid=${encodeURIComponent(p.id)}">
+            <span class="t">${escText(p.title)}</span>
+            <span class="c">${escText(p.client_name || "")}</span>
+            <span class="meta">${escText(p.ptype || "")}</span>
+            <span class="meta">${escText(p.pitch_date || "")}</span>
+            <span class="meta">${escText(p.budget_range || "")}</span>
+            <span class="refs">${p.refs_count ? "🎞 " + p.refs_count : ""}</span>
+            <span class="badge ${p.has_plan ? "on" : "off"}">${p.has_plan ? "企劃中" : "未開始"}</span>
+            <span class="st">${escText(p.status || "")}</span>
+        </a>`).join("");
 }
 
 /**
@@ -786,12 +904,14 @@ async function _loadPlan(pid) {
         // 三件事同時起跑：提案本體（API）、常數、動作層（後兩者是模組下載）。
         // 串起來 await 的話首屏要多等兩個 RTT，而使用者在等的是標題與企劃矩陣。
         // 動作層只有登入模式需要（會打端點）—— 訪客那條不載。
+        // boot() 走 ?pid= 時就預載好了（與 auth/me 平行）；直接呼叫進來的話
+        // 這裡補起跑。企劃矩陣是使用者真正在等的東西，而且它自己還要再拉
+        // plan-templates 與 js/shared/utils.js —— 那第二跳不能排在側欄渲染之後。
         const constP = _propConst();
-        const paP = import("/tabs/proposals/prop-actions.js");
-        // 企劃矩陣是使用者真正在等的東西，而且它自己還要再拉 plan-templates
-        // 與 js/shared/utils.js（第二跳）。排在側欄渲染之後才起跑的話，
-        // 那兩跳完全序列化 —— 走隧道時這是最大的一段等待。
-        const matrixP = importRetryish("/tabs/proposals/plan-matrix.js");
+        const [paP, matrixP] = _planMods || [
+            import("/tabs/proposals/prop-actions.js"),
+            importRetryish("/tabs/proposals/plan-matrix.js"),
+        ];
         const r = await mfetch("/api/v1/proposals/" + encodeURIComponent(pid));
         if (!r.ok) throw new Error(r.status === 404 ? "找不到此提案" : "HTTP " + r.status);
         const prop = (await r.json()).proposal;
@@ -1008,17 +1128,31 @@ async function _loadSharedPlan(shareTok) {
  *  訪客（?t=）看不到清單，那條路徑刻意不掛 —— 點了跳到登入頁只會讓客戶困惑。 */
 function _wireBrandHome() {
     const el = $("brand-home");
-    if (!el) return;
+    if (!el || el.dataset.wired) return;   // 登入成功會再跑一次 boot()
+    el.dataset.wired = "1";
     el.style.cursor = "pointer";
     el.title = "回提案清單";
     el.addEventListener("click", () => { location.href = location.pathname; });
 }
 
 async function boot() {
-    const shareTok = new URLSearchParams(location.search).get("t");
+    // 只 parse 一次：下面「要預載哪些模組」與最後「進清單還是進企劃」必須是同一個
+    // 判斷，分開讀兩次就有機會走岔
+    const q = new URLSearchParams(location.search);
+    const shareTok = q.get("t");
+    const pid = q.get("pid");
     if (shareTok) { _loadSharedPlan(shareTok); return; }   // 公開模式：完全不走登入
     _wireBrandHome();
     if (!localStorage.getItem(TOKEN_KEY)) { showLogin(""); return; }
+    // 該走哪條就預載哪條，而且趕在 auth/me 之前 —— 模組下載與身分驗證平行，
+    // 省掉「等身分回來才開始下載」那一趟（?pid= 是深連結，最常走）
+    if (pid) {
+        _propConst();
+        _planMods = [import("/tabs/proposals/prop-actions.js"),
+                     importRetryish("/tabs/proposals/plan-matrix.js")];
+    } else {
+        _listMod = importRetryish("/tabs/proposals/prop-list.js");
+    }
     let me;
     try {
         const r = await mfetch("/api/v1/auth/me");
@@ -1032,7 +1166,6 @@ async function boot() {
     $("hdr-user").style.display = "";
     // 模組清單要與 noperm-view 文案一起改（crm_projects 於 2026-08-03 放行 — 提案×專案整合）
     if (!isAdmin && !["preprod_proposals", "preprod_plan", "crm_projects"].some(m => mods.includes(m))) { _show("noperm-view"); return; }
-    const pid = new URLSearchParams(location.search).get("pid");
     if (pid) { _loadPlan(pid); } else { _loadList(); }
 }
 
