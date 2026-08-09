@@ -221,6 +221,30 @@ def _resolve_claude_exe() -> Optional[str]:
     return None
 
 
+# 同時最多兩個 claude 子行程。沒有這道閘的話，五個人一起按「生成」就是五個
+# `claude --print`（各帶數萬字 prompt、180 秒 timeout）同時壓在同一台 master 上。
+# 隔壁 api_bulletin 用 `_ask_lock`（完全序列化）；這裡放寬到 2 —— 生成企劃書
+# 是人按了在等的動作，全序列會讓第二個人等上三分鐘。
+_CLAUDE_GATE = asyncio.Semaphore(2)
+
+
+def strip_fence(s: str) -> str:
+    """剝掉 ``` 圍欄。Claude 偶爾還是會包，即使 prompt 叫它不要 —— 剝掉比重試便宜。
+
+    住在這裡是因為它是**claude 回應的後處理**，跟 `_call_claude` 同一層；
+    放在某個功能的 service 裡會變成別的功能去 import 它的私有函式。
+    """
+    t = (s or "").strip()
+    if not t.startswith("```"):
+        return t
+    lines = t.splitlines()
+    if lines and lines[0].startswith("```"):
+        lines = lines[1:]
+    if lines and lines[-1].strip() == "```":
+        lines = lines[:-1]
+    return "\n".join(lines)
+
+
 async def _call_claude(prompt: str, extra_args: Optional[list] = None) -> tuple[Optional[str], str]:
     """subprocess call `claude --print`，回 (stdout, error_detail)。
 
@@ -238,11 +262,12 @@ async def _call_claude(prompt: str, extra_args: Optional[list] = None) -> tuple[
     # Selector-loop-safe: run claude.exe via subprocess.run in a thread
     # (asyncio subprocess is unavailable on Windows SelectorEventLoop).
     from core.subproc import run_capture
-    rc, out, err = await run_capture(
-        [claude_exe, "--print"] + (extra_args or []),
-        input_bytes=prompt.encode("utf-8"),
-        timeout=_CLAUDE_TIMEOUT_SEC,
-    )
+    async with _CLAUDE_GATE:
+        rc, out, err = await run_capture(
+            [claude_exe, "--print"] + (extra_args or []),
+            input_bytes=prompt.encode("utf-8"),
+            timeout=_CLAUDE_TIMEOUT_SEC,
+        )
     if rc == -1:
         reason = (err or b"").decode("utf-8", errors="replace") or "未知錯誤"
         logger.warning("[seo_runner] claude 失敗：%s", reason)

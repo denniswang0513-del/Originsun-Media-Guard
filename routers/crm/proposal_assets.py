@@ -633,6 +633,17 @@ _overview_cache: dict = {"at": 0.0, "root": None, "names": [], "ok": False}
 _overview_lock = asyncio.Lock()
 
 
+# root 底下**不是提案資產夾**的保留名。上層功能自己註冊進來（例如
+# brief_templates 的 `_範本`）—— 共用層只知道「有些名字是保留的」，不知道
+# 保留給誰。反過來寫（這裡 import 上層）會製造循環，也讓資產夾層被迫認識
+# 一個它不該知道的功能。
+RESERVED_FOLDERS: set = set()
+
+
+def reserve_folder(name: str) -> None:
+    RESERVED_FOLDERS.add(name)
+
+
 def invalidate_folder_cache() -> None:
     """建夾/改名後叫一聲 —— 否則總覽最多 60 秒還在列舊名，點下去 404。"""
     _overview_cache["at"] = 0.0
@@ -869,11 +880,6 @@ async def proposal_assets_overview(request: Request):
                         "client_name": r[3] or ""} for r in rows if r[2]}
 
     names, reachable = await _root_folders_cached(root) if root else ([], False)
-    # 🔴 `_範本` 是企劃範本庫的家，不是提案資產夾。不排除的話它會出現在總覽、
-    # 被「連結專案」或「改名」—— 改名走 rename_and_remap（那是專案夾的程序），
-    # 連下去就壞了。正本在 brief_templates.TEMPLATE_DIR。
-    from .brief_templates import TEMPLATE_DIR as _TPL_DIR
-    names = [n for n in names if n != _TPL_DIR]
     out = [{"folder_name": n, "linked": n in by_folder, **(by_folder.get(n) or {})}
            for n in names]
     # 已登記但磁碟上還沒建出來的（剛改名/root 搆不到）也列出來，才不會人間蒸發
@@ -891,10 +897,11 @@ async def proposal_assets_overview(request: Request):
 async def _folder_or_404(folder: str) -> str:
     """root 底下的資料夾絕對路徑（三個 folder 端點共用；含路徑逃逸防護）。
 
-    `_範本` 走這條會被當成提案資產夾（可改名、可連結專案）—— 它有自己的
-    端點組（brief_templates），這裡明確擋掉。"""
-    from .brief_templates import TEMPLATE_DIR as _TPL_DIR
-    if (folder or "").strip() == _TPL_DIR:
+    root 底下有些夾不是提案資產夾（例如企劃範本庫的 `_範本`）。底線開頭的
+    本來就不會進總覽（`_scan_root_folders` 濾掉了），但**這條吃的是使用者
+    傳來的資料夾名** —— 不擋的話它會變成一個可以被「連結專案」「改名」的夾，
+    而改名走 rename_and_remap（專案夾的程序），連下去就壞了。"""
+    if (folder or "").strip() in RESERVED_FOLDERS:
         raise HTTPException(status_code=404, detail="找不到資料夾（或無法存取）")
     folder_abs = await asyncio.to_thread(safe_subfolder, await proposals_root(), folder)
     if not folder_abs:

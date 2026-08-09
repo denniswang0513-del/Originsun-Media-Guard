@@ -19,6 +19,9 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
+import re
+
+from services.website.seo_runner import _call_claude, strip_fence
 
 logger = logging.getLogger(__name__)
 
@@ -108,18 +111,16 @@ async def digest_template(tid: str) -> tuple[bool, str]:
     if err:
         return await _fail(tid, f"抽文字失敗：{err}")
 
-    from services.website.seo_runner import _call_claude
     out, call_err = await _call_claude(
         _PROMPT.format(text=text[:MAX_TEXT_CHARS]))
     if not out:
-        # 原文先存起來 —— 下次重跑不必再解一次 PDF，而且人可以自己讀
-        await _save(tid, text=text)
-        return await _fail(tid, call_err or "claude 沒有回應")
+        # 原文一起存 —— 消化失敗時人可以打開來看「到底抽到了什麼」，
+        # 那是「這份 PDF 是掃描檔」與「prompt 不好」最快的鑑別法
+        return await _fail(tid, call_err or "claude 沒有回應", text=text)
 
-    skeleton = _strip_fence(out).strip()
+    skeleton = strip_fence(out).strip()
     if not skeleton:
-        await _save(tid, text=text)
-        return await _fail(tid, "claude 回了空白")
+        return await _fail(tid, "claude 回了空白", text=text)
 
     await _save(tid, text=text, skeleton=skeleton, status="ok", error=None)
     logger.info("[brief_digest] %s 消化完成（骨架 %d 字）", tid, len(skeleton))
@@ -129,6 +130,11 @@ async def digest_template(tid: str) -> tuple[bool, str]:
 # 骨架裡「## 生成前必問」那一段的條列 —— **從骨架文字推導**，不另存欄位：
 # 人改骨架時問題清單就跟著變，不會有第二份資料在旁邊漂移。
 _Q_HEAD = "生成前必問"
+
+
+# 條列的開頭：`- ` / `* ` / `・` / `1. ` / `2、` / `3) `。Claude 兩種都會寫，
+# 而且同一份骨架裡混用 —— 分兩個分支寫過，兩邊的剝法還不一樣。
+_Q_BULLET = re.compile(r"[-*・]\s*|\d+\s*[.、)]\s*")
 
 
 def parse_questions(skeleton: str) -> list:
@@ -141,28 +147,13 @@ def parse_questions(skeleton: str) -> list:
             continue
         if not inside or not t:
             continue
-        if t[0] in "-*・":
-            t = t[1:].strip()
-        elif t[:2].rstrip(".、) ").isdigit():
-            t = t.split(" ", 1)[-1].strip() if " " in t else t.lstrip("0123456789.、) ")
-        else:
-            continue
+        m = _Q_BULLET.match(t)
+        if not m:
+            continue                       # 那一段裡的散文（例如「這幾題必問：」）
+        t = t[m.end():].strip()
         if t:
             out.append(t)
     return out[:8]
-
-
-def _strip_fence(s: str) -> str:
-    """Claude 偶爾還是會包 ``` 圍欄，即使叫它不要 —— 剝掉而不是重試。"""
-    t = (s or "").strip()
-    if not t.startswith("```"):
-        return t
-    lines = t.splitlines()
-    if lines and lines[0].startswith("```"):
-        lines = lines[1:]
-    if lines and lines[-1].strip() == "```":
-        lines = lines[:-1]
-    return "\n".join(lines)
 
 
 async def _save(tid: str, *, text=None, skeleton=None, status=None, error=...) -> None:
@@ -186,7 +177,7 @@ async def _save(tid: str, *, text=None, skeleton=None, status=None, error=...) -
         await session.commit()
 
 
-async def _fail(tid: str, msg: str) -> tuple[bool, str]:
-    await _save(tid, status="failed", error=msg)
+async def _fail(tid: str, msg: str, *, text=None) -> tuple[bool, str]:
+    await _save(tid, status="failed", error=msg, text=text)
     logger.warning("[brief_digest] %s 消化失敗：%s", tid, msg)
     return False, msg

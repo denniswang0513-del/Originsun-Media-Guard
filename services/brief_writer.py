@@ -15,7 +15,6 @@
 from __future__ import annotations
 
 import logging
-import uuid
 
 logger = logging.getLogger(__name__)
 
@@ -150,13 +149,12 @@ async def write_brief(brief_id: str, *, prop: dict, templates: list,
         length=LENGTHS.get(options.get("length") or "full", LENGTHS["full"]),
         tone=TONES.get(options.get("tone") or "pitch", TONES["pitch"]),
     )
-    from services.website.seo_runner import _call_claude
+    from services.website.seo_runner import _call_claude, strip_fence
     out, err = await _call_claude(prompt)
     if not out or not out.strip():
         return await _save(brief_id, status="failed",
                            error=err or "claude 沒有回應")
-    from services.brief_template_digest import _strip_fence
-    content = _strip_fence(out).strip()
+    content = strip_fence(out).strip()
     await _save(brief_id, content=content, status="ok", error=None)
     logger.info("[brief_writer] %s 生成完成（%d 字）", brief_id, len(content))
     return True, content
@@ -181,6 +179,3 @@ async def _save(brief_id: str, *, content=None, status=None, error=...) -> tuple
         await session.commit()
     return (status == "ok"), (error if error is not ... and error else "")
 
-
-def new_id() -> str:
-    return uuid.uuid4().hex

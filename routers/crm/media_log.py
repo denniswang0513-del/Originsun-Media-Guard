@@ -41,7 +41,7 @@ from core.project_folders import (FOLDER_VIEW_CAP, clean_filename,
                                   iter_files_rel,
                                   list_folder_files, make_dated_folder_name,
                                   remap_prefix, rename_and_remap, safe_rel_path,
-                                  safe_subfolder, subfolder_path, taken_names)
+                                  safe_subfolder, taken_names)
 from core.subproc import run_capture
 
 # public_router = 對外白名單（正本在 _shared，全套件共用一個）。本模組的 4 個

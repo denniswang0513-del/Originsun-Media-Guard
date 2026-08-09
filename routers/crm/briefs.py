@@ -11,34 +11,40 @@
 """
 from __future__ import annotations
 
-import asyncio
 import uuid
 
 from fastapi import HTTPException, Request  # type: ignore
 
-from core.auth import check_admin_or_module
+from core.bg_status import settle
+from core.bg_task import fire
+
+# 提案庫的三模組閘門只有一份（正本與 owner 的決策註解都在 api_proposals）
+from routers.api_proposals import _check_auth as _auth
 
 from ._shared import router, _get_factory, _now, _require_db
 
 try:
+    from sqlalchemy import func as safunc
+    from sqlalchemy.orm import defer
     from ._shared import select
     from db.models import PreprodBrief
 except ImportError:  # DB 套件不存在的 agent 環境
     pass
 
 
-def _auth(request: Request):
-    return check_admin_or_module(request, "preprod_proposals", "preprod_plan",
-                                 "crm_projects")
+def _dict(b, *, full: bool = False, chars: int = None) -> dict:
+    """清單只回 meta —— 一份企劃書上萬字，列十版就是幾十萬字進網路。
 
-
-def _dict(b, *, full: bool = False) -> dict:
-    """清單只回 meta —— 一份企劃書上萬字，列十版就是幾十萬字進網路。"""
+    `chars` 由呼叫端從 SQL 帶進來：清單那支 defer 掉 content，這裡不能再去
+    `len(b.content)`（那會把整份正文從 DB 拉回來，正好抵銷 defer）。
+    """
+    # 卡太久的 pending 在讀取端改判 failed（伺服器重啟過 → task 沒了）
+    status, error = settle(b.status or "ok", b.updated_at, b.error or "")
     d = {
         "id": b.id, "proposal_id": b.proposal_id,
-        "status": b.status or "ok", "error": b.error or "",
+        "status": status, "error": error,
         "template_ids": b.template_ids or [], "options": b.options or {},
-        "chars": len(b.content or ""),
+        "chars": chars if chars is not None else len(b.content or ""),
         "created_by": b.created_by or "",
         "created_at": b.created_at.isoformat() if b.created_at else None,
         "updated_at": b.updated_at.isoformat() if b.updated_at else None,
@@ -56,10 +62,14 @@ async def list_briefs(pid: str, request: Request):
     _require_db()
     factory = await _get_factory()
     async with factory() as session:
+        # defer 正文與矩陣快照、字數改由 SQL 算 —— 這支是前端每 5 秒輪詢的
+        # 目標，把每一版的全文都拉出來只為了 len() 是純浪費
         rows = (await session.execute(
-            select(PreprodBrief).where(PreprodBrief.proposal_id == pid)
-            .order_by(PreprodBrief.created_at.desc()))).scalars().all()
-    return {"briefs": [_dict(b) for b in rows]}
+            select(PreprodBrief, safunc.length(PreprodBrief.content))
+            .options(defer(PreprodBrief.content), defer(PreprodBrief.plan_snapshot))
+            .where(PreprodBrief.proposal_id == pid)
+            .order_by(PreprodBrief.created_at.desc()))).all()
+    return {"briefs": [_dict(b, chars=n or 0) for b, n in rows]}
 
 
 @router.get("/briefs/{bid}")
@@ -94,7 +104,6 @@ async def create_brief(pid: str, request: Request, body: dict = None):
             created_at=_now(), updated_at=_now())
         session.add(b)
         await session.commit()
-        await session.refresh(b)
         return {"status": "ok", "brief": _dict(b, full=True)}
 
 
@@ -139,13 +148,14 @@ async def generate_brief(pid: str, request: Request, body: dict):
             created_at=_now(), updated_at=_now())
         session.add(b)
         await session.commit()
-        await session.refresh(b)
         out = _dict(b)
 
     from services.brief_writer import write_brief
-    asyncio.create_task(write_brief(
-        b.id, prop=prop, templates=templates,
-        matrix_text=matrix_text, options=options))
+    # 走 core.bg_task.fire：強參考（裸 create_task 只被 loop 弱參考）+ 例外守衛，
+    # 例外沒被接住的話這一版會永遠停在 pending
+    fire(write_brief(b.id, prop=prop, templates=templates,
+                     matrix_text=matrix_text, options=options),
+         label=f"brief {b.id}")
     return {"status": "started", "brief": out}
 
 
@@ -165,7 +175,6 @@ async def update_brief(bid: str, request: Request, body: dict):
         b.content = body.get("content") or ""
         b.updated_at = _now()
         await session.commit()
-        await session.refresh(b)
         return {"status": "ok", "brief": _dict(b, full=True)}
 
 
@@ -222,12 +231,11 @@ async def rewrite_selection(bid: str, request: Request, body: dict):
         "不要解釋你改了什麼。",
         "🔴 不要杜撰原文沒有的數字、日期、人名、地名、預算。",
     ])
-    from services.brief_template_digest import _strip_fence
-    from services.website.seo_runner import _call_claude
+    from services.website.seo_runner import _call_claude, strip_fence
     out, err = await _call_claude(prompt)
     if not out or not out.strip():
         raise HTTPException(status_code=502, detail=err or "claude 沒有回應")
-    return {"status": "ok", "text": _strip_fence(out).strip()}
+    return {"status": "ok", "text": strip_fence(out).strip()}
 
 
 @router.delete("/briefs/{bid}")

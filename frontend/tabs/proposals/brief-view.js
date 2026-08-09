@@ -12,10 +12,11 @@
  * 複製一份方法論定義，改版時兩邊一定分岔。
  */
 
+import { autosave } from '../../js/shared/autosave.js';
 import { ensureStyle, esc } from '../../js/shared/utils.js';
 import { PLAN_TEMPLATES } from './plan-templates.js';
 import { field, openDialog } from './prop-dialog.js';
-import { tfetch } from './prop-fetch.js';
+import { pollUntilSettled, tfetch } from './prop-fetch.js';
 
 const API = '/api/v1/crm';
 
@@ -74,10 +75,13 @@ export async function renderBriefs(host, { proposalId, plan = null, toast = null
 
 const S = (h) => h.__bv;
 
+const _list = async (pid) =>
+    (await tfetch(`${API}/proposals/${encodeURIComponent(pid)}/briefs`)).briefs || [];
+
 async function _load(host, keepOpen = true) {
     const s = S(host);
     try {
-        s.items = (await tfetch(`${API}/proposals/${encodeURIComponent(s.proposalId)}/briefs`)).briefs || [];
+        s.items = await _list(s.proposalId);
     } catch (e) {
         host.innerHTML = `<div class="bv-note bv-err">載入失敗：${esc(e.message || e)}</div>`;
         return;
@@ -93,6 +97,9 @@ const _statusLabel = { ok: '', pending: '生成中…', failed: '失敗' };
 
 async function _render(host) {
     const s = S(host);
+    // 重畫會換掉整個 textarea —— 先把還沒送出去的那一版催出去。debounce 期間
+    // 切版本／輪詢收斂都會走到這裡，不催就是打完字直接掉。
+    if (s.saver) { const sv = s.saver; s.saver = null; await sv.flush(); sv.dispose(); }
     host.innerHTML = `
         <div class="bv-bar">
             <button class="bv-btn primary" data-act="gen">✦ 用企劃矩陣生成</button>
@@ -132,7 +139,11 @@ async function _paintOne(host) {
     const meta = s.items.find(x => x.id === s.open);
     if (meta && meta.status === 'pending') {
         main.innerHTML = '<div class="bv-note">生成中…（跑 Claude，約一到三分鐘）</div>';
-        _poll(host, s.open);
+        pollUntilSettled(s.open, s.polling, {
+            alive: () => host.isConnected,       // 切走分頁就停
+            list: _list.bind(null, s.proposalId),
+            onSettled: async (items) => { s.items = items; await _render(host); },
+        });
         return;
     }
     if (meta && meta.status === 'failed') {
@@ -167,17 +178,13 @@ async function _paintOne(host) {
         main.querySelectorAll('[data-rw]').forEach(x => (x.disabled = !has));
     };
     ['select', 'keyup', 'mouseup', 'input'].forEach(ev => ta.addEventListener(ev, sync));
-    let timer = null;
-    ta.addEventListener('input', () => {
-        save.textContent = '未儲存';
-        clearTimeout(timer);
-        timer = setTimeout(async () => {
-            try {
-                await tfetch(`${API}/briefs/${encodeURIComponent(b.id)}`,
-                             { method: 'PATCH', json: { content: ta.value } });
-                save.textContent = '已儲存';
-            } catch (e) { save.textContent = '儲存失敗：' + (e.message || e); }
-        }, 1200);
+    // 共用的自動儲存（停手就送、離開欄位也送、沒改過不打 API）。手寫過一版，
+    // 少了 dirty-check 與 blur flush —— 打完字直接切版本會整段掉。
+    ta.addEventListener('input', () => { save.textContent = '未儲存'; });
+    s.saver = autosave(ta, (v) => tfetch(`${API}/briefs/${encodeURIComponent(b.id)}`,
+                                         { method: 'PATCH', json: { content: v } }), {
+        onOk: () => { save.textContent = '已儲存'; },
+        onError: (err) => { save.textContent = '儲存失敗：' + (err.message || err); },
     });
     main.querySelectorAll('[data-rw]').forEach(el => {
         el.addEventListener('click', () => _rewrite(host, b.id, ta, el.dataset.rw, main));
@@ -208,30 +215,6 @@ async function _rewrite(host, bid, ta, mode, main) {
     } finally {
         btns.forEach(x => (x.disabled = false));
     }
-}
-
-// 一版一條輪詢；host 被拆掉（切走分頁）就停
-function _poll(host, id) {
-    const s = S(host);
-    if (s.polling.has(id)) return;
-    s.polling.add(id);
-    let left = 60;
-    const tick = async () => {
-        if (!host.isConnected) { s.polling.delete(id); return; }
-        try {
-            const list = (await tfetch(
-                `${API}/proposals/${encodeURIComponent(s.proposalId)}/briefs`)).briefs || [];
-            const cur = list.find(x => x.id === id);
-            if (!cur || cur.status !== 'pending' || --left <= 0) {
-                s.polling.delete(id);
-                s.items = list;
-                await _render(host);
-                return;
-            }
-        } catch { /* 抖一下不代表失敗 */ }
-        setTimeout(tick, 5000);
-    };
-    setTimeout(tick, 5000);
 }
 
 async function _blank(host) {

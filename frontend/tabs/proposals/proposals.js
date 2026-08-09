@@ -124,7 +124,7 @@ function _renderShell() {
 
     document.getElementById('prop-templates').addEventListener('click', async () => {
         try {
-            const mod = await import('./brief-templates.js');
+            const mod = await importRetry('/tabs/proposals/brief-templates.js');
             mod.openTemplateLibrary((inner) => _mountOverlay(`
                 <div class="prop-panel" style="width:min(820px,96vw);">
                     <div class="prop-panel-head">
@@ -389,7 +389,7 @@ async function openDetail(pid) {
             });
         },
         brief: async (host) => {
-            const { renderBriefs } = await import('./brief-view.js');
+            const { renderBriefs } = await importRetry('/tabs/proposals/brief-view.js');
             if (!host.isConnected) return;
             await renderBriefs(host, {
                 proposalId: prop.id, plan: prop.plan || null,

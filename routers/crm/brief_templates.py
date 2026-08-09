@@ -1,20 +1,19 @@
 """routers/crm/brief_templates.py — 企劃**範本庫**（`{提案根目錄}/_範本/`）。
 
-⚠️ 別跟前端的 `tabs/proposals/brief-templates.js` 搞混：那支是**方法論模板**
-（三視角 × 四提問的矩陣定義）。這裡的 template 是「以前寫得好的企劃書」，
-拿來給 Claude 參考文風與章節結構 —— 兩者都叫 template，一個是矩陣的骨、
-一個是成品的樣板。
+⚠️ 別跟 `tabs/proposals/plan-templates.js` 搞混：那支是**方法論模板**（三視角 ×
+四提問的矩陣定義）。這裡的 template 是「以前寫得好的企劃書」，拿來給 Claude
+參考文風與章節結構 —— 兩者都叫 template，一個是矩陣的骨、一個是成品的樣板。
+這個功能的前端在 `tabs/proposals/brief-templates.js`。
 
-生成企劃書時給 Claude 參考的「好範本」。兩個入口：直接上傳、或在提案的檔案列
-上按「設為範本」（走 folder-view 的 rowActions 擴充點）。
+兩個入口：直接上傳、或在提案的檔案列上按「設為範本」（走 folder-view 的
+rowActions 擴充點）。
 
-🔴 `_範本` **不是提案資產夾**，所以它必須從「資產資料夾總覽」排除掉 —— 那份
-總覽列的是 root 底下每個資料夾，不排除的話 `_範本` 會變成一個可以被「連結專案」
-「改名」的夾，連結下去就壞了（rename_and_remap 會把它當專案夾改名）。排除點在
-proposal_assets.proposal_assets_overview 與 _folder_or_404，兩處都要，因為那些
-folder/* 端點吃的是使用者傳來的資料夾名。
+🔴 `_範本` **不是提案資產夾**：底線開頭的夾本來就不會進「資產資料夾總覽」
+（`_scan_root_folders` 濾掉了），但 `folder/*` 端點吃的是**使用者傳來的資料夾
+名** —— 所以這支在 import 時把它註冊進 `proposal_assets.RESERVED_FOLDERS`，
+由那邊的 `_folder_or_404` 擋掉直接打 URL 的。
 
-範本的**消化**（抽文字 → 骨架）在 services/plan_template_digest.py，這裡只管
+範本的**消化**（抽文字 → 骨架）在 services/brief_template_digest.py，這裡只管
 檔案與索引。
 """
 from __future__ import annotations
@@ -27,16 +26,22 @@ from typing import List
 
 from fastapi import File, HTTPException, Request, UploadFile  # type: ignore
 
-from core.auth import check_admin_or_module
-from core.project_folders import clean_filename, dedupe, safe_rel_path, save_uploads
+from core.bg_status import settle
+from core.bg_task import fire
+from core.doc_text import SUPPORTED_EXTS as ALLOWED_EXTS
+from core.project_folders import (clean_filename, dedupe, safe_rel_path,
+                                  save_uploads)
+# 提案庫的三模組閘門只有一份（正本與 owner 的決策註解都在 api_proposals）
+from routers.api_proposals import _check_auth as _auth
 
 from services.brief_template_digest import parse_questions as _parse_questions
 
 from ._shared import router, _get_factory, _now, _require_db
-from .proposal_assets import (_project_folder_abs, invalidate_folder_cache,
-                              proposals_root)
+from .proposal_assets import (_resolve_asset_file, invalidate_folder_cache,
+                              proposals_root, reserve_folder)
 
 try:
+    from sqlalchemy.orm import defer
     from ._shared import select
     from db.models import PreprodBriefTemplate
 except ImportError:  # DB 套件不存在的 agent 環境
@@ -45,16 +50,11 @@ except ImportError:  # DB 套件不存在的 agent 環境
 # 範本夾名。底線開頭 = 「這不是提案夾」的視覺約定，同時讓它在排序時沉底。
 TEMPLATE_DIR = "_範本"
 
-# 能抽得出文字的格式。.key（Keynote）沒有可靠的 Python 解法 —— 擋在門口比
-# 讓它進來然後永遠消化失敗好。
-ALLOWED_EXTS = (".pdf", ".pptx", ".docx", ".md", ".txt")
+# 收哪些格式＝抽得出文字的那些（正本在 core.doc_text）。.key 沒有可靠的
+# Python 解法 —— 擋在門口比讓它進來然後永遠消化失敗好。
 MAX_BYTES = 60 * 1024 * 1024
 
-
-def _auth(request: Request):
-    """與提案庫同一道閘 —— owner 2026-08-10：有提案庫權限的人都能上傳範本。"""
-    return check_admin_or_module(request, "preprod_proposals", "preprod_plan",
-                                 "crm_projects")
+reserve_folder(TEMPLATE_DIR)   # 見檔頭：共用層只知道「這個名字保留了」
 
 
 async def _templates_dir(create: bool = False) -> str:
@@ -73,13 +73,14 @@ async def _templates_dir(create: bool = False) -> str:
 
 
 def _dict(t) -> dict:
+    # 卡太久的 pending 在讀取端改判 failed（伺服器重啟過 → task 沒了）
+    status, error = settle(t.status or "pending", t.updated_at, t.error or "")
     return {
         "id": t.id, "name": t.name, "filename": t.filename,
-        "status": t.status or "pending", "error": t.error or "",
+        "status": status, "error": error,
         "skeleton": t.skeleton or "",
         # 從骨架推導，不另存欄位 —— 人改骨架時問題清單跟著變
         "questions": _parse_questions(t.skeleton or ""),
-        "has_text": bool(t.extracted_text),
         "source_project_id": t.source_project_id or "",
         "created_by": t.created_by or "",
         "created_at": t.created_at.isoformat() if t.created_at else None,
@@ -104,8 +105,11 @@ async def list_brief_templates(request: Request):
     _require_db()
     factory = await _get_factory()
     async with factory() as session:
+        # defer 原文：那是消化失敗時給人看的除錯資料，清單一列都不需要它，
+        # 而這支正是前端每 5 秒輪詢的目標（每份範本最多 40k 字）
         rows = (await session.execute(
             select(PreprodBriefTemplate)
+            .options(defer(PreprodBriefTemplate.extracted_text))
             .order_by(PreprodBriefTemplate.created_at.desc()))).scalars().all()
     return {"templates": [_dict(t) for t in rows], "dir": TEMPLATE_DIR}
 
@@ -133,9 +137,9 @@ async def upload_brief_template(request: Request, files: List[UploadFile] = File
                 created_at=_now(), updated_at=_now())
             session.add(t)
             made.append(t)
+        # 不 refresh：expire_on_commit=False，屬性 commit 後仍有效 —— refresh 是
+        # 每列一次額外 SELECT（api_proposals:584 同結論）
         await session.commit()
-        for t in made:
-            await session.refresh(t)
     return {"status": "ok", "templates": [_dict(t) for t in made], "skipped": skipped}
 
 
@@ -155,18 +159,18 @@ async def brief_template_from_asset(request: Request, body: dict):
 
     factory = await _get_factory()
     async with factory() as session:
-        base = await _project_folder_abs(session, project_id)
-    src = await asyncio.to_thread(safe_rel_path, base, rel) if base else None
-    if not src:
-        raise HTTPException(status_code=404, detail="找不到這個檔案")
+        # 「檔案怎麼離開共用磁碟」的判斷只有一份（含 404 vs 500 的決定）
+        src = await _resolve_asset_file(session, project_id, rel)
     filename = clean_filename(os.path.basename(rel))
     _check_ext(filename)
 
     d = await _templates_dir(create=True)
     if not d:
         raise HTTPException(status_code=400, detail="範本資料夾無法建立（提案根目錄未設定或搆不到）")
-    taken = set(await asyncio.to_thread(_listdir_safe, d))
-    filename = dedupe(filename, taken)
+    # keep_ext=True：補號插在副檔名前面（稿.pdf → 稿-2.pdf）。少了它會產出
+    # `稿.pdf-2` —— 副檔名檢查早就過了，落地的卻是消化不了的無副檔名檔案。
+    filename = dedupe(filename, set(await asyncio.to_thread(_listdir, d)),
+                      keep_ext=True)
     try:
         await asyncio.to_thread(shutil.copy2, src, os.path.join(d, filename))
     except OSError as e:
@@ -181,7 +185,6 @@ async def brief_template_from_asset(request: Request, body: dict):
             created_at=_now(), updated_at=_now())
         session.add(t)
         await session.commit()
-        await session.refresh(t)
     return {"status": "ok", "template": _dict(t)}
 
 
@@ -208,7 +211,6 @@ async def update_brief_template(tid: str, request: Request, body: dict):
                 t.status, t.error = "ok", None
         t.updated_at = _now()
         await session.commit()
-        await session.refresh(t)
         return {"status": "ok", "template": _dict(t)}
 
 
@@ -233,8 +235,9 @@ async def digest_brief_template(tid: str, request: Request):
         await session.commit()
 
     from services.brief_template_digest import digest_template
-    # create_task 不 await —— 這支端點的責任只到「已經開始跑」為止
-    asyncio.create_task(digest_template(tid))
+    # 不 await —— 這支端點的責任只到「已經開始跑」為止。走 core.bg_task.fire
+    # 才有強參考（裸 create_task 只被 loop 弱參考，GC 可以直接收掉）與例外守衛。
+    fire(digest_template(tid), label=f"digest {tid}")
     return {"status": "started"}
 
 
@@ -264,7 +267,7 @@ async def delete_brief_template(tid: str, request: Request):
     return {"status": "ok"}
 
 
-def _listdir_safe(path: str) -> list:
+def _listdir(path: str) -> list:
     try:
         return os.listdir(path)
     except OSError:

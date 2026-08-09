@@ -18,8 +18,10 @@
  * 直觀得多 —— 所以這個畫面的重點不是「管理檔案」，是「看得到並改得動骨架」。
  */
 
-import { bearerHeader, ensureStyle, esc, uploadItems } from '../../js/shared/utils.js';
-import { tfetch } from './prop-fetch.js';
+import {
+    bearerHeader, ensureStyle, esc, inputUploadItems, uploadItems,
+} from '../../js/shared/utils.js';
+import { pollUntilSettled, tfetch } from './prop-fetch.js';
 
 const API = '/api/v1/crm/brief-templates';
 
@@ -48,7 +50,7 @@ export async function openTemplateLibrary(mount) {
             <div class="pt-list"><div class="pt-note">載入中…</div></div>
         </div>`);
     const ov = shell.querySelector('.pt');
-    ov.__pt = { items: [], open: '' };
+    ov.__pt = { items: [], open: '', polling: new Set() };
     ov.querySelector('.pt-add').addEventListener('click', () => _pick(ov));
     ov.querySelector('.pt-list').addEventListener('click', (e) => _onClick(ov, e));
     await _load(ov);
@@ -143,31 +145,11 @@ async function _digest(ov, id) {
         await tfetch(`${API}/${encodeURIComponent(id)}/digest`, { method: 'POST' });
     } catch (e) { alert('消化啟動失敗：' + (e.message || e)); return; }
     await _load(ov);
-    _poll(ov, id);
-}
-
-// 一份範本一條輪詢；掛在實例狀態上，避免同一份被按兩次開兩條
-function _poll(ov, id) {
-    const s = S(ov);
-    s.polling = s.polling || new Set();
-    if (s.polling.has(id)) return;
-    s.polling.add(id);
-    let left = 60;                       // 60 × 5s = 5 分鐘，claude 的上限之外再留一點
-    const tick = async () => {
-        if (!ov.isConnected) { s.polling.delete(id); return; }   // 對話框關掉就別再打了
-        try {
-            const list = (await tfetch(API)).templates || [];
-            const cur = list.find(x => x.id === id);
-            if (!cur || cur.status !== 'pending' || --left <= 0) {
-                s.polling.delete(id);
-                s.items = list;
-                _render(ov);
-                return;
-            }
-        } catch { /* 一次失敗不中止輪詢：NAS/網路抖一下不代表消化失敗 */ }
-        setTimeout(tick, 5000);
-    };
-    setTimeout(tick, 5000);
+    pollUntilSettled(id, S(ov).polling, {
+        alive: () => ov.isConnected,             // 對話框關掉就別再打了
+        list: async () => (await tfetch(API)).templates || [],
+        onSettled: (items) => { S(ov).items = items; _render(ov); },
+    });
 }
 
 async function _del(ov, id) {
@@ -192,7 +174,7 @@ function _pick(ov) {
                   + `只收 ${TEMPLATE_EXTS.join(' / ')}（Keynote 請先另存 PDF 或 PPTX）`);
             return;
         }
-        const items = [...inp.files].map(f => ({ file: f, path: f.name }));
+        const items = inputUploadItems(inp.files);
         if (!items.length) return;
         try {
             const d = await uploadItems(`${API}/upload`, items, { headers: bearerHeader() });
