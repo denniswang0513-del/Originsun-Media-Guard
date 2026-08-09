@@ -65,9 +65,22 @@
   .prop-item { display: flex; align-items: stretch;
     border: 1px solid var(--line); border-top: none; }
   .prop-item:first-of-type { border-top: 1px solid var(--line); }
-  /* 列是 <a>（點一列＝導航），所以要把連結的預設樣式收掉 */
+  /* 列是 <a>（點一列＝導航），所以要把連結的預設樣式收掉。
+     🔴 用 grid 不用 flex：flex 之下標題會吃掉所有剩餘空間，於是每一列右半部
+     的起點取決於左邊填了多少 —— 客戶欄長的那列，badge 就被推到別的位置，
+     整張清單看起來是歪的。min-width 只擋下限、擋不住撐開。
+     固定欄寬之後空欄照樣佔位，逐欄對齊。 */
   .prop-row { flex: 1; min-width: 0;
-    display: flex; align-items: center; gap: 14px; padding: 14px 16px;
+    display: grid; align-items: center; gap: 14px; padding: 14px 16px;
+    grid-template-columns:
+        minmax(0, 1fr)   /* 標題 */
+        minmax(0, 150px) /* 客戶 */
+        70px             /* 類型 */
+        86px             /* 提案日 */
+        86px             /* 預算 */
+        44px             /* 參考片數 */
+        64px             /* 企劃中 badge */
+        44px;            /* 狀態 */
     cursor: pointer; transition: background .12s; color: inherit; text-decoration: none; }
   .prop-row:focus-visible { outline: 2px solid var(--red); outline-offset: -2px; }
   .prop-row:hover { background: #fafafa; }
@@ -85,14 +98,18 @@
     transition: opacity .12s, color .12s; }
   .prop-item:hover .prop-del, .prop-del:focus-visible { opacity: 1; }
   .prop-del:hover { color: var(--red); }
-  .prop-row .t { flex: 1; font-size: 14px; }
-  .prop-row .c { font-size: 12px; color: var(--sub); min-width: 90px; }
+  /* 欄寬由 grid 決定 —— 這些只管字級與截斷，不要再放 min-width/flex，
+     那正是原本歪掉的來源 */
+  .prop-row > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .prop-row .t { font-size: 14px; }
+  .prop-row .c { font-size: 12px; color: var(--sub); }
   .prop-row .badge { font-size: 11px; padding: 2px 10px; border-radius: 2px; white-space: nowrap; }
   .prop-row .badge.on { background: #e6f4ea; color: #147a3d; }
   .prop-row .badge.off { background: #f0f0f0; color: var(--sub); }
-  .prop-row .st { font-size: 11px; color: var(--sub); min-width: 48px; text-align: right; }
-  .prop-row .meta { font-size: 11.5px; color: var(--sub); min-width: 74px; }
-  .prop-row .refs { font-size: 11.5px; color: var(--sub); min-width: 40px; text-align: right; }
+  .prop-row .st { font-size: 11px; color: var(--sub); }
+  .prop-row .meta { font-size: 11.5px; color: var(--sub); }
+  .prop-row .refs { font-size: 11.5px; color: var(--sub); text-align: right; }
+  .prop-row .badge { justify-self: start; }
 
   /* 清單工具列（與後台提案庫同一組篩選，版面各自畫） */
   .list-tools { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 0 0 14px; }
@@ -214,14 +231,14 @@
     /* 標題與說明各佔一行（原本並排會把「提案清單」擠成兩行） */
     .list-head { flex-direction: column; align-items: flex-start; gap: 4px; }
 
-    /* 標題一行、其餘資訊在下面自動換行 */
-    .prop-row { flex-wrap: wrap; gap: 6px 10px; padding: 12px 14px; }
+    /* 手機沒有「對齊成表格」這回事：收回 flex 換行，標題一行、其餘跟著排 */
+    .prop-row { display: flex; flex-wrap: wrap; gap: 6px 10px; padding: 12px 14px; }
+    .prop-row > span { overflow: visible; white-space: normal; }
+    .prop-row .t { flex: 1 0 100%; }
     .prop-proj { max-width: 96px; margin: 6px 6px 6px 0; }
     /* 手機沒有 hover —— 淡淡地一直顯示，不然按不到 */
     .prop-del { opacity: .45; padding: 0 10px; }
-    .prop-row .t { flex: 1 0 100%; }
-    .prop-row .c, .prop-row .meta, .prop-row .refs, .prop-row .st {
-      min-width: 0; text-align: left; }
+    .prop-row .c, .prop-row .meta, .prop-row .refs, .prop-row .st { text-align: left; }
     /* 空欄位在換行版面裡只會製造莫名的空隙。桌機靠固定欄寬對齊，
        那邊**不能**跟著藏（藏了整排欄位就對不齊了）。 */
     .prop-row span:empty { display: none; }
@@ -944,7 +961,9 @@ function _paintList() {
             <span class="st">${escText(p.status || "")}</span>
         </a>
         <button class="prop-proj${p.project_id ? "" : " none"}" data-proj="${escAttr(p.id)}"
-                title="${p.project_id ? "換綁或解除所屬專案" : "把這個提案掛到某個既有專案"}"
+                title="${escAttr(p.project_id
+                    ? "目前：" + (p.project_name || p.project_id) + "　（點一下換綁或解除）"
+                    : "把這個提案掛到某個既有專案")}"
         >${escText(PC.projectLabel(p))}</button>
         <button class="prop-del" data-del="${escAttr(p.id)}"
                 title="刪除這個提案（參考片掛載會解除，片庫保留）">✕</button>

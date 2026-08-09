@@ -194,9 +194,11 @@ function _renderRows() {
 
 /** 「專案」欄：已連結顯示專案名、未連結顯示「＋ 連結」，點下去都是換綁對話框。 */
 function _projCell(p) {
+    const tip = p.project_id
+        ? `目前：${p.project_name || p.project_id}　（點一下換綁或解除）`
+        : '把這個提案掛到某個既有專案';
     return `<button class="prop-linkproj${p.project_id ? '' : ' none'}" data-proj="${esc(p.id)}"
-                    title="${p.project_id ? '換綁或解除所屬專案' : '把這個提案掛到某個既有專案'}"
-            >${esc(projectLabel(p))}</button>`;
+                    title="${esc(tip)}">${esc(projectLabel(p))}</button>`;
 }
 
 function _pill(status) {

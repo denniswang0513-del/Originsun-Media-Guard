@@ -26,12 +26,21 @@ export function withCurrent(list, cur) {
 }
 
 /**
- * 清單「專案」欄要顯示什麼。未連結時給的是**行動呼籲**不是空白 —— 那一格
- * 同時是換綁入口，空著的話沒人知道可以按。
- * 回的是原始字串，兩個介面各自用自己的 esc 逸出。
+ * 清單「專案」欄要顯示什麼。回的是原始字串，兩個介面各自用自己的 esc 逸出。
+ *
+ * 三種情況：
+ *   未連結        → 行動呼籲（空白的話沒人知道那一格可以按）
+ *   同名          → 「同名專案」。提案誕生會自動建殼專案、名字就用提案標題，
+ *                   照實顯示等於同一句話在一列裡出現兩次。
+ *   名字不一樣    → 專案名（那才是有資訊量的情況：掛到別的案子上了）
+ * 完整名稱一律留在 title 屬性裡，滑過去看得到。
  */
-export const projectLabel = (p) =>
-    (p.project_id ? (p.project_name || p.project_id) : '＋ 連結');
+export const projectLabel = (p) => {
+    if (!p.project_id) return '＋ 連結';
+    const name = p.project_name || '';
+    if (!name) return p.project_id;
+    return name === (p.title || '') ? '同名專案' : name;
+};
 
 /** 片庫裡還沒掛到這個提案的（掛載挑選器用）。id 型別不保證一致 → 一律轉字串比。 */
 export function pickableRefs(linkedRefs, library) {
