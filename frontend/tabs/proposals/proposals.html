@@ -60,6 +60,16 @@
     }
     #prop-root .prop-linkproj:hover { border-color: #3b82f6; color: #93c5fd; }
     #prop-root .prop-linkproj.none { color: #777; }
+    /* 列尾刪除：平時很淡，hover 到那一列才明顯 —— 它跟「點一列＝開詳情」
+       共存，太顯眼會變成誤觸來源 */
+    #prop-root .prop-rowdel {
+        background: none; border: none; cursor: pointer; color: #555;
+        font-size: 13px; padding: 2px 6px; border-radius: 4px; opacity: 0;
+        transition: opacity .12s, color .12s;
+    }
+    #prop-root .prop-table tbody tr:hover .prop-rowdel { opacity: 1; }
+    #prop-root .prop-rowdel:focus-visible { opacity: 1; outline: 2px solid #f87171; }
+    #prop-root .prop-rowdel:hover { color: #f87171; background: #7f1d1d33; }
     #prop-root .prop-table tbody tr { cursor: pointer; transition: background .12s; }
     #prop-root .prop-table tbody tr:hover { background: #2c2c2c; }
 

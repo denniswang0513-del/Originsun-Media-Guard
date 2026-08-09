@@ -78,6 +78,13 @@
     overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .prop-proj:hover { border-color: var(--red); color: var(--red); }
   .prop-proj.none { opacity: .55; }
+  /* 列尾刪除：平時很淡，hover 到那一列才明顯 —— 它跟「點一列＝進企劃」共存，
+     太顯眼就會變成誤觸來源 */
+  .prop-del { flex: none; background: none; border: none; cursor: pointer;
+    color: #c4c4c4; font-size: 13px; padding: 0 12px; opacity: 0;
+    transition: opacity .12s, color .12s; }
+  .prop-item:hover .prop-del, .prop-del:focus-visible { opacity: 1; }
+  .prop-del:hover { color: var(--red); }
   .prop-row .t { flex: 1; font-size: 14px; }
   .prop-row .c { font-size: 12px; color: var(--sub); min-width: 90px; }
   .prop-row .badge { font-size: 11px; padding: 2px 10px; border-radius: 2px; white-space: nowrap; }
@@ -210,6 +217,8 @@
     /* 標題一行、其餘資訊在下面自動換行 */
     .prop-row { flex-wrap: wrap; gap: 6px 10px; padding: 12px 14px; }
     .prop-proj { max-width: 96px; margin: 6px 6px 6px 0; }
+    /* 手機沒有 hover —— 淡淡地一直顯示，不然按不到 */
+    .prop-del { opacity: .45; padding: 0 10px; }
     .prop-row .t { flex: 1 0 100%; }
     .prop-row .c, .prop-row .meta, .prop-row .refs, .prop-row .st {
       min-width: 0; text-align: left; }
@@ -937,6 +946,8 @@ function _paintList() {
         <button class="prop-proj${p.project_id ? "" : " none"}" data-proj="${escAttr(p.id)}"
                 title="${p.project_id ? "換綁或解除所屬專案" : "把這個提案掛到某個既有專案"}"
         >${escText(PC.projectLabel(p))}</button>
+        <button class="prop-del" data-del="${escAttr(p.id)}"
+                title="刪除這個提案（參考片掛載會解除，片庫保留）">✕</button>
         </div>`).join("");
     host.querySelectorAll("[data-proj]").forEach(el => {
         el.addEventListener("click", async () => {
@@ -944,6 +955,18 @@ function _paintList() {
             if (!p) return;
             const { openProjectLinker } = await import("/tabs/proposals/prop-actions.js");
             openProjectLinker(p, { onSaved: () => _refreshList() });
+        });
+    });
+    // 刪除的規則（確認文案、要不要真的送）走共用的 removeProposal —— 後台
+    // 提案庫用的是同一支，兩邊不會一邊問一邊不問
+    host.querySelectorAll("[data-del]").forEach(el => {
+        el.addEventListener("click", async () => {
+            const p = _rows.find(x => x.id === el.dataset.del);
+            if (!p) return;
+            try {
+                const PA = await import("/tabs/proposals/prop-actions.js");
+                if (await PA.removeProposal(p)) _refreshList();
+            } catch (e) { alert("刪除失敗：" + emsg(e)); }
         });
     });
 }

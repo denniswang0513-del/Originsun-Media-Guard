@@ -42,6 +42,9 @@ const _sorter = createSortable({
     getters: SORT_GETTERS,      // 與獨立企劃頁同一份（含「狀態照流程序」那條）
 });
 
+// 表格總欄數＝可排序的資料欄 + 尾端那個刪除鈕欄（空狀態/錯誤列的 colspan 要用）
+const COLSPAN = SORT_COLUMNS.length + 1;
+
 // 這個分頁的 section id（app.js 的 switchTab 會派 tab-changed 帶它）
 const SECTION_ID = 'tab_preprod_proposals';
 let _tabHookBound = false;
@@ -96,6 +99,7 @@ function _renderShell() {
                     <thead><tr>
                         ${/* 欄位清單只有一份（prop-list.SORT_COLUMNS）—— 加一欄不必記得改三處 */
                           SORT_COLUMNS.map(c => sortableTh(c.key, c.label)).join('')}
+                        <th></th>${/* 刪除鈕：不是資料欄，所以不進 SORT_COLUMNS（排不了） */''}
                     </tr></thead>
                     <tbody id="prop-rows"></tbody>
                 </table>
@@ -151,7 +155,7 @@ async function refreshList({ stats = false } = {}) {
         _lastProps = props;
         _renderRows();
     } catch (e) {
-        tbody.innerHTML = `<tr><td colspan="${SORT_COLUMNS.length}" style="color:#f87171;padding:30px;text-align:center;">提案載入失敗：${esc(e.message || e)}</td></tr>`;
+        tbody.innerHTML = `<tr><td colspan="${COLSPAN}" style="color:#f87171;padding:30px;text-align:center;">提案載入失敗：${esc(e.message || e)}</td></tr>`;
     }
 }
 
@@ -160,7 +164,7 @@ function _renderRows() {
     const tbody = document.getElementById('prop-rows');
     if (!tbody) return;
     tbody.innerHTML = _lastProps.length ? _sorter.sorted(_lastProps).map(_row).join('')
-        : `<tr><td colspan="${SORT_COLUMNS.length}" style="color:#666;padding:40px;text-align:center;">${
+        : `<tr><td colspan="${COLSPAN}" style="color:#666;padding:40px;text-align:center;">${
             _rowsFiltered ? '沒有符合條件的提案' : '尚無提案 — 按「＋ 新提案」建立第一筆'}</td></tr>`;
     tbody.querySelectorAll('tr[data-id]').forEach(el => {
         el.addEventListener('click', () => openDetail(el.dataset.id));
@@ -171,6 +175,18 @@ function _renderRows() {
             e.stopPropagation();
             const p = _lastProps.find(x => x.id === el.dataset.proj);
             if (p) openProjectLinker(p, { onSaved: () => refreshList() });
+        });
+    });
+    // 列尾的刪除：規則走共用的 removeProposal（含確認），這裡只接線。
+    // 刪一筆會動到成案率 → stats 要一起更新。
+    tbody.querySelectorAll('[data-del]').forEach(el => {
+        el.addEventListener('click', async (e) => {
+            e.stopPropagation();
+            const p = _lastProps.find(x => x.id === el.dataset.del);
+            if (!p) return;
+            try {
+                if (await removeProposal(p)) refreshList({ stats: true });
+            } catch (err) { alert('刪除失敗：' + (err.message || err)); }
         });
     });
     _sorter.attach();
@@ -198,6 +214,8 @@ function _row(p) {
             <td>${esc(p.pitch_date || '—')}</td>
             <td>${esc(p.budget_range || '—')}</td>
             <td>🎞 ${p.refs_count || 0}</td>
+            <td><button class="prop-rowdel" data-del="${esc(p.id)}"
+                        title="刪除這個提案（參考片掛載會解除，片庫保留）">✕</button></td>
         </tr>`;
 }
 
