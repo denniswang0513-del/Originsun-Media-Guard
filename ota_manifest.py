@@ -95,6 +95,7 @@ STDLIB = {
     "__future__", "annotations", "sysconfig", "zipimport", "runpy",
     "faulthandler", "smtplib", "imaplib", "poplib", "email",
     "tarfile",  # 標準庫，先前漏列 → preflight 會把它當第三方套件檢查
+    "unicodedata",  # 同上（core/doc_text 的 NFKC 正規化）
 }
 
 # ── Local project modules (excluded from dependency checks) ──
@@ -123,6 +124,7 @@ IMPORT_TO_PIP = {
     "edge_tts": "edge-tts", "f5_tts": "f5-tts",
     "faster_whisper": "faster-whisper",
     "docx": "python-docx",   # ⚠ PyPI 上的 `docx` 是廢棄套件，正確名稱是 python-docx
+    "pptx": "python-pptx",   # ⚠ 同型陷阱：模組叫 pptx，發行套件叫 python-pptx
     "tkinterdnd2": "",  # optional desktop-only
     "croniter": "croniter",
     "jwt": "PyJWT",
@@ -147,6 +149,7 @@ SERVER_ONLY_PKGS = {
     "soundfile",     # tts_engine
     "cryptography",  # ga_service / gsc_service 簽 JWT
     "python-docx", "pypdf",  # showcase AI 參考文件解析（已 try/except 降級）
+    "python-pptx",   # core/doc_text —— 企劃範本抽文字，只在 master 消化時跑
     "pytest",        # publish / deploy 的測試 gate
 }
 
