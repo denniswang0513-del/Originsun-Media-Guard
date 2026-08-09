@@ -300,6 +300,7 @@ async function openDetail(pid) {
             <div class="prop-tabs">
                 <button class="prop-tab active" data-tab="info">📋 基本資料</button>
                 <button class="prop-tab" data-tab="plan">🗂 企劃${prop.has_plan ? '' : '<span class="dot">·未開始</span>'}</button>
+                <button class="prop-tab" data-tab="brief">📄 企劃書</button>
             </div>
             <div class="prop-panel-body" id="pd-tab-info">
                 <div class="prop-info-col">
@@ -364,32 +365,56 @@ async function openDetail(pid) {
                 </div>
             </div>
             <div class="prop-panel-body" id="pd-tab-plan" style="display:none;"></div>
+            <div class="prop-panel-body" id="pd-tab-brief" style="display:none;"></div>
         </div>`);
 
     // 分頁切換：企劃分頁 lazy import 元件（載入失敗不影響基本資料分頁）。
     // 重試必須帶 cache-bust query — ES module map 會永久快取 rejected import，
     // 原路徑重 import 只會拿回同一個 rejected promise（subview-loader.js 同款教訓）。
-    let _planRendered = false;
+    // 容器 id 就是 `pd-tab-{data-tab}` —— 慣例寫在 markup 裡，不另外維護一張表
+    // （企劃頁的側欄分頁用的是同一條慣例）。分頁內容 lazy 掛一次，之後只切顯示。
     let _planTries = 0;
+    const _mounted = new Set(['info']);          // 基本資料在 markup 裡就畫好了
+    const _mount = {
+        plan: async (host) => {
+            const mod = _planTries++ === 0 ? './plan-matrix.js' : `./plan-matrix.js?t=${Date.now()}`;
+            const { renderPlan } = await import(mod);
+            if (!host.isConnected) return;       // await 期間 overlay 已被關掉
+            renderPlan(host, {
+                proposalId: prop.id, plan: prop.plan || null, fetcher: tfetch, canShare: true,
+                onPlanStarted: (p) => {
+                    prop.plan = p;
+                    ov.querySelector('[data-tab="plan"] .dot')?.remove();
+                },
+            });
+        },
+        brief: async (host) => {
+            const { renderBriefs } = await import('./brief-view.js');
+            if (!host.isConnected) return;
+            await renderBriefs(host, {
+                proposalId: prop.id, plan: prop.plan || null,
+                toast: (m) => alert(m),
+            });
+        },
+    };
     ov.querySelectorAll('.prop-tab').forEach(btn => btn.addEventListener('click', async () => {
+        const name = btn.dataset.tab;
         ov.querySelectorAll('.prop-tab').forEach(b => b.classList.toggle('active', b === btn));
-        const showPlan = btn.dataset.tab === 'plan';
-        ov.querySelector('#pd-tab-info').style.display = showPlan ? 'none' : '';
-        ov.querySelector('#pd-tab-plan').style.display = showPlan ? '' : 'none';
-        if (showPlan && !_planRendered) {
-            _planRendered = true;
-            const host = ov.querySelector('#pd-tab-plan');
-            try {
-                const mod = _planTries++ === 0 ? './plan-matrix.js' : `./plan-matrix.js?t=${Date.now()}`;
-                const { renderPlan } = await import(mod);
-                if (!host.isConnected) return;   // await 期間 overlay 已被關掉
-                renderPlan(host, {
-                    proposalId: prop.id, plan: prop.plan || null, fetcher: tfetch, canShare: true,
-                    onPlanStarted: (p) => { prop.plan = p; btn.querySelector('.dot')?.remove(); },
-                });
-            } catch (e) {
-                _planRendered = false;
-                if (host.isConnected) host.innerHTML = `<div style="color:#888;padding:20px;">企劃元件載入失敗：${esc(e.message || e)}（再點一次分頁重試）</div>`;
+        ov.querySelectorAll('.prop-tab').forEach(b => {
+            ov.querySelector('#pd-tab-' + b.dataset.tab).style.display =
+                b.dataset.tab === name ? '' : 'none';
+        });
+        if (_mounted.has(name) || !_mount[name]) return;
+        _mounted.add(name);
+        const host = ov.querySelector('#pd-tab-' + name);
+        try {
+            await _mount[name](host);
+        } catch (e) {
+            // 掛不起來就把旗標放回去 —— 再點一次分頁可以重試
+            // （ES module map 會永久快取 rejected import，所以重試帶 cache-bust）
+            _mounted.delete(name);
+            if (host.isConnected) {
+                host.innerHTML = `<div style="color:#888;padding:20px;">元件載入失敗：${esc(e.message || e)}（再點一次分頁重試）</div>`;
             }
         }
     }));
