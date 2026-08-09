@@ -102,6 +102,50 @@ export async function dropUploadItems(dt) {
 }
 
 /**
+ * 自帶樣式的元件用：同一個 id 只注入一次。
+ *
+ * 「查 id → createElement → 設 id → textContent → appendChild」這串樣板在專案裡
+ * 被逐字複製了十幾份。新元件一律呼叫這支；舊的遇到就順手換過來
+ * （`grep -rn "createElement('style')" frontend` 看還剩哪些）。
+ *
+ * ⚠️ **會反覆改寫內容的動態 stylesheet 不適用**（例如 website/subviews/works.js
+ * 的欄位顯示切換：它每次都重寫 textContent）。這支第一行就 early-return，
+ * 換過去只有第一次會生效，之後靜默失效。
+ */
+export function ensureStyle(id, css) {
+    if (document.getElementById(id)) return;
+    const st = document.createElement('style');
+    st.id = id;
+    st.textContent = css;
+    document.head.appendChild(st);
+}
+
+/**
+ * 非同步 checkbox 的一次切換：鎖住 → 等 → 失敗還原並說明 —— 畫面不說謊。
+ *
+ * 單獨開出來是因為列表很長時要走**事件委派**（不可能每列綁監聽），那條路
+ * 用不到 wireAsyncToggle，只需要這段語意。
+ */
+export async function runToggle(input, fn, errPrefix) {
+    const want = input.checked;
+    input.disabled = true;
+    try {
+        await fn(want);
+    } catch (err) {
+        input.checked = !want;
+        alert(errPrefix + '：' + ((err && err.message) || err));
+    }
+    // 成功時呼叫端通常已把整塊重畫，這個節點已不在畫面上 —— isConnected
+    // 擋掉對已卸下節點的無謂寫入
+    if (input.isConnected) input.disabled = false;
+}
+
+/** runToggle 綁在單一 checkbox 上（列數少、直接綁得起的場合）。 */
+export function wireAsyncToggle(input, fn, errPrefix) {
+    input.addEventListener('change', () => runToggle(input, fn, errPrefix));
+}
+
+/**
  * 拖放上傳區：進入時高亮、放開送檔。`onItems([{file, path}])` 決定怎麼送
  * （拖資料夾進來時 path 帶著目錄結構，見 dropUploadItems）。
  *
@@ -110,13 +154,9 @@ export async function dropUploadItems(dt) {
  */
 const _DROP_HOT = 'osun-drop-hot';
 export function wireFileDrop(zone, onItems) {
-    if (!document.getElementById('osun-drop-style')) {
-        const st = document.createElement('style');
-        st.id = 'osun-drop-style';
-        st.textContent = `.${_DROP_HOT}{outline:2px dashed #3b82f6;outline-offset:-2px;`
-            + 'background:rgba(59,130,246,.06);}';
-        document.head.appendChild(st);
-    }
+    ensureStyle('osun-drop-style',
+        `.${_DROP_HOT}{outline:2px dashed #3b82f6;outline-offset:-2px;`
+        + 'background:rgba(59,130,246,.06);}');
     const on = (e) => { e.preventDefault(); zone.classList.add(_DROP_HOT); };
     const off = (e) => { e.preventDefault(); zone.classList.remove(_DROP_HOT); };
     ['dragenter', 'dragover'].forEach(ev => zone.addEventListener(ev, on));
@@ -388,10 +428,7 @@ export function uploadFailText(e) {
  * 進度條卡在 100% 不動會被當成當掉 —— 明講「伺服器處理中」。
  */
 export function uploadProgress(host, onCancel) {
-    if (!document.getElementById('osun-prog-style')) {
-        const st = document.createElement('style');
-        st.id = 'osun-prog-style';
-        st.textContent = `
+    ensureStyle('osun-prog-style', `
 .osun-prog{display:flex;align-items:center;gap:10px;padding:8px 10px;font-size:12px;
   border:1px solid var(--line,#3a3a3a);border-radius:3px;margin-bottom:8px;}
 .osun-prog-bar{flex:1;height:6px;border-radius:3px;background:rgba(127,127,127,.25);overflow:hidden;}
@@ -405,9 +442,7 @@ export function uploadProgress(host, onCancel) {
   color:#f87171;margin-bottom:8px;}
 .osun-prog-x{background:none;border:1px solid var(--line,#3a3a3a);color:var(--sub,#8b8b8b);
   cursor:pointer;font:inherit;font-size:11px;padding:2px 8px;border-radius:2px;}
-.osun-prog-x:hover{color:#f87171;border-color:#f87171;}`;
-        document.head.appendChild(st);
-    }
+.osun-prog-x:hover{color:#f87171;border-color:#f87171;}`);
     const wrap = document.createElement('div');
     wrap.className = 'osun-prog';
     wrap.innerHTML = '<div class="osun-prog-bar"><i></i></div>'

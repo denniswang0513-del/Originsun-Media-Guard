@@ -18,7 +18,7 @@
  */
 
 import { autosaveDelegated, syncBaseline } from '../../js/shared/autosave.js';
-import { autoGrow, esc } from '../../js/shared/utils.js';
+import { autoGrow, ensureStyle, esc } from '../../js/shared/utils.js';
 
 const CELL_SEL = 'textarea[data-field]';
 
@@ -112,10 +112,7 @@ export function renderSurveyTable(host, opts) {
 // 自帶樣式（只注一次）—— 自己的 --sv-* 變數，深色為預設、公開頁翻白，
 // 比照 plan-matrix 的 --plc-* 做法（吃呼叫端變數會在沒定義的頁面變成看不見的字）
 function _ensureStyle() {
-    if (document.getElementById('sv-style')) return;
-    const st = document.createElement('style');
-    st.id = 'sv-style';
-    st.textContent = `
+    ensureStyle('sv-style', `
 .sv { --sv-ink: #ddd; --sv-sub: #888; --sv-line: #3a3a3a; --sv-red: #f87171;
       --sv-ph: #6b6b6b; --sv-field: rgba(255,255,255,.03); --sv-field-on: rgba(255,255,255,.06);
       --sv-accent: #3b82f6; --sv-ring: rgba(59,130,246,.25); }
@@ -150,6 +147,5 @@ html.plan-theme-light .sv { --sv-ink: #222; --sv-sub: #8b8b8b; --sv-line: #dcdcd
           color: var(--sv-ink); font: inherit; font-size: 12.5px; padding: 4px 9px; }
 .sv-btn:hover { background: rgba(127,127,127,.08); }
 .sv-hint, .sv-msg { font-size: 11.5px; color: var(--sv-sub); padding: 6px 0 0; }
-.sv-msg.err { color: var(--sv-red); }`;
-    document.head.appendChild(st);
+.sv-msg.err { color: var(--sv-red); }`);
 }

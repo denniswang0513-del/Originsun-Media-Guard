@@ -224,7 +224,13 @@
       <div class="plan-main">
         <div id="info-host" style="display:none;"></div>
         <div id="plan-host"><div class="state-msg">載入中…</div></div>
-        <div id="folder-host" style="display:none;"></div>
+        <div id="folder-host" style="display:none;">
+          <!-- 重點提案卡片列與檔案瀏覽分開兩個容器：folder-view 會清空它的
+               host，共用一個的話卡片列每次導覽都被洗掉。
+               樣式作用域的 class 由元件自己掛，這裡不必寫。 -->
+          <div id="pins-host"></div>
+          <div id="folder-fv"></div>
+        </div>
       </div>
     </div>
   </div>
@@ -500,30 +506,67 @@ function _showSideTabs() {
 // 範圍由**端點**決定，不是前端旗標：
 //   登入 → 整個資產夾（CRM 端點）／訪客 → 只有「對外分享」子夾（token 端點）
 // 兩者共用 folder-view.js 的渲染。
-// 「還沒掛上」與「掛什麼」是同一件事 → 一個可為 null 的設定，不用另一顆布林
-// 去跟它同步。
-let _folderOpts = null;      // {load, onFile, write?}；掛好後設回 null
+// 檔案列與卡片列是**兩個各自獨立的一次性槽**：掛好了就把自己那格設回 null，
+// 沒掛成就留著讓使用者切回來重試。「槽是不是 null」就是「掛了沒」——
+// 不用另一顆布林去跟它同步（第一輪拿掉 _pinState 是同一條理由）。
+// 分兩格而不是一包 opts：pins 絕對不能流進 folder-view，靠邊界手動剝掉遲早會漏。
+//
+// ⚠️ 兩個都是模組層變數，靠「換提案＝整頁重載」歸零。哪天「← 清單」改成前端
+// 切換，它們要跟著提案的生命週期重置，否則第二個提案會靜默不掛。
+let _pendingFolder = null;   // folder-view 的設定
+let _pendingPins = null;     // pins-store 那顆（訪客沒有）
 
-function _setupFolderTab(load, onFile, write) {
-    _folderOpts = { load, onFile, write };
+function _setupFolderTab(folder, pins) {
+    _pendingFolder = folder;
+    _pendingPins = pins || null;
     $("tab-folder").style.display = "";
 }
 
+/** 重點提案卡片列（訪客沒有，客戶不能策展也不能授權）。
+ *  nav = folder-view 的把手：勾起來的**資料夾**點下去要走進去，不是下載
+ *  （對資料夾打下載端點是死路）。 */
+async function _mountPins(pins, nav, onFile) {
+    const { renderPins } = await import("/tabs/proposals/pins-panel.js");
+    const host = $("pins-host");
+    pins.watch(() => renderPins(host, {      // watch = 訂閱 + 立刻畫一次
+        state: pins.get(),
+        setPublic: pins.setPublic,
+        onOpen: (p) => (p.is_dir ? nav.go(p.rel) : onFile(p)),
+    }));
+}
+
 async function _mountFolder() {
-    const opts = _folderOpts;
-    if (!opts) return;
-    _folderOpts = null;                        // 只掛一次；之後切回來保留瀏覽位置
-    try {
-        const { renderFolderView } = await import("/tabs/proposals/folder-view.js");
-        renderFolderView($("folder-host"), Object.assign({
-            rootLabel: "資料夾",
-            emptyHint: "這個提案還沒有分享任何檔案。",
-        }, opts));
-    } catch (e) {
-        _folderOpts = opts;                    // 讓使用者切回來能重試
-        $("folder-host").innerHTML =
-            '<div class="state-msg" style="color:var(--red);">資料夾元件載入失敗：'
-            + escText((e && e.message) || e) + "</div>";
+    if (!_pendingFolder && !_pendingPins) return;
+    // 兩個模組同時起跑：序列等待會讓檔案列等卡片列的模組載完，而檔案列一
+    // render 就要去掃 NAS，那才是使用者在等的東西。
+    // 🔴 pins 那顆要先接住 rejection —— folder-view 掛掉時下面根本不會去 await
+    // 它，沒人接的 rejected promise 就是一條 unhandled rejection。
+    const fvMod = import("/tabs/proposals/folder-view.js");
+    if (_pendingPins) import("/tabs/proposals/pins-panel.js").catch(() => {});
+
+    const folder = _pendingFolder;
+    let nav = null;
+    if (folder) {
+        try {
+            const { renderFolderView } = await fvMod;
+            nav = renderFolderView($("folder-fv"), Object.assign({
+                rootLabel: "資料夾",
+                emptyHint: "這個提案還沒有分享任何檔案。",
+            }, folder));
+            _pendingFolder = null;             // 掛好了；之後切回來保留瀏覽位置
+        } catch (e) {
+            $("folder-fv").innerHTML =         // 設定留著，切回來能重試
+                '<div class="state-msg" style="color:var(--red);">資料夾元件載入失敗：'
+                + escText((e && e.message) || e) + "</div>";
+        }
+    }
+    // 卡片列是附屬品（它壞掉不該讓人連檔案都瀏覽不了），而且要用 folder-view
+    // 的把手，所以等檔案列掛好才掛。失敗就把槽放回去 —— 切回來會再試一次。
+    if (_pendingPins && nav) {
+        const pins = _pendingPins;
+        _pendingPins = null;
+        try { await _mountPins(pins, nav, folder.onFile); }
+        catch (e) { _pendingPins = pins; console.warn("[pins] 卡片列載入失敗", e); }
     }
 }
 
@@ -653,43 +696,65 @@ async function _loadPlan(pid) {
             },
         });
         _showSideTabs();
-        // 登入模式：看得到**整個**資產夾（含報價、內部版腳本那些）
-        if (prop.project_id) {
-            const AP = "/api/v1/crm/projects/" + encodeURIComponent(prop.project_id)
-                + "/proposal-assets";
-            const q = (rel) => "?rel=" + encodeURIComponent(rel || "");
-            // 登入模式：看得到**整份**資產夾，而且就地建得了夾、傳得了檔
-            // （owner 2026-08-08 選 B —— 企劃頁不該是「看得到卻做不了」的死路）
-            _setupFolderTab(
-                async (rel) => ok(await mfetch(AP + q(rel))),
-                async (f) => {
-                    // CRM 端點要帶 Bearer，<a href> 送不了 → 走共用的授權下載
-                    const { authDownload } = await import("/js/shared/utils.js");
-                    authDownload(AP + "/file?rel=" + encodeURIComponent(f.rel), f.filename);
-                },
-                {
-                    mkdir: async (name, rel) => ok(await mfetch(AP + "/mkdir" + q(rel),
-                        { method: "POST", body: JSON.stringify({ name }) })),
-                    // opts = {onProgress, signal}（folder-view 給的，它負責畫進度條）
-                    // 走 uploadWithProgress 不走 fetch —— fetch 沒有上傳進度事件
-                    upload: async (items, rel, opts) => {
-                        const u = await import("/js/shared/utils.js");
-                        // uploadItems 會照連線的 body 上限自動分批（走隧道時 100MB）
-                        const d2 = await u.uploadItems(
-                            AP + "/upload" + q(rel), items,
-                            Object.assign({ headers: _authHeader() }, opts));
-                        const bad = (d2.skipped || []).map(s => `${s.filename}（${s.reason}）`);
-                        if (bad.length) alert("部分項目未上傳：\n" + bad.join("\n"));
-                        return d2.files ? d2 : null;   // 一個都沒存成 → 不用重畫
-                    },
-                });
-        }
         host.innerHTML = "";
         const { renderPlan } = await import("/tabs/proposals/plan-matrix.js");
         renderPlan(host, { proposalId: prop.id, plan: prop.plan || null, canShare: true });
+
+        // 資料夾分頁的接線放在企劃矩陣**之後**，而且不 await：它只是註冊設定與
+        // 亮出分頁鈕，晚幾毫秒無所謂；擺在前面的話那次 module import 會把使用者
+        // 真正在等的矩陣往後推一個 RTT（走隧道時很有感）。
+        // 用 .catch 而不是 try —— 它跑在矩陣畫好之後，掉進外層 catch 會把已經
+        // 畫好的矩陣換成「企劃載入失敗」。訪客那條的資料夾探測也是這個形狀。
+        if (prop.project_id) _wireFolderTab(prop.project_id, ok)
+            .catch(e => console.warn("[folder] 資料夾分頁接線失敗", e));
     } catch (e) {
         host.innerHTML = '<div class="state-msg" style="color:var(--red);">企劃載入失敗：' + escText((e && e.message) || e) + "</div>";
     }
+}
+
+/**
+ * 登入模式的資料夾分頁接線：看得到**整份**資產夾（含報價、內部版腳本那些），
+ * 而且就地建得了夾、傳得了檔（owner 2026-08-08 選 B —— 企劃頁不該是「看得到
+ * 卻做不了」的死路）。訪客那條走 token 端點，範圍小得多，接線在 _loadSharedPlan。
+ */
+async function _wireFolderTab(projectId, ok) {
+    const AP = "/api/v1/crm/projects/" + encodeURIComponent(projectId) + "/proposal-assets";
+    const q = (rel) => "?rel=" + encodeURIComponent(rel || "");
+    // 重點提案的狀態與三支端點都在 store 裡（CRM 專案分頁用的是同一顆），
+    // 生命週期＝這一個提案，所以建在這裡而不是模組層。
+    const { makePinsStore } = await import("/tabs/proposals/pins-store.js");
+    const pins = makePinsStore({
+        base: AP,
+        request: async (url, init) => ok(await mfetch(url, init)),
+    });
+    _setupFolderTab({
+        // 每一層的回應都帶 pinned/pins_public → 順手餵給 store
+        load: async (rel) => pins.sync(await ok(await mfetch(AP + q(rel)))),
+        onFile: async (f) => {
+            // CRM 端點要帶 Bearer，<a href> 送不了 → 走共用的授權下載
+            const { authDownload } = await import("/js/shared/utils.js");
+            authDownload(AP + "/file?rel=" + encodeURIComponent(f.rel), f.filename);
+        },
+        write: {
+            mkdir: async (name, rel) => ok(await mfetch(AP + "/mkdir" + q(rel),
+                { method: "POST", body: JSON.stringify({ name }) })),
+            // opts = {onProgress, signal}（folder-view 給的，它負責畫進度條）
+            // 走 uploadWithProgress 不走 fetch —— fetch 沒有上傳進度事件
+            upload: async (items, rel, opts) => {
+                const u = await import("/js/shared/utils.js");
+                // uploadItems 會照連線的 body 上限自動分批（走隧道時 100MB）
+                const d2 = await u.uploadItems(
+                    AP + "/upload" + q(rel), items,
+                    Object.assign({ headers: _authHeader() }, opts));
+                const bad = (d2.skipped || []).map(s => `${s.filename}（${s.reason}）`);
+                if (bad.length) alert("部分項目未上傳：\n" + bad.join("\n"));
+                return d2.files ? d2 : null;   // 一個都沒存成 → 不用重畫
+            },
+        },
+        // 勾選＝策展（此刻以這份為準），不搬檔案、不等於給客戶看。
+        // store 本身就滿足 folder-view 要的 {isPinned, toggle}，不需要轉接層。
+        pin: pins,
+    }, pins);
 }
 
 // ── 企劃（公開共編模式，?t=<token>，免登入） ─────────────
@@ -752,10 +817,13 @@ async function _loadSharedPlan(shareTok) {
             const dl = await import("/js/shared/utils.js");
             fetch(fbase).then(r => r.json()).then(first => {
                 if (!first || !first.enabled) return;
-                _setupFolderTab(
-                    async (rel) => ok(await fetch(fbase + "?rel=" + encodeURIComponent(rel))),
-                    (f) => dl.plainDownload(fbase + "/file?rel=" + encodeURIComponent(f.rel),
-                                            f.filename));
+                // 不傳 pin/pins —— 策展與授權都只有員工能做，客戶那頁連按鈕都
+                // 不該建出來（唯讀不是靠隱藏元素，是靠沒建出來）
+                _setupFolderTab({
+                    load: async (rel) => ok(await fetch(fbase + "?rel=" + encodeURIComponent(rel))),
+                    onFile: (f) => dl.plainDownload(
+                        fbase + "/file?rel=" + encodeURIComponent(f.rel), f.filename),
+                });
             }).catch(() => { /* 探測失敗 → 不顯示分頁，不影響企劃本體 */ });
         }
         host.innerHTML = "";

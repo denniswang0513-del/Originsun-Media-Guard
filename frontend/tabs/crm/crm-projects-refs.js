@@ -46,7 +46,10 @@ export async function loadRefsTab(projectId, container, libCache) {
         <div class="pjref-row" data-link="${esc(r.link_id)}" data-rid="${esc(r.id)}"
              data-embed="${esc(r.embed_url || '')}">
             <div class="pjref-thumb${r.embed_url ? ' playable' : ''}" ${r.embed_url ? 'title="點擊播放"' : ''}>${r.thumb_url
-                ? `<img src="${esc(r.thumb_url)}" alt="" loading="lazy">`
+                // 縮圖 404（片庫封面過期、YouTube 換網址）要退回「無封面」，
+                // 不能留一塊空框 —— 同 pins-panel / refThumb 的契約
+                ? `<img src="${esc(r.thumb_url)}" alt="" loading="lazy"
+                        onerror="this.insertAdjacentHTML('afterend','&lt;span&gt;無封面&lt;/span&gt;');this.remove();">`
                 : '<span>無封面</span>'}${r.embed_url ? '<span class="playbtn">▶</span>' : ''}</div>
             <div class="pjref-main">
                 <div class="pjref-title">${esc(r.title || r.url)}</div>

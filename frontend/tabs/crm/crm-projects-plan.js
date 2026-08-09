@@ -10,9 +10,11 @@
 import { crmFetch, crmToast, esc } from './crm-utils.js';
 import { fmtSize } from '../../js/shared/clip_utils.js';
 import { authDownload, bearerHeader, copyText, folderCrumbsHtml, inputUploadItems,
-         proxyBodyLimit, uploadFailText, uploadItems, uploadProgress,
+         proxyBodyLimit, runToggle, uploadFailText, uploadItems, uploadProgress,
          wireFileDrop } from '../../js/shared/utils.js';
 import { tfetch } from '../proposals/prop-fetch.js';
+import { renderPins } from '../proposals/pins-panel.js';
+import { makePinsStore } from '../proposals/pins-store.js';
 import { state } from './crm-projects-state.js';
 
 const API = '/api/v1/proposals';
@@ -47,12 +49,25 @@ export async function loadPlanTab(projectId, host) {
     } else {
         await _renderPlan(props[0], projectId, host);
     }
-    if (assets && host.isConnected) _mountAssetsCard(projectId, host, assets);
+    if (assets && host.isConnected) {
+        // store 建在這裡（緊鄰 assets 那次 fetch）而不是卡片渲染函式裡 ——
+        // 生命週期是「這一個提案」，跟資料一起流動；企劃頁那邊也是這個高度。
+        const pins = makePinsStore({
+            base: `/projects/${projectId}/proposal-assets`,
+            request: (url, init) => crmFetch(url, init),
+        });
+        pins.sync(assets);
+        _mountAssetsCard(projectId, host, assets, pins);
+    }
 }
+
+/** 資產檔案的下載網址（卡片列與檔案列共用一份組法）。 */
+const _fileUrl = (projectId, rel) =>
+    `/api/v1/crm/projects/${projectId}/proposal-assets/file?rel=${encodeURIComponent(rel)}`;
 
 // ── 資產資料夾設定（比照影像紀錄：root 是全站共用的一份，路徑帶 project_id
 //    只是讓人從專案面板順手改；顯示的資料夾是這個專案的）────────────
-function _mountAssetsCard(projectId, host, d) {
+function _mountAssetsCard(projectId, host, d, pins) {
     const box = document.createElement('div');
     box.style.cssText = 'padding:10px 12px 16px;';
     box.innerHTML = `
@@ -93,9 +108,12 @@ function _mountAssetsCard(projectId, host, d) {
             </div>
         </div>`;
     host.appendChild(box);
-    _renderFiles(box, d);
-    _renderPins(box, projectId, d);
-    _wireUpload(projectId, box, host, d);
+    // 重點提案的狀態不寄生在 d（那是「這一層資料夾」的 payload）—— 它是整個
+    // 提案的狀態，混在一起的話走回上一層會被舊的層快照蓋回去。
+    _renderFiles(box, d, pins);
+    // 先接檔案列（它才有導覽），再把把手交給卡片列
+    const nav = _wireUpload(projectId, box, host, d, pins);
+    _mountPins(box.querySelector('#pp-pins'), projectId, pins, nav);
 
     box.querySelector('#pp-cfg').addEventListener('click', () => {
         const row = box.querySelector('#pp-cfg-row');
@@ -128,68 +146,25 @@ function _mountAssetsCard(projectId, host, d) {
     });
 }
 
-// 檔案列表：一次列一層（子資料夾可以走進去；連結進來的舊資料夾常有好幾層），
-// 標星號的是「提案簡報」（提案詳情與公開共編頁顯示的那一份）
-// 「重點提案」區塊 —— 勾起來的資產在這裡以卡片呈現。
-// 不一定是最終版，是**此刻**要人看的那一版；同事一眼知道現在以哪一份為準。
-function _renderPins(box, projectId, d) {
-    const host = box.querySelector('#pp-pins');
-    if (!host) return;
-    const pins = d.pinned || [];
-    if (!pins.length) {
-        host.innerHTML = `<div style="font-size:11.5px;color:#6b6b6b;margin-bottom:8px;">
-            重點提案：在下面的檔案列勾選，就會出現在這裡。</div>`;
-        return;
-    }
-    const cards = pins.map(p => {
-        const name = (p.rel || '').split('/').pop();
-        const cover = p.thumb_url
-            ? `<img src="${esc(p.thumb_url)}" alt="" loading="lazy"
-                    style="width:100%;height:96px;object-fit:cover;display:block;background:#111;">`
-            : `<div style="height:96px;display:flex;align-items:center;justify-content:center;
-                           background:#111;color:#5b5b5b;font-size:26px;">${p.is_dir ? '📁' : '📄'}</div>`;
-        return `<div data-pincard="${esc(p.rel)}" title="${esc(p.rel)}"
-                     style="width:150px;border:1px solid #2a2a2a;border-radius:5px;overflow:hidden;
-                            background:#141414;cursor:pointer;">
-            ${cover}
-            <div style="padding:5px 7px;font-size:11.5px;line-height:1.45;color:#ddd;
-                        white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${esc(name)}</div>
-        </div>`;
-    }).join('');
-    host.innerHTML = `
-        <div style="display:flex;align-items:center;gap:10px;margin-bottom:6px;">
-            <span style="font-size:12px;color:#ddd;font-weight:600;">重點提案</span>
-            <span style="font-size:11px;color:#6b6b6b;">${pins.length} 項</span>
-            <span style="flex:1;"></span>
-            <label style="font-size:11.5px;color:#8b8b8b;display:flex;align-items:center;gap:5px;cursor:pointer;"
-                   title="打開後，拿到提案分享連結的客戶會在頁面上看到這些檔案">
-                <input type="checkbox" id="pp-pins-public"${d.pins_public ? ' checked' : ''}
-                       style="margin:0;cursor:pointer;accent-color:#c9372c;">
-                客戶看得到
-            </label>
-        </div>
-        ${d.pins_public ? `<div style="font-size:11px;color:#fbbf24;margin-bottom:6px;">
-            客戶目前看得到上面這 ${pins.length} 項。取消勾選會立刻失效。</div>` : ''}
-        <div style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:10px;">${cards}</div>`;
-    host.querySelector('#pp-pins-public').addEventListener('change', async (e) => {
-        const want = e.target.checked;
-        e.target.disabled = true;
-        try {
-            const r = await crmFetch(`/projects/${projectId}/proposal-assets/pins/public`,
-                { method: 'POST', body: JSON.stringify({ public: want }) });
-            d.pins_public = r.pins_public;
-            _renderPins(box, projectId, d);
-            crmToast(want ? '客戶現在看得到重點提案' : '已收回：客戶看不到了');
-        } catch (err) {
-            e.target.checked = !want;
-            alert('設定失敗：' + (err.message || err));
-        }
-    });
-    host.querySelectorAll('[data-pincard]').forEach(el => {
-        el.addEventListener('click', () => {
-            const rel = el.dataset.pincard;
-            const q = `?rel=${encodeURIComponent(rel)}`;
-            authDownload(`/api/v1/crm/projects/${projectId}/proposal-assets/file${q}`, rel);
+// 「重點提案」卡片列。渲染本體在 proposals/pins-panel.js、狀態與端點在
+// proposals/pins-store.js —— 公開企劃頁（白底）用的是同兩份。這裡只接線。
+// nav = 檔案列的把手（{go}）：勾起來的**資料夾**點下去要走進去，不是下載。
+// 企劃頁那邊拿的是 folder-view 回傳的同名把手，兩個呼叫端因此逐字同形。
+function _mountPins(host, projectId, pins, nav) {
+    // watch = 訂閱 + 立刻畫一次；store 只在內容真的變了才通知
+    pins.watch(() => {
+        // 請求還在飛的時候使用者可能已切走專案 —— 對已卸下的節點重建卡片
+        // 只是白發圖片請求（同檔他處已有的 isConnected 慣例）
+        if (!host.isConnected) return;
+        renderPins(host, {
+            state: pins.get(),
+            setPublic: async (want) => {
+                await pins.setPublic(want);
+                crmToast(want ? '客戶現在看得到重點提案' : '已收回：客戶看不到了');
+            },
+            onOpen: (p) => (p.is_dir ? nav.go(p.rel)
+                                     : authDownload(_fileUrl(projectId, p.rel),
+                                                    p.rel.split('/').pop())),
         });
     });
 }
@@ -197,15 +172,17 @@ function _renderPins(box, projectId, d) {
 
 // 重點提案的勾選框。勾選＝策展（這份是此刻的重點），不搬檔案；
 // 客戶看不看得到是另一個開關（見「重點提案」卡）。
-function _pinBox(d, rel, isDir) {
-    const on = (d.pinned || []).some(p => p.rel === rel);
+// 顏色跟 folder-view 的 .fv-pin 對齊 —— 同一顆勾選框在兩個介面不該長不一樣。
+function _pinBox(pins, rel, isDir) {
     return `<input type="checkbox" data-pin="${esc(rel)}" data-pindir="${isDir ? '1' : ''}"
-                   ${on ? 'checked' : ''} title="設為重點提案"
-                   style="flex:none;margin:0;cursor:pointer;accent-color:#3b82f6;">`;
+                   ${pins.isPinned(rel) ? 'checked' : ''} title="設為重點提案"
+                   style="flex:none;margin:0;cursor:pointer;accent-color:#c9372c;">`;
 }
 
 
-function _renderFiles(box, d) {
+// 檔案列表：一次列一層（子資料夾可以走進去；連結進來的舊資料夾常有好幾層），
+// 標星號的是「提案簡報」（提案詳情與公開共編頁顯示的那一份）
+function _renderFiles(box, d, pins) {
     const dirs = d.dirs || [];
     const files = d.files || [];
     const list = box.querySelector('#pp-files');
@@ -219,7 +196,7 @@ function _renderFiles(box, d) {
         <div data-dir="${esc(x.rel)}"
              style="display:flex;align-items:center;gap:8px;padding:6px 10px;cursor:pointer;
                     border-bottom:1px solid #242424;font-size:12.5px;">
-            ${_pinBox(d, x.rel, true)}
+            ${_pinBox(pins, x.rel, true)}
             <span style="color:#8b8b8b;">▸</span>
             <span style="font-weight:600;">${esc(x.name)}</span>
         </div>`).join('')
@@ -228,7 +205,7 @@ function _renderFiles(box, d) {
             return `
         <div class="pp-file" data-rel="${esc(f.rel)}"
              style="display:flex;align-items:center;gap:8px;padding:6px 10px;border-bottom:1px solid #242424;font-size:12.5px;">
-            ${_pinBox(d, f.rel, false)}
+            ${_pinBox(pins, f.rel, false)}
             <span title="${isDeck ? '目前的提案簡報' : '設為提案簡報'}" data-deck
                   style="cursor:pointer;color:${isDeck ? '#fbbf24' : '#3a3a3a'};">★</span>
             <span data-dl style="flex:1;cursor:pointer;" title="下載">${esc(f.filename || f.rel)}</span>
@@ -247,12 +224,13 @@ function _crumbsHtml(d) {
         folderCrumbsHtml(d.folder_name || '根目錄', d.rel)}</div>`;
 }
 
-function _wireUpload(projectId, box, host, d) {
+function _wireUpload(projectId, box, host, d, pins) {
     const input = box.querySelector('#pp-file-input');
     const drop = box.querySelector('#pp-drop');
     // 先改 d、再無參重畫 —— 只重繪檔案區，不重跑 loadPlanTab（那會連
-    // plan-matrix 一起重畫，使用者正在編的格子與捲動位置都沒了）
-    const repaint = () => { _renderFiles(box, d); _renderPins(box, projectId, d); };
+    // plan-matrix 一起重畫，使用者正在編的格子與捲動位置都沒了）。
+    // 卡片列不在這裡重畫：它訂閱了 store，只有重點清單真的變了才動。
+    const repaint = () => { _renderFiles(box, d, pins); };
     // 走過的層記在 levels：往回走是最常見的動作，重打一次是整趟 NAS 掃描。
     // 存**快照**不是 d 本身 —— d 會被後續導覽 Object.assign 覆寫，存參照等於
     // 「回最外層」拿回來的是當前那一層。
@@ -278,12 +256,17 @@ function _wireUpload(projectId, box, host, d) {
     // 走進子資料夾 / 麵包屑往回 —— 換 d 的這一層再重畫（企劃矩陣不受影響）
     const goto = async (rel) => {
         const hit = levels.get(rel);
+        // 🔴 快取命中**刻意不** pins.sync：快照裡的 pinned 是當初那次的，餵回去
+        // 會把 store 倒退（你在別層勾的東西被打回原狀）。store 才是真相來源。
         if (hit) { Object.assign(d, hit); repaint(); return; }
         try {
             const r = await crmFetch(
                 `/projects/${projectId}/proposal-assets?rel=${encodeURIComponent(rel)}`);
             levels.set(rel, r);
             if (!box.isConnected || state.selectedId !== projectId) return;  // 已切走
+            // 每層回應都帶最新的 pinned/pins_public → 餵給 store（企劃頁的 load
+            // 也是這樣做）。同一顆 store 兩種餵法，就是下一次漂移的起點。
+            pins.sync(r);
             Object.assign(d, r);
             repaint();
         } catch (e) { alert('開啟資料夾失敗：' + (e.message || e)); }
@@ -345,24 +328,12 @@ function _wireUpload(projectId, box, host, d) {
         const box2 = e.target.closest('[data-pin]');
         if (box2) {
             e.stopPropagation();                    // 勾選不要順便進資料夾
-            box2.disabled = true;
-            const relPin = box2.dataset.pin;
-            const q2 = `?rel=${encodeURIComponent(relPin)}`;
-            try {
-                const r = box2.checked
-                    ? await crmFetch(`/projects/${projectId}/proposal-assets/pin`, {
-                        method: 'POST',
-                        body: JSON.stringify({ rel: relPin, is_dir: !!box2.dataset.pindir }) })
-                    : await crmFetch(`/projects/${projectId}/proposal-assets/pin${q2}`,
-                        { method: 'DELETE' });
-                d.pinned = r.pinned;
-                d.pins_public = r.pins_public;
-                _renderPins(box, projectId, d);
-            } catch (err) {
-                box2.checked = !box2.checked;       // 失敗就還原，畫面不說謊
-                alert('設定重點提案失敗：' + (err.message || err));
-            }
-            box2.disabled = false;
+            // 鎖住／失敗還原的語意走共用的 runToggle（列數可能上千 → 必須委派，
+            // 所以綁不了 wireAsyncToggle，但語意不該再抄一份）。
+            // 端點在 store 裡（企劃頁用同一顆）；卡片列靠訂閱自己重畫。
+            const rel2 = box2.dataset.pin;
+            await runToggle(box2, (want) => pins.toggle(rel2, !!box2.dataset.pindir, want),
+                            '設定重點提案失敗');
             return;
         }
         const nav = e.target.closest('[data-dir],[data-crumb]');
@@ -394,9 +365,13 @@ function _wireUpload(projectId, box, host, d) {
                 markDeck(rel);
             } catch (err) { alert('設定失敗：' + (err.message || err)); }
         } else if (e.target.closest('[data-dl]')) {
-            authDownload(`/api/v1/crm/projects/${projectId}/proposal-assets/file${q}`, rel);
+            authDownload(_fileUrl(projectId, rel), rel);
         }
     });
+
+    // 導覽的把手交出去（卡片列點到「重點資料夾」時要用）。形狀對齊 folder-view
+    // 回傳的 handle —— 之後兩份資料夾瀏覽器要合併時，公開面已經一樣了。
+    return { go: goto };
 }
 
 function _renderEmpty(projectId, host) {

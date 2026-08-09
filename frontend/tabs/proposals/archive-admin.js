@@ -9,6 +9,7 @@
  */
 
 import { tfetch } from './prop-fetch.js';
+import { ensureStyle } from '../../js/shared/utils.js';
 
 const API = '/api/v1/references';
 const STYLE_ID = 'arcadm-style';
@@ -46,12 +47,7 @@ const STATUS_ORDER = [
 
 /** 掛管理卡。container 內渲染；非 admin 呼叫端自己別掛（後端仍會再閘）。 */
 export async function mountArchiveAdmin(container) {
-    if (!document.getElementById(STYLE_ID)) {
-        const st = document.createElement('style');
-        st.id = STYLE_ID;
-        st.textContent = CSS;
-        document.head.appendChild(st);
-    }
+    ensureStyle(STYLE_ID, CSS);
     container.innerHTML = `
         <details class="arcadm">
             <summary>影片建檔設定（NAS 封存・管理員）</summary>

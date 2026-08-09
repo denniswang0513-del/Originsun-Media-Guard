@@ -22,7 +22,7 @@
 import { tfetch } from './prop-fetch.js';
 import { renderShapes } from './annotate.js';
 import { autosaveDelegated, syncBaseline } from '../../js/shared/autosave.js';
-import { browserKey } from '../../js/shared/utils.js';
+import { browserKey, ensureStyle } from '../../js/shared/utils.js';
 import { ARCHIVE_LABEL, archiveLabelFor } from './ref-pills.js';
 
 const STYLE_ID = 'rfc-style';
@@ -175,14 +175,6 @@ function attr(s) {
 }
 function safeUrl(u) { return /^https?:\/\//i.test(String(u ?? '')) ? String(u) : ''; }
 
-function _injectStyle() {
-    if (document.getElementById(STYLE_ID)) return;
-    const st = document.createElement('style');
-    st.id = STYLE_ID;
-    st.textContent = STYLE_CSS;
-    document.head.appendChild(st);
-}
-
 // ── 影片嵌入（provider 由後端 parse_video_url 快取；link 無 embed → 外連）──
 function _embedHtml(ref) {
     const u = safeUrl(ref.url);
@@ -200,7 +192,7 @@ function _embedHtml(ref) {
 }
 
 export function renderReference(container, opts) {
-    _injectStyle();
+    ensureStyle(STYLE_ID, STYLE_CSS);
     const ref = opts.ref;
     const fo = opts.facetOptions || {};
     // 公開共編模式：權限跟著模式收窄（fail-closed），URL 也由這裡組

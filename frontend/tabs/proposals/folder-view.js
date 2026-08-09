@@ -17,8 +17,8 @@
  * 與深色 SPA 都不用改。
  */
 
-import { esc, folderCrumbsHtml, inputUploadItems, uploadFailText,
-         uploadProgress, wireFileDrop } from '../../js/shared/utils.js';
+import { ensureStyle, esc, folderCrumbsHtml, inputUploadItems, uploadFailText,
+         uploadProgress, wireAsyncToggle, wireFileDrop } from '../../js/shared/utils.js';
 import { fmtSize } from '../../js/shared/clip_utils.js';
 
 const _day = (mtime) => (mtime ? new Date(mtime * 1000).toISOString().slice(0, 10) : '');
@@ -30,10 +30,10 @@ const _day = (mtime) => (mtime ? new Date(mtime * 1000).toISOString().slice(0, 1
  * @param opts.rootLabel 麵包屑最左邊顯示的名字
  * @param opts.emptyHint 整個資料夾空的時候要說什麼
  * @param opts.write     可選；有給才有工具列與拖放：
- *        { upload(items, rel) -> level, mkdir(name, rel) -> level,
- *          } 
+ *        { upload(items, rel) -> level, mkdir(name, rel) -> level }
  * @param opts.pin       可選；有給才長出「重點」勾選欄：
  *        { isPinned(rel) -> bool, toggle(rel, isDir, want) -> Promise }
+ *        pins-store 那顆本身就滿足這個形狀，直接整顆傳進來即可。
  *        勾選是**策展**（這份是此刻的重點），不搬檔案、不等於授權 ——
  *        客戶看不看得到由另一個開關決定。
  * @returns { rel(), go(rel), apply(level) }
@@ -96,16 +96,8 @@ export function renderFolderView(host, opts) {
         });
         host.querySelectorAll('[data-pin]').forEach(el => {
             el.addEventListener('click', (e) => e.stopPropagation());   // 別觸發整列
-            el.addEventListener('change', async () => {
-                el.disabled = true;
-                try {
-                    await pin.toggle(el.dataset.pin, !!el.dataset.pindir, el.checked);
-                } catch (err) {
-                    el.checked = !el.checked;      // 失敗就還原，畫面不說謊
-                    alert('設定重點提案失敗：' + (err.message || err));
-                }
-                el.disabled = false;
-            });
+            wireAsyncToggle(el, (want) => pin.toggle(el.dataset.pin, !!el.dataset.pindir, want),
+                            '設定重點提案失敗');
         });
         if (write) _wireToolbar(d);
     }
@@ -197,10 +189,7 @@ export function renderFolderView(host, opts) {
 
 // 自帶樣式（只注一次）—— 呼叫端不必為了掛這個元件去改自己的 CSS 檔
 function _ensureStyle() {
-    if (document.getElementById('fv-style')) return;
-    const st = document.createElement('style');
-    st.id = 'fv-style';
-    st.textContent = `
+    ensureStyle('fv-style', `
 .fv-body { padding: 18px 4px; font-size: 13px; color: var(--sub, #8b8b8b); }
 .fv-err { color: var(--red, #d33); }
 .fv-warn { color: #b8860b; }
@@ -221,6 +210,5 @@ function _ensureStyle() {
 .fv-btn:hover { background: rgba(127,127,127,.08); }
 .fv-btn.primary { border-color: var(--red, #c33); color: var(--red, #c33); }
 .fv-hint, .fv-busy { font-size: 12px; color: var(--sub, #8b8b8b); }
-.fv-busy[hidden] { display: none; }`;
-    document.head.appendChild(st);
+.fv-busy[hidden] { display: none; }`);
 }

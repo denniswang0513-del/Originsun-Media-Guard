@@ -12,6 +12,8 @@
  *   flattenToBlob(imageUrl, annotations)        // 圖+標示壓平成 WebP（工具列「下載」用）
  */
 
+import { ensureStyle } from '../../js/shared/utils.js';
+
 const NS = 'http://www.w3.org/2000/svg';
 const DEFAULT_COLOR = '#e05252';
 const COLORS = [DEFAULT_COLOR, '#f5a524', '#3b82f6', '#22c55e', '#ffffff', '#111111'];
@@ -42,14 +44,6 @@ const CSS = `
 .anno-wrap.edit svg { cursor: crosshair; }
 .anno-hint { color: #8b8b8b; font-size: 11.5px; padding: 0 14px 10px; }
 `;
-
-function _injectStyle() {
-    if (document.getElementById(STYLE_ID)) return;
-    const st = document.createElement('style');
-    st.id = STYLE_ID;
-    st.textContent = CSS;
-    document.head.appendChild(st);
-}
 
 const el = (name, attrs) => {
     const n = document.createElementNS(NS, name);
@@ -109,7 +103,7 @@ export function renderShapes(svg, annotations) {
  * readonly=true 只看不編（公開唯讀情境）。回 Promise（關閉時 resolve）。
  */
 export function openAnnotator({ imageUrl, annotations, readonly = false, onSave, title = '' }) {
-    _injectStyle();
+    ensureStyle(STYLE_ID, CSS);
     return new Promise((resolve) => {
         let shapes = JSON.parse(JSON.stringify((annotations && annotations.shapes) || []));
         let tool = 'rect';

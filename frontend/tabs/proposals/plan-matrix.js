@@ -20,7 +20,7 @@ import { tfetch } from './prop-fetch.js';          // 共用 fetcher（帶 err.s
 // esc 走 js/shared/utils.js 而不是 crm-utils —— 公開共編頁要在 NAS 對外容器
 // serve（master 關機也開得了），那台只 serve tabs/proposals 與 js/shared 兩個
 // 子目錄；從 ../crm/ 拉東西會讓客戶那頁在 NAS 上直接載入失敗。
-import { esc } from '../../js/shared/utils.js';
+import { ensureStyle, esc } from '../../js/shared/utils.js';
 
 const API = '/api/v1/proposals';
 
@@ -144,21 +144,13 @@ html.plan-theme-light .plc { /* 官網白底（獨立網址） */
 }
 `;
 
-function _injectStyle() {
-    if (!document.getElementById(STYLE_ID)) {
-        const st = document.createElement('style');
-        st.id = STYLE_ID;
-        st.textContent = CSS;
-        document.head.appendChild(st);
-    }
-}
 
 // ── 主入口 ───────────────────────────────────────────────
 // opts: { proposalId, plan, fetcher?, onPlanStarted?, canShare?, getGuestName?,
 //         endpoints?: {cell, meta, share}, refetch?: async()=>plan }
 // 公開共編頁傳自己的 endpoints（/shared/{token}/...）+ refetch；登入路徑用預設。
 export function renderPlan(container, opts) {
-    _injectStyle();
+    ensureStyle(STYLE_ID, CSS);
     opts = { fetcher: tfetch, ...opts };
     if (!opts.endpoints) {
         opts.endpoints = {
