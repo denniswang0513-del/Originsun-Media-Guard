@@ -887,8 +887,13 @@ async def get_shared_plan(token: str):
             "deck_url": _public_deck_url(prop.deck_url, token),
             # 現況盤點：public=True 直接抽掉預算那類欄目（payload 裡根本沒有那一列）
             "survey": proposal_survey.rows(prop.survey, public=True),
+            # thumb_url 給客戶看沒有問題 —— 那是該平台自己的公開封面圖，客戶
+            # 手上本來就有片名與連結。這裡仍然是**逐欄列舉**（不是丟 _ref_dict）：
+            # 片庫的欄位會長（tags/description/curated/archive_*），公開端一律
+            # 明確寫出要給的那幾個，加欄位不會靜默外流。
             "references": [{"id": r.id, "title": r.title or "", "url": r.url or "",
-                            "note": r.note or ""} for r in refs],
+                            "note": r.note or "", "thumb_url": r.thumb_url or ""}
+                           for r in refs],
         }
     return {"title": prop.title, "plan": plan, "info": info}
 
