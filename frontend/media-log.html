@@ -626,7 +626,7 @@ async function uploadOne(item) {
     try {
         const s = await shared();
         failText = s.uploadFailText;
-        await s.uploadFile(API, item.file, {
+        await s.uploadFile(API + "/upload", item.file, {
             fields: { category: item.category, uploader_name: item.uploader },
             bodyLimit: DATA && DATA.request_body_limit,
             onProgress: (pct) => {

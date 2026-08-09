@@ -367,7 +367,7 @@ async function _pumpUploads() {
 
 // 後台也會從家裡/外景用（走 Cloudflare）→ 大檔同樣要分塊，實作與公開收照頁共用。
 function _upload(u) {
-    return uploadFile(`${PUBLIC_API}/${_data.token}`, u.file, {
+    return uploadFile(`${PUBLIC_API}/${_data.token}/upload`, u.file, {
         fields: { category: u.cat || '', uploader_name: '後台' },
         bodyLimit: _data.request_body_limit,
         onProgress: (pct) => {

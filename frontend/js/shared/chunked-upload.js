@@ -20,7 +20,8 @@
  */
 
 import {
-    authFetch, BODY_MARGIN, browserKey, httpError, proxyBodyLimit, uploadWithProgress,
+    authFetch, bearerHeader, BODY_MARGIN, browserKey, httpError, proxyBodyLimit,
+    uploadWithProgress,
 } from './utils.js';
 
 const CLIENT_KEY = 'media_log_client_key';
@@ -34,11 +35,11 @@ async function jsonOrThrow(res) {
 }
 
 /** 單一請求上傳（小檔 / 區網）。進度只有 XHR 給得出來，故走 uploadWithProgress。 */
-function uploadWhole(base, file, opts) {
+function uploadWhole(uploadUrl, file, opts) {
     const fd = new FormData();
     fd.append('file', file);
     for (const [k, v] of Object.entries(opts.fields || {})) fd.append(k, v);
-    return uploadWithProgress(base + '/upload', fd, {
+    return uploadWithProgress(uploadUrl, fd, {
         signal: opts.signal,
         onProgress: (loaded, total) => opts.onProgress
             && opts.onProgress(total ? Math.round((loaded / total) * 100) : 0),
@@ -53,10 +54,14 @@ function uploadWhole(base, file, opts) {
  * 其實寫進去了就會這樣）。把伺服器的真實值回給呼叫端重新對齊即可，重試次數
  * 也不該因此被消耗掉。
  */
-async function putChunk(base, uploadId, offset, blob, signal) {
-    const res = await fetch(`${base}/upload/${uploadId}/chunk?offset=${offset}`, {
+async function putChunk(uploadUrl, uploadId, offset, blob, signal) {
+    // 🔴 這裡要帶 Authorization。begin/finish 走 authFetch 自然有，chunk 因為
+    // body 是原始位元組沒走 authFetch —— 漏掉的話，需要登入的上傳面（提案資產
+    // 夾）每一塊都 401，而 begin 已經成功，錯誤看起來會像「傳到一半才失敗」。
+    // 公開的影像紀錄沒事（token 在網址裡），所以只有另一個消費端會踩到。
+    const res = await fetch(_ep(uploadUrl, `/${uploadId}/chunk`, { offset }), {
         method: 'PUT',
-        headers: { 'Content-Type': 'application/octet-stream' },
+        headers: { 'Content-Type': 'application/octet-stream', ...bearerHeader() },
         body: blob,
         signal,
     });
@@ -68,10 +73,25 @@ async function putChunk(base, uploadId, offset, blob, signal) {
     return payload.received;
 }
 
+/**
+ * 分塊端點的網址：`{上傳端點}/begin`、`/{id}/chunk`、`/{id}/finish`。
+ *
+ * 🔴 後綴要接在 **query 之前**，而且原本的 query 要留著。提案資產夾傳進來的是
+ * `.../upload?rel=PPM`——直接字串相接會變成 `.../upload?rel=PPM/begin`（打不到
+ * 端點），而 `rel` / `folder` 又正是 finish 端點用來決定落點的參數，不能丟。
+ */
+function _ep(uploadUrl, suffix, extra) {
+    const [path, qs] = String(uploadUrl).split('?');
+    const params = new URLSearchParams(qs || '');
+    for (const [k, v] of Object.entries(extra || {})) params.set(k, v);
+    const q = params.toString();
+    return path.replace(/\/+$/, '') + suffix + (q ? '?' + q : '');
+}
+
 const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 
-async function uploadChunked(base, file, opts) {
-    const begun = await jsonOrThrow(await authFetch(base + '/upload/begin', {
+export async function uploadChunked(uploadUrl, file, opts = {}) {
+    const begun = await jsonOrThrow(await authFetch(_ep(uploadUrl, '/begin'), {
         method: 'POST',
         body: {
             filename: file.name,
@@ -93,7 +113,7 @@ async function uploadChunked(base, file, opts) {
         const blob = file.slice(sent, Math.min(sent + chunkBytes, file.size));
         for (let attempt = 0; ; attempt++) {
             try {
-                sent = await putChunk(base, uploadId, sent, blob, opts.signal);
+                sent = await putChunk(uploadUrl, uploadId, sent, blob, opts.signal);
                 break;
             } catch (e) {
                 // 4xx 是這個檔本身的問題（格式/太大/連結失效），重試幾次都一樣
@@ -106,7 +126,7 @@ async function uploadChunked(base, file, opts) {
     }
 
     const done = await jsonOrThrow(await authFetch(
-        `${base}/upload/${uploadId}/finish`, {
+        _ep(uploadUrl, `/${uploadId}/finish`), {
             method: 'POST',
             body: { filename: file.name, size: file.size, ...(opts.fields || {}) },
         }));
@@ -118,7 +138,8 @@ async function uploadChunked(base, file, opts) {
  * 上傳一個檔 → 後端回的 FILE 物件。失敗 throw（Error 帶 `.status`，訊息已經是
  * 講人話的版本，呼叫端直接用 `uploadFailText(e)` 顯示即可）。
  *
- * @param {string} base   端點前綴，例 `/api/v1/crm/public/media-log/{token}`
+ * @param {string} uploadUrl  既有的單一請求上傳端點；分塊端點固定是它接
+ *                            `/begin`、`/{id}/chunk`、`/{id}/finish`
  * @param {File}   file
  * @param {object} opts   { fields, onProgress(pct), signal, bodyLimit }
  *
@@ -132,16 +153,16 @@ async function uploadChunked(base, file, opts) {
  * 猜錯的代價不對稱：多分塊只是多幾十次來回，少分塊是根本傳不上去 —— 所以
  * 單一請求真的撞到**不是我們發出的** 413 時，自動改走分塊再試一次。
  */
-export async function uploadFile(base, file, opts = {}) {
+export async function uploadFile(uploadUrl, file, opts = {}) {
     const cap = opts.bodyLimit ?? proxyBodyLimit();
-    if (cap && file.size > cap - BODY_MARGIN) return uploadChunked(base, file, opts);
+    if (cap && file.size > cap - BODY_MARGIN) return uploadChunked(uploadUrl, file, opts);
     try {
-        return await uploadWhole(base, file, opts);
+        return await uploadWhole(uploadUrl, file, opts);
     } catch (e) {
         // fromServer=false → 這個 413 是中間某層產生的（HTML 頁面，不是我們的
         // JSON），代表判斷失準、這條連線其實有上限。我們自己回的 413（超過
         // 500MB）帶 detail，重試幾次都一樣，不要浪費使用者的時間。
-        if (e.status === 413 && !e.fromServer) return uploadChunked(base, file, opts);
+        if (e.status === 413 && !e.fromServer) return uploadChunked(uploadUrl, file, opts);
         throw e;
     }
 }

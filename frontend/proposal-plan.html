@@ -147,7 +147,9 @@
 </head>
 <body>
 <header>
-  <div class="brand">
+  <!-- 登入模式下整塊 brand 可點 → 回提案清單（owner 2026-08-09）。
+       訪客（?t=）拿不到清單，所以那條路徑不掛連結，見 _wireBrandHome。 -->
+  <div class="brand" id="brand-home">
     <img src="/img/originsun-logo.webp" alt="源日影像" onerror="this.style.display='none'">
     <span class="brand-name">提案企劃 <span class="accent">PLANNER</span></span>
   </div>
@@ -743,9 +745,20 @@ async function _loadSharedPlan(shareTok) {
     }
 }
 
+/** 登入模式下，logo 與「提案企劃 PLANNER」點了回提案清單。
+ *  訪客（?t=）看不到清單，那條路徑刻意不掛 —— 點了跳到登入頁只會讓客戶困惑。 */
+function _wireBrandHome() {
+    const el = $("brand-home");
+    if (!el) return;
+    el.style.cursor = "pointer";
+    el.title = "回提案清單";
+    el.addEventListener("click", () => { location.href = location.pathname; });
+}
+
 async function boot() {
     const shareTok = new URLSearchParams(location.search).get("t");
     if (shareTok) { _loadSharedPlan(shareTok); return; }   // 公開模式：完全不走登入
+    _wireBrandHome();
     if (!localStorage.getItem(TOKEN_KEY)) { showLogin(""); return; }
     let me;
     try {

@@ -18,6 +18,8 @@ from __future__ import annotations
 
 import asyncio
 import os
+import time
+from collections import defaultdict
 from datetime import datetime
 
 from typing import List
@@ -25,13 +27,16 @@ from typing import List
 from fastapi import File, Form, HTTPException, Request, UploadFile
 
 from config import load_settings, save_settings
+from core import chunked_upload as cu
 from core import pinned_assets as pa
 from core.auth import check_admin_or_module
 from core.drive_map import to_canonical_path, to_local_path
-from core.project_folders import (create_subfolder, list_folder_level,
+from core.project_folders import (BLOCKED_UPLOAD_EXTS, clean_filename,
+                                  create_subfolder, dedupe, list_folder_level,
                                   make_dated_folder_name, remap_prefix,
                                   rename_and_remap, safe_rel_dir, safe_rel_path,
-                                  safe_subfolder, save_uploads, subfolder_path,
+                                  safe_sub_dirs, safe_subfolder, save_uploads,
+                                  subfolder_path,
                                   taken_names, validate_folder_name, within_dir)
 
 from ._shared import router, _check_auth, _get_factory, _now, _require_db
@@ -665,6 +670,177 @@ async def _root_folders_cached(root: str) -> tuple:
                  ok=ok)
         return c["names"], ok
 
+
+# ── 分塊上傳（繞開 Cloudflare 的 100MB 單請求上限）──────────────
+#
+# 落地層與影像紀錄共用 core/chunked_upload（那支刻意不綁任何子系統）。這裡只做
+# 三件這個子系統特有的事：目的夾怎麼算、檔名怎麼清洗去重、要不要重建子目錄。
+#
+# 兩個上傳面（專案的、任一資料夾的）各包一層薄殼，端點路徑刻意排成
+# `{既有 upload 端點}/begin | {id}/chunk | {id}/finish` —— 前端拿原本那個 upload
+# 網址接後綴就好，不必為兩個面各記一組。
+#
+# staging 夾是 `{proposals.root}/.chunk-uploads`：與所有目的地同一個 volume
+# （收尾用 os.replace 原子改名），`.` 開頭 → 總覽與列檔都掃不到半成品。
+
+# 同一個 upload_id 的併發保護（行程內）。append_bytes 的位移檢查擋得住重複寫入，
+# 但兩個同位移的請求同時通過檢查就會各寫一次。
+_chunk_locks: defaultdict = defaultdict(asyncio.Lock)
+_chunk_last_gc = 0.0
+_CHUNK_GC_INTERVAL = 3600
+
+
+async def _chunk_root() -> str:
+    """半成品的落腳處 = 提案資產根目錄（與所有目的地同 volume）。"""
+    root = await proposals_root()
+    if not root:
+        raise HTTPException(status_code=503, detail="尚未設定提案資產根目錄")
+    return root
+
+
+def _chunk_err(e: cu.ChunkError) -> HTTPException:
+    """ChunkError → HTTP。🔴 `reason` 這個 key 不能改名：前端顯示錯誤走
+    js/shared/utils.js 的 httpError，它讀字串 detail 或 `detail.reason`。"""
+    code = {"offset": 409, "too-large": 413, "missing": 404,
+            "bad-id": 400}.get(e.kind, 400)
+    return HTTPException(status_code=code,
+                         detail={"error": e.kind, "reason": e.detail,
+                                 "received": e.received})
+
+
+async def _chunk_gc(root: str) -> None:
+    """每小時掃一次 staging 夾清掉棄置的半成品（scandir 打 NAS，不值得每次做）。
+    順手清掉沒人持有的鎖 —— 放棄的上傳走不到 finish。"""
+    global _chunk_last_gc
+    now = time.monotonic()
+    if now - _chunk_last_gc < _CHUNK_GC_INTERVAL:
+        return
+    _chunk_last_gc = now
+    for k in [k for k, lock in _chunk_locks.items() if not lock.locked()]:
+        _chunk_locks.pop(k, None)
+    await asyncio.to_thread(cu.gc, root)
+
+
+async def _chunk_begin(body: dict) -> dict:
+    """開始（或接續）一個分塊上傳 → {upload_id, received, chunk_bytes}。
+
+    upload_id 由（瀏覽器鍵, 檔名, 大小, 修改時間）推導 → 同一個檔重傳落回同一個
+    半成品，換頁重開也接得回去。副檔名與大小在這裡就擋掉，不讓人先傳完才發現。
+    """
+    name = clean_filename(str(body.get("filename") or ""))
+    ext = os.path.splitext(name)[1].lower()
+    if ext in BLOCKED_UPLOAD_EXTS:
+        raise HTTPException(status_code=400, detail="不允許的檔案類型（" + ext + "）")
+    size = int(body.get("size") or 0)
+    if size <= 0:
+        raise HTTPException(status_code=400, detail="缺少檔案大小")
+    if size > _MAX_UPLOAD_BYTES:
+        raise HTTPException(status_code=413,
+                            detail="檔案超過 %dMB 上限" % (_MAX_UPLOAD_BYTES // (1024 * 1024)))
+    root = await _chunk_root()
+    uid = cu.upload_id(str(body.get("client_key") or ""), name, size,
+                       str(body.get("mtime") or ""))
+    await _chunk_gc(root)
+    received = await asyncio.to_thread(cu.begin, root, uid)
+    return {"upload_id": uid, "received": received, "chunk_bytes": cu.CHUNK_BYTES}
+
+
+async def _chunk_put(upload_id: str, offset: int, request: Request) -> dict:
+    """收一塊（raw body，非 multipart）→ {received}。
+
+    片段先收在 list 再交給 writelines —— 合併成一個 bytes 是這條路徑上唯一跑在
+    事件迴圈的工作，省掉它等於把 agent 的反應時間還回去。
+    """
+    root = await _chunk_root()
+    cap = cu.CHUNK_BYTES * 2
+    parts, total = [], 0
+    async for part in request.stream():
+        total += len(part)
+        if total > cap:
+            raise HTTPException(status_code=413, detail="單塊過大")
+        parts.append(part)
+    try:
+        cu.part_path(root, upload_id)          # 先驗 id 格式，再讓 defaultdict 生鎖
+        async with _chunk_locks[upload_id]:
+            received = await asyncio.to_thread(
+                cu.append_bytes, root, upload_id, parts, total,
+                offset=int(offset), max_bytes=_MAX_UPLOAD_BYTES)
+    except cu.ChunkError as e:
+        raise _chunk_err(e)
+    return {"received": received}
+
+
+async def _chunk_finish(folder_abs: str, rel: str, upload_id: str, body: dict) -> dict:
+    """收尾：半成品改名進目的夾 → 回這一層的新內容（同單一請求上傳的形狀）。
+
+    `path`（前端拖整個資料夾時會送）＝該檔在來源夾裡的相對路徑 → 照著重建子目錄，
+    與 core.save_uploads 同一套規則（safe_sub_dirs + within_dir 兩道防護）。
+    """
+    root = await _chunk_root()
+    dir_abs = await _subdir_or_404(folder_abs, rel)
+    name = clean_filename(str(body.get("filename") or ""))
+    segs = safe_sub_dirs(str(body.get("path") or "")) or []
+    dest_dir = os.path.join(dir_abs, *segs) if segs else dir_abs
+    if not within_dir(dir_abs, dest_dir):
+        raise HTTPException(status_code=400, detail="路徑逃出資料夾")
+
+    def _move() -> str:
+        os.makedirs(dest_dir, exist_ok=True)
+        final = dedupe(name, set(os.listdir(dest_dir)), keep_ext=True)
+        cu.finish(root, upload_id, os.path.join(dest_dir, final),
+                  expect_bytes=int(body.get("size") or -1))
+        return final
+
+    try:
+        async with _chunk_locks[upload_id]:
+            final = await asyncio.to_thread(_move)
+    except cu.ChunkError as e:
+        raise _chunk_err(e)
+    _chunk_locks.pop(upload_id, None)
+    saved = "/".join(segs + [final]) if segs else final
+    return {"status": "ok", "saved": [saved], "skipped": [],
+            **await _level(folder_abs, rel)}
+
+
+@router.post("/projects/{project_id}/proposal-assets/upload/begin")
+async def project_chunk_begin(project_id: str, request: Request, body: dict):
+    _assets_auth(request)
+    return await _chunk_begin(body)
+
+
+@router.put("/projects/{project_id}/proposal-assets/upload/{upload_id}/chunk")
+async def project_chunk_put(project_id: str, upload_id: str, offset: int,
+                            request: Request):
+    _assets_auth(request)
+    return await _chunk_put(upload_id, offset, request)
+
+
+@router.post("/projects/{project_id}/proposal-assets/upload/{upload_id}/finish")
+async def project_chunk_finish(project_id: str, upload_id: str, request: Request,
+                               body: dict, rel: str = ""):
+    _assets_auth(request)
+    return await _chunk_finish(await _project_folder_ready(project_id), rel,
+                               upload_id, body)
+
+
+@router.post("/proposal-assets/folder/upload/begin")
+async def folder_chunk_begin(request: Request, body: dict, folder: str = ""):
+    _assets_auth(request)
+    return await _chunk_begin(body)
+
+
+@router.put("/proposal-assets/folder/upload/{upload_id}/chunk")
+async def folder_chunk_put(upload_id: str, offset: int, request: Request,
+                           folder: str = ""):
+    _assets_auth(request)
+    return await _chunk_put(upload_id, offset, request)
+
+
+@router.post("/proposal-assets/folder/upload/{upload_id}/finish")
+async def folder_chunk_finish(upload_id: str, request: Request, body: dict,
+                              folder: str = "", rel: str = ""):
+    _assets_auth(request)
+    return await _chunk_finish(await _folder_or_404(folder), rel, upload_id, body)
 
 @router.get("/proposal-assets/overview")
 async def proposal_assets_overview(request: Request):

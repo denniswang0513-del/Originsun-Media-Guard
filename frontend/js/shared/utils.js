@@ -295,8 +295,11 @@ export function proxyBodyLimit() {
  *
  * **自動分批**：拖一整個資料夾是**一個**請求，20 個 6MB 的檔加起來就會撞到
  * 上面那道 100MB 的牆 —— 所以照累計大小切成多個請求依序送，進度條把它們
- * 當成一件事回報。單一檔案本身就超過上限的沒救（分批切不開一個檔），
- * 進 skipped 並講清楚該怎麼辦。
+ * 當成一件事回報。
+ *
+ * **單一檔案本身就超過上限** → 分批切不開它，改走**分塊上傳**
+ * （`chunked-upload.js`，端點是 `{url}/begin|{id}/chunk|{id}/finish`）。
+ * 後端沒有那組端點就會 404 → 那個檔進 skipped 並講清楚該怎麼辦，行為與從前相同。
  */
 export async function uploadItems(url, items, opts = {}) {
     const { headers, onProgress, onUploaded, signal, limit } = opts;
@@ -306,16 +309,13 @@ export async function uploadItems(url, items, opts = {}) {
 
     const batches = [];
     const skipped = [];
+    const oversized = [];          // 分批切不開 → 走分塊
     let cur = [];
     let curSize = 0;
     for (const it of items) {
         const sz = sizeOf(it);
         if (budget && sz > budget) {
-            skipped.push({
-                filename: it.path || it.file.name,
-                reason: `單檔 ${fmtSize(sz)}，超過這條連線的 ${fmtSize(cap)} 上限`
-                    + `（分批切不開單一檔案 — 請改從公司區網上傳）`,
-            });
+            oversized.push(it);
             continue;
         }
         if (budget && cur.length && curSize + sz > budget) {
@@ -326,10 +326,36 @@ export async function uploadItems(url, items, opts = {}) {
     if (cur.length) batches.push(cur);
 
     const batchBytes = batches.map(b => b.reduce((s, it) => s + sizeOf(it), 0));
-    const total = batchBytes.reduce((a, b) => a + b, 0);
+    const overBytes = oversized.reduce((s, it) => s + sizeOf(it), 0);
+    const total = batchBytes.reduce((a, b) => a + b, 0) + overBytes;
     const saved = [];
     let done = 0;
     let last = null;
+
+    // 超大單檔先走分塊（一個一個來）—— 它們的進度也算進同一條進度條裡
+    if (oversized.length) {
+        const { uploadChunked } = await import('./chunked-upload.js');
+        for (const it of oversized) {
+            const base = done;
+            try {
+                const d = await uploadChunked(url, it.file, {
+                    signal,
+                    fields: { path: it.path || it.file.name },
+                    onProgress: (pct) => onProgress
+                        && onProgress(base + (pct / 100) * sizeOf(it), total),
+                });
+                saved.push(...(d.saved || []));
+                last = d;
+            } catch (e) {
+                skipped.push({
+                    filename: it.path || it.file.name,
+                    reason: `單檔 ${fmtSize(sizeOf(it))} 超過這條連線的 ${fmtSize(cap)} 上限，`
+                        + `改用分塊上傳也失敗了（${(e && e.message) || e}）`,
+                });
+            }
+            done += sizeOf(it);
+        }
+    }
     for (let i = 0; i < batches.length; i++) {
         const d = await uploadWithProgress(url, uploadFormData(batches[i]), {
             headers,
