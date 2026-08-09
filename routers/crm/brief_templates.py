@@ -208,6 +208,32 @@ async def update_brief_template(tid: str, request: Request, body: dict):
         return {"status": "ok", "template": _dict(t)}
 
 
+@router.post("/brief-templates/{tid}/digest")
+async def digest_brief_template(tid: str, request: Request):
+    """把這份範本濃縮成骨架（跑 claude，可能要好幾分鐘）。
+
+    **背景跑、立刻回**：claude --print 一次數十秒到三分鐘，同步等會讓請求逾時，
+    而且使用者盯著轉圈也沒有比較快。前端靠清單裡的 status 輪詢。
+
+    冪等但會**覆蓋**現有骨架（含人手改過的）—— 前端負責問一次。
+    """
+    _auth(request)
+    _require_db()
+    factory = await _get_factory()
+    async with factory() as session:
+        t = await session.get(PreprodBriefTemplate, tid)
+        if not t:
+            raise HTTPException(status_code=404, detail="找不到這個範本")
+        t.status, t.error = "pending", None
+        t.updated_at = _now()
+        await session.commit()
+
+    from services.brief_template_digest import digest_template
+    # create_task 不 await —— 這支端點的責任只到「已經開始跑」為止
+    asyncio.create_task(digest_template(tid))
+    return {"status": "started"}
+
+
 @router.delete("/brief-templates/{tid}")
 async def delete_brief_template(tid: str, request: Request):
     """刪範本：DB 那列 + `_範本` 裡那份檔案。原提案的檔案不動。"""

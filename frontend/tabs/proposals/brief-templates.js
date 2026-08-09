@@ -84,6 +84,8 @@ function _render(ov) {
                 <span class="pt-pill ${esc(st)}">${esc(_statusLabel[st] || st)}</span>
                 <span class="pt-note">${esc(t.filename)}</span>
                 <span class="pt-gap"></span>
+                <button class="pt-btn" data-act="digest">${
+                    t.skeleton ? '重新消化' : '消化'}</button>
                 <button class="pt-btn" data-act="edit">${
                     t.id === s.open ? '收起' : '骨架'}</button>
                 <button class="pt-btn danger" data-act="del">刪除</button>
@@ -114,6 +116,7 @@ function _onClick(ov, e) {
         return;
     }
     if (btn.dataset.act === 'save') return _save(ov, item, id);
+    if (btn.dataset.act === 'digest') return _digest(ov, id);
     if (btn.dataset.act === 'del') return _del(ov, id);
 }
 
@@ -126,6 +129,45 @@ async function _save(ov, item, id) {
         await tfetch(`${API}/${encodeURIComponent(id)}`, { method: 'PATCH', json: body });
         await _load(ov);
     } catch (e) { alert('儲存失敗：' + (e.message || e)); }
+}
+
+/**
+ * 跑消化（claude，數十秒到數分鐘）。端點是**背景跑立刻回**，所以這裡開一條
+ * 輪詢把狀態追到底 —— 不追的話畫面會一直停在「待消化」，看起來像沒反應。
+ */
+async function _digest(ov, id) {
+    const t = S(ov).items.find(x => x.id === id);
+    if (t && t.skeleton
+        && !confirm(`重新消化會**覆蓋**目前的骨架（包含你手改過的內容）。要繼續嗎？`)) return;
+    try {
+        await tfetch(`${API}/${encodeURIComponent(id)}/digest`, { method: 'POST' });
+    } catch (e) { alert('消化啟動失敗：' + (e.message || e)); return; }
+    await _load(ov);
+    _poll(ov, id);
+}
+
+// 一份範本一條輪詢；掛在實例狀態上，避免同一份被按兩次開兩條
+function _poll(ov, id) {
+    const s = S(ov);
+    s.polling = s.polling || new Set();
+    if (s.polling.has(id)) return;
+    s.polling.add(id);
+    let left = 60;                       // 60 × 5s = 5 分鐘，claude 的上限之外再留一點
+    const tick = async () => {
+        if (!ov.isConnected) { s.polling.delete(id); return; }   // 對話框關掉就別再打了
+        try {
+            const list = (await tfetch(API)).templates || [];
+            const cur = list.find(x => x.id === id);
+            if (!cur || cur.status !== 'pending' || --left <= 0) {
+                s.polling.delete(id);
+                s.items = list;
+                _render(ov);
+                return;
+            }
+        } catch { /* 一次失敗不中止輪詢：NAS/網路抖一下不代表消化失敗 */ }
+        setTimeout(tick, 5000);
+    };
+    setTimeout(tick, 5000);
 }
 
 async function _del(ov, id) {
