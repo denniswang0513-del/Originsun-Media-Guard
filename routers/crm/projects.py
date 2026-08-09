@@ -519,7 +519,16 @@ async def _sync_linked_proposals(session, project, old_status: str,
     共用（比照 _apply_status_side_effects，避免兩條路徑漂移）；提案側的
     _sync_project_from_proposal 換完階段也回頭呼叫這裡同步兄弟提案。
     轉「未成案」且提案沒有原因、本次也沒帶 → 422（session 尚未 commit，
-    整筆狀態變更一起擋下）。"""
+    整筆狀態變更一起擋下）。
+
+    🔴 **成案只在「這個專案只掛一筆提案」時自動標**（owner 2026-08-10）。
+    一個專案可以並行多筆提案（同一案提了三個 concept），專案進「製作」時
+    只有一個會贏 —— 無差別把每一筆都標成「成案」會讓成案率虛胖，還會把同一句
+    成案原因灌進沒贏的那幾筆，而 win/loss 原因正是這個模組存在的理由。
+    多筆時**誰贏由專案負責人指定**（專案詳情的提案切換列上直接標）。
+
+    反方向不受影響：轉「未成案」照樣全部標 —— 整案沒拿到就是每個 concept
+    都沒拿到，那個推論成立。"""
     new_status = project.status or ""
     if new_status == old_status:
         return
@@ -530,10 +539,11 @@ async def _sync_linked_proposals(session, project, old_status: str,
     )).scalars().all()
     if not props:
         return
+    auto_win = len(props) == 1
     now = _now()
     reason = (reason or "").strip()
     for prop in props:
-        if new_status in PROPOSAL_WIN_STATUSES and prop.status != "成案":
+        if new_status in PROPOSAL_WIN_STATUSES and auto_win and prop.status != "成案":
             prop.status = "成案"
             if reason:
                 prop.outcome_reason = reason
