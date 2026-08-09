@@ -54,6 +54,8 @@ html.plan-theme-light .plc { /* 官網白底（獨立網址） */
 .plc .plc-rowhead .t { font-weight: 600; font-size: 12px; }
 .plc .plc-rowhead .hint { color: var(--plc-sub); font-size: 10px; margin-top: 4px; line-height: 1.5; }
 .plc .plc-cell { background: var(--plc-cell); padding: 6px; }
+/* 表格排版時欄標題就在正上方，格子自己不必再標一次 —— 堆疊後才顯示（見下） */
+.plc .plc-cell-lens { display: none; }
 .plc .plc-cell textarea, .plc .plc-dir textarea { width: 100%; min-height: 110px; resize: none;
   box-sizing: border-box; overflow-y: hidden;
   background: transparent; color: var(--plc-ink); border: 1px solid transparent;
@@ -141,6 +143,13 @@ html.plan-theme-light .plc { /* 官網白底（獨立網址） */
 @media (max-width: 900px) { /* 窄螢幕：縱向堆疊（排版退化，非流程限制） */
   .plc .plc-grid { grid-template-columns: 1fr; }
   .plc .plc-rowhead { flex-direction: row; gap: 10px; align-items: baseline; }
+  /* 🔴 堆疊之後每一格要自己說「我在回答哪一個視角」——欄標題只在整份矩陣
+     最上面出現一次，捲到第 8 格時早就看不到了，格子等於沒有標籤。 */
+  .plc .plc-cell-lens { display: block; font-size: 11.5px; font-weight: 600;
+    color: var(--plc-sub); padding: 2px 6px 0; }
+  /* 空格不要各佔 110px：12 格全空等於要捲過 1300px 才看得到下一段。
+     有內容的格子照樣由 _autoGrow 撐開。 */
+  .plc .plc-cell textarea { min-height: 46px; }
 }
 /* 手機：工具列裡的「方法論筆記」是**長得像按鈕的 <a>**，頁面層那條
    「button 至少 44px」抓不到它 —— 元件自己把它做成合格的觸控目標。 */
@@ -278,6 +287,7 @@ function _renderMatrix(container, opts, tpl, { readonly = false, exampleBack = n
                     const e = cellOf(lens.key, how.key);
                     const tip = lens.tips?.[how.key] || '';
                     return `<div class="plc-cell">
+                        <div class="plc-cell-lens">${esc(lens.label)}</div>
                         <textarea data-kind="cell" data-lens="${esc(lens.key)}" data-how="${esc(how.key)}"
                             placeholder="${esc(lens.prompts[how.key] || '')}" ${ro}${whoTitle(e)}></textarea>
                         ${tip && !readonly ? `<details class="plc-tip"><summary>💡 方法提示</summary><div>${esc(tip)}</div></details>` : ''}
