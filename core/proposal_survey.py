@@ -22,26 +22,32 @@ from __future__ import annotations
 from core.row_table import (MAX_LABEL, add_custom_row, is_extra,  # noqa: F401
                             remove_custom_row)
 
-# (key, label, public) —— 順序就是表格順序。key 是 DB 存值的鍵，**不要改**
-# （改了值會孤兒）。public=False = 連讀都不出公開端點。
-TEMPLATE: tuple[tuple[str, str, bool], ...] = (
-    ("client", "客戶", True),
-    ("brand_tone", "品牌調性", True),
-    ("product", "產品", True),
-    ("product_tone", "產品調性", True),
-    ("ta", "TA", True),
-    ("goal", "期望目標", True),
-    ("style", "期望風格（1-3 個形容詞）", True),
-    ("special", "特殊需求", True),
-    ("count_length", "支數及片長規劃", True),
-    ("media", "播放媒介", True),
-    ("budget", "預算", False),            # 金額 — 同 budget_range 的既有政策
-    ("deliver_date", "預計交片時間", True),
-    ("client_refs", "客戶參考影片", True),
+# (key, label, hint, public) —— 順序就是表格順序。key 是 DB 存值的鍵，
+# **不要改**（改了值會孤兒）。public=False = 連讀都不出公開端點。
+#
+# `hint` 是空格子裡的提示文字。這一欄不是裝飾：欄目名稱都很短（「品牌調性」、
+# 「TA」、「播放媒介」），客戶打開連結看到一排空格會不知道要寫什麼、於是就不寫。
+# 提示放在**這裡**而不是前端 —— 同一份範本餵登入後台與客戶公開頁兩個渲染端，
+# 寫在其中一邊就會有一邊沒有。
+TEMPLATE: tuple[tuple[str, str, str, bool], ...] = (
+    ("client", "客戶", "公司/品牌全名，以及這次對接的窗口", True),
+    ("brand_tone", "品牌調性", "品牌給人的感覺，例：專業穩重、年輕有活力", True),
+    ("product", "產品", "這支片要講的產品或服務是什麼", True),
+    ("product_tone", "產品調性", "產品本身想給的感覺，可能與品牌調性不同", True),
+    ("ta", "TA", "想打中誰？年齡、身分、生活情境，例：25-40 歲雙薪家庭", True),
+    ("goal", "期望目標", "影片上線後希望發生什麼事，例：提升詢問度、招募", True),
+    ("style", "期望風格（1-3 個形容詞）", "例：溫暖、俐落、有故事感", True),
+    ("special", "特殊需求", "一定要出現/絕對不能出現的東西，例：老闆入鏡、避免醫療宣稱", True),
+    ("count_length", "支數及片長規劃", "例：主片 1 支 90 秒 + 社群短版 3 支各 15 秒", True),
+    ("media", "播放媒介", "會放在哪，例：官網首頁、FB/IG、展場循環播放", True),
+    # 金額 — 同 budget_range 的既有政策，客戶端連讀都不給
+    ("budget", "預算", "含稅或未稅請一併註明", False),
+    ("deliver_date", "預計交片時間", "有沒有非趕不可的日子，例：10/15 記者會前", True),
+    ("client_refs", "客戶參考影片", "貼幾支你覺得對的片，並說說喜歡哪裡", True),
 )
 
-TEMPLATE_KEYS = tuple(k for k, _l, _p in TEMPLATE)
-PUBLIC_KEYS = frozenset(k for k, _l, public in TEMPLATE if public)
+TEMPLATE_KEYS = tuple(k for k, _l, _h, _p in TEMPLATE)
+PUBLIC_KEYS = frozenset(k for k, _l, _h, public in TEMPLATE if public)
 
 FIELDS = ("content", "note")
 MAX_TEXT = 4000          # 單格上限（現況盤點是摘要，不是腳本）
@@ -65,11 +71,12 @@ def rows(stored, *, public: bool = False) -> list[dict]:
             by_key.setdefault(r["key"], r)
 
     out: list[dict] = []
-    for key, label, _public in TEMPLATE:
+    for key, label, hint, _public in TEMPLATE:
         if public and key not in PUBLIC_KEYS:
             continue
         content, note = _cell(by_key.pop(key, None))
-        out.append({"key": key, "label": label, "content": content, "note": note})
+        out.append({"key": key, "label": label, "hint": hint,
+                    "content": content, "note": note})
     if public:
         return out
     # 自訂列：保留使用者給的 label 與 stored 的先後順序
@@ -78,7 +85,7 @@ def rows(stored, *, public: bool = False) -> list[dict]:
             continue                      # 認不得的 key = 舊版/髒資料，不往外送
         content, note = _cell(r)
         out.append({"key": key, "label": str(r.get("label") or key)[:MAX_LABEL],
-                    "content": content, "note": note})
+                    "hint": "", "content": content, "note": note})
     return out
 
 

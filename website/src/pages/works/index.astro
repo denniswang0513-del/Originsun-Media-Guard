@@ -25,6 +25,8 @@ const [meta, allWorks, categories, seriesList] = await Promise.all([
 // 「只有標籤為系列的折成一張卡，不是這個標籤的不用」）。系列卡站在第一個被收攏
 // 成員在牆上的位置、承接該成員的排序權重；data-categories/tags = 被收攏成員的
 // 聯集，兩軸過濾照常。
+// ⚠️ 「掛了系列標籤」只是**有資格**被收攏；真的收不收攏由當前標籤決定，
+//    見下方 gridEntries 的說明。
 // 不收攏（各自一張作品卡）的情況：
 //   1. 沒掛系列標籤 —— 就算它掛在同一個系列底下（同系列可以混：掛標籤的收攏、
 //      沒掛的照樣在牆上單獨出現）
@@ -44,20 +46,37 @@ for (const w of allWorks) {
     foldMembers.set(w.series_id!, list);
 }
 
-// 統一的格子項：cats/tags 給過濾軸（系列卡 = 成員聯集），work/series 二擇一給卡片
-type GridEntry = { cats: string[]; tags: string[]; work?: IPublicProject; series?: ISeriesListItem };
+// 統一的格子項：cats/tags 給過濾軸（系列卡 = 成員聯集），work/series 二擇一給卡片。
+//
+// 🔴 **收攏與否是「看的時候」才決定的，不是 build 時**（owner 2026-08-09）：
+// 在「展覽」標籤底下看到一張寫著「16 支作品」的系列卡是沒有意義的 —— 使用者是
+// 來看展覽相關作品的，那 16 支裡多數根本沒有展覽標籤。只有切到**系列**標籤時，
+// 「把一整個系列收成一張卡」才是使用者要的東西。
+//
+// 所以兩種卡都渲染進 HTML（也對 SEO 友善：每支作品都有自己的卡與連結），
+// 由 client 端依當前標籤挑一種顯示：
+//   tag == 系列  → 顯示系列卡、隱藏被它收攏的成員
+//   其他 / 全部  → 顯示每一支作品、隱藏系列卡
+type GridEntry = {
+    cats: string[]; tags: string[];
+    work?: IPublicProject; series?: ISeriesListItem;
+    foldedInto?: number;      // 這支作品會被哪個系列收攏（在系列標籤下要藏起來）
+};
 const gridEntries: GridEntry[] = [];
 for (const work of allWorks) {
     const members = isFoldable(work) ? foldMembers.get(work.series_id!)! : [];
-    if (members.length < 2) {
-        gridEntries.push({ cats: work.categories || [], tags: work.tags || [], work });
-        continue;
+    const folded = members.length >= 2;
+    // 系列卡站在第一個被收攏成員的位置、承接該成員的排序權重，只畫一次
+    if (folded && work === members[0]) {
+        gridEntries.push({
+            series: seriesById.get(work.series_id!)!,
+            cats: [...new Set(members.flatMap(w => w.categories || []))],
+            tags: [...new Set(members.flatMap(w => w.tags || []))],
+        });
     }
-    if (work !== members[0]) continue;        // 系列卡只畫一次，站在第一個成員的位置
     gridEntries.push({
-        series: seriesById.get(work.series_id!)!,
-        cats: [...new Set(members.flatMap(w => w.categories || []))],
-        tags: [...new Set(members.flatMap(w => w.tags || []))],
+        cats: work.categories || [], tags: work.tags || [], work,
+        ...(folded ? { foldedInto: work.series_id! } : {}),
     });
 }
 
@@ -133,11 +152,14 @@ const seo = buildBasicPageSeo(Astro, {
             <div id="works-grid"
                  data-active-category={activeCategory || ""}
                  data-active-tag={activeTag || ""}
+                 data-fold-tag={SERIES_FOLD_TAG}
                  class="mt-16 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-8 sm:gap-10">
                 {gridEntries.map(entry => (
                     <div class="work-item"
                          data-categories={entry.cats.join(",")}
-                         data-tags={entry.tags.join(",")}>
+                         data-tags={entry.tags.join(",")}
+                         data-series-card={entry.series ? "1" : undefined}
+                         data-folded-into={entry.foldedInto ? String(entry.foldedInto) : undefined}>
                         {entry.work ? <WorkCard work={entry.work} /> : <SeriesCard series={entry.series!} />}
                     </div>
                 ))}
@@ -207,11 +229,19 @@ const seo = buildBasicPageSeo(Astro, {
     // （lazy 圖不會載入 → 手機首屏更快），按「載入更多」逐批揭開。
     // 切分類/標籤是整頁導航（chip 是 <a>）→ 每次載入自然重置到第一批。
     const PAGE_SIZE = 24;
+    // 收攏只在「系列」標籤底下發生（見 frontmatter 的說明）：
+    // 其他標籤與「全部」都把系列攤開成一支一支的作品卡。
+    const foldTag = document.getElementById("works-grid")?.dataset.foldTag || "";
+    const folding = !!foldTag && tag === foldTag;
     const matched: HTMLElement[] = [];
     document.querySelectorAll<HTMLElement>(".work-item").forEach(el => {
         const cats = (el.dataset.categories || "").split(",");
         const tagsArr = (el.dataset.tags || "").split(",");
-        const show = (!cat || cats.includes(cat)) && (!tag || tagsArr.includes(tag));
+        const isSeriesCard = el.dataset.seriesCard === "1";
+        const isFoldedMember = !!el.dataset.foldedInto;
+        const rightShape = folding ? !isFoldedMember : !isSeriesCard;
+        const show = rightShape
+            && (!cat || cats.includes(cat)) && (!tag || tagsArr.includes(tag));
         if (show) matched.push(el);
         else el.style.display = "none";
     });

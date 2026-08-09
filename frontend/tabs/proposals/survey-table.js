@@ -66,8 +66,10 @@ export function renderSurveyTable(host, opts) {
                         <td class="sv-k">${esc(r.label)}${
                             isExtra(r.key) && removeRow
                                 ? '<button class="sv-x" title="移除這個自訂欄目">×</button>' : ''}</td>
-                        <td><textarea rows="1" data-field="content"></textarea></td>
-                        <td class="sv-n"><textarea rows="1" data-field="note"></textarea></td>
+                        <td><textarea rows="2" data-field="content"
+                                      placeholder="${esc(r.hint || '')}"></textarea></td>
+                        <td class="sv-n"><textarea rows="2" data-field="note"
+                                      placeholder="補充說明（選填）"></textarea></td>
                     </tr>`).join('')}
                 </tbody>
             </table>
@@ -114,21 +116,32 @@ function _ensureStyle() {
     const st = document.createElement('style');
     st.id = 'sv-style';
     st.textContent = `
-.sv { --sv-ink: #ddd; --sv-sub: #888; --sv-line: #333; --sv-red: #f87171; }
-html.plan-theme-light .sv { --sv-ink: #222; --sv-sub: #8b8b8b; --sv-line: #e5e5e5; --sv-red: #d33; }
+.sv { --sv-ink: #ddd; --sv-sub: #888; --sv-line: #3a3a3a; --sv-red: #f87171;
+      --sv-ph: #6b6b6b; --sv-field: rgba(255,255,255,.03); --sv-field-on: rgba(255,255,255,.06);
+      --sv-accent: #3b82f6; --sv-ring: rgba(59,130,246,.25); }
+html.plan-theme-light .sv { --sv-ink: #222; --sv-sub: #8b8b8b; --sv-line: #dcdcdc; --sv-red: #d33;
+      --sv-ph: #a8a8a8; --sv-field: #fcfcfc; --sv-field-on: #fff;
+      --sv-accent: #c9372c; --sv-ring: rgba(201,55,44,.15); }
 .sv-table { width: 100%; border-collapse: collapse; font-size: 13px; table-layout: fixed; }
 .sv-table th { text-align: left; font-weight: 600; font-size: 11.5px; color: var(--sv-sub);
                padding: 4px 6px; border-bottom: 1px solid var(--sv-line); }
-.sv-table td { padding: 3px 6px; border-bottom: 1px solid var(--sv-line); vertical-align: top; }
-.sv-table .sv-k { width: 27%; color: var(--sv-ink); font-weight: 600; word-break: break-all;
-                  padding-top: 9px; }
-.sv-table .sv-n { width: 26%; }
-.sv-table textarea { width: 100%; box-sizing: border-box; background: none; resize: none;
-                     border: 1px solid transparent; border-radius: 2px; padding: 4px 5px;
-                     color: var(--sv-ink); font: inherit; font-size: 12.5px; line-height: 1.7;
-                     overflow: hidden; }
-.sv-table textarea:hover { border-color: var(--sv-line); }
-.sv-table textarea:focus { outline: none; border-color: var(--sv-sub); }
+.sv-table td { padding: 6px; border-bottom: 1px solid var(--sv-line); vertical-align: top; }
+.sv-table .sv-k { width: 24%; color: var(--sv-ink); font-weight: 600; word-break: break-all;
+                  padding-top: 12px; }
+.sv-table .sv-n { width: 28%; }
+/* 🔴 邊框**一定要看得見**：原本是 transparent、只有 hover 才浮出來，
+   結果整張表看起來像一排細線，使用者不知道那裡可以打字（owner 2026-08-09 回報）。
+   min-height 給 2 行也是同一個理由 —— 一行高的框看起來像唯讀欄位。 */
+.sv-table textarea { width: 100%; box-sizing: border-box; resize: none;
+                     background: var(--sv-field); border: 1px solid var(--sv-line);
+                     border-radius: 3px; padding: 7px 9px; min-height: 46px;
+                     color: var(--sv-ink); font: inherit; font-size: 13px; line-height: 1.65;
+                     overflow: hidden; transition: border-color .12s, background .12s; }
+.sv-table textarea::placeholder { color: var(--sv-ph); font-size: 12px; }
+.sv-table textarea:hover { border-color: var(--sv-sub); }
+.sv-table textarea:focus { outline: none; border-color: var(--sv-accent);
+                           background: var(--sv-field-on);
+                           box-shadow: 0 0 0 2px var(--sv-ring); }
 .sv-x { border: 0; background: none; cursor: pointer; color: var(--sv-sub);
         font-size: 13px; padding: 0 4px; }
 .sv-x:hover { color: var(--sv-red); }
