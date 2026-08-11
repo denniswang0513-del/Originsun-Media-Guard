@@ -360,11 +360,13 @@
         <button class="side-tab active" data-ptab="plan">企劃</button>
         <button class="side-tab" data-ptab="folder" id="tab-folder" style="display:none;">提案資料</button>
         <button class="side-tab" data-ptab="brief" id="tab-brief" style="display:none;">企劃書</button>
+        <button class="side-tab" data-ptab="quote" id="tab-quote" style="display:none;">報價單</button>
       </nav>
       <div class="plan-main">
         <div id="info-host" style="display:none;"></div>
         <div id="plan-host"><div class="state-msg">載入中…</div></div>
         <div id="brief-host" style="display:none;"></div>
+        <div id="quote-host" style="display:none;"></div>
         <div id="folder-host" style="display:none;">
           <!-- 重點提案卡片列與檔案瀏覽分開兩個容器：folder-view 會清空它的
                host，共用一個的話卡片列每次導覽都被洗掉。
@@ -787,6 +789,7 @@ function _showSideTabs() {
         });
         if (btn.dataset.ptab === "folder") _mountFolder();
         if (btn.dataset.ptab === "brief") _mountBrief();
+        if (btn.dataset.ptab === "quote") _mountQuote();
     }));
 }
 
@@ -810,6 +813,30 @@ async function _mountBrief() {
     } catch (e) {
         $("brief-host").innerHTML =        // 設定留著，切回來能重試
             '<div class="state-msg" style="color:var(--red);">企劃書分頁載入失敗：'
+            + escText(emsg(e)) + "</div>";
+    }
+}
+
+// ── 報價單分頁（只有員工登入才有：金額敏感，客戶那條連分頁鈕都不建出來）──
+// 一次性槽，同 _pendingBrief 的形狀。
+let _pendingQuote = null;
+
+function _setupQuoteTab(opts) {
+    _pendingQuote = opts;
+    $("tab-quote").style.display = "";
+}
+
+async function _mountQuote() {
+    if (!_pendingQuote) return;
+    const opts = _pendingQuote;
+    try {
+        const { importRetry } = await import("/js/shared/utils.js");
+        const { renderQuotes } = await importRetry("/tabs/proposals/quote-view.js");
+        await renderQuotes($("quote-host"), opts);
+        _pendingQuote = null;              // 掛好了；之後切回來保留狀態
+    } catch (e) {
+        $("quote-host").innerHTML =        // 設定留著，切回來能重試
+            '<div class="state-msg" style="color:var(--red);">報價單分頁載入失敗：'
             + escText(emsg(e)) + "</div>";
     }
 }
@@ -1244,6 +1271,8 @@ async function _loadPlan(pid) {
         // 企劃書：矩陣要當生成的輸入，所以 plan 一起帶進去
         _setupBriefTab({ proposalId: prop.id, plan: prop.plan || null,
                          toast: (m) => alert(m) });
+        // 報價單：金額敏感 —— 只在這條登入路徑接線，訪客的 _loadSharedPlan 沒有
+        _setupQuoteTab({ proposalId: prop.id, toast: (m) => alert(m) });
     } catch (e) {
         host.innerHTML = '<div class="state-msg" style="color:var(--red);">企劃載入失敗：' + escText(emsg(e)) + "</div>";
     }

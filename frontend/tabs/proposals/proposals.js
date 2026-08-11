@@ -301,6 +301,7 @@ async function openDetail(pid) {
                 <button class="prop-tab active" data-tab="info">📋 基本資料</button>
                 <button class="prop-tab" data-tab="plan">🗂 企劃${prop.has_plan ? '' : '<span class="dot">·未開始</span>'}</button>
                 <button class="prop-tab" data-tab="brief">📄 企劃書</button>
+                <button class="prop-tab" data-tab="quote">報價單</button>
             </div>
             <div class="prop-panel-body" id="pd-tab-info">
                 <div class="prop-info-col">
@@ -362,6 +363,7 @@ async function openDetail(pid) {
             </div>
             <div class="prop-panel-body" id="pd-tab-plan" style="display:none;"></div>
             <div class="prop-panel-body" id="pd-tab-brief" style="display:none;"></div>
+            <div class="prop-panel-body" id="pd-tab-quote" style="display:none;"></div>
         </div>`);
 
     // 分頁切換：企劃分頁 lazy import 元件（載入失敗不影響基本資料分頁）。
@@ -391,6 +393,11 @@ async function openDetail(pid) {
                 proposalId: prop.id, plan: prop.plan || null,
                 toast: (m) => alert(m),
             });
+        },
+        quote: async (host) => {
+            const { renderQuotes } = await importRetry('/tabs/proposals/quote-view.js');
+            if (!host.isConnected) return;
+            await renderQuotes(host, { proposalId: prop.id, toast: (m) => alert(m) });
         },
     };
     ov.querySelectorAll('.prop-tab').forEach(btn => btn.addEventListener('click', async () => {
