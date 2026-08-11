@@ -965,6 +965,47 @@ class PreprodBriefTemplate(Base):
     updated_at = Column(DateTime(timezone=True), server_default=func.now())
 
 
+class PreprodQuoteFile(Base):
+    """提案的**外部報價檔**（多版本）—— 客戶回簽版、廠商比價版這類不是 CRM
+    報價模組產的檔案。CRM 報價（crm_quotations）仍是主清單，這張表只登記
+    「上傳了哪些檔、第幾版」；實體檔案住在專案資產夾的「報價單」子夾。
+
+    🔴 報價單含金額，是內部敏感資料 —— 這張表的任何欄位都**不准**出現在
+    公開 `?t=` token 端點（同 budget_range 的既有慣例），檔案也不進 web root
+    靜態直出，下載一律走帶權限的端點。
+    """
+    __tablename__ = "preprod_quote_files"
+
+    id = Column(String(32), primary_key=True)                    # uuid4 hex
+    proposal_id = Column(String(32), nullable=False, index=True)
+    version = Column(Integer, nullable=False, default=1)         # 每提案 max+1
+    rel = Column(String(512), nullable=False)                    # 相對專案資產夾（含報價單子夾）
+    filename = Column(String(255), nullable=False)               # 落地後的檔名
+    note = Column(Text, nullable=True)
+    created_by = Column(String(64), nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+
+class PreprodQuoteAnalysis(Base):
+    """報價單的 AI 分析（多次分析各一筆，照 PreprodBrief 的多版模式）。
+
+    inputs 存分析當下用了哪些檔/哪些 CRM 報價版本的快照 —— 檔案與報價之後
+    都會繼續長，不存的話「這份分析是根據什麼寫的」說不清。status 生命週期
+    與企劃書相同（pending/ok/failed + 讀取端 core.bg_status.settle 自癒）。
+    """
+    __tablename__ = "preprod_quote_analyses"
+
+    id = Column(String(32), primary_key=True)                    # uuid4 hex
+    proposal_id = Column(String(32), nullable=False, index=True)
+    content = Column(Text, nullable=True)                        # Markdown
+    inputs = Column(JSONB, nullable=True)                        # {files:[...], crm_quotations:[...]}
+    status = Column(String(16), nullable=True)                   # pending/ok/failed
+    error = Column(Text, nullable=True)
+    created_by = Column(String(64), nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), server_default=func.now())
+
+
 class PreprodReference(Base):
     """參考片庫 — 獨立於單一提案的共用參考片，跨提案重用。
     v2（docs/REFERENCE_LIBRARY.md）：每支片一個小頁面 —— facets 分類族、
