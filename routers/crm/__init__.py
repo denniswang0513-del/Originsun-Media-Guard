@@ -18,6 +18,7 @@ from . import archive       # noqa: F401  結案歸檔清單 + 專案回顧（�
 from . import brief_templates  # noqa: F401  企劃範本庫（_範本 夾；依賴 proposal_assets 的 root）
 from . import briefs         # noqa: F401  提案的企劃書（多版；路徑獨立 /briefs）
 from . import proposal_quotes  # noqa: F401  提案的報價單分頁（上傳多版 + AI 分析；依賴 proposal_assets）
+from . import proposal_meetings  # noqa: F401  提案的會議記錄分頁（純人寫，無 AI）
 
 from ._shared import CRM_PREFIX, router, public_router  # noqa: F401,E402
 

@@ -299,9 +299,10 @@ async function openDetail(pid) {
             </div>
             <div class="prop-tabs">
                 <button class="prop-tab active" data-tab="info">📋 基本資料</button>
-                <button class="prop-tab" data-tab="plan">🗂 企劃${prop.has_plan ? '' : '<span class="dot">·未開始</span>'}</button>
+                <button class="prop-tab" data-tab="plan">🗂 創意發想${prop.has_plan ? '' : '<span class="dot">·未開始</span>'}</button>
                 <button class="prop-tab" data-tab="brief">📄 企劃書</button>
                 <button class="prop-tab" data-tab="quote">報價單</button>
+                <button class="prop-tab" data-tab="meeting">會議記錄</button>
             </div>
             <div class="prop-panel-body" id="pd-tab-info">
                 <div class="prop-info-col">
@@ -364,6 +365,7 @@ async function openDetail(pid) {
             <div class="prop-panel-body" id="pd-tab-plan" style="display:none;"></div>
             <div class="prop-panel-body" id="pd-tab-brief" style="display:none;"></div>
             <div class="prop-panel-body" id="pd-tab-quote" style="display:none;"></div>
+            <div class="prop-panel-body" id="pd-tab-meeting" style="display:none;"></div>
         </div>`);
 
     // 分頁切換：企劃分頁 lazy import 元件（載入失敗不影響基本資料分頁）。
@@ -398,6 +400,11 @@ async function openDetail(pid) {
             const { renderQuotes } = await importRetry('/tabs/proposals/quote-view.js');
             if (!host.isConnected) return;
             await renderQuotes(host, { proposalId: prop.id });
+        },
+        meeting: async (host) => {
+            const { renderMeetings } = await importRetry('/tabs/proposals/meeting-view.js');
+            if (!host.isConnected) return;
+            await renderMeetings(host, { proposalId: prop.id });
         },
     };
     ov.querySelectorAll('.prop-tab').forEach(btn => btn.addEventListener('click', async () => {
@@ -612,7 +619,7 @@ function _wireShareCard(ov, prop) {
     function paint() {
         const on = !!(prop.plan && prop.plan.share_token);
         host.innerHTML = on ? `
-            <div class="prop-note" style="margin:0 0 8px;">已開放：拿到連結的人<b>不用登入</b>，可以看企劃、基本資料與「對外分享」資料夾，並共同編輯企劃。</div>
+            <div class="prop-note" style="margin:0 0 8px;">已開放：拿到連結的人<b>不用登入</b>，可以看創意發想、基本資料與「對外分享」資料夾，並共同編輯。</div>
             <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;">
                 <input id="ps-link" readonly style="flex:1;min-width:200px;font-size:12px;">
                 <button id="ps-copy" class="prop-btn ghost">複製連結</button>

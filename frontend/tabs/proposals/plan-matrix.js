@@ -216,7 +216,7 @@ function _renderStart(container, opts) {
     const { proposalId, fetcher, onPlanStarted } = opts;
     container.innerHTML = `
         <div class="plc-start">
-            <div class="st">用一套方法論開始企劃</div>
+            <div class="st">用一套方法論開始創意發想</div>
             <div class="ss">選一套方法論，把想法攤在矩陣上。之後上了新課，這裡會長出新按鈕。</div>
             ${Object.values(PLAN_TEMPLATES).map(t =>
                 `<button data-tid="${esc(t.id)}">📋 ${esc(t.label)}</button>`).join('')}
@@ -234,7 +234,7 @@ function _renderStart(container, opts) {
             } });
             if (onPlanStarted) onPlanStarted(d.plan);
             renderPlan(container, { ...opts, plan: d.plan });
-        } catch (e) { alert('開始企劃失敗：' + (e.message || e)); btn.disabled = false; }
+        } catch (e) { alert('開始創意發想失敗：' + (e.message || e)); btn.disabled = false; }
     }));
     container.querySelectorAll('button[data-ex]').forEach(btn => btn.addEventListener('click', () => {
         _openExample(container, opts, +btn.dataset.ex, () => _renderStart(container, opts));

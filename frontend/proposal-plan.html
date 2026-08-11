@@ -320,7 +320,7 @@
   <div id="list-view" style="display:none;">
     <div class="list-head">
       <h1>提案清單</h1>
-      <span class="hint">點一筆進企劃矩陣；標「企劃中」的已有內容。</span>
+      <span class="hint">點一筆進創意發想矩陣；標「發想中」的已有內容。</span>
     </div>
     <div class="list-tools" id="list-tools" style="display:none;">
       <span class="chip" id="chip-total"><span class="n">–</span><span class="l">總提案</span></span>
@@ -357,16 +357,18 @@
     <div class="plan-body">
       <nav class="plan-side" id="plan-side" style="display:none;">
         <button class="side-tab" data-ptab="info">基本資料</button>
-        <button class="side-tab active" data-ptab="plan">企劃</button>
+        <button class="side-tab active" data-ptab="plan">創意發想</button>
         <button class="side-tab" data-ptab="folder" id="tab-folder" style="display:none;">提案資料</button>
         <button class="side-tab" data-ptab="brief" id="tab-brief" style="display:none;">企劃書</button>
         <button class="side-tab" data-ptab="quote" id="tab-quote" style="display:none;">報價單</button>
+        <button class="side-tab" data-ptab="meeting" id="tab-meeting" style="display:none;">會議記錄</button>
       </nav>
       <div class="plan-main">
         <div id="info-host" style="display:none;"></div>
         <div id="plan-host"><div class="state-msg">載入中…</div></div>
         <div id="brief-host" style="display:none;"></div>
         <div id="quote-host" style="display:none;"></div>
+        <div id="meeting-host" style="display:none;"></div>
         <div id="folder-host" style="display:none;">
           <!-- 重點提案卡片列與檔案瀏覽分開兩個容器：folder-view 會清空它的
                host，共用一個的話卡片列每次導覽都被洗掉。
@@ -801,6 +803,7 @@ function _showSideTabs() {
 const _LAZY_TABS = {
     brief: { mod: "/tabs/proposals/brief-view.js", fn: "renderBriefs", label: "企劃書" },
     quote: { mod: "/tabs/proposals/quote-view.js", fn: "renderQuotes", label: "報價單" },
+    meeting: { mod: "/tabs/proposals/meeting-view.js", fn: "renderMeetings", label: "會議記錄" },
 };
 const _pending = {};
 
@@ -1073,7 +1076,7 @@ function _paintList() {
             <span class="meta">${escText(p.pitch_date || "")}</span>
             <span class="meta">${escText(p.budget_range || "")}</span>
             <span class="refs">${p.refs_count ? "🎞 " + p.refs_count : ""}</span>
-            <span class="badge ${p.has_plan ? "on" : "off"}">${p.has_plan ? "企劃中" : "未開始"}</span>
+            <span class="badge ${p.has_plan ? "on" : "off"}">${p.has_plan ? "發想中" : "未開始"}</span>
             <span class="st">${escText(p.status || "")}</span>
         </a>
         <button class="prop-proj${p.project_id ? "" : " none"}" data-proj="${escAttr(p.id)}"
@@ -1256,8 +1259,10 @@ async function _loadPlan(pid) {
                                  toast: (m) => alert(m) });
         // 報價單：金額敏感 —— 只在這條登入路徑接線，訪客的 _loadSharedPlan 沒有
         _setupLazyTab("quote", { proposalId: prop.id });
+        // 會議記錄：內部素材（會記到內部判斷與報價底線），同樣不給訪客
+        _setupLazyTab("meeting", { proposalId: prop.id });
     } catch (e) {
-        host.innerHTML = '<div class="state-msg" style="color:var(--red);">企劃載入失敗：' + escText(emsg(e)) + "</div>";
+        host.innerHTML = '<div class="state-msg" style="color:var(--red);">創意發想載入失敗：' + escText(emsg(e)) + "</div>";
     }
 }
 
@@ -1453,7 +1458,7 @@ async function _loadSharedPlan(shareTok) {
         // 企劃還沒開始（公開頁可以先開放、企劃後補）→ 訪客看提示，
         // 不能給 renderPlan 的「開始企劃」按鈕 — 那些會打登入端點
         if (!d.plan || !d.plan.template_id) {
-            host.innerHTML = '<div class="state-msg">企劃尚未開始 — 可先看「基本資料」與「資料夾」分頁。</div>';
+            host.innerHTML = '<div class="state-msg">創意發想尚未開始 — 可先看「基本資料」與「資料夾」分頁。</div>';
             return;
         }
         const { renderPlan } = await import("/tabs/proposals/plan-matrix.js");

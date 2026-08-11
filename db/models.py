@@ -1006,13 +1006,37 @@ class PreprodQuoteAnalysis(Base):
     updated_at = Column(DateTime(timezone=True), server_default=func.now())
 
 
+class PreprodMeetingNote(Base):
+    """提案的**會議記錄**（多筆，一次會議一筆）。
+
+    與企劃書/報價分析不同：這裡沒有 AI、沒有版本快照 —— 會議記錄是**人寫的
+    原始素材**，是創意發想與企劃書的輸入，不是產出物。所以就是一張平表，
+    欄位少、隨手可改。
+
+    🔴 內部資料：不出公開 `?t=` token 端點（客戶會議也可能記到內部判斷、
+    競品、報價底線）。要給客戶看的東西走「提案資料」的勾選。
+    """
+    __tablename__ = "preprod_meeting_notes"
+
+    id = Column(String(32), primary_key=True)                    # uuid4 hex
+    proposal_id = Column(String(32), nullable=False, index=True)
+    met_at = Column(DateTime(timezone=True), nullable=True)      # 會議日期（日曆日，同 pitch_date 下錨）
+    title = Column(String(255), nullable=True)                   # 會議主題
+    attendees = Column(String(512), nullable=True)               # 出席者（自由文字，不綁人員庫）
+    content = Column(Text, nullable=True)                        # 記錄本文
+    created_by = Column(String(64), nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), server_default=func.now())
+
+
 # 提案刪除時要一併清的子表（proposal_id 歸屬列）。清單住在表定義旁邊 ——
 # 新增一張帶 proposal_id 的表時，決策點就在你剛寫完 model 的下一行，而不是
 # 在 api_proposals.delete_proposal 的深處（PreprodBrief 就曾因清單只存在
 # handler 裡而漏掉，孤兒列沒人清）。刻意不含：PreprodReferenceLink（多型
 # 關聯，條件是 target_type+target_id 對）、PreprodProposalRef（LEGACY 凍結）、
 # IntelItem（proposal_id 是回填參照，情報不屬於提案）。
-PROPOSAL_CHILD_TABLES = (PreprodBrief, PreprodQuoteFile, PreprodQuoteAnalysis)
+PROPOSAL_CHILD_TABLES = (PreprodBrief, PreprodQuoteFile, PreprodQuoteAnalysis,
+                         PreprodMeetingNote)
 
 
 class PreprodReference(Base):
