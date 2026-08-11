@@ -36,6 +36,9 @@ python-docx==1.2.0
 # 🔴 生產跑的是 C:\OriginsunAgent\python_embed 不是 .venv —— deploy_to_prod
 #    只複製碼不裝套件，這一條要手動 pip 進 python_embed。
 python-pptx==1.0.2
+# 報價單抽文字（core/doc_text）：報價單十之八九是 Excel。同上，要手動 pip 進
+# python_embed（2026-08-11 dev 與 prod 皆已裝 3.1.5）。openpyxl 讀不了舊的 .xls。
+openpyxl==3.1.5
 
 # ── 影像紀錄（media_log）：分享 QR + iPhone HEIC 縮圖 ──
 # 函式層 import，publish 的相依掃描抓不到，需手動維護

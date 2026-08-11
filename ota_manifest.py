@@ -150,6 +150,7 @@ SERVER_ONLY_PKGS = {
     "cryptography",  # ga_service / gsc_service 簽 JWT
     "python-docx", "pypdf",  # showcase AI 參考文件解析（已 try/except 降級）
     "python-pptx",   # core/doc_text —— 企劃範本抽文字，只在 master 消化時跑
+    "openpyxl",      # core/doc_text —— 報價單多為 Excel，只在 master 抽文字時跑
     "pytest",        # publish / deploy 的測試 gate
 }
 
