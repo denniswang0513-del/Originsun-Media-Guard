@@ -1029,3 +1029,34 @@ proposal 模組表，三處都加了 `crm_projects` —— 有專案管理的人
 - **提案庫 Tab 保留 = 企劃工作區**（owner 拍板）；`/proposal-plan.html` 獨立
   登入頁與公開共編不受影響。專案詳情新增「提案企劃」分頁
   （`crm-projects-plan.js` 嵌 plan-matrix，同工作區 overlay 的登入模式）。
+
+---
+
+## §12 報價單分頁（2026-08-11，v2.4.62 這批）
+
+owner 三個拍板：**CRM 報價為主清單**（唯讀鏡像，正本在報價管理 Tab）、
+**外部報價檔上傳可多版本**（客戶回簽版/廠商比價版這類不是報價模組產的檔）、
+**多份報價（上傳檔+CRM 版本合計 ≥2）時 AI 幫忙分析差異**。
+
+- **落點**：`專案資產夾/{folder_subpath}/報價單/`。🔴 **刻意沒有 /uploads
+  web root 退路**（deck 有）——報價單含金額，不進靜態直出；資產夾建不出來
+  就 400 明講。下載走帶權限端點。
+- **🔴 金額紅線**：`preprod_quote_files` / `preprod_quote_analyses` 的任何
+  資料不准出公開 `?t=` token 端點（同 budget_range 慣例）；前端兩個介面的
+  訪客模式**連分頁鈕都不建**（比照企劃書分頁）。
+- **端點**：`routers/crm/proposal_quotes.py` —— GET `/crm/proposals/{pid}/quotes`
+  （files+crm_quotations+最新 analysis，讀取端 bg_status.settle 自癒）、
+  POST `…/quotes/upload`（版號每提案 max+1）、PATCH/DELETE `…/quotes/{fid}`
+  （刪 DB 列+best-effort 刪磁碟檔——「報價單」子夾是系統管的落點）、
+  GET `…/quotes/{fid}/download`、POST `…/quotes/analyze`（bg_task.fire 背景跑
+  claude，inputs 存當下快照）。守衛沿用 proposal_assets._assets_auth。
+- **AI 分析**：`services/quote_analyzer.py`。鐵則同企劃書的「（未填）」原則：
+  資料裡沒有的一律「（資料中未見）」不准編；抽不出文字的檔（掃描 PDF）要在
+  輸出開頭聲明未納入。單檔文字截 8000 字。
+- **xlsx**：`core/doc_text` 新增 openpyxl 讀取器（`data_only=True` 要算好的值；
+  read_only 串流防整本 styled cell 實體化）。**.xls 不支援**，錯誤訊息教人另存
+  .xlsx。openpyxl 是 server-only（`SERVER_ONLY_PKGS` 已列，別讓依賴掃描把它
+  寫進 requirements_agent —— python-pptx 錯名事故的同型陷阱）。
+- **前端**：`tabs/proposals/quote-view.js` 兩介面共用（獨立企劃頁側欄
+  「報價單」分頁 + 後台詳情分頁），照 brief-view 三條：只 import 同目錄與
+  js/shared、--qv-* 可換膚、外殼由呼叫端給。分析輪詢用 shared/poll-job。
