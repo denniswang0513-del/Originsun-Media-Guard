@@ -30,7 +30,7 @@ export async function renderQuotes(host, { proposalId }) {
     // 備註走共用 autosave（債等：debounce + 失敗退基準重試 + 重畫不重綁）。
     // 委派綁在 host 上一次就好 —— 清單每次動作都整塊重畫，逐顆綁必漏
     autosaveDelegated(host, '.qv-notein', (v, el) =>
-        tfetch(`${_base(S(host).proposalId)}/${encodeURIComponent(el.dataset.note)}`,
+        tfetch(`${_base(proposalId)}/${encodeURIComponent(el.dataset.note)}`,
                { method: 'PATCH', json: { note: v } }),
         { onError: (e) => alert('備註儲存失敗：' + (e.message || e)) });
     await _load(host);
@@ -39,20 +39,13 @@ export async function renderQuotes(host, { proposalId }) {
 const S = (h) => h.__qv;
 const _base = (pid) => `${API}/proposals/${encodeURIComponent(pid)}/quotes`;
 
-/** 後端欄位缺漏時防禦性補齊 —— 這支端點另一頭還在長。 */
-async function _fetchAll(pid) {
-    const d = await tfetch(_base(pid));
-    return {
-        files: d.files || [],
-        crm: d.crm_quotations || [],
-        analysis: d.analysis || null,
-    };
-}
-
 async function _load(host) {
     const s = S(host);
     try {
-        s.data = await _fetchAll(s.proposalId);
+        const d = await tfetch(_base(s.proposalId));
+        // 欄位缺漏防禦性補齊 —— 這支端點另一頭還在長
+        s.data = { files: d.files || [], crm: d.crm_quotations || [],
+                   analysis: d.analysis || null };
     } catch (e) {
         host.innerHTML = `<div class="qv-note qv-err">載入失敗：${esc(e.message || e)}</div>`;
         return;
@@ -85,7 +78,7 @@ function _render(host) {
 
     // 新在上（後端 version desc；照拿不重排）
     const fileRows = files.map(f => `
-        <div class="qv-file" data-fid="${esc(String(f.id))}">
+        <div class="qv-file">
             <div class="qv-fline">
                 <span class="qv-ver">v${esc(f.version ?? '')}</span>
                 <span class="qv-name">${esc(f.filename)}</span>
@@ -197,14 +190,19 @@ function _wireAnalysis(host, analysis) {
         btn.disabled = true;
         box.innerHTML = '<div class="qv-note">分析中…（跑 Claude，約一到三分鐘）</div>';
         // 輪詢帶 ?only=analysis（只要 status，別讓後端每 5 秒陪跑 files/crm
-        // 兩條 query）；settle 才整塊重載一次拿最新那份
+        // 兩條 query）；收斂那一 tick 手上就是完整的 analysis（含 content）——
+        // 就地換上重畫，不再全量重抓（files/crm 在分析期間不會變）
         pollJob(analysis.id, s.polling, {
             alive: () => host.isConnected,       // 切走分頁就停
             list: async () => {
                 const d = await tfetch(_base(s.proposalId) + '?only=analysis');
                 return d.analysis ? [d.analysis] : [];
             },
-            onSettled: async () => { await _load(host); },
+            onSettled: (items) => {
+                if (!host.isConnected) return;
+                if (items && items[0]) { s.data.analysis = items[0]; _render(host); }
+                else return _load(host);         // 超時等罕見路徑才全量重抓
+            },
         });
     } else if (analysis && analysis.status === 'failed') {
         box.innerHTML = `<div class="qv-note qv-err">分析失敗：${esc(analysis.error || '')}</div>`;
@@ -222,8 +220,10 @@ function _wireAnalysis(host, analysis) {
     btn.addEventListener('click', async () => {
         btn.disabled = true;
         try {
-            await tfetch(_base(s.proposalId) + '/analyze', { method: 'POST' });
-            await _load(host);      // 重載 → analysis=pending → 上面那條開始輪詢
+            // POST 回應就帶 pending 那筆 —— 就地換上，files/crm 這一刻不會變
+            const d = await tfetch(_base(s.proposalId) + '/analyze', { method: 'POST' });
+            s.data.analysis = d.analysis;
+            _render(host);          // → pending 分支開始輪詢
         } catch (e) {
             alert('分析失敗：' + (e.message || e));
             btn.disabled = false;
@@ -236,8 +236,8 @@ function _wireAnalysis(host, analysis) {
 function _inputsLabel(inputs) {
     const vs = (list) => (list || []).map(x => 'v' + x.version).join('、');
     const parts = [];
-    if ((inputs || {}).files?.length) parts.push('上傳 ' + vs(inputs.files));
-    if ((inputs || {}).crm_quotations?.length) parts.push('CRM ' + vs(inputs.crm_quotations));
+    if (inputs?.files?.length) parts.push('上傳 ' + vs(inputs.files));
+    if (inputs?.crm_quotations?.length) parts.push('CRM ' + vs(inputs.crm_quotations));
     return parts.length ? `｜本次納入：${parts.join('；')}` : '';
 }
 

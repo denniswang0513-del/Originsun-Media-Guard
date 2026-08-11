@@ -19,7 +19,7 @@ from core.bg_status import settle
 from core.bg_task import fire
 
 # 提案庫的三模組閘門只有一份（正本與 owner 的決策註解都在 api_proposals）
-from routers.api_proposals import _check_auth as _auth
+from routers.api_proposals import proposal_auth
 
 from ._shared import router, _get_factory, _now, _require_db
 
@@ -58,7 +58,7 @@ def _dict(b, *, full: bool = False, chars: int = 0) -> dict:
 @router.get("/proposals/{pid}/briefs")
 async def list_briefs(pid: str, request: Request):
     """某個提案的所有版本（新到舊，只回 meta）。"""
-    _auth(request)
+    proposal_auth(request)
     _require_db()
     factory = await _get_factory()
     async with factory() as session:
@@ -75,7 +75,7 @@ async def list_briefs(pid: str, request: Request):
 @router.get("/briefs/{bid}")
 async def get_brief(bid: str, request: Request):
     """單一版本的全文。"""
-    _auth(request)
+    proposal_auth(request)
     _require_db()
     factory = await _get_factory()
     async with factory() as session:
@@ -92,7 +92,7 @@ async def create_brief(pid: str, request: Request, body: dict = None):
     留這條路是因為：企劃書不一定要 AI 寫。有人已經在 Word 裡寫好了，貼進來
     一樣要能存版本、一樣要能被「選一段改寫」。
     """
-    payload = _auth(request)
+    payload = proposal_auth(request)
     _require_db()
     body = body or {}
     factory = await _get_factory()
@@ -120,7 +120,7 @@ async def generate_brief(pid: str, request: Request, body: dict):
 
     **背景跑立刻回**，前端靠版本清單的 status 輪詢。新增一版，不覆蓋舊的。
     """
-    payload = _auth(request)
+    payload = proposal_auth(request)
     _require_db()
     matrix_text = (body.get("matrix_text") or "").strip()
     template_ids = list(body.get("template_ids") or [])
@@ -169,7 +169,7 @@ async def update_brief(bid: str, request: Request, body: dict):
     掉舊的 content 與矩陣快照，回覆也只回字數。整份來回三趟只為了覆寫一個欄位
     是這條路上最貴的浪費。
     """
-    _auth(request)
+    proposal_auth(request)
     _require_db()
     if "content" not in body:
         raise HTTPException(status_code=422, detail="content 必填")
@@ -206,7 +206,7 @@ async def rewrite_selection(bid: str, request: Request, body: dict):
     🔴 回傳的是**新的那一段**，由前端接回原文。後端不做字串取代 —— 同一段文字
     在一份企劃書裡可能出現不只一次，取代第一個命中會改錯地方。
     """
-    _auth(request)
+    proposal_auth(request)
     _require_db()
     selection = (body.get("selection") or "").strip()
     if not selection:
@@ -249,7 +249,7 @@ async def rewrite_selection(bid: str, request: Request, body: dict):
 
 @router.delete("/briefs/{bid}")
 async def delete_brief(bid: str, request: Request):
-    _auth(request)
+    proposal_auth(request)
     _require_db()
     factory = await _get_factory()
     async with factory() as session:

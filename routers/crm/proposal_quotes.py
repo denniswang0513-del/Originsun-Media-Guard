@@ -24,24 +24,24 @@ from fastapi import File, Form, HTTPException, Request, UploadFile
 
 from core.bg_status import settle
 from core.bg_task import fire
-from core.project_folders import safe_rel_path, save_uploads
+from core.project_folders import safe_rel_path
 
 # 守衛比照提案子分頁的既有先例（briefs.py 同款）：對齊 /proposal-plan.html
 # 的頁面守衛 —— 打得開提案工作頁的人（含 preprod_plan），分頁就要能用，
 # 否則「給看不給用」。不新增 RBAC key。
-from routers.api_proposals import _check_auth as _proposal_guard
+from routers.api_proposals import proposal_auth
 from routers.api_proposals import _get_proposal_or_404
 
-from .proposal_assets import (_resolve_asset_file, ensure_folder, ensure_subdir,
-                              project_folder_abs)
+from .proposal_assets import (_ensure_project_folder, _resolve_asset_file,
+                              land_in_home, project_folder_abs)
 
 from ._shared import router, _get_factory, _now, _require_db
 
 try:
     from sqlalchemy import func as safunc
-    from ._shared import select, CrmProject, CrmQuotation
-    from db.models import PreprodProposal, PreprodQuoteFile, PreprodQuoteAnalysis
-    from .quotes import _load_items, _to_quotation_dict
+    from ._shared import select
+    from db.models import PreprodQuoteFile, PreprodQuoteAnalysis
+    from .quotes import _load_items, _to_quotation_dict, project_quotation_rows
 except ImportError:  # DB 套件不存在的 agent 環境
     pass
 
@@ -93,37 +93,30 @@ async def _file_row_or_404(session, pid: str, fid: str):
     return f
 
 
-async def _crm_quotes_of(session, project_id: str) -> list:
-    if not project_id:
-        return []
-    rows = (await session.execute(
-        select(CrmQuotation).where(CrmQuotation.project_id == project_id)
-        .order_by(CrmQuotation.version.desc()))).scalars().all()
-    return rows
-
-
 @router.get("/proposals/{pid}/quotes")
 async def list_proposal_quotes(pid: str, request: Request, only: str = ""):
     """報價分頁一次撈：上傳檔（version desc）+ CRM 報價摘要 + 最新分析。
 
     `?only=analysis` 給分析輪詢用 —— 每 5 秒只為了讀一個 status 就跑
     files/crm 兩條 query 是純浪費（1-3 分鐘的分析 = 幾十趟）。"""
-    _proposal_guard(request)
+    proposal_auth(request)
     _require_db()
     factory = await _get_factory()
     async with factory() as session:
-        prop = await _get_proposal_or_404(session, pid)
         analysis = (await session.execute(
             select(PreprodQuoteAnalysis)
             .where(PreprodQuoteAnalysis.proposal_id == pid)
             .order_by(PreprodQuoteAnalysis.created_at.desc())
             .limit(1))).scalars().first()
         if only == "analysis":
+            # 輪詢路徑連提案那趟 SELECT 都省（不存在的 pid 回 analysis:null
+            # 而非 404 —— 輪詢端拿的本來就是有效 pid，無差別）
             return {"analysis": _analysis_dict(analysis)}
+        prop = await _get_proposal_or_404(session, pid)
         files = (await session.execute(
             select(PreprodQuoteFile).where(PreprodQuoteFile.proposal_id == pid)
             .order_by(PreprodQuoteFile.version.desc()))).scalars().all()
-        crm_rows = await _crm_quotes_of(session, prop.project_id or "")
+        crm_rows = await project_quotation_rows(session, prop.project_id or "")
     return {"files": [_file_dict(f) for f in files],
             "crm_quotations": [_crm_quote_dict(q) for q in crm_rows],
             "analysis": _analysis_dict(analysis)}
@@ -138,7 +131,7 @@ async def upload_proposal_quote(pid: str, request: Request,
     **沒有退路**：沒連結專案、或資產夾建不出來 → 400 明講。報價單含金額，
     不做 /uploads web root 靜態直出的備援（deck 那條的退路這裡刻意不抄）。
     """
-    payload = _proposal_guard(request)
+    payload = proposal_auth(request)
     _require_db()
     # 副檔名黑名單交給 save_uploads（政策單一正本），skipped reason 轉 422；
     # 只有大小例外前置 —— 契約定死 413，save_uploads 只能回 422
@@ -154,24 +147,12 @@ async def upload_proposal_quote(pid: str, request: Request,
                 status_code=400,
                 detail="這個提案還沒連結專案 —— 報價檔要存進專案資產夾，"
                        "請先在提案詳情連結專案再上傳")
-        project = await session.get(CrmProject, prop.project_id)
-        folder_abs = await ensure_folder(session, project) if project else ""
-        if not folder_abs:
-            raise HTTPException(
-                status_code=400,
-                detail="提案資產資料夾無法建立（根目錄未設定或 NAS 搆不到）—— "
-                       "報價檔不落暫存位置，請先修好資產夾再上傳")
-        sub = "/".join(s for s in [(prop.folder_subpath or "").strip("/"),
-                                   _QUOTE_SUBDIR] if s)
-        dir_abs = await ensure_subdir(folder_abs, sub)
-        # 落地走資產夾同一支（清洗檔名、撞名補 -2、黑名單、上限）
-        saved, skipped = await save_uploads(dir_abs, [file],
-                                            max_bytes=_MAX_QUOTE_BYTES)
-        if not saved:
-            reason = (skipped[0].get("reason") if skipped else "檔案沒有存成")
-            raise HTTPException(status_code=422, detail=f"上傳失敗：{reason}")
-        dest = os.path.join(dir_abs, saved[0])
-        rel = os.path.relpath(dest, folder_abs).replace("\\", "/")
+        # 「確保資產夾存在，否則 4xx」走既有正本（殼專案不見 404、建不出來 400）
+        folder_abs = await _ensure_project_folder(session, prop.project_id)
+        # 落地共用件（清洗檔名、撞名補 -2、黑名單、存不成 422）
+        dest, rel = await land_in_home(folder_abs, prop, file,
+                                       subdir=_QUOTE_SUBDIR,
+                                       max_bytes=_MAX_QUOTE_BYTES)
 
         max_ver = (await session.execute(
             select(safunc.max(PreprodQuoteFile.version))
@@ -190,7 +171,7 @@ async def upload_proposal_quote(pid: str, request: Request,
 @router.patch("/proposals/{pid}/quotes/{fid}")
 async def update_proposal_quote(pid: str, fid: str, request: Request, body: dict):
     """改備註（json {note}）。檔案本身不改 —— 要換檔就傳新的一版。"""
-    _proposal_guard(request)
+    proposal_auth(request)
     _require_db()
     factory = await _get_factory()
     async with factory() as session:
@@ -205,7 +186,7 @@ async def delete_proposal_quote(pid: str, fid: str, request: Request):
     """刪 DB 列 + best-effort 刪磁碟檔。敢動磁碟是因為「報價單」子夾是系統
     管的落點（檔全是 upload 端點放的）；刪不到（NAS 斷線/已被搬走）不擋
     DB 刪除 —— 列不見了才是使用者要的結果。"""
-    _proposal_guard(request)
+    proposal_auth(request)
     _require_db()
     factory = await _get_factory()
     async with factory() as session:
@@ -226,7 +207,7 @@ async def delete_proposal_quote(pid: str, fid: str, request: Request):
 @router.get("/proposals/{pid}/quotes/{fid}/download")
 async def download_proposal_quote(pid: str, fid: str, request: Request):
     """帶權限出檔 —— 報價檔在 NAS 資產夾、不在 web root（比照 deck/download）。"""
-    _proposal_guard(request)
+    proposal_auth(request)
     _require_db()
     factory = await _get_factory()
     async with factory() as session:
@@ -246,7 +227,7 @@ async def analyze_proposal_quotes(pid: str, request: Request):
     輸入在**這一刻**收齊（上傳檔路徑 + CRM 各版結構化資料 + 提案背景）並存
     inputs 快照 —— 分析跑到一半有人再傳一版，這一筆講的仍是按下去當時的狀態。
     一檔抽不出文字不整批死（quote_analyzer 標註後繼續）。"""
-    payload = _proposal_guard(request)
+    payload = proposal_auth(request)
     _require_db()
     who = str((payload or {}).get("username") or "")
     factory = await _get_factory()
@@ -255,29 +236,21 @@ async def analyze_proposal_quotes(pid: str, request: Request):
         file_rows = (await session.execute(
             select(PreprodQuoteFile).where(PreprodQuoteFile.proposal_id == pid)
             .order_by(PreprodQuoteFile.version.desc()))).scalars().all()
-        crm_rows = await _crm_quotes_of(session, prop.project_id or "")
+        crm_rows = await project_quotation_rows(session, prop.project_id or "")
         if not file_rows and not crm_rows:
             raise HTTPException(
                 status_code=422,
                 detail="沒有任何資料可分析 —— 請先上傳報價檔，或在 CRM 報價"
                        "模組建立這個專案的報價")
 
-        # 上傳檔 → 本機可開的絕對路徑（解析不到 → path=""，分析裡如實標註）
+        # 家在哪（純 DB）先問好；UNC 的路徑解析**出了 session 再做** ——
+        # NAS 慢/斷線時別抱著 pool 連線（pool_size=5）卡在磁碟上
         folder_abs = ""
         if prop.project_id:
             try:
                 folder_abs = await project_folder_abs(session, prop.project_id)
             except HTTPException:
                 folder_abs = ""         # 殼專案不見了 → 檔案全標「搆不到」
-        # 一趟 to_thread 解析整批 —— safe_rel_path 內含 UNC stat，逐檔 hop
-        # 是 n 次序列網路往返，而這支端點是同步回應（使用者按著等）
-        rels = [f.rel for f in file_rows]
-        paths = (await asyncio.to_thread(
-            lambda: [safe_rel_path(folder_abs, r) for r in rels])
-            if folder_abs else [None] * len(rels))
-        files = [{"version": f.version, "filename": f.filename,
-                  "note": f.note or "", "path": p or ""}
-                 for f, p in zip(file_rows, paths)]
 
         # CRM 各版含項目明細 —— 序列化走報價模組的正本（_to_quotation_dict /
         # _load_items），報價之後加欄位分析才不會靜默看不到；prompt 端只讀
@@ -299,6 +272,16 @@ async def analyze_proposal_quotes(pid: str, request: Request):
         prop_info = {"title": prop.title or "", "status": prop.status or "",
                      "budget_range": prop.budget_range or ""}
         aid = a.id
+        file_meta = [(f.rel, f.version, f.filename, f.note or "")
+                     for f in file_rows]
+
+    # 一趟 to_thread 解析整批（safe_rel_path 內含 UNC stat，逐檔 hop 是 n 次
+    # 序列網路往返）；解析不到 → path=""，分析裡如實標註
+    paths = (await asyncio.to_thread(
+        lambda: [safe_rel_path(folder_abs, rel) for rel, *_ in file_meta])
+        if folder_abs else [None] * len(file_meta))
+    files = [{"version": ver, "filename": name, "note": note, "path": p or ""}
+             for (_rel, ver, name, note), p in zip(file_meta, paths)]
 
     from services.quote_analyzer import analyze_quotes
     # core.bg_task.fire：強參考 + 例外守衛（例外沒接住這筆會永遠 pending）

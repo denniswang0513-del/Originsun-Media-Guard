@@ -31,7 +31,7 @@ from core.doc_text import SUPPORTED_EXTS as ALLOWED_EXTS
 from core.project_folders import (clean_filename, dedupe, safe_rel_path,
                                   save_uploads)
 # 提案庫的三模組閘門只有一份（正本與 owner 的決策註解都在 api_proposals）
-from routers.api_proposals import _check_auth as _auth
+from routers.api_proposals import proposal_auth
 
 from services.brief_template_digest import parse_questions as _parse_questions
 
@@ -98,7 +98,7 @@ def _check_ext(filename: str) -> str:
 @router.get("/brief-templates")
 async def list_brief_templates(request: Request):
     """範本清單。生成企劃書的挑選器與範本庫畫面共用這一支。"""
-    _auth(request)
+    proposal_auth(request)
     _require_db()
     factory = await _get_factory()
     async with factory() as session:
@@ -112,7 +112,7 @@ async def list_brief_templates(request: Request):
 async def upload_brief_template(request: Request, files: List[UploadFile] = File(...)):
     """直接上傳範本（可多檔）。落地後狀態是 pending —— 消化另外觸發，
     因為那要跑 claude，可能要好幾分鐘，不該擋住上傳這個動作。"""
-    payload = _auth(request)
+    payload = proposal_auth(request)
     _require_db()
     d = await _templates_dir(create=True)
     if not d:
@@ -144,7 +144,7 @@ async def brief_template_from_asset(request: Request, body: dict):
     複製而不是記指標：提案會繼續改版，範本應該是凍結的那一份；而且原檔被刪或
     改名時範本不該跟著斷。撞名由 dedupe 補 -2。
     """
-    payload = _auth(request)
+    payload = proposal_auth(request)
     _require_db()
     project_id = (body.get("project_id") or "").strip()
     rel = (body.get("rel") or "").strip()
@@ -186,7 +186,7 @@ async def brief_template_from_asset(request: Request, body: dict):
 async def update_brief_template(tid: str, request: Request, body: dict):
     """改顯示名或**直接改骨架**。骨架是給人改的 —— 生成出來不對味時改這段，
     比回頭調 prompt 直觀得多。"""
-    _auth(request)
+    proposal_auth(request)
     _require_db()
     factory = await _get_factory()
     async with factory() as session:
@@ -217,7 +217,7 @@ async def digest_brief_template(tid: str, request: Request):
 
     冪等但會**覆蓋**現有骨架（含人手改過的）—— 前端負責問一次。
     """
-    _auth(request)
+    proposal_auth(request)
     _require_db()
     factory = await _get_factory()
     async with factory() as session:
@@ -238,7 +238,7 @@ async def digest_brief_template(tid: str, request: Request):
 @router.delete("/brief-templates/{tid}")
 async def delete_brief_template(tid: str, request: Request):
     """刪範本：DB 那列 + `_範本` 裡那份檔案。原提案的檔案不動。"""
-    _auth(request)
+    proposal_auth(request)
     _require_db()
     factory = await _get_factory()
     async with factory() as session:

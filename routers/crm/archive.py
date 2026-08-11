@@ -153,14 +153,14 @@ def _build_dirs(archive_abs: str) -> None:
 
 async def _archive_dir(project_id: str, *, create: bool) -> str:
     """`{專案資產夾}/歸檔` 的絕對路徑。create=False 且沒建過 → ""。"""
-    from routers.crm.proposal_assets import (_project_folder_abs, _project_folder_ready)
+    from routers.crm.proposal_assets import (project_folder_abs, _project_folder_ready)
     if create:
         folder = await _project_folder_ready(project_id)
     else:
         _require_db()
         factory = await _get_factory()
         async with factory() as session:
-            folder = await _project_folder_abs(session, project_id)
+            folder = await project_folder_abs(session, project_id)
     if not folder:
         return ""
     archive = os.path.join(folder, pa.ROOT_FOLDER)

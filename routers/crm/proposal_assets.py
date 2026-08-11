@@ -55,17 +55,14 @@ def assets_auth(request: Request):
     admin** —— 提案庫 Tab 的「＋ 上傳檔案」按鈕對這些人可見，API 若要 admin
     就是給看不給用。改**根目錄**（全站共用設定）才需要 admin，那條走 _check_auth。
 
-    ⚠️ 這裡不可以沿用 `_shared._check_auth` 這個裸名 —— 它在本套件是 Lv3
-    admin，在 routers/api_proposals.py 卻是模組守衛，同名反義。同理，別把
-    這支 alias 成 `_auth`：briefs.py 的 `_auth` 是**另一個守衛**（多放行
-    preprod_plan），同名兩義。
+    ⚠️ 這裡不可以沿用 `_shared._check_auth` 這個裸名（Lv3 admin，語意不同）。
+    提案子分頁（briefs/quotes）用的是 `api_proposals.proposal_auth`（多放行
+    preprod_plan）—— 兩個守衛都是公開自述名，別再 alias 成 `_auth` 之類的
+    短名把語意藏起來。
     """
     return check_admin_or_module(request, "crm_projects", "preprod_proposals")
 
 
-# 舊私名 —— 外部呼叫端早已多到底線名存實亡（api_proposals/archive/quotes 都在
-# 用），升格公開；alias 留一輪給還沒改名的呼叫端。
-_assets_auth = assets_auth
 
 
 _ROOT_SETTING_KEY = "proposals.root"
@@ -235,7 +232,7 @@ async def pinned_of(session, project_id: str) -> tuple:
         return [], False
     cur = pa.rows(prop.pinned_assets)
     if not cur:
-        folder_abs = await _project_folder_abs(session, project_id)
+        folder_abs = await project_folder_abs(session, project_id)
         if await asyncio.to_thread(_legacy_share_dir_has_files, folder_abs):
             cur = pa.adopt_legacy_share_dir(cur, exists=True)
             prop.pinned_assets = cur
@@ -253,10 +250,6 @@ async def project_folder_abs(session, project_id: str) -> str:
     return os.path.join(root, project.proposal_folder_name)
 
 
-# 同 assets_auth：外部呼叫端太多，底線名存實亡 → 升格公開，alias 留一輪
-_project_folder_abs = project_folder_abs
-
-
 async def file_or_404(folder_abs: str, rel: str) -> str:
     """root 底下的單一檔案絕對路徑；逃逸/不存在/不是檔案 → 404。
 
@@ -271,7 +264,7 @@ async def file_or_404(folder_abs: str, rel: str) -> str:
 
 async def _resolve_asset_file(session, project_id: str, rel: str) -> str:
     """專案資產夾內的單一檔案絕對路徑（下載/刪除/指定簡報共用）。"""
-    return await file_or_404(await _project_folder_abs(session, project_id), rel)
+    return await file_or_404(await project_folder_abs(session, project_id), rel)
 
 
 async def _level(folder_abs: str, rel: str, *, missing_ok: bool = False) -> dict:
@@ -319,6 +312,26 @@ async def ensure_subdir(folder_abs: str, rel: str) -> str:
     except OSError:
         return folder_abs
     return target
+
+
+async def land_in_home(folder_abs: str, prop, file, *, subdir: str = "",
+                       max_bytes: int) -> tuple:
+    """把一個上傳檔落進**提案的家**（`folder_subpath[/subdir]`）→
+    `(dest 絕對路徑, rel 相對資產夾)`。存不成（副檔名黑名單/超限）→ 422。
+
+    deck 上傳（api_proposals）與報價單上傳共用 —— ensure_subdir + save_uploads
+    + skipped→422 + relpath 這串在兩邊逐字長出過第二份，收斂在 ensure_subdir
+    旁邊。落地規則（清洗檔名、撞名補 -2、黑名單）全在 save_uploads，這裡
+    只管「家在哪」與 HTTP 化。"""
+    sub = "/".join(s for s in [(prop.folder_subpath or "").strip("/"),
+                               subdir] if s)
+    dir_abs = await ensure_subdir(folder_abs, sub)
+    saved, skipped = await save_uploads(dir_abs, [file], max_bytes=max_bytes)
+    if not saved:
+        reason = (skipped[0].get("reason") if skipped else "檔案沒有存成")
+        raise HTTPException(status_code=422, detail=f"上傳失敗：{reason}")
+    dest = os.path.join(dir_abs, saved[0])
+    return dest, os.path.relpath(dest, folder_abs).replace("\\", "/")
 
 
 async def _mkdir_result(folder_abs: str, rel: str, raw_name) -> dict:
@@ -383,8 +396,8 @@ async def get_proposal_assets(project_id: str, request: Request, rel: str = ""):
     `rel` = 要看資料夾裡的哪一層（空 = 最外層）。逐層走而不是攤平整棵樹 ——
     連結進來的舊資料夾常有 `@Data/03_製片檔案PPM/…` 好幾層。
 
-    讀寫都放行專案/提案模組（見 _assets_auth）；改**根目錄**才要 admin。"""
-    _assets_auth(request)
+    讀寫都放行專案/提案模組（見 assets_auth）；改**根目錄**才要 admin。"""
+    assets_auth(request)
     _require_db()
     factory = await _get_factory()
     raw = await _raw_root()            # 一次解析，root 與回應裡的 root 共用
@@ -471,7 +484,7 @@ async def upload_proposal_assets(project_id: str, request: Request, rel: str = "
     """上傳檔案進專案的提案資產夾（可多檔）。資料夾不存在會先建出來 ——
     這是「現有提案補檔案」的主要入口。`rel` = 落在哪一層（空 = 最外層，
     子層必須已存在）。落地規則見 core.save_uploads。"""
-    _assets_auth(request)
+    assets_auth(request)
     return await _upload_result(await _project_folder_ready(project_id), files,
                                 rel, paths)
 
@@ -480,7 +493,7 @@ async def upload_proposal_assets(project_id: str, request: Request, rel: str = "
 async def mkdir_proposal_assets(project_id: str, request: Request, rel: str = ""):
     """在專案資產夾的 rel 這一層底下開新子資料夾（body `{name}`）。
     資產夾本身不存在會先建出來 —— 空專案第一個動作就是開結構夾很常見。"""
-    _assets_auth(request)
+    assets_auth(request)
     name = (await request.json()).get("name")
     return await _mkdir_result(await _project_folder_ready(project_id), rel, name)
 
@@ -578,12 +591,12 @@ async def pin_proposal_asset(project_id: str, request: Request):
     縮圖在勾選當下算（勾的量很少，且使用者正等著看卡片長出來）；算不出來
     不影響勾選本身。
     """
-    _assets_auth(request)
+    assets_auth(request)
     body = await request.json()
     rel, is_dir = str(body.get("rel") or ""), bool(body.get("is_dir"))
     who = ""
     try:
-        who = str((_assets_auth(request) or {}).get("username") or "")
+        who = str((assets_auth(request) or {}).get("username") or "")
     except Exception:
         pass
     out = await _save_pins(project_id,
@@ -592,7 +605,7 @@ async def pin_proposal_asset(project_id: str, request: Request):
         _require_db()
         factory = await _get_factory()
         async with factory() as session:
-            folder_abs = await _project_folder_abs(session, project_id)
+            folder_abs = await project_folder_abs(session, project_id)
         thumb = await _make_pin_thumb(folder_abs, project_id, rel)
         if thumb:
             out = await _save_pins(project_id,
@@ -612,12 +625,12 @@ async def unpin_proposal_asset(project_id: str, request: Request, rel: str = "")
     不是「rel 字串等於 deck」：這樣連「勾了整個資料夾、deck 在裡面」也對，
     而且**從來沒被勾過的舊 deck 不會被任何一次取消勾選誤清**。
     """
-    _assets_auth(request)
+    assets_auth(request)
     state = {"deck_cleared": False}
 
     async def _clear_deck(session, prop, old, new):
         deck_rel = _deck_rel(prop.deck_url or "",
-                             await _project_folder_abs(session, project_id))
+                             await project_folder_abs(session, project_id))
         if deck_rel and pa.allows(old, deck_rel) and not pa.allows(new, deck_rel):
             prop.deck_url = ""
             state["deck_cleared"] = True
@@ -634,7 +647,7 @@ async def set_pins_public(project_id: str, request: Request):
     🔴 勾選是策展、這個開關才是授權。分開的理由：勾選當下多半只是想讓團隊
     知道現在以哪一版為準，不該順手就把檔案送到客戶眼前。
     """
-    _assets_auth(request)
+    assets_auth(request)
     want = bool((await request.json()).get("public"))
     _require_db()
     factory = await _get_factory()
@@ -651,7 +664,7 @@ async def set_pins_public(project_id: str, request: Request):
 @router.get("/projects/{project_id}/proposal-assets/file")
 async def download_proposal_asset(project_id: str, request: Request, rel: str = ""):
     """下載資產夾內的單一檔案（rel = 列表回傳的相對路徑）。"""
-    _assets_auth(request)
+    assets_auth(request)
     _require_db()
     factory = await _get_factory()
     async with factory() as session:
@@ -664,7 +677,7 @@ async def download_proposal_asset(project_id: str, request: Request, rel: str = 
 async def delete_proposal_asset(project_id: str, request: Request, rel: str = ""):
     """刪除資產夾內的單一檔案。若刪掉的正是目前指定的提案簡報 → 一併清掉
     deck_url（否則詳情頁會留一個指向不存在檔案的下載連結）。"""
-    _assets_auth(request)
+    assets_auth(request)
     _require_db()
     factory = await _get_factory()
     async with factory() as session:
@@ -690,15 +703,15 @@ async def set_proposal_deck(project_id: str, request: Request):
     「是簡報卻不在提案資料裡」的兩份真相（勾不上例如已滿 30 項 → 不擋指定，
     回一句 warning）。反向不成立：取消指定不會取消勾選。
     """
-    _assets_auth(request)
+    assets_auth(request)
     _require_db()
     body = await request.json()
     rel = str(body.get("rel") or "").strip()
-    who = str((_assets_auth(request) or {}).get("username") or "")
+    who = str((assets_auth(request) or {}).get("username") or "")
     factory = await _get_factory()
     warning = ""
     async with factory() as session:
-        folder_abs = await _project_folder_abs(session, project_id)
+        folder_abs = await project_folder_abs(session, project_id)
         deck_url = to_canonical_path(
             await file_or_404(folder_abs, rel)) if rel else ""
         target = await _deck_target(session, project_id)   # 讀寫同一條挑法
@@ -897,42 +910,42 @@ async def _chunk_finish(folder_abs: str, rel: str, upload_id: str, body: dict) -
 
 @router.post("/projects/{project_id}/proposal-assets/upload/begin")
 async def project_chunk_begin(project_id: str, request: Request, body: dict):
-    _assets_auth(request)
+    assets_auth(request)
     return await _chunk_begin(body)
 
 
 @router.put("/projects/{project_id}/proposal-assets/upload/{upload_id}/chunk")
 async def project_chunk_put(project_id: str, upload_id: str, offset: int,
                             request: Request):
-    _assets_auth(request)
+    assets_auth(request)
     return await _chunk_put(upload_id, offset, request)
 
 
 @router.post("/projects/{project_id}/proposal-assets/upload/{upload_id}/finish")
 async def project_chunk_finish(project_id: str, upload_id: str, request: Request,
                                body: dict, rel: str = ""):
-    _assets_auth(request)
+    assets_auth(request)
     return await _chunk_finish(await _project_folder_ready(project_id), rel,
                                upload_id, body)
 
 
 @router.post("/proposal-assets/folder/upload/begin")
 async def folder_chunk_begin(request: Request, body: dict, folder: str = ""):
-    _assets_auth(request)
+    assets_auth(request)
     return await _chunk_begin(body)
 
 
 @router.put("/proposal-assets/folder/upload/{upload_id}/chunk")
 async def folder_chunk_put(upload_id: str, offset: int, request: Request,
                            folder: str = ""):
-    _assets_auth(request)
+    assets_auth(request)
     return await _chunk_put(upload_id, offset, request)
 
 
 @router.post("/proposal-assets/folder/upload/{upload_id}/finish")
 async def folder_chunk_finish(upload_id: str, request: Request, body: dict,
                               folder: str = "", rel: str = ""):
-    _assets_auth(request)
+    assets_auth(request)
     return await _chunk_finish(await _folder_or_404(folder), rel, upload_id, body)
 
 @router.get("/proposal-assets/overview")
@@ -945,7 +958,7 @@ async def proposal_assets_overview(request: Request):
 
     一次回全部（資料夾數是專案數量級）—— 搜尋由前端就地過濾，不做 server-side
     `q`：每個按鍵都重跑一次 CrmProject×Client join 換不到任何東西。"""
-    _assets_auth(request)
+    assets_auth(request)
     _require_db()
     factory = await _get_factory()
     raw = await _raw_root()            # 一次解析（下面回應裡的 root 是同一份）
@@ -996,14 +1009,14 @@ async def _folder_or_404(folder: str) -> str:
 async def proposal_folder_files(request: Request, folder: str = "", rel: str = ""):
     """任一資產資料夾裡**某一層**的內容（未連結專案的「過去資料夾」也能看）。
     `rel` 空 = 最外層；子資料夾走 dirs 回傳的 rel 再打一次。"""
-    _assets_auth(request)
+    assets_auth(request)
     return {"folder": folder, **await _level(await _folder_or_404(folder), rel)}
 
 
 @router.get("/proposal-assets/folder/file")
 async def proposal_folder_file(request: Request, folder: str = "", rel: str = ""):
     """任一資產資料夾內的單檔下載。"""
-    _assets_auth(request)
+    assets_auth(request)
     from fastapi.responses import FileResponse
     path = await file_or_404(await _folder_or_404(folder), rel)
     return FileResponse(path, filename=os.path.basename(path))
@@ -1015,14 +1028,14 @@ async def proposal_folder_upload(request: Request, folder: str = "", rel: str = 
                                  paths: List[str] = Form(default=[])):
     """上傳檔案進任一資產資料夾（未連結專案的也可以 —— owner 指定）。
     `rel` = 落在哪一層（空 = 最外層；就是使用者目前看的那一層）。"""
-    _assets_auth(request)
+    assets_auth(request)
     return await _upload_result(await _folder_or_404(folder), files, rel, paths)
 
 
 @router.post("/proposal-assets/folder/mkdir")
 async def proposal_folder_mkdir(request: Request, folder: str = "", rel: str = ""):
     """在任一資產資料夾的 rel 這一層底下開新子資料夾（body `{name}`）。"""
-    _assets_auth(request)
+    assets_auth(request)
     name = (await request.json()).get("name")
     return await _mkdir_result(await _folder_or_404(folder), rel, name)
 
@@ -1035,7 +1048,7 @@ async def proposal_folder_rename(request: Request):
     `proposal_folder_name` 跟著改（同進退由 core.rename_and_remap 保證）。
     只改**最外層**的資料夾名：它才是專案↔資料夾的對應鍵，子夾結構原封不動。
     """
-    _assets_auth(request)
+    assets_auth(request)
     _require_db()
     body = await request.json()
     folder = str(body.get("folder") or "").strip()
@@ -1075,7 +1088,7 @@ async def proposal_folder_link(request: Request):
     判斷空不空、也不支援解除連結。提案資產夾是純掃磁碟、沒有索引表，兩邊
     合併只會逼出一個誰都不像的抽象。
     """
-    _assets_auth(request)
+    assets_auth(request)
     _require_db()
     body = await request.json()
     folder = str(body.get("folder") or "").strip()

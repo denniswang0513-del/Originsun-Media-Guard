@@ -46,8 +46,7 @@ async def save_job_row(model_cls, row_id: str, *, status=None, error=...,
     """背景工作那一列的部分更新。**一個參數都不給＝只蓋 updated_at**
     （開工的時間戳 —— 檔頭前提：塞車時健康的工作不被誤判 stale 全靠它）。
     `error=...` sentinel 區分「不動」與「清成 None」；`fields` 給結果欄
-    （content / skeleton …），值為 None 的略過。列不見了就靜默返回 ——
-    背景工作沒有人可以報錯。"""
+    （content / skeleton …）。列不見了就靜默返回 —— 背景工作沒有人可以報錯。"""
     from core.db_guard import db_factory_or_503
     factory = db_factory_or_503()
     async with factory() as session:
@@ -55,8 +54,7 @@ async def save_job_row(model_cls, row_id: str, *, status=None, error=...,
         if not row:
             return
         for k, v in fields.items():
-            if v is not None:
-                setattr(row, k, v)
+            setattr(row, k, v)
         if status is not None:
             row.status = status
         if error is not ...:
@@ -66,9 +64,14 @@ async def save_job_row(model_cls, row_id: str, *, status=None, error=...,
 
 
 async def run_claude_job(model_cls, row_id: str, prompt: str, *,
-                         field: str = "content", tag: str = "") -> None:
+                         field: str = "content", tag: str) -> None:
     """跑一次 claude、把結果 settle 回一列。`on_start` 在拿到併發閘之後
-    蓋開工時間戳 —— 這個容易漏的約定收在這裡就只需要對一次。"""
+    蓋開工時間戳 —— 這個容易漏的約定收在這裡就只需要對一次。
+
+    （`_call_claude` 住在 services.website.seo_runner 是歷史沉積 —— 10 個
+    呼叫端橫跨三個包，真正該搬的是它，見 services/website/_runner_util.py
+    檔頭；本函式留在 core 是刻意的：它與 settle 是同一個 pending 生命週期
+    的寫入/讀取對。）"""
     import logging
     from services.website.seo_runner import _call_claude, strip_fence
     out, err = await _call_claude(
@@ -81,4 +84,4 @@ async def run_claude_job(model_cls, row_id: str, prompt: str, *,
     await save_job_row(model_cls, row_id, status="ok", error=None,
                        **{field: content})
     logging.getLogger(__name__).info(
-        "[%s] %s 完成（%d 字）", tag or model_cls.__name__, row_id, len(content))
+        "[%s] %s 完成（%d 字）", tag, row_id, len(content))

@@ -61,6 +61,17 @@ def _item_to_dict(it) -> dict:
     }
 
 
+async def project_quotation_rows(session, project_id: str) -> list:
+    """某專案的全部報價列（version desc）—— 本檔的列表端點與提案的報價分頁
+    （proposal_quotes）共用同一條 query。"""
+    if not project_id:
+        return []
+    return (await session.execute(
+        select(CrmQuotation).where(CrmQuotation.project_id == project_id)
+        .order_by(CrmQuotation.version.desc())
+    )).scalars().all()
+
+
 async def _load_items(session, quotation_id: str) -> list:
     result = await session.execute(
         select(CrmQuotationItem)
@@ -157,10 +168,7 @@ async def list_project_quotations(project_id: str):
     _require_db()
     factory = await _get_factory()
     async with factory() as session:
-        rows = (await session.execute(
-            select(CrmQuotation).where(CrmQuotation.project_id == project_id)
-            .order_by(CrmQuotation.version.desc())
-        )).scalars().all()
+        rows = await project_quotation_rows(session, project_id)
     return {"quotations": [_to_quotation_dict(q) for q in rows], "total": len(rows)}
 
 

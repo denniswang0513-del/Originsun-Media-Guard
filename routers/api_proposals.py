@@ -4,7 +4,7 @@ api_proposals.py — 提案資料庫 API（P-b，docs/PREPROD_PLAN.md B 段）
 提案智財資產化 + win/loss 學習迴圈：提案 CRUD + deck 上傳（落在提案資產夾、
 自動勾成重點提案；資產夾搆不到才退回 uploads/proposals/{id}/ 並回 warning）
 + 共用參考片庫（跨提案掛連結）+ 一鍵成案（自動建 CRM 專案、project_id 回填）
-+ 轉換率統計（by 類型 / by 年度）。守衛見 `_check_auth`（唯一正本；2026-08-03
++ 轉換率統計（by 類型 / by 年度）。守衛見 `proposal_auth`（唯一正本；2026-08-03
 起含 crm_projects — 提案×專案整合）。DB 三表：preprod_proposals / _references / _proposal_refs
 （create_all 自建）。狀態轉「成案 / 未成案」強制 outcome_reason（組織學習欄）。
 """
@@ -138,7 +138,7 @@ _TW_TZ = timezone(timedelta(hours=8))
 _REF_FIELDS = ("url", "title", "note", "tags", "thumb_url")
 
 
-def _check_auth(request: Request) -> dict:
+def proposal_auth(request: Request) -> dict:
     # crm_projects 也放行（2026-08-03 owner 定調：提案進程與專案管理整合 —— 專案端
     # 的人要能看提案、推提案進度；讀寫不拆兩層閘，內部工具要收緊再說）。
     return check_admin_or_module(request, "preprod_proposals", "preprod_plan", "crm_projects")
@@ -272,7 +272,7 @@ async def _get_proposal_or_404(session, pid: str, for_update: bool = False):
 async def proposal_stats(request: Request):
     """轉換率卡：整體 + by 類型 + by 年（pitch_date）各給 {total, won, rate}。
     只算 status in (已提案/入圍/成案/未成案)；total_all 是含草稿/擱置的全量。"""
-    _check_auth(request)
+    proposal_auth(request)
     factory = _require_factory()
 
     from sqlalchemy import select, func as safunc
@@ -314,7 +314,7 @@ async def proposal_stats(request: Request):
 @router.get("/references")
 async def list_references(request: Request, q: str = ""):
     """參考片庫列表（q=標題/網址 ilike）。"""
-    _check_auth(request)
+    proposal_auth(request)
     factory = _require_factory()
 
     from sqlalchemy import or_, select
@@ -333,7 +333,7 @@ async def list_references(request: Request, q: str = ""):
 @router.post("/references")
 async def create_reference(req: ReferencePayload, request: Request):
     """新增參考片（url 必填）。"""
-    _check_auth(request)
+    proposal_auth(request)
     url = (req.url or "").strip()
     if not url:
         raise HTTPException(status_code=422, detail="url 必填")
@@ -358,7 +358,7 @@ async def create_reference(req: ReferencePayload, request: Request):
 @router.put("/references/{rid}")
 async def update_reference(rid: str, req: ReferencePayload, request: Request):
     """部分更新參考片。"""
-    _check_auth(request)
+    proposal_auth(request)
     factory = _require_factory()
 
     data = req.model_dump(exclude_unset=True)
@@ -384,7 +384,7 @@ async def update_reference(rid: str, req: ReferencePayload, request: Request):
 @router.delete("/references/{rid}")
 async def delete_reference(rid: str, request: Request):
     """刪參考片：連帶清掉所有提案的掛載關聯列。"""
-    _check_auth(request)
+    proposal_auth(request)
     factory = _require_factory()
 
     from sqlalchemy import delete as sa_delete
@@ -411,7 +411,7 @@ async def list_proposals(request: Request, q: str = "", status: str = "",
     """提案列表 + 篩選（q=標題、狀態、類型、客戶、年度=pitch_date 年、
     project_id=成案回填的專案 — 專案詳情「提案來源」區塊用），
     join clients 取 client_name，附 refs_count。"""
-    _check_auth(request)
+    proposal_auth(request)
     factory = _require_factory()
 
     from sqlalchemy import extract, select, func as safunc
@@ -473,7 +473,7 @@ async def create_proposal(req: ProposalPayload, request: Request):
       「提案企劃」分頁的建立路徑）；client_id 沒帶就繼承專案的。
     - 不帶 → 自動建殼專案（管線「提案」階段）。**客戶可空** —— 前期草稿
       常常還沒定客戶，之後在專案詳情補上即可（crm_projects.client_id 已放寬）。"""
-    payload = _check_auth(request)
+    payload = proposal_auth(request)
     title = (req.title or "").strip()
     if not title:
         raise HTTPException(status_code=422, detail="title 必填")
@@ -522,7 +522,7 @@ async def create_proposal(req: ProposalPayload, request: Request):
 @router.get("/{pid}")
 async def get_proposal(pid: str, request: Request):
     """提案詳情：欄位 + client_name/project_name + references[]（join 共用片庫）。"""
-    _check_auth(request)
+    proposal_auth(request)
     factory = _require_factory()
 
     from sqlalchemy import select
@@ -558,7 +558,7 @@ async def get_proposal(pid: str, request: Request):
 @router.put("/{pid}")
 async def update_proposal(pid: str, req: ProposalPayload, request: Request):
     """部分更新：只動 payload 有帶的欄位；轉成案/未成案時 outcome_reason 必填。"""
-    _check_auth(request)
+    proposal_auth(request)
     factory = _require_factory()
 
     data = req.model_dump(exclude_unset=True)
@@ -624,7 +624,7 @@ def _raise_plan_conflict(answer: str, updated_at, updated_by: str):
 async def put_plan(pid: str, req: ProposalPlanPayload, request: Request):
     """整份寫入 — 僅供「開始企劃 / 載入範例 / 清空(clear=true)」。
     只動 plan 欄，不碰提案其他欄位（避開整包 model_dump 洗欄地雷）。"""
-    payload = _check_auth(request)
+    payload = proposal_auth(request)
     factory = _require_factory()
     user = payload.get("username") or ""
     now_iso = datetime.now(timezone.utc).isoformat()
@@ -738,7 +738,7 @@ def _plan_meta_payload(plan: dict, prop_updated_at) -> dict:
 @router.patch("/{pid}/plan/cell")
 async def patch_plan_cell(pid: str, req: ProposalPlanCellPatch, request: Request):
     """逐格寫入（登入路徑）。核心邏輯見 _apply_plan_patch。"""
-    payload = _check_auth(request)
+    payload = proposal_auth(request)
     factory = _require_factory()
     user = payload.get("username") or ""
     now_iso = datetime.now(timezone.utc).isoformat()
@@ -759,7 +759,7 @@ async def patch_plan_cell(pid: str, req: ProposalPlanCellPatch, request: Request
 @router.get("/{pid}/plan/meta")
 async def get_plan_meta(pid: str, request: Request, since: str = ""):
     """輕量輪詢端點（登入路徑）。?since= 沒動過就只花一次純量查詢。"""
-    _check_auth(request)
+    proposal_auth(request)
     factory = _require_factory()
     from sqlalchemy import select
     from db.models import PreprodProposal
@@ -821,7 +821,7 @@ async def enable_plan_share(pid: str, request: Request):
     """開放公開頁面：鑄 token 存進 plan（既有且仍有效則重用，冪等）。
     2026-08-08 起**不再要求企劃已開始** —— 公開頁除了企劃還有基本資料與資料夾
     分頁，owner 要能先給客戶連結、企劃之後補；沒企劃時存 {share_token} 殼。"""
-    _check_auth(request)
+    proposal_auth(request)
     factory = _require_factory()
     from core.auth import new_share_token
     from core.crm_logic import PERMANENT_TOKEN_EXPIRES_DAYS
@@ -842,7 +842,7 @@ async def enable_plan_share(pid: str, request: Request):
 @router.delete("/{pid}/plan/share")
 async def disable_plan_share(pid: str, request: Request):
     """關閉公開共編：移除 token → 既有連結立即 401。冪等。"""
-    _check_auth(request)
+    proposal_auth(request)
     factory = _require_factory()
     async with factory() as session:
         prop = await _get_proposal_or_404(session, pid, for_update=True)
@@ -964,7 +964,7 @@ async def _shared_pins(token: str) -> tuple:
     授權與路徑解析綁在一起，呼叫端拿不到「未經授權的資料夾路徑」這種中間狀態。
     """
     factory = _require_factory()
-    from routers.crm.proposal_assets import _project_folder_abs, pinned_of
+    from routers.crm.proposal_assets import project_folder_abs, pinned_of
     async with factory() as session:
         prop = await _get_prop_by_plan_token(session, token)
         if not prop.project_id:
@@ -972,7 +972,7 @@ async def _shared_pins(token: str) -> tuple:
         pins, is_public = await pinned_of(session, prop.project_id)
         if not is_public or not pins:
             return "", []
-        return await _project_folder_abs(session, prop.project_id), pins
+        return await project_folder_abs(session, prop.project_id), pins
 
 
 @public_router.get("/shared/{token}/folder")
@@ -1064,7 +1064,7 @@ async def _survey_patch(get_prop, req: ProposalSurveyPatch, *, public: bool):
 @router.patch("/{pid}/survey")
 async def patch_survey(pid: str, req: ProposalSurveyPatch, request: Request):
     """現況盤點單格寫入（登入路徑）。last-write-wins — 這張表是摘要不是共筆矩陣。"""
-    _check_auth(request)
+    proposal_auth(request)
     return await _survey_patch(
         lambda s: _get_proposal_or_404(s, pid, for_update=True), req, public=False)
 
@@ -1079,7 +1079,7 @@ async def patch_shared_survey(token: str, req: ProposalSurveyPatch):
 @router.post("/{pid}/survey/rows")
 async def add_survey_row(pid: str, req: ProposalSurveyRowPayload, request: Request):
     """加一列自訂盤點欄目（只有登入路徑能加 —— 公開連結不給長結構）。"""
-    _check_auth(request)
+    proposal_auth(request)
     factory = _require_factory()
     async with factory() as session:
         prop = await _get_proposal_or_404(session, pid, for_update=True)
@@ -1096,7 +1096,7 @@ async def add_survey_row(pid: str, req: ProposalSurveyRowPayload, request: Reque
 @router.delete("/{pid}/survey/rows/{key}")
 async def delete_survey_row(pid: str, key: str, request: Request):
     """刪一列自訂盤點欄目（範本列不給刪，清空即可）。"""
-    _check_auth(request)
+    proposal_auth(request)
     factory = _require_factory()
     async with factory() as session:
         prop = await _get_proposal_or_404(session, pid, for_update=True)
@@ -1253,7 +1253,7 @@ async def delete_proposal(pid: str, request: Request):
     """刪提案：連帶刪 proposal_refs 關聯列（reference 是共用片庫保留）
     + 子表歸屬列（清單正本在 db.models.PROPOSAL_CHILD_TABLES —— 磁碟檔留在
     專案資產夾，資產夾跟著專案不跟提案）+ best-effort 清掉 uploads deck 目錄。"""
-    _check_auth(request)
+    proposal_auth(request)
     factory = _require_factory()
 
     from sqlalchemy import delete as sa_delete
@@ -1298,7 +1298,7 @@ async def upload_deck(pid: str, request: Request, file: UploadFile = File(...)):
     明講「沒進提案資料」—— 從前這條路是靜默的，使用者以為傳上去了卻在資料夾
     裡永遠找不到。
     """
-    payload = _check_auth(request)
+    payload = proposal_auth(request)
     if not _ID_RE.match(pid):
         raise HTTPException(status_code=422, detail="無效的提案 ID")
     ext = (os.path.splitext(file.filename or "")[1] or "").lower()
@@ -1311,7 +1311,6 @@ async def upload_deck(pid: str, request: Request, file: UploadFile = File(...)):
     who = str((payload or {}).get("username") or "")
 
     from core.drive_map import to_canonical_path
-    from core.project_folders import save_uploads
     from db.models import CrmProject
     from routers.crm import proposal_assets
 
@@ -1327,16 +1326,9 @@ async def upload_deck(pid: str, request: Request, file: UploadFile = File(...)):
 
         warning, deck_rel = "", ""
         if folder_abs:
-            dir_abs = await proposal_assets.ensure_subdir(
-                folder_abs, prop.folder_subpath or "")
-            # 落地走資產夾上傳的同一支（分塊寫入、清洗檔名、撞名補 -2、黑名單）
-            saved, skipped = await save_uploads(dir_abs, [file],
-                                                max_bytes=_DECK_MAX_BYTES)
-            if not saved:
-                reason = (skipped[0].get("reason") if skipped else "檔案沒有存成")
-                raise HTTPException(status_code=422, detail=f"上傳失敗：{reason}")
-            dest = os.path.join(dir_abs, saved[0])
-            deck_rel = os.path.relpath(dest, folder_abs).replace("\\", "/")
+            # 落地共用件（清洗檔名、撞名補 -2、黑名單、存不成 422）
+            dest, deck_rel = await proposal_assets.land_in_home(
+                folder_abs, prop, file, max_bytes=_DECK_MAX_BYTES)
             prop.deck_url = to_canonical_path(dest)
             err = await proposal_assets.pin_on_row(prop, folder_abs,
                                                    prop.project_id, deck_rel,
@@ -1401,7 +1393,7 @@ async def set_deck_from_asset(pid: str, request: Request, body: dict = Body(...)
     ⚠️ 只寫**這一筆**提案的 deck_url，不碰任何既有勾選；也不反向把既有勾選
     回填成 deck（deck 對客戶公開頁是開的，回填等於靜默曝光）。
     """
-    payload = _check_auth(request)
+    payload = proposal_auth(request)
     rel = str((body or {}).get("rel") or "").strip()
     if not rel:
         raise HTTPException(status_code=422, detail="缺少 rel（要指定為簡報的檔案）")
@@ -1415,7 +1407,7 @@ async def set_deck_from_asset(pid: str, request: Request, body: dict = Body(...)
         prop = await _get_proposal_or_404(session, pid)
         if not prop.project_id:
             raise HTTPException(status_code=409, detail="這個提案還沒有連結專案")
-        folder_abs = await proposal_assets._project_folder_abs(
+        folder_abs = await proposal_assets.project_folder_abs(
             session, prop.project_id)
         if not folder_abs:
             raise HTTPException(status_code=400,
@@ -1440,7 +1432,7 @@ async def set_deck_from_asset(pid: str, request: Request, body: dict = Body(...)
 @router.get("/{pid}/deck/download")
 async def download_deck(pid: str, request: Request):
     """下載提案簡報 —— deck 存進 NAS 資產夾後不在 web root，靠這個端點帶權限出檔。"""
-    _check_auth(request)
+    proposal_auth(request)
     factory = _require_factory()
     async with factory() as session:
         prop = await _get_proposal_or_404(session, pid)
@@ -1466,7 +1458,7 @@ async def convert_proposal(pid: str, request: Request,
     ⚠️ 這裡**沒有**呼叫 `_check_outcome_reason` —— 同樣轉成案，走 `PUT /{pid}`
     原因必填、走這裡選填。不對稱是既有的（不是誰刻意豁免），要統一就在這裡補
     一行；在前端補會做出「UI 說必填、後端仍收空值」的假守門。"""
-    _check_auth(request)
+    proposal_auth(request)
     factory = _require_factory()
 
     from db.models import CrmProject
@@ -1532,7 +1524,7 @@ async def ensure_proposal_folder(pid: str, request: Request):
     **不在建立提案時做** —— NAS 可能搆不到，新增提案不該因此失敗。這支是
     「第一次要用資料夾」時才呼叫（前端掛資料夾分頁時打一次）。
     """
-    _check_auth(request)
+    proposal_auth(request)
     factory = _require_factory()
 
     from core.project_folders import make_dated_folder_name
@@ -1573,17 +1565,17 @@ async def set_proposal_folder(pid: str, request: Request, body: dict = Body(...)
     給的是「NAS 上早就手工分好的那些夾」——例如專案夾底下已經有
     `20260721_TSMC 第二次提案`，把那筆提案指過去就好，**檔案一個都不用動**。
     """
-    _check_auth(request)
+    proposal_auth(request)
     factory = _require_factory()
 
     from core.project_folders import safe_rel_dir
-    from routers.crm.proposal_assets import _project_folder_abs
+    from routers.crm.proposal_assets import project_folder_abs
 
     sub = (body.get("subpath") or "").strip().replace("\\", "/").strip("/")
     async with factory() as session:
         prop = await _get_proposal_or_404(session, pid)
         if sub:
-            base = await _project_folder_abs(session, prop.project_id or "")
+            base = await project_folder_abs(session, prop.project_id or "")
             # safe_rel_dir 同時擋 `..` 與符號連結逃逸，並確認它真的是個資料夾
             if not base or not await asyncio.to_thread(safe_rel_dir, base, sub):
                 raise HTTPException(status_code=404, detail="專案資產夾底下找不到這個子資料夾")
@@ -1609,7 +1601,7 @@ async def set_proposal_project(pid: str, request: Request, body: dict = Body(...
     ⚠️ 原本自動建的殼專案換綁後會變成孤兒留在專案管線裡。這裡**不自動刪**
     （刪專案是破壞性的，而且它可能已經有報價/成本），由使用者自己決定。
     """
-    _check_auth(request)
+    proposal_auth(request)
     factory = _require_factory()
 
     from sqlalchemy import select
@@ -1650,7 +1642,7 @@ async def set_proposal_project(pid: str, request: Request, body: dict = Body(...
 @router.post("/{pid}/refs")
 async def link_reference(pid: str, request: Request, body: dict = Body(...)):
     """掛參考片到提案：body {reference_id}（重複掛載冪等回 ok）。"""
-    _check_auth(request)
+    proposal_auth(request)
     reference_id = (body.get("reference_id") or "").strip()
     if not reference_id:
         raise HTTPException(status_code=422, detail="reference_id 必填")
@@ -1678,7 +1670,7 @@ async def link_reference(pid: str, request: Request, body: dict = Body(...)):
 @router.delete("/{pid}/refs/{rid}")
 async def unlink_reference(pid: str, rid: str, request: Request):
     """解除提案上的參考片掛載（rid=reference_id；片庫本體保留）。"""
-    _check_auth(request)
+    proposal_auth(request)
     factory = _require_factory()
 
     from sqlalchemy import delete as sa_delete
