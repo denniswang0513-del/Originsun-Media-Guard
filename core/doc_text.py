@@ -27,7 +27,7 @@ _RADICAL_FIX = {
     "⺠": "民",   # CJK RADICAL CIVILIAN
 }
 
-SUPPORTED_EXTS = (".pdf", ".pptx", ".docx", ".md", ".txt")
+SUPPORTED_EXTS = (".pdf", ".pptx", ".docx", ".xlsx", ".md", ".txt")
 
 
 def normalize_cjk(text: str) -> str:
@@ -80,12 +80,40 @@ def _docx(path: str) -> str:
     return "\n".join(out)
 
 
+def _xlsx(path: str) -> str:
+    """試算表：逐工作表逐列抽儲存格文字，格式比照 _pptx 的表格輸出
+    （cell 以 ` | ` 相接、工作表之間標分隔線）。
+
+    `data_only=True` —— 要的是算好的**值**不是公式字串（報價單全是 SUM），
+    但代價是「只有 Excel 存檔時算過的值才在」：程式生成、從未用 Excel 開過的
+    檔案，公式格會是 None → 被當空格跳過。read_only 串流模式：報價單常整張
+    套格式，非 read_only 會把幾萬個空 styled cell 全實體化。
+    """
+    from openpyxl import load_workbook
+    wb = load_workbook(path, read_only=True, data_only=True)
+    try:
+        out = []
+        for ws in wb.worksheets:
+            rows = []
+            for row in ws.iter_rows(values_only=True):
+                cells = [str(c).strip() for c in row
+                         if c is not None and str(c).strip()]
+                if cells:
+                    rows.append(" | ".join(cells))
+            if rows:
+                out.append(f"--- 工作表 {ws.title} ---\n" + "\n".join(rows))
+        return "\n\n".join(out)
+    finally:
+        wb.close()
+
+
 def _plain(path: str) -> str:
     with open(path, "r", encoding="utf-8", errors="replace") as f:
         return f.read()
 
 
-_READERS = {".pdf": _pdf, ".pptx": _pptx, ".docx": _docx, ".md": _plain, ".txt": _plain}
+_READERS = {".pdf": _pdf, ".pptx": _pptx, ".docx": _docx, ".xlsx": _xlsx,
+            ".md": _plain, ".txt": _plain}
 
 
 def extract_text(path: str) -> tuple[str, str]:
@@ -97,6 +125,9 @@ def extract_text(path: str) -> tuple[str, str]:
     ext = os.path.splitext(path)[1].lower()
     reader = _READERS.get(ext)
     if not reader:
+        if ext == ".xls":      # openpyxl 不吃舊二進位格式 —— 明講出路，別回通用訊息
+            return "", ("舊版 Excel 格式 .xls 不支援（openpyxl 只讀 .xlsx）"
+                        "—— 請用 Excel 另存成 .xlsx 再上傳")
         return "", f"不支援的格式 {ext}（只收 {'/'.join(SUPPORTED_EXTS)}）"
     try:
         raw = reader(path)
