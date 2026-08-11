@@ -317,13 +317,9 @@ async function openDetail(pid) {
                     </div>
                     <div class="prop-card-sec">
                         <h4>📄 提案簡報（deck）</h4>
-                        ${prop.deck_url
-                            ? `<div style="margin-bottom:8px;"><a id="pd-deck-dl" href="#" style="color:#93c5fd;">⬇️ 下載簡報（${esc(String(prop.deck_url).split('.').pop())}）</a>
-                               <div style="color:#666;font-size:11px;margin-top:3px;">${esc(String(prop.deck_url).split(/[\\/]/).pop())}</div></div>`
-                            : '<div style="color:#666;font-size:12px;margin-bottom:8px;">尚未上傳</div>'}
-                        <button id="pd-deck-upload" class="prop-btn ghost">⬆️ ${prop.deck_url ? '更換簡報' : '上傳簡報'}</button>
-                        <input id="pd-deck-file" type="file" accept="${DECK_EXTS}" style="display:none;">
-                        <div class="prop-note">支援 pdf / ppt / pptx / key / zip，上限 50MB；更換會覆蓋 deck 連結。</div>
+                        <div id="pd-deck-body">${_deckBodyHtml(prop, [])}</div>
+                        <div class="prop-note">上限 50MB，可執行檔會被擋下；更換會覆蓋 deck 連結。
+                            「提案資料」裡勾選的檔要按一下才會變成簡報 — 簡報是給客戶的那一份。</div>
                     </div>
                     <div class="prop-card-sec">
                         <h4>🌐 公開頁面</h4>
@@ -444,21 +440,9 @@ async function openDetail(pid) {
         } catch (err) { alert('刪除失敗：' + (err.message || err)); }
     });
 
-    // deck 下載（新落點在 NAS 資產夾 → 走帶權限端點，不是靜態連結）
-    ov.querySelector('#pd-deck-dl')?.addEventListener('click', (e) => {
-        e.preventDefault();
-        openDeck(prop.id, prop.deck_url);
-    });
-
-    // deck 上傳（前端先擋 50MB，後端同樣把關 413）
-    const deckInput = ov.querySelector('#pd-deck-file');
-    ov.querySelector('#pd-deck-upload').addEventListener('click', () => deckInput.click());
-    deckInput.addEventListener('change', async () => {
-        try {
-            if (await uploadDeck(prop, deckInput.files[0])) { refreshList(); openDetail(prop.id); }
-            else deckInput.value = '';
-        } catch (err) { alert('上傳失敗：' + (err.message || err)); }
-    });
+    _wireDeckCard(ov, prop);
+    // 沒有 deck 才去問「提案資料」勾了什麼 —— 那一趟要掃 NAS，不能擋詳情
+    _loadDeckPicks(ov, prop);
 
     // 參考片：解除 / 從片庫掛上 / 快速入庫並掛上
     ov.querySelectorAll('.prop-ref-unlink').forEach(btn => {
@@ -489,6 +473,97 @@ async function openDetail(pid) {
             openDetail(prop.id);
         } catch (err) { alert('新增失敗：' + (err.message || err)); }
     });
+}
+
+// ── 提案簡報（deck）那一格 ────────────────────────────────
+// 三種狀態，與 /proposal-plan.html 側欄同一套說法（那邊是 _deckCellHtml）：
+//   有 deck                      → 檔名 + 下載 + 更換
+//   沒 deck 但「提案資料」有勾選 → 已勾選的檔名 + 一顆「設為提案簡報」
+//   都沒有                        → 尚未上傳 + 上傳
+//
+// 🔴 勾選**不會**自動變成簡報：勾選是內部策展（此刻以這份為準），簡報是要
+// 給客戶的那一份 —— 中間那一步必須有人按下去。
+//
+// 版面兩邊各畫各的（這裡深色 SPA、那邊官網白底），共用的是**規則**。
+function _deckBodyHtml(prop, picks) {
+    const base = (p) => String(p || '').split(/[\\/]/).pop();
+    const up = `<button id="pd-deck-upload" class="prop-btn ghost">⬆️ ${
+        prop.deck_url ? '更換簡報' : '上傳簡報'}</button>
+        <input id="pd-deck-file" type="file"${
+            DECK_EXTS ? ` accept="${esc(DECK_EXTS)}"` : ''} style="display:none;">`;
+    if (prop.deck_url) {
+        return `<div style="margin-bottom:8px;">
+            <a id="pd-deck-dl" href="#" style="color:#93c5fd;">⬇️ 下載簡報（${
+                esc(String(prop.deck_url).split('.').pop())}）</a>
+            <div style="color:#666;font-size:11px;margin-top:3px;">${esc(base(prop.deck_url))}</div>
+        </div>${up}`;
+    }
+    if (picks.length) {
+        // 一個就直接寫出來（下拉裡只有一個選項是在浪費一次點擊），
+        // 多個才給下拉 —— 值一律從 #pd-deck-pick 讀，接線不必分兩種
+        const ctrl = picks.length === 1
+            ? `<b>${esc(base(picks[0].rel))}</b>
+               <input type="hidden" id="pd-deck-pick" value="${esc(picks[0].rel)}">`
+            : `<select id="pd-deck-pick" style="max-width:220px;">${picks.map(p =>
+                `<option value="${esc(p.rel)}">${esc(base(p.rel))}</option>`).join('')}</select>`;
+        return `<div style="color:#8b8b8b;font-size:12px;margin-bottom:8px;
+                    display:flex;gap:6px;align-items:center;flex-wrap:wrap;">
+                提案資料已勾選：${ctrl}
+            </div>
+            <button id="pd-deck-set" class="prop-btn" title="把這一份設成給客戶看的提案簡報"
+                >設為提案簡報</button> ${up}`;
+    }
+    return `<div style="color:#666;font-size:12px;margin-bottom:8px;">尚未上傳</div>${up}`;
+}
+
+/** 這一格的三顆動作。整格重畫（補上勾選候選）之後要再叫一次 —— 元素換新了。 */
+function _wireDeckCard(ov, prop) {
+    // deck 下載（新落點在 NAS 資產夾 → 走帶權限端點，不是靜態連結）
+    ov.querySelector('#pd-deck-dl')?.addEventListener('click', (e) => {
+        e.preventDefault();
+        openDeck(prop.id, prop.deck_url);
+    });
+    // deck 上傳（前端先擋 50MB，後端同樣把關 413）
+    const deckInput = ov.querySelector('#pd-deck-file');
+    ov.querySelector('#pd-deck-upload')?.addEventListener('click', () => deckInput.click());
+    deckInput?.addEventListener('change', async () => {
+        try {
+            if (await uploadDeck(prop, deckInput.files[0])) { refreshList(); openDetail(prop.id); }
+            else deckInput.value = '';
+        } catch (err) { alert('上傳失敗：' + (err.message || err)); }
+    });
+    // 已勾選的某一份 → 升成簡報（同一支端點，企劃頁的檔案列★走的也是它）
+    const setBtn = ov.querySelector('#pd-deck-set');
+    setBtn?.addEventListener('click', async () => {
+        const rel = ov.querySelector('#pd-deck-pick')?.value || '';
+        if (!rel) return;
+        setBtn.disabled = true;
+        try {
+            await tfetch(`${API}/${prop.id}/deck/from-asset`, { method: 'POST', json: { rel } });
+            refreshList();
+            openDetail(prop.id);        // 重開詳情 = 這一格換成「有 deck」那種
+        } catch (err) {
+            alert('設定失敗：' + (err.message || err));
+            setBtn.disabled = false;
+        }
+    });
+}
+
+/** 沒有 deck 時才問「提案資料」勾了哪些檔。這一趟會掃 NAS（慢），所以
+ *  **不擋**詳情面板：先畫「尚未上傳」，有候選再把那一格換掉。 */
+async function _loadDeckPicks(ov, prop) {
+    if (prop.deck_url || !prop.project_id) return;
+    let d;
+    try {
+        d = await tfetch('/api/v1/crm/projects/'
+            + encodeURIComponent(prop.project_id) + '/proposal-assets');
+    } catch (_) { return; }            // 沒權限 / NAS 搆不到 → 維持「尚未上傳」
+    // 資料夾不當候選：簡報是一個檔
+    const picks = (d.pinned || []).filter(p => p && !p.is_dir);
+    const body = ov.querySelector('#pd-deck-body');
+    if (!picks.length || !body || !body.isConnected) return;   // await 期間 overlay 可能已關
+    body.innerHTML = _deckBodyHtml(prop, picks);
+    _wireDeckCard(ov, prop);
 }
 
 // ── 現況盤點表（基本資料分頁）─────────────────────────────

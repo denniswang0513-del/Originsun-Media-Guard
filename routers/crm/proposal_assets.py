@@ -289,6 +289,27 @@ async def _subdir_or_404(folder_abs: str, rel: str) -> str:
     return dir_abs
 
 
+async def ensure_subdir(folder_abs: str, rel: str) -> str:
+    """資產夾底下的某一層（**不存在就建出來**）→ 絕對路徑。
+
+    與 `_subdir_or_404` 的分工：那支是「使用者正在瀏覽的那一層」，不存在就是
+    404；這支是「某筆提案的家」（`PreprodProposal.folder_subpath`），值是系統
+    自己產或使用者認領過的，磁碟上被搬走/還沒建都不該讓上傳失敗 —— 逃逸或
+    建不出來就退回資產夾根（有落點總比 500 好，呼叫端不必再寫一套退路）。
+    """
+    sub = str(rel or "").replace("\\", "/").strip("/")
+    if not folder_abs or not sub:
+        return folder_abs
+    target = os.path.join(folder_abs, *sub.split("/"))
+    if not within_dir(folder_abs, target):     # `..` / 絕對路徑注入 → 當沒設
+        return folder_abs
+    try:
+        await asyncio.to_thread(os.makedirs, target, exist_ok=True)
+    except OSError:
+        return folder_abs
+    return target
+
+
 async def _mkdir_result(folder_abs: str, rel: str, raw_name) -> dict:
     """在 rel 這一層底下開一個新子資料夾 → 回這一層的新內容（同上傳的回應形狀，
     前端不必再打一次列檔）。名稱規則走 core.validate_folder_name（與改名同一份）。
@@ -492,8 +513,33 @@ async def _make_pin_thumb(folder_abs: str, project_id: str, rel: str) -> str:
     return url if saved else ""
 
 
-async def _save_pins(project_id: str, mutate) -> dict:
-    """讀 → mutate(現值) → 寫回 → 回目前狀態。`mutate` 回 `(新值, 錯誤訊息)`。"""
+async def pin_on_row(prop, folder_abs: str, project_id: str, rel: str, *,
+                     is_dir: bool = False, by: str = "") -> str:
+    """把 rel 勾成**指定那一列**的重點提案（不 commit）→ 錯誤訊息（成功 ""）。
+
+    存在的理由：deck 與勾選是同一列的兩個欄位（見 `_pins_row`），deck 的兩個
+    入口（`POST /proposals/{pid}/deck` 上傳、`/deck/from-asset` 指定）要在
+    **寫 deck_url 的同一個 session、同一列**上順手勾起來，才不會出現「是簡報
+    但沒出現在提案資料」的分岔。走 `_save_pins` 做不到 —— 那支自己開 session、
+    自己挑列。縮圖照樣算（算不出來不擋勾選）。
+    """
+    new, err = pa.pin(prop.pinned_assets, rel, is_dir=is_dir, by=by)
+    if err:
+        return err
+    if not is_dir:
+        thumb = await _make_pin_thumb(folder_abs, project_id, rel)
+        if thumb:
+            new = pa.set_thumb(new, rel, thumb)
+    prop.pinned_assets = new
+    return ""
+
+
+async def _save_pins(project_id: str, mutate, after=None) -> dict:
+    """讀 → mutate(現值) → 寫回 → 回目前狀態。`mutate` 回 `(新值, 錯誤訊息)`。
+
+    `after(session, prop, old, new)`（async，選用）在同一個交易裡跟著跑 ——
+    取消勾選要順手清 deck_url 用的（見 unpin）。
+    """
     _require_db()
     factory = await _get_factory()
     async with factory() as session:
@@ -501,10 +547,13 @@ async def _save_pins(project_id: str, mutate) -> dict:
         if not prop:
             raise HTTPException(status_code=404,
                                 detail="這個專案還沒有提案，無法設定重點提案")
+        old = pa.rows(prop.pinned_assets)
         new, err = mutate(prop.pinned_assets)
         if err:
             raise HTTPException(status_code=422, detail=err)
         prop.pinned_assets = new
+        if after:
+            await after(session, prop, old, new)
         prop.updated_at = _now()
         await session.commit()
         return {"pinned": pa.rows(new),
@@ -542,9 +591,29 @@ async def pin_proposal_asset(project_id: str, request: Request):
 
 @router.delete("/projects/{project_id}/proposal-assets/pin")
 async def unpin_proposal_asset(project_id: str, request: Request, rel: str = ""):
-    """取消勾選 —— 客戶那條路**立刻**失效（下一次 allows 就回 False）。"""
+    """取消勾選 —— 客戶那條路**立刻**失效（下一次 allows 就回 False）。
+
+    取消掉的若正好是目前的**提案簡報**（或它所在的那個勾選資料夾）→ 一併清掉
+    `deck_url`。deck 與勾選是同一列的兩個欄位，不同步清的話會變成「提案資料
+    裡看不到、詳情頁卻還掛著下載連結」的兩份真相。
+
+    判斷用 `pa.allows` 的**前後差**（本來被涵蓋、現在不被涵蓋才清）——
+    不是「rel 字串等於 deck」：這樣連「勾了整個資料夾、deck 在裡面」也對，
+    而且**從來沒被勾過的舊 deck 不會被任何一次取消勾選誤清**。
+    """
     _assets_auth(request)
-    return await _save_pins(project_id, lambda cur: (pa.unpin(cur, rel), ""))
+    state = {"deck_cleared": False}
+
+    async def _clear_deck(session, prop, old, new):
+        deck_rel = _deck_rel(prop.deck_url or "",
+                             await _project_folder_abs(session, project_id))
+        if deck_rel and pa.allows(old, deck_rel) and not pa.allows(new, deck_rel):
+            prop.deck_url = ""
+            state["deck_cleared"] = True
+
+    out = await _save_pins(project_id, lambda cur: (pa.unpin(cur, rel), ""),
+                           after=_clear_deck)
+    return {**out, **state}
 
 
 @router.post("/projects/{project_id}/proposal-assets/pins/public")
@@ -604,23 +673,36 @@ async def delete_proposal_asset(project_id: str, request: Request, rel: str = ""
 @router.post("/projects/{project_id}/proposal-assets/deck")
 async def set_proposal_deck(project_id: str, request: Request):
     """指定資產夾裡的某個檔案為「提案簡報」（body {rel}；rel 空 = 取消指定）。
-    這份才會出現在提案詳情與公開共編頁的「下載簡報」。"""
+    這份才會出現在提案詳情與公開共編頁的「下載簡報」。
+
+    指定的同時**順手勾成重點提案** —— 簡報就是此刻的重點，兩邊分開勾會做出
+    「是簡報卻不在提案資料裡」的兩份真相（勾不上例如已滿 30 項 → 不擋指定，
+    回一句 warning）。反向不成立：取消指定不會取消勾選。
+    """
     _assets_auth(request)
     _require_db()
     body = await request.json()
     rel = str(body.get("rel") or "").strip()
+    who = str((_assets_auth(request) or {}).get("username") or "")
     factory = await _get_factory()
+    warning = ""
     async with factory() as session:
+        folder_abs = await _project_folder_abs(session, project_id)
         deck_url = to_canonical_path(
-            await _resolve_asset_file(session, project_id, rel)) if rel else ""
+            await file_or_404(folder_abs, rel)) if rel else ""
         target = await _deck_target(session, project_id)   # 讀寫同一條挑法
         if not target:
             raise HTTPException(status_code=404,
                                 detail="此專案還沒有提案 — 請先在「提案企劃」分頁建立")
         target.deck_url = deck_url
+        if rel:
+            warning = await pin_on_row(target, folder_abs, project_id, rel, by=who)
+            if warning:
+                warning = f"已設為提案簡報，但沒能勾進提案資料：{warning}"
         target.updated_at = _now()
         await session.commit()
-    return {"status": "ok", "deck_url": deck_url}
+    out = {"status": "ok", "deck_url": deck_url}
+    return {**out, "warning": warning} if warning else out
 
 
 # ── 資產資料夾總覽（含「過去的」未連結資料夾）─────────────────

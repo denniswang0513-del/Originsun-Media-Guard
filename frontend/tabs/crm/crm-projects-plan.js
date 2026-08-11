@@ -218,7 +218,16 @@ function _mountFiles(host, projectId, d, pins) {
                   await crmFetch(`/projects/${projectId}/proposal-assets/deck`,
                       { method: 'POST', body: JSON.stringify({ rel: f.rel }) });
                   crmToast('已設為提案簡報');
-                  deckRel = f.rel;      // 沒回傳新的一層 → folder-view 只重刷★
+                  deckRel = f.rel;
+                  // 端點順手把它勾成提案資料（deck ⊆ 勾選是後端的單一真相）→
+                  // 重載這一層，勾選框與卡片列才會跟著亮。多一趟掃描換
+                  // 「畫面＝伺服器」，而按★是低頻動作。
+                  const dir = f.rel.includes('/') ? f.rel.slice(0, f.rel.lastIndexOf('/')) : '';
+                  const level = await crmFetch(
+                      `/projects/${projectId}/proposal-assets${q(dir)}`);
+                  pins.sync(level);     // apply() 不會餵 store，這裡自己餵
+                  deckRel = level.deck_rel ?? deckRel;
+                  return level;         // 整層換上（folder-view 的約定）
               } },
             // 抽不出文字的格式不長這顆 —— 讓人按下去才知道不行是浪費一次往返
             { at: 'trail', html: (f) => (isTemplateFile(f.filename) ? '📚' : ''),

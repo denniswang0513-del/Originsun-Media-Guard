@@ -1,7 +1,8 @@
 """
 api_proposals.py — 提案資料庫 API（P-b，docs/PREPROD_PLAN.md B 段）
 
-提案智財資產化 + win/loss 學習迴圈：提案 CRUD + deck 上傳（uploads/proposals/{id}/）
+提案智財資產化 + win/loss 學習迴圈：提案 CRUD + deck 上傳（落在提案資產夾、
+自動勾成重點提案；資產夾搆不到才退回 uploads/proposals/{id}/ 並回 warning）
 + 共用參考片庫（跨提案掛連結）+ 一鍵成案（自動建 CRM 專案、project_id 回填）
 + 轉換率統計（by 類型 / by 年度）。守衛見 `_check_auth`（唯一正本；2026-08-03
 起含 crm_projects — 提案×專案整合）。DB 三表：preprod_proposals / _references / _proposal_refs
@@ -22,6 +23,7 @@ from fastapi import APIRouter, Body, File, HTTPException, Request, UploadFile  #
 from core import pinned_assets as pa
 from core import proposal_survey
 from core.auth import check_admin_or_module
+from core.project_folders import BLOCKED_UPLOAD_EXTS
 from core.schemas import (ProposalPayload, ProposalPlanCellPatch, ProposalPlanPayload,
                           ProposalPublicInfoPatch, ProposalSurveyPatch,
                           ProposalSurveyRowPayload, ReferencePayload)
@@ -41,8 +43,17 @@ public_router = APIRouter(tags=["proposals 公開（token 授權）"])
 
 # deck 檔案落地：<repo>/uploads/proposals/{proposal_id}/（main.py 已 mount /uploads）
 _UPLOAD_BASE = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "uploads")
-_ALLOWED_DECK_EXT = {".pdf", ".ppt", ".pptx", ".key", ".zip"}
 _DECK_MAX_BYTES = 50 * 1024 * 1024        # 50MB，超過回 413
+# 簡報格式**不再有白名單**（2026-08-11）——「提案簡報」實務上包含報價 .xlsx、
+# 腳本 .docx、參考圖 .jpg，白名單只擋到自己人。與資產夾上傳同一條規則：
+# 可執行檔黑名單（core.project_folders.BLOCKED_UPLOAD_EXTS）+ 大小上限。
+#
+# `_WEBROOT_UNSAFE_EXT` 只適用於**退路那條**（uploads/ 由 /uploads 靜態直出、
+# 同源）：會被瀏覽器當網頁執行的格式存在 web root = 儲存型 XSS。資產夾那條
+# 路的檔案只經帶權限的下載端點出去，不受這條限制。
+_WEBROOT_UNSAFE_EXT = {".html", ".htm", ".xhtml", ".shtml", ".mhtml", ".svg",
+                       ".xml", ".xsl", ".swf"}
+_EXT_RE = re.compile(r"^\.[A-Za-z0-9]{1,10}$")   # 退路落點的副檔名清洗
 _ID_RE = re.compile(r"^[0-9a-f]{32}$")
 
 # 狀態機：轉入這兩個狀態時 outcome_reason 必填（win/loss 學習迴圈的核心約束）
@@ -1264,26 +1275,40 @@ async def delete_proposal(pid: str, request: Request):
 
 @router.post("/{pid}/deck")
 async def upload_deck(pid: str, request: Request, file: UploadFile = File(...)):
-    """上傳提案簡報（.pdf/.ppt/.pptx/.key/.zip，上限 50MB→413）。
+    """上傳提案簡報（上限 50MB→413）→ 落在**提案資料**裡並自動勾選。
 
-    落點（2026-08-06 起）：專案的**提案資產夾**（settings `proposals.root` 底下
-    `{建立日}_{專案名}`），`deck_url` 存 canonical 絕對路徑 → 前端走
-    `GET /{pid}/deck/download` 下載。root 未設或 NAS 搆不到 → 退回舊的
-    `uploads/proposals/{pid}/`（web root 靜態直出），行為與從前相同。
-    檔名保留原始檔名（人要能在資料夾裡認出它），撞名補 `-2`。"""
-    _check_auth(request)
+    落點：專案的提案資產夾（settings `proposals.root` 底下 `{建立日}_{專案名}`），
+    再進**這筆提案自己的家**（`folder_subpath`，空 = 專案夾根）。一個專案並行
+    多筆提案時，簡報就該跟它的腳本分鏡放在一起，而不是全擠在專案夾根。
+    `deck_url` 存 canonical 絕對路徑 → 前端走 `GET /{pid}/deck/download` 下載。
+
+    **格式**：與資產夾上傳同一條規則（`BLOCKED_UPLOAD_EXTS` 黑名單）——
+    企劃檔本來就雜（報價 .xlsx、腳本 .docx、參考圖 .jpg），白名單只擋到自己人。
+
+    **自動勾選**：上傳成功即寫進同一列的 `pinned_assets`（deck 與勾選是同一列的
+    兩個欄位 —— 見 `proposal_assets._pins_row`）。這是「單一真相」的另一半：
+    上傳的簡報不必再手動去提案資料勾一次。
+    ⚠️ 勾選只是策展，客戶看不看得到另由 `pins_public` 決定（這裡不碰）。
+
+    **退路**：root 未設 / NAS 搆不到 / 還沒連結專案 → 舊的
+    `uploads/proposals/{pid}/`（web root 靜態直出），但回應會帶 `warning`
+    明講「沒進提案資料」—— 從前這條路是靜默的，使用者以為傳上去了卻在資料夾
+    裡永遠找不到。
+    """
+    payload = _check_auth(request)
     if not _ID_RE.match(pid):
         raise HTTPException(status_code=422, detail="無效的提案 ID")
     ext = (os.path.splitext(file.filename or "")[1] or "").lower()
-    if ext not in _ALLOWED_DECK_EXT:
-        raise HTTPException(status_code=422, detail=f"不支援的簡報格式：{ext or '(無副檔名)'}（限 pdf/ppt/pptx/key/zip）")
-    content = await file.read()
-    if len(content) > _DECK_MAX_BYTES:
+    if ext in BLOCKED_UPLOAD_EXTS:
+        raise HTTPException(status_code=422,
+                            detail=f"不允許的檔案類型（{ext}）")
+    if (getattr(file, "size", None) or 0) > _DECK_MAX_BYTES:
         raise HTTPException(status_code=413, detail="簡報檔超過 50MB 上限")
     factory = _require_factory()
+    who = str((payload or {}).get("username") or "")
 
     from core.drive_map import to_canonical_path
-    from core.project_folders import clean_filename, dedupe
+    from core.project_folders import save_uploads
     from db.models import CrmProject
     from routers.crm import proposal_assets
 
@@ -1291,27 +1316,51 @@ async def upload_deck(pid: str, request: Request, file: UploadFile = File(...)):
         prop = await _get_proposal_or_404(session, pid)
         old_url = prop.deck_url or ""
 
-        asset_dir = ""
+        folder_abs = ""
         if prop.project_id:
             project = await session.get(CrmProject, prop.project_id)
             if project:
-                asset_dir = await proposal_assets.ensure_folder(session, project)
+                folder_abs = await proposal_assets.ensure_folder(session, project)
 
-        if asset_dir:
-            # 撞名探測一次列目錄（每個候選名各打一次 SMB exists 會多好幾趟）
-            base = clean_filename(file.filename or "")
-            taken = set(await asyncio.to_thread(os.listdir, asset_dir))
-            dest = os.path.join(asset_dir, dedupe(base, taken, keep_ext=True))
-            await asyncio.to_thread(_write_bytes, dest, content)
+        warning, deck_rel = "", ""
+        if folder_abs:
+            dir_abs = await proposal_assets.ensure_subdir(
+                folder_abs, prop.folder_subpath or "")
+            # 落地走資產夾上傳的同一支（分塊寫入、清洗檔名、撞名補 -2、黑名單）
+            saved, skipped = await save_uploads(dir_abs, [file],
+                                                max_bytes=_DECK_MAX_BYTES)
+            if not saved:
+                reason = (skipped[0].get("reason") if skipped else "檔案沒有存成")
+                raise HTTPException(status_code=422, detail=f"上傳失敗：{reason}")
+            dest = os.path.join(dir_abs, saved[0])
+            deck_rel = os.path.relpath(dest, folder_abs).replace("\\", "/")
             prop.deck_url = to_canonical_path(dest)
+            err = await proposal_assets.pin_on_row(prop, folder_abs,
+                                                   prop.project_id, deck_rel,
+                                                   by=who)
+            if err:
+                warning = f"簡報已存進提案資料，但沒能自動勾選：{err}"
         else:
-            # 退路：root 未設 / NAS 搆不到 → 舊的 web root 落點（HTTP 直出）
+            # 退路：root 未設 / NAS 搆不到 / 沒連結專案 → 舊的 web root 落點。
+            # 這裡的檔案由 /uploads 靜態直出，同源 —— 會被瀏覽器當網頁執行的
+            # 格式一律不收（資產夾那條路不經瀏覽器解析，所以只有這裡要擋）。
+            if ext in _WEBROOT_UNSAFE_EXT:
+                raise HTTPException(
+                    status_code=422,
+                    detail=f"此提案還沒有可用的資產資料夾，{ext} 無法存到暫存位置；"
+                           "請先連結專案並確認提案資產根目錄可用")
             dest_dir = os.path.join(_UPLOAD_BASE, "proposals", pid)
             os.makedirs(dest_dir, exist_ok=True)
-            fname = f"{uuid.uuid4().hex}{ext}"
-            with open(os.path.join(dest_dir, fname), "wb") as fp:
-                fp.write(content)
-            prop.deck_url = f"/uploads/proposals/{pid}/{fname}"
+            safe_ext = ext if _EXT_RE.match(ext) else ""
+            dest = os.path.join(dest_dir, f"{uuid.uuid4().hex}{safe_ext}")
+            await asyncio.to_thread(_stream_upload, file, dest)
+            prop.deck_url = f"/uploads/proposals/{pid}/{os.path.basename(dest)}"
+            # 純文字：這條會走 crmToast，而它用 textContent —— Markdown 的 **
+            # 會原樣顯示成星號
+            warning = ("已存到暫存位置，未進提案資料 —— "
+                       + ("這個提案還沒連結專案" if not prop.project_id
+                          else "提案資產根目錄未設定或 NAS 搆不到")
+                       + "。修好之後重傳一次，檔案才會落在資料夾裡。")
 
         prop.updated_at = datetime.now(timezone.utc)
         await session.commit()
@@ -1324,12 +1373,65 @@ async def upload_deck(pid: str, request: Request, file: UploadFile = File(...)):
             os.remove(os.path.join(_UPLOAD_BASE, *old_url.split("/")[2:]))
         except OSError:
             pass
-    return {"status": "ok", "deck_url": deck_url}
+    out = {"status": "ok", "deck_url": deck_url, "deck_rel": deck_rel,
+           "pinned": bool(deck_rel and not warning)}
+    return {**out, "warning": warning} if warning else out
 
 
-def _write_bytes(path: str, data: bytes) -> None:
-    with open(path, "wb") as fp:
-        fp.write(data)
+def _stream_upload(file, dest: str) -> None:
+    """UploadFile → 磁碟（分塊，不把整包壓在記憶體裡）。上限已在呼叫端擋過。"""
+    file.file.seek(0)
+    with open(dest, "wb") as fp:
+        shutil.copyfileobj(file.file, fp, 1024 * 1024)
+
+
+@router.post("/{pid}/deck/from-asset")
+async def set_deck_from_asset(pid: str, request: Request, body: dict = Body(...)):
+    """把**提案資料裡既有的檔**設為這筆提案的簡報：body `{rel}`（相對專案資產夾）。
+
+    上傳不是唯一入口 —— 檔案多半早就在 NAS 上了（同事直接丟進資料夾、或從別的
+    夾整理過來）。指定的同時順手勾成重點提案，維持「deck ⊆ 勾選」的單一真相。
+
+    回 `{status, deck_url, deck_rel}`（勾不上時多一個 `warning`，但簡報照樣指定
+    成功 —— 勾選滿 30 項不該讓人連簡報都設不了）。
+
+    ⚠️ 只寫**這一筆**提案的 deck_url，不碰任何既有勾選；也不反向把既有勾選
+    回填成 deck（deck 對客戶公開頁是開的，回填等於靜默曝光）。
+    """
+    payload = _check_auth(request)
+    rel = str((body or {}).get("rel") or "").strip()
+    if not rel:
+        raise HTTPException(status_code=422, detail="缺少 rel（要指定為簡報的檔案）")
+    factory = _require_factory()
+    who = str((payload or {}).get("username") or "")
+
+    from core.drive_map import to_canonical_path
+    from routers.crm import proposal_assets
+
+    async with factory() as session:
+        prop = await _get_proposal_or_404(session, pid)
+        if not prop.project_id:
+            raise HTTPException(status_code=409, detail="這個提案還沒有連結專案")
+        folder_abs = await proposal_assets._project_folder_abs(
+            session, prop.project_id)
+        if not folder_abs:
+            raise HTTPException(status_code=400,
+                                detail="提案資產資料夾尚未建立（根目錄未設定或搆不到）")
+        # 路徑防護與存在性都在 file_or_404 裡（逃逸/不存在/不是檔案 → 404）
+        path = await proposal_assets.file_or_404(folder_abs, rel)
+        deck_rel = os.path.relpath(path, folder_abs).replace("\\", "/")
+        prop.deck_url = to_canonical_path(path)
+        warning = await proposal_assets.pin_on_row(prop, folder_abs,
+                                                   prop.project_id, deck_rel,
+                                                   by=who)
+        if warning:
+            warning = f"已設為提案簡報，但沒能勾進提案資料：{warning}"
+        prop.updated_at = datetime.now(timezone.utc)
+        await session.commit()
+        deck_url = prop.deck_url
+
+    out = {"status": "ok", "deck_url": deck_url, "deck_rel": deck_rel}
+    return {**out, "warning": warning} if warning else out
 
 
 @router.get("/{pid}/deck/download")

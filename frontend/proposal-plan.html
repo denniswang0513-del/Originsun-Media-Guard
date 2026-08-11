@@ -185,6 +185,8 @@
   .info-ref a { color: var(--red); text-decoration: underline; }
   .info-ref .note { font-size: 12px; color: var(--sub); margin-top: 3px; line-height: 1.6; }
   .info-hint { font-size: 11.5px; color: var(--sub); line-height: 1.7; }
+  /* 提案簡報那一格：檔名可能很長（NAS 上的中文命名），不給斷點會把整欄撐開 */
+  .deck-name { font-size: 12.5px; color: var(--ink); word-break: break-all; }
   /* 可編控件：平時像文字，focus 才顯出邊框（唯讀感→可編感的漸進揭露） */
   .info-in { width: 100%; font-family: inherit; font-size: 13px; color: var(--ink);
     background: transparent; border: 1px solid transparent; border-radius: 2px;
@@ -452,6 +454,82 @@ function refThumb(r) {
         : `<span class="${cls}">${inner}</span>`;
 }
 
+// ── 「提案簡報」那一格 ────────────────────────────────────
+// 三種狀態（後台提案庫詳情是同一套說法 — 兩個介面分岔過一次）：
+//   有 deck                      → 檔名 + 下載 + 更換
+//   沒 deck 但「提案資料」有勾選 → 已勾選的檔名 + 一顆「設為提案簡報」
+//   都沒有                        → 尚未上傳 + 上傳
+//
+// 🔴 勾選**不會**自動變成簡報。勾選是內部策展（此刻以這份為準），簡報是
+// 要拿去給客戶的那一份 —— 中間那一步必須有人按下去。
+//
+// 候選從 `deck.pinned()` 拿（資料夾分頁掛好才有；在那之前回空陣列，
+// 那時本來也還沒有人勾得了東西）。資料夾**不當候選**：簡報是一個檔。
+function _deckCellHtml(info, deck) {
+    const base = (p) => String(p || "").split(/[\\/]/).pop();
+    const up = deck.upload
+        ? `<button id="deck-up" class="ref-addbtn" style="margin-left:8px;"
+             >${info.deck_url ? "更換" : "上傳"}</button>
+           <input id="deck-file" type="file"${
+               deck.exts ? ` accept="${escAttr(deck.exts)}"` : ""} hidden>`
+        : "";
+    if (info.deck_url) {
+        // 登入模式的 deck_url 是 NAS 絕對路徑 → 只顯示檔名（路徑不外露、也沒人要看）。
+        // 公開模式拿到的是後端組好的可直連 URL，那條沒有檔名可講 → 只出下載連結。
+        const dl = deck.download
+            ? '<a href="#" id="deck-dl">下載簡報</a>'
+            : (safeUrl(info.deck_url)
+                ? `<a href="${escAttr(info.deck_url)}" target="_blank" rel="noopener">下載簡報</a>` : "");
+        const name = deck.download
+            ? `<span class="deck-name" title="${escAttr(base(info.deck_url))}">${
+                escText(base(info.deck_url))}</span> ` : "";
+        return name + dl + up;
+    }
+    const picks = (deck.pinned ? deck.pinned() : []).filter(p => p && !p.is_dir);
+    if (picks.length && deck.setFromAsset) {
+        const one = picks.length === 1;
+        const ctrl = one
+            ? `<span class="deck-name">${escText(base(picks[0].rel))}</span>
+               <input type="hidden" id="deck-pick" value="${escAttr(picks[0].rel)}">`
+            : `<select id="deck-pick" class="info-in" style="width:auto;">${picks.map(p =>
+                `<option value="${escAttr(p.rel)}">${escText(base(p.rel))}</option>`).join("")}</select>`;
+        return `<span class="info-hint">提案資料已勾選：</span>${ctrl}
+            <button id="deck-set" class="ref-addbtn" style="margin-left:8px;"
+                title="把這一份設成給客戶看的提案簡報">設為提案簡報</button>${up}`;
+    }
+    return `<span class="info-hint">尚未上傳</span>${up}`;
+}
+
+/** 這一格的三顆動作（下載 / 上傳 / 設為簡報）。host 可以是整個側欄或只有那一格。 */
+function _wireDeckCell(host, info, deck) {
+    // 簡報落在 NAS 資產夾（非 web root）→ 由呼叫端提供帶權限的下載動作
+    host.querySelector("#deck-dl")?.addEventListener("click", (e) => {
+        e.preventDefault();
+        deck.download();        // openDeck 自己 alert 失敗原因
+    });
+    const deckFile = host.querySelector("#deck-file");
+    host.querySelector("#deck-up")?.addEventListener("click", () => deckFile.click());
+    deckFile?.addEventListener("change", () => deck.upload(deckFile.files[0]));
+    const setBtn = host.querySelector("#deck-set");
+    setBtn?.addEventListener("click", async () => {
+        const rel = host.querySelector("#deck-pick")?.value || "";
+        if (!rel) return;
+        setBtn.disabled = true;
+        // 成功會走 refresh（整塊重畫）→ 不必自己還原按鈕；失敗才要放回去
+        try { await deck.setFromAsset(rel); }
+        catch (e) { alert("設定失敗：" + emsg(e)); setBtn.disabled = false; }
+    });
+}
+
+/** 只換「提案簡報」那一格。勾選變一下就整塊重畫的話，正在打字的備註/標籤
+ *  會被搶走焦點（自動儲存的欄位最不能這樣對待）。 */
+function _repaintDeckCell(info, deck) {
+    const cell = $("deck-cell");
+    if (!cell) return;
+    cell.innerHTML = _deckCellHtml(info, deck);
+    _wireDeckCell(cell, info, deck);
+}
+
 function _renderInfo(host, info, opts) {
     const canEdit = (f) => (opts.editable || []).includes(f);
     const link = (url, label) => safeUrl(url) ? `<a href="${escAttr(url)}" target="_blank" rel="noopener">${escText(label)}</a>` : "";
@@ -478,13 +556,8 @@ function _renderInfo(host, info, opts) {
         : ro("預算範圍", info.budget_range);
     // 登入頁走 deck.download 帶權限下載；公開頁的 deck_url 後端已給成可直連 URL
     const deck = opts.deck || {};
-    const deckCtrl = (info.deck_url || deck.upload) ? row("提案簡報", `
-        ${info.deck_url
-            ? (deck.download ? '<a href="#" id="deck-dl">下載簡報</a>' : link(info.deck_url, "下載簡報"))
-            : '<span class="info-hint">尚未上傳</span>'}
-        ${deck.upload ? `<button id="deck-up" class="ref-addbtn" style="margin-left:8px;"
-            >${info.deck_url ? "更換" : "上傳"}</button>
-            <input id="deck-file" type="file" accept="${escAttr(deck.exts || "")}" hidden>` : ""}`) : "";
+    const deckCtrl = (info.deck_url || deck.upload)
+        ? row("提案簡報", `<span id="deck-cell">${_deckCellHtml(info, deck)}</span>`) : "";
 
     const reasonCard = canEdit("outcome_reason")
         ? `<div class="info-card"><h4>成案／未成案原因（組織學習）</h4>
@@ -573,14 +646,7 @@ function _renderInfo(host, info, opts) {
         _infoGrow(ta);
         ta.addEventListener("input", () => _infoGrow(ta));   // 內容多長格子就多長
     });
-    // 簡報落在 NAS 資產夾（非 web root）→ 由呼叫端提供帶權限的下載動作
-    host.querySelector("#deck-dl")?.addEventListener("click", (e) => {
-        e.preventDefault();
-        deck.download();        // openDeck 自己 alert 失敗原因
-    });
-    const deckFile = host.querySelector("#deck-file");
-    host.querySelector("#deck-up")?.addEventListener("click", () => deckFile.click());
-    deckFile?.addEventListener("change", () => deck.upload(deckFile.files[0]));
+    _wireDeckCell(host, info, deck);
     _mountSurvey(host, info, opts);
     _wireInfoEditing(host, opts);
 }
@@ -1122,6 +1188,13 @@ async function _loadPlan(pid) {
                     catch (e) { alert("上傳失敗：" + emsg(e)); }
                     finally { const el = $("deck-file"); if (el) el.value = ""; }
                 },
+                // 把「提案資料」裡已經勾選的某一份升成簡報。deck.pinned（候選
+                // 從哪來）由資料夾分頁掛好後補上 —— 在那之前這一格就是「尚未上傳」。
+                setFromAsset: async (rel) => {
+                    await ok(await mfetch(P + "/deck/from-asset",
+                        { method: "POST", body: JSON.stringify({ rel }) }));
+                    await refresh();
+                },
             },
             save: async (field, value) => ok(await mfetch(P, { method: "PUT", body: JSON.stringify({ [field]: value }) })),
             reload: async () => (await ok(await mfetch(P))).proposal,
@@ -1159,8 +1232,15 @@ async function _loadPlan(pid) {
         // 真正在等的矩陣往後推一個 RTT（走隧道時很有感）。
         // 用 .catch 而不是 try —— 它跑在矩陣畫好之後，掉進外層 catch 會把已經
         // 畫好的矩陣換成「企劃載入失敗」。訪客那條的資料夾探測也是這個形狀。
-        if (prop.project_id) _wireFolderTab(prop)
-            .catch(e => console.warn("[folder] 資料夾分頁接線失敗", e));
+        // hooks：側欄的「提案簡報」那一格要跟著資料夾分頁走 —— 候選（勾選了
+        // 哪些）與現值（★ 標在哪一份）都住在那邊。兩件事都只重畫那一格。
+        if (prop.project_id) _wireFolderTab(prop, {
+            onPins: (pins) => {
+                infoOpts.deck.pinned = () => pins.get().pinned || [];
+                pins.watch(() => _repaintDeckCell(prop, infoOpts.deck));
+            },
+            onDeck: () => _repaintDeckCell(prop, infoOpts.deck),
+        }).catch(e => console.warn("[folder] 資料夾分頁接線失敗", e));
         // 企劃書：矩陣要當生成的輸入，所以 plan 一起帶進去
         _setupBriefTab({ proposalId: prop.id, plan: prop.plan || null,
                          toast: (m) => alert(m) });
@@ -1174,7 +1254,7 @@ async function _loadPlan(pid) {
  * 而且就地建得了夾、傳得了檔（owner 2026-08-08 選 B —— 企劃頁不該是「看得到
  * 卻做不了」的死路）。訪客那條走 token 端點，範圍小得多，接線在 _loadSharedPlan。
  */
-async function _wireFolderTab(prop) {
+async function _wireFolderTab(prop, hooks = {}) {
     const projectId = prop.project_id;
     const AP = "/api/v1/crm/projects/" + encodeURIComponent(projectId) + "/proposal-assets";
     const q = (rel) => "?rel=" + encodeURIComponent(rel || "");
@@ -1203,12 +1283,33 @@ async function _wireFolderTab(prop) {
         base: AP,
         request: async (url, init) => ok(await mfetch(url, init)),
     });
+    hooks.onPins?.(pins);
+    // 目前哪一份是簡報（★ 要亮在哪一列）。每一層的回應都帶 deck_rel ——
+    // 設定成功時端點也回一份，所以不必為了換一顆星重掃一趟 NAS。
+    let deckRel = "";
+    // 側欄的「提案簡報」那一格要知道有沒有勾選的候選，而勾選狀態要等資料夾
+    // 分頁**被點開**才會有（folder-view 是 lazy 掛的）。所以沒有 deck 的提案
+    // 先掃一次最外層把 store 餵飽 —— 這一趟同時當 folder-view 的 `initial`，
+    // 使用者真的切過去時不會再掃一次。已經有 deck 的不掃：那一格已經有答案了。
+    let first = null;
+    if (!prop.deck_url) {
+        try {
+            first = await ok(await mfetch(AP + q(sub)));
+            pins.sync(first);
+            deckRel = first.deck_rel || "";
+        } catch (e) { console.warn("[folder] 資產夾預掃失敗（分頁點開時會再試）", e); }
+    }
     _setupFolderTab({
         // 從自己的家開始。rootLabel 刻意**不**改成子夾名 —— 麵包屑的最左邊
         // 代表「專案夾」，改掉的話會變成「子夾名 / 子夾名」，而且就沒有東西
         // 可以點回上一層了（同一個案子的素材要走得過去）。
         startRel: sub,
-        load: async (rel) => ok(await mfetch(AP + q(rel))),
+        initial: first,        // 預掃過就別再掃一次（沒掃成是 null，folder-view 自己去載）
+        load: async (rel) => {
+            const d = await ok(await mfetch(AP + q(rel)));
+            deckRel = d.deck_rel ?? deckRel;   // pinned 那半 folder-view 自己餵回 store
+            return d;
+        },
         // CRM 端點要帶 Bearer，<a href> 送不了 → 走共用的授權下載
         onFile: (f) => u.authDownload(AP + "/file?rel=" + encodeURIComponent(f.rel), f.filename),
         write: {
@@ -1225,9 +1326,31 @@ async function _wireFolderTab(prop) {
         // 勾選＝策展（此刻以這份為準），不搬檔案、不等於給客戶看。
         // store 本身就滿足 folder-view 要的 {isPinned, toggle, sync}，不需要轉接層。
         pin: pins,
-        // 📚 設為範本 —— folder-view 不知道 📚 是什麼意思，動作自帶 run（同 CRM
-        // 專案分頁那份）。只長在抽得出文字的檔上：對 .mp4 顯示它只是浪費一格。
+        // 每列兩個動作 —— folder-view 不知道 ★ 與 📚 是什麼意思，動作自帶 run
+        // （同 CRM 專案分頁那份）。狀態走 cls（'on' = 亮起來），不寫 inline 顏色。
         rowActions: [
+            // ★ 設為提案簡報：客戶看到的那一份就是它，所以**要人按**（勾選不會
+            // 自動變簡報）。側欄那一格靠 onDeck 跟著換，不整塊重畫。
+            { at: "lead", html: () => "★",
+              cls: (f) => (f.rel === deckRel ? "on" : ""),
+              title: (f) => (f.rel === deckRel ? "目前的提案簡報" : "設為提案簡報"),
+              errPrefix: "設定提案簡報失敗",
+              run: async (f) => {
+                  const r = await ok(await mfetch(
+                      "/api/v1/proposals/" + encodeURIComponent(prop.id) + "/deck/from-asset",
+                      { method: "POST", body: JSON.stringify({ rel: f.rel }) }));
+                  deckRel = r.deck_rel || f.rel;
+                  prop.deck_url = r.deck_url || prop.deck_url;
+                  hooks.onDeck?.();                // 側欄那一格立刻換成「有簡報」
+                  // 端點順手把它勾成提案資料（deck ⊆ 勾選是後端的單一真相）→
+                  // 重載這一層，勾選框與卡片列才會跟著亮。多一趟掃描換
+                  // 「畫面＝伺服器」，而按★是低頻動作。
+                  const dir = f.rel.includes("/") ? f.rel.slice(0, f.rel.lastIndexOf("/")) : "";
+                  const level = await ok(await mfetch(AP + q(dir)));
+                  pins.sync(level);                // apply() 不會餵 store，這裡自己餵
+                  deckRel = level.deck_rel ?? deckRel;
+                  return level;                    // 整層換上（folder-view 的約定）
+              } },
             // 抽不出文字的格式不長這顆 —— 讓人按下去才知道不行是浪費一次往返
             { at: "trail", html: (f) => (tplMod.isTemplateFile(f.filename) ? "📚" : ""),
               title: "設為企劃範本（複製一份到 _範本，原檔不動）",
