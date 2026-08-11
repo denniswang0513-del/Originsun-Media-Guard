@@ -63,8 +63,6 @@ def assets_auth(request: Request):
     return check_admin_or_module(request, "crm_projects", "preprod_proposals")
 
 
-
-
 _ROOT_SETTING_KEY = "proposals.root"
 _ROOT_PREFIX = "proposals."
 # 根目錄快取。這個值幾乎不變，但 _raw_root 在熱路徑上（每次列檔、每次上傳、
@@ -262,7 +260,7 @@ async def file_or_404(folder_abs: str, rel: str) -> str:
     return path
 
 
-async def _resolve_asset_file(session, project_id: str, rel: str) -> str:
+async def resolve_asset_file(session, project_id: str, rel: str) -> str:
     """專案資產夾內的單一檔案絕對路徑（下載/刪除/指定簡報共用）。"""
     return await file_or_404(await project_folder_abs(session, project_id), rel)
 
@@ -314,17 +312,17 @@ async def ensure_subdir(folder_abs: str, rel: str) -> str:
     return target
 
 
-async def land_in_home(folder_abs: str, prop, file, *, subdir: str = "",
-                       max_bytes: int) -> tuple:
-    """把一個上傳檔落進**提案的家**（`folder_subpath[/subdir]`）→
+async def land_in_home(folder_abs: str, home_subpath: str, file, *,
+                       subdir: str = "", max_bytes: int) -> tuple:
+    """把一個上傳檔落進**提案的家**（`home_subpath[/subdir]`）→
     `(dest 絕對路徑, rel 相對資產夾)`。存不成（副檔名黑名單/超限）→ 422。
 
     deck 上傳（api_proposals）與報價單上傳共用 —— ensure_subdir + save_uploads
     + skipped→422 + relpath 這串在兩邊逐字長出過第二份，收斂在 ensure_subdir
     旁邊。落地規則（清洗檔名、撞名補 -2、黑名單）全在 save_uploads，這裡
-    只管「家在哪」與 HTTP 化。"""
-    sub = "/".join(s for s in [(prop.folder_subpath or "").strip("/"),
-                               subdir] if s)
+    只管「家在哪」與 HTTP 化。收字串不收 ORM 列 —— 呼叫端才好在
+    **session 之外**呼叫（磁碟 I/O 不該抱著 pool 連線）。"""
+    sub = "/".join(s for s in [(home_subpath or "").strip("/"), subdir] if s)
     dir_abs = await ensure_subdir(folder_abs, sub)
     saved, skipped = await save_uploads(dir_abs, [file], max_bytes=max_bytes)
     if not saved:
@@ -365,7 +363,7 @@ async def _upload_result(folder_abs: str, files, rel: str = "", paths=None) -> d
     return out
 
 
-async def _ensure_project_folder(session, project_id: str) -> str:
+async def ensure_project_folder(session, project_id: str) -> str:
     """專案資產夾（會實際建出來）；建不出來 → 400。"""
     path = await ensure_folder(session, await _project_or_404(session, project_id))
     if not path:
@@ -374,14 +372,14 @@ async def _ensure_project_folder(session, project_id: str) -> str:
     return path
 
 
-async def _project_folder_ready(project_id: str) -> str:
+async def project_folder_ready(project_id: str) -> str:
     """兩個寫入端點（上傳、開夾）的共同前置：確保資產夾存在並落地它的名字。
     commit 不能省 —— 資料夾名可能是這一刻才生成的，磁碟上已經有夾、DB 卻沒記
     的話，下次就會用新名再建一個。"""
     _require_db()
     factory = await _get_factory()
     async with factory() as session:
-        folder = await _ensure_project_folder(session, project_id)
+        folder = await ensure_project_folder(session, project_id)
         await session.commit()
     return folder
 
@@ -485,7 +483,7 @@ async def upload_proposal_assets(project_id: str, request: Request, rel: str = "
     這是「現有提案補檔案」的主要入口。`rel` = 落在哪一層（空 = 最外層，
     子層必須已存在）。落地規則見 core.save_uploads。"""
     assets_auth(request)
-    return await _upload_result(await _project_folder_ready(project_id), files,
+    return await _upload_result(await project_folder_ready(project_id), files,
                                 rel, paths)
 
 
@@ -495,7 +493,7 @@ async def mkdir_proposal_assets(project_id: str, request: Request, rel: str = ""
     資產夾本身不存在會先建出來 —— 空專案第一個動作就是開結構夾很常見。"""
     assets_auth(request)
     name = (await request.json()).get("name")
-    return await _mkdir_result(await _project_folder_ready(project_id), rel, name)
+    return await _mkdir_result(await project_folder_ready(project_id), rel, name)
 
 
 # ── 重點提案：勾選 / 取消 / 開放給客戶 ──────────────────────
@@ -591,14 +589,10 @@ async def pin_proposal_asset(project_id: str, request: Request):
     縮圖在勾選當下算（勾的量很少，且使用者正等著看卡片長出來）；算不出來
     不影響勾選本身。
     """
-    assets_auth(request)
+    payload = assets_auth(request)
     body = await request.json()
     rel, is_dir = str(body.get("rel") or ""), bool(body.get("is_dir"))
-    who = ""
-    try:
-        who = str((assets_auth(request) or {}).get("username") or "")
-    except Exception:
-        pass
+    who = str((payload or {}).get("username") or "")
     out = await _save_pins(project_id,
                            lambda cur: pa.pin(cur, rel, is_dir=is_dir, by=who))
     if not is_dir:
@@ -668,7 +662,7 @@ async def download_proposal_asset(project_id: str, request: Request, rel: str = 
     _require_db()
     factory = await _get_factory()
     async with factory() as session:
-        path = await _resolve_asset_file(session, project_id, rel)
+        path = await resolve_asset_file(session, project_id, rel)
     from fastapi.responses import FileResponse
     return FileResponse(path, filename=os.path.basename(path))
 
@@ -681,7 +675,7 @@ async def delete_proposal_asset(project_id: str, request: Request, rel: str = ""
     _require_db()
     factory = await _get_factory()
     async with factory() as session:
-        path = await _resolve_asset_file(session, project_id, rel)
+        path = await resolve_asset_file(session, project_id, rel)
         await asyncio.to_thread(os.remove, path)
         canon = to_canonical_path(path)
         props = (await session.execute(
@@ -703,11 +697,11 @@ async def set_proposal_deck(project_id: str, request: Request):
     「是簡報卻不在提案資料裡」的兩份真相（勾不上例如已滿 30 項 → 不擋指定，
     回一句 warning）。反向不成立：取消指定不會取消勾選。
     """
-    assets_auth(request)
+    payload = assets_auth(request)
     _require_db()
     body = await request.json()
     rel = str(body.get("rel") or "").strip()
-    who = str((assets_auth(request) or {}).get("username") or "")
+    who = str((payload or {}).get("username") or "")
     factory = await _get_factory()
     warning = ""
     async with factory() as session:
@@ -925,7 +919,7 @@ async def project_chunk_put(project_id: str, upload_id: str, offset: int,
 async def project_chunk_finish(project_id: str, upload_id: str, request: Request,
                                body: dict, rel: str = ""):
     assets_auth(request)
-    return await _chunk_finish(await _project_folder_ready(project_id), rel,
+    return await _chunk_finish(await project_folder_ready(project_id), rel,
                                upload_id, body)
 
 

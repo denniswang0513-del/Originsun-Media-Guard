@@ -12,12 +12,17 @@
 殘留 `downloading` 的 SQL 述詞。要再寫第四個之前先看這裡。
 
 🔴 前提：`updated_at` 必須是**工作真正開始**的時間，不是排進佇列的時間 ——
-`_call_claude` 有併發閘，排隊時間不算在 180 秒 timeout 裡。所以兩個寫入端都在
-`on_start`（拿到閘之後）補蓋一次時間戳；少了那一下，塞車時健康的工作會被誤判。
+`_call_claude` 有併發閘，排隊時間不算在 180 秒 timeout 裡。寫入端唯一正本
+`run_claude_job`（本檔）在 `on_start`（拿到閘之後）補蓋一次時間戳；
+少了那一下，塞車時健康的工作會被誤判。
 """
 from __future__ import annotations
 
+import logging
+
 from datetime import datetime, timedelta, timezone
+
+logger = logging.getLogger(__name__)
 
 # claude 的 timeout 是 180 秒；再給 60 秒讓寫回 DB 完成
 STALE_AFTER = timedelta(seconds=240)
@@ -72,7 +77,6 @@ async def run_claude_job(model_cls, row_id: str, prompt: str, *,
     呼叫端橫跨三個包，真正該搬的是它，見 services/website/_runner_util.py
     檔頭；本函式留在 core 是刻意的：它與 settle 是同一個 pending 生命週期
     的寫入/讀取對。）"""
-    import logging
     from services.website.seo_runner import _call_claude, strip_fence
     out, err = await _call_claude(
         prompt, on_start=lambda: save_job_row(model_cls, row_id))
@@ -83,5 +87,4 @@ async def run_claude_job(model_cls, row_id: str, prompt: str, *,
         return
     await save_job_row(model_cls, row_id, status="ok", error=None,
                        **{field: content})
-    logging.getLogger(__name__).info(
-        "[%s] %s 完成（%d 字）", tag, row_id, len(content))
+    logger.info("[%s] %s 完成（%d 字）", tag, row_id, len(content))

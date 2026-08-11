@@ -29,11 +29,10 @@ from core.project_folders import safe_rel_path
 # 守衛比照提案子分頁的既有先例（briefs.py 同款）：對齊 /proposal-plan.html
 # 的頁面守衛 —— 打得開提案工作頁的人（含 preprod_plan），分頁就要能用，
 # 否則「給看不給用」。不新增 RBAC key。
-from routers.api_proposals import proposal_auth
-from routers.api_proposals import _get_proposal_or_404
+from routers.api_proposals import _get_proposal_or_404, proposal_auth
 
-from .proposal_assets import (_ensure_project_folder, _resolve_asset_file,
-                              land_in_home, project_folder_abs)
+from .proposal_assets import (ensure_project_folder, land_in_home,
+                              project_folder_abs, resolve_asset_file)
 
 from ._shared import router, _get_factory, _now, _require_db
 
@@ -93,6 +92,13 @@ async def _file_row_or_404(session, pid: str, fid: str):
     return f
 
 
+async def _file_rows(session, pid: str) -> list:
+    """這筆提案的全部報價檔列（version desc）—— GET 與 analyze 共用。"""
+    return (await session.execute(
+        select(PreprodQuoteFile).where(PreprodQuoteFile.proposal_id == pid)
+        .order_by(PreprodQuoteFile.version.desc()))).scalars().all()
+
+
 @router.get("/proposals/{pid}/quotes")
 async def list_proposal_quotes(pid: str, request: Request, only: str = ""):
     """報價分頁一次撈：上傳檔（version desc）+ CRM 報價摘要 + 最新分析。
@@ -113,9 +119,7 @@ async def list_proposal_quotes(pid: str, request: Request, only: str = ""):
             # 而非 404 —— 輪詢端拿的本來就是有效 pid，無差別）
             return {"analysis": _analysis_dict(analysis)}
         prop = await _get_proposal_or_404(session, pid)
-        files = (await session.execute(
-            select(PreprodQuoteFile).where(PreprodQuoteFile.proposal_id == pid)
-            .order_by(PreprodQuoteFile.version.desc()))).scalars().all()
+        files = await _file_rows(session, pid)
         crm_rows = await project_quotation_rows(session, prop.project_id or "")
     return {"files": [_file_dict(f) for f in files],
             "crm_quotations": [_crm_quote_dict(q) for q in crm_rows],
@@ -140,6 +144,8 @@ async def upload_proposal_quote(pid: str, request: Request,
     who = str((payload or {}).get("username") or "")
 
     factory = await _get_factory()
+    # 兩段式（同 project_folder_ready 的既有正本）：session1 只做 DB —— 50MB 的
+    # SMB 寫入不抱著 pool 連線（pool_timeout=5s，NAS 慢時等連線的請求會直接死）
     async with factory() as session:
         prop = await _get_proposal_or_404(session, pid)
         if not prop.project_id:
@@ -147,13 +153,19 @@ async def upload_proposal_quote(pid: str, request: Request,
                 status_code=400,
                 detail="這個提案還沒連結專案 —— 報價檔要存進專案資產夾，"
                        "請先在提案詳情連結專案再上傳")
-        # 「確保資產夾存在，否則 4xx」走既有正本（殼專案不見 404、建不出來 400）
-        folder_abs = await _ensure_project_folder(session, prop.project_id)
-        # 落地共用件（清洗檔名、撞名補 -2、黑名單、存不成 422）
-        dest, rel = await land_in_home(folder_abs, prop, file,
-                                       subdir=_QUOTE_SUBDIR,
-                                       max_bytes=_MAX_QUOTE_BYTES)
+        # 「確保資產夾存在，否則 4xx」走既有正本（殼專案不見 404、建不出來 400）；
+        # ensure_folder 可能這一刻才生成 proposal_folder_name → 先 commit 落地
+        # （磁碟有夾、DB 沒記的話下次會用新名再建一個 —— 正本的既有理由）
+        folder_abs = await ensure_project_folder(session, prop.project_id)
+        await session.commit()
+        home_subpath = prop.folder_subpath or ""
 
+    # 磁碟在 session 之外（清洗檔名、撞名補 -2、黑名單、存不成 422）
+    dest, rel = await land_in_home(folder_abs, home_subpath, file,
+                                   subdir=_QUOTE_SUBDIR,
+                                   max_bytes=_MAX_QUOTE_BYTES)
+
+    async with factory() as session:
         max_ver = (await session.execute(
             select(safunc.max(PreprodQuoteFile.version))
             .where(PreprodQuoteFile.proposal_id == pid))).scalar()
@@ -163,7 +175,6 @@ async def upload_proposal_quote(pid: str, request: Request,
             note=(note or "").strip() or None,
             created_by=who, created_at=_now())
         session.add(row)
-        # ensure_folder 可能這一刻才生成 proposal_folder_name —— 同一個 commit 落地
         await session.commit()
         return {"status": "ok", "file": _file_dict(row)}
 
@@ -193,9 +204,9 @@ async def delete_proposal_quote(pid: str, fid: str, request: Request):
         f = await _file_row_or_404(session, pid, fid)
         prop = await _get_proposal_or_404(session, pid)
         try:
-            # _resolve_asset_file 是「檔案怎麼離開共用磁碟」的單一判斷；
+            # resolve_asset_file 是「檔案怎麼離開共用磁碟」的單一判斷；
             # 它 raise 的 HTTPException（檔不在了）正是這裡要吞的 best-effort
-            path = await _resolve_asset_file(session, prop.project_id or "", f.rel)
+            path = await resolve_asset_file(session, prop.project_id or "", f.rel)
             await asyncio.to_thread(os.remove, path)
         except (OSError, HTTPException):
             pass                        # best-effort：磁碟清不掉不留殭屍 DB 列
@@ -215,7 +226,7 @@ async def download_proposal_quote(pid: str, fid: str, request: Request):
         prop = await _get_proposal_or_404(session, pid)
         if not prop.project_id:
             raise HTTPException(status_code=404, detail="找不到檔案（提案未連結專案）")
-        path = await _resolve_asset_file(session, prop.project_id, f.rel)
+        path = await resolve_asset_file(session, prop.project_id, f.rel)
     from fastapi.responses import FileResponse
     return FileResponse(path, filename=f.filename)
 
@@ -233,9 +244,7 @@ async def analyze_proposal_quotes(pid: str, request: Request):
     factory = await _get_factory()
     async with factory() as session:
         prop = await _get_proposal_or_404(session, pid)
-        file_rows = (await session.execute(
-            select(PreprodQuoteFile).where(PreprodQuoteFile.proposal_id == pid)
-            .order_by(PreprodQuoteFile.version.desc()))).scalars().all()
+        file_rows = await _file_rows(session, pid)
         crm_rows = await project_quotation_rows(session, prop.project_id or "")
         if not file_rows and not crm_rows:
             raise HTTPException(
@@ -272,16 +281,18 @@ async def analyze_proposal_quotes(pid: str, request: Request):
         prop_info = {"title": prop.title or "", "status": prop.status or "",
                      "budget_range": prop.budget_range or ""}
         aid = a.id
-        file_meta = [(f.rel, f.version, f.filename, f.note or "")
-                     for f in file_rows]
+        # 最終形狀在 session 內就組好，出去只補 path（不留匿名 tuple）
+        rels = [f.rel for f in file_rows]
+        files = [{"version": f.version, "filename": f.filename,
+                  "note": f.note or "", "path": ""} for f in file_rows]
 
     # 一趟 to_thread 解析整批（safe_rel_path 內含 UNC stat，逐檔 hop 是 n 次
     # 序列網路往返）；解析不到 → path=""，分析裡如實標註
-    paths = (await asyncio.to_thread(
-        lambda: [safe_rel_path(folder_abs, rel) for rel, *_ in file_meta])
-        if folder_abs else [None] * len(file_meta))
-    files = [{"version": ver, "filename": name, "note": note, "path": p or ""}
-             for (_rel, ver, name, note), p in zip(file_meta, paths)]
+    if folder_abs:
+        paths = await asyncio.to_thread(
+            lambda: [safe_rel_path(folder_abs, r) for r in rels])
+        for f, p in zip(files, paths):
+            f["path"] = p or ""
 
     from services.quote_analyzer import analyze_quotes
     # core.bg_task.fire：強參考 + 例外守衛（例外沒接住這筆會永遠 pending）

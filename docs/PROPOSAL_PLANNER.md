@@ -607,7 +607,7 @@ export const PLAN_EXAMPLES = { /* 紙船 + 登山總動員，見 §2.5 / §2.6 *
 
 **其他約束**：
 
-- 守衛沿用 `_check_auth`（模組清單以該函式為唯一正本；2026-08-03 起含
+- 守衛沿用 `proposal_auth`（2026-08-11 由 `_check_auth` 改名；模組清單以該函式為唯一正本；2026-08-03 起含
   `crm_projects` — 提案×專案整合）——
   **`preprod_plan` 已在 `core/auth.py` `ALL_MODULES`，RBAC 三處同步免了。**
 - 只寫 `plan` 一欄，不碰 proposal 其他欄位
@@ -714,7 +714,7 @@ export const PLAN_EXAMPLES = { /* 紙船 + 登山總動員，見 §2.5 / §2.6 *
 | 項目 | 規格 |
 |------|------|
 | 網址 | `/proposal-plan.html`（清單）／`/proposal-plan.html?pid=<id>`（直達某份企劃） |
-| 閘門 | 未登入 → 登入卡（帳密 + Google GSI）；登入後檢查 admin 或 `api_proposals._check_auth` 的模組清單（2026-08-03 起含 `crm_projects`） |
+| 閘門 | 未登入 → 登入卡（帳密 + Google GSI）；登入後檢查 admin 或 `api_proposals.proposal_auth` 的模組清單（2026-08-03 起含 `crm_projects`） |
 | robots | `<meta name="robots" content="noindex,nofollow">` |
 | 主機 | **兩邊都有**（2026-08-07）：登入模式在 master／foundry（需 CRM 後端）；公開 `?t=` 連結由 NAS 對外容器 serve，master 關機也開得了 —— 見 `core/public_assets.py` 與 `routers/api_proposals.public_router` |
 | 分享方式 | 直接把網址貼給同事，對方登入後即進到同一份企劃 |
@@ -973,7 +973,7 @@ owner 2026-07-30：「參考影片他自己可以是一個小頁面，裡頭可�
 
 ## 提案×專案管理整合（2026-08-03，owner 定調「提案的進程要跟專案管理整合」）
 
-**權限**：`api_proposals._check_auth` / 片庫 `_ACCESS_MODULES` / 引用 registry 的
+**權限**：`api_proposals.proposal_auth` / 片庫 `_ACCESS_MODULES` / 引用 registry 的
 proposal 模組表，三處都加了 `crm_projects` —— 有專案管理的人可讀寫提案庫與片庫。
 前端同步四入口：`tab-config.js` 的 `TAB_EXTRA_ACCESS`（tab key → 額外可見模組，
 與後端閘門對齊的唯一前端映射）、`proposal-plan.html`、`reference.html` 閘門與 noperm 文案。
@@ -1049,7 +1049,9 @@ owner 三個拍板：**CRM 報價為主清單**（唯讀鏡像，正本在報價
   POST `…/quotes/upload`（版號每提案 max+1）、PATCH/DELETE `…/quotes/{fid}`
   （刪 DB 列+best-effort 刪磁碟檔——「報價單」子夾是系統管的落點）、
   GET `…/quotes/{fid}/download`、POST `…/quotes/analyze`（bg_task.fire 背景跑
-  claude，inputs 存當下快照）。守衛沿用 proposal_assets._assets_auth。
+  claude，inputs 存當下快照）。守衛用 `api_proposals.proposal_auth`（比照
+  briefs —— 含 preprod_plan，打得開工作頁就能用分頁；資產夾的 `assets_auth`
+  是另一條閘，不含 preprod_plan）。
 - **AI 分析**：`services/quote_analyzer.py`。鐵則同企劃書的「（未填）」原則：
   資料裡沒有的一律「（資料中未見）」不准編；抽不出文字的檔（掃描 PDF）要在
   輸出開頭聲明未納入。單檔文字截 8000 字。

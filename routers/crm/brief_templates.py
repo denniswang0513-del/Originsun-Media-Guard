@@ -36,7 +36,7 @@ from routers.api_proposals import proposal_auth
 from services.brief_template_digest import parse_questions as _parse_questions
 
 from ._shared import router, _get_factory, _now, _require_db
-from .proposal_assets import (_resolve_asset_file, invalidate_folder_cache,
+from .proposal_assets import (resolve_asset_file, invalidate_folder_cache,
                               proposals_root)
 
 try:
@@ -154,7 +154,7 @@ async def brief_template_from_asset(request: Request, body: dict):
     factory = await _get_factory()
     async with factory() as session:
         # 「檔案怎麼離開共用磁碟」的判斷只有一份（含 404 vs 500 的決定）
-        src = await _resolve_asset_file(session, project_id, rel)
+        src = await resolve_asset_file(session, project_id, rel)
     filename = clean_filename(os.path.basename(rel))
     _check_ext(filename)
 

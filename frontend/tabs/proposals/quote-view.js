@@ -201,7 +201,7 @@ function _wireAnalysis(host, analysis) {
             onSettled: (items) => {
                 if (!host.isConnected) return;
                 if (items && items[0]) { s.data.analysis = items[0]; _render(host); }
-                else return _load(host);         // 超時等罕見路徑才全量重抓
+                else return _load(host);         // 那一列不見了（被刪/換新）才全量重抓
             },
         });
     } else if (analysis && analysis.status === 'failed') {

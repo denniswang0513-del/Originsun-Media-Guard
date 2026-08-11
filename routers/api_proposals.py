@@ -1326,9 +1326,13 @@ async def upload_deck(pid: str, request: Request, file: UploadFile = File(...)):
 
         warning, deck_rel = "", ""
         if folder_abs:
-            # 落地共用件（清洗檔名、撞名補 -2、黑名單、存不成 422）
+            # 落地共用件（清洗檔名、撞名補 -2、黑名單、存不成 422）。
+            # ⚠ 這段磁碟 I/O 抱著 session 跑 —— 刻意不拆（報價單那條已拆兩段）：
+            # 這裡同一列要接著寫 deck_url + pinned_assets，退路分支也在同一個
+            # 交易裡，拆開的複雜度大於收益，且為 v2.4.61 已發版行為。
             dest, deck_rel = await proposal_assets.land_in_home(
-                folder_abs, prop, file, max_bytes=_DECK_MAX_BYTES)
+                folder_abs, prop.folder_subpath or "", file,
+                max_bytes=_DECK_MAX_BYTES)
             prop.deck_url = to_canonical_path(dest)
             err = await proposal_assets.pin_on_row(prop, folder_abs,
                                                    prop.project_id, deck_rel,

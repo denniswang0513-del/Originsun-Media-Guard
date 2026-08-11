@@ -109,11 +109,9 @@ async def digest_template(tid: str) -> None:
     if err:
         return await _fail(tid, f"抽文字失敗：{err}")
 
-    # 函式層 import：模組層會把 seo_runner → sqlalchemy 拖進 routers/crm 的
-    # import 鏈，而機隊沒有 sqlalchemy（brief_templates/briefs 的 try/except
-    # ImportError 就是為此），整包 CRM router 會靜默載入失敗
     # 寫入端正本收斂在 core.bg_status（第三份抄本出現時搬的，2026-08-11）；
-    # 空回應與空骨架都由它判 failed
+    # 空回應與空骨架都由它判 failed。seo_runner 那個「函式層 import 才不會把
+    # sqlalchemy 拖進機隊的 import 鏈」的守則已收進 run_claude_job 內部
     from core.bg_status import run_claude_job
     await run_claude_job(PreprodBriefTemplate, tid,
                          _PROMPT.format(text=text[:MAX_TEXT_CHARS]),
