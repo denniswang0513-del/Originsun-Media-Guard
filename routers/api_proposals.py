@@ -1251,20 +1251,19 @@ async def get_shared_plan_meta(token: str, since: str = ""):
 @router.delete("/{pid}")
 async def delete_proposal(pid: str, request: Request):
     """刪提案：連帶刪 proposal_refs 關聯列（reference 是共用片庫保留）
-    + 報價分頁的 DB 列（磁碟檔留在專案資產夾 —— 資產夾跟著專案不跟提案）
-    + best-effort 清掉 uploads deck 目錄。"""
+    + 子表歸屬列（清單正本在 db.models.PROPOSAL_CHILD_TABLES —— 磁碟檔留在
+    專案資產夾，資產夾跟著專案不跟提案）+ best-effort 清掉 uploads deck 目錄。"""
     _check_auth(request)
     factory = _require_factory()
 
     from sqlalchemy import delete as sa_delete
-    from db.models import (PreprodQuoteAnalysis, PreprodQuoteFile,
-                           PreprodReferenceLink)
+    from db.models import PROPOSAL_CHILD_TABLES, PreprodReferenceLink
 
     async with factory() as session:
         prop = await _get_proposal_or_404(session, pid)
         await session.execute(sa_delete(PreprodReferenceLink)
                               .where(*_prop_link(pid)))
-        for tbl in (PreprodQuoteFile, PreprodQuoteAnalysis):
+        for tbl in PROPOSAL_CHILD_TABLES:
             await session.execute(sa_delete(tbl).where(tbl.proposal_id == pid))
         await session.delete(prop)
         await session.commit()

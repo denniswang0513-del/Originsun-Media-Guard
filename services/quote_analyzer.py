@@ -14,9 +14,6 @@
 from __future__ import annotations
 
 import asyncio
-import logging
-
-logger = logging.getLogger(__name__)
 
 # 單檔文字上限。報價 xlsx 可能整本套公式模板幾千列，全塞會撐爆 prompt；
 # 截斷時在輸入裡明講，讓 AI（與看 inputs 的人）知道不是完整內容。
@@ -83,6 +80,8 @@ def build_crm_section(quotations: list) -> str:
         if stages:
             head.append("- 付款節點：" + "、".join(
                 f"{s.get('label') or ''} {s.get('pct') or ''}%" for s in stages))
+        if (q.get("terms") or "").strip():
+            head.append(f"- 條款/備註：{q['terms'].strip()}")
         items = q.get("items") or []
         if items:
             head.append("- 項目明細：")
@@ -118,63 +117,36 @@ def build_files_section(extracted: list) -> str:
     return "\n\n".join(out)
 
 
-async def analyze_quotes(analysis_id: str, *, prop_info: dict, files: list,
-                         quotations: list) -> tuple[bool, str]:
-    """跑分析並寫回那一筆。`files` 元素：{version, filename, note, path}
-    （path = 本機可開的絕對路徑）。回 `(成功, 訊息)`。"""
+async def _extract_one(f: dict) -> dict:
+    """一檔 → {version, filename, note, text, error}。失敗標註不 raise —— 一檔
+    壞不整批死。"""
     from core.doc_text import extract_text
+    base = {"version": f.get("version"), "filename": f.get("filename"),
+            "note": f.get("note") or ""}
+    # path 空 = 端點解析不到（檔案被搬走/資產夾搆不到）—— 標註後繼續
+    if not f.get("path"):
+        return {**base, "text": "",
+                "error": "檔案不在資產夾裡（可能被移動或刪除，或 NAS 搆不到）"}
+    try:
+        text, err = await asyncio.to_thread(extract_text, f["path"])
+    except Exception as e:                       # noqa: BLE001 — 壞檔不該殺掉整批
+        text, err = "", f"{type(e).__name__}: {e}"
+    return {**base, "text": text, "error": err}
 
-    extracted = []
-    for f in files:
-        # path 空 = 端點解析不到（檔案被搬走/資產夾搆不到）—— 標註後繼續
-        if not f.get("path"):
-            extracted.append({"version": f.get("version"),
-                              "filename": f.get("filename"),
-                              "note": f.get("note") or "", "text": "",
-                              "error": "檔案不在資產夾裡（可能被移動或刪除，或 NAS 搆不到）"})
-            continue
-        # 同步 CPU/IO-bound 解析 → to_thread；一檔失敗標註後繼續，不整批死
-        try:
-            text, err = await asyncio.to_thread(extract_text, f["path"])
-        except Exception as e:                       # noqa: BLE001 — 壞檔不該殺掉整批
-            text, err = "", f"{type(e).__name__}: {e}"
-        extracted.append({"version": f.get("version"), "filename": f.get("filename"),
-                          "note": f.get("note") or "", "text": text, "error": err})
+
+async def analyze_quotes(analysis_id: str, *, prop_info: dict, files: list,
+                         quotations: list) -> None:
+    """跑分析並寫回那一筆。`files` 元素：{version, filename, note, path}
+    （path = 本機可開的絕對路徑）。回傳值沒人接（經 bg_task.fire）。"""
+    # 各檔獨立、都在 _CLAUDE_GATE 之前 —— 平行抽，省的時間直接縮短使用者等待
+    extracted = list(await asyncio.gather(*(_extract_one(f) for f in files)))
 
     prompt = _PROMPT.format(
         background=build_background(prop_info),
         crm_section=build_crm_section(quotations),
         files_section=build_files_section(extracted),
     )
-    from services.website.seo_runner import _call_claude, strip_fence
-    out, err = await _call_claude(
-        prompt, on_start=lambda: _save(analysis_id))   # 見 core.bg_status 檔頭
-    if not out or not out.strip():
-        return await _save(analysis_id, status="failed",
-                           error=err or "claude 沒有回應")
-    content = strip_fence(out).strip()
-    await _save(analysis_id, content=content, status="ok", error=None)
-    logger.info("[quote_analyzer] %s 分析完成（%d 字）", analysis_id, len(content))
-    return True, content
-
-
-async def _save(analysis_id: str, *, content=None, status=None, error=...) -> tuple:
-    """部分更新。**一個參數都不給＝只蓋 updated_at**（開工的時間戳，
-    core.bg_status 的 stale 判定靠它）。"""
-    from core.db_guard import db_factory_or_503
+    from core.bg_status import run_claude_job
     from db.models import PreprodQuoteAnalysis
-    from routers.crm._shared import _now
-    factory = db_factory_or_503()
-    async with factory() as session:
-        a = await session.get(PreprodQuoteAnalysis, analysis_id)
-        if not a:
-            return False, "找不到這一筆分析"
-        if content is not None:
-            a.content = content
-        if status is not None:
-            a.status = status
-        if error is not ...:
-            a.error = error
-        a.updated_at = _now()
-        await session.commit()
-    return (status == "ok"), (error if error is not ... and error else "")
+    await run_claude_job(PreprodQuoteAnalysis, analysis_id, prompt,
+                         tag="quote_analyzer")

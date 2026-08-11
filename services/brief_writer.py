@@ -14,10 +14,6 @@
 """
 from __future__ import annotations
 
-import logging
-
-logger = logging.getLogger(__name__)
-
 LENGTHS = {
     "brief": "精簡版：一頁的份量，每節二到四句，只留最關鍵的判斷。",
     "full": "完整版：一份可以直接寄給客戶的提案企劃書。",
@@ -137,8 +133,8 @@ def build_skeletons(templates: list) -> str:
 
 
 async def write_brief(brief_id: str, *, prop: dict, templates: list,
-                      matrix_text: str, options: dict) -> tuple[bool, str]:
-    """跑生成並把結果寫回那一版。回 `(成功, 訊息)`。"""
+                      matrix_text: str, options: dict) -> None:
+    """跑生成並把結果寫回那一版（經 bg_task.fire，回傳值沒人接）。"""
     include = set(options.get("include") or ["survey", "refs"])
     prop = {**prop,
             "_subject": build_subject(options),
@@ -149,35 +145,8 @@ async def write_brief(brief_id: str, *, prop: dict, templates: list,
         length=LENGTHS.get(options.get("length") or "full", LENGTHS["full"]),
         tone=TONES.get(options.get("tone") or "pitch", TONES["pitch"]),
     )
-    from services.website.seo_runner import _call_claude, strip_fence
-    out, err = await _call_claude(
-        prompt, on_start=lambda: _save(brief_id))   # 見 core.bg_status
-    if not out or not out.strip():
-        return await _save(brief_id, status="failed",
-                           error=err or "claude 沒有回應")
-    content = strip_fence(out).strip()
-    await _save(brief_id, content=content, status="ok", error=None)
-    logger.info("[brief_writer] %s 生成完成（%d 字）", brief_id, len(content))
-    return True, content
-
-
-async def _save(brief_id: str, *, content=None, status=None, error=...) -> tuple:
-    """部分更新。**一個參數都不給＝只蓋 updated_at**（開工的時間戳）。"""
-    from core.db_guard import db_factory_or_503
+    # 寫入端正本收斂在 core.bg_status（第三份抄本出現時搬的，2026-08-11）
+    from core.bg_status import run_claude_job
     from db.models import PreprodBrief
-    from routers.crm._shared import _now
-    factory = db_factory_or_503()
-    async with factory() as session:
-        b = await session.get(PreprodBrief, brief_id)
-        if not b:
-            return False, "找不到這一版企劃書"
-        if content is not None:
-            b.content = content
-        if status is not None:
-            b.status = status
-        if error is not ...:
-            b.error = error
-        b.updated_at = _now()
-        await session.commit()
-    return (status == "ok"), (error if error is not ... and error else "")
+    await run_claude_job(PreprodBrief, brief_id, prompt, tag="brief_writer")
 

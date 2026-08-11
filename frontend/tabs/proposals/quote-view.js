@@ -12,6 +12,7 @@
  * （比照企劃書分頁；唯讀不是靠隱藏元素，是靠沒建出來）。
  */
 
+import { autosaveDelegated, syncBaseline } from '../../js/shared/autosave.js';
 import { pollJob } from '../../js/shared/poll-job.js';
 import { authDownload, ensureStyle, esc } from '../../js/shared/utils.js';
 import { tfetch } from './prop-fetch.js';
@@ -21,12 +22,17 @@ const API = '/api/v1/crm';
 /**
  * @param host  掛載容器（會被清空）
  * @param opts.proposalId
- * @param opts.toast      可選；成功訊息怎麼顯示由呼叫端決定
  */
-export async function renderQuotes(host, { proposalId, toast = null }) {
+export async function renderQuotes(host, { proposalId }) {
     ensureStyle('qv-style', STYLE);
     host.classList.add('qv');
-    host.__qv = { proposalId, toast, data: null, polling: new Set() };
+    host.__qv = { proposalId, data: null, polling: new Set() };
+    // 備註走共用 autosave（債等：debounce + 失敗退基準重試 + 重畫不重綁）。
+    // 委派綁在 host 上一次就好 —— 清單每次動作都整塊重畫，逐顆綁必漏
+    autosaveDelegated(host, '.qv-notein', (v, el) =>
+        tfetch(`${_base(S(host).proposalId)}/${encodeURIComponent(el.dataset.note)}`,
+               { method: 'PATCH', json: { note: v } }),
+        { onError: (e) => alert('備註儲存失敗：' + (e.message || e)) });
     await _load(host);
 }
 
@@ -82,14 +88,14 @@ function _render(host) {
         <div class="qv-file" data-fid="${esc(String(f.id))}">
             <div class="qv-fline">
                 <span class="qv-ver">v${esc(f.version ?? '')}</span>
-                <span class="qv-name">${esc(f.filename || f.rel || '')}</span>
+                <span class="qv-name">${esc(f.filename)}</span>
                 <span class="qv-note">${esc(_day(f.created_at))}</span>
                 <span class="qv-gap"></span>
                 <button class="qv-btn sm" data-dl="${esc(String(f.id))}">下載</button>
                 <button class="qv-btn sm" data-del="${esc(String(f.id))}">刪除</button>
             </div>
             <input class="qv-notein" data-note="${esc(String(f.id))}"
-                   placeholder="備註（離開欄位自動儲存）">
+                   placeholder="備註（打完自動儲存）">
         </div>`).join('');
 
     host.innerHTML = `
@@ -137,8 +143,7 @@ function _wireUpload(host) {
         fd.append('file', f);
         try {
             await tfetch(_base(s.proposalId) + '/upload', { method: 'POST', body: fd });
-            if (s.toast) s.toast('報價單已上傳');
-            await _load(host);      // 成功整塊重畫（按鈕文字一起回來）
+            await _load(host);      // 成功整塊重畫（新版本列出現就是回饋）
         } catch (e) {
             alert('上傳失敗：' + (e.message || e));   // 400 沒資產夾 / 413 超過 50MB 照實顯示
             btn.disabled = false;
@@ -159,13 +164,13 @@ function _wireFiles(host, files) {
         el.addEventListener('click', () => {
             const f = byId[el.dataset.dl];
             authDownload(`${_base(s.proposalId)}/${encodeURIComponent(el.dataset.dl)}/download`,
-                         (f && f.filename) || 'quote', '報價單下載');
+                         f.filename, '報價單下載');
         });
     });
     host.querySelectorAll('[data-del]').forEach(el => {
         el.addEventListener('click', async () => {
             const f = byId[el.dataset.del];
-            if (!confirm(`刪除報價檔 v${(f && f.version) ?? ''}？其他版本不受影響。`)) return;
+            if (!confirm(`刪除報價檔 v${f.version}？其他版本不受影響。`)) return;
             try {
                 await tfetch(`${_base(s.proposalId)}/${encodeURIComponent(el.dataset.del)}`,
                              { method: 'DELETE' });
@@ -173,22 +178,12 @@ function _wireFiles(host, files) {
             } catch (e) { alert('刪除失敗：' + (e.message || e)); }
         });
     });
-    // 備註值走 DOM property（不進模板字串 — XSS 防線）；blur 時 dirty-check 才送
+    // 備註值走 DOM property（不進模板字串 — XSS 防線）；送出由 renderQuotes
+    // 綁的委派 autosave 接手，這裡只要把重畫後的基準對齊
     host.querySelectorAll('[data-note]').forEach(el => {
-        const f = byId[el.dataset.note];
-        el.value = (f && f.note) || '';
-        el._saved = el.value;
-        el.addEventListener('blur', async () => {
-            if (el.value === el._saved) return;
-            const want = el.value;
-            try {
-                await tfetch(`${_base(s.proposalId)}/${encodeURIComponent(el.dataset.note)}`,
-                             { method: 'PATCH', json: { note: want } });
-                el._saved = want;
-                if (f) f.note = want;
-            } catch (e) { alert('備註儲存失敗：' + (e.message || e)); }
-        });
+        el.value = (byId[el.dataset.note] || {}).note || '';
     });
+    syncBaseline(host, '.qv-notein');
 }
 
 // ── AI 分析（生成 + 輪詢 + 顯示）──────────────────────────
@@ -201,11 +196,12 @@ function _wireAnalysis(host, analysis) {
     if (analysis && analysis.status === 'pending') {
         btn.disabled = true;
         box.innerHTML = '<div class="qv-note">分析中…（跑 Claude，約一到三分鐘）</div>';
-        // 收斂靠重抓：analysis 每次一筆新的，settle 後整塊重畫拿最新那份
+        // 輪詢帶 ?only=analysis（只要 status，別讓後端每 5 秒陪跑 files/crm
+        // 兩條 query）；settle 才整塊重載一次拿最新那份
         pollJob(analysis.id, s.polling, {
             alive: () => host.isConnected,       // 切走分頁就停
             list: async () => {
-                const d = await _fetchAll(s.proposalId);
+                const d = await tfetch(_base(s.proposalId) + '?only=analysis');
                 return d.analysis ? [d.analysis] : [];
             },
             onSettled: async () => { await _load(host); },
@@ -216,7 +212,8 @@ function _wireAnalysis(host, analysis) {
         // Markdown 原文照畫（escape + pre-wrap）—— 與企劃書分頁同一套顯示法，
         // 不在前端拉 Markdown 渲染器
         box.innerHTML = `
-            <div class="qv-note" style="margin-bottom:4px;">${esc(_day(analysis.created_at))}</div>
+            <div class="qv-note" style="margin-bottom:4px;">${esc(_day(analysis.created_at))}
+                ${esc(_inputsLabel(analysis.inputs))}</div>
             <div class="qv-md">${esc(analysis.content || '')}</div>`;
     } else {
         box.innerHTML = '<div class="qv-note">還沒有分析 —— 湊滿兩份報價後按上面的按鈕。</div>';
@@ -226,13 +223,22 @@ function _wireAnalysis(host, analysis) {
         btn.disabled = true;
         try {
             await tfetch(_base(s.proposalId) + '/analyze', { method: 'POST' });
-            if (s.toast) s.toast('開始分析 —— 約一到三分鐘，完成後結果會自己出現');
             await _load(host);      // 重載 → analysis=pending → 上面那條開始輪詢
         } catch (e) {
             alert('分析失敗：' + (e.message || e));
             btn.disabled = false;
         }
     });
+}
+
+/** 「本次分析納入：上傳 v2、v1；CRM v3、v2」—— 檔案與報價都會繼續長，
+ *  不標的話這份分析講的是什麼永遠說不清（inputs 快照就是為此存的）。 */
+function _inputsLabel(inputs) {
+    const vs = (list) => (list || []).map(x => 'v' + x.version).join('、');
+    const parts = [];
+    if ((inputs || {}).files?.length) parts.push('上傳 ' + vs(inputs.files));
+    if ((inputs || {}).crm_quotations?.length) parts.push('CRM ' + vs(inputs.crm_quotations));
+    return parts.length ? `｜本次納入：${parts.join('；')}` : '';
 }
 
 const STYLE = `

@@ -397,7 +397,7 @@ async function openDetail(pid) {
         quote: async (host) => {
             const { renderQuotes } = await importRetry('/tabs/proposals/quote-view.js');
             if (!host.isConnected) return;
-            await renderQuotes(host, { proposalId: prop.id, toast: (m) => alert(m) });
+            await renderQuotes(host, { proposalId: prop.id });
         },
     };
     ov.querySelectorAll('.prop-tab').forEach(btn => btn.addEventListener('click', async () => {

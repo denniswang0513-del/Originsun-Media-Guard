@@ -1006,6 +1006,15 @@ class PreprodQuoteAnalysis(Base):
     updated_at = Column(DateTime(timezone=True), server_default=func.now())
 
 
+# 提案刪除時要一併清的子表（proposal_id 歸屬列）。清單住在表定義旁邊 ——
+# 新增一張帶 proposal_id 的表時，決策點就在你剛寫完 model 的下一行，而不是
+# 在 api_proposals.delete_proposal 的深處（PreprodBrief 就曾因清單只存在
+# handler 裡而漏掉，孤兒列沒人清）。刻意不含：PreprodReferenceLink（多型
+# 關聯，條件是 target_type+target_id 對）、PreprodProposalRef（LEGACY 凍結）、
+# IntelItem（proposal_id 是回填參照，情報不屬於提案）。
+PROPOSAL_CHILD_TABLES = (PreprodBrief, PreprodQuoteFile, PreprodQuoteAnalysis)
+
+
 class PreprodReference(Base):
     """參考片庫 — 獨立於單一提案的共用參考片，跨提案重用。
     v2（docs/REFERENCE_LIBRARY.md）：每支片一個小頁面 —— facets 分類族、

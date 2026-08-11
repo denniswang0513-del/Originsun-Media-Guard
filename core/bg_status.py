@@ -32,3 +32,53 @@ def settle(status: str, updated_at, error: str = "") -> tuple:
     if datetime.now(timezone.utc) - at > STALE_AFTER:
         return "failed", STALE_MSG
     return status, error
+
+
+# ── 寫入端（2026-08-11 收斂）───────────────────────────────
+# brief_writer / brief_template_digest / quote_analyzer 三個 service 原本各抄
+# 一份「partial update + 蓋 updated_at」與「跑 claude → settle 回一列」——
+# 第三份出現，照檔頭自己的規則收進來。呼叫端都經 core.bg_task.fire，
+# 回傳值沒人接 → 這裡一律回 None。
+
+
+async def save_job_row(model_cls, row_id: str, *, status=None, error=...,
+                       **fields) -> None:
+    """背景工作那一列的部分更新。**一個參數都不給＝只蓋 updated_at**
+    （開工的時間戳 —— 檔頭前提：塞車時健康的工作不被誤判 stale 全靠它）。
+    `error=...` sentinel 區分「不動」與「清成 None」；`fields` 給結果欄
+    （content / skeleton …），值為 None 的略過。列不見了就靜默返回 ——
+    背景工作沒有人可以報錯。"""
+    from core.db_guard import db_factory_or_503
+    factory = db_factory_or_503()
+    async with factory() as session:
+        row = await session.get(model_cls, row_id)
+        if not row:
+            return
+        for k, v in fields.items():
+            if v is not None:
+                setattr(row, k, v)
+        if status is not None:
+            row.status = status
+        if error is not ...:
+            row.error = error
+        row.updated_at = datetime.now(timezone.utc)
+        await session.commit()
+
+
+async def run_claude_job(model_cls, row_id: str, prompt: str, *,
+                         field: str = "content", tag: str = "") -> None:
+    """跑一次 claude、把結果 settle 回一列。`on_start` 在拿到併發閘之後
+    蓋開工時間戳 —— 這個容易漏的約定收在這裡就只需要對一次。"""
+    import logging
+    from services.website.seo_runner import _call_claude, strip_fence
+    out, err = await _call_claude(
+        prompt, on_start=lambda: save_job_row(model_cls, row_id))
+    content = strip_fence(out).strip() if out else ""
+    if not content:
+        await save_job_row(model_cls, row_id, status="failed",
+                           error=err or "claude 沒有回應")
+        return
+    await save_job_row(model_cls, row_id, status="ok", error=None,
+                       **{field: content})
+    logging.getLogger(__name__).info(
+        "[%s] %s 完成（%d 字）", tag or model_cls.__name__, row_id, len(content))

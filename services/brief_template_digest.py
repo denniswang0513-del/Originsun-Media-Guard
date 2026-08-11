@@ -83,8 +83,8 @@ _PROMPT = """你是一位資深影像製作公司的提案企劃主編。下面�
 """
 
 
-async def digest_template(tid: str) -> tuple[bool, str]:
-    """消化一份範本 → `(成功, 訊息)`。狀態與骨架直接寫回 DB。
+async def digest_template(tid: str) -> None:
+    """消化一份範本，狀態與骨架直接寫回 DB（經 bg_task.fire，回傳值沒人接）。
 
     冪等：重跑會覆蓋骨架（人手改過的也會被蓋掉 —— 呼叫端要先問過使用者）。
     """
@@ -97,7 +97,7 @@ async def digest_template(tid: str) -> tuple[bool, str]:
     async with factory() as session:
         t = await session.get(PreprodBriefTemplate, tid)
         if not t:
-            return False, "找不到這個範本"
+            return
         filename = t.filename
 
     d = await _templates_dir()
@@ -112,20 +112,12 @@ async def digest_template(tid: str) -> tuple[bool, str]:
     # 函式層 import：模組層會把 seo_runner → sqlalchemy 拖進 routers/crm 的
     # import 鏈，而機隊沒有 sqlalchemy（brief_templates/briefs 的 try/except
     # ImportError 就是為此），整包 CRM router 會靜默載入失敗
-    from services.website.seo_runner import _call_claude, strip_fence
-    out, call_err = await _call_claude(
-        _PROMPT.format(text=text[:MAX_TEXT_CHARS]),
-        on_start=lambda: _save(tid))          # 見 core.bg_status：拿到閘才算開工
-    if not out:
-        return await _fail(tid, call_err or "claude 沒有回應")
-
-    skeleton = strip_fence(out).strip()
-    if not skeleton:
-        return await _fail(tid, "claude 回了空白")
-
-    await _save(tid, skeleton=skeleton, status="ok", error=None)
-    logger.info("[brief_digest] %s 消化完成（骨架 %d 字）", tid, len(skeleton))
-    return True, skeleton
+    # 寫入端正本收斂在 core.bg_status（第三份抄本出現時搬的，2026-08-11）；
+    # 空回應與空骨架都由它判 failed
+    from core.bg_status import run_claude_job
+    await run_claude_job(PreprodBriefTemplate, tid,
+                         _PROMPT.format(text=text[:MAX_TEXT_CHARS]),
+                         field="skeleton", tag="brief_digest")
 
 
 # 骨架裡「## 生成前必問」那一段的條列 —— **從骨架文字推導**，不另存欄位：
@@ -157,27 +149,9 @@ def parse_questions(skeleton: str) -> list:
     return out[:8]
 
 
-async def _save(tid: str, *, skeleton=None, status=None, error=...) -> None:
-    """部分更新。**一個參數都不給＝只蓋 updated_at**（開工的時間戳）。"""
-    from core.db_guard import db_factory_or_503
+async def _fail(tid: str, msg: str) -> None:
+    """claude 之前就死掉的路（檔案不見/抽不出字）—— 寫入端同一個正本。"""
+    from core.bg_status import save_job_row
     from db.models import PreprodBriefTemplate
-    from routers.crm._shared import _now
-    factory = db_factory_or_503()
-    async with factory() as session:
-        t = await session.get(PreprodBriefTemplate, tid)
-        if not t:
-            return
-        if skeleton is not None:
-            t.skeleton = skeleton
-        if status is not None:
-            t.status = status
-        if error is not ...:
-            t.error = error
-        t.updated_at = _now()
-        await session.commit()
-
-
-async def _fail(tid: str, msg: str) -> tuple[bool, str]:
-    await _save(tid, status="failed", error=msg)
+    await save_job_row(PreprodBriefTemplate, tid, status="failed", error=msg)
     logger.warning("[brief_digest] %s 消化失敗：%s", tid, msg)
-    return False, msg

@@ -788,55 +788,38 @@ function _showSideTabs() {
             $(b.dataset.ptab + "-host").style.display = on ? "" : "none";
         });
         if (btn.dataset.ptab === "folder") _mountFolder();
-        if (btn.dataset.ptab === "brief") _mountBrief();
-        if (btn.dataset.ptab === "quote") _mountQuote();
+        else _mountLazy(btn.dataset.ptab);
     }));
 }
 
-// ── 企劃書分頁（只有員工登入才有：客戶那條連分頁鈕都不建出來）────
-// 一次性槽，同 _pendingFolder 的形狀：掛好了設回 null，沒掛成留著讓人切回來重試。
-let _pendingBrief = null;
+// ── 懶載入分頁（企劃書／報價單 —— 只有員工登入才有：企劃書是內部產出、
+// 報價單金額敏感，客戶那條連分頁鈕都不建出來）────────────────
+// 一張表一個真相：容器沿用 `{ptab}-host` 慣例，錯誤處理與重試只寫一份。
+// 一次性槽（_pending[name]）同 _pendingFolder 的形狀：掛好了設回 null，
+// 沒掛成留著讓人切回來重試。folder 不進這張表 —— 它是雙槽 + 平行 import
+// 的特規（見 _mountFolder），硬塞通用形狀只會兩邊都難讀。
+const _LAZY_TABS = {
+    brief: { mod: "/tabs/proposals/brief-view.js", fn: "renderBriefs", label: "企劃書" },
+    quote: { mod: "/tabs/proposals/quote-view.js", fn: "renderQuotes", label: "報價單" },
+};
+const _pending = {};
 
-function _setupBriefTab(opts) {
-    _pendingBrief = opts;
-    $("tab-brief").style.display = "";
+function _setupLazyTab(name, opts) {
+    _pending[name] = opts;
+    $("tab-" + name).style.display = "";
 }
 
-async function _mountBrief() {
-    if (!_pendingBrief) return;
-    const opts = _pendingBrief;
+async function _mountLazy(name) {
+    const t = _LAZY_TABS[name];
+    if (!t || !_pending[name]) return;
     try {
         const { importRetry } = await import("/js/shared/utils.js");
-        const { renderBriefs } = await importRetry("/tabs/proposals/brief-view.js");
-        await renderBriefs($("brief-host"), opts);
-        _pendingBrief = null;              // 掛好了；之後切回來保留編輯中的內容
+        const mod = await importRetry(t.mod);
+        await mod[t.fn]($(name + "-host"), _pending[name]);
+        _pending[name] = null;             // 掛好了；之後切回來保留狀態
     } catch (e) {
-        $("brief-host").innerHTML =        // 設定留著，切回來能重試
-            '<div class="state-msg" style="color:var(--red);">企劃書分頁載入失敗：'
-            + escText(emsg(e)) + "</div>";
-    }
-}
-
-// ── 報價單分頁（只有員工登入才有：金額敏感，客戶那條連分頁鈕都不建出來）──
-// 一次性槽，同 _pendingBrief 的形狀。
-let _pendingQuote = null;
-
-function _setupQuoteTab(opts) {
-    _pendingQuote = opts;
-    $("tab-quote").style.display = "";
-}
-
-async function _mountQuote() {
-    if (!_pendingQuote) return;
-    const opts = _pendingQuote;
-    try {
-        const { importRetry } = await import("/js/shared/utils.js");
-        const { renderQuotes } = await importRetry("/tabs/proposals/quote-view.js");
-        await renderQuotes($("quote-host"), opts);
-        _pendingQuote = null;              // 掛好了；之後切回來保留狀態
-    } catch (e) {
-        $("quote-host").innerHTML =        // 設定留著，切回來能重試
-            '<div class="state-msg" style="color:var(--red);">報價單分頁載入失敗：'
+        $(name + "-host").innerHTML =      // 設定留著，切回來能重試
+            `<div class="state-msg" style="color:var(--red);">${t.label}分頁載入失敗：`
             + escText(emsg(e)) + "</div>";
     }
 }
@@ -1269,10 +1252,10 @@ async function _loadPlan(pid) {
             onDeck: () => _repaintDeckCell(prop, infoOpts.deck),
         }).catch(e => console.warn("[folder] 資料夾分頁接線失敗", e));
         // 企劃書：矩陣要當生成的輸入，所以 plan 一起帶進去
-        _setupBriefTab({ proposalId: prop.id, plan: prop.plan || null,
-                         toast: (m) => alert(m) });
+        _setupLazyTab("brief", { proposalId: prop.id, plan: prop.plan || null,
+                                 toast: (m) => alert(m) });
         // 報價單：金額敏感 —— 只在這條登入路徑接線，訪客的 _loadSharedPlan 沒有
-        _setupQuoteTab({ proposalId: prop.id, toast: (m) => alert(m) });
+        _setupLazyTab("quote", { proposalId: prop.id });
     } catch (e) {
         host.innerHTML = '<div class="state-msg" style="color:var(--red);">企劃載入失敗：' + escText(emsg(e)) + "</div>";
     }

@@ -96,8 +96,9 @@ def _xlsx(path: str) -> str:
         for ws in wb.worksheets:
             rows = []
             for row in ws.iter_rows(values_only=True):
-                cells = [str(c).strip() for c in row
-                         if c is not None and str(c).strip()]
+                # 整張套格式的報價單常是幾千列×幾十欄 —— str+strip 只算一次
+                cells = [v for c in row
+                         if c is not None and (v := str(c).strip())]
                 if cells:
                     rows.append(" | ".join(cells))
             if rows:

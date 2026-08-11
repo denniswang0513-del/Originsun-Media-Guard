@@ -48,7 +48,7 @@ except ImportError:  # DB 套件不存在的 agent 環境
     pass
 
 
-def _assets_auth(request: Request):
+def assets_auth(request: Request):
     """資產資料夾的守衛（**唯一正本**）—— 能看提案或專案的人就能讀寫資料夾內容。
 
     判準：資料夾內容是「提案的工作檔」，門檻跟得上提案本身即可。**不用
@@ -56,9 +56,16 @@ def _assets_auth(request: Request):
     就是給看不給用。改**根目錄**（全站共用設定）才需要 admin，那條走 _check_auth。
 
     ⚠️ 這裡不可以沿用 `_shared._check_auth` 這個裸名 —— 它在本套件是 Lv3
-    admin，在 routers/api_proposals.py 卻是模組守衛，同名反義。
+    admin，在 routers/api_proposals.py 卻是模組守衛，同名反義。同理，別把
+    這支 alias 成 `_auth`：briefs.py 的 `_auth` 是**另一個守衛**（多放行
+    preprod_plan），同名兩義。
     """
     return check_admin_or_module(request, "crm_projects", "preprod_proposals")
+
+
+# 舊私名 —— 外部呼叫端早已多到底線名存實亡（api_proposals/archive/quotes 都在
+# 用），升格公開；alias 留一輪給還沒改名的呼叫端。
+_assets_auth = assets_auth
 
 
 _ROOT_SETTING_KEY = "proposals.root"
@@ -237,13 +244,17 @@ async def pinned_of(session, project_id: str) -> tuple:
     return cur, bool(getattr(prop, "pins_public", False))
 
 
-async def _project_folder_abs(session, project_id: str) -> str:
+async def project_folder_abs(session, project_id: str) -> str:
     """專案資產夾的絕對路徑（唯讀用；還沒建夾 → ""，不是錯誤）。"""
     project = await _project_or_404(session, project_id)
     root = await proposals_root()
     if not root or not project.proposal_folder_name:
         return ""
     return os.path.join(root, project.proposal_folder_name)
+
+
+# 同 assets_auth：外部呼叫端太多，底線名存實亡 → 升格公開，alias 留一輪
+_project_folder_abs = project_folder_abs
 
 
 async def file_or_404(folder_abs: str, rel: str) -> str:
