@@ -516,6 +516,7 @@ function renderWorkspace() {
     if (ws.allowed.includes("me_profile"))  grid.appendChild(cardProfile(ws.profile));
     if (ws.allowed.includes("me_finance"))  grid.appendChild(cardFinance(ws.timesheet, ws.payments));
     if (ws.allowed.includes("media_log"))   grid.appendChild(cardMediaLog());
+    if (ws.allowed.includes("proposal_plan")) grid.appendChild(cardProposalPlan());
     // 週誌在 grid 之外自成一區（見 #ws-journal 註解）：只建一次，之後只切顯示
     const jr = $("ws-journal");
     if (ws.allowed.includes("journal")) {
@@ -564,6 +565,18 @@ function cardMediaLog() {
         <div class="meta" style="margin-bottom:12px;">劇組劇照 / 花絮的收集與管理：瀏覽資料夾、連結專案、上傳、分享連結 QR、縮圖與設定。</div>
         <a class="mini-btn" href="/media-log-workspace.html"
            style="display:inline-block;text-decoration:none;line-height:1.5;">開啟影像紀錄 ↗</a>`;
+    return card;
+}
+
+// ── 卡：提案企劃 —— 入口連到獨立網址 /proposal-plan.html（帳號登入、企劃工作區）──
+// 閘門對齊後端守衛（提案庫/拍攝企劃/專案管理任一模組，owner 2026-08-11「權限全通」），
+// 由 /me/workspace 的 allowed 帶 proposal_plan 宣告，前端不自行探測權限。
+function cardProposalPlan() {
+    const card = makeCard("Proposal Plan", "提案企劃", "", "proposal_plan");
+    card.querySelector(".card-body").innerHTML = `
+        <div class="meta" style="margin-bottom:12px;">提案清單與企劃矩陣的工作區：四階段企劃、參考影片、重點提案、企劃書生成與資料夾。</div>
+        <a class="mini-btn" href="/proposal-plan.html"
+           style="display:inline-block;text-decoration:none;line-height:1.5;">開啟提案企劃 ↗</a>`;
     return card;
 }
 

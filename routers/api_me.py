@@ -35,6 +35,10 @@ router = APIRouter(prefix="/api/v1/me", tags=["me"])
 
 ME_MODULE_KEYS = ("me_projects", "me_profile", "me_todos", "me_finance", "me_leave")
 
+# 提案企劃卡的閘門 — 對齊 routers/api_proposals._check 的守衛集合（owner 2026-08-11
+# 拍板「權限全通」：打得開 /proposal-plan.html 的人，工作台就有入口卡）。
+PROPOSAL_PLAN_KEYS = ("preprod_proposals", "preprod_plan", "crm_projects")
+
 
 def _profile_dict(s) -> dict:
     """crm_staff 安全子集 — 不含費率/身分證/銀行/website_* 欄位。"""
@@ -58,7 +62,8 @@ def _profile_dict(s) -> dict:
 async def my_workspace(request: Request):
     """個人工作台 bundle — 只回帳號有權限的區塊；未綁定人員檔案時
     人員鍵區塊（profile/projects/finance）回空並帶 bound=False。"""
-    payload = check_admin_or_module(request, *ME_MODULE_KEYS, "journal", "media_log")
+    payload = check_admin_or_module(request, *ME_MODULE_KEYS, "journal", "media_log",
+                                    *PROPOSAL_PLAN_KEYS)
     mods = grant_admin_all_modules(payload.get("access_level"), payload.get("modules") or [])
     allowed = [k for k in ME_MODULE_KEYS if k in mods]
     # 週誌卡宣告式閘門 — my.html 依 allowed 決定要不要抓 /api/v1/journal/mine
@@ -68,6 +73,9 @@ async def my_workspace(request: Request):
     # 影像紀錄卡同款宣告式閘門 — my.html 自行打 /crm/media-log/overview（唯讀瀏覽）
     if "media_log" in mods:
         allowed.append("media_log")
+    # 提案企劃卡 — 純入口連結（/proposal-plan.html），資料不進 bundle
+    if any(k in mods for k in PROPOSAL_PLAN_KEYS):
+        allowed.append("proposal_plan")
     ident = await resolve_current_staff(request)
     staff = ident["staff"]
     out = {
