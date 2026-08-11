@@ -164,10 +164,24 @@ def _deck_rel(deck_url: str, folder_abs: str) -> str:
     return os.path.relpath(local, folder_abs).replace("\\", "/")
 
 
-async def _deck_target(session, project_id: str):
-    """N:1 時 deck 掛在哪一筆衛星提案上 —— **讀寫共用的單一規則**：
-    最近更新的那筆。讀寫各寫一套（一邊過濾 deck_url、一邊不過濾）會讓
-    「按了星號卻標到別的檔」：寫進 B、讀回 A 的舊 deck。"""
+async def pins_row(session, project_id: str, pid: str = ""):
+    """deck 與勾選掛在**哪一筆**提案上（讀寫共用的單一入口）。
+
+    🔴 `pid` 給了就用那一筆（並驗證它確實屬於這個專案）—— 端點是專案層
+    (`/projects/{id}/proposal-assets/*`)，資料卻是提案層的，這個參數就是
+    補上那個落差。2026-08-11 之前只有下面的退路，於是一個專案並行多筆提案
+    時「在看 B 卻標到 A」，而客戶那條更糟：拿 B 的分享連結卻讀到 A 的
+    `pins_public` 與勾選（見 api_proposals._shared_pins）。
+
+    沒給 pid → 退回「最近更新的那筆」。單提案專案（目前生產全部如此）行為
+    完全不變；這條退路留給真的沒有提案脈絡的呼叫端（專案層資產夾總覽）。
+    讀寫務必走同一支，各寫一套會讓「寫進 B、讀回 A」。
+    """
+    if pid:
+        prop = await session.get(PreprodProposal, pid)
+        if not prop or prop.project_id != project_id:
+            raise HTTPException(status_code=404, detail="找不到這個專案底下的提案")
+        return prop
     return (await session.execute(
         select(PreprodProposal)
         .where(PreprodProposal.project_id == project_id)
@@ -195,12 +209,6 @@ async def _project_or_404(session, project_id: str):
 # 取消即失效。判定規則的正本在 core/pinned_assets（純函式，有單元測試）。
 
 
-async def _pins_row(session, project_id: str):
-    """這個專案的勾選掛在哪一筆提案上 —— 沿用 deck 的同一條規則（最近更新的
-    那筆），否則 N:1 時「勾在 B、讀回 A」。"""
-    return await _deck_target(session, project_id)
-
-
 def _legacy_share_dir_has_files(folder_abs: str) -> bool:
     """舊的「對外分享」夾還在而且有東西嗎（一層就夠，不遞迴數）。"""
     if not folder_abs:
@@ -213,8 +221,11 @@ def _legacy_share_dir_has_files(folder_abs: str) -> bool:
         return False
 
 
-async def pinned_of(session, project_id: str) -> tuple:
+async def pinned_of(session, prop) -> tuple:
     """→ `(勾選清單, 是否開放給客戶)`。沒有提案列 → `([], False)`。
+
+    🔴 收**提案列**不收 project_id —— 客戶那條（`_shared_pins`）手上就是 token
+    對應的那一筆，收 project_id 會讓它再推導一次而讀到別筆的授權旗標。
 
     **一次性接管舊分享夾**：還沒勾過任何東西、而舊的「對外分享」夾裡有檔案時，
     把整個夾轉成一個勾選項並開啟對客戶可見。客戶手上可能已經有指向那個夾的
@@ -225,12 +236,11 @@ async def pinned_of(session, project_id: str) -> tuple:
     磁碟探測只在「還沒勾過任何東西」時做，接管完就不再碰（自我了結，不是
     每次讀都多一趟 SMB）。
     """
-    prop = await _pins_row(session, project_id)
     if not prop:
         return [], False
     cur = pa.rows(prop.pinned_assets)
     if not cur:
-        folder_abs = await project_folder_abs(session, project_id)
+        folder_abs = await project_folder_abs(session, prop.project_id or "")
         if await asyncio.to_thread(_legacy_share_dir_has_files, folder_abs):
             cur = pa.adopt_legacy_share_dir(cur, exists=True)
             prop.pinned_assets = cur
@@ -388,7 +398,8 @@ async def project_folder_ready(project_id: str) -> str:
 #    root 本身是全站共用的一份設定）──────────────────────────────
 
 @router.get("/projects/{project_id}/proposal-assets")
-async def get_proposal_assets(project_id: str, request: Request, rel: str = ""):
+async def get_proposal_assets(project_id: str, request: Request, rel: str = "",
+                              pid: str = ""):
     """提案資產夾現況：根目錄、是否搆得到、這個專案的資料夾（還沒建就先算給看）。
 
     `rel` = 要看資料夾裡的哪一層（空 = 最外層）。逐層走而不是攤平整棵樹 ——
@@ -407,9 +418,10 @@ async def get_proposal_assets(project_id: str, request: Request, rel: str = ""):
         name = project.proposal_folder_name or make_dated_folder_name(
             project.name or "", project.created_at or _now(),
             await _taken_names(session, exclude_project_id=project_id))
-        target = await _deck_target(session, project_id)
+        # `pid` = 呼叫端正在看哪一筆提案（多提案專案才有差；見 pins_row）
+        target = await pins_row(session, project_id, pid)
         # 走 pinned_of 而不是直接讀欄位 —— 舊分享夾的一次性接管在那裡
-        pinned, pins_public = await pinned_of(session, project_id)
+        pinned, pins_public = await pinned_of(session, target)
     folder_abs = os.path.join(root, name) if root else ""
     # 所有 NAS 探測（root isdir / 列這一層 / deck 的 realpath）併成一次 to_thread：
     # UNC 斷線時每個都卡秒級且不重疊，分開跑等於使用者要等 3× timeout
@@ -539,7 +551,7 @@ async def pin_on_row(prop, folder_abs: str, project_id: str, rel: str, *,
                      is_dir: bool = False, by: str = "") -> str:
     """把 rel 勾成**指定那一列**的重點提案（不 commit）→ 錯誤訊息（成功 ""）。
 
-    存在的理由：deck 與勾選是同一列的兩個欄位（見 `_pins_row`），deck 的兩個
+    存在的理由：deck 與勾選是同一列的兩個欄位（見 `pins_row`），deck 的兩個
     入口（`POST /proposals/{pid}/deck` 上傳、`/deck/from-asset` 指定）要在
     **寫 deck_url 的同一個 session、同一列**上順手勾起來，才不會出現「是簡報
     但沒出現在提案資料」的分岔。走 `_save_pins` 做不到 —— 那支自己開 session、
@@ -556,16 +568,17 @@ async def pin_on_row(prop, folder_abs: str, project_id: str, rel: str, *,
     return ""
 
 
-async def _save_pins(project_id: str, mutate, after=None) -> dict:
+async def _save_pins(project_id: str, mutate, after=None, pid: str = "") -> dict:
     """讀 → mutate(現值) → 寫回 → 回目前狀態。`mutate` 回 `(新值, 錯誤訊息)`。
 
     `after(session, prop, old, new)`（async，選用）在同一個交易裡跟著跑 ——
     取消勾選要順手清 deck_url 用的（見 unpin）。
+    `pid` = 寫到哪一筆提案上（見 pins_row）。
     """
     _require_db()
     factory = await _get_factory()
     async with factory() as session:
-        prop = await _pins_row(session, project_id)
+        prop = await pins_row(session, project_id, pid)
         if not prop:
             raise HTTPException(status_code=404,
                                 detail="這個專案還沒有提案，無法設定重點提案")
@@ -592,9 +605,11 @@ async def pin_proposal_asset(project_id: str, request: Request):
     payload = assets_auth(request)
     body = await request.json()
     rel, is_dir = str(body.get("rel") or ""), bool(body.get("is_dir"))
+    pid = str(body.get("pid") or "")
     who = str((payload or {}).get("username") or "")
     out = await _save_pins(project_id,
-                           lambda cur: pa.pin(cur, rel, is_dir=is_dir, by=who))
+                           lambda cur: pa.pin(cur, rel, is_dir=is_dir, by=who),
+                           pid=pid)
     if not is_dir:
         _require_db()
         factory = await _get_factory()
@@ -603,12 +618,14 @@ async def pin_proposal_asset(project_id: str, request: Request):
         thumb = await _make_pin_thumb(folder_abs, project_id, rel)
         if thumb:
             out = await _save_pins(project_id,
-                                   lambda cur: (pa.set_thumb(cur, rel, thumb), ""))
+                                   lambda cur: (pa.set_thumb(cur, rel, thumb), ""),
+                                   pid=pid)
     return out
 
 
 @router.delete("/projects/{project_id}/proposal-assets/pin")
-async def unpin_proposal_asset(project_id: str, request: Request, rel: str = ""):
+async def unpin_proposal_asset(project_id: str, request: Request, rel: str = "",
+                               pid: str = ""):
     """取消勾選 —— 客戶那條路**立刻**失效（下一次 allows 就回 False）。
 
     取消掉的若正好是目前的**提案簡報**（或它所在的那個勾選資料夾）→ 一併清掉
@@ -630,7 +647,7 @@ async def unpin_proposal_asset(project_id: str, request: Request, rel: str = "")
             state["deck_cleared"] = True
 
     out = await _save_pins(project_id, lambda cur: (pa.unpin(cur, rel), ""),
-                           after=_clear_deck)
+                           after=_clear_deck, pid=pid)
     return {**out, **state}
 
 
@@ -642,11 +659,14 @@ async def set_pins_public(project_id: str, request: Request):
     知道現在以哪一版為準，不該順手就把檔案送到客戶眼前。
     """
     assets_auth(request)
-    want = bool((await request.json()).get("public"))
+    body = await request.json()
+    want = bool(body.get("public"))
     _require_db()
     factory = await _get_factory()
     async with factory() as session:
-        prop = await _pins_row(session, project_id)
+        # 授權旗標是**逐提案**的：同一個專案的三個 concept 各自決定要不要
+        # 給客戶看（每筆提案有自己的分享 token）
+        prop = await pins_row(session, project_id, str(body.get("pid") or ""))
         if not prop:
             raise HTTPException(status_code=404, detail="這個專案還沒有提案")
         prop.pins_public = want
@@ -708,7 +728,8 @@ async def set_proposal_deck(project_id: str, request: Request):
         folder_abs = await project_folder_abs(session, project_id)
         deck_url = to_canonical_path(
             await file_or_404(folder_abs, rel)) if rel else ""
-        target = await _deck_target(session, project_id)   # 讀寫同一條挑法
+        # 讀寫同一支（body 的 pid = 呼叫端正在看哪一筆提案）
+        target = await pins_row(session, project_id, str(body.get("pid") or ""))
         if not target:
             raise HTTPException(status_code=404,
                                 detail="此專案還沒有提案 — 請先在「提案企劃」分頁建立")

@@ -562,8 +562,10 @@ async function _loadDeckPicks(ov, prop) {
     if (prop.deck_url || !prop.project_id) return;
     let d;
     try {
+        // 帶 pid：候選要來自**這一筆**提案的勾選，不是專案裡最近更新的那筆
         d = await tfetch('/api/v1/crm/projects/'
-            + encodeURIComponent(prop.project_id) + '/proposal-assets');
+            + encodeURIComponent(prop.project_id) + '/proposal-assets'
+            + '?pid=' + encodeURIComponent(prop.id));
     } catch (_) { return; }            // 沒權限 / NAS 搆不到 → 維持「尚未上傳」
     // 資料夾不當候選：簡報是一個檔
     const picks = (d.pinned || []).filter(p => p && !p.is_dir);

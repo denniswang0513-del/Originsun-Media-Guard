@@ -1062,3 +1062,29 @@ owner 三個拍板：**CRM 報價為主清單**（唯讀鏡像，正本在報價
 - **前端**：`tabs/proposals/quote-view.js` 兩介面共用（獨立企劃頁側欄
   「報價單」分頁 + 後台詳情分頁），照 brief-view 三條：只 import 同目錄與
   js/shared、--qv-* 可換膚、外殼由呼叫端給。分析輪詢用 shared/poll-job。
+
+### §12.1 勾選/簡報綁哪一筆提案（2026-08-11 修）
+
+端點掛在**專案層** (`/projects/{id}/proposal-assets/*`)，但勾選（`pinned_assets`）、
+授權旗標（`pins_public`）與提案簡報（`deck_url`）存在**提案列**上。修之前只有
+一條隱式規則「該專案最近更新的那筆」，於是一個專案並行多筆提案時：
+
+- 後台：在看 B 卻標到 A（★ 與勾選都會漂）。
+- 🔴 客戶：拿 B 的分享連結卻讀到 **A 的 `pins_public` 與 A 的勾選** ——
+  B 自己設的「不對外開放」被忽略（`_shared_pins` 手上有 token 對應的提案，
+  卻用 project_id 重新推導了一次）。
+
+**修法**：`proposal_assets.pins_row(session, project_id, pid="")` 成為讀寫的
+單一入口 —— 給了 `pid` 就用那一筆並**驗證它屬於這個專案**（否則 404，不然
+pid 會變成跨專案讀別人資料的入口）；沒給才退回「最近更新」（單提案專案行為
+完全不變，退路留給沒有提案脈絡的專案層總覽）。`pinned_of(session, prop)` 改收
+**提案列**不收 project_id，客戶那條直接把 token 的提案傳進去。
+
+前端一律帶 `pid`：`makePinsStore({base, pid})`（POST 進 body、DELETE 進 query）、
+`/proposal-assets?pid=`、`/proposal-assets/deck` body 帶 pid。
+
+順帶修掉 CRM 專案「提案企劃」分頁的既有 bug：資產夾卡片本來掛在 `loadPlanTab`
+（只建一次），而切 chip 時 `_renderPlan` 的 `host.innerHTML=` 會把它整張洗掉且
+不重建 → 改成 `_loadAssets(projectId, pid, host)` 跟著選定的提案重掛。
+
+守門測試：`tests/unit/test_pins_row.py`（5 項，含跨專案 pid → 404）。

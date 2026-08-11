@@ -969,7 +969,10 @@ async def _shared_pins(token: str) -> tuple:
         prop = await _get_prop_by_plan_token(session, token)
         if not prop.project_id:
             return "", []
-        pins, is_public = await pinned_of(session, prop.project_id)
+        # 🔴 用 token 對應的**那一筆**提案，不是「這個專案最近更新的那筆」——
+        # 一個專案並行多筆提案時，後者會讓客戶拿 B 的連結卻讀到 A 的勾選與
+        # A 的 pins_public（B 自己設的「不對外」被忽略）。
+        pins, is_public = await pinned_of(session, prop)
         if not is_public or not pins:
             return "", []
         return await project_folder_abs(session, prop.project_id), pins
@@ -1289,7 +1292,7 @@ async def upload_deck(pid: str, request: Request, file: UploadFile = File(...)):
     企劃檔本來就雜（報價 .xlsx、腳本 .docx、參考圖 .jpg），白名單只擋到自己人。
 
     **自動勾選**：上傳成功即寫進同一列的 `pinned_assets`（deck 與勾選是同一列的
-    兩個欄位 —— 見 `proposal_assets._pins_row`）。這是「單一真相」的另一半：
+    兩個欄位 —— 見 `proposal_assets.pins_row`）。這是「單一真相」的另一半：
     上傳的簡報不必再手動去提案資料勾一次。
     ⚠️ 勾選只是策展，客戶看不看得到另由 `pins_public` 決定（這裡不碰）。
 

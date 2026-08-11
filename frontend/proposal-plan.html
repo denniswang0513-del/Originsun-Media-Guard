@@ -1269,7 +1269,10 @@ async function _loadPlan(pid) {
 async function _wireFolderTab(prop, hooks = {}) {
     const projectId = prop.project_id;
     const AP = "/api/v1/crm/projects/" + encodeURIComponent(projectId) + "/proposal-assets";
-    const q = (rel) => "?rel=" + encodeURIComponent(rel || "");
+    // 端點掛在專案層、勾選與簡報卻是這一筆提案的 —— 一律帶 pid，否則後端只能
+    // 退回「最近更新的那筆」，多提案專案會標到別筆（見後端 pins_row）
+    const q = (rel) => "?rel=" + encodeURIComponent(rel || "")
+        + "&pid=" + encodeURIComponent(prop.id);
     // 這筆提案的「家」：專案資產夾底下自己的子夾。一個專案可以並行多筆提案，
     // 共用一個夾的話幾個 concept 的腳本與簡報會混在一起（NAS 上本來就是手工
     // 開子夾在分的）。空 = 合體前建的既有提案，家就是專案夾根 —— 不動它。
@@ -1293,6 +1296,7 @@ async function _wireFolderTab(prop, hooks = {}) {
     ]);
     const pins = makePinsStore({
         base: AP,
+        pid: prop.id,
         request: async (url, init) => ok(await mfetch(url, init)),
     });
     hooks.onPins?.(pins);

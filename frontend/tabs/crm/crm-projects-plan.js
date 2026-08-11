@@ -33,14 +33,10 @@ function _fail(host, prefix, e) {
 
 export async function loadPlanTab(projectId, host) {
     host.innerHTML = '<div class="crm-empty">載入中...</div>';
-    let props, assets;
+    let props;
     try {
-        [props, assets] = await Promise.all([
-            tfetch(`${API}?project_id=${encodeURIComponent(projectId)}`)
-                .then(d => d.proposals || []),
-            // 資產夾設定：拿不到（權限/DB）不擋企劃本體
-            crmFetch(`/projects/${projectId}/proposal-assets`).catch(() => null),
-        ]);
+        props = (await tfetch(`${API}?project_id=${encodeURIComponent(projectId)}`))
+            .proposals || [];
     } catch (e) {
         _fail(host, '提案企劃載入失敗', e);
         return;
@@ -48,22 +44,38 @@ export async function loadPlanTab(projectId, host) {
     if (state.selectedId !== projectId || !host.isConnected) return;   // await 期間已切走
     if (!props.length) {
         _renderEmpty(projectId, host);
-    } else {
-        // 一個專案可以並行多筆提案（同一案提了三個 concept）。預設看成案的
-        // 那一筆，沒有的話看最新的 —— 「第一筆」不是有意義的預設。
-        const pick = props.find(p => p.status === '成案') || props[0];
-        await _renderPlan(pick, props, projectId, host);
+        return;
     }
-    if (assets && host.isConnected) {
-        // store 建在這裡（緊鄰 assets 那次 fetch）而不是卡片渲染函式裡 ——
-        // 生命週期是「這一個提案」，跟資料一起流動；企劃頁那邊也是這個高度。
-        const pins = makePinsStore({
-            base: `/projects/${projectId}/proposal-assets`,
-            request: (url, init) => crmFetch(url, init),
-        });
-        pins.sync(assets);
-        _mountAssetsCard(projectId, host, assets, pins);
-    }
+    // 一個專案可以並行多筆提案（同一案提了三個 concept）。預設看成案的
+    // 那一筆，沒有的話看最新的 —— 「第一筆」不是有意義的預設。
+    const pick = props.find(p => p.status === '成案') || props[0];
+    await _renderPlan(pick, props, projectId, host);
+}
+
+/**
+ * 資產夾卡片（勾選 + 檔案列）—— **跟著目前選定的那一筆提案**。
+ *
+ * 🔴 勾選與提案簡報存在提案列上，所以這張卡的資料要帶 `pid` 去要，切 chip
+ * 時也要跟著重載。以前它掛在 loadPlanTab（只在進分頁時建一次）：切 chip 時
+ * `_renderPlan` 的 `host.innerHTML=` 會把它整張洗掉、而且不會重建。
+ *
+ * 不 await：這一趟要掃 NAS（慢），企劃矩陣不該等它。
+ */
+async function _loadAssets(projectId, pid, host) {
+    let d;
+    try {
+        d = await crmFetch(`/projects/${projectId}/proposal-assets`
+            + `?pid=${encodeURIComponent(pid)}`);
+    } catch (_) { return; }        // 權限/DB/NAS 拿不到 → 不擋企劃本體
+    const box = host.querySelector('#pp-assets');
+    if (!box || !box.isConnected) return;   // await 期間切走或換了 chip
+    const pins = makePinsStore({
+        base: `/projects/${projectId}/proposal-assets`,
+        pid,                       // 寫入端也要指名，否則會標到別筆
+        request: (url, init) => crmFetch(url, init),
+    });
+    pins.sync(d);
+    _mountAssetsCard(projectId, pid, host, d, pins);
 }
 
 /** 資產檔案的下載網址（卡片列與檔案列共用一份組法）。 */
@@ -72,7 +84,7 @@ const _fileUrl = (projectId, rel) =>
 
 // ── 資產資料夾設定（比照影像紀錄：root 是全站共用的一份，路徑帶 project_id
 //    只是讓人從專案面板順手改；顯示的資料夾是這個專案的）────────────
-function _mountAssetsCard(projectId, host, d, pins) {
+function _mountAssetsCard(projectId, pid, host, d, pins) {
     const box = document.createElement('div');
     box.style.cssText = 'padding:10px 12px 16px;';
     box.innerHTML = `
@@ -104,10 +116,11 @@ function _mountAssetsCard(projectId, host, d, pins) {
                            （多檔會自動分批送）。更大的檔請到公司區網上傳。</span>` : ''}
             </div>
         </div>`;
-    host.appendChild(box);
+    // 掛進 _renderPlan 留的槽（切 chip 時整塊跟著換）；沒有槽就退回舊行為
+    (host.querySelector('#pp-assets') || host).appendChild(box);
     // 檔案列走共用的 folder-view（企劃頁與提案庫總覽用的是同一支）——
     // 這裡只提供「怎麼拿資料、每列多兩個動作」。
-    const nav = _mountFiles(box.querySelector('#pp-files'), projectId, d, pins);
+    const nav = _mountFiles(box.querySelector('#pp-files'), projectId, pid, d, pins);
     _mountPins(box.querySelector('#pp-pins'), projectId, pins, nav);
 
     box.querySelector('#pp-cfg').addEventListener('click', () => {
@@ -173,8 +186,10 @@ function _mountPins(host, projectId, pins, nav) {
  *
  * @returns folder-view 的把手（{go}）；卡片列點「重點資料夾」要用
  */
-function _mountFiles(host, projectId, d, pins) {
-    const q = (rel) => `?rel=${encodeURIComponent(rel || '')}`;
+function _mountFiles(host, projectId, pid, d, pins) {
+    // 一律帶 pid：每一層的回應都會回填 pinned 到 store，不指名就會拿別筆
+    // 提案的勾選蓋掉畫面（見後端 pins_row）
+    const q = (rel) => `?rel=${encodeURIComponent(rel || '')}&pid=${encodeURIComponent(pid)}`;
     let deckRel = d.deck_rel || '';
 
     return renderFolderView(host, {
@@ -215,8 +230,10 @@ function _mountFiles(host, projectId, d, pins) {
               title: (f) => (f.rel === deckRel ? '目前的提案簡報' : '設為提案簡報'),
               errPrefix: '設定提案簡報失敗',
               run: async (f) => {
+                  // pid：★ 要標在**目前這個 chip 的提案**上，不是專案裡最近
+                  // 更新的那筆（多提案並行時「在看 B 卻標到 A」就是這條）
                   await crmFetch(`/projects/${projectId}/proposal-assets/deck`,
-                      { method: 'POST', body: JSON.stringify({ rel: f.rel }) });
+                      { method: 'POST', body: JSON.stringify({ rel: f.rel, pid }) });
                   crmToast('已設為提案簡報');
                   deckRel = f.rel;
                   // 端點順手把它勾成提案資料（deck ⊆ 勾選是後端的單一真相）→
@@ -330,7 +347,10 @@ async function _renderPlan(listItem, props, projectId, host) {
                style="color:#60a5fa;font-size:12px;">獨立視窗開啟 ↗</a>
         </div>
         ${_winHintHtml(props)}
-        <div id="pp-matrix" style="padding:4px 12px 16px;"></div>`;
+        <div id="pp-matrix" style="padding:4px 12px 16px;"></div>
+        <div id="pp-assets"></div>`;
+    // 資產夾卡片跟著這一筆提案（切 chip 會走到這裡重掛；不 await —— 掃 NAS 慢）
+    _loadAssets(projectId, prop.id, host);
 
     host.querySelectorAll('[data-prop]').forEach(el => {
         el.addEventListener('click', () => {

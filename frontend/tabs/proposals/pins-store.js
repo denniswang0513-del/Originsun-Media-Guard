@@ -40,10 +40,13 @@ function _same(a, b) {
  *                     所以 base 不能拿來組下載網址，只配 request 用。
  *                     這是暫時的：等三個資料夾瀏覽器收斂時一起統一 base 的層級
  *                     （在那之前只有兩處各一行的重複，不值得先猜一個抽象）。
+ * @param opts.pid     這些勾選屬於**哪一筆提案**（見下）。可省略。
  * @param opts.request async (url, init?) => 已解析的 JSON；錯誤要 throw
  *
- * 註：key 是 project_id，但狀態的真正擁有者是提案（preprod_proposals.pinned_assets）；
- * 兩者的對應由後端 pinned_of() 負責，前端不需要知道。
+ * 🔴 狀態的擁有者是**提案**（preprod_proposals.pinned_assets + pins_public），
+ * 端點卻掛在專案層 —— 一個專案並行多筆提案時，不講明 pid 後端只能退回
+ * 「最近更新的那筆」，於是「在看 B 卻標到 A」。呼叫端知道自己在看哪一筆
+ * 就一定要傳 pid（後端 pins_row 會驗證它屬於這個專案）。
  *
  * @returns { get, isPinned, toggle, sync, setPublic, watch }
  *
@@ -51,10 +54,12 @@ function _same(a, b) {
  * 它整顆傳過去即可，不需要轉接層。`toggle` 不是為了那個 port 而生的翻譯，
  * 它就是這個領域的操作：「把某一項的重點狀態設成 want」。
  */
-export function makePinsStore({ base, request }) {
+export function makePinsStore({ base, pid = '', request }) {
     let state = Object.freeze({ pinned: Object.freeze([]), pins_public: false });
     const subs = new Set();
-    const q = (rel) => '?rel=' + encodeURIComponent(rel || '');
+    // pid 走 query（DELETE 沒有 body）；POST 那兩支放 body，見下
+    const q = (rel) => '?rel=' + encodeURIComponent(rel || '')
+        + (pid ? '&pid=' + encodeURIComponent(pid) : '');
 
     /**
      * 從任何帶完整 {pinned, pins_public} 的回應更新；回傳原值好接在 await 上。
@@ -78,7 +83,7 @@ export function makePinsStore({ base, request }) {
     }
 
     const pin = async (rel, isDir) => sync(await request(base + '/pin',
-        { method: 'POST', body: JSON.stringify({ rel, is_dir: !!isDir }) }));
+        { method: 'POST', body: JSON.stringify({ rel, is_dir: !!isDir, pid }) }));
     const unpin = async (rel) => sync(await request(base + '/pin' + q(rel),
         { method: 'DELETE' }));
     // 目前是精確比對。後端的曝光規則是「勾了資料夾 → 整個子樹放行」
@@ -94,7 +99,7 @@ export function makePinsStore({ base, request }) {
         toggle: (rel, isDir, want) => (want ? pin(rel, isDir) : unpin(rel)),
         sync,
         setPublic: async (want) => sync(await request(base + '/pins/public',
-            { method: 'POST', body: JSON.stringify({ public: !!want }) })),
+            { method: 'POST', body: JSON.stringify({ public: !!want, pid }) })),
         /** 訂閱 + 立刻畫一次。分成兩步的話，忘記補第一次的人會拿到空白面板。 */
         watch(fn) { subs.add(fn); fn(state); return () => subs.delete(fn); },
     };
