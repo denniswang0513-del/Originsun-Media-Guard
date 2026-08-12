@@ -40,34 +40,21 @@ export async function pollLocalAgent() {
         if (response.ok) {
             window._localAgentActive = true;
             updateAgentBadge(true);
-            // 🔴 **連線要聽任務真正跑的那台**。這裡原本在「從主控 IP 開頁 +
-            // 本機有 agent」時把 socket 切到 127.0.0.1，但任務其實是送到
-            // same-origin（主控）—— `getComputeBaseUrl` 的本機分支自初版起
-            // 從未生效過。結果進度事件在主控、瀏覽器卻聽自己的機器，畫面像
-            // 卡死（2026-08-12 健檢）。統一改成 same-origin。
-            // 本機 agent 仍用於：安裝提示、版本徽章、以及「開啟資料夾」這類
-            // 應該發生在使用者自己桌面的動作（getLocalAgentBase）。
-            if (window.currentSocketUrl !== window.location.origin) {
-                window.currentSocketUrl = window.location.origin;
-                if (typeof window.setupSocket === 'function') window.setupSocket(window.currentSocketUrl);
-            }
+            // 🔴 這裡原本會在「主控 IP 開頁 + 本機有 agent」時把 socket 切到
+            // 127.0.0.1，但任務是送到 same-origin —— 進度事件在主控、瀏覽器
+            // 卻聽自己的機器，畫面像卡死（2026-08-12）。socket 現在固定
+            // same-origin（app.js 開場設一次），這裡不再切換。
+            // 本機 agent 只用於：安裝提示、版本徽章、以及「該發生在使用者
+            // 自己桌面」的動作（utils.js getLocalAgentBase）。
         } else {
             window._localAgentActive = false;
             if (window._isUpdating) window._hasServerDiedDuringUpdate = true;
             updateAgentBadge(false);
-            if (window.currentSocketUrl !== window.location.origin) {
-                window.currentSocketUrl = window.location.origin;
-                if (typeof window.setupSocket === 'function') window.setupSocket(window.currentSocketUrl);
-            }
         }
     } catch (err) {
         window._localAgentActive = false;
         if (window._isUpdating) window._hasServerDiedDuringUpdate = true;
         updateAgentBadge(false);
-        if (window.currentSocketUrl !== window.location.origin) {
-            window.currentSocketUrl = window.location.origin;
-            if (typeof window.setupSocket === 'function') window.setupSocket(window.currentSocketUrl);
-        }
     } finally {
         window._initialPollComplete = true;
         checkForceInstallModal();

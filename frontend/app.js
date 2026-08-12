@@ -36,7 +36,6 @@ if (typeof appendLog === 'undefined') {
 }
 
 // ─── Main Application ─── //
-        window.currentSocketUrl = window.location.origin;
         let socket = null;
 
         // Idempotent — re-running loadTabs() after login skips already-loaded
@@ -150,6 +149,11 @@ if (typeof appendLog === 'undefined') {
                 rptNameEl.value = `${yyyy}${mm}${dd}_Report`;
             }
 
+            // 備份頁的「最新備份報表」：report.js 是動態 import 的，
+            // DOMContentLoaded 當下還沒掛上 window.loadReportHistory —— 這裡才是
+            // 「tab 都載完了」的確定時機（2026-08-12）
+            if (typeof window.loadReportHistory === 'function') window.loadReportHistory();
+
             // Transcode checkbox listener
             const _chkTc = document.getElementById('chk_transcode');
             if (_chkTc) {
@@ -194,13 +198,6 @@ if (typeof appendLog === 'undefined') {
             window._socket = socket;  // Expose for TTS tab and other modules
             window.socket = socket;
 
-            // 🔴 各 tab 自己掛在 socket 上的監聽（空拍進度、對軌事件）在這裡
-            // 重建後會全部消失 —— app.js 自己的監聽在下面重註冊，tab 的不會。
-            // 讓它們登記在這個清單，socket 一換就重掛（2026-08-12 健檢）。
-            window._socketRebindHooks = window._socketRebindHooks || [];
-            window._socketRebindHooks.forEach(fn => {
-                try { fn(socket); } catch (e) { console.warn('socket rebind hook failed:', e); }
-            });
 
             socket.on('connect', () => {
                 appendLog('已連線至伺服器 WebSocket', 'system');
@@ -601,7 +598,7 @@ if (typeof appendLog === 'undefined') {
 
                 // Open output folder directly
                 if (data.dest_dir) {
-                    fetch((window.getLocalAgentBase ? window.getLocalAgentBase() : window.location.origin) + '/api/v1/utils/open_folder', {
+                    fetch(window.getLocalAgentBase() + '/api/v1/utils/open_folder', {
                         method: 'POST',
                         headers: Object.assign({'Content-Type': 'application/json'},
                                                window.bearerHeader ? window.bearerHeader() : {}),
@@ -612,7 +609,7 @@ if (typeof appendLog === 'undefined') {
         }
         window.setupSocket = setupSocket;
 
-        setupSocket(window.currentSocketUrl);
+        setupSocket(window.location.origin);   // 固定 same-origin，見 version-check 註解
 
         const terminal = document.getElementById('terminal');
         const terminalVerbose = document.getElementById('terminal_verbose');
@@ -630,19 +627,13 @@ if (typeof appendLog === 'undefined') {
 
         // Variables related to sources and setup were moved to backup.js
 
-        // ===== SaaS 路由輔助函數 =====
-        function getAgentBaseUrl() {
-            // 本機代理伺服器，負責 UI 操作如選取資料夾與拖曳。如果沒開，回退給網頁原始伺服器。
-            return window._localAgentActive ? 'http://127.0.0.1:8000' : '';
-        }
-
         async function createShortcut() {
             if (!window._localAgentActive) {
                 alert("此功能需要在「本機已連線」狀態下才能執行！");
                 return;
             }
             try {
-                const res = await fetch((window.getLocalAgentBase ? window.getLocalAgentBase() : 'http://127.0.0.1:8000') + '/api/v1/utils/create_shortcut',
+                const res = await fetch(window.getLocalAgentBase() + '/api/v1/utils/create_shortcut',
                                         { method: 'POST', headers: window.bearerHeader ? window.bearerHeader() : {} });
                 const data = await res.json();
                 if (data.status === 'success') {
@@ -1524,6 +1515,31 @@ if (typeof appendLog === 'undefined') {
             }, 5000);
         }
 
+        /**
+         * 收掉「遠端任務」的畫面狀態。
+         *
+         * 🔴 verify / concat / report 都在 **POST 之前**就把遠端進度面板點亮
+         * （showRemoteMainProgress + initRemoteHostProgress）。提交失敗時只
+         * `return` 的話，畫面會留一條停在 5% 的「遠端比對中…」，而 heartbeat
+         * 根本還沒啟動、沒有人會來清它 —— 使用者拿到正確的錯誤訊息，卻同時
+         * 看到一個假裝在跑的進度條（2026-08-12 /simplify）。
+         */
+        function resetRemoteJobUi() {
+            const tab = window._activeJobTab || 'backup';
+            const prefixMap = { backup: 'bk', transcode: 'tc', concat: 'ct', verify: 'vf',
+                                report: 'rp', transcribe: 'tr', tts: 'tts', drone_meta: 'dm' };
+            const prefix = prefixMap[tab];
+            const panel = prefix && document.getElementById(prefix + '-remote-hosts-progress');
+            if (panel) panel.classList.add('hidden');
+            const area = prefix && _progArea(prefix, tab);
+            if (area) area.classList.add('hidden');
+            window._activeRemoteHosts = {};
+            window._remoteJobType = null;
+            if (typeof resetProgress === 'function') resetProgress();
+            updateActionBarState('idle');
+        }
+        window.resetRemoteJobUi = resetRemoteJobUi;
+
         function stopHeartbeatMonitor() {
             if (window._heartbeatTimer) { clearInterval(window._heartbeatTimer); window._heartbeatTimer = null; }
             window._remoteDispatching = false;
@@ -1537,19 +1553,15 @@ if (typeof appendLog === 'undefined') {
         }
 
         // 顯示對應 TAB 的主進度條（多機模式，不經過 progress Socket 事件）
-        // 進度元素解析器：各 tab 的 id 命名不一致 —— 多數是 `<pfx>-prog-bar`
-        // （連字號＋縮寫），transcribe 是 `transcribe_prog_bar`（底線＋全名）。
-        // 原本三處各自組 id，transcribe 全部找不到 → 遠端轉錄的主進度條永遠
-        // 停在「佇列中 0%」（2026-08-12 健檢）。
+        // 進度元素解析器：多數 tab 是 `<pfx>-prog-bar`，transcribe/tts 是
+        // `<tab>_prog_bar` —— 三處各自組 id 時 transcribe 全部找不到。
         function _progEl(pfx, tab, suffix) {
             return document.getElementById(pfx + '-prog-' + suffix)
-                || document.getElementById(pfx + '_prog_' + suffix)
-                || (tab ? document.getElementById(tab + '_prog_' + suffix) : null);
+                || document.getElementById(tab + '_prog_' + suffix);
         }
         function _progArea(pfx, tab) {
             return document.getElementById(pfx + '-progress')
-                || document.getElementById(pfx + '_progress_area')
-                || (tab ? document.getElementById(tab + '_progress_area') : null);
+                || document.getElementById(tab + '_progress_area');
         }
 
         function showRemoteMainProgress(label) {
@@ -2111,9 +2123,8 @@ if (typeof appendLog === 'undefined') {
                             if (useLocal) {
                                 // 本機補轉：直接送到 localhost，100% 路徑可達
                                 if (typeof appendLog === 'function') appendLog(`[>] 第 ${retryCount} 次補轉：使用本機轉檔（保證路徑可達）`, 'system');
-                                // 補轉必須送到主任務跑的同一台（getComputeBaseUrl），
-                                // 用 currentSocketUrl 會在某些存取路徑下送到別台
-                                const localUrl = (window.getComputeBaseUrl ? window.getComputeBaseUrl() : '') || window.location.origin;
+                                // 補轉送到主任務跑的同一台 = serve 這頁的那台
+                                const localUrl = window.location.origin;
                                 let localStarted = 0;
                                 const byCard = {};
                                 allMissing.forEach(({ cardName, sourceFile }) => {
@@ -2426,7 +2437,6 @@ if (typeof appendLog === 'undefined') {
         window.showCompletionSummary = showCompletionSummary;
         window.playDing = playDing;
         window.createShortcut = createShortcut;
-        window.getAgentBaseUrl = getAgentBaseUrl;
         window.getSelectedHosts = getSelectedHosts;
         window.renderHostSelector = renderHostSelector;
         window.renderStandaloneHostPanels = renderStandaloneHostPanels;
@@ -2434,19 +2444,10 @@ if (typeof appendLog === 'undefined') {
         window.updateComputeModeStyle = updateComputeModeStyle;
         window.mergeHostOutputs = mergeHostOutputs;
         window.pollRemoteHostProgress = pollRemoteHostProgress;
-        window.getComputeBaseUrl = typeof getComputeBaseUrl !== 'undefined' ? getComputeBaseUrl : getAgentBaseUrl;
 
 // ─── Initialize on Page Load ─── //
         document.addEventListener('DOMContentLoaded', () => {
-            // Load the NAS report history into the main Backup Tab dashboard right away.
-            // report.js 是非同步動態載入的，DOMContentLoaded 當下多半還沒掛上
-            // window.loadReportHistory → 首載靜靜落空，備份頁的「最新備份報表」
-            // 一直顯示「尚無歷史報表紀錄」（2026-08-12 健檢）。補一次延後重試。
-            const _tryLoadReports = (tries = 0) => {
-                if (typeof window.loadReportHistory === 'function') { window.loadReportHistory(); return; }
-                if (tries < 20) setTimeout(() => _tryLoadReports(tries + 1), 500);
-            };
-            _tryLoadReports();
+
 
             // Check model status immediately
             if (typeof fetchModelStatus === 'function') {

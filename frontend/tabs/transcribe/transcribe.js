@@ -1057,19 +1057,7 @@ export function onAlignDone(data) {
 // detect mode === 'align'.
 // We attach our listeners directly here in case the global socket exists.
 
-/** socket 重建時：清旗標 → 重新綁一次（清單由 app.js setupSocket 呼叫）。 */
-function _alignRebind() {
-    window._alignSocketBound = false;
-    _attachAlignSocketHandlers();
-}
 function _attachAlignSocketHandlers() {
-    // socket 會在偵測到本機 agent 時被重建 → 舊監聽全滅，而 _alignSocketBound
-    // 已是 true、重試迴圈也早就停了 → 對軌進度/完成/錯誤全部收不到。
-    // 登記進重掛清單，並在重掛時清旗標讓下面的綁定重新執行（2026-08-12 健檢）。
-    window._socketRebindHooks = window._socketRebindHooks || [];
-    if (!window._socketRebindHooks.includes(_alignRebind)) {
-        window._socketRebindHooks.push(_alignRebind);
-    }
     if (window.socket && !window._alignSocketBound) {
         window.socket.on('transcribe_progress', (d) => {
             if (d && d.mode === 'align') onAlignProgress(d);

@@ -139,6 +139,8 @@ export async function submitConcat() {
         if (!res.ok) {
             const why = result.detail || result.message || ('HTTP ' + res.status);
             appendLog(`串帶提交失敗: ${why}`, 'error');
+            // 遠端進度面板在 POST 之前就點亮了，失敗要一併收掉
+            if (window.resetRemoteJobUi) window.resetRemoteJobUi();
             alert('串帶提交失敗：' + why);
             return;
         }

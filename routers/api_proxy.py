@@ -38,7 +38,8 @@ async def merge_host_outputs(req: MergeHostOutputsRequest):
         src_dir = os.path.join(base, subdir)
         if not os.path.isdir(src_dir):
             continue
-            
+
+        _err_before = len(errors)
         for root, dirs, files in os.walk(src_dir):
             for fname in files:
                 src_file = os.path.join(root, fname)
@@ -55,9 +56,11 @@ async def merge_host_outputs(req: MergeHostOutputsRequest):
                 except Exception as e:
                     errors.append(f"{rel_path}: {e}")
                     
-        # 🔴 有檔案沒搬成就**不刪來源**：原本無條件 rmtree，搬失敗的那些檔
-        # 連來源都被清掉（2026-08-12 健檢）。留著讓使用者/補轉還能找到。
-        if errors:
+        # 🔴 這個子夾有檔案沒搬成就**不刪它**：原本無條件 rmtree，搬失敗的
+        # 那些檔連來源都被清掉（2026-08-12 健檢）。errors 是整個請求累積的，
+        # 要比對進迴圈前的長度 —— 直接看 `if errors` 會讓前一個夾的失敗
+        # 連帶擋掉後面每一個夾的清理。
+        if len(errors) > _err_before:
             continue
         try:
             shutil.rmtree(src_dir)

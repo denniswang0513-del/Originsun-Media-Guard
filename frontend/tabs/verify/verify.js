@@ -100,6 +100,8 @@ export async function submitVerify() {
         if (!res.ok) {   // 失敗不能講成「已送出」，否則遠端還會監控一個不存在的任務
             const why = result.detail || result.message || ('HTTP ' + res.status);
             appendLog(`比對提交失敗: ${why}`, 'error');
+            // 進度面板在 POST 之前就點亮了，失敗要一併收掉（不然留一條假進度條）
+            if (window.resetRemoteJobUi) window.resetRemoteJobUi();
             alert('比對提交失敗：' + why);
             return;
         }
