@@ -16,7 +16,6 @@ AI 只做**輸入輔助**：上傳錄音檔 → whisper 逐字稿 → claude 整
 """
 from __future__ import annotations
 
-import asyncio
 import os
 import uuid
 
@@ -32,8 +31,9 @@ from core.bg_task import fire
 from routers.api_proposals import (_fmt_date, _get_proposal_or_404, _parse_date,
                                    proposal_auth)
 
-from .proposal_assets import (home_ready, land_in_home,
-                              project_folder_abs, resolve_asset_file)
+from .proposal_assets import (home_ready, land_in_home, project_folder_abs,
+                              reject_oversize, remove_asset_files,
+                              resolve_asset_file)
 
 # 頂層可 import：meeting_transcriber 模組層只有 stdlib（whisper/db 都在函式內 lazy）
 from services.meeting_transcriber import (disk_artifacts, process_meeting_audio,
@@ -59,10 +59,11 @@ _MAX_AUDIO_BYTES = 500 * 1024 * 1024
 _AUDIO_SUBDIR = "會議記錄"             # 系統管的落點（敢動磁碟的前提，同報價單）
 
 
-def _dict(m) -> dict:
+def _dict(m, *, full: bool = False) -> dict:
     # 卡太久的 pending 在讀取端改判 failed（伺服器重啟過 → task 沒了）。
     # 長錄音靠 meeting_transcriber 的心跳蓋 updated_at 撐過 STALE_AFTER。
     status, error = settle(m.status or "", m.updated_at, m.error or "")
+    pending = status == "pending"
     return {
         "id": m.id,
         "met_at": _fmt_date(m.met_at),
@@ -72,13 +73,16 @@ def _dict(m) -> dict:
         "created_by": m.created_by or "",
         "created_at": m.created_at.isoformat() if m.created_at else None,
         "audio_name": os.path.basename(m.audio_rel) if m.audio_rel else "",
-        # pending 期間前端只畫 phase —— 一小時錄音的逐字稿幾十 KB，
-        # 別讓每 5 秒的輪詢白載它幾十趟
-        "transcript": "" if status == "pending" else (m.transcript or ""),
-        "ai_summary": "" if status == "pending" else (m.ai_summary or ""),
         "status": status,
         "error": error,
-        "phase": (m.phase or "") if status == "pending" else "",
+        "phase": (m.phase or "") if pending else "",
+        # 逐字稿一小時錄音幾十 KB：pending 期間畫面只顯示 phase，清單只回
+        # 「有沒有」（真要看的人展開時再打單筆 GET 拿全文）—— 輪詢每 15 秒
+        # 一趟、整頁重畫每次新增/刪除一趟，都不必白載它。
+        "has_transcript": bool((m.transcript or "").strip()),
+        "has_summary": bool((m.ai_summary or "").strip()),
+        **({"transcript": m.transcript or "", "ai_summary": m.ai_summary or ""}
+           if full and not pending else {}),
     }
 
 
@@ -89,21 +93,10 @@ def _ctx(m) -> dict:
 
 
 async def _remove_audio_files(folder_abs: str, rel: str) -> None:
-    """best-effort 清一個錄音的全部磁碟檔（換檔/刪列共用）。哪些檔算「它的」
-    由 service 的 `disk_artifacts` 定義（寫入端同一份，多 sidecar 不會漏）。
-    清不掉（NAS 斷線/已被搬走）不擋 —— 同報價單刪檔的理由。"""
-    from core.project_folders import safe_rel_path
-
-    def _rm():
-        p = safe_rel_path(folder_abs, rel)
-        if not p:
-            return
-        for path in disk_artifacts(p):
-            try:
-                os.remove(path)
-            except OSError:
-                pass
-    await asyncio.to_thread(_rm)
+    """清一個錄音的全部磁碟檔（換檔/刪列共用）。哪些檔算「它的」由 service
+    的 `disk_artifacts` 定義（寫入端同一份，多一種 sidecar 也不會漏）；
+    每一條怎麼安全地離開共用磁碟由 `remove_asset_files` 決定。"""
+    await remove_asset_files(folder_abs, *disk_artifacts(rel))
 
 
 async def _row_or_404(session, pid: str, mid: str):
@@ -208,13 +201,14 @@ async def delete_meeting_note(pid: str, mid: str, request: Request):
 
 @router.get("/proposals/{pid}/meetings/{mid}")
 async def get_meeting_note(pid: str, mid: str, request: Request):
-    """單筆（錄音處理中的輪詢用 —— 每 5 秒為了一個 status 掃整份清單是浪費）。"""
+    """單筆，**含逐字稿與 AI 整理全文**。兩個用途：處理中的輪詢（為了一個
+    status 掃整份清單是浪費），以及使用者展開那兩塊摺疊區時才載全文。"""
     proposal_auth(request)
     _require_db()
     factory = await _get_factory()
     async with factory() as session:
         m = await _row_or_404(session, pid, mid)
-        return {"note": _dict(m)}
+        return {"note": _dict(m, full=True)}
 
 
 @router.post("/proposals/{pid}/meetings/{mid}/audio")
@@ -232,9 +226,7 @@ async def upload_meeting_audio(pid: str, mid: str, request: Request,
     if ext not in _AUDIO_EXTS:
         raise HTTPException(status_code=422,
                             detail="只收錄音/影音檔（mp3、wav、m4a、mp4…）")
-    # 大小前置成 413（契約同報價單；save_uploads 只能回 422）
-    if (getattr(file, "size", None) or 0) > _MAX_AUDIO_BYTES:
-        raise HTTPException(status_code=413, detail="錄音檔超過 500MB 上限")
+    reject_oversize(file, _MAX_AUDIO_BYTES, "錄音檔")
 
     factory = await _get_factory()
     # 兩段式（同報價單上傳的既有正本）：session1 只做 DB —— 幾百 MB 的 SMB

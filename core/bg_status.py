@@ -74,17 +74,23 @@ async def save_job_row(model_cls, row_id: str, *, status=None, error=...,
 
 
 @contextlib.asynccontextmanager
-async def keepalive(model_cls, row_id: str, progress: dict | None = None):
+async def keepalive(model_cls, row_id: str, fields=None):
     """跑得比 STALE_AFTER 久的 pending 工作進這個 with：每半個 STALE_AFTER
     蓋一次 `updated_at`，settle 就不會把還活著的長工改判成 failed。
-    `progress["phase"]` 有值就順手寫進 phase 欄（工作執行緒更新 dict、
-    心跳負責落 DB —— 進度字不用每一步都付一次 DB 寫入）。"""
+
+    `fields` = 每拍呼叫一次、回這一拍要順手寫的欄位（例如進度字）。**內容由
+    呼叫端定義** —— 這裡不認得任何一張表的欄位名，否則只有一張表有的欄位
+    會變成所有背景工作的共同契約。
+
+    一拍寫失敗（DB 抖一下）只跳過那一拍：心跳死掉的代價是還活著的長工被
+    settle 誤判 failed，比漏記一次進度嚴重得多。"""
     async def _beat():
         while True:
             await asyncio.sleep(_BEAT_SEC)
-            phase = (progress or {}).get("phase")
-            await save_job_row(model_cls, row_id,
-                               **({"phase": phase} if phase is not None else {}))
+            try:
+                await save_job_row(model_cls, row_id, **(fields() if fields else {}))
+            except Exception:                    # noqa: BLE001 — 見上
+                logger.warning("[keepalive] %s 這一拍沒寫成", row_id, exc_info=True)
     task = asyncio.create_task(_beat())
     try:
         yield

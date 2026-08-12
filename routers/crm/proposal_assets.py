@@ -382,11 +382,44 @@ async def ensure_project_folder(session, project_id: str) -> str:
     return path
 
 
+def reject_oversize(file, max_bytes: int, what: str) -> None:
+    """超過上限 → 413。`save_uploads` 只能回 422，而上傳契約定死 413，
+    所以兩個上傳端點都得在它之前擋一次（第二份出現 → 收斂在這）。
+
+    ⚠️ 這**不是**省流量的前置檢查：`UploadFile` 拿得到 `size` 的時候，
+    Starlette 早就把整個 body 收完落到暫存檔了。真要在傳輸前擋，得走分塊
+    上傳（`_chunk_begin` 在 /begin 就驗大小）。"""
+    if (getattr(file, "size", None) or 0) > max_bytes:
+        raise HTTPException(status_code=413,
+                            detail=f"{what}超過 {max_bytes // 1024 // 1024}MB 上限")
+
+
+async def remove_asset_files(folder_abs: str, *rels: str) -> None:
+    """best-effort 刪掉資產夾裡的這幾個檔（換檔、刪列）。**每一條都各自**
+    經過 `safe_rel_path` —— 「檔案能不能離開/消失在共用磁碟」的判斷只有這
+    一份，呼叫端自己 join 路徑再刪就是繞過它。清不掉（NAS 斷線、已被搬走）
+    不算失敗：呼叫端要的是 DB 那一列不見，不是留一個殭屍列。"""
+    def _rm():
+        for rel in rels:
+            path = safe_rel_path(folder_abs, rel) if (folder_abs and rel) else None
+            if not path:
+                continue
+            try:
+                os.remove(path)
+            except OSError:
+                pass
+    await asyncio.to_thread(_rm)
+
+
 async def home_ready(session, prop) -> tuple:
     """提案上傳落地前的共同前置 → `(folder_abs, home_subpath)`。
     沒連結專案 → 400 明講；ensure + **commit**（資料夾名可能這一刻才生成，
     磁碟有夾、DB 沒記的話下次會用新名再建一個）。報價單與會議錄音的上傳
     端點曾各長一份這段開場白 —— 同 `land_in_home` 檔案落地那半的收斂理由。
+
+    `prop` 要是**這個 session 剛撈出來**的那一列（兩個呼叫端都在上一行
+    `_get_proposal_or_404`）—— 收列不收 id 是為了不重撈，代價是這條前提；
+    改成自己撈會讓 proposal_assets 反過來 import api_proposals（環）。
     呼叫端拿到回傳後就該**關 session** 再碰磁碟。"""
     if not prop.project_id:
         raise HTTPException(

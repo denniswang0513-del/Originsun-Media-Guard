@@ -14,7 +14,8 @@
 
 import { autosaveDelegated, syncBaseline } from '../../js/shared/autosave.js';
 import { pollJob } from '../../js/shared/poll-job.js';
-import { authDownload, ensureStyle, esc, proxyBodyLimit,
+import { fmtSize } from '../../js/shared/clip_utils.js';
+import { authDownload, bearerHeader, ensureStyle, esc, proxyBodyLimit,
          uploadWithProgress } from '../../js/shared/utils.js';
 import { tfetch } from './prop-fetch.js';
 
@@ -93,40 +94,33 @@ function _audioHtml(m) {
                     可以先離開這頁，回來再看。</span>
             </div>`;
     }
-    const parts = [];
-    if (m.audio_name) {
-        parts.push(`
-            <div class="mv-abar">
-                <span class="mv-note mv-aname">${esc(m.audio_name)}</span>
-                <span class="mv-gap"></span>
-                <button class="mv-btn sm" data-adl>下載錄音</button>
-                ${m.transcript ? '<button class="mv-btn sm" data-resum>重跑 AI 整理</button>' : ''}
-                <button class="mv-btn sm" data-aup>重新上傳</button>
-            </div>`);
-    } else {
-        parts.push(`
-            <div class="mv-abar">
-                <button class="mv-btn sm" data-aup>上傳會議錄音</button>
-                <span class="mv-note">AI 會轉成逐字稿並整理成會議記錄
-                    （上面欄位是空的才代填，寫過的字不會被動到）。</span>
-            </div>`);
-    }
+    // 一條 bar，兩種內容（結構只寫一次）
+    const parts = [`<div class="mv-abar">${m.audio_name ? `
+            <span class="mv-note mv-aname">${esc(m.audio_name)}</span>
+            <span class="mv-gap"></span>
+            <button class="mv-btn sm" data-adl>下載錄音</button>
+            ${m.has_transcript ? '<button class="mv-btn sm" data-resum>重跑 AI 整理</button>' : ''}
+            <button class="mv-btn sm" data-aup>重新上傳</button>` : `
+            <button class="mv-btn sm" data-aup>上傳會議錄音</button>
+            <span class="mv-note">AI 會轉成逐字稿並整理成會議記錄
+                （上面欄位是空的才代填，寫過的字不會被動到）。</span>`}</div>`];
     if (m.status === 'failed') {
         parts.push(`<div class="mv-note mv-err">處理失敗：${esc(m.error || '')}</div>`);
     }
-    if (m.transcript) {
-        parts.push(`
-            <details class="mv-fold"><summary>逐字稿</summary>
-                <div class="mv-pre">${esc(m.transcript)}</div>
-            </details>`);
-    }
-    if (m.ai_summary) {
-        parts.push(`
-            <details class="mv-fold"><summary>AI 整理</summary>
-                <div class="mv-pre">${esc(m.ai_summary)}</div>
-            </details>`);
-    }
+    // 全文不隨清單一起載（一小時錄音幾十 KB）—— 展開時才打單筆 GET
+    if (m.has_transcript) parts.push(_foldHtml('transcript', '逐字稿', m));
+    if (m.has_summary) parts.push(_foldHtml('summary', 'AI 整理', m));
     return parts.join('');
+}
+
+const _FOLD_FIELD = { transcript: 'transcript', summary: 'ai_summary' };
+
+function _foldHtml(kind, label, m) {
+    const body = m[_FOLD_FIELD[kind]];      // 單筆 GET 回來的才有值
+    return `
+        <details class="mv-fold" data-fold="${kind}"><summary>${label}</summary>
+            <div class="mv-pre">${body ? esc(body) : '載入中…'}</div>
+        </details>`;
 }
 
 function _wireAudio(host, card, m) {
@@ -154,9 +148,24 @@ function _wireAudio(host, card, m) {
             const d = await tfetch(`${_base(s.proposalId)}/${encodeURIComponent(mid)}/summarize`,
                                    { method: 'POST' });
             _refreshCard(host, d.note);
+            _poll(host, mid);           // 這裡才是「剛變成 pending」的地方
         } catch (err) { alert('重跑失敗：' + (err.message || err)); e.target.disabled = false; }
     });
-    if (m.status === 'pending') _poll(host, mid);
+    // 展開才載全文（清單那趟只給 has_*）；載過就不再打
+    card.querySelectorAll('[data-fold]').forEach(el => {
+        el.addEventListener('toggle', async () => {
+            const field = _FOLD_FIELD[el.dataset.fold];
+            const cur = s.notes.find(n => String(n.id) === mid) || {};
+            if (!el.open || cur[field]) return;
+            try {
+                const d = await tfetch(`${_base(s.proposalId)}/${encodeURIComponent(mid)}`);
+                Object.assign(cur, d.note || {});
+                el.querySelector('.mv-pre').textContent = cur[field] || '（沒有內容）';
+            } catch (e) {
+                el.querySelector('.mv-pre').textContent = '載入失敗：' + (e.message || e);
+            }
+        });
+    });
 }
 
 async function _uploadAudio(host, card, mid, f) {
@@ -166,8 +175,8 @@ async function _uploadAudio(host, card, mid, f) {
     // 空白 413，不如先講清楚
     const cap = proxyBodyLimit();
     if (cap && f.size > cap) {
-        alert('遠端連線的單次上傳上限是 100MB —— 請在公司內網上傳這個檔，'
-              + '或先把影片轉成純音檔再傳。');
+        alert(`遠端連線的單次上傳上限是 ${fmtSize(cap)} —— 請在公司內網上傳`
+              + '這個檔，或先把影片轉成純音檔再傳。');
         return;
     }
     box.innerHTML = '<div class="mv-abar"><span class="mv-spin"></span>'
@@ -175,29 +184,33 @@ async function _uploadAudio(host, card, mid, f) {
     const pct = box.querySelector('.mv-uppct');
     const fd = new FormData();
     fd.append('file', f);
-    const tok = localStorage.getItem('auth_token');
     try {
         const d = await uploadWithProgress(
             `${_base(s.proposalId)}/${encodeURIComponent(mid)}/audio`, fd, {
-                headers: tok ? { Authorization: 'Bearer ' + tok } : {},
+                headers: bearerHeader(),
                 onProgress: (loaded, total) => {
                     if (total) pct.textContent = `上傳中… ${Math.round(loaded / total * 100)}%`;
                 },
                 onUploaded: () => { pct.textContent = '上傳完成，等伺服器落檔…'; },
             });
-        _refreshCard(host, d.note);     // pending → _wireAudio 開始輪詢
+        _refreshCard(host, d.note);
+        _poll(host, mid);               // 這裡才是「剛變成 pending」的地方
     } catch (e) {
         alert('上傳失敗：' + (e.message || e));   // 400 沒資產夾 / 413 超限 / 422 副檔名照實顯示
         const cur = s.notes.find(n => String(n.id) === mid);
-        if (cur) _refreshCard(host, cur);
+        if (cur) _paintAudio(host, card, cur);
     }
 }
 
+/** 開始追一筆處理中的錄音。**只從「剛變成 pending」的地方呼叫**（上傳成功、
+ *  重跑整理、初次載入時已在跑的）—— 從重畫路徑呼叫會讓上限自動續約。 */
 function _poll(host, mid) {
     const s = host.__mv;
     pollJob(mid, s.polling, {
         alive: () => host.isConnected,
-        maxTicks: 720,      // whisper 轉一小時錄音要幾十分鐘 —— 追好追滿一小時
+        // 一小時的上限：後端進度字幾十秒才換一次，15 秒問一次夠靈敏也不燒連線
+        maxTicks: 240,
+        tickMs: 15000,
         list: async () => {
             const d = await tfetch(`${_base(s.proposalId)}/${encodeURIComponent(mid)}`);
             return d.note ? [d.note] : [];
@@ -276,6 +289,8 @@ function _wire(host) {
         by.textContent = m.created_by
             ? `由 ${m.created_by} 建立於 ${String(m.created_at || '').slice(0, 10)}` : '';
         _paintAudio(host, card, m);
+        // 進來時就已經在跑的（別人傳的、或自己上次關掉分頁前傳的）
+        if (m.status === 'pending') _poll(host, String(m.id));
     });
     syncBaseline(host, '[data-f]');
 }

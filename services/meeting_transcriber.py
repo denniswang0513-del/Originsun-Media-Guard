@@ -64,11 +64,14 @@ def transcript_txt_path(audio_path: str) -> str:
     return os.path.splitext(audio_path)[0] + _TXT_SUFFIX
 
 
-def disk_artifacts(audio_path: str) -> tuple:
+def disk_artifacts(audio: str) -> tuple:
     """一個錄音在磁碟上擁有的**全部**檔案（錄音本體 + 逐字稿 .txt）。
     寫入端（本檔）與清理端（router 的換檔/刪列）共用這一份定義 ——
-    以後多一種 sidecar 只改這裡，清理端不會漏。"""
-    return (audio_path, transcript_txt_path(audio_path))
+    以後多一種 sidecar 只改這裡，清理端不會漏。
+
+    純字串運算，絕對路徑或**相對路徑**都吃 —— 清理端拿的是 rel，好讓每一條
+    都各自經過 `proposal_assets` 那道「檔案能不能離開共用磁碟」的判斷。"""
+    return (audio, transcript_txt_path(audio))
 
 
 def _whisper_transcribe(wav_path: str, progress: dict) -> str:
@@ -144,14 +147,17 @@ async def process_meeting_audio(mid: str, *, audio_path: str, ctx: dict) -> None
     from db.models import PreprodMeetingNote
     progress = {"phase": ""}
 
-    async def _phase(p: str) -> None:
-        # dict 給心跳讀、DB 給 UI 讀 —— 兩邊一起換，不然畫面停在上一階段
+    async def _phase(p: str, **fields) -> None:
+        # dict 給心跳讀、DB 給 UI 讀 —— **一律經這裡**兩邊一起換，不然畫面
+        # 會停在上一階段（`fields` 讓「換階段順便存結果」也走同一條路）
         progress["phase"] = p
-        await save_job_row(PreprodMeetingNote, mid, phase=p)
+        await save_job_row(PreprodMeetingNote, mid, phase=p, **fields)
 
     tmp_wav = ""
     try:
-        async with keepalive(PreprodMeetingNote, mid, progress):
+        # 心跳只負責讓長工不被 settle 誤判；phase 欄的內容是本模組的事
+        async with keepalive(PreprodMeetingNote, mid,
+                             lambda: {"phase": progress["phase"]}):
             # 抽音訊在 _LOCK 之外 —— 它只是解碼 I/O，不用排在前一件的
             # 幾十分鐘 whisper 後面（NAS 讀取也趁早做）
             await _phase("抽取音訊")
@@ -171,9 +177,7 @@ async def process_meeting_audio(mid: str, *, audio_path: str, ctx: dict) -> None
                 await save_job_row(PreprodMeetingNote, mid, status="failed",
                                    error="辨識不到任何語音內容 —— 檔案可能沒有人聲")
                 return
-            progress["phase"] = "AI 整理中"
-            await save_job_row(PreprodMeetingNote, mid, transcript=transcript,
-                               phase=progress["phase"])
+            await _phase("AI 整理中", transcript=transcript)
             try:                                # best-effort：NAS 搆不到不擋整理
                 await asyncio.to_thread(_write_text,
                                         transcript_txt_path(audio_path), transcript)

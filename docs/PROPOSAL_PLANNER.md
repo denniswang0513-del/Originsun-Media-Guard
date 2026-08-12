@@ -1134,12 +1134,19 @@ AI 在這裡是**輸入輔助**不是產出物：每筆會議記錄可傳一個�
   同事直接從 NAS 拿）。比照報價單：**沒有 /uploads 退路**、下載走帶權限端點。
 - 狀態生命週期同企劃書（pending/ok/failed + `core.bg_status.settle` 讀取端
   自癒）；🔴 **whisper 一小時錄音實測要 10–25 分鐘（CPU）**，遠超
-  STALE_AFTER 240s —— `_beat` 心跳每 90s 蓋 `updated_at` + `phase`
-  （「辨識中 37%」進度字），排隊等 `_LOCK`（一次一件）期間也在跳。
+  STALE_AFTER 240s —— 整段包 `core.bg_status.keepalive`，心跳每半個
+  STALE_AFTER（目前 120s）蓋 `updated_at` + 呼叫端給的 `phase` 進度字
+  （「辨識中 37%」），排隊等 `_LOCK`（一次一件）期間也在跳。心跳寫失敗
+  只跳過那一拍，不讓長工被誤判。
 - `POST /meetings/{mid}/summarize`：只重跑 claude 那段（用既有逐字稿）——
   AI 掛了不必重付一小時的 whisper；還在 pending → 409。
 - 前端輪詢打**單筆** GET `/meetings/{mid}`（別為一個 status 掃整份清單）；
-  `pollJob` 一輪上限 5 分鐘，還在 pending 就續追一輪。**只換那張卡的錄音區**
+  上限由呼叫端一次聲明（`maxTicks: 240` × `tickMs: 15000` ≈ 一小時），
+  🔴 **不准在 `onSettled` 裡重掛** —— `_poll` 只從「剛變成 pending」的三個
+  地方呼叫（上傳成功、重跑整理、初次載入時已在跑的）。**只換那張卡的錄音區**
   （`_refreshCard`）—— 整清單重畫會把別張卡打字中的欄位掀掉。
+- 逐字稿/AI 整理**不隨清單載**：清單只回 `has_transcript`/`has_summary`，
+  使用者展開摺疊區時才打單筆 GET 拿全文（一小時錄音的逐字稿幾十 KB，
+  每次新增/刪除都整份重載是白付）。
 - 新欄位（`audio_rel/transcript/ai_summary/status/error/phase`）已進 main.py
   的 `_crm_cols` migration（dev 既有表要 ALTER；新環境 create_all 直接有）。

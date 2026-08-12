@@ -1,11 +1,11 @@
 """Shared helpers for Whisper-based modules (transcriber.py, aligner.py,
 services/meeting_transcriber.py).
 
-These were duplicated identically in both files; promoted here to avoid
-cross-leaf imports between transcriber and aligner. load_model / extract_wav
-進駐（2026-08-12）：模型載入樣板已在 transcriber ×2、tts_engine 各長一份、
-ffmpeg 抽 wav 在 transcriber/aligner 也各一份 —— 新消費者一律走這裡
-（既有呼叫端是機隊 OTA 關鍵路徑，遷移另案）。
+`detect_device` / `cleanup_gpu` / `format_srt_timestamp` 是唯一正本
+（transcriber 與 aligner 都走這裡）。`load_model` / `extract_wav` 於
+2026-08-12 進駐但**還沒收編既有呼叫端**：模型載入樣板在 transcriber ×2 與
+tts_engine 各有一份、ffmpeg 抽 wav 在 transcriber/aligner 各有一份 ——
+那些檔是機隊 OTA 關鍵路徑，遷移另案；**新消費者一律走這裡**。
 """
 from __future__ import annotations
 
@@ -41,7 +41,12 @@ def cleanup_gpu() -> None:
 def load_model(model_size: str):
     """WhisperModel + 裝置偵測 + models/ 快取目錄，一次到位。**每次呼叫都
     重新載模型**（turbo 約 1.5GB、CPU 載入 15–60 秒）—— 不做全域快取是刻意
-    的：快取會讓 agent 行程常駐多 2–3GB RAM，偶發性任務不值得。"""
+    的：快取會讓 agent 行程常駐多 2–3GB RAM，偶發性任務不值得。
+
+    🔴 辨識期間會吃滿 CPU，**同時只該跑一件**。這裡不設閘是因為既有兩條路
+    各有自己的串行機制（語音辨識 Tab 走 task_queue、會議錄音走
+    `meeting_transcriber._LOCK`）；第三個非同步消費者出現時，閘要設在這裡
+    而不是再各養一把鎖。"""
     from faster_whisper import WhisperModel  # type: ignore
     device, compute_type = detect_device()
     models_dir = os.path.join(_BASE, "models")

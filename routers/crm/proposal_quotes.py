@@ -31,8 +31,8 @@ from core.project_folders import safe_rel_path
 # 否則「給看不給用」。不新增 RBAC key。
 from routers.api_proposals import _get_proposal_or_404, proposal_auth
 
-from .proposal_assets import (home_ready, land_in_home,
-                              project_folder_abs, resolve_asset_file)
+from .proposal_assets import (home_ready, land_in_home, project_folder_abs,
+                              reject_oversize, resolve_asset_file)
 
 from ._shared import router, _get_factory, _now, _require_db
 
@@ -138,9 +138,8 @@ async def upload_proposal_quote(pid: str, request: Request,
     payload = proposal_auth(request)
     _require_db()
     # 副檔名黑名單交給 save_uploads（政策單一正本），skipped reason 轉 422；
-    # 只有大小例外前置 —— 契約定死 413，save_uploads 只能回 422
-    if (getattr(file, "size", None) or 0) > _MAX_QUOTE_BYTES:
-        raise HTTPException(status_code=413, detail="報價檔超過 50MB 上限")
+    # 大小是例外 —— 契約定死 413，save_uploads 只能回 422
+    reject_oversize(file, _MAX_QUOTE_BYTES, "報價檔")
     who = str((payload or {}).get("username") or "")
 
     factory = await _get_factory()

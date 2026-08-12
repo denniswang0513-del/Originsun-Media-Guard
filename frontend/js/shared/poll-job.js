@@ -25,12 +25,13 @@ const MAX_TICKS = 60;
 /** 預設的「做完了」：`status` 不再是 pending。 */
 const notPending = (item) => item.status !== 'pending';
 
-// maxTicks：預設 5 分鐘（60×5s）夠 claude 類工作；合法跑更久的（whisper 轉
-// 一小時錄音要幾十分鐘）由呼叫端聲明一次，不要在 onSettled 裡遞迴重掛 ——
-// 那會讓這個安全上限看起來有、實際上沒有。
+// maxTicks / tickMs：預設 5 分鐘（60×5s）夠 claude 類工作；合法跑更久的
+// （whisper 轉一小時錄音要幾十分鐘）由呼叫端聲明一次 —— 別在 onSettled 裡
+// 遞迴重掛，那會讓這個安全上限看起來有、實際上沒有。慢工也順手放大 tickMs：
+// 後端進度字本來就好幾十秒才換一次，5 秒問一次只是白跑 pool 連線。
 export function pollJob(id, seen,
                         { alive, list, onSettled, settled = notPending,
-                          maxTicks = MAX_TICKS }) {
+                          maxTicks = MAX_TICKS, tickMs = TICK_MS }) {
     if (seen.has(id)) return;
     seen.add(id);
     let left = maxTicks;
@@ -40,12 +41,15 @@ export function pollJob(id, seen,
             const items = await list();
             const cur = items.find(x => x.id === id);
             if (!cur || settled(cur) || --left <= 0) {
-                seen.delete(id);
+                // 先 onSettled 再從 seen 移除：重畫常常會走回「還是 pending
+                // 就開始輪詢」的路，早一步移除等於讓上限自動續約（跑滿
+                // maxTicks 卻永遠停不下來）。留著 → 那次重掛是 no-op。
                 await onSettled(items);
+                seen.delete(id);
                 return;
             }
         } catch { /* 抖一下不代表失敗 */ }
-        setTimeout(tick, TICK_MS);
+        setTimeout(tick, tickMs);
     };
-    setTimeout(tick, TICK_MS);
+    setTimeout(tick, tickMs);
 }
