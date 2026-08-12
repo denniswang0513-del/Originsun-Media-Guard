@@ -29,7 +29,10 @@ const _base = (pid) => `${API}/proposals/${encodeURIComponent(pid)}/meetings`;
 export async function renderMeetings(host, { proposalId }) {
     ensureStyle('mv-style', STYLE);
     host.classList.add('mv');
-    host.__mv = { proposalId, notes: [], polling: new Set() };
+    // 重掛（換提案、切回分頁）時把還在錄的收掉 —— 否則 recorder 活著、麥克風
+    // 開著，而它要更新的那張卡已經不存在了
+    if (host.__mv?.rec) _stopRecording(host, null, false);
+    host.__mv = { proposalId, notes: [], polling: new Set(), rec: null };
     // 逐欄自動儲存走共用件（debounce + 失敗退基準重試 + 重畫不重綁）。
     // 委派綁在 host 上一次就好 —— 清單每次動作都整塊重畫，逐顆綁必漏。
     autosaveDelegated(host, '[data-f]', (v, el) =>
@@ -95,13 +98,15 @@ function _audioHtml(m) {
             </div>`;
     }
     // 一條 bar，兩種內容（結構只寫一次）
+    const rec = canRecord()
+        ? '<button class="mv-btn sm" data-rec>現場錄音</button>' : '';
     const parts = [`<div class="mv-abar">${m.audio_name ? `
             <span class="mv-note mv-aname">${esc(m.audio_name)}</span>
             <span class="mv-gap"></span>
             <button class="mv-btn sm" data-adl>下載錄音</button>
             ${m.has_transcript ? '<button class="mv-btn sm" data-resum>重跑 AI 整理</button>' : ''}
-            <button class="mv-btn sm" data-aup>重新上傳</button>` : `
-            <button class="mv-btn sm" data-aup>上傳會議錄音</button>
+            <button class="mv-btn sm" data-aup>重新上傳</button>${rec}` : `
+            <button class="mv-btn sm" data-aup>上傳會議錄音</button>${rec}
             <span class="mv-note">AI 會轉成逐字稿並整理成會議記錄
                 （上面欄位是空的才代填，寫過的字不會被動到）。</span>`}</div>`];
     if (m.status === 'failed') {
@@ -138,6 +143,11 @@ function _wireAudio(host, card, m) {
         });
         input.click();
     });
+    card.querySelector('[data-rec]')?.addEventListener('click', () => {
+        if (m.audio_name &&
+            !confirm('錄完上傳會換掉這一筆的錄音、逐字稿與 AI 整理（手寫的欄位不受影響）。繼續？')) return;
+        _startRecording(host, card, mid);
+    });
     card.querySelector('[data-adl]')?.addEventListener('click', () => {
         authDownload(`${_base(s.proposalId)}/${encodeURIComponent(mid)}/audio/download`,
                      m.audio_name, '錄音下載');
@@ -171,6 +181,114 @@ function _wireAudio(host, card, m) {
             pre.textContent = cur[field] || '（沒有內容）';
         });
     });
+}
+
+// ── 現場錄音（MediaRecorder）─────────────────────────────────
+//
+// 🔴 `getUserMedia` 只在**安全內容**下存在：HTTPS 或 localhost。公司內網用
+// http://192.168.1.107:8000 進來時瀏覽器根本不給麥克風 —— 所以這顆按鈕是
+// **有才長出來**（`canRecord()`），沒有的路徑照舊用上傳，不留一顆按了會壞
+// 的鈕。走 foundry.originsun-studio.com（HTTPS）進來就有。
+
+const _MIMES = ['audio/webm;codecs=opus', 'audio/webm', 'audio/mp4'];
+
+/** 這個瀏覽器/這條連線錄不錄得成。 */
+function canRecord() {
+    return !!(window.isSecureContext && navigator.mediaDevices?.getUserMedia
+              && window.MediaRecorder);
+}
+
+function _pickMime() {
+    return _MIMES.find(t => MediaRecorder.isTypeSupported(t)) || '';
+}
+
+const _clock = (sec) => `${String(Math.floor(sec / 60)).padStart(2, '0')}:`
+                      + `${String(sec % 60).padStart(2, '0')}`;
+
+async function _startRecording(host, card, mid) {
+    const s = host.__mv;
+    if (s.rec) { alert('已經有一筆在錄音了 —— 先把那筆停掉。'); return; }
+    let stream;
+    try {
+        stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    } catch (e) {
+        // 使用者按了拒絕、或根本沒有麥克風 —— 照實說，別假裝在錄
+        alert('拿不到麥克風：' + (e.message || e)
+              + '\n（瀏覽器網址列的權限圖示可以重新允許）');
+        return;
+    }
+    const mime = _pickMime();
+    const rec = new MediaRecorder(stream, mime ? { mimeType: mime } : {});
+    const chunks = [];
+    rec.addEventListener('dataavailable', (e) => {
+        if (e.data && e.data.size) chunks.push(e.data);
+    });
+    // 每 5 秒切一塊：中途當掉至少不是整場空的，也讓長會議不必等到最後才有資料
+    rec.start(5000);
+
+    const t0 = Date.now();
+    const box = card.querySelector('.mv-audio');
+    box.innerHTML = `
+        <div class="mv-abar">
+            <span class="mv-dot"></span>
+            <span class="mv-note mv-rt">錄音中 00:00</span>
+            <span class="mv-gap"></span>
+            <button class="mv-btn sm" data-stop>停止並上傳</button>
+            <button class="mv-btn sm" data-cancel>取消</button>
+        </div>
+        <div class="mv-note">請讓這個分頁保持開著 —— 關掉或重整就沒了。</div>`;
+    const label = box.querySelector('.mv-rt');
+    const timer = setInterval(() => {
+        label.textContent = '錄音中 ' + _clock(Math.floor((Date.now() - t0) / 1000));
+    }, 1000);
+    // 關分頁/重整前攔一下（錄音只在記憶體裡）
+    const warn = (e) => { e.preventDefault(); e.returnValue = ''; };
+    window.addEventListener('beforeunload', warn);
+
+    s.rec = { mid, rec, stream, chunks, timer, mime, warn };
+    box.querySelector('[data-stop]').addEventListener('click',
+        () => _stopRecording(host, card, true));
+    box.querySelector('[data-cancel]').addEventListener('click', () => {
+        if (confirm('取消就把這段錄音丟掉，不會上傳。確定？')) {
+            _stopRecording(host, card, false);
+        }
+    });
+}
+
+/** 停止錄音。`upload=false` = 丟掉。`card` 給 null 代表畫面已經不在了
+ *  （切走分頁/換提案）—— 那就只收硬體，不碰 DOM。 */
+function _stopRecording(host, card, upload) {
+    const s = host.__mv;
+    const r = s.rec;
+    if (!r) return;
+    s.rec = null;                        // 位子先讓出來（下一筆可以開始錄）
+    clearInterval(r.timer);
+    window.removeEventListener('beforeunload', r.warn);
+    // stop() 之後還會再來一次 dataavailable，要等 'stop' 才算收齊 ——
+    // 麥克風也在這時候才收，提早關軌可能吃掉最後一塊
+    r.rec.addEventListener('stop', () => {
+        r.stream.getTracks().forEach(t => t.stop());   // 分頁上的紅點熄掉
+        if (!card || !upload) {
+            const cur = s.notes.find(n => String(n.id) === r.mid);
+            if (card && cur) _paintAudio(host, card, cur);
+            return;
+        }
+        const type = r.mime || r.chunks[0]?.type || 'audio/webm';
+        const ext = type.includes('mp4') ? '.mp4' : '.webm';
+        const blob = new Blob(r.chunks, { type });
+        if (!blob.size) { alert('這段錄音是空的 —— 沒有收到任何聲音。'); return; }
+        _uploadAudio(host, card, r.mid,
+                     new File([blob], `現場錄音_${_stamp()}${ext}`, { type }));
+    }, { once: true });
+    r.rec.stop();
+}
+
+/** 檔名用的本地時間戳（NAS 上一眼看得出哪天錄的）。 */
+function _stamp() {
+    const d = new Date();
+    const p = (n) => String(n).padStart(2, '0');
+    return `${d.getFullYear()}${p(d.getMonth() + 1)}${p(d.getDate())}`
+         + `_${p(d.getHours())}${p(d.getMinutes())}`;
 }
 
 async function _uploadAudio(host, card, mid, f) {
@@ -344,6 +462,11 @@ html.plan-theme-light .mv { --mv-ink: #262626; --mv-sub: #737373; --mv-line: #e5
       border-top-color: var(--mv-accent); border-radius: 50%; flex: none;
       animation: mv-rot 1s linear infinite; }
 @keyframes mv-rot { to { transform: rotate(360deg); } }
+/* 錄音中的紅點（同錄影機的慣例） */
+.mv-dot { width: 10px; height: 10px; border-radius: 50%; flex: none;
+      background: var(--mv-accent); animation: mv-blink 1.2s ease-in-out infinite; }
+@keyframes mv-blink { 50% { opacity: .25; } }
+.mv-rt { font-variant-numeric: tabular-nums; }
 /* 手機：日期與主題各佔一行，觸控目標 44px（同 proposal-plan 的既有斷點） */
 @media (max-width: 720px) {
   .mv-in { font-size: 16px; }

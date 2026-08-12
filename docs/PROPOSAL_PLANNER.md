@@ -1150,3 +1150,28 @@ AI 在這裡是**輸入輔助**不是產出物：每筆會議記錄可傳一個�
   每次新增/刪除都整份重載是白付）。
 - 新欄位（`audio_rel/transcript/ai_summary/status/error/phase`）已進 main.py
   的 `_crm_cols` migration（dev 既有表要 ALTER；新環境 create_all 直接有）。
+
+### §13.2 現場錄音（MediaRecorder，開會當下直接錄）
+
+會議記錄那排多一顆「現場錄音」：按下去錄，停止後自動當成錄音檔上傳，接上
+§13.1 同一條管線（不另開路徑）。錄出來的是 `audio/webm;codecs=opus`
+（Safari 是 `audio/mp4`），兩種副檔名後端白名單本來就收；實測 webm/opus
+走完整條 ffmpeg → whisper → claude 沒問題。
+
+- 🔴 **按鈕是「有能力才長出來」**（`canRecord()`：`isSecureContext` +
+  `mediaDevices.getUserMedia` + `MediaRecorder`）。`getUserMedia` **只在
+  HTTPS 或 localhost 存在** —— 同事用 `http://192.168.1.107:8000` 內網 IP
+  進來時瀏覽器根本不給麥克風，那條路照舊用「上傳會議錄音」，不留一顆按了
+  會壞的鈕。要現場錄音就走 `foundry.originsun-studio.com`（HTTPS）。
+- 拿不到麥克風（使用者按拒絕、沒有裝置）→ **照實說**，不假裝在錄。
+- `rec.start(5000)` 每 5 秒切一塊；停止後要等 `'stop'` 事件才算收齊，
+  **麥克風軌道也在那時候才收**（提早關軌可能吃掉最後一塊）。
+- 錄音只在記憶體裡：錄製中掛 `beforeunload` 攔關分頁/重整；元件重掛
+  （換提案、切分頁）時 `renderMeetings` 會把還在錄的收掉 —— 否則
+  recorder 活著、麥克風開著，而它要更新的那張卡已經不在了。
+- 一次只錄一筆（`host.__mv.rec`）；取消要 confirm，且不上傳。
+- 回歸測試 `tests/e2e/test_meeting_recorder.py`：按鈕存在 + 44px 可點目標 +
+  開始/取消的狀態轉換。🔴 Windows 的 headless Chromium **一個音訊輸入裝置
+  都沒有**（`--use-fake-device-for-media-capture` 也救不了，回
+  `NotFoundError`），所以測試把 `getUserMedia` 換成 AudioContext 產生的真
+  MediaStream —— 驗的是我們的狀態機，不是瀏覽器的裝置層。
