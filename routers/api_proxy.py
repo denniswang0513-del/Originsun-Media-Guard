@@ -55,6 +55,10 @@ async def merge_host_outputs(req: MergeHostOutputsRequest):
                 except Exception as e:
                     errors.append(f"{rel_path}: {e}")
                     
+        # 🔴 有檔案沒搬成就**不刪來源**：原本無條件 rmtree，搬失敗的那些檔
+        # 連來源都被清掉（2026-08-12 健檢）。留著讓使用者/補轉還能找到。
+        if errors:
+            continue
         try:
             shutil.rmtree(src_dir)
         except Exception:

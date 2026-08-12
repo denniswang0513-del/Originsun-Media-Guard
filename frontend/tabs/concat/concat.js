@@ -133,7 +133,15 @@ export async function submitConcat() {
             method: 'POST', headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(payload)
         });
-        const result = await res.json();
+        const result = await res.json().catch(() => ({}));
+        // 後端對不合法路徑回 400（detail 會點名哪個欄位）—— 不看 res.ok 的話
+        // 使用者看到「已送出」但任務根本沒建（2026-08-12 健檢）
+        if (!res.ok) {
+            const why = result.detail || result.message || ('HTTP ' + res.status);
+            appendLog(`串帶提交失敗: ${why}`, 'error');
+            alert('串帶提交失敗：' + why);
+            return;
+        }
         const retryBtn = document.getElementById('btn_retry');
         if(retryBtn) retryBtn.style.display = 'none';
 

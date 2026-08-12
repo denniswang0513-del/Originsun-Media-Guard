@@ -858,6 +858,12 @@ async function dmwRunNow() {
         const data = await r.json();
         if (!r.ok) { alert('執行失敗: ' + (data.error || r.status)); return; }
         if (data.error) { alert('執行失敗: ' + data.error); return; }
+        // 逐夾派發的失敗在 errors（**複數**）—— 原本只看單數 data.error，
+        // 部分派發失敗照樣報「已派發」（2026-08-12 健檢）
+        if (Array.isArray(data.errors) && data.errors.length) {
+            data.errors.forEach(e => appendLog('⚠️ ' + e, 'error'));
+            alert(`有 ${data.errors.length} 個資料夾沒能派發，詳見日誌。`);
+        }
         appendLog(`✅ 掃描完成：${data.folders} 個資料夾 / ${data.files} 個檔案已派發佇列`, 'system');
 
         // Jobs just entered the queue; surface pause/stop buttons immediately

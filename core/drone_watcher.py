@@ -307,6 +307,19 @@ def run_watcher_scan(cfg: Optional[dict] = None, trigger: str = "scheduled") -> 
     if not source_root or not dest_root:
         return {"error": "來源或目的地根目錄未設定", "folders": 0, "files": 0}
 
+    # 🔴 路徑不存在要**照實回報**，不能靜靜回 0 個資料夾 —— `_scan_candidates`
+    # 對不存在的路徑 return []，前端就顯示「✅ 掃描完成：0 個資料夾」，
+    # 使用者無從得知掃的是哪條路（2026-08-12 健檢；同 653c96a 的派發版）。
+    for label, path in (("來源", source_root), ("目的地", dest_root)):
+        if not os.path.isdir(path):
+            msg = f"{label}根目錄不存在或讀不到：{path}"
+            append_history({
+                "ts": start_ts.isoformat(timespec="seconds"),
+                "trigger": trigger, "folder_count": 0, "file_count": 0,
+                "status": "error", "note": msg,
+            })
+            return {"error": msg, "folders": 0, "files": 0}
+
     candidates = _scan_candidates(source_root, dest_root)
     if not candidates:
         entry = {

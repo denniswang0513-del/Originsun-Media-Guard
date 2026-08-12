@@ -1798,11 +1798,14 @@ if (typeof appendLog === 'undefined') {
                             method: 'POST', headers: { 'Content-Type': 'application/json' },
                             body: JSON.stringify({ sources: files, dest_dir: dest })
                         });
-                        const res = await r.json();
+                        const res = await r.json().catch(() => ({}));
+                        // 🔴 不看 r.ok 的話，遠端回 422/500 也會被記成「已接收」，
+                        // 接著 heartbeat 看它閒著就報「轉檔完成」—— 什麼都沒轉（2026-08-12）
+                        if (!r.ok) throw new Error(res.detail || res.message || ('HTTP ' + r.status));
                         if (typeof appendLog === 'function') appendLog('✅ ' + h.name + ' [' + (cardName || 'all') + '] 接收，任務 ID: ' + (res.job_id || '?'), 'system');
                         hostOk = true;
                     } catch (err) {
-                        if (typeof appendLog === 'function') appendLog('❌ 無法連線到 ' + h.name + ': ' + err.message, 'error');
+                        if (typeof appendLog === 'function') appendLog('❌ ' + h.name + ' 拒收 [' + (cardName || 'all') + ']: ' + err.message, 'error');
                     }
                 }
                 if (hostOk) {
@@ -1841,6 +1844,11 @@ if (typeof appendLog === 'undefined') {
                 const d = await r.json();
                 if (d.status === 'ok') {
                     if (typeof appendLog === 'function') appendLog('✅ 合併完成！共 ' + d.merged + ' 個檔案。', 'system');
+                    // 個別檔案搬移失敗要講出來（後端此時也不會刪來源目錄）
+                    if (Array.isArray(d.errors) && d.errors.length && typeof appendLog === 'function') {
+                        appendLog('⚠️ 有 ' + d.errors.length + ' 個檔案沒搬成（來源目錄保留）：', 'error');
+                        d.errors.slice(0, 10).forEach(e => appendLog('   • ' + e, 'error'));
+                    }
                     stopHeartbeatMonitor();
 
                     // 先定義驗證過關後執行的後續作業
@@ -1896,7 +1904,9 @@ if (typeof appendLog === 'undefined') {
                                                 const r3 = await fetch(concatUrl, {
                                                     method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(concatPayload)
                                                 });
-                                                const j3 = await r3.json();
+                                                const j3 = await r3.json().catch(() => ({}));
+                                                // 非 2xx 也要退回本機，不能當成已排隊（2026-08-12）
+                                                if (!r3.ok) throw new Error(j3.detail || j3.message || ('HTTP ' + r3.status));
                                                 if (typeof appendLog === 'function') appendLog('📌 串帶 [' + cardName + '] 排隊中 @ ' + concatHostName + '，任務 ID: ' + (j3.job_id || '?'), 'system');
                                                 submitted = true;
                                             } catch (err) {
@@ -1908,7 +1918,8 @@ if (typeof appendLog === 'undefined') {
                                                     const r3b = await fetch(localUrl + '/api/v1/jobs/concat', {
                                                         method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(concatPayload)
                                                     });
-                                                    const j3b = await r3b.json();
+                                                    const j3b = await r3b.json().catch(() => ({}));
+                                                    if (!r3b.ok) throw new Error(j3b.detail || j3b.message || ('HTTP ' + r3b.status));
                                                     if (typeof appendLog === 'function') appendLog('📌 串帶 [' + cardName + '] 改由本機排隊，任務 ID: ' + (j3b.job_id || '?'), 'system');
                                                 } catch (err2) {
                                                     if (typeof appendLog === 'function') appendLog('❌ 串帶 [' + cardName + '] 本機也失敗: ' + err2.message, 'error');
@@ -2089,7 +2100,8 @@ if (typeof appendLog === 'undefined') {
                                             method: 'POST', headers: { 'Content-Type': 'application/json' },
                                             body: JSON.stringify({ sources: srcFiles, dest_dir: destDir })
                                         });
-                                        const j = await r.json();
+                                        const j = await r.json().catch(() => ({}));
+                                        if (!r.ok) throw new Error(j.detail || j.message || ('HTTP ' + r.status));
                                         if (typeof appendLog === 'function') appendLog(`[OK] 本機補轉 [${cardName}] ${srcFiles.length} 個檔案排隊，任務 ID: ${j.job_id || '?'}`, 'system');
                                         localStarted++;
                                     } catch (err) {
@@ -2132,7 +2144,9 @@ if (typeof appendLog === 'undefined') {
                                                 method: 'POST', headers: { 'Content-Type': 'application/json' },
                                                 body: JSON.stringify({ sources: uncFiles, dest_dir: destDir })
                                             });
-                                            const j = await r.json();
+                                            const j = await r.json().catch(() => ({}));
+                                            // 拒收要走 catch 的黑名單邏輯，別把該機標成補轉中
+                                            if (!r.ok) throw new Error(j.detail || j.message || ('HTTP ' + r.status));
                                             if (typeof appendLog === 'function') appendLog(`[OK] ${dist.host.name} [${cardName}] 補轉排隊，任務 ID: ${j.job_id || '?'}`, 'system');
                                             requestsStarted++;
                                             window._activeRemoteHosts[dist.host.ip] = {

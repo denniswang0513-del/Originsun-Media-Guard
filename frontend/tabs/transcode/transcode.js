@@ -155,10 +155,12 @@ export async function submitTranscode() {
                 method: 'POST', headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify(collected.payload)
             });
-            const j = await r.json();
+            const j = await r.json().catch(() => ({}));
+            if (!r.ok) throw new Error(j.detail || j.message || ('HTTP ' + r.status));
             appendLog('📌 本機轉檔任務已提交，ID: ' + (j.job_id || '?'), 'system');
         } catch (e) {
             appendLog('❌ 提交失敗: ' + e.message, 'error');
+            alert('轉檔提交失敗：' + e.message);
         }
     } else {
         // 多機分散式派發
@@ -196,6 +198,10 @@ export async function verifyStandaloneProxies() {
     
     try {
         let allMissingSources = [];
+        // 驗證本身失敗（HTTP 錯、後端回非 ok）就**不准**走到「全部產出」那條路 ——
+        // 原本沒有 else 分支：驗不成的卡直接跳過，全部驗不成時 missing 為空 →
+        // 顯示「✅ 所有預期的 Proxy 檔案皆已正常產出！」，剪輯師拿不齊素材（2026-08-12）
+        const verifyFailed = [];
         for (const srcObj of state.sources) {
             const cardName = srcObj.cardName;
             const srcPath = srcObj.path;
@@ -208,16 +214,34 @@ export async function verifyStandaloneProxies() {
                 method: 'POST', headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ sources: [srcPath], dest_dir: proxyDir })
             });
-            const d = await r.json();
-            
-            if (d.status === 'ok') {
-                if (d.missing_sources && d.missing_sources.length > 0) {
-                    const missingWithContext = d.missing_sources.map(file => ({ cardName: cardName, path: file }));
-                    allMissingSources = allMissingSources.concat(missingWithContext);
-                } else {
-                    appendLog(`✅ [${cardName || '(預設)'}] Proxy 皆已產出`, 'system');
-                }
+            const d = await r.json().catch(() => ({}));
+
+            if (!r.ok || d.status !== 'ok') {
+                const why = d.detail || d.message || d.error || ('HTTP ' + r.status);
+                appendLog(`❌ [${cardName || '(預設)'}] 無法驗證 Proxy 產出：${why}`, 'error');
+                verifyFailed.push(cardName || '(預設)');
+                continue;
             }
+            if (d.missing_sources && d.missing_sources.length > 0) {
+                const missingWithContext = d.missing_sources.map(file => ({ cardName: cardName, path: file }));
+                allMissingSources = allMissingSources.concat(missingWithContext);
+            } else {
+                appendLog(`✅ [${cardName || '(預設)'}] Proxy 皆已產出`, 'system');
+            }
+        }
+
+        if (verifyFailed.length) {
+            appendLog(`❌ 有 ${verifyFailed.length} 張卡驗證不了（${verifyFailed.join('、')}）——`
+                      + '**不能**當作轉檔完成，請確認路徑與遠端主機後重跑驗證。', 'error');
+            const tcLabelF = document.getElementById('tc-prog-label');
+            if (tcLabelF) tcLabelF.textContent = '⚠️ 驗證失敗，結果未知';
+            const msF = document.getElementById('merge_status_text');
+            if (msF) msF.textContent = '驗證失敗 ⚠️';
+            if (window._standaloneTranscodeResolve) {   // 別讓上游永遠等下去
+                window._standaloneTranscodeResolve();
+                window._standaloneTranscodeResolve = null;
+            }
+            return;
         }
 
         const missingSources = allMissingSources;

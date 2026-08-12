@@ -219,6 +219,42 @@ export async function submitJob() {
     }
 }
 
+/**
+ * 重送上一次失敗的任務（index.html 的「重試」按鈕，任務出錯時才出現）。
+ *
+ * 2026-08-12 補回：這支在某次重構搬檔時掉了，`app.js` 只留一行
+ * 「migrated to backup.js」的註解，但 backup.js 沒有 —— 按鈕的 onclick
+ * 指向不存在的函式，點下去是 ReferenceError + 全螢幕紅色錯誤橫幅，
+ * 四個 tab 的失敗重試一起斷。
+ */
+export async function retryLastJob() {
+    const job = window._lastJob;
+    if (!job || !job.url) { alert('沒有可重試的任務'); return; }
+    const btn = document.getElementById('btn_retry');
+    if (btn) { btn.disabled = true; btn.textContent = '重送中…'; }
+    try {
+        const res = await fetch(job.url, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(job.payload),
+        });
+        const result = await res.json().catch(() => ({}));
+        if (!res.ok) {
+            appendLog(`重試失敗: ${result.detail || result.message || ('HTTP ' + res.status)}`, 'error');
+            alert(result.detail || ('重試失敗（HTTP ' + res.status + '）'));
+            return;
+        }
+        appendLog(`已重送任務，狀態: ${result.status}, 任務 ID: ${result.job_id || '?'}`, 'system');
+        if (result.warning) appendLog(`⚠️ ${result.warning}`, 'system');
+        if (btn) btn.style.display = 'none';
+    } catch (err) {
+        appendLog(`重試發送失敗: ${err.message}`, 'error');
+        alert('重試發送失敗：' + err.message);
+    } finally {
+        if (btn) { btn.disabled = false; btn.textContent = '重試'; }
+    }
+}
+
 // ── 路徑書籤（2026-07-21 復活）───────────────────────────────
 // 動機：磁碟代號（T:/S:/V:）在各機器不一定有對映，任務在哪台跑就用哪台的
 // 磁碟 → 換機器就炸（煥民新村備份 6 連敗實案）。書籤存 UNC 路徑組 +
@@ -383,3 +419,4 @@ window.toggleConcatOptions = toggleConcatOptions;
 window.toggleReportOptions = toggleReportOptions;
 window.bkSaveBookmark = bkSaveBookmark;
 window.bkDeleteBookmark = bkDeleteBookmark;
+window.retryLastJob = retryLastJob;

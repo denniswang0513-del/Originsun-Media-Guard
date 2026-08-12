@@ -96,7 +96,13 @@ export async function submitVerify() {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(payload)
         });
-        const result = await res.json();
+        const result = await res.json().catch(() => ({}));
+        if (!res.ok) {   // 失敗不能講成「已送出」，否則遠端還會監控一個不存在的任務
+            const why = result.detail || result.message || ('HTTP ' + res.status);
+            appendLog(`比對提交失敗: ${why}`, 'error');
+            alert('比對提交失敗：' + why);
+            return;
+        }
         const retryBtn = document.getElementById('btn_retry');
         if (retryBtn) retryBtn.style.display = 'none';
         appendLog(`比對請求已送出至 [${vfHostObj.name}]，模式：${vfMode === 'quick' ? '快速' : 'XXH64 進階'}，任務 ID: ${result.job_id || '?'}`, 'system');
