@@ -29,10 +29,12 @@ const _base = (pid) => `${API}/proposals/${encodeURIComponent(pid)}/meetings`;
 export async function renderMeetings(host, { proposalId }) {
     ensureStyle('mv-style', STYLE);
     host.classList.add('mv');
-    // 同一個 host 被重掛（換提案）時，把上一輪還在錄的收掉並存起來。
-    // 詳情視窗整個被拆掉的那條路不經過這裡 —— 由 `_tick` 的 isConnected 接。
-    if (host.__mv?.rec) _stopRecording(host, true);
-    host.__mv = { proposalId, notes: [], polling: new Set(), rec: null };
+    // 刻意**不**在這裡收上一輪的錄音：兩個呼叫端都不會對同一個 host 重掛
+    // （詳情視窗每次開都是新的、獨立頁換提案＝整頁重載），而真的重掛時
+    // `_stopRecording` 只是「開始停」，下一行就把 __mv 換掉了 —— 收尾會拿到
+    // 新的 proposalId，把舊提案的錄音 POST 到新提案去。畫面被拆掉那條由
+    // `_tick` 的 isConnected 接。
+    host.__mv = { proposalId, notes: [], polling: new Set(), rec: null, starting: false };
     // 逐欄自動儲存走共用件（debounce + 失敗退基準重試 + 重畫不重綁）。
     // 委派綁在 host 上一次就好 —— 清單每次動作都整塊重畫，逐顆綁必漏。
     autosaveDelegated(host, '[data-f]', (v, el) =>
@@ -88,14 +90,14 @@ function _cardHtml(m) {
 
 // ── 錄音 → 逐字稿 → AI 整理 ─────────────────────────────────
 
-function _audioHtml(m, rec0) {
+function _audioHtml(m, rec) {
     // 錄音中是**渲染出來的一個狀態**，不是就地寫進 DOM 的東西 —— 這樣清單
     // 重畫（新增/刪除別筆）會把錄音列原樣畫回來，而不是把它洗掉
-    if (rec0 && rec0.mid === String(m.id)) {
+    if (rec && rec.mid === String(m.id)) {
         return `
             <div class="mv-abar">
                 <span class="mv-dot"></span>
-                <span class="mv-note mv-rt">錄音中 ${_clock(_elapsed(rec0))}</span>
+                <span class="mv-note mv-rt">錄音中 ${_clock(_elapsed(rec))}</span>
                 <span class="mv-gap"></span>
                 <button class="mv-btn sm" data-stop>停止並上傳</button>
                 <button class="mv-btn sm" data-cancel>取消</button>
@@ -112,15 +114,15 @@ function _audioHtml(m, rec0) {
             </div>`;
     }
     // 一條 bar，兩種內容（結構只寫一次）
-    const rec = _CAN_REC
+    const recBtn = _CAN_REC
         ? '<button class="mv-btn sm" data-rec>現場錄音</button>' : '';
     const parts = [`<div class="mv-abar">${m.audio_name ? `
             <span class="mv-note mv-aname">${esc(m.audio_name)}</span>
             <span class="mv-gap"></span>
             <button class="mv-btn sm" data-adl>下載錄音</button>
             ${m.has_transcript ? '<button class="mv-btn sm" data-resum>重跑 AI 整理</button>' : ''}
-            <button class="mv-btn sm" data-aup>重新上傳</button>${rec}` : `
-            <button class="mv-btn sm" data-aup>上傳會議錄音</button>${rec}
+            <button class="mv-btn sm" data-aup>重新上傳</button>${recBtn}` : `
+            <button class="mv-btn sm" data-aup>上傳會議錄音</button>${recBtn}
             <span class="mv-note">AI 會轉成逐字稿並整理成會議記錄
                 （上面欄位是空的才代填，寫過的字不會被動到）。</span>`}</div>`];
     if (m.status === 'failed') {
@@ -152,11 +154,14 @@ function _wireAudio(host, card, m) {
         // 白名單與後端一致（後端仍會再驗一次）
         input.accept = '.mp3,.wav,.m4a,.aac,.flac,.ogg,.opus,.webm,.mp4,.mov,.mkv,.mts';
         input.addEventListener('change', () => {
-            if (input.files[0]) _uploadAudio(host, card, mid, input.files[0]);
+            if (input.files[0]) _uploadAudio(host, mid, input.files[0]);
         });
         input.click();
     });
     card.querySelector('[data-rec]')?.addEventListener('click', () => {
+        // 先看有沒有人在錄，再問「要不要蓋掉」—— 反過來的話會先嚇使用者一句
+        // 破壞性警告，按了確定才說「已經有一筆在錄音了」
+        if (s.rec || s.starting) { alert('已經有一筆在錄音了 —— 先把那筆停掉。'); return; }
         if (_okReplace(m, '錄完上傳')) _startRecording(host, mid);
     });
     card.querySelector('[data-stop]')?.addEventListener('click',
@@ -206,19 +211,15 @@ function _wireAudio(host, card, m) {
 // **有才長出來**（`_CAN_REC`），沒有的路徑照舊用上傳，不留一顆按了會壞的
 // 鈕。走 foundry.originsun-studio.com（HTTPS）進來就有。
 //
-// 🔴 錄音狀態（`host.__mv.rec`）是**渲染的輸入**，不是就地寫進 DOM 的東西：
-// `_audioHtml` 看到它就畫錄音列。所以新增/刪除別筆造成的整份重畫會把錄音列
-// 原樣畫回來 —— 這條不成立的話，使用者一按「新增會議記錄」錄音就變成看不見
-// 也停不掉的孤兒。
-//
-// 收尾只有一個出口 `_finish`：使用者按停止/取消、瀏覽器自己停掉（裝置被拔、
-// 權限被收回）、畫面被拆掉（關詳情視窗）三條路都收斂到它。
+// 錄音狀態是渲染的輸入（見 `_audioHtml` 開頭）；收尾只有 `_finish` 一個出口。
 
 const _MIMES = ['audio/webm;codecs=opus', 'audio/webm', 'audio/mp4'];
 // 每瀏覽器一次就定了，不必每張卡每次重畫都算
 const _CAN_REC = !!(window.isSecureContext && navigator.mediaDevices?.getUserMedia
                     && window.MediaRecorder);
 const _REPLACE_WARN = '會換掉這一筆的錄音、逐字稿與 AI 整理（手寫的欄位不受影響）。繼續？';
+// 一次只錄一筆，所以攔截器共用一份（addEventListener 對同一個 function 會去重）
+const _WARN = (e) => { e.preventDefault(); e.returnValue = ''; };
 
 /** 已經有檔的那筆要再錄/再傳 → 先問過。 */
 const _okReplace = (m, verb) => !m.audio_name || confirm(verb + _REPLACE_WARN);
@@ -228,10 +229,22 @@ const _clock = (sec) => `${String(Math.floor(sec / 60)).padStart(2, '0')}:`
 const _elapsed = (r) => Math.floor((Date.now() - r.t0) / 1000);
 const _cardOf = (host, mid) =>
     host.querySelector(`.mv-card[data-card="${CSS.escape(String(mid))}"]`);
+const _noteOf = (host, mid) => host.__mv.notes.find(n => String(n.id) === String(mid));
+
+/** 依 id 重畫那張卡的錄音區（卡或那一筆不在了就算了）。 */
+function _repaint(host, mid) {
+    const card = _cardOf(host, mid);
+    const cur = _noteOf(host, mid);
+    if (card && cur) _paintAudio(host, card, cur);
+}
 
 async function _startRecording(host, mid) {
     const s = host.__mv;
-    if (s.rec) { alert('已經有一筆在錄音了 —— 先把那筆停掉。'); return; }
+    // 位子在 **await 之前**就佔住：getUserMedia 會讓出一個 task，連按兩下的
+    // 第二下會通過檢查、開出第二個 recorder，而第一個從此沒人收得掉
+    // （麥克風、計時器、chunks、beforeunload 全留著）
+    if (s.rec || s.starting) { alert('已經有一筆在錄音了 —— 先把那筆停掉。'); return; }
+    s.starting = true;
     let stream;
     try {
         stream = await navigator.mediaDevices.getUserMedia({ audio: true });
@@ -240,20 +253,21 @@ async function _startRecording(host, mid) {
         alert('拿不到麥克風：' + (e.message || e)
               + '\n（瀏覽器網址列的權限圖示可以重新允許）');
         return;
+    } finally {
+        s.starting = false;
     }
     const mime = _MIMES.find(t => MediaRecorder.isTypeSupported(t)) || '';
     const rec = new MediaRecorder(stream, mime ? { mimeType: mime } : {});
-    const r = { mid: String(mid), rec, stream, chunks: [], t0: Date.now() };
+    const r = { mid: String(mid), rec, chunks: [], t0: Date.now() };
     rec.addEventListener('dataavailable', (e) => {
         if (e.data && e.data.size) r.chunks.push(e.data);
     });
     // 唯一的收尾出口，**在建立時就掛**：瀏覽器自己停掉（裝置被拔、權限被
-    // 收回）也會走到，不然那條路沒人接、計時器還在數一個死掉的錄音
+    // 收回）也會走到，不然那條路沒人接、計時器還在數一個死掉的錄音。
+    // （規格保證 error 後面會跟一個 stop，所以不必另外掛 error —— 掛了反而
+    // 會把 intent 設掉，害 _finish 那句「錄音被中斷了」永遠不會出現。）
     rec.addEventListener('stop', () => _finish(host, r), { once: true });
-    rec.addEventListener('error', () => { r.intent = r.intent || 'interrupted'; });
-    // 關分頁/重整前攔一下（錄音只在記憶體裡）
-    r.warn = (e) => { e.preventDefault(); e.returnValue = ''; };
-    window.addEventListener('beforeunload', r.warn);
+    window.addEventListener('beforeunload', _WARN);
     // 計時器每秒重新找那顆節點：清單重畫過後節點是新的，抓著舊的只會餵給
     // 一個已經被丟掉的 DOM（也順便當「畫面還在不在」的偵測）
     r.timer = setInterval(() => _tick(host, r), 1000);
@@ -261,8 +275,7 @@ async function _startRecording(host, mid) {
     rec.start(5000);
 
     s.rec = r;
-    const card = _cardOf(host, r.mid);
-    if (card) _paintAudio(host, card, s.notes.find(n => String(n.id) === r.mid) || {});
+    _repaint(host, r.mid);
 }
 
 /** 每秒：更新計時，並確認這段錄音還有歸屬。 */
@@ -272,13 +285,15 @@ function _tick(host, r) {
         _stopRecording(host, true);
         return;
     }
-    const card = _cardOf(host, r.mid);
-    if (!card) {                                  // 那一筆被刪了 → 沒地方存
+    // 「那一筆還在不在」問**資料**不問畫面 —— 用卡片存不存在判斷的話，
+    // 一次 _load 失敗（NAS/隧道抖一下，錯誤訊息取代整個 host）就會被當成
+    // 「被刪掉了」，把一整場會議的錄音丟掉
+    if (!_noteOf(host, r.mid)) {
         alert('這一筆會議記錄被刪掉了 —— 錄音沒有地方可以存，只好丟掉。');
         _stopRecording(host, false);
         return;
     }
-    const el = card.querySelector('.mv-rt');
+    const el = _cardOf(host, r.mid)?.querySelector('.mv-rt');
     if (el) el.textContent = '錄音中 ' + _clock(_elapsed(r));
 }
 
@@ -292,32 +307,32 @@ function _stopRecording(host, upload) {
     else r.rec.stop();                            // → 'stop' → _finish
 }
 
-/** 唯一的收尾出口：收硬體、拆監聽、決定上傳還是丟掉。 */
+/** 唯一的收尾出口：收硬體、拆監聽、決定上傳還是丟掉。
+ *
+ * **只跑一次**：`stop()` 是同步把 state 變成 inactive、事件另外排隊，所以
+ * 連按兩下「停止並上傳」時第二下會看到 inactive 而直接收尾，接著排隊的
+ * `'stop'` 又送一次 —— 沒這道閘就會上傳兩份。 */
 function _finish(host, r) {
+    if (r.done) return;
+    r.done = true;
     const s = host.__mv;
     clearInterval(r.timer);
-    window.removeEventListener('beforeunload', r.warn);
-    if (s.rec === r) s.rec = null;                // 位子讓出來（下一筆能錄）
-    r.stream.getTracks().forEach(t => t.stop());  // 分頁上的紅點熄掉
-    const card = _cardOf(host, r.mid);
-    const repaint = () => {
-        const cur = s.notes.find(n => String(n.id) === r.mid);
-        if (card && cur) _paintAudio(host, card, cur);
-    };
-    if (r.intent === 'discard') { repaint(); return; }
+    window.removeEventListener('beforeunload', _WARN);
+    if (s.rec === r) s.rec = null;                    // 位子讓出來（下一筆能錄）
+    r.rec.stream.getTracks().forEach(t => t.stop());  // 分頁上的紅點熄掉
+    if (r.intent === 'discard') { _repaint(host, r.mid); return; }
     const type = r.rec.mimeType || r.chunks[0]?.type || 'audio/webm';
     const blob = new Blob(r.chunks, { type });
     if (!blob.size) {
         alert('這段錄音是空的 —— 沒有收到任何聲音。');
-        repaint();                                // 不重畫的話會卡在停住的計時器上
+        _repaint(host, r.mid);                    // 不重畫的話會卡在停住的計時器上
         return;
     }
     // intent 沒設 = 瀏覽器自己停的（裝置被拔/權限被收回）——
     // 錄到的部分是好的，照樣送出，但要講一聲
     if (!r.intent) alert('錄音被中斷了（裝置或權限有變）—— 已經錄到的部分照樣上傳。');
     const ext = type.includes('mp4') ? '.mp4' : '.webm';
-    _uploadAudio(host, card, r.mid,
-                 new File([blob], `現場錄音_${_stamp()}${ext}`, { type }));
+    _uploadAudio(host, r.mid, new File([blob], `現場錄音_${_stamp()}${ext}`, { type }));
 }
 
 /** 檔名用的本地時間戳（NAS 上一眼看得出哪天錄的）。 */
@@ -328,10 +343,11 @@ function _stamp() {
          + `_${p(d.getHours())}${p(d.getMinutes())}`;
 }
 
-/** `card` 可以是 null —— 錄音收尾時詳情視窗可能已經關掉了，但檔案還是要
- *  送出去（使用者只是關了視窗，沒有按取消）。那種情況就沒有進度可畫。 */
-async function _uploadAudio(host, card, mid, f) {
+/** 卡片自己找 —— 錄音收尾時詳情視窗可能已經關掉了（沒有卡就沒有進度可畫），
+ *  但檔案還是要送出去：使用者只是關了視窗，沒有按取消。 */
+async function _uploadAudio(host, mid, f) {
     const s = host.__mv;
+    const card = _cardOf(host, mid);
     // 遠端（foundry 隧道）單一請求 100MB 硬上限 —— 與其讓 Cloudflare 回一頁
     // 空白 413，不如先講清楚
     const cap = proxyBodyLimit();

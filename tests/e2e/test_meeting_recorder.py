@@ -31,29 +31,13 @@ import uuid
 import httpx
 import pytest
 
-MOBILE = {"width": 390, "height": 844}
+from .conftest import MOBILE
 
 
 @pytest.fixture(scope="module")
-def admin_token():
-    from core.auth import create_token
-    return create_token({"sub": "admin", "username": "admin",
-                         "access_level": 3, "modules": []})
-
-
-@pytest.fixture(scope="module")
-def _dev_db_only():
-    from config import load_settings
-    url = (load_settings().get("database_url") or "")
-    db = url.rsplit("/", 1)[-1].split("?")[0].lower()
-    if not db or not (db.endswith("_dev") or "test" in db):
-        pytest.skip(f"只在 dev/test 資料庫上跑（目前 {db or '未設定'}）")
-
-
-@pytest.fixture(scope="module")
-def proposal(real_server, admin_token, _dev_db_only):
+def proposal(real_server, e2e_admin_token, dev_db_only):
     base = real_server["base_url"]
-    h = {"Authorization": f"Bearer {admin_token}"}
+    h = {"Authorization": f"Bearer {e2e_admin_token}"}
     r = httpx.post(f"{base}/api/v1/proposals", headers=h, timeout=60,
                    json={"title": f"錄音UI回歸_{uuid.uuid4().hex[:6]}", "ptype": "其他"})
     if r.status_code >= 400:
@@ -112,12 +96,12 @@ def _open_meetings(pg, base, token, pid):
 
 
 def test_record_button_is_capability_gated(real_server, mic_browser,
-                                           admin_token, proposal):
+                                           e2e_admin_token, proposal):
     """有能力 → 按鈕在；把 MediaRecorder 拿掉 → 按鈕消失（上傳那條永遠都在）。"""
     base, pid = real_server["base_url"], proposal["id"]
     pg = mic_browser.new_page()
     try:
-        _open_meetings(pg, base, admin_token, pid)
+        _open_meetings(pg, base, e2e_admin_token, pid)
         assert pg.evaluate("() => !!(window.isSecureContext"
                            " && navigator.mediaDevices?.getUserMedia"
                            " && window.MediaRecorder)"), \
@@ -141,7 +125,7 @@ def test_record_button_is_capability_gated(real_server, mic_browser,
     pg2 = mic_browser.new_page()
     pg2.add_init_script(_NO_RECORDER)
     try:
-        _open_meetings(pg2, base, admin_token, pid)
+        _open_meetings(pg2, base, e2e_admin_token, pid)
         assert pg2.locator("#meeting-host [data-rec]").count() == 0, \
             "沒有 MediaRecorder 還畫出「現場錄音」＝按鈕是寫死的，按了會壞"
         assert pg2.locator("#meeting-host [data-aup]").count() == 1, \
@@ -150,12 +134,12 @@ def test_record_button_is_capability_gated(real_server, mic_browser,
         pg2.close()
 
 
-def test_start_then_cancel_recording(real_server, mic_browser, admin_token, proposal):
+def test_start_then_cancel_recording(real_server, mic_browser, e2e_admin_token, proposal):
     """開始 → 出現計時器；取消 → 回到原本那排，狀態清乾淨、麥克風關掉。"""
     pg = mic_browser.new_page()
     pg.on("dialog", lambda d: d.accept())        # 取消時的 confirm
     try:
-        _open_meetings(pg, real_server["base_url"], admin_token, proposal["id"])
+        _open_meetings(pg, real_server["base_url"], e2e_admin_token, proposal["id"])
         pg.click("#meeting-host [data-rec]")
         pg.wait_for_selector("#meeting-host .mv-rt", timeout=15000)
         assert "錄音中" in pg.inner_text("#meeting-host .mv-rt")
@@ -176,12 +160,12 @@ def test_start_then_cancel_recording(real_server, mic_browser, admin_token, prop
 
 
 def test_recording_survives_list_rerender(real_server, mic_browser,
-                                          admin_token, proposal):
+                                          e2e_admin_token, proposal):
     """錄音中按「新增會議記錄」（整份重畫）→ 錄音列要被畫回來、還停得掉。"""
     pg = mic_browser.new_page()
     pg.on("dialog", lambda d: d.accept())
     try:
-        _open_meetings(pg, real_server["base_url"], admin_token, proposal["id"])
+        _open_meetings(pg, real_server["base_url"], e2e_admin_token, proposal["id"])
         pg.click("#meeting-host [data-rec]")
         pg.wait_for_selector("#meeting-host .mv-rt", timeout=15000)
 

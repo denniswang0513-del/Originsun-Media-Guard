@@ -1172,15 +1172,28 @@ AI 在這裡是**輸入輔助**不是產出物：每筆會議記錄可傳一個�
   就變成看不見也停不掉的孤兒（只能重整整頁）——
   `tests/e2e/test_meeting_recorder.py::test_recording_survives_list_rerender`
   就是釘這個。
-- 收尾**只有一個出口** `_finish`：使用者按停止/取消、瀏覽器自己停掉（裝置
-  被拔、權限被收回）、畫面被拆掉三條路都收斂到它，統一收麥克風、拆
-  `beforeunload`、清 `s.rec`。`'stop'` 監聽在**建立時**就掛（掛在停止時
-  等於瀏覽器自己停的那條路沒人接）；已 `inactive` 再呼叫 `stop()` 會 throw，
-  所以先看 `state`。
+- 收尾**只有一個出口** `_finish`，而且**只跑一次**（`r.done`）：`stop()` 是
+  同步把 state 變 inactive、事件另外排隊，所以連按兩下「停止並上傳」時第二下
+  會看到 inactive 直接收尾、接著排隊的 `'stop'` 再送一次 —— 沒那道閘就會
+  上傳兩份、跑兩次 whisper。三條路（使用者停止/取消、瀏覽器自己停掉、畫面
+  被拆掉）都收斂到它，統一收麥克風、拆 `beforeunload`、清 `s.rec`。
+  `'stop'` 監聽在**建立時**就掛（掛在停止時等於瀏覽器自停那條沒人接）；
+  已 `inactive` 再呼叫 `stop()` 會 throw，所以先看 `state`。**不掛 `error`**
+  —— 規格保證 error 後面跟一個 stop，掛了反而會把 intent 設掉，害「錄音被
+  中斷了」那句永遠不出現。
+- 開始錄音的位子在 **await 之前**就佔（`s.starting`）：`getUserMedia` 會讓出
+  一個 task，連按兩下的第二下會通過檢查、開出第二個 recorder，而第一個從此
+  沒人收得掉（麥克風、計時器、chunks、`beforeunload` 全留著）。
 - **畫面被拆掉時會自動存起來**：`_tick` 每秒檢查 `host.isConnected`，詳情
   視窗被關掉（X／Esc／點背景，`proposals.js` 的 `_closeOverlay` 直接
   `ov.remove()`，沒有任何 teardown hook）→ 當成「停止並上傳」。關視窗弄丟
-  一整場會議的錄音比多存一個檔糟糕得多。那一筆被刪掉了 → 講一聲後丟掉。
+  一整場會議的錄音比多存一個檔糟糕得多。
+- 🔴 「那一筆還在不在」問 **`s.notes`（資料）不問畫面**：用卡片存不存在判斷
+  的話，一次 `_load` 失敗（隧道抖一下，錯誤訊息取代整個 host）就會被當成
+  「被刪掉了」，把一整場會議的錄音丟掉、還配一句錯的說明。
+- `renderMeetings` **刻意不收**上一輪的錄音：兩個呼叫端都不會對同一個 host
+  重掛，而真重掛時 `_stopRecording` 只是「開始停」，下一行 `__mv` 就被換掉
+  —— 收尾會拿到新的 `proposalId`，把舊提案的錄音 POST 到新提案去。
 - 錄音只在記憶體裡：錄製中掛 `beforeunload` 攔關分頁/重整。一次只錄一筆
   （`host.__mv.rec`）；取消要 confirm，且不上傳。
 - 回歸測試 `tests/e2e/test_meeting_recorder.py`（3 條）：**按鈕是條件長出來的**

@@ -19,30 +19,19 @@ import uuid
 import httpx
 import pytest
 
-MOBILE = {"width": 390, "height": 844}
+from .conftest import MOBILE
+
 IOS_UA = ("Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) "
           "AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1")
 
 
 @pytest.fixture(scope="module")
-def admin_token():
-    from core.auth import create_token
-    return create_token({"sub": "admin", "username": "admin",
-                         "access_level": 3, "modules": []})
+def admin_token(e2e_admin_token):
+    return e2e_admin_token
 
 
 @pytest.fixture(scope="module")
-def _dev_db_only():
-    """自建自刪的測試會寫真資料庫 —— 只允許 dev / test 庫。"""
-    from config import load_settings
-    url = (load_settings().get("database_url") or "")
-    db = url.rsplit("/", 1)[-1].split("?")[0].lower()
-    if not db or not (db.endswith("_dev") or "test" in db):
-        pytest.skip(f"只在 dev/test 資料庫上跑（目前 {db or '未設定'}）")
-
-
-@pytest.fixture(scope="module")
-def proposal(real_server, admin_token, _dev_db_only):
+def proposal(real_server, admin_token, dev_db_only):
     """一筆提案（含殼專案）+ 一條公開共編連結；跑完刪掉。"""
     base = real_server["base_url"]
     h = {"Authorization": f"Bearer {admin_token}"}
