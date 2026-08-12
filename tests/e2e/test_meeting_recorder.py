@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """會議記錄分頁的「現場錄音」UI 回歸（`/proposal-plan.html` → 會議記錄）。
 
-錄音那條路有兩件事光看程式碼看不出來、壞了也不會有例外，只會安靜地不見：
+錄音那條路有三件事光看程式碼看不出來、壞了也不會有例外，只會安靜地不見：
 
   A. **按鈕只在有能力時長出來**。`getUserMedia` 在 http://192.168.1.107:8000
      這種內網 IP 上根本不存在 —— 所以不能無條件畫一顆按了會壞的鈕。有能力
@@ -9,7 +9,6 @@
      沒有後面這半，一顆寫死的按鈕也會讓測試全過。
   B. **開始/取消錄音的狀態轉換**。驗開始後出現計時器、取消後回到原本那排
      按鈕，且錄音狀態有清乾淨（沒清的話下一筆會被「已經有一筆在錄」擋住）。
-
   C. **錄音列撐得過整份重畫**。錄音中按「新增會議記錄」會整份重畫；錄音狀態
      是渲染的輸入，所以錄音列要被畫回來。畫不回來的話 recorder 還活著、但
      使用者看不到也停不掉（只能重整整頁）。
@@ -49,7 +48,7 @@ def proposal(real_server, e2e_admin_token, dev_db_only):
     httpx.delete(f"{base}/api/v1/crm/projects/{p['project_id']}", headers=h, timeout=30)
 
 
-# 用 AudioContext 生一條真的音訊軌，頂替沒有裝置的 getUserMedia（見檔頭 B）。
+# 用 AudioContext 生一條真的音訊軌，頂替沒有裝置的 getUserMedia（見檔頭 C）。
 # 順手把 stream 留一份，好驗收尾時麥克風軌道真的被關掉。
 _FAKE_MIC = """
 navigator.mediaDevices.getUserMedia = async () => {
@@ -70,12 +69,13 @@ _NO_RECORDER = "delete window.MediaRecorder;"
 def mic_browser():
     from playwright.sync_api import sync_playwright
     with sync_playwright() as p:
+        # 只留 autoplay-policy（AudioContext 的 oscillator 要它）—— 假麥克風
+        # 那組旗標與 microphone 權限都用不到：getUserMedia 整支被換掉了，
+        # 真的裝置/權限路徑一次都不會走到
         br = p.chromium.launch(headless=True, args=[
-            "--use-fake-ui-for-media-stream",
             "--autoplay-policy=no-user-gesture-required",
         ])
-        ctx = br.new_context(viewport=MOBILE, has_touch=True,
-                             permissions=["microphone"])
+        ctx = br.new_context(viewport=MOBILE, has_touch=True)
         ctx.add_init_script(_FAKE_MIC)
         yield ctx
         ctx.close()

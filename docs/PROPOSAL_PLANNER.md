@@ -1158,7 +1158,7 @@ AI 在這裡是**輸入輔助**不是產出物：每筆會議記錄可傳一個�
 （Safari 是 `audio/mp4`），兩種副檔名後端白名單本來就收；實測 webm/opus
 走完整條 ffmpeg → whisper → claude 沒問題。
 
-- 🔴 **按鈕是「有能力才長出來」**（`canRecord()`：`isSecureContext` +
+- 🔴 **按鈕是「有能力才長出來」**（`_CAN_REC`：`isSecureContext` +
   `mediaDevices.getUserMedia` + `MediaRecorder`）。`getUserMedia` **只在
   HTTPS 或 localhost 存在** —— 同事用 `http://192.168.1.107:8000` 內網 IP
   進來時瀏覽器根本不給麥克風，那條路照舊用「上傳會議錄音」，不留一顆按了

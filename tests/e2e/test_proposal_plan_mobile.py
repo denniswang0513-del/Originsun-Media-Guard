@@ -26,15 +26,10 @@ IOS_UA = ("Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) "
 
 
 @pytest.fixture(scope="module")
-def admin_token(e2e_admin_token):
-    return e2e_admin_token
-
-
-@pytest.fixture(scope="module")
-def proposal(real_server, admin_token, dev_db_only):
+def proposal(real_server, e2e_admin_token, dev_db_only):
     """一筆提案（含殼專案）+ 一條公開共編連結；跑完刪掉。"""
     base = real_server["base_url"]
-    h = {"Authorization": f"Bearer {admin_token}"}
+    h = {"Authorization": f"Bearer {e2e_admin_token}"}
     tag = uuid.uuid4().hex[:6]
     r = httpx.post(f"{base}/api/v1/proposals", headers=h, timeout=60,
                    json={"title": f"手機回歸_{tag}", "ptype": "品牌形象",
@@ -45,9 +40,9 @@ def proposal(real_server, admin_token, dev_db_only):
     tok = httpx.post(f"{base}/api/v1/proposals/{p['id']}/plan/share",
                      headers=h, timeout=60).json()["token"]
     yield {"id": p["id"], "project_id": p["project_id"], "share": tok}
-    for i in (p["id"], p["project_id"]):
-        httpx.delete(f"{base}/api/v1/proposals/{i}", headers=h, timeout=30)
-        httpx.delete(f"{base}/api/v1/crm/projects/{i}", headers=h, timeout=30)
+    # 各刪各的 —— 交叉刪（拿提案 id 去打 projects）有機會刪到別人的 dev 資料
+    httpx.delete(f"{base}/api/v1/proposals/{p['id']}", headers=h, timeout=30)
+    httpx.delete(f"{base}/api/v1/crm/projects/{p['project_id']}", headers=h, timeout=30)
 
 
 @pytest.fixture(scope="module")
@@ -129,10 +124,10 @@ def test_login_screen(real_server, phone):
         pg.close()
 
 
-def test_proposal_list(real_server, phone, admin_token, proposal):
+def test_proposal_list(real_server, phone, e2e_admin_token, proposal):
     pg = phone.new_page()
     try:
-        _login(pg, real_server["base_url"], admin_token)
+        _login(pg, real_server["base_url"], e2e_admin_token)
         pg.goto(real_server["base_url"] + "/proposal-plan.html", timeout=60000)
         pg.wait_for_selector(".prop-row", timeout=30000)
         pg.wait_for_timeout(600)
@@ -141,12 +136,12 @@ def test_proposal_list(real_server, phone, admin_token, proposal):
         pg.close()
 
 
-def test_plan_matrix(real_server, phone, admin_token, proposal):
+def test_plan_matrix(real_server, phone, e2e_admin_token, proposal):
     """矩陣堆疊後每一格要自己說「我在回答哪一個視角」——欄標題只在最上面
     出現一次，捲到第 8 格時早就看不到了。"""
     pg = phone.new_page()
     try:
-        _login(pg, real_server["base_url"], admin_token)
+        _login(pg, real_server["base_url"], e2e_admin_token)
         pg.goto(f"{real_server['base_url']}/proposal-plan.html?pid={proposal['id']}",
                 timeout=60000)
         pg.wait_for_timeout(3000)
@@ -178,11 +173,11 @@ def test_plan_matrix(real_server, phone, admin_token, proposal):
         pg.close()
 
 
-def test_dialogs_stay_in_viewport(real_server, phone, admin_token, proposal):
+def test_dialogs_stay_in_viewport(real_server, phone, e2e_admin_token, proposal):
     """對話框偏出畫面是「版面被撐寬」的下游症狀 —— 分開驗，才看得出後果。"""
     pg = phone.new_page()
     try:
-        _login(pg, real_server["base_url"], admin_token)
+        _login(pg, real_server["base_url"], e2e_admin_token)
         pg.goto(real_server["base_url"] + "/proposal-plan.html", timeout=60000)
         pg.wait_for_selector(".prop-row", timeout=30000)
         for btn, sel, label in [("#btn-folders", ".pf, .pdlg", "資產資料夾"),

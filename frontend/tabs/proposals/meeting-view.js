@@ -188,7 +188,7 @@ function _wireAudio(host, card, m) {
         el.addEventListener('toggle', async () => {
             if (!el.open) return;
             const field = _FOLD_FIELD[el.dataset.fold];
-            const cur = s.notes.find(n => String(n.id) === mid) || {};
+            const cur = _noteOf(host, mid) || {};
             const pre = el.querySelector('.mv-pre');
             if (!cur[field]) {
                 try {
@@ -241,9 +241,8 @@ function _repaint(host, mid) {
 async function _startRecording(host, mid) {
     const s = host.__mv;
     // 位子在 **await 之前**就佔住：getUserMedia 會讓出一個 task，連按兩下的
-    // 第二下會通過檢查、開出第二個 recorder，而第一個從此沒人收得掉
-    // （麥克風、計時器、chunks、beforeunload 全留著）
-    if (s.rec || s.starting) { alert('已經有一筆在錄音了 —— 先把那筆停掉。'); return; }
+    // 第二下會通過呼叫端的忙碌檢查、開出第二個 recorder，而第一個從此沒人
+    // 收得掉（麥克風、計時器、chunks、beforeunload 全留著）
     s.starting = true;
     let stream;
     try {
@@ -381,8 +380,7 @@ async function _uploadAudio(host, mid, f) {
         _poll(host, mid);               // 這裡才是「剛變成 pending」的地方
     } catch (e) {
         alert('上傳失敗：' + (e.message || e));   // 400 沒資產夾 / 413 超限 / 422 副檔名照實顯示
-        const cur = s.notes.find(n => String(n.id) === mid);
-        if (card && cur) _paintAudio(host, card, cur);
+        _repaint(host, mid);        // 重新找卡：上傳期間可能重畫過，開頭那顆已經被丟掉
     }
 }
 
