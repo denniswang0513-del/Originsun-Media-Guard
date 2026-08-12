@@ -1166,12 +1166,27 @@ AI 在這裡是**輸入輔助**不是產出物：每筆會議記錄可傳一個�
 - 拿不到麥克風（使用者按拒絕、沒有裝置）→ **照實說**，不假裝在錄。
 - `rec.start(5000)` 每 5 秒切一塊；停止後要等 `'stop'` 事件才算收齊，
   **麥克風軌道也在那時候才收**（提早關軌可能吃掉最後一塊）。
-- 錄音只在記憶體裡：錄製中掛 `beforeunload` 攔關分頁/重整；元件重掛
-  （換提案、切分頁）時 `renderMeetings` 會把還在錄的收掉 —— 否則
-  recorder 活著、麥克風開著，而它要更新的那張卡已經不在了。
-- 一次只錄一筆（`host.__mv.rec`）；取消要 confirm，且不上傳。
-- 回歸測試 `tests/e2e/test_meeting_recorder.py`：按鈕存在 + 44px 可點目標 +
-  開始/取消的狀態轉換。🔴 Windows 的 headless Chromium **一個音訊輸入裝置
-  都沒有**（`--use-fake-device-for-media-capture` 也救不了，回
-  `NotFoundError`），所以測試把 `getUserMedia` 換成 AudioContext 產生的真
-  MediaStream —— 驗的是我們的狀態機，不是瀏覽器的裝置層。
+- 🔴 **錄音狀態（`host.__mv.rec`）是渲染的輸入**，不是就地寫進 DOM 的東西：
+  `_audioHtml(m, rec)` 看到它就畫錄音列。所以「錄音中按新增/刪除」造成的
+  整份重畫會把錄音列**原樣畫回來**。這條不成立的話，使用者一按新增，錄音
+  就變成看不見也停不掉的孤兒（只能重整整頁）——
+  `tests/e2e/test_meeting_recorder.py::test_recording_survives_list_rerender`
+  就是釘這個。
+- 收尾**只有一個出口** `_finish`：使用者按停止/取消、瀏覽器自己停掉（裝置
+  被拔、權限被收回）、畫面被拆掉三條路都收斂到它，統一收麥克風、拆
+  `beforeunload`、清 `s.rec`。`'stop'` 監聽在**建立時**就掛（掛在停止時
+  等於瀏覽器自己停的那條路沒人接）；已 `inactive` 再呼叫 `stop()` 會 throw，
+  所以先看 `state`。
+- **畫面被拆掉時會自動存起來**：`_tick` 每秒檢查 `host.isConnected`，詳情
+  視窗被關掉（X／Esc／點背景，`proposals.js` 的 `_closeOverlay` 直接
+  `ov.remove()`，沒有任何 teardown hook）→ 當成「停止並上傳」。關視窗弄丟
+  一整場會議的錄音比多存一個檔糟糕得多。那一筆被刪掉了 → 講一聲後丟掉。
+- 錄音只在記憶體裡：錄製中掛 `beforeunload` 攔關分頁/重整。一次只錄一筆
+  （`host.__mv.rec`）；取消要 confirm，且不上傳。
+- 回歸測試 `tests/e2e/test_meeting_recorder.py`（3 條）：**按鈕是條件長出來的**
+  （拿掉 `MediaRecorder` 後按鈕要消失 —— 少了這半，一顆寫死的按鈕也會全過）、
+  開始/取消的狀態轉換＋麥克風軌道真的停掉、錄音列撐得過整份重畫。
+  🔴 Windows 的 headless Chromium **一個音訊輸入裝置都沒有**
+  （`--use-fake-device-for-media-capture` 也救不了，實測回 `NotFoundError`），
+  所以測試把 `getUserMedia` 換成 AudioContext 產生的真 MediaStream ——
+  驗的是我們的狀態機，不是瀏覽器的裝置層。
