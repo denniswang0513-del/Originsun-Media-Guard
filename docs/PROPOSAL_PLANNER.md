@@ -1106,8 +1106,8 @@ CRM 專案詳情的「提案企劃」分頁**也不動** —— 它指的是整�
 - 一次會議一筆：會議日期／主題／出席者／記錄本文，**逐欄自動儲存**
   （`autosaveDelegated`）。新到舊排序，**沒填日期的殿後**（剛建的那筆該留在
   原地，不該跳到最前面）；NULL 排序在 Python 做，各家 DB 的 NULLS 預設不同。
-- 🔴 **刻意沒有 AI、沒有版本快照**：會議記錄是創意發想與企劃書的**輸入素材**，
-  不是產出物。企劃書那套「重新生成＝新增一版」套過來只會讓人不敢改字。
+- 🔴 **沒有版本快照**：會議記錄是創意發想與企劃書的**輸入素材**，不是產出物。
+  企劃書那套「重新生成＝新增一版」套過來只會讓人不敢改字。
 - 🔴 **內部資料**：不出公開 `?t=` 端點（客戶會議也會記到內部判斷、競品、
   報價底線）。訪客連分頁鈕都不建，比照企劃書/報價單。e2e 有一項專門驗
   公開端點不含會議內容。
@@ -1115,3 +1115,31 @@ CRM 專案詳情的「提案企劃」分頁**也不動** —— 它指的是整�
   （repo 既有地雷，v2.0.5/2.0.6）。日期沿用 `api_proposals._parse_date/_fmt_date`
   的台灣午夜下錨，不自己再寫一套（v2.4.33 修過差一天）。
 - 表已進 `db.models.PROPOSAL_CHILD_TABLES`（刪提案連帶清）。
+
+### §13.1 錄音 → 逐字稿 → AI 整理（2026-08-12，owner「請規劃」後拍板執行）
+
+AI 在這裡是**輸入輔助**不是產出物：每筆會議記錄可傳一個錄音檔
+（POST `/proposals/{pid}/meetings/{mid}/audio`，multipart）→
+`services/meeting_transcriber.py` 背景跑 ffmpeg 抽 16k wav → faster-whisper
+（`turbo`，與語音辨識 Tab 同款、同 `models/` 快取）逐字稿 → claude 整理
+（Markdown：摘要／討論重點／決議／待辦，鐵則同報價分析：「（資料中未見）」
+不准編）。
+
+- 🔴 **`content` 是人的正本**：AI 整理寫進 `ai_summary` 欄；只在 content
+  **當下全空**時代填一次（`_fill_empty_content` 讀活列不讀快照 —— 處理期間
+  有人動手寫就一個字都不碰）。前端代填時把 `_asSaved` 基準一起對齊，
+  免得 autosave 把 AI 填的那份又送回去。
+- 落點：專案資產夾/{提案的家}/**會議記錄**/（`land_in_home`，系統管的子夾
+  → 換檔/刪列敢 best-effort 清磁碟檔；逐字稿另落一份 `.逐字稿.txt` 在錄音旁，
+  同事直接從 NAS 拿）。比照報價單：**沒有 /uploads 退路**、下載走帶權限端點。
+- 狀態生命週期同企劃書（pending/ok/failed + `core.bg_status.settle` 讀取端
+  自癒）；🔴 **whisper 一小時錄音實測要 10–25 分鐘（CPU）**，遠超
+  STALE_AFTER 240s —— `_beat` 心跳每 90s 蓋 `updated_at` + `phase`
+  （「辨識中 37%」進度字），排隊等 `_LOCK`（一次一件）期間也在跳。
+- `POST /meetings/{mid}/summarize`：只重跑 claude 那段（用既有逐字稿）——
+  AI 掛了不必重付一小時的 whisper；還在 pending → 409。
+- 前端輪詢打**單筆** GET `/meetings/{mid}`（別為一個 status 掃整份清單）；
+  `pollJob` 一輪上限 5 分鐘，還在 pending 就續追一輪。**只換那張卡的錄音區**
+  （`_refreshCard`）—— 整清單重畫會把別張卡打字中的欄位掀掉。
+- 新欄位（`audio_rel/transcript/ai_summary/status/error/phase`）已進 main.py
+  的 `_crm_cols` migration（dev 既有表要 ALTER；新環境 create_all 直接有）。

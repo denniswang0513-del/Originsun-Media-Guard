@@ -495,6 +495,13 @@ async def _on_startup():
                         ("preprod_references", "video_id", "VARCHAR(64)"),
                         ("preprod_references", "updated_at", "TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP"),
                         ("preprod_reference_shots", "created_key", "VARCHAR(64)"),
+                        # 會議記錄：錄音 → 逐字稿 → AI 整理（services/meeting_transcriber）
+                        ("preprod_meeting_notes", "audio_rel", "VARCHAR(512)"),
+                        ("preprod_meeting_notes", "transcript", "TEXT"),
+                        ("preprod_meeting_notes", "ai_summary", "TEXT"),
+                        ("preprod_meeting_notes", "status", "VARCHAR(16)"),
+                        ("preprod_meeting_notes", "error", "TEXT"),
+                        ("preprod_meeting_notes", "phase", "VARCHAR(64)"),
                         # 影片封存（docs/REFERENCE_LIBRARY.md §12）
                         ("preprod_references", "archive_status", "VARCHAR(16)"),
                         ("preprod_references", "archive_path", "VARCHAR(512)"),

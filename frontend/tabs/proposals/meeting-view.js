@@ -1,8 +1,9 @@
 /**
- * meeting-view.js — 提案的「會議記錄」分頁（多筆，人手寫）。
+ * meeting-view.js — 提案的「會議記錄」分頁（多筆，逐欄自動儲存）。
  *
- * 刻意**沒有 AI、沒有版本**：會議記錄是創意發想與企劃書的輸入素材，不是
- * 產出物。所以每一筆就是四個欄位，逐欄自動儲存（打完就存，不必按鈕）。
+ * **沒有版本**：會議記錄是創意發想與企劃書的輸入素材，不是產出物。AI 只做
+ * **輸入輔助**：每筆可傳一個會議錄音檔 → 後端 whisper 逐字稿 → claude 整理
+ * （content 空才代填；人寫過的字後端絕不覆蓋）。
  *
  * 兩個介面共用（後台提案庫的詳情、獨立企劃頁），所以照 brief-view / quote-view
  * 那三條：只 import js/shared 與同目錄、自帶 --mv-* 變數、外殼由呼叫端給。
@@ -12,7 +13,8 @@
  */
 
 import { autosaveDelegated, syncBaseline } from '../../js/shared/autosave.js';
-import { ensureStyle, esc } from '../../js/shared/utils.js';
+import { pollJob } from '../../js/shared/poll-job.js';
+import { authDownload, ensureStyle, esc } from '../../js/shared/utils.js';
 import { tfetch } from './prop-fetch.js';
 
 const API = '/api/v1/crm';
@@ -25,7 +27,7 @@ const _base = (pid) => `${API}/proposals/${encodeURIComponent(pid)}/meetings`;
 export async function renderMeetings(host, { proposalId }) {
     ensureStyle('mv-style', STYLE);
     host.classList.add('mv');
-    host.__mv = { proposalId, notes: [] };
+    host.__mv = { proposalId, notes: [], polling: new Set() };
     // 逐欄自動儲存走共用件（debounce + 失敗退基準重試 + 重畫不重綁）。
     // 委派綁在 host 上一次就好 —— 清單每次動作都整塊重畫，逐顆綁必漏。
     autosaveDelegated(host, '[data-f]', (v, el) =>
@@ -74,8 +76,140 @@ function _cardHtml(m) {
                    placeholder="出席者（自由填，例：客戶王經理、導演、製片）">
             <textarea class="mv-in mv-body" data-f="content" data-id="${id}"
                       placeholder="會議記錄…"></textarea>
+            <div class="mv-audio"></div>
             <div class="mv-note mv-by"></div>
         </div>`;
+}
+
+// ── 錄音 → 逐字稿 → AI 整理 ─────────────────────────────────
+
+function _audioHtml(m) {
+    if (m.status === 'pending') {
+        return `
+            <div class="mv-abar">
+                <span class="mv-spin"></span>
+                <span class="mv-note">處理中：${esc(m.phase || '…')} ——
+                    可以先離開這頁，回來再看。</span>
+            </div>`;
+    }
+    const parts = [];
+    if (m.audio_name) {
+        parts.push(`
+            <div class="mv-abar">
+                <span class="mv-note mv-aname">${esc(m.audio_name)}</span>
+                <span class="mv-gap"></span>
+                <button class="mv-btn sm" data-adl>下載錄音</button>
+                ${m.transcript ? '<button class="mv-btn sm" data-resum>重跑 AI 整理</button>' : ''}
+                <button class="mv-btn sm" data-aup>重新上傳</button>
+            </div>`);
+    } else {
+        parts.push(`
+            <div class="mv-abar">
+                <button class="mv-btn sm" data-aup>上傳會議錄音</button>
+                <span class="mv-note">AI 會轉成逐字稿並整理成會議記錄
+                    （上面欄位是空的才代填，寫過的字不會被動到）。</span>
+            </div>`);
+    }
+    if (m.status === 'failed') {
+        parts.push(`<div class="mv-note mv-err">處理失敗：${esc(m.error || '')}</div>`);
+    }
+    if (m.transcript) {
+        parts.push(`
+            <details class="mv-fold"><summary>逐字稿</summary>
+                <div class="mv-pre">${esc(m.transcript)}</div>
+            </details>`);
+    }
+    if (m.ai_summary) {
+        parts.push(`
+            <details class="mv-fold"><summary>AI 整理</summary>
+                <div class="mv-pre">${esc(m.ai_summary)}</div>
+            </details>`);
+    }
+    return parts.join('');
+}
+
+function _wireAudio(host, card, m) {
+    const s = host.__mv;
+    const mid = String(m.id);
+    card.querySelector('[data-aup]')?.addEventListener('click', () => {
+        if (m.audio_name &&
+            !confirm('重新上傳會換掉這一筆的錄音、逐字稿與 AI 整理（手寫的欄位不受影響）。繼續？')) return;
+        const input = document.createElement('input');
+        input.type = 'file';
+        // 白名單與後端一致（後端仍會再驗一次）
+        input.accept = '.mp3,.wav,.m4a,.aac,.flac,.ogg,.opus,.webm,.mp4,.mov,.mkv,.mts';
+        input.addEventListener('change', () => {
+            if (input.files[0]) _uploadAudio(host, card, mid, input.files[0]);
+        });
+        input.click();
+    });
+    card.querySelector('[data-adl]')?.addEventListener('click', () => {
+        authDownload(`${_base(s.proposalId)}/${encodeURIComponent(mid)}/audio/download`,
+                     m.audio_name, '錄音下載');
+    });
+    card.querySelector('[data-resum]')?.addEventListener('click', async (e) => {
+        e.target.disabled = true;
+        try {
+            const d = await tfetch(`${_base(s.proposalId)}/${encodeURIComponent(mid)}/summarize`,
+                                   { method: 'POST' });
+            _refreshCard(host, d.note);
+        } catch (err) { alert('重跑失敗：' + (err.message || err)); e.target.disabled = false; }
+    });
+    if (m.status === 'pending') _poll(host, mid);
+}
+
+async function _uploadAudio(host, card, mid, f) {
+    const s = host.__mv;
+    const box = card.querySelector('.mv-audio');
+    box.innerHTML = '<div class="mv-abar"><span class="mv-spin"></span>' +
+                    '<span class="mv-note">上傳中…（大檔要等一下）</span></div>';
+    const fd = new FormData();
+    fd.append('file', f);
+    try {
+        const d = await tfetch(`${_base(s.proposalId)}/${encodeURIComponent(mid)}/audio`,
+                               { method: 'POST', body: fd });
+        _refreshCard(host, d.note);     // pending → _wireAudio 開始輪詢
+    } catch (e) {
+        alert('上傳失敗：' + (e.message || e));   // 400 沒資產夾 / 413 超限 / 422 副檔名照實顯示
+        const cur = s.notes.find(n => String(n.id) === mid);
+        if (cur) _refreshCard(host, cur);
+    }
+}
+
+function _poll(host, mid) {
+    const s = host.__mv;
+    pollJob(mid, s.polling, {
+        alive: () => host.isConnected,
+        list: async () => {
+            const d = await tfetch(`${_base(s.proposalId)}/${encodeURIComponent(mid)}`);
+            return d.note ? [d.note] : [];
+        },
+        onSettled: (items) => {
+            if (!host.isConnected || !items || !items[0]) return;
+            _refreshCard(host, items[0]);
+            // pollJob 每輪最多 5 分鐘；一小時錄音要跑幾十分鐘 → 還在 pending 就續追
+            if (items[0].status === 'pending') _poll(host, mid);
+        },
+    });
+}
+
+/** 只換這張卡的錄音區（整清單重畫會把別張卡打字中的欄位掀掉）。 */
+function _refreshCard(host, note) {
+    const s = host.__mv;
+    const i = s.notes.findIndex(n => String(n.id) === String(note.id));
+    if (i >= 0) s.notes[i] = note;
+    const card = host.querySelector(`.mv-card[data-card="${CSS.escape(String(note.id))}"]`);
+    if (!card) return;
+    card.querySelector('.mv-audio').innerHTML = _audioHtml(note);
+    _wireAudio(host, card, note);
+    // AI 代填 content：欄位還空著、也沒人正在打，才帶上（基準一起對齊，
+    // 免得 autosave 把 AI 填的那份又送回去一次）
+    const ta = card.querySelector('textarea[data-f="content"]');
+    if (ta && !ta.value.trim() && note.content && document.activeElement !== ta) {
+        ta.value = note.content;
+        ta._asSaved = ta.value;
+        _grow(ta);
+    }
 }
 
 function _wire(host) {
@@ -121,6 +255,8 @@ function _wire(host) {
         const by = card.querySelector('.mv-by');
         by.textContent = m.created_by
             ? `由 ${m.created_by} 建立於 ${String(m.created_at || '').slice(0, 10)}` : '';
+        card.querySelector('.mv-audio').innerHTML = _audioHtml(m);
+        _wireAudio(host, card, m);
     });
     syncBaseline(host, '[data-f]');
 }
@@ -161,6 +297,20 @@ html.plan-theme-light .mv { --mv-ink: #262626; --mv-sub: #737373; --mv-line: #e5
 .mv-body { width: 100%; font-size: 13px; line-height: 1.9; min-height: 88px;
       resize: none; overflow-y: hidden; }
 .mv-by { margin-top: 4px; }
+/* 錄音區 */
+.mv-audio { margin-top: 6px; border-top: 1px dashed var(--mv-line); padding-top: 8px; }
+.mv-abar { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.mv-aname { word-break: break-all; min-width: 0; }
+.mv-fold { margin-top: 6px; }
+.mv-fold summary { font-size: 11.5px; color: var(--mv-sub); cursor: pointer;
+      user-select: none; }
+.mv-pre { border: 1px solid var(--mv-line); border-radius: 3px; margin-top: 4px;
+      padding: 10px 12px; font-size: 12.5px; line-height: 1.9;
+      white-space: pre-wrap; word-break: break-word; max-height: 320px; overflow-y: auto; }
+.mv-spin { width: 12px; height: 12px; border: 2px solid var(--mv-line);
+      border-top-color: var(--mv-accent); border-radius: 50%; flex: none;
+      animation: mv-rot 1s linear infinite; }
+@keyframes mv-rot { to { transform: rotate(360deg); } }
 /* 手機：日期與主題各佔一行，觸控目標 44px（同 proposal-plan 的既有斷點） */
 @media (max-width: 720px) {
   .mv-in { font-size: 16px; }
