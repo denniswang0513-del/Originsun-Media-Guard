@@ -10,7 +10,7 @@ import asyncio
 import locale
 import time
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form  # type: ignore
-from core.auth import check_logged_in  # type: ignore
+from core.auth import check_lan_or_logged_in  # type: ignore
 from core.project_folders import stream_to_disk  # type: ignore
 from core.schemas import OpenFileRequest, ValidatePathsRequest  # type: ignore
 
@@ -26,10 +26,16 @@ router = APIRouter()
 # 那次的修法是在 settings/load 抹除機密，但 read_text 直接讀磁碟上的原始檔，
 # 完全繞過那層抹除 —— 所以守衛要掛在「能不能碰檔案系統」這一層。
 #
+# 🔴 守衛的粒度是「對外才要登入」（check_lan_or_logged_in）：後期製作流程的
+# 產品前提是**同事在本機 agent 上不登入直接用**（owner 2026-08-12 拍板）——
+# 8/08 一律要登入的版本讓全機隊的挑資料夾/開資料夾按鈕靜默壞了四天。
+# LAN 直連（socket 對端是私網位址、無 CF 標頭）匿名放行；經 cloudflared
+# 進來的（CF 標頭偽造不了）必須登入 —— 對外的洩密面維持 8/08 修補後的狀態。
+#
 # 例外（刻意不掛，見檔案末段各自的註解）：validate_paths / drive_map ——
 # 它們是**瀏覽器直接打其他 agent 的 IP**（跨機、不帶 Authorization），掛上去
 # 會讓遠端派發前的路徑驗證整組失效；兩者也只回「路徑存不存在」與磁碟對映表。
-_LOGIN = Depends(check_logged_in)
+_LOGIN = Depends(check_lan_or_logged_in)
 
 # 這支寫進 browse_roots／uploads，與提案資產夾同級 → 沿用同一個數字
 _MAX_UPLOAD_BYTES = 300 * 1024 * 1024

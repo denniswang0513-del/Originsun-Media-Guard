@@ -7,6 +7,7 @@ import hashlib
 import hmac
 import json
 import os
+import re
 import time
 import secrets
 import threading
@@ -268,6 +269,43 @@ def check_logged_in(request: Request):
     if payload is None:
         raise HTTPException(status_code=401, detail="未登入或 token 已過期")
     return payload
+
+
+# 私有網段（LAN 直連的 socket 對端）。讀的是 socket peer 不是 X-Forwarded-For
+# —— 後者誰都能填，前者偽造不了。
+_PRIVATE_HOST_RE = re.compile(
+    r'^(127\.|10\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.)')
+
+
+def check_lan_or_logged_in(request: Request):
+    """LAN 直連免登入；對外（經 cloudflared）必須登入。
+
+    後期製作流程（備份/轉檔/挑資料夾）的**產品前提是同事在本機 agent 上
+    不登入直接用**（owner 2026-08-12 拍板）。8/08 對這批檔案系統端點加
+    `check_logged_in` 擋的其實是**網際網路匿名者**（read_text 曾對外洩出
+    jwt_secret），不是內網同事 —— 一律要登入是矯枉過正，讓全機隊的挑資料夾
+    按鈕靜默壞了四天。
+
+    兩種流量的區別**偽造不了**：
+    - 經 cloudflared tunnel 進來的請求，Cloudflare edge 一定注入
+      `CF-Connecting-IP`/`CF-Ray`（客戶端自己帶的會被 edge 覆寫），且 socket
+      對端是本機的 cloudflared —— 所以「來自 127.0.0.1」**不能**單獨當信任
+      依據，CF 標頭在就是對外流量，必須驗登入。
+    - LAN 直連（同事的瀏覽器打 192.168.x.x:8000 或 localhost）不經 CF，
+      socket 對端是私網位址。
+
+    有帶有效 token 一律放行（對外的合法使用者走這條）。回 payload 或
+    None（None = LAN 匿名放行 —— 呼叫端不要拿回傳值做權限判斷）。
+    """
+    payload = _extract_token(request)
+    if payload is not None:
+        return payload
+    if request.headers.get('cf-connecting-ip') or request.headers.get('cf-ray'):
+        raise HTTPException(status_code=401, detail="未登入或 token 已過期")
+    host = (request.client.host if request.client else '') or ''
+    if _PRIVATE_HOST_RE.match(host) or host in ('::1', 'localhost', 'testclient'):
+        return None
+    raise HTTPException(status_code=401, detail="未登入或 token 已過期")
 
 
 def payload_grants(payload: Optional[dict], *module_keys: str) -> bool:
