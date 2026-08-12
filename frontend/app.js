@@ -1673,13 +1673,16 @@ if (typeof appendLog === 'undefined') {
                             });
                             if (r.ok) {
                                 const d = await r.json();
-                                if (d.status === 'error') {
-                                    if (typeof appendLog === 'function') appendLog('⚠️ [' + cardName + '] 路徑無效或無法讀取: ' + d.message, 'error');
+                                // 後端回的是 d.error（如「目錄不存在: <路徑>」），不是 d.status ——
+                                // 之前檢查錯欄位，「路徑不存在」被誤報成「資料夾裡沒影片」，
+                                // 使用者看不到掃的是哪條路徑（2026-08-12 赤兔派發除錯的教訓）
+                                if (d.error) {
+                                    if (typeof appendLog === 'function') appendLog('⚠️ [' + cardName + '] ' + d.error, 'error');
                                 } else if (d.files && d.files.length > 0) {
                                     cardEntries.push({ cardName, files: d.files, cardDir: absoluteSrcPath });
                                     if (typeof appendLog === 'function') appendLog('📁 ' + cardName + ': ' + d.files.length + ' 個影片 (Standalone)', 'system');
                                 } else {
-                                    if (typeof appendLog === 'function') appendLog('⚠️ [' + cardName + '] 找不到任何符合的影片檔案！', 'error');
+                                    if (typeof appendLog === 'function') appendLog('⚠️ [' + cardName + '] 資料夾存在但沒有任何符合的影片檔案（' + absoluteSrcPath + '）', 'error');
                                 }
                             }
                         } catch (e) { if (typeof appendLog === 'function') appendLog('⚠️ 掃描 ' + cardName + ' 失敗: ' + e.message, 'error'); }
@@ -1696,13 +1699,14 @@ if (typeof appendLog === 'undefined') {
                             });
                             if (r.ok) {
                                 const d = await r.json();
-                                if (d.status === 'error') {
-                                    if (typeof appendLog === 'function') appendLog('⚠️ [' + cardName + '] 路徑無效或無法讀取: ' + d.message, 'error');
+                                // 同上：認 d.error、訊息帶掃描路徑，別把「路徑不存在」講成「沒影片」
+                                if (d.error) {
+                                    if (typeof appendLog === 'function') appendLog('⚠️ [' + cardName + '] ' + d.error, 'error');
                                 } else if (d.files && d.files.length > 0) {
                                     cardEntries.push({ cardName, files: d.files, cardDir });
                                     if (typeof appendLog === 'function') appendLog('📁 ' + cardName + ': ' + d.files.length + ' 個影片', 'system');
                                 } else {
-                                    if (typeof appendLog === 'function') appendLog('⚠️ [' + cardName + '] 找不到任何符合的影片檔案！', 'error');
+                                    if (typeof appendLog === 'function') appendLog('⚠️ [' + cardName + '] 資料夾存在但沒有任何符合的影片檔案（' + cardDir + '）', 'error');
                                 }
                             }
                         } catch (e) { if (typeof appendLog === 'function') appendLog('⚠️ 掃描 ' + cardName + ' 失敗: ' + e.message, 'error'); }
