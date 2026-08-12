@@ -234,6 +234,12 @@ export async function submitTranscribeJob() {
                 if (window.updateHostProgress) window.updateHostProgress(trHostObj.ip, 20, '已排程，轉錄中...', '#059669');
                 window._activeRemoteHosts[trHostObj.ip] = { host: trHostObj, lastSeen: Date.now(), startTime: Date.now(), logOffset: 0 };
                 if (window.startHeartbeatMonitor) window.startHeartbeatMonitor();
+                // 🔴 遠端任務的 transcribe_done 發生在**遠端** agent，本瀏覽器
+                // 永遠收不到 → 按鈕不還原就永久鎖死，只能重整頁面（2026-08-12
+                // 健檢）。派發成功即還原：後續狀態看 per-host 進度列。
+                btn.innerHTML = originalText;
+                btn.disabled = false;
+                btn.classList.remove('opacity-70', 'cursor-not-allowed');
             }
             // Show progress area
             const progArea = document.getElementById('transcribe_progress_area');

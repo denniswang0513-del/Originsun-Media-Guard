@@ -53,7 +53,9 @@ async function dmPickFiles() {
     try {
         const res = await fetch('/api/v1/utils/pick_file?title=選擇影片檔',
                                 { headers: bearerHeader() });
-        const data = await res.json();
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) { alert('無法開啟選擇視窗：HTTP ' + res.status); return; }
+        if (data.message) { alert(data.message); return; }   // Session 0 修復指引
         if (data.path) {
             const cur = document.getElementById('dm_source_path').value.trim();
             document.getElementById('dm_source_path').value = cur ? cur + ', ' + data.path : data.path;
@@ -365,7 +367,7 @@ window.dmToggleFile = dmToggleFile;
 
 function dmToggleSelectAll(checked) {
     _dmFiles.forEach(f => { f.selected = checked; });
-    document.querySelectorAll('.clip-check').forEach(cb => cb.checked = checked);
+    document.querySelectorAll('#dm_file_grid .clip-check').forEach(cb => cb.checked = checked);
     _updateSelectCount();
 }
 window.dmToggleSelectAll = dmToggleSelectAll;

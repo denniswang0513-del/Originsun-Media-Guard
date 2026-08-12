@@ -1416,7 +1416,7 @@ if (typeof appendLog === 'undefined') {
                             // If worker is idle, queue empty, and enough time has passed since submission
                             // (shorter wait for retries since files are smaller)
                             const _minWait = window._remoteDispatchExpectedRetryCount > 0 ? 8000 : 15000;
-                            if (!d.busy && d.queue_length === 0 && (now - info.startTime > _minWait)) {
+                            if (!d.busy && !d.paused && d.queue_length === 0 && (now - info.startTime > _minWait)) {
                                 info.done = true;
                                 info.pct = 100;
                                 const _jl = JOB_LABELS[window._remoteJobType] || '任務';
@@ -1460,8 +1460,8 @@ if (typeof appendLog === 'undefined') {
                         const _pfxMap = { transcode: 'tc', concat: 'ct', verify: 'vf', report: 'rp', transcribe: 'tr', tts: 'tts' };
                         const _pfx = _pfxMap[_tab];
                         if (_pfx) {
-                            const _bar = document.getElementById(_pfx + '-prog-bar');
-                            const _lbl = document.getElementById(_pfx + '-prog-label');
+                            const _bar = _progEl(_pfx, _tab, 'bar');
+                            const _lbl = _progEl(_pfx, _tab, 'label');
                             if (_bar) _bar.style.width = Math.max(5, _aggPct) + '%';
                             const _jl2 = JOB_LABELS[window._remoteJobType] || '任務';
                             if (_lbl) _lbl.textContent = `遠端${_jl2}　${_doneCount}/${_allHosts.length} 台完成 (${_aggPct}%)`;
@@ -1492,11 +1492,11 @@ if (typeof appendLog === 'undefined') {
                             const _pfxMap = { backup: 'bk', transcode: 'tc', concat: 'ct', verify: 'vf', report: 'rp', transcribe: 'tr', tts: 'tts', drone_meta: 'dm' };
                             const _pfx = _pfxMap[_tab];
                             if (_pfx) {
-                                const _bar = document.getElementById(_pfx + '-prog-bar') || document.getElementById(_pfx + '_prog_bar');
-                                const _lbl = document.getElementById(_pfx + '-prog-label') || document.getElementById(_pfx + '_prog_label');
-                                const _eta = document.getElementById(_pfx + '-prog-eta') || document.getElementById(_pfx + '_prog_eta');
-                                const _pct = document.getElementById(_pfx + '-prog-pct') || document.getElementById(_pfx + '_prog_pct');
-                                const _area = document.getElementById(_pfx + '-progress') || document.getElementById(_pfx + '_progress_area');
+                                const _bar = _progEl(_pfx, _tab, 'bar');
+                                const _lbl = _progEl(_pfx, _tab, 'label');
+                                const _eta = _progEl(_pfx, _tab, 'eta');
+                                const _pct = _progEl(_pfx, _tab, 'pct');
+                                const _area = _progArea(_pfx, _tab);
                                 if (_area) _area.classList.remove('hidden');
                                 if (_bar) { _bar.style.width = '100%'; _bar.style.background = 'linear-gradient(90deg, #22c55e, #4ade80)'; }
                                 if (_lbl) _lbl.textContent = `✅ 遠端${_jl}完成`;
@@ -1529,14 +1529,29 @@ if (typeof appendLog === 'undefined') {
         }
 
         // 顯示對應 TAB 的主進度條（多機模式，不經過 progress Socket 事件）
+        // 進度元素解析器：各 tab 的 id 命名不一致 —— 多數是 `<pfx>-prog-bar`
+        // （連字號＋縮寫），transcribe 是 `transcribe_prog_bar`（底線＋全名）。
+        // 原本三處各自組 id，transcribe 全部找不到 → 遠端轉錄的主進度條永遠
+        // 停在「佇列中 0%」（2026-08-12 健檢）。
+        function _progEl(pfx, tab, suffix) {
+            return document.getElementById(pfx + '-prog-' + suffix)
+                || document.getElementById(pfx + '_prog_' + suffix)
+                || (tab ? document.getElementById(tab + '_prog_' + suffix) : null);
+        }
+        function _progArea(pfx, tab) {
+            return document.getElementById(pfx + '-progress')
+                || document.getElementById(pfx + '_progress_area')
+                || (tab ? document.getElementById(tab + '_progress_area') : null);
+        }
+
         function showRemoteMainProgress(label) {
             const tab = window._activeJobTab || 'backup';
             const pfxMap = { backup: 'bk', transcode: 'tc', concat: 'ct', verify: 'vf', report: 'rp', transcribe: 'tr', tts: 'tts' };
             const pfx = pfxMap[tab];
             if (!pfx) return;
-            const container = document.getElementById(pfx + '-progress');
-            const bar = document.getElementById(pfx + '-prog-bar');
-            const lbl = document.getElementById(pfx + '-prog-label');
+            const container = _progArea(pfx, tab);
+            const bar = _progEl(pfx, tab, 'bar');
+            const lbl = _progEl(pfx, tab, 'label');
             if (container) container.classList.remove('hidden');
             if (bar) { bar.style.width = '5%'; bar.style.backgroundColor = '#3b82f6'; }
             if (lbl) lbl.textContent = label || '遠端執行中...';
@@ -1658,6 +1673,9 @@ if (typeof appendLog === 'undefined') {
             // cards: [[cardName, srcPath], ...] 或 scanDir fallback
             const cardEntries = []; // [{ cardName, files: [] }]
             const cards = ctx.cards || [];
+            // 提升到函式層：fallback 分支在 else 內宣告，但下面建 expectedFiles
+            // 時外層要用 —— 走到那條路會 ReferenceError 讓整個派發無聲死掉
+            let projDir = '';
             // localRoot 先轉 UNC — 表單常填 T:\ 等網路磁碟代號，本機 agent 不一定有掛
             const localRoot = _toUnc(ctx.local_root || (document.getElementById('local_root') || {}).value || '');
 
@@ -1716,7 +1734,7 @@ if (typeof appendLog === 'undefined') {
                 }
             } else {
                 // Fallback：掃 project 目錄，card 名稱設為空
-                const projDir = localRoot ? localRoot + '/' + ctx.project_name : '';
+                projDir = localRoot ? localRoot + '/' + ctx.project_name : '';
                 if (projDir) {
                     try {
                         const r = await fetch(getComputeBaseUrl() + '/api/v1/list_dir', {
@@ -2191,7 +2209,7 @@ if (typeof appendLog === 'undefined') {
                         }
                     }, 2500);
 
-                } else { if (typeof appendLog === 'function') appendLog('❌ 合併失敗: ' + d.message, 'error'); }
+                } else { if (typeof appendLog === 'function') appendLog('❌ 合併失敗: ' + (d.message || d.detail || ('HTTP ' + r.status)), 'error'); }
             } catch (e) { if (typeof appendLog === 'function') appendLog('❌ 合併錯誤: ' + e.message, 'error'); }
         }
 
@@ -2410,10 +2428,15 @@ if (typeof appendLog === 'undefined') {
 
 // ─── Initialize on Page Load ─── //
         document.addEventListener('DOMContentLoaded', () => {
-            // Load the NAS report history into the main Backup Tab dashboard right away
-            if (typeof loadReportHistory === 'function') {
-                loadReportHistory();
-            }
+            // Load the NAS report history into the main Backup Tab dashboard right away.
+            // report.js 是非同步動態載入的，DOMContentLoaded 當下多半還沒掛上
+            // window.loadReportHistory → 首載靜靜落空，備份頁的「最新備份報表」
+            // 一直顯示「尚無歷史報表紀錄」（2026-08-12 健檢）。補一次延後重試。
+            const _tryLoadReports = (tries = 0) => {
+                if (typeof window.loadReportHistory === 'function') { window.loadReportHistory(); return; }
+                if (tries < 20) setTimeout(() => _tryLoadReports(tries + 1), 500);
+            };
+            _tryLoadReports();
 
             // Check model status immediately
             if (typeof fetchModelStatus === 'function') {

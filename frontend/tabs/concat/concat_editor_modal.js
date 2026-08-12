@@ -213,7 +213,7 @@ function _renderModal() {
                 <!-- Grid -->
                 <div class="flex items-center gap-3 mb-3 text-xs text-gray-400">
                     <label class="flex items-center gap-1 cursor-pointer">
-                        <input type="checkbox" id="cc_select_all" checked onchange="_ccmSelectAll(this.checked)"
+                        <input type="checkbox" id="ccm_select_all" checked onchange="_ccmSelectAll(this.checked)"
                             class="form-checkbox text-blue-500 bg-[#1e1e1e] border-[#444] rounded"> 全選
                     </label>
                     <span class="text-gray-600">|</span>
@@ -371,7 +371,7 @@ function _onToggleClip(idx, checked) {
     // Re-render to move card between selected/unchecked grids
     _renderGrid();
     _updateSelCount();
-    const all = document.getElementById('cc_select_all');
+    const all = document.getElementById('ccm_select_all');   // 與 concat tab 的同名框互撞過
     if (all) all.checked = _clips.every(c => c.selected);
 }
 

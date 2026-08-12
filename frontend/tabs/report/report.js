@@ -124,7 +124,19 @@ export async function loadReportHistory() {
 export async function deleteReport(reportId) {
     if (!confirm('確定要刪除這筆報表記錄嗎？（將從索引移除，本機檔案不复刪除）')) return;
     try {
-        await fetch(getComputeBaseUrl() + '/api/v1/reports/' + reportId, { method: 'DELETE' });
+        // 這支端點掛 admin 守衛：未登入 401、非管理員 403。原本完全不看回應，
+        // 直接重載清單 → 項目還在、零訊息（正是「點了沒反應」）（2026-08-12）
+        const r = await fetch(getComputeBaseUrl() + '/api/v1/reports/' + reportId,
+                              { method: 'DELETE', headers: window.bearerHeader ? window.bearerHeader() : {} });
+        const d = await r.json().catch(() => ({}));
+        if (r.status === 401 || r.status === 403) {
+            alert('刪除報表需要管理員登入 —— 請先用右上角 👤 登入管理員帳號。');
+            return;
+        }
+        if (!r.ok || d.status === 'error') {
+            alert('刪除失敗：' + (d.message || d.detail || ('HTTP ' + r.status)));
+            return;
+        }
         loadReportHistory();
     } catch (err) {
         alert('刪除失敗: ' + err.message);

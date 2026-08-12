@@ -230,7 +230,14 @@ async function ccScanSources() {
                     if (evt.event === 'start') {
                         total = evt.total;
                         scanCount.textContent = `0 / ${total}`;
-                        if (total === 0) { scanLabel.textContent = '找不到影片檔案'; scanProg.classList.add('hidden'); }
+                        // 訊息寫在 scanProg 裡面、下一句又把 scanProg 藏起來 ——
+                        // 使用者什麼都看不到（2026-08-12 健檢）。改成出聲。
+                        if (total === 0) {
+                            scanLabel.textContent = '找不到影片檔案';
+                            scanProg.classList.add('hidden');
+                            appendLog('⚠️ 掃描結果：這些來源裡找不到任何支援的影片檔（確認路徑與副檔名）', 'error');
+                            alert('找不到影片檔案 —— 請確認來源路徑正確、且資料夾裡有支援的影片格式。');
+                        }
                     } else if (evt.event === 'file') {
                         streamed = true;
                         evt.data.selected = true;
@@ -351,9 +358,13 @@ async function ccAddFolder() {
     try {
         const res = await fetch('/api/v1/utils/pick_folder?title=' + encodeURIComponent('選擇資料夾'),
                                 { headers: bearerHeader() });
-        const data = await res.json();
+        const data = await res.json().catch(() => ({}));
+        // 後端 Session 0 時回 {error:'session_0', message:'<修復指引>'}；
+        // 原本整段靜默 → 按鈕「點了沒反應」（2026-08-12 健檢）
+        if (!res.ok) { alert('無法開啟選擇視窗：HTTP ' + res.status + '（請確認已登入）'); return; }
+        if (data.message) { alert(data.message); return; }
         if (data.path) addStandaloneSource('cc_source_list', data.path);
-    } catch (_) { /* silent */ }
+    } catch (e) { alert('無法開啟選擇視窗：' + (e.message || e)); }
 }
 
 window.submitConcat = submitConcat;
