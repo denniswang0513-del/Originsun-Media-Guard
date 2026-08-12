@@ -317,7 +317,7 @@ window._projBrowseReceipts = async function() {
     } else {
         fetch('/api/v1/utils/open_folder', {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: Object.assign({ 'Content-Type': 'application/json' }, window.bearerHeader ? window.bearerHeader() : {}),
             body: JSON.stringify({ path: receiptPath }),
         });
     }

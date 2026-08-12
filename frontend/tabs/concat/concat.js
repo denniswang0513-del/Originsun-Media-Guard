@@ -1,4 +1,4 @@
-import { appendLog, getComputeBaseUrl, addStandaloneSource, setupDragAndDrop, setupInputDrop, validateRemotePaths, toUncPath, ensureDriveMap, pickFiles } from '../../js/shared/utils.js';
+import { appendLog, getComputeBaseUrl, addStandaloneSource, setupDragAndDrop, setupInputDrop, validateRemotePaths, toUncPath, ensureDriveMap, pickFiles, bearerHeader } from '../../js/shared/utils.js';
 import { refreshConcatEditorStatus } from './concat_editor_modal.js';
 import { createClipCard } from '../../js/shared/clip_card.js';
 
@@ -341,7 +341,8 @@ async function ccAddFiles() {
 
 async function ccAddFolder() {
     try {
-        const res = await fetch('/api/v1/utils/pick_folder?title=' + encodeURIComponent('選擇資料夾'));
+        const res = await fetch('/api/v1/utils/pick_folder?title=' + encodeURIComponent('選擇資料夾'),
+                                { headers: bearerHeader() });
         const data = await res.json();
         if (data.path) addStandaloneSource('cc_source_list', data.path);
     } catch (_) { /* silent */ }

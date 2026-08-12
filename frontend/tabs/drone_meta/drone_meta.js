@@ -1,4 +1,4 @@
-import { appendLog, resetProgress, pickPath, getComputeBaseUrl, validateRemotePaths, toUncPath, ensureDriveMap } from '../../js/shared/utils.js';
+import { appendLog, resetProgress, pickPath, getComputeBaseUrl, validateRemotePaths, toUncPath, ensureDriveMap, bearerHeader } from '../../js/shared/utils.js';
 import { fmtDuration as _fmtDuration, fmtSize as _fmtSize, parseCreationTimeLocal } from '../../js/shared/clip_utils.js';
 import { createClipCard } from '../../js/shared/clip_card.js';
 // Ensure openConcatEditor is available on window from drone_meta tab too
@@ -51,7 +51,8 @@ window.dmPickFolder = dmPickFolder;
 
 async function dmPickFiles() {
     try {
-        const res = await fetch('/api/v1/utils/pick_file?title=選擇影片檔');
+        const res = await fetch('/api/v1/utils/pick_file?title=選擇影片檔',
+                                { headers: bearerHeader() });
         const data = await res.json();
         if (data.path) {
             const cur = document.getElementById('dm_source_path').value.trim();

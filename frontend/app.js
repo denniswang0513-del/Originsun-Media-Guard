@@ -595,7 +595,8 @@ if (typeof appendLog === 'undefined') {
                 if (data.dest_dir) {
                     fetch(window.currentSocketUrl + '/api/v1/utils/open_folder', {
                         method: 'POST',
-                        headers: {'Content-Type': 'application/json'},
+                        headers: Object.assign({'Content-Type': 'application/json'},
+                                               window.bearerHeader ? window.bearerHeader() : {}),
                         body: JSON.stringify({path: data.dest_dir})
                     }).catch(e => console.error(e));
                 }
@@ -633,7 +634,8 @@ if (typeof appendLog === 'undefined') {
                 return;
             }
             try {
-                const res = await fetch('http://127.0.0.1:8000/api/v1/utils/create_shortcut', { method: 'POST' });
+                const res = await fetch('http://127.0.0.1:8000/api/v1/utils/create_shortcut',
+                                        { method: 'POST', headers: window.bearerHeader ? window.bearerHeader() : {} });
                 const data = await res.json();
                 if (data.status === 'success') {
                     alert(data.message);

@@ -267,7 +267,9 @@ export async function pickFolderPath(initialPath) {
         return (await window.openNasBrowser({ title: '選擇資料夾', initialPath: initialPath || '' })) || '';
     }
     try {
-        const r = await fetch('/api/v1/utils/pick_folder');
+        // pick_* 端點要登入（2026-08-08 起）—— window.bearerHeader 由 shared/utils.js 掛
+        const r = await fetch('/api/v1/utils/pick_folder',
+                              { headers: window.bearerHeader ? window.bearerHeader() : {} });
         const d = await r.json();
         return d.path || '';
     } catch (_) {

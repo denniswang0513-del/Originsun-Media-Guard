@@ -218,7 +218,8 @@ function _openFolder() {
     // payload 形狀照抄既有呼叫（app.js / crm-projects-finance.js）：{path}
     fetch('/api/v1/utils/open_folder', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: Object.assign({ 'Content-Type': 'application/json' },
+                               window.bearerHeader ? window.bearerHeader() : {}),
         body: JSON.stringify({ path }),
     }).catch(() => {});
 }

@@ -638,10 +638,11 @@ export async function resolveDropPath(e, file, index = 0) {
     // 方法3：Electron file.path
     if (file && file.path) return file.path;
 
-    // 方法4：後端智慧深度解析
+    // 方法4：後端智慧深度解析（2026-08-08 起要登入 —— 不帶 token 會 401）
     if (file) {
         try {
-            const res = await fetch('/api/v1/utils/resolve_drop?name=' + encodeURIComponent(file.name));
+            const res = await fetch('/api/v1/utils/resolve_drop?name=' + encodeURIComponent(file.name),
+                                    { headers: bearerHeader() });
             if (res.ok) { const d = await res.json(); return d.path || file.name; }
         } catch { }
         return file.name;
@@ -696,13 +697,20 @@ export async function pickPath(inputId, type = 'folder') {
     }
 
     // LAN access → native Windows picker via backend
+    // （2026-08-08 起 pick_* 端點要登入；漏帶 token 的下場是 401 → 按鈕
+    //   「點了沒反應」，全機隊靜默壞了四天 —— 這裡失敗一律要出聲）
     try {
         const endpoint = getAgentBaseUrl() + (type === 'folder' ? '/api/v1/utils/pick_folder' : '/api/v1/utils/pick_file');
         el.classList.add('animate-pulse', 'bg-blue-900', 'text-white');
-        const res = await fetch(endpoint);
+        const res = await fetch(endpoint, { headers: bearerHeader() });
         const data = await res.json();
         el.classList.remove('animate-pulse', 'bg-blue-900', 'text-white');
 
+        if (!res.ok) {
+            alert('無法開啟選擇視窗：' + (data.detail || ('HTTP ' + res.status))
+                  + '\n（請確認已登入；重新整理頁面再登入一次通常可解）');
+            return;
+        }
         if (data.error === 'session_0') {
             alert(data.message || 'Master 跑在 Session 0,picker 無法顯示。');
             return;
@@ -1049,6 +1057,7 @@ window.collectSelectedHost = collectSelectedHost;
 // Make accessible to global scope if needed during transition
 window.resolveDropPath = resolveDropPath;
 window.authFetch = authFetch;
+window.bearerHeader = bearerHeader;   // app.js 等非 import 方要打受守衛端點用
 window.appendLog = appendLog;
 window.pickPath = pickPath;
 window.getComputeBaseUrl = getComputeBaseUrl;
@@ -1056,8 +1065,12 @@ window.resetProgress = resetProgress;
 
 export async function pickFiles(title = '選擇影片（可多選）') {
     try {
-        const res = await fetch('/api/v1/utils/pick_files?title=' + encodeURIComponent(title));
-        if (!res.ok) return [];
+        const res = await fetch('/api/v1/utils/pick_files?title=' + encodeURIComponent(title),
+                                { headers: bearerHeader() });
+        if (!res.ok) {
+            alert('無法開啟選擇視窗：HTTP ' + res.status + '（請確認已登入）');
+            return [];
+        }
         const data = await res.json();
         if (data.error === 'session_0') {
             alert(data.message || 'Master 跑在 Session 0,picker 無法顯示。');

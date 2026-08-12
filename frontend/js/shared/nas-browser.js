@@ -127,7 +127,9 @@ async function _loadDir(path, showFiles) {
 
     try {
         const url = '/api/v1/browse?path=' + encodeURIComponent(path || '') + (showFiles ? '&show_files=true' : '');
-        const res = await fetch(url);
+        // /api/v1/browse 要登入（2026-08-08 起）
+        const token = localStorage.getItem('auth_token');
+        const res = await fetch(url, { headers: token ? { 'Authorization': 'Bearer ' + token } : {} });
         const data = await res.json();
 
         if (data.status === 'error') {

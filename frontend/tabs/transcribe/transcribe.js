@@ -1,4 +1,4 @@
-import { appendLog, getComputeBaseUrl, getAgentBaseUrl, addStandaloneSource, setupDragAndDrop, setupInputDrop, pickPath } from '../../js/shared/utils.js';
+import { appendLog, getComputeBaseUrl, getAgentBaseUrl, addStandaloneSource, setupDragAndDrop, setupInputDrop, pickPath, bearerHeader } from '../../js/shared/utils.js';
 
 window.modelCacheStatus = {};
 window.isDownloadingModel = false;
@@ -19,7 +19,7 @@ export async function fetchModelStatus() {
 
 export async function pickMultiFiles() {
     try {
-        const res = await fetch(getAgentBaseUrl() + '/api/v1/utils/pick_file');
+        const res = await fetch(getAgentBaseUrl() + '/api/v1/utils/pick_file', { headers: bearerHeader() });
         const data = await res.json();
         if (data.path) {
             let paths = Array.isArray(data.path) ? data.path : [data.path];
@@ -269,7 +269,7 @@ export function initTranscribeTab() {
 
 export async function pickTranscribeFolder() {
     try {
-        const res = await fetch(getAgentBaseUrl() + '/api/v1/utils/pick_folder');
+        const res = await fetch(getAgentBaseUrl() + '/api/v1/utils/pick_folder', { headers: bearerHeader() });
         const data = await res.json();
         if (data.path) {
             // List video files from the selected folder
@@ -460,7 +460,7 @@ async function _pickFolderHybrid(title = '選擇資料夾') {
         return (await window.openNasBrowser({ title, mode: 'folder', showFiles: false })) || '';
     }
     try {
-        const r = await fetch(getAgentBaseUrl() + '/api/v1/utils/pick_folder');
+        const r = await fetch(getAgentBaseUrl() + '/api/v1/utils/pick_folder', { headers: bearerHeader() });
         return (await r.json()).path || '';
     } catch (e) { console.error(e); return ''; }
 }
@@ -470,7 +470,7 @@ async function _pickFileHybrid(title = '選擇影片') {
         return (await window.openNasBrowser({ title, mode: 'file', showFiles: true })) || '';
     }
     try {
-        const r = await fetch(getAgentBaseUrl() + '/api/v1/utils/pick_file');
+        const r = await fetch(getAgentBaseUrl() + '/api/v1/utils/pick_file', { headers: bearerHeader() });
         const d = await r.json();
         return Array.isArray(d.path) ? (d.path[0] || '') : (d.path || '');
     } catch (e) { console.error(e); return ''; }
@@ -485,7 +485,7 @@ async function _pickMultiFilesHybrid(title = '選擇影片') {
         return await _listDir(folder, _VIDEO_EXTS_FOR_LIST);
     }
     try {
-        const r = await fetch(getAgentBaseUrl() + '/api/v1/utils/pick_files');
+        const r = await fetch(getAgentBaseUrl() + '/api/v1/utils/pick_files', { headers: bearerHeader() });
         return (await r.json()).paths || [];
     } catch (e) { console.error(e); return []; }
 }
@@ -502,7 +502,7 @@ async function _listDir(folder, exts) {
 
 async function _readTextFile(path) {
     try {
-        const r = await fetch(getAgentBaseUrl() + '/api/v1/utils/read_text?path=' + encodeURIComponent(path));
+        const r = await fetch(getAgentBaseUrl() + '/api/v1/utils/read_text?path=' + encodeURIComponent(path), { headers: bearerHeader() });
         const data = await r.json();
         return data.ok ? data.text : null;
     } catch (e) { return null; }

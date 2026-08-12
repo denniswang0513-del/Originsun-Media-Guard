@@ -144,7 +144,9 @@ function _mountAssetsCard(projectId, pid, host, d, pins) {
         const path = d.project_folder || d.root || '';
         if (!path) { alert('尚未設定提案資產資料夾'); return; }
         fetch('/api/v1/utils/open_folder', {
-            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            method: 'POST',
+            headers: Object.assign({ 'Content-Type': 'application/json' },
+                                   window.bearerHeader ? window.bearerHeader() : {}),
             body: JSON.stringify({ path }),
         }).catch(() => {});
     });
