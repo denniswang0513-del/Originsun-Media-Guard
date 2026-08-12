@@ -668,6 +668,12 @@ window.submitDroneMeta = submitDroneMeta;
 // ── Progress listener ──
 
 function _setupProgressListener() {
+    // 登記進重掛清單：socket 會在偵測到本機 agent 時被重建，只掛一次的話
+    // 進度條之後就永遠不動了（2026-08-12 健檢）
+    window._socketRebindHooks = window._socketRebindHooks || [];
+    if (!window._socketRebindHooks.includes(_setupProgressListener)) {
+        window._socketRebindHooks.push(_setupProgressListener);
+    }
     if (!window._socket) return;
     window._socket.on('progress', (data) => {
         if (data.phase !== 'drone_meta' && data.phase !== 'concat') return;

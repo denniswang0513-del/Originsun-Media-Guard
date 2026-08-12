@@ -194,6 +194,14 @@ if (typeof appendLog === 'undefined') {
             window._socket = socket;  // Expose for TTS tab and other modules
             window.socket = socket;
 
+            // 🔴 各 tab 自己掛在 socket 上的監聽（空拍進度、對軌事件）在這裡
+            // 重建後會全部消失 —— app.js 自己的監聽在下面重註冊，tab 的不會。
+            // 讓它們登記在這個清單，socket 一換就重掛（2026-08-12 健檢）。
+            window._socketRebindHooks = window._socketRebindHooks || [];
+            window._socketRebindHooks.forEach(fn => {
+                try { fn(socket); } catch (e) { console.warn('socket rebind hook failed:', e); }
+            });
+
             socket.on('connect', () => {
                 appendLog('已連線至伺服器 WebSocket', 'system');
             });
@@ -593,7 +601,7 @@ if (typeof appendLog === 'undefined') {
 
                 // Open output folder directly
                 if (data.dest_dir) {
-                    fetch(window.currentSocketUrl + '/api/v1/utils/open_folder', {
+                    fetch((window.getLocalAgentBase ? window.getLocalAgentBase() : window.location.origin) + '/api/v1/utils/open_folder', {
                         method: 'POST',
                         headers: Object.assign({'Content-Type': 'application/json'},
                                                window.bearerHeader ? window.bearerHeader() : {}),
@@ -634,7 +642,7 @@ if (typeof appendLog === 'undefined') {
                 return;
             }
             try {
-                const res = await fetch('http://127.0.0.1:8000/api/v1/utils/create_shortcut',
+                const res = await fetch((window.getLocalAgentBase ? window.getLocalAgentBase() : 'http://127.0.0.1:8000') + '/api/v1/utils/create_shortcut',
                                         { method: 'POST', headers: window.bearerHeader ? window.bearerHeader() : {} });
                 const data = await res.json();
                 if (data.status === 'success') {
@@ -2103,7 +2111,9 @@ if (typeof appendLog === 'undefined') {
                             if (useLocal) {
                                 // 本機補轉：直接送到 localhost，100% 路徑可達
                                 if (typeof appendLog === 'function') appendLog(`[>] 第 ${retryCount} 次補轉：使用本機轉檔（保證路徑可達）`, 'system');
-                                const localUrl = window.currentSocketUrl || window.location.origin;
+                                // 補轉必須送到主任務跑的同一台（getComputeBaseUrl），
+                                // 用 currentSocketUrl 會在某些存取路徑下送到別台
+                                const localUrl = (window.getComputeBaseUrl ? window.getComputeBaseUrl() : '') || window.location.origin;
                                 let localStarted = 0;
                                 const byCard = {};
                                 allMissing.forEach(({ cardName, sourceFile }) => {

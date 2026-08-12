@@ -5,9 +5,30 @@
 // fmtSize 其實是通用格式化，只是當年落在那支檔案裡；不為了它再寫第二份。
 import { fmtSize } from './clip_utils.js';
 
+/**
+ * 任務要送到哪裡執行 —— **serve 這個頁面的那台**（same-origin）。
+ *
+ * 🔴 這裡原本有個 `window.localAgentActive` 分支想把任務改送 127.0.0.1，
+ * 但那個變數**自初版起從未被賦值過**（真正的旗標是 version-check.js 的
+ * `_localAgentActive`，多一個底線）—— 也就是說「送到開啟頁面的那台」是本
+ * 產品一直以來的實際行為。2026-08-12 健檢時確認：把它接上等於**改變所有
+ * 任務的執行位置**（同事從主控 IP 開頁時，備份會從主控搬到他自己的電腦），
+ * 那是營運決策不是修 bug，所以刻意保持 same-origin 並移除死分支。
+ * 要指定機器請用各 tab 的「機器選擇」勾選框（明確、可見）。
+ */
 export function getComputeBaseUrl() {
-    const mode = document.getElementById('compute_mode')?.value;
-    return (mode === 'local' && window.localAgentActive) ? 'http://127.0.0.1:8000' : '';
+    return '';
+}
+
+/**
+ * 「應該發生在使用者自己這台」的動作用這個 base —— 開啟資料夾、建立捷徑
+ * 之類（開在主控的桌面上使用者根本看不到）。本機 agent 沒活著就退回
+ * same-origin。**不要**拿它送任務（那條路是 getComputeBaseUrl）。
+ */
+export function getLocalAgentBase() {
+    const isLocal = location.hostname === 'localhost' || location.hostname === '127.0.0.1';
+    if (isLocal || window._isExternalAccess) return window.location.origin;
+    return window._localAgentActive ? 'http://127.0.0.1:8000' : window.location.origin;
 }
 
 export function getAgentBaseUrl() {
@@ -1061,6 +1082,7 @@ window.bearerHeader = bearerHeader;   // app.js 等非 import 方要打受守衛
 window.appendLog = appendLog;
 window.pickPath = pickPath;
 window.getComputeBaseUrl = getComputeBaseUrl;
+window.getLocalAgentBase = getLocalAgentBase;
 window.resetProgress = resetProgress;
 
 export async function pickFiles(title = '選擇影片（可多選）') {
