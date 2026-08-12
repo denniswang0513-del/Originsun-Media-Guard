@@ -14,7 +14,8 @@
 
 import { autosaveDelegated, syncBaseline } from '../../js/shared/autosave.js';
 import { pollJob } from '../../js/shared/poll-job.js';
-import { authDownload, ensureStyle, esc } from '../../js/shared/utils.js';
+import { authDownload, ensureStyle, esc, proxyBodyLimit,
+         uploadWithProgress } from '../../js/shared/utils.js';
 import { tfetch } from './prop-fetch.js';
 
 const API = '/api/v1/crm';
@@ -161,13 +162,29 @@ function _wireAudio(host, card, m) {
 async function _uploadAudio(host, card, mid, f) {
     const s = host.__mv;
     const box = card.querySelector('.mv-audio');
-    box.innerHTML = '<div class="mv-abar"><span class="mv-spin"></span>' +
-                    '<span class="mv-note">上傳中…（大檔要等一下）</span></div>';
+    // 遠端（foundry 隧道）單一請求 100MB 硬上限 —— 與其讓 Cloudflare 回一頁
+    // 空白 413，不如先講清楚
+    const cap = proxyBodyLimit();
+    if (cap && f.size > cap) {
+        alert('遠端連線的單次上傳上限是 100MB —— 請在公司內網上傳這個檔，'
+              + '或先把影片轉成純音檔再傳。');
+        return;
+    }
+    box.innerHTML = '<div class="mv-abar"><span class="mv-spin"></span>'
+                  + '<span class="mv-note mv-uppct">上傳中…</span></div>';
+    const pct = box.querySelector('.mv-uppct');
     const fd = new FormData();
     fd.append('file', f);
+    const tok = localStorage.getItem('auth_token');
     try {
-        const d = await tfetch(`${_base(s.proposalId)}/${encodeURIComponent(mid)}/audio`,
-                               { method: 'POST', body: fd });
+        const d = await uploadWithProgress(
+            `${_base(s.proposalId)}/${encodeURIComponent(mid)}/audio`, fd, {
+                headers: tok ? { Authorization: 'Bearer ' + tok } : {},
+                onProgress: (loaded, total) => {
+                    if (total) pct.textContent = `上傳中… ${Math.round(loaded / total * 100)}%`;
+                },
+                onUploaded: () => { pct.textContent = '上傳完成，等伺服器落檔…'; },
+            });
         _refreshCard(host, d.note);     // pending → _wireAudio 開始輪詢
     } catch (e) {
         alert('上傳失敗：' + (e.message || e));   // 400 沒資產夾 / 413 超限 / 422 副檔名照實顯示
@@ -180,17 +197,21 @@ function _poll(host, mid) {
     const s = host.__mv;
     pollJob(mid, s.polling, {
         alive: () => host.isConnected,
+        maxTicks: 720,      // whisper 轉一小時錄音要幾十分鐘 —— 追好追滿一小時
         list: async () => {
             const d = await tfetch(`${_base(s.proposalId)}/${encodeURIComponent(mid)}`);
             return d.note ? [d.note] : [];
         },
         onSettled: (items) => {
-            if (!host.isConnected || !items || !items[0]) return;
-            _refreshCard(host, items[0]);
-            // pollJob 每輪最多 5 分鐘；一小時錄音要跑幾十分鐘 → 還在 pending 就續追
-            if (items[0].status === 'pending') _poll(host, mid);
+            if (host.isConnected && items[0]) _refreshCard(host, items[0]);
         },
     });
+}
+
+/** 錄音區的畫＋綁（首次渲染與輪詢刷新共用）。 */
+function _paintAudio(host, card, m) {
+    card.querySelector('.mv-audio').innerHTML = _audioHtml(m);
+    _wireAudio(host, card, m);
 }
 
 /** 只換這張卡的錄音區（整清單重畫會把別張卡打字中的欄位掀掉）。 */
@@ -200,8 +221,7 @@ function _refreshCard(host, note) {
     if (i >= 0) s.notes[i] = note;
     const card = host.querySelector(`.mv-card[data-card="${CSS.escape(String(note.id))}"]`);
     if (!card) return;
-    card.querySelector('.mv-audio').innerHTML = _audioHtml(note);
-    _wireAudio(host, card, note);
+    _paintAudio(host, card, note);
     // AI 代填 content：欄位還空著、也沒人正在打，才帶上（基準一起對齊，
     // 免得 autosave 把 AI 填的那份又送回去一次）
     const ta = card.querySelector('textarea[data-f="content"]');
@@ -255,8 +275,7 @@ function _wire(host) {
         const by = card.querySelector('.mv-by');
         by.textContent = m.created_by
             ? `由 ${m.created_by} 建立於 ${String(m.created_at || '').slice(0, 10)}` : '';
-        card.querySelector('.mv-audio').innerHTML = _audioHtml(m);
-        _wireAudio(host, card, m);
+        _paintAudio(host, card, m);
     });
     syncBaseline(host, '[data-f]');
 }

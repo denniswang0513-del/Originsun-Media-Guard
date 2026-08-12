@@ -32,8 +32,12 @@ from core.bg_task import fire
 from routers.api_proposals import (_fmt_date, _get_proposal_or_404, _parse_date,
                                    proposal_auth)
 
-from .proposal_assets import (ensure_project_folder, land_in_home,
+from .proposal_assets import (home_ready, land_in_home,
                               project_folder_abs, resolve_asset_file)
+
+# 頂層可 import：meeting_transcriber 模組層只有 stdlib（whisper/db 都在函式內 lazy）
+from services.meeting_transcriber import (disk_artifacts, process_meeting_audio,
+                                          summarize_meeting)
 
 from ._shared import router, _get_factory, _now, _require_db
 
@@ -68,8 +72,10 @@ def _dict(m) -> dict:
         "created_by": m.created_by or "",
         "created_at": m.created_at.isoformat() if m.created_at else None,
         "audio_name": os.path.basename(m.audio_rel) if m.audio_rel else "",
-        "transcript": m.transcript or "",
-        "ai_summary": m.ai_summary or "",
+        # pending 期間前端只畫 phase —— 一小時錄音的逐字稿幾十 KB，
+        # 別讓每 5 秒的輪詢白載它幾十趟
+        "transcript": "" if status == "pending" else (m.transcript or ""),
+        "ai_summary": "" if status == "pending" else (m.ai_summary or ""),
         "status": status,
         "error": error,
         "phase": (m.phase or "") if status == "pending" else "",
@@ -83,14 +89,16 @@ def _ctx(m) -> dict:
 
 
 async def _remove_audio_files(folder_abs: str, rel: str) -> None:
-    """best-effort 清錄音檔＋旁邊那份逐字稿 .txt（換檔/刪列共用）。清不掉
-    （NAS 斷線/已被搬走）不擋 —— 同報價單刪檔的理由。"""
+    """best-effort 清一個錄音的全部磁碟檔（換檔/刪列共用）。哪些檔算「它的」
+    由 service 的 `disk_artifacts` 定義（寫入端同一份，多 sidecar 不會漏）。
+    清不掉（NAS 斷線/已被搬走）不擋 —— 同報價單刪檔的理由。"""
     from core.project_folders import safe_rel_path
-    from services.meeting_transcriber import transcript_txt_path
 
     def _rm():
         p = safe_rel_path(folder_abs, rel)
-        for path in ([p, transcript_txt_path(p)] if p else []):
+        if not p:
+            return
+        for path in disk_artifacts(p):
             try:
                 os.remove(path)
             except OSError:
@@ -187,11 +195,10 @@ async def delete_meeting_note(pid: str, mid: str, request: Request):
         audio_rel, folder_abs = m.audio_rel or "", ""
         if audio_rel:
             prop = await _get_proposal_or_404(session, pid)
-            if prop.project_id:
-                try:
-                    folder_abs = await project_folder_abs(session, prop.project_id)
-                except HTTPException:
-                    folder_abs = ""     # 殼專案不見了 → 磁碟檔已無從清起
+            try:
+                folder_abs = await project_folder_abs(session, prop.project_id or "")
+            except HTTPException:
+                folder_abs = ""         # 殼專案不見了 → 磁碟檔已無從清起
         await session.delete(m)
         await session.commit()
     if audio_rel and folder_abs:
@@ -235,14 +242,7 @@ async def upload_meeting_audio(pid: str, mid: str, request: Request,
     async with factory() as session:
         m = await _row_or_404(session, pid, mid)
         prop = await _get_proposal_or_404(session, pid)
-        if not prop.project_id:
-            raise HTTPException(
-                status_code=400,
-                detail="這個提案還沒連結專案 —— 錄音檔要存進專案資產夾，"
-                       "請先在提案詳情連結專案再上傳")
-        folder_abs = await ensure_project_folder(session, prop.project_id)
-        await session.commit()
-        home_subpath = prop.folder_subpath or ""
+        folder_abs, home_subpath = await home_ready(session, prop)
         old_rel, ctx = m.audio_rel or "", _ctx(m)
 
     dest, rel = await land_in_home(folder_abs, home_subpath, file,
@@ -261,7 +261,6 @@ async def upload_meeting_audio(pid: str, mid: str, request: Request,
     if old_rel and old_rel != rel:      # 換檔：舊錄音+舊 .txt 清掉（子夾是系統管的）
         await _remove_audio_files(folder_abs, old_rel)
 
-    from services.meeting_transcriber import process_meeting_audio
     # core.bg_task.fire：強參考 + 例外守衛（例外沒接住這筆會永遠 pending）
     fire(process_meeting_audio(mid, audio_path=dest, ctx=ctx),
          label=f"meeting-audio {mid}")
@@ -286,7 +285,6 @@ async def resummarize_meeting(pid: str, mid: str, request: Request):
         m.updated_at = _now()
         await session.commit()
         transcript, ctx, out = m.transcript, _ctx(m), _dict(m)
-    from services.meeting_transcriber import summarize_meeting
     fire(summarize_meeting(mid, transcript=transcript, ctx=ctx),
          label=f"meeting-summarize {mid}")
     return {"status": "ok", "note": out}

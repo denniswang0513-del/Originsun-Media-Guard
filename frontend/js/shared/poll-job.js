@@ -25,10 +25,15 @@ const MAX_TICKS = 60;
 /** 預設的「做完了」：`status` 不再是 pending。 */
 const notPending = (item) => item.status !== 'pending';
 
-export function pollJob(id, seen, { alive, list, onSettled, settled = notPending }) {
+// maxTicks：預設 5 分鐘（60×5s）夠 claude 類工作；合法跑更久的（whisper 轉
+// 一小時錄音要幾十分鐘）由呼叫端聲明一次，不要在 onSettled 裡遞迴重掛 ——
+// 那會讓這個安全上限看起來有、實際上沒有。
+export function pollJob(id, seen,
+                        { alive, list, onSettled, settled = notPending,
+                          maxTicks = MAX_TICKS }) {
     if (seen.has(id)) return;
     seen.add(id);
-    let left = MAX_TICKS;
+    let left = maxTicks;
     const tick = async () => {
         if (!alive()) { seen.delete(id); return; }
         try {

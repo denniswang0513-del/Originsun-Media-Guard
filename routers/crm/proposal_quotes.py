@@ -18,7 +18,7 @@ import asyncio
 import os
 import uuid
 
-from typing import List, Optional
+from typing import Optional
 
 from fastapi import File, Form, HTTPException, Request, UploadFile
 
@@ -31,7 +31,7 @@ from core.project_folders import safe_rel_path
 # 否則「給看不給用」。不新增 RBAC key。
 from routers.api_proposals import _get_proposal_or_404, proposal_auth
 
-from .proposal_assets import (ensure_project_folder, land_in_home,
+from .proposal_assets import (home_ready, land_in_home,
                               project_folder_abs, resolve_asset_file)
 
 from ._shared import router, _get_factory, _now, _require_db
@@ -148,17 +148,7 @@ async def upload_proposal_quote(pid: str, request: Request,
     # SMB 寫入不抱著 pool 連線（pool_timeout=5s，NAS 慢時等連線的請求會直接死）
     async with factory() as session:
         prop = await _get_proposal_or_404(session, pid)
-        if not prop.project_id:
-            raise HTTPException(
-                status_code=400,
-                detail="這個提案還沒連結專案 —— 報價檔要存進專案資產夾，"
-                       "請先在提案詳情連結專案再上傳")
-        # 「確保資產夾存在，否則 4xx」走既有正本（殼專案不見 404、建不出來 400）；
-        # ensure_folder 可能這一刻才生成 proposal_folder_name → 先 commit 落地
-        # （磁碟有夾、DB 沒記的話下次會用新名再建一個 —— 正本的既有理由）
-        folder_abs = await ensure_project_folder(session, prop.project_id)
-        await session.commit()
-        home_subpath = prop.folder_subpath or ""
+        folder_abs, home_subpath = await home_ready(session, prop)
 
     # 磁碟在 session 之外（清洗檔名、撞名補 -2、黑名單、存不成 422）
     dest, rel = await land_in_home(folder_abs, home_subpath, file,

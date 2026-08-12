@@ -18,15 +18,20 @@
 """
 from __future__ import annotations
 
+import asyncio
+import contextlib
 import logging
 
 from datetime import datetime, timedelta, timezone
 
 logger = logging.getLogger(__name__)
 
-# claude 的 timeout 是 180 秒；再給 60 秒讓寫回 DB 完成
+# claude 的 timeout 是 180 秒；再給 60 秒讓寫回 DB 完成。
+# 🔴 比這更久的合法工作（whisper 轉錄一小時錄音要幾十分鐘）要包 keepalive()
+# —— 心跳間隔由此值推導，改這裡不會讓長工被誤判。
 STALE_AFTER = timedelta(seconds=240)
 STALE_MSG = "背景工作中斷了（伺服器可能重啟過）—— 再按一次就好"
+_BEAT_SEC = STALE_AFTER.total_seconds() / 2
 
 
 def settle(status: str, updated_at, error: str = "") -> tuple:
@@ -66,6 +71,25 @@ async def save_job_row(model_cls, row_id: str, *, status=None, error=...,
             row.error = error
         row.updated_at = datetime.now(timezone.utc)
         await session.commit()
+
+
+@contextlib.asynccontextmanager
+async def keepalive(model_cls, row_id: str, progress: dict | None = None):
+    """跑得比 STALE_AFTER 久的 pending 工作進這個 with：每半個 STALE_AFTER
+    蓋一次 `updated_at`，settle 就不會把還活著的長工改判成 failed。
+    `progress["phase"]` 有值就順手寫進 phase 欄（工作執行緒更新 dict、
+    心跳負責落 DB —— 進度字不用每一步都付一次 DB 寫入）。"""
+    async def _beat():
+        while True:
+            await asyncio.sleep(_BEAT_SEC)
+            phase = (progress or {}).get("phase")
+            await save_job_row(model_cls, row_id,
+                               **({"phase": phase} if phase is not None else {}))
+    task = asyncio.create_task(_beat())
+    try:
+        yield
+    finally:
+        task.cancel()
 
 
 async def run_claude_job(model_cls, row_id: str, prompt: str, *,

@@ -382,6 +382,22 @@ async def ensure_project_folder(session, project_id: str) -> str:
     return path
 
 
+async def home_ready(session, prop) -> tuple:
+    """提案上傳落地前的共同前置 → `(folder_abs, home_subpath)`。
+    沒連結專案 → 400 明講；ensure + **commit**（資料夾名可能這一刻才生成，
+    磁碟有夾、DB 沒記的話下次會用新名再建一個）。報價單與會議錄音的上傳
+    端點曾各長一份這段開場白 —— 同 `land_in_home` 檔案落地那半的收斂理由。
+    呼叫端拿到回傳後就該**關 session** 再碰磁碟。"""
+    if not prop.project_id:
+        raise HTTPException(
+            status_code=400,
+            detail="這個提案還沒連結專案 —— 檔案要存進專案資產夾，"
+                   "請先在提案詳情連結專案再上傳")
+    folder_abs = await ensure_project_folder(session, prop.project_id)
+    await session.commit()
+    return folder_abs, prop.folder_subpath or ""
+
+
 async def project_folder_ready(project_id: str) -> str:
     """兩個寫入端點（上傳、開夾）的共同前置：確保資產夾存在並落地它的名字。
     commit 不能省 —— 資料夾名可能是這一刻才生成的，磁碟上已經有夾、DB 卻沒記

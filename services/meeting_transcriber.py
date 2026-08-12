@@ -7,9 +7,10 @@ faster-whisper 逐字稿（寫回 transcript + 錄音檔旁落一份 .txt）→ 
 🔴 逐字稿是 AI 聽寫，**不是**會議的正本 —— 整理端的鐵則同企劃書/報價分析：
 逐字稿裡沒有的不准編，缺的寫「（資料中未見）」。
 
-🔴 whisper 是 CPU 重活（實測約 10–25 分鐘/小時錄音），`_LOCK` 一次只跑一件；
-排隊與辨識期間由 `_beat` 心跳蓋 `updated_at`（90s < bg_status.STALE_AFTER 240s），
-否則長錄音必被讀取端 settle 誤判成「伺服器重啟過」。
+🔴 whisper 是 CPU 重活（實測約 10–25 分鐘/小時錄音），`_LOCK` 讓**會議錄音
+之間**一次只跑一件（語音辨識 Tab 的任務走 task_queue 另一條線，本來就串行，
+最多同時各一件）。跑得比 settle 的 STALE_AFTER 久 → 整段包
+`core.bg_status.keepalive`（心跳 + phase 進度字都由它落 DB）。
 
 狀態生命週期同企劃書：pending/ok/failed + 讀取端 `core.bg_status.settle` 自癒；
 寫入端一律走 `save_job_row` / `run_claude_job`（core/bg_status.py 的唯一正本）。
@@ -19,19 +20,12 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
-import subprocess
 import tempfile
 
 logger = logging.getLogger(__name__)
 
-_BASE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-_FFMPEG = os.path.join(_BASE, "ffmpeg.exe")
-if not os.path.exists(_FFMPEG):
-    _FFMPEG = "ffmpeg"
-
 _MODEL_SIZE = "turbo"                  # 與語音辨識 Tab 同款（模型已在 models/ 快取）
-_LOCK = asyncio.Lock()                 # whisper 一次一件（見檔頭）
-_HEARTBEAT_SEC = 90
+_LOCK = asyncio.Lock()                 # 會議錄音一次一件（見檔頭）
 _PROMPT_TRANSCRIPT_CHARS = 50000       # claude 一趟吃得下的量；超過截斷並明講
 _TXT_SUFFIX = ".逐字稿.txt"
 
@@ -66,35 +60,22 @@ _PROMPT = """你是一位影像製作公司的製片，負責把會議錄音的�
 
 
 def transcript_txt_path(audio_path: str) -> str:
-    """錄音檔旁那份逐字稿 .txt 的路徑（上傳端點清舊檔時也要算同一個名）。"""
+    """錄音檔旁那份逐字稿 .txt 的路徑。"""
     return os.path.splitext(audio_path)[0] + _TXT_SUFFIX
 
 
-def _extract_wav(src: str, dst: str) -> str:
-    """ffmpeg 抽 16k 單聲道 wav（whisper 的標準輸入）。回錯誤訊息（"" = 成功）。"""
-    try:
-        r = subprocess.run(
-            [_FFMPEG, "-y", "-i", src, "-vn", "-acodec", "pcm_s16le",
-             "-ar", "16000", "-ac", "1", dst],
-            capture_output=True, text=True, errors="replace",
-            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
-    except OSError as e:
-        return f"ffmpeg 起不來：{e}"
-    if r.returncode != 0 or not os.path.exists(dst):
-        tail = (r.stderr or "").strip().splitlines()[-1:] or ["未知錯誤"]
-        return f"音訊抽取失敗：{tail[0]}"
-    return ""
+def disk_artifacts(audio_path: str) -> tuple:
+    """一個錄音在磁碟上擁有的**全部**檔案（錄音本體 + 逐字稿 .txt）。
+    寫入端（本檔）與清理端（router 的換檔/刪列）共用這一份定義 ——
+    以後多一種 sidecar 只改這裡，清理端不會漏。"""
+    return (audio_path, transcript_txt_path(audio_path))
 
 
 def _whisper_transcribe(wav_path: str, progress: dict) -> str:
-    """faster-whisper → 「[時間] 一句」逐行。progress['phase'] 供心跳寫進 DB。"""
-    from faster_whisper import WhisperModel
-    from core.whisper_helpers import cleanup_gpu, detect_device, format_srt_timestamp
-    device, compute_type = detect_device()
-    models_dir = os.path.join(_BASE, "models")
-    os.makedirs(models_dir, exist_ok=True)
-    model = WhisperModel(_MODEL_SIZE, device=device, compute_type=compute_type,
-                         download_root=models_dir)
+    """faster-whisper → 「[時間] 一句」逐行。progress['phase'] 由 keepalive
+    的心跳落 DB。"""
+    from core.whisper_helpers import cleanup_gpu, format_srt_timestamp, load_model
+    model = load_model(_MODEL_SIZE)
     try:
         segments, info = model.transcribe(wav_path, beam_size=5)
         lines = []
@@ -158,50 +139,52 @@ async def summarize_meeting(mid: str, *, transcript: str, ctx: dict) -> None:
 async def process_meeting_audio(mid: str, *, audio_path: str, ctx: dict) -> None:
     """完整流程（經 bg_task.fire，回傳值沒人接）。ctx = 上傳當下的
     {title, met_at, attendees, content} 快照，只進 prompt 背景段。"""
-    from core.bg_status import save_job_row
+    from core.bg_status import keepalive, save_job_row
+    from core.whisper_helpers import extract_wav
     from db.models import PreprodMeetingNote
-    progress = {"phase": "排隊中（等前一件錄音轉完）"}
+    progress = {"phase": ""}
 
-    async def _beat():
-        while True:
-            await asyncio.sleep(_HEARTBEAT_SEC)
-            await save_job_row(PreprodMeetingNote, mid, phase=progress["phase"])
+    async def _phase(p: str) -> None:
+        # dict 給心跳讀、DB 給 UI 讀 —— 兩邊一起換，不然畫面停在上一階段
+        progress["phase"] = p
+        await save_job_row(PreprodMeetingNote, mid, phase=p)
 
-    beat = asyncio.create_task(_beat())
     tmp_wav = ""
     try:
-        async with _LOCK:
-            progress["phase"] = "抽取音訊"
-            await save_job_row(PreprodMeetingNote, mid, phase=progress["phase"])
+        async with keepalive(PreprodMeetingNote, mid, progress):
+            # 抽音訊在 _LOCK 之外 —— 它只是解碼 I/O，不用排在前一件的
+            # 幾十分鐘 whisper 後面（NAS 讀取也趁早做）
+            await _phase("抽取音訊")
             fd, tmp_wav = tempfile.mkstemp(suffix=".wav", prefix="meet_")
             os.close(fd)
-            err = await asyncio.to_thread(_extract_wav, audio_path, tmp_wav)
+            err = await asyncio.to_thread(extract_wav, audio_path, tmp_wav)
             if err:
                 await save_job_row(PreprodMeetingNote, mid,
                                    status="failed", error=err)
                 return
-            progress["phase"] = "辨識中 0%（長錄音可能要幾十分鐘）"
-            await save_job_row(PreprodMeetingNote, mid, phase=progress["phase"])
-            transcript = await asyncio.to_thread(_whisper_transcribe, tmp_wav, progress)
-        if not transcript.strip():
-            await save_job_row(PreprodMeetingNote, mid, status="failed",
-                               error="辨識不到任何語音內容 —— 檔案可能沒有人聲")
-            return
-        progress["phase"] = "AI 整理中"
-        await save_job_row(PreprodMeetingNote, mid, transcript=transcript,
-                           phase=progress["phase"])
-        try:                                    # best-effort：NAS 搆不到不擋整理
-            await asyncio.to_thread(_write_text, transcript_txt_path(audio_path),
-                                    transcript)
-        except OSError:
-            logger.warning("[meeting_transcriber] %s 逐字稿 .txt 落不了 NAS", mid)
-        await summarize_meeting(mid, transcript=transcript, ctx=ctx)
+            await _phase("排隊中（等前一件錄音轉完）")
+            async with _LOCK:
+                await _phase("辨識中 0%（長錄音可能要幾十分鐘）")
+                transcript = await asyncio.to_thread(
+                    _whisper_transcribe, tmp_wav, progress)
+            if not transcript.strip():
+                await save_job_row(PreprodMeetingNote, mid, status="failed",
+                                   error="辨識不到任何語音內容 —— 檔案可能沒有人聲")
+                return
+            progress["phase"] = "AI 整理中"
+            await save_job_row(PreprodMeetingNote, mid, transcript=transcript,
+                               phase=progress["phase"])
+            try:                                # best-effort：NAS 搆不到不擋整理
+                await asyncio.to_thread(_write_text,
+                                        transcript_txt_path(audio_path), transcript)
+            except OSError:
+                logger.warning("[meeting_transcriber] %s 逐字稿 .txt 落不了 NAS", mid)
+            await summarize_meeting(mid, transcript=transcript, ctx=ctx)
     except Exception as e:                      # noqa: BLE001 — 不寫回就永遠 pending
         logger.exception("[meeting_transcriber] %s 掛了", mid)
         await save_job_row(PreprodMeetingNote, mid, status="failed",
                            error=f"{type(e).__name__}: {e}")
     finally:
-        beat.cancel()
         if tmp_wav:
             try:
                 os.remove(tmp_wav)
