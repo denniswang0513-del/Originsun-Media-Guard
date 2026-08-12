@@ -32,7 +32,8 @@ from core.project_folders import safe_rel_path
 from routers.api_proposals import _get_proposal_or_404, proposal_auth
 
 from .proposal_assets import (home_ready, land_in_home, project_folder_abs,
-                              reject_oversize, resolve_asset_file)
+                              reject_oversize, remove_asset_files,
+                              resolve_asset_file)
 
 from ._shared import router, _get_factory, _now, _require_db
 
@@ -183,24 +184,28 @@ async def update_proposal_quote(pid: str, fid: str, request: Request, body: dict
 
 @router.delete("/proposals/{pid}/quotes/{fid}")
 async def delete_proposal_quote(pid: str, fid: str, request: Request):
-    """刪 DB 列 + best-effort 刪磁碟檔。敢動磁碟是因為「報價單」子夾是系統
-    管的落點（檔全是 upload 端點放的）；刪不到（NAS 斷線/已被搬走）不擋
-    DB 刪除 —— 列不見了才是使用者要的結果。"""
+    """刪 DB 列 + best-effort 刪磁碟檔（`remove_asset_files` 是「檔案怎麼安全
+    地離開共用磁碟」的單一判斷）。敢動磁碟是因為「報價單」子夾是系統管的
+    落點（檔全是 upload 端點放的）；刪不到（NAS 斷線/已被搬走）不擋 DB 刪除
+    —— 列不見了才是使用者要的結果。
+
+    磁碟在 session **之外**動（同上傳的兩段式）：NAS 慢的時候 os.remove 一樣
+    會卡，不該抱著 pool 連線（pool_size=5）。"""
     proposal_auth(request)
     _require_db()
     factory = await _get_factory()
     async with factory() as session:
         f = await _file_row_or_404(session, pid, fid)
         prop = await _get_proposal_or_404(session, pid)
+        rel, folder_abs = f.rel, ""
         try:
-            # resolve_asset_file 是「檔案怎麼離開共用磁碟」的單一判斷；
-            # 它 raise 的 HTTPException（檔不在了）正是這裡要吞的 best-effort
-            path = await resolve_asset_file(session, prop.project_id or "", f.rel)
-            await asyncio.to_thread(os.remove, path)
-        except (OSError, HTTPException):
-            pass                        # best-effort：磁碟清不掉不留殭屍 DB 列
+            folder_abs = await project_folder_abs(session, prop.project_id or "")
+        except HTTPException:
+            folder_abs = ""             # 殼專案不見了 → 磁碟檔已無從清起
         await session.delete(f)
         await session.commit()
+    if rel and folder_abs:
+        await remove_asset_files(folder_abs, rel)
     return {"status": "ok"}
 
 

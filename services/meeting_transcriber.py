@@ -59,7 +59,7 @@ _PROMPT = """你是一位影像製作公司的製片，負責把會議錄音的�
 """
 
 
-def transcript_txt_path(audio_path: str) -> str:
+def _transcript_txt_path(audio_path: str) -> str:
     """錄音檔旁那份逐字稿 .txt 的路徑。"""
     return os.path.splitext(audio_path)[0] + _TXT_SUFFIX
 
@@ -71,7 +71,7 @@ def disk_artifacts(audio: str) -> tuple:
 
     純字串運算，絕對路徑或**相對路徑**都吃 —— 清理端拿的是 rel，好讓每一條
     都各自經過 `proposal_assets` 那道「檔案能不能離開共用磁碟」的判斷。"""
-    return (audio, transcript_txt_path(audio))
+    return (audio, _transcript_txt_path(audio))
 
 
 def _whisper_transcribe(wav_path: str, progress: dict) -> str:
@@ -157,7 +157,7 @@ async def process_meeting_audio(mid: str, *, audio_path: str, ctx: dict) -> None
     try:
         # 心跳只負責讓長工不被 settle 誤判；phase 欄的內容是本模組的事
         async with keepalive(PreprodMeetingNote, mid,
-                             lambda: {"phase": progress["phase"]}):
+                             fields=lambda: {"phase": progress["phase"]}):
             # 抽音訊在 _LOCK 之外 —— 它只是解碼 I/O，不用排在前一件的
             # 幾十分鐘 whisper 後面（NAS 讀取也趁早做）
             await _phase("抽取音訊")
@@ -180,7 +180,7 @@ async def process_meeting_audio(mid: str, *, audio_path: str, ctx: dict) -> None
             await _phase("AI 整理中", transcript=transcript)
             try:                                # best-effort：NAS 搆不到不擋整理
                 await asyncio.to_thread(_write_text,
-                                        transcript_txt_path(audio_path), transcript)
+                                        _transcript_txt_path(audio_path), transcript)
             except OSError:
                 logger.warning("[meeting_transcriber] %s 逐字稿 .txt 落不了 NAS", mid)
             await summarize_meeting(mid, transcript=transcript, ctx=ctx)

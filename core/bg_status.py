@@ -96,6 +96,10 @@ async def keepalive(model_cls, row_id: str, fields=None):
         yield
     finally:
         task.cancel()
+        # 等它真的收掉：取消若落在 save_job_row 中間，那條 pool 連線要等
+        # session 的 __aexit__ 跑完才還得回去（pool_size=5）
+        with contextlib.suppress(asyncio.CancelledError):
+            await task
 
 
 async def run_claude_job(model_cls, row_id: str, prompt: str, *,

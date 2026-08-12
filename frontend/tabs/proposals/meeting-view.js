@@ -15,7 +15,7 @@
 import { autosaveDelegated, syncBaseline } from '../../js/shared/autosave.js';
 import { pollJob } from '../../js/shared/poll-job.js';
 import { fmtSize } from '../../js/shared/clip_utils.js';
-import { authDownload, bearerHeader, ensureStyle, esc, proxyBodyLimit,
+import { authDownload, autoGrow, bearerHeader, ensureStyle, esc, proxyBodyLimit,
          uploadWithProgress } from '../../js/shared/utils.js';
 import { tfetch } from './prop-fetch.js';
 
@@ -151,19 +151,24 @@ function _wireAudio(host, card, m) {
             _poll(host, mid);           // 這裡才是「剛變成 pending」的地方
         } catch (err) { alert('重跑失敗：' + (err.message || err)); e.target.disabled = false; }
     });
-    // 展開才載全文（清單那趟只給 has_*）；載過就不再打
+    // 展開才載全文（清單那趟只給 has_*）。單筆 GET 一趟同時帶回逐字稿與
+    // AI 整理 → 第二塊展開時已在手上，**只是不打 API，畫還是要畫**
     card.querySelectorAll('[data-fold]').forEach(el => {
         el.addEventListener('toggle', async () => {
+            if (!el.open) return;
             const field = _FOLD_FIELD[el.dataset.fold];
             const cur = s.notes.find(n => String(n.id) === mid) || {};
-            if (!el.open || cur[field]) return;
-            try {
-                const d = await tfetch(`${_base(s.proposalId)}/${encodeURIComponent(mid)}`);
-                Object.assign(cur, d.note || {});
-                el.querySelector('.mv-pre').textContent = cur[field] || '（沒有內容）';
-            } catch (e) {
-                el.querySelector('.mv-pre').textContent = '載入失敗：' + (e.message || e);
+            const pre = el.querySelector('.mv-pre');
+            if (!cur[field]) {
+                try {
+                    const d = await tfetch(`${_base(s.proposalId)}/${encodeURIComponent(mid)}`);
+                    Object.assign(cur, d.note || {});
+                } catch (e) {
+                    pre.textContent = '載入失敗：' + (e.message || e);
+                    return;
+                }
             }
+            pre.textContent = cur[field] || '（沒有內容）';
         });
     });
 }
@@ -241,7 +246,7 @@ function _refreshCard(host, note) {
     if (ta && !ta.value.trim() && note.content && document.activeElement !== ta) {
         ta.value = note.content;
         ta._asSaved = ta.value;
-        _grow(ta);
+        autoGrow(ta);
     }
 }
 
@@ -279,8 +284,8 @@ function _wire(host) {
         const m = byId[el.dataset.id] || {};
         el.value = m[el.dataset.f] || '';
         if (el.tagName === 'TEXTAREA') {
-            _grow(el);
-            el.addEventListener('input', () => _grow(el));
+            autoGrow(el);
+            el.addEventListener('input', () => autoGrow(el));
         }
     });
     host.querySelectorAll('.mv-card').forEach(card => {
@@ -293,12 +298,6 @@ function _wire(host) {
         if (m.status === 'pending') _poll(host, String(m.id));
     });
     syncBaseline(host, '[data-f]');
-}
-
-/** 內容多長格子就多長（min-height 由 CSS 保底）。 */
-function _grow(ta) {
-    ta.style.height = 'auto';
-    ta.style.height = ta.scrollHeight + 'px';
 }
 
 const STYLE = `
