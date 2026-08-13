@@ -8,8 +8,8 @@
 """
 import os
 
-from core_engine import is_junk_file
-from routers.api_proxy import compare_source, is_incomplete_proxy, merge_host_outputs
+from core_engine import is_junk_file, is_incomplete_output, part_path_for
+from routers.api_proxy import compare_source, merge_host_outputs
 from core.schemas import CompareSourceRequest, MergeHostOutputsRequest
 
 
@@ -22,18 +22,47 @@ def _touch(path, size=1024):
 class TestIsIncompleteProxy:
     def test_part_file_is_incomplete(self, tmp_path):
         p = _touch(str(tmp_path / "A001_proxy.part.mov"))
-        assert is_incomplete_proxy(p) is True
+        assert is_incomplete_output(p) is True
 
     def test_zero_byte_is_incomplete(self, tmp_path):
         p = _touch(str(tmp_path / "A001_proxy.mov"), size=0)
-        assert is_incomplete_proxy(p) is True
+        assert is_incomplete_output(p) is True
 
     def test_normal_proxy_is_complete(self, tmp_path):
         p = _touch(str(tmp_path / "A001_proxy.mov"))
-        assert is_incomplete_proxy(p) is False
+        assert is_incomplete_output(p) is False
 
     def test_missing_file_counts_as_incomplete(self, tmp_path):
-        assert is_incomplete_proxy(str(tmp_path / "nope.mov")) is True
+        assert is_incomplete_output(str(tmp_path / "nope.mov")) is True
+
+
+class TestPartPathFor:
+    def test_keeps_mov_extension(self):
+        # 🔴 副檔名必須留 .mov —— ffmpeg 靠它選 muxer，改成 .mov.part 會失敗
+        assert part_path_for(r"C:\out\A001_proxy.mov") == r"C:\out\A001_proxy.part.mov"
+
+    def test_result_is_recognised_as_incomplete(self, tmp_path):
+        # 寫入端產生的名字，判定端一定要認得（不然半成品會被當成品）
+        p = _touch(part_path_for(str(tmp_path / "A001_proxy.mov")))
+        assert is_incomplete_output(p) is True
+        assert is_junk_file(p) is True
+
+
+class TestListDirDropsHalfBaked:
+    """list_dir 是前端判斷「那台死掉前產出了什麼」的依據 ——
+    半成品若被列進去，正好就是該補的那支不會被補到。"""
+
+    async def test_zero_byte_and_part_are_not_listed(self, tmp_path):
+        from routers.api_system import list_dir_api
+        from core.schemas import ListDirRequest
+
+        _touch(str(tmp_path / "A001_proxy.mov"))
+        _touch(str(tmp_path / "A002_proxy.mov"), size=0)
+        _touch(str(tmp_path / "A003_proxy.part.mov"))
+
+        d = await list_dir_api(ListDirRequest(path=str(tmp_path)))
+        names = sorted(os.path.basename(f) for f in d["files"])
+        assert names == ["A001_proxy.mov"], names
 
 
 class TestJunkFile:

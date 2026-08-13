@@ -17,6 +17,7 @@ import core.state as state  # type: ignore
 from core.socket_mgr import sio  # type: ignore
 from config import load_settings, save_settings  # type: ignore
 from core.schemas import ListDirRequest, DownloadModelRequest  # type: ignore
+from core_engine import is_junk_file, is_incomplete_output  # type: ignore
 
 router = APIRouter()
 
@@ -217,16 +218,21 @@ async def list_dir_api(req: ListDirRequest):
             return {"files": [req.path.replace("\\", "/")], "count": 1}
         return {"files": [], "error": f"檔案不支援: {req.path}"}
     if not os.path.isdir(req.path): return {"files": [], "error": f"目錄不存在: {req.path}"}
-    # 垃圾檔與「轉檔中的暫存產出」不該出現在任何影片清單裡 ——
-    # 前端會拿這份清單當「已經有什麼」的依據（失聯重派算缺件）。
-    from core_engine import is_junk_file  # type: ignore
+    # 🔴 垃圾檔與「還沒完成的產出」不該出現在任何影片清單裡 —— 前端拿這份
+    # 清單當「已經有什麼」的依據（失聯重派靠它算缺件）。0 byte 的殼若被算成
+    # 「已產出」，正好就是我們想補的那支不會被補到。
     files = []
     for root, _, fnames in os.walk(req.path):
         for fname in sorted(fnames):
+            # 先過便宜的副檔名，再做要 stat 的完整性檢查（SMB 上每次都是往返）
+            if os.path.splitext(fname)[1].lower() not in exts:
+                continue
             if is_junk_file(fname):
                 continue
-            if os.path.splitext(fname)[1].lower() in exts:
-                files.append(os.path.join(root, fname).replace("\\", "/"))
+            full = os.path.join(root, fname)
+            if is_incomplete_output(full):
+                continue
+            files.append(full.replace("\\", "/"))
     return {"files": files, "count": len(files)}
 
 

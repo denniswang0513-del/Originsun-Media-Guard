@@ -56,9 +56,43 @@ def is_junk_file(path_or_name: str) -> bool:
     if fname in ("Thumbs.db", ".DS_Store", "desktop.ini"):
         return True
     # 轉檔中的暫存產出（*_proxy.part.mov）—— 掃來源、備份、驗收都不該看到它
-    if fname.lower().endswith(".part.mov"):
+    if fname.lower().endswith(PART_SUFFIX):
         return True
     return False
+
+
+# ── 產出檔的「還沒完成」約定 ────────────────────────────────────────────
+# 寫入端（run_transcode_job）與所有判定端（api_proxy 的三支驗收 + 合併、
+# api_system.list_dir）共用這裡的常數與述詞。分兩邊各寫一份的話，總有一天
+# 一邊認得半成品、另一邊不認得 —— 而不認得的那一邊會把壞檔當成品交出去。
+PART_SUFFIX = ".part.mov"
+
+
+def part_path_for(final_path: str) -> str:
+    """最終檔名 → 轉檔中的暫存檔名。
+
+    副檔名保留 `.mov` 是刻意的：ffmpeg 靠副檔名選 muxer，改成 `.mov.part`
+    會讓它不知道要輸出什麼格式。
+    """
+    return os.path.splitext(final_path)[0] + PART_SUFFIX
+
+
+def is_incomplete_output(path: str) -> bool:
+    """這個產出檔「還不能算數」嗎？
+
+    - `*.part.mov`：還在寫，尚未 rename 成正式名
+    - 0 byte：ffmpeg 剛建檔就被砍斷留下的殼
+    - stat 不到（不存在／讀不到）：一律當作沒有
+
+    🔴 2026-08-13 事故：一台機器轉檔中途掛掉，交付夾裡留下半截檔卻頂著正式
+    檔名，所有「檔案在不在」的檢查都說沒事，補轉也就不補它。
+    """
+    if os.path.basename(path).lower().endswith(PART_SUFFIX):
+        return True
+    try:
+        return os.path.getsize(path) == 0
+    except OSError:
+        return True
 
 def _short_hash(h: Optional[str]) -> str:
     if not h: return "None"
@@ -1105,12 +1139,18 @@ class MediaGuardEngine:
 
             base_name = os.path.splitext(os.path.basename(src_file))[0]
             proxy_out = os.path.join(out_dir, f"{base_name}_proxy.mov")
-            # 🔴 先寫 .part.mov，ffmpeg 正常收工才 rename 成正式名（2026-08-13）。
+            # 🔴 先寫暫存檔，ffmpeg 正常收工才 rename 成正式名（2026-08-13）。
             # 原本直接寫最終檔名 —— 機器中途掛掉就把上一份好檔換成半截檔，而且
             # 檔名還在、大小還有幾 MB，所有「檔案在不在」的檢查都會說沒事
             # （那天一支 3.9GB 的來源留下 6MB 的 moov-less 壞檔差點交付出去）。
-            # 副檔名保留 .mov 是刻意的：ffmpeg 靠副檔名選 muxer。
-            proxy_tmp = os.path.join(out_dir, f"{base_name}_proxy.part.mov")
+            proxy_tmp = part_path_for(proxy_out)
+
+            def _discard_tmp():
+                if os.path.exists(proxy_tmp):
+                    try:
+                        os.remove(proxy_tmp)
+                    except Exception:
+                        pass
 
             _src_sz = os.path.getsize(src_file) if os.path.exists(src_file) else 0
             self.log(f"[{i+1}/{total}] 正在轉檔: {os.path.basename(src_file)}")
@@ -1164,11 +1204,7 @@ class MediaGuardEngine:
             if self._stop_event.is_set():
                 self.log(f"[X] {os.path.basename(src_file)} 轉檔已強制中止。")
                 # 只清自己的暫存檔 —— proxy_out 若已存在是「上一次好的成品」，不准碰
-                if os.path.exists(proxy_tmp):
-                    try:
-                        os.remove(proxy_tmp)
-                    except:
-                        pass
+                _discard_tmp()
                 break
 
             # 累加已完成容量
@@ -1177,11 +1213,7 @@ class MediaGuardEngine:
             if proc.returncode != 0:
                 self.err(f"[!] 轉檔失敗: {os.path.basename(src_file)}")
                 self._log_stderr_tail(stderr_tail)
-                if os.path.exists(proxy_tmp):
-                    try:
-                        os.remove(proxy_tmp)
-                    except Exception:
-                        pass
+                _discard_tmp()
                 err_count += 1  # type: ignore
             else:
                 # ffmpeg 收工了才把暫存檔換成正式名（同目錄 rename，覆蓋舊的）

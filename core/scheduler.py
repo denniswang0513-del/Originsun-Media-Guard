@@ -181,6 +181,13 @@ def dispatch_distributed_transcode(
     將影片檔案分散派發到多個遠端主機進行轉檔。
     compute_hosts: [{name, ip}, ...]，ip='local' 表示本機。
     回傳成功派發的主機數量。
+
+    ⚠️ **這條路徑沒有失敗復原**：派出去就結束，不記錄誰拿到哪些檔、沒有心跳、
+    沒有失聯偵測、也不會把死掉那台的份額改派給別人。互動式派發（app.js
+    dispatchRemoteTranscode + heartbeat）在 2026-08-13 事故後補上了這些，
+    排程派發**還沒有** —— 而排程本來就是沒人在看的時候跑，一台掛掉不會有人
+    發現。要補的話，先把「派工紀錄 × 已產出 → 未完成」這個對帳動作搬到後端
+    （proxy root 是共享的，那台死了照樣讀得到），兩條路徑就能共用。
     """
     import urllib.request
     import urllib.error

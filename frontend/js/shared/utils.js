@@ -1197,13 +1197,23 @@ export async function ensureDriveMap() {
 }
 window.ensureDriveMap = ensureDriveMap;
 
-export async function validateRemotePaths(hostIp, paths) {
+/**
+ * 問某台遠端主機看不看得到這些路徑。
+ *
+ * `timeoutMs` 給「挑可用主機」這種場景用：對方若卡住不回應，沒有逾時就會
+ * 把整個挑選流程一起吊死（而我們正是因為有機器掛掉才在挑）。預設 0 = 不限時，
+ * 維持既有呼叫端的行為。
+ */
+export async function validateRemotePaths(hostIp, paths, timeoutMs = 0) {
     const url = 'http://' + hostIp + '/api/v1/validate_paths';
+    const ctrl = timeoutMs > 0 ? new AbortController() : null;
+    const timer = ctrl ? setTimeout(() => ctrl.abort(), timeoutMs) : null;
     const res = await fetch(url, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ paths })
-    });
+        body: JSON.stringify({ paths }),
+        ...(ctrl ? { signal: ctrl.signal } : {}),
+    }).finally(() => { if (timer) clearTimeout(timer); });
     const data = await res.json();
     const errors = [];
     for (const [path, info] of Object.entries(data.results)) {
