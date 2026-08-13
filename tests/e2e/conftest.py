@@ -35,13 +35,31 @@ def dev_db_only():
 
 
 @pytest.fixture(scope="session")
-def browser_context():
+def browser():
+    """整個 e2e session 只開這一支瀏覽器。
+
+    🔴 `sync_playwright()` 在同一條執行緒裡**只能有一個**：哪個測試檔自己再
+    開一支，跟這裡混跑就會整批 error（各自單跑都好好的，所以很容易以為沒事）。
+    要別的裝置尺寸就從這支 browser 開新 context（見 test_proposal_plan_mobile
+    的 `phone`），不要再 `with sync_playwright()`。
+    """
     with sync_playwright() as p:
-        browser = p.chromium.launch(headless=True)
-        context = browser.new_context()
-        yield context
-        context.close()
-        browser.close()
+        # autoplay-policy 是 test_meeting_recorder 的 AudioContext oscillator 要的
+        # （它拿真 MediaStream 頂替 getUserMedia —— Windows headless 一個音訊
+        # 輸入裝置都沒有）。掛在共用 browser 上讓那支不必自己再開一份；
+        # 對其他測試無害（只影響音訊自動播放）。
+        br = p.chromium.launch(headless=True, args=[
+            "--autoplay-policy=no-user-gesture-required",
+        ])
+        yield br
+        br.close()
+
+
+@pytest.fixture(scope="session")
+def browser_context(browser):
+    context = browser.new_context()
+    yield context
+    context.close()
 
 
 @pytest.fixture(scope="session")

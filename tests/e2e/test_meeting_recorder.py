@@ -66,20 +66,19 @@ _NO_RECORDER = "delete window.MediaRecorder;"
 
 
 @pytest.fixture(scope="module")
-def mic_browser():
-    from playwright.sync_api import sync_playwright
-    with sync_playwright() as p:
-        # 只留 autoplay-policy（AudioContext 的 oscillator 要它）—— 假麥克風
-        # 那組旗標與 microphone 權限都用不到：getUserMedia 整支被換掉了，
-        # 真的裝置/權限路徑一次都不會走到
-        br = p.chromium.launch(headless=True, args=[
-            "--autoplay-policy=no-user-gesture-required",
-        ])
-        ctx = br.new_context(viewport=MOBILE, has_touch=True)
-        ctx.add_init_script(_FAKE_MIC)
-        yield ctx
-        ctx.close()
-        br.close()
+def mic_browser(browser):
+    """假麥克風的 context —— 從 conftest 那支 session browser 開。
+
+    假麥克風那組旗標與 microphone 權限都用不到：getUserMedia 整支被換掉了，
+    真的裝置/權限路徑一次都不會走到。唯一需要的 `--autoplay-policy`
+    （AudioContext 的 oscillator 要它）已經掛在共用 browser 上。
+
+    🔴 不要自己 `sync_playwright()`：同執行緒只能有一支，混跑會整批 error。
+    """
+    ctx = browser.new_context(viewport=MOBILE, has_touch=True)
+    ctx.add_init_script(_FAKE_MIC)
+    yield ctx
+    ctx.close()
 
 
 def _open_meetings(pg, base, token, pid):

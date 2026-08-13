@@ -46,15 +46,17 @@ def proposal(real_server, e2e_admin_token, dev_db_only):
 
 
 @pytest.fixture(scope="module")
-def phone(real_server):
-    from playwright.sync_api import sync_playwright
-    with sync_playwright() as p:
-        br = p.chromium.launch(headless=True)
-        ctx = br.new_context(viewport=MOBILE, device_scale_factor=2,
-                             is_mobile=True, has_touch=True, user_agent=IOS_UA)
-        yield ctx
-        ctx.close()
-        br.close()
+def phone(browser):
+    """手機尺寸的 context —— 從 conftest 那支 session browser 開。
+
+    🔴 不要在這裡再 `sync_playwright()`：同執行緒只能有一支，自己開的話單跑
+    正常、跟其他 e2e 混跑就整批 error（實測 5 個 error），而整套 e2e 一起跑
+    正是 CI 與發版前會做的事。
+    """
+    ctx = browser.new_context(viewport=MOBILE, device_scale_factor=2,
+                              is_mobile=True, has_touch=True, user_agent=IOS_UA)
+    yield ctx
+    ctx.close()
 
 
 # ── 三組量測 ────────────────────────────────────────────────
