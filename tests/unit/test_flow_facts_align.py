@@ -71,7 +71,7 @@ class _Project:
 async def test_gather_facts_covers_every_auto_signal():
     """router 算出來的鍵，必須蓋過範本宣告的每一個 AUTO 項。"""
     from routers.crm.flow import _gather_facts
-    facts, _detail = await _gather_facts(_Session(), _Project())
+    facts, _detail, _meta = await _gather_facts(_Session(), _Project())
 
     missing = pf.missing_facts(facts)
     assert not missing, (
@@ -82,7 +82,7 @@ async def test_gather_facts_covers_every_auto_signal():
 async def test_gather_facts_has_no_stray_keys():
     """反向：router 算了範本沒有的鍵 = 打錯字或範本刪項時的殘留。"""
     from routers.crm.flow import _gather_facts
-    facts, _detail = await _gather_facts(_Session(), _Project())
+    facts, _detail, _meta = await _gather_facts(_Session(), _Project())
 
     stray = sorted(set(facts) - set(pf.AUTO_KEYS))
     assert not stray, f"這些鍵不在軌道範本裡（打錯字？）：{stray}"

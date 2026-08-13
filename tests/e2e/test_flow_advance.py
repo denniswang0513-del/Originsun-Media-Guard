@@ -36,18 +36,26 @@ def case(real_server, e2e_admin_token, dev_db_only):
     httpx.delete(f"{base}/api/v1/crm/projects/{p['project_id']}", headers=h, timeout=30)
 
 
-def _mount(page, project_id, token):
-    """把元件掛起來（不走 SPA 導覽 —— headless 下分頁點擊 flaky）。"""
-    page.evaluate("t => localStorage.setItem('auth_token', t)", token)
-    page.evaluate("""async (pid) => {
-        document.getElementById('advtest')?.remove();
-        const host = document.createElement('div');
-        host.id = 'advtest';
-        document.body.appendChild(host);
-        const m = await import('/tabs/proposals/flow-view.js');
-        await m.renderFlow(host, { projectId: pid });
-    }""", project_id)
-    page.wait_for_selector("#advtest .pflow-track", timeout=20000)
+@pytest.fixture
+def mount(page):
+    """掛上元件；測試結束（**含失敗**）一定拆掉。
+
+    `page` 是 session 範圍的 —— 留著的 host 帶著已綁的事件委派會跑進別支
+    測試檔。收在 fixture 的 teardown 而不是每個測試最後一行：失敗時最需要
+    清理，而那正是「最後一行」跑不到的時候。
+    """
+    def _do(project_id, token):
+        page.evaluate("t => localStorage.setItem('auth_token', t)", token)
+        page.evaluate("""async (pid) => {
+            const host = document.createElement('div');
+            host.id = 'advtest';
+            document.body.appendChild(host);
+            const m = await import('/tabs/proposals/flow-view.js');
+            await m.renderFlow(host, { projectId: pid });
+        }""", project_id)
+        page.wait_for_selector("#advtest .pflow-track", timeout=20000)
+    yield _do
+    page.evaluate("() => document.getElementById('advtest')?.remove()")
 
 
 def _btn(page):
@@ -57,33 +65,29 @@ def _btn(page):
         " disabled: e.disabled, next: e.dataset.advance || '' }))")
 
 
-def test_admin_sees_enabled_button(page, case, e2e_admin_token):
-    _mount(page, case["project_id"], e2e_admin_token)
+def test_admin_sees_enabled_button(page, mount, case, e2e_admin_token):
+    mount(case["project_id"], e2e_admin_token)
     btns = _btn(page)
     assert len(btns) == 1, f"應該只有一顆推進鈕：{btns}"
     assert btns[0]["next"] == "製作", btns[0]
     assert btns[0]["disabled"] is False, "管理員的推進鈕不該是 disabled"
-    page.evaluate("() => document.getElementById('advtest')?.remove()")
 
 
-def test_non_admin_button_is_disabled_not_403(page, case):
+def test_non_admin_button_is_disabled_not_403(page, mount, case, user_token):
     """🔴 非管理員看得到按鈕但按不下去 —— 不是按了才吃 403。"""
-    from core.auth import create_token
-    tok = create_token({"sub": "p", "username": "製片", "access_level": 1,
-                        "modules": ["preprod_proposals", "crm_projects"]})
-    _mount(page, case["project_id"], tok)
+    mount(case["project_id"],
+          user_token(username="製片", modules=["preprod_proposals", "crm_projects"]))
     btns = _btn(page)
     assert len(btns) == 1 and btns[0]["disabled"] is True, \
         f"非管理員的推進鈕應該是 disabled：{btns}"
     # 勾選權還在（模組級鬆綁）—— 兩個權限是分開的
     assert page.eval_on_selector_all("#advtest [data-check]", "e => e.length") > 0, \
         "有 crm_projects 的人還是要勾得動里程碑"
-    page.evaluate("() => document.getElementById('advtest')?.remove()")
 
 
-def test_cancel_does_not_advance(page, case, e2e_admin_token):
+def test_cancel_does_not_advance(page, mount, case, e2e_admin_token):
     """取消＝什麼都不做（軟擋的另一半：確認框不是裝飾）。"""
-    _mount(page, case["project_id"], e2e_admin_token)
+    mount(case["project_id"], e2e_admin_token)
     page.click("#advtest [data-advance]")
     page.wait_for_selector("#pflow-cancel", timeout=10000)
     page.click("#pflow-cancel")
@@ -92,12 +96,11 @@ def test_cancel_does_not_advance(page, case, e2e_admin_token):
     d = httpx.get(f"{case['base']}/api/v1/crm/projects/{case['project_id']}/flow",
                   headers=case["h"], timeout=30).json()
     assert d["stage"]["status"] == "提案", f"取消後階段不該變：{d['stage']['status']}"
-    page.evaluate("() => document.getElementById('advtest')?.remove()")
 
 
-def test_confirm_advances_and_runs_side_effects(page, case, e2e_admin_token):
+def test_confirm_advances_and_runs_side_effects(page, mount, case, e2e_admin_token):
     """🔴 確認後真的推進，而且走的是既有端點的副作用鏈（衛星提案跟著成案）。"""
-    _mount(page, case["project_id"], e2e_admin_token)
+    mount(case["project_id"], e2e_admin_token)
     page.click("#advtest [data-advance]")
     page.wait_for_selector("#pflow-go", timeout=10000)
     # 進「製作」＝這案子拿到了 → 對話框要收成案原因

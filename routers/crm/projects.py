@@ -17,7 +17,8 @@ from config import load_settings as _load_settings
 
 from core.schemas import CrmProjectPayload, CrmProjectPatchPayload
 
-from ._shared import (router, _check_auth, _check_website_auth, _require_db,
+from ._shared import (router, _check_auth, _check_status_auth,
+                      _check_website_auth, _require_db,
                       _get_factory, _now, _parse_shoot_date,
                       _auto_update_client_status, _seed_default_expenses)
 
@@ -640,7 +641,9 @@ async def delete_project(project_id: str, request: Request):
 
 @router.patch("/projects/{project_id}/status")
 async def update_project_status(project_id: str, request: Request):
-    _check_auth(request)
+    # 推進階段有自己的政策旋鈕（core.project_flow.ADVANCE_MODULES）—— 與前端
+    # 的 can_advance 共用同一份，不靠「兩邊剛好都是 admin」這個巧合對齊
+    _check_status_auth(request)
     _require_db()
     factory = await _get_factory()
 

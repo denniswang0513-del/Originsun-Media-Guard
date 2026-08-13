@@ -28,6 +28,7 @@ from fastapi import Request
 
 from core import project_archive as pa
 from core import project_flow as pf
+from core.auth import payload_grants
 from core.crm_logic import (effective_prod_stage, is_main_work,
                             project_works_summary, work_completeness, work_stage)
 
@@ -134,6 +135,9 @@ async def _gather_facts(session, project) -> tuple[dict, dict]:
         "h_loc": bool(row.h_loc),
         "h_footage": bool(row.h_footage),
     }
+    # 不是燈號、但 payload 要用的事實。**不能混進 facts** —— 那個 dict 的鍵
+    # 必須恰好等於 AUTO_KEYS（test_flow_facts_align 兩面都擋）。
+    meta = {"proposal_count": row.prop_n}
     d = {}
     if row.quote_n:
         d["quote"] = f"報價單 {row.quote_n} 版"
@@ -166,7 +170,7 @@ async def _gather_facts(session, project) -> tuple[dict, dict]:
         .where(CrmProjectShowcase.project_id == pid))).all()
     f["work_ready"], f["published"], wd = _work_signals(works, project)
     d.update(wd)
-    return f, d
+    return f, d, meta
 
 
 def _work_signals(works, project):
@@ -214,10 +218,18 @@ async def _payload(session, project, *, auth) -> dict:
     範本與訊號的對齊由 `tests/unit/test_flow_facts_align.py` 守著（實際呼叫
     這支 `_gather_facts` 比對），不在請求路徑上重複檢查。
     """
-    from core.auth import payload_grants
-    facts, detail = await _gather_facts(session, project)
+    facts, detail, meta = await _gather_facts(session, project)
     built = pf.build(facts, project.flow_checks, detail)
     stage = pf.stage_view(project.status)
+    # 🔴 這次推進**會不會真的用到**成案原因 —— 由後端宣告，前端不重算。
+    # 真正的條件不是「下一站是不是製作」（前端能算的只有這個），而是
+    # `_sync_linked_proposals` 的那組：進到 win 階段 × 恰好一筆衛星提案
+    # （多筆時誰贏由專案負責人指定）× 那筆還不是成案。條件不成立卻照樣問，
+    # 使用者打完字送出去會被**靜默丟掉** —— UI 承諾了後端不做的事。
+    stage["collects_outcome_reason"] = bool(
+        stage["next"] in pf.WIN_STATUSES
+        and meta["proposal_count"] == 1
+        and not facts.get("won"))
     return {
         "project_id": project.id,
         "project_name": project.name,
@@ -226,11 +238,9 @@ async def _payload(session, project, *, auth) -> dict:
         "missing": pf.missing_for(built["tracks"], stage["next"]),
         # 看得到 ≠ 勾得動 ≠ 推得動 —— 三層不同，前端據此決定畫什麼。
         # 兩個旗標都從**同一個** payload 推導，不讓呼叫端各自算（算歪了就是
-        # 畫面說可以、後端回 403）。
+        # 畫面說可以、後端回 403），且各自綁住對應端點的政策常數。
         "can_check": payload_grants(auth, *pf.CHECK_MODULES),
-        # 推進＝動商務主軸（客戶分級、錢流口徑、衛星 win/loss），沿用既有
-        # 專案狀態端點的 Lv3 守衛 —— 不帶模組 key 的 payload_grants 只認管理員。
-        "can_advance": payload_grants(auth),
+        "can_advance": payload_grants(auth, *pf.ADVANCE_MODULES),
     }
 
 

@@ -27,7 +27,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 # （proposal_assets 模組層就 import 了），函式內 import 的 ImportError 退路是
 # 死碼，而守衛掛在 router 層＝每個請求都走一次。
 from core.auth import check_admin_or_module, check_logged_in
-from core.project_flow import CHECK_MODULES
+from core.project_flow import ADVANCE_MODULES, CHECK_MODULES
 
 import core.state as state
 from core.finance_logic import month_of
@@ -133,6 +133,13 @@ _check_website_auth = _module_guard('website_admin')
 # 動錢流不是同一個量級，所以先從這裡兌現。政策字面值住
 # core.project_flow.CHECK_MODULES，與前端「畫不畫 checkbox」的判定共用同一份。
 _check_flow_check_auth = _module_guard(*CHECK_MODULES)
+
+# 推進專案階段 —— 動的是商務主軸（客戶分級、錢流口徑、衛星提案 win/loss），
+# 所以從 CRM 泛用寫入預設 `_check_auth` 分家：它本來就不該跟「改個備註欄」
+# 共用同一個政策旋鈕。空 tuple ＝ 今天仍是管理員限定，行為零變化；要鬆綁
+# 是改 `core.project_flow.ADVANCE_MODULES` 一個常數，而不是「記得同時改
+# 端點守衛與前端的 can_advance」。
+_check_status_auth = _module_guard(*ADVANCE_MODULES)
 
 
 def _require_db():

@@ -125,28 +125,34 @@ class TestGates:
         return [{"key": "x", "items": [{"key": k, "state": v}
                                        for k, v in states.items()]}]
 
+    @staticmethod
+    def _keys(bag):
+        return [m["key"] for m in bag]
+
     def test_missing_lists_only_unfinished(self):
         out = pf.missing_for(self._tracks(won=pf.ON, quote_won=pf.OFF), "製作")
-        assert [m["key"] for m in out] == ["quote_won"]
+        assert self._keys(out["blocking"]) == ["quote_won"]
 
     def test_skip_is_not_missing(self):
         tracks = self._tracks(**{k: pf.SKIP for k in pf.GATES["歸檔"]})
-        assert pf.missing_for(tracks, "歸檔") == []
+        out = pf.missing_for(tracks, "歸檔")
+        assert out == {"blocking": [], "advisory": []}
 
     def test_settlement_is_advisory_never_blocking(self):
         """owner 決策點 5：款項未結清不擋結案，只提醒。"""
         out = pf.missing_for(self._tracks(approved=pf.ON, settled=pf.OFF), "結案")
-        settled = [m for m in out if m["key"] == "settled"]
-        assert settled and settled[0]["advisory"] is True
+        assert self._keys(out["advisory"]) == ["settled"]
+        assert out["blocking"] == []
 
-    def test_blocking_items_are_not_advisory(self):
+    def test_blocking_and_advisory_go_to_separate_bags(self):
+        """兩袋分開回 —— 前端有兩處要用，各自 filter 一次就是同一段判斷寫兩份。"""
         out = pf.missing_for(self._tracks(approved=pf.OFF, settled=pf.OFF), "結案")
-        by_key = {m["key"]: m["advisory"] for m in out}
-        assert by_key == {"approved": False, "settled": True}
+        assert self._keys(out["blocking"]) == ["approved"]
+        assert self._keys(out["advisory"]) == ["settled"]
 
     def test_no_gate_for_unknown_target(self):
-        assert pf.missing_for([], "") == []
-        assert pf.missing_for([], "未成案") == []
+        for target in ("", "未成案"):
+            assert pf.missing_for([], target) == {"blocking": [], "advisory": []}
 
 
 class TestStageView:

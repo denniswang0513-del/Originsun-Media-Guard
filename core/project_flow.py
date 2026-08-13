@@ -75,6 +75,23 @@ MAX_NOTE = 500
 # checkbox」兩處共用這一份 —— 分兩處寫的話，總有一天畫面說可以、後端回 403。
 CHECK_MODULES = ("crm_projects",)
 
+# 誰可以推進階段。空 tuple ＝ 只有管理員（`check_admin_or_module` 零 key 時
+# 等同 `check_admin`，同 `_module_guard()` 的既有慣例）。
+#
+# 🔴 為什麼要有這個常數，而不是兩邊各寫「admin」：推進的守衛在
+# `routers/crm/projects.py::update_project_status`，而「畫不畫按鈕」在
+# `routers/crm/flow.py::_payload` —— 兩者今天都是 admin 純屬**巧合**
+# （後者用的是 CRM 泛用寫入預設 `_check_auth`，那支被 85 個端點共用）。
+# CHECK_MODULES 剛開了 CRM 寫入面第一道模組級鬆綁，第二道遲早來；那天
+# 如果只鬆綁端點，按鈕會靜默維持 disabled，而且沒有任何測試會紅。
+ADVANCE_MODULES: tuple = ()
+
+# 進到這些階段＝這個案子拿到了（衛星提案記「成案」）。
+# 🔴 正本在這裡（純模組、無 IO），`routers/api_proposals.PROPOSAL_WIN_STATUSES`
+# re-export 它 —— 原本住在 routers 裡，害 core 的純邏輯與前端都只能用字面值
+# 鏡射一份（前端已經鏡射到第三份了）。
+WIN_STATUSES = frozenset({"製作", "結案", "歸檔"})
+
 # ── 階段（商務主軸，單線）──────────────────────────────────────────────
 # 與 routers/crm/projects.py 的狀態白名單同一組字面值；順序＝管線順序。
 # 「投標/開發/洽詢」是三種可能的**起點**（不是要依序走完），所以推進時
@@ -187,16 +204,24 @@ def build(facts: dict, stored_manual=None, detail: dict = None) -> dict:
     return {"tracks": tracks}
 
 
-def missing_for(tracks: list, target_status: str) -> list[dict]:
+def missing_for(tracks: list, target_status: str) -> dict:
     """推進到 target_status 前「建議先完成」但還沒完成的項目。
 
-    SKIP 不算缺（不上官網的案子不該卡在「官網上線」）。ADVISORY 的項目照列
-    但標 advisory=True —— 讓人看見，但語氣是提醒不是阻擋。
+    SKIP 不算缺（不上官網的案子不該卡在「官網上線」）。
+
+    **回 `{blocking, advisory}` 兩袋而不是一袋帶旗標**：前端有兩個地方要用
+    （缺項橫幅、推進確認框），各自 filter 一次就是同一段判斷寫兩份 ——
+    而 advisory 的語意（owner 決策點 5：款項未結清只提醒不擋）住在這裡，
+    不該讓 JS 端重新詮釋。
     """
     state = {r["key"]: r["state"] for t in (tracks or []) for r in t["items"]}
-    return [{"key": k, "label": ITEMS[k][1], "track": ITEMS[k][0],
-             "advisory": k in ADVISORY}
-            for k in GATES.get(target_status, ()) if state.get(k) == OFF]
+    out = {"blocking": [], "advisory": []}
+    for k in GATES.get(target_status, ()):
+        if state.get(k) != OFF:
+            continue
+        bag = "advisory" if k in ADVISORY else "blocking"
+        out[bag].append({"key": k, "label": ITEMS[k][1], "track": ITEMS[k][0]})
+    return out
 
 
 def stage_view(status: str) -> dict:
