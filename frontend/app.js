@@ -1688,8 +1688,6 @@ if (typeof appendLog === 'undefined') {
                         const _rjt = window._remoteJobType || 'transcode';
                         // 只有 transcode（多機備份流程）才需要合併
                         if (_rjt === 'transcode') {
-                            const ms = document.getElementById('merge_status_text');
-                            if (ms) ms.textContent = '所有遠端主機任務結束，自動觸發整合程序…';
                             if (typeof appendLog === 'function') appendLog('系統提示：所有遠端任務已完成，自動觸發合併與驗證程序...', 'system');
                             mergeHostOutputs();
                         } else {
@@ -2098,8 +2096,6 @@ if (typeof appendLog === 'undefined') {
                 if (typeof appendLog === 'function') appendLog('請先填寫 Proxy Root 與專案名稱。', 'error'); return;
             }
             if (typeof appendLog === 'function') appendLog('📁 合併遠端主機輸出...', 'system');
-            const ms = document.getElementById('merge_status_text');
-            if (ms) ms.textContent = '合併中…';
             try {
                 const r = await fetch(getComputeBaseUrl() + '/api/v1/merge_host_outputs', {
                     method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -2117,8 +2113,6 @@ if (typeof appendLog === 'undefined') {
 
                     // 先定義驗證過關後執行的後續作業
                     window.executePostMergeJobs = function(flags) {
-                        const ms = document.getElementById('merge_status_text');
-                        if (ms) ms.textContent = '完成';
                         if (flags && (flags.do_concat || flags.do_report)) {
                             if (typeof appendLog === 'function') appendLog('🔄 自動觸發後續作業...', 'system');
                             setTimeout(async () => {
@@ -2237,9 +2231,6 @@ if (typeof appendLog === 'undefined') {
                         }
 
                         if (typeof appendLog === 'function') appendLog('🔍 正在驗證 Proxy 轉檔完整性（後端掃描比對）...', 'system');
-                        const ms = document.getElementById('merge_status_text');
-                        if (ms) ms.textContent = '驗證檔案中…';
-
                         try {
                             const allMissing = [];
                             const sharedProxyDir = proxyRoot.replace(/\\/g, '/') + '/' + projName;

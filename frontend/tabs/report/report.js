@@ -30,7 +30,7 @@ export async function submitReportJob() {
         do_filmstrip: document.getElementById('rpt_filmstrip')?.checked ?? true,
         do_techspec: document.getElementById('rpt_techspec')?.checked ?? true,
         do_hash: document.getElementById('rpt_hash')?.checked ?? false,
-        do_gdrive: document.getElementById('rpt_gdrive')?.checked ?? false,
+        do_gdrive: false,   // UI 從未有過這個選項（#rpt_gdrive 不存在），明寫關閉
         do_gchat: false,
         client_sid: window.socket?.id || '',
     };

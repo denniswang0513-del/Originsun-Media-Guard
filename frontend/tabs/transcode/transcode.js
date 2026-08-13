@@ -235,8 +235,6 @@ export async function verifyStandaloneProxies() {
                       + '**不能**當作轉檔完成，請確認路徑與遠端主機後重跑驗證。', 'error');
             const tcLabelF = document.getElementById('tc-prog-label');
             if (tcLabelF) tcLabelF.textContent = '⚠️ 驗證失敗，結果未知';
-            const msF = document.getElementById('merge_status_text');
-            if (msF) msF.textContent = '驗證失敗 ⚠️';
             if (window._standaloneTranscodeResolve) {   // 別讓上游永遠等下去
                 window._standaloneTranscodeResolve();
                 window._standaloneTranscodeResolve = null;
@@ -258,9 +256,6 @@ export async function verifyStandaloneProxies() {
             for (const [ip] of Object.entries(window._activeRemoteHosts || {})) {
                 if(window.updateHostProgress) window.updateHostProgress(ip, 100, '✅ 驗證完成', '#228b22');
             }
-
-            const ms = document.getElementById('merge_status_text');
-            if (ms) ms.textContent = '轉檔完成 ✅';
 
             if (window._standaloneTranscodeResolve) {
                 window._standaloneTranscodeResolve();

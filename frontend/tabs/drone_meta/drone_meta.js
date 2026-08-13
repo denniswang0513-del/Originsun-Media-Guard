@@ -83,7 +83,7 @@ async function dmScanFiles() {
     // the new scan. Xfade prefs (enabled/type/duration) are kept intentionally
     // as user preferences that should persist across batches.
     window._concatAdvancedClips = null;
-    const grid = document.getElementById('dm_file_grid') || document.getElementById('dm_file_list');
+    const grid = document.getElementById('dm_file_grid');
     if (grid) grid.innerHTML = '';
     const gridToolbar = document.getElementById('dm_grid_toolbar');
     if (gridToolbar) gridToolbar.classList.add('hidden');
@@ -246,7 +246,7 @@ window.dmScanFiles = dmScanFiles;
 // ── Card Grid Rendering ──
 
 function _appendFileCard(f, idx) {
-    const grid = document.getElementById('dm_file_grid') || document.getElementById('dm_file_list');
+    const grid = document.getElementById('dm_file_grid');
     if (!grid) return;
     const placeholder = grid.querySelector('.col-span-full') || grid.querySelector('.text-center');
     if (placeholder) placeholder.remove();
@@ -296,7 +296,7 @@ function _reorderDmFiles(from, to) {
     const [file] = _dmFiles.splice(from, 1);
     _dmFiles.splice(to, 0, file);
     // Re-number dataset.idx so the next drag reads fresh positions.
-    const grid = document.getElementById('dm_file_grid') || document.getElementById('dm_file_list');
+    const grid = document.getElementById('dm_file_grid');
     if (grid) for (let i = 0; i < grid.children.length; i++) grid.children[i].dataset.idx = i;
 }
 
@@ -337,7 +337,7 @@ function _updateCardDetail(idx, d) {
 }
 
 function _renderFileGrid() {
-    const grid = document.getElementById('dm_file_grid') || document.getElementById('dm_file_list');
+    const grid = document.getElementById('dm_file_grid');
     if (!grid) return;
     if (!_dmFiles.length) {
         grid.innerHTML = '<div class="text-sm text-gray-500 text-center py-8 col-span-full">尚未掃描影片，請先選擇來源資料夾</div>';
@@ -379,44 +379,6 @@ function dmClearFiles() {
     document.getElementById('dm_scan_status').textContent = '';
 }
 window.dmClearFiles = dmClearFiles;
-
-// ── Batch Time Functions ──
-
-window.dmBatchApplyTime = function() {
-    const date = document.getElementById('dm_batch_date')?.value;
-    const time = document.getElementById('dm_batch_time')?.value;
-    if (!date || !time) { alert('請先設定日期和時間'); return; }
-    document.querySelectorAll('.dm-file-card').forEach(card => {
-        const chk = card.querySelector('.clip-check');
-        if (chk && chk.checked) {
-            const dateInput = card.querySelector('.clip-date');
-            const timeInput = card.querySelector('.clip-time');
-            if (dateInput) dateInput.value = date;
-            if (timeInput) timeInput.value = time;
-        }
-    });
-};
-
-window.dmBatchIncrementTime = function() {
-    const date = document.getElementById('dm_batch_date')?.value;
-    const time = document.getElementById('dm_batch_time')?.value;
-    const increment = parseInt(document.getElementById('dm_batch_increment')?.value) || 1;
-    if (!date || !time) { alert('請先設定起始日期和時間'); return; }
-
-    let baseTime = new Date(`${date}T${time}`);
-    let count = 0;
-    document.querySelectorAll('.dm-file-card').forEach(card => {
-        const chk = card.querySelector('.clip-check');
-        if (chk && chk.checked) {
-            const dt = new Date(baseTime.getTime() + count * increment * 60000);
-            const dateInput = card.querySelector('.clip-date');
-            const timeInput = card.querySelector('.clip-time');
-            if (dateInput) dateInput.value = dt.toISOString().substring(0, 10);
-            if (timeInput) timeInput.value = dt.toTimeString().substring(0, 8);
-            count++;
-        }
-    });
-};
 
 // ── Model Change ──
 
