@@ -59,8 +59,10 @@ def mount(page):
 
 
 def _btn(page):
+    # 兩種按鈕都有 .pflow-adv（啟用的那顆多一個 data-advance）—— 用單一
+    # 選擇器，「應該只有一顆」才不是靠 querySelectorAll 去重湊出來的
     return page.eval_on_selector_all(
-        "#advtest [data-advance], #advtest .pflow-adv",
+        "#advtest .pflow-adv",
         "els => els.map(e => ({ label: e.textContent.trim(),"
         " disabled: e.disabled, next: e.dataset.advance || '' }))")
 
@@ -125,4 +127,3 @@ def test_confirm_advances_and_runs_side_effects(page, mount, case, e2e_admin_tok
     # 畫面也跟上了（重抓不是只改按鈕字）
     assert page.eval_on_selector_all(
         "#advtest .pflow-step.cur", "els => els.map(e => e.textContent.trim())") == ["製作"]
-    page.evaluate("() => document.getElementById('advtest')?.remove()")

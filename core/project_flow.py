@@ -73,7 +73,7 @@ MAX_NOTE = 500
 
 # 誰可以勾手動里程碑（owner 2026-08-14 拍板走模組級）。守衛與「畫不畫
 # checkbox」兩處共用這一份 —— 分兩處寫的話，總有一天畫面說可以、後端回 403。
-CHECK_MODULES = ("crm_projects",)
+CHECK_MODULES: tuple[str, ...] = ("crm_projects",)
 
 # 誰可以推進階段。空 tuple ＝ 只有管理員（`check_admin_or_module` 零 key 時
 # 等同 `check_admin`，同 `_module_guard()` 的既有慣例）。
@@ -84,13 +84,31 @@ CHECK_MODULES = ("crm_projects",)
 # （後者用的是 CRM 泛用寫入預設 `_check_auth`，那支被 85 個端點共用）。
 # CHECK_MODULES 剛開了 CRM 寫入面第一道模組級鬆綁，第二道遲早來；那天
 # 如果只鬆綁端點，按鈕會靜默維持 disabled，而且沒有任何測試會紅。
-ADVANCE_MODULES: tuple = ()
+ADVANCE_MODULES: tuple[str, ...] = ()
 
 # 進到這些階段＝這個案子拿到了（衛星提案記「成案」）。
-# 🔴 正本在這裡（純模組、無 IO），`routers/api_proposals.PROPOSAL_WIN_STATUSES`
-# re-export 它 —— 原本住在 routers 裡，害 core 的純邏輯與前端都只能用字面值
-# 鏡射一份（前端已經鏡射到第三份了）。
+# 🔴 正本在這裡（純模組、無 IO）—— 原本住在 routers 裡，害 core 的純邏輯與
+# 前端都只能用字面值鏡射一份（前端已經鏡射到第三份了）。
 WIN_STATUSES = frozenset({"製作", "結案", "歸檔"})
+
+
+def wins_proposal(new_status: str, proposal_count: int, already_won: bool) -> bool:
+    """推進到 new_status 會不會把那筆衛星提案標成案？
+
+    也就是「這次推進**用不用得到**成案原因」。三個條件缺一不可：
+
+    - 進到 win 階段
+    - **恰好一筆**衛星提案 —— 一個專案可以並行多筆（同一案提三個 concept），
+      多筆時誰贏由專案負責人在企劃分頁指定，不自動標
+    - 那筆還不是「成案」
+
+    🔴 兩個呼叫端共用這一份：`routers/crm/projects._sync_linked_proposals`
+    （真的去標）與 `routers/crm/flow._payload`（決定推進對話框問不問原因）。
+    分兩處寫的話，「對話框問了、後端沒用」就是使用者打完字被靜默丟掉 ——
+    那正是 2026-08-14 第一輪 /simplify 抓到的缺陷，只是當時只統一了
+    WIN_STATUSES 這一半。
+    """
+    return bool(new_status in WIN_STATUSES and proposal_count == 1 and not already_won)
 
 # ── 階段（商務主軸，單線）──────────────────────────────────────────────
 # 與 routers/crm/projects.py 的狀態白名單同一組字面值；順序＝管線順序。

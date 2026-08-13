@@ -411,7 +411,12 @@ async function openDetail(pid) {
         flow: async (host) => {
             const { renderFlow } = await importRetry('/tabs/proposals/flow-view.js');
             if (!host.isConnected) return;
-            await renderFlow(host, { projectId: prop.project_id || '' });
+            await renderFlow(host, {
+                projectId: prop.project_id || '',
+                // 推進會連動這筆提案本身（進「製作」＝衛星提案標成案 + 寫入
+                // 成案原因），詳情標頭的狀態下拉與原因面板都會是舊值 → 重開
+                onAdvanced: () => { refreshList({ stats: true }); openDetail(prop.id); },
+            });
         },
     };
     ov.querySelectorAll('.prop-tab').forEach(btn => btn.addEventListener('click', async () => {

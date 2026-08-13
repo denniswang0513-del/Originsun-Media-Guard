@@ -535,18 +535,19 @@ async def _sync_linked_proposals(session, project, old_status: str,
     new_status = project.status or ""
     if new_status == old_status:
         return
+    from core.project_flow import wins_proposal
     from db.models import PreprodProposal
-    from routers.api_proposals import PROPOSAL_WIN_STATUSES
     props = (await session.execute(
         select(PreprodProposal).where(PreprodProposal.project_id == project.id)
     )).scalars().all()
     if not props:
         return
-    auto_win = len(props) == 1
     now = _now()
     reason = (reason or "").strip()
     for prop in props:
-        if new_status in PROPOSAL_WIN_STATUSES and auto_win and prop.status != "成案":
+        # 判定與「推進對話框問不問成案原因」共用同一份（core.project_flow）——
+        # 分兩處寫的話，對話框問了、這裡不採用，使用者打的字就靜默消失
+        if wins_proposal(new_status, len(props), prop.status == "成案"):
             prop.status = "成案"
             if reason:
                 prop.outcome_reason = reason

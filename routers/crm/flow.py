@@ -20,7 +20,10 @@ CRM 的、資源就是 `crm_projects`，而同樣掛在那一列兩個 JSONB 欄
 - 讀取＝`proposal_auth`（admin / preprod_proposals / preprod_plan /
   crm_projects）—— 公司內部進度透明，而且提案頁本來就是這個閘。
 - 勾手動里程碑＝`_check_flow_check_auth`（`crm_projects` 模組即可，
-  owner 2026-08-14 拍板）。**階段推進仍走既有端點的 Lv3 守衛**，不在這裡放寬。
+  owner 2026-08-14 拍板）。
+- 推進階段**不在這裡做** —— 前端打既有的 `PATCH /projects/{id}/status`，
+  那支與這裡的 `can_advance` 共用 `core.project_flow.ADVANCE_MODULES`
+  （今天等同管理員限定；要鬆綁是改那個常數，不是記得同時改兩個地方）。
 """
 from __future__ import annotations
 
@@ -57,15 +60,19 @@ def _count_sq(model, *where):
     return select(func.count()).select_from(model).where(*where).scalar_subquery()
 
 
-async def _gather_facts(session, project) -> tuple[dict, dict]:
-    """各正本 → AUTO 訊號的 bool（None ＝ 略過）。回 (facts, detail)。
+async def _gather_facts(session, project) -> tuple[dict, dict, dict]:
+    """各正本 → AUTO 訊號的 bool（None ＝ 略過）。回 (facts, detail, meta)。
+
+    - facts：鍵**恰好**等於 `pf.AUTO_KEYS`（test_flow_facts_align 兩面都擋）
+    - detail：item_key → 「為什麼亮」的說明字串
+    - meta：不是燈號、但 payload 要用的事實（目前只有 proposal_count）
 
     🔴 **一趟查完**。這些訊號彼此無關，逐支 await 的話是 13 趟跨網路
     round-trip、而且整段期間佔著五條連線池中的一條（pool_size=5：四個人同時
     開就把池子吃光）。全部是 per-project 純量 → 一個 SELECT 掛 N 個
     uncorrelated scalar subquery，Postgres 一個 plan 算完。
 
-    detail 是給 UI hover 用的「為什麼亮」—— 燈要能自己解釋，不然沒人信它。
+    燈要能自己解釋為什麼亮，不然沒人信它 —— detail 就是那句話。
     """
     pid = project.id
     inv_w = (CrmInvoice.project_id == pid, CrmInvoice.payment_type == "收款",
@@ -221,26 +228,24 @@ async def _payload(session, project, *, auth) -> dict:
     facts, detail, meta = await _gather_facts(session, project)
     built = pf.build(facts, project.flow_checks, detail)
     stage = pf.stage_view(project.status)
-    # 🔴 這次推進**會不會真的用到**成案原因 —— 由後端宣告，前端不重算。
-    # 真正的條件不是「下一站是不是製作」（前端能算的只有這個），而是
-    # `_sync_linked_proposals` 的那組：進到 win 階段 × 恰好一筆衛星提案
-    # （多筆時誰贏由專案負責人指定）× 那筆還不是成案。條件不成立卻照樣問，
-    # 使用者打完字送出去會被**靜默丟掉** —— UI 承諾了後端不做的事。
-    stage["collects_outcome_reason"] = bool(
-        stage["next"] in pf.WIN_STATUSES
-        and meta["proposal_count"] == 1
-        and not facts.get("won"))
     return {
         "project_id": project.id,
         "project_name": project.name,
         "stage": stage,
         "tracks": built["tracks"],
         "missing": pf.missing_for(built["tracks"], stage["next"]),
-        # 看得到 ≠ 勾得動 ≠ 推得動 —— 三層不同，前端據此決定畫什麼。
-        # 兩個旗標都從**同一個** payload 推導，不讓呼叫端各自算（算歪了就是
-        # 畫面說可以、後端回 403），且各自綁住對應端點的政策常數。
+        # 這三個都是「這次動作能做什麼」，不是階段的靜態屬性 —— 所以放頂層，
+        # 不往 core 產的 stage dict 上加料（那樣讀 core 讀不到全貌）。
+        #
+        # 看得到 ≠ 勾得動 ≠ 推得動：三層不同，前端據此決定畫什麼。兩個權限
+        # 旗標都從**同一個** payload 推導、各自綁住對應端點的政策常數 ——
+        # 呼叫端各算各的就會出現「畫面說可以、後端回 403」。
         "can_check": payload_grants(auth, *pf.CHECK_MODULES),
         "can_advance": payload_grants(auth, *pf.ADVANCE_MODULES),
+        # 這次推進**會不會真的用到**成案原因 —— 判定與真正去標的那支
+        # （_sync_linked_proposals）共用 core 的同一份，不在這裡複寫條件。
+        "collects_outcome_reason": pf.wins_proposal(
+            stage["next"], meta["proposal_count"], bool(facts.get("won"))),
     }
 
 

@@ -1286,12 +1286,29 @@ owner 需求原文（兩則合讀）：「將現在的提案頁面裡的專案�
 
 ### §14.3 API
 
-- `GET  /api/v1/projects/{id}/flow` → `{status, stages:[{stage, items:[…], …}],
-  next_status, missing:[…]}`。守衛 `proposal_auth` 級（能看提案的都能看）。
-  自動訊號一次 JOIN/聚合算完（比照 quotations/stats，禁 N+1）。
-- `POST /api/v1/projects/{id}/flow/check` `{item_key, checked, note}`
-  → 守衛 `check_admin_or_module('crm_projects')`（與 CRM 專案寫入同門）。
-- **推進不新增端點**——前端打既有專案狀態端點。
+**⚠️ 以下是實作後校正過的實際形狀**（規劃時寫的 URL 與欄位都飄了；
+端點住 `routers/crm/flow.py`，所以在 CRM 前綴下）：
+
+- `GET  /api/v1/crm/projects/{id}/flow` →
+  ```
+  { project_id, project_name,
+    stage: { status, pipeline[], index, next, is_lost, is_terminal },
+    tracks: [{ key, label, done, total, items: [{ key,label,kind,state,hint,
+                                                  detail?,by?,at?,note? }] }],
+    missing: { blocking: [{key,label,track}], advisory: [...] },
+    can_check, can_advance, collects_outcome_reason }
+  ```
+  守衛 `proposal_auth`（能看提案的都能看）。自動訊號一趟聚合算完
+  （17 個 scalar subquery + 1 趟 showcase，禁 N+1）。
+- `POST /api/v1/crm/projects/{id}/flow/check` `{item_key, checked, note}`
+  → 守衛 `core.project_flow.CHECK_MODULES`（＝`crm_projects` 模組即可）。
+  回同一份 payload（勾完不必再打一次 GET）。
+- **推進不新增端點**——前端打既有的 `PATCH /api/v1/crm/projects/{id}/status`，
+  守衛 `core.project_flow.ADVANCE_MODULES`（空 tuple ＝ 管理員限定）。
+  兩個政策常數各自被端點守衛與前端旗標共用，不靠「剛好都是 admin」對齊。
+- `collects_outcome_reason` 由 `core.project_flow.wins_proposal()` 算，
+  **與真正去標成案的 `_sync_linked_proposals` 共用同一份判定**——
+  分兩處寫的話，對話框問了原因、後端不採用，使用者打的字會靜默消失。
 - 🔴 公開 `?t=` 端點**完全不出 flow**（內部進度、金額訊號、人名都不出；
   防線在後端白名單，不在前端）。
 

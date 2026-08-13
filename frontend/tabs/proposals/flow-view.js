@@ -146,10 +146,10 @@ function _trackHtml(t, canCheck) {
     </div>`;
 }
 
-/** 後端已經把缺項拆成 blocking / advisory 兩袋 —— 前端不重新詮釋那個語意。 */
-function _missingHtml(missing, next) {
-    const blocking = missing.blocking || [];
-    const advisory = missing.advisory || [];
+/** 後端已經把缺項拆成 blocking / advisory 兩袋 —— 前端不重新詮釋那個語意。
+ *  （形狀由 core.project_flow.missing_for 保證，單元測試釘住兩個 key 一定在，
+ *  所以這裡直接解構、不層層補預設值。） */
+function _missingHtml({ blocking, advisory }, next) {
     if (!blocking.length && !advisory.length) return '';
     const parts = [];
     if (blocking.length) {
@@ -177,11 +177,15 @@ export async function renderFlow(host, { projectId, onAdvanced = null }) {
         _msg(host, '這個提案還沒有關聯專案。<br>補上客戶之後系統會自動建立殼專案，進度才有東西可以追。');
         return;
     }
+    // 每次都更新 —— 事件委派只掛一次，但同一個 host 換提案重掛時，closure
+    // 會永久釘住第一次的 projectId（今天兩個呼叫點都給新 host，那是巧合）
+    host.__flow = { ...(host.__flow || {}), pid: projectId, onAdvanced };
     if (!host.__flowWired) {
         host.__flowWired = true;
         // 事件委派掛一次就好 —— 每次重畫都重掛會累積成一次點擊送 N 個請求
-        host.addEventListener('click', (ev) => _onHit(host, projectId, onAdvanced, ev));
-        host.addEventListener('keydown', (ev) => _onHit(host, projectId, onAdvanced, ev));
+        const on = (ev) => _onHit(host, ev);
+        host.addEventListener('click', on);
+        host.addEventListener('keydown', on);
     }
     _msg(host, '載入中…');
     await _load(host, projectId);
@@ -206,17 +210,22 @@ async function _load(host, projectId) {
     }
 }
 
-async function _onHit(host, projectId, onAdvanced, ev) {
+/** 純 dispatcher：兩條路徑各自一支，這裡只決定走哪條。 */
+async function _onHit(host, ev) {
     const adv = ev.target.closest?.('[data-advance]');
     if (adv && host.contains(adv) && ev.type === 'click') {
         ev.preventDefault();
-        await _advance(host, projectId, adv, onAdvanced);
+        await _advance(host, adv);
         return;
     }
     const el = ev.target.closest?.('[data-check]');
     if (!el || !host.contains(el)) return;
     if (ev.type === 'keydown' && ev.key !== 'Enter' && ev.key !== ' ') return;
     ev.preventDefault();
+    await _toggleCheck(host, el);
+}
+
+async function _toggleCheck(host, el) {
     if (el.dataset.busy) return;          // 連點兩下不送兩次
     el.dataset.busy = '1';
     const nowOn = el.classList.contains('on');
@@ -225,7 +234,7 @@ async function _onHit(host, projectId, onAdvanced, ev) {
     el.classList.toggle('on', !nowOn);
     try {
         const fresh = await tfetch(
-            `/api/v1/crm/projects/${encodeURIComponent(projectId)}/flow/check`,
+            `/api/v1/crm/projects/${encodeURIComponent(host.__flow.pid)}/flow/check`,
             { method: 'POST', json: { item_key: el.dataset.check, checked: !nowOn } });
         if (host.isConnected) _paint(host, fresh);
     } catch (e) {
@@ -240,31 +249,33 @@ async function _onHit(host, projectId, onAdvanced, ev) {
  * （客戶分級重算、衛星提案 win/loss、階段時間戳）。這裡不另開寫入路，
  * 也不在前端重做那些副作用。
  */
-async function _advance(host, projectId, btn, onAdvanced) {
+async function _advance(host, btn) {
     if (btn.disabled) return;
+    const f = host.__flow;
     const next = btn.dataset.advance;
     // 先鎖住再開對話框 —— 鎖在 await 之後的話，連點兩下會開出兩個對話框、
     // 送出兩次 PATCH
     btn.disabled = true;
     try {
-        // 「這次會不會用到成案原因」由後端宣告（多筆衛星提案時它根本不會採用，
-        // 前端自己用 next==='製作' 判斷會白問一次、使用者打的字被靜默丟掉）
-        const reason = await _confirmAdvance(
-            next, host.__flowMissing, !!(host.__flowStage || {}).collects_outcome_reason);
+        // 「這次會不會用到成案原因」由後端宣告（它與真正去標的那支共用同一
+        // 份判定）—— 前端自己算的話，多筆衛星提案時會白問一次，使用者打的
+        // 字被靜默丟掉
+        const reason = await _confirmAdvance(next, f.missing, f.collectsReason);
         if (reason === null) return;      // 取消
         const body = { status: next };
         if (reason) body.outcome_reason = reason;
-        await tfetch(`/api/v1/crm/projects/${encodeURIComponent(projectId)}/status`,
+        await tfetch(`/api/v1/crm/projects/${encodeURIComponent(f.pid)}/status`,
                      { method: 'PATCH', json: body });
         // 階段變了 → 重抓（推進會連動衛星提案狀態與一堆訊號，前端自己推導
         // 只會跟後端各算各的）
-        await _load(host, projectId);
-        if (onAdvanced) onAdvanced(next);
+        await _load(host, f.pid);
+        if (f.onAdvanced) f.onAdvanced(next);
     } catch (e) {
         // 422 帶 code 的（如轉未成案要原因）後端訊息已經說清楚了，直接轉述
         alert('推進失敗：' + (e.message || e));
     } finally {
-        btn.disabled = false;             // 重畫會換掉這顆，還原只為了取消那條路
+        // 成功路徑上 _load 已經重畫、這顆按鈕早被換掉（detached）
+        if (btn.isConnected) btn.disabled = false;
     }
 }
 
@@ -272,20 +283,21 @@ async function _advance(host, projectId, btn, onAdvanced) {
 function _advanceHtml(st, canAdvance) {
     if (!st.next) return '';
     const attrs = canAdvance
+        // 不寫死「需要管理員」—— 門檻由 core.project_flow.ADVANCE_MODULES 決定，
+        // 鬆綁時這句話會是第三個忘記改的地方（而且沒有測試守）
         ? `data-advance="${esc(st.next)}"`
-        : `disabled title="推進階段會連動客戶分級與錢流口徑，需要管理員權限"`;
+        : `disabled title="你的帳號沒有推進階段的權限（推進會連動客戶分級與錢流口徑）"`;
     return `<button class="pflow-adv" ${attrs}>推進到「${esc(st.next)}」</button>`;
 }
 
 function _paint(host, d) {
     const st = d.stage || {};
     const can = !!d.can_check;
-    const missing = d.missing || {};
-    // 推進對話框要用的兩樣東西 —— 存最後一次的**權威**資料，別讓它去讀畫面
-    // （讀畫面的話，樂觀更新那一瞬間的 class 會被當成事實）。只存用得到的
-    // 兩塊，不是整包 payload（tracks 佔了 4KB 的 88%，畫完就沒人要了）。
-    host.__flowMissing = missing;
-    host.__flowStage = st;
+    const missing = d.missing || { blocking: [], advisory: [] };
+    // 推進對話框要的三樣東西 —— 存最後一次的**權威**資料，別讓它去讀畫面
+    // （讀畫面的話，樂觀更新那一瞬間的 class 會被當成事實）。刻意不存整包
+    // payload：tracks 佔了 4KB 的 88%，畫成 HTML 之後就沒人要了。
+    host.__flow = { ...host.__flow, missing, collectsReason: !!d.collects_outcome_reason };
     host.innerHTML = `<div class="pflow">
         ${_stageHtml(st, _advanceHtml(st, !!d.can_advance))}
         ${(d.tracks || []).map(t => _trackHtml(t, can)).join('')}
@@ -305,10 +317,8 @@ function _paint(host, d) {
  *
  * @returns {Promise<string|null>} 確認＝成案原因字串（可為空），取消＝null
  */
-async function _confirmAdvance(next, missing, collectsReason) {
+async function _confirmAdvance(next, { blocking, advisory }, collectsReason) {
     const { openDialog, field } = await import('./prop-dialog.js');
-    const blocking = (missing || {}).blocking || [];
-    const advisory = (missing || {}).advisory || [];
     const list = (arr, cls) => arr.length
         ? `<ul class="pflow-mlist ${cls}">${arr.map(m => `<li>${esc(m.label)}</li>`).join('')}</ul>` : '';
     const body = `

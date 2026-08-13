@@ -21,7 +21,6 @@ from typing import Optional
 from fastapi import APIRouter, Body, File, HTTPException, Request, UploadFile  # type: ignore
 
 from core import pinned_assets as pa
-from core import project_flow as _pf
 from core import proposal_survey
 from core.auth import check_admin_or_module
 from core.project_folders import BLOCKED_UPLOAD_EXTS
@@ -81,10 +80,9 @@ _PROP_STATUS_TO_PROJECT_STATUS = {
 }
 # 專案還在前期（可被提案側 win/loss 拉動階段）；已進製作後不回頭拉
 _PRESALE_PROJECT_STATUSES = {"投標", "開發", "洽詢", "提案"}
-# 專案進到這些階段 = 衛星提案記「成案」（projects.py _sync_linked_proposals 用）。
-# 🔴 正本已下沉到 core.project_flow.WIN_STATUSES —— 住在 routers 裡的話，
-# core 的純邏輯與前端都只能用字面值再鏡射一份。這裡保留名字給既有呼叫端。
-PROPOSAL_WIN_STATUSES = _pf.WIN_STATUSES
+# 「專案進到哪些階段＝衛星提案記成案」的正本在 core.project_flow
+# （WIN_STATUSES / wins_proposal）—— 這裡曾有一份 PROPOSAL_WIN_STATUSES，
+# 下沉後唯一的呼叫端已直接改讀 core，別再在 routers 開第二份。
 
 
 async def _create_shell_project(session, prop, status: str = ""):
