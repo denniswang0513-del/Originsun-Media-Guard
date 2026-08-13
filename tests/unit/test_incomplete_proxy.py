@@ -37,15 +37,19 @@ class TestIsIncompleteProxy:
 
 
 class TestPartPathFor:
-    def test_keeps_mov_extension(self):
-        # 🔴 副檔名必須留 .mov —— ffmpeg 靠它選 muxer，改成 .mov.part 會失敗
+    def test_keeps_original_extension(self):
+        # 🔴 副檔名必須跟最終檔一致 —— ffmpeg 靠它選 muxer，寫成 .mov.part 會失敗。
+        # 串帶會產出 .mp4 或 .mov，所以不能寫死其中一種。
         assert part_path_for(r"C:\out\A001_proxy.mov") == r"C:\out\A001_proxy.part.mov"
+        assert part_path_for(r"C:\out\Reel.mp4") == r"C:\out\Reel.part.mp4"
+        assert part_path_for(r"C:\out\MAX_0001.MOV") == r"C:\out\MAX_0001.part.MOV"
 
     def test_result_is_recognised_as_incomplete(self, tmp_path):
         # 寫入端產生的名字，判定端一定要認得（不然半成品會被當成品）
-        p = _touch(part_path_for(str(tmp_path / "A001_proxy.mov")))
-        assert is_incomplete_output(p) is True
-        assert is_junk_file(p) is True
+        for final in ("A001_proxy.mov", "Reel.mp4", "MAX_0001.MOV"):
+            p = _touch(part_path_for(str(tmp_path / final)))
+            assert is_incomplete_output(p) is True
+            assert is_junk_file(p) is True
 
 
 class TestListDirDropsHalfBaked:

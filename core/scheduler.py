@@ -182,15 +182,14 @@ def dispatch_distributed_transcode(
     compute_hosts: [{name, ip}, ...]，ip='local' 表示本機。
     回傳成功派發的主機數量。
 
-    ⚠️ **這條路徑沒有失敗復原**：派出去就結束，不記錄誰拿到哪些檔、沒有心跳、
-    沒有失聯偵測、也不會把死掉那台的份額改派給別人。互動式派發（app.js
-    dispatchRemoteTranscode + heartbeat）在 2026-08-13 事故後補上了這些，
-    排程派發**還沒有** —— 而排程本來就是沒人在看的時候跑，一台掛掉不會有人
-    發現。要補的話，先把「派工紀錄 × 已產出 → 未完成」這個對帳動作搬到後端
-    （proxy root 是共享的，那台死了照樣讀得到），兩條路徑就能共用。
+    派出去之後由 `core.dispatch_reconcile` 接手盯著：誰拿到哪些檔會登記下來，
+    排程迴圈每分鐘對帳一次（派工 × 共享 proxy root 上的實際產出），失聯的
+    份額改派給還活著的主機。沒人接手時發告警 —— 排程本來就是沒人在看的
+    時候跑，不出聲就等於沒發生。
     """
     import urllib.request
     import urllib.error
+    from core import dispatch_reconcile
 
     # 1. 掃描影片
     all_files = _scan_video_files(source_dirs)
@@ -219,6 +218,7 @@ def dispatch_distributed_transcode(
 
     # 4. 派發任務
     dispatched = 0
+    assignments = []   # 派成功的才登記對帳（見 dispatch_reconcile）
     for i, host in enumerate(reachable):
         bucket = host_buckets[i]
         if not bucket:
@@ -235,8 +235,13 @@ def dispatch_distributed_transcode(
                 req = TranscodeRequest(sources=sources, dest_dir=host_dest, project_name=project_name)
                 enqueue_job(req, project_name or "scheduled", "transcode")
                 dispatched += 1
+                assignments.append({"name": host_name, "ip": ip,
+                                    "dest_dir": host_dest, "sources": sources})
             except Exception as e:
                 _log.warning("分散式轉檔本機 enqueue 失敗: %s", e)
+                assignments.append({"name": host_name, "ip": ip, "failed": True,
+                                    "dest_dir": os.path.join(dest_dir, f"HostDispatch_{host_name}"),
+                                    "sources": sources})
         else:
             # 遠端 HTTP 派發
             host_dest = os.path.join(dest_dir, f"HostDispatch_{host_name}")
@@ -251,14 +256,22 @@ def dispatch_distributed_transcode(
                 headers={"Content-Type": "application/json"},
                 method="POST",
             )
+            ok = False
             try:
                 with urllib.request.urlopen(req, timeout=30) as resp:
-                    if resp.status in (200, 201):
+                    ok = resp.status in (200, 201)
+                    if ok:
                         dispatched += 1
                     else:
                         _log.warning("分散式轉檔主機 %s 回應 %s", host_name, resp.status)
             except Exception as e:
                 _log.warning("分散式轉檔主機 %s 派發失敗: %s", host_name, e)
+            assignments.append({"name": host_name, "ip": ip, "failed": not ok,
+                                "dest_dir": host_dest, "sources": sources})
+
+    # 派失敗的那幾台也登記（failed=True）—— 它們的份額原本會直接被丟掉，
+    # 現在第一次對帳就會改派給還活著的主機
+    dispatch_reconcile.register(dest_dir, project_name, assignments)
 
     _log.info("分散式轉檔派發完成: %d/%d 主機", dispatched, len(reachable))
     return dispatched
@@ -563,6 +576,12 @@ async def run_scheduler():
             await asyncio.to_thread(_check_and_dispatch)
         except Exception:
             _log.exception("排程檢查迴圈發生異常")
+        # 分散式轉檔對帳：失聯的主機把份額改派給活著的（後端派發沒有前端 heartbeat）
+        try:
+            from core import dispatch_reconcile
+            await asyncio.to_thread(dispatch_reconcile.reconcile_tick)
+        except Exception:
+            _log.exception("分散式轉檔對帳異常")
         # 空拍排程監控（每日指定時間觸發）
         try:
             from core import drone_watcher  # type: ignore

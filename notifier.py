@@ -34,6 +34,7 @@ CRITICAL_ALERTS = frozenset({
     "agent_offline", "agent_recovered",
     "ai_runner_failed",
     "archive_failed",
+    "dispatch_host_lost",
 })
 
 
@@ -91,6 +92,7 @@ def notify_tab(template_key: str, **variables) -> None:
         "db_offline":        "🔴 【資料庫斷線】PostgreSQL（{db}）連線中斷 — {hostname}\n已切換 JSON fallback，每 60 秒自動重連中",
         "db_recovered":      "🟢 【資料庫恢復】PostgreSQL（{db}）連線已恢復 — {hostname}",
         "deploy_failed":     "🔴 【部署到生產失敗】v{version}\n⚠️ {detail}",
+        "dispatch_host_lost":"🔴 【分散式轉檔失聯】{project_name}\n🖥️ 主機：{hosts}（{reason}）\n📂 未完成 {file_count} 支 — {action}",
         "log_oversize":      "🟠 【Log 檔超大】{hostname} 的 {filename} 已達 {size_mb}MB\nlog 只在重啟時輪替 — 建議找空檔重啟該機 agent",
         "agent_offline":     "🔴 【機隊斷線】{name}（{url}）連續 {misses} 次健康檢查無回應\n可能：關機/睡眠/網路/agent 掛掉 — 請檢查該機器",
         "agent_recovered":   "🟢 【機隊恢復】{name}（{url}）已重新上線",

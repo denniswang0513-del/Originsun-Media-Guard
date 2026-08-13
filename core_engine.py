@@ -55,44 +55,107 @@ def is_junk_file(path_or_name: str) -> bool:
         return True
     if fname in ("Thumbs.db", ".DS_Store", "desktop.ini"):
         return True
-    # 轉檔中的暫存產出（*_proxy.part.mov）—— 掃來源、備份、驗收都不該看到它
-    if fname.lower().endswith(PART_SUFFIX):
+    # 寫到一半的產出（*.part.<ext>）—— 掃來源、備份、驗收都不該看到它
+    if is_partial_name(fname):
         return True
     return False
 
 
 # ── 產出檔的「還沒完成」約定 ────────────────────────────────────────────
-# 寫入端（run_transcode_job）與所有判定端（api_proxy 的三支驗收 + 合併、
+# 寫入端（AtomicOutput）與所有判定端（api_proxy 的三支驗收 + 合併、
 # api_system.list_dir）共用這裡的常數與述詞。分兩邊各寫一份的話，總有一天
 # 一邊認得半成品、另一邊不認得 —— 而不認得的那一邊會把壞檔當成品交出去。
-PART_SUFFIX = ".part.mov"
+PART_MARK = ".part"
 
 
 def part_path_for(final_path: str) -> str:
-    """最終檔名 → 轉檔中的暫存檔名。
+    """最終檔名 → 寫入中的暫存檔名（`<stem>.part<ext>`）。
 
-    副檔名保留 `.mov` 是刻意的：ffmpeg 靠副檔名選 muxer，改成 `.mov.part`
-    會讓它不知道要輸出什麼格式。
+    副檔名必須跟最終檔一致：ffmpeg 靠副檔名選 muxer，寫成 `foo.mov.part`
+    它就不知道該輸出什麼格式（串帶會產出 .mp4 或 .mov，不能寫死其中一種）。
     """
-    return os.path.splitext(final_path)[0] + PART_SUFFIX
+    stem, ext = os.path.splitext(final_path)
+    return stem + PART_MARK + (ext or ".tmp")
+
+
+def is_partial_name(path_or_name: str) -> bool:
+    """檔名是不是 `<stem>.part<ext>` 這種寫入中的暫存檔？"""
+    stem = os.path.splitext(os.path.basename(path_or_name))[0]
+    return stem.lower().endswith(PART_MARK)
 
 
 def is_incomplete_output(path: str) -> bool:
     """這個產出檔「還不能算數」嗎？
 
-    - `*.part.mov`：還在寫，尚未 rename 成正式名
+    - `*.part.<ext>`：還在寫，尚未 rename 成正式名
     - 0 byte：ffmpeg 剛建檔就被砍斷留下的殼
     - stat 不到（不存在／讀不到）：一律當作沒有
 
     🔴 2026-08-13 事故：一台機器轉檔中途掛掉，交付夾裡留下半截檔卻頂著正式
     檔名，所有「檔案在不在」的檢查都說沒事，補轉也就不補它。
     """
-    if os.path.basename(path).lower().endswith(PART_SUFFIX):
+    if is_partial_name(path):
         return True
     try:
         return os.path.getsize(path) == 0
     except OSError:
         return True
+
+
+class AtomicOutput:
+    """產出檔的原子落地：先寫暫存檔，確定成功了才換成正式名。
+
+    🔴 為什麼每個寫檔的地方都要走這裡（2026-08-13 事故）：
+      - 轉檔：機器中途掛掉，交付夾留下頂著正式檔名的 6MB 半截檔，
+        所有「檔案在不在」的檢查都說沒事，補轉也就不補它。
+      - 串帶：更糟 —— 舊做法是**先把上一份好的 reel 刪掉**再寫，
+        失敗的話連舊的都沒了，而 reel 是要交給客戶的東西。
+
+    用法：
+
+        with AtomicOutput(final_path) as out:
+            run_ffmpeg(..., out.path)      # 寫暫存檔
+            if rc != 0:
+                return                     # 離開 with → 暫存檔丟掉，正式檔不受影響
+            out.commit()                   # 換成正式名
+
+    沒 commit 就離開（失敗／中止／例外）＝ 正式檔保持原樣。commit 撞到目的檔
+    被鎖住時會拋 OSError，**且暫存檔保留不刪** —— 內容是好的，人可以手動搶救。
+    """
+
+    def __init__(self, final_path: str):
+        self.final_path = final_path
+        self.path = part_path_for(final_path)
+        self.committed = False
+        self._keep = False
+
+    def _unlink(self) -> None:
+        try:
+            os.remove(self.path)
+        except OSError:
+            pass
+
+    def reset(self) -> None:
+        """丟掉寫到一半的內容，準備用同一個暫存檔重寫（NVENC→x264 重試用）。"""
+        self._unlink()
+
+    def commit(self) -> None:
+        """暫存檔換成正式名。失敗拋 OSError，且暫存檔留著（內容是好的）。"""
+        try:
+            os.replace(self.path, self.final_path)
+        except OSError:
+            self._keep = True
+            raise
+        self.committed = True
+
+    def __enter__(self) -> "AtomicOutput":
+        self._unlink()   # 上一輪失敗留下的殘骸
+        return self
+
+    def __exit__(self, exc_type, exc, tb) -> bool:
+        if not self.committed and not self._keep:
+            self._unlink()
+        return False
 
 def _short_hash(h: Optional[str]) -> str:
     if not h: return "None"
@@ -1139,88 +1202,81 @@ class MediaGuardEngine:
 
             base_name = os.path.splitext(os.path.basename(src_file))[0]
             proxy_out = os.path.join(out_dir, f"{base_name}_proxy.mov")
-            # 🔴 先寫暫存檔，ffmpeg 正常收工才 rename 成正式名（2026-08-13）。
-            # 原本直接寫最終檔名 —— 機器中途掛掉就把上一份好檔換成半截檔，而且
-            # 檔名還在、大小還有幾 MB，所有「檔案在不在」的檢查都會說沒事
-            # （那天一支 3.9GB 的來源留下 6MB 的 moov-less 壞檔差點交付出去）。
-            proxy_tmp = part_path_for(proxy_out)
 
-            def _discard_tmp():
-                if os.path.exists(proxy_tmp):
-                    try:
-                        os.remove(proxy_tmp)
-                    except Exception:
-                        pass
+            # 🔴 寫暫存檔、ffmpeg 正常收工才換成正式名（2026-08-13）。原本直接寫
+            # 最終檔名 —— 機器中途掛掉就把上一份好檔換成半截檔，而且檔名還在、
+            # 大小還有幾 MB，所有「檔案在不在」的檢查都會說沒事（那天一支 3.9GB
+            # 的來源留下 6MB 的 moov-less 壞檔差點交付出去）。
+            with AtomicOutput(proxy_out) as out:
+                _src_sz = os.path.getsize(src_file) if os.path.exists(src_file) else 0
+                self.log(f"[{i+1}/{total}] 正在轉檔: {os.path.basename(src_file)}")
+                duration = self._get_video_duration(src_file)
+                n_audio = self._probe_audio_stream_count(src_file)
+                if n_audio > 1:
+                    self.log(f"  [audio] 多軌音訊 ({n_audio} 軌)，保留全部 {n_audio} 軌（各軌轉 AAC）")
 
-            _src_sz = os.path.getsize(src_file) if os.path.exists(src_file) else 0
-            self.log(f"[{i+1}/{total}] 正在轉檔: {os.path.basename(src_file)}")
-            duration = self._get_video_duration(src_file)
-            n_audio = self._probe_audio_stream_count(src_file)
-            if n_audio > 1:
-                self.log(f"  [audio] 多軌音訊 ({n_audio} 軌)，保留全部 {n_audio} 軌（各軌轉 AAC）")
+                cmd = self._build_proxy_transcode_cmd(src_file, out.path, n_audio)
 
-            cmd = self._build_proxy_transcode_cmd(src_file, proxy_tmp, n_audio)
+                proc, stderr_tail, stderr_thread = self._spawn_with_stderr_tail(cmd)
 
-            proc, stderr_tail, stderr_thread = self._spawn_with_stderr_tail(cmd)
+                # 解析 FFmpeg 進度
+                for pline in (proc.stdout or []):
+                    if self._check_pause_stop():
+                        proc.terminate()
+                        break
 
-            # 解析 FFmpeg 進度
-            for pline in (proc.stdout or []):
-                if self._check_pause_stop():
-                    proc.terminate()
-                    break
-                
-                pline = pline.strip()
-                if pline.startswith("out_time_ms="):
-                    try:
-                        ms = int(pline.split("=")[1])
-                        if duration > 0:
-                            frac = min(1.0, (ms / 1_000_000) / duration)
-                            base_pct = i / total
-                            slot_size = 1.0 / total
-                            curr_pct = (base_pct + (frac * slot_size)) * 100
+                    pline = pline.strip()
+                    if pline.startswith("out_time_ms="):
+                        try:
+                            ms = int(pline.split("=")[1])
+                            if duration > 0:
+                                frac = min(1.0, (ms / 1_000_000) / duration)
+                                base_pct = i / total
+                                slot_size = 1.0 / total
+                                curr_pct = (base_pct + (frac * slot_size)) * 100
 
-                            if on_progress is not None:
-                                on_progress({  # type: ignore
-                                    "phase": "transcode",
-                                    "status": "processing",
-                                    "current_file": os.path.basename(src_file),
-                                    "file_pct": frac * 100,
-                                    "total_pct": curr_pct,
-                                    "done_files": i,
-                                    "total_files": total,
-                                    "done_bytes": _tc_done_bytes + int(frac * _src_sz),
-                                    "total_bytes": _tc_total_bytes,
-                                })
-                    except Exception:
-                        pass
+                                if on_progress is not None:
+                                    on_progress({  # type: ignore
+                                        "phase": "transcode",
+                                        "status": "processing",
+                                        "current_file": os.path.basename(src_file),
+                                        "file_pct": frac * 100,
+                                        "total_pct": curr_pct,
+                                        "done_files": i,
+                                        "total_files": total,
+                                        "done_bytes": _tc_done_bytes + int(frac * _src_sz),
+                                        "total_bytes": _tc_total_bytes,
+                                    })
+                        except Exception:
+                            pass
 
-            try:
-                proc.wait(timeout=3)
-            except subprocess.TimeoutExpired:
-                proc.kill()
-                proc.wait()
-            stderr_thread.join(timeout=2)
-
-            if self._stop_event.is_set():
-                self.log(f"[X] {os.path.basename(src_file)} 轉檔已強制中止。")
-                # 只清自己的暫存檔 —— proxy_out 若已存在是「上一次好的成品」，不准碰
-                _discard_tmp()
-                break
-
-            # 累加已完成容量
-            _tc_done_bytes += _src_sz
-
-            if proc.returncode != 0:
-                self.err(f"[!] 轉檔失敗: {os.path.basename(src_file)}")
-                self._log_stderr_tail(stderr_tail)
-                _discard_tmp()
-                err_count += 1  # type: ignore
-            else:
-                # ffmpeg 收工了才把暫存檔換成正式名（同目錄 rename，覆蓋舊的）
                 try:
-                    os.replace(proxy_tmp, proxy_out)
-                except Exception as e:
-                    self.err(f"[!] 產出無法歸位: {os.path.basename(proxy_out)} — {e}")
+                    proc.wait(timeout=3)
+                except subprocess.TimeoutExpired:
+                    proc.kill()
+                    proc.wait()
+                stderr_thread.join(timeout=2)
+
+                if self._stop_event.is_set():
+                    self.log(f"[X] {os.path.basename(src_file)} 轉檔已強制中止。")
+                    # 離開 with 只丟自己的暫存檔 —— proxy_out 若已存在是「上一次好的
+                    # 成品」，不准碰
+                    break
+
+                # 累加已完成容量
+                _tc_done_bytes += _src_sz
+
+                if proc.returncode != 0:
+                    self.err(f"[!] 轉檔失敗: {os.path.basename(src_file)}")
+                    self._log_stderr_tail(stderr_tail)
+                    err_count += 1  # type: ignore
+                    continue
+
+                try:
+                    out.commit()
+                except OSError as e:
+                    self.err(f"[!] 產出無法歸位: {os.path.basename(proxy_out)} — {e}"
+                             f"（轉好的檔案保留在 {os.path.basename(out.path)}）")
                     err_count += 1  # type: ignore
                     continue
                 self.log(f"[OK] 完成: {os.path.basename(proxy_out)}")
@@ -1413,10 +1469,15 @@ class MediaGuardEngine:
                 folder_name = "Standalone_Reel"
         reel_out = os.path.join(dest_dir, f"{folder_name}{ext}")
 
-        # 預先嘗試刪除已存在的輸出檔案，以避免 FFmpeg -y 在 NAS 上直接覆寫造成的各種死鎖問題
+        # 🔴 不准先刪舊 reel。舊做法是「先 os.remove 再讓 ffmpeg 寫最終檔名」，
+        # 中途失敗（NAS 斷線、機器掛掉、使用者中止）就連上一份好的都沒了 ——
+        # 而 reel 是要交給客戶的東西。改成寫暫存檔、成功才換名（見下方 AtomicOutput）。
+        # 這裡只做非破壞性的鎖定探測：舊檔正被播放器開著的話，等一小時編碼完才在
+        # 換名那步撞牆太浪費，先開一次寫入就知道換不換得掉（不動內容）。
         if os.path.exists(reel_out):
             try:
-                os.remove(reel_out)
+                with open(reel_out, "r+b"):
+                    pass
             except OSError as e:
                 self.err(f"[系統阻擋] 無法覆寫 {os.path.basename(reel_out)} (檔案可能正被開啟、或遭系統鎖定): {e}")
                 return
@@ -1634,143 +1695,149 @@ class MediaGuardEngine:
         used_nvenc = "NVENC" in codec
         fallback_attempted = False
 
-        # ── 可能執行兩次：第一次 NVENC，失敗則 fallback x264 ──
-        while True:
-            # 建構 -i 參數（每個檔案一個獨立輸入）
-            input_args = []
-            for p in files:
-                input_args += ["-i", p]
+        # 🔴 整段編碼寫進暫存檔，成功了才換成正式名 —— 中途失敗／中止／機器掛掉
+        # 時，上一份好的 reel 原封不動（見 AtomicOutput）。
+        with AtomicOutput(reel_out) as out:
+            # ── 可能執行兩次：第一次 NVENC，失敗則 fallback x264 ──
+            while True:
+                # 建構 -i 參數（每個檔案一個獨立輸入）
+                input_args = []
+                for p in files:
+                    input_args += ["-i", p]
 
-            cmd = [
-                "ffmpeg", "-y", "-nostdin",
-            ] + input_args + [
-                "-filter_complex_script", filter_script_path,
-                "-map", video_map, "-map", "[aout]",
-            ] + vcodec_args + acodec_args + [
-                "-progress", "pipe:1",
-                "-nostats",
-                reel_out
-            ]
+                cmd = [
+                    "ffmpeg", "-y", "-nostdin",
+                ] + input_args + [
+                    "-filter_complex_script", filter_script_path,
+                    "-map", video_map, "-map", "[aout]",
+                ] + vcodec_args + acodec_args + [
+                    "-progress", "pipe:1",
+                    "-nostats",
+                    out.path
+                ]
 
-            # 加入 CREATE_NO_WINDOW 避免在背景打擾到使用者
-            creation_flags = 0
-            if hasattr(subprocess, 'CREATE_NO_WINDOW'):
-                creation_flags = getattr(subprocess, 'CREATE_NO_WINDOW')
+                # 加入 CREATE_NO_WINDOW 避免在背景打擾到使用者
+                creation_flags = 0
+                if hasattr(subprocess, 'CREATE_NO_WINDOW'):
+                    creation_flags = getattr(subprocess, 'CREATE_NO_WINDOW')
 
-            err_log_file = os.path.join(tempfile.gettempdir(), f"Originsun_concat_err_{uuid.uuid4().hex[:8]}.log")
-            f_err = open(err_log_file, "w", encoding="utf-8")
-            try:
-                proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=f_err, encoding="utf-8", errors="replace", creationflags=creation_flags)
-            except OSError as e:
-                f_err.close()
-                self.err(f"[!] FFmpeg 啟動失敗: {e}")
-                for tmp in _temp_intermediates:
-                    try: os.remove(tmp)
-                    except OSError: pass
-                return
+                err_log_file = os.path.join(tempfile.gettempdir(), f"Originsun_concat_err_{uuid.uuid4().hex[:8]}.log")
+                f_err = open(err_log_file, "w", encoding="utf-8")
+                try:
+                    proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=f_err, encoding="utf-8", errors="replace", creationflags=creation_flags)
+                except OSError as e:
+                    f_err.close()
+                    self.err(f"[!] FFmpeg 啟動失敗: {e}")
+                    for tmp in _temp_intermediates:
+                        try: os.remove(tmp)
+                        except OSError: pass
+                    return
 
-            t_start = time.time()
-            for cline in (proc.stdout or []):
-                if self._check_pause_stop():
-                    proc.terminate()
-                    break
+                t_start = time.time()
+                for cline in (proc.stdout or []):
+                    if self._check_pause_stop():
+                        proc.terminate()
+                        break
 
-                cline = cline.strip()
-                if cline.startswith("out_time_ms="):
+                    cline = cline.strip()
+                    if cline.startswith("out_time_ms="):
+                        try:
+                            cms = int(cline.split("=")[1])
+                            if concat_duration > 0:
+                                cfrac = min(1.0, (cms / 1_000_000) / float(concat_duration))
+                                elapsed = time.time() - t_start
+                                _out_sz = os.path.getsize(out.path) if os.path.exists(out.path) else 0
+                                speed_mbps = float(_out_sz / (1024*1024)) / elapsed if elapsed > 0 else 0.0
+
+                                if on_progress is not None:
+                                    on_progress({  # type: ignore
+                                        "phase": "concat",
+                                        "status": "processing",
+                                        "current_file": os.path.basename(reel_out),
+                                        "file_pct": cfrac * 100,
+                                        "total_pct": cfrac * 100,
+                                        "speed_mbps": speed_mbps,
+                                        "done_files": 1,
+                                        "total_files": 1,
+                                        "done_bytes": _out_sz,
+                                        "total_bytes": _ct_total_bytes,
+                                        "sources_count": _ct_sources_count,
+                                    })
+                        except Exception:
+                            pass
+
+                try:
+                    proc.wait(timeout=3)
+                except subprocess.TimeoutExpired:
+                    proc.kill()
+                    proc.wait()
+
+                try:
+                    f_err.close()
+                except:
+                    pass
+
+                # ── NVENC 失敗 → 自動降級為 x264 軟體編碼 ──
+                if proc.returncode != 0 and used_nvenc and not fallback_attempted:
+                    err_txt = ""
                     try:
-                        cms = int(cline.split("=")[1])
-                        if concat_duration > 0:
-                            cfrac = min(1.0, (cms / 1_000_000) / float(concat_duration))
-                            elapsed = time.time() - t_start
-                            _out_sz = os.path.getsize(reel_out) if os.path.exists(reel_out) else 0
-                            speed_mbps = float(_out_sz / (1024*1024)) / elapsed if elapsed > 0 else 0.0
-
-                            if on_progress is not None:
-                                on_progress({  # type: ignore
-                                    "phase": "concat",
-                                    "status": "processing",
-                                    "current_file": os.path.basename(reel_out),
-                                    "file_pct": cfrac * 100,
-                                    "total_pct": cfrac * 100,
-                                    "speed_mbps": speed_mbps,
-                                    "done_files": 1,
-                                    "total_files": 1,
-                                    "done_bytes": _out_sz,
-                                    "total_bytes": _ct_total_bytes,
-                                    "sources_count": _ct_sources_count,
-                                })
-                    except Exception:
+                        with open(err_log_file, "r", encoding="utf-8") as fe:
+                            err_txt = fe.read()
+                    except:
                         pass
+                    try:
+                        os.remove(err_log_file)
+                    except:
+                        pass
+                    out.reset()   # 丟掉 NVENC 寫到一半的暫存檔，同一個檔名重寫
+
+                    self.log("[!] NVENC 硬體編碼失敗，自動切換為 x264 軟體編碼重試...")
+                    vcodec_args = ["-c:v", "libx264", "-pix_fmt", "yuv420p", "-preset", "fast", "-crf", "23"]
+                    acodec_args = ["-c:a", "aac", "-b:a", "192k"]
+                    used_nvenc = False
+                    fallback_attempted = True
+                    continue  # 重新執行 while 迴圈
+
+                break  # 正常結束或非 NVENC 失敗，跳出迴圈
 
             try:
-                proc.wait(timeout=3)
-            except subprocess.TimeoutExpired:
-                proc.kill()
-                proc.wait()
-
-            try:
-                f_err.close()
-            except:
+                if os.path.exists(filter_script_path):
+                    os.remove(filter_script_path)
+            except Exception:
                 pass
 
-            # ── NVENC 失敗 → 自動降級為 x264 軟體編碼 ──
-            if proc.returncode != 0 and used_nvenc and not fallback_attempted:
-                err_txt = ""
+            if self._stop_event.is_set():
+                # 沒 commit → 離開 with 時暫存檔自動丟掉，舊的 reel 原封不動
+                self.log("[X] 串帶已中止。")
+            elif proc.returncode != 0:
+                err_txt = "Unknown stderr"
                 try:
                     with open(err_log_file, "r", encoding="utf-8") as fe:
                         err_txt = fe.read()
                 except:
                     pass
+                if len(err_txt) > 2000:
+                    err_txt = "..." + err_txt[-2000:]  # type: ignore
+                self.err(f"[!] 串帶失敗: \n{err_txt}")
+            else:
                 try:
-                    os.remove(err_log_file)
-                except:
-                    pass
-                # 清理失敗的輸出檔
-                if os.path.exists(reel_out):
-                    try: os.remove(reel_out)
-                    except: pass
+                    out.commit()
+                except OSError as e:
+                    # 舊 reel 這時被鎖住了（開場的探測過得了、跑完才被人開起來）。
+                    # 暫存檔留著不刪 —— 那是剛編好的完整成品，只差改個名字。
+                    self.err(f"[!] 串帶完成但無法歸位 {os.path.basename(reel_out)}: {e}\n"
+                             f"    成品保留在: {out.path}")
+                else:
+                    suffix = "（已自動降級為 x264 軟體編碼）" if fallback_attempted else ""
+                    self.log(f"[Engine] 串帶壓印任務完成！{suffix}")
+                    if on_progress is not None:
+                        on_progress({"phase": "concat", "status": "completed", "total_pct": 100})  # type: ignore
 
-                self.log("[!] NVENC 硬體編碼失敗，自動切換為 x264 軟體編碼重試...")
-                vcodec_args = ["-c:v", "libx264", "-pix_fmt", "yuv420p", "-preset", "fast", "-crf", "23"]
-                acodec_args = ["-c:a", "aac", "-b:a", "192k"]
-                used_nvenc = False
-                fallback_attempted = True
-                continue  # 重新執行 while 迴圈
-
-            break  # 正常結束或非 NVENC 失敗，跳出迴圈
-
-        try:
-            if os.path.exists(filter_script_path):
-                os.remove(filter_script_path)
-        except Exception:
-            pass
-
-        if self._stop_event.is_set():
-            self.log("[X] 串帶已中止。")
-            if os.path.exists(reel_out):
-                try: os.remove(reel_out)
-                except: pass
-        elif proc.returncode != 0:
-            err_txt = "Unknown stderr"
             try:
-                with open(err_log_file, "r", encoding="utf-8") as fe:
-                    err_txt = fe.read()
+                if os.path.exists(err_log_file):
+                    os.remove(err_log_file)
             except:
                 pass
-            if len(err_txt) > 2000:
-                err_txt = "..." + err_txt[-2000:]  # type: ignore
-            self.err(f"[!] 串帶失敗: \n{err_txt}")
-        else:
-            suffix = "（已自動降級為 x264 軟體編碼）" if fallback_attempted else ""
-            self.log(f"[Engine] 串帶壓印任務完成！{suffix}")
-            if on_progress is not None:
-                on_progress({"phase": "concat", "status": "completed", "total_pct": 100})  # type: ignore
-
-        try:
-            if os.path.exists(err_log_file):
-                os.remove(err_log_file)
-        except:
-            pass
 
         # 清理分批預合併的中間檔案
         for tmp in _temp_intermediates:
@@ -2015,49 +2082,60 @@ class MediaGuardEngine:
         cmd.extend(vcodec_args)
         if include_audio:
             cmd += ["-c:a", "aac", "-b:a", "192k"]
-        cmd.append(output_path)
+        # 同 run_concat_job：寫暫存檔，ffmpeg 收工才換成正式名。失敗／中止時
+        # 上一份好的成品不受影響（這是要交出去的東西）。
+        with AtomicOutput(output_path) as out:
+            cmd.append(out.path)
 
-        self.log(f"[Engine] 進階串帶：{n} 段 → {output_path}")
-        if on_progress:
-            on_progress({'phase': 'concat', 'total_pct': 0, 'status': '進階串帶中...', 'total_files': n, 'done_files': 0})
+            self.log(f"[Engine] 進階串帶：{n} 段 → {output_path}")
+            if on_progress:
+                on_progress({'phase': 'concat', 'total_pct': 0, 'status': '進階串帶中...', 'total_files': n, 'done_files': 0})
 
-        def _run_once(final_cmd):
-            try:
-                proc = _sp.Popen(final_cmd, stdout=_sp.PIPE, stderr=_sp.PIPE, creationflags=_flags)
-                _, stderr = proc.communicate()
-                err_txt = (stderr or b"")[-3000:].decode("utf-8", errors="ignore")
-                return proc.returncode, err_txt
-            except Exception as e:
-                return -1, str(e)
+            def _run_once(final_cmd):
+                try:
+                    proc = _sp.Popen(final_cmd, stdout=_sp.PIPE, stderr=_sp.PIPE, creationflags=_flags)
+                    _, stderr = proc.communicate()
+                    err_txt = (stderr or b"")[-3000:].decode("utf-8", errors="ignore")
+                    return proc.returncode, err_txt
+                except Exception as e:
+                    return -1, str(e)
 
-        rc, err_msg = _run_once(cmd)
+            rc, err_msg = _run_once(cmd)
 
-        # NVENC driver mismatch (SOCA-style) → auto fallback to libx264.
-        nvenc_fail = ("nvenc" in err_msg.lower() and
-                      ("api version" in err_msg.lower() or
-                       "minimum required" in err_msg.lower() or
-                       "could not open encoder" in err_msg.lower()))
-        if rc != 0 and nvenc_fail and "NVENC" in codec:
-            self.log("[Engine] 偵測到 NVENC 驅動不相容，自動改用 libx264 軟編重試")
-            # Replace encoder args in-place: NVENC → libx264
-            new_cmd = []
-            i = 0
-            while i < len(cmd):
-                arg = cmd[i]
-                if arg == "-c:v" and i + 1 < len(cmd) and cmd[i + 1] == "h264_nvenc":
-                    new_cmd += ["-c:v", "libx264", "-preset", "medium", "-crf", "20", "-pix_fmt", "yuv420p"]
-                    i += 2
-                    # Also skip original NVENC-specific args that follow (-preset, -b:v)
-                    while i < len(cmd) and cmd[i] in ("-preset", "-b:v"):
+            # NVENC driver mismatch (SOCA-style) → auto fallback to libx264.
+            nvenc_fail = ("nvenc" in err_msg.lower() and
+                          ("api version" in err_msg.lower() or
+                           "minimum required" in err_msg.lower() or
+                           "could not open encoder" in err_msg.lower()))
+            if rc != 0 and nvenc_fail and "NVENC" in codec:
+                self.log("[Engine] 偵測到 NVENC 驅動不相容，自動改用 libx264 軟編重試")
+                out.reset()   # 丟掉 NVENC 寫到一半的暫存檔
+                # Replace encoder args in-place: NVENC → libx264
+                new_cmd = []
+                i = 0
+                while i < len(cmd):
+                    arg = cmd[i]
+                    if arg == "-c:v" and i + 1 < len(cmd) and cmd[i + 1] == "h264_nvenc":
+                        new_cmd += ["-c:v", "libx264", "-preset", "medium", "-crf", "20", "-pix_fmt", "yuv420p"]
                         i += 2
-                    continue
-                new_cmd.append(arg)
-                i += 1
-            rc, err_msg = _run_once(new_cmd)
+                        # Also skip original NVENC-specific args that follow (-preset, -b:v)
+                        while i < len(cmd) and cmd[i] in ("-preset", "-b:v"):
+                            i += 2
+                        continue
+                    new_cmd.append(arg)
+                    i += 1
+                rc, err_msg = _run_once(new_cmd)
 
-        if rc != 0:
-            self.err(f"[Engine] ffmpeg 進階串帶失敗：\n{err_msg}")
-            return
+            if rc != 0:
+                self.err(f"[Engine] ffmpeg 進階串帶失敗：\n{err_msg}")
+                return   # 離開 with → 半截檔丟掉
+
+            try:
+                out.commit()
+            except OSError as e:
+                self.err(f"[Engine] 進階串帶完成但無法歸位 {os.path.basename(output_path)}：{e}\n"
+                         f"    成品保留在: {out.path}")
+                return
 
         if on_progress:
             on_progress({'phase': 'concat', 'total_pct': 100, 'status': '完成', 'total_files': n, 'done_files': n})

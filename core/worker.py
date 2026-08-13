@@ -18,7 +18,7 @@ from core.schemas import (  # type: ignore
     TtsRequest, TtsCloneRequest, DroneMetaRequest,
     TimelineExportRequest,
 )
-from core_engine import ReportManifest  # type: ignore
+from core_engine import ReportManifest, AtomicOutput  # type: ignore
 
 
 # ── Public API ───────────────────────────────────────────────
@@ -1221,121 +1221,136 @@ def _drone_meta_sync(job, engine, task: DroneMetaRequest, _on_progress):
                     sf.write(f".F.PRY ({f_pry[0]:.1f}\u00b0, {f_pry[1]:.1f}\u00b0, {f_pry[2]:.1f}\u00b0), ")
                     sf.write(f"G.PRY ({g_pry[0]:.1f}\u00b0, {g_pry[1]:.1f}\u00b0, {g_pry[2]:.1f}\u00b0)\n\n")
 
-        # Per-file step = pure container remux: rename, write creation_time,
-        # normalize DJI → Autel (inject SRT subtitle, set handler names).
-        # ABSOLUTELY NO trim / color / re-encode — all advanced edits happen
-        # at the concat step via advanced_clips so raw clips stay untouched.
-        ff_cmd = [ffmpeg_bin, "-y", "-i", fpath]
+        # 🔴 寫暫存檔、remux + exiftool 都成功才換成正式名。原本直接寫最終
+        # 檔名：ffmpeg 或 exiftool 中途失敗，交付夾就留下一個頂著正式檔名的
+        # 半截檔（manifest 沒記成功、但檔案在，肉眼看不出來）。
+        with AtomicOutput(new_path) as out:
+            # Per-file step = pure container remux: rename, write creation_time,
+            # normalize DJI → Autel (inject SRT subtitle, set handler names).
+            # ABSOLUTELY NO trim / color / re-encode — all advanced edits happen
+            # at the concat step via advanced_clips so raw clips stay untouched.
+            ff_cmd = [ffmpeg_bin, "-y", "-i", fpath]
 
-        if is_dji and autel_srt_path:
-            ff_cmd += ["-i", autel_srt_path]
+            if is_dji and autel_srt_path:
+                ff_cmd += ["-i", autel_srt_path]
 
-        if is_dji:
-            # Exclude DJI private meta/dbgi tracks AND the mjpeg attached_pic
-            # thumbnail Mavic 3+ embeds (without :0 it sneaks in as a second
-            # video stream and breaks downstream concat / re-mux steps).
-            ff_cmd += ["-map", "0:v:0", "-map", "0:a:0?"]
-            if autel_srt_path:
-                ff_cmd += ["-map", "1:0"]
-        else:
-            ff_cmd += ["-map", "0"]
+            if is_dji:
+                # Exclude DJI private meta/dbgi tracks AND the mjpeg attached_pic
+                # thumbnail Mavic 3+ embeds (without :0 it sneaks in as a second
+                # video stream and breaks downstream concat / re-mux steps).
+                ff_cmd += ["-map", "0:v:0", "-map", "0:a:0?"]
+                if autel_srt_path:
+                    ff_cmd += ["-map", "1:0"]
+            else:
+                ff_cmd += ["-map", "0"]
 
-        if is_dji and autel_srt_path:
-            # Copy av streams; transcode SRT to mov_text for MOV container.
-            # Force 60fps timescale to match Autel (DJI uses 59.94).
-            ff_cmd += ["-c:v", "copy", "-c:a", "copy", "-c:s", "mov_text",
-                       "-video_track_timescale", "60000"]
-        else:
-            ff_cmd += ["-c", "copy"]
+            if is_dji and autel_srt_path:
+                # Copy av streams; transcode SRT to mov_text for MOV container.
+                # Force 60fps timescale to match Autel (DJI uses 59.94).
+                ff_cmd += ["-c:v", "copy", "-c:a", "copy", "-c:s", "mov_text",
+                           "-video_track_timescale", "60000"]
+            else:
+                ff_cmd += ["-c", "copy"]
 
-        # Handler metadata
-        if is_dji:
-            ff_cmd += ["-metadata:s:v", "handler_name=Autel.Video"]
-            if autel_srt_path:
-                ff_cmd += ["-metadata:s:s", "handler_name=Autel.Subtitle"]
+            # Handler metadata
+            if is_dji:
+                ff_cmd += ["-metadata:s:v", "handler_name=Autel.Video"]
+                if autel_srt_path:
+                    ff_cmd += ["-metadata:s:s", "handler_name=Autel.Subtitle"]
 
-        # NO +faststart on intermediate files — these go straight into concat,
-        # never streamed via web. faststart forces a 2-pass IO write that
-        # roughly doubles wall time for multi-GB 4K HEVC drone clips on NAS.
-        # The final concat output (line 1089) keeps faststart since that's
-        # the user-facing reel that may be browser-previewed.
-        ff_cmd += ["-metadata", f"creation_time={file_iso_dt}", new_path]
+            # NO +faststart on intermediate files — these go straight into concat,
+            # never streamed via web. faststart forces a 2-pass IO write that
+            # roughly doubles wall time for multi-GB 4K HEVC drone clips on NAS.
+            # The final concat output (line 1089) keeps faststart since that's
+            # the user-facing reel that may be browser-previewed.
+            ff_cmd += ["-metadata", f"creation_time={file_iso_dt}", out.path]
 
-        ff_result = subprocess.run(
-            ff_cmd, capture_output=True, text=True,
-            encoding="utf-8", errors="ignore",
-            creationflags=HNO,
-        )
-        if ff_result.returncode != 0:
-            err = ff_result.stderr[-800:] if ff_result.stderr else "unknown error"
-            # Compact stderr: drop banner lines, keep anything with Error/Invalid/bitstream.
-            err_lines = [ln for ln in err.splitlines() if ln.strip()]
-            concise = '\n'.join(err_lines[-8:])  # last 8 non-blank lines usually carry the cause
-            fail_list.append(f"{os.path.basename(fpath)}: ffmpeg 失敗 — {err}")
-            _emit_sync_for_job(job_id, 'log', {
-                'type': 'error', 'msg': f'ffmpeg 失敗: {os.path.basename(fpath)}\n{concise}'
-            })
-            _emit_sync_for_job(job_id, 'log', {
-                'type': 'info', 'msg': f'ffmpeg 指令: {" ".join(ff_cmd)}'
-            })
-            continue
+            ff_result = subprocess.run(
+                ff_cmd, capture_output=True, text=True,
+                encoding="utf-8", errors="ignore",
+                creationflags=HNO,
+            )
+            if ff_result.returncode != 0:
+                err = ff_result.stderr[-800:] if ff_result.stderr else "unknown error"
+                # Compact stderr: drop banner lines, keep anything with Error/Invalid/bitstream.
+                err_lines = [ln for ln in err.splitlines() if ln.strip()]
+                concise = '\n'.join(err_lines[-8:])  # last 8 non-blank lines usually carry the cause
+                fail_list.append(f"{os.path.basename(fpath)}: ffmpeg 失敗 — {err}")
+                _emit_sync_for_job(job_id, 'log', {
+                    'type': 'error', 'msg': f'ffmpeg 失敗: {os.path.basename(fpath)}\n{concise}'
+                })
+                _emit_sync_for_job(job_id, 'log', {
+                    'type': 'info', 'msg': f'ffmpeg 指令: {" ".join(ff_cmd)}'
+                })
+                continue
 
-        # exiftool write metadata (date stamps + drone make/model/lens)
-        exif_cmd = [
-            exiftool,
-            f"-CreateDate={file_exif_dt}",
-            f"-ModifyDate={file_exif_dt}",
-            f"-TrackCreateDate={file_exif_dt}",
-            f"-TrackModifyDate={file_exif_dt}",
-            f"-MediaCreateDate={file_exif_dt}",
-            f"-MediaModifyDate={file_exif_dt}",
-            f"-FileCreateDate={file_exif_dt}",
-            f"-FileModifyDate={file_exif_dt}",
-            f"-Make={task.drone_make}",
-            f"-Model={task.drone_model}",
-            f"-QuickTime:Make={task.drone_make}",
-            f"-QuickTime:Model={task.drone_model}",
-            f"-LensMake={task.lens_make}",
-            f"-LensModel={task.lens_model}",
-            "-Software=Lavf58.20.100",
-            "-QuickTime:SoftwareVersion=Lavf58.20.100",
-            "-overwrite_original",
-            new_path,
-        ]
-        exif_result = subprocess.run(
-            exif_cmd, capture_output=True, text=True,
-            encoding="utf-8", errors="ignore",
-            creationflags=HNO,
-        )
-        if exif_result.returncode != 0:
-            err = exif_result.stderr[-500:] if exif_result.stderr else "unknown error"
-            fail_list.append(f"{new_name}: exiftool 失敗 — {err}")
-            _emit_sync_for_job(job_id, 'log', {
-                'type': 'error', 'msg': f'exiftool 失敗: {new_name}'
-            })
-            # Clean up temp SRT even on failure
+            # exiftool write metadata (date stamps + drone make/model/lens)
+            exif_cmd = [
+                exiftool,
+                f"-CreateDate={file_exif_dt}",
+                f"-ModifyDate={file_exif_dt}",
+                f"-TrackCreateDate={file_exif_dt}",
+                f"-TrackModifyDate={file_exif_dt}",
+                f"-MediaCreateDate={file_exif_dt}",
+                f"-MediaModifyDate={file_exif_dt}",
+                f"-FileCreateDate={file_exif_dt}",
+                f"-FileModifyDate={file_exif_dt}",
+                f"-Make={task.drone_make}",
+                f"-Model={task.drone_model}",
+                f"-QuickTime:Make={task.drone_make}",
+                f"-QuickTime:Model={task.drone_model}",
+                f"-LensMake={task.lens_make}",
+                f"-LensModel={task.lens_model}",
+                "-Software=Lavf58.20.100",
+                "-QuickTime:SoftwareVersion=Lavf58.20.100",
+                "-overwrite_original",
+                out.path,
+            ]
+            exif_result = subprocess.run(
+                exif_cmd, capture_output=True, text=True,
+                encoding="utf-8", errors="ignore",
+                creationflags=HNO,
+            )
+            if exif_result.returncode != 0:
+                err = exif_result.stderr[-500:] if exif_result.stderr else "unknown error"
+                fail_list.append(f"{new_name}: exiftool 失敗 — {err}")
+                _emit_sync_for_job(job_id, 'log', {
+                    'type': 'error', 'msg': f'exiftool 失敗: {new_name}'
+                })
+                # Clean up temp SRT even on failure
+                if autel_srt_path and os.path.exists(autel_srt_path):
+                    try:
+                        os.remove(autel_srt_path)
+                    except OSError:
+                        pass
+                continue
+
+            # Clean up temp Autel SRT file
             if autel_srt_path and os.path.exists(autel_srt_path):
                 try:
                     os.remove(autel_srt_path)
                 except OSError:
                     pass
-            continue
 
-        # Clean up temp Autel SRT file
-        if autel_srt_path and os.path.exists(autel_srt_path):
+            # remux + metadata 都成功了才換成正式檔名
             try:
-                os.remove(autel_srt_path)
-            except OSError:
-                pass
+                out.commit()
+            except OSError as e:
+                fail_list.append(f"{new_name}: 無法歸位 — {e}")
+                _emit_sync_for_job(job_id, 'log', {
+                    'type': 'error',
+                    'msg': f'寫好了卻無法改名: {new_name} — {e}\n成品保留在: {out.path}'
+                })
+                continue
 
-        success_count += 1
-        new_file_paths.append(new_path)
-        _record_manifest_success(manifest_dir, manifest, manifest_stems,
-                                 src_stem, current_index, ext_key, next_index)
-        _emit_sync_for_job(job_id, 'log', {
-            'type': 'info', 'msg': f'✓ {new_name} 完成'
-                + (f' (DJI→Autel 轉換)' if is_dji else '')
-        })
+            success_count += 1
+            new_file_paths.append(new_path)
+            _record_manifest_success(manifest_dir, manifest, manifest_stems,
+                                     src_stem, current_index, ext_key, next_index)
+            _emit_sync_for_job(job_id, 'log', {
+                'type': 'info', 'msg': f'✓ {new_name} 完成'
+                    + (f' (DJI→Autel 轉換)' if is_dji else '')
+            })
 
     # Final progress
     _on_progress({

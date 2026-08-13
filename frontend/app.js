@@ -1387,7 +1387,7 @@ if (typeof appendLog === 'undefined') {
         /**
          * 某台的 HostDispatch 夾裡「真的產出了什麼」。
          * 夾子在共享的 proxy root 上，所以那台就算已經死透了也查得到。
-         * `.part.mov` 是還沒收工的暫存檔，不算數（會被列進重派清單）。
+         * `*.part.<ext>` 是還沒收工的暫存檔，不算數（會被列進重派清單）。
          */
         async function listProducedStems(dir) {
             const stems = new Set();
@@ -1402,7 +1402,7 @@ if (typeof appendLog === 'undefined') {
                     const name = String(p).split(/[\\/]/).pop() || '';
                     // 過渡期防護：list_dir 從 v2.4.66 起自己就會濾掉半成品，但
                     // OTA 期間機隊會有舊版 agent。機隊全數 ≥ 2.4.66 後可整條移除。
-                    if (/\.part\.mov$/i.test(name)) return;
+                    if (/\.part\.[^.]+$/i.test(name)) return;
                     stems.add(_proxyStem(name));
                 });
             } catch (_) { /* 查不到就當作什麼都沒產出，寧可重轉也不要漏 */ }

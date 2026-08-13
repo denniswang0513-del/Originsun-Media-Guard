@@ -14,6 +14,8 @@ import threading
 from datetime import datetime
 from typing import List, Tuple, Optional
 
+from core_engine import is_junk_file  # type: ignore
+
 _BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 _CONFIG_PATH = os.path.join(_BASE_DIR, "watcher_config.json")
 _HISTORY_PATH = os.path.join(_BASE_DIR, "watcher_history.json")
@@ -263,7 +265,10 @@ def _scan_candidates(source_root: str, dest_root: str) -> List[Tuple[str, List[s
         # behaviour to avoid re-processing existing work.
         if os.path.isdir(dest_sub):
             try:
+                # 寫到一半的 MAX_0001.part.MOV 不算「處理過」——
+                # 它的結尾同樣是 .MOV，不濾掉的話整個資料夾會被跳過
                 if any(f.upper().startswith("MAX_") and f.upper().endswith(_MAX_OUT_EXTS)
+                       and not is_junk_file(f)
                        for f in os.listdir(dest_sub)):
                     continue
             except OSError:
