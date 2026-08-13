@@ -187,6 +187,69 @@ class TestGates:
             assert pf.missing_for([], target) == {"blocking": [], "advisory": []}
 
 
+class TestDeepLinks:
+    """「去完成」deep-link（§14.4）。
+
+    這組全部在守**靜默失效**：連結的三個環節（item→模組、模組→RBAC、
+    模組→tab）任一對不上，畫面都不會報錯 —— 只會安安靜靜少一條連結，或者
+    畫成「你沒有這個權限」給每一個人看（包括管理員）。
+    """
+
+    def test_every_auto_item_has_a_destination(self):
+        """沒有去處的燈＝叫人自己去找，而這功能的價值正是「不用找」。"""
+        assert sorted(pf.AUTO_KEYS - set(pf.ITEM_DEST)) == []
+
+    def test_manual_items_have_no_destination(self):
+        """手動項就在這頁勾，不該把人送去別的地方。"""
+        assert not set(pf.MANUAL_KEYS) & set(pf.ITEM_DEST)
+
+    def test_destinations_are_declared(self):
+        for ik, dest in pf.ITEM_DEST.items():
+            assert dest in pf.DESTS, f"{ik} 指向未宣告的目的地 {dest}"
+
+    def test_destination_keys_are_real_rbac_modules(self):
+        """🔴 目的地的鍵**就是**模組鍵 —— 打錯字的話 `payload_grants` 對
+        每個人都回 False，連管理員都看到「你沒有這個權限」。"""
+        from core.auth import ALL_MODULES
+        for key in pf.DESTS:
+            assert key in ALL_MODULES, f"{key} 不是合法的模組鍵"
+
+    def test_destination_keys_are_real_tabs(self):
+        """🔴 另一半：前端拿 TAB_MAP[模組鍵] 換 section id，換不到就靜默不畫。
+
+        直接讀 tab-config.js 比對 —— 那份是前端的正本，兩邊靠字串接。
+        """
+        import re
+        from pathlib import Path
+        src = Path(__file__).resolve().parents[2] / "frontend/js/shared/tab-config.js"
+        body = re.search(r"export const TAB_MAP = \{(.*?)\n\};",
+                         src.read_text(encoding="utf-8"), re.S).group(1)
+        tabs = set(re.findall(r"(\w+)\s*:\s*'", body))
+        assert tabs, "TAB_MAP 解析失敗（tab-config.js 的寫法改了？）"
+        for key in pf.DESTS:
+            assert key in tabs, f"{key} 在 TAB_MAP 裡沒有對應的 tab"
+
+    def test_only_unlit_auto_rows_carry_a_destination(self):
+        """亮了的沒事可做、略過的更不用去 —— 連結只給未亮的自動燈。
+
+        這個判斷放在後端（build）而不是 JS，前端才不會有第二份 state 判斷。
+        """
+        out = pf.build({"quote": True, "published": None},
+                       {"shooting": {"checked": True}})
+        rows = {r["key"]: r for t in out["tracks"] for r in t["items"]}
+        assert "dest" not in rows["quote"], "亮著的燈不該帶去處"
+        assert "dest" not in rows["published"], "略過的燈不該帶去處"
+        assert "dest" not in rows["shooting"], "手動項不該帶去處"
+        assert rows["settled"]["dest"] == "crm_invoices"
+
+    def test_missing_rows_carry_the_same_destination_key(self):
+        """缺項清單與燈號列共用同一個欄位名 —— 前端一支 `_dest()` 兩處通用。"""
+        out = pf.missing_for(
+            TestGates._tracks(approved=pf.OFF, settled=pf.OFF), "結案")
+        assert out["blocking"][0]["dest"] == pf.ITEM_DEST["approved"]
+        assert out["advisory"][0]["dest"] == pf.ITEM_DEST["settled"]
+
+
 class TestStageView:
     def test_next_status_follows_pipeline(self):
         assert pf.stage_view("提案")["next"] == "製作"

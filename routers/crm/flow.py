@@ -239,6 +239,12 @@ async def _payload(session, project, *, auth) -> dict:
         # 呼叫端各算各的就會出現「畫面說可以、後端回 403」。
         "can_check": payload_grants(auth, *pf.CHECK_MODULES),
         "can_advance": payload_grants(auth, *pf.ADVANCE_MODULES),
+        # deep-link「去完成」：每個目的地一份 {名稱, 這個人進不進得去}。
+        # 權限在**這裡**算一次，前端不再自己讀 token 解 modules —— 那等於把
+        # RBAC 的判定複製到 JS，而 can_check/can_advance 已經是這個慣例。
+        # 整張表都送（10 個字串，不到 1KB）：形狀固定，前端不必猜哪個鍵在。
+        "links": {k: {"label": lb, "allowed": payload_grants(auth, k)}
+                  for k, lb in pf.DESTS.items()},
         # 這次推進**會不會真的用到**成案原因（見 wins_proposal docstring）
         "collects_outcome_reason": pf.wins_proposal(
             stage["next"], meta["proposal_count"], bool(facts.get("won"))),

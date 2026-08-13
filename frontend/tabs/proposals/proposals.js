@@ -416,6 +416,9 @@ async function openDetail(pid) {
                 // 推進會連動這筆提案本身（進「製作」＝衛星提案標成案 + 寫入
                 // 成案原因），詳情標頭的狀態下拉與原因面板都會是舊值 → 重開
                 onAdvanced: () => { refreshList({ stats: true }); openDetail(prop.id); },
+                // 「去完成」在 SPA 裡是原地換 tab —— overlay 不關的話，切過去
+                // 的畫面被蓋在底下（overlay 掛在 body 上、不在 tab section 裡）
+                onNavigate: _closeOverlay,
             });
         },
     };

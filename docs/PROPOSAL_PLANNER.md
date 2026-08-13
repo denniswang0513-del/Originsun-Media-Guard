@@ -1398,6 +1398,14 @@ RBAC v2 原則沿用：權限＝帳號的 `modules[]`＋管理員開關，admin 
 2. `crm_project_flow_checks` 表 + check API + 勾選 UI（audit：checked_by）。
 3. 推進按鈕（走既有狀態端點）+ 缺項軟擋確認框。
 4. `/proposal-plan.html` 同步 + deep-links + 清單階段 chip。
+   - 4A ✅ deep-link「去完成」（2026-08-14）。實作與 §14.4 的草案差一處：
+     **目的地不另立一組 key** —— 目的地就是一個 tab，而 tab 的鍵就是模組鍵
+     （`TAB_MAP` 本來就這樣鍵的），所以 `core.project_flow.DESTS` 是
+     「模組鍵 → 名稱」一張表，前端用既有的 `TAB_MAP` 換 section id，不必再
+     維護第二份「目的地 → 網址」對照。權限在後端算成 `links[key].allowed`
+     （同 `can_check` / `can_advance` 的慣例），前端不自己解 token。
+     SPA 原地換 tab（`onNavigate` 先關 overlay）／獨立頁開新分頁，靠
+     `window.switchTab` 在不在做能力偵測。
 
 測試：unit＝每個 auto 訊號正反面 + RBAC 反面（提案庫-only 勾選要 403）；
 e2e＝勾選、推進、未成案原因守衛、公開頁不出 flow。

@@ -84,7 +84,10 @@ def mount_flow(page):
     留下的 host 帶著已綁的事件委派會跑進別支測試檔 —— 而失敗時最需要清理，
     正是「最後一行」跑不到的時候。
     """
+    made = []
+
     def _do(project_id, token, *, host_id="flowhost", wait=".pflow-track"):
+        made.append(host_id)
         page.evaluate("t => localStorage.setItem('auth_token', t)", token)
         page.evaluate("""async ([pid, hid]) => {
             const host = document.createElement('div');
@@ -97,8 +100,9 @@ def mount_flow(page):
             page.wait_for_selector(f"#{host_id} {wait}", timeout=20000)
         return host_id
     yield _do
-    page.evaluate("() => document.querySelectorAll('#flowhost, #advtest, #flowtest-host')"
-                  ".forEach(e => e.remove())")
+    # 收自己掛過的那幾個 —— 寫死一份 id 清單的話，新測試檔換個 host_id 就
+    # 靜默漏掉（而漏掉的殘留會帶著已綁的事件委派跑進別支測試檔）
+    page.evaluate("ids => ids.forEach(i => document.getElementById(i)?.remove())", made)
 
 
 @pytest.fixture(autouse=True)

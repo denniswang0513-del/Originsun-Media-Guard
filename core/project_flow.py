@@ -71,6 +71,49 @@ AUTO_KEYS = frozenset(k for k, v in ITEMS.items() if v[2] == AUTO)
 
 MAX_NOTE = 500
 
+# ── deep-link「去完成」目的地（規格 §14.4）──────────────────────────────
+# 未亮的燈要能帶人去做那件事，不然它只是一句抱怨。
+#
+# **目的地就是一個 tab，而 tab 的鍵就是模組鍵** —— RBAC v2 的 `modules[]` 每個
+# 值都對應一個 tab（`frontend/js/shared/tab-config.js` 的 TAB_MAP 就是這樣鍵
+# 的）。所以這裡一個 dict 就夠：模組鍵 → 目的地名稱；前端用 TAB_MAP[key] 換到
+# section id，不必再維護第二張「dest → 網址」對照表（那張表會跟這張漂掉）。
+#
+# 🔴 **門在目的地**（owner §14.4）：這裡的鍵只決定連結畫成可點還是禁用＋
+# 「需要＿＿權限」，**不是安全邊界** —— 真正的守衛是目的地自己的既有閘門。
+# 不藏功能：沒權限的人看得到燈、看得到缺哪個權限，只是點不動。
+DESTS: dict[str, str] = {
+    "crm_projects":      "專案管理",
+    "crm_quotes":        "報價管理",
+    "crm_invoices":      "財務管理",
+    "preprod_proposals": "提案庫",
+    "media_log":         "影像紀錄",
+    "timesheets":        "專案工時",
+    "portal":            "審批門戶",
+    "references":        "片庫",
+    "preprod_locations": "場景庫",
+    "footage":           "素材庫",
+}
+
+# item_key → 目的地。**每個 AUTO 項都要有一個**（test_project_flow 守著）：
+# 沒有去處的燈等於叫人自己去找，而這功能的價值正是「不用找」。
+# 手動項不列 —— 它們就在這頁勾，不需要去別的地方。
+ITEM_DEST: dict[str, str] = {
+    "client": "crm_projects", "quote": "crm_quotes", "quote_won": "crm_quotes",
+    "invoiced": "crm_invoices", "settled": "crm_invoices",
+    "proposal": "preprod_proposals", "ideation": "preprod_proposals",
+    "brief": "preprod_proposals", "pitched": "preprod_proposals",
+    "won": "preprod_proposals",
+    "staffed": "crm_projects", "footage_in": "media_log",
+    "timesheet": "timesheets", "approved": "portal",
+    # 交付軌四項全在專案詳情的「完稿結案」分頁
+    "final": "crm_projects", "archived": "crm_projects",
+    "work_ready": "crm_projects", "published": "crm_projects",
+    "retro": "crm_projects",
+    "h_tpl": "preprod_proposals", "h_refs": "references",
+    "h_loc": "preprod_locations", "h_footage": "footage",
+}
+
 # 誰可以勾手動里程碑（owner 2026-08-14 拍板走模組級）。守衛與「畫不畫
 # checkbox」兩處共用這一份 —— 分兩處寫的話，總有一天畫面說可以、後端回 403。
 CHECK_MODULES: tuple[str, ...] = ("crm_projects",)
@@ -213,6 +256,11 @@ def build(facts: dict, stored_manual=None, detail: dict = None) -> dict:
                 row["state"] = SKIP if val is None else (ON if val else OFF)
                 if detail_map.get(ik):
                     row["detail"] = str(detail_map[ik])[:200]
+                # 只有**未亮**的燈帶去處：亮了的沒事要做，略過的更不用去。
+                # 「什麼時候該畫連結」這個判斷放在這裡（產 payload 的地方），
+                # 前端就不會有第二份 state 判斷跟這裡漂掉。
+                if row["state"] == OFF and ik in ITEM_DEST:
+                    row["dest"] = ITEM_DEST[ik]
             rows.append(row)
         tracks.append({
             "key": tk, "label": tlabel, "items": rows,
@@ -238,7 +286,9 @@ def missing_for(tracks: list, target_status: str) -> dict:
         if state.get(k) != OFF:
             continue
         bag = "advisory" if k in ADVISORY else "blocking"
-        out[bag].append({"key": k, "label": ITEMS[k][1], "track": ITEMS[k][0]})
+        # dest 的鍵名與 build() 產的燈號列一致 —— 前端一支 `_dest()` 兩處通用
+        out[bag].append({"key": k, "label": ITEMS[k][1], "track": ITEMS[k][0],
+                         "dest": ITEM_DEST.get(k, "")})
     return out
 
 
