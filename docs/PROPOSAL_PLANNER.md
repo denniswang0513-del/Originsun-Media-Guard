@@ -1212,9 +1212,13 @@ owner 需求原文（兩則合讀）：「將現在的提案頁面裡的專案�
    狀態寫入，後端查詢時即時算）。自動訊號從既有資料推（報價單、人員配置、
    影像紀錄、審批、`work_completeness` 四項、發票請款）；只有無法從資料推的
    步驟（開拍、剪輯完成…）落新表當手動勾選項。
-3. **不新增階段**。沿用八狀態（投標/開發/洽詢/提案/製作/結案/歸檔/未成案），
-   工作流步驟是**每個階段內的 checklist**，不是第二套狀態機——兩套狀態機
-   總有一天互相漂移。
+3. **階段與進度解耦**（2026-08-13 owner「有時候進度是多方前進」後修正）。
+   **階段**沿用八狀態（投標/開發/洽詢/提案/製作/結案/歸檔/未成案）維持
+   **單線**——它是商務主軸，CRM 的客戶分級、錢流口徑、結案看板全掛在上面，
+   一個專案同時只能在一個狀態。**進度**則是**多軌並行**的訊號矩陣：訊號
+   從資料推導、哪時發生哪時亮，**與當前階段無關**——還在「提案」階段時
+   人員已配置、素材已入庫，照亮不誤。推進階段只是把商務主軸的標籤往前撥。
+   不做第二套狀態機——兩套狀態機總有一天互相漂移。
 4. **推進走既有閘門**。「推進到下一階段」＝打 `routers/crm/projects.py` 既有
    的專案狀態端點（狀態白名單 + `_sync_linked_proposals` 衛星 win/loss +
    客戶分級重算的完整副作用鏈）。🔴 合體鐵則沿用：**不能只 setattr、不能繞過
@@ -1222,43 +1226,60 @@ owner 需求原文（兩則合讀）：「將現在的提案頁面裡的專案�
 
 ### §14.1 資料層
 
-新表 `crm_project_stage_checks`（只存**手動**項；自動訊號永不落庫）：
+新表 `crm_project_flow_checks`（只存**手動**項；自動訊號永不落庫）：
 
-    id PK / project_id FK / stage / item_key / checked bool
+    id PK / project_id FK / item_key / checked bool
     / checked_by / checked_at / note TEXT
-    UNIQUE(project_id, stage, item_key)
+    UNIQUE(project_id, item_key)
+
+（item_key 全域唯一，**不帶 stage 欄**——項目屬於軌道不屬於階段，
+這正是「多方前進」的資料層體現。）
 
 步驟範本＝純資料常數 `core/project_flow.py`（比照 plan-templates 慣例）：
-每階段 `items[{key, label, kind: auto|manual, hint, link}]`，auto 項各配一個
+每軌 `items[{key, label, kind: auto|manual, hint, link}]`，auto 項各配一個
 推導函式。v1 一套通用範本，不做 per-project_type 客製（決策點 1）。
 
-### §14.2 階段步驟草案（v1 內建，文字任 owner 改）
+### §14.2 四條軌道草案（v1 內建，文字任 owner 改）
 
-- **投標/開發/洽詢**（前期）：客戶已建檔(auto: client_id)、提案已建立
-  (auto: 衛星列存在)
-- **提案**：創意發想已開始(auto: `_plan_started`)、企劃書至少一版
-  (auto: preprod_brief)、報價單已備(auto: preprod_quote_files 或
-  crm_quotations)、已向客戶提案(auto: 衛星 status ∈ 已提案/入圍)
-- **製作**：報價成交(auto: quotation 狀態)、人員已配置
-  (auto: crm_project_staff ≥1)、開拍(manual)、素材已進影像紀錄
-  (auto: media_log)、剪輯完成(manual)、客戶審批通過
+進度按**軌道**分組、各軌獨立前進，不按階段分組：
+
+- **商務軌**：客戶已建檔(auto: client_id) → 報價單已備(auto:
+  preprod_quote_files 或 crm_quotations) → 報價成交(auto: quotation 狀態)
+  → 已請款/開發票(auto: crm_invoices 有列) → 款項結清(auto: 應收餘額 0)
+- **企劃軌**：提案已建立(auto: 衛星列存在) → 創意發想已開始(auto:
+  `_plan_started`) → 企劃書至少一版(auto: preprod_brief) → 已向客戶提案
+  (auto: 衛星 status ∈ 已提案/入圍) → 成案(auto: 衛星 status)
+- **製作軌**：人員已配置(auto: crm_project_staff ≥1) → 開拍(manual) →
+  素材已進影像紀錄(auto: media_log) → 剪輯完成(manual) → 客戶審批通過
   (auto: portal 最新一輪通過；沒開審批單則 manual)
-- **結案**：完稿已交付(manual)、上架素材完成度
-  (auto: `work_completeness` 四項逐項亮燈)、已請款/開發票
-  (auto: crm_invoices 有列)、款項結清(auto: 應收餘額 0——黃燈提示，
-  **不阻擋**，實務上結案常先於收款；決策點 5)
-- **歸檔**：手動一鍵（決策點 4）
-- **未成案**：終態。顯示 outcome_reason，無步驟、不可推進。
+- **交付軌**：完稿已交付(manual) → 上架素材完成度(auto:
+  `work_completeness` 四項逐項亮燈；1:N 多作品專案**每支作品一列**) →
+  官網上線(auto: showcase published；「不上官網」則此項顯示略過)
 
-推進遇缺項＝**軟擋**：彈確認框列出缺什麼，確認後仍可推（決策點 2）。
-硬擋只保留既有守衛（成案/未成案原因必填等）——不在 UI 層新蓋假守門。
+軌內箭頭是**建議順序**不是鎖——亮燈只看資料，跳著亮完全合法
+（先收到訂金再補企劃書，商務軌就是比企劃軌快）。
+
+**多提案並行**（v2.4.57 一專案 1:N 提案）：企劃軌訊號**聚合**所有衛星提案
+（任一筆有企劃書＝亮；「成案」看成案那筆）。
+
+**階段 gate**（推進時的建議檢查）引用**跨軌**的特定項，不是「某階段的清單」：
+
+| 推進 | 建議完成（軟擋列缺項） | 硬守衛（既有，不動） |
+|---|---|---|
+| 前期→製作 | 企劃軌「成案」、商務軌「報價成交」 | 成案 outcome_reason 必填 |
+| 製作→結案 | 製作軌「審批通過」 | — |
+| 結案→歸檔 | 交付軌全亮、商務軌「已請款」 | — |
+| 任一→未成案 | — | outcome_reason 必填 |
+
+款項結清**永不阻擋**（黃燈；決策點 5）。推進遇缺項＝**軟擋**：確認框列出
+缺什麼，確認後仍可推（決策點 2）。硬擋只保留既有守衛——不在 UI 層新蓋假守門。
 
 ### §14.3 API
 
 - `GET  /api/v1/projects/{id}/flow` → `{status, stages:[{stage, items:[…], …}],
   next_status, missing:[…]}`。守衛 `proposal_auth` 級（能看提案的都能看）。
   自動訊號一次 JOIN/聚合算完（比照 quotations/stats，禁 N+1）。
-- `POST /api/v1/projects/{id}/flow/check` `{stage, item_key, checked, note}`
+- `POST /api/v1/projects/{id}/flow/check` `{item_key, checked, note}`
   → 守衛 `check_admin_or_module('crm_projects')`（與 CRM 專案寫入同門）。
 - **推進不新增端點**——前端打既有專案狀態端點。
 - 🔴 公開 `?t=` 端點**完全不出 flow**（內部進度、金額訊號、人名都不出；
@@ -1269,9 +1290,11 @@ owner 需求原文（兩則合讀）：「將現在的提案頁面裡的專案�
 - 兩介面**結構共用**（v2.4.54 的教訓：逐項移植只會再分岔）：提案詳情 overlay
   與 `/proposal-plan.html` 各加「進度」分頁，跑同一份 `tabs/proposals/flow-*.js`。
   🔴 import closure 鐵則沿用：只准 `tabs/proposals/` 與 `js/shared/`。
-- 視覺：頂部階段 stepper（八狀態線性、未成案岔出紅），當前階段 checklist
-  （auto 項亮燈＋「去完成」deep-link、manual 項勾選＋署名），底部「推進到
-  下一階段」按鈕。
+- 視覺：頂部階段 stepper（八狀態線性、未成案岔出紅）＝商務主軸單線；
+  主體＝**四條橫向軌道**（§14.2），每軌 items 依建議順序排列、亮燈只看資料
+  ——「多方前進」在畫面上就是四條軌各自往前亮。auto 項亮燈＋「去完成」
+  deep-link、manual 項勾選＋署名。底部「推進到下一階段」按鈕＋跨軌 gate
+  缺項的軟擋確認框。
 - deep-link 目的地：SPA 內有權限者跳 CRM 對應分頁（報價管理/人員配置/完稿
   結案…）；`/proposal-plan.html` 使用者開對應獨立頁；無權限者按鈕禁用＋
   「需要專案管理權限」——不藏功能，讓人知道找誰。
@@ -1291,7 +1314,7 @@ owner 需求原文（兩則合讀）：「將現在的提案頁面裡的專案�
 
 1. `core/project_flow.py` 範本 + `GET /flow`（純推導，零新表）+ 詳情「進度」
    分頁唯讀 stepper。
-2. `crm_project_stage_checks` 表 + check API + 勾選 UI（audit：checked_by）。
+2. `crm_project_flow_checks` 表 + check API + 勾選 UI（audit：checked_by）。
 3. 推進按鈕（走既有狀態端點）+ 缺項軟擋確認框。
 4. `/proposal-plan.html` 同步 + deep-links + 清單階段 chip。
 
