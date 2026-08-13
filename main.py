@@ -40,6 +40,7 @@ _ROUTER_MODULES = [
     'api_footage',
     'api_analytics',
     'api_crm',
+    'api_project_flow',
     'api_drone_meta',
     'api_drone_watcher',
     'api_bulletin',
@@ -643,6 +644,10 @@ async def _on_startup():
                         "ALTER TABLE crm_projects ADD COLUMN IF NOT EXISTS budget_hours DOUBLE PRECISION",
                         # N-now 上架驗收：rebuild 後對外頁 200 驗證通過的時間戳
                         "ALTER TABLE crm_projects ADD COLUMN IF NOT EXISTS website_verified_at TIMESTAMP WITH TIME ZONE",
+                        # §14 工作流：五軌進度裡「推不出來」的手動里程碑（開拍/剪輯完成）。
+                        # 值在 DB、欄目在 core/project_flow.py —— 與 archive_checklist /
+                        # proposal_survey 同一套慣例，所以不另建表。
+                        "ALTER TABLE crm_projects ADD COLUMN IF NOT EXISTS flow_checks JSONB",
                         # H1 員工檔案完整化（HR_FIN_PLAN）
                         "ALTER TABLE crm_staff ADD COLUMN IF NOT EXISTS employment_type VARCHAR(16)",
                         "ALTER TABLE crm_staff ADD COLUMN IF NOT EXISTS hire_date TIMESTAMP WITH TIME ZONE",

@@ -1470,6 +1470,64 @@ Area 指標——現金流、稼動率留在各自 Area tab，別塞進專案進
 
 四項全是**提醒＋deep-link**，零新儲存（勾選記錄住既有 flow_checks 表）——
 又一個鏡頭，不是容器。進 v1 階段三（與復盤勾選項同批，便宜）。
+
+### §14.10 動工前的現況校正（2026-08-14 讀碼後，**推翻上面四處假設**）
+
+「照建議執行」後實際讀 schema 與既有實作，發現規劃時的四個假設有誤。
+以本節為準（上面各節保留原文供追溯決策脈絡）：
+
+**校正 1：復盤與歸檔清單「已經做好了」**——`crm_projects.archive_checklist`
+（`core/project_archive.py` 5 列範本＋自訂列＋待收/已收/不適用＋資料夾掃描
+自動勾）與 `crm_projects.review_kpta`（Keep/Problem/Try/Action 四欄）已上線，
+掛在專案詳情「完稿結案」分頁最上方，端點在 `routers/crm/archive.py`。
+→ §14.8 的「復盤完成」**不做手動勾選項**，改成**讀 KPTA 的 auto 訊號**；
+歸檔清單同理。§14.9 的收割清單也不另造 —— 見校正 3。
+
+**校正 2：儲存改 JSONB 欄，不新增表**。既有兩個先例（`proposal_survey` /
+`project_archive`）都是**「欄目在程式碼、值在 DB JSONB」**＋共用
+`core/row_table.py`。手動勾選項改存 `crm_projects.flow_checks` JSONB
+（startup `ALTER TABLE ADD COLUMN IF NOT EXISTS`，房規），
+不建 `crm_project_flow_checks` 表、不寫 migration 檔。
+
+**校正 3：PARA 收割絕大部分可以 auto**（比規劃時樂觀）——反查鍵都現成：
+
+| 收割項 | 訊號來源（已存在） |
+|---|---|
+| 企劃範本 | `preprod_brief_templates.source_project_id` |
+| 片庫 | `preprod_reference_links(target_type='crm_project', target_id=)` |
+| 場景庫 | `preprod_location_usages.project_id` |
+| 素材庫索引 | `footage_index.project_id` |
+
+→ 收割獨立成**第五軌**（原規劃塞進復盤區塊），四項全 auto、零手動。
+
+**校正 4：🔴 RBAC 現況與 §14.5 假設不符**。`routers/crm/_shared.py::_check_auth`
+＝ `check_admin`（**Lv3 管理員**），整個 CRM 後端（含專案狀態端點、archive）
+都是管理員限定；`crm_projects` 等模組 key 目前**只控前端 tab 顯示**，唯一的
+例外是 `_check_website_auth`（website_admin）。所以 §14.5 那張表寫的
+「勾手動項＝`check_admin_or_module('crm_projects')`」與現況不一致：
+真給了模組級寫入權，會出現「能勾進度、卻不能改專案狀態」的怪組合。
+
+決策留給 owner（**階段二動工前必問**），三個選項：
+(a) 跟隨現況＝`check_admin`（一致，但非管理員的製作同仁勾不了）；
+(b) 開模組級＝`check_admin_or_module('crm_projects')`（進度勾選比 CRM 其餘
+部分寬鬆，是刻意的第一道鬆綁）；
+(c) 一併把 CRM 專案寫入降權到模組級（最一致，但**影響面遠超本功能**，
+應另案）。
+→ **階段一（唯讀 GET）不受影響**：讀取用 `proposal_auth`（已含 crm_projects），
+先做完唯讀再處理寫入權。
+
+**校正 5：訊號欄位對照**（動工時的實際名稱，⚠ 規劃時未定的都在這）：
+
+| 訊號 | 來源 |
+|---|---|
+| 報價成交 | `crm_quotations.status == '已簽核'` |
+| 已請款 | `crm_invoices(project_id, payment_type='收款')` 有列 |
+| 款項結清 | 同上且無 `payment_status == '未收款'` |
+| 工時 | `timesheets.project_id`（⚠ Sheet 列可能為 NULL，退而用 project_name 對映） |
+| 素材入庫 | `project_media_files.project_id` |
+| 客戶審批 | `portal_review_links.status == '已核准'` |
+| 上架完成度 | `crm_project_showcase` × `core.crm_logic.work_completeness` |
+| 官網上線 | `crm_project_showcase.published`；`prod_stage == '不上官網'` → 略過 |
 - `renderMeetings` **刻意不收**上一輪的錄音：兩個呼叫端都不會對同一個 host
   重掛，而真重掛時 `_stopRecording` 只是「開始停」，下一行 `__mv` 就被換掉
   —— 收尾會拿到新的 `proposalId`，把舊提案的錄音 POST 到新提案去。

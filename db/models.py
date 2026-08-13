@@ -211,6 +211,7 @@ class CrmProject(Base):
     proposal_folder_name = Column(String(255), nullable=True)
     archive_checklist = Column(JSONB, nullable=True)             # 結案歸檔清單（範本正本在 core/project_archive.py）
     review_kpta = Column(JSONB, nullable=True)                   # 專案回顧 Keep/Problem/Try/Action
+    flow_checks = Column(JSONB, nullable=True)                   # 工作流手動里程碑（範本正本在 core/project_flow.py）
     status = Column(String(32), nullable=False, default="洽詢")
     am_username = Column(String(64), nullable=True)
     pm_usernames = Column(JSONB, nullable=True)

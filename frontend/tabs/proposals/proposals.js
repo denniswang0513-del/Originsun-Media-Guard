@@ -303,6 +303,7 @@ async function openDetail(pid) {
                 <button class="prop-tab" data-tab="brief">📄 企劃書</button>
                 <button class="prop-tab" data-tab="quote">報價單</button>
                 <button class="prop-tab" data-tab="meeting">會議記錄</button>
+                <button class="prop-tab" data-tab="flow">進度</button>
             </div>
             <div class="prop-panel-body" id="pd-tab-info">
                 <div class="prop-info-col">
@@ -366,6 +367,7 @@ async function openDetail(pid) {
             <div class="prop-panel-body" id="pd-tab-brief" style="display:none;"></div>
             <div class="prop-panel-body" id="pd-tab-quote" style="display:none;"></div>
             <div class="prop-panel-body" id="pd-tab-meeting" style="display:none;"></div>
+            <div class="prop-panel-body" id="pd-tab-flow" style="display:none;"></div>
         </div>`);
 
     // 分頁切換：企劃分頁 lazy import 元件（載入失敗不影響基本資料分頁）。
@@ -405,6 +407,11 @@ async function openDetail(pid) {
             const { renderMeetings } = await importRetry('/tabs/proposals/meeting-view.js');
             if (!host.isConnected) return;
             await renderMeetings(host, { proposalId: prop.id });
+        },
+        flow: async (host) => {
+            const { renderFlow } = await importRetry('/tabs/proposals/flow-view.js');
+            if (!host.isConnected) return;
+            await renderFlow(host, { projectId: prop.project_id || '' });
         },
     };
     ov.querySelectorAll('.prop-tab').forEach(btn => btn.addEventListener('click', async () => {
