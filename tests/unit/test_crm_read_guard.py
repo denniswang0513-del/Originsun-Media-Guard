@@ -29,14 +29,14 @@ def test_business_data_rejects_anonymous(app_client, path):
     assert app_client.get(path).status_code == 401, f"{path} 匿名讀得到"
 
 
-def test_module_user_can_still_read(app_client, user_headers):
+def test_module_user_can_still_read(app_client, as_user):
     """非管理員（模組級授權）照樣讀得到 —— 守衛是 check_logged_in 不是 check_admin。
 
     這條反面很重要：改成 check_admin 的話這裡會紅，而畫面上的症狀是
     器材庫/場景庫/看片門戶的專案下拉整個空掉。
     """
     r = app_client.get("/api/v1/crm/projects",
-                       headers=user_headers(modules=["equipment", "portal"]))
+                       headers=as_user(modules=["equipment", "portal"]))
     # 單元環境沒有 DB → 503；重點是**沒有被權限擋掉**（401/403 才是回歸）
     assert r.status_code not in (401, 403), f"模組級使用者被權限擋掉：{r.status_code}"
 
@@ -93,26 +93,26 @@ def test_flow_rejects_anonymous(app_client):
                            ).status_code == 401
 
 
-def test_planner_can_read_but_not_tick(app_client, user_headers):
+def test_planner_can_read_but_not_tick(app_client, as_user):
     """🔴 只有提案庫權限的人：看得到全部進度、動不了。"""
-    h = user_headers(modules=["preprod_proposals"])
+    h = as_user(modules=["preprod_proposals"])
     assert app_client.get(FLOW, headers=h).status_code != 403
     assert app_client.post(FLOW + "/check", headers=h,
                            json={"item_key": "shooting", "checked": True}
                            ).status_code == 403
 
 
-def test_crm_projects_module_can_tick(app_client, user_headers):
+def test_crm_projects_module_can_tick(app_client, as_user):
     """🔴 這條就是這次鬆綁：lv1 + crm_projects 不必是管理員也勾得動。
 
     生產有 3 個 lv1 帳號被授予 crm_projects 卻打不了任何 CRM 寫入
     （其餘寫入都是 Lv3）—— 權限是空頭支票。這裡兌現它。
     """
-    r = app_client.post(FLOW + "/check", headers=user_headers(modules=["crm_projects"]),
+    r = app_client.post(FLOW + "/check", headers=as_user(modules=["crm_projects"]),
                         json={"item_key": "shooting", "checked": True})
     assert r.status_code not in (401, 403), f"被權限擋掉：{r.status_code}"
 
 
-def test_unrelated_module_cannot_read_flow(app_client, user_headers):
-    assert app_client.get(FLOW, headers=user_headers(modules=["backup"])
+def test_unrelated_module_cannot_read_flow(app_client, as_user):
+    assert app_client.get(FLOW, headers=as_user(modules=["backup"])
                           ).status_code == 403

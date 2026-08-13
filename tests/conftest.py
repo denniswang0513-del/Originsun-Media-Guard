@@ -155,8 +155,13 @@ def user_token():
 
 
 @pytest.fixture
-def user_headers(user_token):
-    """`user_headers(modules=[...])` → 帶該 token 的 HTTP headers。"""
+def as_user(user_token):
+    """`as_user(modules=[...])` → 帶該 token 的 HTTP headers。
+
+    刻意**不叫** `user_headers`：`tests/integration/test_paste_upload.py` 已經
+    有一個同名的區域 fixture 回傳 dict（不是 callable），同名會讓兩種形狀在
+    不同檔案裡互相遮蔽。名字帶動詞也讀得出它要被呼叫。
+    """
     return lambda **claims: {"Authorization": f"Bearer {user_token(**claims)}"}
 
 

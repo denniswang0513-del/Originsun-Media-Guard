@@ -27,6 +27,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 # （proposal_assets 模組層就 import 了），函式內 import 的 ImportError 退路是
 # 死碼，而守衛掛在 router 層＝每個請求都走一次。
 from core.auth import check_admin_or_module, check_logged_in
+from core.project_flow import CHECK_MODULES
 
 import core.state as state
 from core.finance_logic import month_of
@@ -86,17 +87,17 @@ async def _crm_read_guard(request: Request):
     check_logged_in(request)
 
 
-def _check_flow_check_auth(request: Request):
-    """工作流手動里程碑的寫入守衛 —— 模組級（owner 2026-08-14 拍板）。
+def _module_guard(*modules: str):
+    """守衛工廠：`check_admin_or_module(request, *modules)`。
 
-    這是 CRM 寫入面第一道模組級鬆綁：生產有 3 個 lv1 帳號被授予 `crm_projects`
-    卻打不了任何 CRM 寫入端點（其餘寫入都是 Lv3），權限等於空頭支票。勾一個
-    里程碑跟改專案狀態、動錢流不是同一個量級，所以先從這裡兌現。
-    政策字面值住 `core.project_flow.CHECK_MODULES`，與前端「畫不畫 checkbox」
-    的判定共用同一份。
+    不帶 modules ＝ 只有管理員（`check_admin_or_module` 零 key 時等同
+    `check_admin` —— 兩者都走 `payload_grants`，access_level>=3 或 legacy
+    role=='admin' 通過）。CRM 的寫入守衛正在長第三、第四個（模組級鬆綁才
+    剛開始），三個各寫一遍就會長出三種拼法。
     """
-    from core.project_flow import CHECK_MODULES
-    return check_admin_or_module(request, *CHECK_MODULES)
+    def guard(request: Request):
+        return check_admin_or_module(request, *modules)
+    return guard
 
 
 router = APIRouter(prefix=CRM_PREFIX, tags=["CRM"],
@@ -118,26 +119,20 @@ public_router = APIRouter(tags=["CRM 公開（token 授權）"])
 
 # ── Helpers ──────────────────────────────────────────────────
 
-def _check_auth(request: Request):
-    try:
-        from core.auth import check_admin
-        check_admin(request)
-    except ImportError:
-        pass
+# CRM 一般寫入 —— 管理員限定（歷史預設）。
+_check_auth = _module_guard()
 
+# 官網製作授權 — 管理員 OR 擁有 website_admin 模組即可（不需全域 admin）。
+# 給「結案製作」看板 + showcase 編輯端點用：非管理員的官網製作人員只要帳號
+# modules 含 'website_admin' 就能操作，跟官網管理 Tab 寫入守衛（website 路由）一致。
+_check_website_auth = _module_guard('website_admin')
 
-def _check_website_auth(request: Request):
-    """官網製作授權 — 管理員 OR 擁有 website_admin 模組即可（不需全域 admin）。
-
-    給「結案製作」看板 + showcase 編輯端點用：非管理員的官網製作人員只要帳號
-    modules 含 'website_admin' 就能操作，跟官網管理 Tab 寫入守衛（website 路由）
-    一致。full admin（access_level>=3 / legacy role）永遠通過。
-    """
-    try:
-        from core.auth import check_admin_or_module
-        check_admin_or_module(request, 'website_admin')
-    except ImportError:
-        pass
+# 工作流手動里程碑 —— 模組級（owner 2026-08-14 拍板）。這是 CRM 寫入面第一道
+# 模組級鬆綁：生產有 3 個 lv1 帳號被授予 crm_projects 卻打不了任何 CRM 寫入
+# 端點（其餘寫入都是 Lv3），權限等於空頭支票。勾一個里程碑跟改專案狀態、
+# 動錢流不是同一個量級，所以先從這裡兌現。政策字面值住
+# core.project_flow.CHECK_MODULES，與前端「畫不畫 checkbox」的判定共用同一份。
+_check_flow_check_auth = _module_guard(*CHECK_MODULES)
 
 
 def _require_db():
@@ -177,6 +172,36 @@ async def _project_or_404(session, project_id: str):
     if not project:
         raise HTTPException(status_code=404, detail="專案不存在")
     return project
+
+
+async def _with_project(project_id: str, payload):
+    """DB 守門 → session → 專案或 404 → `await payload(session, project)`。
+
+    掛在 `crm_projects` 那幾個 JSONB 欄上的功能（archive_checklist /
+    review_kpta / flow_checks）讀取端一模一樣，各自抄一份的話，下一個要加
+    的東西（audit 列、updated_by）只會被加在其中一個檔。
+    """
+    _require_db()
+    factory = await _get_factory()
+    async with factory() as session:
+        return await payload(session, await _project_or_404(session, project_id))
+
+
+async def _patch_project_json(project_id: str, attr: str, call, payload):
+    """讀某個 JSONB 欄 → `call(舊值) -> (新值, 錯誤)` → commit → 回完整狀態。
+
+    `call` 的簽名刻意對齊 `core.project_archive` / `core.project_flow` 那批
+    純函式，端點就只剩一行 lambda。錯誤字串非空 → 422。
+    """
+    async def _run(session, project):
+        new, err = call(getattr(project, attr))
+        if err:
+            raise HTTPException(status_code=422, detail=err)
+        setattr(project, attr, new)
+        project.updated_at = _now()
+        await session.commit()
+        return await payload(session, project)
+    return await _with_project(project_id, _run)
 
 
 def _username(request: Request) -> str:

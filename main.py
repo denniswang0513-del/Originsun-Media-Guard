@@ -553,6 +553,16 @@ async def _on_startup():
                         "CREATE INDEX IF NOT EXISTS idx_payreq_payee ON crm_payment_requests(payee_name)",
                         # 提案=專案合體：專案列表附掛提案子狀態的 scalar subquery 用
                         "CREATE INDEX IF NOT EXISTS idx_pprop_project ON preprod_proposals(project_id, updated_at)",
+                        # §14 工作流的聚合查詢（EXPLAIN 實測補的四顆）：
+                        # ① timesheets 用名稱對映那一臂原本是 Seq Scan，而「查不到」
+                        #    才是年輕專案的常態 —— 也就是每次開進度分頁都掃全表
+                        "CREATE INDEX IF NOT EXISTS idx_ts_project_name ON timesheets(project_name)",
+                        # ② 場景使用履歷只索引了 location_id
+                        "CREATE INDEX IF NOT EXISTS idx_ploc_usage_project ON preprod_location_usages(project_id)",
+                        # ③④ 單欄索引下 planner 只能挑一個，另一個變 Filter；
+                        #    inv_unpaid 是 COUNT 不能短路 → 會走遍全公司的未收款發票
+                        "CREATE INDEX IF NOT EXISTS idx_invoice_project_status ON crm_invoices(project_id, payment_status)",
+                        "CREATE INDEX IF NOT EXISTS idx_quote_project_status ON crm_quotations(project_id, status)",
                         # 提案=專案合體：前期草稿提案還沒定客戶也要能是專案
                         # （ALTER 冪等 — 已 DROP 過再跑一次不會錯）
                         "ALTER TABLE crm_projects ALTER COLUMN client_id DROP NOT NULL",

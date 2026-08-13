@@ -11,10 +11,10 @@
 
 為什麼住在 `routers/crm/` 而不是自己一支頂層 router：它讀寫的每一張表都是
 CRM 的、資源就是 `crm_projects`，而同樣掛在那一列兩個 JSONB 欄上的姊妹功能
-（`archive.py`）就在隔壁。住這裡才吃得到 `_shared` 的 `_get_factory` /
-`_require_db` / `_project_or_404` / `_now` / `_write`，也才在 `_crm_read_guard`
-的保護傘下 —— 那道守衛的意義正是「新端點預設就安全」，自己另開命名空間
-等於把自己排除在外。
+（`archive.py`）就在隔壁。住這裡才吃得到 `_shared` 的 `_with_project` /
+`_patch_project_json`（與 archive.py 共用同一份 JSONB 讀寫樣板），也才在
+`_crm_read_guard` 的保護傘下 —— 那道守衛的意義正是「新端點預設就安全」，
+自己另開命名空間等於把自己排除在外。
 
 守衛：
 - 讀取＝`proposal_auth`（admin / preprod_proposals / preprod_plan /
@@ -28,20 +28,31 @@ from fastapi import HTTPException, Request
 
 from core import project_archive as pa
 from core import project_flow as pf
-from core.crm_logic import project_works_summary, work_completeness, work_stage
+from core.crm_logic import (effective_prod_stage, project_works_summary,
+                            work_completeness, work_stage)
 
-from ._shared import (router, _check_flow_check_auth, _get_factory, _now,
-                      _project_or_404, _require_db, _username)
+from ._shared import (router, _check_flow_check_auth, _now,  # noqa: F401
+                      _patch_project_json, _username, _with_project)
+
+# DB 相依包在 try —— 機隊的精簡 agent 沒有 sqlalchemy，這是整個 crm 套件的
+# 慣例（12/14 個領域模組都這樣），也是 test_crm_shared_reexports 守的東西。
+try:
+    from sqlalchemy import false, func, literal, select
+    from db.models import (CrmInvoice, CrmProjectShowcase, CrmProjectStaff,
+                           CrmQuotation, FootageIndex, PortalReviewLink,
+                           PreprodBrief, PreprodBriefTemplate, PreprodLocationUsage,
+                           PreprodProposal, PreprodReferenceLink, ProjectMediaFile,
+                           Timesheet)
+except ImportError:
+    pass
 
 
 def _exists(model, *where):
     """EXISTS 子查詢 —— 這些訊號只問「有沒有」，不必 COUNT 掃完整批。"""
-    from sqlalchemy import literal, select
     return select(literal(1)).select_from(model).where(*where).exists()
 
 
 def _count_sq(model, *where):
-    from sqlalchemy import func, select
     return select(func.count()).select_from(model).where(*where).scalar_subquery()
 
 
@@ -55,13 +66,6 @@ async def _gather_facts(session, project) -> tuple[dict, dict]:
 
     detail 是給 UI hover 用的「為什麼亮」—— 燈要能自己解釋，不然沒人信它。
     """
-    from sqlalchemy import select
-    from db.models import (CrmInvoice, CrmProjectShowcase, CrmProjectStaff,
-                           CrmQuotation, FootageIndex, PortalReviewLink,
-                           PreprodBrief, PreprodBriefTemplate, PreprodLocationUsage,
-                           PreprodProposal, PreprodReferenceLink, ProjectMediaFile,
-                           Timesheet)
-
     pid = project.id
     inv_w = (CrmInvoice.project_id == pid, CrmInvoice.payment_type == "收款",
              CrmInvoice.issue_status != "作廢")
@@ -95,7 +99,7 @@ async def _gather_facts(session, project) -> tuple[dict, dict]:
         _exists(ProjectMediaFile, ProjectMediaFile.project_id == pid).label("footage_in"),
         _exists(Timesheet, Timesheet.project_id == pid).label("ts_by_id"),
         (_exists(Timesheet, Timesheet.project_name == ts_name) if ts_name
-         else _exists(Timesheet, Timesheet.id.is_(None))).label("ts_by_name"),
+         else false()).label("ts_by_name"),
         _exists(PortalReviewLink, PortalReviewLink.project_id == pid,
                 PortalReviewLink.status == "已核准").label("approved"),
         _exists(PreprodBriefTemplate,
@@ -179,7 +183,8 @@ def _work_signals(works, project):
         return (None, None, {}) if stage == "不上官網" else (False, False, {})
 
     summary = project_works_summary([
-        {"stage": work_stage(bool(w.published), w.prod_stage or stage)}
+        {"stage": work_stage(bool(w.published),
+                             effective_prod_stage(w.prod_stage, stage))}
         for w in works])
     if summary["total"] and summary["skipped"] == summary["total"]:
         return None, None, {"work_ready": "標記為不上官網"}
@@ -197,12 +202,17 @@ def _work_signals(works, project):
 
 
 async def _payload(session, project, *, can_check: bool) -> dict:
-    """讀與寫都回這一份 —— 勾完不必再打一次 GET（同 archive.py 慣例）。"""
+    """讀與寫都回這一份 —— 勾完不必再打一次 GET（同 archive.py 慣例）。
+
+    ⚠️ 這個慣例在 archive.py 是**免費**的（那邊的 payload 純粹是兩個已經在
+    記憶體裡的 JSONB 欄），在這裡要多花 2 趟查詢。仍然值得：讓前端自己算
+    軌道完成數＝把 `build()` 複製到 JS，正是 `missing_facts` 在防的那種分裂。
+    但下一個要抄「同 archive.py 慣例」的功能要知道帳單不一樣。
+
+    範本與訊號的對齊由 `tests/unit/test_flow_facts_align.py` 守著（實際呼叫
+    這支 `_gather_facts` 比對），不在請求路徑上重複檢查。
+    """
     facts, detail = await _gather_facts(session, project)
-    missing = pf.missing_facts(facts)
-    if missing:      # 範本加了訊號卻沒人算 → 那盞燈永遠不亮且沒有錯誤
-        raise HTTPException(status_code=500,
-                            detail=f"工作流訊號未實作：{'、'.join(missing)}")
     built = pf.build(facts, project.flow_checks, detail)
     stage = pf.stage_view(project.status)
     return {
@@ -221,13 +231,10 @@ async def get_project_flow(project_id: str, request: Request):
     from core.auth import payload_grants
     from routers.api_proposals import proposal_auth
     auth = proposal_auth(request)
-    _require_db()
-    factory = await _get_factory()
-    async with factory() as session:
-        project = await _project_or_404(session, project_id)
-        # 看得到進度不等於勾得動 —— 前端據此決定畫 checkbox 還是唯讀圓點
-        return await _payload(session, project,
-                              can_check=payload_grants(auth, *pf.CHECK_MODULES))
+    # 看得到進度不等於勾得動 —— 前端據此決定畫 checkbox 還是唯讀圓點
+    can = payload_grants(auth, *pf.CHECK_MODULES)
+    return await _with_project(
+        project_id, lambda s, p: _payload(s, p, can_check=can))
 
 
 @router.post("/projects/{project_id}/flow/check")
@@ -239,17 +246,10 @@ async def check_flow_item(project_id: str, request: Request):
     """
     _check_flow_check_auth(request)
     body = await request.json()
-    _require_db()
-    factory = await _get_factory()
-    async with factory() as session:
-        project = await _project_or_404(session, project_id)
-        new, err = pf.apply_check(project.flow_checks, body.get("item_key"),
-                                  body.get("checked"), body.get("note"),
-                                  who=_username(request),
-                                  when=_now().strftime("%Y-%m-%d %H:%M"))
-        if err:
-            raise HTTPException(status_code=422, detail=err)
-        project.flow_checks = new
-        project.updated_at = _now()
-        await session.commit()
-        return await _payload(session, project, can_check=True)
+    return await _patch_project_json(
+        project_id, "flow_checks",
+        lambda cur: pf.apply_check(cur, body.get("item_key"),
+                                   body.get("checked"), body.get("note"),
+                                   who=_username(request),
+                                   when=_now().strftime("%Y-%m-%d %H:%M")),
+        lambda s, p: _payload(s, p, can_check=True))

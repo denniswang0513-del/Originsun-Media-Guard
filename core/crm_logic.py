@@ -197,6 +197,16 @@ def work_stage(published: bool, prod_stage) -> str:
     return "待製作"
 
 
+def effective_prod_stage(sc_prod_stage, project_prod_stage, *, is_main=True):
+    """作品的官網製作階段 —— 作品自己的優先，沒有才吃專案層的預設。
+
+    結案看板（routers/crm/projects.py）與工作流交付軌（routers/crm/flow.py）
+    共用：同一支作品在兩個畫面顯示不同階段的話，使用者不會知道該信哪個。
+    `is_main=False` 的子作品不繼承專案層預設（那是主作品的過渡期鏡射）。
+    """
+    return sc_prod_stage or (project_prod_stage if is_main else None)
+
+
 def work_completeness(*, video_url=None, youtube_id=None, extra_videos=None,
                       gallery=None, cover_url=None, featured_image=None,
                       description=None, credits=None, credits_text=None) -> dict:

@@ -76,7 +76,12 @@ class TestBuild:
 
 
 class TestMissingFacts:
-    """範本與 router 的訊號清單必須對齊 —— 這是唯一的靜默失效點。"""
+    """`missing_facts` 這支述詞本身的行為。
+
+    ⚠️ 這裡的斷言拿 AUTO_KEYS 自己造輸入，所以**測不到** router 有沒有漏算
+    訊號（第一版誤以為測得到）—— 那個由 `test_flow_facts_align.py` 實際呼叫
+    `_gather_facts` 來守。
+    """
 
     def test_empty_facts_reports_every_auto_key(self):
         assert set(pf.missing_facts({})) == set(pf.AUTO_KEYS)
@@ -84,10 +89,9 @@ class TestMissingFacts:
     def test_complete_facts_reports_nothing(self):
         assert pf.missing_facts({k: False for k in pf.AUTO_KEYS}) == ()
 
-    def test_one_forgotten_signal_is_caught(self):
-        facts = {k: False for k in pf.AUTO_KEYS}
-        facts.pop("h_footage")
-        assert pf.missing_facts(facts) == ("h_footage",)
+    def test_manual_keys_are_not_required_facts(self):
+        """手動項的值來自 DB 不是 facts —— 別把它們也當成「漏算」。"""
+        assert not (set(pf.MANUAL_KEYS) & set(pf.missing_facts({})))
 
 
 class TestApplyCheck:

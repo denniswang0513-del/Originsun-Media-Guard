@@ -24,12 +24,16 @@ from fastapi import HTTPException, Request
 from core import project_archive as pa
 from core.project_folders import create_subfolder
 
-from ._shared import (router, _check_auth, _get_factory, _now,
-                      _project_or_404, _require_db)
+from ._shared import (router, _check_auth, _get_factory, _patch_project_json,
+                      _project_or_404, _require_db, _with_project)
 
 
-def _payload(project) -> dict:
-    """歸檔分頁的完整狀態 —— 讀與寫都回這一份，前端不必再打一次 GET。"""
+async def _payload(_session, project) -> dict:
+    """歸檔分頁的完整狀態 —— 讀與寫都回這一份，前端不必再打一次 GET。
+
+    純粹是兩個已經在記憶體裡的 JSONB 欄，不打 DB（`_session` 只是為了對齊
+    `_with_project` 的介面）。
+    """
     checklist = pa.rows(project.archive_checklist)
     return {
         "checklist": checklist,
@@ -42,31 +46,15 @@ def _payload(project) -> dict:
 
 
 async def _write(project_id: str, attr: str, call):
-    """讀某個 JSONB 欄 → `call(舊值) -> (新值, 錯誤)` → commit → 回完整狀態。
-
-    `call` 的簽名刻意對齊 core.project_archive 那批純函式，端點就只剩一行 lambda。
-    錯誤字串非空 → 422。"""
-    _require_db()
-    factory = await _get_factory()
-    async with factory() as session:
-        project = await _project_or_404(session, project_id)
-        new, err = call(getattr(project, attr))
-        if err:
-            raise HTTPException(status_code=422, detail=err)
-        setattr(project, attr, new)
-        project.updated_at = _now()
-        await session.commit()
-        return _payload(project)
+    """本檔的 JSONB 寫入 —— 樣板在 `_shared._patch_project_json`（flow.py 同用）。"""
+    return await _patch_project_json(project_id, attr, call, _payload)
 
 
 @router.get("/projects/{project_id}/archive")
 async def get_project_archive(project_id: str, request: Request):
     """歸檔清單 + 回顧（範本每次讀時對齊 —— 之後加項目，舊專案也會長出來）。"""
     _check_auth(request)
-    _require_db()
-    factory = await _get_factory()
-    async with factory() as session:
-        return _payload(await _project_or_404(session, project_id))
+    return await _with_project(project_id, _payload)
 
 
 @router.patch("/projects/{project_id}/archive")

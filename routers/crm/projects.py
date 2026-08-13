@@ -308,7 +308,8 @@ async def _work_items_for_project(session, project, rows=None) -> list[dict]:
           None 才自己查。專案沒有任何 sc row（未進過 showcase 流程）→ 以
           _virtual_work_from_project 合成一筆主作品，看板卡片永遠有東西可畫。
     """
-    from core.crm_logic import is_main_work, work_stage, work_url_slug
+    from core.crm_logic import (effective_prod_stage, is_main_work, work_stage,
+                                work_url_slug)
     from services.website.project_service import (
         _virtual_work_from_project, work_completeness_dict,
     )
@@ -327,7 +328,8 @@ async def _work_items_for_project(session, project, rows=None) -> list[dict]:
         main = is_main_work(sc)
         # prod_stage 過渡期 fallback（Phase 4 停寫 public_* 時一併移除）：主作品的
         # sc row 可能由 get-or-create 路徑補水前建立、階段只寫在專案欄
-        prod_stage = sc.prod_stage or (project.website_prod_stage if main else None)
+        prod_stage = effective_prod_stage(sc.prod_stage, project.website_prod_stage,
+                                          is_main=main)
         items.append({
             "id": sc.id,
             "is_primary": main,

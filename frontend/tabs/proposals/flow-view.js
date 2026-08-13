@@ -1,8 +1,8 @@
 /**
- * flow-view.js — 專案工作流：階段（單線）× 五軌進度（多方前進）。唯讀（階段一）。
+ * flow-view.js — 專案工作流：階段（單線）× 五軌進度（多方前進）+ 手動里程碑。
  *
  * 規格正本 docs/PROPOSAL_PLANNER.md §14。判定邏輯全在後端
- * （core/project_flow.py + routers/api_project_flow.py）—— 這裡只畫。
+ * （core/project_flow.py + routers/crm/flow.py）—— 這裡只畫。
  *
  * 🔴 import closure 鐵則：只准 `tabs/proposals/` 與 `js/shared/`。NAS 對外容器
  * 只 serve 這兩處（core/public_assets.py MODULE_DIRS），碰到 tabs/crm/ 會壞掉。
@@ -161,14 +161,18 @@ export async function renderFlow(host, { projectId }) {
         if (el.dataset.busy) return;          // 連點兩下不送兩次
         el.dataset.busy = '1';
         const nowOn = el.classList.contains('on');
+        // 先動畫面再送請求：那一趟要等後端重算整片進度（幾百 ms），不先回應
+        // 的話點下去像沒反應。權威狀態由下面的重畫覆蓋，失敗則還原。
+        el.classList.toggle('on', !nowOn);
         try {
             const fresh = await tfetch(
                 `/api/v1/crm/projects/${encodeURIComponent(projectId)}/flow/check`,
                 { method: 'POST', json: { item_key: el.dataset.check, checked: !nowOn } });
             if (host.isConnected) _paint(host, fresh);
         } catch (e) {
-            alert('標記失敗：' + (e.message || e));
+            el.classList.toggle('on', nowOn);   // 還原樂觀更新
             delete el.dataset.busy;
+            alert('標記失敗：' + (e.message || e));
         }
     };
     host.addEventListener('click', onHit);
