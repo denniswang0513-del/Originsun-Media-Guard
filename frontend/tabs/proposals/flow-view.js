@@ -55,6 +55,11 @@ const CSS = `
 .pflow-miss b { color:#f0c96a; font-weight:600; }
 .pflow-miss .adv { color:#8a8a8a; }
 .pflow-empty { padding:22px; text-align:center; color:#777; font-size:12.5px; }
+.pflow-note { margin-top:12px; font-size:11.5px; color:#666; }
+.pflow-item.clickable { cursor:pointer; }
+.pflow-item.clickable:hover { border-color:#4a4a4a; background:#202020; color:#ddd; }
+.pflow-item.clickable:focus-visible { outline:2px solid #1f538d; outline-offset:1px; }
+.pflow-item[data-busy] { opacity:.5; pointer-events:none; }
 @media (max-width: 720px) {
     .pflow-track { flex-direction:column; gap:4px; }
     .pflow-tname { flex:none; padding-top:0; }
@@ -73,22 +78,27 @@ function _stageHtml(st) {
     return `<div class="pflow-stage">${steps}</div>`;
 }
 
-function _itemHtml(it) {
+function _itemHtml(it, canCheck) {
+    const clickable = it.kind === 'manual' && canCheck;
     const cls = ['pflow-item', it.state === 'on' ? 'on' : it.state === 'skip' ? 'skip' : '',
-                 it.kind === 'manual' ? 'manual' : ''].filter(Boolean).join(' ');
+                 it.kind === 'manual' ? 'manual' : '',
+                 clickable ? 'clickable' : ''].filter(Boolean).join(' ');
     // 燈要能自己解釋為什麼亮 —— 沒有這個，燈號系統會變成沒人信任的裝飾
     const why = it.detail ? `${it.label}：${it.detail}`
         : it.state === 'on' && it.kind === 'manual'
             ? `${it.label}：${it.by || '有人'} 於 ${it.at || '—'} 標記${it.note ? '（' + it.note + '）' : ''}`
+            : clickable ? `${it.hint || it.label}（點一下${it.state === 'on' ? '取消' : '標記'}）`
+            : it.kind === 'manual' ? `${it.label}：需要專案管理權限才能標記`
             : it.hint || it.label;
     const dot = it.state === 'on'
         ? `<span class="pflow-dot" style="background:${TRACK_COLOR[it._track] || '#888'}"></span>`
         : `<span class="pflow-dot"></span>`;
-    return `<span class="${cls}" title="${esc(why)}">${dot}${esc(it.label)}</span>`;
+    const attrs = clickable ? ` data-check="${esc(it.key)}" role="button" tabindex="0"` : '';
+    return `<span class="${cls}"${attrs} title="${esc(why)}">${dot}${esc(it.label)}</span>`;
 }
 
-function _trackHtml(t) {
-    const items = t.items.map(i => _itemHtml({ ...i, _track: t.key })).join('');
+function _trackHtml(t, canCheck) {
+    const items = t.items.map(i => _itemHtml({ ...i, _track: t.key }, canCheck)).join('');
     return `<div class="pflow-track">
         <div class="pflow-tname" style="color:${TRACK_COLOR[t.key] || '#bbb'}">${esc(t.label)}</div>
         <div class="pflow-items">${items}</div>
@@ -134,10 +144,39 @@ export async function renderFlow(host, { projectId }) {
     }
     if (!host.isConnected) return;      // 載入期間視窗被關掉了
 
+    _paint(host, d);
+    if (host.__flowWired) return;
+    host.__flowWired = true;
+    // 事件委派掛一次就好 —— 每次重畫都重掛會累積成一次點擊送 N 個請求
+    const onHit = async (ev) => {
+        const el = ev.target.closest?.('[data-check]');
+        if (!el || !host.contains(el)) return;
+        if (ev.type === 'keydown' && ev.key !== 'Enter' && ev.key !== ' ') return;
+        ev.preventDefault();
+        if (el.dataset.busy) return;          // 連點兩下不送兩次
+        el.dataset.busy = '1';
+        const nowOn = el.classList.contains('on');
+        try {
+            const fresh = await tfetch(
+                `/api/v1/projects/${encodeURIComponent(projectId)}/flow/check`,
+                { method: 'POST', json: { item_key: el.dataset.check, checked: !nowOn } });
+            if (host.isConnected) _paint(host, fresh);
+        } catch (e) {
+            alert('標記失敗：' + (e.message || e));
+            delete el.dataset.busy;
+        }
+    };
+    host.addEventListener('click', onHit);
+    host.addEventListener('keydown', onHit);
+}
+
+function _paint(host, d) {
     const st = d.stage || {};
+    const can = !!d.can_check;
     host.innerHTML = `<div class="pflow">
         ${_stageHtml(st)}
-        ${(d.tracks || []).map(_trackHtml).join('')}
+        ${(d.tracks || []).map(t => _trackHtml(t, can)).join('')}
         ${_missingHtml(d.missing || [], st.next)}
+        ${can ? '' : '<div class="pflow-note">里程碑（開拍／剪輯完成）需要專案管理權限才能標記。</div>'}
     </div>`;
 }

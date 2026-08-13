@@ -122,6 +122,58 @@ class TestGates:
         assert pf.missing_for({}, "未成案") == []
 
 
+class TestApiGuards:
+    """權限矩陣（owner 2026-08-14 拍板：勾選走模組級）。
+
+    守衛在 `_require_db` 之前跑，所以 401/403 在沒有 DB 的單元環境也測得到；
+    200 那條在 e2e/實打腳本驗（這裡只釘「不是被權限擋掉」）。
+    """
+
+    @staticmethod
+    def _client():
+        from fastapi.testclient import TestClient
+        import main
+        return TestClient(main.app)
+
+    @staticmethod
+    def _tok(**kw):
+        from core.auth import create_token
+        base = {"sub": "u", "username": "u", "access_level": 1, "modules": []}
+        base.update(kw)
+        return create_token(base)
+
+    def test_anonymous_rejected(self):
+        c = self._client()
+        assert c.get("/api/v1/projects/x/flow").status_code == 401
+        assert c.post("/api/v1/projects/x/flow/check",
+                      json={"item_key": "shooting", "checked": True}).status_code == 401
+
+    def test_planner_can_read_but_not_tick(self):
+        """🔴 只有提案庫權限的人：看得到全部進度、動不了。"""
+        c, tok = self._client(), self._tok(modules=["preprod_proposals"])
+        h = {"Authorization": f"Bearer {tok}"}
+        assert c.get("/api/v1/projects/x/flow", headers=h).status_code != 403
+        assert c.post("/api/v1/projects/x/flow/check", headers=h,
+                      json={"item_key": "shooting", "checked": True}).status_code == 403
+
+    def test_crm_projects_module_can_tick(self):
+        """🔴 這條就是這次鬆綁：lv1 + crm_projects 不必是管理員也勾得動。
+
+        生產有 3 個 lv1 帳號被授予 crm_projects 卻打不了任何 CRM 寫入
+        （Lv3 限定）—— 權限是空頭支票。這裡兌現它。
+        """
+        c, tok = self._client(), self._tok(modules=["crm_projects"])
+        h = {"Authorization": f"Bearer {tok}"}
+        r = c.post("/api/v1/projects/x/flow/check", headers=h,
+                   json={"item_key": "shooting", "checked": True})
+        assert r.status_code not in (401, 403), f"被權限擋掉：{r.status_code}"
+
+    def test_unrelated_module_cannot_read(self):
+        c, tok = self._client(), self._tok(modules=["backup"])
+        h = {"Authorization": f"Bearer {tok}"}
+        assert c.get("/api/v1/projects/x/flow", headers=h).status_code == 403
+
+
 class TestStageView:
     def test_next_status_follows_pipeline(self):
         assert pf.stage_view("提案")["next"] == "製作"

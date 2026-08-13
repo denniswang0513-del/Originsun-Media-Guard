@@ -21,7 +21,7 @@ import uuid
 from datetime import date, datetime, timezone
 from typing import Optional
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Request
 
 import core.state as state
 from core.finance_logic import month_of
@@ -57,7 +57,45 @@ __all__ = [
 
 CRM_PREFIX = "/api/v1/crm"   # 單一真相：router、NAS 掛載、守衛測試三處共用
 
-router = APIRouter(prefix=CRM_PREFIX, tags=["CRM"])
+
+# 這兩支是給對外官網的 Astro build 讀的（作品/團隊），必須維持匿名可讀。
+# 它們掛在內部 router 上（歷史因素），所以下面的守衛要放行。
+_PUBLIC_PATHS = frozenset({
+    f"{CRM_PREFIX}/public/site/works",
+    f"{CRM_PREFIX}/public/site/team",
+})
+
+
+async def _crm_read_guard(request: Request):
+    """整個 CRM router 的底線守衛：**你得先是我們的人**。
+
+    🔴 2026-08-14 發現：CRM 的讀取端點（清單/詳情）多數根本沒帶 request 參數
+    ＝ 零守衛。實測匿名可讀生產 236 筆專案，欄位含 contract_amount /
+    amount_receivable / profit_target_pct / 客戶名 / 負責人。8000 經
+    cloudflared 對外，等同對網際網路公開整份案件清單與金額。
+
+    為什麼放在 router 層而不是逐支加：漏一支就等於沒修，而 CRM 有 140+ 端點、
+    還會繼續長。放這裡，新端點預設就是安全的。
+
+    用 `check_logged_in` 而**不是** `check_admin`：器材庫/場景庫/看片門戶/
+    素材庫/現金流/提案庫六個分頁都在讀 CRM 清單，那些使用者不是管理員
+    （模組級授權）—— 用 admin 會把他們的畫面全打壞。也**不是**
+    `check_lan_or_logged_in`：那條是後期製作工具的產品前提（owner 2026-08-12
+    拍板，剪輯師在本機不登入直接用），CRM 是商務資料，不適用。
+
+    寫入端各自的 `_check_auth`（Lv3）不動 —— 這裡只是補上「至少要登入」的底線。
+    """
+    if request.url.path in _PUBLIC_PATHS:
+        return
+    try:
+        from core.auth import check_logged_in
+    except ImportError:      # DB/auth 套件不存在的精簡 agent
+        return
+    check_logged_in(request)
+
+
+router = APIRouter(prefix=CRM_PREFIX, tags=["CRM"],
+                   dependencies=[Depends(_crm_read_guard)])
 
 # 對外白名單 —— NAS 對外容器只掛這一個 router（master 在 crm/__init__ 收編回
 # 主 router，URL 完全不變）。「這條端點可以對外」是整個 CRM 套件的橫切分類

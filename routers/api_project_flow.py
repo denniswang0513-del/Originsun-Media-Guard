@@ -9,20 +9,27 @@
 這裡查詢時把它們聚合成燈號，**不搬不抄**。整個功能唯一的新儲存是手動勾選
 （`crm_projects.flow_checks`，階段二才寫）。
 
-守衛：讀取用 `proposal_auth`（admin / preprod_proposals / preprod_plan /
-crm_projects）—— 公司內部進度透明，而且提案頁本來就是這個閘。
-⚠️ 寫入端（階段二）的守衛尚未定案，見 §14.10 校正 4：CRM 後端目前整片是
-`check_admin`（Lv3），開模組級寫入要 owner 拍板。
+守衛：
+- 讀取＝`proposal_auth`（admin / preprod_proposals / preprod_plan /
+  crm_projects）—— 公司內部進度透明，而且提案頁本來就是這個閘。
+- 勾手動里程碑＝`check_admin_or_module('crm_projects')`（owner 2026-08-14
+  拍板走模組級）。這是 CRM 寫入面第一道模組級鬆綁：生產有 3 個 lv1 帳號
+  被授予 `crm_projects` 卻打不了任何 CRM 寫入端點（Lv3 限定），等於權限是
+  空頭支票。勾一個里程碑跟改專案狀態、動錢流不是同一個量級，所以先從這裡
+  兌現。**階段推進仍走既有端點的既有守衛**（Lv3），不在這裡放寬。
 
 ⚠️ 這些端點**不在**對外白名單 —— 內部進度、人名、金額訊號都不給客戶
 `?t=` 連結看（tests/unit/test_public_surface.py 守著）。
 """
 from __future__ import annotations
 
+from datetime import datetime, timezone
+
 from fastapi import APIRouter, HTTPException, Request  # type: ignore
 
 from core import project_archive as pa
 from core import project_flow as pf
+from core.auth import check_admin_or_module
 from routers.api_proposals import _plan_started, proposal_auth
 
 router = APIRouter(prefix="/api/v1/projects", tags=["專案工作流"])
@@ -176,26 +183,67 @@ def _work_signals(works, project):
     return ready == len(works), published == len(works), detail
 
 
+async def _payload(session, project) -> dict:
+    """讀與寫都回這一份 —— 勾完不必再打一次 GET（同 crm/archive.py 慣例）。"""
+    facts, detail = await _gather_facts(session, project)
+    facts["_detail"] = detail
+    built = pf.build(facts, project.flow_checks)
+    stage = pf.stage_view(project.status)
+    return {
+        "project_id": project.id,
+        "project_name": project.name,
+        "stage": stage,
+        "tracks": built["tracks"],
+        "missing": pf.missing_for(built["_state"], stage["next"]) if stage["next"] else [],
+        "can_check": True,
+    }
+
+
+async def _project_or_404(session, project_id: str):
+    from db.models import CrmProject
+    project = await session.get(CrmProject, project_id)
+    if not project:
+        raise HTTPException(status_code=404, detail="專案不存在")
+    return project
+
+
 @router.get("/{project_id}/flow")
 async def get_project_flow(project_id: str, request: Request):
     """專案工作流：階段（單線）+ 五軌進度（多方前進）+ 推進建議。"""
-    proposal_auth(request)
+    payload = proposal_auth(request)
     _require_db()
     factory = await _factory()
     async with factory() as session:
-        from db.models import CrmProject
-        project = await session.get(CrmProject, project_id)
-        if not project:
-            raise HTTPException(status_code=404, detail="專案不存在")
+        out = await _payload(session, await _project_or_404(session, project_id))
+        # 看得到進度不等於勾得動 —— 前端據此決定畫 checkbox 還是唯讀圓點
+        from core.auth import payload_grants
+        out["can_check"] = bool(payload_grants(payload, "crm_projects"))
+        return out
 
-        facts, detail = await _gather_facts(session, project)
-        facts["_detail"] = detail
-        built = pf.build(facts, getattr(project, "flow_checks", None))
-        stage = pf.stage_view(project.status)
-        return {
-            "project_id": project.id,
-            "project_name": project.name,
-            "stage": stage,
-            "tracks": built["tracks"],
-            "missing": pf.missing_for(built["_state"], stage["next"]) if stage["next"] else [],
-        }
+
+@router.post("/{project_id}/flow/check")
+async def check_flow_item(project_id: str, request: Request):
+    """勾/取消一個手動里程碑：{item_key, checked, note}。
+
+    自動訊號不給勾（422）—— 那些由資料決定，手動蓋過去就等於讓「資料說了算」
+    這條規則失效。
+    """
+    auth = check_admin_or_module(request, "crm_projects")
+    body = await request.json()
+    _require_db()
+    factory = await _factory()
+    async with factory() as session:
+        project = await _project_or_404(session, project_id)
+        who = str(auth.get("username") or auth.get("sub") or "")[:64]
+        when = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M")
+        new, err = pf.apply_check(project.flow_checks, body.get("item_key"),
+                                  body.get("checked"), body.get("note"),
+                                  who=who, when=when)
+        if err:
+            raise HTTPException(status_code=422, detail=err)
+        project.flow_checks = new
+        project.updated_at = datetime.now(timezone.utc)
+        await session.commit()
+        out = await _payload(session, project)
+        out["can_check"] = True
+        return out

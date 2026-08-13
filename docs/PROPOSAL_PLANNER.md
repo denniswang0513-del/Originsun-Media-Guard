@@ -1518,14 +1518,14 @@ Area 指標——現金流、稼動率留在各自 Area tab，別塞進專案進
 與現況不一致：真給了模組級寫入權，會出現「能勾進度、卻不能改專案狀態」的
 怪組合（生產有 3 個 lv1 帳號被授予 `crm_projects`，他們今天點寫入就是 403）。
 
-決策留給 owner（**階段二動工前必問**），三個選項：
-(a) 跟隨現況＝`check_admin`（一致，但非管理員的製作同仁勾不了）；
-(b) 開模組級＝`check_admin_or_module('crm_projects')`（進度勾選比 CRM 其餘
-部分寬鬆，是刻意的第一道鬆綁）；
-(c) 一併把 CRM 專案寫入降權到模組級（最一致，但**影響面遠超本功能**，
-應另案）。
-→ **階段一（唯讀 GET）不受影響**：讀取用 `proposal_auth`（已含 crm_projects），
-先做完唯讀再處理寫入權。
+**✅ owner 2026-08-14 拍板 (b) 模組級**（已實作）：勾手動里程碑＝
+`check_admin_or_module('crm_projects')`。這是 CRM 寫入面第一道模組級鬆綁
+—— 生產 3 個 lv1 帳號（nashtsai / Ryansnap / soca）被授予 `crm_projects`
+卻打不了任何 CRM 寫入端點，權限是空頭支票，這裡先兌現。
+**階段推進仍走既有端點的既有守衛（Lv3），不在這裡放寬**（動商務主軸＝
+動客戶分級與錢流口徑，量級不同）。
+`GET /flow` 回傳 `can_check`，前端據此決定畫 checkbox 還是唯讀圓點 ——
+提案庫-only 的人看得到全部進度、動不了（決策點 3）。
 
 ### §14.12 🔴 安全發現：CRM 專案讀取端點匿名可讀（2026-08-14，查權限時發現）
 
@@ -1541,13 +1541,29 @@ Area 指標——現金流、稼動率留在各自 Area tab，別塞進專案進
 `notes`、`folder_path`。⚠️ 8000 經 cloudflared 對外（foundry），
 若 tunnel 前沒有 CF Access，等同對網際網路公開整個案件清單與金額。
 
-**修法**（小、可逆、但**不可只改端點**）：兩支加 `check_logged_in`
-（不是 `check_admin` —— 器材庫/場景庫/看片門戶/素材庫/現金流/提案庫六個
-分頁都在讀這支清單，用 admin 會把非管理員的那些分頁全打壞）。
-🔴 上一次加守衛沒 grep 齊呼叫點，機隊挑資料夾靜默壞四天
-（[[reference_picker_auth_break]]）—— 已先 grep：前端 12 個呼叫點全部走
-帶 token 的 wrapper（tfetch / ffetch / cfetch / crmFetch），NAS 對外容器
-只掛 `public_router` 不含這兩支，所以加守衛安全。**待 owner 同意後執行**。
+**✅ 已修（2026-08-14，owner 同意）**。實測發現範圍比兩支大得多：匿名打得到
+的是**整個 CRM 讀取面** —— projects / clients / staff / quotations / invoices /
+payments / cash-entries / receivables-summary / payables-summary…
+
+修法＝在 `_shared.router` 掛 router 層級的 `_crm_read_guard`（`check_logged_in`）：
+
+- **為什麼掛 router 不逐支加**：漏一支等於沒修（當初就是這樣漏的），
+  而 CRM 有 140+ 端點還在長。掛這裡，新端點預設就是安全的。
+- **為什麼是 `check_logged_in` 不是 `check_admin`**：器材庫/場景庫/看片門戶/
+  素材庫/現金流/提案庫六個分頁都在讀 CRM 清單，那些使用者是模組級授權、
+  不是管理員 —— 用 admin 會把他們的畫面全打壞。
+- **為什麼不是 `check_lan_or_logged_in`**：那條是**後期製作工具**的產品前提
+  （owner 2026-08-12 拍板，剪輯師本機不登入直接用）。owner 2026-08-14 再次
+  確認「後期製作 tab 是工具，開放使用」—— 本次修正**完全不碰**那批端點。
+- `/crm/public/site/{works,team}` 放行（對外官網的 Astro build 在讀）。
+
+實測三類（dev 8001）：商務資料匿名 401 / 模組使用者 200 / admin 200；
+官網兩支維持匿名 200；後期製作十支（pick_folder、browse_dir、status、queue、
+job_history、bookmarks、agents、tts/voices、drive_map、reports/history）
+全部維持匿名 200 未受影響。
+回歸測試 `tests/unit/test_crm_read_guard.py`：**列舉** app 上所有 CRM GET
+路由逐一驗證匿名 401（不是挑幾支測）—— 將來有人在別的 router 上加
+`/api/v1/crm/…` 也會被抓到。拿掉守衛後 8 條紅（已反向驗證）。
 
 ### §14.11 與 CRM 專案管理的分界線（owner 2026-08-14 問「最重要的功能差別是什麼」）
 
