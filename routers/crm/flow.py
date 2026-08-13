@@ -203,7 +203,7 @@ def _work_signals(works, project):
              "published": f"{summary['live']}/{summary['total']} 支已上線"})
 
 
-async def _payload(session, project, *, can_check: bool) -> dict:
+async def _payload(session, project, *, auth) -> dict:
     """讀與寫都回這一份 —— 勾完不必再打一次 GET（同 archive.py 慣例）。
 
     ⚠️ 這個慣例在 archive.py 是**免費**的（那邊的 payload 純粹是兩個已經在
@@ -214,6 +214,7 @@ async def _payload(session, project, *, can_check: bool) -> dict:
     範本與訊號的對齊由 `tests/unit/test_flow_facts_align.py` 守著（實際呼叫
     這支 `_gather_facts` 比對），不在請求路徑上重複檢查。
     """
+    from core.auth import payload_grants
     facts, detail = await _gather_facts(session, project)
     built = pf.build(facts, project.flow_checks, detail)
     stage = pf.stage_view(project.status)
@@ -223,20 +224,22 @@ async def _payload(session, project, *, can_check: bool) -> dict:
         "stage": stage,
         "tracks": built["tracks"],
         "missing": pf.missing_for(built["tracks"], stage["next"]),
-        "can_check": can_check,
+        # 看得到 ≠ 勾得動 ≠ 推得動 —— 三層不同，前端據此決定畫什麼。
+        # 兩個旗標都從**同一個** payload 推導，不讓呼叫端各自算（算歪了就是
+        # 畫面說可以、後端回 403）。
+        "can_check": payload_grants(auth, *pf.CHECK_MODULES),
+        # 推進＝動商務主軸（客戶分級、錢流口徑、衛星 win/loss），沿用既有
+        # 專案狀態端點的 Lv3 守衛 —— 不帶模組 key 的 payload_grants 只認管理員。
+        "can_advance": payload_grants(auth),
     }
 
 
 @router.get("/projects/{project_id}/flow")
 async def get_project_flow(project_id: str, request: Request):
     """專案工作流：階段（單線）+ 五軌進度（多方前進）+ 推進建議。"""
-    from core.auth import payload_grants
     from routers.api_proposals import proposal_auth
     auth = proposal_auth(request)
-    # 看得到進度不等於勾得動 —— 前端據此決定畫 checkbox 還是唯讀圓點
-    can = payload_grants(auth, *pf.CHECK_MODULES)
-    return await _with_project(
-        project_id, lambda s, p: _payload(s, p, can_check=can))
+    return await _with_project(project_id, lambda s, p: _payload(s, p, auth=auth))
 
 
 @router.post("/projects/{project_id}/flow/check")
@@ -246,7 +249,7 @@ async def check_flow_item(project_id: str, request: Request):
     自動訊號不給勾（422）—— 那些由資料決定，手動蓋過去就等於讓「資料說了算」
     這條規則失效。
     """
-    _check_flow_check_auth(request)
+    auth = _check_flow_check_auth(request)
     body = await request.json()
     return await _patch_project_json(
         project_id, "flow_checks",
@@ -254,4 +257,4 @@ async def check_flow_item(project_id: str, request: Request):
                                    body.get("checked"), body.get("note"),
                                    who=_username(request),
                                    when=_now().strftime("%Y-%m-%d %H:%M")),
-        lambda s, p: _payload(s, p, can_check=True))
+        lambda s, p: _payload(s, p, auth=auth))

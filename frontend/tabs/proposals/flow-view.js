@@ -85,6 +85,27 @@ html.plan-theme-light .pflow { --pf-ink:#262626; --pf-sub:#737373; --pf-line:#e5
     background:var(--pf-hover-bg); color:var(--pf-ink); }
 .pflow-item.clickable:focus-visible { outline:2px solid var(--pf-cur); outline-offset:1px; }
 .pflow-item[data-busy] { opacity:.5; pointer-events:none; }
+.pflow-gap { flex:1; }
+.pflow-adv { border:1px solid var(--pf-cur); background:var(--pf-cur);
+    color:var(--pf-cur-ink); font:inherit; font-size:12px; font-weight:600;
+    padding:6px 14px; border-radius:6px; cursor:pointer; white-space:nowrap; }
+.pflow-adv:hover:not(:disabled) { filter:brightness(1.12); }
+.pflow-adv:disabled { opacity:.42; cursor:not-allowed; }
+.pflow-adv[data-busy] { opacity:.5; }
+/* 推進對話框（掛在 prop-dialog 的 .pdlg-body 裡，吃它的主題變數） */
+.pflow-dlg-p { margin:0 0 8px; font-size:13px; line-height:1.7; }
+.pflow-dlg-p.sub { margin-top:14px; color:var(--pdlg-sub); font-size:12px; }
+.pflow-mlist { margin:0 0 4px; padding-left:20px; font-size:12.5px; line-height:1.9; }
+.pflow-mlist.adv { color:var(--pdlg-sub); }
+.pflow-dlg-lb { display:block; margin-top:16px; font-size:12.5px; color:var(--pdlg-sub); }
+.pflow-dlg-ta { display:block; width:100%; margin-top:6px; padding:8px 10px;
+    background:var(--pdlg-field); border:1px solid var(--pdlg-line); border-radius:4px;
+    color:var(--pdlg-ink); font:inherit; font-size:13px; line-height:1.7; resize:vertical; }
+.pflow-dlg-act { display:flex; justify-content:flex-end; gap:8px; margin-top:20px; }
+.pflow-btn { border:1px solid var(--pdlg-accent); background:var(--pdlg-accent);
+    color:var(--pdlg-btn-ink); font:inherit; font-size:13px; padding:8px 16px;
+    border-radius:4px; cursor:pointer; }
+.pflow-btn.ghost { background:none; border-color:var(--pdlg-line); color:var(--pdlg-ink); }
 @media (max-width: 720px) {
     .pflow-track { flex-direction:column; gap:4px; }
     .pflow-tname { flex:none; padding-top:0; }
@@ -92,7 +113,7 @@ html.plan-theme-light .pflow { --pf-ink:#262626; --pf-sub:#737373; --pf-line:#e5
 }
 `;
 
-function _stageHtml(st) {
+function _stageHtml(st, advanceHtml = '') {
     if (st.is_lost) {
         return `<div class="pflow-lost">未成案 — 這個案子沒有拿到。原因記在提案的組織學習欄。</div>`;
     }
@@ -100,7 +121,7 @@ function _stageHtml(st) {
         const cls = s === st.status ? 'cur' : (st.index >= 0 && i < st.index ? 'done' : '');
         return `<span class="pflow-step ${cls}">${esc(s)}</span>`;
     }).join('<span class="pflow-arrow">—</span>');
-    return `<div class="pflow-stage">${steps}</div>`;
+    return `<div class="pflow-stage">${steps}<span class="pflow-gap"></span>${advanceHtml}</div>`;
 }
 
 /** 燈要能自己解釋為什麼亮 —— 沒有這個，燈號系統會變成沒人信任的裝飾。 */
@@ -180,6 +201,12 @@ export async function renderFlow(host, { projectId }) {
     host.__flowWired = true;
     // 事件委派掛一次就好 —— 每次重畫都重掛會累積成一次點擊送 N 個請求
     const onHit = async (ev) => {
+        const adv = ev.target.closest?.('[data-advance]');
+        if (adv && host.contains(adv) && ev.type === 'click') {
+            ev.preventDefault();
+            await _advance(host, projectId, adv);
+            return;
+        }
         const el = ev.target.closest?.('[data-check]');
         if (!el || !host.contains(el)) return;
         if (ev.type === 'keydown' && ev.key !== 'Enter' && ev.key !== ' ') return;
@@ -205,13 +232,100 @@ export async function renderFlow(host, { projectId }) {
     host.addEventListener('keydown', onHit);
 }
 
+/**
+ * 推進一階。**打的是既有的專案狀態端點** —— 那支帶著完整副作用鏈
+ * （客戶分級重算、衛星提案 win/loss、階段時間戳）。這裡不另開寫入路，
+ * 也不在前端重做那些副作用。
+ */
+async function _advance(host, projectId, btn) {
+    if (btn.dataset.busy) return;
+    const next = btn.dataset.advance;
+    const cur = host.__flowData || {};
+    // 進到 PROPOSAL_WIN_STATUSES 的第一站＝這案子拿到了 → 順手收成案原因
+    const { go, reason } = await _confirmAdvance(next, cur.missing || [], next === '製作');
+    if (!go) return;
+    btn.dataset.busy = '1';
+    btn.disabled = true;
+    try {
+        const body = { status: next };
+        if (reason) body.outcome_reason = reason;
+        await tfetch(`/api/v1/crm/projects/${encodeURIComponent(projectId)}/status`,
+                     { method: 'PATCH', json: body });
+        // 階段變了 → 整份重抓（推進會連動衛星提案狀態與一堆訊號，
+        // 前端自己推導只會跟後端各算各的）
+        await renderFlow(host, { projectId });
+        window.dispatchEvent(new CustomEvent('flow:advanced',
+                                             { detail: { projectId, status: next } }));
+    } catch (e) {
+        btn.disabled = false;
+        delete btn.dataset.busy;
+        // 422 帶 code 的（如轉未成案要原因）後端訊息已經說清楚了，直接轉述
+        alert('推進失敗：' + (e.message || e));
+    }
+}
+
+/** 推進鈕：掛在階段列右端。終態（歸檔／未成案）沒有下一站就不畫。 */
+function _advanceHtml(st, canAdvance) {
+    if (!st.next) return '';
+    const label = `推進到「${esc(st.next)}」`;
+    return canAdvance
+        ? `<button class="pflow-adv" data-advance="${esc(st.next)}">${label}</button>`
+        : `<button class="pflow-adv" disabled title="推進階段會連動客戶分級與錢流口徑，需要管理員權限">${label}</button>`;
+}
+
 function _paint(host, d) {
     const st = d.stage || {};
     const can = !!d.can_check;
+    // 推進對話框要列缺項 —— 存最後一次的權威資料，別讓它去讀畫面
+    // （讀畫面的話，樂觀更新那一瞬間的 class 會被當成事實）
+    host.__flowData = d;
     host.innerHTML = `<div class="pflow">
-        ${_stageHtml(st)}
+        ${_stageHtml(st, _advanceHtml(st, !!d.can_advance))}
         ${(d.tracks || []).map(t => _trackHtml(t, can)).join('')}
         ${_missingHtml(d.missing || [], st.next)}
         ${can ? '' : '<div class="pflow-note">里程碑（開拍／剪輯完成）需要專案管理權限才能標記。</div>'}
     </div>`;
+}
+
+/**
+ * 軟擋（owner 決策點 2）：缺項只列出來，確認後仍然推得動。
+ * 硬守衛留在既有端點（轉未成案要原因那類）—— 這裡不新蓋假守門。
+ * @returns {Promise<{go:boolean, reason:string}>}
+ */
+async function _confirmAdvance(next, missing, isWin) {
+    const { openDialog } = await import('./prop-dialog.js');
+    const blocking = (missing || []).filter(m => !m.advisory);
+    const advisory = (missing || []).filter(m => m.advisory);
+    const list = (arr, cls) => arr.length
+        ? `<ul class="pflow-mlist ${cls}">${arr.map(m => `<li>${esc(m.label)}</li>`).join('')}</ul>` : '';
+    const body = `
+        ${blocking.length
+            ? `<p class="pflow-dlg-p">這幾項還沒完成，確定要推進嗎？</p>${list(blocking, '')}`
+            : `<p class="pflow-dlg-p">建議完成的項目都到齊了。</p>`}
+        ${advisory.length
+            ? `<p class="pflow-dlg-p sub">以下只是提醒，不影響推進：</p>${list(advisory, 'adv')}` : ''}
+        ${isWin ? `<label class="pflow-dlg-lb">成案原因（組織學習欄，可留空）
+            <textarea class="pflow-dlg-ta" id="pflow-reason" rows="3"
+                placeholder="為什麼拿到這個案子？下一次要複製什麼？"></textarea></label>` : ''}
+        <div class="pflow-dlg-act">
+            <button class="pflow-btn ghost" id="pflow-cancel">取消</button>
+            <button class="pflow-btn" id="pflow-go">推進到「${esc(next)}」</button>
+        </div>`;
+    return new Promise(resolve => {
+        let done = false;
+        const dlg = openDialog({
+            title: `推進階段`, body, width: 460,
+            // 關掉（X／Esc／點背景）＝取消，不能讓 Promise 懸著
+            onClose: () => { if (!done) { done = true; resolve({ go: false, reason: '' }); } },
+        });
+        const finish = (go) => {
+            if (done) return;
+            done = true;
+            const ta = dlg.el.querySelector('#pflow-reason');
+            resolve({ go, reason: ta ? ta.value.trim() : '' });
+            dlg.close();
+        };
+        dlg.el.querySelector('#pflow-go').addEventListener('click', () => finish(true));
+        dlg.el.querySelector('#pflow-cancel').addEventListener('click', () => finish(false));
+    });
 }
