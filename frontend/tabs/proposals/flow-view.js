@@ -78,36 +78,41 @@ function _stageHtml(st) {
     return `<div class="pflow-stage">${steps}</div>`;
 }
 
-function _itemHtml(it, canCheck) {
+/** 燈要能自己解釋為什麼亮 —— 沒有這個，燈號系統會變成沒人信任的裝飾。 */
+function _why(it, clickable) {
+    if (it.detail) return `${it.label}：${it.detail}`;
+    if (it.kind !== 'manual') return it.hint || it.label;
+    if (it.state === 'on') {
+        return `${it.label}：${it.by || '有人'} 於 ${it.at || '—'} 標記`
+            + (it.note ? `（${it.note}）` : '');
+    }
+    return clickable ? `${it.hint || it.label}（點一下標記）`
+                     : `${it.label}：需要專案管理權限才能標記`;
+}
+
+function _itemHtml(it, canCheck, color) {
     const clickable = it.kind === 'manual' && canCheck;
-    const cls = ['pflow-item', it.state === 'on' ? 'on' : it.state === 'skip' ? 'skip' : '',
-                 it.kind === 'manual' ? 'manual' : '',
-                 clickable ? 'clickable' : ''].filter(Boolean).join(' ');
-    // 燈要能自己解釋為什麼亮 —— 沒有這個，燈號系統會變成沒人信任的裝飾
-    const why = it.detail ? `${it.label}：${it.detail}`
-        : it.state === 'on' && it.kind === 'manual'
-            ? `${it.label}：${it.by || '有人'} 於 ${it.at || '—'} 標記${it.note ? '（' + it.note + '）' : ''}`
-            : clickable ? `${it.hint || it.label}（點一下${it.state === 'on' ? '取消' : '標記'}）`
-            : it.kind === 'manual' ? `${it.label}：需要專案管理權限才能標記`
-            : it.hint || it.label;
+    // state/kind 本身就是 on|off|skip、auto|manual，直接當 class 用
+    const cls = `pflow-item ${it.state} ${it.kind}${clickable ? ' clickable' : ''}`;
     const dot = it.state === 'on'
-        ? `<span class="pflow-dot" style="background:${TRACK_COLOR[it._track] || '#888'}"></span>`
-        : `<span class="pflow-dot"></span>`;
+        ? `<span class="pflow-dot" style="background:${color}"></span>`
+        : '<span class="pflow-dot"></span>';
     const attrs = clickable ? ` data-check="${esc(it.key)}" role="button" tabindex="0"` : '';
-    return `<span class="${cls}"${attrs} title="${esc(why)}">${dot}${esc(it.label)}</span>`;
+    return `<span class="${cls}"${attrs} title="${esc(_why(it, clickable))}">${dot}${esc(it.label)}</span>`;
 }
 
 function _trackHtml(t, canCheck) {
-    const items = t.items.map(i => _itemHtml({ ...i, _track: t.key }, canCheck)).join('');
+    const color = TRACK_COLOR[t.key] || '#888';
+    const items = t.items.map(i => _itemHtml(i, canCheck, color)).join('');
     return `<div class="pflow-track">
-        <div class="pflow-tname" style="color:${TRACK_COLOR[t.key] || '#bbb'}">${esc(t.label)}</div>
+        <div class="pflow-tname" style="color:${color}">${esc(t.label)}</div>
         <div class="pflow-items">${items}</div>
         <div class="pflow-count">${t.done}/${t.total}</div>
     </div>`;
 }
 
 function _missingHtml(missing, next) {
-    if (!next || !missing.length) return '';
+    if (!missing.length) return '';   // 沒有下一階段時後端本來就回空陣列
     const blocking = missing.filter(m => !m.advisory);
     const advisory = missing.filter(m => m.advisory);
     const parts = [];
@@ -136,7 +141,7 @@ export async function renderFlow(host, { projectId }) {
     host.innerHTML = `<div class="pflow-empty">載入中…</div>`;
     let d;
     try {
-        d = await tfetch(`/api/v1/projects/${encodeURIComponent(projectId)}/flow`);
+        d = await tfetch(`/api/v1/crm/projects/${encodeURIComponent(projectId)}/flow`);
     } catch (e) {
         if (!host.isConnected) return;
         host.innerHTML = `<div class="pflow-empty">進度載入失敗：${esc(e.message || e)}</div>`;
@@ -158,7 +163,7 @@ export async function renderFlow(host, { projectId }) {
         const nowOn = el.classList.contains('on');
         try {
             const fresh = await tfetch(
-                `/api/v1/projects/${encodeURIComponent(projectId)}/flow/check`,
+                `/api/v1/crm/projects/${encodeURIComponent(projectId)}/flow/check`,
                 { method: 'POST', json: { item_key: el.dataset.check, checked: !nowOn } });
             if (host.isConnected) _paint(host, fresh);
         } catch (e) {

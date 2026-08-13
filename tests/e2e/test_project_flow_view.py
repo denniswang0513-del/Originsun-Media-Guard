@@ -85,6 +85,8 @@ def test_flow_tab_renders_five_tracks(page, real_server, e2e_admin_token, dev_db
             assert never not in r["lit"], f"空專案不該亮「{never}」"
         # 推進建議（提案 → 製作）
         assert r["missing"] and "推進到「製作」" in r["missing"][0]
+        # 收割軌四項全部 auto，空專案一盞都不該亮
+        assert not any(x in r["lit"] for x in ("企劃範本已收割", "素材庫已索引"))
     finally:
         requests.delete(f"{base}/api/v1/crm/projects/{pid}", headers=H, timeout=30)
         requests.delete(f"{base}/api/v1/crm/clients/{cid}", headers=H, timeout=30)

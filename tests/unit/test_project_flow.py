@@ -41,8 +41,9 @@ class TestBuild:
 
     def test_none_means_skip_not_incomplete(self):
         out = pf.build({"published": None, "work_ready": None})
-        assert out["_state"]["published"] == pf.SKIP
         deliver = next(t for t in out["tracks"] if t["key"] == "deliver")
+        skipped = [r for r in deliver["items"] if r["state"] == pf.SKIP]
+        assert {r["key"] for r in skipped} == {"published", "work_ready"}
         # 略過的項目不進分母 —— 否則永遠 3/5 看起來像沒做完
         assert deliver["total"] == len(deliver["items"]) - 2
 
@@ -52,9 +53,9 @@ class TestBuild:
         prod = next(t for t in out["tracks"] if t["key"] == "prod")
         on = {r["key"] for r in prod["items"] if r["state"] == pf.ON}
         assert on == {"staffed", "footage_in"}
-        # build() 完全不接受 status 參數 —— 結構上就不可能看階段
-        with pytest.raises(TypeError):
-            pf.build({}, None, "製作")
+        # build() 的參數裡沒有 status —— 結構上就不可能看階段
+        import inspect
+        assert "status" not in inspect.signature(pf.build).parameters
 
     def test_manual_item_reads_stored_value(self):
         stored = {"shooting": {"checked": True, "by": "阿明", "at": "2026-08-14", "note": "第一天"}}
@@ -69,9 +70,24 @@ class TestBuild:
             assert out["tracks"]
 
     def test_detail_is_attached_to_auto_rows(self):
-        out = pf.build({"quote": True, "_detail": {"quote": "報價單 2 版"}})
+        out = pf.build({"quote": True}, None, {"quote": "報價單 2 版"})
         biz = next(t for t in out["tracks"] if t["key"] == "biz")
         assert next(r for r in biz["items"] if r["key"] == "quote")["detail"] == "報價單 2 版"
+
+
+class TestMissingFacts:
+    """範本與 router 的訊號清單必須對齊 —— 這是唯一的靜默失效點。"""
+
+    def test_empty_facts_reports_every_auto_key(self):
+        assert set(pf.missing_facts({})) == set(pf.AUTO_KEYS)
+
+    def test_complete_facts_reports_nothing(self):
+        assert pf.missing_facts({k: False for k in pf.AUTO_KEYS}) == ()
+
+    def test_one_forgotten_signal_is_caught(self):
+        facts = {k: False for k in pf.AUTO_KEYS}
+        facts.pop("h_footage")
+        assert pf.missing_facts(facts) == ("h_footage",)
 
 
 class TestApplyCheck:
@@ -101,77 +117,34 @@ class TestApplyCheck:
 
 
 class TestGates:
+    @staticmethod
+    def _tracks(**states):
+        """假的 tracks 結構 —— missing_for 只讀 items 的 key/state。"""
+        return [{"key": "x", "items": [{"key": k, "state": v}
+                                       for k, v in states.items()]}]
+
     def test_missing_lists_only_unfinished(self):
-        state = {"won": pf.ON, "quote_won": pf.OFF}
-        out = pf.missing_for(state, "製作")
+        out = pf.missing_for(self._tracks(won=pf.ON, quote_won=pf.OFF), "製作")
         assert [m["key"] for m in out] == ["quote_won"]
 
     def test_skip_is_not_missing(self):
-        state = {k: pf.SKIP for k in pf.GATES["歸檔"]}
-        assert pf.missing_for(state, "歸檔") == []
+        tracks = self._tracks(**{k: pf.SKIP for k in pf.GATES["歸檔"]})
+        assert pf.missing_for(tracks, "歸檔") == []
 
     def test_settlement_is_advisory_never_blocking(self):
         """owner 決策點 5：款項未結清不擋結案，只提醒。"""
-        state = {"approved": pf.ON, "settled": pf.OFF}
-        out = pf.missing_for(state, "結案")
+        out = pf.missing_for(self._tracks(approved=pf.ON, settled=pf.OFF), "結案")
         settled = [m for m in out if m["key"] == "settled"]
         assert settled and settled[0]["advisory"] is True
 
+    def test_blocking_items_are_not_advisory(self):
+        out = pf.missing_for(self._tracks(approved=pf.OFF, settled=pf.OFF), "結案")
+        by_key = {m["key"]: m["advisory"] for m in out}
+        assert by_key == {"approved": False, "settled": True}
+
     def test_no_gate_for_unknown_target(self):
-        assert pf.missing_for({}, "") == []
-        assert pf.missing_for({}, "未成案") == []
-
-
-class TestApiGuards:
-    """權限矩陣（owner 2026-08-14 拍板：勾選走模組級）。
-
-    守衛在 `_require_db` 之前跑，所以 401/403 在沒有 DB 的單元環境也測得到；
-    200 那條在 e2e/實打腳本驗（這裡只釘「不是被權限擋掉」）。
-    """
-
-    @staticmethod
-    def _client():
-        from fastapi.testclient import TestClient
-        import main
-        return TestClient(main.app)
-
-    @staticmethod
-    def _tok(**kw):
-        from core.auth import create_token
-        base = {"sub": "u", "username": "u", "access_level": 1, "modules": []}
-        base.update(kw)
-        return create_token(base)
-
-    def test_anonymous_rejected(self):
-        c = self._client()
-        assert c.get("/api/v1/projects/x/flow").status_code == 401
-        assert c.post("/api/v1/projects/x/flow/check",
-                      json={"item_key": "shooting", "checked": True}).status_code == 401
-
-    def test_planner_can_read_but_not_tick(self):
-        """🔴 只有提案庫權限的人：看得到全部進度、動不了。"""
-        c, tok = self._client(), self._tok(modules=["preprod_proposals"])
-        h = {"Authorization": f"Bearer {tok}"}
-        assert c.get("/api/v1/projects/x/flow", headers=h).status_code != 403
-        assert c.post("/api/v1/projects/x/flow/check", headers=h,
-                      json={"item_key": "shooting", "checked": True}).status_code == 403
-
-    def test_crm_projects_module_can_tick(self):
-        """🔴 這條就是這次鬆綁：lv1 + crm_projects 不必是管理員也勾得動。
-
-        生產有 3 個 lv1 帳號被授予 crm_projects 卻打不了任何 CRM 寫入
-        （Lv3 限定）—— 權限是空頭支票。這裡兌現它。
-        """
-        c, tok = self._client(), self._tok(modules=["crm_projects"])
-        h = {"Authorization": f"Bearer {tok}"}
-        r = c.post("/api/v1/projects/x/flow/check", headers=h,
-                   json={"item_key": "shooting", "checked": True})
-        assert r.status_code not in (401, 403), f"被權限擋掉：{r.status_code}"
-
-    def test_unrelated_module_cannot_read(self):
-        c, tok = self._client(), self._tok(modules=["backup"])
-        h = {"Authorization": f"Bearer {tok}"}
-        assert c.get("/api/v1/projects/x/flow", headers=h).status_code == 403
+        assert pf.missing_for([], "") == []
+        assert pf.missing_for([], "未成案") == []
 
 
 class TestStageView:

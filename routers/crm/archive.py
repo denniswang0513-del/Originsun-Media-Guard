@@ -24,19 +24,8 @@ from fastapi import HTTPException, Request
 from core import project_archive as pa
 from core.project_folders import create_subfolder
 
-from ._shared import router, _check_auth, _get_factory, _now, _require_db
-
-try:
-    from ._shared import CrmProject
-except ImportError:  # DB 套件不存在的 agent 環境
-    pass
-
-
-async def _project_or_404(session, project_id: str):
-    project = await session.get(CrmProject, project_id)
-    if not project:
-        raise HTTPException(status_code=404, detail="專案不存在")
-    return project
+from ._shared import (router, _check_auth, _get_factory, _now,
+                      _project_or_404, _require_db)
 
 
 def _payload(project) -> dict:

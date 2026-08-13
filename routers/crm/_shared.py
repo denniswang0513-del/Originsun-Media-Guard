@@ -23,6 +23,11 @@ from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 
+# 模組層 import：CRM 套件本來就在 import 時硬相依 core.auth
+# （proposal_assets 模組層就 import 了），函式內 import 的 ImportError 退路是
+# 死碼，而守衛掛在 router 層＝每個請求都走一次。
+from core.auth import check_admin_or_module, check_logged_in
+
 import core.state as state
 from core.finance_logic import month_of
 
@@ -58,14 +63,6 @@ __all__ = [
 CRM_PREFIX = "/api/v1/crm"   # 單一真相：router、NAS 掛載、守衛測試三處共用
 
 
-# 這兩支是給對外官網的 Astro build 讀的（作品/團隊），必須維持匿名可讀。
-# 它們掛在內部 router 上（歷史因素），所以下面的守衛要放行。
-_PUBLIC_PATHS = frozenset({
-    f"{CRM_PREFIX}/public/site/works",
-    f"{CRM_PREFIX}/public/site/team",
-})
-
-
 async def _crm_read_guard(request: Request):
     """整個 CRM router 的底線守衛：**你得先是我們的人**。
 
@@ -75,7 +72,8 @@ async def _crm_read_guard(request: Request):
     cloudflared 對外，等同對網際網路公開整份案件清單與金額。
 
     為什麼放在 router 層而不是逐支加：漏一支就等於沒修，而 CRM 有 140+ 端點、
-    還會繼續長。放這裡，新端點預設就是安全的。
+    還會繼續長。放這裡，新端點預設就是安全的（**沒有任何路徑例外** —— 例外
+    清單會變成下一個被遺忘的洞）。
 
     用 `check_logged_in` 而**不是** `check_admin`：器材庫/場景庫/看片門戶/
     素材庫/現金流/提案庫六個分頁都在讀 CRM 清單，那些使用者不是管理員
@@ -85,13 +83,20 @@ async def _crm_read_guard(request: Request):
 
     寫入端各自的 `_check_auth`（Lv3）不動 —— 這裡只是補上「至少要登入」的底線。
     """
-    if request.url.path in _PUBLIC_PATHS:
-        return
-    try:
-        from core.auth import check_logged_in
-    except ImportError:      # DB/auth 套件不存在的精簡 agent
-        return
     check_logged_in(request)
+
+
+def _check_flow_check_auth(request: Request):
+    """工作流手動里程碑的寫入守衛 —— 模組級（owner 2026-08-14 拍板）。
+
+    這是 CRM 寫入面第一道模組級鬆綁：生產有 3 個 lv1 帳號被授予 `crm_projects`
+    卻打不了任何 CRM 寫入端點（其餘寫入都是 Lv3），權限等於空頭支票。勾一個
+    里程碑跟改專案狀態、動錢流不是同一個量級，所以先從這裡兌現。
+    政策字面值住 `core.project_flow.CHECK_MODULES`，與前端「畫不畫 checkbox」
+    的判定共用同一份。
+    """
+    from core.project_flow import CHECK_MODULES
+    return check_admin_or_module(request, *CHECK_MODULES)
 
 
 router = APIRouter(prefix=CRM_PREFIX, tags=["CRM"],
@@ -163,6 +168,15 @@ async def _mark_dirty_safe(tag: str) -> None:
     except Exception as e:
         import logging
         logging.getLogger(__name__).warning("[%s] mark_dirty 失敗: %s", tag, e)
+
+
+async def _project_or_404(session, project_id: str):
+    """專案列或 404 —— archive / flow / proposal_assets 共用（原本各抄一份，
+    連 404 訊息都不一樣）。"""
+    project = await session.get(CrmProject, project_id)
+    if not project:
+        raise HTTPException(status_code=404, detail="專案不存在")
+    return project
 
 
 def _username(request: Request) -> str:

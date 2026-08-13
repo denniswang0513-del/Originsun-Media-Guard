@@ -134,6 +134,32 @@ def admin_headers(admin_token):
     return {"Authorization": f"Bearer {admin_token}"}
 
 
+@pytest.fixture(scope="session")
+def app_client():
+    """同步 TestClient（守衛/路由測試用）—— 全套件共用一個，app 只啟動一次。"""
+    from fastapi.testclient import TestClient
+    import main
+    return TestClient(main.app)
+
+
+@pytest.fixture
+def user_token():
+    """造一張非管理員 token：`user_token(modules=[...])`。
+
+    「lv1 + 指定模組」是模組級權限測試的固定樣板，之前每個檔各抄一份。
+    """
+    def _make(**claims):
+        return create_token({"sub": "u", "username": "u",
+                             "access_level": 1, "modules": [], **claims})
+    return _make
+
+
+@pytest.fixture
+def user_headers(user_token):
+    """`user_headers(modules=[...])` → 帶該 token 的 HTTP headers。"""
+    return lambda **claims: {"Authorization": f"Bearer {user_token(**claims)}"}
+
+
 # ── 5. real_server ───────────────────────────────────────────
 @pytest.fixture(scope="session")
 def real_server():

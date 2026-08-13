@@ -23,8 +23,11 @@ def _reimported_names(src: str) -> list:
     """抽出檔案內所有 `from ._shared import ...` 的名稱（含括號多行與 as 別名）。"""
     names = []
     for m in re.finditer(r"from \._shared import (?:\(([^)]+)\)|([^\n(]+))", src):
-        raw = (m.group(1) or m.group(2) or "").replace("\n", ",")
-        for part in raw.split(","):
+        raw = (m.group(1) or m.group(2) or "")
+        # 先剝行內註解（`from ._shared import (a, b,  # noqa: F401` 是合法寫法，
+        # 不剝的話 `# noqa: F401` 會被當成一個「不存在的名稱」而假失敗）
+        raw = "\n".join(ln.split("#", 1)[0] for ln in raw.splitlines())
+        for part in raw.replace("\n", ",").split(","):
             part = part.strip()
             if not part:
                 continue

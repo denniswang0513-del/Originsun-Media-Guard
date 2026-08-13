@@ -64,13 +64,16 @@ TRACKS: tuple[tuple[str, str, tuple], ...] = (
     )),
 )
 
-TRACK_KEYS = tuple(k for k, _l, _items in TRACKS)
 ITEMS = {ik: (tk, lb, kind, hint)
          for tk, _tl, items in TRACKS for ik, lb, kind, hint in items}
 MANUAL_KEYS = tuple(k for k, v in ITEMS.items() if v[2] == MANUAL)
-AUTO_KEYS = tuple(k for k, v in ITEMS.items() if v[2] == AUTO)
+AUTO_KEYS = frozenset(k for k, v in ITEMS.items() if v[2] == AUTO)
 
 MAX_NOTE = 500
+
+# 誰可以勾手動里程碑（owner 2026-08-14 拍板走模組級）。守衛與「畫不畫
+# checkbox」兩處共用這一份 —— 分兩處寫的話，總有一天畫面說可以、後端回 403。
+CHECK_MODULES = ("crm_projects",)
 
 # ── 階段（商務主軸，單線）──────────────────────────────────────────────
 # 與 routers/crm/projects.py 的狀態白名單同一組字面值；順序＝管線順序。
@@ -90,13 +93,13 @@ NEXT_STATUS = {
 # 硬守衛（成案/未成案原因必填等）留在既有端點，這裡不重複實作。
 GATES = {
     "製作": ("won", "quote_won"),
-    "結案": ("approved",),
-    "歸檔": ("final", "archived", "invoiced", "retro"),
+    "結案": ("approved", "settled"),
+    "歸檔": ("final", "archived", "invoiced", "retro", "settled"),
 }
 
-# 永遠不擋的軟提示（列在缺項裡但標成「提醒」）—— owner 決策點 5：
-# 實務上結案常先於收款，不能因為錢還沒到就卡住流程。
-ADVISORY = ("settled",)
+# 列在缺項裡、但標成「提醒」而非阻擋 —— owner 決策點 5：實務上結案常先於收款，
+# 不能因為錢還沒到就卡住流程。（放進 GATES 一起走，不另開第二個迴圈。）
+ADVISORY = frozenset({"settled"})
 
 
 def _norm_manual(stored) -> dict:
@@ -130,65 +133,66 @@ def apply_check(stored, key: str, checked, note, *, who: str, when: str):
     return cur, ""
 
 
-def build(facts: dict, stored_manual=None) -> dict:
+def missing_facts(facts: dict) -> tuple:
+    """範本宣告了、但呼叫端沒給的自動訊號 —— 空 tuple ＝ 兩邊對齊。
+
+    🔴 為什麼需要這支：軌道範本（這裡）與訊號怎麼算（router）是分開的，靠
+    item_key 字串接。漏一個或打錯字的話 `build()` 會把它畫成「未完成」——
+    **永遠不會亮，而且沒有任何錯誤**。這是這個設計唯一的靜默失效點，
+    所以把它變成可執行的斷言（單元測試 + router 啟動時檢查）。
+    """
+    return tuple(sorted(AUTO_KEYS - set(facts or ())))
+
+
+def build(facts: dict, stored_manual=None, detail: dict = None) -> dict:
     """facts（呼叫端從各正本撈的訊號）+ 手動勾選 → 完整工作流狀態。
 
     facts 的鍵 = AUTO 項的 item_key，值是 bool 或 None。**None ＝「略過」**
     （例如標記「不上官網」的專案，`published` 不該顯示成未完成）。
     缺鍵一律當 False —— 訊號撈不到時寧可顯示未完成，不要謊報完成。
+    detail：item_key → 「為什麼亮」的說明字串（燈要能自己解釋）。
     """
     facts = facts or {}
+    detail_map = detail or {}
     manual = _norm_manual(stored_manual)
 
     tracks = []
-    state = {}          # item_key → ON/OFF/SKIP，給 gate 判定用
     for tk, tlabel, items in TRACKS:
         rows = []
         for ik, label, kind, hint in items:
+            row = {"key": ik, "label": label, "kind": kind, "hint": hint}
             if kind == MANUAL:
                 m = manual.get(ik) or {}
-                st = ON if m.get("checked") else OFF
-                row = {"key": ik, "label": label, "kind": kind, "hint": hint,
-                       "state": st, "by": m.get("by", ""), "at": m.get("at", ""),
-                       "note": m.get("note", "")}
+                row["state"] = ON if m.get("checked") else OFF
+                row.update(by=m.get("by", ""), at=m.get("at", ""),
+                           note=m.get("note", ""))
             else:
-                # 🔴 「沒有這個鍵」與「明確給 None」是兩件事：前者＝訊號撈不到
-                # （顯示未完成，寧可低報也不謊報交付），後者＝呼叫端明確說
-                # 這項不適用（略過）。用 .get() 會把兩者混成同一種。
-                st = OFF if ik not in facts else (
-                    SKIP if facts[ik] is None else (ON if facts[ik] else OFF))
-                row = {"key": ik, "label": label, "kind": kind, "hint": hint,
-                       "state": st}
-                detail = (facts.get("_detail") or {}).get(ik)
-                if detail:
-                    row["detail"] = str(detail)[:200]   # 燈要能自己解釋為什麼亮
-            state[ik] = st
+                # 缺鍵 → False（訊號撈不到就顯示未完成，寧可低報也不謊報交付）；
+                # 明確 None → 呼叫端說這項不適用（略過）。`.get(ik, False)` 正好
+                # 把這兩者分開 —— 用 `.get(ik)` 會混成同一種。
+                val = facts.get(ik, False)
+                row["state"] = SKIP if val is None else (ON if val else OFF)
+                if detail_map.get(ik):
+                    row["detail"] = str(detail_map[ik])[:200]
             rows.append(row)
-        done = sum(1 for r in rows if r["state"] == ON)
-        total = sum(1 for r in rows if r["state"] != SKIP)
-        tracks.append({"key": tk, "label": tlabel, "items": rows,
-                       "done": done, "total": total})
-    return {"tracks": tracks, "_state": state}
+        tracks.append({
+            "key": tk, "label": tlabel, "items": rows,
+            "done": sum(1 for r in rows if r["state"] == ON),
+            "total": sum(1 for r in rows if r["state"] != SKIP),
+        })
+    return {"tracks": tracks}
 
 
-def missing_for(state: dict, target_status: str) -> list[dict]:
+def missing_for(tracks: list, target_status: str) -> list[dict]:
     """推進到 target_status 前「建議先完成」但還沒完成的項目。
 
     SKIP 不算缺（不上官網的案子不該卡在「官網上線」）。ADVISORY 的項目照列
     但標 advisory=True —— 讓人看見，但語氣是提醒不是阻擋。
     """
-    out = []
-    for key in GATES.get(target_status, ()):
-        if state.get(key) == OFF:
-            tk, label, _kind, _hint = ITEMS[key]
-            out.append({"key": key, "label": label, "track": tk,
-                        "advisory": key in ADVISORY})
-    for key in ADVISORY:
-        if target_status in ("結案", "歸檔") and state.get(key) == OFF \
-                and not any(o["key"] == key for o in out):
-            tk, label, _kind, _hint = ITEMS[key]
-            out.append({"key": key, "label": label, "track": tk, "advisory": True})
-    return out
+    state = {r["key"]: r["state"] for t in (tracks or []) for r in t["items"]}
+    return [{"key": k, "label": ITEMS[k][1], "track": ITEMS[k][0],
+             "advisory": k in ADVISORY}
+            for k in GATES.get(target_status, ()) if state.get(k) == OFF]
 
 
 def stage_view(status: str) -> dict:
