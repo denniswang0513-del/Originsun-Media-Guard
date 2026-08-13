@@ -1191,6 +1191,121 @@ AI 在這裡是**輸入輔助**不是產出物：每筆會議記錄可傳一個�
 - 🔴 「那一筆還在不在」問 **`s.notes`（資料）不問畫面**：用卡片存不存在判斷
   的話，一次 `_load` 失敗（隧道抖一下，錯誤訊息取代整個 host）就會被當成
   「被刪掉了」，把一整場會議的錄音丟掉、還配一句錯的說明。
+
+## §14 提案頁＝工作流中樞（2026-08-13「請規劃」，⏳ 待 owner 拍板後動工）
+
+owner 需求原文（兩則合讀）：「將現在的提案頁面裡的專案，依據專案的進度逐步地
+完成到結案，然後這些功能都跟 CRM 系統同步。每個人的權限由 CRM 系統控制」＋
+「我想把提案頁面擴充成我的工作流」。
+
+一句話：**提案頁從「企劃工作區」升級成「專案從提案走到結案的駕駛艙」**——
+在提案詳情（SPA overlay 與 `/proposal-plan.html` 兩介面）看得到專案現在走到
+哪個階段、這個階段還缺什麼、下一步按哪裡；推進動作直接從這裡發。
+
+### §14.0 四個核心設計判斷（先讀這裡再動工）
+
+1. **同步靠合體，不靠複製**。§「提案=專案合體」之後，提案頁裡的專案「就是」
+   `crm_projects` 那一列（project_id 1:1 衛星）。工作流視圖是**同一筆資料的另
+   一個投影**——不新增第二份狀態、不雙寫。提案頁發生的每個寫入都打**既有**
+   CRM 端點；「跟 CRM 同步」因此是結構保證，不是同步程式。
+2. **進度＝訊號＋勾選，read-time 推導**（預支款結算的既有模式：前端不做任何
+   狀態寫入，後端查詢時即時算）。自動訊號從既有資料推（報價單、人員配置、
+   影像紀錄、審批、`work_completeness` 四項、發票請款）；只有無法從資料推的
+   步驟（開拍、剪輯完成…）落新表當手動勾選項。
+3. **不新增階段**。沿用八狀態（投標/開發/洽詢/提案/製作/結案/歸檔/未成案），
+   工作流步驟是**每個階段內的 checklist**，不是第二套狀態機——兩套狀態機
+   總有一天互相漂移。
+4. **推進走既有閘門**。「推進到下一階段」＝打 `routers/crm/projects.py` 既有
+   的專案狀態端點（狀態白名單 + `_sync_linked_proposals` 衛星 win/loss +
+   客戶分級重算的完整副作用鏈）。🔴 合體鐵則沿用：**不能只 setattr、不能繞過
+   副作用鏈另開寫入路**。
+
+### §14.1 資料層
+
+新表 `crm_project_stage_checks`（只存**手動**項；自動訊號永不落庫）：
+
+    id PK / project_id FK / stage / item_key / checked bool
+    / checked_by / checked_at / note TEXT
+    UNIQUE(project_id, stage, item_key)
+
+步驟範本＝純資料常數 `core/project_flow.py`（比照 plan-templates 慣例）：
+每階段 `items[{key, label, kind: auto|manual, hint, link}]`，auto 項各配一個
+推導函式。v1 一套通用範本，不做 per-project_type 客製（決策點 1）。
+
+### §14.2 階段步驟草案（v1 內建，文字任 owner 改）
+
+- **投標/開發/洽詢**（前期）：客戶已建檔(auto: client_id)、提案已建立
+  (auto: 衛星列存在)
+- **提案**：創意發想已開始(auto: `_plan_started`)、企劃書至少一版
+  (auto: preprod_brief)、報價單已備(auto: preprod_quote_files 或
+  crm_quotations)、已向客戶提案(auto: 衛星 status ∈ 已提案/入圍)
+- **製作**：報價成交(auto: quotation 狀態)、人員已配置
+  (auto: crm_project_staff ≥1)、開拍(manual)、素材已進影像紀錄
+  (auto: media_log)、剪輯完成(manual)、客戶審批通過
+  (auto: portal 最新一輪通過；沒開審批單則 manual)
+- **結案**：完稿已交付(manual)、上架素材完成度
+  (auto: `work_completeness` 四項逐項亮燈)、已請款/開發票
+  (auto: crm_invoices 有列)、款項結清(auto: 應收餘額 0——黃燈提示，
+  **不阻擋**，實務上結案常先於收款；決策點 5)
+- **歸檔**：手動一鍵（決策點 4）
+- **未成案**：終態。顯示 outcome_reason，無步驟、不可推進。
+
+推進遇缺項＝**軟擋**：彈確認框列出缺什麼，確認後仍可推（決策點 2）。
+硬擋只保留既有守衛（成案/未成案原因必填等）——不在 UI 層新蓋假守門。
+
+### §14.3 API
+
+- `GET  /api/v1/projects/{id}/flow` → `{status, stages:[{stage, items:[…], …}],
+  next_status, missing:[…]}`。守衛 `proposal_auth` 級（能看提案的都能看）。
+  自動訊號一次 JOIN/聚合算完（比照 quotations/stats，禁 N+1）。
+- `POST /api/v1/projects/{id}/flow/check` `{stage, item_key, checked, note}`
+  → 守衛 `check_admin_or_module('crm_projects')`（與 CRM 專案寫入同門）。
+- **推進不新增端點**——前端打既有專案狀態端點。
+- 🔴 公開 `?t=` 端點**完全不出 flow**（內部進度、金額訊號、人名都不出；
+  防線在後端白名單，不在前端）。
+
+### §14.4 前端
+
+- 兩介面**結構共用**（v2.4.54 的教訓：逐項移植只會再分岔）：提案詳情 overlay
+  與 `/proposal-plan.html` 各加「進度」分頁，跑同一份 `tabs/proposals/flow-*.js`。
+  🔴 import closure 鐵則沿用：只准 `tabs/proposals/` 與 `js/shared/`。
+- 視覺：頂部階段 stepper（八狀態線性、未成案岔出紅），當前階段 checklist
+  （auto 項亮燈＋「去完成」deep-link、manual 項勾選＋署名），底部「推進到
+  下一階段」按鈕。
+- deep-link 目的地：SPA 內有權限者跳 CRM 對應分頁（報價管理/人員配置/完稿
+  結案…）；`/proposal-plan.html` 使用者開對應獨立頁；無權限者按鈕禁用＋
+  「需要專案管理權限」——不藏功能，讓人知道找誰。
+- 提案清單列補「專案階段」chip（清單已有 project_name 欄，同一格加狀態）。
+
+### §14.5 RBAC（權限全由 CRM 現制控制，不新增權限 key）
+
+| 動作 | 守衛 |
+|---|---|
+| 看進度分頁 | `proposal_auth`（admin / preprod_proposals / preprod_plan / crm_projects） |
+| 勾手動項、推進階段 | `check_admin_or_module('crm_projects')` |
+| 公開 `?t=` | 一律不出 |
+
+提案庫-only 的人：**看得到全部進度、動不了**（決策點 3）。
+
+### §14.6 分階段交付（每階段 /simplify + 各自 commit）
+
+1. `core/project_flow.py` 範本 + `GET /flow`（純推導，零新表）+ 詳情「進度」
+   分頁唯讀 stepper。
+2. `crm_project_stage_checks` 表 + check API + 勾選 UI（audit：checked_by）。
+3. 推進按鈕（走既有狀態端點）+ 缺項軟擋確認框。
+4. `/proposal-plan.html` 同步 + deep-links + 清單階段 chip。
+
+測試：unit＝每個 auto 訊號正反面 + RBAC 反面（提案庫-only 勾選要 403）；
+e2e＝勾選、推進、未成案原因守衛、公開頁不出 flow。
+
+### §14.7 待 owner 拍板（動工前問完）
+
+1. v1 步驟草案（§14.2）可否？要不要依專案類型（紀實/廣告/MV…）給不同
+   checklist？（建議 v1 一套通用，用了再分化）
+2. 推進遇缺項：軟擋（確認框）還是硬擋？（建議軟擋）
+3. 提案庫-only 的人可否勾手動項？（建議不可——勾選＝專案管理權限）
+4. 歸檔要不要自動（結案 N 天後）？（建議 v1 手動）
+5. 「款項結清」要不要擋結案？（建議不擋，黃燈提示）
 - `renderMeetings` **刻意不收**上一輪的錄音：兩個呼叫端都不會對同一個 host
   重掛，而真重掛時 `_stopRecording` 只是「開始停」，下一行 `__mv` 就被換掉
   —— 收尾會拿到新的 `proposalId`，把舊提案的錄音 POST 到新提案去。
