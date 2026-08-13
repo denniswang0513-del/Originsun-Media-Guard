@@ -55,6 +55,9 @@ def is_junk_file(path_or_name: str) -> bool:
         return True
     if fname in ("Thumbs.db", ".DS_Store", "desktop.ini"):
         return True
+    # 轉檔中的暫存產出（*_proxy.part.mov）—— 掃來源、備份、驗收都不該看到它
+    if fname.lower().endswith(".part.mov"):
+        return True
     return False
 
 def _short_hash(h: Optional[str]) -> str:
@@ -1102,6 +1105,12 @@ class MediaGuardEngine:
 
             base_name = os.path.splitext(os.path.basename(src_file))[0]
             proxy_out = os.path.join(out_dir, f"{base_name}_proxy.mov")
+            # 🔴 先寫 .part.mov，ffmpeg 正常收工才 rename 成正式名（2026-08-13）。
+            # 原本直接寫最終檔名 —— 機器中途掛掉就把上一份好檔換成半截檔，而且
+            # 檔名還在、大小還有幾 MB，所有「檔案在不在」的檢查都會說沒事
+            # （那天一支 3.9GB 的來源留下 6MB 的 moov-less 壞檔差點交付出去）。
+            # 副檔名保留 .mov 是刻意的：ffmpeg 靠副檔名選 muxer。
+            proxy_tmp = os.path.join(out_dir, f"{base_name}_proxy.part.mov")
 
             _src_sz = os.path.getsize(src_file) if os.path.exists(src_file) else 0
             self.log(f"[{i+1}/{total}] 正在轉檔: {os.path.basename(src_file)}")
@@ -1110,7 +1119,7 @@ class MediaGuardEngine:
             if n_audio > 1:
                 self.log(f"  [audio] 多軌音訊 ({n_audio} 軌)，保留全部 {n_audio} 軌（各軌轉 AAC）")
 
-            cmd = self._build_proxy_transcode_cmd(src_file, proxy_out, n_audio)
+            cmd = self._build_proxy_transcode_cmd(src_file, proxy_tmp, n_audio)
 
             proc, stderr_tail, stderr_thread = self._spawn_with_stderr_tail(cmd)
 
@@ -1154,9 +1163,10 @@ class MediaGuardEngine:
 
             if self._stop_event.is_set():
                 self.log(f"[X] {os.path.basename(src_file)} 轉檔已強制中止。")
-                if os.path.exists(proxy_out):
+                # 只清自己的暫存檔 —— proxy_out 若已存在是「上一次好的成品」，不准碰
+                if os.path.exists(proxy_tmp):
                     try:
-                        os.remove(proxy_out)
+                        os.remove(proxy_tmp)
                     except:
                         pass
                 break
@@ -1167,8 +1177,20 @@ class MediaGuardEngine:
             if proc.returncode != 0:
                 self.err(f"[!] 轉檔失敗: {os.path.basename(src_file)}")
                 self._log_stderr_tail(stderr_tail)
+                if os.path.exists(proxy_tmp):
+                    try:
+                        os.remove(proxy_tmp)
+                    except Exception:
+                        pass
                 err_count += 1  # type: ignore
             else:
+                # ffmpeg 收工了才把暫存檔換成正式名（同目錄 rename，覆蓋舊的）
+                try:
+                    os.replace(proxy_tmp, proxy_out)
+                except Exception as e:
+                    self.err(f"[!] 產出無法歸位: {os.path.basename(proxy_out)} — {e}")
+                    err_count += 1  # type: ignore
+                    continue
                 self.log(f"[OK] 完成: {os.path.basename(proxy_out)}")
 
         if not self._stop_event.is_set():

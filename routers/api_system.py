@@ -217,9 +217,14 @@ async def list_dir_api(req: ListDirRequest):
             return {"files": [req.path.replace("\\", "/")], "count": 1}
         return {"files": [], "error": f"檔案不支援: {req.path}"}
     if not os.path.isdir(req.path): return {"files": [], "error": f"目錄不存在: {req.path}"}
+    # 垃圾檔與「轉檔中的暫存產出」不該出現在任何影片清單裡 ——
+    # 前端會拿這份清單當「已經有什麼」的依據（失聯重派算缺件）。
+    from core_engine import is_junk_file  # type: ignore
     files = []
     for root, _, fnames in os.walk(req.path):
         for fname in sorted(fnames):
+            if is_junk_file(fname):
+                continue
             if os.path.splitext(fname)[1].lower() in exts:
                 files.append(os.path.join(root, fname).replace("\\", "/"))
     return {"files": files, "count": len(files)}

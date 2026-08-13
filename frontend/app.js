@@ -1338,6 +1338,185 @@ if (typeof appendLog === 'undefined') {
         const _RE_SYSTEM_LOG = /\[Engine\]|系統|✅|完成|開始/;
         const _RE_ERROR_LOG = /\[!\]|❌|失敗|錯誤|error|FAIL/i;
 
+        // 失聯門檻：90 秒沒有任何一次成功回應（心跳每 5 秒一次 = 連續 18 次落空）
+        const _HOST_TIMEOUT_MS = 90000;
+
+        /**
+         * 遠端主機狀態：running（還在跑）/ done（確認完成）/ timeout（失聯，結果不明）。
+         * 舊寫法只有布林 `done`，其他 tab 建立的紀錄仍沿用 —— 這裡統一翻譯。
+         */
+        function _hostState(info) {
+            if (info.state) return info.state;
+            return info.done ? 'done' : 'running';
+        }
+
+        /**
+         * 挑出「現在真的能接活」的遠端主機：扣掉黑名單、ping 得通、看得到來源。
+         *
+         * 補轉與失聯重派共用同一份判定 —— 兩邊若各寫一套，遲早會有一邊把工作
+         * 派給看不到來源路徑的機器，然後整批再空轉一輪。
+         */
+        async function pickLiveDispatchHosts(opts) {
+            const exclude = new Set((opts && opts.exclude) || []);
+            const blacklist = new Set(window._retryFailedHosts || []);
+            const candidates = (window._originalDispatchHosts || [])
+                .filter(h => !blacklist.has(h.ip) && !exclude.has(h.ip));
+            const srcDirs = window._originalSourceDirs || [];
+            const live = [];
+            await Promise.all(candidates.map(async h => {
+                try {
+                    const c1 = new AbortController();
+                    const t1 = setTimeout(() => c1.abort(), 3000);
+                    const ping = await fetch('http://' + h.ip + '/api/v1/health', { signal: c1.signal });
+                    clearTimeout(t1);
+                    if (!ping.ok) return;
+                    if (srcDirs.length) {
+                        const c2 = new AbortController();
+                        const t2 = setTimeout(() => c2.abort(), 4000);
+                        const vr = await fetch('http://' + h.ip + '/api/v1/validate_paths', {
+                            method: 'POST', headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ paths: srcDirs }), signal: c2.signal,
+                        });
+                        clearTimeout(t2);
+                        const vd = await vr.json();
+                        if (!Object.values(vd.results || {}).every(v => v.path_exists)) return;
+                    }
+                    live.push(h);
+                } catch (_) { /* 連不上就是不可用 */ }
+            }));
+            return live;
+        }
+        window.pickLiveDispatchHosts = pickLiveDispatchHosts;
+
+        // 來源檔名 → 比對用 stem（proxy 產出是 <stem>_proxy.mov）
+        function _proxyStem(pathOrName) {
+            const name = String(pathOrName).split(/[\\/]/).pop() || '';
+            let stem = name.replace(/\.[^.]+$/, '').toLowerCase();
+            if (stem.endsWith('_proxy')) stem = stem.slice(0, -6);
+            return stem;
+        }
+
+        /**
+         * 某台的 HostDispatch 夾裡「真的產出了什麼」。
+         * 夾子在共享的 proxy root 上，所以那台就算已經死透了也查得到。
+         * `.part.mov` 是還沒收工的暫存檔，不算數（會被列進重派清單）。
+         */
+        async function listProducedStems(dir) {
+            const stems = new Set();
+            if (!dir) return stems;
+            try {
+                const r = await fetch(getComputeBaseUrl() + '/api/v1/list_dir', {
+                    method: 'POST', headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ path: dir })
+                });
+                const d = await r.json();
+                (d.files || []).forEach(p => {
+                    const name = String(p).split(/[\\/]/).pop() || '';
+                    if (/\.part\.mov$/i.test(name)) return;
+                    stems.add(_proxyStem(name));
+                });
+            } catch (_) { /* 查不到就當作什麼都沒產出，寧可重轉也不要漏 */ }
+            return stems;
+        }
+
+        /**
+         * 一台主機失聯 → 把它「分到但還沒產出」的檔案改派給其他活著的主機。
+         *
+         * 🔴 這是 2026-08-13 事故的正面修法：當時一台轉檔中途掛掉，前端把
+         * 「逾時」當成「完成」，直接宣告全體完成並觸發合併 —— 那台手上還有
+         * 51 支沒轉，沒有任何人接手。
+         *
+         * 回傳 true 表示已經有接手的主機在跑（heartbeat 要繼續等）。
+         */
+        async function reassignFromDeadHost(deadIp, info) {
+            const assigned = Array.isArray(info.assigned) ? info.assigned : [];
+            const hostName = (info.host && info.host.name) || deadIp;
+
+            // 就算它自己醒過來，也不再派工給它 —— 醒來的那台會繼續寫舊任務，
+            // 與接手的主機同時寫同一個目的地。
+            window._retryFailedHosts = [...new Set([...(window._retryFailedHosts || []), deadIp])];
+
+            if (!assigned.length) {
+                appendLog(`⚠️ ${hostName} 失聯，但沒有它的派工紀錄 —— 無法立即重派，留給合併後的補轉處理`, 'error');
+                return false;
+            }
+
+            const produced = await listProducedStems(info.destBase);
+            if (info.takeoverBase && info.takeoverBase !== info.destBase) {
+                // 這台先前接手過別人的工作，產出在另一個夾子裡
+                (await listProducedStems(info.takeoverBase)).forEach(s => produced.add(s));
+            }
+            const outstanding = assigned.filter(a => !produced.has(_proxyStem(a.file)));
+            appendLog(`🔁 ${hostName} 失聯：分到 ${assigned.length} 個、已產出 ${assigned.length - outstanding.length} 個、`
+                      + `尚缺 ${outstanding.length} 個`, 'system');
+            if (!outstanding.length) return false;
+
+            const live = await pickLiveDispatchHosts({ exclude: [deadIp] });
+            if (!live.length) {
+                appendLog(`❌ 沒有其他可接手的主機（${outstanding.length} 個檔案待轉）—— 合併後會再嘗試補轉/本機轉`, 'error');
+                return false;
+            }
+
+            const _unc = window.toUncPath || window._toUnc || (x => x);
+            const destRoot = window._dispatchDestRoot || '';
+            const slots = live.map(h => ({ host: h, byCard: {} }));
+            outstanding.forEach((a, i) => {
+                const slot = slots[i % slots.length];
+                const card = a.cardName || '';
+                (slot.byCard[card] = slot.byCard[card] || []).push(a.file);
+            });
+
+            let started = 0;
+            for (const slot of slots) {
+                const cards = Object.entries(slot.byCard);
+                if (!cards.length) continue;
+                const base = destRoot
+                    ? destRoot + '/HostDispatch_Takeover_' + slot.host.name.replace(/\s+/g, '_')
+                    : '';
+                const takenOver = [];
+                for (const [cardName, files] of cards) {
+                    const destDir = _unc(base + (cardName ? '/' + cardName : ''));
+                    try {
+                        const r = await fetch('http://' + slot.host.ip + '/api/v1/jobs/transcode', {
+                            method: 'POST', headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ sources: files.map(_unc), dest_dir: destDir })
+                        });
+                        const j = await r.json().catch(() => ({}));
+                        if (!r.ok) throw new Error(j.detail || j.message || ('HTTP ' + r.status));
+                        appendLog(`↪️ ${slot.host.name} 接手 [${cardName || 'all'}] ${files.length} 個，任務 ID: ${j.job_id || '?'}`, 'system');
+                        files.forEach(f => takenOver.push({ cardName, file: f }));
+                        started++;
+                    } catch (err) {
+                        appendLog(`❌ ${slot.host.name} 無法接手 [${cardName || 'all'}]: ${err.message}`, 'error');
+                        window._retryFailedHosts = [...new Set([...(window._retryFailedHosts || []), slot.host.ip])];
+                    }
+                }
+                if (!takenOver.length) continue;
+                // 這台可能本來就在跑自己的份 —— 併進去，不要覆蓋掉既有紀錄
+                const prev = window._activeRemoteHosts[slot.host.ip];
+                window._activeRemoteHosts[slot.host.ip] = {
+                    host: slot.host,
+                    assigned: [...((prev && prev.assigned) || []), ...takenOver],
+                    destBase: (prev && prev.destBase) || base,
+                    takeoverBase: base,
+                    logOffset: (prev && prev.logOffset) || 0,
+                    expectedJobs: ((prev && prev.expectedJobs) || 0) + Object.keys(slot.byCard).length,
+                    state: 'running',
+                    pct: (prev && prev.pct) || 0,
+                    lastSeen: Date.now(),
+                    // 重算起算點：不然「閒著就是做完了」的判定會對剛接手的機器誤判
+                    startTime: Date.now(),
+                };
+                updateHostProgress(slot.host.ip, 20, '接手轉檔中...', '#d48a04');
+            }
+
+            if (!started) {
+                appendLog(`❌ ${outstanding.length} 個檔案沒有主機接手成功`, 'error');
+                return false;
+            }
+            return true;
+        }
+
         function startHeartbeatMonitor() {
             if (window._heartbeatTimer) clearInterval(window._heartbeatTimer);
             // 統一入口：heartbeat 啟動 = 有遠端任務執行中。
@@ -1351,10 +1530,12 @@ if (typeof appendLog === 'undefined') {
             window._heartbeatTimer = setInterval(async () => {
                 const now = Date.now();
                 for (const [ip, info] of Object.entries(window._activeRemoteHosts || {})) {
-                    if (info.done) continue;
+                    if (_hostState(info) !== 'running') continue;
                     try {
                         const ctrl = new AbortController();
-                        const t = setTimeout(() => ctrl.abort(), 3000);
+                        // 8 秒不是 3 秒：一台被 ffmpeg 榨滿的機器偶爾三秒回不了狀態
+                        // 很正常，太短會把忙碌誤判成死亡（2026-08-13）
+                        const t = setTimeout(() => ctrl.abort(), 8000);
                         const offset = info.logOffset || 0;
                         const r = await fetch('http://' + ip + '/api/v1/status?log_offset=' + offset, { signal: ctrl.signal });
                         clearTimeout(t);
@@ -1416,24 +1597,36 @@ if (typeof appendLog === 'undefined') {
                             // (shorter wait for retries since files are smaller)
                             const _minWait = window._remoteDispatchExpectedRetryCount > 0 ? 8000 : 15000;
                             if (!d.busy && !d.paused && d.queue_length === 0 && (now - info.startTime > _minWait)) {
-                                info.done = true;
+                                info.state = 'done';
                                 info.pct = 100;
                                 const _jl = JOB_LABELS[window._remoteJobType] || '任務';
                                 updateHostProgress(ip, 100, `✅ ${_jl}完成`, '#228b22');
                             }
                         }
                     } catch (_) { }
-                    if (!info.done && now - info.lastSeen > 60000) {
-                        updateHostProgress(ip, 0, '⚠️ 逾時', '#b45309');
-                        if (typeof appendLog === 'function') appendLog('⚠️ ' + info.host.name + ' (' + ip + ') 逾時', 'error');
-                        info.done = true;
+                    // 🔴 逾時 ≠ 完成（2026-08-13）。這裡標的是「失去聯絡、結果不明」，
+                    // 標成 done 會讓下面的「全部完成」成立、直接觸發合併 —— 那台手上
+                    // 沒轉完的檔案就這樣人間蒸發。分散式轉檔另外把它的份額改派出去。
+                    if (_hostState(info) === 'running' && now - info.lastSeen > _HOST_TIMEOUT_MS) {
+                        info.state = 'timeout';
+                        updateHostProgress(ip, info.pct || 0, '⚠️ 失聯', '#b45309');
+                        if (typeof appendLog === 'function') {
+                            appendLog(`⚠️ ${info.host.name} (${ip}) 失去聯絡超過 ${Math.round(_HOST_TIMEOUT_MS / 1000)} 秒 — 任務結果不明`, 'error');
+                        }
+                        if (window._remoteJobType === 'transcode') {
+                            // 先把狀態改掉再進非同步流程，避免下一輪 heartbeat 重複重派
+                            reassignFromDeadHost(ip, info).catch(err => {
+                                if (typeof appendLog === 'function') appendLog('重派失敗: ' + err.message, 'error');
+                            });
+                        }
                     }
                 }
 
                 // 更新主進度條（多機加總進度 — 用各主機實際進度的平均值）
                 const _allHosts = Object.values(window._activeRemoteHosts || {});
                 if (_allHosts.length > 0) {
-                    const _doneCount = _allHosts.filter(h => h.done).length;
+                    const _doneCount = _allHosts.filter(h => _hostState(h) === 'done').length;
+                    const _lostCount = _allHosts.filter(h => _hostState(h) === 'timeout').length;
                     const _sumPct = _allHosts.reduce((s, h) => s + (h.pct || 0), 0);
                     const _aggPct = Math.round(_sumPct / _allHosts.length);
                     const _tab = window._activeJobTab || 'backup';
@@ -1453,7 +1646,8 @@ if (typeof appendLog === 'undefined') {
                         if (bkSegTrans) { bkSegTrans.style.width = `${(_aggPct / 100) * _segW}%`; bkSegTrans.style.backgroundColor = '#d48a04'; }
                         if (bkLblTrans) bkLblTrans.textContent = `${_aggPct}%`;
                         document.getElementById('bk-lbl-backup').textContent = '100%';
-                        if (bkProgLabel) bkProgLabel.textContent = `遠端轉檔　${_doneCount}/${_allHosts.length} 台完成 (${_aggPct}%)`;
+                        if (bkProgLabel) bkProgLabel.textContent = `遠端轉檔　${_doneCount}/${_allHosts.length} 台完成 (${_aggPct}%)`
+                            + (_lostCount ? `，${_lostCount} 台失聯` : '');
                     } else {
                         // 其他 TAB：單一進度條
                         const _pfxMap = { transcode: 'tc', concat: 'ct', verify: 'vf', report: 'rp', transcribe: 'tr', tts: 'tts' };
@@ -1463,15 +1657,22 @@ if (typeof appendLog === 'undefined') {
                             const _lbl = _progEl(_pfx, _tab, 'label');
                             if (_bar) _bar.style.width = Math.max(5, _aggPct) + '%';
                             const _jl2 = JOB_LABELS[window._remoteJobType] || '任務';
-                            if (_lbl) _lbl.textContent = `遠端${_jl2}　${_doneCount}/${_allHosts.length} 台完成 (${_aggPct}%)`;
+                            if (_lbl) _lbl.textContent = `遠端${_jl2}　${_doneCount}/${_allHosts.length} 台完成 (${_aggPct}%)`
+                                + (_lostCount ? `，${_lostCount} 台失聯` : '');
                         }
                     }
                 }
 
                 // Check if all hosts have completed their chunks
                 const hosts = _allHosts;
-                if (hosts.length > 0 && hosts.every(h => h.done)) {
+                // 「全部有結果」不等於「全部成功」—— 失聯的那台若已改派出去，
+                // 接手的主機會是新的 running 紀錄，這裡自然會繼續等它。
+                if (hosts.length > 0 && hosts.every(h => _hostState(h) !== 'running')) {
                     stopHeartbeatMonitor();
+                    if (_lostCount && typeof appendLog === 'function') {
+                        appendLog(`⚠️ 有 ${_lostCount} 台失聯且沒有主機接手 —— 以下流程是在「結果不完整」的前提下進行，`
+                                  + `合併後的驗證會列出缺件並嘗試補轉`, 'error');
+                    }
 
                     // Small buffer to allow the UI to reflect 100% state before fetching
                     setTimeout(() => {
@@ -1813,6 +2014,9 @@ if (typeof appendLog === 'undefined') {
                 hostCardMaps[hostIdx][cardName].push(file);
             });
 
+            // 派工的目的地根 —— 失聯重派要用它組接手主機的 HostDispatch 夾
+            window._dispatchDestRoot = ctx.proxy_root ? ctx.proxy_root + '/' + ctx.project_name : '';
+
             window._activeRemoteHosts = {};
             for (let i = 0; i < reachable.length; i++) {
                 const h = reachable[i];
@@ -1823,13 +2027,18 @@ if (typeof appendLog === 'undefined') {
                 const totalForHost = cardNames.reduce((s, c) => s + cardMap[c].length, 0);
                 updateHostProgress(h.ip, 10, '送出中... (' + totalForHost + ' 個)', '#1f538d');
 
+                const hostDestBase = window._dispatchDestRoot
+                    ? window._dispatchDestRoot + '/HostDispatch_' + h.name.replace(/\s+/g, '_')
+                    : '';
                 let hostOk = false;
+                // 🔴 記下這台「真的接下了哪些檔案」—— 它中途掛掉時，重派要靠這份
+                // 清單才知道該補什麼。原本這裡存的是全部檔案（每台都一樣），
+                // 等於沒有派工紀錄（2026-08-13）。
+                const acceptedFiles = [];
                 for (const cardName of cardNames) {
                     const files = cardMap[cardName].map(_toUnc);
                     const cardSuffix = cardName ? '/' + cardName : '';
-                    const dest = _toUnc(ctx.proxy_root
-                        ? ctx.proxy_root + '/' + ctx.project_name + '/HostDispatch_' + h.name.replace(/\s+/g, '_') + cardSuffix
-                        : '');
+                    const dest = _toUnc(hostDestBase ? hostDestBase + cardSuffix : '');
                     try {
                         if (typeof appendLog === 'function') appendLog('→ 送出 [' + (cardName || '(all)') + '] ' + files.length + ' 個給 ' + h.name, 'system');
                         const r = await fetch('http://' + h.ip + '/api/v1/jobs/transcode', {
@@ -1841,6 +2050,7 @@ if (typeof appendLog === 'undefined') {
                         // 接著 heartbeat 看它閒著就報「轉檔完成」—— 什麼都沒轉（2026-08-12）
                         if (!r.ok) throw new Error(res.detail || res.message || ('HTTP ' + r.status));
                         if (typeof appendLog === 'function') appendLog('✅ ' + h.name + ' [' + (cardName || 'all') + '] 接收，任務 ID: ' + (res.job_id || '?'), 'system');
+                        files.forEach(f => acceptedFiles.push({ cardName, file: f }));
                         hostOk = true;
                     } catch (err) {
                         if (typeof appendLog === 'function') appendLog('❌ ' + h.name + ' 拒收 [' + (cardName || 'all') + ']: ' + err.message, 'error');
@@ -1848,7 +2058,11 @@ if (typeof appendLog === 'undefined') {
                 }
                 if (hostOk) {
                     updateHostProgress(h.ip, 20, '轉檔中...', '#d48a04');
-                    window._activeRemoteHosts[h.ip] = { host: h, files: allCardFiles.map(cf => cf.file), lastSeen: Date.now(), startTime: Date.now(), expectedJobs: cardNames.length, pct: 0 };
+                    window._activeRemoteHosts[h.ip] = {
+                        host: h, assigned: acceptedFiles, destBase: hostDestBase,
+                        state: 'running', lastSeen: Date.now(), startTime: Date.now(),
+                        expectedJobs: cardNames.length, pct: 0,
+                    };
                 } else {
                     // Blacklist this host so retry rounds skip it.
                     window._retryFailedHosts = [...new Set([...(window._retryFailedHosts || []), h.ip])];
@@ -2083,37 +2297,12 @@ if (typeof appendLog === 'undefined') {
                             let liveRemoteHosts = [];
 
                             if (!useLocal) {
-                                const origHosts = window._originalDispatchHosts || [];
-                                const origSrcDirs = window._originalSourceDirs || [];
                                 const blacklist = new Set(window._retryFailedHosts || []);
-                                const candidates = origHosts.filter(h => !blacklist.has(h.ip));
                                 if (blacklist.size > 0 && typeof appendLog === 'function') {
                                     appendLog(`[i] 跳過黑名單主機 (${[...blacklist].join(', ')})`, 'system');
                                 }
-                                // Re-ping + re-validate surviving candidates.
-                                await Promise.all(candidates.map(async h => {
-                                    try {
-                                        const c1 = new AbortController();
-                                        const t1 = setTimeout(() => c1.abort(), 3000);
-                                        const ping = await fetch('http://' + h.ip + '/api/v1/health', { signal: c1.signal });
-                                        clearTimeout(t1);
-                                        if (!ping.ok) return;
-                                        if (origSrcDirs.length) {
-                                            const c2 = new AbortController();
-                                            const t2 = setTimeout(() => c2.abort(), 4000);
-                                            const vr = await fetch('http://' + h.ip + '/api/v1/validate_paths', {
-                                                method: 'POST', headers: { 'Content-Type': 'application/json' },
-                                                body: JSON.stringify({ paths: origSrcDirs }),
-                                                signal: c2.signal,
-                                            });
-                                            clearTimeout(t2);
-                                            const vd = await vr.json();
-                                            const ok = Object.values(vd.results || {}).every(v => v.path_exists);
-                                            if (!ok) return;
-                                        }
-                                        liveRemoteHosts.push(h);
-                                    } catch (_) { /* unreachable — skip */ }
-                                }));
+                                // 與失聯重派共用同一套「誰能接活」判定（ping + 看得到來源）
+                                liveRemoteHosts = await pickLiveDispatchHosts();
                                 if (liveRemoteHosts.length === 0) {
                                     if (typeof appendLog === 'function') appendLog('[>] 目前無可執行的遠端主機（黑名單外都不可達或看不到來源），改用本機補轉', 'system');
                                     useLocal = true;
@@ -2174,6 +2363,7 @@ if (typeof appendLog === 'undefined') {
                                 let requestsStarted = 0;
                                 window._activeRemoteHosts = {}; // 重置，只追蹤補轉主機
                                 const _unc = window.toUncPath || window._toUnc || (x => x);
+                                window._dispatchDestRoot = window._dispatchDestRoot || (proxyRoot + '/' + projName);
                                 for (const dist of distributions) {
                                     for (const [cardName, srcFiles] of Object.entries(dist.byCard)) {
                                         const destDir = _unc(proxyRoot + '/' + projName + '/HostDispatch_Retry_' + dist.host.name.replace(/\s+/g, '_') + '/' + cardName);
@@ -2188,8 +2378,14 @@ if (typeof appendLog === 'undefined') {
                                             if (!r.ok) throw new Error(j.detail || j.message || ('HTTP ' + r.status));
                                             if (typeof appendLog === 'function') appendLog(`[OK] ${dist.host.name} [${cardName}] 補轉排隊，任務 ID: ${j.job_id || '?'}`, 'system');
                                             requestsStarted++;
+                                            // 補轉中的機器也可能掛掉 —— 一樣要留派工紀錄供重派
+                                            const prevR = window._activeRemoteHosts[dist.host.ip];
                                             window._activeRemoteHosts[dist.host.ip] = {
-                                                host: dist.host, done: false, pct: 0,
+                                                host: dist.host, state: 'running', pct: 0,
+                                                assigned: [...((prevR && prevR.assigned) || []),
+                                                           ...srcFiles.map(f => ({ cardName, file: f }))],
+                                                destBase: _unc(proxyRoot + '/' + projName + '/HostDispatch_Retry_'
+                                                               + dist.host.name.replace(/\s+/g, '_')),
                                                 lastSeen: Date.now(), startTime: Date.now(),
                                                 expectedJobs: Object.keys(dist.byCard).length
                                             };

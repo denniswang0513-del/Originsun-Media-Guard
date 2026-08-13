@@ -10,6 +10,25 @@ from core.worker import enqueue_job  # type: ignore
 
 router = APIRouter()
 
+
+def is_incomplete_proxy(path: str) -> bool:
+    """半成品產出 —— 驗收要當成「還沒有」、合併不准搬進交付夾。
+
+    兩種型態（2026-08-13 事故）：
+    - `*_proxy.part.mov`：core_engine 轉檔中的暫存檔，還沒 rename 成正式名
+    - 0 byte：ffmpeg 剛建檔就被砍斷留下的殼
+
+    🔴 這條規則要對「所有」判定 proxy 存不存在的地方一致生效，
+    否則補轉會以為檔案已經有了，壞檔就留在交付夾裡。
+    """
+    if os.path.basename(path).lower().endswith(".part.mov"):
+        return True
+    try:
+        return os.path.getsize(path) == 0
+    except OSError:
+        return True
+
+
 @router.post("/api/v1/jobs/transcode")
 async def create_transcode_job(req: TranscodeRequest):
     project_name = req.project_name or os.path.basename(req.dest_dir) or "unnamed"
@@ -43,6 +62,11 @@ async def merge_host_outputs(req: MergeHostOutputsRequest):
         for root, dirs, files in os.walk(src_dir):
             for fname in files:
                 src_file = os.path.join(root, fname)
+                # 半成品不搬進交付夾 —— 那台可能正在寫，或是死掉留下的殼。
+                # 留在原地，讓補轉去補（搬過去只會佔著正式檔名騙過驗收）。
+                if is_incomplete_proxy(src_file):
+                    errors.append(f"{os.path.relpath(src_file, src_dir)}: 半成品（未完成的轉檔產出），保留未搬")
+                    continue
                 rel_path = os.path.relpath(src_file, src_dir)
                 dst_file = os.path.join(base, rel_path)
                 os.makedirs(os.path.dirname(dst_file), exist_ok=True)
@@ -85,7 +109,7 @@ async def verify_proxies(req: VerifyProxiesRequest):
         card_dir = os.path.join(base_dir, card_name)
         for f in files:
             expected_path = os.path.join(card_dir, f)
-            if not os.path.exists(expected_path):
+            if not os.path.exists(expected_path) or is_incomplete_proxy(expected_path):
                 missing.append({"card_name": card_name, "file": f})
                 
     return {"status": "ok", "missing_files": missing}
@@ -119,6 +143,8 @@ async def verify_standalone_proxies(req: VerifyStandaloneProxiesRequest):
         for root, _, fnames in os.walk(req.dest_dir):
             for fname in fnames:
                 if os.path.splitext(fname)[1].lower() in proxy_exts:
+                    if is_incomplete_proxy(os.path.join(root, fname)):
+                        continue
                     stem = os.path.splitext(fname)[0].lower()
                     if stem.endswith("_proxy"): stem = stem[:-6]
                     proxy_stems.add(stem)
@@ -158,6 +184,8 @@ async def compare_source(req: CompareSourceRequest):
         for root, _, fnames in os.walk(req.output_dir):
             for f in fnames:
                 if os.path.splitext(f)[1].lower() in proxy_exts:
+                    if is_incomplete_proxy(os.path.join(root, f)):
+                        continue
                     stem = os.path.splitext(f)[0].lower()
                     if stem.endswith("_proxy"): stem = str(stem)[:-6]  # type: ignore
                     if req.flat_proxy: key = stem
