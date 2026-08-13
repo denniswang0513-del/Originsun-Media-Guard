@@ -46,7 +46,9 @@ const CSS = `
 .pflow-item.skip { opacity:.45; border-style:dashed; }
 .pflow-dot { width:8px; height:8px; border-radius:50%; flex:0 0 8px;
     border:1px solid currentColor; }
-.pflow-item.on .pflow-dot { border:0; }
+/* 亮起來＝填軌色。用 CSS 變數而不是在 JS 裡按 state 決定要不要寫 inline
+   background —— 那樣的話樂觀更新只加 class、點會變成無邊框又無底色（消失）。 */
+.pflow-item.on .pflow-dot { border:0; background:var(--dot, #888); }
 .pflow-item.manual .pflow-dot { border-radius:2px; }
 .pflow-count { flex:0 0 auto; font-size:11px; color:#666; padding-top:5px;
     min-width:34px; text-align:right; }
@@ -94,9 +96,8 @@ function _itemHtml(it, canCheck, color) {
     const clickable = it.kind === 'manual' && canCheck;
     // state/kind 本身就是 on|off|skip、auto|manual，直接當 class 用
     const cls = `pflow-item ${it.state} ${it.kind}${clickable ? ' clickable' : ''}`;
-    const dot = it.state === 'on'
-        ? `<span class="pflow-dot" style="background:${color}"></span>`
-        : '<span class="pflow-dot"></span>';
+    // 顏色一律傳下去（由 CSS 決定亮不亮），純 class 切換就有正確視覺
+    const dot = `<span class="pflow-dot" style="--dot:${color}"></span>`;
     const attrs = clickable ? ` data-check="${esc(it.key)}" role="button" tabindex="0"` : '';
     return `<span class="${cls}"${attrs} title="${esc(_why(it, clickable))}">${dot}${esc(it.label)}</span>`;
 }

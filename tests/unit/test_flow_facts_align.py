@@ -16,14 +16,29 @@ from core import project_flow as pf
 
 
 class _Row:
-    """聚合查詢那一列 —— 任何欄位都回 0（falsy，數值比較也成立）。"""
-    def __getattr__(self, _name):
-        return 0
+    """聚合查詢那一列 —— **只認得 SELECT 真的有選的欄位**。
+
+    🔴 一律 `__getattr__ → 0` 的話會開出第二個靜默失效點：把 `.label("h_loc")`
+    改名卻忘了改 `row.h_loc`，測試照樣綠、真的 Row 會 AttributeError。
+    所以用 statement 的實際欄位名建，未知名稱就炸。
+    """
+    def __init__(self, names):
+        self._names = set(names)
+
+    def __getattr__(self, name):
+        # __getattr__ 只在正常查找失敗時才進來，所以 self._names 走不到這裡
+        if name in self._names:
+            return 0
+        raise AttributeError(
+            f"聚合查詢沒有選 `{name}` —— label 與讀取端對不上（打錯字？）")
 
 
 class _Result:
+    def __init__(self, names):
+        self._names = names
+
     def one(self):
-        return _Row()
+        return _Row(self._names)
 
     def all(self):
         return []          # 沒有 showcase 作品列
@@ -34,9 +49,13 @@ class _Session:
     def __init__(self):
         self.calls = 0
 
-    async def execute(self, *_a, **_kw):
+    async def execute(self, stmt, *_a, **_kw):
         self.calls += 1
-        return _Result()
+        try:
+            names = list(stmt.selected_columns.keys())
+        except AttributeError:
+            names = []
+        return _Result(names)
 
 
 class _Project:
@@ -78,7 +97,9 @@ async def test_gather_facts_stays_at_two_queries():
     s = _Session()
     from routers.crm.flow import _gather_facts
     await _gather_facts(s, _Project())
-    assert s.calls == 2, f"_gather_facts 發了 {s.calls} 個查詢（應為 2）"
+    # `<=` 不是 `==`：要擋的是回到「一個訊號一趟查詢」，而不是擋住「把
+    # showcase 那趟也併進聚合」這種正向改動
+    assert s.calls <= 2, f"_gather_facts 發了 {s.calls} 個查詢（應 ≤ 2）"
 
 
 @pytest.mark.parametrize("key", sorted(pf.AUTO_KEYS))

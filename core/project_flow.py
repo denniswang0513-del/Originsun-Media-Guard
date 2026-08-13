@@ -140,10 +140,10 @@ def missing_facts(facts: dict) -> tuple:
     item_key 字串接。漏一個或打錯字的話 `build()` 會把它畫成「未完成」——
     **永遠不會亮，而且沒有任何錯誤**。這是這個設計唯一的靜默失效點。
 
-    呼叫點在 `routers/crm/flow.py` 的**模組層**（import 時就 assert），不是
-    每個請求跑一次 —— 放請求裡只能把「一盞燈不亮」變成「整片 500」，而且是
-    在使用者面前、在付完 DB 代價之後才發現。放 import 層則是啟動與每一次
-    測試都會炸，CI 就攔下來了。
+    呼叫點在 `tests/unit/test_flow_facts_align.py` —— 它用假 session 真的跑
+    一次 `routers/crm/flow._gather_facts`，比對它**實際**產出的鍵。刻意不放在
+    請求路徑上：那只能把「一盞燈不亮」變成「整片 500」，而且是在使用者面前、
+    付完 DB 代價之後才發現；放 CI 則是還沒上線就攔下來。
     """
     return tuple(sorted(AUTO_KEYS - set(facts or ())))
 

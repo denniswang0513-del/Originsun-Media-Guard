@@ -24,14 +24,14 @@ CRM 的、資源就是 `crm_projects`，而同樣掛在那一列兩個 JSONB 欄
 """
 from __future__ import annotations
 
-from fastapi import HTTPException, Request
+from fastapi import Request
 
 from core import project_archive as pa
 from core import project_flow as pf
-from core.crm_logic import (effective_prod_stage, project_works_summary,
-                            work_completeness, work_stage)
+from core.crm_logic import (effective_prod_stage, is_main_work,
+                            project_works_summary, work_completeness, work_stage)
 
-from ._shared import (router, _check_flow_check_auth, _now,  # noqa: F401
+from ._shared import (router, _check_flow_check_auth, _now,
                       _patch_project_json, _username, _with_project)
 
 # DB 相依包在 try —— 機隊的精簡 agent 沒有 sqlalchemy，這是整個 crm 套件的
@@ -156,7 +156,8 @@ async def _gather_facts(session, project) -> tuple[dict, dict]:
     # 只取 work_completeness 要的欄位 —— select(Model) 會把 ai_reference_files
     # （每份文件上限 8000 字、份數無上限）等大欄位一起拖出來算兩個布林
     works = (await session.execute(
-        select(CrmProjectShowcase.video_url, CrmProjectShowcase.youtube_id,
+        select(CrmProjectShowcase.id, CrmProjectShowcase.project_id,
+               CrmProjectShowcase.video_url, CrmProjectShowcase.youtube_id,
                CrmProjectShowcase.extra_videos, CrmProjectShowcase.gallery,
                CrmProjectShowcase.cover_url, CrmProjectShowcase.featured_image,
                CrmProjectShowcase.description, CrmProjectShowcase.credits,
@@ -184,7 +185,8 @@ def _work_signals(works, project):
 
     summary = project_works_summary([
         {"stage": work_stage(bool(w.published),
-                             effective_prod_stage(w.prod_stage, stage))}
+                             effective_prod_stage(w.prod_stage, stage,
+                                                  is_main=is_main_work(w)))}
         for w in works])
     if summary["total"] and summary["skipped"] == summary["total"]:
         return None, None, {"work_ready": "標記為不上官網"}

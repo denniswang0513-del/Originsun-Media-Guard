@@ -25,7 +25,7 @@ from core import project_archive as pa
 from core.project_folders import create_subfolder
 
 from ._shared import (router, _check_auth, _get_factory, _patch_project_json,
-                      _project_or_404, _require_db, _with_project)
+                      _require_db, _with_project)
 
 
 async def _payload(_session, project) -> dict:

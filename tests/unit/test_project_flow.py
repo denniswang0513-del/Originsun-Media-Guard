@@ -6,8 +6,6 @@
   ② 訊號撈不到寧可顯示未完成，不准謊報完成
   ③ 「略過」不是「未完成」（不上官網的案子不該卡在官網那盞燈）
 """
-import pytest
-
 from core import project_flow as pf
 
 

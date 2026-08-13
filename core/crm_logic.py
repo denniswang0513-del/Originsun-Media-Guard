@@ -197,12 +197,16 @@ def work_stage(published: bool, prod_stage) -> str:
     return "待製作"
 
 
-def effective_prod_stage(sc_prod_stage, project_prod_stage, *, is_main=True):
+def effective_prod_stage(sc_prod_stage, project_prod_stage, *, is_main):
     """作品的官網製作階段 —— 作品自己的優先，沒有才吃專案層的預設。
 
     結案看板（routers/crm/projects.py）與工作流交付軌（routers/crm/flow.py）
     共用：同一支作品在兩個畫面顯示不同階段的話，使用者不會知道該信哪個。
     `is_main=False` 的子作品不繼承專案層預設（那是主作品的過渡期鏡射）。
+
+    🔴 `is_main` 刻意**沒有預設值**：給了預設（True）的話，呼叫端不表態就會
+    把每一列都當主作品，子作品照樣繼承專案層的階段 —— 正是這支函式宣稱要
+    防的漂移，只是換成有了名字。逼下一個呼叫端想清楚它手上那列是不是主作品。
     """
     return sc_prod_stage or (project_prod_stage if is_main else None)
 
