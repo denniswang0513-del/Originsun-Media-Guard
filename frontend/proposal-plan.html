@@ -358,17 +358,21 @@
       <nav class="plan-side" id="plan-side" style="display:none;">
         <button class="side-tab" data-ptab="info">基本資料</button>
         <button class="side-tab active" data-ptab="plan">創意發想</button>
+        <button class="side-tab" data-ptab="refs" id="tab-refs">參考影片</button>
         <button class="side-tab" data-ptab="folder" id="tab-folder" style="display:none;">提案資料</button>
         <button class="side-tab" data-ptab="brief" id="tab-brief" style="display:none;">企劃書</button>
         <button class="side-tab" data-ptab="quote" id="tab-quote" style="display:none;">報價單</button>
         <button class="side-tab" data-ptab="meeting" id="tab-meeting" style="display:none;">會議記錄</button>
+        <button class="side-tab" data-ptab="flow" id="tab-flow" style="display:none;">進度</button>
       </nav>
       <div class="plan-main">
         <div id="info-host" style="display:none;"></div>
+        <div id="refs-host" style="display:none;"></div>
         <div id="plan-host"><div class="state-msg">載入中…</div></div>
         <div id="brief-host" style="display:none;"></div>
         <div id="quote-host" style="display:none;"></div>
         <div id="meeting-host" style="display:none;"></div>
+        <div id="flow-host" style="display:none;"></div>
         <div id="folder-host" style="display:none;">
           <!-- 重點提案卡片列與檔案瀏覽分開兩個容器：folder-view 會清空它的
                host，共用一個的話卡片列每次導覽都被洗掉。
@@ -568,6 +572,51 @@ function _renderInfo(host, info, opts) {
              <textarea class="info-in info-ta" data-field="outcome_reason" placeholder="轉成案或未成案時必填"></textarea></div>`
         : (info.outcome_reason ? `<div class="info-card"><h4>成案／未成案原因</h4><div class="info-hint">${escText(info.outcome_reason)}</div></div>` : "");
 
+    host.innerHTML = `
+        <div class="info-card">
+            <h4>基本資訊</h4>
+            ${ro("狀態", info.status)}
+            ${ro("客戶", info.client_name)}
+            ${ptypeCtrl}
+            ${dateCtrl}
+            ${budgetCtrl}
+            ${tagsCtrl}
+            ${deckCtrl}
+        </div>
+        ${reasonCard}
+        ${opts.survey ? `<div class="info-card">
+            <h4>現況盤點</h4>
+            <div id="survey-host"></div>
+        </div>` : ""}
+        <div class="info-card">
+            <h4>備註</h4>
+            <textarea class="info-in info-ta" data-field="notes"
+                placeholder="這份提案的補充說明、客戶偏好、內部提醒…（會自動儲存）"${canEdit("notes") ? "" : " readonly"}></textarea>
+        </div>
+        <div class="info-hint">${escText(opts.hint || "欄位改完會自動儲存。")}</div>
+        <div class="info-save" id="info-save"></div>`;
+
+    // textarea 值走 DOM property（不進模板字串 — XSS 防線）
+    host.querySelector('[data-field="notes"]').value = info.notes || "";
+    const rt = host.querySelector('[data-field="outcome_reason"]');
+    if (rt) rt.value = info.outcome_reason || "";
+    host.querySelectorAll("textarea.info-ta").forEach(ta => {
+        _infoGrow(ta);
+        ta.addEventListener("input", () => _infoGrow(ta));   // 內容多長格子就多長
+    });
+    _wireDeckCell(host, info, deck);
+    _mountSurvey(host, info, opts);
+    _wireInfoEditing(host, opts);
+}
+
+/** 參考影片 —— 自成一個側欄分頁（2026-08-14 owner：從基本資料底部搬出來）。
+ *
+ * 與 _renderInfo 拆開而不是共用一個 host：兩者的重畫時機不同（加/移除參考片
+ * 只該重畫這一塊，不該把使用者正在打的備註 textarea 一起洗掉）。
+ * 唯讀分支（訪客沒有 opts.refs）照畫清單，只是沒有加入/移除控件。
+ */
+function _renderRefs(host, info, opts) {
+    const link = (url, label) => safeUrl(url) ? `<a href="${escAttr(url)}" target="_blank" rel="noopener">${escText(label)}</a>` : "";
     const canRefs = !!opts.refs;
     const refs = (info.references || []).map(r => canRefs ? `
         <div class="info-ref" data-rid="${escAttr(r.id)}">
@@ -607,51 +656,21 @@ function _renderInfo(host, info, opts) {
 
     host.innerHTML = `
         <div class="info-card">
-            <h4>基本資訊</h4>
-            ${ro("狀態", info.status)}
-            ${ro("客戶", info.client_name)}
-            ${ptypeCtrl}
-            ${dateCtrl}
-            ${budgetCtrl}
-            ${tagsCtrl}
-            ${deckCtrl}
-        </div>
-        ${reasonCard}
-        ${opts.survey ? `<div class="info-card">
-            <h4>現況盤點</h4>
-            <div id="survey-host"></div>
-        </div>` : ""}
-        <div class="info-card">
-            <h4>備註</h4>
-            <textarea class="info-in info-ta" data-field="notes"
-                placeholder="這份提案的補充說明、客戶偏好、內部提醒…（會自動儲存）"${canEdit("notes") ? "" : " readonly"}></textarea>
-        </div>
-        <div class="info-card">
             <h4>參考影片（${(info.references || []).length}）</h4>
             ${refs || '<div class="info-hint">尚未加參考影片</div>'}
             ${refAdd}
-        </div>
-        <div class="info-hint">${escText(opts.hint || "欄位改完會自動儲存。")}</div>
-        <div class="info-save" id="info-save"></div>`;
+        </div>`;
 
-    // textarea / 參考片欄位值走 DOM property（不進模板字串 — XSS 防線）
-    host.querySelector('[data-field="notes"]').value = info.notes || "";
-    const rt = host.querySelector('[data-field="outcome_reason"]');
-    if (rt) rt.value = info.outcome_reason || "";
-    if (canRefs) {
-        const byId = {};
-        (info.references || []).forEach(r => { byId[r.id] = r; });
-        host.querySelectorAll(".ref-in[data-rfield]").forEach(el => {
-            el.value = (byId[el.dataset.rid] || {})[el.dataset.rfield] || "";
-        });
-        _wireRefs(host, info, opts);
-    }
-    host.querySelectorAll("textarea.info-ta").forEach(ta => {
-        _infoGrow(ta);
-        ta.addEventListener("input", () => _infoGrow(ta));   // 內容多長格子就多長
+    if (!canRefs) return;
+    // 參考片欄位值走 DOM property（不進模板字串 — XSS 防線）
+    const byId = {};
+    (info.references || []).forEach(r => { byId[r.id] = r; });
+    host.querySelectorAll(".ref-in[data-rfield]").forEach(el => {
+        el.value = (byId[el.dataset.rid] || {})[el.dataset.rfield] || "";
     });
-    _wireDeckCell(host, info, deck);
-    _mountSurvey(host, info, opts);
+    _wireRefs(host, info, opts);
+    // 標題/備註的自動儲存也要接 —— 這些欄位跟著搬過來了，留在 _renderInfo
+    // 那邊接的話會找不到任何 .ref-in（改了字靜默不存）。
     _wireInfoEditing(host, opts);
 }
 
@@ -715,8 +734,8 @@ function _wireRefs(host, info, opts) {
     // 剛加的那支從畫面消失。
     const redraw = async () => {
         Object.assign(info, await opts.reload());
-        _renderInfo(host, info, opts);
-    };
+        _renderRefs(host, info, opts);     // 只重畫這一塊 —— 基本資料那邊使用者
+    };                                      // 可能正在打字，不該被洗掉
 
     host.querySelector("#ref-add-btn").addEventListener("click", async () => {
         const url = $("ref-new-url").value.trim();
@@ -738,7 +757,10 @@ function _wireRefs(host, info, opts) {
     _wireRefPicker(host, info, opts, redraw, say);   // 同步：選項點開才抓
 }
 
-// 自動儲存：停手 800ms 或離開欄位就送（dirty-check 擋沒改過的），同企劃矩陣手感
+// 自動儲存：停手 800ms 或離開欄位就送（dirty-check 擋沒改過的），同企劃矩陣手感。
+// 兩種欄位共用：基本資料的 .info-in[data-field]（在 info-host）與參考影片的
+// .ref-in[data-rfield]（2026-08-14 搬到 refs-host）—— 所以 host 由呼叫端給，
+// 不能寫死成 info-host。「已儲存 ✓」共用側欄底部那一格。
 function _wireInfoEditing(host, opts) {
     const saveEl = $("info-save");
     const timers = new Map();
@@ -778,6 +800,7 @@ function _wireInfoEditing(host, opts) {
     }
 }
 
+
 function _showSideTabs() {
     const side = $("plan-side");
     side.style.display = "";
@@ -804,6 +827,7 @@ const _LAZY_TABS = {
     brief: { mod: "/tabs/proposals/brief-view.js", fn: "renderBriefs", label: "企劃書" },
     quote: { mod: "/tabs/proposals/quote-view.js", fn: "renderQuotes", label: "報價單" },
     meeting: { mod: "/tabs/proposals/meeting-view.js", fn: "renderMeetings", label: "會議記錄" },
+    flow: { mod: "/tabs/proposals/flow-view.js", fn: "renderFlow", label: "進度" },
 };
 const _pending = {};
 
@@ -1183,6 +1207,7 @@ async function _loadPlan(pid) {
             $("plan-title").textContent = prop.title;
             document.title = prop.title + "｜提案企劃｜ORIGINSUN";
             _renderInfo($("info-host"), prop, infoOpts);
+            _renderRefs($("refs-host"), prop, infoOpts);
         };
         // 登入模式：完整欄位可編，走既有部分更新 PUT
         const P = "/api/v1/proposals/" + encodeURIComponent(pid);
@@ -1234,6 +1259,7 @@ async function _loadPlan(pid) {
             },
         };
         _renderInfo($("info-host"), prop, infoOpts);
+        _renderRefs($("refs-host"), prop, infoOpts);
         _wireHeaderActions(prop, PA, refresh);
         _showSideTabs();
         host.innerHTML = "";
@@ -1261,6 +1287,10 @@ async function _loadPlan(pid) {
         _setupLazyTab("quote", { proposalId: prop.id });
         // 會議記錄：內部素材（會記到內部判斷與報價底線），同樣不給訪客
         _setupLazyTab("meeting", { proposalId: prop.id });
+        // 進度：專案的五軌工作流。沒有殼專案就不建這個分頁 —— 它整頁的內容
+        // 都來自專案，掛出來只會是一句「還沒有關聯專案」。訪客同樣沒有
+        // （內部進度、人名、金額訊號都不出公開頁，見 §14.3）。
+        if (prop.project_id) _setupLazyTab("flow", { projectId: prop.project_id });
     } catch (e) {
         host.innerHTML = '<div class="state-msg" style="color:var(--red);">創意發想載入失敗：' + escText(emsg(e)) + "</div>";
     }
@@ -1409,7 +1439,7 @@ async function _loadSharedPlan(shareTok) {
             // 公開共編：只放行描述性欄位（後端 _PUBLIC_INFO_FIELDS 才是真守門）
             const J = { "Content-Type": "application/json" };
             await constP;                      // PTYPES（畫類型下拉要用）
-            _renderInfo($("info-host"), d.info, {
+            const sharedOpts = {
                 editable: ["ptype", "pitch_date", "tags", "notes"],
                 save: async (field, value) => ok(await fetch(base + "/info",
                     { method: "PATCH", headers: J, body: JSON.stringify({ field, value }) })),
@@ -1432,7 +1462,9 @@ async function _loadSharedPlan(shareTok) {
                     remove: async (rid) => ok(await fetch(base + "/refs/" + encodeURIComponent(rid),
                         { method: "DELETE" })),
                 },
-            });
+            };
+            _renderInfo($("info-host"), d.info, sharedOpts);
+            _renderRefs($("refs-host"), d.info, sharedOpts);
             _showSideTabs();
             // 訪客模式：只看得到「對外分享」子夾（範圍由 token 端點的 root 決定，
             // 前端拿不到、也改不了）。沒開這個夾 → enabled:false → 不顯示分頁。

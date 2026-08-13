@@ -20,47 +20,70 @@ const TRACK_COLOR = {
     deliver: '#7c3aed', harvest: '#546e7a',
 };
 
+// 主題化＝元件自帶 --pf-* 變數、深色為預設、白底靠 html.plan-theme-light 覆寫
+// （比照 plan-matrix / meeting-view / folder-view 的既有慣例）。這頁在兩個地方
+// 掛：後台 SPA（深色）與 /proposal-plan.html（官網白底）—— 寫死顏色的話，
+// 企劃人員最常用的那個頁面會是一片黑底貼在白紙上。
 const CSS = `
-.pflow { padding: 4px 2px 18px; }
+.pflow { --pf-ink:#ddd; --pf-sub:#888; --pf-line:#2e2e2e; --pf-card:#161616;
+    --pf-panel:#181818; --pf-on-bg:#1c1c1c; --pf-on-line:#3a3a3a;
+    --pf-done:#9ccc65; --pf-done-bg:#1d2a16; --pf-done-line:#3d5c2a;
+    --pf-cur:#1f538d; --pf-cur-ink:#fff;
+    --pf-lost:#e88; --pf-lost-bg:#2a1618; --pf-lost-line:#6e2b2b;
+    --pf-warn:#d9b45a; --pf-warn-b:#f0c96a; --pf-warn-bg:#1e1a12; --pf-warn-line:#4a3c1a;
+    --pf-hover-bg:#202020; --pf-hover-line:#4a4a4a;
+    padding:4px 2px 18px; color:var(--pf-ink); }
+html.plan-theme-light .pflow { --pf-ink:#262626; --pf-sub:#737373; --pf-line:#e5e5e5;
+    --pf-card:#fafafa; --pf-panel:#fafafa; --pf-on-bg:#fff; --pf-on-line:#d4d4d4;
+    --pf-done:#3f7a1f; --pf-done-bg:#eef7e6; --pf-done-line:#cfe4bd;
+    --pf-cur:#1f538d; --pf-cur-ink:#fff;
+    --pf-lost:#b3261e; --pf-lost-bg:#fdecea; --pf-lost-line:#f3c2bd;
+    --pf-warn:#8a6d1f; --pf-warn-b:#6b5416; --pf-warn-bg:#fdf6e3; --pf-warn-line:#ecdcb0;
+    --pf-hover-bg:#f0f0f0; --pf-hover-line:#c4c4c4; }
+.pflow * { box-sizing:border-box; }
 .pflow-stage { display:flex; align-items:center; gap:6px; flex-wrap:wrap;
-    padding:12px 14px; background:#181818; border:1px solid #2e2e2e;
+    padding:12px 14px; background:var(--pf-panel); border:1px solid var(--pf-line);
     border-radius:8px; margin-bottom:14px; }
 .pflow-step { font-size:12px; padding:5px 12px; border-radius:999px;
-    border:1px solid #3a3a3a; color:#777; white-space:nowrap; }
-.pflow-step.done { color:#9ccc65; border-color:#3d5c2a; background:#1d2a16; }
-.pflow-step.cur { color:#fff; border-color:#1f538d; background:#1f538d;
-    font-weight:600; }
-.pflow-arrow { color:#3a3a3a; font-size:11px; }
+    border:1px solid var(--pf-line); color:var(--pf-sub); white-space:nowrap; }
+.pflow-step.done { color:var(--pf-done); border-color:var(--pf-done-line);
+    background:var(--pf-done-bg); }
+.pflow-step.cur { color:var(--pf-cur-ink); border-color:var(--pf-cur);
+    background:var(--pf-cur); font-weight:600; }
+.pflow-arrow { color:var(--pf-line); font-size:11px; }
 .pflow-lost { padding:12px 14px; border-radius:8px; margin-bottom:14px;
-    background:#2a1618; border:1px solid #6e2b2b; color:#e88; font-size:12.5px; }
+    background:var(--pf-lost-bg); border:1px solid var(--pf-lost-line);
+    color:var(--pf-lost); font-size:12.5px; }
 .pflow-track { display:flex; align-items:flex-start; gap:10px; padding:9px 0;
-    border-bottom:1px solid #242424; }
+    border-bottom:1px solid var(--pf-line); }
 .pflow-track:last-child { border-bottom:0; }
-.pflow-tname { flex:0 0 52px; font-size:12px; color:#bbb; font-weight:600;
-    padding-top:4px; }
+.pflow-tname { flex:0 0 52px; font-size:12px; font-weight:600; padding-top:4px; }
 .pflow-items { flex:1; display:flex; flex-wrap:wrap; gap:6px; }
 .pflow-item { display:inline-flex; align-items:center; gap:5px; font-size:11.5px;
-    padding:4px 9px; border-radius:6px; border:1px solid #2e2e2e;
-    background:#161616; color:#888; cursor:default; }
-.pflow-item.on { color:#ddd; border-color:#3a3a3a; background:#1c1c1c; }
+    padding:4px 9px; border-radius:6px; border:1px solid var(--pf-line);
+    background:var(--pf-card); color:var(--pf-sub); cursor:default; }
+.pflow-item.on { color:var(--pf-ink); border-color:var(--pf-on-line);
+    background:var(--pf-on-bg); }
 .pflow-item.skip { opacity:.45; border-style:dashed; }
 .pflow-dot { width:8px; height:8px; border-radius:50%; flex:0 0 8px;
     border:1px solid currentColor; }
 /* 亮起來＝填軌色。用 CSS 變數而不是在 JS 裡按 state 決定要不要寫 inline
    background —— 那樣的話樂觀更新只加 class、點會變成無邊框又無底色（消失）。 */
-.pflow-item.on .pflow-dot { border:0; background:var(--dot, #888); }
+.pflow-item.on .pflow-dot { border:0; background:var(--dot, currentColor); }
 .pflow-item.manual .pflow-dot { border-radius:2px; }
-.pflow-count { flex:0 0 auto; font-size:11px; color:#666; padding-top:5px;
+.pflow-count { flex:0 0 auto; font-size:11px; color:var(--pf-sub); padding-top:5px;
     min-width:34px; text-align:right; }
 .pflow-miss { margin-top:14px; padding:10px 12px; border-radius:8px;
-    background:#1e1a12; border:1px solid #4a3c1a; font-size:12px; color:#d9b45a; }
-.pflow-miss b { color:#f0c96a; font-weight:600; }
-.pflow-miss .adv { color:#8a8a8a; }
-.pflow-empty { padding:22px; text-align:center; color:#777; font-size:12.5px; }
-.pflow-note { margin-top:12px; font-size:11.5px; color:#666; }
+    background:var(--pf-warn-bg); border:1px solid var(--pf-warn-line);
+    font-size:12px; color:var(--pf-warn); }
+.pflow-miss b { color:var(--pf-warn-b); font-weight:600; }
+.pflow-miss .adv { color:var(--pf-sub); }
+.pflow-empty { padding:22px; text-align:center; color:var(--pf-sub); font-size:12.5px; }
+.pflow-note { margin-top:12px; font-size:11.5px; color:var(--pf-sub); }
 .pflow-item.clickable { cursor:pointer; }
-.pflow-item.clickable:hover { border-color:#4a4a4a; background:#202020; color:#ddd; }
-.pflow-item.clickable:focus-visible { outline:2px solid #1f538d; outline-offset:1px; }
+.pflow-item.clickable:hover { border-color:var(--pf-hover-line);
+    background:var(--pf-hover-bg); color:var(--pf-ink); }
+.pflow-item.clickable:focus-visible { outline:2px solid var(--pf-cur); outline-offset:1px; }
 .pflow-item[data-busy] { opacity:.5; pointer-events:none; }
 @media (max-width: 720px) {
     .pflow-track { flex-direction:column; gap:4px; }
@@ -134,18 +157,20 @@ function _missingHtml(missing, next) {
  */
 export async function renderFlow(host, { projectId }) {
     ensureStyle('pflow-css', CSS);
+    // 訊息狀態也要包在 .pflow 裡 —— 主題變數定義在那一層，裸著放的話
+    // 白底頁上會拿不到 --pf-sub 而變成繼承色（看起來像沒套樣式）。
+    const msg = (t) => { host.innerHTML = `<div class="pflow"><div class="pflow-empty">${t}</div></div>`; };
     if (!projectId) {
-        host.innerHTML = `<div class="pflow-empty">這個提案還沒有關聯專案。<br>
-            補上客戶之後系統會自動建立殼專案，進度才有東西可以追。</div>`;
+        msg('這個提案還沒有關聯專案。<br>補上客戶之後系統會自動建立殼專案，進度才有東西可以追。');
         return;
     }
-    host.innerHTML = `<div class="pflow-empty">載入中…</div>`;
+    msg('載入中…');
     let d;
     try {
         d = await tfetch(`/api/v1/crm/projects/${encodeURIComponent(projectId)}/flow`);
     } catch (e) {
         if (!host.isConnected) return;
-        host.innerHTML = `<div class="pflow-empty">進度載入失敗：${esc(e.message || e)}</div>`;
+        msg('進度載入失敗：' + esc(e.message || e));
         return;
     }
     if (!host.isConnected) return;      // 載入期間視窗被關掉了
