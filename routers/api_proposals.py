@@ -80,9 +80,8 @@ _PROP_STATUS_TO_PROJECT_STATUS = {
 }
 # 專案還在前期（可被提案側 win/loss 拉動階段）；已進製作後不回頭拉
 _PRESALE_PROJECT_STATUSES = {"投標", "開發", "洽詢", "提案"}
-# 「專案進到哪些階段＝衛星提案記成案」的正本在 core.project_flow
-# （WIN_STATUSES / wins_proposal）—— 這裡曾有一份 PROPOSAL_WIN_STATUSES，
-# 下沉後唯一的呼叫端已直接改讀 core，別再在 routers 開第二份。
+# 「哪些階段＝衛星提案記成案」的正本在 core.project_flow（WIN_STATUSES /
+# wins_proposal）—— 這裡曾有一份 PROPOSAL_WIN_STATUSES，別再開第二份。
 
 
 async def _create_shell_project(session, prop, status: str = ""):

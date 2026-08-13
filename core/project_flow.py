@@ -87,8 +87,8 @@ CHECK_MODULES: tuple[str, ...] = ("crm_projects",)
 ADVANCE_MODULES: tuple[str, ...] = ()
 
 # 進到這些階段＝這個案子拿到了（衛星提案記「成案」）。
-# 🔴 正本在這裡（純模組、無 IO）—— 原本住在 routers 裡，害 core 的純邏輯與
-# 前端都只能用字面值鏡射一份（前端已經鏡射到第三份了）。
+# 正本在這裡（純模組、無 IO）—— 原本住在 routers 裡，害 core 的純邏輯只能
+# 用字面值再鏡射一份。
 WIN_STATUSES = frozenset({"製作", "結案", "歸檔"})
 
 

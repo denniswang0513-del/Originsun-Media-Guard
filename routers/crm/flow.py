@@ -22,8 +22,7 @@ CRM 的、資源就是 `crm_projects`，而同樣掛在那一列兩個 JSONB 欄
 - 勾手動里程碑＝`_check_flow_check_auth`（`crm_projects` 模組即可，
   owner 2026-08-14 拍板）。
 - 推進階段**不在這裡做** —— 前端打既有的 `PATCH /projects/{id}/status`，
-  那支與這裡的 `can_advance` 共用 `core.project_flow.ADVANCE_MODULES`
-  （今天等同管理員限定；要鬆綁是改那個常數，不是記得同時改兩個地方）。
+  那支與這裡的 `can_advance` 共用 `core.project_flow.ADVANCE_MODULES`。
 """
 from __future__ import annotations
 
@@ -229,8 +228,6 @@ async def _payload(session, project, *, auth) -> dict:
     built = pf.build(facts, project.flow_checks, detail)
     stage = pf.stage_view(project.status)
     return {
-        "project_id": project.id,
-        "project_name": project.name,
         "stage": stage,
         "tracks": built["tracks"],
         "missing": pf.missing_for(built["tracks"], stage["next"]),
@@ -242,8 +239,7 @@ async def _payload(session, project, *, auth) -> dict:
         # 呼叫端各算各的就會出現「畫面說可以、後端回 403」。
         "can_check": payload_grants(auth, *pf.CHECK_MODULES),
         "can_advance": payload_grants(auth, *pf.ADVANCE_MODULES),
-        # 這次推進**會不會真的用到**成案原因 —— 判定與真正去標的那支
-        # （_sync_linked_proposals）共用 core 的同一份，不在這裡複寫條件。
+        # 這次推進**會不會真的用到**成案原因（見 wins_proposal docstring）
         "collects_outcome_reason": pf.wins_proposal(
             stage["next"], meta["proposal_count"], bool(facts.get("won"))),
     }

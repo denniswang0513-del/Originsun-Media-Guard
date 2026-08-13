@@ -118,6 +118,38 @@ class TestApplyCheck:
         assert s2["shooting"]["checked"] is False and s2["shooting"]["by"] == "乙"
 
 
+class TestWinsProposal:
+    """「這次推進會不會把衛星提案標成案」＝「推進對話框要不要問成案原因」。
+
+    🔴 兩個呼叫端共用這一支（`_sync_linked_proposals` 真的去標、`flow._payload`
+    決定問不問）。它存在的理由就是那兩條 False 分支 —— 分兩處寫的時候，
+    前端只算得出 `next === '製作'`，於是多筆提案的專案會**白問一次**，
+    使用者打完的成案原因被後端靜默丟掉。
+    """
+
+    def test_single_proposal_entering_win_stage(self):
+        assert pf.wins_proposal("製作", 1, False) is True
+
+    def test_every_win_stage_counts(self):
+        for s in pf.WIN_STATUSES:
+            assert pf.wins_proposal(s, 1, False) is True, s
+
+    def test_multiple_proposals_never_auto_win(self):
+        """🔴 同一案提三個 concept 時只有一個會贏，誰贏由專案負責人指定。"""
+        for n in (2, 3, 7):
+            assert pf.wins_proposal("製作", n, False) is False, n
+
+    def test_no_proposal_at_all(self):
+        assert pf.wins_proposal("製作", 0, False) is False
+
+    def test_already_won_does_not_ask_again(self):
+        assert pf.wins_proposal("製作", 1, True) is False
+
+    def test_non_win_stage(self):
+        for s in ("提案", "洽詢", "未成案", "", "投標"):
+            assert pf.wins_proposal(s, 1, False) is False, s
+
+
 class TestGates:
     @staticmethod
     def _tracks(**states):

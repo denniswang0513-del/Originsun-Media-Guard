@@ -73,6 +73,34 @@ def page(browser_context, real_server):
     p.close()
 
 
+@pytest.fixture
+def mount_flow(page):
+    """把 flow-view 元件掛到一個臨時 host 上；結束（**含失敗**）一定拆掉。
+
+    不走 SPA 導覽 —— headless 下的分頁點擊 flaky（v2.4.0 的教訓：改成直接
+    import 子視圖模組測）。
+
+    🔴 teardown 收在這裡而不是每個測試的最後一行：`page` 是 session 範圍的，
+    留下的 host 帶著已綁的事件委派會跑進別支測試檔 —— 而失敗時最需要清理，
+    正是「最後一行」跑不到的時候。
+    """
+    def _do(project_id, token, *, host_id="flowhost", wait=".pflow-track"):
+        page.evaluate("t => localStorage.setItem('auth_token', t)", token)
+        page.evaluate("""async ([pid, hid]) => {
+            const host = document.createElement('div');
+            host.id = hid;
+            document.body.appendChild(host);
+            const m = await import('/tabs/proposals/flow-view.js');
+            await m.renderFlow(host, { projectId: pid });
+        }""", [project_id, host_id])
+        if wait:
+            page.wait_for_selector(f"#{host_id} {wait}", timeout=20000)
+        return host_id
+    yield _do
+    page.evaluate("() => document.querySelectorAll('#flowhost, #advtest, #flowtest-host')"
+                  ".forEach(e => e.remove())")
+
+
 @pytest.fixture(autouse=True)
 def _check_server_alive(real_server):
     """Check test server process is alive before each test."""

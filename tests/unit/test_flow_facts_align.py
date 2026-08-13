@@ -102,8 +102,7 @@ async def test_gather_facts_stays_at_two_queries():
     assert s.calls <= 2, f"_gather_facts 發了 {s.calls} 個查詢（應 ≤ 2）"
 
 
-@pytest.mark.parametrize("key", sorted(pf.AUTO_KEYS))
-def test_every_auto_item_is_reachable_from_a_track(key):
-    """範本自身的一致性：AUTO_KEYS 的每一項都真的掛在某條軌道上。"""
-    assert key in pf.ITEMS
-    assert pf.ITEMS[key][0] in {t[0] for t in pf.TRACKS}
+# 這裡曾有一支 `test_every_auto_item_is_reachable_from_a_track` —— 它斷言
+# AUTO_KEYS 的每一項都在 ITEMS 裡、且掛在某條軌道上。但 AUTO_KEYS 是從
+# ITEMS 推導、ITEMS 是從 TRACKS 推導（project_flow.py），所以它**恆真**，
+# 20 個綠燈買不到任何東西 —— 正是本檔開頭批評第一版的那個毛病。已刪。

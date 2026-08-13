@@ -37,25 +37,9 @@ def case(real_server, e2e_admin_token, dev_db_only):
 
 
 @pytest.fixture
-def mount(page):
-    """掛上元件；測試結束（**含失敗**）一定拆掉。
-
-    `page` 是 session 範圍的 —— 留著的 host 帶著已綁的事件委派會跑進別支
-    測試檔。收在 fixture 的 teardown 而不是每個測試最後一行：失敗時最需要
-    清理，而那正是「最後一行」跑不到的時候。
-    """
-    def _do(project_id, token):
-        page.evaluate("t => localStorage.setItem('auth_token', t)", token)
-        page.evaluate("""async (pid) => {
-            const host = document.createElement('div');
-            host.id = 'advtest';
-            document.body.appendChild(host);
-            const m = await import('/tabs/proposals/flow-view.js');
-            await m.renderFlow(host, { projectId: pid });
-        }""", project_id)
-        page.wait_for_selector("#advtest .pflow-track", timeout=20000)
-    yield _do
-    page.evaluate("() => document.getElementById('advtest')?.remove()")
+def mount(mount_flow):
+    """掛在固定的 #advtest 上（本檔的選擇器都寫死這個 id）。"""
+    return lambda project_id, token: mount_flow(project_id, token, host_id="advtest")
 
 
 def _btn(page):

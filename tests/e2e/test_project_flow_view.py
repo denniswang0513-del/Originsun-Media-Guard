@@ -14,38 +14,31 @@ import pytest
 pytestmark = pytest.mark.e2e
 
 
-def _mount_js(project_id: str) -> str:
-    """直接掛載元件 —— 不走 SPA 導覽。
+HOST = "flowtest-host"
 
-    SPA 的分頁點擊在 headless 下 flaky（v2.4.0 的教訓：改成直接 import
-    子視圖模組測），而這支要驗的正是「模組載得起來 + 渲染正確」。
 
-    🔴 回傳**結構化**的渲染結果，不是整包 innerHTML：軌道名用子字串比對會
-    誤判（「收割」兩個字也出現在項目名「企劃範本已收割」裡 —— 實測把軌道名
-    改掉測試照樣過）。
+def _read(page):
+    """讀出**結構化**的渲染結果，不是整包 innerHTML。
+
+    🔴 軌道名用子字串比對會誤判（「收割」兩個字也出現在項目名「企劃範本已
+    收割」裡 —— 實測把軌道名改掉測試照樣過），所以比對的是節點本身。
     """
-    return """
-    (async (pid) => {
-        const host = document.createElement('div');
-        host.id = 'flowtest-host';
-        document.body.appendChild(host);
-        const m = await import('/tabs/proposals/flow-view.js');
-        await m.renderFlow(host, { projectId: pid });
+    return page.eval_on_selector(f"#{HOST}", """host => {
         const q = s => [...host.querySelectorAll(s)].map(e => e.textContent.trim());
         return {
             html: host.innerHTML,
             tracks: q('.pflow-tname'),
             items: q('.pflow-item'),
-            lit: [...host.querySelectorAll('.pflow-item.on')].map(e => e.textContent.trim()),
+            lit: q('.pflow-item.on'),
             stages: q('.pflow-step'),
             current: q('.pflow-step.cur'),
             missing: q('.pflow-miss'),
         };
-    })(%r)
-    """ % project_id
+    }""")
 
 
-def test_flow_tab_renders_five_tracks(page, real_server, e2e_admin_token, dev_db_only):
+def test_flow_tab_renders_five_tracks(page, mount_flow, real_server,
+                                      e2e_admin_token, dev_db_only):
     import requests
     base = real_server["base_url"]
     H = {"Authorization": "Bearer " + e2e_admin_token}
@@ -68,8 +61,8 @@ def test_flow_tab_renders_five_tracks(page, real_server, e2e_admin_token, dev_db
     assert pid, f"回應沒有 project id: {r.text[:200]}"
 
     try:
-        page.evaluate("t => localStorage.setItem('auth_token', t)", e2e_admin_token)
-        r = page.evaluate(_mount_js(pid))
+        mount_flow(pid, e2e_admin_token, host_id=HOST)
+        r = _read(page)
 
         assert "載入失敗" not in r["html"], f"渲染錯誤：{r['html'][:300]}"
         # 五條軌，比對**軌道名節點**本身（不是整包 HTML 的子字串）
@@ -90,13 +83,12 @@ def test_flow_tab_renders_five_tracks(page, real_server, e2e_admin_token, dev_db
     finally:
         requests.delete(f"{base}/api/v1/crm/projects/{pid}", headers=H, timeout=30)
         requests.delete(f"{base}/api/v1/crm/clients/{cid}", headers=H, timeout=30)
-        page.evaluate("() => document.getElementById('flowtest-host')?.remove()")
 
 
-def test_flow_without_project_says_so(page, real_server, e2e_admin_token):
+def test_flow_without_project_says_so(page, mount_flow, e2e_admin_token):
     """沒有殼專案的提案不該顯示假進度，要講清楚為什麼沒有。"""
-    page.evaluate("t => localStorage.setItem('auth_token', t)", e2e_admin_token)
-    r = page.evaluate(_mount_js(""))
+    # 沒有專案就不會畫軌道 → 沒有 .pflow-track 可等
+    mount_flow("", e2e_admin_token, host_id=HOST, wait=None)
+    r = _read(page)
     assert "還沒有關聯專案" in r["html"]
     assert r["tracks"] == [], "沒有專案卻畫了軌道"
-    page.evaluate("() => document.getElementById('flowtest-host')?.remove()")

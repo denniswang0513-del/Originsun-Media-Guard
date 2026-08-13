@@ -545,8 +545,7 @@ async def _sync_linked_proposals(session, project, old_status: str,
     now = _now()
     reason = (reason or "").strip()
     for prop in props:
-        # 判定與「推進對話框問不問成案原因」共用同一份（core.project_flow）——
-        # 分兩處寫的話，對話框問了、這裡不採用，使用者打的字就靜默消失
+        # 與「推進對話框問不問成案原因」共用同一份判定（見該函式 docstring）
         if wins_proposal(new_status, len(props), prop.status == "成案"):
             prop.status = "成案"
             if reason:
@@ -642,9 +641,7 @@ async def delete_project(project_id: str, request: Request):
 
 @router.patch("/projects/{project_id}/status")
 async def update_project_status(project_id: str, request: Request):
-    # 推進階段有自己的政策旋鈕（core.project_flow.ADVANCE_MODULES）—— 與前端
-    # 的 can_advance 共用同一份，不靠「兩邊剛好都是 admin」這個巧合對齊
-    _check_status_auth(request)
+    _check_status_auth(request)          # 政策：core.project_flow.ADVANCE_MODULES
     _require_db()
     factory = await _get_factory()
 

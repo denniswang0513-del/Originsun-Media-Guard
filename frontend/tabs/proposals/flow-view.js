@@ -177,11 +177,13 @@ export async function renderFlow(host, { projectId, onAdvanced = null }) {
         _msg(host, '這個提案還沒有關聯專案。<br>補上客戶之後系統會自動建立殼專案，進度才有東西可以追。');
         return;
     }
-    // 每次都更新 —— 事件委派只掛一次，但同一個 host 換提案重掛時，closure
-    // 會永久釘住第一次的 projectId（今天兩個呼叫點都給新 host，那是巧合）
-    host.__flow = { ...(host.__flow || {}), pid: projectId, onAdvanced };
-    if (!host.__flowWired) {
-        host.__flowWired = true;
+    // `__flow` 是這個 host 的全部狀態，形狀在這裡宣告一次（也兼作「掛過了沒」
+    // 的旗標）。每次都整個換掉：同一個 host 換提案時，closure 會永久釘住
+    // 第一次的 projectId，而殘留的 missing/collectsReason 是上一個專案的。
+    const wired = !!host.__flow;
+    host.__flow = { pid: projectId, onAdvanced,
+                    missing: { blocking: [], advisory: [] }, collectsReason: false };
+    if (!wired) {
         // 事件委派掛一次就好 —— 每次重畫都重掛會累積成一次點擊送 N 個請求
         const on = (ev) => _onHit(host, ev);
         host.addEventListener('click', on);

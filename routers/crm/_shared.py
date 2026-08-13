@@ -134,11 +134,8 @@ _check_website_auth = _module_guard('website_admin')
 # core.project_flow.CHECK_MODULES，與前端「畫不畫 checkbox」的判定共用同一份。
 _check_flow_check_auth = _module_guard(*CHECK_MODULES)
 
-# 推進專案階段 —— 動的是商務主軸（客戶分級、錢流口徑、衛星提案 win/loss），
-# 所以從 CRM 泛用寫入預設 `_check_auth` 分家：它本來就不該跟「改個備註欄」
-# 共用同一個政策旋鈕。空 tuple ＝ 今天仍是管理員限定，行為零變化；要鬆綁
-# 是改 `core.project_flow.ADVANCE_MODULES` 一個常數，而不是「記得同時改
-# 端點守衛與前端的 can_advance」。
+# 推進專案階段 —— 從 CRM 泛用寫入預設分家，理由與退場條件見
+# core.project_flow.ADVANCE_MODULES
 _check_status_auth = _module_guard(*ADVANCE_MODULES)
 
 
