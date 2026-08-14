@@ -13,13 +13,8 @@
 import { ensureStyle, esc } from '../../js/shared/utils.js';
 import { TAB_MAP, tabLabel } from '../../js/shared/tab-config.js';
 import { tfetch } from './prop-fetch.js';
-
-// 軌色沿用四段進度條的既有色彙（備份藍/轉檔橘/串接綠/報表紫）—— 同事已經
-// 認得這套顏色語言，不另外發明一組。收割用灰藍（PARA 的 Resources，非主線）。
-const TRACK_COLOR = {
-    plan: '#1f538d', prod: '#d48a04', biz: '#228b22',
-    deliver: '#7c3aed', harvest: '#546e7a',
-};
+// 軌色與清單的微型完成條共用一份（見 prop-const.TRACK_COLOR）
+import { TRACK_COLOR } from './prop-const.js';
 
 // 主題化＝元件自帶 --pf-* 變數、深色為預設、白底靠 html.plan-theme-light 覆寫
 // （比照 plan-matrix / meeting-view / folder-view 的既有慣例）。這頁在兩個地方

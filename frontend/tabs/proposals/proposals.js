@@ -18,7 +18,7 @@ import { API, DECK_EXTS, PTYPES, STATUSES, pickableRefs, projectLabel, withCurre
     from './prop-const.js';
 // 清單的查詢/排序/統計與獨立企劃頁共用（版面各自畫，邏輯只有一份）
 import {
-    fetchProposals, fillYearSelect, hasFilters, paintStats,
+    fetchProposals, fillYearSelect, flowOf, hasFilters, loadFlowSummary, paintStats,
     SORT_COLUMNS, SORT_GETTERS, wireFilters,
 } from './prop-list.js';
 import {
@@ -32,6 +32,7 @@ let _lastProps = [];     // 目前篩選下的清單（供點欄頭排序重繪�
 let _readFilters = null;
 let _rowsFiltered = false;   // 目前這批是不是篩過的（決定空狀態要說什麼）
 let _escHandler = null;
+let _flowHtml = null;    // flow-badge.flowCellsHtml —— 載入後留著（重排要重填）
 
 // ── 點欄頭排序：預設 key '' = 不排序、維持後端順序，點了才生效 ──
 const _sorter = createSortable({
@@ -175,6 +176,9 @@ async function refreshList({ stats = false } = {}) {
         if (!_rowsFiltered) fillYearSelect(document.getElementById('prop-f-year'), props);
         _lastProps = props;
         _renderRows();
+        // 進度摘要是**附加**資訊：清單先畫出來，摘要到了再補上那一欄。
+        // 併進上面那個 await 的話，一個慢查詢會讓整張表晚幾百毫秒才出現。
+        _paintFlow(props);
     } catch (e) {
         tbody.innerHTML = `<tr><td colspan="${COLSPAN}" style="color:#f87171;padding:30px;text-align:center;">提案載入失敗：${esc(e.message || e)}</td></tr>`;
     }
@@ -210,7 +214,29 @@ function _renderRows() {
             } catch (err) { alert('刪除失敗：' + (err.message || err)); }
         });
     });
+    _fillFlow();      // 重排後那幾格是空的（_row 不填，見 _paintFlow）
     _sorter.attach();
+}
+
+/**
+ * 進度欄：抓摘要 → 把每一格填進去。
+ *
+ * 只換那幾格的 innerHTML，不重畫整個 tbody —— 重畫會把剛剛掛上的三組事件
+ * 委派（開詳情/換綁/刪除）全部丟掉，還會讓使用者正在看的排序閃一下。
+ * 畫面層是動態 import：它要 utils.js，而清單的資料層刻意不碰那包。
+ */
+async function _paintFlow(props) {
+    if (!await loadFlowSummary(props.map(p => p.project_id))) return;
+    _flowHtml ||= (await importRetry('/tabs/proposals/flow-badge.js')).flowCellsHtml;
+    _fillFlow();
+}
+
+/** 把快取裡的摘要填進那幾格。載入前是 no-op —— 點欄頭重排也走這支。 */
+function _fillFlow() {
+    if (!_flowHtml) return;
+    document.querySelectorAll('#prop-rows [data-flow]').forEach(td => {
+        td.innerHTML = _flowHtml(flowOf(td.dataset.flow));
+    });
 }
 
 /** 「專案」欄：已連結顯示專案名、未連結顯示「＋ 連結」，點下去都是換綁對話框。 */
@@ -237,6 +263,7 @@ function _row(p) {
             <td>${esc(p.pitch_date || '—')}</td>
             <td>${esc(p.budget_range || '—')}</td>
             <td>🎞 ${p.refs_count || 0}</td>
+            <td class="prop-flow" data-flow="${esc(p.project_id || '')}"></td>
             <td><button class="prop-rowdel" data-del="${esc(p.id)}"
                         title="刪除這個提案（參考片掛載會解除，片庫保留）">✕</button></td>
         </tr>`;

@@ -178,6 +178,19 @@ async def _project_or_404(session, project_id: str):
     return project
 
 
+async def _with_session(run):
+    """DB 守門 → session → `await run(session)`。
+
+    「查一批」的端點用這支（單一專案用下面的 `_with_project`）—— 兩者的守門
+    與 session 生命週期是同一件事，分開寫的話下一個要加的東西（逾時、
+    read-only、tracing）只會被加在其中一個。
+    """
+    _require_db()
+    factory = await _get_factory()
+    async with factory() as session:
+        return await run(session)
+
+
 async def _with_project(project_id: str, payload):
     """DB 守門 → session → 專案或 404 → `await payload(session, project)`。
 
@@ -185,10 +198,9 @@ async def _with_project(project_id: str, payload):
     review_kpta / flow_checks）讀取端一模一樣，各自抄一份的話，下一個要加
     的東西（audit 列、updated_by）只會被加在其中一個檔。
     """
-    _require_db()
-    factory = await _get_factory()
-    async with factory() as session:
+    async def _run(session):
         return await payload(session, await _project_or_404(session, project_id))
+    return await _with_session(_run)
 
 
 async def _patch_project_json(project_id: str, attr: str, call, payload):

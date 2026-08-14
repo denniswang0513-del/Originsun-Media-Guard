@@ -39,6 +39,44 @@ export async function fetchProposals(filters) {
     return (await tfetch(API + listQuery(filters))).proposals || [];
 }
 
+// ── 進度摘要（§14.4 階段四B）────────────────────────────────────────────
+// **資料在這裡、畫面在 flow-badge.js**。分開不是為了整齊，是因為這個檔案在
+// `/proposal-plan.html` 的清單首屏路徑上，而畫面那半要 utils.js（53KB）——
+// 見檔頭的相依說明。這裡只多用一次已經有的 tfetch。
+
+/** project_id → {status, tracks:[{key,label,done,total}]}。每次以回來的那批覆寫。 */
+const _flow = new Map();
+
+export const flowOf = (projectId) => (projectId && _flow.get(projectId)) || null;
+
+/**
+ * 抓一批專案的進度摘要（沒有殼專案的提案不必問）。
+ *
+ * 失敗**不擋清單**：進度是附加資訊，為了它讓整張表畫不出來是本末倒置。
+ * @returns {Promise<boolean>} 有沒有拿到新資料（呼叫端據此決定要不要重畫）
+ */
+export async function loadFlowSummary(projectIds) {
+    const ids = [...new Set((projectIds || []).filter(Boolean))];
+    if (!ids.length) return false;
+    try {
+        const d = await tfetch('/api/v1/crm/projects/flow/summary?ids='
+                               + encodeURIComponent(ids.join(',')));
+        for (const [pid, s] of Object.entries(d.projects || {})) _flow.set(pid, s);
+        return true;
+    } catch (_e) {
+        return false;
+    }
+}
+
+/** 排序用的單一數字：整體完成比例。沒有資料排最後（-1）。 */
+export function flowPct(projectId) {
+    const s = flowOf(projectId);
+    if (!s) return -1;
+    const done = s.tracks.reduce((n, t) => n + t.done, 0);
+    const total = s.tracks.reduce((n, t) => n + t.total, 0);
+    return total ? done / total : 0;
+}
+
 /**
  * 可排序的欄位：**一份清單**同時餵後台的表頭與企劃頁的排序下拉。
  * 分兩份的話，加一欄要改三個地方（getter、表頭、下拉），而漏改不會報錯。
@@ -56,6 +94,10 @@ export const SORT_COLUMNS = [
     { key: 'pitch', label: '提案日', get: p => p.pitch_date || '' },
     { key: 'budget', label: '預算範圍', get: p => p.budget_range || '' },
     { key: 'refs', label: '參考', get: p => p.refs_count ?? 0 },
+    // 進度（§14.4 階段四B）：階段 chip + 五格微型完成條。排序值是整體完成
+    // 比例 —— 「哪個案子最卡」就是點這一欄。資料不在 p 上（另一支端點批次
+    // 取），所以 getter 走 flow-badge 的快取；還沒到的排最後（-1）。
+    { key: 'flow', label: '進度', get: p => flowPct(p.project_id) },
 ];
 
 export const SORT_GETTERS = Object.fromEntries(SORT_COLUMNS.map(c => [c.key, c.get]));

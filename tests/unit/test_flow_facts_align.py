@@ -23,6 +23,8 @@ class _Row:
     def __init__(self, names):
         self._names = set(names)
 
+    pid = "p1"          # 驅動欄（= _Project.id）—— _gather_facts 拿它當鍵
+
     def __getattr__(self, name):
         # __getattr__ 只在正常查找失敗時才進來，所以 self._names 走不到這裡
         if name in self._names:
@@ -32,14 +34,15 @@ class _Row:
 
 
 class _Result:
+    """聚合那趟回一列（假裝只查了一個專案）；showcase 那趟回空。
+
+    靠 `pid` 在不在欄位名裡分辨是哪一趟 —— 聚合的第一欄就是它。
+    """
     def __init__(self, names):
         self._names = names
 
-    def one(self):
-        return _Row(self._names)
-
     def all(self):
-        return []          # 沒有 showcase 作品列
+        return [_Row(self._names)] if "pid" in self._names else []
 
 
 class _Session:
@@ -69,7 +72,7 @@ class _Project:
 async def test_gather_facts_covers_every_auto_signal():
     """router 算出來的鍵，必須蓋過範本宣告的每一個 AUTO 項。"""
     from routers.crm.flow import _gather_facts
-    facts, _detail, _meta = await _gather_facts(_Session(), _Project())
+    facts, _detail, _meta = (await _gather_facts(_Session(), [_Project()]))["p1"]
 
     missing = pf.missing_facts(facts)
     assert not missing, (
@@ -80,7 +83,7 @@ async def test_gather_facts_covers_every_auto_signal():
 async def test_gather_facts_has_no_stray_keys():
     """反向：router 算了範本沒有的鍵 = 打錯字或範本刪項時的殘留。"""
     from routers.crm.flow import _gather_facts
-    facts, _detail, _meta = await _gather_facts(_Session(), _Project())
+    facts, _detail, _meta = (await _gather_facts(_Session(), [_Project()]))["p1"]
 
     stray = sorted(set(facts) - set(pf.AUTO_KEYS))
     assert not stray, f"這些鍵不在軌道範本裡（打錯字？）：{stray}"
@@ -94,7 +97,7 @@ async def test_gather_facts_stays_at_two_queries():
     """
     s = _Session()
     from routers.crm.flow import _gather_facts
-    await _gather_facts(s, _Project())
+    await _gather_facts(s, [_Project()])
     # `<=` 不是 `==`：要擋的是回到「一個訊號一趟查詢」，而不是擋住「把
     # showcase 那趟也併進聚合」這種正向改動
     assert s.calls <= 2, f"_gather_facts 發了 {s.calls} 個查詢（應 ≤ 2）"

@@ -26,6 +26,20 @@ export const PTYPES = ['形象', '廣告', '紀錄片', '政府標案', '社群'
 export const DECK_EXTS = '';
 
 /**
+ * 五軌的顏色。沿用四段進度條的既有色彙（備份藍/轉檔橘/串接綠/報表紫）——
+ * 同事已經認得這套顏色語言，不另外發明一組。收割用灰藍（PARA 的 Resources，
+ * 非主線）。
+ *
+ * 住在這裡是因為**兩處都要用**：詳情的五軌燈號（flow-view）與清單的微型完成條
+ * （flow-badge）。同一條軌在兩個畫面不同色的話，「掃一眼看哪軌卡住」就廢了。
+ * 鍵＝`core.project_flow.TRACKS` 的軌道 key。
+ */
+export const TRACK_COLOR = {
+    plan: '#1f538d', prod: '#d48a04', biz: '#228b22',
+    deliver: '#7c3aed', harvest: '#546e7a',
+};
+
+/**
  * 下拉選項：清單 + 現值。舊資料/CSV 匯入的自由文字不在清單裡，不補進去的話
  * `<select>` 會靜默把它換成第一個選項 —— 使用者只是點開看一眼，值就沒了。
  */
