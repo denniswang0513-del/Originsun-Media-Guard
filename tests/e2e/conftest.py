@@ -154,18 +154,20 @@ def mount_flow(page):
     # host_id 沒有預設：每支測試的選擇器都寫死自己那個 id，給預設只會讓
     # 「made 收得齊不齊」變成要去看有沒有人漏傳
     def _do(project_id, token, *, host_id, wait=".pflow-track",
-            here="preprod_proposals"):
+            here="preprod_proposals", **opts):
         # here 的預設值＝兩個真實掛載點都傳的那個（提案工作區）。測試要驗
         # 「沒有 here 時那幾盞燈就有連結」才明確傳 ''。
+        # **opts：其餘 renderFlow 選項（proposalId…）原樣帶過去 —— 這裡不列
+        # 白名單，不然元件每加一個選項就要來改一次這支 fixture。
         made.append(host_id)
         page.evaluate("t => localStorage.setItem('auth_token', t)", token)
-        page.evaluate("""async ([pid, hid, here]) => {
+        page.evaluate("""async ([pid, hid, here, extra]) => {
             const host = document.createElement('div');
             host.id = hid;
             document.body.appendChild(host);
             const m = await import('/tabs/proposals/flow-view.js');
-            await m.renderFlow(host, { projectId: pid, here });
-        }""", [project_id, host_id, here])
+            await m.renderFlow(host, { projectId: pid, here, ...extra });
+        }""", [project_id, host_id, here, opts])
         if wait:
             page.wait_for_selector(f"#{host_id} {wait}", timeout=20000)
         return host_id

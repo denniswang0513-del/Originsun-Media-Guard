@@ -1302,12 +1302,20 @@ async function _loadPlan(pid) {
         _setupLazyTab("quote", { proposalId: prop.id });
         // 會議記錄：內部素材（會記到內部判斷與報價底線），同樣不給訪客
         _setupLazyTab("meeting", { proposalId: prop.id });
-        // 進度：專案的五軌工作流。沒有殼專案就不建這個分頁 —— 它整頁的內容
-        // 都來自專案，掛出來只會是一句「還沒有關聯專案」。訪客同樣沒有
-        // （內部進度、人名、金額訊號都不出公開頁，見 §14.3）。
+        // 進度：專案的五軌工作流。沒有殼專案時**照掛** —— 那一頁不再只是一句
+        // 「還沒有關聯專案」，而是把它放進管線的那顆按鈕（§14.4 邊界態）；
+        // 而這裡正是會發現「這個案子沒進管線」的地方。訪客沒有這條路
+        // （內部進度、人名、金額訊號都不出公開頁，見 §14.3；訪客走
+        // _loadSharedPlan）。
         // here：這頁本身就是提案工作區 —— 指回提案庫的燈不畫連結（見 renderFlow）
-        if (prop.project_id) _setupLazyTab("flow",
-            { projectId: prop.project_id, here: "preprod_proposals" });
+        _setupLazyTab("flow", {
+            projectId: prop.project_id || "", proposalId: prop.id,
+            here: "preprod_proposals",
+            // 自癒建了殼專案 → 標頭與側欄的「專案」那格還寫著未連結。
+            // （資料夾分頁要等重整才會出現：它的接線在上面那一段，
+            //   而那是開頁時一次性的。）
+            onLinked: () => refresh(),
+        });
     } catch (e) {
         host.innerHTML = '<div class="state-msg" style="color:var(--red);">創意發想載入失敗：' + escText(emsg(e)) + "</div>";
     }
