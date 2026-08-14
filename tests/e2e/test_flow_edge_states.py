@@ -14,7 +14,7 @@ import uuid
 
 import pytest
 
-from .conftest import HTTP
+from .conftest import HTTP, project_case
 
 pytestmark = pytest.mark.e2e
 
@@ -35,30 +35,8 @@ def _snap(page, host_id):
 
 @pytest.fixture(scope="module")
 def owned_project(real_server, e2e_admin_token, dev_db_only):
-    """自建自刪一組客戶 + 專案（狀態＝提案）。
-
-    不用 flow_case：那支建的是**提案**的殼專案，而這裡要直接改專案狀態去驗
-    終態 —— 改到提案的殼會連動衛星提案的 win/loss，等於順手測了別人的東西。
-    """
-    base = real_server["base_url"]
-    h = {"Authorization": f"Bearer {e2e_admin_token}"}
-    tag = uuid.uuid4().hex[:6]
-    rc = HTTP.post(f"{base}/api/v1/crm/clients", headers=h,
-                   json={"name": f"[FLOWEDGE] 客戶 {tag}", "short_name": f"FED{tag}"})
-    if rc.status_code >= 400:
-        pytest.skip(f"建不出客戶（{rc.status_code}）：{rc.text[:120]}")
-    cid = rc.json().get("id") or (rc.json().get("client") or {}).get("id")
-    rp = HTTP.post(f"{base}/api/v1/crm/projects", headers=h,
-                   json={"name": f"[FLOWEDGE] {tag}", "status": "提案", "client_id": cid})
-    if rp.status_code >= 400:
-        HTTP.delete(f"{base}/api/v1/crm/clients/{cid}", headers=h)
-        pytest.skip(f"建不出專案（{rp.status_code}）：{rp.text[:120]}")
-    pid = rp.json().get("id") or (rp.json().get("project") or {}).get("id")
-    try:
-        yield {"base": base, "h": h, "pid": pid, "cid": cid}
-    finally:
-        HTTP.delete(f"{base}/api/v1/crm/projects/{pid}", headers=h)
-        HTTP.delete(f"{base}/api/v1/crm/clients/{cid}", headers=h)
+    with project_case(real_server["base_url"], e2e_admin_token, "FLOWEDGE") as c:
+        yield c
 
 
 def _set_status(c, status, **extra):
@@ -135,24 +113,19 @@ def test_returning_to_the_tab_refetches(page, mount_flow, owned_project,
 def test_fresh_data_is_not_refetched(page, mount_flow, owned_project,
                                      e2e_admin_token):
     """剛抓過就切回來不重抓 —— 沒有這道門檻，在兩個分頁間點五下就是五趟
-    那支不便宜的聚合查詢。"""
-    hid = mount_flow(owned_project["pid"], e2e_admin_token, host_id="edge-fresh")
-    seen = []
-    want = f"/{owned_project['pid']}/flow"
+    那支不便宜的聚合查詢。
 
-    def _watch(req):
-        if want in req.url:
-            seen.append(req.url)
-    page.on("request", _watch)
-    try:
-        page.eval_on_selector(f"#{hid}", "h => { h.style.display = 'none'; }")
-        page.eval_on_selector(f"#{hid}", "h => { h.style.display = ''; }")
-        page.wait_for_timeout(800)   # 給 IO 兩三個 frame 的機會真的跑一次
-        assert not seen, f"才剛抓過卻又抓了一次：{seen}"
-    finally:
-        # `page` 是 session 範圍的 —— 不解掉，這個監聽會跟著跑進後面每一支
-        # e2e 測試（而它閉包住的 seen 會一直長）
-        page.remove_listener("request", _watch)
+    用 `__flow.at`（每次**送出**抓取時蓋的時間戳）當觀測點，不去監聽網路：
+    `page` 是 session 範圍的，掛在它上面的 request 監聽解不乾淨就會跟著跑進
+    後面每一支 e2e。
+    """
+    hid = mount_flow(owned_project["pid"], e2e_admin_token, host_id="edge-fresh")
+    at = page.eval_on_selector(f"#{hid}", "h => h.__flow.at")
+    page.eval_on_selector(f"#{hid}", "h => { h.style.display = 'none'; }")
+    page.eval_on_selector(f"#{hid}", "h => { h.style.display = ''; }")
+    page.wait_for_timeout(800)   # 給 RO 兩三個 frame 的機會真的跑一次
+    assert page.eval_on_selector(f"#{hid}", "h => h.__flow.at") == at, \
+        "才剛抓過卻又抓了一次"
 
 
 def test_heal_button_creates_the_shell_project(page, mount_flow, real_server,

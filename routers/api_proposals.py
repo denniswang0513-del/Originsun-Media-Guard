@@ -83,6 +83,24 @@ _PRESALE_PROJECT_STATUSES = {"投標", "開發", "洽詢", "提案"}
 # 「哪些階段＝衛星提案記成案」的正本在 core.project_flow（WIN_STATUSES /
 # wins_proposal）—— 這裡曾有一份 PROPOSAL_WIN_STATUSES，別再開第二份。
 
+# 「已停擺的提案不進管線洗版」—— 唯一刻意不建殼專案的狀態。
+PIPELINE_EXEMPT_STATUS = "擱置"
+
+
+def enters_pipeline(prop) -> bool:
+    """這筆提案現在該不該補一個殼專案？
+
+    🔴 **這條規則的正本。** 它原本各寫一份在 `update_proposal`（Python 條件）
+    與 `migrate_unlinked_proposals_to_projects`（SQL where），而 2026-08-14
+    的自癒 CTA 差點讓前端變成第三份（它得靠「回來的 project_id 是空的」反推
+    原因，還把「擱置」兩個字寫死在訊息裡）。現在前端改讀回應裡的 status，
+    遷移那支共用同一個常數 —— 加一個豁免狀態只要改這裡。
+
+    純函式、不碰 session：所以 tests/unit 驗得到（那支端點要真 DB，
+    e2e 才跑得動，不該是這條規則唯一的守門）。
+    """
+    return not prop.project_id and (prop.status or "") != PIPELINE_EXEMPT_STATUS
+
 
 async def _create_shell_project(session, prop, status: str = ""):
     """從提案衛星列建殼專案 — 走 routers/crm/projects.py 的建案單一正本
@@ -589,7 +607,7 @@ async def update_proposal(pid: str, req: ProposalPayload, request: Request):
             await _sync_project_from_proposal(
                 session, prop, await session.get(CrmProject, prop.project_id))
         # 還沒入管線的提案（擱置中挪回來、或遷移前建的）→ 自動建殼補上
-        if not prop.project_id and (prop.status or "") != "擱置":
+        if enters_pipeline(prop):
             project = await _create_shell_project(session, prop)
             prop.project_id = project.id
         await session.commit()
@@ -1713,7 +1731,7 @@ async def migrate_unlinked_proposals_to_projects() -> None:
         ids = (await session.execute(
             select(PreprodProposal.id).where(
                 PreprodProposal.project_id.is_(None),
-                PreprodProposal.status != "擱置",
+                PreprodProposal.status != PIPELINE_EXEMPT_STATUS,
             ))).scalars().all()
     migrated = 0
     for pid in ids:

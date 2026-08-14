@@ -7,9 +7,9 @@
 
 自建自刪（dev/test 庫限定）。
 """
-import uuid
-
 import pytest
+
+from .conftest import project_case
 
 pytestmark = pytest.mark.e2e
 
@@ -39,29 +39,10 @@ def _read(page):
 
 def test_flow_tab_renders_five_tracks(page, mount_flow, real_server,
                                       e2e_admin_token, dev_db_only):
-    import requests
-    base = real_server["base_url"]
-    H = {"Authorization": "Bearer " + e2e_admin_token}
-
-    # 自己建客戶 + 專案（只刪自己建的 —— 金絲雀鐵則）。
-    # 手建專案 client_id 必填（只有提案建殼那條路可以空，見 db.models.CrmProject）。
-    tag = uuid.uuid4().hex[:6]
-    rc = requests.post(f"{base}/api/v1/crm/clients", headers=H,
-                       json={"name": f"[FLOWE2E] 客戶 {tag}",
-                             "short_name": f"FE2E{tag}"}, timeout=30)
-    assert rc.status_code in (200, 201), f"建客戶失敗 {rc.status_code}: {rc.text[:200]}"
-    cid = rc.json().get("id") or (rc.json().get("client") or {}).get("id")
-    assert cid, f"回應沒有 client id: {rc.text[:200]}"
-
-    r = requests.post(f"{base}/api/v1/crm/projects", headers=H,
-                      json={"name": f"[FLOWE2E] {tag}", "status": "提案",
-                            "client_id": cid}, timeout=30)
-    assert r.status_code in (200, 201), f"建專案失敗 {r.status_code}: {r.text[:200]}"
-    pid = r.json().get("id") or (r.json().get("project") or {}).get("id")
-    assert pid, f"回應沒有 project id: {r.text[:200]}"
-
-    try:
-        mount_flow(pid, e2e_admin_token, host_id=HOST)
+    # 建客戶 + 專案 + 反序刪掉（只刪自己建的 —— 金絲雀鐵則）走 conftest 的
+    # 共用契約，與 test_flow_edge_states 同一份
+    with project_case(real_server["base_url"], e2e_admin_token, "FLOWE2E") as c:
+        mount_flow(c["pid"], e2e_admin_token, host_id=HOST)
         r = _read(page)
 
         assert "載入失敗" not in r["html"], f"渲染錯誤：{r['html'][:300]}"
@@ -80,9 +61,6 @@ def test_flow_tab_renders_five_tracks(page, mount_flow, real_server,
         assert r["missing"] and "推進到「製作」" in r["missing"][0]
         # 收割軌四項全部 auto，空專案一盞都不該亮
         assert not any(x in r["lit"] for x in ("企劃範本已收割", "素材庫已索引"))
-    finally:
-        requests.delete(f"{base}/api/v1/crm/projects/{pid}", headers=H, timeout=30)
-        requests.delete(f"{base}/api/v1/crm/clients/{cid}", headers=H, timeout=30)
 
 
 def test_flow_without_project_says_so(page, mount_flow, e2e_admin_token):

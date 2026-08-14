@@ -113,6 +113,40 @@ def flow_case(base, token, title):
         HTTP.delete(f"{base}/api/v1/crm/projects/{p['project_id']}", headers=h)
 
 
+@contextmanager
+def project_case(base, token, tag):
+    """自建自刪一組客戶 + CRM 專案（狀態＝提案），回 {base, h, pid, cid}。
+
+    與 `flow_case` 是姊妹：那支從**提案**側建（順帶拿到殼專案），這支直接建
+    專案 —— 要改專案狀態驗終態時得用這支，改到提案的殼會連動衛星提案的
+    win/loss，等於順手測了別人的東西。
+
+    手建專案 client_id 必填（只有提案建殼那條路可以空，見 db.models.CrmProject），
+    所以客戶那半不能省。共用的同樣是「怎麼建、怎麼跳過、怎麼收」這份契約 ——
+    抄壞的後果是把測試資料留在庫裡，而反序刪除（先專案後客戶）正是最容易
+    抄漏的一段。
+    """
+    h = {"Authorization": f"Bearer {token}"}
+    uniq = uuid.uuid4().hex[:6]
+    rc = HTTP.post(f"{base}/api/v1/crm/clients", headers=h,
+                   json={"name": f"[{tag}] 客戶 {uniq}", "short_name": f"{tag[:4]}{uniq}"})
+    if rc.status_code >= 400:
+        pytest.skip(f"建不出客戶（{rc.status_code}）：{rc.text[:120]}")
+    cid = rc.json().get("id") or (rc.json().get("client") or {}).get("id")
+    rp = HTTP.post(f"{base}/api/v1/crm/projects", headers=h,
+                   json={"name": f"[{tag}] {uniq}", "status": "提案", "client_id": cid})
+    if rp.status_code >= 400:
+        HTTP.delete(f"{base}/api/v1/crm/clients/{cid}", headers=h)
+        pytest.skip(f"建不出專案（{rp.status_code}）：{rp.text[:120]}")
+    pid = rp.json().get("id") or (rp.json().get("project") or {}).get("id")
+    try:
+        yield {"base": base, "h": h, "pid": pid, "cid": cid}
+    finally:
+        # 反序：專案先走，客戶才刪得掉
+        HTTP.delete(f"{base}/api/v1/crm/projects/{pid}", headers=h)
+        HTTP.delete(f"{base}/api/v1/crm/clients/{cid}", headers=h)
+
+
 @pytest.fixture(scope="module")
 def plan_page(browser_context, real_server, e2e_admin_token):
     """開一頁 `/proposal-plan.html`（已登入）。用完自己關。

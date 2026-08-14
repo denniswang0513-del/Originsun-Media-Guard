@@ -88,7 +88,8 @@ a.pflow-item::after, .pflow-item.nogo::after { content:'↗'; font-size:10px;
 .pflow-note { margin-top:12px; font-size:11.5px; color:var(--pf-sub); }
 /* 終態唯讀（§14.4 邊界態）：未成案／歸檔。灰掉的是**還沒做的那一面** ——
    已亮的燈維持原樣：對一個結束的案子，那些是歷史紀錄不是待辦。
-   凍結只做視覺與互動，缺項橫幅與「去完成」則整個不畫（見 _dest）。 */
+   凍結只做視覺與互動，「去完成」不畫（見 _dest）；缺項橫幅則不必特別處理
+   —— 終態沒有下一站，後端的閘門查詢自然就空了（core.project_flow.GATES）。 */
 .pflow.frozen .pflow-item { opacity:.5; }
 .pflow.frozen .pflow-item.on { opacity:.9; }
 .pflow.frozen .pflow-tname, .pflow.frozen .pflow-dot { filter:grayscale(.9); }
@@ -242,8 +243,8 @@ function _missingHtml({ blocking, advisory }, next, ctx) {
 /**
  * @param host   掛載節點
  * @param opts   { projectId, proposalId, onAdvanced, onLinked, here }
- *               projectId 空＝這個提案還沒入管線；帶 proposalId 的話畫自癒 CTA
- *               （見 _healHtml），沒帶就只剩一句說明。
+ *               projectId 空＝這個提案還沒入管線 → 畫自癒 CTA（見 HEAL_HTML），
+ *               所以那條路上 proposalId 是必要的。
  *               onLinked() 在自癒成功後呼叫（呼叫端的標頭/清單還顯示「未連結」）。
  *               onAdvanced(status) 在推進成功後呼叫，讓呼叫端更新自己那份
  *               （詳情標頭的狀態、清單的階段 chip…）。用回呼而不是全域
@@ -266,8 +267,9 @@ export async function renderFlow(host, { projectId, proposalId = '',
     host.__flow = { pid: projectId, propId: proposalId, onAdvanced, onLinked,
                     ctx: { links: {}, here, newTab: NEW_TAB, frozen: false },
                     missing: { blocking: [], advisory: [] }, collectsReason: false,
-                    // at＝這份資料幾時抓的；visible＝觀察者上次看到的可見狀態
-                    // （起始 true 的理由見 _watchVisible）
+                    // at＝上次**送出**抓取的時刻（節流用，見 _load）；
+                    // visible＝觀察者上次看到的可見狀態（起始 true 的理由見
+                    // _watchVisible）
                     at: 0, visible: true };
     if (!wired) {
         // 事件委派掛一次就好 —— 每次重畫都重掛會累積成一次點擊送 N 個請求
@@ -277,7 +279,7 @@ export async function renderFlow(host, { projectId, proposalId = '',
         _watchVisible(host);
     }
     if (!projectId) {
-        _msg(host, _healHtml(proposalId));
+        _msg(host, HEAL_HTML);
         return;
     }
     _msg(host, '載入中…');
@@ -312,31 +314,49 @@ const _FRESH_MS = 15000;
  * 「現在看得見」，那次不算轉換 → 不重抓。對使用者是對的（那一瞬間他根本
  * 沒離開），但寫測試時要真的等 `visible` 變 false 再顯示回來。
  *
- * 自己收：host 被移除（overlay 關掉）時解除訂閱 —— 這個元件沒有 destroy API，
- * 而 document 上的監聽不解會跟著每個開過的提案累積。
+ * 🔴 **收拾不能靠「下次回呼時發現自己被移除了」**：RO 只在尺寸**變化**時叫，
+ * 而 host 常常是「已經 display:none」時才被移除（開提案 → 看進度 → 切去別的
+ * 分頁 → 關掉 overlay，這是很普通的一串點擊）—— 那一刻尺寸沒變，回呼永遠
+ * 不會再來，掛在 document 上的那個監聽就跟著每個開過的提案永久累積。
+ * 所以改成：**一個** document 監聽 + 一份 host 名冊，每次巡邏順手把已經離開
+ * DOM 的清掉。N 個監聽變 1 個，而且不必給元件一個呼叫端要記得呼叫的
+ * destroy API。
  */
-function _watchVisible(host) {
-    const seen = () => {
+const _watched = new Set();
+
+function _sweep() {
+    for (const host of _watched) {
         if (!host.isConnected) {
-            obs.disconnect();
-            document.removeEventListener('visibilitychange', seen);
-            return;
+            host.__flowObs?.disconnect();
+            _watched.delete(host);
+            continue;
         }
-        const f = host.__flow;
-        if (!f) return;
-        // offsetParent 是 null ＝ 這一格現在 display:none（沒有 position:fixed
-        // 的祖先，所以這裡讀得準）
-        const now = !document.hidden && !!host.offsetParent;
-        // 起始值 true（見 renderFlow）：RO 在 observe() 當下就會先叫一次，
-        // 起始給 false 的話那一次會被當成「切回來了」，每次開分頁都抓兩趟。
-        const back = now && !f.visible;
-        f.visible = now;
-        if (!back || !f.pid || Date.now() - f.at < _FRESH_MS) return;
-        _load(host, f.pid);
-    };
-    const obs = new ResizeObserver(seen);
-    obs.observe(host);
-    document.addEventListener('visibilitychange', seen);
+        _visitVisible(host);
+    }
+}
+
+/** 這個 host 的可見狀態變了沒；由看不見變看得見就重抓。 */
+function _visitVisible(host) {
+    const f = host.__flow;
+    // offsetParent 是 null ＝ 這一格現在 display:none（沒有 position:fixed
+    // 的祖先，所以這裡讀得準）
+    const now = !document.hidden && !!host.offsetParent;
+    // 起始值 true（見 renderFlow）：RO 在 observe() 當下就會先叫一次，
+    // 起始給 false 的話那一次會被當成「切回來了」，每次開分頁都抓兩趟。
+    const back = now && !f.visible;
+    f.visible = now;
+    if (!back || !f.pid || Date.now() - f.at < _FRESH_MS) return;
+    _load(host, f.pid);
+}
+
+function _watchVisible(host) {
+    if (!_watched.size) document.addEventListener('visibilitychange', _sweep);
+    _watched.add(host);
+    // RO 只服務這一個 host（它報的是這一格的版面盒）；巡邏時才需要看全體
+    host.__flowObs = new ResizeObserver(() => {
+        if (host.isConnected) _visitVisible(host); else _sweep();
+    });
+    host.__flowObs.observe(host);
 }
 
 /**
@@ -349,36 +369,44 @@ function _watchVisible(host) {
  * 規格草案寫的是「補客戶 CTA」，但那是 `crm_projects.client_id` 放寬之前的
  * 前提 —— 現在客戶可空、殼專案不等客戶，所以按鈕直接做真正要做的事。
  */
-function _healHtml(proposalId) {
-    const why = '這個提案還沒有關聯專案，所以沒有進度可以追。';
-    if (!proposalId) return why;
-    return `${why}<br>建一個殼專案把它放進管線，五軌訊號就會開始自己亮。`
-         + `<div><button class="pflow-adv" data-heal>建立專案並開始追蹤</button></div>`;
-}
+const HEAL_LABEL = '建立專案並開始追蹤';
+const HEAL_HTML =
+    '這個提案還沒有關聯專案，所以沒有進度可以追。'
+    + '<br>建一個殼專案把它放進管線，五軌訊號就會開始自己亮。'
+    + `<div><button class="pflow-adv" data-heal>${HEAL_LABEL}</button></div>`;
 
 /** 自癒：送一份空的部分更新 → 後端補殼專案 → 原地變成真的進度頁。 */
 async function _heal(host, btn) {
+    if (btn.disabled) return;
     const f = host.__flow;
     btn.disabled = true;
     btn.textContent = '建立中…';
     try {
         const d = await tfetch(`/api/v1/proposals/${encodeURIComponent(f.propId)}`,
                                { method: 'PUT', json: {} });
-        const pid = (d.proposal || {}).project_id || '';
+        const prop = d.proposal || {};
+        const pid = prop.project_id || '';
         if (!host.isConnected) return;
         if (!pid) {
-            // 唯一補不了的情況：擱置中的提案刻意不入管線（見那支端點）
-            _msg(host, '這個提案是「擱置」狀態，不會進管線。<br>把狀態改回草稿之後再回來，系統就會自動建立專案。');
+            // 補不了的情況：後端不讓這個狀態入管線（見 api_proposals
+            // .enters_pipeline）。**狀態名用後端回的那份**，不在這裡寫死
+            // ——那條規則已經有正本了，前端再抄一次就是第三份。
+            _msg(host, `這個提案是「${esc(prop.status || '?')}」狀態，不會進管線。`
+                     + '<br>把狀態改回草稿之後再回來，系統就會自動建立專案。');
             return;
         }
         f.pid = pid;
+        // 先讓呼叫端更新它那份（清單的「專案」欄、標頭）。SPA 的做法是整個
+        // 重開詳情 → 這個 host 當場被拆掉，所以**拆掉了就別再抓** ——
+        // 那趟聚合查詢問到的東西會直接被丟進垃圾桶。
+        if (f.onLinked) f.onLinked(pid);
+        if (!host.isConnected) return;
         _msg(host, '載入中…');
         await _load(host, pid);
-        if (f.onLinked) f.onLinked(pid);
     } catch (e) {
         if (!host.isConnected) return;
         btn.disabled = false;
-        btn.textContent = '建立專案並開始追蹤';
+        btn.textContent = HEAL_LABEL;
         alert('建立專案失敗：' + (e.message || e));
     }
 }
@@ -394,6 +422,11 @@ function _msg(host, t) {
  *  刻意不先清成「載入中…」：舊資料在新的到之前都還是對的，清掉只換來一次
  *  整片空白閃爍。 */
 async function _load(host, projectId) {
+    // 🔴 時間戳蓋在**送出**的這一刻，不是拿到的那一刻：`at` 節流的是「要不要
+    // 再去問一次」。蓋在 _paint 的話，抓的期間 at 還是舊值（來回切分頁就是
+    // N 個並發的聚合查詢打同一個 5 條的連線池），而抓失敗時它永遠是 0 ——
+    // 之後每次切回來都無節流地重打。
+    host.__flow.at = Date.now();
     try {
         const d = await tfetch(`/api/v1/crm/projects/${encodeURIComponent(projectId)}/flow`);
         if (host.isConnected) _paint(host, d);
@@ -405,16 +438,12 @@ async function _load(host, projectId) {
 /** 純 dispatcher：兩條路徑各自一支，這裡只決定走哪條。
  *  「去完成」不在這裡 —— 它是一條純 `<a>`（見 SPA 常數）。 */
 async function _onHit(host, ev) {
-    const adv = ev.target.closest?.('[data-advance]');
-    if (adv && host.contains(adv) && ev.type === 'click') {
+    // 兩顆按鈕同一條路：找到、確認在自己家裡、擋掉預設、交給對應的處理函式
+    // （兩者都自己擋 disabled）
+    const btn = ev.target.closest?.('[data-advance],[data-heal]');
+    if (btn && host.contains(btn) && ev.type === 'click') {
         ev.preventDefault();
-        await _advance(host, adv);
-        return;
-    }
-    const heal = ev.target.closest?.('[data-heal]');
-    if (heal && host.contains(heal) && ev.type === 'click' && !heal.disabled) {
-        ev.preventDefault();
-        await _heal(host, heal);
+        await (btn.hasAttribute('data-heal') ? _heal : _advance)(host, btn);
         return;
     }
     const el = ev.target.closest?.('[data-check]');
@@ -492,10 +521,15 @@ function _advanceHtml(st, canAdvance) {
 /**
  * 頁尾那一句。三種情況共用一格且互斥 —— 分開寫的話「已凍結」與「需要權限
  * 才能標記」會同時出現，而它們互相矛盾（凍結時有權限的人一樣勾不動）。
+ *
+ * 🔴 終態的名字用**後端送來的 `status`**，不寫死「歸檔」：終態有哪些是
+ * `core.project_flow.TERMINAL` 的政策，多一個終態時這裡不該是第二個要記得
+ * 改的地方（不改的話，畫面會篤定地告訴使用者一個錯的狀態）。
  */
-function _noteHtml(st, frozen, canCheck) {
-    if (frozen) {
-        return `<div class="pflow-note">這個案子已經${st.is_lost ? '結束（未成案）' : '歸檔'}，`
+function _noteHtml(st, canCheck) {
+    if (st.is_terminal) {
+        return `<div class="pflow-note">這個案子已經${st.is_lost ? '結束' : ''}`
+             + `「${esc(st.status || '')}」，`
              + `進度只供查閱：里程碑不再能勾，未完成的項目也不再提示「去完成」。</div>`;
     }
     return canCheck ? ''
@@ -520,14 +554,13 @@ function _paint(host, d) {
     // 推進對話框要的三樣東西 —— 存最後一次的**權威**資料，別讓它去讀畫面
     // （讀畫面的話，樂觀更新那一瞬間的 class 會被當成事實）。刻意不存整包
     // payload：tracks 佔了 4KB 的 88%，畫成 HTML 之後就沒人要了。
-    // `at`＝這份資料的時間戳，切回分頁時據此決定重不重抓（見 _watchVisible）。
-    host.__flow = { ...host.__flow, missing, ctx, at: Date.now(),
+    host.__flow = { ...host.__flow, missing, ctx,
                     collectsReason: !!d.collects_outcome_reason };
     host.innerHTML = `<div class="pflow${frozen ? ' frozen' : ''}">
         ${_stageHtml(st, _advanceHtml(st, !!d.can_advance))}
         ${(d.tracks || []).map(t => _trackHtml(t, can, ctx)).join('')}
         ${_missingHtml(missing, st.next, ctx)}
-        ${_noteHtml(st, frozen, !!d.can_check)}
+        ${_noteHtml(st, can)}
     </div>`;
 }
 
