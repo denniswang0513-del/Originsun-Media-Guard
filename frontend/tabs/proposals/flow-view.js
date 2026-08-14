@@ -248,18 +248,14 @@ function _missingHtml({ blocking, advisory }, next, ctx) {
  *
  *               onChanged()：這個元件剛動了後端的東西（推進階段／補殼專案），
  *               呼叫端那份鏡像（詳情標頭的狀態、清單的階段 chip 與「專案」欄）
- *               已經是舊的。**一個回呼涵蓋兩種動作**：原本分成 onAdvanced /
- *               onLinked，結果第二個掛載點只接了其中一個 —— 從企劃頁推進階段
- *               會連動衛星提案的狀態，而那頁的狀態下拉就一直顯示舊值。兩個
- *               回呼都沒有呼叫端用得到參數，分開的唯一效果就是可以漏接一半。
- *               用回呼而不是全域 CustomEvent —— 這個模組的既有慣例
- *               （onPlanStarted / toast / onSaved）都是回呼，而全域事件沒有
- *               owner，之後要拆得 grep 全 repo。
+ *               已經是舊的。**一個回呼涵蓋兩種動作** —— 分開的唯一效果就是
+ *               可以漏接一半，而那真的發生過（§14.4.4）。用回呼而不是全域
+ *               CustomEvent：這個模組的既有慣例（onPlanStarted / toast /
+ *               onSaved）都是回呼，全域事件沒有 owner，之後要拆得 grep 全 repo。
  *
- *               🔴 它在元件**重畫自己之前**被呼叫，而且會被 await：呼叫端有權
- *               把這個 host 拆掉（SPA 就是整個重開詳情），拆掉之後元件就不再
- *               去抓那份會被直接丟進垃圾桶的聚合查詢。所以回傳 promise 的
- *               呼叫端請確實回傳 —— 不然元件會在你拆掉之前就先問完了。
+ *               它會被 await，且在元件重畫自己**之前**呼叫（你有權把這個 host
+ *               拆掉）—— 所以要拆的話請回傳你的 promise。忘了回傳不會壞，
+ *               只是多抓一趟然後丟掉；理由見 _settled。
  *               here：「這個畫面本身就是哪個 tab」的模組鍵。指向這裡的
  *               deep-link 不畫 —— 兩個掛載點都在提案工作區裡，那幾盞燈
  *               （提案已建立／企劃書…）該做的事就在手邊，把人送去提案庫清單
@@ -303,38 +299,22 @@ export async function renderFlow(host, { projectId, proposalId = '',
 const _FRESH_MS = 15000;
 
 /**
- * 「切回分頁重抓」（§14.4；v1 明確不做輪詢）。
+ * 「切回分頁重抓」（§14.4.3；v1 明確不做輪詢）。整個機制與設計理由在那一節，
+ * 這裡只留三條會被「順手清乾淨」弄壞的：
  *
- * 掛在**元件自己**身上而不是兩個呼叫端各接一次：兩邊的分頁切換各有各的快取
- * 機制（SPA 是 `_mounted` Set、企劃頁是 `_pending` 槽），而它們的共同點只有
- * 一個 —— 切回來時這個 host 會重新有版面。
+ * 🔴 **ResizeObserver 不是 IntersectionObserver**：IO 講「有沒有進到視窗裡」，
+ * 所以捲到畫面外的 host 藏起來再顯示，兩次都是 not-intersecting、它根本不會
+ * 叫。RO 講版面盒，與捲動位置無關。（換成 IO 的症狀是「單跑過、跟別支一起
+ * 跑就紅」的假 flaky。）
  *
- * 🔴 用 ResizeObserver **不是** IntersectionObserver：IO 講的是「有沒有進到
- * 視窗裡」，所以捲到畫面外的 host 從 display:none 切回來時，兩次都是
- * not-intersecting —— 它根本不會叫。RO 講的是版面盒，display:none（0×0）
- * 切回來一定會叫，與捲動位置無關。（這個差別實測會變成「單跑過、跟別支
- * 一起跑就紅」的假 flaky。）
+ * 🔴 **一個 RO 服務全體**，而收拾靠 `observe()` 當下必定觸發的那一次回呼 ——
+ * 「開下一個提案的進度分頁」就是清掉上一個死掉的那個的時機。不能改成「等那
+ * 個 host 自己的回呼發現自己被移除」：它常常是**已經** display:none 才被移除
+ * （看完進度 → 切去別的分頁 → 關掉 overlay），那一刻尺寸沒變，回呼不會再來。
  *
- * 兩個來源導到同一支：分頁內的分頁（display 切換 → RO）與瀏覽器分頁
- * （visibilitychange）。使用者的意圖一樣：「我回來了，給我現在的事實」。
- * 只在**看不見→看得見**那一次的轉換上重抓，所以單純的視窗縮放（RO 也會叫）
- * 不會變成一趟查詢。轉換記在 `host.__flow.visible`（不是閉包變數）—— 它是
- * 這個 host 的狀態，而且看得到才驗得了。
- *
- * ⚠️ RO 的回報是**合併**的：藏起來又馬上顯示（同一個 frame 內）只會收到一次
- * 「現在看得見」，那次不算轉換 → 不重抓。對使用者是對的（那一瞬間他根本
- * 沒離開），但寫測試時要真的等 `visible` 變 false 再顯示回來。
- *
- * 🔴 **收拾不能靠「下次回呼時發現自己被移除了」**：RO 只在尺寸**變化**時叫，
- * 而 host 常常是「已經 display:none」時才被移除（開提案 → 看進度 → 切去別的
- * 分頁 → 關掉 overlay，這是很普通的一串點擊）—— 那一刻尺寸沒變，那個 host
- * 的回呼永遠不會再來。
- *
- * 所以：**一個** RO 服務全體 host（RO 收得下多個 target）+ **一個** document
- * 監聽，任一來源都走同一趟巡邏，順手把已經離開 DOM 的清掉。關鍵在
- * `observe()` **當下就會叫一次** —— 也就是說「開下一個提案的進度分頁」本身
- * 就是清掉上一個死掉的那個的時機，而那正是前一版唯一會漏掉的情境。
- * 名冊因此穩定維持在個位數，不必給元件一個呼叫端要記得呼叫的 destroy API。
+ * ⚠️ RO 的回報是**合併**的：同一個 frame 內藏了又顯示只會收到一次「現在看得
+ * 見」，不算轉換 → 不重抓（對使用者是對的，他根本沒離開）。寫測試時要真的等
+ * `visible` 變 false 再顯示回來。
  */
 const _watched = new Set();
 const _obs = new ResizeObserver(_sweep);
@@ -342,36 +322,31 @@ document.addEventListener('visibilitychange', _sweep);
 
 function _sweep() {
     for (const host of _watched) {
-        if (host.isConnected) { _visitVisible(host); continue; }
-        _obs.unobserve(host);
-        _watched.delete(host);
+        if (!host.isConnected) {
+            _obs.unobserve(host);
+            _watched.delete(host);
+            continue;
+        }
+        const f = host.__flow;
+        // 「看得見」認得的只有 display:none（offsetParent 為 null 的另一個成因
+        // 是 host 自己 position:fixed —— 這一格不是；SPA 的 .prop-ov 是 fixed，
+        // 但那是祖先，不影響判讀）。改用 visibility / content-visibility /
+        // height:0 藏的話這裡會判成看得見，重抓就靜靜地不發生了。
+        const now = !document.hidden && !!host.offsetParent;
+        // 起始值 true（見 renderFlow）：observe() 當下那次回呼才不會被當成
+        // 「切回來了」而每次開分頁都抓兩趟。
+        const back = now && !f.visible;
+        f.visible = now;
+        // 不會變成 _load → _paint → RO → _load 的迴圈，兩道各自成立的閘：
+        // (1) 重畫前 `visible` 已經是 true，所以 back 是 false；
+        // (2) _load/_paint 都蓋 `at`，所以那次回呼一定落在門檻內。
+        if (back && f.pid && Date.now() - f.at >= _FRESH_MS) _load(host, f.pid);
     }
 }
 
-/** 這個 host 的可見狀態變了沒；由看不見變看得見就重抓。 */
-function _visitVisible(host) {
-    const f = host.__flow;
-    // 「看得見」＝ 沒有任何祖先 display:none（offsetParent 為 null 的另一個
-    // 成因是 host 自己 position:fixed —— 這一格永遠不是）。
-    // ⚠️ 認得的只有 display:none：用 visibility/content-visibility/height:0
-    // 藏起來的話這裡會判成看得見，重抓就靜靜地不發生了。兩個掛載點目前都是
-    // display 切換（SPA 的 .prop-ov 是 fixed，但那是**祖先**，不影響判讀）。
-    const now = !document.hidden && !!host.offsetParent;
-    // 起始值 true（見 renderFlow）：RO 在 observe() 當下就會先叫一次，
-    // 起始給 false 的話那一次會被當成「切回來了」，每次開分頁都抓兩趟。
-    const back = now && !f.visible;
-    f.visible = now;
-    if (!back || !f.pid || Date.now() - f.at < _FRESH_MS) return;
-    _load(host, f.pid);
-}
-
 /**
- * 沒有殼專案時的自癒 CTA（§14.4 邊界態第三條）。
- *
- * 打 `POST /proposals/{id}/project/shell` —— 一個有名字的動作，不是借
- * `PUT /{id}` 的尾巴（理由寫在那支端點的 docstring）。**拒絕的理由由後端
- * 給**，這裡只把 detail 顯示出來：前端不知道「該不該入管線」的規則，也不該
- * 從「回來的 project_id 是空的」去反推。
+ * 沒有殼專案時的自癒 CTA（§14.4.2）。打 `POST /proposals/{id}/project/shell`
+ * —— 一個有名字的動作，不是借 `PUT /{id}` 的尾巴（理由在那支端點的 docstring）。
  *
  * 規格草案寫的是「補客戶 CTA」，但那是 `crm_projects.client_id` 放寬之前的
  * 前提 —— 現在客戶可空、殼專案不等客戶，所以按鈕直接做真正要做的事。
@@ -382,11 +357,9 @@ const HEAL_HTML =
     + '<br>建一個殼專案把它放進管線，五軌訊號就會開始自己亮。'
     + `<div><button class="pflow-adv" data-heal>${HEAL_LABEL}</button></div>`;
 
-/** 自癒：建殼專案 → 原地變成真的進度頁。 */
+/** 自癒：建殼專案 → 原地變成真的進度頁。（鎖與解鎖由 _onHit 負責） */
 async function _heal(host, btn) {
-    if (btn.disabled) return;
     const f = host.__flow;
-    btn.disabled = true;
     btn.textContent = '建立中…';
     try {
         const d = await tfetch(
@@ -396,11 +369,8 @@ async function _heal(host, btn) {
         f.pid = d.project_id;
         await _settled(host, f);
     } catch (e) {
-        // 409＝後端說這個提案不該入管線，訊息它已經寫好了（別在這裡改寫成
-        // 自己的推論）。其餘就是失敗。
-        btn.disabled = false;
         btn.textContent = HEAL_LABEL;
-        alert((e.status === 409 ? '' : '建立專案失敗：') + (e.message || e));
+        alert('建立專案失敗：' + (e.message || e));
     }
 }
 
@@ -408,9 +378,13 @@ async function _heal(host, btn) {
  * 動完後端之後的收尾，兩個寫入路徑共用。
  *
  * 順序是**先通知呼叫端、再重畫自己**：呼叫端有權把這個 host 拆掉（SPA 就是
- * 整個重開詳情），而拆掉之後那趟 `/flow` 聚合查詢（一列 18 個相關子查詢）
- * 問到的東西會直接被丟進垃圾桶。await 是必要的 —— 呼叫端的拆除多半在
- * await 之後才發生，不等它的話 `isConnected` 這一刻永遠還是 true。
+ * 整個重開詳情），拆掉之後那趟 `/flow`（一列 18 個相關子查詢）問到的東西會
+ * 直接被丟進垃圾桶 —— 而且使用者是在等它跑完才看到重開的詳情。
+ * await 是必要的：呼叫端的拆除多半在它自己的 await 之後才發生，不等它的話
+ * `isConnected` 這一刻永遠還是 true（第二輪實測，回歸測試釘著）。
+ *
+ * 呼叫端沒回傳 promise 也不會壞，只是退回「多抓一趟然後丟掉」—— 這是省一趟
+ * 查詢的最佳化，不是正確性的前提。
  */
 async function _settled(host, f) {
     if (f.onChanged) await f.onChanged();
@@ -445,12 +419,19 @@ async function _load(host, projectId) {
 /** 純 dispatcher：兩條路徑各自一支，這裡只決定走哪條。
  *  「去完成」不在這裡 —— 它是一條純 `<a>`（見 SPA 常數）。 */
 async function _onHit(host, ev) {
-    // 兩顆按鈕同一條路：找到、確認在自己家裡、擋掉預設、交給對應的處理函式
-    // （兩者都自己擋 disabled）
+    // 兩顆按鈕同一條路：找到、確認在自己家裡、擋掉預設、鎖住、交給對應的
+    // 處理函式。鎖在這裡而不是各自的開頭 —— 兩邊原本連解鎖的時機都不一樣。
     const btn = ev.target.closest?.('[data-advance],[data-heal]');
     if (btn && host.contains(btn) && ev.type === 'click') {
         ev.preventDefault();
-        await (btn.hasAttribute('data-heal') ? _heal : _advance)(host, btn);
+        if (btn.disabled) return;          // 連點兩下不送兩次
+        btn.disabled = true;
+        try {
+            await (btn.hasAttribute('data-heal') ? _heal : _advance)(host, btn);
+        } finally {
+            // 成功路徑上 _load 已經重畫、這顆按鈕早被換掉（detached）
+            if (btn.isConnected) btn.disabled = false;
+        }
         return;
     }
     const el = ev.target.closest?.('[data-check]');
@@ -485,12 +466,10 @@ async function _toggleCheck(host, el) {
  * 也不在前端重做那些副作用。
  */
 async function _advance(host, btn) {
-    if (btn.disabled) return;
     const f = host.__flow;
     const next = btn.dataset.advance;
-    // 先鎖住再開對話框 —— 鎖在 await 之後的話，連點兩下會開出兩個對話框、
+    // 鎖在 _onHit 就上了（在開對話框之前）—— 不然連點兩下會開出兩個對話框、
     // 送出兩次 PATCH
-    btn.disabled = true;
     try {
         // 「這次會不會用到成案原因」由後端宣告（它與真正去標的那支共用同一
         // 份判定）—— 前端自己算的話，多筆衛星提案時會白問一次，使用者打的
@@ -507,9 +486,6 @@ async function _advance(host, btn) {
     } catch (e) {
         // 422 帶 code 的（如轉未成案要原因）後端訊息已經說清楚了，直接轉述
         alert('推進失敗：' + (e.message || e));
-    } finally {
-        // 成功路徑上 _load 已經重畫、這顆按鈕早被換掉（detached）
-        if (btn.isConnected) btn.disabled = false;
     }
 }
 

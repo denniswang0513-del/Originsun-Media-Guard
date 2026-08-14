@@ -87,17 +87,15 @@ _PRESALE_PROJECT_STATUSES = {"投標", "開發", "洽詢", "提案"}
 PIPELINE_EXEMPT_STATUS = "擱置"
 
 
-def enters_pipeline(prop) -> bool:
-    """這筆提案現在該不該補一個殼專案 —— 這條規則的**唯一**表述。
+def needs_shell_backfill(prop) -> bool:
+    """系統**自己**該不該替這筆提案補一個殼專案？
 
-    三個消費者都走這支：`update_proposal` 的自癒尾巴、startup 的存量遷移、
-    以及 `create_shell_for_proposal`（進度分頁的自癒 CTA 打的那支）。純函式、
-    不碰 session，所以 tests/unit 驗得到 —— 那三個消費者都要真 DB。
+    問的是自動補件的政策，不是「使用者可不可以建」—— 兩個消費者都是自動的：
+    `update_proposal` 的尾巴（寫入時順手維持不變量）與 startup 的存量遷移。
+    使用者按按鈕的那條（`create_shell_for_proposal`）**不問這支**：豁免的用意
+    是「別讓批次補件把停擺的案子洗進管線」，而明確的一次點擊不是批次補件。
 
-    🔴 遷移那支的 SQL 只做**預篩**（`project_id IS NULL`），真正的判定在
-    鎖住那一列之後交給這支。曾經兩邊各寫一份，而且已經在 NULL 語意上分岔了：
-    SQL 的 `status != '擱置'` 對 NULL 是 false（那些列永遠遷不到），這支卻對
-    空狀態回 True —— 單元測試釘的是後者，等於「看起來有守，其實只守到一半」。
+    純函式、不碰 session，所以 tests/unit 驗得到 —— 兩個消費者都要真 DB。
     """
     return not prop.project_id and (prop.status or "") != PIPELINE_EXEMPT_STATUS
 
@@ -607,7 +605,7 @@ async def update_proposal(pid: str, req: ProposalPayload, request: Request):
             await _sync_project_from_proposal(
                 session, prop, await session.get(CrmProject, prop.project_id))
         # 還沒入管線的提案（擱置中挪回來、或遷移前建的）→ 自動建殼補上
-        if enters_pipeline(prop):
+        if needs_shell_backfill(prop):
             project = await _create_shell_project(session, prop)
             prop.project_id = project.id
         await session.commit()
@@ -1618,32 +1616,24 @@ async def create_shell_for_proposal(pid: str, request: Request):
     為什麼不繼續借 `PUT /{pid}` 的尾巴：那條的契約是「只動 payload 有帶的
     欄位」，空 body 在那份契約下**是 no-op** —— 自癒能成立純粹是因為它尾端
     剛好沒有 early-return。而且借來的東西自帶包袱：空 PUT 照樣蓋
-    `updated_at`，而提案清單是 `updated_at.desc()` 排的，所以對一筆「擱置」
-    提案按下按鈕，唯一的效果是把它浮到清單最上面。
-    同一個理由寫在隔壁 `set_proposal_project` 的開頭（2026-08-06）——
-    帶副作用的動作要有自己的名字。
+    `updated_at`，而提案清單是 `updated_at.desc()` 排的。同一個理由寫在隔壁
+    `set_proposal_project` 的開頭（2026-08-06）—— 帶副作用的動作要有自己的名字。
 
-    🔴 **拒絕的理由由後端講**：前端只把 `detail` 顯示出來。它原本是從
-    「回來的 project_id 是空的」反推原因、還自己補一句「改回草稿就會建」；
-    那句話今天是對的，但規則長出第二個非狀態的條件時它會很有自信地說錯，
-    而且不會有任何東西紅。
+    **不問 `needs_shell_backfill`**：那支是自動補件的政策（別讓批次把停擺的
+    案子洗進管線），而這裡是使用者按了按鈕。唯一的前提是冪等。
     """
     proposal_auth(request)
     factory = _require_factory()
     async with factory() as session:
-        prop = await _get_proposal_or_404(session, pid)
-        if prop.project_id:          # 冪等：兩個分頁各按一次不該建出兩個殼
-            return {"status": "ok", "project_id": prop.project_id, "created": False}
-        if not enters_pipeline(prop):
-            raise HTTPException(
-                status_code=409,
-                detail=f"「{prop.status or '?'}」狀態的提案不會進管線。"
-                       "把狀態改回草稿之後再回到這一頁，系統就會自動建立專案。")
-        project = await _create_shell_project(session, prop)
-        prop.project_id = project.id
-        prop.updated_at = datetime.now(timezone.utc)   # 這次是真的改了東西
-        await session.commit()
-    return {"status": "ok", "project_id": project.id, "created": True}
+        # for_update：兩個分頁各按一次會同時進來，沒鎖的話兩邊都看到「還沒有
+        # 專案」→ 建出兩個殼，其中一個變成沒人指到的孤兒（同這個檔案其他寫入
+        # 端點的慣例）
+        prop = await _get_proposal_or_404(session, pid, for_update=True)
+        if not prop.project_id:
+            prop.project_id = (await _create_shell_project(session, prop)).id
+            prop.updated_at = datetime.now(timezone.utc)   # 這次是真的改了東西
+            await session.commit()
+    return {"status": "ok", "project_id": prop.project_id}
 
 
 @router.patch("/{pid}/project")
@@ -1759,15 +1749,21 @@ async def migrate_unlinked_proposals_to_projects() -> None:
     factory = get_session_factory()
     if not factory:
         return
-    from sqlalchemy import select
+    from sqlalchemy import func, select
     from db.models import PreprodProposal
 
     async with factory() as session:
         ids = (await session.execute(
-            # 只做預篩 —— 誰該入管線由 enters_pipeline 在鎖住那一列之後說了算
-            # （SQL 的 `!=` 對 NULL 是 false，跟那支的判定會分岔）
+            # 與 needs_shell_backfill **逐字對應**的 SQL 版（`coalesce(status,'')`
+            # ＝那支的 `(prop.status or "")`）。
+            # 🔴 不能寫成裸的 `status != '擱置'`：那對 NULL 是 false，狀態未設的
+            # 提案會永遠遷不到 —— 兩邊的判定就在這裡分岔過。
+            # 也不能只篩 project_id 然後全交給迴圈：擱置的提案每台機隊開機都會被
+            # 逐列 FOR UPDATE 一次，而且是把整列（plan JSONB 上限 200KB）拉過
+            # 網路只為了讀兩個純量欄位。鎖住之後的重驗仍以那支為準。
             select(PreprodProposal.id).where(
                 PreprodProposal.project_id.is_(None),
+                func.coalesce(PreprodProposal.status, "") != PIPELINE_EXEMPT_STATUS,
             ))).scalars().all()
     migrated = 0
     for pid in ids:
@@ -1776,7 +1772,7 @@ async def migrate_unlinked_proposals_to_projects() -> None:
                 select(PreprodProposal).where(PreprodProposal.id == pid)
                 .with_for_update()
             )).scalar_one_or_none()
-            if not prop or not enters_pipeline(prop):
+            if not prop or not needs_shell_backfill(prop):
                 continue
             try:
                 project = await _create_shell_project(session, prop)

@@ -10,11 +10,36 @@
 
 自建自刪（dev/test 庫限定）。
 """
+from contextlib import contextmanager
+
 import pytest
 
 from .conftest import HTTP, flow_case, project_case
 
 pytestmark = pytest.mark.e2e
+
+
+@contextmanager
+def _unpipelined(base, token, tag):
+    """一筆「不在管線裡」的提案（＝存量遷移前的樣子）：建提案（自動帶殼）→
+    解除連結 → 刪掉那個殼。
+
+    🔴 **自癒建出來的新專案由這裡收**。兩支測試各自手抄那段 try/finally 時，
+    只要中間任何一個 assert 或 wait 先炸掉，`healed` 還是空字串，那個專案就
+    永久留在 dev 庫裡 —— 而「只刪自己建的」正是這個 repo 咬過的金絲雀鐵則。
+    這裡改成回頭問後端「你現在掛在哪個專案」，不依賴測試有沒有跑到那一行。
+    """
+    with flow_case(base, token, tag) as c:
+        HTTP.patch(f"{base}/api/v1/proposals/{c['prop_id']}/project",
+                   headers=c["h"], json={"project_id": ""})
+        HTTP.delete(f"{base}/api/v1/crm/projects/{c['project_id']}", headers=c["h"])
+        try:
+            yield c
+        finally:
+            healed = HTTP.get(f"{base}/api/v1/proposals/{c['prop_id']}",
+                              headers=c["h"]).json()["proposal"]["project_id"]
+            if healed:
+                HTTP.delete(f"{base}/api/v1/crm/projects/{healed}", headers=c["h"])
 
 
 def _snap(page, host_id):
@@ -116,12 +141,11 @@ def test_fresh_data_is_not_refetched(page, mount_flow, owned_project,
     用 `__flow.at`（抓取的時間戳）當觀測點，不去監聽網路：`page` 是 session
     範圍的，掛在它上面的 request 監聽解不乾淨就會跟著跑進後面每一支 e2e。
 
-    🔴 **兩次可見度轉換都要真的等到**。少了它們，藏起來又顯示會被 RO 合併成
-    一次「現在看得見」→ 連轉換都沒發生 → 根本走不到節流那一行，而測試照樣
-    綠 —— 一支永遠不會紅的測試比沒有測試更糟。
+    🔴 **兩次可見度轉換都要真的等到**（理由見上一支）—— 少了它們就走不到
+    節流那一行，而測試照樣綠。
     """
     hid = mount_flow(owned_project["project_id"], e2e_admin_token, host_id="edge-fresh")
-    seen = f"id => document.getElementById(id).__flow.visible"
+    seen = "id => document.getElementById(id).__flow.visible"
     at = page.eval_on_selector(f"#{hid}", "h => h.__flow.at")
 
     page.eval_on_selector(f"#{hid}", "h => { h.style.display = 'none'; }")
@@ -135,34 +159,19 @@ def test_fresh_data_is_not_refetched(page, mount_flow, owned_project,
 
 def test_heal_button_creates_the_shell_project(page, mount_flow, real_server,
                                                e2e_admin_token, dev_db_only):
-    """🔴 沒有殼專案 → 按鈕真的把它放進管線。
-
-    建法：建提案（自動帶殼）→ 解除連結 + 刪掉那個殼 → 得到一筆「不在管線裡」
-    的提案，也就是遷移前的存量長的樣子。建/刪提案那半走 conftest 的
-    `flow_case` 契約（它還順便守著「這筆提案沒有殼專案就跳過」）；這裡只多
-    收自癒出來的那個新專案 —— 那是它不可能知道的。
-    """
-    healed = ""
-    with flow_case(real_server["base_url"], e2e_admin_token, "自癒") as c:
+    """🔴 沒有殼專案 → 按鈕真的把它放進管線。"""
+    with _unpipelined(real_server["base_url"], e2e_admin_token, "自癒") as c:
         base, h, shell = c["base"], c["h"], c["project_id"]
-        try:
-            HTTP.patch(f"{base}/api/v1/proposals/{c['prop_id']}/project",
-                       headers=h, json={"project_id": ""})
-            HTTP.delete(f"{base}/api/v1/crm/projects/{shell}", headers=h)
+        hid = mount_flow("", e2e_admin_token, host_id="edge-heal",
+                         wait="[data-heal]", proposalId=c["prop_id"])
+        page.click(f"#{hid} [data-heal]")
+        page.wait_for_selector(f"#{hid} .pflow-track", timeout=20000)
 
-            hid = mount_flow("", e2e_admin_token, host_id="edge-heal",
-                             wait="[data-heal]", proposalId=c["prop_id"])
-            page.click(f"#{hid} [data-heal]")
-            page.wait_for_selector(f"#{hid} .pflow-track", timeout=20000)
-
-            # 畫面說補上了 → 後端也真的補上了（不是前端自己畫了五條軌）
-            healed = HTTP.get(f"{base}/api/v1/proposals/{c['prop_id']}",
-                              headers=h).json()["proposal"]["project_id"]
-            assert healed and healed != shell, f"提案還是沒有專案：{healed!r}"
-            assert _snap(page, hid)["tracks"] == 5
-        finally:
-            if healed:
-                HTTP.delete(f"{base}/api/v1/crm/projects/{healed}", headers=h)
+        # 畫面說補上了 → 後端也真的補上了（不是前端自己畫了五條軌）
+        healed = HTTP.get(f"{base}/api/v1/proposals/{c['prop_id']}",
+                          headers=h).json()["proposal"]["project_id"]
+        assert healed and healed != shell, f"提案還是沒有專案：{healed!r}"
+        assert _snap(page, hid)["tracks"] == 5
 
 
 def test_no_refetch_when_the_caller_tears_the_host_down(page, real_server,
@@ -173,47 +182,37 @@ def test_no_refetch_when_the_caller_tears_the_host_down(page, real_server,
     看起來是對的，但 SPA 的回呼是「同步返回、在自己的 await 之後才換掉
     overlay」，所以不 await 回呼的話，檢查的那一刻 host 永遠還在 —— 那趟
     一列 18 個相關子查詢的 `/flow` 照樣送出，然後整份丟掉。
-
     所以這裡的假 onChanged 刻意做成同一個形狀：先 await 一下，才拆掉 host。
+
+    觀測點同樣是 `__flow.at`（同上一支的理由）：CTA 那條路上它是 0，只有
+    `_load` 會蓋 —— 所以「還是 0」就等於「沒去抓」。
+    🔴 等的是**回呼真的跑完**那個訊號，不是一段固定秒數：POST 建殼是
+    `create_project_in_session` 的第一擊（約 9 趟 round trip + 10 列 insert），
+    冷機器上跑超過任何猜出來的秒數都不奇怪，而那會讓這支測試在「根本還沒走到
+    判斷點」的情況下綠掉 —— 拿掉守衛也一樣綠。
     """
-    with flow_case(real_server["base_url"], e2e_admin_token, "拆除") as c:
-        base, h, shell = c["base"], c["h"], c["project_id"]
-        healed = ""
-        try:
-            HTTP.patch(f"{base}/api/v1/proposals/{c['prop_id']}/project",
-                       headers=h, json={"project_id": ""})
-            HTTP.delete(f"{base}/api/v1/crm/projects/{shell}", headers=h)
+    with _unpipelined(real_server["base_url"], e2e_admin_token, "拆除") as c:
+        at = page.evaluate("""async ([token, propId]) => {
+            localStorage.setItem('auth_token', token);
+            const host = document.createElement('div');
+            document.body.appendChild(host);
+            const m = await import('/tabs/proposals/flow-view.js');
+            let torn; const teardown = new Promise(r => { torn = r; });
+            try {
+                await m.renderFlow(host, {
+                    projectId: '', proposalId: propId, here: 'preprod_proposals',
+                    // 比照 SPA：回呼自己也有 await，拆除在那之後才發生
+                    onChanged: async () => {
+                        await new Promise(r => setTimeout(r, 0));
+                        host.remove();
+                        torn();
+                    },
+                });
+                host.querySelector('[data-heal]').click();
+                await teardown;                            // 判斷點已經過了
+                await new Promise(r => setTimeout(r, 0));  // 讓漏網的 _load 有機會蓋 at
+                return host.__flow.at;
+            } finally { host.remove(); }
+        }""", [e2e_admin_token, c["prop_id"]])
 
-            urls = page.evaluate("""async ([token, propId]) => {
-                localStorage.setItem('auth_token', token);
-                const host = document.createElement('div');
-                document.body.appendChild(host);
-                const m = await import('/tabs/proposals/flow-view.js');
-                const seen = [];
-                const orig = window.fetch;
-                window.fetch = (...a) => { seen.push(String(a[0])); return orig(...a); };
-                try {
-                    await m.renderFlow(host, {
-                        projectId: '', proposalId: propId,
-                        here: 'preprod_proposals',
-                        // 比照 SPA：回呼自己也有 await，拆除在那之後才發生
-                        onChanged: async () => {
-                            await new Promise(r => setTimeout(r, 30));
-                            host.remove();
-                        },
-                    });
-                    host.querySelector('[data-heal]').click();
-                    await new Promise(r => setTimeout(r, 1500));
-                    return seen;
-                } finally { window.fetch = orig; host.remove(); }
-            }""", [e2e_admin_token, c["prop_id"]])
-
-            assert any("/project/shell" in u for u in urls), \
-                f"自癒根本沒送出：{urls}"
-            assert not [u for u in urls if u.endswith("/flow")], \
-                f"host 都被拆掉了還去抓 /flow：{urls}"
-            healed = HTTP.get(f"{base}/api/v1/proposals/{c['prop_id']}",
-                              headers=h).json()["proposal"]["project_id"]
-        finally:
-            if healed:
-                HTTP.delete(f"{base}/api/v1/crm/projects/{healed}", headers=h)
+        assert at == 0, "host 都被拆掉了還去抓 /flow"

@@ -442,9 +442,8 @@ async function openDetail(pid) {
                 // 推進會連動這筆提案本身（進「製作」＝衛星提案標成案 + 寫入
                 // 成案原因），自癒建殼則會把「專案」欄從「＋ 連結」變成專案名
                 // —— 兩者都讓詳情標頭與清單成為舊值，重開一次最省事也最不會漏。
-                // 🔴 **要回傳那個 promise**：openDetail 是在它自己的 await 之後
-                // 才換掉 overlay 的，不回傳的話 flow-view 會在這個 host 被拆掉
-                // 之前就先問完那趟聚合查詢（然後整份丟掉）。
+                // 回傳那個 promise：openDetail 是在它自己的 await 之後才換掉
+                // overlay，不回傳的話 flow-view 會白抓一趟聚合查詢再丟掉。
                 onChanged: () => {
                     refreshList({ stats: true });
                     return openDetail(prop.id);
