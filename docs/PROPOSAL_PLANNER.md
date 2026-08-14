@@ -1447,12 +1447,24 @@ RBAC v2 原則沿用：權限＝帳號的 `modules[]`＋管理員開關，admin 
         對一個結束的案子，那是歷史紀錄不是待辦。
         🔴 **凍結是畫面的事，不是守衛**：端點仍然收得下（歸檔後才發現里程碑
         記錯，admin 要補得回來），與這功能其他地方的軟性口徑一致。
-     2. **沒有殼專案 → 一顆真按鈕**，走既有的**自癒路**（`PUT /proposals/{id}`
-        尾端本來就會替沒入管線的提案補殼），不新開端點。草案寫的是「補客戶
-        CTA」，但那是 `crm_projects.client_id` 放寬前的前提 —— 現在殼專案不等
-        客戶，所以按鈕直接做真正要做的事。唯一補不了的是「擱置」（刻意不入
-        管線），照實說。`/proposal-plan.html` 因此**改成一律掛**進度分頁：
-        那頁正是會發現「這案子沒進管線」的地方。
+     2. **沒有殼專案 → 一顆真按鈕**：`POST /proposals/{id}/project/shell`
+        （冪等）。草案寫的是「補客戶 CTA」，但那是 `crm_projects.client_id`
+        放寬前的前提 —— 現在殼專案不等客戶，所以按鈕直接做真正要做的事。
+        `/proposal-plan.html` 因此**改成一律掛**進度分頁：那頁正是會發現
+        「這案子沒進管線」的地方。
+        ⚠️ 第一版是借 `PUT /proposals/{id}` 尾端的自癒副作用（空 body），
+        /simplify 第二輪換掉：那條的契約是「只動 payload 有帶的欄位」，空
+        body 在那份契約下**是 no-op**，能成立純粹因為它尾端剛好沒有
+        early-return；而且借來的東西自帶包袱 —— 空 PUT 照樣蓋 `updated_at`，
+        清單是 `updated_at.desc()` 排的，所以對一筆「擱置」提案按下按鈕，
+        唯一的效果是把它浮到最上面。同一個理由早就寫在隔壁
+        `PATCH /{pid}/project` 的開頭（帶副作用的動作要有自己的名字）。
+        **拒絕的理由由後端給**（409 + detail），前端只顯示：原本它從「回來的
+        project_id 是空的」反推原因、還自己補一句「改回草稿就會建」——
+        那句話今天是對的，但規則長出第二個非狀態條件時它會很有自信地說錯。
+        規則正本＝`api_proposals.enters_pipeline`，三個消費者（PUT 尾巴、
+        startup 遷移、這支端點）全走它；遷移的 SQL 降為預篩 `project_id IS
+        NULL`，因為 `status != '擱置'` 對 NULL 是 false，兩邊語意本來已分岔。
      3. **切回分頁重抓**（v1 仍不做輪詢）：掛在元件自己身上，兩個掛載點各自
         的分頁快取（SPA 的 `_mounted` Set／企劃頁的 `_pending` 槽）都不用改。
         🔴 用 **ResizeObserver 不是 IntersectionObserver**：IO 講的是「有沒有
@@ -1462,6 +1474,20 @@ RBAC v2 原則沿用：權限＝帳號的 `modules[]`＋管理員開關，admin 
         ⚠️ RO 的回報是**合併**的：同一 frame 內藏了又顯示只會收到一次「現在
         看得見」→ 不算轉換、不重抓（對使用者是對的）。轉換狀態因此記在
         `host.__flow.visible` 而不是閉包變數 —— 看得到才等得了、才驗得了。
+        收拾走**一個** RO（收得下多個 target）+ 一個 document 監聽 + 一份名冊：
+        關鍵是 `observe()` 當下就會叫一次，所以「開下一個提案的進度分頁」本身
+        就是清掉上一個死掉的那個的時機 —— 而那正是「已經 display:none 才被
+        移除」這個最常見情境下唯一會來的訊號。
+     4. **一個 `onChanged()` 回呼**（原本是 onAdvanced / onLinked 兩個）。
+        兩個都沒有呼叫端用得到參數，分開的唯一效果就是可以漏接一半 —— 而
+        `/proposal-plan.html` 就漏了 onAdvanced：從那頁推進階段會連動衛星提案
+        的狀態，標頭的狀態下拉卻一直顯示舊值。
+        🔴 它在元件重畫自己**之前**被呼叫，而且**會被 await**：呼叫端有權把
+        host 拆掉（SPA 就是整個重開詳情），拆掉之後就不必再抓那份會被丟掉的
+        聚合查詢。不 await 的話這個守衛是**假的** —— SPA 的回呼同步返回、在
+        它自己的 await 之後才換掉 overlay，所以檢查那一刻 host 永遠還在
+        （/simplify 第二輪抓到；回歸測試
+        `test_no_refetch_when_the_caller_tears_the_host_down`）。
 
 測試：unit＝每個 auto 訊號正反面 + RBAC 反面（提案庫-only 勾選要 403）；
 e2e＝勾選、推進、未成案原因守衛、公開頁不出 flow、終態凍結、自癒建殼、

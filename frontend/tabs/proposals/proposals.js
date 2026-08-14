@@ -436,15 +436,19 @@ async function openDetail(pid) {
         flow: async (host) => {
             const { renderFlow } = await importRetry('/tabs/proposals/flow-view.js');
             if (!host.isConnected) return;
-            // 推進會連動這筆提案本身（進「製作」＝衛星提案標成案 + 寫入成案
-            // 原因），自癒建殼則會把「專案」欄從「＋ 連結」變成專案名 ——
-            // 兩者都讓詳情標頭與清單成為舊值，重開一次最省事也最不會漏。
-            const reopen = () => { refreshList({ stats: true }); openDetail(prop.id); };
             await renderFlow(host, {
                 projectId: prop.project_id || '',
                 proposalId: prop.id,
-                onAdvanced: reopen,
-                onLinked: reopen,
+                // 推進會連動這筆提案本身（進「製作」＝衛星提案標成案 + 寫入
+                // 成案原因），自癒建殼則會把「專案」欄從「＋ 連結」變成專案名
+                // —— 兩者都讓詳情標頭與清單成為舊值，重開一次最省事也最不會漏。
+                // 🔴 **要回傳那個 promise**：openDetail 是在它自己的 await 之後
+                // 才換掉 overlay 的，不回傳的話 flow-view 會在這個 host 被拆掉
+                // 之前就先問完那趟聚合查詢（然後整份丟掉）。
+                onChanged: () => {
+                    refreshList({ stats: true });
+                    return openDetail(prop.id);
+                },
                 // 這個畫面**就是**提案工作區 —— 指回提案庫的燈不畫連結
                 here: 'preprod_proposals',
             });

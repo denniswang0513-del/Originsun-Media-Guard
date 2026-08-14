@@ -88,16 +88,16 @@ PIPELINE_EXEMPT_STATUS = "擱置"
 
 
 def enters_pipeline(prop) -> bool:
-    """這筆提案現在該不該補一個殼專案？
+    """這筆提案現在該不該補一個殼專案 —— 這條規則的**唯一**表述。
 
-    🔴 **這條規則的正本。** 它原本各寫一份在 `update_proposal`（Python 條件）
-    與 `migrate_unlinked_proposals_to_projects`（SQL where），而 2026-08-14
-    的自癒 CTA 差點讓前端變成第三份（它得靠「回來的 project_id 是空的」反推
-    原因，還把「擱置」兩個字寫死在訊息裡）。現在前端改讀回應裡的 status，
-    遷移那支共用同一個常數 —— 加一個豁免狀態只要改這裡。
+    三個消費者都走這支：`update_proposal` 的自癒尾巴、startup 的存量遷移、
+    以及 `create_shell_for_proposal`（進度分頁的自癒 CTA 打的那支）。純函式、
+    不碰 session，所以 tests/unit 驗得到 —— 那三個消費者都要真 DB。
 
-    純函式、不碰 session：所以 tests/unit 驗得到（那支端點要真 DB，
-    e2e 才跑得動，不該是這條規則唯一的守門）。
+    🔴 遷移那支的 SQL 只做**預篩**（`project_id IS NULL`），真正的判定在
+    鎖住那一列之後交給這支。曾經兩邊各寫一份，而且已經在 NULL 語意上分岔了：
+    SQL 的 `status != '擱置'` 對 NULL 是 false（那些列永遠遷不到），這支卻對
+    空狀態回 True —— 單元測試釘的是後者，等於「看起來有守，其實只守到一半」。
     """
     return not prop.project_id and (prop.status or "") != PIPELINE_EXEMPT_STATUS
 
@@ -1611,6 +1611,41 @@ async def set_proposal_folder(pid: str, request: Request, body: dict = Body(...)
     return {"status": "ok", "folder_subpath": sub}
 
 
+@router.post("/{pid}/project/shell")
+async def create_shell_for_proposal(pid: str, request: Request):
+    """把還沒入管線的提案補一個殼專案（進度分頁的自癒 CTA 打這支）。冪等。
+
+    為什麼不繼續借 `PUT /{pid}` 的尾巴：那條的契約是「只動 payload 有帶的
+    欄位」，空 body 在那份契約下**是 no-op** —— 自癒能成立純粹是因為它尾端
+    剛好沒有 early-return。而且借來的東西自帶包袱：空 PUT 照樣蓋
+    `updated_at`，而提案清單是 `updated_at.desc()` 排的，所以對一筆「擱置」
+    提案按下按鈕，唯一的效果是把它浮到清單最上面。
+    同一個理由寫在隔壁 `set_proposal_project` 的開頭（2026-08-06）——
+    帶副作用的動作要有自己的名字。
+
+    🔴 **拒絕的理由由後端講**：前端只把 `detail` 顯示出來。它原本是從
+    「回來的 project_id 是空的」反推原因、還自己補一句「改回草稿就會建」；
+    那句話今天是對的，但規則長出第二個非狀態的條件時它會很有自信地說錯，
+    而且不會有任何東西紅。
+    """
+    proposal_auth(request)
+    factory = _require_factory()
+    async with factory() as session:
+        prop = await _get_proposal_or_404(session, pid)
+        if prop.project_id:          # 冪等：兩個分頁各按一次不該建出兩個殼
+            return {"status": "ok", "project_id": prop.project_id, "created": False}
+        if not enters_pipeline(prop):
+            raise HTTPException(
+                status_code=409,
+                detail=f"「{prop.status or '?'}」狀態的提案不會進管線。"
+                       "把狀態改回草稿之後再回到這一頁，系統就會自動建立專案。")
+        project = await _create_shell_project(session, prop)
+        prop.project_id = project.id
+        prop.updated_at = datetime.now(timezone.utc)   # 這次是真的改了東西
+        await session.commit()
+    return {"status": "ok", "project_id": project.id, "created": True}
+
+
 @router.patch("/{pid}/project")
 async def set_proposal_project(pid: str, request: Request, body: dict = Body(...)):
     """換綁／解除提案所屬的 CRM 專案：body {project_id}（空字串＝解除）。
@@ -1729,9 +1764,10 @@ async def migrate_unlinked_proposals_to_projects() -> None:
 
     async with factory() as session:
         ids = (await session.execute(
+            # 只做預篩 —— 誰該入管線由 enters_pipeline 在鎖住那一列之後說了算
+            # （SQL 的 `!=` 對 NULL 是 false，跟那支的判定會分岔）
             select(PreprodProposal.id).where(
                 PreprodProposal.project_id.is_(None),
-                PreprodProposal.status != PIPELINE_EXEMPT_STATUS,
             ))).scalars().all()
     migrated = 0
     for pid in ids:
@@ -1740,7 +1776,7 @@ async def migrate_unlinked_proposals_to_projects() -> None:
                 select(PreprodProposal).where(PreprodProposal.id == pid)
                 .with_for_update()
             )).scalar_one_or_none()
-            if not prop or prop.project_id:
+            if not prop or not enters_pipeline(prop):
                 continue
             try:
                 project = await _create_shell_project(session, prop)

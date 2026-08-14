@@ -115,7 +115,10 @@ def flow_case(base, token, title):
 
 @contextmanager
 def project_case(base, token, tag):
-    """自建自刪一組客戶 + CRM 專案（狀態＝提案），回 {base, h, pid, cid}。
+    """自建自刪一組客戶 + CRM 專案（狀態＝提案），回 {base, h, project_id, client_id}。
+
+    鍵名與 `flow_case` 對齊（都用 `project_id`）—— 同一個檔案同時用到兩支時，
+    「這支叫 pid 那支叫 project_id」是純粹自找的記憶負擔。
 
     與 `flow_case` 是姊妹：那支從**提案**側建（順帶拿到殼專案），這支直接建
     專案 —— 要改專案狀態驗終態時得用這支，改到提案的殼會連動衛星提案的
@@ -132,15 +135,18 @@ def project_case(base, token, tag):
                    json={"name": f"[{tag}] 客戶 {uniq}", "short_name": f"{tag[:4]}{uniq}"})
     if rc.status_code >= 400:
         pytest.skip(f"建不出客戶（{rc.status_code}）：{rc.text[:120]}")
-    cid = rc.json().get("id") or (rc.json().get("client") or {}).get("id")
+    # 直接索引，不給 `or` 退路：那兩支端點只回這一種形狀（clients.py /
+    # projects.py 的 return），退路永遠走不到，而形狀真的變了的時候它會把
+    # None 靜靜塞進下面的網址
+    cid = rc.json()["client"]["id"]
     rp = HTTP.post(f"{base}/api/v1/crm/projects", headers=h,
                    json={"name": f"[{tag}] {uniq}", "status": "提案", "client_id": cid})
     if rp.status_code >= 400:
         HTTP.delete(f"{base}/api/v1/crm/clients/{cid}", headers=h)
         pytest.skip(f"建不出專案（{rp.status_code}）：{rp.text[:120]}")
-    pid = rp.json().get("id") or (rp.json().get("project") or {}).get("id")
+    pid = rp.json()["project"]["id"]
     try:
-        yield {"base": base, "h": h, "pid": pid, "cid": cid}
+        yield {"base": base, "h": h, "project_id": pid, "client_id": cid}
     finally:
         # 反序：專案先走，客戶才刪得掉
         HTTP.delete(f"{base}/api/v1/crm/projects/{pid}", headers=h)

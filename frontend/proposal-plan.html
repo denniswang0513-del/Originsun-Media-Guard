@@ -1311,10 +1311,12 @@ async function _loadPlan(pid) {
         _setupLazyTab("flow", {
             projectId: prop.project_id || "", proposalId: prop.id,
             here: "preprod_proposals",
-            // 自癒建了殼專案 → 標頭與側欄的「專案」那格還寫著未連結。
+            // 進度分頁動了後端 → 這頁的鏡像要跟上：自癒建殼會改「專案」那格，
+            // 推進階段會連動這筆提案的狀態（進「製作」＝標成案），而狀態下拉
+            // 就在標頭上。refresh() 兩者都涵蓋。
             // （資料夾分頁要等重整才會出現：它的接線在上面那一段，
             //   而那是開頁時一次性的。）
-            onLinked: () => refresh(),
+            onChanged: () => refresh(),
         });
     } catch (e) {
         host.innerHTML = '<div class="state-msg" style="color:var(--red);">創意發想載入失敗：' + escText(emsg(e)) + "</div>";

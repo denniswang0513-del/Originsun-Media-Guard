@@ -242,14 +242,24 @@ function _missingHtml({ blocking, advisory }, next, ctx) {
 
 /**
  * @param host   掛載節點
- * @param opts   { projectId, proposalId, onAdvanced, onLinked, here }
+ * @param opts   { projectId, proposalId, onChanged, here }
  *               projectId 空＝這個提案還沒入管線 → 畫自癒 CTA（見 HEAL_HTML），
  *               所以那條路上 proposalId 是必要的。
- *               onLinked() 在自癒成功後呼叫（呼叫端的標頭/清單還顯示「未連結」）。
- *               onAdvanced(status) 在推進成功後呼叫，讓呼叫端更新自己那份
- *               （詳情標頭的狀態、清單的階段 chip…）。用回呼而不是全域
- *               CustomEvent —— 這個模組的既有慣例（onPlanStarted / toast /
- *               onSaved）都是回呼，而全域事件沒有 owner，之後要拆得 grep 全 repo。
+ *
+ *               onChanged()：這個元件剛動了後端的東西（推進階段／補殼專案），
+ *               呼叫端那份鏡像（詳情標頭的狀態、清單的階段 chip 與「專案」欄）
+ *               已經是舊的。**一個回呼涵蓋兩種動作**：原本分成 onAdvanced /
+ *               onLinked，結果第二個掛載點只接了其中一個 —— 從企劃頁推進階段
+ *               會連動衛星提案的狀態，而那頁的狀態下拉就一直顯示舊值。兩個
+ *               回呼都沒有呼叫端用得到參數，分開的唯一效果就是可以漏接一半。
+ *               用回呼而不是全域 CustomEvent —— 這個模組的既有慣例
+ *               （onPlanStarted / toast / onSaved）都是回呼，而全域事件沒有
+ *               owner，之後要拆得 grep 全 repo。
+ *
+ *               🔴 它在元件**重畫自己之前**被呼叫，而且會被 await：呼叫端有權
+ *               把這個 host 拆掉（SPA 就是整個重開詳情），拆掉之後元件就不再
+ *               去抓那份會被直接丟進垃圾桶的聚合查詢。所以回傳 promise 的
+ *               呼叫端請確實回傳 —— 不然元件會在你拆掉之前就先問完了。
  *               here：「這個畫面本身就是哪個 tab」的模組鍵。指向這裡的
  *               deep-link 不畫 —— 兩個掛載點都在提案工作區裡，那幾盞燈
  *               （提案已建立／企劃書…）該做的事就在手邊，把人送去提案庫清單
@@ -257,26 +267,27 @@ function _missingHtml({ blocking, advisory }, next, ctx) {
  *               的答案一樣，讀網址卻只在其中一個會對。
  */
 export async function renderFlow(host, { projectId, proposalId = '',
-                                         onAdvanced = null, onLinked = null,
-                                         here = '' }) {
+                                         onChanged = null, here = '' }) {
     ensureStyle('pflow-css', CSS);
     // `__flow` 是這個 host 的全部狀態，形狀在這裡宣告一次（也兼作「掛過了沒」
     // 的旗標）。每次都整個換掉：同一個 host 換提案時，closure 會永久釘住
     // 第一次的 projectId，而殘留的 missing/collectsReason 是上一個專案的。
     const wired = !!host.__flow;
-    host.__flow = { pid: projectId, propId: proposalId, onAdvanced, onLinked,
+    host.__flow = { pid: projectId, propId: proposalId, onChanged,
                     ctx: { links: {}, here, newTab: NEW_TAB, frozen: false },
                     missing: { blocking: [], advisory: [] }, collectsReason: false,
-                    // at＝上次**送出**抓取的時刻（節流用，見 _load）；
+                    // at＝上次抓取的時刻（節流用，見 _load / _paint）；
                     // visible＝觀察者上次看到的可見狀態（起始 true 的理由見
-                    // _watchVisible）
+                    // _visitVisible）
                     at: 0, visible: true };
     if (!wired) {
         // 事件委派掛一次就好 —— 每次重畫都重掛會累積成一次點擊送 N 個請求
         const on = (ev) => _onHit(host, ev);
         host.addEventListener('click', on);
         host.addEventListener('keydown', on);
-        _watchVisible(host);
+        // 進名冊 —— observe() 當下的那一次回呼順便把上一個死掉的清掉（見 _sweep）
+        _watched.add(host);
+        _obs.observe(host);
     }
     if (!projectId) {
         _msg(host, HEAL_HTML);
@@ -316,30 +327,35 @@ const _FRESH_MS = 15000;
  *
  * 🔴 **收拾不能靠「下次回呼時發現自己被移除了」**：RO 只在尺寸**變化**時叫，
  * 而 host 常常是「已經 display:none」時才被移除（開提案 → 看進度 → 切去別的
- * 分頁 → 關掉 overlay，這是很普通的一串點擊）—— 那一刻尺寸沒變，回呼永遠
- * 不會再來，掛在 document 上的那個監聽就跟著每個開過的提案永久累積。
- * 所以改成：**一個** document 監聽 + 一份 host 名冊，每次巡邏順手把已經離開
- * DOM 的清掉。N 個監聽變 1 個，而且不必給元件一個呼叫端要記得呼叫的
- * destroy API。
+ * 分頁 → 關掉 overlay，這是很普通的一串點擊）—— 那一刻尺寸沒變，那個 host
+ * 的回呼永遠不會再來。
+ *
+ * 所以：**一個** RO 服務全體 host（RO 收得下多個 target）+ **一個** document
+ * 監聽，任一來源都走同一趟巡邏，順手把已經離開 DOM 的清掉。關鍵在
+ * `observe()` **當下就會叫一次** —— 也就是說「開下一個提案的進度分頁」本身
+ * 就是清掉上一個死掉的那個的時機，而那正是前一版唯一會漏掉的情境。
+ * 名冊因此穩定維持在個位數，不必給元件一個呼叫端要記得呼叫的 destroy API。
  */
 const _watched = new Set();
+const _obs = new ResizeObserver(_sweep);
+document.addEventListener('visibilitychange', _sweep);
 
 function _sweep() {
     for (const host of _watched) {
-        if (!host.isConnected) {
-            host.__flowObs?.disconnect();
-            _watched.delete(host);
-            continue;
-        }
-        _visitVisible(host);
+        if (host.isConnected) { _visitVisible(host); continue; }
+        _obs.unobserve(host);
+        _watched.delete(host);
     }
 }
 
 /** 這個 host 的可見狀態變了沒；由看不見變看得見就重抓。 */
 function _visitVisible(host) {
     const f = host.__flow;
-    // offsetParent 是 null ＝ 這一格現在 display:none（沒有 position:fixed
-    // 的祖先，所以這裡讀得準）
+    // 「看得見」＝ 沒有任何祖先 display:none（offsetParent 為 null 的另一個
+    // 成因是 host 自己 position:fixed —— 這一格永遠不是）。
+    // ⚠️ 認得的只有 display:none：用 visibility/content-visibility/height:0
+    // 藏起來的話這裡會判成看得見，重抓就靜靜地不發生了。兩個掛載點目前都是
+    // display 切換（SPA 的 .prop-ov 是 fixed，但那是**祖先**，不影響判讀）。
     const now = !document.hidden && !!host.offsetParent;
     // 起始值 true（見 renderFlow）：RO 在 observe() 當下就會先叫一次，
     // 起始給 false 的話那一次會被當成「切回來了」，每次開分頁都抓兩趟。
@@ -349,22 +365,13 @@ function _visitVisible(host) {
     _load(host, f.pid);
 }
 
-function _watchVisible(host) {
-    if (!_watched.size) document.addEventListener('visibilitychange', _sweep);
-    _watched.add(host);
-    // RO 只服務這一個 host（它報的是這一格的版面盒）；巡邏時才需要看全體
-    host.__flowObs = new ResizeObserver(() => {
-        if (host.isConnected) _visitVisible(host); else _sweep();
-    });
-    host.__flowObs.observe(host);
-}
-
 /**
  * 沒有殼專案時的自癒 CTA（§14.4 邊界態第三條）。
  *
- * 走的是**既有的自癒路**：`PUT /proposals/{id}` 尾端本來就會替「還沒入管線」
- * 的提案補一個殼專案（api_proposals.update_proposal），所以這裡只要送一份
- * 空的部分更新，不新開端點、也不在前端重做一次建案。
+ * 打 `POST /proposals/{id}/project/shell` —— 一個有名字的動作，不是借
+ * `PUT /{id}` 的尾巴（理由寫在那支端點的 docstring）。**拒絕的理由由後端
+ * 給**，這裡只把 detail 顯示出來：前端不知道「該不該入管線」的規則，也不該
+ * 從「回來的 project_id 是空的」去反推。
  *
  * 規格草案寫的是「補客戶 CTA」，但那是 `crm_projects.client_id` 放寬之前的
  * 前提 —— 現在客戶可空、殼專案不等客戶，所以按鈕直接做真正要做的事。
@@ -375,40 +382,40 @@ const HEAL_HTML =
     + '<br>建一個殼專案把它放進管線，五軌訊號就會開始自己亮。'
     + `<div><button class="pflow-adv" data-heal>${HEAL_LABEL}</button></div>`;
 
-/** 自癒：送一份空的部分更新 → 後端補殼專案 → 原地變成真的進度頁。 */
+/** 自癒：建殼專案 → 原地變成真的進度頁。 */
 async function _heal(host, btn) {
     if (btn.disabled) return;
     const f = host.__flow;
     btn.disabled = true;
     btn.textContent = '建立中…';
     try {
-        const d = await tfetch(`/api/v1/proposals/${encodeURIComponent(f.propId)}`,
-                               { method: 'PUT', json: {} });
-        const prop = d.proposal || {};
-        const pid = prop.project_id || '';
+        const d = await tfetch(
+            `/api/v1/proposals/${encodeURIComponent(f.propId)}/project/shell`,
+            { method: 'POST' });
         if (!host.isConnected) return;
-        if (!pid) {
-            // 補不了的情況：後端不讓這個狀態入管線（見 api_proposals
-            // .enters_pipeline）。**狀態名用後端回的那份**，不在這裡寫死
-            // ——那條規則已經有正本了，前端再抄一次就是第三份。
-            _msg(host, `這個提案是「${esc(prop.status || '?')}」狀態，不會進管線。`
-                     + '<br>把狀態改回草稿之後再回來，系統就會自動建立專案。');
-            return;
-        }
-        f.pid = pid;
-        // 先讓呼叫端更新它那份（清單的「專案」欄、標頭）。SPA 的做法是整個
-        // 重開詳情 → 這個 host 當場被拆掉，所以**拆掉了就別再抓** ——
-        // 那趟聚合查詢問到的東西會直接被丟進垃圾桶。
-        if (f.onLinked) f.onLinked(pid);
-        if (!host.isConnected) return;
-        _msg(host, '載入中…');
-        await _load(host, pid);
+        f.pid = d.project_id;
+        await _settled(host, f);
     } catch (e) {
-        if (!host.isConnected) return;
+        // 409＝後端說這個提案不該入管線，訊息它已經寫好了（別在這裡改寫成
+        // 自己的推論）。其餘就是失敗。
         btn.disabled = false;
         btn.textContent = HEAL_LABEL;
-        alert('建立專案失敗：' + (e.message || e));
+        alert((e.status === 409 ? '' : '建立專案失敗：') + (e.message || e));
     }
+}
+
+/**
+ * 動完後端之後的收尾，兩個寫入路徑共用。
+ *
+ * 順序是**先通知呼叫端、再重畫自己**：呼叫端有權把這個 host 拆掉（SPA 就是
+ * 整個重開詳情），而拆掉之後那趟 `/flow` 聚合查詢（一列 18 個相關子查詢）
+ * 問到的東西會直接被丟進垃圾桶。await 是必要的 —— 呼叫端的拆除多半在
+ * await 之後才發生，不等它的話 `isConnected` 這一刻永遠還是 true。
+ */
+async function _settled(host, f) {
+    if (f.onChanged) await f.onChanged();
+    if (!host.isConnected) return;
+    await _load(host, f.pid);
 }
 
 /** 訊息狀態也要包在 .pflow 裡 —— 主題變數定義在那一層，裸著放的話
@@ -494,10 +501,9 @@ async function _advance(host, btn) {
         if (reason) body.outcome_reason = reason;
         await tfetch(`/api/v1/crm/projects/${encodeURIComponent(f.pid)}/status`,
                      { method: 'PATCH', json: body });
-        // 階段變了 → 重抓（推進會連動衛星提案狀態與一堆訊號，前端自己推導
-        // 只會跟後端各算各的）
-        await _load(host, f.pid);
-        if (f.onAdvanced) f.onAdvanced(next);
+        // 階段變了 → 通知呼叫端 + 重抓（推進會連動衛星提案狀態與一堆訊號，
+        // 前端自己推導只會跟後端各算各的）。順序與拆除的處理見 _settled。
+        await _settled(host, f);
     } catch (e) {
         // 422 帶 code 的（如轉未成案要原因）後端訊息已經說清楚了，直接轉述
         alert('推進失敗：' + (e.message || e));
@@ -554,7 +560,10 @@ function _paint(host, d) {
     // 推進對話框要的三樣東西 —— 存最後一次的**權威**資料，別讓它去讀畫面
     // （讀畫面的話，樂觀更新那一瞬間的 class 會被當成事實）。刻意不存整包
     // payload：tracks 佔了 4KB 的 88%，畫成 HTML 之後就沒人要了。
-    host.__flow = { ...host.__flow, missing, ctx,
+    // `at` 也在這裡重蓋一次：勾選端點回的是**同一份**權威 payload
+    // （routers/crm/flow.py 的慣例），所以勾完之後這一格跟剛抓過一樣新。
+    // 只在 _load 送出時蓋的話，勾完 14 秒切走再切回來會白抓一趟兩秒前的資料。
+    host.__flow = { ...host.__flow, missing, ctx, at: Date.now(),
                     collectsReason: !!d.collects_outcome_reason };
     host.innerHTML = `<div class="pflow${frozen ? ' frozen' : ''}">
         ${_stageHtml(st, _advanceHtml(st, !!d.can_advance))}

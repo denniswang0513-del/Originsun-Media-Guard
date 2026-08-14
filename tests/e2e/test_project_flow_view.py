@@ -42,7 +42,7 @@ def test_flow_tab_renders_five_tracks(page, mount_flow, real_server,
     # 建客戶 + 專案 + 反序刪掉（只刪自己建的 —— 金絲雀鐵則）走 conftest 的
     # 共用契約，與 test_flow_edge_states 同一份
     with project_case(real_server["base_url"], e2e_admin_token, "FLOWE2E") as c:
-        mount_flow(c["pid"], e2e_admin_token, host_id=HOST)
+        mount_flow(c["project_id"], e2e_admin_token, host_id=HOST)
         r = _read(page)
 
         assert "載入失敗" not in r["html"], f"渲染錯誤：{r['html'][:300]}"
