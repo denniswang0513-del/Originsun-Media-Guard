@@ -1426,8 +1426,10 @@ RBAC v2 原則沿用：權限＝帳號的 `modules[]`＋管理員開關，admin 
      排序：點「進度」欄＝按整體完成比例排，也就是「哪個案子最卡」。
      沒有殼專案／摘要還沒到 → 畫「—」，不畫五個空格子（空格子跟「五軌全零」
      長得一樣，那是謊報）。
-     ⚠️ 畫面那半（flow-badge.js）由兩個清單**動態** import：它要 utils.js
-     （53KB），而 prop-list.js 在獨立企劃頁的清單首屏路徑上。
+     畫面那半（flow-badge.js）是**靜態** import：它只依賴新抽出的
+     `js/shared/dom.js`（零依賴的 `esc` + `ensureStyle`）。原本為了避開
+     utils.js（57KB，還靜態拉 clip_utils 8KB，而前端一律 no-store）改成動態
+     載入 —— 實測那只是把 68KB 延後、沒有省掉，還多三個序列 RTT。
      權限仍在後端算成 `links[key]`（同 `can_check` / `can_advance` 的慣例），
      但用 **`core.auth.tab_modules`**：提案庫／片庫本來就收不只一個模組，只認
      同名的話拍攝企劃的人會在自己**進得去**的 tab 上看到「你沒有權限」。
