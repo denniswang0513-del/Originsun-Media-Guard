@@ -23,12 +23,12 @@ class _Row:
     def __init__(self, names):
         self._names = set(names)
 
-    pid = "p1"          # 驅動欄（= _Project.id）—— _gather_facts 拿它當鍵
-
     def __getattr__(self, name):
-        # __getattr__ 只在正常查找失敗時才進來，所以 self._names 走不到這裡
+        # __getattr__ 只在正常查找失敗時才進來，所以 self._names 走不到這裡。
+        # pid 不寫成類別屬性 —— 那樣它就繞過了下面這道「有沒有真的 SELECT」
+        # 的檢查（把 .label("pid") 改名，假件照答、真的 Row 會 AttributeError）
         if name in self._names:
-            return 0
+            return "p1" if name == "pid" else 0
         raise AttributeError(
             f"聚合查詢沒有選 `{name}` —— label 與讀取端對不上（打錯字？）")
 

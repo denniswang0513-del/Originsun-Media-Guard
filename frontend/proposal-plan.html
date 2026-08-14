@@ -83,8 +83,7 @@
         44px             /* 狀態 */
         118px;           /* 進度：階段 chip + 五格條（§14.4 階段四B） */
     cursor: pointer; transition: background .12s; color: inherit; text-decoration: none; }
-  /* 這頁是官網白底，元件預設深色 → 掛 plan-theme-light 讓 flow-badge 換膚
-     （同 flow-view 的做法；html 上那個 class 由本頁一開始就設好） */
+  /* 進度那格的內容可能比欄寬長（階段名 + 五格）→ 不讓它把 grid 撐開 */
   .prop-row .flow { min-width: 0; overflow: hidden; }
   .prop-row:focus-visible { outline: 2px solid var(--red); outline-offset: -2px; }
   .prop-row:hover { background: #fafafa; }
@@ -1077,9 +1076,7 @@ async function _refreshList() {
         _rowsFiltered = PL.hasFilters(filters);
         if (!_rowsFiltered) PL.fillYearSelect($("f-year"), _rows);
         _paintList();
-        // 進度摘要是**附加**資訊：清單先畫，摘要到了再補那一格。併進上面那個
-        // await 的話，一個慢查詢會讓整份清單晚幾百毫秒才出現。
-        _paintFlow();
+        _paintFlow();          // 附加資訊，不 await（同後台提案庫）
     } catch (e) {
         $("list-host").innerHTML = _listErr(e);
     }
@@ -1139,26 +1136,16 @@ function _paintList() {
             } catch (e) { alert("刪除失敗：" + emsg(e)); }
         });
     });
-    _fillFlow();          // 重排後那幾格是空的（列的樣板不填，見 _paintFlow）
+    PL.fillFlowCells($("list-host"));   // 列的樣板留空格
 }
 
 // ── 進度欄（§14.4 階段四B）──────────────────────────────
-// 資料在 prop-list（已經載了），畫面在 flow-badge —— 後者要 utils.js，
-// 所以動態載、而且只在清單真的有資料時才載。
-let _flowHtml = null;
-
+/**
+ * 🔴 摘要到了要**整份重畫**，不能只補格子：「進度」是可排序欄，而它的值在
+ * 這一刻才存在。只補格子的話，選了進度排序的人看到的順序永遠是後端順序。
+ */
 async function _paintFlow() {
-    if (!await PL.loadFlowSummary(_rows.map(p => p.project_id))) return;
-    _flowHtml ||= (await importRetryish("/tabs/proposals/flow-badge.js")).flowCellsHtml;
-    _fillFlow();
-}
-
-/** 把快取裡的摘要填進那幾格。載入前是 no-op。 */
-function _fillFlow() {
-    if (!_flowHtml) return;
-    $("list-host").querySelectorAll("[data-flow]").forEach(el => {
-        el.innerHTML = _flowHtml(PL.flowOf(el.dataset.flow));
-    });
+    if (await PL.loadFlowSummary(_rows.map(p => p.project_id))) _paintList();
 }
 
 /**

@@ -113,6 +113,31 @@ def flow_case(base, token, title):
         HTTP.delete(f"{base}/api/v1/crm/projects/{p['project_id']}", headers=h)
 
 
+@pytest.fixture(scope="module")
+def plan_page(browser_context, real_server, e2e_admin_token):
+    """開一頁 `/proposal-plan.html`（已登入）。用完自己關。
+
+    🔴 為什麼要 goto 兩次：`localStorage` 是綁 origin 的，沒有先落地在那個
+    origin 上就寫不進去。這個非顯而易見的開場白原本在四個測試檔各抄一份 ——
+    哪天改成 `context.add_init_script`，只會有一個被改到。
+    """
+    made = []
+
+    def _open(query="", *, wait="#plan-side .side-tab"):
+        page = browser_context.new_page()
+        made.append(page)
+        base = real_server["base_url"] + "/proposal-plan.html"
+        page.goto(base, timeout=60000)
+        page.evaluate("t => localStorage.setItem('auth_token', t)", e2e_admin_token)
+        page.goto(base + query, timeout=60000)
+        if wait:
+            page.wait_for_selector(wait, timeout=30000)
+        return page
+    yield _open
+    for p in made:
+        p.close()
+
+
 @pytest.fixture
 def mount_flow(page):
     """把 flow-view 元件掛到一個臨時 host 上；結束（**含失敗**）一定拆掉。

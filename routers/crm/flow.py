@@ -34,9 +34,8 @@ from core.auth import payload_grants, tab_modules
 from core.crm_logic import (effective_prod_stage, is_main_work,
                             project_works_summary, work_completeness, work_stage)
 
-from ._shared import (router, _check_flow_check_auth, _now,
-                      _patch_project_json, _username, _with_project,
-                      _with_session)
+from ._shared import (router, _check_flow_check_auth, _crm_session, _now,
+                      _patch_project_json, _username, _with_project)
 
 # DB 相依包在 try —— 機隊的精簡 agent 沒有 sqlalchemy，這是整個 crm 套件的
 # 慣例（12/14 個領域模組都這樣），也是 test_crm_shared_reexports 守的東西。
@@ -294,34 +293,51 @@ async def get_flow_summary(request: Request, ids: str = ""):
     **不回燈號明細**：清單上畫的是五格微型完成條，每格只要兩個數字。整包
     tracks 帶 items 是 4KB/專案，五十列就是 200KB —— 而畫面用不到其中 88%。
 
-    走 `_gather_facts` 同一支（一趟相關子查詢，與專案數無關）—— 清單與詳情
-    對「哪盞燈算亮」必須是同一份判定，否則清單顯示 3/5、點進去 2/5。
-
+走 `_gather_facts` 同一支（理由見那支）。
     這條路徑**不回權限旗標**（can_check / links…）：清單不畫可互動的東西。
     """
     from routers.api_proposals import proposal_auth
     proposal_auth(request)
-    wanted = [i for i in (ids or "").split(",") if i.strip()][:_SUMMARY_MAX]
+    raw = [i for i in (ids or "").split(",") if i.strip()]
+    wanted = raw[:_SUMMARY_MAX]
+    if len(wanted) < len(raw):
+        # 截斷不報錯（422 會讓 loadFlowSummary 整欄放棄，比少一截更糟），
+        # 但要留痕：症狀是尾端那些列永遠顯示「尚未取得進度」，而畫面上
+        # 沒有任何東西說得出為什麼
+        import logging
+        logging.getLogger(__name__).info(
+            "flow/summary 截斷：%d → %d", len(raw), _SUMMARY_MAX)
     if not wanted:
         return {"projects": {}}
 
-    async def _run(session):
-        projects = (await session.execute(
-            select(CrmProject).where(CrmProject.id.in_(wanted)))).scalars().all()
+    async with _crm_session() as session:
+        # 只取用得到的欄位 —— `select(CrmProject)` 會把整列 ORM 實體拉出來
+        # （200 筆量到 290KB / 6.9ms，比重寫過的聚合查詢本身還貴），而下面
+        # 只讀這七個。`_facts_for` 吃的是屬性存取，Row 與 ORM 實體一樣用。
+        projects = (await session.execute(select(
+            CrmProject.id, CrmProject.name, CrmProject.client_id,
+            CrmProject.status, CrmProject.website_prod_stage,
+            CrmProject.archive_checklist, CrmProject.review_kpta,
+            CrmProject.flow_checks,
+        ).where(CrmProject.id.in_(wanted)))).all()
         gathered = await _gather_facts(session, projects)
         out = {}
         for p in projects:
             facts, detail, _meta = gathered[p.id]
             built = pf.build(facts, p.flow_checks, detail)
+            # 帶 is_lost / is_terminal 而不是只給 status —— 清單的 chip 要據此
+            # 上色，而「哪些狀態算終態」是 core.project_flow 的政策
+            # （LOST / TERMINAL）。只給字串的話前端就得自己比對那兩個字面值，
+            # 加一個終態就會靜默畫錯色。詳情面板的階段列本來就吃這兩個旗標。
+            st = pf.stage_view(p.status)
             out[p.id] = {
-                "status": p.status or "",
+                "status": st["status"], "is_lost": st["is_lost"],
+                "is_terminal": st["is_terminal"],
                 "tracks": [{"key": t["key"], "label": t["label"],
                             "done": t["done"], "total": t["total"]}
                            for t in built["tracks"]],
             }
         return {"projects": out}
-
-    return await _with_session(_run)
 
 
 @router.get("/projects/{project_id}/flow")

@@ -18,6 +18,7 @@ from __future__ import annotations
 import os
 import re
 import uuid
+from contextlib import asynccontextmanager
 from datetime import date, datetime, timezone
 from typing import Optional
 
@@ -178,17 +179,24 @@ async def _project_or_404(session, project_id: str):
     return project
 
 
-async def _with_session(run):
-    """DB 守門 → session → `await run(session)`。
+@asynccontextmanager
+async def _crm_session():
+    """DB 守門 + session 生命週期。`async with _crm_session() as session:`
 
-    「查一批」的端點用這支（單一專案用下面的 `_with_project`）—— 兩者的守門
-    與 session 生命週期是同一件事，分開寫的話下一個要加的東西（逾時、
-    read-only、tracing）只會被加在其中一個。
+    🔴 形狀刻意是 context manager 而不是「傳一個 callback 進來」：這個套件裡
+    有 **130 處**逐字抄著下面這三行
+
+        _require_db(); factory = await _get_factory(); async with factory() ...
+
+    而它們大多在 `_get_factory()` 與 `async with` 之間還要做事（組子查詢、
+    解日期），callback 形狀對那些人是**倒退**（要把函式體包成閉包）。CM 形狀
+    是它們可以逐一直接換掉的那一種 —— 抽一個沒人接得上的抽象，等於再多一份。
+    （`_with_project` 是例外：它要把 404 夾在中間，所以留著 callback。）
     """
     _require_db()
     factory = await _get_factory()
     async with factory() as session:
-        return await run(session)
+        yield session
 
 
 async def _with_project(project_id: str, payload):
@@ -198,9 +206,8 @@ async def _with_project(project_id: str, payload):
     review_kpta / flow_checks）讀取端一模一樣，各自抄一份的話，下一個要加
     的東西（audit 列、updated_by）只會被加在其中一個檔。
     """
-    async def _run(session):
+    async with _crm_session() as session:
         return await payload(session, await _project_or_404(session, project_id))
-    return await _with_session(_run)
 
 
 async def _patch_project_json(project_id: str, attr: str, call, payload):

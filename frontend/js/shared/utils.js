@@ -4,6 +4,10 @@
 // clip_utils 是 leaf（自己 0 個 import）→ 這條相依不會造成循環。
 // fmtSize 其實是通用格式化，只是當年落在那支檔案裡；不為了它再寫第二份。
 import { fmtSize } from './clip_utils.js';
+// esc / ensureStyle 搬到 js/shared/dom.js（零依賴、11 行）—— 只要那兩支的
+// 渲染件不必再為此拖進這整包 57KB。這裡 re-export，既有 importer 不用改。
+import { esc, ensureStyle } from './dom.js';
+export { esc, ensureStyle };
 
 /**
  * 任務要送到哪裡執行 —— **serve 這個頁面的那台**（same-origin）。
@@ -122,24 +126,6 @@ export async function dropUploadItems(dt) {
     return out;
 }
 
-/**
- * 自帶樣式的元件用：同一個 id 只注入一次。
- *
- * 「查 id → createElement → 設 id → textContent → appendChild」這串樣板在專案裡
- * 被逐字複製了十幾份。新元件一律呼叫這支；舊的遇到就順手換過來
- * （`grep -rn "createElement('style')" frontend` 看還剩哪些）。
- *
- * ⚠️ **會反覆改寫內容的動態 stylesheet 不適用**（例如 website/subviews/works.js
- * 的欄位顯示切換：它每次都重寫 textContent）。這支第一行就 early-return，
- * 換過去只有第一次會生效，之後靜默失效。
- */
-export function ensureStyle(id, css) {
-    if (document.getElementById(id)) return;
-    const st = document.createElement('style');
-    st.id = id;
-    st.textContent = css;
-    document.head.appendChild(st);
-}
 
 /** 非同步 checkbox：按下去先鎖住，失敗就把勾勾還原並說明 —— 畫面不說謊。 */
 export function wireAsyncToggle(input, fn, errPrefix) {
@@ -496,14 +482,6 @@ export function uploadProgress(host, onCancel) {
     };
 }
 
-/**
- * HTML escape。這裡是**不依賴任何模組**的那一份 —— 公開頁（訪客、未登入）
- * 也 import 得起，不會像 tabs/crm/crm-utils.js 那樣把 CRM state 一起拖進來。
- */
-export function esc(s) {
-    return String(s ?? '').replace(/[&<>"']/g,
-        c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
-}
 
 /**
  * 專案下拉的 <option> 字串（含佔位）。GET /crm/projects 的

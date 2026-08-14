@@ -18,8 +18,8 @@ import { API, DECK_EXTS, PTYPES, STATUSES, pickableRefs, projectLabel, withCurre
     from './prop-const.js';
 // 清單的查詢/排序/統計與獨立企劃頁共用（版面各自畫，邏輯只有一份）
 import {
-    fetchProposals, fillYearSelect, flowOf, hasFilters, loadFlowSummary, paintStats,
-    SORT_COLUMNS, SORT_GETTERS, wireFilters,
+    fetchProposals, fillFlowCells, fillYearSelect, hasFilters, loadFlowSummary,
+    paintStats, SORT_COLUMNS, SORT_GETTERS, wireFilters,
 } from './prop-list.js';
 import {
     addRefByUrl, changeStatus, libraryRefs, linkRef, openProjectLinker,
@@ -32,7 +32,6 @@ let _lastProps = [];     // 目前篩選下的清單（供點欄頭排序重繪�
 let _readFilters = null;
 let _rowsFiltered = false;   // 目前這批是不是篩過的（決定空狀態要說什麼）
 let _escHandler = null;
-let _flowHtml = null;    // flow-badge.flowCellsHtml —— 載入後留著（重排要重填）
 
 // ── 點欄頭排序：預設 key '' = 不排序、維持後端順序，點了才生效 ──
 const _sorter = createSortable({
@@ -176,8 +175,8 @@ async function refreshList({ stats = false } = {}) {
         if (!_rowsFiltered) fillYearSelect(document.getElementById('prop-f-year'), props);
         _lastProps = props;
         _renderRows();
-        // 進度摘要是**附加**資訊：清單先畫出來，摘要到了再補上那一欄。
-        // 併進上面那個 await 的話，一個慢查詢會讓整張表晚幾百毫秒才出現。
+        // 進度摘要是**附加**資訊，所以不 await：併進上面那趟的話，一個慢
+        // 查詢會讓整張表晚幾百毫秒才出現；摘要失敗也不該擋住清單。
         _paintFlow(props);
     } catch (e) {
         tbody.innerHTML = `<tr><td colspan="${COLSPAN}" style="color:#f87171;padding:30px;text-align:center;">提案載入失敗：${esc(e.message || e)}</td></tr>`;
@@ -214,29 +213,22 @@ function _renderRows() {
             } catch (err) { alert('刪除失敗：' + (err.message || err)); }
         });
     });
-    _fillFlow();      // 重排後那幾格是空的（_row 不填，見 _paintFlow）
+    fillFlowCells(document.getElementById('prop-rows'));  // 列的樣板留空格
     _sorter.attach();
 }
 
 /**
- * 進度欄：抓摘要 → 把每一格填進去。
+ * 進度欄：抓摘要 → **重畫整個 tbody**。
  *
- * 只換那幾格的 innerHTML，不重畫整個 tbody —— 重畫會把剛剛掛上的三組事件
- * 委派（開詳情/換綁/刪除）全部丟掉，還會讓使用者正在看的排序閃一下。
- * 畫面層是動態 import：它要 utils.js，而清單的資料層刻意不碰那包。
+ * 🔴 只補那幾格是不夠的：「進度」是可排序欄，而它的值在這一刻才存在。
+ * 排序早在摘要到之前就算完了（那時每一列都是 -1），只換格子的話順序會
+ * 永遠停在後端順序、而表頭的箭頭還說著「已按進度排序」。而且 createSortable
+ * 把排序選擇存進 localStorage，所以那個謊言會跟著使用者每次重開。
+ * 重畫是安全的：_renderRows 自己會把三組事件委派重掛一次（點欄頭排序走的
+ * 就是同一支）。
  */
 async function _paintFlow(props) {
-    if (!await loadFlowSummary(props.map(p => p.project_id))) return;
-    _flowHtml ||= (await importRetry('/tabs/proposals/flow-badge.js')).flowCellsHtml;
-    _fillFlow();
-}
-
-/** 把快取裡的摘要填進那幾格。載入前是 no-op —— 點欄頭重排也走這支。 */
-function _fillFlow() {
-    if (!_flowHtml) return;
-    document.querySelectorAll('#prop-rows [data-flow]').forEach(td => {
-        td.innerHTML = _flowHtml(flowOf(td.dataset.flow));
-    });
+    if (await loadFlowSummary(props.map(p => p.project_id))) _renderRows();
 }
 
 /** 「專案」欄：已連結顯示專案名、未連結顯示「＋ 連結」，點下去都是換綁對話框。 */

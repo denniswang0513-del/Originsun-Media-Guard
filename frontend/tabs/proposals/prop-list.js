@@ -24,6 +24,9 @@
 import { enumIndex, sortRows } from '../../js/shared/sortable.js';
 import { API, STATUSES } from './prop-const.js';
 import { tfetch } from './prop-fetch.js';
+// 畫面那半。靜態 import：flow-badge 只依賴 js/shared/dom.js 的 esc +
+// ensureStyle（+3.6KB），不會把 utils.js 拖進清單的首屏路徑。
+import { flowCellsHtml } from './flow-badge.js';
 
 export const hasFilters = (f) => Object.values(f || {}).some(Boolean);
 
@@ -40,9 +43,8 @@ export async function fetchProposals(filters) {
 }
 
 // ── 進度摘要（§14.4 階段四B）────────────────────────────────────────────
-// **資料在這裡、畫面在 flow-badge.js**。分開不是為了整齊，是因為這個檔案在
-// `/proposal-plan.html` 的清單首屏路徑上，而畫面那半要 utils.js（53KB）——
-// 見檔頭的相依說明。這裡只多用一次已經有的 tfetch。
+// 資料在這裡、畫面在 flow-badge.js（靜態 import：它只依賴 js/shared/dom.js
+// 的 esc + ensureStyle，+3.6KB，不會把 utils.js 拖進清單的首屏路徑）。
 
 /** project_id → {status, tracks:[{key,label,done,total}]}。每次以回來的那批覆寫。 */
 const _flow = new Map();
@@ -68,12 +70,24 @@ export async function loadFlowSummary(projectIds) {
     }
 }
 
-/** 排序用的單一數字：整體完成比例。沒有資料排最後（-1）。 */
-export function flowPct(projectId) {
+/**
+ * 把快取裡的摘要填進 `root` 底下每一格（每次重畫的最後一步）。
+ *
+ * 組裝住在這裡而不是 flow-badge：那樣就得反過來 import 這支的 `flowOf`，
+ * 兩個模組互指。這裡本來就同時握有資料與渲染件。
+ */
+export function fillFlowCells(root) {
+    root.querySelectorAll('[data-flow]').forEach(el => {
+        el.innerHTML = flowCellsHtml(flowOf(el.dataset.flow));
+    });
+}
+
+/** 排序用的單一數字：整體完成比例。沒有資料排最後（-1）。
+ *  不 export —— 唯一的消費者是下面那張 SORT_COLUMNS。 */
+function flowPct(projectId) {
     const s = flowOf(projectId);
     if (!s) return -1;
-    const done = s.tracks.reduce((n, t) => n + t.done, 0);
-    const total = s.tracks.reduce((n, t) => n + t.total, 0);
+    const [done, total] = s.tracks.reduce(([d, t], x) => [d + x.done, t + x.total], [0, 0]);
     return total ? done / total : 0;
 }
 

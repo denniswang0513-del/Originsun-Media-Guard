@@ -5,18 +5,18 @@
  * （一軌一格、按完成比例填色），不是一條總進度 —— 總進度會把「企劃做完了但
  * 錢還沒收」跟「錢收了但東西沒交」壓成同一個數字，而那正是要分辨的東西。
  *
- * **只有畫面**。資料（抓 / 快取 / 排序值）在 `prop-list.js` —— 那個檔案在
- * 獨立企劃頁的清單首屏路徑上，而這裡要 utils.js（53KB），不能拖它下水。
- * 所以這支由**兩個渲染端**動態 import（它們本來就有 utils）。
+ * **只有畫面**，資料在 `prop-list.js`（那邊的相依段落說明為什麼要分）。
+ * 相依刻意只有 `js/shared/dom.js`（零依賴的 esc + ensureStyle）與 prop-const
+ * —— 這支在提案清單的首屏路徑上，碰 utils.js 會拖進 68KB（它還靜態拉
+ * clip_utils），而主控端對前端一律 no-store：那是每次開頁重抓一遍。
  *
- * 判定完全不在前端：後端 `GET /crm/projects/flow/summary` 回每軌的 done/total，
- * 走的是詳情面板同一支 `_gather_facts` —— 清單顯示 3/5、點進去 2/5 是這個
- * 功能最容易失去信任的方式。
+ * 判定完全不在前端：`GET /crm/projects/flow/summary` 回每軌的 done/total
+ * 與階段旗標，走的是詳情面板同一支 `_gather_facts`。
  *
  * 🔴 import closure 鐵則：只准 `tabs/proposals/` 與 `js/shared/`（見 flow-view）。
  * 🔴 UI 無 emoji（owner 2026-07-17 鐵則）。
  */
-import { ensureStyle, esc } from '../../js/shared/utils.js';
+import { ensureStyle, esc } from '../../js/shared/dom.js';
 import { TRACK_COLOR } from './prop-const.js';
 
 const CSS = `
@@ -39,18 +39,19 @@ html.plan-theme-light .pfb-stage.lost { color:#b3261e; background:#fdecea;
 .pfb-none { font-size:11px; color:var(--pfb-sub, #888); }
 `;
 
-/** 階段 chip 的色階：未成案＝紅、歸檔＝已完成、其餘＝進行中。 */
-function _stageCls(status) {
-    if (status === '未成案') return 'lost';
-    if (status === '歸檔') return 'done';
-    return status ? 'live' : '';
+/** 階段 chip 的色階。旗標由後端給（見 core.project_flow.stage_view）——
+ *  「哪些狀態算終態」是那邊的政策，不在這裡比對字面值。 */
+function _stageCls(s) {
+    if (s.is_lost) return 'lost';
+    if (s.is_terminal) return 'done';
+    return s.status ? 'live' : '';
 }
 
 /**
  * 一列的 HTML。`summary` 來自 `prop-list.flowOf(project_id)`。
  *
  * 沒有殼專案（或摘要還沒到）就畫一個「—」，**不畫空的格子** —— 空格子跟
- * 「五軌都掛零」長得一模一樣，那是謊報。
+ * 「五軌都掛零」長得一模一樣，那會把「還沒問到」畫成「什麼都沒做」。
  */
 export function flowCellsHtml(summary) {
     ensureStyle('pfb-css', CSS);
@@ -64,6 +65,6 @@ export function flowCellsHtml(summary) {
     }).join('');
     const st = summary.status || '';
     return `<span class="pfb">`
-         + (st ? `<span class="pfb-stage ${_stageCls(st)}">${esc(st)}</span>` : '')
+         + (st ? `<span class="pfb-stage ${_stageCls(summary)}">${esc(st)}</span>` : '')
          + `<span class="pfb-bars">${cells}</span></span>`;
 }

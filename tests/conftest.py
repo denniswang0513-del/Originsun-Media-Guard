@@ -202,6 +202,14 @@ def real_server():
     # 所以間隔可以縮到 0.1s，開機就緒後少空等最多半秒。
     with httpx.Client(timeout=2.0) as probe:
         while time.time() < deadline:
+            # 🔴 先看**我們這支**還活著沒。港口被上一輪殘留的 server 佔住時，
+            # 我們的 uvicorn 會 bind 失敗立刻死掉，而下面那個 health 探測會被
+            # 那支舊的接走 —— 測試就安安靜靜地跑在**舊程式碼**上（2026-08-14
+            # 實際咬到：改了端點卻一直看到舊回應）。
+            if proc.poll() is not None:
+                pytest.fail(
+                    f"測試 server 啟動就死了（rc={proc.returncode}）—— "
+                    "port 18000 多半被上一輪的殘留行程佔住了。")
             try:
                 if probe.get(f"{base_url}/api/v1/health").status_code == 200:
                     ready = True

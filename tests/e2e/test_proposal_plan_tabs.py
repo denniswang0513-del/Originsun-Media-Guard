@@ -35,17 +35,11 @@ def prop(real_server, e2e_admin_token, dev_db_only):
 
 
 @pytest.fixture(scope="module")
-def pg(browser_context, real_server, e2e_admin_token, prop):
-    page = browser_context.new_page()
-    page.goto(real_server["base_url"] + "/proposal-plan.html", timeout=60000)
-    page.evaluate("t => localStorage.setItem('auth_token', t)", e2e_admin_token)
-    page.goto(f"{real_server['base_url']}/proposal-plan.html?pid={prop['id']}",
-              timeout=60000)
+def pg(plan_page, prop):
     # 側欄要等 _showSideTabs() 把 #plan-side 顯示出來（在資料載完之後）
-    page.wait_for_selector("#plan-side .side-tab", state="visible", timeout=30000)
+    page = plan_page(f"?pid={prop['id']}")
     _settled(page)
-    yield page
-    page.close()
+    return page
 
 
 def _settled(pg):
