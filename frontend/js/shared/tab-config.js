@@ -64,8 +64,12 @@ export const TAB_LOADERS = [
 // tab key → 本身模組之外也放行的模組（與各 router 的後端閘門對齊，改閘門要同步這裡）：
 // - 提案庫：api_proposals._check_auth 也收 crm_projects（提案進程與專案管理整合）
 // - 片庫：api_references._ACCESS_MODULES = references + 提案庫兩系 + crm_projects
+// 🔴 正本是 core/auth.py 的 TAB_ACCESS（那份又是 router 閘門本身的參數）。
+// 這份是跨語言的鏡射，由 tests/unit/test_rbac_module_sync 比對 —— 改後端
+// 閘門一定要同步這裡。（2026-08-14：preprod_plan 原本漏在提案庫這列，拍攝
+// 企劃的人打 API 進得去、畫面上卻沒有那個 tab。）
 const TAB_EXTRA_ACCESS = {
-    preprod_proposals: ['crm_projects'],
+    preprod_proposals: ['preprod_plan', 'crm_projects'],
     references: ['preprod_proposals', 'preprod_plan', 'crm_projects'],
 };
 
@@ -140,12 +144,11 @@ export function groupKeys(group) {
 // timesheets=工時檢核，跟側欄按鈕上的字不一樣。
 // 找不到就回 key 本身 —— 沒有 tab 的模組（me_* 那幾個）不該讓呼叫端爆掉。
 export function tabLabel(key) {
-    for (const g of TAB_GROUPS) {
-        if (g.single === key) return g.label.replace(/^\P{L}+/u, '');
-        const it = (g.items || []).find((x) => x.key === key);
-        if (it) return it.label.replace(/^\P{L}+/u, '');
-    }
-    return key;
+    const all = TAB_GROUPS.flatMap((g) =>
+        g.single ? [{ key: g.single, label: g.label }] : g.items);
+    // 只剝開頭的圖示與空白（不是「所有非字母」—— `3D 模型` 那種標籤會被吃掉字）
+    return (all.find((i) => i.key === key)?.label || key)
+        .replace(/^[\p{Extended_Pictographic}️‍\s]+/u, '');
 }
 
 // Reverse lookup: a section id (e.g. 'tab_main') → its TAB_GROUPS entry.

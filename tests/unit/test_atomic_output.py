@@ -55,7 +55,7 @@ class TestAtomicOutputContract:
         """上一輪留下的暫存檔不能被當成這一輪的內容接著寫。"""
         final = str(tmp_path / "Reel.mov")
         stale = _touch(part_path_for(final), b"STALE")
-        with AtomicOutput(final) as out:
+        with AtomicOutput(final):
             assert not os.path.exists(stale)
 
     def test_failed_commit_keeps_the_good_temp(self, tmp_path, monkeypatch):

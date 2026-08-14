@@ -98,32 +98,11 @@ ITEM_DEST: dict[str, str] = {
     "h_loc": "preprod_locations", "h_footage": "footage",
 }
 
-# 用得到的目的地（payload 要逐個算權限）。**推導**而不是手寫第二張表 ——
-# 手寫的話就要再有一個測試去釘兩張表一致。
-DESTS: frozenset = frozenset(ITEM_DEST.values())
-
-# 目的地額外放行的模組。**鏡射 tab-config.js 的 TAB_EXTRA_ACCESS**，而那份又
-# 鏡射各 router 的真閘門（`api_references._ACCESS_MODULES`、
-# `api_proposals.proposal_auth`）—— 那兩個 tab 本來就收不只一個模組。
+# 用得到的目的地（payload 要逐個算權限）。**推導**而不是手寫第二張表。
 #
-# 🔴 只認同名模組的話，提案企劃人員（modules=['preprod_proposals']）會在自己
-# **明明進得去**的片庫／提案庫上看到「你沒有這個模組權限」—— 畫面說不行、
-# 點進去其實可以，正是這個功能一路在修的那種 UX 謊言。
-# tests/unit/test_project_flow 直接讀 tab-config.js 比對，漂了就紅。
-DEST_ALSO: dict[str, tuple[str, ...]] = {
-    "preprod_proposals": ("crm_projects",),
-    "references": ("preprod_proposals", "preprod_plan", "crm_projects"),
-}
-
-
-def dest_modules(dest: str) -> tuple[str, ...]:
-    """進得去這個目的地的模組（任一即可）。
-
-    🔴 **門在目的地**（owner §14.4）：這個答案只決定連結畫成可點還是禁用＋
-    「需要＿＿權限」，**不是安全邊界** —— 真正的守衛是目的地自己的既有閘門。
-    不藏功能：沒權限的人看得到燈、看得到缺哪個權限，只是點不動。
-    """
-    return (dest,) + DEST_ALSO.get(dest, ())
+# 🔴 「誰進得去這個目的地」不在這裡答 —— 那是 `core.auth.tab_modules`
+# （tab 閘門本身的參數）。這裡只說「去哪」，不說「誰能去」。
+DESTS: frozenset = frozenset(ITEM_DEST.values())
 
 # 誰可以勾手動里程碑（owner 2026-08-14 拍板走模組級）。守衛與「畫不畫
 # checkbox」兩處共用這一份 —— 分兩處寫的話，總有一天畫面說可以、後端回 403。

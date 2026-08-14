@@ -10,8 +10,6 @@
 呼叫 `_gather_facts`，用假的 session 接住那唯一一次 SQL，比對它**實際**
 產出的鍵。
 """
-import pytest
-
 from core import project_flow as pf
 
 

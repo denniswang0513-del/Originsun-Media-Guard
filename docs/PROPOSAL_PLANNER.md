@@ -1411,9 +1411,17 @@ RBAC v2 原則沿用：權限＝帳號的 `modules[]`＋管理員開關，admin 
      3. **overlay 收在 `tab-changed`**：不是給 flow-view 一個 onNavigate 回呼。
         原本切走 tab 時 overlay 會留在畫面上蓋著別的分頁（側欄點按／上一頁／
         貼網址三條路本來就有這個 bug），收在既有的 tab-changed 監聽一處全包。
+     4. **指回自己的燈不畫連結**：兩個掛載點都在提案工作區裡，所以由呼叫端傳
+        `here='preprod_proposals'`。企劃軌那 6 盞燈該做的事就在手邊，把人送去
+        提案庫清單反而是推離現場。由呼叫端說而不是讀 `location.hash` ——
+        兩個掛載點的答案一樣，讀網址卻只在其中一個會對。
      權限仍在後端算成 `links[key]`（同 `can_check` / `can_advance` 的慣例），
-     且**鏡射 tab-config.js 的 `TAB_EXTRA_ACCESS`** —— 只認同名模組的話，
-     提案企劃人員會在自己進得去的片庫／提案庫上看到「你沒有權限」。
+     但用 **`core.auth.tab_modules`**：提案庫／片庫本來就收不只一個模組，只認
+     同名的話拍攝企劃的人會在自己**進得去**的 tab 上看到「你沒有權限」。
+     那份名單順勢從兩個 router 收進 `core.auth.TAB_ACCESS`（它本來就是那些
+     閘門的參數），前端 `TAB_EXTRA_ACCESS` 降為跨語言鏡射，由
+     `test_rbac_module_sync` 比對 —— 它立刻抓到提案庫漏了 `preprod_plan`
+     （那些人打 API 進得去、側欄卻沒有那個 tab），一併補上。
 
 測試：unit＝每個 auto 訊號正反面 + RBAC 反面（提案庫-only 勾選要 403）；
 e2e＝勾選、推進、未成案原因守衛、公開頁不出 flow。

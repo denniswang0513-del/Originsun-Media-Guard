@@ -1290,7 +1290,9 @@ async function _loadPlan(pid) {
         // 進度：專案的五軌工作流。沒有殼專案就不建這個分頁 —— 它整頁的內容
         // 都來自專案，掛出來只會是一句「還沒有關聯專案」。訪客同樣沒有
         // （內部進度、人名、金額訊號都不出公開頁，見 §14.3）。
-        if (prop.project_id) _setupLazyTab("flow", { projectId: prop.project_id });
+        // here：這頁本身就是提案工作區 —— 指回提案庫的燈不畫連結（見 renderFlow）
+        if (prop.project_id) _setupLazyTab("flow",
+            { projectId: prop.project_id, here: "preprod_proposals" });
     } catch (e) {
         host.innerHTML = '<div class="state-msg" style="color:var(--red);">創意發想載入失敗：' + escText(emsg(e)) + "</div>";
     }

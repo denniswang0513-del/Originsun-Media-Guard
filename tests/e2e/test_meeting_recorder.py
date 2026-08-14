@@ -25,27 +25,20 @@ scratchpad 的端到端腳本。這裡只釘 UI。
 手機視窗跑：新加的按鈕一樣要守 44px 可點目標（同 test_proposal_plan_mobile）。
 只在 dev / 測試資料庫上跑（會建一筆提案再刪掉）。
 """
-import uuid
-
-import httpx
 import pytest
 
-from .conftest import MOBILE
+from .conftest import MOBILE, flow_case
 
 
 @pytest.fixture(scope="module")
 def proposal(real_server, e2e_admin_token, dev_db_only):
-    base = real_server["base_url"]
-    h = {"Authorization": f"Bearer {e2e_admin_token}"}
-    r = httpx.post(f"{base}/api/v1/proposals", headers=h, timeout=60,
-                   json={"title": f"錄音UI回歸_{uuid.uuid4().hex[:6]}", "ptype": "其他"})
-    if r.status_code >= 400:
-        pytest.skip(f"建不出提案（{r.status_code}）：{r.text[:120]}")
-    p = r.json()["proposal"]
-    yield p
-    # 各刪各的 —— 交叉刪（拿提案 id 去打 projects）有機會刪到別人的 dev 資料
-    httpx.delete(f"{base}/api/v1/proposals/{p['id']}", headers=h, timeout=30)
-    httpx.delete(f"{base}/api/v1/crm/projects/{p['project_id']}", headers=h, timeout=30)
+    """自建自刪的提案 —— 建/跳過/收的契約共用 conftest 那一份。
+
+    （原本這裡抄了一份，而且是抄壞的那份：沒有「沒有殼專案就 skip」，所以
+    收尾那行 `p['project_id']` 會直接 KeyError 而不是乾淨跳過。）
+    """
+    with flow_case(real_server["base_url"], e2e_admin_token, "錄音UI回歸") as c:
+        yield {"id": c["prop_id"]}
 
 
 # 用 AudioContext 生一條真的音訊軌，頂替沒有裝置的 getUserMedia（見檔頭 C）。

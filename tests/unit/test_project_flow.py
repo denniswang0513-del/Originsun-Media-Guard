@@ -6,21 +6,11 @@
   ② 訊號撈不到寧可顯示未完成，不准謊報完成
   ③ 「略過」不是「未完成」（不上官網的案子不該卡在官網那盞燈）
 """
-import re
-
 from core import project_flow as pf
 
-# 從前端原始碼抽常數 —— `_js` 的正本在 test_rbac_module_sync（它就是為了
-# 「後端清單 vs tab-config.js」而存在的），不要在這裡再造一份讀檔 + 解碼。
-from .test_rbac_module_sync import _js
-
-
-def _js_keys(const: str) -> set:
-    """tab-config.js 裡某個物件常數的鍵集合。"""
-    body = re.search(rf"{const} = \{{(.*?)\n\}};",
-                     _js("frontend/js/shared/tab-config.js"), re.S)
-    assert body, f"{const} 解析失敗（tab-config.js 的寫法改了？）"
-    return set(re.findall(r"(\w+)\s*:", body.group(1)))
+# 抽前端常數的正本在 test_rbac_module_sync（那支就是為了「後端清單 vs
+# tab-config.js」而存在的）—— 不在這裡再造一份讀檔 + 解析。
+from .test_rbac_module_sync import _js_keys
 
 
 class TestTemplate:
@@ -195,6 +185,8 @@ class TestGates:
         out = pf.missing_for(self._tracks(approved=pf.OFF, settled=pf.OFF), "結案")
         assert self._keys(out["blocking"]) == ["approved"]
         assert self._keys(out["advisory"]) == ["settled"]
+        # 缺項與燈號列用同一個 dest 欄位名 —— 前端一支 `_dest()` 兩處通用
+        assert out["blocking"][0]["dest"] == pf.ITEM_DEST["approved"]
 
     def test_no_gate_for_unknown_target(self):
         for target in ("", "未成案"):
@@ -204,9 +196,10 @@ class TestGates:
 class TestDeepLinks:
     """「去完成」deep-link（§14.4）。
 
-    這組全部在守**靜默失效**：連結的三個環節（item→模組、模組→RBAC、
-    模組→tab）任一對不上，畫面都不會報錯 —— 只會安安靜靜少一條連結，或者
-    畫成「你沒有這個權限」給每一個人看（包括管理員）。
+    連結靠兩段字串接（item → 模組鍵 → tab），任一段對不上畫面**都不會報錯**：
+    只會安安靜靜少一條連結。這組就是那兩段的守衛。
+    （「誰進得去這個目的地」不在這裡 —— 那是 core.auth.TAB_ACCESS，
+    由 test_rbac_module_sync 守。）
     """
 
     def test_every_auto_item_has_a_destination(self):
@@ -214,50 +207,22 @@ class TestDeepLinks:
         assert sorted(pf.AUTO_KEYS - set(pf.ITEM_DEST)) == []
 
     def test_manual_items_have_no_destination(self):
-        """手動項就在這頁勾，不該把人送去別的地方。"""
         assert not set(pf.MANUAL_KEYS) & set(pf.ITEM_DEST)
 
     def test_destination_keys_are_real_rbac_modules(self):
-        """🔴 目的地的鍵**就是**模組鍵 —— 打錯字的話 `payload_grants` 對
-        每個人都回 False，連管理員都看到「你沒有這個權限」。"""
+        """打錯字的話 `payload_grants` 對每個人都回 False —— 連管理員都會看到
+        「你沒有這個模組權限」。"""
         from core.auth import ALL_MODULES
         for key in pf.DESTS:
             assert key in ALL_MODULES, f"{key} 不是合法的模組鍵"
-        for key in pf.DEST_ALSO:
-            assert key in pf.DESTS, f"DEST_ALSO 放行了沒人用的目的地 {key}"
-            for m in pf.DEST_ALSO[key]:
-                assert m in ALL_MODULES, f"{key} 額外放行了非法模組 {m}"
 
     def test_destination_keys_are_real_tabs(self):
-        """🔴 另一半：前端拿 TAB_MAP[模組鍵] 換 section id，換不到就靜默不畫。
-
-        直接讀 tab-config.js 比對 —— 那份是前端的正本，兩邊靠字串接。
-        """
-        assert not (pf.DESTS - _js_keys("TAB_MAP")), \
-            f"這些目的地在 TAB_MAP 裡沒有 tab：{sorted(pf.DESTS - _js_keys('TAB_MAP'))}"
-
-    def test_extra_access_matches_the_frontend_rule(self):
-        """🔴 `allowed` 只認同名模組的話，提案企劃人員會在自己**進得去**的
-        片庫／提案庫上看到「你沒有這個模組權限」。
-
-        比對 tab-config.js 的 TAB_EXTRA_ACCESS —— 那份是「誰看得到這個
-        tab」的正本（它自己又鏡射各 router 的真閘門）。兩邊漂了就紅。
-        """
-        src = _js("frontend/js/shared/tab-config.js")
-        body = re.search(r"TAB_EXTRA_ACCESS = \{(.*?)\n\};", src, re.S).group(1)
-        front = {k: tuple(re.findall(r"'([^']+)'", v))
-                 for k, v in re.findall(r"(\w+)\s*:\s*\[([^\]]*)\]", body)}
-        assert front, "TAB_EXTRA_ACCESS 解析失敗（tab-config.js 的寫法改了？）"
-        for key, extra in front.items():
-            if key in pf.DESTS:
-                assert pf.DEST_ALSO.get(key, ()) == extra, \
-                    f"{key} 的額外放行與前端不一致：{pf.DEST_ALSO.get(key, ())} vs {extra}"
+        """另一段：前端拿 TAB_MAP[模組鍵] 換 section id，換不到就靜默不畫。"""
+        missing = pf.DESTS - _js_keys("TAB_MAP")
+        assert not missing, f"這些目的地在 TAB_MAP 裡沒有 tab：{sorted(missing)}"
 
     def test_only_unlit_auto_rows_carry_a_destination(self):
-        """亮了的沒事可做、略過的更不用去 —— 連結只給未亮的自動燈。
-
-        這個判斷放在後端（build）而不是 JS，前端才不會有第二份 state 判斷。
-        """
+        """連結只給未亮的自動燈：亮了的沒事可做、略過的更不用去。"""
         out = pf.build({"quote": True, "published": None},
                        {"shooting": {"checked": True}})
         rows = {r["key"]: r for t in out["tracks"] for r in t["items"]}
@@ -265,13 +230,6 @@ class TestDeepLinks:
         assert "dest" not in rows["published"], "略過的燈不該帶去處"
         assert "dest" not in rows["shooting"], "手動項不該帶去處"
         assert rows["settled"]["dest"] == "crm_invoices"
-
-    def test_missing_rows_carry_the_same_destination_key(self):
-        """缺項清單與燈號列共用同一個欄位名 —— 前端一支 `_dest()` 兩處通用。"""
-        out = pf.missing_for(
-            TestGates._tracks(approved=pf.OFF, settled=pf.OFF), "結案")
-        assert out["blocking"][0]["dest"] == pf.ITEM_DEST["approved"]
-        assert out["advisory"][0]["dest"] == pf.ITEM_DEST["settled"]
 
 
 class TestStageView:

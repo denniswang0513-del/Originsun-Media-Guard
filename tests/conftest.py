@@ -191,7 +191,10 @@ def real_server():
     )
 
     # Wait for server to be ready (max 15 seconds)
-    base_url = "http://localhost:18000"
+    # 🔴 **127.0.0.1 不是 localhost**：uvicorn 綁 0.0.0.0（只有 IPv4），而
+    # localhost 在 Windows 先解到 ::1 —— 每一條新連線都先耗 ~2 秒等 IPv6 SYN
+    # 逾時才退回 IPv4。整個測試套跑幾十條連線，那是幾十秒純等待。
+    base_url = "http://127.0.0.1:18000"
     deadline = time.time() + 15
     ready = False
     while time.time() < deadline:

@@ -22,7 +22,7 @@ from fastapi import APIRouter, Body, File, HTTPException, Request, UploadFile  #
 
 from core import pinned_assets as pa
 from core import proposal_survey
-from core.auth import check_admin_or_module
+from core.auth import check_admin_or_module, tab_modules
 from core.project_folders import BLOCKED_UPLOAD_EXTS
 from core.schemas import (ProposalPayload, ProposalPlanCellPatch, ProposalPlanPayload,
                           ProposalPublicInfoPatch, ProposalSurveyPatch,
@@ -141,7 +141,8 @@ _REF_FIELDS = ("url", "title", "note", "tags", "thumb_url")
 def proposal_auth(request: Request) -> dict:
     # crm_projects 也放行（2026-08-03 owner 定調：提案進程與專案管理整合 —— 專案端
     # 的人要能看提案、推提案進度；讀寫不拆兩層閘，內部工具要收緊再說）。
-    return check_admin_or_module(request, "preprod_proposals", "preprod_plan", "crm_projects")
+    # 名單正本在 core.auth.TAB_ACCESS（見那裡的註解：這份原本漂過）。
+    return check_admin_or_module(request, *tab_modules("preprod_proposals"))
 
 
 from core.db_guard import db_factory_or_503 as _require_factory

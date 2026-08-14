@@ -26,7 +26,7 @@ from typing import List, NamedTuple, Optional
 
 from fastapi import APIRouter, Body, File, HTTPException, Request, UploadFile  # type: ignore
 
-from core.auth import check_admin_or_module
+from core.auth import check_admin_or_module, tab_modules
 from core.db_guard import db_factory_or_503 as _require_factory
 from core.schemas import ReferencePatch
 
@@ -79,8 +79,10 @@ _PUBLIC_ALLOW = {"field": ("title", "note", "description"), "research": True, "f
 _LINK_TARGET_LIMIT = 20                # link_targets 每型別回傳數（typeahead 下拉，不分頁）
 
 
-# 片庫的存取模組（唯一正本 —— header 閘門與 video 端點的 ?token= 判定共用）
-_ACCESS_MODULES = ("references", "preprod_proposals", "preprod_plan", "crm_projects")
+# 片庫的存取模組（header 閘門與 video 端點的 ?token= 判定共用）。
+# 正本在 core.auth.TAB_ACCESS —— 「誰進得去這個 tab」不只這裡要問，工作流的
+# deep-link 也要（畫成可點還是「需要＿＿權限」），分兩處寫就會漂。
+_ACCESS_MODULES = tab_modules("references")
 
 
 def _check_auth(request: Request) -> dict:

@@ -135,20 +135,10 @@ def test_flow_tab_renders_with_light_theme(pg, prop):
     assert bg.lower() in ("#fafafa", "rgb(250, 250, 250)"), \
         f"白底頁沒吃到淺色主題（--pf-card={bg!r}）"
 
-
-def test_flow_deep_links_open_a_new_tab_here(pg, prop):
-    """🔴 這頁不是 SPA —— 「去完成」必須開新分頁。
-
-    後台 SPA 那條路是原地換 tab（`/#tab_x` 只換 hash，test_flow_links 驗）；
-    **同一個 href 從這頁點下去卻是一次跨頁導覽**，會把企劃人員手上正在編的
-    東西整個帶走。判斷是 `_sameDoc()`（比對 pathname），只有在這頁看得到它
-    另一半有沒有做對。
-    """
-    if not prop["project_id"]:
-        pytest.skip("這筆提案沒有殼專案（無 client_id），進度分頁本來就不建")
-
-    _open(pg, "flow")
-    pg.wait_for_selector("#flow-host .pflow-track", timeout=20000)
+    # 🔴 這頁不是 SPA —— 「去完成」必須開新分頁。同一個 href 在後台是原地換
+    # tab（只換 hash，test_flow_links 驗），從這頁點卻是一次跨頁導覽，會把
+    # 企劃人員手上正在編的東西整個帶走。判斷在 flow-view 的 NEW_TAB
+    # （比對 pathname），**只有在這頁看得到它另一半有沒有做對**。
     links = pg.eval_on_selector_all(
         "#flow-host a.pflow-item, #flow-host a.pflow-golink",
         "els => els.map(e => ({ href: e.getAttribute('href'),"

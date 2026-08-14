@@ -117,16 +117,19 @@ def mount_flow(page):
     """
     made = []
 
-    def _do(project_id, token, *, host_id="flowhost", wait=".pflow-track"):
+    def _do(project_id, token, *, host_id="flowhost", wait=".pflow-track",
+            here="preprod_proposals"):
+        # here 的預設值＝兩個真實掛載點都傳的那個（提案工作區）。測試要驗
+        # 「沒有 here 時那幾盞燈就有連結」才明確傳 ''。
         made.append(host_id)
         page.evaluate("t => localStorage.setItem('auth_token', t)", token)
-        page.evaluate("""async ([pid, hid]) => {
+        page.evaluate("""async ([pid, hid, here]) => {
             const host = document.createElement('div');
             host.id = hid;
             document.body.appendChild(host);
             const m = await import('/tabs/proposals/flow-view.js');
-            await m.renderFlow(host, { projectId: pid });
-        }""", [project_id, host_id])
+            await m.renderFlow(host, { projectId: pid, here });
+        }""", [project_id, host_id, here])
         if wait:
             page.wait_for_selector(f"#{host_id} {wait}", timeout=20000)
         return host_id

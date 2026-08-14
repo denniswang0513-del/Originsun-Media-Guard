@@ -21,9 +21,16 @@ from .conftest import flow_case
 pytestmark = pytest.mark.e2e
 
 
-@pytest.fixture
+@pytest.fixture(scope="module")
 def case(real_server, e2e_admin_token, dev_db_only):
-    """每個測試一筆新提案 —— 推進會改狀態，共用會讓測試互相汙染。"""
+    """唯讀那幾支共用一筆 —— 它們只是渲染或按了取消，什麼都沒改。"""
+    with flow_case(real_server["base_url"], e2e_admin_token, "推進回歸") as c:
+        yield c
+
+
+@pytest.fixture
+def fresh_case(real_server, e2e_admin_token, dev_db_only):
+    """會真的推進的那支專用 —— 改了狀態的專案不能留給別人重用。"""
     with flow_case(real_server["base_url"], e2e_admin_token, "推進回歸") as c:
         yield c
 
@@ -76,9 +83,9 @@ def test_cancel_does_not_advance(page, mount, case, e2e_admin_token):
     assert d["stage"]["status"] == "提案", f"取消後階段不該變：{d['stage']['status']}"
 
 
-def test_confirm_advances_and_runs_side_effects(page, mount, case, e2e_admin_token):
+def test_confirm_advances_and_runs_side_effects(page, mount, fresh_case, e2e_admin_token):
     """🔴 確認後真的推進，而且走的是既有端點的副作用鏈（衛星提案跟著成案）。"""
-    mount(case["project_id"], e2e_admin_token)
+    mount(fresh_case["project_id"], e2e_admin_token)
     page.click("#advtest [data-advance]")
     page.wait_for_selector("#pflow-go", timeout=10000)
     # 進「製作」＝這案子拿到了 → 對話框要收成案原因
@@ -88,13 +95,13 @@ def test_confirm_advances_and_runs_side_effects(page, mount, case, e2e_admin_tok
     page.click("#pflow-go")
     page.wait_for_timeout(2500)          # PATCH + renderFlow 重抓
 
-    d = httpx.get(f"{case['base']}/api/v1/crm/projects/{case['project_id']}/flow",
-                  headers=case["h"], timeout=30).json()
+    d = httpx.get(f"{fresh_case['base']}/api/v1/crm/projects/{fresh_case['project_id']}/flow",
+                  headers=fresh_case["h"], timeout=30).json()
     assert d["stage"]["status"] == "製作", f"階段沒推進：{d['stage']['status']}"
 
     # 副作用鏈：衛星提案標成案 + 原因寫進組織學習欄
-    gp = httpx.get(f"{case['base']}/api/v1/proposals/{case['prop_id']}",
-                   headers=case["h"], timeout=30).json()
+    gp = httpx.get(f"{fresh_case['base']}/api/v1/proposals/{fresh_case['prop_id']}",
+                   headers=fresh_case["h"], timeout=30).json()
     gp = gp.get("proposal") or gp
     assert gp["status"] == "成案", f"衛星提案沒跟著成案：{gp['status']}"
     assert gp.get("outcome_reason") == reason, \

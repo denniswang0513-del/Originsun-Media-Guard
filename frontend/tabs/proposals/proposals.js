@@ -422,6 +422,8 @@ async function openDetail(pid) {
                 // 推進會連動這筆提案本身（進「製作」＝衛星提案標成案 + 寫入
                 // 成案原因），詳情標頭的狀態下拉與原因面板都會是舊值 → 重開
                 onAdvanced: () => { refreshList({ stats: true }); openDetail(prop.id); },
+                // 這個畫面**就是**提案工作區 —— 指回提案庫的燈不畫連結
+                here: 'preprod_proposals',
             });
         },
     };

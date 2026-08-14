@@ -30,7 +30,7 @@ from fastapi import Request
 
 from core import project_archive as pa
 from core import project_flow as pf
-from core.auth import payload_grants
+from core.auth import payload_grants, tab_modules
 from core.crm_logic import (effective_prod_stage, is_main_work,
                             project_works_summary, work_completeness, work_stage)
 
@@ -242,7 +242,13 @@ async def _payload(session, project, *, auth) -> dict:
         # deep-link「去完成」：目的地 → 這個人進不進得去。權限在**這裡**算，
         # 前端不自己讀 token 解 modules（那等於把 RBAC 判定複製到 JS）。
         # 名稱不送 —— 那是導覽的字，前端 `tabLabel()` 就拿得到。
-        "links": {k: payload_grants(auth, *pf.dest_modules(k)) for k in pf.DESTS},
+        #
+        # 🔴 **門在目的地**（owner §14.4）：這個答案只決定連結畫成可點還是
+        # 禁用＋「需要＿＿權限」，不是安全邊界。用 `tab_modules` 而不是目的地
+        # 鍵本身 —— 提案庫／片庫本來就收不只一個模組（正本 core.auth.TAB_ACCESS
+        # 就是那些閘門的參數），只認同名的話拍攝企劃的人會在自己**進得去**的
+        # tab 上看到「你沒有權限」。
+        "links": {k: payload_grants(auth, *tab_modules(k)) for k in pf.DESTS},
         # 這次推進**會不會真的用到**成案原因（見 wins_proposal docstring）
         "collects_outcome_reason": pf.wins_proposal(
             stage["next"], meta["proposal_count"], bool(facts.get("won"))),
