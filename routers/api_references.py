@@ -855,8 +855,7 @@ def _target_models() -> dict:
     return {
         "proposal": _TargetSpec(PreprodProposal, PreprodProposal.title,
                                 PreprodProposal.status, PreprodProposal.updated_at,
-                                # 與 api_proposals._check_auth 同一份（2026-08-03 起含 crm_projects）
-                                ("preprod_proposals", "preprod_plan", "crm_projects")),
+                                tab_modules("preprod_proposals")),
         "crm_project": _TargetSpec(CrmProject, CrmProject.name,
                                    CrmProject.status, CrmProject.updated_at,
                                    ("crm_projects",)),

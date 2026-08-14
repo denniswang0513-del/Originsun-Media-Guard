@@ -139,11 +139,8 @@ function _why(it, clickable) {
 // 後台 SPA 的網址。deep-link 一律指這裡的 `#<section>`：SPA 從開頁
 // （app.js 讀 location.hash）到之後的 hashchange 都吃這個形式，所以一條純
 // `<a>` 就會換 tab —— 不必攔 click，也不必碰 `window.switchTab`。
-//
-// 🔴 這個模組會被 serve 到 NAS 對外容器（core/public_assets.MODULE_DIRS），
-// 但**進度分頁在那裡掛不起來**：它要先同源打到 /api/v1/crm/... 才畫得出東西，
-// 而 NAS 的 nginx 只 proxy 幾個 shared/ 端點。所以「SPA 就在本站的 /」這個
-// 假設只在它真的會執行的那台機器上被用到。
+// 「SPA 就在本站的 /」這個假設在 NAS 對外容器上不成立，但進度分頁在那裡
+// 本來就掛不起來（它要先同源打到 /api/v1/crm/…，那邊只 proxy 幾個 shared/）。
 const SPA = '/';
 // pathname 不會變（SPA 走 hash 路由），所以這是文件層級的常數。
 // `/proposal-plan.html` 上點 `/#tab_x` 是一次**跨頁導覽**，會把企劃人員手上
@@ -191,7 +188,9 @@ function _goName(row, ctx) {
 
 function _itemHtml(it, canCheck, color, ctx) {
     const clickable = it.kind === 'manual' && canCheck;
-    const d = clickable ? null : _dest(it, ctx);
+    // 手動項不會帶 dest（後端只給未亮的自動燈），所以兩者互斥是資料保證的，
+    // 不必在這裡再用 clickable 擋一次
+    const d = _dest(it, ctx);
     const go = !!(d && d.allowed);
     // state/kind 本身就是 on|off|skip、auto|manual，直接當 class 用。
     // 「有連結」不另給 class —— 那就是 <a>（CSS 用 a.pflow-item 選）。

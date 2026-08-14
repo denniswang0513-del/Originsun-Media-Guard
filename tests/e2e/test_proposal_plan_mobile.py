@@ -14,12 +14,10 @@
 
 只在 dev / 測試資料庫上跑（會建一筆提案再刪掉）。生產庫直接 skip。
 """
-import uuid
 
-import httpx
 import pytest
 
-from .conftest import MOBILE
+from .conftest import HTTP, MOBILE, flow_case
 
 IOS_UA = ("Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) "
           "AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1")
@@ -27,22 +25,15 @@ IOS_UA = ("Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) "
 
 @pytest.fixture(scope="module")
 def proposal(real_server, e2e_admin_token, dev_db_only):
-    """一筆提案（含殼專案）+ 一條公開共編連結；跑完刪掉。"""
-    base = real_server["base_url"]
-    h = {"Authorization": f"Bearer {e2e_admin_token}"}
-    tag = uuid.uuid4().hex[:6]
-    r = httpx.post(f"{base}/api/v1/proposals", headers=h, timeout=60,
-                   json={"title": f"手機回歸_{tag}", "ptype": "品牌形象",
-                         "budget_range": "80-120萬"})
-    if r.status_code >= 400:
-        pytest.skip(f"建不出提案（{r.status_code}）：{r.text[:120]}")
-    p = r.json()["proposal"]
-    tok = httpx.post(f"{base}/api/v1/proposals/{p['id']}/plan/share",
-                     headers=h, timeout=60).json()["token"]
-    yield {"id": p["id"], "project_id": p["project_id"], "share": tok}
-    # 各刪各的 —— 交叉刪（拿提案 id 去打 projects）有機會刪到別人的 dev 資料
-    httpx.delete(f"{base}/api/v1/proposals/{p['id']}", headers=h, timeout=30)
-    httpx.delete(f"{base}/api/v1/crm/projects/{p['project_id']}", headers=h, timeout=30)
+    """一筆提案（含殼專案）+ 一條公開共編連結；跑完刪掉。
+
+    建/跳過/收的契約共用 conftest 的 flow_case（原本這裡抄了一份，而且少了
+    「沒有殼專案就 skip」—— 收尾那行會 KeyError 而不是乾淨跳過）。
+    """
+    with flow_case(real_server["base_url"], e2e_admin_token, "手機回歸") as c:
+        tok = HTTP.post(f"{c['base']}/api/v1/proposals/{c['prop_id']}/plan/share",
+                         headers=c["h"], timeout=60).json()["token"]
+        yield {"id": c["prop_id"], "project_id": c["project_id"], "share": tok}
 
 
 @pytest.fixture(scope="module")

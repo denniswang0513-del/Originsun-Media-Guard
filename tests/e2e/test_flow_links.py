@@ -63,10 +63,8 @@ def test_unlit_auto_lamps_link_to_their_tab(page, mount_flow, case, e2e_admin_to
     assert by["報價單已備"]["link"] == "/#tab_crm_quotes", by["報價單已備"]
     # 管理員什麼都進得去 → 一條都不該是禁用態
     assert not [i for i in items if i["blocked"]]
-    # 亮著的沒事可做、手動項就在這頁勾 —— 兩者都不該把人送走
-    for i in items:
-        if i["on"] or i["manual"]:
-            assert not i["link"], f"「{i['label']}」不該有連結"
+    # （亮著的／手動項沒有連結，是後端不給 dest 的結果 ——
+    #   由 test_project_flow.test_only_unlit_auto_rows_carry_a_destination 釘）
 
 
 def test_here_suppresses_links_back_to_this_workspace(page, mount_flow, case,
@@ -84,7 +82,7 @@ def test_here_suppresses_links_back_to_this_workspace(page, mount_flow, case,
         assert by[label]["link"] == "", f"「{label}」不該連回自己所在的工作區"
         assert not by[label]["blocked"], f"「{label}」不是權限問題，不該畫成禁用態"
     # 別處的燈照樣有連結（不是整片關掉）
-    assert by["報價單已備"]["link"] == "/#tab_crm_quotes"
+    assert by["報價單已備"]["link"] != ""
 
 
 def test_missing_module_disables_the_link_but_still_shows_it(page, mount_flow, case,

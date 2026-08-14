@@ -197,15 +197,18 @@ def real_server():
     base_url = "http://127.0.0.1:18000"
     deadline = time.time() + 15
     ready = False
-    while time.time() < deadline:
-        try:
-            r = httpx.get(f"{base_url}/api/v1/health", timeout=2.0)
-            if r.status_code == 200:
-                ready = True
-                break
-        except Exception:
-            pass
-        time.sleep(0.5)
+    # 共用一個 Client：模組層 `httpx.get` 每次重建 Client 要 ~158ms，比這裡
+    # 的輪詢間隔還久（等於實際週期是 0.66s 不是 0.5s）。連線被拒是立即返回的，
+    # 所以間隔可以縮到 0.1s，開機就緒後少空等最多半秒。
+    with httpx.Client(timeout=2.0) as probe:
+        while time.time() < deadline:
+            try:
+                if probe.get(f"{base_url}/api/v1/health").status_code == 200:
+                    ready = True
+                    break
+            except Exception:
+                pass
+            time.sleep(0.1)
 
     if not ready:
         proc.terminate()

@@ -13,7 +13,7 @@ import uuid
 
 from fastapi import APIRouter, HTTPException, Request  # type: ignore
 
-from core.auth import check_admin_or_module
+from core.auth import check_admin_or_module, tab_modules
 from core.schemas import IntelSourcePayload
 
 router = APIRouter(prefix="/api/v1/intel", tags=["intel"])
@@ -25,7 +25,7 @@ _SRC_FIELDS = ("name", "type", "url", "keywords", "note")
 
 
 def _check_auth(request: Request) -> dict:
-    return check_admin_or_module(request, "intel", "preprod_plan")
+    return check_admin_or_module(request, *tab_modules("intel"))
 
 
 from core.db_guard import db_factory_or_503 as _require_factory

@@ -17,7 +17,7 @@ from datetime import datetime, timezone
 from fastapi import APIRouter, HTTPException, Request  # type: ignore
 from fastapi.responses import FileResponse  # type: ignore
 
-from core.auth import check_admin_or_module
+from core.auth import check_admin_or_module, tab_modules
 from core.schemas import PortalApprovePayload, PortalCommentPayload, PortalLinkPayload
 
 router = APIRouter(prefix="/api/v1/portal", tags=["portal"])
@@ -38,7 +38,7 @@ _rate_counter: dict = {}   # token -> [minute_bucket, count]
 
 
 def _check_auth(request: Request) -> dict:
-    return check_admin_or_module(request, "portal", "crm_projects")
+    return check_admin_or_module(request, *tab_modules("portal"))
 
 
 from core.db_guard import db_factory_or_503 as _require_factory

@@ -11,7 +11,7 @@
 import re
 from pathlib import Path
 
-from core.auth import ALL_MODULES, TAB_ACCESS
+from core.auth import ALL_MODULES, TAB_ACCESS, tab_modules
 
 _ROOT = Path(__file__).resolve().parents[2]
 _TAB_CONFIG = "frontend/js/shared/tab-config.js"
@@ -22,8 +22,13 @@ def _js(path: str) -> str:
 
 
 def _js_body(const: str, path: str = _TAB_CONFIG) -> str:
-    """JS 物件/陣列常數的內容（`X = { … }` 或 `X = [ … ]` 之間那段）。"""
-    m = re.search(rf"{const}\s*=\s*[{{[](.*?)[}}\]];", _js(path), re.DOTALL)
+    """JS 常數的值（`X = ` 到句末 `;` 之間）。
+
+    不去配對外層的 {} / []：下面每個消費者都只在這段裡再抓自己要的東西，
+    留著外層括號完全無妨，而「要嘛大括號要嘛中括號」寫成字元類別（還要在
+    f-string 裡跳脫大括號）是這個檔最難讀的一行，還會接受頭尾不成對的東西。
+    """
+    m = re.search(rf"{const}\s*=\s*(.*?);\n", _js(path), re.DOTALL)
     assert m, f"{path} 找不到 {const} 定義（寫法改了？）"
     return m.group(1)
 
@@ -66,15 +71,68 @@ def test_no_duplicate_modules_across_groups():
 
 
 def test_tab_extra_access_matches_backend():
-    """🔴 `TAB_ACCESS` 是 router 閘門本身的參數；前端拿它決定 tab 看不看得見。
+    """🔴 前端拿 TAB_ACCESS 決定 tab 看不看得見，所以那份鏡射要一字不差。
 
-    漂掉的症狀不對稱、而且兩邊都難發現：前端**少**一個模組 → 那個人打 API
-    進得去、畫面上卻沒有那個 tab（2026-08-14 實例：提案庫漏了 preprod_plan）；
-    前端**多**一個 → 側欄畫得出來，點進去每支請求 403。
+    漂掉的症狀不對稱、兩邊都難發現：前端**少**一個模組 → 那個人打 API 進得去、
+    畫面上卻沒有那個 tab；前端**多**一個 → 側欄畫得出來，點進去每支請求 403。
     """
     front = {k: tuple(re.findall(r"'([^']+)'", v))
              for k, v in re.findall(r"(\w+)\s*:\s*\[([^\]]*)\]",
                                     _js_body("TAB_EXTRA_ACCESS"))}
-    # 後端列完整名單（含同名模組），前端只列「額外」的 —— 比對前先對齊形狀
-    back = {k: tuple(m for m in mods if m != k) for k, mods in TAB_ACCESS.items()}
-    assert front == back, f"TAB_EXTRA_ACCESS 與 core/auth.TAB_ACCESS 不同步：{front} vs {back}"
+    # 前端只列「額外」的，後端列完整名單 —— 把同名那個補回去再比。
+    # 方向刻意是「前端 → 後端」：反過來（從後端濾掉同名那個）的話，後端某列
+    # 忘了列自己的模組也會比成相等，而那正是要抓的漂移之一。
+    assert {k: (k, *extra) for k, extra in front.items()} == TAB_ACCESS, \
+        f"TAB_EXTRA_ACCESS 與 core/auth.TAB_ACCESS 不同步：{front} vs {TAB_ACCESS}"
+
+
+# 掃到但**不是 tab 級的門** —— 是某幾支端點自己放寬，tab 本身沒有跟著開。
+# 列在這裡是要逼人做決定（是漏改正本，還是真的只放寬這幾支端點），而不是
+# 讓掃描默默漏掉。
+_NOT_TAB_GATES = {
+    ("crm_invoices", "crm_projects"):
+        "api_cashflow：付款節點是專案側也要看的子功能，整個財務管理 tab 沒開放",
+    ("crm_projects", "preprod_proposals"):
+        "crm/proposal_assets：提案資產上傳（提案庫 tab 的按鈕），不是專案管理 tab 的門",
+}
+
+
+def test_tab_access_matches_the_real_router_gates():
+    """🔴 把「單一正本」從宣告變成事實 —— 掃 routers/ 比對真閘門。
+
+    沒有這支的話，`TAB_ACCESS` 只是**第三份**清單：它剛落地時就已經漏了五個
+    tab（portal / preprod_locations / footage / equipment / intel），而漏掉的
+    後果是工作流的燈對進得去的人說「你沒有這個模組權限」、側欄也不給那個 tab。
+    下一個在 router 裡直接寫 `check_admin_or_module(request, "a", "b")` 的人
+    會在這裡被擋下來。
+    """
+    tabs = _js_keys("TAB_MAP")
+    gates, root = {}, _ROOT / "routers"
+    pat = re.compile(r"check_admin_or_module\(\s*request,\s*((?:[\"'][a-z_]+[\"']\s*,?\s*)+)\)")
+    for path in sorted(root.rglob("*.py")):
+        for raw in pat.findall(path.read_text(encoding="utf-8")):
+            keys = tuple(re.findall(r"[\"']([a-z_]+)[\"']", raw))
+            # 只看「第一個 key 是某個 tab」的閘門 —— 那才是 tab 級的門。
+            # 單 key 的不算漂移（tab_modules 的預設就是它）。
+            if len(keys) > 1 and keys[0] in tabs:
+                gates.setdefault(keys[0], set()).add(keys)
+
+    stray = {tab: sorted(v - {tab_modules(tab)} - _NOT_TAB_GATES.keys())
+             for tab, v in gates.items()}
+    stray = {t: v for t, v in stray.items() if v}
+    assert not stray, (
+        "這些 tab 的閘門沒有走 core.auth.tab_modules（或與 TAB_ACCESS 不一致）："
+        f"{stray}；正本 = {TAB_ACCESS}。"
+        "若它其實是端點級放行而不是 tab 級的門，加進 _NOT_TAB_GATES 並寫下理由。")
+
+
+def test_flow_destinations_are_real_tabs():
+    """工作流「去完成」的目的地都要在 TAB_MAP 裡有 tab。
+
+    前端拿 `TAB_MAP[模組鍵]` 換 section id —— 換不到就**靜默不畫連結**，
+    畫面上不會有任何錯誤，只是那盞燈永遠帶不了人去做那件事。
+    住這裡是因為它同樣是「Python 常數 vs tab-config.js」的比對。
+    """
+    from core.project_flow import DESTS
+    missing = DESTS - _js_keys("TAB_MAP")
+    assert not missing, f"這些目的地在 TAB_MAP 裡沒有 tab：{sorted(missing)}"

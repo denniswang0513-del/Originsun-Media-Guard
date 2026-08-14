@@ -61,16 +61,18 @@ export const TAB_LOADERS = [
     ['website_admin', './tabs/website/website.html',         './tabs/website/website.js',         'initWebsiteTab'],
 ];
 
-// tab key → 本身模組之外也放行的模組（與各 router 的後端閘門對齊，改閘門要同步這裡）：
-// - 提案庫：api_proposals._check_auth 也收 crm_projects（提案進程與專案管理整合）
-// - 片庫：api_references._ACCESS_MODULES = references + 提案庫兩系 + crm_projects
-// 🔴 正本是 core/auth.py 的 TAB_ACCESS（那份又是 router 閘門本身的參數）。
-// 這份是跨語言的鏡射，由 tests/unit/test_rbac_module_sync 比對 —— 改後端
-// 閘門一定要同步這裡。（2026-08-14：preprod_plan 原本漏在提案庫這列，拍攝
-// 企劃的人打 API 進得去、畫面上卻沒有那個 tab。）
+// tab key → 本身模組之外也放行的模組。
+// 🔴 正本是 core/auth.py 的 TAB_ACCESS（那份就是各 router 閘門的參數）。
+// 這份是跨語言的鏡射（vanilla JS 沒有 build step，抄不掉），由
+// tests/unit/test_rbac_module_sync 比對 —— 漏改這裡的症狀見那份正本的註解。
 const TAB_EXTRA_ACCESS = {
     preprod_proposals: ['preprod_plan', 'crm_projects'],
     references: ['preprod_proposals', 'preprod_plan', 'crm_projects'],
+    portal: ['crm_projects'],
+    preprod_locations: ['preprod_plan'],
+    footage: ['transcribe'],
+    equipment: ['preprod_plan'],
+    intel: ['preprod_plan'],
 };
 
 export function shouldShowTab(key, authUser, modules) {

@@ -12,7 +12,7 @@ from datetime import datetime, timezone
 
 from fastapi import APIRouter, HTTPException, Request  # type: ignore
 
-from core.auth import check_admin_or_module
+from core.auth import check_admin_or_module, tab_modules
 from core.schemas import FootageScanRequest, FootageTagsPayload
 
 router = APIRouter(prefix="/api/v1/footage", tags=["footage"])
@@ -22,7 +22,7 @@ _scan_status = {"running": False, "last_result": None, "root": ""}
 
 
 def _guard(request: Request):
-    check_admin_or_module(request, "footage", "transcribe")
+    check_admin_or_module(request, *tab_modules("footage"))
 
 
 from core.db_guard import db_factory_or_503 as _factory_or_503

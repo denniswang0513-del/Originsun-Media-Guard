@@ -13,10 +13,9 @@ win/loss 都掛在專案狀態上。所以三件事要釘住：
 """
 import uuid
 
-import httpx
 import pytest
 
-from .conftest import flow_case
+from .conftest import HTTP, flow_case
 
 pytestmark = pytest.mark.e2e
 
@@ -24,13 +23,6 @@ pytestmark = pytest.mark.e2e
 @pytest.fixture(scope="module")
 def case(real_server, e2e_admin_token, dev_db_only):
     """唯讀那幾支共用一筆 —— 它們只是渲染或按了取消，什麼都沒改。"""
-    with flow_case(real_server["base_url"], e2e_admin_token, "推進回歸") as c:
-        yield c
-
-
-@pytest.fixture
-def fresh_case(real_server, e2e_admin_token, dev_db_only):
-    """會真的推進的那支專用 —— 改了狀態的專案不能留給別人重用。"""
     with flow_case(real_server["base_url"], e2e_admin_token, "推進回歸") as c:
         yield c
 
@@ -76,15 +68,25 @@ def test_cancel_does_not_advance(page, mount, case, e2e_admin_token):
     page.click("#advtest [data-advance]")
     page.wait_for_selector("#pflow-cancel", timeout=10000)
     page.click("#pflow-cancel")
-    page.wait_for_timeout(600)
+    page.wait_for_selector("#pflow-cancel", state="detached", timeout=10000)
 
-    d = httpx.get(f"{case['base']}/api/v1/crm/projects/{case['project_id']}/flow",
+    d = HTTP.get(f"{case['base']}/api/v1/crm/projects/{case['project_id']}/flow",
                   headers=case["h"], timeout=30).json()
     assert d["stage"]["status"] == "提案", f"取消後階段不該變：{d['stage']['status']}"
 
 
-def test_confirm_advances_and_runs_side_effects(page, mount, fresh_case, e2e_admin_token):
-    """🔴 確認後真的推進，而且走的是既有端點的副作用鏈（衛星提案跟著成案）。"""
+def test_confirm_advances_and_runs_side_effects(page, mount, real_server,
+                                                e2e_admin_token, dev_db_only):
+    """🔴 確認後真的推進，而且走的是既有端點的副作用鏈（衛星提案跟著成案）。
+
+    自己開一筆（不用上面那個 module 範圍的）—— 這支會真的改狀態，留給別人
+    重用的話，唯讀那幾支就變成依賴檔案順序才會過。
+    """
+    with flow_case(real_server["base_url"], e2e_admin_token, "推進回歸") as fresh_case:
+        _confirm_and_check(page, mount, fresh_case, e2e_admin_token)
+
+
+def _confirm_and_check(page, mount, fresh_case, e2e_admin_token):
     mount(fresh_case["project_id"], e2e_admin_token)
     page.click("#advtest [data-advance]")
     page.wait_for_selector("#pflow-go", timeout=10000)
@@ -93,14 +95,19 @@ def test_confirm_advances_and_runs_side_effects(page, mount, fresh_case, e2e_adm
     reason = "測試成案原因_" + uuid.uuid4().hex[:4]
     page.fill("#pflow-reason", reason)
     page.click("#pflow-go")
-    page.wait_for_timeout(2500)          # PATCH + renderFlow 重抓
+    # 🔴 等**條件**：PATCH + renderFlow 重畫完，階段列的目前站變成「製作」。
+    # 原本固定睡 2.5 秒 —— 實測條件在 50ms 就成立，而睡秒數的版本在機器變快
+    # 或變慢時都不對：它等於沒有等待條件，只是賭時鐘。
+    page.wait_for_function(
+        "() => [...document.querySelectorAll('#advtest .pflow-step.cur')]"
+        ".some(e => e.textContent.trim() === '製作')", timeout=20000)
 
-    d = httpx.get(f"{fresh_case['base']}/api/v1/crm/projects/{fresh_case['project_id']}/flow",
+    d = HTTP.get(f"{fresh_case['base']}/api/v1/crm/projects/{fresh_case['project_id']}/flow",
                   headers=fresh_case["h"], timeout=30).json()
     assert d["stage"]["status"] == "製作", f"階段沒推進：{d['stage']['status']}"
 
     # 副作用鏈：衛星提案標成案 + 原因寫進組織學習欄
-    gp = httpx.get(f"{fresh_case['base']}/api/v1/proposals/{fresh_case['prop_id']}",
+    gp = HTTP.get(f"{fresh_case['base']}/api/v1/proposals/{fresh_case['prop_id']}",
                    headers=fresh_case["h"], timeout=30).json()
     gp = gp.get("proposal") or gp
     assert gp["status"] == "成案", f"衛星提案沒跟著成案：{gp['status']}"

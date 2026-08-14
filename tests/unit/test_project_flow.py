@@ -8,10 +8,6 @@
 """
 from core import project_flow as pf
 
-# 抽前端常數的正本在 test_rbac_module_sync（那支就是為了「後端清單 vs
-# tab-config.js」而存在的）—— 不在這裡再造一份讀檔 + 解析。
-from .test_rbac_module_sync import _js_keys
-
 
 class TestTemplate:
     def test_item_keys_are_globally_unique(self):
@@ -185,7 +181,7 @@ class TestGates:
         out = pf.missing_for(self._tracks(approved=pf.OFF, settled=pf.OFF), "結案")
         assert self._keys(out["blocking"]) == ["approved"]
         assert self._keys(out["advisory"]) == ["settled"]
-        # 缺項與燈號列用同一個 dest 欄位名 —— 前端一支 `_dest()` 兩處通用
+        # 缺項與燈號列共用同一個 dest 欄位名（見 core.project_flow.missing_for）
         assert out["blocking"][0]["dest"] == pf.ITEM_DEST["approved"]
 
     def test_no_gate_for_unknown_target(self):
@@ -203,7 +199,6 @@ class TestDeepLinks:
     """
 
     def test_every_auto_item_has_a_destination(self):
-        """沒有去處的燈＝叫人自己去找，而這功能的價值正是「不用找」。"""
         assert sorted(pf.AUTO_KEYS - set(pf.ITEM_DEST)) == []
 
     def test_manual_items_have_no_destination(self):
@@ -216,13 +211,10 @@ class TestDeepLinks:
         for key in pf.DESTS:
             assert key in ALL_MODULES, f"{key} 不是合法的模組鍵"
 
-    def test_destination_keys_are_real_tabs(self):
-        """另一段：前端拿 TAB_MAP[模組鍵] 換 section id，換不到就靜默不畫。"""
-        missing = pf.DESTS - _js_keys("TAB_MAP")
-        assert not missing, f"這些目的地在 TAB_MAP 裡沒有 tab：{sorted(missing)}"
+    # 另一段（目的地在 TAB_MAP 裡有 tab）是跨語言比對 → 住在
+    # test_rbac_module_sync，那個檔就是為這種比對存在的。
 
     def test_only_unlit_auto_rows_carry_a_destination(self):
-        """連結只給未亮的自動燈：亮了的沒事可做、略過的更不用去。"""
         out = pf.build({"quote": True, "published": None},
                        {"shooting": {"checked": True}})
         rows = {r["key"]: r for t in out["tracks"] for r in t["items"]}

@@ -1398,7 +1398,7 @@ RBAC v2 原則沿用：權限＝帳號的 `modules[]`＋管理員開關，admin 
 2. `crm_project_flow_checks` 表 + check API + 勾選 UI（audit：checked_by）。
 3. 推進按鈕（走既有狀態端點）+ 缺項軟擋確認框。
 4. `/proposal-plan.html` 同步 + deep-links + 清單階段 chip。
-   - 4A ✅ deep-link「去完成」（2026-08-14）。實作與 §14.4 草案的三處差異：
+   - 4A ✅ deep-link「去完成」（2026-08-14）。實作與 §14.4 草案的四處差異：
      1. **目的地不另立一組 key**：目的地就是一個 tab，tab 的鍵就是模組鍵，
         所以 `core.project_flow.ITEM_DEST` 只放模組鍵，前端用既有的
         `TAB_MAP` 換 section、`tabLabel()` 換中文名 —— 不再多一張

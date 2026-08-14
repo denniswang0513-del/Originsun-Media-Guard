@@ -11,6 +11,12 @@ from playwright.sync_api import sync_playwright
 # 手機視窗（iPhone 14）—— 幾支測試共用同一組尺寸
 MOBILE = {"width": 390, "height": 844}
 
+# 🔴 **不要用 httpx 的模組層 `httpx.get/post/delete`**：那些每次都重建一個
+# Client，實測 175ms/次，其中 158ms 純粹是建 Client（憑證/環境/transport）——
+# 對 127.0.0.1 的純 HTTP 也一樣。共用一個降到 4ms/次。
+# retries=1：共用連線偶爾會撞到伺服器端關掉的 keep-alive。
+HTTP = httpx.Client(transport=httpx.HTTPTransport(retries=1), timeout=60)
+
 
 @pytest.fixture(scope="module")
 def e2e_admin_token():
@@ -72,7 +78,11 @@ def page(browser_context, real_server):
     p.on("console", lambda msg: print(f"[BROWSER {msg.type}] {msg.text}"))
     p.goto(real_server["base_url"] + "/", timeout=60000)
     p.wait_for_load_state("domcontentloaded")
-    p.wait_for_timeout(3000)  # Allow dynamic tabs to load
+    # 等 loadTabs() 把各 section 填好 —— 等**條件**不是等秒數（實測 0.29s 就
+    # 到位，原本固定睡 3 秒）。逾時放寬到 30s：慢機只是慢，不該因此變紅。
+    p.wait_for_function(
+        "() => [...document.querySelectorAll('.tab-content')]"
+        ".some(s => s.children.length > 0)", timeout=30000)
     yield p
     p.close()
 
@@ -87,7 +97,7 @@ def flow_case(base, token, title):
     會把測試資料寫進生產庫的部分。
     """
     h = {"Authorization": f"Bearer {token}"}
-    r = httpx.post(f"{base}/api/v1/proposals", headers=h, timeout=60,
+    r = HTTP.post(f"{base}/api/v1/proposals", headers=h,
                    json={"title": f"{title}_{uuid.uuid4().hex[:6]}", "ptype": "其他"})
     if r.status_code >= 400:
         pytest.skip(f"建不出提案（{r.status_code}）：{r.text[:120]}")
@@ -99,9 +109,8 @@ def flow_case(base, token, title):
                "prop_id": p["id"], "project_id": p["project_id"]}
     finally:
         # 各刪各的 —— 交叉刪（拿提案 id 去打 projects）有機會刪到別人的 dev 資料
-        httpx.delete(f"{base}/api/v1/proposals/{p['id']}", headers=h, timeout=30)
-        httpx.delete(f"{base}/api/v1/crm/projects/{p['project_id']}",
-                     headers=h, timeout=30)
+        HTTP.delete(f"{base}/api/v1/proposals/{p['id']}", headers=h)
+        HTTP.delete(f"{base}/api/v1/crm/projects/{p['project_id']}", headers=h)
 
 
 @pytest.fixture
@@ -117,7 +126,9 @@ def mount_flow(page):
     """
     made = []
 
-    def _do(project_id, token, *, host_id="flowhost", wait=".pflow-track",
+    # host_id 沒有預設：每支測試的選擇器都寫死自己那個 id，給預設只會讓
+    # 「made 收得齊不齊」變成要去看有沒有人漏傳
+    def _do(project_id, token, *, host_id, wait=".pflow-track",
             here="preprod_proposals"):
         # here 的預設值＝兩個真實掛載點都傳的那個（提案工作區）。測試要驗
         # 「沒有 here 時那幾盞燈就有連結」才明確傳 ''。

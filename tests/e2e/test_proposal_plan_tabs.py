@@ -14,38 +14,24 @@
 """
 import uuid
 
-import httpx
 import pytest
+
+from .conftest import HTTP, flow_case
 
 pytestmark = pytest.mark.e2e
 
 
 @pytest.fixture(scope="module")
 def prop(real_server, e2e_admin_token, dev_db_only):
-    base = real_server["base_url"]
-    h = {"Authorization": f"Bearer {e2e_admin_token}"}
-    tag = uuid.uuid4().hex[:6]
-    # 要帶 client_id 才會建殼專案 —— 沒有殼專案就沒有「進度」分頁可驗
-    # （db.models.CrmProject：只有提案建殼這條路允許 client_id 為空）
-    rc = httpx.post(f"{base}/api/v1/crm/clients", headers=h, timeout=60,
-                    json={"name": f"[分頁回歸] {tag}", "short_name": f"TAB{tag}"})
-    if rc.status_code >= 400:
-        pytest.skip(f"建不出客戶（{rc.status_code}）：{rc.text[:120]}")
-    cid = rc.json().get("id") or (rc.json().get("client") or {}).get("id")
+    """建/跳過/收的契約共用 conftest 的 flow_case。
 
-    r = httpx.post(f"{base}/api/v1/proposals", headers=h, timeout=60,
-                   json={"title": f"分頁回歸_{tag}", "ptype": "品牌形象",
-                         "client_id": cid})
-    if r.status_code >= 400:
-        httpx.delete(f"{base}/api/v1/crm/clients/{cid}", headers=h, timeout=30)
-        pytest.skip(f"建不出提案（{r.status_code}）：{r.text[:120]}")
-    p = r.json()["proposal"]
-    yield {"id": p["id"], "project_id": p.get("project_id") or "", "base": base, "h": h}
-    # 各刪各的 —— 交叉刪（拿提案 id 去打 projects）有機會刪到別人的 dev 資料
-    httpx.delete(f"{base}/api/v1/proposals/{p['id']}", headers=h, timeout=30)
-    if p.get("project_id"):
-        httpx.delete(f"{base}/api/v1/crm/projects/{p['project_id']}", headers=h, timeout=30)
-    httpx.delete(f"{base}/api/v1/crm/clients/{cid}", headers=h, timeout=30)
+    原本這裡自己建了一個客戶，理由寫的是「要帶 client_id 才會建殼專案」——
+    那句是錯的（api_proposals._create_shell_project：客戶未定也照建），而且
+    本檔沒有任何斷言用到那個客戶。
+    """
+    with flow_case(real_server["base_url"], e2e_admin_token, "分頁回歸") as c:
+        yield {"id": c["prop_id"], "project_id": c["project_id"],
+               "base": c["base"], "h": c["h"]}
 
 
 @pytest.fixture(scope="module")
@@ -57,14 +43,23 @@ def pg(browser_context, real_server, e2e_admin_token, prop):
               timeout=60000)
     # 側欄要等 _showSideTabs() 把 #plan-side 顯示出來（在資料載完之後）
     page.wait_for_selector("#plan-side .side-tab", state="visible", timeout=30000)
-    page.wait_for_timeout(1200)
+    _settled(page)
     yield page
     page.close()
 
 
+def _settled(pg):
+    """等基本資料那格真的填好 —— 等條件不是等秒數（實測 0.25s，原本睡 1.2s）。"""
+    pg.wait_for_function("() => document.getElementById('info-host')?.children.length > 0",
+                         timeout=30000)
+
+
 def _open(pg, ptab):
     pg.click(f'#plan-side .side-tab[data-ptab="{ptab}"]')
-    pg.wait_for_timeout(800)
+    # 分頁是 lazy import 的 → 等那格有東西，不要睡固定秒數
+    pg.wait_for_function(
+        "id => document.getElementById(id)?.children.length > 0",
+        arg=f"{ptab}-host", timeout=30000)
 
 
 def test_refs_tab_exists_and_renders(pg):
@@ -85,20 +80,20 @@ def test_ref_note_autosave_survives_reload(pg, prop):
     """🔴 搬家最容易斷的是自動儲存接線 —— 改一個字要真的存進 DB。"""
     base, h = prop["base"], prop["h"]
     # 兩步（同 prop-actions.addRefByUrl）：先進共用片庫，再掛到這個提案
-    r = httpx.post(f"{base}/api/v1/proposals/references", headers=h, timeout=60,
+    r = HTTP.post(f"{base}/api/v1/proposals/references", headers=h, timeout=60,
                    json={"url": f"https://example.com/{uuid.uuid4().hex[:8]}",
                          "title": "原標題"})
     if r.status_code >= 400:
         pytest.skip(f"加不進片庫（{r.status_code}）：{r.text[:120]}")
     rid = r.json()["reference"]["id"]
-    r2 = httpx.post(f"{base}/api/v1/proposals/{prop['id']}/refs", headers=h,
+    r2 = HTTP.post(f"{base}/api/v1/proposals/{prop['id']}/refs", headers=h,
                     timeout=60, json={"reference_id": rid})
     if r2.status_code >= 400:
         pytest.skip(f"掛不上提案（{r2.status_code}）：{r2.text[:120]}")
 
     pg.reload(timeout=60000)
     pg.wait_for_selector("#plan-side .side-tab", timeout=30000)
-    pg.wait_for_timeout(1200)
+    _settled(pg)
     _open(pg, "refs")
     pg.wait_for_selector('#refs-host .ref-in[data-rfield="note"]', timeout=15000)
 
@@ -107,7 +102,7 @@ def test_ref_note_autosave_survives_reload(pg, prop):
     pg.eval_on_selector('#refs-host .ref-in[data-rfield="note"]', "e => e.blur()")
     pg.wait_for_timeout(1500)            # debounce 800ms + 一趟 API
 
-    fresh = httpx.get(f"{base}/api/v1/proposals/{prop['id']}", headers=h, timeout=30).json()
+    fresh = HTTP.get(f"{base}/api/v1/proposals/{prop['id']}", headers=h, timeout=30).json()
     refs = (fresh.get("proposal") or fresh).get("references") or []
     assert refs and refs[0].get("note") == want, \
         f"備註沒存進 DB（接線斷了）：{[r.get('note') for r in refs]}"
@@ -115,9 +110,6 @@ def test_ref_note_autosave_survives_reload(pg, prop):
 
 def test_flow_tab_renders_with_light_theme(pg, prop):
     """進度分頁在白底頁上要吃得到主題變數（元件預設是深色）。"""
-    if not prop["project_id"]:
-        pytest.skip("這筆提案沒有殼專案（無 client_id），進度分頁本來就不建")
-
     tabs = pg.eval_on_selector_all(
         "#plan-side .side-tab", "els => els.map(e => e.textContent.trim())")
     assert "進度" in tabs, f"側欄沒有進度分頁：{tabs}"

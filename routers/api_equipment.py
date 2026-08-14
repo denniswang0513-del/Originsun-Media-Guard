@@ -15,7 +15,7 @@ from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, File, HTTPException, Request, UploadFile  # type: ignore
 
-from core.auth import check_admin_or_module
+from core.auth import check_admin_or_module, tab_modules
 from core.schemas import (
     EquipmentCheckoutPayload,
     EquipmentMaintenancePayload,
@@ -39,7 +39,7 @@ _EQUIP_FIELDS = (
 
 
 def _check_auth(request: Request) -> dict:
-    return check_admin_or_module(request, "equipment", "preprod_plan")
+    return check_admin_or_module(request, *tab_modules("equipment"))
 
 
 from core.db_guard import db_factory_or_503 as _require_factory

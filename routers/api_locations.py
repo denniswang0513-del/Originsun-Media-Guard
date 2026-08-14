@@ -15,7 +15,7 @@ from typing import List
 
 from fastapi import APIRouter, File, HTTPException, Request, UploadFile  # type: ignore
 
-from core.auth import check_admin_or_module
+from core.auth import check_admin_or_module, tab_modules
 from core.schemas import LocationPayload, LocationUsagePayload
 
 router = APIRouter(prefix="/api/v1/locations", tags=["locations"])
@@ -34,7 +34,7 @@ _LOC_FIELDS = (
 
 
 def _check_auth(request: Request) -> dict:
-    return check_admin_or_module(request, "preprod_locations", "preprod_plan")
+    return check_admin_or_module(request, *tab_modules("preprod_locations"))
 
 
 from core.db_guard import db_factory_or_503 as _require_factory

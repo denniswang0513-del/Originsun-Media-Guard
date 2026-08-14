@@ -155,21 +155,26 @@ def grant_admin_all_modules(access_level, modules):
     return list(ALL_MODULES) if (access_level or 0) >= 3 else modules
 
 
-# 進得去某個 tab 的模組（任一即可）。**只列同名模組以外還放行的那幾個**，
-# 其餘 tab 一律「只有同名模組」，由 tab_modules() 補上。
+# 進得去某個 tab 的模組（任一即可）。**只有需要額外放行的 tab 才列一行**，
+# 值是完整名單（含同名模組）；其餘由 tab_modules() 回 (key,)。
 #
 # 為什麼住在這裡：這幾個 tuple 本來就是 `check_admin_or_module` 的參數，而這支
 # 檔案已經是「admin 或模組」這條規則的正本（見 payload_grants）。原本它們散在
 # 各自的 router 裡，於是「誰進得去提案庫」在 repo 裡有三份（router 的閘門、
 # tab-config.js 的 TAB_EXTRA_ACCESS、加上工作流 deep-link 要不要畫成可點），
 # 而且**已經漂了**：router 收 preprod_plan，前端那份沒有 —— 拍攝企劃的人打
-# API 進得去，畫面上卻看不到那個 tab。
+# API 進得去，畫面上卻看不到那個 tab，而工作流的燈還會對他說「你沒有權限」。
 #
-# 前端的 TAB_EXTRA_ACCESS 是跨語言的鏡射（vanilla JS 無 build step，抄不掉），
-# 由 tests/unit/test_rbac_module_sync 比對 —— 那是這個 repo 既有的慣例。
+# 兩道測試把這份釘成事實而不是宣告（tests/unit/test_rbac_module_sync）：
+# 掃 routers/ 比對真閘門、比對 tab-config.js 的跨語言鏡射。
 TAB_ACCESS: dict = {
     'preprod_proposals': ('preprod_proposals', 'preprod_plan', 'crm_projects'),
     'references': ('references', 'preprod_proposals', 'preprod_plan', 'crm_projects'),
+    'portal': ('portal', 'crm_projects'),
+    'preprod_locations': ('preprod_locations', 'preprod_plan'),
+    'footage': ('footage', 'transcribe'),
+    'equipment': ('equipment', 'preprod_plan'),
+    'intel': ('intel', 'preprod_plan'),
 }
 
 
