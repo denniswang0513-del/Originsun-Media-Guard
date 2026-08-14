@@ -137,11 +137,12 @@ def test_flow_tab_renders_with_light_theme(pg, prop):
 
 
 def test_flow_deep_links_open_a_new_tab_here(pg, prop):
-    """🔴 這頁沒有 `window.switchTab` —— 「去完成」必須開新分頁。
+    """🔴 這頁不是 SPA —— 「去完成」必須開新分頁。
 
-    後台 SPA 那條路是原地換 tab（test_flow_links 驗），走的是同一支
-    `_inSpa()` 能力偵測；**只有在這頁看得到它另一半有沒有做對**。做錯的
-    症狀是點下去毫無反應（href 的 `/#tab_x` 對這頁只是換個 hash）。
+    後台 SPA 那條路是原地換 tab（`/#tab_x` 只換 hash，test_flow_links 驗）；
+    **同一個 href 從這頁點下去卻是一次跨頁導覽**，會把企劃人員手上正在編的
+    東西整個帶走。判斷是 `_sameDoc()`（比對 pathname），只有在這頁看得到它
+    另一半有沒有做對。
     """
     if not prop["project_id"]:
         pytest.skip("這筆提案沒有殼專案（無 client_id），進度分頁本來就不建")
@@ -149,7 +150,7 @@ def test_flow_deep_links_open_a_new_tab_here(pg, prop):
     _open(pg, "flow")
     pg.wait_for_selector("#flow-host .pflow-track", timeout=20000)
     links = pg.eval_on_selector_all(
-        "#flow-host a[data-go]",
+        "#flow-host a.pflow-item, #flow-host a.pflow-golink",
         "els => els.map(e => ({ href: e.getAttribute('href'),"
         " target: e.getAttribute('target') }))")
     assert links, "空專案的未亮燈上一條 deep-link 都沒有"

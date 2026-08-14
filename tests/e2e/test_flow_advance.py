@@ -16,24 +16,16 @@ import uuid
 import httpx
 import pytest
 
+from .conftest import flow_case
+
 pytestmark = pytest.mark.e2e
 
 
 @pytest.fixture
 def case(real_server, e2e_admin_token, dev_db_only):
     """每個測試一筆新提案 —— 推進會改狀態，共用會讓測試互相汙染。"""
-    base = real_server["base_url"]
-    h = {"Authorization": f"Bearer {e2e_admin_token}"}
-    r = httpx.post(f"{base}/api/v1/proposals", headers=h, timeout=60,
-                   json={"title": f"推進回歸_{uuid.uuid4().hex[:6]}", "ptype": "其他"})
-    if r.status_code >= 400:
-        pytest.skip(f"建不出提案（{r.status_code}）：{r.text[:120]}")
-    p = r.json()["proposal"]
-    if not p.get("project_id"):
-        pytest.skip("這筆提案沒有殼專案")
-    yield {"base": base, "h": h, "prop_id": p["id"], "project_id": p["project_id"]}
-    httpx.delete(f"{base}/api/v1/proposals/{p['id']}", headers=h, timeout=30)
-    httpx.delete(f"{base}/api/v1/crm/projects/{p['project_id']}", headers=h, timeout=30)
+    with flow_case(real_server["base_url"], e2e_admin_token, "推進回歸") as c:
+        yield c
 
 
 @pytest.fixture

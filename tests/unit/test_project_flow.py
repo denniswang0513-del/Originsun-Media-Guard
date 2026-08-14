@@ -6,7 +6,21 @@
   ② 訊號撈不到寧可顯示未完成，不准謊報完成
   ③ 「略過」不是「未完成」（不上官網的案子不該卡在官網那盞燈）
 """
+import re
+
 from core import project_flow as pf
+
+# 從前端原始碼抽常數 —— `_js` 的正本在 test_rbac_module_sync（它就是為了
+# 「後端清單 vs tab-config.js」而存在的），不要在這裡再造一份讀檔 + 解碼。
+from .test_rbac_module_sync import _js
+
+
+def _js_keys(const: str) -> set:
+    """tab-config.js 裡某個物件常數的鍵集合。"""
+    body = re.search(rf"{const} = \{{(.*?)\n\}};",
+                     _js("frontend/js/shared/tab-config.js"), re.S)
+    assert body, f"{const} 解析失敗（tab-config.js 的寫法改了？）"
+    return set(re.findall(r"(\w+)\s*:", body.group(1)))
 
 
 class TestTemplate:
@@ -203,31 +217,41 @@ class TestDeepLinks:
         """手動項就在這頁勾，不該把人送去別的地方。"""
         assert not set(pf.MANUAL_KEYS) & set(pf.ITEM_DEST)
 
-    def test_destinations_are_declared(self):
-        for ik, dest in pf.ITEM_DEST.items():
-            assert dest in pf.DESTS, f"{ik} 指向未宣告的目的地 {dest}"
-
     def test_destination_keys_are_real_rbac_modules(self):
         """🔴 目的地的鍵**就是**模組鍵 —— 打錯字的話 `payload_grants` 對
         每個人都回 False，連管理員都看到「你沒有這個權限」。"""
         from core.auth import ALL_MODULES
         for key in pf.DESTS:
             assert key in ALL_MODULES, f"{key} 不是合法的模組鍵"
+        for key in pf.DEST_ALSO:
+            assert key in pf.DESTS, f"DEST_ALSO 放行了沒人用的目的地 {key}"
+            for m in pf.DEST_ALSO[key]:
+                assert m in ALL_MODULES, f"{key} 額外放行了非法模組 {m}"
 
     def test_destination_keys_are_real_tabs(self):
         """🔴 另一半：前端拿 TAB_MAP[模組鍵] 換 section id，換不到就靜默不畫。
 
         直接讀 tab-config.js 比對 —— 那份是前端的正本，兩邊靠字串接。
         """
-        import re
-        from pathlib import Path
-        src = Path(__file__).resolve().parents[2] / "frontend/js/shared/tab-config.js"
-        body = re.search(r"export const TAB_MAP = \{(.*?)\n\};",
-                         src.read_text(encoding="utf-8"), re.S).group(1)
-        tabs = set(re.findall(r"(\w+)\s*:\s*'", body))
-        assert tabs, "TAB_MAP 解析失敗（tab-config.js 的寫法改了？）"
-        for key in pf.DESTS:
-            assert key in tabs, f"{key} 在 TAB_MAP 裡沒有對應的 tab"
+        assert not (pf.DESTS - _js_keys("TAB_MAP")), \
+            f"這些目的地在 TAB_MAP 裡沒有 tab：{sorted(pf.DESTS - _js_keys('TAB_MAP'))}"
+
+    def test_extra_access_matches_the_frontend_rule(self):
+        """🔴 `allowed` 只認同名模組的話，提案企劃人員會在自己**進得去**的
+        片庫／提案庫上看到「你沒有這個模組權限」。
+
+        比對 tab-config.js 的 TAB_EXTRA_ACCESS —— 那份是「誰看得到這個
+        tab」的正本（它自己又鏡射各 router 的真閘門）。兩邊漂了就紅。
+        """
+        src = _js("frontend/js/shared/tab-config.js")
+        body = re.search(r"TAB_EXTRA_ACCESS = \{(.*?)\n\};", src, re.S).group(1)
+        front = {k: tuple(re.findall(r"'([^']+)'", v))
+                 for k, v in re.findall(r"(\w+)\s*:\s*\[([^\]]*)\]", body)}
+        assert front, "TAB_EXTRA_ACCESS 解析失敗（tab-config.js 的寫法改了？）"
+        for key, extra in front.items():
+            if key in pf.DESTS:
+                assert pf.DEST_ALSO.get(key, ()) == extra, \
+                    f"{key} 的額外放行與前端不一致：{pf.DEST_ALSO.get(key, ())} vs {extra}"
 
     def test_only_unlit_auto_rows_carry_a_destination(self):
         """亮了的沒事可做、略過的更不用去 —— 連結只給未亮的自動燈。

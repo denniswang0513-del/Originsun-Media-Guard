@@ -11,7 +11,7 @@
  * 🔴 UI 無 emoji（owner 2026-07-17 鐵則）：新 UI 一律純文字。
  */
 import { ensureStyle, esc } from '../../js/shared/utils.js';
-import { TAB_MAP } from '../../js/shared/tab-config.js';
+import { TAB_MAP, tabLabel } from '../../js/shared/tab-config.js';
 import { tfetch } from './prop-fetch.js';
 
 // 軌色沿用四段進度條的既有色彙（備份藍/轉檔橘/串接綠/報表紫）—— 同事已經
@@ -68,9 +68,8 @@ html.plan-theme-light .pflow { --pf-ink:#262626; --pf-sub:#737373; --pf-line:#e5
    沒權限的還是畫，只是更淡：不藏功能，讓人知道有這條路、缺什麼權限。
    走 ::after 而不是塞一個 <span>：它是裝飾不是內容 —— 混進 textContent 的話
    連結的可及性名稱會多一個箭頭念出來，讀燈號名的測試也要各自去剝它。 */
-.pflow-item.go::after, .pflow-item.nogo::after { content:'↗'; font-size:10px;
-    margin-left:1px; }
-.pflow-item.go::after { opacity:.7; }
+a.pflow-item::after, .pflow-item.nogo::after { content:'↗'; font-size:10px;
+    margin-left:1px; opacity:.7; }
 .pflow-item.nogo::after { opacity:.3; }
 .pflow-golink { color:inherit; text-decoration:underline dotted; }
 .pflow-golink:hover { text-decoration-style:solid; }
@@ -138,55 +137,76 @@ function _why(it, clickable) {
                      : `${it.label}：需要專案管理權限才能標記`;
 }
 
+// 後台 SPA 的網址。deep-link 一律指這裡的 `#<section>`：SPA 從開頁
+// （app.js 讀 location.hash）到之後的 hashchange 都吃這個形式，所以一條純
+// `<a>` 就會換 tab —— 不必攔 click，也不必碰 `window.switchTab`（那是這個
+// 模組**沒有**、也不准 import 的東西：它會被 serve 到 NAS 對外容器）。
+const SPA = '/';
+
 /**
  * 「去完成」的去處。`dest` 只在該畫連結時才由後端給（未亮的自動燈 ——
  * 見 core.project_flow.build），所以這裡不重新判斷 state。
  *
- * 🔴 目的地的鍵**就是模組鍵**，而 TAB_MAP 也是用模組鍵鍵的 → 一張既有的表
- * 就換得到 section id，不必再維護第二份「目的地 → 網址」對照（那份會跟後端
- * 的 DESTS 漂掉）。換不到（有模組但沒 tab）就不畫 —— 不畫點了沒反應的東西。
+ * 🔴 目的地的鍵**就是模組鍵**，TAB_MAP 與 tabLabel 也都是用模組鍵鍵的 →
+ * 既有的表就換得到 section id 與中文名，不必再維護第二份對照。
+ * 換不到（有模組但沒 tab，如 me_*）就不畫 —— 不畫點了沒反應的東西。
+ * 已經站在那個 tab 上也不畫：同一個 hash 點下去什麼都不會發生。
  */
 function _dest(row, links) {
-    const L = row.dest && links[row.dest];
-    const section = L && TAB_MAP[row.dest];
-    return (L && section) ? { section, label: L.label, allowed: !!L.allowed } : null;
+    const section = row.dest && TAB_MAP[row.dest];
+    if (!section || (_sameDoc() && location.hash === '#' + section)) return null;
+    return { section, label: tabLabel(row.dest), allowed: !!links[row.dest] };
 }
 
-/** deep-link 的 href/target。SPA 裡由 _onHit 接走做原地切換，其他頁
- *  （/proposal-plan.html）就讓瀏覽器自己開新分頁。
- *  寫成真的 `<a href>` 而不是 onclick —— 中鍵/Ctrl 點開新分頁、右鍵複製連結
- *  是使用者本來就會做的事，span 一律做不到。 */
-function _goAttrs(section, inSpa) {
-    return ` href="/#${esc(section)}" data-go="${esc(section)}"`
-         + (inSpa ? '' : ' target="_blank" rel="noopener"');
+/** 這一頁**就是** SPA 嗎？是的話 `/#tab_x` 只是換 hash（原地換 tab）；
+ *  不是的話（/proposal-plan.html）那是一次跨頁導覽，會把使用者手上的東西
+ *  帶走 → 開新分頁。預設偏保守：判斷不出來就開新分頁，最壞是多一個分頁，
+ *  而不是弄丟正在編輯的內容。 */
+function _sameDoc() {
+    return location.pathname === SPA;
 }
 
-function _itemHtml(it, canCheck, color, links, inSpa) {
+/** deep-link 的屬性。寫成真的 `<a href>` 而不是 onclick —— Ctrl 點開新分頁、
+ *  右鍵複製連結是使用者本來就會做的事，span 一律做不到。 */
+function _goAttrs(section, sameDoc = _sameDoc()) {
+    return ` href="${SPA}#${esc(section)}"`
+         + (sameDoc ? '' : ' target="_blank" rel="noopener"');
+}
+
+/** 缺項的名字：進得去就是一條 deep-link，進不去就純文字（不畫點不動的連結）。
+ *  燈號列、缺項橫幅、推進確認框三處共用 —— 分開寫的話，連結的 class、
+ *  tooltip 與 fallback 就有三份要一起改。 */
+function _goName(row, links, sameDoc, wrap = esc) {
+    const d = _dest(row, links);
+    const text = wrap(row.label);
+    return (d && d.allowed)
+        ? `<a class="pflow-golink"${_goAttrs(d.section, sameDoc)}`
+          + ` title="去「${esc(d.label)}」完成">${text}</a>` : text;
+}
+
+function _itemHtml(it, canCheck, color, links, sameDoc) {
     const clickable = it.kind === 'manual' && canCheck;
     const d = clickable ? null : _dest(it, links);
     const go = !!(d && d.allowed);
-    // state/kind 本身就是 on|off|skip、auto|manual，直接當 class 用
+    // state/kind 本身就是 on|off|skip、auto|manual，直接當 class 用。
+    // 「有連結」不另給 class —— 那就是 <a>（CSS 用 a.pflow-item 選）。
     const cls = `pflow-item ${it.state} ${it.kind}`
-              + (clickable || go ? ' clickable' : '') + (d ? (go ? ' go' : ' nogo') : '');
+              + (clickable || go ? ' clickable' : '') + (d && !go ? ' nogo' : '');
     // 顏色一律傳下去（由 CSS 決定亮不亮），純 class 切換就有正確視覺
     const dot = `<span class="pflow-dot" style="--dot:${color}"></span>`;
-    let tag = 'span', attrs = '', tip = _why(it, clickable);
-    if (clickable) {
-        attrs = ` data-check="${esc(it.key)}" role="button" tabindex="0"`;
-    } else if (go) {
-        tag = 'a';
-        attrs = _goAttrs(d.section, inSpa);
-        tip += `　→ 去「${d.label}」完成`;
-    } else if (d) {
-        tip += `　→ 在「${d.label}」完成（你的帳號沒有這個模組權限）`;
-    }
+    const tag = go ? 'a' : 'span';
+    const attrs = clickable ? ` data-check="${esc(it.key)}" role="button" tabindex="0"`
+                : go ? _goAttrs(d.section, sameDoc) : '';
+    const tip = _why(it, clickable) + (!d ? ''
+              : go ? `　→ 去「${d.label}」完成`
+                   : `　→ 在「${d.label}」完成（你的帳號沒有這個模組權限）`);
     return `<${tag} class="${cls}"${attrs} title="${esc(tip)}">`
          + `${dot}${esc(it.label)}</${tag}>`;
 }
 
-function _trackHtml(t, canCheck, links, inSpa) {
+function _trackHtml(t, canCheck, links, sameDoc) {
     const color = TRACK_COLOR[t.key] || '#888';
-    const items = t.items.map(i => _itemHtml(i, canCheck, color, links, inSpa)).join('');
+    const items = t.items.map(i => _itemHtml(i, canCheck, color, links, sameDoc)).join('');
     return `<div class="pflow-track">
         <div class="pflow-tname" style="color:${color}">${esc(t.label)}</div>
         <div class="pflow-items">${items}</div>
@@ -197,44 +217,32 @@ function _trackHtml(t, canCheck, links, inSpa) {
 /** 後端已經把缺項拆成 blocking / advisory 兩袋 —— 前端不重新詮釋那個語意。
  *  （形狀由 core.project_flow.missing_for 保證，單元測試釘住兩個 key 一定在，
  *  所以這裡直接解構、不層層補預設值。） */
-function _missingHtml({ blocking, advisory }, next, links, inSpa) {
+function _missingHtml({ blocking, advisory }, next, links, sameDoc) {
     if (!blocking.length && !advisory.length) return '';
     // 缺項也帶去處（規格 §14.4「各附 deep-link」）—— 缺項橫幅正是最該能直接
-    // 動身的地方。沒權限就退回純文字，不畫一條點不動的連結。
-    const name = (m, bold) => {
-        const d = _dest(m, links);
-        const t = bold ? `<b>${esc(m.label)}</b>` : esc(m.label);
-        return (d && d.allowed)
-            ? `<a class="pflow-golink"${_goAttrs(d.section, inSpa)}`
-              + ` title="去「${esc(d.label)}」完成">${t}</a>` : t;
-    };
+    // 動身的地方
     const parts = [];
     if (blocking.length) {
         parts.push(`推進到「${esc(next)}」前建議先完成：` +
-            blocking.map(m => name(m, true)).join('、'));
+            blocking.map(m => _goName(m, links, sameDoc, s => `<b>${esc(s)}</b>`))
+                    .join('、'));
     }
     if (advisory.length) {
         parts.push(`<span class="adv">提醒（不影響推進）：` +
-            advisory.map(m => name(m, false)).join('、') + `</span>`);
+            advisory.map(m => _goName(m, links, sameDoc)).join('、') + `</span>`);
     }
     return `<div class="pflow-miss">${parts.join('<br>')}</div>`;
 }
 
 /**
  * @param host   掛載節點
- * @param opts   { projectId, onAdvanced, onNavigate }  —— 沒有殼專案的提案
- *               不要呼叫這支。
+ * @param opts   { projectId, onAdvanced }  —— 沒有殼專案的提案不要呼叫這支。
  *               onAdvanced(status) 在推進成功後呼叫，讓呼叫端更新自己那份
- *               （詳情標頭的狀態、清單的階段 chip…）。
- *               onNavigate() 在 SPA 裡原地切走 tab **之前**呼叫 —— 掛在
- *               overlay 裡的話要先關掉它，不然切過去的畫面被蓋在底下。
- *               這個模組不自己去 remove 別人的 DOM：誰掛的誰收。
- *               用回呼而不是全域 CustomEvent —— 這個模組的既有慣例
- *               （onPlanStarted / toast / onSaved）都是回呼，而全域事件沒有
- *               owner，之後要拆得 grep 全 repo。
+ *               （詳情標頭的狀態、清單的階段 chip…）。用回呼而不是全域
+ *               CustomEvent —— 這個模組的既有慣例（onPlanStarted / toast /
+ *               onSaved）都是回呼，而全域事件沒有 owner，之後要拆得 grep 全 repo。
  */
-export async function renderFlow(host, { projectId, onAdvanced = null,
-                                         onNavigate = null }) {
+export async function renderFlow(host, { projectId, onAdvanced = null }) {
     ensureStyle('pflow-css', CSS);
     if (!projectId) {
         _msg(host, '這個提案還沒有關聯專案。<br>補上客戶之後系統會自動建立殼專案，進度才有東西可以追。');
@@ -244,7 +252,7 @@ export async function renderFlow(host, { projectId, onAdvanced = null,
     // 的旗標）。每次都整個換掉：同一個 host 換提案時，closure 會永久釘住
     // 第一次的 projectId，而殘留的 missing/collectsReason 是上一個專案的。
     const wired = !!host.__flow;
-    host.__flow = { pid: projectId, onAdvanced, onNavigate, links: {},
+    host.__flow = { pid: projectId, onAdvanced, links: {},
                     missing: { blocking: [], advisory: [] }, collectsReason: false };
     if (!wired) {
         // 事件委派掛一次就好 —— 每次重畫都重掛會累積成一次點擊送 N 個請求
@@ -275,18 +283,10 @@ async function _load(host, projectId) {
     }
 }
 
-/** 純 dispatcher：三條路徑各自一支，這裡只決定走哪條。 */
+/** 純 dispatcher：兩條路徑各自一支，這裡只決定走哪條。
+ *  「去完成」不在這裡 —— 它是一條純 `<a>`，交給瀏覽器與 SPA 既有的
+ *  hashchange 路由，這個模組不需要知道導覽怎麼運作。 */
 async function _onHit(host, ev) {
-    const go = ev.target.closest?.('[data-go]');
-    if (go && host.contains(go) && ev.type === 'click') {
-        // 非 SPA、或使用者自己要開新分頁（Ctrl/⌘/Shift/中鍵）→ 什麼都不做，
-        // 讓 <a> 的原生行為跑完。攔下來自己 open() 會被彈窗封鎖擋掉。
-        if (!_inSpa() || ev.metaKey || ev.ctrlKey || ev.shiftKey || ev.button) return;
-        ev.preventDefault();
-        host.__flow.onNavigate?.();     // overlay 先關（誰掛的誰收）
-        window.switchTab(go.dataset.go);
-        return;
-    }
     const adv = ev.target.closest?.('[data-advance]');
     if (adv && host.contains(adv) && ev.type === 'click') {
         ev.preventDefault();
@@ -365,18 +365,11 @@ function _advanceHtml(st, canAdvance) {
     return `<button class="pflow-adv" ${attrs}>推進到「${esc(st.next)}」</button>`;
 }
 
-/** 在後台 SPA 裡嗎？—— 有 `window.switchTab` 就是。這決定 deep-link 是原地
- *  換 tab 還是開新分頁；`/proposal-plan.html` 沒有那個全域函式。
- *  用能力偵測而不是叫呼叫端傳旗標：兩個掛載點各傳一次就會有一天忘記改。 */
-function _inSpa() {
-    return typeof window.switchTab === 'function';
-}
-
 function _paint(host, d) {
     const st = d.stage || {};
     const can = !!d.can_check;
     const links = d.links || {};
-    const inSpa = _inSpa();
+    const sameDoc = _sameDoc();
     const missing = d.missing || { blocking: [], advisory: [] };
     // 推進對話框要的三樣東西 —— 存最後一次的**權威**資料，別讓它去讀畫面
     // （讀畫面的話，樂觀更新那一瞬間的 class 會被當成事實）。刻意不存整包
@@ -385,8 +378,8 @@ function _paint(host, d) {
                     collectsReason: !!d.collects_outcome_reason };
     host.innerHTML = `<div class="pflow">
         ${_stageHtml(st, _advanceHtml(st, !!d.can_advance))}
-        ${(d.tracks || []).map(t => _trackHtml(t, can, links, inSpa)).join('')}
-        ${_missingHtml(missing, st.next, links, inSpa)}
+        ${(d.tracks || []).map(t => _trackHtml(t, can, links, sameDoc)).join('')}
+        ${_missingHtml(missing, st.next, links, sameDoc)}
         ${can ? '' : '<div class="pflow-note">里程碑（開拍／剪輯完成）需要專案管理權限才能標記。</div>'}
     </div>`;
 }
@@ -404,16 +397,11 @@ function _paint(host, d) {
  */
 async function _confirmAdvance(next, { blocking, advisory }, collectsReason, links) {
     const { openDialog, field } = await import('./prop-dialog.js');
-    // 缺項的「去完成」在對話框裡**一律開新分頁**（inSpa 傳 false）：這裡原地
+    // 缺項的「去完成」在對話框裡**一律開新分頁**（sameDoc 傳 false）：原地
     // 切走會把對話框連同你正在做的決定一起毀掉。新分頁去完成、回來仍在原處。
-    const item = (m) => {
-        const d = _dest(m, links);
-        return (d && d.allowed)
-            ? `${esc(m.label)}　<a class="pflow-golink"${_goAttrs(d.section, false)}`
-              + `>去「${esc(d.label)}」完成</a>` : esc(m.label);
-    };
     const list = (arr, cls) => arr.length
-        ? `<ul class="pflow-mlist ${cls}">${arr.map(m => `<li>${item(m)}</li>`).join('')}</ul>` : '';
+        ? `<ul class="pflow-mlist ${cls}">`
+          + arr.map(m => `<li>${_goName(m, links, false)}</li>`).join('') + '</ul>' : '';
     const body = `
         ${blocking.length
             ? `<p class="pflow-dlg-p">這幾項還沒完成，確定要推進嗎？</p>${list(blocking, '')}`

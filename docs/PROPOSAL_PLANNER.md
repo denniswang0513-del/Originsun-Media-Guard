@@ -1398,14 +1398,22 @@ RBAC v2 原則沿用：權限＝帳號的 `modules[]`＋管理員開關，admin 
 2. `crm_project_flow_checks` 表 + check API + 勾選 UI（audit：checked_by）。
 3. 推進按鈕（走既有狀態端點）+ 缺項軟擋確認框。
 4. `/proposal-plan.html` 同步 + deep-links + 清單階段 chip。
-   - 4A ✅ deep-link「去完成」（2026-08-14）。實作與 §14.4 的草案差一處：
-     **目的地不另立一組 key** —— 目的地就是一個 tab，而 tab 的鍵就是模組鍵
-     （`TAB_MAP` 本來就這樣鍵的），所以 `core.project_flow.DESTS` 是
-     「模組鍵 → 名稱」一張表，前端用既有的 `TAB_MAP` 換 section id，不必再
-     維護第二份「目的地 → 網址」對照。權限在後端算成 `links[key].allowed`
-     （同 `can_check` / `can_advance` 的慣例），前端不自己解 token。
-     SPA 原地換 tab（`onNavigate` 先關 overlay）／獨立頁開新分頁，靠
-     `window.switchTab` 在不在做能力偵測。
+   - 4A ✅ deep-link「去完成」（2026-08-14）。實作與 §14.4 草案的三處差異：
+     1. **目的地不另立一組 key**：目的地就是一個 tab，tab 的鍵就是模組鍵，
+        所以 `core.project_flow.ITEM_DEST` 只放模組鍵，前端用既有的
+        `TAB_MAP` 換 section、`tabLabel()` 換中文名 —— 不再多一張
+        「目的地 → 網址／名稱」的表（原本會是第三份 tab 中文名，而既有的
+        兩份 `TAB_GROUPS`／`MODULE_LABELS` 已經在漂）。
+     2. **不攔 click**：連結就是一條 `<a href="/#tab_x">`。SPA 自己的
+        hashchange 路由本來就吃這個形式，所以原地換 tab 是免費的；
+        `/proposal-plan.html` 因為 pathname 不同會是跨頁導覽 → `target=_blank`。
+        元件因此不碰 `window.switchTab`（那是它不准 import 的東西）。
+     3. **overlay 收在 `tab-changed`**：不是給 flow-view 一個 onNavigate 回呼。
+        原本切走 tab 時 overlay 會留在畫面上蓋著別的分頁（側欄點按／上一頁／
+        貼網址三條路本來就有這個 bug），收在既有的 tab-changed 監聽一處全包。
+     權限仍在後端算成 `links[key]`（同 `can_check` / `can_advance` 的慣例），
+     且**鏡射 tab-config.js 的 `TAB_EXTRA_ACCESS`** —— 只認同名模組的話，
+     提案企劃人員會在自己進得去的片庫／提案庫上看到「你沒有權限」。
 
 測試：unit＝每個 auto 訊號正反面 + RBAC 反面（提案庫-only 勾選要 403）；
 e2e＝勾選、推進、未成案原因守衛、公開頁不出 flow。

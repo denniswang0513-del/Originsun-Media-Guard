@@ -1,6 +1,10 @@
 """
 E2E test fixtures using Playwright + real server.
 """
+import uuid
+from contextlib import contextmanager
+
+import httpx
 import pytest
 from playwright.sync_api import sync_playwright
 
@@ -71,6 +75,33 @@ def page(browser_context, real_server):
     p.wait_for_timeout(3000)  # Allow dynamic tabs to load
     yield p
     p.close()
+
+
+@contextmanager
+def flow_case(base, token, title):
+    """自建自刪一筆提案 + 它的殼專案，回 {prop_id, project_id}。
+
+    寫成 context manager 而不是 fixture：用它的兩支測試檔**範圍不同**
+    （推進會改狀態 → function；純渲染 → module），而 fixture 的範圍是宣告
+    時綁死的。共用的是「怎麼建、怎麼跳過、怎麼收」這份契約 —— 那才是抄壞
+    會把測試資料寫進生產庫的部分。
+    """
+    h = {"Authorization": f"Bearer {token}"}
+    r = httpx.post(f"{base}/api/v1/proposals", headers=h, timeout=60,
+                   json={"title": f"{title}_{uuid.uuid4().hex[:6]}", "ptype": "其他"})
+    if r.status_code >= 400:
+        pytest.skip(f"建不出提案（{r.status_code}）：{r.text[:120]}")
+    p = r.json()["proposal"]
+    if not p.get("project_id"):
+        pytest.skip("這筆提案沒有殼專案")
+    try:
+        yield {"base": base, "h": h,
+               "prop_id": p["id"], "project_id": p["project_id"]}
+    finally:
+        # 各刪各的 —— 交叉刪（拿提案 id 去打 projects）有機會刪到別人的 dev 資料
+        httpx.delete(f"{base}/api/v1/proposals/{p['id']}", headers=h, timeout=30)
+        httpx.delete(f"{base}/api/v1/crm/projects/{p['project_id']}",
+                     headers=h, timeout=30)
 
 
 @pytest.fixture

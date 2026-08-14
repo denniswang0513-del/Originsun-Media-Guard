@@ -133,6 +133,21 @@ export function groupKeys(group) {
     return keys.filter((k) => TAB_MAP[k]);
 }
 
+// 模組鍵 → 這個 tab 在導覽上的名字（去掉 emoji）。
+// 導覽標籤是這個 tab 名字的正本 —— 別處要稱呼一個 tab（deep-link 的
+// 「去『報價管理』完成」之類）就從這裡拿，不要再抄一份中文。抄出來的那些
+// 已經在漂了：user-mgmt.js 的 MODULE_LABELS 寫 crm_quotes=報價、
+// timesheets=工時檢核，跟側欄按鈕上的字不一樣。
+// 找不到就回 key 本身 —— 沒有 tab 的模組（me_* 那幾個）不該讓呼叫端爆掉。
+export function tabLabel(key) {
+    for (const g of TAB_GROUPS) {
+        if (g.single === key) return g.label.replace(/^\P{L}+/u, '');
+        const it = (g.items || []).find((x) => x.key === key);
+        if (it) return it.label.replace(/^\P{L}+/u, '');
+    }
+    return key;
+}
+
 // Reverse lookup: a section id (e.g. 'tab_main') → its TAB_GROUPS entry.
 export function groupForSection(sectionId) {
     return TAB_GROUPS.find((g) => groupKeys(g).some((k) => TAB_MAP[k] === sectionId)) || null;
