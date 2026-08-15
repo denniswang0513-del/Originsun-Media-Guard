@@ -1,8 +1,12 @@
 /**
- * crm-projects-archive.js — 結案歸檔清單 + 專案回顧（KPTA）
+ * archive-card.js — 結案歸檔清單 + 專案回顧（KPTA）
  *
- * 掛在專案詳情「完稿結案」分頁的最上方。對齊 owner 的 Notion 專案啟動面版：
- * 「歸檔資料確認事項」+「專案回顧」。
+ * 掛在「完稿結案」的最上方。**兩個呼叫端**：CRM 專案詳情、以及專案頁
+ * （/proposal-plan.html?id=）。所以 fetcher 由呼叫端注入 —— 這個檔住在
+ * `tabs/proposals/`（公開頁的 import 封閉範圍內），不能靜態拉 tabs/crm 的
+ * `crmFetch`；而兩邊本來就各有各的 fetch 包裝（crmFetch / mfetch）。
+ *
+ * 對齊 owner 的 Notion 專案啟動面版：「歸檔資料確認事項」+「專案回顧」。
  *
  * 範本、狀態選項、齊備度判定全部由後端給（core/project_archive.py 是正本）——
  * 這裡不硬寫任何一列項目名稱，之後後端加項目，前端不用改。
@@ -16,11 +20,17 @@
  */
 
 import { autosaveDelegated, syncBaseline } from '../../js/shared/autosave.js';
-import { crmFetch, esc } from './crm-utils.js';
+import { esc } from '../../js/shared/dom.js';
 
 const AUTOSAVE_SEL = 'textarea[data-kpta], input[data-field="note"]';
 
-export async function renderArchiveCard(host, projectId) {
+/**
+ * @param host       掛載節點
+ * @param projectId
+ * @param crmFetch   CRM 前綴的 fetcher（`(path, opts) => Promise<json>`）——
+ *                   注入而不是 import，理由見檔頭。
+ */
+export async function renderArchiveCard(host, projectId, crmFetch) {
     host.innerHTML = '<div class="crm-empty" style="padding:12px;">歸檔清單載入中…</div>';
     let data;
     try {

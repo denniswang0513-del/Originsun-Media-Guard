@@ -24,7 +24,9 @@ import { renderDetail, initDetailHandlers } from './crm-projects-detail.js';
 import { _loadFinancialSummary, _showExpenseForm, initCostHandlers } from './crm-projects-cost.js';
 import { _loadCostStaff, _loadAdvances, _loadProjectStaff, initFinanceHandlers } from './crm-projects-finance.js';
 import { loadProjectQuotes, initQuoteHandlers } from './crm-projects-quotes.js';
-import { loadDeliveryTab, initDeliveryHandlers } from './crm-projects-delivery.js';
+// 完稿結案：元件搬到 tabs/proposals/（專案頁也用同一份，見 docs §15.2）——
+// host 與 fetcher 由呼叫端注入，所以這裡把 CRM 的那顆 crmFetch 傳進去。
+import { loadDeliveryTab, initDeliveryHandlers } from '../proposals/delivery-view.js';
 import { loadProjectTypes } from './crm-projects-core.js';
 import { loadCostGroups, renderGroupSwitcher, initCostGroupsHandlers } from './crm-projects-cost-groups.js';
 
@@ -39,7 +41,7 @@ function _reloadActiveDetailTab(projectId) {
     if (tab === 'media') _loadMediaTab(projectId, { fast: true });
     else if (tab === 'plan') _loadPlanTab(projectId);
     else if (tab === 'refs') _loadRefsTab(projectId);
-    else if (tab === 'delivery') loadDeliveryTab(projectId);
+    else if (tab === 'delivery') loadDeliveryTab(projectId, { fetcher: _fetch });
     else if (tab === 'team') { _loadCostStaff(projectId); _loadAdvances(projectId); }
     // info/finance 由 renderDetail 涵蓋、quotes 由 selectProject 的 loadQuotations 涵蓋
 }
@@ -339,7 +341,7 @@ export async function initCrmProjectsTab() {
             if (tab === 'team' && state.selectedId) { _loadCostStaff(state.selectedId); _loadAdvances(state.selectedId); }
             document.getElementById('proj-detail-finance').classList.toggle('hidden', tab !== 'finance');
             document.getElementById('proj-detail-delivery').classList.toggle('hidden', tab !== 'delivery');
-            if (tab === 'delivery' && state.selectedId) { loadDeliveryTab(state.selectedId); }
+            if (tab === 'delivery' && state.selectedId) { loadDeliveryTab(state.selectedId, { fetcher: _fetch }); }
             document.getElementById('proj-detail-plan').classList.toggle('hidden', tab !== 'plan');
             if (tab === 'plan' && state.selectedId) { _loadPlanTab(state.selectedId); }
             document.getElementById('proj-detail-media').classList.toggle('hidden', tab !== 'media');

@@ -68,6 +68,25 @@ def test_legacy_proposal_deeplink_still_works(plan_page, case):
     assert pg.locator("#proj-stage").is_visible() is False, "提案模式不該有階段 chip"
 
 
+def test_delivery_tab_moved_in(plan_page, case):
+    """階段 2：完稿結案（歸檔清單 + 專案回顧 + 上架編輯器）搬進專案頁。
+
+    元件與 CRM 那邊**同一份**（tabs/proposals/delivery-view.js，host 與
+    fetcher 注入）—— 所以這裡驗的是「注入接對了」，不是又寫了一份。
+    """
+    pg = _open(plan_page, f"?id={case['project_id']}", "#tab-delivery")
+    pg.click("#tab-delivery")
+    # 歸檔清單那半打的是 /crm/projects/{id}/archive（走注入的 _crmFetch）
+    pg.wait_for_selector("#delivery-host .delivery-archive", timeout=30000)
+    pg.wait_for_function(
+        """() => {
+            const el = document.querySelector('#delivery-host .delivery-archive');
+            return el && el.textContent && !el.textContent.includes('載入中');
+        }""", timeout=30000)
+    txt = pg.locator("#delivery-host .delivery-archive").text_content()
+    assert "載入失敗" not in txt, f"歸檔清單載入失敗（fetcher 沒接對）：{txt[:120]}"
+
+
 # ── B：一專案 N 提案 ────────────────────────────────────────
 def test_switcher_appears_only_with_multiple_proposals(plan_page, case):
     """單筆時不顯示切換器；掛第二筆上去就出現，且兩筆都在選項裡。"""

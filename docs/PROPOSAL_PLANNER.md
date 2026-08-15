@@ -1825,10 +1825,45 @@ owner 需求原文：「我想要將我的提案企劃頁面改成專案管理�
 - CRM 專案詳情標頭加「開啟專案頁 ↗」（開新分頁：詳情面板裡常有編到一半的
   成本列）。
 
-### §15.3 後續階段（未動工）
+### §15.3 階段 2（部分完成 2026-08-15）：完稿結案搬進來；人員配置卡住
 
-- **階段 2**：把「人員配置 / 完稿結案」從 CRM 搬過來（製作期天天用、不碰
-  金額）。CRM 那邊改成連過去，不複製。
+**完稿結案 ✅ 搬完**（歸檔清單 + 專案回顧 KPTA + 官網上架編輯器）。
+
+搬法是**同一份元件兩個呼叫端**，不是複製：
+`crm-projects-archive.js` → `tabs/proposals/archive-card.js`、
+`crm-projects-delivery.js` → `tabs/proposals/delivery-view.js`，
+**host 與 fetcher 改成注入**。
+
+🔴 為什麼非搬檔案不可（而不是直接 import 過去用）：這一頁在
+`core.public_assets.PAGES` 裡，它的 **import 相依閉包只准
+`tabs/proposals/` 與 `js/shared/`**（NAS 對外容器只 serve 那兩處，
+`test_public_surface` 守著）。原本那兩支靜態 import `tabs/crm/crm-utils.js`
+—— 直接用就會紅。而它們真正用到 crm-utils 的只有 `crmFetch` 與 `esc` 兩個：
+`esc` 已經在 `js/shared/dom.js`（階段 4B 抽的），`crmFetch` 兩邊本來就各有
+各的包裝，注入即可。DOM id 也一併改成掛在 host 上找 —— 寫死
+`proj-detail-delivery` / `delivery-showcase-frame` 等於只服務得了一個呼叫端。
+
+**人員配置 ❌ 沒搬 —— 卡在一個要 owner 決定的事**：
+
+在這個系統裡**「人員」與「錢」是同一張表**。實查：
+
+- 詳情面板的「執行人員」來自 `GET /projects/{id}/cost-lines`，畫出來的是
+  **金額、小計、總計與付款狀態**（`crm-projects-finance.js::_loadCostStaff`）
+  —— 它是一個掛著人事標籤的錢的視圖。
+- 派工表 `crm_project_staff` 本身就有 `cost` / `rate_override` / `days`。
+
+而這一頁的閘門收 `preprod_plan`（企劃人員進得來），CRM 的錢在
+`crm_invoices` 後面。整塊搬過來＝把成本攤在企劃人員眼前。
+
+三條路，**建議第三條**：
+
+1. 不搬（維持現況，人員配置留在 CRM）。
+2. 後端出一支不含金額的派工端點（新端點 + 白名單欄位），前端只吃那支。
+3. **搬，但分頁只在有 `crm_projects` 模組時建出來**，且只顯示 AM/PM 與派工
+   名單/角色，不出 `cost`/`rate_override`。這與本頁既有慣例一致 ——
+   「唯讀不是靠隱藏元素，是靠沒建出來」（企劃書/報價單對訪客就是這樣）。
+
+### §15.4 後續階段（未動工）
 - **階段 3**：CRM 專案管理收斂成「清單 + 錢」（帳目/成本/財務摘要留著）。
 - **刻意不做**：把成本／帳目搬進這一頁。1,700 行、金額敏感、使用者是財務
   不是製作、RBAC 也不同 —— 搬過去只會讓企劃人員的頁面掛著一堆點不進去的

@@ -390,6 +390,9 @@
         <button class="side-tab" data-ptab="quote" id="tab-quote" style="display:none;">報價單</button>
         <button class="side-tab" data-ptab="meeting" id="tab-meeting" style="display:none;">會議記錄</button>
         <button class="side-tab" data-ptab="flow" id="tab-flow" style="display:none;">進度</button>
+        <!-- 完稿結案：專案範疇（歸檔清單 + 專案回顧 + 官網上架編輯器）。
+             只在專案模式亮 —— 提案模式的主角是提案，結案是專案的事。 -->
+        <button class="side-tab" data-ptab="delivery" id="tab-delivery" style="display:none;">完稿結案</button>
       </nav>
       <div class="plan-main">
         <div id="info-host" style="display:none;"></div>
@@ -399,6 +402,7 @@
         <div id="quote-host" style="display:none;"></div>
         <div id="meeting-host" style="display:none;"></div>
         <div id="flow-host" style="display:none;"></div>
+        <div id="delivery-host" style="display:none;"></div>
         <div id="folder-host" style="display:none;">
           <!-- 重點提案卡片列與檔案瀏覽分開兩個容器：folder-view 會清空它的
                host，共用一個的話卡片列每次導覽都被洗掉。
@@ -860,6 +864,11 @@ const _LAZY_TABS = {
     quote: { mod: "/tabs/proposals/quote-view.js", fn: "renderQuotes", label: "報價單" },
     meeting: { mod: "/tabs/proposals/meeting-view.js", fn: "renderMeetings", label: "會議記錄" },
     flow: { mod: "/tabs/proposals/flow-view.js", fn: "renderFlow", label: "進度" },
+    // 完稿結案的簽名是 (projectId, {host, fetcher})，與其他分頁的 (host, opts)
+    // 相反 —— 它有另一個呼叫端（CRM 專案詳情）而那邊先有。`argsFirst` 就是
+    // 「第一個參數不是 host」的標記，免得為了一支特例把 _mountLazy 拆成兩條。
+    delivery: { mod: "/tabs/proposals/delivery-view.js", fn: "loadDeliveryTab",
+                label: "完稿結案", argsFirst: true },
 };
 const _pending = {};
 
@@ -874,7 +883,10 @@ async function _mountLazy(name) {
     try {
         const { importRetry } = await import("/js/shared/utils.js");
         const mod = await importRetry(t.mod);
-        await mod[t.fn]($(name + "-host"), _pending[name]);
+        const host = $(name + "-host");
+        // argsFirst 的那支自己收 host（放在 opts 裡）—— 見 _LAZY_TABS 的註解
+        if (t.argsFirst) await mod[t.fn](_pending[name].arg, { ..._pending[name], host });
+        else await mod[t.fn](host, _pending[name]);
         _pending[name] = null;             // 掛好了；之後切回來保留狀態
     } catch (e) {
         $(name + "-host").innerHTML =      // 設定留著，切回來能重試
@@ -1231,6 +1243,19 @@ function _wireHeaderActions(prop, PA, refresh) {
 
 let _PROJ = null;    // { id, name, status } —— 專案模式才有；提案模式是 null
 
+/** CRM 前綴的 fetcher，形狀對齊 tabs/crm 的 `crmFetch`（回 json、非 2xx 丟）。
+ *  搬過來的元件（archive-card / delivery-view）吃的是這個介面 —— 它們不能
+ *  靜態 import tabs/crm 的那顆（公開頁的 import 封閉範圍），所以由呼叫端注入。 */
+async function _crmFetch(path, opts = {}) {
+    const r = await mfetch("/api/v1/crm" + path, opts);
+    if (!r.ok) {
+        let detail = "";
+        try { detail = (await r.json()).detail || ""; } catch (_) { /* 非 json */ }
+        throw new Error(typeof detail === "string" && detail ? detail : "HTTP " + r.status);
+    }
+    return r.status === 204 ? null : r.json();
+}
+
 /** 專案標頭：專案名 + 階段 chip。
  *  🔴 **不顯示任何金額** —— `GET /crm/projects/{id}` 會回 contract_amount /
  *  amount_receivable / profit_target_pct，而這頁的閘門收得比 CRM 寬
@@ -1282,6 +1307,8 @@ function _renderNoProposal(project) {
     $("plan-acts").style.display = "none";
     $("tab-flow").style.display = "";
     _setupLazyTab("flow", { projectId: project.id, here: "preprod_proposals" });
+    // 專案範疇的分頁不受「有沒有提案」影響
+    _setupLazyTab("delivery", { arg: project.id, fetcher: _crmFetch });
     // 🔴 CTA 掛在**側欄**不是 plan-host：那個容器屬於「創意發想」分頁，而
     // 下面就要把畫面切到進度 —— 放那裡會被一起藏起來（按鈕在、但看不見）。
     // 側欄的東西不隨分頁切換消失，而「這個專案還沒有提案」本來就是導覽層級
@@ -1476,6 +1503,9 @@ async function _loadPlan(pid) {
         if (_PROJ) {
             const side = $("plan-side");
             side.insertBefore($("tab-flow"), side.querySelector('[data-ptab="info"]'));
+            // 完稿結案是專案範疇的（歸檔清單/專案回顧/官網上架），與看哪一份
+            // 提案無關 —— 所以吃的是 _PROJ.id，不是 prop.project_id
+            _setupLazyTab("delivery", { arg: _PROJ.id, fetcher: _crmFetch });
             _activateTab("flow");
         }
     } catch (e) {
