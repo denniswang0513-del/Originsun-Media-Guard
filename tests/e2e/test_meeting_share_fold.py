@@ -69,6 +69,10 @@ def test_share_roundtrip_minimal_fields_then_revoke(pg, case):
     url = pg.input_value("#meeting-host .mv-shlink")
     assert "/meeting-note.html?t=" in url, url
     token = url.split("t=")[-1]
+    # 🔴 短 token（owner 2026-08-15「網址好長」）：舊版鑄的是完整 JWT，光
+    # token 就 400+ 字元。公開端點從來沒解過它（拿整串字查 DB），所以那三段
+    # base64 是純浪費 —— 這行釘住「別又改回 new_share_token」。
+    assert len(token) <= 24 and "." not in token, f"token 又變長了：{len(token)} 字 {token[:40]}"
     assert pg.locator("#meeting-host .mv-card [data-shr]").first.text_content() == "分享中"
 
     # 匿名（不帶 Authorization）打公開端點 —— 拿得到，而且**恰好**四個欄位

@@ -247,6 +247,23 @@ def new_share_token(sub: str, scope: str, expires_days: int) -> str:
                         expires_days=expires_days)
 
 
+def new_short_token(nbytes: int = 9) -> str:
+    """鑄一張**短的**分享 token（純亂數，12 字元左右）。
+
+    什麼時候用這支、什麼時候用 `new_share_token`：差別在**驗證端要不要從
+    token 本身讀出東西**。`decode_unverified` 那條路要靠 payload 的 `sub`
+    決定去查哪一列，所以那些 token 非得是 JWT 不可；而「直接拿整串字去 DB
+    查」的（會議記錄單篇分享）根本沒解過它 —— JWT 的三段 base64 純粹是把
+    網址撐成 400 多個字元（owner 2026-08-15 實際回報「網址好長」）。
+
+    安全性不變：兩者都**不靠簽章保護**（見 `decode_unverified` 的說明），
+    真正的憑證都是「這串字與我們存起來的完全相同」。9 bytes = 72 bits 亂數，
+    猜中的機率遠低於猜中 uuid4 的 row id —— 而那本來就是舊格式的實際門檻。
+    """
+    import secrets
+    return secrets.token_urlsafe(nbytes)
+
+
 def decode_unverified(token: str) -> Optional[dict]:
     """解出 JWT 的 payload，**不驗簽章**（過期仍然擋）。
 

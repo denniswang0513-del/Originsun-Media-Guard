@@ -295,17 +295,19 @@ async def share_meeting_note(pid: str, mid: str, request: Request):
     公開面在 `api_proposals.public_router` 的 `/shared/meeting/{token}`
     （NAS 容器 24/7，master 關機連結照樣開得了）—— 這裡只管鑄與撤。
     驗證走逐字比對（`stored_token_matches` 慣例），jwt_secret 輪替不殺連結。
+
+    🔴 token 走 `new_short_token`（純亂數 12 字）**不是** `new_share_token`
+    （JWT）：公開端點是拿整串字直接查 DB、從來沒解過 payload，所以那三段
+    base64 只是把網址撐到 400 多字元。判準寫在 `new_short_token` 的說明。
     """
     proposal_auth(request)
     _require_db()
-    from core.auth import new_share_token
-    from core.crm_logic import PERMANENT_TOKEN_EXPIRES_DAYS
+    from core.auth import new_short_token
     factory = await _get_factory()
     async with factory() as session:
         m = await _row_or_404(session, pid, mid)
         if not m.share_token:
-            m.share_token = new_share_token(mid, "meeting_note",
-                                            PERMANENT_TOKEN_EXPIRES_DAYS)
+            m.share_token = new_short_token()
             # 刻意**不**蓋 updated_at：那個欄位是錄音管線 settle 的心跳，
             # 分享動作與內容無關，蓋了會白白延長一個卡住 pending 的壽命
             await session.commit()

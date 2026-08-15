@@ -1207,7 +1207,16 @@ AI 在這裡是**輸入輔助**不是產出物：每筆會議記錄可傳一個�
   `test_meeting_share_fold.py::test_typing_does_not_scroll_the_page_up`。
 
 **單篇唯讀分享**：每張卡「分享」鈕 → 鑄這一筆自己的 token（`share_token`
-欄，`new_share_token` + 逐字比對慣例）→ `/meeting-note.html?t=` 唯讀頁。
+欄）→ `/meeting-note.html?t=` 唯讀頁。
+
+🔴 token 用 **`core.auth.new_short_token`（純亂數 12 字）不是
+`new_share_token`（JWT）**。判準：**驗證端要不要從 token 本身讀出東西**——
+提案共編那條要靠 `decode_unverified` 的 `sub` 決定查哪一列，所以非 JWT 不可；
+這條是拿整串字直接查 DB、從來沒解過 payload，JWT 的三段 base64 只是把網址
+撐成 400 多字元（owner 2026-08-15 實際回報「網址好長」）。安全性不變 ——
+兩者都不靠簽章，憑證都是「這串字與存起來的完全相同」，而 72 bits 亂數比
+猜中 uuid4 的 row id 還難（那本來就是舊格式的實際門檻）。
+e2e 用 `len(token) <= 24 and "." not in token` 釘住，別又改回去。
 - 🔴 與提案層 `?t=` 共編是**兩套 token、兩種範圍**。公開端點
   （`/api/v1/proposals/shared/meeting/{token}`，public_router → NAS 容器
   24/7）**只出四欄**：日期／主題／出席者／本文 —— 逐字稿、AI 整理、錄音、
