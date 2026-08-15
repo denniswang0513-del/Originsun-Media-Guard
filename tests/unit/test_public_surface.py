@@ -50,6 +50,8 @@ EXPECTED_API = {
     ("/api/v1/proposals/shared/{token}/refs/{rid}", "DELETE"),
     ("/api/v1/proposals/shared/{token}/folder", "GET"),
     ("/api/v1/proposals/shared/{token}/folder/file", "GET"),
+    # 單篇會議記錄唯讀分享（自己的 token；只出四欄，owner 2026-08-15 拍板）
+    ("/api/v1/proposals/shared/meeting/{token}", "GET"),
     # 參考片研究頁（token 授權；提案公開頁的「研究頁 ↗」連過去）
     ("/api/v1/references/shared/{token}/{rid}", "GET"),
     ("/api/v1/references/shared/{token}/{rid}", "PATCH"),

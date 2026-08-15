@@ -84,6 +84,11 @@ def _open_meetings(pg, base, token, pid):
     pg.wait_for_selector("#meeting-host .mv-bar", timeout=30000)
     if pg.locator("#meeting-host .mv-card").count() == 0:
         pg.click("#meeting-host [data-add]")
+    # §13.3 起卡片**預設收合**（新增的那張會自動展開）：錄音列在收合區裡，
+    # 走「既有卡」那條路要先展開，下面等 visible 才等得到
+    first = pg.locator("#meeting-host .mv-card").first
+    if "closed" in (first.get_attribute("class") or ""):
+        first.locator("[data-tg]").click()
     pg.wait_for_selector("#meeting-host .mv-card .mv-abar", timeout=30000)
 
 

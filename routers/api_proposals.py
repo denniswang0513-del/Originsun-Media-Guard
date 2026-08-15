@@ -1268,6 +1268,35 @@ async def get_shared_plan_meta(token: str, since: str = ""):
     return _plan_meta_payload(plan, cur)
 
 
+@public_router.get("/shared/meeting/{token}")
+async def get_shared_meeting_note(token: str):
+    """單篇會議記錄的公開唯讀資料（`/meeting-note.html?t=` 那頁吃這支）。
+
+    owner 2026-08-15 拍板的**明確分享動作** —— 與提案層的 `?t=` 共編是兩套
+    token、兩種範圍。最小欄位集：日期／主題／出席者／本文四欄，逐字稿、
+    AI 整理、錄音、提案歸屬一律不出（那些是內部素材，分享的是「記錄」這一篇）。
+
+    路徑不會撞 `/shared/{token}/deck` 那族：第二段是 token 值（uuid hex），
+    不會等於字面 "deck"/"folder"。
+    """
+    factory = _require_factory()
+
+    from sqlalchemy import select
+    from core.auth import stored_token_matches
+    from db.models import PreprodMeetingNote
+
+    async with factory() as session:
+        m = (await session.execute(
+            select(PreprodMeetingNote)
+            .where(PreprodMeetingNote.share_token == token))).scalar_one_or_none()
+        # DB 等值查找之後再走一次定時安全比對（與 plan share 的驗證慣例一致）
+        if not m or not stored_token_matches(m.share_token, token):
+            raise HTTPException(status_code=404, detail="連結不存在或已被停用")
+        return {"note": {"met_at": _fmt_date(m.met_at), "title": m.title or "",
+                         "attendees": m.attendees or "",
+                         "content": m.content or ""}}
+
+
 @router.delete("/{pid}")
 async def delete_proposal(pid: str, request: Request):
     """刪提案：連帶刪 proposal_refs 關聯列（reference 是共用片庫保留）

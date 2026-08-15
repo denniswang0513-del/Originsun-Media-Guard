@@ -1015,8 +1015,11 @@ class PreprodMeetingNote(Base):
     whisper 逐字稿 → claude 整理（services/meeting_transcriber）；`content` 是
     人的正本，AI 只在它**全空**時代填一次，之後絕不覆蓋。
 
-    🔴 內部資料：不出公開 `?t=` token 端點（客戶會議也可能記到內部判斷、
-    競品、報價底線）。要給客戶看的東西走「提案資料」的勾選。
+    🔴 內部資料：不出**提案層**的公開 `?t=` 共編端點（客戶會議也可能記到
+    內部判斷、競品、報價底線）。唯一的例外是**單篇唯讀分享**（owner
+    2026-08-15 拍板）：對某一筆明確按「分享」才鑄 `share_token`，公開端點
+    只出 met_at/title/attendees/content 四欄 —— 逐字稿、AI 整理、錄音、
+    提案歸屬都不出。
     """
     __tablename__ = "preprod_meeting_notes"
 
@@ -1037,6 +1040,9 @@ class PreprodMeetingNote(Base):
     status = Column(String(16), nullable=True)
     error = Column(Text, nullable=True)
     phase = Column(String(64), nullable=True)                    # pending 期間的階段字（辨識中 37% …）
+    # 單篇唯讀分享：按「分享」才鑄（new_share_token）、撤銷＝清空；
+    # 驗證走逐字比對（v2.4.52 起的慣例 —— jwt_secret 輪替不殺分享連結）
+    share_token = Column(String(512), nullable=True)
 
 
 # 提案刪除時要一併清的子表（proposal_id 歸屬列）。清單住在表定義旁邊 ——

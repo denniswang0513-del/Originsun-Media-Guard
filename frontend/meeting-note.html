@@ -1,0 +1,80 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<!-- 分享連結頁：不給搜尋引擎收 —— token 就是授權，收錄等於把門牌貼上網 -->
+<meta name="robots" content="noindex, nofollow">
+<title>會議記錄｜ORIGINSUN</title>
+<style>
+  /* 唯讀訪客頁：白底（同 proposal-plan 訪客模式的視覺方向），零依賴主題系統 */
+  * { box-sizing: border-box; margin: 0; }
+  body { font-family: "Noto Sans TC", "Microsoft JhengHei", sans-serif;
+         background: #f7f6f4; color: #262626; line-height: 1.9; }
+  header { display: flex; align-items: center; gap: 12px;
+           padding: 18px 24px; background: #fff; border-bottom: 1px solid #e5e5e5; }
+  header img { height: 30px; width: auto; display: block; }
+  header .brand-name { font-size: 13px; letter-spacing: .25em; font-weight: 300; }
+  .wrap { max-width: 720px; margin: 0 auto; padding: 28px 20px 60px; }
+  .card { background: #fff; border: 1px solid #e5e5e5; border-radius: 4px;
+          padding: 24px 26px; }
+  h1 { font-size: 19px; font-weight: 700; margin-bottom: 4px; }
+  .meta { font-size: 12.5px; color: #737373; margin-bottom: 18px;
+          padding-bottom: 14px; border-bottom: 1px solid #eee; }
+  .meta span + span::before { content: "　·　"; color: #d4d4d4; }
+  /* 本文是自由文字：保留換行、不解析任何標記 */
+  .body { font-size: 14px; white-space: pre-wrap; word-break: break-word; }
+  .state { text-align: center; color: #737373; font-size: 13.5px; padding: 60px 0; }
+  footer { text-align: center; font-size: 11px; color: #a3a3a3; margin-top: 28px;
+           letter-spacing: .08em; }
+  @media (max-width: 720px) { .card { padding: 18px 16px; } .body { font-size: 15px; } }
+</style>
+</head>
+<body>
+<header>
+  <img src="/img/originsun-logo.webp" alt="源日影像" onerror="this.style.display='none'">
+  <span class="brand-name">會議記錄 MEETING NOTE</span>
+</header>
+<div class="wrap">
+  <div id="box" class="state">載入中…</div>
+  <footer>此頁為唯讀分享 · ORIGINSUN 源日影像</footer>
+</div>
+<script type="module">
+// 🔴 這頁由 NAS 對外容器 serve（core/public_assets.PAGES）——
+// import 只准 /js/shared/（test_public_surface 的相依閉包守衛）。
+import { esc } from '/js/shared/dom.js';
+
+const box = document.getElementById('box');
+const t = new URLSearchParams(location.search).get('t') || '';
+
+async function load() {
+    if (!t) { box.textContent = '連結不完整（缺少授權參數）。'; return; }
+    let r;
+    try {
+        r = await fetch(`/api/v1/proposals/shared/meeting/${encodeURIComponent(t)}`);
+    } catch {
+        box.textContent = '連線失敗 —— 請稍後重新整理。';
+        return;
+    }
+    if (!r.ok) {
+        // 404 的訊息由後端給（不存在或已被停用），別在這裡自己編一個理由
+        const d = await r.json().catch(() => ({}));
+        box.textContent = (typeof d.detail === 'string' && d.detail) || '這個連結已經失效。';
+        return;
+    }
+    const m = (await r.json()).note || {};
+    box.className = 'card';
+    // title/attendees/content 是自由文字 → 一律 esc；日期是後端排的固定格式
+    box.innerHTML = `
+        <h1>${esc(m.title || '（未命名會議）')}</h1>
+        <div class="meta">
+            ${m.met_at ? `<span>${esc(m.met_at)}</span>` : ''}
+            ${m.attendees ? `<span>${esc(m.attendees)}</span>` : ''}
+        </div>
+        <div class="body">${esc(m.content || '（這一筆還沒有內容）')}</div>`;
+    if (m.title) document.title = m.title + '｜會議記錄｜ORIGINSUN';
+}
+load();
+</script>
+</body>
+</html>

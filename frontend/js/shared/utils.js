@@ -500,8 +500,18 @@ export function projectOptionsHtml(projects, placeholder = '— 選擇專案 —
 /** textarea 隨內容長高（專案裡已有四份手抄，新程式一律用這支）。 */
 export function autoGrow(el) {
     if (!el) return;
+    // 🔴 先量再收：`height='auto'` 那一瞬間整份文件變矮，捲動容器被 clamp
+    // 往上跳，高度設回來之後 scrollTop 回不來 —— 打一個字畫面就往上浮一次，
+    // 記錄越長浮得越兇（2026-08-15 會議記錄實際咬到）。所以把每一層有捲動量
+    // 的祖先先記下來，改完高度原數塞回去。documentElement 也在 parentElement
+    // 鏈上，整頁捲動同樣被接住。
+    const saved = [];
+    for (let n = el.parentElement; n; n = n.parentElement) {
+        if (n.scrollTop) saved.push([n, n.scrollTop]);
+    }
     el.style.height = 'auto';
     el.style.height = el.scrollHeight + 'px';
+    saved.forEach(([n, t]) => { n.scrollTop = t; });
 }
 
 /**

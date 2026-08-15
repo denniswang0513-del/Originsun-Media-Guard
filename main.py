@@ -502,6 +502,8 @@ async def _on_startup():
                         ("preprod_meeting_notes", "status", "VARCHAR(16)"),
                         ("preprod_meeting_notes", "error", "TEXT"),
                         ("preprod_meeting_notes", "phase", "VARCHAR(64)"),
+                        # 單篇會議記錄唯讀分享（owner 2026-08-15）
+                        ("preprod_meeting_notes", "share_token", "VARCHAR(512)"),
                         # 影片封存（docs/REFERENCE_LIBRARY.md §12）
                         ("preprod_references", "archive_status", "VARCHAR(16)"),
                         ("preprod_references", "archive_path", "VARCHAR(512)"),

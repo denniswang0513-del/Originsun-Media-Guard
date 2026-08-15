@@ -10,13 +10,15 @@
  *
  * 🔴 內部資料：公開 ?t= 訪客模式**不掛**這個元件 —— 呼叫端連分頁鈕都不建
  * （比照企劃書/報價單；唯讀不是靠隱藏元素，是靠沒建出來）。
+ * 唯一的對外出口是**單篇唯讀分享**（owner 2026-08-15）：每張卡的「分享」鈕
+ * → 鑄自己的 token → `/meeting-note.html?t=` 唯讀頁，只出四個欄位。
  */
 
 import { autosaveDelegated, syncBaseline } from '../../js/shared/autosave.js';
 import { pollJob } from '../../js/shared/poll-job.js';
 import { fmtSize } from '../../js/shared/clip_utils.js';
-import { authDownload, autoGrow, bearerHeader, ensureStyle, esc, proxyBodyLimit,
-         uploadWithProgress } from '../../js/shared/utils.js';
+import { authDownload, autoGrow, bearerHeader, copyText, ensureStyle, esc,
+         proxyBodyLimit, uploadWithProgress } from '../../js/shared/utils.js';
 import { tfetch } from './prop-fetch.js';
 
 const API = '/api/v1/crm';
@@ -34,7 +36,10 @@ export async function renderMeetings(host, { proposalId }) {
     // `_stopRecording` 只是「開始停」，下一行就把 __mv 換掉了 —— 收尾會拿到
     // 新的 proposalId，把舊提案的錄音 POST 到新提案去。畫面被拆掉那條由
     // `_tick` 的 isConnected 接。
-    host.__mv = { proposalId, notes: [], polling: new Set(), rec: null, starting: false };
+    // open＝展開中的卡片 id。**預設全收**（owner 2026-08-15）：清單掃日期與
+    // 主題就好，點箭頭才展開 —— 會議多了整頁長文捲不完。
+    host.__mv = { proposalId, notes: [], polling: new Set(), rec: null,
+                  starting: false, open: new Set() };
     // 逐欄自動儲存走共用件（debounce + 失敗退基準重試 + 重畫不重綁）。
     // 委派綁在 host 上一次就好 —— 清單每次動作都整塊重畫，逐顆綁必漏。
     autosaveDelegated(host, '[data-f]', (v, el) =>
@@ -62,23 +67,28 @@ function _render(host) {
             <button class="mv-btn primary" data-add>新增會議記錄</button>
             <span class="mv-note">共 ${s.notes.length} 筆；打完字自動儲存。</span>
         </div>
-        ${s.notes.map(_cardHtml).join('') ||
+        ${s.notes.map((m) => _cardHtml(m, s)).join('') ||
           '<div class="mv-note">還沒有會議記錄 —— 開會前先按上面新增一筆，邊聽邊記。</div>'}`;
     _wire(host);
 }
 
-/** 值一律走 DOM property 餵（不進模板字串）—— 這裡裝的是自由文字。 */
-function _cardHtml(m) {
+/** 值一律走 DOM property 餵（不進模板字串）—— 這裡裝的是自由文字。
+ *  收合＝`closed` class（CSS 藏掉 head 以外的直系子節點）；日期與主題留在
+ *  head 上，收著也看得到、也**改得到**（head 裡的輸入照常自動儲存）。 */
+function _cardHtml(m, s) {
     const id = esc(String(m.id));
     return `
-        <div class="mv-card" data-card="${id}">
+        <div class="mv-card${s.open.has(String(m.id)) ? '' : ' closed'}" data-card="${id}">
             <div class="mv-head">
+                <button class="mv-arr" data-tg="${id}" title="展開／收合">▸</button>
                 <input type="date" class="mv-in mv-date" data-f="met_at" data-id="${id}">
                 <input class="mv-in mv-title" data-f="title" data-id="${id}"
                        placeholder="會議主題">
                 <span class="mv-gap"></span>
+                <button class="mv-btn sm" data-shr="${id}">${m.shared ? '分享中' : '分享'}</button>
                 <button class="mv-btn sm" data-del="${id}">刪除</button>
             </div>
+            <div class="mv-share"></div>
             <input class="mv-in mv-att" data-f="attendees" data-id="${id}"
                    placeholder="出席者（自由填，例：客戶王經理、導演、製片）">
             <textarea class="mv-in mv-body" data-f="content" data-id="${id}"
@@ -86,6 +96,66 @@ function _cardHtml(m) {
             <div class="mv-audio"></div>
             <div class="mv-note mv-by"></div>
         </div>`;
+}
+
+// ── 單篇唯讀分享（owner 2026-08-15）────────────────────────
+//
+// token 是這一筆自己的（與提案層 ?t= 共編是兩套）；公開頁只出日期／主題／
+// 出席者／內容四欄。按「分享」才向後端鑄 token —— 清單輪詢不帶 token。
+
+const _shareUrl = (tok) =>
+    `${location.origin}/meeting-note.html?t=${encodeURIComponent(tok)}`;
+
+async function _toggleShare(host, card, m) {
+    const box = card.querySelector('.mv-share');
+    if (box.childElementCount) { box.innerHTML = ''; return; }   // 再按一次＝收起
+    _setOpen(host, card, true);          // 面板在收合區裡 —— 收著按分享要先展開
+    let tok;
+    try {
+        tok = (await tfetch(`${_base(host.__mv.proposalId)}/${encodeURIComponent(m.id)}/share`,
+                            { method: 'POST' })).token;
+    } catch (e) { alert('開啟分享失敗：' + (e.message || e)); return; }
+    m.shared = true;
+    card.querySelector('[data-shr]').textContent = '分享中';
+    box.innerHTML = `
+        <div class="mv-abar">
+            <input class="mv-in mv-shlink" readonly>
+            <button class="mv-btn sm" data-shcopy>複製連結</button>
+            <a class="mv-btn sm" target="_blank" rel="noopener" data-shopen>開啟</a>
+            <button class="mv-btn sm" data-shoff>停用連結</button>
+        </div>
+        <div class="mv-note">唯讀分享：拿到連結的人都看得到這一筆的日期、主題、
+            出席者與內容（不含逐字稿、AI 整理與錄音）。停用後舊連結立即失效。</div>`;
+    box.querySelector('.mv-shlink').value = _shareUrl(tok);      // DOM property，不進模板
+    box.querySelector('[data-shopen]').href = _shareUrl(tok);
+    box.querySelector('[data-shcopy]').addEventListener('click',
+        (e) => copyText(_shareUrl(tok), e.target));
+    box.querySelector('[data-shoff]').addEventListener('click', async (e) => {
+        if (!confirm('停用後，拿到連結的人就再也打不開了。確定？')) return;
+        e.target.disabled = true;
+        try {
+            await tfetch(`${_base(host.__mv.proposalId)}/${encodeURIComponent(m.id)}/share`,
+                         { method: 'DELETE' });
+            m.shared = false;
+            card.querySelector('[data-shr]').textContent = '分享';
+            box.innerHTML = '<div class="mv-note">已停用 —— 舊連結現在會顯示「連結不存在或已被停用」。</div>';
+        } catch (err) { alert('停用失敗：' + (err.message || err)); e.target.disabled = false; }
+    });
+}
+
+/** 展開／收合一張卡（分享面板與展開箭頭共用）。展開時要補 autoGrow ——
+ *  textarea 在 display:none 下量不到高度，收著時填進去的值會算成一條細線。 */
+function _setOpen(host, card, want) {
+    const id = card.dataset.card;
+    const s = host.__mv;
+    if (want) {
+        s.open.add(id);
+        card.classList.remove('closed');
+        card.querySelectorAll('textarea').forEach(autoGrow);
+    } else {
+        s.open.delete(id);
+        card.classList.add('closed');
+    }
 }
 
 // ── 錄音 → 逐字稿 → AI 整理 ─────────────────────────────────
@@ -435,12 +505,37 @@ function _wire(host) {
     host.querySelector('[data-add]').addEventListener('click', async (e) => {
         e.target.disabled = true;
         try {
-            await tfetch(_base(s.proposalId), { method: 'POST', json: {} });
+            const d = await tfetch(_base(s.proposalId), { method: 'POST', json: {} });
+            // 新的那張直接展開 —— 建了一筆卻要先找到它再點箭頭才寫得了字，
+            // 是把「預設收合」變成使用者的麻煩
+            if (d.note) s.open.add(String(d.note.id));
             await _load(host);
         } catch (err) {
             alert('新增失敗：' + (err.message || err));
             e.target.disabled = false;
         }
+    });
+
+    host.querySelectorAll('[data-tg]').forEach(el => {
+        el.addEventListener('click', () => {
+            const card = _cardOf(host, el.dataset.tg);
+            const closing = !card.classList.contains('closed');
+            // 錄音列在收合區裡 —— 收起來會讓紅點與停止鈕都看不見，錄音卻
+            // 還在跑（很容易忘掉它）。錄完再收。
+            if (closing && s.rec && s.rec.mid === String(el.dataset.tg)) {
+                alert('這一筆正在錄音 —— 先停止或取消，再收合。');
+                return;
+            }
+            _setOpen(host, card, closing ? false : true);
+        });
+    });
+
+    host.querySelectorAll('[data-shr]').forEach(el => {
+        el.addEventListener('click', () => {
+            const m = byId[el.dataset.shr];
+            const card = _cardOf(host, el.dataset.shr);
+            if (m && card) _toggleShare(host, card, m);
+        });
     });
 
     host.querySelectorAll('[data-del]').forEach(el => {
@@ -496,6 +591,21 @@ html.plan-theme-light .mv { --mv-ink: #262626; --mv-sub: #737373; --mv-line: #e5
 .mv-card { border: 1px solid var(--mv-line); border-radius: 3px; background: var(--mv-card);
       padding: 10px 12px; margin-bottom: 10px; }
 .mv-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 6px; }
+/* 收合：藏掉 head 以外的一切（出席者/本文/錄音區/分享面板/署名）。
+   head 自己的 margin 也收掉，收合卡才不會底下多一截空白。 */
+.mv-card.closed > :not(.mv-head) { display: none; }
+.mv-card.closed .mv-head { margin-bottom: 0; }
+.mv-arr { border: 0; background: none; cursor: pointer; color: var(--mv-sub);
+      font: inherit; font-size: 11px; padding: 4px 2px; flex: none;
+      transition: transform .15s; transform: rotate(90deg); }
+.mv-card.closed .mv-arr { transform: none; }
+.mv-arr:hover { color: var(--mv-accent); }
+/* 分享面板（連結 + 複製/開啟/停用）。<a> 當按鈕用要自己去掉底線 */
+.mv-share:not(:empty) { border: 1px dashed var(--mv-line); border-radius: 3px;
+      padding: 8px 10px; margin-bottom: 8px; }
+.mv-shlink { flex: 1; min-width: 180px; font-size: 11.5px; color: var(--mv-sub);
+      border-color: var(--mv-line); }
+a.mv-btn { text-decoration: none; display: inline-flex; align-items: center; }
 /* 可編控件：平時像文字，focus 才顯邊框（同基本資料的漸進揭露） */
 .mv-in { font: inherit; color: var(--mv-ink); background: transparent;
       border: 1px solid transparent; border-radius: 2px; padding: 4px 6px; outline: none; }

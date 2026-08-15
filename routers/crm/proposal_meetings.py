@@ -6,10 +6,13 @@ AI 只做**輸入輔助**：上傳錄音檔 → whisper 逐字稿 → claude 整
 （services/meeting_transcriber）；`content` 是人的正本，AI 只在它全空時代填
 一次，之後絕不覆蓋。
 
-🔴 內部資料：不出公開 `?t=` token 端點（客戶會議也會記到內部判斷、競品、
-報價底線）。要給客戶看的東西走「提案資料」的勾選。所有端點都掛內部守衛，
-沒有任何一條進 public_router。錄音檔與逐字稿同樣不進 /uploads web root ——
-落點是專案資產夾的「會議記錄」子夾，下載走帶權限端點（比照報價單）。
+🔴 內部資料：不出**提案層**的公開 `?t=` 共編端點（客戶會議也會記到內部判斷、
+競品、報價底線）。唯一的例外是**單篇唯讀分享**（owner 2026-08-15 拍板）：
+對某一筆明確按「分享」→ 鑄 share_token → `/meeting-note.html?t=` 唯讀頁，
+公開端點（api_proposals.public_router，NAS 容器 24/7）只出四個欄位 ——
+逐字稿、AI 整理、錄音、提案歸屬都不出。本檔的端點仍全部掛內部守衛。
+錄音檔與逐字稿同樣不進 /uploads web root —— 落點是專案資產夾的「會議記錄」
+子夾，下載走帶權限端點（比照報價單）。
 
 日期沿用提案日的下錨規則（`api_proposals._parse_date/_fmt_date`）—— 會議日期
 是「日曆日」不是時刻，各自寫一套就會出現 v2.4.33 修過的差一天。
@@ -81,6 +84,9 @@ def _dict(m, *, full: bool = False) -> dict:
         # 一趟、整頁重畫每次新增/刪除一趟，都不必白載它。
         "has_transcript": bool((m.transcript or "").strip()),
         "has_summary": bool((m.ai_summary or "").strip()),
+        # 只給「有沒有在分享」的事實 —— token 本身要按「分享」才拿（清單每
+        # 15 秒輪詢一趟，不必回傳一個等同連結的祕密）
+        "shared": bool(m.share_token),
         **({"transcript": m.transcript or "", "ai_summary": m.ai_summary or ""}
            if full and not pending else {}),
     }
@@ -280,6 +286,43 @@ async def resummarize_meeting(pid: str, mid: str, request: Request):
     fire(summarize_meeting(mid, transcript=transcript, ctx=ctx),
          label=f"meeting-summarize {mid}")
     return {"status": "ok", "note": out}
+
+
+@router.post("/proposals/{pid}/meetings/{mid}/share")
+async def share_meeting_note(pid: str, mid: str, request: Request):
+    """開啟單篇唯讀分享：鑄 token 存 DB（已有則重用，冪等）。
+
+    公開面在 `api_proposals.public_router` 的 `/shared/meeting/{token}`
+    （NAS 容器 24/7，master 關機連結照樣開得了）—— 這裡只管鑄與撤。
+    驗證走逐字比對（`stored_token_matches` 慣例），jwt_secret 輪替不殺連結。
+    """
+    proposal_auth(request)
+    _require_db()
+    from core.auth import new_share_token
+    from core.crm_logic import PERMANENT_TOKEN_EXPIRES_DAYS
+    factory = await _get_factory()
+    async with factory() as session:
+        m = await _row_or_404(session, pid, mid)
+        if not m.share_token:
+            m.share_token = new_share_token(mid, "meeting_note",
+                                            PERMANENT_TOKEN_EXPIRES_DAYS)
+            # 刻意**不**蓋 updated_at：那個欄位是錄音管線 settle 的心跳，
+            # 分享動作與內容無關，蓋了會白白延長一個卡住 pending 的壽命
+            await session.commit()
+        return {"status": "ok", "token": m.share_token}
+
+
+@router.delete("/proposals/{pid}/meetings/{mid}/share")
+async def unshare_meeting_note(pid: str, mid: str, request: Request):
+    """撤銷分享：清掉 token，舊連結立即失效（公開端點逐字比對，比不上就 404）。"""
+    proposal_auth(request)
+    _require_db()
+    factory = await _get_factory()
+    async with factory() as session:
+        m = await _row_or_404(session, pid, mid)
+        m.share_token = None
+        await session.commit()
+    return {"status": "ok"}
 
 
 @router.get("/proposals/{pid}/meetings/{mid}/audio/download")
