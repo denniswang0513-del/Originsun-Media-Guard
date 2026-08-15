@@ -9,6 +9,8 @@ import uuid
 import pytest
 import httpx
 
+from .conftest import goto_tab
+
 pytestmark = pytest.mark.e2e
 
 FIXTURES_DIR = os.path.join(os.path.dirname(__file__), "fixtures")
@@ -63,8 +65,7 @@ def test_task_done_log(page, real_server, tmp_path):
     assert r.status_code == 200
 
     # Switch to backup tab to see the terminal
-    page.click("#btn_tab_main")
-    page.wait_for_timeout(500)
+    goto_tab(page, "production", "tab_main")
 
     # Wait for task_status done event to propagate
     page.wait_for_timeout(5000)

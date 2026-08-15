@@ -1,15 +1,28 @@
-"""
-Layer 3 — E2E 專案總覽 Tab UI 測試（Playwright）。
+# -*- coding: utf-8 -*-
+"""E2E 專案總覽 Tab（`pj-` 前綴）。
 
-All CSS classes use the `pj-` prefix.
+2026-08-15 對齊兩次改版：導覽走分群（goto_tab），機器管理走
+`/api/v1/agents`（admin 守衛）—— 舊測試寫的 `settings.json["agents"]`
+早就沒人讀了（機器清單住 DB，NAS json 只是 fallback），而
+`/api/settings/save` 現在要 admin，匿名 POST 靜默失敗讓那批測試紅了一陣子。
+
+🔴 金絲雀鐵則：dev 的 agents 清單＝**真實生產機隊**。這裡只動名字帶
+`_TAG` 的列（開頭掃殘留、finally 必刪），URL 用 TEST-NET（192.0.2.x，
+RFC 5737 保證不路由）—— 舊測試用 192.168.1.200，那是哪天真的有機器插上
+就會被健康輪詢打到的位址。
 """
 import os
+from contextlib import contextmanager
+
 import pytest
-import httpx
+
+from .conftest import HTTP, goto_tab
 
 pytestmark = pytest.mark.e2e
 
 SCREENSHOTS_DIR = os.path.join(os.path.dirname(__file__), "screenshots")
+
+_TAG = "E2E測試機"
 
 
 def _safe_print(msg):
@@ -21,27 +34,47 @@ def _safe_print(msg):
         sys.stdout.buffer.write((str(msg) + "\n").encode("utf-8", errors="replace"))
 
 
-def _cleanup_test_agents(real_server):
-    """Remove any test agents from settings via API."""
+def _sweep_test_agents(base, h):
+    """清掉上一輪殘留的測試機器 —— 只認 `_TAG` 開頭的名字，掃錯範圍就是把
+    真機從機隊名單裡刪掉。"""
+    for a in HTTP.get(f"{base}/api/v1/agents").json().get("agents", []):
+        if (a.get("name") or "").startswith(_TAG):
+            HTTP.delete(f"{base}/api/v1/agents/{a['id']}", headers=h)
+
+
+@contextmanager
+def _agent_case(base, token, names):
+    """自建自刪 N 台測試機器。寫的是 dev DB 的 agents 表（也會 best-effort
+    同步 NAS json 備份），所以建/收都走正式 API、絕不繞道。"""
+    h = {"Authorization": f"Bearer {token}"}
+    _sweep_test_agents(base, h)
+    made = []
     try:
-        base = real_server["base_url"]
-        r = httpx.get(f"{base}/api/settings/load", timeout=5.0)
-        if r.status_code == 200:
-            settings = r.json()
-            agents = settings.get("agents", [])
-            cleaned = [a for a in agents if not a.get("name", "").startswith("Test")]
-            if len(cleaned) != len(agents):
-                settings["agents"] = cleaned
-                httpx.post(f"{base}/api/settings/save", json=settings, timeout=5.0)
-    except Exception:
-        pass
+        for i, n in enumerate(names):
+            r = HTTP.post(f"{base}/api/v1/agents", headers=h,
+                          json={"name": n, "url": f"http://192.0.2.{10 + i}:8000"})
+            assert r.status_code == 200, f"建測試機器失敗 {r.status_code}: {r.text[:200]}"
+            made.append(r.json()["agent"])
+        yield {"h": h, "agents": made}
+    finally:
+        for a in made:
+            HTTP.delete(f"{base}/api/v1/agents/{a['id']}", headers=h)
+
+
+def _reload_cards(page, expect_text):
+    """讓 projects tab 重抓機器清單（不開輪詢），等到某張卡真的出現。"""
+    goto_tab(page, "projects", "tab-projects")
+    page.evaluate("window.projectsTab && window.projectsTab.reloadAgentsNoPolling()")
+    page.wait_for_function(
+        """t => [...document.querySelectorAll('.pj-machine-card')]
+                 .some(c => c.textContent.includes(t))""",
+        arg=expect_text, timeout=15000)
 
 
 # ── 1. 專案總覽 Tab 存在 ────────────────────────────────────
 def test_projects_tab_exists(page, real_server):
     """Find and click projects tab → pj-container visible."""
-    page.click("#btn_tab-projects")
-    page.wait_for_timeout(500)
+    goto_tab(page, "projects", "tab-projects")
 
     container = page.query_selector(".pj-container")
     assert container is not None, "pj-container not found"
@@ -53,8 +86,7 @@ def test_projects_tab_exists(page, real_server):
 # ── 2. Section headers ──────────────────────────────────────
 def test_section_headers(page, real_server):
     """Verify 4 section headers exist in correct order."""
-    page.click("#btn_tab-projects")
-    page.wait_for_timeout(500)
+    goto_tab(page, "projects", "tab-projects")
 
     headers = page.query_selector_all(".pj-section-header")
     header_texts = []
@@ -71,8 +103,7 @@ def test_section_headers(page, real_server):
 # ── 3. Settings panel toggle ────────────────────────────────
 def test_settings_panel_toggle(page, real_server):
     """Click settings button → panel shows → has 4 selects → click again → hides."""
-    page.click("#btn_tab-projects")
-    page.wait_for_timeout(500)
+    goto_tab(page, "projects", "tab-projects")
 
     # Click settings button (in header)
     settings_btn = page.query_selector(".pj-header-right .pj-btn-settings")
@@ -99,175 +130,72 @@ def test_settings_panel_toggle(page, real_server):
     assert not panel.is_visible(), "Settings panel should be hidden after second click"
 
 
-# ── 4. Add agent form ───────────────────────────────────────
-def test_add_agent_form(page, real_server):
-    """Click add machine → form shows with name/IP/port → cancel → hides."""
-    _cleanup_test_agents(real_server)
-    page.click("#btn_tab-projects")
-    page.wait_for_timeout(500)
-
-    # Find "新增機器" button - look for it in section headers or machines area
-    add_btn = page.query_selector("text=新增機器") or page.query_selector("text=+ 新增機器")
-    if not add_btn:
-        # Try buttons near machine section
-        buttons = page.query_selector_all(".pj-section-header button")
-        for b in buttons:
-            txt = b.text_content()
-            if "新增" in txt:
-                add_btn = b
-                break
-    if not add_btn:
-        # Try empty state button
-        add_btn = page.query_selector(".pj-machines-empty button")
-
-    assert add_btn is not None, "Add machine button not found"
-    add_btn.click()
-    page.wait_for_timeout(300)
-
-    form = page.query_selector("#pj-add-agent-form")
-    assert form is not None, "Add agent form not found"
-    assert form.is_visible(), "Form not visible after click"
-
-    # Check fields
-    name_input = page.query_selector("#pj-agent-name")
-    ip_input = page.query_selector("#pj-agent-ip")
-    port_input = page.query_selector("#pj-agent-port")
-    assert name_input is not None, "Name input not found"
-    assert ip_input is not None, "IP input not found"
-    assert port_input is not None, "Port input not found"
-
-    page.screenshot(path=os.path.join(SCREENSHOTS_DIR, "test_add_agent_form.png"))
-
-    # Cancel
-    cancel_btn = form.query_selector(".pj-btn-close") or form.query_selector("button:has-text('取消')")
-    if cancel_btn:
-        cancel_btn.click()
-        page.wait_for_timeout(300)
-        assert not form.is_visible(), "Form should be hidden after cancel"
-
-
-# ── 5. Add agent success ────────────────────────────────────
-def test_add_agent_success(page, real_server):
-    """Add agent via API → verify card appears in UI."""
-    _cleanup_test_agents(real_server)
-    base = real_server["base_url"]
-
+# ── 4. Add agent form（admin-only UI）───────────────────────
+def test_add_agent_form(browser_context, real_server, e2e_admin_token):
+    """「+ 新增機器」是 admin-only（匿名連按鈕都看不到）—— 用登入的獨立分頁
+    驗表單開闔。獨立分頁是刻意的：共用的 `page` 是匿名 session，在它身上
+    登入會把後面每一支匿名測試的前提弄髒。"""
+    p = browser_context.new_page()
     try:
-        # Add agent via API
-        r = httpx.get(f"{base}/api/settings/load", timeout=15.0)
-        settings = r.json()
-        settings["agents"] = settings.get("agents", []) + [
-            {"id": "test_pc_1", "name": "Test-PC", "url": "http://192.168.1.200:8000"}
-        ]
-        httpx.post(f"{base}/api/settings/save", json=settings, timeout=15.0)
-    except httpx.ReadTimeout:
-        pytest.skip("Server busy")
+        base = real_server["base_url"]
+        p.goto(base + "/", timeout=60000)
+        p.evaluate("t => localStorage.setItem('auth_token', t)", e2e_admin_token)
+        p.reload(timeout=60000)
+        goto_tab(p, "projects", "tab-projects")
+        # admin-only 元素由登入流程非同步揭示 —— 等它真的可見
+        p.wait_for_selector(".pj-btn-settings.admin-only", state="visible",
+                            timeout=15000)
+        p.click(".pj-btn-settings.admin-only")
 
-    # Switch to projects tab and reload agents (no polling to avoid server interference)
-    page.click("#btn_tab-projects")
-    page.wait_for_timeout(500)
-    page.evaluate("window.projectsTab && window.projectsTab.reloadAgentsNoPolling()")
-    page.wait_for_timeout(1500)
+        form = p.locator("#pj-add-agent-form")
+        assert form.is_visible(), "按了新增機器，表單沒出現"
+        for fid in ("#pj-agent-name", "#pj-agent-ip", "#pj-agent-port"):
+            assert p.locator(fid).count() == 1, f"表單缺欄位 {fid}"
+        p.screenshot(path=os.path.join(SCREENSHOTS_DIR, "test_add_agent_form.png"))
 
-    # Check for machine card
-    cards = page.query_selector_all(".pj-machine-card")
-    _safe_print(f"Machine cards found: {len(cards)}")
-
-    card_found = any("Test-PC" in c.text_content() for c in cards)
-
-    page.screenshot(path=os.path.join(SCREENSHOTS_DIR, "test_add_agent_success.png"))
-    assert card_found, "Machine card with name 'Test-PC' not found"
-
-    _cleanup_test_agents(real_server)
+        p.click(".pj-btn-settings.admin-only")     # 再按一次＝收起
+        assert not form.is_visible(), "再按一次應該收起表單"
+    finally:
+        p.close()
 
 
-# ── 6. Add two agents → persist after refresh ───────────────
-def test_add_two_agents(page, real_server):
-    """Add PC-X and PC-Y via API → both persist in settings."""
-    _cleanup_test_agents(real_server)
-    base = real_server["base_url"]
+# ── 5. Add agent → card appears in UI ───────────────────────
+def test_add_agent_success(page, real_server, e2e_admin_token, dev_db_only):
+    """API 建一台 → 專案總覽真的長出那張機器卡（匿名也看得到機器狀態）。"""
+    with _agent_case(real_server["base_url"], e2e_admin_token, [f"{_TAG}A"]):
+        _reload_cards(page, f"{_TAG}A")
+        page.screenshot(path=os.path.join(SCREENSHOTS_DIR, "test_add_agent_success.png"))
 
-    try:
-        r = httpx.get(f"{base}/api/settings/load", timeout=15.0)
-        settings = r.json()
-        settings["agents"] = settings.get("agents", []) + [
-            {"id": "test_pcx", "name": "Test-PCX", "url": "http://192.168.1.201:8000"},
-            {"id": "test_pcy", "name": "Test-PCY", "url": "http://192.168.1.202:8000"},
-        ]
-        httpx.post(f"{base}/api/settings/save", json=settings, timeout=15.0)
 
-        # Verify persistence via API
-        r2 = httpx.get(f"{base}/api/settings/load", timeout=15.0)
-        saved_agents = r2.json().get("agents", [])
-        saved_names = [a.get("name", "") for a in saved_agents]
-        _safe_print(f"Agents in settings after save: {saved_names}")
-
-        assert "Test-PCX" in saved_names, f"Test-PCX not found in settings. Got: {saved_names}"
-        assert "Test-PCY" in saved_names, f"Test-PCY not found in settings. Got: {saved_names}"
-    except httpx.ReadTimeout:
-        pytest.skip("Server busy")
-
-    # Switch to projects tab and reload agents (no polling to avoid server interference)
-    page.click("#btn_tab-projects")
-    page.wait_for_timeout(500)
-    page.evaluate("window.projectsTab && window.projectsTab.reloadAgentsNoPolling()")
-    page.wait_for_timeout(1500)
-
-    cards_text = [c.text_content() for c in page.query_selector_all(".pj-machine-card")]
-    _safe_print(f"Cards in UI: {cards_text}")
-
-    page.screenshot(path=os.path.join(SCREENSHOTS_DIR, "test_add_two_agents.png"))
-    assert any("Test-PCX" in t for t in cards_text), "Test-PCX card not found in UI"
-    assert any("Test-PCY" in t for t in cards_text), "Test-PCY card not found in UI"
-
-    _cleanup_test_agents(real_server)
+# ── 6. Add two agents ───────────────────────────────────────
+def test_add_two_agents(page, real_server, e2e_admin_token, dev_db_only):
+    """一次兩台都要出現（id 去重那段邏輯的 UI 面）。"""
+    with _agent_case(real_server["base_url"], e2e_admin_token,
+                     [f"{_TAG}X", f"{_TAG}Y"]):
+        _reload_cards(page, f"{_TAG}X")
+        _reload_cards(page, f"{_TAG}Y")
+        page.screenshot(path=os.path.join(SCREENSHOTS_DIR, "test_add_two_agents.png"))
 
 
 # ── 7. Remove agent ─────────────────────────────────────────
-def test_remove_agent(page, real_server):
-    """Add one agent via API → remove via API → verify gone."""
-    _cleanup_test_agents(real_server)
+def test_remove_agent(real_server, e2e_admin_token, dev_db_only):
+    """API 建一台 → API 刪掉 → 清單裡真的沒了（不是只有畫面上消失）。"""
     base = real_server["base_url"]
-
-    try:
-        # Add agent via API
-        r = httpx.get(f"{base}/api/settings/load", timeout=15.0)
-        settings = r.json()
-        settings["agents"] = settings.get("agents", []) + [
-            {"id": "test_remove_1", "name": "Test-Remove", "url": "http://192.168.1.250:8000"}
-        ]
-        httpx.post(f"{base}/api/settings/save", json=settings, timeout=15.0)
-
-        # Verify agent was added
-        r2 = httpx.get(f"{base}/api/settings/load", timeout=15.0)
-        saved = r2.json().get("agents", [])
-        assert any(a.get("id") == "test_remove_1" for a in saved), "Agent not saved"
-
-        # Remove via API (avoid confirm() dialog hang in Playwright)
-        r_load = httpx.get(f"{base}/api/settings/load", timeout=15.0)
-        s = r_load.json()
-        s["agents"] = [a for a in s.get("agents", []) if a.get("id") != "test_remove_1"]
-        httpx.post(f"{base}/api/settings/save", json=s, timeout=15.0)
-
-        # Verify via API that agent is removed
-        r3 = httpx.get(f"{base}/api/settings/load", timeout=15.0)
-        remaining = r3.json().get("agents", [])
-        remove_found = any(a.get("id") == "test_remove_1" for a in remaining)
-        assert not remove_found, f"Test-Remove agent should be gone. Remaining: {remaining}"
-    except httpx.ReadTimeout:
-        pytest.skip("Server busy (conflict timeout from previous tests)")
-
-    _cleanup_test_agents(real_server)
+    with _agent_case(base, e2e_admin_token, [f"{_TAG}R"]) as c:
+        aid = c["agents"][0]["id"]
+        r = HTTP.delete(f"{base}/api/v1/agents/{aid}", headers=c["h"])
+        assert r.status_code == 200, r.text[:200]
+        ids = [a["id"] for a in HTTP.get(f"{base}/api/v1/agents").json()["agents"]]
+        assert aid not in ids, f"刪了還在清單裡：{aid}"
+        c["agents"].clear()          # 已刪乾淨，finally 不必再刪一次
 
 
 # ── 8. Empty states ──────────────────────────────────────────
 def test_empty_states(page, real_server):
     """With no machines/tasks, verify empty state messages."""
-    _cleanup_test_agents(real_server)
     # Instead of full page reload, just switch tabs to refresh
-    page.click("#btn_tab_main", timeout=5000)
-    page.wait_for_timeout(300)
-    page.click("#btn_tab-projects", timeout=5000)
+    goto_tab(page, "production", "tab_main")
+    goto_tab(page, "projects", "tab-projects")
     page.wait_for_timeout(1000)
 
     # Check machines empty state

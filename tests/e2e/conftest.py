@@ -87,6 +87,23 @@ def page(browser_context, real_server):
     p.close()
 
 
+def goto_tab(page, group_id, section_id):
+    """分群導覽（頂部群組 + 左側欄）下切到某個 tab —— **點真的按鈕**，不走
+    hash 捷徑（這些測試守的就是導覽本身）。
+
+    先點頂部群組 `#gbtn_{group}`：single 群組點完就到了；items 群組會先落在
+    該群第一個有權限的 tab 並長出左側欄，再點 `#sbtn_{section}`。
+    等的是 section 真的可見，不是固定秒數。
+
+    （tab 分群改版前的 `#btn_tab_*` 平鋪按鈕已不存在 —— 13 支舊 e2e 紅了
+    一陣子就是紅在這裡。）
+    """
+    page.click(f"#gbtn_{group_id}")
+    if page.locator(f"#sbtn_{section_id}").count():
+        page.click(f"#sbtn_{section_id}")
+    page.wait_for_selector(f"#{section_id}:not(.hidden)", timeout=15000)
+
+
 @contextmanager
 def flow_case(base, token, title):
     """自建自刪一筆提案 + 它的殼專案，回 {prop_id, project_id}。
