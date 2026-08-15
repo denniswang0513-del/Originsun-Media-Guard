@@ -111,10 +111,33 @@ CRM 詳情面板的「執行人員」畫的是**後者** —— 所以它才有�
 | 階段 | 內容 |
 |---|---|
 | **A｜地基** | `core/money.py`（`MONEY_FIELDS` + `can_see_money` + `redact`）、CRM router 出口過濾、第一層 403 補齊、`api_finance`／`api_cashflow` 守衛換成 `money_view`、RBAC 三處同步、列舉式測試、前端 `|| 0` 消費端稽核 |
-| **B｜解鎖專案頁** | 人員配置搬進專案頁（移檔 + host/fetcher 注入，同完稿結案那套 —— 那頁的 import 閉包只准 `tabs/proposals/` 與 `js/shared/`） |
+| **B｜解鎖專案頁 ✅ 2026-08-15** | 人員配置搬進專案頁（見下方 §7） |
 | **C｜維持不做** | 成本／帳目 1,700 行搬進專案頁。理由沒變（使用者是財務不是製作），與權限無關 |
 
-## 6. 測試
+## 6. 階段 B 實作（2026-08-15）
+
+元件 `frontend/tabs/proposals/staff-view.js`，**同一份兩個呼叫端**（CRM 專案詳情
+的人員配置 + 專案頁的同名分頁），host / fetcher / 刪除動作由呼叫端注入 ——
+搬檔而不是 import 過去用的理由同完稿結案那組（那頁的 import 閉包只准
+`tabs/proposals/` 與 `js/shared/`，`test_public_surface` 守著）。
+
+🔴 **判斷有沒有金額只看「後端回了鍵沒有」，不問前端旗標**。第一版寫成
+`canSeeMoney() && …`，e2e 立刻紅：`canSeeMoney()` 讀的是 SPA 的
+`window._accessLevel/_modules`，而獨立頁 proposal-plan.html 根本不設那些全域
+—— 管理員在那頁會被判成沒授權。鍵在＝後端認可，這是兩個掛載點唯一都對的判準。
+（`js/shared/money.js` 的 `canSeeMoney()` 仍在用，但只用在 SPA 那側：客戶績效
+與專案詳情的財務區塊要在**發請求之前**就決定畫不畫。）
+
+專案頁那份是**唯讀**的：不注入 `onRemove` 就不畫刪除鈕（派工寫入仍在 CRM，Lv3）。
+
+順手修掉一處同型的謊話：CRM 新增派工的人員下拉印 `$${s.daily_rate}/天`，沒有
+金額權時那個鍵不存在 → 畫面上是 `$undefined/天`。
+
+e2e `tests/e2e/test_project_page.py`：同一筆派工（3 天 × $8,000）分別用管理員與
+「拍攝企劃＋專案管理但無 money_view」兩個 token 開同一頁 —— 前者看到日費/小計/
+合計，後者只看到人、職務、專案角色、天數、備註。
+
+## 7. 測試
 
 照 `tests/unit/test_crm_read_guard.py` 的**列舉式**寫法（不是挑幾支測）：掃出
 app 上所有 CRM GET 路由，用無授權 token 打，斷言回應不含 `MONEY_FIELDS` 任一鍵；

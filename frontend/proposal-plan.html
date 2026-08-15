@@ -393,6 +393,9 @@
         <!-- 完稿結案：專案範疇（歸檔清單 + 專案回顧 + 官網上架編輯器）。
              只在專案模式亮 —— 提案模式的主角是提案，結案是專案的事。 -->
         <button class="side-tab" data-ptab="delivery" id="tab-delivery" style="display:none;">完稿結案</button>
+        <!-- 人員配置：專案範疇（派工＝誰、什麼角色、幾天）。金額欄跟著
+             money_view 走，元件自己判斷 —— 見 docs/MONEY_VISIBILITY.md §4。 -->
+        <button class="side-tab" data-ptab="staff" id="tab-staff" style="display:none;">人員配置</button>
       </nav>
       <div class="plan-main">
         <div id="info-host" style="display:none;"></div>
@@ -403,6 +406,7 @@
         <div id="meeting-host" style="display:none;"></div>
         <div id="flow-host" style="display:none;"></div>
         <div id="delivery-host" style="display:none;"></div>
+        <div id="staff-host" style="display:none;"></div>
         <div id="folder-host" style="display:none;">
           <!-- 重點提案卡片列與檔案瀏覽分開兩個容器：folder-view 會清空它的
                host，共用一個的話卡片列每次導覽都被洗掉。
@@ -868,6 +872,9 @@ const _LAZY_TABS = {
     // 由另一個呼叫端（CRM 專案詳情）持有，轉接寫在元件那邊，這張表保持單一形狀
     delivery: { mod: "/tabs/proposals/delivery-view.js", fn: "renderDelivery",
                 label: "完稿結案" },
+    // 唯讀：不注入 onRemove（派工寫入仍在 CRM，且是 Lv3）
+    staff: { mod: "/tabs/proposals/staff-view.js", fn: "renderStaff",
+             label: "人員配置" },
 };
 const _pending = {};
 
@@ -1298,6 +1305,7 @@ function _renderNoProposal(project) {
     _setupLazyTab("flow", { projectId: project.id, here: "preprod_proposals" });
     // 專案範疇的分頁不受「有沒有提案」影響
     _setupLazyTab("delivery", { projectId: project.id, fetcher: _crmFetch });
+    _setupLazyTab("staff", { projectId: project.id, fetcher: _crmFetch });
     // 🔴 CTA 掛在**側欄**不是 plan-host：那個容器屬於「創意發想」分頁，而
     // 下面就要把畫面切到進度 —— 放那裡會被一起藏起來（按鈕在、但看不見）。
     // 側欄的東西不隨分頁切換消失，而「這個專案還沒有提案」本來就是導覽層級
@@ -1499,6 +1507,9 @@ async function _loadPlan(pid, prefetchP = null) {
             // 完稿結案是專案範疇的（歸檔清單/專案回顧/官網上架），與看哪一份
             // 提案無關 —— 所以吃的是 _PROJ.id，不是 prop.project_id
             _setupLazyTab("delivery", { projectId: _PROJ.id, fetcher: _crmFetch });
+            // 人員配置同理（派工是專案的，不是某一份提案的）。唯讀 —— 不注入
+            // onRemove，寫入留在 CRM（Lv3）。
+            _setupLazyTab("staff", { projectId: _PROJ.id, fetcher: _crmFetch });
             _activateTab("flow");
         }
     } catch (e) {

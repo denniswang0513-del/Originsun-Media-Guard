@@ -180,12 +180,15 @@ def plan_page(browser_context, real_server, e2e_admin_token):
     """
     made = []
 
-    def _open(query="", *, wait="#plan-side .side-tab"):
+    # token：預設 admin。傳別的進來是為了驗「這個身分看到什麼」——
+    # 目前用在金額檢視權（沒有 money_view 的人不該看到日費與小計）。
+    def _open(query="", *, wait="#plan-side .side-tab", token=None):
         page = browser_context.new_page()
         made.append(page)
         base = real_server["base_url"] + "/proposal-plan.html"
         page.goto(base, timeout=60000)
-        page.evaluate("t => localStorage.setItem('auth_token', t)", e2e_admin_token)
+        page.evaluate("t => localStorage.setItem('auth_token', t)",
+                      token or e2e_admin_token)
         page.goto(base + query, timeout=60000)
         if wait:
             page.wait_for_selector(wait, timeout=30000)

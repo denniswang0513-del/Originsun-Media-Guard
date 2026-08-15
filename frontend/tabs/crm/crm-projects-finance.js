@@ -6,32 +6,19 @@
 import { state, callbacks, EXPENSE_CATEGORIES } from './crm-projects-state.js';
 import { crmFetch as _fetch, esc as _esc, fmtNum } from './crm-utils.js';
 import { canSeeMoney } from '../../js/shared/money.js';
+import { loadProjectStaff } from '../proposals/staff-view.js';
 
 // ── Load Project Staff ──────────────────────────────────────────
 
+/** CRM 這一側的人員配置入口 —— 畫的那份在 tabs/proposals/staff-view.js
+ *  （專案頁用同一份，host / fetcher / 刪除動作由呼叫端注入，見該檔檔頭）。 */
 async function _loadProjectStaff(projectId) {
-    const container = document.getElementById('proj-staff-list');
-    if (!container) return;
-    try {
-        const data = await _fetch('/projects/' + projectId + '/staff');
-        const staff = data.staff || [];
-        if (staff.length === 0) {
-            container.innerHTML = '<div class="crm-empty" style="padding:8px 0;">尚無派工</div>';
-            return;
-        }
-        const totalCost = staff.reduce((s, r) => s + r.cost, 0);
-        container.innerHTML = staff.map(r => `
-            <div class="quote-item-row" style="padding:6px 0;">
-                <span class="quote-item-desc">${_esc(r.staff_name)} <span class="crm-muted">${_esc(r.staff_role)}</span></span>
-                <span class="quote-item-qty">${r.days}天</span>
-                <span class="quote-item-price">$${fmtNum(r.rate)}</span>
-                <span class="quote-item-amount">$${fmtNum(r.cost)}</span>
-                <button class="crm-btn crm-btn-danger crm-btn-sm" style="padding:2px 6px;" onclick="window._projRemoveStaff('${r.id}','${projectId}')">&#x2715;</button>
-            </div>
-        `).join('') + `<div style="text-align:right;font-weight:700;padding:8px 0;color:#e0e0e0;">內部成本合計: $${fmtNum(totalCost)}</div>`;
-    } catch (_) {
-        container.innerHTML = '<div class="crm-empty">載入失敗</div>';
-    }
+    const host = document.getElementById('proj-staff-list');
+    if (!host) return;
+    return loadProjectStaff(projectId, {
+        host, fetcher: _fetch,
+        onRemove: (psId) => window._projRemoveStaff(psId, projectId),
+    });
 }
 
 // ── Load Cost Staff ─────────────────────────────────────────────

@@ -17,6 +17,8 @@
 
 自建自刪（dev/test 庫限定）。
 """
+import uuid
+
 import pytest
 
 from .conftest import HTTP, flow_case, project_case
@@ -86,6 +88,67 @@ def test_delivery_tab_moved_in(plan_page, case):
     txt = pg.locator("#delivery-host .delivery-archive").text_content()
     assert "載入失敗" not in txt, f"歸檔清單載入失敗（fetcher 沒接對）：{txt[:120]}"
     pg.close()
+
+
+# ── 人員配置（階段 B）：人看得到、錢看授權 ──────────────────
+@pytest.fixture(scope="module")
+def staffed(case):
+    """在案子上掛一筆派工（自建自刪）：3 天 × $8,000 = $24,000。"""
+    base, h = case["base"], case["h"]
+    r = HTTP.post(f"{base}/api/v1/crm/staff", headers=h,
+                  json={"name": f"派工測試_{uuid.uuid4().hex[:6]}", "role": "攝影",
+                        "daily_rate": 8000, "status": "在職"})
+    if r.status_code >= 400:
+        pytest.skip(f"建不出人員（{r.status_code}）：{r.text[:120]}")
+    sid = r.json().get("staff", r.json()).get("id")
+    a = HTTP.post(f"{base}/api/v1/crm/projects/{case['project_id']}/staff", headers=h,
+                  json={"staff_id": sid, "role_in_project": "主攝", "days": 3,
+                        "rate_override": 8000, "notes": "e2e"})
+    if a.status_code >= 400:
+        HTTP.delete(f"{base}/api/v1/crm/staff/{sid}", headers=h)
+        pytest.skip(f"建不出派工（{a.status_code}）：{a.text[:120]}")
+    try:
+        yield {"staff_id": sid}
+    finally:
+        rows = HTTP.get(f"{base}/api/v1/crm/projects/{case['project_id']}/staff",
+                        headers=h).json().get("staff", [])
+        for x in rows:                       # 只刪自己建的
+            if x.get("staff_id") == sid:
+                HTTP.delete(f"{base}/api/v1/crm/project-staff/{x['id']}", headers=h)
+        HTTP.delete(f"{base}/api/v1/crm/staff/{sid}", headers=h)
+
+
+def _staff_text(pg):
+    pg.click("#tab-staff")
+    pg.wait_for_function(
+        """() => {
+            const el = document.querySelector('#staff-host');
+            return el && el.textContent && !el.textContent.includes('載入中');
+        }""", timeout=30000)
+    return pg.locator("#staff-host").text_content()
+
+
+def test_staff_tab_shows_people_and_money_for_admin(plan_page, case, staffed):
+    """管理員：人 + 檔期 + 日費 + 小計 + 合計都在。"""
+    txt = _staff_text(plan_page(f"?id={case['project_id']}", wait="#tab-staff"))
+    assert "主攝" in txt and "3 天" in txt, txt[:200]
+    assert "8,000" in txt and "24,000" in txt, f"管理員看不到金額：{txt[:200]}"
+
+
+def test_staff_tab_hides_money_without_grant(plan_page, case, staffed):
+    """🔴 沒有 money_view：人與檔期照給，日費／小計／合計整欄不見。
+
+    這條守的是**後端**（core/money.py 把鍵從回應裡刪掉）—— 前端就算照畫，
+    畫出來的也會是空的而不是 0。所以斷言的是「畫面上沒有錢」而不是「有沒有藏」。
+    """
+    from core.auth import create_token
+    tok = create_token({"sub": "planner", "username": "planner", "access_level": 1,
+                        "modules": ["preprod_plan", "crm_projects"]})
+    txt = _staff_text(plan_page(f"?id={case['project_id']}",
+                                wait="#tab-staff", token=tok))
+    assert "主攝" in txt and "3 天" in txt, f"人與檔期不該被藏：{txt[:200]}"
+    for money in ("8,000", "24,000", "內部成本合計"):
+        assert money not in txt, f"沒有金額權卻看到「{money}」：{txt[:200]}"
 
 
 # ── B：一專案 N 提案 ────────────────────────────────────────

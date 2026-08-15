@@ -256,7 +256,9 @@ export async function initCrmProjectsTab() {
         const formHtml = `<div id="${formId}" style="padding:8px;background:#1e1e1e;border-radius:6px;border:1px solid #3a3a3a;margin-bottom:8px;display:flex;gap:6px;align-items:center;flex-wrap:wrap;">
             <select id="proj-staff-sel" class="crm-input" style="flex:1;min-width:120px;">
                 <option value="">— 選擇人員 —</option>
-                ${staffList.map(s => `<option value="${s.id}" data-role="${_esc(s.role)}">${_esc(s.name)} (${_esc(s.role)} $${s.daily_rate}/天)</option>`).join('')}
+                ${staffList.map(s => `<option value="${s.id}" data-role="${_esc(s.role)}">${_esc(s.name)} (${_esc(s.role)}${
+                    // 沒有金額檢視權時後端不回 daily_rate → 原本會印成 `$undefined/天`
+                    s.daily_rate == null ? '' : ` $${s.daily_rate}/天`})</option>`).join('')}
             </select>
             <input id="proj-staff-days" type="number" class="crm-input" value="1" min="1" style="width:60px;text-align:right;" placeholder="天數">
             <button class="crm-btn crm-btn-primary crm-btn-sm" onclick="window._projConfirmStaff()">確定</button>
