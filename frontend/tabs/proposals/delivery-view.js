@@ -25,9 +25,8 @@ import { renderArchiveCard } from './archive-card.js';
 
 let _embedMsgBound = false;
 
-// 歸檔清單 + 專案回顧掛在最上方。改成**靜態** import（同目錄的鄰居）——
-// 原本動態拉是為了跨目錄取 tabs/crm 那份，搬進來之後那個理由沒了；
-// 而它自己的錯誤處理在 renderArchiveCard 裡面，不會擋掉下面的編輯器。
+// 歸檔清單 + 專案回顧掛在最上方。靜態 import 同目錄的鄰居即可 ——
+// 它的載入失敗由這裡的 try 接住，不會擋掉下面的編輯器。
 async function _mountArchive(host, projectId, fetcher) {
     if (!host) return;
     try {
@@ -55,7 +54,10 @@ function _bindEmbedHeightListener() {
 // ── Main Load ──────────────────────────────────────────────
 
 export async function loadDeliveryTab(projectId, opts = {}) {
-    const container = opts.host || document.getElementById('proj-detail-delivery');
+    // host 一律由呼叫端給，**沒有 DOM id fallback** —— 留著 fallback 的話，
+    // 第三個呼叫端忘了傳 host 會靜默畫進 CRM 的容器（或一個藏著的），
+    // 而不是當場失敗
+    const container = opts.host;
     const _fetch = opts.fetcher;
     if (!container || !_fetch) return;
 
@@ -181,6 +183,11 @@ async function _selectDeliveryWork(container, workId, _fetch) {
         alert('切換作品失敗：' + (e.message || e));
     }
 }
+
+/** 專案頁 lazy-tab 表要的 (host, opts) 轉接口 —— 本尊簽名由 CRM 呼叫端
+ *  持有，轉接寫在這裡，那張表就不必為了一支特例長出旗標與分支。 */
+export const renderDelivery = (host, opts) =>
+    loadDeliveryTab(opts.projectId, { ...opts, host });
 
 // ── Init (called once at module load) ──────────────────────
 

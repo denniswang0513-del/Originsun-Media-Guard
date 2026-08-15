@@ -261,7 +261,7 @@ const _embedParam = new URLSearchParams(location.search).get('embed');
 const EMBED = _embedParam != null ? _embedParam === '1' : (window.self !== window.top);
 
 // 把內容高度回傳給父視窗（/my.html 工作台），讓外框自動長高、免內部捲軸。
-// ⚠ 另一份同樣的 embed 協定在 showcase-edit.html（宿主 crm-projects-delivery.js）——
+// ⚠ 另一份同樣的 embed 協定在 showcase-edit.html（宿主 tabs/proposals/delivery-view.js）——
 //    鐵則：量「內容元素」不要量 body/documentElement（會被 iframe 視窗高度撐著→無限長高），
 //    且 embed 內不可用 vh。改任一份記得看另一份。
 let _lastH = -1;

@@ -864,11 +864,10 @@ const _LAZY_TABS = {
     quote: { mod: "/tabs/proposals/quote-view.js", fn: "renderQuotes", label: "報價單" },
     meeting: { mod: "/tabs/proposals/meeting-view.js", fn: "renderMeetings", label: "會議記錄" },
     flow: { mod: "/tabs/proposals/flow-view.js", fn: "renderFlow", label: "進度" },
-    // 完稿結案的簽名是 (projectId, {host, fetcher})，與其他分頁的 (host, opts)
-    // 相反 —— 它有另一個呼叫端（CRM 專案詳情）而那邊先有。`argsFirst` 就是
-    // 「第一個參數不是 host」的標記，免得為了一支特例把 _mountLazy 拆成兩條。
-    delivery: { mod: "/tabs/proposals/delivery-view.js", fn: "loadDeliveryTab",
-                label: "完稿結案", argsFirst: true },
+    // renderDelivery 是 delivery-view 的 (host, opts) 轉接口 —— 它的本尊簽名
+    // 由另一個呼叫端（CRM 專案詳情）持有，轉接寫在元件那邊，這張表保持單一形狀
+    delivery: { mod: "/tabs/proposals/delivery-view.js", fn: "renderDelivery",
+                label: "完稿結案" },
 };
 const _pending = {};
 
@@ -883,10 +882,7 @@ async function _mountLazy(name) {
     try {
         const { importRetry } = await import("/js/shared/utils.js");
         const mod = await importRetry(t.mod);
-        const host = $(name + "-host");
-        // argsFirst 的那支自己收 host（放在 opts 裡）—— 見 _LAZY_TABS 的註解
-        if (t.argsFirst) await mod[t.fn](_pending[name].arg, { ..._pending[name], host });
-        else await mod[t.fn](host, _pending[name]);
+        await mod[t.fn]($(name + "-host"), _pending[name]);
         _pending[name] = null;             // 掛好了；之後切回來保留狀態
     } catch (e) {
         $(name + "-host").innerHTML =      // 設定留著，切回來能重試
@@ -1243,18 +1239,19 @@ function _wireHeaderActions(prop, PA, refresh) {
 
 let _PROJ = null;    // { id, name, status } —— 專案模式才有；提案模式是 null
 
+/** 換到某一份提案＝改 `?p=` 整頁重載（理由見 _wirePropSwitch）。切換器與
+ *  「建立提案」兩處共用。 */
+function _gotoProposal(pid) {
+    const u = new URLSearchParams(location.search);
+    u.set("p", pid);
+    location.search = u.toString();
+}
+
 /** CRM 前綴的 fetcher，形狀對齊 tabs/crm 的 `crmFetch`（回 json、非 2xx 丟）。
  *  搬過來的元件（archive-card / delivery-view）吃的是這個介面 —— 它們不能
- *  靜態 import tabs/crm 的那顆（公開頁的 import 封閉範圍），所以由呼叫端注入。 */
-async function _crmFetch(path, opts = {}) {
-    const r = await mfetch("/api/v1/crm" + path, opts);
-    if (!r.ok) {
-        let detail = "";
-        try { detail = (await r.json()).detail || ""; } catch (_) { /* 非 json */ }
-        throw new Error(typeof detail === "string" && detail ? detail : "HTTP " + r.status);
-    }
-    return r.status === 204 ? null : r.json();
-}
+ *  靜態 import tabs/crm 的那顆（公開頁的 import 封閉範圍），所以由呼叫端注入。
+ *  解包就是這頁自己的 `ok()`，不另寫一份（第一版寫了，兩份的錯誤訊息立刻分岔）。 */
+const _crmFetch = async (path, opts = {}) => ok(await mfetch("/api/v1/crm" + path, opts));
 
 /** 專案標頭：專案名 + 階段 chip。
  *  🔴 **不顯示任何金額** —— `GET /crm/projects/{id}` 會回 contract_amount /
@@ -1285,11 +1282,7 @@ function _wirePropSwitch(proposals, currentId) {
         sel.appendChild(o);
     });
     box.style.display = "";
-    sel.addEventListener("change", () => {
-        const u = new URLSearchParams(location.search);
-        u.set("p", sel.value);
-        location.search = u.toString();
-    });
+    sel.addEventListener("change", () => _gotoProposal(sel.value));
 }
 
 /** 這個專案還沒有提案 —— 進度照常給，其餘分頁換成一顆「建立提案」。
@@ -1299,16 +1292,15 @@ function _renderNoProposal(project) {
     _showSideTabs();
     // 提案範疇的分頁全部不亮（唯讀不是靠隱藏元素，是靠沒建出來 —— 這裡連
     // 按鈕都不顯示，因為點了確實沒有東西可看）
-    ["info", "plan", "refs"].forEach(t => {
-        const b = $("plan-side").querySelector(`[data-ptab="${t}"]`);
-        if (b) b.style.display = "none";
-    });
+    // 只列預設就亮著的三顆（folder/brief/quote/meeting/flow/delivery 在
+    // markup 裡本來就 display:none）；按鈕是靜態 markup，一定在
+    ["info", "plan", "refs"].forEach(t =>
+        $("plan-side").querySelector(`[data-ptab="${t}"]`).style.display = "none");
     // 標頭那排（提案狀態下拉／編輯／刪除）動的都是提案，沒有提案就沒有意義
     $("plan-acts").style.display = "none";
-    $("tab-flow").style.display = "";
     _setupLazyTab("flow", { projectId: project.id, here: "preprod_proposals" });
     // 專案範疇的分頁不受「有沒有提案」影響
-    _setupLazyTab("delivery", { arg: project.id, fetcher: _crmFetch });
+    _setupLazyTab("delivery", { projectId: project.id, fetcher: _crmFetch });
     // 🔴 CTA 掛在**側欄**不是 plan-host：那個容器屬於「創意發想」分頁，而
     // 下面就要把畫面切到進度 —— 放那裡會被一起藏起來（按鈕在、但看不見）。
     // 側欄的東西不隨分頁切換消失，而「這個專案還沒有提案」本來就是導覽層級
@@ -1326,9 +1318,7 @@ function _renderNoProposal(project) {
                 body: JSON.stringify({ title: project.name || "新提案",
                                        project_id: project.id }),
             }));
-            const u = new URLSearchParams(location.search);
-            u.set("p", d.proposal.id);
-            location.search = u.toString();
+            _gotoProposal(d.proposal.id);
         } catch (err) { alert("建立失敗：" + emsg(err)); e.target.disabled = false; }
     });
     _activateTab("flow");
@@ -1350,11 +1340,15 @@ async function _loadProject(projectId) {
         _paintProjectHead(project);
         const proposals = lr.ok ? ((await lr.json()).proposals || []) : [];
         if (!proposals.length) { _renderNoProposal(project); return; }
-        // 指定哪一份（?p=），否則用清單第一筆（後端已按 updated_at desc 排）
+        // 指定哪一份（?p=）就**並行**預抓那筆 —— 切換器與「建立提案」每次都
+        // 帶 ?p= 重載，串在清單後面等於每次切換白付一趟 RTT。stale（不在
+        // 清單裡）就棄用，照走清單第一筆（後端已按 updated_at desc 排）。
         const want = new URLSearchParams(location.search).get("p");
+        const planP = want ? mfetch("/api/v1/proposals/" + encodeURIComponent(want)) : null;
+        if (planP) planP.catch(() => {});          // 棄用時別變成 unhandled rejection
         const cur = proposals.find(p => p.id === want) || proposals[0];
         _wirePropSwitch(proposals, cur.id);
-        await _loadPlan(cur.id);
+        await _loadPlan(cur.id, cur.id === want ? planP : null);
     } catch (e) {
         $("plan-host").innerHTML = '<div class="state-msg" style="color:var(--red);">'
             + "專案載入失敗：" + escText(emsg(e)) + "</div>";
@@ -1369,7 +1363,7 @@ function _paintPlanTitle(prop) {
 }
 
 // ── 企劃（登入模式） ─────────────────────────────────────
-async function _loadPlan(pid) {
+async function _loadPlan(pid, prefetchP = null) {
     _show("plan-view");
     const host = $("plan-host");
     try {
@@ -1384,7 +1378,7 @@ async function _loadPlan(pid) {
             import("/tabs/proposals/prop-actions.js"),
             importRetryish("/tabs/proposals/plan-matrix.js"),
         ];
-        const r = await mfetch("/api/v1/proposals/" + encodeURIComponent(pid));
+        const r = await (prefetchP || mfetch("/api/v1/proposals/" + encodeURIComponent(pid)));
         if (!r.ok) throw new Error(r.status === 404 ? "找不到此提案" : "HTTP " + r.status);
         const prop = (await r.json()).proposal;
         await constP;
@@ -1505,7 +1499,7 @@ async function _loadPlan(pid) {
             side.insertBefore($("tab-flow"), side.querySelector('[data-ptab="info"]'));
             // 完稿結案是專案範疇的（歸檔清單/專案回顧/官網上架），與看哪一份
             // 提案無關 —— 所以吃的是 _PROJ.id，不是 prop.project_id
-            _setupLazyTab("delivery", { arg: _PROJ.id, fetcher: _crmFetch });
+            _setupLazyTab("delivery", { projectId: _PROJ.id, fetcher: _crmFetch });
             _activateTab("flow");
         }
     } catch (e) {

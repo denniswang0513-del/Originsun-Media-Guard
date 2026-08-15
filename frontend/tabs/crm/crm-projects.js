@@ -41,7 +41,7 @@ function _reloadActiveDetailTab(projectId) {
     if (tab === 'media') _loadMediaTab(projectId, { fast: true });
     else if (tab === 'plan') _loadPlanTab(projectId);
     else if (tab === 'refs') _loadRefsTab(projectId);
-    else if (tab === 'delivery') loadDeliveryTab(projectId, { fetcher: _fetch });
+    else if (tab === 'delivery') loadDeliveryTab(projectId, { host: document.getElementById('proj-detail-delivery'), fetcher: _fetch });
     else if (tab === 'team') { _loadCostStaff(projectId); _loadAdvances(projectId); }
     // info/finance 由 renderDetail 涵蓋、quotes 由 selectProject 的 loadQuotations 涵蓋
 }
@@ -341,7 +341,7 @@ export async function initCrmProjectsTab() {
             if (tab === 'team' && state.selectedId) { _loadCostStaff(state.selectedId); _loadAdvances(state.selectedId); }
             document.getElementById('proj-detail-finance').classList.toggle('hidden', tab !== 'finance');
             document.getElementById('proj-detail-delivery').classList.toggle('hidden', tab !== 'delivery');
-            if (tab === 'delivery' && state.selectedId) { loadDeliveryTab(state.selectedId, { fetcher: _fetch }); }
+            if (tab === 'delivery' && state.selectedId) { loadDeliveryTab(state.selectedId, { host: document.getElementById('proj-detail-delivery'), fetcher: _fetch }); }
             document.getElementById('proj-detail-plan').classList.toggle('hidden', tab !== 'plan');
             if (tab === 'plan' && state.selectedId) { _loadPlanTab(state.selectedId); }
             document.getElementById('proj-detail-media').classList.toggle('hidden', tab !== 'media');

@@ -21,10 +21,6 @@ from .conftest import HTTP, flow_case, project_case
 pytestmark = pytest.mark.e2e
 
 
-def _open(plan_page, query, wait):
-    return plan_page(query, wait=wait)
-
-
 # ── A + D：專案模式的標頭與預設分頁；提案模式不受影響 ──────
 @pytest.fixture(scope="module")
 def case(real_server, e2e_admin_token, dev_db_only):
@@ -34,7 +30,7 @@ def case(real_server, e2e_admin_token, dev_db_only):
 
 def test_project_mode_shows_project_and_defaults_to_flow(plan_page, case):
     """A：標頭＝專案名＋階段 chip，預設分頁＝進度，且不漏金額。"""
-    pg = _open(plan_page, f"?id={case['project_id']}", "#plan-side .side-tab")
+    pg = plan_page(f"?id={case['project_id']}", wait="#plan-side .side-tab")
     pg.wait_for_selector("#flow-host .pflow-track", timeout=30000)
 
     # 預設就停在進度（不是創意發想）
@@ -60,7 +56,7 @@ def test_project_mode_shows_project_and_defaults_to_flow(plan_page, case):
 
 def test_legacy_proposal_deeplink_still_works(plan_page, case):
     """D：`?pid=` 照舊 —— 標題是提案名、預設仍是創意發想。"""
-    pg = _open(plan_page, f"?pid={case['prop_id']}", "#plan-side .side-tab")
+    pg = plan_page(f"?pid={case['prop_id']}", wait="#plan-side .side-tab")
     pg.wait_for_selector("#plan-host", timeout=30000)
     active = pg.eval_on_selector(
         "#plan-side .side-tab.active", "el => el.dataset.ptab")
@@ -74,10 +70,10 @@ def test_delivery_tab_moved_in(plan_page, case):
     元件與 CRM 那邊**同一份**（tabs/proposals/delivery-view.js，host 與
     fetcher 注入）—— 所以這裡驗的是「注入接對了」，不是又寫了一份。
     """
-    pg = _open(plan_page, f"?id={case['project_id']}", "#tab-delivery")
+    pg = plan_page(f"?id={case['project_id']}", wait="#tab-delivery")
     pg.click("#tab-delivery")
-    # 歸檔清單那半打的是 /crm/projects/{id}/archive（走注入的 _crmFetch）
-    pg.wait_for_selector("#delivery-host .delivery-archive", timeout=30000)
+    # 歸檔清單那半打的是 /crm/projects/{id}/archive（走注入的 _crmFetch）。
+    # 一個 wait 就夠：述詞本身要求元素存在且已離開載入態
     pg.wait_for_function(
         """() => {
             const el = document.querySelector('#delivery-host .delivery-archive');
@@ -91,7 +87,7 @@ def test_delivery_tab_moved_in(plan_page, case):
 def test_switcher_appears_only_with_multiple_proposals(plan_page, case):
     """單筆時不顯示切換器；掛第二筆上去就出現，且兩筆都在選項裡。"""
     base, h, projid = case["base"], case["h"], case["project_id"]
-    pg = _open(plan_page, f"?id={projid}", "#plan-side .side-tab")
+    pg = plan_page(f"?id={projid}", wait="#plan-side .side-tab")
     assert pg.locator("#prop-switch").is_visible() is False, \
         "只有一筆提案卻畫了切換器（永遠只有一個選項的下拉是噪音）"
 
@@ -100,12 +96,14 @@ def test_switcher_appears_only_with_multiple_proposals(plan_page, case):
     assert r.status_code == 200, r.text[:200]
     second = r.json()["proposal"]["id"]
     try:
-        pg2 = _open(plan_page, f"?id={projid}", "#prop-switch-sel")
+        pg.close()                       # 被下一頁取代 —— 留著會掛著 plan-matrix 的共編輪詢到模組結束
+        pg2 = plan_page(f"?id={projid}", wait="#prop-switch-sel")
         opts = pg2.eval_on_selector_all(
             "#prop-switch-sel option", "els => els.map(e => e.value)")
         assert set(opts) == {case["prop_id"], second}, opts
         # 指定哪一份就開哪一份
-        pg3 = _open(plan_page, f"?id={projid}&p={second}", "#prop-switch-sel")
+        pg2.close()
+        pg3 = plan_page(f"?id={projid}&p={second}", wait="#prop-switch-sel")
         assert pg3.eval_on_selector("#prop-switch-sel", "el => el.value") == second
     finally:
         HTTP.delete(f"{base}/api/v1/proposals/{second}", headers=h)
@@ -116,7 +114,7 @@ def test_project_without_proposals_offers_to_create_one(plan_page, real_server,
                                                         e2e_admin_token, dev_db_only):
     """直接在 CRM 建的專案（沒有提案）不是死路：進度照給 + 一顆建立提案。"""
     with project_case(real_server["base_url"], e2e_admin_token, "無提案") as c:
-        pg = _open(plan_page, f"?id={c['project_id']}", "#mk-prop")
+        pg = plan_page(f"?id={c['project_id']}", wait="#mk-prop")
         # 進度照樣掛得起來（它是專案範疇的）
         pg.wait_for_selector("#flow-host .pflow-track", timeout=30000)
         # 提案範疇的分頁不亮（點了確實沒東西可看）
