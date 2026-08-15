@@ -14,11 +14,11 @@ import uuid
 from datetime import datetime
 from typing import Optional
 
-from fastapi import HTTPException, Request, UploadFile, File, Query
+from fastapi import Depends, HTTPException, Request, UploadFile, File, Query
 
 from core.schemas import StaffPayload, ResumePayload, ProjectStaffPayload
 
-from ._shared import (router, _check_auth, _require_db, _get_factory, _now,
+from ._shared import (router, _check_auth, _check_money, _require_db, _get_factory, _now,
                       STAFF_CREATED_VIA_ADMIN, _UPLOAD_BASE, _ALLOWED_IMG_EXT,
                       _verify_token_generic)
 
@@ -146,7 +146,7 @@ async def get_staff(staff_id: str):
     return _to_staff_dict(s)
 
 
-@router.get("/staff/{staff_id}/rate-history")
+@router.get("/staff/{staff_id}/rate-history", dependencies=[Depends(_check_money)])
 async def staff_rate_history(staff_id: str, request: Request):
     """H1 費率歷史（新→舊）。N2 成本回寫與 B2 複盤以此按 work_date 取當時費率。"""
     _check_auth(request)
@@ -932,7 +932,7 @@ async def delete_project_staff(ps_id: str, request: Request):
     return {"status": "ok"}
 
 
-@router.get("/projects/{project_id}/cost-summary")
+@router.get("/projects/{project_id}/cost-summary", dependencies=[Depends(_check_money)])
 async def project_cost_summary(project_id: str):
     _require_db()
     factory = await _get_factory()

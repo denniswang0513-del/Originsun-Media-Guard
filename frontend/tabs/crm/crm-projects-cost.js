@@ -6,6 +6,7 @@
 import { state, callbacks, EXPENSE_CATEGORIES } from './crm-projects-state.js';
 import { calcDashboard, remainColor, profitColor, barColor, diffLabel } from './crm-projects-calc.js';
 import { crmFetch as _fetch, esc as _esc, fmtNum, searchableSelect } from './crm-utils.js';
+import { canSeeMoney } from '../../js/shared/money.js';
 
 // ── Dirty map ──────────────────────────────────────────────────
 window._costDirtyMap = {};
@@ -88,6 +89,13 @@ if (!_autosaveStatusTimer) {
 async function _loadFinancialSummary(projectId) {
     const container = document.getElementById('proj-detail-finance');
     if (!container) return;
+    // 這一整塊（預算/結算/毛利/成本明細/雜支）三支端點全是錢，沒授權會 403 ——
+    // 不先問一次的話畫面上是紅色「載入失敗」，那會被當成故障來報修。
+    if (!canSeeMoney()) {
+        container.innerHTML = '<div class="crm-empty" style="padding:8px;">'
+            + '此帳號沒有金額檢視權限</div>';
+        return;
+    }
     container.innerHTML = '<div class="crm-empty" style="padding:8px;">載入中...</div>';
     try {
         // 先載子表列表 + 決定當前選中（loadCostGroups 會保證 selectedGroupId 設定）

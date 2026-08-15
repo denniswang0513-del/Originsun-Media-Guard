@@ -177,7 +177,10 @@ export const PERMISSION_GROUPS = [
     { id: 'production', label: '🎬 後期製作', modules: ['backup', 'verify', 'transcode', 'concat', 'drone_meta', 'report', 'transcribe', 'tts', 'footage'] },
     { id: 'business',   label: '💼 業務管理', modules: ['crm_clients', 'crm_projects', 'crm_quotes', 'portal', 'media_log'] },
     { id: 'hr',         label: '人事管理', modules: ['crm_staff', 'timesheets', 'hr_leave', 'journal'] },
-    { id: 'finance',    label: '💰 財務管理', modules: ['crm_invoices'] },
+    // money_view 不是 tab，是橫切的能力鍵（有它才看得到合約金額／日費／成本）。
+    // 放在財務群只是為了讓勾選的人一眼知道它管什麼 —— groupKeys 會因 TAB_MAP
+    // 沒有這個 key 而自動不進側欄。政策正本 core/money.py。
+    { id: 'finance',    label: '💰 財務管理', modules: ['crm_invoices', 'money_view'] },
     { id: 'website',    label: '🌐 官網管理', modules: ['website_admin'] },
     // N0 個人工作台 — 獨立頁 /my.html 的卡片（無 SPA tab，僅權限編輯器用；
     // groupKeys 會因 TAB_MAP 無此 key 而自動不進側欄）。

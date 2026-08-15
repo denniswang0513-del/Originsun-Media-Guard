@@ -16,6 +16,7 @@ from fastapi import APIRouter, HTTPException, Request  # type: ignore
 from config import load_settings
 from core.auth import check_admin_or_module
 from core.finance_logic import local_day
+from core.money import check_money
 from core.schemas import MilestonePayload, MonthClosePayload
 from routers.crm._shared import _parse_day, _username, _validate_month
 
@@ -26,7 +27,11 @@ _DEFAULT_TEMPLATE = [("訂金", 30), ("期中款", 40), ("尾款", 30)]
 
 
 def _guard(request: Request):
+    # 功能面（帳務 or 專案管理）+ 金額檢視權。這支每一格都是錢：付款節點的
+    # 金額、90 天預測的流入流出 —— 沒有「拿掉數字還剩下什麼」可言，所以擋入口
+    # 而不是抹欄位（owner 2026-08-15；docs/MONEY_VISIBILITY.md）。
     check_admin_or_module(request, "crm_invoices", "crm_projects")
+    check_money(request)
 
 
 from core.db_guard import db_factory_or_503 as _factory_or_503

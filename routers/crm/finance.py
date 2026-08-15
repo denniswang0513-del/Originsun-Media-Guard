@@ -10,12 +10,12 @@ import io
 import uuid
 from datetime import datetime, timezone
 
-from fastapi import HTTPException, Request, UploadFile, File, Query
+from fastapi import Depends, HTTPException, Request, UploadFile, File, Query
 
 from core.finance_logic import month_of
 from core.schemas import InvoicePayload, PaymentRequestPayload, CashEntryPayload
 
-from ._shared import (router, _check_auth, _require_db, _get_factory, _now,
+from ._shared import (router, _check_auth, _check_money, _require_db, _get_factory, _now,
                       _parse_shoot_date, _assert_month_open, _assert_rows_open,
                       _locked_month_set, _raise_locked_batch)
 
@@ -63,7 +63,7 @@ def _unmark_invoice_received(inv) -> None:
 
 # ── Invoice Endpoints ───────────────────────────────────────
 
-@router.get("/invoices")
+@router.get("/invoices", dependencies=[Depends(_check_money)])
 async def list_invoices(
     q: str = Query(""), payment_type: str = Query(""),
     category: str = Query(""), project_id: str = Query(""),
@@ -117,7 +117,7 @@ async def create_invoice(req: InvoicePayload, request: Request):
     return {"status": "ok", "invoice": _to_invoice_dict(inv)}
 
 
-@router.get("/invoices/{invoice_id}")
+@router.get("/invoices/{invoice_id}", dependencies=[Depends(_check_money)])
 async def get_invoice(invoice_id: str):
     _require_db()
     factory = await _get_factory()
@@ -279,7 +279,7 @@ def _to_payment_dict(p, project_name: str = "") -> dict:
 
 # ── Payment Request Endpoints ──────────────────────────────
 
-@router.get("/payments")
+@router.get("/payments", dependencies=[Depends(_check_money)])
 async def list_payments(
     q: str = Query(""), category: str = Query(""),
     payment_status: str = Query(""), project_id: str = Query(""),
@@ -332,7 +332,7 @@ async def create_payment(req: PaymentRequestPayload, request: Request):
     return {"status": "ok", "payment": _to_payment_dict(p)}
 
 
-@router.get("/payments/advances")
+@router.get("/payments/advances", dependencies=[Depends(_check_money)])
 async def list_advance_payments(returned: int = -1, project_id: str = Query("")):
     """列出預支款。returned=-1=全部，0=未結清，1=已結清。project_id 可過濾特定專案。"""
     _require_db()
@@ -529,7 +529,7 @@ async def batch_unpay(request: Request):
     return {"status": "ok", "updated": updated}
 
 
-@router.get("/payments/{payment_id}")
+@router.get("/payments/{payment_id}", dependencies=[Depends(_check_money)])
 async def get_payment(payment_id: str):
     _require_db()
     factory = await _get_factory()
@@ -693,7 +693,7 @@ def _to_cash_dict(e, project_name: str = "", invoice_title: str = "") -> dict:
 # _raise_locked_batch）唯一實作在 routers/crm/_shared.py — 含「守哪個日期欄」判準表。
 
 
-@router.get("/cash-entries")
+@router.get("/cash-entries", dependencies=[Depends(_check_money)])
 async def list_cash_entries(
     q: str = Query(""), category: str = Query(""),
     item: str = Query(""), project_id: str = Query(""),
@@ -865,7 +865,7 @@ async def import_cash_csv(request: Request, file: UploadFile = File(...)):
 
 # ── Accounts Payable (應付帳款) ─────────────────────────────
 
-@router.get("/payables/summary")
+@router.get("/payables/summary", dependencies=[Depends(_check_money)])
 async def payables_summary(month: str = Query(""), status: str = Query("")):
     """請款彙總，按收款人分組。month=all 或空=全部應付款；month=YYYY-MM=該月。"""
     _require_db()
@@ -914,7 +914,7 @@ async def payables_summary(month: str = Query(""), status: str = Query("")):
     return {"month": month or "all", **group_payables(rows)}
 
 
-@router.get("/receivables/summary")
+@router.get("/receivables/summary", dependencies=[Depends(_check_money)])
 async def receivables_summary(status: str = Query("")):
     """應收帳款彙總：已開立發票按客戶（company_name）分組。status=未收款/已收款/空=全部。"""
     _require_db()

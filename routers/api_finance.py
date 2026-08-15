@@ -23,7 +23,8 @@ api_finance.py — 財務管理階段二/三：科目對映 + 銀行帳戶 + 對
   攤還純函式 amortization_schedule 在 core/finance_logic.py
   （黃金測試 tests/unit/test_finance_loans.py）。
 
-守門：全部端點 check_admin_or_module(request, 'crm_invoices')（沿用帳務模組 key）。
+守門：全部端點 `crm_invoices` 模組 **＋** `money_view` 金額檢視權
+（2026-08-15 起；docs/MONEY_VISIBILITY.md）。
 金額一律 Integer 新台幣。純計算規則在 core/finance_logic.py（有單元測試）。
 """
 
@@ -35,6 +36,7 @@ from fastapi import APIRouter, HTTPException, Request  # type: ignore
 from config import load_settings, save_settings
 from core.auth import check_admin_or_module
 from core.db_guard import db_factory_or_503 as _factory_or_503
+from core.money import check_money
 from core.finance_logic import (amortization_schedule,
                                 auto_match_statement_lines,
                                 bank_running_balance, cash_entry_flow,
@@ -66,7 +68,11 @@ LOAN_PAY_CATEGORY = "貸款繳款"  # 對映 (cash, 貸款繳款) → 2400/loan�
 
 
 def _guard(request: Request):
+    # 兩把鑰匙都要：`crm_invoices` ＝ 進得了財務管理這個功能面，`money_view` ＝
+    # 看得到數字（owner 2026-08-15「預設不要看到金額，除非我授權」，
+    # 政策正本 core/money.py）。這支 router 每一格都是錢，所以擋在入口。
     check_admin_or_module(request, "crm_invoices")
+    check_money(request)
 
 
 async def _flow_sums_by_account(session, until=None, account_id=None) -> dict:

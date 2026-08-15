@@ -141,6 +141,11 @@ ALL_MODULES = [
     'media_log',
     # 參考影片庫 v2（前期製作 › 片庫；docs/REFERENCE_LIBRARY.md）
     'references',
+    # 金額檢視（owner 2026-08-15「預設不要看到金額，除非我授權」）。
+    # ⚠ **不是** tab —— 它是一個橫切的能力鍵：有它才看得到合約金額／日費／成本。
+    # 刻意不讓 crm_invoices / crm_quotes / crm_projects / crm_staff 隱含它
+    # （隱含＝有人不經 owner 的手就拿到鑰匙）。政策正本 core/money.py。
+    'money_view',
 ]
 
 
@@ -365,6 +370,15 @@ def payload_grants(payload: Optional[dict], *module_keys: str) -> bool:
         return True
     user_modules = payload.get('modules') or []
     return any(k in user_modules for k in module_keys)
+
+
+def current_payload(request: Request) -> Optional[dict]:
+    """驗過的 token payload，沒有／無效就 None —— **不丟例外**。
+
+    給「有沒有這個權限」而不是「擋不擋你」的判斷用（例如金額欄位要不要抹）。
+    擋人請用 check_* 那批：它們該回 401/403，而不是靜默把人當匿名。
+    """
+    return _extract_token(request)
 
 
 def check_admin_or_module(request: Request, *module_keys: str):

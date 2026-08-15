@@ -4,6 +4,7 @@
  */
 
 import { crmFetch as _fetch, crmCacheFetch, crmCacheInvalidate, esc as _esc, fmtNum as _fmtNum, renderAvatar, setupResizeHandle, enableInlineEdit, addEditButton, kebabMenuHtml, createSortable, enumIndex, searchableSelect } from './crm-utils.js';
+import { canSeeMoney } from '../../js/shared/money.js';
 
 // 專案階段 → 圖表/圓點色（客戶績效視圖用；與 crm.css 的 .crm-proj-badge-* 是
 // 不同 render path 故不共用）。未知階段 fallback 灰色。保留 已取消 舊值(無 backfill
@@ -187,12 +188,17 @@ async function _loadClientPerformance(clientId) {
 
         const collectColor = collectRate >= 80 ? '#86efac' : collectRate >= 50 ? '#fbbf24' : '#fca5a5';
 
+        // 🔴 沒有金額檢視權時，後端把 contract_amount / amount_received 從
+        // 回應裡**刪掉**了 —— 上面那些 `|| 0` 的加總會得到 0，畫出來就是
+        // 「這個客戶合約總額 $0、收款率 0%」，那是謊報。整格不畫才誠實。
+        const $money = canSeeMoney();
         container.innerHTML = `
             <div class="crm-perf-grid">
                 <div class="crm-perf-card">
                     <div class="crm-perf-num">${totalProjects}</div>
                     <div class="crm-perf-label">專案總數</div>
                 </div>
+                ${$money ? `
                 <div class="crm-perf-card">
                     <div class="crm-perf-num">$${_n(totalRevenue)}</div>
                     <div class="crm-perf-label">合約總額</div>
@@ -204,7 +210,7 @@ async function _loadClientPerformance(clientId) {
                 <div class="crm-perf-card">
                     <div class="crm-perf-num" style="color:${collectColor};">${collectRate}%</div>
                     <div class="crm-perf-label">收款率</div>
-                </div>
+                </div>` : ''}
             </div>
 
             <div style="margin-top:16px;">
@@ -222,7 +228,7 @@ async function _loadClientPerformance(clientId) {
                 }).join('')}
             </div>
 
-            <div style="margin-top:16px;">
+            ${$money ? `<div style="margin-top:16px;">
                 <div style="font-size:12px;font-weight:700;color:#6b7280;margin-bottom:8px;">年度營收</div>
                 ${yearKeys.map(y => `
                     <div style="display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid #2e2e2e;">
@@ -230,7 +236,7 @@ async function _loadClientPerformance(clientId) {
                         <span style="font-size:13px;font-weight:700;color:#fbbf24;">$${_n(yearRevenue[y])}</span>
                     </div>
                 `).join('')}
-            </div>
+            </div>` : ''}
         `;
     } catch (e) {
         container.innerHTML = '<div class="crm-empty" style="color:#fca5a5;">載入失敗</div>';

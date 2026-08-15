@@ -28,6 +28,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 # （proposal_assets 模組層就 import 了），函式內 import 的 ImportError 退路是
 # 死碼，而守衛掛在 router 層＝每個請求都走一次。
 from core.auth import check_admin_or_module, check_logged_in
+from core.money import MoneyRedactRoute, check_money
 from core.project_flow import ADVANCE_MODULES, CHECK_MODULES
 
 import core.state as state
@@ -102,7 +103,8 @@ def _module_guard(*modules: str):
 
 
 router = APIRouter(prefix=CRM_PREFIX, tags=["CRM"],
-                   dependencies=[Depends(_crm_read_guard)])
+                   dependencies=[Depends(_crm_read_guard)],
+                   route_class=MoneyRedactRoute)
 
 # 對外白名單 —— NAS 對外容器只掛這一個 router（master 在 crm/__init__ 收編回
 # 主 router，URL 完全不變）。「這條端點可以對外」是整個 CRM 套件的橫切分類
@@ -122,6 +124,11 @@ public_router = APIRouter(tags=["CRM 公開（token 授權）"])
 
 # CRM 一般寫入 —— 管理員限定（歷史預設）。
 _check_auth = _module_guard()
+
+# 第一層金額守衛：**端點本身就是錢**（成本明細／財務摘要／發票／請款／收支／
+# 報價／費率史）。第二層（欄位抹除）由 router 的 MoneyRedactRoute 負責，管的是
+# 「夾帶」金額的端點。政策與名單住 core/money.py，這裡只是把它接到 CRM 上。
+_check_money = check_money
 
 # 官網製作授權 — 管理員 OR 擁有 website_admin 模組即可（不需全域 admin）。
 # 給「結案製作」看板 + showcase 編輯端點用：非管理員的官網製作人員只要帳號
