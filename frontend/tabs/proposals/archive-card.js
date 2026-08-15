@@ -1,10 +1,9 @@
 /**
  * archive-card.js — 結案歸檔清單 + 專案回顧（KPTA）
  *
- * 掛在「完稿結案」的最上方。**兩個呼叫端**：CRM 專案詳情、以及專案頁
- * （/proposal-plan.html?id=）。所以 fetcher 由呼叫端注入 —— 這個檔住在
- * `tabs/proposals/`（公開頁的 import 封閉範圍內），不能靜態拉 tabs/crm 的
- * `crmFetch`；而兩邊本來就各有各的 fetch 包裝（crmFetch / mfetch）。
+ * 掛在「完稿結案」的最上方，由 `delivery-view._mountArchive` 掛載（唯一的
+ * 呼叫端 —— CRM 與專案頁都是經過它進來的）。fetcher 由呼叫端注入，為什麼
+ * 非注入不可見 delivery-view 檔頭與 docs/PROPOSAL_PLANNER.md §15.3。
  *
  * 對齊 owner 的 Notion 專案啟動面版：「歸檔資料確認事項」+「專案回顧」。
  *

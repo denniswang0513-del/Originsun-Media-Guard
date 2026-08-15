@@ -25,8 +25,14 @@ import { _loadFinancialSummary, _showExpenseForm, initCostHandlers } from './crm
 import { _loadCostStaff, _loadAdvances, _loadProjectStaff, initFinanceHandlers } from './crm-projects-finance.js';
 import { loadProjectQuotes, initQuoteHandlers } from './crm-projects-quotes.js';
 // 完稿結案：元件搬到 tabs/proposals/（專案頁也用同一份，見 docs §15.2）——
-// host 與 fetcher 由呼叫端注入，所以這裡把 CRM 的那顆 crmFetch 傳進去。
+// host 與 fetcher 由呼叫端注入，所以這裡把 CRM 這邊的兩樣東西一次綁好。
 import { loadDeliveryTab, initDeliveryHandlers } from '../proposals/delivery-view.js';
+
+/** CRM 這一側的完稿結案入口 —— 注入的內容兩個呼叫點完全一樣，寫一次就好。
+ *  host 每次現查：與這個檔案其他分頁的慣例一致（面板是靜態 markup，但不必
+ *  為此在模組層建立一個載入順序的耦合）。 */
+const _openDelivery = (pid) => loadDeliveryTab(pid, {
+    host: document.getElementById('proj-detail-delivery'), fetcher: _fetch });
 import { loadProjectTypes } from './crm-projects-core.js';
 import { loadCostGroups, renderGroupSwitcher, initCostGroupsHandlers } from './crm-projects-cost-groups.js';
 
@@ -41,7 +47,7 @@ function _reloadActiveDetailTab(projectId) {
     if (tab === 'media') _loadMediaTab(projectId, { fast: true });
     else if (tab === 'plan') _loadPlanTab(projectId);
     else if (tab === 'refs') _loadRefsTab(projectId);
-    else if (tab === 'delivery') loadDeliveryTab(projectId, { host: document.getElementById('proj-detail-delivery'), fetcher: _fetch });
+    else if (tab === 'delivery') _openDelivery(projectId);
     else if (tab === 'team') { _loadCostStaff(projectId); _loadAdvances(projectId); }
     // info/finance 由 renderDetail 涵蓋、quotes 由 selectProject 的 loadQuotations 涵蓋
 }
@@ -341,7 +347,7 @@ export async function initCrmProjectsTab() {
             if (tab === 'team' && state.selectedId) { _loadCostStaff(state.selectedId); _loadAdvances(state.selectedId); }
             document.getElementById('proj-detail-finance').classList.toggle('hidden', tab !== 'finance');
             document.getElementById('proj-detail-delivery').classList.toggle('hidden', tab !== 'delivery');
-            if (tab === 'delivery' && state.selectedId) { loadDeliveryTab(state.selectedId, { host: document.getElementById('proj-detail-delivery'), fetcher: _fetch }); }
+            if (tab === 'delivery' && state.selectedId) { _openDelivery(state.selectedId); }
             document.getElementById('proj-detail-plan').classList.toggle('hidden', tab !== 'plan');
             if (tab === 'plan' && state.selectedId) { _loadPlanTab(state.selectedId); }
             document.getElementById('proj-detail-media').classList.toggle('hidden', tab !== 'media');

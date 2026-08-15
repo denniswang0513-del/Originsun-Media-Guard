@@ -12,6 +12,9 @@
 🔴 標頭不准出現金額：這頁的閘門比 CRM 寬（preprod_plan 的企劃人員進得來），
 而 `GET /crm/projects/{id}` 是會回 contract_amount 的。
 
+每支測試用完自己關頁 —— 留著的頁會掛著 plan-matrix 的 30s 共編輪詢到模組結束
+（fixture 只在模組收尾才統一關）。
+
 自建自刪（dev/test 庫限定）。
 """
 import pytest
@@ -52,7 +55,7 @@ def test_project_mode_shows_project_and_defaults_to_flow(plan_page, case):
     head = pg.locator(".plan-head").text_content()
     for money in ("contract_amount", "amount_receivable", "profit_target"):
         assert money not in head, f"標頭出現金額欄位：{money}"
-    pg.close()   # 用完即關 —— 留著的頁掛著 plan-matrix 的 30s 共編輪詢
+    pg.close()
 
 
 def test_legacy_proposal_deeplink_still_works(plan_page, case):
@@ -98,7 +101,7 @@ def test_switcher_appears_only_with_multiple_proposals(plan_page, case):
     assert r.status_code == 200, r.text[:200]
     second = r.json()["proposal"]["id"]
     try:
-        pg.close()                       # 被下一頁取代 —— 留著會掛著 plan-matrix 的共編輪詢到模組結束
+        pg.close()                       # 被下一頁取代
         pg2 = plan_page(f"?id={projid}", wait="#prop-switch-sel")
         opts = pg2.eval_on_selector_all(
             "#prop-switch-sel option", "els => els.map(e => e.value)")

@@ -1289,10 +1289,8 @@ function _wirePropSwitch(proposals, currentId) {
  *  不另開端點。 */
 function _renderNoProposal(project) {
     _showSideTabs();
-    // 提案範疇的分頁全部不亮（唯讀不是靠隱藏元素，是靠沒建出來 —— 這裡連
-    // 按鈕都不顯示，因為點了確實沒有東西可看）
-    // 只列預設就亮著的三顆（folder/brief/quote/meeting/flow/delivery 在
-    // markup 裡本來就 display:none）；按鈕是靜態 markup，一定在
+    // 提案範疇的分頁不亮 —— 點了確實沒東西可看。只列預設就亮著的三顆，
+    // 其餘（folder/brief/quote/meeting/flow/delivery）在 markup 裡本來就 none。
     ["info", "plan", "refs"].forEach(t =>
         $("plan-side").querySelector(`[data-ptab="${t}"]`).style.display = "none");
     // 標頭那排（提案狀態下拉／編輯／刪除）動的都是提案，沒有提案就沒有意義
@@ -1327,7 +1325,7 @@ async function _loadProject(projectId) {
         // ?p= 指定哪一份提案（切換器與「建立提案」每次都帶著重載）→ 那筆的
         // GET 跟下面兩趟**一起起跑**。🔴 發起點必須在 Promise.all 之前才有
         // 意義 —— 放在 await 之後的話，到 _loadPlan 消費它為止全是同步碼，
-        // 跟原地才發沒有差別（第一輪就這樣寫成了零收益，第二輪抓到）。
+        // 跟原地才發沒有差別（2026-08-15 一度就是那樣寫的，零收益）。
         // stale（不在清單裡）就棄用照走舊路，所以要吞掉棄用時的 rejection。
         const want = new URLSearchParams(location.search).get("p");
         const planP = want ? mfetch("/api/v1/proposals/" + encodeURIComponent(want)) : null;
