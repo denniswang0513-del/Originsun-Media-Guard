@@ -271,7 +271,21 @@ function _editCell(field, displayHtml) {
 // ── Detail Panel Rendering (stage-aware) ──────────────────
 
 function renderDetail(project) {
-    document.getElementById('proj-detail-title').textContent = project.name;
+    const _title = document.getElementById('proj-detail-title');
+    _title.textContent = project.name;
+    // 「開啟專案頁 ↗」—— 製作期的工作面（進度五軌／創意發想／企劃書／報價單／
+    // 會議記錄／資料夾）在那一頁，而且它是白底獨立頁、網址可以直接給同事。
+    // 這裡**不重做**那些分頁，只給一條路過去（見 docs/PROPOSAL_PLANNER.md
+    // §15：CRM 這邊收斂成「清單 + 錢」）。開新分頁：CRM 詳情面板裡常有
+    // 編到一半的成本列，原地導覽會把它帶走。
+    const _go = document.createElement('a');
+    _go.className = 'crm-btn crm-btn-secondary crm-btn-sm';
+    _go.style.cssText = 'margin-left:10px;font-size:10px;padding:2px 8px;';
+    _go.target = '_blank';
+    _go.rel = 'noopener';
+    _go.href = '/proposal-plan.html?id=' + encodeURIComponent(project.id);
+    _go.textContent = '開啟專案頁 ↗';
+    _title.appendChild(_go);
 
     const _pBadge = (status) => {
         const map = {'未到帳':'crm-badge crm-pay-未到帳','部分到帳':'crm-badge crm-pay-部分到帳','全額到帳':'crm-badge crm-pay-全額到帳'};

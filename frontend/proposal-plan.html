@@ -148,6 +148,22 @@
   .plan-body { display: flex; gap: 20px; align-items: flex-start; }
   .plan-side { display: flex; flex-direction: column; gap: 2px; min-width: 112px;
     position: sticky; top: 72px; }
+  /* 專案模式的提案切換器（側欄頂端）。刻意長得不像分頁 —— 它切的是「哪一份
+     提案」，不是「看哪一頁」，混在分頁列裡會被當成第九個分頁點。 */
+  #prop-switch { padding: 0 12px 10px; margin-bottom: 6px; border-bottom: 1px solid var(--line); }
+  .ps-label { font-size: 10px; letter-spacing: .2em; color: var(--sub); margin-bottom: 4px; }
+  #prop-switch-sel { width: 100%; font: inherit; font-size: 12px; color: var(--ink);
+    background: #fff; border: 1px solid var(--line); border-radius: 2px; padding: 5px 6px; outline: none; }
+  #prop-switch-sel:focus { border-color: var(--red); }
+  /* 沒有提案時的側欄 CTA（不隨分頁切換消失） */
+  #no-prop-cta { padding: 12px; margin-top: 6px; border-top: 1px solid var(--line); }
+  #no-prop-cta button { width: 100%; font: inherit; font-size: 12px; cursor: pointer;
+    color: var(--red); background: none; border: 1px solid var(--red);
+    border-radius: 2px; padding: 7px 8px; }
+  #no-prop-cta button:disabled { opacity: .5; cursor: default; }
+  /* 專案模式標頭：專案名為主、階段 chip 在旁 */
+  .proj-stage { font-size: 11px; letter-spacing: .1em; color: var(--sub);
+    border: 1px solid var(--line); border-radius: 999px; padding: 3px 10px; white-space: nowrap; }
   .side-tab { text-align: left; background: none; cursor: pointer; color: var(--sub);
     border: none; border-left: 2px solid transparent; padding: 9px 14px; font-size: 13px;
     letter-spacing: 0.05em; transition: all .12s; }
@@ -347,6 +363,7 @@
     <div class="plan-head">
       <button class="back" id="plan-back" onclick="location.href = location.pathname">← 清單</button>
       <h1 id="plan-title"></h1>
+      <span class="proj-stage" id="proj-stage" style="display:none;"></span>
       <span class="plan-acts" id="plan-acts">
         <select id="plan-status" title="提案狀態（成案會建立或推進 CRM 專案）"></select>
         <button id="plan-edit" title="編輯標題、客戶等基本資料">編輯</button>
@@ -359,6 +376,12 @@
     </div>
     <div class="plan-body">
       <nav class="plan-side" id="plan-side" style="display:none;">
+        <!-- 專案模式（?id=）才出現：這個專案底下的提案（1 專案 : N 提案）。
+             只有一筆時不顯示 —— 一個永遠只有一個選項的下拉是純噪音。 -->
+        <div id="prop-switch" style="display:none;">
+          <div class="ps-label">提案</div>
+          <select id="prop-switch-sel"></select>
+        </div>
         <button class="side-tab" data-ptab="info">基本資料</button>
         <button class="side-tab active" data-ptab="plan">創意發想</button>
         <button class="side-tab" data-ptab="refs" id="tab-refs">參考影片</button>
@@ -804,20 +827,26 @@ function _wireInfoEditing(host, opts) {
 }
 
 
+/** 切到某個分頁（點擊與「開頁時預設哪一頁」共用同一條路 —— 分開寫的話
+ *  預設頁會漏掉 _mountLazy，畫面停在空白容器上）。 */
+function _activateTab(name) {
+    const side = $("plan-side");
+    side.querySelectorAll(".side-tab").forEach(b => {
+        const on = (b.dataset.ptab === name);
+        b.classList.toggle("active", on);
+        // 容器 id 就是 `{data-ptab}-host` —— 慣例寫在 markup 裡，不另外維護一張表。
+        // 都是「只藏不拆」：plan-matrix 的共編輪詢靠 isConnected 自停，拆 DOM 會中斷它
+        $(b.dataset.ptab + "-host").style.display = on ? "" : "none";
+    });
+    if (name === "folder") _mountFolder();
+    else _mountLazy(name);
+}
+
 function _showSideTabs() {
     const side = $("plan-side");
     side.style.display = "";
-    side.querySelectorAll(".side-tab").forEach(btn => btn.addEventListener("click", () => {
-        // 容器 id 就是 `{data-ptab}-host` —— 慣例寫在 markup 裡，不另外維護一張表。
-        // 都是「只藏不拆」：plan-matrix 的共編輪詢靠 isConnected 自停，拆 DOM 會中斷它
-        side.querySelectorAll(".side-tab").forEach(b => {
-            const on = (b === btn);
-            b.classList.toggle("active", on);
-            $(b.dataset.ptab + "-host").style.display = on ? "" : "none";
-        });
-        if (btn.dataset.ptab === "folder") _mountFolder();
-        else _mountLazy(btn.dataset.ptab);
-    }));
+    side.querySelectorAll(".side-tab").forEach(btn =>
+        btn.addEventListener("click", () => _activateTab(btn.dataset.ptab)));
 }
 
 // ── 懶載入分頁（企劃書／報價單 —— 只有員工登入才有：企劃書是內部產出、
@@ -1188,6 +1217,130 @@ function _wireHeaderActions(prop, PA, refresh) {
     });
 }
 
+// ── 專案模式（?id=<專案id>）─────────────────────────────
+//
+// 這一頁本來就在管專案（進度五軌、資料夾、報價、會議都掛在專案上），只有
+// 入口還在講提案。專案模式把主鍵換過來：以專案開頁，提案變成它底下的東西。
+//
+// 🔴 **一個專案可以有 N 筆提案**（同一案提三個 concept；`wins_proposal` 的
+// 「恰好一筆才自動標成案」就是為此），也可以**一筆都沒有**（直接在 CRM 建的
+// 專案）。所以這裡不能假設「專案 ↔ 提案」是一對一。
+//
+// 提案範疇的分頁（創意發想/企劃書/報價單/會議記錄/基本資料/參考影片）跟著
+// 側欄頂端的切換器走；專案範疇的（進度）與切換器無關。
+
+let _PROJ = null;    // { id, name, status } —— 專案模式才有；提案模式是 null
+
+/** 專案標頭：專案名 + 階段 chip。
+ *  🔴 **不顯示任何金額** —— `GET /crm/projects/{id}` 會回 contract_amount /
+ *  amount_receivable / profit_target_pct，而這頁的閘門收得比 CRM 寬
+ *  （preprod_plan 的企劃人員進得來）。標頭只放名字與階段。 */
+function _paintProjectHead(project) {
+    $("plan-title").textContent = project.name || "（未命名專案）";
+    document.title = (project.name || "專案") + "｜專案｜ORIGINSUN";
+    const chip = $("proj-stage");
+    chip.textContent = project.status || "";
+    chip.style.display = project.status ? "" : "none";
+    $("plan-back").textContent = "← 專案清單";
+}
+
+/** 提案切換器：只在有兩筆以上時出現。切換＝換網址重載（`?id=…&p=…`）——
+ *  提案範疇的六個分頁各有各的掛載狀態與自動儲存基準，就地換提案要一個一個
+ *  拆重掛，而那正是「換了提案卻看到上一份的字」的來源。 */
+function _wirePropSwitch(proposals, currentId) {
+    if (proposals.length < 2) return;
+    const box = $("prop-switch");
+    const sel = $("prop-switch-sel");
+    sel.innerHTML = "";
+    proposals.forEach(p => {
+        const o = document.createElement("option");
+        o.value = p.id;
+        o.textContent = (p.title || "（未命名）") + (p.status ? `　${p.status}` : "");
+        o.selected = (p.id === currentId);
+        sel.appendChild(o);
+    });
+    box.style.display = "";
+    sel.addEventListener("change", () => {
+        const u = new URLSearchParams(location.search);
+        u.set("p", sel.value);
+        location.search = u.toString();
+    });
+}
+
+/** 這個專案還沒有提案 —— 進度照常給，其餘分頁換成一顆「建立提案」。
+ *  走既有的 `POST /proposals` 帶 project_id（掛到既有專案那條路），
+ *  不另開端點。 */
+function _renderNoProposal(project) {
+    _showSideTabs();
+    // 提案範疇的分頁全部不亮（唯讀不是靠隱藏元素，是靠沒建出來 —— 這裡連
+    // 按鈕都不顯示，因為點了確實沒有東西可看）
+    ["info", "plan", "refs"].forEach(t => {
+        const b = $("plan-side").querySelector(`[data-ptab="${t}"]`);
+        if (b) b.style.display = "none";
+    });
+    // 標頭那排（提案狀態下拉／編輯／刪除）動的都是提案，沒有提案就沒有意義
+    $("plan-acts").style.display = "none";
+    $("tab-flow").style.display = "";
+    _setupLazyTab("flow", { projectId: project.id, here: "preprod_proposals" });
+    // 🔴 CTA 掛在**側欄**不是 plan-host：那個容器屬於「創意發想」分頁，而
+    // 下面就要把畫面切到進度 —— 放那裡會被一起藏起來（按鈕在、但看不見）。
+    // 側欄的東西不隨分頁切換消失，而「這個專案還沒有提案」本來就是導覽層級
+    // 的事實，不是某一頁的內容。
+    const cta = document.createElement("div");
+    cta.id = "no-prop-cta";
+    cta.innerHTML = '<div class="ps-label">還沒有提案</div>'
+        + '<button id="mk-prop">建立提案</button>';
+    $("plan-side").appendChild(cta);
+    $("mk-prop").addEventListener("click", async (e) => {
+        e.target.disabled = true;
+        try {
+            const d = await ok(await mfetch("/api/v1/proposals", {
+                method: "POST",
+                body: JSON.stringify({ title: project.name || "新提案",
+                                       project_id: project.id }),
+            }));
+            const u = new URLSearchParams(location.search);
+            u.set("p", d.proposal.id);
+            location.search = u.toString();
+        } catch (err) { alert("建立失敗：" + emsg(err)); e.target.disabled = false; }
+    });
+    _activateTab("flow");
+}
+
+async function _loadProject(projectId) {
+    _show("plan-view");
+    try {
+        // 專案本體與它的提案清單同時起跑 —— 串起來 await 會讓首屏多等一個 RTT
+        const [pr, lr] = await Promise.all([
+            mfetch("/api/v1/crm/projects/" + encodeURIComponent(projectId)),
+            mfetch("/api/v1/proposals?project_id=" + encodeURIComponent(projectId)),
+        ]);
+        if (!pr.ok) throw new Error(pr.status === 404 ? "找不到此專案" : "HTTP " + pr.status);
+        // ⚠️ 這支回的是**專案物件本身**，沒有 {project:…} 外層（與提案端的
+        //   {proposal:…} 不同）—— 照抄鄰居的形狀會拿到 undefined
+        const project = await pr.json();
+        _PROJ = { id: project.id, name: project.name, status: project.status };
+        _paintProjectHead(project);
+        const proposals = lr.ok ? ((await lr.json()).proposals || []) : [];
+        if (!proposals.length) { _renderNoProposal(project); return; }
+        // 指定哪一份（?p=），否則用清單第一筆（後端已按 updated_at desc 排）
+        const want = new URLSearchParams(location.search).get("p");
+        const cur = proposals.find(p => p.id === want) || proposals[0];
+        _wirePropSwitch(proposals, cur.id);
+        await _loadPlan(cur.id);
+    } catch (e) {
+        $("plan-host").innerHTML = '<div class="state-msg" style="color:var(--red);">'
+            + "專案載入失敗：" + escText(emsg(e)) + "</div>";
+    }
+}
+
+/** 標頭文字：專案模式維持專案名（提案名在側欄切換器上），提案模式用提案名。 */
+function _paintPlanTitle(prop) {
+    if (_PROJ) return;
+    $("plan-title").textContent = prop.title;
+    document.title = prop.title + "｜提案企劃｜ORIGINSUN";
+}
+
 // ── 企劃（登入模式） ─────────────────────────────────────
 async function _loadPlan(pid) {
     _show("plan-view");
@@ -1209,8 +1362,9 @@ async function _loadPlan(pid) {
         const prop = (await r.json()).proposal;
         await constP;
         const PA = await paP;
-        $("plan-title").textContent = prop.title;
-        document.title = prop.title + "｜提案企劃｜ORIGINSUN";
+        // 專案模式的標頭是專案名（已由 _paintProjectHead 畫好）—— 別被提案標題
+        // 蓋掉。提案的名字在側欄的切換器上。
+        _paintPlanTitle(prop);
         // 🔴 一律重抓，不要拿 PUT 的回應直接 Object.assign：
         //   PUT 回的 _prop_dict 少 client_name/references/plan/survey（client_name
         //   還固定是空字串），蓋上去會讓側欄的「客戶」整列消失；
@@ -1219,8 +1373,7 @@ async function _loadPlan(pid) {
         // 編輯是低頻動作，一支 GET 換掉「前端猜伺服器改了什麼」的整套推理。
         const refresh = async () => {
             Object.assign(prop, await infoOpts.reload());
-            $("plan-title").textContent = prop.title;
-            document.title = prop.title + "｜提案企劃｜ORIGINSUN";
+            _paintPlanTitle(prop);
             _renderInfo($("info-host"), prop, infoOpts);
             _renderRefs($("refs-host"), prop, infoOpts);
         };
@@ -1318,6 +1471,13 @@ async function _loadPlan(pid) {
             //   而那是開頁時一次性的。）
             onChanged: () => refresh(),
         });
+        // 專案模式：進度是全局視圖，開頁就該看到它 —— 先看到某一份提案的
+        // 創意發想，等於又把主角換回提案。分頁鈕也移到最前面，順序＝重要性。
+        if (_PROJ) {
+            const side = $("plan-side");
+            side.insertBefore($("tab-flow"), side.querySelector('[data-ptab="info"]'));
+            _activateTab("flow");
+        }
     } catch (e) {
         host.innerHTML = '<div class="state-msg" style="color:var(--red);">創意發想載入失敗：' + escText(emsg(e)) + "</div>";
     }
@@ -1549,12 +1709,16 @@ async function boot() {
     const q = new URLSearchParams(location.search);
     const shareTok = q.get("t");
     const pid = q.get("pid");
+    // ?id=<專案id> ＝ 專案模式（主鍵是專案，提案是它底下的東西）。
+    // ?pid=<提案id> 仍然有效：既有的深連結（CRM 的「開啟企劃」、我的工作台）
+    // 不該因為這次改動就死掉。
+    const projId = q.get("id");
     if (shareTok) { _loadSharedPlan(shareTok); return; }   // 公開模式：完全不走登入
     _wireBrandHome();
     if (!localStorage.getItem(TOKEN_KEY)) { showLogin(""); return; }
     // 該走哪條就預載哪條，而且趕在 auth/me 之前 —— 模組下載與身分驗證平行，
     // 省掉「等身分回來才開始下載」那一趟（?pid= 是深連結，最常走）
-    if (pid) {
+    if (pid || projId) {
         _propConst();
         _planMods = [import("/tabs/proposals/prop-actions.js"),
                      importRetryish("/tabs/proposals/plan-matrix.js")];
@@ -1574,7 +1738,9 @@ async function boot() {
     $("hdr-user").style.display = "";
     // 模組清單要與 noperm-view 文案一起改（crm_projects 於 2026-08-03 放行 — 提案×專案整合）
     if (!isAdmin && !["preprod_proposals", "preprod_plan", "crm_projects"].some(m => mods.includes(m))) { _show("noperm-view"); return; }
-    if (pid) { _loadPlan(pid); } else { _loadList(); }
+    if (projId) { _loadProject(projId); }
+    else if (pid) { _loadPlan(pid); }
+    else { _loadList(); }
 }
 
 boot();
