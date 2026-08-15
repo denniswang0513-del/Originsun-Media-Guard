@@ -1239,8 +1239,9 @@ function _wireHeaderActions(prop, PA, refresh) {
 
 let _PROJ = null;    // { id, name, status } —— 專案模式才有；提案模式是 null
 
-/** 換到某一份提案＝改 `?p=` 整頁重載（理由見 _wirePropSwitch）。切換器與
- *  「建立提案」兩處共用。 */
+/** 換到某一份提案＝改 `?p=` **整頁重載**（切換器與「建立提案」共用）。
+ *  就地換提案不可行：提案範疇的六個分頁各有各的掛載狀態與自動儲存基準，
+ *  要一個一個拆重掛 —— 那正是「換了提案卻看到上一份的字」的來源。 */
 function _gotoProposal(pid) {
     const u = new URLSearchParams(location.search);
     u.set("p", pid);
@@ -1266,9 +1267,7 @@ function _paintProjectHead(project) {
     $("plan-back").textContent = "← 專案清單";
 }
 
-/** 提案切換器：只在有兩筆以上時出現。切換＝換網址重載（`?id=…&p=…`）——
- *  提案範疇的六個分頁各有各的掛載狀態與自動儲存基準，就地換提案要一個一個
- *  拆重掛，而那正是「換了提案卻看到上一份的字」的來源。 */
+/** 提案切換器：只在有兩筆以上時出現。切換＝整頁重載（理由見 _gotoProposal）。 */
 function _wirePropSwitch(proposals, currentId) {
     if (proposals.length < 2) return;
     const box = $("prop-switch");
@@ -1305,11 +1304,9 @@ function _renderNoProposal(project) {
     // 下面就要把畫面切到進度 —— 放那裡會被一起藏起來（按鈕在、但看不見）。
     // 側欄的東西不隨分頁切換消失，而「這個專案還沒有提案」本來就是導覽層級
     // 的事實，不是某一頁的內容。
-    const cta = document.createElement("div");
-    cta.id = "no-prop-cta";
-    cta.innerHTML = '<div class="ps-label">還沒有提案</div>'
-        + '<button id="mk-prop">建立提案</button>';
-    $("plan-side").appendChild(cta);
+    $("plan-side").insertAdjacentHTML("beforeend",
+        '<div id="no-prop-cta"><div class="ps-label">還沒有提案</div>'
+        + '<button id="mk-prop">建立提案</button></div>');
     $("mk-prop").addEventListener("click", async (e) => {
         e.target.disabled = true;
         try {
@@ -1327,6 +1324,14 @@ function _renderNoProposal(project) {
 async function _loadProject(projectId) {
     _show("plan-view");
     try {
+        // ?p= 指定哪一份提案（切換器與「建立提案」每次都帶著重載）→ 那筆的
+        // GET 跟下面兩趟**一起起跑**。🔴 發起點必須在 Promise.all 之前才有
+        // 意義 —— 放在 await 之後的話，到 _loadPlan 消費它為止全是同步碼，
+        // 跟原地才發沒有差別（第一輪就這樣寫成了零收益，第二輪抓到）。
+        // stale（不在清單裡）就棄用照走舊路，所以要吞掉棄用時的 rejection。
+        const want = new URLSearchParams(location.search).get("p");
+        const planP = want ? mfetch("/api/v1/proposals/" + encodeURIComponent(want)) : null;
+        if (planP) planP.catch(() => {});
         // 專案本體與它的提案清單同時起跑 —— 串起來 await 會讓首屏多等一個 RTT
         const [pr, lr] = await Promise.all([
             mfetch("/api/v1/crm/projects/" + encodeURIComponent(projectId)),
@@ -1340,12 +1345,6 @@ async function _loadProject(projectId) {
         _paintProjectHead(project);
         const proposals = lr.ok ? ((await lr.json()).proposals || []) : [];
         if (!proposals.length) { _renderNoProposal(project); return; }
-        // 指定哪一份（?p=）就**並行**預抓那筆 —— 切換器與「建立提案」每次都
-        // 帶 ?p= 重載，串在清單後面等於每次切換白付一趟 RTT。stale（不在
-        // 清單裡）就棄用，照走清單第一筆（後端已按 updated_at desc 排）。
-        const want = new URLSearchParams(location.search).get("p");
-        const planP = want ? mfetch("/api/v1/proposals/" + encodeURIComponent(want)) : null;
-        if (planP) planP.catch(() => {});          // 棄用時別變成 unhandled rejection
         const cur = proposals.find(p => p.id === want) || proposals[0];
         _wirePropSwitch(proposals, cur.id);
         await _loadPlan(cur.id, cur.id === want ? planP : null);
@@ -1363,6 +1362,8 @@ function _paintPlanTitle(prop) {
 }
 
 // ── 企劃（登入模式） ─────────────────────────────────────
+/** prefetchP（可選）：**同一個 pid、body 未讀**的 Response promise ——
+ *  解包、.ok 檢查與錯誤訊息都在這裡，呼叫端只准起跑、不准碰。 */
 async function _loadPlan(pid, prefetchP = null) {
     _show("plan-view");
     const host = $("plan-host");

@@ -52,16 +52,17 @@ def test_project_mode_shows_project_and_defaults_to_flow(plan_page, case):
     head = pg.locator(".plan-head").text_content()
     for money in ("contract_amount", "amount_receivable", "profit_target"):
         assert money not in head, f"標頭出現金額欄位：{money}"
+    pg.close()   # 用完即關 —— 留著的頁掛著 plan-matrix 的 30s 共編輪詢
 
 
 def test_legacy_proposal_deeplink_still_works(plan_page, case):
     """D：`?pid=` 照舊 —— 標題是提案名、預設仍是創意發想。"""
     pg = plan_page(f"?pid={case['prop_id']}", wait="#plan-side .side-tab")
-    pg.wait_for_selector("#plan-host", timeout=30000)
     active = pg.eval_on_selector(
         "#plan-side .side-tab.active", "el => el.dataset.ptab")
     assert active == "plan", f"提案模式的預設分頁被改掉了：{active}"
     assert pg.locator("#proj-stage").is_visible() is False, "提案模式不該有階段 chip"
+    pg.close()
 
 
 def test_delivery_tab_moved_in(plan_page, case):
@@ -81,6 +82,7 @@ def test_delivery_tab_moved_in(plan_page, case):
         }""", timeout=30000)
     txt = pg.locator("#delivery-host .delivery-archive").text_content()
     assert "載入失敗" not in txt, f"歸檔清單載入失敗（fetcher 沒接對）：{txt[:120]}"
+    pg.close()
 
 
 # ── B：一專案 N 提案 ────────────────────────────────────────
@@ -105,6 +107,7 @@ def test_switcher_appears_only_with_multiple_proposals(plan_page, case):
         pg2.close()
         pg3 = plan_page(f"?id={projid}&p={second}", wait="#prop-switch-sel")
         assert pg3.eval_on_selector("#prop-switch-sel", "el => el.value") == second
+        pg3.close()
     finally:
         HTTP.delete(f"{base}/api/v1/proposals/{second}", headers=h)
 
@@ -132,4 +135,5 @@ def test_project_without_proposals_offers_to_create_one(plan_page, real_server,
         props = HTTP.get(f"{c['base']}/api/v1/proposals?project_id={c['project_id']}",
                          headers=c["h"]).json()["proposals"]
         assert len(props) == 1, f"建立提案沒生效：{props}"
+        pg.close()   # 先關頁再刪提案 —— 留著的話它的共編輪詢會對已刪的提案 404
         HTTP.delete(f"{c['base']}/api/v1/proposals/{props[0]['id']}", headers=c["h"])

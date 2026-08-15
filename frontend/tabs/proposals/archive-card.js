@@ -32,13 +32,9 @@ const AUTOSAVE_SEL = 'textarea[data-kpta], input[data-field="note"]';
  */
 export async function renderArchiveCard(host, projectId, crmFetch) {
     host.innerHTML = '<div class="crm-empty" style="padding:12px;">歸檔清單載入中…</div>';
-    let data;
-    try {
-        data = await crmFetch(`/projects/${projectId}/archive`);
-    } catch (e) {
-        host.innerHTML = `<div class="crm-empty" style="padding:12px;">歸檔清單載入失敗：${esc(e.message || e)}</div>`;
-        return;
-    }
+    // 失敗直接往上拋 —— 唯一的呼叫端（delivery-view._mountArchive）有同一句
+    // 錯誤畫面，這裡再 catch 一次就是同一段字的第二份（改字時必漂）
+    let data = await crmFetch(`/projects/${projectId}/archive`);
 
     const say = (text, err = false) => {
         const el = host.querySelector('#arc-msg');

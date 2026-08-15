@@ -21,7 +21,8 @@ import { renderArchiveCard } from './archive-card.js';
 // host 與 fetcher 都由呼叫端給 —— 這個檔住在 `tabs/proposals/`（公開頁的
 // import 封閉範圍內），不能靜態拉 tabs/crm 的 crmFetch；而寫死 DOM id
 // （proj-detail-delivery / delivery-showcase-frame…）等於只服務得了一個呼叫端。
-// iframe 的 id 改成掛在 host 上找，不再問 document。
+// 呼叫端範圍內的查找一律掛在 host 上；唯一問 document 的是高度監聽
+// （全域一份，見 _bindEmbedHeightListener 的說明）。
 
 let _embedMsgBound = false;
 
@@ -37,7 +38,8 @@ async function _mountArchive(host, projectId, fetcher) {
 }
 
 // showcase-edit（embed 模式）會 postMessage 內容高度 → 外框自動長高、避免雙捲軸。
-// listener 每次都 getElementById，換 src / 重建 iframe 都沿用同一個監聽。
+// 每則訊息都重新 querySelectorAll（frame 是 class 不是 id）—— 換 src /
+// 重建 iframe 都沿用同一個全域監聽，不必跟著重綁。
 function _bindEmbedHeightListener() {
     if (_embedMsgBound) return;
     _embedMsgBound = true;
