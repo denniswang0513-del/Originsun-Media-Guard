@@ -607,13 +607,24 @@ export function crmToast(msg, ms = 2000) {
 // 實際上會把管理員判成「沒授權」的陷阱。放這裡，公開頁 import 不到，陷阱消失。
 // 元件層（tabs/proposals/*）要判斷金額請看**後端回了那個鍵沒有**——
 // 那是兩個掛載點都成立的唯一判準（見 staff-view.js）。
-export function canSeeMoney() {
-    if ((window._accessLevel || 0) >= 3) return true;   // 管理員一律看得到
-    return (window._modules || []).includes('money_view');
+export const canSeeMoney = () => hasModule('money_view');
+
+/** 「管理員 OR 有這個模組」—— 後端 `core.auth.payload_grants` 的前端鏡射。
+ *
+ *  寫一次的理由：這條規則本來就在前端被抄了兩份（這支與 crm-projects.js 的
+ *  `_canManageWebsite`），RBAC 語義一動（例如 Lv2 也放行）就得兩處都找到。
+ *
+ *  ⚠️ Lv3 那一半今天其實是冗餘的 —— 登入與 `/auth/me` 都走 `_enrich_user`，
+ *  管理員拿到的 `modules` 已經是 `ALL_MODULES`。留著是因為它的失效方向安全
+ *  （少畫金額，不是多畫），而且不必去賭每一條發 token 的路徑都記得 enrich。
+ */
+export function hasModule(key) {
+    return (window._accessLevel || 0) >= 3
+        || (window._modules || []).includes(key);
 }
 
-// 整塊「這裡本來是錢」的替代畫面。三個呼叫端說的是同一句話 ——
-// 各寫一份的話改字時只會改到一邊。
+// 整塊「這裡本來是錢」的替代畫面。兩個呼叫端（財務摘要、執行人員）說的是
+// 同一句話 —— 各寫一份的話改字時只會改到一邊。
 export const NO_MONEY_HTML =
     '<div class="crm-empty" style="padding:8px 0;font-size:12px;">'
     + '此帳號沒有金額檢視權限</div>';

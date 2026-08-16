@@ -19,7 +19,7 @@ from core.schemas import (ProjectExpensePayload, ProjectExpensePatchPayload,
                           CostLinePayload, CostLineUpdatePayload,
                           CostGroupCreate, CostGroupUpdate, CostGroupDuplicate)
 
-from ._shared import (router, _check_auth, _check_money, _require_db, _get_factory, _now,
+from ._shared import (router, _check_auth, money_dep, _require_db, _get_factory, _now,
                       _parse_shoot_date, _seed_default_expenses)
 
 try:
@@ -33,7 +33,7 @@ except ImportError:  # DB 套件不存在的 agent 環境 — 行為同原檔 tr
 
 # ── Project Expense (雜支) Endpoints ────────────────────────
 
-@router.get("/projects/{project_id}/expenses", dependencies=[Depends(_check_money)])
+@router.get("/projects/{project_id}/expenses", dependencies=[Depends(money_dep)])
 async def list_project_expenses(project_id: str, group_id: Optional[str] = Query(None)):
     """列出專案雜支。
     - 無 group_id：回整個專案的雜支 + 多一層 grouped_by_group
@@ -506,7 +506,7 @@ async def serve_receipt(path: str = Query(""), request: Request = None):
     return FileResponse(path)
 
 
-@router.get("/projects/{project_id}/financial-summary", dependencies=[Depends(_check_money)])
+@router.get("/projects/{project_id}/financial-summary", dependencies=[Depends(money_dep)])
 async def project_financial_summary(project_id: str):
     """專案財務摘要：含稅/未稅/毛利/雜支/外包 預估vs實際。
     多子表後另附：allocated_budget_sum / groups_count / groups_missing_budget_count。"""
@@ -690,7 +690,7 @@ def _cost_line_to_dict(line, staff_map: dict) -> dict:
 
 # ── Project Cost Lines (成本估算) Endpoints ──────────────────
 
-@router.get("/projects/{project_id}/cost-lines", dependencies=[Depends(_check_money)])
+@router.get("/projects/{project_id}/cost-lines", dependencies=[Depends(money_dep)])
 async def list_project_cost_lines(project_id: str, group_id: Optional[str] = Query(None)):
     """回傳成本估算明細，按 phase 分組。
     - 無 group_id：回傳整個專案 + 多一層 grouped_by_group
@@ -901,7 +901,7 @@ async def delete_project_cost_line(line_id: str, request: Request):
 
 # ── Cost Line Templates (成本估算範本) Endpoints ─────────────
 
-@router.get("/cost-line-templates", dependencies=[Depends(_check_money)])
+@router.get("/cost-line-templates", dependencies=[Depends(money_dep)])
 async def list_cost_line_templates():
     """列出所有成本估算範本。"""
     _require_db()
@@ -1165,7 +1165,7 @@ def _cost_group_to_dict(g, summary: Optional[dict] = None) -> dict:
     return d
 
 
-@router.get("/projects/{project_id}/cost-groups", dependencies=[Depends(_check_money)])
+@router.get("/projects/{project_id}/cost-groups", dependencies=[Depends(money_dep)])
 async def list_project_cost_groups(project_id: str):
     """列出指定專案的所有子表 + 每組 summary。純讀取：依賴
     migration + create_project 保證主表存在，避免 GET 寫入。"""
@@ -1349,7 +1349,7 @@ async def duplicate_cost_group(group_id: str, req: CostGroupDuplicate, request: 
     return {"status": "ok", "cost_group": _cost_group_to_dict(new_g, summary), "lines_copied": len(src_lines)}
 
 
-@router.get("/cost-groups/{group_id}/summary", dependencies=[Depends(_check_money)])
+@router.get("/cost-groups/{group_id}/summary", dependencies=[Depends(money_dep)])
 async def get_cost_group_summary(group_id: str):
     """單一子表的儀表板資料。"""
     _require_db()

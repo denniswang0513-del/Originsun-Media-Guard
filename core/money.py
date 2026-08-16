@@ -87,33 +87,66 @@ MONEY_FIELDS = frozenset({
     "purchase_cost",
 })
 
-# 名字像錢、但**刻意不抹**的欄位 —— 每一個都要有理由寫在這裡。
+# ── 名字像錢、但**刻意不抹**的欄位 ────────────────────────────
 # `tests/unit/test_money_visibility.py::test_registry_covers_money_columns`
-# 掃 `db/models.py` 的 Column 名，凡命中金額字樣就必須落在上面的名單或這裡，
-# 二選一。加欄位的人一定要表態，這就是那道網子的意義。
-REGISTRY_EXEMPT = {
-    # ── 真的不是錢 ──
+# 掃 model 的 Column 名，凡命中金額字樣就必須落在 `MONEY_FIELDS` 或這三張表
+# 之一。加欄位的人一定要表態，這就是那道網子的意義。
+#
+# 🔴 分三張而不是一張：四種性質對程式碼原本**同形**（消費端只當 flat set），
+# 理由只活在字串裡沒人讀。分開之後，每一類該有的那條斷言才寫得出來 ——
+# 尤其 `_PENDING_OWNER`：owner 拍板那天沒有任何東西會出聲，混在永久豁免裡
+# 就等於永遠不會被回頭決。
+
+_NOT_MONEY = {
     "tax_rate": "法定 5%，沒有資訊量",
-    "payment_status": "狀態字串（未到帳／部分／全額），不是金額",
     "budget_hours": "時數池不是錢（N2 工時）",
     "cost_group_id": "外鍵 ID",
-    "curated": "正則誤中（cu-rate-d）",
-    # ── 是錢，但抹了會壞事 ──
-    "amount": "泛名：`{expense: {id}}` 之類的物件也叫它；發它的端點整支 403",
-    # ── 是錢，但屬於「工作面的錢」，owner 待決的邊界 ──
-    #    （docs/MONEY_VISIBILITY.md：me_finance／公開雜支頁／提案報價單）
+}
+
+# 是錢，但目前只出現在整支 403 的端點上，所以不抹。
+# ⚠️ 這裡的理由是**斷言不是事實**：哪天有人在掛 MoneyRedactRoute 的 router 上
+# 加一支回這些鍵的端點、第一層又沒擋，兩層會一起放行。搬端點時要回頭看這張表。
+_ONLY_ON_BLOCKED_ROUTES = {
+    "subtotal": "報價小計 —— crm/quotes 整支 403",
+    "commission": "發票佣金 —— crm/finance 整支 403",
+    "claim": "收支明細的請款欄 —— crm/finance 整支 403",
+    "deposit": "收支明細的存入欄 —— 同上",
+    "expense": "收支明細的支出欄；另外它也是雜支端點 `{expense:{id}}` 物件的鍵，"
+               "抹了會把建立回應打壞",
+}
+
+# 是錢，但屬於「工作面的錢」——owner 待決的邊界
+# （docs/MONEY_VISIBILITY.md：me_finance／公開雜支頁／提案報價單）。
+# 🔴 這一組**不是**已經封死的事實，是還沒拍板。混進上面那組會讓下一個看表的人
+# 以為它絕不外流。
+_PENDING_OWNER = {
     "final_price": "提案工作區的報價單分頁 —— 企劃正在做的那份報價",
     "budget_range": "提案的客戶預算區間，是企劃的工作輸入",
-    # ── 自由文字，第二層（抹鍵）本來就到不了 ──
+    "amount": "`/api/v1/me/workspace` 回自己的請款金額（me_finance 守衛，"
+              "且該 router 沒掛 MoneyRedactRoute）—— 自己的錢",
+    "estimated": "公開雜支登記頁的預估金額 —— 現場的人正在登記的那筆",
+    "actual": "同上，實際金額。⚠️ 但 `GET /crm/public/projects/{id}/expenses` "
+              "任何登入者都打得到＝全專案雜支金額，這條要 owner 決定",
+}
+
+# 自由文字：第二層（抹鍵）本來就到不了，句子裡的金額不是鍵。
+_FREE_TEXT = {
     "fee_note": "備註文字裡的金額不是鍵，是句子",
 }
+
+REGISTRY_EXEMPT = {**_NOT_MONEY, **_ONLY_ON_BLOCKED_ROUTES,
+                   **_PENDING_OWNER, **_FREE_TEXT}
 
 
 def can_see_money(request: Request) -> bool:
     """這個請求看不看得到金額。管理員（Lv3）一律 True。
 
-    刻意收在這裡而不是各處自己 `payload_grants(..., 'money_view')`：
-    「誰算看得到錢」將來若要放寬（例如專案負責人看自己的案子），只有這一支要改。
+    刻意收在這裡而不是各處自己 `payload_grants(..., 'money_view')`：這是**後端**
+    這條規則的唯一正本，放寬（例如專案負責人看自己的案子）只要改這裡。
+
+    ⚠️ 前端另有一份鏡射（`tabs/crm/crm-utils.js::hasModule`）—— 它決定的是
+    「要不要發那個必然 403 的請求」，不是授權本身。放寬這裡的那天記得一起看它，
+    否則後端會回金額而畫面照樣顯示「沒有權限」。
     """
     return payload_grants(_extract_token(request), MODULE_KEY)
 
@@ -122,15 +155,28 @@ def check_money(request: Request):
     """第一層守衛：整支端點就是錢 → 沒授權直接 403。
 
     這是**手動呼叫**的形式（`api_finance` / `api_cashflow` 的 `_guard` 在
-    endpoint body 裡直接呼叫它）。當 FastAPI dependency 用的是
-    `routers/crm/_shared._check_money` —— 那支是 async 包裝，理由見該處。
+    endpoint body 裡直接呼叫它，比照 CRM 的 `_check_auth(request)` 慣例）。
     ⚠️ 別把這支改成 `async def`：那兩個 `_guard` 是同步呼叫，改了會變成
     「產生一個沒人 await 的 coroutine」＝**守衛靜默失效**（2026-08-15 試過，
-    測試當場抓到）。
+    測試當場抓到）。要當 FastAPI dependency 請用下面的 `money_dep`。
     """
     if not can_see_money(request):
         raise HTTPException(status_code=403, detail="沒有金額檢視權限")
     return True
+
+
+async def money_dep(request: Request):
+    """`Depends()` 用的形式 —— 與 `check_money` 同一件事，只是 async。
+
+    ⚠️ async 不是風格是**成本**：FastAPI 對同步 dependency 會走
+    `run_in_threadpool`，實測那一跳 104µs、而它包住的驗證只有 10µs ——
+    21 支端點每個請求白付 10 倍，還各吃掉一個 anyio worker 名額。
+    （CRM 的 `_crm_read_guard` 也是 async，同一個理由。）
+
+    兩種形式都住在這裡：政策正本在 `core`，用法正本卻擺進 CRM 套件的話，
+    `api_finance` 想改用 dependency 形式就得反向 import CRM —— 層級倒置。
+    """
+    return check_money(request)
 
 
 # 便宜的預篩：`MONEY_FIELDS` 每一個鍵都含這幾個子字串之一（由
@@ -141,8 +187,28 @@ def check_money(request: Request):
 # 為什麼值得：owner 的政策是「預設不給」，所以**沒授權才是多數路徑**。實測
 # 236 筆專案（118KB、無金額欄）走 parse+redact 是 1.6ms 而且結果整份丟掉；
 # 走這條預篩是 0.34ms。命中金額時多付的成本是 0.0008ms。
-_PREFILTER = (b"amount", b"rate", b"cost", b"price", b"fee",
+#
+# 這串同時是「這個系統裡哪些字面代表錢」的**唯一清單**：
+# `test_registry_covers_money_columns` 掃 `db/models.py` 時也用它，所以加一個
+# 錢字只要加在這裡，兩個用途一起長。（`salary` 目前沒有欄位命中，列著是為了
+# 下一個加薪資欄的人 —— 多一個 token 只會讓預篩多命中一點，不改變行為。）
+_PREFILTER = (b"amount", b"rate", b"cost", b"price", b"fee", b"salary",
               b"profit", b"budget", b"ex_tax", b"contract", b"balance")
+
+# 掃描器**額外**要認得的欄名。這些名字本身就是金額，但目前沒有一個進
+# `MONEY_FIELDS`（都在下面的豁免表裡表態），所以不必進 `_PREFILTER`
+# ——預篩每多一個 token 就少一分選擇性，而它們對抹除沒有作用。
+#
+# 🔴 為什麼非有這一串不可：`estimated` / `actual`（雜支的預估與實際金額）
+# 兩套正則本來都掃不到，於是「掃 model 逼人表態」那道網對它們完全失明 ——
+# 而 `GET /crm/public/projects/{id}/expenses` 回的正是 `actual`。
+# `transfer_fee` 至少還被舊正則掃到過；這幾個是連掃都沒掃到。
+#
+# ⚠️ **精確比對，不能當前綴**：`actual_days`（天數）、`estimated_quantity`
+# （數量）、`actual_notes`（備註）都不是錢，當前綴會把它們一起拖進來要人表態，
+# 那張豁免表就開始長雜訊。
+SCANNER_EXACT = frozenset({"estimated", "actual", "subtotal", "commission",
+                           "claim", "deposit", "expense"})
 
 
 def redact(obj: Any) -> Any:

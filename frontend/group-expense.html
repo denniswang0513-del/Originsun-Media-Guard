@@ -130,8 +130,19 @@ async function _init() {
       dateEl.textContent = '—';
       dateEl.classList.add('muted');
     }
+    // 🔴 分三種狀態而不是兩種：**鍵不在**＝這個身分看不到金額（整列不畫），
+    // 鍵在但沒值＝真的未設。原本兩者都印「未設」，等於對現場的人說謊。
+    // 沒有金額檢視權時後端會把 misc_budget_amount 的鍵刪掉（core/money.py）。
+    //
+    // ⚠️ 這頁目前**整個打不開**：它裸 fetch、不帶 Authorization，而 CRM 的
+    // `_crm_read_guard`（2026-08-14 補的匿名防線）讓那些 /public/ 端點一律 401。
+    // 那是先於金額授權的既有問題（advance-expense.html 同病），修好之後這段
+    // 才會真的被走到。
+    const mbRow = document.getElementById('gi-misc-budget').parentElement;
     const mbEl = document.getElementById('gi-misc-budget');
-    if (_group.misc_budget_amount != null && _group.misc_budget_amount > 0) {
+    if (!('misc_budget_amount' in _group)) {
+      if (mbRow) mbRow.style.display = 'none';
+    } else if (_group.misc_budget_amount != null && _group.misc_budget_amount > 0) {
       mbEl.textContent = _fmtMoney(_group.misc_budget_amount);
     } else {
       mbEl.textContent = '未設';

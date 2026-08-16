@@ -11,7 +11,7 @@
  *   finance.js — 預支 + 請款 + 雜支
  */
 
-import { crmFetch as _fetch, esc as _esc, setupResizeHandle } from './crm-utils.js';
+import { crmFetch as _fetch, esc as _esc, setupResizeHandle, hasModule } from './crm-utils.js';
 import { state, callbacks, EXPENSE_CATEGORIES } from './crm-projects-state.js';
 import {
     loadProjects, loadClients, loadUsers, loadStaffList,
@@ -370,8 +370,7 @@ export async function initCrmProjectsTab() {
     // ── RBAC: 管理員或擁有 website_admin 模組者，「結案」分頁顯示官網製作收件匣；
     //   其他人「結案」分頁＝一般「結案」狀態清單。權限旗標由 auth-state.js 掛在
     //   window（_accessLevel / _modules）。後端仍會再閘一次。「結案」分頁對所有人可見。
-    const _canManageWebsite = (window._accessLevel >= 3) ||
-        (Array.isArray(window._modules) && window._modules.includes('website_admin'));
+    const _canManageWebsite = hasModule('website_admin');
 
     // ── Sub-tab switching (總表 + 8 階段管線；報價總覽已獨立成左側欄 tab） ──
     //   總表：不篩狀態、顯示工具列狀態下拉。

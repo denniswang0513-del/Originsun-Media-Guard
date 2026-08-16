@@ -11,7 +11,7 @@ from fastapi import Depends, HTTPException, Request, Query
 
 from core.schemas import QuotationPayload, QuotationTemplatePayload
 
-from ._shared import (router, _check_auth, _check_money, _require_db, _get_factory,
+from ._shared import (router, _check_auth, money_dep, _require_db, _get_factory,
                       _now, _parse_shoot_date)
 
 try:
@@ -102,7 +102,7 @@ async def _save_items(session, quotation_id: str, items: list):
 
 # ── Quotation Endpoints ─────────────────────────────────────
 
-@router.get("/quotations", dependencies=[Depends(_check_money)])
+@router.get("/quotations", dependencies=[Depends(money_dep)])
 async def list_all_quotations(
     q: str = Query(""), status: str = Query(""),
     client_id: str = Query(""), am: str = Query(""),
@@ -134,7 +134,7 @@ async def list_all_quotations(
     }
 
 
-@router.get("/quotations/stats", dependencies=[Depends(_check_money)])
+@router.get("/quotations/stats", dependencies=[Depends(money_dep)])
 async def quotation_stats():
     _require_db()
     factory = await _get_factory()
@@ -163,7 +163,7 @@ async def quotation_stats():
     }
 
 
-@router.get("/projects/{project_id}/quotations", dependencies=[Depends(_check_money)])
+@router.get("/projects/{project_id}/quotations", dependencies=[Depends(money_dep)])
 async def list_project_quotations(project_id: str):
     _require_db()
     factory = await _get_factory()
@@ -211,7 +211,7 @@ async def create_quotation(project_id: str, req: QuotationPayload, request: Requ
     return {"status": "ok", "quotation": _to_quotation_dict(q, items=loaded_items)}
 
 
-@router.get("/quotations/{quotation_id}", dependencies=[Depends(_check_money)])
+@router.get("/quotations/{quotation_id}", dependencies=[Depends(money_dep)])
 async def get_quotation(quotation_id: str):
     _require_db()
     factory = await _get_factory()
@@ -277,7 +277,7 @@ async def delete_quotation(quotation_id: str, request: Request):
 
 # ── Quotation Template Endpoints ────────────────────────────
 
-@router.get("/quotation-templates", dependencies=[Depends(_check_money)])
+@router.get("/quotation-templates", dependencies=[Depends(money_dep)])
 async def list_templates():
     _require_db()
     factory = await _get_factory()

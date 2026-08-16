@@ -19,10 +19,14 @@ from fastapi.routing import APIRouter
 from fastapi.testclient import TestClient
 
 from core.money import (_PREFILTER, MONEY_FIELDS, REGISTRY_EXEMPT,
-                        MoneyRedactRoute, redact)
+                        SCANNER_EXACT, MoneyRedactRoute, redact)
 
-# 整支就是錢 → 沒 money_view 要 403。路徑參數填不存在的值：守衛在 handler
-# 之前跑，不會真的動到資料。
+# 整支就是錢 → 有授權才進得去。路徑參數填不存在的值：守衛在 handler 之前跑，
+# 不會真的動到資料。
+#
+# 這張表只服務**正面**那條（授權了不該被擋）。反面（沒授權要 403）由下方
+# `test_money_paths_are_guarded` 掃真的路由表獨佔 —— 一開始兩邊各有一張清單，
+# 當場就漂了（`expenses` / `quotation-templates` 在這裡、正則裡沒有）。
 MONEY_ONLY_PATHS = [
     "/api/v1/crm/invoices",
     "/api/v1/crm/payments",
@@ -50,13 +54,17 @@ MONEY_ONLY_PATHS = [
 ALSO_ADMIN_ONLY = {"/api/v1/crm/staff/__probe__/rate-history"}
 
 
-@pytest.mark.parametrize("path", MONEY_ONLY_PATHS)
-def test_money_only_endpoints_reject_without_grant(app_client, as_user, path):
-    """🔴 有帳務/專案模組但沒有金額權 → 403。
+# CRM 之外的兩支「整支都是錢」的 router。路由掃描只走 CRM 前綴，所以它們的
+# 反面得自己驗 —— 🔴 第一輪把反面測試整批刪掉交給掃描時漏了這兩支，實測把
+# `api_finance._guard` 裡的 `check_money(request)` 拿掉，整份測試照樣全綠。
+NON_CRM_MONEY_PATHS = [p for p in MONEY_ONLY_PATHS
+                       if not p.startswith("/api/v1/crm/")]
 
-    這批端點拿掉數字就什麼都不剩，所以擋入口而不是抹欄位。
-    """
-    h = as_user(modules=["crm_invoices", "crm_projects", "crm_quotes"])
+
+@pytest.mark.parametrize("path", NON_CRM_MONEY_PATHS)
+def test_non_crm_money_routers_reject_without_grant(app_client, as_user, path):
+    """有帳務/專案模組但沒有金額權 → 財務管理與現金流整支 403。"""
+    h = as_user(modules=["crm_invoices", "crm_projects"])
     assert app_client.get(path, headers=h).status_code == 403, \
         f"{path} 沒有 money_view 也讀得到"
 
@@ -122,7 +130,17 @@ def test_generic_names_stay_out_of_the_registry(key):
 # 實際落地的卻是手抄路徑清單 —— 而同一次疏漏就漏掉了 `transfer_fee`
 # （帳款匯費，每一支專案清單都在回）。
 
-_MONEYISH = re.compile(r"amount|cost|rate|price|fee|budget|balance|salary|profit")
+# 🔴 錢字清單從 `_PREFILTER` 推導，不另抄一份。第一版兩邊各寫一份、當場就分岔了
+# （這邊有 salary 沒有 contract/ex_tax，那邊相反）—— 而這支測試的存在意義正是
+# 「別靠人記得」，自己身上重演同一個疏漏最沒說服力。
+# 錨在詞首或底線：`curated` 不該因為字中夾著 `rate` 就要人來豁免它
+# （實測全部 model 欄位，加錨之後只有它掉出來，沒有任何真的金額欄漏掉）。
+_MONEY_RE = re.compile("(^|_)(" + "|".join(t.decode() for t in _PREFILTER) + ")")
+
+
+def _moneyish(name: str) -> bool:
+    """欄名像不像錢：詞彙比對（預篩那份）＋ 幾個必須完整同名的（SCANNER_EXACT）。"""
+    return bool(_MONEY_RE.search(name)) or name in SCANNER_EXACT
 
 
 def test_registry_covers_money_columns():
@@ -131,37 +149,57 @@ def test_registry_covers_money_columns():
     人對著 model 抄一遍名單，而 model 會自己長 —— 同一個人同一次疏漏會同時漏掉
     名單與手寫測試，沒有任何一步會變紅。錨在 schema 才抓得到。
     """
-    src = (Path(__file__).resolve().parents[2] / "db" / "models.py").read_text(encoding="utf-8")
+    db = Path(__file__).resolve().parents[2] / "db"
+    # models_website/ 也要掃 —— `budget_range` 就住在那裡（inquiry.py）。
+    src = "\n".join(p.read_text(encoding="utf-8")
+                    for p in [db / "models.py", *sorted((db / "models_website").glob("*.py"))])
     cols = set(re.findall(r"^\s{4}(\w+)\s*=\s*Column\(", src, re.M))
+    # 🔴 地板：這條掃描靠正則認 `Column(`，換成 `mapped_column`、改縮排、或把
+    # model 拆檔都會讓它靜默變成空集合 —— 空集合的 `missing` 也是空的，測試照樣
+    # 全綠。姊妹測試（掃路由表）本來就有這道地板，這支當初漏了。
+    assert len(cols) > 300, f"只掃到 {len(cols)} 個 Column，掃描器八成壞了"
     missing = sorted(c for c in cols
-                     if _MONEYISH.search(c)
+                     if _moneyish(c)
                      and c not in MONEY_FIELDS and c not in REGISTRY_EXEMPT)
     assert not missing, (
         f"這些 model 欄位名字像錢，卻既不在 MONEY_FIELDS 也不在 REGISTRY_EXEMPT："
         f"{missing}。是錢就加進 MONEY_FIELDS；不抹就加進 REGISTRY_EXEMPT 並寫下理由。")
+    # 反向：豁免表裡不准有「這條規則本來就掃不到」的死筆 —— 有人憑直覺加了
+    # 一筆，沒有任何一步會告訴他不需要，那張表就開始長無效內容。
+    dead = sorted(k for k in REGISTRY_EXEMPT if not _moneyish(k))
+    assert not dead, f"REGISTRY_EXEMPT 這幾筆根本不會被掃到，是死筆：{dead}"
 
 
-def test_money_paths_are_guarded():
+def test_the_net_is_never_narrower_than_what_it_guards():
+    """🔴 網子不准比它要守的清單窄。
+
+    第一版就是這樣壞的：詞彙表認不出 `MONEY_FIELDS` 自己的 `ex_tax` 與
+    `total_contract`，於是「掃 model 找漏網」這件事對那兩類欄位完全失明 ——
+    一個號稱會自己長大的網，比它要 backstop 的手抄清單還窄。
+
+    註：`MONEY_FIELDS` 有 8 個不是 Column 而是**算出來的鍵**（`cost = days ×
+    rate` 那類）。這條只驗詞彙涵蓋，不要求它們在 model 裡找得到。
+    """
+    blind = sorted(f for f in MONEY_FIELDS if not _moneyish(f))
+    assert not blind, f"這些已知的錢欄位，掃描正則自己認不出來：{blind}"
+
+
+def test_money_paths_are_guarded(app_client, as_user):
     """🔴 守衛要跟得上路由表：路徑本身就在說「我是錢」的 CRM GET，一律要 403。
 
-    手抄 18 條路徑守不住「明天有人加了 /payments/foo 忘了掛守衛」。這條掃真的
-    路由表，新端點只要路徑帶那些字就自動進來被驗。
+    手抄清單守不住「明天有人加了 /payments/foo 忘了掛守衛」。這條掃真的路由表，
+    新端點只要路徑帶那些字就自動進來被驗 —— 沒授權的一律要 403。
     """
     import main
     from routers.crm._shared import CRM_PREFIX
 
-    from core.auth import create_token
-    tok = create_token({"sub": "u", "username": "u", "access_level": 1,
-                        "modules": ["crm_invoices", "crm_quotes", "crm_projects"]})
-    h = {"Authorization": "Bearer " + tok}
-    from fastapi.testclient import TestClient
-    client = TestClient(main.app, raise_server_exceptions=False)
-
+    h = as_user(modules=["crm_invoices", "crm_quotes", "crm_projects"])
     money_path = re.compile(
-        r"/(invoices|payments|cash-entries|payables|receivables|quotations"
+        r"/(invoices|payments|cash-entries|payables|receivables"
+        r"|quotations|quotation-templates|expenses"
         r"|cost-lines|cost-line-templates|cost-groups|cost-summary"
         r"|financial-summary|rate-history)")
-    checked, leaked = 0, []
+    checked, leaked, scanned = 0, [], set()
     for route in main.app.routes:
         path = getattr(route, "path", "")
         if not path.startswith(CRM_PREFIX) or "GET" not in (getattr(route, "methods", None) or set()):
@@ -171,12 +209,17 @@ def test_money_paths_are_guarded():
         if not money_path.search(path) or "/public/" in path:
             continue
         probe = re.sub(r"\{[^}]+\}", "__probe__", path)
+        scanned.add(probe)
         checked += 1
-        if client.get(probe, headers=h).status_code != 403:
+        if app_client.get(probe, headers=h).status_code != 403:
             leaked.append(path)
 
     assert checked >= 15, f"只掃到 {checked} 支金額端點，掃描邏輯可能壞了"
     assert not leaked, f"{len(leaked)} 支路徑就是錢的端點沒擋：{leaked}"
+    # 🔴 掃描不准比手抄清單窄 —— 那張清單是它要 backstop 的東西。第一版正則
+    # 就漏了 `expenses` 與 `quotation-templates`（兩者都在 MONEY_ONLY_PATHS 裡）。
+    hand = {p for p in MONEY_ONLY_PATHS if p.startswith(CRM_PREFIX)}
+    assert hand <= scanned, f"手抄清單有、掃描沒涵蓋到：{sorted(hand - scanned)}"
 
 
 def test_prefilter_tokens_cover_every_money_field():

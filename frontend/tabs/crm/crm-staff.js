@@ -308,6 +308,10 @@ async function _loadStaffProjects(staffId) {
             return;
         }
 
+        // 🔴 沒有金額檢視權時後端把 `cost` 的鍵刪掉（core/money.py）——
+        // `|| 0` 會讓這個人的累計費用變成「$0」、每一列變成「3天 · $0」，
+        // 那是謊報。判準跟 staff-view.js 一樣：看**鍵在不在**，不問前端旗標。
+        const showMoney = projects.some(p => 'cost' in p);
         const totalEarned = projects.reduce((s, p) => s + (p.cost || 0), 0);
 
         const orphanAssigned = projects.filter(p => !(p.credits_in_project || []).length).length;
@@ -321,7 +325,7 @@ async function _loadStaffProjects(staffId) {
         const chipsHtml = `
             <div class="crm-stat-chips">
                 ${_statChip('派工', `${projects.length} 件`)}
-                ${_statChip('累計費用', `$${_fmtNum(totalEarned)}`)}
+                ${showMoney ? _statChip('累計費用', `$${_fmtNum(totalEarned)}`) : ''}
                 ${orphanAssigned > 0 ? _statChip('⚠ 派工未掛 credit', `${orphanAssigned} 件`, 'warn') : ''}
                 ${creditOnly.length > 0 ? _statChip('外部演員（無派工）', `${creditOnly.length} 件`, 'info') : ''}
             </div>
@@ -342,7 +346,8 @@ async function _loadStaffProjects(staffId) {
                     </div>
                     ${isCreditOnly
                         ? `<div class="crm-project-row-meta assigned">📋 派工：（無）</div>`
-                        : `<div class="crm-project-row-meta assigned">📋 派工：${_esc(p.role_in_project) || '—'} · ${p.days || 0}天 · $${_fmtNum(p.cost || 0)}</div>`}
+                        : `<div class="crm-project-row-meta assigned">📋 派工：${_esc(p.role_in_project) || '—'} · ${p.days || 0}天${
+                            'cost' in p ? ` · $${_fmtNum(p.cost)}` : ''}</div>`}
                     ${credits
                         ? `<div class="crm-project-row-meta credit">🎬 演職員：${credits}</div>`
                         : (!isCreditOnly

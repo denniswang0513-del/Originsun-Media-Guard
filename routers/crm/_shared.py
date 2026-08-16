@@ -28,7 +28,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 # （proposal_assets 模組層就 import 了），函式內 import 的 ImportError 退路是
 # 死碼，而守衛掛在 router 層＝每個請求都走一次。
 from core.auth import check_admin_or_module, check_logged_in
-from core.money import MoneyRedactRoute, check_money
+from core.money import MoneyRedactRoute, money_dep  # money_dep 給領域模組 re-export
 from core.project_flow import ADVANCE_MODULES, CHECK_MODULES
 
 import core.state as state
@@ -54,7 +54,7 @@ except ImportError:
 # 其餘 db.models 類與 or_ / delete / IntegrityError 是給領域模組
 # `from ._shared import ...` 的 re-export（列進 __all__，ruff F401 視為已使用）。
 __all__ = [
-    "router", "or_", "delete", "sa_update", "IntegrityError", "User",
+    "router", "money_dep", "or_", "delete", "sa_update", "IntegrityError", "User",
     "CrmQuotation", "CrmQuotationItem", "CrmQuotationTemplate",
     "CrmStaff", "CrmStaffPortfolio", "CrmProjectStaff",
     "CrmInvoice", "CrmPaymentRequest", "CrmCashEntry",
@@ -126,17 +126,9 @@ public_router = APIRouter(tags=["CRM 公開（token 授權）"])
 _check_auth = _module_guard()
 
 # 第一層金額守衛：**端點本身就是錢**（成本明細／財務摘要／發票／請款／收支／
-# 報價／費率史）。第二層（欄位抹除）由 router 的 MoneyRedactRoute 負責，管的是
-# 「夾帶」金額的端點。政策與名單住 core/money.py，這裡只是把它接到 CRM 上。
-#
-# ⚠️ 這層 async 包裝不是別名，是**成本**：FastAPI 對同步 dependency 會走
-# `run_in_threadpool`，實測那一跳 104µs、而它包住的驗證只有 10µs —— 21 支端點
-# 每個請求白付 10 倍成本，還各吃掉一個 anyio worker 名額。隔壁的
-# `_crm_read_guard` 也是 async，同一個理由。
-# （`core.money.check_money` 本體維持同步：`api_finance`/`api_cashflow` 的
-#   `_guard` 是在 endpoint body 裡直接呼叫它的。）
-async def _check_money(request: Request):
-    return check_money(request)
+# 報價／費率史）→ `dependencies=[Depends(money_dep)]`。第二層（欄位抹除）由
+# router 的 MoneyRedactRoute 負責，管的是「夾帶」金額的端點。
+# 政策、名單、兩種守衛形式全部住 core/money.py；領域模組從這裡 re-export 拿。
 
 # 官網製作授權 — 管理員 OR 擁有 website_admin 模組即可（不需全域 admin）。
 # 給「結案製作」看板 + showcase 編輯端點用：非管理員的官網製作人員只要帳號
