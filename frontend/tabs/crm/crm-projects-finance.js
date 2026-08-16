@@ -5,7 +5,7 @@
 
 import { state, callbacks, EXPENSE_CATEGORIES } from './crm-projects-state.js';
 import { crmFetch as _fetch, esc as _esc, fmtNum } from './crm-utils.js';
-import { canSeeMoney } from '../../js/shared/money.js';
+import { canSeeMoney, NO_MONEY_HTML } from '../../js/shared/money.js';
 import { loadProjectStaff } from '../proposals/staff-view.js';
 
 // ── Load Project Staff ──────────────────────────────────────────
@@ -29,11 +29,7 @@ async function _loadCostStaff(projectId) {
     // 「執行人員」畫的是 cost-lines（**錢的正本**：項目 × 金額 × 付款狀態），
     // 所以它跟著金額權走。沒授權時人員配置要看 tabs/proposals 那條路
     // （派工＝人的正本），不是把這張表閹掉。docs/MONEY_VISIBILITY.md §4
-    if (!canSeeMoney()) {
-        container.innerHTML = '<div class="crm-empty" style="padding:8px 0;font-size:12px;">'
-            + '此帳號沒有金額檢視權限</div>';
-        return;
-    }
+    if (!canSeeMoney()) { container.innerHTML = NO_MONEY_HTML; return; }
     try {
         var data = await _fetch('/projects/' + projectId + '/cost-lines');
         var lines = data.cost_lines || [];

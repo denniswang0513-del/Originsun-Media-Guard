@@ -13,8 +13,8 @@ export function canSeeMoney() {
     return (window._modules || []).includes('money_view');
 }
 
-// 金額 → 顯示字串；沒有值（含被後端抹掉而不存在）一律 '—'，不是 0。
-export function moneyText(n) {
-    return (n === null || n === undefined || n === '')
-        ? '—' : '$' + Number(n).toLocaleString('zh-TW');
-}
+// 整塊「這裡本來是錢」的替代畫面。兩個呼叫端（專案詳情的財務摘要、執行人員）
+// 說的是同一句話 —— 各寫一份的話改字時只會改到一邊。
+export const NO_MONEY_HTML =
+    '<div class="crm-empty" style="padding:8px 0;font-size:12px;">'
+    + '此帳號沒有金額檢視權限</div>';

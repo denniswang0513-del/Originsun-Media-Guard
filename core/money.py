@@ -25,7 +25,7 @@ owner 2026-08-15：**預設看不到金額，除非我授權**。
 from __future__ import annotations
 
 import json
-from typing import Any, Optional
+from typing import Any
 
 from fastapi import HTTPException, Request
 from fastapi.responses import JSONResponse
@@ -129,8 +129,3 @@ class MoneyRedactRoute(APIRoute):
             )
 
         return handler
-
-
-def money_or_none(request: Request, value: Optional[int]) -> Optional[int]:
-    """給「不走 router 出口」的地方用（例如非 CRM router 的單一數字）。"""
-    return value if can_see_money(request) else None

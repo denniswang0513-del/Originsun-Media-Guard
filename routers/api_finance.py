@@ -36,13 +36,13 @@ from fastapi import APIRouter, HTTPException, Request  # type: ignore
 from config import load_settings, save_settings
 from core.auth import check_admin_or_module
 from core.db_guard import db_factory_or_503 as _factory_or_503
-from core.money import check_money
 from core.finance_logic import (amortization_schedule,
                                 auto_match_statement_lines,
                                 bank_running_balance, cash_entry_flow,
                                 local_day, period_months, reconciliation_diff,
                                 statement_line_status, today_start,
                                 workbench_summary)
+from core.money import check_money
 from core.schemas import (BankAccountPayload, BulkAssignAccountPayload,
                           FinanceAdjustmentPayload, FinanceCategoryMapPut,
                           FinanceSetupWizardPayload, LoanPayload,
