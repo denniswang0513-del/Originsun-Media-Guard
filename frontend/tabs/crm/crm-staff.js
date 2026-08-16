@@ -105,10 +105,14 @@ function renderDetail(s) {
         ${prop('職能', s.role)}
         <div class="crm-detail-prop"><div class="crm-prop-label">狀態</div><div class="crm-prop-value">${_sBadge(s.status)}</div></div>
         ${prop('僱用型態', s.employment_type)}
-        <div class="crm-detail-prop"><div class="crm-prop-label">日費 / 時薪</div>
+        ${!('daily_rate' in s || 'hourly_rate' in s) ? ''
+            // 🔴 沒有金額檢視權時後端把這兩個鍵刪掉（core/money.py）——
+            // 原本會走到 else 分支印「空」，那是說「這個人沒設費率」，不是
+            // 「你看不到」。整列不畫才誠實（同 group-expense 的預算列）。
+            : `<div class="crm-detail-prop"><div class="crm-prop-label">日費 / 時薪</div>
             <div class="crm-prop-value${(s.daily_rate || s.hourly_rate) ? '' : ' empty'}">${(s.daily_rate || s.hourly_rate)
                 ? `${s.daily_rate ? '日 $' + Number(s.daily_rate).toLocaleString() : ''}${s.daily_rate && s.hourly_rate ? '｜' : ''}${s.hourly_rate ? '時 $' + Number(s.hourly_rate).toLocaleString() : ''} <span id="staff-rate-history-slot" style="font-size:11px;color:#888;"></span>`
-                : '空'}</div></div>
+                : '空'}</div></div>`}
         ${prop('到職日', s.hire_date)}
         ${s.leave_date ? prop('離職日', s.leave_date) : ''}
         ${prop('緊急聯絡人', s.emergency_contact)}

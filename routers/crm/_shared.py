@@ -117,18 +117,20 @@ router = APIRouter(prefix=CRM_PREFIX, tags=["CRM"],
 # tests/unit/test_media_log_public_router.py 仍在，守的是「有人往這個物件加端點」。
 # 刻意不帶 prefix —— master 由上面 router 的 CRM_PREFIX 提供，NAS 掛載時自己指定。
 # ⚠ 往這裡加端點前先問：它真的該在對外服務上被匿名打到嗎？
-public_router = APIRouter(tags=["CRM 公開（token 授權）"])
+#
+# 🔴 `route_class` 要自己再寫一次：`include_router` 用 `route_class_override=
+# type(route)` **保留子 router 自己的 class**，所以上面那個 router 的
+# MoneyRedactRoute 不會傳下來。少了這行，第二層（金額抹除）對這批端點完全
+# 不存在 —— 而 core/money.py 宣稱「掛這裡，新端點預設就是安全的」，那句話就
+# 在這個子集上變成假的。公開／手機頁正是最可能夾帶金額的去處。
+public_router = APIRouter(tags=["CRM 公開（token 授權）"],
+                          route_class=MoneyRedactRoute)
 
 
 # ── Helpers ──────────────────────────────────────────────────
 
 # CRM 一般寫入 —— 管理員限定（歷史預設）。
 _check_auth = _module_guard()
-
-# 第一層金額守衛：**端點本身就是錢**（成本明細／財務摘要／發票／請款／收支／
-# 報價／費率史）→ `dependencies=[Depends(money_dep)]`。第二層（欄位抹除）由
-# router 的 MoneyRedactRoute 負責，管的是「夾帶」金額的端點。
-# 政策、名單、兩種守衛形式全部住 core/money.py；領域模組從這裡 re-export 拿。
 
 # 官網製作授權 — 管理員 OR 擁有 website_admin 模組即可（不需全域 admin）。
 # 給「結案製作」看板 + showcase 編輯端點用：非管理員的官網製作人員只要帳號

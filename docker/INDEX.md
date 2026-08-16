@@ -35,7 +35,7 @@ NAS 端對外網站部署設定（Phase M 完整版 A）。
 | `Dockerfile.website` | 建立 `originsun/website-api:latest` image — python:3.11-slim + curl + pip 裝 requirements_website.txt |
 | `requirements_website.txt` | website-api 容器最小依賴（fastapi/uvicorn/sqlalchemy/asyncpg/httpx 等，**不含** ffmpeg/torch/whisper） |
 | `docker-compose.yml` | 定義 website-api service：mount `../code` → `/app`、env `DATABASE_URL`/`JWT_SECRET`/`MASTER_RELAY_URL`、接 `postgres_default` bridge |
-| `nginx/originsun.conf` | Website_Nginx 設定 — `^~ /_astro/` 長期 cache、`location /` try_files、`location /api/website/` proxy_pass website-api:8001，外加**公開頁**那組（`/media-log.html`、`/proposal-plan.html`、`/img/`、`/tabs/proposals/`、`/js/shared/`、兩組 token API）—— 那組的清單正本在 `core/public_assets.py`，別只改這裡 |
+| `nginx/originsun.conf` | Website_Nginx 設定 — `^~ /_astro/` 長期 cache、`location /` try_files、`location /api/website/` proxy_pass website-api:8001，外加**公開頁**那組（`/media-log.html`、`/project.html`（舊 `/proposal-plan.html` 301 到它）、`/img/`、`/tabs/proposals/`、`/js/shared/`、兩組 token API）—— 那組的清單正本在 `core/public_assets.py`，別只改這裡 |
 | `.env`（**不進 git**）| `DATABASE_URL` / `JWT_SECRET` / `WEBSITE_CORS_ORIGINS` / `MASTER_RELAY_URL` |
 
 ## NAS 路徑佈局

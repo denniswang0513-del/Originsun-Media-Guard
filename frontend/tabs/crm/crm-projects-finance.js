@@ -4,8 +4,7 @@
  */
 
 import { state, callbacks, EXPENSE_CATEGORIES } from './crm-projects-state.js';
-import { crmFetch as _fetch, esc as _esc, fmtNum, canSeeMoney, NO_MONEY_HTML }
-    from './crm-utils.js';
+import { crmFetch as _fetch, esc as _esc, fmtNum, moneyGate } from './crm-utils.js';
 import { loadProjectStaff } from '../proposals/staff-view.js';
 
 // ── Load Project Staff ──────────────────────────────────────────
@@ -29,7 +28,7 @@ async function _loadCostStaff(projectId) {
     // 「執行人員」畫的是 cost-lines（**錢的正本**：項目 × 金額 × 付款狀態），
     // 所以它跟著金額權走。沒授權時人員配置要看 tabs/proposals 那條路
     // （派工＝人的正本），不是把這張表閹掉。docs/MONEY_VISIBILITY.md §4
-    if (!canSeeMoney()) { container.innerHTML = NO_MONEY_HTML; return; }
+    if (moneyGate(container)) return;
     try {
         var data = await _fetch('/projects/' + projectId + '/cost-lines');
         var lines = data.cost_lines || [];
@@ -116,6 +115,10 @@ async function _loadCostStaff(projectId) {
 async function _loadAdvances(projectId) {
     var container = document.getElementById('proj-advance-list');
     if (!container) return;
+    // 兩支端點都是錢（advances 與 expenses 都掛了 money_dep）。這裡漏掉閘門的
+    // 話，畫面上半截（執行人員）寫「沒有權限」、下半截紅字「載入失敗」——
+    // 它跟 _loadCostStaff 是同一個呼叫點一起叫的。
+    if (moneyGate(container)) return;
     try {
         var [advData, expData] = await Promise.all([
             _fetch('/payments/advances?returned=-1&project_id=' + projectId),

@@ -17,6 +17,11 @@ owner 2026-08-15：**預設看不到金額，除非我授權**。
 🔴 **刪鍵不是歸零**：前端很多地方寫 `x.contract_amount || 0`，抹成 0 會變成
 「這案子合約金額是 0 元」——那是謊報。鍵不存在，前端才畫得出「—」。
 
+前端因此要分清楚**兩種缺**：可空欄位是三態（鍵不在＝你看不到／鍵在但沒值＝
+真的沒設／有值），不可空欄位兩態就夠。判準一律用 `'key' in obj`，不要用
+`obj.key == null` —— 後者把前兩態合併，於是「沒授權」會被畫成「未設」
+（雜支頁的預算列踩過這一次）。
+
 🔴 **只抹 `cost` 等於沒抹**：`cost = days × rate`，而 `days`（檔期）是要留給
 企劃看的。所以 `daily_rate` / `hourly_rate` 也必須在名單裡 —— 否則拿人名去
 `GET /crm/staff` 查日費、乘上天數就還原了。同理 `/staff/{id}/rate-history`
@@ -89,18 +94,22 @@ MONEY_FIELDS = frozenset({
 
 # ── 名字像錢、但**刻意不抹**的欄位 ────────────────────────────
 # `tests/unit/test_money_visibility.py::test_registry_covers_money_columns`
-# 掃 model 的 Column 名，凡命中金額字樣就必須落在 `MONEY_FIELDS` 或這三張表
+# 掃 model 的 Column 名，凡命中金額字樣就必須落在 `MONEY_FIELDS` 或下面四張表
 # 之一。加欄位的人一定要表態，這就是那道網子的意義。
 #
-# 🔴 分三張而不是一張：四種性質對程式碼原本**同形**（消費端只當 flat set），
-# 理由只活在字串裡沒人讀。分開之後，每一類該有的那條斷言才寫得出來 ——
-# 尤其 `_PENDING_OWNER`：owner 拍板那天沒有任何東西會出聲，混在永久豁免裡
-# 就等於永遠不會被回頭決。
+# 🔴 四種性質分四張而不是一張：混在一起時它們對程式碼**同形**（消費端只當
+# flat set），理由只活在字串裡沒人讀。分開之後每一類才寫得出自己的斷言 ——
+# `_PENDING_OWNER` 的那條就在 `test_pending_owner_items_are_still_pending`：
+# owner 拍板要抹的那天，鍵得從這裡搬進 `MONEY_FIELDS`，而不是留一則過期註解。
 
 _NOT_MONEY = {
     "tax_rate": "法定 5%，沒有資訊量",
     "budget_hours": "時數池不是錢（N2 工時）",
     "cost_group_id": "外鍵 ID",
+    # 下面兩筆是被「中文尾註」那條軸掃到的假陽性 —— 註解裡提到成本/費用，
+    # 欄位本身是名稱字串（會計科目掃描不可避免會碰到的兩個）。
+    "name": "名稱字串（科目名「外包成本」、貸款名…），不是金額",
+    "pnl_group": "損益表分組名（營業收入/外包成本/…），是分類不是金額",
 }
 
 # 是錢，但目前只出現在整支 403 的端點上，所以不抹。
@@ -130,12 +139,29 @@ _PENDING_OWNER = {
 }
 
 # 自由文字：第二層（抹鍵）本來就到不了，句子裡的金額不是鍵。
+#
+# 🔴 這一類劃出的是**機制的真實邊界**，不只是一個欄位的豁免。抹鍵到不了的地方
+# 還有：檔案下載端點（收據影像、報價檔 —— `FileResponse` 沒有 body 可抹）、
+# 以及沒掛 `MoneyRedactRoute` 的 router（`api_me` / `api_equipment`）。
+# 掛上 router ≠ 安全，那些出口只能靠第一層。
 _FREE_TEXT = {
     "fee_note": "備註文字裡的金額不是鍵，是句子",
 }
 
 REGISTRY_EXEMPT = {**_NOT_MONEY, **_ONLY_ON_BLOCKED_ROUTES,
                    **_PENDING_OWNER, **_FREE_TEXT}
+
+# 掃描器（測試）除了 `_PREFILTER` 的詞彙之外，還要認得的**完整同名**欄位。
+# 這幾個名字本身就是金額，但都在豁免表裡表態，所以不進 `_PREFILTER` ——
+# 預篩每多一個 token 就少一分選擇性，而它們對抹除沒有作用。
+#
+# 🔴 沒有這一串的話，`estimated` / `actual`（雜支的預估與實際金額）兩套正則
+# 都掃不到，「掃 model 逼人表態」那道網對它們完全失明 —— 而
+# `GET /crm/public/projects/{id}/expenses` 回的正是 `actual`。
+#
+# ⚠️ 精確比對不能當前綴：`actual_days`（天數）、`estimated_quantity`（數量）、
+# `actual_notes`（備註）都不是錢，當前綴會把它們一起拖進來要人表態。
+SCANNER_EXACT = frozenset(_ONLY_ON_BLOCKED_ROUTES) | {"estimated", "actual"}
 
 
 def can_see_money(request: Request) -> bool:
@@ -195,21 +221,6 @@ async def money_dep(request: Request):
 _PREFILTER = (b"amount", b"rate", b"cost", b"price", b"fee", b"salary",
               b"profit", b"budget", b"ex_tax", b"contract", b"balance")
 
-# 掃描器**額外**要認得的欄名。這些名字本身就是金額，但目前沒有一個進
-# `MONEY_FIELDS`（都在下面的豁免表裡表態），所以不必進 `_PREFILTER`
-# ——預篩每多一個 token 就少一分選擇性，而它們對抹除沒有作用。
-#
-# 🔴 為什麼非有這一串不可：`estimated` / `actual`（雜支的預估與實際金額）
-# 兩套正則本來都掃不到，於是「掃 model 逼人表態」那道網對它們完全失明 ——
-# 而 `GET /crm/public/projects/{id}/expenses` 回的正是 `actual`。
-# `transfer_fee` 至少還被舊正則掃到過；這幾個是連掃都沒掃到。
-#
-# ⚠️ **精確比對，不能當前綴**：`actual_days`（天數）、`estimated_quantity`
-# （數量）、`actual_notes`（備註）都不是錢，當前綴會把它們一起拖進來要人表態，
-# 那張豁免表就開始長雜訊。
-SCANNER_EXACT = frozenset({"estimated", "actual", "subtotal", "commission",
-                           "claim", "deposit", "expense"})
-
 
 def redact(obj: Any) -> Any:
     """遞迴刪掉 `MONEY_FIELDS` 的鍵（list/dict 混排都吃）。"""
@@ -229,7 +240,10 @@ class MoneyRedactRoute(APIRoute):
 
     有授權的請求**原樣返回**（連 body 都不碰）。沒授權的先走 `_PREFILTER`
     這道 bytes 掃描，只有真的帶金額字樣的回應才付 parse + redact。
-    非 JSON 的回應（收據圖片、縮圖、PDF、串流）跳過：它們沒有欄位可抹。
+    ⚠️ 非 JSON 的回應（收據圖片、縮圖、PDF、串流）跳過 —— 這是**限制不是理由**：
+    收據上就是金額，只是以像素而不是鍵的形式存在。那些出口只能靠第一層，
+    或靠「拿得到 path 的端點本身是 Lv3」這條**另一條**防線
+    （`GET /receipt-file` 就是靠後者）。
     """
 
     def get_route_handler(self):

@@ -30,8 +30,8 @@ GET /api/v1/crm/cash-entries  → 200      GET /api/v1/crm/staff      → 200
 
 ```python
 # core/money.py
-def can_see_money(payload) -> bool:
-    return payload_grants(payload, 'money_view')     # access_level>=3 一律通過
+def can_see_money(request) -> bool:
+    return payload_grants(_extract_token(request), MODULE_KEY)  # Lv3 一律通過
 ```
 
 - **為什麼不沿用 `crm_invoices`**：那是**帳務 tab 的鑰匙**。沿用的話，要讓一個 PM
@@ -133,8 +133,13 @@ CRM 詳情面板的「執行人員」畫的是**後者** —— 所以它才有�
 `canSeeMoney() && …`，e2e 立刻紅：`canSeeMoney()` 讀的是 SPA 的
 `window._accessLevel/_modules`，而獨立頁 `/project.html` 根本不設那些全域
 —— 管理員在那頁會被判成沒授權。鍵在＝後端認可，這是兩個掛載點唯一都對的判準。
-（`js/shared/money.js` 的 `canSeeMoney()` 仍在用，但只用在 SPA 那側：客戶績效
-與專案詳情的財務區塊要在**發請求之前**就決定畫不畫。）
+（`canSeeMoney()` 仍在用，但只用在 SPA 那側：客戶績效與專案詳情的財務區塊要在
+**發請求之前**就決定畫不畫 —— 那些端點整支 403，不先問一次畫面上會是紅色
+「載入失敗」，會被當成故障來報修。三個區塊共用 `crm-utils.js::moneyGate`。
+
+🔴 它住在 **`tabs/crm/crm-utils.js`**，**不是** `js/shared/`。放進 `js/shared/`
+（＝公開頁的 import 白名單）等於在獨立頁那側擺一個看起來能用、實際上會把管理員
+判成沒授權的陷阱 —— 那正是上面這個 e2e 抓到的坑。）
 
 專案頁那份是**唯讀**的：不注入 `onRemove` 就不畫刪除鈕（派工寫入仍在 CRM，Lv3）。
 
@@ -145,8 +150,20 @@ e2e `tests/e2e/test_project_page.py`：同一筆派工（3 天 × $8,000）分�
 「拍攝企劃＋專案管理但無 money_view」兩個 token 開同一頁 —— 前者看到日費/小計/
 合計，後者只看到人、職務、專案角色、天數、備註。
 
-## 7. 測試
+## 7. 測試（`tests/unit/test_money_visibility.py`）
 
-照 `tests/unit/test_crm_read_guard.py` 的**列舉式**寫法（不是挑幾支測）：掃出
-app 上所有 CRM GET 路由，用無授權 token 打，斷言回應不含 `MONEY_FIELDS` 任一鍵；
-有授權則必須含。將來誰新增端點漏了會紅。
+手寫清單守得住今天；真正要防的是「明天有人加了東西忘了表態」。所以三條網都
+**錨在會自己長的東西**上：
+
+| 網 | 錨 | 它接住什麼 |
+|---|---|---|
+| `test_registry_covers_money_columns` | `db/models.py` + `db/models_website/` 的 Column | 新欄位是錢卻沒進名單。**兩條軸**：英文詞彙表 + **中文尾註**（`# 預估金額`）—— 只靠英文的話，召回率綁在「下一個人剛好選中我列的字」上，而 `estimated`/`actual` 就是這樣漏過去的 |
+| `test_money_paths_are_guarded` | `main.app.routes` | 新端點路徑就在說「我是錢」卻沒掛第一層 |
+| `test_every_crm_route_has_the_redact_class` | 同上 | 有人在 `crm/` 底下新建 router 而沒帶 route class（`public_router` 就這樣漏過整組） |
+
+三條各自都有**地板**（掃不到東西要紅，不能靜默變成空集合），而且不准比它們
+backstop 的手抄清單窄（兩條互相包含的斷言）。
+
+⚠️ 文件曾寫「掃所有 CRM GET 路由、斷言回應不含 `MONEY_FIELDS`」—— 那對抹除層
+本身是套套邏輯（`redact` 刪的就是那些鍵），真正要驗的是**route class 有沒有掛
+到**，所以落地成上表第三條。

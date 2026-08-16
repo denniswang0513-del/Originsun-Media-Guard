@@ -18,8 +18,8 @@ from fastapi import FastAPI
 from fastapi.routing import APIRouter
 from fastapi.testclient import TestClient
 
-from core.money import (_PREFILTER, MONEY_FIELDS, REGISTRY_EXEMPT,
-                        SCANNER_EXACT, MoneyRedactRoute, redact)
+from core.money import (_PENDING_OWNER, _PREFILTER, MONEY_FIELDS,
+                        REGISTRY_EXEMPT, SCANNER_EXACT, MoneyRedactRoute, redact)
 
 # 整支就是錢 → 有授權才進得去。路徑參數填不存在的值：守衛在 handler 之前跑，
 # 不會真的動到資料。
@@ -55,8 +55,8 @@ ALSO_ADMIN_ONLY = {"/api/v1/crm/staff/__probe__/rate-history"}
 
 
 # CRM 之外的兩支「整支都是錢」的 router。路由掃描只走 CRM 前綴，所以它們的
-# 反面得自己驗 —— 🔴 第一輪把反面測試整批刪掉交給掃描時漏了這兩支，實測把
-# `api_finance._guard` 裡的 `check_money(request)` 拿掉，整份測試照樣全綠。
+# 反面得自己驗 —— 🔴 路由掃描只走 CRM 前綴，這兩支不在裡面。實測：把
+# `api_finance._guard` 的 `check_money(request)` 拿掉，整份測試照樣全綠。
 NON_CRM_MONEY_PATHS = [p for p in MONEY_ONLY_PATHS
                        if not p.startswith("/api/v1/crm/")]
 
@@ -88,16 +88,16 @@ def test_admin_always_sees_money(app_client, as_user):
 # ── 第二層：欄位抹除 ────────────────────────────────────────
 
 def test_redact_drops_keys_not_zeroes_them():
-    """🔴 刪鍵不是歸零：前端 `x.contract_amount || 0` 會把 0 畫成真的金額。"""
-    out = redact({"name": "A", "contract_amount": 500000, "status": "製作"})
-    assert "contract_amount" not in out
-    assert out == {"name": "A", "status": "製作"}
+    """🔴 刪鍵不是歸零（list/dict 混排都要吃）。
 
-
-def test_redact_walks_nested_lists_and_dicts():
-    data = {"staff": [{"staff_name": "王", "days": 3, "rate": 8000, "cost": 24000}],
+    歸零的話前端的 `x.contract_amount || 0` 會把 0 畫成真的金額 —— 等值比較
+    就是在釘這件事：鍵得**消失**，不是變成 0。
+    """
+    data = {"name": "A", "contract_amount": 500000,
+            "staff": [{"staff_name": "王", "days": 3, "rate": 8000, "cost": 24000}],
             "meta": {"nested": {"daily_rate": 9000, "keep": 1}}}
     out = redact(data)
+    assert out["name"] == "A" and "contract_amount" not in out
     assert out["staff"][0] == {"staff_name": "王", "days": 3}
     assert out["meta"]["nested"] == {"keep": 1}
 
@@ -126,13 +126,11 @@ def test_generic_names_stay_out_of_the_registry(key):
 # 上面那些是手寫清單，守得住今天。這兩條錨在**會自己長的東西**上（DB 欄位、
 # 路由表），所以明天有人加了東西忘了表態，它們才會紅。
 #
-# 這正是 2026-08-15 第一版缺的：docs 承諾「列舉式，將來誰新增端點漏了會紅」，
-# 實際落地的卻是手抄路徑清單 —— 而同一次疏漏就漏掉了 `transfer_fee`
-# （帳款匯費，每一支專案清單都在回）。
+# 手抄清單漏掉一個欄位是**靜默**的：畫面正常、測試全綠、只是多回一個數字
+# （`transfer_fee` 就是這樣漏的 —— 帳款匯費，每一支專案清單都在回）。
 
-# 🔴 錢字清單從 `_PREFILTER` 推導，不另抄一份。第一版兩邊各寫一份、當場就分岔了
-# （這邊有 salary 沒有 contract/ex_tax，那邊相反）—— 而這支測試的存在意義正是
-# 「別靠人記得」，自己身上重演同一個疏漏最沒說服力。
+# 🔴 錢字清單從 `_PREFILTER` 推導，不另抄一份。兩邊各寫一份必定分岔，而這支
+# 測試的存在意義正是「別靠人記得」—— 自己身上重演同一個疏漏最沒說服力。
 # 錨在詞首或底線：`curated` 不該因為字中夾著 `rate` 就要人來豁免它
 # （實測全部 model 欄位，加錨之後只有它掉出來，沒有任何真的金額欄漏掉）。
 _MONEY_RE = re.compile("(^|_)(" + "|".join(t.decode() for t in _PREFILTER) + ")")
@@ -158,24 +156,49 @@ def test_registry_covers_money_columns():
     # model 拆檔都會讓它靜默變成空集合 —— 空集合的 `missing` 也是空的，測試照樣
     # 全綠。姊妹測試（掃路由表）本來就有這道地板，這支當初漏了。
     assert len(cols) > 300, f"只掃到 {len(cols)} 個 Column，掃描器八成壞了"
+
+    # 🔴 第二條軸：中文尾註。第一條軸（英文詞彙表）的召回率綁在「下一個人會不會
+    # 剛好選中我列的字」上 —— `estimated`/`actual` 就是被人找到之後才手動補進
+    # 詞彙表的，失效模式跟它要取代的「人抄名單」一模一樣。而作者用中文寫
+    # 「# 預估金額」的機率，遠高於他選中某個英文 token。
+    zh = re.compile(r"金額|費用|單價|價格|款項|薪|成本|預算|營收|匯費|稅額")
+    noted = {m.group(1) for m in re.finditer(
+        r"^\s{4}(\w+)\s*=\s*Column\([^\n]*#\s*(.*)$", src, re.M) if zh.search(m.group(2))}
+
+    def caught(col):
+        """兩條軸任一命中就算「這名字在說它是錢」。"""
+        return _moneyish(col) or col in noted
+
     missing = sorted(c for c in cols
-                     if _moneyish(c)
+                     if caught(c)
                      and c not in MONEY_FIELDS and c not in REGISTRY_EXEMPT)
     assert not missing, (
         f"這些 model 欄位名字像錢，卻既不在 MONEY_FIELDS 也不在 REGISTRY_EXEMPT："
         f"{missing}。是錢就加進 MONEY_FIELDS；不抹就加進 REGISTRY_EXEMPT 並寫下理由。")
     # 反向：豁免表裡不准有「這條規則本來就掃不到」的死筆 —— 有人憑直覺加了
     # 一筆，沒有任何一步會告訴他不需要，那張表就開始長無效內容。
-    dead = sorted(k for k in REGISTRY_EXEMPT if not _moneyish(k))
+    dead = sorted(k for k in REGISTRY_EXEMPT if not caught(k))
     assert not dead, f"REGISTRY_EXEMPT 這幾筆根本不會被掃到，是死筆：{dead}"
+
+
+def test_pending_owner_items_are_still_pending():
+    """🔴 `_PENDING_OWNER` 是「還沒拍板」不是「已經封死」。
+
+    owner 決定要抹的那天，鍵要從那張表**搬進** `MONEY_FIELDS` —— 而不是留一則
+    過期的註解說「待決」。兩邊同時有，就是有人只做了一半。
+    """
+    both = sorted(set(_PENDING_OWNER) & MONEY_FIELDS)
+    assert not both, (
+        f"這幾筆同時在 _PENDING_OWNER 與 MONEY_FIELDS：{both}。"
+        "拍板了就把它從待決表移走，別讓下一個人以為還沒決定。")
 
 
 def test_the_net_is_never_narrower_than_what_it_guards():
     """🔴 網子不准比它要守的清單窄。
 
-    第一版就是這樣壞的：詞彙表認不出 `MONEY_FIELDS` 自己的 `ex_tax` 與
-    `total_contract`，於是「掃 model 找漏網」這件事對那兩類欄位完全失明 ——
-    一個號稱會自己長大的網，比它要 backstop 的手抄清單還窄。
+    詞彙表少一個字，「掃 model 找漏網」對那一類欄位就完全失明 —— 一個號稱會
+    自己長大的網，比它要 backstop 的手抄清單還窄（`ex_tax` 與 `total_contract`
+    實際發生過）。
 
     註：`MONEY_FIELDS` 有 8 個不是 Column 而是**算出來的鍵**（`cost = days ×
     rate` 那類）。這條只驗詞彙涵蓋，不要求它們在 model 裡找得到。
@@ -216,10 +239,29 @@ def test_money_paths_are_guarded(app_client, as_user):
 
     assert checked >= 15, f"只掃到 {checked} 支金額端點，掃描邏輯可能壞了"
     assert not leaked, f"{len(leaked)} 支路徑就是錢的端點沒擋：{leaked}"
-    # 🔴 掃描不准比手抄清單窄 —— 那張清單是它要 backstop 的東西。第一版正則
-    # 就漏了 `expenses` 與 `quotation-templates`（兩者都在 MONEY_ONLY_PATHS 裡）。
+    # 🔴 掃描不准比手抄清單窄 —— 那張清單正是它要 backstop 的東西。正則少一個
+    # 字（例如 `expenses`），那幾支就靜默地不在守備範圍內。
     hand = {p for p in MONEY_ONLY_PATHS if p.startswith(CRM_PREFIX)}
     assert hand <= scanned, f"手抄清單有、掃描沒涵蓋到：{sorted(hand - scanned)}"
+
+
+def test_every_crm_route_has_the_redact_class():
+    """🔴 第二層是掛在 **CRM_PREFIX 這個命名空間**上的性質，不是掛在某個
+    router 物件上。
+
+    這兩件事今天幾乎重合，而「幾乎」就是洞：`include_router` 用
+    `route_class_override=type(route)` 保留子 router 自己的 class，所以
+    `public_router` 那批（公開／手機頁，最可能夾帶金額的去處）原本整組沒有第二層。
+    把性質釘在命名空間上，將來有人在 crm/ 底下新建第三個 APIRouter 也會被接住。
+    """
+    import main
+    from core.money import MoneyRedactRoute as _RC
+    from routers.crm._shared import CRM_PREFIX
+
+    naked = sorted({r.path for r in main.app.routes
+                    if getattr(r, "path", "").startswith(CRM_PREFIX)
+                    and not isinstance(r, _RC)})
+    assert not naked, f"{len(naked)} 條 CRM 路由沒有金額抹除層：{naked[:8]}"
 
 
 def test_prefilter_tokens_cover_every_money_field():

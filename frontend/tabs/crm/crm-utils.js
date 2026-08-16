@@ -623,8 +623,19 @@ export function hasModule(key) {
         || (window._modules || []).includes(key);
 }
 
-// 整塊「這裡本來是錢」的替代畫面。兩個呼叫端（財務摘要、執行人員）說的是
-// 同一句話 —— 各寫一份的話改字時只會改到一邊。
+// 整塊「這裡本來是錢」的替代畫面。多個呼叫端說的是同一句話 —— 各寫一份的話
+// 改字時只會改到一邊。
 export const NO_MONEY_HTML =
     '<div class="crm-empty" style="padding:8px 0;font-size:12px;">'
     + '此帳號沒有金額檢視權限</div>';
+
+/** 「這一整塊都是錢」的區塊在**發請求前**先擋下來：擋住回 true，呼叫端 return。
+ *
+ *  為什麼要擋而不是讓它 403：那些端點整支是錢（`Depends(money_dep)`），
+ *  fetch 失敗時畫面上是紅色「載入失敗」—— 那會被當成故障來報修。
+ *
+ *  收成一個名字而不是在每個區塊各貼三行：貼第三次時就已經漏掉一個
+ *  （`_loadAdvances`，於是同一畫面上半截寫「沒有權限」、下半截紅字「載入失敗」）。
+ */
+export const moneyGate = (el) =>
+    canSeeMoney() ? false : (el.innerHTML = NO_MONEY_HTML, true);
