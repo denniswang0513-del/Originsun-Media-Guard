@@ -150,38 +150,44 @@ def test_staff_tab_hides_money_without_grant(plan_page, case, staffed, user_toke
 
 
 # ── 落地畫面：沒帶參數＝專案清單（owner 2026-08-15 選 A）─────
-def test_bare_url_lands_on_the_project_list(plan_page, case):
-    """🔴 這一頁的主鍵是專案 —— 沒帶參數就該列專案，不是提案。
+def test_bare_url_lands_on_one_merged_list(plan_page, case):
+    """🔴 一份清單，列＝專案（owner 2026-08-15：「提案與其他狀態就用篩選來列」）。
 
-    改名之前（也就是網址還叫 proposal-plan 的時候）落在提案清單是合理的；
-    改完之後還落在那裡，就變成「網址說專案、內容說提案」。
+    合併之前這裡是兩份：沒帶參數給專案清單、`?view=proposals` 給提案清單。
+    兩份清單意味著同一個案子在兩個地方各有一列，而它們的欄位還不一樣。
 
     順帶守金額：這頁的閘門比 CRM 寬（拍攝企劃的人進得來），而
-    `GET /crm/projects` 會回 contract_amount —— 清單一個金額欄都不該開。
+    `GET /crm/projects` 會回 contract_amount —— 合併之後也不准把它畫進來。
     """
-    pg = plan_page("", wait="#projlist-view .pl-row")
-    assert pg.locator("#projlist-view").is_visible()
-    assert pg.locator("#list-view").is_visible() is False, "沒帶參數卻落在提案清單"
-    body = pg.locator("#projlist-view").text_content()
-    assert "$" not in body, f"專案清單畫了金額：{body[:150]}"
+    pg = plan_page("", wait=f'#list-host a.prop-row[href="?id={case["project_id"]}"]')
+    assert pg.locator("#list-view").is_visible()
+    # 階段篩選就在工具列上，而且預設是「進行中」
+    assert pg.eval_on_selector("#f-stage", "el => el.value") == ""
+    body = pg.locator("#list-host").text_content()
+    assert "$" not in body, f"清單畫了金額：{body[:150]}"
     pg.close()
 
 
-def test_clicking_a_project_opens_its_project_page(plan_page, case):
-    """點一列 → 進那個案子的專案頁（?id=），標頭是專案名。"""
-    pg = plan_page("", wait=f'#projlist-view .pl-row[data-id="{case["project_id"]}"]')
-    pg.click(f'#projlist-view .pl-row[data-id="{case["project_id"]}"]')
+def test_clicking_a_row_opens_that_project(plan_page, case):
+    """點一列 → 進那個案子的專案頁（?id=）。"""
+    sel = f'#list-host a.prop-row[href="?id={case["project_id"]}"]'
+    pg = plan_page("", wait=sel)
+    pg.click(sel)
     pg.wait_for_selector("#plan-side .side-tab", timeout=30000)
     assert f"id={case['project_id']}" in pg.url
     assert pg.locator("#proj-stage").is_visible(), "沒進到專案模式"
     pg.close()
 
 
-def test_proposal_list_moved_behind_a_toggle(plan_page, case):
-    """提案清單沒有消失，改走 `?view=proposals`（清單頁上那顆切換鈕）。"""
-    pg = plan_page("?view=proposals", wait="#list-view")
-    assert pg.locator("#list-view").is_visible()
-    assert pg.locator("#projlist-view").is_visible() is False
+def test_proposal_rows_keep_a_direct_route_to_the_matrix(plan_page, case):
+    """合併不能讓企劃的人多兩次點擊：有提案的列另給一顆「創意發想」直達 ?pid=。"""
+    pg = plan_page("?view=proposals",
+                   wait=f'#list-host a.prop-proj[href="?pid={case["prop_id"]}"]')
+    # `?view=proposals` 保留成「開頁就篩在提案階段」的捷徑（既有連結不該死掉）
+    assert pg.eval_on_selector("#f-stage", "el => el.value") == "提案"
+    pg.click(f'#list-host a.prop-proj[href="?pid={case["prop_id"]}"]')
+    pg.wait_for_selector("#plan-side .side-tab", timeout=30000)
+    assert f"pid={case['prop_id']}" in pg.url
     pg.close()
 
 

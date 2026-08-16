@@ -90,13 +90,14 @@
   .prop-row .flow { min-width: 0; overflow: hidden; }
   .prop-row:focus-visible { outline: 2px solid var(--red); outline-offset: -2px; }
   .prop-row:hover { background: #fafafa; }
-  /* 平時像文字，hover 才顯出可按 —— 它同時是「目前接在哪」的顯示 */
+  /* 平時像文字，hover 才顯出可按 —— 清單合併後它是「創意發想」直達鍵
+     （合併前是「目前接在哪／換綁專案」，那個語意隨列的身分變成專案而移到專案頁） */
   .prop-proj { flex: none; max-width: 150px; background: none; cursor: pointer;
     border: 1px solid transparent; border-radius: 3px; color: var(--sub);
     font: inherit; font-size: 12px; padding: 4px 8px; margin: 8px 8px 8px 0;
-    overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    text-decoration: none; line-height: 1.6; }
   .prop-proj:hover { border-color: var(--red); color: var(--red); }
-  .prop-proj.none { opacity: .55; }
   /* 列尾刪除：平時很淡，hover 到那一列才明顯 —— 它跟「點一列＝進企劃」共存，
      太顯眼就會變成誤觸來源 */
   .prop-del { flex: none; background: none; border: none; cursor: pointer;
@@ -338,30 +339,18 @@
     </div>
   </div>
 
-  <!-- 專案清單（沒帶參數時的落地畫面）-->
-  <div id="projlist-view" style="display:none;">
-    <div class="list-head">
-      <h1>專案管理</h1>
-      <span class="hint">點一筆進那個案子的專案頁（進度、創意發想、企劃書、
-        報價單、會議記錄、人員配置、完稿結案）。</span>
-      <span class="grow"></span>
-      <button class="btn-ghost" id="to-proposals">提案清單 ↗</button>
-    </div>
-    <div id="projlist-host"><div class="state-msg">載入中…</div></div>
-  </div>
-
-  <!-- 提案清單 -->
+  <!-- 專案清單（沒帶參數時的落地畫面）——「提案」只是階段篩選的一個值 -->
   <div id="list-view" style="display:none;">
     <div class="list-head">
-      <button class="btn-ghost" onclick="location.href = location.pathname">← 專案</button>
-      <h1>提案清單</h1>
-      <span class="hint">點一筆進創意發想矩陣；標「發想中」的已有內容。</span>
+      <h1>專案清單</h1>
+      <span class="hint">點一筆進那個案子的專案頁；提案階段的另有「創意發想」捷徑。</span>
     </div>
     <div class="list-tools" id="list-tools" style="display:none;">
-      <span class="chip" id="chip-total"><span class="n">–</span><span class="l">總提案</span></span>
+      <span class="chip" id="chip-total"><span class="n">–</span><span class="l">列出</span></span>
       <span class="chip rate" id="chip-rate"><span class="n">–</span><span class="l">成案率</span></span>
-      <input id="f-q" type="text" placeholder="搜尋標題…" style="width:170px;">
-      <select id="f-status"><option value="">全部狀態</option></select>
+      <input id="f-q" type="text" placeholder="搜尋標題／客戶…" style="width:170px;">
+      <select id="f-stage" title="專案階段"></select>
+      <select id="f-status"><option value="">全部提案狀態</option></select>
       <select id="f-ptype"><option value="">全部類型</option></select>
       <select id="f-year"></select>
       <select id="f-sort" title="排序依據"><option value="">預設順序</option></select>
@@ -981,7 +970,7 @@ async function _mountFolder() {
 }
 
 function _show(view) {
-    for (const v of ["login-view", "noperm-view", "projlist-view", "list-view", "plan-view"]) $(v).style.display = (v === view ? "block" : "none");
+    for (const v of ["login-view", "noperm-view", "list-view", "plan-view"]) $(v).style.display = (v === view ? "block" : "none");
     $("btn-logout").style.display = (view === "login-view") ? "none" : "";
 }
 function showLogin(msg) {
@@ -1049,24 +1038,15 @@ let _rowsFiltered = false;             // 這批是不是篩過的（決定空�
 const _listErr = (e) => '<div class="state-msg" style="color:var(--red);">清單載入失敗：'
     + escText(emsg(e)) + "</div>";
 
-/** 專案清單 —— 沒帶參數時的落地畫面（owner 2026-08-15 選 A）。
- *
- *  🔴 一個金額都不畫，理由見 tabs/proposals/project-list.js 檔頭。
- */
-async function _loadProjectList() {
-    _show("projlist-view");
-    try {
-        const mod = await importRetryish("/tabs/proposals/project-list.js");
-        await mod.renderProjectList($("projlist-host"), {
-            fetcher: _crmFetch,
-            onOpen: (id) => { location.search = "?id=" + encodeURIComponent(id); },
-        });
-    } catch (e) {
-        $("projlist-host").innerHTML = _listErr(e);
-    }
-}
+// 專案階段的顯示順序。正本是 `core.project_flow.PIPELINE` + `LOST`
+// （前端另一份在 tabs/crm/crm-projects-state.js，而這一頁的 import 閉包碰不到
+// 那裡）。⚠️ 下拉**只列資料裡真的出現過的階段** —— 這份順序漂了頂多是排序怪，
+// 不會生出一個選了什麼都沒有的選項。
+const STAGE_ORDER = ["投標", "開發", "洽詢", "提案", "製作", "結案", "歸檔", "未成案"];
+// 預設不看的（生產 236 個專案裡 213 個是歸檔 —— 預設全列等於把清單淹掉）
+const STAGE_DONE = new Set(["歸檔", "未成案"]);
 
-async function _loadList() {
+async function _loadList(initialStage = "") {
     _show("list-view");
     try {
         // 常數與清單邏輯同時起跑（工具列的下拉要 STATUSES / PTYPES / SORT_COLUMNS）
@@ -1077,9 +1057,15 @@ async function _loadList() {
         _wireListTools(pc, pl);
         PL = pl;
         $("list-tools").style.display = "flex";
-        // 統計只在進清單時抓一次 —— 後端 /stats 不吃 filters，每次篩選重打
-        // 是拿一模一樣的數字做一次全表掃描
-        PL.paintStats($("chip-total"), $("chip-rate"));
+        // 階段預選要在 _refreshList 之前 —— 它會重建下拉並保留當下的值
+        if (initialStage) {
+            $("f-stage").innerHTML =
+                `<option value="${escAttr(initialStage)}">${escText(initialStage)}</option>`;
+            $("f-stage").value = initialStage;
+        }
+        // 成案率只在進清單時抓一次（後端 /stats 不吃 filters）。左邊那顆
+        // chip 改成「這次列出幾筆」，由 _paintList 每次重畫時填。
+        PL.paintStats(document.createElement("span"), $("chip-rate"));
         await _refreshList();
     } catch (e) {
         $("list-host").innerHTML = _listErr(e);
@@ -1089,6 +1075,7 @@ async function _loadList() {
 function _wireListTools(pc, PL) {
     const opt = (v, label) => `<option value="${escAttr(v)}">${escText(label ?? v)}</option>`;
     $("f-status").insertAdjacentHTML("beforeend", pc.STATUSES.map(v => opt(v)).join(""));
+    $("f-stage").addEventListener("change", () => { _paintList(); _paintFlow(); });
     $("f-ptype").insertAdjacentHTML("beforeend", pc.PTYPES.map(v => opt(v)).join(""));
     // 可排序的欄位跟後台的表頭同一份清單
     $("f-sort").insertAdjacentHTML("beforeend",
@@ -1144,14 +1131,68 @@ function _wireListTools(pc, PL) {
     });
 }
 
+/** 專案 ⨝ 提案 → 一份清單。**列的身分是專案**（「提案」是它的一個階段）。
+ *
+ *  owner 2026-08-15：「提案與其他狀態就用篩選來列」。生產實查支持這個形狀 ——
+ *  5 筆提案**全部**掛著殼專案（提案=專案合體，docs §11），而且沒有一個專案掛
+ *  兩份提案。哪天真的一專案 N 提案，多出來的那幾份在專案頁的切換器上，清單
+ *  仍然一案一列。
+ *
+ *  欄位刻意沿用提案那份的名字（title/client_name/ptype/…），這樣
+ *  `PL.sortProposals` 與既有的列渲染不用改。沒有提案的專案就用專案自己的值。
+ *
+ *  🔴 金額只取提案的 `budget_range`，**不碰**專案的 contract_amount：後者沒有
+ *  money_view 時會被後端抹掉（core/money.py），畫了就是空欄或 0 的謊報。
+ */
+function _mergeRows(projects, proposals) {
+    const byProject = new Map();
+    for (const p of proposals) if (p.project_id) byProject.set(p.project_id, p);
+    const rows = projects.map(pr => {
+        const p = byProject.get(pr.id);
+        return {
+            ...(p || {}),
+            id: p ? p.id : "",                       // 提案 id（沒有提案就空）
+            project_id: pr.id,
+            project_name: pr.name || "",
+            stage: pr.status || "",
+            title: p ? p.title : (pr.name || "（未命名）"),
+            client_name: (p && p.client_name) || pr.client_short_name || "",
+            ptype: (p && p.ptype) || pr.project_type || "",
+            pitch_date: (p && p.pitch_date) || (pr.start_date || "").slice(0, 10),
+            budget_range: p ? (p.budget_range || "") : "",
+            has_proposal: !!p,
+        };
+    });
+    // 沒掛專案的提案（理論上不該有 —— 提案誕生即建殼專案）也要列出來，
+    // 不然它會從清單上消失而沒有人發現
+    for (const p of proposals) {
+        if (!p.project_id) rows.push({ ...p, stage: "", has_proposal: true });
+    }
+    return rows;
+}
+
+/** 目前篩選條件下要顯示的列（階段在前端篩、其餘沿用 PL 的伺服器端篩選）。 */
+function _visibleRows() {
+    const stage = $("f-stage").value;
+    if (!stage) return _rows.filter(r => !STAGE_DONE.has(r.stage));   // 預設：進行中
+    if (stage === "*") return _rows;
+    return _rows.filter(r => r.stage === stage);
+}
+
 async function _refreshList() {
     try {
         const filters = _readFilters();
-        _rows = await PL.fetchProposals(filters);
+        // 兩邊同時起跑：串起來 await 會讓清單多等一個 RTT，而它們互不相依
+        const [proposals, projs] = await Promise.all([
+            PL.fetchProposals(filters),
+            _crmFetch("/projects").then(d => d.projects || []).catch(() => []),
+        ]);
+        _rows = _mergeRows(projs, proposals);
         // 記「這批的出處」而不是重讀控件 —— 打字到 debounce 觸發之間，控件已經
         // 有值但 _rows 還是舊的那批，重讀會說出不符實情的空狀態
         _rowsFiltered = PL.hasFilters(filters);
         if (!_rowsFiltered) PL.fillYearSelect($("f-year"), _rows);
+        _fillStageSelect();
         _paintList();
         _paintFlow();          // 附加資訊，不 await（同後台提案庫）
     } catch (e) {
@@ -1159,12 +1200,27 @@ async function _refreshList() {
     }
 }
 
+/** 階段下拉：只列資料裡真的出現過的（順序照 STAGE_ORDER），選擇保留。 */
+function _fillStageSelect() {
+    const el = $("f-stage");
+    const keep = el.value;
+    const present = new Set(_rows.map(r => r.stage).filter(Boolean));
+    const opts = ['<option value="">進行中</option>', '<option value="*">全部階段</option>']
+        .concat(STAGE_ORDER.filter(s => present.has(s))
+            .map(s => `<option value="${escAttr(s)}">${escText(s)}</option>`));
+    el.innerHTML = opts.join("");
+    el.value = keep;
+}
+
 function _paintList() {
     const host = $("list-host");
-    if (!_rows.length) {
-        host.innerHTML = _rowsFiltered
-            ? '<div class="state-msg">沒有符合條件的提案。</div>'
-            : '<div class="state-msg">還沒有提案 — 按「＋ 新提案」建立第一筆。</div>';
+    const rows = _visibleRows();
+    $("chip-total").querySelector(".n").textContent = rows.length;
+    if (!rows.length) {
+        const filtered = _rowsFiltered || $("f-stage").value;
+        host.innerHTML = filtered
+            ? '<div class="state-msg">沒有符合條件的專案。</div>'
+            : '<div class="state-msg">沒有進行中的專案 —— 換「全部階段」看歸檔的。</div>';
         return;
     }
     // 列是 `<a href>` 不是 div+click：點一列的語意就是導航。中鍵/Ctrl 開新分頁、
@@ -1172,35 +1228,31 @@ function _paintList() {
     // 「專案」鈕是 <a> 的**兄弟**不是子孫：button 放進 a 裡是無效 HTML，
     // 鍵盤與朗讀器的行為也會壞掉。外面包一層 .prop-item 讓兩者並排。
     const dir = $("f-dir").dataset.dir === "desc" ? "desc" : "asc";
-    host.innerHTML = PL.sortProposals(_rows, $("f-sort").value, dir).map(p => `
+    // 點一列 = 進那個案子的專案頁。提案階段的另給一顆「創意發想」直達
+    // （合併之前那是列本身的行為，不能因為合併就多兩次點擊）。
+    host.innerHTML = PL.sortProposals(rows, $("f-sort").value, dir).map(p => `
         <div class="prop-item">
-        <a class="prop-row" href="?pid=${encodeURIComponent(p.id)}">
+        <a class="prop-row" href="?${p.project_id
+            ? "id=" + encodeURIComponent(p.project_id)
+            : "pid=" + encodeURIComponent(p.id)}">
             <span class="t">${escText(p.title)}</span>
             <span class="c">${escText(p.client_name || "")}</span>
             <span class="meta">${escText(p.ptype || "")}</span>
             <span class="meta">${escText(p.pitch_date || "")}</span>
             <span class="meta">${escText(p.budget_range || "")}</span>
             <span class="refs">${p.refs_count ? "🎞 " + p.refs_count : ""}</span>
-            <span class="badge ${p.has_plan ? "on" : "off"}">${p.has_plan ? "發想中" : "未開始"}</span>
-            <span class="st">${escText(p.status || "")}</span>
+            <span class="badge ${p.has_proposal ? (p.has_plan ? "on" : "off") : "none"}"
+            >${p.has_proposal ? (p.has_plan ? "發想中" : "未開始") : ""}</span>
+            <span class="st">${escText(p.stage || p.status || "")}</span>
             <span class="flow" data-flow="${escAttr(p.project_id || "")}"></span>
         </a>
-        <button class="prop-proj${p.project_id ? "" : " none"}" data-proj="${escAttr(p.id)}"
-                title="${escAttr(p.project_id
-                    ? "目前：" + (p.project_name || p.project_id) + "　（點一下換綁或解除）"
-                    : "把這個提案掛到某個既有專案")}"
-        >${escText(PC.projectLabel(p))}</button>
+        ${p.has_proposal ? `<a class="prop-proj" href="?pid=${escAttr(p.id)}"
+                title="直接進這份提案的創意發想矩陣">創意發想</a>
         <button class="prop-del" data-del="${escAttr(p.id)}"
-                title="刪除這個提案（參考片掛載會解除，片庫保留）">✕</button>
+                title="刪除這個提案（參考片掛載會解除，片庫保留）">✕</button>` : ""}
         </div>`).join("");
-    host.querySelectorAll("[data-proj]").forEach(el => {
-        el.addEventListener("click", async () => {
-            const p = _rows.find(x => x.id === el.dataset.proj);
-            if (!p) return;
-            const { openProjectLinker } = await import("/tabs/proposals/prop-actions.js");
-            openProjectLinker(p, { onSaved: () => _refreshList() });
-        });
-    });
+    // 「換綁專案」不在這裡了：清單合併之後列的身分就是專案，換綁的語意
+    // （把提案掛到別的專案）屬於那份提案，入口在專案頁的標頭。
     // 刪除的規則（確認文案、要不要真的送）走共用的 removeProposal —— 後台
     // 提案庫用的是同一支，兩邊不會一邊問一邊不問
     host.querySelectorAll("[data-del]").forEach(el => {
@@ -1789,14 +1841,9 @@ async function boot() {
         _propConst();
         _planMods = [import("/tabs/proposals/prop-actions.js"),
                      importRetryish("/tabs/proposals/plan-matrix.js")];
-    } else if (q.get("view") === "proposals") {
-        _listMod = importRetryish("/tabs/proposals/prop-list.js");
     } else {
-        importRetryish("/tabs/proposals/project-list.js");   // 預熱：落地就是它
+        _listMod = importRetryish("/tabs/proposals/prop-list.js");
     }
-    $("to-proposals").addEventListener("click", () => {
-        location.search = "?view=proposals";
-    });
     let me;
     try {
         const r = await mfetch("/api/v1/auth/me");
@@ -1812,10 +1859,9 @@ async function boot() {
     if (!isAdmin && !["preprod_proposals", "preprod_plan", "crm_projects"].some(m => mods.includes(m))) { _show("noperm-view"); return; }
     if (projId) { _loadProject(projId); }
     else if (pid) { _loadPlan(pid); }
-    // 沒帶參數 → 專案清單（這一頁的主鍵是專案）。提案清單移到 `?view=proposals`，
-    // 由清單頁上那顆「提案清單 ↗」進去 —— owner 2026-08-15 選 A。
-    else if (q.get("view") === "proposals") { _loadList(); }
-    else { _loadProjectList(); }
+    // 沒帶參數 → 一份合併清單（列＝專案，「提案」是階段篩選的一個值）。
+    // `?view=proposals` 保留成「開頁就篩在提案階段」的捷徑 —— 既有連結不該死掉。
+    else { _loadList(q.get("view") === "proposals" ? "提案" : ""); }
 }
 
 boot();
