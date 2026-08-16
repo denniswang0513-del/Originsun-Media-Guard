@@ -16,20 +16,163 @@ from fastapi import Depends, HTTPException, Request, UploadFile, File, Query
 
 from core.project_folders import BLOCKED_UPLOAD_EXTS, stream_to_disk
 from core.schemas import (ProjectExpensePayload, ProjectExpensePatchPayload,
-                          CostLinePayload, CostLineUpdatePayload,
+                          CostLinePayload, CostLineUpdatePayload, ExpenseLinkPayload,
                           CostGroupCreate, CostGroupUpdate, CostGroupDuplicate)
 
-from ._shared import (router, _check_auth, money_dep, _require_db, _get_factory, _now,
-                      _parse_shoot_date, _seed_default_expenses)
+from ._shared import (router, public_router, _check_auth, money_dep, _require_db,
+                      _get_factory, _now, _parse_shoot_date, _seed_default_expenses,
+                      _mint_token_generic, _verify_token_generic)
 
 try:
     from ._shared import (select, delete,
                           CrmProject, CrmProjectExpense, CrmProjectStaff,
                           CrmProjectCostLine, CrmCostLineTemplate,
                           CrmProjectCostGroup, CrmQuotation, CrmQuotationItem,
-                          CrmStaff, CrmPaymentRequest)
+                          CrmStaff, CrmPaymentRequest, CrmExpenseLink)
 except ImportError:  # DB 套件不存在的 agent 環境 — 行為同原檔 try/except
     pass
+
+# ── 雜支登記分享連結（token；給沒有帳號的現場人員）────────────
+#
+# 為什麼是 token 而不是「id 猜不到」：2026-08-14 的 `_crm_read_guard` 之後，
+# `/public/projects/{id}/…` 那批要登入才打得到（CRM 是商務資料，master 經
+# cloudflared 對外）。但現場登記雜支的是外部場記／臨時人員，他們沒有帳號。
+# token 才是「發一條連結給特定一件事」的憑證 —— 這也正是影像紀錄那套的做法，
+# 所以直接用同一組 `_mint_token_generic` / `_verify_token_generic`。
+#
+# ⚠️ 這四支掛 `public_router`（NAS 對外容器也會掛到）：token 就是憑證，沒有
+# token 打不到任何東西。曝露面由 tests/unit/test_public_surface.py 列舉斷言。
+EXPENSE_LINK_SCOPE = "expense_link"
+
+
+async def _resolve_link(session, token: str):
+    """驗 token → 回 (link_row, project_id, fixed_group_id)。
+
+    `kind == 'group'` 的連結**綁死**那個子表：登記時不讓前端指定別的
+    cost_group_id —— 連結的意義就是「這一天的雜支」。
+    """
+    link = await _verify_token_generic(session, token, EXPENSE_LINK_SCOPE,
+                                       CrmExpenseLink, "enabled", require_editable=True)
+    if link.kind == "group":
+        g = await session.get(CrmProjectCostGroup, link.id)
+        if not g:
+            raise HTTPException(status_code=404, detail="子表已刪除")
+        return link, g.project_id, g.id
+    return link, link.id, None
+
+
+@router.post("/expense-links", dependencies=[Depends(_check_auth)])
+async def mint_expense_link(req: ExpenseLinkPayload):
+    """發（或重置）一條雜支登記連結。冪等：`rotate=False` 時重用既有 token，
+    所以後台重複點「複製連結」不會讓已發出去的那條失效。"""
+    if req.kind not in ("project", "group"):
+        raise HTTPException(status_code=400, detail="kind 只能是 project 或 group")
+    _require_db()
+    factory = await _get_factory()
+    async with factory() as session:
+        model = CrmProject if req.kind == "project" else CrmProjectCostGroup
+        if not await session.get(model, req.target_id):
+            raise HTTPException(status_code=404, detail="找不到目標")
+        token, row = await _mint_token_generic(
+            session, CrmExpenseLink, req.target_id, EXPENSE_LINK_SCOPE,
+            reuse_existing=not req.rotate, row_defaults={"kind": req.kind},
+            on_rotate=lambda r: setattr(r, "kind", req.kind))
+        row.kind = req.kind          # 既有 row 換 kind（重用路徑不走 on_rotate）
+        if row.enabled is None:
+            row.enabled = True
+        await session.commit()
+        return {"token": token, "kind": row.kind, "enabled": bool(row.enabled)}
+
+
+@router.post("/expense-links/{target_id}/enabled", dependencies=[Depends(_check_auth)])
+async def set_expense_link_enabled(target_id: str, enabled: bool = Query(True)):
+    """停用／重新啟用一條連結（停用後那條網址回 403，不必換 token）。"""
+    _require_db()
+    factory = await _get_factory()
+    async with factory() as session:
+        row = await session.get(CrmExpenseLink, target_id)
+        if not row:
+            raise HTTPException(status_code=404, detail="找不到此連結")
+        row.enabled = enabled
+        row.updated_at = _now()
+        await session.commit()
+        return {"status": "ok", "enabled": enabled}
+
+
+@public_router.get("/public/expense/{token}")
+async def get_expense_link_info(token: str):
+    """連結首屏：專案名 +（專案連結才有的）子表清單。
+
+    金額欄（子表預算）交給 MoneyRedactRoute —— 匿名一律沒有 money_view，
+    所以現場的人看得到「哪個專案、哪一天」，看不到預算數字。
+    """
+    _require_db()
+    factory = await _get_factory()
+    async with factory() as session:
+        link, project_id, group_id = await _resolve_link(session, token)
+        proj = await session.get(CrmProject, project_id)
+        if not proj:
+            raise HTTPException(status_code=404, detail="找不到此專案")
+        out = {"kind": link.kind,
+               "project": {"id": proj.id, "name": proj.name},
+               "cost_groups": [], "group": None}
+        if link.kind == "group":
+            g = await session.get(CrmProjectCostGroup, group_id)
+            out["group"] = {"id": g.id, "name": g.name,
+                            "shoot_date": _fmt_date(g.shoot_date),
+                            "notes": g.notes or "",
+                            "budget_amount": g.budget_amount,
+                            "misc_budget_amount": g.misc_budget_amount}
+        else:
+            groups = (await session.execute(
+                select(CrmProjectCostGroup)
+                .where(CrmProjectCostGroup.project_id == project_id)
+                .order_by(CrmProjectCostGroup.sort_order, CrmProjectCostGroup.created_at)
+            )).scalars().all()
+            out["cost_groups"] = [{"id": g.id, "name": g.name,
+                                   "shoot_date": _fmt_date(g.shoot_date)} for g in groups]
+        return out
+
+
+@public_router.get("/public/expense/{token}/expenses")
+async def list_expense_link_expenses(token: str):
+    """這條連結範圍內已登記的雜支（子表連結只看那一天的）。"""
+    _require_db()
+    factory = await _get_factory()
+    async with factory() as session:
+        _link, project_id, group_id = await _resolve_link(session, token)
+        q = select(CrmProjectExpense).where(CrmProjectExpense.project_id == project_id)
+        if group_id:
+            q = q.where(CrmProjectExpense.cost_group_id == group_id)
+        rows = (await session.execute(q)).scalars().all()
+    return {"expenses": [{
+        "id": e.id, "category": e.category, "actual": e.actual,
+        "sub_item": e.sub_item or "", "payee": e.payee or "",
+        "created_at": _fmt_date(e.created_at),
+    } for e in rows]}
+
+
+@public_router.post("/public/expense/{token}/expenses")
+async def add_expense_link_expense(token: str, req: ProjectExpensePayload):
+    _require_db()
+    factory = await _get_factory()
+    async with factory() as session:
+        _link, project_id, group_id = await _resolve_link(session, token)
+        if group_id:
+            req.cost_group_id = group_id     # 連結綁死那一天，不吃前端指定的
+        e = await _create_expense(session, project_id, req)
+    return {"status": "ok", "expense_id": e.id, "expense": {"id": e.id}}
+
+
+@public_router.post("/public/expense/{token}/receipts/{expense_id}")
+async def upload_expense_link_receipt(token: str, expense_id: str,
+                                      file: UploadFile = File(...)):
+    _require_db()
+    factory = await _get_factory()
+    async with factory() as session:
+        _link, project_id, _gid = await _resolve_link(session, token)
+    return await _save_receipt(project_id, expense_id, file)
+
 
 # ── Project Expense (雜支) Endpoints ────────────────────────
 

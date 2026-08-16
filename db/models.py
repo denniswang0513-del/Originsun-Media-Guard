@@ -1468,6 +1468,26 @@ class FinanceLoanPayment(Base):
 # 原始檔存管理員設定的資料夾（settings.json media_log.root），縮圖走 WebP。
 # ═══════════════════════════════════════════════════════════════════
 
+class CrmExpenseLink(Base):
+    """雜支登記的分享連結（token 模式，照 ProjectMediaLog 的形狀）。
+
+    為什麼需要它：8/14 的 `_crm_read_guard` 之後，雜支頁的 `/public/...` 端點
+    一律要登入 —— 但現場登記雜支的人（外部場記／臨時人員）沒有帳號。token 才是
+    這種「發一條連結給特定一件事」的正確憑證，「專案 id 猜不到」不是。
+
+    `id` = 目標 id（專案／子表），`kind` 決定那條連結的範圍。兩種 id 都是
+    uuid4 hex，共用一張表不會撞。
+    """
+    __tablename__ = "crm_expense_links"
+
+    id = Column(String(32), primary_key=True)                    # 專案 id 或子表 id
+    kind = Column(String(16), nullable=False)                    # project | group
+    edit_token = Column(String(512), nullable=True)
+    enabled = Column(Boolean, default=True)                      # False = 整條連結停用（403）
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+
 class ProjectMediaLog(Base):
     """影像紀錄分享連結（1:1 專案）— token 模式照 CrmProjectShowcase.edit_token
     （scope="media_log"，reuse/重發語意見 media_log._mint_media_log_token）。"""

@@ -507,6 +507,17 @@ class ProjectExpensePayload(BaseModel):
     cost_group_id: Optional[str] = None
 
 
+class ExpenseLinkPayload(BaseModel):
+    """發一條雜支登記的分享連結（token）。
+
+    `kind`：`project`（整個專案）或 `group`（單一拍攝日子表）。
+    `rotate=True` ＝「重置連結」：舊連結當場失效。
+    """
+    kind: str
+    target_id: str
+    rotate: bool = False
+
+
 class ProjectExpensePatchPayload(BaseModel):
     """供 inline edit 用的部分更新 payload — 所有欄位 optional。"""
     category: Optional[str] = None

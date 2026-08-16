@@ -325,12 +325,21 @@ window._projShareExpenseLink = function() {
         window._cgShareLink(state.selectedGroupId, null);
         return;
     }
-    // Fallback：沒子表狀態時退回專案層級連結
-    var url = location.origin + '/expense.html?project=' + state.selectedId;
-    navigator.clipboard.writeText(url).then(function() {
-        alert('公開雜支登記連結已複製：\n' + url);
-    }).catch(function() {
-        prompt('請複製連結：', url);
+    // Fallback：沒子表狀態時退回專案層級連結。
+    // 帶 token 不帶專案 id —— 理由同子表那顆（見 crm-projects-cost-groups._shareLink）：
+    // 現場的人沒有帳號，而 `?project=` 那條要登入。
+    _fetch('/expense-links', {
+        method: 'POST',
+        body: JSON.stringify({ kind: 'project', target_id: state.selectedId }),
+    }).then(function(d) {
+        var url = location.origin + '/expense.html?t=' + encodeURIComponent(d.token);
+        navigator.clipboard.writeText(url).then(function() {
+            alert('雜支登記連結已複製（免登入，可直接給現場人員）：\n' + url);
+        }).catch(function() {
+            prompt('請複製連結：', url);
+        });
+    }).catch(function(e) {
+        alert('發連結失敗：' + (e.message || e));
     });
 };
 

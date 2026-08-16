@@ -51,15 +51,26 @@ def test_every_crm_get_route_rejects_anonymous(app_client):
     註：`/crm/public/site/{works,team}` 曾被列為例外，理由寫「對外官網 Astro
     build 在讀」—— 實際查證後那是錯的（官網讀的是 `/api/website/*`，見
     website/src/lib/crm-client.ts），那兩支零消費者。例外已整條移除。
+
+    🔴 唯一不受這條管的是 **token 端點**（影像紀錄、雜支登記）：它們的憑證就是
+    token，本來就發給沒有帳號的人。排除方式刻意**不是**寫一張路徑例外清單
+    （那正是這支測試在防的東西），而是問「這條路由在不在 `public_router` 上」
+    —— 那個物件的內容由 test_media_log_public_router 與 test_public_surface
+    逐條列舉釘住，往裡面加一條會在那兩支紅。
     """
     import main
+    from routers.crm import public_router
     from routers.crm._shared import CRM_PREFIX
 
+    token_paths = {CRM_PREFIX + r.path for r in public_router.routes
+                   if getattr(r, "path", None)}
     checked, leaked = 0, []
     for route in main.app.routes:
         path = getattr(route, "path", "")
         methods = getattr(route, "methods", set()) or set()
         if not path.startswith(CRM_PREFIX) or "GET" not in methods:
+            continue
+        if path in token_paths:
             continue
         # 路徑參數填一個不存在的值 —— 守衛在 handler 之前跑，所以不會真的動到資料
         probe = path

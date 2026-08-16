@@ -426,8 +426,21 @@ function _openDuplicateModal(gid) {
 // ── Share link (雜支登記連結) ─────────────────────────────────
 
 async function _shareLink(gid, ev) {
-    const url = `${window.location.origin}/group-expense.html?id=${gid}`;
     const btn = ev?.currentTarget || ev?.target;
+    // 🔴 連結帶 token，不帶子表 id：現場登記雜支的是外部場記／臨時人員，他們
+    // **沒有帳號**，而 `?id=` 那條自 2026-08-14 的 CRM 匿名防線起要登入。
+    // 發 token 是冪等的（reuse_existing）—— 重複點「複製」不會讓已經發出去的
+    // 那條失效；要作廢請用「重置」（rotate）。
+    let url;
+    try {
+        const d = await _fetch('/expense-links', {
+            method: 'POST', body: JSON.stringify({ kind: 'group', target_id: gid }),
+        });
+        url = `${window.location.origin}/group-expense.html?t=${encodeURIComponent(d.token)}`;
+    } catch (e) {
+        _toast('發連結失敗：' + (e.message || e));
+        return;
+    }
     try {
         await navigator.clipboard.writeText(url);
         _toast('✓ 已複製雜支登記連結');

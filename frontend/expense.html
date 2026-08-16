@@ -116,6 +116,12 @@ let _token = localStorage.getItem('auth_token') || '';
 let _projectId = '';
 let _publicMode = false;
 
+// 分享連結模式：`?t=<token>` —— 給**沒有帳號**的現場人員（外部場記／臨時人員）。
+// token 就是憑證，整條路不碰 Authorization；後端見 costs.py EXPENSE_LINK_SCOPE。
+// 舊的 `?project=<id>` 仍然有效，但那條需要登入（8/14 的 CRM 匿名防線）。
+const _shareToken = new URLSearchParams(location.search).get('t') || '';
+const _TBASE = BASE + '/public/expense/' + encodeURIComponent(_shareToken);
+
 function _headers() {
   const h = { 'Content-Type': 'application/json' };
   if (_token) h['Authorization'] = 'Bearer ' + _token;
@@ -132,8 +138,35 @@ function _needLogin() {
 }
 
 async function _init() {
-  // 公開模式：?project=PROJECT_ID
   const params = new URLSearchParams(location.search);
+
+  // 分享連結模式：?t=TOKEN（免登入）
+  if (_shareToken) {
+    _publicMode = true;
+    try {
+      const r = await fetch(_TBASE);
+      if (r.status === 403) throw new Error('這條連結已被停用');
+      if (!r.ok) throw new Error('連結無效或已失效');
+      const info = await r.json();
+      _projectId = (info.project || {}).id || '';
+      const sel = document.getElementById('exp-project');
+      sel.innerHTML = '<option>' + ((info.project || {}).name || '專案') + '</option>';
+      sel.disabled = true;
+      _populateGroups(info.cost_groups || []);
+    } catch (e) {
+      document.getElementById('login-section').style.display = 'none';
+      const err = document.getElementById('login-error');
+      err.textContent = e.message || '連結無效';
+      err.style.display = '';
+      return;
+    }
+    document.getElementById('main-section').style.display = '';
+    _loadHistory();
+    document.getElementById('exp-file').addEventListener('change', _handlePhoto);
+    return;
+  }
+
+  // 舊的公開模式：?project=PROJECT_ID（需要登入）
   const pubProjectId = params.get('project');
   if (pubProjectId) {
     _publicMode = true;
@@ -264,13 +297,15 @@ async function _submit() {
 
   try {
     // Create expense
-    const expUrl = _publicMode
-      ? BASE + '/public/projects/' + _projectId + '/expenses'
+    const expUrl = _shareToken ? _TBASE + '/expenses'
+      : _publicMode ? BASE + '/public/projects/' + _projectId + '/expenses'
       : BASE + '/projects/' + _projectId + '/expenses';
     const groupId = document.getElementById('exp-group').value || null;
     const r = await fetch(expUrl, {
-      // 公開模式也要帶 token —— `/public/...` 端點自 2026-08-14 起需要登入
-      method: 'POST', headers: _headers(),
+      // 分享連結模式不帶 Authorization（token 在網址裡就是憑證）；
+      // 其餘模式要帶 —— `/public/projects/...` 自 2026-08-14 起需要登入
+      method: 'POST',
+      headers: _shareToken ? { 'Content-Type': 'application/json' } : _headers(),
       body: JSON.stringify({
         category: document.getElementById('exp-category').value,
         sub_item: document.getElementById('exp-sub-item').value,
@@ -289,11 +324,12 @@ async function _submit() {
     if (file && expenseId) {
       const form = new FormData();
       form.append('file', file);
-      const receiptUrl = _publicMode
-        ? BASE + '/public/projects/' + _projectId + '/receipts/' + expenseId
+      const receiptUrl = _shareToken ? _TBASE + '/receipts/' + expenseId
+        : _publicMode ? BASE + '/public/projects/' + _projectId + '/receipts/' + expenseId
         : BASE + '/projects/' + _projectId + '/receipts/' + expenseId;
       await fetch(receiptUrl, {
-        method: 'POST', headers: { 'Authorization': 'Bearer ' + _token }, body: form,
+        method: 'POST', body: form,
+        headers: _shareToken ? {} : { 'Authorization': 'Bearer ' + _token },
       });
     }
 
@@ -318,10 +354,10 @@ async function _submit() {
 async function _loadHistory() {
   if (!_projectId) return;
   try {
-    const histUrl = _publicMode
-      ? BASE + '/public/projects/' + _projectId + '/expenses'
+    const histUrl = _shareToken ? _TBASE + '/expenses'
+      : _publicMode ? BASE + '/public/projects/' + _projectId + '/expenses'
       : BASE + '/projects/' + _projectId + '/expenses';
-    const r = await fetch(histUrl, { headers: _headers() });
+    const r = await fetch(histUrl, { headers: _shareToken ? {} : _headers() });
     const data = await r.json();
     const list = document.getElementById('history-list');
     const exps = (data.expenses || []).reverse().slice(0, 10);

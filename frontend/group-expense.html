@@ -116,6 +116,12 @@ let _group = null;
 let _project = null;
 let _token = localStorage.getItem('auth_token') || '';
 
+// 分享連結模式：`?t=<token>` —— 給**沒有帳號**的現場人員。token 就是憑證，
+// 這條路不碰 Authorization、也不需要登入閘（後端 costs.py EXPENSE_LINK_SCOPE）。
+// 舊的 `?id=<子表 id>` 仍有效，但那條要登入（8/14 的 CRM 匿名防線）。
+const _shareToken = params.get('t') || '';
+const _TBASE = BASE + '/public/expense/' + encodeURIComponent(_shareToken);
+
 /** 這頁所有 API 都帶 token —— `/public/...` 端點需要登入（見上方登入閘註解）。 */
 function _headers(json = true) {
   const h = json ? { 'Content-Type': 'application/json' } : {};
@@ -152,17 +158,21 @@ function _fmtMoney(n) {
 }
 
 async function _init() {
-  if (!groupId) {
+  if (!groupId && !_shareToken) {
     document.getElementById('loading').style.display = 'none';
     document.getElementById('fatal').style.display = '';
     document.getElementById('fatal').textContent = '無效的連結（缺少子表 ID）';
     return;
   }
   try {
-    const r = await fetch(BASE + '/public/cost-groups/' + groupId + '/info',
-                          { headers: _headers() });
-    if (r.status === 401) { _needLogin(); return; }
-    if (!r.ok) throw new Error((await r.json().catch(() => ({}))).detail || '找不到此子表');
+    const r = _shareToken
+      ? await fetch(_TBASE)
+      : await fetch(BASE + '/public/cost-groups/' + groupId + '/info',
+                    { headers: _headers() });
+    if (r.status === 403) throw new Error('這條連結已被停用');
+    if (r.status === 401 && !_shareToken) { _needLogin(); return; }
+    if (!r.ok) throw new Error((await r.json().catch(() => ({}))).detail
+                               || (_shareToken ? '連結無效或已失效' : '找不到此子表'));
     const data = await r.json();
     _group = data.group;
     _project = data.project;
@@ -223,9 +233,10 @@ async function _submit() {
   const btn = document.getElementById('btn-submit');
   btn.disabled = true; btn.textContent = '送出中...';
   try {
-    const r = await fetch(BASE + '/public/cost-groups/' + groupId + '/expenses', {
+    const r = await fetch(_shareToken ? _TBASE + '/expenses'
+                          : BASE + '/public/cost-groups/' + groupId + '/expenses', {
       method: 'POST',
-      headers: _headers(),
+      headers: _shareToken ? { 'Content-Type': 'application/json' } : _headers(),
       body: JSON.stringify({
         category: document.getElementById('f-category').value,
         sub_item: document.getElementById('f-sub-item').value,
@@ -243,8 +254,9 @@ async function _submit() {
     if (file && expenseId) {
       const form = new FormData();
       form.append('file', file);
-      await fetch(BASE + '/public/cost-groups/' + groupId + '/receipts/' + expenseId, {
-        method: 'POST', headers: _headers(false), body: form,
+      await fetch(_shareToken ? _TBASE + '/receipts/' + expenseId
+                  : BASE + '/public/cost-groups/' + groupId + '/receipts/' + expenseId, {
+        method: 'POST', headers: _shareToken ? {} : _headers(false), body: form,
       });
     }
 
@@ -267,8 +279,10 @@ async function _submit() {
 
 async function _loadHistory() {
   try {
-    const r = await fetch(BASE + '/public/cost-groups/' + groupId + '/expenses',
-                          { headers: _headers() });
+    const r = _shareToken
+      ? await fetch(_TBASE + '/expenses')
+      : await fetch(BASE + '/public/cost-groups/' + groupId + '/expenses',
+                    { headers: _headers() });
     if (!r.ok) return;
     const data = await r.json();
     const expenses = data.expenses || [];

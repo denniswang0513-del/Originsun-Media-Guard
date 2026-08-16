@@ -1,11 +1,14 @@
-"""影像紀錄 public_router 白名單守衛（R1 防線）。
+"""CRM `public_router` 白名單守衛（R1 防線）。
 
-NAS 對外容器只掛 routers.crm.media_log.public_router。若哪天有人把它接回
+（檔名還叫 media_log 是歷史 —— 那時 public_router 上只有影像紀錄。守的物件
+一直是**整個 CRM 套件的對外曝露面**，現在上面還有雜支登記連結。）
+
+NAS 對外容器只掛 routers.crm 的 public_router。若哪天有人把它接回
 _shared.router、或把別的端點加進 public_router，對外服務就會曝露整套 CRM
 （客戶/報價/成本/財務，160+ 端點）——而且不會有任何徵兆。
 
-本測試把「對外只能出現這 4 條」寫成可執行的斷言：
-  1. public_router 自身路由集合 == 預期 4 條（多一條少一條都紅）
+本測試把「對外只能出現這幾條」寫成可執行的斷言：
+  1. public_router 自身路由集合 == 預期集合（多一條少一條都紅）
   2. 掛進一個乾淨 app（模擬 main_website.py）後不含任何其他 CRM 路徑
   3. master 側 URL 不變（_shared.router 仍看得到同樣的 4 條）
 """
@@ -20,6 +23,12 @@ from routers.crm import router as crm_router  # noqa: E402
 # 對外容器允許出現的完整路由集合（路徑, 方法）——mount prefix 由呼叫端給。
 # 新增對外端點時要同步改這裡，等於強制經過一次「這真的該對外嗎」的思考。
 EXPECTED = {
+    # 雜支登記連結（token；現場外部人員沒有帳號 —— costs.py EXPENSE_LINK_SCOPE）
+    ("/api/v1/crm/public/expense/{token}", "GET"),
+    ("/api/v1/crm/public/expense/{token}/expenses", "GET"),
+    ("/api/v1/crm/public/expense/{token}/expenses", "POST"),
+    ("/api/v1/crm/public/expense/{token}/receipts/{expense_id}", "POST"),
+    # 影像紀錄
     ("/api/v1/crm/public/media-log/{token}", "GET"),
     ("/api/v1/crm/public/media-log/{token}/upload", "POST"),
     # 分塊上傳（>100MB 的檔過不了 Cloudflare 的單請求 body 上限）

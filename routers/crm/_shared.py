@@ -44,7 +44,7 @@ try:
                            CrmProjectCostLine, CrmCostLineTemplate,
                            CrmProjectCostGroup,
                            CrmProjectShowcase,
-                           ProjectMediaLog, ProjectMediaFile,
+                           ProjectMediaLog, ProjectMediaFile, CrmExpenseLink,
                            WEBSITE_TEAM_OVERRIDE_FIELDS)
     _HAS_DB = True
 except ImportError:
@@ -59,7 +59,7 @@ __all__ = [
     "CrmStaff", "CrmStaffPortfolio", "CrmProjectStaff",
     "CrmInvoice", "CrmPaymentRequest", "CrmCashEntry",
     "CrmProjectCostLine", "CrmCostLineTemplate", "CrmProjectCostGroup",
-    "CrmProjectShowcase", "ProjectMediaLog", "ProjectMediaFile",
+    "CrmProjectShowcase", "ProjectMediaLog", "ProjectMediaFile", "CrmExpenseLink",
     "WEBSITE_TEAM_OVERRIDE_FIELDS",
 ]
 

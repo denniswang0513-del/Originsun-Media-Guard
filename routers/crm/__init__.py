@@ -21,8 +21,20 @@ from . import briefs         # noqa: F401  提案的企劃書（多版；路徑�
 from . import proposal_quotes  # noqa: F401  提案的報價單分頁（上傳多版 + AI 分析；依賴 proposal_assets）
 from . import proposal_meetings  # noqa: F401  提案的會議記錄分頁（純人寫，無 AI）
 
-from ._shared import CRM_PREFIX, router, public_router  # noqa: F401,E402
+from fastapi import APIRouter  # noqa: E402
 
-# composition root：對外白名單在這裡收編回主 router —— master 掛一個 router 就
-# 有全部端點，URL 與拆分前完全相同；NAS 對外容器則只掛 public_router。
-router.include_router(public_router)
+from ._shared import CRM_PREFIX, public_router  # noqa: F401,E402
+from ._shared import router as guarded_router  # noqa: E402
+
+# composition root：master 掛這一個物件就有全部端點，URL 與拆分前完全相同；
+# NAS 對外容器只掛 public_router。
+#
+# 🔴 對外白名單**不能**用 `guarded_router.include_router(public_router)` 收進去：
+# `include_router` 會把父 router 的 `dependencies` 併給每一條被收編的路由，於是
+# `_crm_read_guard`（要登入）套到了 token 端點上 —— 那批的憑證**是 token**，
+# 本來就給沒有帳號的人用。實際後果：影像紀錄與雜支登記的公開頁在 master 上
+# 一律 401（在 NAS 那側才活著，因為那邊直接掛 public_router，所以沒人發現）。
+# 平行掛在一個沒有守衛的外殼上，兩邊行為才一致。
+router = APIRouter()
+router.include_router(public_router, prefix=CRM_PREFIX)
+router.include_router(guarded_router)

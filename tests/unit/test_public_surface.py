@@ -38,6 +38,13 @@ EXPECTED_API = {
     ("/api/v1/crm/public/media-log/{token}/upload/{upload_id}/finish", "POST"),
     ("/api/v1/crm/public/media-log/{token}/file/{file_id}", "GET"),
     ("/api/v1/crm/public/media-log/{token}/file/{file_id}", "DELETE"),
+    # 雜支登記（token 授權；現場外部人員沒有帳號，見 costs.py EXPENSE_LINK_SCOPE）
+    # 讀的那兩支只回這條連結範圍內的東西；金額欄由 MoneyRedactRoute 抹掉
+    # （匿名一律沒有 money_view → 看得到「哪個專案、哪一天」，看不到預算）。
+    ("/api/v1/crm/public/expense/{token}", "GET"),
+    ("/api/v1/crm/public/expense/{token}/expenses", "GET"),
+    ("/api/v1/crm/public/expense/{token}/expenses", "POST"),
+    ("/api/v1/crm/public/expense/{token}/receipts/{expense_id}", "POST"),
     # 提案公開共編頁（token 授權；客戶手上的 ?t= 連結）
     ("/api/v1/proposals/shared/{token}", "GET"),
     ("/api/v1/proposals/shared/{token}/deck", "GET"),

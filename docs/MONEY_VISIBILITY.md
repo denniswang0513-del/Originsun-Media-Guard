@@ -150,6 +150,30 @@ e2e `tests/e2e/test_project_page.py`：同一筆派工（3 天 × $8,000）分�
 「拍攝企劃＋專案管理但無 money_view」兩個 token 開同一頁 —— 前者看到日費/小計/
 合計，後者只看到人、職務、專案角色、天數、備註。
 
+## 6.5 雜支登記連結（token）— 2026-08-15
+
+8/14 的 `_crm_read_guard` 之後，手機雜支頁的 `/public/...` 端點要登入才打得到，
+而現場登記的是**沒有帳號**的外部場記／臨時人員。修法不是把端點改回匿名
+（master 經 cloudflared 對外，等於用「id 猜不到」當唯一防線），是發 **token**
+連結 —— 影像紀錄那套 `_mint_token_generic` 直接沿用。
+
+- 後台：`POST /crm/expense-links {kind, target_id}`（Lv3）。**冪等** —— 重複點
+  「複製連結」不會讓已發出去的失效；`rotate=true` 才換新（＝重置，舊的當場 401）。
+  `POST /crm/expense-links/{id}/enabled?enabled=false` 停用（該連結回 403）。
+- 現場：`/expense.html?t=` 與 `/group-expense.html?t=`，四支 token 端點掛
+  `public_router`（曝露面由 `test_public_surface` + `test_media_log_public_router`
+  兩處列舉釘住）。
+- **子表連結綁死那一天**：payload 塞別的 `cost_group_id` 會被忽略，否則一條連結
+  通吃整個專案。
+- **匿名＝沒有 `money_view`**，所以子表預算會被第二層抹掉：現場的人看得到
+  「哪個專案、哪一天、自己剛登記多少」，看不到預算。
+
+🔴 這批同時修好一個**沉默已久的架構 bug**：`router.include_router(public_router)`
+會把父 router 的 `dependencies` 併給每一條被收編的路由 —— 於是 `_crm_read_guard`
+套到了 token 端點上，**影像紀錄的公開頁在 master 上一直是 401**（在 NAS 那側才
+活著，因為那邊直接掛 `public_router`，所以沒人發現）。composition root 改成把
+兩者平行掛在一個沒有守衛的外殼上，兩邊行為才一致。
+
 ## 7. 測試（`tests/unit/test_money_visibility.py`）
 
 手寫清單守得住今天；真正要防的是「明天有人加了東西忘了表態」。所以三條網都
