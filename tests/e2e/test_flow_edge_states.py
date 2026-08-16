@@ -216,3 +216,52 @@ def test_no_refetch_when_the_caller_tears_the_host_down(page, real_server,
         }""", [e2e_admin_token, c["prop_id"]])
 
         assert at == 0, "host 都被拆掉了還去抓 /flow"
+
+
+def test_custom_items_can_be_added_and_removed(page, mount_flow, owned_project,
+                                               e2e_admin_token):
+    """自訂項（owner 2026-08-15：「裡頭的項目細節也是要可以新增刪除」）。
+
+    範本那五軌是全公司通用的，所以「這個案子額外要做的事」只能加在專案自己的
+    blob 裡。這條守三件事：加得出來、勾得動、刪得掉，而且**範本項不給刪**
+    （沒有最後那半，一顆手滑的 ✕ 會把全公司的骨架從這個案子上拿掉）。
+    """
+    c = owned_project
+    label = "補拍空景（e2e）"
+    host = mount_flow(c["project_id"], e2e_admin_token, host_id="edge-custom")
+    page.on("dialog", lambda d: (d.accept(label) if d.type == "prompt" else d.accept()))
+    try:
+        # 加：製作軌的「＋」
+        page.click(f'#{host} [data-add-track="prod"]')
+        page.wait_for_function(
+            """([h, t]) => document.getElementById(h)?.textContent.includes(t)""",
+            arg=[host, label], timeout=20000)
+
+        # 勾得動（自訂項是手動項）
+        item = page.query_selector(
+            f'#{host} .pflow-item.manual:not(.on)[data-check^="c_"]')
+        assert item, "自訂項沒有變成可勾的手動項"
+        key = item.get_attribute("data-check")
+        item.click()
+        page.wait_for_selector(f'#{host} [data-check="{key}"].on', timeout=20000)
+
+        # 🔴 範本項沒有 ✕（不然一顆手滑就把全公司的骨架拿掉）
+        assert page.eval_on_selector_all(
+            f'#{host} [data-del-item]',
+            "els => els.map(e => e.dataset.delItem)") == [key], "刪除鈕出現在範本項上"
+
+        # 刪
+        page.click(f'#{host} [data-del-item="{key}"]')
+        page.wait_for_function(
+            """([h, t]) => !document.getElementById(h)?.textContent.includes(t)""",
+            arg=[host, label], timeout=20000)
+    finally:
+        # 保險：測試中途炸掉時把殘留的自訂項清掉（只清自己加的）
+        fresh = HTTP.get(f"{c['base']}/api/v1/crm/projects/{c['project_id']}/flow",
+                         headers=c["h"]).json()
+        for t in fresh.get("tracks", []):
+            for it in t["items"]:
+                if it.get("custom") and it["label"] == label:
+                    HTTP.delete(
+                        f"{c['base']}/api/v1/crm/projects/{c['project_id']}"
+                        f"/flow/items/{it['key']}", headers=c["h"])

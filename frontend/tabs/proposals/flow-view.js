@@ -90,6 +90,18 @@ a.pflow-item::after, .pflow-item.nogo::after { content:'↗'; font-size:10px;
    已亮的燈維持原樣：對一個結束的案子，那些是歷史紀錄不是待辦。
    凍結只做視覺與互動，「去完成」不畫（見 _dest）；缺項橫幅則不必特別處理
    —— 終態沒有下一站，後端的閘門查詢自然就空了（core.project_flow.GATES）。 */
+/* 自訂項的「＋／✕」：平時很淡，滑到那一軌才明顯 —— 它們跟燈號並排，
+   太顯眼會蓋過真正要看的東西（哪一軌卡住） */
+.pflow-add, .pflow-x { font:inherit; font-size:11.5px; line-height:1;
+    border:1px dashed var(--pf-line); background:none; color:var(--pf-sub);
+    border-radius:6px; padding:4px 8px; cursor:pointer; opacity:.5;
+    transition:opacity .12s, color .12s, border-color .12s; }
+.pflow-x { border-style:solid; border-color:transparent; padding:4px 4px;
+    margin-left:-3px; }
+.pflow-track:hover .pflow-add, .pflow-track:hover .pflow-x,
+.pflow-add:focus-visible, .pflow-x:focus-visible { opacity:1; }
+.pflow-add:hover, .pflow-x:hover { color:#e03131; border-color:#e03131; }
+.pflow.frozen .pflow-add, .pflow.frozen .pflow-x { display:none; }
 .pflow.frozen .pflow-item { opacity:.5; }
 .pflow.frozen .pflow-item.on { opacity:.9; }
 .pflow.frozen .pflow-tname, .pflow.frozen .pflow-dot { filter:grayscale(.9); }
@@ -207,16 +219,24 @@ function _itemHtml(it, canCheck, color, ctx) {
     const attrs = clickable ? ` data-check="${esc(it.key)}" role="button" tabindex="0"`
                 : go ? _goAttrs(d.section, ctx.newTab) : '';
     const tip = _why(it, clickable) + (d ? `　→ ${_goTip(d)}` : '');
+    // 自訂項才給刪 —— 範本那五軌是全公司的骨架，不是這個案子的事
+    const del = (it.custom && canCheck)
+        ? `<button class="pflow-x" data-del-item="${esc(it.key)}"
+                   title="刪除這個自訂項">&#x2715;</button>` : '';
     return `<${tag} class="${cls}"${attrs} title="${esc(tip)}">`
-         + `${dot}${esc(it.label)}</${tag}>`;
+         + `${dot}${esc(it.label)}</${tag}>${del}`;
 }
 
 function _trackHtml(t, canCheck, ctx) {
     const color = TRACK_COLOR[t.key] || '#888';
     const items = t.items.map(i => _itemHtml(i, canCheck, color, ctx)).join('');
+    // 「＋」只在勾得動的人身上出現（同一道守衛：能勾就能加自己的項目）
+    const add = canCheck
+        ? `<button class="pflow-add" data-add-track="${esc(t.key)}"
+                   title="這個案子額外要做的事">＋</button>` : '';
     return `<div class="pflow-track">
         <div class="pflow-tname" style="color:${color}">${esc(t.label)}</div>
-        <div class="pflow-items">${items}</div>
+        <div class="pflow-items">${items}${add}</div>
         <div class="pflow-count">${t.done}/${t.total}</div>
     </div>`;
 }
@@ -434,11 +454,45 @@ async function _onHit(host, ev) {
         }
         return;
     }
+    // 自訂項：加／刪（同一道守衛 —— 能勾就能加自己的項目）
+    const add = ev.target.closest?.('[data-add-track]');
+    if (add && host.contains(add) && ev.type === 'click') {
+        ev.preventDefault();
+        return _addItem(host, add.dataset.addTrack);
+    }
+    const del = ev.target.closest?.('[data-del-item]');
+    if (del && host.contains(del) && ev.type === 'click') {
+        ev.preventDefault();
+        return _delItem(host, del.dataset.delItem);
+    }
     const el = ev.target.closest?.('[data-check]');
     if (!el || !host.contains(el)) return;
     if (ev.type === 'keydown' && ev.key !== 'Enter' && ev.key !== ' ') return;
     ev.preventDefault();
     await _toggleCheck(host, el);
+}
+
+/** 自訂項：加一條到這一軌。範本不動，只寫這個專案的 blob。 */
+async function _addItem(host, track) {
+    const label = (prompt('這個案子額外要做的事：', '') || '').trim();
+    if (!label) return;
+    await _writeItem(host, `/flow/items`, { method: 'POST', json: { track, label } },
+                     '新增失敗：');
+}
+
+async function _delItem(host, key) {
+    if (!confirm('刪除這個自訂項？')) return;
+    await _writeItem(host, `/flow/items/${encodeURIComponent(key)}`,
+                     { method: 'DELETE' }, '刪除失敗：');
+}
+
+/** 兩支自訂項寫入共用：打端點 → 拿回完整進度 → 重畫。 */
+async function _writeItem(host, path, opts, errPrefix) {
+    try {
+        const fresh = await tfetch(
+            `/api/v1/crm/projects/${encodeURIComponent(host.__flow.pid)}${path}`, opts);
+        if (host.isConnected) _paint(host, fresh);
+    } catch (e) { alert(errPrefix + (e.message || e)); }
 }
 
 async function _toggleCheck(host, el) {

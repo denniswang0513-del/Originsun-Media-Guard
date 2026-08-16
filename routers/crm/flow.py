@@ -26,6 +26,8 @@ CRM 的、資源就是 `crm_projects`，而同樣掛在那一列兩個 JSONB 欄
 """
 from __future__ import annotations
 
+import uuid
+
 from fastapi import Request
 
 from core import project_archive as pa
@@ -363,4 +365,33 @@ async def check_flow_item(project_id: str, request: Request):
                                    body.get("checked"), body.get("note"),
                                    who=_username(request),
                                    when=_now().strftime("%Y-%m-%d %H:%M")),
+        lambda s, p: _payload(s, p, auth=auth))
+
+
+@router.post("/projects/{project_id}/flow/items")
+async def add_flow_item(project_id: str, request: Request):
+    """加一個自訂項到某一軌：{track, label}。
+
+    範本那五軌是全公司通用的（§14.7 決策點 1），這支只動**這個專案**的 blob
+    —— 「這個案子額外要做的事」以前無處可放，而隔壁的歸檔清單早就有自訂項。
+    守衛與勾選同一道：能勾就能加自己的項目。
+    """
+    auth = _check_flow_check_auth(request)
+    body = await request.json()
+    return await _patch_project_json(
+        project_id, "flow_checks",
+        lambda cur: pf.add_custom(cur, body.get("track"), body.get("label"),
+                                  key_seed=uuid.uuid4().hex,
+                                  who=_username(request),
+                                  when=_now().strftime("%Y-%m-%d %H:%M")),
+        lambda s, p: _payload(s, p, auth=auth))
+
+
+@router.delete("/projects/{project_id}/flow/items/{key}")
+async def delete_flow_item(project_id: str, key: str, request: Request):
+    """刪一個自訂項（範本項不給刪 —— 那是全公司的骨架，不是這個案子的事）。"""
+    auth = _check_flow_check_auth(request)
+    return await _patch_project_json(
+        project_id, "flow_checks",
+        lambda cur: pf.remove_custom(cur, key),
         lambda s, p: _payload(s, p, auth=auth))

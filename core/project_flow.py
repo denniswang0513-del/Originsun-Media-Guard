@@ -71,6 +71,21 @@ AUTO_KEYS = frozenset(k for k, v in ITEMS.items() if v[2] == AUTO)
 
 MAX_NOTE = 500
 
+# ── 自訂項（owner 2026-08-15：「裡頭的項目細節也是要可以新增刪除」）────────
+#
+# 範本那五軌是全公司通用的（§14.7 決策點 1：v1 一套通用，用了再分化），但
+# 「這個案子額外要做的事」無處可放 —— 而隔壁的歸檔清單早就有「＋自訂項」，
+# 同一種東西兩種待遇。所以自訂項只加在**專案自己的** flow_checks blob 裡，
+# 範本不動。
+#
+# 🔴 放在 blob 的保留鍵底下而不是跟手動項平鋪：平鋪的話一個自訂項只要取名
+# 撞到未來的範本 key（例如有人加了叫 "shooting" 的自訂項，而範本後來也長出
+# 同名項），兩者就會互相覆蓋。分開放，命名空間永遠不會撞。
+CUSTOM_BUCKET = "_custom"
+MAX_CUSTOM = 20            # 每案上限：清單是拿來看的，不是拿來當待辦系統
+MAX_LABEL = 60
+TRACK_KEYS = frozenset(tk for tk, _lb, _items in TRACKS)
+
 # ── deep-link「去完成」目的地（規格 §14.4）──────────────────────────────
 # 未亮的燈要能帶人去做那件事，不然它只是一句抱怨。
 #
@@ -187,18 +202,82 @@ def _norm_manual(stored) -> dict:
     return out
 
 
+def _norm_custom(stored) -> dict:
+    """blob 裡的自訂項 → 乾淨 dict（壞資料、未知軌道一律丟掉）。"""
+    src = (stored or {}).get(CUSTOM_BUCKET) if isinstance(stored, dict) else None
+    out = {}
+    for key, row in (src or {}).items() if isinstance(src, dict) else ():
+        if not isinstance(row, dict) or row.get("track") not in TRACK_KEYS:
+            continue
+        label = str(row.get("label") or "").strip()[:MAX_LABEL]
+        if not label:
+            continue
+        out[str(key)[:40]] = {
+            "track": row["track"], "label": label,
+            "checked": bool(row.get("checked")),
+            "by": str(row.get("by") or "")[:64],
+            "at": str(row.get("at") or "")[:40],
+            "note": str(row.get("note") or "")[:MAX_NOTE],
+        }
+    return out
+
+
+def _rebuild(stored, manual=None, custom=None) -> dict:
+    """把手動項與自訂項寫回同一個 blob（兩者都要保住，改一邊不能弄丟另一邊）。"""
+    out = dict(_norm_manual(stored) if manual is None else manual)
+    cur_custom = _norm_custom(stored) if custom is None else custom
+    if cur_custom:
+        out[CUSTOM_BUCKET] = cur_custom
+    return out
+
+
 def apply_check(stored, key: str, checked, note, *, who: str, when: str):
-    """手動項單筆寫入 → (新的 dict, 錯誤訊息)。錯誤時 stored 原樣退回。"""
+    """手動項或自訂項單筆寫入 → (新的 dict, 錯誤訊息)。錯誤時 stored 原樣退回。"""
+    text = "" if note is None else str(note)
+    if len(text) > MAX_NOTE:
+        return stored, f"備註超過 {MAX_NOTE} 字上限"
+    custom = _norm_custom(stored)
+    if key in custom:
+        custom[key].update(checked=bool(checked), by=who, at=when, note=text)
+        return _rebuild(stored, custom=custom), ""
     if key not in ITEMS:
         return stored, "未知的項目"
     if ITEMS[key][2] != MANUAL:
         return stored, "這是自動訊號，不能手動勾（它由資料決定）"
-    text = "" if note is None else str(note)
-    if len(text) > MAX_NOTE:
-        return stored, f"備註超過 {MAX_NOTE} 字上限"
-    cur = _norm_manual(stored)
-    cur[key] = {"checked": bool(checked), "by": who, "at": when, "note": text}
-    return cur, ""
+    manual = _norm_manual(stored)
+    manual[key] = {"checked": bool(checked), "by": who, "at": when, "note": text}
+    return _rebuild(stored, manual=manual), ""
+
+
+def add_custom(stored, track: str, label, *, key_seed: str, who: str, when: str):
+    """加一個自訂項到某一軌 → (新的 dict, 錯誤訊息)。
+
+    `key_seed` 由呼叫端給（uuid），與範本 key 不同命名空間 —— 見 CUSTOM_BUCKET。
+    """
+    if track not in TRACK_KEYS:
+        return stored, "未知的軌道"
+    text = str(label or "").strip()
+    if not text:
+        return stored, "請填項目名稱"
+    if len(text) > MAX_LABEL:
+        return stored, f"項目名稱超過 {MAX_LABEL} 字上限"
+    custom = _norm_custom(stored)
+    if len(custom) >= MAX_CUSTOM:
+        return stored, f"自訂項已達上限 {MAX_CUSTOM} 個"
+    custom[f"c_{key_seed[:16]}"] = {
+        "track": track, "label": text, "checked": False,
+        "by": who, "at": when, "note": "",
+    }
+    return _rebuild(stored, custom=custom), ""
+
+
+def remove_custom(stored, key: str):
+    """刪一個自訂項 → (新的 dict, 錯誤訊息)。範本項不給刪（那是全公司的）。"""
+    custom = _norm_custom(stored)
+    if key not in custom:
+        return stored, ("範本項目不能刪除" if key in ITEMS else "找不到這個自訂項")
+    custom.pop(key)
+    return _rebuild(stored, custom=custom), ""
 
 
 def missing_facts(facts: dict) -> tuple:
@@ -227,6 +306,7 @@ def build(facts: dict, stored_manual=None, detail: dict = None) -> dict:
     facts = facts or {}
     detail_map = detail or {}
     manual = _norm_manual(stored_manual)
+    custom = _norm_custom(stored_manual)
 
     tracks = []
     for tk, tlabel, items in TRACKS:
@@ -251,6 +331,15 @@ def build(facts: dict, stored_manual=None, detail: dict = None) -> dict:
                 if row["state"] == OFF:
                     row["dest"] = ITEM_DEST[ik]
             rows.append(row)
+        # 自訂項排在範本項之後 —— 範本是骨架，這個案子額外要做的事跟在後面。
+        # `custom=True` 讓前端知道哪幾列可以刪（範本項不給刪）。
+        for ck, c in custom.items():
+            if c["track"] != tk:
+                continue
+            rows.append({"key": ck, "label": c["label"], "kind": MANUAL,
+                         "hint": "這個專案的自訂項", "custom": True,
+                         "state": ON if c["checked"] else OFF,
+                         "by": c["by"], "at": c["at"], "note": c["note"]})
         tracks.append({
             "key": tk, "label": tlabel, "items": rows,
             "done": sum(1 for r in rows if r["state"] == ON),

@@ -9,6 +9,11 @@
 from core import project_flow as pf
 
 
+def _track(built, key):
+    """build() 出來的某一軌 —— 自訂項那組測試共用。"""
+    return next(t for t in built["tracks"] if t["key"] == key)
+
+
 class TestTemplate:
     def test_item_keys_are_globally_unique(self):
         """item_key 全域唯一是資料契約 —— 手動勾選用它當 DB 的鍵。"""
@@ -246,3 +251,72 @@ class TestStageView:
     def test_unknown_status_does_not_crash(self):
         v = pf.stage_view("")
         assert v["index"] == -1 and v["next"] == ""
+
+
+class TestCustomItems:
+    """自訂項（owner 2026-08-15：「裡頭的項目細節也是要可以新增刪除」）。
+
+    範本那五軌是全公司通用的；「這個案子額外要做的事」放專案自己的 blob。
+    """
+
+    def _added(self, label="補拍空景", track="prod", stored=None):
+        return pf.add_custom(stored or {}, track, label,
+                             key_seed="abc123", who="me", when="2026-08-15 10:00")
+
+    def test_add_then_it_shows_up_in_that_track(self):
+        cur, err = self._added()
+        assert err == ""
+        rows = _track(pf.build({}, cur), "prod")["items"]
+        mine = [r for r in rows if r.get("custom")]
+        assert len(mine) == 1
+        assert mine[0]["label"] == "補拍空景" and mine[0]["state"] == pf.OFF
+        # 範本項一個都沒少（自訂項是加在後面，不是取代）
+        assert len(rows) == len(pf.TRACKS[2][2]) + 1
+
+    def test_custom_can_be_checked_and_counts_toward_the_track(self):
+        cur, _ = self._added()
+        key = next(iter(cur[pf.CUSTOM_BUCKET]))
+        cur, err = pf.apply_check(cur, key, True, "已補", who="me", when="now")
+        assert err == ""
+        t = _track(pf.build({}, cur), "prod")
+        assert [r for r in t["items"] if r["key"] == key][0]["state"] == pf.ON
+        assert t["done"] >= 1
+
+    def test_removing_keeps_the_manual_checks(self):
+        """🔴 兩者住同一個 blob —— 刪自訂項不能把手動勾選一起弄丟。"""
+        cur, _ = pf.apply_check({}, "shooting", True, "", who="me", when="now")
+        cur, _ = pf.add_custom(cur, "prod", "補拍", key_seed="x1",
+                               who="me", when="now")
+        key = next(iter(cur[pf.CUSTOM_BUCKET]))
+        cur, err = pf.remove_custom(cur, key)
+        assert err == ""
+        rows = {r["key"]: r for r in _track(pf.build({}, cur), "prod")["items"]}
+        assert rows["shooting"]["state"] == pf.ON, "刪自訂項把手動勾選弄丟了"
+        assert not any(r.get("custom") for r in rows.values())
+
+    def test_template_items_cannot_be_removed(self):
+        cur, _ = self._added()
+        _, err = pf.remove_custom(cur, "shooting")
+        assert "不能刪除" in err
+
+    def test_bad_input_is_refused(self):
+        assert self._added(track="nope")[1] == "未知的軌道"
+        assert self._added(label="   ")[1] == "請填項目名稱"
+        assert "上限" in self._added(label="x" * 200)[1]
+
+    def test_cap_per_project(self):
+        cur = {}
+        for i in range(pf.MAX_CUSTOM):
+            cur, err = pf.add_custom(cur, "prod", f"項目{i}", key_seed=f"k{i}",
+                                     who="me", when="now")
+            assert err == ""
+        _, err = pf.add_custom(cur, "prod", "再一個", key_seed="over",
+                               who="me", when="now")
+        assert "上限" in err
+
+    def test_garbage_in_the_blob_is_dropped_not_crashed(self):
+        for junk in ({pf.CUSTOM_BUCKET: "x"}, {pf.CUSTOM_BUCKET: {"a": 1}},
+                     {pf.CUSTOM_BUCKET: {"a": {"track": "nope", "label": "x"}}},
+                     {pf.CUSTOM_BUCKET: {"a": {"track": "prod", "label": "  "}}}):
+            assert not any(r.get("custom")
+                           for t in pf.build({}, junk)["tracks"] for r in t["items"])
