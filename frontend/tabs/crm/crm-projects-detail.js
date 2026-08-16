@@ -274,10 +274,13 @@ function renderDetail(project) {
     const _title = document.getElementById('proj-detail-title');
     _title.textContent = project.name;
     // 「開啟專案頁 ↗」—— 製作期的工作面（進度五軌／創意發想／企劃書／報價單／
-    // 會議記錄／資料夾）在那一頁，而且它是白底獨立頁、網址可以直接給同事。
-    // 這裡**不重做**那些分頁，只給一條路過去（見 docs/PROPOSAL_PLANNER.md
-    // §15：CRM 這邊收斂成「清單 + 錢」）。開新分頁：CRM 詳情面板裡常有
-    // 編到一半的成本列，原地導覽會把它帶走。
+    // 會議記錄／資料夾／人員配置）在那一頁，而且它是白底獨立頁、網址可以直接
+    // 給同事。掛在標題列而不是某個分頁裡：不管你正在看哪一格，出口都在同一個
+    // 位置。開新分頁：CRM 詳情面板裡常有編到一半的成本列，原地導覽會把它帶走。
+    //
+    // owner 2026-08-15 選 B（docs/PROPOSAL_PLANNER.md §15.5）：CRM **保留**
+    // 全部入口，只是共用的分頁一律同一份元件（人員配置／完稿結案／提案企劃
+    // 都是），不各寫一份。所以這顆是「換個工作面」而不是「去看被搬走的東西」。
     const _go = document.createElement('a');
     _go.className = 'crm-btn crm-btn-secondary crm-btn-sm';
     _go.style.cssText = 'margin-left:10px;font-size:10px;padding:2px 8px;';
