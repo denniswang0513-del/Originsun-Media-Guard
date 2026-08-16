@@ -60,8 +60,11 @@ def pg(plan_page, case):
     是進不去提案庫 section 的（這也是 mount_flow 當初改成直接 import 子視圖
     模組的同一個理由）。兩個清單畫的是同一支 `flowCellsHtml`，接線那半在
     這裡驗得到；後台那半的差異只有「哪個元素放格子」。
+
+    ⚠️ `?view=proposals`：2026-08-15 起這一頁沒帶參數落在**專案**清單
+    （主鍵換成專案後的落地畫面），提案清單移到這個切換底下。
     """
-    return plan_page(wait="#list-host .prop-row")
+    return plan_page("?view=proposals", wait="#list-host .prop-row")
 
 
 def test_list_paints_cells(pg, case):

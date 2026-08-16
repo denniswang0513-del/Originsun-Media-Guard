@@ -60,6 +60,9 @@
   .list-head { display: flex; align-items: baseline; gap: 14px; margin: 8px 0 18px; }
   .list-head h1 { font-size: 20px; font-weight: 300; letter-spacing: 0.1em; margin: 0; }
   .list-head .hint { font-size: 12px; color: var(--sub); }
+  /* `.grow` 原本只定義在 .list-tools 底下；專案／提案兩份清單的標題列也要用它
+     把右邊那顆切換鈕推到底 */
+  .list-head .grow { flex: 1; }
   /* 外框在 .prop-item 上：列本身是 <a>，而「專案」鈕是它的兄弟（button 放進
      a 裡是無效 HTML）。兩者並排，框住的是整組。 */
   .prop-item { display: flex; align-items: stretch;
@@ -335,9 +338,22 @@
     </div>
   </div>
 
-  <!-- 清單 -->
+  <!-- 專案清單（沒帶參數時的落地畫面）-->
+  <div id="projlist-view" style="display:none;">
+    <div class="list-head">
+      <h1>專案管理</h1>
+      <span class="hint">點一筆進那個案子的專案頁（進度、創意發想、企劃書、
+        報價單、會議記錄、人員配置、完稿結案）。</span>
+      <span class="grow"></span>
+      <button class="btn-ghost" id="to-proposals">提案清單 ↗</button>
+    </div>
+    <div id="projlist-host"><div class="state-msg">載入中…</div></div>
+  </div>
+
+  <!-- 提案清單 -->
   <div id="list-view" style="display:none;">
     <div class="list-head">
+      <button class="btn-ghost" onclick="location.href = location.pathname">← 專案</button>
       <h1>提案清單</h1>
       <span class="hint">點一筆進創意發想矩陣；標「發想中」的已有內容。</span>
     </div>
@@ -965,7 +981,7 @@ async function _mountFolder() {
 }
 
 function _show(view) {
-    for (const v of ["login-view", "noperm-view", "list-view", "plan-view"]) $(v).style.display = (v === view ? "block" : "none");
+    for (const v of ["login-view", "noperm-view", "projlist-view", "list-view", "plan-view"]) $(v).style.display = (v === view ? "block" : "none");
     $("btn-logout").style.display = (view === "login-view") ? "none" : "";
 }
 function showLogin(msg) {
@@ -1032,6 +1048,23 @@ let _rowsFiltered = false;             // 這批是不是篩過的（決定空�
 /** 清單載入/查詢失敗的訊息（兩個 catch 共用一份字串）。 */
 const _listErr = (e) => '<div class="state-msg" style="color:var(--red);">清單載入失敗：'
     + escText(emsg(e)) + "</div>";
+
+/** 專案清單 —— 沒帶參數時的落地畫面（owner 2026-08-15 選 A）。
+ *
+ *  🔴 一個金額都不畫，理由見 tabs/proposals/project-list.js 檔頭。
+ */
+async function _loadProjectList() {
+    _show("projlist-view");
+    try {
+        const mod = await importRetryish("/tabs/proposals/project-list.js");
+        await mod.renderProjectList($("projlist-host"), {
+            fetcher: _crmFetch,
+            onOpen: (id) => { location.search = "?id=" + encodeURIComponent(id); },
+        });
+    } catch (e) {
+        $("projlist-host").innerHTML = _listErr(e);
+    }
+}
 
 async function _loadList() {
     _show("list-view");
@@ -1756,9 +1789,14 @@ async function boot() {
         _propConst();
         _planMods = [import("/tabs/proposals/prop-actions.js"),
                      importRetryish("/tabs/proposals/plan-matrix.js")];
-    } else {
+    } else if (q.get("view") === "proposals") {
         _listMod = importRetryish("/tabs/proposals/prop-list.js");
+    } else {
+        importRetryish("/tabs/proposals/project-list.js");   // 預熱：落地就是它
     }
+    $("to-proposals").addEventListener("click", () => {
+        location.search = "?view=proposals";
+    });
     let me;
     try {
         const r = await mfetch("/api/v1/auth/me");
@@ -1774,7 +1812,10 @@ async function boot() {
     if (!isAdmin && !["preprod_proposals", "preprod_plan", "crm_projects"].some(m => mods.includes(m))) { _show("noperm-view"); return; }
     if (projId) { _loadProject(projId); }
     else if (pid) { _loadPlan(pid); }
-    else { _loadList(); }
+    // 沒帶參數 → 專案清單（這一頁的主鍵是專案）。提案清單移到 `?view=proposals`，
+    // 由清單頁上那顆「提案清單 ↗」進去 —— owner 2026-08-15 選 A。
+    else if (q.get("view") === "proposals") { _loadList(); }
+    else { _loadProjectList(); }
 }
 
 boot();

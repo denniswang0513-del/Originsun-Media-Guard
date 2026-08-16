@@ -149,6 +149,42 @@ def test_staff_tab_hides_money_without_grant(plan_page, case, staffed, user_toke
         assert money not in txt, f"沒有金額權卻看到「{money}」：{txt[:200]}"
 
 
+# ── 落地畫面：沒帶參數＝專案清單（owner 2026-08-15 選 A）─────
+def test_bare_url_lands_on_the_project_list(plan_page, case):
+    """🔴 這一頁的主鍵是專案 —— 沒帶參數就該列專案，不是提案。
+
+    改名之前（也就是網址還叫 proposal-plan 的時候）落在提案清單是合理的；
+    改完之後還落在那裡，就變成「網址說專案、內容說提案」。
+
+    順帶守金額：這頁的閘門比 CRM 寬（拍攝企劃的人進得來），而
+    `GET /crm/projects` 會回 contract_amount —— 清單一個金額欄都不該開。
+    """
+    pg = plan_page("", wait="#projlist-view .pl-row")
+    assert pg.locator("#projlist-view").is_visible()
+    assert pg.locator("#list-view").is_visible() is False, "沒帶參數卻落在提案清單"
+    body = pg.locator("#projlist-view").text_content()
+    assert "$" not in body, f"專案清單畫了金額：{body[:150]}"
+    pg.close()
+
+
+def test_clicking_a_project_opens_its_project_page(plan_page, case):
+    """點一列 → 進那個案子的專案頁（?id=），標頭是專案名。"""
+    pg = plan_page("", wait=f'#projlist-view .pl-row[data-id="{case["project_id"]}"]')
+    pg.click(f'#projlist-view .pl-row[data-id="{case["project_id"]}"]')
+    pg.wait_for_selector("#plan-side .side-tab", timeout=30000)
+    assert f"id={case['project_id']}" in pg.url
+    assert pg.locator("#proj-stage").is_visible(), "沒進到專案模式"
+    pg.close()
+
+
+def test_proposal_list_moved_behind_a_toggle(plan_page, case):
+    """提案清單沒有消失，改走 `?view=proposals`（清單頁上那顆切換鈕）。"""
+    pg = plan_page("?view=proposals", wait="#list-view")
+    assert pg.locator("#list-view").is_visible()
+    assert pg.locator("#projlist-view").is_visible() is False
+    pg.close()
+
+
 # ── B：一專案 N 提案 ────────────────────────────────────────
 def test_switcher_appears_only_with_multiple_proposals(plan_page, case):
     """單筆時不顯示切換器；掛第二筆上去就出現，且兩筆都在選項裡。"""

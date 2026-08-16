@@ -121,7 +121,7 @@ def test_proposal_list(real_server, phone, e2e_admin_token, proposal):
     pg = phone.new_page()
     try:
         _login(pg, real_server["base_url"], e2e_admin_token)
-        pg.goto(real_server["base_url"] + "/project.html", timeout=60000)
+        pg.goto(real_server["base_url"] + "/project.html?view=proposals", timeout=60000)
         pg.wait_for_selector(".prop-row", timeout=30000)
         pg.wait_for_timeout(600)
         _assert_screen(pg, "提案清單")
@@ -171,7 +171,7 @@ def test_dialogs_stay_in_viewport(real_server, phone, e2e_admin_token, proposal)
     pg = phone.new_page()
     try:
         _login(pg, real_server["base_url"], e2e_admin_token)
-        pg.goto(real_server["base_url"] + "/project.html", timeout=60000)
+        pg.goto(real_server["base_url"] + "/project.html?view=proposals", timeout=60000)
         pg.wait_for_selector(".prop-row", timeout=30000)
         for btn, sel, label in [("#btn-folders", ".pf, .pdlg", "資產資料夾"),
                                 ("#btn-new", ".pdlg", "新提案")]:
