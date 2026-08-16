@@ -51,6 +51,18 @@ select:focus, input:focus { border-color: #3b82f6; }
   <div id="loading" class="loading">載入中...</div>
   <div id="fatal" class="fatal" style="display:none;"></div>
 
+  <!-- 登入閘：這頁的 API 自 2026-08-14 的 `_crm_read_guard` 起需要登入
+       （CRM 是商務資料）。原本裸 fetch → 整頁停在「載入中」。 -->
+  <div id="login-card" class="card" style="display:none;">
+    <div style="margin-bottom:10px;font-size:14px;">這個連結需要登入才能使用</div>
+    <input id="lg-user" placeholder="帳號" autocomplete="username"
+           style="width:100%;padding:10px;margin-bottom:8px;box-sizing:border-box;">
+    <input id="lg-pass" type="password" placeholder="密碼" autocomplete="current-password"
+           style="width:100%;padding:10px;margin-bottom:8px;box-sizing:border-box;">
+    <div id="lg-err" style="color:#dc2626;font-size:13px;display:none;margin-bottom:8px;"></div>
+    <button class="btn-submit" style="display:block;" onclick="_login()">登入</button>
+  </div>
+
   <div id="group-info" class="card" style="display:none;">
     <div class="info-row"><span class="info-label">專案</span><span class="info-value" id="gi-project">—</span></div>
     <div class="info-row"><span class="info-label">子表</span><span class="info-value" id="gi-group">—</span></div>
@@ -102,6 +114,38 @@ const params = new URLSearchParams(location.search);
 const groupId = params.get('id');
 let _group = null;
 let _project = null;
+let _token = localStorage.getItem('auth_token') || '';
+
+/** 這頁所有 API 都帶 token —— `/public/...` 端點需要登入（見上方登入閘註解）。 */
+function _headers(json = true) {
+  const h = json ? { 'Content-Type': 'application/json' } : {};
+  if (_token) h['Authorization'] = 'Bearer ' + _token;
+  return h;
+}
+
+function _needLogin() {
+  document.getElementById('loading').style.display = 'none';
+  document.getElementById('login-card').style.display = '';
+}
+
+async function _login() {
+  const err = document.getElementById('lg-err');
+  try {
+    const r = await fetch(location.origin + '/api/v1/auth/login', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username: document.getElementById('lg-user').value,
+                             password: document.getElementById('lg-pass').value }),
+    });
+    const d = await r.json();
+    if (!d.token) throw new Error(d.detail || '登入失敗');
+    _token = d.token;
+    localStorage.setItem('auth_token', _token);
+    location.reload();
+  } catch (e) {
+    err.textContent = e.message || '連線失敗';
+    err.style.display = '';
+  }
+}
 
 function _fmtMoney(n) {
   return '$' + (n || 0).toLocaleString('zh-TW');
@@ -115,7 +159,9 @@ async function _init() {
     return;
   }
   try {
-    const r = await fetch(BASE + '/public/cost-groups/' + groupId + '/info');
+    const r = await fetch(BASE + '/public/cost-groups/' + groupId + '/info',
+                          { headers: _headers() });
+    if (r.status === 401) { _needLogin(); return; }
     if (!r.ok) throw new Error((await r.json().catch(() => ({}))).detail || '找不到此子表');
     const data = await r.json();
     _group = data.group;
@@ -134,10 +180,8 @@ async function _init() {
     // 鍵在但沒值＝真的未設。原本兩者都印「未設」，等於對現場的人說謊。
     // 沒有金額檢視權時後端會把 misc_budget_amount 的鍵刪掉（core/money.py）。
     //
-    // ⚠️ 這頁目前**整個打不開**：它裸 fetch、不帶 Authorization，而 CRM 的
-    // `_crm_read_guard`（2026-08-14 補的匿名防線）讓那些 /public/ 端點一律 401。
-    // 那是先於金額授權的既有問題（advance-expense.html 同病），修好之後這段
-    // 才會真的被走到。
+    // 實測（dev，2026-08-15）：一般員工看不到這兩個鍵、管理員看得到 —— 所以
+    // 「鍵不在」在這頁是**常態**，不是例外狀況。
     const mbRow = document.getElementById('gi-misc-budget').parentElement;
     const mbEl = document.getElementById('gi-misc-budget');
     if (!('misc_budget_amount' in _group)) {
@@ -181,7 +225,7 @@ async function _submit() {
   try {
     const r = await fetch(BASE + '/public/cost-groups/' + groupId + '/expenses', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: _headers(),
       body: JSON.stringify({
         category: document.getElementById('f-category').value,
         sub_item: document.getElementById('f-sub-item').value,
@@ -200,7 +244,7 @@ async function _submit() {
       const form = new FormData();
       form.append('file', file);
       await fetch(BASE + '/public/cost-groups/' + groupId + '/receipts/' + expenseId, {
-        method: 'POST', body: form,
+        method: 'POST', headers: _headers(false), body: form,
       });
     }
 
@@ -223,7 +267,8 @@ async function _submit() {
 
 async function _loadHistory() {
   try {
-    const r = await fetch(BASE + '/public/cost-groups/' + groupId + '/expenses');
+    const r = await fetch(BASE + '/public/cost-groups/' + groupId + '/expenses',
+                          { headers: _headers() });
     if (!r.ok) return;
     const data = await r.json();
     const expenses = data.expenses || [];

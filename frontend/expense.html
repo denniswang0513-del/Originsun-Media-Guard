@@ -122,6 +122,15 @@ function _headers() {
   return h;
 }
 
+/** 需要登入：把畫面換成登入表單（登入成功後 _login() 會重跑 _init）。 */
+function _needLogin() {
+  document.getElementById('main-section').style.display = 'none';
+  document.getElementById('login-section').style.display = '';
+  const err = document.getElementById('login-error');
+  err.textContent = '這個連結需要登入才能使用';
+  err.style.display = '';
+}
+
 async function _init() {
   // 公開模式：?project=PROJECT_ID
   const params = new URLSearchParams(location.search);
@@ -130,7 +139,12 @@ async function _init() {
     _publicMode = true;
     _projectId = pubProjectId;
     try {
-      const r = await fetch(BASE + '/public/projects/' + pubProjectId + '/info');
+      // 🔴 帶 token：這批 `/public/...` 端點自 2026-08-14 的 `_crm_read_guard`
+      // 起需要登入（CRM 是商務資料），裸 fetch 會 401 —— 症狀是下拉印
+      // 「無法載入專案」、表單還在、送出才失敗。改成 401 就請人登入。
+      const r = await fetch(BASE + '/public/projects/' + pubProjectId + '/info',
+                            { headers: _headers() });
+      if (r.status === 401) { _needLogin(); return; }
       if (!r.ok) throw new Error();
       const info = await r.json();
       const sel = document.getElementById('exp-project');
@@ -255,7 +269,8 @@ async function _submit() {
       : BASE + '/projects/' + _projectId + '/expenses';
     const groupId = document.getElementById('exp-group').value || null;
     const r = await fetch(expUrl, {
-      method: 'POST', headers: _publicMode ? { 'Content-Type': 'application/json' } : _headers(),
+      // 公開模式也要帶 token —— `/public/...` 端點自 2026-08-14 起需要登入
+      method: 'POST', headers: _headers(),
       body: JSON.stringify({
         category: document.getElementById('exp-category').value,
         sub_item: document.getElementById('exp-sub-item').value,
@@ -278,7 +293,7 @@ async function _submit() {
         ? BASE + '/public/projects/' + _projectId + '/receipts/' + expenseId
         : BASE + '/projects/' + _projectId + '/receipts/' + expenseId;
       await fetch(receiptUrl, {
-        method: 'POST', headers: _publicMode ? {} : { 'Authorization': 'Bearer ' + _token }, body: form,
+        method: 'POST', headers: { 'Authorization': 'Bearer ' + _token }, body: form,
       });
     }
 
@@ -306,7 +321,7 @@ async function _loadHistory() {
     const histUrl = _publicMode
       ? BASE + '/public/projects/' + _projectId + '/expenses'
       : BASE + '/projects/' + _projectId + '/expenses';
-    const r = await fetch(histUrl, { headers: _publicMode ? {} : _headers() });
+    const r = await fetch(histUrl, { headers: _headers() });
     const data = await r.json();
     const list = document.getElementById('history-list');
     const exps = (data.expenses || []).reverse().slice(0, 10);

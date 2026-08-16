@@ -48,6 +48,18 @@ select:focus, input:focus { border-color: #3b82f6; }
 
   <div id="loading" class="loading">載入中...</div>
 
+  <!-- 登入閘：這頁打的是預支款端點，自 2026-08-14 的 `_crm_read_guard` 起需要
+       登入，且預支款清單屬於金額（money_view）。原本裸 fetch → 停在「載入中」。 -->
+  <div id="login-card" class="card" style="display:none;">
+    <div id="lg-why" style="margin-bottom:10px;font-size:14px;">這個連結需要登入才能使用</div>
+    <input id="lg-user" placeholder="帳號" autocomplete="username"
+           style="width:100%;padding:10px;margin-bottom:8px;box-sizing:border-box;">
+    <input id="lg-pass" type="password" placeholder="密碼" autocomplete="current-password"
+           style="width:100%;padding:10px;margin-bottom:8px;box-sizing:border-box;">
+    <div id="lg-err" style="color:#dc2626;font-size:13px;display:none;margin-bottom:8px;"></div>
+    <button class="btn-submit" style="display:block;" onclick="_login()">登入</button>
+  </div>
+
   <!-- Advance Info -->
   <div id="advance-info" class="card" style="display:none;">
     <div class="info-row"><span class="info-label">專案</span><span class="info-value" id="adv-project"></span></div>
@@ -101,6 +113,43 @@ const advanceId = params.get('id');
 let _advance = null;
 let _projectId = '';
 let _payeeName = '';
+let _token = localStorage.getItem('auth_token') || '';
+
+function _headers(json = true) {
+  const h = json ? { 'Content-Type': 'application/json' } : {};
+  if (_token) h['Authorization'] = 'Bearer ' + _token;
+  return h;
+}
+
+/** 401＝沒登入、403＝登入了但沒有金額檢視權（預支款是錢）。兩種都要說清楚，
+ *  不然畫面只會停在「載入中」。 */
+function _needLogin(status) {
+  document.getElementById('loading').style.display = 'none';
+  document.getElementById('login-card').style.display = '';
+  if (status === 403) {
+    document.getElementById('lg-why').textContent =
+      '這個帳號沒有金額檢視權限（預支款屬於金額）—— 請管理員開通，或換一個有權限的帳號登入';
+  }
+}
+
+async function _login() {
+  const err = document.getElementById('lg-err');
+  try {
+    const r = await fetch(location.origin + '/api/v1/auth/login', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username: document.getElementById('lg-user').value,
+                             password: document.getElementById('lg-pass').value }),
+    });
+    const d = await r.json();
+    if (!d.token) throw new Error(d.detail || '登入失敗');
+    _token = d.token;
+    localStorage.setItem('auth_token', _token);
+    location.reload();
+  } catch (e) {
+    err.textContent = e.message || '連線失敗';
+    err.style.display = '';
+  }
+}
 
 async function _init() {
   if (!advanceId) {
@@ -109,14 +158,16 @@ async function _init() {
   }
   try {
     // Fetch advance info
-    const r = await fetch(BASE + '/payments/' + advanceId);
+    const r = await fetch(BASE + '/payments/' + advanceId, { headers: _headers() });
+    if (r.status === 401 || r.status === 403) { _needLogin(r.status); return; }
     if (!r.ok) throw new Error('找不到預支款');
     _advance = await r.json();
     _projectId = _advance.project_id;
     _payeeName = _advance.payee_name;
 
     // Fetch advance summary
-    const ar = await fetch(BASE + '/payments/advances?returned=-1');
+    const ar = await fetch(BASE + '/payments/advances?returned=-1',
+                           { headers: _headers() });
     const advData = await ar.json();
     const adv = (advData.advances || []).find(a => a.id === advanceId);
 
@@ -161,7 +212,7 @@ async function _submit() {
   try {
     const r = await fetch(BASE + '/advance/' + advanceId + '/expenses', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: _headers(),
       body: JSON.stringify({
         category: document.getElementById('f-category').value,
         sub_item: document.getElementById('f-sub-item').value,
@@ -180,7 +231,8 @@ async function _submit() {
     if (file && expenseId) {
       const form = new FormData();
       form.append('file', file);
-      await fetch(BASE + '/project-expenses/' + expenseId + '/receipt', { method: 'POST', body: form });
+      await fetch(BASE + '/project-expenses/' + expenseId + '/receipt',
+                  { method: 'POST', headers: _headers(false), body: form });
     }
 
     _showMsg('✓ 已送出 · 可繼續登記下一筆', false);
@@ -203,7 +255,8 @@ async function _submit() {
 async function _loadHistory() {
   if (!_projectId) return;
   try {
-    const r = await fetch(BASE + '/projects/' + _projectId + '/expenses');
+    const r = await fetch(BASE + '/projects/' + _projectId + '/expenses',
+                          { headers: _headers() });
     const data = await r.json();
     const expenses = (data.expenses || []).filter(e => e.payee === _payeeName);
     const list = document.getElementById('history-list');
