@@ -168,6 +168,37 @@ def test_bare_url_lands_on_one_merged_list(plan_page, case):
     pg.close()
 
 
+def test_every_row_lines_up(plan_page, case):
+    """🔴 逐欄對齊 —— 有提案／沒提案兩種列不准長得不一樣寬。
+
+    合併之後才會出現的歪法：有提案的列在 `.prop-row` 右邊多掛兩顆按鈕，
+    `.prop-item` 是 flex，於是那些列的 `.prop-row` 比較窄；寬度差被標題欄的
+    `1fr` 吸收，右邊每一欄的起點就逐列漂移。肉眼看是「排版沒對齊」，量起來
+    是 row 寬度不相等 —— 所以這條量的是寬度與欄位起點，不是截圖。
+    """
+    pg = plan_page("", wait="#list-host a.prop-row")
+    # 🔴 防空過：清單裡必須**同時**有「有提案」與「沒提案」兩種列，否則下面
+    # 那些斷言在只有一種列的資料上會無條件通過 —— 一張看起來很綠的空網子。
+    kinds = pg.eval_on_selector_all(
+        "#list-host .prop-item",
+        "els => els.map(e => !!e.querySelector('.prop-proj'))")
+    assert True in kinds and False in kinds, \
+        f"清單只有一種列（{kinds[:5]}…），這條測不到對齊問題"
+
+    box = pg.eval_on_selector_all(
+        "#list-host a.prop-row",
+        "els => els.map(e => Math.round(e.getBoundingClientRect().width))")
+    assert len(set(box)) == 1, f"各列寬度不一致（歪的來源）：{sorted(set(box))}"
+
+    # 抽三欄驗起點：標題後的每一欄都必須在同一個 x（空欄也要佔位）
+    for col in (".c", ".st", ".flow"):
+        xs = pg.eval_on_selector_all(
+            f"#list-host a.prop-row {col}",
+            "els => els.map(e => Math.round(e.getBoundingClientRect().left))")
+        assert len(set(xs)) == 1, f"{col} 欄逐列漂移：{sorted(set(xs))[:6]}"
+    pg.close()
+
+
 def test_clicking_a_row_opens_that_project(plan_page, case):
     """點一列 → 進那個案子的專案頁（?id=）。"""
     sel = f'#list-host a.prop-row[href="?id={case["project_id"]}"]'

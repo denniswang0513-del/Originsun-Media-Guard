@@ -90,6 +90,12 @@
   .prop-row .flow { min-width: 0; overflow: hidden; }
   .prop-row:focus-visible { outline: 2px solid var(--red); outline-offset: -2px; }
   .prop-row:hover { background: #fafafa; }
+  /* 🔴 尾部動作區**永遠佔位**（沒有提案的列裡面是空的）。
+     少了它，有提案／沒提案兩種列的 .prop-row 寬度不一樣 —— 而寬度差會被
+     標題欄的 `1fr` 吸收，於是右邊每一欄的起點逐列漂移，整張清單看起來是歪的。
+     這正是專案與提案清單合併之後才出現的症狀：合併前每一列都有那兩顆。 */
+  .prop-actions { flex: none; width: 118px; display: flex;
+    align-items: center; justify-content: flex-end; }
   /* 平時像文字，hover 才顯出可按 —— 清單合併後它是「創意發想」直達鍵
      （合併前是「目前接在哪／換綁專案」，那個語意隨列的身分變成專案而移到專案頁） */
   .prop-proj { flex: none; max-width: 150px; background: none; cursor: pointer;
@@ -261,6 +267,8 @@
     .prop-row > span { overflow: visible; white-space: normal; }
     .prop-row .t { flex: 1 0 100%; }
     .prop-proj { max-width: 96px; margin: 6px 6px 6px 0; }
+    /* 手機是換行版面，不靠欄位對齊 → 動作區不必留固定寬（留了就是右邊一塊空白） */
+    .prop-actions { width: auto; }
     /* 手機沒有 hover —— 淡淡地一直顯示，不然按不到 */
     .prop-del { opacity: .45; padding: 0 10px; }
     .prop-row .c, .prop-row .meta, .prop-row .refs, .prop-row .st { text-align: left; }
@@ -1243,13 +1251,14 @@ function _paintList() {
             <span class="refs">${p.refs_count ? "🎞 " + p.refs_count : ""}</span>
             <span class="badge ${p.has_proposal ? (p.has_plan ? "on" : "off") : "none"}"
             >${p.has_proposal ? (p.has_plan ? "發想中" : "未開始") : ""}</span>
-            <span class="st">${escText(p.stage || p.status || "")}</span>
+            <span class="st">${escText(p.has_proposal ? (p.status || "") : "")}</span>
             <span class="flow" data-flow="${escAttr(p.project_id || "")}"></span>
         </a>
-        ${p.has_proposal ? `<a class="prop-proj" href="?pid=${escAttr(p.id)}"
+        <span class="prop-actions">${p.has_proposal ? `<a class="prop-proj"
+                href="?pid=${escAttr(p.id)}"
                 title="直接進這份提案的創意發想矩陣">創意發想</a>
         <button class="prop-del" data-del="${escAttr(p.id)}"
-                title="刪除這個提案（參考片掛載會解除，片庫保留）">✕</button>` : ""}
+                title="刪除這個提案（參考片掛載會解除，片庫保留）">✕</button>` : ""}</span>
         </div>`).join("");
     // 「換綁專案」不在這裡了：清單合併之後列的身分就是專案，換綁的語意
     // （把提案掛到別的專案）屬於那份提案，入口在專案頁的標頭。
