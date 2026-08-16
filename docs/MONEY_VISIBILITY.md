@@ -41,9 +41,17 @@ def can_see_money(payload) -> bool:
   持有者要看數字，就在使用者管理多勾一格 —— 那一格正是「我授權了」的紀錄。
 - 管理員（Lv3）永遠通過：他們本來就是能改所有東西的人，另外擋是自欺。
 
-上線時的授權名單（2026-08-15 生產 12 帳號實查）：管理員 `admin` /
-`denniswang0513` / `OriginsunFinance` 自動有；非管理員只有三個會受影響 ——
-`Ryansnap`、`soca`（帳務＋報價＋專案）、`nashtsai`（只有專案管理）。
+**上線時不做任何授權**（owner 2026-08-15：「先不給 讓我控制」）。
+
+2026-08-15 生產 12 帳號實查：管理員 `admin` / `denniswang0513` /
+`OriginsunFinance` 因 Lv3 自動有；非管理員裡會感覺到差異的只有三個 ——
+`Ryansnap`、`soca`（帳務＋報價＋專案）、`nashtsai`（只有專案管理）。他們上線後
+會直接看不到金額，**由 owner 在使用者管理逐一勾「金額檢視」開通**。
+
+已查證**沒有任何路徑會自動塞這把鑰匙**（不做也不該做 backfill）：
+`main.py` 的 RBAC v2 回填只碰 `username='admin' AND modules IS NULL`；
+`api_auth` 的 `ALL_MODULES` 只在「一個使用者都沒有」時給 bootstrap admin；
+`grant_admin_all_modules()` 只對 Lv3 生效，而管理員本來就通過。
 
 ## 2. 兩層機制、一份名單
 
