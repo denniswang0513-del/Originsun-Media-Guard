@@ -372,15 +372,6 @@ def payload_grants(payload: Optional[dict], *module_keys: str) -> bool:
     return any(k in user_modules for k in module_keys)
 
 
-def current_payload(request: Request) -> Optional[dict]:
-    """驗過的 token payload，沒有／無效就 None —— **不丟例外**。
-
-    給「有沒有這個權限」而不是「擋不擋你」的判斷用（例如金額欄位要不要抹）。
-    擋人請用 check_* 那批：它們該回 401/403，而不是靜默把人當匿名。
-    """
-    return _extract_token(request)
-
-
 def check_admin_or_module(request: Request, *module_keys: str):
     """Like check_admin, but ALSO passes if the token grants any of module_keys.
 

@@ -131,7 +131,7 @@ CRM 詳情面板的「執行人員」畫的是**後者** —— 所以它才有�
 
 🔴 **判斷有沒有金額只看「後端回了鍵沒有」，不問前端旗標**。第一版寫成
 `canSeeMoney() && …`，e2e 立刻紅：`canSeeMoney()` 讀的是 SPA 的
-`window._accessLevel/_modules`，而獨立頁 proposal-plan.html 根本不設那些全域
+`window._accessLevel/_modules`，而獨立頁 `/project.html` 根本不設那些全域
 —— 管理員在那頁會被判成沒授權。鍵在＝後端認可，這是兩個掛載點唯一都對的判準。
 （`js/shared/money.js` 的 `canSeeMoney()` 仍在用，但只用在 SPA 那側：客戶績效
 與專案詳情的財務區塊要在**發請求之前**就決定畫不畫。）

@@ -1,10 +1,10 @@
 /**
  * staff-view.js — 人員配置（派工表）
  *
- * 兩個呼叫端共用同一份：CRM 專案詳情的「人員配置」與專案頁（proposal-plan）的
- * 同名分頁。host 與 fetcher 由呼叫端注入（CRM 走 crmFetch、專案頁走它自己的
- * mfetch 包裝），理由與完稿結案那組相同 —— 見 delivery-view 檔頭與
- * docs/PROPOSAL_PLANNER.md §15.3。
+ * 三個呼叫端共用同一份：CRM 專案詳情的「人員配置」、客戶詳情的專案彈窗、
+ * 以及專案頁（`/project.html`）的同名分頁。host 與 fetcher 由呼叫端注入
+ * （CRM 走 crmFetch、專案頁走它自己的 mfetch 包裝），理由與完稿結案那組
+ * 相同 —— 見 delivery-view 檔頭與 docs/PROPOSAL_PLANNER.md §15.3。
  *
  * 🔴 這支打的是 `GET /projects/{id}/staff`（`crm_project_staff`）——**人的正本**，
  * 不是 `cost-lines`。CRM 詳情面板的「執行人員」畫的是後者（項目 × 金額 × 付款

@@ -135,15 +135,13 @@ def test_staff_tab_shows_people_and_money_for_admin(plan_page, case, staffed):
     assert "8,000" in txt and "24,000" in txt, f"管理員看不到金額：{txt[:200]}"
 
 
-def test_staff_tab_hides_money_without_grant(plan_page, case, staffed):
+def test_staff_tab_hides_money_without_grant(plan_page, case, staffed, user_token):
     """🔴 沒有 money_view：人與檔期照給，日費／小計／合計整欄不見。
 
     這條守的是**後端**（core/money.py 把鍵從回應裡刪掉）—— 前端就算照畫，
     畫出來的也會是空的而不是 0。所以斷言的是「畫面上沒有錢」而不是「有沒有藏」。
     """
-    from core.auth import create_token
-    tok = create_token({"sub": "planner", "username": "planner", "access_level": 1,
-                        "modules": ["preprod_plan", "crm_projects"]})
+    tok = user_token(modules=["preprod_plan", "crm_projects"])
     txt = _staff_text(plan_page(f"?id={case['project_id']}",
                                 wait="#tab-staff", token=tok))
     assert "主攝" in txt and "3 天" in txt, f"人與檔期不該被藏：{txt[:200]}"

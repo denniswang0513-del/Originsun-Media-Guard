@@ -592,3 +592,28 @@ export function crmToast(msg, ms = 2000) {
         setTimeout(() => el.remove(), 250);
     }, ms);
 }
+
+
+// ── 金額檢視授權（前端鏡射）─────────────────────────────────
+// owner 2026-08-15：**預設看不到金額，除非我授權**。
+//
+// 🔴 **執行的是後端**（core/money.py：整支 403 + 欄位從回應裡刪掉）。這裡不是
+// 守衛，是為了「不要畫出謊話」：沒授權時金額欄位根本不在 payload 裡，而畫面上
+// 一堆 `p.contract_amount || 0` 會把「看不到」畫成「這個客戶總營收 0 元」。
+//
+// 🔴 **住在 crm-utils 而不是 js/shared/**：它讀的是 SPA 的
+// `window._accessLevel/_modules`，那兩個全域只有後台 SPA 會設。放在
+// `js/shared/`（＝公開頁的 import 白名單）等於在獨立頁那側擺一個看起來能用、
+// 實際上會把管理員判成「沒授權」的陷阱。放這裡，公開頁 import 不到，陷阱消失。
+// 元件層（tabs/proposals/*）要判斷金額請看**後端回了那個鍵沒有**——
+// 那是兩個掛載點都成立的唯一判準（見 staff-view.js）。
+export function canSeeMoney() {
+    if ((window._accessLevel || 0) >= 3) return true;   // 管理員一律看得到
+    return (window._modules || []).includes('money_view');
+}
+
+// 整塊「這裡本來是錢」的替代畫面。三個呼叫端說的是同一句話 ——
+// 各寫一份的話改字時只會改到一邊。
+export const NO_MONEY_HTML =
+    '<div class="crm-empty" style="padding:8px 0;font-size:12px;">'
+    + '此帳號沒有金額檢視權限</div>';

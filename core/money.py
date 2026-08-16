@@ -32,7 +32,10 @@ from fastapi.responses import JSONResponse
 from fastapi.routing import APIRoute
 from starlette.responses import Response
 
-from core.auth import current_payload, payload_grants
+# `_extract_token`：驗過的 payload 或 None（不丟例外）。名字帶底線但它是這個
+# repo 既有的公用寫法 —— core/identity.py、api_api_keys、api_auth、api_ota 都
+# 直接 import 它。另外包一個公開別名只會讓「該用哪一個」多一次判斷。
+from core.auth import _extract_token, payload_grants
 
 MODULE_KEY = "money_view"
 
@@ -46,16 +49,25 @@ MODULE_KEY = "money_view"
 #   - `total` 在 CRM 是**列數**（clients/projects/quotes/finance 的 `len(rows)`），
 #     `flow.py` 還拿它當五軌完成條的分母 —— 抹掉＝進度條變 0/0
 #   - `expense` 在雜支端點是 `{"id": ...}` 這個**物件**的鍵（公開登記頁在用）
-#   - `amount` / `subtotal` / `balance` / `deposit` 只出現在**整支 403**的帳務與
-#     報價端點上，收進來零收益、誤殺卻是真的
+#   - `amount` / `subtotal` / `balance` / `deposit` 幾乎只出現在**整支 403**的
+#     帳務與報價端點上，收進來的收益遠小於誤殺風險
+#
+# ⚠️ 上一條**不是**「所以那些欄位一定看不到」。實查的反例：
+# `GET /crm/proposals/{pid}/quotes`（提案工作區的報價單分頁）掛的是提案守衛
+# （拍攝企劃／提案庫／專案管理任一），回的 `total` / `final_price` 因此對沒有
+# `money_view` 的人仍然看得到。那是 owner 待決的邊界（「工作面的錢」vs
+# 「公司的錢」，見 docs/MONEY_VISIBILITY.md），**不是漏掉** —— 但別把上面那句
+# 當成第二層無條件成立的證明。
 #
 # 新增欄位時的判準：**它自己或它與另一個可見欄位的乘積是不是金額**
-# （`days` 留著，所以 `rate` 一定要抹）。
+# （`days` 留著，所以 `rate` 一定要抹）。名單有沒有跟上 model，由
+# `tests/unit/test_money_visibility.py::test_registry_covers_money_columns` 釘住。
 MONEY_FIELDS = frozenset({
     # 專案（crm_projects）
     "contract_amount", "amount_receivable", "amount_received",
     "profit_target_pct", "profit_target", "misc_budget_pct",
     "budget_amount", "misc_budget_amount", "ex_tax", "total_contract",
+    "transfer_fee",
     # 人／派工（crm_staff / crm_project_staff）—— rate 系列是 cost 的還原路徑
     "daily_rate", "hourly_rate", "day_rate",
     "rate", "rate_override", "default_rate",
@@ -64,7 +76,37 @@ MONEY_FIELDS = frozenset({
     "estimated_unit_price", "estimated_amount",
     "actual_unit_price", "actual_amount", "unit_price",
     "paid_amount", "unpaid_amount",
+    # 報價（crm_quotations）＋ 發票
+    "internal_cost", "amount_ex_tax", "amount_total", "tax_amount",
+    "invoice_amount",
+    # 財務管理／對帳／貸款（api_finance；那支 router 整個 403，列在這裡是為了
+    # 「錢的欄位名有一份完整清單」，將來哪支端點搬進 CRM router 也自動受保護）
+    "opening_balance", "statement_balance", "system_balance",
+    "bank_fee", "annual_rate",
+    # 器材（api_equipment，同上理由）
+    "purchase_cost",
 })
+
+# 名字像錢、但**刻意不抹**的欄位 —— 每一個都要有理由寫在這裡。
+# `tests/unit/test_money_visibility.py::test_registry_covers_money_columns`
+# 掃 `db/models.py` 的 Column 名，凡命中金額字樣就必須落在上面的名單或這裡，
+# 二選一。加欄位的人一定要表態，這就是那道網子的意義。
+REGISTRY_EXEMPT = {
+    # ── 真的不是錢 ──
+    "tax_rate": "法定 5%，沒有資訊量",
+    "payment_status": "狀態字串（未到帳／部分／全額），不是金額",
+    "budget_hours": "時數池不是錢（N2 工時）",
+    "cost_group_id": "外鍵 ID",
+    "curated": "正則誤中（cu-rate-d）",
+    # ── 是錢，但抹了會壞事 ──
+    "amount": "泛名：`{expense: {id}}` 之類的物件也叫它；發它的端點整支 403",
+    # ── 是錢，但屬於「工作面的錢」，owner 待決的邊界 ──
+    #    （docs/MONEY_VISIBILITY.md：me_finance／公開雜支頁／提案報價單）
+    "final_price": "提案工作區的報價單分頁 —— 企劃正在做的那份報價",
+    "budget_range": "提案的客戶預算區間，是企劃的工作輸入",
+    # ── 自由文字，第二層（抹鍵）本來就到不了 ──
+    "fee_note": "備註文字裡的金額不是鍵，是句子",
+}
 
 
 def can_see_money(request: Request) -> bool:
@@ -73,14 +115,34 @@ def can_see_money(request: Request) -> bool:
     刻意收在這裡而不是各處自己 `payload_grants(..., 'money_view')`：
     「誰算看得到錢」將來若要放寬（例如專案負責人看自己的案子），只有這一支要改。
     """
-    return payload_grants(current_payload(request), MODULE_KEY)
+    return payload_grants(_extract_token(request), MODULE_KEY)
 
 
 def check_money(request: Request):
-    """第一層守衛：整支端點就是錢 → 沒授權直接 403。"""
+    """第一層守衛：整支端點就是錢 → 沒授權直接 403。
+
+    這是**手動呼叫**的形式（`api_finance` / `api_cashflow` 的 `_guard` 在
+    endpoint body 裡直接呼叫它）。當 FastAPI dependency 用的是
+    `routers/crm/_shared._check_money` —— 那支是 async 包裝，理由見該處。
+    ⚠️ 別把這支改成 `async def`：那兩個 `_guard` 是同步呼叫，改了會變成
+    「產生一個沒人 await 的 coroutine」＝**守衛靜默失效**（2026-08-15 試過，
+    測試當場抓到）。
+    """
     if not can_see_money(request):
         raise HTTPException(status_code=403, detail="沒有金額檢視權限")
     return True
+
+
+# 便宜的預篩：`MONEY_FIELDS` 每一個鍵都含這幾個子字串之一（由
+# `test_prefilter_tokens_cover_every_money_field` 釘住），所以「原始 bytes 裡
+# 一個 token 都沒出現」就保證**沒有東西要抹**。這是嚴格的超集過濾，不可能改變
+# 行為，卻能讓多數回應完全跳過 parse + redact。
+#
+# 為什麼值得：owner 的政策是「預設不給」，所以**沒授權才是多數路徑**。實測
+# 236 筆專案（118KB、無金額欄）走 parse+redact 是 1.6ms 而且結果整份丟掉；
+# 走這條預篩是 0.34ms。命中金額時多付的成本是 0.0008ms。
+_PREFILTER = (b"amount", b"rate", b"cost", b"price", b"fee",
+              b"profit", b"budget", b"ex_tax", b"contract", b"balance")
 
 
 def redact(obj: Any) -> Any:
@@ -99,7 +161,8 @@ class MoneyRedactRoute(APIRoute):
     （派工、成本明細、成本摘要、某人的專案清單），逐支加漏一支就等於沒修 ——
     2026-08-14 那個匿名可讀的洞就是這樣長出來的。掛這裡，新端點預設就是安全的。
 
-    有授權的請求**原樣返回**（連 body 都不碰）—— 成本只落在沒授權的那條路上。
+    有授權的請求**原樣返回**（連 body 都不碰）。沒授權的先走 `_PREFILTER`
+    這道 bytes 掃描，只有真的帶金額字樣的回應才付 parse + redact。
     非 JSON 的回應（收據圖片、縮圖、PDF、串流）跳過：它們沒有欄位可抹。
     """
 
@@ -113,11 +176,15 @@ class MoneyRedactRoute(APIRoute):
             body = getattr(response, "body", None)
             if not body or "application/json" not in response.headers.get("content-type", ""):
                 return response
+            if not any(t in body for t in _PREFILTER):
+                return response
             try:
                 data = json.loads(body)
             except ValueError:
                 return response
             clean = redact(data)
+            # 沒動到就別重建 —— 深度比較實測 0.00~0.04ms（redact 重用了葉節點，
+            # `==` 在每個純量上以 identity 短路），換掉的是 0.88ms 的 json.dumps。
             if clean == data:
                 return response
             return JSONResponse(

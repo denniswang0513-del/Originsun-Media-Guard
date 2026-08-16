@@ -4,8 +4,8 @@
  */
 
 import { state, callbacks, EXPENSE_CATEGORIES } from './crm-projects-state.js';
-import { crmFetch as _fetch, esc as _esc, fmtNum } from './crm-utils.js';
-import { canSeeMoney, NO_MONEY_HTML } from '../../js/shared/money.js';
+import { crmFetch as _fetch, esc as _esc, fmtNum, canSeeMoney, NO_MONEY_HTML }
+    from './crm-utils.js';
 import { loadProjectStaff } from '../proposals/staff-view.js';
 
 // ── Load Project Staff ──────────────────────────────────────────

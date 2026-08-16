@@ -3,8 +3,8 @@
  * 功能：列表視圖 + 詳情面板 + 新增/編輯 Modal + CSV 匯入
  */
 
-import { crmFetch as _fetch, crmCacheFetch, crmCacheInvalidate, esc as _esc, fmtNum as _fmtNum, renderAvatar, setupResizeHandle, enableInlineEdit, addEditButton, kebabMenuHtml, createSortable, enumIndex, searchableSelect } from './crm-utils.js';
-import { canSeeMoney } from '../../js/shared/money.js';
+import { crmFetch as _fetch, crmCacheFetch, crmCacheInvalidate, esc as _esc, fmtNum as _fmtNum, renderAvatar, setupResizeHandle, enableInlineEdit, addEditButton, kebabMenuHtml, createSortable, enumIndex, searchableSelect, canSeeMoney } from './crm-utils.js';
+import { loadProjectStaff } from '../proposals/staff-view.js';
 
 // 專案階段 → 圖表/圓點色（客戶績效視圖用；與 crm.css 的 .crm-proj-badge-* 是
 // 不同 render path 故不共用）。未知階段 fallback 灰色。保留 已取消 舊值(無 backfill
@@ -300,15 +300,13 @@ window._crmShowProjectDetail = async (projectId) => {
     const statusColors = STATUS_COLORS;
 
     try {
-        const [p, fin, staffData, quoteData] = await Promise.all([
+        const [p, fin, quoteData] = await Promise.all([
             _fetch('/projects/' + projectId),
             _fetch('/projects/' + projectId + '/financial-summary').catch(() => null),
-            _fetch('/projects/' + projectId + '/staff').catch(() => ({ staff: [] })),
             _fetch('/projects/' + projectId + '/quotations').catch(() => ({ quotations: [] })),
         ]);
 
         const color = statusColors[p.status] || '#9ca3af';
-        const staff = staffData.staff || [];
         const quotes = quoteData.quotations || [];
 
         // Tab 1: 專案資訊
@@ -324,15 +322,12 @@ window._crmShowProjectDetail = async (projectId) => {
             ${prop('備註', p.notes)}
         `;
 
-        // Tab 2: 人員配置
-        const staffHtml = staff.length === 0
-            ? '<div class="crm-empty">尚無派工</div>'
-            : staff.map(r => `
-                <div style="display:flex;justify-content:space-between;align-items:center;padding:6px 0;border-bottom:1px solid #2e2e2e;">
-                    <span>${_esc(r.staff_name)} <span style="color:#9ca3af;font-size:11px;">${_esc(r.staff_role)}</span></span>
-                    <span style="font-size:12px;">${r.days}天 × $${_n(r.rate)} = <b>$${_n(r.cost)}</b></span>
-                </div>
-            `).join('') + `<div style="text-align:right;font-weight:700;padding:8px 0;">合計: $${_n(staff.reduce((s, r) => s + r.cost, 0))}</div>`;
+        // Tab 2: 人員配置 —— 交給共用元件（第三個呼叫端）。
+        // 🔴 這裡原本自己畫一份，而它寫的是 `${r.days}天 × $${_n(r.rate)}`，
+        // `_n` 又是 `(n||0)` —— 沒有金額檢視權時後端把 rate/cost 的鍵刪掉，
+        // 這行就會畫成「3天 × $0 = $0」「合計: $0」，正是 core/money.py
+        // 「刪鍵不是歸零」要防的謊報。元件會依鍵在不在決定畫不畫那兩欄。
+        const staffHost = document.createElement('div');
 
         // Tab 3: 報價
         const quoteHtml = quotes.length === 0
@@ -380,7 +375,7 @@ window._crmShowProjectDetail = async (projectId) => {
                 </div>
                 <div class="crm-modal-body" style="max-height:60vh;overflow-y:auto;">
                     <div id="pm-tab-info">${infoHtml}</div>
-                    <div id="pm-tab-staff" class="hidden">${staffHtml}</div>
+                    <div id="pm-tab-staff" class="hidden"></div>
                     <div id="pm-tab-quote" class="hidden">${quoteHtml}</div>
                     <div id="pm-tab-finance" class="hidden">${finHtml}</div>
                 </div>
@@ -388,6 +383,8 @@ window._crmShowProjectDetail = async (projectId) => {
         </div>`;
 
         document.body.insertAdjacentHTML('beforeend', html);
+        document.getElementById('pm-tab-staff').appendChild(staffHost);
+        loadProjectStaff(projectId, { host: staffHost, fetcher: _fetch });  // 唯讀
 
         // Tab switching inside modal
         document.querySelectorAll('.crm-pm-tabs .crm-tab').forEach(btn => {

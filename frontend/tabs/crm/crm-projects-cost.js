@@ -5,8 +5,8 @@
 
 import { state, callbacks, EXPENSE_CATEGORIES } from './crm-projects-state.js';
 import { calcDashboard, remainColor, profitColor, barColor, diffLabel } from './crm-projects-calc.js';
-import { crmFetch as _fetch, esc as _esc, fmtNum, searchableSelect } from './crm-utils.js';
-import { canSeeMoney, NO_MONEY_HTML } from '../../js/shared/money.js';
+import { crmFetch as _fetch, esc as _esc, fmtNum, searchableSelect, canSeeMoney, NO_MONEY_HTML }
+    from './crm-utils.js';
 
 // ── Dirty map ──────────────────────────────────────────────────
 window._costDirtyMap = {};
