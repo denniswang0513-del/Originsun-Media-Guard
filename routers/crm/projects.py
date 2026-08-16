@@ -17,7 +17,7 @@ from config import load_settings as _load_settings
 
 from core.schemas import CrmProjectPayload, CrmProjectPatchPayload
 
-from ._shared import (router, _check_auth, _check_status_auth,
+from ._shared import (router, _check_auth, _check_status_auth, _check_project_write_auth,
                       _check_website_auth, _require_db,
                       _get_factory, _now, _parse_shoot_date,
                       _auto_update_client_status, _seed_default_expenses)
@@ -143,7 +143,7 @@ async def create_project_in_session(session, data: dict):
 
 @router.post("/projects")
 async def create_project(req: CrmProjectPayload, request: Request):
-    _check_auth(request)
+    _check_project_write_auth(request)
     _require_db()
     factory = await _get_factory()
 
@@ -624,7 +624,7 @@ async def update_project(project_id: str, req: CrmProjectPatchPayload, request: 
 
 @router.delete("/projects/{project_id}")
 async def delete_project(project_id: str, request: Request):
-    _check_auth(request)
+    _check_project_write_auth(request)
     _require_db()
     factory = await _get_factory()
 

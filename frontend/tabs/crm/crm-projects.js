@@ -243,49 +243,11 @@ export async function initCrmProjectsTab() {
         } catch (e) { alert(e.message); }
     };
 
-    // ── Staff handlers (cross-module: use finance + state) ──
-    window._projAddStaff = async () => {
-        if (!state.selectedId) return;
-        let staffList = [];
-        try { staffList = (await _fetch('/staff?status=在職')).staff || []; } catch(_) {}
-        if (staffList.length === 0) { alert('請先在人力資源 Tab 新增人員'); return; }
-        const container = document.getElementById('proj-staff-list');
-        if (!container) return;
-        const formId = 'proj-staff-add-form';
-        if (document.getElementById(formId)) return;
-        const formHtml = `<div id="${formId}" style="padding:8px;background:#1e1e1e;border-radius:6px;border:1px solid #3a3a3a;margin-bottom:8px;display:flex;gap:6px;align-items:center;flex-wrap:wrap;">
-            <select id="proj-staff-sel" class="crm-input" style="flex:1;min-width:120px;">
-                <option value="">— 選擇人員 —</option>
-                ${staffList.map(s => `<option value="${s.id}" data-role="${_esc(s.role)}">${_esc(s.name)} (${_esc(s.role)}${
-                    // 沒有金額檢視權時後端不回 daily_rate → 原本會印成 `$undefined/天`
-                    s.daily_rate == null ? '' : ` $${s.daily_rate}/天`})</option>`).join('')}
-            </select>
-            <input id="proj-staff-days" type="number" class="crm-input" value="1" min="1" style="width:60px;text-align:right;" placeholder="天數">
-            <button class="crm-btn crm-btn-primary crm-btn-sm" onclick="window._projConfirmStaff()">確定</button>
-            <button class="crm-btn crm-btn-secondary crm-btn-sm" onclick="document.getElementById('${formId}').remove()">取消</button>
-        </div>`;
-        container.insertAdjacentHTML('afterbegin', formHtml);
-    };
-    window._projConfirmStaff = async () => {
-        const sel = document.getElementById('proj-staff-sel');
-        const staffId = sel?.value;
-        if (!staffId) { alert('請選擇人員'); return; }
-        const role = sel.selectedOptions[0]?.dataset.role || '';
-        const days = parseInt(document.getElementById('proj-staff-days')?.value) || 1;
-        try {
-            await _fetch('/projects/' + state.selectedId + '/staff', {
-                method: 'POST', body: JSON.stringify({ staff_id: staffId, role_in_project: role, days })
-            });
-            _loadProjectStaff(state.selectedId);
-        } catch (e) { alert('新增失敗：' + e.message); }
-    };
-    window._projRemoveStaff = async (psId, projectId) => {
-        if (!confirm('確定移除此派工？')) return;
-        try {
-            await _fetch('/project-staff/' + psId, { method: 'DELETE' });
-            _loadProjectStaff(projectId);
-        } catch (e) { alert(e.message); }
-    };
+    // ── Staff handlers ──
+    // 新增／移除派工都在共用元件裡（tabs/proposals/staff-view.js）—— 這裡原本
+    // 有一整套 window._projAddStaff / _projConfirmStaff / _projRemoveStaff，
+    // 那是元件搬出去之前的東西。兩套並存的話 CRM 會冒出兩個「新增」入口，
+    // 而且刪除會確認兩次（元件問一次、這裡再問一次）。
 
     // ── Sub-module handlers ──
     initDetailHandlers();

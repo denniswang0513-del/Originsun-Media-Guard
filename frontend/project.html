@@ -366,6 +366,7 @@
       <span class="grow"></span>
       <button id="btn-tpls" title="以前寫得好的企劃書 —— Claude 生成時照它的章節與文風">企劃範本</button>
       <button id="btn-folders" title="NAS 上的提案資產資料夾（含過去手工整理的）">資產資料夾</button>
+      <button id="btn-new-proj">＋ 新專案</button>
       <button id="btn-new">＋ 新提案</button>
     </div>
     <div id="list-host"><div class="state-msg">載入中…</div></div>
@@ -377,6 +378,10 @@
       <button class="back" id="plan-back" onclick="location.href = location.pathname">← 清單</button>
       <h1 id="plan-title"></h1>
       <span class="proj-stage" id="proj-stage" style="display:none;"></span>
+      <!-- 刪除**專案**（專案模式才出現）—— 與右邊那顆「刪除」不同：那顆刪的是
+           目前這份提案。兩個動作差很多，所以文字寫全、位置也分開。 -->
+      <button id="proj-del" class="danger" style="display:none;"
+              title="刪除這個專案（含它底下的提案、派工與歸檔紀錄）">刪除專案</button>
       <span class="plan-acts" id="plan-acts">
         <select id="plan-status" title="提案狀態（成案會建立或推進 CRM 專案）"></select>
         <button id="plan-edit" title="編輯標題、客戶等基本資料">編輯</button>
@@ -1137,6 +1142,35 @@ function _wireListTools(pc, PL) {
             location.href = location.pathname + "?pid=" + encodeURIComponent(p.id);
         } });
     });
+    // 新專案：只問名字與客戶（其餘欄位在 CRM 補）。建完直接進那個案子的專案頁
+    // —— 建專案的下一步一定是開始做它。
+    $("btn-new-proj").addEventListener("click", () => _newProject());
+}
+
+/** 建立專案。刻意只問兩個欄位：名稱（必填）與客戶（選填）。
+ *  合約金額、負責人、日期那些是 CRM 的工作面，在這裡問只會擋住「先開起來」。 */
+async function _newProject() {
+    const name = (prompt("新專案名稱：", "") || "").trim();
+    if (!name) return;
+    let clients = [];
+    try { clients = (await _crmFetch("/clients")).clients || []; } catch (_) { /* 選填 */ }
+    let clientId = "";
+    if (clients.length) {
+        const lines = clients.slice(0, 40)
+            .map((c, i) => `${i + 1}. ${c.short_name || c.name || ""}`).join("\n");
+        const pick = prompt("客戶（輸入編號，留白＝先不指定）：\n" + lines, "");
+        if (pick === null) return;
+        const idx = parseInt(pick, 10);
+        if (idx >= 1 && idx <= clients.length) clientId = clients[idx - 1].id;
+    }
+    try {
+        const d = await _crmFetch("/projects", {
+            method: "POST",
+            body: JSON.stringify({ name, client_id: clientId, status: "洽詢" }),
+        });
+        const id = (d.project || d).id;
+        location.href = location.pathname + "?id=" + encodeURIComponent(id);
+    } catch (e) { alert("建立失敗：" + emsg(e)); }
 }
 
 /** 專案 ⨝ 提案 → 一份清單。**列的身分是專案**（「提案」是它的一個階段）。
@@ -1366,6 +1400,26 @@ function _paintProjectHead(project) {
     chip.textContent = project.status || "";
     chip.style.display = project.status ? "" : "none";
     $("plan-back").textContent = "← 專案清單";
+    // 刪除專案只在專案模式出現（?pid= 進來的沒有專案脈絡）
+    const del = $("proj-del");
+    del.style.display = "";
+    del.onclick = () => _deleteProject(project);
+}
+
+/** 刪除專案。二次確認要**打字**：它會連帶帶走底下的提案、派工與歸檔紀錄，
+ *  而這頁的刪除鍵離「刪除（提案）」只有幾十像素。 */
+async function _deleteProject(project) {
+    const name = project.name || "";
+    const typed = prompt(
+        `刪除專案「${name}」？\n\n` +
+        "它底下的提案、派工與歸檔紀錄會一起消失，且無法復原。\n" +
+        "確定的話請輸入專案名稱：", "");
+    if (typed === null) return;
+    if (typed.trim() !== name.trim()) { alert("名稱不符，已取消。"); return; }
+    try {
+        await _crmFetch("/projects/" + encodeURIComponent(project.id), { method: "DELETE" });
+        location.href = location.pathname;      // 回清單
+    } catch (e) { alert("刪除失敗：" + emsg(e)); }
 }
 
 /** 提案切換器：只在有兩筆以上時出現。切換＝整頁重載（理由見 _gotoProposal）。 */

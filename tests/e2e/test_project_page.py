@@ -222,6 +222,73 @@ def test_proposal_rows_keep_a_direct_route_to_the_matrix(plan_page, case):
     pg.close()
 
 
+# ── 內容都要能新增／刪除（owner 2026-08-15）──────────────────
+def test_staff_can_be_added_and_removed_from_the_project_page(plan_page, case, user_token):
+    """🔴 人員配置在專案頁要能增能刪，而且**非管理員**也按得動。
+
+    這條同時守兩件事：畫面上的按鈕在（搬進來時它是唯讀的），以及後端那道
+    Lv3 → crm_projects 的鬆綁真的生效（沒鬆綁的話按下去 403，列不會出現）。
+    """
+    base, h = case["base"], case["h"]
+    r = HTTP.post(f"{base}/api/v1/crm/staff", headers=h,
+                  json={"name": f"增刪測試_{uuid.uuid4().hex[:6]}", "role": "燈光",
+                        "daily_rate": 6000, "status": "在職"})
+    if r.status_code >= 400:
+        pytest.skip(f"建不出人員（{r.status_code}）：{r.text[:120]}")
+    sid = r.json().get("staff", r.json()).get("id")
+    tok = user_token(modules=["crm_projects"])          # lv1，不是管理員
+    try:
+        pg = plan_page(f"?id={case['project_id']}", wait="#tab-staff", token=tok)
+        pg.click("#tab-staff")
+        pg.wait_for_selector("#staff-host .pstaff-addbtn", timeout=30000)
+        pg.click("#staff-host .pstaff-addbtn")
+        pg.wait_for_selector('#staff-host [data-f="staff"]', timeout=30000)
+        pg.select_option('#staff-host [data-f="staff"]', sid)
+        pg.fill('#staff-host [data-f="role"]', "燈光師")
+        pg.click("#staff-host [data-go]")
+        # 🔴 等「那一筆」而不是「有列」—— 這個專案本來就有派工（staffed fixture），
+        # 等 .pstaff-row 會在按下去的瞬間就成立，等於什麼都沒驗到
+        pg.wait_for_function(
+            """() => document.querySelector('#staff-host')?.textContent.includes('燈光師')""",
+            timeout=30000)
+
+        # 刪除（confirm 對話框自動按確定）。刪自己剛加的那列 —— 它是最後一列。
+        pg.on("dialog", lambda d: d.accept())
+        pg.eval_on_selector_all(
+            "#staff-host .pstaff-row",
+            """els => { const r = els.find(e => e.textContent.includes('燈光師'));
+                        r.querySelector('.pstaff-del').click(); }""")
+        pg.wait_for_function(
+            """() => !document.querySelector('#staff-host')?.textContent.includes('燈光師')""",
+            timeout=30000)
+        pg.close()
+    finally:
+        rows = HTTP.get(f"{base}/api/v1/crm/projects/{case['project_id']}/staff",
+                        headers=h).json().get("staff", [])
+        for x in rows:                       # 只清自己建的
+            if x.get("staff_id") == sid:
+                HTTP.delete(f"{base}/api/v1/crm/project-staff/{x['id']}", headers=h)
+        HTTP.delete(f"{base}/api/v1/crm/staff/{sid}", headers=h)
+
+
+def test_project_can_be_created_and_deleted_by_a_module_user(case, user_token):
+    """🔴 專案本體的增刪 —— 用 API 驗權限那一半（UI 那半是 prompt，e2e 點不了）。
+
+    lv1 + crm_projects 要建得起來也刪得掉；這正是這次從 Lv3 鬆綁的東西。
+    """
+    base = case["base"]
+    h = {"Authorization": f"Bearer {user_token(modules=['crm_projects'])}"}
+    name = f"增刪測試專案_{uuid.uuid4().hex[:6]}"
+    r = HTTP.post(f"{base}/api/v1/crm/projects", headers=h,
+                  json={"name": name, "client_id": "", "status": "洽詢"})
+    assert r.status_code == 200, f"非管理員建不了專案：{r.status_code} {r.text[:150]}"
+    pid = r.json()["project"]["id"]
+    d = HTTP.delete(f"{base}/api/v1/crm/projects/{pid}", headers=h)
+    assert d.status_code == 200, f"非管理員刪不掉專案：{d.status_code} {d.text[:150]}"
+    gone = HTTP.get(f"{base}/api/v1/crm/projects/{pid}", headers=h)
+    assert gone.status_code == 404, f"刪了還在：{gone.status_code}"
+
+
 # ── B：一專案 N 提案 ────────────────────────────────────────
 def test_switcher_appears_only_with_multiple_proposals(plan_page, case):
     """單筆時不顯示切換器；掛第二筆上去就出現，且兩筆都在選項裡。"""

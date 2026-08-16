@@ -137,6 +137,17 @@ _check_auth = _module_guard()
 # modules 含 'website_admin' 就能操作，跟官網管理 Tab 寫入守衛（website 路由）一致。
 _check_website_auth = _module_guard('website_admin')
 
+# 專案本體與派工的增刪 —— 模組級（owner 2026-08-15 拍板，同工作流勾選那條路）。
+#
+# 為什麼鬆綁：專案頁把「每個案子的工作面」搬齊了之後，唯獨人員配置與專案本身
+# 加不了也刪不了 —— 因為這幾支是 Lv3。而專案頁的閘門收 crm_projects，於是
+# 持有那個模組的人看得到畫面、按下去 403。這就是 8/14 那句「權限是空頭支票」
+# 的同一個形狀，owner 給了同一個答案。
+#
+# ⚠️ 這比勾一個里程碑重：建專案／刪專案是會動到整個案子的動作。刻意**不**把
+# 其他 CRM 寫入（客戶、報價、帳務、成本）一起放行 —— 那些的使用者是財務。
+_check_project_write_auth = _module_guard('crm_projects')
+
 # 工作流手動里程碑 —— 模組級（owner 2026-08-14 拍板）。這是 CRM 寫入面第一道
 # 模組級鬆綁：生產有 3 個 lv1 帳號被授予 crm_projects 卻打不了任何 CRM 寫入
 # 端點（其餘寫入都是 Lv3），權限等於空頭支票。勾一個里程碑跟改專案狀態、

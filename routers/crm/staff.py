@@ -18,7 +18,8 @@ from fastapi import Depends, HTTPException, Request, UploadFile, File, Query
 
 from core.schemas import StaffPayload, ResumePayload, ProjectStaffPayload
 
-from ._shared import (router, _check_auth, money_dep, _require_db, _get_factory, _now,
+from ._shared import (router, _check_auth, _check_project_write_auth, money_dep,
+                      _require_db, _get_factory, _now,
                       STAFF_CREATED_VIA_ADMIN, _UPLOAD_BASE, _ALLOWED_IMG_EXT,
                       _verify_token_generic)
 
@@ -878,7 +879,7 @@ async def list_project_staff(project_id: str):
 
 @router.post("/projects/{project_id}/staff")
 async def add_project_staff(project_id: str, req: ProjectStaffPayload, request: Request):
-    _check_auth(request)
+    _check_project_write_auth(request)
     _require_db()
     factory = await _get_factory()
     async with factory() as session:
@@ -899,7 +900,7 @@ async def add_project_staff(project_id: str, req: ProjectStaffPayload, request: 
 
 @router.put("/project-staff/{ps_id}")
 async def update_project_staff(ps_id: str, req: ProjectStaffPayload, request: Request):
-    _check_auth(request)
+    _check_project_write_auth(request)
     _require_db()
     factory = await _get_factory()
     async with factory() as session:
@@ -920,7 +921,7 @@ async def update_project_staff(ps_id: str, req: ProjectStaffPayload, request: Re
 
 @router.delete("/project-staff/{ps_id}")
 async def delete_project_staff(ps_id: str, request: Request):
-    _check_auth(request)
+    _check_project_write_auth(request)
     _require_db()
     factory = await _get_factory()
     async with factory() as session:

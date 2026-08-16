@@ -33,6 +33,16 @@ const CSS = `
 .pstaff-note{flex-basis:100%;color:#9ca3af;font-size:12px;padding-left:2px;}
 .pstaff-total{text-align:right;font-weight:700;padding:8px 0;color:#e0e0e0;}
 .pstaff-empty{color:#9ca3af;padding:8px 0;font-size:13px;}
+.pstaff-del{background:none;border:none;cursor:pointer;color:#c4c4c4;font-size:12px;
+  padding:0 4px;opacity:0;transition:opacity .12s,color .12s;}
+.pstaff-row:hover .pstaff-del,.pstaff-del:focus-visible{opacity:1;}
+.pstaff-del:hover{color:#e03131;}
+.pstaff-add{display:flex;gap:6px;align-items:center;padding:10px 0;flex-wrap:wrap;}
+.pstaff-addbtn{font:inherit;font-size:12px;padding:5px 10px;cursor:pointer;
+  border:1px solid #d0d0d0;border-radius:3px;background:#fff;color:#444;}
+.pstaff-addbtn:hover{border-color:#e03131;color:#e03131;}
+.pstaff-f{font:inherit;font-size:13px;padding:5px 8px;border:1px solid #d0d0d0;
+  border-radius:3px;background:#fff;min-width:0;}
 `;
 
 const _num = (n) => Number(n || 0).toLocaleString('zh-TW');
@@ -51,8 +61,11 @@ export async function loadProjectStaff(projectId, opts = {}) {
     try {
         const data = await opts.fetcher(`/projects/${projectId}/staff`);
         const rows = data.staff || [];
+        // 空狀態也要能新增 —— 「尚無派工」加一顆按鈕就沒了，那是這個分頁
+        // 唯一的入口（owner 2026-08-15：內容都要可以新增可以刪除）
         if (!rows.length) {
             host.innerHTML = '<div class="pstaff-empty">尚無派工</div>';
+            _wireAdd(host, projectId, opts);
             return;
         }
         // 🔴 有沒有金額**只看後端回了什麼**（沒授權時 core/money.py 直接把鍵
@@ -70,22 +83,85 @@ export async function loadProjectStaff(projectId, opts = {}) {
               <span class="pstaff-days">${r.days ?? 0} 天</span>
               ${showMoney ? `<span class="pstaff-money">$${_num(r.rate)}</span>
               <span class="pstaff-money">$${_num(r.cost)}</span>` : ''}
-              ${opts.onRemove ? `<button class="crm-btn crm-btn-danger crm-btn-sm"
-                 style="padding:2px 6px;" data-rm="${esc(r.id)}">&#x2715;</button>` : ''}
+              <button class="pstaff-del" data-rm="${esc(r.id)}"
+                      title="移除這筆派工">&#x2715;</button>
               ${r.notes ? `<span class="pstaff-note">${esc(r.notes)}</span>` : ''}
             </div>`).join('')
             + (showMoney
                 ? `<div class="pstaff-total">內部成本合計: $${
                     _num(rows.reduce((s, r) => s + (r.cost || 0), 0))}</div>`
                 : '');
-        if (opts.onRemove) {
-            host.querySelectorAll('[data-rm]').forEach(btn =>
-                btn.addEventListener('click', () => opts.onRemove(btn.dataset.rm)));
-        }
+        host.querySelectorAll('[data-rm]').forEach(btn =>
+            btn.addEventListener('click', () => _remove(btn.dataset.rm, projectId, opts)));
+        _wireAdd(host, projectId, opts);
     } catch (e) {
         host.innerHTML = `<div class="pstaff-empty" style="color:#f87171;">人員配置載入失敗：${
             esc(e && e.message ? e.message : String(e))}</div>`;
     }
+}
+
+/** 移除一筆派工。`opts.onRemove` 給了就交給呼叫端（CRM 有自己的重載流程），
+ *  沒給就自己打端點再重畫 —— 這樣兩個掛載點都刪得掉，不必各接一次線。 */
+async function _remove(rowId, projectId, opts) {
+    if (!confirm('確定移除此派工？')) return;
+    if (opts.onRemove) return opts.onRemove(rowId);
+    try {
+        await opts.fetcher(`/project-staff/${rowId}`, { method: 'DELETE' });
+        await loadProjectStaff(projectId, opts);
+    } catch (e) { alert('移除失敗：' + (e && e.message ? e.message : e)); }
+}
+
+/** 「＋ 新增派工」：人員下拉 + 角色 + 天數。
+ *
+ *  🔴 表單**不問費率**：日費由後端從人員檔案帶（cost = days × rate），而沒有
+ *  金額檢視權的人本來就看不到那個數字 —— 讓他填一個看不到的欄位是荒謬的。
+ *  要調費率請到 CRM 的成本估算（那裡本來就是錢的工作面）。
+ */
+function _wireAdd(host, projectId, opts) {
+    const bar = document.createElement('div');
+    bar.className = 'pstaff-add';
+    bar.innerHTML = '<button class="pstaff-addbtn">＋ 新增派工</button>';
+    host.appendChild(bar);
+    bar.querySelector('.pstaff-addbtn').addEventListener('click', async () => {
+        let staff = [];
+        try {
+            staff = (await opts.fetcher('/staff?status=在職')).staff || [];
+        } catch (e) { alert('人員清單載入失敗：' + (e && e.message ? e.message : e)); return; }
+        if (!staff.length) { alert('請先在「人力資源」建立人員'); return; }
+        bar.innerHTML = `
+            <select class="pstaff-f" data-f="staff">${staff.map(s =>
+                `<option value="${esc(s.id)}" data-role="${esc(s.role || '')}"
+                 >${esc(s.name)}${s.role ? '（' + esc(s.role) + '）' : ''}</option>`).join('')}</select>
+            <input class="pstaff-f" data-f="role" placeholder="本案角色（如：主攝）">
+            <input class="pstaff-f" data-f="days" type="number" min="1" value="1"
+                   style="width:70px;" title="天數">
+            <button class="pstaff-addbtn" data-go="1">加入</button>
+            <button class="pstaff-addbtn" data-cancel="1">取消</button>`;
+        const f = (k) => bar.querySelector(`[data-f="${k}"]`);
+        bar.querySelector('[data-cancel]').addEventListener('click',
+            () => loadProjectStaff(projectId, opts));
+        bar.querySelector('[data-go]').addEventListener('click', async (ev) => {
+            ev.target.disabled = true;
+            const sel = f('staff');
+            try {
+                await opts.fetcher(`/projects/${projectId}/staff`, {
+                    method: 'POST',
+                    body: JSON.stringify({
+                        staff_id: sel.value,
+                        // 沒填就用人員檔案上的職能 —— 多數情況本案角色就是他的職能
+                        role_in_project: f('role').value
+                            || sel.selectedOptions[0]?.dataset.role || '',
+                        days: parseInt(f('days').value, 10) || 1,
+                    }),
+                });
+                await loadProjectStaff(projectId, opts);
+                opts.onChanged?.();
+            } catch (e) {
+                alert('新增失敗：' + (e && e.message ? e.message : e));
+                ev.target.disabled = false;
+            }
+        });
+    });
 }
 
 /** `(host, opts)` 轉接口 —— 專案頁的 _LAZY_TABS 只認這個形狀。 */

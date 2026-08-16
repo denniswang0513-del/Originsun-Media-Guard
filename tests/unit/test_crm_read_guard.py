@@ -127,3 +127,46 @@ def test_crm_projects_module_can_tick(app_client, as_user):
 def test_unrelated_module_cannot_read_flow(app_client, as_user):
     assert app_client.get(FLOW, headers=as_user(modules=["backup"])
                           ).status_code == 403
+
+
+# ── 專案本體與派工的增刪（owner 2026-08-15 拍板，第二道模組級鬆綁）──────
+# 專案頁把「每個案子的工作面」搬齊之後，唯獨人員配置與專案本身加不了也刪不了
+# ——那幾支是 Lv3，而這頁的閘門收 crm_projects：看得到畫面、按下去 403。
+# 同 8/14 那句「權限是空頭支票」。
+
+PROJECT_WRITES = [
+    # body 要能過 pydantic —— 驗證發生在 handler 之前，少一個必填欄位會回 422，
+    # 那條路上守衛根本沒跑到，反面測試就變成在測 schema 而不是測權限
+    ("post", "/api/v1/crm/projects", {"name": "x", "client_id": "c"}),
+    ("delete", "/api/v1/crm/projects/__probe__", None),
+    ("post", "/api/v1/crm/projects/__probe__/staff",
+     {"staff_id": "s", "role_in_project": "攝影", "days": 1}),
+    ("delete", "/api/v1/crm/project-staff/__probe__", None),
+]
+
+
+@pytest.mark.parametrize("method,path,body", PROJECT_WRITES)
+def test_crm_projects_module_can_write_projects_and_staff(app_client, as_user,
+                                                          method, path, body):
+    """🔴 lv1 + crm_projects 要動得了專案與派工（不是被權限擋掉）。
+
+    單元環境沒有 DB → 503/404 都算過；這裡釘的是**不是 401/403**。
+    """
+    kw = {"headers": as_user(modules=["crm_projects"])}
+    if body is not None:
+        kw["json"] = body
+    r = getattr(app_client, method)(path, **kw)
+    assert r.status_code not in (401, 403), f"{method} {path} 被權限擋掉：{r.status_code}"
+
+
+@pytest.mark.parametrize("method,path,body", PROJECT_WRITES)
+def test_other_modules_still_cannot_write_projects(app_client, as_user,
+                                                   method, path, body):
+    """反面：鬆綁只給 crm_projects —— 拿別的模組來的照樣 403。
+
+    沒有這條，上面那條在「守衛整個被拿掉」時也會綠。
+    """
+    kw = {"headers": as_user(modules=["preprod_proposals", "backup"])}
+    if body is not None:
+        kw["json"] = body
+    assert getattr(app_client, method)(path, **kw).status_code == 403

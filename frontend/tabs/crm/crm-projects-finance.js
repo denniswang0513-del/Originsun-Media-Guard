@@ -16,7 +16,8 @@ async function _loadProjectStaff(projectId) {
     if (!host) return;
     return loadProjectStaff(projectId, {
         host, fetcher: _fetch,
-        onRemove: (psId) => window._projRemoveStaff(psId, projectId),
+        // 不注入 onRemove：刪除由元件自己做（它已經有確認與重畫）。
+        // 注入的話會確認兩次 —— 元件問一次、被注入的那支再問一次。
     });
 }
 
