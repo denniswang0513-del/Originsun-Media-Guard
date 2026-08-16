@@ -17,9 +17,9 @@ if _sys.platform == "win32":
     asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
 import socketio  # type: ignore
 import uvicorn  # type: ignore
-from fastapi import FastAPI  # type: ignore
+from fastapi import FastAPI, Request  # type: ignore
 from fastapi.staticfiles import StaticFiles  # type: ignore
-from fastapi.responses import FileResponse  # type: ignore
+from fastapi.responses import FileResponse, RedirectResponse  # type: ignore
 from fastapi.middleware.cors import CORSMiddleware  # type: ignore
 # BaseHTTPMiddleware removed — it buffers streaming responses (breaks SSE)
 
@@ -1198,6 +1198,22 @@ async def download_installer():
     if os.path.exists(file_path):
         return FileResponse(file_path, filename="Install_Originsun_Agent.bat")
     return {"error": "找不到自動安裝腳本。"}
+
+@app.get("/proposal-plan.html", include_in_schema=False)
+async def _legacy_proposal_plan(request: Request):
+    """舊網址 → `/project.html`（2026-08-15 改名，主鍵早已從提案換成專案）。
+
+    🔴 **query string 一定要帶過去**：已經發給客戶的共編連結是
+    `/proposal-plan.html?t=<token>`，掉了 token 就是一個空頁。同理 `?pid=`
+    （CRM 的「開啟企劃」、我的工作台）與 `?id=`。
+
+    註冊在 `app.mount("/")` 之前才會贏 —— StaticFiles 掛在根，順序決定誰接。
+    NAS 那側的同一條規則在 docker/nginx/originsun.conf（對外流量不經過這裡）。
+    """
+    qs = request.url.query
+    return RedirectResponse("/project.html" + (f"?{qs}" if qs else ""),
+                            status_code=301)
+
 
 @app.get("/")
 async def serve_index():

@@ -14,7 +14,7 @@
  * 純渲染：不持有狀態（狀態在 pins-store），每次要更新就整支再呼叫一次 ——
  * 比照 plan-matrix / survey-table 的慣例，呼叫端不必留 handle。
  *
- * 同一份 UI 活在兩個色系：CRM SPA（深色）與 /proposal-plan.html（官網白底）。
+ * 同一份 UI 活在兩個色系：CRM SPA（深色）與 /project.html（官網白底）。
  * 主題化＝自帶 --pin-* 變數、深色為預設、白底靠 html.plan-theme-light 覆寫
  * （吃呼叫端變數會在沒定義的頁面變成看不見的字）。
  */
@@ -50,7 +50,7 @@ export function renderPins(host, opts = {}) {
 
     const cards = pins.map((p, i) => {
         // 縮圖壞掉（NAS 產圖失敗、檔案被換掉）要退回佔位方塊，不能留一塊空白：
-        // 一排有圖一排沒圖看起來像壞掉。同 proposal-plan.html 的 refThumb。
+        // 一排有圖一排沒圖看起來像壞掉。同 project.html 的 refThumb。
         const cover = p.thumb_url
             ? `<img src="${esc(p.thumb_url)}" alt="" loading="lazy" class="pin-img"
                     onerror="this.parentElement.classList.add('ph');this.remove();">`

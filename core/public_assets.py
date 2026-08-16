@@ -25,7 +25,7 @@ import re
 # 不放進來的話 master 關機時客戶點那個連結會 404。
 # meeting-note.html：單篇會議記錄的唯讀分享頁（自己的 token，見
 # api_proposals /shared/meeting/{token}）。
-PAGES = ("media-log.html", "proposal-plan.html", "reference.html",
+PAGES = ("media-log.html", "project.html", "reference.html",
          "meeting-note.html")
 
 # 上面那些頁 import 得到的模組目錄（相對 frontend/）。網址就是 "/" + 目錄名。
@@ -40,7 +40,7 @@ SYNC_PATHS = (["frontend/img"]
 # 三種寫法都要抓 —— 漏掉一種 = 那條相依連同它整棵子樹對守衛完全隱形：
 #   1. `from "x"`                       靜態 import / re-export
 #   2. `import("x")` / `importXxx("x")` 動態 import 與它的包裝（utils.js 的
-#      importRetry、proposal-plan.html 的 importRetryish…）——從語法上看只是
+#      importRetry、project.html 的 importRetryish…）——從語法上看只是
 #      個函式呼叫
 #   3. `import "x";`                    bare side-effect import（app.js 就這樣寫）
 #

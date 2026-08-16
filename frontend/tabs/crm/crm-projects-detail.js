@@ -283,7 +283,7 @@ function renderDetail(project) {
     _go.style.cssText = 'margin-left:10px;font-size:10px;padding:2px 8px;';
     _go.target = '_blank';
     _go.rel = 'noopener';
-    _go.href = '/proposal-plan.html?id=' + encodeURIComponent(project.id);
+    _go.href = '/project.html?id=' + encodeURIComponent(project.id);
     _go.textContent = '開啟專案頁 ↗';
     _title.appendChild(_go);
 

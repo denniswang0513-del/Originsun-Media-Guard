@@ -2,7 +2,7 @@
  * crm-projects-plan.js — 專案詳情「提案企劃」分頁（提案=專案合體，2026-08-06）
  *
  * 專案的提案衛星列（preprod_proposals.project_id）→ 嵌現成的 plan-matrix
- * 企劃元件（同 提案庫 overlay / proposal-plan.html 的登入模式）。
+ * 企劃元件（同 提案庫 overlay / project.html 的登入模式）。
  * 沒有衛星列（非提案出身的專案）→ 空狀態 + 一鍵建立
  * （POST /proposals {title: 專案名, project_id} — 後端掛載、不另建殼專案）。
  */
@@ -345,7 +345,7 @@ async function _renderPlan(listItem, props, projectId, host) {
             <span style="flex:1;"></span>
             <button id="pp-add" class="crm-btn crm-btn-secondary crm-btn-sm"
                     title="同一個案子再提一個方向（各自有企劃、各自有資產子夾）">＋ 再加一筆提案</button>
-            <a href="/proposal-plan.html?pid=${encodeURIComponent(prop.id)}" target="_blank" rel="noopener"
+            <a href="/project.html?pid=${encodeURIComponent(prop.id)}" target="_blank" rel="noopener"
                style="color:#60a5fa;font-size:12px;">獨立視窗開啟 ↗</a>
         </div>
         ${_winHintHtml(props)}

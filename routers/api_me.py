@@ -36,7 +36,7 @@ router = APIRouter(prefix="/api/v1/me", tags=["me"])
 ME_MODULE_KEYS = ("me_projects", "me_profile", "me_todos", "me_finance", "me_leave")
 
 # 提案企劃卡的閘門 — 對齊 routers/api_proposals._check 的守衛集合（owner 2026-08-11
-# 拍板「權限全通」：打得開 /proposal-plan.html 的人，工作台就有入口卡）。
+# 拍板「權限全通」：打得開 /project.html 的人，工作台就有入口卡）。
 PROPOSAL_PLAN_KEYS = ("preprod_proposals", "preprod_plan", "crm_projects")
 
 
@@ -73,7 +73,7 @@ async def my_workspace(request: Request):
     # 影像紀錄卡同款宣告式閘門 — my.html 自行打 /crm/media-log/overview（唯讀瀏覽）
     if "media_log" in mods:
         allowed.append("media_log")
-    # 提案企劃卡 — 純入口連結（/proposal-plan.html），資料不進 bundle
+    # 提案企劃卡 — 純入口連結（/project.html），資料不進 bundle
     if any(k in mods for k in PROPOSAL_PLAN_KEYS):
         allowed.append("proposal_plan")
     ident = await resolve_current_staff(request)

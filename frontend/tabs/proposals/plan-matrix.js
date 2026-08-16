@@ -1,7 +1,7 @@
 /**
  * plan-matrix.js — 提案企劃矩陣元件（docs/PROPOSAL_PLANNER.md §6.4/§7.3）
  *
- * 同一份 UI 活在兩個色系：CRM SPA overlay（深色）與 /proposal-plan.html（官網白底）。
+ * 同一份 UI 活在兩個色系：CRM SPA overlay（深色）與 /project.html（官網白底）。
  * 主題化 = 元件自帶 --plc-* CSS 變數（深色為預設，定義在 .plc 上），
  * 白底靠 html.plan-theme-light 覆寫（specificity 一定贏）— 比照 media-log 元件做法。
  *
@@ -373,7 +373,7 @@ function _wireSharePanel(container, opts) {
     const btn = container.querySelector('#plc-share-btn');
     const panel = container.querySelector('#plc-share-panel');
     if (!btn || !panel) return;
-    const shareUrl = (tok) => `${location.origin}/proposal-plan.html?t=${encodeURIComponent(tok)}`;
+    const shareUrl = (tok) => `${location.origin}/project.html?t=${encodeURIComponent(tok)}`;
 
     function paint() {
         const tok = opts.plan.share_token || '';

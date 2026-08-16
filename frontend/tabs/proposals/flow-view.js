@@ -18,7 +18,7 @@ import { TRACK_COLOR } from './prop-const.js';
 
 // 主題化＝元件自帶 --pf-* 變數、深色為預設、白底靠 html.plan-theme-light 覆寫
 // （比照 plan-matrix / meeting-view / folder-view 的既有慣例）。這頁在兩個地方
-// 掛：後台 SPA（深色）與 /proposal-plan.html（官網白底）—— 寫死顏色的話，
+// 掛：後台 SPA（深色）與 /project.html（官網白底）—— 寫死顏色的話，
 // 企劃人員最常用的那個頁面會是一片黑底貼在白紙上。
 const CSS = `
 .pflow { --pf-ink:#ddd; --pf-sub:#888; --pf-line:#2e2e2e; --pf-card:#161616;
@@ -146,7 +146,7 @@ function _why(it, clickable) {
 // 本來就掛不起來（它要先同源打到 /api/v1/crm/…，那邊只 proxy 幾個 shared/）。
 const SPA = '/';
 // pathname 不會變（SPA 走 hash 路由），所以這是文件層級的常數。
-// `/proposal-plan.html` 上點 `/#tab_x` 是一次**跨頁導覽**，會把企劃人員手上
+// `/project.html` 上點 `/#tab_x` 是一次**跨頁導覽**，會把企劃人員手上
 // 正在編的東西帶走 → 開新分頁。判斷不出來就開新分頁：最壞多一個分頁，而不是
 // 弄丟內容。
 const NEW_TAB = location.pathname !== SPA;

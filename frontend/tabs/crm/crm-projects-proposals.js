@@ -109,7 +109,7 @@ function _wireHost(host) {
             e.preventDefault();
             openDeck(pid, (_cache || []).find(x => x.id === pid)?.deck_url);
         } else if (e.target.closest('[data-open]')) {
-            window.open(`/proposal-plan.html?pid=${encodeURIComponent(pid)}`, '_blank', 'noopener');
+            window.open(`/project.html?pid=${encodeURIComponent(pid)}`, '_blank', 'noopener');
         }
     });
 }

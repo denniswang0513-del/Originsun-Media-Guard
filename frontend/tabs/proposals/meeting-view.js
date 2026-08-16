@@ -636,7 +636,7 @@ a.mv-btn { text-decoration: none; display: inline-flex; align-items: center; }
       background: var(--mv-accent); animation: mv-blink 1.2s ease-in-out infinite; }
 @keyframes mv-blink { 50% { opacity: .25; } }
 .mv-rt { font-variant-numeric: tabular-nums; }
-/* 手機：日期與主題各佔一行，觸控目標 44px（同 proposal-plan 的既有斷點） */
+/* 手機：日期與主題各佔一行，觸控目標 44px（同 project.html 的既有斷點） */
 @media (max-width: 720px) {
   .mv-in { font-size: 16px; }
   .mv-title { min-width: 100%; }

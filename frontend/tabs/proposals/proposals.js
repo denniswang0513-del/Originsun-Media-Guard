@@ -536,7 +536,7 @@ async function openDetail(pid) {
 }
 
 // ── 提案簡報（deck）那一格 ────────────────────────────────
-// 三種狀態，與 /proposal-plan.html 側欄同一套說法（那邊是 _deckCellHtml）：
+// 三種狀態，與 /project.html 側欄同一套說法（那邊是 _deckCellHtml）：
 //   有 deck                      → 檔名 + 下載 + 更換
 //   沒 deck 但「提案資料」有勾選 → 已勾選的檔名 + 一顆「設為提案簡報」
 //   都沒有                        → 尚未上傳 + 上傳
@@ -660,7 +660,7 @@ async function _mountSurvey(ov, prop) {
 function _wireShareCard(ov, prop) {
     const host = ov.querySelector('#pd-share-host');
     if (!host) return;
-    const shareUrl = () => `${location.origin}/proposal-plan.html?t=${encodeURIComponent((prop.plan || {}).share_token || '')}`;
+    const shareUrl = () => `${location.origin}/project.html?t=${encodeURIComponent((prop.plan || {}).share_token || '')}`;
 
     function paint() {
         const on = !!(prop.plan && prop.plan.share_token);

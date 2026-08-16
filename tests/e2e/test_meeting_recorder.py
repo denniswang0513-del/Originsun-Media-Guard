@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""會議記錄分頁的「現場錄音」UI 回歸（`/proposal-plan.html` → 會議記錄）。
+"""會議記錄分頁的「現場錄音」UI 回歸（`/project.html` → 會議記錄）。
 
 錄音那條路有三件事光看程式碼看不出來、壞了也不會有例外，只會安靜地不見：
 
@@ -76,9 +76,9 @@ def mic_browser(browser):
 
 def _open_meetings(pg, base, token, pid):
     """登入 → 開這筆提案 → 切到會議記錄分頁 → 確保有一張卡。"""
-    pg.goto(f"{base}/proposal-plan.html", timeout=60000)
+    pg.goto(f"{base}/project.html", timeout=60000)
     pg.evaluate(f"localStorage.setItem('auth_token','{token}')")
-    pg.goto(f"{base}/proposal-plan.html?pid={pid}", timeout=60000)
+    pg.goto(f"{base}/project.html?pid={pid}", timeout=60000)
     pg.wait_for_selector("#tab-meeting", state="attached", timeout=30000)
     pg.click("#tab-meeting")
     pg.wait_for_selector("#meeting-host .mv-bar", timeout=30000)

@@ -1878,11 +1878,40 @@ CRM 專案詳情。
 （人員配置搬入＝那份的階段 B，**✅ 同日完成**：`tabs/proposals/staff-view.js`
 一份兩個呼叫端，專案頁那份唯讀，金額欄由後端回不回那個鍵決定）。
 
-### §15.4 後續階段（未動工）
-- **階段 3**：CRM 專案管理收斂成「清單 + 錢」（帳目/成本/財務摘要留著）。
+### §15.4 網址改名（✅ 2026-08-15）
+
+`/proposal-plan.html` → **`/project.html`**（owner「網址改名一起處理」）。
+主鍵早就從提案換成專案了，網址是最後一個還在說舊故事的地方。
+
+🔴 **舊網址留 301 且必須帶 query string**。這條守的不是路由表，是**已經發出去
+的東西**：客戶手上的共編連結、同事書籤、貼在 Google Chat 的網址，全是
+`/proposal-plan.html?t=…`。掉了 query 就是一個沒有 token 的空頁 —— 而那種壞法
+沒有人會來報修，只會有人默默說「那個連結壞了」。
+
+兩側各一份規則（對外流量走 NAS，不經過 master）：
+- master：`main.py::_legacy_proposal_plan` —— **必須註冊在 `mount("/")` 之前**，
+  StaticFiles 掛在根，順序決定誰接得到。
+- NAS：`docker/nginx/originsun.conf` 的 `return 301 /project.html$is_args$args`。
+
+兩份都由 `tests/unit/test_legacy_page_redirect.py` 釘住（master 驗真的 301 +
+四種 query；nginx 驗字面規則 —— 那側漏了 `$is_args$args` 的話 master 全綠、
+客戶連結照樣壞）。
+
+⚠️ **發版時要手動清舊檔**：`deploy_to_prod` 與 NAS scp 都**不做 mirror-delete**，
+所以 `C:\OriginsunAgent\frontend\proposal-plan.html` 與 NAS 上那份會留著。
+301 讓它們打不到（master 的路由先接、nginx 的 location 先比），但留著就是兩份
+會漂的同名頁 —— 發完版順手刪。
+
+### §15.5 後續階段
+
+- **階段 3（owner 2026-08-15 選 B）**：CRM **保留 8 個分頁與入口**，只是不重複
+  畫 —— 共用的四個一律同一份元件（人員配置／完稿結案已是），提案範疇的改成明確
+  的「在專案頁編輯 ↗」。
+  **為什麼不收成「CRM 只剩錢」**：實查生產 12 個帳號，進得了 CRM 專案管理的與
+  進得了專案頁的是**同一組六個**（3 個 Lv3 + Ryansnap／nashtsai／soca），沒有
+  只進得了其中一邊的人。所以收斂原本最大的好處「不要有兩處要改」**今天已經由
+  『同一份元件兩個呼叫端』拿到了**；移除入口只多換到概念清晰，卻要付六個人每天
+  的操作節奏。等真的出現「只做企劃、不碰 CRM」的人再收 A。
 - **刻意不做**：把成本／帳目搬進這一頁。1,700 行、金額敏感、使用者是財務
   不是製作、RBAC 也不同 —— 搬過去只會讓企劃人員的頁面掛著一堆點不進去的
   東西。
-- 網址改名 `/project.html`（舊網址轉址）留到功能穩定後再做：它會動到
-  `core/public_assets.PAGES` + nginx + publish 同步 + 三個入口 + e2e，
-  與功能改動綁在同一筆會讓爆炸半徑加倍。

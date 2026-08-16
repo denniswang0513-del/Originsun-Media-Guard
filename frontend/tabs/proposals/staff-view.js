@@ -58,7 +58,7 @@ export async function loadProjectStaff(projectId, opts = {}) {
         // 🔴 有沒有金額**只看後端回了什麼**（沒授權時 core/money.py 直接把鍵
         // 刪掉），不看前端旗標。`canSeeMoney()` 讀的是 SPA 的
         // `window._accessLevel/_modules`，而這支的另一個掛載點是獨立頁
-        // proposal-plan.html —— 那頁沒有那些全域，問了會把管理員也判成沒授權。
+        // project.html —— 那頁沒有那些全域，問了會把管理員也判成沒授權。
         // 鍵在＝後端認可，這是唯一不會漂的判準。
         const showMoney = rows.some(r => 'cost' in r);
         host.innerHTML = rows.map(r => `

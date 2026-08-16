@@ -172,7 +172,7 @@ def project_case(base, token, tag):
 
 @pytest.fixture(scope="module")
 def plan_page(browser_context, real_server, e2e_admin_token):
-    """開一頁 `/proposal-plan.html`（已登入）。用完自己關。
+    """開一頁 `/project.html`（已登入）。用完自己關。
 
     🔴 為什麼要 goto 兩次：`localStorage` 是綁 origin 的，沒有先落地在那個
     origin 上就寫不進去。這個非顯而易見的開場白原本在四個測試檔各抄一份 ——
@@ -185,7 +185,7 @@ def plan_page(browser_context, real_server, e2e_admin_token):
     def _open(query="", *, wait="#plan-side .side-tab", token=None):
         page = browser_context.new_page()
         made.append(page)
-        base = real_server["base_url"] + "/proposal-plan.html"
+        base = real_server["base_url"] + "/project.html"
         page.goto(base, timeout=60000)
         page.evaluate("t => localStorage.setItem('auth_token', t)",
                       token or e2e_admin_token)

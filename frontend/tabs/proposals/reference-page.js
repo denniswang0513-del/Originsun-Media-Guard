@@ -313,7 +313,7 @@ export function renderReference(container, opts) {
             ${ref.links.length ? ref.links.map(l => `
                 <div class="rfc-link-row" data-link="${attr(l.link_id)}">
                     <span class="tt">${esc(TARGET_LABEL[l.target_type] || l.target_type)}</span>
-                    <a href="${l.target_type === 'crm_project' ? '/#crm-projects' : '/proposal-plan.html?pid=' + encodeURIComponent(l.target_id)}"
+                    <a href="${l.target_type === 'crm_project' ? '/#crm-projects' : '/project.html?pid=' + encodeURIComponent(l.target_id)}"
                        target="_blank" rel="noopener">${esc(l.title || l.target_id)}</a>
                     <span class="st">${esc(l.status || '')}</span>
                     ${l.note ? `<span class="st">— ${esc(l.note)}</span>` : ''}

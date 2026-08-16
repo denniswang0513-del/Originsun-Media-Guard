@@ -3,7 +3,7 @@
  *
  * 比一般 tfetch 多帶 err.status / err.detail — plan-matrix 的 409 衝突 UI
  * 靠它們分流（曾因兩份 fetcher 分岔，SPA 路徑的衝突 UI 整個死路）。
- * 無 SPA 依賴：未來 /proposal-plan.html 獨立頁也 import 這份。
+ * 無 SPA 依賴：未來 /project.html 獨立頁也 import 這份。
  */
 
 function _authHeaders(extra = {}) {

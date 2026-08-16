@@ -32,7 +32,7 @@ PROPOSALS_PREFIX = "/api/v1/proposals"
 router = APIRouter(prefix=PROPOSALS_PREFIX, tags=["proposals"])
 
 # 對外白名單 —— NAS 24/7 容器只掛這一個（master 在檔尾收編回主 router，
-# URL 完全不變）。提案的公開共編頁（/proposal-plan.html?t=）要在 master 關機
+# URL 完全不變）。提案的公開共編頁（/project.html?t=）要在 master 關機
 # 時仍然開得了，所以那些 `/shared/{token}/…` 端點必須住在容器裡。
 #
 # ⚠️ 往這裡加端點前先問：它真的該被**匿名**打到嗎？授權只有 token 一層。

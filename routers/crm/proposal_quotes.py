@@ -26,7 +26,7 @@ from core.bg_status import settle
 from core.bg_task import fire
 from core.project_folders import safe_rel_path
 
-# 守衛比照提案子分頁的既有先例（briefs.py 同款）：對齊 /proposal-plan.html
+# 守衛比照提案子分頁的既有先例（briefs.py 同款）：對齊 /project.html
 # 的頁面守衛 —— 打得開提案工作頁的人（含 preprod_plan），分頁就要能用，
 # 否則「給看不給用」。不新增 RBAC key。
 from routers.api_proposals import _get_proposal_or_404, proposal_auth

@@ -1,7 +1,7 @@
 /**
  * prop-actions.js — 提案的「動作層」：狀態管線、成案轉專案、刪除、簡報、參考片。
  *
- * 後台「📑 提案庫」、CRM 專案的提案帶、獨立頁 /proposal-plan.html 共用同一份。
+ * 後台「📑 提案庫」、CRM 專案的提案帶、獨立頁 /project.html 共用同一份。
  * 理由同 pins-store：真正會漂移的不是版面，是**端點與規則**。實際發生過 ——
  * 「成案」原本有三份實作，其中 CRM 那份的組織學習原因是選填、提案庫那份是
  * 必填，同一個守門從不同入口進去鬆緊不一樣。
@@ -9,7 +9,7 @@
  * 🔴 規則的權威在後端 `routers/api_proposals.py`（狀態機、convert 的副作用都在
  * 那裡）。這裡只負責「前端怎麼問、送哪支端點」。
  *
- * 部署限制：**凡是 /proposal-plan.html 或 /reference.html 的 import 閉包裡的檔案**
+ * 部署限制：**凡是 /project.html 或 /reference.html 的 import 閉包裡的檔案**
  * 都只能靜態 import `tabs/proposals` 與 `js/shared` —— NAS 對外容器只 serve 這兩個
  * 子目錄（正本在 `core/public_assets.py`，由 `tests/unit/test_public_surface.py`
  * 釘住），拉到 crm-utils / website-utils 會讓客戶那頁在 NAS 上直接載入失敗。

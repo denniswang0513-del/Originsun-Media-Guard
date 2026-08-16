@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""提案企劃頁 `/proposal-plan.html` 的手機版版面回歸（iPhone 14 尺寸）。
+"""提案企劃頁 `/project.html` 的手機版版面回歸（iPhone 14 尺寸）。
 
 企劃人員主要在手機上用這頁，客戶則是用 `?t=` 連結在手機上看。這裡釘住三條
 不變式，每一條都對應一個真的壞過的東西：
@@ -102,7 +102,7 @@ def _assert_screen(pg, label):
 
 
 def _login(pg, base, token):
-    pg.goto(f"{base}/proposal-plan.html", timeout=60000)
+    pg.goto(f"{base}/project.html", timeout=60000)
     pg.evaluate(f"localStorage.setItem('auth_token','{token}')")
 
 
@@ -110,7 +110,7 @@ def _login(pg, base, token):
 def test_login_screen(real_server, phone):
     pg = phone.new_page()
     try:
-        pg.goto(real_server["base_url"] + "/proposal-plan.html", timeout=60000)
+        pg.goto(real_server["base_url"] + "/project.html", timeout=60000)
         pg.wait_for_timeout(1500)
         _assert_screen(pg, "登入畫面")
     finally:
@@ -121,7 +121,7 @@ def test_proposal_list(real_server, phone, e2e_admin_token, proposal):
     pg = phone.new_page()
     try:
         _login(pg, real_server["base_url"], e2e_admin_token)
-        pg.goto(real_server["base_url"] + "/proposal-plan.html", timeout=60000)
+        pg.goto(real_server["base_url"] + "/project.html", timeout=60000)
         pg.wait_for_selector(".prop-row", timeout=30000)
         pg.wait_for_timeout(600)
         _assert_screen(pg, "提案清單")
@@ -135,7 +135,7 @@ def test_plan_matrix(real_server, phone, e2e_admin_token, proposal):
     pg = phone.new_page()
     try:
         _login(pg, real_server["base_url"], e2e_admin_token)
-        pg.goto(f"{real_server['base_url']}/proposal-plan.html?pid={proposal['id']}",
+        pg.goto(f"{real_server['base_url']}/project.html?pid={proposal['id']}",
                 timeout=60000)
         pg.wait_for_timeout(3000)
         if pg.eval_on_selector_all(".plc-start [data-tid]", "e=>e.length"):
@@ -171,7 +171,7 @@ def test_dialogs_stay_in_viewport(real_server, phone, e2e_admin_token, proposal)
     pg = phone.new_page()
     try:
         _login(pg, real_server["base_url"], e2e_admin_token)
-        pg.goto(real_server["base_url"] + "/proposal-plan.html", timeout=60000)
+        pg.goto(real_server["base_url"] + "/project.html", timeout=60000)
         pg.wait_for_selector(".prop-row", timeout=30000)
         for btn, sel, label in [("#btn-folders", ".pf, .pdlg", "資產資料夾"),
                                 ("#btn-new", ".pdlg", "新提案")]:
@@ -199,7 +199,7 @@ def test_guest_share_page(real_server, phone, proposal):
     errs = []
     pg.on("pageerror", lambda e: errs.append(str(e)))
     try:
-        pg.goto(f"{real_server['base_url']}/proposal-plan.html?t={proposal['share']}",
+        pg.goto(f"{real_server['base_url']}/project.html?t={proposal['share']}",
                 timeout=60000)
         pg.wait_for_timeout(3500)
         _assert_screen(pg, "客戶公開共編頁")

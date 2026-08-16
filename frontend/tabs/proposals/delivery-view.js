@@ -17,7 +17,7 @@
 import { esc as _esc } from '../../js/shared/dom.js';
 import { renderArchiveCard } from './archive-card.js';
 
-// 🔴 **兩個呼叫端**：CRM 專案詳情、專案頁（/proposal-plan.html?id=）。所以
+// 🔴 **兩個呼叫端**：CRM 專案詳情、專案頁（/project.html?id=）。所以
 // host 與 fetcher 都由呼叫端給 —— 這個檔住在 `tabs/proposals/`（公開頁的
 // import 封閉範圍內），不能靜態拉 tabs/crm 的 crmFetch；而寫死 DOM id
 // （proj-detail-delivery / delivery-showcase-frame…）等於只服務得了一個呼叫端。

@@ -102,7 +102,7 @@ export async function openProposalEditor({ proposal = null, onSaved, onCancel = 
     const err = $('#pe-err');
     $('#pe-cancel').addEventListener('click', dlg.close);
     // 客戶名錄晚一步填：冷快取時要打一次 API，先把框開起來比讓人乾等好
-    // （同 proposal-plan 的片庫挑選器）。現在的客戶已經在上面同步放進去了，
+    // （同 project.html 的片庫挑選器）。現在的客戶已經在上面同步放進去了，
     // 這裡只補「其他」選項，而且**不動選取值** —— 使用者可能已經改過了
     // （包含剛按「＋ 新客戶」建的那個）。
     _clients().then(list => {
