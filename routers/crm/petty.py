@@ -27,6 +27,7 @@ from sqlalchemy import func as safunc
 from sqlalchemy import select
 
 from core.auth import check_admin_or_module
+from core.money import can_see_money
 from core.identity import resolve_current_staff
 from core.schemas import PettyExpensePayload, PettySubmitPayload
 from db.models import (CrmCashEntry, CrmPaymentRequest, CrmProject,
@@ -58,6 +59,25 @@ async def _my_staff(request: Request):
         raise HTTPException(status_code=409,
                             detail="帳號尚未綁定人員檔案，請聯絡管理員")
     return ident["staff"]
+
+
+def _new_expense(body, staff_id: str) -> CrmProjectExpense:
+    """單據建構的單一正本（本人登記 / 代為登記共用）。"""
+    return CrmProjectExpense(
+        id=uuid.uuid4().hex[:16],
+        project_id=body.project_id or None,
+        category=body.category or "其他",
+        estimated=0, actual=body.actual,
+        sub_item=body.summary or None,
+        notes=body.notes or None,
+        created_at=_now(),
+        expense_date=_parse_day(body.expense_date) or _now(),
+        staff_id=staff_id,
+        item=body.item or "其他",
+        invoice_no=body.invoice_no or None,
+        has_invoice=1 if body.invoice_no else 0,
+        status="草稿",
+    )
 
 
 def _expense_dict(e: CrmProjectExpense, project_name: str = "") -> dict:
@@ -119,24 +139,21 @@ async def petty_options():
 
 
 # ── 我的請款（own-scope，不受 money_view 管）──────────────────────────
-@router.get("/petty/me")
-async def my_petty(request: Request):
-    staff = await _my_staff(request)
-    factory = await _get_factory()
-    async with factory() as session:
-        names = dict((await session.execute(
-            select(CrmProject.id, CrmProject.name))).all())
-        rows = (await session.execute(
-            select(CrmProjectExpense)
-            .where(CrmProjectExpense.staff_id == staff.id,
-                   CrmProjectExpense.claim_id.is_(None))
-            .order_by(CrmProjectExpense.expense_date.desc().nullslast())
-        )).scalars().all()
-        claims = (await session.execute(
-            select(CrmReimbursement)
-            .where(CrmReimbursement.staff_id == staff.id)
-            .order_by(CrmReimbursement.created_at.desc()).limit(50)
-        )).scalars().all()
+async def _petty_payload(session, staff) -> dict:
+    """某個人的零用金現況。own-scope 與代管視圖共用 —— 兩份會漂。"""
+    names = dict((await session.execute(
+        select(CrmProject.id, CrmProject.name))).all())
+    rows = (await session.execute(
+        select(CrmProjectExpense)
+        .where(CrmProjectExpense.staff_id == staff.id,
+               CrmProjectExpense.claim_id.is_(None))
+        .order_by(CrmProjectExpense.expense_date.desc().nullslast())
+    )).scalars().all()
+    claims = (await session.execute(
+        select(CrmReimbursement)
+        .where(CrmReimbursement.staff_id == staff.id)
+        .order_by(CrmReimbursement.created_at.desc()).limit(50)
+    )).scalars().all()
     return {
         "staff": {"id": staff.id, "name": staff.name},
         "petty_float": staff.petty_float or 0,
@@ -144,6 +161,14 @@ async def my_petty(request: Request):
         "pending": [_expense_dict(r, names.get(r.project_id, "")) for r in rows],
         "claims": [_claim_dict(c) for c in claims],
     }
+
+
+@router.get("/petty/me")
+async def my_petty(request: Request):
+    staff = await _my_staff(request)
+    factory = await _get_factory()
+    async with factory() as session:
+        return await _petty_payload(session, staff)
 
 
 @router.post("/petty/expenses")
@@ -154,21 +179,7 @@ async def add_my_petty_expense(body: PettyExpensePayload, request: Request):
         raise HTTPException(status_code=400, detail="金額不可為 0")
     factory = await _get_factory()
     async with factory() as session:
-        exp = CrmProjectExpense(
-            id=uuid.uuid4().hex[:16],
-            project_id=body.project_id or None,
-            category=body.category or "其他",
-            estimated=0, actual=body.actual,
-            sub_item=body.summary or None,
-            notes=body.notes or None,
-            created_at=_now(),
-            expense_date=_parse_day(body.expense_date) or _now(),
-            staff_id=staff.id,
-            item=body.item or "其他",
-            invoice_no=body.invoice_no or None,
-            has_invoice=1 if body.invoice_no else 0,
-            status="草稿",
-        )
+        exp = _new_expense(body, staff.id)
         session.add(exp)
         await session.commit()
         return {"status": "ok", "id": exp.id}
@@ -177,10 +188,11 @@ async def add_my_petty_expense(body: PettyExpensePayload, request: Request):
 @router.put("/petty/expenses/{expense_id}")
 async def update_my_petty_expense(expense_id: str, body: PettyExpensePayload,
                                   request: Request):
-    staff = await _my_staff(request)
+    any_owner = _may_manage_others(request)
+    staff_id = None if any_owner else (await _my_staff(request)).id
     factory = await _get_factory()
     async with factory() as session:
-        exp = await _own_editable(session, expense_id, staff.id)
+        exp = await _own_editable(session, expense_id, staff_id, any_owner)
         exp.project_id = body.project_id or None
         exp.category = body.category or "其他"
         exp.actual = body.actual
@@ -196,36 +208,164 @@ async def update_my_petty_expense(expense_id: str, body: PettyExpensePayload,
 
 @router.delete("/petty/expenses/{expense_id}")
 async def delete_my_petty_expense(expense_id: str, request: Request):
-    staff = await _my_staff(request)
+    any_owner = _may_manage_others(request)
+    staff_id = None if any_owner else (await _my_staff(request)).id
     factory = await _get_factory()
     async with factory() as session:
-        exp = await _own_editable(session, expense_id, staff.id)
+        exp = await _own_editable(session, expense_id, staff_id, any_owner)
         await session.delete(exp)
         await session.commit()
     return {"status": "ok", "deleted": expense_id}
 
 
-async def _own_editable(session, expense_id: str, staff_id: str):
-    """本人的、還沒送出的單據 —— 其餘一律 404/409（不洩漏別人的單據存在與否）。"""
+def _may_manage_others(request: Request) -> bool:
+    """審核者（money_view + finance_approve）改得動**任何人**的草稿。
+
+    會計代打之後常要回頭補一張收據或改個項目 —— 只能改自己的話，代為登記就
+    變成單向的。非審核者維持只摸得到自己的。
+    """
+    if not can_see_money(request):
+        return False
+    try:
+        _check_approver(request)
+        return True
+    except HTTPException:
+        return False
+
+
+async def _own_editable(session, expense_id: str, staff_id: str, any_owner: bool = False):
+    """還沒送出的單據。`any_owner`＝審核者代管別人的（見下方 §代為登記）。
+
+    非審核者只摸得到自己的，而且 404 不 403 —— 403 等於告訴對方「這筆存在、
+    只是不是你的」，那本身就是洩漏。
+    """
     exp = await session.get(CrmProjectExpense, expense_id)
-    if exp is None or exp.staff_id != staff_id:
+    if exp is None or (not any_owner and exp.staff_id != staff_id):
         raise HTTPException(status_code=404, detail="找不到這筆支出（或不是你的）")
     if (exp.status or "草稿") not in EDITABLE or exp.claim_id:
         raise HTTPException(status_code=409, detail="已送出請款的單據不能自行修改")
     return exp
 
 
+# ── 代為登記：財務端管理**所有人**的零用金（owner 2026-08-17）───────────
+#
+# 為什麼要有這一組：`admin` 是共用帳號、後面沒有人，`/petty/me` 對它必然 409；
+# 而真實流程裡本來就有「同事把收據交給會計、會計代打」這條路 —— 只做 own-scope
+# 等於逼每個墊過錢的人都要有帳號並自己登記。
+#
+# 🔴 這一組**明確接受 staff_id**，與 own-scope 那組相反（那邊連 schema 都沒有這個
+# 欄位，見 test_payload_has_no_staff_id）。分成兩組端點而不是加一個可選參數：
+# 可選參數會讓「沒帶就是自己」變成預設安全性，而漏檢一次就是任何人都能替別人
+# 記帳。分開之後守衛寫在路徑上，漏不掉。
+
+
+async def _approver_staff(request: Request, session, staff_id: str):
+    _check_approver(request)
+    staff = await session.get(CrmStaff, staff_id)
+    if staff is None:
+        raise HTTPException(status_code=404, detail="找不到這位人員")
+    return staff
+
+
+@router.get("/petty/staff-options", dependencies=[Depends(money_dep)])
+async def petty_staff_options(request: Request):
+    """代為登記的人員下拉：在職人員 + 任何已經有零用金紀錄的人（含離職的）。"""
+    _check_approver(request)
+    factory = await _get_factory()
+    async with factory() as session:
+        used = {r[0] for r in (await session.execute(
+            select(CrmProjectExpense.staff_id)
+            .where(CrmProjectExpense.staff_id.isnot(None)).distinct())).all()}
+        rows = (await session.execute(
+            select(CrmStaff.id, CrmStaff.name, CrmStaff.status,
+                   CrmStaff.petty_float))).all()
+    out = [{"id": r.id, "name": r.name, "petty_float": r.petty_float or 0}
+           for r in rows if (r.status or "在職") == "在職" or r.id in used]
+    return {"staff": sorted(out, key=lambda s: s["name"])}
+
+
+@router.get("/petty/staff/{staff_id}", dependencies=[Depends(money_dep)])
+async def petty_of_staff(staff_id: str, request: Request):
+    """某個人的零用金現況 —— 形狀與 `/petty/me` 相同，前端共用同一段畫面。"""
+    _check_approver(request)     # 先擋權限再碰 DB —— 否則沒 DB 時會回 503 遮住 403
+    factory = await _get_factory()
+    async with factory() as session:
+        staff = await _approver_staff(request, session, staff_id)
+        return await _petty_payload(session, staff)
+
+
+@router.post("/petty/staff/{staff_id}/expenses", dependencies=[Depends(money_dep)])
+async def add_petty_expense_for(staff_id: str, body: PettyExpensePayload,
+                                request: Request):
+    _check_approver(request)     # 先擋權限再碰 DB —— 否則沒 DB 時會回 503 遮住 403
+    factory = await _get_factory()
+    async with factory() as session:
+        staff = await _approver_staff(request, session, staff_id)
+        exp = _new_expense(body, staff.id)
+        session.add(exp)
+        await session.commit()
+        return {"status": "ok", "id": exp.id}
+
+
+@router.post("/petty/staff/{staff_id}/submit", dependencies=[Depends(money_dep)])
+async def submit_petty_for(staff_id: str, body: PettySubmitPayload,
+                           request: Request):
+    _check_approver(request)     # 先擋權限再碰 DB —— 否則沒 DB 時會回 503 遮住 403
+    factory = await _get_factory()
+    async with factory() as session:
+        staff = await _approver_staff(request, session, staff_id)
+        return await _submit_for(session, staff, body.notes)
+
+
 @router.post("/petty/expenses/{expense_id}/receipt")
 async def upload_my_petty_receipt(expense_id: str, request: Request,
                                   file: UploadFile = File(...)):
     """收據上傳 —— 復用 costs._save_receipt（它已支援沒有專案的支出）。"""
-    staff = await _my_staff(request)
+    any_owner = _may_manage_others(request)
+    staff_id = None if any_owner else (await _my_staff(request)).id
     factory = await _get_factory()
     async with factory() as session:
-        exp = await _own_editable(session, expense_id, staff.id)
+        exp = await _own_editable(session, expense_id, staff_id, any_owner)
         project_id = exp.project_id
     from .costs import _save_receipt
     return await _save_receipt(project_id, expense_id, file)
+
+
+async def _submit_for(session, staff, notes: str = "") -> dict:
+    """把某人手上的草稿打包成批次並直接成立。本人送出／代為送出共用。"""
+    rows = (await session.execute(
+        select(CrmProjectExpense)
+        .where(CrmProjectExpense.staff_id == staff.id,
+               CrmProjectExpense.claim_id.is_(None))
+    )).scalars().all()
+    rows = [r for r in rows if (r.status or "草稿") in EDITABLE]
+    if not rows:
+        raise HTTPException(status_code=400, detail="沒有可送出的單據")
+    dates = [r.expense_date for r in rows if r.expense_date]
+    total = sum(r.actual or 0 for r in rows)
+    opening = staff.petty_float or 0
+    await _assert_month_open(session, *dates)
+    now = _now()
+    claim = CrmReimbursement(
+        id=uuid.uuid4().hex[:16],
+        staff_id=staff.id, staff_name=staff.name,
+        period_start=min(dates) if dates else None,
+        period_end=max(dates) if dates else None,
+        opening_float=opening,
+        closing_float=opening - total,
+        total_claim=total,
+        status="已核准", submitted_at=now,
+        approved_by="（自動核准）", approved_at=now,
+        notes=notes or None,
+    )
+    session.add(claim)
+    for r in rows:
+        r.claim_id = claim.id
+        r.status = "已核准"
+    aps = await _build_aps(session, claim, rows, staff)
+    await session.commit()
+    return {"status": "ok", "claim_id": claim.id, "count": len(rows),
+        "total_claim": total, "payment_requests": aps, "auto_approved": True}
 
 
 @router.post("/petty/submit")
@@ -243,39 +383,7 @@ async def submit_my_petty(body: PettySubmitPayload, request: Request):
     staff = await _my_staff(request)
     factory = await _get_factory()
     async with factory() as session:
-        rows = (await session.execute(
-            select(CrmProjectExpense)
-            .where(CrmProjectExpense.staff_id == staff.id,
-                   CrmProjectExpense.claim_id.is_(None))
-        )).scalars().all()
-        rows = [r for r in rows if (r.status or "草稿") in EDITABLE]
-        if not rows:
-            raise HTTPException(status_code=400, detail="沒有可送出的單據")
-        dates = [r.expense_date for r in rows if r.expense_date]
-        total = sum(r.actual or 0 for r in rows)
-        opening = staff.petty_float or 0
-        await _assert_month_open(session, *dates)
-        now = _now()
-        claim = CrmReimbursement(
-            id=uuid.uuid4().hex[:16],
-            staff_id=staff.id, staff_name=staff.name,
-            period_start=min(dates) if dates else None,
-            period_end=max(dates) if dates else None,
-            opening_float=opening,
-            closing_float=opening - total,
-            total_claim=total,
-            status="已核准", submitted_at=now,
-            approved_by="（自動核准）", approved_at=now,
-            notes=body.notes or None,
-        )
-        session.add(claim)
-        for r in rows:
-            r.claim_id = claim.id
-            r.status = "已核准"
-        aps = await _build_aps(session, claim, rows, staff)
-        await session.commit()
-    return {"status": "ok", "claim_id": claim.id, "count": len(rows),
-            "total_claim": total, "payment_requests": aps, "auto_approved": True}
+        return await _submit_for(session, staff, body.notes)
 
 
 # ── 財務視角：帳戶總覽 / 待審 / 匯款清冊 ──────────────────────────────

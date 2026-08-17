@@ -107,6 +107,58 @@ def test_finance_views_allow_both(app_client, as_user, path):
 
 
 # ── 抹除層不准把「自己的錢」抹掉 ───────────────────────────────────────
+# ── 代為登記：財務端管理所有人的零用金 ────────────────────────────────
+DELEGATE = [
+    ("get", "/api/v1/crm/petty/staff-options", None),
+    ("get", "/api/v1/crm/petty/staff/__probe__", None),
+    ("post", "/api/v1/crm/petty/staff/__probe__/expenses",
+     {"actual": 100, "summary": "咖啡"}),
+    ("post", "/api/v1/crm/petty/staff/__probe__/submit", {}),
+]
+
+
+@pytest.mark.parametrize("method,path,body", DELEGATE)
+def test_delegate_rejects_plain_employee(app_client, as_user, method, path, body):
+    """🔴 代為登記＝替別人記帳。只有審核者能做，一般員工連讀都不行。"""
+    kw = {"headers": as_user(modules=["me_finance"])}
+    if body is not None:
+        kw["json"] = body
+    assert getattr(app_client, method)(path, **kw).status_code == 403
+
+
+@pytest.mark.parametrize("method,path,body", DELEGATE)
+def test_delegate_needs_both_grants(app_client, as_user, method, path, body):
+    for mods in (["finance_approve"], ["money_view"]):
+        kw = {"headers": as_user(modules=mods)}
+        if body is not None:
+            kw["json"] = body
+        assert getattr(app_client, method)(path, **kw).status_code == 403, mods
+
+
+@pytest.mark.parametrize("method,path,body", DELEGATE)
+def test_delegate_allows_approver(app_client, as_user, method, path, body):
+    kw = {"headers": as_user(modules=["money_view", "finance_approve"])}
+    if body is not None:
+        kw["json"] = body
+    r = getattr(app_client, method)(path, **kw)
+    assert r.status_code not in (401, 403), f"{method} {path}：{r.status_code}"
+
+
+def test_delegate_is_a_separate_endpoint_not_an_optional_field():
+    """🔴 代管走**路徑參數**，own-scope 的 schema 仍然沒有 staff_id。
+
+    低阻力的寫法是給 `/petty/expenses` 加一個可選的 staff_id、沒帶就當自己 ——
+    那會讓「漏檢一次守衛」直接等於「任何人都能替別人記帳」。分成兩組端點之後，
+    守衛寫在路徑上，漏不掉。
+    """
+    assert "staff_id" not in PettyExpensePayload.model_fields
+    src = (Path(__file__).resolve().parents[2]
+           / "routers" / "crm" / "petty.py").read_text(encoding="utf-8")
+    own = src.split("async def add_my_petty_expense")[1].split("\n@router")[0]
+    assert "_my_staff(request)" in own and "staff.id" in own
+    assert "body.staff_id" not in src, "own-scope 端點不准從 body 取 staff_id"
+
+
 # ── 審核／匯款（P2）──────────────────────────────────────────────────
 APPROVE_WRITES = [
     "/api/v1/crm/petty/claims/__probe__/approve",
@@ -145,7 +197,9 @@ def test_submit_auto_approves_and_builds_aps():
     """
     src = (Path(__file__).resolve().parents[2]
            / "routers" / "crm" / "petty.py").read_text(encoding="utf-8")
-    submit = src.split("async def submit_my_petty")[1].split("\n@router")[0]
+    # 錨在 `_submit_for` —— 送出的本體抽成函式後（本人送出／代為送出共用），
+    # 錨在端點上會失明
+    submit = src.split("async def _submit_for")[1].split("\n@router")[0]
     assert 'status="已核准"' in submit, "送出後的狀態不是已核准"
     assert "_build_aps(" in submit, "送出時沒有產應付款"
     assert "_assert_month_open(" in submit, "送出沒有檢查月結鎖帳"

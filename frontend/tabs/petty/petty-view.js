@@ -63,14 +63,45 @@ const CSS = `
 </style>`;
 
 // ── 分頁 1：我的請款 ────────────────────────────────────────────────
+// 代為登記：目前正在管理誰的零用金（null＝自己）。審核者才切得動。
+// 放模組層而不是參數：切換之後每一次重繪（新增/刪除/送出後）都要留在同一個人身上。
+let _asStaff = null;
+const _base = () => _asStaff
+    ? `/api/v1/crm/petty/staff/${encodeURIComponent(_asStaff)}`
+    : "/api/v1/crm/petty";
+
 export async function renderMine(host) {
-    let data, opts;
+    let data, opts, staffList = null;
+    // 審核者才拿得到人員清單（沒權限就 403，那不是錯誤，是「你只能記自己的」）
+    try { staffList = (await get("/api/v1/crm/petty/staff-options")).staff; }
+    catch (_) { staffList = null; }
+
     try {
         [data, opts] = await Promise.all([
-            get("/api/v1/crm/petty/me"), get("/api/v1/crm/petty/options")]);
+            get(_asStaff ? _base() : "/api/v1/crm/petty/me"),
+            get("/api/v1/crm/petty/options")]);
     } catch (e) {
-        // 帳號沒綁人員檔案不是故障，是「還差一步設定」——說清楚差哪一步，
-        // 別讓人看到紅字的「載入失敗」以為系統壞了
+        // 帳號沒綁人員檔案不是故障，是「還差一步設定」。但如果這個人是審核者，
+        // 他其實有路可走 —— 直接把「代為登記」的選單給他，而不是留一句死路。
+        if (e.status === 409 && staffList && staffList.length) {
+            host.innerHTML = CSS + `
+              <div class="pc-empty" style="text-align:left;">
+                這個帳號沒有綁定人員檔案（例如共用的 admin），所以沒有「自己的」請款。<br>
+                你有審核權限，可以直接<strong>代為登記</strong>某個人的零用金：
+                <div style="margin-top:12px;">
+                  <select id="pc-as" style="padding:9px;min-width:220px;">
+                    <option value="">選擇要管理誰的零用金…</option>
+                    ${staffList.map(s => `<option value="${esc(s.id)}">${esc(s.name)}</option>`).join("")}
+                  </select>
+                </div>
+              </div>`;
+            host.querySelector("#pc-as").onchange = (ev) => {
+                if (!ev.target.value) return;
+                _asStaff = ev.target.value;
+                renderMine(host);
+            };
+            return;
+        }
         if (e.status === 409) {
             host.innerHTML = CSS + '<div class="pc-empty">'
                 + '這個帳號還沒有綁定人員檔案，所以無法登記請款。<br>'
@@ -84,9 +115,21 @@ export async function renderMine(host) {
         + opts.projects.map(p => `<option value="${esc(p.id)}">${esc(p.name)}</option>`).join("");
     const itemOpts = opts.items.map(i => `<option value="${esc(i)}">${esc(i)}</option>`).join("");
 
-    host.innerHTML = CSS + `
+    const asSel = staffList && staffList.length ? `
+      <div style="margin-bottom:12px;display:flex;gap:8px;align-items:center;">
+        <span class="lbl" style="font-size:11px;color:var(--sub);">管理誰的零用金</span>
+        <select id="pc-as" style="padding:7px 10px;max-width:260px;">
+          <option value="">我自己</option>
+          ${staffList.map(s => `<option value="${esc(s.id)}"${
+            s.id === _asStaff ? " selected" : ""}>${esc(s.name)}</option>`).join("")}
+        </select>
+        ${_asStaff ? '<span class="pc-pill">代為登記中</span>' : ""}
+      </div>` : "";
+
+    host.innerHTML = CSS + asSel + `
     <div class="pc-sum">
-      <div><div class="lbl">本期應請款</div><div class="big">${money(data.pending_total)}</div></div>
+      <div><div class="lbl">本期應請款${_asStaff ? "（" + esc(data.staff.name) + "）" : ""}</div>
+        <div class="big">${money(data.pending_total)}</div></div>
       ${data.petty_float ? `<div><div class="lbl">手上備用金</div><div class="big">${
           money(data.petty_float - data.pending_total)}</div>
           <div class="sub" style="font-size:11px;color:var(--sub);">額度 ${money(data.petty_float)}</div></div>` : ""}
@@ -154,6 +197,9 @@ export async function renderMine(host) {
           </div>`).join("");
     }
 
+    const asEl = host.querySelector("#pc-as");
+    if (asEl) asEl.onchange = (ev) => { _asStaff = ev.target.value || null; renderMine(host); };
+
     const msg = host.querySelector("#pc-msg");
     host.querySelector("#pc-add").onclick = async (ev) => {
         const btn = ev.currentTarget;
@@ -161,7 +207,7 @@ export async function renderMine(host) {
         if (!amt) { msg.textContent = "金額不可為 0"; return; }
         btn.disabled = true; msg.textContent = "送出中…";
         try {
-            const r = await send("POST", "/api/v1/crm/petty/expenses", {
+            const r = await send("POST", _base() + "/expenses", {
                 expense_date: host.querySelector("#f-date").value,
                 actual: amt,
                 summary: host.querySelector("#f-sum").value.trim(),
@@ -191,7 +237,7 @@ export async function renderMine(host) {
                      + "\n\n送出後直接成立並列入匯款清冊，你就不能自己修改了。"
                      + "\n財務端看過覺得有問題會退回給你。")) return;
         sub.disabled = true;
-        try { await send("POST", "/api/v1/crm/petty/submit", { notes: "" }); renderMine(host); }
+        try { await send("POST", _base() + "/submit", { notes: "" }); renderMine(host); }
         catch (e) { alert(String(e.message || e)); sub.disabled = false; }
     };
 }
