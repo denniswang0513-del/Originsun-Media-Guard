@@ -537,6 +537,13 @@ class CrmProjectExpense(Base):
     claim_id = Column(String(32), nullable=True, index=True)    # 歸屬請款批次（NULL＝未送出）
     status = Column(String(16), nullable=False, default="草稿")  # 草稿/待審/已核准/已付款/退回
     project_label = Column(String(128), nullable=True)          # 匯入時沒對到專案的原始標籤文字
+    # 🔴 費用歸屬人 ≠ 墊款人（owner 2026-08-17：「後期雜支是要王士源付款的」）。
+    # staff_id = 誰掏的錢（公司要匯給他）；owner_staff_id = 誰負擔這筆費用
+    # （公司要跟他收回）。兩者相同或 NULL ＝ 公司自己吸收，沒有內部往來。
+    # 沒有這個欄位的話，「別人幫你墊、但帳算你的」只能靠人腦記，而那正是
+    # 王士源那筆 −647 在系統裡湊不出來的原因。
+    owner_staff_id = Column(String(32), nullable=True, index=True)
+    owner_settled = Column(Integer, nullable=False, default=0)   # 歸屬人是否已還這筆
 
 
 class CrmProjectCostGroup(Base):

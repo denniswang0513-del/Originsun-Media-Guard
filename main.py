@@ -700,6 +700,10 @@ async def _on_startup():
                         "UPDATE crm_staff SET petty_float=0 WHERE petty_float IS NULL",
                         "ALTER TABLE crm_cash_entries ADD COLUMN IF NOT EXISTS expense_id VARCHAR(32)",
                         "ALTER TABLE crm_payment_requests ADD COLUMN IF NOT EXISTS reimbursement_id VARCHAR(32)",
+                        # 費用歸屬人（後期雜支那類「別人墊、帳算你的」）
+                        "ALTER TABLE crm_project_expenses ADD COLUMN IF NOT EXISTS owner_staff_id VARCHAR(32)",
+                        "ALTER TABLE crm_project_expenses ADD COLUMN IF NOT EXISTS owner_settled INTEGER DEFAULT 0",
+                        "CREATE INDEX IF NOT EXISTS idx_expense_owner ON crm_project_expenses (owner_staff_id, owner_settled)",
                         "CREATE INDEX IF NOT EXISTS idx_payreq_reimb ON crm_payment_requests (reimbursement_id)",
                         "CREATE INDEX IF NOT EXISTS idx_cash_expense ON crm_cash_entries (expense_id)",
                         # receipt_path 從 crm_projects 下放到 crm_project_cost_groups。

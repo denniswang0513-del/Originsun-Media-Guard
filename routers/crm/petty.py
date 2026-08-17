@@ -71,7 +71,9 @@ def _new_expense(body, staff_id: str) -> CrmProjectExpense:
         sub_item=body.summary or None,
         notes=body.notes or None,
         created_at=_now(),
-        expense_date=_parse_day(body.expense_date) or _now(),
+        # 🔴 空日期就留空 —— Sheet 裡本來就有 37 列沒填日期，塞今天會製造假資料。
+        # 手機/工作台的表單自己帶今天（value=today），所以只有刻意留白才會是 NULL。
+        expense_date=_parse_day(body.expense_date),
         staff_id=staff_id,
         item=body.item or "其他",
         invoice_no=body.invoice_no or None,
@@ -89,6 +91,8 @@ def _expense_dict(e: CrmProjectExpense, project_name: str = "") -> dict:
         "item": e.item or "",
         "category": e.category or "",
         "staff_id": e.staff_id or "",
+        "owner_staff_id": e.owner_staff_id or "",
+        "owner_settled": bool(e.owner_settled),
         "project_id": e.project_id or "",
         "project_name": project_name,
         "project_label": e.project_label or "",
@@ -418,6 +422,15 @@ async def petty_accounts(request: Request):
         bound = dict((await session.execute(
             select(User.staff_id, User.username)
             .where(User.staff_id.isnot(None), User.staff_id != ""))).all())
+        # 🔴 費用歸屬：這個人要「還」給公司的部分（別人墊、帳算他的、還沒結）。
+        # 不扣掉的話，王士源那種「自己沒有未結請款、但欠公司 647」的人在清冊上
+        # 會顯示成 —，看起來像沒事。
+        owes = dict((await session.execute(
+            select(CrmProjectExpense.owner_staff_id,
+                   safunc.coalesce(safunc.sum(CrmProjectExpense.actual), 0))
+            .where(CrmProjectExpense.owner_staff_id.isnot(None),
+                   CrmProjectExpense.owner_settled == 0)
+            .group_by(CrmProjectExpense.owner_staff_id))).all())
 
     agg: dict[str, dict] = {}
     for sid, status, total, cnt in sums:
@@ -434,12 +447,14 @@ async def petty_accounts(request: Request):
     for s in staff_rows:
         a = agg.get(s.id)
         float_amt = s.petty_float or 0
-        if not a and not float_amt:
-            continue               # 從來沒有零用金紀錄的人不列
         a = a or {"draft": 0, "open": 0, "paid": 0, "rows": 0}
         acct = s.bank_account or ""
+        owe = owes.get(s.id, 0)
+        if not a and not float_amt and not owe:
+            continue
         out.append({
             "staff_id": s.id, "name": s.name,
+            "owed_by_staff": owe,          # 歸屬他、還沒還的（正數＝他欠公司）
             "staff_status": s.status or "",
             "bound_user": bound.get(s.id, ""),      # 空＝沒綁帳號
             "opening_float": float_amt,
@@ -462,6 +477,7 @@ async def petty_accounts(request: Request):
             "paid": sum(x["paid_total"] for x in out),
             "unbound": sum(1 for x in out if not x["bound_user"]),
             "bank_missing": sum(1 for x in out if x["bank_missing"]),
+            "owed": sum(x["owed_by_staff"] for x in out),
         },
         "claims": [_claim_dict(c) for c in
                    sorted(claims, key=lambda c: (c.submitted_at or _now()), reverse=True)],
@@ -501,8 +517,11 @@ async def petty_entries(request: Request, q: str = Query(""),
                      | safunc.coalesce(CrmProjectExpense.notes, "").ilike(like)
                      | safunc.coalesce(CrmProjectExpense.invoice_no, "").ilike(like)
                      | safunc.coalesce(CrmProjectExpense.project_label, "").ilike(like))
-        # 只看零用金的單據：舊的專案雜支沒有 item / staff_id，混進來會讓帳冊變髒
-        w.append(CrmProjectExpense.claim_id.isnot(None))
+        # 只看零用金的單據 —— 舊的專案雜支（CRM 成本頁建的）沒有 item，混進來
+        # 會讓帳冊變髒。
+        # 🔴 判準是「有 item」不是「有 claim_id」：剛在這一頁新增的草稿還沒送出、
+        # 沒有 claim_id，用 claim_id 當判準的話新增完會看不見 ——「按了沒反應」。
+        w.append(CrmProjectExpense.item.isnot(None))
 
         base = select(CrmProjectExpense).where(*w)
         total, amount = (await session.execute(
@@ -510,7 +529,11 @@ async def petty_entries(request: Request, q: str = Query(""),
                    safunc.coalesce(safunc.sum(CrmProjectExpense.actual), 0))
             .where(*w))).first()
         rows = (await session.execute(
-            base.order_by(CrmProjectExpense.expense_date.desc().nullslast(),
+            # 🔴 沒有日期的排**最前面**，不是最後面。兩個理由：
+            #   1. 剛在這一頁新增的列還沒填日期，排最後＝在第 300 列之後，
+            #      使用者按完「新增」什麼都沒看到
+            #   2. 匯入的 37 列待補日期本來就是該優先整理的東西
+            base.order_by(CrmProjectExpense.expense_date.desc().nullsfirst(),
                           CrmProjectExpense.created_at.desc())
             .limit(min(limit, 2000)).offset(offset))).scalars().all()
         names = dict((await session.execute(
@@ -545,7 +568,8 @@ async def patch_petty_entry(expense_id: str, request: Request):
     _check_approver(request)
     body = await request.json()
     allowed = {"expense_date", "actual", "summary", "note", "item",
-               "staff_id", "project_id", "project_label", "invoice_no"}
+               "staff_id", "project_id", "project_label", "invoice_no",
+               "owner_staff_id", "owner_settled"}
     unknown = set(body) - allowed
     if unknown:
         raise HTTPException(status_code=400, detail=f"不支援的欄位：{sorted(unknown)}")
@@ -585,6 +609,10 @@ async def patch_petty_entry(expense_id: str, request: Request):
                 exp.project_label = None
         if "project_label" in body:
             exp.project_label = body["project_label"] or None
+        if "owner_staff_id" in body:
+            exp.owner_staff_id = body["owner_staff_id"] or None
+        if "owner_settled" in body:
+            exp.owner_settled = 1 if body["owner_settled"] else 0
         await session.commit()
     return {"status": "ok", "id": expense_id}
 

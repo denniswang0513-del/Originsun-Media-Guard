@@ -334,7 +334,8 @@ export async function renderAccounts(host) {
 
     const rows = data.accounts;
     // 應匯＝已送出待付 + 未送出草稿（草稿還不能匯，但要讓人看到有東西在路上）
-    const due = (a) => a.claim_total + a.draft_total;
+    // 淨額＝他墊的（待付＋草稿）− 歸屬他但別人墊的（還沒還）
+    const due = (a) => a.claim_total + a.draft_total - (a.owed_by_staff || 0);
     const payable = rows.filter(a => due(a) > 0);
     const total = payable.reduce((s, a) => s + a.claim_total, 0);
     const owed = rows.filter(a => due(a) < 0);
@@ -350,23 +351,25 @@ export async function renderAccounts(host) {
         <div style="margin-left:auto;"><button class="pc-btn ghost" id="pc-csv">匯出銀行 CSV</button></div>
       </div>
 
-      <div class="pc-head pc-row"><span>收款人</span><span>銀行帳號</span><span>未送出</span>
-        <span class="amt">應匯金額</span><span>狀態</span></div>
+      <div class="pc-head pc-row"><span>收款人</span><span>銀行帳號</span><span>應收回</span>
+        <span class="amt">應匯淨額</span><span>狀態</span></div>
       ${rows.map(a => {
         const d = due(a);
         // 三態：正＝要匯給他／零＝這期沒請款（畫 —，不是 NT$ 0）／負＝他欠公司
-        const amt = d > 0 ? money(a.claim_total)
+        const amt = d > 0 ? money(d)
                   : d < 0 ? `<span class="pc-warn">${money(d)}</span>`
                   : '<span class="sub">—</span>';
         const state = d > 0 ? (a.claim_total ? "待匯款" : "未送出")
-                    : d < 0 ? "應收回" : "無請款";
+                    : d < 0 ? "應收回" : (a.rows ? "無請款" : "無紀錄");
         return `
         <div class="pc-row">
           <span>${esc(a.name)}${a.bound_user ? "" :
             '<span class="pc-pill">未綁帳號</span>'}</span>
           <span class="${a.bank_missing && d > 0 ? "pc-warn" : "sub"}">${
             a.bank_missing ? (d > 0 ? "⚠ 未填帳號，無法匯款" : "—") : esc(a.bank)}</span>
-          <span class="sub">${a.draft_total ? money(a.draft_total) + "（草稿）" : "—"}</span>
+          <span class="${a.owed_by_staff ? "pc-warn" : "sub"}">${
+            a.owed_by_staff ? money(a.owed_by_staff)
+              : (a.draft_total ? money(a.draft_total) + "（草稿）" : "—")}</span>
           <span class="amt">${amt}</span>
           <span><span class="pc-pill">${state}</span></span>
         </div>`; }).join("")}
@@ -457,11 +460,13 @@ export async function renderOverview(host) {
     // 那就是「載入有點慢」的來源（實測 DOM 節點數差一個數量級）。這裡只放
     // 目前值那一個，其餘等使用者真的點下去（focus）才補 —— 一次只長一個下拉。
     const projName = Object.fromEntries(opts.projects.map(p => [p.id, p.name]));
+    const PROJ_OPTS = '<option value="">（無專案）</option>'
+        + opts.projects.map(p => `<option value="${esc(p.id)}">${esc(p.name)}</option>`).join("");
     const projCell = (e) => {
         const cur = e.project_id;
         const label = cur ? (projName[cur] || "（已刪除的專案）")
                           : (e.project_label ? e.project_label + "（未歸戶）" : "（無）");
-        return `<select data-f="project_id" data-lazy="1"${
+        return `<select data-no-search data-f="project_id" data-lazy="1"${
             e.project_label ? ` title="原始標籤：${esc(e.project_label)}"` : ""}>
               <option value="${esc(cur)}" selected>${esc(label)}</option>
             </select>`;
@@ -471,10 +476,10 @@ export async function renderOverview(host) {
       <div class="lg-bar">
         <input id="lg-q" placeholder="搜尋摘要／附註／發票號／標籤（Enter）"
                value="${esc(_LG.q)}" style="min-width:240px;">
-        <select id="lg-staff"><option value="">全部收款人</option>
+        <select id="lg-staff" data-no-search><option value="">全部收款人</option>
           ${people.staff.map(p => `<option value="${esc(p.id)}"${
             p.id === _LG.staff_id ? " selected" : ""}>${esc(p.name)}</option>`).join("")}</select>
-        <select id="lg-item"><option value="">全部項目</option>
+        <select id="lg-item" data-no-search><option value="">全部項目</option>
           ${opts.items.map(i => `<option${i === _LG.item ? " selected" : ""}>${esc(i)}</option>`).join("")}</select>
         <input id="lg-month" type="month" value="${esc(_LG.month)}">
         <label style="font-size:12px;color:var(--sub);display:flex;gap:4px;align-items:center;">
@@ -488,10 +493,23 @@ export async function renderOverview(host) {
         <thead><tr>
           <th style="width:112px;">日期</th><th style="width:92px;text-align:right;">請款</th>
           <th style="min-width:210px;">摘要</th><th style="width:135px;">附註</th>
-          <th style="width:130px;">項目</th><th style="width:130px;">收款人</th>
+          <th style="width:130px;">項目</th><th style="width:130px;">收款人</th><th style="width:120px;">費用歸屬</th>
           <th style="width:200px;">專案標籤</th><th style="width:64px;"></th>
         </tr></thead>
-        <tbody>${d.entries.map(e => `
+        <tbody>
+          <tr class="lg-new">
+            <td class="dt"><input type="date" id="n-date" title="留白＝日期待補"></td>
+            <td class="amt"><input type="number" id="n-amt" placeholder="金額" style="text-align:right;"></td>
+            <td><input id="n-sum" placeholder="＋ 新增一筆：摘要"></td>
+            <td><input id="n-note" placeholder="發票號／附註"></td>
+            <td><select data-no-search id="n-item">${ITEM_OPTS}</select></td>
+            <td><select data-no-search id="n-staff">${STAFF_OPTS}</select></td>
+            <td><select data-no-search id="n-owner">${STAFF_OPTS}</select></td>
+            <td><select data-no-search id="n-proj">${PROJ_OPTS}</select></td>
+            <td><button class="pc-btn" id="n-add"
+                        style="padding:5px 10px;font-size:12px;">新增</button></td>
+          </tr>
+          ${d.entries.map(e => `
           <tr data-id="${esc(e.id)}" class="${e.locked ? "locked" : ""}">
             <td class="dt"><input type="date" data-f="expense_date" value="${esc(e.expense_date)}"></td>
             <td class="amt"><input type="number" data-f="actual" value="${e.actual}"
@@ -499,14 +517,16 @@ export async function renderOverview(host) {
             <td><input data-f="summary" value="${esc(e.summary)}"></td>
             <td><input data-f="${e.invoice_no ? "invoice_no" : "note"}"
                        value="${esc(e.invoice_no || e.note)}"></td>
-            <td><select data-f="item" data-v="${esc(e.item)}">${ITEM_OPTS}</select></td>
+            <td><select data-no-search data-f="item" data-v="${esc(e.item)}">${ITEM_OPTS}</select></td>
             <td>${e.staff_id || !e.staff_name
               // 非員工的代墊（生產有 14 列「外部製片_現金提款」）沒有 staff_id ——
               // 不補這一個選項的話，下拉空白、名字也不見了，看起來像資料掉了
-              ? `<select data-f="staff_id" data-v="${esc(e.staff_id)}">${STAFF_OPTS}</select>`
-              : `<select data-f="staff_id" data-v="">
+              ? `<select data-no-search data-f="staff_id" data-v="${esc(e.staff_id)}">${STAFF_OPTS}</select>`
+              : `<select data-no-search data-f="staff_id" data-v="">
                    <option value="" selected>${esc(e.staff_name)}（非員工）</option>
                    ${STAFF_OPTS}</select>`}</td>
+            <td><select data-no-search data-f="owner_staff_id" data-v="${esc(e.owner_staff_id)}"
+                        title="誰負擔這筆費用（空＝墊款人自己）">${STAFF_OPTS}</select></td>
             <td>${projCell(e)}</td>
             <td class="lg-lock">${e.locked ? "已入帳" : esc(e.status)}</td>
           </tr>`).join("")}</tbody>
@@ -518,7 +538,6 @@ export async function renderOverview(host) {
         : ""}`;
 
     // 篩選：搜尋框走 Enter（每個字打一次 API 會讓 443 列的表卡住），其餘 change 即查
-    const rerun = () => renderOverview(host);
     host.querySelector("#lg-q").onkeydown = (ev) => {
         if (ev.key === "Enter") { _LG.q = ev.target.value.trim(); _LG.limit = 300; rerun(); }
     };
@@ -530,6 +549,35 @@ export async function renderOverview(host) {
     };
     const more = host.querySelector("#lg-more");
     if (more) more.onclick = () => { _LG.limit += 300; rerun(); };
+
+    const rerun = () => renderOverview(host);
+
+    // ＋ 新增一筆：收款人是必填（錢要算在誰頭上），其餘可空 —— 尤其日期，
+    // Sheet 裡本來就有 37 列沒填，留白比塞今天更誠實
+    const nAdd = host.querySelector("#n-add");
+    if (nAdd) nAdd.onclick = async () => {
+        const staffId = host.querySelector("#n-staff").value;
+        const amt = parseInt(host.querySelector("#n-amt").value, 10);
+        if (!staffId) { alert("請先選收款人（這筆錢是誰墊的）"); return; }
+        if (!amt) { alert("金額不可為 0"); return; }
+        nAdd.disabled = true;
+        try {
+            const r = await send("POST", `/api/v1/crm/petty/staff/${encodeURIComponent(staffId)}/expenses`, {
+                expense_date: host.querySelector("#n-date").value,   // 空＝待補
+                actual: amt,
+                summary: host.querySelector("#n-sum").value.trim(),
+                item: host.querySelector("#n-item").value,
+                invoice_no: host.querySelector("#n-note").value.trim(),
+                project_id: host.querySelector("#n-proj").value || null,
+            });
+            const owner = host.querySelector("#n-owner").value;
+            if (owner) {
+                await send("PATCH", "/api/v1/crm/petty/entries/" + r.id,
+                           { owner_staff_id: owner });
+            }
+            rerun();
+        } catch (e) { alert(String(e.message || e)); nAdd.disabled = false; }
+    };
 
     // 選中值：innerHTML 用同一份選項字串，掛好後才逐列設 value
     host.querySelectorAll("tbody select[data-v]").forEach(sel => {

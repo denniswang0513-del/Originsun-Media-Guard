@@ -168,12 +168,18 @@ def test_ledger_patch_has_a_field_whitelist():
     assert "reimbursement_id == exp.claim_id" in body and "409" in body
 
 
-def test_ledger_only_shows_petty_rows():
-    """帳冊只列零用金單據（有 claim_id）—— 混進舊的專案雜支會讓這張表變髒。"""
+def test_ledger_shows_new_drafts_too():
+    """🔴 帳冊的判準是「有 item」，不是「有 claim_id」。
+
+    用 claim_id 當判準的話，剛在這一頁新增的草稿（還沒送出、沒有 claim_id）
+    會看不見 —— 使用者按了「新增」、資料真的寫進去了、畫面卻沒動。那種
+    「成功但看起來失敗」比報錯更難查。舊的專案雜支沒有 item，照樣擋在外面。
+    """
     src = (Path(__file__).resolve().parents[2]
            / "routers" / "crm" / "petty.py").read_text(encoding="utf-8")
     body = src.split("async def petty_entries")[1].split("\n@router")[0]
-    assert "CrmProjectExpense.claim_id.isnot(None)" in body
+    assert "CrmProjectExpense.item.isnot(None)" in body
+    assert "CrmProjectExpense.claim_id.isnot(None)" not in body
 
 
 def test_overview_lists_everyone_with_history_not_just_debtors():
