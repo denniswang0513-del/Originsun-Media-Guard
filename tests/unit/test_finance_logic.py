@@ -29,9 +29,14 @@ _CASH_EXPECTED = {r["category_text"]: r["treatment"]
 
 
 class TestClassifyCashEntry:
-    def test_seed_covers_29_cash_categories(self):
-        """種子必須恰好覆蓋收支明細現行 27 個 category 值 + 2 個貸款值（階段四）。"""
-        assert len(_CASH_EXPECTED) == 29
+    def test_seed_covers_30_cash_categories(self):
+        """種子必須恰好覆蓋收支明細現行 category 值。
+
+        27 原生 + 2 貸款（階段四）+ 1 後期雜支（2026-08-17 零用金整合：Sheet 上
+        實際用過但對映表缺的唯一一個）。這個數字是**刻意的釘子** —— 加科目要在
+        這裡明白地改，不能默默長。
+        """
+        assert len(_CASH_EXPECTED) == 30
 
     @pytest.mark.parametrize("category,expected", sorted(_CASH_EXPECTED.items()))
     def test_all_cash_categories(self, category, expected):
