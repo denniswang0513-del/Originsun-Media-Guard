@@ -325,6 +325,7 @@ export async function renderAccounts(host) {
     const [data, approved] = await Promise.all([
         get("/api/v1/crm/petty/accounts"),
         get("/api/v1/crm/petty/claims?status=" + encodeURIComponent("已核准"))]);
+    // 這一頁只回答「現在要匯多少給誰」；全貌（含已結清的人）在「全部零用金」
     const payable = data.accounts.filter(a => (a.claim_total + a.draft_total) > 0);
     const owed = data.accounts.filter(a => (a.claim_total + a.draft_total) < 0);
     const total = payable.reduce((s, a) => s + a.claim_total, 0);
@@ -383,6 +384,57 @@ export async function renderAccounts(host) {
             renderAccounts(host);
         } catch (e) { alert(String(e.message || e)); b.disabled = false; }
     });
+}
+
+// ── 分頁：全部零用金（帳戶總覽 + 綁定狀態 + 所有批次）──────────────────
+export async function renderOverview(host) {
+    const d = await get("/api/v1/crm/petty/accounts");
+    const t = d.totals;
+    const rows = d.accounts;
+
+    host.innerHTML = CSS + `
+      <div class="pc-sum">
+        <div><div class="lbl">有零用金紀錄的人</div><div class="big">${t.people}</div></div>
+        <div><div class="lbl">未送出</div><div class="big">${money(t.draft)}</div></div>
+        <div><div class="lbl">已送出待付</div><div class="big">${money(t.open)}</div></div>
+        <div><div class="lbl">歷史已付</div><div class="big">${money(t.paid)}</div></div>
+        ${t.unbound ? `<div><div class="lbl">未綁帳號</div>
+          <div class="big pc-warn">${t.unbound}</div></div>` : ""}
+        ${t.bank_missing ? `<div><div class="lbl">缺銀行帳號</div>
+          <div class="big pc-warn">${t.bank_missing}</div></div>` : ""}
+      </div>
+
+      <div class="pc-head pc-row"><span>姓名</span><span>綁定的帳號</span>
+        <span>銀行帳號</span><span class="amt">未送出</span><span>待付／已付</span>
+        <span>備用金</span></div>
+      ${rows.map(a => `
+        <div class="pc-row">
+          <span>${esc(a.name)}${a.staff_status && a.staff_status !== "在職"
+            ? `<span class="pc-pill">${esc(a.staff_status)}</span>` : ""}</span>
+          <span class="${a.bound_user ? "sub" : "pc-warn"}">${
+            a.bound_user ? esc(a.bound_user) : "未綁定（只能代為登記）"}</span>
+          <span class="${a.bank_missing ? "pc-warn" : "sub"}">${
+            a.bank_missing ? "未填" : esc(a.bank)}</span>
+          <span class="amt">${a.draft_total ? money(a.draft_total) : "—"}</span>
+          <span class="sub">${money(a.claim_total)} ／ ${money(a.paid_total)}
+            <span style="opacity:.6;">（${a.rows} 筆）</span></span>
+          <span class="sub">${a.opening_float ? money(a.opening_float) : "—"}</span>
+        </div>`).join("")}
+
+      <h3 style="font-size:13px;letter-spacing:.15em;color:var(--sub);
+          margin:28px 0 8px;text-transform:uppercase;">所有請款批次（${d.claims.length}）</h3>
+      <div class="pc-head pc-row"><span>送出日</span><span>人／期間</span><span>狀態</span>
+        <span class="amt">金額</span><span>匯款日</span><span></span></div>
+      ${d.claims.map(c => `
+        <div class="pc-row">
+          <span class="sub">${esc(c.submitted_at || "")}</span>
+          <span>${esc(c.staff_name)}
+            <span class="sub"> · ${esc(c.period_start || "?")} ~ ${esc(c.period_end || "?")}</span></span>
+          <span><span class="pc-pill">${esc(c.status)}</span></span>
+          <span class="amt">${money(c.total_claim)}</span>
+          <span class="sub">${esc(c.paid_at || "")}</span>
+          <span class="sub">${esc((c.notes || "").slice(0, 24))}</span>
+        </div>`).join("")}`;
 }
 
 // ── 分頁 4：未歸戶標籤（一次綁一個標籤，帶走底下所有列）────────────────

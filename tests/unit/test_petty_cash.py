@@ -144,6 +144,23 @@ def test_delegate_allows_approver(app_client, as_user, method, path, body):
     assert r.status_code not in (401, 403), f"{method} {path}：{r.status_code}"
 
 
+def test_overview_lists_everyone_with_history_not_just_debtors():
+    """🔴 帳戶總覽的判準是「曾經有過單據」，不是「現在還欠他錢」。
+
+    只列未結的話這頁就是匯款清冊的複本，而 owner 要的是全貌（誰用過、誰沒綁
+    帳號、歷史付了多少）。這條錨在查詢條件上：`HAVING` 那一段若退回成
+    「只看未結」，斷言會紅。
+    """
+    src = (Path(__file__).resolve().parents[2]
+           / "routers" / "crm" / "petty.py").read_text(encoding="utf-8")
+    body = src.split("async def petty_accounts")[1].split("\n@router")[0]
+    assert "bound_user" in body, "帳戶總覽沒有綁定狀態"
+    assert "User.staff_id" in body, "綁定狀態沒有去 users 撈"
+    assert "paid_total" in body and "rows" in body, "缺歷史累計"
+    # 沒有紀錄也沒有備用金的人才跳過 —— 不是「沒有未結就跳過」
+    assert "if not a and not float_amt" in body
+
+
 def test_delegate_is_a_separate_endpoint_not_an_optional_field():
     """🔴 代管走**路徑參數**，own-scope 的 schema 仍然沒有 staff_id。
 

@@ -32,7 +32,7 @@ from core.identity import resolve_current_staff
 from core.schemas import PettyExpensePayload, PettySubmitPayload
 from db.models import (CrmCashEntry, CrmPaymentRequest, CrmProject,
                        CrmProjectExpense, CrmReimbursement, CrmStaff,
-                       FinanceCategoryMap)
+                       FinanceCategoryMap, User)
 
 from ._shared import (_assert_month_open, _get_factory, _now, _parse_day,
                       _require_db, _username, money_dep, router)
@@ -389,46 +389,82 @@ async def submit_my_petty(body: PettySubmitPayload, request: Request):
 # ── 財務視角：帳戶總覽 / 待審 / 匯款清冊 ──────────────────────────────
 @router.get("/petty/accounts", dependencies=[Depends(money_dep)])
 async def petty_accounts(request: Request):
-    """帳戶總覽 —— 人 × 期初／期末／應請款／狀態（＝ Sheet 上半段）。"""
+    """帳戶總覽 —— **所有**跟零用金有關的人，含綁定狀態與歷史累計。
+
+    🔴 「有關」的判準刻意放寬到「曾經有過任何一筆單據」，不是「現在還欠他錢」。
+    只列未結的話，帳戶總覽就變成匯款清冊的複本 —— 而 owner 要看的是全貌
+    （誰用過、誰沒帳號、誰沒綁、歷史付了多少）。149 人裡有紀錄的才進來，
+    所以清單仍然不會變成整本人員名冊。
+
+    綁定狀態（`bound_user`）是這頁的重點之一：沒綁帳號的人**自己登不了記**，
+    只能靠代為登記。空字串＝沒綁，畫面上要看得出來。
+    """
     _check_approver(request)
     factory = await _get_factory()
     async with factory() as session:
-        # 未結清＝已送出但還沒付款的批次，加上還沒送出的草稿
-        claims = (await session.execute(
-            select(CrmReimbursement)
-            .where(CrmReimbursement.status.in_(("待審", "已核准")))
-        )).scalars().all()
-        drafts = dict((await session.execute(
-            select(CrmProjectExpense.staff_id,
-                   safunc.coalesce(safunc.sum(CrmProjectExpense.actual), 0))
-            .where(CrmProjectExpense.claim_id.is_(None),
-                   CrmProjectExpense.staff_id.isnot(None))
-            .group_by(CrmProjectExpense.staff_id))).all())
+        claims = (await session.execute(select(CrmReimbursement))).scalars().all()
+        # 逐人 × 狀態的單據合計：一次 group by 拿齊草稿／待付／已付
+        sums = (await session.execute(
+            select(CrmProjectExpense.staff_id, CrmProjectExpense.status,
+                   safunc.coalesce(safunc.sum(CrmProjectExpense.actual), 0),
+                   safunc.count(CrmProjectExpense.id))
+            .where(CrmProjectExpense.staff_id.isnot(None))
+            .group_by(CrmProjectExpense.staff_id, CrmProjectExpense.status))).all()
         staff_rows = (await session.execute(
             select(CrmStaff.id, CrmStaff.name, CrmStaff.petty_float,
-                   CrmStaff.bank_name, CrmStaff.bank_account))).all()
+                   CrmStaff.bank_name, CrmStaff.bank_account, CrmStaff.status))).all()
+        # 綁定狀態：users.staff_id → 帳號名（沒綁的人自己登不了記）
+        bound = dict((await session.execute(
+            select(User.staff_id, User.username)
+            .where(User.staff_id.isnot(None), User.staff_id != ""))).all())
 
-    by_staff: dict[str, dict] = {}
+    agg: dict[str, dict] = {}
+    for sid, status, total, cnt in sums:
+        a = agg.setdefault(sid, {"draft": 0, "open": 0, "paid": 0, "rows": 0})
+        a["rows"] += cnt
+        if status in EDITABLE:
+            a["draft"] += total
+        elif status == "已付款":
+            a["paid"] += total
+        else:                      # 待審 / 已核准 ＝ 已送出未付
+            a["open"] += total
+
+    out = []
     for s in staff_rows:
-        pending = drafts.get(s.id, 0)
-        mine = [c for c in claims if c.staff_id == s.id]
-        if not pending and not mine and not (s.petty_float or 0):
-            continue                      # 149 個人裡只留跟零用金有關的
-        submitted = sum(c.total_claim for c in mine)
+        a = agg.get(s.id)
+        float_amt = s.petty_float or 0
+        if not a and not float_amt:
+            continue               # 從來沒有零用金紀錄的人不列
+        a = a or {"draft": 0, "open": 0, "paid": 0, "rows": 0}
         acct = s.bank_account or ""
-        by_staff[s.id] = {
+        out.append({
             "staff_id": s.id, "name": s.name,
-            "opening_float": s.petty_float or 0,
-            "draft_total": pending,          # 還沒送出的
-            "claim_total": submitted,        # 已送出待付的
-            "closing_float": (s.petty_float or 0) - pending - submitted,
-            "bank": (f"{s.bank_name or ''} {acct[-4:]}" if acct else ""),
+            "staff_status": s.status or "",
+            "bound_user": bound.get(s.id, ""),      # 空＝沒綁帳號
+            "opening_float": float_amt,
+            "draft_total": a["draft"],              # 還沒送出
+            "claim_total": a["open"],               # 已送出待付
+            "paid_total": a["paid"],                # 歷史已付累計
+            "rows": a["rows"],
+            "closing_float": float_amt - a["draft"] - a["open"],
+            "bank": (f"{s.bank_name or ''} {acct[-4:]}".strip() if acct else ""),
             # 🔴 缺帳號要在畫面上擋住，不是靜默出 0
             "bank_missing": not acct,
-            "status": ("待請款" if (pending or submitted) else "已請款"),
-        }
-    return {"accounts": sorted(by_staff.values(),
-                               key=lambda a: -(a["claim_total"] + a["draft_total"]))}
+            "status": ("待請款" if (a["draft"] or a["open"]) else "已請款"),
+        })
+    return {
+        "accounts": sorted(out, key=lambda x: -(x["claim_total"] + x["draft_total"])),
+        "totals": {
+            "people": len(out),
+            "draft": sum(x["draft_total"] for x in out),
+            "open": sum(x["claim_total"] for x in out),
+            "paid": sum(x["paid_total"] for x in out),
+            "unbound": sum(1 for x in out if not x["bound_user"]),
+            "bank_missing": sum(1 for x in out if x["bank_missing"]),
+        },
+        "claims": [_claim_dict(c) for c in
+                   sorted(claims, key=lambda c: (c.submitted_at or _now()), reverse=True)],
+    }
 
 
 @router.get("/petty/claims", dependencies=[Depends(money_dep)])

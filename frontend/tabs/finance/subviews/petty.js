@@ -17,6 +17,7 @@ const TABS = [
     { id: 'claims', label: '審核', fn: 'renderClaims', need: () => canSeeMoney() && hasModule('finance_approve') },
     { id: 'accounts', label: '匯款清冊', fn: 'renderAccounts', need: () => canSeeMoney() && hasModule('finance_approve') },
     { id: 'labels', label: '未歸戶標籤', fn: 'renderLabels', need: () => canSeeMoney() && hasModule('finance_approve') },
+    { id: 'all', label: '全部零用金', fn: 'renderOverview', need: () => canSeeMoney() && hasModule('finance_approve') },
 ];
 
 export default async function render(container, opts = {}) {
