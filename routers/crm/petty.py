@@ -67,20 +67,42 @@ async def _my_staff(request: Request):
     return ident["staff"]
 
 
+def _enforce_project_link(exp, wants_link: bool = False) -> bool:
+    """🔴 不變量：非「專案雜支」的單據不得掛專案（PROJECT_LINK_ITEMS）。
+
+    在**賦值之後**檢查最終狀態，不在賦值前預測 —— 預測式守衛實際漏過兩個洞：
+    PUT 整支沒檢查；PATCH `{"item": ""}` 讓連結留在 NULL 項目上（守衛拿舊項目
+    判斷、賦值卻寫入 None）。所有會動到 project_id / item 的寫入路徑最後都要
+    經過這一支。
+
+    `wants_link=True`（這次請求明確要求連結）→ 409 並說明怎麼修；
+    否則解除連結並回傳 True，呼叫端回報給前端 —— 靜默清掉的話，
+    專案毛利會自己少一筆而沒有人知道為什麼。
+    """
+    if not exp.project_id or (exp.item or "") in PROJECT_LINK_ITEMS:
+        return False
+    if wants_link:
+        raise HTTPException(
+            status_code=409,
+            detail=f"「{exp.item or '未分類'}」不開放連結專案。"
+                   "要掛專案請先把項目改成「專案雜支」。")
+    exp.project_id = None
+    exp.cost_group_id = None
+    return True
+
+
 def _new_expense(body, staff_id: str) -> CrmProjectExpense:
     """單據建構的單一正本（本人登記 / 代為登記共用）。
 
     會計項目若在「項目 → 歸屬人」對映裡（例如後期雜支→王士源），
     建立時就把費用歸屬填好 —— 那條規則設定一次就好，不必每筆挑。
+    專案連結的合法性不在這裡管 —— 呼叫端建完要過 `_enforce_project_link`。
     """
     item = body.item or "其他"
-    # 非專案雜支不連專案（見 PROJECT_LINK_ITEMS）—— 擋在這裡，四條建立路徑
-    # 都走這支，不必各自記得
-    linked = body.project_id if item in PROJECT_LINK_ITEMS else None
     return CrmProjectExpense(
         owner_staff_id=_item_owners().get(item) or None,
         id=uuid.uuid4().hex[:16],
-        project_id=linked or None,
+        project_id=body.project_id or None,
         category=body.category or "其他",
         estimated=0, actual=body.actual,
         sub_item=body.summary or None,
@@ -202,6 +224,7 @@ async def add_my_petty_expense(body: PettyExpensePayload, request: Request):
     factory = await _get_factory()
     async with factory() as session:
         exp = _new_expense(body, staff.id)
+        _enforce_project_link(exp)          # 非專案雜支 → 不連（表單本來就鎖住）
         await _attach_cost_group(session, exp)
         session.add(exp)
         await session.commit()
@@ -236,6 +259,7 @@ async def update_my_petty_expense(expense_id: str, body: PettyExpensePayload,
         exp.item = body.item or "其他"
         exp.invoice_no = body.invoice_no or None
         exp.has_invoice = 1 if body.invoice_no else 0
+        _enforce_project_link(exp, wants_link=bool(body.project_id))
         await session.commit()
     return {"status": "ok", "id": expense_id}
 
@@ -336,6 +360,7 @@ async def add_petty_expense_for(staff_id: str, body: PettyExpensePayload,
     async with factory() as session:
         staff = await _approver_staff(request, session, staff_id)
         exp = _new_expense(body, staff.id)
+        _enforce_project_link(exp)          # 非專案雜支 → 不連（表單本來就鎖住）
         await _attach_cost_group(session, exp)
         session.add(exp)
         await session.commit()
@@ -706,20 +731,6 @@ async def patch_petty_entry(expense_id: str, request: Request):
                     status_code=409,
                     detail="這筆已經產生應付款（科目與認列月份已入帳）。"
                            "要修改請先退回該批次，改完再送出。")
-        # 🔴 只有專案雜支能連專案。同一次 PATCH 可能同時改項目與專案，所以先算出
-        # 「這一列改完之後的項目」再判斷。
-        unlinked = False
-        new_item = (body.get("item") if "item" in body else exp.item) or exp.item
-        if body.get("project_id") and new_item not in PROJECT_LINK_ITEMS:
-            raise HTTPException(
-                status_code=409,
-                detail=f"「{new_item}」不開放連結專案。要掛專案請先把項目改成「專案雜支」。")
-        if "item" in body and new_item not in PROJECT_LINK_ITEMS and exp.project_id:
-            # 改成不可連結的項目 → 解除既有連結，並在回應裡講明白。
-            # 靜默清掉的話，專案毛利會自己少一筆而沒有人知道為什麼。
-            exp.project_id = None
-            exp.cost_group_id = None
-            unlinked = True
         if "expense_date" in body:
             exp.expense_date = _parse_day(body["expense_date"]) or exp.expense_date
         if "actual" in body:
@@ -759,6 +770,8 @@ async def patch_petty_entry(expense_id: str, request: Request):
             exp.owner_staff_id = body["owner_staff_id"] or None
         if "owner_settled" in body:
             exp.owner_settled = 1 if body["owner_settled"] else 0
+        # 最終狀態檢查（409 會讓 session 不 commit 而整筆回滾，含子表的自我修復）
+        unlinked = _enforce_project_link(exp, wants_link=bool(body.get("project_id")))
         await session.commit()
     return {"status": "ok", "id": expense_id, "unlinked": unlinked}
 

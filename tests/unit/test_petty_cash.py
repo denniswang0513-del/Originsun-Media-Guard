@@ -447,16 +447,23 @@ def test_only_project_misc_can_link_a_project():
 
     src = (Path(__file__).resolve().parents[2]
            / "routers" / "crm" / "petty.py").read_text(encoding="utf-8")
-    new_exp = src.split("def _new_expense")[1].split("\ndef ")[0]
-    assert "PROJECT_LINK_ITEMS" in new_exp, "建立時沒擋"
+    # 不變量收斂在 `_enforce_project_link` —— **賦值後查最終狀態**，不是賦值前
+    # 預測（預測式守衛漏過 PUT 整支、以及 PATCH {"item": ""} 讓連結留在 NULL
+    # 項目上）。四條會動到 project_id/item 的寫入路徑都必須經過它。
+    helper = src.split("def _enforce_project_link")[1][:900]
+    assert "409" in helper and "不開放連結專案" in helper
+    for fn in ("add_my_petty_expense", "add_petty_expense_for",
+               "update_my_petty_expense", "patch_petty_entry"):
+        body = src.split(f"async def {fn}")[1].split("\n@router")[0]
+        assert "_enforce_project_link" in body, f"{fn} 沒過不變量"
+    # 解除連結要**回報**（靜默清掉的話，專案毛利自己少一筆而沒人知道為什麼）
     patch = src.split("async def patch_petty_entry")[1].split("\n@router")[0]
-    assert "PROJECT_LINK_ITEMS" in patch and "409" in patch, "PATCH 沒擋"
-    # 改成不可連結的項目 → 解除既有連結，而且要**回報**（靜默清掉最難查）
-    assert "unlinked = True" in patch and '"unlinked": unlinked' in src
+    assert '"unlinked": unlinked' in patch
 
     view = (FRONTEND / "tabs" / "petty" / "petty-view.js").read_text(encoding="utf-8")
     assert "project_link_items" in view, "前端沒讀後端那份規則"
-    assert '["專案雜支"]' in view, "前端該有 fallback，但不該只有寫死的清單"
+    # fallback 清單只准存在一份（wireProjectGate/linkableSet 收斂點）
+    assert view.count('["專案雜支"]') == 1, "fallback 清單被複製了"
 
 
 def test_cost_group_endpoint_needs_both_grants(app_client, as_user):

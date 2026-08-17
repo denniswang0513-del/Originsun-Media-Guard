@@ -13,6 +13,21 @@ const money = (n) => (n === null || n === undefined) ? "—"
     : (n < 0 ? "-NT$ " : "NT$ ") + Math.abs(n).toLocaleString();
 const today = () => new Date().toISOString().slice(0, 10);
 
+// 「只有專案雜支可連結專案」—— 規則正本在後端（/petty/options 的
+// project_link_items），這裡只有斷線時的 fallback；所有用點共用這一份。
+const linkableSet = (opts) => new Set(opts.project_link_items || ["專案雜支"]);
+// 專案欄跟著項目開關（登記表單與帳冊新增列共用；規則或文案變了只改這裡）
+function wireProjectGate(itemEl, projEl, linkable) {
+    if (!itemEl || !projEl) return;
+    const sync = () => {
+        projEl.disabled = !linkable.has(itemEl.value);
+        if (projEl.disabled) projEl.value = "";
+        projEl.title = projEl.disabled ? "只有「專案雜支」開放連結專案" : "";
+    };
+    itemEl.addEventListener("change", sync);
+    sync();
+}
+
 async function get(path) {
     const r = await F().mfetch(path);
     if (!r.ok) {
@@ -203,18 +218,8 @@ export async function renderMine(host) {
     const asEl = host.querySelector("#pc-as");
     if (asEl) asEl.onchange = (ev) => { _asStaff = ev.target.value || null; renderMine(host); };
 
-    // 登記表單的專案欄跟著項目開關 —— 與帳冊同一條規則（只有專案雜支可連專案）
-    const LINKABLE_M = new Set(opts.project_link_items || ["專案雜支"]);
-    const fItem = host.querySelector("#f-item"), fProj = host.querySelector("#f-proj");
-    if (fItem && fProj) {
-        const sync = () => {
-            fProj.disabled = !LINKABLE_M.has(fItem.value);
-            if (fProj.disabled) fProj.value = "";
-            fProj.title = fProj.disabled ? "只有「專案雜支」開放連結專案" : "";
-        };
-        fItem.addEventListener("change", sync);
-        sync();
-    }
+    wireProjectGate(host.querySelector("#f-item"),
+                    host.querySelector("#f-proj"), linkableSet(opts));
 
     const msg = host.querySelector("#pc-msg");
     host.querySelector("#pc-add").onclick = async (ev) => {
@@ -502,7 +507,7 @@ export async function renderOverview(host) {
         + opts.projects.map(p => `<option value="${esc(p.id)}">${esc(labelOf[p.id])}</option>`).join("");
     // 只有「專案雜支」開放連結專案（owner 2026-08-17）。規則來自後端的
     // `project_link_items`，不在前端寫死 —— 兩邊各寫一份就會漂。
-    const LINKABLE = new Set(opts.project_link_items || ["專案雜支"]);
+    const LINKABLE = linkableSet(opts);
     const projCell = (e) => {
         const cur = e.project_id;
         const val = cur ? (labelOf[cur] || projName[cur] || "（已刪除的專案）") : "";
@@ -601,17 +606,8 @@ export async function renderOverview(host) {
     const rerun = () => renderOverview(host);
 
     // 新增列：專案欄跟著項目開關（同一條規則，不讓人填了才被後端退回）
-    const nItem = host.querySelector("#n-item"), nProj = host.querySelector("#n-proj");
-    if (nItem && nProj) {
-        const syncProj = () => {
-            nProj.disabled = !LINKABLE.has(nItem.value);
-            if (nProj.disabled) nProj.value = "";
-            nProj.title = nProj.disabled
-                ? "只有「專案雜支」開放連結專案" : "";
-        };
-        nItem.addEventListener("change", syncProj);
-        syncProj();
-    }
+    wireProjectGate(host.querySelector("#n-item"),
+                    host.querySelector("#n-proj"), LINKABLE);
 
     // 「項目 → 費用歸屬人」設定：設定一次，之後建立的單據自動帶
     // （owner 2026-08-17：不用在帳冊上為此多開一欄讓人每筆挑）
