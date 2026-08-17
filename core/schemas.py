@@ -507,6 +507,26 @@ class ProjectExpensePayload(BaseModel):
     cost_group_id: Optional[str] = None
 
 
+class PettyExpensePayload(BaseModel):
+    """零用金：本人登記一筆墊付（docs/PETTY_CASH_PLAN.md）。
+
+    ⚠️ 沒有 `staff_id` 欄位 —— 請款人一律從 token 解（own-scope 的定義）。
+    `project_id` 可留白＝公司層級支出（行政/業務推廣），實測歷史 289/443 如此。
+    """
+    expense_date: str = ""          # YYYY-MM-DD，空 → 今天
+    actual: int = 0                 # 實付金額（可為負＝退款/沖回）
+    summary: str = ""               # 摘要（存 sub_item）
+    item: str = ""                  # 會計項目 → finance_category_map
+    category: str = "其他"           # 手機頁粗分類（交通/住宿/飲食…），與 item 不同軸
+    project_id: Optional[str] = None
+    invoice_no: str = ""
+    notes: str = ""
+
+
+class PettySubmitPayload(BaseModel):
+    notes: str = ""
+
+
 class ExpenseLinkPayload(BaseModel):
     """發一條雜支登記的分享連結（token）。
 

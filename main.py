@@ -672,6 +672,36 @@ async def _on_startup():
                         "ALTER TABLE crm_payment_requests ADD COLUMN IF NOT EXISTS is_advance INTEGER DEFAULT 0",
                         "ALTER TABLE crm_payment_requests ADD COLUMN IF NOT EXISTS advance_returned INTEGER DEFAULT 0",
                         "ALTER TABLE crm_cash_entries ADD COLUMN IF NOT EXISTS advance_payment_id VARCHAR(32)",
+                        # ── 零用金請款（docs/PETTY_CASH_PLAN.md）──────────────
+                        # 支出單據行擴充：一筆登記同時餵專案成本與個人請款。
+                        # project_id 放寬成可空 —— 公司層級支出（行政/業務推廣）沒有
+                        # 專案，歷史資料 289/443 列如此。既有 241 列不受影響。
+                        "ALTER TABLE crm_project_expenses ALTER COLUMN project_id DROP NOT NULL",
+                        "ALTER TABLE crm_project_expenses ADD COLUMN IF NOT EXISTS expense_date TIMESTAMP WITH TIME ZONE",
+                        "ALTER TABLE crm_project_expenses ADD COLUMN IF NOT EXISTS staff_id VARCHAR(32)",
+                        "ALTER TABLE crm_project_expenses ADD COLUMN IF NOT EXISTS item VARCHAR(32)",
+                        "ALTER TABLE crm_project_expenses ADD COLUMN IF NOT EXISTS invoice_no VARCHAR(32)",
+                        "ALTER TABLE crm_project_expenses ADD COLUMN IF NOT EXISTS has_invoice INTEGER DEFAULT 0",
+                        "ALTER TABLE crm_project_expenses ADD COLUMN IF NOT EXISTS claim_id VARCHAR(32)",
+                        # 🔴 這欄**不能**帶 DEFAULT：帶了的話 ADD COLUMN 會把既有列
+                        # 全部填成「草稿」，而草稿在零用金的語意是「還沒送出的請款」——
+                        # 既有雜支會憑空出現在請款清單裡。留 NULL 再由下一句補終態。
+                        "ALTER TABLE crm_project_expenses ADD COLUMN IF NOT EXISTS status VARCHAR(16)",
+                        "ALTER TABLE crm_project_expenses ADD COLUMN IF NOT EXISTS project_label VARCHAR(128)",
+                        "CREATE INDEX IF NOT EXISTS idx_expense_staff_claim "
+                        "ON crm_project_expenses (staff_id, claim_id)",
+                        "CREATE INDEX IF NOT EXISTS idx_expense_date ON crm_project_expenses (expense_date)",
+                        # 既有列是「已經在專案裡的雜支」，不是待請款單據 —— 補一個終態。
+                        # 條件帶 claim_id IS NULL：日後真正的草稿都有批次或會自己走
+                        # ORM 預設值，不會被這句掃到（這句每次 boot 都跑）。
+                        "UPDATE crm_project_expenses SET status='已付款' "
+                        "WHERE status IS NULL AND claim_id IS NULL",
+                        "ALTER TABLE crm_staff ADD COLUMN IF NOT EXISTS petty_float INTEGER DEFAULT 0",
+                        "UPDATE crm_staff SET petty_float=0 WHERE petty_float IS NULL",
+                        "ALTER TABLE crm_cash_entries ADD COLUMN IF NOT EXISTS expense_id VARCHAR(32)",
+                        "ALTER TABLE crm_payment_requests ADD COLUMN IF NOT EXISTS reimbursement_id VARCHAR(32)",
+                        "CREATE INDEX IF NOT EXISTS idx_payreq_reimb ON crm_payment_requests (reimbursement_id)",
+                        "CREATE INDEX IF NOT EXISTS idx_cash_expense ON crm_cash_entries (expense_id)",
                         # receipt_path 從 crm_projects 下放到 crm_project_cost_groups。
                         # 第一行先確保 cost_groups 有此欄位；接著一次性把舊值搬到
                         # 該專案 sort_order 最小的子表（且子表還沒設值時）；最後 DROP

@@ -146,6 +146,11 @@ ALL_MODULES = [
     # 刻意不讓 crm_invoices / crm_quotes / crm_projects / crm_staff 隱含它
     # （隱含＝有人不經 owner 的手就拿到鑰匙）。政策正本 core/money.py。
     'money_view',
+    # 零用金請款的審核／匯款（docs/PETTY_CASH_PLAN.md §4）。
+    # ⚠ 與 money_view 一樣是橫切能力鍵、不是 tab；而且**兩個都要**才審得了
+    #   （審核畫面本身就是別人的金額）。刻意不用 Lv3 當閘門 —— 主管未必是
+    #   管理員，用 Lv3 等於逼 owner 把管理員發出去。
+    'finance_approve',
 ]
 
 

@@ -376,6 +376,10 @@ class CrmStaff(Base):
     # N-hr H2：年度特休額度（天）。餘額不另存 ledger — 即時算＝額度 − 當年度
     # 已核准特休 days 合計（core/hr_logic.leave_balance）。
     annual_leave_days = Column(Integer, nullable=True)
+    # 零用金備用金（imprest）：這個人手上長期持有多少公司現金。0 ＝ 自己先墊、事後全額請款
+    # （實測 8 個零用金帳戶只有 1 人持有 10,000）。應請款＝Σ單據，與這個數字無關 ——
+    # 它只決定「期末手上還有多少現金」的顯示。
+    petty_float = Column(Integer, nullable=False, default=0)   # 備用金金額（手上長期持有的公司現金）
     # Resume / portfolio fields
     photo_url = Column(String(512), nullable=True)
     bio = Column(Text, nullable=True)
@@ -501,21 +505,38 @@ class CrmProjectStaff(Base):
 
 
 class CrmProjectExpense(Base):
-    """專案雜支明細（歸屬於 cost_group）。"""
+    """支出單據（原「專案雜支明細」）。
+
+    🔴 2026-08-17 起這張表同時是**零用金請款的單據行**（docs/PETTY_CASH_PLAN.md）：
+    一筆登記同時餵「專案成本」與「個人請款」兩邊，不再兩處各記一份。
+    因此 `project_id` 放寬成可空 —— 公司層級支出（行政/業務推廣/設備耗材）沒有專案，
+    實測歷史資料 289/443 列如此。
+    """
     __tablename__ = "crm_project_expenses"
 
     id = Column(String(32), primary_key=True)
-    project_id = Column(String(32), nullable=False, index=True)
+    project_id = Column(String(32), nullable=True, index=True)   # 可空＝公司層級支出
     cost_group_id = Column(String(32), nullable=True, index=True)  # FK → crm_project_cost_groups
     category = Column(String(64), nullable=False)               # 交通/住宿/飲食/提案/其他
     estimated = Column(Integer, nullable=False, default=0)      # 預估金額
     actual = Column(Integer, nullable=False, default=0)         # 實際金額
     receipt_url = Column(String(512), nullable=True)            # 收據連結 ← 財務預留
     sub_item = Column(String(128), nullable=True)              # 細項
-    payee = Column(String(64), nullable=True)                  # 請款人
+    payee = Column(String(64), nullable=True)                  # 請款人（非員工時的文字備援）
     advance_id = Column(String(32), nullable=True)             # 關聯預支款 ID
     notes = Column(Text, nullable=True)
     created_at = Column(DateTime(timezone=True), nullable=True)
+    # ── 零用金請款（PETTY_CASH_PLAN §2.1）────────────────────────────────
+    # 🔴 認列時點：專案成本一律用 expense_date（消費日），不是請款日/匯款日。
+    # created_at 是「登記進系統的時間」，兩者常差好幾週，不能混用。
+    expense_date = Column(DateTime(timezone=True), nullable=True, index=True)
+    staff_id = Column(String(32), nullable=True, index=True)    # 墊錢的人 → crm_staff.id
+    item = Column(String(32), nullable=True)                    # 會計項目 → finance_category_map
+    invoice_no = Column(String(32), nullable=True)              # 發票號/收據字號
+    has_invoice = Column(Integer, nullable=False, default=0)    # 0/1
+    claim_id = Column(String(32), nullable=True, index=True)    # 歸屬請款批次（NULL＝未送出）
+    status = Column(String(16), nullable=False, default="草稿")  # 草稿/待審/已核准/已付款/退回
+    project_label = Column(String(128), nullable=True)          # 匯入時沒對到專案的原始標籤文字
 
 
 class CrmProjectCostGroup(Base):
@@ -647,6 +668,9 @@ class CrmPaymentRequest(Base):
     advance_by = Column(String(64), nullable=True)                     # 代墊人（實際收款人）
     is_advance = Column(Integer, nullable=False, default=0)            # 0=一般, 1=預支款
     advance_returned = Column(Integer, nullable=False, default=0)      # 0=未歸還, 1=已歸還
+    # 零用金批次產生的應付款（一張批次 → 多張 AP：會計項目 × 認列月份）。
+    # 🔴 方向是 AP→批次 而不是批次→AP：一對多的那一邊才存得下。
+    reimbursement_id = Column(String(32), nullable=True, index=True)
     notes = Column(Text, nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now())
@@ -656,6 +680,37 @@ class CrmPaymentRequest(Base):
         Index("idx_payreq_status", "payment_status"),
         Index("idx_payreq_planned_month", "planned_month"),
         Index("idx_payreq_payee", "payee_name"),
+    )
+
+
+class CrmReimbursement(Base):
+    """零用金請款批次 —— 一個人、一段期間、一次請款（PETTY_CASH_PLAN §2.2）。
+
+    單據行（CrmProjectExpense）掛 claim_id 過來；狀態機在批次上，行只跟隨。
+    核准時產一張 CrmPaymentRequest(category="零用金") → 之後完全走既有 AP 流程
+    （應付帳款月份分組 / 月結鎖帳 / 銀行對帳 / 三表），財務側零新程式碼。
+    """
+    __tablename__ = "crm_reimbursements"
+
+    id = Column(String(32), primary_key=True)
+    staff_id = Column(String(32), nullable=True, index=True)   # 可空＝非員工（外部人員代墊）
+    staff_name = Column(String(64), nullable=False)            # 快照（人員改名不影響歷史單）
+    period_start = Column(DateTime(timezone=True), nullable=True)
+    period_end = Column(DateTime(timezone=True), nullable=True)
+    opening_float = Column(Integer, nullable=False, default=0)  # 期初備用金金額快照
+    total_claim = Column(Integer, nullable=False, default=0)    # 應請款金額（Σ 單據行；可為負＝應向本人收回的款項）
+    closing_float = Column(Integer, nullable=False, default=0)  # 期末金額＝期初 − 已花
+    status = Column(String(16), nullable=False, default="草稿")  # 草稿/待審/已核准/已付款/退回
+    submitted_at = Column(DateTime(timezone=True), nullable=True)
+    approved_by = Column(String(64), nullable=True)
+    approved_at = Column(DateTime(timezone=True), nullable=True)
+    paid_at = Column(DateTime(timezone=True), nullable=True)
+    notes = Column(Text, nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    __table_args__ = (
+        Index("idx_reimb_staff_status", "staff_id", "status"),
     )
 
 
@@ -687,6 +742,7 @@ class CrmCashEntry(Base):
     bank_account_id = Column(String(32), nullable=True)          # 掛哪個銀行帳戶（財務階段二）
     payment_request_id = Column(String(32), nullable=True)       # AP 硬連結 → crm_payment_requests
     loan_payment_id = Column(String(32), nullable=True)          # 貸款繳款硬連結 → finance_loan_payments（treatment=loan，不進損益）
+    expense_id = Column(String(32), nullable=True, index=True)   # 零用金逐行落帳硬連結 → crm_project_expenses（重跑不重複記帳）
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now())
 

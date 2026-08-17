@@ -148,8 +148,26 @@ _FREE_TEXT = {
     "fee_note": "備註文字裡的金額不是鍵，是句子",
 }
 
+# 是錢，而且**必須讓本人看得到** —— 零用金請款（docs/PETTY_CASH_PLAN.md §4，
+# owner 2026-08-17）。這是第五類，不能併進上面任何一張：
+#
+#   - 不是 `_PENDING_OWNER`（那是「還沒拍板」；這一類已經拍板了）
+#   - 不是 `_ONLY_ON_BLOCKED_ROUTES`（那是「只出現在 403 端點上」；這一類**刻意**
+#     出現在沒有 `money_view` 的人打得到的端點上）
+#
+# 🔴 把它們放進 `MONEY_FIELDS` 會壞掉的是**產品**：員工沒有 `money_view`（owner
+# 的預設就是不給），抹掉之後他看不到自己墊了多少錢、也看不到公司要匯給他多少。
+# 擋住「別人的錢」的是 **scope 不是抹鍵** —— `/petty/me` 一族只查
+# `staff_id = 我`（routers/crm/petty.py），財務視角那組另外掛 `money_dep`。
+_OWN_SCOPE = {
+    "total_claim": "自己這批請多少 —— /petty/me 只回本人的批次",
+    "opening_float": "自己手上的備用金期初",
+    "closing_float": "同上，期末",
+    "petty_float": "crm_staff 上的備用金額度；/petty/me 只回本人的",
+}
+
 REGISTRY_EXEMPT = {**_NOT_MONEY, **_ONLY_ON_BLOCKED_ROUTES,
-                   **_PENDING_OWNER, **_FREE_TEXT}
+                   **_PENDING_OWNER, **_FREE_TEXT, **_OWN_SCOPE}
 
 # 掃描器（測試）除了 `_PREFILTER` 的詞彙之外，還要認得的**完整同名**欄位。
 # 這幾個名字本身就是金額，但都在豁免表裡表態，所以不進 `_PREFILTER` ——
