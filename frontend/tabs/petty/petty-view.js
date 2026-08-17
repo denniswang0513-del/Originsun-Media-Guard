@@ -386,55 +386,139 @@ export async function renderAccounts(host) {
     });
 }
 
-// ── 分頁：全部零用金（帳戶總覽 + 綁定狀態 + 所有批次）──────────────────
-export async function renderOverview(host) {
-    const d = await get("/api/v1/crm/petty/accounts");
-    const t = d.totals;
-    const rows = d.accounts;
+// ── 分頁：全部零用金 —— **逐筆帳冊**（欄位對齊 owner 的 Google Sheet）─────
+//
+// owner 2026-08-17 看過每人彙總版後：「我希望全部的零用金是像這樣的管理頁面」
+// —— 附圖是那張 443 列的表。彙總表回答不了「那筆 4,309 的影印是誰、哪個案子」，
+// 所以主體換成逐筆，欄位順序照原表：日期／請款／摘要／附註／項目／收款人／專案標籤。
+// 下拉就地改（項目／收款人／專案），change 即存。
+const LEDGER_CSS = `
+<style>
+.lg-bar { display:flex; gap:8px; flex-wrap:wrap; align-items:center; margin-bottom:10px; }
+.lg-bar input, .lg-bar select { padding:7px 9px; border:1px solid var(--line);
+  border-radius:2px; font-size:13px; font-family:inherit; background:transparent; color:inherit; }
+.lg-sum { font-size:12px; color:var(--sub); margin-left:auto; }
+.lg-wrap { overflow-x:auto; border:1px solid var(--line); }
+table.lg { border-collapse:collapse; width:100%; font-size:13px; min-width:980px; }
+table.lg th { text-align:left; font-weight:600; font-size:11px; letter-spacing:.08em;
+  color:var(--sub); padding:8px 10px; border-bottom:1px solid var(--line);
+  position:sticky; top:0; background:var(--bg-soft); white-space:nowrap; }
+table.lg td { padding:4px 8px; border-bottom:1px solid var(--line); vertical-align:middle; }
+table.lg tr:hover td { background:rgba(127,127,127,.07); }
+table.lg td.amt { text-align:right; font-variant-numeric:tabular-nums; font-weight:600; }
+table.lg td.dt { white-space:nowrap; color:var(--sub); }
+table.lg select, table.lg input { width:100%; background:transparent; color:inherit;
+  border:1px solid transparent; border-radius:2px; padding:4px 5px; font-size:13px;
+  font-family:inherit; }
+table.lg select:hover, table.lg input:hover { border-color:var(--line); }
+table.lg select:focus, table.lg input:focus { border-color:var(--sub); outline:none; }
+table.lg tr.locked select, table.lg tr.locked input { pointer-events:none; opacity:.5; }
+.lg-lock { font-size:11px; color:var(--sub); white-space:nowrap; }
+.lg-more { text-align:center; padding:14px; }
+</style>`;
 
-    host.innerHTML = CSS + `
-      <div class="pc-sum">
-        <div><div class="lbl">有零用金紀錄的人</div><div class="big">${t.people}</div></div>
-        <div><div class="lbl">未送出</div><div class="big">${money(t.draft)}</div></div>
-        <div><div class="lbl">已送出待付</div><div class="big">${money(t.open)}</div></div>
-        <div><div class="lbl">歷史已付</div><div class="big">${money(t.paid)}</div></div>
-        ${t.unbound ? `<div><div class="lbl">未綁帳號</div>
-          <div class="big pc-warn">${t.unbound}</div></div>` : ""}
-        ${t.bank_missing ? `<div><div class="lbl">缺銀行帳號</div>
-          <div class="big pc-warn">${t.bank_missing}</div></div>` : ""}
+const _LG = { q: "", staff_id: "", item: "", month: "", unbound: 0, limit: 300 };
+
+export async function renderOverview(host) {
+    const qs = new URLSearchParams(
+        Object.entries(_LG).filter(([, v]) => v !== "" && v !== 0)).toString();
+    const [d, opts, people] = await Promise.all([
+        get("/api/v1/crm/petty/entries?" + qs),
+        get("/api/v1/crm/petty/options"),
+        get("/api/v1/crm/petty/staff-options"),
+    ]);
+
+    const itemOpts = (cur) => '<option value=""></option>'
+        + opts.items.map(i => `<option${i === cur ? " selected" : ""}>${esc(i)}</option>`).join("");
+    const staffOpts = (cur) => '<option value=""></option>'
+        + people.staff.map(p => `<option value="${esc(p.id)}"${
+            p.id === cur ? " selected" : ""}>${esc(p.name)}</option>`).join("");
+    const projOpts = (cur) => '<option value="">（無）</option>'
+        + opts.projects.map(p => `<option value="${esc(p.id)}"${
+            p.id === cur ? " selected" : ""}>${esc(p.name)}</option>`).join("");
+
+    host.innerHTML = CSS + LEDGER_CSS + `
+      <div class="lg-bar">
+        <input id="lg-q" placeholder="搜尋摘要／附註／發票號／標籤（Enter）"
+               value="${esc(_LG.q)}" style="min-width:240px;">
+        <select id="lg-staff"><option value="">全部收款人</option>
+          ${people.staff.map(p => `<option value="${esc(p.id)}"${
+            p.id === _LG.staff_id ? " selected" : ""}>${esc(p.name)}</option>`).join("")}</select>
+        <select id="lg-item"><option value="">全部項目</option>
+          ${opts.items.map(i => `<option${i === _LG.item ? " selected" : ""}>${esc(i)}</option>`).join("")}</select>
+        <input id="lg-month" type="month" value="${esc(_LG.month)}">
+        <label style="font-size:12px;color:var(--sub);display:flex;gap:4px;align-items:center;">
+          <input type="checkbox" id="lg-unbound" ${_LG.unbound ? "checked" : ""} style="width:auto;">
+          只看未歸戶專案</label>
+        <span class="lg-sum">${d.total.toLocaleString()} 筆 ／ 合計 ${money(d.amount)}${
+          d.returned < d.total ? `（顯示前 ${d.returned}）` : ""}</span>
       </div>
 
-      <div class="pc-head pc-row"><span>姓名</span><span>綁定的帳號</span>
-        <span>銀行帳號</span><span class="amt">未送出</span><span>待付／已付</span>
-        <span>備用金</span></div>
-      ${rows.map(a => `
-        <div class="pc-row">
-          <span>${esc(a.name)}${a.staff_status && a.staff_status !== "在職"
-            ? `<span class="pc-pill">${esc(a.staff_status)}</span>` : ""}</span>
-          <span class="${a.bound_user ? "sub" : "pc-warn"}">${
-            a.bound_user ? esc(a.bound_user) : "未綁定（只能代為登記）"}</span>
-          <span class="${a.bank_missing ? "pc-warn" : "sub"}">${
-            a.bank_missing ? "未填" : esc(a.bank)}</span>
-          <span class="amt">${a.draft_total ? money(a.draft_total) : "—"}</span>
-          <span class="sub">${money(a.claim_total)} ／ ${money(a.paid_total)}
-            <span style="opacity:.6;">（${a.rows} 筆）</span></span>
-          <span class="sub">${a.opening_float ? money(a.opening_float) : "—"}</span>
-        </div>`).join("")}
+      <div class="lg-wrap"><table class="lg">
+        <thead><tr>
+          <th style="width:112px;">日期</th><th style="width:92px;text-align:right;">請款</th>
+          <th style="min-width:210px;">摘要</th><th style="width:135px;">附註</th>
+          <th style="width:130px;">項目</th><th style="width:130px;">收款人</th>
+          <th style="width:200px;">專案標籤</th><th style="width:64px;"></th>
+        </tr></thead>
+        <tbody>${d.entries.map(e => `
+          <tr data-id="${esc(e.id)}" class="${e.locked ? "locked" : ""}">
+            <td class="dt"><input type="date" data-f="expense_date" value="${esc(e.expense_date)}"></td>
+            <td class="amt"><input type="number" data-f="actual" value="${e.actual}"
+                                   style="text-align:right;"></td>
+            <td><input data-f="summary" value="${esc(e.summary)}"></td>
+            <td><input data-f="${e.invoice_no ? "invoice_no" : "note"}"
+                       value="${esc(e.invoice_no || e.note)}"></td>
+            <td><select data-f="item">${itemOpts(e.item)}</select></td>
+            <td><select data-f="staff_id">${staffOpts(e.staff_id)}</select></td>
+            <td><select data-f="project_id"${e.project_label
+                  ? ` title="原始標籤：${esc(e.project_label)}"` : ""}>
+                  ${e.project_label && !e.project_id
+                    ? `<option value="" selected>${esc(e.project_label)}（未歸戶）</option>`
+                    : ""}
+                  ${projOpts(e.project_id)}
+                </select></td>
+            <td class="lg-lock">${e.locked ? "已入帳" : esc(e.status)}</td>
+          </tr>`).join("")}</tbody>
+      </table></div>
+      ${d.entries.length ? "" : '<div class="pc-empty">沒有符合條件的單據。</div>'}
+      ${d.returned < d.total
+        ? `<div class="lg-more"><button class="pc-btn ghost" id="lg-more">
+             再載 300 筆（已顯示 ${d.returned}／${d.total}）</button></div>`
+        : ""}`;
 
-      <h3 style="font-size:13px;letter-spacing:.15em;color:var(--sub);
-          margin:28px 0 8px;text-transform:uppercase;">所有請款批次（${d.claims.length}）</h3>
-      <div class="pc-head pc-row"><span>送出日</span><span>人／期間</span><span>狀態</span>
-        <span class="amt">金額</span><span>匯款日</span><span></span></div>
-      ${d.claims.map(c => `
-        <div class="pc-row">
-          <span class="sub">${esc(c.submitted_at || "")}</span>
-          <span>${esc(c.staff_name)}
-            <span class="sub"> · ${esc(c.period_start || "?")} ~ ${esc(c.period_end || "?")}</span></span>
-          <span><span class="pc-pill">${esc(c.status)}</span></span>
-          <span class="amt">${money(c.total_claim)}</span>
-          <span class="sub">${esc(c.paid_at || "")}</span>
-          <span class="sub">${esc((c.notes || "").slice(0, 24))}</span>
-        </div>`).join("")}`;
+    // 篩選：搜尋框走 Enter（每個字打一次 API 會讓 443 列的表卡住），其餘 change 即查
+    const rerun = () => renderOverview(host);
+    host.querySelector("#lg-q").onkeydown = (ev) => {
+        if (ev.key === "Enter") { _LG.q = ev.target.value.trim(); _LG.limit = 300; rerun(); }
+    };
+    host.querySelector("#lg-staff").onchange = (ev) => { _LG.staff_id = ev.target.value; rerun(); };
+    host.querySelector("#lg-item").onchange = (ev) => { _LG.item = ev.target.value; rerun(); };
+    host.querySelector("#lg-month").onchange = (ev) => { _LG.month = ev.target.value; rerun(); };
+    host.querySelector("#lg-unbound").onchange = (ev) => {
+        _LG.unbound = ev.target.checked ? 1 : 0; rerun();
+    };
+    const more = host.querySelector("#lg-more");
+    if (more) more.onclick = () => { _LG.limit += 300; rerun(); };
+
+    // 就地修改：change 才送（不是每個鍵），存好把邊框閃綠當回饋
+    host.querySelectorAll("tbody [data-f]").forEach(el => {
+        el.onchange = async () => {
+            const tr = el.closest("tr");
+            const f = el.dataset.f;
+            const val = el.type === "number" ? Number(el.value) : el.value;
+            try {
+                await send("PATCH", "/api/v1/crm/petty/entries/" + tr.dataset.id, { [f]: val });
+                el.style.borderColor = "var(--ok)";
+                setTimeout(() => { el.style.borderColor = ""; }, 900);
+                // 綁定專案會讓「未歸戶」那一格的樣子改變 —— 重抓比就地補畫可靠
+                if (f === "project_id") rerun();
+            } catch (err) {
+                el.style.borderColor = "var(--red)";
+                alert(String(err.message || err));
+            }
+        };
+    });
 }
 
 // ── 分頁 4：未歸戶標籤（一次綁一個標籤，帶走底下所有列）────────────────

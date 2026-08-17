@@ -144,6 +144,38 @@ def test_delegate_allows_approver(app_client, as_user, method, path, body):
     assert r.status_code not in (401, 403), f"{method} {path}：{r.status_code}"
 
 
+def test_ledger_endpoints_need_both_grants(app_client, as_user):
+    for h in (as_user(modules=["me_finance"]), as_user(modules=["money_view"]),
+              as_user(modules=["finance_approve"])):
+        assert app_client.get("/api/v1/crm/petty/entries", headers=h).status_code == 403
+        assert app_client.patch("/api/v1/crm/petty/entries/__probe__", headers=h,
+                                json={"item": "行政"}).status_code == 403
+
+
+def test_ledger_patch_has_a_field_whitelist():
+    """🔴 就地編輯只准改分類與敘述，不准改 `status` / `claim_id`。
+
+    帳冊頁的每一格都直接打 PATCH，白名單漏一個欄位＝畫面上多一個可以把單據
+    「改成已付款」的洞。這條錨在白名單常數上。
+    """
+    src = (Path(__file__).resolve().parents[2]
+           / "routers" / "crm" / "petty.py").read_text(encoding="utf-8")
+    body = src.split("async def patch_petty_entry")[1].split("\n@router")[0]
+    assert "allowed = {" in body
+    for forbidden in ("status", "claim_id", "receipt_url"):
+        assert f'"{forbidden}"' not in body.split("allowed = {")[1].split("}")[0], forbidden
+    # 已產應付款的列不准改分類（科目與認列月份已入帳）
+    assert "reimbursement_id == exp.claim_id" in body and "409" in body
+
+
+def test_ledger_only_shows_petty_rows():
+    """帳冊只列零用金單據（有 claim_id）—— 混進舊的專案雜支會讓這張表變髒。"""
+    src = (Path(__file__).resolve().parents[2]
+           / "routers" / "crm" / "petty.py").read_text(encoding="utf-8")
+    body = src.split("async def petty_entries")[1].split("\n@router")[0]
+    assert "CrmProjectExpense.claim_id.isnot(None)" in body
+
+
 def test_overview_lists_everyone_with_history_not_just_debtors():
     """🔴 帳戶總覽的判準是「曾經有過單據」，不是「現在還欠他錢」。
 

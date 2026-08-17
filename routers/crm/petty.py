@@ -467,6 +467,127 @@ async def petty_accounts(request: Request):
     }
 
 
+@router.get("/petty/entries", dependencies=[Depends(money_dep)])
+async def petty_entries(request: Request, q: str = Query(""),
+                        staff_id: str = Query(""), item: str = Query(""),
+                        month: str = Query(""), status: str = Query(""),
+                        unbound: int = Query(0),
+                        limit: int = Query(1000), offset: int = Query(0)):
+    """**逐筆**的零用金帳冊 —— 欄位對齊 owner 的 Google Sheet（日期／請款／摘要／
+    附註／項目／收款人／專案標籤）。
+
+    這是「全部零用金」那頁的主體。做成逐筆而不是每人彙總的理由：owner 原本就是
+    對著一張 443 列的表在工作，彙總表回答不了「那筆 4,309 的影印是誰、哪個案子」。
+    """
+    _check_approver(request)
+    factory = await _get_factory()
+    async with factory() as session:
+        w = []
+        if staff_id:
+            w.append(CrmProjectExpense.staff_id == staff_id)
+        if item:
+            w.append(CrmProjectExpense.item == item)
+        if status:
+            w.append(CrmProjectExpense.status == status)
+        if unbound:                       # 只看沒對到專案、但有標籤的
+            w.append(CrmProjectExpense.project_label.isnot(None))
+            w.append(CrmProjectExpense.project_id.is_(None))
+        if month:                         # YYYY-MM
+            w.append(safunc.to_char(CrmProjectExpense.expense_date, "YYYY-MM") == month)
+        if q:
+            like = f"%{q}%"
+            w.append(safunc.coalesce(CrmProjectExpense.sub_item, "").ilike(like)
+                     | safunc.coalesce(CrmProjectExpense.notes, "").ilike(like)
+                     | safunc.coalesce(CrmProjectExpense.invoice_no, "").ilike(like)
+                     | safunc.coalesce(CrmProjectExpense.project_label, "").ilike(like))
+        # 只看零用金的單據：舊的專案雜支沒有 item / staff_id，混進來會讓帳冊變髒
+        w.append(CrmProjectExpense.claim_id.isnot(None))
+
+        base = select(CrmProjectExpense).where(*w)
+        total, amount = (await session.execute(
+            select(safunc.count(CrmProjectExpense.id),
+                   safunc.coalesce(safunc.sum(CrmProjectExpense.actual), 0))
+            .where(*w))).first()
+        rows = (await session.execute(
+            base.order_by(CrmProjectExpense.expense_date.desc().nullslast(),
+                          CrmProjectExpense.created_at.desc())
+            .limit(min(limit, 2000)).offset(offset))).scalars().all()
+        names = dict((await session.execute(
+            select(CrmProject.id, CrmProject.name))).all())
+        staff = dict((await session.execute(
+            select(CrmStaff.id, CrmStaff.name))).all())
+        # 哪些批次已經產過應付款 → 那些列的分類不能再改（見 PATCH）
+        booked = {r[0] for r in (await session.execute(
+            select(CrmPaymentRequest.reimbursement_id)
+            .where(CrmPaymentRequest.reimbursement_id.isnot(None)))).all()}
+
+    out = []
+    for e in rows:
+        d = _expense_dict(e, names.get(e.project_id, ""))
+        d["staff_name"] = staff.get(e.staff_id, e.payee or "")
+        d["note"] = e.notes or ""
+        d["locked"] = e.claim_id in booked     # 已產應付款＝分類已入帳，不准改
+        out.append(d)
+    return {"entries": out, "total": total, "amount": amount,
+            "returned": len(out), "offset": offset}
+
+
+@router.patch("/petty/entries/{expense_id}", dependencies=[Depends(money_dep)])
+async def patch_petty_entry(expense_id: str, request: Request):
+    """就地修改一列（帳冊頁的下拉／欄位）。
+
+    🔴 **已經產過應付款的列不准改分類**：那筆錢的科目與認列月份已經寫進
+    `crm_payment_requests`，改了單據卻不改 AP，帳面上兩邊會對不起來 ——
+    而畫面上完全看不出來。要改就先退回批次（AP 會被撤掉），改完再送出。
+    匯入的歷史批次沒有 AP，所以那 443 列照樣改得動（那正是要整理的東西）。
+    """
+    _check_approver(request)
+    body = await request.json()
+    allowed = {"expense_date", "actual", "summary", "note", "item",
+               "staff_id", "project_id", "project_label", "invoice_no"}
+    unknown = set(body) - allowed
+    if unknown:
+        raise HTTPException(status_code=400, detail=f"不支援的欄位：{sorted(unknown)}")
+    factory = await _get_factory()
+    async with factory() as session:
+        exp = await session.get(CrmProjectExpense, expense_id)
+        if exp is None:
+            raise HTTPException(status_code=404, detail="找不到這筆支出")
+        if exp.claim_id:
+            booked = (await session.execute(
+                select(safunc.count(CrmPaymentRequest.id))
+                .where(CrmPaymentRequest.reimbursement_id == exp.claim_id))).scalar_one()
+            if booked:
+                raise HTTPException(
+                    status_code=409,
+                    detail="這筆已經產生應付款（科目與認列月份已入帳）。"
+                           "要修改請先退回該批次，改完再送出。")
+        if "expense_date" in body:
+            exp.expense_date = _parse_day(body["expense_date"]) or exp.expense_date
+        if "actual" in body:
+            exp.actual = int(body["actual"] or 0)
+        if "summary" in body:
+            exp.sub_item = body["summary"] or None
+        if "note" in body:
+            exp.notes = body["note"] or None
+        if "item" in body:
+            exp.item = body["item"] or None
+        if "staff_id" in body:
+            exp.staff_id = body["staff_id"] or None
+        if "invoice_no" in body:
+            exp.invoice_no = body["invoice_no"] or None
+            exp.has_invoice = 1 if exp.invoice_no else 0
+        if "project_id" in body:
+            exp.project_id = body["project_id"] or None
+            # 綁到專案了就把原始標籤收掉 —— 留著會讓「未歸戶」永遠清不完
+            if exp.project_id:
+                exp.project_label = None
+        if "project_label" in body:
+            exp.project_label = body["project_label"] or None
+        await session.commit()
+    return {"status": "ok", "id": expense_id}
+
+
 @router.get("/petty/claims", dependencies=[Depends(money_dep)])
 async def petty_claims(request: Request, status: str = Query("待審")):
     """待審／已核准／已付款批次清單（含逐行明細）。"""
