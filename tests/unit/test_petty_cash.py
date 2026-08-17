@@ -424,14 +424,34 @@ def test_binding_a_project_also_attaches_a_cost_group():
     src = (Path(__file__).resolve().parents[2]
            / "routers" / "crm" / "petty.py").read_text(encoding="utf-8")
     assert "_attach_cost_group" in src
-    patch = src.split("async def patch_petty_entry")[1].split("
-@router")[0]
+    patch = src.split("async def patch_petty_entry")[1].split("\n@router")[0]
     assert "_resolve_target_group" in patch, "PATCH 綁專案沒有落子表"
-    bind = src.split("async def petty_bind_label")[1].split("
-@router")[0]
+    bind = src.split("async def petty_bind_label")[1].split("\n@router")[0]
     assert "_resolve_target_group" in bind, "一次綁整個標籤沒有落子表"
     # 解除專案時也要把子表清掉，否則會留下「沒有專案卻掛在某子表下」的孤兒
     assert "exp.cost_group_id = None" in patch
+
+
+def test_cost_group_endpoint_needs_both_grants(app_client, as_user):
+    for h in (as_user(modules=["me_finance"]), as_user(modules=["money_view"]),
+              as_user(modules=["finance_approve"])):
+        assert app_client.get("/api/v1/crm/petty/project-groups/__probe__",
+                              headers=h).status_code == 403
+
+
+def test_ledger_asks_which_cost_group_when_there_are_several():
+    """🔴 專案有多張成本子表時要問使用者掛哪一張（owner 2026-08-17）。
+
+    預設落主表不會算錯錢，但「這筆算哪一天的拍攝」只有人知道 —— 默默落主表
+    等於幫使用者做了一個他看不到的決定。只有一張時不問（沒得選）。
+    """
+    view = (FRONTEND / "tabs" / "petty" / "petty-view.js").read_text(encoding="utf-8")
+    assert "_pickCostGroup" in view
+    fn = view.split("const _pickCostGroup")[1].split("\n    };")[0]
+    assert "groups.length <= 1" in fn, "只有一張子表時不該問"
+    assert "petty/project-groups/" in fn
+    # 取消要放棄整個動作，不是默默落主表
+    assert "resolve(null)" in fn or "done(null)" in fn
 
 
 def test_item_owner_mapping_needs_both_grants(app_client, as_user):

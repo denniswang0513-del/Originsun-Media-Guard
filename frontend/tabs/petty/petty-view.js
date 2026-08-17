@@ -657,6 +657,46 @@ export async function renderOverview(host) {
         sel.value = sel.dataset.v;
     });
 
+    // 專案有多張成本子表 → 問掛哪一張；只有一張（或沒有）就回 "" 讓後端落主表。
+    // 回 null ＝ 使用者按了取消。
+    const _pickCostGroup = async (projectId) => {
+        let groups = [];
+        try {
+            groups = (await get("/api/v1/crm/petty/project-groups/"
+                                + encodeURIComponent(projectId))).groups;
+        } catch (_) { return ""; }
+        if (groups.length <= 1) return "";
+        return new Promise(resolve => {
+            const box = document.createElement("div");
+            box.className = "lg-modal";
+            box.innerHTML = `
+              <div class="lg-modal-in" style="max-width:420px;">
+                <h3 style="margin:0 0 6px;font-size:15px;">要掛哪一張成本子表？</h3>
+                <div class="pc-empty" style="text-align:left;padding:0 0 12px;">
+                  這個專案有 ${groups.length} 張子表。選錯只是分組不對，金額仍算進
+                  專案成本；不確定就選第一張。</div>
+                ${groups.map((g, i) => `
+                  <label style="display:flex;gap:8px;align-items:center;padding:8px;
+                                border:1px solid var(--line);margin-bottom:6px;cursor:pointer;">
+                    <input type="radio" name="lg-g" value="${esc(g.id)}"
+                           ${i === 0 ? "checked" : ""} style="width:auto;">
+                    <span>${esc(g.name)}${g.shoot_date
+                      ? `<span class="sub"> · ${esc(g.shoot_date)}</span>` : ""}</span>
+                  </label>`).join("")}
+                <div class="pc-actions" style="margin-top:12px;">
+                  <button class="pc-btn ghost" data-x>取消</button>
+                  <button class="pc-btn" data-ok>確定</button>
+                </div>
+              </div>`;
+            host.appendChild(box);
+            const done = (v) => { box.remove(); resolve(v); };
+            box.querySelector("[data-x]").onclick = () => done(null);
+            box.onclick = (ev) => { if (ev.target === box) done(null); };
+            box.querySelector("[data-ok]").onclick = () => done(
+                box.querySelector('input[name="lg-g"]:checked').value);
+        });
+    };
+
     // 就地修改：change 才送（不是每個鍵），存好把邊框閃綠當回饋
     host.querySelectorAll("tbody [data-f]").forEach(el => {
         el.onchange = async () => {
@@ -673,6 +713,22 @@ export async function renderOverview(host) {
                 }
                 val = typed ? idOfLabel[typed] : "";
                 el.dataset.was = typed;
+                // 專案有不只一張成本子表時，問要掛哪一張（owner 2026-08-17）——
+                // 預設落主表雖然不會錯，但「這筆算哪一天的拍攝」只有人知道
+                if (val) {
+                    const gid = await _pickCostGroup(val);
+                    if (gid === null) {            // 使用者取消 → 整個動作放棄
+                        el.value = el.dataset.was = tr.querySelector(
+                            '[data-f="project_id"]').defaultValue || "";
+                        return;
+                    }
+                    await send("PATCH", "/api/v1/crm/petty/entries/" + tr.dataset.id,
+                               { project_id: val, cost_group_id: gid });
+                    el.style.borderColor = "var(--ok)";
+                    setTimeout(() => { el.style.borderColor = ""; }, 900);
+                    rerun();
+                    return;
+                }
             }
             try {
                 await send("PATCH", "/api/v1/crm/petty/entries/" + tr.dataset.id, { [f]: val });

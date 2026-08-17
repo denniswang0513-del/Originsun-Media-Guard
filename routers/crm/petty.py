@@ -643,6 +643,27 @@ async def petty_entries(request: Request, q: str = Query(""),
             "returned": len(out), "offset": offset}
 
 
+@router.get("/petty/project-groups/{project_id}", dependencies=[Depends(money_dep)])
+async def petty_project_groups(project_id: str, request: Request):
+    """某專案的成本子表清單 —— 帳冊在綁專案時，若不只一張就問使用者掛哪張。
+
+    只有一張（或沒有）就不必問，後端會自動落主表。
+    """
+    _check_approver(request)
+    factory = await _get_factory()
+    async with factory() as session:
+        from db.models import CrmProjectCostGroup
+        rows = (await session.execute(
+            select(CrmProjectCostGroup.id, CrmProjectCostGroup.name,
+                   CrmProjectCostGroup.shoot_date)
+            .where(CrmProjectCostGroup.project_id == project_id)
+            .order_by(CrmProjectCostGroup.sort_order,
+                      CrmProjectCostGroup.created_at))).all()
+    return {"groups": [{"id": r.id, "name": r.name,
+                        "shoot_date": r.shoot_date.strftime("%Y-%m-%d")
+                        if r.shoot_date else ""} for r in rows]}
+
+
 @router.patch("/petty/entries/{expense_id}", dependencies=[Depends(money_dep)])
 async def patch_petty_entry(expense_id: str, request: Request):
     """就地修改一列（帳冊頁的下拉／欄位）。
@@ -656,7 +677,7 @@ async def patch_petty_entry(expense_id: str, request: Request):
     body = await request.json()
     allowed = {"expense_date", "actual", "summary", "note", "item",
                "staff_id", "project_id", "project_label", "invoice_no",
-               "owner_staff_id", "owner_settled"}
+               "owner_staff_id", "owner_settled", "cost_group_id"}
     unknown = set(body) - allowed
     if unknown:
         raise HTTPException(status_code=400, detail=f"不支援的欄位：{sorted(unknown)}")
@@ -698,13 +719,17 @@ async def patch_petty_entry(expense_id: str, request: Request):
                 # cost_group_id 是 NULL 的列只存在於扁平清單裡 —— 綁了專案卻在
                 # 專案頁上看不到那筆錢（owner 2026-08-17 回報）。沿用 CRM 建立
                 # 雜支時的同一支解析器，落到主表。
+                # 呼叫端可以指定要掛哪一張子表（帳冊在專案有多張時會問）；
+                # 沒指定就落主表
                 from .costs import _resolve_target_group
                 exp.cost_group_id = await _resolve_target_group(
-                    session, exp.project_id, None)
+                    session, exp.project_id, body.get("cost_group_id"))
             else:
                 exp.cost_group_id = None
         if "project_label" in body:
             exp.project_label = body["project_label"] or None
+        if "cost_group_id" in body and "project_id" not in body:
+            exp.cost_group_id = body["cost_group_id"] or None
         if "owner_staff_id" in body:
             exp.owner_staff_id = body["owner_staff_id"] or None
         if "owner_settled" in body:
