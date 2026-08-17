@@ -530,3 +530,19 @@ def test_own_scope_fields_are_not_redacted():
     """
     both = sorted(set(_OWN_SCOPE) & MONEY_FIELDS)
     assert not both, f"這幾筆同時要抹又要給本人看：{both}"
+
+
+def test_ledger_marks_which_cost_group_a_bound_row_landed_on():
+    """🔴 綁了專案的列要看得出掛在哪張成本子表，沒掛的要看得出來。
+
+    `cost_group_id` 是 NULL 的列**綁了專案卻不會出現在專案頁的雜支裡**
+    （2026-08-17 踩過）—— 那是資料層的靜默失敗，畫面上兩者長得一模一樣。
+    帳冊的紅色 i 是唯一看得出來的地方，所以三件事都要在：
+    後端回子表名稱、前端分兩種狀態、沒綁專案的列不長出這個記號。
+    """
+    body = _fn("petty_entries")
+    assert "cost_group_name" in body, "帳冊沒回成本子表名稱"
+    assert "CrmProjectCostGroup.id.in_(gids)" in body, "子表名稱不是批次撈的（N+1）"
+    hint = PETTY_VIEW.split("const groupHint")[1].split("const projCell")[0]
+    assert "if (!e.project_id) return \"\"" in hint, "沒綁專案的列不該有記號"
+    assert "lg-i warn" in hint and "cost_group_name" in hint, "缺少「沒掛子表」的警示狀態"

@@ -133,6 +133,7 @@ def _expense_dict(e: CrmProjectExpense, project_name: str = "") -> dict:
         "project_id": e.project_id or "",
         "project_name": project_name,
         "project_label": e.project_label or "",
+        "cost_group_id": e.cost_group_id or "",
         "invoice_no": e.invoice_no or "",
         "has_invoice": bool(e.has_invoice),
         "receipt_url": e.receipt_url or "",
@@ -637,6 +638,15 @@ async def petty_entries(request: Request, q: str = Query(""),
         booked = {r[0] for r in (await session.execute(
             select(CrmPaymentRequest.reimbursement_id)
             .where(CrmPaymentRequest.reimbursement_id.isnot(None)))).all()}
+        # 掛到哪張成本子表 —— 帳冊靠這個標出「綁了專案但沒落子表」的列
+        # （那種列在專案頁的雜支完全看不到，2026-08-17 踩過一次）
+        gids = {e.cost_group_id for e in rows if e.cost_group_id}
+        cost_groups = {}
+        if gids:
+            from db.models import CrmProjectCostGroup
+            cost_groups = dict((await session.execute(
+                select(CrmProjectCostGroup.id, CrmProjectCostGroup.name)
+                .where(CrmProjectCostGroup.id.in_(gids)))).all())
 
     out = []
     for e in rows:
@@ -644,6 +654,7 @@ async def petty_entries(request: Request, q: str = Query(""),
         d["staff_name"] = staff.get(e.staff_id, e.payee or "")
         d["note"] = e.notes or ""
         d["locked"] = e.claim_id in booked     # 已產應付款＝分類已入帳，不准改
+        d["cost_group_name"] = cost_groups.get(e.cost_group_id, "")
         out.append(d)
     return {"entries": out, "total": total, "amount": amount,
             "returned": len(out), "offset": offset}

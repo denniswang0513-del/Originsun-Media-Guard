@@ -467,6 +467,14 @@ table.lg select:hover, table.lg input:hover { border-color:var(--line); }
 table.lg select:focus, table.lg input:focus { border-color:var(--sub); outline:none; }
 table.lg tr.locked select, table.lg tr.locked input { pointer-events:none; opacity:.5; }
 .lg-lock { font-size:11px; color:var(--sub); white-space:nowrap; }
+/* 綁了專案的列：專案欄旁邊一個 i，滑過去看掛在哪張成本子表 */
+.lg-proj { display:flex; align-items:center; gap:4px; }
+.lg-proj > input { flex:1; min-width:0; }
+.lg-i { flex:none; width:15px; height:15px; line-height:14px; text-align:center;
+  border:1px solid var(--line); border-radius:50%; font-size:10px; font-style:italic;
+  font-family:Georgia,serif; color:var(--sub); cursor:help; user-select:none; }
+.lg-i:hover { border-color:var(--sub); color:inherit; }
+.lg-i.warn { border-color:var(--red); color:var(--red); }
 .lg-more { text-align:center; padding:14px; }
 .lg-modal { position:fixed; inset:0; background:rgba(0,0,0,.55); z-index:900;
   display:flex; align-items:center; justify-content:center; padding:20px; }
@@ -520,22 +528,32 @@ export async function renderOverview(host) {
     // 只有「專案雜支」開放連結專案（owner 2026-08-17）。規則來自後端的
     // `project_link_items`，不在前端寫死 —— 兩邊各寫一份就會漂。
     const LINKABLE = linkableSet(opts);
+    // 綁了專案才給的提示：掛在哪張成本子表。沒落子表的用紅色 i ——
+    // 那種列在專案頁的雜支根本看不到（綁了卻等於沒綁），這是唯一看得出來的地方。
+    const groupHint = (e) => {
+        if (!e.project_id) return "";
+        return e.cost_group_name
+            ? `<span class="lg-i" title="掛在成本子表：${esc(e.cost_group_name)}">i</span>`
+            : '<span class="lg-i warn" title="綁了專案但沒掛成本子表 —— '
+              + '這筆不會出現在專案頁的雜支裡。清掉專案再重綁一次就會補上。">i</span>';
+    };
     const projCell = (e) => {
         const cur = e.project_id;
         const val = cur ? (labelOf[cur] || projName[cur] || "（已刪除的專案）") : "";
         if (!LINKABLE.has(e.item)) {
             // 鎖住而不是隱藏：既有的標籤文字還看得到（那是資料），
             // 只是這個項目不該連專案
-            return `<input data-f="project_id" value="${esc(val)}" disabled
+            return `<span class="lg-proj"><input data-f="project_id" value="${esc(val)}" disabled
                            style="opacity:.45;"
                            placeholder="${e.project_label ? esc(e.project_label) : "—"}"
-                           title="「${esc(e.item || "")}」不開放連結專案（只有專案雜支可以）">`;
+                           title="「${esc(e.item || "")}」不開放連結專案（只有專案雜支可以）"
+                           >${groupHint(e)}</span>`;
         }
-        return `<input data-f="project_id" list="pc-proj-dl"
+        return `<span class="lg-proj"><input data-f="project_id" list="pc-proj-dl"
                        value="${esc(val)}" data-was="${esc(val)}"
                        placeholder="${e.project_label ? esc(e.project_label) + "（未歸戶）" : "（無專案）"}"
                        title="${e.project_label ? "原始標籤：" + esc(e.project_label)
-                                                : "打字搜尋專案；清空＝不歸專案"}">`;
+                                                : "打字搜尋專案；清空＝不歸專案"}">${groupHint(e)}</span>`;
     };
 
     host.innerHTML = CSS + LEDGER_CSS + PROJ_DATALIST + `
