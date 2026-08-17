@@ -180,7 +180,12 @@ async def upload_expense_link_receipt(token: str, expense_id: str,
 async def list_project_expenses(project_id: str, group_id: Optional[str] = Query(None)):
     """列出專案雜支。
     - 無 group_id：回整個專案的雜支 + 多一層 grouped_by_group
-    - 有 group_id：只回該子表的雜支"""
+    - 有 group_id：只回該子表的雜支
+
+    🔴 零用金整合後這支有**兩個**消費端（CRM 帳務子視圖、/project.html 的
+    「支出」分頁），payload 因此帶了誰墊的 / 會計項目 / 請款狀態。不另開一支
+    「專案的零用金」端點 —— 那會讓「這個案子花了多少」有兩個互相矛盾的答案。
+    """
     _require_db()
     factory = await _get_factory()
     async with factory() as session:
@@ -195,6 +200,12 @@ async def list_project_expenses(project_id: str, group_id: Optional[str] = Query
             .order_by(CrmProjectCostGroup.sort_order, CrmProjectCostGroup.created_at)
         )).scalars().all()
 
+        # 墊錢的人：一次查完，不在迴圈裡逐筆撈
+        sids = {e.staff_id for e in rows if e.staff_id}
+        names = dict((await session.execute(
+            select(CrmStaff.id, CrmStaff.name).where(CrmStaff.id.in_(sids))
+        )).all()) if sids else {}
+
     def _e_to_dict(e):
         return {
             "id": e.id, "category": e.category,
@@ -204,15 +215,29 @@ async def list_project_expenses(project_id: str, group_id: Optional[str] = Query
             "advance_id": e.advance_id or "",
             "receipt_url": e.receipt_url or "", "notes": e.notes or "",
             "created_at": _fmt_date(e.created_at),
+            # 零用金（docs/PETTY_CASH_PLAN.md §3.5）
+            # 🔴 專案成本認列用 expense_date（消費日），不是 created_at（登記日）
+            # 也不是請款/匯款日 —— 否則毛利會隨「誰拖著沒請款」漂移。
+            "expense_date": _fmt_date(e.expense_date),
+            "item": e.item or "",
+            "staff_id": e.staff_id or "",
+            "staff_name": names.get(e.staff_id, "") if e.staff_id else (e.payee or ""),
+            "invoice_no": e.invoice_no or "",
+            "has_invoice": bool(e.has_invoice),
+            "status": e.status or "",
         }
 
     expenses = [_e_to_dict(e) for e in rows]
     grouped_by_group = [{
         "group_id": g.id, "group_name": g.name,
         "shoot_date": _fmt_date(g.shoot_date),
+        "misc_budget_amount": g.misc_budget_amount,   # 可為 None＝未設，不是 0
         "expenses": [_e_to_dict(e) for e in rows if e.cost_group_id == g.id],
     } for g in groups]
-    return {"expenses": expenses, "grouped_by_group": grouped_by_group}
+    # 雜支預算：跨子表加總。全部未設 → None（畫面要畫「未設」而不是「預算 0」）
+    budgets = [g.misc_budget_amount for g in groups if g.misc_budget_amount is not None]
+    return {"expenses": expenses, "grouped_by_group": grouped_by_group,
+            "misc_budget_total": sum(budgets) if budgets else None}
 
 
 async def _create_expense(session, project_id: str, req, advance_id=None, payee_override=None):
@@ -514,26 +539,33 @@ async def _save_receipt(project_id: str, expense_id: str, file: UploadFile):
     _require_db()
     factory = await _get_factory()
     async with factory() as session:
-        proj = await session.get(CrmProject, project_id)
-        if not proj:
+        # project_id 可為 None —— 零用金的公司層級支出（行政/業務推廣）沒有專案，
+        # 但一樣要收據。收據儲存只有這一條路徑，不為它另開一份。
+        proj = await session.get(CrmProject, project_id) if project_id else None
+        if project_id and not proj:
             raise HTTPException(status_code=404, detail="找不到此專案")
         exp = await session.get(CrmProjectExpense, expense_id)
         if not exp:
             raise HTTPException(status_code=404, detail="找不到此支出")
 
         # 路徑優先序：cost_group.receipt_path → uploads/receipts/{project_name}/{group_name}/
-        # 沒 cost_group 關聯時 fallback 到專案層級 uploads 子目錄。
+        # 沒 cost_group 關聯時 fallback 到專案層級 uploads 子目錄；
+        # 連專案都沒有（零用金公司支出）→ uploads/receipts/_零用金/{年月}/。
         cg = await session.get(CrmProjectCostGroup, exp.cost_group_id) if exp.cost_group_id else None
+        when = exp.expense_date or exp.created_at
         if cg and cg.receipt_path:
             base = cg.receipt_path
-        else:
+        elif proj:
             sub = (cg.name if cg and cg.name else "main")
             base = os.path.join(os.getcwd(), "uploads", "receipts",
                                 proj.name or project_id, sub)
+        else:
+            base = os.path.join(os.getcwd(), "uploads", "receipts", "_零用金",
+                                when.strftime("%Y-%m") if when else "nodate")
         os.makedirs(base, exist_ok=True)
 
         # Build filename: date_category_subitem_payee_id.ext
-        date_str = exp.created_at.strftime("%Y%m%d") if exp.created_at else "nodate"
+        date_str = when.strftime("%Y%m%d") if when else "nodate"
         cat = _re.sub(r'[\\/:*?"<>|]', '', exp.category or "misc")
         sub = _re.sub(r'[\\/:*?"<>|]', '', exp.sub_item or "")
         payee = _re.sub(r'[\\/:*?"<>|]', '', exp.payee or "")

@@ -110,11 +110,38 @@ SEED_CATEGORY_MAP: list[dict] = [
     # 按攤還表 due_date 另行認列），CF 走科目 2400 cf_activity=financing
     {"source": "cash", "category_text": "貸款繳款", "account_code": "2400", "treatment": "loan"},
     {"source": "cash", "category_text": "貸款撥款", "account_code": "2400", "treatment": "loan"},
-    # ── source='payment'（請款單 category，4 值）──
+    # 零用金整合（docs/PETTY_CASH_PLAN.md）：Sheet 上實際用過的 12 個項目裡，
+    # 只有這一個沒有對映（實測 2026-08-17）。歸「專案雜支」同一科目。
+    {"source": "cash", "category_text": "後期雜支", "account_code": "5200", "treatment": "direct_expense"},
+    # ── source='payment'（請款單 category）──
+    #
+    # 🔴 零用金核准後產出的應付款，`category` 帶的是**會計項目**（行政／專案雜支
+    # ／設備耗材…），而費用認列就發生在請款單這一側（core.finance_logic
+    # .iter_expense_items 查的是 ('payment', category)）。原本這裡只有 4 個值，
+    # 那些項目查不到就全部掉進「未歸類支出」—— 帳面上看得到錢、看不出花在哪。
+    #
+    # ⚠️ 不要拿 `零用金` 這個既有的 payment 對映去掛：它是 treatment='transfer'
+    # （撥補備用金＝現金在帳戶間搬家，不是費用），掛上去會讓整批請款從損益消失。
     {"source": "payment", "category_text": "專案外包", "account_code": "5100", "treatment": "direct_expense"},
     {"source": "payment", "category_text": "零用金", "account_code": "1110", "treatment": "transfer"},
     {"source": "payment", "category_text": "轉存", "account_code": "1100", "treatment": "transfer"},
     {"source": "payment", "category_text": "發票代開", "account_code": "4210", "treatment": "passthrough"},
+    # 零用金會用到的費用項目 —— 科目與 source='cash' 那組**逐一對齊**
+    # （同一筆錢不管走收支還是走請款單，都該落在同一個科目）
+    {"source": "payment", "category_text": "專案雜支", "account_code": "5200", "treatment": "direct_expense"},
+    {"source": "payment", "category_text": "後期雜支", "account_code": "5200", "treatment": "direct_expense"},
+    {"source": "payment", "category_text": "行政", "account_code": "6330", "treatment": "direct_expense"},
+    {"source": "payment", "category_text": "設備耗材", "account_code": "6230", "treatment": "direct_expense"},
+    {"source": "payment", "category_text": "建構", "account_code": "6230", "treatment": "direct_expense"},
+    {"source": "payment", "category_text": "設備維護", "account_code": "6240", "treatment": "direct_expense"},
+    {"source": "payment", "category_text": "業務推廣", "account_code": "6310", "treatment": "direct_expense"},
+    {"source": "payment", "category_text": "軟體網路服務", "account_code": "6220", "treatment": "direct_expense"},
+    {"source": "payment", "category_text": "薪資", "account_code": "6100", "treatment": "direct_expense"},
+    {"source": "payment", "category_text": "其他", "account_code": "6990", "treatment": "direct_expense"},
+    # 「專案」在收支是**收入**（4100）。零用金的單據行不會是收入，但項目下拉是
+    # 同一份清單、歷史資料裡也真的有 39 列選了它 —— 對映成收入會讓那 39 列的錢
+    # 變成營收。掛成 5200（專案成本）才是它在請款單語境下的意思。
+    {"source": "payment", "category_text": "專案", "account_code": "5200", "treatment": "direct_expense"},
     # ── source='invoice'（發票 category）──
     {"source": "invoice", "category_text": "專案", "account_code": "4100", "treatment": "direct_income"},
     {"source": "invoice", "category_text": "內部代開", "account_code": "4210", "treatment": "passthrough"},

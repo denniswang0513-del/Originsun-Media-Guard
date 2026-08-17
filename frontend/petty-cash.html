@@ -1,0 +1,235 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex,nofollow">
+<title>零用金｜ORIGINSUN</title>
+<!-- 零用金請款「獨立網址」（docs/PETTY_CASH_PLAN.md §3）：帳號登入 → 四個分頁
+     （我的請款 / 審核 / 匯款清冊 / 帳戶總覽），權限決定看得到幾個。比照
+     project.html / media-log-workspace.html 的獨立網址家族，只掛 master / foundry
+     （NAS 對外容器沒有 CRM 後端）。
+     🔴 RWD 是硬需求不是加分：登記發生在現場（剛買完東西、拍收據），審核與匯款
+     發生在桌機。窄螢幕下表格轉成卡片，表單元件加大到手指按得到。 -->
+<script src="https://accounts.google.com/gsi/client" async defer></script>
+<style>
+  :root { --red: #c9372c; --ink: #262626; --sub: #737373; --line: #e5e5e5;
+          --bg-soft: #fafafa; --ok: #15803d; --warn: #b45309; }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; background: #fff; color: var(--ink);
+    font-family: "Noto Sans TC", "Microsoft JhengHei", "Segoe UI", sans-serif; }
+  a { color: inherit; text-decoration: none; }
+  .eyebrow { font-size: 11px; letter-spacing: 0.35em; text-transform: uppercase; color: var(--sub); }
+  .accent { color: var(--red); }
+
+  header { position: sticky; top: 0; z-index: 50; display: flex; align-items: center;
+    justify-content: space-between; padding: 14px 20px; background: rgba(255,255,255,0.96);
+    backdrop-filter: blur(12px); border-bottom: 1px solid var(--line); }
+  header .brand-name { font-size: 13px; letter-spacing: 0.25em; font-weight: 300; }
+  header .hdr-right { display: flex; align-items: center; gap: 12px; }
+  header .hdr-user { font-size: 12px; color: var(--sub); }
+  .btn-ghost { background: none; border: 1px solid var(--line); border-radius: 2px;
+    padding: 6px 14px; font-size: 12px; color: var(--sub); cursor: pointer; }
+  .btn-ghost:hover { color: var(--red); border-color: var(--red); }
+
+  main { max-width: 1100px; margin: 0 auto; padding: 20px 16px 60px; }
+
+  /* 分頁列 */
+  nav.tabs { display: flex; gap: 4px; border-bottom: 1px solid var(--line);
+    margin-bottom: 20px; overflow-x: auto; }
+  nav.tabs button { background: none; border: 0; border-bottom: 2px solid transparent;
+    padding: 10px 14px; font-size: 14px; color: var(--sub); cursor: pointer; white-space: nowrap; }
+  nav.tabs button.on { color: var(--ink); border-bottom-color: var(--red); font-weight: 600; }
+
+  .center-wrap { max-width: 380px; margin: 8vh auto 0; }
+  .login-card { border: 1px solid var(--line); padding: 36px 32px; }
+  .login-card h1 { font-size: 16px; letter-spacing: .1em; font-weight: 400; margin: 0 0 22px; }
+  .login-card input { width: 100%; padding: 11px 12px; border: 1px solid var(--line);
+    border-radius: 2px; font-size: 14px; margin-bottom: 10px; font-family: inherit; }
+  .login-card button[type=submit] { width: 100%; padding: 11px; background: var(--ink);
+    color: #fff; border: 0; border-radius: 2px; font-size: 14px; cursor: pointer; }
+  .divider { display: none; align-items: center; gap: 10px; color: var(--sub);
+    font-size: 11px; margin: 16px 0; }
+  .divider::before, .divider::after { content: ""; flex: 1; height: 1px; background: var(--line); }
+  .err { color: var(--red); font-size: 12px; margin-bottom: 10px; display: none; }
+  .state-msg { color: var(--sub); font-size: 13px; padding: 24px 0; text-align: center; }
+</style>
+</head>
+<body>
+
+<header>
+  <span class="brand-name">ORIGINSUN <span class="accent">零用金</span></span>
+  <div class="hdr-right">
+    <a class="btn-ghost" href="/my.html">個人工作台</a>
+    <span class="hdr-user" id="hdr-user" style="display:none;"></span>
+    <button class="btn-ghost" id="btn-logout" style="display:none;" onclick="doLogout()">登出</button>
+  </div>
+</header>
+
+<main>
+  <!-- 登入 -->
+  <div id="login-view" style="display:none;">
+    <div class="center-wrap">
+      <div class="login-card">
+        <h1>登入</h1>
+        <div class="err" id="login-err"></div>
+        <form onsubmit="doPwdLogin(event)">
+          <input id="in-user" placeholder="帳號" autocomplete="username">
+          <input id="in-pwd" type="password" placeholder="密碼" autocomplete="current-password">
+          <button type="submit">登入</button>
+        </form>
+        <div class="divider" id="login-divider">或</div>
+        <div id="g_id_signin_container" style="display:none;justify-content:center;"></div>
+      </div>
+    </div>
+  </div>
+
+  <div id="noperm-view" style="display:none;">
+    <div class="state-msg">這個帳號沒有零用金的權限。請聯絡管理員開啟「我的工時請款」。</div>
+  </div>
+
+  <!-- 主畫面 -->
+  <div id="app-view" style="display:none;">
+    <nav class="tabs" id="tabbar"></nav>
+    <div id="tab-host"></div>
+  </div>
+</main>
+
+<script type="module">
+import { renderMine, renderAccounts, renderClaims, renderLabels }
+    from "/tabs/petty/petty-view.js";
+
+const TOKEN_KEY = "auth_token";
+const $ = (id) => document.getElementById(id);
+function _authHeader() {
+    const tok = localStorage.getItem(TOKEN_KEY);
+    return tok ? { "Authorization": "Bearer " + tok } : {};
+}
+async function mfetch(path, opts = {}) {
+    const headers = Object.assign({ "Content-Type": "application/json" },
+                                  _authHeader(), opts.headers || {});
+    return fetch(path, Object.assign({}, opts, { headers }));
+}
+// 上傳走 FormData —— 不能帶 Content-Type，瀏覽器要自己補 boundary
+async function ufetch(path, form) {
+    return fetch(path, { method: "POST", headers: _authHeader(), body: form });
+}
+window.__petty = { mfetch, ufetch };     // 給子模組用（同源同頁，不另建一層）
+
+function _show(view) {
+    for (const v of ["login-view", "noperm-view", "app-view"])
+        $(v).style.display = (v === view ? "block" : "none");
+    $("btn-logout").style.display = (view === "login-view") ? "none" : "";
+}
+function showLogin(msg) {
+    _show("login-view"); $("hdr-user").style.display = "none";
+    if (msg) { const e = $("login-err"); e.textContent = msg; e.style.display = "block"; }
+    initGoogle();
+}
+window.doLogout = () => {
+    localStorage.removeItem(TOKEN_KEY); localStorage.removeItem("auth_user");
+    location.href = location.pathname;
+};
+function onLoginOk(d) {
+    localStorage.setItem(TOKEN_KEY, d.token); $("login-err").style.display = "none"; boot();
+}
+window.doPwdLogin = async (ev) => {
+    ev.preventDefault();
+    try {
+        const r = await fetch("/api/v1/auth/login", {
+            method: "POST", headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ username: $("in-user").value.trim(),
+                                   password: $("in-pwd").value }) });
+        const d = await r.json();
+        if (!r.ok) { showLogin(d.detail || "登入失敗"); return; }
+        onLoginOk(d);
+    } catch (_) { showLogin("連線失敗，請稍後再試"); }
+};
+
+let _gisInited = false;
+async function initGoogle() {
+    if (_gisInited) return;
+    try {
+        const r = await fetch("/api/v1/auth/google/config");
+        if (!r.ok) return;
+        const cfg = await r.json();
+        if (!cfg.enabled || !cfg.client_id) return;
+        for (let i = 0; i < 40 && (typeof google === "undefined" || !google.accounts); i++)
+            await new Promise(res => setTimeout(res, 150));
+        if (typeof google === "undefined" || !google.accounts) return;
+        google.accounts.id.initialize({
+            client_id: cfg.client_id, auto_select: false, cancel_on_tap_outside: true,
+            callback: async (resp) => {
+                try {
+                    const r2 = await fetch("/api/v1/auth/google/login", {
+                        method: "POST", headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({ credential: resp.credential }) });
+                    const d = await r2.json();
+                    if (!r2.ok) { showLogin(d.detail || "Google 登入失敗"); return; }
+                    onLoginOk(d);
+                } catch (_) { showLogin("連線失敗，請稍後再試"); }
+            },
+        });
+        google.accounts.id.renderButton($("g_id_signin_container"),
+            { theme: "outline", size: "large", width: 320, text: "signin_with" });
+        $("g_id_signin_container").style.display = "flex";
+        $("login-divider").style.display = "flex";
+        _gisInited = true;
+    } catch (e) { console.warn("[GIS] init failed", e); }
+}
+
+// 分頁定義 —— `need` 為空＝人人可見；其餘要模組（管理員一律有全部）
+const TABS = [
+    { id: "mine",     label: "我的請款",   need: [],                                 fn: renderMine },
+    { id: "claims",   label: "審核",       need: ["money_view", "finance_approve"],  fn: renderClaims },
+    { id: "accounts", label: "匯款清冊",   need: ["money_view", "finance_approve"],  fn: renderAccounts },
+    { id: "labels",   label: "未歸戶標籤", need: ["money_view", "finance_approve"],  fn: renderLabels },
+];
+
+function mountTabs(visible) {
+    const bar = $("tabbar");
+    bar.innerHTML = "";
+    visible.forEach((t, i) => {
+        const b = document.createElement("button");
+        b.textContent = t.label;
+        b.onclick = () => {
+            [...bar.children].forEach(c => c.classList.remove("on"));
+            b.classList.add("on");
+            $("tab-host").innerHTML = '<div class="state-msg">載入中…</div>';
+            t.fn($("tab-host")).catch(e => {
+                $("tab-host").innerHTML =
+                    '<div class="state-msg" style="color:var(--red);">載入失敗：'
+                    + String(e && e.message || e) + "</div>";
+            });
+        };
+        bar.appendChild(b);
+        if (i === 0) b.click();
+    });
+}
+
+async function boot() {
+    if (!localStorage.getItem(TOKEN_KEY)) { showLogin(""); return; }
+    let me;
+    try {
+        const r = await mfetch("/api/v1/auth/me");
+        if (r.status === 401) { localStorage.removeItem(TOKEN_KEY); showLogin(""); return; }
+        if (!r.ok) { showLogin("載入失敗（" + r.status + "）"); return; }
+        me = await r.json();
+    } catch (_) { showLogin("連線失敗，請稍後再試"); return; }
+
+    const mods = me.modules || [];
+    const isAdmin = (me.access_level || 0) >= 3;
+    $("hdr-user").textContent = me.username || "";
+    $("hdr-user").style.display = "";
+    // 「我的請款」的閘門是 me_finance —— 與 /my.html 的請款卡同一個 key
+    if (!isAdmin && !mods.includes("me_finance")) { _show("noperm-view"); return; }
+    // 🔴 分頁顯示與否照著後端守衛算，不自作主張：財務那三個分頁**兩個模組都要**
+    const visible = TABS.filter(t => isAdmin || t.need.every(m => mods.includes(m)));
+    _show("app-view");
+    mountTabs(visible);
+}
+
+boot();
+</script>
+</body>
+</html>
