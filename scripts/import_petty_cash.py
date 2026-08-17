@@ -33,13 +33,25 @@ sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="repla
 from sqlalchemy import select, update as sa_update  # noqa: E402
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine  # noqa: E402
 
-from config import load_settings  # noqa: E402
 from db.models import (CrmProject, CrmProjectExpense, CrmReimbursement,  # noqa: E402
                        CrmStaff)
 
 # 明細表的欄位位置（Sheet 版面固定；欄位名那列本身也在資料區裡，靠 header 偵測跳過）
+# deposit/kind 未用，僅記 Sheet 版面（實務只填「請款」欄，見 §0 實測）
 COL = {"date": 0, "spend": 1, "claim": 2, "deposit": 3, "summary": 4,
        "note": 5, "kind": 6, "item": 7, "payee": 8, "project": 12}
+
+
+def resolve_db_url(prod: bool) -> str:
+    """dev/prod 庫切換的**單一正本** —— 三支零用金腳本共用（backfill 系列經
+    importlib 載入本模組取用）。這段邏輯絕不能在 dry-run 報告器與 applier 之間
+    漂移（memory 有一筆 database_url 改壞連錯庫的前科）。"""
+    from config import load_settings
+    url = load_settings().get("database_url", "")
+    return (url.replace("/mediaguard_dev", "/mediaguard") if prod
+            else (url if url.endswith("_dev") else url + "_dev"))
+
+
 HEADER_MARK = "日期"
 
 # 附註欄是自由文字：可能是發票號碼、可能是「收據/無發票」、也可能是整段商品說明
@@ -150,9 +162,7 @@ async def main() -> int:
     print(f"讀入：帳戶 {len(accounts)} 個、明細 {len(details)} 列、"
           f"合計 NT${sum(d['amount'] for d in details):,}\n")
 
-    url = load_settings().get("database_url", "")
-    url = (url.replace("/mediaguard_dev", "/mediaguard") if args.prod
-           else (url if url.endswith("_dev") else url + "_dev"))
+    url = resolve_db_url(args.prod)
     print(f"DB: {url.split('@')[-1]}   模式: {'寫入' if args.apply else 'DRY-RUN'}\n")
 
     engine = create_async_engine(url)

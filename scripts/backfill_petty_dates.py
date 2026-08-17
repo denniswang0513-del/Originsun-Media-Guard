@@ -26,12 +26,11 @@ sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 from sqlalchemy import select  # noqa: E402
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine  # noqa: E402
 
-from config import load_settings  # noqa: E402
 from db.models import CrmProjectExpense, CrmStaff  # noqa: E402
 
 
-def _read_sheet(path):
-    """借用隔壁 import_petty_cash 的 CSV 解析。
+def _petty_mod():
+    """載入隔壁 import_petty_cash（共用 read_sheet 與 resolve_db_url）。
 
     🔴 刻意用 importlib 依**檔案路徑**載入，不寫 `from import_petty_cash import`：
     publish_update 的依賴掃描器會把那個頂層 import 當成外部套件，寫進
@@ -41,10 +40,10 @@ def _read_sheet(path):
     import importlib.util
     src = os.path.join(os.path.dirname(os.path.abspath(__file__)),
                        "import_petty_cash.py")
-    spec = importlib.util.spec_from_file_location("_petty_csv", src)
+    spec = importlib.util.spec_from_file_location("_petty", src)
     mod = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(mod)
-    return mod.read_sheet(path)
+    return mod
 
 
 async def main() -> int:
@@ -54,14 +53,13 @@ async def main() -> int:
     ap.add_argument("--apply", action="store_true")
     args = ap.parse_args()
 
-    _, details = _read_sheet(args.csv)
+    petty = _petty_mod()
+    _, details = petty.read_sheet(args.csv)
     # 沒填日期的列 → 它的 `_order`（＝上方最近一列的日期）就是要補的值
     blanks = [d for d in details if d["date"] is None]
     print(f"Sheet 沒有日期的列：{len(blanks)}")
 
-    url = load_settings().get("database_url", "")
-    url = (url.replace("/mediaguard_dev", "/mediaguard") if args.prod
-           else (url if url.endswith("_dev") else url + "_dev"))
+    url = petty.resolve_db_url(args.prod)
     print(f"DB: {url.split('@')[-1]}   模式: {'寫入' if args.apply else 'DRY-RUN'}\n")
     engine = create_async_engine(url)
     factory = async_sessionmaker(engine, expire_on_commit=False)

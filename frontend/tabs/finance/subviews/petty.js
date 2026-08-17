@@ -1,7 +1,7 @@
 /**
  * petty.js — 💵 零用金子視圖（財務管理 Tab）
  *
- * 內容**不重畫**：直接掛 `tabs/petty/petty-view.js` 的四個 render，與獨立網址
+ * 內容**不重畫**：直接掛 `tabs/petty/petty-view.js` 的各分頁 render（見 TABS），與獨立網址
  * `/petty-cash.html` 是同一套元件、同一批端點。原本規劃寫「CRM 帳務只放一顆
  * 連過去的按鈕」—— 實際用起來那是把已經登入的人踢去另一個登入頁，所以改成
  * 就地掛載；`/petty-cash.html` 仍在（手機現場登記走那條）。

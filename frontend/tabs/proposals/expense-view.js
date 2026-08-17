@@ -12,7 +12,9 @@
 // 釘住）。這個目錄實際的意思是「/project.html 掛的元件」，不是「提案專用」——
 // staff-view / delivery-view 也都住這裡。
 
-const esc = (s) => { const d = document.createElement("div"); d.textContent = String(s ?? ""); return d.innerHTML; };
+// dom.js 的 esc 是零依賴的純字串替換 —— 這裡原本是 createElement 版
+// （petty 帳冊實測那種寫法在大量呼叫下慢兩秒多）
+import { esc } from "../../js/shared/dom.js";
 const money = (n) => (n === null || n === undefined) ? "—"
     : (n < 0 ? "-NT$ " : "NT$ ") + Math.abs(n).toLocaleString();
 

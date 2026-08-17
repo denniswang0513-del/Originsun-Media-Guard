@@ -1,17 +1,22 @@
-// 零用金四個分頁的畫面（docs/PETTY_CASH_PLAN.md §3）。
+// 零用金各分頁的畫面（docs/PETTY_CASH_PLAN.md §3；分頁清單見兩個宿主的 TABS）。
 //
-// import 閉包只准 `tabs/petty/` 與 `js/shared/` —— 同 /project.html 的規則
-// （tests/unit/test_public_surface.py 釘住）。頁面的 fetch 包裝由殼層放在
-// `window.__petty` 上：同源同頁、只有這一個消費者，另建一層抽象只是多一個檔案。
+// import 閉包只准 `tabs/petty/` 與 `js/shared/` —— 同 /project.html 的規則。
+// fetch 包裝由宿主放在 `window.__petty` 上：**兩個宿主**（獨立頁
+// petty-cash.html、CRM 財務子視圖），合約由 test_both_hosts_share_one_fetch_contract
+// 釘住；第三個宿主出現時再改成參數注入。
 const F = () => window.__petty;
 
-// 🔴 純字串替換，不建 DOM：帳冊一次渲染會叫這支上萬次，
-// 舊寫法（createElement + textContent）光這裡就吃掉兩秒多。
-const _ESC = { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" };
-const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => _ESC[c]);
+// dom.js 的 esc 是純字串替換（零依賴、公開頁也 import 得起）——
+// 帳冊一次渲染叫上萬次也扛得住；別換回 createElement 版（實測慢兩秒多）。
+import { esc } from "../../js/shared/dom.js";
 const money = (n) => (n === null || n === undefined) ? "—"
     : (n < 0 ? "-NT$ " : "NT$ ") + Math.abs(n).toLocaleString();
 const today = () => new Date().toISOString().slice(0, 10);
+// 存檔成功的視覺回饋（綠框閃一下）
+const flashOk = (el) => {
+    el.style.borderColor = "var(--ok)";
+    setTimeout(() => { el.style.borderColor = ""; }, 900);
+};
 
 // 「只有專案雜支可連結專案」—— 規則正本在後端（/petty/options 的
 // project_link_items），這裡只有斷線時的 fallback；所有用點共用這一份。
@@ -80,7 +85,18 @@ const CSS = `
 }
 </style>`;
 
-// ── 分頁 1：我的請款 ────────────────────────────────────────────────
+// 近靜態清單的頁面級快取。兩個都是「開頁後幾乎不變」的資料：
+//   staff-options —— 非審核者每次渲染都吃一個**必然 403** 的往返（登記迴圈
+//     一路重繪，等於每記一筆多付一次）；403 也快取成 null，權限變更本來就要重登。
+//   options —— 240 個專案 + 項目清單（~30KB），帳冊整理 154 筆未歸戶時
+//     每次就地編輯都重抓一次。新開的專案要重整頁面才看得到 —— 這是刻意的取捨。
+let _staffP = null, _optsP = null;
+const staffOptions = () => (_staffP ??= get("/api/v1/crm/petty/staff-options")
+    .then(r => r.staff).catch(() => null));
+const cachedOptions = () => (_optsP ??= get("/api/v1/crm/petty/options")
+    .catch(e => { _optsP = null; throw e; }));   // 失敗不快取，下次重試
+
+// ── 分頁：我的請款 ──────────────────────────────────────────────────
 // 代為登記：目前正在管理誰的零用金（null＝自己）。審核者才切得動。
 // 放模組層而不是參數：切換之後每一次重繪（新增/刪除/送出後）都要留在同一個人身上。
 let _asStaff = null;
@@ -89,16 +105,16 @@ const _base = () => _asStaff
     : "/api/v1/crm/petty";
 
 export async function renderMine(host) {
-    let data, opts, staffList = null;
-    // 審核者才拿得到人員清單（沒權限就 403，那不是錯誤，是「你只能記自己的」）
-    try { staffList = (await get("/api/v1/crm/petty/staff-options")).staff; }
-    catch (_) { staffList = null; }
-
+    let data, opts;
+    // 審核者才拿得到人員清單（403 → null，不是錯誤，是「你只能記自己的」）
+    const staffListP = staffOptions();
+    let staffList;
     try {
-        [data, opts] = await Promise.all([
+        [data, opts, staffList] = await Promise.all([
             get(_asStaff ? _base() : "/api/v1/crm/petty/me"),
-            get("/api/v1/crm/petty/options")]);
+            cachedOptions(), staffListP]);
     } catch (e) {
+        staffList = await staffListP;
         // 帳號沒綁人員檔案不是故障，是「還差一步設定」。但如果這個人是審核者，
         // 他其實有路可走 —— 直接把「代為登記」的選單給他，而不是留一句死路。
         if (e.status === 409 && staffList && staffList.length) {
@@ -263,7 +279,7 @@ export async function renderMine(host) {
     };
 }
 
-// ── 分頁 2：審核（P1 唯讀；核准／退回是 P2）────────────────────────────
+// ── 分頁：審核 —— 送出即成立，這裡是覆核（整批/逐行退回、核准歷史待審批）──
 export async function renderClaims(host) {
     // 預設直接成立（owner 2026-08-17）→ 這一頁的主體是**已核准待匯**，不是待審。
     // 「待審」仍然撈：歷史匯入的批次是待審，而且將來若改回人工審核也不用改這裡。
@@ -341,7 +357,7 @@ export async function renderClaims(host) {
     });
 }
 
-// ── 分頁 3：匯款清冊 ─────────────────────────────────────────────────
+// ── 分頁：匯款清冊 ───────────────────────────────────────────────────
 // owner 2026-08-17：「需要列出所有員工狀態，沒有請款就標註 --，欠款就標註負值」。
 // 原本只列「還要付的人」—— 那讓「這個人這期沒有請款」與「這個人不在清單裡」
 // 長得一模一樣，看的人分不出是沒花錢還是漏了。改成全員一列，用符號區分三態。
@@ -405,16 +421,13 @@ export async function renderAccounts(host) {
         </div>`).join("") : '<div class="pc-empty">沒有已核准待匯的批次。</div>'}`;
 
     host.querySelector("#pc-csv").onclick = async () => {
-        // 這支回 CSV 不是 JSON，而且要帶 Authorization —— <a href> 送不了標頭
-        const r = await F().mfetch("/api/v1/crm/petty/payout.csv");
-        if (!r.ok) { alert("匯出失敗（" + r.status + "）"); return; }
-        const url = URL.createObjectURL(await r.blob());
-        const a = document.createElement("a");
-        a.href = url; a.download = "payout.csv"; a.click();
-        URL.revokeObjectURL(url);
+        // authDownload 是「帶權限下載」的單一正本（<a href> 送不了 Authorization）。
+        // 動態 import：utils.js 65KB，只有按下匯出的人才需要付
+        const { authDownload } = await import("../../js/shared/utils.js");
+        authDownload("/api/v1/crm/petty/payout.csv", "payout.csv", "匯出");
     };
     host.querySelectorAll("[data-pay]").forEach(b => b.onclick = async () => {
-        const d = prompt("匯款日期（YYYY-MM-DD）：", new Date().toISOString().slice(0, 10));
+        const d = prompt("匯款日期（YYYY-MM-DD）：", today());
         if (!d) return;
         b.disabled = true;
         try {
@@ -468,11 +481,10 @@ const _LG = { q: "", staff_id: "", item: "", month: "", unbound: 0, limit: 300 }
 export async function renderOverview(host) {
     const qs = new URLSearchParams(
         Object.entries(_LG).filter(([, v]) => v !== "" && v !== 0)).toString();
-    const [d, opts, people] = await Promise.all([
+    const [d, opts, staff] = await Promise.all([
         get("/api/v1/crm/petty/entries?" + qs),
-        get("/api/v1/crm/petty/options"),
-        get("/api/v1/crm/petty/staff-options"),
-    ]);
+        cachedOptions(), staffOptions()]);
+    const people = { staff: staff || [] };
 
     // 選項字串**只組一次**（300 列各組一次＝300 倍的無謂工作）；
     // 選中哪一個等 innerHTML 掛好之後用 `.value =` 設，一列一次賦值。
@@ -751,14 +763,12 @@ export async function renderOverview(host) {
                 if (val) {
                     const gid = await _pickCostGroup(val);
                     if (gid === null) {            // 使用者取消 → 整個動作放棄
-                        el.value = el.dataset.was = tr.querySelector(
-                            '[data-f="project_id"]').defaultValue || "";
+                        el.value = el.dataset.was = el.defaultValue || "";
                         return;
                     }
                     await send("PATCH", "/api/v1/crm/petty/entries/" + tr.dataset.id,
                                { project_id: val, cost_group_id: gid });
-                    el.style.borderColor = "var(--ok)";
-                    setTimeout(() => { el.style.borderColor = ""; }, 900);
+                    flashOk(el);
                     rerun();
                     return;
                 }
@@ -766,8 +776,7 @@ export async function renderOverview(host) {
             try {
                 const r = await send("PATCH",
                     "/api/v1/crm/petty/entries/" + tr.dataset.id, { [f]: val });
-                el.style.borderColor = "var(--ok)";
-                setTimeout(() => { el.style.borderColor = ""; }, 900);
+                flashOk(el);
                 // 綁定專案會讓「未歸戶」那一格的樣子改變 —— 重抓比就地補畫可靠
                 // 項目換了會改變「這一列能不能連專案」，而且後端可能順手解除了
                 // 既有連結 —— 兩者都要讓畫面跟上，否則使用者看到的是舊狀態
@@ -786,10 +795,10 @@ export async function renderOverview(host) {
     });
 }
 
-// ── 分頁 4：未歸戶標籤（一次綁一個標籤，帶走底下所有列）────────────────
+// ── 分頁：未歸戶標籤（一次綁一個標籤，帶走底下所有列）─────────────────
 export async function renderLabels(host) {
     const [data, opts] = await Promise.all([
-        get("/api/v1/crm/petty/unbound-labels"), get("/api/v1/crm/petty/options")]);
+        get("/api/v1/crm/petty/unbound-labels"), cachedOptions()]);
     if (!data.labels.length) {
         host.innerHTML = CSS + '<div class="pc-empty">沒有未歸戶的專案標籤。</div>';
         return;

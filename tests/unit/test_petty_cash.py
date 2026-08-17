@@ -20,8 +20,20 @@ import pytest
 from core.money import MONEY_FIELDS, _OWN_SCOPE
 from core.schemas import PettyExpensePayload
 
-FRONTEND = Path(__file__).resolve().parents[2] / "frontend"
+REPO = Path(__file__).resolve().parents[2]
+FRONTEND = REPO / "frontend"
 PROJECT_HTML = (FRONTEND / "project.html").read_text(encoding="utf-8")
+PETTY_SRC = (REPO / "routers" / "crm" / "petty.py").read_text(encoding="utf-8")
+PETTY_VIEW = (FRONTEND / "tabs" / "petty" / "petty-view.js").read_text(encoding="utf-8")
+
+
+def _fn(name: str) -> str:
+    """petty.py 裡某個 endpoint/函式的本文切片（源碼錨定測試共用）。"""
+    return PETTY_SRC.split(f"async def {name}")[1].split("\n@router")[0]
+
+
+# 權限矩陣：三把鑰匙各自單獨都**不夠**（財務視角要 money_view + finance_approve）
+LACKING = (["me_finance"], ["money_view"], ["finance_approve"])
 
 OWN_SCOPE_PATHS = ["/api/v1/crm/petty/me", "/api/v1/crm/petty/options"]
 FINANCE_PATHS = [
@@ -76,27 +88,12 @@ def test_payload_has_no_staff_id():
 
 
 # ── 別人的錢：兩個權限都要 ────────────────────────────────────────────
+@pytest.mark.parametrize("mods", LACKING)
 @pytest.mark.parametrize("path", FINANCE_PATHS)
-def test_finance_views_reject_plain_employee(app_client, as_user, path):
-    assert app_client.get(path, headers=as_user(modules=["me_finance"])
-                          ).status_code == 403
-
-
-@pytest.mark.parametrize("path", FINANCE_PATHS)
-def test_finance_views_reject_approver_without_money_view(app_client, as_user, path):
-    """🔴 只有審核權、沒有金額權 → 還是 403。
-
-    審核畫面本身就是別人的金額，所以 `money_dep` 那一層不能因為「他是審核者」
-    就跳過。反過來只有 money_view 沒有審核權的情況由下一條守。
-    """
-    assert app_client.get(path, headers=as_user(modules=["finance_approve"])
-                          ).status_code == 403
-
-
-@pytest.mark.parametrize("path", FINANCE_PATHS)
-def test_finance_views_reject_money_view_without_approver(app_client, as_user, path):
-    assert app_client.get(path, headers=as_user(modules=["money_view"])
-                          ).status_code == 403
+def test_finance_views_reject_insufficient_grants(app_client, as_user, path, mods):
+    """🔴 三把鑰匙各自單獨都 403 —— 含「只有審核權沒金額權」：審核畫面本身就是
+    別人的金額，`money_dep` 那層不能因為他是審核者就跳過。"""
+    assert app_client.get(path, headers=as_user(modules=mods)).status_code == 403
 
 
 @pytest.mark.parametrize("path", FINANCE_PATHS)
@@ -106,7 +103,6 @@ def test_finance_views_allow_both(app_client, as_user, path):
     assert r.status_code not in (401, 403), f"{path} 兩權齊備仍被擋：{r.status_code}"
 
 
-# ── 抹除層不准把「自己的錢」抹掉 ───────────────────────────────────────
 # ── 代為登記：財務端管理所有人的零用金 ────────────────────────────────
 DELEGATE = [
     ("get", "/api/v1/crm/petty/staff-options", None),
@@ -128,7 +124,7 @@ def test_delegate_rejects_plain_employee(app_client, as_user, method, path, body
 
 @pytest.mark.parametrize("method,path,body", DELEGATE)
 def test_delegate_needs_both_grants(app_client, as_user, method, path, body):
-    for mods in (["finance_approve"], ["money_view"]):
+    for mods in LACKING:
         kw = {"headers": as_user(modules=mods)}
         if body is not None:
             kw["json"] = body
@@ -145,8 +141,8 @@ def test_delegate_allows_approver(app_client, as_user, method, path, body):
 
 
 def test_ledger_endpoints_need_both_grants(app_client, as_user):
-    for h in (as_user(modules=["me_finance"]), as_user(modules=["money_view"]),
-              as_user(modules=["finance_approve"])):
+    for mods in LACKING:
+        h = as_user(modules=mods)
         assert app_client.get("/api/v1/crm/petty/entries", headers=h).status_code == 403
         assert app_client.patch("/api/v1/crm/petty/entries/__probe__", headers=h,
                                 json={"item": "行政"}).status_code == 403
@@ -158,9 +154,7 @@ def test_ledger_patch_has_a_field_whitelist():
     帳冊頁的每一格都直接打 PATCH，白名單漏一個欄位＝畫面上多一個可以把單據
     「改成已付款」的洞。這條錨在白名單常數上。
     """
-    src = (Path(__file__).resolve().parents[2]
-           / "routers" / "crm" / "petty.py").read_text(encoding="utf-8")
-    body = src.split("async def patch_petty_entry")[1].split("\n@router")[0]
+    body = PETTY_SRC.split("async def patch_petty_entry")[1].split("\n@router")[0]
     assert "allowed = {" in body
     for forbidden in ("status", "claim_id", "receipt_url"):
         assert f'"{forbidden}"' not in body.split("allowed = {")[1].split("}")[0], forbidden
@@ -175,9 +169,7 @@ def test_ledger_shows_new_drafts_too():
     會看不見 —— 使用者按了「新增」、資料真的寫進去了、畫面卻沒動。那種
     「成功但看起來失敗」比報錯更難查。舊的專案雜支沒有 item，照樣擋在外面。
     """
-    src = (Path(__file__).resolve().parents[2]
-           / "routers" / "crm" / "petty.py").read_text(encoding="utf-8")
-    body = src.split("async def petty_entries")[1].split("\n@router")[0]
+    body = PETTY_SRC.split("async def petty_entries")[1].split("\n@router")[0]
     assert "CrmProjectExpense.item.isnot(None)" in body
     assert "CrmProjectExpense.claim_id.isnot(None)" not in body
 
@@ -189,9 +181,7 @@ def test_overview_lists_everyone_with_history_not_just_debtors():
     帳號、歷史付了多少）。這條錨在查詢條件上：`HAVING` 那一段若退回成
     「只看未結」，斷言會紅。
     """
-    src = (Path(__file__).resolve().parents[2]
-           / "routers" / "crm" / "petty.py").read_text(encoding="utf-8")
-    body = src.split("async def petty_accounts")[1].split("\n@router")[0]
+    body = PETTY_SRC.split("async def petty_accounts")[1].split("\n@router")[0]
     assert "bound_user" in body, "帳戶總覽沒有綁定狀態"
     assert "User.staff_id" in body, "綁定狀態沒有去 users 撈"
     assert "paid_total" in body and "rows" in body, "缺歷史累計"
@@ -212,11 +202,9 @@ def test_delegate_is_a_separate_endpoint_not_an_optional_field():
     守衛寫在路徑上，漏不掉。
     """
     assert "staff_id" not in PettyExpensePayload.model_fields
-    src = (Path(__file__).resolve().parents[2]
-           / "routers" / "crm" / "petty.py").read_text(encoding="utf-8")
-    own = src.split("async def add_my_petty_expense")[1].split("\n@router")[0]
+    own = PETTY_SRC.split("async def add_my_petty_expense")[1].split("\n@router")[0]
     assert "_my_staff(request)" in own and "staff.id" in own
-    assert "body.staff_id" not in src, "own-scope 端點不准從 body 取 staff_id"
+    assert "body.staff_id" not in PETTY_SRC, "own-scope 端點不准從 body 取 staff_id"
 
 
 # ── 審核／匯款（P2）──────────────────────────────────────────────────
@@ -255,11 +243,9 @@ def test_submit_auto_approves_and_builds_aps():
     也要拿掉 `_build_aps`，畫面上看起來一樣，只有「錢沒進匯款清冊」——
     而那要等到有人問「我的請款怎麼還沒下來」才會發現。
     """
-    src = (Path(__file__).resolve().parents[2]
-           / "routers" / "crm" / "petty.py").read_text(encoding="utf-8")
     # 錨在 `_submit_for` —— 送出的本體抽成函式後（本人送出／代為送出共用），
     # 錨在端點上會失明
-    submit = src.split("async def _submit_for")[1].split("\n@router")[0]
+    submit = PETTY_SRC.split("async def _submit_for")[1].split("\n@router")[0]
     assert 'status="已核准"' in submit, "送出後的狀態不是已核准"
     assert "_build_aps(" in submit, "送出時沒有產應付款"
     assert "_assert_month_open(" in submit, "送出沒有檢查月結鎖帳"
@@ -271,13 +257,11 @@ def test_reject_clears_the_generated_aps():
     單據回到本人草稿、應付帳款卻還掛著那筆錢 —— 月結與現金流預測都會多算，
     而且沒有任何畫面會顯示這個矛盾。三條退回路徑都必須經過 `_clear_aps`。
     """
-    src = (Path(__file__).resolve().parents[2]
-           / "routers" / "crm" / "petty.py").read_text(encoding="utf-8")
     for fn in ("reject_claim", "reject_claim_line"):
-        body = src.split(f"async def {fn}")[1].split("\n@router")[0]
+        body = PETTY_SRC.split(f"async def {fn}")[1].split("\n@router")[0]
         assert "_clear_aps(" in body, f"{fn} 沒有撤掉應付款"
     # 已付款的不准撤（那筆錢真的出去了）
-    clear = src.split("async def _clear_aps")[1].split("\n@router")[0]
+    clear = PETTY_SRC.split("async def _clear_aps")[1].split("\n@router")[0]
     assert "已付款" in clear and "409" in clear
 
 
@@ -287,9 +271,7 @@ def test_line_reject_rebuilds_aps_instead_of_patching_them():
     就地改要處理「整個 (項目×月份) 桶消失」等分支，等於養出第二套 AP 邏輯；
     撤掉重建走的是與送出時同一段程式碼，不會漂。
     """
-    src = (Path(__file__).resolve().parents[2]
-           / "routers" / "crm" / "petty.py").read_text(encoding="utf-8")
-    body = src.split("async def reject_claim_line")[1].split("\n@router")[0]
+    body = PETTY_SRC.split("async def reject_claim_line")[1].split("\n@router")[0]
     assert "_clear_aps(" in body and "_build_aps(" in body
 
 
@@ -327,13 +309,11 @@ def test_ap_category_is_the_item_not_the_word_petty_cash():
     帳戶間搬家），掛上去整批請款會從損益表消失。這條釘住那個字不出現在產生
     應付款的程式碼裡。
     """
-    src = (Path(__file__).resolve().parents[2]
-           / "routers" / "crm" / "petty.py").read_text(encoding="utf-8")
     # 錨在 `_build_aps` —— 產 AP 的地方只有這一處（送出／核准／逐行退回重建
     # 三條路都走它）。錨在某一支端點上的話，邏輯一被抽成函式測試就失明。
-    build = src.split("async def _build_aps")[1].split("\nasync def ")[0]
+    build = PETTY_SRC.split("async def _build_aps")[1].split("\nasync def ")[0]
     assert "category=item" in build.replace(" ", "")
-    assert 'category="零用金"' not in src
+    assert 'category="零用金"' not in PETTY_SRC
 
 
 def test_payment_source_mapping_covers_the_expense_items():
@@ -399,18 +379,19 @@ def test_both_hosts_share_one_fetch_contract():
     `js/shared/utils.authFetch`）。任一邊改成自己 stringify，就變成雙重編碼，
     後端收到的是一個 JSON 字串而不是物件 → 422，而且只壞一個宿主。
     """
-    view = (FRONTEND / "tabs" / "petty" / "petty-view.js").read_text(encoding="utf-8")
-    send = view.split("async function send(")[1].split("\n}")[0]
+    send = PETTY_VIEW.split("async function send(")[1].split("\n}")[0]
     assert "JSON.stringify" not in send, "元件不該自己 stringify（宿主負責）"
 
+    # 兩個宿主現在接的是**同一個函式**（js/shared/utils.authFetch）——
+    # 合約不可能分岔；這裡釘住誰都不准再長出自己的本地版
     standalone = (FRONTEND / "petty-cash.html").read_text(encoding="utf-8")
-    mfetch = standalone.split("async function mfetch(")[1].split("\n}")[0]
-    assert "JSON.stringify(opts.body)" in mfetch, "獨立頁的 mfetch 沒有 stringify"
-
+    assert "mfetch: authFetch" in standalone, "獨立頁該直接接 authFetch"
+    assert "async function mfetch(" not in standalone, "獨立頁不准再有本地 mfetch 複本"
     sub = (FRONTEND / "tabs" / "finance" / "subviews" / "petty.js").read_text(encoding="utf-8")
     assert "mfetch: authFetch" in sub, "子視圖應直接接 authFetch（同一份合約）"
     # 上傳例外：authFetch 會補 JSON header 並 stringify FormData
-    assert "bearerHeader()" in sub, "FormData 上傳不能走 authFetch"
+    assert "bearerHeader()" in sub and "bearerHeader()" in standalone, \
+        "FormData 上傳不能走 authFetch"
 
 
 def test_binding_a_project_also_attaches_a_cost_group():
@@ -421,12 +402,10 @@ def test_binding_a_project_also_attaches_a_cost_group():
     2026-08-17 回報，生產上有 2 列這樣）。四條會設 project_id 的路徑都要走
     `_resolve_target_group`（與 CRM 建立雜支同一支）。
     """
-    src = (Path(__file__).resolve().parents[2]
-           / "routers" / "crm" / "petty.py").read_text(encoding="utf-8")
-    assert "_attach_cost_group" in src
-    patch = src.split("async def patch_petty_entry")[1].split("\n@router")[0]
+    assert "_attach_cost_group" in PETTY_SRC
+    patch = PETTY_SRC.split("async def patch_petty_entry")[1].split("\n@router")[0]
     assert "_resolve_target_group" in patch, "PATCH 綁專案沒有落子表"
-    bind = src.split("async def petty_bind_label")[1].split("\n@router")[0]
+    bind = PETTY_SRC.split("async def petty_bind_label")[1].split("\n@router")[0]
     assert "_resolve_target_group" in bind, "一次綁整個標籤沒有落子表"
     # 解除專案時也要把子表清掉，否則會留下「沒有專案卻掛在某子表下」的孤兒
     assert "exp.cost_group_id = None" in patch
@@ -445,32 +424,28 @@ def test_only_project_misc_can_link_a_project():
     assert "專案雜支" in PROJECT_LINK_ITEMS
     assert "行政" not in PROJECT_LINK_ITEMS
 
-    src = (Path(__file__).resolve().parents[2]
-           / "routers" / "crm" / "petty.py").read_text(encoding="utf-8")
     # 不變量收斂在 `_enforce_project_link` —— **賦值後查最終狀態**，不是賦值前
     # 預測（預測式守衛漏過 PUT 整支、以及 PATCH {"item": ""} 讓連結留在 NULL
     # 項目上）。四條會動到 project_id/item 的寫入路徑都必須經過它。
-    helper = src.split("def _enforce_project_link")[1][:900]
+    helper = PETTY_SRC.split("def _enforce_project_link")[1][:900]
     assert "409" in helper and "不開放連結專案" in helper
     for fn in ("add_my_petty_expense", "add_petty_expense_for",
                "update_my_petty_expense", "patch_petty_entry"):
-        body = src.split(f"async def {fn}")[1].split("\n@router")[0]
+        body = PETTY_SRC.split(f"async def {fn}")[1].split("\n@router")[0]
         assert "_enforce_project_link" in body, f"{fn} 沒過不變量"
     # 解除連結要**回報**（靜默清掉的話，專案毛利自己少一筆而沒人知道為什麼）
-    patch = src.split("async def patch_petty_entry")[1].split("\n@router")[0]
+    patch = PETTY_SRC.split("async def patch_petty_entry")[1].split("\n@router")[0]
     assert '"unlinked": unlinked' in patch
 
-    view = (FRONTEND / "tabs" / "petty" / "petty-view.js").read_text(encoding="utf-8")
-    assert "project_link_items" in view, "前端沒讀後端那份規則"
+    assert "project_link_items" in PETTY_VIEW, "前端沒讀後端那份規則"
     # fallback 清單只准存在一份（wireProjectGate/linkableSet 收斂點）
-    assert view.count('["專案雜支"]') == 1, "fallback 清單被複製了"
+    assert PETTY_VIEW.count('["專案雜支"]') == 1, "fallback 清單被複製了"
 
 
 def test_cost_group_endpoint_needs_both_grants(app_client, as_user):
-    for h in (as_user(modules=["me_finance"]), as_user(modules=["money_view"]),
-              as_user(modules=["finance_approve"])):
+    for mods in LACKING:
         assert app_client.get("/api/v1/crm/petty/project-groups/__probe__",
-                              headers=h).status_code == 403
+                              headers=as_user(modules=mods)).status_code == 403
 
 
 def test_ledger_asks_which_cost_group_when_there_are_several():
@@ -479,9 +454,8 @@ def test_ledger_asks_which_cost_group_when_there_are_several():
     預設落主表不會算錯錢，但「這筆算哪一天的拍攝」只有人知道 —— 默默落主表
     等於幫使用者做了一個他看不到的決定。只有一張時不問（沒得選）。
     """
-    view = (FRONTEND / "tabs" / "petty" / "petty-view.js").read_text(encoding="utf-8")
-    assert "_pickCostGroup" in view
-    fn = view.split("const _pickCostGroup")[1].split("\n    };")[0]
+    assert "_pickCostGroup" in PETTY_VIEW
+    fn = PETTY_VIEW.split("const _pickCostGroup")[1].split("\n    };")[0]
     assert "groups.length <= 1" in fn, "只有一張子表時不該問"
     assert "petty/project-groups/" in fn
     # 取消要放棄整個動作，不是默默落主表
@@ -489,8 +463,8 @@ def test_ledger_asks_which_cost_group_when_there_are_several():
 
 
 def test_item_owner_mapping_needs_both_grants(app_client, as_user):
-    for h in (as_user(modules=["me_finance"]), as_user(modules=["money_view"]),
-              as_user(modules=["finance_approve"])):
+    for mods in LACKING:
+        h = as_user(modules=mods)
         assert app_client.get("/api/v1/crm/petty/item-owners",
                               headers=h).status_code == 403
         assert app_client.put("/api/v1/crm/petty/item-owners", headers=h,
@@ -503,22 +477,17 @@ def test_item_owner_mapping_only_fills_unassigned():
     手動改過的例外、已結清的歷史都不能被一鍵覆蓋 —— 否則每按一次設定就把人家
     整理好的歸屬洗掉一次，而且沒有任何提示。
     """
-    src = (Path(__file__).resolve().parents[2]
-           / "routers" / "crm" / "petty.py").read_text(encoding="utf-8")
-    body = src.split("async def set_item_owners")[1].split("\n@router")[0]
+    body = PETTY_SRC.split("async def set_item_owners")[1].split("\n@router")[0]
     assert "owner_staff_id.is_(None)" in body
 
 
 def test_new_expense_applies_the_item_owner_rule():
     """建立單據時就套用對映 —— 規則設定一次，不必每筆挑（帳冊因此不用開那一欄）。"""
-    src = (Path(__file__).resolve().parents[2]
-           / "routers" / "crm" / "petty.py").read_text(encoding="utf-8")
-    body = src.split("def _new_expense")[1].split("\ndef ")[0]
+    body = PETTY_SRC.split("def _new_expense")[1].split("\ndef ")[0]
     assert "_item_owners()" in body and "owner_staff_id=" in body
-    view = (FRONTEND / "tabs" / "petty" / "petty-view.js").read_text(encoding="utf-8")
     # 帳冊不再有逐列的歸屬欄，改成工具列的設定按鈕
-    assert 'data-f="owner_staff_id"' not in view
-    assert 'id="lg-owners"' in view
+    assert 'data-f="owner_staff_id"' not in PETTY_VIEW
+    assert 'id="lg-owners"' in PETTY_VIEW
 
 
 def test_project_picker_is_one_shared_datalist_not_300_selects():
@@ -528,19 +497,17 @@ def test_project_picker_is_one_shared_datalist_not_300_selects():
     這條釘住兩件事：datalist 只組一次、而且列裡是 input 不是 select
     （回頭改成 select 就會把 238 個選項再乘上 300）。
     """
-    view = (FRONTEND / "tabs" / "petty" / "petty-view.js").read_text(encoding="utf-8")
-    assert view.count("<datalist id=\"pc-proj-dl\">") == 1
-    assert 'list="pc-proj-dl"' in view
+    assert PETTY_VIEW.count("<datalist id=\"pc-proj-dl\">") == 1
+    assert 'list="pc-proj-dl"' in PETTY_VIEW
     # 逐列的專案欄是 input；select 版本（含 data-lazy 那套）不該再存在
-    assert "data-lazy" not in view
-    assert '<input data-f="project_id"' in view
-    assert '<select data-no-search data-f="project_id"' not in view
+    assert "data-lazy" not in PETTY_VIEW
+    assert '<input data-f="project_id"' in PETTY_VIEW
+    assert '<select data-no-search data-f="project_id"' not in PETTY_VIEW
 
 
 def test_typo_in_project_does_not_silently_unbind():
     """打錯專案名要擋下來並還原 —— 靜默當成「不歸專案」會無聲抹掉歸屬。"""
-    view = (FRONTEND / "tabs" / "petty" / "petty-view.js").read_text(encoding="utf-8")
-    body = view.split('if (f === "project_id" && el.tagName === "INPUT")')[1][:500]
+    body = PETTY_VIEW.split('if (f === "project_id" && el.tagName === "INPUT")')[1][:500]
     assert "找不到專案" in body and "dataset.was" in body
 
 
@@ -554,6 +521,7 @@ def test_petty_subview_is_registered_in_the_finance_nav():
     assert not missing, f"側欄按鈕指向不存在的子視圖：{missing}"
 
 
+# ── 抹除層不准把「自己的錢」抹掉 ───────────────────────────────────────
 def test_own_scope_fields_are_not_redacted():
     """🔴 `_OWN_SCOPE` 與 `MONEY_FIELDS` 必須互斥。
 

@@ -12,8 +12,8 @@
 （`actual` / `estimated` 目前落在 `core.money._PENDING_OWNER`，本來就沒被抹 ——
 所以**別**依賴抹除層來擋別人的錢，擋住它的是 scope。）
 
-財務視角（帳戶總覽 / 待審 / 匯款清冊）走另一組端點，第一層 `money_dep` 403 +
-`finance_approve` 模組。
+財務視角（匯款清冊 / 審核 / 全部零用金帳冊）走另一組端點，
+第一層 `money_dep` 403 + `finance_approve` 模組。
 """
 from __future__ import annotations
 
@@ -34,8 +34,8 @@ from db.models import (CrmCashEntry, CrmPaymentRequest, CrmProject,
                        CrmProjectExpense, CrmReimbursement, CrmStaff,
                        FinanceCategoryMap, User)
 
-from ._shared import (_assert_month_open, _get_factory, _now, _parse_day,
-                      _require_db, _username, money_dep, router)
+from ._shared import (_assert_month_open, _crm_session, _now, _parse_day,
+                      _username, money_dep, router)
 
 # 送出後就不再是本人能改的東西；只有這兩個狀態算「還在我手上」
 EDITABLE = ("草稿", "退回")
@@ -162,9 +162,7 @@ def _claim_dict(c: CrmReimbursement) -> dict:
 @router.get("/petty/options")
 async def petty_options():
     """登記表單的兩個軸：專案（可留白＝公司支出）＋ 會計項目。"""
-    _require_db()
-    factory = await _get_factory()
-    async with factory() as session:
+    async with _crm_session() as session:
         projects = (await session.execute(
             select(CrmProject.id, CrmProject.name, CrmProject.status)
             .order_by(CrmProject.created_at.desc()).limit(400))).all()
@@ -210,8 +208,7 @@ async def _petty_payload(session, staff) -> dict:
 @router.get("/petty/me")
 async def my_petty(request: Request):
     staff = await _my_staff(request)
-    factory = await _get_factory()
-    async with factory() as session:
+    async with _crm_session() as session:
         return await _petty_payload(session, staff)
 
 
@@ -221,8 +218,7 @@ async def add_my_petty_expense(body: PettyExpensePayload, request: Request):
     staff = await _my_staff(request)
     if not body.actual:
         raise HTTPException(status_code=400, detail="金額不可為 0")
-    factory = await _get_factory()
-    async with factory() as session:
+    async with _crm_session() as session:
         exp = _new_expense(body, staff.id)
         _enforce_project_link(exp)          # 非專案雜支 → 不連（表單本來就鎖住）
         await _attach_cost_group(session, exp)
@@ -245,11 +241,8 @@ async def _attach_cost_group(session, exp) -> None:
 @router.put("/petty/expenses/{expense_id}")
 async def update_my_petty_expense(expense_id: str, body: PettyExpensePayload,
                                   request: Request):
-    any_owner = _may_manage_others(request)
-    staff_id = None if any_owner else (await _my_staff(request)).id
-    factory = await _get_factory()
-    async with factory() as session:
-        exp = await _own_editable(session, expense_id, staff_id, any_owner)
+    async with _crm_session() as session:
+        exp = await _own_editable(session, expense_id, request)
         exp.project_id = body.project_id or None
         exp.category = body.category or "其他"
         exp.actual = body.actual
@@ -266,11 +259,8 @@ async def update_my_petty_expense(expense_id: str, body: PettyExpensePayload,
 
 @router.delete("/petty/expenses/{expense_id}")
 async def delete_my_petty_expense(expense_id: str, request: Request):
-    any_owner = _may_manage_others(request)
-    staff_id = None if any_owner else (await _my_staff(request)).id
-    factory = await _get_factory()
-    async with factory() as session:
-        exp = await _own_editable(session, expense_id, staff_id, any_owner)
+    async with _crm_session() as session:
+        exp = await _own_editable(session, expense_id, request)
         await session.delete(exp)
         await session.commit()
     return {"status": "ok", "deleted": expense_id}
@@ -291,12 +281,14 @@ def _may_manage_others(request: Request) -> bool:
         return False
 
 
-async def _own_editable(session, expense_id: str, staff_id: str, any_owner: bool = False):
-    """還沒送出的單據。`any_owner`＝審核者代管別人的（見下方 §代為登記）。
+async def _own_editable(session, expense_id: str, request: Request):
+    """還沒送出的單據。scope 判斷收在這裡：審核者可代管任何人的草稿
+    （代打後常要補收據、改項目），非審核者只摸得到自己的。
 
-    非審核者只摸得到自己的，而且 404 不 403 —— 403 等於告訴對方「這筆存在、
-    只是不是你的」，那本身就是洩漏。
+    404 不 403 —— 403 等於告訴對方「這筆存在、只是不是你的」，那本身就是洩漏。
     """
+    any_owner = _may_manage_others(request)
+    staff_id = None if any_owner else (await _my_staff(request)).id
     exp = await session.get(CrmProjectExpense, expense_id)
     if exp is None or (not any_owner and exp.staff_id != staff_id):
         raise HTTPException(status_code=404, detail="找不到這筆支出（或不是你的）")
@@ -318,7 +310,7 @@ async def _own_editable(session, expense_id: str, staff_id: str, any_owner: bool
 
 
 async def _approver_staff(request: Request, session, staff_id: str):
-    _check_approver(request)
+    """代管對象查找。權限已在各端點頂部擋過（先 403 再碰 DB），這裡不重查。"""
     staff = await session.get(CrmStaff, staff_id)
     if staff is None:
         raise HTTPException(status_code=404, detail="找不到這位人員")
@@ -329,8 +321,7 @@ async def _approver_staff(request: Request, session, staff_id: str):
 async def petty_staff_options(request: Request):
     """代為登記的人員下拉：在職人員 + 任何已經有零用金紀錄的人（含離職的）。"""
     _check_approver(request)
-    factory = await _get_factory()
-    async with factory() as session:
+    async with _crm_session() as session:
         used = {r[0] for r in (await session.execute(
             select(CrmProjectExpense.staff_id)
             .where(CrmProjectExpense.staff_id.isnot(None)).distinct())).all()}
@@ -346,8 +337,7 @@ async def petty_staff_options(request: Request):
 async def petty_of_staff(staff_id: str, request: Request):
     """某個人的零用金現況 —— 形狀與 `/petty/me` 相同，前端共用同一段畫面。"""
     _check_approver(request)     # 先擋權限再碰 DB —— 否則沒 DB 時會回 503 遮住 403
-    factory = await _get_factory()
-    async with factory() as session:
+    async with _crm_session() as session:
         staff = await _approver_staff(request, session, staff_id)
         return await _petty_payload(session, staff)
 
@@ -356,8 +346,7 @@ async def petty_of_staff(staff_id: str, request: Request):
 async def add_petty_expense_for(staff_id: str, body: PettyExpensePayload,
                                 request: Request):
     _check_approver(request)     # 先擋權限再碰 DB —— 否則沒 DB 時會回 503 遮住 403
-    factory = await _get_factory()
-    async with factory() as session:
+    async with _crm_session() as session:
         staff = await _approver_staff(request, session, staff_id)
         exp = _new_expense(body, staff.id)
         _enforce_project_link(exp)          # 非專案雜支 → 不連（表單本來就鎖住）
@@ -371,8 +360,7 @@ async def add_petty_expense_for(staff_id: str, body: PettyExpensePayload,
 async def submit_petty_for(staff_id: str, body: PettySubmitPayload,
                            request: Request):
     _check_approver(request)     # 先擋權限再碰 DB —— 否則沒 DB 時會回 503 遮住 403
-    factory = await _get_factory()
-    async with factory() as session:
+    async with _crm_session() as session:
         staff = await _approver_staff(request, session, staff_id)
         return await _submit_for(session, staff, body.notes)
 
@@ -381,11 +369,8 @@ async def submit_petty_for(staff_id: str, body: PettySubmitPayload,
 async def upload_my_petty_receipt(expense_id: str, request: Request,
                                   file: UploadFile = File(...)):
     """收據上傳 —— 復用 costs._save_receipt（它已支援沒有專案的支出）。"""
-    any_owner = _may_manage_others(request)
-    staff_id = None if any_owner else (await _my_staff(request)).id
-    factory = await _get_factory()
-    async with factory() as session:
-        exp = await _own_editable(session, expense_id, staff_id, any_owner)
+    async with _crm_session() as session:
+        exp = await _own_editable(session, expense_id, request)
         project_id = exp.project_id
     from .costs import _save_receipt
     return await _save_receipt(project_id, expense_id, file)
@@ -441,18 +426,18 @@ async def submit_my_petty(body: PettySubmitPayload, request: Request):
     不能讓人往已經結算完的月份塞新費用。
     """
     staff = await _my_staff(request)
-    factory = await _get_factory()
-    async with factory() as session:
+    async with _crm_session() as session:
         return await _submit_for(session, staff, body.notes)
 
 
-# ── 財務視角：帳戶總覽 / 待審 / 匯款清冊 ──────────────────────────────
+# ── 財務視角（money_view + finance_approve）：匯款清冊 / 審核 / 帳冊 ────
 @router.get("/petty/accounts", dependencies=[Depends(money_dep)])
 async def petty_accounts(request: Request):
-    """帳戶總覽 —— **所有**跟零用金有關的人，含綁定狀態與歷史累計。
+    """匯款清冊的資料源 —— **所有**跟零用金有關的人，含綁定狀態與歷史累計。
 
     🔴 「有關」的判準刻意放寬到「曾經有過任何一筆單據」，不是「現在還欠他錢」。
-    只列未結的話，帳戶總覽就變成匯款清冊的複本 —— 而 owner 要看的是全貌
+    只列「還欠他錢的人」的話，「這期沒請款」與「不在清單」會長得一樣 ——
+    owner 要的是全貌
     （誰用過、誰沒帳號、誰沒綁、歷史付了多少）。149 人裡有紀錄的才進來，
     所以清單仍然不會變成整本人員名冊。
 
@@ -460,9 +445,7 @@ async def petty_accounts(request: Request):
     只能靠代為登記。空字串＝沒綁，畫面上要看得出來。
     """
     _check_approver(request)
-    factory = await _get_factory()
-    async with factory() as session:
-        claims = (await session.execute(select(CrmReimbursement))).scalars().all()
+    async with _crm_session() as session:
         # 逐人 × 狀態的單據合計：一次 group by 拿齊草稿／待付／已付
         sums = (await session.execute(
             select(CrmProjectExpense.staff_id, CrmProjectExpense.status,
@@ -525,20 +508,10 @@ async def petty_accounts(request: Request):
             "bank_missing": not acct,
             "status": ("待請款" if (a["draft"] or a["open"]) else "已請款"),
         })
-    return {
-        "accounts": sorted(out, key=lambda x: -(x["claim_total"] + x["draft_total"])),
-        "totals": {
-            "people": len(out),
-            "draft": sum(x["draft_total"] for x in out),
-            "open": sum(x["claim_total"] for x in out),
-            "paid": sum(x["paid_total"] for x in out),
-            "unbound": sum(1 for x in out if not x["bound_user"]),
-            "bank_missing": sum(1 for x in out if x["bank_missing"]),
-            "owed": sum(x["owed_by_staff"] for x in out),
-        },
-        "claims": [_claim_dict(c) for c in
-                   sorted(claims, key=lambda c: (c.submitted_at or _now()), reverse=True)],
-    }
+    # 匯款清冊（唯一消費端）自己算合計、批次明細另打 /petty/claims ——
+    # 這裡曾多回一份 totals 與全表 claims，兩者都沒人讀，還隨批次歷史線性長大
+    return {"accounts": sorted(
+        out, key=lambda x: -(x["claim_total"] + x["draft_total"]))}
 
 
 # ── 項目 → 費用歸屬人 的對映（owner 2026-08-17：「有個設定按鈕，直接讓項目與
@@ -561,8 +534,7 @@ def _item_owners() -> dict:
 async def get_item_owners(request: Request):
     """目前的「項目 → 歸屬人」對映 + 可選人員（設定面板一次拿齊）。"""
     _check_approver(request)
-    factory = await _get_factory()
-    async with factory() as session:
+    async with _crm_session() as session:
         items = [r[0] for r in (await session.execute(
             select(FinanceCategoryMap.category_text)
             .where(FinanceCategoryMap.source == "cash",
@@ -593,8 +565,7 @@ async def set_item_owners(request: Request, apply_existing: int = Query(0)):
 
     touched = 0
     if apply_existing and mapping:
-        factory = await _get_factory()
-        async with factory() as session:
+        async with _crm_session() as session:
             for item, sid in mapping.items():
                 rows = (await session.execute(
                     select(CrmProjectExpense)
@@ -620,8 +591,7 @@ async def petty_entries(request: Request, q: str = Query(""),
     對著一張 443 列的表在工作，彙總表回答不了「那筆 4,309 的影印是誰、哪個案子」。
     """
     _check_approver(request)
-    factory = await _get_factory()
-    async with factory() as session:
+    async with _crm_session() as session:
         w = []
         if staff_id:
             w.append(CrmProjectExpense.staff_id == staff_id)
@@ -686,8 +656,7 @@ async def petty_project_groups(project_id: str, request: Request):
     只有一張（或沒有）就不必問，後端會自動落主表。
     """
     _check_approver(request)
-    factory = await _get_factory()
-    async with factory() as session:
+    async with _crm_session() as session:
         from db.models import CrmProjectCostGroup
         rows = (await session.execute(
             select(CrmProjectCostGroup.id, CrmProjectCostGroup.name,
@@ -717,8 +686,7 @@ async def patch_petty_entry(expense_id: str, request: Request):
     unknown = set(body) - allowed
     if unknown:
         raise HTTPException(status_code=400, detail=f"不支援的欄位：{sorted(unknown)}")
-    factory = await _get_factory()
-    async with factory() as session:
+    async with _crm_session() as session:
         exp = await session.get(CrmProjectExpense, expense_id)
         if exp is None:
             raise HTTPException(status_code=404, detail="找不到這筆支出")
@@ -780,8 +748,7 @@ async def patch_petty_entry(expense_id: str, request: Request):
 async def petty_claims(request: Request, status: str = Query("待審")):
     """待審／已核准／已付款批次清單（含逐行明細）。"""
     _check_approver(request)
-    factory = await _get_factory()
-    async with factory() as session:
+    async with _crm_session() as session:
         claims = (await session.execute(
             select(CrmReimbursement)
             .where(CrmReimbursement.status == status)
@@ -876,8 +843,7 @@ async def _clear_aps(session, claim_id: str) -> int:
 async def approve_claim(claim_id: str, request: Request):
     """核准 → 產應付款（項目 × 月份），批次與單據轉「已核准」。"""
     _check_approver(request)
-    factory = await _get_factory()
-    async with factory() as session:
+    async with _crm_session() as session:
         claim = await session.get(CrmReimbursement, claim_id)
         if claim is None:
             raise HTTPException(status_code=404, detail="找不到這張請款批次")
@@ -907,8 +873,7 @@ async def approve_claim(claim_id: str, request: Request):
 async def reject_claim(claim_id: str, request: Request, reason: str = Query("")):
     """整批退回 —— 單據回到本人的草稿（claim_id 清掉），批次留著當紀錄。"""
     _check_approver(request)
-    factory = await _get_factory()
-    async with factory() as session:
+    async with _crm_session() as session:
         claim = await session.get(CrmReimbursement, claim_id)
         if claim is None:
             raise HTTPException(status_code=404, detail="找不到這張請款批次")
@@ -939,8 +904,7 @@ async def reject_claim_line(claim_id: str, expense_id: str, request: Request,
     人就得重送 30 筆 —— 於是大家開始不用系統。
     """
     _check_approver(request)
-    factory = await _get_factory()
-    async with factory() as session:
+    async with _crm_session() as session:
         claim = await session.get(CrmReimbursement, claim_id)
         exp = await session.get(CrmProjectExpense, expense_id)
         if claim is None or exp is None or exp.claim_id != claim_id:
@@ -981,8 +945,7 @@ async def pay_claim(claim_id: str, request: Request, payment_date: str = Query("
     """
     _check_approver(request)
     when = _parse_day(payment_date) or _now()
-    factory = await _get_factory()
-    async with factory() as session:
+    async with _crm_session() as session:
         claim = await session.get(CrmReimbursement, claim_id)
         if claim is None:
             raise HTTPException(status_code=404, detail="找不到這張請款批次")
@@ -1038,8 +1001,7 @@ async def payout_csv(request: Request):
     以為已經匯完了。
     """
     _check_approver(request)
-    factory = await _get_factory()
-    async with factory() as session:
+    async with _crm_session() as session:
         claims = (await session.execute(
             select(CrmReimbursement)
             .where(CrmReimbursement.status == "已核准")
@@ -1076,8 +1038,7 @@ async def petty_unbound_labels(request: Request):
     不是逐列去挑。
     """
     _check_approver(request)
-    factory = await _get_factory()
-    async with factory() as session:
+    async with _crm_session() as session:
         rows = (await session.execute(
             select(CrmProjectExpense.project_label,
                    safunc.count(CrmProjectExpense.id),
@@ -1097,8 +1058,7 @@ async def petty_bind_label(request: Request, label: str = Query(...),
                            project_id: str = Query(...)):
     """把某個標籤底下所有未綁定的列，一次掛到指定專案。"""
     _check_approver(request)
-    factory = await _get_factory()
-    async with factory() as session:
+    async with _crm_session() as session:
         proj = await session.get(CrmProject, project_id)
         if proj is None:
             raise HTTPException(status_code=404, detail="找不到此專案")
@@ -1116,5 +1076,3 @@ async def petty_bind_label(request: Request, label: str = Query(...),
         await session.commit()
     return {"status": "ok", "bound": len(rows), "project": proj.name}
 
-
-__all__ = ["petty_options", "my_petty"]

@@ -5,8 +5,8 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="robots" content="noindex,nofollow">
 <title>零用金｜ORIGINSUN</title>
-<!-- 零用金請款「獨立網址」（docs/PETTY_CASH_PLAN.md §3）：帳號登入 → 四個分頁
-     （我的請款 / 審核 / 匯款清冊 / 帳戶總覽），權限決定看得到幾個。比照
+<!-- 零用金請款「獨立網址」（docs/PETTY_CASH_PLAN.md §3）：帳號登入 → 分頁
+     （清單見下方 TABS，權限決定看得到幾個）。比照
      project.html / media-log-workspace.html 的獨立網址家族，只掛 master / foundry
      （NAS 對外容器沒有 CRM 後端）。
      🔴 RWD 是硬需求不是加分：登記發生在現場（剛買完東西、拍收據），審核與匯款
@@ -99,25 +99,18 @@
 import { renderMine, renderAccounts, renderClaims, renderLabels, renderOverview }
     from "/tabs/petty/petty-view.js";
 
+import { authFetch, bearerHeader } from "/js/shared/utils.js";
+
 const TOKEN_KEY = "auth_token";
 const $ = (id) => document.getElementById(id);
-function _authHeader() {
-    const tok = localStorage.getItem(TOKEN_KEY);
-    return tok ? { "Authorization": "Bearer " + tok } : {};
-}
-// 合約與 js/shared/utils.authFetch 相同（body 傳物件、這裡 stringify）——
-// 同一個元件在 SPA 子視圖裡是接 authFetch 的，兩邊不能有兩套合約
-async function mfetch(path, opts = {}) {
-    const headers = Object.assign({ "Content-Type": "application/json" },
-                                  _authHeader(), opts.headers || {});
-    return fetch(path, Object.assign({}, opts, { headers,
-        body: opts.body !== undefined ? JSON.stringify(opts.body) : undefined }));
-}
-// 上傳走 FormData —— 不能帶 Content-Type，瀏覽器要自己補 boundary
-async function ufetch(path, form) {
-    return fetch(path, { method: "POST", headers: _authHeader(), body: form });
-}
-window.__petty = { mfetch, ufetch };     // 給子模組用（同源同頁，不另建一層）
+// fetch 出口與 CRM 子視圖宿主**同一份**（utils.js：「新分頁一律 import 這份，
+// 勿再複製第 N 份」）。上傳不能走 authFetch —— 它會補 JSON header 並把
+// FormData 拿去 stringify，走 bearerHeader() 讓瀏覽器自己補 boundary。
+window.__petty = {
+    mfetch: authFetch,
+    ufetch: (path, form) => fetch(path, {
+        method: "POST", headers: bearerHeader(), body: form }),
+};
 
 function _show(view) {
     for (const v of ["login-view", "noperm-view", "app-view"])
@@ -215,7 +208,7 @@ async function boot() {
     if (!localStorage.getItem(TOKEN_KEY)) { showLogin(""); return; }
     let me;
     try {
-        const r = await mfetch("/api/v1/auth/me");
+        const r = await authFetch("/api/v1/auth/me");
         if (r.status === 401) { localStorage.removeItem(TOKEN_KEY); showLogin(""); return; }
         if (!r.ok) { showLogin("載入失敗（" + r.status + "）"); return; }
         me = await r.json();
