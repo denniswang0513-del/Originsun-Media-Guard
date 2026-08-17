@@ -414,6 +414,10 @@
         <!-- 人員配置：專案範疇（派工＝誰、什麼角色、幾天）。金額欄跟著
              money_view 走，元件自己判斷 —— 見 docs/MONEY_VISIBILITY.md §4。 -->
         <button class="side-tab" data-ptab="staff" id="tab-staff" style="display:none;">人員配置</button>
+        <!-- 支出：這個案子花了多少、花在哪（雜支＋零用金是同一張表）。
+             閘門是 money_view —— 沒有金額權限的人**整顆鈕都不出現**，
+             不是出現後點進去一片空白。見 docs/PETTY_CASH_PLAN.md §3.5。 -->
+        <button class="side-tab" data-ptab="expense" id="tab-expense" style="display:none;">支出</button>
       </nav>
       <div class="plan-main">
         <div id="info-host" style="display:none;"></div>
@@ -425,6 +429,7 @@
         <div id="flow-host" style="display:none;"></div>
         <div id="delivery-host" style="display:none;"></div>
         <div id="staff-host" style="display:none;"></div>
+        <div id="expense-host" style="display:none;"></div>
         <div id="folder-host" style="display:none;">
           <!-- 重點提案卡片列與檔案瀏覽分開兩個容器：folder-view 會清空它的
                host，共用一個的話卡片列每次導覽都被洗掉。
@@ -893,6 +898,9 @@ const _LAZY_TABS = {
     // 唯讀：不注入 onRemove（派工寫入仍在 CRM，且是 Lv3）
     staff: { mod: "/tabs/proposals/staff-view.js", fn: "renderStaff",
              label: "人員配置" },
+    // 支出：專案視角（誰墊的只是一欄；個人視角在 /petty-cash.html）
+    expense: { mod: "/tabs/proposals/expense-view.js", fn: "renderExpenses",
+               label: "支出" },
 };
 const _pending = {};
 
@@ -1372,6 +1380,10 @@ function _wireHeaderActions(prop, PA, refresh) {
 // 提案範疇的分頁（創意發想/企劃書/報價單/會議記錄/基本資料/參考影片）跟著
 // 側欄頂端的切換器走；專案範疇的（進度）與切換器無關。
 
+// 有沒有金額權限 —— boot() 從 /auth/me 填。決定「支出」分頁掛不掛。
+// 前端這份是**鏡射**，真正的守衛在後端（那支端點掛 money_dep）：這裡只是
+// 避免發一個必然 403 的請求、以及不要畫出點了沒東西的分頁鈕。
+let _CAN_MONEY = false;
 let _PROJ = null;    // { id, name, status } —— 專案模式才有；提案模式是 null
 
 /** 換到某一份提案＝改 `?p=` **整頁重載**（切換器與「建立提案」共用）。
@@ -1454,6 +1466,7 @@ function _renderNoProposal(project) {
     // 專案範疇的分頁不受「有沒有提案」影響
     _setupLazyTab("delivery", { projectId: project.id, fetcher: _crmFetch });
     _setupLazyTab("staff", { projectId: project.id, fetcher: _crmFetch });
+    if (_CAN_MONEY) _setupLazyTab("expense", { projectId: project.id, fetcher: _crmFetch });
     // 🔴 CTA 掛在**側欄**不是 plan-host：那個容器屬於「創意發想」分頁，而
     // 下面就要把畫面切到進度 —— 放那裡會被一起藏起來（按鈕在、但看不見）。
     // 側欄的東西不隨分頁切換消失，而「這個專案還沒有提案」本來就是導覽層級
@@ -1658,6 +1671,7 @@ async function _loadPlan(pid, prefetchP = null) {
             // 人員配置同理（派工是專案的，不是某一份提案的）。唯讀 —— 不注入
             // onRemove，寫入留在 CRM（Lv3）。
             _setupLazyTab("staff", { projectId: _PROJ.id, fetcher: _crmFetch });
+            if (_CAN_MONEY) _setupLazyTab("expense", { projectId: _PROJ.id, fetcher: _crmFetch });
             _activateTab("flow");
         }
     } catch (e) {
@@ -1916,6 +1930,7 @@ async function boot() {
     } catch (_) { showLogin("連線失敗，請稍後再試"); return; }
     const mods = me.modules || [];
     const isAdmin = (me.access_level || 0) >= 3 || me.role_name === "admin";
+    _CAN_MONEY = isAdmin || mods.includes("money_view");
     $("hdr-user").textContent = me.username || "";
     $("hdr-user").style.display = "";
     // 模組清單要與 noperm-view 文案一起改（crm_projects 於 2026-08-03 放行 — 提案×專案整合）
