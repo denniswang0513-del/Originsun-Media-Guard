@@ -437,6 +437,12 @@ table.lg select:focus, table.lg input:focus { border-color:var(--sub); outline:n
 table.lg tr.locked select, table.lg tr.locked input { pointer-events:none; opacity:.5; }
 .lg-lock { font-size:11px; color:var(--sub); white-space:nowrap; }
 .lg-more { text-align:center; padding:14px; }
+.lg-modal { position:fixed; inset:0; background:rgba(0,0,0,.55); z-index:900;
+  display:flex; align-items:center; justify-content:center; padding:20px; }
+.lg-modal-in { background:var(--bg-soft); border:1px solid var(--line); padding:20px;
+  max-width:520px; width:100%; max-height:82vh; overflow:auto; }
+.lg-modal-in select { background:#1e1e1e; color:inherit; border:1px solid var(--line);
+  border-radius:2px; font-family:inherit; }
 </style>`;
 
 const _LG = { q: "", staff_id: "", item: "", month: "", unbound: 0, limit: 300 };
@@ -504,6 +510,8 @@ export async function renderOverview(host) {
         <label style="font-size:12px;color:var(--sub);display:flex;gap:4px;align-items:center;">
           <input type="checkbox" id="lg-unbound" ${_LG.unbound ? "checked" : ""} style="width:auto;">
           只看未歸戶專案</label>
+        <button class="pc-btn ghost" id="lg-owners"
+                style="padding:6px 12px;font-size:12px;">費用歸屬設定</button>
         <span class="lg-sum">${d.total.toLocaleString()} 筆 ／ 合計 ${money(d.amount)}${
           d.returned < d.total ? `（顯示前 ${d.returned}）` : ""}</span>
       </div>
@@ -512,7 +520,7 @@ export async function renderOverview(host) {
         <thead><tr>
           <th style="width:112px;">日期</th><th style="width:92px;text-align:right;">請款</th>
           <th style="min-width:210px;">摘要</th><th style="width:135px;">附註</th>
-          <th style="width:130px;">項目</th><th style="width:130px;">收款人</th><th style="width:120px;">費用歸屬</th>
+          <th style="width:130px;">項目</th><th style="width:130px;">收款人</th>
           <th style="width:200px;">專案標籤</th><th style="width:64px;"></th>
         </tr></thead>
         <tbody>
@@ -523,7 +531,6 @@ export async function renderOverview(host) {
             <td><input id="n-note" placeholder="發票號／附註"></td>
             <td><select data-no-search id="n-item">${ITEM_OPTS}</select></td>
             <td><select data-no-search id="n-staff">${STAFF_OPTS}</select></td>
-            <td><select data-no-search id="n-owner">${STAFF_OPTS}</select></td>
             <td><select data-no-search id="n-proj">${PROJ_OPTS}</select></td>
             <td><button class="pc-btn" id="n-add"
                         style="padding:5px 10px;font-size:12px;">新增</button></td>
@@ -544,8 +551,6 @@ export async function renderOverview(host) {
               : `<select data-no-search data-f="staff_id" data-v="">
                    <option value="" selected>${esc(e.staff_name)}（非員工）</option>
                    ${STAFF_OPTS}</select>`}</td>
-            <td><select data-no-search data-f="owner_staff_id" data-v="${esc(e.owner_staff_id)}"
-                        title="誰負擔這筆費用（空＝墊款人自己）">${STAFF_OPTS}</select></td>
             <td>${projCell(e)}</td>
             <td class="lg-lock">${e.locked ? "已入帳" : esc(e.status)}</td>
           </tr>`).join("")}</tbody>
@@ -571,6 +576,60 @@ export async function renderOverview(host) {
 
     const rerun = () => renderOverview(host);
 
+    // 「項目 → 費用歸屬人」設定：設定一次，之後建立的單據自動帶
+    // （owner 2026-08-17：不用在帳冊上為此多開一欄讓人每筆挑）
+    host.querySelector("#lg-owners").onclick = async () => {
+        const cfg = await get("/api/v1/crm/petty/item-owners");
+        const staffOpts = (cur) => '<option value="">（不指定 —— 墊款人自己負擔）</option>'
+            + cfg.staff.map(p => `<option value="${esc(p.id)}"${
+                p.id === cur ? " selected" : ""}>${esc(p.name)}</option>`).join("");
+        const box = document.createElement("div");
+        box.className = "lg-modal";
+        box.innerHTML = `
+          <div class="lg-modal-in">
+            <h3 style="margin:0 0 6px;font-size:15px;">費用歸屬設定</h3>
+            <div class="pc-empty" style="text-align:left;padding:0 0 12px;">
+              哪個<strong>會計項目</strong>的費用該算在誰頭上。設定之後，新登記的
+              單據會自動帶上歸屬人；公司照樣把錢匯給墊款人，再從歸屬人那邊收回。
+              留空＝墊款人自己負擔（多數項目都是這樣）。</div>
+            ${cfg.items.map(i => `
+              <div style="display:flex;gap:10px;align-items:center;margin-bottom:6px;">
+                <span style="min-width:120px;font-size:13px;">${esc(i)}</span>
+                <select data-item="${esc(i)}" style="flex:1;padding:6px;">
+                  ${staffOpts(cfg.mapping[i] || "")}</select>
+              </div>`).join("")}
+            <label style="display:flex;gap:6px;align-items:center;margin:14px 0 4px;font-size:13px;">
+              <input type="checkbox" id="lg-apply" checked style="width:auto;">
+              同時套用到<strong>還沒指定歸屬</strong>的既有單據</label>
+            <div class="pc-empty" style="text-align:left;padding:0 0 12px;font-size:12px;">
+              已經指定過的（含手動改的例外、已結清的歷史）不會被覆蓋。</div>
+            <div class="pc-actions">
+              <button class="pc-btn ghost" id="lg-cancel">取消</button>
+              <button class="pc-btn" id="lg-save">儲存</button>
+            </div>
+          </div>`;
+        host.appendChild(box);
+        const close = () => box.remove();
+        box.querySelector("#lg-cancel").onclick = close;
+        box.onclick = (ev) => { if (ev.target === box) close(); };
+        box.querySelector("#lg-save").onclick = async (ev) => {
+            ev.currentTarget.disabled = true;
+            const mapping = {};
+            box.querySelectorAll("select[data-item]").forEach(sel => {
+                if (sel.value) mapping[sel.dataset.item] = sel.value;
+            });
+            const apply = box.querySelector("#lg-apply").checked ? 1 : 0;
+            try {
+                const r = await send("PUT",
+                    "/api/v1/crm/petty/item-owners?apply_existing=" + apply, { mapping });
+                close();
+                alert(`已儲存 ${Object.keys(r.mapping).length} 條對映`
+                      + (r.applied ? `，並套用到 ${r.applied} 筆既有單據。` : "。"));
+                rerun();
+            } catch (e) { alert(String(e.message || e)); ev.currentTarget.disabled = false; }
+        };
+    };
+
     // ＋ 新增一筆：收款人是必填（錢要算在誰頭上），其餘可空 —— 尤其日期，
     // Sheet 裡本來就有 37 列沒填，留白比塞今天更誠實
     const nAdd = host.querySelector("#n-add");
@@ -589,11 +648,6 @@ export async function renderOverview(host) {
                 invoice_no: host.querySelector("#n-note").value.trim(),
                 project_id: host.querySelector("#n-proj").value || null,
             });
-            const owner = host.querySelector("#n-owner").value;
-            if (owner) {
-                await send("PATCH", "/api/v1/crm/petty/entries/" + r.id,
-                           { owner_staff_id: owner });
-            }
             rerun();
         } catch (e) { alert(String(e.message || e)); nAdd.disabled = false; }
     };

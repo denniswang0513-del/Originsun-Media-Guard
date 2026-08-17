@@ -413,6 +413,39 @@ def test_both_hosts_share_one_fetch_contract():
     assert "bearerHeader()" in sub, "FormData 上傳不能走 authFetch"
 
 
+def test_item_owner_mapping_needs_both_grants(app_client, as_user):
+    for h in (as_user(modules=["me_finance"]), as_user(modules=["money_view"]),
+              as_user(modules=["finance_approve"])):
+        assert app_client.get("/api/v1/crm/petty/item-owners",
+                              headers=h).status_code == 403
+        assert app_client.put("/api/v1/crm/petty/item-owners", headers=h,
+                              json={"mapping": {}}).status_code == 403
+
+
+def test_item_owner_mapping_only_fills_unassigned():
+    """🔴 「套用到既有」只補 `owner_staff_id IS NULL` 的列。
+
+    手動改過的例外、已結清的歷史都不能被一鍵覆蓋 —— 否則每按一次設定就把人家
+    整理好的歸屬洗掉一次，而且沒有任何提示。
+    """
+    src = (Path(__file__).resolve().parents[2]
+           / "routers" / "crm" / "petty.py").read_text(encoding="utf-8")
+    body = src.split("async def set_item_owners")[1].split("\n@router")[0]
+    assert "owner_staff_id.is_(None)" in body
+
+
+def test_new_expense_applies_the_item_owner_rule():
+    """建立單據時就套用對映 —— 規則設定一次，不必每筆挑（帳冊因此不用開那一欄）。"""
+    src = (Path(__file__).resolve().parents[2]
+           / "routers" / "crm" / "petty.py").read_text(encoding="utf-8")
+    body = src.split("def _new_expense")[1].split("\ndef ")[0]
+    assert "_item_owners()" in body and "owner_staff_id=" in body
+    view = (FRONTEND / "tabs" / "petty" / "petty-view.js").read_text(encoding="utf-8")
+    # 帳冊不再有逐列的歸屬欄，改成工具列的設定按鈕
+    assert 'data-f="owner_staff_id"' not in view
+    assert 'id="lg-owners"' in view
+
+
 def test_project_picker_is_one_shared_datalist_not_300_selects():
     """🔴 專案有 238 個 —— 每列各長一份下拉＝七萬個 option（載入卡住的原因）。
 

@@ -62,8 +62,14 @@ async def _my_staff(request: Request):
 
 
 def _new_expense(body, staff_id: str) -> CrmProjectExpense:
-    """單據建構的單一正本（本人登記 / 代為登記共用）。"""
+    """單據建構的單一正本（本人登記 / 代為登記共用）。
+
+    會計項目若在「項目 → 歸屬人」對映裡（例如後期雜支→王士源），
+    建立時就把費用歸屬填好 —— 那條規則設定一次就好，不必每筆挑。
+    """
+    item = body.item or "其他"
     return CrmProjectExpense(
+        owner_staff_id=_item_owners().get(item) or None,
         id=uuid.uuid4().hex[:16],
         project_id=body.project_id or None,
         category=body.category or "其他",
@@ -75,7 +81,7 @@ def _new_expense(body, staff_id: str) -> CrmProjectExpense:
         # 手機/工作台的表單自己帶今天（value=today），所以只有刻意留白才會是 NULL。
         expense_date=_parse_day(body.expense_date),
         staff_id=staff_id,
-        item=body.item or "其他",
+        item=item,
         invoice_no=body.invoice_no or None,
         has_invoice=1 if body.invoice_no else 0,
         status="草稿",
@@ -484,6 +490,72 @@ async def petty_accounts(request: Request):
         "claims": [_claim_dict(c) for c in
                    sorted(claims, key=lambda c: (c.submitted_at or _now()), reverse=True)],
     }
+
+
+# ── 項目 → 費用歸屬人 的對映（owner 2026-08-17：「有個設定按鈕，直接讓項目與
+# 人員做連結，不用特別開一欄」）──────────────────────────────────────────
+#
+# 規則存 settings.json（`petty_item_owners`），不開資料表：它是一份「哪個項目算
+# 誰的」的設定，不是業務資料 —— 而且 CRM 只跑在 master，settings 就在那裡。
+# 建立單據時套用；逐列的 owner_staff_id 仍然存在（例外照樣改得動），只是不必
+# 在帳冊上多開一欄讓人每筆挑。
+SETTINGS_KEY = "petty_item_owners"
+
+
+def _item_owners() -> dict:
+    from config import load_settings
+    v = load_settings().get(SETTINGS_KEY) or {}
+    return v if isinstance(v, dict) else {}
+
+
+@router.get("/petty/item-owners", dependencies=[Depends(money_dep)])
+async def get_item_owners(request: Request):
+    """目前的「項目 → 歸屬人」對映 + 可選人員（設定面板一次拿齊）。"""
+    _check_approver(request)
+    factory = await _get_factory()
+    async with factory() as session:
+        items = [r[0] for r in (await session.execute(
+            select(FinanceCategoryMap.category_text)
+            .where(FinanceCategoryMap.source == "cash",
+                   FinanceCategoryMap.active.is_(True))
+            .order_by(FinanceCategoryMap.category_text))).all()]
+        staff = (await session.execute(
+            select(CrmStaff.id, CrmStaff.name)
+            .where(CrmStaff.status == "在職").order_by(CrmStaff.name))).all()
+    return {"mapping": _item_owners(),
+            "items": items or list(FALLBACK_ITEMS),
+            "staff": [{"id": r.id, "name": r.name} for r in staff]}
+
+
+@router.put("/petty/item-owners", dependencies=[Depends(money_dep)])
+async def set_item_owners(request: Request, apply_existing: int = Query(0)):
+    """存對映。`apply_existing=1` 一併套到**還沒指定歸屬**的既有單據。
+
+    只補 `owner_staff_id IS NULL` 的列 —— 已經指定過的（含手動改過的例外、
+    已結清的歷史）不動，所以重複按不會把人家改好的東西洗掉。
+    """
+    _check_approver(request)
+    body = await request.json()
+    mapping = {str(k): str(v) for k, v in (body.get("mapping") or {}).items() if v}
+    from config import load_settings, save_settings
+    cur = load_settings()
+    cur[SETTINGS_KEY] = mapping
+    save_settings(cur)
+
+    touched = 0
+    if apply_existing and mapping:
+        factory = await _get_factory()
+        async with factory() as session:
+            for item, sid in mapping.items():
+                rows = (await session.execute(
+                    select(CrmProjectExpense)
+                    .where(CrmProjectExpense.item == item,
+                           CrmProjectExpense.owner_staff_id.is_(None)))).scalars().all()
+                for r in rows:
+                    r.owner_staff_id = sid
+                    touched += 1
+            await session.commit()
+    return {"status": "ok", "mapping": mapping, "applied": touched}
 
 
 @router.get("/petty/entries", dependencies=[Depends(money_dep)])
