@@ -447,11 +447,13 @@ async def petty_accounts(request: Request):
     for s in staff_rows:
         a = agg.get(s.id)
         float_amt = s.petty_float or 0
-        a = a or {"draft": 0, "open": 0, "paid": 0, "rows": 0}
-        acct = s.bank_account or ""
         owe = owes.get(s.id, 0)
+        # 🔴 這個 continue 一定要在 `a = a or {...}` **之前**：補了預設值之後 `a`
+        # 永遠是 dict，條件就永遠不成立 —— 149 個人全部湧進匯款清冊（踩過一次）。
         if not a and not float_amt and not owe:
             continue
+        a = a or {"draft": 0, "open": 0, "paid": 0, "rows": 0}
+        acct = s.bank_account or ""
         out.append({
             "staff_id": s.id, "name": s.name,
             "owed_by_staff": owe,          # 歸屬他、還沒還的（正數＝他欠公司）

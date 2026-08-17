@@ -195,8 +195,13 @@ def test_overview_lists_everyone_with_history_not_just_debtors():
     assert "bound_user" in body, "帳戶總覽沒有綁定狀態"
     assert "User.staff_id" in body, "綁定狀態沒有去 users 撈"
     assert "paid_total" in body and "rows" in body, "缺歷史累計"
-    # 沒有紀錄也沒有備用金的人才跳過 —— 不是「沒有未結就跳過」
-    assert "if not a and not float_amt" in body
+    # 沒有紀錄也沒有備用金也沒欠款的人才跳過 —— 不是「沒有未結就跳過」
+    assert "if not a and not float_amt and not owe" in body
+    # 🔴 那個 continue 必須在補預設值之前 —— 補完 `a` 永遠是 dict、條件永遠不成立，
+    # 149 個人會全部湧進匯款清冊（2026-08-17 踩過，生產上真的變成 150 列）
+    skip_at = body.index("if not a and not float_amt and not owe")
+    default_at = body.index('a = a or {"draft"')
+    assert skip_at < default_at, "跳過條件被排在補預設值之後 → 永遠不會跳過"
 
 
 def test_delegate_is_a_separate_endpoint_not_an_optional_field():
