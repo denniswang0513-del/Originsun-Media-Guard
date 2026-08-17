@@ -200,7 +200,14 @@ submitted_at, approved_by, approved_at, paid_at, notes
 - **`/my.html`** 加一張「零用金」卡，卡片本身就是外連入口（比照專案管理卡），**不內嵌**。
 - **`/expense.html`（既有 token 手機頁）** 維持原樣，專給**沒有帳號的外部人員**現場登記。
   有帳號的員工一律走 `/petty-cash.html` —— 一個人只有一條路。
-- **CRM 帳務** 不做零用金子視圖，只放一個連到這頁的按鈕。
+- **CRM 帳務**（財務管理 Tab）→ 側欄「💵 零用金」子視圖。
+  🔴 **2026-08-17 更正**：原本寫「只放一個連過去的按鈕」。實際用起來那是把
+  已經登入 SPA 的人踢去另一個登入頁 —— owner 當場反映「沒看到零用金的頁面 /
+  希望建在 CRM 裡面不用連過去 / CRM 裡面可以管理所有的零用金」。改成
+  `tabs/finance/subviews/petty.js` **就地掛載同一套元件**（`tabs/petty/petty-view.js`），
+  不重畫第二份 UI。獨立網址仍在，定位收窄成「手機現場登記」。
+  ⚠️ 兩個宿主共用元件 → fetch 合約必須一致（body 傳物件、宿主 stringify），
+  由 `test_both_hosts_share_one_fetch_contract` 釘住。
 
 ---
 

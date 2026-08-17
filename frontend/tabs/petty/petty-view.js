@@ -20,8 +20,9 @@ async function get(path) {
     return r.json();
 }
 async function send(method, path, body) {
-    const r = await F().mfetch(path, {
-        method, body: body === undefined ? undefined : JSON.stringify(body) });
+    // body 傳**物件**，由 fetch 包裝負責 stringify —— 對齊
+    // js/shared/utils.authFetch 的合約，SPA 子視圖才能直接把 authFetch 接上來
+    const r = await F().mfetch(path, { method, body });
     if (!r.ok) throw new Error((await r.json().catch(() => ({}))).detail || ("HTTP " + r.status));
     return r.json().catch(() => ({}));
 }

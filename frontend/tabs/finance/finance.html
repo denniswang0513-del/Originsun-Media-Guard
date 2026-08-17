@@ -16,6 +16,10 @@
         <button class="finance-nav-btn" data-inv-view="cashbook">📒 收支明細</button>
         <button class="finance-nav-btn" data-inv-view="payables">📤 應付帳款</button>
         <button class="finance-nav-btn" data-inv-view="receivables">📥 應收帳款</button>
+        <!-- 零用金：同事墊的錢。就地掛 tabs/petty 的元件（與獨立網址
+             /petty-cash.html 同一套），不是連出去 —— 已經登入的人不該被踢去
+             另一個登入頁。owner 2026-08-17：CRM 裡要能管理所有的零用金。 -->
+        <button class="finance-nav-btn" data-subview="petty">💵 零用金</button>
 
         <div style="padding:14px 16px 4px;font-size:10px;color:#555;letter-spacing:0.1em;">📈 分析</div>
         <button class="finance-nav-btn active" data-subview="dashboard">📊 儀表板</button>

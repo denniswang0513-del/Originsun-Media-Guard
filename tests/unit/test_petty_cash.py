@@ -278,6 +278,37 @@ def test_project_page_imports_stay_inside_the_closure():
     assert (FRONTEND / "tabs/proposals/expense-view.js").exists()
 
 
+def test_both_hosts_share_one_fetch_contract():
+    """🔴 零用金元件有**兩個宿主**（獨立頁 /petty-cash.html、CRM 財務子視圖）。
+
+    元件把 body 當**物件**交出去，由宿主的 fetch 包裝 stringify（對齊
+    `js/shared/utils.authFetch`）。任一邊改成自己 stringify，就變成雙重編碼，
+    後端收到的是一個 JSON 字串而不是物件 → 422，而且只壞一個宿主。
+    """
+    view = (FRONTEND / "tabs" / "petty" / "petty-view.js").read_text(encoding="utf-8")
+    send = view.split("async function send(")[1].split("\n}")[0]
+    assert "JSON.stringify" not in send, "元件不該自己 stringify（宿主負責）"
+
+    standalone = (FRONTEND / "petty-cash.html").read_text(encoding="utf-8")
+    mfetch = standalone.split("async function mfetch(")[1].split("\n}")[0]
+    assert "JSON.stringify(opts.body)" in mfetch, "獨立頁的 mfetch 沒有 stringify"
+
+    sub = (FRONTEND / "tabs" / "finance" / "subviews" / "petty.js").read_text(encoding="utf-8")
+    assert "mfetch: authFetch" in sub, "子視圖應直接接 authFetch（同一份合約）"
+    # 上傳例外：authFetch 會補 JSON header 並 stringify FormData
+    assert "bearerHeader()" in sub, "FormData 上傳不能走 authFetch"
+
+
+def test_petty_subview_is_registered_in_the_finance_nav():
+    """側欄有按鈕、subviews/ 有對應檔案 —— 少一邊就是點了沒反應。"""
+    nav = (FRONTEND / "tabs" / "finance" / "finance.html").read_text(encoding="utf-8")
+    names = re.findall(r'data-subview="([^"]+)"', nav)
+    assert "petty" in names, "財務管理側欄沒有零用金"
+    missing = [n for n in names
+               if not (FRONTEND / "tabs" / "finance" / "subviews" / f"{n}.js").exists()]
+    assert not missing, f"側欄按鈕指向不存在的子視圖：{missing}"
+
+
 def test_own_scope_fields_are_not_redacted():
     """🔴 `_OWN_SCOPE` 與 `MONEY_FIELDS` 必須互斥。
 

@@ -105,10 +105,13 @@ function _authHeader() {
     const tok = localStorage.getItem(TOKEN_KEY);
     return tok ? { "Authorization": "Bearer " + tok } : {};
 }
+// 合約與 js/shared/utils.authFetch 相同（body 傳物件、這裡 stringify）——
+// 同一個元件在 SPA 子視圖裡是接 authFetch 的，兩邊不能有兩套合約
 async function mfetch(path, opts = {}) {
     const headers = Object.assign({ "Content-Type": "application/json" },
                                   _authHeader(), opts.headers || {});
-    return fetch(path, Object.assign({}, opts, { headers }));
+    return fetch(path, Object.assign({}, opts, { headers,
+        body: opts.body !== undefined ? JSON.stringify(opts.body) : undefined }));
 }
 // 上傳走 FormData —— 不能帶 Content-Type，瀏覽器要自己補 boundary
 async function ufetch(path, form) {
