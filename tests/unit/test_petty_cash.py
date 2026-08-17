@@ -413,6 +413,29 @@ def test_both_hosts_share_one_fetch_contract():
     assert "bearerHeader()" in sub, "FormData 上傳不能走 authFetch"
 
 
+def test_project_picker_is_one_shared_datalist_not_300_selects():
+    """🔴 專案有 238 個 —— 每列各長一份下拉＝七萬個 option（載入卡住的原因）。
+
+    改成**共用一份 datalist**：選項全表只長一次，型別提示由瀏覽器做。
+    這條釘住兩件事：datalist 只組一次、而且列裡是 input 不是 select
+    （回頭改成 select 就會把 238 個選項再乘上 300）。
+    """
+    view = (FRONTEND / "tabs" / "petty" / "petty-view.js").read_text(encoding="utf-8")
+    assert view.count("<datalist id=\"pc-proj-dl\">") == 1
+    assert 'list="pc-proj-dl"' in view
+    # 逐列的專案欄是 input；select 版本（含 data-lazy 那套）不該再存在
+    assert "data-lazy" not in view
+    assert '<input data-f="project_id"' in view
+    assert '<select data-no-search data-f="project_id"' not in view
+
+
+def test_typo_in_project_does_not_silently_unbind():
+    """打錯專案名要擋下來並還原 —— 靜默當成「不歸專案」會無聲抹掉歸屬。"""
+    view = (FRONTEND / "tabs" / "petty" / "petty-view.js").read_text(encoding="utf-8")
+    body = view.split('if (f === "project_id" && el.tagName === "INPUT")')[1][:500]
+    assert "找不到專案" in body and "dataset.was" in body
+
+
 def test_petty_subview_is_registered_in_the_finance_nav():
     """側欄有按鈕、subviews/ 有對應檔案 —— 少一邊就是點了沒反應。"""
     nav = (FRONTEND / "tabs" / "finance" / "finance.html").read_text(encoding="utf-8")

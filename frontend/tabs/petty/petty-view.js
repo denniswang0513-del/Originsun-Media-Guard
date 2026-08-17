@@ -459,20 +459,39 @@ export async function renderOverview(host) {
     // 🔴 專案下拉**不預先展開**：238 個專案 × 300 列 ＝ 七萬個 <option>，
     // 那就是「載入有點慢」的來源（實測 DOM 節點數差一個數量級）。這裡只放
     // 目前值那一個，其餘等使用者真的點下去（focus）才補 —— 一次只長一個下拉。
+    // 🔴 專案有 238 個 —— 純 <select> 沒辦法用（owner 2026-08-17：「這個清單太多
+    // 要可以搜尋」）。用**共用一份 <datalist> + 可打字的 input**：
+    //   - 238 個 option 全表只長一次，不是每列一份（那是先前載入慢的原因）
+    //   - 型別提示與過濾是瀏覽器原生的，不必引 searchableSelect
+    //     （那支住在 tabs/crm/，而這個元件要同時跑在獨立頁與 SPA 子視圖）
+    // 顯示字串必須唯一才能反查 id —— 同名專案補一個短碼。
     const projName = Object.fromEntries(opts.projects.map(p => [p.id, p.name]));
+    const seen = new Map();
+    const labelOf = {}, idOfLabel = {};
+    for (const p of opts.projects) {
+        const n = (seen.get(p.name) || 0) + 1;
+        seen.set(p.name, n);
+        const label = n === 1 ? p.name : `${p.name}｜${p.id.slice(0, 6)}`;
+        labelOf[p.id] = label;
+        idOfLabel[label] = p.id;
+    }
+    const PROJ_DATALIST = '<datalist id="pc-proj-dl">'
+        + Object.keys(idOfLabel).map(l => `<option value="${esc(l)}"></option>`).join("")
+        + "</datalist>";
+    // 新增列仍用 select（只有一個，238 個選項無所謂，而且可直接挑）
     const PROJ_OPTS = '<option value="">（無專案）</option>'
-        + opts.projects.map(p => `<option value="${esc(p.id)}">${esc(p.name)}</option>`).join("");
+        + opts.projects.map(p => `<option value="${esc(p.id)}">${esc(labelOf[p.id])}</option>`).join("");
     const projCell = (e) => {
         const cur = e.project_id;
-        const label = cur ? (projName[cur] || "（已刪除的專案）")
-                          : (e.project_label ? e.project_label + "（未歸戶）" : "（無）");
-        return `<select data-no-search data-f="project_id" data-lazy="1"${
-            e.project_label ? ` title="原始標籤：${esc(e.project_label)}"` : ""}>
-              <option value="${esc(cur)}" selected>${esc(label)}</option>
-            </select>`;
+        const val = cur ? (labelOf[cur] || projName[cur] || "（已刪除的專案）") : "";
+        return `<input data-f="project_id" list="pc-proj-dl"
+                       value="${esc(val)}" data-was="${esc(val)}"
+                       placeholder="${e.project_label ? esc(e.project_label) + "（未歸戶）" : "（無專案）"}"
+                       title="${e.project_label ? "原始標籤：" + esc(e.project_label)
+                                                : "打字搜尋專案；清空＝不歸專案"}">`;
     };
 
-    host.innerHTML = CSS + LEDGER_CSS + `
+    host.innerHTML = CSS + LEDGER_CSS + PROJ_DATALIST + `
       <div class="lg-bar">
         <input id="lg-q" placeholder="搜尋摘要／附註／發票號／標籤（Enter）"
                value="${esc(_LG.q)}" style="min-width:240px;">
@@ -584,27 +603,23 @@ export async function renderOverview(host) {
         sel.value = sel.dataset.v;
     });
 
-    // 懶展開：第一次 focus 才把專案清單塞進「那一個」下拉
-    const fillProjects = (sel) => {
-        if (!sel.dataset.lazy) return;
-        delete sel.dataset.lazy;
-        const cur = sel.value;
-        sel.innerHTML = '<option value="">（無）</option>'
-            + opts.projects.map(p => `<option value="${esc(p.id)}"${
-                p.id === cur ? " selected" : ""}>${esc(p.name)}</option>`).join("");
-        if (!cur) sel.value = "";
-    };
-    host.querySelectorAll('select[data-f="project_id"]').forEach(sel => {
-        sel.addEventListener("focus", () => fillProjects(sel));
-        sel.addEventListener("mousedown", () => fillProjects(sel));
-    });
-
     // 就地修改：change 才送（不是每個鍵），存好把邊框閃綠當回饋
     host.querySelectorAll("tbody [data-f]").forEach(el => {
         el.onchange = async () => {
             const tr = el.closest("tr");
             const f = el.dataset.f;
-            const val = el.type === "number" ? Number(el.value) : el.value;
+            let val = el.type === "number" ? Number(el.value) : el.value;
+            if (f === "project_id" && el.tagName === "INPUT") {
+                const typed = el.value.trim();
+                if (typed && !(typed in idOfLabel)) {
+                    // 🔴 打錯字不要靜默當成「不歸專案」—— 那會無聲地把歸屬清掉
+                    alert("找不到專案「" + typed + "」。請從清單挑一個，或清空表示不歸專案。");
+                    el.value = el.dataset.was || "";
+                    return;
+                }
+                val = typed ? idOfLabel[typed] : "";
+                el.dataset.was = typed;
+            }
             try {
                 await send("PATCH", "/api/v1/crm/petty/entries/" + tr.dataset.id, { [f]: val });
                 el.style.borderColor = "var(--ok)";
