@@ -88,6 +88,7 @@ def _expense_dict(e: CrmProjectExpense, project_name: str = "") -> dict:
         "summary": e.sub_item or "",
         "item": e.item or "",
         "category": e.category or "",
+        "staff_id": e.staff_id or "",
         "project_id": e.project_id or "",
         "project_name": project_name,
         "project_label": e.project_label or "",

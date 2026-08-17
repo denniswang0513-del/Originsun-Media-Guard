@@ -5,7 +5,10 @@
 // `window.__petty` 上：同源同頁、只有這一個消費者，另建一層抽象只是多一個檔案。
 const F = () => window.__petty;
 
-const esc = (s) => { const d = document.createElement("div"); d.textContent = String(s ?? ""); return d.innerHTML; };
+// 🔴 純字串替換，不建 DOM：帳冊一次渲染會叫這支上萬次，
+// 舊寫法（createElement + textContent）光這裡就吃掉兩秒多。
+const _ESC = { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" };
+const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => _ESC[c]);
 const money = (n) => (n === null || n === undefined) ? "—"
     : (n < 0 ? "-NT$ " : "NT$ ") + Math.abs(n).toLocaleString();
 const today = () => new Date().toISOString().slice(0, 10);
@@ -321,37 +324,53 @@ export async function renderClaims(host) {
 }
 
 // ── 分頁 3：匯款清冊 ─────────────────────────────────────────────────
+// owner 2026-08-17：「需要列出所有員工狀態，沒有請款就標註 --，欠款就標註負值」。
+// 原本只列「還要付的人」—— 那讓「這個人這期沒有請款」與「這個人不在清單裡」
+// 長得一模一樣，看的人分不出是沒花錢還是漏了。改成全員一列，用符號區分三態。
 export async function renderAccounts(host) {
     const [data, approved] = await Promise.all([
         get("/api/v1/crm/petty/accounts"),
         get("/api/v1/crm/petty/claims?status=" + encodeURIComponent("已核准"))]);
-    // 這一頁只回答「現在要匯多少給誰」；全貌（含已結清的人）在「全部零用金」
-    const payable = data.accounts.filter(a => (a.claim_total + a.draft_total) > 0);
-    const owed = data.accounts.filter(a => (a.claim_total + a.draft_total) < 0);
+
+    const rows = data.accounts;
+    // 應匯＝已送出待付 + 未送出草稿（草稿還不能匯，但要讓人看到有東西在路上）
+    const due = (a) => a.claim_total + a.draft_total;
+    const payable = rows.filter(a => due(a) > 0);
     const total = payable.reduce((s, a) => s + a.claim_total, 0);
+    const owed = rows.filter(a => due(a) < 0);
 
     host.innerHTML = CSS + `
       <div class="pc-sum">
         <div><div class="lbl">本期應匯總額（已送出）</div><div class="big">${money(total)}</div></div>
-        <div><div class="lbl">待匯人數</div><div class="big">${payable.filter(a => a.claim_total).length}</div></div>
+        <div><div class="lbl">待匯人數</div><div class="big">${
+          payable.filter(a => a.claim_total).length}<span class="sub"
+          style="font-size:13px;color:var(--sub);"> ／ 全員 ${rows.length}</span></div></div>
+        ${owed.length ? `<div><div class="lbl">應收回</div>
+          <div class="big pc-warn">${money(owed.reduce((s, a) => s + due(a), 0))}</div></div>` : ""}
         <div style="margin-left:auto;"><button class="pc-btn ghost" id="pc-csv">匯出銀行 CSV</button></div>
       </div>
+
       <div class="pc-head pc-row"><span>收款人</span><span>銀行帳號</span><span>未送出</span>
         <span class="amt">應匯金額</span><span>狀態</span></div>
-      ${payable.length ? payable.map(a => `
+      ${rows.map(a => {
+        const d = due(a);
+        // 三態：正＝要匯給他／零＝這期沒請款（畫 —，不是 NT$ 0）／負＝他欠公司
+        const amt = d > 0 ? money(a.claim_total)
+                  : d < 0 ? `<span class="pc-warn">${money(d)}</span>`
+                  : '<span class="sub">—</span>';
+        const state = d > 0 ? (a.claim_total ? "待匯款" : "未送出")
+                    : d < 0 ? "應收回" : "無請款";
+        return `
         <div class="pc-row">
-          <span>${esc(a.name)}</span>
-          <span class="${a.bank_missing ? "pc-warn" : "sub"}">${
-            a.bank_missing ? "⚠ 未填帳號，無法匯款" : esc(a.bank)}</span>
-          <span class="sub">${a.draft_total ? money(a.draft_total) + "（草稿）" : ""}</span>
-          <span class="amt">${money(a.claim_total)}</span>
-          <span><span class="pc-pill">${esc(a.status)}</span></span>
-        </div>`).join("") : '<div class="pc-empty">目前沒有要匯的款項。</div>'}
-      ${owed.length ? `<h3 style="font-size:13px;letter-spacing:.15em;color:var(--sub);
-          margin:28px 0 8px;text-transform:uppercase;">應向本人收回</h3>`
-        + owed.map(a => `<div class="pc-row"><span>${esc(a.name)}</span><span></span><span></span>
-            <span class="amt pc-warn">${money(a.claim_total + a.draft_total)}</span><span></span></div>`).join("")
-        : ""}
+          <span>${esc(a.name)}${a.bound_user ? "" :
+            '<span class="pc-pill">未綁帳號</span>'}</span>
+          <span class="${a.bank_missing && d > 0 ? "pc-warn" : "sub"}">${
+            a.bank_missing ? (d > 0 ? "⚠ 未填帳號，無法匯款" : "—") : esc(a.bank)}</span>
+          <span class="sub">${a.draft_total ? money(a.draft_total) + "（草稿）" : "—"}</span>
+          <span class="amt">${amt}</span>
+          <span><span class="pc-pill">${state}</span></span>
+        </div>`; }).join("")}
+
       <h3 style="font-size:13px;letter-spacing:.15em;color:var(--sub);
           margin:28px 0 8px;text-transform:uppercase;">已核准，待匯款</h3>
       ${approved.claims.length ? approved.claims.map(c => `
@@ -365,7 +384,7 @@ export async function renderAccounts(host) {
         </div>`).join("") : '<div class="pc-empty">沒有已核准待匯的批次。</div>'}`;
 
     host.querySelector("#pc-csv").onclick = async () => {
-        // 這支回 CSV 不是 JSON，而且要帶 Authorization —— 直接 <a href> 沒有標頭
+        // 這支回 CSV 不是 JSON，而且要帶 Authorization —— <a href> 送不了標頭
         const r = await F().mfetch("/api/v1/crm/petty/payout.csv");
         if (!r.ok) { alert("匯出失敗（" + r.status + "）"); return; }
         const url = URL.createObjectURL(await r.blob());
@@ -428,14 +447,25 @@ export async function renderOverview(host) {
         get("/api/v1/crm/petty/staff-options"),
     ]);
 
-    const itemOpts = (cur) => '<option value=""></option>'
-        + opts.items.map(i => `<option${i === cur ? " selected" : ""}>${esc(i)}</option>`).join("");
-    const staffOpts = (cur) => '<option value=""></option>'
-        + people.staff.map(p => `<option value="${esc(p.id)}"${
-            p.id === cur ? " selected" : ""}>${esc(p.name)}</option>`).join("");
-    const projOpts = (cur) => '<option value="">（無）</option>'
-        + opts.projects.map(p => `<option value="${esc(p.id)}"${
-            p.id === cur ? " selected" : ""}>${esc(p.name)}</option>`).join("");
+    // 選項字串**只組一次**（300 列各組一次＝300 倍的無謂工作）；
+    // 選中哪一個等 innerHTML 掛好之後用 `.value =` 設，一列一次賦值。
+    const ITEM_OPTS = '<option value=""></option>'
+        + opts.items.map(i => `<option>${esc(i)}</option>`).join("");
+    const STAFF_OPTS = '<option value=""></option>'
+        + people.staff.map(p => `<option value="${esc(p.id)}">${esc(p.name)}</option>`).join("");
+    // 🔴 專案下拉**不預先展開**：238 個專案 × 300 列 ＝ 七萬個 <option>，
+    // 那就是「載入有點慢」的來源（實測 DOM 節點數差一個數量級）。這裡只放
+    // 目前值那一個，其餘等使用者真的點下去（focus）才補 —— 一次只長一個下拉。
+    const projName = Object.fromEntries(opts.projects.map(p => [p.id, p.name]));
+    const projCell = (e) => {
+        const cur = e.project_id;
+        const label = cur ? (projName[cur] || "（已刪除的專案）")
+                          : (e.project_label ? e.project_label + "（未歸戶）" : "（無）");
+        return `<select data-f="project_id" data-lazy="1"${
+            e.project_label ? ` title="原始標籤：${esc(e.project_label)}"` : ""}>
+              <option value="${esc(cur)}" selected>${esc(label)}</option>
+            </select>`;
+    };
 
     host.innerHTML = CSS + LEDGER_CSS + `
       <div class="lg-bar">
@@ -469,15 +499,15 @@ export async function renderOverview(host) {
             <td><input data-f="summary" value="${esc(e.summary)}"></td>
             <td><input data-f="${e.invoice_no ? "invoice_no" : "note"}"
                        value="${esc(e.invoice_no || e.note)}"></td>
-            <td><select data-f="item">${itemOpts(e.item)}</select></td>
-            <td><select data-f="staff_id">${staffOpts(e.staff_id)}</select></td>
-            <td><select data-f="project_id"${e.project_label
-                  ? ` title="原始標籤：${esc(e.project_label)}"` : ""}>
-                  ${e.project_label && !e.project_id
-                    ? `<option value="" selected>${esc(e.project_label)}（未歸戶）</option>`
-                    : ""}
-                  ${projOpts(e.project_id)}
-                </select></td>
+            <td><select data-f="item" data-v="${esc(e.item)}">${ITEM_OPTS}</select></td>
+            <td>${e.staff_id || !e.staff_name
+              // 非員工的代墊（生產有 14 列「外部製片_現金提款」）沒有 staff_id ——
+              // 不補這一個選項的話，下拉空白、名字也不見了，看起來像資料掉了
+              ? `<select data-f="staff_id" data-v="${esc(e.staff_id)}">${STAFF_OPTS}</select>`
+              : `<select data-f="staff_id" data-v="">
+                   <option value="" selected>${esc(e.staff_name)}（非員工）</option>
+                   ${STAFF_OPTS}</select>`}</td>
+            <td>${projCell(e)}</td>
             <td class="lg-lock">${e.locked ? "已入帳" : esc(e.status)}</td>
           </tr>`).join("")}</tbody>
       </table></div>
@@ -500,6 +530,26 @@ export async function renderOverview(host) {
     };
     const more = host.querySelector("#lg-more");
     if (more) more.onclick = () => { _LG.limit += 300; rerun(); };
+
+    // 選中值：innerHTML 用同一份選項字串，掛好後才逐列設 value
+    host.querySelectorAll("tbody select[data-v]").forEach(sel => {
+        sel.value = sel.dataset.v;
+    });
+
+    // 懶展開：第一次 focus 才把專案清單塞進「那一個」下拉
+    const fillProjects = (sel) => {
+        if (!sel.dataset.lazy) return;
+        delete sel.dataset.lazy;
+        const cur = sel.value;
+        sel.innerHTML = '<option value="">（無）</option>'
+            + opts.projects.map(p => `<option value="${esc(p.id)}"${
+                p.id === cur ? " selected" : ""}>${esc(p.name)}</option>`).join("");
+        if (!cur) sel.value = "";
+    };
+    host.querySelectorAll('select[data-f="project_id"]').forEach(sel => {
+        sel.addEventListener("focus", () => fillProjects(sel));
+        sel.addEventListener("mousedown", () => fillProjects(sel));
+    });
 
     // 就地修改：change 才送（不是每個鍵），存好把邊框閃綠當回饋
     host.querySelectorAll("tbody [data-f]").forEach(el => {
