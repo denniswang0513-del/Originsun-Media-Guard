@@ -18,7 +18,7 @@ from fastapi import Depends, HTTPException, Request, UploadFile, File, Query
 
 from core.schemas import StaffPayload, ResumePayload, ProjectStaffPayload
 
-from ._shared import (router, _check_auth, _check_project_write_auth, money_dep,
+from ._shared import (router, token_router, _check_auth, _check_project_write_auth, money_dep,
                       _require_db, _get_factory, _now,
                       STAFF_CREATED_VIA_ADMIN, _UPLOAD_BASE, _ALLOWED_IMG_EXT,
                       _verify_token_generic)
@@ -573,7 +573,7 @@ async def delete_staff_portfolio(item_id: str, request: Request):
     return {"status": "ok"}
 
 
-@router.get("/public/staff/{staff_id}/resume")
+@token_router.get("/public/staff/{staff_id}/resume")
 async def get_public_staff_resume(staff_id: str):
     """公開履歷頁面（無需認證），僅限 resume_visible=True 的人員。"""
     _require_db()
@@ -727,7 +727,7 @@ async def generate_staff_edit_token(staff_id: str, request: Request):
     return {"status": "ok", "token": token, "url": f"/staff-edit.html?token={token}"}
 
 
-@router.get("/public/staff-edit/{token}")
+@token_router.get("/public/staff-edit/{token}")
 async def get_staff_edit_data(token: str):
     """透過 Token 取得人員履歷資料（無需認證）。"""
     _require_db()
@@ -749,7 +749,7 @@ async def get_staff_edit_data(token: str):
     return {"staff": staff, "portfolio": portfolio, "editable": bool(s.resume_editable) if s.resume_editable is not None else True}
 
 
-@router.put("/public/staff-edit/{token}")
+@token_router.put("/public/staff-edit/{token}")
 async def update_staff_edit_data(token: str, req: ResumePayload):
     """透過 Token 更新人員履歷資料（無需認證）。"""
     _require_db()
@@ -767,7 +767,7 @@ async def update_staff_edit_data(token: str, req: ResumePayload):
     return {"status": "ok"}
 
 
-@router.post("/public/staff-edit/{token}/photo")
+@token_router.post("/public/staff-edit/{token}/photo")
 async def upload_staff_edit_photo(token: str, file: UploadFile = File(...)):
     """透過 Token 上傳人員照片（無需認證）。"""
     _require_db()
@@ -802,7 +802,7 @@ async def upload_staff_edit_photo(token: str, file: UploadFile = File(...)):
     return {"status": "ok", "photo_url": url}
 
 
-@router.post("/public/staff-edit/{token}/portfolio")
+@token_router.post("/public/staff-edit/{token}/portfolio")
 async def add_staff_edit_portfolio(token: str,
                                    title: str = Query(...), url: str = Query(...),
                                    role_desc: str = Query(""), sort_order: int = Query(0),
@@ -838,7 +838,7 @@ async def add_staff_edit_portfolio(token: str,
     return {"status": "ok", "item": _to_portfolio_dict(p)}
 
 
-@router.delete("/public/staff-edit/{token}/portfolio/{item_id}")
+@token_router.delete("/public/staff-edit/{token}/portfolio/{item_id}")
 async def delete_staff_edit_portfolio(token: str, item_id: str):
     """透過 Token 刪除作品集項目（無需認證）。"""
     _require_db()

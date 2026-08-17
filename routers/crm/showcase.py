@@ -19,7 +19,7 @@ from core.crm_logic import (SHOWCASE_EDIT_EXPIRES_DAYS, SHOWCASE_EDIT_SCOPE,
 from core.schemas import (SeriesQuickAddPayload, ShowcasePayload,
                           StaffQuickAddPayload)
 
-from ._shared import (router, _check_auth, _check_website_auth, _require_db,
+from ._shared import (router, token_router, _check_auth, _check_website_auth, _require_db,
                       _get_factory, _mark_dirty_safe, _now, _UPLOAD_BASE,
                       _ALLOWED_IMG_EXT, _save_image_as_webp,
                       _verify_token_generic, _is_valid_scoped_token,
@@ -694,7 +694,7 @@ async def _build_credit_blocks_from_staff(session, project_id: str) -> list:
     return blocks
 
 
-@router.get("/public/showcase-edit/{token}")
+@token_router.get("/public/showcase-edit/{token}")
 async def get_showcase_edit_data(token: str):
     """透過 Token 取得 Showcase 編輯資料（無需認證）。"""
     _require_db()
@@ -704,7 +704,7 @@ async def get_showcase_edit_data(token: str):
         return await _build_showcase_edit_data(session, sc)
 
 
-@router.post("/public/showcase-edit/{token}/series")
+@token_router.post("/public/showcase-edit/{token}/series")
 async def quick_create_series(token: str, body: SeriesQuickAddPayload):
     """快速建立系列（編輯器系列下拉/分類小測驗「找不到 → 新增」用）。
 
@@ -725,7 +725,7 @@ async def quick_create_series(token: str, body: SeriesQuickAddPayload):
             "title_zh": title, "slug": slug, "visible": False})
 
 
-@router.get("/public/showcase-edit/{token}/status")
+@token_router.get("/public/showcase-edit/{token}/status")
 async def get_showcase_edit_status(token: str):
     """透過 token 查發布狀態（編輯器「發布時間線」輪詢用；唯讀 token 也可看）。
 
@@ -755,7 +755,7 @@ async def get_showcase_edit_status(token: str):
     return out
 
 
-@router.get("/public/showcase-edit/{token}/staff_search")
+@token_router.get("/public/showcase-edit/{token}/staff_search")
 async def search_staff_via_token(token: str, q: str = Query("")):
     """透過 token 搜尋 crm_staff（給 showcase-edit autocomplete 用）。
 
@@ -775,7 +775,7 @@ async def search_staff_via_token(token: str, q: str = Query("")):
     return {"items": [_to_staff_public_dict(s) for s in rows]}
 
 
-@router.get("/public/showcase-edit/{token}/clients_search")
+@token_router.get("/public/showcase-edit/{token}/clients_search")
 async def search_clients_via_token(token: str, q: str = Query("")):
     """透過 token 搜尋 clients（給 showcase-edit「客戶」欄 autocomplete 用）。
 
@@ -799,7 +799,7 @@ async def search_clients_via_token(token: str, q: str = Query("")):
     ]}
 
 
-@router.post("/public/showcase-edit/{token}/staff_quick_add")
+@token_router.post("/public/showcase-edit/{token}/staff_quick_add")
 async def quick_add_staff_via_token(token: str, req: StaffQuickAddPayload):
     """透過 token 快速建 minimal staff（給 showcase-edit「找不到→建立」用）。
 
@@ -827,7 +827,7 @@ async def quick_add_staff_via_token(token: str, req: StaffQuickAddPayload):
     return _to_staff_public_dict(s)
 
 
-@router.put("/public/showcase-edit/{token}")
+@token_router.put("/public/showcase-edit/{token}")
 async def update_showcase_edit_data(token: str, request: Request):
     """透過 Token 更新 Showcase 資料（無需認證）。"""
     from db.models_website import WebsiteProjectCategory
@@ -899,7 +899,7 @@ async def update_showcase_edit_data(token: str, request: Request):
     return {"status": "ok"}
 
 
-@router.post("/public/showcase-edit/{token}/carry_in")
+@token_router.post("/public/showcase-edit/{token}/carry_in")
 async def carry_in_showcase_credits(token: str, request: Request):
     """一鍵帶入 — 從專案派工生 credits BLOCK 結構，並補齊作品 meta（標題/客戶/年份）。
 
@@ -949,7 +949,7 @@ async def carry_in_showcase_credits(token: str, request: Request):
     return data
 
 
-@router.post("/public/showcase-edit/{token}/request_ai_review")
+@token_router.post("/public/showcase-edit/{token}/request_ai_review")
 async def request_ai_review_via_token(token: str):
     """PM 從 showcase-edit 觸發「請 AI 重新生」— mark needs_ai_review=True 讓
     Claude 下次跑 audit 會撈到此作品。不直接呼 LLM，pipeline 由 admin/Claude
@@ -963,7 +963,7 @@ async def request_ai_review_via_token(token: str):
     return {"status": "ok"}
 
 
-@router.post("/public/showcase-edit/{token}/run_ai_now")
+@token_router.post("/public/showcase-edit/{token}/run_ai_now")
 async def run_ai_now_via_token(token: str):
     """PM 從 showcase-edit 觸發「立即執行此作品」— 直接呼 claude --print
     生 SEO 內容寫進 DB。耗 Max 訂閱額度。每作品 30-60 秒。
@@ -1041,7 +1041,7 @@ async def _ai_description_context(session, sc):
     return name, client_name, existing.strip(), ref
 
 
-@router.post("/public/showcase-edit/{token}/ai_description/questions")
+@token_router.post("/public/showcase-edit/{token}/ai_description/questions")
 async def ai_description_questions(token: str):
     """AI 互動撰寫描述 step 1：依作品資訊出 3-5 個引導問題（headless claude，~30-60s）。"""
     _require_db()
@@ -1068,7 +1068,7 @@ async def ai_description_questions(token: str):
     return {"questions": _parse_questions(out)}
 
 
-@router.post("/public/showcase-edit/{token}/ai_description/draft")
+@token_router.post("/public/showcase-edit/{token}/ai_description/draft")
 async def ai_description_draft(token: str, request: Request):
     """AI 互動撰寫描述 step 2：綜合製作人答案 + 作品資訊，生成精簡 SEO 描述。
     只回草稿（不寫 DB）；由前端審核後再套用（存進 public_description + seo_description）。"""
@@ -1108,7 +1108,7 @@ async def ai_description_draft(token: str, request: Request):
 
 # ── AI 參考資料上傳 / 補充說明 / 刪除（token-authed，寫 draft 狀態不 rebuild）──
 
-@router.post("/public/showcase-edit/{token}/ai_reference/upload")
+@token_router.post("/public/showcase-edit/{token}/ai_reference/upload")
 async def upload_ai_reference(token: str, file: UploadFile = File(...)):
     """透過 Token 上傳 AI 參考資料文件（txt/md/csv/pdf/docx），抽出文字供 AI
     寫描述 / SEO 用（無需認證）。抽不到文字（掃描版 PDF）→ 400。"""
@@ -1153,7 +1153,7 @@ async def upload_ai_reference(token: str, file: UploadFile = File(...)):
     return {"ai_reference_files": result_files, "ai_reference_notes": notes}
 
 
-@router.put("/public/showcase-edit/{token}/ai_reference")
+@token_router.put("/public/showcase-edit/{token}/ai_reference")
 async def update_ai_reference_notes(token: str, request: Request):
     """透過 Token 更新 AI 參考資料的「補充說明」文字（無需認證）。"""
     _require_db()
@@ -1171,7 +1171,7 @@ async def update_ai_reference_notes(token: str, request: Request):
     return {"ai_reference_files": result_files, "ai_reference_notes": n}
 
 
-@router.delete("/public/showcase-edit/{token}/ai_reference/file")
+@token_router.delete("/public/showcase-edit/{token}/ai_reference/file")
 async def delete_ai_reference_file(token: str, request: Request):
     """透過 Token 刪除一筆 AI 參考資料文件（依 name 比對，移除第一筆）+
     best-effort 刪磁碟原始檔（無需認證）。"""
@@ -1211,7 +1211,7 @@ async def delete_ai_reference_file(token: str, request: Request):
     return {"ai_reference_files": result_files, "ai_reference_notes": notes}
 
 
-@router.post("/public/showcase-edit/{token}/gallery")
+@token_router.post("/public/showcase-edit/{token}/gallery")
 async def upload_showcase_edit_gallery(token: str, file: UploadFile = File(...),
                                        caption: str = Query("")):
     """透過 Token 上傳 Showcase 圖庫圖片（無需認證）。"""
@@ -1239,7 +1239,7 @@ async def upload_showcase_edit_gallery(token: str, file: UploadFile = File(...),
     return {"status": "ok", "gallery": sc.gallery or []}
 
 
-@router.post("/public/showcase-edit/{token}/featured_image")
+@token_router.post("/public/showcase-edit/{token}/featured_image")
 async def upload_showcase_edit_featured_image(token: str, file: UploadFile = File(...)):
     """透過 Token 上傳作品「精選圖 / 首頁輪播圖」（無需認證）。
 
@@ -1285,7 +1285,7 @@ async def upload_showcase_edit_featured_image(token: str, file: UploadFile = Fil
     return {"url": url}
 
 
-@router.post("/public/showcase-edit/{token}/process")
+@token_router.post("/public/showcase-edit/{token}/process")
 async def upload_showcase_edit_process(token: str, file: UploadFile = File(...),
                                        caption: str = Query(""),
                                        phase: str = Query(""),
@@ -1319,7 +1319,7 @@ async def upload_showcase_edit_process(token: str, file: UploadFile = File(...),
 
 # ── 創作過程 ←→ 影像紀錄（結案挑圖：素材已在系統，免重新上傳）──
 
-@router.get("/public/showcase-edit/{token}/media-log-files")
+@token_router.get("/public/showcase-edit/{token}/media-log-files")
 async def showcase_edit_media_log_files(token: str):
     """該作品所屬專案的影像紀錄圖片清單（挑圖 picker 資料源）。
     只回 PIL 開得動的（thumb_url 非空）— RAW 無縮圖者轉不進創作過程。"""
@@ -1342,7 +1342,7 @@ async def showcase_edit_media_log_files(token: str):
     } for f in rows]}
 
 
-@router.post("/public/showcase-edit/{token}/process/from-media-log")
+@token_router.post("/public/showcase-edit/{token}/process/from-media-log")
 async def showcase_edit_process_from_media_log(token: str, request: Request):
     """把選取的影像紀錄檔轉進創作過程（原檔重轉 WebP 進 showcase 資料夾 —
     與 upload_showcase_edit_process 同管線，之後刪影像紀錄檔也不影響官網）。"""

@@ -54,7 +54,8 @@ except ImportError:
 # 其餘 db.models 類與 or_ / delete / IntegrityError 是給領域模組
 # `from ._shared import ...` 的 re-export（列進 __all__，ruff F401 視為已使用）。
 __all__ = [
-    "router", "money_dep", "or_", "delete", "sa_update", "IntegrityError", "User",
+    "router", "token_router", "money_dep",
+    "or_", "delete", "sa_update", "IntegrityError", "User",
     "CrmQuotation", "CrmQuotationItem", "CrmQuotationTemplate",
     "CrmStaff", "CrmStaffPortfolio", "CrmProjectStaff",
     "CrmInvoice", "CrmPaymentRequest", "CrmCashEntry",
@@ -125,6 +126,23 @@ router = APIRouter(prefix=CRM_PREFIX, tags=["CRM"],
 # 在這個子集上變成假的。公開／手機頁正是最可能夾帶金額的去處。
 public_router = APIRouter(tags=["CRM 公開（token 授權）"],
                           route_class=MoneyRedactRoute)
+
+# ── token_router：token 自我驗證的端點（匿名，但**不在 NAS 白名單**）──────
+#
+# 🔴 為什麼需要第三個 router（2026-08-15，完稿結案 iframe 整片 404 的根因）：
+# showcase-edit / staff-edit / resume 這批頁面的憑證**是網址裡的 token**
+# （發給外部製作人員、沒有帳號），fetch 一律不帶 Authorization。它們的端點
+# 原本掛在主 router 上，8/14 的 `_crm_read_guard`（要登入）把它們一起蓋到 ——
+# 於是每一支都回「未登入」，頁面只能顯示「連結已失效」。
+#
+# 跟 public_router 的差別只有一個：**要不要對 NAS 對外容器曝露**。
+#   public_router＝master 關機也要活（媒體紀錄、雜支連結）→ NAS 有掛。
+#   token_router ＝只有 master 在 serve 的編輯器（showcase-edit 等）→ NAS 不掛，
+#   曝露面不用為它變大。
+# 守衛就是端點自己的 `_verify_token_generic`（逐字比對 DB）；MoneyRedactRoute
+# 照掛 —— 匿名＝沒有 money_view，人員搜尋回的 daily_rate 會被抹（前端已處理）。
+token_router = APIRouter(tags=["CRM token 自驗（master 限定）"],
+                         route_class=MoneyRedactRoute)
 
 
 # ── Helpers ──────────────────────────────────────────────────

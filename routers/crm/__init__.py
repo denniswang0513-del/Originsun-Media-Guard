@@ -23,7 +23,7 @@ from . import proposal_meetings  # noqa: F401  提案的會議記錄分頁（純
 
 from fastapi import APIRouter  # noqa: E402
 
-from ._shared import CRM_PREFIX, public_router  # noqa: F401,E402
+from ._shared import CRM_PREFIX, public_router, token_router  # noqa: F401,E402
 from ._shared import router as guarded_router  # noqa: E402
 
 # composition root：master 掛這一個物件就有全部端點，URL 與拆分前完全相同；
@@ -37,4 +37,7 @@ from ._shared import router as guarded_router  # noqa: E402
 # 平行掛在一個沒有守衛的外殼上，兩邊行為才一致。
 router = APIRouter()
 router.include_router(public_router, prefix=CRM_PREFIX)
+# token_router：同樣匿名（token 自驗），但只在 master —— NAS 對外容器不掛它，
+# 曝露面不用為「只有 master 在 serve 的編輯器」變大。見 _shared.py 的說明。
+router.include_router(token_router, prefix=CRM_PREFIX)
 router.include_router(guarded_router)

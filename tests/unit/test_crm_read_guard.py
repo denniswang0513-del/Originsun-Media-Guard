@@ -59,11 +59,12 @@ def test_every_crm_get_route_rejects_anonymous(app_client):
     逐條列舉釘住，往裡面加一條會在那兩支紅。
     """
     import main
-    from routers.crm import public_router
+    from routers.crm import public_router, token_router
     from routers.crm._shared import CRM_PREFIX
 
-    token_paths = {CRM_PREFIX + r.path for r in public_router.routes
-                   if getattr(r, "path", None)}
+    token_paths = {CRM_PREFIX + r.path
+                   for router_ in (public_router, token_router)
+                   for r in router_.routes if getattr(r, "path", None)}
     checked, leaked = 0, []
     for route in main.app.routes:
         path = getattr(route, "path", "")
@@ -127,6 +128,35 @@ def test_crm_projects_module_can_tick(app_client, as_user):
 def test_unrelated_module_cannot_read_flow(app_client, as_user):
     assert app_client.get(FLOW, headers=as_user(modules=["backup"])
                           ).status_code == 403
+
+
+# ── token 自驗端點：匿名要走得到 token 驗證，不准被登入守衛先擋 ─────────
+# 🔴 2026-08-15 事故的回歸測試：showcase-edit / staff-edit / resume 的憑證是
+# 網址裡的 token（頁面裸 fetch），但端點掛在主 router 上被 8/14 的
+# `_crm_read_guard` 蓋到 —— 每一支都回「未登入」，完稿結案 iframe 與外部編輯
+# 連結整片「已失效」。兩種失敗都是 401，**分辨靠 detail**：
+#   守衛的 401 = 「未登入或 token 已過期」（請求沒走到 token 驗證）
+#   自驗的 401 = 「無效的連結」（走到了，token 不對 —— 這才是對的路）
+
+TOKEN_PAGES = [
+    "/api/v1/crm/public/showcase-edit/__badtoken__",
+    "/api/v1/crm/public/staff-edit/__badtoken__",
+]
+
+
+@pytest.mark.parametrize("path", TOKEN_PAGES)
+def test_token_pages_reach_token_verification_anonymously(app_client, path):
+    r = app_client.get(path)
+    assert r.status_code in (401, 503), r.status_code
+    detail = (r.json() or {}).get("detail", "")
+    assert "未登入" not in detail, \
+        f"{path} 被登入守衛先擋掉了（token 頁的憑證是 token，頁面不帶 Authorization）"
+
+
+def test_public_resume_is_anonymous(app_client):
+    """對外履歷分享頁（resume.html）—— 設計上就是公開唯讀，錢由第二層抹。"""
+    r = app_client.get("/api/v1/crm/public/staff/__probe__/resume")
+    assert r.status_code != 401, "履歷分享連結被登入守衛擋掉"
 
 
 # ── 專案本體與派工的增刪（owner 2026-08-15 拍板，第二道模組級鬆綁）──────
