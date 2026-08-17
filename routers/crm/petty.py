@@ -191,9 +191,21 @@ async def add_my_petty_expense(body: PettyExpensePayload, request: Request):
     factory = await _get_factory()
     async with factory() as session:
         exp = _new_expense(body, staff.id)
+        await _attach_cost_group(session, exp)
         session.add(exp)
         await session.commit()
         return {"status": "ok", "id": exp.id}
+
+
+async def _attach_cost_group(session, exp) -> None:
+    """有專案就落到該專案的成本子表（沒有就自我修復建主表）。
+
+    不做的話，這筆錢在 CRM 專案詳情的雜支區塊看不到 —— 那一區是照子表分組畫的。
+    """
+    if not exp.project_id or exp.cost_group_id:
+        return
+    from .costs import _resolve_target_group
+    exp.cost_group_id = await _resolve_target_group(session, exp.project_id, None)
 
 
 @router.put("/petty/expenses/{expense_id}")
@@ -313,6 +325,7 @@ async def add_petty_expense_for(staff_id: str, body: PettyExpensePayload,
     async with factory() as session:
         staff = await _approver_staff(request, session, staff_id)
         exp = _new_expense(body, staff.id)
+        await _attach_cost_group(session, exp)
         session.add(exp)
         await session.commit()
         return {"status": "ok", "id": exp.id}
@@ -681,6 +694,15 @@ async def patch_petty_entry(expense_id: str, request: Request):
             # 綁到專案了就把原始標籤收掉 —— 留著會讓「未歸戶」永遠清不完
             if exp.project_id:
                 exp.project_label = None
+                # 🔴 一併落到成本子表：CRM 專案詳情的雜支是**照子表分組**顯示的，
+                # cost_group_id 是 NULL 的列只存在於扁平清單裡 —— 綁了專案卻在
+                # 專案頁上看不到那筆錢（owner 2026-08-17 回報）。沿用 CRM 建立
+                # 雜支時的同一支解析器，落到主表。
+                from .costs import _resolve_target_group
+                exp.cost_group_id = await _resolve_target_group(
+                    session, exp.project_id, None)
+            else:
+                exp.cost_group_id = None
         if "project_label" in body:
             exp.project_label = body["project_label"] or None
         if "owner_staff_id" in body:
@@ -1018,8 +1040,12 @@ async def petty_bind_label(request: Request, label: str = Query(...),
             select(CrmProjectExpense)
             .where(CrmProjectExpense.project_label == label,
                    CrmProjectExpense.project_id.is_(None)))).scalars().all()
+        from .costs import _resolve_target_group
+        gid = await _resolve_target_group(session, project_id, None)
         for r in rows:
             r.project_id = project_id
+            r.cost_group_id = r.cost_group_id or gid
+            r.project_label = None
         await session.commit()
     return {"status": "ok", "bound": len(rows), "project": proj.name}
 

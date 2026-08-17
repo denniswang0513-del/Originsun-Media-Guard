@@ -413,6 +413,27 @@ def test_both_hosts_share_one_fetch_contract():
     assert "bearerHeader()" in sub, "FormData 上傳不能走 authFetch"
 
 
+def test_binding_a_project_also_attaches_a_cost_group():
+    """🔴 綁專案時要一併落到成本子表。
+
+    CRM 專案詳情的雜支區塊是**照子表分組**畫的 —— `cost_group_id` 是 NULL 的列
+    只活在扁平清單裡，於是「綁了專案、專案頁上卻看不到那筆錢」（owner
+    2026-08-17 回報，生產上有 2 列這樣）。四條會設 project_id 的路徑都要走
+    `_resolve_target_group`（與 CRM 建立雜支同一支）。
+    """
+    src = (Path(__file__).resolve().parents[2]
+           / "routers" / "crm" / "petty.py").read_text(encoding="utf-8")
+    assert "_attach_cost_group" in src
+    patch = src.split("async def patch_petty_entry")[1].split("
+@router")[0]
+    assert "_resolve_target_group" in patch, "PATCH 綁專案沒有落子表"
+    bind = src.split("async def petty_bind_label")[1].split("
+@router")[0]
+    assert "_resolve_target_group" in bind, "一次綁整個標籤沒有落子表"
+    # 解除專案時也要把子表清掉，否則會留下「沒有專案卻掛在某子表下」的孤兒
+    assert "exp.cost_group_id = None" in patch
+
+
 def test_item_owner_mapping_needs_both_grants(app_client, as_user):
     for h in (as_user(modules=["me_finance"]), as_user(modules=["money_view"]),
               as_user(modules=["finance_approve"])):
