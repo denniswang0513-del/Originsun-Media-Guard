@@ -432,6 +432,33 @@ def test_binding_a_project_also_attaches_a_cost_group():
     assert "exp.cost_group_id = None" in patch
 
 
+def test_only_project_misc_can_link_a_project():
+    """🔴 只有「專案雜支」可以連結專案（owner 2026-08-17）。
+
+    行政／設備耗材／業務推廣是公司層級支出 —— 掛到專案上會讓那個案子的毛利
+    多算一筆不屬於它的錢，而且從報表上看不出來是誤掛。
+
+    三個地方都要遵守同一份 `PROJECT_LINK_ITEMS`：建立、PATCH、未歸戶標籤。
+    前端也讀同一份（經 `/petty/options` 的 `project_link_items`），不各寫一份。
+    """
+    from routers.crm.petty import PROJECT_LINK_ITEMS
+    assert "專案雜支" in PROJECT_LINK_ITEMS
+    assert "行政" not in PROJECT_LINK_ITEMS
+
+    src = (Path(__file__).resolve().parents[2]
+           / "routers" / "crm" / "petty.py").read_text(encoding="utf-8")
+    new_exp = src.split("def _new_expense")[1].split("\ndef ")[0]
+    assert "PROJECT_LINK_ITEMS" in new_exp, "建立時沒擋"
+    patch = src.split("async def patch_petty_entry")[1].split("\n@router")[0]
+    assert "PROJECT_LINK_ITEMS" in patch and "409" in patch, "PATCH 沒擋"
+    # 改成不可連結的項目 → 解除既有連結，而且要**回報**（靜默清掉最難查）
+    assert "unlinked = True" in patch and '"unlinked": unlinked' in src
+
+    view = (FRONTEND / "tabs" / "petty" / "petty-view.js").read_text(encoding="utf-8")
+    assert "project_link_items" in view, "前端沒讀後端那份規則"
+    assert '["專案雜支"]' in view, "前端該有 fallback，但不該只有寫死的清單"
+
+
 def test_cost_group_endpoint_needs_both_grants(app_client, as_user):
     for h in (as_user(modules=["me_finance"]), as_user(modules=["money_view"]),
               as_user(modules=["finance_approve"])):

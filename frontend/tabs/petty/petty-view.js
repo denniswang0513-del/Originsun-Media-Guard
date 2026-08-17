@@ -203,6 +203,19 @@ export async function renderMine(host) {
     const asEl = host.querySelector("#pc-as");
     if (asEl) asEl.onchange = (ev) => { _asStaff = ev.target.value || null; renderMine(host); };
 
+    // 登記表單的專案欄跟著項目開關 —— 與帳冊同一條規則（只有專案雜支可連專案）
+    const LINKABLE_M = new Set(opts.project_link_items || ["專案雜支"]);
+    const fItem = host.querySelector("#f-item"), fProj = host.querySelector("#f-proj");
+    if (fItem && fProj) {
+        const sync = () => {
+            fProj.disabled = !LINKABLE_M.has(fItem.value);
+            if (fProj.disabled) fProj.value = "";
+            fProj.title = fProj.disabled ? "只有「專案雜支」開放連結專案" : "";
+        };
+        fItem.addEventListener("change", sync);
+        sync();
+    }
+
     const msg = host.querySelector("#pc-msg");
     host.querySelector("#pc-add").onclick = async (ev) => {
         const btn = ev.currentTarget;
@@ -487,9 +500,20 @@ export async function renderOverview(host) {
     // 新增列仍用 select（只有一個，238 個選項無所謂，而且可直接挑）
     const PROJ_OPTS = '<option value="">（無專案）</option>'
         + opts.projects.map(p => `<option value="${esc(p.id)}">${esc(labelOf[p.id])}</option>`).join("");
+    // 只有「專案雜支」開放連結專案（owner 2026-08-17）。規則來自後端的
+    // `project_link_items`，不在前端寫死 —— 兩邊各寫一份就會漂。
+    const LINKABLE = new Set(opts.project_link_items || ["專案雜支"]);
     const projCell = (e) => {
         const cur = e.project_id;
         const val = cur ? (labelOf[cur] || projName[cur] || "（已刪除的專案）") : "";
+        if (!LINKABLE.has(e.item)) {
+            // 鎖住而不是隱藏：既有的標籤文字還看得到（那是資料），
+            // 只是這個項目不該連專案
+            return `<input data-f="project_id" value="${esc(val)}" disabled
+                           style="opacity:.45;"
+                           placeholder="${e.project_label ? esc(e.project_label) : "—"}"
+                           title="「${esc(e.item || "")}」不開放連結專案（只有專案雜支可以）">`;
+        }
         return `<input data-f="project_id" list="pc-proj-dl"
                        value="${esc(val)}" data-was="${esc(val)}"
                        placeholder="${e.project_label ? esc(e.project_label) + "（未歸戶）" : "（無專案）"}"
@@ -531,7 +555,7 @@ export async function renderOverview(host) {
             <td><input id="n-note" placeholder="發票號／附註"></td>
             <td><select data-no-search id="n-item">${ITEM_OPTS}</select></td>
             <td><select data-no-search id="n-staff">${STAFF_OPTS}</select></td>
-            <td><select data-no-search id="n-proj">${PROJ_OPTS}</select></td>
+            <td><select data-no-search id="n-proj" disabled>${PROJ_OPTS}</select></td>
             <td><button class="pc-btn" id="n-add"
                         style="padding:5px 10px;font-size:12px;">新增</button></td>
           </tr>
@@ -575,6 +599,19 @@ export async function renderOverview(host) {
     if (more) more.onclick = () => { _LG.limit += 300; rerun(); };
 
     const rerun = () => renderOverview(host);
+
+    // 新增列：專案欄跟著項目開關（同一條規則，不讓人填了才被後端退回）
+    const nItem = host.querySelector("#n-item"), nProj = host.querySelector("#n-proj");
+    if (nItem && nProj) {
+        const syncProj = () => {
+            nProj.disabled = !LINKABLE.has(nItem.value);
+            if (nProj.disabled) nProj.value = "";
+            nProj.title = nProj.disabled
+                ? "只有「專案雜支」開放連結專案" : "";
+        };
+        nItem.addEventListener("change", syncProj);
+        syncProj();
+    }
 
     // 「項目 → 費用歸屬人」設定：設定一次，之後建立的單據自動帶
     // （owner 2026-08-17：不用在帳冊上為此多開一欄讓人每筆挑）
@@ -731,11 +768,20 @@ export async function renderOverview(host) {
                 }
             }
             try {
-                await send("PATCH", "/api/v1/crm/petty/entries/" + tr.dataset.id, { [f]: val });
+                const r = await send("PATCH",
+                    "/api/v1/crm/petty/entries/" + tr.dataset.id, { [f]: val });
                 el.style.borderColor = "var(--ok)";
                 setTimeout(() => { el.style.borderColor = ""; }, 900);
                 // 綁定專案會讓「未歸戶」那一格的樣子改變 —— 重抓比就地補畫可靠
-                if (f === "project_id") rerun();
+                // 項目換了會改變「這一列能不能連專案」，而且後端可能順手解除了
+                // 既有連結 —— 兩者都要讓畫面跟上，否則使用者看到的是舊狀態
+                if (f === "project_id" || f === "item") {
+                    if (r && r.unlinked) {
+                        alert("項目已改為「" + el.value
+                              + "」，不開放連結專案，原本的專案連結已解除。");
+                    }
+                    rerun();
+                }
             } catch (err) {
                 el.style.borderColor = "var(--red)";
                 alert(String(err.message || err));

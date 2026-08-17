@@ -47,6 +47,12 @@ FALLBACK_ITEMS = ("專案雜支", "行政", "設備耗材", "業務推廣", "建
 
 APPROVE_MODULE = "finance_approve"
 
+# 🔴 只有「專案雜支」可以連結專案（owner 2026-08-17：「只有勾專案雜支時，那筆才
+# 需要連結專案；其餘的項目不開放連結」）。行政／設備耗材／業務推廣那些是公司層級
+# 支出，掛到專案上會讓專案毛利多算一筆不屬於它的錢。
+# 要放寬就改這一份 —— 前端經 `/petty/options` 拿同一份，不各自寫死。
+PROJECT_LINK_ITEMS = ("專案雜支",)
+
 
 def _check_approver(request: Request):
     """審核／匯款：金額權限 + 審核模組。兩者都要。"""
@@ -68,10 +74,13 @@ def _new_expense(body, staff_id: str) -> CrmProjectExpense:
     建立時就把費用歸屬填好 —— 那條規則設定一次就好，不必每筆挑。
     """
     item = body.item or "其他"
+    # 非專案雜支不連專案（見 PROJECT_LINK_ITEMS）—— 擋在這裡，四條建立路徑
+    # 都走這支，不必各自記得
+    linked = body.project_id if item in PROJECT_LINK_ITEMS else None
     return CrmProjectExpense(
         owner_staff_id=_item_owners().get(item) or None,
         id=uuid.uuid4().hex[:16],
-        project_id=body.project_id or None,
+        project_id=linked or None,
         category=body.category or "其他",
         estimated=0, actual=body.actual,
         sub_item=body.summary or None,
@@ -146,6 +155,8 @@ async def petty_options():
         "projects": [{"id": p.id, "name": p.name, "status": p.status or ""}
                      for p in projects],
         "items": items or list(FALLBACK_ITEMS),
+        # 前端據此決定專案欄可不可以編（規則的單一真相在後端）
+        "project_link_items": list(PROJECT_LINK_ITEMS),
     }
 
 
@@ -695,6 +706,20 @@ async def patch_petty_entry(expense_id: str, request: Request):
                     status_code=409,
                     detail="這筆已經產生應付款（科目與認列月份已入帳）。"
                            "要修改請先退回該批次，改完再送出。")
+        # 🔴 只有專案雜支能連專案。同一次 PATCH 可能同時改項目與專案，所以先算出
+        # 「這一列改完之後的項目」再判斷。
+        unlinked = False
+        new_item = (body.get("item") if "item" in body else exp.item) or exp.item
+        if body.get("project_id") and new_item not in PROJECT_LINK_ITEMS:
+            raise HTTPException(
+                status_code=409,
+                detail=f"「{new_item}」不開放連結專案。要掛專案請先把項目改成「專案雜支」。")
+        if "item" in body and new_item not in PROJECT_LINK_ITEMS and exp.project_id:
+            # 改成不可連結的項目 → 解除既有連結，並在回應裡講明白。
+            # 靜默清掉的話，專案毛利會自己少一筆而沒有人知道為什麼。
+            exp.project_id = None
+            exp.cost_group_id = None
+            unlinked = True
         if "expense_date" in body:
             exp.expense_date = _parse_day(body["expense_date"]) or exp.expense_date
         if "actual" in body:
@@ -735,7 +760,7 @@ async def patch_petty_entry(expense_id: str, request: Request):
         if "owner_settled" in body:
             exp.owner_settled = 1 if body["owner_settled"] else 0
         await session.commit()
-    return {"status": "ok", "id": expense_id}
+    return {"status": "ok", "id": expense_id, "unlinked": unlinked}
 
 
 @router.get("/petty/claims", dependencies=[Depends(money_dep)])
@@ -1045,7 +1070,10 @@ async def petty_unbound_labels(request: Request):
                    safunc.count(CrmProjectExpense.id),
                    safunc.coalesce(safunc.sum(CrmProjectExpense.actual), 0))
             .where(CrmProjectExpense.project_label.isnot(None),
-                   CrmProjectExpense.project_id.is_(None))
+                   CrmProjectExpense.project_id.is_(None),
+                   # 綁不了的項目列在這裡只是死路（實測 153 列裡有 26 列是
+                   # 「專案」「轉存」—— 標籤文字留著，但不開放連結）
+                   CrmProjectExpense.item.in_(PROJECT_LINK_ITEMS))
             .group_by(CrmProjectExpense.project_label)
             .order_by(safunc.count(CrmProjectExpense.id).desc()))).all()
     return {"labels": [{"label": r[0], "count": r[1], "total": r[2]} for r in rows]}
@@ -1064,7 +1092,8 @@ async def petty_bind_label(request: Request, label: str = Query(...),
         rows = (await session.execute(
             select(CrmProjectExpense)
             .where(CrmProjectExpense.project_label == label,
-                   CrmProjectExpense.project_id.is_(None)))).scalars().all()
+                   CrmProjectExpense.project_id.is_(None),
+                   CrmProjectExpense.item.in_(PROJECT_LINK_ITEMS)))).scalars().all()
         from .costs import _resolve_target_group
         gid = await _resolve_target_group(session, project_id, None)
         for r in rows:
