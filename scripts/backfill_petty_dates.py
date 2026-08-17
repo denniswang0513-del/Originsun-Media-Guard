@@ -21,7 +21,6 @@ import sys
 from collections import defaultdict
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 
 from sqlalchemy import select  # noqa: E402
@@ -29,7 +28,23 @@ from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine  # no
 
 from config import load_settings  # noqa: E402
 from db.models import CrmProjectExpense, CrmStaff  # noqa: E402
-from import_petty_cash import read_sheet  # noqa: E402
+
+
+def _read_sheet(path):
+    """借用隔壁 import_petty_cash 的 CSV 解析。
+
+    🔴 刻意用 importlib 依**檔案路徑**載入，不寫 `from import_petty_cash import`：
+    publish_update 的依賴掃描器會把那個頂層 import 當成外部套件，寫進
+    requirements_agent.txt，然後 preflight 因為裝不到而擋下整個發版（2026-08-17
+    實際發生過一次，跟 memory 裡那筆「pptx 錯名寫進 requirements」同一類）。
+    """
+    import importlib.util
+    src = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                       "import_petty_cash.py")
+    spec = importlib.util.spec_from_file_location("_petty_csv", src)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod.read_sheet(path)
 
 
 async def main() -> int:
@@ -39,7 +54,7 @@ async def main() -> int:
     ap.add_argument("--apply", action="store_true")
     args = ap.parse_args()
 
-    _, details = read_sheet(args.csv)
+    _, details = _read_sheet(args.csv)
     # 沒填日期的列 → 它的 `_order`（＝上方最近一列的日期）就是要補的值
     blanks = [d for d in details if d["date"] is None]
     print(f"Sheet 沒有日期的列：{len(blanks)}")
