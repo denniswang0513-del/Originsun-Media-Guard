@@ -505,6 +505,8 @@ class ProjectExpensePayload(BaseModel):
     advance_id: str = ""
     notes: str = ""
     cost_group_id: Optional[str] = None
+    # 消費日（YYYY-MM-DD，空＝不填）。專案成本認列用它，不用登記日。
+    expense_date: str = ""
 
 
 class PettyExpensePayload(BaseModel):

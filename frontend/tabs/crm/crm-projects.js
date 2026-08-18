@@ -148,6 +148,10 @@ export async function initCrmProjectsTab() {
                   </select>
                 </div>
                 <div class="crm-field">
+                  <label>消費日</label>
+                  <input id="exp-modal-date" type="date" class="crm-input" value="${new Date().toISOString().slice(0, 10)}">
+                </div>
+                <div class="crm-field">
                   <label>細項</label>
                   <input id="exp-modal-sub" type="text" class="crm-input" placeholder="如：高鐵來回">
                 </div>
@@ -189,6 +193,7 @@ export async function initCrmProjectsTab() {
             payee: document.getElementById('exp-modal-payee').value,
             notes: document.getElementById('exp-modal-notes').value,
             cost_group_id: state.selectedGroupId,
+            expense_date: document.getElementById('exp-modal-date')?.value || '',
         };
         try {
             const r = await _fetch('/projects/' + state.selectedId + '/expenses', { method: 'POST', body: JSON.stringify(payload) });

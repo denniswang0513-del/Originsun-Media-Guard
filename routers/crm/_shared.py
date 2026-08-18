@@ -17,9 +17,11 @@ from __future__ import annotations
 
 import os
 import re
-import uuid
 from contextlib import asynccontextmanager
 from datetime import date, datetime, timezone
+from zoneinfo import ZoneInfo
+
+_TW_TZ = ZoneInfo("Asia/Taipei")
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Request
@@ -39,7 +41,8 @@ try:
     from sqlalchemy.exc import IntegrityError
     from db.models import (Client, User, CrmProject, CrmQuotation, CrmQuotationItem,
                            CrmQuotationTemplate, CrmStaff, CrmStaffPortfolio,
-                           CrmProjectStaff, CrmProjectExpense,
+                           CrmProjectStaff,
+                           CrmProjectExpense,  # noqa: F401 — re-export（costs.py 從 _shared 取）
                            CrmInvoice, CrmPaymentRequest, CrmCashEntry,
                            CrmProjectCostLine, CrmCostLineTemplate,
                            CrmProjectCostGroup,
@@ -269,6 +272,21 @@ def _username(request: Request) -> str:
     from core.auth import _extract_token
     payload = _extract_token(request) or {}
     return payload.get("username") or payload.get("sub") or "?"
+
+
+def _fmt_day(dt) -> str:
+    """timestamptz → 'YYYY-MM-DD'（台北），None → ''。
+
+    🔴 aware datetime 不准直接 strftime/取 date：寫入端是 naive（PG 依 session
+    時區 Asia/Taipei 解讀 → 存成前一天 16:00Z），asyncpg 讀回是 aware UTC ——
+    面值取日期就差一天（2026-08-18 在雜支消費日踩到，hr_logic/api_proposals
+    早各修過一次）。naive 視為本地 wallclock 直接取。
+    """
+    if not dt:
+        return ""
+    if dt.tzinfo is not None:
+        dt = dt.astimezone(_TW_TZ)
+    return dt.strftime("%Y-%m-%d")
 
 
 def _parse_day(raw):
@@ -508,37 +526,3 @@ async def _mint_token_generic(session, model_cls, obj_id: str, scope: str, *,
 
 
 
-# ── 以下自原檔「Cost Line Default Templates」section 搬入（projects + costs 共用）──
-# Default 行政雜支 categories — auto-seeded as $0 rows on each new
-# (project, cost-group) pair so users can just fill amounts in instead
-# of clicking "+ 新增雜支" first. Kept aligned with EXPENSE_CATEGORIES
-# in frontend/tabs/crm/crm-projects-state.js — the inline-edit dropdown
-# must offer every seeded category.
-_EXPENSE_CATEGORY_DEFAULTS = [
-    "交通", "住宿", "飲食", "提案", "器材", "其他",
-]
-
-
-async def _seed_default_expenses(session, project_id: str, cost_group_id: str) -> int:
-    """Insert one $0 expense row per default category not yet present
-    on (project_id, cost_group_id). Caller commits. Idempotent."""
-    rows = (await session.execute(
-        select(CrmProjectExpense.category).where(
-            CrmProjectExpense.project_id == project_id,
-            CrmProjectExpense.cost_group_id == cost_group_id,
-        )
-    )).scalars().all()
-    existing = set(rows)
-    now = _now()
-    added = 0
-    for cat in _EXPENSE_CATEGORY_DEFAULTS:
-        if cat in existing:
-            continue
-        session.add(CrmProjectExpense(
-            id=uuid.uuid4().hex,
-            project_id=project_id, cost_group_id=cost_group_id,
-            category=cat, estimated=0, actual=0,
-            created_at=now,
-        ))
-        added += 1
-    return added

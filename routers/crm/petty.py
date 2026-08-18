@@ -34,8 +34,8 @@ from db.models import (Client, CrmCashEntry, CrmPaymentRequest, CrmProject,
                        CrmProjectExpense, CrmReimbursement, CrmStaff,
                        FinanceCategoryMap, User)
 
-from ._shared import (_assert_month_open, _crm_session, _now, _parse_day,
-                      _username, money_dep, router)
+from ._shared import (_assert_month_open, _crm_session, _fmt_day, _now,
+                      _parse_day, _username, money_dep, router)
 
 # 送出後就不再是本人能改的東西；只有這兩個狀態算「還在我手上」
 EDITABLE = ("草稿", "退回")
@@ -122,7 +122,7 @@ def _new_expense(body, staff_id: str) -> CrmProjectExpense:
 def _expense_dict(e: CrmProjectExpense, project_name: str = "") -> dict:
     return {
         "id": e.id,
-        "expense_date": e.expense_date.strftime("%Y-%m-%d") if e.expense_date else "",
+        "expense_date": _fmt_day(e.expense_date),
         "actual": e.actual,
         "summary": e.sub_item or "",
         "item": e.item or "",
@@ -147,14 +147,14 @@ def _claim_dict(c: CrmReimbursement) -> dict:
     return {
         "id": c.id,
         "staff_name": c.staff_name,
-        "period_start": c.period_start.strftime("%Y-%m-%d") if c.period_start else "",
-        "period_end": c.period_end.strftime("%Y-%m-%d") if c.period_end else "",
+        "period_start": _fmt_day(c.period_start),
+        "period_end": _fmt_day(c.period_end),
         "total_claim": c.total_claim,
         "opening_float": c.opening_float,
         "closing_float": c.closing_float,
         "status": c.status,
-        "submitted_at": c.submitted_at.strftime("%Y-%m-%d") if c.submitted_at else "",
-        "paid_at": c.paid_at.strftime("%Y-%m-%d") if c.paid_at else "",
+        "submitted_at": _fmt_day(c.submitted_at),
+        "paid_at": _fmt_day(c.paid_at),
         "notes": c.notes or "",
     }
 
@@ -698,8 +698,7 @@ async def petty_project_groups(project_id: str, request: Request):
             .order_by(CrmProjectCostGroup.sort_order,
                       CrmProjectCostGroup.created_at))).all()
     return {"groups": [{"id": r.id, "name": r.name,
-                        "shoot_date": r.shoot_date.strftime("%Y-%m-%d")
-                        if r.shoot_date else ""} for r in rows]}
+                        "shoot_date": _fmt_day(r.shoot_date)} for r in rows]}
 
 
 @router.patch("/petty/entries/{expense_id}", dependencies=[Depends(money_dep)])

@@ -1179,7 +1179,7 @@ async def patch_shared_reference(token: str, rid: str, body: dict = Body(...)):
     （避免免登入連結改到其他提案看到的資料）。網址不給改：換片＝移除後重加。"""
     factory = _require_factory()
 
-    from sqlalchemy import func as safunc, select
+    from sqlalchemy import select
     from db.models import PreprodReference, PreprodReferenceLink
 
     async with factory() as session:

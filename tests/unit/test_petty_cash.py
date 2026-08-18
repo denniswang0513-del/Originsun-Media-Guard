@@ -576,3 +576,67 @@ def test_every_project_picker_shares_one_label_builder():
             f"「{blank}」那個下拉沒走共用的標籤建構"
     # datalist 的值與反查表同源
     assert "const { labelOf, idOfLabel } = projectLabels(opts.projects);" in PETTY_VIEW
+
+
+# ── 專案頁雜支區 × 零用金（2026-08-18 整頓）────────────────────────
+COSTS_SRC = (REPO / "routers" / "crm" / "costs.py").read_text(encoding="utf-8")
+COST_VIEW = (FRONTEND / "tabs" / "crm" / "crm-projects-cost.js").read_text(encoding="utf-8")
+
+
+def test_claimed_rows_are_immutable_from_project_page():
+    """🔴 已進請款單（claim_id）的列：專案頁的改/刪三條路都要過 _guard_claimed。
+
+    少一條 ＝ 有人能從專案頁改掉某張請款單 total_claim 的組成金額，
+    員工看到的單子總額無聲地變成錯的。
+    """
+    assert "def _guard_claimed" in COSTS_SRC
+    for fn in ("patch_project_expense", "update_project_expense", "delete_project_expense"):
+        body = COSTS_SRC.split(f"async def {fn}")[1].split("\n@router")[0]
+        assert "_guard_claimed(e)" in body, f"{fn} 沒擋 claim 列"
+    # 前端同步上鎖：locked 列不給 inline edit、不給刪除鈕
+    assert "const locked = !!e.claim_id;" in COST_VIEW
+    assert "已進零用金請款單" in COST_VIEW
+
+
+def test_placeholder_seeding_is_gone():
+    """🔴 $0 佔位雜支列不准再種回來（清過 dev 9,354 / prod 193 列）。
+
+    它們和真資料在畫面上無法區分，會把雜支區塞成「一堆列其實全空」。
+    類別清單活在前端 EXPENSE_CATEGORIES，不需要種進資料庫。
+    """
+    for src_name, src in (("costs.py", COSTS_SRC), ("projects.py",
+                          (REPO / "routers" / "crm" / "projects.py").read_text(encoding="utf-8")),
+                          ("_shared.py",
+                          (REPO / "routers" / "crm" / "_shared.py").read_text(encoding="utf-8"))):
+        assert "_seed_default_expenses" not in src, f"{src_name} 還在種佔位列"
+
+
+def test_project_page_expense_ux_contract():
+    """就地新增列存在且送 expense_date；日期欄消費日優先；雜支區不被成本項目挾持。"""
+    # 就地新增：日期/類別/細項/金額/收款人 + POST 帶 expense_date
+    assert "window._expQuickAdd" in COST_VIEW
+    assert "expense_date: document.getElementById('exp-qa-date').value" in COST_VIEW
+    # 消費日優先，登記日只是 fallback
+    assert "e.expense_date || e.created_at" in COST_VIEW
+    # 🔴 雜支區必須在「尚無項目」時照畫（只有零用金列的專案，錢不能整區消失）
+    before_misc = COST_VIEW.split("行政雜支 section")[0]
+    assert before_misc.rstrip().endswith("// ──"), "雜支區前的結構變了，確認它不在 else 裡"
+    assert "html += '<div class=\"cost-table\">';" in COST_VIEW
+    # 零用金列標示：pill + 收款人讀員工檔
+    assert "exp-pill" in COST_VIEW and "e.staff_name || e.payee" in COST_VIEW
+
+
+def test_expense_dates_are_formatted_in_taipei():
+    """🔴 timestamptz 讀取端一律走 _fmt_day（台北歸一）。
+
+    寫入是 naive（PG session=Asia/Taipei → 存前一天 16:00Z）、asyncpg 讀回
+    aware UTC —— 面值 strftime/isoformat 取日期就差一天。2026-08-18 在消費日
+    實測踩到（送 08-01 回讀 07-31）。
+    """
+    shared = (REPO / "routers" / "crm" / "_shared.py").read_text(encoding="utf-8")
+    assert "def _fmt_day" in shared and "astimezone(_TW_TZ)" in shared
+    # petty 的日期欄位不准再裸 strftime（子表拍攝日那筆也算）
+    assert 'strftime("%Y-%m-%d")' not in PETTY_SRC, "petty.py 有日期欄位繞過 _fmt_day"
+    # costs 的 _fmt_date 委派給 _fmt_day
+    fmt = COSTS_SRC.split("def _fmt_date")[1].split("\ndef ")[0]
+    assert "_fmt_day" in fmt and "isoformat" not in fmt

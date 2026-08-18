@@ -114,3 +114,4 @@ tools/
 
 # settings.json 的輪替備份（含舊 jwt_secret，絕不進 git）
 settings.json.bak_*
+scripts/_placeholder_backup_*.json

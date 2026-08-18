@@ -956,6 +956,19 @@
     flex: 0 0 32px;
     text-align: center;
 }
+.exp-pill {
+    display: inline-block; margin-left: 4px; padding: 0 4px;
+    border: 1px solid #4b5563; border-radius: 3px;
+    font-size: 9px; color: #9ca3af; vertical-align: 1px; cursor: help;
+}
+/* 就地新增列：格子裝 input/select，日期格要塞得下原生 date picker */
+.exp-qa { border-bottom: none; }
+.exp-qa .exp-col-date { flex: 0 0 118px; }
+.exp-qa input, .exp-qa select {
+    width: 100%; box-sizing: border-box;
+    background: #222; border: 1px solid #333; color: #d1d5db;
+    font-size: 11px; padding: 2px 4px; border-radius: 4px;
+}
 .cost-divider { margin-right: 0; border-right: 1px solid #3a3a3a; padding-right: 8px; }
 .cost-col-copy { width: 20px; flex-shrink: 0; text-align: center; color: #555; cursor: pointer; font-size: 12px; }
 .cost-col-copy:hover { color: #3b82f6; }

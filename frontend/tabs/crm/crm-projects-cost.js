@@ -223,6 +223,10 @@ function _renderCostLines(grouped, expenses, financialSummary) {
         </div>
       </div>`;
 
+    // 🔴 成本項目與行政雜支是**兩個獨立資料源** —— 沒有成本項目時雜支照樣要畫。
+    // 原本整個雜支區包在 else 裡：只有零用金列的專案，錢在這頁一格都看不到
+    // （2026-08-18 踩到，跟「綁了專案沒掛子表」同一類靜默失蹤）。
+    html += '<div class="cost-table">';
     if (grouped.length === 0) {
         html += `<div class="crm-empty" style="padding:16px 0;text-align:center;">
             <div style="margin-bottom:10px;color:#9ca3af;">尚無項目</div>
@@ -230,8 +234,7 @@ function _renderCostLines(grouped, expenses, financialSummary) {
             <button class="crm-btn crm-btn-secondary crm-btn-sm" style="margin-left:8px;" onclick="window._costImportFromQuote()">從報價匯入</button>
         </div>`;
     } else {
-        html += `<div class="cost-table">
-          <div class="cost-row cost-row-header">
+        html += `<div class="cost-row cost-row-header">
             <span class="cost-col-item">項目</span>
             <span class="cost-col-price">單價</span>
             <span class="cost-col-qty">數量</span>
@@ -360,6 +363,7 @@ function _renderCostLines(grouped, expenses, financialSummary) {
                 <span class="cost-col-actions"></span>
               </div>`;
         }
+    }
 
         // ── 行政雜支 section (from crm_project_expenses) ──
         const miscBudget = financialSummary ? (financialSummary.misc_budget || 0) : 0;
@@ -379,26 +383,59 @@ function _renderCostLines(grouped, expenses, financialSummary) {
 
         if (expenses && expenses.length > 0) {
             for (const e of expenses) {
-                const dateStr = e.created_at ? _esc(e.created_at) : '';
+                // 消費日優先（零用金帶真實消費日）；手動列退回登記日
+                const dateStr = _esc(e.expense_date || e.created_at || '');
                 const subDisplay = e.sub_item ? _esc(e.sub_item) : '<span class="crm-muted">—</span>';
-                const payeeDisplay = e.payee ? _esc(e.payee) : '<span class="crm-muted">—</span>';
+                // 零用金流進來的列：收款人讀員工檔（payee 是自由文字，那些列必空）、
+                // 掛「零用金」pill；已進請款單（claim_id）→ 這頁唯讀，後端同樣 409。
+                const fromPetty = !!e.staff_id;
+                const locked = !!e.claim_id;
+                const payeeName = e.staff_name || e.payee || '';
+                const pill = fromPetty
+                    ? `<span class="exp-pill" title="來自零用金請款${e.status ? '（狀態：' + _esc(e.status) + '）' : ''}${locked ? '，已進請款單 — 請到零用金頁處理' : ''}">零用金</span>`
+                    : '';
+                // 可編輯性收在這一個 helper：locked 全鎖；零用金列的收款人是身分不是文字
+                const edCell = (cls, field, cur, display) => {
+                    if (locked || (fromPetty && field === 'payee')) return `<span class="${cls}">${display}</span>`;
+                    const curArg = field === 'actual' ? (e.actual || 0) : `'${_esc(cur || '')}'`;
+                    return `<span class="${cls} cost-editable" onclick="window._expEdit(this,'${e.id}','${field}',${curArg})">${display}</span>`;
+                };
                 html += `
-                  <div class="cost-row cost-row-expense">
+                  <div class="cost-row cost-row-expense"${locked ? ' title="已進零用金請款單：這頁唯讀，請到零用金頁處理"' : ''}>
                     <span class="exp-col-date">${dateStr}</span>
-                    <span class="exp-col-cat cost-editable" onclick="window._expEdit(this,'${e.id}','category','${_esc(e.category)}')">${_esc(e.category)}</span>
-                    <span class="exp-col-sub cost-editable" onclick="window._expEdit(this,'${e.id}','sub_item','${_esc(e.sub_item || '')}')">${subDisplay}</span>
-                    <span class="exp-col-amt cost-editable" onclick="window._expEdit(this,'${e.id}','actual',${e.actual || 0})">$${fmtNum(e.actual)}</span>
-                    <span class="exp-col-payee cost-editable" onclick="window._expEdit(this,'${e.id}','payee','${_esc(e.payee || '')}')">${payeeDisplay}</span>
+                    ${edCell('exp-col-cat', 'category', e.category, _esc(e.category))}
+                    ${edCell('exp-col-sub', 'sub_item', e.sub_item, subDisplay)}
+                    ${edCell('exp-col-amt', 'actual', null, '$' + fmtNum(e.actual))}
+                    ${edCell('exp-col-payee', 'payee', e.payee, (payeeName ? _esc(payeeName) : '<span class="crm-muted">—</span>') + pill)}
                     <span class="exp-col-receipt">${e.receipt_url ? '<a href="' + e.receipt_url + '" target="_blank" style="color:#3b82f6;">📎</a>' : '—'}</span>
-                    <span class="exp-col-action">
+                    <span class="exp-col-action">${locked ? '' : `
                       <button class="crm-btn crm-btn-danger crm-btn-sm" style="padding:1px 5px;"
-                              onclick="window._projDeleteExpense('${e.id}')">✕</button>
+                              onclick="window._projDeleteExpense('${e.id}')">✕</button>`}
                     </span>
                   </div>`;
             }
-        } else {
-            html += '<div class="cost-row"><span class="cost-col-item crm-muted" style="font-size:11px;">尚無雜支紀錄</span></div>';
         }
+
+        // 就地新增列 —— 日常登記的正路（modal 留給要附收據的情況）。
+        // $0 佔位列 2026-08-18 退場後，這條就是「從這裡登記」的唯一入口。
+        const qaToday = new Date().toISOString().slice(0, 10);
+        const qaStaff = '<option value=""></option>' + (state.staffList || []).map(st =>
+            `<option value="${_esc(st.name)}">${_esc(st.name)}</option>`).join('');
+        html += `
+          <div class="cost-row cost-row-expense exp-qa">
+            <span class="exp-col-date"><input id="exp-qa-date" type="date" value="${qaToday}"></span>
+            <span class="exp-col-cat"><select id="exp-qa-cat" data-no-search>${EXPENSE_CATEGORIES.map(c => `<option>${c}</option>`).join('')}</select></span>
+            <span class="exp-col-sub"><input id="exp-qa-sub" placeholder="＋ 新增一筆：細項（Enter 儲存）"
+                   onkeydown="if(event.key==='Enter')window._expQuickAdd()"></span>
+            <span class="exp-col-amt"><input id="exp-qa-amt" type="number" min="0" placeholder="金額"
+                   onkeydown="if(event.key==='Enter')window._expQuickAdd()"></span>
+            <span class="exp-col-payee"><select id="exp-qa-payee" data-no-search title="收款人">${qaStaff}</select></span>
+            <span class="exp-col-receipt"></span>
+            <span class="exp-col-action">
+              <button class="crm-btn crm-btn-secondary crm-btn-sm" style="padding:1px 6px;"
+                      onclick="window._expQuickAdd()">新增</button>
+            </span>
+          </div>`;
 
         html += `
           <div class="cost-row cost-row-subtotal">
@@ -406,7 +443,7 @@ function _renderCostLines(grouped, expenses, financialSummary) {
             <span class="cost-col-price"></span>
             <span class="cost-col-qty"></span>
             <span class="cost-col-unit"></span>
-            <span class="cost-col-amt" style="font-weight:600;">$${fmtNum(expActualTotal)}</span>
+            <span class="cost-col-amt" style="font-weight:600;">$${fmtNum(miscBudget)}</span>
             <span class="cost-col-staff cost-divider"></span>
             <span class="cost-col-price"></span>
             <span class="cost-col-qty"></span>
@@ -420,7 +457,9 @@ function _renderCostLines(grouped, expenses, financialSummary) {
           </div>`;
 
         // ── Grand total (cost lines + expenses) ──
-        const totalEst = grandEst + expActualTotal;
+        // 預估側計入雜支「預算」而不是實際數 —— 否則雜支對差額的貢獻恆為 0，
+        // 跟上面小計那欄（實際-預算）自相矛盾。
+        const totalEst = grandEst + miscBudget;
         const totalAct = grandAct + expActualTotal;
         const totalDiff = totalAct - totalEst;
         const totalDiffColor = totalDiff < 0 ? '#86efac' : totalDiff > 0 ? '#fca5a5' : '#9ca3af';
@@ -443,8 +482,7 @@ function _renderCostLines(grouped, expenses, financialSummary) {
             <span class="cost-col-actions"></span>
           </div>`;
 
-        html += '</div>';
-    }
+    html += '</div>';
     return html;
 }
 
@@ -559,11 +597,27 @@ function _costUpdateSubtotals() {
                 break;
             }
         }
-        // 行政雜支 subtotal — add to grand total (don't recalc, expenses are static)
+        // 行政雜支 subtotal — 實際欄從列即時重加（inline 改完金額小計才會跟著動）；
+        // 預估欄是雜支預算（靜態），照畫面讀。就地新增列的格子裝的是 input，
+        // textContent 為空 → 自然被跳過。
         if (text.indexOf('行政雜支') >= 0) {
+            var expAct = 0;
+            document.querySelectorAll('.cost-row-expense .exp-col-amt').forEach(function(c) {
+                var t = c.textContent.replace(/[$,]/g, '').trim();
+                if (t && t !== '—') expAct += parseInt(t) || 0;
+            });
             var eAmts = sub.querySelectorAll('.cost-col-amt');
-            if (eAmts[0]) { var v = eAmts[0].textContent.replace(/[$,]/g, '').trim(); if (v && v !== '—') grandEst += parseInt(v); }
-            if (eAmts[1]) { var v2 = eAmts[1].textContent.replace(/[$,]/g, '').trim(); if (v2 && v2 !== '—') grandAct += parseInt(v2); }
+            var expEst = 0;
+            if (eAmts[0]) { var v = eAmts[0].textContent.replace(/[$,]/g, '').trim(); if (v && v !== '—') expEst = parseInt(v) || 0; }
+            if (eAmts[1]) eAmts[1].textContent = '$' + fmtNum(expAct);
+            var eDiffCell = sub.querySelector('.cost-col-diff');
+            if (eDiffCell) {
+                var edl = diffLabel(expAct - expEst, !expEst && !expAct, true);
+                eDiffCell.textContent = edl.text;
+                eDiffCell.style.color = edl.color;
+            }
+            grandEst += expEst;
+            grandAct += expAct;
         }
     });
 
@@ -867,6 +921,30 @@ window._projDeleteCostLine = async function(lineId) {
         await _fetch('/project-cost-lines/' + lineId, { method: 'DELETE' });
         _loadFinancialSummary(state.selectedId);
     } catch (e) { alert(e.message); }
+};
+
+// ── 就地新增一筆雜支（行政雜支區底部固定的輸入列）─────────────
+window._expQuickAdd = async function() {
+    if (!state.selectedId) return;
+    const amt = parseInt(document.getElementById('exp-qa-amt')?.value) || 0;
+    const sub = (document.getElementById('exp-qa-sub')?.value || '').trim();
+    if (!amt && !sub) return;   // 空列不送
+    try {
+        await _fetch('/projects/' + state.selectedId + '/expenses', {
+            method: 'POST',
+            body: JSON.stringify({
+                category: document.getElementById('exp-qa-cat').value,
+                sub_item: sub,
+                estimated: 0,
+                actual: amt,
+                payee: document.getElementById('exp-qa-payee').value,
+                notes: '',
+                cost_group_id: state.selectedGroupId,
+                expense_date: document.getElementById('exp-qa-date').value || '',
+            }),
+        });
+        _loadFinancialSummary(state.selectedId);
+    } catch (e) { alert('新增失敗：' + e.message); }
 };
 
 // ── Inline edit: 行政雜支（類別/細項/金額/請款人）─────────────

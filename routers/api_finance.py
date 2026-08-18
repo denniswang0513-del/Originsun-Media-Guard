@@ -590,7 +590,7 @@ async def auto_match_statement(payload: StatementAutoMatchPayload, request: Requ
     """自動配對：金額相等 + 日期最近（純函式 auto_match_statement_lines）→ 寫回連結。"""
     _guard(request)
     month = _validate_month(payload.month)
-    from db.models import BankAccount, BankStatementLine
+    from db.models import BankAccount
     factory = _factory_or_503()
     async with factory() as session:
         if not await session.get(BankAccount, payload.bank_account_id):

@@ -20,7 +20,7 @@ from core.schemas import (ProjectExpensePayload, ProjectExpensePatchPayload,
                           CostGroupCreate, CostGroupUpdate, CostGroupDuplicate)
 
 from ._shared import (router, public_router, _check_auth, money_dep, _require_db,
-                      _get_factory, _now, _parse_shoot_date, _seed_default_expenses,
+                      _get_factory, _fmt_day, _now, _parse_day, _parse_shoot_date,
                       _mint_token_generic, _verify_token_generic)
 
 try:
@@ -225,6 +225,7 @@ async def list_project_expenses(project_id: str, group_id: Optional[str] = Query
             "invoice_no": e.invoice_no or "",
             "has_invoice": bool(e.has_invoice),
             "status": e.status or "",
+            "claim_id": e.claim_id or "",
         }
 
     expenses = [_e_to_dict(e) for e in rows]
@@ -240,6 +241,20 @@ async def list_project_expenses(project_id: str, group_id: Optional[str] = Query
             "misc_budget_total": sum(budgets) if budgets else None}
 
 
+def _guard_claimed(e):
+    """🔴 已進零用金請款單的列，專案頁不准改也不准刪。
+
+    claim_id 一設，這筆的金額就是某張請款單 total_claim 的一部分 —— 從這裡
+    改金額或刪列，單子總額會無聲地對不上（員工那邊看到的還是舊數字）。
+    要動就先去零用金頁把那張請款單退回。
+    """
+    if e.claim_id:
+        raise HTTPException(
+            status_code=409,
+            detail="這筆已進零用金請款單，改了金額單子就對不上。"
+                   "請到零用金頁把該請款單退回後再處理。")
+
+
 async def _create_expense(session, project_id: str, req, advance_id=None, payee_override=None):
     """建立專案雜支的共用 helper。"""
     cost_group_id = await _resolve_target_group(session, project_id, req.cost_group_id)
@@ -251,6 +266,7 @@ async def _create_expense(session, project_id: str, req, advance_id=None, payee_
         payee=payee_override or req.payee or None,
         advance_id=advance_id or req.advance_id or None,
         notes=req.notes, created_at=_now(),
+        expense_date=_parse_day(getattr(req, "expense_date", "")),
     )
     session.add(e)
     await session.commit()
@@ -421,6 +437,7 @@ async def patch_project_expense(expense_id: str, req: ProjectExpensePatchPayload
         e = await session.get(CrmProjectExpense, expense_id)
         if not e:
             raise HTTPException(status_code=404, detail="找不到此雜支")
+        _guard_claimed(e)
         for key, val in data.items():
             if key in _NULLABLE_TEXT and val == "":
                 val = None
@@ -458,6 +475,7 @@ async def update_project_expense(expense_id: str, req: ProjectExpensePayload, re
         e = await session.get(CrmProjectExpense, expense_id)
         if not e:
             raise HTTPException(status_code=404, detail="找不到此雜支")
+        _guard_claimed(e)
         e.category = req.category
         e.estimated = req.estimated
         e.actual = req.actual
@@ -480,6 +498,7 @@ async def delete_project_expense(expense_id: str, request: Request):
         e = await session.get(CrmProjectExpense, expense_id)
         if not e:
             raise HTTPException(status_code=404, detail="找不到此雜支")
+        _guard_claimed(e)
         await session.delete(e)
         await session.commit()
     return {"status": "ok"}
@@ -779,8 +798,8 @@ PHASE_ORDER = ("前期製作", "現場拍攝", "後期製作")
 
 
 def _fmt_date(dt) -> Optional[str]:
-    """Datetime → 'YYYY-MM-DD'，None 時回 None。"""
-    return dt.isoformat()[:10] if dt else None
+    """Datetime → 'YYYY-MM-DD'（台北歸一，見 _shared._fmt_day），None 時回 None。"""
+    return _fmt_day(dt) or None
 
 
 def _phase_group(lines: list) -> list:
@@ -949,12 +968,8 @@ async def init_project_cost_lines(project_id: str, request: Request):
                 phase=phase, item_name=item_name, sort_order=sort_order,
             ))
             added += 1
-        # Also back-fill the 10 default 行政雜支 categories — legacy projects
-        # created before this feature won't have them.
-        added_exp = await _seed_default_expenses(session, project_id, target_gid)
         await session.commit()
-    return {"status": "ok", "added": added, "added_expenses": added_exp,
-            "cost_group_id": target_gid}
+    return {"status": "ok", "added": added, "cost_group_id": target_gid}
 
 
 @router.post("/projects/{project_id}/cost-lines")
@@ -1411,7 +1426,6 @@ async def create_cost_group(project_id: str, req: CostGroupCreate, request: Requ
             receipt_path=(req.receipt_path or None),
         )
         session.add(g)
-        await _seed_default_expenses(session, project_id, g.id)
         await session.commit()
         await session.refresh(g)
         summary = await _compute_group_summary(session, g.id)
@@ -1517,7 +1531,6 @@ async def duplicate_cost_group(group_id: str, req: CostGroupDuplicate, request: 
                 estimated_notes=l.estimated_notes,
                 # 結算欄位不複製
             ))
-        await _seed_default_expenses(session, src.project_id, new_g.id)
         await session.commit()
         await session.refresh(new_g)
         summary = await _compute_group_summary(session, new_g.id)

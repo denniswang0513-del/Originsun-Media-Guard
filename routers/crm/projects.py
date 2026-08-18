@@ -20,7 +20,7 @@ from core.schemas import CrmProjectPayload, CrmProjectPatchPayload
 from ._shared import (router, _check_auth, _check_status_auth, _check_project_write_auth,
                       _check_website_auth, _require_db,
                       _get_factory, _now, _parse_shoot_date,
-                      _auto_update_client_status, _seed_default_expenses)
+                      _auto_update_client_status)
 
 try:
     from ._shared import (select, or_,
@@ -132,12 +132,11 @@ async def create_project_in_session(session, data: dict):
 
     session.add(project)
     await _auto_update_client_status(session, project.client_id)
-    # 同時建立第一張子表「主表」+ 預設 10 個行政雜支類別 row。
-    main_group_id = uuid.uuid4().hex
+    # 同時建立第一張子表「主表」。（$0 佔位雜支列 2026-08-18 起不再種 ——
+    # 它們長得跟真資料一樣，生產庫一度積了 193 列；日常登記走就地新增列。）
     session.add(CrmProjectCostGroup(
-        id=main_group_id, project_id=project.id, name="主表", sort_order=0,
+        id=uuid.uuid4().hex, project_id=project.id, name="主表", sort_order=0,
     ))
-    await _seed_default_expenses(session, project.id, main_group_id)
     return project, (client.short_name if client else "")
 
 
@@ -233,13 +232,11 @@ async def duplicate_project(project_id: str, request: Request):
                 created_at=now, updated_at=now,
             ))
 
-        # 沒有任何子表的舊專案 → 補一張主表 + 預設雜支，保證詳情頁有東西
+        # 沒有任何子表的舊專案 → 補一張主表，保證詳情頁有東西
         if not groups:
-            main_group_id = uuid.uuid4().hex
             session.add(CrmProjectCostGroup(
-                id=main_group_id, project_id=new_id, name="主表", sort_order=0,
+                id=uuid.uuid4().hex, project_id=new_id, name="主表", sort_order=0,
             ))
-            await _seed_default_expenses(session, new_id, main_group_id)
 
         # 成本估算明細 — 保留預估、清結算
         lines = (await session.execute(

@@ -9,7 +9,7 @@ import sys
 import asyncio
 import locale
 import time
-from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form  # type: ignore
+from fastapi import APIRouter, Depends, UploadFile, File, Form  # type: ignore
 from core.auth import check_lan_or_logged_in  # type: ignore
 from core.project_folders import stream_to_disk  # type: ignore
 from core.schemas import OpenFileRequest, ValidatePathsRequest  # type: ignore
