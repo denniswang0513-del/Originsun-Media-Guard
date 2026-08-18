@@ -128,7 +128,7 @@ async function _loadFinancialSummary(projectId) {
             </div>
             <div class="cost-progress-wrap">
               <div class="cost-progress-bar"></div>
-              <div class="cost-progress-tick" title="預估排定位置"></div>
+              <div class="cost-progress-tick" title="預估合計（成本＋雜支）在預算裡的位置；藍條（實際）超過這裡＝實花超出原計畫"></div>
             </div>
             <div class="cost-progress-label"></div>
             ${alert}
@@ -207,7 +207,8 @@ function _fillDashGrid(parts) {
     const label = document.querySelector('.cost-progress-label');
     if (label) {
         label.textContent = '預算已使用 ' + d.usagePct + '%（實際 $' + fmtNum(d.totalActual)
-            + ' / 執行預算 $' + fmtNum(d.execBudget) + '）｜預估排定 ' + d.estPct + '%';
+            + ' / 執行預算 $' + fmtNum(d.execBudget) + '）｜預估合計 $' + fmtNum(d.totalEstimated)
+            + ' 佔預算 ' + d.estPct + '%（灰色刻度）';
     }
 }
 
