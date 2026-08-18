@@ -571,11 +571,15 @@ def test_every_project_picker_shares_one_label_builder():
     assert PETTY_VIEW.count("function projectLabels") == 1
     # 沒有人再自己把 opts.projects 攤成 <option>（那就是繞過標籤建構）
     assert "opts.projects.map(" not in PETTY_VIEW, "有下拉自己組專案選項，沒走共用建構"
-    for blank in ("（公司支出，不歸專案）", "（無專案）", "選擇專案…"):
+    # <select> 挑選處（帳冊新增列／未歸戶綁定）走共用 options 建構
+    for blank in ("（無專案）", "選擇專案…"):
         assert f"projectOptions(opts.projects, '<option value=\"\">{blank}" in PETTY_VIEW, \
             f"「{blank}」那個下拉沒走共用的標籤建構"
-    # datalist 的值與反查表同源
+    # datalist 挑選處（帳冊過濾／登記表單，2026-08-19 表單改可搜尋）：
+    # 值與反查表同源 —— 自由文字必須反查得到 id，打錯不准靜默變公司支出
     assert "const { labelOf, idOfLabel } = projectLabels(opts.projects);" in PETTY_VIEW
+    assert "idOfLabel: formIdOfLabel } = projectLabels(opts.projects)" in PETTY_VIEW
+    assert "formIdOfLabel[projLabel]" in PETTY_VIEW, "表單送出沒反查 id"
 
 
 # ── 專案頁雜支區 × 零用金（2026-08-18 整頓）────────────────────────

@@ -170,7 +170,12 @@ export async function renderMine(host) {
         throw e;
     }
 
-    const projOpts = projectOptions(opts.projects, '<option value="">（公司支出，不歸專案）</option>');
+    // 專案 238 筆 → input+datalist（原生可搜尋，跟帳冊同一招）：顯示字串用
+    // projectLabels 的唯一標籤（年份｜客戶｜專案名），送出時反查回 id
+    const { idOfLabel: formIdOfLabel } = projectLabels(opts.projects);
+    const FORM_PROJ_DL = '<datalist id="f-proj-dl">'
+        + Object.keys(formIdOfLabel).map(l => `<option value="${esc(l)}"></option>`).join("")
+        + "</datalist>";
     const itemOpts = opts.items.map(i => `<option value="${esc(i)}">${esc(i)}</option>`).join("");
 
     const asSel = staffList && staffList.length ? `
@@ -203,8 +208,9 @@ export async function renderMine(host) {
         <div><label>金額</label><input type="number" id="f-amt" inputmode="numeric" placeholder="0"></div>
         <div style="grid-column:span 2;"><label>摘要</label>
           <input id="f-sum" placeholder="例：兩廳院拍攝午餐"></div>
-        <div><label>專案</label><select id="f-proj">${projOpts}</select></div>
         <div><label>項目（會計）</label><select id="f-item">${itemOpts}</select></div>
+        <div><label>專案</label><input id="f-proj" list="f-proj-dl"
+             placeholder="不填＝公司支出；輸入年份/客戶/專案名搜尋">${FORM_PROJ_DL}</div>
         <div><label>發票號碼（沒有可留白）</label><input id="f-inv" placeholder="AB12345678"></div>
         <div><label>收據照片</label><input type="file" id="f-file" accept="image/*" capture="environment"></div>
       </div>
@@ -266,13 +272,17 @@ export async function renderMine(host) {
         const btn = ev.currentTarget;
         const amt = parseInt(host.querySelector("#f-amt").value, 10);
         if (!amt) { msg.textContent = "金額不可為 0"; return; }
+        // datalist 是自由文字：非空就必須反查得到 id，打錯字不能靜默變公司支出
+        const projLabel = host.querySelector("#f-proj").value.trim();
+        const projId = projLabel ? (formIdOfLabel[projLabel] || null) : null;
+        if (projLabel && !projId) { msg.textContent = "專案對不上，請從清單挑選"; return; }
         btn.disabled = true; msg.textContent = "送出中…";
         try {
             const r = await send("POST", _base() + "/expenses", {
                 expense_date: host.querySelector("#f-date").value,
                 actual: amt,
                 summary: host.querySelector("#f-sum").value.trim(),
-                project_id: host.querySelector("#f-proj").value || null,
+                project_id: projId,
                 item: host.querySelector("#f-item").value,
                 invoice_no: host.querySelector("#f-inv").value.trim(),
             });
