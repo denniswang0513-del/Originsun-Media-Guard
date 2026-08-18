@@ -218,8 +218,9 @@ async function boot() {
     const isAdmin = (me.access_level || 0) >= 3;
     $("hdr-user").textContent = me.username || "";
     $("hdr-user").style.display = "";
-    // 「我的請款」的閘門是 me_finance —— 與 /my.html 的請款卡同一個 key
-    if (!isAdmin && !mods.includes("me_finance")) { _show("noperm-view"); return; }
+    // 「我的請款」的閘門是 me_petty —— 與 /my.html 的零用金卡同一個 key
+    // （2026-08-19 從 me_finance 拆出，owner 要單獨控制的授權格）
+    if (!isAdmin && !mods.includes("me_petty")) { _show("noperm-view"); return; }
     // 🔴 分頁顯示與否照著後端守衛算，不自作主張：財務那三個分頁**兩個模組都要**
     const visible = TABS.filter(t => isAdmin || t.need.every(m => mods.includes(m)));
     _show("app-view");

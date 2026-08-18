@@ -184,7 +184,7 @@ export const PERMISSION_GROUPS = [
     { id: 'website',    label: '🌐 官網管理', modules: ['website_admin'] },
     // N0 個人工作台 — 獨立頁 /my.html 的卡片（無 SPA tab，僅權限編輯器用；
     // groupKeys 會因 TAB_MAP 無此 key 而自動不進側欄）。
-    { id: 'me',         label: '🙋 個人工作台', modules: ['me_projects', 'me_profile', 'me_todos', 'me_finance', 'me_leave'] },
+    { id: 'me',         label: '🙋 個人工作台', modules: ['me_projects', 'me_profile', 'me_todos', 'me_finance', 'me_leave', 'me_petty'] },
 ];
 
 // Flat list of every assignable RBAC module key — derived from PERMISSION_GROUPS

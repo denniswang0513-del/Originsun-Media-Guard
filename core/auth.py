@@ -151,6 +151,10 @@ ALL_MODULES = [
     #   （審核畫面本身就是別人的金額）。刻意不用 Lv3 當閘門 —— 主管未必是
     #   管理員，用 Lv3 等於逼 owner 把管理員發出去。
     'finance_approve',
+    # 零用金（/petty-cash.html 與 /my.html 零用金卡）。原本沿用 me_finance，
+    # owner 2026-08-19「請款要單獨控制的授權按鈕」→ 拆出獨立 key。
+    # own-scope 後端本來就只認登入＋綁定人員，這把鑰匙管的是 UI 入口。
+    'me_petty',
 ]
 
 

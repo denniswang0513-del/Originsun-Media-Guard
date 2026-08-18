@@ -33,7 +33,8 @@ from routers.api_hr import approved_annual_used, new_leave_request
 
 router = APIRouter(prefix="/api/v1/me", tags=["me"])
 
-ME_MODULE_KEYS = ("me_projects", "me_profile", "me_todos", "me_finance", "me_leave")
+ME_MODULE_KEYS = ("me_projects", "me_profile", "me_todos", "me_finance", "me_leave",
+                  "me_petty")   # 零用金卡（2026-08-19 從 me_finance 拆出）
 
 # 提案企劃卡的閘門 — 對齊 routers/api_proposals._check 的守衛集合（owner 2026-08-11
 # 拍板「權限全通」：打得開 /project.html 的人，工作台就有入口卡）。

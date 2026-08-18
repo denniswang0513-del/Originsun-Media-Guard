@@ -638,6 +638,20 @@ def test_project_page_expense_ux_contract():
     assert "exp-pill" in COST_VIEW and "e.staff_name || e.payee" in COST_VIEW
 
 
+def test_me_petty_is_the_standalone_key():
+    """零用金入口的鑰匙是獨立的 me_petty（owner 2026-08-19「請款要單獨控制」），
+    不再搭 me_finance 便車。入口兩處（獨立頁 + my.html 卡）都要認同一把。"""
+    from core.auth import ALL_MODULES
+    assert "me_petty" in ALL_MODULES
+    page = (FRONTEND / "petty-cash.html").read_text(encoding="utf-8")
+    assert 'mods.includes("me_petty")' in page
+    assert 'mods.includes("me_finance")' not in page, "獨立頁還在收舊鑰匙"
+    my = (FRONTEND / "my.html").read_text(encoding="utf-8")
+    assert 'ws.allowed.includes("me_petty")' in my
+    api_me = (REPO / "routers" / "api_me.py").read_text(encoding="utf-8")
+    assert '"me_petty"' in api_me, "workspace allowed 沒帶新 key，卡片永遠不出現"
+
+
 def test_dashboard_misc_estimate_source():
     """🔴 預估雜支的正本＝子表「雜支預算」加總（misc_budget_total），不是逐列
     estimated —— $0 佔位列退場後逐列數字恆為 0，預估剩餘會漏扣雜支

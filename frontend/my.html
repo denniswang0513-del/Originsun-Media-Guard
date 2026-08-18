@@ -504,7 +504,7 @@ function renderWorkspace() {
     $("btn-logout").style.display = "";
     $("hdr-hr").style.display = ws.hr_manager ? "" : "none";
 
-    const staffSections = ["me_profile", "me_projects", "me_finance", "me_leave"];
+    const staffSections = ["me_profile", "me_projects", "me_finance", "me_leave", "me_petty"];
     $("ws-notice").innerHTML = (!ws.bound && ws.allowed.some(k => staffSections.includes(k)))
         ? `<div class="notice">此帳號尚未綁定人員檔案 — 專案／個人資料／工時卡片暫無資料，請管理員在「使用者管理」完成綁定。</div>` : "";
 
@@ -515,7 +515,7 @@ function renderWorkspace() {
     if (ws.allowed.includes("me_leave"))    grid.appendChild(cardLeave(ws.leave));
     if (ws.allowed.includes("me_profile"))  grid.appendChild(cardProfile(ws.profile));
     if (ws.allowed.includes("me_finance"))  grid.appendChild(cardFinance(ws.timesheet, ws.payments));
-    if (ws.allowed.includes("me_finance"))  grid.appendChild(cardPettyCash());
+    if (ws.allowed.includes("me_petty"))    grid.appendChild(cardPettyCash());
     if (ws.allowed.includes("media_log"))   grid.appendChild(cardMediaLog());
     if (ws.allowed.includes("proposal_plan")) grid.appendChild(cardProposalPlan());
     // 週誌在 grid 之外自成一區（見 #ws-journal 註解）：只建一次，之後只切顯示
@@ -570,9 +570,9 @@ function cardMediaLog() {
 }
 
 // ── 卡：零用金 —— 入口連到獨立網址 /petty-cash.html（帳號登入）──
-// 閘門沿用 me_finance（工時請款那把鑰匙），不另開 key：對員工而言「我的請款」
-// 跟「我的工時」是同一件事的兩半。財務端的審核／匯款清冊在那一頁裡另外看
-// money_view + finance_approve，這張卡不管那些。
+// 閘門是獨立的 me_petty（owner 2026-08-19「請款要單獨控制」，從 me_finance
+// 拆出）。財務端的審核／匯款清冊在那一頁裡另外看 money_view +
+// finance_approve，這張卡不管那些。
 function cardPettyCash() {
     const card = makeCard("Petty Cash", "零用金", "", "petty_cash");
     card.querySelector(".card-body").innerHTML = `
