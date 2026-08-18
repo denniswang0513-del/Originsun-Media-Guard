@@ -116,9 +116,8 @@ async function _loadFinancialSummary(projectId) {
               <span>合約未稅 <b>$${fmtNum(f.ex_tax)}</b></span>
               <span>目標利潤 <b>$${fmtNum(f.profit_target)}</b>（${f.profit_target_pct}%）</span>
               <span>執行預算 <b style="color:#60a5fa;">$${fmtNum(d.execBudget)}</b></span>
-              <span>預估雜支 <b>$${fmtNum(d.miscEstimated)}</b>（${d.miscAuto ? `未稅 ${d.miscPct}%` : '子表設定'}）
-                <button class="crm-btn crm-btn-secondary crm-btn-sm" style="margin-left:4px;padding:1px 8px;"
-                        onclick="window._miscPctModal()">編輯</button></span>
+              <span>預估雜支 <b>$${fmtNum(d.miscEstimated)}</b>（${d.miscAuto ? `未稅 ${d.miscPct}%` : '子表設定'}）<button class="cda-edit" onclick="window._miscPctModal()">編輯</button></span>
+              <span>實際毛利 <b id="cd-anchor-pf"></b></span>
               ${f.transfer_fee ? `<span style="color:#6b7280;">帳款匯費 $${fmtNum(f.transfer_fee)}</span>` : ''}
             </div>
             <div class="cost-dash-grid">
@@ -186,6 +185,9 @@ function _fillDashGrid(parts) {
     set('cd-rem-act', '$' + fmtNum(d.remainingActual), remainColor(d.remainingActual));
     // 毛利不掛箭頭 —— 顏色（達標綠/未達黃/虧損紅）就是語義（owner 2026-08-18）
     set('cd-pf-act', '$' + fmtNum(d.actualProfit) + '（' + d.profitPct + '%）',
+        profitColor(d.profitPct));
+    // 錨點列的實際毛利跟對照表同格同源，inline 編輯後一起動
+    set('cd-anchor-pf', '$' + fmtNum(d.actualProfit) + '（' + d.profitPct + '%）',
         profitColor(d.profitPct));
     // 差額列：花錢欄 剩/超（剩餘雜支就住在雜支欄這格）；推導欄 ±（比計畫好＝綠）
     const setDL = (id, dl) => set(id, dl.text, dl.color);

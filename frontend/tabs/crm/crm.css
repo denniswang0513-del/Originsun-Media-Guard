@@ -1100,6 +1100,12 @@
     font-size: 12px; color: #9ca3af; margin-bottom: 10px;
 }
 .cost-dash-anchors b { font-size: 15px; color: #e0e0e0; font-weight: 700; }
+/* 預估雜支旁的「編輯」：低調文字鈕，貼著數值走，不搶版面 */
+.cost-dash-anchors .cda-edit {
+    background: none; border: none; cursor: pointer;
+    color: #6b7280; font-size: 11px; padding: 0 2px; margin-left: 2px;
+}
+.cost-dash-anchors .cda-edit:hover { color: #d1d5db; text-decoration: underline; }
 .cost-dash-grid {
     display: grid; grid-template-columns: 44px repeat(4, 1fr);
     gap: 4px 14px; align-items: baseline;
