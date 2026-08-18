@@ -766,12 +766,16 @@ async def project_financial_summary(project_id: str):
                      & CrmProjectCostGroup.misc_budget_amount.is_(None), 1),
                     else_=0,
                 )), 0),
+                # 手動雜支預算加總：SUM 忽略 NULL；全部未設 → NULL（≠ 0，
+                # 前端據此決定退回 misc_budget_pct 自動推算）
+                sa_func.sum(CrmProjectCostGroup.misc_budget_amount),
             )
             .where(CrmProjectCostGroup.project_id == project_id)
         )).first()
         allocated_budget_sum = int(g_row[0] or 0) if g_row else 0
         groups_count = int(g_row[1] or 0) if g_row else 0
         groups_missing_budget_count = int(g_row[2] or 0) if g_row else 0
+        misc_budget_total = int(g_row[3]) if g_row and g_row[3] is not None else None
 
     from core.crm_logic import project_margin
     contract = project.contract_amount or 0
@@ -805,6 +809,9 @@ async def project_financial_summary(project_id: str):
         "allocated_budget_sum": allocated_budget_sum,
         "groups_count": groups_count,
         "groups_missing_budget_count": groups_missing_budget_count,
+        # 預估雜支的正本：子表「雜支預算」手動加總；None＝全部未設
+        # （前端退回 misc_budget 的 % 自動推算並標示「自動」）
+        "misc_budget_total": misc_budget_total,
     }
 
 

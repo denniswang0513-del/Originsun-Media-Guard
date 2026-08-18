@@ -470,7 +470,7 @@ async function _loadBudgetOverview(projectId, isClosed) {
     try {
         const f = await _fetch('/projects/' + projectId + '/financial-summary');
         const d = calcDashboard(f);
-        const rc = remainColor(d.remaining);
+        const rc = remainColor(d.remainingActual);
         const pc = profitColor(d.profitPct);
         const bc = barColor(d.usagePct);
 
@@ -509,8 +509,8 @@ async function _loadBudgetOverview(projectId, isClosed) {
                 </div>
                 <div class="pi-fin-card">
                   <div class="pi-fin-label">剩餘預算</div>
-                  <div class="pi-fin-value" style="color:${rc};">$${fmtNum(d.remaining)}</div>
-                  <div class="pi-fin-sub">&nbsp;</div>
+                  <div class="pi-fin-value" style="color:${rc};">$${fmtNum(d.remainingActual)}</div>
+                  <div class="pi-fin-sub">預估剩 $${fmtNum(d.remaining)}</div>
                 </div>
                 <div class="pi-fin-card">
                   <div class="pi-fin-label">專案結算</div>
@@ -525,11 +525,11 @@ async function _loadBudgetOverview(projectId, isClosed) {
               </div>
               <div class="cost-progress-wrap"><div class="cost-progress-bar" style="width:${Math.min(d.usagePct, 100)}%;background:${bc};"></div></div>
               <div class="pi-budget-meta">
-                預算已使用 ${d.usagePct}% ($${fmtNum(d.totalEstimated)} / $${fmtNum(d.execBudget)})
+                預算已使用 ${d.usagePct}%（實際 $${fmtNum(d.totalActual)} / $${fmtNum(d.execBudget)}）
                 &nbsp;·&nbsp;
-                預估毛利率 ${f.profit_target_pct != null ? f.profit_target_pct : 20}% ($${fmtNum(d.actualProfit)} / $${fmtNum(f.profit_target)})
+                預估排定 ${d.estPct}%（$${fmtNum(d.totalEstimated)}）
                 &nbsp;·&nbsp;
-                預估雜支 ${f.misc_budget_pct != null ? f.misc_budget_pct : 5}% ($${fmtNum(f.expense_actual)} / $${fmtNum(f.misc_budget)})
+                雜支 $${fmtNum(d.miscActual)} / $${fmtNum(d.miscEstimated)}${d.miscAuto ? '（自動）' : ''}
               </div>
             `;
         }

@@ -638,6 +638,21 @@ def test_project_page_expense_ux_contract():
     assert "exp-pill" in COST_VIEW and "e.staff_name || e.payee" in COST_VIEW
 
 
+def test_dashboard_misc_estimate_source():
+    """🔴 預估雜支的正本＝子表「雜支預算」加總（misc_budget_total），不是逐列
+    estimated —— $0 佔位列退場後逐列數字恆為 0，預估剩餘會漏扣雜支
+    （owner 2026-08-18 抓到的洞）。全部未設才退回 % 自動推算並標「自動」。
+    """
+    calc = (FRONTEND / "tabs" / "crm" / "crm-projects-calc.js").read_text(encoding="utf-8")
+    assert "misc_budget_total" in calc
+    assert "expense_estimated" not in calc.split("export function calcDashboard")[1], \
+        "calcDashboard 又退回死掉的逐列 estimated"
+    assert '"misc_budget_total": misc_budget_total' in COSTS_SRC  # financial-summary 有帶
+    # 儀表板填值單一正本 + 雜支預算就地編輯 + 剩餘雜支住在對照表雜支欄
+    assert "_fillDashGrid" in COST_VIEW and "_miscBudgetEdit" in COST_VIEW
+    assert "cd-misc-diff" in COST_VIEW
+
+
 def test_expense_dates_are_formatted_in_taipei():
     """🔴 timestamptz 讀取端一律走 _fmt_day（台北歸一）。
 
