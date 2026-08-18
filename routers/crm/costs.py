@@ -755,9 +755,14 @@ async def set_receipts_root(request: Request):
             os.makedirs(root, exist_ok=True)   # 多半是 NAS 上還沒建的資料夾，順手建
         except OSError as e:
             raise HTTPException(status_code=422, detail=f"資料夾無法使用：{e}")
-    s = load_settings()
-    s["receipts_root"] = root
-    save_settings(s)
+    # settings.json 寫入也要包 —— agent 自己會定期寫 settings，撞到檔案佔用
+    # 會炸成裸 500（2026-08-19 owner 第一次存 NAS 路徑就中獎，重按即成功）
+    try:
+        s = load_settings()
+        s["receipts_root"] = root
+        save_settings(s)
+    except OSError as e:
+        raise HTTPException(status_code=503, detail=f"設定檔忙碌中，請再按一次儲存（{e}）")
     return {"status": "ok", "receipts_root": root, "effective": _receipts_root()}
 
 
