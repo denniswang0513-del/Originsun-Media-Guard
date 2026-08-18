@@ -61,6 +61,12 @@ export default async function render(container, opts = {}) {
 
     if (!isCurrent()) return;          // 載入期間使用者切走了就別再畫
     const host = container.querySelector('#pt-host');
+
+    // 收據資料夾設定（owner 2026-08-19）：探測端點，403＝非管理員 → 不顯示。
+    // ⚠ 刻意不用 settings/load 整包（那條有機密遮罩，整包存回會洗掉真值），
+    // 走 petty/receipts-root 這對只碰單鍵的端點。
+    _mountReceiptsRoot(container, host).catch(() => {});
+
     const mod = await import('../../petty/petty-view.js');
     const show = async (t, btn) => {
         container.querySelectorAll('.pt-tab').forEach(b => {
@@ -81,4 +87,51 @@ export default async function render(container, opts = {}) {
     });
     const first = container.querySelector('.pt-tab');
     if (first) show(visible[0], first);
+}
+
+async function _mountReceiptsRoot(container, host) {
+    const r = await authFetch('/api/v1/crm/petty/receipts-root');
+    if (!r.ok) return;                 // 非管理員（403）或端點不在 → 靜默不顯示
+    const cfg = await r.json();
+    const bar = container.querySelector('a[href="/petty-cash.html"]')?.parentElement;
+    if (!bar) return;
+    const esc = (s) => String(s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/"/g, '&quot;');
+
+    const a = document.createElement('a');
+    a.href = 'javascript:void(0)';
+    a.textContent = '收據資料夾';
+    a.style.cssText = 'align-self:center;font-size:12px;color:#888;margin-left:14px;';
+    bar.appendChild(a);
+
+    const panel = document.createElement('div');
+    panel.style.cssText = 'display:none;margin:-4px 0 14px;padding:10px 12px;'
+        + 'border:1px solid #2a2a2a;border-radius:6px;font-size:12px;color:#888;line-height:1.7;';
+    panel.innerHTML = `
+        收據照片的儲存根目錄。要集中到 NAS 就填 NAS 路徑；留空＝主控機預設
+        <span style="color:#aaa;">${esc(cfg.default)}</span>。子表自己設的收據資料夾仍優先。
+        <div style="display:flex;gap:8px;margin-top:8px;">
+          <input id="pt-rroot" value="${esc(cfg.receipts_root)}"
+                 placeholder="例：\\\\OriginsunNAS\\Receipts 或 T:\\收據"
+                 style="flex:1;padding:6px 8px;border:1px solid #2a2a2a;border-radius:4px;">
+          <button class="pc-btn" id="pt-rroot-save" style="padding:6px 16px;border:0;border-radius:4px;color:#fff;cursor:pointer;">儲存</button>
+          <span id="pt-rroot-msg" style="align-self:center;"></span>
+        </div>
+        <div style="margin-top:6px;">目前生效：<span id="pt-rroot-eff">${esc(cfg.effective)}</span></div>`;
+    host.before(panel);
+
+    a.onclick = () => { panel.style.display = panel.style.display === 'none' ? '' : 'none'; };
+    panel.querySelector('#pt-rroot-save').onclick = async () => {
+        const msg = panel.querySelector('#pt-rroot-msg');
+        msg.textContent = '儲存中…';
+        try {
+            const rr = await authFetch('/api/v1/crm/petty/receipts-root', {
+                method: 'POST',
+                body: JSON.stringify({ receipts_root: panel.querySelector('#pt-rroot').value.trim() }),
+            });
+            const d = await rr.json().catch(() => ({}));
+            if (!rr.ok) { msg.textContent = '失敗：' + (d.detail || rr.status); return; }
+            panel.querySelector('#pt-rroot-eff').textContent = d.effective || '';
+            msg.textContent = '已儲存（之後上傳的收據存到新位置；舊檔不搬）';
+        } catch (e) { msg.textContent = '失敗：' + (e && e.message || e); }
+    };
 }

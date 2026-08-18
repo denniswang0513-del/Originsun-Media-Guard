@@ -14,6 +14,7 @@ from typing import Optional
 
 from fastapi import Depends, HTTPException, Request, UploadFile, File, Query
 
+from core.auth import check_admin
 from core.project_folders import BLOCKED_UPLOAD_EXTS, stream_to_disk
 from core.schemas import (ProjectExpensePayload, ProjectExpensePatchPayload,
                           CostLinePayload, CostLineUpdatePayload, ExpenseLinkPayload,
@@ -570,6 +571,15 @@ async def upload_project_receipt_public(project_id: str, expense_id: str, file: 
 _MAX_RECEIPT_BYTES = 30 * 1024 * 1024
 
 
+def _receipts_root() -> str:
+    """收據儲存根目錄的單一正本：settings.receipts_root（後台可設，要集中到
+    NAS 就指 NAS 路徑）優先，留空＝老預設 uploads/receipts（主控機本機）。
+    子表自己的 receipt_path 仍最優先 —— 這裡只管兩條 fallback。"""
+    from config import load_settings
+    root = (load_settings().get("receipts_root") or "").strip()
+    return root or os.path.join(os.getcwd(), "uploads", "receipts")
+
+
 async def _save_receipt(project_id: str, expense_id: str, file: UploadFile):
     import re as _re
     _require_db()
@@ -588,20 +598,20 @@ async def _save_receipt(project_id: str, expense_id: str, file: UploadFile):
         # 沒 cost_group 關聯時 fallback 到專案層級 uploads 子目錄；
         # 連專案都沒有（零用金公司支出）→ uploads/receipts/_零用金/{年月}/。
         cg = await session.get(CrmProjectCostGroup, exp.cost_group_id) if exp.cost_group_id else None
-        when = exp.expense_date or exp.created_at
+        # 🔴 日期進資料夾/檔名前走 _fmt_day 台北歸一 —— aware timestamptz 面值
+        # strftime 會差一天（填 08-19 檔名變 20260818，2026-08-19 實測踩到）
+        day = _fmt_day(exp.expense_date or exp.created_at)   # '' ＝ 無日期
         if cg and cg.receipt_path:
             base = cg.receipt_path
         elif proj:
             sub = (cg.name if cg and cg.name else "main")
-            base = os.path.join(os.getcwd(), "uploads", "receipts",
-                                proj.name or project_id, sub)
+            base = os.path.join(_receipts_root(), proj.name or project_id, sub)
         else:
-            base = os.path.join(os.getcwd(), "uploads", "receipts", "_零用金",
-                                when.strftime("%Y-%m") if when else "nodate")
+            base = os.path.join(_receipts_root(), "_零用金", day[:7] or "nodate")
         os.makedirs(base, exist_ok=True)
 
         # Build filename: date_category_subitem_payee_id.ext
-        date_str = when.strftime("%Y%m%d") if when else "nodate"
+        date_str = day.replace("-", "") or "nodate"
         cat = _re.sub(r'[\\/:*?"<>|]', '', exp.category or "misc")
         sub = _re.sub(r'[\\/:*?"<>|]', '', exp.sub_item or "")
         payee = _re.sub(r'[\\/:*?"<>|]', '', exp.payee or "")
@@ -702,7 +712,9 @@ async def serve_receipt(path: str = Query(""), request: Request = None):
         raise HTTPException(status_code=404, detail="檔案不存在")
     abs_path = os.path.abspath(path)
     uploads_dir = os.path.abspath(os.path.join(os.getcwd(), "uploads"))
-    if not abs_path.startswith(uploads_dir):
+    # receipts_root 換過位置（例如指到 NAS）後，新收據不在 uploads/ 底下
+    if not abs_path.startswith(uploads_dir) \
+            and not abs_path.startswith(os.path.abspath(_receipts_root())):
         # 檢查是否在某個子表的 receipt_path 內
         _require_db()
         factory = await _get_factory()
@@ -715,6 +727,38 @@ async def serve_receipt(path: str = Query(""), request: Request = None):
             raise HTTPException(status_code=403, detail="無權存取此路徑")
     from starlette.responses import FileResponse
     return FileResponse(path)
+
+
+@router.get("/petty/receipts-root")
+async def get_receipts_root(request: Request):
+    """收據根目錄設定（admin 專用）。
+
+    ⚠ 刻意不走 settings/load 整包 —— 那條回應對機密欄位是遮罩過的，前端拿
+    整包改一鍵再存回會把真密碼洗成遮罩值（2026-07-10 settings 外洩修補後的
+    既定風險）。這裡 server 端只讀寫這一個鍵。
+    """
+    check_admin(request)
+    from config import load_settings
+    return {"receipts_root": (load_settings().get("receipts_root") or ""),
+            "default": os.path.join(os.getcwd(), "uploads", "receipts"),
+            "effective": _receipts_root()}
+
+
+@router.post("/petty/receipts-root")
+async def set_receipts_root(request: Request):
+    check_admin(request)
+    from config import load_settings, save_settings
+    body = await request.json()
+    root = (body.get("receipts_root") or "").strip()
+    if root:
+        try:
+            os.makedirs(root, exist_ok=True)   # 多半是 NAS 上還沒建的資料夾，順手建
+        except OSError as e:
+            raise HTTPException(status_code=422, detail=f"資料夾無法使用：{e}")
+    s = load_settings()
+    s["receipts_root"] = root
+    save_settings(s)
+    return {"status": "ok", "receipts_root": root, "effective": _receipts_root()}
 
 
 @router.get("/projects/{project_id}/financial-summary", dependencies=[Depends(money_dep)])

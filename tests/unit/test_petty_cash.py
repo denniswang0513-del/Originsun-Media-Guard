@@ -642,6 +642,26 @@ def test_project_page_expense_ux_contract():
     assert "exp-pill" in COST_VIEW and "e.staff_name || e.payee" in COST_VIEW
 
 
+def test_receipts_root_setting():
+    """收據根目錄可後台設定（owner 2026-08-19），四個接點缺一不可：
+    設定正本 _receipts_root、兩條 fallback 儲存路徑、服務端 allow-list
+    （換到 NAS 後新收據不在 uploads/，漏了會 403）、admin 專用讀寫端點。"""
+    assert "def _receipts_root" in COSTS_SRC
+    save = COSTS_SRC.split("async def _save_receipt")[1].split("\n@router")[0]
+    assert save.count("_receipts_root()") == 2, "兩條 fallback 都要吃設定值"
+    assert 'os.getcwd(), "uploads", "receipts"' not in save, "殘留硬編碼路徑"
+    # 檔名/資料夾日期走 _fmt_day 台北歸一（面值 strftime 差一天，08-19 踩到）
+    assert "_fmt_day(exp.expense_date or exp.created_at)" in save
+    assert 'strftime("%Y' not in save, "檔名日期繞過 _fmt_day"
+    serve = COSTS_SRC.split("async def serve_receipt")[1].split("\n@router")[0]
+    assert "_receipts_root()" in serve, "換了根目錄，舊/新收據連結會 403"
+    for fn in ("get_receipts_root", "set_receipts_root"):
+        assert "check_admin(request)" in COSTS_SRC.split(f"async def {fn}")[1].split("\n@router")[0]
+    sub = (FRONTEND / "tabs" / "finance" / "subviews" / "petty.js").read_text(encoding="utf-8")
+    assert "petty/receipts-root" in sub
+    assert "/api/settings/load" not in sub, "不准走遮罩過的 settings 整包（會洗掉機密）"
+
+
 def test_me_petty_is_the_standalone_key():
     """零用金入口的鑰匙是獨立的 me_petty（owner 2026-08-19「請款要單獨控制」），
     不再搭 me_finance 便車。入口兩處（獨立頁 + my.html 卡）都要認同一把。"""
