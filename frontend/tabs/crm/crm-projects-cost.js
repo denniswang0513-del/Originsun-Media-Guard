@@ -4,11 +4,13 @@
  */
 
 import { state, callbacks, EXPENSE_CATEGORIES } from './crm-projects-state.js';
-import { calcDashboard, remainColor, profitColor, barColor, diffLabel } from './crm-projects-calc.js';
+import { calcDashboard, calcDashboardParts, remainColor, profitColor, barColor, diffLabel } from './crm-projects-calc.js';
 import { crmFetch as _fetch, esc as _esc, fmtNum, searchableSelect, moneyGate, today }
     from './crm-utils.js';
 
 // ── Dirty map ──────────────────────────────────────────────────
+// 儀表板基準：render 時記下「其他子表」的數字，inline 重算＝基準＋當前子表即時值
+let _dashBase = null;
 window._costDirtyMap = {};
 window._expDirtyMap = {};  // {expId: {field: value}} 行政雜支 inline edit
 window._projDirtyMap = {}; // {field: value} 專案資訊 cell-by-cell inline edit
@@ -110,9 +112,7 @@ async function _loadFinancialSummary(projectId) {
         // 格子先留空，值由 _fillDashGrid 填 —— 初次 render 與 inline 編輯後的
         // 即時重算共用同一個填值正本，格式不會漂。
         container.innerHTML = `
-            <div class="cost-dash-anchors" id="cost-dash"
-                 data-ex-tax="${f.ex_tax}" data-profit-target="${f.profit_target}"
-                 data-misc-est="${d.miscEstimated}" data-misc-auto="${d.miscAuto ? 1 : 0}">
+            <div class="cost-dash-anchors">
               <span>合約未稅 <b>$${fmtNum(f.ex_tax)}</b></span>
               <span>目標利潤 <b>$${fmtNum(f.profit_target)}</b>（${f.profit_target_pct}%）</span>
               <span>執行預算 <b style="color:#60a5fa;">$${fmtNum(d.execBudget)}</b></span>
@@ -133,19 +133,23 @@ async function _loadFinancialSummary(projectId) {
             <div id="cost-groups-switcher"></div>
             ${_renderCostLines(costData.grouped || [], expData.expenses || [], f)}
         `;
-        _fillDashGrid({ exTax: f.ex_tax, profitTarget: f.profit_target,
-                        costEst: d.costEstimated, costAct: d.costActual,
-                        miscEst: d.miscEstimated, miscAuto: d.miscAuto,
-                        miscAct: d.miscActual });
-        // 記下「其他子表」的基準值 —— inline 編輯的即時重算只掃得到當前子表
-        // 的格子，補上這個基準，多子表專案的儀表板數字才不會在重算時縮水
-        const scraped = _costUpdateSubtotals() || { costEst: 0, costAct: 0, miscAct: 0 };
-        const dashEl = document.getElementById('cost-dash');
-        if (dashEl) {
-            dashEl.dataset.otherCostEst = d.costEstimated - (scraped.costEst || 0);
-            dashEl.dataset.otherCostAct = d.costActual - (scraped.costAct || 0);
-            dashEl.dataset.otherMiscAct = d.miscActual - (scraped.miscAct || 0);
-        }
+        // 儀表板基準：其他子表的數字。inline 重算時「基準＋當前子表即時值」
+        // 拼回專案全貌。從回應資料算（畫面只載當前子表的 cost-lines/expenses），
+        // 不靠 DOM 刮字 —— 刮字的格式一變基準就整場汙染
+        const curCostEst = (costData.grouped || []).reduce((s, gp) =>
+            s + gp.lines.reduce((a, ln) => a + (ln.estimated_amount || 0), 0), 0);
+        const curCostAct = (costData.grouped || []).reduce((s, gp) =>
+            s + gp.lines.reduce((a, ln) => a + (ln.actual_amount || 0), 0), 0);
+        const curMiscAct = (expData.expenses || []).reduce((s, e) => s + (e.actual || 0), 0);
+        _dashBase = {
+            exTax: f.ex_tax, profitTarget: f.profit_target,
+            miscEstimated: d.miscEstimated, miscAuto: d.miscAuto,
+            miscPct: f.misc_budget_pct != null ? f.misc_budget_pct : 5,
+            otherCostEst: d.costEstimated - curCostEst,
+            otherCostAct: d.costActual - curCostAct,
+            otherMiscAct: d.miscActual - curMiscAct,
+        };
+        _fillDashGrid({ ...d, miscPct: _dashBase.miscPct });
         // DO NOT clear dirty maps here. Reload may happen via enableInlineEdit's
         // post-save renderDetail() while a cost cell auto-save is still pending
         // (debounced 1s timer hasn't fired). Wiping the buffer would lose that
@@ -161,56 +165,55 @@ async function _loadFinancialSummary(projectId) {
     }
 }
 
-// 儀表板格子的單一填值正本 —— 初次 render 與 inline 編輯後的即時重算共用。
-// v = { exTax, profitTarget, costEst, costAct, miscEst, miscAuto, miscAct }
-function _fillDashGrid(v) {
-    const execBudget = v.exTax - v.profitTarget;
-    const totalEst = v.costEst + v.miscEst;
-    const totalAct = v.costAct + v.miscAct;
-    const remEst = execBudget - totalEst;
-    const remAct = execBudget - totalAct;
-    const pfEst = v.exTax - totalEst;
-    const pfAct = v.exTax - totalAct;
-    const pfEstPct = v.exTax > 0 ? Math.round(pfEst / v.exTax * 100) : 0;
-    const pfActPct = v.exTax > 0 ? Math.round(pfAct / v.exTax * 100) : 0;
-    const usagePct = execBudget > 0 ? Math.round(totalAct / execBudget * 100) : 0;
-    const estPct = execBudget > 0 ? Math.round(totalEst / execBudget * 100) : 0;
+// 儀表板格子的填值正本 —— 只管畫；算的事委派 calcDashboardParts（公式單一
+// 來源，跟 calcDashboard 同一條），初次 render 與 inline 即時重算共用。
+function _fillDashGrid(parts) {
+    const d = calcDashboardParts(parts);
     const set = (id, text, color) => {
         const el = document.getElementById(id);
         if (el) { el.textContent = text; el.style.color = color || ''; }
     };
-    set('cd-cost-est', '$' + fmtNum(v.costEst));
-    set('cd-misc-est', '$' + fmtNum(v.miscEst) + (v.miscAuto ? '（自動）' : ''),
-        v.miscAuto ? '#6b7280' : '');
-    set('cd-rem-est', '$' + fmtNum(remEst), remainColor(remEst));
-    set('cd-pf-est', '$' + fmtNum(pfEst) + '（' + pfEstPct + '%）');
-    set('cd-cost-act', '$' + fmtNum(v.costAct));
-    set('cd-misc-act', '$' + fmtNum(v.miscAct));
-    set('cd-rem-act', '$' + fmtNum(remAct), remainColor(remAct));
-    set('cd-pf-act', '$' + fmtNum(pfAct) + '（' + pfActPct + '%'
-        + (pfActPct >= 20 ? ' ↑' : pfActPct < 0 ? ' ↓' : '') + '）', profitColor(pfActPct));
-    // 差額列：花錢欄用 剩/超（剩餘雜支就住在雜支欄這格）；推導欄用 ±（比計畫好＝綠）
-    const spendDiff = (id, est, act) => {
-        const left = est - act;
-        if (!est && !act) { set(id, '—', '#6b7280'); return; }
-        set(id, (left >= 0 ? '剩 $' : '超 $') + fmtNum(Math.abs(left)),
-            left >= 0 ? '#86efac' : '#fca5a5');
-    };
-    spendDiff('cd-cost-diff', v.costEst, v.costAct);
-    spendDiff('cd-misc-diff', v.miscEst, v.miscAct);
+    set('cd-cost-est', '$' + fmtNum(d.costEstimated));
+    const miscEstCell = document.getElementById('cd-misc-est');
+    if (miscEstCell) {
+        if (d.miscAuto) {
+            // 自動推算：值旁掛「?」—— hover 說明比例來源、點了可改比例
+            const pct = d.miscPct != null ? d.miscPct : 5;
+            miscEstCell.innerHTML = '$' + fmtNum(d.miscEstimated)
+                + `<span class="cd-q" onclick="window._miscPctEdit(this.parentElement)" title="子表未設「雜支預算」，自動以合約未稅的 ${pct}% 推估。點一下可修改比例；在行政雜支區設定雜支預算後即改用手動值。">?</span>`;
+            miscEstCell.style.color = '#6b7280';
+        } else {
+            miscEstCell.textContent = '$' + fmtNum(d.miscEstimated);
+            miscEstCell.style.color = '';
+        }
+    }
+    set('cd-rem-est', '$' + fmtNum(d.remaining), remainColor(d.remaining));
+    set('cd-pf-est', '$' + fmtNum(d.estProfit) + '（' + d.estProfitPct + '%）');
+    set('cd-cost-act', '$' + fmtNum(d.costActual));
+    set('cd-misc-act', '$' + fmtNum(d.miscActual));
+    set('cd-rem-act', '$' + fmtNum(d.remainingActual), remainColor(d.remainingActual));
+    // 毛利不掛箭頭 —— 顏色（達標綠/未達黃/虧損紅）就是語義（owner 2026-08-18）
+    set('cd-pf-act', '$' + fmtNum(d.actualProfit) + '（' + d.profitPct + '%）',
+        profitColor(d.profitPct));
+    // 差額列：花錢欄 剩/超（剩餘雜支就住在雜支欄這格）；推導欄 ±（比計畫好＝綠）
+    const setDL = (id, dl) => set(id, dl.text, dl.color);
+    setDL('cd-cost-diff', diffLabel(d.costActual - d.costEstimated,
+        !d.costEstimated && !d.costActual, true, ['剩 ', '超 ']));
+    setDL('cd-misc-diff', diffLabel(d.miscActual - d.miscEstimated,
+        !d.miscEstimated && !d.miscActual, true, ['剩 ', '超 ']));
     const drift = (id, val) => set(id, (val >= 0 ? '+$' : '−$') + fmtNum(Math.abs(val)),
-                                   val >= 0 ? '#86efac' : '#fca5a5');
-    drift('cd-rem-diff', remAct - remEst);
-    drift('cd-pf-diff', pfAct - pfEst);
+                                   remainColor(val));
+    drift('cd-rem-diff', d.remainingActual - d.remaining);
+    drift('cd-pf-diff', d.actualProfit - d.estProfit);
     // 進度條：實際填充 + 預估刻度（實際追過刻度＝超出原計畫）
     const bar = document.querySelector('.cost-progress-bar');
-    if (bar) { bar.style.width = Math.min(usagePct, 100) + '%'; bar.style.background = barColor(usagePct); }
+    if (bar) { bar.style.width = Math.min(d.usagePct, 100) + '%'; bar.style.background = barColor(d.usagePct); }
     const tick = document.querySelector('.cost-progress-tick');
-    if (tick) tick.style.left = Math.min(estPct, 100) + '%';
+    if (tick) tick.style.left = Math.min(d.estPct, 100) + '%';
     const label = document.querySelector('.cost-progress-label');
     if (label) {
-        label.textContent = '預算已使用 ' + usagePct + '%（實際 $' + fmtNum(totalAct)
-            + ' / 執行預算 $' + fmtNum(execBudget) + '）｜預估排定 ' + estPct + '%';
+        label.textContent = '預算已使用 ' + d.usagePct + '%（實際 $' + fmtNum(d.totalActual)
+            + ' / 執行預算 $' + fmtNum(d.execBudget) + '）｜預估排定 ' + d.estPct + '%';
     }
 }
 
@@ -430,8 +433,8 @@ function _renderCostLines(grouped, expenses, financialSummary) {
     const groupMisc = grp ? grp.misc_budget_amount : null;   // null＝未設，不是 0
     const miscBudget = groupMisc || 0;
     const expActualTotal = (expenses || []).reduce((s, e) => s + (e.actual || 0), 0);
-    const expDiff = expActualTotal - miscBudget;
-    const miscLeft = miscBudget - expActualTotal;
+    const miscLeft = miscBudget - expActualTotal;   // 剩餘雜支（差額欄用它的負值）
+    const expDiff = -miscLeft;
 
     html += `<div class="cost-phase-header" style="display:flex;justify-content:space-between;align-items:center;">
       <span>行政雜支</span>
@@ -440,7 +443,7 @@ function _renderCostLines(grouped, expenses, financialSummary) {
           雜支預算 <span class="cost-editable" onclick="window._miscBudgetEdit(this)"
                 title="點一下直接改本子表的雜支預算">${groupMisc == null ? '未設' : '$' + fmtNum(groupMisc)}</span>
           ｜ 已用 $${fmtNum(expActualTotal)}${groupMisc == null ? '' : `
-          ｜ 剩餘 <span style="color:${miscLeft >= 0 ? '#86efac' : '#fca5a5'};">$${fmtNum(miscLeft)}</span>`}
+          ｜ 剩餘 <span style="color:${remainColor(miscLeft)};">$${fmtNum(miscLeft)}</span>`}
         </span>
         <button class="crm-btn crm-btn-secondary cost-toolbar-btn" onclick="window._projShowExpenseModal()">+</button>
         <button class="crm-btn crm-btn-secondary cost-toolbar-btn" onclick="window._projBrowseReceipts()" title="瀏覽收據">&#128065;</button>
@@ -726,27 +729,22 @@ function _costUpdateSubtotals() {
             tDiffCell.style.color = tdl.color;
         }
     }
-    return { est: grandEst, act: grandAct,
-             costEst: grandEst - miscEstScraped, costAct: grandAct - miscActScraped,
+    return { costEst: grandEst - miscEstScraped, costAct: grandAct - miscActScraped,
              miscAct: miscActScraped };
 }
 
 function _costUpdateDashboard() {
-    // inline 編輯後的即時重算：當前子表用畫面掃出來的數，其他子表用 render
-    // 時記在 dataset 的基準值，加總後丟回 _fillDashGrid（跟初次 render 同一
-    // 個填值正本）。雜支預估是靜態的（改預算會走 reload），直接讀 dataset。
+    // inline 編輯後的即時重算：當前子表用畫面掃出來的即時值，其他子表用
+    // render 時算好的 _dashBase 基準，拼回專案全貌後交給同一個填值正本。
     var totals = _costUpdateSubtotals();
-    var dash = document.getElementById('cost-dash');
-    if (!dash || !totals) return;
-    var ds = dash.dataset;
+    if (!_dashBase || !document.getElementById('cd-cost-est')) return;
     _fillDashGrid({
-        exTax: parseInt(ds.exTax) || 0,
-        profitTarget: parseInt(ds.profitTarget) || 0,
-        costEst: (parseInt(ds.otherCostEst) || 0) + totals.costEst,
-        costAct: (parseInt(ds.otherCostAct) || 0) + totals.costAct,
-        miscEst: parseInt(ds.miscEst) || 0,
-        miscAuto: ds.miscAuto === '1',
-        miscAct: (parseInt(ds.otherMiscAct) || 0) + totals.miscAct,
+        exTax: _dashBase.exTax, profitTarget: _dashBase.profitTarget,
+        miscEstimated: _dashBase.miscEstimated, miscAuto: _dashBase.miscAuto,
+        miscPct: _dashBase.miscPct,
+        costEstimated: _dashBase.otherCostEst + totals.costEst,
+        costActual: _dashBase.otherCostAct + totals.costAct,
+        miscActual: _dashBase.otherMiscAct + totals.miscAct,
     });
 }
 
@@ -1025,9 +1023,11 @@ window._miscBudgetEdit = function(el) {
     const gid = state.selectedGroupId;
     if (!gid || el.querySelector('input')) return;
     const grp = (state.costGroups || []).find(g => g.id === gid);
-    const cur = grp && grp.misc_budget_amount != null ? grp.misc_budget_amount : '';
+    const cur = grp && grp.misc_budget_amount != null ? grp.misc_budget_amount : null;
+    // 取消/沒改 → 本地還原就好，別打 3 支 API 整版重載
+    const restore = () => { el.textContent = cur == null ? '未設' : '$' + fmtNum(cur); };
     const input = document.createElement('input');
-    input.type = 'number'; input.min = '0'; input.value = cur;
+    input.type = 'number'; input.min = '0'; input.value = cur == null ? '' : cur;
     input.className = 'crm-input';
     input.style.cssText = 'width:90px;font-size:11px;padding:1px 4px;';
     el.innerHTML = ''; el.appendChild(input);
@@ -1036,20 +1036,49 @@ window._miscBudgetEdit = function(el) {
     const commit = async () => {
         if (done) return; done = true;
         const raw = input.value.trim();
+        const val = raw === '' ? null : (parseInt(raw) || 0);   // 留空＝清回「未設」
+        if (val === cur) { restore(); return; }
         try {
-            // 留空＝不改（清回「未設」走子表編輯視窗 —— PUT 是 exclude_none，
-            // 這裡送不了 null）
-            if (raw !== '' && (parseInt(raw) || 0) !== (grp?.misc_budget_amount ?? -1)) {
-                await _fetch('/cost-groups/' + gid, { method: 'PUT',
-                    body: JSON.stringify({ misc_budget_amount: parseInt(raw) || 0 }) });
-            }
+            await _fetch('/cost-groups/' + gid, { method: 'PUT',
+                body: JSON.stringify({ misc_budget_amount: val }) });
             _loadFinancialSummary(state.selectedId);
-        } catch (e) { alert('儲存失敗：' + e.message); _loadFinancialSummary(state.selectedId); }
+        } catch (e) { alert('儲存失敗：' + e.message); restore(); }
     };
     input.addEventListener('blur', commit);
     input.addEventListener('keydown', ev => {
         if (ev.key === 'Enter') { ev.preventDefault(); input.blur(); }
-        if (ev.key === 'Escape') { done = true; _loadFinancialSummary(state.selectedId); }
+        if (ev.key === 'Escape') { done = true; restore(); }
+    });
+};
+
+// ── 自動雜支比例就地編輯（寫回專案的 misc_budget_pct）────────────
+window._miscPctEdit = function(cell) {
+    if (!state.selectedId || cell.querySelector('input')) return;
+    const cur = _dashBase ? _dashBase.miscPct : 5;
+    // 取消/沒改 → 用基準值重畫格子即可（不打 API）
+    const restore = () => _costUpdateDashboard();
+    const input = document.createElement('input');
+    input.type = 'number'; input.min = '0'; input.max = '100'; input.value = cur;
+    input.className = 'crm-input';
+    input.style.cssText = 'width:60px;font-size:12px;padding:1px 4px;text-align:right;';
+    cell.textContent = ''; cell.appendChild(input);
+    cell.insertAdjacentText('beforeend', ' %');
+    input.focus(); input.select();
+    let done = false;
+    const commit = async () => {
+        if (done) return; done = true;
+        const val = parseInt(input.value);
+        if (isNaN(val) || val === cur) { restore(); return; }
+        try {
+            await _fetch('/projects/' + state.selectedId, { method: 'PUT',
+                body: JSON.stringify({ misc_budget_pct: val }) });
+            _loadFinancialSummary(state.selectedId);
+        } catch (e) { alert('儲存失敗：' + e.message); restore(); }
+    };
+    input.addEventListener('blur', commit);
+    input.addEventListener('keydown', ev => {
+        if (ev.key === 'Enter') { ev.preventDefault(); input.blur(); }
+        if (ev.key === 'Escape') { done = true; restore(); }
     });
 };
 
@@ -1086,9 +1115,8 @@ window._expEdit = function(cell, expId, field, currentVal) {
         window._expDirtyMap[expId][field] = val;
         if (isAmount) {
             cell.textContent = '$' + fmtNum(val);
-            // Admin expense amount changed → client-side recalc subtotals + dashboard
-            // (without this the 行政雜支 小計 stays at $0 until next reload).
-            _costUpdateSubtotals();
+            // Admin expense amount changed → client-side recalc（_costUpdateDashboard
+            // 內部就會跑 _costUpdateSubtotals，不用各叫一次）
             _costUpdateDashboard();
         } else if (isCategory) {
             cell.innerHTML = `<span class="exp-cat-pill">${_esc(val)}</span>`;

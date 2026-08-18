@@ -925,27 +925,28 @@
     display: flex; align-items: center; gap: 16px;
     padding: 5px 0; border-bottom: 1px solid #2e2e2e;
 }
+/* 全欄置中（owner 2026-08-18）—— 表頭與資料格同一套對齊，掃視不跳行 */
 .cost-row-expense .exp-col-date {
     flex: 0 0 118px;   /* 跟就地新增列的原生 date picker 同寬，欄位才對得齊 */
-    color: #6b7280; font-size: 10px;
+    color: #6b7280; font-size: 10px; text-align: center;
     font-variant-numeric: tabular-nums;
 }
 .cost-row-expense .exp-col-cat {
-    flex: 0 0 76px;
+    flex: 0 0 76px; text-align: center;
     color: #d1d5db;
 }
 .cost-row-expense .exp-col-sub {
-    flex: 3 1 160px; min-width: 0;
+    flex: 3 1 160px; min-width: 0; text-align: center;
     overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
     color: #d1d5db;
 }
 .cost-row-expense .exp-col-amt {
     flex: 0 1 110px;
-    text-align: right; color: #e0e0e0;
+    text-align: center; color: #e0e0e0;
     font-variant-numeric: tabular-nums;
 }
 .cost-row-expense .exp-col-payee {
-    flex: 1 1 130px; min-width: 0;
+    flex: 1 1 130px; min-width: 0; text-align: center;
     font-size: 11px; color: #9ca3af;
     overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
@@ -991,7 +992,7 @@
 .exp-qa .exp-col-date { flex: 0 0 118px; }
 .exp-qa .crm-btn { white-space: nowrap; }
 .exp-qa input, .exp-qa select {
-    width: 100%; box-sizing: border-box;
+    width: 100%; box-sizing: border-box; text-align: center;
     background: #222; border: 1px solid #333; color: #d1d5db;
     font-size: 11px; padding: 2px 4px; border-radius: 4px;
 }
@@ -1093,16 +1094,6 @@
 }
 
 /* ── Cost Dashboard (財務卡片 + 進度條) ── */
-.cost-dashboard {
-    display: flex; gap: 8px; margin-bottom: 10px;
-}
-.cost-card {
-    flex: 1; background: #1e1e1e; border: 1px solid #2e2e2e; border-radius: 8px;
-    padding: 10px 12px; text-align: center;
-}
-.cost-card-label { font-size: 11px; color: #6b7280; margin-bottom: 4px; }
-.cost-card-value { font-size: 18px; font-weight: 700; }
-.cost-card-sub { font-size: 10px; color: #555; margin-top: 2px; }
 /* 儀表板 2026-08 版：錨點列 + 預估/實際/差額 × 成本/雜支/剩餘/毛利 對照格 */
 .cost-dash-anchors {
     display: flex; gap: 20px; flex-wrap: wrap; align-items: baseline;
@@ -1122,6 +1113,14 @@
     border-bottom: 1px solid #2e2e2e; padding-bottom: 3px;
 }
 .cost-dash-grid .cdg-r { font-size: 11px; color: #6b7280; text-align: left; }
+/* 自動推算的「?」：hover 看說明、點了改比例 */
+.cd-q {
+    display: inline-block; margin-left: 5px; width: 14px; height: 14px;
+    line-height: 14px; text-align: center; border-radius: 50%;
+    border: 1px solid #4b5563; font-size: 10px; color: #9ca3af;
+    cursor: pointer; vertical-align: 1px;
+}
+.cd-q:hover { border-color: #9ca3af; color: #d1d5db; }
 .cost-progress-wrap {
     position: relative;
     height: 6px; background: #2e2e2e; border-radius: 3px; margin-bottom: 4px;
@@ -1133,10 +1132,6 @@
     background: #9ca3af; border-radius: 1px;
 }
 .cost-progress-label { font-size: 11px; color: #6b7280; text-align: right; margin-bottom: 8px; }
-.cost-dashboard-detail {
-    display: flex; gap: 16px; font-size: 11px; color: #9ca3af;
-    padding: 6px 0; border-top: 1px solid #2e2e2e; margin-bottom: 4px;
-}
 
 .cost-tpl-item {
     padding: 6px 12px; cursor: pointer; font-size: 12px;

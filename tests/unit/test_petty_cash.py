@@ -648,8 +648,14 @@ def test_dashboard_misc_estimate_source():
     assert "expense_estimated" not in calc.split("export function calcDashboard")[1], \
         "calcDashboard 又退回死掉的逐列 estimated"
     assert '"misc_budget_total": misc_budget_total' in COSTS_SRC  # financial-summary 有帶
-    # 儀表板填值單一正本 + 雜支預算就地編輯 + 剩餘雜支住在對照表雜支欄
-    assert "_fillDashGrid" in COST_VIEW and "_miscBudgetEdit" in COST_VIEW
+    # 公式單一正本：calcDashboardParts 是唯一的衍生鏈，_fillDashGrid 只准委派
+    # 不准自己算（2026-08-18 /simplify：兩份公式已經在 usagePct 改口徑時
+    # 差點各改各的）
+    assert "export function calcDashboardParts" in calc
+    fill = COST_VIEW.split("function _fillDashGrid")[1].split("\nfunction ")[0]
+    assert "calcDashboardParts(" in fill
+    assert "Math.round" not in fill, "_fillDashGrid 又自己長出公式了"
+    assert "_miscBudgetEdit" in COST_VIEW and "_miscPctEdit" in COST_VIEW
     assert "cd-misc-diff" in COST_VIEW
 
 

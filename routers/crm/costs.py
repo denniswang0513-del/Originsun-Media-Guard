@@ -235,7 +235,9 @@ async def list_project_expenses(project_id: str, group_id: Optional[str] = Query
         "misc_budget_amount": g.misc_budget_amount,   # 可為 None＝未設，不是 0
         "expenses": [_e_to_dict(e) for e in rows if e.cost_group_id == g.id],
     } for g in groups]
-    # 雜支預算：跨子表加總。全部未設 → None（畫面要畫「未設」而不是「預算 0」）
+    # 雜支預算：跨子表加總。全部未設 → None（畫面要畫「未設」而不是「預算 0」）。
+    # ⚠ 同語義的 SQL 版在 financial-summary 的 misc_budget_total（SUM 忽略
+    # NULL）—— 改「0 是否視為未設」這類語義時兩處要一起動。
     budgets = [g.misc_budget_amount for g in groups if g.misc_budget_amount is not None]
     return {"expenses": expenses, "grouped_by_group": grouped_by_group,
             "misc_budget_total": sum(budgets) if budgets else None}
@@ -767,7 +769,9 @@ async def project_financial_summary(project_id: str):
                     else_=0,
                 )), 0),
                 # 手動雜支預算加總：SUM 忽略 NULL；全部未設 → NULL（≠ 0，
-                # 前端據此決定退回 misc_budget_pct 自動推算）
+                # 前端據此決定退回 misc_budget_pct 自動推算）。
+                # ⚠ Python 版同語義在 list_project_expenses 的 misc_budget_total
+                # —— 語義變動兩處要一起動。
                 sa_func.sum(CrmProjectCostGroup.misc_budget_amount),
             )
             .where(CrmProjectCostGroup.project_id == project_id)
@@ -1456,7 +1460,12 @@ async def create_cost_group(project_id: str, req: CostGroupCreate, request: Requ
 
 @router.put("/cost-groups/{group_id}")
 async def update_cost_group(group_id: str, req: CostGroupUpdate, request: Request):
-    """更新子表（名稱/拍攝日/備註/排序/預算/毛利率），PATCH 風格只動非 None 欄位。"""
+    """更新子表（名稱/拍攝日/備註/排序/預算/毛利率），PATCH 風格只動有帶的欄位。
+
+    exclude_unset（不是 exclude_none）：顯式帶 null ＝ 清空 —— 雜支預算清回
+    「未設」（≠ 0，未設才會退回 % 自動推算）靠這個；exclude_none 會把 null
+    靜默丟掉，編輯視窗按了清空其實沒清（同 costs.py 收據路徑的前例）。
+    """
     _check_auth(request)
     _require_db()
     factory = await _get_factory()
@@ -1464,8 +1473,8 @@ async def update_cost_group(group_id: str, req: CostGroupUpdate, request: Reques
         g = await session.get(CrmProjectCostGroup, group_id)
         if not g:
             raise HTTPException(status_code=404, detail="找不到此子表")
-        data = req.model_dump(exclude_none=True)
-        if "name" in data:
+        data = req.model_dump(exclude_unset=True)
+        if data.get("name"):
             g.name = data["name"].strip() or g.name
         if "shoot_date" in data:
             g.shoot_date = _parse_shoot_date(data["shoot_date"]) if data["shoot_date"] else None
