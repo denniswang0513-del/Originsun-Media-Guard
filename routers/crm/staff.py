@@ -19,7 +19,7 @@ from fastapi import Depends, HTTPException, Request, UploadFile, File, Query
 from core.schemas import StaffPayload, ResumePayload, ProjectStaffPayload
 
 from ._shared import (router, token_router, _check_auth, _check_project_write_auth, money_dep,
-                      _require_db, _get_factory, _now,
+                      _require_db, _get_factory, _fmt_day, _now,
                       STAFF_CREATED_VIA_ADMIN, _UPLOAD_BASE, _ALLOWED_IMG_EXT,
                       _verify_token_generic)
 
@@ -64,8 +64,8 @@ def _to_staff_dict(s) -> dict:
         "status": s.status or "在職", "notes": s.notes or "",
         # H1 員工檔案完整化
         "employment_type": s.employment_type or "",
-        "hire_date": s.hire_date.strftime("%Y-%m-%d") if s.hire_date else "",
-        "leave_date": s.leave_date.strftime("%Y-%m-%d") if s.leave_date else "",
+        "hire_date": _fmt_day(s.hire_date),
+        "leave_date": _fmt_day(s.leave_date),
         "emergency_contact": s.emergency_contact or "",
         "photo_url": s.photo_url or "",
         "bio": s.bio or "",
@@ -162,7 +162,7 @@ async def staff_rate_history(staff_id: str, request: Request):
         )).scalars().all()
     return {"history": [{
         "day_rate": r.day_rate,
-        "effective_from": r.effective_from.strftime("%Y-%m-%d") if r.effective_from else "",
+        "effective_from": _fmt_day(r.effective_from),
         "note": r.note or "",
     } for r in rows]}
 

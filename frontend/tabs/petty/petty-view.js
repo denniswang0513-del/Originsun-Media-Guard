@@ -35,9 +35,10 @@ function projectLabels(projects) {
     }
     return { labelOf, idOfLabel };
 }
-// <select> 用的整串 options（第一個是「不選」那格，各處文案不同）
-function projectOptions(projects, blank) {
-    const { labelOf } = projectLabels(projects);
+// <select> 用的整串 options（第一個是「不選」那格，各處文案不同）。
+// 呼叫端手上已有 labelOf 就傳進來，別讓同一張表在一個 render 裡算兩次。
+function projectOptions(projects, blank, labelOf) {
+    labelOf = labelOf || projectLabels(projects).labelOf;
     return blank + projects.map(p =>
         `<option value="${esc(p.id)}">${esc(labelOf[p.id])}</option>`).join("");
 }
@@ -536,7 +537,7 @@ export async function renderOverview(host) {
         + Object.keys(idOfLabel).map(l => `<option value="${esc(l)}"></option>`).join("")
         + "</datalist>";
     // 新增列仍用 select（只有一個，238 個選項無所謂，而且可直接挑）
-    const PROJ_OPTS = projectOptions(opts.projects, '<option value="">（無專案）</option>');
+    const PROJ_OPTS = projectOptions(opts.projects, '<option value="">（無專案）</option>', labelOf);
     // 只有「專案雜支」開放連結專案（owner 2026-08-17）。規則來自後端的
     // `project_link_items`，不在前端寫死 —— 兩邊各寫一份就會漂。
     const LINKABLE = linkableSet(opts);

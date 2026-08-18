@@ -118,6 +118,13 @@ export function fmtNum(n) {
     return (n || 0).toLocaleString('zh-TW');
 }
 
+// 今天（本地時區）的 YYYY-MM-DD —— 別用 toISOString().slice(0,10)：
+// 那是 UTC 面值，台北早上八點前會差一天。
+export function today() {
+    const d = new Date();
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+
 export function populateClientSelect(elementId, clients, placeholder = '全部客戶') {
     const sel = document.getElementById(elementId);
     if (!sel) return;

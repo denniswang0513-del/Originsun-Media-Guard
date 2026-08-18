@@ -31,8 +31,8 @@ from core.money import can_see_money
 from core.identity import resolve_current_staff
 from core.schemas import PettyExpensePayload, PettySubmitPayload
 from db.models import (Client, CrmCashEntry, CrmPaymentRequest, CrmProject,
-                       CrmProjectExpense, CrmReimbursement, CrmStaff,
-                       FinanceCategoryMap, User)
+                       CrmProjectCostGroup, CrmProjectExpense, CrmReimbursement,
+                       CrmStaff, FinanceCategoryMap, User)
 
 from ._shared import (_assert_month_open, _crm_session, _fmt_day, _now,
                       _parse_day, _username, money_dep, router)
@@ -133,7 +133,6 @@ def _expense_dict(e: CrmProjectExpense, project_name: str = "") -> dict:
         "project_id": e.project_id or "",
         "project_name": project_name,
         "project_label": e.project_label or "",
-        "cost_group_id": e.cost_group_id or "",
         "invoice_no": e.invoice_no or "",
         "has_invoice": bool(e.has_invoice),
         "receipt_url": e.receipt_url or "",
@@ -170,7 +169,9 @@ def _project_year(p) -> str:
     """
     for d in (p.start_date, p.shoot_date, p.completion_date):
         if d:
-            return str(d.year)
+            # timestamptz 面值取年份會踩台北 1/1 → 前一年 12/31 的同型坑，
+            # 一律走 _fmt_day 歸一再切前四碼
+            return _fmt_day(d)[:4]
     return ""
 
 
@@ -665,7 +666,6 @@ async def petty_entries(request: Request, q: str = Query(""),
         gids = {e.cost_group_id for e in rows if e.cost_group_id}
         cost_groups = {}
         if gids:
-            from db.models import CrmProjectCostGroup
             cost_groups = dict((await session.execute(
                 select(CrmProjectCostGroup.id, CrmProjectCostGroup.name)
                 .where(CrmProjectCostGroup.id.in_(gids)))).all())
@@ -690,7 +690,6 @@ async def petty_project_groups(project_id: str, request: Request):
     """
     _check_approver(request)
     async with _crm_session() as session:
-        from db.models import CrmProjectCostGroup
         rows = (await session.execute(
             select(CrmProjectCostGroup.id, CrmProjectCostGroup.name,
                    CrmProjectCostGroup.shoot_date)

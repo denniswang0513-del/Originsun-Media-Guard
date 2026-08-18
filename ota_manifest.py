@@ -5,6 +5,7 @@ Used by: publish_update.py, build_agent_zip.py, update_agent.py, preflight.py
 
 import os
 import re
+import sys
 
 # ── Individual files synced to Agent ──
 AGENT_FILES = [
@@ -78,26 +79,12 @@ EXCLUDE_DIRS = {
 }
 
 # ── Python stdlib modules (excluded from dependency checks) ──
-STDLIB = {
-    "os", "sys", "json", "time", "re", "io", "math", "random", "uuid", "datetime", "calendar",
-    "pathlib", "collections", "functools", "itertools", "typing", "enum", "dataclasses",
-    "abc", "subprocess", "shutil", "tempfile", "zipfile", "hashlib", "socket", "signal",
-    "threading", "asyncio", "concurrent", "http", "urllib", "email", "html", "xml",
-    "logging", "warnings", "traceback", "inspect", "importlib", "pkgutil", "copy",
-    "struct", "base64", "hmac", "secrets", "contextlib", "textwrap", "string",
-    "argparse", "configparser", "csv", "sqlite3", "platform", "ctypes", "glob",
-    "fnmatch", "stat", "mimetypes", "webbrowser", "multiprocessing", "filecmp", "gc",
-    "locale", "queue", "tkinter", "codecs", "operator", "fractions", "decimal",
-    "heapq", "bisect", "array", "weakref", "types", "numbers", "cmath", "pprint",
-    "dis", "token", "tokenize", "site", "pip", "distutils", "unittest", "doctest",
-    "venv", "ensurepip", "getpass", "atexit", "selectors", "ssl", "certifi",
-    "winreg", "msvcrt", "winsound", "nt", "posixpath", "ntpath", "_thread", "builtins",
-    "__future__", "annotations", "sysconfig", "zipimport", "runpy",
-    "faulthandler", "smtplib", "imaplib", "poplib", "email",
-    "tarfile",  # 標準庫，先前漏列 → preflight 會把它當第三方套件檢查
-    "unicodedata",  # 同上（core/doc_text 的 NFKC 正規化）
-    "zoneinfo",  # 同上（3.9+ 標準庫；crm/_shared 的台北時區歸一）
-}
+# 3.10+ 直接問直譯器，不再手維護清單 —— tarfile / unicodedata / zoneinfo
+# 各漏過一次，每次都是 preflight/發版現場才發現。master 與機隊都跑 3.11。
+# 聯集的殘餘＝不是 stdlib、但一樣不該進 requirements 的名字：
+#   pip / certifi 隨環境必在；annotations 是掃描器把
+#   `from __future__ import annotations` 當模組名收進來的假陽性。
+STDLIB = set(sys.stdlib_module_names) | {"pip", "certifi", "annotations"}
 
 # ── Local project modules (excluded from dependency checks) ──
 LOCAL_MODULES = {

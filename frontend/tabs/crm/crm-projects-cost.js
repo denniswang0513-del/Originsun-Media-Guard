@@ -5,7 +5,7 @@
 
 import { state, callbacks, EXPENSE_CATEGORIES } from './crm-projects-state.js';
 import { calcDashboard, remainColor, profitColor, barColor, diffLabel } from './crm-projects-calc.js';
-import { crmFetch as _fetch, esc as _esc, fmtNum, searchableSelect, moneyGate }
+import { crmFetch as _fetch, esc as _esc, fmtNum, searchableSelect, moneyGate, today }
     from './crm-utils.js';
 
 // ── Dirty map ──────────────────────────────────────────────────
@@ -365,122 +365,122 @@ function _renderCostLines(grouped, expenses, financialSummary) {
         }
     }
 
-        // ── 行政雜支 section (from crm_project_expenses) ──
-        const miscBudget = financialSummary ? (financialSummary.misc_budget || 0) : 0;
-        const expActualTotal = (expenses || []).reduce((s, e) => s + (e.actual || 0), 0);
-        const expDiff = expActualTotal - miscBudget;
-        const expDiffColor = expDiff < 0 ? '#86efac' : expDiff > 0 ? '#fca5a5' : '#9ca3af';
+    // ── 行政雜支 section (from crm_project_expenses) ──
+    const miscBudget = financialSummary ? (financialSummary.misc_budget || 0) : 0;
+    const expActualTotal = (expenses || []).reduce((s, e) => s + (e.actual || 0), 0);
+    const expDiff = expActualTotal - miscBudget;
+    const expDiffColor = expDiff < 0 ? '#86efac' : expDiff > 0 ? '#fca5a5' : '#9ca3af';
 
-        html += `<div class="cost-phase-header" style="display:flex;justify-content:space-between;align-items:center;">
-          <span>行政雜支</span>
-          <div style="display:flex;gap:6px;align-items:center;">
-            <span style="font-weight:400;font-size:11px;color:#6b7280;">預估 $${fmtNum(miscBudget)}</span>
-            <button class="crm-btn crm-btn-secondary cost-toolbar-btn" onclick="window._projShowExpenseModal()">+</button>
-            <button class="crm-btn crm-btn-secondary cost-toolbar-btn" onclick="window._projBrowseReceipts()" title="瀏覽收據">&#128065;</button>
-            <button class="crm-btn crm-btn-secondary cost-toolbar-btn" onclick="window._projShareExpenseLink()" title="複製當前子表的雜支登記連結">🔗</button>
-          </div>
-        </div>`;
+    html += `<div class="cost-phase-header" style="display:flex;justify-content:space-between;align-items:center;">
+      <span>行政雜支</span>
+      <div style="display:flex;gap:6px;align-items:center;">
+        <span style="font-weight:400;font-size:11px;color:#6b7280;">預估 $${fmtNum(miscBudget)}</span>
+        <button class="crm-btn crm-btn-secondary cost-toolbar-btn" onclick="window._projShowExpenseModal()">+</button>
+        <button class="crm-btn crm-btn-secondary cost-toolbar-btn" onclick="window._projBrowseReceipts()" title="瀏覽收據">&#128065;</button>
+        <button class="crm-btn crm-btn-secondary cost-toolbar-btn" onclick="window._projShareExpenseLink()" title="複製當前子表的雜支登記連結">🔗</button>
+      </div>
+    </div>`;
 
-        if (expenses && expenses.length > 0) {
-            for (const e of expenses) {
-                // 消費日優先（零用金帶真實消費日）；手動列退回登記日
-                const dateStr = _esc(e.expense_date || e.created_at || '');
-                const subDisplay = e.sub_item ? _esc(e.sub_item) : '<span class="crm-muted">—</span>';
-                // 零用金流進來的列：收款人讀員工檔（payee 是自由文字，那些列必空）、
-                // 掛「零用金」pill；已進請款單（claim_id）→ 這頁唯讀，後端同樣 409。
-                const fromPetty = !!e.staff_id;
-                const locked = !!e.claim_id;
-                const payeeName = e.staff_name || e.payee || '';
-                const pill = fromPetty
-                    ? `<span class="exp-pill" title="來自零用金請款${e.status ? '（狀態：' + _esc(e.status) + '）' : ''}${locked ? '，已進請款單 — 請到零用金頁處理' : ''}">零用金</span>`
-                    : '';
-                // 可編輯性收在這一個 helper：locked 全鎖；零用金列的收款人是身分不是文字
-                const edCell = (cls, field, cur, display) => {
-                    if (locked || (fromPetty && field === 'payee')) return `<span class="${cls}">${display}</span>`;
-                    const curArg = field === 'actual' ? (e.actual || 0) : `'${_esc(cur || '')}'`;
-                    return `<span class="${cls} cost-editable" onclick="window._expEdit(this,'${e.id}','${field}',${curArg})">${display}</span>`;
-                };
-                html += `
-                  <div class="cost-row cost-row-expense"${locked ? ' title="已進零用金請款單：這頁唯讀，請到零用金頁處理"' : ''}>
-                    <span class="exp-col-date">${dateStr}</span>
-                    ${edCell('exp-col-cat', 'category', e.category, _esc(e.category))}
-                    ${edCell('exp-col-sub', 'sub_item', e.sub_item, subDisplay)}
-                    ${edCell('exp-col-amt', 'actual', null, '$' + fmtNum(e.actual))}
-                    ${edCell('exp-col-payee', 'payee', e.payee, (payeeName ? _esc(payeeName) : '<span class="crm-muted">—</span>') + pill)}
-                    <span class="exp-col-receipt">${e.receipt_url ? '<a href="' + e.receipt_url + '" target="_blank" style="color:#3b82f6;">📎</a>' : '—'}</span>
-                    <span class="exp-col-action">${locked ? '' : `
-                      <button class="crm-btn crm-btn-danger crm-btn-sm" style="padding:1px 5px;"
-                              onclick="window._projDeleteExpense('${e.id}')">✕</button>`}
-                    </span>
-                  </div>`;
-            }
+    if (expenses && expenses.length > 0) {
+        for (const e of expenses) {
+            // 消費日優先（零用金帶真實消費日）；手動列退回登記日
+            const dateStr = _esc(e.expense_date || e.created_at || '');
+            const subDisplay = e.sub_item ? _esc(e.sub_item) : '<span class="crm-muted">—</span>';
+            // 零用金流進來的列：收款人讀員工檔（payee 是自由文字，那些列必空）、
+            // 掛「零用金」pill；已進請款單（claim_id）→ 這頁唯讀，後端同樣 409。
+            const fromPetty = !!e.staff_id;
+            const locked = !!e.claim_id;
+            const payeeName = e.staff_name || e.payee || '';
+            const pill = fromPetty
+                ? `<span class="exp-pill" title="來自零用金請款${e.status ? '（狀態：' + _esc(e.status) + '）' : ''}${locked ? '，已進請款單 — 請到零用金頁處理' : ''}">零用金</span>`
+                : '';
+            // 可編輯性收在這一個 helper：locked 全鎖；零用金列的收款人是身分不是文字
+            const edCell = (cls, field, cur, display) => {
+                if (locked || (fromPetty && field === 'payee')) return `<span class="${cls}">${display}</span>`;
+                const curArg = typeof cur === 'number' ? cur : `'${_esc(cur || '')}'`;
+                return `<span class="${cls} cost-editable" onclick="window._expEdit(this,'${e.id}','${field}',${curArg})">${display}</span>`;
+            };
+            html += `
+              <div class="cost-row cost-row-expense"${locked ? ' title="已進零用金請款單：這頁唯讀，請到零用金頁處理"' : ''}>
+                ${edCell('exp-col-date', 'expense_date', dateStr, dateStr || '<span class="crm-muted">—</span>')}
+                ${edCell('exp-col-cat', 'category', e.category, _esc(e.category))}
+                ${edCell('exp-col-sub', 'sub_item', e.sub_item, subDisplay)}
+                ${edCell('exp-col-amt', 'actual', e.actual || 0, '$' + fmtNum(e.actual))}
+                ${edCell('exp-col-payee', 'payee', e.payee, (payeeName ? _esc(payeeName) : '<span class="crm-muted">—</span>') + pill)}
+                <span class="exp-col-receipt">${e.receipt_url ? '<a href="' + e.receipt_url + '" target="_blank" style="color:#3b82f6;">📎</a>' : '—'}</span>
+                <span class="exp-col-action">${locked ? '' : `
+                  <button class="crm-btn crm-btn-danger crm-btn-sm" style="padding:1px 5px;"
+                          onclick="window._projDeleteExpense('${e.id}')">✕</button>`}
+                </span>
+              </div>`;
         }
+    }
 
-        // 就地新增列 —— 日常登記的正路（modal 留給要附收據的情況）。
-        // $0 佔位列 2026-08-18 退場後，這條就是「從這裡登記」的唯一入口。
-        const qaToday = new Date().toISOString().slice(0, 10);
-        const qaStaff = '<option value=""></option>' + (state.staffList || []).map(st =>
-            `<option value="${_esc(st.name)}">${_esc(st.name)}</option>`).join('');
-        html += `
-          <div class="cost-row cost-row-expense exp-qa">
-            <span class="exp-col-date"><input id="exp-qa-date" type="date" value="${qaToday}"></span>
-            <span class="exp-col-cat"><select id="exp-qa-cat" data-no-search>${EXPENSE_CATEGORIES.map(c => `<option>${c}</option>`).join('')}</select></span>
-            <span class="exp-col-sub"><input id="exp-qa-sub" placeholder="＋ 新增一筆：細項（Enter 儲存）"
-                   onkeydown="if(event.key==='Enter')window._expQuickAdd()"></span>
-            <span class="exp-col-amt"><input id="exp-qa-amt" type="number" min="0" placeholder="金額"
-                   onkeydown="if(event.key==='Enter')window._expQuickAdd()"></span>
-            <span class="exp-col-payee"><select id="exp-qa-payee" data-no-search title="收款人">${qaStaff}</select></span>
-            <span class="exp-col-receipt"></span>
-            <span class="exp-col-action">
-              <button class="crm-btn crm-btn-secondary crm-btn-sm" style="padding:1px 6px;"
-                      onclick="window._expQuickAdd()">新增</button>
-            </span>
-          </div>`;
+    // 就地新增列 —— 日常登記的正路（modal 留給要附收據的情況）。
+    // $0 佔位列 2026-08-18 退場後，這條就是「從這裡登記」的唯一入口。
+    const qaToday = today();
+    const qaStaff = '<option value=""></option>' + (state.staffList || []).map(st =>
+        `<option value="${_esc(st.name)}">${_esc(st.name)}</option>`).join('');
+    html += `
+      <div class="cost-row cost-row-expense exp-qa">
+        <span class="exp-col-date"><input id="exp-qa-date" type="date" value="${qaToday}"></span>
+        <span class="exp-col-cat"><select id="exp-qa-cat" data-no-search>${EXPENSE_CATEGORIES.map(c => `<option>${c}</option>`).join('')}</select></span>
+        <span class="exp-col-sub"><input id="exp-qa-sub" placeholder="＋ 新增一筆：細項（Enter 儲存）"
+               onkeydown="if(event.key==='Enter')window._expQuickAdd()"></span>
+        <span class="exp-col-amt"><input id="exp-qa-amt" type="number" min="0" placeholder="金額"
+               onkeydown="if(event.key==='Enter')window._expQuickAdd()"></span>
+        <span class="exp-col-payee"><select id="exp-qa-payee" data-no-search title="收款人">${qaStaff}</select></span>
+        <span class="exp-col-receipt"></span>
+        <span class="exp-col-action">
+          <button class="crm-btn crm-btn-secondary crm-btn-sm" style="padding:1px 6px;"
+                  onclick="window._expQuickAdd()">新增</button>
+        </span>
+      </div>`;
 
-        html += `
-          <div class="cost-row cost-row-subtotal">
-            <span class="cost-col-item" style="color:#9ca3af;font-style:italic;">行政雜支 小計</span>
-            <span class="cost-col-price"></span>
-            <span class="cost-col-qty"></span>
-            <span class="cost-col-unit"></span>
-            <span class="cost-col-amt" style="font-weight:600;">$${fmtNum(miscBudget)}</span>
-            <span class="cost-col-staff cost-divider"></span>
-            <span class="cost-col-price"></span>
-            <span class="cost-col-qty"></span>
-            <span class="cost-col-unit"></span>
-            <span class="cost-col-amt" style="font-weight:600;">$${fmtNum(expActualTotal)}</span>
-            <span class="cost-col-staff"></span>
-            <span class="cost-col-diff" style="color:${diffLabel(expDiff, !miscBudget && !expActualTotal, true).color};font-weight:600;">
-              ${diffLabel(expDiff, !miscBudget && !expActualTotal, true).text}
-            </span>
-            <span class="cost-col-actions"></span>
-          </div>`;
+    html += `
+      <div class="cost-row cost-row-subtotal">
+        <span class="cost-col-item" style="color:#9ca3af;font-style:italic;">行政雜支 小計</span>
+        <span class="cost-col-price"></span>
+        <span class="cost-col-qty"></span>
+        <span class="cost-col-unit"></span>
+        <span class="cost-col-amt" style="font-weight:600;">$${fmtNum(miscBudget)}</span>
+        <span class="cost-col-staff cost-divider"></span>
+        <span class="cost-col-price"></span>
+        <span class="cost-col-qty"></span>
+        <span class="cost-col-unit"></span>
+        <span class="cost-col-amt" style="font-weight:600;">$${fmtNum(expActualTotal)}</span>
+        <span class="cost-col-staff"></span>
+        <span class="cost-col-diff" style="color:${diffLabel(expDiff, !miscBudget && !expActualTotal, true).color};font-weight:600;">
+          ${diffLabel(expDiff, !miscBudget && !expActualTotal, true).text}
+        </span>
+        <span class="cost-col-actions"></span>
+      </div>`;
 
-        // ── Grand total (cost lines + expenses) ──
-        // 預估側計入雜支「預算」而不是實際數 —— 否則雜支對差額的貢獻恆為 0，
-        // 跟上面小計那欄（實際-預算）自相矛盾。
-        const totalEst = grandEst + miscBudget;
-        const totalAct = grandAct + expActualTotal;
-        const totalDiff = totalAct - totalEst;
-        const totalDiffColor = totalDiff < 0 ? '#86efac' : totalDiff > 0 ? '#fca5a5' : '#9ca3af';
-        html += `
-          <div class="cost-row cost-row-total">
-            <span class="cost-col-item">本子表合計</span>
-            <span class="cost-col-price"></span>
-            <span class="cost-col-qty"></span>
-            <span class="cost-col-unit"></span>
-            <span class="cost-col-amt">$${fmtNum(totalEst)}</span>
-            <span class="cost-col-staff cost-divider"></span>
-            <span class="cost-col-price"></span>
-            <span class="cost-col-qty"></span>
-            <span class="cost-col-unit"></span>
-            <span class="cost-col-amt">$${fmtNum(totalAct)}</span>
-            <span class="cost-col-staff"></span>
-            <span class="cost-col-diff" style="color:${diffLabel(totalDiff, !totalEst && !totalAct, true).color};">
-              ${diffLabel(totalDiff, !totalEst && !totalAct, true).text}
-            </span>
-            <span class="cost-col-actions"></span>
-          </div>`;
+    // ── Grand total (cost lines + expenses) ──
+    // 預估側計入雜支「預算」而不是實際數 —— 否則雜支對差額的貢獻恆為 0，
+    // 跟上面小計那欄（實際-預算）自相矛盾。
+    const totalEst = grandEst + miscBudget;
+    const totalAct = grandAct + expActualTotal;
+    const totalDiff = totalAct - totalEst;
+    const totalDiffColor = totalDiff < 0 ? '#86efac' : totalDiff > 0 ? '#fca5a5' : '#9ca3af';
+    html += `
+      <div class="cost-row cost-row-total">
+        <span class="cost-col-item">本子表合計</span>
+        <span class="cost-col-price"></span>
+        <span class="cost-col-qty"></span>
+        <span class="cost-col-unit"></span>
+        <span class="cost-col-amt">$${fmtNum(totalEst)}</span>
+        <span class="cost-col-staff cost-divider"></span>
+        <span class="cost-col-price"></span>
+        <span class="cost-col-qty"></span>
+        <span class="cost-col-unit"></span>
+        <span class="cost-col-amt">$${fmtNum(totalAct)}</span>
+        <span class="cost-col-staff"></span>
+        <span class="cost-col-diff" style="color:${diffLabel(totalDiff, !totalEst && !totalAct, true).color};">
+          ${diffLabel(totalDiff, !totalEst && !totalAct, true).text}
+        </span>
+        <span class="cost-col-actions"></span>
+      </div>`;
 
     html += '</div>';
     return html;
@@ -943,7 +943,9 @@ window._expQuickAdd = async function() {
                 expense_date: document.getElementById('exp-qa-date').value || '',
             }),
         });
-        _loadFinancialSummary(state.selectedId);
+        // 重載後把焦點放回細項欄 —— 連續登記（Enter、Enter、Enter）不用重新點
+        await _loadFinancialSummary(state.selectedId);
+        document.getElementById('exp-qa-sub')?.focus();
     } catch (e) { alert('新增失敗：' + e.message); }
 };
 
@@ -952,6 +954,7 @@ window._expEdit = function(cell, expId, field, currentVal) {
     if (cell.querySelector('input, select')) return;
     const isCategory = field === 'category';
     const isAmount = field === 'actual';
+    const isDate = field === 'expense_date';
     let input;
     if (isCategory) {
         input = document.createElement('select');
@@ -960,7 +963,7 @@ window._expEdit = function(cell, expId, field, currentVal) {
         ).join('');
     } else {
         input = document.createElement('input');
-        input.type = isAmount ? 'number' : 'text';
+        input.type = isAmount ? 'number' : (isDate ? 'date' : 'text');
         if (isAmount) input.min = '0';
         input.value = currentVal !== null && currentVal !== undefined ? currentVal : '';
     }

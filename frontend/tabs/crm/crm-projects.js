@@ -11,7 +11,7 @@
  *   finance.js — 預支 + 請款 + 雜支
  */
 
-import { crmFetch as _fetch, esc as _esc, setupResizeHandle, hasModule } from './crm-utils.js';
+import { crmFetch as _fetch, esc as _esc, setupResizeHandle, hasModule, today } from './crm-utils.js';
 import { state, callbacks, EXPENSE_CATEGORIES } from './crm-projects-state.js';
 import {
     loadProjects, loadClients, loadUsers, loadStaffList,
@@ -149,7 +149,7 @@ export async function initCrmProjectsTab() {
                 </div>
                 <div class="crm-field">
                   <label>消費日</label>
-                  <input id="exp-modal-date" type="date" class="crm-input" value="${new Date().toISOString().slice(0, 10)}">
+                  <input id="exp-modal-date" type="date" class="crm-input" value="${today()}">
                 </div>
                 <div class="crm-field">
                   <label>細項</label>

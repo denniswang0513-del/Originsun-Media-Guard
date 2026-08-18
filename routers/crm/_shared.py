@@ -19,10 +19,8 @@ import os
 import re
 from contextlib import asynccontextmanager
 from datetime import date, datetime, timezone
-from zoneinfo import ZoneInfo
-
-_TW_TZ = ZoneInfo("Asia/Taipei")
 from typing import Optional
+from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 
@@ -42,7 +40,7 @@ try:
     from db.models import (Client, User, CrmProject, CrmQuotation, CrmQuotationItem,
                            CrmQuotationTemplate, CrmStaff, CrmStaffPortfolio,
                            CrmProjectStaff,
-                           CrmProjectExpense,  # noqa: F401 — re-export（costs.py 從 _shared 取）
+                           CrmProjectExpense,
                            CrmInvoice, CrmPaymentRequest, CrmCashEntry,
                            CrmProjectCostLine, CrmCostLineTemplate,
                            CrmProjectCostGroup,
@@ -53,12 +51,12 @@ try:
 except ImportError:
     _HAS_DB = False
 
-# 本檔自用只有 select / Client / CrmProject / CrmProjectExpense；
-# 其餘 db.models 類與 or_ / delete / IntegrityError 是給領域模組
-# `from ._shared import ...` 的 re-export（列進 __all__，ruff F401 視為已使用）。
+# 本檔自用只有 select / Client / CrmProject；其餘 db.models 類與
+# or_ / delete / IntegrityError 是給領域模組 `from ._shared import ...`
+# 的 re-export（列進 __all__，ruff F401 視為已使用）。
 __all__ = [
     "router", "token_router", "money_dep",
-    "or_", "delete", "sa_update", "IntegrityError", "User",
+    "or_", "delete", "sa_update", "IntegrityError", "User", "CrmProjectExpense",
     "CrmQuotation", "CrmQuotationItem", "CrmQuotationTemplate",
     "CrmStaff", "CrmStaffPortfolio", "CrmProjectStaff",
     "CrmInvoice", "CrmPaymentRequest", "CrmCashEntry",
@@ -272,6 +270,9 @@ def _username(request: Request) -> str:
     from core.auth import _extract_token
     payload = _extract_token(request) or {}
     return payload.get("username") or payload.get("sub") or "?"
+
+
+_TW_TZ = ZoneInfo("Asia/Taipei")
 
 
 def _fmt_day(dt) -> str:

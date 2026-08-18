@@ -550,6 +550,7 @@ class ProjectExpensePatchPayload(BaseModel):
     advance_id: Optional[str] = None
     notes: Optional[str] = None
     cost_group_id: Optional[str] = None
+    expense_date: Optional[str] = None   # YYYY-MM-DD；空字串＝清掉消費日
 
 
 class QuotationItemPayload(BaseModel):

@@ -15,7 +15,7 @@ from fastapi import Depends, HTTPException, Request, UploadFile, File, Query
 from core.finance_logic import month_of
 from core.schemas import InvoicePayload, PaymentRequestPayload, CashEntryPayload
 
-from ._shared import (router, _check_auth, money_dep, _require_db, _get_factory, _now,
+from ._shared import (router, _check_auth, money_dep, _require_db, _get_factory, _fmt_day, _now,
                       _parse_shoot_date, _assert_month_open, _assert_rows_open,
                       _locked_month_set, _raise_locked_batch)
 
@@ -384,7 +384,7 @@ async def list_advance_payments(returned: int = -1, project_id: str = Query(""))
             )).scalars().all()
             cash_entries = [{
                 "id": c.id,
-                "entry_date": c.entry_date.isoformat()[:10] if c.entry_date else None,
+                "entry_date": _fmt_day(c.entry_date) or None,
                 "summary": c.summary or "",
                 "deposit": c.deposit or 0,
                 "expense": c.expense or 0,

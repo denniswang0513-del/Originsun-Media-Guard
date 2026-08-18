@@ -581,6 +581,8 @@ def test_every_project_picker_shares_one_label_builder():
 # ── 專案頁雜支區 × 零用金（2026-08-18 整頓）────────────────────────
 COSTS_SRC = (REPO / "routers" / "crm" / "costs.py").read_text(encoding="utf-8")
 COST_VIEW = (FRONTEND / "tabs" / "crm" / "crm-projects-cost.js").read_text(encoding="utf-8")
+SHARED_SRC = (REPO / "routers" / "crm" / "_shared.py").read_text(encoding="utf-8")
+PROJECTS_SRC = (REPO / "routers" / "crm" / "projects.py").read_text(encoding="utf-8")
 
 
 def test_claimed_rows_are_immutable_from_project_page():
@@ -593,6 +595,15 @@ def test_claimed_rows_are_immutable_from_project_page():
     for fn in ("patch_project_expense", "update_project_expense", "delete_project_expense"):
         body = COSTS_SRC.split(f"async def {fn}")[1].split("\n@router")[0]
         assert "_guard_claimed(e)" in body, f"{fn} 沒擋 claim 列"
+    # 整批路徑同一個政策：刪子表會 cascade 刪雜支、綁預支會動結算歸屬 ——
+    # 逐列守衛擋得再嚴，整批路徑漏了就等於沒守
+    dg = COSTS_SRC.split("async def delete_cost_group")[1].split("\n@router")[0]
+    assert "claim_id.isnot(None)" in dg, "刪子表沒擋 claim 列（cascade 會整批消滅）"
+    la = COSTS_SRC.split("async def link_expenses_to_advance")[1].split("\n@router")[0]
+    assert "_guard_claimed(e)" in la, "綁預支沒擋 claim 列"
+    # 零用金列的收款人是身分不是文字：後端也要擋（前端鎖只是鏡像不是正本）
+    patch = COSTS_SRC.split("async def patch_project_expense")[1].split("\n@router")[0]
+    assert '"payee" in data and e.staff_id' in patch
     # 前端同步上鎖：locked 列不給 inline edit、不給刪除鈕
     assert "const locked = !!e.claim_id;" in COST_VIEW
     assert "已進零用金請款單" in COST_VIEW
@@ -604,10 +615,8 @@ def test_placeholder_seeding_is_gone():
     它們和真資料在畫面上無法區分，會把雜支區塞成「一堆列其實全空」。
     類別清單活在前端 EXPENSE_CATEGORIES，不需要種進資料庫。
     """
-    for src_name, src in (("costs.py", COSTS_SRC), ("projects.py",
-                          (REPO / "routers" / "crm" / "projects.py").read_text(encoding="utf-8")),
-                          ("_shared.py",
-                          (REPO / "routers" / "crm" / "_shared.py").read_text(encoding="utf-8"))):
+    for src_name, src in (("costs.py", COSTS_SRC), ("projects.py", PROJECTS_SRC),
+                          ("_shared.py", SHARED_SRC)):
         assert "_seed_default_expenses" not in src, f"{src_name} 還在種佔位列"
 
 
@@ -616,8 +625,11 @@ def test_project_page_expense_ux_contract():
     # 就地新增：日期/類別/細項/金額/收款人 + POST 帶 expense_date
     assert "window._expQuickAdd" in COST_VIEW
     assert "expense_date: document.getElementById('exp-qa-date').value" in COST_VIEW
-    # 消費日優先，登記日只是 fallback
+    # 消費日優先，登記日只是 fallback；填錯要能就地改（PATCH 端要走 _parse_day）
     assert "e.expense_date || e.created_at" in COST_VIEW
+    assert "edCell('exp-col-date', 'expense_date'" in COST_VIEW
+    patch = COSTS_SRC.split("async def patch_project_expense")[1].split("\n@router")[0]
+    assert "_parse_day(val)" in patch, "PATCH 把日期字串直接 setattr 進 timestamptz 會炸"
     # 🔴 雜支區必須在「尚無項目」時照畫（只有零用金列的專案，錢不能整區消失）
     before_misc = COST_VIEW.split("行政雜支 section")[0]
     assert before_misc.rstrip().endswith("// ──"), "雜支區前的結構變了，確認它不在 else 裡"
@@ -633,10 +645,21 @@ def test_expense_dates_are_formatted_in_taipei():
     aware UTC —— 面值 strftime/isoformat 取日期就差一天。2026-08-18 在消費日
     實測踩到（送 08-01 回讀 07-31）。
     """
-    shared = (REPO / "routers" / "crm" / "_shared.py").read_text(encoding="utf-8")
-    assert "def _fmt_day" in shared and "astimezone(_TW_TZ)" in shared
-    # petty 的日期欄位不准再裸 strftime（子表拍攝日那筆也算）
-    assert 'strftime("%Y-%m-%d")' not in PETTY_SRC, "petty.py 有日期欄位繞過 _fmt_day"
+    assert "def _fmt_day" in SHARED_SRC and "astimezone(_TW_TZ)" in SHARED_SRC
     # costs 的 _fmt_date 委派給 _fmt_day
     fmt = COSTS_SRC.split("def _fmt_date")[1].split("\ndef ")[0]
     assert "_fmt_day" in fmt and "isoformat" not in fmt
+    # 年份也是同一型坑（timestamptz 面值取年份，台北 1/1 → 前一年）
+    year_fn = PETTY_SRC.split("def _project_year")[1].split("async def")[0]
+    assert "_fmt_day" in year_fn and ".year" not in year_fn
+    # 整個 routers/crm 套件掃一輪：日期欄位不准再面值取日
+    # （hr_logic → api_proposals → 消費日，同一個坑已經修三次了）
+    for f in sorted((REPO / "routers" / "crm").glob("*.py")):
+        src = f.read_text(encoding="utf-8")
+        assert "isoformat()[:10]" not in src, f"{f.name} 有面值取日期，該走 _fmt_day"
+        if f.name == "_shared.py":     # _fmt_day 本體的 strftime 是歸一後的合法使用
+            continue
+        for ln in src.splitlines():
+            if ('strftime("%Y-%m-%d")' in ln
+                    and "datetime.now()" not in ln and "_now()" not in ln):
+                raise AssertionError(f"{f.name}: {ln.strip()} — 該走 _fmt_day")

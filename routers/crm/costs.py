@@ -266,7 +266,7 @@ async def _create_expense(session, project_id: str, req, advance_id=None, payee_
         payee=payee_override or req.payee or None,
         advance_id=advance_id or req.advance_id or None,
         notes=req.notes, created_at=_now(),
-        expense_date=_parse_day(getattr(req, "expense_date", "")),
+        expense_date=_parse_day(req.expense_date),
     )
     session.add(e)
     await session.commit()
@@ -438,7 +438,15 @@ async def patch_project_expense(expense_id: str, req: ProjectExpensePatchPayload
         if not e:
             raise HTTPException(status_code=404, detail="找不到此雜支")
         _guard_claimed(e)
+        if "payee" in data and e.staff_id:
+            raise HTTPException(status_code=409,
+                                detail="這筆是零用金列，收款人就是請款員工本人，"
+                                       "專案頁不能改。")
         for key, val in data.items():
+            if key == "expense_date":
+                # 字串日期要走 _parse_day（setattr 塞字串進 timestamptz 會炸）
+                e.expense_date = _parse_day(val)
+                continue
             if key in _NULLABLE_TEXT and val == "":
                 val = None
             setattr(e, key, val)
@@ -461,6 +469,7 @@ async def link_expenses_to_advance(request: Request):
         for eid in expense_ids:
             e = await session.get(CrmProjectExpense, eid)
             if e:
+                _guard_claimed(e)   # 已進請款單的列，預支綁定也不准從這裡動
                 e.advance_id = advance_id if advance_id else None
         await session.commit()
     return {"status": "ok", "linked": len(expense_ids)}
@@ -476,6 +485,10 @@ async def update_project_expense(expense_id: str, req: ProjectExpensePayload, re
         if not e:
             raise HTTPException(status_code=404, detail="找不到此雜支")
         _guard_claimed(e)
+        if e.staff_id and (req.payee or None) != (e.payee or None):
+            raise HTTPException(status_code=409,
+                                detail="這筆是零用金列，收款人就是請款員工本人，"
+                                       "專案頁不能改。")
         e.category = req.category
         e.estimated = req.estimated
         e.actual = req.actual
@@ -483,6 +496,8 @@ async def update_project_expense(expense_id: str, req: ProjectExpensePayload, re
         e.payee = req.payee or None
         e.advance_id = req.advance_id or None
         e.notes = req.notes
+        # 沒帶＝保留原值（schema 有預設值，整包覆寫會把日期洗掉 —— v2.0 的坑）
+        e.expense_date = _parse_day(req.expense_date) or e.expense_date
         if req.cost_group_id:
             e.cost_group_id = req.cost_group_id
         await session.commit()
@@ -1479,6 +1494,16 @@ async def delete_cost_group(group_id: str, request: Request):
         )).scalar_one()
         if count <= 1:
             raise HTTPException(status_code=400, detail="至少需保留一張子表")
+        # claim 列不准從專案側消滅（同 _guard_claimed 的政策，這裡是整批路徑）
+        claimed = (await session.execute(
+            select(_fn.count(CrmProjectExpense.id))
+            .where(CrmProjectExpense.cost_group_id == group_id,
+                   CrmProjectExpense.claim_id.isnot(None)))).scalar_one()
+        if claimed:
+            raise HTTPException(
+                status_code=409,
+                detail=f"這張子表有 {claimed} 筆已進零用金請款單的雜支，"
+                       "刪表會讓請款單對不上。請先到零用金頁處理那些請款單。")
         # cascade cost_lines + expenses（receipt 實體檔目前保留，不做磁碟清理）
         await session.execute(delete(CrmProjectCostLine).where(CrmProjectCostLine.cost_group_id == group_id))
         await session.execute(delete(CrmProjectExpense).where(CrmProjectExpense.cost_group_id == group_id))
