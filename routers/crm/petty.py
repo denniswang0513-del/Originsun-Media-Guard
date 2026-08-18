@@ -30,7 +30,7 @@ from core.auth import check_admin_or_module
 from core.money import can_see_money
 from core.identity import resolve_current_staff
 from core.schemas import PettyExpensePayload, PettySubmitPayload
-from db.models import (CrmCashEntry, CrmPaymentRequest, CrmProject,
+from db.models import (Client, CrmCashEntry, CrmPaymentRequest, CrmProject,
                        CrmProjectExpense, CrmReimbursement, CrmStaff,
                        FinanceCategoryMap, User)
 
@@ -160,12 +160,33 @@ def _claim_dict(c: CrmReimbursement) -> dict:
 
 
 # ── 下拉選項 ────────────────────────────────────────────────────────
+def _project_year(p) -> str:
+    """專案的年份 —— 只認**專案自己的**日期，猜不到就留白。
+
+    🔴 刻意不退到 created_at：生產庫 238 個專案裡有 217 個是 2026-05 那次匯入
+    建立的，退到建立日等於幫 216 個舊專案全部標上「2026」——那是假資料，而且
+    會讓「打 2025 找 2025 的案子」剛好濾不到。寧可空著（專案名常自帶年份，
+    62 個是這樣），要顯示就去專案管理把起始日補上。
+    """
+    for d in (p.start_date, p.shoot_date, p.completion_date):
+        if d:
+            return str(d.year)
+    return ""
+
+
 @router.get("/petty/options")
 async def petty_options():
-    """登記表單的兩個軸：專案（可留白＝公司支出）＋ 會計項目。"""
+    """登記表單的兩個軸：專案（可留白＝公司支出）＋ 會計項目。
+
+    專案帶年份與客戶 —— 238 個專案裡同名/近名的不少，光看名字挑不出來
+    （owner 2026-08-18）。年份的取法見 `_project_year`（沒填日期的專案不硬猜）。
+    """
     async with _crm_session() as session:
         projects = (await session.execute(
-            select(CrmProject.id, CrmProject.name, CrmProject.status)
+            select(CrmProject.id, CrmProject.name, CrmProject.status,
+                   CrmProject.start_date, CrmProject.shoot_date,
+                   CrmProject.completion_date, Client.short_name)
+            .outerjoin(Client, Client.id == CrmProject.client_id)
             .order_by(CrmProject.created_at.desc()).limit(400))).all()
         items = [r[0] for r in (await session.execute(
             select(FinanceCategoryMap.category_text)
@@ -173,7 +194,8 @@ async def petty_options():
                    FinanceCategoryMap.active.is_(True))
             .order_by(FinanceCategoryMap.category_text))).all()]
     return {
-        "projects": [{"id": p.id, "name": p.name, "status": p.status or ""}
+        "projects": [{"id": p.id, "name": p.name, "status": p.status or "",
+                      "year": _project_year(p), "client": p.short_name or ""}
                      for p in projects],
         "items": items or list(FALLBACK_ITEMS),
         # 前端據此決定專案欄可不可以編（規則的單一真相在後端）

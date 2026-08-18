@@ -18,6 +18,30 @@ const flashOk = (el) => {
     setTimeout(() => { el.style.borderColor = ""; }, 900);
 };
 
+// 專案顯示字串的**單一正本**：「2025｜台北市政府｜城市形象片」。
+// 年份與客戶不只是給人看的 —— <datalist> 與升級後的搜尋下拉都是對整串做子字串
+// 比對，所以打「2025」或客戶名一樣濾得到（owner 2026-08-18：「也可以用這些資訊
+// 搜索」）。年份/客戶缺就自動不出現，不會留下空的分隔線。
+// 顯示字串必須唯一才能從 <datalist> 的值反查回 id —— 撞名的補一個短碼。
+function projectLabels(projects) {
+    const seen = new Map(), labelOf = {}, idOfLabel = {};
+    for (const p of projects) {
+        const base = [p.year, p.client, p.name].filter(Boolean).join("｜");
+        const n = (seen.get(base) || 0) + 1;
+        seen.set(base, n);
+        const label = n === 1 ? base : `${base}｜${p.id.slice(0, 6)}`;
+        labelOf[p.id] = label;
+        idOfLabel[label] = p.id;
+    }
+    return { labelOf, idOfLabel };
+}
+// <select> 用的整串 options（第一個是「不選」那格，各處文案不同）
+function projectOptions(projects, blank) {
+    const { labelOf } = projectLabels(projects);
+    return blank + projects.map(p =>
+        `<option value="${esc(p.id)}">${esc(labelOf[p.id])}</option>`).join("");
+}
+
 // 「只有專案雜支可連結專案」—— 規則正本在後端（/petty/options 的
 // project_link_items），這裡只有斷線時的 fallback；所有用點共用這一份。
 const linkableSet = (opts) => new Set(opts.project_link_items || ["專案雜支"]);
@@ -145,8 +169,7 @@ export async function renderMine(host) {
         throw e;
     }
 
-    const projOpts = '<option value="">（公司支出，不歸專案）</option>'
-        + opts.projects.map(p => `<option value="${esc(p.id)}">${esc(p.name)}</option>`).join("");
+    const projOpts = projectOptions(opts.projects, '<option value="">（公司支出，不歸專案）</option>');
     const itemOpts = opts.items.map(i => `<option value="${esc(i)}">${esc(i)}</option>`).join("");
 
     const asSel = staffList && staffList.length ? `
@@ -508,23 +531,12 @@ export async function renderOverview(host) {
     //   - 238 個 option 全表只長一次，不是每列一份（那是先前載入慢的原因）
     //   - 型別提示與過濾是瀏覽器原生的，不必引 searchableSelect
     //     （那支住在 tabs/crm/，而這個元件要同時跑在獨立頁與 SPA 子視圖）
-    // 顯示字串必須唯一才能反查 id —— 同名專案補一個短碼。
-    const projName = Object.fromEntries(opts.projects.map(p => [p.id, p.name]));
-    const seen = new Map();
-    const labelOf = {}, idOfLabel = {};
-    for (const p of opts.projects) {
-        const n = (seen.get(p.name) || 0) + 1;
-        seen.set(p.name, n);
-        const label = n === 1 ? p.name : `${p.name}｜${p.id.slice(0, 6)}`;
-        labelOf[p.id] = label;
-        idOfLabel[label] = p.id;
-    }
+    const { labelOf, idOfLabel } = projectLabels(opts.projects);
     const PROJ_DATALIST = '<datalist id="pc-proj-dl">'
         + Object.keys(idOfLabel).map(l => `<option value="${esc(l)}"></option>`).join("")
         + "</datalist>";
     // 新增列仍用 select（只有一個，238 個選項無所謂，而且可直接挑）
-    const PROJ_OPTS = '<option value="">（無專案）</option>'
-        + opts.projects.map(p => `<option value="${esc(p.id)}">${esc(labelOf[p.id])}</option>`).join("");
+    const PROJ_OPTS = projectOptions(opts.projects, '<option value="">（無專案）</option>');
     // 只有「專案雜支」開放連結專案（owner 2026-08-17）。規則來自後端的
     // `project_link_items`，不在前端寫死 —— 兩邊各寫一份就會漂。
     const LINKABLE = linkableSet(opts);
@@ -539,7 +551,7 @@ export async function renderOverview(host) {
     };
     const projCell = (e) => {
         const cur = e.project_id;
-        const val = cur ? (labelOf[cur] || projName[cur] || "（已刪除的專案）") : "";
+        const val = cur ? (labelOf[cur] || "（已刪除的專案）") : "";
         if (!LINKABLE.has(e.item)) {
             // 鎖住而不是隱藏：既有的標籤文字還看得到（那是資料），
             // 只是這個項目不該連專案
@@ -549,11 +561,16 @@ export async function renderOverview(host) {
                            title="「${esc(e.item || "")}」不開放連結專案（只有專案雜支可以）"
                            >${groupHint(e)}</span>`;
         }
+        // 標籤是「年份｜客戶｜專案名」，在 240px 的欄位裡一定看不完 ——
+        // 綁好的列 title 直接放整串，滑過去才知道自己挑到哪一個。
+        const tip = val
+            ? val + (e.project_label ? `（原始標籤：${e.project_label}）` : "")
+            : (e.project_label ? "原始標籤：" + e.project_label
+                               : "打字搜尋專案（年份／客戶／專案名都能打）；清空＝不歸專案");
         return `<span class="lg-proj"><input data-f="project_id" list="pc-proj-dl"
                        value="${esc(val)}" data-was="${esc(val)}"
                        placeholder="${e.project_label ? esc(e.project_label) + "（未歸戶）" : "（無專案）"}"
-                       title="${e.project_label ? "原始標籤：" + esc(e.project_label)
-                                                : "打字搜尋專案；清空＝不歸專案"}">${groupHint(e)}</span>`;
+                       title="${esc(tip)}">${groupHint(e)}</span>`;
     };
 
     host.innerHTML = CSS + LEDGER_CSS + PROJ_DATALIST + `
@@ -580,7 +597,7 @@ export async function renderOverview(host) {
           <th style="width:112px;">日期</th><th style="width:92px;text-align:right;">請款</th>
           <th style="min-width:210px;">摘要</th><th style="width:135px;">附註</th>
           <th style="width:130px;">項目</th><th style="width:130px;">收款人</th>
-          <th style="width:200px;">專案標籤</th><th style="width:64px;"></th>
+          <th style="width:240px;">專案標籤</th><th style="width:64px;"></th>
         </tr></thead>
         <tbody>
           <tr class="lg-new">
@@ -821,8 +838,7 @@ export async function renderLabels(host) {
         host.innerHTML = CSS + '<div class="pc-empty">沒有未歸戶的專案標籤。</div>';
         return;
     }
-    const sel = '<option value="">選擇專案…</option>'
-        + opts.projects.map(p => `<option value="${esc(p.id)}">${esc(p.name)}</option>`).join("");
+    const sel = projectOptions(opts.projects, '<option value="">選擇專案…</option>');
     host.innerHTML = CSS + `
       <div class="pc-empty" style="text-align:left;padding:0 0 14px;">
         匯入的歷史單據裡，這些專案標籤在 CRM 找不到對應專案。綁一次就會帶走底下所有列

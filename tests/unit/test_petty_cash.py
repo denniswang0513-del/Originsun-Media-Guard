@@ -546,3 +546,33 @@ def test_ledger_marks_which_cost_group_a_bound_row_landed_on():
     hint = PETTY_VIEW.split("const groupHint")[1].split("const projCell")[0]
     assert "if (!e.project_id) return \"\"" in hint, "沒綁專案的列不該有記號"
     assert "lg-i warn" in hint and "cost_group_name" in hint, "缺少「沒掛子表」的警示狀態"
+
+
+def test_project_year_never_falls_back_to_created_at():
+    """🔴 沒填日期的專案就留白，不准拿建立日充數。
+
+    生產庫 238 個專案裡 216 個沒有任何自己的日期（start/shoot/completion 全空），
+    而其中 217 個是 2026-05 那次匯入建立的。退到 `created_at` ＝ 幫一整批舊案子
+    蓋上「2026」，既是假資料，又剛好讓「打 2025 找 2025 的案子」濾不到。
+    """
+    year = PETTY_SRC.split("def _project_year")[1].split("\n@router")[0]
+    assert "p.created_at" not in year, "年份退到建立日了（那是匯入日不是專案年份）"
+    assert "p.start_date, p.shoot_date, p.completion_date" in year
+    opts = _fn("petty_options")
+    assert "Client.short_name" in opts and "outerjoin(Client" in opts, "選項沒帶客戶"
+
+
+def test_every_project_picker_shares_one_label_builder():
+    """專案顯示字串只准有一份 —— 三個挑選處（登記表單／帳冊／未歸戶綁定）。
+
+    格式是「年份｜客戶｜專案名」，而帳冊是**反查**用的：使用者打進來的字串要能
+    對回 id，所以任何一處自己組字串，就會有一個挑得到卻存不回去的下拉。
+    """
+    assert PETTY_VIEW.count("function projectLabels") == 1
+    # 沒有人再自己把 opts.projects 攤成 <option>（那就是繞過標籤建構）
+    assert "opts.projects.map(" not in PETTY_VIEW, "有下拉自己組專案選項，沒走共用建構"
+    for blank in ("（公司支出，不歸專案）", "（無專案）", "選擇專案…"):
+        assert f"projectOptions(opts.projects, '<option value=\"\">{blank}" in PETTY_VIEW, \
+            f"「{blank}」那個下拉沒走共用的標籤建構"
+    # datalist 的值與反查表同源
+    assert "const { labelOf, idOfLabel } = projectLabels(opts.projects);" in PETTY_VIEW
