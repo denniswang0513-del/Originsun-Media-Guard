@@ -208,7 +208,7 @@ function _fillDashGrid(parts) {
     if (label) {
         label.textContent = '預算已使用 ' + d.usagePct + '%（實際 $' + fmtNum(d.totalActual)
             + ' / 執行預算 $' + fmtNum(d.execBudget) + '）｜預估合計 $' + fmtNum(d.totalEstimated)
-            + ' 佔預算 ' + d.estPct + '%（灰色刻度）';
+            + ' 佔預算 ' + d.estPct + '%';
     }
 }
 
