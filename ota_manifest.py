@@ -96,6 +96,7 @@ STDLIB = {
     "faulthandler", "smtplib", "imaplib", "poplib", "email",
     "tarfile",  # 標準庫，先前漏列 → preflight 會把它當第三方套件檢查
     "unicodedata",  # 同上（core/doc_text 的 NFKC 正規化）
+    "zoneinfo",  # 同上（3.9+ 標準庫；crm/_shared 的台北時區歸一）
 }
 
 # ── Local project modules (excluded from dependency checks) ──
