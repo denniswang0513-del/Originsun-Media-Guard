@@ -925,7 +925,7 @@
     padding: 4px 0; border-bottom: 1px solid #2e2e2e;
 }
 .cost-row-expense .exp-col-date {
-    flex: 0 0 80px;
+    flex: 0 0 118px;   /* 跟就地新增列的原生 date picker 同寬，欄位才對得齊 */
     color: #6b7280; font-size: 10px;
     font-variant-numeric: tabular-nums;
 }
@@ -953,9 +953,30 @@
     text-align: center; color: #9ca3af;
 }
 .cost-row-expense .exp-col-action {
-    flex: 0 0 32px;
+    flex: 0 0 46px;   /* 「新增」兩字不折行；✕ 置中不受影響 */
     text-align: center;
 }
+/* 表頭列：這段版型跟成本項目完全不同，欄位名只在這裡出現一次 */
+.exp-head {
+    color: #6b7280; font-size: 10px; font-weight: 600;
+    border-bottom: 1px solid #333; padding: 2px 0;
+}
+.exp-head .exp-col-cat, .exp-head .exp-col-sub, .exp-head .exp-col-payee { color: #6b7280; }
+/* 類別小標籤（灰色，跟零用金 pill 同語彙不同身分） */
+.exp-cat-pill {
+    display: inline-block; padding: 0 5px;
+    border: 1px solid #374151; border-radius: 3px;
+    font-size: 10px; color: #9ca3af;
+}
+/* 同一天第二筆起淡化 —— 視覺上自然按天分組 */
+.exp-date-rep { opacity: .3; }
+/* 刪除鈕安靜版：平常近乎隱形，滑到列上才現身，滑到鈕上才轉紅 */
+.exp-del {
+    background: none; border: none; cursor: pointer;
+    color: #3a3a3a; font-size: 11px; padding: 1px 6px; border-radius: 4px;
+}
+.cost-row-expense:hover .exp-del { color: #9ca3af; }
+.exp-del:hover { color: #f87171; background: rgba(127, 29, 29, .25); }
 .exp-pill {
     display: inline-block; margin-left: 4px; padding: 0 4px;
     border: 1px solid #4b5563; border-radius: 3px;
@@ -964,6 +985,7 @@
 /* 就地新增列：格子裝 input/select，日期格要塞得下原生 date picker */
 .exp-qa { border-bottom: none; }
 .exp-qa .exp-col-date { flex: 0 0 118px; }
+.exp-qa .crm-btn { white-space: nowrap; }
 .exp-qa input, .exp-qa select {
     width: 100%; box-sizing: border-box;
     background: #222; border: 1px solid #333; color: #d1d5db;

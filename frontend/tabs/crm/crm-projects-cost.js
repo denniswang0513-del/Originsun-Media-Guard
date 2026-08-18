@@ -381,11 +381,33 @@ function _renderCostLines(grouped, expenses, financialSummary) {
       </div>
     </div>`;
 
+    // 表頭：這段複用 cost-row 版型但欄位跟上面完全不同，沒表頭時
+    // 空格子的「—」根本猜不出是哪一欄（owner 2026-08-18 回報看不懂）
+    html += `
+      <div class="cost-row cost-row-expense exp-head">
+        <span class="exp-col-date">消費日</span>
+        <span class="exp-col-cat">類別</span>
+        <span class="exp-col-sub">細項</span>
+        <span class="exp-col-amt">金額</span>
+        <span class="exp-col-payee">收款人</span>
+        <span class="exp-col-receipt">收據</span>
+        <span class="exp-col-action"></span>
+      </div>`;
+
     if (expenses && expenses.length > 0) {
-        for (const e of expenses) {
+        // 照消費日排（舊→新，最新的落在底部緊鄰新增列）；同日第二筆起日期淡化
+        const sorted = [...expenses].sort((a, b) =>
+            String(a.expense_date || a.created_at || '').localeCompare(
+                String(b.expense_date || b.created_at || '')));
+        let prevDate = null;
+        for (const e of sorted) {
             // 消費日優先（零用金帶真實消費日）；手動列退回登記日
             const dateStr = _esc(e.expense_date || e.created_at || '');
-            const subDisplay = e.sub_item ? _esc(e.sub_item) : '<span class="crm-muted">—</span>';
+            const dateDisplay = dateStr && dateStr === prevDate
+                ? `<span class="exp-date-rep">${dateStr}</span>` : dateStr;
+            prevDate = dateStr;
+            // 空值一律留白 —— 「—」三連發是雜訊，留白反而讓有料的格子跳出來
+            const subDisplay = e.sub_item ? _esc(e.sub_item) : '';
             // 零用金流進來的列：收款人讀員工檔（payee 是自由文字，那些列必空）、
             // 掛「零用金」pill；已進請款單（claim_id）→ 這頁唯讀，後端同樣 409。
             const fromPetty = !!e.staff_id;
@@ -402,14 +424,14 @@ function _renderCostLines(grouped, expenses, financialSummary) {
             };
             html += `
               <div class="cost-row cost-row-expense"${locked ? ' title="已進零用金請款單：這頁唯讀，請到零用金頁處理"' : ''}>
-                ${edCell('exp-col-date', 'expense_date', dateStr, dateStr || '<span class="crm-muted">—</span>')}
-                ${edCell('exp-col-cat', 'category', e.category, _esc(e.category))}
+                ${edCell('exp-col-date', 'expense_date', dateStr, dateDisplay)}
+                ${edCell('exp-col-cat', 'category', e.category, `<span class="exp-cat-pill">${_esc(e.category)}</span>`)}
                 ${edCell('exp-col-sub', 'sub_item', e.sub_item, subDisplay)}
                 ${edCell('exp-col-amt', 'actual', e.actual || 0, '$' + fmtNum(e.actual))}
-                ${edCell('exp-col-payee', 'payee', e.payee, (payeeName ? _esc(payeeName) : '<span class="crm-muted">—</span>') + pill)}
-                <span class="exp-col-receipt">${e.receipt_url ? '<a href="' + e.receipt_url + '" target="_blank" style="color:#3b82f6;">📎</a>' : '—'}</span>
+                ${edCell('exp-col-payee', 'payee', e.payee, (payeeName ? _esc(payeeName) : '') + pill)}
+                <span class="exp-col-receipt">${e.receipt_url ? '<a href="' + e.receipt_url + '" target="_blank" style="color:#3b82f6;">📎</a>' : ''}</span>
                 <span class="exp-col-action">${locked ? '' : `
-                  <button class="crm-btn crm-btn-danger crm-btn-sm" style="padding:1px 5px;"
+                  <button class="exp-del" title="刪除這筆"
                           onclick="window._projDeleteExpense('${e.id}')">✕</button>`}
                 </span>
               </div>`;
@@ -419,7 +441,7 @@ function _renderCostLines(grouped, expenses, financialSummary) {
     // 就地新增列 —— 日常登記的正路（modal 留給要附收據的情況）。
     // $0 佔位列 2026-08-18 退場後，這條就是「從這裡登記」的唯一入口。
     const qaToday = today();
-    const qaStaff = '<option value=""></option>' + (state.staffList || []).map(st =>
+    const qaStaff = '<option value="">收款人…</option>' + (state.staffList || []).map(st =>
         `<option value="${_esc(st.name)}">${_esc(st.name)}</option>`).join('');
     html += `
       <div class="cost-row cost-row-expense exp-qa">
@@ -602,7 +624,7 @@ function _costUpdateSubtotals() {
         // textContent 為空 → 自然被跳過。
         if (text.indexOf('行政雜支') >= 0) {
             var expAct = 0;
-            document.querySelectorAll('.cost-row-expense .exp-col-amt').forEach(function(c) {
+            document.querySelectorAll('.cost-row-expense:not(.exp-head) .exp-col-amt').forEach(function(c) {
                 var t = c.textContent.replace(/[$,]/g, '').trim();
                 if (t && t !== '—') expAct += parseInt(t) || 0;
             });
@@ -987,9 +1009,9 @@ window._expEdit = function(cell, expId, field, currentVal) {
             _costUpdateSubtotals();
             _costUpdateDashboard();
         } else if (isCategory) {
-            cell.textContent = val;
+            cell.innerHTML = `<span class="exp-cat-pill">${_esc(val)}</span>`;
         } else {
-            cell.innerHTML = val ? _esc(val) : '<span class="crm-muted">—</span>';
+            cell.innerHTML = val ? _esc(val) : '';
         }
         _scheduleAutoSave();
     };
@@ -1010,9 +1032,9 @@ window._expEdit = function(cell, expId, field, currentVal) {
             if (isAmount) {
                 cell.textContent = '$' + fmtNum(parseInt(currentVal) || 0);
             } else if (isCategory) {
-                cell.textContent = currentVal;
+                cell.innerHTML = `<span class="exp-cat-pill">${_esc(currentVal)}</span>`;
             } else {
-                cell.innerHTML = currentVal ? _esc(currentVal) : '<span class="crm-muted">—</span>';
+                cell.innerHTML = currentVal ? _esc(currentVal) : '';
             }
         }
     });
