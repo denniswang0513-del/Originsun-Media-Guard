@@ -655,7 +655,7 @@ def test_dashboard_misc_estimate_source():
     fill = COST_VIEW.split("function _fillDashGrid")[1].split("\nfunction ")[0]
     assert "calcDashboardParts(" in fill
     assert "Math.round" not in fill, "_fillDashGrid 又自己長出公式了"
-    assert "_miscBudgetEdit" in COST_VIEW and "_miscPctEdit" in COST_VIEW
+    assert "_miscBudgetEdit" in COST_VIEW and "_miscPctModal" in COST_VIEW
     assert "cd-misc-diff" in COST_VIEW
 
 

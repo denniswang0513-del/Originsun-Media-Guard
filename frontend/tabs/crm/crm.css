@@ -1113,14 +1113,6 @@
     border-bottom: 1px solid #2e2e2e; padding-bottom: 3px;
 }
 .cost-dash-grid .cdg-r { font-size: 11px; color: #6b7280; text-align: left; }
-/* 自動推算的「?」：hover 看說明、點了改比例 */
-.cd-q {
-    display: inline-block; margin-left: 5px; width: 14px; height: 14px;
-    line-height: 14px; text-align: center; border-radius: 50%;
-    border: 1px solid #4b5563; font-size: 10px; color: #9ca3af;
-    cursor: pointer; vertical-align: 1px;
-}
-.cd-q:hover { border-color: #9ca3af; color: #d1d5db; }
 .cost-progress-wrap {
     position: relative;
     height: 6px; background: #2e2e2e; border-radius: 3px; margin-bottom: 4px;

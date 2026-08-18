@@ -55,6 +55,7 @@ export function calcDashboard(f) {
         costActual: f.costline_actual || 0,
         miscEstimated: miscAuto ? (f.misc_budget || 0) : f.misc_budget_total,
         miscAuto,
+        miscPct: f.misc_budget_pct != null ? f.misc_budget_pct : 5,
         miscActual: f.expense_actual || 0,
     });
 }

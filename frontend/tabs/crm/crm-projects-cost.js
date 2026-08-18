@@ -116,6 +116,9 @@ async function _loadFinancialSummary(projectId) {
               <span>合約未稅 <b>$${fmtNum(f.ex_tax)}</b></span>
               <span>目標利潤 <b>$${fmtNum(f.profit_target)}</b>（${f.profit_target_pct}%）</span>
               <span>執行預算 <b style="color:#60a5fa;">$${fmtNum(d.execBudget)}</b></span>
+              <span>預估雜支 <b>$${fmtNum(d.miscEstimated)}</b>（${d.miscAuto ? `未稅 ${d.miscPct}%` : '子表設定'}）
+                <button class="crm-btn crm-btn-secondary crm-btn-sm" style="margin-left:4px;padding:1px 8px;"
+                        onclick="window._miscPctModal()">編輯</button></span>
               ${f.transfer_fee ? `<span style="color:#6b7280;">帳款匯費 $${fmtNum(f.transfer_fee)}</span>` : ''}
             </div>
             <div class="cost-dash-grid">
@@ -144,7 +147,7 @@ async function _loadFinancialSummary(projectId) {
         _dashBase = {
             exTax: f.ex_tax, profitTarget: f.profit_target,
             miscEstimated: d.miscEstimated, miscAuto: d.miscAuto,
-            miscPct: f.misc_budget_pct != null ? f.misc_budget_pct : 5,
+            miscPct: d.miscPct,
             otherCostEst: d.costEstimated - curCostEst,
             otherCostAct: d.costActual - curCostAct,
             otherMiscAct: d.miscActual - curMiscAct,
@@ -174,19 +177,8 @@ function _fillDashGrid(parts) {
         if (el) { el.textContent = text; el.style.color = color || ''; }
     };
     set('cd-cost-est', '$' + fmtNum(d.costEstimated));
-    const miscEstCell = document.getElementById('cd-misc-est');
-    if (miscEstCell) {
-        if (d.miscAuto) {
-            // 自動推算：值旁掛「?」—— hover 說明比例來源、點了可改比例
-            const pct = d.miscPct != null ? d.miscPct : 5;
-            miscEstCell.innerHTML = '$' + fmtNum(d.miscEstimated)
-                + `<span class="cd-q" onclick="window._miscPctEdit(this.parentElement)" title="子表未設「雜支預算」，自動以合約未稅的 ${pct}% 推估。點一下可修改比例；在行政雜支區設定雜支預算後即改用手動值。">?</span>`;
-            miscEstCell.style.color = '#6b7280';
-        } else {
-            miscEstCell.textContent = '$' + fmtNum(d.miscEstimated);
-            miscEstCell.style.color = '';
-        }
-    }
+    // 自動推算的雜支淡色提示；比例的說明與編輯統一在錨點列「預估雜支」的彈窗
+    set('cd-misc-est', '$' + fmtNum(d.miscEstimated), d.miscAuto ? '#6b7280' : '');
     set('cd-rem-est', '$' + fmtNum(d.remaining), remainColor(d.remaining));
     set('cd-pf-est', '$' + fmtNum(d.estProfit) + '（' + d.estProfitPct + '%）');
     set('cd-cost-act', '$' + fmtNum(d.costActual));
@@ -1051,35 +1043,55 @@ window._miscBudgetEdit = function(el) {
     });
 };
 
-// ── 自動雜支比例就地編輯（寫回專案的 misc_budget_pct）────────────
-window._miscPctEdit = function(cell) {
-    if (!state.selectedId || cell.querySelector('input')) return;
+// ── 雜支比例編輯彈窗（寫回專案的 misc_budget_pct）────────────────
+window._miscPctModal = function() {
+    if (!state.selectedId || document.getElementById('misc-pct-overlay')) return;
     const cur = _dashBase ? _dashBase.miscPct : 5;
-    // 取消/沒改 → 用基準值重畫格子即可（不打 API）
-    const restore = () => _costUpdateDashboard();
-    const input = document.createElement('input');
-    input.type = 'number'; input.min = '0'; input.max = '100'; input.value = cur;
-    input.className = 'crm-input';
-    input.style.cssText = 'width:60px;font-size:12px;padding:1px 4px;text-align:right;';
-    cell.textContent = ''; cell.appendChild(input);
-    cell.insertAdjacentText('beforeend', ' %');
-    input.focus(); input.select();
-    let done = false;
-    const commit = async () => {
-        if (done) return; done = true;
-        const val = parseInt(input.value);
-        if (isNaN(val) || val === cur) { restore(); return; }
-        try {
-            await _fetch('/projects/' + state.selectedId, { method: 'PUT',
-                body: JSON.stringify({ misc_budget_pct: val }) });
-            _loadFinancialSummary(state.selectedId);
-        } catch (e) { alert('儲存失敗：' + e.message); restore(); }
-    };
-    input.addEventListener('blur', commit);
-    input.addEventListener('keydown', ev => {
-        if (ev.key === 'Enter') { ev.preventDefault(); input.blur(); }
-        if (ev.key === 'Escape') { done = true; restore(); }
-    });
+    const overlay = document.createElement('div');
+    overlay.id = 'misc-pct-overlay';
+    overlay.className = 'crm-modal-overlay';
+    overlay.style.display = 'flex';
+    overlay.addEventListener('click', e => { if (e.target === overlay) overlay.remove(); });
+    overlay.innerHTML = `
+      <div class="crm-modal" style="max-width:360px;">
+        <div class="crm-modal-header">
+          <h3>預估雜支比例</h3>
+          <button onclick="document.getElementById('misc-pct-overlay').remove()" class="crm-detail-close">✕</button>
+        </div>
+        <div class="crm-modal-body">
+          <div class="crm-field" style="margin-bottom:10px;">
+            <label>比例（%，佔合約未稅）</label>
+            <input id="misc-pct-input" type="number" class="crm-input" min="0" max="100" value="${cur}"
+                   onkeydown="if(event.key==='Enter')window._miscPctSave()">
+          </div>
+          <div style="font-size:11px;color:#6b7280;line-height:1.6;">
+            子表未設「雜支預算」時，預估雜支＝合約未稅 × 此比例。<br>
+            子表設了雜支預算就以該手動值為準，比例不生效。
+          </div>
+        </div>
+        <div class="crm-modal-footer">
+          <button onclick="document.getElementById('misc-pct-overlay').remove()" class="crm-btn crm-btn-secondary">取消</button>
+          <button onclick="window._miscPctSave()" class="crm-btn crm-btn-primary">儲存</button>
+        </div>
+      </div>`;
+    document.body.appendChild(overlay);
+    const inp = document.getElementById('misc-pct-input');
+    inp.focus(); inp.select();
+};
+
+window._miscPctSave = async function() {
+    const val = parseInt(document.getElementById('misc-pct-input')?.value);
+    if (isNaN(val) || val < 0 || val > 100) { alert('比例需為 0–100 的整數'); return; }
+    if (_dashBase && val === _dashBase.miscPct) {   // 沒改 → 關窗就好
+        document.getElementById('misc-pct-overlay')?.remove();
+        return;
+    }
+    try {
+        await _fetch('/projects/' + state.selectedId, { method: 'PUT',
+            body: JSON.stringify({ misc_budget_pct: val }) });
+        document.getElementById('misc-pct-overlay')?.remove();
+        _loadFinancialSummary(state.selectedId);
+    } catch (e) { alert('儲存失敗：' + e.message); }
 };
 
 // ── Inline edit: 行政雜支（類別/細項/金額/請款人）─────────────
