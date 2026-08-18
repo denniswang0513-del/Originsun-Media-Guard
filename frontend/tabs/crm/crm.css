@@ -918,11 +918,12 @@
     line-height: 18px;
 }
 
-/* 行政雜支列：獨立欄位布局（不走成本估算的 14 欄 grid）
-   細項保留最大寬度，避免被擠壓成「0...」 */
+/* 行政雜支列：獨立欄位布局（不走成本估算的 14 欄 grid）。
+   剩餘寬度由細項與收款人按 3:1 分享 —— 細項獨吞的話，右邊三欄會全部
+   貼在一起（owner 2026-08-18：「太多資訊擠在一起」）。 */
 .cost-row-expense {
-    display: flex; align-items: center; gap: 8px;
-    padding: 4px 0; border-bottom: 1px solid #2e2e2e;
+    display: flex; align-items: center; gap: 16px;
+    padding: 5px 0; border-bottom: 1px solid #2e2e2e;
 }
 .cost-row-expense .exp-col-date {
     flex: 0 0 118px;   /* 跟就地新增列的原生 date picker 同寬，欄位才對得齊 */
@@ -930,26 +931,26 @@
     font-variant-numeric: tabular-nums;
 }
 .cost-row-expense .exp-col-cat {
-    flex: 0 0 56px;
+    flex: 0 0 76px;
     color: #d1d5db;
 }
 .cost-row-expense .exp-col-sub {
-    flex: 1 1 auto; min-width: 0;
+    flex: 3 1 160px; min-width: 0;
     overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
     color: #d1d5db;
 }
 .cost-row-expense .exp-col-amt {
-    flex: 0 0 100px;
+    flex: 0 1 110px;
     text-align: right; color: #e0e0e0;
     font-variant-numeric: tabular-nums;
 }
 .cost-row-expense .exp-col-payee {
-    flex: 0 0 90px;
+    flex: 1 1 130px; min-width: 0;
     font-size: 11px; color: #9ca3af;
     overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
 .cost-row-expense .exp-col-receipt {
-    flex: 0 0 40px;
+    flex: 0 0 56px;
     text-align: center; color: #9ca3af;
 }
 .cost-row-expense .exp-col-action {
@@ -978,7 +979,7 @@
 .cost-row-expense:hover .exp-del { color: #9ca3af; }
 .exp-del:hover { color: #f87171; background: rgba(127, 29, 29, .25); }
 .exp-pill {
-    display: inline-block; margin-left: 4px; padding: 0 4px;
+    display: inline-block; margin-left: 6px; padding: 0 4px;
     border: 1px solid #4b5563; border-radius: 3px;
     font-size: 9px; color: #9ca3af; vertical-align: 1px; cursor: help;
 }
