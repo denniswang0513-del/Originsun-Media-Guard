@@ -633,7 +633,7 @@
 #inv-list-body .crm-row.inv-qa:hover { background: #202020; }
 #inv-list-body .crm-row.inv-qa input,
 #inv-list-body .crm-row.inv-qa select {
-  width: 92%; background: #171717; color: #e0e0e0;
+  width: 100%; background: #171717; color: #e0e0e0;
   border: 1px solid #3f3f3f; border-radius: 3px;
   padding: 2px 4px; font-size: 11px; text-align: center;
 }
@@ -661,9 +661,58 @@
    時後寫的贏，而這段在檔案裡比它早出現 —— 多一個 :not() 把特異度拉到 (1,3,1)。 */
 #inv-list-body .crm-row.inv-qa,
 #inv-list-body .crm-row.inv-qa > div:not(.crm-kebab-wrap) { overflow: visible; }
-#inv-list-body .crm-row.inv-qa .ss-wrap { width: 92%; }
+#inv-list-body .crm-row.inv-qa .ss-wrap { width: 100%; }
 #inv-list-body .crm-row.inv-qa .ss-input { width: 100%; font-size: 11px; padding: 2px 4px; text-align: center; }
 #inv-list-body .crm-row.inv-qa .ss-panel { z-index: 300; text-align: left; }
+
+/* ── 發票列表欄寬 ──────────────────────────────────────────
+   表頭 / 就地新增列 / 資料列三者共用同一組 nth-child 規則 —— 改一處三邊一起動，
+   不會有「表頭挪了資料列沒挪」的漂移。
+
+   為什麼不全用 flex:1：等寬時 8 碼的統編跟長公司名的抬頭一樣寬，抬頭被截成
+   「財團法人台北市文化基…」而統編右邊空一大片。固定寬給內容長度固定的欄
+   （日期/金額/統編/類別/三個狀態），剩下的空間全給會被截斷的 名稱/抬頭/品項。
+
+   對齊：長文字靠左（截斷才讀得順）、金額靠右（位數對齊才能比大小）、
+   固定格式與 badge 置中。 */
+#inv-list-panel .acct-header > span:nth-child(1),
+#inv-list-body .crm-row:not(.inv-qa-paper) > *:nth-child(1) { flex: 0 0 108px; }   /* date input 要塞得下 YYYY/MM/DD + 日曆圖示 */
+#inv-list-panel .acct-header > span:nth-child(2),
+#inv-list-body .crm-row:not(.inv-qa-paper) > *:nth-child(2) { flex: 2.2 1 0; min-width: 0; text-align: left; }
+#inv-list-panel .acct-header > span:nth-child(3),
+#inv-list-body .crm-row:not(.inv-qa-paper) > *:nth-child(3) { flex: 0 0 108px; text-align: right; }
+#inv-list-panel .acct-header > span:nth-child(4),
+#inv-list-body .crm-row:not(.inv-qa-paper) > *:nth-child(4) { flex: 2.2 1 0; min-width: 0; text-align: left; }
+#inv-list-panel .acct-header > span:nth-child(5),
+#inv-list-body .crm-row:not(.inv-qa-paper) > *:nth-child(5) { flex: 0 0 88px; }
+#inv-list-panel .acct-header > span:nth-child(6),
+#inv-list-body .crm-row:not(.inv-qa-paper) > *:nth-child(6) { flex: 1.5 1 0; min-width: 0; text-align: left; }
+#inv-list-panel .acct-header > span:nth-child(7),
+#inv-list-body .crm-row:not(.inv-qa-paper) > *:nth-child(7) { flex: 0 0 84px; }
+#inv-list-panel .acct-header > span:nth-child(8),
+#inv-list-body .crm-row:not(.inv-qa-paper) > *:nth-child(8) { flex: 0 0 76px; }   /* 表頭「發票種類」4 字不換行 */
+#inv-list-panel .acct-header > span:nth-child(9),
+#inv-list-body .crm-row:not(.inv-qa-paper) > *:nth-child(9) { flex: 0 0 76px; }
+#inv-list-panel .acct-header > span:nth-child(10),
+#inv-list-body .crm-row:not(.inv-qa-paper) > *:nth-child(10) { flex: 0 0 76px; }
+
+/* 欄間留白：金額靠右、抬頭靠左，兩欄相鄰時字會黏成一串（$12,600財團法人…）。
+   padding 在 flex item 內側，不影響外框寬度 → 三邊仍對齊。kebab 排除（只有 36px）。 */
+#inv-list-panel .acct-header > span { white-space: nowrap; }
+#inv-list-panel .acct-header > span:not(:last-child),
+#inv-list-body .crm-row:not(.inv-qa-paper) > *:not(.crm-kebab-wrap) { padding-left: 7px; padding-right: 7px; }
+
+/* 🔴 就地新增列的格子一定要能縮到 flex-basis：金額欄裡是「模式鈕＋輸入框」的
+   flex 容器，內容的固有寬度大於格子寬 → min-width:auto 讓它撐開（實測 152→185px），
+   後面每一欄都被往右推 20-25px，整列與表頭錯開。 */
+#inv-list-body .crm-row.inv-qa > * { min-width: 0; }
+#inv-list-body .crm-row.inv-qa input,
+#inv-list-body .crm-row.inv-qa select { min-width: 0; }
+/* 就地新增列的輸入框吃滿格子（原本 92% 會與上下欄位的邊界對不齊） */
+#inv-list-body .crm-row.inv-qa > * > input,
+#inv-list-body .crm-row.inv-qa > input,
+#inv-list-body .crm-row.inv-qa > select,
+#inv-list-body .crm-row.inv-qa .ss-wrap { width: 100%; }
 
 /* ── 發票種類 badge（電子／紙本，點一下切換）── */
 .inv-kind-badge { cursor: pointer; }

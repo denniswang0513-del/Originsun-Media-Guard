@@ -217,7 +217,9 @@ function _quickAddRow() {
         <div><span id="inv-qa-taxid" class="inv-qa-hint">—</span></div>
         <div><input id="inv-qa-item" placeholder="品項" ${enter}></div>
         <div><select id="inv-qa-cat" onchange="window._invQuickCalc()">${opts(_INV_CATEGORIES, '專案')}</select></div>
-        <div><select id="inv-qa-kind" onchange="window._invQuickKind()">${opts(_INV_KINDS, '電子發票')}</select></div>
+        <div><select id="inv-qa-kind" onchange="window._invQuickKind()">${
+            _INV_KINDS.map(v => `<option value="${_esc(v)}"${v === '電子發票' ? ' selected' : ''}>${_esc(v.replace('發票', ''))}</option>`).join('')
+        }</select></div>
         <div><select id="inv-qa-pay">${opts(['未收款', '已收款', '已付款', '作廢'], '未收款')}</select></div>
         <div><select id="inv-qa-iss">${opts(['開立中', '已開立', '作廢'], '開立中')}</select></div>
         <span class="crm-kebab-wrap">
@@ -311,11 +313,11 @@ function renderList() {
     body.innerHTML = _quickAddRow() + _sorter.sorted(_invoices).map(inv => `
         <div class="crm-row${inv.id === _selectedId ? ' selected' : ''}" onclick="window._invSelect('${inv.id}')">
             <div class="crm-row-date">${inv.invoice_date ? inv.invoice_date.substring(0, 10) : '—'}</div>
-            <div class="crm-row-name">${_esc(inv.title)}</div>
+            <div class="crm-row-name" title="${_esc(inv.title)}">${_esc(inv.title)}</div>
             <div class="crm-row-amount">$${_fmtNum(inv.amount_total)}</div>
-            <div class="crm-row-client">${_esc(inv.company_name)}</div>
+            <div class="crm-row-client" title="${_esc(inv.company_name)}">${_esc(inv.company_name)}</div>
             <div>${_esc(inv.tax_id)}</div>
-            <div>${_esc(inv.item_type)}</div>
+            <div title="${_esc(inv.item_type)}">${_esc(inv.item_type)}</div>
             <div>${_esc(inv.category)}</div>
             <div class="crm-row-status">${_kindBadge(inv)}</div>
             <div class="crm-row-status">${_payBadge(inv.payment_status)}</div>
