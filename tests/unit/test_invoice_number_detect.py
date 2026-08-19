@@ -13,6 +13,8 @@ import os
 
 import pytest
 
+BS = chr(92)
+
 from routers.crm.finance import _detect_invoice_number, _INVOICE_NO_LABELLED
 
 
@@ -118,16 +120,17 @@ def test_upload_marks_issued_but_not_voided():
 
 
 def test_invoice_root_must_be_absolute():
-    """🔴 相對路徑要擋。os.makedirs('192.168.1.132\\Archive\\…') 會**成功** ——
+    """🔴 相對路徑要擋。os.makedirs('192.168.1.132\Archive\…') 會**成功** ——
     在 agent 工作目錄底下建出一整串資料夾，於是「存到 NAS」變成靜靜存進
     C:\OriginsunAgent\192.168.1.132\… 而畫面上一切正常
-    （owner 少打開頭兩個反斜線，三個電子發票檔全落在本機）。"""
+    （owner 少打開頭兩個反斜線，三個電子發票檔全落在本機）。
+
+    判斷細節見 test_invoice_root_accepts_only_drive_or_unc —— isabs 不夠。"""
     src = _finance_src()
     i = src.index("async def set_invoices_root(")
     body = src[i:i + 2500]
-    assert "os.path.isabs(root)" in body, "沒有擋相對路徑"
-    assert body.index("os.path.isabs(root)") < body.index("os.makedirs(root"), \
-        "isabs 檢查必須在 makedirs **之前** —— 否則資料夾已經被建出來了"
+    guard = body.index("ntpath.splitdrive")
+    assert guard < body.index("os.makedirs(root"),         "路徑檢查必須在 makedirs **之前** —— 否則資料夾已經被建出來了"
     assert "不可寫入" in body, "只 makedirs 不夠：NAS 可能給列目錄卻不給寫，要實際寫一個檔驗"
 
 
@@ -168,3 +171,31 @@ def test_migrate_is_dry_run_by_default():
     i = src.index("async def migrate_invoice_files(")
     sig = src[i:i + 260]
     assert "apply: bool = Query(False)" in sig, "migrate 預設就該是 dry-run"
+
+
+@pytest.mark.parametrize("root,ok,why", [
+    ("192.168.1.132" + BS + "Archive",        False, "相對路徑（NAS 少打兩個反斜線）"),
+    (BS + "192.168.1.132" + BS + "Archive",   False, "只有一個反斜線 → 其實是 C: 根目錄"),
+    (BS * 2 + "192.168.1.132" + BS + "Ar",    True,  "正確 UNC"),
+    ("//192.168.1.132/Archive",               True,  "正斜線 UNC"),
+    ("D:" + BS + "Invoices",                  True,  "本機磁碟"),
+    ("uploads" + BS + "invoices",             False, "相對"),
+])
+def test_invoice_root_accepts_only_drive_or_unc(root, ok, why):
+    """🔴 `os.path.isabs()` 不足以擋：Windows 對「單一個反斜線開頭」也回 True，
+    但那是**目前磁碟的根目錄**。少打一個反斜線的 \\192.168.1.132\Archive 會變成
+    C:\192.168.1.132\Archive，而且 makedirs 與寫入測試都會成功 —— 完全看不出
+    存錯地方。2026-08-19 少打兩個、又少打一個，各中一次。"""
+    import ntpath
+    drive, _ = ntpath.splitdrive(root)
+    looks_unc = root.startswith(BS * 2) or root.startswith("//")
+    assert bool(looks_unc or (drive and drive.endswith(":"))) is ok, why
+
+
+def test_invoice_root_validation_uses_splitdrive_not_isabs():
+    """實作要真的用 splitdrive/UNC 判斷，不是回頭只靠 os.path.isabs。"""
+    src = _finance_src()
+    i = src.index("async def set_invoices_root(")
+    body = src[i:i + 2500]
+    assert "ntpath.splitdrive" in body, "沒有用 splitdrive 判斷磁碟機"
+    assert 'startswith("' + BS * 4 + '")' in body or "startswith('" + BS * 4 + "')" in body,         "沒有判斷 UNC 的兩個反斜線"

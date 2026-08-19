@@ -8,6 +8,7 @@ from __future__ import annotations
 import asyncio
 import csv
 import io
+import ntpath
 import os
 import re
 import uuid
@@ -713,11 +714,18 @@ async def set_invoices_root(request: Request):
         # 它在 agent 的工作目錄底下建出一整串資料夾，於是「存到 NAS」變成靜靜存進
         # C:\OriginsunAgent\192.168.1.132\… 而畫面上一切正常。2026-08-19 owner 少打
         # 開頭的兩個反斜線就中招（三個電子發票檔全落在本機）。
-        if not os.path.isabs(root):
+        # 合法只有兩種：磁碟機開頭（D:\...）或真正的 UNC（\\server\share\...）。
+        # 🔴 `os.path.isabs()` 不夠：Windows 對「單一個反斜線開頭」也回 True，
+        # 但那是「目前磁碟的根目錄」—— 少打一個反斜線的 \\192.168.1.132\Archive
+        # 會變成 C:\192.168.1.132\Archive，而且 makedirs 與寫入測試**都會成功**，
+        # 完全看不出存錯地方（2026-08-19 少打兩個、又少打一個，各中一次）。
+        drive, _ = ntpath.splitdrive(root)
+        looks_unc = root.startswith("\\\\") or root.startswith("//")
+        if not (looks_unc or (drive and drive.endswith(":"))):
             raise HTTPException(status_code=422, detail=(
-                f"請填**完整路徑**：NAS 要用 \\\\192.168.1.132\\Archive\\... 這種"
-                f"開頭兩個反斜線的寫法，本機碟要用 D:\\... —— 目前填的「{root}」是"
-                f"相對路徑，檔案會被存進主控端資料夾裡而不是你要的位置。"))
+                f"「{root}」不是完整路徑。NAS 請用 \\\\192.168.1.132\\Archive\\... "
+                f"（**開頭兩個**反斜線），本機碟請用 D:\\... —— 只有一個反斜線或沒有的話，"
+                f"檔案會被存進主控端自己的資料夾裡，而且畫面上完全看不出來。"))
         try:
             os.makedirs(root, exist_ok=True)
         except OSError as e:
