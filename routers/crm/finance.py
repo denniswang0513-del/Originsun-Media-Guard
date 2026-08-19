@@ -5,14 +5,17 @@
 """
 from __future__ import annotations
 
+import asyncio
 import csv
 import io
+import os
 import re
 import uuid
 from datetime import datetime, timezone
 
 from fastapi import Depends, HTTPException, Request, UploadFile, File, Query
 
+from core.auth import check_admin
 from core.finance_logic import month_of
 from core.ledger import require_entity
 from core.schemas import InvoicePayload, PaymentRequestPayload, CashEntryPayload
@@ -91,6 +94,12 @@ def _to_invoice_dict(inv, project_name: str = "") -> dict:
         "recipient_phone": getattr(inv, 'recipient_phone', '') or "",
         "recipient_address": getattr(inv, 'recipient_address', '') or "",
         "paid_date": inv.paid_date.isoformat() if getattr(inv, 'paid_date', None) else None,
+        # 已開立的電子發票檔（磁碟絕對路徑）。前端拿它去打 /crm/invoice-file 取檔。
+        # 🔴 刻意不進 InvoicePayload —— 進去的話 update_invoice 的整包 model_dump
+        # 寫回會在前端沒送這欄時把它洗成 ""（本 repo 記過的那族陷阱）。只有上傳／
+        # 刪除端點動得了它。
+        "file_url": getattr(inv, 'file_url', '') or "",
+        "file_name": os.path.basename(getattr(inv, 'file_url', '') or ""),
         "notes": inv.notes or "",
         "created_at": inv.created_at.isoformat() if inv.created_at else None,
     }
@@ -317,6 +326,156 @@ async def import_invoices_csv(request: Request, file: UploadFile = File(...)):
             imported += 1
         await session.commit()
     return {"status": "ok", "imported": imported, "skipped": skipped}
+
+
+# ── 已開立電子發票檔 ────────────────────────────────────────
+#
+# 骨架與零用金收據（routers/crm/costs.py）同一套：後台可設根目錄 → 依規則產生
+# 資料夾與檔名 → 串流寫入 + 大小上限 + 副檔名黑名單 → 走白名單守衛的下載端點。
+# 刻意**不**共用 receipts_root：收據是我們付出去的憑證、發票是我們開出去的，
+# 交給會計師的是兩包不同東西，常常指到不同位置。
+_MAX_INVOICE_BYTES = 30 * 1024 * 1024   # 電子發票是 PDF 或存證聯圖，比照收據
+
+
+def _invoices_root() -> str:
+    """電子發票檔根目錄的單一正本：settings.invoices_root（後台可設，要指到
+    NAS 或會計師的共用資料夾就填那個路徑），留空＝uploads/invoices。"""
+    from config import load_settings
+    root = (load_settings().get("invoices_root") or "").strip()
+    return root or os.path.join(os.getcwd(), "uploads", "invoices")
+
+
+def _safe_part(s: str, limit: int = 0) -> str:
+    """檔名片段：拿掉 Windows 不收的字元，可選截斷。"""
+    out = re.sub(r'[\\/:*?"<>|]', "", (s or "").strip())
+    return out[:limit] if limit else out
+
+
+def _invoice_file_name(inv, ext: str) -> str:
+    """{日期}_{發票號碼}_{抬頭前20字}_{含稅金額}[_作廢].{ext}
+
+    - 日期開頭 → 資料夾內自然照時間排序，整包交給會計師順序就是對的
+    - 發票號碼 → 法定唯一識別，對帳/查調/作廢都用它；沒號碼（開立中）用 id 前 8 碼
+    - 抬頭截斷 20 字 → 台灣公司名很長，不截會撞 Windows 260 字元路徑上限
+    - 含稅金額 → 交叉核對用，檔名數字跟系統對不上就知道有問題
+    - 作廢放**尾端**不放前綴 —— 放前面會破壞日期排序
+    """
+    day = _fmt_day(inv.invoice_date)          # 🔴 台北歸一，直接 strftime 會差一天
+    parts = [day.replace("-", "") or "nodate",
+             _safe_part(inv.invoice_number) or inv.id[:8],
+             _safe_part(inv.company_name, 20) or "無抬頭",
+             str(inv.amount_total or 0)]
+    if (inv.issue_status or "") == "作廢" or (inv.payment_status or "") == "作廢":
+        parts.append("作廢")
+    return "_".join(p for p in parts if p) + ext
+
+
+@router.post("/invoices/{invoice_id}/file")
+async def upload_invoice_file(invoice_id: str, request: Request, file: UploadFile = File(...)):
+    """上傳這張發票開好的電子發票檔。同一張再傳一次＝取代（舊檔留在磁碟不刪，
+    避免誤傳覆蓋掉唯一的正本；要清掉走 DELETE）。"""
+    _check_auth(request)
+    _require_db()
+    from core.project_folders import BLOCKED_UPLOAD_EXTS, stream_to_disk
+
+    ext = os.path.splitext(file.filename or "")[1] or ".pdf"
+    if ext.lower() in BLOCKED_UPLOAD_EXTS:
+        raise HTTPException(status_code=400, detail=f"不接受的檔案格式：{ext}")
+
+    factory = await _get_factory()
+    async with factory() as session:
+        inv = await session.get(CrmInvoice, invoice_id)
+        if not inv:
+            raise HTTPException(status_code=404, detail="找不到此發票")
+        require_entity(request, inv.entity or "parent", level="full")
+
+        day = _fmt_day(inv.invoice_date)
+        # {root}/{年}/{年-月}/ —— 按月不按「期」（營業稅兩個月一期，要交一期抓兩夾），
+        # 也刻意不按專案（發票是照稅務期間歸檔的，收據才按專案）
+        base = os.path.join(_invoices_root(), day[:4] or "nodate", day[:7] or "nodate")
+        try:
+            os.makedirs(base, exist_ok=True)
+        except OSError as e:
+            raise HTTPException(status_code=422, detail=f"資料夾無法使用：{e}")
+
+        filepath = os.path.join(base, _invoice_file_name(inv, ext))
+        written = await asyncio.to_thread(stream_to_disk, file.file, filepath,
+                                          _MAX_INVOICE_BYTES)
+        if written < 0:
+            raise HTTPException(status_code=413,
+                                detail=f"檔案超過 {_MAX_INVOICE_BYTES // 1024 // 1024}MB")
+        inv.file_url = filepath
+        inv.updated_at = _now()
+        await session.commit()
+    return {"status": "ok", "file_url": filepath, "file_name": os.path.basename(filepath)}
+
+
+@router.delete("/invoices/{invoice_id}/file")
+async def clear_invoice_file(invoice_id: str, request: Request):
+    """解除關聯。**不刪磁碟上的檔** —— 那可能是唯一一份正本，且稅務憑證誤刪
+    救不回來；要清檔案由人到資料夾裡處理。"""
+    _check_auth(request)
+    _require_db()
+    factory = await _get_factory()
+    async with factory() as session:
+        inv = await session.get(CrmInvoice, invoice_id)
+        if not inv:
+            raise HTTPException(status_code=404, detail="找不到此發票")
+        require_entity(request, inv.entity or "parent", level="full")
+        inv.file_url = None
+        inv.updated_at = _now()
+        await session.commit()
+    return {"status": "ok"}
+
+
+@router.get("/invoice-file")
+async def serve_invoice_file(path: str = Query(""), request: Request = None):
+    """提供電子發票檔下載/檢視。路徑白名單：只放行 invoices_root 底下的檔
+    （比照 costs.serve_receipt —— 沒有這道，這支就是任意檔案讀取）。"""
+    _check_auth(request)
+    if not path or not os.path.isfile(path):
+        raise HTTPException(status_code=404, detail="檔案不存在")
+    abs_path = os.path.abspath(path)
+    if not abs_path.startswith(os.path.abspath(_invoices_root())):
+        raise HTTPException(status_code=403, detail="無權存取此路徑")
+    from starlette.responses import FileResponse
+    return FileResponse(abs_path, filename=os.path.basename(abs_path))
+
+
+@router.get("/invoices-root")
+async def get_invoices_root(request: Request):
+    """電子發票根目錄設定（admin 專用）。
+
+    ⚠ 與 costs.get_receipts_root 同樣刻意不走 settings/load 整包 —— 那條回應對
+    機密欄位是遮罩過的，前端拿整包改一鍵再存回會把真密碼洗成遮罩值。
+    """
+    check_admin(request)
+    from config import load_settings
+    return {"invoices_root": (load_settings().get("invoices_root") or ""),
+            "default": os.path.join(os.getcwd(), "uploads", "invoices"),
+            "effective": _invoices_root()}
+
+
+@router.post("/invoices-root")
+async def set_invoices_root(request: Request):
+    check_admin(request)
+    from config import load_settings, save_settings
+    body = await request.json()
+    root = (body.get("invoices_root") or "").strip()
+    if root:
+        try:
+            os.makedirs(root, exist_ok=True)   # 多半是 NAS 上還沒建的資料夾，順手建
+        except OSError as e:
+            raise HTTPException(status_code=422, detail=f"資料夾無法使用：{e}")
+    # settings.json 寫入也包起來 —— agent 自己會定期寫 settings，撞到檔案佔用
+    # 會炸成裸 500（收據那支踩過，同一個坑）
+    try:
+        s = load_settings()
+        s["invoices_root"] = root
+        save_settings(s)
+    except OSError as e:
+        raise HTTPException(status_code=503, detail=f"設定檔忙碌中，請再按一次儲存（{e}）")
+    return {"status": "ok", "invoices_root": root, "effective": _invoices_root()}
 
 
 # ── Payment Request Helpers ─────────────────────────────────

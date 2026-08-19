@@ -664,6 +664,39 @@
 #inv-list-body .crm-row.inv-qa .ss-input { width: 100%; font-size: 11px; padding: 2px 4px; text-align: center; }
 #inv-list-body .crm-row.inv-qa .ss-panel { z-index: 300; text-align: left; }
 
+/* ── 發票詳情：左屬性列 + 右電子發票檔 ── */
+.crm-detail-body { display: flex; flex: 1; min-height: 0; overflow: hidden; }
+.crm-detail-body > .crm-detail-content { flex: 1; min-width: 0; }
+.inv-file-pane {
+  flex: 0 0 300px; border-left: 1px solid #3a3a3a;
+  padding: 14px 12px; overflow-y: auto; background: #222;
+}
+.inv-file-pane h4 {
+  margin: 0 0 10px; font-size: 11px; font-weight: 700; color: #6b7280;
+  text-transform: uppercase; letter-spacing: .05em;
+}
+/* 拖放區：沒檔案時是虛線框，有檔案時換成檔名卡 */
+.inv-file-drop {
+  border: 1px dashed #4b5563; border-radius: 6px; padding: 22px 10px;
+  text-align: center; color: #6b7280; font-size: 12px; cursor: pointer;
+  transition: border-color .15s, background .15s;
+}
+.inv-file-drop:hover, .inv-file-drop.dragover { border-color: #3b82f6; background: #1e293b; color: #93c5fd; }
+.inv-file-card {
+  background: #171717; border: 1px solid #3f3f3f; border-radius: 6px; padding: 10px;
+}
+.inv-file-card .fn {
+  font-size: 11px; color: #e0e0e0; word-break: break-all; line-height: 1.5; margin-bottom: 8px;
+}
+.inv-file-actions { display: flex; gap: 6px; flex-wrap: wrap; }
+.inv-file-note { margin-top: 10px; font-size: 10px; color: #6b7280; line-height: 1.6; }
+
+/* 窄螢幕：右欄改疊在下方，不硬擠 */
+@media (max-width: 1100px) {
+  .crm-detail-body { flex-direction: column; }
+  .inv-file-pane { flex: 0 0 auto; border-left: none; border-top: 1px solid #3a3a3a; }
+}
+
 /* ── Client project cards ── */
 .crm-project-card {
   padding: 10px 14px;

@@ -640,6 +640,7 @@ class CrmInvoice(Base):
     recipient_phone = Column(String(32), nullable=True)                  # 紙本發票收件電話
     recipient_address = Column(String(255), nullable=True)               # 紙本發票收件地址
     paid_date = Column(DateTime(timezone=True), nullable=True)           # 收款日（AR 收現時間戳，財務階段二）
+    file_url = Column(String(512), nullable=True)                        # 已開立的電子發票檔（PDF/圖），存磁碟絕對路徑
     notes = Column(Text, nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now())

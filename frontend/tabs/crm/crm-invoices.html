@@ -60,7 +60,14 @@
         <button id="inv-detail-close" class="crm-detail-close" title="關閉">&#x2715;</button>
       </div>
     </div>
-    <div class="crm-detail-content" id="inv-detail-content"></div>
+    <!-- 兩欄：左＝屬性列、右＝電子發票檔。
+         🔴 檔案區必須是 #inv-detail-content 的**兄弟**而不是子節點 ——
+         enableInlineEdit 進編輯模式時會把 content 的 innerHTML 整個換掉，
+         放進去的話一按編輯就消失。 -->
+    <div class="crm-detail-body">
+      <div class="crm-detail-content" id="inv-detail-content"></div>
+      <aside class="inv-file-pane" id="inv-file-pane"></aside>
+    </div>
   </div>
 </div>
 </div>

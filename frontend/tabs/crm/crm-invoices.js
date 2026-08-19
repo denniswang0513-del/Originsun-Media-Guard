@@ -362,6 +362,102 @@ function _wireEditDynamics() {
     }
 }
 
+// ── 電子發票檔（詳情面板右欄）────────────────────────────────
+// 檔案存磁碟（根目錄 settings.invoices_root，後台可設），DB 只記絕對路徑。
+// 檔名/資料夾規則的正本在後端 routers/crm/finance.py::_invoice_file_name。
+
+let _fileBusy = false;
+
+function _renderFilePane(inv) {
+    const pane = document.getElementById('inv-file-pane');
+    if (!pane) return;
+    const hasFile = !!inv.file_url;
+    pane.innerHTML = `
+      <h4>電子發票</h4>
+      ${hasFile ? `
+        <div class="inv-file-card">
+          <div class="fn">${_esc(inv.file_name || inv.file_url)}</div>
+          <div class="inv-file-actions">
+            <button class="crm-btn crm-btn-secondary crm-btn-sm" onclick="window._invFileOpen()">開啟</button>
+            <button class="crm-btn crm-btn-secondary crm-btn-sm" onclick="window._invFilePick()">重新上傳</button>
+            <button class="crm-btn crm-btn-secondary crm-btn-sm" onclick="window._invFileClear()">解除關聯</button>
+          </div>
+        </div>
+        <div class="inv-file-note">「解除關聯」只是把這筆的連結拿掉，<b>不會刪磁碟上的檔</b>
+          —— 稅務憑證誤刪救不回來。</div>
+      ` : `
+        <div class="inv-file-drop" id="inv-file-drop" onclick="window._invFilePick()">
+          拖曳檔案到這裡<br>或點一下選擇<br>
+          <span style="font-size:10px;">PDF / JPG / PNG，30MB 內</span>
+        </div>
+        <div class="inv-file-note">存到<b>發票根目錄</b>底下的
+          <code>${_esc((inv.invoice_date || '').substring(0, 4) || '年')}/${_esc((inv.invoice_date || '').substring(0, 7) || '年-月')}/</code>，
+          檔名自動組成「日期_發票號碼_抬頭_金額」。</div>
+      `}
+      <input type="file" id="inv-file-input" style="display:none;"
+             accept=".pdf,.jpg,.jpeg,.png,application/pdf,image/*"
+             onchange="window._invFileUpload(this.files[0])">`;
+
+    const drop = document.getElementById('inv-file-drop');
+    if (drop) {
+        ['dragenter', 'dragover'].forEach(e => drop.addEventListener(e, (ev) => {
+            ev.preventDefault(); drop.classList.add('dragover');
+        }));
+        ['dragleave', 'drop'].forEach(e => drop.addEventListener(e, (ev) => {
+            ev.preventDefault(); drop.classList.remove('dragover');
+        }));
+        drop.addEventListener('drop', (ev) => {
+            const f = ev.dataTransfer?.files?.[0];
+            if (f) window._invFileUpload(f);
+        });
+    }
+}
+
+window._invFilePick = function () { document.getElementById('inv-file-input')?.click(); };
+
+window._invFileOpen = function () {
+    const inv = _invoices.find(i => i.id === _selectedId);
+    if (!inv?.file_url) return;
+    // 走後端白名單守衛的取檔端點（檔案可能在 NAS，不在 web root 底下）
+    window.open('/api/v1/crm/invoice-file?path=' + encodeURIComponent(inv.file_url), '_blank');
+};
+
+window._invFileUpload = async function (file) {
+    if (!file || _fileBusy || !_selectedId) return;
+    _fileBusy = true;
+    const pane = document.getElementById('inv-file-pane');
+    if (pane) pane.querySelector('h4').textContent = '電子發票（上傳中…）';
+    try {
+        const fd = new FormData();
+        fd.append('file', file);
+        const token = localStorage.getItem('auth_token');
+        const res = await fetch(`/api/v1/crm/invoices/${_selectedId}/file`, {
+            method: 'POST', body: fd,
+            headers: token ? { 'Authorization': 'Bearer ' + token } : {},
+        });
+        if (!res.ok) {
+            const e = await res.json().catch(() => ({}));
+            throw new Error(e.detail || ('HTTP ' + res.status));
+        }
+        await loadInvoices();
+        const fresh = await _fetch('/invoices/' + _selectedId);
+        renderDetail(fresh);
+    } catch (e) {
+        alert('上傳失敗：' + e.message);
+        const inv = _invoices.find(i => i.id === _selectedId);
+        if (inv) _renderFilePane(inv);
+    } finally { _fileBusy = false; }
+};
+
+window._invFileClear = async function () {
+    if (!_selectedId || !confirm('解除這張發票與檔案的關聯？（磁碟上的檔不會被刪除）')) return;
+    try {
+        await _fetch('/invoices/' + _selectedId + '/file', { method: 'DELETE' });
+        await loadInvoices();
+        renderDetail(await _fetch('/invoices/' + _selectedId));
+    } catch (e) { alert('解除失敗：' + e.message); }
+};
+
 function renderDetail(inv) {
     document.getElementById('inv-detail-title').textContent = inv.title;
     const prop = (label, value) => {
@@ -399,6 +495,7 @@ function renderDetail(inv) {
     html += prop('備註', inv.notes);
 
     document.getElementById('inv-detail-content').innerHTML = html;
+    _renderFilePane(inv);
 
     const actions = document.getElementById('inv-bar-actions');
     if (actions) {
