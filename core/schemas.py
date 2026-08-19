@@ -671,6 +671,8 @@ class PaymentRequestPayload(BaseModel):
     is_advance: int = 0
     advance_returned: int = 0
     notes: str = ""
+    # 兩本帳：None＝建立時落 'parent'、更新時維持既有值；🔴 不可給 "parent" 當預設——整包 model_dump 寫回會把我的帳列洗回母公司
+    entity: Optional[str] = None
 
 
 class CashEntryPayload(BaseModel):
@@ -696,6 +698,8 @@ class CashEntryPayload(BaseModel):
     advance_payment_id: Optional[str] = None
     bank_account_id: Optional[str] = None       # 掛哪個銀行帳戶（財務階段二）
     payment_request_id: Optional[str] = None    # AP 硬連結 → crm_payment_requests
+    # 兩本帳：None＝建立時落 'parent'、更新時維持既有值；🔴 不可給 "parent" 當預設——整包 model_dump 寫回會把我的帳列洗回母公司
+    entity: Optional[str] = None
 
 
 class CostLinePayload(BaseModel):
@@ -792,6 +796,8 @@ class InvoicePayload(BaseModel):
     recipient_phone: str = ""
     recipient_address: str = ""
     notes: str = ""
+    # 兩本帳：None＝建立時落 'parent'、更新時維持既有值；🔴 不可給 "parent" 當預設——整包 model_dump 寫回會把我的帳列洗回母公司
+    entity: Optional[str] = None
 
 
 class TimesheetRow(BaseModel):
@@ -1040,6 +1046,8 @@ class BankAccountPayload(BaseModel):
     active: Optional[bool] = None
     sort_order: Optional[int] = None
     note: Optional[str] = None
+    # 兩本帳：None＝建立時落 'parent'、更新時維持既有值；🔴 不可給 "parent" 當預設——整包 model_dump 寫回會把我的帳列洗回母公司
+    entity: Optional[str] = None
 
 
 class ReconciliationPayload(BaseModel):
@@ -1094,6 +1102,8 @@ class FinanceAdjustmentPayload(BaseModel):
     amount: Optional[int] = None           # 有號金額
     adj_type: Optional[str] = None         # opening/correction/owner_in/owner_out/accountant/writeoff/other
     description: Optional[str] = None      # create 必填由端點檢查
+    # 兩本帳：None＝建立時落 'parent'、更新時維持既有值；🔴 不可給 "parent" 當預設——整包 model_dump 寫回會把我的帳列洗回母公司
+    entity: Optional[str] = None
 
 
 class BulkAssignAccountPayload(BaseModel):
@@ -1136,6 +1146,8 @@ class LoanPayload(BaseModel):
     bank_account_id: Optional[str] = None  # 預設扣款帳戶
     opening_balance: Optional[int] = None  # 導入舊貸=當下剩餘本金（攤還表只生剩餘期）
     note: Optional[str] = None
+    # 兩本帳：None＝建立時落 'parent'、更新時維持既有值；🔴 不可給 "parent" 當預設——整包 model_dump 寫回會把我的帳列洗回母公司
+    entity: Optional[str] = None
 
 
 class LoanPayPayload(BaseModel):

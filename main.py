@@ -1020,6 +1020,24 @@ async def _on_startup():
                         # 新環境 create_all 隨 model 建）— 也是 matched_entry_id 查詢的索引
                         "CREATE UNIQUE INDEX IF NOT EXISTS uq_stmtline_matched_entry "
                         "ON bank_statement_lines(matched_entry_id) WHERE matched_entry_id IS NOT NULL",
+                        # ── 兩本帳（公司實體）：錢流 7 表加 entity 欄
+                        # （parent=母公司（預設）/mine=我的帳，docs/LEDGER_ENTITY_PLAN.md §1.1）
+                        "ALTER TABLE crm_invoices ADD COLUMN IF NOT EXISTS entity VARCHAR(16) NOT NULL DEFAULT 'parent'",
+                        "ALTER TABLE crm_payment_requests ADD COLUMN IF NOT EXISTS entity VARCHAR(16) NOT NULL DEFAULT 'parent'",
+                        "ALTER TABLE crm_cash_entries ADD COLUMN IF NOT EXISTS entity VARCHAR(16) NOT NULL DEFAULT 'parent'",
+                        "ALTER TABLE bank_accounts ADD COLUMN IF NOT EXISTS entity VARCHAR(16) NOT NULL DEFAULT 'parent'",
+                        "ALTER TABLE finance_adjustments ADD COLUMN IF NOT EXISTS entity VARCHAR(16) NOT NULL DEFAULT 'parent'",
+                        "ALTER TABLE finance_loans ADD COLUMN IF NOT EXISTS entity VARCHAR(16) NOT NULL DEFAULT 'parent'",
+                        "ALTER TABLE finance_month_close ADD COLUMN IF NOT EXISTS entity VARCHAR(16) NOT NULL DEFAULT 'parent'",
+                        # （v1 曾用 'own' 當預設值，只存在於 dev DB，且從未 commit／發版。
+                        #  2026-08-19 已確認 dev 七表 own=0、default 全是 'parent'，
+                        #  prod 這根欄是本次才建、直接就是 'parent' —— 一次性的
+                        #  SET DEFAULT / UPDATE own→parent 已無事可做，不留在啟動路徑上
+                        #  每次開機空掃七張錢流表。）
+                        # month_close 的 unique 從全域 month 改為 (entity, month) 複合
+                        "ALTER TABLE finance_month_close DROP CONSTRAINT IF EXISTS finance_month_close_month_key",
+                        "CREATE UNIQUE INDEX IF NOT EXISTS uq_month_close_entity_month "
+                        "ON finance_month_close (entity, month)",
                     ]:
                         try:
                             await _sfin.execute(_tfin(col_sql))

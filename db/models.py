@@ -618,6 +618,7 @@ class CrmInvoice(Base):
     __tablename__ = "crm_invoices"
 
     id = Column(String(32), primary_key=True)
+    entity = Column(String(16), nullable=False, server_default="parent")   # 兩本帳：parent=母公司（預設）/mine=我的帳（docs/LEDGER_ENTITY_PLAN.md）
     payment_type = Column(String(16), nullable=False, default="收款")   # 收款/付款
     payment_status = Column(String(16), nullable=False, default="未收款")  # 未收款/已收款/作廢
     issue_status = Column(String(16), nullable=False, default="已開立")  # 已開立/作廢
@@ -657,6 +658,7 @@ class CrmPaymentRequest(Base):
     __tablename__ = "crm_payment_requests"
 
     id = Column(String(32), primary_key=True)
+    entity = Column(String(16), nullable=False, server_default="parent")   # 兩本帳：parent=母公司（預設）/mine=我的帳（docs/LEDGER_ENTITY_PLAN.md）
     request_date = Column(DateTime(timezone=True), nullable=True)       # 日期
     amount = Column(Integer, nullable=False, default=0)                 # 請款金額
     summary = Column(String(255), nullable=False)                       # 摘要
@@ -726,6 +728,7 @@ class CrmCashEntry(Base):
     __tablename__ = "crm_cash_entries"
 
     id = Column(String(32), primary_key=True)
+    entity = Column(String(16), nullable=False, server_default="parent")   # 兩本帳：parent=母公司（預設）/mine=我的帳（docs/LEDGER_ENTITY_PLAN.md）
     entry_date = Column(DateTime(timezone=True), nullable=True, index=True)
     expense = Column(Integer, nullable=True)                     # 支出
     claim = Column(Integer, nullable=True)                       # 請款
@@ -875,12 +878,16 @@ class FinanceMonthClose(Base):
     __tablename__ = "finance_month_close"
 
     id = Column(String(32), primary_key=True)
-    month = Column(String(7), nullable=False, unique=True)       # 'YYYY-MM'
+    entity = Column(String(16), nullable=False, server_default="parent")  # 兩本帳：parent=母公司（預設）/mine=我的帳（docs/LEDGER_ENTITY_PLAN.md）
+    month = Column(String(7), nullable=False)                    # 'YYYY-MM'（unique 改為 (entity, month) 複合）
     closed_by = Column(String(64), nullable=False, default="")
     closed_at = Column(DateTime(timezone=True), server_default=func.now())
     snapshot = Column(JSONB, nullable=True)                      # {income, expense, by_category, entry_count}
     reopened_by = Column(String(64), nullable=True)              # reopen 留稽核痕跡
     reopened_at = Column(DateTime(timezone=True), nullable=True)
+
+    __table_args__ = (UniqueConstraint("entity", "month",
+                                       name="uq_month_close_entity_month"),)
 
 
 class PreprodLocation(Base):
@@ -1394,6 +1401,7 @@ class BankAccount(Base):
     __tablename__ = "bank_accounts"
 
     id = Column(String(32), primary_key=True)
+    entity = Column(String(16), nullable=False, server_default="parent")  # 兩本帳：parent=母公司（預設）/mine=我的帳（docs/LEDGER_ENTITY_PLAN.md）
     name = Column(String(64), nullable=False)                    # 帳戶顯示名（XX 銀行活存）
     bank_name = Column(String(64), nullable=True)                # 銀行名稱
     account_no = Column(String(32), nullable=True)               # 帳號（後幾碼即可）
@@ -1463,6 +1471,7 @@ class FinanceAdjustment(Base):
     __tablename__ = "finance_adjustments"
 
     id = Column(String(32), primary_key=True)
+    entity = Column(String(16), nullable=False, server_default="parent")  # 兩本帳：parent=母公司（預設）/mine=我的帳（docs/LEDGER_ENTITY_PLAN.md）
     adj_date = Column(DateTime(timezone=True), nullable=False)   # 調整生效日（月結守衛看這個月）
     account_id = Column(String(32), nullable=False)              # soft FK → finance_accounts.id
     amount = Column(Integer, nullable=False)                     # 有號金額（新台幣整數）
@@ -1490,6 +1499,7 @@ class FinanceLoan(Base):
     __tablename__ = "finance_loans"
 
     id = Column(String(32), primary_key=True)
+    entity = Column(String(16), nullable=False, server_default="parent")  # 兩本帳：parent=母公司（預設）/mine=我的帳（docs/LEDGER_ENTITY_PLAN.md）
     name = Column(String(128), nullable=False)                   # 貸款顯示名（XX 銀行週轉金）
     lender = Column(String(64), nullable=True)                   # 貸款銀行/機構
     principal = Column(Integer, nullable=False, default=0)       # 原始本金（新台幣整數）
