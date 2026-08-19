@@ -664,6 +664,19 @@
 #inv-list-body .crm-row.inv-qa .ss-input { width: 100%; font-size: 11px; padding: 2px 4px; text-align: center; }
 #inv-list-body .crm-row.inv-qa .ss-panel { z-index: 300; text-align: left; }
 
+/* ── 發票資料夾設定卡（管理員）── */
+.inv-root-link { align-self: center; font-size: 12px; color: #888; margin-right: 12px; text-decoration: none; }
+.inv-root-link:hover { color: #93c5fd; }
+.inv-root-panel {
+  margin: 0 12px 10px; padding: 10px 12px;
+  border: 1px solid #2a2a2a; border-radius: 6px;
+  font-size: 12px; color: #888; line-height: 1.7;
+}
+.inv-root-panel input {
+  flex: 1; padding: 6px 8px; background: #171717; color: #e0e0e0;
+  border: 1px solid #2a2a2a; border-radius: 4px;
+}
+
 /* ── 發票詳情：左屬性列 + 右電子發票檔 ── */
 .crm-detail-body { display: flex; flex: 1; min-height: 0; overflow: hidden; }
 .crm-detail-body > .crm-detail-content { flex: 1; min-width: 0; }

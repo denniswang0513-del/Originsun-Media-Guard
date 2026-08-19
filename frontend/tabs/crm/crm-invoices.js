@@ -430,15 +430,9 @@ window._invFileUpload = async function (file) {
     try {
         const fd = new FormData();
         fd.append('file', file);
-        const token = localStorage.getItem('auth_token');
-        const res = await fetch(`/api/v1/crm/invoices/${_selectedId}/file`, {
-            method: 'POST', body: fd,
-            headers: token ? { 'Authorization': 'Bearer ' + token } : {},
-        });
-        if (!res.ok) {
-            const e = await res.json().catch(() => ({}));
-            throw new Error(e.detail || ('HTTP ' + res.status));
-        }
+        // crmFetch 對 FormData 會刻意不設 Content-Type（否則蓋掉 multipart boundary），
+        // token 與錯誤 detail 也都幫忙處理好了 —— 不要在這裡再手刻一次 fetch。
+        await _fetch(`/invoices/${_selectedId}/file`, { method: 'POST', body: fd });
         await loadInvoices();
         const fresh = await _fetch('/invoices/' + _selectedId);
         renderDetail(fresh);
@@ -457,6 +451,48 @@ window._invFileClear = async function () {
         renderDetail(await _fetch('/invoices/' + _selectedId));
     } catch (e) { alert('解除失敗：' + e.message); }
 };
+
+/** 發票根目錄設定卡（管理員限定）。
+ *
+ * 端點是 check_admin —— 非管理員拿到 403，就讓入口保持隱藏（不畫一個按下去
+ * 必然失敗的按鈕）。比照零用金的「收據資料夾」卡，同一個互動形狀。 */
+async function _initInvoicesRootCard() {
+    const link = document.getElementById('inv-root-toggle');
+    const panel = document.getElementById('inv-root-panel');
+    if (!link || !panel) return;
+    let cfg;
+    try {
+        cfg = await _fetch('/invoices-root');   // 403（非管理員）→ 進 catch，入口不顯示
+    } catch (_) { return; }
+
+    link.style.display = '';
+    panel.innerHTML = `
+        已開立的電子發票檔存放根目錄。要集中到 NAS 或會計師的共用資料夾就填那個路徑；
+        留空＝主控機預設 <span style="color:#aaa;">${_esc(cfg.default)}</span>。
+        底下會自動分 <code>{年}/{年-月}/</code>，檔名為
+        <code>日期_發票號碼_抬頭_含稅金額</code>。
+        <div style="display:flex;gap:8px;margin-top:8px;">
+          <input id="inv-root-input" value="${_esc(cfg.invoices_root)}"
+                 placeholder="例：\\\\OriginsunNAS\\Invoices 或 T:\\發票">
+          <button class="crm-btn crm-btn-primary crm-btn-sm" id="inv-root-save">儲存</button>
+          <span id="inv-root-msg" style="align-self:center;"></span>
+        </div>
+        <div style="margin-top:6px;">目前生效：<span id="inv-root-eff">${_esc(cfg.effective)}</span></div>`;
+
+    link.onclick = () => { panel.style.display = panel.style.display === 'none' ? '' : 'none'; };
+    panel.querySelector('#inv-root-save').onclick = async () => {
+        const msg = panel.querySelector('#inv-root-msg');
+        msg.textContent = '儲存中…';
+        try {
+            const d = await _fetch('/invoices-root', {
+                method: 'POST',
+                body: JSON.stringify({ invoices_root: panel.querySelector('#inv-root-input').value.trim() }),
+            });
+            panel.querySelector('#inv-root-eff').textContent = d.effective || '';
+            msg.textContent = '已儲存（之後上傳的發票存到新位置；舊檔不搬）';
+        } catch (e) { msg.textContent = '失敗：' + (e && e.message || e); }
+    };
+}
 
 function renderDetail(inv) {
     document.getElementById('inv-detail-title').textContent = inv.title;
@@ -924,6 +960,7 @@ export async function initCrmInvoicesTab() {
     document.getElementById('inv-filter-type').addEventListener('change', e => { _filters.issue_status = e.target.value; loadInvoices(); });
     document.getElementById('inv-filter-cat').addEventListener('change', e => { _filters.category = e.target.value; loadInvoices(); });
 
+    _initInvoicesRootCard();   // 管理員限定，非管理員入口保持隱藏（不 await，別擋住 tab 載入）
     document.getElementById('inv-btn-add').addEventListener('click', () => openModal());
     document.getElementById('inv-btn-import').addEventListener('click', openImportModal);
     document.getElementById('inv-btn-save').addEventListener('click', saveInvoice);

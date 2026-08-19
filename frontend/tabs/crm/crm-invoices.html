@@ -29,10 +29,14 @@
     <option value="外部代開">外部代開</option>
   </select>
   <div class="crm-toolbar-right">
+    <!-- 管理員才看得到（後端 check_admin）；由 _initInvoicesRootCard 決定顯不顯示 -->
+    <a href="javascript:void(0)" id="inv-root-toggle" class="inv-root-link" style="display:none;">發票資料夾</a>
     <button id="inv-btn-import" class="crm-btn crm-btn-secondary">匯入 CSV</button>
     <button id="inv-btn-add" class="crm-btn crm-btn-primary">+ 新增發票</button>
   </div>
 </div>
+
+<div id="inv-root-panel" class="inv-root-panel" style="display:none;"></div>
 
 <!-- Body -->
 <div class="crm-body">
