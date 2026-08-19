@@ -621,6 +621,27 @@
 /* 款項狀態空白＝來源沒填。刻意與「未收款」（橘）視覺分開：那是一種進度，這是沒表態。 */
 .crm-pay-badge-未設定 { background: #262626; color: #6b7280; border: 1px dashed #4b5563; }
 
+/* ── 發票就地新增列 ──
+   釘在列表最上方（sticky）：捲到哪都能登記，不用先回到頂端。
+   欄位沿用 .crm-row 的 flex 版面，所以格子與底下的資料列自動對齊。 */
+#inv-list-body .crm-row.inv-qa {
+  position: sticky; top: 0; z-index: 2;
+  background: #202020; border-bottom: 1px solid #333;
+  cursor: default;
+}
+#inv-list-body .crm-row.inv-qa:hover { background: #202020; }
+#inv-list-body .crm-row.inv-qa input,
+#inv-list-body .crm-row.inv-qa select {
+  width: 92%; background: #171717; color: #e0e0e0;
+  border: 1px solid #3f3f3f; border-radius: 3px;
+  padding: 2px 4px; font-size: 11px; text-align: center;
+}
+#inv-list-body .crm-row.inv-qa input:focus,
+#inv-list-body .crm-row.inv-qa select:focus { border-color: #3b82f6; outline: none; }
+#inv-list-body .crm-row.inv-qa .crm-row-name input { text-align: left; }
+.inv-qa-hint { font-size: 10px; color: #6b7280; margin-top: 1px; }
+.inv-qa-btn { padding: 1px 6px; font-size: 13px; line-height: 1.2; }
+
 /* ── Client project cards ── */
 .crm-project-card {
   padding: 10px 14px;

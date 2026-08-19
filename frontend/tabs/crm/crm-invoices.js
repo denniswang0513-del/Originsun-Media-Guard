@@ -124,15 +124,100 @@ const _sorter = createSortable({
     },
 });
 
+const _INV_CATEGORIES = ['專案', '內部代開', '外部代開'];
+
+/** 就地新增列 —— 日常登記的正路（modal 留給要填發票號/紙本收件資訊/自訂代開匯款的情況）。
+ *
+ * 欄位與列表欄目一一對齊，所以打字的位置就是這筆資料之後會出現的位置。
+ * 金額欄收的是**未稅價**（與 modal 同一個輸入方向，避免兩條路各自進位造成尾差），
+ * 旁邊即時顯示推算出來的含稅價。Enter 直接送出，送完焦點回名稱欄可以連續登記。 */
+function _quickAddRow() {
+    const opts = (arr, sel) => arr.map(v =>
+        `<option${v === sel ? ' selected' : ''}>${_esc(v)}</option>`).join('');
+    const clientOpts = '<option value="">—</option>' + _clients.map(c =>
+        `<option value="${_esc(c.short_name)}">${_esc(c.short_name)}</option>`).join('');
+    const enter = 'onkeydown="if(event.key===\'Enter\'){event.preventDefault();window._invQuickAdd();}"';
+    return `
+      <div class="crm-row inv-qa">
+        <div class="crm-row-date"><input id="inv-qa-date" type="date" value="${_todayStr()}" ${enter}></div>
+        <div class="crm-row-name"><input id="inv-qa-title" placeholder="＋ 名稱（Enter 儲存）"
+               title="輸入名稱後按 Enter 直接新增一筆發票；其餘欄位可留白，之後點該列補齊" ${enter}></div>
+        <div class="crm-row-amount">
+          <input id="inv-qa-ex" type="number" min="0" placeholder="未稅價"
+                 oninput="window._invQuickCalc()" ${enter}>
+          <div id="inv-qa-total" class="inv-qa-hint"></div>
+        </div>
+        <div class="crm-row-client">
+          <select id="inv-qa-company" data-no-search onchange="window._invQuickCalc()">${clientOpts}</select>
+        </div>
+        <div><span id="inv-qa-taxid" class="inv-qa-hint">—</span></div>
+        <div><input id="inv-qa-item" placeholder="品項" ${enter}></div>
+        <div><select id="inv-qa-cat" data-no-search onchange="window._invQuickCalc()">${opts(_INV_CATEGORIES, '專案')}</select></div>
+        <div><select id="inv-qa-pay" data-no-search>${opts(['未收款', '已收款', '已付款', '作廢'], '未收款')}</select></div>
+        <div><select id="inv-qa-iss" data-no-search>${opts(['開立中', '已開立', '作廢'], '開立中')}</select></div>
+        <span class="crm-kebab-wrap">
+          <button class="crm-btn crm-btn-primary crm-btn-sm inv-qa-btn"
+                  title="新增這筆發票（或按 Enter）" onclick="window._invQuickAdd()">＋</button>
+        </span>
+      </div>`;
+}
+
+/** 就地新增列的即時推算：含稅價提示 + 統編帶出（與送出時用同一支 _deriveFromExTax）。 */
+window._invQuickCalc = function () {
+    const preview = _deriveFromExTax({
+        amount_ex_tax: document.getElementById('inv-qa-ex')?.value,
+        company_name: document.getElementById('inv-qa-company')?.value || '',
+        category: document.getElementById('inv-qa-cat')?.value || '專案',
+    });
+    const tEl = document.getElementById('inv-qa-total');
+    if (tEl) tEl.textContent = preview.amount_total ? '含稅 $' + _fmtNum(preview.amount_total) : '';
+    const xEl = document.getElementById('inv-qa-taxid');
+    if (xEl) xEl.textContent = preview.tax_id || '—';
+};
+
+window._invQuickAdd = async function () {
+    const val = (id) => (document.getElementById(id)?.value || '').trim();
+    const title = val('inv-qa-title');
+    if (!title) { document.getElementById('inv-qa-title')?.focus(); return; }   // 空列不送
+
+    const issue = val('inv-qa-iss');
+    const payload = _deriveFromExTax({
+        title,
+        invoice_date: val('inv-qa-date') || null,
+        amount_ex_tax: val('inv-qa-ex') ? parseInt(val('inv-qa-ex')) : null,
+        company_name: val('inv-qa-company'),
+        item_type: val('inv-qa-item'),
+        category: val('inv-qa-cat') || '專案',
+        issue_status: issue,
+        // 作廢的發票款項狀態一律作廢（與 modal / inline 編輯同一條規則）
+        payment_status: issue === '作廢' ? '作廢' : val('inv-qa-pay'),
+        payment_type: val('inv-qa-pay') === '已付款' ? '付款' : '收款',
+    });
+    if (_pinEntity() === 'mine') payload.entity = 'mine';   // 帳本 pin，parent 不送
+
+    const btn = document.querySelector('.inv-qa-btn');
+    if (btn) btn.disabled = true;
+    try {
+        await _fetch('/invoices', { method: 'POST', body: JSON.stringify(payload) });
+        await loadInvoices();
+        // 重載後焦點回名稱欄 —— 連續登記（打字、Enter、打字、Enter）不用重新點
+        document.getElementById('inv-qa-title')?.focus();
+    } catch (e) {
+        alert('新增失敗：' + e.message);
+        if (btn) btn.disabled = false;
+    }
+};
+
 function renderList() {
     const body = document.getElementById('inv-list-body');
     if (!body) return;
     _sorter.attach();
     if (_invoices.length === 0) {
-        body.innerHTML = `<div class="crm-empty">尚無發票${_filters.q ? '，請調整搜尋' : ''}</div>`;
+        body.innerHTML = _quickAddRow()
+            + `<div class="crm-empty">尚無發票${_filters.q ? '，請調整搜尋' : ''}</div>`;
         return;
     }
-    body.innerHTML = _sorter.sorted(_invoices).map(inv => `
+    body.innerHTML = _quickAddRow() + _sorter.sorted(_invoices).map(inv => `
         <div class="crm-row${inv.id === _selectedId ? ' selected' : ''}" onclick="window._invSelect('${inv.id}')">
             <div class="crm-row-date">${inv.invoice_date ? inv.invoice_date.substring(0, 10) : '—'}</div>
             <div class="crm-row-name">${_esc(inv.title)}</div>
@@ -309,19 +394,7 @@ function renderDetail(inv) {
                 payload.payment_type = inv.payment_type || '收款';
                 if (payload.issue_status === '作廢') payload.payment_status = '作廢';
                 else payload.payment_status = inv.payment_status || '';
-                // auto-calc from 未稅價
-                const ex = parseInt(payload.amount_ex_tax) || 0;
-                payload.amount_total = ex ? Math.round(ex * 1.05) : null;
-                payload.tax_amount = ex ? (payload.amount_total - ex) : null;
-                // resolve tax_id from selected client
-                const client = _clients.find(c => c.short_name === payload.company_name);
-                payload.tax_id = client?.tax_id || inv.tax_id || '';
-                // resolve commission from amount
-                const tot = payload.amount_total || 0;
-                const fees = _loadFees();
-                if (payload.category === '內部代開') payload.commission = tot ? Math.round(tot * (1 - fees.internal / 100)) : null;
-                else if (payload.category === '外部代開') payload.commission = tot ? Math.round(tot * (1 - fees.external / 100)) : null;
-                else payload.commission = null;
+                _deriveFromExTax(payload, inv.tax_id);   // 未稅價→含稅/稅額、客戶→統編、類別→代開匯款
                 await _fetch('/invoices/' + inv.id, { method: 'PUT', body: JSON.stringify(payload) });
                 const updated = await _fetch('/invoices/' + inv.id);
                 renderDetail(updated);
@@ -373,6 +446,25 @@ function _populateClientSelect(selectedName) {
     if (!sel) return;
     sel.innerHTML = `<option value="">— 選擇客戶 —</option>` +
         _clients.map(c => `<option value="${_esc(c.short_name)}" data-taxid="${_esc(c.tax_id || '')}"${c.short_name === selectedName ? ' selected' : ''}>${_esc(c.short_name)}${c.tax_id ? ' (' + c.tax_id + ')' : ''}</option>`).join('');
+}
+
+/** 未稅價 → 含稅價/稅額、客戶 → 統編、類別 → 代開匯款。
+ *
+ * 就地新增列與詳情頁 inline 編輯共用。modal 那條路**不**走這裡 —— 它把含稅價、
+ * 代開匯款都攤開給人直接填（`_updateTaxCalc` 即時算給你看），是刻意的差異。
+ * 這裡收斂的是「只給未稅價，其餘我幫你推」的那一種輸入。 */
+function _deriveFromExTax(payload, fallbackTaxId = '') {
+    const ex = parseInt(payload.amount_ex_tax) || 0;
+    payload.amount_total = ex ? Math.round(ex * 1.05) : null;
+    payload.tax_amount = ex ? (payload.amount_total - ex) : null;
+    const client = _clients.find(c => c.short_name === payload.company_name);
+    payload.tax_id = client?.tax_id || fallbackTaxId || '';
+    const tot = payload.amount_total || 0;
+    const fees = _loadFees();
+    if (payload.category === '內部代開') payload.commission = tot ? Math.round(tot * (1 - fees.internal / 100)) : null;
+    else if (payload.category === '外部代開') payload.commission = tot ? Math.round(tot * (1 - fees.external / 100)) : null;
+    else payload.commission = null;
+    return payload;
 }
 
 function _todayStr() {
