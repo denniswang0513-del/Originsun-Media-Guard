@@ -126,6 +126,24 @@ const _sorter = createSortable({
 
 const _INV_CATEGORIES = ['專案', '內部代開', '外部代開'];
 
+// 金額欄輸入的是未稅還是含稅 —— 來源有時記未稅、有時記含稅，所以是可切換的。
+// 記在 localStorage：同一個人的來源資料通常一致，不該每開一次都重選。
+const _QA_MODE_KEY = 'inv_qa_amount_mode';
+const _qaMode = () => (localStorage.getItem(_QA_MODE_KEY) === 'total' ? 'total' : 'ex');
+const _qaModeLabel = (m) => (m === 'total' ? '含稅' : '未稅');
+
+/** 切換未稅／含稅。刻意**不動已輸入的數字** —— 切換的是「這個數字是什麼」，
+ *  不是把它換算掉；打錯方向時按一下就對，不用重打。 */
+window._invQuickToggleMode = function () {
+    const next = _qaMode() === 'ex' ? 'total' : 'ex';
+    localStorage.setItem(_QA_MODE_KEY, next);
+    const btn = document.getElementById('inv-qa-mode');
+    if (btn) btn.textContent = _qaModeLabel(next);
+    const inp = document.getElementById('inv-qa-amt');
+    if (inp) inp.placeholder = _qaModeLabel(next) + '價';
+    window._invQuickCalc();
+};
+
 /** 就地新增列 —— 日常登記的正路（modal 留給要填發票號/紙本收件資訊/自訂代開匯款的情況）。
  *
  * 欄位與列表欄目一一對齊，所以打字的位置就是這筆資料之後會出現的位置。
@@ -137,24 +155,30 @@ function _quickAddRow() {
     const clientOpts = '<option value="">—</option>' + _clients.map(c =>
         `<option value="${_esc(c.short_name)}">${_esc(c.short_name)}</option>`).join('');
     const enter = 'onkeydown="if(event.key===\'Enter\'){event.preventDefault();window._invQuickAdd();}"';
+    const mode = _qaMode();
     return `
       <div class="crm-row inv-qa">
         <div class="crm-row-date"><input id="inv-qa-date" type="date" value="${_todayStr()}" ${enter}></div>
         <div class="crm-row-name"><input id="inv-qa-title" placeholder="＋ 名稱（Enter 儲存）"
                title="輸入名稱後按 Enter 直接新增一筆發票；其餘欄位可留白，之後點該列補齊" ${enter}></div>
         <div class="crm-row-amount">
-          <input id="inv-qa-ex" type="number" min="0" placeholder="未稅價"
-                 oninput="window._invQuickCalc()" ${enter}>
-          <div id="inv-qa-total" class="inv-qa-hint"></div>
+          <div class="inv-qa-amt">
+            <button type="button" id="inv-qa-mode" class="inv-qa-mode"
+                    title="切換：這格輸入的是未稅價還是含稅價（按一下換，數字不變）"
+                    onclick="window._invQuickToggleMode()">${_qaModeLabel(mode)}</button>
+            <input id="inv-qa-amt" type="number" min="0" placeholder="${_qaModeLabel(mode)}價"
+                   oninput="window._invQuickCalc()" ${enter}>
+          </div>
+          <div id="inv-qa-conv" class="inv-qa-hint"></div>
         </div>
         <div class="crm-row-client">
-          <select id="inv-qa-company" data-no-search onchange="window._invQuickCalc()">${clientOpts}</select>
+          <select id="inv-qa-company" onchange="window._invQuickCalc()">${clientOpts}</select>
         </div>
         <div><span id="inv-qa-taxid" class="inv-qa-hint">—</span></div>
         <div><input id="inv-qa-item" placeholder="品項" ${enter}></div>
-        <div><select id="inv-qa-cat" data-no-search onchange="window._invQuickCalc()">${opts(_INV_CATEGORIES, '專案')}</select></div>
-        <div><select id="inv-qa-pay" data-no-search>${opts(['未收款', '已收款', '已付款', '作廢'], '未收款')}</select></div>
-        <div><select id="inv-qa-iss" data-no-search>${opts(['開立中', '已開立', '作廢'], '開立中')}</select></div>
+        <div><select id="inv-qa-cat" onchange="window._invQuickCalc()">${opts(_INV_CATEGORIES, '專案')}</select></div>
+        <div><select id="inv-qa-pay">${opts(['未收款', '已收款', '已付款', '作廢'], '未收款')}</select></div>
+        <div><select id="inv-qa-iss">${opts(['開立中', '已開立', '作廢'], '開立中')}</select></div>
         <span class="crm-kebab-wrap">
           <button class="crm-btn crm-btn-primary crm-btn-sm inv-qa-btn"
                   title="新增這筆發票（或按 Enter）" onclick="window._invQuickAdd()">＋</button>
@@ -162,15 +186,21 @@ function _quickAddRow() {
       </div>`;
 }
 
-/** 就地新增列的即時推算：含稅價提示 + 統編帶出（與送出時用同一支 _deriveFromExTax）。 */
+/** 就地新增列的即時推算：換算另一邊的金額 + 統編帶出（與送出時同一支 _deriveInvoice）。 */
 window._invQuickCalc = function () {
-    const preview = _deriveFromExTax({
-        amount_ex_tax: document.getElementById('inv-qa-ex')?.value,
+    const mode = _qaMode();
+    const preview = _deriveInvoice({
         company_name: document.getElementById('inv-qa-company')?.value || '',
         category: document.getElementById('inv-qa-cat')?.value || '專案',
-    });
-    const tEl = document.getElementById('inv-qa-total');
-    if (tEl) tEl.textContent = preview.amount_total ? '含稅 $' + _fmtNum(preview.amount_total) : '';
+    }, { amount: document.getElementById('inv-qa-amt')?.value, mode });
+    const cEl = document.getElementById('inv-qa-conv');
+    // 提示永遠顯示「你沒在打的那一邊」——打未稅就給含稅，打含稅就給未稅
+    if (cEl) {
+        cEl.textContent = preview.amount_total
+            ? (mode === 'total' ? '未稅 $' + _fmtNum(preview.amount_ex_tax)
+                                : '含稅 $' + _fmtNum(preview.amount_total))
+            : '';
+    }
     const xEl = document.getElementById('inv-qa-taxid');
     if (xEl) xEl.textContent = preview.tax_id || '—';
 };
@@ -181,10 +211,9 @@ window._invQuickAdd = async function () {
     if (!title) { document.getElementById('inv-qa-title')?.focus(); return; }   // 空列不送
 
     const issue = val('inv-qa-iss');
-    const payload = _deriveFromExTax({
+    const payload = _deriveInvoice({
         title,
         invoice_date: val('inv-qa-date') || null,
-        amount_ex_tax: val('inv-qa-ex') ? parseInt(val('inv-qa-ex')) : null,
         company_name: val('inv-qa-company'),
         item_type: val('inv-qa-item'),
         category: val('inv-qa-cat') || '專案',
@@ -192,7 +221,7 @@ window._invQuickAdd = async function () {
         // 作廢的發票款項狀態一律作廢（與 modal / inline 編輯同一條規則）
         payment_status: issue === '作廢' ? '作廢' : val('inv-qa-pay'),
         payment_type: val('inv-qa-pay') === '已付款' ? '付款' : '收款',
-    });
+    }, { amount: val('inv-qa-amt'), mode: _qaMode() });
     if (_pinEntity() === 'mine') payload.entity = 'mine';   // 帳本 pin，parent 不送
 
     const btn = document.querySelector('.inv-qa-btn');
@@ -394,7 +423,8 @@ function renderDetail(inv) {
                 payload.payment_type = inv.payment_type || '收款';
                 if (payload.issue_status === '作廢') payload.payment_status = '作廢';
                 else payload.payment_status = inv.payment_status || '';
-                _deriveFromExTax(payload, inv.tax_id);   // 未稅價→含稅/稅額、客戶→統編、類別→代開匯款
+                // 詳情頁的金額欄是「未稅價」，方向固定 ex
+                _deriveInvoice(payload, { amount: payload.amount_ex_tax, mode: 'ex', fallbackTaxId: inv.tax_id });
                 await _fetch('/invoices/' + inv.id, { method: 'PUT', body: JSON.stringify(payload) });
                 const updated = await _fetch('/invoices/' + inv.id);
                 renderDetail(updated);
@@ -448,15 +478,27 @@ function _populateClientSelect(selectedName) {
         _clients.map(c => `<option value="${_esc(c.short_name)}" data-taxid="${_esc(c.tax_id || '')}"${c.short_name === selectedName ? ' selected' : ''}>${_esc(c.short_name)}${c.tax_id ? ' (' + c.tax_id + ')' : ''}</option>`).join('');
 }
 
-/** 未稅價 → 含稅價/稅額、客戶 → 統編、類別 → 代開匯款。
+const TAX_RATE = 1.05;
+
+/** 一個金額 + 它是未稅還是含稅 → 推出三個金額欄。
+ *
+ * 兩個方向都收在這裡：來源有時記未稅、有時記含稅，若讓兩條輸入路徑各自進位，
+ * 同一筆錢會產生尾差。含稅→未稅用 round(total / 1.05)（166,950 → 159,000，
+ * 回推 159,000×1.05 = 166,950 ✓），稅額一律取兩者之差，保證三欄自洽。 */
+function _amountsFrom(value, mode) {
+    const n = parseInt(value) || 0;
+    if (!n) return { amount_ex_tax: null, amount_total: null, tax_amount: null };
+    const total = mode === 'total' ? n : Math.round(n * TAX_RATE);
+    const ex = mode === 'total' ? Math.round(n / TAX_RATE) : n;
+    return { amount_ex_tax: ex, amount_total: total, tax_amount: total - ex };
+}
+
+/** 金額三欄 + 客戶 → 統編 + 類別 → 代開匯款。
  *
  * 就地新增列與詳情頁 inline 編輯共用。modal 那條路**不**走這裡 —— 它把含稅價、
- * 代開匯款都攤開給人直接填（`_updateTaxCalc` 即時算給你看），是刻意的差異。
- * 這裡收斂的是「只給未稅價，其餘我幫你推」的那一種輸入。 */
-function _deriveFromExTax(payload, fallbackTaxId = '') {
-    const ex = parseInt(payload.amount_ex_tax) || 0;
-    payload.amount_total = ex ? Math.round(ex * 1.05) : null;
-    payload.tax_amount = ex ? (payload.amount_total - ex) : null;
+ * 代開匯款都攤開給人直接填（`_updateTaxCalc` 即時算給你看），是刻意的差異。 */
+function _deriveInvoice(payload, { amount, mode = 'ex', fallbackTaxId = '' } = {}) {
+    Object.assign(payload, _amountsFrom(amount, mode));
     const client = _clients.find(c => c.short_name === payload.company_name);
     payload.tax_id = client?.tax_id || fallbackTaxId || '';
     const tot = payload.amount_total || 0;

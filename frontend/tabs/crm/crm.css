@@ -642,6 +642,28 @@
 .inv-qa-hint { font-size: 10px; color: #6b7280; margin-top: 1px; }
 .inv-qa-btn { padding: 1px 6px; font-size: 13px; line-height: 1.2; }
 
+/* 金額欄：未稅／含稅切換鈕貼著輸入框，一眼看得出「現在打的是哪一種」 */
+.inv-qa-amt { display: flex; align-items: center; gap: 3px; justify-content: center; }
+#inv-list-body .crm-row.inv-qa .inv-qa-amt input { width: auto; flex: 1; min-width: 0; }
+.inv-qa-mode {
+  flex: 0 0 auto; cursor: pointer;
+  background: #1f2937; color: #93c5fd; border: 1px solid #3b82f6; border-radius: 3px;
+  font-size: 10px; padding: 2px 4px; line-height: 1.2;
+}
+.inv-qa-mode:hover { background: #1e3a5f; }
+
+/* 可搜尋下拉在就地新增列裡：輸入框吃滿格子、面板蓋在資料列之上。
+   🔴 必須解掉格子的 overflow:hidden —— 資料列那條 ellipsis 規則
+   （.crm-row > div { overflow:hidden }）會把往下展開的 .ss-panel 整個裁掉，
+   而且 DOM 上仍算「可見」（offsetParent 不為 null），只有量 bounding box 才看得出來。
+   ⚠️ 選擇器要比那條 ellipsis 規則「更特異」而不是只靠順序：兩者都是 (1,2,1)
+   時後寫的贏，而這段在檔案裡比它早出現 —— 多一個 :not() 把特異度拉到 (1,3,1)。 */
+#inv-list-body .crm-row.inv-qa,
+#inv-list-body .crm-row.inv-qa > div:not(.crm-kebab-wrap) { overflow: visible; }
+#inv-list-body .crm-row.inv-qa .ss-wrap { width: 92%; }
+#inv-list-body .crm-row.inv-qa .ss-input { width: 100%; font-size: 11px; padding: 2px 4px; text-align: center; }
+#inv-list-body .crm-row.inv-qa .ss-panel { z-index: 300; text-align: left; }
+
 /* ── Client project cards ── */
 .crm-project-card {
   padding: 10px 14px;
