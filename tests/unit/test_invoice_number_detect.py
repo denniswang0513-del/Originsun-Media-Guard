@@ -97,3 +97,52 @@ def test_upload_reports_but_does_not_apply():
     assert "detected_invoice_number" in body, "上傳回應沒有帶偵測結果"
     assert not re.search(r"inv\.invoice_number\s*=", body), \
         "上傳端點不該自己寫入 invoice_number —— 那是使用者按下去才發生的事"
+
+
+# ── 上傳後的兩個連帶行為（owner 2026-08-19 回報）──────────
+
+def _finance_src():
+    return io.open(os.path.join(os.path.dirname(os.path.dirname(
+        os.path.dirname(os.path.abspath(__file__)))), "routers/crm/finance.py"),
+        encoding="utf-8").read()
+
+
+def test_upload_marks_issued_but_not_voided():
+    """上傳電子發票證明聯＝這張已經開出去了 → issue_status 轉『已開立』。
+    但作廢的不動：作廢也會留存證明聯，那不是『開立中』。"""
+    src = _finance_src()
+    i = src.index("async def upload_invoice_file(")
+    body = src[i:i + 3000]
+    assert 'inv.issue_status = "已開立"' in body, "上傳後沒有轉成已開立"
+    assert '!= "作廢"' in body, "作廢的發票不該被改成已開立"
+
+
+def test_invoice_root_must_be_absolute():
+    """🔴 相對路徑要擋。os.makedirs('192.168.1.132\\Archive\\…') 會**成功** ——
+    在 agent 工作目錄底下建出一整串資料夾，於是「存到 NAS」變成靜靜存進
+    C:\OriginsunAgent\192.168.1.132\… 而畫面上一切正常
+    （owner 少打開頭兩個反斜線，三個電子發票檔全落在本機）。"""
+    src = _finance_src()
+    i = src.index("async def set_invoices_root(")
+    body = src[i:i + 2500]
+    assert "os.path.isabs(root)" in body, "沒有擋相對路徑"
+    assert body.index("os.path.isabs(root)") < body.index("os.makedirs(root"), \
+        "isabs 檢查必須在 makedirs **之前** —— 否則資料夾已經被建出來了"
+    assert "不可寫入" in body, "只 makedirs 不夠：NAS 可能給列目錄卻不給寫，要實際寫一個檔驗"
+
+
+def test_file_name_resyncs_on_update():
+    """檔名是上傳當下組的；發票號碼/日期之後才補上時要重新對齊。
+
+    最常見：上傳時號碼還空著 → 檔名落到 id 前 8 碼（fallback），之後號碼補上，
+    檔名還停在 `20260806_42ec03d2_…`。"""
+    src = _finance_src()
+    assert "def _resync_invoice_file(" in src
+    i = src.index("async def update_invoice(")
+    assert "_resync_invoice_file" in src[i:i + 2500], "update_invoice 沒有重新對齊檔名"
+    j = src.index("def _resync_invoice_file(")
+    helper = src[j:j + 1400]
+    assert "os.path.exists(target)" in helper, \
+        "目標同名檔已存在時不可覆蓋 —— 那是別人的稅務憑證"
+    assert "except OSError" in helper, \
+        "搬移失敗只能維持原狀，不能讓『改個發票號碼』整個失敗"

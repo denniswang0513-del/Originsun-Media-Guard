@@ -221,6 +221,10 @@ async def update_invoice(invoice_id: str, req: InvoicePayload, request: Request)
             setattr(inv, k, v)
         inv.invoice_date = new_date
         inv.updated_at = _now()
+        # 檔名是上傳當下組出來的 —— 發票號碼/日期/抬頭/金額改了就重新對齊
+        # （最常見：上傳時還沒填號碼，檔名落到 id 前 8 碼，之後號碼才補上）
+        if inv.file_url:
+            inv.file_url = await asyncio.to_thread(_resync_invoice_file, inv)
         await session.commit()
     return {"status": "ok"}
 
@@ -415,6 +419,34 @@ def _detect_invoice_number(path: str) -> str:
     return hits.pop() if len(hits) == 1 else ""
 
 
+def _resync_invoice_file(inv) -> str:
+    """把磁碟上的檔名/資料夾重新對齊這張發票現在的欄位；回傳新路徑（沒動就回原值）。
+
+    為什麼需要：檔名是**上傳當下**由發票欄位組出來的。上傳時還沒填發票號碼的話
+    檔名會落到 id 前 8 碼（fallback），之後號碼補上了，檔名還停在
+    `20260806_42ec03d2_…`（owner 2026-08-19 實際遇到）。日期改了也一樣 ——
+    資料夾是 {年}/{年-月}，改日期就該換資料夾。
+
+    只搬不刪：目標已存在同名檔就不動（不覆蓋別人的憑證），搬移失敗也只是維持原狀，
+    絕不讓「改個發票號碼」因為檔案系統的問題而整個失敗。
+    """
+    old = inv.file_url or ""
+    if not old or not os.path.isfile(old):
+        return old
+    ext = os.path.splitext(old)[1]
+    day = _fmt_day(inv.invoice_date)
+    base = os.path.join(_invoices_root(), day[:4] or "nodate", day[:7] or "nodate")
+    target = os.path.join(base, _invoice_file_name(inv, ext))
+    if os.path.abspath(target) == os.path.abspath(old) or os.path.exists(target):
+        return old
+    try:
+        os.makedirs(base, exist_ok=True)
+        os.replace(old, target)
+        return target
+    except OSError:
+        return old
+
+
 @router.post("/invoices/{invoice_id}/file")
 async def upload_invoice_file(invoice_id: str, request: Request, file: UploadFile = File(...)):
     """上傳這張發票開好的電子發票檔。同一張再傳一次＝取代（舊檔留在磁碟不刪，
@@ -450,6 +482,10 @@ async def upload_invoice_file(invoice_id: str, request: Request, file: UploadFil
             raise HTTPException(status_code=413,
                                 detail=f"檔案超過 {_MAX_INVOICE_BYTES // 1024 // 1024}MB")
         inv.file_url = filepath
+        # 有了電子發票證明聯就代表這張已經開出去了（owner 2026-08-19）。
+        # 作廢的不動 —— 作廢也會留存證明聯，那不是「開立中」。
+        if (inv.issue_status or "") != "作廢":
+            inv.issue_status = "已開立"
         inv.updated_at = _now()
         await session.commit()
         current_number = inv.invoice_number or ""
@@ -620,10 +656,28 @@ async def set_invoices_root(request: Request):
     body = await request.json()
     root = (body.get("invoices_root") or "").strip()
     if root:
+        # 🔴 一定要擋相對路徑。`os.makedirs("192.168.1.132\\Archive\\…")` 會**成功** ——
+        # 它在 agent 的工作目錄底下建出一整串資料夾，於是「存到 NAS」變成靜靜存進
+        # C:\OriginsunAgent\192.168.1.132\… 而畫面上一切正常。2026-08-19 owner 少打
+        # 開頭的兩個反斜線就中招（三個電子發票檔全落在本機）。
+        if not os.path.isabs(root):
+            raise HTTPException(status_code=422, detail=(
+                f"請填**完整路徑**：NAS 要用 \\\\192.168.1.132\\Archive\\... 這種"
+                f"開頭兩個反斜線的寫法，本機碟要用 D:\\... —— 目前填的「{root}」是"
+                f"相對路徑，檔案會被存進主控端資料夾裡而不是你要的位置。"))
         try:
-            os.makedirs(root, exist_ok=True)   # 多半是 NAS 上還沒建的資料夾，順手建
+            os.makedirs(root, exist_ok=True)
         except OSError as e:
             raise HTTPException(status_code=422, detail=f"資料夾無法使用：{e}")
+        # makedirs 成功不等於寫得進去（NAS 可能給了列目錄權限卻不給寫）——
+        # 實際寫一個檔再刪掉才算數，不然錯誤會延到「同事上傳發票」那一刻才爆。
+        probe = os.path.join(root, ".originsun_write_test")
+        try:
+            with open(probe, "wb") as f:
+                f.write(b"ok")
+            os.remove(probe)
+        except OSError as e:
+            raise HTTPException(status_code=422, detail=f"資料夾不可寫入：{e}")
     # settings.json 寫入也包起來 —— agent 自己會定期寫 settings，撞到檔案佔用
     # 會炸成裸 500（收據那支踩過，同一個坑）
     try:
