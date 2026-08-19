@@ -1194,7 +1194,16 @@ async def payables_summary(request: Request, month: str = Query(""),
 @router.get("/receivables/summary", dependencies=[Depends(money_dep)])
 async def receivables_summary(request: Request, status: str = Query(""),
                               entity: str = Query("")):
-    """應收帳款彙總：已開立發票按客戶（company_name）分組。status=未收款/已收款/空=全部。"""
+    """應收帳款彙總：已開立的**收款**發票按客戶（company_name）分組。
+    status=未收款/已收款/空=全部（空＝尚未收到的）。
+
+    🔴 只算收款方向。發票的 payment_type 有 收款／付款 兩種：「付款」是代開發票
+    （我們開給對方、錢是我們要付出去的）。原本只用
+    `payment_status NOT IN ('已收款','作廢')` 過濾，「已付款」不在那個清單裡就被
+    當成應收 —— 2026-08-19 匯 394 筆歷史發票後實測：應收 13,554,350 裡有
+    10,656,093（79%、183 張）其實是代開的付款發票，把應收虛增成 4.7 倍。
+    以前系統裡 0 筆發票，這個缺陷看不出來。
+    """
     # 兩本帳：money_dep 之上疊第二層 entity scope（plan §2.4）
     # full：CRM 帳務＝原始帳列，合夥人不可及 —— money_dep 已擋一層，刻意雙保險
     ent = require_entity(request, entity, level="full")
@@ -1215,6 +1224,10 @@ async def receivables_summary(request: Request, status: str = Query(""),
             # 種類切換鈕，每次點到的是不同筆）。
             .order_by(CrmInvoice.invoice_date.desc(), CrmInvoice.created_at.desc(), CrmInvoice.id)
         )
+        # 收款方向才是應收（NULL 視為收款 —— 與 _to_invoice_dict 的 `or "收款"` 一致；
+        # 「付款」的代開發票與「作廢」都排除）
+        query = query.where(or_(CrmInvoice.payment_type == "收款",
+                                CrmInvoice.payment_type.is_(None)))
         if status:
             query = query.where(CrmInvoice.payment_status == status)
         else:
