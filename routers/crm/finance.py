@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import csv
 import io
+import re
 import uuid
 from datetime import datetime, timezone
 
@@ -26,6 +27,25 @@ try:
                           CrmPaymentRequest, CrmCashEntry, CrmProjectExpense)
 except ImportError:  # DB 套件不存在的 agent 環境 — 行為同原檔 try/except
     pass
+
+# ── CSV 匯入共用 ────────────────────────────────────────────
+
+def _parse_money(val: str) -> int:
+    """CSV 金額欄 → int（無法辨識回 0）。三支 import_csv 共用的唯一正本。
+
+    🔴 為什麼要收斂成一份：發票／收支／請款三個 mapper 本來各寫一套，發票那套
+    **沒有去逗號** —— Google Sheets 匯出時金額欄只要設了千分位格式就是 "1,234"，
+    於是每一筆帶逗號的發票金額都被靜靜寫成 0（不報錯、不跳過）。2026-08-19 匯
+    394 筆歷史發票前實測到 14 筆會中招，其中最大一筆 342,857。
+
+    吃得下：千分位逗號、全形/半形空白、NT$／$ 符號、小數點。
+    ⚠️ 會計式括號負數 "(1,234)" 沿用舊行為＝去括號後仍為正數（收支表有獨立的
+    支出/存入兩欄，不靠括號表達正負）。要改負號語意得先確認三張表都沒在用它。
+    """
+    s = (val or "").strip().replace(",", "").replace(" ", "").replace("　", "")
+    s = s.replace("NT$", "").replace("$", "").replace("(", "").replace(")", "")
+    return int(float(s)) if re.fullmatch(r"-?\d+(\.\d+)?", s) else 0
+
 
 # ── 兩本帳（entity）helpers — docs/LEDGER_ENTITY_PLAN.md §2.4/§3 ──────
 
@@ -218,10 +238,16 @@ _INVOICE_COL_MAP = {
     "amount_ex_tax":  ["未稅價", "amount_ex_tax"],
     "amount_total":   ["發票金額", "amount_total"],
     "tax_amount":     ["稅額", "tax_amount"],
-    "commission":     ["代開應區", "commission"],
+    # 「代開應區」是舊的錯字別名（實際表頭是「代開應匯」）—— 兩個都收，舊檔不回頭壞
+    "commission":     ["代開應匯", "代開應區", "commission"],
     "company_name":   ["抬頭", "company_name"],
     "tax_id":         ["統編", "tax_id"],
     "item_type":      ["品項", "item_type"],
+    # 紙本發票收件資訊與備註：model 一直有這四根欄位，別名漏了就整欄靜靜丟掉
+    "recipient":         ["收件人", "recipient"],
+    "recipient_phone":   ["收件電話", "電話", "recipient_phone"],
+    "recipient_address": ["收件地址", "地址", "recipient_address"],
+    "notes":             ["備註", "附註", "notes"],
 }
 
 _INVOICE_INT_FIELDS = {"amount_ex_tax", "amount_total", "tax_amount", "commission"}
@@ -234,18 +260,20 @@ def _map_invoice_row(header_map: dict, row: dict) -> dict:
             orig = header_map.get(alias.lower())
             if orig and row.get(orig, "").strip():
                 val = row[orig].strip()
-                if field in _INVOICE_INT_FIELDS:
-                    val = int(float(val)) if val.replace('.', '').replace('-', '').isdigit() else 0
-                data[field] = val
+                data[field] = _parse_money(val) if field in _INVOICE_INT_FIELDS else val
                 break
-    # Derive payment_status from payment_type
+    # Sheet 的「款項狀態」一欄同時是方向（收/付）與狀態（已/未）→ 拆成兩個欄位。
+    # 🔴「未收款」裡也有一個「收」字：只判 '收' in pt 會把未收的發票標成**已收款**，
+    #    應收帳款憑空消失、收入被提前認列。2026-08-19 匯 394 筆歷史發票時實測到
+    #    44 張未收款發票中招。判「已/未」必須先於或同時於判「收/付」。
     pt = data.get("payment_type", "")
+    unpaid = "未" in pt
     if "收" in pt:
-        data["payment_status"] = "已收款"
         data["payment_type"] = "收款"
+        data["payment_status"] = "未收款" if unpaid else "已收款"
     elif "付" in pt:
-        data["payment_status"] = "已付款"
         data["payment_type"] = "付款"
+        data["payment_status"] = "未付款" if unpaid else "已付款"
     elif "作廢" in pt:
         data["payment_status"] = "作廢"
     return data
@@ -678,9 +706,7 @@ def _map_payment_row(header_map: dict, row: dict) -> dict:
             orig = header_map.get(alias.lower())
             if orig and row.get(orig, "").strip():
                 val = row[orig].strip()
-                if field == "amount":
-                    val = int(float(val.replace(",", ""))) if val.replace(",", "").replace(".", "").replace("-", "").isdigit() else 0
-                data[field] = val
+                data[field] = _parse_money(val) if field == "amount" else val
                 break
     # Parse combined payee field: "姓名_身分證" or just "姓名"
     combined = data.pop("payee_combined", "")
@@ -901,11 +927,7 @@ def _map_cash_row(header_map: dict, row: dict) -> dict:
             orig = header_map.get(alias.lower())
             if orig and row.get(orig, "").strip():
                 val = row[orig].strip()
-                if field in _CASH_INT_FIELDS:
-                    clean = val.replace(",", "").replace("(", "").replace(")", "")
-                    data[field] = int(float(clean)) if clean.replace(".", "").replace("-", "").isdigit() else 0
-                else:
-                    data[field] = val
+                data[field] = _parse_money(val) if field in _CASH_INT_FIELDS else val
                 break
     return data
 
