@@ -309,13 +309,15 @@ def _validate_month(month: str) -> str:
 
 # ── F1 月結守衛（唯一實作 — routers/crm/finance.py 與 routers/api_finance.py 共用）──
 
-async def _locked_month_set(session) -> set:
+async def _locked_month_set(session, entity: str = "parent") -> set:
     """已鎖（未重開）月份集合 — batch / CSV 匯入要逐筆檢查、彙整違規清單時用
-    （_assert_month_open 是單筆語意，逐筆呼叫會在第一筆就斷，報不出全貌）。"""
+    （_assert_month_open 是單筆語意，逐筆呼叫會在第一筆就斷，報不出全貌）。
+    兩本帳各自鎖月，見 docs/LEDGER_ENTITY_PLAN.md §3。"""
     from db.models import FinanceMonthClose
     rows = (await session.execute(
         select(FinanceMonthClose.month).where(
-            FinanceMonthClose.reopened_at.is_(None)))).scalars().all()
+            FinanceMonthClose.reopened_at.is_(None),
+            FinanceMonthClose.entity == entity))).scalars().all()
     return set(rows)
 
 
@@ -329,10 +331,12 @@ def _raise_locked_batch(violations: list):
                "（需修改請先到帳務→現金流重開該月）")
 
 
-async def _assert_month_open(session, *dates):
+async def _assert_month_open(session, *dates, entity: str = "parent"):
     """F1 月結鎖帳：任一日期落在已鎖（未重開）月份 → 409。
     dates 收 str / date / datetime（core.finance_logic.month_of 收斂型別）。
     更新時要同時傳舊/新日期（把紀錄搬進或搬出鎖定月都算改帳）。
+    兩本帳各自鎖月，見 docs/LEDGER_ENTITY_PLAN.md §3 —— 呼叫端傳**該列的
+    entity**（petty/costs 為母公司域，吃預設 'parent' 不用改）。
 
     守衛覆蓋範圍（財務階段二擴張）與「看哪個日期」的判準：
     - 收支明細  create/update/delete → entry_date（現金側）
@@ -348,18 +352,19 @@ async def _assert_month_open(session, *dates):
     months = {m for m in (month_of(d) for d in dates) if m}
     if not months:
         return
-    locked = sorted(months & await _locked_month_set(session))
+    locked = sorted(months & await _locked_month_set(session, entity=entity))
     if locked:
         raise HTTPException(
             status_code=409,
             detail=f"月份已鎖帳：{', '.join(locked)}（需修改請先到帳務→現金流重開該月）")
 
 
-async def _assert_rows_open(session, dated_rows):
+async def _assert_rows_open(session, dated_rows, entity: str = "parent"):
     """batch / CSV 的逐筆月結檢查：dated_rows = iterable of (label, date_like)。
     一次撈鎖定月集合 → 逐筆比對 → 收集違規 label → 任一違規整批 409。
-    label 由呼叫端組好（如「第 N 列（YYYY-MM-DD）」），這裡只負責比對與彙整。"""
-    locked = await _locked_month_set(session)
+    label 由呼叫端組好（如「第 N 列（YYYY-MM-DD）」），這裡只負責比對與彙整。
+    兩本帳各自鎖月，見 docs/LEDGER_ENTITY_PLAN.md §3。"""
+    locked = await _locked_month_set(session, entity=entity)
     violations = [label for label, d in dated_rows if (month_of(d) or "") in locked]
     if violations:
         _raise_locked_batch(violations)

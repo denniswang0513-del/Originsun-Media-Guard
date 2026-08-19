@@ -23,8 +23,15 @@ api_finance.py — 財務管理階段二/三：科目對映 + 銀行帳戶 + 對
   攤還純函式 amortization_schedule 在 core/finance_logic.py
   （黃金測試 tests/unit/test_finance_loans.py）。
 
-守門：全部端點 `crm_invoices` 模組 **＋** `money_view` 金額檢視權
-（2026-08-15 起；docs/MONEY_VISIBILITY.md）。
+守門：兩本帳 entity 化 v2（2026-08-19；docs/LEDGER_ENTITY_PLAN.md §2.4）——
+`_guard(request, entity, level)` 走 core.ledger.require_entity：entity 值
+'parent'＝母公司（預設；既有資料全歸此）、'mine'＝我的帳。scope 分兩層：
+level="view"（報表：儀表板/三表/drilldown/稅務包＋科目/對映讀取）合夥人
+（finance_partner）可及；level="full"（其餘全部：銀行帳戶/對帳/對帳單明細/
+調整/貸款/bulk-assign/category-map 寫入/setup-wizard）⟺ `crm_invoices`＋
+`money_view` 雙鑰匙（沿用 2026-08-15；docs/MONEY_VISIBILITY.md）或
+`finance_mine`；Lv3 全開。銀行帳戶/調整/貸款/三表/儀表板/稅務包以解析後
+entity 過濾；科目表與對映兩本共用（讀任一 scope、寫限母公司 full scope）。
 金額一律 Integer 新台幣。純計算規則在 core/finance_logic.py（有單元測試）。
 """
 
@@ -34,7 +41,6 @@ from datetime import datetime, timedelta
 from fastapi import APIRouter, HTTPException, Request  # type: ignore
 
 from config import load_settings, save_settings
-from core.auth import check_admin_or_module
 from core.db_guard import db_factory_or_503 as _factory_or_503
 from core.finance_logic import (amortization_schedule,
                                 auto_match_statement_lines,
@@ -42,7 +48,6 @@ from core.finance_logic import (amortization_schedule,
                                 local_day, period_months, reconciliation_diff,
                                 statement_line_status, today_start,
                                 workbench_summary)
-from core.money import check_money
 from core.schemas import (BankAccountPayload, BulkAssignAccountPayload,
                           FinanceAdjustmentPayload, FinanceCategoryMapPut,
                           FinanceSetupWizardPayload, LoanPayload,
@@ -67,21 +72,28 @@ ACCT_KINDS = {"bank", "cash"}
 LOAN_PAY_CATEGORY = "貸款繳款"  # 對映 (cash, 貸款繳款) → 2400/loan（seed_finance）
 
 
-def _guard(request: Request):
-    # 兩把鑰匙都要：`crm_invoices` ＝ 進得了財務管理這個功能面，`money_view` ＝
-    # 看得到數字（owner 2026-08-15「預設不要看到金額，除非我授權」，
-    # 政策正本 core/money.py）。這支 router 每一格都是錢，所以擋在入口。
-    check_admin_or_module(request, "crm_invoices")
-    check_money(request)
+def _guard(request: Request, entity: str = "", level: str = "view") -> str:
+    """財務域守衛 v2：回傳解析後的帳本 entity（docs/LEDGER_ENTITY_PLAN.md §2.4）。
+
+    level="view"＝報表層（合夥人 finance_partner 可及）；level="full"＝記帳/
+    銀行/原始帳列/月結寫入（parent ⟺ crm_invoices AND money_view、
+    mine ⟺ finance_mine；Lv3 全開）。舊的 check_admin_or_module('crm_invoices')
+    + check_money 語意已內含在 require_entity 的 scope 判定裡 —— 不要在這裡
+    疊舊守衛。"""
+    from core.ledger import require_entity
+    return require_entity(request, entity, level=level)
 
 
-async def _flow_sums_by_account(session, until=None, account_id=None) -> dict:
+async def _flow_sums_by_account(session, until=None, account_id=None,
+                                entity=None) -> dict:
     """各帳戶掛帳收支的 SUM 聚合 {bank_account_id: {deposit, expense, bank_fee, claim}}。
 
     流水公式線性（見 finance_logic.bank_running_balance docstring）→ 聚合值包成
     一筆 entry 餵 bank_running_balance 即得餘額，免逐筆搬。until 給對帳用
     （只算 entry_date < until 的流水；未填日期的收支無法定位月份，不計入）。
-    account_id 非 None 時只聚合單一帳戶（對帳只需要一個帳戶，免全表掃）。"""
+    account_id 非 None 時只聚合單一帳戶（對帳只需要一個帳戶，免全表掃）。
+    entity 非 None 時只聚合該帳本（帳戶清單只要自己那本 —— 不加這個過濾的話，
+    /my-ledger.html 每次開銀行帳戶都會把整份母公司收支歷史聚合完再全部丟掉）。"""
     from sqlalchemy import select, func as safunc
     from db.models import CrmCashEntry
     q = (select(CrmCashEntry.bank_account_id,
@@ -91,6 +103,8 @@ async def _flow_sums_by_account(session, until=None, account_id=None) -> dict:
                 safunc.coalesce(safunc.sum(CrmCashEntry.claim), 0))
          .where(CrmCashEntry.bank_account_id.isnot(None),
                 CrmCashEntry.bank_account_id != ""))
+    if entity is not None:
+        q = q.where(CrmCashEntry.entity == entity)
     if account_id is not None:
         q = q.where(CrmCashEntry.bank_account_id == account_id)
     if until is not None:
@@ -101,13 +115,15 @@ async def _flow_sums_by_account(session, until=None, account_id=None) -> dict:
             for row in (await session.execute(q)).all()}
 
 
-async def _unassigned_count(session) -> int:
+async def _unassigned_count(session, entity: str = "parent") -> int:
+    """未掛帳戶的收支筆數 — 兩本帳分開數（兩本帳互不見彼此的未掛帳待辦）。"""
     from sqlalchemy import select, or_, func as safunc
     from db.models import CrmCashEntry
     return (await session.execute(
         select(safunc.count(CrmCashEntry.id)).where(
             or_(CrmCashEntry.bank_account_id.is_(None),
-                CrmCashEntry.bank_account_id == "")))).scalar() or 0
+                CrmCashEntry.bank_account_id == ""),
+            CrmCashEntry.entity == entity))).scalar() or 0
 
 
 # ── 科目表 ──────────────────────────────────────────────────
@@ -124,8 +140,8 @@ def _acct_dict(a) -> dict:
 
 
 @router.get("/accounts")
-async def list_accounts(request: Request):
-    _guard(request)
+async def list_accounts(request: Request, entity: str = ""):
+    _guard(request, entity)  # 科目表兩本帳共用：任一 scope 可讀、不過濾
     from sqlalchemy import select
     from db.models import FinanceAccount
     factory = _factory_or_503()
@@ -144,8 +160,8 @@ def _map_dict(m) -> dict:
 
 
 @router.get("/category-map")
-async def list_category_map(request: Request):
-    _guard(request)
+async def list_category_map(request: Request, entity: str = ""):
+    _guard(request, entity)  # 對映兩本帳共用：任一 scope 可讀、不過濾
     from sqlalchemy import select
     from db.models import FinanceCategoryMap
     factory = _factory_or_503()
@@ -159,7 +175,8 @@ async def list_category_map(request: Request):
 @router.put("/category-map")
 async def upsert_category_map(payload: FinanceCategoryMapPut, request: Request):
     """批次 upsert：以 (source, category_text) 為 key，有則改 account/treatment、無則建。"""
-    _guard(request)
+    # 共用科目表，寫入限母公司 full scope（合夥人不可改兩本帳共用的對映）
+    _guard(request, "parent", level="full")
     if not payload.items:
         raise HTTPException(status_code=422, detail="items 不可為空")
     for it in payload.items:
@@ -206,10 +223,10 @@ async def upsert_category_map(payload: FinanceCategoryMapPut, request: Request):
 
 
 @router.get("/category-map/unmapped")
-async def list_unmapped_categories(request: Request):
+async def list_unmapped_categories(request: Request, entity: str = ""):
     """掃收支明細 + 請款單的 distinct category 中沒有對映的值（含使用筆數），
     給後台「有幾個類別還沒歸科目」的待辦清單。"""
-    _guard(request)
+    _guard(request, entity)  # 對映兩本帳共用：任一 scope 可讀、不過濾
     from sqlalchemy import select, func as safunc
     from db.models import CrmCashEntry, CrmPaymentRequest, FinanceCategoryMap
     factory = _factory_or_503()
@@ -239,33 +256,38 @@ def _bank_dict(b) -> dict:
         "opening_date": b.opening_date.strftime("%Y-%m-%d") if b.opening_date else None,
         "is_default": bool(b.is_default), "active": bool(b.active),
         "sort_order": b.sort_order or 0, "note": b.note or "",
+        "entity": b.entity or "parent",
         "created_at": b.created_at.isoformat() if b.created_at else None,
         "updated_at": b.updated_at.isoformat() if b.updated_at else None,
     }
 
 
-async def _unset_other_defaults(session, keep_id: str):
-    """is_default 單選：設某帳戶為預設時，把其他帳戶的預設拿掉。"""
+async def _unset_other_defaults(session, keep_id: str, entity: str = "parent"):
+    """is_default 單選（每本帳各一個預設）：設某帳戶為預設時，把**同帳本**
+    其他帳戶的預設拿掉 — 兩本帳的預設互不干擾。"""
     from sqlalchemy import update as sa_update
     from db.models import BankAccount
     await session.execute(
-        sa_update(BankAccount).where(BankAccount.id != keep_id)
+        sa_update(BankAccount).where(BankAccount.id != keep_id,
+                                     BankAccount.entity == entity)
         .values(is_default=False))
 
 
 @router.get("/bank-accounts")
-async def list_bank_accounts(request: Request, with_balances: int = 1):
+async def list_bank_accounts(request: Request, with_balances: int = 1,
+                             entity: str = ""):
     """with_balances=0 跳過流水聚合與未掛帳統計（current_balance 回 null）—
     給只要帳戶清單的呼叫端（如收支明細的帳戶下拉）省兩次全表聚合。"""
-    _guard(request)
+    ent = _guard(request, entity, level="full")
     from sqlalchemy import select
     from db.models import BankAccount
     factory = _factory_or_503()
     async with factory() as session:
         rows = (await session.execute(
-            select(BankAccount).order_by(BankAccount.sort_order, BankAccount.created_at))).scalars().all()
-        sums = await _flow_sums_by_account(session) if with_balances else {}
-        unassigned = await _unassigned_count(session) if with_balances else 0
+            select(BankAccount).where(BankAccount.entity == ent)
+            .order_by(BankAccount.sort_order, BankAccount.created_at))).scalars().all()
+        sums = await _flow_sums_by_account(session, entity=ent) if with_balances else {}
+        unassigned = await _unassigned_count(session, ent) if with_balances else 0
     items = []
     for b in rows:
         d = _bank_dict(b)
@@ -277,8 +299,11 @@ async def list_bank_accounts(request: Request, with_balances: int = 1):
 
 
 @router.post("/bank-accounts")
-async def create_bank_account(payload: BankAccountPayload, request: Request):
-    _guard(request)
+async def create_bank_account(payload: BankAccountPayload, request: Request,
+                              entity: str = ""):
+    # payload.entity（None＝落 entity query param 的解析結果）驗 scope
+    # —— 不能建自己看不到的帳本。_guard 對空字串會自己套預設，一次就夠。
+    target_ent = _guard(request, payload.entity or entity, level="full")
     if not (payload.name or "").strip():
         raise HTTPException(status_code=422, detail="name 必填")
     if payload.acct_kind and payload.acct_kind not in ACCT_KINDS:
@@ -295,18 +320,20 @@ async def create_bank_account(payload: BankAccountPayload, request: Request):
             is_default=bool(payload.is_default),
             active=payload.active if payload.active is not None else True,
             sort_order=payload.sort_order or 0, note=payload.note,
+            entity=target_ent,
         )
         session.add(b)
         if b.is_default:
             await session.flush()
-            await _unset_other_defaults(session, b.id)
+            await _unset_other_defaults(session, b.id, b.entity)
         await session.commit()
         return _bank_dict(b)
 
 
 @router.put("/bank-accounts/{account_id}")
-async def update_bank_account(account_id: str, payload: BankAccountPayload, request: Request):
-    _guard(request)
+async def update_bank_account(account_id: str, payload: BankAccountPayload,
+                              request: Request):
+    _guard(request, level="full")
     if payload.acct_kind and payload.acct_kind not in ACCT_KINDS:
         raise HTTPException(status_code=422, detail=f"acct_kind 需為 {sorted(ACCT_KINDS)}")
     from db.models import BankAccount
@@ -315,7 +342,12 @@ async def update_bank_account(account_id: str, payload: BankAccountPayload, requ
         b = await session.get(BankAccount, account_id)
         if not b:
             raise HTTPException(status_code=404, detail="帳戶不存在")
+        _guard(request, b.entity or "parent", level="full")  # 這顆帳戶所屬帳本要在 scope 內
         data = payload.model_dump(exclude_unset=True)
+        # entity 不允許改：payload.entity None＝維持既有值；非 None 且不同 → 422
+        new_ent = data.pop("entity", None)
+        if new_ent is not None and new_ent != (b.entity or "parent"):
+            raise HTTPException(status_code=422, detail="帳戶不可跨帳本搬移")
         if "name" in data and not (data["name"] or "").strip():
             raise HTTPException(status_code=422, detail="name 不可為空")
         if "opening_date" in data:
@@ -323,7 +355,7 @@ async def update_bank_account(account_id: str, payload: BankAccountPayload, requ
         for k, v in data.items():
             setattr(b, k, v)
         if data.get("is_default"):
-            await _unset_other_defaults(session, b.id)
+            await _unset_other_defaults(session, b.id, b.entity or "parent")
         await session.commit()
         return _bank_dict(b)
 
@@ -331,7 +363,7 @@ async def update_bank_account(account_id: str, payload: BankAccountPayload, requ
 @router.delete("/bank-accounts/{account_id}")
 async def delete_bank_account(account_id: str, request: Request):
     """有掛帳收支的帳戶不可刪（歷史流水會變孤兒）→ 409 建議停用 active=false。"""
-    _guard(request)
+    _guard(request, level="full")
     from sqlalchemy import select, func as safunc
     from db.models import BankAccount, CrmCashEntry
     factory = _factory_or_503()
@@ -339,6 +371,7 @@ async def delete_bank_account(account_id: str, request: Request):
         b = await session.get(BankAccount, account_id)
         if not b:
             raise HTTPException(status_code=404, detail="帳戶不存在")
+        _guard(request, b.entity or "parent", level="full")  # 這顆帳戶所屬帳本要在 scope 內
         used = (await session.execute(
             select(safunc.count(CrmCashEntry.id))
             .where(CrmCashEntry.bank_account_id == account_id))).scalar() or 0
@@ -384,14 +417,19 @@ def _recon_dict(r) -> dict:
 
 
 @router.get("/reconciliations")
-async def list_reconciliations(request: Request, bank_account_id: str = ""):
-    _guard(request)
+async def list_reconciliations(request: Request, bank_account_id: str = "",
+                               entity: str = ""):
+    ent = _guard(request, entity, level="full")
     from sqlalchemy import select
-    from db.models import BankReconciliation
+    from db.models import BankAccount, BankReconciliation
     factory = _factory_or_503()
     async with factory() as session:
-        q = select(BankReconciliation).order_by(
-            BankReconciliation.month.desc(), BankReconciliation.bank_account_id)
+        # 對帳紀錄無 entity 欄 — 經帳戶推導：join 只留本帳本帳戶的對帳列
+        q = (select(BankReconciliation)
+             .join(BankAccount, BankAccount.id == BankReconciliation.bank_account_id)
+             .where(BankAccount.entity == ent)
+             .order_by(BankReconciliation.month.desc(),
+                       BankReconciliation.bank_account_id))
         if bank_account_id:
             q = q.where(BankReconciliation.bank_account_id == bank_account_id)
         rows = (await session.execute(q)).scalars().all()
@@ -402,7 +440,7 @@ async def list_reconciliations(request: Request, bank_account_id: str = ""):
 async def create_reconciliation(payload: ReconciliationPayload, request: Request):
     """對帳：system_balance = 帳戶期初 + entry_date 在該月底（含）前的掛帳流水。
     同帳戶同月重送 = 覆蓋（upsert，重新對一次）。"""
-    _guard(request)
+    _guard(request, level="full")
     month = _validate_month(payload.month)
     from sqlalchemy import select
     from db.models import BankAccount, BankReconciliation
@@ -411,6 +449,7 @@ async def create_reconciliation(payload: ReconciliationPayload, request: Request
         acct = await session.get(BankAccount, payload.bank_account_id)
         if not acct:
             raise HTTPException(status_code=404, detail="帳戶不存在")
+        _guard(request, acct.entity or "parent", level="full")  # 對帳的帳本 scope 經帳戶推導
         system_balance = await _system_balance(session, acct, month)
         rd = reconciliation_diff(system_balance, payload.statement_balance)
         row = (await session.execute(
@@ -489,7 +528,7 @@ async def _wb_load(session, bank_account_id: str, month: str) -> tuple:
 async def reconciliation_workbench(request: Request, bank_account_id: str, month: str):
     """對帳工作台一次拿全：對帳單明細 + 該月收支（含配對旗標）+ 摘要 + 系統餘額
     + 既有對帳紀錄。前端只打這支就能畫整個工作台。"""
-    _guard(request)
+    _guard(request, level="full")
     month = _validate_month(month)
     from sqlalchemy import select
     from db.models import BankAccount, BankReconciliation
@@ -498,6 +537,7 @@ async def reconciliation_workbench(request: Request, bank_account_id: str, month
         acct = await session.get(BankAccount, bank_account_id)
         if not acct:
             raise HTTPException(status_code=404, detail="帳戶不存在")
+        _guard(request, acct.entity or "parent", level="full")  # 工作台的帳本 scope 經帳戶推導
         lines, entries, matched_ids = await _wb_load(session, bank_account_id, month)
         system_balance = await _system_balance(session, acct, month)
         recon = (await session.execute(
@@ -520,7 +560,7 @@ async def add_statement_lines(payload: StatementLinesBulkPayload, request: Reque
     """對帳單明細批次新增（貼上匯入 / 手動 key 都走這支）。
     工作底稿不掛月結守衛 — 唯一寫真帳的補記入帳才有。replace=true 先清同帳戶
     同月既有明細（含配對連結；收支明細本身不動）。"""
-    _guard(request)
+    _guard(request, level="full")
     month = _validate_month(payload.month)
     if not payload.lines:
         raise HTTPException(status_code=422, detail="lines 不可為空")
@@ -531,8 +571,10 @@ async def add_statement_lines(payload: StatementLinesBulkPayload, request: Reque
     from db.models import BankAccount, BankStatementLine
     factory = _factory_or_503()
     async with factory() as session:
-        if not await session.get(BankAccount, payload.bank_account_id):
+        acct = await session.get(BankAccount, payload.bank_account_id)
+        if not acct:
             raise HTTPException(status_code=404, detail="帳戶不存在")
+        _guard(request, acct.entity or "parent", level="full")  # 明細掛在帳戶下 — 帳本 scope 經帳戶推導
         if payload.replace:
             await session.execute(sadelete(BankStatementLine).where(
                 BankStatementLine.bank_account_id == payload.bank_account_id,
@@ -548,11 +590,14 @@ async def add_statement_lines(payload: StatementLinesBulkPayload, request: Reque
     return {"ok": True, "added": len(payload.lines)}
 
 
-async def _stmt_line_or_404(session, line_id: str):
-    from db.models import BankStatementLine
+async def _stmt_line_or_404(session, line_id: str, request: Request):
+    """載明細列 + 依所屬帳戶的 entity 驗帳本 scope（兩本帳，§2.4）。"""
+    from db.models import BankAccount, BankStatementLine
     row = await session.get(BankStatementLine, line_id)
     if not row:
         raise HTTPException(status_code=404, detail="對帳單明細不存在")
+    acct = await session.get(BankAccount, row.bank_account_id)
+    _guard(request, (acct.entity if acct else "") or "parent", level="full")
     return row
 
 
@@ -561,10 +606,10 @@ async def update_statement_line(line_id: str, payload: StatementLineUpdatePayloa
                                 request: Request):
     """只開放補交易日與註記 — 金額/摘要要改就刪列重加（工作底稿，改配對過的
     金額會讓差額數學失真，乾脆不開這扇門）。"""
-    _guard(request)
+    _guard(request, level="full")
     factory = _factory_or_503()
     async with factory() as session:
-        row = await _stmt_line_or_404(session, line_id)
+        row = await _stmt_line_or_404(session, line_id, request)
         if payload.line_date is not None:
             row.line_date = _parse_day(payload.line_date)
         if payload.note is not None:
@@ -576,10 +621,10 @@ async def update_statement_line(line_id: str, payload: StatementLineUpdatePayloa
 @router.delete("/statement-lines/{line_id}")
 async def delete_statement_line(line_id: str, request: Request):
     """刪明細列（工作底稿）— 配對連結一併消失，收支明細本身不動。"""
-    _guard(request)
+    _guard(request, level="full")
     factory = _factory_or_503()
     async with factory() as session:
-        row = await _stmt_line_or_404(session, line_id)
+        row = await _stmt_line_or_404(session, line_id, request)
         await session.delete(row)
         await session.commit()
     return {"ok": True}
@@ -588,13 +633,15 @@ async def delete_statement_line(line_id: str, request: Request):
 @router.post("/statement-lines/auto-match")
 async def auto_match_statement(payload: StatementAutoMatchPayload, request: Request):
     """自動配對：金額相等 + 日期最近（純函式 auto_match_statement_lines）→ 寫回連結。"""
-    _guard(request)
+    _guard(request, level="full")
     month = _validate_month(payload.month)
     from db.models import BankAccount
     factory = _factory_or_503()
     async with factory() as session:
-        if not await session.get(BankAccount, payload.bank_account_id):
+        acct = await session.get(BankAccount, payload.bank_account_id)
+        if not acct:
             raise HTTPException(status_code=404, detail="帳戶不存在")
+        _guard(request, acct.entity or "parent", level="full")  # 帳本 scope 經帳戶推導
         lines, entries, matched_ids = await _wb_load(session, payload.bank_account_id, month)
         pairs = auto_match_statement_lines(
             [{"id": l.id, "amount": l.amount, "line_date": local_day(l.line_date),
@@ -613,12 +660,12 @@ async def auto_match_statement(payload: StatementAutoMatchPayload, request: Requ
 async def match_statement_line(line_id: str, payload: StatementLineMatchPayload,
                                request: Request):
     """手動配對：金額必須相等（差額數學才成立）、一筆收支只能被一列認領。"""
-    _guard(request)
+    _guard(request, level="full")
     from sqlalchemy import select
     from db.models import BankStatementLine, CrmCashEntry
     factory = _factory_or_503()
     async with factory() as session:
-        row = await _stmt_line_or_404(session, line_id)
+        row = await _stmt_line_or_404(session, line_id, request)
         if row.matched_entry_id:
             raise HTTPException(status_code=409, detail="此列已配對，請先取消配對")
         entry = await session.get(CrmCashEntry, payload.entry_id)
@@ -644,10 +691,10 @@ async def match_statement_line(line_id: str, payload: StatementLineMatchPayload,
 
 @router.post("/statement-lines/{line_id}/unmatch")
 async def unmatch_statement_line(line_id: str, request: Request):
-    _guard(request)
+    _guard(request, level="full")
     factory = _factory_or_503()
     async with factory() as session:
-        row = await _stmt_line_or_404(session, line_id)
+        row = await _stmt_line_or_404(session, line_id, request)
         row.matched_entry_id = None
         await session.commit()
         return _stmt_dict(row)
@@ -659,18 +706,20 @@ async def create_entry_from_statement_line(
     """補記入帳：銀行有、系統漏記 → 從明細列建收支明細並自動配對。
     寫真帳 → 月結守衛看交易日；category 必填（→ 科目走既有對映，沒對映會
     出現在未歸類佇列）。正額=存入、負額=支出。"""
-    _guard(request)
-    from db.models import CrmCashEntry
+    _guard(request, level="full")
+    from db.models import BankAccount, CrmCashEntry
     factory = _factory_or_503()
     async with factory() as session:
-        row = await _stmt_line_or_404(session, line_id)
+        row = await _stmt_line_or_404(session, line_id, request)  # 內含帳戶 entity scope 驗證
+        acct = await session.get(BankAccount, row.bank_account_id)
+        row_ent = (acct.entity if acct else "") or "parent"
         if row.matched_entry_id:
             raise HTTPException(status_code=409, detail="此列已配對，不需補記")
         if not row.line_date:
             raise HTTPException(status_code=422, detail="請先填這列的交易日再補記")
         if not (payload.category or "").strip():
             raise HTTPException(status_code=422, detail="請選擇類別（報表要靠它歸科目）")
-        await _assert_month_open(session, row.line_date)
+        await _assert_month_open(session, row.line_date, entity=row_ent)
         amt = row.amount
         entry = CrmCashEntry(
             id=uuid.uuid4().hex, entry_date=row.line_date,
@@ -678,7 +727,8 @@ async def create_entry_from_statement_line(
             expense=-amt if amt < 0 else None,
             summary=(payload.summary or row.description or "銀行對帳補記")[:255],
             category=payload.category.strip(), payee=payload.payee or None,
-            note="銀行對帳補記", bank_account_id=row.bank_account_id)
+            note="銀行對帳補記", bank_account_id=row.bank_account_id,
+            entity=row_ent)  # 補記入帳繼承帳戶的帳本
         session.add(entry)
         row.matched_entry_id = entry.id
         await session.commit()
@@ -694,6 +744,7 @@ def _adj_dict(a, code: str = "", name: str = "") -> dict:
         "adj_date": adj_date.strftime("%Y-%m-%d") if adj_date else None,
         "account_id": a.account_id, "account_code": code, "account_name": name,
         "amount": a.amount, "adj_type": a.adj_type, "description": a.description,
+        "entity": a.entity or "parent",
         "created_by": a.created_by or "",
         "created_at": a.created_at.isoformat() if a.created_at else None,
     }
@@ -711,8 +762,8 @@ async def _get_non_bank_account(session, account_id: str):
 
 
 @router.get("/adjustments")
-async def list_adjustments(request: Request):
-    _guard(request)
+async def list_adjustments(request: Request, entity: str = ""):
+    ent = _guard(request, entity, level="full")
     from sqlalchemy import select
     from db.models import FinanceAccount, FinanceAdjustment
     factory = _factory_or_503()
@@ -720,13 +771,17 @@ async def list_adjustments(request: Request):
         rows = (await session.execute(
             select(FinanceAdjustment, FinanceAccount.code, FinanceAccount.name)
             .outerjoin(FinanceAccount, FinanceAccount.id == FinanceAdjustment.account_id)
+            .where(FinanceAdjustment.entity == ent)
             .order_by(FinanceAdjustment.adj_date.desc()))).all()
     return {"items": [_adj_dict(a, c or "", n or "") for a, c, n in rows]}
 
 
 @router.post("/adjustments")
-async def create_adjustment(payload: FinanceAdjustmentPayload, request: Request):
-    _guard(request)
+async def create_adjustment(payload: FinanceAdjustmentPayload, request: Request,
+                            entity: str = ""):
+    # payload.entity（None＝落 entity query param 的解析結果）驗 scope
+    # —— 不能建自己看不到的帳本。_guard 對空字串會自己套預設，一次就夠。
+    target_ent = _guard(request, payload.entity or entity, level="full")
     adj_date = _parse_day(payload.adj_date)
     if not adj_date:
         raise HTTPException(status_code=422, detail="adj_date 必填（YYYY-MM-DD）")
@@ -742,29 +797,37 @@ async def create_adjustment(payload: FinanceAdjustmentPayload, request: Request)
     factory = _factory_or_503()
     async with factory() as session:
         acct = await _get_non_bank_account(session, payload.account_id)
-        await _assert_month_open(session, adj_date)
+        await _assert_month_open(session, adj_date, entity=target_ent)
         a = FinanceAdjustment(
             id=uuid.uuid4().hex, adj_date=adj_date, account_id=payload.account_id,
             amount=payload.amount, adj_type=payload.adj_type,
-            description=payload.description.strip(), created_by=_username(request))
+            description=payload.description.strip(), created_by=_username(request),
+            entity=target_ent)
         session.add(a)
         await session.commit()
         return _adj_dict(a, acct.code, acct.name)
 
 
 @router.put("/adjustments/{adj_id}")
-async def update_adjustment(adj_id: str, payload: FinanceAdjustmentPayload, request: Request):
-    _guard(request)
+async def update_adjustment(adj_id: str, payload: FinanceAdjustmentPayload,
+                            request: Request):
+    _guard(request, level="full")
     from db.models import FinanceAdjustment
     factory = _factory_or_503()
     async with factory() as session:
         a = await session.get(FinanceAdjustment, adj_id)
         if not a:
             raise HTTPException(status_code=404, detail="調整列不存在")
+        _guard(request, a.entity or "parent", level="full")  # 這列所屬帳本要在 scope 內
         data = payload.model_dump(exclude_unset=True)
+        # entity 不允許改：payload.entity None＝維持既有值；非 None 且不同 → 422
+        new_ent = data.pop("entity", None)
+        if new_ent is not None and new_ent != (a.entity or "parent"):
+            raise HTTPException(status_code=422, detail="調整列不可跨帳本搬移")
         new_date = _parse_day(data["adj_date"]) if data.get("adj_date") else None
-        # 舊/新月份都要開著（搬進或搬出鎖定月都算改帳）
-        await _assert_month_open(session, a.adj_date, new_date)
+        # 舊/新月份都要開著（搬進或搬出鎖定月都算改帳）— 用這列的帳本查鎖
+        await _assert_month_open(session, a.adj_date, new_date,
+                                 entity=a.entity or "parent")
         if "account_id" in data and data["account_id"]:
             await _get_non_bank_account(session, data["account_id"])
             a.account_id = data["account_id"]
@@ -784,14 +847,15 @@ async def update_adjustment(adj_id: str, payload: FinanceAdjustmentPayload, requ
 
 @router.delete("/adjustments/{adj_id}")
 async def delete_adjustment(adj_id: str, request: Request):
-    _guard(request)
+    _guard(request, level="full")
     from db.models import FinanceAdjustment
     factory = _factory_or_503()
     async with factory() as session:
         a = await session.get(FinanceAdjustment, adj_id)
         if not a:
             raise HTTPException(status_code=404, detail="調整列不存在")
-        await _assert_month_open(session, a.adj_date)
+        _guard(request, a.entity or "parent", level="full")  # 這列所屬帳本要在 scope 內
+        await _assert_month_open(session, a.adj_date, entity=a.entity or "parent")
         await session.delete(a)
         await session.commit()
     return {"ok": True}
@@ -801,18 +865,34 @@ async def delete_adjustment(adj_id: str, request: Request):
 
 @router.post("/cash-entries/bulk-assign-account")
 async def bulk_assign_account(payload: BulkAssignAccountPayload, request: Request):
-    """把（未掛帳戶的）收支明細整批掛到指定帳戶 — 導入期一鍵補歷史。"""
-    _guard(request)
-    from sqlalchemy import or_, update as sa_update
+    """把（未掛帳戶的）收支明細整批掛到指定帳戶 — 導入期一鍵補歷史。
+
+    兩本帳守衛：候選列的 entity 必須全部 == 目標帳戶 entity（跨帳本掛帳 → 409；
+    候選列與帳戶同帳本 ⇒ 也必在請求者 scope 內，因為帳戶 entity 已驗過）。"""
+    _guard(request, level="full")
+    from sqlalchemy import or_, select, func as safunc, update as sa_update
     from db.models import BankAccount, CrmCashEntry
     factory = _factory_or_503()
     async with factory() as session:
-        if not await session.get(BankAccount, payload.bank_account_id):
+        acct = await session.get(BankAccount, payload.bank_account_id)
+        if not acct:
             raise HTTPException(status_code=404, detail="帳戶不存在")
-        stmt = sa_update(CrmCashEntry).values(bank_account_id=payload.bank_account_id)
+        acct_ent = acct.entity or "parent"
+        _guard(request, acct_ent, level="full")  # 目標帳戶所屬帳本要在 scope 內
+        cond = []
         if payload.only_unassigned:
-            stmt = stmt.where(or_(CrmCashEntry.bank_account_id.is_(None),
-                                  CrmCashEntry.bank_account_id == ""))
+            cond.append(or_(CrmCashEntry.bank_account_id.is_(None),
+                            CrmCashEntry.bank_account_id == ""))
+        cross = (await session.execute(
+            select(safunc.count(CrmCashEntry.id))
+            .where(*cond, CrmCashEntry.entity != acct_ent))).scalar() or 0
+        if cross:
+            raise HTTPException(
+                status_code=409,
+                detail=f"有 {cross} 筆收支與目標帳戶分屬不同帳本，不可跨帳本掛帳")
+        stmt = (sa_update(CrmCashEntry)
+                .values(bank_account_id=payload.bank_account_id)
+                .where(*cond, CrmCashEntry.entity == acct_ent))
         result = await session.execute(stmt)
         await session.commit()
     return {"updated": int(result.rowcount or 0)}
@@ -841,6 +921,7 @@ def _loan_dict(l, *, paid_periods=None, total_periods=None) -> dict:
         "first_payment_date": fpd.strftime("%Y-%m-%d") if fpd else None,
         "bank_account_id": l.bank_account_id, "status": status,
         "opening_balance": l.opening_balance, "note": l.note or "",
+        "entity": l.entity or "parent",
         "created_at": l.created_at.isoformat() if l.created_at else None,
         "updated_at": l.updated_at.isoformat() if l.updated_at else None,
     }
@@ -885,19 +966,22 @@ async def _get_loan_and_period(session, loan_id: str, period_no: int):
     return loan, row
 
 
-async def _query_upcoming_payments(session, horizon):
+async def _query_upcoming_payments(session, horizon, entity=None):
     """未繳且 due_date ≤ horizon 的期別 + 貸款名 → [(payment_row, loan_name)]。
     /loans/upcoming 端點與排程提醒（core.scheduler._loan_due_check）共用 —
-    不掛 guard。逾期（due_date < today）本就 ≤ horizon 故一併涵蓋。"""
+    不掛 guard。逾期（due_date < today）本就 ≤ horizon 故一併涵蓋。
+    entity 非 None 時只回該帳本的貸款期別（排程提醒不帶 = 兩本都提醒）。"""
     from sqlalchemy import select
     from db.models import FinanceLoan, FinanceLoanPayment
+    q = (select(FinanceLoanPayment, FinanceLoan.name)
+         .join(FinanceLoan, FinanceLoan.id == FinanceLoanPayment.loan_id)
+         .where(FinanceLoanPayment.status != "paid",
+                FinanceLoanPayment.due_date <= horizon))
+    if entity is not None:
+        q = q.where(FinanceLoan.entity == entity)
     return (await session.execute(
-        select(FinanceLoanPayment, FinanceLoan.name)
-        .join(FinanceLoan, FinanceLoan.id == FinanceLoanPayment.loan_id)
-        .where(FinanceLoanPayment.status != "paid",
-               FinanceLoanPayment.due_date <= horizon)
-        .order_by(FinanceLoanPayment.due_date,
-                  FinanceLoanPayment.period_no))).all()
+        q.order_by(FinanceLoanPayment.due_date,
+                   FinanceLoanPayment.period_no))).all()
 
 
 def _build_schedule_or_422(principal, annual_rate, term_months, method,
@@ -911,20 +995,23 @@ def _build_schedule_or_422(principal, annual_rate, term_months, method,
 
 
 @router.get("/loans")
-async def list_loans(request: Request):
+async def list_loans(request: Request, entity: str = ""):
     """貸款清單 + 即時彙總：outstanding（餘額）/next_due（下一期）/
     paid_periods/total_periods。"""
-    _guard(request)
+    ent = _guard(request, entity, level="full")
     from sqlalchemy import select
     from db.models import FinanceLoan, FinanceLoanPayment
     factory = _factory_or_503()
     async with factory() as session:
         loans = (await session.execute(
-            select(FinanceLoan).order_by(FinanceLoan.created_at))).scalars().all()
+            select(FinanceLoan).where(FinanceLoan.entity == ent)
+            .order_by(FinanceLoan.created_at))).scalars().all()
         pays = (await session.execute(
-            select(FinanceLoanPayment).order_by(
-                FinanceLoanPayment.loan_id,
-                FinanceLoanPayment.period_no))).scalars().all()
+            select(FinanceLoanPayment)
+            .join(FinanceLoan, FinanceLoan.id == FinanceLoanPayment.loan_id)
+            .where(FinanceLoan.entity == ent)
+            .order_by(FinanceLoanPayment.loan_id,
+                      FinanceLoanPayment.period_no))).scalars().all()
     by_loan: dict = {}
     for p in pays:
         by_loan.setdefault(p.loan_id, []).append(p)  # 查詢已按 period_no 排序
@@ -950,12 +1037,14 @@ async def list_loans(request: Request):
 
 
 @router.post("/loans")
-async def create_loan(payload: LoanPayload, request: Request):
+async def create_loan(payload: LoanPayload, request: Request, entity: str = ""):
     """建檔即生攤還表（amortization_schedule 純函式）。
 
     opening_balance 模式（導入舊貸）：principal 記原始本金供參考，攤還表以
     opening_balance（當下剩餘本金）+ term_months（剩餘期數）生成剩餘期。"""
-    _guard(request)
+    # payload.entity（None＝落 entity query param 的解析結果）驗 scope
+    # —— 不能建自己看不到的帳本。_guard 對空字串會自己套預設，一次就夠。
+    target_ent = _guard(request, payload.entity or entity, level="full")
     # 純函式沒守的（值域/日期正負）在此擋；principal/term/method/日期有效性
     # 交給 _build_schedule_or_422（amortization_schedule 的 ValueError → 422）。
     if not (payload.name or "").strip():
@@ -974,9 +1063,13 @@ async def create_loan(payload: LoanPayload, request: Request):
     from db.models import BankAccount, FinanceLoan, FinanceLoanPayment
     factory = _factory_or_503()
     async with factory() as session:
-        if payload.bank_account_id and \
-                not await session.get(BankAccount, payload.bank_account_id):
-            raise HTTPException(status_code=404, detail="扣款帳戶不存在")
+        if payload.bank_account_id:
+            acct = await session.get(BankAccount, payload.bank_account_id)
+            if not acct:
+                raise HTTPException(status_code=404, detail="扣款帳戶不存在")
+            if (acct.entity or "parent") != target_ent:
+                raise HTTPException(
+                    status_code=409, detail="貸款與扣款帳戶分屬不同帳本")
         loan = FinanceLoan(
             id=uuid.uuid4().hex, name=payload.name.strip(),
             lender=payload.lender, principal=payload.principal,
@@ -986,7 +1079,7 @@ async def create_loan(payload: LoanPayload, request: Request):
             start_date=start, first_payment_date=first,
             bank_account_id=payload.bank_account_id or None,
             opening_balance=payload.opening_balance,
-            note=payload.note)
+            note=payload.note, entity=target_ent)
         session.add(loan)
         for row in sched:
             session.add(FinanceLoanPayment(
@@ -1010,8 +1103,9 @@ async def update_loan(loan_id: str, payload: LoanPayload, request: Request):
     剩餘期數 = 新 term_months − 已繳期數（新期數 ≤ 已繳期數 → 422）；
     首期到期日 = 原第一個未繳期別的 due_date（保持原繳款節奏，全繳過則
     接在最後已繳期的下月同日）；寬限期扣掉已繳期數。"""
-    _guard(request)
+    _guard(request, level="full")
     data = payload.model_dump(exclude_unset=True)
+    data.pop("entity", None)  # entity 由下方鎖死不可改 — 別讓它流進 setattr
     if "name" in data and not (data["name"] or "").strip():
         raise HTTPException(status_code=422, detail="name 不可為空")
     # method 值域由 _build_schedule_or_422 統一驗（結構欄變更必觸發重生）。
@@ -1025,9 +1119,17 @@ async def update_loan(loan_id: str, payload: LoanPayload, request: Request):
         loan = await session.get(FinanceLoan, loan_id)
         if not loan:
             raise HTTPException(status_code=404, detail="貸款不存在")
-        if "bank_account_id" in data and data["bank_account_id"] and \
-                not await session.get(BankAccount, data["bank_account_id"]):
-            raise HTTPException(status_code=404, detail="扣款帳戶不存在")
+        _guard(request, loan.entity or "parent", level="full")  # 這筆貸款所屬帳本要在 scope 內
+        # entity 不允許改：payload.entity None＝維持既有值；非 None 且不同 → 422
+        if payload.entity is not None and payload.entity != (loan.entity or "parent"):
+            raise HTTPException(status_code=422, detail="貸款不可跨帳本搬移")
+        if "bank_account_id" in data and data["bank_account_id"]:
+            new_acct = await session.get(BankAccount, data["bank_account_id"])
+            if not new_acct:
+                raise HTTPException(status_code=404, detail="扣款帳戶不存在")
+            if (new_acct.entity or "parent") != (loan.entity or "parent"):
+                raise HTTPException(
+                    status_code=409, detail="貸款與扣款帳戶分屬不同帳本")
         for k in ("name", "lender", "note"):
             if k in data:
                 setattr(loan, k, (data[k] or "").strip() if k == "name" else data[k])
@@ -1099,7 +1201,7 @@ async def update_loan(loan_id: str, payload: LoanPayload, request: Request):
 async def delete_loan(loan_id: str, request: Request):
     """有已繳期別的貸款不可刪（收支明細會變孤兒）→ 409 先取消繳款；
     否則連攤還表一併刪。"""
-    _guard(request)
+    _guard(request, level="full")
     from sqlalchemy import delete as sa_delete, select, func as safunc
     from db.models import FinanceLoan, FinanceLoanPayment
     factory = _factory_or_503()
@@ -1107,6 +1209,7 @@ async def delete_loan(loan_id: str, request: Request):
         loan = await session.get(FinanceLoan, loan_id)
         if not loan:
             raise HTTPException(status_code=404, detail="貸款不存在")
+        _guard(request, loan.entity or "parent", level="full")  # 這筆貸款所屬帳本要在 scope 內
         paid = (await session.execute(
             select(safunc.count(FinanceLoanPayment.id)).where(
                 FinanceLoanPayment.loan_id == loan_id,
@@ -1125,7 +1228,7 @@ async def delete_loan(loan_id: str, request: Request):
 @router.get("/loans/{loan_id}/schedule")
 async def loan_schedule(loan_id: str, request: Request):
     """攤還表全期別（含 overdue 即時標記）。"""
-    _guard(request)
+    _guard(request, level="full")
     from sqlalchemy import select
     from db.models import FinanceLoan, FinanceLoanPayment
     factory = _factory_or_503()
@@ -1133,6 +1236,7 @@ async def loan_schedule(loan_id: str, request: Request):
         loan = await session.get(FinanceLoan, loan_id)
         if not loan:
             raise HTTPException(status_code=404, detail="貸款不存在")
+        _guard(request, loan.entity or "parent", level="full")  # 這筆貸款所屬帳本要在 scope 內
         rows = (await session.execute(
             select(FinanceLoanPayment)
             .where(FinanceLoanPayment.loan_id == loan_id)
@@ -1153,24 +1257,31 @@ async def pay_loan_period(loan_id: str, period_no: int,
     回 'loan' → 不進損益（利息費用權責已按攤還表 due_date 認列，避免重複）+ 走
     科目 2400 cf_activity=financing。硬連結壓過文字 category，日後改 category/
     對映都不會誤入損益。"""
-    _guard(request)
+    _guard(request, level="full")
     paid_date = _parse_day(payload.paid_date) or today_start()
     from db.models import BankAccount, CrmCashEntry
     factory = _factory_or_503()
     async with factory() as session:
         loan, row = await _get_loan_and_period(session, loan_id, period_no)
+        loan_ent = loan.entity or "parent"
+        _guard(request, loan_ent, level="full")  # 這筆貸款所屬帳本要在 scope 內
         if (row.status or "") == "paid":
             raise HTTPException(status_code=409, detail=f"第 {period_no} 期已繳款")
-        await _assert_month_open(session, paid_date)
+        await _assert_month_open(session, paid_date, entity=loan_ent)
         acct_id = payload.bank_account_id or loan.bank_account_id
-        if acct_id and not await session.get(BankAccount, acct_id):
-            raise HTTPException(status_code=404, detail="扣款帳戶不存在")
+        if acct_id:
+            acct = await session.get(BankAccount, acct_id)
+            if not acct:
+                raise HTTPException(status_code=404, detail="扣款帳戶不存在")
+            if (acct.entity or "parent") != loan_ent:
+                raise HTTPException(
+                    status_code=409, detail="貸款與扣款帳戶分屬不同帳本")
         total = int(row.principal_due or 0) + int(row.interest_due or 0)
         entry = CrmCashEntry(
             id=uuid.uuid4().hex, entry_date=paid_date, expense=total,
             summary=f"{loan.name} 第{row.period_no}期",
             category=LOAN_PAY_CATEGORY, bank_account_id=acct_id or None,
-            loan_payment_id=row.id)
+            loan_payment_id=row.id, entity=loan_ent)  # 繳款收支繼承貸款帳本
         session.add(entry)
         row.status = "paid"
         row.paid_at = paid_date
@@ -1183,17 +1294,19 @@ async def pay_loan_period(loan_id: str, period_no: int,
 async def unpay_loan_period(loan_id: str, period_no: int, request: Request):
     """取消繳款：刪關聯收支明細（月結守衛看其 entry_date 月）→ 期別回 scheduled。
     （loan status 為推導值 — 未繳期別出現即 active，無需寫回。）"""
-    _guard(request)
+    _guard(request, level="full")
     from db.models import CrmCashEntry
     factory = _factory_or_503()
     async with factory() as session:
-        _loan, row = await _get_loan_and_period(session, loan_id, period_no)
+        loan, row = await _get_loan_and_period(session, loan_id, period_no)
+        loan_ent = loan.entity or "parent"
+        _guard(request, loan_ent, level="full")  # 這筆貸款所屬帳本要在 scope 內
         if (row.status or "") != "paid":
             raise HTTPException(status_code=409, detail=f"第 {period_no} 期尚未繳款")
         if row.cash_entry_id:
             entry = await session.get(CrmCashEntry, row.cash_entry_id)
             if entry:
-                await _assert_month_open(session, entry.entry_date)
+                await _assert_month_open(session, entry.entry_date, entity=loan_ent)
                 await session.delete(entry)
         row.status = "scheduled"
         row.paid_at = None
@@ -1203,16 +1316,16 @@ async def unpay_loan_period(loan_id: str, period_no: int, request: Request):
 
 
 @router.get("/loans/upcoming")
-async def loans_upcoming(request: Request, days: int = 14):
+async def loans_upcoming(request: Request, days: int = 14, entity: str = ""):
     """未繳且 due_date ≤ today+days 的期別（含逾期，overdue 標記）—
     儀表板/提醒共用（查詢見 _query_upcoming_payments）。"""
-    _guard(request)
+    ent = _guard(request, entity, level="full")
     days = max(1, min(days, 365))
     factory = _factory_or_503()
     today = today_start()
     horizon = today + timedelta(days=days)
     async with factory() as session:
-        rows = await _query_upcoming_payments(session, horizon)
+        rows = await _query_upcoming_payments(session, horizon, entity=ent)
     items = []
     for p, name in rows:
         d = _loan_pay_dict(p, today)
@@ -1232,35 +1345,36 @@ def _parse_period(period: str) -> list:
 
 
 @router.get("/statements")
-async def get_statements(request: Request, period: str = ""):
+async def get_statements(request: Request, period: str = "", entity: str = ""):
     """期間三表（損益/資產負債/現金流量）+ 白話解讀 + meta。
 
     period：'2026-06' | '2026-Q2' | '2026' | '2025-07..2026-06'。
     已鎖月（未重開）且快照為 v2 → PnL/CF 讀快照逐月加總、BS 取期末月快照；
     其餘月份 live 算。meta 含 locked_months/live_months/baseline_month/warnings。
     """
-    _guard(request)
+    ent = _guard(request, entity)
     months = _parse_period(period)
     from services import finance_statements as fs
     factory = _factory_or_503()
     async with factory() as session:
-        return await fs.statements_for_period(session, months)
+        return await fs.statements_for_period(session, months, entity=ent)
 
 
 @router.get("/statements/drilldown")
-async def statements_drilldown(request: Request, kind: str = "", period: str = ""):
+async def statements_drilldown(request: Request, kind: str = "", period: str = "",
+                               entity: str = ""):
     """三表列 → 底層明細（上限 500 列 + 合計 + truncated 旗標）。
 
     kind ∈ revenue / cost.<料|工|費> / opex.<銷售|管理|研發> / non_operating /
     receivable / payable / cash.<operating|investing|financing>。
     """
-    _guard(request)
+    ent = _guard(request, entity)
     months = _parse_period(period)
     from services import finance_statements as fs
     factory = _factory_or_503()
     async with factory() as session:
         try:
-            return await fs.drilldown(session, kind, months)
+            return await fs.drilldown(session, kind, months, entity=ent)
         except ValueError as e:
             raise HTTPException(status_code=422, detail=str(e))
 
@@ -1274,27 +1388,27 @@ def _period_or_current(period: str) -> tuple:
 
 
 @router.get("/dashboard")
-async def get_dashboard(request: Request, period: str = ""):
+async def get_dashboard(request: Request, period: str = "", entity: str = ""):
     """財務儀表板：12 月損益趨勢 + 現金水位/跑道 + AR 帳齡 + 客戶集中度 +
     專案毛利 Top/Bottom。period 缺省=本月，格式同 /statements。"""
-    _guard(request)
+    ent = _guard(request, entity)
     months, eff = _period_or_current(period)
     from services import finance_statements as fs
     factory = _factory_or_503()
     async with factory() as session:
-        return await fs.dashboard_summary(session, months, period=eff)
+        return await fs.dashboard_summary(session, months, period=eff, entity=ent)
 
 
 @router.get("/tax-package")
-async def get_tax_package(request: Request, period: str = ""):
+async def get_tax_package(request: Request, period: str = "", entity: str = ""):
     """稅務包：銷項/進項發票明細 + 分類支出 + 勞報彙總 + 營業稅位置。
     period 缺省=本月，格式同 /statements。"""
-    _guard(request)
+    ent = _guard(request, entity)
     months, eff = _period_or_current(period)
     from services import finance_statements as fs
     factory = _factory_or_503()
     async with factory() as session:
-        return await fs.tax_package(session, months, period=eff)
+        return await fs.tax_package(session, months, period=eff, entity=ent)
 
 
 # ── 設定精靈 ────────────────────────────────────────────────
@@ -1306,7 +1420,9 @@ async def setup_wizard(payload: FinanceSetupWizardPayload, request: Request):
     → assign_history 時把既有收支掛到預設帳戶（只掛未掛帳的，重跑不覆蓋手動掛帳）
     → settings 寫 finance.baseline_month
     → equity_amount 非空時建 3100 期初權益 opening 調整列。"""
-    _guard(request)
+    # 精靈只服務母公司帳本（baseline_month settings 是全域單值；我的帳精靈
+    # v1 不做，plan §2.4）→ 強制 parent + full scope
+    _guard(request, "parent", level="full")
     month = _validate_month(payload.baseline_month)
     if not payload.bank_accounts:
         raise HTTPException(status_code=422, detail="bank_accounts 至少要一個帳戶")
@@ -1326,8 +1442,8 @@ async def setup_wizard(payload: FinanceSetupWizardPayload, request: Request):
     username = _username(request)
 
     async with factory() as session:
-        await _assert_month_open(session, baseline_day1)
-        # 1) 建帳戶
+        await _assert_month_open(session, baseline_day1, entity="parent")
+        # 1) 建帳戶（精靈只服務母公司帳本）
         default_id = None
         for i, spec in enumerate(payload.bank_accounts):
             b = BankAccount(
@@ -1336,21 +1452,22 @@ async def setup_wizard(payload: FinanceSetupWizardPayload, request: Request):
                 acct_kind=spec.acct_kind, opening_balance=spec.opening_balance or 0,
                 opening_date=baseline_day1,
                 is_default=(i == payload.default_account_index),
-                active=True, sort_order=i)
+                active=True, sort_order=i, entity="parent")
             session.add(b)
             if b.is_default:
                 default_id = b.id
         await session.flush()
         if default_id:
-            await _unset_other_defaults(session, default_id)
+            await _unset_other_defaults(session, default_id, "parent")
 
-        # 2) 歷史收支掛預設帳戶
+        # 2) 歷史收支掛預設帳戶（只掛母公司帳本的未掛帳列 — 別把我的帳列掃進來）
         assigned = 0
         if payload.assign_history and default_id:
             result = await session.execute(
                 sa_update(CrmCashEntry).values(bank_account_id=default_id)
                 .where(or_(CrmCashEntry.bank_account_id.is_(None),
-                           CrmCashEntry.bank_account_id == "")))
+                           CrmCashEntry.bank_account_id == ""),
+                       CrmCashEntry.entity == "parent"))
             assigned = int(result.rowcount or 0)
 
         # 3) 期初權益（3100）opening 調整列
@@ -1363,7 +1480,7 @@ async def setup_wizard(payload: FinanceSetupWizardPayload, request: Request):
                 id=uuid.uuid4().hex, adj_date=baseline_day1,
                 account_id=equity_acct.id, amount=payload.equity_amount,
                 adj_type="opening", description="期初權益（設定精靈）",
-                created_by=username))
+                created_by=username, entity="parent"))
         await session.commit()
 
     # 4) settings 寫 baseline_month（DB transaction 成功後才落檔）

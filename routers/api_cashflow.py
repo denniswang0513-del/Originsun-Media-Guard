@@ -14,9 +14,7 @@ from datetime import datetime, timedelta
 from fastapi import APIRouter, HTTPException, Request  # type: ignore
 
 from config import load_settings
-from core.auth import check_admin_or_module
 from core.finance_logic import local_day
-from core.money import check_money
 from core.schemas import MilestonePayload, MonthClosePayload
 from routers.crm._shared import _parse_day, _username, _validate_month
 
@@ -26,12 +24,18 @@ MILESTONE_STATUSES = ["未到期", "待請款", "已請款", "已收款"]
 _DEFAULT_TEMPLATE = [("訂金", 30), ("期中款", 40), ("尾款", 30)]
 
 
-def _guard(request: Request):
-    # 功能面（帳務 or 專案管理）+ 金額檢視權。這支每一格都是錢：付款節點的
-    # 金額、90 天預測的流入流出 —— 沒有「拿掉數字還剩下什麼」可言，所以擋入口
-    # 而不是抹欄位（owner 2026-08-15；docs/MONEY_VISIBILITY.md）。
-    check_admin_or_module(request, "crm_invoices", "crm_projects")
-    check_money(request)
+def _guard(request: Request, entity: str = "", level: str = "view") -> str:
+    """財務域守衛 v2：回傳解析後的帳本 entity（docs/LEDGER_ENTITY_PLAN.md §2.4）。
+
+    這支每一格都是錢：付款節點的金額、90 天預測的流入流出 —— 沒有「拿掉數字
+    還剩下什麼」可言，所以擋入口而不是抹欄位（owner 2026-08-15；
+    docs/MONEY_VISIBILITY.md）。level="view"＝報表層（合夥人 finance_partner
+    可及；本檔只有 month-close GET）；level="full"＝寫入與 CRM 域（parent ⟺
+    crm_invoices AND money_view、mine ⟺ finance_mine；Lv3 全開）。舊的
+    check_admin_or_module + check_money 語意已內含在 require_entity 的 scope
+    判定裡 —— 不要再疊舊守衛。"""
+    from core.ledger import require_entity
+    return require_entity(request, entity, level=level)
 
 
 from core.db_guard import db_factory_or_503 as _factory_or_503
@@ -49,7 +53,7 @@ def _ms_dict(m, pname: str = ""):
 
 @router.get("/milestones")
 async def list_milestones(request: Request, project_id: str = ""):
-    _guard(request)
+    _guard(request, "parent", level="full")  # 付款節點綁專案＝母公司 CRM 域（我的帳無專案；合夥人不可及，§2.4）
     from sqlalchemy import select
     from db.models import PaymentMilestone, CrmProject
     factory = _factory_or_503()
@@ -70,7 +74,7 @@ async def list_milestones(request: Request, project_id: str = ""):
 
 @router.post("/milestones")
 async def create_milestone(payload: MilestonePayload, request: Request):
-    _guard(request)
+    _guard(request, "parent", level="full")  # 付款節點綁專案＝母公司 CRM 域（合夥人不可及，§2.4）
     if not payload.project_id:
         raise HTTPException(status_code=422, detail="project_id 必填")
     if payload.status and payload.status not in MILESTONE_STATUSES:
@@ -93,7 +97,7 @@ async def create_milestone(payload: MilestonePayload, request: Request):
 
 @router.put("/milestones/{mid}")
 async def update_milestone(mid: str, payload: MilestonePayload, request: Request):
-    _guard(request)
+    _guard(request, "parent", level="full")  # 付款節點綁專案＝母公司 CRM 域（合夥人不可及，§2.4）
     if payload.status and payload.status not in MILESTONE_STATUSES:
         raise HTTPException(status_code=422, detail=f"status 需為 {MILESTONE_STATUSES}")
     from db.models import PaymentMilestone
@@ -123,7 +127,7 @@ async def update_milestone(mid: str, payload: MilestonePayload, request: Request
 
 @router.delete("/milestones/{mid}")
 async def delete_milestone(mid: str, request: Request):
-    _guard(request)
+    _guard(request, "parent", level="full")  # 付款節點綁專案＝母公司 CRM 域（合夥人不可及，§2.4）
     from db.models import PaymentMilestone
     factory = _factory_or_503()
     async with factory() as session:
@@ -138,7 +142,7 @@ async def delete_milestone(mid: str, request: Request):
 @router.post("/milestones/template/{project_id}")
 async def apply_template(project_id: str, request: Request):
     """從合約金額按 30/40/30 生成三節點（已有節點的專案拒絕，避免蓋掉手工排程）。"""
-    _guard(request)
+    _guard(request, "parent", level="full")  # 付款節點綁專案＝母公司 CRM 域（合夥人不可及，§2.4）
     from sqlalchemy import select, func as safunc
     from db.models import PaymentMilestone, CrmProject
     factory = _factory_or_503()
@@ -171,7 +175,9 @@ async def apply_template(project_id: str, request: Request):
 async def forecast(request: Request, days: int = 90):
     """90 天現金流：週分桶（流入=節點、流出=未付請款+貸款攤還+固定成本），
     逾期/未排期另列。"""
-    _guard(request)
+    # 預測綁 milestones/專案/固定成本＝母公司 CRM 域（合夥人不可及）；
+    # v1 不做我的帳預測（plan §6）
+    _guard(request, "parent", level="full")
     days = max(14, min(days, 365))
     from sqlalchemy import select
     from db.models import (PaymentMilestone, CrmPaymentRequest, CrmProject,
@@ -186,11 +192,16 @@ async def forecast(request: Request, days: int = 90):
         ms = (await session.execute(
             select(PaymentMilestone).where(PaymentMilestone.status != "已收款"))).scalars().all()
         prs = (await session.execute(
-            select(CrmPaymentRequest).where(CrmPaymentRequest.payment_status != "已付款"))).scalars().all()
+            select(CrmPaymentRequest).where(
+                CrmPaymentRequest.payment_status != "已付款",
+                CrmPaymentRequest.entity == "parent"))).scalars().all()  # 母公司帳本
+        from db.models import FinanceLoan
         loan_pays = (await session.execute(
-            select(FinanceLoanPayment).where(
-                FinanceLoanPayment.status != "paid",
-                FinanceLoanPayment.due_date < horizon))).scalars().all()
+            select(FinanceLoanPayment)
+            .join(FinanceLoan, FinanceLoan.id == FinanceLoanPayment.loan_id)
+            .where(FinanceLoanPayment.status != "paid",
+                   FinanceLoanPayment.due_date < horizon,
+                   FinanceLoan.entity == "parent"))).scalars().all()  # 母公司帳本
         pids = {m.project_id for m in ms}
         names = {}
         if pids:
@@ -274,12 +285,13 @@ async def forecast(request: Request, days: int = 90):
 # /api/v1/finance/statements 同一套聚合）；/statements 讀快照的判準是
 # snapshot.get("v")==2 且含 "pnl" 鍵，v1 舊快照視同未鎖 → live 算（相容）。
 
-async def _month_snapshot(session, month: str) -> dict:
+async def _month_snapshot(session, month: str, entity: str = "parent") -> dict:
     from sqlalchemy import select, func as safunc
     from db.models import CrmCashEntry
     start = datetime.strptime(month + "-01", "%Y-%m-%d")
     end = (start + timedelta(days=32)).replace(day=1)
-    cond = (CrmCashEntry.entry_date >= start) & (CrmCashEntry.entry_date < end)
+    cond = ((CrmCashEntry.entry_date >= start) & (CrmCashEntry.entry_date < end)
+            & (CrmCashEntry.entity == entity))  # 兩本帳：快照只算本帳本的收支
     total = (await session.execute(
         select(safunc.coalesce(safunc.sum(CrmCashEntry.deposit), 0),
                safunc.coalesce(safunc.sum(CrmCashEntry.expense), 0),
@@ -296,16 +308,17 @@ async def _month_snapshot(session, month: str) -> dict:
 
 
 @router.get("/month-close")
-async def list_month_close(request: Request):
-    _guard(request)
+async def list_month_close(request: Request, entity: str = ""):
+    ent = _guard(request, entity)  # view：合夥人看得到母公司鎖帳狀態（§2.4）
     from sqlalchemy import select
     from db.models import FinanceMonthClose
     factory = _factory_or_503()
     async with factory() as session:
         rows = (await session.execute(
-            select(FinanceMonthClose).order_by(FinanceMonthClose.month.desc()))).scalars().all()
+            select(FinanceMonthClose).where(FinanceMonthClose.entity == ent)
+            .order_by(FinanceMonthClose.month.desc()))).scalars().all()
     return {"months": [{
-        "month": r.month, "closed_by": r.closed_by,
+        "month": r.month, "entity": r.entity or "parent", "closed_by": r.closed_by,
         "closed_at": r.closed_at.strftime("%Y-%m-%d %H:%M") if r.closed_at else "",
         "reopened_by": r.reopened_by,
         "reopened_at": r.reopened_at.strftime("%Y-%m-%d %H:%M") if r.reopened_at else None,
@@ -315,20 +328,23 @@ async def list_month_close(request: Request):
 
 
 @router.post("/month-close")
-async def close_month(payload: MonthClosePayload, request: Request):
-    _guard(request)
+async def close_month(payload: MonthClosePayload, request: Request,
+                      entity: str = ""):
+    ent = _guard(request, entity, level="full")
     month = _validate_month(payload.month)
     from sqlalchemy import select
     from db.models import FinanceMonthClose
     from services import finance_statements as fs
     factory = _factory_or_503()
     async with factory() as session:
-        cash = await _month_snapshot(session, month)
-        extras, warnings = await fs.month_close_extras(session, month)
+        cash = await _month_snapshot(session, month, entity=ent)
+        extras, warnings = await fs.month_close_extras(session, month, entity=ent)
         # v1 四欄留頂層（前端月結列表讀 snapshot.income）+ 規格巢狀 cash
         snap = {"v": 2, **cash, "cash": cash, **extras}
         row = (await session.execute(
-            select(FinanceMonthClose).where(FinanceMonthClose.month == month))).scalar_one_or_none()
+            select(FinanceMonthClose).where(
+                FinanceMonthClose.month == month,
+                FinanceMonthClose.entity == ent))).scalar_one_or_none()
         if row and row.reopened_at is None:
             raise HTTPException(status_code=409, detail=f"{month} 已鎖帳")
         if row:  # 重開後再鎖：刷新 snapshot、清稽核欄
@@ -339,26 +355,30 @@ async def close_month(payload: MonthClosePayload, request: Request):
             row.reopened_at = None
         else:
             session.add(FinanceMonthClose(
-                id=uuid.uuid4().hex, month=month,
+                id=uuid.uuid4().hex, month=month, entity=ent,
                 closed_by=_username(request), snapshot=snap))
         await session.commit()
     # warnings 不擋鎖帳（未歸類/未掛帳戶/該月對帳缺漏）— 誠實回報給前端顯示
-    return {"ok": True, "month": month, "snapshot": snap, "warnings": warnings}
+    return {"ok": True, "month": month, "entity": ent,
+            "snapshot": snap, "warnings": warnings}
 
 
 @router.post("/month-close/reopen")
-async def reopen_month(payload: MonthClosePayload, request: Request):
-    _guard(request)
+async def reopen_month(payload: MonthClosePayload, request: Request,
+                       entity: str = ""):
+    ent = _guard(request, entity, level="full")
     month = _validate_month(payload.month)
     from sqlalchemy import select
     from db.models import FinanceMonthClose
     factory = _factory_or_503()
     async with factory() as session:
         row = (await session.execute(
-            select(FinanceMonthClose).where(FinanceMonthClose.month == month))).scalar_one_or_none()
+            select(FinanceMonthClose).where(
+                FinanceMonthClose.month == month,
+                FinanceMonthClose.entity == ent))).scalar_one_or_none()
         if not row or row.reopened_at is not None:
             raise HTTPException(status_code=404, detail=f"{month} 未在鎖定狀態")
         row.reopened_by = _username(request)
         row.reopened_at = datetime.now()
         await session.commit()
-    return {"ok": True, "month": month}
+    return {"ok": True, "month": month, "entity": ent}

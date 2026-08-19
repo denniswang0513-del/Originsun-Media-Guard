@@ -16,6 +16,16 @@
   「有掛 advance_id」的支出明細進損益（現金對應 treatment='advance' 不進
   損益 → 不重複）；未掛 advance_id 的專案雜支與請款單/收支明細重疊，不計。
   該表無支出日期欄，以 created_at 定月。
+
+兩本帳（entity，2026-08-19 v2，見 docs/LEDGER_ENTITY_PLAN.md §4）：
+- 對外函式全部帶 `entity: str = "parent"`（'parent'＝母公司 / 'mine'＝我的帳），
+  預設 parent → 既有資料全屬母公司帳、既有呼叫端數字不變。entity 過濾只發生在
+  本模組的取數層（_load_inputs / _advance_state / 快照查詢），
+  core/finance_logic.py 純函式不知 entity 存在。
+- 錢流六源（invoices/payments/cash_entries/adjustments/bank_accounts/loans）
+  以 entity WHERE 過濾；loan_payments 經 loans 推導；科目表/科目對映兩本共用
+  （plan §1.2）。CRM 營運域（equipment/專案毛利/預支核銷）屬母公司 →
+  entity!='parent'（我的帳）時不餵、對應回傳鍵給空值（形狀不變）。
 """
 from __future__ import annotations
 
@@ -76,53 +86,69 @@ def _dump(rows, *cols) -> list:
     return [{c: getattr(r, c) for c in cols} for r in rows]
 
 
-async def _load_inputs(session) -> dict:
-    """全表載入 → 純函式吃的 dict/list（欄位子集，含 drilldown 需要的識別欄）。"""
+async def _load_inputs(session, entity: str = "parent") -> dict:
+    """全表載入 → 純函式吃的 dict/list（欄位子集，含 drilldown 需要的識別欄）。
+
+    entity：錢流六源以 entity WHERE 過濾；loan_payments 經該 entity 的 loans；
+    equipment 是母公司域（plan §1.2）→ entity!='parent' 回空；科目/對映兩本共用不過濾。
+    """
     from sqlalchemy import select
     from db.models import (BankAccount, CrmCashEntry, CrmInvoice,
                            CrmPaymentRequest, Equipment, FinanceAccount,
                            FinanceAdjustment, FinanceCategoryMap, FinanceLoan,
                            FinanceLoanPayment)
 
-    async def _all(model, order_by=None):
+    async def _all(model, order_by=None, where=None):
         q = select(model)
+        if where is not None:
+            q = q.where(where)
         if order_by is not None:
             q = q.order_by(*order_by)
         return (await session.execute(q)).scalars().all()
 
-    invoices = _dump(await _all(CrmInvoice),
+    invoices = _dump(await _all(CrmInvoice, where=CrmInvoice.entity == entity),
                      "id", "payment_type", "issue_status", "payment_status",
                      "category", "amount_total", "amount_ex_tax", "tax_amount",
                      "commission", "invoice_date", "paid_date", "title",
                      "invoice_number", "company_name", "tax_id", "project_id")
-    payments = _dump(await _all(CrmPaymentRequest),
+    payments = _dump(await _all(CrmPaymentRequest,
+                                where=CrmPaymentRequest.entity == entity),
                      "id", "is_advance", "request_date", "amount", "category",
                      "summary", "payee_name", "payment_status", "payment_date",
                      "payee_id", "payee_type", "invoice_amount")
-    cash_entries = _dump(await _all(CrmCashEntry),
+    cash_entries = _dump(await _all(CrmCashEntry,
+                                    where=CrmCashEntry.entity == entity),
                          "id", "entry_date", "deposit", "expense", "bank_fee",
                          "claim", "category", "summary", "invoice_id",
                          "advance_payment_id", "payment_request_id",
                          "bank_account_id")
-    equipment = _dump(await _all(Equipment),
-                      "id", "name", "purchase_cost", "purchase_date",
-                      "depreciation_months", "retired_date", "status")
-    adjustments = _dump(await _all(FinanceAdjustment),
+    # 器材是母公司域（無 entity 欄）→ 我的帳不餵折舊（plan §1.2）
+    equipment = (_dump(await _all(Equipment),
+                       "id", "name", "purchase_cost", "purchase_date",
+                       "depreciation_months", "retired_date", "status")
+                 if entity == "parent" else [])
+    adjustments = _dump(await _all(FinanceAdjustment,
+                                   where=FinanceAdjustment.entity == entity),
                         "id", "adj_date", "amount", "adj_type", "description",
                         "account_id")
     bank_accounts = _dump(await _all(BankAccount,
                                      order_by=(BankAccount.sort_order,
-                                               BankAccount.created_at)),
+                                               BankAccount.created_at),
+                                     where=BankAccount.entity == entity),
                           "id", "name", "opening_balance", "opening_date",
                           "acct_kind", "active")
     for b in bank_accounts:
         b["active"] = bool(b["active"])
-    loans = _dump(await _all(FinanceLoan),
+    loans = _dump(await _all(FinanceLoan, where=FinanceLoan.entity == entity),
                   "id", "name", "principal", "opening_balance", "start_date",
                   "bank_account_id")
-    loan_payments = _dump(await _all(FinanceLoanPayment),
-                          "id", "loan_id", "period_no", "due_date",
-                          "principal_due", "interest_due", "status", "paid_at")
+    loan_ids = [ln["id"] for ln in loans]
+    loan_payments = _dump(
+        (await _all(FinanceLoanPayment,
+                    where=FinanceLoanPayment.loan_id.in_(loan_ids))
+         if loan_ids else []),
+        "id", "loan_id", "period_no", "due_date",
+        "principal_due", "interest_due", "status", "paid_at")
 
     accounts = {r.id: {"code": r.code, "name": r.name, "pnl_group": r.pnl_group,
                        "cf_activity": r.cf_activity, "acct_type": r.acct_type}
@@ -141,19 +167,26 @@ async def _load_inputs(session) -> dict:
             "accounts": accounts, "cat_map": cat_map}
 
 
-async def _advance_state(session) -> dict:
+async def _advance_state(session, entity: str = "parent") -> dict:
     """未結清預支餘額合計 + 預支核銷支出列（餵損益 營業成本-費）。
 
     三來源一次 GROUP BY（不逐預支 N+1），逐預支套 core.crm_logic
     compute_advance_status（與 /payments/advances 端點同一套判定）。
+
+    entity：預支/核銷是母公司域（CrmProjectExpense 無 entity 欄，plan §1.2）
+    → entity!='parent'（我的帳）直接回空結構；parent 時 payments/cash_entries
+    仍帶 entity 過濾。
     """
+    if entity != "parent":
+        return {"balance_total": 0, "expenses": []}
     from sqlalchemy import select, func as safunc
     from core.crm_logic import compute_advance_status
     from db.models import CrmCashEntry, CrmPaymentRequest, CrmProjectExpense
 
     advances = (await session.execute(
         select(CrmPaymentRequest.id, CrmPaymentRequest.amount)
-        .where(CrmPaymentRequest.is_advance == 1))).all()
+        .where(CrmPaymentRequest.is_advance == 1,
+               CrmPaymentRequest.entity == entity))).all()
     exp_by_adv = {row[0]: int(row[1] or 0) for row in (await session.execute(
         select(CrmProjectExpense.advance_id, safunc.sum(CrmProjectExpense.actual))
         .where(CrmProjectExpense.advance_id.isnot(None),
@@ -163,13 +196,15 @@ async def _advance_state(session) -> dict:
         select(CrmCashEntry.advance_payment_id, safunc.sum(CrmCashEntry.expense))
         .where(CrmCashEntry.advance_payment_id.isnot(None),
                CrmCashEntry.advance_payment_id != "",
-               CrmCashEntry.expense > 0)
+               CrmCashEntry.expense > 0,
+               CrmCashEntry.entity == entity)
         .group_by(CrmCashEntry.advance_payment_id))).all()}
     ret_by_adv = {row[0]: int(row[1] or 0) for row in (await session.execute(
         select(CrmCashEntry.advance_payment_id, safunc.sum(CrmCashEntry.deposit))
         .where(CrmCashEntry.advance_payment_id.isnot(None),
                CrmCashEntry.advance_payment_id != "",
-               CrmCashEntry.deposit > 0)
+               CrmCashEntry.deposit > 0,
+               CrmCashEntry.entity == entity)
         .group_by(CrmCashEntry.advance_payment_id))).all()}
 
     balance_total = 0
@@ -220,14 +255,16 @@ def _cf_side(bank_lines: list) -> dict:
 
 # ── live 三表計算 ────────────────────────────────────────────
 
-async def compute_live(session, months, inputs=None, adv=None) -> dict:
+async def compute_live(session, months, inputs=None, adv=None,
+                       entity: str = "parent") -> dict:
     """指定月集合的 live 三表（不看快照）。BS as_of = 期末月，累積段 =
-    baseline..as_of（baseline 缺值時退資料最早月，再退期首月）。"""
+    baseline..as_of（baseline 缺值時退資料最早月，再退期首月）。
+    inputs/adv 若由 caller 預載，須是同一 entity 的載入結果。"""
     months = sorted(set(months))
     if inputs is None:
-        inputs = await _load_inputs(session)
+        inputs = await _load_inputs(session, entity)
     if adv is None:
-        adv = await _advance_state(session)
+        adv = await _advance_state(session, entity)
     as_of = months[-1]
     baseline = _resolve_baseline(inputs) or months[0]
     kw = _pnl_kw(inputs, adv)
@@ -266,26 +303,28 @@ async def compute_live(session, months, inputs=None, adv=None) -> dict:
 
 # ── /statements：快照 v2 合併 ────────────────────────────────
 
-async def statements_for_period(session, months) -> dict:
+async def statements_for_period(session, months, entity: str = "parent") -> dict:
     """期間三表：已鎖月（未重開、快照 v:2）優先讀快照 — PnL/CF 逐月可加總
     （merge_pnl/merge_cf）；BS 取期末月快照、期末月未鎖則 live。
-    v1（無 pnl 鍵）快照視同未鎖 → 該月 live 算（讀取端相容）。"""
+    v1（無 pnl 鍵）快照視同未鎖 → 該月 live 算（讀取端相容）。
+    快照按 (entity, month) 讀 — 兩本帳各自鎖月（plan §1.1）。"""
     from sqlalchemy import select
     from db.models import FinanceMonthClose
 
     months = sorted(set(months))
-    inputs = await _load_inputs(session)
+    inputs = await _load_inputs(session, entity)
 
     rows = (await session.execute(
         select(FinanceMonthClose).where(
             FinanceMonthClose.month.in_(months),
+            FinanceMonthClose.entity == entity,
             FinanceMonthClose.reopened_at.is_(None)))).scalars().all()
     snaps = {r.month: r.snapshot for r in rows
              if isinstance(r.snapshot, dict) and r.snapshot.get("v") == 2
              and "pnl" in r.snapshot}
     live_months = [m for m in months if m not in snaps]
     # 預支狀態只有 live 計算需要 → 全期間皆快照時不掃三張表
-    live = (await compute_live(session, live_months, inputs)
+    live = (await compute_live(session, live_months, inputs, entity=entity)
             if live_months else None)
 
     pnl_parts = [snaps[m]["pnl"] for m in months if m in snaps]
@@ -323,15 +362,16 @@ async def statements_for_period(session, months) -> dict:
 
 # ── 月結快照 v2 ──────────────────────────────────────────────
 
-async def month_close_extras(session, month: str) -> tuple:
+async def month_close_extras(session, month: str, entity: str = "parent") -> tuple:
     """close_month 快照 v2 的三表部分 + 鎖帳前檢核警示。
 
     回 (extras, warnings)：extras = {pnl, bs, cf, checks}（api_cashflow 併上
     v:2 與 cash v1 四欄後入庫）；warnings = 未歸類/未掛帳戶/未填日期 +
-    該月各銀行帳戶對帳缺漏（不擋鎖帳，誠實回報）。"""
-    inputs = await _load_inputs(session)
-    adv = await _advance_state(session)
-    live = await compute_live(session, [month], inputs, adv)
+    該月各銀行帳戶對帳缺漏（不擋鎖帳，誠實回報）。
+    entity：取數走該 entity；對帳缺漏只掃該 entity 的銀行帳戶。"""
+    inputs = await _load_inputs(session, entity)
+    adv = await _advance_state(session, entity)
+    live = await compute_live(session, [month], inputs, adv, entity=entity)
     extras = {"pnl": live["pnl"], "bs": live["bs"], "cf": live["cf"],
               "checks": {"bs_diff": live["bs"]["check"]["diff"],
                          "cf_diff": live["cf"]["check"]["diff"]}}
@@ -368,7 +408,7 @@ def _row(source, rid, date, label, amount, category="", status="") -> dict:
             "category": category or "", "status": status or ""}
 
 
-async def drilldown(session, kind: str, months) -> dict:
+async def drilldown(session, kind: str, months, entity: str = "parent") -> dict:
     """三表列 → 底層明細（發票/請款/收支簡化 dict + 合計，上限 500 列）。
 
     kind 值域 = VALID_DRILL_KINDS（與報表行 drill 欄位同一組值 — 單一來源在
@@ -382,7 +422,7 @@ async def drilldown(session, kind: str, months) -> dict:
         raise ValueError(f"kind 無效: {kind}")
     months = sorted(set(months))
     mset = set(months)
-    inputs = await _load_inputs(session)
+    inputs = await _load_inputs(session, entity)
     cat_map, accounts = inputs["cat_map"], inputs["accounts"]
     items: list = []
 
@@ -425,7 +465,7 @@ async def drilldown(session, kind: str, months) -> dict:
                                   row.get("category"),
                                   "未歸類" if unmapped else ""))
         if group == "營業成本-費":
-            adv = await _advance_state(session)
+            adv = await _advance_state(session, entity)
             for x in adv["expenses"]:
                 if month_of(x.get("date")) in mset:
                     items.append(_row("expense", x["id"], x.get("date"),
@@ -611,15 +651,18 @@ async def _project_margins(session, *, top=5) -> dict:
         return {"available": False, "top": [], "bottom": []}
 
 
-async def dashboard_summary(session, months, period: str = "") -> dict:
+async def dashboard_summary(session, months, period: str = "",
+                            entity: str = "parent") -> dict:
     """財務儀表板彙總（trend / cash / aging / concentration / project_margins / meta）。
 
     reuse _load_inputs + core/finance_logic 純函式為單一來源。period = 原查詢
-    字串（endpoint 傳入以填 meta；缺省時 caller 已補當月）。"""
+    字串（endpoint 傳入以填 meta；缺省時 caller 已補當月）。
+    entity!='parent'（我的帳）時專案毛利/專案客戶對映（母公司 CRM 域）跳過 →
+    project_margins 回 available:false 空結構、集中度客戶名退發票抬頭（形狀不變）。"""
     months = sorted(set(months))
     mset = set(months)
-    inputs = await _load_inputs(session)
-    adv = await _advance_state(session)
+    inputs = await _load_inputs(session, entity)
+    adv = await _advance_state(session, entity)
     as_of = months[-1]
     baseline = _resolve_baseline(inputs) or months[0]
 
@@ -661,17 +704,22 @@ async def dashboard_summary(session, months, period: str = "") -> dict:
         ar_open_invoices(inputs["invoices"], baseline, as_of), as_of)
 
     # concentration：期間營收發票，client 名 = project_id→客戶 → 抬頭 → 未指定
-    proj_client = await _project_client_map(session)
+    # （crm_projects/clients 是母公司域 → 我的帳不查對映，客戶名退發票抬頭）
+    proj_client = await _project_client_map(session) if entity == "parent" else {}
     rev_by_client: dict = {}
     for inv in iter_revenue_invoices(inputs["invoices"], mset):
         name = resolve_client_name(inv, proj_client)
         rev_by_client[name] = rev_by_client.get(name, 0) + invoice_ex_tax(inv)
     concentration = client_concentration(rev_by_client)
 
+    # 專案毛利是母公司域（plan §1.2）→ 我的帳回空結構（形狀不變，前端不炸）
+    project_margins = (await _project_margins(session) if entity == "parent"
+                       else {"available": False, "top": [], "bottom": []})
+
     return {
         "trend": trend, "cash": cash, "aging": aging,
         "concentration": concentration,
-        "project_margins": await _project_margins(session),
+        "project_margins": project_margins,
         "meta": {"period": period or _period_label(months), "as_of": as_of,
                  "baseline_month": baseline, "warnings": []},
     }
@@ -696,13 +744,15 @@ def _vat_side(rows) -> dict:
             "count": len(rows)}
 
 
-async def tax_package(session, months, period: str = "") -> dict:
+async def tax_package(session, months, period: str = "",
+                      entity: str = "parent") -> dict:
     """稅務包：銷項/進項發票明細 + 分類支出 + 勞報彙總 + 營業稅位置 + meta。
 
-    直接吃 _load_inputs 的 crm_invoices / crm_payment_requests / cash_entries。"""
+    直接吃 _load_inputs 的 crm_invoices / crm_payment_requests / cash_entries
+    （取數已按 entity 過濾）。"""
     months = sorted(set(months))
     mset = set(months)
-    inputs = await _load_inputs(session)
+    inputs = await _load_inputs(session, entity)
     invoices = inputs["invoices"]
     payments = inputs["payments"]
     cash_entries = inputs["cash_entries"]

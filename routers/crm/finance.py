@@ -13,6 +13,7 @@ from datetime import datetime, timezone
 from fastapi import Depends, HTTPException, Request, UploadFile, File, Query
 
 from core.finance_logic import month_of
+from core.ledger import require_entity
 from core.schemas import InvoicePayload, PaymentRequestPayload, CashEntryPayload
 
 from ._shared import (router, _check_auth, money_dep, _require_db, _get_factory, _fmt_day, _now,
@@ -26,11 +27,37 @@ try:
 except ImportError:  # DB 套件不存在的 agent 環境 — 行為同原檔 try/except
     pass
 
+# ── 兩本帳（entity）helpers — docs/LEDGER_ENTITY_PLAN.md §2.4/§3 ──────
+
+def _entity_for_write(request: Request, payload_entity, row=None) -> str:
+    """建立/更新端點的 entity 決策 —— 回傳該列最終應落的 entity。
+
+    - payload.entity 為 None → 建立落 'parent'（母公司，預設）、更新維持既有值
+      （🔴 絕不可把 None 洗成 'parent'——舊前端整包寫回會把「我的帳」列洗回母公司）。
+    - payload.entity 非 None → require_entity 驗 scope＋合法值（非法 422）。
+    - 🔴 **更新不得換帳本**（owner 2026-08-19 拍板）：帶了與該列現值不同的
+      entity → 422，與 api_finance 的銀行帳戶／調整／貸款同一條規矩，也就是
+      plan §2.4「更新維持既有值」的字面意思。一筆帳建在哪本就留在哪本；真要
+      換帳本＝刪掉重建，那會留下痕跡，而不是靜靜地把一列錢搬進另一本帳。
+
+    此處與本檔其他 require_entity 一律 level="full"：CRM 帳務端點是原始帳列
+    與寫入面，合夥人（finance_partner）不可及 —— money_dep 已擋一層，
+    這是刻意的雙保險（plan §2.3/§2.4）。
+    """
+    if payload_entity is None:
+        return (row.entity or "parent") if row is not None else "parent"
+    ent = require_entity(request, payload_entity, level="full")
+    if row is not None and (row.entity or "parent") != ent:
+        raise HTTPException(status_code=422, detail="這筆帳不可跨帳本搬移")
+    return ent
+
+
 # ── Invoice Helpers ─────────────────────────────────────────
 
 def _to_invoice_dict(inv, project_name: str = "") -> dict:
     return {
-        "id": inv.id, "payment_type": inv.payment_type or "收款",
+        "id": inv.id, "entity": inv.entity or "parent",
+        "payment_type": inv.payment_type or "收款",
         "payment_status": inv.payment_status or "", "issue_status": inv.issue_status or "",
         "invoice_number": inv.invoice_number or "", "title": inv.title or "",
         "invoice_date": inv.invoice_date.isoformat() if inv.invoice_date else None,
@@ -65,16 +92,21 @@ def _unmark_invoice_received(inv) -> None:
 
 @router.get("/invoices", dependencies=[Depends(money_dep)])
 async def list_invoices(
+    request: Request,
     q: str = Query(""), payment_type: str = Query(""),
     category: str = Query(""), project_id: str = Query(""),
-    issue_status: str = Query(""),
+    issue_status: str = Query(""), entity: str = Query(""),
 ):
+    # 兩本帳：money_dep 之上疊第二層 entity scope（plan §2.4）
+    # full：CRM 帳務＝原始帳列，合夥人不可及 —— money_dep 已擋一層，刻意雙保險
+    ent = require_entity(request, entity, level="full")
     _require_db()
     factory = await _get_factory()
     async with factory() as session:
         query = (
             select(CrmInvoice, CrmProject.name.label("pn"))
             .outerjoin(CrmProject, CrmProject.id == CrmInvoice.project_id)
+            .where(CrmInvoice.entity == ent)
             .order_by(CrmInvoice.invoice_date.desc())
         )
         if payment_type:
@@ -102,15 +134,16 @@ async def list_invoices(
 async def create_invoice(req: InvoicePayload, request: Request):
     _check_auth(request)
     _require_db()
+    ent = _entity_for_write(request, req.entity)
     factory = await _get_factory()
     now = _now()
     inv = CrmInvoice(
         id=uuid.uuid4().hex, invoice_date=_parse_shoot_date(req.invoice_date),
-        created_at=now, updated_at=now,
-        **req.model_dump(exclude={"invoice_date"}),
+        created_at=now, updated_at=now, entity=ent,
+        **req.model_dump(exclude={"invoice_date", "entity"}),
     )
     async with factory() as session:
-        await _assert_month_open(session, inv.invoice_date)
+        await _assert_month_open(session, inv.invoice_date, entity=ent)
         session.add(inv)
         await session.commit()
         await session.refresh(inv)
@@ -118,13 +151,14 @@ async def create_invoice(req: InvoicePayload, request: Request):
 
 
 @router.get("/invoices/{invoice_id}", dependencies=[Depends(money_dep)])
-async def get_invoice(invoice_id: str):
+async def get_invoice(invoice_id: str, request: Request):
     _require_db()
     factory = await _get_factory()
     async with factory() as session:
         inv = await session.get(CrmInvoice, invoice_id)
         if not inv:
             raise HTTPException(status_code=404, detail="找不到此發票")
+        require_entity(request, inv.entity or "parent", level="full")  # 兩本帳 scope 驗證（full：原始帳列，money_dep 之上刻意雙保險）
         pn = ""
         if inv.project_id:
             p = await session.get(CrmProject, inv.project_id)
@@ -141,10 +175,12 @@ async def update_invoice(invoice_id: str, req: InvoicePayload, request: Request)
         inv = await session.get(CrmInvoice, invoice_id)
         if not inv:
             raise HTTPException(status_code=404, detail="找不到此發票")
+        # 兩本帳：payload.entity None＝維持既有值；帶不同值＝想搬帳本 → 422
+        ent = _entity_for_write(request, req.entity, inv)
         # 舊/新 invoice_date 的月份都要開著（搬進或搬出鎖定月都算改帳）
         new_date = _parse_shoot_date(req.invoice_date)
-        await _assert_month_open(session, inv.invoice_date, new_date)
-        for k, v in req.model_dump(exclude={"invoice_date"}).items():
+        await _assert_month_open(session, inv.invoice_date, new_date, entity=ent)
+        for k, v in req.model_dump(exclude={"invoice_date", "entity"}).items():
             setattr(inv, k, v)
         inv.invoice_date = new_date
         inv.updated_at = _now()
@@ -161,7 +197,8 @@ async def delete_invoice(invoice_id: str, request: Request):
         inv = await session.get(CrmInvoice, invoice_id)
         if not inv:
             raise HTTPException(status_code=404, detail="找不到此發票")
-        await _assert_month_open(session, inv.invoice_date)
+        require_entity(request, inv.entity or "parent", level="full")  # 兩本帳 scope 驗證（full：原始帳列，money_dep 之上刻意雙保險）
+        await _assert_month_open(session, inv.invoice_date, entity=inv.entity or "parent")
         await session.delete(inv)
         await session.commit()
     return {"status": "ok"}
@@ -242,10 +279,11 @@ async def import_invoices_csv(request: Request, file: UploadFile = File(...)):
             if inv_date:
                 dated.append((f"第 {line_no} 列（{inv_date.strftime('%Y-%m-%d')}）", inv_date))
             parsed.append((data, inv_date))
-        await _assert_rows_open(session, dated)
+        # 兩本帳：CSV 匯入 v1 限母公司帳（entity='parent'），我的帳不走匯入
+        await _assert_rows_open(session, dated, entity="parent")
         for data, inv_date in parsed:
             now = _now()
-            inv = CrmInvoice(id=uuid.uuid4().hex, invoice_date=inv_date,
+            inv = CrmInvoice(id=uuid.uuid4().hex, invoice_date=inv_date, entity="parent",
                              created_at=now, updated_at=now, **data)
             session.add(inv)
             imported += 1
@@ -257,7 +295,8 @@ async def import_invoices_csv(request: Request, file: UploadFile = File(...)):
 
 def _to_payment_dict(p, project_name: str = "") -> dict:
     return {
-        "id": p.id, "request_date": p.request_date.isoformat() if p.request_date else None,
+        "id": p.id, "entity": p.entity or "parent",
+        "request_date": p.request_date.isoformat() if p.request_date else None,
         "amount": p.amount, "summary": p.summary or "",
         "category": p.category or "",
         "payee_name": p.payee_name or "", "payee_id": p.payee_id or "",
@@ -281,15 +320,21 @@ def _to_payment_dict(p, project_name: str = "") -> dict:
 
 @router.get("/payments", dependencies=[Depends(money_dep)])
 async def list_payments(
+    request: Request,
     q: str = Query(""), category: str = Query(""),
     payment_status: str = Query(""), project_id: str = Query(""),
+    entity: str = Query(""),
 ):
+    # 兩本帳：money_dep 之上疊第二層 entity scope（plan §2.4）
+    # full：CRM 帳務＝原始帳列，合夥人不可及 —— money_dep 已擋一層，刻意雙保險
+    ent = require_entity(request, entity, level="full")
     _require_db()
     factory = await _get_factory()
     async with factory() as session:
         query = (
             select(CrmPaymentRequest, CrmProject.name.label("pn"))
             .outerjoin(CrmProject, CrmProject.id == CrmPaymentRequest.project_id)
+            .where(CrmPaymentRequest.entity == ent)
             .order_by(CrmPaymentRequest.request_date.desc())
         )
         if category:
@@ -318,28 +363,36 @@ async def list_payments(
 async def create_payment(req: PaymentRequestPayload, request: Request):
     _check_auth(request)
     _require_db()
+    ent = _entity_for_write(request, req.entity)
     factory = await _get_factory()
     now = _now()
     date_fields = {"request_date", "payment_date"}
     dates = {f: _parse_shoot_date(getattr(req, f)) for f in date_fields}
-    data = req.model_dump(exclude=date_fields)
-    p = CrmPaymentRequest(id=uuid.uuid4().hex, **dates, created_at=now, updated_at=now, **data)
+    data = req.model_dump(exclude=date_fields | {"entity"})
+    p = CrmPaymentRequest(id=uuid.uuid4().hex, **dates, entity=ent,
+                          created_at=now, updated_at=now, **data)
     async with factory() as session:
         # F1 月結守衛：請款單的權責費用認列月 = request_date
-        await _assert_month_open(session, dates.get("request_date"))
+        await _assert_month_open(session, dates.get("request_date"), entity=ent)
         session.add(p)
         await session.commit()
     return {"status": "ok", "payment": _to_payment_dict(p)}
 
 
 @router.get("/payments/advances", dependencies=[Depends(money_dep)])
-async def list_advance_payments(returned: int = -1, project_id: str = Query("")):
+async def list_advance_payments(request: Request, returned: int = -1,
+                                project_id: str = Query(""), entity: str = Query("")):
     """列出預支款。returned=-1=全部，0=未結清，1=已結清。project_id 可過濾特定專案。"""
+    # 兩本帳：money_dep 之上疊第二層 entity scope（plan §2.4）
+    # full：CRM 帳務＝原始帳列，合夥人不可及 —— money_dep 已擋一層，刻意雙保險
+    ent = require_entity(request, entity, level="full")
     _require_db()
     factory = await _get_factory()
     async with factory() as session:
         from sqlalchemy import func as sa_func
-        q = select(CrmPaymentRequest).where(CrmPaymentRequest.is_advance == 1)
+        q = (select(CrmPaymentRequest)
+             .where(CrmPaymentRequest.is_advance == 1)
+             .where(CrmPaymentRequest.entity == ent))
         if project_id:
             q = q.where(CrmPaymentRequest.project_id == project_id)
         rows = (await session.execute(q.order_by(CrmPaymentRequest.created_at.desc()))).scalars().all()
@@ -392,6 +445,7 @@ async def list_advance_payments(returned: int = -1, project_id: str = Query(""))
             } for c in linked_cash]
             result.append({
                 "id": p.id,
+                "entity": p.entity or "parent",
                 "payee_name": p.payee_name or "",
                 "amount": amt,
                 "project_id": p.project_id or "",
@@ -419,7 +473,8 @@ async def batch_update_month(request: Request):
     """更新請款單的 planned_month。
 
     F1 月結守衛判準：planned_month 是「預計付款月」排程欄，不是權責認列日
-    （request_date）也不是現金發生日（payment_date）— 改排程不改帳，不掛守衛。"""
+    （request_date）也不是現金發生日（payment_date）— 改排程不改帳，不掛守衛
+    （所以也沒有 per-entity 鎖月檢查；各列的 entity 維持不變）。"""
     _check_auth(request)
     _require_db()
     factory = await _get_factory()
@@ -458,24 +513,31 @@ async def batch_pay(request: Request):
         raise HTTPException(status_code=400, detail="請提供 payment_ids")
 
     async with factory() as session:
-        locked = await _locked_month_set(session)
-        # month_of：timestamptz 回讀是 UTC 表示，直取 strftime 會把月初歸前月
-        if month_of(pay_date) in locked:
-            raise HTTPException(
-                status_code=409,
-                detail=f"付款日 {pay_date.strftime('%Y-%m-%d')} 落在已鎖帳月份"
-                       "（需修改請先到帳務→現金流重開該月）")
-        # 先整批檢查再改（違規時一筆都不動）
-        targets, violations = [], []
+        # 先載入會變動的列（違規時一筆都不動）
+        rows = []
         for pid in ids:
             p = await session.get(CrmPaymentRequest, pid)
             if not p:
                 continue
             will_change = (p.payment_status != "已付款") or (p.payment_date != pay_date)
-            if not will_change:
-                continue
+            if will_change:
+                rows.append(p)
+        # 兩本帳各自鎖月（plan §3）：涉及的 entity 分組、各查一次鎖定月集合
+        locked_by_entity = {
+            ent: await _locked_month_set(session, entity=ent)
+            for ent in {(p.entity or "parent") for p in rows}
+        }
+        # month_of：timestamptz 回讀是 UTC 表示，直取 strftime 會把月初歸前月
+        pay_month = month_of(pay_date)
+        if any(pay_month in locked for locked in locked_by_entity.values()):
+            raise HTTPException(
+                status_code=409,
+                detail=f"付款日 {pay_date.strftime('%Y-%m-%d')} 落在已鎖帳月份"
+                       "（需修改請先到帳務→現金流重開該月）")
+        targets, violations = [], []
+        for p in rows:
             old_month = month_of(p.payment_date)
-            if old_month and old_month in locked:
+            if old_month and old_month in locked_by_entity[p.entity or "parent"]:
                 violations.append(f"{p.summary or p.id}（{old_month}）")
                 continue
             targets.append(p)
@@ -506,14 +568,20 @@ async def batch_unpay(request: Request):
         raise HTTPException(status_code=400, detail="請提供 payment_ids")
 
     async with factory() as session:
-        locked = await _locked_month_set(session)
-        targets, violations = [], []
+        rows = []
         for pid in ids:
             p = await session.get(CrmPaymentRequest, pid)
-            if not (p and p.payment_status == "已付款"):
-                continue
+            if p and p.payment_status == "已付款":
+                rows.append(p)
+        # 兩本帳各自鎖月（plan §3）：涉及的 entity 分組、各查一次鎖定月集合
+        locked_by_entity = {
+            ent: await _locked_month_set(session, entity=ent)
+            for ent in {(p.entity or "parent") for p in rows}
+        }
+        targets, violations = [], []
+        for p in rows:
             old_month = month_of(p.payment_date)
-            if old_month and old_month in locked:
+            if old_month and old_month in locked_by_entity[p.entity or "parent"]:
                 violations.append(f"{p.summary or p.id}（{old_month}）")
                 continue
             targets.append(p)
@@ -530,13 +598,14 @@ async def batch_unpay(request: Request):
 
 
 @router.get("/payments/{payment_id}", dependencies=[Depends(money_dep)])
-async def get_payment(payment_id: str):
+async def get_payment(payment_id: str, request: Request):
     _require_db()
     factory = await _get_factory()
     async with factory() as session:
         p = await session.get(CrmPaymentRequest, payment_id)
         if not p:
             raise HTTPException(status_code=404, detail="找不到此請款單")
+        require_entity(request, p.entity or "parent", level="full")  # 兩本帳 scope 驗證（full：原始帳列，money_dep 之上刻意雙保險）
         pn = ""
         if p.project_id:
             proj = await session.get(CrmProject, p.project_id)
@@ -555,9 +624,12 @@ async def update_payment(payment_id: str, req: PaymentRequestPayload, request: R
         p = await session.get(CrmPaymentRequest, payment_id)
         if not p:
             raise HTTPException(status_code=404, detail="找不到此請款單")
+        # 兩本帳：payload.entity None＝維持既有值；帶不同值＝想搬帳本 → 422
+        ent = _entity_for_write(request, req.entity, p)
         # F1 月結守衛：舊/新 request_date 的月份都要開著
-        await _assert_month_open(session, p.request_date, dates.get("request_date"))
-        for k, v in req.model_dump(exclude=date_fields).items():
+        await _assert_month_open(session, p.request_date, dates.get("request_date"),
+                                 entity=ent)
+        for k, v in req.model_dump(exclude=date_fields | {"entity"}).items():
             setattr(p, k, v)
         for k, v in dates.items():
             setattr(p, k, v)
@@ -575,7 +647,8 @@ async def delete_payment(payment_id: str, request: Request):
         p = await session.get(CrmPaymentRequest, payment_id)
         if not p:
             raise HTTPException(status_code=404, detail="找不到此請款單")
-        await _assert_month_open(session, p.request_date)
+        require_entity(request, p.entity or "parent", level="full")  # 兩本帳 scope 驗證（full：原始帳列，money_dep 之上刻意雙保險）
+        await _assert_month_open(session, p.request_date, entity=p.entity or "parent")
         await session.delete(p)
         await session.commit()
     return {"status": "ok"}
@@ -650,12 +723,13 @@ async def import_payments_csv(request: Request, file: UploadFile = File(...)):
             if req_date:
                 dated.append((f"第 {line_no} 列（{req_date.strftime('%Y-%m-%d')}）", req_date))
             parsed.append((data, req_date, pay_date))
-        await _assert_rows_open(session, dated)
+        # 兩本帳：CSV 匯入 v1 限母公司帳（entity='parent'），我的帳不走匯入
+        await _assert_rows_open(session, dated, entity="parent")
         for data, req_date, pay_date in parsed:
             now = _now()
             p = CrmPaymentRequest(
                 id=uuid.uuid4().hex, request_date=req_date, payment_date=pay_date,
-                created_at=now, updated_at=now, **data,
+                entity="parent", created_at=now, updated_at=now, **data,
             )
             session.add(p)
             imported += 1
@@ -668,6 +742,7 @@ async def import_payments_csv(request: Request, file: UploadFile = File(...)):
 def _to_cash_dict(e, project_name: str = "", invoice_title: str = "") -> dict:
     return {
         "id": e.id,
+        "entity": e.entity or "parent",
         "entry_date": e.entry_date.isoformat() if e.entry_date else None,
         "expense": e.expense, "claim": e.claim, "deposit": e.deposit,
         "summary": e.summary or "", "note": e.note or "",
@@ -695,9 +770,14 @@ def _to_cash_dict(e, project_name: str = "", invoice_title: str = "") -> dict:
 
 @router.get("/cash-entries", dependencies=[Depends(money_dep)])
 async def list_cash_entries(
+    request: Request,
     q: str = Query(""), category: str = Query(""),
     item: str = Query(""), project_id: str = Query(""),
+    entity: str = Query(""),
 ):
+    # 兩本帳：money_dep 之上疊第二層 entity scope（plan §2.4）
+    # full：CRM 帳務＝原始帳列，合夥人不可及 —— money_dep 已擋一層，刻意雙保險
+    ent = require_entity(request, entity, level="full")
     _require_db()
     factory = await _get_factory()
     async with factory() as session:
@@ -705,6 +785,7 @@ async def list_cash_entries(
             select(CrmCashEntry, CrmProject.name.label("pn"), CrmInvoice.title.label("inv_title"))
             .outerjoin(CrmProject, CrmProject.id == CrmCashEntry.project_id)
             .outerjoin(CrmInvoice, CrmInvoice.id == CrmCashEntry.invoice_id)
+            .where(CrmCashEntry.entity == ent)
             .order_by(CrmCashEntry.entry_date.desc())
         )
         if category:
@@ -724,13 +805,14 @@ async def list_cash_entries(
 async def create_cash_entry(req: CashEntryPayload, request: Request):
     _check_auth(request)
     _require_db()
+    ent = _entity_for_write(request, req.entity)
     factory = await _get_factory()
     date_fields = {"entry_date", "payment_date"}
     dates = {f: _parse_shoot_date(getattr(req, f)) for f in date_fields}
-    data = req.model_dump(exclude=date_fields)
-    e = CrmCashEntry(id=uuid.uuid4().hex, **dates, created_at=_now(), **data)
+    data = req.model_dump(exclude=date_fields | {"entity"})
+    e = CrmCashEntry(id=uuid.uuid4().hex, **dates, entity=ent, created_at=_now(), **data)
     async with factory() as session:
-        await _assert_month_open(session, dates.get("entry_date"))
+        await _assert_month_open(session, dates.get("entry_date"), entity=ent)
         session.add(e)
         if req.invoice_id and req.deposit:
             inv = await session.get(CrmInvoice, req.invoice_id)
@@ -752,9 +834,12 @@ async def update_cash_entry(entry_id: str, req: CashEntryPayload, request: Reque
         e = await session.get(CrmCashEntry, entry_id)
         if not e:
             raise HTTPException(status_code=404, detail="找不到此收支紀錄")
-        await _assert_month_open(session, e.entry_date, dates.get("entry_date"))
+        # 兩本帳：payload.entity None＝維持既有值；帶不同值＝想搬帳本 → 422
+        ent = _entity_for_write(request, req.entity, e)
+        await _assert_month_open(session, e.entry_date, dates.get("entry_date"),
+                                 entity=ent)
         old_invoice_id = e.invoice_id
-        for k, v in req.model_dump(exclude=date_fields).items():
+        for k, v in req.model_dump(exclude=date_fields | {"entity"}).items():
             setattr(e, k, v)
         for k, v in dates.items():
             setattr(e, k, v)
@@ -781,7 +866,8 @@ async def delete_cash_entry(entry_id: str, request: Request):
         e = await session.get(CrmCashEntry, entry_id)
         if not e:
             raise HTTPException(status_code=404, detail="找不到此收支紀錄")
-        await _assert_month_open(session, e.entry_date)
+        require_entity(request, e.entity or "parent", level="full")  # 兩本帳 scope 驗證（full：原始帳列，money_dep 之上刻意雙保險）
+        await _assert_month_open(session, e.entry_date, entity=e.entity or "parent")
         if e.invoice_id and e.deposit:
             inv = await session.get(CrmInvoice, e.invoice_id)
             if inv and inv.payment_status == "已收款":
@@ -853,9 +939,10 @@ async def import_cash_csv(request: Request, file: UploadFile = File(...)):
             if entry_date:
                 dated.append((f"第 {line_no} 列（{entry_date.strftime('%Y-%m-%d')}）", entry_date))
             parsed.append((data, entry_date, pay_date))
-        await _assert_rows_open(session, dated)
+        # 兩本帳：CSV 匯入 v1 限母公司帳（entity='parent'），我的帳不走匯入
+        await _assert_rows_open(session, dated, entity="parent")
         for data, entry_date, pay_date in parsed:
-            e = CrmCashEntry(id=uuid.uuid4().hex, entry_date=entry_date,
+            e = CrmCashEntry(id=uuid.uuid4().hex, entry_date=entry_date, entity="parent",
                              payment_date=pay_date, created_at=_now(), **data)
             session.add(e)
             imported += 1
@@ -866,8 +953,12 @@ async def import_cash_csv(request: Request, file: UploadFile = File(...)):
 # ── Accounts Payable (應付帳款) ─────────────────────────────
 
 @router.get("/payables/summary", dependencies=[Depends(money_dep)])
-async def payables_summary(month: str = Query(""), status: str = Query("")):
+async def payables_summary(request: Request, month: str = Query(""),
+                           status: str = Query(""), entity: str = Query("")):
     """請款彙總，按收款人分組。month=all 或空=全部應付款；month=YYYY-MM=該月。"""
+    # 兩本帳：money_dep 之上疊第二層 entity scope（plan §2.4）
+    # full：CRM 帳務＝原始帳列，合夥人不可及 —— money_dep 已擋一層，刻意雙保險
+    ent = require_entity(request, entity, level="full")
     _require_db()
     factory = await _get_factory()
 
@@ -878,6 +969,7 @@ async def payables_summary(month: str = Query(""), status: str = Query("")):
             select(CrmPaymentRequest, CrmStaff.id_number, CrmStaff.bank_name, CrmStaff.bank_account)
             .outerjoin(CrmStaff, CrmStaff.name == CrmPaymentRequest.payee_name)
             .where(or_(CrmPaymentRequest.is_advance == 0, CrmPaymentRequest.is_advance.is_(None)))
+            .where(CrmPaymentRequest.entity == ent)
             .order_by(CrmPaymentRequest.request_date)
         )
 
@@ -915,8 +1007,12 @@ async def payables_summary(month: str = Query(""), status: str = Query("")):
 
 
 @router.get("/receivables/summary", dependencies=[Depends(money_dep)])
-async def receivables_summary(status: str = Query("")):
+async def receivables_summary(request: Request, status: str = Query(""),
+                              entity: str = Query("")):
     """應收帳款彙總：已開立發票按客戶（company_name）分組。status=未收款/已收款/空=全部。"""
+    # 兩本帳：money_dep 之上疊第二層 entity scope（plan §2.4）
+    # full：CRM 帳務＝原始帳列，合夥人不可及 —— money_dep 已擋一層，刻意雙保險
+    ent = require_entity(request, entity, level="full")
     _require_db()
     factory = await _get_factory()
 
@@ -927,6 +1023,7 @@ async def receivables_summary(status: str = Query("")):
             .outerjoin(CrmProject, CrmProject.id == CrmInvoice.project_id)
             .outerjoin(Client, Client.short_name == CrmInvoice.company_name)
             .where(CrmInvoice.issue_status == "已開立")
+            .where(CrmInvoice.entity == ent)
             .order_by(CrmInvoice.invoice_date.desc())
         )
         if status:
@@ -942,7 +1039,11 @@ async def receivables_summary(status: str = Query("")):
 
 @router.patch("/invoices/batch-receive")
 async def batch_receive(request: Request):
-    """批次標記發票為已收款。"""
+    """批次標記發票為已收款。
+
+    F1 月結守衛：本端點一直沒掛守衛（發票的權責認列月 = invoice_date 不變，
+    標記收款只動 payment_status/paid_date；現金側鎖月由收支明細把關）——
+    entity 化維持原判準，各列的 entity 不變、不做鎖月檢查。"""
     _check_auth(request)
     _require_db()
     factory = await _get_factory()
