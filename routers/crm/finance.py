@@ -635,6 +635,59 @@ async def download_invoice_file_public(token: str):
     return await serve_invoice_by_share_token(token)
 
 
+@router.post("/invoices/migrate-files")
+async def migrate_invoice_files(request: Request, apply: bool = Query(False)):
+    """把已上傳的電子發票檔搬到**目前**的發票根目錄底下（改過根目錄後補搬）。
+
+    預設 dry-run，`?apply=true` 才真的搬 —— 比照匯入腳本的契約。
+
+    🔴 一定要由 agent 自己跑，不能從別的 shell：主控 agent 跑在 Session 1、
+    握有 NAS 的 SMB 連線；其他 session（例如排程或維運用的 shell）看不到那些
+    對映與 UNC，會一路 Access denied（memory 的 Session 0 陷阱）。
+
+    搬移交給 _resync_invoice_file —— 它算的目標路徑就是「目前根目錄 + 這張發票
+    現在的欄位」，所以順便把舊檔名（例如上傳時號碼還空著而落到 id 前 8 碼的）
+    一起對齊。不覆蓋同名檔、搬不動就維持原狀並列在回應裡。
+    """
+    check_admin(request)
+    _require_db()
+    factory = await _get_factory()
+    moved, skipped, missing = [], [], []
+    async with factory() as session:
+        rows = (await session.execute(
+            select(CrmInvoice).where(CrmInvoice.file_url.isnot(None),
+                                     CrmInvoice.file_url != ""))).scalars().all()
+        for inv in rows:
+            old = inv.file_url
+            if not os.path.isfile(old):
+                missing.append({"title": inv.title, "path": old})
+                continue
+            if apply:
+                # 🔴 _resync_invoice_file 只搬檔、**不會**改 inv.file_url —— DB 這半
+                # 一定要在這裡自己寫回去。少了這行＝檔案搬走了、DB 還指著舊路徑，
+                # 稅務憑證全變孤兒檔（2026-08-19 dev 實測到，幸好沒先對生產跑）。
+                # 搬不動（目標已存在／權限不足）時它回傳原路徑，就是下面的相等判斷。
+                new = await asyncio.to_thread(_resync_invoice_file, inv)
+            else:
+                day = _fmt_day(inv.invoice_date)
+                new = os.path.join(_invoices_root(), day[:4] or "nodate", day[:7] or "nodate",
+                                   _invoice_file_name(inv, os.path.splitext(old)[1]))
+            if os.path.abspath(new) == os.path.abspath(old):
+                skipped.append({"title": inv.title, "path": old,
+                                **({"why": "目標已存在或搬移失敗"} if apply else {})})
+                continue
+            if apply:
+                inv.file_url = new
+                inv.updated_at = _now()
+            moved.append({"title": inv.title, "from": old, "to": new})
+        if apply:
+            await session.commit()
+    return {"status": "ok", "applied": apply, "root": _invoices_root(),
+            "moved": moved, "skipped": skipped, "missing": missing,
+            "summary": f"{'已搬移' if apply else '將搬移'} {len(moved)} 個；"
+                       f"原地不動 {len(skipped)} 個；找不到檔案 {len(missing)} 個"}
+
+
 @router.get("/invoices-root")
 async def get_invoices_root(request: Request):
     """電子發票根目錄設定（admin 專用）。

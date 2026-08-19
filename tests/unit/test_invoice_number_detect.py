@@ -146,3 +146,25 @@ def test_file_name_resyncs_on_update():
         "目標同名檔已存在時不可覆蓋 —— 那是別人的稅務憑證"
     assert "except OSError" in helper, \
         "搬移失敗只能維持原狀，不能讓『改個發票號碼』整個失敗"
+
+
+def test_migrate_writes_back_db_path():
+    """🔴 搬檔之後 **一定要**把新路徑寫回 inv.file_url。
+
+    _resync_invoice_file 只搬檔、不動 DB。少了寫回那行＝檔案搬走了、DB 還指著
+    舊路徑，稅務憑證全變孤兒檔（2026-08-19 dev 實測到，幸好沒先對生產跑）。
+    """
+    src = _finance_src()
+    i = src.index("async def migrate_invoice_files(")
+    body = src[i:i + 3000]
+    assert "inv.file_url = new" in body, "搬移後沒有把新路徑寫回 DB"
+    assert body.index("_resync_invoice_file") < body.index("inv.file_url = new"), \
+        "順序必須是「先搬檔、再寫回 DB」"
+
+
+def test_migrate_is_dry_run_by_default():
+    """比照匯入腳本：預設只出計畫，?apply=true 才真的動檔案。"""
+    src = _finance_src()
+    i = src.index("async def migrate_invoice_files(")
+    sig = src[i:i + 260]
+    assert "apply: bool = Query(False)" in sig, "migrate 預設就該是 dry-run"
