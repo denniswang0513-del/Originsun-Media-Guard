@@ -1024,6 +1024,10 @@ async def _on_startup():
                         "ALTER TABLE crm_invoices ADD COLUMN IF NOT EXISTS file_url VARCHAR(512)",
                         # 客戶下載電子發票的分享連結 token
                         "ALTER TABLE crm_invoices ADD COLUMN IF NOT EXISTS share_token VARCHAR(512)",
+                        # 分享碼是免登入端點的查詢條件（索引命中，不讓匿名請求逼出全表掃描），
+                        # 同時擋短碼碰撞。partial index：NULL 不算重複
+                        "CREATE UNIQUE INDEX IF NOT EXISTS uq_invoice_share_token "
+                        "ON crm_invoices (share_token) WHERE share_token IS NOT NULL",
                         # ── 兩本帳（公司實體）：錢流 7 表加 entity 欄
                         # （parent=母公司（預設）/mine=我的帳，docs/LEDGER_ENTITY_PLAN.md §1.1）
                         "ALTER TABLE crm_invoices ADD COLUMN IF NOT EXISTS entity VARCHAR(16) NOT NULL DEFAULT 'parent'",
@@ -1269,6 +1273,20 @@ async def _legacy_proposal_plan(request: Request):
     qs = request.url.query
     return RedirectResponse("/project.html" + (f"?{qs}" if qs else ""),
                             status_code=301)
+
+
+@app.get("/e/{code}", include_in_schema=False)
+async def _short_invoice_file(code: str):
+    """電子發票短網址：`/e/{12 碼}` → 檔案下載（免登入，憑證就是那串碼）。
+
+    掛在根路徑是為了**短** —— 走 router 前綴會變成 /api/v1/crm/... 又長回去
+    （owner 要求：原本整條 287 字元，現在約 49）。實作在
+    routers/crm/finance.py，這裡只是把根路徑接過去。
+
+    註冊在 `app.mount("/")` 之前才會贏 —— StaticFiles 掛在根，順序決定誰接。
+    """
+    from routers.crm.finance import serve_invoice_by_share_token
+    return await serve_invoice_by_share_token(code)
 
 
 @app.get("/")

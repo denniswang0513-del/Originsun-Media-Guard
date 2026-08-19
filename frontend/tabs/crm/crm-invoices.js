@@ -528,7 +528,10 @@ window._invShareLink = async function (btn) {
         const d = await _fetch(`/invoices/${_selectedId}/share`, { method: 'POST' });
         // 後端只回 path：網址要用「使用者現在是從哪個網域進來的」組（內網 IP、
         // localhost、還是 cloudflared 的對外網域），寫死任何一個都會寄出打不開的連結。
-        await copyText(location.origin + d.path, btn);
+        // 複製「檔名 換行 連結」兩行（owner 指定）—— 貼進信裡對方一眼知道那是什麼，
+        // 光一條網址看不出是哪張發票。
+        const url = location.origin + d.path;
+        await copyText(`${d.file_name || ''}\n${url}`.trim(), btn);
         await loadInvoices();
         // 等 copyText 的「已複製」回饋（1.5s）走完再重畫這一區，否則按鈕會在
         // 使用者看到回饋之前就被換掉，變成「按了好像沒反應」。

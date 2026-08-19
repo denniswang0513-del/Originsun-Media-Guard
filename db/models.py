@@ -641,7 +641,7 @@ class CrmInvoice(Base):
     recipient_address = Column(String(255), nullable=True)               # 紙本發票收件地址
     paid_date = Column(DateTime(timezone=True), nullable=True)           # 收款日（AR 收現時間戳，財務階段二）
     file_url = Column(String(512), nullable=True)                        # 已開立的電子發票檔（PDF/圖），存磁碟絕對路徑
-    share_token = Column(String(512), nullable=True)                     # 給客戶下載電子發票的分享連結 token（逐字比對，見 core.auth.new_share_token）
+    share_token = Column(String(512), nullable=True, index=True)         # 給客戶下載電子發票的短碼（/e/{code}，逐字比對）
     notes = Column(Text, nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now())

@@ -21,7 +21,7 @@ from core.ledger import require_entity
 from core.schemas import InvoicePayload, PaymentRequestPayload, CashEntryPayload
 
 from ._shared import (router, token_router, _check_auth, money_dep, _require_db,
-                      _get_factory, _fmt_day, _now, _is_valid_scoped_token,
+                      _get_factory, _fmt_day, _now,
                       _parse_shoot_date, _assert_month_open, _assert_rows_open,
                       _locked_month_set, _raise_locked_batch)
 
@@ -450,24 +450,32 @@ async def serve_invoice_file(path: str = Query(""), request: Request = None):
     return FileResponse(abs_path, filename=os.path.basename(abs_path))
 
 
-_INVOICE_SHARE_SCOPE = "invoice_file"
+# 短碼長度：secrets.token_urlsafe(9) → 12 字元（72 bits）。這串是要寄給客戶、
+# 有時會被人工轉貼甚至念出來的，所以要短；72 bits 對「猜不到」而言仍綽綽有餘，
+# 而且每次嘗試都要打一次伺服器（share_token 上有 unique index，查詢是索引命中）。
+_SHARE_CODE_BYTES = 9
+
+
+def _new_share_code() -> str:
+    import secrets
+    return secrets.token_urlsafe(_SHARE_CODE_BYTES)
 
 
 @router.post("/invoices/{invoice_id}/share")
 async def create_invoice_share_link(invoice_id: str, request: Request):
-    """產生（或取回）給客戶下載這張電子發票的連結。
+    """產生（或取回）給客戶下載這張電子發票的短連結。
 
-    冪等：已經有一張有效的就原樣回傳 —— 同一張發票寄兩次信不該讓先寄出去的
-    連結失效。要作廢舊連結走 DELETE（重置語意）。
+    冪等：已經有一張就原樣回傳 —— 同一張發票寄兩次信不該讓先寄出去的連結失效。
+    要作廢走 DELETE（重置語意）。
 
-    🔴 token 不驗簽章、靠逐字比對 DB（core.auth.new_share_token / decode_unverified
-    的既定設計）：jwt_secret 輪替時不會連坐殺掉已經寄給客戶的連結，而那些連結
-    本來就偽造不了（光有 secret 產不出對得上 DB 的字串）。
+    🔴 憑證＝「網址裡那串字與 DB 存的完全相同」，不驗簽章。所以 jwt_secret 輪替
+    不會連坐殺掉已經寄給客戶的連結，而那些連結本來就偽造不了。
+    v1 用的是 220+ 字元的 JWT，整條網址 287 字元 —— owner 要求縮短，改成 12 字元
+    短碼掛在根路徑 `/e/{code}`（約 49 字元）。**舊的長網址仍然有效**（見
+    download_invoice_file_public），已經寄出去的連結不會因為這次改版失效。
     """
     _check_auth(request)
     _require_db()
-    from core.auth import new_share_token
-    from core.crm_logic import PERMANENT_TOKEN_EXPIRES_DAYS
     factory = await _get_factory()
     async with factory() as session:
         inv = await session.get(CrmInvoice, invoice_id)
@@ -476,14 +484,22 @@ async def create_invoice_share_link(invoice_id: str, request: Request):
         require_entity(request, inv.entity or "parent", level="full")
         if not inv.file_url:
             raise HTTPException(status_code=422, detail="這張發票還沒有上傳電子發票檔")
-        if not _is_valid_scoped_token(inv.share_token, _INVOICE_SHARE_SCOPE):
-            inv.share_token = new_share_token(invoice_id, _INVOICE_SHARE_SCOPE,
-                                              PERMANENT_TOKEN_EXPIRES_DAYS)
+        if not inv.share_token:
+            # unique index 擋碰撞；72 bits 幾乎不會撞，但撞到就換一個而不是噴 500
+            for _ in range(5):
+                candidate = _new_share_code()
+                dup = (await session.execute(
+                    select(CrmInvoice.id).where(CrmInvoice.share_token == candidate))).first()
+                if not dup:
+                    inv.share_token = candidate
+                    break
+            else:
+                raise HTTPException(status_code=503, detail="短碼產生失敗，請再試一次")
             inv.updated_at = _now()
             await session.commit()
         token = inv.share_token
-    return {"status": "ok", "token": token,
-            "path": f"/api/v1/crm/public/invoice-file/{token}"}
+    return {"status": "ok", "token": token, "path": f"/e/{token}",
+            "file_name": os.path.basename(inv.file_url or "")}
 
 
 @router.delete("/invoices/{invoice_id}/share")
@@ -503,36 +519,41 @@ async def revoke_invoice_share_link(invoice_id: str, request: Request):
     return {"status": "ok"}
 
 
-@token_router.get("/public/invoice-file/{token}")
-async def download_invoice_file_public(token: str):
-    """客戶憑連結下載電子發票 —— **免登入**，憑證就是網址裡那串 token。
+async def serve_invoice_by_share_token(token: str):
+    """憑分享碼取電子發票檔 —— **免登入**，憑證就是網址裡那串字。
 
-    掛 token_router 不掛 public_router：public_router 是 NAS 對外容器也會掛的那組
-    （master 關機仍要能用），電子發票下載沒有 24/7 的必要，曝露面不必為它變大。
+    短碼與舊 JWT 共用這一支：查詢就是「share_token 逐字等於來訪者出示的字串」，
+    格式不影響判定。所以改成短碼之後，改版前已經寄出去的長網址照樣有效。
 
     只回檔案本身，不回發票的其他欄位 —— 客戶要的是那張憑證，順手多給金額/統編/
     客戶名等於把不必要的東西一起寄出去。
     """
     _require_db()
-    from core.auth import decode_unverified, stored_token_matches
-    payload = decode_unverified(token)
-    if not payload or payload.get("scope") != _INVOICE_SHARE_SCOPE:
-        raise HTTPException(status_code=401, detail="無效的連結")
     factory = await _get_factory()
     async with factory() as session:
-        inv = await session.get(CrmInvoice, payload.get("sub", ""))
-        # 逐字比對：token 撤銷（share_token=None）或重新產生後，舊連結立刻失效
-        if not inv or not stored_token_matches(inv.share_token or "", token):
-            raise HTTPException(status_code=401, detail="連結已失效")
-        path = inv.file_url or ""
+        row = (await session.execute(
+            select(CrmInvoice.file_url).where(CrmInvoice.share_token == token))).first()
+    if not row:
+        raise HTTPException(status_code=401, detail="連結已失效")
+    path = row[0] or ""
     if not path or not os.path.isfile(path):
         raise HTTPException(status_code=404, detail="檔案不存在")
-    # 同 serve_invoice_file 的路徑白名單 —— 免登入端點更不能讓 DB 裡一個被改壞的
-    # 路徑變成任意檔案讀取
+    # 免登入端點更不能讓 DB 裡一個被改壞的路徑變成任意檔案讀取
     if not os.path.abspath(path).startswith(os.path.abspath(_invoices_root())):
         raise HTTPException(status_code=403, detail="無權存取此路徑")
     from starlette.responses import FileResponse
     return FileResponse(os.path.abspath(path), filename=os.path.basename(path))
+
+
+@token_router.get("/public/invoice-file/{token}")
+async def download_invoice_file_public(token: str):
+    """舊的長網址（v1 的 JWT 版）。改用 /e/{code} 短碼之後仍保留這條 ——
+    改版前已經寄給客戶的連結不該因為我們換格式而變成死連結。
+
+    掛 token_router 不掛 public_router：後者是 NAS 對外容器也會掛的那組
+    （master 關機仍要能用），電子發票下載沒有 24/7 的必要，曝露面不必為它變大。
+    """
+    return await serve_invoice_by_share_token(token)
 
 
 @router.get("/invoices-root")
