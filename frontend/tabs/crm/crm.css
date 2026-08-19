@@ -678,9 +678,9 @@
 #inv-list-panel .acct-header > span:nth-child(1),
 #inv-list-body .crm-row:not(.inv-qa-paper) > *:nth-child(1) { flex: 0 0 108px; }   /* date input 要塞得下 YYYY/MM/DD + 日曆圖示 */
 #inv-list-panel .acct-header > span:nth-child(2),
-#inv-list-body .crm-row:not(.inv-qa-paper) > *:nth-child(2) { flex: 2.2 1 0; min-width: 0; text-align: left; }
+#inv-list-body .crm-row:not(.inv-qa-paper) > *:nth-child(2) { flex: 1.5 1 0; min-width: 0; text-align: left; }
 #inv-list-panel .acct-header > span:nth-child(3),
-#inv-list-body .crm-row:not(.inv-qa-paper) > *:nth-child(3) { flex: 0 0 108px; text-align: right; }
+#inv-list-body .crm-row:not(.inv-qa-paper) > *:nth-child(3) { flex: 0 0 152px; text-align: right; }   /* 發票的主角是金額：給足寬度，也讓未稅/含稅鈕＋輸入框不擠 */
 #inv-list-panel .acct-header > span:nth-child(4),
 #inv-list-body .crm-row:not(.inv-qa-paper) > *:nth-child(4) { flex: 2.2 1 0; min-width: 0; text-align: left; }
 #inv-list-panel .acct-header > span:nth-child(5),
@@ -881,8 +881,16 @@
 #pay-list-body .crm-row-amount,
 #cash-list-body .crm-row-amt-out,
 #cash-list-body .crm-row-amt-in,
-#inv-list-body .crm-row-amount,
 #payable-list-body .crm-row-amount { font-weight: 600; font-size: 13px; }
+/* 發票列表：金額是這張表的主角，比其他欄再重一級（白、15px、數字等寬對齊）。
+   ⚠️ 選擇器要壓過資料列那條 ellipsis 規則
+   （#inv-list-body .crm-row > div:not(.crm-kebab-wrap)，含 font-size:12px，特異度
+   (1,2,1)）—— 只寫 `#inv-list-body .crm-row-amount` 是 (1,1,0)，weight/color 會生效
+   但 font-size 吃不到，畫面上完全看不出哪裡沒套用。多一個 :not() 拉到 (1,3,1)。 */
+#inv-list-body .crm-row > div.crm-row-amount:not(.crm-kebab-wrap) {
+  font-weight: 700; font-size: 15px; color: #fff;
+  font-variant-numeric: tabular-nums;
+}
 
 /* ── Cash entry columns ── */
 .crm-col-amt-out { flex: 0.7; text-align: right; }
