@@ -92,15 +92,20 @@ def find_header(rows: list) -> int:
 
 
 def parse_date(v: str):
-    """'2024/01/02' / '2024-1-2' → date。壞值回 None（呼叫端會列出來要人決定）。"""
+    """'2024/01/02' / '2024-1-2' → 該日的 UTC 午夜。壞值回 None（報告會列出來）。
+
+    🔴 日期只把 Sheet 的斜線格式正規化，實際的 datetime **交給
+    routers.crm._shared._parse_shoot_date 造** —— 這個 repo 的日期欄慣例是
+    UTC 午夜（台北是 UTC+8，UTC 午夜換算台北仍同一天，_fmt_day 與前端取 ISO
+    前 10 碼才會一致）。這裡自己 `datetime(y,m,d).date()` 會被寫成**台北**午夜
+    ＝前一天 16:00Z，前端顯示就少一天（2026-08-19 第一版匯入實際踩到，394 筆全中）。
+    """
     v = (v or "").strip()
     m = re.fullmatch(r"(\d{4})[/-](\d{1,2})[/-](\d{1,2})", v)
     if not m:
         return None
-    try:
-        return datetime(int(m[1]), int(m[2]), int(m[3])).date()
-    except ValueError:
-        return None
+    from routers.crm._shared import _parse_shoot_date
+    return _parse_shoot_date(f"{int(m[1]):04d}-{int(m[2]):02d}-{int(m[3]):02d}")
 
 
 def load(csv_path: str):

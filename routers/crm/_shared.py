@@ -371,13 +371,32 @@ async def _assert_rows_open(session, dated_rows, entity: str = "parent"):
 
 
 def _parse_shoot_date(date_str: Optional[str]) -> Optional[datetime]:
+    """'YYYY-MM-DD' → 該日的 **UTC 午夜**（本 repo 日期欄的寫入慣例）。
+
+    🔴 為什麼是 UTC 午夜而不是台北午夜：台北是 UTC+8，UTC 午夜換算台北仍是同一天，
+    所以 `_fmt_day`（轉台北取日期）與前端（取 ISO 字串前 10 碼）兩個讀取端會得到
+    同一個答案。寫成台北午夜的話存進去是前一天 16:00Z，前端就會少一天 —— 2026-08-19
+    匯 394 筆歷史發票時踩到（匯入腳本自己造 datetime，沒走這支）。
+
+    也吃**完整 ISO datetime**（例如 `_to_invoice_dict` 吐出來的
+    '2024-01-01T16:00:00+00:00'）：任何「GET 回來、改一個欄位、PUT 回去」的呼叫端
+    都會把這種字串送回來，原本只認純日期 → 直接回 None → 日期被清空。順帶把舊的
+    台北午夜資料在每次編輯時歸一到 UTC 午夜（aware 值先轉台北再取日期，同 _fmt_day）。
+    """
     if not date_str:
         return None
+    s = str(date_str).strip()
     try:
-        d = date.fromisoformat(date_str)
-        return datetime(d.year, d.month, d.day, tzinfo=timezone.utc)
+        return datetime(*date.fromisoformat(s).timetuple()[:3], tzinfo=timezone.utc)
+    except ValueError:
+        pass
+    try:
+        dt = datetime.fromisoformat(s.replace("Z", "+00:00"))
     except ValueError:
         return None
+    if dt.tzinfo is not None:
+        dt = dt.astimezone(_TW_TZ)
+    return datetime(dt.year, dt.month, dt.day, tzinfo=timezone.utc)
 
 
 def _to_dict(c) -> dict:
