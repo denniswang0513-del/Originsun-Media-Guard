@@ -1022,6 +1022,8 @@ async def _on_startup():
                         "ON bank_statement_lines(matched_entry_id) WHERE matched_entry_id IS NOT NULL",
                         # 已開立的電子發票檔（存磁碟絕對路徑；根目錄 settings.invoices_root）
                         "ALTER TABLE crm_invoices ADD COLUMN IF NOT EXISTS file_url VARCHAR(512)",
+                        # 客戶下載電子發票的分享連結 token
+                        "ALTER TABLE crm_invoices ADD COLUMN IF NOT EXISTS share_token VARCHAR(512)",
                         # ── 兩本帳（公司實體）：錢流 7 表加 entity 欄
                         # （parent=母公司（預設）/mine=我的帳，docs/LEDGER_ENTITY_PLAN.md §1.1）
                         "ALTER TABLE crm_invoices ADD COLUMN IF NOT EXISTS entity VARCHAR(16) NOT NULL DEFAULT 'parent'",

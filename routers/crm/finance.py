@@ -20,7 +20,8 @@ from core.finance_logic import month_of
 from core.ledger import require_entity
 from core.schemas import InvoicePayload, PaymentRequestPayload, CashEntryPayload
 
-from ._shared import (router, _check_auth, money_dep, _require_db, _get_factory, _fmt_day, _now,
+from ._shared import (router, token_router, _check_auth, money_dep, _require_db,
+                      _get_factory, _fmt_day, _now, _is_valid_scoped_token,
                       _parse_shoot_date, _assert_month_open, _assert_rows_open,
                       _locked_month_set, _raise_locked_batch)
 
@@ -100,6 +101,9 @@ def _to_invoice_dict(inv, project_name: str = "") -> dict:
         # 刪除端點動得了它。
         "file_url": getattr(inv, 'file_url', '') or "",
         "file_name": os.path.basename(getattr(inv, 'file_url', '') or ""),
+        # 只回「有沒有」，不回 token 本身 —— 列表是每個看得到帳務的人都拿得到的
+        # 回應，客戶下載連結沒有理由整批躺在那裡（要用時前端再打 /share 取）。
+        "has_share": bool(getattr(inv, 'share_token', None)),
         "notes": inv.notes or "",
         "created_at": inv.created_at.isoformat() if inv.created_at else None,
     }
@@ -444,6 +448,91 @@ async def serve_invoice_file(path: str = Query(""), request: Request = None):
         raise HTTPException(status_code=403, detail="無權存取此路徑")
     from starlette.responses import FileResponse
     return FileResponse(abs_path, filename=os.path.basename(abs_path))
+
+
+_INVOICE_SHARE_SCOPE = "invoice_file"
+
+
+@router.post("/invoices/{invoice_id}/share")
+async def create_invoice_share_link(invoice_id: str, request: Request):
+    """產生（或取回）給客戶下載這張電子發票的連結。
+
+    冪等：已經有一張有效的就原樣回傳 —— 同一張發票寄兩次信不該讓先寄出去的
+    連結失效。要作廢舊連結走 DELETE（重置語意）。
+
+    🔴 token 不驗簽章、靠逐字比對 DB（core.auth.new_share_token / decode_unverified
+    的既定設計）：jwt_secret 輪替時不會連坐殺掉已經寄給客戶的連結，而那些連結
+    本來就偽造不了（光有 secret 產不出對得上 DB 的字串）。
+    """
+    _check_auth(request)
+    _require_db()
+    from core.auth import new_share_token
+    from core.crm_logic import PERMANENT_TOKEN_EXPIRES_DAYS
+    factory = await _get_factory()
+    async with factory() as session:
+        inv = await session.get(CrmInvoice, invoice_id)
+        if not inv:
+            raise HTTPException(status_code=404, detail="找不到此發票")
+        require_entity(request, inv.entity or "parent", level="full")
+        if not inv.file_url:
+            raise HTTPException(status_code=422, detail="這張發票還沒有上傳電子發票檔")
+        if not _is_valid_scoped_token(inv.share_token, _INVOICE_SHARE_SCOPE):
+            inv.share_token = new_share_token(invoice_id, _INVOICE_SHARE_SCOPE,
+                                              PERMANENT_TOKEN_EXPIRES_DAYS)
+            inv.updated_at = _now()
+            await session.commit()
+        token = inv.share_token
+    return {"status": "ok", "token": token,
+            "path": f"/api/v1/crm/public/invoice-file/{token}"}
+
+
+@router.delete("/invoices/{invoice_id}/share")
+async def revoke_invoice_share_link(invoice_id: str, request: Request):
+    """作廢已發出的下載連結（寄錯人、客戶換窗口時用）。之後可再產一張新的。"""
+    _check_auth(request)
+    _require_db()
+    factory = await _get_factory()
+    async with factory() as session:
+        inv = await session.get(CrmInvoice, invoice_id)
+        if not inv:
+            raise HTTPException(status_code=404, detail="找不到此發票")
+        require_entity(request, inv.entity or "parent", level="full")
+        inv.share_token = None
+        inv.updated_at = _now()
+        await session.commit()
+    return {"status": "ok"}
+
+
+@token_router.get("/public/invoice-file/{token}")
+async def download_invoice_file_public(token: str):
+    """客戶憑連結下載電子發票 —— **免登入**，憑證就是網址裡那串 token。
+
+    掛 token_router 不掛 public_router：public_router 是 NAS 對外容器也會掛的那組
+    （master 關機仍要能用），電子發票下載沒有 24/7 的必要，曝露面不必為它變大。
+
+    只回檔案本身，不回發票的其他欄位 —— 客戶要的是那張憑證，順手多給金額/統編/
+    客戶名等於把不必要的東西一起寄出去。
+    """
+    _require_db()
+    from core.auth import decode_unverified, stored_token_matches
+    payload = decode_unverified(token)
+    if not payload or payload.get("scope") != _INVOICE_SHARE_SCOPE:
+        raise HTTPException(status_code=401, detail="無效的連結")
+    factory = await _get_factory()
+    async with factory() as session:
+        inv = await session.get(CrmInvoice, payload.get("sub", ""))
+        # 逐字比對：token 撤銷（share_token=None）或重新產生後，舊連結立刻失效
+        if not inv or not stored_token_matches(inv.share_token or "", token):
+            raise HTTPException(status_code=401, detail="連結已失效")
+        path = inv.file_url or ""
+    if not path or not os.path.isfile(path):
+        raise HTTPException(status_code=404, detail="檔案不存在")
+    # 同 serve_invoice_file 的路徑白名單 —— 免登入端點更不能讓 DB 裡一個被改壞的
+    # 路徑變成任意檔案讀取
+    if not os.path.abspath(path).startswith(os.path.abspath(_invoices_root())):
+        raise HTTPException(status_code=403, detail="無權存取此路徑")
+    from starlette.responses import FileResponse
+    return FileResponse(os.path.abspath(path), filename=os.path.basename(path))
 
 
 @router.get("/invoices-root")
