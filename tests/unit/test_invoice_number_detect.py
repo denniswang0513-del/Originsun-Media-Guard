@@ -109,6 +109,30 @@ def _finance_src():
         encoding="utf-8").read()
 
 
+def _func_body(src, header):
+    """從 `def xxx(` 取到下一個頂層 def/裝飾器之前。
+
+    切固定字數（src[i:i+1400]）會隨著註解變長而切斷 —— 補了幾行說明就讓測試
+    莫名其妙變紅，而那不是實作有問題。
+    """
+    i = src.index(header)
+    rest = src[i + len(header):]
+    ends = [rest.find(m) for m in ("\n@router", "\n@token_router", "\ndef ", "\nasync def ")]
+    ends = [e for e in ends if e != -1]
+    return src[i:i + len(header) + (min(ends) if ends else len(rest))]
+
+
+def _code_only(body):
+    """剝掉 docstring 與 # 註解，只留程式碼。
+
+    🔴 掃描式測試一定要先剝註解再比對：`assert "os.replace" not in body` 會被
+    「本函式的註解正好在說明不可以用 os.replace」打敗（這條測試第一版就是這樣紅的）。
+    """
+    import re as _re
+    body = _re.sub(r'"""[\s\S]*?"""', "", body)
+    return "\n".join(ln.split("#")[0] for ln in body.splitlines())
+
+
 def test_upload_marks_issued_but_not_voided():
     """上傳電子發票證明聯＝這張已經開出去了 → issue_status 轉『已開立』。
     但作廢的不動：作廢也會留存證明聯，那不是『開立中』。"""
@@ -143,11 +167,10 @@ def test_file_name_resyncs_on_update():
     assert "def _resync_invoice_file(" in src
     i = src.index("async def update_invoice(")
     assert "_resync_invoice_file" in src[i:i + 2500], "update_invoice 沒有重新對齊檔名"
-    j = src.index("def _resync_invoice_file(")
-    helper = src[j:j + 1400]
+    helper = _func_body(src, "def _resync_invoice_file(")
     assert "os.path.exists(target)" in helper, \
         "目標同名檔已存在時不可覆蓋 —— 那是別人的稅務憑證"
-    assert "except OSError" in helper, \
+    assert "except (OSError" in helper or "except OSError" in helper, \
         "搬移失敗只能維持原狀，不能讓『改個發票號碼』整個失敗"
 
 
@@ -209,9 +232,7 @@ def test_resync_uses_shutil_move_not_os_replace():
     NAS 時整批失敗（幸好設計是「搬不動就維持原狀」，檔案沒丟）。
     shutil.move 在跨裝置時會退成「複製再刪來源」。
     """
-    src = _finance_src()
-    i = src.index("def _resync_invoice_file(")
-    body = src[i:i + 1600]
-    assert "shutil.move" in body, "沒有用 shutil.move —— 跨磁碟區會失敗"
-    assert "os.replace" not in body and "os.rename" not in body, \
+    code = _code_only(_func_body(_finance_src(), "def _resync_invoice_file("))
+    assert "shutil.move(" in code, "沒有用 shutil.move —— 跨磁碟區會失敗"
+    assert "os.replace(" not in code and "os.rename(" not in code, \
         "os.replace/os.rename 不能跨磁碟區，不可用於搬到 NAS"
