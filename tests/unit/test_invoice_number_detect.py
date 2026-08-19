@@ -199,3 +199,19 @@ def test_invoice_root_validation_uses_splitdrive_not_isabs():
     body = src[i:i + 2500]
     assert "ntpath.splitdrive" in body, "沒有用 splitdrive 判斷磁碟機"
     assert 'startswith("' + BS * 4 + '")' in body or "startswith('" + BS * 4 + "')" in body,         "沒有判斷 UNC 的兩個反斜線"
+
+
+def test_resync_uses_shutil_move_not_os_replace():
+    """🔴 搬檔一定要 shutil.move。
+
+    os.replace / os.rename **不能跨磁碟區** —— 本機 C:\ → NAS
+    \\192.168.1.132\... 會直接丟 WinError 17。2026-08-19 把三個電子發票搬上
+    NAS 時整批失敗（幸好設計是「搬不動就維持原狀」，檔案沒丟）。
+    shutil.move 在跨裝置時會退成「複製再刪來源」。
+    """
+    src = _finance_src()
+    i = src.index("def _resync_invoice_file(")
+    body = src[i:i + 1600]
+    assert "shutil.move" in body, "沒有用 shutil.move —— 跨磁碟區會失敗"
+    assert "os.replace" not in body and "os.rename" not in body, \
+        "os.replace/os.rename 不能跨磁碟區，不可用於搬到 NAS"

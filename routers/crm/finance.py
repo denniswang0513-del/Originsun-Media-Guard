@@ -11,6 +11,7 @@ import io
 import ntpath
 import os
 import re
+import shutil
 import uuid
 from datetime import datetime, timezone
 
@@ -442,9 +443,13 @@ def _resync_invoice_file(inv) -> str:
         return old
     try:
         os.makedirs(base, exist_ok=True)
-        os.replace(old, target)
+        # 🔴 一定要 shutil.move 不能用 os.replace/os.rename：那兩支**不能跨磁碟區**，
+        # 本機 C:\ → NAS \\192.168.1.132\... 會直接丟 WinError 17（2026-08-19 把
+        # 三個電子發票搬上 NAS 時實際踩到；幸好失敗時是維持原狀而不是弄丟檔）。
+        # shutil.move 在跨裝置時會退成「複製再刪來源」。
+        shutil.move(old, target)
         return target
-    except OSError:
+    except (OSError, shutil.Error):
         return old
 
 
