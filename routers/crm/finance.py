@@ -136,7 +136,11 @@ async def list_invoices(
             select(CrmInvoice, CrmProject.name.label("pn"))
             .outerjoin(CrmProject, CrmProject.id == CrmInvoice.project_id)
             .where(CrmInvoice.entity == ent)
-            .order_by(CrmInvoice.invoice_date.desc())
+            # 🔴 日期後面一定要有 tiebreaker：一天開 5-10 張發票很常見，只用
+            # invoice_date 排序時，任一列被 UPDATE 後 Postgres 回傳的相對順序就可能改變
+            # —— 畫面上是「改了一筆，同日期的列整組跳動」（2026-08-19 實測：連點三次
+            # 種類切換鈕，每次點到的是不同筆）。
+            .order_by(CrmInvoice.invoice_date.desc(), CrmInvoice.created_at.desc(), CrmInvoice.id)
         )
         if payment_type:
             query = query.where(CrmInvoice.payment_type == payment_type)
@@ -1205,7 +1209,11 @@ async def receivables_summary(request: Request, status: str = Query(""),
             .outerjoin(Client, Client.short_name == CrmInvoice.company_name)
             .where(CrmInvoice.issue_status == "已開立")
             .where(CrmInvoice.entity == ent)
-            .order_by(CrmInvoice.invoice_date.desc())
+            # 🔴 日期後面一定要有 tiebreaker：一天開 5-10 張發票很常見，只用
+            # invoice_date 排序時，任一列被 UPDATE 後 Postgres 回傳的相對順序就可能改變
+            # —— 畫面上是「改了一筆，同日期的列整組跳動」（2026-08-19 實測：連點三次
+            # 種類切換鈕，每次點到的是不同筆）。
+            .order_by(CrmInvoice.invoice_date.desc(), CrmInvoice.created_at.desc(), CrmInvoice.id)
         )
         if status:
             query = query.where(CrmInvoice.payment_status == status)
