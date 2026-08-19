@@ -2,6 +2,12 @@
  * crm-invoices.js — 帳務管理 Tab
  */
 import { crmFetch as _fetch, crmCacheFetch, esc as _esc, fmtNum as _fmtNum, setupResizeHandle, enableInlineEdit, addEditButton, kebabMenuHtml, createSortable, enumIndex } from './crm-utils.js';
+// 兩本帳（公司實體）— docs/LEDGER_ENTITY_PLAN.md §5。帳本由頁面隱形 pin：
+// 財務 tab＝'parent'（預設）、/my-ledger.html＝'mine'（該頁在載入財務模組前設
+// window._finEntity）。無使用者可見的帳本選單（單一 tab 單一帳本）。query 一律帶
+// pin 值；payload 只在 'mine' 才帶 entity:'mine'（後端 None 語意：建立落 parent、
+// 更新維持既有值 —— 不洗欄位）。pin 用財務模組那份，不在這裡複寫。
+import { finEntity as _pinEntity } from '../finance/fin-utils.js';
 
 let _invoices = [];
 let _projects = [];
@@ -63,6 +69,7 @@ async function loadInvoices() {
     if (_filters.q)            params.set('q', _filters.q);
     if (_filters.issue_status) params.set('issue_status', _filters.issue_status);
     if (_filters.category)     params.set('category', _filters.category);
+    params.set('entity', _pinEntity());
     try {
         const data = await _fetch(`/invoices?${params}`);
         _invoices = data.invoices || [];
@@ -488,6 +495,8 @@ async function saveInvoice() {
     if (payload.issue_status === '作廢') payload.payment_status = '作廢';
     else if (_editingId && _editingPaymentStatus) payload.payment_status = _editingPaymentStatus;
     else payload.payment_status = '未收款';
+    // 帳本（兩本帳）— pin 是 'mine' 才帶；parent 不送（後端 None→parent，PUT 不洗欄位）
+    if (_pinEntity() === 'mine') payload.entity = 'mine';
 
     const btn = document.getElementById('inv-btn-save');
     btn.disabled = true; btn.textContent = '儲存中...';

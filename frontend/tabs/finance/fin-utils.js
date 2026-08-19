@@ -8,11 +8,35 @@
 
 const API = '/api/v1/finance';
 
+// ── 兩本帳（公司實體）—— docs/LEDGER_ENTITY_PLAN.md §5 ─────────
+// 'parent' = 母公司（預設；財務 tab 固定這本）/ 'mine' = 我的帳（owner 私帳，
+// 只在獨立頁 /my-ledger.html 出現 —— 該頁在載入財務模組前把 window._finEntity
+// 釘成 'mine'）。無使用者可見的帳本切換器（v2 已移除 v1 的切換 pill），所以
+// 前端不需要 entity → 顯示名稱的對照表（要顯示的那一處直接寫死）。
+
+// scope 判定（crm-utils.js hasModule 的同義複寫 —— 本檔刻意零 import，見檔頭）：
+// Lv3 admin 的 modules 經 _enrich_user 已含全 key，Lv3 那半是安全冗餘。
+function _hasMod(key) {
+    return (window._accessLevel || 0) >= 3 || (window._modules || []).includes(key);
+}
+/** 母公司 full scope ⟺ crm_invoices AND money_view
+ *（鏡射 core/ledger.py allowed_entities level="full"）。
+ * 前端只需要這一條：view scope 多出來的 finance_partner 那半是「報表唯讀」，
+ * 對 nav 而言＝沒有 full 的一切，((A&&M)||P) && !(P && !(A&&M)) 恆等於 A&&M。 */
+export function finHasFullParentScope() {
+    return _hasMod('crm_invoices') && _hasMod('money_view');
+}
+
+/** 目前帳本 — 頁面 pin（/my-ledger.html 設 window._finEntity='mine'），預設母公司 */
+export function finEntity() { return window._finEntity || 'parent'; }
+
 export async function finFetch(path, opts = {}) {
     const token = localStorage.getItem('auth_token');
     const headers = { 'Content-Type': 'application/json', ...(opts.headers || {}) };
     if (token) headers['Authorization'] = `Bearer ${token}`;
-    const res = await fetch(API + path, { ...opts, headers });
+    // 一律帶 entity（既有呼叫端有的 path 已帶 '?'，判斷後拼接）
+    const sep = path.includes('?') ? '&' : '?';
+    const res = await fetch(API + path + sep + 'entity=' + finEntity(), { ...opts, headers });
     if (!res.ok) {
         const err = await res.json().catch(() => ({ detail: res.statusText }));
         const detail = Array.isArray(err.detail)

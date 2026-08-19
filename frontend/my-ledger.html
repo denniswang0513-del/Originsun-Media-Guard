@@ -1,0 +1,166 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex,nofollow">
+<title>我的帳｜ORIGINSUN</title>
+<!-- 我的帳（兩本帳 entity='mine'）獨立頁 — docs/LEDGER_ENTITY_PLAN.md §5。
+     owner 2026-08-19 拍板：不做 SPA tab，改「外部連結＋每次重新登入」——
+     側欄零入口（旁人不知道這頁存在），知道網址也要打帳密才進得來。
+     比照 website-admin.html 的獨立登入頁模式，但兩點刻意不同：
+     🔴 1) 永遠先出登入表單，不吃 localStorage 既有登入態（重新驗證是本頁的
+        存在理由）；登入成功才把新 token 寫回 auth_token（同帳號換新 token，
+        主系統分頁不受影響；財務模組的 finFetch/authFetch 都讀這把，零改動）。
+     🔴 2) 不放 Google 一鍵登入 —— Google session 活著時一鍵就過，重新驗證
+        形同虛設。要打密碼。
+     「登出」只是回到登入表單（reload），不清 auth_token —— 清了會殺掉同瀏覽器
+     主系統的登入態；本頁的門檻是表單本身，不是 token 的有無。
+     權限閘門（伺服器端才是真防線）：Lv3 或 finance_mine 模組；API 層 mine 帳本
+     由 core/ledger.require_entity 守住，別人拿自己的帳號打 API 也進不來。
+     🔴 掛載順序不可換：window._accessLevel/_modules/_finEntity='mine' 必須在
+     import finance.js 前設好 —— 財務模組與內嵌的 crm-invoices/crm-cashbook
+     都以這個 pin 決定 entity。本頁在前端根層，子資源一律絕對路徑。 -->
+<style>
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; background: #1a1a1a; color: #e5e5e5;
+    font-family: "Noto Sans TC", "Microsoft JhengHei", "Segoe UI", sans-serif; }
+  #ml-header {
+    display: flex; align-items: center; justify-content: space-between;
+    height: 40px; padding: 0 16px; background: #202020; border-bottom: 1px solid #2a2a2a;
+  }
+  #ml-header .ml-title { font-size: 13px; font-weight: 600; letter-spacing: 0.08em; color: #ddd; }
+  #ml-header .ml-sub { font-size: 11px; color: #666; margin-left: 10px; }
+  #ml-header .hdr-right { display: flex; align-items: center; gap: 12px; }
+  #ml-header #ml-user { font-size: 12px; color: #888; }
+  #ml-lock {
+    background: none; border: 1px solid #3a3a3a; border-radius: 3px; display: none;
+    padding: 4px 12px; font-size: 12px; color: #999; cursor: pointer;
+  }
+  #ml-lock:hover { color: #ddd; border-color: #555; }
+
+  #login-view { max-width: 360px; margin: 14vh auto 0; padding: 0 20px; }
+  .login-card { border: 1px solid #2e2e2e; background: #202020; border-radius: 6px; padding: 36px 32px; }
+  .login-card h1 { font-size: 20px; font-weight: 400; letter-spacing: 0.08em; margin: 0 0 6px; color: #eee; }
+  .login-card .sub { font-size: 12px; color: #888; margin-bottom: 26px; line-height: 1.8; }
+  .field { margin-bottom: 14px; }
+  .field label { display: block; font-size: 11px; letter-spacing: 0.12em; color: #888; margin-bottom: 6px; }
+  .field input { width: 100%; background: #1a1a1a; border: 1px solid #3a3a3a; border-radius: 3px;
+    padding: 10px 12px; font-size: 14px; color: #e5e5e5; outline: none; }
+  .field input:focus { border-color: #3b82f6; }
+  .btn-primary { display: block; width: 100%; text-align: center; background: #3b82f6; color: #fff;
+    border: 0; border-radius: 3px; padding: 11px; font-size: 13px; letter-spacing: 0.2em;
+    cursor: pointer; margin-top: 20px; }
+  .btn-primary:hover { background: #2f6fd6; }
+  .err { color: #ef4444; font-size: 12px; margin-top: 12px; display: none; }
+
+  .state-msg { display: none; align-items: center; justify-content: center;
+    height: calc(100vh - 40px); color: #999; font-size: 14px; line-height: 1.9;
+    text-align: center; padding: 0 20px; }
+  #app-view { display: none; height: calc(100vh - 40px); overflow: hidden; }
+  #app-view #finance-root { height: 100%; }
+</style>
+</head>
+<body>
+<div id="ml-header">
+  <div style="display:flex;align-items:baseline;">
+    <span class="ml-title">我的帳</span>
+    <span class="ml-sub">獨立帳本（與母公司帳分開）</span>
+  </div>
+  <div class="hdr-right">
+    <span id="ml-user"></span>
+    <button id="ml-lock" onclick="location.reload()">鎖定</button>
+  </div>
+</div>
+
+<div id="login-view">
+  <div class="login-card">
+    <h1>我的帳</h1>
+    <div class="sub">私人帳本，每次進入都需要重新驗證身分。</div>
+    <form id="login-form">
+      <div class="field"><label>帳號</label><input id="in-user" autocomplete="username"></div>
+      <div class="field"><label>密碼</label><input id="in-pwd" type="password" autocomplete="current-password"></div>
+      <button class="btn-primary" type="submit">登入</button>
+    </form>
+    <div id="login-err" class="err"></div>
+  </div>
+</div>
+
+<div id="noperm-view" class="state-msg"></div>
+<div id="app-view"><div style="color:#888;padding:40px;text-align:center;">載入中…</div></div>
+
+<script type="module">
+const $ = (id) => document.getElementById(id);
+
+function showErr(text) {
+    const e = $('login-err');
+    e.textContent = text;
+    e.style.display = 'block';
+}
+
+function showNoperm(text) {
+    $('login-view').style.display = 'none';
+    $('noperm-view').textContent = text;
+    $('noperm-view').style.display = 'flex';
+}
+
+async function mountLedger(me) {
+    $('login-view').style.display = 'none';
+    $('ml-user').textContent = me.username || '';
+    $('ml-lock').style.display = '';
+    $('app-view').style.display = 'block';
+
+    // 🔴 順序不可換：scope 全域 + entity pin 都要在 import finance.js 之前。
+    window._accessLevel = me.access_level || 0;
+    window._modules = me.modules || [];
+    window._finEntity = 'mine';
+
+    try {
+        // 財務模組依賴的全域樣式表登入通過後才注入（登入卡自帶樣式、保持乾淨）。
+        for (const href of ['/style.css', '/tabs/crm/crm.css']) {
+            const l = document.createElement('link');
+            l.rel = 'stylesheet'; l.href = href;
+            document.head.appendChild(l);
+        }
+        // 殼 HTML 與模組互不依賴（只有 initFinanceTab 需要 DOM）→ 並行取，省一趟 RTT
+        const [html, mod] = await Promise.all([
+            fetch('/tabs/finance/finance.html').then((r) => {
+                if (!r.ok) throw new Error('HTTP ' + r.status);
+                return r.text();
+            }),
+            import('/tabs/finance/finance.js'),
+        ]);
+        $('app-view').innerHTML = html;
+        await mod.initFinanceTab();
+    } catch (e) {
+        showNoperm('我的帳載入失敗：' + ((e && e.message) || e));
+    }
+}
+
+$('login-form').addEventListener('submit', async (ev) => {
+    ev.preventDefault();
+    let d;
+    try {
+        const r = await fetch('/api/v1/auth/login', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ username: $('in-user').value.trim(), password: $('in-pwd').value }),
+        });
+        d = await r.json();
+        if (!r.ok) { showErr(d.detail || '登入失敗'); return; }
+    } catch (_) { showErr('連線失敗，請稍後再試'); return; }
+
+    localStorage.setItem('auth_token', d.token);
+    // 閘門直接讀登入回應（username/access_level/modules 都在裡面 —— 本頁刻意
+    // 只有「每次重新登入」這一條路，沒有 token 續用的開機路徑，所以不需要再打
+    // /auth/me 換同一份資料。比照 website-admin.html 的新登入分支）。
+    if ((d.access_level || 0) < 3 && !(d.modules || []).includes('finance_mine')) {
+        showNoperm('此帳號沒有『我的帳』權限。');
+        return;
+    }
+    mountLedger(d);
+});
+
+$('in-user').focus();
+</script>
+</body>
+</html>

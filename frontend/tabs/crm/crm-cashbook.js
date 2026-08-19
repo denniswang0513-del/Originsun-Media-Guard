@@ -2,6 +2,13 @@
  * crm-cashbook.js — 收支明細子視圖
  */
 import { crmFetch as _fetch, esc as _esc, fmtNum as _fmtNum, setupResizeHandle, enableInlineEdit, addEditButton, kebabMenuHtml, createSortable } from './crm-utils.js';
+// 兩本帳（公司實體）— docs/LEDGER_ENTITY_PLAN.md §5。帳本由頁面隱形 pin：
+// 財務 tab＝'parent'（預設）、/my-ledger.html＝'mine'（該頁在載入財務模組前設
+// window._finEntity）。無使用者可見的帳本選單（單一 tab 單一帳本）。query 一律帶
+// pin 值；payload 只在 'mine' 才帶 entity:'mine'（後端 None 語意：建立落 parent、
+// 更新維持既有值 —— 不洗欄位）。pin 與 /api/v1/finance 的 fetch 都用財務模組那份，
+// 不在這裡複寫（finFetch 會自己附 entity）。
+import { finEntity as _pinEntity, finFetch as _finFetch } from '../finance/fin-utils.js';
 
 let _entries = [];
 let _invoiceList = [];
@@ -28,13 +35,15 @@ async function loadEntries() {
     if (_filters.q)        params.set('q', _filters.q);
     if (_filters.category) params.set('category', _filters.category);
     if (_filters.item)     params.set('item', _filters.item);
+    params.set('entity', _pinEntity());
     try { _entries = (await _fetch('/cash-entries?' + params)).entries || []; }
     catch (_) { _entries = []; }
     renderList();
 }
 
 async function _loadInvoiceList() {
-    try { _invoiceList = (await _fetch('/invoices')).invoices || []; } catch(_) { _invoiceList = []; }
+    // 發票是帶 entity 的表 — 關聯選單只列同一本帳的發票
+    try { _invoiceList = (await _fetch('/invoices?entity=' + _pinEntity())).invoices || []; } catch(_) { _invoiceList = []; }
 }
 
 async function _loadProjectList() {
@@ -48,13 +57,9 @@ async function _loadClientList() {
 async function _loadBankAccounts() {
     // 財務模組帳戶清單（prefix /api/v1/finance，非 crm）— 失敗優雅降級：隱藏帳戶欄、不擋原功能
     // with_balances=0：這裡只要 id/name/is_default/active，跳過後端餘額聚合
+    // 帳戶屬於哪家公司（兩本帳）：finFetch 自動附頁面 pin 的 entity，選單只列該帳本的帳戶
     try {
-        const token = localStorage.getItem('auth_token');
-        const res = await fetch('/api/v1/finance/bank-accounts?with_balances=0', {
-            headers: token ? { 'Authorization': 'Bearer ' + token } : {},
-        });
-        if (!res.ok) throw new Error('HTTP ' + res.status);
-        _bankAccounts = (await res.json()).items || [];
+        _bankAccounts = (await _finFetch('/bank-accounts?with_balances=0')).items || [];
     } catch (_) { _bankAccounts = null; }
 }
 
@@ -359,6 +364,8 @@ async function saveEntry() {
         const bel = document.getElementById('cash-f-bank_account_id');
         if (bel) payload.bank_account_id = bel.value;
     }
+    // 帳本（兩本帳）— pin 是 'mine' 才帶；parent 不送（後端 None→parent，PUT 不洗欄位）
+    if (_pinEntity() === 'mine') payload.entity = 'mine';
     _cleanPayload(payload);
     // 專案雜支 + 預支關聯 → 自動帶入預支款的專案
     if (payload.advance_payment_id && !payload.project_id) {

@@ -13,7 +13,7 @@
  *   行為等價優先）；除非帳務視圖天然重寫，不做真子視圖化拆殼。
  */
 
-import { esc } from './fin-utils.js';
+import { esc, finEntity, finHasFullParentScope } from './fin-utils.js';
 import { createSubviewLoader } from '../../js/shared/subview-loader.js';
 
 let _inited = false;
@@ -25,23 +25,39 @@ export async function initFinanceTab() {
     if (_inited) return;   // app.js loadTabs 只呼叫一次；防禦性去重
     _inited = true;
 
-    const wrap = document.getElementById('finance-invoices-wrap');
-    try {
-        // 1. 載入既有帳務殼（含發票視圖 + 其餘五視圖的內部 lazy-load 容器）
-        const resp = await fetch('./tabs/crm/crm-invoices.html');
-        if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
-        wrap.innerHTML = await resp.text();
+    // ── 兩本帳 nav 三模式（LEDGER_ENTITY_PLAN §5）──
+    // full-parent（記帳者/owner）＝全功能；mine（只在 /my-ledger.html 發生，該頁
+    // 在 import 本模組前把 window._finEntity 釘成 'mine'）＝隱藏母公司 CRM 域
+    // （.fin-nav-full：請款/應付/應收/零用金/現金流預測）；合夥人（finance_partner
+    // 唯讀）＝只留 儀表板 + 財務三表，不載帳務殼（其 CRM 讀取端點對合夥人本來
+    // 就 403，載了只會畫一排空殼）。
+    const mineMode = finEntity() === 'mine';
+    const fullParent = finHasFullParentScope();
+    const loadShell = mineMode || fullParent;
+    const hideNav = (sel) => document.querySelectorAll('#finance-nav ' + sel)
+        .forEach((el) => { el.style.display = 'none'; });
+    if (mineMode || !fullParent) hideNav('.fin-nav-full');
+    if (!mineMode && !fullParent) hideNav('.fin-nav-mine-ok');
 
-        // 2. 啟動既有帳務邏輯（六視圖切換/CSV 匯入/月結卡全部沿用）
-        const mod = await import('../crm/crm-invoices.js');
-        await mod.initCrmInvoicesTab();
-    } catch (e) {
-        wrap.innerHTML = `<div style="color:#f87171;padding:40px;text-align:center;">
-            帳務載入失敗：${esc(e.message)}
-            <button class="crm-btn crm-btn-secondary crm-btn-sm" style="margin-left:8px;"
-                    onclick="location.reload()">重新整理頁面</button></div>`;
-        _inited = false;
-        return;
+    const wrap = document.getElementById('finance-invoices-wrap');
+    if (loadShell) {
+        try {
+            // 1. 載入既有帳務殼（含發票視圖 + 其餘五視圖的內部 lazy-load 容器）
+            const resp = await fetch('./tabs/crm/crm-invoices.html');
+            if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+            wrap.innerHTML = await resp.text();
+
+            // 2. 啟動既有帳務邏輯（六視圖切換/CSV 匯入/月結卡全部沿用）
+            const mod = await import('../crm/crm-invoices.js');
+            await mod.initCrmInvoicesTab();
+        } catch (e) {
+            wrap.innerHTML = `<div style="color:#f87171;padding:40px;text-align:center;">
+                帳務載入失敗：${esc(e.message)}
+                <button class="crm-btn crm-btn-secondary crm-btn-sm" style="margin-left:8px;"
+                        onclick="location.reload()">重新整理頁面</button></div>`;
+            _inited = false;
+            return;
+        }
     }
 
     _bindSideNav();
