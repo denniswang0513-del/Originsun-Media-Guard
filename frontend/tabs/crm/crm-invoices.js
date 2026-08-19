@@ -8,6 +8,9 @@ import { crmFetch as _fetch, crmCacheFetch, esc as _esc, fmtNum as _fmtNum, setu
 // pin 值；payload 只在 'mine' 才帶 entity:'mine'（後端 None 語意：建立落 parent、
 // 更新維持既有值 —— 不洗欄位）。pin 用財務模組那份，不在這裡複寫。
 import { finEntity as _pinEntity } from '../finance/fin-utils.js';
+// 🔴 複製一律走 shared 那份：同事多半從 http://192.168.1.x 連進來（非安全內容），
+// navigator.clipboard 根本不存在 —— 那支有 textarea+execCommand 的 fallback。
+import { copyText } from '../../js/shared/utils.js';
 
 let _invoices = [];
 let _projects = [];
@@ -448,6 +451,14 @@ function _renderFilePane(inv) {
             <button class="crm-btn crm-btn-secondary crm-btn-sm" onclick="window._invFileClear()">解除關聯</button>
           </div>
         </div>
+        <div class="inv-file-share">
+          <button class="crm-btn crm-btn-primary crm-btn-sm" onclick="window._invShareLink(this)">
+            ${inv.has_share ? '複製客戶下載連結' : '產生客戶下載連結'}</button>
+          ${inv.has_share ? `<button class="crm-btn crm-btn-secondary crm-btn-sm"
+                onclick="window._invShareRevoke()">停用連結</button>` : ''}
+        </div>
+        <div class="inv-file-note">下載連結<b>免登入</b>，拿到網址的人就能下載這張發票 ——
+          寄錯人時按「停用連結」，舊網址立刻失效（之後可再產一張新的）。</div>
         <div class="inv-file-note">「解除關聯」只是把這筆的連結拿掉，<b>不會刪磁碟上的檔</b>
           —— 稅務憑證誤刪救不回來。</div>
       ` : `
@@ -508,6 +519,35 @@ window._invFileUpload = async function (file) {
     } finally { _fileBusy = false; }
 };
 
+/** 產生（或取回）客戶下載連結並複製到剪貼簿。
+ *  後端是冪等的：已經有一張有效的就原樣回傳 —— 同一張發票寄兩次信，先寄出去的
+ *  那個連結不該失效。 */
+window._invShareLink = async function (btn) {
+    if (!_selectedId) return;
+    try {
+        const d = await _fetch(`/invoices/${_selectedId}/share`, { method: 'POST' });
+        // 後端只回 path：網址要用「使用者現在是從哪個網域進來的」組（內網 IP、
+        // localhost、還是 cloudflared 的對外網域），寫死任何一個都會寄出打不開的連結。
+        await copyText(location.origin + d.path, btn);
+        await loadInvoices();
+        // 等 copyText 的「已複製」回饋（1.5s）走完再重畫這一區，否則按鈕會在
+        // 使用者看到回饋之前就被換掉，變成「按了好像沒反應」。
+        setTimeout(async () => {
+            if (!_selectedId) return;
+            try { _renderFilePane(await _fetch('/invoices/' + _selectedId)); } catch (_) { /* 已切走 */ }
+        }, 1700);
+    } catch (e) { alert('產生連結失敗：' + e.message); }
+};
+
+window._invShareRevoke = async function () {
+    if (!_selectedId || !confirm('停用這張發票的下載連結？已寄出去的網址會立刻失效。')) return;
+    try {
+        await _fetch(`/invoices/${_selectedId}/share`, { method: 'DELETE' });
+        await loadInvoices();
+        renderDetail(await _fetch('/invoices/' + _selectedId));
+    } catch (e) { alert('停用失敗：' + e.message); }
+};
+
 window._invFileClear = async function () {
     if (!_selectedId || !confirm('解除這張發票與檔案的關聯？（磁碟上的檔不會被刪除）')) return;
     try {
@@ -561,9 +601,19 @@ async function _initInvoicesRootCard() {
 
 function renderDetail(inv) {
     document.getElementById('inv-detail-title').textContent = inv.title;
-    const prop = (label, value) => {
+    // 每列右側一顆低調的「複製」—— 開發票的同事要把抬頭/統編/品項/金額逐項貼到
+    // 開立系統，逐欄反白很容易多帶到空白或漏字。平常淡到幾乎看不見，滑到該列才浮出。
+    // 空值不給按鈕（沒東西可複製）。金額類複製**純數字**：貼進開立系統時
+    // 「$12,600」的錢字號與逗號多半要再手動清掉。
+    const prop = (label, value, copyValue = null) => {
         const empty = !value;
-        return `<div class="crm-detail-prop"><div class="crm-prop-label">${label}</div><div class="crm-prop-value${empty ? ' empty' : ''}">${empty ? '空' : _esc(String(value))}</div></div>`;
+        const raw = copyValue != null ? String(copyValue) : String(value ?? '');
+        const btn = empty ? '' :
+            `<button type="button" class="crm-prop-copy" data-copy="${_esc(raw)}"
+                     title="複製${_esc(label)}">複製</button>`;
+        return `<div class="crm-detail-prop"><div class="crm-prop-label">${label}</div>` +
+            `<div class="crm-prop-value${empty ? ' empty' : ''}">${empty ? '空' : _esc(String(value))}</div>` +
+            `${btn}</div>`;
     };
     const section = (title, extra = '') => `<div class="crm-detail-section">${title}${extra ? '<span style="margin-left:auto;">' + extra + '</span>' : ''}</div>`;
     const commLabel = inv.category === '外部代開' ? '代開應匯' : inv.category === '內部代開' ? '代開匯款' : '';
@@ -575,9 +625,9 @@ function renderDetail(inv) {
     html += section('開立資訊', _payBadge(inv.payment_status));
     html += prop('發票編號', inv.invoice_number);
     html += prop('開立狀態', inv.issue_status);
-    html += prop('未稅價', inv.amount_ex_tax ? '$' + _fmtNum(inv.amount_ex_tax) : '');
-    html += prop('含稅價', inv.amount_total ? '$' + _fmtNum(inv.amount_total) : '');
-    html += prop('稅額', inv.tax_amount ? '$' + _fmtNum(inv.tax_amount) : '');
+    html += prop('未稅價', inv.amount_ex_tax ? '$' + _fmtNum(inv.amount_ex_tax) : '', inv.amount_ex_tax);
+    html += prop('含稅價', inv.amount_total ? '$' + _fmtNum(inv.amount_total) : '', inv.amount_total);
+    html += prop('稅額', inv.tax_amount ? '$' + _fmtNum(inv.tax_amount) : '', inv.tax_amount);
     html += prop('抬頭', inv.company_name);
     html += prop('統編', inv.tax_id);
     html += prop('品項', inv.item_type);
@@ -592,10 +642,19 @@ function renderDetail(inv) {
     html += prop('申請人', inv.applicant);
     html += prop('發票類別', inv.category);
     if (inv.category === '專案') html += prop('關聯專案', inv.project_name);
-    if (commLabel) html += prop(commLabel, inv.commission ? '$' + _fmtNum(inv.commission) : '');
+    if (commLabel) html += prop(commLabel, inv.commission ? '$' + _fmtNum(inv.commission) : '', inv.commission);
     html += prop('備註', inv.notes);
 
-    document.getElementById('inv-detail-content').innerHTML = html;
+    const content = document.getElementById('inv-detail-content');
+    content.innerHTML = html;
+    // 委派：renderDetail 每次重建 innerHTML，逐顆綁 listener 會隨著重建流失
+    if (!content.dataset.copyWired) {
+        content.dataset.copyWired = '1';
+        content.addEventListener('click', (e) => {
+            const btn = e.target.closest('.crm-prop-copy');
+            if (btn) copyText(btn.dataset.copy || '', btn);
+        });
+    }
     _renderFilePane(inv);
 
     const actions = document.getElementById('inv-bar-actions');

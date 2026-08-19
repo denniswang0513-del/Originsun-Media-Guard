@@ -665,6 +665,19 @@
 #inv-list-body .crm-row.inv-qa .ss-input { width: 100%; font-size: 11px; padding: 2px 4px; text-align: center; }
 #inv-list-body .crm-row.inv-qa .ss-panel { z-index: 300; text-align: left; }
 
+/* ── 詳情列的「複製」（低調：平常近乎隱形，滑到該列才浮出）── */
+.crm-detail-prop { position: relative; }
+.crm-prop-copy {
+  flex: 0 0 auto; margin-left: auto; align-self: center;
+  background: none; border: 1px solid transparent; border-radius: 3px;
+  color: #4b5563; font-size: 10px; padding: 1px 6px; cursor: pointer;
+  opacity: 0; transition: opacity .12s, color .12s, border-color .12s;
+}
+.crm-detail-prop:hover .crm-prop-copy { opacity: 1; }
+.crm-prop-copy:hover { color: #93c5fd; border-color: #3b82f6; }
+/* 鍵盤 focus 也要看得見 —— 純靠 hover 的話 tab 過去是一顆隱形按鈕 */
+.crm-prop-copy:focus-visible { opacity: 1; color: #93c5fd; border-color: #3b82f6; outline: none; }
+
 /* ── 發票列表欄寬 ──────────────────────────────────────────
    表頭 / 就地新增列 / 資料列三者共用同一組 nth-child 規則 —— 改一處三邊一起動，
    不會有「表頭挪了資料列沒挪」的漂移。
@@ -773,6 +786,7 @@
   font-size: 11px; color: #e0e0e0; word-break: break-all; line-height: 1.5; margin-bottom: 8px;
 }
 .inv-file-actions { display: flex; gap: 6px; flex-wrap: wrap; }
+.inv-file-share { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 10px; }
 .inv-file-note { margin-top: 10px; font-size: 10px; color: #6b7280; line-height: 1.6; }
 
 /* 窄螢幕：右欄改疊在下方，不硬擠 */
