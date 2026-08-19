@@ -689,25 +689,27 @@
    對齊：長文字靠左（截斷才讀得順）、金額靠右（位數對齊才能比大小）、
    固定格式與 badge 置中。 */
 #inv-list-panel .acct-header > span:nth-child(1),
-#inv-list-body .crm-row:not(.inv-qa-paper) > *:nth-child(1) { flex: 0 0 108px; }   /* date input 要塞得下 YYYY/MM/DD + 日曆圖示 */
+#inv-list-body .crm-row:not(.inv-qa-paper) > *:nth-child(1) { flex: 0 0 108px; }   /* 日期 —— date input 要塞得下 YYYY/MM/DD + 日曆圖示 */
 #inv-list-panel .acct-header > span:nth-child(2),
-#inv-list-body .crm-row:not(.inv-qa-paper) > *:nth-child(2) { flex: 1.5 1 0; min-width: 0; text-align: left; }
+#inv-list-body .crm-row:not(.inv-qa-paper) > *:nth-child(2) { flex: 0 0 84px; }   /* 申請人 —— 人名 3-4 字 */
 #inv-list-panel .acct-header > span:nth-child(3),
-#inv-list-body .crm-row:not(.inv-qa-paper) > *:nth-child(3) { flex: 0 0 152px; text-align: right; }   /* 發票的主角是金額：給足寬度，也讓未稅/含稅鈕＋輸入框不擠 */
+#inv-list-body .crm-row:not(.inv-qa-paper) > *:nth-child(3) { flex: 2 1 0; min-width: 0; text-align: left; }   /* 名稱 */
 #inv-list-panel .acct-header > span:nth-child(4),
-#inv-list-body .crm-row:not(.inv-qa-paper) > *:nth-child(4) { flex: 2.2 1 0; min-width: 0; text-align: left; }
+#inv-list-body .crm-row:not(.inv-qa-paper) > *:nth-child(4) { flex: 0 0 152px; text-align: right; }   /* 含稅價 —— 發票的主角，也讓未稅/含稅鈕＋輸入框不擠 */
 #inv-list-panel .acct-header > span:nth-child(5),
-#inv-list-body .crm-row:not(.inv-qa-paper) > *:nth-child(5) { flex: 0 0 88px; }
+#inv-list-body .crm-row:not(.inv-qa-paper) > *:nth-child(5) { flex: 2.2 1 0; min-width: 0; text-align: left; }   /* 抬頭 */
 #inv-list-panel .acct-header > span:nth-child(6),
-#inv-list-body .crm-row:not(.inv-qa-paper) > *:nth-child(6) { flex: 1.5 1 0; min-width: 0; text-align: left; }
+#inv-list-body .crm-row:not(.inv-qa-paper) > *:nth-child(6) { flex: 0 0 88px; }   /* 統編 —— 固定 8 碼 */
 #inv-list-panel .acct-header > span:nth-child(7),
-#inv-list-body .crm-row:not(.inv-qa-paper) > *:nth-child(7) { flex: 0 0 84px; }
+#inv-list-body .crm-row:not(.inv-qa-paper) > *:nth-child(7) { flex: 1.5 1 0; min-width: 0; text-align: left; }   /* 品項 */
 #inv-list-panel .acct-header > span:nth-child(8),
-#inv-list-body .crm-row:not(.inv-qa-paper) > *:nth-child(8) { flex: 0 0 76px; }   /* 表頭「發票種類」4 字不換行 */
+#inv-list-body .crm-row:not(.inv-qa-paper) > *:nth-child(8) { flex: 0 0 84px; }   /* 類別 */
 #inv-list-panel .acct-header > span:nth-child(9),
-#inv-list-body .crm-row:not(.inv-qa-paper) > *:nth-child(9) { flex: 0 0 76px; }
+#inv-list-body .crm-row:not(.inv-qa-paper) > *:nth-child(9) { flex: 0 0 76px; }   /* 發票種類 */
 #inv-list-panel .acct-header > span:nth-child(10),
-#inv-list-body .crm-row:not(.inv-qa-paper) > *:nth-child(10) { flex: 0 0 76px; }
+#inv-list-body .crm-row:not(.inv-qa-paper) > *:nth-child(10) { flex: 0 0 76px; }   /* 款項狀態 */
+#inv-list-panel .acct-header > span:nth-child(11),
+#inv-list-body .crm-row:not(.inv-qa-paper) > *:nth-child(11) { flex: 0 0 76px; }   /* 開立狀態 */
 
 /* 欄間留白：金額靠右、抬頭靠左，兩欄相鄰時字會黏成一串（$12,600財團法人…）。
    padding 在 flex item 內側，不影響外框寬度 → 三邊仍對齊。kebab 排除（只有 36px）。 */

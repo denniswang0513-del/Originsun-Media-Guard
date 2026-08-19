@@ -115,7 +115,8 @@ const _sorter = createSortable({
     panelId: 'inv-list-panel',
     onChange: () => renderList(),
     getters: {
-        date:     i => i.invoice_date || '',
+        date:      i => i.invoice_date || '',
+        applicant: i => (i.applicant || '').toLowerCase(),
         title:    i => (i.title || '').toLowerCase(),
         amount:   i => i.amount_total || 0,
         company:  i => (i.company_name || '').toLowerCase(),
@@ -202,6 +203,10 @@ function _quickAddRow() {
       <div class="inv-qa-wrap">
       <div class="crm-row inv-qa">
         <div class="crm-row-date"><input id="inv-qa-date" type="date" value="${_todayStr()}" ${enter}></div>
+        <div><select id="inv-qa-applicant">${
+            ['<option value="">—</option>'].concat(_loadApplicants().map(n =>
+                `<option value="${_esc(n)}">${_esc(n)}</option>`)).join('')
+        }</select></div>
         <div class="crm-row-name"><input id="inv-qa-title" placeholder="＋ 名稱（Enter 儲存）"
                title="輸入名稱後按 Enter 直接新增一筆發票；其餘欄位可留白，之後點該列補齊" ${enter}></div>
         <div class="crm-row-amount">
@@ -278,6 +283,7 @@ window._invQuickAdd = async function () {
         invoice_date: val('inv-qa-date') || null,
         company_name: val('inv-qa-company'),
         item_type: val('inv-qa-item'),
+        applicant: val('inv-qa-applicant'),
         category: val('inv-qa-cat') || '專案',
         invoice_kind: val('inv-qa-kind') || '電子發票',
         // 紙本才有收件資訊；選電子時那列是隱藏的，讀到的是空字串，正好不覆寫
@@ -316,6 +322,7 @@ function renderList() {
     body.innerHTML = _quickAddRow() + _sorter.sorted(_invoices).map(inv => `
         <div class="crm-row${inv.id === _selectedId ? ' selected' : ''}" onclick="window._invSelect('${inv.id}')">
             <div class="crm-row-date">${inv.invoice_date ? inv.invoice_date.substring(0, 10) : '—'}</div>
+            <div title="${_esc(inv.applicant)}">${_esc(inv.applicant)}</div>
             <div class="crm-row-name" title="${_esc(inv.title)}">${_esc(inv.title)}</div>
             <div class="crm-row-amount">$${_fmtNum(inv.amount_total)}</div>
             <div class="crm-row-client" title="${_esc(inv.company_name)}">${_esc(inv.company_name)}</div>
