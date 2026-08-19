@@ -618,6 +618,8 @@
 .crm-pay-badge-未收款 { background: #3b2f1f; color: #fbbf24; }
 .crm-pay-badge-付款 { background: #3b2f1f; color: #fbbf24; }
 .crm-pay-badge-作廢 { background: #374151; color: #9ca3af; text-decoration: line-through; }
+/* 款項狀態空白＝來源沒填。刻意與「未收款」（橘）視覺分開：那是一種進度，這是沒表態。 */
+.crm-pay-badge-未設定 { background: #262626; color: #6b7280; border: 1px dashed #4b5563; }
 
 /* ── Client project cards ── */
 .crm-project-card {

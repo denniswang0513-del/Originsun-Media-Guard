@@ -95,6 +95,17 @@ function _statusBadge(status) {
 
 // 開立中 → 已開立 → 作廢:工作流順序,asc 把待處理(開立中)排前面
 const _INV_STATUS_ORDER = ['開立中', '已開立', '作廢'];
+// 款項狀態排序：待處理(未收/未付)在前、空白墊底（空白＝來源沒填，不是一種進度）
+const _INV_PAY_ORDER = ['未收款', '未付款', '已收款', '已付款', '作廢', ''];
+
+/** 款項狀態 badge。🔴 空白就顯示空白 —— 舊寫法 `payment_status || '未收款'` 會把
+ *  「來源沒填」畫成「未收款」，等於替沒表態的資料表態（匯入歷史發票時有 21 張）。 */
+function _payBadge(status) {
+    const s = (status || '').trim();
+    if (!s) return '<span class="crm-badge crm-pay-badge-未設定">未設定</span>';
+    const cls = s === '已收款' || s === '已付款' ? '收款' : s === '作廢' ? '作廢' : '未收款';
+    return `<span class="crm-badge crm-pay-badge-${cls}">${_esc(s)}</span>`;
+}
 const _sorter = createSortable({
     storageKey: 'crm_invoices_sort',
     defaultSort: { key: 'date', dir: 'desc' },
@@ -108,6 +119,7 @@ const _sorter = createSortable({
         tax_id:   i => (i.tax_id || '').toLowerCase(),
         item:     i => (i.item_type || '').toLowerCase(),
         category: i => (i.category || '').toLowerCase(),
+        pay:      i => enumIndex(_INV_PAY_ORDER, (i.payment_status || '').trim(), ''),
         status:   i => enumIndex(_INV_STATUS_ORDER, i.issue_status, '開立中'),
     },
 });
@@ -129,6 +141,7 @@ function renderList() {
             <div>${_esc(inv.tax_id)}</div>
             <div>${_esc(inv.item_type)}</div>
             <div>${_esc(inv.category)}</div>
+            <div class="crm-row-status">${_payBadge(inv.payment_status)}</div>
             <div class="crm-row-status">${_statusBadge(inv.issue_status)}</div>
             ${kebabMenuHtml(inv.id, { onEdit: '_invEdit', onDuplicate: '_invDup', onDelete: '_invDelete' })}
         </div>
@@ -248,8 +261,7 @@ function renderDetail(inv) {
     // ── 頂部
     html += prop('日期', inv.invoice_date ? inv.invoice_date.substring(0, 10) : '');
     // ── 開立資訊
-    const payBadge = `<span class="crm-badge crm-pay-badge-${_esc(inv.payment_status === '已收款' ? '收款' : inv.payment_status || '未收款')}">${_esc(inv.payment_status || '未收款')}</span>`;
-    html += section('開立資訊', payBadge);
+    html += section('開立資訊', _payBadge(inv.payment_status));
     html += prop('發票編號', inv.invoice_number);
     html += prop('開立狀態', inv.issue_status);
     html += prop('未稅價', inv.amount_ex_tax ? '$' + _fmtNum(inv.amount_ex_tax) : '');
@@ -291,9 +303,12 @@ function renderDetail(inv) {
                 if (payload.issue_status !== '作廢') {
                     payload.issue_status = payload.invoice_number?.trim() ? '已開立' : '開立中';
                 }
-                payload.payment_type = '收款';
+                // 🔴 這裡是「編別的欄位」的路徑，不是改收付狀態的路徑 —— 兩欄一律原值帶回。
+                // 舊寫法硬塞 payment_type='收款'（匯入的 183 張付款發票一被編輯就翻面）、
+                // payment_status 空值塞 '未收款'（替來源沒填的 21 張表態）。
+                payload.payment_type = inv.payment_type || '收款';
                 if (payload.issue_status === '作廢') payload.payment_status = '作廢';
-                else payload.payment_status = inv.payment_status || '未收款';
+                else payload.payment_status = inv.payment_status || '';
                 // auto-calc from 未稅價
                 const ex = parseInt(payload.amount_ex_tax) || 0;
                 payload.amount_total = ex ? Math.round(ex * 1.05) : null;
@@ -418,9 +433,7 @@ function openModal(inv = null) {
     // Payment status badge
     const badgeEl = document.getElementById('inv-modal-pay-badge');
     if (badgeEl) {
-        const ps = inv?.payment_status || '未收款';
-        const cls = ps === '已收款' ? '收款' : ps === '作廢' ? '作廢' : '未收款';
-        badgeEl.innerHTML = inv ? `<span class="crm-badge crm-pay-badge-${cls}">${_esc(ps)}</span>` : '';
+        badgeEl.innerHTML = inv ? _payBadge(inv.payment_status) : '';
     }
     const err = document.getElementById('inv-modal-error');
     err.textContent = ''; err.style.display = 'none';
