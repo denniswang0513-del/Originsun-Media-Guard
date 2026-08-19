@@ -624,8 +624,9 @@
 /* ── 發票就地新增列 ──
    釘在列表最上方（sticky）：捲到哪都能登記，不用先回到頂端。
    欄位沿用 .crm-row 的 flex 版面，所以格子與底下的資料列自動對齊。 */
+/* 主列與紙本列一起釘在頂端 —— 兩個各自 sticky top:0 會疊在一起 */
+#inv-list-body .inv-qa-wrap { position: sticky; top: 0; z-index: 2; background: #202020; }
 #inv-list-body .crm-row.inv-qa {
-  position: sticky; top: 0; z-index: 2;
   background: #202020; border-bottom: 1px solid #333;
   cursor: default;
 }
@@ -663,6 +664,27 @@
 #inv-list-body .crm-row.inv-qa .ss-wrap { width: 92%; }
 #inv-list-body .crm-row.inv-qa .ss-input { width: 100%; font-size: 11px; padding: 2px 4px; text-align: center; }
 #inv-list-body .crm-row.inv-qa .ss-panel { z-index: 300; text-align: left; }
+
+/* ── 發票種類 badge（電子／紙本，點一下切換）── */
+.inv-kind-badge { cursor: pointer; }
+.inv-kind-電子 { background: #1e293b; color: #93c5fd; }
+.inv-kind-紙本 { background: #3b2f1f; color: #fcd34d; }
+.inv-kind-未設定 { background: #262626; color: #6b7280; border: 1px dashed #4b5563; }
+.inv-kind-異常 { background: #4c1d24; color: #fca5a5; }   /* 不是電子也不是紙本＝來源填錯 */
+/* 紙本但收件資訊還沒補 —— 右上角一點，一眼掃得出哪些要處理 */
+.inv-kind-badge.need-recipient { position: relative; }
+.inv-kind-badge.need-recipient::after {
+  content: ''; position: absolute; top: -2px; right: -2px;
+  width: 6px; height: 6px; border-radius: 50%; background: #f87171;
+}
+
+/* 就地新增列的紙本收件資訊（選了紙本才展開的第二列）*/
+#inv-list-body .crm-row.inv-qa-paper {
+  gap: 6px; padding: 0 8px 6px; align-items: center;
+  border-bottom: 1px solid #333; background: #202020;
+}
+#inv-list-body .crm-row.inv-qa-paper > .inv-qa-paper-label { flex: 0 0 auto; font-size: 10px; color: #fcd34d; padding: 0 4px; overflow: visible; }
+#inv-list-body .crm-row.inv-qa-paper input { flex: 1; }
 
 /* ── 發票資料夾設定卡（管理員）── */
 .inv-root-link { align-self: center; font-size: 12px; color: #888; margin-right: 12px; text-decoration: none; }

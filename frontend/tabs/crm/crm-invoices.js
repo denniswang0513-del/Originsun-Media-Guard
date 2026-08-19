@@ -119,12 +119,51 @@ const _sorter = createSortable({
         tax_id:   i => (i.tax_id || '').toLowerCase(),
         item:     i => (i.item_type || '').toLowerCase(),
         category: i => (i.category || '').toLowerCase(),
+        kind:     i => (i.invoice_kind || '').toLowerCase(),
         pay:      i => enumIndex(_INV_PAY_ORDER, (i.payment_status || '').trim(), ''),
         status:   i => enumIndex(_INV_STATUS_ORDER, i.issue_status, '開立中'),
     },
 });
 
 const _INV_CATEGORIES = ['專案', '內部代開', '外部代開'];
+const _INV_KINDS = ['電子發票', '紙本發票'];
+
+/** 發票種類 badge。紙本但沒填收件資訊 → 標成待補（53 筆歷史紙本發票全都沒有收件人，
+ *  這個記號就是拿來一眼掃出哪些要補的）。點一下在電子⇄紙本之間切換。 */
+function _kindBadge(inv) {
+    const k = (inv.invoice_kind || '').trim();
+    const known = _INV_KINDS.includes(k);
+    const needRecipient = k === '紙本發票' && !(inv.recipient || '').trim();
+    const cls = !k ? '未設定' : !known ? '異常' : k === '紙本發票' ? '紙本' : '電子';
+    const label = !k ? '未設定' : known ? k.replace('發票', '') : k;
+    const title = !known && k ? `不是合法的發票種類（${k}）—— 點一下改成電子/紙本`
+        : needRecipient ? '紙本發票，但還沒填收件資訊 —— 點該列到詳情補'
+            : '點一下切換 電子 ⇄ 紙本';
+    return `<span class="crm-badge inv-kind-badge inv-kind-${cls}${needRecipient ? ' need-recipient' : ''}"
+                  title="${_esc(title)}"
+                  onclick="event.stopPropagation();window._invToggleKind('${inv.id}')">${_esc(label)}</span>`;
+}
+
+/** 在電子⇄紙本之間切換。只有兩個值、按一下就換回來，所以不加確認；
+ *  但改成紙本時提醒去補收件資訊（後端 PUT 不碰 file_url，見 _to_invoice_dict 註解）。 */
+window._invToggleKind = async function (id) {
+    const inv = _invoices.find(i => i.id === id);
+    if (!inv) return;
+    const next = (inv.invoice_kind || '').trim() === '紙本發票' ? '電子發票' : '紙本發票';
+    try {
+        const full = await _fetch('/invoices/' + id);
+        await _fetch('/invoices/' + id, {
+            method: 'PUT',
+            // 🔴 invoice_date 原樣帶回完整 ISO，不要自己 substring(0,10)：
+            // 若該列是舊的台北午夜資料（'2024-01-01T16:00:00+00:00'），前 10 碼是
+            // UTC 那天、比實際少一天。後端 _parse_shoot_date 會把完整 ISO 轉成台北
+            // 日期再存成 UTC 午夜，兩種慣例都對。
+            body: JSON.stringify({ ...full, invoice_kind: next }),
+        });
+        await loadInvoices();
+        if (_selectedId === id) renderDetail(await _fetch('/invoices/' + id));
+    } catch (e) { alert('切換失敗：' + e.message); }
+};
 
 // 金額欄輸入的是未稅還是含稅 —— 來源有時記未稅、有時記含稅，所以是可切換的。
 // 記在 localStorage：同一個人的來源資料通常一致，不該每開一次都重選。
@@ -157,6 +196,7 @@ function _quickAddRow() {
     const enter = 'onkeydown="if(event.key===\'Enter\'){event.preventDefault();window._invQuickAdd();}"';
     const mode = _qaMode();
     return `
+      <div class="inv-qa-wrap">
       <div class="crm-row inv-qa">
         <div class="crm-row-date"><input id="inv-qa-date" type="date" value="${_todayStr()}" ${enter}></div>
         <div class="crm-row-name"><input id="inv-qa-title" placeholder="＋ 名稱（Enter 儲存）"
@@ -177,14 +217,31 @@ function _quickAddRow() {
         <div><span id="inv-qa-taxid" class="inv-qa-hint">—</span></div>
         <div><input id="inv-qa-item" placeholder="品項" ${enter}></div>
         <div><select id="inv-qa-cat" onchange="window._invQuickCalc()">${opts(_INV_CATEGORIES, '專案')}</select></div>
+        <div><select id="inv-qa-kind" onchange="window._invQuickKind()">${opts(_INV_KINDS, '電子發票')}</select></div>
         <div><select id="inv-qa-pay">${opts(['未收款', '已收款', '已付款', '作廢'], '未收款')}</select></div>
         <div><select id="inv-qa-iss">${opts(['開立中', '已開立', '作廢'], '開立中')}</select></div>
         <span class="crm-kebab-wrap">
           <button class="crm-btn crm-btn-primary crm-btn-sm inv-qa-btn"
                   title="新增這筆發票（或按 Enter）" onclick="window._invQuickAdd()">＋</button>
         </span>
+      </div>
+      <!-- 紙本發票才要的收件資訊：選了紙本才展開，平常不佔版面 -->
+      <div class="crm-row inv-qa inv-qa-paper" id="inv-qa-paper" style="display:none;">
+        <div class="inv-qa-paper-label">紙本寄送</div>
+        <input id="inv-qa-recipient" placeholder="收件人" ${enter}>
+        <input id="inv-qa-recipient_phone" placeholder="收件電話" ${enter}>
+        <input id="inv-qa-recipient_address" placeholder="收件地址" ${enter}>
+      </div>
       </div>`;
 }
+
+/** 發票種類切到紙本 → 展開收件資訊那列（電子發票不需要，平常不佔版面）。 */
+window._invQuickKind = function () {
+    const paper = document.getElementById('inv-qa-kind')?.value === '紙本發票';
+    const row = document.getElementById('inv-qa-paper');
+    if (row) row.style.display = paper ? '' : 'none';
+    if (paper) document.getElementById('inv-qa-recipient')?.focus();
+};
 
 /** 就地新增列的即時推算：換算另一邊的金額 + 統編帶出（與送出時同一支 _deriveInvoice）。 */
 window._invQuickCalc = function () {
@@ -217,6 +274,11 @@ window._invQuickAdd = async function () {
         company_name: val('inv-qa-company'),
         item_type: val('inv-qa-item'),
         category: val('inv-qa-cat') || '專案',
+        invoice_kind: val('inv-qa-kind') || '電子發票',
+        // 紙本才有收件資訊；選電子時那列是隱藏的，讀到的是空字串，正好不覆寫
+        recipient: val('inv-qa-recipient'),
+        recipient_phone: val('inv-qa-recipient_phone'),
+        recipient_address: val('inv-qa-recipient_address'),
         issue_status: issue,
         // 作廢的發票款項狀態一律作廢（與 modal / inline 編輯同一條規則）
         payment_status: issue === '作廢' ? '作廢' : val('inv-qa-pay'),
@@ -255,6 +317,7 @@ function renderList() {
             <div>${_esc(inv.tax_id)}</div>
             <div>${_esc(inv.item_type)}</div>
             <div>${_esc(inv.category)}</div>
+            <div class="crm-row-status">${_kindBadge(inv)}</div>
             <div class="crm-row-status">${_payBadge(inv.payment_status)}</div>
             <div class="crm-row-status">${_statusBadge(inv.issue_status)}</div>
             ${kebabMenuHtml(inv.id, { onEdit: '_invEdit', onDuplicate: '_invDup', onDelete: '_invDelete' })}
