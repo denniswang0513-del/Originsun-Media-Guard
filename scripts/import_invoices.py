@@ -51,6 +51,30 @@ from routers.crm.finance import _map_invoice_row  # noqa: E402
 HEADER_MARK = "發票編號"   # 表頭列的指紋（計算機區沒有這個字）
 ENTITY = "parent"          # 匯入一律落母公司帳（我的帳不走匯入）
 
+# ── 逐筆修正表（owner 2026-08-19 核可）────────────────────────
+#
+# 來源 Sheet 有三列資料本身是壞的。修正**寫在這裡而不是埋進轉換邏輯**，理由：
+# 匯入腳本改動別人的數字時，那個改動必須看得見、可稽核、能一眼推翻。
+# 鍵＝發票編號（這份 Sheet 393/394 有號碼且唯一）。
+#
+# 兩個日期都是從**發票號碼序號**推的（號碼依開立順序遞增），不是猜的：
+#   PJ00158168：前一號 ...167 是 05/26、後面 ...170/171 是 05/27 → 落在兩者之間
+#   RJ16719874：號碼比鄰近的 ...862/864/865 都大（＝較晚開），原欄寫「這筆8月中開」
+FIXUPS = {
+    "PJ00158168": {"date": "2025/05/26",
+                   "why": "原欄只有『2025/05』沒有日；由發票號序列 ...167(05/26) → ...170(05/27) 定位"},
+    "RJ16719874": {"date": "2025/08/15",
+                   "why": "原欄是註記『這筆8月中開』；號碼晚於鄰近 7/31 各筆，取 8 月中"},
+    "PJ00158165": {"tax_amount": 3476,
+                   "why": "原稅額 66,829 與未稅 69,524 不符；69,524×5%=3,476 且 69,524+3,476=73,000"},
+}
+
+# 款項狀態空白時**保留空白**（owner 2026-08-19）：不讓 CrmInvoice 的欄位預設
+# 把它寫成「未收款」—— 那是替沒填的列表態。
+# 🔴 用空字串不用 None：應收帳款的預設查詢是 payment_status NOT IN ('已收款','作廢')，
+#    NULL 在 SQL 三值邏輯下會讓整列**消失**在應收帳款外；'' 則照常列出、狀態顯示空白。
+BLANK_STATUS = ""
+
 
 def resolve_db_url(prod: bool) -> str:
     """dev/prod 庫切換 —— 與 scripts/import_petty_cash.py 同一套寫法，不得漂移。"""
@@ -84,7 +108,7 @@ def load(csv_path: str):
     h = find_header(rows)
     hdr = [c.strip() for c in rows[h]]
     header_map = {c.lower(): c for c in hdr if c}
-    recs, skipped, bad_date = [], [], []
+    recs, skipped, bad_date, applied = [], [], [], []
     for ln, raw in enumerate(rows[h + 1:], start=h + 2):
         if not any(c.strip() for c in raw):
             continue
@@ -94,15 +118,33 @@ def load(csv_path: str):
             skipped.append(ln)
             continue
         raw_date = data.pop("invoice_date", "")
+
+        # 款項狀態空白 → 明著存空字串，不落 model 預設「未收款」
+        if not (row.get("款項狀態") or "").strip():
+            data["payment_status"] = BLANK_STATUS
+
+        fx = FIXUPS.get(data.get("invoice_number", ""))
+        if fx:
+            for k, v in fx.items():
+                if k == "why":
+                    continue
+                before = raw_date if k == "date" else data.get(k)
+                if k == "date":
+                    raw_date = v
+                else:
+                    data[k] = v
+                applied.append((ln, data.get("invoice_number", ""), data.get("title", ""),
+                                k, before, v, fx["why"]))
+
         d = parse_date(raw_date)
         if not d:
             bad_date.append((ln, raw_date, data.get("title", ""), data.get("invoice_number", "")))
         recs.append({"line": ln, "date": d, "raw_date": raw_date, "data": data,
                      "tag": (row.get("索引標籤") or "").strip()})
-    return recs, skipped, bad_date
+    return recs, skipped, bad_date, applied
 
 
-def report(recs, skipped, bad_date, csv_path):
+def report(recs, skipped, bad_date, applied, csv_path):
     print("=" * 68)
     print("來源:", csv_path)
     print("=" * 68)
@@ -123,6 +165,18 @@ def report(recs, skipped, bad_date, csv_path):
     g = [sum(v[i] for v in tot.values()) for i in range(4)]
     print(f"{'合計':<10}{g[0]:>6}{g[1]:>16,}{g[2]:>16,}{g[3]:>14,}")
 
+    if applied:
+        print(f"\n[修正] 逐筆修正表套用了 {len(applied)} 處（FIXUPS，見檔頭）:")
+        for ln, num, title, field, before, after, why in applied:
+            print(f"      第 {ln} 列  {num}  {title[:20]}")
+            print(f"          {field}: {before!r} -> {after!r}")
+            print(f"          理由: {why}")
+
+    blanks = [r for r in recs if r["data"].get("payment_status") == BLANK_STATUS]
+    if blanks:
+        print(f"\n[空白] 款項狀態保留空白 {len(blanks)} 列（不套用「未收款」預設）"
+              f"—— 仍會出現在應收帳款，狀態欄顯示空白")
+
     if bad_date:
         print(f"\n[!] 日期無法解析 {len(bad_date)} 列（會以 invoice_date=NULL 匯入，之後用 UI 補）:")
         for ln, raw, title, num in bad_date:
@@ -142,8 +196,8 @@ def report(recs, skipped, bad_date, csv_path):
 
 
 async def run(csv_path: str, prod: bool, apply: bool):
-    recs, skipped, bad_date = load(csv_path)
-    totals = report(recs, skipped, bad_date, csv_path)
+    recs, skipped, bad_date, applied = load(csv_path)
+    totals = report(recs, skipped, bad_date, applied, csv_path)
 
     url = resolve_db_url(prod)
     dbname = url.rsplit("/", 1)[-1]
