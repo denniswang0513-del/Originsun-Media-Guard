@@ -155,6 +155,16 @@ ALL_MODULES = [
     # owner 2026-08-19「請款要單獨控制的授權按鈕」→ 拆出獨立 key。
     # own-scope 後端本來就只認登入＋綁定人員，這把鑰匙管的是 UI 入口。
     'me_petty',
+    # 兩本帳的兩把帳本 key（docs/LEDGER_ENTITY_PLAN.md §2.1；scope 判定正本 core/ledger.py）。
+    # finance_partner（label：母公司報表）：合夥人用。母公司帳**報表唯讀**
+    #   （儀表板/三表/drilldown/稅務包）。橫切「帳本」key，不是 tab。
+    #   合夥人帳號唯一該有的 key —— **絕不可與 money_view 同給**（money_view
+    #   是橫切金額鑰匙，會破報表唯讀邊界，見 plan §2.3），也絕不給 Lv3。
+    # finance_mine（label：我的帳）：owner 私帳（entity='mine'）全功能
+    #   ＋獨立頂層 tab 的入口 key。Lv3 經 grant_admin_all_modules 自動持有。
+    # ⚠ 一律 append 在尾端 — modules[0] 決定 admin 落地頁。
+    'finance_partner',
+    'finance_mine',
 ]
 
 
@@ -189,6 +199,8 @@ TAB_ACCESS: dict = {
     'footage': ('footage', 'transcribe'),
     'equipment': ('equipment', 'preprod_plan'),
     'intel': ('intel', 'preprod_plan'),
+    # 兩本帳：只有母公司報表 key 的合夥人也進得了財務 tab（docs/LEDGER_ENTITY_PLAN.md §2.1）
+    'crm_invoices': ('crm_invoices', 'finance_partner'),
 }
 
 

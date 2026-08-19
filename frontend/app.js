@@ -101,7 +101,9 @@ if (typeof appendLog === 'undefined') {
                     const fromHash = _isNavigable(hashTab) ? hashTab : null;
                     // Else logged-out users get media tools only → land on 備份並轉檔
                     // (the historical default tab), derived from TAB_MAP not a literal.
-                    const firstTab = fromHash || (hasModules ? TAB_MAP[modules[0]] : TAB_MAP.backup);
+                    // modules[0] 可能是非 tab 的橫切 key（如 finance_partner —— 合夥人
+                    // 帳號只有這一把）→ TAB_MAP 查無 → 退到第一個看得到的 tab。
+                    const firstTab = fromHash || (hasModules ? (TAB_MAP[modules[0]] || _firstAuthorizedSection()) : TAB_MAP.backup);
                     if (firstTab) switchTab(firstTab);
                 }
             } catch (err) {

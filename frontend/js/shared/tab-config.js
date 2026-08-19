@@ -16,7 +16,8 @@ export const TAB_MAP = {
     transcribe: 'tab_transcribe', tts: 'tab_tts', footage: 'tab_footage', drone_meta: 'tab_drone_meta',
     crm_clients: 'tab_crm_clients', crm_projects: 'tab_crm_projects',
     crm_quotes: 'tab_crm_quotes', crm_staff: 'tab_crm_staff',
-    crm_invoices: 'tab_crm_invoices', timesheets: 'tab_timesheets',
+    crm_invoices: 'tab_crm_invoices',
+    timesheets: 'tab_timesheets',
     portal: 'tab_portal', media_log: 'tab_media_log',
     hr_leave: 'tab_hr_leave',
     journal: 'tab_journal',
@@ -73,6 +74,8 @@ const TAB_EXTRA_ACCESS = {
     footage: ['transcribe'],
     equipment: ['preprod_plan'],
     intel: ['preprod_plan'],
+    // 兩本帳（LEDGER_ENTITY_PLAN）：合夥人只有 finance_partner（母公司報表唯讀）也要進得了財務 tab
+    crm_invoices: ['finance_partner'],
 };
 
 export function shouldShowTab(key, authUser, modules) {
@@ -128,6 +131,9 @@ export const TAB_GROUPS = [
     // 財務管理（2026-07 起）：帳務六視圖自業務管理搬入；沿用 crm_invoices 單一
     // module key（零 RBAC 遷移，既有授權者自動看得到）。內部子視圖自管左側欄。
     { id: 'finance',    label: '💰 財務管理', single: 'crm_invoices' },
+    // 「我的帳」刻意沒有 SPA tab（owner 2026-08-19）：走外部連結 /my-ledger.html
+    // ＋每次重新登入 —— 側欄零入口，旁人不知道這頁存在。finance_mine 只是權限
+    // key（PERMISSION_GROUPS 有列），不是 tab，別把 tab 加回來。
     { id: 'website',    label: '🌐 官網管理', single: 'website_admin' },
 ];
 
@@ -180,7 +186,11 @@ export const PERMISSION_GROUPS = [
     // money_view 不是 tab，是橫切的能力鍵（有它才看得到合約金額／日費／成本）。
     // 放在財務群只是為了讓勾選的人一眼知道它管什麼 —— groupKeys 會因 TAB_MAP
     // 沒有這個 key 而自動不進側欄。政策正本 core/money.py。
-    { id: 'finance',    label: '💰 財務管理', modules: ['crm_invoices', 'money_view', 'finance_approve'] },
+    // 兩本帳的兩把帳本 key（政策正本 core/ledger.py，docs/LEDGER_ENTITY_PLAN.md）：
+    // finance_partner = 母公司報表唯讀（合夥人；橫切 key，非 tab —— 絕不可與
+    // money_view 同給，見 plan §2.3）；finance_mine = 我的帳（owner 私帳全功能
+    // ＋「我的帳」頂層 tab 的入口 key）。
+    { id: 'finance',    label: '💰 財務管理', modules: ['crm_invoices', 'money_view', 'finance_approve', 'finance_partner', 'finance_mine'] },
     { id: 'website',    label: '🌐 官網管理', modules: ['website_admin'] },
     // N0 個人工作台 — 獨立頁 /my.html 的卡片（無 SPA tab，僅權限編輯器用；
     // groupKeys 會因 TAB_MAP 無此 key 而自動不進側欄）。
