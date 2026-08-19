@@ -378,6 +378,43 @@ def _invoice_file_name(inv, ext: str) -> str:
     return "_".join(p for p in parts if p) + ext
 
 
+# 統一發票號碼＝2 碼英文 + 8 碼數字（財政部格式，例 DQ45891570）
+_TW_INVOICE_NO = r"[A-Z]{2}\d{8}"
+# 「發票號碼：」的標籤。電子發票證明聯常把字距拉開（買　　方 / 統 一 編 號），
+# 所以每個字之間都允許空白；冒號全形半形都收 —— core.doc_text 的 NFKC 會把
+# 全形「：」轉成半形，但直接讀別處來的文字時不一定經過那層。
+_INVOICE_NO_LABELLED = re.compile(
+    r"發\s*票\s*號\s*碼\s*[:：]?\s*(" + _TW_INVOICE_NO + r")")
+
+
+def _detect_invoice_number(path: str) -> str:
+    """從電子發票證明聯（PDF）抽發票號碼。抽不到回 ""。
+
+    **同步**（呼叫端要丟 asyncio.to_thread）—— pypdf 是 CPU-bound 純同步解析。
+
+    兩段式：先找「發票號碼：」標籤後面的號碼；找不到標籤才退而求其次，看全文
+    是否**恰好只有一組**符合格式的字串。「恰好一組」是刻意的 —— 證明聯上除了
+    發票號碼還可能有隨機碼、載具號碼，多於一組時猜錯的代價（把法定號碼寫錯）
+    遠大於讓人自己填。
+
+    圖片檔（JPG/PNG）走到這裡會被 extract_text 判成不支援 → 回 ""，不做 OCR。
+    """
+    if os.path.splitext(path)[1].lower() != ".pdf":
+        return ""
+    try:
+        from core.doc_text import extract_text
+        text, err = extract_text(path)
+    except Exception:
+        return ""
+    if err or not text:
+        return ""
+    m = _INVOICE_NO_LABELLED.search(text)
+    if m:
+        return m.group(1)
+    hits = set(re.findall(_TW_INVOICE_NO, text))
+    return hits.pop() if len(hits) == 1 else ""
+
+
 @router.post("/invoices/{invoice_id}/file")
 async def upload_invoice_file(invoice_id: str, request: Request, file: UploadFile = File(...)):
     """上傳這張發票開好的電子發票檔。同一張再傳一次＝取代（舊檔留在磁碟不刪，
@@ -415,7 +452,13 @@ async def upload_invoice_file(invoice_id: str, request: Request, file: UploadFil
         inv.file_url = filepath
         inv.updated_at = _now()
         await session.commit()
-    return {"status": "ok", "file_url": filepath, "file_name": os.path.basename(filepath)}
+        current_number = inv.invoice_number or ""
+    # 偵測到的號碼只**回報**、不自動寫入 —— 發票號碼是法定識別，套不套用由人決定
+    detected = await asyncio.to_thread(_detect_invoice_number, filepath)
+    return {"status": "ok", "file_url": filepath, "file_name": os.path.basename(filepath),
+            "detected_invoice_number": detected,
+            # 與現有值相同就不用麻煩使用者
+            "detected_differs": bool(detected and detected != current_number)}
 
 
 @router.delete("/invoices/{invoice_id}/file")

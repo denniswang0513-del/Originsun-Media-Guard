@@ -787,6 +787,13 @@
 }
 .inv-file-actions { display: flex; gap: 6px; flex-wrap: wrap; }
 .inv-file-share { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 10px; }
+/* 從 PDF 讀到發票號碼的待確認提示 —— 要顯眼（是要人做決定的），但不是錯誤 */
+.inv-file-detected {
+  margin-top: 10px; padding: 8px 10px;
+  background: #1e293b; border: 1px solid #3b82f6; border-radius: 6px;
+  font-size: 11px; color: #93c5fd; line-height: 1.6;
+}
+.inv-file-detected b { font-size: 13px; color: #fff; letter-spacing: .04em; }
 .inv-file-note { margin-top: 10px; font-size: 10px; color: #6b7280; line-height: 1.6; }
 
 /* 窄螢幕：右欄改疊在下方，不硬擠 */

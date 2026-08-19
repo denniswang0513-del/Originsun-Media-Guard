@@ -435,6 +435,8 @@ function _wireEditDynamics() {
 // 檔名/資料夾規則的正本在後端 routers/crm/finance.py::_invoice_file_name。
 
 let _fileBusy = false;
+// 上傳後從電子發票 PDF 抽到、但還沒經人確認的發票號碼（見 _renderFilePane 的提示條）
+let _pendingNumber = null;
 
 function _renderFilePane(inv) {
     const pane = document.getElementById('inv-file-pane');
@@ -451,6 +453,16 @@ function _renderFilePane(inv) {
             <button class="crm-btn crm-btn-secondary crm-btn-sm" onclick="window._invFileClear()">解除關聯</button>
           </div>
         </div>
+        ${_pendingNumber ? `
+        <div class="inv-file-detected">
+          從 PDF 讀到發票號碼<br><b>${_esc(_pendingNumber)}</b>
+          ${inv.invoice_number ? `<div class="inv-file-note" style="margin-top:4px;">
+              目前是 ${_esc(inv.invoice_number)}，套用會取代它</div>` : ''}
+          <div class="inv-file-actions" style="margin-top:6px;">
+            <button class="crm-btn crm-btn-primary crm-btn-sm" onclick="window._invApplyNumber()">套用</button>
+            <button class="crm-btn crm-btn-secondary crm-btn-sm" onclick="window._invDismissNumber()">不要</button>
+          </div>
+        </div>` : ''}
         <div class="inv-file-share">
           <button class="crm-btn crm-btn-primary crm-btn-sm" onclick="window._invShareLink(this)">
             ${inv.has_share ? '複製客戶下載連結' : '產生客戶下載連結'}</button>
@@ -508,8 +520,11 @@ window._invFileUpload = async function (file) {
         fd.append('file', file);
         // crmFetch 對 FormData 會刻意不設 Content-Type（否則蓋掉 multipart boundary），
         // token 與錯誤 detail 也都幫忙處理好了 —— 不要在這裡再手刻一次 fetch。
-        await _fetch(`/invoices/${_selectedId}/file`, { method: 'POST', body: fd });
+        const up = await _fetch(`/invoices/${_selectedId}/file`, { method: 'POST', body: fd });
         await loadInvoices();
+        // 偵測到的號碼與現值不同才問 —— 一樣的話沒有打擾的理由。
+        // 🔴 不自動套用：發票號碼是法定識別，改它要人點頭（owner 要的是「可以選擇」）。
+        if (up.detected_differs) _pendingNumber = up.detected_invoice_number;
         const fresh = await _fetch('/invoices/' + _selectedId);
         renderDetail(fresh);
     } catch (e) {
@@ -522,6 +537,29 @@ window._invFileUpload = async function (file) {
 /** 產生（或取回）客戶下載連結並複製到剪貼簿。
  *  後端是冪等的：已經有一張有效的就原樣回傳 —— 同一張發票寄兩次信，先寄出去的
  *  那個連結不該失效。 */
+/** 套用偵測到的發票號碼。走既有的 PUT（與種類切換同一條路），所以
+ *  「有編號→已開立」那條自動規則、月結守衛都照常生效。 */
+window._invApplyNumber = async function () {
+    if (!_selectedId || !_pendingNumber) return;
+    const num = _pendingNumber;
+    _pendingNumber = null;
+    try {
+        const full = await _fetch('/invoices/' + _selectedId);
+        await _fetch('/invoices/' + _selectedId, {
+            method: 'PUT',
+            body: JSON.stringify({ ...full, invoice_number: num }),
+        });
+        await loadInvoices();
+        renderDetail(await _fetch('/invoices/' + _selectedId));
+    } catch (e) { alert('套用失敗：' + e.message); }
+};
+
+window._invDismissNumber = function () {
+    _pendingNumber = null;
+    const inv = _invoices.find(i => i.id === _selectedId);
+    if (inv) _renderFilePane(inv);
+};
+
 window._invShareLink = async function (btn) {
     if (!_selectedId) return;
     try {
@@ -699,6 +737,9 @@ function renderDetail(inv) {
 // ── Detail ───────────────────────────────────────────────────
 
 async function selectInvoice(id) {
+    // 🔴 切到別張發票一定要清掉上一張還沒確認的偵測號碼 —— 留著的話那個「套用」
+    // 會把 A 的發票號碼寫進 B。
+    if (_selectedId !== id) _pendingNumber = null;
     _selectedId = id;
     renderList();
     document.getElementById('inv-detail-panel').style.display = 'flex';
