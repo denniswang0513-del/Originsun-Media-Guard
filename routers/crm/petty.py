@@ -26,13 +26,15 @@ from fastapi.responses import Response
 from sqlalchemy import func as safunc
 from sqlalchemy import select
 
+from core.project_link import PETTY_ITEMS as _PETTY_PROJECT_ITEMS
+from ._shared import cash_category_texts
 from core.auth import check_admin_or_module
 from core.money import can_see_money
 from core.identity import resolve_current_staff
 from core.schemas import PettyExpensePayload, PettySubmitPayload
 from db.models import (Client, CrmCashEntry, CrmPaymentRequest, CrmProject,
                        CrmProjectCostGroup, CrmProjectExpense, CrmReimbursement,
-                       CrmStaff, FinanceCategoryMap, User)
+                       CrmStaff, User)
 
 from ._shared import (_assert_month_open, _crm_session, _fmt_day, _now,
                       _parse_day, _username, money_dep, router)
@@ -50,8 +52,9 @@ APPROVE_MODULE = "finance_approve"
 # 🔴 只有「專案雜支」可以連結專案（owner 2026-08-17：「只有勾專案雜支時，那筆才
 # 需要連結專案；其餘的項目不開放連結」）。行政／設備耗材／業務推廣那些是公司層級
 # 支出，掛到專案上會讓專案毛利多算一筆不屬於它的錢。
-# 要放寬就改這一份 —— 前端經 `/petty/options` 拿同一份，不各自寫死。
-PROJECT_LINK_ITEMS = ("專案雜支",)
+# 值在 core/project_link.py（三個入口的答案放在一起，差異看得見）；前端經
+# `/petty/options` 拿同一份，不各自寫死。
+PROJECT_LINK_ITEMS = _PETTY_PROJECT_ITEMS
 
 
 def _check_approver(request: Request):
@@ -189,11 +192,7 @@ async def petty_options():
                    CrmProject.completion_date, Client.short_name)
             .outerjoin(Client, Client.id == CrmProject.client_id)
             .order_by(CrmProject.created_at.desc()).limit(400))).all()
-        items = [r[0] for r in (await session.execute(
-            select(FinanceCategoryMap.category_text)
-            .where(FinanceCategoryMap.source == "cash",
-                   FinanceCategoryMap.active.is_(True))
-            .order_by(FinanceCategoryMap.category_text))).all()]
+        items = await cash_category_texts(session)
     return {
         "projects": [{"id": p.id, "name": p.name, "status": p.status or "",
                       "year": _project_year(p), "client": p.short_name or ""}
@@ -559,11 +558,7 @@ async def get_item_owners(request: Request):
     """目前的「項目 → 歸屬人」對映 + 可選人員（設定面板一次拿齊）。"""
     _check_approver(request)
     async with _crm_session() as session:
-        items = [r[0] for r in (await session.execute(
-            select(FinanceCategoryMap.category_text)
-            .where(FinanceCategoryMap.source == "cash",
-                   FinanceCategoryMap.active.is_(True))
-            .order_by(FinanceCategoryMap.category_text))).all()]
+        items = await cash_category_texts(session)
         staff = (await session.execute(
             select(CrmStaff.id, CrmStaff.name)
             .where(CrmStaff.status == "在職").order_by(CrmStaff.name))).all()

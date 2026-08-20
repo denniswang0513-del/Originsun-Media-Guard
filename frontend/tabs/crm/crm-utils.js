@@ -145,7 +145,15 @@ export { projectOptionsHtml } from '../../js/shared/utils.js';
 export function searchableSelect(sel, opts = {}) {
     if (!sel || sel.dataset.searchable) return;
     sel.dataset.searchable = '1';
-    const placeholder = opts.placeholder || '搜尋...';
+    // 篩選器的預設選項是「全部XX」而且 value 是空字串 —— 下面「顯示目前選中標籤」
+    // 那段只認有 value 的選項，所以升級後整個框變空白，使用者看不出這是什麼篩選器
+    // （實測收支明細的類別篩選器：選項從 4 個變 28 個跨過自動升級門檻後就這樣）。
+    // 沒有明確指定 placeholder 時，就拿那個空值選項的字當提示 —— 等同原生 select
+    // 未選時的顯示，語意一致。
+    const _blank = [...sel.options].find(o => !o.value);
+    const placeholder = opts.placeholder
+        || (_blank && _blank.textContent.trim())
+        || '搜尋...';
 
     const wrap = document.createElement('div');
     wrap.className = 'ss-wrap';
@@ -201,7 +209,10 @@ export function searchableSelect(sel, opts = {}) {
         sel.dispatchEvent(new Event('change', { bubbles: true }));
     }
 
-    input.addEventListener('focus', () => { _buildItems(); _render(input.value); });
+    // 點開就看到**全部**選項，不要拿已選值的文字去過濾 —— 那樣一個已經有值的
+    // 下拉點開只會看到它自己那一項，使用者得先手動清空才換得掉（實測專案下拉
+    // 32 個選項，選過之後再點開只剩 1 個）。開始打字才過濾。
+    input.addEventListener('focus', () => { _buildItems(); _render(''); });
     input.addEventListener('input', () => { _buildItems(); _render(input.value); });
     input.addEventListener('blur', () => { setTimeout(() => panel.style.display = 'none', 150); });
     input.addEventListener('keydown', e => {

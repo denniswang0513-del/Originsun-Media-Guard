@@ -42,6 +42,7 @@ try:
                            CrmProjectStaff,
                            CrmProjectExpense,
                            CrmInvoice, CrmPaymentRequest, CrmCashEntry,
+                           CrmCashInvoiceLink,
                            CrmProjectCostLine, CrmCostLineTemplate,
                            CrmProjectCostGroup,
                            CrmProjectShowcase,
@@ -59,7 +60,8 @@ __all__ = [
     "or_", "delete", "sa_update", "IntegrityError", "User", "CrmProjectExpense",
     "CrmQuotation", "CrmQuotationItem", "CrmQuotationTemplate",
     "CrmStaff", "CrmStaffPortfolio", "CrmProjectStaff",
-    "CrmInvoice", "CrmPaymentRequest", "CrmCashEntry",
+    "CrmInvoice", "CrmPaymentRequest", "CrmCashEntry", "CrmCashInvoiceLink",
+    "cash_category_texts",
     "CrmProjectCostLine", "CrmCostLineTemplate", "CrmProjectCostGroup",
     "CrmProjectShowcase", "ProjectMediaLog", "ProjectMediaFile", "CrmExpenseLink",
     "WEBSITE_TEAM_OVERRIDE_FIELDS",
@@ -549,5 +551,17 @@ async def _mint_token_generic(session, model_cls, obj_id: str, scope: str, *,
         row.updated_at = _now()
     return token, row
 
+async def cash_category_texts(session) -> list:
+    """目前有效的收支明細 category 清單（finance_category_map, source='cash'）。
 
-
+    唯一正本 —— 這份清單本來散在四個地方（零用金 options 端點、零用金另一支查詢、
+    對帳單預覽的未對映檢查、匯入腳本），其中兩份是 ORM、兩份是手寫 SQL，`active`
+    的寫法還不一致。前端下拉也不該再寫死：`貸款繳款`／`貸款補貼` 這些後來加的
+    類別沒同步進去，結果自家匯入寫出來的列，使用者在編輯視窗裡選不到它的類別。
+    """
+    from db.models import FinanceCategoryMap
+    return [r[0] for r in (await session.execute(
+        select(FinanceCategoryMap.category_text)
+        .where(FinanceCategoryMap.source == "cash",
+               FinanceCategoryMap.active.is_(True))
+        .order_by(FinanceCategoryMap.category_text))).all()]

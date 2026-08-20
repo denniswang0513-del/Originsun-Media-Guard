@@ -100,6 +100,24 @@ def reconciliation_diff(system_balance: int, statement_balance: int) -> dict:
     return {"diff": diff, "status": "balanced" if diff == 0 else "diff"}
 
 
+# 收款方代扣的匯費上限。實收比發票少這個數以內就當「收齊了」——
+# 台灣的跨行匯費是 15/30 元，2026-08-20 實測 394 張歷史發票裡有 42 張正好差 30。
+FEE_TOLERANCE = 50
+
+
+def invoice_is_settled(collected: int, amount_total: int) -> bool:
+    """這張發票收齊了沒？
+
+    🔴 唯一正本 —— 這個判斷同時決定三件事：發票的 payment_status、它出不出現在
+    應收帳款、以及分配面板顯示綠燈還是「沒收齊」。分開寫必然漂：2026-08-20 實測，
+    「收到任何一毛就標已收款」讓一張只收 111,050 / 面額 144,900 的發票（尚欠
+    33,850）整張從應收帳款消失，同一畫面的發票列表卻照實顯示 outstanding。
+
+    容差是為了匯費，不是為了讓沒收齊的發票蒙混過關 —— 差 33,850 不會過，差 30 會。
+    """
+    return int(collected or 0) + FEE_TOLERANCE >= int(amount_total or 0)
+
+
 def statement_line_status(line: dict) -> str:
     """對帳單明細列狀態（推導值不落庫）：matched（有配對）> noted（有說明）> unmatched。"""
     if line.get("matched_entry_id"):

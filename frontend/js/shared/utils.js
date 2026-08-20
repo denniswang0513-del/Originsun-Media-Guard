@@ -491,9 +491,10 @@ export function uploadProgress(host, onCancel) {
  * 住在這裡而不是 crm-utils：提案資產夾瀏覽器也要用它，而那支要能在 NAS 對外
  * 容器載入（只 serve js/shared 與 tabs/proposals）。crm-utils 仍 re-export。
  */
-export function projectOptionsHtml(projects, placeholder = '— 選擇專案 —') {
+export function projectOptionsHtml(projects, placeholder = '— 選擇專案 —', selectedId = null) {
     return `<option value="">${esc(placeholder)}</option>`
-        + (projects || []).map(p => `<option value="${esc(p.id)}">${esc(p.name)}${
+        + (projects || []).map(p => `<option value="${esc(p.id)}"${
+            p.id === selectedId ? ' selected' : ''}>${esc(p.name)}${
             p.client_short_name ? '（' + esc(p.client_short_name) + '）' : ''}</option>`).join('');
 }
 

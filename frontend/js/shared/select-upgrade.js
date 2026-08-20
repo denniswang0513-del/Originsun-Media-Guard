@@ -22,7 +22,9 @@ const SEL = 'select:not([data-searchable]):not([multiple]):not([data-no-search])
 function _sweep() {
     for (const sel of document.querySelectorAll(SEL)) {
         if (sel.options.length >= MIN_OPTIONS) {
-            try { searchableSelect(sel, { placeholder: '搜尋…' }); } catch (_) { /* per-select isolation */ }
+            // 不指定 placeholder —— 讓 searchableSelect 自己取「全部XX」那個空值
+            // 選項的字。統一寫死「搜尋…」會把篩選器的身分抹掉。
+            try { searchableSelect(sel); } catch (_) { /* per-select isolation */ }
         }
     }
 }

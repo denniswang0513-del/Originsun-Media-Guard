@@ -42,14 +42,10 @@ COL = {"date": 0, "spend": 1, "claim": 2, "deposit": 3, "summary": 4,
        "note": 5, "kind": 6, "item": 7, "payee": 8, "project": 12}
 
 
-def resolve_db_url(prod: bool) -> str:
-    """dev/prod 庫切換的**單一正本** —— 三支零用金腳本共用（backfill 系列經
-    importlib 載入本模組取用）。這段邏輯絕不能在 dry-run 報告器與 applier 之間
-    漂移（memory 有一筆 database_url 改壞連錯庫的前科）。"""
-    from config import load_settings
-    url = load_settings().get("database_url", "")
-    return (url.replace("/mediaguard_dev", "/mediaguard") if prod
-            else (url if url.endswith("_dev") else url + "_dev"))
+# 正本搬到 scripts/_common.py（原本三支匯入腳本各有一份一字不差的複本）。
+# 這裡保留 module 層級的名字 —— backfill_petty_dates 與 cleanup_placeholder_expenses
+# 是用 importlib 依**檔案路徑**載入本模組再取 `.resolve_db_url`，拿掉會直接壞掉。
+from scripts._common import resolve_db_url  # noqa: E402,F401
 
 
 HEADER_MARK = "日期"

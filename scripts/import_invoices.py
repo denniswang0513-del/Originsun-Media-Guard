@@ -33,7 +33,6 @@ import asyncio
 import csv
 import io
 import os
-import re
 import sys
 import uuid
 from collections import defaultdict
@@ -45,6 +44,7 @@ sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="repla
 from sqlalchemy import select  # noqa: E402
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine  # noqa: E402
 
+from scripts._common import find_header, parse_date, resolve_db_url  # noqa: E402
 from db.models import CrmInvoice  # noqa: E402
 from routers.crm.finance import _map_invoice_row  # noqa: E402
 
@@ -76,41 +76,9 @@ FIXUPS = {
 BLANK_STATUS = ""
 
 
-def resolve_db_url(prod: bool) -> str:
-    """dev/prod 庫切換 —— 與 scripts/import_petty_cash.py 同一套寫法，不得漂移。"""
-    from config import load_settings
-    url = load_settings().get("database_url", "")
-    return (url.replace("/mediaguard_dev", "/mediaguard") if prod
-            else (url if url.endswith("_dev") else url + "_dev"))
-
-
-def find_header(rows: list) -> int:
-    for i, r in enumerate(rows):
-        if any(c.strip() == HEADER_MARK for c in r):
-            return i
-    raise SystemExit(f"找不到表頭列（沒有任何一列含「{HEADER_MARK}」）")
-
-
-def parse_date(v: str):
-    """'2024/01/02' / '2024-1-2' → 該日的 UTC 午夜。壞值回 None（報告會列出來）。
-
-    🔴 日期只把 Sheet 的斜線格式正規化，實際的 datetime **交給
-    routers.crm._shared._parse_shoot_date 造** —— 這個 repo 的日期欄慣例是
-    UTC 午夜（台北是 UTC+8，UTC 午夜換算台北仍同一天，_fmt_day 與前端取 ISO
-    前 10 碼才會一致）。這裡自己 `datetime(y,m,d).date()` 會被寫成**台北**午夜
-    ＝前一天 16:00Z，前端顯示就少一天（2026-08-19 第一版匯入實際踩到，394 筆全中）。
-    """
-    v = (v or "").strip()
-    m = re.fullmatch(r"(\d{4})[/-](\d{1,2})[/-](\d{1,2})", v)
-    if not m:
-        return None
-    from routers.crm._shared import _parse_shoot_date
-    return _parse_shoot_date(f"{int(m[1]):04d}-{int(m[2]):02d}-{int(m[3]):02d}")
-
-
 def load(csv_path: str):
     rows = list(csv.reader(io.open(csv_path, encoding="utf-8-sig", newline="")))
-    h = find_header(rows)
+    h = find_header(rows, HEADER_MARK)
     hdr = [c.strip() for c in rows[h]]
     header_map = {c.lower(): c for c in hdr if c}
     recs, skipped, bad_date, applied = [], [], [], []
