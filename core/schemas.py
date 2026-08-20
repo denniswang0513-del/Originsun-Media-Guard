@@ -676,11 +676,14 @@ class PaymentRequestPayload(BaseModel):
 
 
 class CashEntryPayload(BaseModel):
+    """收支明細。**PUT 走 exclude_unset 部分更新** —— 所以每個欄位都可以不送，
+    包括 summary（建立時由 create_cash_entry 明確驗必填）。整包寫回會把前端沒送的
+    欄位洗成這裡的預設值，收支明細有 20 幾欄而編輯視窗只送 10 個。"""
     entry_date: Optional[str] = None
     expense: Optional[int] = None
     claim: Optional[int] = None
     deposit: Optional[int] = None
-    summary: str
+    summary: Optional[str] = None
     note: str = ""
     category: str = ""
     item: str = ""
@@ -1144,6 +1147,7 @@ class LoanPayload(BaseModel):
     start_date: Optional[str] = None       # 'YYYY-MM-DD'
     first_payment_date: Optional[str] = None  # 'YYYY-MM-DD'（空=起貸日下月同日）
     bank_account_id: Optional[str] = None  # 預設扣款帳戶
+    account_no: Optional[str] = None       # 銀行放款帳號（對帳單匯入配對用）
     opening_balance: Optional[int] = None  # 導入舊貸=當下剩餘本金（攤還表只生剩餘期）
     note: Optional[str] = None
     # 兩本帳：None＝建立時落 'parent'、更新時維持既有值；🔴 不可給 "parent" 當預設——整包 model_dump 寫回會把我的帳列洗回母公司
@@ -1151,9 +1155,12 @@ class LoanPayload(BaseModel):
 
 
 class LoanPayPayload(BaseModel):
-    """貸款繳款：自動建收支明細（expense=本+息、category=貸款繳款）。"""
+    """貸款繳款：自動建收支明細（expense=實扣金額、category=貸款繳款）。"""
     bank_account_id: Optional[str] = None  # 空 → 用貸款預設扣款帳戶
     paid_date: Optional[str] = None        # 'YYYY-MM-DD'，空 → 今天
+    # 銀行實際扣了多少（正整數）。空 → 照攤還表本+息。
+    # 對帳單匯入會自動帶銀行那個數字；手動繳款時對著存摺填才會準。
+    amount: Optional[int] = None
 
 
 # ── 書籤（任務路徑預設；2026-07-21 復活 — 前端存 UNC 路徑組，全機隊共用）──
@@ -1201,3 +1208,32 @@ class ChunkFinishRequest(BaseModel):
     size: int = Field(gt=0, description="期望的總長度；與實收不符 → 409")
     category: str = ""
     uploader_name: str = ""
+
+
+class StatementImportRow(BaseModel):
+    """對帳單匯入 apply 的一列 —— 前端把 preview 回來的列原樣送回（可改分類/
+    可取消勾選）。金額帶號：正=存入、負=支出。"""
+    date: str
+    amount: int
+    description: Optional[str] = ""
+    category: Optional[str] = ""
+    # 指定成貸款繳款時要帶：配到哪筆貸款的哪一期（preview 已配好或使用者手選）
+    loan_id: Optional[str] = None
+    period_no: Optional[int] = None
+
+
+class StatementImportApply(BaseModel):
+    """確認後寫入。rows 只放使用者勾選要匯的列 —— 沒勾的不會出現在這裡。"""
+    bank_account_id: str
+    rows: List[StatementImportRow] = []
+
+
+class CashInvoiceLink(BaseModel):
+    """一筆收款分配到一張發票的金額（合併匯款 / 分期收款）。"""
+    invoice_id: str
+    amount: int
+
+
+class CashInvoiceLinksPayload(BaseModel):
+    """整組取代某筆收款的發票分配 —— 送空 items 就是全部解除。"""
+    items: List[CashInvoiceLink] = []

@@ -649,6 +649,14 @@ async def _on_startup():
                 from sqlalchemy import text as _tex
                 async with _fex() as _sex:
                     for col_sql in [
+                        # 對帳單匯入：貸款的銀行放款帳號（合庫備註帶 315614 這種號碼，
+                        # 靠它認出扣款屬於哪筆貸款 —— 金額配對在銀行月付固定、我們重算
+                        # 的情況下會差幾十元，帳號才是可靠的鍵）
+                        "ALTER TABLE finance_loans ADD COLUMN IF NOT EXISTS account_no VARCHAR(32)",
+                        # 銀行實扣金額（空＝照攤還表）。銀行按實際天數算息會跟我們
+                        # 重算的差幾元，記攤還表數字會讓銀行餘額逐期累積偏差、
+                        # 對帳工作台也永遠勾不掉那些列。
+                        "ALTER TABLE finance_loan_payments ADD COLUMN IF NOT EXISTS paid_amount INTEGER",
                         # 結案製作看板：結案專案的官網製作階段（待製作/製作中/不上官網）
                         "ALTER TABLE crm_projects ADD COLUMN IF NOT EXISTS website_prod_stage VARCHAR(16)",
                         # N2 階段0：專案時數預算池（對齊工時 Sheet 的預算欄，藍圖 §3 現況修正）

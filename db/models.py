@@ -759,6 +759,31 @@ class CrmCashEntry(Base):
     updated_at = Column(DateTime(timezone=True), server_default=func.now())
 
 
+class CrmCashInvoiceLink(Base):
+    """收款 ↔ 發票的分配明細（多對多，帶金額）。
+
+    為什麼不是 crm_cash_entries.invoice_id 一個欄位就好 —— 真實帳有兩種一對多：
+      合併匯款：客戶一次匯 3 張發票的錢 → 一筆收款要掛多張發票
+      分期收款：一張發票分兩次收 → 一張發票要掛多筆收款
+    兩者都是 (收款, 發票, 這次分配多少) 的關係，一張連結表同時解決。
+
+    `crm_cash_entries.invoice_id` 保留為「主要發票」（既有查詢與 UI 都靠它），
+    寫入連結時一併同步成金額最大的那張 —— 舊路徑不會因為這張表而失準。
+    """
+    __tablename__ = "crm_cash_invoice_links"
+
+    id = Column(String(32), primary_key=True)
+    cash_entry_id = Column(String(32), nullable=False, index=True)  # soft FK → crm_cash_entries.id
+    invoice_id = Column(String(32), nullable=False, index=True)     # soft FK → crm_invoices.id
+    amount = Column(Integer, nullable=False, default=0)             # 這筆收款分配到這張發票的金額
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    __table_args__ = (
+        # 同一筆收款不會對同一張發票分配兩次（要改金額就改那一列）
+        UniqueConstraint("cash_entry_id", "invoice_id", name="uq_cashinv_entry_invoice"),
+    )
+
+
 class ApiKey(Base):
     """API Key for programmatic access (OpenClaw, scripts, CI/CD)."""
     __tablename__ = "api_keys"
@@ -1512,6 +1537,7 @@ class FinanceLoan(Base):
     start_date = Column(DateTime(timezone=True), nullable=True)  # 撥款/起貸日
     first_payment_date = Column(DateTime(timezone=True), nullable=True)  # 首期繳款日（空=起貸日下月同日）
     bank_account_id = Column(String(32), nullable=True)          # 預設扣款帳戶（soft FK → bank_accounts.id）
+    account_no = Column(String(32), nullable=True)               # 銀行放款帳號 —— 對帳單匯入靠它認出這筆是哪個貸款的扣款
     opening_balance = Column(Integer, nullable=True)             # 導入舊貸=當下剩餘本金（空=全新貸款）
     note = Column(Text, nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
@@ -1530,6 +1556,12 @@ class FinanceLoanPayment(Base):
     principal_due = Column(Integer, nullable=False, default=0)   # 本期應還本金
     interest_due = Column(Integer, nullable=False, default=0)    # 本期應付利息
     paid_at = Column(DateTime(timezone=True), nullable=True)     # 實際繳款日
+    # 銀行**實際扣款**金額。空＝照攤還表（principal_due + interest_due）。
+    # 🔴 為什麼要分開存：銀行按實際天數算息、進位也不同，跟我們用公式重算的會差
+    # 幾元（實測合庫 315614 攤還表 4,456／銀行實扣 4,470，315611 是 25,286／25,290）。
+    # 記攤還表那個數字的話，系統的銀行餘額每期歪十幾元且累積，而對帳工作台要求
+    # 金額完全相等才勾得掉 —— 那些列會永遠配不上。現金看銀行的，本息拆分看攤還表。
+    paid_amount = Column(Integer, nullable=True)
     cash_entry_id = Column(String(32), nullable=True)            # 關聯收支明細（pay 自動建）
     status = Column(String(16), nullable=False, default="scheduled")  # scheduled/paid（逾期為即時推導，不落庫）
 
