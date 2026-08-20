@@ -32,19 +32,32 @@ function _loadFees() {
 function _saveFees(fees) { localStorage.setItem('inv_commission_fees', JSON.stringify(fees)); }
 
 // ── Applicant list (localStorage) ───────────────────────────
-function _loadApplicants() {
+// 申請人清單（誰能被選為這張發票的申請人）。
+//
+// 🔴 存在伺服器（settings 的 invoice_applicants），不是瀏覽器的 localStorage ——
+// 那是每台電腦各自一份，在辦公室設好、回家開就只剩「—」，而且沒人知道少了誰
+// （2026-08-20 owner 實際踩到）。這是全公司共用的一份名單。
+// 沒設定過時後端會用發票資料裡實際用過的人當預設，所以永遠不會是空的；
+// 用⚙️管理視窗改過之後，就以那份為準（可以刪掉不再開票的人）。
+let _applicants = [];
+
+async function _loadApplicants() {
     try {
-        const s = localStorage.getItem('inv_applicants');
-        if (s) return JSON.parse(s);
-    } catch (_) {}
-    return [];
+        _applicants = (await _fetch('/invoice-applicants')).applicants || [];
+    } catch (_) { _applicants = []; }
+    return _applicants;
 }
-function _saveApplicants(list) { localStorage.setItem('inv_applicants', JSON.stringify(list)); }
+
+async function _saveApplicants(list) {
+    await _fetch('/invoice-applicants',
+                 { method: 'PUT', body: JSON.stringify({ applicants: list }) });
+    _applicants = list;
+}
 
 function _populateApplicantSelect(current) {
     const sel = document.getElementById('inv-f-applicant');
     if (!sel) return;
-    const list = _loadApplicants();
+    const list = _applicants;
     sel.innerHTML = '<option value="">— 選擇 —</option>' +
         list.map(n => `<option value="${_esc(n)}"${n === current ? ' selected' : ''}>${_esc(n)}</option>`).join('');
 }
@@ -52,12 +65,12 @@ function _populateApplicantSelect(current) {
 function _renderApplicantList() {
     const container = document.getElementById('inv-applicant-list');
     if (!container) return;
-    const list = _loadApplicants();
-    if (list.length === 0) {
-        container.innerHTML = '<div style="color:#6b7280;font-size:12px;">尚無申請人</div>';
+    if (_applicants.length === 0) {
+        container.innerHTML = '<div style="color:#6b7280;font-size:12px;">'
+            + '尚無申請人（清空後會退回用發票資料推導）</div>';
         return;
     }
-    container.innerHTML = list.map((n, i) =>
+    container.innerHTML = _applicants.map((n, i) =>
         `<div style="display:flex;align-items:center;gap:8px;padding:4px 0;">` +
         `<span style="flex:1;font-size:13px;">${_esc(n)}</span>` +
         `<button type="button" class="crm-btn crm-btn-danger crm-btn-sm" onclick="window._invRemoveApplicant(${i})">刪除</button>` +
@@ -99,14 +112,20 @@ function _statusBadge(status) {
 // 開立中 → 已開立 → 作廢:工作流順序,asc 把待處理(開立中)排前面
 const _INV_STATUS_ORDER = ['開立中', '已開立', '作廢'];
 // 款項狀態排序：待處理(未收/未付)在前、空白墊底（空白＝來源沒填，不是一種進度）
-const _INV_PAY_ORDER = ['未收款', '未付款', '已收款', '已付款', '作廢', ''];
+// 🔴 發票的「錢已經付出去」叫**已轉撥**（owner 2026-08-20）——
+// 過路錢轉給代開人，跟請款單的「已付款」（我們真的付掉一筆費用）是兩件事。
+const INV_REMITTED = '已轉撥';
+const _INV_PAY_ORDER = ['未收款', '未付款', '已收款', INV_REMITTED, '作廢', ''];
 
 /** 款項狀態 badge。🔴 空白就顯示空白 —— 舊寫法 `payment_status || '未收款'` 會把
  *  「來源沒填」畫成「未收款」，等於替沒表態的資料表態（匯入歷史發票時有 21 張）。 */
 function _payBadge(status) {
     const s = (status || '').trim();
     if (!s) return '<span class="crm-badge crm-pay-badge-未設定">未設定</span>';
-    const cls = s === '已收款' || s === '已付款' ? '收款' : s === '作廢' ? '作廢' : '未收款';
+    // 已轉撥自己一個顏色 —— 它跟「已收款」是不同階段（錢進來 vs 錢再轉出去），
+    // 共用綠色的話一整欄看起來都一樣，分不出哪些還沒轉撥。
+    const cls = s === INV_REMITTED ? '已轉撥'
+        : s === '已收款' ? '收款' : s === '作廢' ? '作廢' : '未收款';
     return `<span class="crm-badge crm-pay-badge-${cls}">${_esc(s)}</span>`;
 }
 const _sorter = createSortable({
@@ -197,25 +216,26 @@ function _quickAddRow() {
         `<option${v === sel ? ' selected' : ''}>${_esc(v)}</option>`).join('');
     const clientOpts = '<option value="">—</option>' + _clients.map(c =>
         `<option value="${_esc(c.short_name)}">${_esc(c.short_name)}</option>`).join('');
-    const enter = 'onkeydown="if(event.key===\'Enter\'){event.preventDefault();window._invQuickAdd();}"';
+    // 🔴 刻意**不**綁 Enter 送出 —— owner 2026-08-20：這排格子就在列表最上面，
+    // 打字時很容易誤按，一按就直接寫進一筆。要新增就按右邊那顆 ＋。
     const mode = _qaMode();
     return `
       <div class="inv-qa-wrap">
       <div class="crm-row inv-qa">
-        <div class="crm-row-date"><input id="inv-qa-date" type="date" value="${_todayStr()}" ${enter}></div>
+        <div class="crm-row-date"><input id="inv-qa-date" type="date" value="${_todayStr()}"></div>
         <div><select id="inv-qa-applicant">${
-            ['<option value="">—</option>'].concat(_loadApplicants().map(n =>
+            ['<option value="">—</option>'].concat(_applicants.map(n =>
                 `<option value="${_esc(n)}">${_esc(n)}</option>`)).join('')
         }</select></div>
-        <div class="crm-row-name"><input id="inv-qa-title" placeholder="＋ 名稱（Enter 儲存）"
-               title="輸入名稱後按 Enter 直接新增一筆發票；其餘欄位可留白，之後點該列補齊" ${enter}></div>
+        <div class="crm-row-name"><input id="inv-qa-title" placeholder="＋ 名稱（填完按右側 ＋）"
+               title="填好名稱後按這一列最右邊的 ＋ 新增；其餘欄位可留白，之後點該列補齊"></div>
         <div class="crm-row-amount">
           <div class="inv-qa-amt">
             <button type="button" id="inv-qa-mode" class="inv-qa-mode"
                     title="切換：這格輸入的是未稅價還是含稅價（按一下換，數字不變）"
                     onclick="window._invQuickToggleMode()">${_qaModeLabel(mode)}</button>
             <input id="inv-qa-amt" type="number" min="0" placeholder="${_qaModeLabel(mode)}價"
-                   oninput="window._invQuickCalc()" ${enter}>
+                   oninput="window._invQuickCalc()">
           </div>
           <div id="inv-qa-conv" class="inv-qa-hint"></div>
         </div>
@@ -223,24 +243,24 @@ function _quickAddRow() {
           <select id="inv-qa-company" onchange="window._invQuickCalc()">${clientOpts}</select>
         </div>
         <div><span id="inv-qa-taxid" class="inv-qa-hint">—</span></div>
-        <div><input id="inv-qa-item" placeholder="品項" ${enter}></div>
+        <div><input id="inv-qa-item" placeholder="品項"></div>
         <div><select id="inv-qa-cat" onchange="window._invQuickCalc()">${opts(_INV_CATEGORIES, '專案')}</select></div>
         <div><select id="inv-qa-kind" onchange="window._invQuickKind()">${
             _INV_KINDS.map(v => `<option value="${_esc(v)}"${v === '電子發票' ? ' selected' : ''}>${_esc(v.replace('發票', ''))}</option>`).join('')
         }</select></div>
-        <div><select id="inv-qa-pay">${opts(['未收款', '已收款', '已付款', '作廢'], '未收款')}</select></div>
+        <div><select id="inv-qa-pay">${opts(['未收款', '已收款', INV_REMITTED, '作廢'], '未收款')}</select></div>
         <div><select id="inv-qa-iss">${opts(['開立中', '已開立', '作廢'], '開立中')}</select></div>
         <span class="crm-kebab-wrap">
           <button class="crm-btn crm-btn-primary crm-btn-sm inv-qa-btn"
-                  title="新增這筆發票（或按 Enter）" onclick="window._invQuickAdd()">＋</button>
+                  title="新增這筆發票" onclick="window._invQuickAdd()">＋</button>
         </span>
       </div>
       <!-- 紙本發票才要的收件資訊：選了紙本才展開，平常不佔版面 -->
       <div class="crm-row inv-qa inv-qa-paper" id="inv-qa-paper" style="display:none;">
         <div class="inv-qa-paper-label">紙本寄送</div>
-        <input id="inv-qa-recipient" placeholder="收件人" ${enter}>
-        <input id="inv-qa-recipient_phone" placeholder="收件電話" ${enter}>
-        <input id="inv-qa-recipient_address" placeholder="收件地址" ${enter}>
+        <input id="inv-qa-recipient" placeholder="收件人">
+        <input id="inv-qa-recipient_phone" placeholder="收件電話">
+        <input id="inv-qa-recipient_address" placeholder="收件地址">
       </div>
       </div>`;
 }
@@ -293,7 +313,7 @@ window._invQuickAdd = async function () {
         issue_status: issue,
         // 作廢的發票款項狀態一律作廢（與 modal / inline 編輯同一條規則）
         payment_status: issue === '作廢' ? '作廢' : val('inv-qa-pay'),
-        payment_type: val('inv-qa-pay') === '已付款' ? '付款' : '收款',
+        payment_type: val('inv-qa-pay') === INV_REMITTED ? '付款' : '收款',
     }, { amount: val('inv-qa-amt'), mode: _qaMode() });
     if (_pinEntity() === 'mine') payload.entity = 'mine';   // 帳本 pin，parent 不送
 
@@ -345,8 +365,11 @@ function _buildEditFields() {
         // ── 開立資訊
         {name:'invoice_number', label:'發票編號', type:'text'},
         {name:'issue_status', label:'開立狀態', type:'select', options:[{value:'開立中',label:'開立中'},{value:'已開立',label:'已開立'},{value:'作廢',label:'作廢'}]},
+        // 🔴 兩欄都可以填 —— 對方報價給的有時是未稅、有時是含稅，只開一邊就要
+        // 有人自己按計算機再回填（owner 2026-08-20）。改哪一欄就以哪一欄為準，
+        // 另一欄與稅額由 _deriveInvoice 推（同一支，不另寫一套換算）。
         {name:'amount_ex_tax', label:'未稅價', type:'number'},
-        {name:'_amount_total_display', label:'含稅價', type:'readonly'},
+        {name:'amount_total', label:'含稅價', type:'number'},
         {name:'_tax_amount_display', label:'稅額', type:'readonly'},
         {name:'company_name', label:'抬頭', type:'select',
             options:[{value:'',label:'— 選擇客戶 —'}].concat(_clients.map(c => ({value:c.short_name,label:c.short_name + (c.tax_id ? ' (' + c.tax_id + ')' : '')})))},
@@ -754,7 +777,7 @@ function renderDetail(inv) {
     }
     addEditButton('inv-bar-actions', () => {
         const editData = { ...inv,
-            _amount_total_display: inv.amount_total ? '$' + _fmtNum(inv.amount_total) : '',
+
             _tax_amount_display: inv.tax_amount ? '$' + _fmtNum(inv.tax_amount) : '',
             _commission_display: inv.commission ? '$' + _fmtNum(inv.commission) : '',
         };
@@ -770,8 +793,16 @@ function renderDetail(inv) {
                 payload.payment_type = inv.payment_type || '收款';
                 if (payload.issue_status === '作廢') payload.payment_status = '作廢';
                 else payload.payment_status = inv.payment_status || '';
-                // 詳情頁的金額欄是「未稅價」，方向固定 ex
-                _deriveInvoice(payload, { amount: payload.amount_ex_tax, mode: 'ex', fallbackTaxId: inv.tax_id });
+                // 兩欄都可編：看使用者動了哪一欄就從那一欄推另一欄。
+                // 兩欄都改（或都沒改）時以含稅價為準 —— 含稅是實際收到/付出的數字，
+                // 而未稅是它除出來的；反過來推會因為四捨五入讓含稅價自己跳動。
+                const exChanged = (payload.amount_ex_tax ?? null) !== (inv.amount_ex_tax ?? null);
+                const totChanged = (payload.amount_total ?? null) !== (inv.amount_total ?? null);
+                const useTotal = totChanged || !exChanged;
+                _deriveInvoice(payload, {
+                    amount: useTotal ? payload.amount_total : payload.amount_ex_tax,
+                    mode: useTotal ? 'total' : 'ex',
+                    fallbackTaxId: inv.tax_id });
                 await _fetch('/invoices/' + inv.id, { method: 'PUT', body: JSON.stringify(payload) });
                 const updated = await _fetch('/invoices/' + inv.id);
                 renderDetail(updated);
@@ -1086,26 +1117,27 @@ function _initApplicantSettings() {
         document.getElementById('inv-applicant-popup').style.display = 'block';
     });
 
-    document.getElementById('inv-applicant-add-btn').addEventListener('click', () => {
+    document.getElementById('inv-applicant-add-btn').addEventListener('click', async () => {
         const input = document.getElementById('inv-applicant-new');
         const name = input.value.trim();
         if (!name) return;
-        const list = _loadApplicants();
-        if (!list.includes(name)) {
-            list.push(name);
-            _saveApplicants(list);
+        if (!_applicants.includes(name)) {
+            try { await _saveApplicants([..._applicants, name]); }
+            catch (e) { alert('存不起來：' + e.message); return; }
         }
         input.value = '';
         _renderApplicantList();
         _populateApplicantSelect(document.getElementById('inv-f-applicant').value);
+        renderList();          // 快速新增列的下拉跟著更新
     });
 
-    window._invRemoveApplicant = (idx) => {
-        const list = _loadApplicants();
-        list.splice(idx, 1);
-        _saveApplicants(list);
+    window._invRemoveApplicant = async (idx) => {
+        const next = _applicants.filter((_, i) => i !== idx);
+        try { await _saveApplicants(next); }
+        catch (e) { alert('存不起來：' + e.message); return; }
         _renderApplicantList();
         _populateApplicantSelect(document.getElementById('inv-f-applicant').value);
+        renderList();
     };
 }
 
@@ -1356,5 +1388,11 @@ export async function initCrmInvoicesTab() {
         if (window._cashflowRefresh) window._cashflowRefresh();
     });
 
-    await Promise.all([loadInvoices(), loadProjects(), loadClients()]);
+    // 🔴 申請人清單要跟其他資料一起載，而且載完要重畫一次列表 ——
+    // 快速新增列的申請人下拉是在 renderList 裡組的，清單晚到就會是空的
+    // （帳戶切換列同一種競態剛咬過一次，見 crm-cashbook.initCrmCashbookTab）。
+    await Promise.all([loadInvoices(), loadProjects(), loadClients(),
+                       _loadApplicants()]);
+    _populateApplicantSelect();
+    renderList();
 }

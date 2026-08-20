@@ -689,6 +689,12 @@ export async function initCrmCashbookTab() {
     // 列表的「帳戶」欄也是空的。等全部到齊再畫一次就好（畫兩次是 1,600 列 ×2）。
     await Promise.all([loadEntries({ render: false }), _loadInvoiceList(), _loadProjectList(),
                        _loadClientList(), _loadBankAccounts(), _loadCashOptions()]);
+    // 🔴 這裡要連 _syncFilterOptions 一起補畫，不是只有 renderList。
+    // 帳戶切換列由 _syncFilterOptions → _renderAcctTabs 畫，而 loadEntries 內部那次
+    // 幾乎一定跑在 _loadBankAccounts 回來之前（六支並行）—— 那時 _bankAccounts 還是
+    // null，_renderAcctTabs 會把容器清成空字串，然後就再也沒有人重畫它。
+    // 2026-08-20 實測：三顆帳戶鈕與總表全部消失，而且時好時壞（看誰先回來）。
+    _syncFilterOptions();
     renderList();
 }
 

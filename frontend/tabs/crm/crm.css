@@ -618,6 +618,9 @@
 .crm-pay-badge-未收款 { background: #3b2f1f; color: #fbbf24; }
 .crm-pay-badge-付款 { background: #3b2f1f; color: #fbbf24; }
 .crm-pay-badge-作廢 { background: #374151; color: #9ca3af; text-decoration: line-through; }
+/* 已轉撥＝錢已經轉給代開人，是比「已收款」更後面的一階。給它自己的顏色（靛藍），
+   跟已收款的綠、未收款的琥珀都分得開 —— 一整欄掃過去要看得出哪些還沒轉出去。 */
+.crm-pay-badge-已轉撥 { background: #1e2f52; color: #93b4fd; }
 /* 款項狀態空白＝來源沒填。刻意與「未收款」（橘）視覺分開：那是一種進度，這是沒表態。 */
 .crm-pay-badge-未設定 { background: #262626; color: #6b7280; border: 1px dashed #4b5563; }
 
@@ -625,21 +628,26 @@
    釘在列表最上方（sticky）：捲到哪都能登記，不用先回到頂端。
    欄位沿用 .crm-row 的 flex 版面，所以格子與底下的資料列自動對齊。 */
 /* 主列與紙本列一起釘在頂端 —— 兩個各自 sticky top:0 會疊在一起 */
-#inv-list-body .inv-qa-wrap { position: sticky; top: 0; z-index: 2; background: #202020; }
-#inv-list-body .crm-row.inv-qa {
+/* 🔴 選擇器不綁 #inv-list-body —— 請款單也用同一套快速新增列，綁死列表容器
+   的話第二個用的人只能整段複製一份（然後兩份就開始漂）。欄寬本來就由各自
+   列表的 .crm-row 規則決定，這裡只管「輸入格長什麼樣」。 */
+.inv-qa-wrap { position: sticky; top: 0; z-index: 2; background: #202020; }
+.crm-row.inv-qa {
   background: #202020; border-bottom: 1px solid #333;
   cursor: default;
 }
-#inv-list-body .crm-row.inv-qa:hover { background: #202020; }
-#inv-list-body .crm-row.inv-qa input,
-#inv-list-body .crm-row.inv-qa select {
+.crm-row.inv-qa:hover { background: #202020; }
+.crm-row.inv-qa input,
+.crm-row.inv-qa select {
   width: 100%; background: #171717; color: #e0e0e0;
   border: 1px solid #3f3f3f; border-radius: 3px;
   padding: 2px 4px; font-size: 11px; text-align: center;
 }
-#inv-list-body .crm-row.inv-qa input:focus,
-#inv-list-body .crm-row.inv-qa select:focus { border-color: #3b82f6; outline: none; }
-#inv-list-body .crm-row.inv-qa .crm-row-name input { text-align: left; }
+.crm-row.inv-qa input:focus,
+.crm-row.inv-qa select:focus { border-color: #3b82f6; outline: none; }
+.crm-row.inv-qa .crm-row-name input { text-align: left; }
+/* 摘要那格靠左（請款單沒有 .crm-row-name 這個 class） */
+.crm-row.inv-qa input.qa-left { text-align: left; }
 .inv-qa-hint { font-size: 10px; color: #6b7280; margin-top: 1px; }
 .inv-qa-btn { padding: 1px 6px; font-size: 13px; line-height: 1.2; }
 
@@ -657,13 +665,17 @@
    🔴 必須解掉格子的 overflow:hidden —— 資料列那條 ellipsis 規則
    （.crm-row > div { overflow:hidden }）會把往下展開的 .ss-panel 整個裁掉，
    而且 DOM 上仍算「可見」（offsetParent 不為 null），只有量 bounding box 才看得出來。
-   ⚠️ 選擇器要比那條 ellipsis 規則「更特異」而不是只靠順序：兩者都是 (1,2,1)
-   時後寫的贏，而這段在檔案裡比它早出現 —— 多一個 :not() 把特異度拉到 (1,3,1)。 */
+   ⚠️ 選擇器要比那條 ellipsis 規則「更特異」而不是只靠順序：那條是 (1,2,1)、
+   這段在檔案裡比它早出現，所以要補列表的 ID 才拉得到 (1,3,1)。
+   🔴 新的列表要用快速新增列時，在**這裡**加一份 ID，不要去動 ellipsis 那條
+   （改它會連帶蓋掉欄寬，2026-08-20 實測整張表跟表頭錯開）。 */
 #inv-list-body .crm-row.inv-qa,
-#inv-list-body .crm-row.inv-qa > div:not(.crm-kebab-wrap) { overflow: visible; }
-#inv-list-body .crm-row.inv-qa .ss-wrap { width: 100%; }
-#inv-list-body .crm-row.inv-qa .ss-input { width: 100%; font-size: 11px; padding: 2px 4px; text-align: center; }
-#inv-list-body .crm-row.inv-qa .ss-panel { z-index: 300; text-align: left; }
+#inv-list-body .crm-row.inv-qa > div:not(.crm-kebab-wrap),
+#pay-list-body .crm-row.inv-qa,
+#pay-list-body .crm-row.inv-qa > div:not(.crm-kebab-wrap) { overflow: visible; }
+.crm-row.inv-qa .ss-wrap { width: 100%; }
+.crm-row.inv-qa .ss-input { width: 100%; font-size: 11px; padding: 2px 4px; text-align: center; }
+.crm-row.inv-qa .ss-panel { z-index: 300; text-align: left; }
 
 /* ── 詳情列的「複製」（低調：平常近乎隱形，滑到該列才浮出）── */
 .crm-detail-prop { position: relative; }
@@ -885,6 +897,11 @@
 /* ── Accounting tabs: centered, uniform columns ── */
 .acct-header span { flex: 1; text-align: center; }
 
+/* 🔴 這條的特異度是 (1,2,1)，而每個列表的欄寬規則（`#X-list-body .crm-row >
+   *:nth-child(N):not(.crm-kebab-wrap)`）是 (1,3,0) —— 差一名就換人贏。
+   2026-08-20 曾在這裡加 `:not(.inv-qa)` 想排除快速新增列，特異度升到 (1,3,1)
+   就反過來蓋掉所有欄寬，整張表的欄位與表頭錯開。**不要動這條的選擇器**；
+   快速新增列的例外寫在下面那組（自己補 ID 拉到 (1,3,1)）。 */
 #inv-list-body .crm-row > div:not(.crm-kebab-wrap),
 #inv-list-body .crm-row > span:not(:last-child),
 #pay-list-body .crm-row > div:not(.crm-kebab-wrap),

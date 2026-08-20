@@ -1,7 +1,7 @@
 /**
  * crm-payments.js — 請款管理子視圖
  */
-import { crmFetch as _fetch, esc as _esc, fmtNum as _fmtNum, setupResizeHandle, enableInlineEdit, addEditButton, kebabMenuHtml, createSortable, enumIndex } from './crm-utils.js';
+import { crmFetch as _fetch, esc as _esc, fmtNum as _fmtNum, setupResizeHandle, enableInlineEdit, addEditButton, kebabMenuHtml, createSortable, enumIndex, today } from './crm-utils.js';
 
 let _payments = [];
 let _projects = [];
@@ -68,17 +68,18 @@ function renderList() {
     if (!body) return;
     _sorter.attach();
     if (_payments.length === 0) {
-        body.innerHTML = `<div class="crm-empty">尚無請款${_filters.q ? '，請調整搜尋' : ''}</div>`;
+        body.innerHTML = _quickAddRow()
+            + `<div class="crm-empty">尚無請款${_filters.q ? '，請調整搜尋' : ''}</div>`;
         return;
     }
-    body.innerHTML = _sorter.sorted(_payments).map(p => `
+    body.innerHTML = _quickAddRow() + _sorter.sorted(_payments).map(p => `
         <div class="crm-row pay-row${p.id === _selectedId ? ' selected' : ''}" onclick="window._paySelect('${p.id}')">
             <span>${p.request_date ? p.request_date.substring(0, 10) : '—'}</span>
             <span style="font-weight:600;color:#e0e0e0;">${_esc(p.summary)}</span>
             <span style="font-weight:600;color:#e0e0e0;">$${_fmtNum(p.amount)}</span>
             <span>${_esc(p.category || '')}</span>
             <span>${_esc(p.payee_name)}</span>
-            <span>${p.category === '發票代開' && p.invoice_number ? _esc((() => { const inv = _invoiceList.find(i => i.invoice_number === p.invoice_number); return inv ? inv.title : p.invoice_number; })()) : ''}</span>
+            <span title="${_esc(p.invoice_number || '')}">${_esc(p.invoice_title || p.invoice_number || '')}</span>
             <span>${_esc(p.project_name || p.project_label || '')}</span>
             <span>${_statusBadge(p.payment_status)}</span>
             ${kebabMenuHtml(p.id, { onEdit: '_payEdit', onDuplicate: '_payDup', onDelete: '_payDelete' })}
@@ -87,8 +88,9 @@ function renderList() {
 }
 
 function _buildEditFields() {
-    const catOpts = ['','行政','其他','建構','專案雜支','設備耗材','設備維護','軟體網路服務','發票代開','業務推廣','零用金','獎金','薪資','轉存']
-        .map(v => ({value:v, label:v || '—'}));
+    // 🔴 清單缺「專案外包」曾讓最大宗的類別（歷史匯入 371/806 筆，46%）在
+    // 編輯視窗選不到自己 —— 跟收支明細寫死 27 項少 5 項同一種病。
+    const catOpts = [''].concat(_CATEGORIES).map(v => ({value:v, label:v || '—'}));
     const payeeTypeOpts = ['','內部人員','現金','勞報','核銷'].map(v => ({value:v, label:v || '—'}));
     const payeeOpts = [{value:'', label:'— 選擇人員 —'}].concat(
         _staffList.map(s => ({value:s.name, label:s.name + ' (' + s.role + ')'})));
@@ -284,6 +286,103 @@ const _DATE_FIELDS = ['request_date', 'payment_date'];
 const _INT_FIELDS = ['amount'];
 
 const _PROJECT_CATEGORIES = ['專案外包', '專案雜支'];
+// 🔴 清單缺「專案外包」曾讓最大宗的類別（歷史匯入 371/806 筆，46%）在編輯視窗
+// 選不到自己 —— 跟收支明細寫死 27 項少 5 項同一種病。快速列與編輯表單共用這一份。
+const _CATEGORIES = ['專案外包', '發票代開', '建構', '零用金', '專案雜支', '專案',
+    '薪資', '行政', '軟體網路服務', '業務推廣', '設備耗材', '設備維護',
+    '獎金', '轉存', '其他'];
+
+/** 列表頂端的快速新增列（比照發票 Tab：打字 → Enter → 直接進一筆）。 */
+function _quickAddRow() {
+    // 🔴 刻意**不**綁 Enter 送出 —— owner 2026-08-20：這排格子就在列表最上面，
+    // 打字時很容易誤按，一按就直接寫進一筆。要新增就按右邊那顆 ＋。
+    const opt = (v, sel) => `<option value="${_esc(v)}"${v === sel ? ' selected' : ''}>${_esc(v || '—')}</option>`;
+    const cats = _CATEGORIES.map(v => opt(v, '專案外包')).join('');
+    const payees = ['<option value="">—</option>'].concat(
+        _staffList.map(st => `<option value="${_esc(st.name)}">${_esc(st.name)}</option>`)).join('');
+    const projs = ['<option value="">—</option>'].concat(
+        _projects.map(p => `<option value="${_esc(p.id)}">${_esc(p.name)}</option>`)).join('');
+    return `
+      <div class="inv-qa-wrap">
+      <div class="crm-row inv-qa">
+        <div><input id="pay-qa-date" type="date" value="${today()}"></div>
+        <div><input id="pay-qa-summary" class="qa-left" placeholder="＋ 摘要（填完按右側 ＋）"
+             title="填好摘要後按這一列最右邊的 ＋ 新增；其餘欄位可留白，之後點該列補齊"></div>
+        <div><input id="pay-qa-amount" type="number" min="0" placeholder="金額"></div>
+        <div><select id="pay-qa-category" onchange="window._payQuickCat()">${cats}</select></div>
+        <div><select id="pay-qa-payee">${payees}</select></div>
+        <div><input id="pay-qa-invoice" placeholder="發票號碼"
+             title="項目選「發票代開」時才用得到"></div>
+        <div><select id="pay-qa-project">${projs}</select></div>
+        <div><select id="pay-qa-status">${
+            ['應付款', '已付款'].map(v => opt(v, '應付款')).join('')}</select></div>
+        <span class="crm-kebab-wrap">
+          <button class="crm-btn crm-btn-primary crm-btn-sm inv-qa-btn"
+                  title="新增這筆請款" onclick="window._payQuickAdd()">＋</button>
+        </span>
+      </div>
+      </div>`;
+}
+
+/** 只有「發票代開」才用得到發票號碼欄 —— 其餘類別把它變灰，避免亂填。 */
+window._payQuickCat = function () {
+    const inv = document.getElementById('pay-qa-invoice');
+    if (!inv) return;
+    const on = document.getElementById('pay-qa-category')?.value === '發票代開';
+    inv.disabled = !on;
+    inv.style.opacity = on ? '' : '.35';
+    if (!on) inv.value = '';
+};
+
+window._payQuickAdd = async function () {
+    const val = (id) => (document.getElementById(id)?.value || '').trim();
+    const summary = val('pay-qa-summary');
+    if (!summary) { document.getElementById('pay-qa-summary')?.focus(); return; }  // 空列不送
+
+    const category = val('pay-qa-category') || '專案外包';
+    const status = val('pay-qa-status') || '應付款';
+    const reqDate = val('pay-qa-date') || today();
+    const payload = {
+        summary,
+        request_date: reqDate,
+        amount: parseInt(val('pay-qa-amount'), 10) || 0,
+        category,
+        payee_name: val('pay-qa-payee'),
+        payment_status: status,
+        // 已付款要有付款日，否則現金側查不到這筆什麼時候出去的
+        payment_date: status === '已付款' ? reqDate : null,
+        // 應付款要有預計付款月，否則不會出現在應付帳款的月份分組裡
+        planned_month: status === '應付款' ? reqDate.substring(0, 7) : '',
+    };
+    if (category === '發票代開' && val('pay-qa-invoice')) {
+        payload.invoice_number = val('pay-qa-invoice');
+        payload.needs_invoice = 1;
+    }
+    if (_PROJECT_CATEGORIES.includes(category) || category === '發票代開') {
+        const pid = val('pay-qa-project');
+        if (pid) payload.project_id = pid;
+    }
+    // 收款人若對得上人員庫，順帶帶入身分證與身分別（編輯視窗的既有規則）
+    const staff = _staffList.find(st => st.name === payload.payee_name);
+    if (staff) {
+        if (staff.id_number) payload.payee_id = staff.id_number;
+        if (staff.payee_type) payload.payee_type = staff.payee_type;
+    }
+
+    const btn = document.querySelector('.inv-qa-btn');
+    if (btn) btn.disabled = true;
+    try {
+        await _fetch('/payments', { method: 'POST', body: JSON.stringify(payload) });
+        await loadPayments();
+        // 重載後焦點回摘要欄 —— 連續登記（打字、Enter、打字、Enter）不用重新點
+        document.getElementById('pay-qa-summary')?.focus();
+    } catch (e) {
+        alert('新增失敗：' + e.message);
+    } finally {
+        const b2 = document.querySelector('.inv-qa-btn');
+        if (b2) b2.disabled = false;
+    }
+};
 let _invoiceList = [];
 
 async function _loadInvoiceList() {

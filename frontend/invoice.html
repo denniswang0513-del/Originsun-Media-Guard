@@ -127,7 +127,7 @@ async function _submit() {
   try {
     const r = await fetch(BASE + '/invoices', { method: 'POST', headers: _headers(), body: JSON.stringify({
       payment_type: document.getElementById('f-type').value,
-      payment_status: document.getElementById('f-type').value === '收款' ? '已收款' : '已付款',
+      payment_status: document.getElementById('f-type').value === '收款' ? '已收款' : '已轉撥',
       issue_status: '已開立',
       invoice_number: document.getElementById('f-number').value,
       invoice_date: document.getElementById('f-date').value || null,
