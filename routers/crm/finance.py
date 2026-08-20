@@ -127,6 +127,68 @@ def _unmark_invoice_received(inv) -> None:
     inv.paid_date = None
 
 
+# 自動產生的待請款在 notes 裡帶這個標記 —— 反向清理（發票退回未收款）只敢刪
+# 帶標記且還沒付的，人手建的請款單絕不動。
+_AUTO_KAI_NOTE = "代開發票已收款自動產生"
+
+# 🔴 發票的「錢已經付出去」狀態叫**已轉撥**，不是「已付款」（owner 2026-08-20）。
+# 這條線上的錢是過路錢：客戶把款匯進公司 → 公司轉撥給代開人。叫「已付款」會跟
+# **請款單**的已付款（我們真的付掉一筆費用）混在一起，那是兩件事、兩張表。
+# 實測生產 183 張這個狀態全是 payment_type=付款，其中 181 張是代開。
+# ⚠ 只改發票這一邊 —— CrmPaymentRequest 與零用金批次的「已付款」語意正確，別動。
+INVOICE_REMITTED = "已轉撥"
+
+
+async def _sync_passthrough_request(session, inv, when=None) -> None:
+    """代開發票的收款 → 待請款 自動化（owner 2026-08-20 拍板）。
+
+    業務流：公司幫人代開發票（category=內部代開/外部代開），客戶把錢匯進公司
+    → 發票標「已收款」→ 這筆錢的 92% 要匯回給代開人（8% 是稅與手續費），
+    所以要出現一張「應付款」的請款單。金額用發票的 commission 欄（發票匯入時
+    就算好的代開應匯 = amount_total × 92%），沒有才臨時算。
+    之後在應付帳款把它標成已付款 → 發票進「已轉撥」= 整條走完（見 batch_pay）。
+
+    冪等：同一張發票號碼已有「發票代開」請款單（不論狀態）就不再建 ——
+    歷史匯入的 178 筆與重複觸發都靠這條擋。
+    反向：發票退回「未收款」（收款被刪/改）→ 只刪**自動產生且還是應付款**的
+    那張；請款單已付款代表錢真的匯出去了，退狀態不能把付款紀錄變不見。
+    """
+    if not (inv.category and "代開" in inv.category):
+        return
+    no = (inv.invoice_number or "").replace("-", "")
+    if not no:
+        return                      # 沒有號碼就沒有可靠的冪等鍵，不自動建
+    from sqlalchemy import func as safunc
+    existing = (await session.execute(
+        select(CrmPaymentRequest)
+        .where(CrmPaymentRequest.category == "發票代開",
+               safunc.replace(CrmPaymentRequest.invoice_number, "-", "") == no)
+    )).scalars().all()
+    if inv.payment_status == "已收款":
+        if existing:
+            return
+        amount = int(inv.commission or 0) or round(int(inv.amount_total or 0) * 0.92)
+        if amount <= 0:
+            return
+        d = when or _now()
+        now = _now()
+        session.add(CrmPaymentRequest(
+            id=uuid.uuid4().hex, entity=inv.entity or "parent",
+            request_date=d, amount=amount,
+            summary=inv.title or f"代開 {inv.invoice_number}",
+            category="發票代開", payee_name=inv.applicant or None,
+            needs_invoice=1, invoice_number=inv.invoice_number,
+            invoice_amount=int(inv.amount_total or 0),
+            project_id=inv.project_id or None,
+            payment_status="應付款", planned_month=month_of(d),
+            notes=f"{_AUTO_KAI_NOTE}（發票 {int(inv.amount_total or 0):,} × 92% 應匯 {amount:,}）",
+            created_at=now, updated_at=now))
+    else:
+        for p in existing:
+            if p.payment_status == "應付款" and _AUTO_KAI_NOTE in (p.notes or ""):
+                await session.delete(p)
+
+
 async def _resettle_invoice(session, invoice_id, when=None,
                             unmark_if_empty: bool = False) -> None:
     """依**帳上實收**重算一張發票的收款狀態。所有寫入路徑的唯一入口。
@@ -158,13 +220,18 @@ async def _resettle_invoice(session, invoice_id, when=None,
     coll = (await _invoice_collections(session, [invoice_id])).get(invoice_id, {})
     got = coll.get("collected", 0)
     if got and invoice_is_settled(got, inv.amount_total):
-        _mark_invoice_received(inv, when or coll.get("last_paid_date") or _now())
+        # 代開發票的「已轉撥」是比已收款更後面的階段（錢已匯給代開人）——
+        # 收款重算不可以把它降回已收款，那會讓匯出去的紀錄看起來像沒發生。
+        if not (inv.payment_status == INVOICE_REMITTED and inv.category
+                and "代開" in inv.category):
+            _mark_invoice_received(inv, when or coll.get("last_paid_date") or _now())
     elif got or unmark_if_empty:
         # 帳上收了但沒收齊（分期）→ 回到未收款，它才會留在應收帳款裡
         _unmark_invoice_received(inv)
     else:
         return                      # 帳上沒話講 → 不動人工標記
     inv.updated_at = _now()
+    await _sync_passthrough_request(session, inv, when=when)
 
 
 # ── Invoice Endpoints ───────────────────────────────────────
@@ -329,10 +396,15 @@ async def update_invoice(invoice_id: str, req: InvoicePayload, request: Request)
         # 舊/新 invoice_date 的月份都要開著（搬進或搬出鎖定月都算改帳）
         new_date = _parse_shoot_date(req.invoice_date)
         await _assert_month_open(session, inv.invoice_date, new_date, entity=ent)
+        old_status = inv.payment_status
         for k, v in req.model_dump(exclude={"invoice_date", "entity"}).items():
             setattr(inv, k, v)
         inv.invoice_date = new_date
         inv.updated_at = _now()
+        # 代開發票手動標「已收款」（或退回）→ 待請款同步。最常見的觸發點就是
+        # 這裡：客戶匯款進來，有人在發票列表把狀態改掉。
+        if inv.payment_status != old_status:
+            await _sync_passthrough_request(session, inv)
         # 檔名是上傳當下組出來的 —— 發票號碼/日期/抬頭/金額改了就重新對齊
         # （最常見：上傳時還沒填號碼，檔名落到 id 前 8 碼，之後號碼才補上）
         if inv.file_url:
@@ -432,7 +504,7 @@ def _map_invoice_row(header_map: dict, row: dict) -> dict:
         data["payment_status"] = "未收款" if unpaid else "已收款"
     elif "付" in pt:
         data["payment_type"] = "付款"
-        data["payment_status"] = "未付款" if unpaid else "已付款"
+        data["payment_status"] = "未付款" if unpaid else INVOICE_REMITTED
     elif "作廢" in pt:
         data["payment_status"] = "作廢"
     return data
@@ -830,6 +902,59 @@ async def migrate_invoice_files(request: Request, apply: bool = Query(False)):
                        f"原地不動 {len(skipped)} 個；找不到檔案 {len(missing)} 個"}
 
 
+@router.get("/invoice-applicants", dependencies=[Depends(money_dep)])
+async def get_invoice_applicants(request: Request):
+    """開發票的申請人名單（誰能被選為這張票的申請人）。
+
+    🔴 存在 settings 而不是瀏覽器的 localStorage —— 那是每台電腦各自一份，
+    在辦公室設好、回家開就只剩空白，而且沒有人知道少了誰（2026-08-20 owner 實際
+    踩到：下拉只剩「—」）。這是全公司共用的一份名單，本來就該存在伺服器。
+
+    ⚠ 與 get_invoices_root 同樣刻意不走 settings/load 整包：那條回應對機密欄位是
+    遮罩過的，前端拿整包改一個鍵再存回會把真密碼洗成遮罩值。
+
+    沒設定過就用發票資料裡實際用過的人（依張數排序）當預設，名單永遠不會是空的。
+    """
+    _require_db()
+    from sqlalchemy import func as _f
+    safunc_count = _f.count
+    from config import load_settings
+    saved = load_settings().get("invoice_applicants")
+    if isinstance(saved, list):
+        return {"applicants": [str(x) for x in saved if str(x).strip()],
+                "source": "settings"}
+    factory = await _get_factory()
+    async with factory() as session:
+        rows = (await session.execute(
+            select(CrmInvoice.applicant, safunc_count(CrmInvoice.id))
+            .where(CrmInvoice.applicant.isnot(None), CrmInvoice.applicant != "")
+            .group_by(CrmInvoice.applicant)
+            .order_by(safunc_count(CrmInvoice.id).desc()))).all()
+    return {"applicants": [r[0].strip() for r in rows if (r[0] or "").strip()],
+            "source": "data"}
+
+
+@router.put("/invoice-applicants")
+async def set_invoice_applicants(request: Request):
+    """整份取代申請人名單。空陣列＝清空（下次讀會退回用發票資料推導）。"""
+    check_admin(request)
+    from config import load_settings, save_settings
+    body = await request.json()
+    names = body.get("applicants")
+    if not isinstance(names, list):
+        raise HTTPException(status_code=422, detail="applicants 要是陣列")
+    clean, seen = [], set()
+    for n in names:
+        n = str(n or "").strip()
+        if n and n not in seen:      # 去重、保留順序（順序＝下拉的顯示順序）
+            seen.add(n)
+            clean.append(n)
+    cfg = load_settings()
+    cfg["invoice_applicants"] = clean
+    save_settings(cfg)
+    return {"status": "ok", "applicants": clean}
+
+
 @router.get("/invoices-root")
 async def get_invoices_root(request: Request):
     """電子發票根目錄設定（admin 專用）。
@@ -893,8 +1018,13 @@ async def set_invoices_root(request: Request):
 
 # ── Payment Request Helpers ─────────────────────────────────
 
-def _to_payment_dict(p, project_name: str = "") -> dict:
+def _to_payment_dict(p, project_name: str = "", invoice_title: str = "") -> dict:
     return {
+        # 代開發票的中文名。列表顯示它而不是發票號碼 —— 「MJ00094858」對人沒有
+        # 意義，「思沙龍精華製作EP 02」才有。慣例同 _to_cash_dict 的 invoice_title：
+        # 由後端 JOIN 帶出來，前端不再自己抓一份發票清單去 find()（那份清單只在
+        # 點選某列時才載入，列表首次渲染時是空的 → 全部退回顯示號碼）。
+        "invoice_title": invoice_title,
         "id": p.id, "entity": p.entity or "parent",
         "request_date": p.request_date.isoformat() if p.request_date else None,
         "amount": p.amount, "summary": p.summary or "",
@@ -931,9 +1061,16 @@ async def list_payments(
     _require_db()
     factory = await _get_factory()
     async with factory() as session:
+        # 發票號碼在兩邊可能一邊帶連字號一邊不帶 —— 用 replace 歸一再 join，
+        # 否則同一張發票只因寫法不同就查不到標題（匯入的 171 筆全是無連字號版）。
+        from sqlalchemy import func as safunc
+        _no = safunc.replace(CrmPaymentRequest.invoice_number, "-", "")
         query = (
-            select(CrmPaymentRequest, CrmProject.name.label("pn"))
+            select(CrmPaymentRequest, CrmProject.name.label("pn"),
+                   CrmInvoice.title.label("it"))
             .outerjoin(CrmProject, CrmProject.id == CrmPaymentRequest.project_id)
+            .outerjoin(CrmInvoice,
+                       safunc.replace(CrmInvoice.invoice_number, "-", "") == _no)
             .where(CrmPaymentRequest.entity == ent)
             .order_by(CrmPaymentRequest.request_date.desc())
         )
@@ -954,7 +1091,7 @@ async def list_payments(
             ))
         rows = (await session.execute(query)).all()
     return {
-        "payments": [_to_payment_dict(r[0], r[1] or "") for r in rows],
+        "payments": [_to_payment_dict(r[0], r[1] or "", r[2] or "") for r in rows],
         "total": len(rows),
     }
 
@@ -1149,6 +1286,19 @@ async def batch_pay(request: Request):
             p.payment_date = pay_date
             p.updated_at = _now()
             updated += 1
+            # 代開請款單付掉 = 錢匯給代開人了 → 對應發票走到「已轉撥」，
+            # 整條生命週期（未收款→已收款→已轉撥）收尾。號碼對得上才動。
+            if p.category == "發票代開" and p.invoice_number:
+                from sqlalchemy import func as safunc
+                inv = (await session.execute(
+                    select(CrmInvoice).where(
+                        safunc.replace(CrmInvoice.invoice_number, "-", "")
+                        == p.invoice_number.replace("-", ""),
+                        CrmInvoice.payment_status == "已收款")
+                )).scalars().first()
+                if inv:
+                    inv.payment_status = INVOICE_REMITTED
+                    inv.updated_at = _now()
         await session.commit()
     return {"status": "ok", "updated": updated}
 
@@ -1193,6 +1343,20 @@ async def batch_unpay(request: Request):
             p.payment_date = None
             p.updated_at = _now()
             updated += 1
+            # batch_pay 的對稱反向：取消付掉的代開請款單 → 發票從「已轉撥」
+            # 退回「已收款」。不退的話會留下「請款單應付款、發票卻已轉撥」
+            # 的矛盾 —— 待請款區有一張，發票卻說錢已經匯了。
+            if p.category == "發票代開" and p.invoice_number:
+                from sqlalchemy import func as safunc
+                inv = (await session.execute(
+                    select(CrmInvoice).where(
+                        safunc.replace(CrmInvoice.invoice_number, "-", "")
+                        == p.invoice_number.replace("-", ""),
+                        CrmInvoice.payment_status == INVOICE_REMITTED)
+                )).scalars().first()
+                if inv:
+                    inv.payment_status = "已收款"
+                    inv.updated_at = _now()
         await session.commit()
     return {"status": "ok", "updated": updated}
 
@@ -1748,7 +1912,7 @@ async def receivables_summary(request: Request, status: str = Query(""),
 
     🔴 只算收款方向。發票的 payment_type 有 收款／付款 兩種：「付款」是代開發票
     （我們開給對方、錢是我們要付出去的）。原本只用
-    `payment_status NOT IN ('已收款','作廢')` 過濾，「已付款」不在那個清單裡就被
+    `payment_status NOT IN ('已收款','作廢')` 過濾，「已轉撥」不在那個清單裡就被
     當成應收 —— 2026-08-19 匯 394 筆歷史發票後實測：應收 13,554,350 裡有
     10,656,093（79%、183 張）其實是代開的付款發票，把應收虛增成 4.7 倍。
     以前系統裡 0 筆發票，這個缺陷看不出來。
@@ -1811,6 +1975,7 @@ async def batch_receive(request: Request):
                 # 批次標記沒有收支入帳日 → 以標記時間為收款日（已有值不覆蓋）
                 _mark_invoice_received(inv, _now())
                 inv.updated_at = _now()
+                await _sync_passthrough_request(session, inv)
                 updated += 1
         await session.commit()
     return {"status": "ok", "updated": updated}
