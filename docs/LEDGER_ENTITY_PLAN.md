@@ -50,6 +50,10 @@ CREATE UNIQUE INDEX IF NOT EXISTS uq_month_close_entity_month ON finance_month_c
 
 - **科目表與對映**（`finance_accounts` / `finance_category_map`）：兩本帳共用
   同一套科目（unique constraint 不用動；寫入限母公司 full scope，見 §2.4）。
+- **收款↔發票分配表**（`crm_cash_invoice_links`，2026-08-20 新增，合併匯款/分期）：
+  純連結表，**不帶 entity** —— 帳本由兩端（cash_entry / invoice）自己的 entity 推導。
+  寫入時要求兩端同帳本，不同就 409（`routers/crm/finance.py` 的
+  `set_cash_entry_invoices`）。這條邊界只活在程式碼裡，所以寫在這裡。
 - **母公司專屬領域**（projects / petty / costs / equipment / staff /
   payment_milestones）：整個 CRM 營運域就是母公司的 → 綁 `'parent'`，不加欄。
   報表引擎在 `entity=='mine'` 時**不餵**這些來源（折舊/專案毛利/預支核銷回空）。
@@ -109,8 +113,12 @@ owner 拍板「合夥人使用 CRM 是完整的、公司專案資料聯通」→
   - **level="view"**（合夥人可及）：/dashboard、/statements、/statements/drilldown、
     /tax-package、/accounts GET、/category-map GET、/unmapped GET。
   - **level="full"**（其餘全部）：銀行帳戶/對帳/對帳單明細/調整/貸款/
-    bulk-assign/category-map PUT/setup-wizard。對帳與明細仍經 bank_account
-    推導 entity；跨帳本掛帳 409；setup-wizard 限 parent。
+    bulk-assign/category-map PUT/setup-wizard/**bank-statement preview 與 apply**
+    （2026-08-20 對帳單匯入）。對帳與明細仍經 bank_account 推導 entity；
+    跨帳本掛帳 409；setup-wizard 限 parent。
+    ⚠️ preview 的守衛刻意分兩段：**讀檔前**先 `_guard(request, level="full")`
+    （否則未登入的人也能讓機器去解析他上傳的 8MB PDF），拿到帳戶後再守一次
+    entity scope。兩次不是重複，別合併。
   - 🔴 **逐列端點（PUT/DELETE/單列動作）不收 `entity` query param**：帳本由
     該列（或其 bank_account / loan）自己的 entity 推導，載入後 `_guard` 那次
     才是權威判定。收 param 只會多一個沒有作用、還可能誤 403 的公開參數。
@@ -120,6 +128,10 @@ owner 拍板「合夥人使用 CRM 是完整的、公司專案資料聯通」→
 - `routers/crm/finance.py`：列表/單筆 `require_entity(..., level="full")`
   疊在 money_dep 之上；建立/更新 payload 帶 entity（None＝建立落 parent／
   更新維持既有值）；CSV 匯入整批 parent。
+  2026-08-20 新增的收支子資源同規：`GET /cash-entries/options`（下拉選項來源）、
+  `GET|PUT /cash-entries/{id}/invoices`（收款↔發票分配）都是
+  `require_entity(..., level="full")`，且逐列端點照 §2.4 的 🔴 規則
+  **不收 `entity` query param**（帳本由該列自己推導）。
 - 🔴 **更新一律不得換帳本**（owner 2026-08-19 拍板，六張表同一條規矩）：
   payload 的 entity 與該列現值不同 → 422。api_finance（銀行帳戶/調整/貸款）
   本來就是這樣；crm/finance（發票/請款/收支）曾實作成「驗兩邊 scope 後真的

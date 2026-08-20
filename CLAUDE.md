@@ -741,7 +741,7 @@ CRM 系統包含 6 個獨立 Tab + 帳務管理的 5 個子視圖：
 | 👥 人力資源 | `crm/crm-staff.html` + `.js` | `crm_staff` |
 | 🧾 帳務—發票 | `crm/crm-invoices.html` + `.js` | `crm_invoices` |
 | 🧾 帳務—請款 | `crm/crm-payments.html` + `.js` | `crm_payment_requests` |
-| 🧾 帳務—收支明細 | `crm/crm-cashbook.html` + `.js` | `crm_cash_entries` |
+| 🧾 帳務—收支明細 | `crm/crm-cashbook.html` + `.js` | `crm_cash_entries`, `crm_cash_invoice_links` |
 | 🧾 帳務—應付帳款 | `crm/crm-payables.html` + `.js` | (視圖，含 batch-month) |
 | 🧾 帳務—應收帳款 | `crm/crm-receivables.html` + `.js` | (視圖，查詢 `crm_invoices`) |
 
