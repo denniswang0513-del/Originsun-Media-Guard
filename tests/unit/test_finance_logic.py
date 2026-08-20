@@ -22,25 +22,87 @@ from db.seed_finance import SEED_CATEGORY_MAP
 # {(source, category_text): treatment} — classify_cash_entry 吃的形狀
 CAT_MAP = {(r["source"], r["category_text"]): r["treatment"] for r in SEED_CATEGORY_MAP}
 
-# 種子裡 source='cash' 的 29 個 category → 預期 treatment
-# （27 原生 + 階段四貸款繳款/撥款）
-_CASH_EXPECTED = {r["category_text"]: r["treatment"]
-                  for r in SEED_CATEGORY_MAP if r["source"] == "cash"}
+# 收支明細每個 category 的**預期** treatment —— 刻意手寫，不從種子推導。
+#
+# 🔴 原本這張表是 `{r["category_text"]: r["treatment"] for r in SEED_CATEGORY_MAP …}`，
+# 也就是從種子自己抄一份再拿去跟種子比 —— 循環論證。實測（2026-08-20）：把種子的
+# 「貸款繳款」從 loan 改成 direct_expense，底下 32 個參數化案例**全部照樣通過**。
+# 一個對帳單匯入進來的還本被當成費用、直接吃掉當期損益，測試會全綠。
+# 手寫在這裡，改種子就必須也改這裡，那一下就是「你確定要改分錄嗎」的關口。
+_CASH_EXPECTED = {
+    "水電網路": "direct_expense",
+    "交際應酬": "direct_expense",
+    "行政": "direct_expense",
+    "其他": "direct_expense",
+    "其他收入": "direct_income",
+    "房租": "direct_expense",
+    "建構": "direct_expense",
+    "專案": "direct_income",
+    "專案外包": "direct_expense",
+    "專案雜支": "direct_expense",
+    "教育訓練": "direct_expense",
+    "設備耗材": "direct_expense",
+    "設備維護": "direct_expense",
+    "軟體網路服務": "direct_expense",
+    "勞健保": "direct_expense",
+    "發票代開": "passthrough",      # 代開：錢過路，不是我們的收入
+    "會計": "direct_expense",
+    "業務推廣": "direct_expense",
+    "製作金": "direct_expense",
+    "銀行利息": "direct_income",
+    "獎金": "direct_expense",
+    "請款單": "ap_settlement",      # 沖應付，不重複認費用
+    "辦公室管理費": "direct_expense",
+    "營所稅": "tax_income",
+    "營業稅": "tax_vat",
+    "薪資": "direct_expense",
+    "轉存": "transfer",             # 帳戶間搬錢，兩邊都不進損益
+    "貸款繳款": "loan",             # 還本走籌資，不進損益
+    "貸款撥款": "loan",
+    "貸款補貼": "direct_income",    # 政府貼息是真的收入
+    "銀行借款": "loan",
+    "後期雜支": "direct_expense",
+}
+_SEED_CASH = {r["category_text"]: r["treatment"]
+              for r in SEED_CATEGORY_MAP if r["source"] == "cash"}
 
 
 class TestClassifyCashEntry:
-    def test_seed_covers_30_cash_categories(self):
-        """種子必須恰好覆蓋收支明細現行 category 值。
+    def test_seed_covers_32_cash_categories(self):
+        """種子必須恰好覆蓋收支明細現行 category 值，而且分錄與預期一致。
 
         27 原生 + 2 貸款（階段四）+ 1 後期雜支（2026-08-17 零用金整合：Sheet 上
-        實際用過但對映表缺的唯一一個）。這個數字是**刻意的釘子** —— 加科目要在
+        實際用過但對映表缺的唯一一個）+ 2 對帳單匯入（2026-08-20：貸款補貼＝政府
+        貼息入帳、銀行借款＝撥款/還本）。這個數字是**刻意的釘子** —— 加科目要在
         這裡明白地改，不能默默長。
+
+        集合相等這條比數字更重要：加了新科目卻忘了在 _CASH_EXPECTED 想清楚它的
+        分錄，就會在這裡停下來。
         """
-        assert len(_CASH_EXPECTED) == 30
+        assert len(_CASH_EXPECTED) == 32
+        assert set(_SEED_CASH) == set(_CASH_EXPECTED), (
+            "種子與預期表的科目集合不一致 —— 新增/移除科目要兩邊一起想清楚。"
+            f" 只在種子: {sorted(set(_SEED_CASH) - set(_CASH_EXPECTED))}"
+            f" 只在預期: {sorted(set(_CASH_EXPECTED) - set(_SEED_CASH))}")
+
+    def test_keyword_rules_only_produce_seeded_categories(self):
+        """對帳單解析器吐出的 category 必須都在種子裡。
+
+        🔴 不然那些列會靜默落到報表的「未歸類」—— 2026-08-20 的「貸款補貼」與
+        「銀行借款」就是這樣漏的（解析器會產、種子沒有），靠人工比對才發現。
+        兩邊都是模組常數，這條零成本。
+        """
+        from core.bank_statement import KEYWORD_RULES
+        produced = {cat for _kw, cat, _d in KEYWORD_RULES}
+        assert produced <= set(_SEED_CASH), (
+            f"解析器會產出但種子沒有的科目: {sorted(produced - set(_SEED_CASH))}")
 
     @pytest.mark.parametrize("category,expected", sorted(_CASH_EXPECTED.items()))
     def test_all_cash_categories(self, category, expected):
-        """27 個 cash category 全覆蓋：無關聯 id 時走 category 對映。"""
+        """32 個 cash category：無關聯 id 時走 category 對映，且分錄要對。
+
+        預期值來自手寫的 _CASH_EXPECTED（不是種子），所以種子改錯這裡會紅。
+        """
         entry = {"category": category, "invoice_id": None,
                  "advance_payment_id": None, "payment_request_id": None}
         assert classify_cash_entry(entry, CAT_MAP) == expected
@@ -55,6 +117,9 @@ class TestClassifyCashEntry:
         assert _CASH_EXPECTED["專案"] == "direct_income"
         assert _CASH_EXPECTED["貸款繳款"] == "loan"   # 階段四：不進損益、CF financing
         assert _CASH_EXPECTED["貸款撥款"] == "loan"
+        # 對帳單匯入帶進來的兩個：貼息是真的收入、借款本金走籌資不進損益
+        assert _CASH_EXPECTED["貸款補貼"] == "direct_income"
+        assert _CASH_EXPECTED["銀行借款"] == "loan"
 
     # ── 關聯 id 優先序 ──
     def test_advance_id_wins_over_everything(self):

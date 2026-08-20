@@ -38,7 +38,8 @@ entity 過濾；科目表與對映兩本共用（讀任一 scope、寫限母公�
 import uuid
 from datetime import datetime, timedelta
 
-from fastapi import APIRouter, HTTPException, Request  # type: ignore
+from fastapi import (APIRouter, File, Form, HTTPException,  # type: ignore
+                     Request, UploadFile)
 
 from config import load_settings, save_settings
 from core.db_guard import db_factory_or_503 as _factory_or_503
@@ -55,9 +56,11 @@ from core.schemas import (BankAccountPayload, BulkAssignAccountPayload,
                           StatementAutoMatchPayload,
                           StatementLineCreateEntryPayload,
                           StatementLineMatchPayload,
+                          StatementImportApply,
                           StatementLinesBulkPayload,
                           StatementLineUpdatePayload)
-from routers.crm._shared import (_assert_month_open, _parse_day, _username,
+from routers.crm._shared import (_assert_month_open, _assert_rows_open,
+                                 _parse_day, _username,
                                  _validate_month)
 
 router = APIRouter(prefix="/api/v1/finance", tags=["finance"])
@@ -356,6 +359,12 @@ async def update_bank_account(account_id: str, payload: BankAccountPayload,
             setattr(b, k, v)
         if data.get("is_default"):
             await _unset_other_defaults(session, b.id, b.entity or "parent")
+        # 🔴 明著給 updated_at（跟 update_loan 同一慣例）：欄位有 onupdate=func.now()
+        # ＝值由 DB 算，UPDATE 後 SQLAlchemy 會把該屬性標成過期；下面 _bank_dict 讀它
+        # 就會在 async context 裡觸發 lazy IO → MissingGreenlet 500。症狀很賊：
+        # **有真的改到東西才 500**（沒改到就沒 UPDATE、屬性不過期 → 200），
+        # 而且 500 之前已經 commit 成功，UI 顯示存檔失敗但其實存進去了。
+        b.updated_at = datetime.now()
         await session.commit()
         return _bank_dict(b)
 
@@ -920,6 +929,7 @@ def _loan_dict(l, *, paid_periods=None, total_periods=None) -> dict:
         "start_date": sd.strftime("%Y-%m-%d") if sd else None,
         "first_payment_date": fpd.strftime("%Y-%m-%d") if fpd else None,
         "bank_account_id": l.bank_account_id, "status": status,
+        "account_no": l.account_no or "",
         "opening_balance": l.opening_balance, "note": l.note or "",
         "entity": l.entity or "parent",
         "created_at": l.created_at.isoformat() if l.created_at else None,
@@ -994,27 +1004,37 @@ def _build_schedule_or_422(principal, annual_rate, term_months, method,
         raise HTTPException(status_code=422, detail=str(e))
 
 
+async def _load_loans_with_payments(session, entity: str):
+    """(貸款清單, {loan_id: [期別…按 period_no 排序]}) —— 清單頁與對帳單配對共用。
+
+    兩支本來各寫一份同樣的兩個查詢加分組；分開寫的話「下一期是哪一期」很容易
+    長出第二種定義（實際已經發生過：一邊算 overdue、一邊沒算）。
+    """
+    from sqlalchemy import select
+    from db.models import FinanceLoan, FinanceLoanPayment
+    loans = (await session.execute(
+        select(FinanceLoan).where(FinanceLoan.entity == entity)
+        .order_by(FinanceLoan.created_at))).scalars().all()
+    pays = (await session.execute(
+        select(FinanceLoanPayment)
+        .join(FinanceLoan, FinanceLoan.id == FinanceLoanPayment.loan_id)
+        .where(FinanceLoan.entity == entity)
+        .order_by(FinanceLoanPayment.loan_id,
+                  FinanceLoanPayment.period_no))).scalars().all()
+    by_loan: dict = {}
+    for p in pays:
+        by_loan.setdefault(p.loan_id, []).append(p)   # 查詢已按 period_no 排序
+    return loans, by_loan
+
+
 @router.get("/loans")
 async def list_loans(request: Request, entity: str = ""):
     """貸款清單 + 即時彙總：outstanding（餘額）/next_due（下一期）/
     paid_periods/total_periods。"""
     ent = _guard(request, entity, level="full")
-    from sqlalchemy import select
-    from db.models import FinanceLoan, FinanceLoanPayment
     factory = _factory_or_503()
     async with factory() as session:
-        loans = (await session.execute(
-            select(FinanceLoan).where(FinanceLoan.entity == ent)
-            .order_by(FinanceLoan.created_at))).scalars().all()
-        pays = (await session.execute(
-            select(FinanceLoanPayment)
-            .join(FinanceLoan, FinanceLoan.id == FinanceLoanPayment.loan_id)
-            .where(FinanceLoan.entity == ent)
-            .order_by(FinanceLoanPayment.loan_id,
-                      FinanceLoanPayment.period_no))).scalars().all()
-    by_loan: dict = {}
-    for p in pays:
-        by_loan.setdefault(p.loan_id, []).append(p)  # 查詢已按 period_no 排序
+        loans, by_loan = await _load_loans_with_payments(session, ent)
     today = today_start()
     items = []
     for l in loans:
@@ -1078,6 +1098,7 @@ async def create_loan(payload: LoanPayload, request: Request, entity: str = ""):
             grace_months=payload.grace_months or 0,
             start_date=start, first_payment_date=first,
             bank_account_id=payload.bank_account_id or None,
+            account_no=(payload.account_no or "").strip() or None,
             opening_balance=payload.opening_balance,
             note=payload.note, entity=target_ent)
         session.add(loan)
@@ -1130,9 +1151,9 @@ async def update_loan(loan_id: str, payload: LoanPayload, request: Request):
             if (new_acct.entity or "parent") != (loan.entity or "parent"):
                 raise HTTPException(
                     status_code=409, detail="貸款與扣款帳戶分屬不同帳本")
-        for k in ("name", "lender", "note"):
+        for k in ("name", "lender", "note", "account_no"):
             if k in data:
-                setattr(loan, k, (data[k] or "").strip() if k == "name" else data[k])
+                setattr(loan, k, (data[k] or "").strip() if k in ("name", "account_no") else data[k])
         if "bank_account_id" in data:
             loan.bank_account_id = data["bank_account_id"] or None
         if structural & set(data):
@@ -1247,6 +1268,44 @@ async def loan_schedule(loan_id: str, request: Request):
             "items": [_loan_pay_dict(r, today) for r in rows]}
 
 
+def _record_loan_payment(session, loan, row, paid_date, acct_id, note: str = None,
+                         actual_amount: int = None):
+    """標某一期已繳 + 建對應的收支明細（**手動按繳款與對帳單匯入共用這一條路**）。
+
+    🔴 `loan_payment_id` 這個硬連結是關鍵：classify 靠它回 'loan' —— 不進損益
+    （利息費用已按攤還表 due_date 權責認列，重複計會雙算）、現金流走籌資活動。
+    兩條路各寫一份的話，其中一邊日後多帶一個欄位，同一筆繳款就會依「從哪裡記的」
+    落到不同報表列。
+
+    🔴 `actual_amount`＝銀行**實際扣款**。有給就以它為準記現金，沒給才退回攤還表
+    （本+息）。銀行按實際天數算息、進位方式也不同 —— 實測合庫 315614 攤還表算
+    4,456、銀行扣 4,470；315611 是 25,286 對 25,290。記攤還表那個數字的話系統的
+    銀行餘額每期歪十幾元且累積（owner 剛把三個帳戶對到分毫不差），而對帳工作台
+    要求金額完全相等才勾得掉，那些列會永遠配不上、每個月都要人工處理。
+
+    本金／利息的拆分仍照攤還表（貸款餘額的推進以它為準）；差額只落在現金那一側。
+    """
+    from db.models import CrmCashEntry
+    total = int(row.principal_due or 0) + int(row.interest_due or 0)
+    paid = int(actual_amount) if actual_amount else total
+    diff = paid - total
+    memo = note or ""
+    if diff:
+        memo = (memo + " " if memo else "") + (
+            f"（銀行實扣 {paid:,}，攤還表 {total:,}，差 {diff:+,}）")
+    entry = CrmCashEntry(
+        id=uuid.uuid4().hex, entry_date=paid_date, expense=paid,
+        summary=f"{loan.name} 第{row.period_no}期", note=memo or None,
+        category=LOAN_PAY_CATEGORY, bank_account_id=acct_id or None,
+        loan_payment_id=row.id, entity=loan.entity or "parent")  # 繳款收支繼承貸款帳本
+    session.add(entry)
+    row.status = "paid"
+    row.paid_at = paid_date
+    row.paid_amount = paid
+    row.cash_entry_id = entry.id
+    return entry
+
+
 @router.post("/loans/{loan_id}/payments/{period_no}/pay")
 async def pay_loan_period(loan_id: str, period_no: int,
                           payload: LoanPayPayload, request: Request):
@@ -1259,7 +1318,7 @@ async def pay_loan_period(loan_id: str, period_no: int,
     對映都不會誤入損益。"""
     _guard(request, level="full")
     paid_date = _parse_day(payload.paid_date) or today_start()
-    from db.models import BankAccount, CrmCashEntry
+    from db.models import BankAccount
     factory = _factory_or_503()
     async with factory() as session:
         loan, row = await _get_loan_and_period(session, loan_id, period_no)
@@ -1276,16 +1335,8 @@ async def pay_loan_period(loan_id: str, period_no: int,
             if (acct.entity or "parent") != loan_ent:
                 raise HTTPException(
                     status_code=409, detail="貸款與扣款帳戶分屬不同帳本")
-        total = int(row.principal_due or 0) + int(row.interest_due or 0)
-        entry = CrmCashEntry(
-            id=uuid.uuid4().hex, entry_date=paid_date, expense=total,
-            summary=f"{loan.name} 第{row.period_no}期",
-            category=LOAN_PAY_CATEGORY, bank_account_id=acct_id or None,
-            loan_payment_id=row.id, entity=loan_ent)  # 繳款收支繼承貸款帳本
-        session.add(entry)
-        row.status = "paid"
-        row.paid_at = paid_date
-        row.cash_entry_id = entry.id
+        entry = _record_loan_payment(session, loan, row, paid_date, acct_id,
+                                     actual_amount=payload.amount)
         await session.commit()
         return {"ok": True, "cash_entry_id": entry.id}
 
@@ -1491,3 +1542,317 @@ async def setup_wizard(payload: FinanceSetupWizardPayload, request: Request):
     save_settings(settings)
 
     return {"ok": True, "created_accounts": len(payload.bank_accounts), "assigned": assigned}
+# ── 對帳單匯入（上傳銀行明細 → 自動換算成收支＋貸款繳款）────────────
+
+_STMT_MAX_BYTES = 8 * 1024 * 1024      # 對帳單就是幾頁文字，超過必是傳錯檔
+
+
+def _statement_text(filename: str, blob: bytes) -> str:
+    """上傳檔 → 純文字。PDF 走 core.doc_text（含康熙部首正規化），其餘當文字。"""
+    import os
+    import tempfile
+
+    ext = os.path.splitext(filename or "")[1].lower()
+    if ext == ".pdf":
+        from core.doc_text import extract_text
+        fd, tmp = tempfile.mkstemp(suffix=".pdf")
+        try:
+            with os.fdopen(fd, "wb") as f:
+                f.write(blob)
+            txt, err = extract_text(tmp)     # 同步 CPU-bound，呼叫端已包 to_thread
+            if err:
+                raise HTTPException(status_code=422, detail=f"讀不了這個 PDF：{err}")
+            return txt
+        finally:
+            try:
+                os.remove(tmp)
+            except OSError:
+                pass
+    for enc in ("utf-8-sig", "big5", "cp950"):
+        try:
+            return blob.decode(enc)
+        except UnicodeDecodeError:
+            continue
+    return blob.decode("utf-8", errors="replace")
+
+
+async def _loans_for_matching(session, entity: str) -> list:
+    """配對用的貸款清單：帶 account_no 與全部期別（含已繳，供重匯偵測）。"""
+    loans, by_loan = await _load_loans_with_payments(session, entity)
+    out = []
+    for l in loans:
+        rows_all = by_loan.get(l.id, [])
+        # **全部**期別（含已繳）都給配對器：配對是照「到期日最接近」挑的，
+        # 已繳期別要在裡面，重匯同一份對帳單才認得出「這期已經記過了」——
+        # 少了它，重匯會被配到下一期並蓋上錯的繳款日。
+        periods = [{"period_no": r.period_no,
+                    "total": (r.principal_due or 0) + (r.interest_due or 0),
+                    "due_date": (local_day(r.due_date).strftime("%Y-%m-%d")
+                                 if r.due_date else None),
+                    "paid": (r.status or "") == "paid"} for r in rows_all]
+        # 這裡刻意**不**算「下一期是哪一期」—— _load_loans_with_payments 的
+        # docstring 已經說了「分開寫的話很容易長出第二種定義」，而配對器
+        # （match_loan_payments）只讀 id/name/account_no/periods，回應也不帶
+        # loans。算了沒人看的第二種定義，就是在等它跟 list_loans 那份漂開。
+        out.append({
+            "id": l.id, "name": l.name, "account_no": l.account_no or "",
+            "periods": periods,
+        })
+    return out
+
+
+async def _existing_entry_keys(session, acct_id, dates):
+    """帳上已有的 (日期, 帶號金額) → 筆數。對帳單匯入的重複偵測用。
+
+    preview 拿它標「已匯過」、apply 拿它**真的擋下來** —— 只活在 preview 顯示層
+    的防護等於沒有：表頭全選會把 duplicate 列一起勾起來、送出逾時重按也一樣，
+    兩條路都直接寫進 CrmCashEntry，同日同額的收支就變兩份，餘額與三張報表全部
+    雙倍（貸款列有 status=="paid" 保護，一般列一個都沒有）。
+
+    回 Counter 而不是 set：對帳單同一天真的可能有兩筆一樣的三十元手續費 ——
+    帳上已有一筆就只跳過一筆，第二筆照匯。
+    """
+    from collections import Counter
+
+    from sqlalchemy import and_, select
+
+    from db.models import CrmCashEntry
+    out = Counter()
+    if not dates:
+        return out
+    # 🔴 前後各放寬一天：_parse_day 回 naive datetime，跟 timestamptz 欄位比較時
+    # 邊界會偏掉，實測「對帳單最後一天」的列永遠判不出重複 —— 而那正是使用者
+    # 重複匯入時最常撞到的一天。真正的比對交給 (日期, 金額) 鍵。
+    lo = _parse_day(dates[0]) - timedelta(days=1)
+    hi = _parse_day(dates[-1]) + timedelta(days=1)
+    rows = (await session.execute(
+        select(CrmCashEntry.entry_date, CrmCashEntry.expense, CrmCashEntry.deposit)
+        .where(and_(CrmCashEntry.bank_account_id == acct_id,
+                    CrmCashEntry.entry_date >= lo,
+                    CrmCashEntry.entry_date <= hi)))).all()
+    for dt, exp, dep in rows:
+        if dt:
+            out[(local_day(dt).strftime("%Y-%m-%d"), (dep or 0) - (exp or 0))] += 1
+    return out
+
+
+@router.post("/bank-statement/preview")
+async def preview_bank_statement(
+        request: Request,
+        bank_account_id: str = Form(""),
+        text: str = Form(""),
+        file: UploadFile | None = File(None)):
+    """上傳/貼上銀行對帳單 → 解析＋分類＋配貸款期別。**只讀不寫**。
+
+    輸入（multipart）：file=對帳單檔（PDF/CSV/TXT）或 text=貼上的文字，
+    外加 bank_account_id。回每一列的建議動作與所有警告 —— 前端逐列給人確認，
+    確認後才打 /bank-statement/apply。
+
+    重複匯入偵測：同帳戶同日同金額已經有收支明細 → 標 duplicate=True 預設不勾。
+    """
+    from core.bank_statement import (LOAN_CATEGORY, match_loan_payments,
+                                     parse_statement)
+    from db.models import BankAccount
+
+    # 🔴 先驗身份再碰檔案。原本是讀完 8MB、跑完 PDF 文字抽取（CPU-bound）才在
+    # 拿到帳戶之後守衛 —— 未登入的人也能讓這台機器去解析他上傳的 PDF。
+    # 下面拿到 acct 之後那次 entity 守衛照留（這次守的是「有沒有權限」，
+    # 那次守的是「這個帳本在不在你的 scope 裡」），兩次不是重複。
+    _guard(request, level="full")
+    acct_id = (bank_account_id or "").strip()
+    if not acct_id:
+        raise HTTPException(status_code=422, detail="請先選擇這份對帳單是哪個銀行帳戶")
+    text = (text or "").strip()
+    if file is not None:
+        blob = await file.read()
+        if len(blob) > _STMT_MAX_BYTES:
+            raise HTTPException(status_code=422, detail="檔案過大（上限 8MB）")
+        import asyncio
+        text = await asyncio.to_thread(_statement_text, file.filename or "", blob)
+    if not text.strip():
+        raise HTTPException(status_code=422, detail="沒有收到對帳單內容（檔案或貼上的文字）")
+
+    factory = _factory_or_503()
+    async with factory() as session:
+        acct = await session.get(BankAccount, acct_id)
+        if not acct:
+            raise HTTPException(status_code=404, detail="帳戶不存在")
+        ent = _guard(request, acct.entity or "parent", level="full")
+
+        res = parse_statement(text)
+        if not res.ok:
+            return {"ok": False, "errors": res.errors,
+                    "warnings": res.warnings, "rows": []}
+
+        loans = await _loans_for_matching(session, ent)
+        matches = match_loan_payments(res.rows, loans)
+        # line_no → 該列被配到的貸款期別
+        by_line = {}
+        for m in matches:
+            for ln in m["lines"]:
+                by_line[ln] = m
+
+        # 重複偵測：同帳戶、同日、同金額已存在 → 這列多半已經匯過
+        existing = await _existing_entry_keys(
+            session, acct_id, sorted({r.date for r in res.rows}))
+
+        # 科目對映：category 沒對映的要標出來（不然匯進去報表變未歸類）
+        from routers.crm._shared import cash_category_texts
+        mapped = set(await cash_category_texts(session))
+
+    out_rows = []
+    for r in res.rows:
+        m = by_line.get(r.line_no)
+        # 兩條重複線：①同帳戶同日同金額已有收支 ②配到的貸款期別已經記過繳款
+        # （②必要 —— 繳款收支存的是攤還表金額，跟銀行實扣差幾十元，①抓不到）
+        dup = (existing[(r.date, r.amount)] > 0
+               or (m or {}).get("confidence") == "already_paid")
+        if dup and existing[(r.date, r.amount)] > 0:
+            existing[(r.date, r.amount)] -= 1   # multiset：一筆抵一筆
+        out_rows.append({
+            "date": r.date, "amount": r.amount, "description": r.note[:120],
+            "category": r.category, "inferred": r.inferred,
+            # 🔴 方向是推出來的列**不預設勾選**：我們才剛跟使用者說「這列的方向
+            # 是猜的」，不能又讓表頭那顆全選一按就把猜測寫進帳。要它就自己勾。
+            "duplicate": dup, "selected": not dup and not r.inferred,
+            # 🔴 兩種都會落到報表的「未歸類」：有類別但沒對映、以及**完全沒類別**
+            # （摘要沒中任何 KEYWORD_RULES）。舊寫法只認前者，後者靜默通過 ——
+            # 那是更該提醒的一種，連該歸哪裡都不知道。
+            "unmapped_category": (not r.category) or (r.category not in mapped),
+            "loan_id": (m or {}).get("loan_id"),
+            "loan_name": (m or {}).get("loan_name", ""),
+            "period_no": (m or {}).get("period_no"),
+            "match_confidence": (m or {}).get("confidence", ""),
+            "is_loan": r.category == LOAN_CATEGORY and r.amount < 0,
+        })
+    return {
+        "ok": True, "rows": out_rows, "warnings": res.warnings, "errors": [],
+        "summary": {"count": len(out_rows), "total_in": res.total_in,
+                    "total_out": res.total_out,
+                    "duplicates": sum(1 for r in out_rows if r["duplicate"]),
+                    "loan_rows": sum(1 for r in out_rows if r["is_loan"])},
+    }
+
+
+@router.post("/bank-statement/apply")
+async def apply_bank_statement(payload: StatementImportApply, request: Request):
+    """把確認過的列寫進帳：一般列 → 收支明細；貸款繳款列 → 走繳款流程
+    （標期別已繳＋自動建帶 loan_payment_id 硬連結的收支，與手動按繳款同一條路）。
+
+    月結守衛：任一列落鎖定月 → 整批 409，不做半套。
+    """
+    _guard(request, level="full")
+    if not payload.rows:
+        raise HTTPException(status_code=422, detail="沒有要匯入的列")
+    from db.models import BankAccount, CrmCashEntry
+
+    factory = _factory_or_503()
+    async with factory() as session:
+        acct = await session.get(BankAccount, payload.bank_account_id)
+        if not acct:
+            raise HTTPException(status_code=404, detail="帳戶不存在")
+        ent = _guard(request, acct.entity or "parent", level="full")
+
+        # 先驗全部月份（整批原子性：有一列落鎖定月就全部不做）。
+        # 🔴 用 _assert_rows_open 而不是逐列 _assert_month_open —— 後者每呼叫一次就
+        # 重撈一次鎖定月集合（一年份對帳單 = 1,000+ 次多餘往返），而且只會在第一個
+        # 違規列就中斷；批次版一次撈完、409 把所有違規列一起列出來。
+        dated = []
+        for r in payload.rows:
+            d = _parse_day(r.date)
+            if not d:
+                raise HTTPException(status_code=422, detail=f"日期無法解析：{r.date}")
+            dated.append((f"{r.date} {(r.description or '')[:20]}", d))
+        await _assert_rows_open(session, dated, entity=ent)
+
+        # 🔴 重複防護不能只活在 preview 的顯示層：表頭那顆全選會把「已匯過」的
+        # 列一起勾起來，送出逾時重按一次也一樣 —— 兩條路都直接寫進 CrmCashEntry，
+        # 同日同額的收支就變兩份，帳戶餘額與三張報表全部雙倍。貸款列本來就有
+        # status=="paid" 擋著，一般列在這之前一個防護都沒有。
+        seen = await _existing_entry_keys(
+            session, payload.bank_account_id, sorted(r.date for r in payload.rows))
+        made_entries = made_payments = 0
+        skipped_dup = []
+        # 對帳工作台的「銀行說發生了什麼」那一欄。
+        #
+        # 🔴 這支端點原本只寫帳（右欄），左欄留白 —— 用它匯完一整年，打開工作台
+        # 會看到「帳上 30 筆、銀行 0 筆」，看起來像銀行整年沒有任何交易。工作台
+        # 自己那條匯入路徑只填左欄不寫帳，兩邊各做一半，誰都沒說完整的話。
+        # 這裡兩欄一起填，並且直接把兩邊配起來（matched_entry_id）：帳本來就是
+        # 從這份對帳單記的，本來就是同一件事，不需要人再去勾一次。
+        stmt_lines = []
+        for r, (_label, d) in zip(payload.rows, dated):
+            if r.loan_id and r.period_no:
+                loan, row = await _get_loan_and_period(session, r.loan_id, r.period_no)
+                if (loan.entity or "parent") != ent:
+                    raise HTTPException(status_code=409, detail="貸款與帳戶分屬不同帳本")
+                if (row.status or "") == "paid":
+                    continue          # 已繳過就跳過（重跑不重複記）
+                # r.amount 是帶號的（支出為負）→ 取絕對值當實扣。
+                # 這才是銀行真的扣的錢，攤還表只決定本息拆分。
+                ent_line = _record_loan_payment(
+                    session, loan, row, d, payload.bank_account_id,
+                    note="銀行對帳單匯入", actual_amount=abs(int(r.amount or 0)))
+                made_payments += 1
+                stmt_lines.append((r, ent_line))
+            else:
+                amt = int(r.amount or 0)
+                if not amt:
+                    continue
+                key = (r.date, amt)
+                if seen[key] > 0:
+                    seen[key] -= 1          # multiset：帳上有幾筆就跳過幾筆
+                    skipped_dup.append(f"{r.date} {amt:+,}")
+                    continue
+                ce = CrmCashEntry(
+                    id=uuid.uuid4().hex, entry_date=d,
+                    expense=(-amt if amt < 0 else None),
+                    deposit=(amt if amt > 0 else None),
+                    summary=(r.description or "銀行對帳單")[:255],
+                    note="銀行對帳單匯入",
+                    category=(r.category or "").strip() or None,
+                    bank_account_id=payload.bank_account_id, entity=ent)
+                session.add(ce)
+                made_entries += 1
+                stmt_lines.append((r, ce))
+
+        # 工作台可能已經自己匯過同一個月（它那條路只填左欄不寫帳）。那些列就是
+        # 這幾筆交易，不該再建一份 —— 找同日同額且還沒配對的，直接拿來配。
+        from collections import defaultdict
+
+        from sqlalchemy import and_, select
+
+        from db.models import BankStatementLine
+        spare = defaultdict(list)
+        if stmt_lines:
+            months = {r.date[:7] for r, _ce in stmt_lines}
+            for ln in (await session.execute(
+                    select(BankStatementLine).where(and_(
+                        BankStatementLine.bank_account_id == payload.bank_account_id,
+                        BankStatementLine.month.in_(months),
+                        BankStatementLine.matched_entry_id.is_(None))))).scalars():
+                key = (local_day(ln.line_date).strftime("%Y-%m-%d")
+                       if ln.line_date else "", int(ln.amount or 0))
+                spare[key].append(ln)
+        reused = 0
+        for r, ce in stmt_lines:
+            key = (r.date, int(r.amount or 0))
+            if spare[key]:
+                spare[key].pop().matched_entry_id = ce.id       # 沿用工作台已有的那列
+                reused += 1
+                continue
+            session.add(BankStatementLine(
+                id=uuid.uuid4().hex,
+                bank_account_id=payload.bank_account_id,
+                month=r.date[:7],
+                line_date=_parse_day(r.date),
+                description=(r.description or "")[:255],
+                # 左欄記**銀行說的**金額。貸款列的收支金額也已經改記實扣，
+                # 兩邊會一致 —— 工作台要求金額相等才算配對得上。
+                amount=int(r.amount or 0),
+                matched_entry_id=ce.id,
+                created_by="銀行對帳單匯入"))
+        await session.commit()
+    return {"ok": True, "entries": made_entries, "loan_payments": made_payments,
+            "statement_lines": len(stmt_lines), "reused_lines": reused,
+            "skipped_duplicates": skipped_dup}

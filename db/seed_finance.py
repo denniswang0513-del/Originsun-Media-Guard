@@ -78,7 +78,8 @@ SEED_ACCOUNTS: list[tuple] = [
 # treatment 全集：direct_expense/direct_income/ap_settlement/ar_settlement/
 # transfer/tax_vat/tax_income/advance/passthrough/loan
 SEED_CATEGORY_MAP: list[dict] = [
-    # ── source='cash'（收支明細 category，29 值 = 27 原生 + 貸款繳款/撥款）──
+    # ── source='cash'（收支明細 category）—— 原生項目 + 貸款相關（繳款/撥款/
+    #    補貼/借款）。數量會隨業務長，別在註解裡寫死一個會過期的數字。
     {"source": "cash", "category_text": "水電網路", "account_code": "6210", "treatment": "direct_expense"},
     {"source": "cash", "category_text": "交際應酬", "account_code": "6300", "treatment": "direct_expense"},
     {"source": "cash", "category_text": "行政", "account_code": "6330", "treatment": "direct_expense"},
@@ -110,6 +111,12 @@ SEED_CATEGORY_MAP: list[dict] = [
     # 按攤還表 due_date 另行認列），CF 走科目 2400 cf_activity=financing
     {"source": "cash", "category_text": "貸款繳款", "account_code": "2400", "treatment": "loan"},
     {"source": "cash", "category_text": "貸款撥款", "account_code": "2400", "treatment": "loan"},
+    # 政府貸款貼息（合庫「中心轉存／文創補貼息」、一銀「中小X月」中小企業信保補貼）。
+    # 🔴 core/bank_statement.py 的 KEYWORD_RULES 會把這些摘要判成「貸款補貼」，
+    # 種子沒有這一列的話，任何從種子建起來的環境都會把每一筆補貼標成「科目未對映」，
+    # 三表也會丟進未歸類 —— 對帳單匯入的預覽警告就會變成使用者學會忽略的雜訊。
+    {"source": "cash", "category_text": "貸款補貼", "account_code": "4230", "treatment": "direct_income"},
+    {"source": "cash", "category_text": "銀行借款", "account_code": "2400", "treatment": "loan"},
     # 零用金整合（docs/PETTY_CASH_PLAN.md）：Sheet 上實際用過的 12 個項目裡，
     # 只有這一個沒有對映（實測 2026-08-17）。歸「專案雜支」同一科目。
     {"source": "cash", "category_text": "後期雜支", "account_code": "5200", "treatment": "direct_expense"},

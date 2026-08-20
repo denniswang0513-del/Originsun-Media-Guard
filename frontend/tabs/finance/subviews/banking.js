@@ -6,8 +6,9 @@
  *       → 月底對帳（POST /reconciliations + 歷史表）→ 進階摺疊：帳務調整。
  * 後端 API prefix /api/v1/finance（fin-utils.finFetch）。
  */
-import { finFetch, esc, fmtNum, finToast, finSubviewBoot, todayStr, ACCT_KIND_OPTIONS } from '../fin-utils.js';
+import { finFetch, finEntity, esc, fmtNum, finToast, finSubviewBoot, todayStr, metricCard, ACCT_KIND_OPTIONS } from '../fin-utils.js';
 import { createSortable, sortableTh, enumIndex } from '../../crm/crm-utils.js';   // 點欄頭排序（通用排序器）
+import { bearerHeader } from '../../../js/shared/utils.js';   // 送 FormData 時不能自帶 Content-Type
 
 const KIND_LABEL = Object.fromEntries(ACCT_KIND_OPTIONS.map(k => [k.v, k.label]));
 const ADJ_TYPES = [
@@ -24,6 +25,7 @@ const LOAN_METHODS = [
     { v: 'interest_only', label: '每月只繳利息，到期還本金' },
 ];
 const LOAN_METHOD_LABEL = Object.fromEntries(LOAN_METHODS.map(m => [m.v, m.label]));
+const LOAN_GROUP_KEY = 'finance_loan_groups_open';   // 展開中的銀行（依 lender 名）
 
 let _c = null;
 let _isCurrent = () => true;
@@ -39,6 +41,7 @@ let _schedLoanId = null; // 攤還表 modal 目前開的貸款 id
 let _wb = null;          // 對帳工作台：{acct, month, data}；null=未開
 let _wbCats = null;      // 補記入帳的類別 datalist（cash 對映 category，lazy 載一次）
 let _wbImportRows = null; // 匯入流程暫存：貼上解析後的儲存格陣列
+let _stmtPreview = null; // 對帳單匯入：preview 回來的列（確認後才寫入）
 
 let _schedItems = null;  // 最近一次攤還表 items（排序重繪用）
 let _reconItems = null;  // 最近一次月結對帳歷史 items（排序重繪用）
@@ -506,7 +509,8 @@ function _loanCard(l) {
         nextHtml = `<div style="font-size:12px;margin-top:6px;color:${overdue ? '#fca5a5' : '#ccc'};">
             下期繳款 ${esc(String(l.next_due.due_date).substring(0, 10))} · $${fmtNum(l.next_due.total)}${overdue ? '<b>（已逾期）</b>' : ''}</div>`;
     }
-    const meta = [esc(l.lender || ''), `年利率 ${esc(l.annual_rate)}%`, esc(LOAN_METHOD_LABEL[l.method] || l.method || '')]
+    // 銀行名不重複寫進卡片 —— 分組標頭已經標明是哪一家
+    const meta = [`年利率 ${esc(l.annual_rate)}%`, esc(LOAN_METHOD_LABEL[l.method] || l.method || '')]
         .filter(Boolean).join(' · ') + ((l.grace_months || 0) > 0 ? ` · 寬限 ${esc(l.grace_months)} 個月` : '');
     return `
     <div style="background:#222;border:1px solid #333;border-radius:8px;padding:14px 16px;min-width:250px;flex:0 1 300px;${paidOff ? 'opacity:.7;' : ''}">
@@ -528,14 +532,87 @@ function _loanCard(l) {
     </div>`;
 }
 
+/** 依銀行分組 → [{ lender, loans, outstanding, nextTotal, active, paidOff }]，
+ *  未繳清餘額大的銀行排前面（同一家銀行常有多筆授信，合起來才看得出曝險）。 */
+function _loanGroups() {
+    const by = new Map();
+    for (const l of _loans) {
+        const key = (l.lender || '').trim() || '未指定銀行';
+        if (!by.has(key)) by.set(key, []);
+        by.get(key).push(l);
+    }
+    return [...by.entries()].map(([lender, loans]) => {
+        const live = loans.filter(l => l.status !== 'paid_off');
+        return {
+            lender, loans,
+            outstanding: loans.reduce((s, l) => s + (l.outstanding || 0), 0),
+            // 下期應繳只加未繳清的（繳清的沒有 next_due，加了會誤導）
+            nextTotal: live.reduce((s, l) => s + (l.next_due ? (l.next_due.total || 0) : 0), 0),
+            overdue: live.some(l => l.next_due && l.next_due.overdue),
+            active: live.length, paidOff: loans.length - live.length,
+        };
+    }).sort((a, b) => b.outstanding - a.outstanding);
+}
+
+/** 展開中的銀行（localStorage 記住；預設全展開 = 首次進來就看得到明細）。 */
+function _loanOpenSet(groups) {
+    try {
+        const raw = localStorage.getItem(LOAN_GROUP_KEY);
+        if (raw) return new Set(JSON.parse(raw));
+    } catch (e) { /* 壞掉的舊值當沒存過 */ }
+    return new Set(groups.map(g => g.lender));   // 沒存過＝全展開
+}
+
+function _loanTotalsBar(groups) {
+    const outstanding = groups.reduce((s, g) => s + g.outstanding, 0);
+    const nextTotal = groups.reduce((s, g) => s + g.nextTotal, 0);
+    const active = groups.reduce((s, g) => s + g.active, 0);
+    const overdue = groups.some(g => g.overdue);
+    const money = (n, color) => `<span style="color:${color};">$${fmtNum(n)}</span>`;
+    return `
+    <div style="display:flex;flex-wrap:wrap;gap:12px;margin-bottom:12px;">
+        ${metricCard('貸款總餘額', money(outstanding, '#fbbf24'))}
+        ${metricCard('下期應繳合計', money(nextTotal, overdue ? '#fca5a5' : '#eee'))}
+        ${metricCard('筆數', `${fmtNum(active)}`,
+                     `${fmtNum(active)} 筆繳款中 / ${fmtNum(groups.length)} 家銀行`)}
+    </div>`;
+}
+
+function _loanGroupBlock(g, open) {
+    const arrow = open ? '▾' : '▸';
+    const sub = [`${fmtNum(g.active)} 筆繳款中`, g.paidOff ? `${fmtNum(g.paidOff)} 筆已繳清` : '']
+        .filter(Boolean).join(' · ');
+    return `
+    <div style="border:1px solid #333;border-radius:8px;margin-bottom:10px;overflow:hidden;">
+        <div onclick="window._finBank.loanGroupToggle('${esc(encodeURIComponent(g.lender))}')"
+             style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;background:#1b1b1b;
+                    padding:10px 14px;cursor:pointer;user-select:none;">
+            <span style="color:#9ca3af;width:12px;">${arrow}</span>
+            <span style="font-weight:600;color:#eee;">${esc(g.lender)}</span>
+            <span style="color:#888;font-size:12px;">${esc(sub)}</span>
+            <span style="margin-left:auto;display:flex;gap:20px;align-items:baseline;flex-wrap:wrap;">
+                <span style="color:#9ca3af;font-size:11px;">剩餘本金
+                    <b style="color:#fbbf24;font-size:16px;margin-left:4px;">$${fmtNum(g.outstanding)}</b></span>
+                ${g.nextTotal ? `<span style="color:#9ca3af;font-size:11px;">下期應繳
+                    <b style="color:${g.overdue ? '#fca5a5' : '#ddd'};font-size:16px;margin-left:4px;">$${fmtNum(g.nextTotal)}</b></span>` : ''}
+            </span>
+        </div>
+        ${open ? `<div style="display:flex;flex-wrap:wrap;gap:12px;align-items:stretch;padding:12px 14px;background:#202020;">
+            ${g.loans.map(_loanCard).join('')}</div>` : ''}
+    </div>`;
+}
+
 /** 貸款區塊內容（記繳款/取消後只重畫這塊，modal 不動） */
 function _loansSectionInner() {
     const head = `
         <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;">
             <h3 style="color:#eee;margin:0;font-size:14px;">🏦 銀行貸款</h3>
-            ${_loans.length ? '<button class="crm-btn crm-btn-secondary crm-btn-sm" onclick="window._finBank.loanOpenAdd()">+ 新增貸款</button>' : ''}
+            <span style="display:flex;gap:6px;flex-wrap:wrap;">
+                ${_loans.length ? '<button class="crm-btn crm-btn-secondary crm-btn-sm" onclick="window._finBank.stmtOpen()">📄 匯入銀行對帳單</button>' : ''}
+                ${_loans.length ? '<button class="crm-btn crm-btn-secondary crm-btn-sm" onclick="window._finBank.loanOpenAdd()">+ 新增貸款</button>' : ''}
+            </span>
         </div>
-        <p style="color:#888;font-size:12px;margin:4px 0 12px;">公司借的每一筆錢一張卡 — 攤還表照銀行合約排好，每期一鍵記繳款、自動寫進收支明細。</p>`;
+        <p style="color:#888;font-size:12px;margin:4px 0 12px;">依銀行分組 — 點銀行列展開該行每筆授信。攤還表照合約排好，每期一鍵記繳款、自動寫進收支明細。</p>`;
     if (_loanErr) {
         return head + `<div style="color:#fca5a5;font-size:13px;">貸款載入失敗：${esc(_loanErr)}
             <button class="crm-btn crm-btn-secondary crm-btn-sm" style="margin-left:8px;" onclick="window._finBank.reload()">🔄 重試</button></div>`;
@@ -547,7 +624,10 @@ function _loansSectionInner() {
             <button class="crm-btn crm-btn-secondary crm-btn-sm" onclick="window._finBank.loanOpenAdd()">+ 新增貸款</button>
         </div>`;
     }
-    return head + `<div style="display:flex;flex-wrap:wrap;gap:12px;align-items:stretch;">${_loans.map(_loanCard).join('')}</div>`;
+    const groups = _loanGroups();
+    const open = _loanOpenSet(groups);
+    return head + _loanTotalsBar(groups)
+        + groups.map(g => _loanGroupBlock(g, open.has(g.lender))).join('');
 }
 
 // ── 貸款 CRUD ──
@@ -631,6 +711,19 @@ _fb.loanSave = async (btn) => {
         showErr(e.message);
         btn.disabled = false; btn.textContent = '儲存';
     }
+};
+
+/** 展開/收合某家銀行 —— 只重畫貸款區塊，攤還表 modal 與其他區塊不動。 */
+_fb.loanGroupToggle = (encoded) => {
+    const lender = decodeURIComponent(encoded);
+    const open = _loanOpenSet(_loanGroups());
+    if (open.has(lender)) open.delete(lender);
+    else open.add(lender);
+    try {
+        localStorage.setItem(LOAN_GROUP_KEY, JSON.stringify([...open]));
+    } catch (e) { /* 無痕模式寫不了 —— 這輪照樣展開，只是不記住 */ }
+    const sec = _c.querySelector('#finbank-loans-section');
+    if (sec) sec.innerHTML = _loansSectionInner();
 };
 
 _fb.loanDel = async (id) => {
@@ -857,6 +950,9 @@ function _wbCloseModal() {
     const o = document.getElementById('finbank-wb-modal');
     if (o) o.style.display = 'none';
 }
+// 對帳單匯入的 modal 按鈕走 onclick="window._finBank.…" —— 要真的掛上去，
+// 不然按了完全沒反應（inline onclick 看不到模組作用域裡的函式）。
+_fb.wbCloseModal = _wbCloseModal;
 
 /** 工作台變更請求共用骨架：打 API →（可選 toast）→（可選關 modal）→ 整台重載。
  *  失敗 toast 錯誤訊息（409 月結鎖帳等直接顯示後端 detail）。 */
@@ -1039,152 +1135,132 @@ _fb.wbAddSave = (btn) => {
     }, { btn, close: true });
 };
 
-// ── 工作台：貼上匯入（解析 → 欄位對應 → 匯入）────────────────
-
-const _WB_ROLES = [
-    { v: 'ignore', label: '忽略' },
-    { v: 'date', label: '日期' },
-    { v: 'desc', label: '摘要' },
-    { v: 'withdraw', label: '支出（提出）' },
-    { v: 'deposit', label: '存入' },
-    { v: 'amount', label: '金額（±）' },
-];
-
-/** 貼上文字 → 儲存格陣列。Excel/網銀複製多半是 tab 分隔；退而求其次逗號、多空白。 */
-function _wbParsePaste(text) {
-    const rows = [];
-    for (const raw of text.split(/\r?\n/)) {
-        const line = raw.replace(/\u00a0/g, ' ').trimEnd();
-        if (!line.trim()) continue;
-        const cells = line.includes('\t') ? line.split('\t')
-            : (line.includes(',') ? line.split(',') : line.split(/\s{2,}/));
-        rows.push(cells.map(c => c.trim().replace(/^"|"$/g, '')));
-    }
-    return rows;
-}
-
-/** 各種日期寫法 → 'YYYY-MM-DD'。3 碼以下年份視為民國（114/07/01 → 2025-07-01）；
- *  只有 月/日 → 用對帳月份的年份。看不懂回 null（該列仍可匯入，補記時 modal 會要求補日期）。
- *  ⚠ 規則無測試（前端無單元測試基礎設施）— 匯入有預覽格人工把關；若日後有第二個
- *  消費者（如後端匯入路徑）再搬 core/finance_logic.py 鎖黃金測試。 */
-function _wbParseDate(s, month) {
-    if (!s) return null;
-    const str = String(s).trim();
-    let m = str.match(/(\d{2,4})[\/\-.年](\d{1,2})[\/\-.月](\d{1,2})/);
-    if (m) {
-        let y = +m[1];
-        if (y < 1000) y += 1911;
-        return `${y}-${String(+m[2]).padStart(2, '0')}-${String(+m[3]).padStart(2, '0')}`;
-    }
-    m = str.match(/^(\d{1,2})[\/\-.](\d{1,2})$/);
-    if (m && month) return `${month.slice(0, 4)}-${String(+m[1]).padStart(2, '0')}-${String(+m[2]).padStart(2, '0')}`;
-    return null;
-}
-
-/** 金額字串 → 整數。容忍千分位/貨幣符號/全形空白；會計括號負數 (1,234) → -1234。 */
-function _wbParseAmt(s) {
-    if (s == null) return 0;
-    let str = String(s).replace(/[,$\s，]/g, '');
-    if (/^[(（].*[)）]$/.test(str)) str = '-' + str.replace(/[()（）]/g, '');
-    const n = parseFloat(str);
-    return isNaN(n) ? 0 : Math.round(n);
-}
-
-/** 欄位角色自動猜測：有表頭看字面（提出/存入/摘要…），沒表頭靠型態
- *  （日期樣式 → 日期；數字欄依序 支出→存入→忽略(餘額)；其餘首個文字欄 → 摘要）。 */
-function _wbGuessRoles(rows, month) {
-    const n = Math.max(0, ...rows.map(r => r.length));
-    const roles = new Array(n).fill('ignore');
-    const hasHeader = rows.length > 1 && rows[0].every(c => !/\d{2,}[\/\-.年]/.test(c) && !/^\d{3,}/.test(c.replace(/[,$\s]/g, '')));
-    const header = hasHeader ? rows[0] : null;
-    const sample = (hasHeader ? rows.slice(1) : rows).slice(0, 8);
-    for (let i = 0; i < n; i++) {
-        const h = header ? (header[i] || '') : '';
-        const cells = sample.map(r => r[i] || '').filter(Boolean);
-        const numeric = cells.length > 0 && cells.every(c => /^[-()（）$,.\d\s，]+$/.test(c));
-        // 日期優先於數字判定：'2026-07-01' 的 '-' 也落在數字字元類，先驗日期樣式（要過半才算）
-        const dateish = cells.length > 0 && cells.filter(c => _wbParseDate(c, month)).length > cells.length / 2;
-        if (/日期|交易日/.test(h) || (dateish && !/金額|餘額|支出|存入/.test(h))) { roles[i] = 'date'; continue; }
-        if (/支出|提出|借方|付出/.test(h)) { roles[i] = 'withdraw'; continue; }
-        if (/存入|收入|貸方/.test(h)) { roles[i] = 'deposit'; continue; }
-        if (/餘額/.test(h)) { roles[i] = 'ignore'; continue; }
-        if (/金額/.test(h) && numeric) { roles[i] = 'amount'; continue; }
-        if (/摘要|備註|說明|明細|敘述/.test(h)) { roles[i] = 'desc'; continue; }
-        if (numeric && cells.some(c => /\d/.test(c))) {
-            roles[i] = !roles.includes('withdraw') && !roles.includes('amount') ? 'withdraw'
-                : (!roles.includes('deposit') ? 'deposit' : 'ignore');   // 第三個數字欄多半是餘額
-            continue;
-        }
-        if (!roles.includes('desc') && cells.length) roles[i] = 'desc';
-    }
-    return { roles, headerRows: hasHeader ? 1 : 0 };
-}
+// ── 工作台：匯入對帳單明細 ──────────────────────────────────
+//
+// 解析走**後端**的 core/bank_statement.py（POST /bank-statement/preview）。
+// 這裡本來有一整套前端解析器（_wbParsePaste/_wbParseDate/_wbParseAmt/_wbGuessRoles，
+// 約 70 行），連同「請人逐欄指定角色」的步驟一起收掉了 —— 那份的註解自己寫著
+// 「若日後有第二個消費者（如後端匯入路徑）再搬去鎖黃金測試」，而後端匯入路徑
+// 就是第二個消費者。留兩份的代價是：民國年與會計括號的規則只存在其中一邊，
+// 兩支對同一份對帳單會得到不同答案，而且錯的那支永遠不會被測到。
+//
+// 換過來之後不必再問「哪一欄是支出」：金額的正負由**餘額鏈**推（本列餘額 −
+// 上列餘額），再跟銀行自己印的總計對帳。人要確認的是「這些列對不對」，
+// 不是「這欄叫什麼」。
 
 _fb.wbImportOpen = () => {
     _wbImportRows = null;
     _wbModal('匯入對帳單明細', `
-        <p style="color:#888;font-size:12px;margin:0 0 8px;">從網銀交易明細（或 Excel）整块選取複製，直接貼進來 — 下一步會讓你確認每一欄是什麼。</p>
-        <textarea id="finbank-wb-paste" class="crm-input" rows="10" style="width:100%;box-sizing:border-box;font-family:monospace;font-size:12px;" placeholder="例：\n2026/07/01\t跨行轉入\t\t50,000\t120,000\n2026/07/03\t轉帳手續費\t15\t\t119,985"></textarea>
+        <p style="color:#888;font-size:12px;margin:0 0 8px;">
+            從網銀交易明細整塊選取複製，直接貼進來。金額的正負由<b>餘額欄</b>推算，
+            不必指定哪一欄是支出 —— 所以請把<b>餘額那一欄一起複製</b>。</p>
+        <textarea id="finbank-wb-paste" class="crm-input" rows="10"
+            style="width:100%;box-sizing:border-box;font-family:monospace;font-size:12px;"
+            placeholder="例：&#10;2026/07/01\t跨行轉入\t\t50,000\t120,000&#10;2026/07/03\t轉帳手續費\t15\t\t119,985"></textarea>
+        <div id="finbank-wb-imp-err" style="display:none;color:#fca5a5;font-size:12px;margin-top:8px;white-space:pre-wrap;"></div>
         <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:12px;">
-            <button class="crm-btn crm-btn-primary" onclick="window._finBank.wbImportParse()">下一步：確認欄位</button>
+            <button class="crm-btn crm-btn-primary" onclick="window._finBank.wbImportParse(this)">下一步：確認明細</button>
         </div>`);
 };
 
-_fb.wbImportParse = () => {
-    const text = document.getElementById('finbank-wb-paste')?.value || '';
-    const rows = _wbParsePaste(text);
-    if (!rows.length) { finToast('貼上的內容解析不到任何列', true); return; }
-    const { roles, headerRows } = _wbGuessRoles(rows, _wb.month);
-    _wbImportRows = rows;
-    const nCol = roles.length;
-    const selRow = roles.map((r, i) => `<th style="padding:2px 6px;">
-        <select data-col="${i}" class="crm-select" style="font-size:11px;padding:2px 4px;">
-            ${_WB_ROLES.map(o => `<option value="${o.v}"${o.v === r ? ' selected' : ''}>${o.label}</option>`).join('')}
-        </select></th>`).join('');
-    const preview = rows.slice(0, 6).map(r => `<tr style="border-top:1px solid #2a2a2a;">
-        ${Array.from({ length: nCol }, (_, i) => `<td style="padding:3px 6px;max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${esc(r[i] || '')}</td>`).join('')}</tr>`).join('');
-    _wbModal('匯入對帳單明細 — 確認欄位', `
-        <p style="color:#888;font-size:12px;margin:0 0 8px;">解析到 ${rows.length} 列。每一欄選對角色（猜錯就改），沒金額的列會自動略過。</p>
+// ── 對帳單預覽：兩個入口（工作台貼上、貸款區上傳檔案）共用 ────────────
+//
+// 兩邊打的是同一支 /bank-statement/preview，只有「送什麼欄位」和「拿到之後
+// 畫成什麼」不同。錯誤處理、忙碌狀態、摘要列本來各寫一份 —— 尤其
+// multipart 這段：finFetch 會硬塞 Content-Type: application/json，boundary
+// 就被蓋掉，所以必須走原生 fetch 讓瀏覽器自己帶。這種一寫錯就整條壞掉的
+// 細節只該存在一份。
+
+/** POST 預覽。失敗/未通過檢查 → 呼叫 show(原因) 並回 null。 */
+async function _stmtFetchPreview(fd, { btn, doneLabel, show, failMsg }) {
+    btn.disabled = true;
+    btn.textContent = '解析中…';
+    try {
+        const res = await fetch(`/api/v1/finance/bank-statement/preview?entity=${finEntity()}`,
+            { method: 'POST', body: fd, headers: bearerHeader() });
+        const d = await res.json();
+        if (!res.ok) throw new Error(d.detail || '解析失敗');
+        if (!d.ok) { show(failMsg + '\n• ' + (d.errors || []).join('\n• ')); return null; }
+        return d;
+    } catch (e) {
+        show(e.message);
+        return null;
+    } finally {
+        btn.disabled = false;
+        btn.textContent = doneLabel;
+    }
+}
+
+/** 「共 N 筆／存入／支出」摘要列 + 警告區塊。extra = 追加的 <span>。 */
+function _stmtSummaryBar(d, extra = '') {
+    const s = d.summary || {};
+    const warn = (d.warnings || []).length
+        ? `<div style="color:#fbbf24;font-size:12px;margin:6px 0;white-space:pre-wrap;">⚠ ${(d.warnings || []).map(esc).join('\n⚠ ')}</div>`
+        : '';
+    return `<div style="display:flex;gap:18px;flex-wrap:wrap;font-size:12px;color:#ccc;margin-bottom:6px;">
+            <span>共 <b>${fmtNum(s.count)}</b> 筆</span>
+            <span>存入 <b style="color:#86efac;">$${fmtNum(s.total_in)}</b></span>
+            <span>支出 <b style="color:#fca5a5;">$${fmtNum(s.total_out)}</b></span>
+            ${extra}
+        </div>
+        ${warn}`;
+}
+
+_fb.wbImportParse = async (btn) => {
+    const text = (document.getElementById('finbank-wb-paste')?.value || '').trim();
+    const err = document.getElementById('finbank-wb-imp-err');
+    const show = (m) => { err.textContent = m; err.style.display = 'block'; };
+    err.style.display = 'none';
+    if (!text) return show('請先貼上交易明細');
+    const fd = new FormData();
+    fd.append('bank_account_id', _wb.acct);
+    fd.append('text', text);
+    const d = await _stmtFetchPreview(fd, {
+        btn, doneLabel: '下一步：確認明細', show,
+        failMsg: '這份明細沒通過檢查，所以不匯入：',
+    });
+    if (!d) return;
+    _wbImportRows = d.rows || [];
+    _wbRenderImportPreview(d);
+};
+
+function _wbRenderImportPreview(d) {
+    const rows = d.rows || [];
+    const body = rows.slice(0, 8).map(r => `
+        <tr style="border-top:1px solid #2a2a2a;">
+            <td style="padding:3px 6px;white-space:nowrap;">${esc(r.date)}</td>
+            <td style="padding:3px 6px;max-width:260px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${esc(r.description || '')}</td>
+            <td style="padding:3px 6px;text-align:right;white-space:nowrap;">${_wbAmt(r.amount)}</td>
+        </tr>`).join('');
+    _wbModal('匯入對帳單明細 — 確認', `
+        ${_stmtSummaryBar(d)}
         <div style="overflow-x:auto;border:1px solid #2a2a2a;border-radius:6px;">
-            <table style="border-collapse:collapse;font-size:12px;color:#ccc;min-width:100%;">
-                <thead><tr>${selRow}</tr></thead><tbody>${preview}</tbody>
+            <table style="border-collapse:collapse;font-size:12px;color:#ccc;width:100%;">
+                <tbody>${body}</tbody>
             </table>
         </div>
-        ${rows.length > 6 ? `<div style="color:#666;font-size:11px;margin-top:4px;">…（預覽前 6 列，實際匯入全部）</div>` : ''}
-        <label style="display:block;color:#ccc;font-size:12px;margin-top:10px;"><input type="checkbox" id="finbank-wb-skiphdr"${headerRows ? ' checked' : ''}> 第一列是表頭（不匯入）</label>
-        <label style="display:block;color:#ccc;font-size:12px;margin-top:4px;"><input type="checkbox" id="finbank-wb-replace"> 取代本月已匯入的明細（重新匯入）</label>
+        ${rows.length > 8 ? `<div style="color:#666;font-size:11px;margin-top:4px;">…（預覽前 8 列，實際匯入 ${fmtNum(rows.length)} 筆）</div>` : ''}
+        <label style="display:block;color:#ccc;font-size:12px;margin-top:10px;">
+            <input type="checkbox" id="finbank-wb-replace"> 取代本月已匯入的明細（重新匯入）</label>
         <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:12px;">
             <button class="crm-btn crm-btn-secondary" onclick="window._finBank.wbImportOpen()">← 重貼</button>
             <button class="crm-btn crm-btn-primary" onclick="window._finBank.wbImportSave(this)">匯入</button>
         </div>`);
-};
+}
 
 _fb.wbImportSave = async (btn) => {
     const body = document.getElementById('finbank-wb-modal-body');
-    const roles = [...body.querySelectorAll('select[data-col]')].map(s => s.value);
-    const skip = body.querySelector('#finbank-wb-skiphdr')?.checked ? 1 : 0;
     const replace = body.querySelector('#finbank-wb-replace')?.checked || false;
-    const lines = [];
-    let skipped = 0;
-    for (const r of _wbImportRows.slice(skip)) {
-        let dateStr = null, amount = 0;
-        const desc = [];
-        roles.forEach((role, i) => {
-            const cell = r[i] || '';
-            if (role === 'date' && !dateStr) dateStr = _wbParseDate(cell, _wb.month);
-            else if (role === 'desc' && cell) desc.push(cell);
-            else if (role === 'withdraw') amount -= Math.abs(_wbParseAmt(cell));
-            else if (role === 'deposit') amount += Math.abs(_wbParseAmt(cell));
-            else if (role === 'amount') amount += _wbParseAmt(cell);
-        });
-        if (!amount) { skipped++; continue; }
-        lines.push({ line_date: dateStr, description: desc.join(' ').slice(0, 255), amount });
-    }
-    if (!lines.length) { finToast('解析不到有效明細（每列要有非 0 金額）— 檢查欄位角色是否選對', true); return; }
+    // 對帳工作底稿只要 (日期, 摘要, 帶號金額)；後端已經把三者算好了
+    const lines = (_wbImportRows || [])
+        .filter(r => r.amount)
+        .map(r => ({ line_date: r.date, description: (r.description || '').slice(0, 255),
+                     amount: r.amount }));
+    if (!lines.length) { finToast('沒有可匯入的明細（每列要有非 0 金額）', true); return; }
     return _wbApi('/statement-lines', {
         method: 'POST',
         body: JSON.stringify({ bank_account_id: _wb.acct, month: _wb.month, lines, replace }),
-    }, { btn, close: true, okMsg: `已匯入 ${lines.length} 筆${skipped ? `（略過 ${skipped} 列無金額）` : ''}` });
+    }, { btn, close: true, okMsg: `已匯入 ${lines.length} 筆` });
 };
 
 // ── 工作台：手動配對 / 註記 / 補記入帳 ───────────────────────
@@ -1352,4 +1428,153 @@ _fb.adjDel = async (id) => {
         finToast('已刪除');
         _fb.reload();
     } catch (e) { finToast(e.message, true); }
+};
+
+// ── 銀行對帳單匯入（上傳/貼上 → 逐列確認 → 寫帳）──────────────
+//
+// 為什麼要「預覽再確認」而不是解析完直接匯：對帳單解析得再穩，把錢寫進帳這件事
+// 都該由人按下最後一步。預覽把每一列的判斷攤開（分類、配到哪筆貸款哪一期、是不是
+// 已經匯過），錯的當場取消勾選 —— 不做「全自動但你不知道它做了什麼」。
+
+_fb.stmtOpen = () => {
+    _stmtPreview = null;
+    const opts = _accounts.filter(a => a.active !== false).map(a =>
+        `<option value="${esc(a.id)}">${esc(a.name)}</option>`).join('');
+    _wbModal('匯入銀行對帳單', `
+        <p style="color:#888;font-size:12px;margin:0 0 10px;">
+            上傳網銀下載的交易明細（PDF / CSV / TXT），或把網銀畫面的交易表格複製貼上。
+            系統用<b>餘額欄</b>推每筆是支出還是存入，再跟對帳單自己印的總計核對 ——
+            對不上會直接擋下來，不會猜。貸款扣款會自動配到對應的貸款期別。</p>
+        <div class="crm-field"><label>這份對帳單是哪個帳戶</label>
+            <select id="finbank-stmt-acct">${opts}</select></div>
+        <div class="crm-field"><label>上傳檔案</label>
+            <input type="file" id="finbank-stmt-file" accept=".pdf,.csv,.txt">
+            <div style="color:#666;font-size:11px;margin-top:3px;">掃描成圖片的 PDF 沒有文字層，讀不到 —— 那種請改用下面的貼上。</div></div>
+        <div class="crm-field"><label>或：貼上交易明細</label>
+            <textarea id="finbank-stmt-text" rows="6" placeholder="從網銀整塊選取複製，直接貼在這裡"
+                style="width:100%;font-family:monospace;font-size:12px;"></textarea></div>
+        <div id="finbank-stmt-err" style="display:none;color:#fca5a5;font-size:12px;margin:6px 0;white-space:pre-wrap;"></div>
+        <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:10px;">
+            <button class="crm-btn crm-btn-secondary" onclick="window._finBank.wbCloseModal()">取消</button>
+            <button class="crm-btn crm-btn-primary" onclick="window._finBank.stmtParse(this)">解析看看</button>
+        </div>`);
+};
+
+_fb.stmtParse = async (btn) => {
+    const err = document.getElementById('finbank-stmt-err');
+    const show = (m) => { err.textContent = m; err.style.display = 'block'; };
+    err.style.display = 'none';
+    const acctId = document.getElementById('finbank-stmt-acct').value;
+    const file = document.getElementById('finbank-stmt-file').files[0];
+    const text = document.getElementById('finbank-stmt-text').value.trim();
+    if (!acctId) return show('請先選帳戶');
+    if (!file && !text) return show('請上傳檔案或貼上交易明細');
+
+    const fd = new FormData();
+    fd.append('bank_account_id', acctId);
+    if (file) fd.append('file', file);
+    if (text) fd.append('text', text);
+    const d = await _stmtFetchPreview(fd, {
+        btn, doneLabel: '解析看看', show,
+        failMsg: '這份對帳單沒通過檢查，所以不匯入：',
+    });
+    if (!d) return;
+    _stmtPreview = { acctId, ...d };
+    _stmtRenderPreview();
+};
+
+function _stmtRow(r, i) {
+    const isOut = r.amount < 0;
+    const tag = (txt, bg, fg) =>
+        `<span style="font-size:10px;padding:1px 5px;border-radius:7px;background:${bg};color:${fg};">${esc(txt)}</span>`;
+    let status = '';
+    if (r.duplicate) status = tag('已匯過', '#3a2d12', '#fbbf24');
+    else if (r.inferred) status = tag('方向請確認', '#3a2d12', '#fbbf24');
+    else if (r.unmapped_category) status = tag(r.category ? '科目未對映' : '無類別', '#3a2d12', '#fbbf24');
+    let loanCell = '';
+    if (r.is_loan) {
+        loanCell = r.loan_id
+            ? `${esc(r.loan_name)} 第${r.period_no}期 ` +
+              tag(r.match_confidence === 'account' ? '帳號認出' : '金額吻合', '#14351f', '#86efac')
+            : tag('配不到貸款 → 會當一般支出記', '#3a1f1f', '#fca5a5');
+    }
+    return `<tr style="border-bottom:1px solid #2a2a2a;${r.duplicate ? 'opacity:.55;' : ''}">
+        <td style="padding:4px 6px;"><input type="checkbox" data-stmt-i="${i}" ${r.selected ? 'checked' : ''}></td>
+        <td style="padding:4px 6px;color:#ccc;white-space:nowrap;">${esc(r.date)}</td>
+        <td style="padding:4px 6px;color:#ddd;">${esc(r.description || '')}</td>
+        <td style="padding:4px 6px;text-align:right;white-space:nowrap;color:${isOut ? '#fca5a5' : '#86efac'};">
+            ${isOut ? '-' : '+'}$${fmtNum(Math.abs(r.amount))}</td>
+        <td style="padding:4px 6px;color:#bbb;white-space:nowrap;">${esc(r.category || '（未分類）')}</td>
+        <td style="padding:4px 6px;">${loanCell}</td>
+        <td style="padding:4px 6px;">${status}</td>
+    </tr>`;
+}
+
+function _stmtRenderPreview() {
+    const d = _stmtPreview;
+    const s = d.summary || {};
+    const th = (t, align) => `<th style="padding:4px 6px;text-align:${align || 'left'};color:#9ca3af;font-weight:500;font-size:11px;">${t}</th>`;
+    _wbModal('確認要匯入哪些列', `
+        ${_stmtSummaryBar(d, `<span>貸款扣款 <b>${fmtNum(s.loan_rows)}</b> 筆</span>
+            ${s.duplicates ? `<span style="color:#fbbf24;">已匯過 ${fmtNum(s.duplicates)} 筆（預設不勾）</span>` : ''}`)}
+        <div style="max-height:46vh;overflow:auto;border:1px solid #2e2e2e;border-radius:6px;">
+            <table style="width:100%;border-collapse:collapse;font-size:12px;">
+                <thead style="position:sticky;top:0;background:#1b1b1b;"><tr>
+                    ${th('<input type="checkbox" id="finbank-stmt-all">')}${th('日期')}${th('摘要')}
+                    ${th('金額', 'right')}${th('分類')}${th('貸款期別')}${th('')}
+                </tr></thead>
+                <tbody id="finbank-stmt-tbody">${(d.rows || []).map(_stmtRow).join('')}</tbody>
+            </table>
+        </div>
+        <div id="finbank-stmt-err" style="display:none;color:#fca5a5;font-size:12px;margin:6px 0;white-space:pre-wrap;"></div>
+        <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:10px;">
+            <button class="crm-btn crm-btn-secondary" onclick="window._finBank.wbCloseModal()">取消</button>
+            <button class="crm-btn crm-btn-primary" onclick="window._finBank.stmtApply(this)">匯入勾選的列</button>
+        </div>`);
+    const all = document.getElementById('finbank-stmt-all');
+    if (all) {
+        all.onchange = () => document.querySelectorAll('#finbank-stmt-tbody input[data-stmt-i]')
+            .forEach(cb => { cb.checked = all.checked; });
+    }
+}
+
+_fb.stmtApply = async (btn) => {
+    const d = _stmtPreview;
+    if (!d) return;
+    const picked = [...document.querySelectorAll('#finbank-stmt-tbody input[data-stmt-i]:checked')]
+        .map(cb => d.rows[Number(cb.dataset.stmtI)]).filter(Boolean);
+    const err = document.getElementById('finbank-stmt-err');
+    if (!picked.length) {
+        err.textContent = '一列都沒勾 —— 沒有東西要匯入。';
+        err.style.display = 'block';
+        return;
+    }
+    btn.disabled = true;
+    btn.textContent = '匯入中…';
+    try {
+        const r = await finFetch('/bank-statement/apply', {
+            method: 'POST',
+            body: JSON.stringify({
+                bank_account_id: d.acctId,
+                rows: picked.map(x => ({
+                    date: x.date, amount: x.amount, description: x.description,
+                    category: x.category, loan_id: x.loan_id, period_no: x.period_no,
+                })),
+            }),
+        });
+        _wbCloseModal();
+        // 後端會擋掉帳上已有的同日同額列（全選會把「已匯過」一起勾起來，
+        // 逾時重按也是）—— 跳過幾筆一定要講，否則使用者以為全部匯進去了。
+        const dup = (r.skipped_duplicates || []).length;
+        finToast(`已匯入 ${r.entries} 筆收支、${r.loan_payments} 期貸款繳款`
+            + (r.statement_lines ? `；對帳工作台同步 ${r.statement_lines} 列（已自動配對）` : '')
+            + (dup ? `；跳過 ${dup} 筆重複（帳上已有）` : ''));
+        _fb.reload();
+    } catch (e) {
+        err.textContent = e.message;
+        err.style.display = 'block';
+    } finally {
+        btn.disabled = false;
+        btn.textContent = '匯入勾選的列';
+    }
 };
