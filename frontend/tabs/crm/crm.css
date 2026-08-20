@@ -902,8 +902,6 @@
 #inv-list-body .crm-row-name { font-weight: 600; color: #e0e0e0; }
 
 #pay-list-body .crm-row-amount,
-#cash-list-body .crm-row-amt-out,
-#cash-list-body .crm-row-amt-in,
 #payable-list-body .crm-row-amount { font-weight: 600; font-size: 13px; }
 /* 發票列表：金額是這張表的主角，比其他欄再重一級（白、15px、數字等寬對齊）。
    ⚠️ 選擇器要壓過資料列那條 ellipsis 規則
@@ -914,12 +912,6 @@
   font-weight: 700; font-size: 15px; color: #fff;
   font-variant-numeric: tabular-nums;
 }
-
-/* ── Cash entry columns ── */
-.crm-col-amt-out { flex: 0.7; text-align: right; }
-.crm-col-amt-in  { flex: 0.7; text-align: right; }
-.crm-row-amt-out { flex: 0.7; text-align: right; font-size: 13px; }
-.crm-row-amt-in  { flex: 0.7; text-align: right; font-size: 13px; }
 
 /* ── Payable cards ── */
 .payable-card { background: #222; border: 1px solid #3a3a3a; border-radius: 8px; margin-bottom: 8px; overflow: hidden; }
@@ -1775,3 +1767,48 @@
 .crm-info-box-sub { color: #93c5fd; margin-top: 4px; font-size: 11px; }
 
 
+
+/* ── 收支明細：9 欄的寬度分配 ────────────────────────────────
+   加了「帳戶」「備註」之後欄位變 9 個，全部 flex:1 均分會讓日期換行、
+   金額被截斷。這裡把固定寬度的欄（日期/金額/類別/帳戶）釘死，剩下的空間
+   給會長的文字欄按比例分。
+   ⚠️ 選擇器要壓過上面那條 `#cash-list-body .crm-row > div:not(.crm-kebab-wrap)`
+   （特異度 (1,2,1)），所以資料列這邊也帶 :not() 保持同級並排在後面。 */
+/* 🔴 資料列的選擇器一定要帶 :not(.crm-kebab-wrap)。沒帶的話
+   `#cash-list-body .crm-row > *:nth-child(N)` 是 (1,2,0)，輸給上面那條
+   `#cash-list-body .crm-row > div:not(.crm-kebab-wrap)`(1,2,1) —— 結果只有表頭
+   套到新寬度、資料列還是均分 flex:1，整排欄位對不到標題（2026-08-20 實測）。
+   帶了 :not() 之後是 (1,3,0)，b 段 3>2 勝出。 */
+#cash-list-panel .acct-header > span:nth-child(1),
+#cash-list-body .crm-row > *:nth-child(1):not(.crm-kebab-wrap) { flex: 0 0 92px; }                      /* 日期 */
+#cash-list-panel .acct-header > span:nth-child(2),
+#cash-list-body .crm-row > *:nth-child(2):not(.crm-kebab-wrap) { flex: 1.6 1 0; min-width: 0; text-align: left; }  /* 內容 */
+#cash-list-panel .acct-header > span:nth-child(3),
+#cash-list-body .crm-row > *:nth-child(3):not(.crm-kebab-wrap) { flex: 0 0 104px; text-align: right; }  /* 收入 */
+#cash-list-panel .acct-header > span:nth-child(4),
+#cash-list-body .crm-row > *:nth-child(4):not(.crm-kebab-wrap) { flex: 0 0 104px; text-align: right; }  /* 支出 */
+#cash-list-panel .acct-header > span:nth-child(5),
+#cash-list-body .crm-row > *:nth-child(5):not(.crm-kebab-wrap) { flex: 0 0 84px; }                      /* 類別 */
+#cash-list-panel .acct-header > span:nth-child(6),
+#cash-list-body .crm-row > *:nth-child(6):not(.crm-kebab-wrap) { flex: 1.6 1 0; min-width: 0; text-align: left; color: #8a8a8a; }  /* 備註 */
+#cash-list-panel .acct-header > span:nth-child(7),
+#cash-list-body .crm-row > *:nth-child(7):not(.crm-kebab-wrap) { flex: 1 1 0; min-width: 0; text-align: left; }    /* 專案 */
+#cash-list-panel .acct-header > span:nth-child(8),
+#cash-list-body .crm-row > *:nth-child(8):not(.crm-kebab-wrap) { flex: 1.2 1 0; min-width: 0; text-align: left; }  /* 發票 */
+#cash-list-panel .acct-header > span:nth-child(9),
+#cash-list-body .crm-row > *:nth-child(9):not(.crm-kebab-wrap) { flex: 0 0 104px; }                     /* 帳戶 */
+#cash-list-panel .acct-header > span:nth-child(10),
+#cash-list-body .crm-row > .crm-kebab-wrap { flex: 0 0 36px; }
+
+/* ── 帳戶切換列（總表／各銀行，附餘額）────────────────────── */
+.cash-acct-tabs { display: flex; gap: 8px; flex-wrap: wrap; padding: 8px 12px;
+  border-bottom: 1px solid #2a2a2a; }
+.cash-acct-tab { background: #1b1b1b; border: 1px solid #333; border-radius: 6px;
+  padding: 5px 12px; cursor: pointer; color: #bbb; font-size: 12px; line-height: 1.35;
+  text-align: left; }
+.cash-acct-tab:hover { border-color: #4a4a4a; color: #ddd; }
+.cash-acct-tab.active { border-color: #3b82f6; background: #16233a; color: #fff; }
+.cash-acct-tab b { display: block; font-size: 14px; font-weight: 700;
+  font-variant-numeric: tabular-nums; }
+.cash-acct-tab .neg { color: #fca5a5; }
+.cash-acct-tab .pos { color: #fbbf24; }

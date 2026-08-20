@@ -647,6 +647,46 @@ async function _initInvoicesRootCard() {
     };
 }
 
+/** 收款紀錄區塊：這張發票實際收了幾次、每次多少、哪一天、還欠多少。
+ *
+ *  資料來自收支明細的發票分配（crm_cash_invoice_links），也就是**帳上真的進了
+ *  多少錢** —— 比手填的「款項狀態」可靠，而且分期收款時看得到全貌。
+ *  `payments` 只有 GET /invoices/{id} 才回（清單那支只回合計，不拖慢列表）。
+ */
+function _collectionSection(inv, section, prop) {
+    const pays = inv.payments || [];
+    const collected = inv.collected || 0;
+    const total = inv.amount_total || 0;
+    const outstanding = inv.outstanding != null ? inv.outstanding : (total - collected);
+    if (!pays.length && !collected) {
+        // 沒有任何收款紀錄就不佔版面 —— 但已標已收款卻查無紀錄要講出來，
+        // 那是「狀態說收到了、帳上卻沒有這筆錢」，值得被看見。
+        // 只在收支明細涵蓋得到這張發票的期間時才提醒 —— 早於收支表起始日的
+        // 發票，帳上本來就查不到對應收款，那不是資料有問題。
+        if (inv.payment_status === '已收款' && inv.collection_checkable) {
+            return section('收款紀錄')
+                + `<div style="padding:6px 0;font-size:12px;color:#fbbf24;">`
+                + `標示為已收款，但收支明細裡查不到對應的收款 ——`
+                + ` 可能是還沒在收支明細掛上這張發票。</div>`;
+        }
+        return '';
+    }
+    const done = outstanding <= 0;
+    let h = section('收款紀錄',
+        `<span style="font-size:11px;color:${done ? '#86efac' : '#fbbf24'};">`
+        + `已收 $${_fmtNum(collected)} / $${_fmtNum(total)}`
+        + (done ? '（收齊）' : `，尚欠 $${_fmtNum(outstanding)}`) + '</span>');
+    pays.forEach((p, i) => {
+        const label = pays.length > 1 ? `第 ${i + 1} 次到款` : '到款日';
+        const bits = [p.date ? p.date.substring(0, 10) : '(無日期)',
+                      '$' + _fmtNum(p.amount)];
+        if (p.bank_account) bits.push(p.bank_account);   // 錢進了哪個銀行
+        if (p.summary) bits.push(p.summary);
+        h += prop(label, bits.join('　'), p.date ? p.date.substring(0, 10) : '');
+    });
+    return h;
+}
+
 function renderDetail(inv) {
     document.getElementById('inv-detail-title').textContent = inv.title;
     // 每列右側一顆低調的「複製」—— 開發票的同事要把抬頭/統編/品項/金額逐項貼到
@@ -685,6 +725,8 @@ function renderDetail(inv) {
         html += prop('收件電話', inv.recipient_phone);
         html += prop('收件地址', inv.recipient_address);
     }
+    // ── 收款紀錄（從收支明細的發票分配推導，不是手填的狀態欄）
+    html += _collectionSection(inv, section, prop);
     // ── 補充資訊
     html += section('補充資訊');
     html += prop('申請人', inv.applicant);

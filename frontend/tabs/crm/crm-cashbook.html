@@ -1,18 +1,15 @@
 <!-- Cash Entry Toolbar -->
 <div class="crm-toolbar">
-  <input id="cash-search" type="search" placeholder="搜尋摘要、收款人..." class="crm-search-input">
+  <input id="cash-search" type="search" placeholder="搜尋內容、備註、發票號碼..." class="crm-search-input">
+  <!-- 類別選項由 JS 依實際資料生成（寫死的清單跟不上使用中的類別，選了篩不到東西）。
+       原本還有一個「全部項目」篩 item 欄 —— 那欄從來沒有資料，永遠篩出空白，已移除。 -->
   <select id="cash-filter-cat" class="crm-select">
     <option value="">全部類別</option>
-    <option value="請款">請款</option>
-    <option value="收支">收支</option>
-    <option value="轉存">轉存</option>
   </select>
-  <select id="cash-filter-item" class="crm-select">
-    <option value="">全部項目</option>
-    <option value="專案">專案</option>
-    <option value="設備耗材">設備耗材</option>
-    <option value="行政">行政</option>
-    <option value="轉存">轉存</option>
+  <select id="cash-filter-dir" class="crm-select">
+    <option value="">收入＋支出</option>
+    <option value="in">只看收入</option>
+    <option value="out">只看支出</option>
   </select>
   <div class="crm-toolbar-right">
     <button id="cash-btn-import" class="crm-btn crm-btn-secondary">匯入 CSV</button>
@@ -23,14 +20,19 @@
 <!-- Body -->
 <div class="crm-body">
   <div class="crm-list-panel" id="cash-list-panel">
+    <!-- 帳戶切換列：總表／各銀行，每個都標當下餘額。放這裡而不是塞進工具列的
+         下拉 —— 餘額是每天要看的數字，藏在下拉裡等於沒有。 -->
+    <div class="cash-acct-tabs" id="cash-acct-tabs"></div>
     <div class="crm-list-header acct-header">
       <span data-sort-key="date">日期 <span class="crm-sort-ind">↕</span></span>
       <span data-sort-key="summary">內容 <span class="crm-sort-ind">↕</span></span>
       <span data-sort-key="deposit">收入 <span class="crm-sort-ind">↕</span></span>
       <span data-sort-key="expense">支出 <span class="crm-sort-ind">↕</span></span>
       <span data-sort-key="category">類別 <span class="crm-sort-ind">↕</span></span>
+      <span data-sort-key="note">備註 <span class="crm-sort-ind">↕</span></span>
       <span data-sort-key="project">專案 <span class="crm-sort-ind">↕</span></span>
       <span data-sort-key="invoice">發票 <span class="crm-sort-ind">↕</span></span>
+      <span data-sort-key="account">帳戶 <span class="crm-sort-ind">↕</span></span>
       <span style="flex:0 0 36px;"></span>
     </div>
     <div id="cash-list-body"><div class="crm-empty">載入中...</div></div>
@@ -78,34 +80,8 @@
         <div class="crm-field">
           <label>類別</label>
           <select id="cash-f-category" class="crm-input">
-            <option value="">—</option>
-            <option value="水電網路">水電網路</option>
-            <option value="交際應酬">交際應酬</option>
-            <option value="行政">行政</option>
-            <option value="其他">其他</option>
-            <option value="其他收入">其他收入</option>
-            <option value="房租">房租</option>
-            <option value="建構">建構</option>
-            <option value="專案">專案</option>
-            <option value="專案外包">專案外包</option>
-            <option value="專案雜支">專案雜支</option>
-            <option value="教育訓練">教育訓練</option>
-            <option value="設備耗材">設備耗材</option>
-            <option value="設備維護">設備維護</option>
-            <option value="軟體網路服務">軟體網路服務</option>
-            <option value="勞健保">勞健保</option>
-            <option value="發票代開">發票代開</option>
-            <option value="會計">會計</option>
-            <option value="業務推廣">業務推廣</option>
-            <option value="製作金">製作金</option>
-            <option value="銀行利息">銀行利息</option>
-            <option value="獎金">獎金</option>
-            <option value="請款單">請款單</option>
-            <option value="辦公室管理費">辦公室管理費</option>
-            <option value="營所稅">營所稅</option>
-            <option value="營業稅">營業稅</option>
-            <option value="薪資">薪資</option>
-            <option value="轉存">轉存</option>
+            <!-- 選項由 JS 依 /cash-entries/options 填（正本是
+                 finance_category_map）—— 寫死會跟種子脫節 -->
           </select>
         </div>
         <div class="crm-field crm-field-full">
@@ -144,7 +120,6 @@
           <input type="hidden" id="cash-f-advance_payment_id" value="">
         </div>
       </div>
-      <div id="cash-verify-row" style="display:none;padding:8px 0;font-size:12px;color:#9ca3af;"></div>
 
       <!-- 3. 補充資訊 -->
       <div class="crm-form-section">補充資訊</div>
