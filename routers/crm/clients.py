@@ -14,7 +14,7 @@ from core.schemas import ClientPayload
 
 from ._shared import (router, _check_auth, _require_db, _get_factory,
                       _now, _to_dict, _auto_update_client_status,
-                      _CLIENT_TIER_EXCLUDE_STATUSES)
+                      _CLIENT_TIER_EXCLUDE_STATUSES, map_csv_row)
 
 try:
     from ._shared import (select, or_, sa_update, IntegrityError,
@@ -187,16 +187,7 @@ _COL_MAP = {
 
 def _map_row(header_map: dict, row: dict) -> dict:
     """Map a CSV row to client fields using pre-computed header_map."""
-    result = {}
-    for field, aliases in _COL_MAP.items():
-        for alias in aliases:
-            orig = header_map.get(alias.lower())
-            if orig is not None:
-                val = row.get(orig, "").strip()
-                if val:
-                    result[field] = val
-                break
-    return result
+    return map_csv_row(_COL_MAP, header_map, row)
 
 
 @router.post("/clients/import_csv")

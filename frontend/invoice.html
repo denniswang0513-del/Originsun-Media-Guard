@@ -94,7 +94,13 @@ function _headers() {
 async function _init() {
   if (!_token) { document.getElementById('login-section').style.display = ''; return; }
   document.getElementById('main-section').style.display = '';
-  document.getElementById('f-date').value = new Date().toISOString().substring(0, 10);
+  // 🔴 本地日期，不是 toISOString()（那是 UTC）—— 台北早上 8 點前會填成**昨天**，
+  // 跨月時連會計月都錯
+  {
+    const d = new Date();
+    document.getElementById('f-date').value =
+      `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  }
   try {
     const data = await (await fetch(BASE + '/projects', { headers: _headers() })).json();
     const sel = document.getElementById('f-project');
@@ -127,7 +133,11 @@ async function _submit() {
   try {
     const r = await fetch(BASE + '/invoices', { method: 'POST', headers: _headers(), body: JSON.stringify({
       payment_type: document.getElementById('f-type').value,
-      payment_status: document.getElementById('f-type').value === '收款' ? '已收款' : '已轉撥',
+      // 🔴 狀態由後端依方向決定（core/finance_logic.initial_invoice_status）。
+      // 這頁是獨立 HTML、沒有模組可 import，自己寫一份的下場就是 2026-08-21 那次：
+      // 「已轉撥」改名成「已撥款」時漏了這裡，從手機登記的代開發票拿到一個
+      // 系統其他地方都不認得的舊狀態。
+      payment_status: '',
       issue_status: '已開立',
       invoice_number: document.getElementById('f-number').value,
       invoice_date: document.getElementById('f-date').value || null,

@@ -679,6 +679,9 @@ async def _on_startup():
                         "ALTER TABLE crm_payment_requests ADD COLUMN IF NOT EXISTS advance_by VARCHAR(64)",
                         "ALTER TABLE crm_payment_requests ADD COLUMN IF NOT EXISTS is_advance INTEGER DEFAULT 0",
                         "ALTER TABLE crm_payment_requests ADD COLUMN IF NOT EXISTS advance_returned INTEGER DEFAULT 0",
+                        # 代開自動化的冪等鍵改用發票 id（無號發票也有鍵）
+                        "ALTER TABLE crm_payment_requests ADD COLUMN IF NOT EXISTS source_invoice_id VARCHAR(32)",
+                        "CREATE INDEX IF NOT EXISTS idx_payreq_src_invoice ON crm_payment_requests(source_invoice_id)",
                         "ALTER TABLE crm_cash_entries ADD COLUMN IF NOT EXISTS advance_payment_id VARCHAR(32)",
                         # ── 零用金請款（docs/PETTY_CASH_PLAN.md）──────────────
                         # 支出單據行擴充：一筆登記同時餵專案成本與個人請款。

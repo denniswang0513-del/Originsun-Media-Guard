@@ -69,7 +69,9 @@ function renderDetail(c) {
     }
 
     const itemsHtml = c.items.map(it => {
-        const isReceived = it.payment_status === '已收款';
+        // 「收到錢了沒」由後端判（group_receivables 的 collected）——
+        // 前端列一份狀態字串的話，代開改名那種事一發生就會有一邊漏掉
+        const isReceived = !!it.is_collected;
         const daysColor = it.days_since_issued > 60 ? '#ef4444' : it.days_since_issued > 30 ? '#fbbf24' : '#9ca3af';
         return `
         <div class="payable-item" id="recv-row-${it.id}">

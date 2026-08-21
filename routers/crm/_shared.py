@@ -292,6 +292,41 @@ def _fmt_day(dt) -> str:
     return dt.strftime("%Y-%m-%d")
 
 
+def map_csv_row(col_map: dict, header_map: dict, row: dict, coerce=None) -> dict:
+    """CSV 一列 → {欄位: 值}，依 {欄位: [別名…]} 對映。六支匯入端的唯一正本。
+
+    別名採「第一個**有值**的欄勝出」。
+    🔴 本來有兩種方言：clients/projects 那兩支是「第一個**存在**的表頭勝出」＋
+    break —— CSV 同時有「匯款資訊」與「匯款帳號」兩欄、而前者這一列剛好空白時，
+    後者的值會被整格吞掉，而且沒有任何跡象。這裡不留那個方言：六個匯入端沒有
+    任何一支會寫入空字串（都有 truthiness 閘），空格從來就不是「刻意留白」。
+
+    coerce(欄位, 值) 讓呼叫端自己決定型別轉換（_parse_money／int），不塞進來。
+    """
+    data = {}
+    for field, aliases in col_map.items():
+        for alias in aliases:
+            orig = header_map.get(alias.lower())
+            if orig and (row.get(orig) or "").strip():
+                val = row[orig].strip()
+                data[field] = coerce(field, val) if coerce else val
+                break
+    return data
+
+
+def _fmt_minute(dt) -> str:
+    """timestamptz → 'YYYY-MM-DD HH:MM'（台北），None → ''。
+
+    同 _fmt_day 的理由：asyncpg 讀回來是 aware UTC，面值直接切字串會少 8 小時
+    （草稿清單的「最後修改」實測顯示成前一天 17:31）。
+    """
+    if not dt:
+        return ""
+    if dt.tzinfo is not None:
+        dt = dt.astimezone(_TW_TZ)
+    return dt.strftime("%Y-%m-%d %H:%M")
+
+
 def _parse_day(raw):
     """YYYY-MM-DD → datetime；空值 → None；格式錯 → 422（與 _parse_shoot_date
     的「看不懂回 None」語意不同 — 這支給嚴格驗證的財務端點用）。"""

@@ -18,9 +18,17 @@ from datetime import datetime, timezone
 from fastapi import Depends, HTTPException, Request, UploadFile, File, Query
 
 from core.auth import check_admin
-from core.finance_logic import month_of
+from core.finance_logic import (INVOICE_COLLECTED_STATUSES as INVOICE_COLLECTED,
+                                INVOICE_PASSTHROUGH_COLLECTED,
+                                INVOICE_PENDING_REMIT, INVOICE_REMITTED,
+                                INVOICE_RECEIVED, PASSTHROUGH_FEE_RATES,
+                                alloc_verdict, initial_invoice_status,
+                                invoice_direction, invoice_is_settled,
+                                is_passthrough_category, month_of,
+                                normalize_invoice_status, passthrough_commission)
 from core.ledger import require_entity
 from core.project_link import CASH_CATEGORIES as _PROJECT_LINK_CATEGORIES
+from core.project_link import PAYMENT_CATEGORIES as _PAYMENT_LINK_CATEGORIES
 from core.schemas import (InvoicePayload, PaymentRequestPayload, CashEntryPayload,
                           CashInvoiceLinksPayload)
 
@@ -28,7 +36,7 @@ from ._shared import (router, token_router, _check_auth, money_dep, _require_db,
                       cash_category_texts,
                       _get_factory, _fmt_day, _now,
                       _parse_shoot_date, _assert_month_open, _assert_rows_open,
-                      _locked_month_set, _raise_locked_batch)
+                      _locked_month_set, _raise_locked_batch, map_csv_row)
 
 try:
     from ._shared import (select, or_,
@@ -116,8 +124,15 @@ def _to_invoice_dict(inv, project_name: str = "") -> dict:
 
 
 def _mark_invoice_received(inv, when) -> None:
-    """收款發票標已收款 + paid_date first-wins（兩欄不變式成對動 — 反向見 _unmark）。"""
-    inv.payment_status = "已收款"
+    """發票收到錢了：標狀態 + paid_date first-wins（兩欄不變式成對動 — 反向見 _unmark）。
+
+    代開發票標的是**待撥款**不是已收款：錢進來了，但這筆是過路錢，還欠代開人
+    一次轉撥（owner 2026-08-21）。同一個動作也會生出那張應付的請款單，見
+    _sync_passthrough_request。
+    """
+    inv.payment_status = (INVOICE_PENDING_REMIT
+                          if is_passthrough_category(inv.category)
+                          else INVOICE_RECEIVED)
     if not inv.paid_date:
         inv.paid_date = when
 
@@ -131,15 +146,51 @@ def _unmark_invoice_received(inv) -> None:
 # 帶標記且還沒付的，人手建的請款單絕不動。
 _AUTO_KAI_NOTE = "代開發票已收款自動產生"
 
-# 🔴 發票的「錢已經付出去」狀態叫**已轉撥**，不是「已付款」（owner 2026-08-20）。
-# 這條線上的錢是過路錢：客戶把款匯進公司 → 公司轉撥給代開人。叫「已付款」會跟
-# **請款單**的已付款（我們真的付掉一筆費用）混在一起，那是兩件事、兩張表。
-# 實測生產 183 張這個狀態全是 payment_type=付款，其中 181 張是代開。
-# ⚠ 只改發票這一邊 —— CrmPaymentRequest 與零用金批次的「已付款」語意正確，別動。
-INVOICE_REMITTED = "已轉撥"
+# 發票款項狀態的正本在 core/finance_logic —— 這裡只是把名字帶進來用。
+# ⚠ 只有發票這一邊用這組字：CrmPaymentRequest 與零用金批次的「已付款」語意
+# 正確（我們真的付掉一筆費用），別動。
 
 
-async def _sync_passthrough_request(session, inv, when=None) -> None:
+async def _passthrough_requests_for(session, invs) -> dict:
+    """代開發票 → 它那張自動請款單 {invoice_id: [請款單…]}（整批預載）。
+
+    鍵的規則跟 _sync_passthrough_request 同一套：source_invoice_id 為主、
+    舊資料退回發票號碼、**空號一律不比**。
+    🔴 逐張查的代價不是「多一個往返」而已 —— 條件裡的 replace() 是欄位上的函式，
+    索引用不到，等於**每張發票掃一次全部的請款單**（生產 816 筆）。批次重算
+    25 張發票就是掃 25 遍。
+    """
+    invs = [i for i in invs if is_passthrough_category(i.category)]
+    if not invs:
+        return {}
+    from sqlalchemy import func as safunc
+    ids = {i.id for i in invs}
+    nos = {(i.invoice_number or "").replace("-", "") for i in invs} - {""}
+    conds = [CrmPaymentRequest.source_invoice_id.in_(ids)]
+    if nos:
+        conds.append(
+            safunc.replace(CrmPaymentRequest.invoice_number, "-", "").in_(nos))
+    rows = (await session.execute(
+        select(CrmPaymentRequest)
+        .where(CrmPaymentRequest.category == "發票代開", or_(*conds)))).scalars().all()
+    by_id, by_no = {}, {}
+    for p in rows:
+        if p.source_invoice_id:
+            by_id.setdefault(p.source_invoice_id, []).append(p)
+        k = (p.invoice_number or "").replace("-", "")
+        if k:
+            by_no.setdefault(k, []).append(p)
+    out = {}
+    for i in invs:
+        hits = list(by_id.get(i.id, []))
+        for p in by_no.get((i.invoice_number or "").replace("-", ""), []):
+            if p not in hits:
+                hits.append(p)
+        out[i.id] = hits
+    return out
+
+
+async def _sync_passthrough_request(session, inv, when=None, existing=None) -> None:
     """代開發票的收款 → 待請款 自動化（owner 2026-08-20 拍板）。
 
     業務流：公司幫人代開發票（category=內部代開/外部代開），客戶把錢匯進公司
@@ -148,32 +199,34 @@ async def _sync_passthrough_request(session, inv, when=None) -> None:
     就算好的代開應匯 = amount_total × 92%），沒有才臨時算。
     之後在應付帳款把它標成已付款 → 發票進「已轉撥」= 整條走完（見 batch_pay）。
 
-    冪等：同一張發票號碼已有「發票代開」請款單（不論狀態）就不再建 ——
-    歷史匯入的 178 筆與重複觸發都靠這條擋。
+    冪等鍵是 **source_invoice_id**（發票 id），不是發票號碼。
+    🔴 原本拿號碼當鍵，遇到**無號發票**（代開還沒拿到號碼）就 `return` ——
+    收款在收支明細掛上去、發票也標了已收款，卻不會出現請款單，而且沒有任何
+    跡象（owner 2026-08-21 回報）。實際卡住 3 張無號的內部代開。
+    號碼比對留著當**舊資料的**退路：歷史那 183 張自動單建立時還沒有這個欄位，
+    不比號碼的話會重建一張。空號一律不比（兩張都沒號碼不代表是同一張）。
     反向：發票退回「未收款」（收款被刪/改）→ 只刪**自動產生且還是應付款**的
     那張；請款單已付款代表錢真的匯出去了，退狀態不能把付款紀錄變不見。
     """
-    if not (inv.category and "代開" in inv.category):
+    if not is_passthrough_category(inv.category):
         return
-    no = (inv.invoice_number or "").replace("-", "")
-    if not no:
-        return                      # 沒有號碼就沒有可靠的冪等鍵，不自動建
-    from sqlalchemy import func as safunc
-    existing = (await session.execute(
-        select(CrmPaymentRequest)
-        .where(CrmPaymentRequest.category == "發票代開",
-               safunc.replace(CrmPaymentRequest.invoice_number, "-", "") == no)
-    )).scalars().all()
-    if inv.payment_status == "已收款":
+    if existing is None:        # 批次呼叫端會把預載好的結果帶進來
+        existing = (await _passthrough_requests_for(session, [inv])).get(inv.id, [])
+    if inv.payment_status in INVOICE_PASSTHROUGH_COLLECTED:
         if existing:
             return
-        amount = int(inv.commission or 0) or round(int(inv.amount_total or 0) * 0.92)
+        # commission 是開票時算好存下來的；沒有就用同一條規則現算（費率在 core，
+        # 不是寫死的 0.92 —— 外部代開是 10%，寫死會少匯給對方 2%）
+        from config import load_settings
+        amount = int(inv.commission or 0) or passthrough_commission(
+            inv.amount_total, inv.category, load_settings().get("invoice_fee_rates"))
         if amount <= 0:
             return
         d = when or _now()
         now = _now()
         session.add(CrmPaymentRequest(
             id=uuid.uuid4().hex, entity=inv.entity or "parent",
+            source_invoice_id=inv.id,
             request_date=d, amount=amount,
             summary=inv.title or f"代開 {inv.invoice_number}",
             category="發票代開", payee_name=inv.applicant or None,
@@ -189,8 +242,58 @@ async def _sync_passthrough_request(session, inv, when=None) -> None:
                 await session.delete(p)
 
 
-async def _resettle_invoice(session, invoice_id, when=None,
+async def _kai_invoice_of(session, p, want_status):
+    """代開請款單 → 它對應的那張發票（狀態要落在 want_status 裡）。
+
+    先認 source_invoice_id（無號發票唯一有效的鍵），舊資料退回號碼比對。
+    want_status 收字串或字串序列 —— 改名期間新舊用詞會並存（待撥款／已收款）。
+    """
+    from sqlalchemy import func as safunc
+    want = (want_status,) if isinstance(want_status, str) else tuple(want_status)
+    if p.source_invoice_id:
+        inv = await session.get(CrmInvoice, p.source_invoice_id)
+        return inv if inv and inv.payment_status in want else None
+    no = (p.invoice_number or "").replace("-", "")
+    if not no:
+        return None
+    return (await session.execute(
+        select(CrmInvoice).where(
+            safunc.replace(CrmInvoice.invoice_number, "-", "") == no,
+            CrmInvoice.payment_status.in_(want))
+    )).scalars().first()
+
+
+async def resettle_invoices(session, invoice_ids, when=None,
                             unmark_if_empty: bool = False) -> None:
+    """N 張發票一次重算收款狀態。
+
+    只把**讀**批次化（一次 _invoice_collections），寫還是走 _resettle_invoice
+    那一支 —— 標記/退回/代開待請款同步的規則不能有第二個版本。
+    一年份對帳單一次匯進來會有上百張發票，逐張讀就是上百個往返，全部關在同一個
+    交易裡（那段時間 crm_invoices 上是有寫鎖的）。
+    """
+    ids = [i for i in dict.fromkeys(invoice_ids) if i]
+    if not ids:
+        return
+    coll = await _invoice_collections(session, ids)
+    # 發票本體一次載進 identity map（底下的 session.get 就變成記憶體命中），
+    # 代開請款單也一次撈 —— 這兩樣逐張做的話都是 N 個往返，其中請款單那個
+    # 還是 N 次全表掃描
+    invs = (await session.execute(
+        select(CrmInvoice).where(CrmInvoice.id.in_(ids)))).scalars().all()
+    kai = await _passthrough_requests_for(session, invs)
+    for iid in ids:
+        await _resettle_invoice(
+            session, iid,
+            # when 可以是單一日期，也可以是 {invoice_id: 日期}（批次時每張不同）
+            when=(when.get(iid) if isinstance(when, dict) else when),
+            unmark_if_empty=unmark_if_empty, coll=coll.get(iid, {}),
+            kai=kai.get(iid))
+
+
+async def _resettle_invoice(session, invoice_id, when=None,
+                            unmark_if_empty: bool = False, coll=None,
+                            kai=None) -> None:
     """依**帳上實收**重算一張發票的收款狀態。所有寫入路徑的唯一入口。
 
     🔴 為什麼不是「碰到就標已收款」：那條舊規則讓分期收款靜默消失。實測
@@ -213,17 +316,17 @@ async def _resettle_invoice(session, invoice_id, when=None,
     """
     if not invoice_id:
         return
-    from core.finance_logic import invoice_is_settled
     inv = await session.get(CrmInvoice, invoice_id)
     if not inv:
         return
-    coll = (await _invoice_collections(session, [invoice_id])).get(invoice_id, {})
+    if coll is None:                    # 批次呼叫端會把讀好的結果帶進來
+        coll = (await _invoice_collections(session, [invoice_id])).get(invoice_id, {})
     got = coll.get("collected", 0)
     if got and invoice_is_settled(got, inv.amount_total):
         # 代開發票的「已轉撥」是比已收款更後面的階段（錢已匯給代開人）——
         # 收款重算不可以把它降回已收款，那會讓匯出去的紀錄看起來像沒發生。
-        if not (inv.payment_status == INVOICE_REMITTED and inv.category
-                and "代開" in inv.category):
+        if not (inv.payment_status == INVOICE_REMITTED
+                and is_passthrough_category(inv.category)):
             _mark_invoice_received(inv, when or coll.get("last_paid_date") or _now())
     elif got or unmark_if_empty:
         # 帳上收了但沒收齊（分期）→ 回到未收款，它才會留在應收帳款裡
@@ -231,7 +334,111 @@ async def _resettle_invoice(session, invoice_id, when=None,
     else:
         return                      # 帳上沒話講 → 不動人工標記
     inv.updated_at = _now()
-    await _sync_passthrough_request(session, inv, when=when)
+    await _sync_passthrough_request(session, inv, when=when, existing=kai)
+
+
+async def resolve_invoice_allocs(session, items, ent, by_id=None):
+    """把 [(invoice_id, 金額)] 驗成 [(CrmInvoice, 金額)]。三條寫入路徑共用。
+
+    擋的是**一定錯**而不是可能錯的三件事：發票不存在／不同帳本／同一張重複，
+    外加金額 ≤ 0（0 元的分配列在分配表裡就是一個看不出用途的鬼列）。
+    金額對不對得上入帳金額**不擋** —— 客戶少匯、多匯、匯費都會讓它對不齊。
+
+    一次把發票撈回來，不要逐列 session.get：一份月對帳單掛 25 張就是 25 個往返。
+    """
+    pairs = [((iid or "").strip(), int(amt or 0)) for iid, amt in items]
+    if any(not iid for iid, _a in pairs):
+        raise HTTPException(status_code=422, detail="invoice_id 不可為空")
+    ids = [iid for iid, _a in pairs]
+    if len(set(ids)) != len(ids):
+        raise HTTPException(status_code=422, detail="同一張發票不可重複掛在同一筆收款")
+    if by_id is None:      # 呼叫端逐列進來時各自撈；整批進來時由呼叫端撈一次
+        by_id = {i.id: i for i in (await session.execute(
+            select(CrmInvoice).where(CrmInvoice.id.in_(ids)))).scalars().all()} if ids else {}
+
+    rows = []
+    for iid, amt in pairs:
+        inv = by_id.get(iid)
+        if not inv:
+            raise HTTPException(status_code=404, detail=f"發票不存在：{iid}")
+        if (inv.entity or "parent") != ent:
+            raise HTTPException(status_code=409, detail="收款與發票分屬不同帳本")
+        if amt <= 0:
+            raise HTTPException(
+                status_code=422,
+                detail=f"分配金額要大於 0（{inv.invoice_number or inv.title}）")
+        rows.append((inv, amt))
+    return rows
+
+
+async def replace_invoice_allocs(session, entry, rows, when=None, set_primary=True):
+    """單筆版 —— 規則正本在 replace_invoice_allocs_bulk（一筆也是一批）。"""
+    await replace_invoice_allocs_bulk(session, [(entry, rows)], when=when,
+                                      set_primary=set_primary)
+
+
+async def replace_invoice_allocs_bulk(session, pairs, when=None, set_primary=True):
+    """整組取代 N 筆收款的發票分配 —— **唯一**寫 crm_cash_invoice_links 的地方。
+
+    一次動三樣東西，少做一樣就會有兩個畫面各講各的：
+      1. 分配表（多對多的正本）
+      2. 收支列的 invoice_id / invoice_number / has_invoice（列表與舊查詢讀這幾欄）
+      3. 相關發票的收款狀態（🔴 本來完全不動 —— 客戶合併匯款 300,000 掛三張，
+         三張都還留在應收帳款裡：錢收了、應收沒減，資產負債表虛增。
+         被移除的那些也要重算，否則錢退掉了卻永遠掛已收款。）
+
+    為什麼要有批次版：對帳單匯入是一列一筆收款，逐筆呼叫等於每列 4 個往返
+    （查舊連結、刪、flush、重算收款）。一年份對帳單約 150 列 = 600 個往返，
+    而且整段關在同一個寫交易裡壓著 crm_invoices 的鎖。而那些收支列是這次**剛
+    建出來的**，舊連結必定是空的 —— 那 2 個往返純粹是白跑。
+
+    🔴 同一筆收款不可以在 pairs 裡出現兩次：DELETE 只跑一輪，後面幾組連結會
+    **疊加**而不是後蓋前（逐筆呼叫是後蓋前），主要發票欄也會跟連結講不同的話。
+    當場擋掉，不要留給日後某個呼叫端去踩。
+
+    rows 已經過 resolve_invoice_allocs 驗證。呼叫端負責 commit。
+    """
+    pairs = list(pairs)
+    if not pairs:
+        return
+    from sqlalchemy import delete as sa_delete
+    eids = [e.id for e, _r in pairs]
+    if len(set(eids)) != len(eids):
+        raise HTTPException(status_code=500,
+                            detail="同一筆收款不可重複進同一批發票分配")
+
+    prev: dict = {}
+    for eid, iid in (await session.execute(
+            select(CrmCashInvoiceLink.cash_entry_id, CrmCashInvoiceLink.invoice_id)
+            .where(CrmCashInvoiceLink.cash_entry_id.in_(eids)))).all():
+        prev.setdefault(eid, set()).add(iid)
+    if prev:            # 全新的收支列（對帳單匯入）一筆舊連結都沒有 → 整個跳過
+        await session.execute(sa_delete(CrmCashInvoiceLink).where(
+            CrmCashInvoiceLink.cash_entry_id.in_(list(prev))))
+
+    kept_when: dict = {}
+    for entry, rows in pairs:
+        w = when or entry.entry_date or _now()
+        for inv, amt in rows:
+            session.add(CrmCashInvoiceLink(
+                id=uuid.uuid4().hex, cash_entry_id=entry.id,
+                invoice_id=inv.id, amount=amt))
+            cur = kept_when.get(inv.id)
+            # 同一張發票被這批的兩列分次收款 → 到款日取**最後**那筆（收齊的那天）。
+            # 逐筆呼叫時是「第 1 列先算一次（沒收齊）、第 2 列再算一次（收齊）」，
+            # 批次一次看到全部，日期就得自己挑對的那個。
+            kept_when[inv.id] = w if (cur is None or w > cur) else cur
+        # 主要發票 = 分配金額最大的那張（沒有就清空）。
+        # set_primary=False 給編輯視窗那條路用：那邊的主要發票是**輸入**不是輸出，
+        # 而且收支列被改成支出時不可以順手把 invoice_id 清掉（代開付出去那側要留著）。
+        if set_primary:
+            _set_primary_invoice(entry, max(rows, key=lambda x: x[1])[0] if rows else None)
+    await session.flush()
+
+    await resettle_invoices(session, list(kept_when), when=kept_when)
+    # 被移除的：憑據是我們剛拿掉的
+    dropped = (set().union(*prev.values()) - set(kept_when)) if prev else set()
+    await resettle_invoices(session, dropped, unmark_if_empty=True)
 
 
 # ── Invoice Endpoints ───────────────────────────────────────
@@ -281,9 +488,7 @@ async def list_invoices(
         c = coll.get(r[0].id) or {}
         # 清單只帶合計與最後到款日（逐筆明細在 GET /invoices/{id}）—— 分期收款
         # 要能一眼看出「開了多少、收了多少、還欠多少」。
-        d["collected"] = c.get("collected", 0)
-        d["last_paid_date"] = c.get("last_paid_date")
-        d["outstanding"] = int(r[0].amount_total or 0) - d["collected"]
+        d.update(collection_fields(r[0].amount_total, c))
         out.append(d)
     return {"invoices": out, "total": len(out)}
 
@@ -295,10 +500,24 @@ async def create_invoice(req: InvoicePayload, request: Request):
     ent = _entity_for_write(request, req.entity)
     factory = await _get_factory()
     now = _now()
+    data = req.model_dump(exclude={"invoice_date", "entity"})
+    # 款項狀態在**入口**定案，不留給客戶端：
+    #   · 舊客戶端可能送改名前的字（已轉撥）→ 正規化
+    #   · 沒送或送空字串 → 依方向推（收款＝未收款、代開＝未付款）
+    # 🔴 空字串不會觸發欄位的 default —— SQLAlchemy 的 default 只在「這個 key
+    # 根本沒出現」時才跑。手機登記頁改成不自己決定狀態之後，送的是 ''，於是
+    # 每一張從手機開的發票都存了一個空白狀態：沒有 badge，也不在
+    # `payment_status NOT IN (...)` 這類過濾的任何一邊（2026-08-21 實測）。
+    data["payment_status"] = (
+        normalize_invoice_status(data.get("payment_status") or "")
+        or initial_invoice_status(data.get("payment_type") or ""))
+    # 方向也由狀態推 —— 前端本來自己判，而且漏掉「待撥款」（那也是付款方向），
+    # 於是待撥款的代開發票會被當成收款、跑進應收帳款
+    if not (data.get("payment_type") or "").strip():
+        data["payment_type"] = invoice_direction(data["payment_status"])
     inv = CrmInvoice(
         id=uuid.uuid4().hex, invoice_date=_parse_shoot_date(req.invoice_date),
-        created_at=now, updated_at=now, entity=ent,
-        **req.model_dump(exclude={"invoice_date", "entity"}),
+        created_at=now, updated_at=now, entity=ent, **data,
     )
     async with factory() as session:
         await _assert_month_open(session, inv.invoice_date, entity=ent)
@@ -308,17 +527,38 @@ async def create_invoice(req: InvoicePayload, request: Request):
     return {"status": "ok", "invoice": _to_invoice_dict(inv)}
 
 
-async def _invoice_collections(session, invoice_ids, with_detail: bool = False):
+def collection_fields(amount_total, coll: dict | None = None,
+                      with_detail: bool = False) -> dict:
+    """發票 payload 的收款欄位：collected / outstanding / **settled** / last_paid_date。
+
+    🔴 `settled` 是關鍵那一欄。以前只回 collected 與 outstanding，於是前端三個地方
+    各自用 `outstanding > 0` / `<= 0` 判「收齊了沒」—— 但真正的規則是
+    invoice_is_settled（含 NT$50 匯費容差，394 張歷史發票裡有 42 張靠它）。
+    結果同一張被匯費短收 30 元的發票：應收帳款說收齊了，發票列表說「尚欠 $30」。
+    容差是後端的事，不該複製到瀏覽器 —— 後端算好一個布林送過去。
+    """
+    c = coll or {}
+    got = int(c.get("collected", 0) or 0)
+    total = int(amount_total or 0)
+    d = {"collected": got, "outstanding": total - got,
+         "settled": invoice_is_settled(got, total),
+         "last_paid_date": c.get("last_paid_date")}
+    if with_detail:
+        d["payments"] = c.get("payments", [])
+    return d
+
+
+async def _invoice_collections(session, invoice_ids):
     """發票 id → 實際收到多少（＋每一筆的日期金額）。
 
     來源是 crm_cash_invoice_links（收款↔發票分配表）JOIN 收支明細 —— 也就是
     **帳上真的進了多少錢**，不是有人手動勾的狀態欄。一張發票分三次到款時，
     這裡會回三筆，加總就是已收金額，跟面額一減就知道還欠多少。
 
-    with_detail 只決定要不要附上逐筆 `payments`；`collected` 與 `last_paid_date`
-    兩種模式都算，而且**走同一段程式碼**。原本清單模式另走一條 GROUP BY，等於
-    「已收金額」有兩個算法可以各自出錯 —— 實測（303 筆分配、394 張發票）兩者
-    6.4ms vs 6.3ms，那條捷徑什麼也沒買到。
+    逐筆 `payments` 一律附上；要不要送到前端由 collection_fields 的 with_detail
+    決定（本來這裡也有一個同名旗標，把 payments 建好又 pop 掉，兩個閘門永遠同值）。
+    原本清單模式另走一條 GROUP BY，等於「已收金額」有兩個算法可以各自出錯 ——
+    實測（303 筆分配、394 張發票）兩者 6.4ms vs 6.3ms，那條捷徑什麼也沒買到。
     """
     ids = [i for i in set(invoice_ids or []) if i]
     if not ids:
@@ -343,9 +583,6 @@ async def _invoice_collections(session, invoice_ids, with_detail: bool = False):
                               "bank_account": bank or ""})
         if iso and (not d["last_paid_date"] or iso > d["last_paid_date"]):
             d["last_paid_date"] = iso
-    if not with_detail:
-        for d in out.values():
-            d.pop("payments")
     return out
 
 
@@ -363,7 +600,7 @@ async def get_invoice(invoice_id: str, request: Request):
         if inv.project_id:
             p = await session.get(CrmProject, inv.project_id)
             pn = p.name if p else ""
-        coll = (await _invoice_collections(session, [inv.id], with_detail=True)).get(inv.id)
+        coll = (await _invoice_collections(session, [inv.id])).get(inv.id)
         # 「標已收款卻查無收款」這條提醒只在**收支明細涵蓋得到這張發票的期間**時
         # 才有意義。原本用「這本帳有沒有任何連結」當開關 —— 實測沒用：backfill
         # 一跑完旗標就永遠是 true，那 8 張早於收支表起始日的發票照樣天天跳警告，
@@ -375,10 +612,7 @@ async def get_invoice(invoice_id: str, request: Request):
     d = _to_invoice_dict(inv, pn)
     d["collection_checkable"] = bool(
         covered_from and inv.invoice_date and inv.invoice_date >= covered_from)
-    d["collected"] = (coll or {}).get("collected", 0)
-    d["last_paid_date"] = (coll or {}).get("last_paid_date")
-    d["payments"] = (coll or {}).get("payments", [])
-    d["outstanding"] = int(inv.amount_total or 0) - d["collected"]
+    d.update(collection_fields(inv.amount_total, coll, with_detail=True))
     return d
 
 
@@ -397,7 +631,12 @@ async def update_invoice(invoice_id: str, req: InvoicePayload, request: Request)
         new_date = _parse_shoot_date(req.invoice_date)
         await _assert_month_open(session, inv.invoice_date, new_date, entity=ent)
         old_status = inv.payment_status
-        for k, v in req.model_dump(exclude={"invoice_date", "entity"}).items():
+        upd = req.model_dump(exclude={"invoice_date", "entity"})
+        # 同上：舊字正規化、空的就依方向推（PUT 會整包寫回，空字串照樣會寫進去）
+        upd["payment_status"] = (
+            normalize_invoice_status(upd.get("payment_status") or "")
+            or initial_invoice_status(upd.get("payment_type") or ""))
+        for k, v in upd.items():
             setattr(inv, k, v)
         inv.invoice_date = new_date
         inv.updated_at = _now()
@@ -484,34 +723,21 @@ _INVOICE_COL_MAP = {
 _INVOICE_INT_FIELDS = {"amount_ex_tax", "amount_total", "tax_amount", "commission"}
 
 
-def _map_invoice_row(header_map: dict, row: dict) -> dict:
-    data = {}
-    for field, aliases in _INVOICE_COL_MAP.items():
-        for alias in aliases:
-            orig = header_map.get(alias.lower())
-            if orig and row.get(orig, "").strip():
-                val = row[orig].strip()
-                data[field] = _parse_money(val) if field in _INVOICE_INT_FIELDS else val
-                break
-    # Sheet 的「款項狀態」一欄同時是方向（收/付）與狀態（已/未）→ 拆成兩個欄位。
-    # 🔴「未收款」裡也有一個「收」字：只判 '收' in pt 會把未收的發票標成**已收款**，
-    #    應收帳款憑空消失、收入被提前認列。2026-08-19 匯 394 筆歷史發票時實測到
-    #    44 張未收款發票中招。判「已/未」必須先於或同時於判「收/付」。
-    pt = data.get("payment_type", "")
-    unpaid = "未" in pt
-    if "收" in pt:
-        data["payment_type"] = "收款"
-        data["payment_status"] = "未收款" if unpaid else "已收款"
-    elif "付" in pt:
-        data["payment_type"] = "付款"
-        data["payment_status"] = "未付款" if unpaid else INVOICE_REMITTED
-    elif "作廢" in pt:
-        data["payment_status"] = "作廢"
-    return data
+async def _import_money_csv(request: Request, file: UploadFile, *,
+                            map_row, skip_if, date_fields: tuple, build) -> dict:
+    """帳務三支 CSV 匯入的共用骨架（發票／請款／收支）。唯一正本。
 
+    這裡收的不是「省幾行」，是四條規則本來各抄三份：
+      · utf-8-sig → big5 的解碼退路（同事的 Excel 匯出兩種都有）
+      · 列號從 2 起算（第 1 列是表頭）—— 錯誤訊息要指得到人看得懂的那一列
+      · 兩本帳：CSV 匯入 v1 限母公司帳（entity='parent'），我的帳不走匯入
+      · **F1 月結守衛**：先 parse 全部、逐列判月，任一列落鎖定月 → 整批 409，
+        不做半套。第四支帳務 CSV 一定會漏抄其中一半，而漏掉守衛＝把一個
+        已經結完帳的月份重新打開。
 
-@router.post("/invoices/import_csv")
-async def import_invoices_csv(request: Request, file: UploadFile = File(...)):
+    date_fields[0] 是月結守衛看的那一欄（權責認列日），其餘只是要 parse 的日期。
+    build(data, dates) 回一個 ORM 物件 —— 三張表的欄位不同，那部分不共用。
+    """
     _check_auth(request)
     _require_db()
     content = await file.read()
@@ -521,33 +747,61 @@ async def import_invoices_csv(request: Request, file: UploadFile = File(...)):
         text = content.decode("big5", errors="replace")
 
     reader = csv.DictReader(io.StringIO(text))
-    headers = list(reader.fieldnames or [])
-    header_map = {h.lower(): h for h in headers}
+    header_map = {h.lower(): h for h in (reader.fieldnames or [])}
+    guard_field = date_fields[0]
     imported = skipped = 0
     factory = await _get_factory()
 
     async with factory() as session:
-        # F1 月結守衛：逐列判 invoice_date 的月，任一列落鎖定月 → 整批 409
         parsed, dated = [], []
-        for line_no, row in enumerate(reader, start=2):  # 第 1 列是表頭
-            data = _map_invoice_row(header_map, row)
-            if not data.get("title"):
+        for line_no, row in enumerate(reader, start=2):   # 第 1 列是表頭
+            data = map_row(header_map, row)
+            if skip_if(data):
                 skipped += 1
                 continue
-            inv_date = _parse_shoot_date(data.pop("invoice_date", None))
-            if inv_date:
-                dated.append((f"第 {line_no} 列（{inv_date.strftime('%Y-%m-%d')}）", inv_date))
-            parsed.append((data, inv_date))
-        # 兩本帳：CSV 匯入 v1 限母公司帳（entity='parent'），我的帳不走匯入
+            dates = {f: _parse_shoot_date(data.pop(f, None)) for f in date_fields}
+            if dates[guard_field]:
+                dated.append((f"第 {line_no} 列"
+                              f"（{dates[guard_field].strftime('%Y-%m-%d')}）",
+                              dates[guard_field]))
+            parsed.append((data, dates))
         await _assert_rows_open(session, dated, entity="parent")
-        for data, inv_date in parsed:
-            now = _now()
-            inv = CrmInvoice(id=uuid.uuid4().hex, invoice_date=inv_date, entity="parent",
-                             created_at=now, updated_at=now, **data)
-            session.add(inv)
+        for data, dates in parsed:
+            session.add(build(data, dates))
             imported += 1
         await session.commit()
     return {"status": "ok", "imported": imported, "skipped": skipped}
+
+
+def _map_invoice_row(header_map: dict, row: dict) -> dict:
+    data = map_csv_row(
+        _INVOICE_COL_MAP, header_map, row,
+        coerce=lambda f, v: _parse_money(v) if f in _INVOICE_INT_FIELDS else v)
+    # Sheet 的「款項狀態」一欄同時是方向（收/付）與狀態（已/未）→ 拆成兩個欄位。
+    # 🔴「未收款」裡也有一個「收」字：只判 '收' in pt 會把未收的發票標成**已收款**，
+    #    應收帳款憑空消失、收入被提前認列。2026-08-19 匯 394 筆歷史發票時實測到
+    #    44 張未收款發票中招。判「已/未」必須先於或同時於判「收/付」。
+    pt = data.get("payment_type", "")
+    unpaid = "未" in pt
+    if "收" in pt:
+        data["payment_type"] = "收款"
+    elif "付" in pt:
+        data["payment_type"] = "付款"
+    if "收" in pt or "付" in pt or "作廢" in pt:
+        data["payment_status"] = initial_invoice_status(pt, unpaid)
+    return data
+
+
+@router.post("/invoices/import_csv")
+async def import_invoices_csv(request: Request, file: UploadFile = File(...)):
+    def build(data, d):
+        now = _now()
+        return CrmInvoice(id=uuid.uuid4().hex, invoice_date=d["invoice_date"],
+                          entity="parent", created_at=now, updated_at=now, **data)
+    return await _import_money_csv(
+        request, file, map_row=_map_invoice_row,
+        skip_if=lambda d: not d.get("title"),
+        date_fields=("invoice_date",), build=build)
 
 
 # ── 已開立電子發票檔 ────────────────────────────────────────
@@ -934,6 +1188,47 @@ async def get_invoice_applicants(request: Request):
             "source": "data"}
 
 
+@router.get("/invoice-fee-rates", dependencies=[Depends(money_dep)])
+async def get_invoice_fee_rates(request: Request):
+    """代開手續費率（%）。應匯給代開人的錢 = 面額 × (1 − 費率)。
+
+    🔴 存 settings 不存 localStorage：費率是公司政策，每台電腦各一份的話，
+    同一張發票在不同人手上會算出不同的應匯金額（而那個數字會變成一張應付款）。
+    """
+    from config import load_settings
+    saved = load_settings().get("invoice_fee_rates")
+    rates = dict(PASSTHROUGH_FEE_RATES)
+    if isinstance(saved, dict):
+        rates.update({k: float(v) for k, v in saved.items()
+                      if k in PASSTHROUGH_FEE_RATES})
+    return {"rates": rates}
+
+
+@router.put("/invoice-fee-rates")
+async def set_invoice_fee_rates(request: Request):
+    check_admin(request)
+    from config import load_settings, save_settings
+    body = await request.json()
+    rates = body.get("rates")
+    if not isinstance(rates, dict):
+        raise HTTPException(status_code=422, detail="rates 要是物件")
+    clean = {}
+    for k, v in rates.items():
+        if k not in PASSTHROUGH_FEE_RATES:
+            raise HTTPException(status_code=422, detail=f"未知的代開類別：{k}")
+        try:
+            pct = float(v)
+        except (TypeError, ValueError):
+            raise HTTPException(status_code=422, detail=f"{k} 的費率要是數字")
+        if not 0 <= pct < 100:
+            raise HTTPException(status_code=422, detail=f"{k} 的費率要在 0~100 之間")
+        clean[k] = pct
+    st = load_settings()
+    st["invoice_fee_rates"] = clean
+    save_settings(st)
+    return {"ok": True, "rates": clean}
+
+
 @router.put("/invoice-applicants")
 async def set_invoice_applicants(request: Request):
     """整份取代申請人名單。空陣列＝清空（下次讀會退回用發票資料推導）。"""
@@ -1018,7 +1313,54 @@ async def set_invoices_root(request: Request):
 
 # ── Payment Request Helpers ─────────────────────────────────
 
-def _to_payment_dict(p, project_name: str = "", invoice_title: str = "") -> dict:
+async def _invoice_link_for(session, payments, ent) -> dict:
+    """請款單 → 它對應的那張發票 {payment_id: (invoice_id, title)}。
+
+    列表顯示抬頭而不是號碼 —— 「MJ00094858」對人沒有意義，「思沙龍精華製作EP 02」才有。
+
+    🔴 不要用 join 去撈。invoice_number **不是唯一鍵**，join 一對多就會讓同一張
+    請款單在清單裡分身（owner 2026-08-21 截圖：一張 TEDMA 被畫成四列，total 也
+    跟著虛胖）。當時的觸發點是空字串：請款單的號碼是 ''，帳上又有 5 張無號發票
+    的號碼也是 '' → '' = '' 成立。
+    也不要用 correlated 子查詢：那會變成每列跑一次 SubPlan（815 張 × 掃 400 張
+    發票），而且 replace() 是欄位上的函式，走不到索引。
+    一次把發票撈回來在 Python 查表 —— 兩個問題一起沒有。
+
+    對得上的兩條路：① source_invoice_id（唯一、無號發票也有）
+                    ② 舊資料的發票號碼（**空號不比對** —— 兩張都沒號碼不代表是
+                       同一張，那是「不知道」不是「相等」）
+    """
+    ids = {p.source_invoice_id for p in payments if p.source_invoice_id}
+    nos = {p.invoice_number.replace("-", "") for p in payments if p.invoice_number}
+    if not ids and not nos:
+        return {}
+    conds = []
+    if ids:
+        conds.append(CrmInvoice.id.in_(ids))
+    if nos:
+        conds.append(CrmInvoice.invoice_number.isnot(None))
+    invs = (await session.execute(
+        select(CrmInvoice.id, CrmInvoice.invoice_number, CrmInvoice.title)
+        .where(CrmInvoice.entity == ent, or_(*conds)))).all()   # 別跨帳本抓標題
+    by_id = {i: t for i, _n, t in invs}
+    by_no = {}                                   # 號碼 → (id, 抬頭)
+    for i, n, t in invs:
+        key = (n or "").replace("-", "")
+        if key:
+            by_no.setdefault(key, (i, t))
+    out = {}
+    for p in payments:
+        if p.source_invoice_id and p.source_invoice_id in by_id:
+            out[p.id] = (p.source_invoice_id, by_id[p.source_invoice_id])
+        elif p.invoice_number:
+            hit = by_no.get(p.invoice_number.replace("-", ""))
+            if hit:
+                out[p.id] = hit
+    return out
+
+
+def _to_payment_dict(p, project_name: str = "", invoice_id: str = "",
+                     invoice_title: str = "") -> dict:
     return {
         # 代開發票的中文名。列表顯示它而不是發票號碼 —— 「MJ00094858」對人沒有
         # 意義，「思沙龍精華製作EP 02」才有。慣例同 _to_cash_dict 的 invoice_title：
@@ -1033,6 +1375,10 @@ def _to_payment_dict(p, project_name: str = "", invoice_title: str = "") -> dict
         "payee_type": p.payee_type or "",
         "needs_invoice": p.needs_invoice, "invoice_number": p.invoice_number or "",
         "invoice_amount": p.invoice_amount,
+        # 🔴 這裡回的是**解析後**的發票 id：欄位空的舊資料由後端用發票號碼補上
+        # （_invoice_link_for）。前端不必知道還有一條號碼比對的舊路 —— 那條規則
+        # 抄到前端就會變成第三、第四份，而且空號比對的坑要在每一份各修一次。
+        "source_invoice_id": invoice_id or p.source_invoice_id or "",
         "project_id": p.project_id or "", "project_name": project_name,
         "project_label": p.project_label or "",
         "payment_date": p.payment_date.isoformat() if p.payment_date else None,
@@ -1061,16 +1407,9 @@ async def list_payments(
     _require_db()
     factory = await _get_factory()
     async with factory() as session:
-        # 發票號碼在兩邊可能一邊帶連字號一邊不帶 —— 用 replace 歸一再 join，
-        # 否則同一張發票只因寫法不同就查不到標題（匯入的 171 筆全是無連字號版）。
-        from sqlalchemy import func as safunc
-        _no = safunc.replace(CrmPaymentRequest.invoice_number, "-", "")
         query = (
-            select(CrmPaymentRequest, CrmProject.name.label("pn"),
-                   CrmInvoice.title.label("it"))
+            select(CrmPaymentRequest, CrmProject.name.label("pn"))
             .outerjoin(CrmProject, CrmProject.id == CrmPaymentRequest.project_id)
-            .outerjoin(CrmInvoice,
-                       safunc.replace(CrmInvoice.invoice_number, "-", "") == _no)
             .where(CrmPaymentRequest.entity == ent)
             .order_by(CrmPaymentRequest.request_date.desc())
         )
@@ -1090,8 +1429,10 @@ async def list_payments(
                 CrmPaymentRequest.payee_name.ilike(ql),
             ))
         rows = (await session.execute(query)).all()
+        links = await _invoice_link_for(session, [r[0] for r in rows], ent)
     return {
-        "payments": [_to_payment_dict(r[0], r[1] or "", r[2] or "") for r in rows],
+        "payments": [_to_payment_dict(r[0], r[1] or "", *links.get(r[0].id, ("", "")))
+                     for r in rows],
         "total": len(rows),
     }
 
@@ -1114,6 +1455,18 @@ async def create_payment(req: PaymentRequestPayload, request: Request):
         session.add(p)
         await session.commit()
     return {"status": "ok", "payment": _to_payment_dict(p)}
+
+
+@router.get("/payments/options", dependencies=[Depends(money_dep)])
+async def payment_options(request: Request):
+    """請款單的下拉來源（比照 /cash-entries/options、/petty/options）。
+
+    🔴 core/project_link.PAYMENT_CATEGORIES 一直沒有生產呼叫端 —— 那個模組的
+    docstring 說它把三份寫死的清單集中起來，但請款單這一份始終留在前端，改規則
+    要發版，而零用金／請款／收支三者**刻意**的差異也從程式碼裡看不出來。
+    """
+    require_entity(request, "", level="full")
+    return {"project_link_categories": list(_PAYMENT_LINK_CATEGORIES)}
 
 
 @router.get("/payments/advances", dependencies=[Depends(money_dep)])
@@ -1266,15 +1619,18 @@ async def batch_pay(request: Request):
         }
         # month_of：timestamptz 回讀是 UTC 表示，直取 strftime 會把月初歸前月
         pay_month = month_of(pay_date)
-        if any(pay_month in locked for locked in locked_by_entity.values()):
-            raise HTTPException(
-                status_code=409,
-                detail=f"付款日 {pay_date.strftime('%Y-%m-%d')} 落在已鎖帳月份"
-                       "（需修改請先到帳務→現金流重開該月）")
         targets, violations = [], []
         for p in rows:
+            # 🔴 鎖月要看**這一列自己那本帳**。本來新付款日那條是
+            # `any(... for locked in locked_by_entity.values())` —— 我的帳鎖了
+            # 某個月，母公司的批次付款就整批被擋，而下面舊付款日那條是對的。
+            # 同一支函式兩套規則。
+            locked = locked_by_entity[p.entity or "parent"]
             old_month = month_of(p.payment_date)
-            if old_month and old_month in locked_by_entity[p.entity or "parent"]:
+            if pay_month in locked:
+                violations.append(f"{p.summary or p.id}（付款日 {pay_month}）")
+                continue
+            if old_month and old_month in locked:
                 violations.append(f"{p.summary or p.id}（{old_month}）")
                 continue
             targets.append(p)
@@ -1288,14 +1644,9 @@ async def batch_pay(request: Request):
             updated += 1
             # 代開請款單付掉 = 錢匯給代開人了 → 對應發票走到「已轉撥」，
             # 整條生命週期（未收款→已收款→已轉撥）收尾。號碼對得上才動。
-            if p.category == "發票代開" and p.invoice_number:
-                from sqlalchemy import func as safunc
-                inv = (await session.execute(
-                    select(CrmInvoice).where(
-                        safunc.replace(CrmInvoice.invoice_number, "-", "")
-                        == p.invoice_number.replace("-", ""),
-                        CrmInvoice.payment_status == "已收款")
-                )).scalars().first()
+            if p.category == "發票代開":
+                inv = await _kai_invoice_of(session, p,
+                                            INVOICE_PASSTHROUGH_COLLECTED)
                 if inv:
                     inv.payment_status = INVOICE_REMITTED
                     inv.updated_at = _now()
@@ -1346,16 +1697,10 @@ async def batch_unpay(request: Request):
             # batch_pay 的對稱反向：取消付掉的代開請款單 → 發票從「已轉撥」
             # 退回「已收款」。不退的話會留下「請款單應付款、發票卻已轉撥」
             # 的矛盾 —— 待請款區有一張，發票卻說錢已經匯了。
-            if p.category == "發票代開" and p.invoice_number:
-                from sqlalchemy import func as safunc
-                inv = (await session.execute(
-                    select(CrmInvoice).where(
-                        safunc.replace(CrmInvoice.invoice_number, "-", "")
-                        == p.invoice_number.replace("-", ""),
-                        CrmInvoice.payment_status == INVOICE_REMITTED)
-                )).scalars().first()
+            if p.category == "發票代開":
+                inv = await _kai_invoice_of(session, p, INVOICE_REMITTED)
                 if inv:
-                    inv.payment_status = "已收款"
+                    inv.payment_status = INVOICE_PENDING_REMIT
                     inv.updated_at = _now()
         await session.commit()
     return {"status": "ok", "updated": updated}
@@ -1374,7 +1719,10 @@ async def get_payment(payment_id: str, request: Request):
         if p.project_id:
             proj = await session.get(CrmProject, p.project_id)
             pn = proj.name if proj else ""
-    return _to_payment_dict(p, pn)
+        # 單張也走同一支解析（詳情面板點開就是打這裡）—— 兩條路回的形狀要一樣，
+        # 不然「列表看得到抬頭、點進去只剩號碼」
+        link = (await _invoice_link_for(session, [p], p.entity or "parent")).get(p.id)
+    return _to_payment_dict(p, pn, *(link or ("", "")))
 
 
 @router.put("/payments/{payment_id}")
@@ -1393,7 +1741,14 @@ async def update_payment(payment_id: str, req: PaymentRequestPayload, request: R
         # F1 月結守衛：舊/新 request_date 的月份都要開著
         await _assert_month_open(session, p.request_date, dates.get("request_date"),
                                  entity=ent)
-        for k, v in req.model_dump(exclude=date_fields | {"entity"}).items():
+        data = req.model_dump(exclude=date_fields | {"entity"})
+        # 🔴 source_invoice_id 沒送就維持原值，不要被預設的 None 洗掉。
+        # 這是整包 model_dump 的老坑：欄位有預設值 + 前端不送 = 該欄被清空。
+        # 這個欄位被清空的後果特別安靜：請款單付掉時就找不到要收尾的那張發票，
+        # 代開發票會永遠停在待撥款。
+        if data.get("source_invoice_id") is None:
+            data.pop("source_invoice_id", None)
+        for k, v in data.items():
             setattr(p, k, v)
         for k, v in dates.items():
             setattr(p, k, v)
@@ -1436,14 +1791,9 @@ _PAYMENT_COL_MAP = {
 
 
 def _map_payment_row(header_map: dict, row: dict) -> dict:
-    data = {}
-    for field, aliases in _PAYMENT_COL_MAP.items():
-        for alias in aliases:
-            orig = header_map.get(alias.lower())
-            if orig and row.get(orig, "").strip():
-                val = row[orig].strip()
-                data[field] = _parse_money(val) if field == "amount" else val
-                break
+    data = map_csv_row(
+        _PAYMENT_COL_MAP, header_map, row,
+        coerce=lambda f, v: _parse_money(v) if f == "amount" else v)
     # Parse combined payee field: "姓名_身分證" or just "姓名"
     combined = data.pop("payee_combined", "")
     if combined:
@@ -1451,52 +1801,26 @@ def _map_payment_row(header_map: dict, row: dict) -> dict:
         data["payee_name"] = parts[0]
         if len(parts) > 1:
             data["payee_id"] = parts[1]
+    # 摘要留白 → 用收款人頂替。🔴 這步必須在「要不要跳過這一列」之前，也就是
+    # 在 mapper 裡 —— 否則「只有收款人、沒有摘要」的列會被當空列跳掉，而那是
+    # 請款單很常見的填法。
+    if not data.get("summary") and data.get("payee_name"):
+        data["summary"] = data["payee_name"]
     return data
 
 
 @router.post("/payments/import_csv")
 async def import_payments_csv(request: Request, file: UploadFile = File(...)):
-    _check_auth(request)
-    _require_db()
-    content = await file.read()
-    try:
-        text = content.decode("utf-8-sig")
-    except UnicodeDecodeError:
-        text = content.decode("big5", errors="replace")
-
-    reader = csv.DictReader(io.StringIO(text))
-    headers = list(reader.fieldnames or [])
-    header_map = {h.lower(): h for h in headers}
-    imported = skipped = 0
-    factory = await _get_factory()
-
-    async with factory() as session:
-        # F1 月結守衛：逐列判 request_date 的月，任一列落鎖定月 → 整批 409
-        parsed, dated = [], []
-        for line_no, row in enumerate(reader, start=2):  # 第 1 列是表頭
-            data = _map_payment_row(header_map, row)
-            if not data.get("summary") and not data.get("payee_name"):
-                skipped += 1
-                continue
-            if not data.get("summary"):
-                data["summary"] = data.get("payee_name", "")
-            req_date = _parse_shoot_date(data.pop("request_date", None))
-            pay_date = _parse_shoot_date(data.pop("payment_date", None))
-            if req_date:
-                dated.append((f"第 {line_no} 列（{req_date.strftime('%Y-%m-%d')}）", req_date))
-            parsed.append((data, req_date, pay_date))
-        # 兩本帳：CSV 匯入 v1 限母公司帳（entity='parent'），我的帳不走匯入
-        await _assert_rows_open(session, dated, entity="parent")
-        for data, req_date, pay_date in parsed:
-            now = _now()
-            p = CrmPaymentRequest(
-                id=uuid.uuid4().hex, request_date=req_date, payment_date=pay_date,
-                entity="parent", created_at=now, updated_at=now, **data,
-            )
-            session.add(p)
-            imported += 1
-        await session.commit()
-    return {"status": "ok", "imported": imported, "skipped": skipped}
+    def build(data, d):
+        now = _now()
+        return CrmPaymentRequest(
+            id=uuid.uuid4().hex, request_date=d["request_date"],
+            payment_date=d["payment_date"], entity="parent",
+            created_at=now, updated_at=now, **data)
+    return await _import_money_csv(
+        request, file, map_row=_map_payment_row,
+        skip_if=lambda d: not d.get("summary"),   # 摘要在 mapper 裡已用收款人補過
+        date_fields=("request_date", "payment_date"), build=build)
 
 
 # ── Cash Entry (收支明細) ───────────────────────────────────
@@ -1652,10 +1976,7 @@ async def create_cash_entry(req: CashEntryPayload, request: Request):
         # 發票的收款，列表那欄看得到，但「關聯發票」面板是空的、發票的已收金額
         # 停在 0 —— 因為那兩處讀的是 crm_cash_invoice_links 不是 invoice_id。
         # 要按一次編輯再存檔才會補上，等於帳目正確與否取決於有沒有人多按一下。）
-        await _sync_single_alloc(session, e)
-        await session.flush()
-        await _resettle_invoice(session, e.invoice_id,
-                                when=dates.get("entry_date") or _now())
+        await _sync_single_alloc(session, e)   # 收款狀態也由它一起收尾
         await session.commit()
     return {"status": "ok", "entry_id": e.id, "entry": {"id": e.id}}
 
@@ -1673,7 +1994,6 @@ async def _sync_single_alloc(session, e):
     三張，有人在編輯視窗動一下發票下拉，A 與 C 的已收就憑空歸零、B 變成收了
     180,000 超過面額，全程沒有任何提示）。所以多張時擋下來，請他去面板改。
     """
-    from sqlalchemy import delete as sa_del
     existing = (await session.execute(
         select(CrmCashInvoiceLink.invoice_id)
         .where(CrmCashInvoiceLink.cash_entry_id == e.id))).scalars().all()
@@ -1684,14 +2004,14 @@ async def _sync_single_alloc(session, e):
             status_code=409,
             detail=f"這筆收款已經分配給 {len(existing)} 張發票（合併匯款或分期）—— "
                    f"要改請用「關聯發票」面板，從編輯視窗改會把其他幾張的已收金額清掉")
-    await session.execute(sa_del(CrmCashInvoiceLink).where(
-        CrmCashInvoiceLink.cash_entry_id == e.id))
-    # deposit 被清成 0（改成支出列）→ 只刪不建：這筆錢已經不是收款了，
+    # deposit 被清成 0（改成支出列）→ 空分配：這筆錢已經不是收款了，
     # 留著舊分配列會讓那張發票永遠算已收（實測會留孤兒）。
-    if e.invoice_id and (e.deposit or 0):
-        session.add(CrmCashInvoiceLink(id=uuid.uuid4().hex, cash_entry_id=e.id,
-                                       invoice_id=e.invoice_id,
-                                       amount=int(e.deposit or 0)))
+    ent = e.entity or "parent"
+    rows = (await resolve_invoice_allocs(session, [(e.invoice_id, int(e.deposit or 0))], ent)
+            if e.invoice_id and (e.deposit or 0) else [])
+    # set_primary=False：這條路的主要發票是使用者在表單挑的，不是從分配表推的
+    await replace_invoice_allocs(session, e, rows, when=e.entry_date,
+                                 set_primary=False)
 
 
 @router.put("/cash-entries/{entry_id}")
@@ -1721,7 +2041,6 @@ async def update_cash_entry(entry_id: str, req: CashEntryPayload, request: Reque
         ent = _entity_for_write(request, req.entity, e)
         await _assert_month_open(session, e.entry_date, dates.get("entry_date"),
                                  entity=ent)
-        old_invoice_id = e.invoice_id
         for k, v in data.items():
             if k not in date_fields:
                 setattr(e, k, v)
@@ -1733,17 +2052,13 @@ async def update_cash_entry(entry_id: str, req: CashEntryPayload, request: Reque
         # 🔴 金額變了也要同步分配表，不是只有換發票才要 —— 收款 180,000 打錯成
         # 18,000，分配列會留在 180,000，那張發票的 outstanding 就少算 162,000
         # （明明還欠錢卻顯示收滿）。2026-08-20 實測。
-        if "invoice_id" in data or "deposit" in data:
-            await _sync_single_alloc(session, e)
         if "invoice_id" in data:
-            if old_invoice_id and old_invoice_id != e.invoice_id:
-                await _resettle_invoice(session, old_invoice_id,
-                                        unmark_if_empty=True)
             _set_primary_invoice(e, await session.get(CrmInvoice, e.invoice_id)
                                  if e.invoice_id else None)
         if "invoice_id" in data or "deposit" in data:
-            await _resettle_invoice(session, e.invoice_id,
-                                    when=e.entry_date or _now())
+            # 分配表、主要發票欄、相關發票的收款狀態一次到位；換掉的舊發票也會
+            # 被重算（共用寫入者比對分配表的前後差異），不用在這裡再比一次
+            await _sync_single_alloc(session, e)
         _normalize_cash_fks(e)
         _enforce_cash_project_link(e)
         await session.commit()
@@ -1779,8 +2094,9 @@ async def delete_cash_entry(entry_id: str, request: Request):
         await session.flush()
         # 被這筆收款影響到的發票要重算 —— 舊碼是「無條件打回未收款」，那會把
         # 合併匯款裡另外兩筆收款也收過的發票一起打回去。
-        for iid in set(touched) | ({e.invoice_id} if e.invoice_id else set()):
-            await _resettle_invoice(session, iid, unmark_if_empty=True)
+        await resettle_invoices(
+            session, set(touched) | ({e.invoice_id} if e.invoice_id else set()),
+            unmark_if_empty=True)
         await session.commit()
     return {"status": "ok"}
 
@@ -1797,55 +2113,20 @@ _CASH_INT_FIELDS = {"expense", "claim", "deposit"}
 
 
 def _map_cash_row(header_map: dict, row: dict) -> dict:
-    data = {}
-    for field, aliases in _CASH_COL_MAP.items():
-        for alias in aliases:
-            orig = header_map.get(alias.lower())
-            if orig and row.get(orig, "").strip():
-                val = row[orig].strip()
-                data[field] = _parse_money(val) if field in _CASH_INT_FIELDS else val
-                break
-    return data
+    return map_csv_row(
+        _CASH_COL_MAP, header_map, row,
+        coerce=lambda f, v: _parse_money(v) if f in _CASH_INT_FIELDS else v)
 
 
 @router.post("/cash-entries/import_csv")
 async def import_cash_csv(request: Request, file: UploadFile = File(...)):
-    _check_auth(request)
-    _require_db()
-    content = await file.read()
-    try:
-        text = content.decode("utf-8-sig")
-    except UnicodeDecodeError:
-        text = content.decode("big5", errors="replace")
-
-    reader = csv.DictReader(io.StringIO(text))
-    headers = list(reader.fieldnames or [])
-    header_map = {h.lower(): h for h in headers}
-    imported = skipped = 0
-    factory = await _get_factory()
-
-    async with factory() as session:
-        # F1 月結守衛：逐列判 entry_date 的月，任一列落鎖定月 → 整批 409
-        parsed, dated = [], []
-        for line_no, row in enumerate(reader, start=2):  # 第 1 列是表頭
-            data = _map_cash_row(header_map, row)
-            if not data.get("summary"):
-                skipped += 1
-                continue
-            entry_date = _parse_shoot_date(data.pop("entry_date", None))
-            pay_date = _parse_shoot_date(data.pop("payment_date", None))
-            if entry_date:
-                dated.append((f"第 {line_no} 列（{entry_date.strftime('%Y-%m-%d')}）", entry_date))
-            parsed.append((data, entry_date, pay_date))
-        # 兩本帳：CSV 匯入 v1 限母公司帳（entity='parent'），我的帳不走匯入
-        await _assert_rows_open(session, dated, entity="parent")
-        for data, entry_date, pay_date in parsed:
-            e = CrmCashEntry(id=uuid.uuid4().hex, entry_date=entry_date, entity="parent",
-                             payment_date=pay_date, created_at=_now(), **data)
-            session.add(e)
-            imported += 1
-        await session.commit()
-    return {"status": "ok", "imported": imported, "skipped": skipped}
+    return await _import_money_csv(
+        request, file, map_row=_map_cash_row,
+        skip_if=lambda d: not d.get("summary"),
+        date_fields=("entry_date", "payment_date"),
+        build=lambda data, d: CrmCashEntry(
+            id=uuid.uuid4().hex, entry_date=d["entry_date"], entity="parent",
+            payment_date=d["payment_date"], created_at=_now(), **data))
 
 
 # ── Accounts Payable (應付帳款) ─────────────────────────────
@@ -1944,7 +2225,8 @@ async def receivables_summary(request: Request, status: str = Query(""),
         if status:
             query = query.where(CrmInvoice.payment_status == status)
         else:
-            query = query.where(CrmInvoice.payment_status.notin_(["已收款", "作廢"]))
+            query = query.where(
+                CrmInvoice.payment_status.notin_([*INVOICE_COLLECTED, "作廢"]))
         rows = (await session.execute(query)).all()
 
     # 分組聚合是純邏輯，抽在 core/crm_logic.py（有單元測試）
@@ -1971,7 +2253,7 @@ async def batch_receive(request: Request):
         updated = 0
         for iid in ids:
             inv = await session.get(CrmInvoice, iid)
-            if inv and inv.payment_status != "已收款":
+            if inv and inv.payment_status not in INVOICE_COLLECTED:
                 # 批次標記沒有收支入帳日 → 以標記時間為收款日（已有值不覆蓋）
                 _mark_invoice_received(inv, _now())
                 inv.updated_at = _now()
@@ -1991,25 +2273,8 @@ async def batch_receive(request: Request):
 # 只收一半。硬擋會逼人亂填，所以後端算出差額與判讀，由人決定要不要理。
 
 def _alloc_verdict(entry, allocated: int) -> dict:
-    """分配金額 vs 這筆收款、vs 發票面額 → 給人看的判讀。"""
-    received = int(entry.deposit or 0)
-    diff = allocated - received
-    if not allocated:
-        state, msg = "empty", "還沒分配任何發票"
-    elif diff == 0:
-        state, msg = "ok", "分配金額與實收金額相符"
-    elif 0 < diff <= 50:
-        state, msg = "fee", f"分配比實收多 {diff} 元 —— 常見於收款方代扣匯費"
-    elif diff > 50:
-        state = "over"
-        msg = (f"分配金額比實收多 {diff:,} 元 —— 可能是這幾張發票沒有全部收齊"
-               f"（分期），或多掛了一張")
-    else:
-        state = "under"
-        msg = (f"分配金額比實收少 {-diff:,} 元 —— 還有沒掛上的發票，"
-               f"或這筆收款有一部分不屬於發票")
-    return {"received": received, "allocated": allocated, "diff": diff,
-            "state": state, "message": msg}
+    """分配判讀 —— 規則在 core.finance_logic（純函式、有測試、共用容差）。"""
+    return alloc_verdict(int(entry.deposit or 0), allocated)
 
 
 async def _load_allocs(session, entry):
@@ -2028,9 +2293,8 @@ async def _load_allocs(session, entry):
             "amount": int(link.amount or 0),
             # 這張發票**整體**收了多少（跨所有收款）—— 分期時要看得到全貌，
             # 不能只看眼前這一筆分配了多少
-            "collected": coll.get(link.invoice_id, {}).get("collected", 0),
-            "outstanding": (int((inv.amount_total if inv else 0) or 0)
-                            - coll.get(link.invoice_id, {}).get("collected", 0)),
+            **collection_fields(inv.amount_total if inv else 0,
+                                coll.get(link.invoice_id)),
             "invoice_number": (inv.invoice_number if inv else "") or "",
             "title": (inv.title if inv else "") or "",
             "amount_total": int((inv.amount_total if inv else 0) or 0),
@@ -2074,49 +2338,9 @@ async def set_cash_entry_invoices(entry_id: str, req: CashInvoiceLinksPayload,
         ent = require_entity(request, e.entity or "parent", level="full")
         await _assert_month_open(session, e.entry_date, entity=ent)
 
-        seen = set()
-        rows = []
-        for it in (req.items or []):
-            iid = (it.invoice_id or "").strip()
-            if not iid:
-                raise HTTPException(status_code=422, detail="invoice_id 不可為空")
-            if iid in seen:
-                raise HTTPException(status_code=422,
-                                    detail="同一張發票不可重複掛在同一筆收款")
-            seen.add(iid)
-            inv = await session.get(CrmInvoice, iid)
-            if not inv:
-                raise HTTPException(status_code=404, detail=f"發票不存在：{iid}")
-            if (inv.entity or "parent") != ent:
-                raise HTTPException(status_code=409, detail="收款與發票分屬不同帳本")
-            amt = int(it.amount or 0)
-            if amt <= 0:
-                raise HTTPException(
-                    status_code=422,
-                    detail=f"分配金額要大於 0（{inv.invoice_number or inv.title}）")
-            rows.append((inv, amt))
-
-        from sqlalchemy import delete as sa_delete
-        prev = (await session.execute(
-            select(CrmCashInvoiceLink.invoice_id)
-            .where(CrmCashInvoiceLink.cash_entry_id == entry_id))).scalars().all()
-        await session.execute(sa_delete(CrmCashInvoiceLink).where(
-            CrmCashInvoiceLink.cash_entry_id == entry_id))
-        for inv, amt in rows:
-            session.add(CrmCashInvoiceLink(
-                id=uuid.uuid4().hex, cash_entry_id=entry_id,
-                invoice_id=inv.id, amount=amt))
-        # 主要發票 = 分配金額最大的那張（沒有就清空）
-        _set_primary_invoice(e, max(rows, key=lambda x: x[1])[0] if rows else None)
-        await session.flush()
-        # 🔴 這裡本來完全不動發票狀態 —— 客戶合併匯款 300,000 掛三張，三張都還
-        # 留在應收帳款裡（錢收了、應收沒減，資產負債表虛增）。移除的那些也要
-        # 重算，否則錢退掉了卻永遠掛已收款。
-        kept = {inv.id for inv, _a in rows}
-        for iid in kept:
-            await _resettle_invoice(session, iid, when=e.entry_date or _now())
-        for iid in set(prev) - kept:        # 被移除的：憑據是我們剛拿掉的
-            await _resettle_invoice(session, iid, unmark_if_empty=True)
+        rows = await resolve_invoice_allocs(
+            session, [(it.invoice_id, it.amount) for it in (req.items or [])], ent)
+        await replace_invoice_allocs(session, e, rows)
         await session.commit()
 
         items, allocated = await _load_allocs(session, e)

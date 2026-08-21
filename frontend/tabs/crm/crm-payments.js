@@ -97,10 +97,19 @@ function _buildEditFields() {
     const statusOpts = [{value:'應付款',label:'應付款'},{value:'已付款',label:'已付款'}];
     const projectOpts = [{value:'',label:'— 選擇專案 —'}].concat(
         _projects.map(pr => ({value:pr.id, label:pr.name + ' (' + (pr.client_short_name || '') + ')'})));
+    // 代開的排前面（這個欄位就是為它存在的），其餘照日期新到舊。
+    // 標籤帶發票號碼 —— 找發票最常用的就是號碼，不放進去就搜不到。
     const invoiceOpts = [{value:'',label:'— 選擇發票 —'}].concat(
-        _invoiceList.filter(inv => inv.issue_status === '已開立').map(inv => ({
-            value:inv.id, label:inv.title + ' $' + (inv.amount_total||0).toLocaleString('zh-TW') + ' (' + (inv.company_name||'') + ')'
-        })));
+        _invoiceList
+            .filter(inv => inv.issue_status !== '作廢' && inv.payment_status !== '作廢')
+            .sort((a, b) => (_isKaiInvoice(b) - _isKaiInvoice(a))
+                || String(b.invoice_date || '').localeCompare(String(a.invoice_date || '')))
+            .map(inv => ({
+                value: inv.id,
+                label: (inv.invoice_number || '無號') + ' ' + (inv.title || '')
+                    + ' $' + (inv.amount_total || 0).toLocaleString('zh-TW')
+                    + ' (' + (inv.company_name || '') + ')',
+            })));
 
     return [
         {name:'summary', label:'摘要', type:'text'},
@@ -180,7 +189,7 @@ function _wireEditDynamics(p) {
 
     // Set initial value for _invoice_sel and _project_sel
     if (invSel && p.category === '發票代開') {
-        const matchInv = _invoiceList.find(i => i.invoice_number === p.invoice_number);
+        const matchInv = _invoiceOf(p);
         if (matchInv) invSel.value = matchInv.id;
     }
     const projSel = content.querySelector('[data-field="_project_sel"]');
@@ -208,8 +217,8 @@ function renderDetail(p) {
         ${p.payment_status === '已付款' && p.payment_date ? prop('付款日', p.payment_date.substring(0, 10)) : ''}
         <div style="border-top:1px solid #2e2e2e;margin:8px 0;"></div>
         <div style="font-size:12px;font-weight:700;color:#6b7280;padding:4px 0;">補充資訊</div>
-        ${p.category === '發票代開' && p.invoice_number ? (() => {
-            const inv = _invoiceList.find(i => i.invoice_number === p.invoice_number);
+        ${p.category === '發票代開' && (p.source_invoice_id || p.invoice_number) ? (() => {
+            const inv = _invoiceOf(p);
             return prop('代開發票', inv ? inv.title + ' $' + (inv.amount_total||0).toLocaleString('zh-TW') : p.invoice_number);
         })() : ''}
         ${p.invoice_number ? prop('發票號碼', p.invoice_number) : ''}
@@ -237,7 +246,12 @@ function renderDetail(p) {
                 payload.payment_date = p.payment_date || null;
                 // Resolve project_id from the right field depending on category
                 if (payload.category === '發票代開') {
-                    payload.project_id = payload._invoice_sel || null;
+                    // 🔴 挑到的發票寫進 source_invoice_id，**不是** project_id。
+                    // 舊寫法 `project_id = _invoice_sel` 是把發票 id 塞進專案欄：
+                    // 專案欄會指向一個不存在的專案（畫面上空白），同時把使用者
+                    // 在「專案」下拉挑的值整個丟掉。
+                    payload.source_invoice_id = payload._invoice_sel || null;
+                    payload.project_id = payload._project_sel || null;
                     const inv = _invoiceList.find(i => i.id === payload._invoice_sel);
                     if (inv) payload.invoice_number = inv.invoice_number || '';
                 } else if (_PROJECT_CATEGORIES.includes(payload.category)) {
@@ -285,7 +299,17 @@ const _FIELDS = ['summary', 'amount', 'request_date', 'category', 'payee_name', 
 const _DATE_FIELDS = ['request_date', 'payment_date'];
 const _INT_FIELDS = ['amount'];
 
-const _PROJECT_CATEGORIES = ['專案外包', '專案雜支'];
+// 哪些類別可以連結專案 —— 由後端供（core/project_link.PAYMENT_CATEGORIES）。
+// 這份只是斷線時的 fallback：寫死在前端的話，改規則要發版，而且零用金／請款／
+// 收支三者刻意的差異從程式碼裡看不出來。
+let _PROJECT_CATEGORIES = ['專案外包', '專案雜支'];
+
+async function _loadPayOptions() {
+    try {
+        const o = await _fetch('/payments/options');
+        if (o.project_link_categories?.length) _PROJECT_CATEGORIES = o.project_link_categories;
+    } catch (_) { /* 用 fallback，不擋畫面 */ }
+}
 // 🔴 清單缺「專案外包」曾讓最大宗的類別（歷史匯入 371/806 筆，46%）在編輯視窗
 // 選不到自己 —— 跟收支明細寫死 27 項少 5 項同一種病。快速列與編輯表單共用這一份。
 const _CATEGORIES = ['專案外包', '發票代開', '建構', '零用金', '專案雜支', '專案',
@@ -385,9 +409,24 @@ window._payQuickAdd = async function () {
 };
 let _invoiceList = [];
 
+/** 「代開發票」選單的來源。
+ *
+ * 🔴 不能用 payment_type=收款 過濾（owner 2026-08-21：找不到我要的發票）。
+ * 資料裡的 payment_type 其實是「款項狀態」那一欄拆出來的方向，代開發票一旦
+ * 收了錢／轉撥出去就變成 **付款** —— 於是這個專門用來挑代開發票的選單，
+ * 反而看不到 199 張代開發票（生產實測：183 張 payment_type=付款 全部消失，
+ * 想找的「cooltech VJ 補開」就是其中一張）。改成全部撈回來，作廢的不列。
+ */
 async function _loadInvoiceList() {
-    try { _invoiceList = (await _fetch('/invoices?payment_type=收款')).invoices || []; } catch(_) { _invoiceList = []; }
+    try { _invoiceList = (await _fetch('/invoices')).invoices || []; } catch(_) { _invoiceList = []; }
 }
+
+const _isKaiInvoice = (inv) => ('' + (inv.category || '')).includes('代開');
+
+/** 這張請款單對應的發票。
+ *  後端已經把「舊資料用發票號碼補」那條規則解好了（_invoice_link_for），
+ *  所以這裡只認 id —— 前端不該再抄一份號碼比對，那條規則的空號坑要修就得修每一份。 */
+const _invoiceOf = (p) => _invoiceList.find(i => i.id === p.source_invoice_id) || null;
 
 function _updateExtraFields(category) {
     const invoiceField = document.getElementById('pay-invoice-field');
@@ -457,7 +496,7 @@ function openModal(p = null) {
         if (_DATE_FIELDS.includes(f) && p?.[f]) el.value = p[f].substring(0, 10);
         else el.value = p ? (p[f] ?? '') : '';
     }
-    if (!p) document.getElementById('pay-f-request_date').value = new Date().toISOString().substring(0, 10);
+    if (!p) document.getElementById('pay-f-request_date').value = today();
     _updateExtraFields(p?.category || '');
     document.getElementById('pay-modal').style.display = 'flex';
 }
@@ -624,5 +663,6 @@ export async function initCrmPaymentsTab() {
     }
 
     setupResizeHandle('pay-resize-handle', 'pay-detail-panel');
-    await Promise.all([loadPayments(), loadProjects(), loadStaffList(), _loadInvoiceList()]);
+    await Promise.all([loadPayments(), loadProjects(), loadStaffList(),
+                       _loadInvoiceList(), _loadPayOptions()]);
 }

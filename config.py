@@ -149,28 +149,51 @@ def _migrate_compute_hosts(data: dict) -> None:
     data.pop("compute_hosts", None)
 
 
+# 檔案內容的快取，key 是 mtime。save_settings 一寫、mtime 就變、下次自動重讀。
+# 🔴 只快取**解析後的檔案**，不快取 merge 的結果 —— merge 產出的是新的 section
+# dict，而呼叫端普遍是 `s = load_settings(); s[k] = v; save_settings(s)`，
+# 快取整包會讓某個呼叫端的就地修改污染下一個呼叫端拿到的設定。
+_settings_cache: tuple = (None, None)
+
+
+def _detached(v):
+    """可變值要複製一份再交出去 —— 不然呼叫端就地改（改了沒存檔）會污染快取。
+    dict section 上面本來就每次重建，這裡處理 list 那幾個（agents、schedules…）。"""
+    if isinstance(v, list):
+        return [dict(x) if isinstance(x, dict) else x for x in v]
+    if isinstance(v, dict):
+        return dict(v)
+    return v
+
+
 def load_settings() -> dict:
+    global _settings_cache
     if os.path.exists(_SETTINGS_FILE):
         try:
-            with open(_SETTINGS_FILE, "r", encoding="utf-8") as f:
-                data = _json.load(f)
+            mtime = os.path.getmtime(_SETTINGS_FILE)
+            if _settings_cache[0] != mtime:
+                with open(_SETTINGS_FILE, "r", encoding="utf-8") as f:
+                    data = _json.load(f)
                 # 一次性遷移 compute_hosts → agents
                 if data.get("compute_hosts"):
                     _migrate_compute_hosts(data)
                     with open(_SETTINGS_FILE, "w", encoding="utf-8") as fw:
                         _json.dump(data, fw, ensure_ascii=False, indent=4)
-                merged: dict = {}
-                # Merge defaults first
-                for section, defaults in _DEFAULT_SETTINGS.items():
-                    if isinstance(defaults, dict):
-                        merged[section] = {**defaults, **data.get(section, {})}
-                    else:
-                        merged[section] = data.get(section, defaults)
-                # Preserve any extra keys from file not in defaults
-                for key in data:
-                    if key not in merged:
-                        merged[key] = data[key]
-                return merged
+                    mtime = os.path.getmtime(_SETTINGS_FILE)
+                _settings_cache = (mtime, data)
+            data = _settings_cache[1]
+            merged: dict = {}
+            # Merge defaults first
+            for section, defaults in _DEFAULT_SETTINGS.items():
+                if isinstance(defaults, dict):
+                    merged[section] = {**defaults, **data.get(section, {})}
+                else:
+                    merged[section] = _detached(data.get(section, defaults))
+            # Preserve any extra keys from file not in defaults
+            for key in data:
+                if key not in merged:
+                    merged[key] = _detached(data[key])
+            return merged
         except Exception:
             pass
     return {s: (dict(v) if isinstance(v, dict) else v) for s, v in _DEFAULT_SETTINGS.items()}

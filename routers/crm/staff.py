@@ -21,7 +21,7 @@ from core.schemas import StaffPayload, ResumePayload, ProjectStaffPayload
 from ._shared import (router, token_router, _check_auth, _check_project_write_auth, money_dep,
                       _require_db, _get_factory, _fmt_day, _now,
                       STAFF_CREATED_VIA_ADMIN, _UPLOAD_BASE, _ALLOWED_IMG_EXT,
-                      _verify_token_generic)
+                      _verify_token_generic, map_csv_row)
 
 try:
     from ._shared import (select, or_,
@@ -315,15 +315,10 @@ _STAFF_COL_MAP = {
 
 
 def _map_staff_row(header_map: dict, row: dict) -> dict:
-    data = {}
-    for field, aliases in _STAFF_COL_MAP.items():
-        for alias in aliases:
-            orig = header_map.get(alias.lower())
-            if orig and row.get(orig, "").strip():
-                val = row[orig].strip()
-                data[field] = int(val) if field in ("daily_rate", "hourly_rate") and val.isdigit() else val
-                break
-    return data
+    return map_csv_row(
+        _STAFF_COL_MAP, header_map, row,
+        coerce=lambda f, v: (int(v) if f in ("daily_rate", "hourly_rate") and v.isdigit()
+                             else v))
 
 
 @router.post("/staff/import_csv")

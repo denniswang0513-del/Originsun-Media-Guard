@@ -66,8 +66,13 @@ def test_voided_and_collected_are_still_excluded():
 
 
 def test_no_other_receivables_query_forgot_the_filter():
-    """整份 crm/finance.py 只有一處用 `payment_status NOT IN (已收款, 作廢)` 當
-    應收條件；哪天多一處，這條會逼它一起帶方向過濾。"""
+    """整份 crm/finance.py 只有一處用 `payment_status NOT IN (收現狀態, 作廢)` 當
+    應收條件；哪天多一處，這條會逼它一起帶方向過濾。
+
+    排除清單用常數 INVOICE_COLLECTED 而不是逐字列 —— 代開改名之後「收到錢」
+    有三種說法（已收款／待撥款／已撥款），各處自己寫字串遲早漏掉一個，漏掉的
+    那個就會被算回應收（「已轉撥」漏掉那次把應收虛增成 4.7 倍）。
+    """
     src = _src("routers/crm/finance.py")
-    hits = re.findall(r'payment_status\.notin_\(\["已收款", "作廢"\]\)', src)
+    hits = re.findall(r'payment_status\.notin_\(\[\*INVOICE_COLLECTED, "作廢"\]\)', src)
     assert len(hits) == 1, f"應收條件出現 {len(hits)} 處，新增的那處也要過濾 payment_type"

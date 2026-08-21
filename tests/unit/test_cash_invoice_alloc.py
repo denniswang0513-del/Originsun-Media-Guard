@@ -133,10 +133,21 @@ def test_settlement_rule_has_exactly_one_definition():
     「完全不動」、刪除路徑「無條件打回未收款」。
     """
     src = repo_src('routers/crm/finance.py')
+    # 收款狀態一律由分配表那條路收尾：三個寫入端點走 _sync_single_alloc /
+    # replace_invoice_allocs（兩者最終都是 replace_invoice_allocs），刪除那條
+    # 沒有分配可寫，直接呼叫 _resettle_invoice。
+    ok = ('resettle_invoices', 'replace_invoice_allocs', '_sync_single_alloc')
     for fn in ('async def create_cash_entry(', 'async def update_cash_entry(',
                'async def delete_cash_entry(', 'async def set_cash_entry_invoices('):
         body = code_only(func_body(src, fn))
-        assert '_resettle_invoice' in body, f'{fn} 沒有走統一的收款狀態規則'
+        assert any(h in body for h in ok), f'{fn} 沒有走統一的收款狀態規則'
+    # 共用寫入者一定要收尾狀態 —— 它是三條路的交會點，漏了就三條一起錯
+    writer = code_only(func_body(src, 'async def replace_invoice_allocs_bulk('))
+    assert writer.count('resettle_invoices(') == 2, \
+        'replace_invoice_allocs_bulk 要同時重算「留下的」與「被移除的」發票'
+    # 批次入口只批次「讀」，寫還是走同一支 —— 標記/退回的規則不能有第二個版本
+    plural = code_only(func_body(src, 'async def resettle_invoices('))
+    assert '_resettle_invoice(' in plural
 
 
 def test_edit_form_cannot_flatten_a_multi_invoice_allocation():

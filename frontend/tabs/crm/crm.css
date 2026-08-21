@@ -434,6 +434,37 @@
   font-family: inherit;
 }
 .crm-input:focus { border-color: #3b82f6; }
+/* 檔案選擇：瀏覽器預設是亮色系統控制項，在深色 modal 裡像貼上去的一塊白。
+   外框比照 .crm-input，裡面那顆原生按鈕用 ::file-selector-button 換掉。 */
+.crm-file {
+  background: #1e1e1e;
+  border: 1px solid #3a3a3a;
+  border-radius: 6px;
+  color: #9ca3af;
+  padding: 6px 8px;
+  font-size: 12px;
+  width: 100%;
+  box-sizing: border-box;
+}
+.crm-file::file-selector-button {
+  background: #2f2f2f;
+  border: 1px solid #4a4a4a;
+  border-radius: 5px;
+  color: #e0e0e0;
+  padding: 4px 12px;
+  margin-right: 10px;
+  font-size: 12px;
+  font-family: inherit;
+  cursor: pointer;
+}
+.crm-file::file-selector-button:hover { background: #3a3a3a; border-color: #5a5a5a; }
+.crm-file:focus-within { border-color: #3b82f6; outline: none; }
+/* 表格格子裡的下拉：配色沿用 .crm-select，寬度吃滿該欄 —— 用 auto 的話選項字數不同會讓每一列
+   自己一個寬度，整欄看起來像沒對齊。外層 <col> 已經定好欄寬。 */
+.crm-select-sm {
+  padding: 1px 4px; font-size: 11px; border-radius: 3px;
+  width: 100%; max-width: 100%; box-sizing: border-box;
+}
 .crm-input-auto { background: #2a2a2a; color: #9ca3af; }
 
 .crm-textarea { resize: vertical; min-height: 60px; }
@@ -614,15 +645,19 @@
 .crm-view-btn.active { background: #1e1e1e; color: #fff; }
 
 /* ── Invoice badge colors ── */
-.crm-pay-badge-收款 { background: #14532d; color: #86efac; }
-.crm-pay-badge-未收款 { background: #3b2f1f; color: #fbbf24; }
-.crm-pay-badge-付款 { background: #3b2f1f; color: #fbbf24; }
-.crm-pay-badge-作廢 { background: #374151; color: #9ca3af; text-decoration: line-through; }
+/* 款項狀態 badge。class 是語意 token 不是中文狀態字 —— 顯示的字只住在
+   crm-invoices.js 的 _payBadge，改用詞不必動樣式表。 */
+.crm-pay-badge-collected { background: #14532d; color: #86efac; }
+.crm-pay-badge-unpaid { background: #3b2f1f; color: #fbbf24; }
+.crm-pay-badge-void { background: #374151; color: #9ca3af; text-decoration: line-through; }
 /* 已轉撥＝錢已經轉給代開人，是比「已收款」更後面的一階。給它自己的顏色（靛藍），
    跟已收款的綠、未收款的琥珀都分得開 —— 一整欄掃過去要看得出哪些還沒轉出去。 */
-.crm-pay-badge-已轉撥 { background: #1e2f52; color: #93b4fd; }
+.crm-pay-badge-remitted { background: #1e2f52; color: #93b4fd; }
+/* 待撥款＝錢收到了、還欠代開人一次轉撥。用紫色自成一格 ——
+   本來想用橘的，但跟「未收款」的琥珀太接近，一整欄掃過去分不出來 */
+.crm-pay-badge-pending-remit { background: #3b2551; color: #d8b4fe; }
 /* 款項狀態空白＝來源沒填。刻意與「未收款」（橘）視覺分開：那是一種進度，這是沒表態。 */
-.crm-pay-badge-未設定 { background: #262626; color: #6b7280; border: 1px dashed #4b5563; }
+.crm-pay-badge-unset { background: #262626; color: #6b7280; border: 1px dashed #4b5563; }
 
 /* ── 發票就地新增列 ──
    釘在列表最上方（sticky）：捲到哪都能登記，不用先回到頂端。

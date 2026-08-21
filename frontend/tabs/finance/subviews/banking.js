@@ -30,6 +30,7 @@ const LOAN_GROUP_KEY = 'finance_loan_groups_open';   // 展開中的銀行（依
 let _c = null;
 let _isCurrent = () => true;
 let _accounts = [];      // 銀行帳戶
+let _drafts = [];        // 對帳單匯入草稿（掛到一半的）
 let _unassigned = 0;
 let _adjustments = [];
 let _coa = [];           // 會計科目（調整表下拉用）
@@ -39,7 +40,6 @@ let _loanErr = null;     // /loans 載入失敗訊息（不擋其他區塊）
 let _editingLoanId = null; // 貸款 modal：null=新增
 let _schedLoanId = null; // 攤還表 modal 目前開的貸款 id
 let _wb = null;          // 對帳工作台：{acct, month, data}；null=未開
-let _wbCats = null;      // 補記入帳的類別 datalist（cash 對映 category，lazy 載一次）
 let _wbImportRows = null; // 匯入流程暫存：貼上解析後的儲存格陣列
 let _stmtPreview = null; // 對帳單匯入：preview 回來的列（確認後才寫入）
 
@@ -141,16 +141,18 @@ export default async function render(container, ctx = {}) {
             () => finFetch('/adjustments').catch(() => ({ items: [] })),
             () => finFetch('/accounts').catch(() => ({ items: [] })),
             () => finFetch('/loans').catch(e => ({ items: [], _error: e.message })),
+            () => finFetch('/bank-statement/drafts').catch(() => ({ drafts: [] })),
         ],
     });
     if (!results) return;
-    const [bank, adj, coa, loans] = results;
+    const [bank, adj, coa, loans, drafts] = results;
     _accounts = bank.items || [];
     _unassigned = bank.unassigned_count || 0;
     _adjustments = adj.items || [];
     _coa = coa.items || [];
     _loans = loans.items || [];
     _loanErr = loans._error || null;
+    _drafts = drafts.drafts || [];
     _renderShell();
     const sel = _c.querySelector('#finbank-recon-acct');
     if (sel && sel.value) _loadReconHistory(sel.value);
@@ -232,8 +234,16 @@ function _renderShell() {
 
         <!-- 月底對帳（工作台：明細逐筆勾銷 → 最後核對餘額） -->
         <div style="background:#202020;border:1px solid #2e2e2e;border-radius:8px;padding:16px;margin-bottom:16px;">
-            <h3 style="color:#eee;margin:0 0 4px;font-size:14px;">🔍 月底對帳</h3>
-            <p style="color:#888;font-size:12px;margin:0 0 12px;">把銀行對帳單的明細倒進來（貼上匯入或手動 key），逐筆跟系統收支勾銷 — 漏記的直接補記入帳、對不上的看得見，最後再核對月底餘額。</p>
+            <h3 style="color:#eee;margin:0 0 4px;font-size:14px;">🔍 對帳系統</h3>
+            <p style="color:#888;font-size:12px;margin:0 0 10px;">
+                銀行的帳從這裡進系統：上傳對帳單 → 自動分類、自動配貸款期別 → 寫進收支明細。
+                同一份重傳只會補新的，所以可以每個月固定丟一次。
+                分類規則自己設，用久了幾乎不用手動改。</p>
+            <div style="display:flex;gap:8px;flex-wrap:wrap;margin:0 0 12px;">
+                <button class="crm-btn crm-btn-primary" onclick="window._finBank.stmtOpen()">📄 上傳對帳單</button>
+                <button class="crm-btn crm-btn-secondary" onclick="window._finBank.rulesOpen()">⚙️ 分類規則</button>
+            </div>
+            ${_draftsStrip()}
             ${actives.length === 0 ? '<div style="color:#888;font-size:13px;">先新增帳戶才能對帳。</div>' : `
             <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end;">
                 <div><div style="color:#9ca3af;font-size:11px;margin-bottom:3px;">帳戶</div>
@@ -244,7 +254,7 @@ function _renderShell() {
             </div>
             <div id="finbank-wb" style="margin-top:12px;"></div>
             <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end;margin-top:14px;padding-top:12px;border-top:1px solid #2a2a2a;">
-                <div><div style="color:#9ca3af;font-size:11px;margin-bottom:3px;">最後一步：對帳單月底餘額</div>
+                <div><div style="color:#9ca3af;font-size:11px;margin-bottom:3px;">核對：對帳單月底餘額</div>
                     <input id="finbank-recon-balance" type="number" class="crm-input" placeholder="照對帳單抄" style="width:150px;"></div>
                 <button class="crm-btn crm-btn-secondary" onclick="window._finBank.reconcile(this)">核對餘額</button>
             </div>
@@ -604,11 +614,12 @@ function _loanGroupBlock(g, open) {
 
 /** 貸款區塊內容（記繳款/取消後只重畫這塊，modal 不動） */
 function _loansSectionInner() {
+    // 這裡刻意沒有「上傳對帳單」鈕：入口統一在上面的「對帳系統」——
+    // 同一個動作兩個入口，使用者永遠在猜哪個才是對的（2026-08-20 搬走）。
     const head = `
         <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;">
             <h3 style="color:#eee;margin:0;font-size:14px;">🏦 銀行貸款</h3>
             <span style="display:flex;gap:6px;flex-wrap:wrap;">
-                ${_loans.length ? '<button class="crm-btn crm-btn-secondary crm-btn-sm" onclick="window._finBank.stmtOpen()">📄 匯入銀行對帳單</button>' : ''}
                 ${_loans.length ? '<button class="crm-btn crm-btn-secondary crm-btn-sm" onclick="window._finBank.loanOpenAdd()">+ 新增貸款</button>' : ''}
             </span>
         </div>
@@ -939,8 +950,13 @@ function _wbAmt(v) {
     return `<span style="color:${n >= 0 ? '#86efac' : '#fca5a5'};">${n > 0 ? '+' : (n < 0 ? '−' : '')}$${fmtNum(Math.abs(n))}</span>`;
 }
 
-function _wbModal(title, bodyHtml) {
+/** 這組視窗共用同一個外框。width 給欄位多的內容用（預設 760 太窄，
+ *  對帳單預覽有 9 欄含兩個下拉，全部擠在一起，owner 2026-08-21 反應）。 */
+function _wbModal(title, bodyHtml, { width = 760 } = {}) {
     const overlay = document.getElementById('finbank-wb-modal');
+    const box = overlay.querySelector('.crm-modal');
+    // 寬版也要吃得下小螢幕 —— min() 讓它最多佔畫面 95%
+    if (box) box.style.maxWidth = `min(${width}px, 95vw)`;
     overlay.querySelector('#finbank-wb-modal-title').textContent = title;
     overlay.querySelector('#finbank-wb-modal-body').innerHTML = bodyHtml;
     overlay.style.display = 'flex';
@@ -986,9 +1002,9 @@ function _wbEntryCells(e) {
         <td style="padding:4px 8px;text-align:right;white-space:nowrap;">${_wbAmt(e.amount)}</td>`;
 }
 
-/** 可捲動表格容器 */
+/** 可捲動表格容器。data-wb-scroll 給 _wbRender 記位置用（見下）。 */
 function _wbTable(inner, maxH = 420) {
-    return `<div style="max-height:${maxH}px;overflow:auto;border:1px solid #2a2a2a;border-radius:6px;">
+    return `<div data-wb-scroll style="max-height:${maxH}px;overflow:auto;border:1px solid #2a2a2a;border-radius:6px;">
         <table style="border-collapse:collapse;font-size:12px;color:#ccc;width:100%;">${inner}</table></div>`;
 }
 
@@ -1044,6 +1060,10 @@ function _wbRender() {
     const el = _c.querySelector('#finbank-wb');
     if (!el) return;
     if (!_wb) { el.innerHTML = ''; return; }
+    // 🔴 重畫前記住捲軸位置（owner 2026-08-21：「編輯後不要跳到最上面」）。
+    // 每配對／註記／補記一列就整塊重畫（那些動作真的改了伺服器狀態，不能像
+    // 匯入預覽那樣只換一列），對帳到第 30 列時每按一次就被彈回第 1 列。
+    const keep = [...el.querySelectorAll('[data-wb-scroll]')].map(x => x.scrollTop);
     const { data, month } = _wb;
     const s = data.summary || {};
     const lines = data.lines || [];
@@ -1085,6 +1105,10 @@ function _wbRender() {
         </div>`;
     _wbLinesSorter.attach();
     _wbEntriesSorter.attach();
+    // 捲軸放回去（依序對回同一個容器；表格結構固定，兩個容器順序不會變）
+    el.querySelectorAll('[data-wb-scroll]').forEach((x, i) => {
+        if (keep[i]) x.scrollTop = keep[i];
+    });
 }
 
 _fb.wbAutoMatch = (btn) => _wbApi('/statement-lines/auto-match', {
@@ -1241,7 +1265,10 @@ function _wbRenderImportPreview(d) {
         </div>
         ${rows.length > 8 ? `<div style="color:#666;font-size:11px;margin-top:4px;">…（預覽前 8 列，實際匯入 ${fmtNum(rows.length)} 筆）</div>` : ''}
         <label style="display:block;color:#ccc;font-size:12px;margin-top:10px;">
-            <input type="checkbox" id="finbank-wb-replace"> 取代本月已匯入的明細（重新匯入）</label>
+            <input type="checkbox" id="finbank-wb-replace">
+            取代這幾個月已匯入的明細（重新來過）
+            <span style="color:#9ca3af;">—— 不勾的話只補新的，重複的自動跳過；
+            勾了會連已經勾銷好的紀錄一起清掉。</span></label>
         <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:12px;">
             <button class="crm-btn crm-btn-secondary" onclick="window._finBank.wbImportOpen()">← 重貼</button>
             <button class="crm-btn crm-btn-primary" onclick="window._finBank.wbImportSave(this)">匯入</button>
@@ -1257,10 +1284,21 @@ _fb.wbImportSave = async (btn) => {
         .map(r => ({ line_date: r.date, description: (r.description || '').slice(0, 255),
                      amount: r.amount }));
     if (!lines.length) { finToast('沒有可匯入的明細（每列要有非 0 金額）', true); return; }
+    // 🔴 不傳 month —— 每一列自己的日期決定它屬於哪個月，跨月的對帳單一次傳完
+    // 就好（月份只當「該列沒有日期」時的後備，這條路每列都有日期）。
     return _wbApi('/statement-lines', {
         method: 'POST',
-        body: JSON.stringify({ bank_account_id: _wb.acct, month: _wb.month, lines, replace }),
-    }, { btn, close: true, okMsg: `已匯入 ${lines.length} 筆` });
+        body: JSON.stringify({ bank_account_id: _wb.acct, lines, replace }),
+    }, {
+        btn, close: true,
+        okMsg: (r) => {
+            const ms = r.months || [];
+            return `已匯入 ${fmtNum(r.added)} 筆`
+                + (ms.length > 1 ? `（涵蓋 ${ms[0]} ～ ${ms[ms.length - 1]}，共 ${ms.length} 個月）` : '')
+                + (r.skipped ? `；跳過 ${fmtNum(r.skipped)} 筆重複` : '')
+                + (r.dropped_matched ? `；⚠ 覆蓋掉 ${fmtNum(r.dropped_matched)} 筆已勾銷的` : '');
+        },
+    });
 };
 
 // ── 工作台：手動配對 / 註記 / 補記入帳 ───────────────────────
@@ -1304,12 +1342,11 @@ _fb.wbNoteSave = (btn, lineId) => _wbApi(`/statement-lines/${lineId}`, {
 _fb.wbCreateOpen = async (lineId) => {
     const ln = _wbLine(lineId);
     if (!ln) return;
-    if (_wbCats === null) {
-        try {
-            const r = await finFetch('/category-map');
-            _wbCats = [...new Set((r.items || []).filter(m => m.source === 'cash' && m.active !== false).map(m => m.category_text))];
-        } catch { _wbCats = []; }
-    }
+    // 🔴 類別清單只有一份：_ensureCashCats（後端的 cash_category_texts）。
+    // 這裡本來自己抓 /category-map 再在前端篩一遍 —— 而且篩法跟後端不一樣
+    // （後端 active.is_(True) 排除 NULL、這邊 active !== false 收進 NULL），
+    // 於是這個 datalist 會給出後端不認得的類別，而這一欄會直接寫進真的收支列。
+    const cats = await _ensureCashCats();
     _wbModal('補記入帳（系統漏記 → 建收支明細）', `
         ${_wbBanner(ln, `<span style="color:#888;font-size:11px;">（${ln.amount >= 0 ? '存入' : '支出'}，日期金額照對帳單帶入）</span>`)}
         <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end;">
@@ -1317,7 +1354,7 @@ _fb.wbCreateOpen = async (lineId) => {
                 <input id="finbank-wb-ce-date" type="date" class="crm-input" value="${_wb.month}-01"></div>`}
             <div><div style="color:#9ca3af;font-size:11px;margin-bottom:3px;">類別（報表靠它歸科目）</div>
                 <input id="finbank-wb-ce-cat" class="crm-input" list="finbank-wb-cats" style="width:170px;" placeholder="選或輸入類別">
-                <datalist id="finbank-wb-cats">${_wbCats.map(c => `<option value="${esc(c)}">`).join('')}</datalist></div>
+                <datalist id="finbank-wb-cats">${cats.map(c => `<option value="${esc(c)}">`).join('')}</datalist></div>
             <div style="flex:1;min-width:160px;"><div style="color:#9ca3af;font-size:11px;margin-bottom:3px;">摘要</div>
                 <input id="finbank-wb-ce-summary" class="crm-input" style="width:100%;box-sizing:border-box;" value="${esc(ln.description || '')}"></div>
             <div><div style="color:#9ca3af;font-size:11px;margin-bottom:3px;">收款/付款人（可空）</div>
@@ -1436,7 +1473,7 @@ _fb.adjDel = async (id) => {
 // 都該由人按下最後一步。預覽把每一列的判斷攤開（分類、配到哪筆貸款哪一期、是不是
 // 已經匯過），錯的當場取消勾選 —— 不做「全自動但你不知道它做了什麼」。
 
-_fb.stmtOpen = () => {
+_fb.stmtOpen = async () => {
     _stmtPreview = null;
     const opts = _accounts.filter(a => a.active !== false).map(a =>
         `<option value="${esc(a.id)}">${esc(a.name)}</option>`).join('');
@@ -1446,13 +1483,14 @@ _fb.stmtOpen = () => {
             系統用<b>餘額欄</b>推每筆是支出還是存入，再跟對帳單自己印的總計核對 ——
             對不上會直接擋下來，不會猜。貸款扣款會自動配到對應的貸款期別。</p>
         <div class="crm-field"><label>這份對帳單是哪個帳戶</label>
-            <select id="finbank-stmt-acct">${opts}</select></div>
+            <select id="finbank-stmt-acct" class="crm-select">${opts}</select></div>
         <div class="crm-field"><label>上傳檔案</label>
-            <input type="file" id="finbank-stmt-file" accept=".pdf,.csv,.txt">
+            <input type="file" id="finbank-stmt-file" accept=".pdf,.csv,.txt" class="crm-file">
             <div style="color:#666;font-size:11px;margin-top:3px;">掃描成圖片的 PDF 沒有文字層，讀不到 —— 那種請改用下面的貼上。</div></div>
         <div class="crm-field"><label>或：貼上交易明細</label>
-            <textarea id="finbank-stmt-text" rows="6" placeholder="從網銀整塊選取複製，直接貼在這裡"
-                style="width:100%;font-family:monospace;font-size:12px;"></textarea></div>
+            <textarea id="finbank-stmt-text" rows="6" class="crm-input"
+                placeholder="從網銀整塊選取複製，直接貼在這裡"
+                style="font-family:ui-monospace,monospace;font-size:12px;"></textarea></div>
         <div id="finbank-stmt-err" style="display:none;color:#fca5a5;font-size:12px;margin:6px 0;white-space:pre-wrap;"></div>
         <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:10px;">
             <button class="crm-btn crm-btn-secondary" onclick="window._finBank.wbCloseModal()">取消</button>
@@ -1479,9 +1517,140 @@ _fb.stmtParse = async (btn) => {
         failMsg: '這份對帳單沒通過檢查，所以不匯入：',
     });
     if (!d) return;
-    _stmtPreview = { acctId, ...d };
+    // 帳戶跟著預覽回來（bank_account_id）—— 不用再自己記一份
+    _stmtPreview = d;
+    // 類別清單也一起回來了（mapped_categories）—— 這條路不用再跨 prefix 抓
+    if (d.mapped_categories && d.mapped_categories.length) _cashCats = d.mapped_categories;
     _stmtRenderPreview();
 };
+
+/* ── 草稿：掛好專案與發票、確認無誤之後再匯入 ───────────────────────────
+ *
+ * 一份對帳單幾十列，每列要決定分類、掛哪個專案、對到哪張發票，中途常常要去查
+ * 別的資料（owner 2026-08-21）。沒有草稿的話，人一離開就得從上傳重來。
+ *
+ * 🔴 草稿存的是**原始對帳單文字 + 人工決定**，不是畫面的快照。開啟時後端重新
+ * 解析，才拿得到最新的重複判定 —— 草稿放兩天，中間可能有幾列已經從別的路進帳了。
+ */
+function _draftsStrip() {
+    if (!_drafts.length) return '';
+    return `<div id="finbank-drafts" style="margin:0 0 12px;padding:10px 12px;background:#1c2536;
+                border:1px solid #2c3a52;border-radius:6px;">
+        <div style="color:#93c5fd;font-size:12px;margin-bottom:6px;">
+            未匯入的草稿（${_drafts.length}）—— 掛到一半的對帳單，接著做</div>
+        ${_drafts.map(d => `<div style="display:flex;align-items:center;gap:8px;
+                padding:4px 0;border-top:1px solid #2c3a52;">
+            <div style="flex:1;min-width:0;color:#ddd;font-size:12px;overflow:hidden;
+                        text-overflow:ellipsis;white-space:nowrap;">${esc(d.name)}</div>
+            <div style="color:#6b7280;font-size:11px;white-space:nowrap;">${esc(d.updated_at)}</div>
+            <button class="crm-btn crm-btn-primary crm-btn-sm"
+                onclick="window._finBank.draftOpen('${esc(d.id)}', this)">接著做</button>
+            <button class="crm-btn crm-btn-secondary crm-btn-sm"
+                onclick="window._finBank.draftDelete('${esc(d.id)}', this)">刪除</button>
+        </div>`).join('')}
+    </div>`;
+}
+
+_fb.draftOpen = async (id, btn) => {
+    if (btn) { btn.disabled = true; btn.textContent = '載入中…'; }
+    try {
+        const d = await finFetch('/bank-statement/drafts/' + id);
+        if (!d.ok) {
+            finToast('這份草稿的對帳單重新解析失敗：'
+                + (d.errors || []).join('；'), true);
+            return;
+        }
+        _stmtPreview = d;
+        if (d.mapped_categories && d.mapped_categories.length) _cashCats = d.mapped_categories;
+        _stmtRenderPreview();
+        // 存草稿之後才被匯進去的列會變成「已匯過」並自動取消勾選 —— 要講出來，
+        // 不然使用者以為自己上次沒勾到。
+        const dup = (d.rows || []).filter(r => r.duplicate).length;
+        if (dup) finToast(`這份草稿有 ${dup} 列在帳上已經有了，已自動取消勾選`);
+        // 對帳單被重新下載過（摘要或金額改了）時，存過的決定會對不回去 ——
+        // 不講的話人以為自己上次沒做完
+        if (d.draft_missing) {
+            finToast(`有 ${d.draft_missing} 列的決定對不回去（對帳單內容跟存檔時不一樣）`,
+                     true);
+        }
+    } catch (e) {
+        finToast(e.message, true);
+    } finally {
+        if (btn) { btn.disabled = false; btn.textContent = '接著做'; }
+    }
+};
+
+/** 只把草稿區換掉。
+ *  _fb.reload() 是整個子頁重畫：5 支 API + 重建 shell，還會把使用者開著的
+ *  對帳工作台一起收掉 —— 而存一份草稿只改了這一條。 */
+async function _refreshDrafts() {
+    try { _drafts = (await finFetch('/bank-statement/drafts')).drafts || []; }
+    catch (_) { _drafts = []; }
+    const el = _c && _c.querySelector('#finbank-drafts');
+    if (el) el.outerHTML = _draftsStrip();
+    else _fb.reload();          // 本來沒有草稿區（清單原本是空的）→ 只能整個重畫
+}
+
+_fb.draftDelete = async (id, btn) => {
+    const d = _drafts.find(x => x.id === id);
+    if (!confirm(`刪掉草稿「${d ? d.name : ''}」？裡面掛好的專案與發票會一起消失。`)) return;
+    if (btn) btn.disabled = true;
+    try {
+        await finFetch('/bank-statement/drafts/' + id, { method: 'DELETE' });
+        finToast('草稿已刪除');
+        await _refreshDrafts();
+    } catch (e) {
+        finToast(e.message, true);
+        if (btn) btn.disabled = false;
+    }
+};
+
+_fb.stmtSaveDraft = async (btn) => {
+    const d = _stmtPreview;
+    if (!d) return;
+    const err = document.getElementById('finbank-stmt-err');
+    btn.disabled = true;
+    btn.textContent = '儲存中…';
+    try {
+        const r = await finFetch('/bank-statement/drafts', {
+            method: 'POST',
+            body: JSON.stringify({
+                // 已經是草稿就更新同一份 —— 每按一次存一筆新的，一週後會有十幾份
+                // 長得一樣的草稿，那比沒有還糟
+                id: d.draft_id || null,
+                bank_account_id: d.bank_account_id,
+                source_text: d.source_text || '',
+                rows: (d.rows || []).map(x => ({ ..._stmtRowPayload(x),
+                                                 selected: !!x.selected })),
+            }),
+        });
+        d.draft_id = r.id;          // 之後再按就是更新這一份
+        _wbCloseModal();
+        finToast(`已存成草稿「${r.name}」—— 在對帳系統可以接著做`);
+        await _refreshDrafts();
+    } catch (e) {
+        if (err) { err.textContent = e.message; err.style.display = 'block'; }
+    } finally {
+        btn.disabled = false;
+        btn.textContent = '存成草稿';
+    }
+};
+
+/** 只重畫**一列**。
+ *
+ * 🔴 不要在編輯時整表重畫（owner 2026-08-21：「編輯後不要跳到最上面」）。
+ * _stmtRenderPreview() 會重建整個 modal body → 捲軸回到頂端，一份三十列的
+ * 對帳單改到第 20 列，每改一次就被彈回第 1 列。改分類、挑專案、挑發票影響到的
+ * 都只有那一列（專案格能不能用跟著分類走，也在同一列裡），逐列換就夠。
+ *
+ * 另一個好處：整表重畫會把所有下拉丟給 select-upgrade 重新升級一次（閃一下）。
+ */
+function _stmtRefreshRow(i) {
+    const tb = document.getElementById('finbank-stmt-tbody');
+    const tr = tb && tb.querySelectorAll('tr')[i];
+    if (!tr || !_stmtPreview || !_stmtPreview.rows[i]) return;
+    tr.outerHTML = _stmtRow(_stmtPreview.rows[i], i);
+}
 
 function _stmtRow(r, i) {
     const isOut = r.amount < 0;
@@ -1499,17 +1668,566 @@ function _stmtRow(r, i) {
             : tag('配不到貸款 → 會當一般支出記', '#3a1f1f', '#fca5a5');
     }
     return `<tr style="border-bottom:1px solid #2a2a2a;${r.duplicate ? 'opacity:.55;' : ''}">
-        <td style="padding:4px 6px;"><input type="checkbox" data-stmt-i="${i}" ${r.selected ? 'checked' : ''}></td>
+        <td style="padding:4px 6px;"><input type="checkbox" data-stmt-i="${i}"
+            onchange="window._finBank.stmtPick(${i}, this.checked)" ${r.selected ? 'checked' : ''}></td>
         <td style="padding:4px 6px;color:#ccc;white-space:nowrap;">${esc(r.date)}</td>
-        <td style="padding:4px 6px;color:#ddd;">${esc(r.description || '')}</td>
+        <td style="padding:4px 6px;color:#ddd;" title="${esc(r.description || '')}">${esc(r.description || '')}</td>
         <td style="padding:4px 6px;text-align:right;white-space:nowrap;color:${isOut ? '#fca5a5' : '#86efac'};">
             ${isOut ? '-' : '+'}$${fmtNum(Math.abs(r.amount))}</td>
-        <td style="padding:4px 6px;color:#bbb;white-space:nowrap;">${esc(r.category || '（未分類）')}</td>
+        <td style="padding:4px 6px;white-space:nowrap;">
+            <select class="crm-select crm-select-sm"
+                    onchange="window._finBank.stmtCatChanged(${i}, this.value)">
+                ${_stmtCatOptions(r.category)}
+            </select>
+            <button type="button" title="把「${esc((r.description || '').slice(0, 12))} → 這個類別」存成規則，以後自動套用"
+                    onclick="window._finBank.stmtSaveRule(${i})"
+                    style="background:none;border:none;color:#6b7280;cursor:pointer;font-size:12px;padding:0 2px;">＋規則</button>
+        </td>
+        <td style="padding:4px 6px;">${_stmtProjCell(r, i)}</td>
+        <td style="padding:4px 6px;">${_stmtInvCell(r, i)}</td>
         <td style="padding:4px 6px;">${loanCell}</td>
         <td style="padding:4px 6px;">${status}</td>
     </tr>`;
 }
 
+/** 類別下拉的選項。來源是後端的收支科目對映（規則只能填報表認得的類別）。 */
+let _cashCats = null;
+
+/** 類別清單由後端供（唯一正本）—— 前端寫死的清單會跟科目對映脫節。
+ *  那支端點在 crm prefix 下，這裡直接打完整路徑（不為了一次呼叫把 crmFetch
+ *  拉進財務模組，那條線的 base 與錯誤處理都不一樣）。抓一次就夠，兩個入口共用。 */
+async function _ensureCashCats() {
+    if (_cashCats) return _cashCats;
+    try {
+        const res = await fetch('/api/v1/crm/cash-entries/options',
+                                { headers: bearerHeader() });
+        _cashCats = res.ok ? ((await res.json()).categories || []) : [];
+    } catch (_) { _cashCats = []; }
+    return _cashCats;
+}
+
+function _stmtCatOptions(cur) {
+    const list = _cashCats || (cur ? [cur] : []);
+    return `<option value="">（未分類）</option>`
+        + list.map(v => `<option value="${esc(v)}"${v === cur ? ' selected' : ''}>${esc(v)}</option>`).join('');
+}
+
+/** 逐列改分類 —— 規則沒中的列本來只能整批落到「未歸類」，那比沒分類更難發現
+ *  （畫面上看起來「已經分好了」）。改在這裡當場修掉，最省事。 */
+_fb.stmtCatChanged = (i, v) => {
+    if (!_stmtPreview || !_stmtPreview.rows[i]) return;
+    const r = _stmtPreview.rows[i];
+    const cats = _stmtPreview.project_categories || [];
+    r.category = v;
+    // 「會落到未歸類嗎」的規則跟後端同一條：沒類別**或**類別沒有科目對映。
+    // 只判 !v 的話，改成一個沒對映的類別之後那個提醒就消失了。
+    r.unmapped_category = !v || !(_stmtPreview.mapped_categories || []).includes(v);
+    // 分類換成非專案類 → 原本掛的專案要跟著清掉，否則寫入時會被守衛擋下
+    // （行政/薪資掛專案會讓專案毛利多算一筆不屬於它的錢）
+    if (!cats.includes(v)) r.project_id = null;
+    _stmtRefreshRow(i);        // 專案格的可用與否跟著分類走（只有這一列會變）
+};
+
+/** 把「這列的摘要 → 這個類別」存成規則。關鍵字由使用者自己打。
+ *
+ * 🔴 刻意**不**預填猜測值（owner 2026-08-20）。原本是 `description.slice(0, 8)`，
+ * 對「2026/08/20 電信費 150725950595分行作業管理部」這種摘要會猜出 `2026/08/` ——
+ * 存下去就是「2026 年 8 月的交易全歸這類」，而且它**會生效**，錯得很安靜。
+ * （摘要裡會留著第二個日期欄，因為解析器只吃掉第一個日期。）
+ * 改成把完整摘要放在提示裡讓人照著挑，輸入框留空 —— 猜錯的預設值比沒有更糟。
+ */
+_fb.stmtSaveRule = async (i) => {
+    const r = _stmtPreview && _stmtPreview.rows[i];
+    if (!r) return;
+    if (!r.category) return finToast('先選一個類別再存規則');
+    const kw = prompt(
+        '摘要：' + (r.description || '')
+        + '\n\n從上面挑一段當關鍵字（摘要包含它就自動歸到「'
+        + r.category + '」）：', '');
+    if (!kw || !kw.trim()) return;
+    if (!(r.description || '').includes(kw.trim())) {
+        // 打錯字的話這條規則永遠不會中，而且沒有任何跡象 —— 當場擋下來
+        return alert('「' + kw.trim() + '」不在這列的摘要裡，這條規則不會生效。\n\n'
+            + '摘要：' + (r.description || ''));
+    }
+    try {
+        await finFetch('/import-rules', { method: 'POST', body: JSON.stringify({
+            keyword: kw.trim(), category: r.category,
+            bank_account_id: _stmtPreview.bank_account_id,   // 綁這個帳戶：各行摘要用語不同
+            sort_order: 50, active: true,
+            note: '從對帳單預覽建立' }) });
+        finToast('已存成規則：' + kw.trim() + ' → ' + r.category);
+    } catch (e) {
+        alert('存不起來：' + e.message);
+    }
+};
+
+// ── 分類規則（bank_import_rules）──────────────────────────
+//
+// 銀行摘要文字 →〔規則〕→ 類別 →〔科目對映〕→ 會計科目。
+// 右半邊本來就是後台可編的，左半邊原本寫死 14 條在 core/bank_statement.py。
+
+let _rules = [];
+
+/** 帳戶 id → 名稱（找不到就顯示 id 前 8 碼，不要靜靜變空白）。 */
+function _acctName(id) {
+    const a = _accounts.find(x => String(x.id) === String(id));
+    return a ? (a.name || '') : String(id).slice(0, 8);
+}
+
+_fb.rulesOpen = async () => {
+    await _ensureCashCats();
+    try { _rules = (await finFetch('/import-rules')).items || []; }
+    catch (_) { _rules = []; }
+    _rulesRender();
+};
+
+function _rulesRender() {
+    const acctOpts = '<option value="">所有帳戶</option>' + _accounts
+        .filter(a => a.active !== false)
+        .map(a => `<option value="${esc(a.id)}">${esc(a.name)}</option>`).join('');
+    const catOpts = '<option value="">— 選類別 —</option>'
+        + (_cashCats || []).map(v => `<option value="${esc(v)}">${esc(v)}</option>`).join('');
+    const rows = _rules.map(r => `
+        <tr style="border-bottom:1px solid #2a2a2a;${r.active ? '' : 'opacity:.45;'}">
+            <td style="padding:4px 6px;color:#ddd;">${esc(r.keyword)}</td>
+            <td style="padding:4px 6px;color:#bbb;">${esc(r.category)}</td>
+            <td style="padding:4px 6px;color:#9ca3af;font-size:11px;">${
+                r.bank_account_id ? esc(_acctName(r.bank_account_id)) : '所有帳戶'}</td>
+            <td style="padding:4px 6px;text-align:right;">
+                <button class="crm-btn crm-btn-secondary crm-btn-sm"
+                        onclick="window._finBank.ruleToggle('${r.id}', ${r.active ? 'false' : 'true'})">${
+                    r.active ? '停用' : '啟用'}</button>
+                <button class="crm-btn crm-btn-danger crm-btn-sm"
+                        onclick="window._finBank.ruleDelete('${r.id}')">刪除</button>
+            </td>
+        </tr>`).join('');
+    _wbModal('分類規則', `
+        <p style="color:#888;font-size:12px;margin:0 0 10px;">
+            對帳單的摘要包含「關鍵字」就自動歸到那個類別。
+            <b>綁定帳戶的規則優先於「所有帳戶」</b> —— 合庫寫「攤還本息」、一銀寫
+            「中小７月」，同一件事兩種寫法，綁帳戶才不會互相誤觸。
+            由上而下比對，先命中的先贏。</p>
+        <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:flex-end;margin-bottom:10px;">
+            <div><div style="color:#9ca3af;font-size:11px;">關鍵字</div>
+                <input id="rule-kw" class="crm-input" style="width:130px;" placeholder="摘要含這串"></div>
+            <div><div style="color:#9ca3af;font-size:11px;">歸到類別</div>
+                <select id="rule-cat" class="crm-select">${catOpts}</select></div>
+            <div><div style="color:#9ca3af;font-size:11px;">適用帳戶</div>
+                <select id="rule-acct" class="crm-select">${acctOpts}</select></div>
+            <button class="crm-btn crm-btn-primary" onclick="window._finBank.ruleAdd(this)">新增</button>
+        </div>
+        <div id="rule-err" style="display:none;color:#fca5a5;font-size:12px;margin-bottom:6px;"></div>
+        ${_wbTable(`<thead><tr>
+            <th style="padding:4px 6px;text-align:left;color:#9ca3af;font-weight:500;font-size:11px;">關鍵字</th>
+            <th style="padding:4px 6px;text-align:left;color:#9ca3af;font-weight:500;font-size:11px;">類別</th>
+            <th style="padding:4px 6px;text-align:left;color:#9ca3af;font-weight:500;font-size:11px;">適用帳戶</th>
+            <th></th></tr></thead><tbody>${rows}</tbody>`, 300)}
+        <div style="display:flex;gap:8px;justify-content:space-between;align-items:center;margin-top:12px;padding-top:10px;border-top:1px solid #2a2a2a;">
+            <button class="crm-btn crm-btn-secondary" onclick="window._finBank.rulesApplyUnclassified(this)"
+                    title="只碰 category 是空的列 —— 已經有類別的（不管規則分的還是人手改的）一律不動">
+                套用到未歸類的歷史列</button>
+            <button class="crm-btn crm-btn-secondary" onclick="window._finBank.wbCloseModal()">關閉</button>
+        </div>`);
+}
+
+_fb.ruleAdd = async (btn) => {
+    const err = document.getElementById('rule-err');
+    const show = (m) => { err.textContent = m; err.style.display = 'block'; };
+    err.style.display = 'none';
+    const kw = document.getElementById('rule-kw').value.trim();
+    const cat = document.getElementById('rule-cat').value;
+    if (!kw) return show('請填關鍵字');
+    if (!cat) return show('請選類別');
+    btn.disabled = true;
+    try {
+        await finFetch('/import-rules', { method: 'POST', body: JSON.stringify({
+            keyword: kw, category: cat,
+            bank_account_id: document.getElementById('rule-acct').value || null,
+            sort_order: 50, active: true, note: '手動新增' }) });
+        await _fb.rulesOpen();
+    } catch (e) {
+        show(e.message);
+        btn.disabled = false;
+    }
+};
+
+_fb.ruleToggle = async (id, active) => {
+    const r = _rules.find(x => x.id === id);
+    if (!r) return;
+    await finFetch('/import-rules/' + id, { method: 'PUT', body: JSON.stringify({
+        keyword: r.keyword, category: r.category,
+        bank_account_id: r.bank_account_id || null,
+        sort_order: r.sort_order, active, note: r.note }) });
+    await _fb.rulesOpen();
+};
+
+_fb.ruleDelete = async (id) => {
+    const r = _rules.find(x => x.id === id);
+    if (!confirm(`刪除規則「${r ? r.keyword : id}」？`)) return;
+    await finFetch('/import-rules/' + id, { method: 'DELETE' });
+    await _fb.rulesOpen();
+};
+
+_fb.rulesApplyUnclassified = async (btn) => {
+    if (!confirm('把現行規則套用到還沒分類的歷史收支列？\n\n'
+        + '只會碰「類別是空的」那些 —— 已經有類別的不動。')) return;
+    btn.disabled = true;
+    btn.textContent = '套用中…';
+    try {
+        const r = await finFetch(`/import-rules/apply-unclassified?entity=${finEntity()}`,
+                                 { method: 'POST' });
+        const detail = Object.entries(r.by_category || {})
+            .map(([k, v]) => `${k} ${v}`).join('、');
+        finToast(`掃了 ${fmtNum(r.scanned)} 筆未歸類，分好 ${fmtNum(r.changed)} 筆`
+            + (detail ? `（${detail}）` : ''));
+    } catch (e) {
+        alert('套用失敗：' + e.message);
+    } finally {
+        btn.disabled = false;
+        btn.textContent = '套用到未歸類的歷史列';
+    }
+};
+
+/* ── 挑專案／挑發票：第二層視窗 ────────────────────────────────────────
+ *
+ * 原本這兩格是 <select>。下拉在這裡有三個過不去的問題（owner 2026-08-21）：
+ *   1. 一格塞不下判斷所需的資訊 —— 專案要看客戶與狀態才知道是不是同名的另一案，
+ *      發票要看日期與尚欠才知道是不是這筆匯款。一個 <option> 只有一行字。
+ *   2. 一筆匯款常常是**合併好幾張發票**的錢，還要逐張填金額；下拉天生只能挑一張。
+ * （下拉本身**有**搜尋 —— select-upgrade.js 會把選項 ≥8 的原生 select 自動換成
+ *  可搜尋元件。所以「沒搜尋」不是理由，「一行字放不下、又不能複選」才是。）
+ * 改成按鈕 → 第二層視窗（可搜尋、資訊完整、發票可複選並分配金額）。
+ * 挑完回到預覽（第一層原封不動留在後面，不重畫、不重打 API）。
+ */
+
+/** 第二層視窗自己一個 overlay —— 不能借用 _wbModal 的那個：
+ *  那支是換掉同一個容器的內容，一開就把底下的預覽表洗掉了。 */
+function _pickModal(title, bodyHtml, { width = 720 } = {}) {
+    let o = document.getElementById('finbank-pick-modal');
+    if (!o) {
+        o = document.createElement('div');
+        o.id = 'finbank-pick-modal';
+        o.className = 'crm-modal-overlay';
+        o.style.zIndex = '1100';          // 疊在第一層（1000）之上
+        o.innerHTML = `<div class="crm-modal">
+            <div class="crm-modal-header">
+                <h3 id="finbank-pick-title"></h3>
+                <button class="crm-detail-close"
+                        onclick="window._finBank.pickClose()">&#x2715;</button>
+            </div>
+            <div class="crm-modal-body" id="finbank-pick-body"></div>
+        </div>`;
+        document.body.appendChild(o);
+    }
+    o.querySelector('.crm-modal').style.maxWidth = `min(${width}px, 94vw)`;
+    o.querySelector('#finbank-pick-title').textContent = title;
+    o.querySelector('#finbank-pick-body').innerHTML = bodyHtml;
+    o.style.display = 'flex';
+    const box = o.querySelector('#finbank-pick-search');
+    if (box) box.focus();
+}
+
+_fb.pickClose = () => {
+    const o = document.getElementById('finbank-pick-modal');
+    if (o) {
+        o.style.display = 'none';
+        // 內容一起清掉 —— overlay 是重複使用的，不清的話最後一次挑發票的
+        // 幾千個節點會一直留在文件裡
+        o.querySelector('#finbank-pick-body').innerHTML = '';
+    }
+    _pick = null;
+};
+
+/** 第二層視窗的暫存狀態（挑到一半的東西；按確定才寫回 _stmtPreview.rows）。 */
+let _pick = null;
+
+const _pickHay = (...parts) => parts.filter(Boolean).join(' ').toLowerCase();
+
+// 一次最多畫幾列。清單都是「最可能的排前面」，看不到的那些靠搜尋。
+const _PICK_MAX = 100;
+
+/** 發票清單的欄寬 —— 表頭與資料列**共用同一組**，各寫一份一定會歪。
+ *  原本一列是兩行、欄位用「·」串起來，數字沒有對齊，一頁十幾張很難掃。 */
+const _INV_GRID = 'display:grid;grid-template-columns:'
+    + '20px 116px minmax(0,1fr) 88px 168px 92px 92px 96px 104px;'
+    + 'align-items:center;gap:8px;';
+
+/** 搜尋框輸入 → 只重畫清單（不重畫整個視窗，不然游標會跳掉）。 */
+_fb.pickSearch = (q) => {
+    if (!_pick) return;
+    _pick.q = (q || '').trim().toLowerCase();
+    const el = document.getElementById('finbank-pick-list');
+    if (el) el.innerHTML = _pick.render();
+};
+
+/* ── 專案 ─────────────────────────────────────────────────────────── */
+
+/** 專案格：只有專案類的分類收得下（規則同收支明細，由後端回的清單決定）。 */
+function _stmtProjCell(r, i) {
+    const cats = (_stmtPreview && _stmtPreview.project_categories) || [];
+    if (!cats.includes(r.category)) {
+        return '<span style="color:#4b5563;font-size:11px;">—</span>';
+    }
+    const p = _stmtIndex().proj[r.project_id];
+    const label = p ? esc(p.name) : '＋ 選專案';
+    return `<button type="button" class="crm-btn crm-btn-secondary"
+            onclick="window._finBank.stmtPickProj(${i})"
+            title="${p ? esc(p.name) : '挑一個專案'}"
+            style="width:100%;text-align:left;font-size:11px;padding:3px 6px;
+                   ${p ? '' : 'color:#6b7280;'}overflow:hidden;text-overflow:ellipsis;
+                   white-space:nowrap;">${label}</button>`;
+}
+
+_fb.stmtPickProj = (i) => {
+    const r = _stmtPreview && _stmtPreview.rows[i];
+    if (!r) return;
+    const list = (_stmtPreview.projects || []);
+    _pick = {
+        q: '',
+        render() {
+            const all = list.filter(p => !this.q
+                || _pickHay(p.name, p.client, p.status).includes(this.q));
+            if (!all.length) {
+                return '<div style="color:#6b7280;font-size:12px;padding:14px;">找不到符合的專案</div>';
+            }
+            const rows = all.slice(0, _PICK_MAX);      // 理由同發票清單
+            const more = all.length - rows.length;
+            const tail = more > 0
+                ? `<div style="color:#6b7280;font-size:11px;padding:8px 10px;">
+                     還有 ${fmtNum(more)} 個沒顯示 —— 繼續輸入縮小範圍</div>`
+                : '';
+            return rows.map(p => {
+                const on = p.id === r.project_id;
+                return `<div onclick="window._finBank.pickProjTake('${esc(p.id)}')"
+                    style="padding:7px 10px;border-bottom:1px solid #2a2a2a;cursor:pointer;
+                           ${on ? 'background:#1e3a2a;' : ''}">
+                    <div style="color:#eee;font-size:13px;">${esc(p.name)}</div>
+                    <div style="color:#9ca3af;font-size:11px;margin-top:2px;">
+                        ${esc(p.client || '（無客戶）')}
+                        ${p.status ? '　·　' + esc(p.status) : ''}
+                        ${p.start ? '　·　' + esc(p.start) : ''}
+                    </div></div>`;
+            }).join('') + tail;
+        },
+        take(id) {
+            r.project_id = id || null;
+            _fb.pickClose();
+            _stmtRefreshRow(i);
+        },
+    };
+    _pickModal(`挑專案　—　${r.date}　${(r.description || '').slice(0, 24)}`, `
+        <input id="finbank-pick-search" class="crm-input" placeholder="搜尋專案／客戶…"
+               oninput="window._finBank.pickSearch(this.value)"
+               style="width:100%;margin-bottom:8px;">
+        <div style="max-height:50vh;overflow:auto;border:1px solid #2e2e2e;border-radius:6px;"
+             id="finbank-pick-list">${_pick.render()}</div>
+        <div style="display:flex;justify-content:space-between;margin-top:10px;">
+            <button class="crm-btn crm-btn-secondary"
+                    onclick="window._finBank.pickProjTake('')">不掛專案</button>
+            <button class="crm-btn crm-btn-secondary"
+                    onclick="window._finBank.pickClose()">取消</button>
+        </div>`);
+};
+
+_fb.pickProjTake = (id) => { if (_pick) _pick.take(id); };
+
+/* ── 發票 ─────────────────────────────────────────────────────────── */
+
+/** 預覽的發票／專案查表。整張表共用一份 —— 逐格重建的話，60 列 × 400 張發票
+ *  就是兩萬多次無謂的迴圈（而且每次逐列重畫又來一遍）。
+ *  key 綁在 _stmtPreview 物件本身，換一份預覽自然失效。 */
+let _stmtIdx = null;
+function _stmtIndex() {
+    if (_stmtIdx && _stmtIdx.src === _stmtPreview) return _stmtIdx;
+    const inv = {}, proj = {};
+    ((_stmtPreview && _stmtPreview.invoices) || []).forEach(v => { inv[v.id] = v; });
+    ((_stmtPreview && _stmtPreview.projects) || []).forEach(x => { proj[x.id] = x; });
+    _stmtIdx = { src: _stmtPreview, inv, proj };
+    return _stmtIdx;
+}
+
+/** 送回後端的一列：只送**決定**，不送 preview 的其他欄位。
+ *
+ * 🔴 存草稿與匯入共用這一支。各寫一份的下場已經發生過：匯入那份把「沒掛發票」
+ * 寫成 `invoices: null`，而後端那欄是 List 不收 null —— 只要對帳單裡有一列沒掛
+ * 發票（也就是幾乎每一份），整批匯入就 422。存草稿那份寫的是 `|| []`，所以存
+ * 得起來、匯不進去，兩條路各講各的。
+ */
+const _stmtRowPayload = (x) => ({
+    date: x.date, amount: x.amount, description: x.description,
+    category: x.category, loan_id: x.loan_id, period_no: x.period_no,
+    project_id: x.project_id || null,
+    invoices: x.invoices || [],
+});
+
+/** 發票格：只有收入列有意義（支出掛發票是代開付出去那側，語意不同）。 */
+function _stmtInvCell(r, i) {
+    if (!(r.amount > 0)) {
+        return '<span style="color:#4b5563;font-size:11px;">—</span>';
+    }
+    const allocs = r.invoices || [];
+    const byId = _stmtIndex().inv;
+    let label = '＋ 選發票';
+    let title = '挑發票（可複選：一筆匯款拆給多張）';
+    if (allocs.length === 1) {
+        const v = byId[allocs[0].invoice_id];
+        label = esc((v && (v.title || v.invoice_number)) || '已選 1 張');
+        title = v ? `${v.invoice_number || '無號'} ${v.title || ''}` : '';
+    } else if (allocs.length > 1) {
+        label = `${allocs.length} 張　$${fmtNum(allocs.reduce((t, a) => t + a.amount, 0))}`;
+        title = allocs.map(a => {
+            const v = byId[a.invoice_id];
+            return `${(v && v.invoice_number) || '無號'} $${fmtNum(a.amount)}`;
+        }).join('\n');
+    }
+    return `<button type="button" class="crm-btn crm-btn-secondary"
+            onclick="window._finBank.stmtPickInv(${i})" title="${esc(title)}"
+            style="width:100%;text-align:left;font-size:11px;padding:3px 6px;
+                   ${allocs.length ? '' : 'color:#6b7280;'}overflow:hidden;
+                   text-overflow:ellipsis;white-space:nowrap;">${label}</button>`;
+}
+
+_fb.stmtPickInv = (i) => {
+    const r = _stmtPreview && _stmtPreview.rows[i];
+    if (!r) return;
+    const target = Math.abs(r.amount);
+    const list = (_stmtPreview.invoices || []).slice();
+    // 金額接近的排前面 —— 對一筆入帳來說，「尚欠剛好等於這個數」的那張幾乎
+    // 一定就是答案，讓它不用搜尋就在第一行。同差距時日期近的優先。
+    list.sort((a, b) => (Math.abs((a.outstanding || 0) - target)
+                       - Math.abs((b.outstanding || 0) - target))
+                     || String(b.date || '').localeCompare(String(a.date || '')));
+    const sel = new Map((r.invoices || []).map(a => [a.invoice_id, a.amount]));
+
+    _pick = {
+        q: '',
+        sel,
+        sum() { let t = 0; this.sel.forEach(v => { t += (v || 0); }); return t; },
+        remain() { return Math.max(0, target - this.sum()); },
+        render() {
+            const all = list.filter(v => !this.q
+                || _pickHay(v.invoice_number, v.title, v.company_name).includes(this.q));
+            if (!all.length) {
+                return '<div style="color:#6b7280;font-size:12px;padding:14px;">找不到符合的發票</div>';
+            }
+            // 只畫前 100 張。清單已經照「跟這筆入帳的金額差距」排好，第 100 名
+            // 之後不可能是答案；而每列是九格 grid，四百張要拼 ~280KB 的字串、
+            // 生幾千個節點 —— 打一個字就重來一次。
+            const rows = all.slice(0, _PICK_MAX);
+            const more = all.length - rows.length;
+            const tail = more > 0
+                ? `<div style="color:#6b7280;font-size:11px;padding:8px 10px;">
+                     還有 ${fmtNum(more)} 張沒顯示 —— 繼續輸入縮小範圍</div>`
+                : '';
+            return rows.map(v => {
+                const on = this.sel.has(v.id);
+                const hit = (v.outstanding || 0) === target;
+                const cell = (html, extra = '') =>
+                    `<div style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;${extra}">${html}</div>`;
+                return `<div style="${_INV_GRID}padding:5px 10px;border-bottom:1px solid #2a2a2a;
+                        cursor:pointer;${on ? 'background:#1e3a2a;' : ''}"
+                        onclick="window._finBank.pickInvToggle('${esc(v.id)}', ${on ? 'false' : 'true'})">
+                    <input type="checkbox" ${on ? 'checked' : ''} style="pointer-events:none;">
+                    ${cell(esc(v.invoice_number || '無號'), 'color:#ddd;')}
+                    ${cell(esc(v.title || '') + (hit
+                        ? ' <span style="color:#86efac;font-size:10px;">◀ 金額吻合</span>' : ''),
+                        'color:#eee;')}
+                    ${cell(esc(v.date || ''), 'color:#9ca3af;')}
+                    ${cell(esc(v.company_name || ''), 'color:#9ca3af;')}
+                    ${cell('$' + fmtNum(v.amount_total || 0), 'color:#ccc;text-align:right;')}
+                    ${cell('$' + fmtNum(v.collected || 0), 'color:#9ca3af;text-align:right;')}
+                    ${cell('$' + fmtNum(v.outstanding || 0), 'color:#fbbf24;text-align:right;')}
+                    <input class="crm-input" type="number" ${on ? '' : 'disabled'}
+                        value="${on ? this.sel.get(v.id) : ''}"
+                        onclick="event.stopPropagation();"
+                        onchange="window._finBank.pickInvAmt('${esc(v.id)}', this.value)"
+                        title="分配給這張的金額"
+                        style="text-align:right;font-size:12px;padding:3px 6px;min-width:0;">
+                </div>`;
+            }).join('') + tail;
+        },
+        foot() {
+            const t = this.sum();
+            const diff = target - t;
+            return `已分配 <b style="color:#eee;">$${fmtNum(t)}</b>
+                ／ 這列入帳 $${fmtNum(target)}
+                ${diff === 0
+                    ? '<span style="color:#86efac;">　剛好對上</span>'
+                    : `<span style="color:#fbbf24;">　${diff > 0 ? '還差' : '超出'} $${fmtNum(Math.abs(diff))}</span>`}`;
+        },
+        redraw() {
+            const el = document.getElementById('finbank-pick-list');
+            if (el) el.innerHTML = this.render();
+            const f = document.getElementById('finbank-pick-foot');
+            if (f) f.innerHTML = this.foot();
+        },
+        // 🔴 允許不等於入帳金額就關掉 —— 客戶少匯、多匯、匯款手續費都會讓它對不齊，
+        // 擋下來只會逼人亂填。差額用顏色提醒，寫進去的是使用者填的數。
+        take() {
+            const allocs = [];
+            this.sel.forEach((amt, id) => {
+                if ((amt || 0) > 0) allocs.push({ invoice_id: id, amount: Math.round(amt) });
+            });
+            // 只有 invoices 一種表示法 —— 主要發票（金額最大那張）由後端從
+            // 分配表推，前端不留一份推導值
+            r.invoices = allocs;
+            _fb.pickClose();
+            _stmtRefreshRow(i);
+        },
+    };
+    const th = (t, right) =>
+        `<div style="color:#9ca3af;font-size:11px;${right ? 'text-align:right;' : ''}">${t}</div>`;
+    _pickModal(`挑發票　—　${r.date}　入帳 $${fmtNum(target)}`, `
+        <input id="finbank-pick-search" class="crm-input" placeholder="搜尋發票號／抬頭／客戶…"
+               oninput="window._finBank.pickSearch(this.value)"
+               style="width:100%;margin-bottom:8px;">
+        <div style="color:#6b7280;font-size:11px;margin-bottom:6px;">
+            一筆匯款可以拆給多張發票（合併匯款）。金額接近這筆入帳的排在前面。
+        </div>
+        <div style="border:1px solid #2e2e2e;border-radius:6px;overflow:hidden;">
+            <div style="${_INV_GRID}padding:6px 10px;background:#242424;
+                        border-bottom:1px solid #2e2e2e;">
+                <div></div>${th('發票號')}${th('名稱')}${th('日期')}${th('公司')}
+                ${th('面額', 1)}${th('已收', 1)}${th('尚欠', 1)}${th('分配金額', 1)}
+            </div>
+            <div style="max-height:46vh;overflow:auto;"
+                 id="finbank-pick-list">${_pick.render()}</div>
+        </div>
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-top:10px;">
+            <div id="finbank-pick-foot" style="color:#9ca3af;font-size:12px;">${_pick.foot()}</div>
+            <div style="display:flex;gap:8px;">
+                <button class="crm-btn crm-btn-secondary"
+                        onclick="window._finBank.pickClose()">取消</button>
+                <button class="crm-btn crm-btn-primary"
+                        onclick="window._finBank.pickInvTake()">確定</button>
+            </div>
+        </div>`, { width: 1080 });
+};
+
+_fb.pickInvToggle = (id, on) => {
+    if (!_pick || !_pick.sel) return;
+    if (on) {
+        const v = (_stmtPreview.invoices || []).find(x => x.id === id) || {};
+        // 預設帶「這張還欠多少」與「這列還沒分配掉多少」的較小者 ——
+        // 兩個都是使用者本來就要算的數，先算好比留空白省事。
+        _pick.sel.set(id, Math.min(v.outstanding || 0, _pick.remain()) || (v.outstanding || 0));
+    } else {
+        _pick.sel.delete(id);
+    }
+    _pick.redraw();
+};
+
+_fb.pickInvAmt = (id, v) => {
+    if (!_pick || !_pick.sel) return;
+    _pick.sel.set(id, Math.max(0, Math.round(Number(v) || 0)));
+    _pick.redraw();
+};
+
+_fb.pickInvTake = () => { if (_pick) _pick.take(); };
+
+/** 整張預覽表。改一列請用 _stmtRefreshRow，不要整表重畫（捲軸會跳回頂端）。
+ *  `#finbank-stmt-scroll` 那個 id 是捲軸測試用來量位置的。 */
 function _stmtRenderPreview() {
     const d = _stmtPreview;
     const s = d.summary || {};
@@ -1517,11 +2235,18 @@ function _stmtRenderPreview() {
     _wbModal('確認要匯入哪些列', `
         ${_stmtSummaryBar(d, `<span>貸款扣款 <b>${fmtNum(s.loan_rows)}</b> 筆</span>
             ${s.duplicates ? `<span style="color:#fbbf24;">已匯過 ${fmtNum(s.duplicates)} 筆（預設不勾）</span>` : ''}`)}
-        <div style="max-height:46vh;overflow:auto;border:1px solid #2e2e2e;border-radius:6px;">
-            <table style="width:100%;border-collapse:collapse;font-size:12px;">
+        <div id="finbank-stmt-scroll" style="max-height:46vh;overflow:auto;border:1px solid #2e2e2e;border-radius:6px;">
+            <table style="width:100%;border-collapse:collapse;font-size:12px;table-layout:fixed;">
+                <colgroup>
+                    <col style="width:30px;"><col style="width:88px;">
+                    <col><!-- 摘要：吃剩下的 -->
+                    <col style="width:96px;"><col style="width:118px;">
+                    <col style="width:150px;"><col style="width:230px;">
+                    <col style="width:150px;"><col style="width:62px;">
+                </colgroup>
                 <thead style="position:sticky;top:0;background:#1b1b1b;"><tr>
                     ${th('<input type="checkbox" id="finbank-stmt-all">')}${th('日期')}${th('摘要')}
-                    ${th('金額', 'right')}${th('分類')}${th('貸款期別')}${th('')}
+                    ${th('金額', 'right')}${th('分類')}${th('專案')}${th('發票')}${th('貸款期別')}${th('')}
                 </tr></thead>
                 <tbody id="finbank-stmt-tbody">${(d.rows || []).map(_stmtRow).join('')}</tbody>
             </table>
@@ -1529,20 +2254,36 @@ function _stmtRenderPreview() {
         <div id="finbank-stmt-err" style="display:none;color:#fca5a5;font-size:12px;margin:6px 0;white-space:pre-wrap;"></div>
         <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:10px;">
             <button class="crm-btn crm-btn-secondary" onclick="window._finBank.wbCloseModal()">取消</button>
+            <button class="crm-btn crm-btn-secondary" onclick="window._finBank.stmtSaveDraft(this)"
+                    title="掛到一半先收起來，之後在對帳系統接著做">存成草稿</button>
             <button class="crm-btn crm-btn-primary" onclick="window._finBank.stmtApply(this)">匯入勾選的列</button>
-        </div>`);
+        </div>`, { width: 1240 });
     const all = document.getElementById('finbank-stmt-all');
     if (all) {
-        all.onchange = () => document.querySelectorAll('#finbank-stmt-tbody input[data-stmt-i]')
-            .forEach(cb => { cb.checked = all.checked; });
+        all.onchange = () => {
+            document.querySelectorAll('#finbank-stmt-tbody input[data-stmt-i]')
+                .forEach(cb => { cb.checked = all.checked; });
+            (_stmtPreview.rows || []).forEach(r => { r.selected = all.checked; });
+        };
     }
 }
+
+/** 勾選狀態要存進**資料**，不能只留在畫面上。
+ *
+ * 🔴 這張表會重畫（改分類、挑專案、挑發票都會），而重畫是從 r.selected 重建
+ * checked。狀態只在 DOM 的話，使用者手動取消的那列會被還原成打勾 —— 然後那筆
+ * 就被匯進去了，畫面上完全看不出來（v2.4.110 加專案欄之後就有這個洞，
+ * 2026-08-21 實測確認：取消第 2 列 → 改第 3 列的分類 → 第 2 列自己勾回來）。
+ */
+_fb.stmtPick = (i, checked) => {
+    if (_stmtPreview && _stmtPreview.rows[i]) _stmtPreview.rows[i].selected = !!checked;
+};
 
 _fb.stmtApply = async (btn) => {
     const d = _stmtPreview;
     if (!d) return;
-    const picked = [...document.querySelectorAll('#finbank-stmt-tbody input[data-stmt-i]:checked')]
-        .map(cb => d.rows[Number(cb.dataset.stmtI)]).filter(Boolean);
+    // 讀**資料**不是讀畫面 —— 畫面會被重畫洗掉（見 stmtPick 的說明）
+    const picked = (d.rows || []).filter(r => r.selected);
     const err = document.getElementById('finbank-stmt-err');
     if (!picked.length) {
         err.textContent = '一列都沒勾 —— 沒有東西要匯入。';
@@ -1555,11 +2296,8 @@ _fb.stmtApply = async (btn) => {
         const r = await finFetch('/bank-statement/apply', {
             method: 'POST',
             body: JSON.stringify({
-                bank_account_id: d.acctId,
-                rows: picked.map(x => ({
-                    date: x.date, amount: x.amount, description: x.description,
-                    category: x.category, loan_id: x.loan_id, period_no: x.period_no,
-                })),
+                bank_account_id: d.bank_account_id,
+                rows: picked.map(_stmtRowPayload),
             }),
         });
         _wbCloseModal();
@@ -1567,8 +2305,12 @@ _fb.stmtApply = async (btn) => {
         // 逾時重按也是）—— 跳過幾筆一定要講，否則使用者以為全部匯進去了。
         const dup = (r.skipped_duplicates || []).length;
         finToast(`已匯入 ${r.entries} 筆收支、${r.loan_payments} 期貸款繳款`
+            + (r.linked_invoices ? `；掛上 ${r.linked_invoices} 張發票` : '')
             + (r.statement_lines ? `；對帳工作台同步 ${r.statement_lines} 列（已自動配對）` : '')
-            + (dup ? `；跳過 ${dup} 筆重複（帳上已有）` : ''));
+            + (dup ? `；跳過 ${dup} 筆重複（帳上已有）` : '')
+            // 從草稿匯入時草稿**留著** —— 常常是分幾次匯（先匯確定的、剩下的再查）。
+            // 匯過的列下次開啟會自動標「已匯過」且不勾，所以留著不會重複匯。
+            + (d.draft_id ? '；草稿仍保留（剩下的列可以之後再匯，做完記得刪掉）' : ''));
         _fb.reload();
     } catch (e) {
         err.textContent = e.message;

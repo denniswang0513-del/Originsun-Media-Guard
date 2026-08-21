@@ -201,6 +201,11 @@ def workbench_summary(lines: list, entries: list) -> dict:
     }
 
 
+# 本地時區抓一次就好。無參數的 astimezone() 每次都會重新解析系統時區設定，
+# 而 month_of / local_day 是逐列呼叫的原語。
+_LOCAL_TZ = datetime.now().astimezone().tzinfo
+
+
 def month_of(dt) -> str | None:
     """datetime / date / ISO 字串 → 'YYYY-MM'；None 或看不懂 → None。
 
@@ -216,7 +221,11 @@ def month_of(dt) -> str | None:
         return None
     if isinstance(dt, datetime):
         if dt.tzinfo is not None:
-            dt = dt.astimezone()
+            # 🔴 用快取好的本地 tzinfo，不要用無參數的 astimezone()：後者每次都去
+            # 問一次作業系統的時區（實測 1,466ns vs 336ns）。這支是三表引擎的
+            # 逐列原語 —— 一次 /finance/statements 會呼叫近三萬次，光這一行就是
+            # 整支請求的 42% CPU（150.8ms → 72.9ms）。
+            dt = dt.astimezone(_LOCAL_TZ)
         return f"{dt.year:04d}-{dt.month:02d}"
     if isinstance(dt, date):
         return f"{dt.year:04d}-{dt.month:02d}"
@@ -236,7 +245,7 @@ def local_day(dt):
     if dt is None:
         return None
     if isinstance(dt, datetime) and dt.tzinfo is not None:
-        return dt.astimezone().replace(tzinfo=None)
+        return dt.astimezone(_LOCAL_TZ).replace(tzinfo=None)   # 理由同 month_of
     return dt
 
 
@@ -578,9 +587,128 @@ def invoice_tax(inv: dict) -> int:
     return total - round(total / 1.05)
 
 
+# ── 發票款項狀態：整個系統的正本 ────────────────────────────────────
+#
+# 一般收款發票：未收款 ──▶ 已收款（收到錢就結束了）
+# 代開發票    ：未收款 ──▶ 待撥款 ──▶ 已撥款
+#               （過路錢：收到錢只是換公司欠代開人，撥出去才結束）
+#
+# 🔴 這組字**只在這裡列一次**。呼叫端各寫各的字串，漏一個就會把收到的錢算成
+# 沒收到 —— 實測咬過：「已轉撥」不在應收的排除清單裡，應收虛增成 4.7 倍。
+# 前端不該自己判「收到了沒」：後端在回應裡直接給旗標（見 group_receivables 的
+# collected、_to_invoice_dict 的 settled），前端只讀旗標。
+INVOICE_RECEIVED = "已收款"           # 一般發票：錢收到了，結束
+INVOICE_PENDING_REMIT = "待撥款"      # 代開：錢收到了，還沒轉給代開人
+INVOICE_REMITTED = "已撥款"           # 代開：錢已經轉給代開人
+_INVOICE_REMITTED_LEGACY = "已轉撥"   # 2026-08-21 改名前的舊字（資料已改，讀舊備份時還會遇到）
+
+# 「錢已經收進來了」—— 判斷還算不算應收、要不要再標一次收款，一律用整組。
+INVOICE_COLLECTED_STATUSES = (INVOICE_RECEIVED, INVOICE_PENDING_REMIT,
+                              INVOICE_REMITTED, _INVOICE_REMITTED_LEGACY)
+# 代開收到錢的兩種寫法（改名前後）—— 觸發待請款同步、付款收尾時比對用
+INVOICE_PASSTHROUGH_COLLECTED = (INVOICE_PENDING_REMIT, INVOICE_RECEIVED)
+
+
+# 代開＝過路發票（公司幫人開、錢再轉出去）。這個判定決定三件事：走哪條狀態
+# 生命週期、要不要自動生一張應付的請款單、commission 算不算業外收入。
+# 🔴 本來有三種寫法（`"代開" in category` 的子字串比對兩處、集合比對一處、
+# 前端再一份），彼此不一致：一個叫「代開」的類別會走過路狀態、生請款單，
+# 卻沒有科目對映也不進業外收入。
+INVOICE_PASSTHROUGH_CATEGORIES = ("內部代開", "外部代開")
+
+
+def is_passthrough_category(category: str) -> bool:
+    return (category or "") in INVOICE_PASSTHROUGH_CATEGORIES
+
+
+# 代開的手續費率（%）。應匯給代開人的錢 = 面額 × (1 − 費率)。
+# 🔴 這組數字本來一份在**每個使用者的 localStorage**、一份寫死在後端（0.92）——
+# 於是：兩台電腦設不同費率就算出不同的應匯金額；外部代開畫面說 10%、實際產出的
+# 應付款卻是 8%；而從手機登記頁、CSV 匯入、對帳單匯入建的發票根本沒跑那段 JS。
+# 費率是公司政策，跟申請人名單一樣本來就該存在伺服器（見 get_invoice_applicants）。
+PASSTHROUGH_FEE_RATES = {"內部代開": 8.0, "外部代開": 10.0}
+
+
+def passthrough_commission(amount_total, category: str, rates: dict | None = None) -> int:
+    """代開發票要匯回給代開人的金額 = 面額 × (1 − 費率)。
+
+    rates 給後台設定用（settings 的 invoice_fee_rates）；沒給就用預設。
+    非代開類別回 0 —— 呼叫端不必先判一次。
+    """
+    total = int(amount_total or 0)
+    if not total or not is_passthrough_category(category):
+        return 0
+    pct = float((rates or {}).get(category, PASSTHROUGH_FEE_RATES.get(category, 8.0)))
+    return round(total * (1 - pct / 100))
+
+
+def alloc_verdict(received: int, allocated: int) -> dict:
+    """分配金額 vs 這筆收款 → 給人看的判讀。
+
+    容差用 FEE_TOLERANCE（同 invoice_is_settled）—— 本來這裡寫死兩個 50，
+    調容差時會漏掉其中一邊。
+    """
+    received, allocated = int(received or 0), int(allocated or 0)
+    diff = allocated - received
+    if not allocated:
+        state, msg = "empty", "還沒分配任何發票"
+    elif diff == 0:
+        state, msg = "ok", "分配金額與實收金額相符"
+    elif 0 < diff <= FEE_TOLERANCE:
+        state, msg = "fee", f"分配比實收多 {diff} 元 —— 常見於收款方代扣匯費"
+    elif diff > FEE_TOLERANCE:
+        state = "over"
+        msg = (f"分配金額比實收多 {diff:,} 元 —— 可能是這幾張發票沒有全部收齊"
+               f"（分期），或多掛了一張")
+    else:
+        state = "under"
+        msg = (f"分配金額比實收少 {-diff:,} 元 —— 還有沒掛上的發票，"
+               f"或這筆收款有一部分不屬於發票")
+    return {"received": received, "allocated": allocated, "diff": diff,
+            "state": state, "message": msg}
+
+
+def initial_invoice_status(payment_type: str, unpaid: bool = False) -> str:
+    """開一張發票時的初始款項狀態。方向決定，不是呼叫端各自決定。
+
+    收款＝我們要跟客戶收的錢；付款＝代開，錢是要轉出去的。
+    🔴 這條規則本來散在三個入口（CSV 匯入、手機登記頁、快速新增列），
+    2026-08-21 把「已轉撥」改名成「已撥款」時，手機登記頁被漏掉 —— 從手機登記的
+    代開發票會拿到一個系統其他地方都不認得的舊狀態，畫面上連顏色都套不到。
+    """
+    pt = payment_type or ""
+    if "作廢" in pt:
+        return "作廢"
+    if "付" in pt:
+        return "未付款" if unpaid else INVOICE_REMITTED
+    return "未收款" if unpaid else INVOICE_RECEIVED
+
+
+def invoice_direction(payment_status: str) -> str:
+    """款項狀態 → 方向（收款／付款／作廢）。
+
+    🔴 前端本來自己判：`狀態 === 已撥款 ? '付款' : '收款'` —— 漏掉**待撥款**，
+    那也是付款方向的狀態，於是從快速新增列開一張待撥款的代開發票，方向會是收款，
+    然後它就會出現在應收帳款裡（代開是過路錢，不該算我們的應收）。
+    """
+    st = payment_status or ""
+    if st == "作廢":
+        return "作廢"
+    if st in (INVOICE_PENDING_REMIT, INVOICE_REMITTED, _INVOICE_REMITTED_LEGACY,
+              "未付款"):
+        return "付款"
+    return "收款"
+
+
+def normalize_invoice_status(status: str) -> str:
+    """把舊字換成現在的字（改名前存的、或還沒更新的客戶端送上來的）。"""
+    return INVOICE_REMITTED if status == _INVOICE_REMITTED_LEGACY else status
+
+
 def invoice_collected(inv: dict) -> bool:
-    """收款發票是否已收現：paid_date 非空 或 payment_status='已收款'。"""
-    return bool(inv.get("paid_date")) or (inv.get("payment_status") or "") == "已收款"
+    """收款發票是否已收現：paid_date 非空 或 狀態落在 INVOICE_COLLECTED_STATUSES。"""
+    return (bool(inv.get("paid_date"))
+            or (inv.get("payment_status") or "") in INVOICE_COLLECTED_STATUSES)
 
 
 def out_amount(e: dict) -> int:
@@ -984,7 +1112,7 @@ def build_pnl(months, *, invoices=(), payments=(), cash_entries=(), equipment=()
             continue
         if month_of(inv.get("invoice_date")) not in mset:
             continue
-        if (inv.get("category") or "專案") in ("內部代開", "外部代開"):
+        if is_passthrough_category(inv.get("category") or "專案"):
             c = int(inv.get("commission") or 0)
             if c:
                 _bump(prim["nonop_income"], "代開手續費收入", c)

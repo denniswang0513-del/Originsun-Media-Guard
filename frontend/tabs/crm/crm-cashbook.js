@@ -333,6 +333,14 @@ function _outstanding(inv) {
     return inv.outstanding != null ? inv.outstanding : (inv.amount_total || 0);
 }
 
+/** 收齊了沒。
+ *  🔴 讀後端的 settled，不要自己用 `outstanding <= 0` 判 —— 真正的規則是
+ *  invoice_is_settled（含 NT$50 匯費容差，394 張歷史發票裡有 42 張靠它）。
+ *  自己判的話，被匯費短收 30 元的那張會在應收帳款「收齊」、在這裡「尚欠 $30」。 */
+function _settled(inv) {
+    return inv.settled != null ? !!inv.settled : _outstanding(inv) <= 0;
+}
+
 /** 發票下拉的候選清單：**還沒收齊的**才列（394 張裡多數早就結案，全倒進下拉
  *  等於在已結案名單裡大海撈針）。
  *
@@ -348,7 +356,7 @@ function _invoiceCandidates(keepId) {
     return _invoiceList.filter(inv =>
         inv.issue_status === '已開立'
         && (inv.payment_status || '') !== '作廢'
-        && (_outstanding(inv) > 0 || inv.id === keepId));
+        && (!_settled(inv) || inv.id === keepId));
 }
 
 /** 下拉顯示：內容 · 金額 · 客戶 · 發票號碼 —— 四項一起才分得出同名同額的兩張
@@ -359,7 +367,7 @@ function _invoiceLabel(inv) {
     if (inv.company_name) parts.push(inv.company_name);
     if (inv.invoice_number) parts.push(inv.invoice_number);
     const left = _outstanding(inv);
-    if (left <= 0) parts.push('已結清');
+    if (_settled(inv)) parts.push('已結清');
     else if (inv.collected) parts.push(`已收 $${_fmtNum(inv.collected)}，尚欠 $${_fmtNum(left)}`);
     return parts.join(' · ');
 }

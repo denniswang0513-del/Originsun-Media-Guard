@@ -84,6 +84,14 @@ textarea { resize: vertical; min-height: 50px; font-family: inherit; }
       <label>金額</label>
       <input id="exp-amount" type="number" inputmode="numeric" placeholder="0" min="0">
 
+      <!-- 🔴 消費日期必須自己填，不能靠登記日。專案成本的認列時點是**消費日**
+           （db/models.py CrmProjectExpense 的說明），後端在 expense_date 為空時
+           會退回 created_at —— 生產實測 485 筆裡有 42 筆（8.7%）就是這樣落在
+           登記日：拍攝當天花的錢隔幾天才登記，就記到錯的期間，跨月時連會計月
+           都錯。預設今天，實際去哪天花的自己改。 -->
+      <label>消費日期</label>
+      <input id="exp-date" type="date">
+
       <label>請款人</label>
       <input id="exp-payee" type="text" placeholder="選填">
 
@@ -137,7 +145,20 @@ function _needLogin() {
   err.style.display = '';
 }
 
+/** 消費日期預設今天。
+ *  🔴 用本地日期，不是 `new Date().toISOString().slice(0,10)` —— 那是 UTC，
+ *  台北時間早上 8 點前會填成**昨天**，跨月時連會計月都錯。 */
+function _setToday() {
+  const d = new Date();
+  const el = document.getElementById('exp-date');
+  if (el) {
+    el.value = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`
+             + `-${String(d.getDate()).padStart(2, '0')}`;
+  }
+}
+
 async function _init() {
+  _setToday();
   const params = new URLSearchParams(location.search);
 
   // 分享連結模式：?t=TOKEN（免登入）
@@ -310,6 +331,7 @@ async function _submit() {
         category: document.getElementById('exp-category').value,
         sub_item: document.getElementById('exp-sub-item').value,
         estimated: 0, actual: amount,
+        expense_date: document.getElementById('exp-date').value || null,
         payee: document.getElementById('exp-payee').value,
         notes: document.getElementById('exp-notes').value,
         cost_group_id: groupId,
@@ -337,6 +359,7 @@ async function _submit() {
     // 清空輸入欄位（保留專案/子表/類別/請款人，通常連續登記同一人同類別）
     document.getElementById('exp-sub-item').value = '';
     document.getElementById('exp-amount').value = '';
+    _setToday();                       // 下一筆預設還是今天
     document.getElementById('exp-notes').value = '';
     document.getElementById('exp-file').value = '';
     const area = document.getElementById('photo-area');

@@ -18,18 +18,30 @@ let _clients = [];
 let _selectedId = null;
 let _editingId = null;
 let _editingPaymentStatus = null;
+let _editingPaymentType = null;
 let _filters = { q: '', issue_status: '', category: '' };
 let _csvFile = null;
 
-// ── Commission fee settings (localStorage) ──────────────────
-function _loadFees() {
+// ── 代開手續費率 ────────────────────────────────────────────
+//
+// 🔴 存伺服器不存 localStorage（比照下面的申請人名單）。費率是公司政策 ——
+// 每台電腦各一份的話，同一張發票在不同人手上會算出不同的應匯金額，而那個數字
+// 會變成一張真的要匯出去的應付款。而且後端本來另外寫死 0.92：外部代開畫面說
+// 10%、實際產生的應付款卻是 8%，少匯給對方 2%（2026-08-21 /simplify 抓到）。
+// 這裡只是顯示用的快取；真正算錢的是 core/finance_logic.passthrough_commission。
+let _fees = { 內部代開: 8, 外部代開: 10 };
+
+async function _loadFees() {
     try {
-        const s = localStorage.getItem('inv_commission_fees');
-        if (s) return JSON.parse(s);
-    } catch (_) {}
-    return { internal: 8, external: 10 };
+        const r = await _fetch('/invoice-fee-rates');
+        if (r && r.rates) _fees = r.rates;
+    } catch (_) { /* 讀不到就用預設，跟後端的預設同一組 */ }
+    return _fees;
 }
-function _saveFees(fees) { localStorage.setItem('inv_commission_fees', JSON.stringify(fees)); }
+
+const _feeOf = (cat) => Number(_fees[cat] ?? 8);
+const _commissionOf = (total, cat) =>
+    total ? Math.round(total * (1 - _feeOf(cat) / 100)) : null;
 
 // ── Applicant list (localStorage) ───────────────────────────
 // 申請人清單（誰能被選為這張發票的申請人）。
@@ -103,29 +115,37 @@ async function loadClients() {
 
 // ── Rendering ────────────────────────────────────────────────
 
+/** 開立狀態 badge。class 是語意 token（同 _payBadge）—— 中文只出現在顯示的字。 */
 function _statusBadge(status) {
-    if (status === '作廢') return `<span class="crm-badge crm-pay-badge-作廢">${_esc(status)}</span>`;
-    if (status === '已開立') return `<span class="crm-badge crm-pay-badge-收款">${_esc(status)}</span>`;
-    return `<span class="crm-badge crm-pay-badge-付款">${_esc(status || '開立中')}</span>`;
+    const cls = status === '作廢' ? 'void'
+        : status === '已開立' ? 'collected' : 'unpaid';
+    return `<span class="crm-badge crm-pay-badge-${cls}">${_esc(status || '開立中')}</span>`;
 }
 
 // 開立中 → 已開立 → 作廢:工作流順序,asc 把待處理(開立中)排前面
 const _INV_STATUS_ORDER = ['開立中', '已開立', '作廢'];
 // 款項狀態排序：待處理(未收/未付)在前、空白墊底（空白＝來源沒填，不是一種進度）
-// 🔴 發票的「錢已經付出去」叫**已轉撥**（owner 2026-08-20）——
-// 過路錢轉給代開人，跟請款單的「已付款」（我們真的付掉一筆費用）是兩件事。
-const INV_REMITTED = '已轉撥';
-const _INV_PAY_ORDER = ['未收款', '未付款', '已收款', INV_REMITTED, '作廢', ''];
+// 代開發票的三段（owner 2026-08-21 定名，後端 crm/finance.py 同一組字）：
+//   未收款 ──客戶匯錢進來──▶ 待撥款 ──應付帳款把請款單付掉──▶ 已撥款
+// 代開不用「已收款」是因為收到錢只是換公司欠代開人 —— 「待撥款」一眼就看得出
+// 還有一筆錢要出去。跟請款單的「已付款」（我們真的付掉一筆費用）是兩件事。
+const INV_PENDING_REMIT = '待撥款';
+const INV_REMITTED = '已撥款';
+const _INV_PAY_ORDER = ['未收款', '未付款', INV_PENDING_REMIT, '已收款',
+                        INV_REMITTED, '作廢', ''];
 
 /** 款項狀態 badge。🔴 空白就顯示空白 —— 舊寫法 `payment_status || '未收款'` 會把
  *  「來源沒填」畫成「未收款」，等於替沒表態的資料表態（匯入歷史發票時有 21 張）。 */
 function _payBadge(status) {
     const s = (status || '').trim();
-    if (!s) return '<span class="crm-badge crm-pay-badge-未設定">未設定</span>';
-    // 已轉撥自己一個顏色 —— 它跟「已收款」是不同階段（錢進來 vs 錢再轉出去），
-    // 共用綠色的話一整欄看起來都一樣，分不出哪些還沒轉撥。
-    const cls = s === INV_REMITTED ? '已轉撥'
-        : s === '已收款' ? '收款' : s === '作廢' ? '作廢' : '未收款';
+    if (!s) return '<span class="crm-badge crm-pay-badge-unset">未設定</span>';
+    // 三段各一個顏色 —— 共用綠色的話一整欄看起來都一樣，分不出哪些還沒撥款。
+    // 待撥款＝紫（還有一筆錢要出去）、已撥款＝藍（收尾了）、已收款＝綠。
+    // 🔴 class 用語意 token 不用中文狀態字：拿中文當 class 名的話，改一次用詞
+    // 就得連 CSS 一起改（已轉撥→已撥款那次就是），而顯示的字只該住在這一行。
+    const cls = s === INV_REMITTED ? 'remitted'
+        : s === INV_PENDING_REMIT ? 'pending-remit'
+        : s === '已收款' ? 'collected' : s === '作廢' ? 'void' : 'unpaid';
     return `<span class="crm-badge crm-pay-badge-${cls}">${_esc(s)}</span>`;
 }
 const _sorter = createSortable({
@@ -248,7 +268,7 @@ function _quickAddRow() {
         <div><select id="inv-qa-kind" onchange="window._invQuickKind()">${
             _INV_KINDS.map(v => `<option value="${_esc(v)}"${v === '電子發票' ? ' selected' : ''}>${_esc(v.replace('發票', ''))}</option>`).join('')
         }</select></div>
-        <div><select id="inv-qa-pay">${opts(['未收款', '已收款', INV_REMITTED, '作廢'], '未收款')}</select></div>
+        <div><select id="inv-qa-pay">${opts(['未收款', '已收款', INV_PENDING_REMIT, INV_REMITTED, '作廢'], '未收款')}</select></div>
         <div><select id="inv-qa-iss">${opts(['開立中', '已開立', '作廢'], '開立中')}</select></div>
         <span class="crm-kebab-wrap">
           <button class="crm-btn crm-btn-primary crm-btn-sm inv-qa-btn"
@@ -313,7 +333,9 @@ window._invQuickAdd = async function () {
         issue_status: issue,
         // 作廢的發票款項狀態一律作廢（與 modal / inline 編輯同一條規則）
         payment_status: issue === '作廢' ? '作廢' : val('inv-qa-pay'),
-        payment_type: val('inv-qa-pay') === INV_REMITTED ? '付款' : '收款',
+        // 方向由後端從狀態推（core/finance_logic.invoice_direction）——
+        // 前端本來自己判 `=== 已撥款 ? 付款 : 收款`，漏掉「待撥款」那個也是付款
+        // 方向的狀態，於是那張代開發票會被當成收款、跑進應收帳款
     }, { amount: val('inv-qa-amt'), mode: _qaMode() });
     if (_pinEntity() === 'mine') payload.entity = 'mine';   // 帳本 pin，parent 不送
 
@@ -648,7 +670,7 @@ async function _initInvoicesRootCard() {
         底下會自動分 <code>{年}/{年-月}/</code>，檔名為
         <code>日期_發票號碼_抬頭_含稅金額</code>。
         <div style="display:flex;gap:8px;margin-top:8px;">
-          <input id="inv-root-input" value="${_esc(cfg.invoices_root)}"
+          <input id="inv-root-input" class="crm-input" value="${_esc(cfg.invoices_root)}"
                  placeholder="例：\\\\OriginsunNAS\\Invoices 或 T:\\發票">
           <button class="crm-btn crm-btn-primary crm-btn-sm" id="inv-root-save">儲存</button>
           <span id="inv-root-msg" style="align-self:center;"></span>
@@ -686,7 +708,9 @@ function _collectionSection(inv, section, prop) {
         // 那是「狀態說收到了、帳上卻沒有這筆錢」，值得被看見。
         // 只在收支明細涵蓋得到這張發票的期間時才提醒 —— 早於收支表起始日的
         // 發票，帳上本來就查不到對應收款，那不是資料有問題。
-        if (inv.payment_status === '已收款' && inv.collection_checkable) {
+        if ((inv.payment_status === '已收款'
+             || inv.payment_status === INV_PENDING_REMIT)
+            && inv.collection_checkable) {
             return section('收款紀錄')
                 + `<div style="padding:6px 0;font-size:12px;color:#fbbf24;">`
                 + `標示為已收款，但收支明細裡查不到對應的收款 ——`
@@ -694,7 +718,8 @@ function _collectionSection(inv, section, prop) {
         }
         return '';
     }
-    const done = outstanding <= 0;
+    // 收齊了沒由後端判（含匯費容差）—— 自己用 outstanding <= 0 算會跟應收帳款打架
+    const done = inv.settled != null ? !!inv.settled : outstanding <= 0;
     let h = section('收款紀錄',
         `<span style="font-size:11px;color:${done ? '#86efac' : '#fbbf24'};">`
         + `已收 $${_fmtNum(collected)} / $${_fmtNum(total)}`
@@ -883,9 +908,9 @@ function _deriveInvoice(payload, { amount, mode = 'ex', fallbackTaxId = '' } = {
     const client = _clients.find(c => c.short_name === payload.company_name);
     payload.tax_id = client?.tax_id || fallbackTaxId || '';
     const tot = payload.amount_total || 0;
-    const fees = _loadFees();
-    if (payload.category === '內部代開') payload.commission = tot ? Math.round(tot * (1 - fees.internal / 100)) : null;
-    else if (payload.category === '外部代開') payload.commission = tot ? Math.round(tot * (1 - fees.external / 100)) : null;
+    if (payload.category === '內部代開' || payload.category === '外部代開') {
+        payload.commission = _commissionOf(tot, payload.category);
+    }
     else payload.commission = null;
     return payload;
 }
@@ -896,22 +921,22 @@ function _todayStr() {
 }
 
 function _updateTaxCalc() {
-    const exTax = parseInt(document.getElementById('inv-f-amount_ex_tax').value) || 0;
-    const total = Math.round(exTax * 1.05);
-    document.getElementById('inv-f-amount_total').value = exTax ? total : '';
+    // 稅率只有 _amountsFrom 一個出口 —— 本來這裡與計算機各自寫死 1.05，
+    // TAX_RATE 只管得到三分之一的地方（稅率不是永恆的 5%）
+    const a = _amountsFrom(document.getElementById('inv-f-amount_ex_tax').value, 'ex');
+    document.getElementById('inv-f-amount_total').value = a.amount_total ?? '';
     _updateCommission();
 }
 
 function _updateCommission() {
     const total = parseInt(document.getElementById('inv-f-amount_total').value) || 0;
     const cat = document.getElementById('inv-f-category').value;
-    const fees = _loadFees();
     const intEl = document.getElementById('inv-f-commission');
     const extEl = document.getElementById('inv-f-commission_ext');
     if (cat === '內部代開') {
-        intEl.value = total ? Math.round(total * (1 - fees.internal / 100)) : '';
+        intEl.value = _commissionOf(total, '內部代開') ?? '';
     } else if (cat === '外部代開') {
-        extEl.value = total ? Math.round(total * (1 - fees.external / 100)) : '';
+        extEl.value = _commissionOf(total, '外部代開') ?? '';
     }
 }
 
@@ -944,6 +969,7 @@ function _onInvoiceNumberInput() {
 function openModal(inv = null) {
     _editingId = inv ? inv.id : null;
     _editingPaymentStatus = inv?.payment_status || null;
+    _editingPaymentType = inv?.payment_type || null;
     document.getElementById('inv-modal-title').textContent = inv ? '編輯發票' : '新增發票';
     // Payment status badge
     const badgeEl = document.getElementById('inv-modal-pay-badge');
@@ -1018,8 +1044,12 @@ async function saveInvoice() {
     const exTax = payload.amount_ex_tax || 0;
     const total = payload.amount_total || 0;
     payload.tax_amount = total - exTax;
-    // payment_type / payment_status (auto-derive)
-    payload.payment_type = '收款';
+    // payment_type / payment_status —— 編輯時**一律原值帶回**。
+    // 🔴 這行本來是無條件 `= '收款'`。列表的 inline 編輯那條路早就修好了
+    //（見 _quickEditSave 的說明），但這個編輯視窗漏掉：打開任何一張代開發票
+    // 按儲存，方向就被翻成收款。生產有 183 張 payment_type='付款'、合計
+    // 10,656,093 —— 那正是 receivables_summary 註解裡「應收虛增成 4.7 倍」的同一批。
+    payload.payment_type = _editingPaymentType || '收款';
     if (payload.issue_status === '作廢') payload.payment_status = '作廢';
     else if (_editingId && _editingPaymentStatus) payload.payment_status = _editingPaymentStatus;
     else payload.payment_status = '未收款';
@@ -1061,8 +1091,9 @@ function _initCalculator() {
             _calcExTax = 0;
             return;
         }
-        _calcExTax = Math.round(incl / 1.05);
-        const tax = incl - _calcExTax;
+        const a = _amountsFrom(incl, 'total');       // 稅率同上，只有一個出口
+        _calcExTax = a.amount_ex_tax || 0;
+        const tax = a.tax_amount || 0;
         document.getElementById('inv-calc-r-ex').textContent = '$' + _calcExTax.toLocaleString('zh-TW');
         document.getElementById('inv-calc-r-tax').textContent = '$' + tax.toLocaleString('zh-TW');
         applyBtn.disabled = false;
@@ -1089,18 +1120,32 @@ function _initCalculator() {
 
 // ── Commission Settings Popup ────────────────────────────────
 
-function _initCommissionSettings() {
-    const fees = _loadFees();
+async function _initCommissionSettings() {
     const intEl = document.getElementById('inv-fee-internal');
     const extEl = document.getElementById('inv-fee-external');
-    intEl.value = fees.internal;
-    extEl.value = fees.external;
-    const save = () => {
-        _saveFees({ internal: parseFloat(intEl.value) || 0, external: parseFloat(extEl.value) || 0 });
+    await _loadFees();
+    intEl.value = _feeOf('內部代開');
+    extEl.value = _feeOf('外部代開');
+    // 存伺服器（全公司一份）—— 打字時不要每個鍵都送，離開欄位才存
+    const save = async () => {
+        const rates = { 內部代開: parseFloat(intEl.value) || 0,
+                        外部代開: parseFloat(extEl.value) || 0 };
+        try {
+            const r = await _fetch('/invoice-fee-rates',
+                                   { method: 'PUT', body: JSON.stringify({ rates }) });
+            _fees = r.rates || rates;
+        } catch (e) { alert('費率存不起來：' + e.message); }
         _updateCommission();
     };
-    intEl.addEventListener('input', save);
-    extEl.addEventListener('input', save);
+    const preview = () => {
+        _fees = { 內部代開: parseFloat(intEl.value) || 0,
+                  外部代開: parseFloat(extEl.value) || 0 };
+        _updateCommission();
+    };
+    intEl.addEventListener('input', preview);
+    extEl.addEventListener('input', preview);
+    intEl.addEventListener('change', save);
+    extEl.addEventListener('change', save);
     document.getElementById('inv-commission-settings-btn').addEventListener('click', () => {
         document.getElementById('inv-commission-popup').style.display = 'block';
     });
@@ -1391,8 +1436,9 @@ export async function initCrmInvoicesTab() {
     // 🔴 申請人清單要跟其他資料一起載，而且載完要重畫一次列表 ——
     // 快速新增列的申請人下拉是在 renderList 裡組的，清單晚到就會是空的
     // （帳戶切換列同一種競態剛咬過一次，見 crm-cashbook.initCrmCashbookTab）。
+    // 費率同理：一起載，晚到的話新增發票時會用預設值算出錯的代開匯款
     await Promise.all([loadInvoices(), loadProjects(), loadClients(),
-                       _loadApplicants()]);
+                       _loadApplicants(), _loadFees()]);
     _populateApplicantSelect();
     renderList();
 }

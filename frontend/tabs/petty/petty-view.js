@@ -11,7 +11,12 @@ const F = () => window.__petty;
 import { esc } from "../../js/shared/dom.js";
 const money = (n) => (n === null || n === undefined) ? "—"
     : (n < 0 ? "-NT$ " : "NT$ ") + Math.abs(n).toLocaleString();
-const today = () => new Date().toISOString().slice(0, 10);
+// 🔴 本地今天，不是 toISOString()（UTC 面值，台北早上八點前差一天）——
+// 這支填的是匯款日期，會進月結鎖帳的判定
+const today = () => {
+    const d = new Date();
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+};
 // 存檔成功的視覺回饋（綠框閃一下）
 const flashOk = (el) => {
     el.style.borderColor = "var(--ok)";

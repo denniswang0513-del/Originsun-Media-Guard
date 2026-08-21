@@ -462,3 +462,19 @@ def test_deprecated_own_literal_gone_from_runtime(rel):
     ＝有人把舊語意寫回來（查詢撈 'own' 的列＝永遠空集合，靜默漏帳）。"""
     hits = re.findall(r"['\"]own['\"]", _src(rel))
     assert not hits, f"{rel} 還有 {len(hits)} 處廢棄的 'own' 字面值"
+
+
+def test_batch_pay_locks_are_per_ledger():
+    """🔴 鎖月要看**這一列自己那本帳**。
+
+    batch_pay 本來對「新付款日」用 `any(... for locked in locked_by_entity.values())`
+    —— 我的帳鎖了某個月，母公司的批次付款就整批 409；而同一支函式裡「舊付款日」
+    那條是對的。同一個判斷兩套規則。
+    """
+    from tests.unit._srcscan import code_only, func_body, repo_src
+    body = code_only(func_body(repo_src('routers/crm/finance.py'),
+                               'async def batch_pay('))
+    assert 'for locked in locked_by_entity.values()' not in body, \
+        '又用跨帳本的鎖月判斷了'
+    assert 'locked = locked_by_entity[p.entity or "parent"]' in body
+    assert body.count('in locked') == 2, '新舊付款日都要看同一本帳的鎖'

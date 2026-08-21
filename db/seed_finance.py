@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import logging
 import uuid
+from core.finance_logic import INVOICE_PASSTHROUGH_CATEGORIES
 
 logger = logging.getLogger(__name__)
 
@@ -151,8 +152,10 @@ SEED_CATEGORY_MAP: list[dict] = [
     {"source": "payment", "category_text": "專案", "account_code": "5200", "treatment": "direct_expense"},
     # ── source='invoice'（發票 category）──
     {"source": "invoice", "category_text": "專案", "account_code": "4100", "treatment": "direct_income"},
-    {"source": "invoice", "category_text": "內部代開", "account_code": "4210", "treatment": "passthrough"},
-    {"source": "invoice", "category_text": "外部代開", "account_code": "4210", "treatment": "passthrough"},
+    # 代開類別由 core.finance_logic.INVOICE_PASSTHROUGH_CATEGORIES 決定 ——
+    # 這裡跟那邊各列一份的話，新增一種代開就會「走過路流程但沒有科目對映」
+    *({"source": "invoice", "category_text": c, "account_code": "4210",
+       "treatment": "passthrough"} for c in INVOICE_PASSTHROUGH_CATEGORIES),
 ]
 
 
@@ -162,7 +165,7 @@ async def seed_finance_stage2(session_factory) -> None:
     只補缺的列，不覆蓋既有列 — 使用者後台改過的科目/對映不會被還原。
     """
     from sqlalchemy import select
-    from db.models import FinanceAccount, FinanceCategoryMap
+    from db.models import BankImportRule, FinanceAccount, FinanceCategoryMap
 
     async with session_factory() as session:
         # 1) 科目：code → id 對照（既有的沿用其 id；新種子 id 直接用 code，可讀好查）
@@ -205,6 +208,24 @@ async def seed_finance_stage2(session_factory) -> None:
             ))
             added_maps += 1
 
-        if added_accounts or added_maps:
+        # 3) 對帳單分類規則：種子 = core.bank_statement 原本寫死的那 14 條。
+        #    以 (keyword, bank_account_id) 查 —— 使用者刪掉某條就是刪掉了，
+        #    不要每次開機又長回來（那會讓「我明明刪過」變成鬧鬼）。
+        #    🔴 所以只在**整張表是空的**時候灌，不是逐條補。
+        has_rule = (await session.execute(
+            select(BankImportRule.id).limit(1))).scalar() is not None
+        added_rules = 0
+        if not has_rule:
+            from core.bank_statement import KEYWORD_RULES
+            for i, (kw, cat, direction) in enumerate(KEYWORD_RULES):
+                session.add(BankImportRule(
+                    id=uuid.uuid4().hex, keyword=kw, bank_account_id=None,
+                    category=cat, direction=direction,
+                    sort_order=(i + 1) * 10, active=True,
+                    note="系統預設（從合庫／一銀對帳單反推）"))
+                added_rules += 1
+
+        if added_accounts or added_maps or added_rules:
             await session.commit()
-            logger.info("[seed_finance] 科目 +%d、對映 +%d", added_accounts, added_maps)
+            logger.info("[seed_finance] 科目 +%d、對映 +%d、對帳單規則 +%d",
+                        added_accounts, added_maps, added_rules)

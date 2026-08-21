@@ -662,6 +662,9 @@ class PaymentRequestPayload(BaseModel):
     needs_invoice: int = 0
     invoice_number: str = ""
     invoice_amount: Optional[int] = None
+    # 代開請款單指向的那張發票。號碼可能是空的（代開還沒拿到號），id 才是可靠的鍵
+    # —— 付款時要靠它把發票收尾到「已撥款」。
+    source_invoice_id: Optional[str] = None
     project_id: Optional[str] = None
     project_label: str = ""
     payment_date: Optional[str] = None
@@ -1069,9 +1072,17 @@ class StatementLineIn(BaseModel):
 
 
 class StatementLinesBulkPayload(BaseModel):
-    """對帳單明細批次新增。replace=true 先清同帳戶同月既有明細（重新匯入）。"""
+    """對帳單明細批次新增。
+
+    🔴 month 是選填的：每一列自己的 line_date 就決定它屬於哪個月，一份跨月的
+    對帳單不該逼人切成三次傳（owner 2026-08-20）。只有「該列沒有日期」時才退回
+    用 month；連 month 都沒給就擋下來，不猜。
+
+    replace=true 只清**這批真的涵蓋到的月份**，不是日期區間 —— 按區間清的話，
+    檔案裡剛好沒有交易的那個月會被連坐清空，那個月已經勾銷好的紀錄就沒了。
+    """
     bank_account_id: str
-    month: str                             # 'YYYY-MM'
+    month: Optional[str] = None            # 'YYYY-MM'，只當沒有 line_date 時的後備
     lines: List[StatementLineIn]
     replace: bool = False
 
@@ -1210,6 +1221,12 @@ class ChunkFinishRequest(BaseModel):
     uploader_name: str = ""
 
 
+class CashInvoiceLink(BaseModel):
+    """一筆收款分配到一張發票的金額（合併匯款 / 分期收款）。"""
+    invoice_id: str
+    amount: int
+
+
 class StatementImportRow(BaseModel):
     """對帳單匯入 apply 的一列 —— 前端把 preview 回來的列原樣送回（可改分類/
     可取消勾選）。金額帶號：正=存入、負=支出。"""
@@ -1220,6 +1237,37 @@ class StatementImportRow(BaseModel):
     # 指定成貸款繳款時要帶：配到哪筆貸款的哪一期（preview 已配好或使用者手選）
     loan_id: Optional[str] = None
     period_no: Optional[int] = None
+    # 預覽時當場掛的專案與發票（owner 2026-08-20）。
+    # 🔴 專案只有專案類的 category 收得下（core/project_link.CASH_CATEGORIES），
+    #    發票只有收入列有意義 —— 兩者都由寫入端再驗一次，不信前端。
+    project_id: Optional[str] = None
+    # 一列可以掛多張發票（合併匯款：客戶一次匯三張的錢）。分配表本來就是多對多。
+    # 只有這一種表示法 —— 「主要發票」是從分配表推出來的（金額最大那張），
+    # 推導規則只放在 replace_invoice_allocs，前端不留第二份。
+    invoices: List[CashInvoiceLink] = []
+
+
+class StatementDraftRow(StatementImportRow):
+    """草稿存的一列 —— 比 apply 多一個「勾了沒」。
+
+    apply 只收勾選的列（沒勾的根本不會送上來），草稿要**全部**列都存，
+    連同「這列我不打算匯」的決定一起 —— 不然下次開啟又全部變回預設勾選。
+    """
+    selected: bool = False
+
+
+class StatementDraftPayload(BaseModel):
+    """存草稿。id 有值＝更新既有草稿（同一份對帳單改到一半再存一次）。
+
+    source_text 是**原始對帳單文字**：開啟時重新解析，才拿得到最新的重複判定
+    與最新的專案／發票清單（見 db.models.BankImportDraft 的說明）。
+    """
+    id: Optional[str] = None
+    bank_account_id: str
+    source_text: str
+    rows: List[StatementDraftRow] = []
+    # 沒有 name：名字由後端從帳戶＋日期區間＋列數自動組（_auto_draft_name）。
+    # 沒有改名 UI，而且重存會依當下的列重新命名 —— 真要做改名該是另一支端點。
 
 
 class StatementImportApply(BaseModel):
@@ -1228,10 +1276,19 @@ class StatementImportApply(BaseModel):
     rows: List[StatementImportRow] = []
 
 
-class CashInvoiceLink(BaseModel):
-    """一筆收款分配到一張發票的金額（合併匯款 / 分期收款）。"""
-    invoice_id: str
-    amount: int
+class BankImportRulePayload(BaseModel):
+    """對帳單摘要 → 收支類別 的分類規則（使用者可編）。
+
+    🔴 direction 不在這裡 —— 它只在「第一列推不出方向」的邊緣情況用得到，
+    讓人去理解 +1/-1/0 不划算。使用者新增的規則一律 0（＝看不出方向，
+    解析器會標記該列要人確認）。種子那 14 條的方向值保留在 DB 裡。
+    """
+    keyword: str
+    category: str
+    bank_account_id: Optional[str] = None    # 空 = 套用到所有帳戶
+    sort_order: int = 100
+    active: bool = True
+    note: str = ""
 
 
 class CashInvoiceLinksPayload(BaseModel):

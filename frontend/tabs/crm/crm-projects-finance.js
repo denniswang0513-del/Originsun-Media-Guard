@@ -4,7 +4,7 @@
  */
 
 import { state, callbacks, EXPENSE_CATEGORIES } from './crm-projects-state.js';
-import { crmFetch as _fetch, esc as _esc, fmtNum, moneyGate } from './crm-utils.js';
+import { crmFetch as _fetch, esc as _esc, fmtNum, moneyGate, today } from './crm-utils.js';
 import { loadProjectStaff } from '../proposals/staff-view.js';
 
 // ── Load Project Staff ──────────────────────────────────────────
@@ -232,7 +232,7 @@ window._costCreateAdvance = function() {
         state.staffList.map(function(s) { return '<option value="' + _esc(s.name) + '">' + _esc(s.name) + ' (' + _esc(s.role || '') + ')</option>'; }).join('') +
         '</select></div>' +
         '<div class="crm-field crm-field-full"><label>預支金額 <span class="crm-required">*</span></label><input id="adv-modal-amount" type="number" class="crm-input" required></div>' +
-        '<div class="crm-field crm-field-full"><label>日期 <span class="crm-required">*</span></label><input id="adv-modal-date" type="date" class="crm-input" value="' + new Date().toISOString().substring(0, 10) + '" required></div>' +
+        '<div class="crm-field crm-field-full"><label>日期 <span class="crm-required">*</span></label><input id="adv-modal-date" type="date" class="crm-input" value="' + today() + '" required></div>' +
         '<div class="crm-field crm-field-full"><label>應付款月 <span class="crm-required">*</span></label><input id="adv-modal-month" type="month" class="crm-input" required></div>' +
         '<div class="crm-field crm-field-full"><label>備註</label><input id="adv-modal-notes" class="crm-input" placeholder="選填"></div>' +
         '</div></div>' +
@@ -260,7 +260,7 @@ window._costCreateAdvance = function() {
                     is_advance: 1,
                     payment_status: '應付款',
                     planned_month: document.getElementById('adv-modal-month').value || '',
-                    request_date: document.getElementById('adv-modal-date').value || new Date().toISOString().substring(0, 10),
+                    request_date: document.getElementById('adv-modal-date').value || today(),
                 })
             });
             overlay.remove();
@@ -523,9 +523,9 @@ window._costCreatePayment = function(payeeName, amount, summary, status) {
                     payee_type: document.getElementById('pay-modal-payee-type').value || '',
                     planned_month: document.getElementById('pay-modal-month').value || '',
                     advance_by: isAdvance ? originalPayee : '',
-                    request_date: new Date().toISOString().substring(0, 10),
+                    request_date: today(),
                     payment_status: status,
-                    payment_date: status === '已付款' ? new Date().toISOString().substring(0, 10) : '',
+                    payment_date: status === '已付款' ? today() : '',
                 })
             });
             overlay.remove();
@@ -572,7 +572,7 @@ window._costUpdatePaymentStatus = async function(paymentId, newStatus) {
         // GET existing data first, then PUT with updated status
         var existing = await _fetch('/payments/' + paymentId);
         existing.payment_status = newStatus;
-        if (newStatus === '已付款') existing.payment_date = new Date().toISOString().substring(0, 10);
+        if (newStatus === '已付款') existing.payment_date = today();
         delete existing.id;
         delete existing.created_at;
         delete existing.updated_at;

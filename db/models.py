@@ -671,6 +671,10 @@ class CrmPaymentRequest(Base):
     needs_invoice = Column(Integer, nullable=False, default=0)          # 是否需代開發票 0/1
     invoice_number = Column(String(32), nullable=True)                  # 代開發票號碼
     invoice_amount = Column(Integer, nullable=True)                     # 代開發票金額
+    # 代開自動化的**冪等鍵**（owner 2026-08-21）。原本拿 invoice_number 當鍵，
+    # 但無號發票（代開還沒拿到號碼）就沒有鍵可用 → 自動化整個跳過，收款掛上去
+    # 也不會進請款單，而且沒有任何跡象。發票 id 一定有、一定唯一。
+    source_invoice_id = Column(String(32), nullable=True, index=True)
     project_id = Column(String(32), nullable=True, index=True)          # 關聯專案
     project_label = Column(String(128), nullable=True)                  # 專案標籤（手動填）
     payment_date = Column(DateTime(timezone=True), nullable=True)       # 付款日
@@ -1402,6 +1406,74 @@ class FinanceAccount(Base):
     active = Column(Boolean, default=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
+
+class BankImportRule(Base):
+    """銀行對帳單摘要 → 收支類別 的分類規則（使用者可編）。
+
+    這一層在 finance_category_map **之前**：
+
+        銀行摘要文字 →〔本表〕→ 類別 →〔finance_category_map〕→ 會計科目
+
+    右半邊本來就是資料驅動的，左半邊原本寫死在 core/bank_statement.KEYWORD_RULES
+    的 14 條裡 —— 那些是從合庫與一銀的對帳單反推的，換一家銀行、換一種摘要用語
+    就要改程式（owner 2026-08-20：希望自己能設規則）。
+
+    bank_account_id 是關鍵：合庫寫「攤還本息」、一銀寫「中小７月」，同一件事
+    兩種寫法；規則綁到帳戶才不會互相誤觸。留空 = 套用到所有帳戶。
+
+    🔴 direction 不開放給使用者設（UI 沒有這欄）。它只在「第一列沒有前一列餘額、
+    也沒有印總計」時才用得到 —— 那是餘額鏈推不出方向的邊緣情況，讓人去理解
+    「+1/-1/0」不划算。種子沿用原本 KEYWORD_RULES 的方向值，使用者新增的一律 0
+    （0 = 看不出方向，解析器會標記該列要人確認且不預設勾選）。
+    """
+    __tablename__ = "bank_import_rules"
+
+    id = Column(String(32), primary_key=True)
+    keyword = Column(String(64), nullable=False)                 # 摘要包含這串就命中
+    bank_account_id = Column(String(32), nullable=True)          # soft FK；空=所有帳戶
+    category = Column(String(32), nullable=False)                # 命中後填的收支類別
+    direction = Column(Integer, nullable=False, default=0)       # -1 支出 / +1 存入 / 0 不確定
+    sort_order = Column(Integer, nullable=False, default=100)    # 小的先比（多條命中時誰贏）
+    active = Column(Boolean, default=True)
+    note = Column(String(255), nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    __table_args__ = (
+        Index("ix_bankrule_acct", "bank_account_id", "active"),
+    )
+
+
+class BankImportDraft(Base):
+    """對帳單匯入的草稿 —— 掛好專案與發票、確認無誤之後再匯入（owner 2026-08-21）。
+
+    一份對帳單幾十列，每列要決定分類、掛哪個專案、對到哪張發票，中途常常要去查
+    別的資料。沒有草稿的話，人一離開就得從上傳重來一次（那些決定全部重做）。
+
+    🔴 存的是**原始文字**加上人工決定，不是解析結果的快照。開啟時重新解析，
+    才拿得到最新的：
+      · 重複判定（草稿放兩天，中間可能有幾列已經從別的路進帳了 → 不該再匯一次）
+      · 貸款期別配對（同上）
+      · 專案與發票清單（發票可能已經收齊，不該再出現在候選裡）
+    人工決定用（日期, 金額, 摘要）貼回去 —— 不是用列序號，因為重新解析的列序
+    在對帳單本身沒變的前提下雖然一樣，但拿內容當鍵比較不會錯得無聲。
+    """
+    __tablename__ = "bank_import_drafts"
+
+    id = Column(String(32), primary_key=True)
+    entity = Column(String(16), nullable=False, default="parent")
+    bank_account_id = Column(String(32), nullable=False)
+    name = Column(String(120), nullable=False, default="")
+    source_text = Column(Text, nullable=False)          # 原始貼上／檔案抽出的文字
+    decisions = Column(Text, nullable=False, default="[]")   # JSON：人工決定
+    row_count = Column(Integer, nullable=False, default=0)
+    created_by = Column(String(64), nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    __table_args__ = (
+        Index("ix_bankdraft_acct", "entity", "bank_account_id"),
+    )
 
 class FinanceCategoryMap(Base):
     """收支/請款/發票 category → 科目 對映（引擎的翻譯層）。

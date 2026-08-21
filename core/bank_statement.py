@@ -111,10 +111,16 @@ def _to_int(tok: str):
     return int(round(v))
 
 
-def _classify(text: str):
-    """摘要文字 → (category, 方向提示)。沒中回 ('', 0)。"""
-    for kw, cat, direction in KEYWORD_RULES:
-        if kw in text:
+def _classify(text: str, rules=None):
+    """摘要文字 → (category, 方向提示)。沒中回 ('', 0)。
+
+    rules = [(關鍵字, category, 方向)]，由呼叫端給（正式路徑是 DB 的
+    bank_import_rules，使用者可編）。不給就用模組內建的 KEYWORD_RULES ——
+    那份現在的角色是**種子與離線預設**，不是唯一真相。
+    順序即優先序：先命中的先贏，所以呼叫端要照 sort_order 排好再傳進來。
+    """
+    for kw, cat, direction in (rules if rules is not None else KEYWORD_RULES):
+        if kw and kw in text:
             return cat, direction
     return "", 0
 
@@ -194,10 +200,12 @@ def _parse_line(raw: str):
     return date, amounts, balance, " ".join(words).strip()
 
 
-def parse_statement(text: str, opening_balance: int = None) -> ParseResult:
+def parse_statement(text: str, opening_balance: int = None,
+                    rules=None) -> ParseResult:
     """對帳單文字 → ParseResult。見模組檔頭的三重把關。
 
     opening_balance：知道對帳單期初餘額就傳，第一列的方向會由它決定（最準）。
+    rules：分類規則 [(關鍵字, category, 方向)]，不給就用內建 KEYWORD_RULES。
     """
     res = ParseResult()
     parsed = []
@@ -244,7 +252,7 @@ def parse_statement(text: str, opening_balance: int = None) -> ParseResult:
         if solved is not None:
             first["signed"] = solved
         else:
-            cat, direction = _classify(first["words"])
+            cat, direction = _classify(first["words"], rules)
             amt = first["amounts"][0] if first["amounts"] else 0
             first["signed"] = amt * (direction if direction else -1)
             inferred_first = True
@@ -273,7 +281,7 @@ def parse_statement(text: str, opening_balance: int = None) -> ParseResult:
                 f"{r['amounts']} 對不上：{r['raw'][:70]}")
 
     for r in rows:
-        cat, _ = _classify(r["words"])
+        cat, _ = _classify(r["words"], rules)
         res.rows.append(StmtRow(
             line_no=r["line_no"], date=r["date"], amount=r["signed"] or 0,
             balance=r["balance"], note=r["words"], category=cat,

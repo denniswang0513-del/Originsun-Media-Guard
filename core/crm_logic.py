@@ -3,6 +3,7 @@
 錢流判定規則是公司帳務的 source of truth，抽成純函式讓「規則」與
 「SQL 聚合」分離：endpoint 只負責把 DB 加總餵進來。
 """
+from core.finance_logic import INVOICE_COLLECTED_STATUSES
 
 
 def compute_advance_status(amount: float, expense_total: float,
@@ -123,6 +124,11 @@ def group_receivables(rows, now) -> dict:
             "invoice_date": inv.invoice_date.strftime("%Y/%m/%d") if inv.invoice_date else "",
             "amount_total": inv.amount_total or 0,
             "payment_status": inv.payment_status or "",
+            # 「錢收到了沒」由這裡判 —— 前端列一份狀態字串的話，代開改名那種事
+            # 一發生就會有一邊漏掉（實測：receivables 的陣列漏了舊字「已轉撥」）。
+            # 🔴 欄名不能叫 collected：發票 payload 的 collected 是**金額**
+            # （collection_fields），同一個域裡一個布林一個整數會出人命。
+            "is_collected": (inv.payment_status or "") in INVOICE_COLLECTED_STATUSES,
             "project_name": proj_name or "",
             "days_since_issued": days,
             "category": inv.category or "",
