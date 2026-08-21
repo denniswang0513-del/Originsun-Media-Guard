@@ -201,6 +201,9 @@ finally:
     check(not [x for x in d.get("items", []) if x["name"].startswith("ZZ_UI")],
           "測試活動清光")
     check(not LEFTOVER, "磁碟上的附件也清光", LEFTOVER)
+    from _benefit_residue import scan
+    rest = asyncio.run(scan())
+    check(not rest, "🔴 全域殘留掃描（別支漏的也算）", rest)
 
 print("")
 print("ALL PASS" if not fails else f"{len(fails)} FAILED: {fails}")

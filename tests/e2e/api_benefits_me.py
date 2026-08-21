@@ -149,6 +149,9 @@ finally:
     asyncio.run(teardown(pool_id))
     st, d = call("GET", "/crm/benefits/pools")
     check(not [x for x in d["items"] if x["name"].startswith("ZZ_me")], "清光")
+    from _benefit_residue import scan
+    rest = asyncio.run(scan())
+    check(not rest, "🔴 全域殘留掃描（別支漏的也算）", rest)
 
 print("\n" + ("ALL PASS" if not fails else f"{len(fails)} FAILED: {fails}"))
 sys.exit(1 if fails else 0)

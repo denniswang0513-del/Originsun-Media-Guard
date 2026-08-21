@@ -96,8 +96,8 @@ async def setup():
 async def teardown():
     from db.session import init_db, get_session_factory
     from sqlalchemy import select
-    from db.models import (CrmPaymentRequest, CrmStaff, HrBenefitEntry,
-                           HrBenefitFunding, HrBenefitPool, User)
+    from db.models import (CrmCashEntry, CrmPaymentRequest, CrmStaff,
+                           HrBenefitEntry, HrBenefitFunding, HrBenefitPool, User)
     await init_db()
     async with get_session_factory()() as s:
         for pool in (await s.execute(select(HrBenefitPool).where(
@@ -116,6 +116,13 @@ async def teardown():
                     except OSError as err:
                         LEFTOVER.append(f"{e.receipt_url}（{err.__class__.__name__}）")
                 if e.payment_request_id:
+                    # 🔴 收支明細也要刪。「登記匯款」會落一列帳 —— 只刪請款單的話
+                    #    帳上留下的是指向不存在請款單的孤兒列。2026-08-21 我就是
+                    #    這樣在生產的收支明細留了三筆假帳（owner 自己看到才發現）。
+                    for ce in (await s.execute(select(CrmCashEntry).where(
+                            CrmCashEntry.payment_request_id
+                            == e.payment_request_id))).scalars().all():
+                        await s.delete(ce)
                     ap = await s.get(CrmPaymentRequest, e.payment_request_id)
                     if ap:
                         await s.delete(ap)
@@ -241,6 +248,9 @@ finally:
     check(not [x for x in d.get("items", []) if x["name"].startswith("ZZ證明")],
           "測試資料清光")
     check(not LEFTOVER, "磁碟上的測試單據也清光", LEFTOVER)
+    from _benefit_residue import scan
+    rest = asyncio.run(scan())
+    check(not rest, "🔴 全域殘留掃描（別支漏的也算）", rest)
     if LEFTOVER:
         print("     🔴 這些檔要手動刪（多半是 NAS UNC，本行程沒有憑證）：")
         for x in LEFTOVER:

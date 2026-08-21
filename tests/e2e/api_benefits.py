@@ -5,6 +5,7 @@ owner 的流程原話：「幾個福利池（快樂／進修），員工登記 �
 請款；每年撥一筆錢進池。」這支就照那句話走一遍，並驗到帳上。
 全部自己建的資料，跑完刪光（開頭也先清 —— 上一次跑到一半炸掉的殘留會讓斷言互咬）。
 """
+import asyncio
 import json
 import sys
 import urllib.error
@@ -203,6 +204,9 @@ if IS_DEV:
     purge()
     st, d = call("GET", "/crm/benefits/pools")
     check(not [x for x in d["items"] if x["name"].startswith(PREFIX)], "測試資料清光")
+    from _benefit_residue import scan
+    rest = asyncio.run(scan())
+    check(not rest, "🔴 全域殘留掃描（別支漏的也算）", rest)
 else:
     print("  (生產：清理另外跑)")
 

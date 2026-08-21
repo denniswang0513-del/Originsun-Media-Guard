@@ -22,6 +22,7 @@ ADMIN = create_token({"sub": "admin", "username": "admin",
                       "access_level": 3, "modules": []})
 POOL_NAME = "ZZ_my 快樂"
 fails = []
+LEFTOVER = []      # 清不掉的檔案 —— 收尾要出聲
 
 
 def check(ok, label, extra=""):
@@ -55,29 +56,15 @@ async def _setup():
 
 
 async def _teardown():
-    from db.session import init_db, get_session_factory
-    from sqlalchemy import select
-    from db.models import (CrmStaff, HrBenefitEntry, HrBenefitFunding,
-                           HrBenefitPool, User)
-    await init_db()
-    async with get_session_factory()() as s:
-        pools = (await s.execute(select(HrBenefitPool).where(
-            HrBenefitPool.name.like("ZZ\\_my%", escape="\\")))).scalars().all()
-        for pool in pools:
-            for e in (await s.execute(select(HrBenefitEntry).where(
-                    HrBenefitEntry.pool_id == pool.id))).scalars().all():
-                await s.delete(e)
-            for f in (await s.execute(select(HrBenefitFunding).where(
-                    HrBenefitFunding.pool_id == pool.id))).scalars().all():
-                await s.delete(f)
-            await s.delete(pool)
-        for u in (await s.execute(select(User).where(
-                User.username == "zz_my_tmp"))).scalars().all():
-            await s.delete(u)
-        for st in (await s.execute(select(CrmStaff).where(
-                CrmStaff.name == "ZZ臨時員工"))).scalars().all():
-            await s.delete(st)
-        await s.commit()
+    """清理走共用的 purge —— 七張表一次刪完（含**收支明細**與請款單）。
+
+    🔴 這支本來自己寫了一份，漏了收支明細與請款單：第 9 段會核准＋登記匯款，
+    於是每跑一次就在帳上留一筆假的支出與一張孤兒請款單。同樣的漏在
+    api_benefit_proof 上直接留進了生產（owner 2026-08-21 自己看到才發現）。
+    """
+    from _benefit_residue import purge
+    LEFTOVER.extend(await purge("ZZ\_my%"))
+    LEFTOVER.extend(await purge("ZZ臨時員工"))
 
 
 asyncio.run(_teardown())      # 先清上一次的殘留
@@ -205,6 +192,10 @@ finally:
     _, d = api("GET", "/crm/benefits/pools")
     check(not [x for x in d.get("items", []) if x["name"].startswith("ZZ_my")],
           "清光")
+    check(not LEFTOVER, "磁碟上的檔也清光", LEFTOVER)
+    from _benefit_residue import scan
+    rest = asyncio.run(scan())
+    check(not rest, "🔴 全域殘留掃描（別支漏的也算）", rest)
 
 print("\n" + ("ALL PASS" if not fails else f"{len(fails)} FAILED: {fails}"))
 sys.exit(1 if fails else 0)

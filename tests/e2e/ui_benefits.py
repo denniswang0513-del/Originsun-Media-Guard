@@ -4,6 +4,7 @@
 為什麼要有這一支：這個 repo 咬過「按鈕點了沒反應」兩次（401 靜默失敗、暫時死區），
 而且新 tab 少了 index.html 的 section 殼時 API 全綠也看不出來。只有真的點下去才知道。
 """
+import asyncio
 import json
 import os
 import sys
@@ -217,6 +218,9 @@ finally:
     check(not [x for x in d.get("items", []) if x["name"].startswith("ZZ_UI")],
           "測試池清光")
     check(not LEFTOVER, "磁碟上的測試單據也清光", LEFTOVER)
+    from _benefit_residue import scan
+    rest = asyncio.run(scan())
+    check(not rest, "🔴 全域殘留掃描（別支漏的也算）", rest)
 
 print("\n" + ("ALL PASS" if not fails else f"{len(fails)} FAILED: {fails}"))
 sys.exit(1 if fails else 0)
