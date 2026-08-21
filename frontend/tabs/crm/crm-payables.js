@@ -77,7 +77,12 @@ async function loadPayables() {
         const [name, m] = _selectedKey.split('|');
         const grp = _monthGroups.find(g => g.month === m);
         const p = grp?.payees.find(x => x.payee_name === name);
-        if (p) renderDetail(p, m);
+        // 🔴 找不到就要把面板收掉，不能什麼都不做：/payables/summary 只列未付，
+        // 把某個收款人的最後一筆付掉之後他就整個不在清單裡了 —— 舊的 else 分支
+        // （沒有）會讓付款前那份畫面留在螢幕上，連「應付款」「全部付款」兩顆
+        // 按鈕都還在。使用者按了付款卻看到按鈕原封不動，會以為根本沒作用
+        // （owner 2026-08-21 回報的正是這個畫面）；再按一次還會重付已付的單。
+        if (p) renderDetail(p, m); else closeDetail();
     }
 }
 

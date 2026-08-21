@@ -65,7 +65,13 @@ try:
         btn = pg.locator(f'#payable-mb-{pid}')
         check(btn.count() > 0, '詳情面板有那顆按鈕', btn.count())
         btn.click()
-        pg.wait_for_timeout(2500)
+        pg.wait_for_timeout(1500)
+        try:      # 生產機較慢，等重畫而不是賭固定秒數
+            pg.wait_for_function(
+                f"() => {{const e=document.getElementById('payable-mb-{pid}');"
+                f"return !e || !e.offsetParent;}}", timeout=15000)
+        except Exception:
+            pass
         check(not errs, '按下去沒有 JS 例外', errs[:2])
 
         print('\n[3] 後端狀態真的變了')
@@ -79,7 +85,18 @@ try:
         # 付掉之後那一筆就不在應付帳款清單裡了（/payables/summary 只列未付），
         # 所以驗的是「那顆應付款按鈕消失」而不是「出現已付款標籤」——
         # 後者在修好與壞掉兩種版本都是 false，等於沒驗到東西。
-        check(pg.locator(f'#payable-mb-{pid}').count() == 0, '「應付款」按鈕已消失')
+        # 驗「看不見」而不是「不存在」：closeDetail 只把面板 display 設 none、
+        # 不清 innerHTML，按鈕節點還留在 DOM 裡。使用者按不按得到才是重點。
+        check(not pg.locator(f'#payable-mb-{pid}').is_visible(), '「應付款」按鈕已不可見')
+        # 面板整個收掉 —— 付掉最後一筆之後那個收款人就不在清單裡了，
+        # 舊版會把付款前的畫面留在螢幕上（按鈕原封不動＝看起來像沒作用）。
+        # 用等待而不是即時判斷：重新載入是非同步的，按鈕消失不代表面板已收。
+        hidden = True
+        try:
+            pg.wait_for_selector('#payable-detail-panel', state='hidden', timeout=15000)
+        except Exception:
+            hidden = False
+        check(hidden, '陳舊的詳情面板已收起')
 
         b.close()
 finally:
