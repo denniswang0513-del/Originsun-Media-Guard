@@ -478,8 +478,20 @@ function _cfHtml(cf) {
     const rows = _cfRows(cf).map(r => _trow(r.label, _amt(r.amount), r));
     const chk = cf.check || {};
     const diff = chk.diff || 0;
+    // 🔴 後端**已經算出**差額是哪來的（build_cashflow 的 check.notes：預支往來／
+    //    轉存未成對／未掛帳戶），這裡本來把它丟掉、寫死成「可能有收支未掛帳戶」。
+    //    owner 2026-08-22 把帳戶全掛上去之後差額還在，就是被這句話帶偏的 ——
+    //    真正的原因是轉存未成對。猜的原因比沒有原因更糟。
+    const notes = chk.notes || [];
     const checkHtml = diff !== 0
-        ? `<div style="color:#f87171;font-size:13px;margin-top:10px;">⚠ 現金流勾稽差額 $${fmtNum(diff)}（期初＋淨流 ≠ 期末，可能有收支未掛帳戶）</div>`
+        ? `<div style="color:#f87171;font-size:13px;margin-top:10px;">
+             ⚠ 現金流勾稽差額 $${fmtNum(diff)}（期初＋淨流 ≠ 期末）
+             ${notes.length
+                ? `<div style="margin-top:4px;color:#fca5a5;">${
+                     notes.map(n => `• ${esc(n)}`).join('<br>')}</div>`
+                : `<div style="margin-top:4px;color:#888;">
+                     系統找不到已知原因（不是預支、轉存或未掛帳戶）—— 請告訴管理員。</div>`}
+           </div>`
         : '';
 
     return `
