@@ -67,10 +67,13 @@ INVOICES = [
      "payment_status": "未收款", "category": "專案", "amount_total": 210000,
      "amount_ex_tax": None, "tax_amount": 10000, "commission": None,
      "invoice_date": _d("2026-02-15"), "paid_date": None},
-    # INV3 內部代開（commission 1000 → 業外收入；稅額進銷項）
+    # INV3 內部代開。🔴 commission 是**要匯給代開人的錢**（面額 × 92%），
+    # 不是手續費 —— 這份黃金資料本來寫 1000（等於只匯 1,000 出去、留 51,500），
+    # 編碼了錯的心智模型，也讓 build_pnl 的錯帳看起來像對的。
+    # 真正留在公司的 = 52500 − 48300 − 2500(銷項稅) = 1700。
     {"id": "INV3", "payment_type": "收款", "issue_status": "已開立",
      "payment_status": "未收款", "category": "內部代開", "amount_total": 52500,
-     "amount_ex_tax": 50000, "tax_amount": 2500, "commission": 1000,
+     "amount_ex_tax": 50000, "tax_amount": 2500, "commission": 48300,
      "invoice_date": _d("2026-02-20"), "paid_date": None},
     # INV4 作廢 → 全部不計
     {"id": "INV4", "payment_type": "收款", "issue_status": "作廢",
@@ -341,18 +344,19 @@ class TestBuildPnlGolden:
         assert pnl["operating"]["expense_rate"] == 4.61
 
     def test_non_operating(self, pnl):
-        assert pnl["non_operating"]["total"] == 1500
+        # 代開留下的淨額 = 52500 − 48300(應匯) − 2500(銷項稅) = 1700
+        assert pnl["non_operating"]["total"] == 2200
         inc = {x["label"]: x["amount"] for x in pnl["non_operating"]["income"]}
-        assert inc == {"代開手續費收入": 1000, "利息收入": 500}
+        assert inc == {"代開手續費（已扣銷項稅）": 1700, "利息收入": 500}
         assert pnl["non_operating"]["expense"] == []
 
     def test_tax_and_net(self, pnl):
-        assert pnl["pretax"] == 191670
+        assert pnl["pretax"] == 192370
         assert pnl["tax"]["income_tax"] == 7000
         assert pnl["tax"]["vat_info"] == {
             "output": 17500, "input": 1000, "paid": 5250, "net": 11250}
-        assert pnl["net"]["amount"] == 184670
-        assert pnl["net"]["rate"] == 61.56
+        assert pnl["net"]["amount"] == 185370
+        assert pnl["net"]["rate"] == 61.79
 
     def test_monthly_avg(self, pnl):
         assert pnl["monthly_avg"] == {"revenue": 100000, "cost": 32000,
@@ -426,12 +430,12 @@ class TestBalanceSheetGolden:
     def test_equity(self, bs):
         amounts = {x["key"]: x["amount"] for x in bs["equity"]["lines"]}
         assert amounts == {"opening": 50000, "owner": 5000,
-                           "retained": 184670, "adjustments": 2000}
-        assert bs["equity"]["total"] == 241670
+                           "retained": 185370, "adjustments": 2000}
+        assert bs["equity"]["total"] == 242370
 
     def test_check_diff_exposed(self, bs):
-        # 361220 − 41250 − 241670 = 78300（合成資料含未入帳器材等 — 誠實外顯）
-        assert bs["check"]["diff"] == 78300
+        # 361220 − 41250 − 242370 = 77600（合成資料含未入帳器材等 — 誠實外顯）
+        assert bs["check"]["diff"] == 77600
         assert bs["check"]["notes"]  # 附原因清單
         assert any("未歸類" in n for n in bs["check"]["notes"])
 
@@ -443,7 +447,7 @@ class TestBalanceSheetGolden:
     def test_pct_denominator_is_assets_total(self, bs):
         assert bs["assets"]["current"][0]["pct"] == round(68220 * 100 / 361220, 2)
         assert bs["liabilities"]["current"][0]["pct"] == round(30000 * 100 / 361220, 2)
-        assert bs["equity"]["lines"][2]["pct"] == round(184670 * 100 / 361220, 2)
+        assert bs["equity"]["lines"][2]["pct"] == round(185370 * 100 / 361220, 2)
 
 
 # ═══ 現金流量表黃金數字 ═════════════════════════════════════

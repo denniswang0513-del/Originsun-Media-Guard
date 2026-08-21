@@ -587,6 +587,37 @@ def invoice_tax(inv: dict) -> int:
     return total - round(total / 1.05)
 
 
+def passthrough_fee_income(inv: dict) -> int:
+    """代開發票真正留在公司的錢（進損益的業外收入）。
+
+        面額(含稅) − 應匯給代開人 − 這張發票的銷項稅額
+
+    🔴 這支存在的理由是一個實際的錯帳（owner 2026-08-21 發現）：
+    `commission` 這個欄位名字騙人 —— 它存的是 `passthrough_commission()` 算出來的
+    **要匯給代開人的錢**（面額 × (1 − 費率)），不是手續費。build_pnl 卻整筆當成
+    「代開手續費收入」記進業外收入，於是 2026-08 的業外收入是 927,222、
+    稅前淨利虛增 846,594（真正的 8% 手續費只有 80,628）。
+
+    🔴 為什麼還要再扣銷項稅（owner 2026-08-21 拍板）：代開的對方是個人、
+    開不出發票給公司抵進項（那常常正是他要代開的原因），所以整張發票的
+    銷項稅由公司自己吞。8% 的手續費裡有一大塊是替人繳的稅 ——
+    8 月實收 80,628、扣掉 47,993 的稅只剩 32,635，毛利率從 8% 掉到 3.2%。
+    這件事本來看不見，現在報表上會講出來。
+
+    ⚠ 這個假設哪天變了（對方開始給憑證）就要改這裡：那時公司只負擔自己那
+    8% 裡的 5%，回到 `(面額 − 應匯) ÷ 1.05`。
+
+    非代開類別回 0 —— 呼叫端不必先判一次。
+    """
+    if not is_passthrough_category(inv.get("category") or ""):
+        return 0
+    total = int(inv.get("amount_total") or 0)
+    payout = int(inv.get("commission") or 0)
+    if not total or not payout:
+        return 0
+    return total - payout - invoice_tax(inv)
+
+
 # ── 發票款項狀態：整個系統的正本 ────────────────────────────────────
 #
 # 一般收款發票：未收款 ──▶ 已收款（收到錢就結束了）
@@ -1103,7 +1134,8 @@ def build_pnl(months, *, invoices=(), payments=(), cash_entries=(), equipment=()
     - 營業收入 = 收款發票（payment_type=收款、issue_status≠作廢、category=專案）
       未稅額 by invoice_date 月；by_collection 依收現狀態拆 已收/應收，
       另加 direct_income 現金收款（對映到營業收入科目、未開票）單列 cash。
-    - 業外收入 = 代開發票 commission（內部/外部代開，by invoice_date）
+    - 業外收入 = 代開發票的**淨手續費**（面額 − 應匯 − 銷項稅，
+      見 passthrough_fee_income；**不是** commission 欄，那欄是要匯出去的錢）
       + direct_income 收支按對映科目（利息收入等）。
     - 營業成本/費用 = ①請款單（非 is_advance，by request_date，category 走
       source='payment' 對映；transfer/passthrough 不計）②direct_expense 收支
@@ -1150,9 +1182,10 @@ def build_pnl(months, *, invoices=(), payments=(), cash_entries=(), equipment=()
         if month_of(inv.get("invoice_date")) not in mset:
             continue
         if is_passthrough_category(inv.get("category") or "專案"):
-            c = int(inv.get("commission") or 0)
+            # 🔴 不是 commission —— 那欄是「要匯出去的錢」。見 passthrough_fee_income。
+            c = passthrough_fee_income(inv)
             if c:
-                _bump(prim["nonop_income"], "代開手續費收入", c)
+                _bump(prim["nonop_income"], "代開手續費（已扣銷項稅）", c)
 
     # 費用側（請款 + direct_expense/unmapped/tax_income 收支）單一迭代來源
     for _src, _row, group, label, amount in iter_expense_items(

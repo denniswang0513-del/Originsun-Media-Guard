@@ -57,6 +57,7 @@ from core.finance_logic import (
     iter_expense_items,
     iter_loan_interest,
     iter_revenue_invoices,
+    passthrough_fee_income,
     loan_outstanding_rows,
     local_day,
     map_account,
@@ -496,11 +497,13 @@ async def drilldown(session, kind: str, months, entity: str = "parent") -> dict:
                 continue
             if month_of(inv.get("invoice_date")) not in mset:
                 continue
-            if (inv.get("category") or "") in ("內部代開", "外部代開") and \
-                    int(inv.get("commission") or 0):
+            # 🔴 金額要跟 build_pnl 用**同一支**函式算 —— 這裡放 commission、
+            # 表頭放淨手續費的話，明細加起來永遠對不上表頭。
+            fee = passthrough_fee_income(inv)
+            if fee:
                 items.append(_row("invoice", inv["id"], inv.get("invoice_date"),
-                                  inv.get("title"), inv.get("commission"),
-                                  inv.get("category"), "代開手續費"))
+                                  inv.get("title"), fee,
+                                  inv.get("category"), "代開手續費（已扣銷項稅）"))
         for e in inputs["cash_entries"]:
             if month_of(e.get("entry_date")) not in mset:
                 continue
