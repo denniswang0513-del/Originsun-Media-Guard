@@ -22,11 +22,18 @@ sys.path.insert(0, r"E:\Dev\Originsun-Media-Guard")
 from core.auth import create_token  # noqa: E402
 
 BASE = (sys.argv[1] if len(sys.argv) > 1 else "http://127.0.0.1:8001") + "/api/v1"
+# 🔴 DB helper 要跟 API 打同一個庫。第一次跑生產時忘了這件事：臨時帳號建在 dev、
+# API 打 8000 → 生產不認得那個人（409），而且 teardown 清的是 dev、
+# 生產真的留下一個 ZZ 池。BASE 指到 8000 就把生產的 settings 插到 sys.path 最前面。
+if ":8000" in BASE:
+    sys.path.insert(0, r"C:\OriginsunAgent")
+    os.chdir(r"C:\OriginsunAgent")
 ADMIN = create_token({"sub": "admin", "username": "admin",
                       "access_level": 3, "modules": []})
 FIX = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
                    "fixtures", "einvoice_full.pdf")   # 當成單據用，內容不重要
 fails = []
+LEFTOVER = []      # 清不掉的檔案 —— 結尾要講出來，不能靜默
 
 
 def check(ok, label, extra=""):
@@ -97,11 +104,17 @@ async def teardown():
                 HrBenefitPool.name.like("ZZ證明%")))).scalars().all():
             for e in (await s.execute(select(HrBenefitEntry).where(
                     HrBenefitEntry.pool_id == pool.id))).scalars().all():
-                if e.receipt_url and os.path.isfile(e.receipt_url):
+                # 🔴 刪不掉要**出聲**。原本是 os.path.isfile() 為假就靜默跳過 ——
+                # 而收據存在 NAS 的 UNC 路徑上時，跑測試的這個行程根本看不到它
+                # （沒有 NAS 憑證），於是「清乾淨了」是假的：實測生產跑完之後
+                # NAS 上真的留了一個測試單據。
+                if e.receipt_url:
                     try:
                         os.remove(e.receipt_url)
-                    except OSError:
+                    except FileNotFoundError:
                         pass
+                    except OSError as err:
+                        LEFTOVER.append(f"{e.receipt_url}（{err.__class__.__name__}）")
                 if e.payment_request_id:
                     ap = await s.get(CrmPaymentRequest, e.payment_request_id)
                     if ap:
@@ -197,6 +210,11 @@ finally:
     st, d = call("GET", "/crm/benefits/pools")
     check(not [x for x in d.get("items", []) if x["name"].startswith("ZZ證明")],
           "測試資料清光")
+    check(not LEFTOVER, "磁碟上的測試單據也清光", LEFTOVER)
+    if LEFTOVER:
+        print("     🔴 這些檔要手動刪（多半是 NAS UNC，本行程沒有憑證）：")
+        for x in LEFTOVER:
+            print("       ", x)
 
 print("\n" + ("ALL PASS" if not fails else f"{len(fails)} FAILED: {fails}"))
 sys.exit(1 if fails else 0)
