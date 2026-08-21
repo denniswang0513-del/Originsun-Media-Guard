@@ -125,6 +125,40 @@ def test_cancel_does_not_wipe_an_existing_note():
     assert "[data-cancel]\").onclick = () => box.remove();" in c
 
 
+# ── 沒綁人員檔案的帳號 ────────────────────────────────────────────
+
+def test_unbound_account_is_explained_not_shown_as_an_error():
+    """🔴 owner 用 admin 開 /my.html 時看到「載入失敗（409）」。
+
+    409 的意思是「這個帳號沒有綁人員檔案」—— admin 是系統帳號本來就沒有綁人，
+    那不是錯誤，是「這張卡對你沒有內容」。後端 detail 早就寫得清清楚楚，
+    前端卻丟掉只印狀態碼（跟 503 被印成「需要權限」同一種病）。
+    """
+    my = repo_src(MY)
+    assert "cardBenefits(ws.bound)" in my, "卡片不知道帳號有沒有綁人"
+    c = _card()
+    assert "bound === false" in c, "沒有短路 —— 還是會去打那支必定 409 的端點"
+    assert "還沒有綁定人員檔案" in c
+
+
+def test_backend_detail_is_surfaced_not_swallowed():
+    c = _card()
+    assert "(await r.json()).detail" in c, "後端的話被丟掉了"
+    assert "載入失敗（${r.status}）" not in c, "又只印狀態碼了"
+
+
+def test_status_fallback_covers_the_meaningful_codes():
+    """沒有 detail 時才落到對照表；503 一樣不能說成權限問題。"""
+    my = repo_src(MY)
+    f = my[my.index("function failText("):]
+    f = f[:f.index(chr(10) + "}")]
+    for code in ("=== 0", "=== 401", "=== 403", "=== 503", ">= 500"):
+        assert code in f, f"沒有處理 {code}"
+    assert "不是權限問題" in f
+    i503 = f.index("=== 503")
+    assert "需要「" not in f[i503:], "503 又在要求權限"
+
+
 # ── 授權 ──────────────────────────────────────────────────────────
 
 def test_card_is_gated_by_me_benefits_and_the_key_is_registered():

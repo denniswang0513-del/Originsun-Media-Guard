@@ -516,7 +516,7 @@ function renderWorkspace() {
     if (ws.allowed.includes("me_profile"))  grid.appendChild(cardProfile(ws.profile));
     if (ws.allowed.includes("me_finance"))  grid.appendChild(cardFinance(ws.timesheet, ws.payments));
     if (ws.allowed.includes("me_petty"))    grid.appendChild(cardPettyCash());
-    if (ws.allowed.includes("me_benefits")) grid.appendChild(cardBenefits());
+    if (ws.allowed.includes("me_benefits")) grid.appendChild(cardBenefits(ws.bound));
     if (ws.allowed.includes("media_log"))   grid.appendChild(cardMediaLog());
     if (ws.allowed.includes("proposal_plan")) grid.appendChild(cardProposalPlan());
     // 週誌在 grid 之外自成一區（見 #ws-journal 註解）：只建一次，之後只切顯示
@@ -583,15 +583,36 @@ function cardPettyCash() {
     return card;
 }
 
+/** 載入失敗時要說什麼。後端有 detail 就用它，沒有才落到這裡。
+ *  與 js/shared/utils.js 的 tabLoadError 同一套說法（這一頁不是 module，
+ *  沒辦法 import —— 內容有變的話兩邊要一起改）。 */
+function failText(status) {
+    if (status === 0) return "連不到伺服器 —— 請確認自己在公司區網，或稍後再試。";
+    if (status === 401) return "登入已經過期，請重新整理頁面再登入一次。";
+    if (status === 403) return "沒有權限，請找管理員開通。";
+    if (status === 503) return "資料庫暫時不可用（不是權限問題）—— 通常是連線數滿了，稍等一下重新整理就會恢復。";
+    if (status >= 500) return `伺服器錯誤（${status}）—— 這不是你的權限問題，請告訴管理員。`;
+    return `載入失敗（${status}）`;
+}
+
 // ── 卡：福委會 —— 員工自己登記（owner 2026-08-21「這兩塊員工都可以登記，
 // 他們登記後我審核通過，就進公司請款」）──
 // 直接做在卡片裡而不是另開一頁：只有三個欄位（池／項目／金額），
 // 為它開一頁反而讓人多點一次。版式沿用請假卡（.pf-edit + .inline-row + .row/.pill）
 // —— 這一頁沒有 .mini-input/.mini-table 那種 class，自己發明等於畫面空白。
 // 餘額由後端算（前端自己算會跟後端講不同的話）。
-function cardBenefits() {
+function cardBenefits(bound) {
     const card = makeCard("Welfare", "福委會", "", "benefits");
     const body = card.querySelector(".card-body");
+    // 🔴 沒綁人員檔案就不要發請求 —— 後端會回 409，而畫面上只會出現
+    //    「載入失敗（409）」。admin 這種系統帳號本來就沒有綁人，
+    //    那不是錯誤，是「這張卡對你沒有內容」。
+    if (bound === false) {
+        body.innerHTML = `<div class="meta">這個帳號還沒有綁定人員檔案，
+            所以沒有屬於你的福委會紀錄。請管理員到「使用者管理」把帳號
+            綁到人員之後就會出現。</div>`;
+        return card;
+    }
     body.innerHTML = `<div class="meta">載入中…</div>`;
 
     const render = (d) => {
@@ -803,10 +824,19 @@ function cardBenefits() {
     const load = async () => {
         try {
             const r = await mfetch("/api/v1/crm/benefits/me");
-            if (!r.ok) { body.innerHTML = `<div class="meta">載入失敗（${r.status}）</div>`; return; }
+            if (!r.ok) {
+                // 🔴 後端的 detail 已經是一句人話（例如 409＝帳號沒綁人員檔案），
+                //    丟掉它只印狀態碼，看的人什麼也不知道。
+                //    這一頁不是 ES module，沒辦法 import js/shared/utils.js 的
+                //    tabLoadError，所以這裡留一份最小的對照。
+                let msg = "";
+                try { msg = (await r.json()).detail || ""; } catch (_) { /* 非 JSON */ }
+                body.innerHTML = `<div class="meta">${esc(msg || failText(r.status))}</div>`;
+                return;
+            }
             render(await r.json());
         } catch (_) {
-            body.innerHTML = `<div class="meta">載入失敗</div>`;
+            body.innerHTML = `<div class="meta">${esc(failText(0))}</div>`;
         }
     };
     load();
