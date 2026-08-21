@@ -203,3 +203,127 @@ assert pg.query_selector('canvas') is not None
   HTTP 請求 **100 秒逾時**。傳大圖、video-to-video 這類重活走 Tailscale。
 - `jwt.secret` 是與 master 共用的那一把。輪替 JWT secret 時**這裡也要換**，
   否則所有人的 cookie 同時失效（見 `reference_jwt_secret_topology`）。
+
+---
+
+## 8. 模型與實測數字（2026-08-21）
+
+模型放在 **`D:\AI\models`**（不在 portable 資料夾裡），由 ComfyUI 的
+`extra_model_paths.yaml` 指過去 —— 這樣更新或重裝 ComfyUI 不會碰到那幾十 GB。
+
+| 模型 | 大小 | 用途 |
+|---|---|---|
+| ltx-2.5-22b-distilled-transformer (int8) | 20.5 GB | **主力影片模型** |
+| gemma4-12b-with-proj (int8) | 14.3 GB | LTX-2.5 的文字編碼器 |
+| gemma4_e2b_it | 9.6 GB | LTX-2.5 的第二個文字編碼器 |
+| ltx-2.5-video-vae / audio-vae | 1.4 GB / 348 MB | LTX-2.5 |
+| ltx-2.5-latent-spatial-upscaler-x2 | 950 MB | LTX-2.5 內建的潛在空間放大 |
+| wan2.2_ti2v_5B + umt5_xxl + vae | 17.3 GB | Wan 2.2（已被 LTX-2.5 取代，保留備用）|
+| seedvr2_3b_int8 + vae | 3.8 GB | 像素空間影片放大／修復 |
+
+### 實測（RTX 5060 Ti 16GB，全部 121 幀 @ 24fps = 5 秒）
+
+| 路徑 | 解析度 | 時間 | 峰值 VRAM | 音軌 |
+|---|---|---|---|---|
+| Wan 2.2 5B | 1280×704 | 538 s | 15733 MiB | ✗ |
+| Wan 2.2 5B | 1920×1088 | **3226 s** | 15955 MiB | ✗ |
+| Wan 720p → SeedVR2 ×1.5 | 1920×1056 | 1544 s | 15941 MiB | ✗ |
+| **LTX-2.5** | 1280×704 | **105 s** | 15288 MiB | ✓ |
+| **LTX-2.5** | **1920×1088** | **196 s** | 15484 MiB | ✓ |
+
+**結論：影片一律用 LTX-2.5，直接生 1080p。** 比 Wan 生 1080p 快 16 倍、比 Wan 生
+720p 還快 3 倍，而且附同步音軌、支援原生多鏡頭、文字渲染得出來。
+
+「低解析生成 → 放大」那套兩段式**只在用 Wan 時才划算**（25.8 分 vs 53.8 分）。
+LTX-2.5 出現後它沒有存在意義了 —— SeedVR2 留著是給**既有素材**做修復／放大用，
+不是給生成流程用。
+
+⚠️ 105 秒那次含冷啟動載入模型；196 秒那次模型已常駐，**不含載入**。
+每次冷啟動大約要多一分鐘。
+
+---
+
+## 9. 怎麼跑一次
+
+`docs/comfyui_gateway/run_template.py`（在 master 上跑，透過 Tailscale 打 GPU 機）：
+
+```bash
+# LTX-2.5 文生影片，預設 0.9 百萬像素 = 1280×736
+.venv/Scripts/python.exe docs/comfyui_gateway/run_template.py video_ltx2_5_t2v
+
+# 1080p
+LTX_MP=2.0 .venv/Scripts/python.exe docs/comfyui_gateway/run_template.py video_ltx2_5_t2v
+
+# 只轉換不送出（看 API 圖長什麼樣）
+DRY=1 .venv/Scripts/python.exe docs/comfyui_gateway/run_template.py video_ltx2_5_t2v
+```
+
+**LTX 的解析度是用百萬像素驅動的**（頂層 `ResolutionSelector`），不是節點的寬高。
+範本自附的對照表（16:9，multiple=32）：
+
+```
+0.5 → 960×544    0.9 → 1280×736（預設）    1.0 → 1376×768
+1.5 → 1664×928   2.0 → 1920×1088
+```
+
+其他環境變數：`SEEDVR2_SCALE`（放大倍率）、`SEEDVR2_CHUNK`（每塊幀數）、
+`LOADVIDEO`（要放大的來源檔，需先放進 ComfyUI 的 `input/`）。
+
+---
+
+## 10. 🔴 模型與範本的坑
+
+### 10.1 curl 會把 HTTP 錯誤訊息寫進 .safetensors，而大小檢查驗不出來
+
+第一次下載 LTX-2.5 時 HF 回 401（門禁 repo），**curl 把錯誤訊息內文寫進了檔案**
+（約 200 bytes）。清理時只刪 `Length -eq 0` 的檔 —— 這些檔不是 0，躲過了。
+第二次用 `curl -C -` 續傳，把真資料**接在錯誤訊息後面**：
+
+```
+檔案 = [401 錯誤訊息] + [從第 200 byte 開始的真實模型資料]
+總大小 == Content-Length   ← 大小檢查完全通過
+safetensors 標頭 = 垃圾    ← 載入時才炸
+```
+
+症狀是 `VAELoader` 噴 `UnicodeDecodeError: 'utf-8' codec can't decode byte 0xfd`，
+或標頭長度變成 `8367815047113827137`（那是把 `"o model L"` 當 int64 讀出來的值）。
+
+**根治：`curl --fail`** —— HTTP 錯誤時完全不寫檔案。
+**驗證要讀內容不能只看大小**：safetensors 前 8 bytes 是標頭長度（小端 int64），
+第 9 個 byte 必須是 `{`。
+
+### 10.2 `Get-ChildItem` 對正在寫入的檔案回報過期大小
+
+下載進行中用 `Get-ChildItem` 看會一直是 0 MB，因為它讀的是快取的目錄 metadata。
+要用 `(New-Object IO.FileInfo $p)` 再 `.Refresh()` 才看得到真實大小。
+（我因此誤判過好幾次「下載沒動」。）
+
+### 10.3 HF 門禁 repo：細粒度 token 預設不通
+
+`Lightricks/LTX-2.5` 是門禁 repo。**401 = 沒憑證；403 = 憑證有效但沒授權**。
+細粒度（fine-grained）token 即使有 read 權限，**還要另外勾
+「Read access to contents of all public gated repos you can access」**，
+否則一律 403 而且錯誤訊息不會說原因。用典型（classic）Read token 最省事。
+token 存在 GPU 機 `D:\AI\hf_token.txt`。
+
+### 10.4 新版範本用 subgraph，手寫的 UI→API 轉換器會壞掉
+
+`video_ltx2_5_t2v.json` 頂層只有 7 個節點，真正的 40 個節點在
+`definitions.subgraphs` 裡。另外 KSampler 的 seed 後面跟著一個
+`control_after_generate` 小工具（`"randomize"`），API schema 裡沒有這個輸入，
+**會讓後面所有值位移一格**（steps 拿到 `"randomize"`、cfg 拿到 20）。
+
+不要自己寫轉換器。`run_template.py` 用無頭瀏覽器呼叫 ComfyUI 前端自己的
+`app.graphToPrompt()` —— 那就是人按下 Run 時走的同一條路，subgraph、seed 小工具、
+被 bypass 的節點全都自動處理。
+
+### 10.5 OOM 不一定出在你以為的那個維度
+
+SeedVR2 放大跑 121 幀時 OOM（宣稱要 28.3 GiB）。它的 `auto` 分塊模式說明是
+「predict the largest chunk that fits free VRAM」，**在這張卡上預測錯誤**。
+但把分塊改成手動 13 幀後，**報錯數字一個位元組都沒變** —— 那個「沒變」就是證據：
+爆的是空間維度不是時間維度。真正的原因是範本預設放大 **×2**
+（1280×704 → 2560×1408），而 1080p 只需要 **×1.5**。改成 1.5 就過了。
+
+改設定後**先確認它真的進到 API 圖裡**（`DRY=1`）再下結論，否則你會拿一個沒生效的
+變更去推翻正確的假設。
